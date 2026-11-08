@@ -21,8 +21,8 @@ use crate::symbols::SymbolDirectory;
 
 pub const DEFAULT_LIMIT: usize = 500;
 pub const MAX_LIMIT: usize = 1000;
-/// `next-key`는 15분 묵혀도 통했다(kiwoom.md §10.3). 그보다 오래되면 일·주·월봉은 오늘부터 다시 따라가고,
-/// 분봉은 가진 가장 이른 봉의 날짜로 건너뛴다.
+/// `next-key`는 15분 묵혀도 통했다(kiwoom.md §10.3). 그보다 오래되면 오늘부터 다시 따라간다.
+/// 지수 분봉만 가진 가장 이른 봉의 날짜로 건너뛴다.
 const CONT_FRESH_SECS: i64 = 15 * 60;
 pub const IDLE_EVICT_SECS: i64 = 10 * 60;
 
@@ -243,10 +243,10 @@ impl BarService {
             }
             tracing::info!(symbol = %key.feed.symbol().as_wire(), venue = ?key.feed.venue(), cont_age_secs = now.unix() - c.received_at.unix(), "연속조회 키가 기대한 위치를 주지 않아 다시 따라갑니다");
         }
-        // 분봉은 오늘부터 따라가면 1분봉 1년이 191페이지다(kiwoom.md §2). 과거 base_dt는 그날 19:59부터
-        // 거꾸로 주므로(§1) 가진 가장 이른 봉의 날짜에서 시작하면 첫 페이지가 그 봉과 겹치고 그 아래로 내려간다.
-        let start = match s.bars.first() {
-            Some(oldest) if key.period.is_intraday() => oldest.bucket.start().kst_date(),
+        // 주식은 과거 base_dt로 가면 그날 뒤의 권리발생이 빠진 가격이 온다(kiwoom.md §4.1). 그래서 언제나 오늘부터
+        // 따라간다(1분봉 1년이 191페이지, kiwoom.md §2). 지수에는 수정주가가 없어 그 봉의 날짜로 바로 간다.
+        let start = match (key.feed, s.bars.first()) {
+            (Feed::Index(_), Some(oldest)) if key.period.is_intraday() => oldest.bucket.start().kst_date(),
             _ => s.today,
         };
         self.follow_from(key, s, start).await
