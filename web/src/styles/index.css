@@ -64,6 +64,8 @@
   }
   .seg-btn:hover { background: var(--raised); color: var(--text); }
   .seg-btn[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+  .seg-btn[aria-disabled="true"] { color: var(--text-3); opacity: 0.6; cursor: not-allowed; }
+  .seg-btn[aria-disabled="true"]:hover { background: none; }
   .icon-btn {
     width: 26px; height: 26px; display: grid; place-items: center; border-radius: var(--r-s); color: var(--text-2);
   }

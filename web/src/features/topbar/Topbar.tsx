@@ -4,11 +4,12 @@ import { useCell, useLayoutStore } from "../../stores/layout";
 import { useSelectionStore } from "../../stores/selection";
 import { useThemeStore } from "../../stores/theme";
 import { BrandIcon, MoonIcon, SearchIcon, SunIcon } from "../icons";
+import { VenuePicker } from "../venue/VenuePicker";
 import { StyleMenu } from "./StyleMenu";
 
 const PERIOD_KEY = { D: "D", W: "W", M: "M" } as const;
 
-/** 위쪽 막대(frontend.md §2.1). #2에서는 종목, 봉 주기 일·주·월, 봉 모양, 로그 축, 테마만 켠다. */
+/** 위쪽 막대(frontend.md §2.1). 종목, 거래소(주식만), 봉 주기, 봉 모양, 로그 축, 테마. */
 export function Topbar() {
   const slot = useSelectionStore((s) => s.activeSlot);
   const openDialog = useSelectionStore((s) => s.openDialog);
@@ -39,6 +40,12 @@ export function Topbar() {
         <span className="text-s text-text-3">{symbolSub(cell.symbol, info)}</span>
         <kbd className="ml-auto">/</kbd>
       </button>
+      {cell.venue !== null && (
+        <>
+          <span className="tb-sep" />
+          <VenuePicker cell={cell} info={info} variant="desktop" />
+        </>
+      )}
       <span className="tb-sep" />
       <div role="group" aria-label="봉 주기" className="inline-flex items-center gap-px">
         {PERIODS_ON.map((p) => (
