@@ -124,3 +124,10 @@ W4 교차 리뷰(`review-w4.md`)에서 코디네이터 담당으로 분류된 �
 - **서버를 하나만 띄우는 장치**: Postgres advisory lock 대신 잠금 파일(`flock`)을 쓴다(ADR 0004).
 - **Postgres**: #3(사용자 자료)부터 쓴다. #2에는 Postgres가 없다.
 - **#2 완료 조건**: 서버를 다시 켜도 차트가 몇 초 안에 다시 뜬다(키움에서 다시 받음).
+
+### D15. 사용자 자료는 SQLite (사용자 확정, ADR 0006)
+- Postgres와 Docker를 쓰지 않는다. 사용자 자료는 `data/vally.db`(SQLite, WAL 모드, git 제외)에 둔다. sqlx의 sqlite 기능과 sqlx 마이그레이션을 쓴다.
+- #3에서 처음 만든다. #2에는 DB가 없다.
+- 스키마는 SQLite에 맞춘다.
+  - `jsonb`는 JSON 텍스트로, `uuid`는 텍스트로, 시각은 정수(Unix 초)로 둔다.
+  - 부분 유일 인덱스는 SQLite도 지원하므로 그대로 쓴다.
