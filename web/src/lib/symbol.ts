@@ -20,7 +20,6 @@ export function symbolSub(code: SymbolCode, info: SymbolInfo | undefined): strin
   return info?.kind === "index" || isIndexCode(code) ? KIND_LABEL.index : code;
 }
 
-/** 봉 주기, 짧은 것부터. 위쪽 막대와 `[` `]`가 이 순서를 쓴다. */
 export const PERIODS = ["1m", "3m", "5m", "15m", "30m", "60m", "D", "W", "M"] as const satisfies readonly Period[];
 // 계약에 봉 주기가 늘면 여기서 타입 오류가 난다.
 const _allPeriodsListed: Exclude<Period, (typeof PERIODS)[number]> extends never ? true : never = true;

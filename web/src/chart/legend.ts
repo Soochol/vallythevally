@@ -52,7 +52,6 @@ export class Legend {
     parent.append(this.root);
   }
 
-  /** venue가 빈 글자(지수)면 그 자리를 숨긴다. */
   setHead(h: { name: string; sub: string; venue: string; period: string }): void {
     this.name.textContent = h.name;
     this.sub.textContent = h.sub;

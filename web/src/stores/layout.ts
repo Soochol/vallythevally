@@ -19,7 +19,6 @@ export interface CellState {
 /** 지금 열린 레이아웃(frontend.md §5.3). #2는 메모리의 기본 1칸(코스피 일봉)만 갖고 저장하지 않는다. */
 interface LayoutState {
   cells: CellState[];
-  /** venue를 주면 그 거래소를, 없으면 지금 거래소를 바란다. 허용되지 않으면 통합이다(`venueFor`). */
   setSymbol(slot: Slot, target: VenueTarget, venue?: Venue): void;
   setVenue(slot: Slot, venue: Venue): void;
   setPeriod(slot: Slot, p: Period): void;

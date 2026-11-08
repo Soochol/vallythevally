@@ -242,7 +242,6 @@ export function seriesOf(s: FakeSymbol, venue: Venue | null, period: Period, now
   });
 }
 
-/** t < before인 첫 자리(오름차순 봉에서). */
 function countBefore(bars: Bar[], before: number): number {
   let lo = 0;
   let hi = bars.length;

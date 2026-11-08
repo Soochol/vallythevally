@@ -36,7 +36,6 @@ export const HOTKEYS: { keys: string; label: string; action: HotkeyAction; match
   ];
 })();
 
-/** 봉 주기 버튼의 툴팁에 붙이는 단축키. */
 export function periodKey(p: Period): string | undefined {
   return HOTKEYS.find((h) => h.action.kind === "period" && h.action.period === p)?.keys;
 }

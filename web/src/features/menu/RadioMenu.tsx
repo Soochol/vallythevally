@@ -4,7 +4,6 @@ import { CheckIcon } from "../icons";
 interface Props<T extends string> {
   label: string;
   options: readonly { value: T; label: string }[];
-  /** 메뉴 안에 지금 값이 없으면 null. */
   value: T | null;
   onChoose: (v: T) => void;
   /** restoreFocus면 메뉴를 연 버튼으로 초점을 돌려야 한다(Esc, 고름). 바깥을 누르거나 Tab이면 false. */
