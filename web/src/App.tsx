@@ -2,6 +2,9 @@ import { useEffect, useState } from "react";
 import { useSymbolInfo } from "./api/queries";
 import type { CellStatus } from "./chart/ChartController";
 import { ChartCell } from "./features/grid/ChartCell";
+import { PeriodChips } from "./features/phone/PeriodChips";
+import { PhoneHeader } from "./features/phone/PhoneHeader";
+import { PhoneTabs } from "./features/phone/PhoneTabs";
 import { SearchDialog } from "./features/search/SearchDialog";
 import { StatusBar } from "./features/status/StatusBar";
 import { Toast } from "./features/toast/Toast";
@@ -35,10 +38,13 @@ export function ChartScreen() {
       }
     >
       <Topbar />
+      <PhoneHeader cell={cell} info={info} status={status} />
+      <PeriodChips cell={cell} />
       <main aria-label="칸" className="grid min-h-0 min-w-0 grid-cols-1 grid-rows-1 bg-line [grid-area:grid]">
         <ChartCell slot={slot} status={status} onStatus={setStatus} />
       </main>
       <StatusBar />
+      <PhoneTabs />
       <SearchDialog />
       <Toast />
     </div>
