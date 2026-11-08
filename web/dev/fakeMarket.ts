@@ -265,7 +265,7 @@ export function resolveVenue(s: FakeSymbol, param: string | null): { venue: Venu
   if (param !== null && !isVenue(param)) return { error: `거래소는 combined, krx, nxt 중 하나입니다: ${param}` };
   const wanted = param;
   if (s.kind === "index") return wanted === null ? { venue: null } : { error: "지수에는 거래소가 없습니다" };
-  if (wanted === "nxt" && !s.nxtEnabled) return { error: `${s.name}(${s.code})은 NXT에서 거래되지 않습니다` };
+  if (wanted === "nxt" && !s.nxtEnabled) return { error: `NXT에서 거래되지 않는 종목입니다: ${s.name}(${s.code})` };
   return { venue: wanted ?? "combined" };
 }
 
