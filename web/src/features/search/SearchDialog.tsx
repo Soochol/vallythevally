@@ -8,6 +8,7 @@ import { useRecentStore } from "../../stores/recent";
 import { useSelectionStore } from "../../stores/selection";
 import { SearchIcon } from "../icons";
 import { highlight, normalizeQuery } from "./highlight";
+import { searchList } from "./searchList";
 
 /** 종목 검색(frontend.md §3.1). 데스크톱은 가운데 대화상자, 휴대폰은 아래에서 올라오는 시트. */
 export function SearchDialog() {
@@ -27,9 +28,8 @@ function SearchDialogBody() {
   const ids = useId();
   const opener = useRef<Element | null>(document.activeElement);
 
-  const showingRecent = query === "";
-  const rows: SymbolInfo[] = showingRecent ? recent : (search.data ?? []);
-  const activeIndex = Math.min(active, rows.length - 1);
+  const { rows, selectable, recent: showingRecent } = searchList(query, recent, search.data);
+  const activeIndex = selectable ? Math.min(active, rows.length - 1) : -1;
   const optionId = (i: number) => `${ids}-opt-${i}`;
 
   useEffect(() => setActive(0), [query, search.data]);
@@ -55,11 +55,11 @@ function SearchDialogBody() {
       case "ArrowDown":
       case "ArrowUp":
         e.preventDefault();
-        if (rows.length) setActive((activeIndex + (e.key === "ArrowDown" ? 1 : -1) + rows.length) % rows.length);
+        if (selectable && rows.length) setActive((activeIndex + (e.key === "ArrowDown" ? 1 : -1) + rows.length) % rows.length);
         return;
       case "Enter": {
         e.preventDefault();
-        const row = rows[activeIndex];
+        const row = selectable ? rows[activeIndex] : undefined;
         if (row) choose(row);
         return;
       }
@@ -76,7 +76,7 @@ function SearchDialogBody() {
   let message: string | null = null;
   if (showingRecent && rows.length === 0) message = "종목 이름, 코드, 초성을 입력하세요";
   else if (!showingRecent && search.isError) message = search.error.message;
-  else if (!showingRecent && search.isSuccess && !search.isPlaceholderData && rows.length === 0) {
+  else if (!showingRecent && selectable && rows.length === 0) {
     message = "맞는 종목이 없습니다. 코드 6자리로도 찾을 수 있습니다";
   }
 
@@ -110,7 +110,7 @@ function SearchDialogBody() {
             aria-expanded={rows.length > 0}
             aria-controls={`${ids}-list`}
             aria-autocomplete="list"
-            aria-activedescendant={rows.length ? optionId(activeIndex) : undefined}
+            aria-activedescendant={activeIndex >= 0 ? optionId(activeIndex) : undefined}
             autoComplete="off"
             spellCheck={false}
             className="min-w-0 flex-1 bg-transparent text-text outline-none placeholder:text-text-3"
@@ -120,6 +120,7 @@ function SearchDialogBody() {
           id={`${ids}-list`}
           role="listbox"
           aria-label={showingRecent ? "최근 본 종목" : "검색 결과"}
+          aria-busy={!selectable && !search.isError}
           className="max-h-[380px] overflow-auto p-1 max-md:max-h-none max-md:flex-1"
         >
           {showingRecent && rows.length > 0 && (
@@ -133,9 +134,10 @@ function SearchDialogBody() {
               id={optionId(i)}
               role="option"
               aria-selected={i === activeIndex}
-              onPointerMove={() => i !== activeIndex && setActive(i)}
-              onClick={() => choose(s)}
-              className="grid cursor-pointer grid-cols-[1fr_auto_auto] items-center gap-3 rounded-m px-3 py-2 aria-selected:bg-accent-soft max-md:min-h-[44px]"
+              aria-disabled={!selectable}
+              onPointerMove={() => selectable && i !== activeIndex && setActive(i)}
+              onClick={() => selectable && choose(s)}
+              className="grid cursor-pointer grid-cols-[1fr_auto_auto] items-center gap-3 rounded-m px-3 py-2 aria-selected:bg-accent-soft aria-disabled:cursor-default aria-disabled:opacity-70 max-md:min-h-[44px]"
             >
               <span className="min-w-0 truncate font-semibold">
                 <Marked text={s.name} query={query} />
