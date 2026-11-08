@@ -45,7 +45,7 @@ function SearchDialogBody() {
 
   const choose = (info: SymbolInfo) => {
     queryClient.setQueryData(["symbol", info.code], info);
-    useLayoutStore.getState().setSymbol(slot, info.code);
+    useLayoutStore.getState().setSymbol(slot, info);
     close();
   };
 
