@@ -47,17 +47,20 @@ export interface FeedListener {
   prepended(history: History, added: number): void;
   /** 최신 페이지를 받지 못했다. */
   failed(error: ApiRequestError): void;
+  /** 과거 페이지를 받지 못했다. 가진 봉은 그대로다. `retryOlder`나 다시 열기 전까지 과거 페이지를 받지 않는다. */
+  olderFailed(error: ApiRequestError): void;
 }
 
 /**
  * 칸 하나의 봉 받기. 종목·봉 주기를 열 때마다 세대를 올리고, 이전 세대의 응답은 버린다(D1).
- * 과거 페이지는 한 번에 하나만 받는다.
+ * 과거 페이지는 한 번에 하나만 받는다. 실패하면 스크롤로 다시 보내지 않는다.
  */
 export class BarFeed {
   private generation = 0;
   private key: { symbol: SymbolCode; period: Period } | null = null;
   private history: History | null = null;
   private olderInFlight = false;
+  private olderFailed = false;
   private abort = new AbortController();
 
   constructor(
@@ -79,6 +82,7 @@ export class BarFeed {
     const gen = ++this.generation;
     this.history = null;
     this.olderInFlight = false;
+    this.olderFailed = false;
     this.fetchPage(key, this.abort.signal).then(
       (page) => {
         if (gen !== this.generation) return;
@@ -95,7 +99,7 @@ export class BarFeed {
   /** 왼쪽 끝이 가까워졌다. 받을 수 있으면 과거 페이지 하나를 받는다. */
   needOlder(): void {
     const { key, history } = this;
-    if (!key || !history || history.nextBefore === null || this.olderInFlight) return;
+    if (!key || !history || history.nextBefore === null || this.olderInFlight || this.olderFailed) return;
     const gen = this.generation;
     this.olderInFlight = true;
     this.fetchPage({ ...key, before: history.nextBefore }, this.abort.signal).then(
@@ -106,11 +110,19 @@ export class BarFeed {
         this.history = next;
         this.listener.prepended(next, added);
       },
-      () => {
-        // 과거 페이지 실패는 다음 스크롤에서 다시 시도한다.
-        if (gen === this.generation) this.olderInFlight = false;
+      (e: unknown) => {
+        if (gen !== this.generation) return;
+        this.olderInFlight = false;
+        this.olderFailed = true;
+        this.listener.olderFailed(e instanceof ApiRequestError ? e : new ApiRequestError("internal", String(e)));
       },
     );
+  }
+
+  /** 실패한 과거 페이지를 다시 받는다(`다시 시도`). */
+  retryOlder(): void {
+    this.olderFailed = false;
+    this.needOlder();
   }
 
   dispose(): void {

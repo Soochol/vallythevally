@@ -18,3 +18,13 @@ export function cellErrorView(error: ApiRequestError, symbol: SymbolCode): CellE
       return { text: error.message, action: "retry" };
   }
 }
+
+export interface OlderErrorView {
+  text: string;
+  retry: boolean;
+}
+
+/** 과거 페이지를 받다 난 오류. 가진 봉은 그대로 두고 칸 왼쪽 끝에 이유를 적는다. */
+export function olderErrorView(error: ApiRequestError, symbol: SymbolCode): OlderErrorView {
+  return { text: `과거 봉을 받지 못했습니다. ${error.message}`, retry: cellErrorView(error, symbol).action === "retry" };
+}

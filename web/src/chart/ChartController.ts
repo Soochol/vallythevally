@@ -38,7 +38,7 @@ export interface CellView {
 /** React가 그리는 칸 상태: 불러오는 중, 오류, 또는 마지막 봉(휴대폰 머리용). */
 export type CellStatus =
   | { kind: "loading" }
-  | { kind: "ready"; latest: Bar; prev: Bar | null; isCurrent: boolean; fetchedAt: number }
+  | { kind: "ready"; latest: Bar; prev: Bar | null; isCurrent: boolean; fetchedAt: number; olderError: ApiRequestError | null }
   | { kind: "error"; error: ApiRequestError };
 
 export interface ControllerDeps {
@@ -60,6 +60,7 @@ export class ChartController {
   private history: History | null = null;
   private bars: Bar[] = [];
   private hoverIndex: number | null = null;
+  private ready: Extract<CellStatus, { kind: "ready" }> | null = null;
   private settingData = false;
   private disposed = false;
 
@@ -74,6 +75,7 @@ export class ChartController {
       reset: (h) => this.onReset(h),
       prepended: (h, added) => this.onPrepended(h, added),
       failed: (e) => this.onFailed(e),
+      olderFailed: (e) => this.emitReady(e),
     });
 
     this.chart.subscribeCrosshairMove((p) => {
@@ -109,6 +111,7 @@ export class ChartController {
     if (prev?.symbol !== next.symbol || prev.period !== next.period) {
       if (prev && isIndexCode(prev.symbol) !== isIndex) this.main.api.applyOptions({ priceFormat: priceFormat(isIndex) });
       this.history = null;
+      this.ready = null;
       this.setBars([]);
       this.renderLegend();
       this.onStatus({ kind: "loading" });
@@ -119,8 +122,15 @@ export class ChartController {
   /** 같은 종목·봉 주기를 처음부터 다시 받는다(오류 뒤 `다시 시도`). */
   reload(): void {
     if (!this.view) return;
+    this.ready = null;
     this.onStatus({ kind: "loading" });
     this.feed.reload();
+  }
+
+  /** 실패한 과거 페이지를 다시 받는다(과거 봉 오류의 `다시 시도`). */
+  retryOlder(): void {
+    this.emitReady(null);
+    this.feed.retryOlder();
   }
 
   setTheme(tokens: ThemeTokens): void {
@@ -197,13 +207,15 @@ export class ChartController {
     this.renderLegend();
     const latest = bars[bars.length - 1];
     if (latest) {
-      this.onStatus({
+      this.ready = {
         kind: "ready",
         latest,
         prev: bars[bars.length - 2] ?? null,
         isCurrent: h.current !== null && latest.t === h.current.t,
         fetchedAt: Date.now(),
-      });
+        olderError: null,
+      };
+      this.onStatus(this.ready);
     } else {
       this.onStatus({ kind: "error", error: new ApiRequestError("internal", "받은 봉이 없습니다") });
     }
@@ -221,7 +233,14 @@ export class ChartController {
     this.renderLegend();
   }
 
+  private emitReady(olderError: ApiRequestError | null): void {
+    if (!this.ready) return;
+    this.ready = { ...this.ready, olderError };
+    this.onStatus(this.ready);
+  }
+
   private onFailed(error: ApiRequestError): void {
+    this.ready = null;
     this.history = null;
     this.setBars([]);
     this.renderLegend();

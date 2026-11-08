@@ -6,7 +6,7 @@ import { PERIOD_LABEL } from "../../lib/symbol";
 import { type Slot, useCell } from "../../stores/layout";
 import { useSelectionStore } from "../../stores/selection";
 import { useThemeStore } from "../../stores/theme";
-import { cellErrorView } from "./cellError";
+import { cellErrorView, olderErrorView } from "./cellError";
 
 interface Props {
   slot: Slot;
@@ -47,6 +47,7 @@ export function ChartCell({ slot, status, onStatus }: Props) {
 
   const name = info?.name ?? cell.symbol;
   const error = status.kind === "error" ? cellErrorView(status.error, cell.symbol) : null;
+  const olderError = status.kind === "ready" && status.olderError ? olderErrorView(status.olderError, cell.symbol) : null;
 
   return (
     <section
@@ -61,6 +62,19 @@ export function ChartCell({ slot, status, onStatus }: Props) {
           <p className="rounded-m bg-surface px-3 py-2 text-s text-text-2 shadow-dialog" role="status">
             봉을 불러오는 중입니다
           </p>
+        </div>
+      )}
+      {olderError && (
+        <div
+          role="alert"
+          className="absolute left-2 top-1/2 z-[5] flex max-w-[min(44ch,calc(100%-96px))] -translate-y-1/2 flex-col items-start gap-2 rounded-m border border-[color-mix(in_srgb,var(--accent)_50%,transparent)] bg-accent-soft px-3 py-2 text-s text-text shadow-dialog"
+        >
+          <p>{olderError.text}</p>
+          {olderError.retry && (
+            <button type="button" className="btn-primary" onClick={() => ctl.current?.retryOlder()}>
+              다시 시도
+            </button>
+          )}
         </div>
       )}
       {error && (
