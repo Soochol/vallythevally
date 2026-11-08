@@ -13,7 +13,7 @@ use domain::{ConfirmedBar, KstDate, KstTime, Period, SeriesKey, Symbol};
 
 use crate::clock::Clock;
 use crate::kiwoom::api::{DailyChart, IndexDailyChart, IndexMonthlyChart, IndexWeeklyChart, MarketRequest, MonthlyChart, WeeklyChart};
-use crate::kiwoom::rest::{ContKey, KiwoomError, KiwoomRest, Priority};
+use crate::kiwoom::rest::{ContKey, KiwoomError, KiwoomRest, MergeScope, Priority};
 use crate::kiwoom::wire::{ChartBody, ChartRows, KiwoomBar, parse_chart};
 use crate::symbols::SymbolDirectory;
 
@@ -92,6 +92,8 @@ pub struct BarService {
     clock: Clock,
     slots: Mutex<HashMap<SeriesKey, Arc<Slot>>>,
     next_id: AtomicU64,
+    /// 07:45 비우기마다 오른다. 키움 조회의 합치기 범위다.
+    resets: AtomicU64,
 }
 
 struct Fetched {
@@ -101,7 +103,7 @@ struct Fetched {
 
 impl BarService {
     pub fn new(rest: KiwoomRest, symbols: Arc<SymbolDirectory>, clock: Clock) -> Self {
-        BarService { rest, symbols, clock, slots: Mutex::new(HashMap::new()), next_id: AtomicU64::new(1) }
+        BarService { rest, symbols, clock, slots: Mutex::new(HashMap::new()), next_id: AtomicU64::new(1), resets: AtomicU64::new(0) }
     }
 
     /// `before`가 None이면 최신 페이지다.
@@ -141,9 +143,11 @@ impl BarService {
     }
 
     /// 07:45에 부른다. 진행 중인 조회의 응답은 내려간 시리즈에만 쓰이고 버려진다.
+    /// 비운 뒤의 조회는 비우기 전 조회와 합쳐지지 않는다.
     pub fn clear_all(&self) {
         let n = {
             let mut slots = self.slots.lock().expect("slots 잠금");
+            self.resets.fetch_add(1, Ordering::SeqCst);
             let n = slots.len();
             slots.clear();
             n
@@ -285,7 +289,8 @@ impl BarService {
         R: MarketRequest,
         R::Response: ChartBody,
     {
-        let page = self.rest.call(req, cont, Priority::Screen).await?;
+        let scope = MergeScope(self.resets.load(Ordering::SeqCst));
+        let page = self.rest.call(req, cont, Priority::Screen, scope).await?;
         match parse_chart(page.body, period) {
             Ok(ChartRows::Rows(rows)) => Ok(Fetched { rows, next: page.next }),
             Ok(ChartRows::UnknownSymbol) => Err(BarError::UnknownSymbol),

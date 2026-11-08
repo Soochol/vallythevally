@@ -56,6 +56,11 @@ impl ContKey {
     }
 }
 
+/// 같은 요청 합치기의 범위. 범위가 다르면 내용이 같아도 합치지 않고 따로 보낸다.
+/// `BarService`는 07:45 비우기마다 범위를 바꿔, 비우기 전 조회의 응답이 새 캐시에 들어가지 않게 한다.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+pub struct MergeScope(pub u64);
+
 #[derive(Debug)]
 pub struct Page<T> {
     pub body: T,
@@ -97,9 +102,10 @@ struct RawPage {
 
 type JobResult = Result<RawPage, KiwoomError>;
 
-/// 같은 요청 합치기의 키: (api-id, 정규화한 본문, 연속조회 키).
+/// 같은 요청 합치기의 키: (합치기 범위, api-id, 정규화한 본문, 연속조회 키).
 #[derive(Clone, PartialEq, Eq, Hash)]
 struct DedupeKey {
+    scope: MergeScope,
     api_id: ApiId,
     body: String,
     cont: Option<ContKey>,
@@ -223,8 +229,10 @@ impl KiwoomRest {
         req: &R,
         cont: Option<&ContKey>,
         priority: Priority,
+        scope: MergeScope,
     ) -> Result<Page<R::Response>, KiwoomError> {
         let key = DedupeKey {
+            scope,
             api_id: R::API_ID,
             body: serde_json::to_string(req).expect("요청 타입은 언제나 직렬화된다"),
             cont: cont.cloned(),
@@ -604,7 +612,7 @@ mod tests {
     }
 
     async fn call_k(rest: &KiwoomRest, i: usize, p: Priority) -> Result<Page<crate::kiwoom::wire::StockListResponse>, KiwoomError> {
-        rest.call(&StockList::EXCHANGE, Some(&cont(i)), p).await
+        rest.call(&StockList::EXCHANGE, Some(&cont(i)), p, MergeScope::default()).await
     }
 
     fn token_counter() -> impl Fn(&Sent) -> Option<Result<HttpResponse, TransportError>> {
@@ -758,7 +766,7 @@ mod tests {
             tokens(s).unwrap_or_else(|| ok(json!({"return_code": 3, "return_msg": "인증에 실패했습니다[8005:x]"}), None))
         }));
         let rest = rest(&fake);
-        let r = rest.call(&StockList::EXCHANGE, None, Priority::Screen).await;
+        let r = rest.call(&StockList::EXCHANGE, None, Priority::Screen, MergeScope::default()).await;
         assert_eq!(r.err(), Some(KiwoomError::AuthFailed { detail: Some(8005) }));
         assert_eq!(fake.market_sent().len(), 2);
     }
@@ -770,8 +778,8 @@ mod tests {
             tokens(s).unwrap_or_else(|| ok(json!({"return_code": 3, "return_msg": "인증 실패[8030:투자구분]"}), None))
         }));
         let rest = rest(&fake);
-        assert_eq!(rest.call(&StockList::EXCHANGE, None, Priority::Screen).await.err(), Some(KiwoomError::AuthFailed { detail: Some(8030) }));
-        assert_eq!(rest.call(&StockList::KOSDAQ, None, Priority::Screen).await.err(), Some(KiwoomError::AuthFailed { detail: Some(8030) }));
+        assert_eq!(rest.call(&StockList::EXCHANGE, None, Priority::Screen, MergeScope::default()).await.err(), Some(KiwoomError::AuthFailed { detail: Some(8030) }));
+        assert_eq!(rest.call(&StockList::KOSDAQ, None, Priority::Screen, MergeScope::default()).await.err(), Some(KiwoomError::AuthFailed { detail: Some(8030) }));
         assert_eq!(rest.issue_token().await.err(), Some(KiwoomError::AuthFailed { detail: Some(8030) }));
         assert_eq!(fake.sent().len(), 2, "멈춘 뒤에는 아무것도 보내지 않는다");
     }
@@ -819,7 +827,7 @@ mod tests {
             tokens(s).unwrap_or_else(|| ok(json!({"list": "not a list", "return_code": 0}), None))
         }));
         let rest = rest(&fake);
-        assert!(matches!(rest.call(&StockList::EXCHANGE, None, Priority::Screen).await, Err(KiwoomError::Parse { api_id: ApiId::Ka10099, .. })));
+        assert!(matches!(rest.call(&StockList::EXCHANGE, None, Priority::Screen, MergeScope::default()).await, Err(KiwoomError::Parse { api_id: ApiId::Ka10099, .. })));
         assert_eq!(fake.market_sent().len(), 1);
     }
 
@@ -830,9 +838,9 @@ mod tests {
             tokens(s).unwrap_or_else(|| ok(json!({"list": [], "return_code": 0}), (s.cont.is_none()).then_some("NEXT-1")))
         }));
         let rest = rest(&fake);
-        let p1 = rest.call(&StockList::EXCHANGE, None, Priority::Screen).await.unwrap();
+        let p1 = rest.call(&StockList::EXCHANGE, None, Priority::Screen, MergeScope::default()).await.unwrap();
         assert_eq!(p1.next, Some(ContKey::new("NEXT-1")));
-        let p2 = rest.call(&StockList::EXCHANGE, p1.next.as_ref(), Priority::Screen).await.unwrap();
+        let p2 = rest.call(&StockList::EXCHANGE, p1.next.as_ref(), Priority::Screen, MergeScope::default()).await.unwrap();
         assert_eq!(p2.next, None);
         assert_eq!(fake.market_sent()[1].cont.as_deref(), Some("NEXT-1"));
     }

@@ -8,7 +8,7 @@ use domain::{IndexCode, Market, Symbol, SymbolInfo, SymbolKind};
 use tokio::sync::watch;
 
 use crate::kiwoom::api::StockList;
-use crate::kiwoom::rest::{KiwoomError, KiwoomRest, Priority};
+use crate::kiwoom::rest::{KiwoomError, KiwoomRest, MergeScope, Priority};
 use crate::kiwoom::wire::{Listing, classify};
 
 pub const READY_WAIT: Duration = Duration::from_secs(10);
@@ -172,7 +172,7 @@ pub async fn fetch_directory(rest: &KiwoomRest, priority: Priority) -> Result<Di
     for req in [StockList::EXCHANGE, StockList::KOSDAQ] {
         let mut cont = None;
         for _ in 0..MAX_LIST_PAGES {
-            let page = rest.call(&req, cont.as_ref(), priority).await?;
+            let page = rest.call(&req, cont.as_ref(), priority, MergeScope::default()).await?;
             for row in &page.body.list {
                 match classify(row) {
                     Listing::Include(info) => stocks.push(info),

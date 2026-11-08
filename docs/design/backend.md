@@ -76,7 +76,7 @@ web(WASM) ───▶ indicators(feature "wasm")
 | `config` | `Config::from_env()` | `.env` 읽기, 검증, 비밀값 감싸기 | #2 |
 | `instance` | `InstanceLock::acquire(path)` | 잠금 파일(`flock`)로 서버 하나 보장(§4.1) | #2 |
 | `kiwoom::auth` | `KiwoomAuth`(토큰 단일 소유자) | 발급, 만료 판단, 토큰 세대 알림 | #2 |
-| `kiwoom::rest` | `KiwoomRest::call(req, cont, priority)` | 대기열, 초당 4회, 같은 요청 합치기, 연속조회, 오류 대응 | #2 |
+| `kiwoom::rest` | `KiwoomRest::call(req, cont, priority, scope)` | 대기열, 초당 4회, 같은 요청 합치기, 연속조회, 오류 대응 | #2 |
 | `kiwoom::ws` | `KiwoomStream` | LOGIN, PING, REG/REMOVE, 재연결, 토큰 세대 변경 | #4 |
 | `kiwoom::wire` | 응답 → `domain` 타입 파서 | 부호, 배율, 필드 번호, 빈 행, 날짜 형식 | #2 |
 | `bars` | `BarService` | 메모리 캐시, 캐시 구간, 시리즈 세대 번호, 키움 조회, 10분 내리기와 07:45 비우기, 분봉 1년 하한 | #2 |
@@ -504,7 +504,7 @@ pub struct ContKey(String);
   - 단, `Recovery`가 기다리고 있으면 내보내는 4번 중 1번은 `Recovery`에 준다. 사용자가 과거로 계속 스크롤해도 복구가 멈추지 않는다.
   - `Background`는 앞의 둘이 비었을 때만 나간다.
 - **같은 요청은 한 번만**
-  - 진행 중 요청 표의 키는 `(api-id, 정규화한 요청 본문, 연속조회 키)`다.
+  - 진행 중 요청 표의 키는 `(합치기 범위, api-id, 정규화한 요청 본문, 연속조회 키)`다. 합치기 범위(`MergeScope`)는 `BarService`가 07:45 비우기마다 바꾼다. 비운 뒤의 조회가 비우기 전에 출발한 조회의 응답을 나눠 받으면 버린 옛 가격이 새 캐시에 들어가기 때문이다(§6.4).
   - 같은 키가 대기열에 있거나 응답을 기다리는 중이면 새로 넣지 않는다. 같은 결과를 나눠 받는다(`futures::future::Shared`).
   - 이미 들어간 요청보다 높은 우선순위로 같은 요청이 오면 그 요청의 우선순위를 올린다.
   - 합쳐진 결과를 받은 호출자는 **자기가 필요한 범위가 채워졌는지 다시 확인한다**. 모자라면 자기 요청을 이어서 낸다. `BarService`의 키별 합치기(§6.3)도 같다.
