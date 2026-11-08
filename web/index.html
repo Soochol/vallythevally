@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="ko" data-theme="dark">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>vallythevally</title>
+    <script>
+      try {
+        if (localStorage.getItem("vv.theme") === "light") document.documentElement.dataset.theme = "light";
+      } catch {}
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

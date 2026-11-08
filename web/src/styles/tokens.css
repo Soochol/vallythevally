@@ -1,0 +1,36 @@
+/* 디자인 토큰(frontend.md §1.2). 원본은 docs/design/mockup/styles.css 다. */
+:root {
+  --font-sans: "Pretendard Variable", Pretendard, "Noto Sans CJK KR", "Apple SD Gothic Neo", system-ui, sans-serif;
+  --fs-xs: 11px; --fs-s: 12px; --fs-m: 13px; --fs-l: 15px; --fs-xl: 22px;
+  --s1: 2px; --s2: 4px; --s3: 8px; --s4: 12px; --s5: 16px; --s6: 24px;
+  --r-s: 3px; --r-m: 6px; --r-l: 10px;
+  --topbar-h: 40px; --tools-w: 40px; --watch-w: 264px; --status-h: 24px;
+  --link-a: #E3B04B; --link-b: #B79BEA; --link-c: #72C9A6;
+}
+:root, [data-theme="dark"] {
+  --bg: #131B1A; --chart-bg: #161F1E; --surface: #1A2423; --raised: #24302E; --line: #2B3735; --grid: #1D2827;
+  --text: #E3EAE6; --text-2: #96A59F; --text-3: #7E8D88;
+  --accent: #E3B04B; --accent-ink: #1C1606; --accent-soft: rgba(227, 176, 75, 0.16);
+  --up: #F2565E; --down: #4F90F3; --up-vol: rgba(242, 86, 94, 0.42); --down-vol: rgba(79, 144, 243, 0.42);
+  --crosshair: #7F8F8A; --series-line: #8CC9B6; --series-fill: rgba(140, 201, 182, 0.16);
+  --ind-1: #C7A2F2; --ind-2: #6FD0A8; --ind-3: #F2A66B; --ind-4: #E6DF8C; --ind-5: #9AA9A4;
+  --cmp-1: #EDE7DA; --cmp-2: #F291C2; --cmp-3: #9FD8E8;
+  --draw: #E3B04B; --cloud-up: rgba(242, 86, 94, 0.10); --cloud-down: rgba(79, 144, 243, 0.10);
+  --shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+  --scrim: rgba(8, 12, 11, 0.55);
+  color-scheme: dark;
+}
+[data-theme="light"] {
+  --bg: #EDF1EF; --chart-bg: #FBFCFB; --surface: #F5F8F6; --raised: #E2E9E6; --line: #CBD5D1; --grid: #ECF0EE;
+  --text: #16211F; --text-2: #4B5A56; --text-3: #5F6D68;
+  --accent: #8A5905; --accent-ink: #FFFFFF; --accent-soft: rgba(138, 89, 5, 0.12);
+  --up: #C8202F; --down: #1A5ED6; --up-vol: rgba(200, 32, 47, 0.38); --down-vol: rgba(26, 94, 214, 0.38);
+  --crosshair: #6F7D78; --series-line: #1F7A68; --series-fill: rgba(31, 122, 104, 0.12);
+  --ind-1: #7B4FC4; --ind-2: #12875F; --ind-3: #C05A14; --ind-4: #857600; --ind-5: #66746F;
+  --cmp-1: #3B3F3E; --cmp-2: #C2187A; --cmp-3: #11799A;
+  --draw: #8A5905; --cloud-up: rgba(200, 32, 47, 0.08); --cloud-down: rgba(26, 94, 214, 0.08);
+  --link-a: #A86E00; --link-b: #6F4BB8; --link-c: #14805C;
+  --shadow: 0 12px 32px rgba(22, 33, 31, 0.18);
+  --scrim: rgba(22, 33, 31, 0.28);
+  color-scheme: light;
+}
