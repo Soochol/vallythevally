@@ -22,20 +22,21 @@ export function useOpenFromAddress() {
     const slot = useSelectionStore.getState().activeSlot;
     const { setSymbol, setPeriod } = useLayoutStore.getState();
     setParams({}, { replace: true });
-    if (period !== null && isPeriodOn(period)) setPeriod(slot, period);
-    if (symbol === null) return;
+    // 종목과 봉 주기를 한 번에 바꾼다. 따로 바꾸면 지금 종목의 새 봉 주기를 쓸데없이 한 번 더 받는다.
+    const open = () => {
+      if (period !== null && isPeriodOn(period)) setPeriod(slot, period);
+      if (symbol !== null) setSymbol(slot, symbol);
+    };
+    if (symbol === null) return open();
     queryClient
       .fetchQuery({ queryKey: ["symbol", symbol], queryFn: ({ signal }) => fetchSymbolInfo(symbol, signal), staleTime: Infinity })
-      .then(
-        () => setSymbol(slot, symbol),
-        (e: unknown) => {
-          if (e instanceof ApiRequestError && e.code === "unknown_symbol") {
-            useSelectionStore.getState().showToast(`주소의 종목 ${symbol}를 찾을 수 없습니다`);
-          } else {
-            // 서버가 아직 종목 목록을 못 받았을 수 있다. 칸이 열면서 오류를 보인다.
-            setSymbol(slot, symbol);
-          }
-        },
-      );
+      .then(open, (e: unknown) => {
+        if (e instanceof ApiRequestError && e.code === "unknown_symbol") {
+          useSelectionStore.getState().showToast(`주소의 종목 ${symbol}를 찾을 수 없습니다`);
+        } else {
+          // 서버가 아직 종목 목록을 못 받았을 수 있다. 칸이 열면서 오류를 보인다.
+          open();
+        }
+      });
   }, [symbol, period, setParams, queryClient]);
 }
