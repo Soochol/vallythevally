@@ -38,7 +38,7 @@ export function ChartCell({ slot, status, onStatus }: Props) {
   }, []);
 
   useEffect(() => {
-    ctl.current?.apply({ symbol: cell.symbol, period: cell.period, settings: cell.chartSettings, info });
+    ctl.current?.apply({ symbol: cell.symbol, venue: cell.venue, period: cell.period, settings: cell.chartSettings, info });
   }, [cell, info]);
 
   useEffect(() => {

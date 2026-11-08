@@ -1,10 +1,15 @@
 import { describe, expect, test } from "vitest";
-import type { BarsQuery } from "../api/bars";
+import type { BarsQuery, SeriesKey } from "../api/bars";
 import type { Bar } from "../api/generated/Bar";
 import type { BarsPage } from "../api/generated/BarsPage";
 import { ApiRequestError } from "../api/http";
 import { BarFeed, displayBars, type History, prependOlder } from "./barFeed";
 
+const key = (symbol: string, period: SeriesKey["period"], venue: SeriesKey["venue"] = "combined"): SeriesKey => ({
+  symbol,
+  venue,
+  period,
+});
 const bar = (t: number, c = t): Bar => ({ t, o: c, h: c, l: c, c, v: 1 });
 const page = (bars: Bar[], nextBefore: number | null, current: Bar | null = null): BarsPage => ({
   symbol: "005930",
@@ -61,8 +66,8 @@ function harness() {
 describe("BarFeed", () => {
   test("이전 세대의 응답은 버린다", async () => {
     const { feed, calls, events, flush, history } = harness();
-    feed.open("005930", "D");
-    feed.open("005930", "W");
+    feed.open(key("005930", "D"));
+    feed.open(key("005930", "W"));
     calls[0]!.resolve(page([bar(1)], null));
     calls[1]!.resolve(page([bar(5), bar(6)], null));
     await flush();
@@ -70,9 +75,24 @@ describe("BarFeed", () => {
     expect(history()?.bars.map((b) => b.t)).toEqual([5, 6]);
   });
 
+  test("거래소를 바꾸면 새 세대다. 이전 거래소의 늦은 최신·과거 페이지는 버린다", async () => {
+    const { feed, calls, events, flush, history } = harness();
+    feed.open(key("005930", "D", "krx"));
+    calls[0]!.resolve(page([bar(10), bar(11)], 10));
+    await flush();
+    feed.needOlder();
+    feed.open(key("005930", "D", "nxt"));
+    expect(calls.map((c) => [c.q.venue, c.q.before])).toEqual([["krx", undefined], ["krx", 10], ["nxt", undefined]]);
+    calls[1]!.resolve(page([bar(8), bar(9)], null));
+    calls[2]!.resolve(page([bar(20)], null));
+    await flush();
+    expect(events).toEqual(["reset 2", "reset 1"]);
+    expect(history()?.bars.map((b) => b.t)).toEqual([20]);
+  });
+
   test("과거 페이지 요청은 한 번에 하나, nextBefore를 before로 보낸다", async () => {
     const { feed, calls, events, flush } = harness();
-    feed.open("005930", "D");
+    feed.open(key("005930", "D"));
     feed.needOlder(); // 최신 페이지가 오기 전에는 받지 않는다
     calls[0]!.resolve(page([bar(10), bar(11)], 10, bar(12)));
     await flush();
@@ -89,7 +109,7 @@ describe("BarFeed", () => {
 
   test("nextBefore가 null이면 더 받지 않는다", async () => {
     const { feed, calls, flush } = harness();
-    feed.open("005930", "D");
+    feed.open(key("005930", "D"));
     calls[0]!.resolve(page([bar(10)], 10));
     await flush();
     feed.needOlder();
@@ -102,11 +122,11 @@ describe("BarFeed", () => {
 
   test("봉 주기를 바꾼 뒤 도착한 과거 페이지는 버린다", async () => {
     const { feed, calls, events, flush } = harness();
-    feed.open("005930", "D");
+    feed.open(key("005930", "D"));
     calls[0]!.resolve(page([bar(10)], 10));
     await flush();
     feed.needOlder();
-    feed.open("005930", "W");
+    feed.open(key("005930", "W"));
     calls[1]!.resolve(page([bar(9)], null));
     calls[2]!.resolve(page([bar(20)], null));
     await flush();
@@ -116,7 +136,7 @@ describe("BarFeed", () => {
 
   test("최신 페이지 실패를 알린다", async () => {
     const { feed, calls, events, flush } = harness();
-    feed.open("999999", "D");
+    feed.open(key("999999", "D"));
     calls[0]!.reject(new ApiRequestError("unknown_symbol", "없음"));
     await flush();
     expect(events).toEqual(["failed unknown_symbol"]);
@@ -124,7 +144,7 @@ describe("BarFeed", () => {
 
   test("과거 페이지 실패를 알리고, 가진 봉은 그대로 두고, 스크롤로는 다시 보내지 않는다", async () => {
     const { feed, calls, events, flush, history } = harness();
-    feed.open("005930", "D");
+    feed.open(key("005930", "D"));
     calls[0]!.resolve(page([bar(10), bar(11)], 10));
     await flush();
     feed.needOlder();
@@ -139,7 +159,7 @@ describe("BarFeed", () => {
 
   test("retryOlder는 실패한 과거 페이지를 다시 받는다", async () => {
     const { feed, calls, events, flush } = harness();
-    feed.open("005930", "D");
+    feed.open(key("005930", "D"));
     calls[0]!.resolve(page([bar(10)], 10));
     await flush();
     feed.needOlder();
@@ -155,7 +175,7 @@ describe("BarFeed", () => {
 
   test("다시 열면 과거 페이지 실패 상태를 지운다", async () => {
     const { feed, calls, flush } = harness();
-    feed.open("005930", "D");
+    feed.open(key("005930", "D"));
     calls[0]!.resolve(page([bar(10)], 10));
     await flush();
     feed.needOlder();
@@ -170,7 +190,7 @@ describe("BarFeed", () => {
 
   test("dispose 뒤 도착한 응답은 버린다", async () => {
     const { feed, calls, events, flush } = harness();
-    feed.open("005930", "D");
+    feed.open(key("005930", "D"));
     feed.dispose();
     calls[0]!.resolve(page([bar(1)], null));
     await flush();

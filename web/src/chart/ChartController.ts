@@ -15,6 +15,7 @@ import type { Bar } from "../api/generated/Bar";
 import type { Period } from "../api/generated/Period";
 import type { SymbolCode } from "../api/generated/SymbolCode";
 import type { SymbolInfo } from "../api/generated/SymbolInfo";
+import type { Venue } from "../api/generated/Venue";
 import { ApiRequestError } from "../api/http";
 import { isIndexCode, PERIOD_LABEL, symbolSub } from "../lib/symbol";
 import { BarFeed, displayBars, type FetchPage, type History } from "./barFeed";
@@ -30,6 +31,7 @@ const RIGHT_OFFSET = 6;
 
 export interface CellView {
   symbol: SymbolCode;
+  venue: Venue | null;
   period: Period;
   settings: ChartSettings;
   info: SymbolInfo | undefined;
@@ -108,18 +110,18 @@ export class ChartController {
         mode: next.settings.scale === "log" ? PriceScaleMode.Logarithmic : PriceScaleMode.Normal,
       });
     }
-    if (prev?.symbol !== next.symbol || prev.period !== next.period) {
+    if (prev?.symbol !== next.symbol || prev.venue !== next.venue || prev.period !== next.period) {
       if (prev && isIndexCode(prev.symbol) !== isIndex) this.main.api.applyOptions({ priceFormat: priceFormat(isIndex) });
       this.history = null;
       this.ready = null;
       this.setBars([]);
       this.renderLegend();
       this.onStatus({ kind: "loading" });
-      this.feed.open(next.symbol, next.period);
+      this.feed.open({ symbol: next.symbol, venue: next.venue, period: next.period });
     }
   }
 
-  /** 같은 종목·봉 주기를 처음부터 다시 받는다(오류 뒤 `다시 시도`). */
+  /** 같은 봉 열을 처음부터 다시 받는다(오류 뒤 `다시 시도`). */
   reload(): void {
     if (!this.view) return;
     this.ready = null;

@@ -1,8 +1,6 @@
-import type { BarsQuery } from "../api/bars";
+import type { BarsQuery, SeriesKey } from "../api/bars";
 import type { Bar } from "../api/generated/Bar";
 import type { BarsPage } from "../api/generated/BarsPage";
-import type { Period } from "../api/generated/Period";
-import type { SymbolCode } from "../api/generated/SymbolCode";
 import type { UnixSeconds } from "../api/generated/UnixSeconds";
 import { ApiRequestError } from "../api/http";
 
@@ -52,12 +50,12 @@ export interface FeedListener {
 }
 
 /**
- * 칸 하나의 봉 받기. 종목·봉 주기를 열 때마다 세대를 올리고, 이전 세대의 응답은 버린다(D1).
+ * 칸 하나의 봉 받기. 종목·거래소·봉 주기를 열 때마다 세대를 올리고, 이전 세대의 응답은 버린다(D1).
  * 과거 페이지는 한 번에 하나만 받는다. 실패하면 스크롤로 다시 보내지 않는다.
  */
 export class BarFeed {
   private generation = 0;
-  private key: { symbol: SymbolCode; period: Period } | null = null;
+  private key: SeriesKey | null = null;
   private history: History | null = null;
   private olderInFlight = false;
   private olderFailed = false;
@@ -68,12 +66,12 @@ export class BarFeed {
     private readonly listener: FeedListener,
   ) {}
 
-  open(symbol: SymbolCode, period: Period): void {
-    this.key = { symbol, period };
+  open(key: SeriesKey): void {
+    this.key = key;
     this.reload();
   }
 
-  /** 같은 종목·봉 주기를 처음부터 다시 받는다. */
+  /** 같은 봉 열을 처음부터 다시 받는다. */
   reload(): void {
     const key = this.key;
     if (!key) return;
