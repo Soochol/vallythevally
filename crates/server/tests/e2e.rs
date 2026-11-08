@@ -63,6 +63,23 @@ async fn serves_symbols_and_bars_from_fake_kiwoom_and_never_logs_secrets() {
     assert_eq!(idx["bars"][9]["c"].as_f64(), Some(5_059.69));
     assert!(idx["nextBefore"].is_number());
 
+    let (status, krx) = get(&client, &base, "/api/bars?symbol=005930&period=D&venue=krx&limit=5").await;
+    assert_eq!((status, krx["venue"].as_str()), (200, Some("krx")), "{krx}");
+    assert_eq!(krx["bars"][4]["c"].as_f64(), Some(193_500.0), "KRX 11-06 종가");
+
+    let (status, nxt) = get(&client, &base, "/api/bars?symbol=005930&period=1m&venue=nxt").await;
+    assert_eq!((status, nxt["venue"].as_str(), nxt["period"].as_str()), (200, Some("nxt"), Some("1m")), "{nxt}");
+    let last = nxt["bars"].as_array().unwrap().last().unwrap().clone();
+    assert_eq!((last["t"].as_i64(), last["c"].as_f64()), (Some(1_793_962_740), Some(193_400.0)), "NXT 11-06 19:59 봉");
+    assert_eq!(nxt["nextBefore"], Value::Null, "가짜 키움은 두 번째 페이지에서 끝난다");
+
+    let (status, err) = get(&client, &base, "/api/bars?symbol=005935&period=1m&venue=nxt").await;
+    assert_eq!((status, err["error"]["code"].as_str()), (400, Some("bad_request")), "NXT 불가 종목");
+
+    let (status, idx_m) = get(&client, &base, "/api/bars?symbol=IDX:001&period=1m").await;
+    assert_eq!((status, idx_m["venue"].clone()), (200, Value::Null), "{idx_m}");
+    assert_eq!(idx_m["bars"].as_array().unwrap().last().unwrap()["c"].as_f64(), Some(5_059.69));
+
     let (status, err) = get(&client, &base, "/api/bars?symbol=000000&period=D").await;
     assert_eq!((status, err["error"]["code"].as_str()), (404, Some("unknown_symbol")));
     let (status, page) = get(&client, &base, "/layout/abc").await;

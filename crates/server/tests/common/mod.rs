@@ -80,7 +80,14 @@ async fn handle(State(seen): State<Arc<Seen>>, headers: HeaderMap, body: String)
         }
         "ka10099" if body.contains("\"10\"") => "ka10099_10",
         "ka10099" => "ka10099_0",
-        "ka10081" => "ka10081_005930_AL",
+        // 거래소는 stk_cd 접미사로 고른다(kiwoom.md 3·12·13절).
+        "ka10081" if body.contains("_NX") => "ka10081_005930_NX",
+        "ka10081" if body.contains("_AL") => "ka10081_005930_AL",
+        "ka10081" => "ka10081_005930",
+        "ka10080" if body.contains("005935_NX") => "ka10080_005935_NX_1",
+        "ka10080" if body.contains("_NX") => "ka10080_005930_NX_1",
+        "ka10080" => "ka10080_005930_3",
+        "ka20005" => "ka20005_001_1",
         "ka10082" => "ka10082_005930_AL",
         "ka10083" => "ka10083_005930_AL",
         "ka20006" => "ka20006_001",
