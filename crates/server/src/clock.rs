@@ -49,9 +49,13 @@ impl Clock {
         }
     }
 
+    /// 돌아올 때 `now() >= t`이다. 초 단위로 버린 시각 때문에 일찍 깨면 다시 잔다.
     pub async fn sleep_until(&self, t: KstTime) {
-        let secs = t.unix() - self.now().unix();
-        if secs > 0 {
+        loop {
+            let secs = t.unix() - self.now().unix();
+            if secs <= 0 {
+                return;
+            }
             tokio::time::sleep(Duration::from_secs(secs as u64)).await;
         }
     }
