@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useSymbolInfo } from "./api/queries";
 import type { CellStatus } from "./chart/ChartController";
 import { ChartCell } from "./features/grid/ChartCell";
+import { SearchDialog } from "./features/search/SearchDialog";
 import { StatusBar } from "./features/status/StatusBar";
 import { Toast } from "./features/toast/Toast";
 import { Topbar } from "./features/topbar/Topbar";
@@ -38,6 +39,7 @@ export function ChartScreen() {
         <ChartCell slot={slot} status={status} onStatus={setStatus} />
       </main>
       <StatusBar />
+      <SearchDialog />
       <Toast />
     </div>
   );
