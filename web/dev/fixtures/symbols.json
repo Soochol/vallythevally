@@ -31,6 +31,7 @@
     { "code": "229200", "name": "KODEX 코스닥150", "kind": "etf", "market": "kospi", "close": 16885, "volume": 5300000, "years": 7 },
     { "code": "395400", "name": "SK리츠", "kind": "reit", "market": "kospi", "close": 5260, "volume": 390000, "years": 4 },
     { "code": "330590", "name": "롯데리츠", "kind": "reit", "market": "kospi", "close": 4315, "volume": 610000, "years": 5 },
-    { "code": "555555", "name": "조회실패시험", "kind": "common", "market": "kospi", "close": 10000, "volume": 1000, "years": 1, "fail": "kiwoom_unavailable" }
+    { "code": "555555", "name": "조회실패시험", "kind": "common", "market": "kospi", "close": 10000, "volume": 1000, "years": 1, "fail": "kiwoom_unavailable" },
+    { "code": "888888", "name": "상장폐지시험", "kind": "common", "market": "kosdaq", "close": 1000, "volume": 1000, "years": 1, "fail": "unknown_symbol" }
   ]
 }

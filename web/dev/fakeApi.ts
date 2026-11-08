@@ -1,5 +1,6 @@
 // dev 서버 전용 가짜 /api. vite.config.ts가 VITE_FAKE_API=0이 아닐 때만 붙인다(apply: "serve").
-// 999999는 unknown_symbol, 555555(조회실패시험)의 봉은 kiwoom_unavailable로 답한다.
+// 999999는 어디서나 unknown_symbol이다. 555555(조회실패시험)의 봉은 kiwoom_unavailable,
+// 888888(상장폐지시험)은 검색에는 나오지만 봉은 unknown_symbol로 답한다(칸 오류 화면 확인용).
 import type { ServerResponse } from "node:http";
 import type { Plugin } from "vite";
 import type { ApiError } from "../src/api/generated/ApiError.ts";
@@ -49,6 +50,7 @@ export function fakeApi(): Plugin {
           await sleep(before === null ? LATEST_PAGE_DELAY_MS : PAST_PAGE_DELAY_MS);
           const s = findSymbol(code);
           if (!s) return fail(res, 404, "unknown_symbol", `종목 ${code}을 찾을 수 없습니다`);
+          if (s.fail === "unknown_symbol") return fail(res, 404, "unknown_symbol", `종목 ${code}을 찾을 수 없습니다`);
           if (s.fail === "kiwoom_unavailable") {
             return fail(res, 503, "kiwoom_unavailable", "키움 조회가 응답하지 않습니다. 잠시 뒤 다시 시도하세요.");
           }

@@ -40,7 +40,7 @@ export class Legend {
     "self-center rounded-[9px] border border-line px-1.5 text-xs text-text-3",
     "조회 값",
   );
-  private readonly ohlc = el("div", `${ROW} flex gap-2 whitespace-nowrap text-s`);
+  private readonly ohlc = el("div", `${ROW} flex flex-wrap gap-x-2 whitespace-nowrap text-s max-md:w-auto max-md:gap-x-1.5`);
 
   constructor(parent: HTMLElement) {
     const head = el("div", `${ROW} flex items-baseline gap-1.5 whitespace-nowrap max-md:hidden`);
