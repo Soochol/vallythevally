@@ -1,0 +1,274 @@
+{
+  "seegene": {
+    "observationWindow": [
+      "2020-01-01",
+      "2022-12-31"
+    ],
+    "peakClose2020to2022": {
+      "date": "2020-08-07",
+      "close": 156901
+    },
+    "subsequentMinimumThrough2023H1": {
+      "date": "2023-06-30",
+      "close": 20550
+    },
+    "peakToSubsequentMinimumPct": -86.902569,
+    "end2022": {
+      "date": "2022-12-29",
+      "close": 27200
+    },
+    "peakToEnd2022Pct": -82.664228,
+    "end2023H1": {
+      "date": "2023-06-30",
+      "close": 20550
+    },
+    "peakToEnd2023H1Pct": -86.902569,
+    "highestClose2023H1": {
+      "date": "2023-02-07",
+      "close": 28650
+    },
+    "annualAdjustedPriceChanges": {
+      "2020": {
+        "start": {
+          "date": "2019-12-30",
+          "close": 15404
+        },
+        "end": {
+          "date": "2020-12-30",
+          "close": 96995
+        },
+        "adjustedPriceChangePct": 529.674111
+      },
+      "2021": {
+        "start": {
+          "date": "2020-12-30",
+          "close": 96995
+        },
+        "end": {
+          "date": "2021-12-30",
+          "close": 61000
+        },
+        "adjustedPriceChangePct": -37.11016
+      },
+      "2022": {
+        "start": {
+          "date": "2021-12-30",
+          "close": 61000
+        },
+        "end": {
+          "date": "2022-12-29",
+          "close": 27200
+        },
+        "adjustedPriceChangePct": -55.409836
+      }
+    },
+    "pointCount": 990,
+    "firstDate": "2019-07-01",
+    "lastDate": "2023-06-30",
+    "formula": "100*(target adjusted close / peak adjusted close - 1); peak restricted to 2020-2022, minimum strictly after peak through 2023-06-30. This is not all-period maximum drawdown."
+  },
+  "ecoprobm": {
+    "observationWindow": [
+      "2020-01-01",
+      "2022-12-31"
+    ],
+    "peakClose2020to2022": {
+      "date": "2021-11-18",
+      "close": 138011
+    },
+    "subsequentMinimumThrough2023H1": {
+      "date": "2022-02-10",
+      "close": 77578
+    },
+    "peakToSubsequentMinimumPct": -43.788539,
+    "end2022": {
+      "date": "2022-12-29",
+      "close": 90650
+    },
+    "peakToEnd2022Pct": -34.31683,
+    "end2023H1": {
+      "date": "2023-06-30",
+      "close": 245080
+    },
+    "peakToEnd2023H1Pct": 77.580048,
+    "highestClose2023H1": {
+      "date": "2023-04-18",
+      "close": 291340
+    },
+    "annualAdjustedPriceChanges": {
+      "2020": {
+        "start": {
+          "date": "2019-12-30",
+          "close": 12888
+        },
+        "end": {
+          "date": "2020-12-30",
+          "close": 41366
+        },
+        "adjustedPriceChangePct": 220.965239
+      },
+      "2021": {
+        "start": {
+          "date": "2020-12-30",
+          "close": 41366
+        },
+        "end": {
+          "date": "2021-12-30",
+          "close": 121790
+        },
+        "adjustedPriceChangePct": 194.420539
+      },
+      "2022": {
+        "start": {
+          "date": "2021-12-30",
+          "close": 121790
+        },
+        "end": {
+          "date": "2022-12-29",
+          "close": 90650
+        },
+        "adjustedPriceChangePct": -25.568602
+      }
+    },
+    "pointCount": 990,
+    "firstDate": "2019-07-01",
+    "lastDate": "2023-06-30",
+    "formula": "100*(target adjusted close / peak adjusted close - 1); peak restricted to 2020-2022, minimum strictly after peak through 2023-06-30. This is not all-period maximum drawdown."
+  },
+  "wemade": {
+    "observationWindow": [
+      "2020-01-01",
+      "2022-12-31"
+    ],
+    "peakClose2020to2022": {
+      "date": "2021-11-19",
+      "close": 237000
+    },
+    "subsequentMinimumThrough2023H1": {
+      "date": "2022-12-08",
+      "close": 30050
+    },
+    "peakToSubsequentMinimumPct": -87.320675,
+    "end2022": {
+      "date": "2022-12-29",
+      "close": 31550
+    },
+    "peakToEnd2022Pct": -86.687764,
+    "end2023H1": {
+      "date": "2023-06-30",
+      "close": 39050
+    },
+    "peakToEnd2023H1Pct": -83.523207,
+    "highestClose2023H1": {
+      "date": "2023-02-22",
+      "close": 59500
+    },
+    "annualAdjustedPriceChanges": {
+      "2020": {
+        "start": {
+          "date": "2019-12-30",
+          "close": 14978
+        },
+        "end": {
+          "date": "2020-12-30",
+          "close": 19449
+        },
+        "adjustedPriceChangePct": 29.850447
+      },
+      "2021": {
+        "start": {
+          "date": "2020-12-30",
+          "close": 19449
+        },
+        "end": {
+          "date": "2021-12-30",
+          "close": 177900
+        },
+        "adjustedPriceChangePct": 814.699985
+      },
+      "2022": {
+        "start": {
+          "date": "2021-12-30",
+          "close": 177900
+        },
+        "end": {
+          "date": "2022-12-29",
+          "close": 31550
+        },
+        "adjustedPriceChangePct": -82.265318
+      }
+    },
+    "pointCount": 990,
+    "firstDate": "2019-07-01",
+    "lastDate": "2023-06-30",
+    "formula": "100*(target adjusted close / peak adjusted close - 1); peak restricted to 2020-2022, minimum strictly after peak through 2023-06-30. This is not all-period maximum drawdown."
+  },
+  "sugentech": {
+    "observationWindow": [
+      "2020-01-01",
+      "2022-12-31"
+    ],
+    "peakClose2020to2022": {
+      "date": "2020-08-06",
+      "close": 55500
+    },
+    "subsequentMinimumThrough2023H1": {
+      "date": "2023-06-27",
+      "close": 7210
+    },
+    "peakToSubsequentMinimumPct": -87.009009,
+    "end2022": {
+      "date": "2022-12-29",
+      "close": 10150
+    },
+    "peakToEnd2022Pct": -81.711712,
+    "end2023H1": {
+      "date": "2023-06-30",
+      "close": 7230
+    },
+    "peakToEnd2023H1Pct": -86.972973,
+    "highestClose2023H1": {
+      "date": "2023-01-05",
+      "close": 10350
+    },
+    "annualAdjustedPriceChanges": {
+      "2020": {
+        "start": {
+          "date": "2019-12-30",
+          "close": 5480
+        },
+        "end": {
+          "date": "2020-12-30",
+          "close": 20300
+        },
+        "adjustedPriceChangePct": 270.437956
+      },
+      "2021": {
+        "start": {
+          "date": "2020-12-30",
+          "close": 20300
+        },
+        "end": {
+          "date": "2021-12-30",
+          "close": 14000
+        },
+        "adjustedPriceChangePct": -31.034483
+      },
+      "2022": {
+        "start": {
+          "date": "2021-12-30",
+          "close": 14000
+        },
+        "end": {
+          "date": "2022-12-29",
+          "close": 10150
+        },
+        "adjustedPriceChangePct": -27.5
+      }
+    },
+    "pointCount": 988,
+    "firstDate": "2019-07-01",
+    "lastDate": "2023-06-30",
+    "formula": "100*(target adjusted close / peak adjusted close - 1); peak restricted to 2020-2022, minimum strictly after peak through 2023-06-30. This is not all-period maximum drawdown."
+  }
+}

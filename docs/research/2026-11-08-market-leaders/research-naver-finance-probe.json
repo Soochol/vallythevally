@@ -1,0 +1,341 @@
+{
+  "checkedAt": "2026-11-08T09:30:52.391789+00:00",
+  "requests": [
+    {
+      "id": "samsung-quarter",
+      "requestedUrl": "https://m.stock.naver.com/api/stock/005930/finance/quarter",
+      "status": 200,
+      "finalUrl": "https://m.stock.naver.com/api/stock/005930/finance/quarter",
+      "contentType": "application/json;charset=UTF-8",
+      "bytes": 5121,
+      "periods": [
+        {
+          "isConsensus": "N",
+          "title": "2025.06.",
+          "key": "202506"
+        },
+        {
+          "isConsensus": "N",
+          "title": "2025.09.",
+          "key": "202509"
+        },
+        {
+          "isConsensus": "N",
+          "title": "2025.12.",
+          "key": "202512"
+        },
+        {
+          "isConsensus": "N",
+          "title": "2026.03.",
+          "key": "202603"
+        },
+        {
+          "isConsensus": "N",
+          "title": "2026.06.",
+          "key": "202606"
+        },
+        {
+          "isConsensus": "Y",
+          "title": "2026.09.",
+          "key": "202609"
+        }
+      ],
+      "rows": [
+        "매출액",
+        "영업이익",
+        "당기순이익",
+        "지배주주순이익",
+        "비지배주주순이익",
+        "영업이익률",
+        "순이익률",
+        "ROE",
+        "부채비율",
+        "당좌비율",
+        "유보율",
+        "EPS",
+        "PER",
+        "BPS",
+        "PBR",
+        "주당배당금"
+      ],
+      "responseKeys": [
+        "itemCode",
+        "financePeriodType",
+        "financeInfo",
+        "corporationSummary"
+      ]
+    },
+    {
+      "id": "samsung-annual",
+      "requestedUrl": "https://m.stock.naver.com/api/stock/005930/finance/annual",
+      "status": 200,
+      "finalUrl": "https://m.stock.naver.com/api/stock/005930/finance/annual",
+      "contentType": "application/json;charset=UTF-8",
+      "bytes": 3840,
+      "periods": [
+        {
+          "isConsensus": "N",
+          "title": "2023.12.",
+          "key": "202312"
+        },
+        {
+          "isConsensus": "N",
+          "title": "2024.12.",
+          "key": "202412"
+        },
+        {
+          "isConsensus": "N",
+          "title": "2025.12.",
+          "key": "202512"
+        },
+        {
+          "isConsensus": "Y",
+          "title": "2026.12.",
+          "key": "202612"
+        }
+      ],
+      "rows": [
+        "매출액",
+        "영업이익",
+        "당기순이익",
+        "지배주주순이익",
+        "비지배주주순이익",
+        "영업이익률",
+        "순이익률",
+        "ROE",
+        "부채비율",
+        "당좌비율",
+        "유보율",
+        "EPS",
+        "PER",
+        "BPS",
+        "PBR",
+        "주당배당금"
+      ],
+      "responseKeys": [
+        "itemCode",
+        "financePeriodType",
+        "financeInfo",
+        "corporationSummary"
+      ]
+    },
+    {
+      "id": "naver-quarter",
+      "requestedUrl": "https://m.stock.naver.com/api/stock/035420/finance/quarter",
+      "status": 200,
+      "finalUrl": "https://m.stock.naver.com/api/stock/035420/finance/quarter",
+      "contentType": "application/json;charset=UTF-8",
+      "bytes": 5128,
+      "periods": [
+        {
+          "isConsensus": "N",
+          "title": "2025.06.",
+          "key": "202506"
+        },
+        {
+          "isConsensus": "N",
+          "title": "2025.09.",
+          "key": "202509"
+        },
+        {
+          "isConsensus": "N",
+          "title": "2025.12.",
+          "key": "202512"
+        },
+        {
+          "isConsensus": "N",
+          "title": "2026.03.",
+          "key": "202603"
+        },
+        {
+          "isConsensus": "N",
+          "title": "2026.06.",
+          "key": "202606"
+        },
+        {
+          "isConsensus": "Y",
+          "title": "2026.09.",
+          "key": "202609"
+        }
+      ],
+      "rows": [
+        "매출액",
+        "영업이익",
+        "당기순이익",
+        "지배주주순이익",
+        "비지배주주순이익",
+        "영업이익률",
+        "순이익률",
+        "ROE",
+        "부채비율",
+        "당좌비율",
+        "유보율",
+        "EPS",
+        "PER",
+        "BPS",
+        "PBR",
+        "주당배당금"
+      ],
+      "responseKeys": [
+        "itemCode",
+        "financePeriodType",
+        "financeInfo",
+        "corporationSummary"
+      ]
+    },
+    {
+      "id": "seegene-quarter",
+      "requestedUrl": "https://m.stock.naver.com/api/stock/096530/finance/quarter",
+      "status": 200,
+      "finalUrl": "https://m.stock.naver.com/api/stock/096530/finance/quarter",
+      "contentType": "application/json;charset=UTF-8",
+      "bytes": 5003,
+      "periods": [
+        {
+          "isConsensus": "N",
+          "title": "2025.06.",
+          "key": "202506"
+        },
+        {
+          "isConsensus": "N",
+          "title": "2025.09.",
+          "key": "202509"
+        },
+        {
+          "isConsensus": "N",
+          "title": "2025.12.",
+          "key": "202512"
+        },
+        {
+          "isConsensus": "N",
+          "title": "2026.03.",
+          "key": "202603"
+        },
+        {
+          "isConsensus": "N",
+          "title": "2026.06.",
+          "key": "202606"
+        },
+        {
+          "isConsensus": "Y",
+          "title": "2026.09.",
+          "key": "202609"
+        }
+      ],
+      "rows": [
+        "매출액",
+        "영업이익",
+        "당기순이익",
+        "지배주주순이익",
+        "비지배주주순이익",
+        "영업이익률",
+        "순이익률",
+        "ROE",
+        "부채비율",
+        "당좌비율",
+        "유보율",
+        "EPS",
+        "PER",
+        "BPS",
+        "PBR",
+        "주당배당금"
+      ],
+      "responseKeys": [
+        "itemCode",
+        "financePeriodType",
+        "financeInfo",
+        "corporationSummary"
+      ]
+    },
+    {
+      "id": "samsung-quarter-date-test",
+      "requestedUrl": "https://m.stock.naver.com/api/stock/005930/finance/quarter?startTime=20190101&endTime=20231231&year=2021",
+      "status": 200,
+      "finalUrl": "https://m.stock.naver.com/api/stock/005930/finance/quarter?startTime=20190101&endTime=20231231&year=2021",
+      "contentType": "application/json;charset=UTF-8",
+      "bytes": 5121,
+      "periods": [
+        {
+          "isConsensus": "N",
+          "title": "2025.06.",
+          "key": "202506"
+        },
+        {
+          "isConsensus": "N",
+          "title": "2025.09.",
+          "key": "202509"
+        },
+        {
+          "isConsensus": "N",
+          "title": "2025.12.",
+          "key": "202512"
+        },
+        {
+          "isConsensus": "N",
+          "title": "2026.03.",
+          "key": "202603"
+        },
+        {
+          "isConsensus": "N",
+          "title": "2026.06.",
+          "key": "202606"
+        },
+        {
+          "isConsensus": "Y",
+          "title": "2026.09.",
+          "key": "202609"
+        }
+      ],
+      "rows": [
+        "매출액",
+        "영업이익",
+        "당기순이익",
+        "지배주주순이익",
+        "비지배주주순이익",
+        "영업이익률",
+        "순이익률",
+        "ROE",
+        "부채비율",
+        "당좌비율",
+        "유보율",
+        "EPS",
+        "PER",
+        "BPS",
+        "PBR",
+        "주당배당금"
+      ],
+      "responseKeys": [
+        "itemCode",
+        "financePeriodType",
+        "financeInfo",
+        "corporationSummary"
+      ]
+    },
+    {
+      "id": "desktop-page",
+      "requestedUrl": "https://finance.naver.com/item/main.naver?code=005930",
+      "status": 200,
+      "finalUrl": "https://stock.naver.com/domestic/stock/005930/price",
+      "contentType": "text/html; charset=utf-8",
+      "bytes": 137071,
+      "financeRelatedText": [],
+      "scriptUrls": [
+        "https://ssl.pstatic.net/imgstock/fn/real/pc/_next/static/chunks/709a4a77-72e50ae442961c14.js",
+        "https://ssl.pstatic.net/imgstock/fn/real/pc/_next/static/chunks/95412-3ca938aef9f68545.js",
+        "https://ssl.pstatic.net/imgstock/fn/real/pc/_next/static/chunks/main-app-4b7e1d1ee116a80c.js",
+        "https://ssl.pstatic.net/imgstock/fn/real/pc/_next/static/chunks/8201-3530517b90e4249f.js",
+        "https://ssl.pstatic.net/imgstock/fn/real/pc/_next/static/chunks/21263-c46a2358f8a064a6.js",
+        "https://ssl.pstatic.net/imgstock/fn/real/pc/_next/static/chunks/app/global-error-227ef285480ad948.js",
+        "https://ssl.pstatic.net/imgstock/fn/real/pc/_next/static/chunks/79112-2197b6fa893d8d0b.js",
+        "https://ssl.pstatic.net/imgstock/fn/real/pc/_next/static/chunks/70949-dbc9eb3ec5aa2002.js",
+        "https://ssl.pstatic.net/imgstock/fn/real/pc/_next/static/chunks/62979-1b78f56e426135c1.js",
+        "https://ssl.pstatic.net/imgstock/fn/real/pc/_next/static/chunks/70288-1a33284cb72ad972.js",
+        "https://ssl.pstatic.net/imgstock/fn/real/pc/_next/static/chunks/79780-8ecc5f6be059543b.js",
+        "https://ssl.pstatic.net/imgstock/fn/real/pc/_next/static/chunks/38533-294d681d2c6ff589.js",
+        "https://ssl.pstatic.net/imgstock/fn/real/pc/_next/static/chunks/32488-6af66f9c8b886cd9.js",
+        "https://ssl.pstatic.net/imgstock/fn/real/pc/_next/static/chunks/47404-3dd097365ea7fb19.js",
+        "https://ssl.pstatic.net/imgstock/fn/real/pc/_next/static/chunks/7919-bcfe2dbdd2f3a2de.js"
+      ]
+    }
+  ]
+}

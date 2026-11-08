@@ -1,0 +1,42 @@
+{
+  "status": "passed",
+  "verifiedDate": "2026-11-08",
+  "command": "/usr/bin/python3 docs/research/2026-11-08-market-leaders/market-validate.py",
+  "pythonVersion": "3.14.4 (main, Aug 20 2026, 10:41:58) [GCC 15.2.0]",
+  "offlineRegenerationByteIdentical": true,
+  "sourceReferencesResolve": true,
+  "checks": [
+    {
+      "id": "kospi",
+      "daily": 990,
+      "weekly": 209,
+      "periodReturnsDecimalChecked": 5,
+      "maxDrawdownsExhaustivelyChecked": 5,
+      "annualReturnsDecimalChecked": 3,
+      "extremesChecked": 3,
+      "rawHashMatched": true
+    },
+    {
+      "id": "kosdaq",
+      "daily": 990,
+      "weekly": 209,
+      "periodReturnsDecimalChecked": 5,
+      "maxDrawdownsExhaustivelyChecked": 5,
+      "annualReturnsDecimalChecked": 3,
+      "extremesChecked": 3,
+      "rawHashMatched": true
+    }
+  ],
+  "filesSha256": {
+    "market.json": "93fd7cf7d7429e325a2c4b3a4589a26caed2eee51c6f2efb8e6a8252860c77e3",
+    "market-prices.json": "2bfa7c70aae77eff898c263c3accfc157841ec94be5ba211e6ffac4ad76d43e8",
+    "market-daily.json": "3b34dd06e1be529c5a8d63b1efe1e88e7388a0d69c344294f2c8b6f39f9120b5",
+    "market-calculations.json": "210c7b44f968e8ea5ff7c496a3f5d0bcd3215d2db48c57f289c9071ff146944d",
+    "market.md": "3b059b3ca092c4404b0a0f711e5d13f39f22d06b7e4d554b0ecc1538213b6bf8",
+    "fetch-market.py": "982b48a35660816a811535c19fa250d42591abda14df49617afbdf7cf03fce2a",
+    "market-validate.py": "29982cdfeda4779dc2579ba49dd9ac822f78bf43fc494214b9bf50f072e0f504",
+    "market-raw-kospi.txt": "a121f27ec426844e723cb69215d26df9334b4a3aa9604d5b756cdcda7bd4aa22",
+    "market-raw-kosdaq.txt": "6b8d3fc00901a1a1b7ea0dc9f0f413d849350b1ace4e4dfb0f535ecd5c9d5baf"
+  },
+  "scope": "원본 대조 8개 연말 값·2개 정점은 별도 원문 수동 확인. 이 검증은 저장된 일별 자료의 계산·주별 압축·재현성을 검증하며 전체 990행의 KRX 원본 진위를 증명하지 않는다."
+}
