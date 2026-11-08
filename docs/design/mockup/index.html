@@ -6,7 +6,7 @@
 <title>차트 화면 목업 · vallythevally</title>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
 <link rel="stylesheet" href="styles.css">
-<!-- 화면 상태는 주소의 질의 문자열로 고정한다: ?layout=4|1&theme=dark|light&dialog=indicator|search|alert&sheet=watch -->
+<!-- 화면 상태는 주소의 질의 문자열로 고정한다: ?layout=4|1&theme=dark|light&dialog=indicator|compare|search|alert&kind=price&q=&active=0..3&conn=live|reconnecting&sheet=watch -->
 </head>
 <body>
 <svg width="0" height="0" style="position:absolute" aria-hidden="true">
@@ -92,7 +92,6 @@
 
   <footer class="status d-only">
     <span class="conn" data-state="live" title="키움 실시간 연결 상태"><span class="dot"></span>실시간 연결됨</span>
-    <span class="muted">구독 15종목</span>
     <span class="saved"><svg class="i"><use href="#i-check"/></svg><span id="savedText">자동 저장됨 14:32:08</span></span>
     <span class="grow"></span>
     <span class="muted">목업: 가짜 데이터</span>

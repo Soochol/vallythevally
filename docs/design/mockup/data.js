@@ -238,19 +238,31 @@
       const c = ch.charCodeAt(0) - 0xac00;
       return c >= 0 && c < 11172 ? CHO[Math.floor(c / 588)] : ch;
     }).join('');
-  const isChoOnly = (q) => [...q].every((ch) => CHO.includes(ch) || ch === ' ');
-  V.search = (q) => {
-    const all = [...V.SYMBOLS, ...V.SEARCH_ONLY];
-    q = q.trim().toLowerCase();
-    if (!q) return all.slice(0, 8);
-    const score = (s) => {
-      const name = s.name.toLowerCase();
-      if (s.code.startsWith(q)) return 3;
-      if (name.startsWith(q)) return 3;
-      if (isChoOnly(q) && V.chosung(name).startsWith(q)) return 2;
-      if (name.includes(q) || (isChoOnly(q) && V.chosung(name).includes(q))) return 1;
+  const isChoOnly = (q) => [...q].every((ch) => CHO.includes(ch));
+  // D5 정규화: 앞뒤 공백 자르기, 안쪽 공백 지우기, 영문 대문자.
+  V.normalize = (q) => q.trim().replace(/\s+/g, '').toUpperCase();
+  const KIND_ORDER = { 지수: 0, 주식: 1, 우선주: 2, ETF: 3, 리츠: 4 };
+  // D5 순위: 코드 완전 > 이름 완전 > 코드 접두 > 이름 접두 > 초성 접두 > 이름 포함 > 초성 포함.
+  // 같은 순위 안: 지수 > 보통주 > 우선주 > ETF > 리츠, 그다음 이름 가나다순. 최대 20개. 빈 입력은 [].
+  // 실제 검색은 서버 /api/symbols가 한다. 이 함수는 목업용 대역이다.
+  V.search = (raw) => {
+    const q = V.normalize(raw);
+    if (!q) return [];
+    const cho = isChoOnly(q);
+    const rank = (s) => {
+      const name = V.normalize(s.name), ch = V.chosung(name);
+      if (s.code === q) return 7;
+      if (name === q) return 6;
+      if (s.code.startsWith(q)) return 5;
+      if (name.startsWith(q)) return 4;
+      if (cho && ch.startsWith(q)) return 3;
+      if (name.includes(q)) return 2;
+      if (cho && ch.includes(q)) return 1;
       return 0;
     };
-    return all.map((s) => [score(s), s]).filter(([sc]) => sc > 0).sort((a, b) => b[0] - a[0]).map(([, s]) => s);
+    return [...V.SYMBOLS, ...V.SEARCH_ONLY]
+      .map((s) => [rank(s), s]).filter(([r]) => r > 0)
+      .sort((a, b) => b[0] - a[0] || KIND_ORDER[a[1].kind] - KIND_ORDER[b[1].kind] || a[1].name.localeCompare(b[1].name, 'ko'))
+      .slice(0, 20).map(([, s]) => s);
   };
 })();

@@ -10,7 +10,8 @@
   const state = {
     layout: isPhone ? 'phone' : params.get('layout') || '4',
     theme: params.get('theme') || 'dark',
-    active: 0,
+    active: Number(params.get('active') || 0),
+    conn: params.get('conn') || 'live', // live | reconnecting. 멈춤 표시를 보이기 위한 목업 스위치
     syncCross: true,
     syncScroll: true,
   };
@@ -209,10 +210,10 @@
         ctl.priceLegend.push({ name: `볼린저 밴드 ${ind.p.n} ${ind.p.k}`, color: c, val: (i) => `${fmtPrice(b.up[i], sym.index)} ${fmtPrice(b.mid[i], sym.index)} ${fmtPrice(b.lo[i], sym.index)}` });
       } else if (ind.type === 'ichi') {
         const k = V.ichimoku(bars);
-        // 선행스팬은 미래 시각에 그려지므로 시간축에 빈 봉(whitespace)을 덧붙인다.
+        // 선행스팬 시리즈가 미래 시각의 점을 직접 갖는다. 주 시리즈에는 빈 시각(whitespace)을 붙이지 않는다(W4-28).
+        // 그래야 현재 봉이 주 시리즈의 마지막 점으로 남아 series.update로 갱신된다.
         const future = intraday ? [] : V.futureDays(times[times.length - 1], k.spanA.length - bars.length);
         const ext = times.concat(future);
-        main.setData((cell.style === 'area' ? bars.map((b) => ({ time: b.time, value: b.close })) : bars).concat(future.map((t) => ({ time: t }))));
         line(k.tenkan, css('--ind-3'), 0); line(k.kijun, css('--ind-1'), 0);
         line(k.spanA, css('--up'), 0, { lineStyle: LC.LineStyle.Solid }, ext); line(k.spanB, css('--down'), 0, {}, ext);
         line(k.chikou, css('--ind-2'), 0, { lineStyle: LC.LineStyle.Dotted });
@@ -316,7 +317,7 @@
         <span class="link-tag" ${cell.link ? `data-link="${cell.link}"` : ''} title="${cell.link ? `종목 연동 ${cell.link}` : '종목 연동 꺼짐'}">${cell.link || '·'}</span>
         <span class="lg-sym">${sym.name}</span><span class="lg-code">${sym.index ? sym.market : sym.code}</span><span class="lg-period">${cell.period}</span>
       </div>
-      <div class="lg-price"><span class="lg-close"></span><span class="lg-chg"></span><span class="lg-time muted" style="font-size:11px"></span></div>
+      <div class="lg-price"><span class="lg-close"></span><span class="lg-chg"></span><span class="lg-time muted" style="font-size:11px"></span>${state.conn !== 'live' ? '<span class="stall" title="실시간이 멈췄습니다. 마지막으로 값을 받은 시각">멈춤 14:02</span>' : ''}</div>
       <div class="lg-ohlc"></div>
       <ul class="lg-ind">${ctl.priceLegend.map((it, j) => `<li class="${it.cmp ? 'cmp' : ''} ${layout.arr === '1' && j === 1 && !isPhone ? 'show-acts' : ''}"><span class="sw" style="background:${it.color}"></span><span class="nm">${it.name}</span><b class="v"></b>${actions}</li>`).join('')}</ul>`;
     el.appendChild(lg);
@@ -347,7 +348,7 @@
     const { bars, sym, legendEl: lg } = ctl;
     const b = bars[i], prev = bars[i - 1] || b;
     const chg = b.close - prev.close, pct = (chg / prev.close) * 100, d = dir(chg);
-    $('.lg-close', lg).className = `lg-close ${d}`;
+    $('.lg-close', lg).className = `lg-close ${d}${state.conn !== 'live' ? ' stale' : ''}`;
     $('.lg-close', lg).textContent = fmtPrice(b.close, sym.index);
     $('.lg-chg', lg).className = `lg-chg ${d}`;
     $('.lg-chg', lg).textContent = `${chg > 0 ? '+' : ''}${fmtPrice(chg, sym.index)}  ${fmtPct(pct)}`;
@@ -432,8 +433,11 @@
     $('#symBtn').innerHTML = `${icon('i-search')}<b>${sym.name}</b><span class="sub">${sym.index ? sym.market : sym.code}</span><kbd>/</kbd>`;
     if (isPhone) {
       const b = ctl.bars[i], prev = ctl.bars[i - 1] || b, chg = b.close - prev.close, d = dir(chg);
+      const live = state.conn === 'live';
       $('#mHead').innerHTML = `<div class="nm"><b>${sym.name}</b><small>${sym.code}</small>
-        <div class="px"><strong class="${d}">${fmtPrice(b.close, sym.index)}</strong><span class="${d}">${chg > 0 ? '+' : ''}${fmtPrice(chg)} ${fmtPct((chg / prev.close) * 100)}</span></div></div>
+        <div class="px${live ? '' : ' stale'}"><strong class="${d}">${fmtPrice(b.close, sym.index)}</strong><span class="${d}">${chg > 0 ? '+' : ''}${fmtPrice(chg)} ${fmtPct((chg / prev.close) * 100)}</span></div>
+        <div class="m-status"><span class="conn" data-state="${live ? 'live' : 'reconnecting'}"><span class="dot"></span>${live ? '실시간 14:32:08' : '키움 재연결 중: 14:02부터 멈춤'}</span>
+          <a href="https://www.tradingview.com/" target="_blank" rel="noopener">Lightweight Charts™</a></div></div>
         <button class="icon-btn" title="테마 바꾸기" id="mTheme">${icon(state.theme === 'dark' ? 'i-sun' : 'i-moon')}</button>`;
       $('#mTheme').onclick = toggleTheme;
     }
@@ -460,23 +464,20 @@
     $('#arrSeg').innerHTML = ['1', '2h', '2v', '3', '4'].map((a) => `<button class="arr-btn" aria-pressed="${a === layout.arr}" title="${{ 1: '1칸', '2h': '2칸 좌우', '2v': '2칸 상하', 3: '3칸', 4: '4칸' }[a]}"><svg class="i" viewBox="0 0 16 16"><use href="#a-${a}"/></svg></button>`).join('');
   }
 
-  function spark(bars) {
-    const v = bars.slice(-30).map((b) => b.close), mn = Math.min(...v), mx = Math.max(...v);
-    const pts = v.map((x, i) => `${(i / (v.length - 1)) * 44},${11 - ((x - mn) / (mx - mn || 1)) * 10}`).join(' ');
-    return `<svg class="spark" viewBox="0 0 44 12" aria-hidden="true"><polyline points="${pts}" fill="none" stroke="${v[v.length - 1] >= v[0] ? 'var(--up)' : 'var(--down)'}" stroke-width="1.3"/></svg>`;
-  }
   function renderWatch() {
     const cur = ctls[state.active].cell.sym;
-    const list = ['005930', '000660', '373220', '005380', '035420', '035720', '068270', '086520', '196170', '005935', '069500', '001', '101'];
+    const list = WATCH;
     $('#watchCount').textContent = list.length + '종목';
     $('#watchList').innerHTML = list.map((code) => {
       const s = V.sym(code), d = V.daily(code), b = d[d.length - 1], p = d[d.length - 2];
       const pct = (b.close / p.close - 1) * 100;
-      return `<li><button class="wrow" aria-current="${code === cur}"><span class="nm"><b>${s.name}</b><small>${s.index ? s.market : s.code}${spark(d)}</small></span><span class="px">${fmtPrice(b.close, s.index)}</span><span class="pct ${dir(pct)}">${fmtPct(pct)}</span></button></li>`;
+      return `<li><button class="wrow" aria-current="${code === cur}"><span class="nm"><b>${s.name}</b><small>${s.index ? s.market : s.code}</small></span><span class="px${state.conn !== 'live' ? ' stale' : ''}">${fmtPrice(b.close, s.index)}</span><span class="pct ${dir(pct)}">${fmtPct(pct)}</span></button></li>`;
     }).join('');
   }
 
   // ---- 대화상자 ----
+  const WATCH = ['005930', '000660', '373220', '005380', '035420', '035720', '068270', '086520', '196170', '005935', '069500', '001', '101'];
+  const RECENT = ['086520', '207940', '001', '035720']; // 최근 본 종목(#3부터 UiState.recentSymbols)
   const scrim = $('#scrim');
   function openDialog(kind) {
     scrim.innerHTML = kind === 'search' ? searchDialog() : kind === 'alert' ? alertDialog() : indicatorDialog(kind === 'compare' ? 'compare' : 'indicator');
@@ -532,20 +533,27 @@
 
   function searchDialog() {
     return `<div class="dialog palette" role="dialog" aria-modal="true" aria-label="종목 검색">
-      <label class="field-search">${icon('i-search')}<input id="q" value="${params.get('q') || 'ㅅㅅ'}" placeholder="종목 이름, 코드, 초성(ㅅㅅㅈㅈ)" aria-label="종목 검색" aria-controls="results" autocomplete="off"></label>
+      <label class="field-search">${icon('i-search')}<input id="q" value="${params.has('q') ? params.get('q') : 'ㅅㅅ'}" placeholder="종목 이름, 코드, 초성(ㅅㅅㅈㅈ)" aria-label="종목 검색" aria-controls="results" autocomplete="off"></label>
       <ul class="results" id="results" role="listbox"></ul>
       <div class="dlg-foot"><span class="hint"><kbd>↑</kbd><kbd>↓</kbd> 고르기 <kbd>Enter</kbd> 이 칸에 열기 <kbd>Shift+Enter</kbd> 비교 종목으로 <kbd>Ctrl+Enter</kbd> 관심종목에 추가</span></div></div>`;
   }
   function wireSearch() {
     const q = $('#q');
+    const row = (s, i, nm = s.name) => `<li><button role="option" aria-selected="${i === 0}"><span><b>${nm}</b></span><span class="code">${s.code}</span><span class="mk">${s.market} ${s.kind}</span></button></li>`;
     const draw = () => {
-      const query = q.value;
-      $('#results').innerHTML = V.search(query).slice(0, 8).map((s, i) => {
+      const query = V.normalize(q.value);
+      if (!query) {
+        // 빈 입력: 서버를 부르지 않고 관심종목과 최근 본 종목을 보인다(D5).
+        const find = (c) => V.sym(c) || V.SEARCH_ONLY.find((x) => x.code === c);
+        $('#results').innerHTML = `<li class="grp">최근 본 종목</li>${RECENT.map((c, i) => row(find(c), i)).join('')}<li class="grp">관심종목</li>${WATCH.map((c) => row(find(c), 1)).join('')}`;
+        return;
+      }
+      $('#results').innerHTML = V.search(query).map((s, i) => {
         const cho = V.chosung(s.name);
         let nm = s.name;
-        const at = cho.indexOf(query.trim());
-        if (query.trim() && at >= 0) nm = s.name.slice(0, at) + '<mark>' + s.name.slice(at, at + query.trim().length) + '</mark>' + s.name.slice(at + query.trim().length);
-        return `<li><button role="option" aria-selected="${i === 0}"><span><b>${nm}</b></span><span class="code">${s.code}</span><span class="mk">${s.market} ${s.kind}</span></button></li>`;
+        const at = s.name.toUpperCase().startsWith(query) ? 0 : cho.indexOf(query);
+        if (at >= 0) nm = s.name.slice(0, at) + '<mark>' + s.name.slice(at, at + query.length) + '</mark>' + s.name.slice(at + query.length);
+        return row(s, i, nm);
       }).join('') || '<li class="muted" style="padding:12px">맞는 종목이 없습니다. 코드 6자리로도 찾을 수 있습니다.</li>';
     };
     q.addEventListener('input', draw);
@@ -555,16 +563,45 @@
   function alertDialog() {
     const c = ctls[state.active];
     const last = c.bars[c.bars.length - 1].close;
+    const price = params.get('kind') === 'price';
+    // 이 칸 지표의 선 목록. shift가 0이 아닌 선은 알림에 쓸 수 없다(D8). 실제 앱은 WASM 엔진의 shift(index)로 판단한다.
+    const LINES = {
+      ma: (p) => [[`이동평균 ${p.p.kind} ${p.p.n}`, 0]],
+      bb: (p) => [['볼린저 밴드 상단', 0], ['볼린저 밴드 중심', 0], ['볼린저 밴드 하단', 0]],
+      ichi: () => [['일목 전환선', 0], ['일목 기준선', 0], ['일목 선행스팬 A', 25], ['일목 선행스팬 B', 25], ['일목 후행스팬', -25]],
+      vol: () => [['거래량', 0]],
+      rsi: (p) => [[`RSI ${p.p.n}`, 0]],
+      macd: () => [['MACD', 0], ['MACD 시그널', 0], ['MACD 막대', 0]],
+      stoch: () => [['스토캐스틱 %K', 0], ['스토캐스틱 %D', 0]],
+    };
+    const lines = [...c.cell.price, ...c.cell.panels].flatMap((p) => LINES[p.type](p));
+    const firstOk = lines.findIndex(([, sh]) => sh === 0);
+    const pick = lines.findIndex(([n]) => n.startsWith('스토캐스틱 %K'));
+    const sel = pick >= 0 ? pick : firstOk;
+    const lineList = `<ul class="line-list" role="listbox" aria-label="알림에 쓸 선">${lines.map(([n, sh], k) => sh === 0
+      ? `<li role="option" aria-selected="${k === sel}" tabindex="${k === sel ? 0 : -1}">${n}</li>`
+      : `<li role="option" aria-disabled="true" aria-describedby="shiftWhy">${n}<span class="why">${sh > 0 ? '앞' : '뒤'}으로 ${Math.abs(sh)}봉 옮겨 그린 선</span></li>`).join('')}</ul>
+      <p class="help" id="shiftWhy">앞뒤로 옮겨 그린 선은 알림에 쓸 수 없습니다.</p>`;
+    const target = Math.floor(last / 1000) * 1000;
+    const body = price ? `
+        <div class="row"><span class="lbl">조건</span><div class="segbox"><button aria-pressed="true">위로 넘어설 때</button><button aria-pressed="false">아래로 내려설 때</button></div></div>
+        <div class="row"><label for="alV">값</label><span><input class="input num" id="alV" value="${fmtPrice(target, c.sym.index)}"> <span class="muted" style="font-size:12px">지금 ${fmtPrice(last, c.sym.index)}</span></span></div>
+        <div class="row"><span></span><div class="warn" role="status">지금 가격 ${fmtPrice(last, c.sym.index)}이 이미 ${fmtPrice(target, c.sym.index)} 이상입니다. ${fmtPrice(target, c.sym.index)} 아래로 내려갔다가 다시 넘어설 때 울립니다.</div></div>`
+      : `
+        <div class="row" style="align-items:start"><span class="lbl" style="padding-top:6px">선</span><div>${lineList}</div></div>
+        <div class="row"><span class="lbl">조건</span><div class="segbox"><button aria-pressed="true">상향 돌파</button><button aria-pressed="false">하향 돌파</button><button aria-pressed="false">다른 지표와 교차</button></div></div>
+        <div class="row"><label for="alV">값</label><input class="input num" id="alV" value="80"></div>`;
+    const note = price
+      ? '가격 알림은 체결이 들어오는 즉시 판단합니다. 가격이 정한 값을 새로 넘어설 때만 울립니다.'
+      : '지표 알림은 봉이 확정될 때만 판단합니다. 봉 중간에 잠깐 넘었다 내려오면 울리지 않습니다. RSI·MACD·지수 이동평균은 서버가 최근 확정 봉 500개 이상으로 다시 계산하므로 화면 값과 소수점 아래가 조금 다를 수 있습니다.';
     return `<div class="dialog alert-dlg" role="dialog" aria-modal="true" aria-labelledby="alT">
       <div class="dlg-head"><h2 id="alT">알림 만들기</h2><span class="ctx">${c.sym.name} ${c.cell.period}</span><span class="grow"></span><button class="icon-btn" data-close title="닫기 (Esc)">${icon('i-x')}</button></div>
       <div class="dlg-form">
-        <div class="row"><span class="lbl">종류</span><div class="segbox"><button aria-pressed="false">가격 알림</button><button aria-pressed="true">지표 알림</button></div></div>
-        <div class="row"><label>지표</label><select class="input wide"><option>RSI 14 (지표 패널 2)</option><option>이동평균 단순 20</option><option>MACD 12 26 9</option></select></div>
-        <div class="row"><span class="lbl">조건</span><div class="segbox"><button aria-pressed="true">상향 돌파</button><button aria-pressed="false">하향 돌파</button><button aria-pressed="false">다른 지표와 교차</button></div></div>
-        <div class="row"><label for="alV">값</label><input class="input num" id="alV" value="70"></div>
+        <div class="row"><span class="lbl">종류</span><div class="segbox"><button aria-pressed="${price}">가격 알림</button><button aria-pressed="${!price}">지표 알림</button></div></div>
+        ${body}
         <div class="row"><span class="lbl">반복</span><div class="radios"><label><input type="radio" name="rep" checked> 한 번 울리면 끄기</label><label><input type="radio" name="rep"> 매번 울리기</label></div></div>
         <div class="row"><span class="lbl">받을 곳</span><div class="checks"><label><input type="checkbox" checked> 텔레그램</label><label><input type="checkbox" checked> 화면 안 알림</label></div></div>
-        <div class="note">지표 알림은 봉이 확정될 때만 판단합니다. 봉 중간에 잠깐 70을 넘었다 내려오면 울리지 않습니다. 가격 알림은 체결이 들어오는 즉시 판단합니다(지금 ${fmtPrice(last, c.sym.index)}).</div>
+        <div class="note">${note}</div>
       </div>
       <div class="dlg-foot"><span class="hint">서버가 켜져 있는 동안 울립니다</span><span class="grow"></span><button class="btn" data-close>취소</button><button class="btn primary">알림 만들기</button></div></div>`;
   }
@@ -600,7 +637,11 @@
     $('#mTabs').querySelectorAll('button').forEach((x) => x.setAttribute('aria-pressed', x === b));
   });
 
-  renderTools(); renderArr(); setActive(0);
+  renderTools(); renderArr(); setActive(Math.min(state.active, ctls.length - 1));
+  if (state.conn !== 'live') {
+    const cn = $('.status .conn'); cn.dataset.state = 'reconnecting';
+    cn.lastChild.textContent = '키움에 다시 연결하는 중 (14:02부터)';
+  }
   if (params.get('sheet') === 'watch') $('#mTabs [data-tab="watch"]').click();
   if (params.get('dialog')) openDialog(params.get('dialog'));
   document.body.dataset.ready = '1';

@@ -342,3 +342,20 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); }
   .conn[data-state="live"] .dot { animation: pulse 2.4s ease-in-out infinite; }
   @keyframes pulse { 50% { box-shadow: 0 0 0 5px color-mix(in srgb, var(--ind-2) 0%, transparent); } }
 }
+
+/* ===== 1차 수정(decisions-r1, W4) ===== */
+/* 멈춘 시세: 숫자를 흐리게, 꼬리표로 멈춘 시각 표시(W4-32) */
+.stale { opacity: 0.7; }
+.stall { font-size: var(--fs-xs); color: var(--accent); border: 1px solid color-mix(in srgb, var(--accent) 60%, transparent); border-radius: 9px; padding: 0 6px; }
+.m-status { display: flex; align-items: center; justify-content: space-between; gap: var(--s3); font-size: var(--fs-xs); color: var(--text-2); margin-top: 2px; }
+.m-status a { color: var(--text-3); }
+/* 검색 묶음 제목 */
+.results li.grp { font-size: var(--fs-xs); color: var(--text-3); padding: var(--s3) var(--s4) var(--s2); }
+/* 알림: 선 목록, 비활성 선, 이미 넘어 있음 안내 */
+.line-list { list-style: none; margin: 0; padding: 2px; border: 1px solid var(--line); border-radius: var(--r-m); background: var(--chart-bg); width: 300px; }
+.line-list li { padding: 5px var(--s3); border-radius: var(--r-s); display: flex; gap: var(--s3); align-items: baseline; font-size: var(--fs-s); }
+.line-list li[aria-selected="true"] { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+.line-list li[aria-disabled="true"] { color: var(--text-3); cursor: not-allowed; }
+.line-list li .why { margin-left: auto; font-size: var(--fs-xs); }
+.dlg-form .help#shiftWhy { margin: 4px 0 0; font-size: var(--fs-xs); color: var(--text-3); }
+.warn { font-size: var(--fs-s); color: var(--text); background: var(--accent-soft); border: 1px solid color-mix(in srgb, var(--accent) 50%, transparent); border-radius: var(--r-m); padding: var(--s3) var(--s4); }
