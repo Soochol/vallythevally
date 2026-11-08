@@ -1,6 +1,6 @@
 //! 시세 API만 허용(backend.md §4.4). 이 enum에 없는 api-id와 경로는 보낼 수 없다.
 
-use domain::{IndexCode, KstDate, StockCode, Venue};
+use domain::{IndexCode, KstDate, Period, StockCode, Venue};
 use serde::Serialize;
 
 use super::wire;
@@ -138,6 +138,63 @@ index_chart!(IndexDailyChart, Ka20006, wire::IndexDailyChartResponse);
 index_chart!(IndexWeeklyChart, Ka20007, wire::IndexWeeklyChartResponse);
 index_chart!(IndexMonthlyChart, Ka20008, wire::IndexMonthlyChartResponse);
 
+/// ka10080 주식 분봉.
+///
+/// 일·주·월봉과 달리 `base_dt`에 과거 날짜를 받는다. 분봉은 연속조회 키가 묵으면(kiwoom.md §10.3) 오늘부터
+/// 다시 따라가기에 너무 길다(1분봉 1년이 191페이지, §2). `base_dt`를 과거 날짜로 주면 키움은 그날 19:59부터
+/// 거꾸로 주므로(§1) 끊긴 자리로 한 번에 건너뛸 수 있다.
+#[derive(Serialize)]
+pub struct MinuteChart {
+    stk_cd: String,
+    tic_scope: String,
+    upd_stkpc_tp: &'static str,
+    base_dt: String,
+}
+
+impl MinuteChart {
+    /// 분봉 주기가 아니면 None.
+    pub fn new(code: StockCode, venue: Venue, period: Period, base_dt: KstDate) -> Option<Self> {
+        Some(MinuteChart {
+            stk_cd: kiwoom_stock_code(code, venue),
+            tic_scope: tic_scope(period)?,
+            upd_stkpc_tp: ADJUSTED_PRICE,
+            base_dt: base_dt.yyyymmdd(),
+        })
+    }
+}
+
+impl sealed::Sealed for MinuteChart {}
+impl MarketRequest for MinuteChart {
+    const API_ID: ApiId = ApiId::Ka10080;
+    type Response = wire::MinuteChartResponse;
+}
+
+/// ka20005 업종 분봉. 과거 `base_dt`를 받는 까닭은 [`MinuteChart`]와 같다. 지수에는 수정주가 필드가 없다(§6).
+#[derive(Serialize)]
+pub struct IndexMinuteChart {
+    inds_cd: String,
+    tic_scope: String,
+    base_dt: String,
+}
+
+impl IndexMinuteChart {
+    /// 분봉 주기가 아니면 None.
+    pub fn new(code: IndexCode, period: Period, base_dt: KstDate) -> Option<Self> {
+        Some(IndexMinuteChart { inds_cd: code.as_str().to_owned(), tic_scope: tic_scope(period)?, base_dt: base_dt.yyyymmdd() })
+    }
+}
+
+impl sealed::Sealed for IndexMinuteChart {}
+impl MarketRequest for IndexMinuteChart {
+    const API_ID: ApiId = ApiId::Ka20005;
+    type Response = wire::IndexMinuteChartResponse;
+}
+
+/// "1", "3", "5", "15", "30", "60".
+fn tic_scope(period: Period) -> Option<String> {
+    period.minutes().map(|n| n.to_string())
+}
+
 /// ka10099. `mrkt_tp=0`은 거래소 시장의 모든 상품, `10`은 코스닥이다(kiwoom.md §5).
 #[derive(Serialize)]
 pub struct StockList {
@@ -178,6 +235,28 @@ mod tests {
             json!({"inds_cd": "101", "base_dt": "20261109"})
         );
         assert_eq!(serde_json::to_value(StockList::KOSDAQ).unwrap(), json!({"mrkt_tp": "10"}));
+    }
+
+    #[test]
+    fn minute_bodies_take_tic_scope_from_the_period_and_a_past_base_dt() {
+        let c = StockCode::parse("005930").unwrap();
+        let past = KstDate::new(2026, 6, 1).unwrap();
+        assert_eq!(
+            serde_json::to_value(MinuteChart::new(c, Venue::Nxt, Period::M15, past).unwrap()).unwrap(),
+            json!({"stk_cd": "005930_NX", "tic_scope": "15", "upd_stkpc_tp": "1", "base_dt": "20260601"})
+        );
+        let scopes: Vec<_> = Period::ALL
+            .into_iter()
+            .filter_map(|p| MinuteChart::new(c, Venue::Krx, p, today()))
+            .map(|r| serde_json::to_value(r).unwrap()["tic_scope"].as_str().unwrap().to_owned())
+            .collect();
+        assert_eq!(scopes, ["1", "3", "5", "15", "30", "60"]);
+        assert_eq!(
+            serde_json::to_value(IndexMinuteChart::new(IndexCode::KOSPI, Period::M1, today()).unwrap()).unwrap(),
+            json!({"inds_cd": "001", "tic_scope": "1", "base_dt": "20261109"})
+        );
+        assert!(IndexMinuteChart::new(IndexCode::KOSPI, Period::Day, today()).is_none());
+        assert_eq!(<IndexMinuteChart as MarketRequest>::API_ID.as_str(), "ka20005");
     }
 
     #[test]

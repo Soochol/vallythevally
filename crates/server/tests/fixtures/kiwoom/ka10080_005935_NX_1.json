@@ -1,0 +1,25 @@
+{
+ "_source": "tools/kiwoom-probe/out/i14_nx_m1_005935.json 행 0~0(kiwoom.md §13. NXT 불가 종목 005935의 _NX 1분봉: 빈 행 1개)",
+ "_headers": {
+  "cont-yn": "N",
+  "next-key": ""
+ },
+ "return_code": 0,
+ "return_msg": "정상적으로 처리되었습니다",
+ "stk_cd": "005935_NX",
+ "stk_min_pole_chart_qry": [
+  {
+   "acc_trde_qty": "",
+   "cntr_tm": "",
+   "cur_prc": "",
+   "high_pric": "",
+   "low_pric": "",
+   "open_pric": "",
+   "pred_pre": "",
+   "pred_pre_sig": "",
+   "trde_qty": "",
+   "upd_rt": "",
+   "upd_stkpc_tp": ""
+  }
+ ]
+}

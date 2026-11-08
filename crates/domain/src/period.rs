@@ -65,7 +65,8 @@ impl Period {
         self.minutes().is_some()
     }
 
-    fn minutes(self) -> Option<i64> {
+    /// 분봉의 분 수. 일·주·월봉은 None.
+    pub fn minutes(self) -> Option<i64> {
         match self {
             Period::M1 => Some(1),
             Period::M3 => Some(3),

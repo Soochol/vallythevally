@@ -16,11 +16,13 @@ impl fmt::Display for WireError {
 
 impl std::error::Error for WireError {}
 
-/// 일·주·월봉 행. 지수와 주식이 같은 필드 이름을 쓴다. 명세에 없는 필드는 무시한다.
+/// 봉 행. 지수와 주식이 같은 필드 이름을 쓴다. 일·주·월봉은 `dt`, 분봉은 `cntr_tm`에 시각이 있다.
+/// 명세에 없는 필드는 무시한다.
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(default)]
 pub struct ChartRow {
     pub dt: String,
+    pub cntr_tm: String,
     pub open_pric: String,
     pub high_pric: String,
     pub low_pric: String,
@@ -31,19 +33,29 @@ pub struct ChartRow {
 /// 가격 배율이 TR 묶음마다 다르다. 그래서 공통 "자연 단위 → centi" 함수를 두지 않는다.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PriceScale {
-    /// ka10081/82/83: 원 단위 정수. 절댓값 × 100.
+    /// ka10080/81/82/83: 원 단위 정수. 절댓값 × 100.
     StockWon,
-    /// ka20006/07/08: 이미 100배 정수. 절댓값 그대로.
+    /// ka20005/06/07/08: 이미 100배 정수. 절댓값 그대로.
     IndexCenti,
+}
+
+/// 행의 시각이 어느 필드에 있나.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RowTime {
+    /// `dt`(`YYYYMMDD`). 주봉·월봉은 구간의 첫 관측일이다(§3.2).
+    Date,
+    /// `cntr_tm`(`YYYYMMDDHHMMSS`, KST). 구간이 시작하는 시각이다(kiwoom.md §1).
+    DateTime,
 }
 
 pub trait ChartBody {
     const SCALE: PriceScale;
+    const TIME: RowTime;
     fn into_rows(self) -> Vec<ChartRow>;
 }
 
 macro_rules! chart_body {
-    ($name:ident, $field:ident, $scale:ident) => {
+    ($name:ident, $field:ident, $scale:ident, $time:ident) => {
         #[derive(Debug, Deserialize)]
         pub struct $name {
             #[serde(default)]
@@ -51,6 +63,7 @@ macro_rules! chart_body {
         }
         impl ChartBody for $name {
             const SCALE: PriceScale = PriceScale::$scale;
+            const TIME: RowTime = RowTime::$time;
             fn into_rows(self) -> Vec<ChartRow> {
                 self.$field
             }
@@ -58,12 +71,14 @@ macro_rules! chart_body {
     };
 }
 
-chart_body!(DailyChartResponse, stk_dt_pole_chart_qry, StockWon);
-chart_body!(WeeklyChartResponse, stk_stk_pole_chart_qry, StockWon);
-chart_body!(MonthlyChartResponse, stk_mth_pole_chart_qry, StockWon);
-chart_body!(IndexDailyChartResponse, inds_dt_pole_qry, IndexCenti);
-chart_body!(IndexWeeklyChartResponse, inds_stk_pole_qry, IndexCenti);
-chart_body!(IndexMonthlyChartResponse, inds_mth_pole_qry, IndexCenti);
+chart_body!(MinuteChartResponse, stk_min_pole_chart_qry, StockWon, DateTime);
+chart_body!(DailyChartResponse, stk_dt_pole_chart_qry, StockWon, Date);
+chart_body!(WeeklyChartResponse, stk_stk_pole_chart_qry, StockWon, Date);
+chart_body!(MonthlyChartResponse, stk_mth_pole_chart_qry, StockWon, Date);
+chart_body!(IndexMinuteChartResponse, inds_min_pole_qry, IndexCenti, DateTime);
+chart_body!(IndexDailyChartResponse, inds_dt_pole_qry, IndexCenti, Date);
+chart_body!(IndexWeeklyChartResponse, inds_stk_pole_qry, IndexCenti, Date);
+chart_body!(IndexMonthlyChartResponse, inds_mth_pole_qry, IndexCenti, Date);
 
 /// 키움에서 받은 봉. 가장 늦은 봉은 진행 중인 구간일 수 있다.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -74,7 +89,7 @@ pub struct KiwoomBar {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ChartRows {
-    /// 빈 행 하나: 없는 코드(kiwoom.md §9).
+    /// 빈 행 하나: 없는 코드(kiwoom.md §9). NXT에서 거래되지 않는 종목의 `_NX`도 같은 모양이다(§12.4, §13).
     UnknownSymbol,
     /// 오름차순.
     Rows(Vec<KiwoomBar>),
@@ -83,22 +98,27 @@ pub enum ChartRows {
 /// 행은 최신순으로 온다. 결과는 오름차순이다.
 pub fn parse_chart<B: ChartBody>(body: B, period: Period) -> Result<ChartRows, WireError> {
     let rows = body.into_rows();
-    if rows.first().is_some_and(|r| r.dt.is_empty()) {
+    if rows.first().is_some_and(|r| r.dt.is_empty() && r.cntr_tm.is_empty()) {
         return Ok(ChartRows::UnknownSymbol);
     }
     let price = match B::SCALE {
         PriceScale::StockWon => stock_price,
         PriceScale::IndexCenti => index_price,
     };
-    let mut bars = rows.iter().rev().map(|r| parse_row(r, period, price)).collect::<Result<Vec<_>, _>>()?;
+    let mut bars = rows.iter().rev().map(|r| parse_row(r, B::TIME, period, price)).collect::<Result<Vec<_>, _>>()?;
     bars.dedup_by_key(|b| b.bucket);
     Ok(ChartRows::Rows(bars))
 }
 
-fn parse_row(r: &ChartRow, period: Period, price: fn(&str) -> Result<Price, WireError>) -> Result<KiwoomBar, WireError> {
-    let date = KstDate::parse_yyyymmdd(&r.dt).ok_or_else(|| WireError(format!("dt가 날짜가 아닙니다: {:?}", r.dt)))?;
+fn parse_row(r: &ChartRow, time: RowTime, period: Period, price: fn(&str) -> Result<Price, WireError>) -> Result<KiwoomBar, WireError> {
+    let t = match time {
+        RowTime::Date => KstDate::parse_yyyymmdd(&r.dt)
+            .map(|d| KstTime::from_kst_civil(d, TimeOfDay::MIDNIGHT))
+            .ok_or_else(|| WireError(format!("dt가 날짜가 아닙니다: {:?}", r.dt)))?,
+        RowTime::DateTime => parse_kst_datetime(&r.cntr_tm).ok_or_else(|| WireError(format!("cntr_tm이 시각이 아닙니다: {:?}", r.cntr_tm)))?,
+    };
     // 주봉·월봉 dt는 구간의 첫 관측일이다. 그 주 월요일, 그달 1일로 맞춘다(§3.2).
-    let bucket = period.bucket(KstTime::from_kst_civil(date, TimeOfDay::MIDNIGHT));
+    let bucket = period.bucket(t);
     let (o, h, l, c) = (price(&r.open_pric)?, price(&r.high_pric)?, price(&r.low_pric)?, price(&r.cur_prc)?);
     let v = Volume(unsigned(&r.trde_qty)?);
     let ohlcv = match Ohlcv::try_new(o, h, l, c, v) {
@@ -106,7 +126,7 @@ fn parse_row(r: &ChartRow, period: Period, price: fn(&str) -> Result<Price, Wire
         Err(e) => {
             // 실제 지수 일봉에 저가 > 종가 같은 행이 있다(코스피 1996-11-04 등). 행을 버리면 구간에 구멍이 생기므로
             // 고가·저가를 네 값의 최대·최소로 넓혀 받는다.
-            tracing::warn!(dt = %r.dt, error = %e, "키움 봉의 시고저종이 맞지 않아 고가·저가를 넓혔습니다");
+            tracing::warn!(dt = %r.dt, cntr_tm = %r.cntr_tm, error = %e, "키움 봉의 시고저종이 맞지 않아 고가·저가를 넓혔습니다");
             let high = o.max(h).max(l).max(c);
             let low = o.min(h).min(l).min(c);
             Ohlcv::try_new(o, high, low, c, v).expect("넓힌 고가·저가는 언제나 시가·종가를 감싼다")
@@ -280,6 +300,57 @@ mod tests {
         let m = rows::<IndexMonthlyChartResponse>("ka20008_001", Period::Month);
         assert_eq!(m.last().unwrap().bucket.start(), day("20261101"));
         assert_eq!(centi(&m[m.len() - 2]), [681_449, 704_467, 530_598, 573_074]);
+    }
+
+    fn at(ymd: &str, h: u32, m: u32) -> KstTime {
+        KstTime::from_kst_civil(KstDate::parse_yyyymmdd(ymd).unwrap(), TimeOfDay::hms(h, m, 0).unwrap())
+    }
+
+    fn close_on(bars: &[KiwoomBar], t: KstTime) -> u64 {
+        bars.iter().find(|b| b.bucket.start() == t).unwrap_or_else(|| panic!("{t} 봉이 없다")).ohlcv.close().centi()
+    }
+
+    #[test]
+    fn daily_close_differs_by_venue() {
+        let krx = rows::<DailyChartResponse>("ka10081_005930", Period::Day);
+        let nxt = rows::<DailyChartResponse>("ka10081_005930_NX", Period::Day);
+        let all = rows::<DailyChartResponse>("ka10081_005930_AL", Period::Day);
+        let d = day("20261106");
+        assert_eq!([close_on(&krx, d), close_on(&nxt, d), close_on(&all, d)], [19_350_000, 19_340_000, 19_340_000]);
+    }
+
+    #[test]
+    fn nxt_minutes_start_at_cntr_tm_and_keep_the_1535_bar() {
+        let bars = rows::<MinuteChartResponse>("ka10080_005930_NX_1", Period::M1);
+        assert_ascending(&bars);
+        let last = bars.last().unwrap();
+        assert_eq!(last.bucket.start(), at("20261106", 19, 59));
+        assert_eq!(centi(last), [19_370_000, 19_370_000, 19_340_000, 19_340_000], "부호를 뗀 원 × 100");
+        assert!(bars.iter().any(|b| b.bucket.start() == at("20261106", 15, 35)));
+    }
+
+    #[test]
+    fn krx_three_minutes_jump_from_1533_to_1600() {
+        let bars = rows::<MinuteChartResponse>("ka10080_005930_3", Period::M3);
+        assert_ascending(&bars);
+        let i = bars.iter().position(|b| b.bucket.start() == at("20261106", 15, 33)).unwrap();
+        assert_eq!(bars[i + 1].bucket.start(), at("20261106", 16, 0));
+        assert!(bars.iter().all(|b| b.bucket.start().kst_time_of_day().secs() % 180 == 0));
+    }
+
+    #[test]
+    fn nxt_minutes_of_a_symbol_not_on_nxt_are_one_empty_row() {
+        let s = serde_json::from_str::<MinuteChartResponse>(&fixture("ka10080_005935_NX_1")).unwrap();
+        assert_eq!(parse_chart(s, Period::M1).unwrap(), ChartRows::UnknownSymbol);
+    }
+
+    #[test]
+    fn index_minutes_are_already_centi() {
+        let bars = rows::<IndexMinuteChartResponse>("ka20005_001_1", Period::M1);
+        assert_ascending(&bars);
+        let last = bars.last().unwrap();
+        assert_eq!(last.bucket.start(), at("20261106", 15, 30));
+        assert_eq!(centi(last), [505_029, 505_969, 505_029, 505_969]);
     }
 
     #[test]
