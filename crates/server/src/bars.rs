@@ -9,7 +9,7 @@ use std::fmt;
 use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
-use domain::{ConfirmedBar, Feed, KstDate, KstTime, Period, SeriesKey};
+use domain::{ConfirmedBar, Feed, KstDate, KstTime, Period, SeriesKey, Venue};
 
 use crate::clock::Clock;
 use crate::kiwoom::api::{DailyChart, IndexDailyChart, IndexMonthlyChart, IndexWeeklyChart, MarketRequest, MonthlyChart, WeeklyChart};
@@ -112,8 +112,12 @@ impl BarService {
             return Err(BarError::BadRequest("분봉은 아직 열리지 않았습니다(#4에서 열립니다)".into()));
         }
         let dir = self.symbols.ready().await.map_err(|_| BarError::Unavailable("종목 목록을 아직 받지 못했습니다".into()))?;
-        if dir.get(key.feed.symbol()).is_none() {
+        let Some(info) = dir.get(key.feed.symbol()) else {
             return Err(BarError::UnknownSymbol);
+        };
+        // 키움은 NXT 불가 종목의 `_NX`에 없는 코드와 같은 빈 행을 준다(kiwoom.md §12.4, §13). 보내기 전에 거른다.
+        if key.feed.venue() == Some(Venue::Nxt) && !info.nxt_enabled {
+            return Err(BarError::BadRequest(format!("{}({})은 NXT에서 거래되지 않습니다", info.name, key.feed.symbol().as_wire())));
         }
         let slot = self.slot(key);
         let seen_latest = slot.latest_fetches.load(Ordering::SeqCst);
@@ -448,6 +452,8 @@ mod tests {
     }
 
     const SAMSUNG: &str = "005930";
+    /// 삼성전자우. NXT에서 거래되지 않는다.
+    const NOT_ON_NXT: &str = "005935";
     const EMPTY_ROW: &str = "999990";
 
     fn harness(now: KstTime, latency: Duration, day: FakeChart, week: FakeChart, month: FakeChart) -> Harness {
@@ -469,8 +475,8 @@ mod tests {
         let clock = Clock::fake(now);
         let rest = KiwoomRest::new(Arc::new(fake.clone()), KiwoomAuth::new(Secret::new("k".into()), Secret::new("s".into())), clock.clone());
         let symbols = Arc::new(SymbolDirectory::default());
-        let stock = |code: &str| SymbolInfo { symbol: Symbol::parse(code).unwrap(), name: code.into(), kind: SymbolKind::Common, market: Market::Kospi, nxt_enabled: true };
-        symbols.replace(Directory::build(vec![stock(SAMSUNG), stock(EMPTY_ROW)]));
+        let stock = |code: &str, nxt_enabled| SymbolInfo { symbol: Symbol::parse(code).unwrap(), name: code.into(), kind: SymbolKind::Common, market: Market::Kospi, nxt_enabled };
+        symbols.replace(Directory::build(vec![stock(SAMSUNG, true), stock(NOT_ON_NXT, false), stock(EMPTY_ROW, true)]));
         Harness { fake, bars: Arc::new(BarService::new(rest, symbols, clock.clone())), clock }
     }
 
@@ -480,6 +486,10 @@ mod tests {
 
     fn key(symbol: &str, period: Period) -> SeriesKey {
         SeriesKey { feed: Feed::new(Symbol::parse(symbol).unwrap(), None).unwrap(), period }
+    }
+
+    fn venue_key(symbol: &str, venue: Venue, period: Period) -> SeriesKey {
+        SeriesKey { feed: Feed::new(Symbol::parse(symbol).unwrap(), Some(venue)).unwrap(), period }
     }
 
     fn assert_contiguous_asc(bars: &[ConfirmedBar]) {
@@ -646,6 +656,17 @@ mod tests {
         assert!(h.chart_calls().is_empty(), "목록에 없으면 키움을 부르지 않는다");
         assert_eq!(h.bars.page(key(EMPTY_ROW, Period::Day), None, 10).await, Err(BarError::UnknownSymbol));
         assert!(matches!(h.bars.page(key(SAMSUNG, Period::M5), None, 10).await, Err(BarError::BadRequest(_))));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn nxt_is_rejected_before_kiwoom_for_symbols_not_on_nxt() {
+        let h = std_harness(Duration::ZERO);
+        let r = h.bars.page(venue_key(NOT_ON_NXT, Venue::Nxt, Period::Day), None, 10).await;
+        assert!(matches!(&r, Err(BarError::BadRequest(m)) if m.contains("NXT에서 거래되지 않습니다")), "{r:?}");
+        assert!(h.chart_calls().is_empty(), "키움을 부르지 않는다");
+        assert_eq!(h.bars.series_count(), 0, "시리즈도 만들지 않는다");
+        h.bars.page(venue_key(NOT_ON_NXT, Venue::Krx, Period::Day), None, 10).await.unwrap();
+        assert_eq!(h.chart_calls().len(), 1, "KRX는 받는다");
     }
 
     #[tokio::test(start_paused = true)]
