@@ -1,11 +1,11 @@
 # 백엔드 설계
 
-vallythevally Rust 백엔드의 설계다. 코드는 아직 없다. 이 문서의 Rust 코드 블록은 형태를 보여 주는 스케치이고, 컴파일을 확인한 코드가 아니다.
+vallythevally Rust 백엔드의 설계다. #2의 코드(`crates/domain`, `crates/server`)가 있다. 이 문서의 Rust 코드 블록은 형태를 보여 주는 스케치다. #2에서 켜진 절은 코드에 맞췄고, 아직 켜지지 않은 절은 설계다. 코드와 이 문서가 다르면 코드가 지금의 사실이다.
 
 - 기준 문서
-  - `GLOSSARY.md`, `docs/adr/0001`~`0004`
-  - 이슈 #2~#9(로드맵 #12)
-  - `docs/kiwoom.md`(조회 실측, 2026-11-08)
+  - `GLOSSARY.md`, `docs/adr/0001`~`0007`
+  - 이슈 #2~#9, #14(로드맵 #12)
+  - `docs/kiwoom.md`(조회 실측 2026-11-08, 11~13절은 2026-11-09)
   - `docs/design/decisions-r1.md`(코디네이터 결정). 이 문서와 다르면 결정 문서를 따른다.
 - 키움 동작 중 아직 재지 않은 것은 **[실측 대기]**로 표시했다. 장중에만 잴 수 있는 것은 **[월요일 실측 대기]**로 표시했다. 기본값은 §12에 모았다.
 - 브라우저 쪽이 기대는 것은 모두 §8 **브라우저 계약**에 있다. 프런트엔드는 §8만 읽으면 된다.
@@ -73,13 +73,14 @@ web(WASM) ───▶ indicators(feature "wasm")
 
 | 모듈 | 바깥에 보이는 것 | 숨기는 것 | 단계 |
 |---|---|---|---|
-| `config` | `Config::from_env()` | `.env` 읽기, 검증, 비밀값 감싸기 | #2 |
+| `config` | `Config::from_env()` | `VALLY_ENV_FILE` 읽기, 검증, 비밀값 감싸기 | #2 |
 | `instance` | `InstanceLock::acquire(path)` | 잠금 파일(`flock`)로 서버 하나 보장(§4.1) | #2 |
-| `kiwoom::auth` | `KiwoomAuth`(토큰 단일 소유자) | 발급, 만료 판단, 토큰 세대 알림 | #2 |
-| `kiwoom::rest` | `KiwoomRest::call(req, cont, priority, scope)` | 대기열, 초당 4회, 같은 요청 합치기, 연속조회, 오류 대응 | #2 |
+| `kiwoom::auth` | `KiwoomAuth`(토큰 단일 소유자) | 토큰 상태, 만료 판단, 다시 발급할지 정하는 규칙 | #2 |
+| `kiwoom::rest` | `KiwoomRest::call(req, cont, priority, scope)`, `issue_token()` | 대기열, 초당 4회, au10001 보내기, 같은 요청 합치기, 연속조회, 오류 대응 | #2 |
+| `kiwoom::api` | 요청 타입(`MarketRequest`), `kiwoom_stock_code` | 허용 목록, 경로, 종목코드 접미사 | #2 |
 | `kiwoom::ws` | `KiwoomStream` | LOGIN, PING, REG/REMOVE, 재연결, 토큰 세대 변경 | #4 |
-| `kiwoom::wire` | 응답 → `domain` 타입 파서 | 부호, 배율, 필드 번호, 빈 행, 날짜 형식 | #2 |
-| `bars` | `BarService` | 메모리 캐시, 캐시 구간, 시리즈 세대 번호, 키움 조회, 10분 내리기와 07:45 비우기, 분봉 1년 하한 | #2 |
+| `kiwoom::wire` | 응답 → `domain` 타입 파서 | 부호, 배율, 필드 번호, 빈 행, 날짜 형식, 시고저종 보정 | #2 |
+| `bars` | `BarService` | 메모리 캐시, 캐시 구간, 시리즈 세대 번호, 키움 조회, 10분 내리기와 07:45 비우기 | #2(분봉 과거 조회는 #14) |
 | `symbols` | `SymbolDirectory` | 메모리 종목 목록(켤 때와 07:45에 갱신), 검색 | #2 |
 | `market` | `MarketHub`(액터) | 구독 관리자, 현재 봉 집계, 확정, `seq`, 끊긴 구간 복구, 브라우저로 내보내기 | #4 |
 | `alert` | `AlertEngine` | 가격 알림·지표 알림 판단 실행, 반복, 기록 | #8 |
@@ -324,14 +325,17 @@ pub struct SeriesKey { pub symbol: Symbol, pub period: Period }
 
 ### 3.1 0B 체결시간에 날짜 정하기
 
-체결이 들어오는 시간은 평일 **[08:00, 20:00)** 이다. 마지막 관측일의 마지막 분봉은 19:59, 1틱 차트의 마지막 체결은 19:59:59였다(kiwoom.md §8). 자정을 넘는 체결이 없다. 그래서 **수신 시각의 KST 날짜**를 붙이면 된다. 시계가 어긋난 경우를 걸러 내려고 검사를 둔다.
+체결 시간은 평일 **[08:00, 20:00)** 이다. 다만 20:00:00~20:00:03의 체결도 0B로 온다. 키움 REST는 이 체결을 19:59 봉에 넣는다(D16, kiwoom.md 11.8). 자정을 넘는 체결은 없다. 그래서 **수신 시각의 KST 날짜**를 붙이면 된다. 시계가 어긋난 경우를 걸러 내려고 검사를 둔다.
 
 ```rust
 pub const TRADING_OPEN: TimeOfDay;  // 08:00:00 (포함)
-pub const TRADING_CLOSE: TimeOfDay; // 20:00:00 (배타)
+/// domain::SESSION_CLOSE. 20:00:00. 장 끝에 닿는 봉의 끝이다.
+pub const SESSION_CLOSE: TimeOfDay;
+/// domain::CLOSE_GRACE_SECS = 10. [SESSION_CLOSE, SESSION_CLOSE + 10초)의 체결은 받는다.
+pub const CLOSE_GRACE_SECS: i64;
 
 pub enum TradeTimeError {
-    /// [08:00:00, 20:00:00) 밖.
+    /// [08:00:00, 20:00:10) 밖.
     OutsideTradingWindow,
     /// 체결시간이 수신 시각보다 60초 넘게 미래. 서버 시계가 늦다.
     FromFuture,
@@ -344,8 +348,9 @@ pub fn resolve_trade_time(received_at: KstTime, hhmmss: TimeOfDay) -> Result<Kst
 ```
 
 - 규칙: `t = 수신 시각의 KST 날짜 + hhmmss`. `t`가 위 세 검사를 통과해야 `Trade`가 된다.
+- **장 끝의 체결**(#4): `[20:00:00, 20:00:10)`의 체결은 그날 마지막 분 구간의 체결로 집계한다. 1분봉이면 19:59 봉, 5분봉이면 19:55 봉이다. `Period::bucket`은 시계로만 자르므로 20:00:03을 20:00 구간에 넣는다. 그래서 집계 함수가 이 체결의 시각을 19:59:59로 당겨서 넣는다. 일·주·월봉은 원래 그날 구간이라 따로 할 일이 없다.
+- 이 체결을 받으려면 실시간 연결을 20:00:10 뒤까지 유지한다(§5.2).
 - 걸러진 체결은 버린다. 종류별 카운터와 `warn` 로그를 남긴다. 현재 봉에는 영향을 주지 않는다. 그 구간의 확정 봉은 나중에 키움 조회로 바로잡힌다.
-- 0B가 20:00:00 이후 체결을 실제로 주는지는 [월요일 실측 대기]다. 준다면 그때 창을 고친다.
 - 공휴일인지는 따지지 않는다. 체결이 오면 받는다.
 
 키움 차트 조회 응답은 날짜가 들어 있으므로 추론하지 않는다. 분봉 `cntr_tm`은 `YYYYMMDDHHMMSS`이고 일·주·월봉 `dt`는 `YYYYMMDD`이다.
@@ -379,14 +384,17 @@ pub fn resolve_trade_time(received_at: KstTime, hhmmss: TimeOfDay) -> Result<Kst
 
 | 봉 주기 | `confirm_at` |
 |---|---|
-| 분봉 | 구간 끝 + 2초 |
-| 일 | 그날 20:00:00 + 2초 |
-| 주 | 그 주 금요일 20:00:00 + 2초 |
-| 월 | 그 달 마지막 평일 20:00:00 + 2초 |
+| 분봉(장 중간) | 구간 끝 + 2초(`MINUTE_GRACE_SECS`) |
+| 분봉(구간 끝이 20:00) | 그날 20:00:00 + 10초(`CLOSE_GRACE_SECS`) |
+| 일 | 그날 20:00:00 + 10초 |
+| 주 | 그 주 금요일 20:00:00 + 10초 |
+| 월 | 그 달 마지막 평일 20:00:00 + 10초 |
 
-- 2초는 체결이 없을 때 늦게 도착하는 체결을 기다리는 유예다.
+- 2초는 장 중간에 늦게 도착하는 체결을 기다리는 유예다.
+- 장 끝에 닿는 봉은 10초를 기다린다. 20:00:00~20:00:03 체결이 그 봉에 들어가기 때문이다(D16). 2초로는 20:00:03 체결을 놓친다. 코드의 `Bucket::confirm_at`이 이 표다.
 - 주말에는 체결이 없다. 그래서 "금요일 20:00"은 휴장일 달력 없이도 맞다. 금요일이 공휴일이면 그 주의 마지막 체결은 이미 들어와 있으므로 같은 시각에 확정해도 결과가 같다.
 - 일봉 종가는 그날 마지막 봉(19:59)의 종가다(kiwoom.md §3). 그래서 일봉은 20:00 뒤에야 확정된다.
+- #2에는 실시간이 없다. 그래도 같은 `confirm_at`으로 키움 조회의 마지막 행이 확정 봉인지 진행 중 구간인지 가른다(§6.3).
 
 ### 3.4 강제 단절 시각
 
@@ -400,41 +408,58 @@ pub fn resolve_trade_time(received_at: KstTime, hhmmss: TimeOfDay) -> Result<Kst
 
 ### 4.1 토큰
 
-토큰은 `KiwoomAuth` 하나가 가진다. REST와 WebSocket 모두 여기서 받는다. 발급과 만료 판단은 이 소유자만 한다.
+토큰은 `KiwoomAuth` 하나가 가진다. `KiwoomAuth`는 토큰 상태와 규칙만 갖고 요청을 보내지 않는다. au10001은 조회 대기열(§4.2)이 직접 보낸다. 그래서 `KiwoomAuth::get()` 같은 "토큰을 받아 오는 함수"는 없다.
 
 ```rust
-pub struct KiwoomAuth { /* Mutex<Option<IssuedToken>>, 발급 single-flight, watch::Sender<TokenGen> */ }
+pub struct KiwoomAuth { /* app_key, app_secret: Secret, Mutex<State> */ }
 
-struct IssuedToken {
-    token: Secret<String>,
-    expires_at: KstTime, // au10001 응답 expires_dt. 발급 후 24시간(kiwoom.md)
-    generation: TokenGen,
+struct State {
+    issued: Option<Issued>,    // { token: Secret<String>, issued_at, expires_at, generation }
+    stale: bool,               // 토큰 무효 응답을 받아 다시 발급해야 한다
+    last_invalidate: Option<KstTime>,
+    halted: Option<u16>,       // 되돌릴 수 없는 인증 실패의 상세 코드
 }
 
 /// 토큰이 다시 발급될 때마다 1씩 는다.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub struct TokenGen(u64);
+pub struct TokenGen(pub u64);
 
 impl KiwoomAuth {
-    /// 유효한 토큰을 준다. 필요할 때만 다시 발급한다(아래 규칙). 동시에 불러도 발급은 한 번이다.
-    pub async fn get(&self) -> Result<(Secret<String>, TokenGen), AuthError>;
-    /// 토큰 무효 응답을 받았을 때만 부른다. seen 세대가 지금 세대와 같을 때만 다시 발급한다.
-    /// 5분 안에 두 번째로 부르면 다시 발급하지 않고 실패한다.
-    pub async fn invalidate(&self, seen: TokenGen) -> Result<(Secret<String>, TokenGen), AuthError>;
-    /// WebSocket 태스크가 세대 변경을 받는다.
-    pub fn generations(&self) -> watch::Receiver<TokenGen>;
+    /// 지금 보낼 때 쓸 토큰. 무효로 표시됐거나, 멈췄거나, 만료까지 10분이 안 남았으면 None.
+    pub fn current(&self, now: KstTime) -> Option<(Secret<String>, TokenGen)>;
+    pub fn needs_issue(&self, now: KstTime) -> bool;
+    /// au10001 본문. 앱키와 시크릿이 들어 있으므로 Secret으로만 낸다.
+    pub fn issue_body(&self) -> Secret<String>;
+    pub fn record_issued(&self, resp: TokenResponse, now: KstTime) -> Result<TokenGen, AuthError>;
+    /// 토큰 무효 응답을 받았을 때만 부른다. seen이 지금 세대일 때만 다시 발급하도록 표시한다.
+    /// 5분 안에 두 번째로 부르면 InvalidAgain.
+    pub fn invalidate(&self, seen: TokenGen, now: KstTime) -> Result<(), AuthError>;
+    /// 매일 20:05: 지금 토큰이 그날 20:05 전에 발급된 것인가.
+    pub fn due_daily_reissue(&self, now: KstTime) -> bool;
+    pub fn halt(&self, detail: u16);
+}
+
+impl KiwoomRest {
+    /// au10001을 대기열 맨 앞에 넣고 결과를 기다린다. 서버를 켤 때와 20:05에만 부른다.
+    pub async fn issue_token(&self) -> Result<TokenGen, KiwoomError>;
 }
 ```
 
 - **키는 하나**: 실계좌 키 하나만 쓴다(`VALLY_KIWOOM_APP_KEY`, `VALLY_KIWOOM_APP_SECRET`). 모의 키 설정은 없다.
 - **발급하는 때**(ADR 0004): 발급을 되풀이하지 않는다.
-  1. 서버를 켤 때 한 번. 토큰은 메모리에만 있으므로 피할 수 없다.
+  1. 서버를 켤 때 한 번. 토큰은 메모리에만 있으므로 피할 수 없다. 이 발급이 실패해도 서버는 뜬다. 다음 조회가 들어오면 대기열이 발급부터 다시 한다.
   2. 하루 한 번, 장이 끝난 뒤. 매일 20:05에, 지금 토큰이 그날 20:05 전에 발급된 것이면 다시 발급한다. 토큰은 24시간 유효하므로 만료가 장중에 오지 않는다. 20:05에 실패하면 07:45까지 10분마다 다시 시도한다.
-  3. 토큰 무효 응답을 받았을 때(`invalidate`). 그대로 두면 서버가 멈추므로 예외로 둔다. 5분 안에 두 번은 하지 않는다.
-  4. 안전장치: 위가 모두 실패해 만료까지 10분이 안 남으면 그때 다시 발급한다.
-- **WebSocket에 알리기**: 세대가 바뀌면 `generations()`로 WebSocket 태스크에 알린다. 태스크는 지금 세션을 닫고 새 토큰으로 **한 번** 다시 연결한다. 그다음 다시 REG하고 끊긴 구간을 복구한다(§5.2). 새 발급이 기존 세션을 실제로 끊는지는 [월요일 실측 대기]다. 끊지 않더라도 같은 경로로 갈아탄다. 세션이 쥔 토큰과 REST 토큰을 같은 세대로 맞추기 위해서다.
+  3. 토큰 무효 응답(`[8005]`)을 받았을 때. 그 요청은 `invalidate`를 한 번 부르고 한 번 다시 보낸다. 다시 보낼 때 대기열이 먼저 발급한다. 그래도 `[8005]`면 그 요청은 `AuthFailed`다. 5분 안에 두 번은 발급하지 않는다.
+  4. 안전장치: 만료까지 10분이 안 남으면 `current`가 `None`을 주고, 대기열이 다음 요청 전에 발급한다.
+- **토큰은 보내는 순간에 읽는다**(D16): 대기 중인 요청은 토큰을 쥐고 있지 않다. 대기열이 요청을 내보낼 때 `current`로 읽는다. 그래서 새 토큰은 그 뒤의 모든 REST 요청에 바로 쓰인다. 옛 토큰으로 보낸 REST는 `[8005]`로 실패하기 때문이다(kiwoom.md 11.10).
+- **au10001이 실패하면**: 기다리던 시세 요청을 모두 실패로 돌려준다. 토큰 없이는 어느 요청도 보낼 수 없다.
+- **토큰과 WebSocket**(#4, D16)
+  - 새 토큰을 받아도 기존 WebSocket 세션은 끊기지 않는다(kiwoom.md 11.10). 그래서 세대가 바뀌어도 세션을 일부러 닫지 않는다. 다음에 다시 연결할 때 그때의 토큰으로 LOGIN한다.
+  - 같은 앱키로 두 번째 LOGIN을 하면 기존 세션이 close 1000 'Bye'로 끊긴다. 그래서 서버 하나 원칙(ADR 0004, 아래 잠금 파일)을 지킨다.
 - **토큰은 메모리에만 둔다**: 서버를 다시 켜면 새로 발급한다. 재시작은 드물어서 받아들인다.
 - 토큰 폐기(au10002)는 허용 목록에 넣지 않는다. 폐기할 일이 없다.
+
+**켜는 순서**(`app.rs`): 설정 → 잠금 파일 → 포트 열기 → 첫 토큰 발급 → 종목 목록 받기를 태스크로 띄움 → 요청 받기. 목록이 오기 전에 요청을 받아야 "목록을 최대 10초 기다림"(§6.6)이 성립한다.
 
 #### 토큰을 가진 프로세스는 하나: 잠금 파일
 
@@ -464,7 +489,7 @@ pub enum LockError {
 - **파일을 만들 수 없으면**(권한 등): 같은 방식으로 종료 코드 1. 잠금 없이 뜨지 않는다.
 - **끝날 때**: 파일을 지우지 않는다. 지우면 그 사이에 다른 프로세스가 새 파일을 잡는 경합이 생긴다. 잠금은 프로세스가 죽으면 OS가 풀므로 남은 파일이 다음 실행을 막지 않는다.
 - **이 잠금이 막지 못하는 것**
-  - 실측 프로그램과 동시에 돌리지 않는 것은 운영 규칙이다(ADR 0004). 실측 프로그램도 같은 잠금 파일을 잡게 하면 이것도 막을 수 있다(§14).
+  - 실측 프로그램은 같은 잠금 파일을 잡고 돌린다(ADR 0004). kiwoom.md 12·13절의 조회는 `flock -n /run/user/1000/vallythevally/server.lock`으로 잡았다. 실측 프로그램이 잠금을 잡지 않고 돌면 이 장치로는 막지 못한다.
   - 로컬 서버와 클라우드 서버(#9)는 다른 PC라 막지 못한다. #9에서 옮길 때의 절차는 이렇다. 로컬 서버를 멈춘다 → 멈췄는지 확인한다 → 클라우드 서버를 켠다. 이 절차를 #9 문서에 적는다.
 
 ### 4.2 조회 대기열
@@ -480,17 +505,19 @@ pub enum Priority {
     Background,
 }
 
-pub struct KiwoomRest { /* KiwoomAuth, 대기열 셋, 진행 중 요청 표 */ }
+pub struct KiwoomRest { /* KiwoomAuth, 대기열 셋, 진행 중 요청 표, 보내는 태스크 하나 */ }
 
 impl KiwoomRest {
     /// 한 페이지를 받는다. 연속조회 키가 있으면 다음 페이지를 이어 받는다.
-    pub async fn call<R: MarketRequest>(&self, req: &R, cont: Option<ContKey>, priority: Priority)
+    pub async fn call<R: MarketRequest>(&self, req: &R, cont: Option<&ContKey>, priority: Priority, scope: MergeScope)
         -> Result<Page<R::Response>, KiwoomError>;
 }
 
 pub struct Page<T> { pub body: T, pub next: Option<ContKey> }
 /// 응답 헤더가 cont-yn=Y 일 때의 next-key. N이면 None.
 pub struct ContKey(String);
+/// 같은 요청 합치기의 범위. BarService가 07:45 비우기마다 바꾼다.
+pub struct MergeScope(pub u64);
 ```
 
 - **속도: 초당 4회**(ADR 0003)
@@ -498,11 +525,12 @@ pub struct ContKey(String);
   - 요청을 내보내는 시각 사이를 최소 260ms 띄운다. 그러면 어느 1초 구간(양 끝 포함)에도 4회를 넘지 않는다.
   - 토큰 발급(au10001), 다시 보내기, 연속조회 페이지가 모두 이 제한에 든다.
   - 키움 한도는 초당 5회이지만 실측하지 않았다(kiwoom.md §9). 그래서 여유를 둔다.
-- **토큰 발급과 대기열**: au10001도 속도 제한을 따른다. 다만 토큰을 얻는 단계는 건너뛴다(그러지 않으면 토큰을 얻으려고 토큰이 필요해진다). 토큰 발급은 다른 요청보다 먼저 나간다.
+- **토큰 발급과 대기열**: au10001은 대기열의 보내는 태스크가 직접 보낸다. 260ms 간격을 따르고, 다른 요청보다 먼저 나간다. 발급을 기다리는 호출(`issue_token`)이 있거나, 시세 요청이 있는데 `needs_issue`가 참이면 발급한다. 시세 요청은 내보내는 순간 `current`로 토큰을 읽는다(§4.1).
 - **우선순위**
   - 기본은 `Screen` > `Recovery` > `Background` 순서다.
-  - 단, `Recovery`가 기다리고 있으면 내보내는 4번 중 1번은 `Recovery`에 준다. 사용자가 과거로 계속 스크롤해도 복구가 멈추지 않는다.
   - `Background`는 앞의 둘이 비었을 때만 나간다.
+  - #4: `Recovery`가 기다리고 있으면 내보내는 4번 중 1번은 `Recovery`에 준다. 사용자가 과거로 계속 스크롤해도 복구가 멈추지 않는다. #2에는 `Recovery` 요청이 없어서 이 몫을 넣지 않았다.
+  - #2·#14의 봉 조회는 모두 `Screen`이다. `BarService::page`는 우선순위를 받지 않는다.
 - **같은 요청은 한 번만**
   - 진행 중 요청 표의 키는 `(합치기 범위, api-id, 정규화한 요청 본문, 연속조회 키)`다. 합치기 범위(`MergeScope`)는 `BarService`가 07:45 비우기마다 바꾼다. 비운 뒤의 조회가 비우기 전에 출발한 조회의 응답을 나눠 받으면 버린 옛 가격이 새 캐시에 들어가기 때문이다(§6.4).
   - 같은 키가 대기열에 있거나 응답을 기다리는 중이면 새로 넣지 않는다. 같은 결과를 나눠 받는다(`futures::future::Shared`).
@@ -595,10 +623,11 @@ pub trait MarketRequest: sealed::Sealed + serde::Serialize {
 ### 4.5 요청 타입 예시
 
 ```rust
+// 주봉 WeeklyChart(ka10082), 월봉 MonthlyChart(ka10083)도 같은 매크로로 만든다.
 #[derive(Serialize)]
 pub struct DailyChart {           // ka10081
     stk_cd: String,               // kiwoom_stock_code(...)로만 만든다
-    base_dt: String,              // 필수(빠지면 1511). 언제나 "오늘"(KST, YYYYMMDD). §6.3
+    base_dt: String,              // 필수(빠지면 1511). 시리즈를 만든 날(KST, YYYYMMDD). §6.3
     upd_stkpc_tp: &'static str,   // 언제나 "1"(수정주가)
 }
 impl sealed::Sealed for DailyChart {}
@@ -608,17 +637,13 @@ impl MarketRequest for DailyChart {
 }
 
 impl DailyChart {
-    /// base_dt는 인자로 받지 않는다. 생성자가 today를 넣는다. 과거 날짜로 바로 가는 요청은 표현할 수 없다.
-    pub fn new(code: StockCode, today: KstDate) -> Self;
+    /// today는 시리즈의 base_date, 곧 시리즈를 만든 날이다(§6.2). 07:45에 시리즈를 모두 비우므로
+    /// 한 시리즈의 조회는 모두 같은 base_dt를 쓴다. 자정부터 07:45까지는 전날 날짜일 수 있다.
+    pub fn new(code: StockCode, venue: Venue, today: KstDate) -> Self;
 }
 
-#[derive(Serialize)]
-pub struct MinuteChart {          // ka10080
-    stk_cd: String,
-    tic_scope: &'static str,      // "1" "3" "5" "15" "30" "60"
-    upd_stkpc_tp: &'static str,   // "1"
-    base_dt: String,              // 오늘. 빼도 결과가 같지만(kiwoom.md §1) 일봉과 맞춰 넣는다
-}
+// 지수: IndexDailyChart(ka20006), IndexWeeklyChart(ka20007), IndexMonthlyChart(ka20008).
+// 본문은 { inds_cd, base_dt }이고 수정주가 필드가 없다.
 ```
 
 ### 4.6 응답 단위와 부호
@@ -632,17 +657,18 @@ pub struct MinuteChart {          // ka10080
 | ka10080/81/82/83 주식 | `"193500"`, `"-193400"` | 절댓값 × 100 → `19_350_000` | `193500` | 주. `trde_qty` |
 | ka20005/06/07/08 지수 | `"505969"`, `"-505969"` | 절댓값 그대로 → `505_969`(이미 100배 정수) | `5059.69` | 단위 미확인(천 주로 보임). 받은 값 그대로 |
 | 0B 주식 실시간 | `"+71500"`(명세) | 절댓값 × 100 | 원 | 필드 15의 절댓값(주) |
-| 0J 지수 실시간 | [월요일 실측 대기: 100배 정수인지 소수인지] | 실측 뒤 정한다 | 포인트 | [월요일 실측 대기] |
+| 0J 지수 실시간 | `"-1327.93"`(소수 2자리 문자열, 방향 부호) | 부호를 떼고 소수점 둘째 자리까지 읽어 centi로 → `132_793` | 포인트 | 필드 13 누적거래량. 단위 미확인(천 주로 보임) |
 
-- 지수 REST 경로에 주식의 "× 100"을 적용하면 지수가 100배가 된다. 그래서 변환 함수는 TR마다 따로 두고 `Price::from_centi`만 부른다. 공통 "자연 단위 → centi" 함수는 두지 않는다.
+- 지수 REST 경로에 주식의 "× 100"을 적용하면 지수가 100배가 된다. 그래서 변환 함수는 TR마다 따로 두고 `Price::from_centi`만 부른다. 공통 "자연 단위 → centi" 함수는 두지 않는다. 코드는 `wire::PriceScale`(`StockWon`, `IndexCenti`)로 가른다.
+- **0J는 REST 지수와 파서를 따로 둔다**(#4, D16): REST 지수는 100배 정수이고 0J는 소수 문자열이다(kiwoom.md 11.5). 0J의 시가·고가·저가·현재가(16, 17, 18, 10)에도 방향 부호가 붙으므로 절댓값을 쓴다.
+- **시고저종이 맞지 않는 행**: 실제 키움 행 중 `low ≤ open, close ≤ high`를 어기는 것이 있다. 실측으로 코스피 일봉 9행, 코스닥 일봉 59행을 찾았다(예: 코스피 1996-11-04). 행 하나를 거절하면 그 페이지 전체가 실패하고, 행을 버리면 구간에 구멍이 생긴다. 그래서 파서(`parse_row`)는 고가를 네 값의 최대로, 저가를 네 값의 최소로 넓혀 받고 `warn` 로그를 남긴다. 이 규칙은 주식 행에도 같게 적용된다. 고정 입력은 `ka20006_001_19961104.json`이다.
 - 거래대금(`trde_prica`)은 읽지 않는다(§2.2). 단위가 일봉·지수 일봉은 백만원, 주·월봉은 원으로 TR마다 다르다.
 - `upd_rt`, `upd_stkpc_tp`, `kind`처럼 명세에 없는 필드가 섞여 와도 무시한다(`#[serde(deny_unknown_fields)]`를 쓰지 않는다).
 
 ```rust
 // server::kiwoom::wire
-/// 행은 최신순으로 온다. 결과는 오름차순으로 돌려준다.
-pub fn parse_stock_chart(resp: &ChartResponse, period: Period) -> Result<ChartRows, WireError>;
-pub fn parse_index_chart(resp: &IndexChartResponse, period: Period) -> Result<ChartRows, WireError>;
+/// 행은 최신순으로 온다. 결과는 오름차순으로 돌려준다. 응답 타입마다 배열 이름과 PriceScale이 정해져 있다.
+pub fn parse_chart<B: ChartBody>(body: B, period: Period) -> Result<ChartRows, WireError>;
 
 pub enum ChartRows {
     /// 빈 행 하나: 없는 코드.
@@ -654,8 +680,8 @@ pub enum ChartRows {
 pub struct KiwoomBar {
     pub bucket: Bucket,
     pub ohlcv: Ohlcv,
-    /// 분봉 행의 acc_trde_qty, 일봉 행의 trde_qty. 현재 봉 시드 경계 후보(§5.4).
-    pub day_cum: Option<Volume>,
+    // #4에서 더한다: day_cum: Option<Volume>. 분봉 행의 acc_trde_qty, 일봉 행의 trde_qty.
+    // 현재 봉 시드 경계 후보(§5.4).
 }
 
 pub fn parse_real_0b(values: &RealValues, received_at: KstTime) -> Result<RealTrade, WireError>;
@@ -719,6 +745,7 @@ pub enum StreamEvent {
 
 - 주소: `wss://api.kiwoom.com:10000/api/dostk/websocket`.
 - **LOGIN**: 연결 직후 `{"trnm":"LOGIN","token":…}`을 보낸다. 성공 응답은 `{"trnm":"LOGIN","return_code":0,…}`이다. 성공 응답을 받아야 `Live`로 간다. 인증 실패(§4.3)면 `invalidate`로 토큰을 한 번 다시 받아 재시도한다. 또 실패하면 `Halted`.
+- **LOGIN은 앱키당 하나**: 같은 앱키로 다른 곳에서 LOGIN하면 기존 세션이 close 1000 'Bye'로 끊긴다(D16, kiwoom.md 11.9). 서버 하나 원칙(§4.1 잠금 파일)이 이것을 막는다.
 - **PING**: 서버가 10초마다 `{"trnm":"PING"}` 텍스트 메시지를 보낸다. 받은 문자열을 그대로 돌려보낸다. WebSocket 프로토콜의 Ping 프레임은 오지 않는다. 30초 동안 아무 메시지도 없으면 연결이 죽었다고 보고 다시 연결한다.
 - **REG**: `data`는 `{"item":[…],"type":[…]}`의 배열이다. 한 원소에 종목 여럿을 넣을 수 있고 원소 하나의 한도는 따로 없다. 서버는 type별 원소 하나에 모두 담는다.
 - **REG 한도**: 그룹당 200(`105118`), **접속 전체 200**(`105115`)이다. 그룹을 나눠도 늘지 않는다. **0J 지수도 이 200에 든다**(kiwoom.md §10.7). 서버는 §5.3의 `REALTIME_LIMIT`로 미리 지키므로 이 오류는 우리 버그다. 받으면 `error` 로그를 남기고 세션을 다시 연결해 원하는 집합을 처음부터 맞춘다. 그룹 번호는 `grp_no: "1"` 하나만 쓴다. `refresh: "1"`(기존 것 유지)로 보낸다.
@@ -731,7 +758,9 @@ pub enum StreamEvent {
 
 ### 5.2 다시 연결과 끊긴 구간 복구
 
-- 끊기면 1·2·5·10·30초 간격으로 다시 연결한다. 그 뒤로는 30초 고정이다. 07:50 강제 단절과 토큰 세대 변경(§4.1)도 같은 경로다.
+- 끊기면 1·2·5·10·30초 간격으로 다시 연결한다. 그 뒤로는 30초 고정이다. 07:50 강제 단절도 같은 경로다. 토큰 세대가 바뀌어도 세션을 닫지 않는다(§4.1).
+- **08:00 전에 붙어 있기**: 08:00 정각에 접속하면 첫 체결을 놓칠 수 있다(kiwoom.md 11.9). 07:50 단절 뒤에는 07:55부터 다시 붙어 08:00 전에 `Live`가 되게 한다(D16).
+- **20:00 뒤의 연결**: 20:00:00~20:00:03 체결을 받으려고 20:00:10까지는 연결을 그대로 둔다(§3.1). 장이 닫혀도 연결을 일부러 끊지는 않는다.
 - 다시 연결되면 LOGIN → 원하는 집합 전체를 다시 REG → `StreamEvent::Live`를 보낸다.
 - `MarketHub`는 `Down { at }`과 그다음 `Live { since }` 사이를 **끊긴 구간**으로 본다. 끊긴 구간이 체결 시간([08:00, 20:00))과 겹치지 않으면 메울 것이 없다. 07:50 단절이 대개 그렇다. 겹치면 아래 순서로 복구한다.
 
@@ -917,35 +946,46 @@ pub struct HubSnapshot {
 ```rust
 pub struct BarService {
     rest: KiwoomRest,
-    /// 열려 있는 시리즈. 키마다 잠금 하나. 이 잠금이 한 시리즈의 쓰기를 줄 세운다.
-    series: Mutex<HashMap<SeriesKey, Arc<tokio::sync::Mutex<Series>>>>,
+    symbols: Arc<SymbolDirectory>,
+    clock: Clock,
+    /// 열려 있는 시리즈. 키마다 Slot 하나.
+    slots: Mutex<HashMap<SeriesKey, Arc<Slot>>>,
     /// 시리즈를 새로 만들 때마다 1씩 는다. 프로세스 안에서 유일하다.
-    next_series_id: AtomicU64,
-    /// 키별 single-flight(§6.3).
-    inflight: InflightTable,
+    next_id: AtomicU64,
+    /// 07:45 비우기마다 1씩 는다. 키움 조회의 합치기 범위(MergeScope)다.
+    resets: AtomicU64,
+}
+
+struct Slot {
+    /// 이 시리즈를 만든 순간 받은 번호(세대). 내렸다가 다시 만들면 바뀐다.
+    id: SeriesId,
+    /// 마지막으로 REST 페이지 요청을 받은 시각(Unix 초). 10분 내리기 판단에 쓴다.
+    last_access: AtomicI64,
+    /// 최신 페이지를 키움에서 받은 횟수. 키별 잠금을 기다린 요청이 그사이 받은 결과를 다시 쓰는 데 쓴다.
+    latest_fetches: AtomicU64,
+    /// 키별 잠금. 이 잠금이 한 시리즈의 읽기와 쓰기를 줄 세운다.
+    series: tokio::sync::Mutex<Series>,
 }
 
 /// 메모리의 시리즈 하나 = 캐시 구간 하나.
-pub struct Series {
-    /// 이 시리즈를 만든 순간 받은 번호(세대). 내렸다가 다시 만들면 바뀐다.
-    id: SeriesId,
+struct Series {
+    /// 이 시리즈의 모든 조회가 쓰는 base_dt. 시리즈를 만든 날이다.
+    base_date: KstDate,
     /// 오름차순. 캐시 구간 [oldest, newest] 안에서 빠짐이 없다.
     bars: Vec<ConfirmedBar>,
-    /// 키움에서 받은 봉 중 가장 늦은 것. 그 뒤는 실시간으로 만든 봉이다.
-    kiwoom_newest: Option<KstTime>,
-    /// 키움이 더 과거를 주지 않는다(분봉은 1년 하한 포함).
+    /// 키움이 더 과거를 주지 않는다(cont-yn: N).
     reached_origin: bool,
-    /// 과거로 이어 받을 연속조회 키와 그 키가 가리키는 위치.
+    /// 가진 가장 이른 봉 바로 앞을 가리키는 연속조회 키와 받은 시각.
     cont: Option<(ContKey, KstTime)>,
-    /// 마지막으로 REST 페이지 요청을 받은 시각. 10분 내리기 판단에 쓴다.
-    last_access: KstTime,
+    /// 마지막 최신 페이지 조회가 준 진행 중 구간의 봉. 캐시 구간에는 넣지 않는다.
+    current: Option<KiwoomBar>,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
 pub struct SeriesId(u64);
 ```
 
 - **캐시 키**: `SeriesKey` = (종목, 봉 주기). 봉 하나의 키는 (종목, 봉 주기, `t`)다.
+- **#4에서 더할 것**: 실시간으로 만든 봉을 붙이려면 "키움에서 받은 가장 늦은 봉"(`kiwoom_newest`)을 시리즈가 알아야 한다(§6.3 앞으로 늘리기). #2에는 실시간 쓰기가 없어서 이 필드가 없다.
 - **내리기**: 시리즈를 "쓰는 곳"은 그 키의 브라우저 구독(#4), 그 키를 잡은 켜진 알림(#8), 최근 10분 안의 REST 요청이다. 셋 다 없게 된 지 10분이 지나면 맵에서 지운다. 1분 타이머가 판단한다. #2·#3에는 구독이 없으므로 마지막 REST 요청으로부터 10분이다.
 - **매일 07:45에 모두 비우기**(ADR 0003)
   - 07:45:00에 시리즈 맵을 통째로 비운다. 키움이 수정주가를 다음 날 반영해 주면, 다시 받은 봉은 수정주가로 온다. 그래서 수정주가 대조는 하지 않는다. 키움이 언제 반영하는지는 [실측 대기]다(§12.3).
@@ -961,20 +1001,22 @@ pub struct SeriesId(u64);
 
 - 구간은 양 끝으로만 늘어난다. 구간 사이에 구멍이 생기는 쓰기는 하지 않는다.
 - **수정주가 기준을 고정한다**(W4-04)
-  - 주식 조회는 언제나 `base_dt = 오늘`, `upd_stkpc_tp = 1`에서 시작해 연속조회로 과거로 내려간다. 이 경로로 받으면 과거 전체가 오늘 기준의 수정주가로 온다(kiwoom.md §4).
-  - 과거 날짜를 `base_dt`로 바로 가는 조회는 쓰지 않는다. 명세상 그 날짜 뒤의 권리발생이 반영되지 않을 수 있다. `DailyChart::new`가 `base_dt`를 인자로 받지 않는 것이 이 규칙을 강제한다.
-  - 하루 안에서는 "오늘"이 바뀌지 않는다. 날짜가 바뀌기 전(07:45)에 시리즈를 모두 비우므로, 한 시리즈 안에 서로 다른 날 기준의 봉이 섞이지 않는다.
-  - 브라우저의 `before` 커서는 "어디까지 내려갈지"일 뿐이다. 수정주가 기준일(언제나 오늘)과 다르다.
+  - 일·주·월봉 조회는 언제나 `base_dt = 시리즈의 base_date`(시리즈를 만든 날), `upd_stkpc_tp = 1`에서 시작해 연속조회로 과거로 내려간다. 이 경로로 받으면 과거 전체가 그날 기준의 수정주가로 온다(kiwoom.md §4).
+  - 일·주·월봉은 과거 날짜를 `base_dt`로 바로 가는 조회를 쓰지 않는다. 명세상 그 날짜 뒤의 권리발생이 반영되지 않을 수 있다. 요청 생성자의 날짜 인자에는 시리즈의 `base_date`만 넘긴다.
+  - 07:45에 시리즈를 모두 비우므로, 한 시리즈 안에 서로 다른 날 기준의 봉이 섞이지 않는다.
+  - 브라우저의 `before` 커서는 "어디까지 내려갈지"일 뿐이다. 수정주가 기준일(`base_date`)과 다르다.
   - 지수에는 수정주가가 없다. 같은 규칙을 그대로 써도 해가 없으므로 같은 경로를 쓴다.
-- **과거로 늘리기**(스크롤)
-  - `oldest`보다 이른 봉이 필요하면 오늘부터 시작한 연속조회 체인을 따라 내려간다.
-  - 시리즈의 `cont`(마지막으로 받은 연속조회 키)에서 이어 받는다.
-  - `next-key`는 15분 묵혀도 통했고 이어 받은 봉에 빠짐·겹침이 없었다(kiwoom.md §10.3). 그래서 기억한 키가 15분 안이면 그대로 쓴다. 15분이 넘었거나, 키가 없거나, 키로 받은 첫 봉이 기대한 위치(기억한 마지막 봉의 바로 앞)가 아니면 오늘부터 다시 따라간다. 한 페이지가 분봉 900·일봉 600개라, 1분봉 1년 끝까지 가도 약 191페이지, 초당 4회로 약 48초다. [실측 대기: 15분 넘는 유효 시간, 장중에 새 봉이 붙는 동안의 키]
-  - 체인을 따라 내려가며 받은 페이지 중 이미 메모리에 있는 부분은 키움 값으로 덮어쓴다. 이것은 출처 교체(§6.4)이기도 하다.
-  - 키움이 더 줄 것이 없거나(`cont-yn: N`) 분봉 1년 하한에 닿으면 `reached_origin = true`.
+- **과거로 늘리기**(스크롤, `extend_older`)
+  - `oldest`보다 이른 봉이 필요하면 시리즈의 `cont`(가진 가장 이른 봉 바로 앞을 가리키는 연속조회 키)로 한 페이지를 받는다.
+  - `next-key`는 15분 묵혀도 통했고 이어 받은 봉에 빠짐·겹침이 없었다(kiwoom.md §10.3). 그래서 기억한 키가 15분(`CONT_FRESH_SECS`) 안이면 그대로 쓴다.
+  - **키로 받은 페이지를 믿는 조건**: 새 페이지의 가장 늦은 봉이 시리즈의 가장 이른 봉보다 일러야 한다. 휴장일이 있어서 "바로 앞 봉"인지까지는 확인할 수 없다. 조건이 맞지 않으면 그 페이지를 버린다.
+  - 키가 없거나, 15분이 넘었거나, 위 조건이 맞지 않으면 오늘부터 다시 따라간다(`follow_from_today`). 처음부터 연속조회 체인을 따라 내려가고, 가진 구간 아래로 한 페이지 넘어가면 멈춘다. 받은 페이지 중 이미 메모리에 있는 부분은 키움 값으로 덮어쓴다. 이것은 출처 교체(§6.4)이기도 하다. [실측 대기: 15분 넘는 유효 시간, 장중에 새 봉이 붙는 동안의 키]
+  - 키움이 더 줄 것이 없으면(`cont-yn: N`) `reached_origin = true`.
+  - 연속조회 키와 `reached_origin`은 받은 페이지가 가진 구간의 가장 이른 봉까지 내려왔을 때만 바꾼다.
 - **앞으로 늘리기**(최신으로 따라잡기, `refresh_latest`)
-  - 최신 페이지부터 받아 과거로 연속조회한다. 받은 봉이 `kiwoom_newest`에 닿으면 멈춘다. 그러면 그 사이의 실시간으로 만든 봉이 모두 키움 값으로 바뀐다.
-  - 연속조회가 끝까지 가도 닿지 않으면 그 시리즈를 버리고 받은 것으로 새로 만든다.
+  - #2: 최신 페이지 한 장을 받는다. 그 페이지의 가장 이른 확정 봉이 메모리의 가장 늦은 봉과 같거나 이르면 이어 붙인다. 이어지지 않으면 시리즈를 비우고 받은 페이지로 새로 만든다. `info` 로그를 남긴다.
+  - #4: 최신 페이지부터 받아 과거로 연속조회한다. 받은 봉이 `kiwoom_newest`에 닿으면 멈춘다. 그러면 그 사이의 실시간으로 만든 봉이 모두 키움 값으로 바뀐다. 연속조회가 끝까지 가도 닿지 않으면 그 시리즈를 버리고 받은 것으로 새로 만든다.
+  - 받은 행 중 `confirm_at`이 지나지 않은 행(가장 늦은 행)은 진행 중 구간의 봉으로 떼어 `current`에 둔다. 캐시 구간에는 확정 봉만 들어간다.
 - **실시간으로 만든 봉 붙이기**(`append_realtime`)
   - 봉 시작 시각이 `newest`보다 늦어야 한다.
   - 키움 세션이 `newest`의 확정 시각 이전부터 지금까지 한 번도 끊기지 않았어야 한다.
@@ -984,47 +1026,46 @@ pub struct SeriesId(u64);
 ```rust
 pub struct BarPage {
     pub bars: Vec<ConfirmedBar>,      // 오름차순, before 보다 이른 것
-    pub next_before: Option<KstTime>, // None이면 더 과거가 없다(분봉은 1년 하한 포함)
-    pub current: Option<CurrentBarOrKiwoom>, // 최신 페이지일 때만
-    pub seq: Option<u64>,             // 최신 페이지이고 실시간 집계기가 있을 때만
-}
-
-pub enum CurrentBarOrKiwoom {
-    /// #4 이후: MarketHub 스냅숏의 현재 봉.
-    Live(CurrentBar),
-    /// #2·#3, 또는 집계기가 아직 없을 때: 키움 조회가 준 진행 중 구간의 봉.
-    Fetched(KiwoomBar),
+    pub current: Option<KiwoomBar>,   // 최신 페이지일 때만. 키움 조회가 준 진행 중 구간의 봉
+    pub next_before: Option<KstTime>, // None이면 더 과거가 없다
 }
 
 impl BarService {
-    /// before가 None이면 최신 페이지다.
-    /// 요청 범위가 메모리의 캐시 구간 안이면 바로 돌려주고 키움을 기다리지 않는다.
-    /// 시리즈가 없거나 구간 밖일 때만 키움에서 받아 구간을 늘린다.
-    pub async fn page(&self, key: SeriesKey, before: Option<KstTime>, limit: usize, prio: Priority)
-        -> Result<BarPage, BarError>;
-    /// 최신으로 따라잡기. 진행 중 구간의 봉을 돌려준다.
-    pub async fn refresh_latest(&self, key: SeriesKey, prio: Priority) -> Result<RefreshResult, BarError>;
-    pub async fn append_realtime(&self, key: SeriesKey, bar: ConfirmedBar, live_since: KstTime);
-    /// 07:45 타이머가 부른다.
-    pub async fn clear_all(&self);
+    /// before가 None이면 최신 페이지다. 요청 범위가 메모리의 캐시 구간 안이면 키움을 부르지 않는다.
+    /// 최신 페이지는 언제나 키움 최신 페이지를 한 번 받는다(current를 채우려고).
+    pub async fn page(&self, key: SeriesKey, before: Option<KstTime>, limit: usize) -> Result<BarPage, BarError>;
+    /// 07:45 타이머가 부른다. 시리즈를 모두 내리고 합치기 범위를 바꾼다.
+    pub fn clear_all(&self);
+    /// 1분 타이머가 부른다. 10분 동안 요청이 없던 시리즈를 내린다. 조회 중인 시리즈는 남긴다.
+    pub fn evict_idle(&self);
 }
+
+// #4에서 더한다
+//  - BarPage.current를 enum으로: MarketHub 스냅숏의 현재 봉(Live) 또는 키움 조회 값(Fetched).
+//  - BarPage.seq: 최신 페이지이고 실시간 집계기가 있을 때만 Some.
+//  - refresh_latest(key, prio) -> RefreshResult, append_realtime(key, bar, live_since).
 ```
 
 - **최신 페이지의 `current`**
   - #4 이후 그 키에 실시간 집계기가 있으면 `MarketHub` 스냅숏의 현재 봉이다.
   - #2·#3, 또는 집계기가 없으면 키움 최신 페이지의 마지막 봉(진행 중 구간)이다(D12). 메모리에 시리즈가 이미 있어도 최신 페이지 요청이면 키움 최신 페이지를 한 번 받아 `current`를 채운다. 같은 응답으로 앞으로 늘리기도 한다.
-- **같은 요청은 한 번만**: 같은 `SeriesKey`에 대한 키움 조회는 키별 single-flight로 한 번만 돈다. 칸 네 개가 같은 종목을 동시에 열어도 키움에는 한 번 간다. 합쳐진 결과를 받은 호출자는 자기 범위(`before`, `limit`)가 채워졌는지 다시 확인한다.
+- **같은 요청은 한 번만**: 같은 `SeriesKey`의 요청은 키별 잠금(`Slot.series`)에서 줄을 선다. 잠금은 키움 조회 동안에도 쥔다.
+  - 최신 페이지 요청은 잠금을 기다리기 전에 `latest_fetches`를 읽어 둔다. 잠금을 잡았을 때 값이 바뀌었으면 앞 요청이 그사이 최신 페이지를 받은 것이다. 그러면 키움을 다시 부르지 않고 메모리 결과를 쓴다.
+  - 과거 페이지 요청은 잠금을 잡은 뒤 메모리에 `before` 아래로 `limit`개가 있는지 본다. 앞 요청이 이미 받아 두었으면 키움을 부르지 않는다.
+  - 그래서 칸 네 개가 같은 종목을 동시에 열어도 키움에는 한 번 간다.
 
 ### 6.4 늦은 응답과 출처 교체
 
 키움 조회는 수 초가 걸린다. 그사이 시리즈가 내려가거나(10분 내리기, 07:45 비우기) 다른 쓰기가 끼어들 수 있다(W4-07). 메모리에서는 다음 두 가지로 충분하다.
 
 - **시리즈 세대 번호**(`SeriesId`)
-  - 조회를 시작할 때 그 시리즈의 `id`를 받아 둔다. 시리즈가 없어서 새로 여는 조회는 시리즈를 먼저 빈 상태로 만들고 그 `id`를 받는다.
-  - 응답이 오면 키의 잠금을 쥐고, 맵에 있는 시리즈의 `id`가 받아 둔 것과 같을 때만 반영한다.
-  - 다르거나 시리즈가 없으면 버린다. 그사이 시리즈가 내려가 새로 만들어졌다는 뜻이다. 비운 캐시를 늦은 응답이 되살리지 못한다.
+  - 요청은 맵에서 `Slot`(`Arc`)을 받아 쥐고 시작한다. 시리즈가 없으면 요청이 빈 시리즈를 먼저 만든다.
+  - 그사이 시리즈가 내려가면(10분 내리기, 07:45 비우기) 맵에서는 빠지고 요청이 쥔 `Slot`만 남는다. 응답은 그 떨어져 나간 `Slot`에 쓰이고 요청이 끝나면 함께 버려진다. 비운 캐시를 늦은 응답이 되살리지 못한다.
+  - 요청을 마칠 때 맵의 `Slot.id`가 쥔 것과 다르면 `info` 로그를 남긴다.
   - 응답이 시리즈를 새로 만드는 경로는 없다. 시리즈를 만드는 것은 요청뿐이다.
-- **키별 잠금**: 한 시리즈의 쓰기(키움 응답 반영, 실시간으로 만든 봉 붙이기)는 그 키의 `tokio::Mutex`로 줄 세운다. 키움을 기다리는 동안에는 잠금을 쥐지 않는다. 응답이 온 뒤 반영할 때만 쥔다.
+  - 07:45 비우기는 합치기 범위(`MergeScope`)도 바꾼다. 비우기 전에 출발한 키움 조회의 응답을 비운 뒤의 요청이 나눠 받지 않는다(§4.2).
+- **키별 잠금**(#2·#14): 한 시리즈의 읽기와 쓰기는 그 키의 `tokio::Mutex`로 줄 세운다. #2에는 실시간 쓰기가 없어서 키움 조회 동안에도 잠금을 쥔다. 같은 키의 요청을 합치는 일도 이 잠금이 한다(§6.3).
+  - #4에서 다시 본다. 실시간으로 만든 봉을 붙이는 쓰기가 키움 조회(수 초)를 기다리면 안 되기 때문이다. 그때는 키움을 기다리는 동안 잠금을 놓고, 응답을 반영할 때만 쥔다. 반영할 때 `SeriesId`를 비교해 다르면 버린다.
 - **출처 교체 규칙**
   - 키움에서 받은 봉은 같은 `t`의 봉을 언제나 덮어쓴다(`source = Kiwoom`, `needs_verify = false`).
   - 실시간으로 만든 봉은 같은 `t`에 봉이 이미 있으면 넣지 않는다. 뒤늦게 도착한 실시간 쓰기가 키움 값을 되돌리지 못한다.
@@ -1052,10 +1093,10 @@ impl BarService {
 
 > 켜지는 단계: #2
 
-**목록 받기**: 종목 목록도 메모리에만 둔다. 서버를 켤 때와 매일 07:45에 ka10099를 두 번(`mrkt_tp=0`, `10`) 불러 목록을 통째로 바꾼다. 각 호출은 연속조회 없이 한 번에 온다.
+**목록 받기**: 종목 목록도 메모리에만 둔다. 서버를 켤 때와 매일 07:45에 ka10099를 두 번(`mrkt_tp=0`, `10`) 불러 목록을 통째로 바꾼다. 실측에서는 각 호출이 연속조회 없이 한 번에 왔다. 코드는 `cont-yn: Y`가 오면 호출마다 10페이지까지 따라간다.
 
-- 서버를 켤 때는 `Screen` 우선순위로 받는다. 받기 전에 온 검색·봉 요청은 목록이 올 때까지 기다린다(최대 10초, 넘으면 `kiwoom_unavailable`).
-- 07:45 갱신은 `Background`로 받는다. 받는 동안과 실패했을 때는 이전 목록을 그대로 쓴다. 실패하면 5분마다 다시 시도한다.
+- 서버를 켤 때는 `Screen` 우선순위로 받는다. 받기 전에 온 검색·봉 요청은 목록이 올 때까지 기다린다(`READY_WAIT` 10초, 넘으면 `kiwoom_unavailable`). 그래서 서버는 목록을 받기 전에 요청을 받기 시작한다(§4.1 켜는 순서).
+- 07:45 갱신은 `Background`로 받는다. 받는 동안과 실패했을 때는 이전 목록을 그대로 쓴다. 실패하면 5분마다, 다음 07:45 전까지 다시 시도한다.
 - 서버를 켤 때 받기에 실패하면 10초 간격으로 다시 시도한다. 그동안 검색과 봉 요청은 `kiwoom_unavailable`이다.
 
 | 호출 | 행의 `marketCode` | 넣는가 | `kind` | `market` |
@@ -1291,7 +1332,18 @@ pub fn judge_cross(dir: CrossDir, prev: (f64, f64), cur: (f64, f64)) -> bool;
 - 분봉은 **최근 1년만** 온다(#4). 과거로 받다가 `nextBefore`가 `null`이 되면 끝이다. 프런트는 "분봉은 최근 1년까지" 안내를 띄운다.
 - 가격은 자연 단위의 `number`다(주식 원, 지수 포인트). 주식은 정수, 지수는 소수 둘째 자리까지다.
 - 거래량은 `number`(정수)다. 지수의 거래량 단위는 아직 확인하지 못했다. 받은 값을 그대로 보여 준다.
-- 오류 응답은 HTTP 4xx/5xx와 본문 `ApiError`다.
+- 오류 응답은 HTTP 4xx/5xx와 본문 `ApiError`다. 코드마다 HTTP 상태가 하나다(`http::status_of`).
+
+| `code` | HTTP | 뜻 |
+|---|---|---|
+| `bad_request` | 400 | 질의나 본문이 틀렸다 |
+| `not_found` | 404 | 없는 API 경로, 없는 사용자 자료 |
+| `unknown_symbol` | 404 | 종목 목록에 없거나 키움이 빈 행을 준 종목 |
+| `conflict` | 409 | 마지막 레이아웃 지우기 같은 충돌 |
+| `payload_too_large` | 413 | 64KB를 넘는 본문 |
+| `internal` | 500 | 서버 버그(파싱 실패, 키움이 거절한 요청) |
+| `kiwoom_auth_failed` | 502 | 키움이 우리 인증을 거절했다. 다시 시도해도 낫지 않는다. 운영자가 설정을 고친다 |
+| `kiwoom_unavailable` | 503 | 키움에 닿지 못했거나 요청 개수 초과가 이어졌거나 종목 목록을 아직 못 받았다. 다시 시도할 수 있다 |
 
 ```ts
 type UnixSeconds = number;
@@ -1538,7 +1590,7 @@ type SpecValidation =
   | { ok: false; errors: { field: string; message: string }[] };  // message는 한국어 문장
 ```
 
-이 TS 타입들은 서버가 Rust 타입에서 생성한다(`ts-rs`). 생성 파일은 `web/src/api/generated.ts`다. CI가 생성 결과와 커밋된 파일이 같은지 검사한다. JSON 왕복 테스트(§10)가 위 필드 이름(`spanB`, `maPeriod` 등)을 고정한다.
+이 TS 타입들은 서버가 Rust 타입(`crates/server/src/api.rs`)에서 생성한다(`ts-rs`). 생성 파일은 `web/src/api/generated/` 디렉터리에 타입마다 한 파일(`BarsPage.ts`, `Venue.ts` 등)로 둔다. 손대지 않는다. `crates/server/tests/contract.rs`가 생성 결과와 커밋된 파일이 같은지 검사한다. JSON 왕복 테스트(§10)가 위 필드 이름(`spanB`, `maPeriod` 등)을 고정한다.
 
 #### 변경 알림 (#4)
 
@@ -1834,7 +1886,7 @@ pub fn future_bar_starts(period: &str, last_start: f64, n: usize) -> Result<Vec<
 
 | 대상 | 방법 | 위치 | 단계 |
 |---|---|---|---|
-| 봉 경계·확정 시각 | 표 기반 테스트. 봉 주기마다 08:00:00, 08:59:59, 09:00:00, 15:30:00, 19:59:59, 20:00:00(창 밖), 금요일 20:00:02, 월말 마지막 평일, 월초. 다음 구간 체결로 닫기와 타이머로 닫기 중 먼저 오는 쪽 | `domain` | #2·#4 |
+| 봉 경계·확정 시각 | 표 기반 테스트. 봉 주기마다 08:00:00, 08:59:59, 09:00:00, 15:30:00, 19:59:59, 20:00:03(19:59 봉), 20:00:10(창 밖), 금요일 20:00:10, 장 중간 분봉의 끝 + 2초, 월말 마지막 평일, 월초. 다음 구간 체결로 닫기와 타이머로 닫기 중 먼저 오는 쪽 | `domain` | #2·#4 |
 | 미래 봉 시각 | `future_bar_starts` 표 기반 테스트. 분봉: 19:59 다음은 다음 평일 08:00, 금요일 19:59 다음은 월요일 08:00. 일봉: 금요일 다음은 월요일. 주봉: 연말을 넘는 주(예: 2026-12-28 → 2027-01-04), 월요일이 1일인 주. 월봉: 12월 → 다음 해 1월, 1일이 토·일인 달(예: 2026-11-01(일), 2027-05-01(토))도 1일 | `domain` | #5 |
 | 체결 날짜 정하기 | 수신 시각과 체결시간 쌍을 손으로 쓴다. 창 밖, 미래, 너무 과거 | `domain` | #4 |
 | 현재 봉 집계 | 손으로 쓴 체결 목록 → `aggregate` → 손으로 쓴 확정 봉 목록·현재 봉과 비교. 시드 경계(`DayCum`, `Unknown`), 늦은 체결, 체결 없는 분, 단일가 체결 한 건, 불완전한 봉의 `needs_verify` | `domain` | #4 |
@@ -1846,7 +1898,7 @@ pub fn future_bar_starts(period: &str, last_start: f64, n: usize) -> Result<Vec<
 | 지표 설정 JSON | `Spec`의 JSON 왕복. 적어도 `{"kind":"ichimoku","conversion":9,"base":26,"spanB":52,"displacement":26}`와 `{"kind":"volume","maPeriod":20}`, `stochSlow`가 그대로 오가는지. ts-rs 생성 파일에 같은 이름이 나오는지 | `indicators` | #5 |
 | 키움 파서 | `docs/kiwoom.md`의 응답 예시를 `server/tests/fixtures/kiwoom/*.json`로 그대로 옮긴다. 파일 머리에 출처(문서 절)를 적는다. 아래 목록 참고 | `server::kiwoom::wire` | #2 |
 | 허용 목록 | 소스 전체에서 주문·계좌 경로와 api-id 문자열을 찾는 구조 검사(§4.4) | `server` | #2 |
-| 대기열 | 가짜 시계와 가짜 전송으로: 어느 1초 구간에도 4회 이하(토큰 발급·다시 보내기·연속조회 포함), `Screen` 먼저, `Recovery` 몫(4번 중 1번), 같은 요청 한 번, 요청 개수 초과 뒤 1초 멈춤 | `server::kiwoom::rest` | #2 |
+| 대기열 | 가짜 시계와 가짜 전송으로: 어느 1초 구간에도 4회 이하(토큰 발급·다시 보내기·연속조회 포함), 토큰 발급 먼저, `Screen` 먼저, 같은 요청 한 번, 합치기 범위가 다르면 따로 보냄, 요청 개수 초과 뒤 1초 멈춤, `[8005]` 뒤 한 번 발급하고 한 번 다시 보냄, au10001 실패 시 기다리던 요청 모두 실패. `Recovery` 몫(4번 중 1번)은 #4 | `server::kiwoom::rest` | #2 |
 | 메모리 캐시 | DB 없이 가짜 `MarketRequest` 응답과 가짜 시계로: 과거로 늘리기, 앞으로 늘리기, 실시간으로 만든 봉 붙이기 조건(세션 끊김, 시리즈 없음), 출처 교체(키움은 덮어쓰고 실시간은 못 덮어씀), **시리즈를 내린 뒤·07:45 비운 뒤 도착한 응답은 버림(`SeriesId`가 다름)**, 응답이 시리즈를 새로 만들지 않음, 10분 내리기(구독·알림·최근 REST 요청 중 하나라도 있으면 유지), 07:45 비우기 뒤 구독 중인 키 다시 채우기와 `reload { reason: "daily_reset" }`, 분봉 1년 하한, 같은 요청 합치기 | `server::bars` | #2·#4 |
 | 종목 목록·검색 | 켤 때 목록 받기 전 요청은 기다림, 07:45 갱신 실패 시 이전 목록 유지. ka10099 고정 입력으로 `marketCode` 거르기, 우선주 코드 규칙(`03481K` 포함). 검색 순위·동점 순서·이름 순서(`삼성전자` < `삼성SDI`)·초성·정규화 표 기반 테스트 | `server::symbols` | #2 |
 | 정적 파일 | `/api/없는경로` → JSON 404, `/assets/없는.js` → 404, `/layout/x` → index.html, `.wasm` MIME, 캐시 헤더 | `server::http` | #2 |
@@ -1861,6 +1913,8 @@ pub fn future_bar_starts(period: &str, last_start: f64, n: usize) -> Result<Vec<
 - ka10080 1분봉 행: 시·고·저·종 모두 `-` 부호(§1).
 - ka20005 지수 분봉: `--32411` 이중 부호, 100배 정수(§6).
 - ka20006 지수 일봉: `505969` → 5,059.69(§6).
+- ka20006 코스피 1996-11-04: 저가가 종가보다 높은 실제 행(§4.6 보정).
+- ka10082·ka10083, ka20007·ka20008: 주봉·월봉 `dt` 맞추기(10.4·10.5절).
 - ka10099 행과 ka10100 응답(§5).
 - 없는 코드의 빈 행: ka10081 `stk_cd=999999`, ka20006 `inds_cd=999`(§9).
 - 필수 입력 누락: `return_code: 2`, `return_msg`의 `[1511:…]`(§9).
@@ -1877,12 +1931,19 @@ pub fn future_bar_starts(period: &str, last_start: f64, n: usize) -> Result<Vec<
 
 ### 11.1 `.env` 키
 
-저장소 루트 `.env`를 쓴다. 값은 이 문서에 적지 않는다.
+설정은 프로세스 환경변수와 `VALLY_ENV_FILE`이 가리키는 파일에서 읽는다. 값은 이 문서에 적지 않는다.
+
+- `VALLY_ENV_FILE`은 `.env` 형식 파일의 **절대 경로**다. 상대 경로면 시작하지 않는다. `./.env`를 찾아보는 대체 경로는 없다. 어느 디렉터리에서 켜든 같은 파일을 읽게 하려는 것이다.
+- `VALLY_ENV_FILE`이 없으면 프로세스 환경변수만 쓴다.
+- 같은 키가 둘 다에 있으면 프로세스 환경변수가 이긴다.
+- 파일은 `KEY=VALUE` 줄만 읽는다. 빈 줄과 `#` 줄은 건너뛰고, 앞의 `export `와 값을 감싼 따옴표 한 쌍을 벗긴다.
 
 | 키 | 필수 | 뜻 |
 |---|---|---|
+| `VALLY_ENV_FILE` | 아니오 | 위 설정 파일의 절대 경로 |
 | `VALLY_KIWOOM_APP_KEY` | 예 | 실계좌 앱키(ADR 0004) |
 | `VALLY_KIWOOM_APP_SECRET` | 예 | 실계좌 시크릿(ADR 0004) |
+| `VALLY_KIWOOM_BASE_URL` | 아니오 | 키움 REST 주소. 기본 `https://api.kiwoom.com`. 통합 테스트가 가짜 키움 서버를 가리키는 데 쓴다 |
 | `VALLY_DB_PATH` | 아니오 | 사용자 자료 SQLite 파일 경로. 기본 `data/vally.db`. #2에서는 읽지 않는다 |
 | `VALLY_LOCK_PATH` | 아니오 | 잠금 파일 경로(§4.1). 기본 `$XDG_RUNTIME_DIR/vallythevally/server.lock`, 없으면 `/tmp/vallythevally-<uid>/server.lock` |
 | `VALLY_BIND` | 아니오 | 받는 주소. 기본 `127.0.0.1:8080` |
@@ -1891,7 +1952,7 @@ pub fn future_bar_starts(period: &str, last_start: f64, n: usize) -> Result<Vec<
 | `VALLY_STATIC_DIR` | 아니오 | SPA 빌드 결과 위치. 기본 `web/dist` |
 | `VALLY_LOG` | 아니오 | `tracing` 필터. 기본 `info` |
 
-`.env`에 이 밖의 `VALLY_` 키가 있으면 시작할 때 경고한다(오타를 찾으려는 것이다). 모의 키 설정은 없다.
+이 밖의 `VALLY_` 키가 있으면 시작할 때 경고한다(오타를 찾으려는 것이다). 모의 키 설정은 없다.
 
 ### 11.2 받는 주소
 
@@ -1924,7 +1985,7 @@ impl<T> Secret<T> { pub fn expose(&self) -> &T; }
 
 ## 12. 실측 대기 항목
 
-`docs/kiwoom.md`(조회 실측, 2026-11-08 일요일 밤)의 결과를 반영했다.
+`docs/kiwoom.md`의 결과를 반영했다. 1~10절은 2026-11-08 일요일 밤의 조회 실측, 11절은 hoga-ops 근거(D16), 12·13절은 2026-11-09 새벽의 조회 실측이다.
 
 ### 12.1 확인된 것(설계에 반영함)
 
@@ -1962,22 +2023,28 @@ impl<T> Secret<T> { pub fn expose(&self) -> &T; }
 | WebSocket REG 한도 | 그룹당 200(`105118`), 접속 전체 200(`105115`). 0J도 여기에 센다. 원소 하나의 한도는 없다 | §5.1, §5.3 |
 | 토큰 유효 기간 | 발급 후 24시간 | §4.1 |
 | 같은 토큰으로 다시 접속 | 매번 LOGIN 성공 | §5.1 |
+| `_AL` 0B(11.1, D16) | KRX와 NXT 체결을 한 흐름으로 준다. `9081`이 거래소를 가른다 | §5.3 |
+| 0B `9081`(11.2) | 문자열 `KRX`/`NXT`(정규장에서 확인) | §5.3 |
+| 0B 필드(11.3) | 명세대로. 15의 부호가 체결 방향, 20이 실제 체결 시각 | §4.6 |
+| 0J 가격(11.5, D16) | 100배 정수가 아니라 방향 부호가 붙은 소수 2자리 문자열 | §4.6 |
+| 단일가 체결(11.6) | 15:30 종가 단일가는 15:30:00대 대량 체결 한 건으로 1530 봉에 든다. 09:00 시가 단일가는 첫 체결 시각의 분 봉에 든다(09:02인 날도 있다) | §3.2, §5.4 |
+| 20:00 이후 체결(11.8, D16) | 20:00:00~20:00:03 체결이 온다. 키움은 19:59 봉에 넣는다 | §3.1, §3.3 |
+| 새 토큰과 WebSocket(11.10, D16) | 새 토큰은 기존 세션을 끊지 않는다. 옛 토큰의 REST가 `[8005]`로 실패한다. 세션을 끊는 것은 같은 앱키의 두 번째 LOGIN(close 1000)이다 | §4.1, §5.1 |
+| 08:00 첫 체결(11.9) | 08:00 정각에 접속하면 첫 체결을 놓칠 수 있다 | §5.2 |
 
-### 12.2 월요일 실측 대기(장중에만 잴 수 있다)
+### 12.2 장중 실측 대기(장중에만 잴 수 있다)
+
+D16(kiwoom.md 11절)으로 풀린 항목은 12.1로 옮겼다. 남은 것은 아래와 같다.
 
 | # | 항목 | 기본값(이 설계가 가정한 것) | 틀리면 바꿀 곳 |
 |---|---|---|---|
-| 1 | `_AL` 0B가 KRX·NXT 체결을 한 흐름으로 주는가 | 준다 | 틀리면 "차트는 언제나 통합 시세"를 다시 연다 |
-| 2 | 0B `9081` 거래소구분 값 | 쓰지 않는다 | 파서 |
-| 3 | 0B 필드: 20 체결시간, 10 현재가, 15 체결량(±), 13 누적거래량, 11 전일대비, 25 방향 | 명세대로 | `parse_real_0b` |
-| 4 | 0B 누적거래량(13)과 분봉 `acc_trde_qty`·일봉 `trde_qty`의 기준이 같은가 | 모른다 → 시드 경계를 믿지 않음(`Unknown`) | §5.4. 같으면 `DayCum`으로 바꾼다 |
-| 5 | 0J 프레임 형식, 가격이 100배 정수인지 소수인지, 거래량 필드 | 미정. 실측 전에는 0J 파서를 켜지 않는다 | §4.6 `parse_real_0j` |
-| 6 | 09:00 시가·15:30 종가 단일가 체결이 0B로 어떻게 오는가, 1분봉 어디(09:00, 09:02)에 들어가는가 | 체결 한 건, 그 체결시간의 구간 | 집계 테스트 |
-| 7 | KRX 코드의 15:30 이후 체결, 15:35 봉의 정체 | `_AL`만 쓰므로 영향 없음 | — |
-| 8 | 0B가 20:00:00 이후 체결을 주는가 | 주지 않는다 | §3.1 창 |
-| 9 | 07:50 강제 단절의 Close 코드와 다시 접속되는 시각, 일요일 05:00 | 바로 붙는다. 안 되면 30초마다 재시도 | §5.2 |
-| 10 | 새 토큰 발급이 기존 WebSocket 세션을 끊는가 | 끊든 아니든 새 토큰으로 갈아탄다 | §4.1 |
-| 11 | ka10099 `lastPrice`가 장중에 오늘 기준가인가 | 쓰지 않는다 | §4.6 |
+| 1 | 0B 누적거래량(13)의 하루 합계가 일봉 `trde_qty` 기준인가 분봉 합 기준인가. 분 안의 증분은 REST 분봉과 같다(11.4) | 모른다 → 시드 경계를 믿지 않음(`Unknown`) | §5.4. 같으면 `DayCum`으로 바꾼다 |
+| 2 | 0J 13·15의 단위(11.5) | 받은 값 그대로 | §4.6 |
+| 3 | 09:00 시가 단일가가 0B 한 건으로 오는가(11.6) | 한 건, 그 체결시간의 구간 | 집계 테스트 |
+| 4 | KRX 코드의 15:30~16:00 체결, 15:35 봉의 정체, 애프터마켓 시간대의 `290`·`9081` 값(11.7) | `_AL`만 쓰므로 영향 없음 | — |
+| 5 | 20:00:03보다 늦은 체결이 오는가(11.8) | 20:00:10까지만 받는다 | §3.1 창, `CLOSE_GRACE_SECS` |
+| 6 | 07:50 강제 단절의 Close 코드와 다시 접속되는 시각, 일요일 05:00(11.9) | 바로 붙는다. 안 되면 30초마다 재시도 | §5.2 |
+| 7 | ka10099 `lastPrice`가 장중에 오늘 기준가인가(11.11) | 쓰지 않는다 | §4.6 |
 
 ### 12.3 조회로 잴 수 있지만 아직 안 잰 것
 
@@ -1997,10 +2064,9 @@ impl<T> Secret<T> { pub fn expose(&self) -> &T; }
 
 ## 14. 용어·ADR 제안
 
-GLOSSARY.md와 ADR은 고치지 않았다. 아래는 제안이다.
+GLOSSARY.md와 ADR은 고치지 않았다. 아래는 제안이다. ADR 0004에 이미 들어간 것(토큰을 발급하는 네 경우, 실측 프로그램도 같은 잠금 파일을 잡는 것)은 지웠다. PR #13이 낸 제안 두 개(장 끝 확정 유예 10초, 지수 봉의 시고저종 보정)는 이 문서 §3.3과 §4.6에 넣었다.
 
-- **기준가**(새 용어 후보, kiwoom.md에서도 제안): 등락의 기준이 되는 가격(보통 전일 종가). 현재가의 `change`가 이것에 기대고 있다(§4.6). 용어집에 넣기를 제안한다.
+- **기준가**(새 용어 후보, kiwoom.md에서도 제안): 등락의 기준이 되는 가격(보통 전일 종가). 현재가의 `change`가 이것에 기대고 있다(§4.6). 용어집 "정규장 종가" 항목이 이미 이 말을 쓴다. 표제어로 넣기를 제안한다.
 - **끊긴 구간**(새 용어 후보): 실시간 연결이 끊겨 체결을 받지 못한 시간. 다시 연결되면 조회로 메운다. ADR 0003이 "실시간 연결이 끊겼던 구간"이라고 풀어 쓰는 개념이다.
 - **캐시 구간**(새 용어 후보): (종목, 봉 주기)마다 캐시가 빠짐없이 갖고 있는 시각 범위.
-- **ADR 0004 "그 밖의 때에는 다시 발급하지 않는다"**: 서버를 켤 때의 발급과 토큰 무효 응답 뒤의 발급(5분에 한 번)은 피할 수 없다(§4.1). 이 두 예외를 ADR에 적어 두기를 제안한다.
-- **ADR 0004 잠금 파일**: 실측 프로그램도 서버와 같은 잠금 파일(`VALLY_LOCK_PATH`)을 잡게 하면, "둘을 동시에 돌리지 않는다"를 운영 규칙이 아니라 장치로 지킬 수 있다. 다음 실측 프로그램을 만들 때 넣기를 제안한다.
+- **ADR 0004의 "저장소 루트 `.env`"**: 서버는 `VALLY_ENV_FILE`(절대 경로)로만 설정 파일을 읽는다(§11.1). ADR 문구를 "`VALLY_ENV_FILE`이 가리키는 파일"로 고치기를 제안한다.

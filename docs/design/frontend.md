@@ -2,8 +2,9 @@
 
 차트 화면의 생김새, 조작, 프런트엔드 코드 구조를 정한다. 로드맵 #12의 1~7단계(#2~#8)가 이 문서를 따른다. 8단계(#9) 배포는 화면에 영향이 없다.
 
-- **기준 문서**: `GLOSSARY.md`, `docs/adr/0001`~`0004`, 백엔드 설계 `docs/design/backend.md`. 백엔드 쪽 경계는 그 문서의 §8(브라우저 계약)과 §9(지표 크레이트 API)다.
+- **기준 문서**: `GLOSSARY.md`, `docs/adr/0001`~`0007`, 백엔드 설계 `docs/design/backend.md`. 백엔드 쪽 경계는 그 문서의 §8(브라우저 계약)과 §9(지표 크레이트 API)다.
 - **1차 수정(2026-11-08)**: 코디네이터 결정 `docs/design/decisions-r1.md`(U1·U2, D1~D11)와 교차 리뷰 `docs/design/review-w4.md`의 프런트 지적(W4-25, 28, 29, 31, 32)을 반영했다. 계약 이름은 decisions-r1.md를 글자 그대로 따른다. 이 문서와 그 문서가 다르면 그 문서가 맞다.
+- **2차 수정(2026-11-09)**: #2의 코드(`web/src`)에 맞췄다. #2에서 켜진 절은 코드가 지금의 사실이다. D12~D17과 ADR 0007(칸마다 거래소)도 반영했다.
 - **목업**: `docs/design/mockup/index.html`. 빌드 없이 브라우저로 연다. 데이터는 시드로 만든 가짜 값이다.
   - 화면 상태는 주소의 질의 문자열로 고른다.
     - `?layout=4|1`: 4칸 또는 1칸
@@ -80,7 +81,7 @@ D3의 표를 그대로 옮긴다. 단계 번호는 이슈 번호다. 이 문서�
 
 ### 1.2 디자인 토큰(CSS 변수)
 
-목업 `styles.css`의 변수가 원본이다. 실제 앱에서는 이 값들을 `web/src/styles/tokens.css`에 두고 Tailwind 테마가 변수를 참조하게 한다(§5.1).
+목업 `styles.css`의 변수가 원본이다. 실제 앱에서는 이 값들을 `web/src/styles/tokens.css`에 둔다. Tailwind는 v4이고 설정 파일(`tailwind.config.ts`)이 없다. `web/src/styles/index.css`의 `@theme inline`이 토큰 변수만 가리킨다(`--color-up: var(--up)` 등). Tailwind 기본 색은 `--color-*: initial`로 지워서 토큰 밖의 색을 쓸 수 없다(§5.1).
 
 **색**
 
@@ -149,7 +150,7 @@ D3의 표를 그대로 옮긴다. 단계 번호는 이슈 번호다. 이 문서�
 - **높은 밀도를 기본으로 한다.** 데스크톱 1440×900에서 4칸이 각각 지표 패널 1~2개와 함께 들어가고, 관심종목 13종목이 스크롤 없이 보인다.
 - **줄이는 것과 지키는 것**
   - 줄이는 것: 칸 머리줄을 따로 두지 않는다. 범례가 머리줄을 겸한다. 그래서 차트 면적이 커진다.
-  - 지키는 것: 클릭 대상은 데스크톱 26px 이상, 휴대폰 36px 이상으로 둔다. 범례 줄 높이는 18px이다.
+  - 지키는 것: 클릭 대상은 데스크톱 26px 이상, 휴대폰 36px 이상으로 둔다. 범례 줄 높이는 18px이다. 휴대폰의 봉 주기 칩과 테마 버튼도 36px이다(목업보다 크다).
 - **범례의 반투명 바탕**: 여러 칸 화면에서는 범례가 봉을 가리지 않게 가격 패널의 위 여백을 26%로 잡는다(`scaleMargins.top`). 범례 줄마다 `--chart-bg` 78%의 바탕을 깔아 봉 위에서도 글자가 읽힌다.
 
 ---
@@ -250,7 +251,7 @@ D3의 표를 그대로 옮긴다. 단계 번호는 이슈 번호다. 이 문서�
 
 범례는 칸 왼쪽 위에 겹쳐 놓는다(목업 `.legend`). 줄 순서는 다음과 같다.
 
-1. **머리줄**: 종목 연동 꼬리표, 종목 이름(650), 코드(지수는 시장 이름), 봉 주기
+1. **머리줄**: 종목 연동 꼬리표, 종목 이름(650), 코드(지수는 목업처럼 `지수`. 코드의 `symbolSub`), 봉 주기
 2. **가격줄**: 종가(크게, 등락색), 전 봉 대비 변화량과 %, 봉 시각
 3. **OHLCV 줄**: `시 고 저 종 량`. 이름표 글자는 `--text-3`, 값은 `--text`
 4. **가격 패널 지표**: 줄마다 색 견본 10×2px, 이름과 설정값(`이동평균 20`, `볼린저 밴드 20 2`), 값
@@ -323,6 +324,7 @@ D3의 표를 그대로 옮긴다. 단계 번호는 이슈 번호다. 이 문서�
 | `←` `→` | 십자선을 한 봉씩 옮기기(키보드로 범례 읽기) |
 | `+` `−` / `Home` `End` | 확대·축소 / 처음·최신 봉으로 |
 
+- **#2에서 켜진 키**: `/`, `Ctrl+K`, `D` `W` `M`, `[` `]`, `L`, 대화상자의 `Esc`. 표 하나(`lib/hotkeys.ts`의 `HOTKEYS`)에 정의하고 `event.code`로 판단한다. 한글 입력 상태에서도 같게 동작한다.
 - **충돌 정리**: `Ctrl+1~4`는 브라우저 탭 전환과 부딪히고, `Alt+숫자`는 리눅스 Chrome 탭 전환과 부딪힌다. 그래서 칸 이동은 `` ` ``와 `Tab`으로 한다.
 - **목업**
   - 왼쪽 도구와 위 막대 버튼의 툴팁이 이 표와 같다.
@@ -622,63 +624,76 @@ D3의 표를 그대로 옮긴다. 단계 번호는 이슈 번호다. 이 문서�
 
 ### 5.1 폴더와 라우트
 
+`(#N)`이 붙은 것은 그 단계에서 만든다. 붙지 않은 것은 #2에 있다.
+
 ```
 web/
   index.html
-  vite.config.ts            # wasm 플러그인 없이 동작(§5.6). /api 프록시 → 127.0.0.1 서버
-  tailwind.config.ts        # 색·간격·글꼴은 CSS 변수 참조: colors.up = "var(--up)" 등
+  vite.config.ts            # @tailwindcss/vite. 기본은 dev 서버가 가짜 API(dev/fakeApi.ts)로 답한다.
+                            # VITE_FAKE_API=0이면 /api를 127.0.0.1:8080 서버로 보낸다. wasm 플러그인 없음(§5.6)
+  dev/
+    fakeApi.ts              # 개발용 가짜 /api. fakeMarket.ts가 봉을 만든다
   src/
-    main.tsx                # QueryClient, Router, 테마 적용
-    styles/tokens.css       # §1.2 토큰. :root(다크) + [data-theme="light"]
+    main.tsx                # QueryClient, Router
+    App.tsx                 # ChartScreen: 데스크톱·휴대폰 껍데기
+    styles/
+      tokens.css            # §1.2 토큰. :root(다크) + [data-theme="light"]
+      index.css             # Tailwind v4 @theme inline(토큰 변수만 가리킴), 글꼴, 공통 클래스
     api/
-      generated.ts          # ts-rs가 만든 계약 타입(백엔드 §8). 손대지 않는다
-      http.ts               # fetch 래퍼, ApiError 해석
-      queries.ts            # TanStack Query 훅: useSymbolSearch, useLayouts, useLayout, useDrawings, useWatchlist, useAlerts, useUiState
-      socket.ts             # MarketSocket: WebSocket 하나, 구독 다중화, 다시 연결
+      generated/            # ts-rs가 만든 계약 타입(백엔드 §8). 타입마다 한 파일. 손대지 않는다
+      http.ts               # fetch 래퍼, ApiError 해석(ApiRequestError)
+      bars.ts               # fetchBarsPage. 봉은 React Query가 아니라 컨트롤러가 갖는다
+      queries.ts            # TanStack Query 훅: useSymbolSearch, useSymbolInfo. (#3~) useLayouts, useWatchlist, useUiState …
+      socket.ts             # (#4) MarketSocket: WebSocket 하나, 구독 다중화, 다시 연결
     chart/                  # React를 모르는 명령형 코드
       ChartController.ts    # 칸 하나의 차트 엔진 래퍼(§5.4)
-      series.ts             # 봉 모양별 주 시리즈 생성, 테마 적용
-      indicators/
-        worker.ts           # Web Worker: WASM 로드, Engine 보관(§5.6)
-        client.ts           # 워커와 주고받는 Promise API
-        render.ts           # Output → LWC 시리즈/pane 매핑
-      drawings/
-        DrawingPrimitive.ts # ISeriesPrimitive 구현(그리기, hit-test)
-        tools.ts            # 도구별 점 수, 그리기, 손잡이
-        anchor.ts           # (t, price) ↔ 좌표 변환(§3.5)
-        magnet.ts
-      CloudPrimitive.ts     # 일목 구름 채우기
-      sync.ts               # 칸 사이 십자선·스크롤 동기화 버스
-      time.ts               # KST 표시 변환(t + 32400), 봉 주기 길이
+      barFeed.ts            # 칸 하나의 봉 받기: 세대, 최신 페이지, 과거 페이지 이어 붙이기
+      legend.ts             # 범례 DOM(§2.3)
+      series.ts             # 봉 모양별 주 시리즈와 거래량 시리즈, 색 적용
+      settings.ts           # ChartSettings(§5.5)
+      theme.ts              # CSS 변수 → ThemeTokens
+      time.ts               # KST 표시 변환(t + 32400), 봉 시각 표기
+      indicators/           # (#5) worker.ts, client.ts, render.ts(§5.6)
+      drawings/             # (#6) DrawingPrimitive.ts, tools.ts, anchor.ts(§3.5), magnet.ts
+      CloudPrimitive.ts     # (#5) 일목 구름 채우기
+      sync.ts               # (#7) 칸 사이 십자선·스크롤 동기화 버스
     stores/
-      layout.ts             # useLayoutStore
-      selection.ts          # useSelectionStore
-      drawingHistory.ts     # useDrawingHistoryStore
-      connection.ts         # useConnectionStore(상태 줄 전용, 작은 스토어)
+      layout.ts             # useLayoutStore(§5.3). #2는 메모리의 기본 1칸
+      selection.ts          # useSelectionStore: 활성 칸, 열린 대화상자, 아래 알림
+      recent.ts             # 최근 본 종목(#2는 메모리, #3~ UiState.recentSymbols)
+      theme.ts              # 테마(localStorage, #3~ UiState.theme)
+      drawingHistory.ts     # (#6) useDrawingHistoryStore
+      connection.ts         # (#4) useConnectionStore(상태 줄 전용, 작은 스토어)
     features/
-      topbar/               # 종목 버튼, 봉 주기, 지표·비교·로그, 레이아웃 메뉴, 동기화 칩
-      tools/                # 왼쪽 드로잉 도구
-      grid/                 # 칸 배치, ChartCell(컨트롤러를 붙였다 떼는 얇은 컴포넌트)
-      watchlist/
-      status/
-      search/               # 검색 대화상자, 초성 강조
-      indicator-dialog/
-      alert-dialog/
-      phone/                # 휴대폰 머리, 칩, 아래 탭, 시트
+      topbar/               # 종목 버튼, 봉 주기, 봉 모양 메뉴(StyleMenu), 로그. (#5~) 지표·비교, (#7) 레이아웃 메뉴, 동기화 칩
+      grid/                 # ChartCell(컨트롤러를 붙였다 떼는 얇은 컴포넌트), cellError.ts(§3.7a 오류 문장)
+      search/               # 검색 대화상자, 결과 목록, 초성 강조
+      status/               # 상태 줄, 라이브러리 표기
+      toast/                # 화면 아래 알림(주소의 종목을 찾을 수 없음 등)
+      phone/                # 휴대폰 머리, 봉 주기 칩, 아래 탭
+      useHotkeys.ts         # §3.2 단축키
+      useOpenFromAddress.ts # 주소의 ?symbol=&period=로 활성 칸 열기
+      tools/                # (#6) 왼쪽 드로잉 도구
+      watchlist/            # (#3)
+      indicator-dialog/     # (#5)
+      alert-dialog/         # (#8)
     lib/
       format.ts             # 가격·거래량·% 표기(§1.3)
-      hotkeys.ts            # §3.2 표 하나로 정의, 도움말도 이 표에서 생성
-      autosave.ts           # 1초 디바운스, 재시도, keepalive
+      hotkeys.ts            # §3.2 표 하나로 정의. (#3~) 도움말도 이 표에서 생성
+      symbol.ts             # 지수 판별, 봉 주기 이름, 켜진 봉 주기(PERIODS_ON)
+      autosave.ts           # (#3) 1초 디바운스, 재시도, keepalive
 ```
 
 **라우트**(React Router): 데스크톱과 휴대폰은 같은 라우트를 쓰고 폭에 따라 화면 껍데기만 바꾼다.
 
 | 경로 | 화면 |
 |---|---|
-| `/` | `UiState.lastLayoutId`로 이동. 없으면 첫 레이아웃 |
-| `/layout/:layoutId` | 차트 화면. 데스크톱은 레이아웃, 휴대폰은 `UiState.phone` 칸(#3~. #2에는 `/`만 있고 메모리의 기본 1칸을 보인다) |
-| `/layout/:layoutId?symbol=005930&period=D` | 활성 칸을 이 종목으로 열기(알림 메시지 링크, 외부 바로가기) |
-| `/alerts` | 알림 목록 서랍을 연 상태(7단계) |
+| `/` | #2: 메모리의 기본 1칸(코스피 일봉). #3~: `UiState.lastLayoutId`로 이동. 없으면 첫 레이아웃 |
+| `/?symbol=005930&period=D` | #2: 활성 칸을 이 종목·봉 주기로 열기(알림 메시지 링크, 외부 바로가기). 읽은 뒤 주소에서 지운다 |
+| `/layout/:layoutId` | (#3~) 차트 화면. 데스크톱은 레이아웃, 휴대폰은 `UiState.phone` 칸 |
+| `/layout/:layoutId?symbol=005930&period=D` | (#3~) 위와 같이 활성 칸을 열기 |
+| `/alerts` | (#8) 알림 목록 서랍을 연 상태 |
+| 그 밖 | `/`로 보낸다 |
 
 대화상자(검색, 지표, 알림 만들기)는 라우트로 만들지 않는다. 뒤로 가기로 닫히는 것보다 `Esc`가 일관된다.
 
@@ -701,7 +716,7 @@ web/
 // stores/layout.ts: 지금 열린 레이아웃 하나(서버 Layout의 편집 사본)
 // type Slot = Cell["slot"]  (0 | 1 | 2 | 3). 코드에서 pane은 Lightweight Charts의 패널만 뜻한다(D10)
 interface LayoutState {
-  layout: Layout;                       // generated.ts의 Layout. cells[].chartSettings는 ChartSettings로 해석해 둔다
+  layout: Layout;                       // api/generated/의 Layout(#3~). cells[].chartSettings는 ChartSettings로 해석해 둔다
   dirty: boolean;
   saveState: "idle" | "pending" | "saving" | "saved" | "failed";
   savedAt: number | null;
@@ -750,16 +765,35 @@ interface DrawingHistoryState {
 ### 5.4 차트 엔진 래퍼: 칸마다 명령형 컨트롤러
 
 ```ts
+interface CellView {
+  symbol: SymbolCode;
+  period: Period;
+  settings: ChartSettings;
+  info: SymbolInfo | undefined;             // 범례 머리줄의 이름. 아직 못 받았으면 코드만 쓴다
+}
+
+/** React가 그리는 칸 상태. 휴대폰 머리와 칸 오류·과거 봉 오류 꼬리표가 쓴다. */
+type CellStatus =
+  | { kind: "loading" }
+  | { kind: "ready"; latest: Bar; prev: Bar | null; isCurrent: boolean; fetchedAt: number; olderError: ApiRequestError | null }
+  | { kind: "error"; error: ApiRequestError };
+
 class ChartController {
-  constructor(el: HTMLElement, deps: { socket: MarketSocket; indicators: IndicatorClient; sync: SyncBus; theme: ThemeTokens });
-  // 칸의 설정을 맞춘다. 바뀐 부분만 반영(diff): 종목·봉 주기가 바뀌면 데이터부터, 지표만 바뀌면 그 지표만
-  apply(cell: { symbol: SymbolCode; period: Period; settings: ChartSettings }): void;
+  constructor(el: HTMLElement, deps: { tokens: ThemeTokens; onStatus: (s: CellStatus) => void; fetchPage?: FetchPage });
+  // (#4~) deps에 socket: MarketSocket, (#5~) indicators: IndicatorClient, (#7~) sync: SyncBus를 더한다
+  // 칸의 설정을 맞춘다. 바뀐 부분만 반영(diff): 종목·봉 주기가 바뀌면 데이터부터, 봉 모양·축만 바뀌면 그것만
+  apply(cell: CellView): void;
+  reload(): void;                           // 같은 종목·봉 주기를 처음부터(칸 오류의 `다시 시도`)
+  retryOlder(): void;                       // 실패한 과거 페이지를 다시(과거 봉 오류의 `다시 시도`)
   setTheme(t: ThemeTokens): void;           // 모든 시리즈·primitive 색 다시 적용
-  setDrawings(list: Drawing[], editable: boolean): void;
-  setActive(active: boolean): void;
+  setDrawings(list: Drawing[], editable: boolean): void;   // (#6~)
+  setActive(active: boolean): void;                         // (#7~)
   dispose(): void;                          // 구독 해지, 워커 엔진 해제, chart.remove()
 }
 ```
+
+- `fetchPage`는 테스트가 가짜 응답을 넣는 자리다. 기본은 `api/bars.ts`의 `fetchBarsPage`다.
+- 봉 받기와 세대는 `chart/barFeed.ts`의 `BarFeed`가 맡는다. 컨트롤러는 `BarFeed`가 알려 주는 `reset`, `prepended`, `failed`, `olderFailed`를 받아 그린다.
 
 **React와의 경계**
 - `features/grid/ChartCell.tsx`는 `useEffect`로 컨트롤러를 만들고, 칸 설정이 바뀌면 `apply`만 부른다.
