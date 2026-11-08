@@ -6,13 +6,11 @@ use ts_rs::TS;
 
 /// Unix 초(UTC 기준 정수). 봉의 `t`는 봉 시작 시각이다.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, TS)]
-#[serde(transparent)]
 #[ts(export)]
 pub struct UnixSeconds(#[ts(type = "number")] pub i64);
 
 /// 주식·ETF "005930", 지수 "IDX:001"(코스피) "IDX:101"(코스닥).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
-#[serde(transparent)]
 #[ts(export)]
 pub struct SymbolCode(pub String);
 
