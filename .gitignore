@@ -4,3 +4,7 @@ __pycache__/
 .env
 .env.*
 .DS_Store
+
+# Rust 빌드 산출물, 버릴 실측 프로그램
+target/
+tools/kiwoom-probe/
