@@ -138,11 +138,8 @@ index_chart!(IndexDailyChart, Ka20006, wire::IndexDailyChartResponse);
 index_chart!(IndexWeeklyChart, Ka20007, wire::IndexWeeklyChartResponse);
 index_chart!(IndexMonthlyChart, Ka20008, wire::IndexMonthlyChartResponse);
 
-/// ka10080 주식 분봉.
-///
-/// 일·주·월봉과 달리 `base_dt`에 과거 날짜를 받는다. 분봉은 연속조회 키가 묵으면(kiwoom.md §10.3) 오늘부터
-/// 다시 따라가기에 너무 길다(1분봉 1년이 191페이지, §2). `base_dt`를 과거 날짜로 주면 키움은 그날 19:59부터
-/// 거꾸로 주므로(§1) 끊긴 자리로 한 번에 건너뛸 수 있다.
+/// ka10080 주식 분봉. `base_dt`는 일·주·월봉처럼 언제나 시리즈의 오늘이다. 과거 날짜를 주면 그날 뒤의
+/// 권리발생이 빠진 가격이 온다(kiwoom.md §4.1, backend.md §6.3).
 #[derive(Serialize)]
 pub struct MinuteChart {
     stk_cd: String,
@@ -153,12 +150,12 @@ pub struct MinuteChart {
 
 impl MinuteChart {
     /// 분봉 주기가 아니면 None.
-    pub fn new(code: StockCode, venue: Venue, period: Period, base_dt: KstDate) -> Option<Self> {
+    pub fn new(code: StockCode, venue: Venue, period: Period, today: KstDate) -> Option<Self> {
         Some(MinuteChart {
             stk_cd: kiwoom_stock_code(code, venue),
             tic_scope: tic_scope(period)?,
             upd_stkpc_tp: ADJUSTED_PRICE,
-            base_dt: base_dt.yyyymmdd(),
+            base_dt: today.yyyymmdd(),
         })
     }
 }
@@ -169,7 +166,8 @@ impl MarketRequest for MinuteChart {
     type Response = wire::MinuteChartResponse;
 }
 
-/// ka20005 업종 분봉. 과거 `base_dt`를 받는 까닭은 [`MinuteChart`]와 같다. 지수에는 수정주가 필드가 없다(§6).
+/// ka20005 업종 분봉. 지수에는 수정주가 필드가 없어(§6) 과거 `base_dt`로 받아도 값이 같다. 그래서 연속조회 키가
+/// 묵으면(kiwoom.md §10.3) 키움이 그날 19:59부터 거꾸로 주는 것(§1)을 써서 끊긴 자리로 한 번에 건너뛴다.
 #[derive(Serialize)]
 pub struct IndexMinuteChart {
     inds_cd: String,
