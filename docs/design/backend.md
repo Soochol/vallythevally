@@ -16,15 +16,15 @@ vallythevally Rust 백엔드의 설계다. 코드는 아직 없다. 이 문서�
 
 | 이슈 | 단계 | 켜지는 것 | 아직 없는 것 |
 |---|---|---|---|
-| #2 | 1단계 기반 | 1칸 고정, REST `/api/symbols`·`/api/bars`, 메모리 캐시(07:45 비우기), 종목 목록(메모리), 키움 조회 대기열, 잠금 파일, 차트 설정은 브라우저 메모리에 | WebSocket, WASM, Postgres |
-| #3 | 2단계 저장 | Postgres(Docker compose, `127.0.0.1:5433`), `app` 스키마(sqlx 마이그레이션), 기본 레이아웃 마이그레이션, 관심종목, `UiState`, 자동 저장. 관심종목 현재가는 REST 조회 | WebSocket |
+| #2 | 1단계 기반 | 1칸 고정, REST `/api/symbols`·`/api/bars`, 메모리 캐시(07:45 비우기), 종목 목록(메모리), 키움 조회 대기열, 잠금 파일, 차트 설정은 브라우저 메모리에 | WebSocket, WASM, DB |
+| #3 | 2단계 저장 | SQLite 파일 `data/vally.db`(sqlx 마이그레이션), 기본 레이아웃 마이그레이션, 관심종목, `UiState`, 자동 저장. 관심종목 현재가는 REST 조회 | WebSocket |
 | #4 | 3단계 실시간 | WebSocket, 구독, 현재 봉 집계, `seq`, 분봉 | |
 | #5 | 4단계 지표 | WASM 지표, 비교 종목 | |
 | #6~#9 | 5~8단계 | 드로잉 → 여러 칸 → 알림 → 클라우드 | |
 
 - **#2의 진행 중 구간**(D3, D12): 실시간이 아직 없다. 그래서 REST 최신 페이지의 `current`로 진행 중 구간을 보여 준다. 이 값은 키움 조회가 준 오늘 봉(이번 주, 이번 달 봉)이다. 종목이나 봉 주기를 바꾸거나 새로고침할 때만 새로 받는다. `BarsPage.seq`는 `null`이다.
 - **#2 완료 조건**(D14): 서버를 다시 켜도 차트가 몇 초 안에 다시 뜬다. 캐시는 비어 있으므로 키움에서 다시 받는다(일봉 1회 조회).
-- **Postgres는 #3부터**(D14): #2 서버는 DB 없이 뜬다. `VALLY_DATABASE_URL`도 #3부터 필요하다. #3의 Postgres는 Docker compose로 띄우고 `127.0.0.1:5433`에만 연다(`ports: "127.0.0.1:5433:5432"`). 시세는 Postgres에 두지 않는다(ADR 0003).
+- **DB는 #3부터, SQLite 파일 하나**(D14, D15, ADR 0006): #2 서버는 DB 없이 뜬다. #3에서 사용자 자료용 SQLite 파일(`data/vally.db`, git 제외)을 처음 만든다. 따로 띄우는 DB 서버는 없다. 시세는 DB에 두지 않는다(ADR 0003).
 
 ---
 
@@ -40,8 +40,9 @@ vallythevally/
 ├── crates/
 │   ├── domain/           # 순수. 체결·봉·봉 주기·종목코드·시각·현재 봉 집계·알림 판단
 │   ├── indicators/       # 순수. 지표 종류 일곱 가지. feature "wasm"으로 브라우저용 빌드
-│   └── server/           # 바이너리 하나. Axum + 키움 + 메모리 캐시 + 실시간 + 알림 + Postgres(#3부터, 사용자 자료만)
-├── migrations/           # sqlx 마이그레이션(사용자 자료 스키마 app, #3부터)
+│   └── server/           # 바이너리 하나. Axum + 키움 + 메모리 캐시 + 실시간 + 알림 + SQLite(#3부터, 사용자 자료만)
+├── migrations/           # sqlx 마이그레이션(SQLite 사용자 자료, #3부터)
+├── data/                 # vally.db (git 제외, #3부터)
 └── web/                  # React (이 문서 범위 밖)
 ```
 
@@ -62,7 +63,7 @@ web(WASM) ───▶ indicators(feature "wasm")
 | `indicators` → `domain` | 일목균형표 선행스팬은 마지막 봉 뒤의 미래 봉 시작 시각이 필요하다. 봉 경계 규칙의 유일한 정의는 `domain::Period`다. 그래서 브라우저도 같은 함수를 WASM으로 받는다(§9.3). |
 | `domain`은 `indicators`를 모른다 | 지표 알림의 판단은 "지표 값 두 쌍이 교차했나"뿐이다. `domain::alert`는 `f64` 값만 받는다. 지표 계산은 `server`가 `indicators`로 해서 넘긴다. 그래서 순환이 없다. |
 | `kiwoom`은 모듈 | 호출자는 `server` 하나다. 실측 프로그램(#1)은 버릴 코드라 두 번째 호출자로 치지 않는다. 크레이트로 나눠서 얻는 것은 파서 테스트의 빌드 격리 정도인데, 모듈 테스트로 충분하다. 시세 API만 쓰게 하는 장치(§4.4)는 타입과 테스트로 건다. |
-| `store`는 모듈 | 호출자는 `server` 하나다. sqlx의 컴파일 시점 쿼리 검사는 크레이트를 나누지 않아도 된다. 시세 캐시가 메모리로 옮겨 가서(ADR 0003) `store`에는 사용자 자료(`store::app`)만 남는다. #2에는 `store`도 sqlx 의존도 없다. #3에서 처음 들어온다. |
+| `store`는 모듈 | 호출자는 `server` 하나다. sqlx의 컴파일 시점 쿼리 검사는 크레이트를 나누지 않아도 된다. 시세 캐시가 메모리로 옮겨 가서(ADR 0003) `store`에는 사용자 자료(`store::app`, SQLite)만 남는다. #2에는 `store`도 sqlx 의존도 없다. #3에서 처음 들어온다. |
 
 나중에 두 번째 바이너리가 같은 키움 클라이언트를 써야 하면 그때 `server::kiwoom`을 크레이트로 뺀다. ADR 0004 때문에 토큰을 가진 프로세스는 하나뿐이어야 하므로 그런 일은 드물 것이다.
 
@@ -83,7 +84,7 @@ web(WASM) ───▶ indicators(feature "wasm")
 | `market` | `MarketHub`(액터) | 구독 관리자, 현재 봉 집계, 확정, `seq`, 끊긴 구간 복구, 브라우저로 내보내기 | #4 |
 | `alert` | `AlertEngine` | 가격 알림·지표 알림 판단 실행, 반복, 기록 | #8 |
 | `notify` | `Notifier::send(event)` | 텔레그램, 화면 안 알림 | #8 |
-| `store::app` | 사용자 자료 저장소 | sqlx 쿼리 | #3 |
+| `store::app` | 사용자 자료 저장소 | SQLite 연결 풀, 쓰기 연결 하나, sqlx 쿼리와 마이그레이션 | #3 |
 | `http` | `router(state)` | REST, 브라우저 WebSocket, 정적 파일 | #2(WS는 #4) |
 
 ---
@@ -361,7 +362,9 @@ pub fn resolve_trade_time(received_at: KstTime, hhmmss: TimeOfDay) -> Result<Kst
 | 월 | 그 달 1일 00:00 KST(1일이 주말이어도) | 다음 달 1일 00:00 |
 
 - **08:00 기준이냐 09:00 기준이냐**: 우리 봉 주기(1·3·5·15·30·60분)는 모두 60분의 약수다. 그래서 08:00에서 자르든 09:00에서 자르든 정시에서 자르든 경계가 같다. 실측도 이와 맞는다. `_AL` 60분봉이 08:00~19:00 정시로 붙는다(kiwoom.md §1).
-- 키움 분봉 `cntr_tm`은 **구간 시작 시각**이다. 주봉·월봉 `dt`도 구간의 첫날이다(이번 주 봉이 `20261102`(월)로 왔다). 그래도 파서는 키움이 준 시각을 `Period::bucket`에 넣어 다시 맞춘다. 분봉은 결과가 키움 값과 다르면 파싱 오류로 본다. 주봉·월봉은 결과를 그대로 쓴다. [실측 대기: 1일이 주말인 달의 월봉 `dt`가 1일인지, 그달 체결이 처음 있는 날인지. 어느 쪽이든 `bucket`이 1일로 맞춘다]
+- 키움 분봉 `cntr_tm`은 **구간 시작 시각**이다.
+- 주봉·월봉 `dt`는 구간의 **첫 관측일**이다. 달력의 첫날이 아니다. 예를 들어 이번 주 봉과 2026-11 월봉이 둘 다 `20261102`로, 2025-03 월봉이 `20250304`로 왔다(kiwoom.md §10.4·10.5). 그래서 주봉은 그 주 월요일로, 월봉은 그달 1일로 **반드시** 맞춘다.
+- 파서는 키움이 준 시각을 `Period::bucket`에 넣어 다시 맞춘다. 분봉은 결과가 키움 값과 다르면 파싱 오류로 본다. 주봉·월봉은 결과(월요일, 1일)를 그대로 쓴다.
 - 체결이 없는 분은 봉을 만들지 않는다. 빈 봉을 채우지 않는다. 키움도 08:50~08:59, 15:20~15:29처럼 체결이 없는 분은 건너뛴다(kiwoom.md §2).
 - 개장이 늦은 날(예: 10:00 개장)도 같은 규칙으로 처리된다. 경계는 시계만으로 정해지고 장 시간표를 쓰지 않는다.
 
@@ -435,7 +438,7 @@ impl KiwoomAuth {
 
 #### 토큰을 가진 프로세스는 하나: 잠금 파일
 
-서버는 잠금 파일(`flock`)을 잡아 같은 PC에서 하나만 뜬다(ADR 0004). #2에는 Postgres가 없으므로 DB 잠금은 쓰지 않는다.
+서버는 잠금 파일(`flock`)을 잡아 같은 PC에서 하나만 뜬다(ADR 0004). DB(#3부터 SQLite)로는 이 일을 하지 않는다.
 
 ```rust
 /// 프로세스 수명 동안 쥐고 있는다. drop하거나 프로세스가 죽으면 OS가 잠금을 푼다.
@@ -511,8 +514,8 @@ pub struct ContKey(String);
 
 키움 응답은 세 겹으로 판정한다. 실측 결과(kiwoom.md §9)를 따른다.
 
-1. **HTTP 상태**: 200이 아니면 전송 오류나 서버 오류다(401, 429, 5xx).
-2. **최상위 `return_code`**: 0이면 성공이다. 0이 아니면 실패다. 이 숫자는 키움 오류 코드가 아니다. 예를 들어 필수 입력 누락은 `return_code: 2`로 왔다.
+1. **HTTP 상태**: 200이 아니면 전송 오류, 요청 개수 초과(429), 서버 오류(5xx)다. 토큰 무효는 HTTP 200으로 온다.
+2. **최상위 `return_code`**: 0이면 성공이다. 0이 아니면 실패다. 이 숫자는 키움 오류 코드가 아니라 오류의 큰 갈래다. 관측한 값은 2(입력 값 오류), 3(인증 실패), 5(요청 개수 초과 갈래)다. **같은 5에 1700과 1634가 함께 오므로** 대응은 상세 코드로 가른다.
 3. **`return_msg` 안의 상세 코드**: 키움 오류 코드는 메시지 속 대괄호에 들어 있다. 예: `"입력 값 오류입니다[1511:필수 입력 값에 값이 존재하지 않습니다. …]"`. 파서는 정규식 `\[(\d{4}):`로 꺼낸다. 없으면 `None`이다.
 
 성공 응답이어도 한 번 더 검사한다.
@@ -538,9 +541,10 @@ pub enum KiwoomError {
 
 | 상황 | 판정 근거 | 대응 |
 |---|---|---|
-| 요청 개수 초과 | HTTP 429 또는 상세 코드 1700 [실측 대기: 실제로 본 적 없음] | 같은 요청을 그 대기열 맨 앞에 다시 넣는다. 대기열 전체를 1초 멈춘다. 같은 요청이 3번 연속 걸리면 실패로 돌려준다. 260ms 간격이 모자랐다는 뜻이므로 `warn` 로그를 남긴다. |
-| 토큰 무효·만료 | HTTP 401 또는 상세 코드 8005 [실측 대기] | `invalidate` 한 번, 그다음 같은 요청을 한 번 다시 보낸다. 그래도 실패하면 `AuthFailed`. |
+| 요청 개수 초과 | HTTP 429, `return_code: 5`, 상세 코드 1700(`유량=5`가 메시지에 있다). 판정은 HTTP 429 또는 상세 1700 | 같은 요청을 그 대기열 맨 앞에 다시 넣는다. 대기열 전체를 1초 멈춘다. 같은 요청이 3번 연속 걸리면 실패로 돌려준다. 260ms 간격이 모자랐다는 뜻이므로 `warn` 로그를 남긴다. |
+| 토큰 무효·만료 | **HTTP 200**, `return_code: 3`, 상세 코드 8005. 판정은 상세 8005. 만료된 진짜 토큰도 같은 형태인지는 [실측 대기] | `invalidate` 한 번, 그다음 같은 요청을 한 번 다시 보낸다. 그래도 실패하면 `AuthFailed`. |
 | 앱키·IP·투자구분 인증 실패 | 상세 코드 8001~8200 중 8005 밖 | 되돌릴 수 없는 설정 문제다. 모든 조회와 실시간을 멈춘다. 상태를 `halted`로 바꿔 브라우저에 알린다. 다시 발급을 반복하지 않는다. 운영자가 고치고 서버를 다시 켠다. |
+| 한 번에 넣은 종목이 너무 많음 | HTTP 200, `return_code: 5`, 상세 코드 1634(ka10095에 101종목 이상) | 우리 코드의 버그다(§5.3이 100개씩 나눈다). 물러서거나 다시 보내지 않는다. `error` 로그. 1700과 섞으면 같은 요청을 되풀이하게 되므로 반드시 상세 코드로 가른다. |
 | 없는 종목 | 성공 응답의 빈 행 | 다시 보내지 않는다. 브라우저에는 `unknown_symbol`. |
 | 잘못된 요청 | 상세 코드 1501~1999 | 다시 보내지 않는다. 우리 코드의 버그이므로 `error` 로그. 브라우저에는 `internal`. |
 | 상세 코드 없는 실패 | `return_code ≠ 0`, 대괄호 없음 | 잘못된 요청과 같이 다룬다. `return_msg`를 로그에 남긴다. |
@@ -560,15 +564,15 @@ pub enum ApiId {
     Au10001, // 접근토큰 발급              /oauth2/token
     Ka10099, // 종목정보 리스트            /api/dostk/stkinfo
     Ka10100, // 종목정보 하나              /api/dostk/stkinfo
-    Ka10095, // 관심종목정보(여러 종목 현재가) /api/dostk/stkinfo  [실측 대기]
+    Ka10095, // 지정종목 정보(여러 종목 현재가, 한 번에 100개까지) /api/dostk/stkinfo
     Ka10080, // 주식 분봉                  /api/dostk/chart
     Ka10081, // 주식 일봉                  /api/dostk/chart
     Ka10082, // 주식 주봉                  /api/dostk/chart
     Ka10083, // 주식 월봉                  /api/dostk/chart
     Ka20005, // 업종 분봉                  /api/dostk/chart
     Ka20006, // 업종 일봉                  /api/dostk/chart
-    Ka20007, // 업종 주봉                  /api/dostk/chart  [실측 대기]
-    Ka20008, // 업종 월봉                  /api/dostk/chart  [실측 대기]
+    Ka20007, // 업종 주봉(배열 inds_stk_pole_qry) /api/dostk/chart
+    Ka20008, // 업종 월봉(배열 inds_mth_pole_qry) /api/dostk/chart
 }
 
 impl ApiId {
@@ -626,7 +630,7 @@ pub struct MinuteChart {          // ka10080
 | 원천 | 가격 원문 예 | 내부 `Price`(centi) | 브라우저 | 거래량 |
 |---|---|---|---|---|
 | ka10080/81/82/83 주식 | `"193500"`, `"-193400"` | 절댓값 × 100 → `19_350_000` | `193500` | 주. `trde_qty` |
-| ka20005/06 지수 | `"505969"`, `"-505969"` | 절댓값 그대로 → `505_969`(이미 100배 정수) | `5059.69` | 단위 미확인(천 주로 보임). 받은 값 그대로 |
+| ka20005/06/07/08 지수 | `"505969"`, `"-505969"` | 절댓값 그대로 → `505_969`(이미 100배 정수) | `5059.69` | 단위 미확인(천 주로 보임). 받은 값 그대로 |
 | 0B 주식 실시간 | `"+71500"`(명세) | 절댓값 × 100 | 원 | 필드 15의 절댓값(주) |
 | 0J 지수 실시간 | [월요일 실측 대기: 100배 정수인지 소수인지] | 실측 뒤 정한다 | 포인트 | [월요일 실측 대기] |
 
@@ -668,7 +672,7 @@ pub enum Direction { UpperLimit, Up, Flat, LowerLimit, Down }
 
 - 기준가는 등락의 기준이 되는 가격이다(보통 전일 종가). 종목마다 그날 한 번 정한다.
   - 실시간이 있으면 첫 0B에서 `기준가 = 현재가 − 방향 부호 × |전일대비|`로 구한다. 방향 부호는 상승·상한이면 +1, 하락·하한이면 −1, 보합이면 0이다.
-  - 실시간이 없으면(#3, 넘친 관심종목) ka10095의 현재가·전일대비·방향으로 같은 식을 쓴다 [실측 대기].
+  - 실시간이 없으면(#3, 넘친 관심종목) ka10095를 쓴다. 기준가는 `base_pric`(부호 없음), 방향은 `pred_pre_sig`, 현재가는 `cur_prc`의 절댓값이다. 실측에서 100종목 모두 `|cur_prc| − base_pric = pred_pre`가 성립했고, `pred_pre_sig`도 `cur_prc` 부호와 맞았다(kiwoom.md §10.6).
   - ka10099의 `lastPrice`는 마지막 관측일의 기준가였다(kiwoom.md §5). 현재가로 쓰지 않는다. 장중에 이 값이 오늘 기준가인지는 [월요일 실측 대기]다.
 - `change = 현재가 − 기준가`, `changeRate = change / 기준가 × 100`.
 - 계산한 `change`의 부호가 방향 필드와 어긋나면 `warn` 로그를 남긴다. 값은 계산한 것을 쓴다.
@@ -716,7 +720,8 @@ pub enum StreamEvent {
 - 주소: `wss://api.kiwoom.com:10000/api/dostk/websocket`.
 - **LOGIN**: 연결 직후 `{"trnm":"LOGIN","token":…}`을 보낸다. 성공 응답은 `{"trnm":"LOGIN","return_code":0,…}`이다. 성공 응답을 받아야 `Live`로 간다. 인증 실패(§4.3)면 `invalidate`로 토큰을 한 번 다시 받아 재시도한다. 또 실패하면 `Halted`.
 - **PING**: 서버가 10초마다 `{"trnm":"PING"}` 텍스트 메시지를 보낸다. 받은 문자열을 그대로 돌려보낸다. WebSocket 프로토콜의 Ping 프레임은 오지 않는다. 30초 동안 아무 메시지도 없으면 연결이 죽었다고 보고 다시 연결한다.
-- **REG**: `data`는 `{"item":[…],"type":[…]}`의 배열이다. 한 원소에 종목 여럿을 넣을 수 있다. 서버는 type별 원소 하나에 종목을 최대 100개씩 담는다 [실측 대기: 한 원소의 한도]. 그룹 번호는 `grp_no: "1"` 하나만 쓴다. `refresh: "1"`(기존 것 유지)로 보낸다.
+- **REG**: `data`는 `{"item":[…],"type":[…]}`의 배열이다. 한 원소에 종목 여럿을 넣을 수 있고 원소 하나의 한도는 따로 없다. 서버는 type별 원소 하나에 모두 담는다.
+- **REG 한도**: 그룹당 200(`105118`), **접속 전체 200**(`105115`)이다. 그룹을 나눠도 늘지 않는다. **0J 지수도 이 200에 든다**(kiwoom.md §10.7). 서버는 §5.3의 `REALTIME_LIMIT`로 미리 지키므로 이 오류는 우리 버그다. 받으면 `error` 로그를 남기고 세션을 다시 연결해 원하는 집합을 처음부터 맞춘다. 그룹 번호는 `grp_no: "1"` 하나만 쓴다. `refresh: "1"`(기존 것 유지)로 보낸다.
 - **REMOVE**: **type별로 따로 보낸다.** 0B와 0J를 한 요청에 섞으면 `105112`로 실패한다.
 - **한 번에 하나**: REG/REMOVE 응답에는 요청 번호가 없다. 그래서 제어 메시지는 하나씩 보내고 응답을 기다린다. 5초 안에 응답이 없으면 실패로 본다.
 - **키움 쪽 목록은 응답을 보고 바꾼다**: 세션은 키움이 받아들인 종목 목록(`accepted`)을 따로 든다. REG·REMOVE의 성공 응답을 받은 뒤에만 `accepted`를 바꾼다. 실패하면 한 번 다시 보낸다. 또 실패하면 세션을 닫고 다시 연결한다. 다시 연결하면 `accepted`를 비우고 원하는 집합 전체를 처음부터 REG 하므로 어긋남이 없어진다. 200 한도 계산(§5.3)은 원하는 집합으로 한다.
@@ -769,6 +774,7 @@ pub struct SubscriptionManager {
 }
 
 pub const RELEASE_GRACE_SECS: i64 = 30;
+/// 키움 접속 전체 한도. 0B 종목과 0J 지수를 더해서 센다(kiwoom.md §10.7).
 pub const REALTIME_LIMIT: usize = 200;
 
 pub struct Plan {
@@ -793,11 +799,12 @@ impl SubscriptionManager {
 
 `plan`의 규칙:
 
+0. **지수 몫**: 0J 지수도 200에 든다. 그리고 지수는 ka10095로 조회할 수 없어 넘쳐도 1분 조회로 돌릴 수 없다. 그래서 누가 잡았든(관심종목만이라도) 지수는 칸과 같은 우선순위로 받는다. 종목이 쓸 수 있는 자리는 `200 − 받는 지수 수`다. v1의 지수는 코스피·코스닥 둘뿐이라 종목 자리는 198 이상이다.
 1. **유지**: `admitted`에 있는 종목 중 보유자가 있거나 30초 유예 중인 종목은 그대로 둔다. 새 종목이 들어온다고 칸·알림이 잡은 종목을 밀어내지 않는다.
 2. **빼기**: 보유자가 없고 30초가 지난 종목은 `admitted`에서 뺀다.
 3. **새로 받기**: `admitted`에 없는 후보를 우선순위 순서로 넣는다. 우선순위는 칸 > 알림 > 관심종목만 잡은 종목이다. 같은 우선순위 안에서는 보유자가 생긴 시각이 이른 순서다.
 4. **자리가 없을 때**: 새 후보가 칸이나 알림이면 자리를 만든다. 먼저 30초 유예 중인 종목을 뺀다. 그래도 없으면 관심종목만 잡은 종목을 뺀다. 둘 다 없으면 그 보유자는 `rejected`다.
-5. 관심종목만 잡았는데 실시간에 못 든 종목은 `polled`로 간다. 1분마다 `Ka10095`로 한 번에 묶어 조회한다(`Background`).
+5. 관심종목만 잡았는데 실시간에 못 든 종목은 `polled`로 간다. 1분마다 `Ka10095`로 **100종목씩** 묶어 조회한다(`Background`). 101종목 이상은 `1634`로 거절된다.
 6. **회복**: 자리가 나면 `rejected`였던 보유자를 3번 규칙으로 다시 넣는다. 들어가면 알린다. 칸이면 같은 `sub`로 `subscribed`를 다시 보낸다. 알림이면 `Alert.warning`을 `null`로 되돌린다.
 
 `MarketHub`는 보유자가 바뀔 때와 1초 타이머마다 `plan`을 다시 계산한다. `realtime`이 바뀌었으면 `KiwoomStream::set_desired`를 부른다.
@@ -899,7 +906,7 @@ pub struct HubSnapshot {
 | 서버 메모리 | 열려 있는 `SeriesKey`의 확정 봉과 캐시 구간, 종목 목록 | 시리즈는 쓰는 곳이 없어지고 10분 뒤 내린다. 매일 07:45에 모두 버린다. 서버를 끄면 사라진다 |
 | 브라우저 메모리 | §8 참고 | 탭 수명 |
 
-- 시세는 디스크에 남기지 않는다(ADR 0003). Postgres에는 시세용 스키마가 없다. Postgres는 #3부터 사용자 자료(`app` 스키마)에만 쓴다.
+- 시세는 디스크에 남기지 않는다(ADR 0003). SQLite 파일(#3부터)에는 사용자 자료만 둔다.
 - 서버를 다시 켜면 캐시는 빈 상태다. 차트를 열면 키움에서 다시 받는다. 처음 열 때 일봉·분봉 1회, 주봉 2회, 월봉 3회 조회라 몇 초 안에 뜬다(§6.5).
 - 키움이 응답하지 않으면(점검 시간 등) 이미 메모리에 있는 시리즈만 보인다. 새로 여는 차트는 `kiwoom_unavailable`이다. ADR 0003이 받아들인 비용이다.
 - 현재 봉은 캐시하지 않는다. 캐시에 넣는 함수는 `ConfirmedBar`만 받는다.
@@ -962,7 +969,7 @@ pub struct SeriesId(u64);
 - **과거로 늘리기**(스크롤)
   - `oldest`보다 이른 봉이 필요하면 오늘부터 시작한 연속조회 체인을 따라 내려간다.
   - 시리즈의 `cont`(마지막으로 받은 연속조회 키)에서 이어 받는다.
-  - 키가 없거나 만료되었으면 오늘부터 다시 따라간다. 한 페이지가 분봉 900·일봉 600개라, 1분봉 1년 끝까지 가도 약 191페이지, 초당 4회로 약 48초다. [실측 대기: `next-key`가 얼마 동안 유효한지]
+  - `next-key`는 15분 묵혀도 통했고 이어 받은 봉에 빠짐·겹침이 없었다(kiwoom.md §10.3). 그래서 기억한 키가 15분 안이면 그대로 쓴다. 15분이 넘었거나, 키가 없거나, 키로 받은 첫 봉이 기대한 위치(기억한 마지막 봉의 바로 앞)가 아니면 오늘부터 다시 따라간다. 한 페이지가 분봉 900·일봉 600개라, 1분봉 1년 끝까지 가도 약 191페이지, 초당 4회로 약 48초다. [실측 대기: 15분 넘는 유효 시간, 장중에 새 봉이 붙는 동안의 키]
   - 체인을 따라 내려가며 받은 페이지 중 이미 메모리에 있는 부분은 키움 값으로 덮어쓴다. 이것은 출처 교체(§6.4)이기도 하다.
   - 키움이 더 줄 것이 없거나(`cont-yn: N`) 분봉 1년 하한에 닿으면 `reached_origin = true`.
 - **앞으로 늘리기**(최신으로 따라잡기, `refresh_latest`)
@@ -1039,7 +1046,7 @@ impl BarService {
   - `t < floor`인 분봉은 돌려주지 않는다. 받아도 메모리에 넣지 않는다.
   - 다음 페이지가 하한 아래로만 가게 되면 `nextBefore = null`.
   - 일·주·월봉에는 하한이 없다. 일봉은 1985년까지 받을 수 있다.
-- **지표 알림**: 알림이 잡은 키는 지표 계산에 필요한 N개(§7.2)를 서버가 미리 채운다. 서버를 켤 때와 07:45 비우기 뒤에도 다시 채운다.
+- **지표 알림**: 알림이 잡은 키는 지표 계산에 필요한 N개(§7.3)를 서버가 미리 채운다. 서버를 켤 때와 07:45 비우기 뒤에도 다시 채운다.
 
 ### 6.6 종목 목록과 검색
 
@@ -1078,95 +1085,126 @@ impl BarService {
 
 ## 7. 사용자 자료 스키마
 
-> 켜지는 단계: #3(관심종목, 레이아웃 기본 1칸, `ui_state`), #6(드로잉), #7(여러 칸), #8(알림)
+> 켜지는 단계: #3(SQLite 파일, 관심종목, 레이아웃 기본 1칸, `ui_state`), #6(드로잉), #7(여러 칸), #8(알림)
 
-`app` 스키마에 둔다. sqlx 마이그레이션(`migrations/`)으로 관리한다. 사용자는 한 명뿐이라 사용자 id 열이 없다(ADR 0001).
+SQLite 파일 하나(`data/vally.db`, git 제외)에 둔다(ADR 0006). sqlx의 `sqlite` 기능으로 열고, 마이그레이션은 sqlx 마이그레이션(`migrations/`)으로 한다. 사용자는 한 명뿐이라 사용자 id 열이 없다(ADR 0001).
 
-- id는 브라우저가 만드는 UUID(v7)다. 그래서 생성과 수정이 모두 `PUT /…/:id`(upsert)다. 자동 저장을 몇 번 다시 보내도 결과가 같다.
-- JSON 열(`chart_settings`, `style`, `ui_state.state`)은 서버가 받을 때 크기(64KB)만 검사하고 그대로 저장한다. 모양은 프런트엔드가 정한다. 서버가 해석해야 하는 것(드로잉 점, 알림 조건)은 별도 열로 두고 파싱해서 검사한다.
+- id는 브라우저가 만드는 UUID(v7) 문자열이다. `TEXT`로 저장한다. 그래서 생성과 수정이 모두 `PUT /…/:id`(upsert, `INSERT … ON CONFLICT(id) DO UPDATE`)다. 자동 저장을 몇 번 다시 보내도 결과가 같다.
+- 시각은 `INTEGER`(Unix 초)다. 브라우저 계약의 `UnixSeconds`와 같은 값이다.
+- JSON 열은 JSON 텍스트(`TEXT`)이고 `CHECK (json_valid(…))`를 건다. 서버가 받을 때 크기(64KB)만 검사하고 그대로 저장한다. 모양은 프런트엔드가 정한다. 모르는 키도 버리지 않고 그대로 돌려준다. 서버가 해석해야 하는 것(드로잉 점, 알림 조건)은 별도 열로 두고 파싱해서 검사한다.
+- 참/거짓은 `INTEGER` 0·1이다(`CHECK (x IN (0,1))`).
 
-### 7.1 테이블
+### 7.1 연결
+
+```rust
+pub struct AppDb {
+    /// 읽기 풀. 크기 4.
+    read: SqlitePool,
+    /// 쓰기 풀. 크기 1. 모든 쓰기가 이 연결 하나로 줄 선다.
+    write: SqlitePool,
+}
+
+impl AppDb {
+    /// 파일과 상위 디렉터리가 없으면 만든다. 열고 나서 마이그레이션을 돌린다.
+    pub async fn open(path: &Path) -> Result<AppDb, DbError>;
+}
+```
+
+- **파일**: `VALLY_DB_PATH`(§11.1). 기본 `data/vally.db`(서버 작업 디렉터리 기준). `data/`가 없으면 만든다. 파일이 없으면 만든다(`create_if_missing`).
+- **연결마다 거는 설정**(sqlx `SqliteConnectOptions`)
+  - `journal_mode = WAL`: 쓰는 동안에도 읽기가 막히지 않는다.
+  - `foreign_keys = ON`: SQLite는 연결마다 꺼진 채로 시작하므로 모든 연결에 건다. `ON DELETE CASCADE`가 이것에 기댄다.
+  - `busy_timeout = 5000`(5초): 잠금을 기다리다 곧바로 `SQLITE_BUSY`로 실패하지 않게 한다.
+  - `synchronous = NORMAL`: WAL에서 권장되는 값이다. 전원이 나가면 마지막 몇 개의 커밋을 잃을 수 있지만 파일은 깨지지 않는다. 자동 저장 자료라 받아들인다.
+- **풀 크기**: 쓰기 풀 1, 읽기 풀 4. SQLite는 쓰는 사람이 한 번에 하나뿐이다. 쓰기 연결을 하나로 두면 쓰기끼리 `SQLITE_BUSY`로 부딪히지 않는다. 쓰기는 자동 저장으로 1초에 한 번 정도라 충분하다.
+- **트랜잭션**: 쓰기 트랜잭션은 `BEGIN IMMEDIATE`로 연다. 레이아웃과 칸처럼 여러 테이블을 함께 바꾸는 쓰기는 한 트랜잭션이다.
+- **백업**: 파일 복사로 한다. 서버가 켜져 있을 때는 `VACUUM INTO 'data/backup-YYYYMMDD.db'`로 한다(WAL 파일까지 일관되게 담긴다). 자동 백업은 v1에 두지 않는다.
+- 서버 하나 보장은 잠금 파일이 맡는다(§4.1). 그래서 같은 DB 파일을 두 서버가 여는 일은 없다.
+
+### 7.2 테이블
 
 ```sql
-CREATE SCHEMA app;
-
 -- 관심종목: 목록 하나
-CREATE TABLE app.watchlist (
-  symbol   text    PRIMARY KEY,
-  position integer NOT NULL UNIQUE
-);
+CREATE TABLE watchlist (
+  symbol   TEXT    PRIMARY KEY,
+  position INTEGER NOT NULL UNIQUE
+) STRICT;
 
 -- 레이아웃
-CREATE TABLE app.layouts (
-  id          uuid        PRIMARY KEY,
-  name        text        NOT NULL UNIQUE,
-  arrangement text        NOT NULL CHECK (arrangement IN ('1','2h','2v','3','4')),
-  sync        jsonb       NOT NULL,        -- { crosshair: bool, scroll: bool }. 빠진 키는 true로 읽는다
-  position    integer     NOT NULL,
-  updated_at  timestamptz NOT NULL
-);
+CREATE TABLE layouts (
+  id          TEXT    PRIMARY KEY,                     -- UUID v7
+  name        TEXT    NOT NULL UNIQUE,
+  arrangement TEXT    NOT NULL CHECK (arrangement IN ('1','2h','2v','3','4')),
+  sync        TEXT    NOT NULL CHECK (json_valid(sync)),  -- { crosshair: bool, scroll: bool }. 빠진 키는 true로 읽는다
+  position    INTEGER NOT NULL,
+  updated_at  INTEGER NOT NULL                         -- Unix 초
+) STRICT;
 
-CREATE TABLE app.layout_cells (
-  layout_id      uuid     NOT NULL REFERENCES app.layouts(id) ON DELETE CASCADE,
-  slot           smallint NOT NULL CHECK (slot BETWEEN 0 AND 3),
-  symbol         text     NOT NULL,
-  period         text     NOT NULL,
-  symbol_link    boolean  NOT NULL,       -- 종목 연동
-  chart_settings jsonb    NOT NULL,       -- 지표·기간·축·비교 종목. 프런트엔드 소유
+CREATE TABLE layout_cells (
+  layout_id      TEXT    NOT NULL REFERENCES layouts(id) ON DELETE CASCADE,
+  slot           INTEGER NOT NULL CHECK (slot BETWEEN 0 AND 3),
+  symbol         TEXT    NOT NULL,
+  period         TEXT    NOT NULL,
+  symbol_link    INTEGER NOT NULL CHECK (symbol_link IN (0,1)),   -- 종목 연동
+  chart_settings TEXT    NOT NULL CHECK (json_valid(chart_settings)),  -- 지표·기간·축·비교 종목. 프런트엔드 소유
   PRIMARY KEY (layout_id, slot)
-);
+) STRICT;
 -- 칸 개수와 arrangement가 맞는지는 서버가 쓰기 전에 검사한다('1'→1칸, '2h'/'2v'→2칸, '3'→3칸, '4'→4칸).
 
 -- 마지막으로 연 레이아웃, 테마 같은 화면 상태. 64KB 이하. 모르는 키도 그대로 저장한다.
-CREATE TABLE app.ui_state (
-  singleton boolean PRIMARY KEY DEFAULT true CHECK (singleton),
-  state     jsonb   NOT NULL
-);
+CREATE TABLE ui_state (
+  singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+  state     TEXT    NOT NULL CHECK (json_valid(state))
+) STRICT;
 
 -- 드로잉: 종목에 붙는다. 봉 주기와 레이아웃에는 붙지 않는다.
-CREATE TABLE app.drawings (
-  id         uuid        PRIMARY KEY,
-  symbol     text        NOT NULL,
-  tool       text        NOT NULL CHECK (tool IN ('trendline','hline','vline','rect','fib','text')),
-  points     jsonb       NOT NULL,        -- [{ t: Unix 초, price: number }]
-  text       text,
-  style      jsonb       NOT NULL,
-  updated_at timestamptz NOT NULL
-);
-CREATE INDEX ON app.drawings (symbol);
+CREATE TABLE drawings (
+  id         TEXT    PRIMARY KEY,
+  symbol     TEXT    NOT NULL,
+  tool       TEXT    NOT NULL CHECK (tool IN ('trendline','hline','vline','rect','fib','text')),
+  points     TEXT    NOT NULL CHECK (json_valid(points)),   -- [{ t: Unix 초, price: number }]
+  text       TEXT,
+  style      TEXT    NOT NULL CHECK (json_valid(style)),
+  updated_at INTEGER NOT NULL
+) STRICT;
+CREATE INDEX drawings_by_symbol ON drawings (symbol);
 
 -- 알림
-CREATE TABLE app.alerts (
-  id          uuid        PRIMARY KEY,
-  symbol      text        NOT NULL,
-  condition   jsonb       NOT NULL,       -- AlertCondition(§8.2). 서버가 파싱한다
-  repeat      text        NOT NULL CHECK (repeat IN ('once','every')),
-  enabled     boolean     NOT NULL,
-  channels    text[]      NOT NULL,       -- 'telegram', 'in_app'
-  note        text,
-  updated_at  timestamptz NOT NULL
-);
+CREATE TABLE alerts (
+  id          TEXT    PRIMARY KEY,
+  symbol      TEXT    NOT NULL,
+  condition   TEXT    NOT NULL CHECK (json_valid(condition)),  -- AlertCondition(§8.2). 서버가 파싱한다
+  repeat      TEXT    NOT NULL CHECK (repeat IN ('once','every')),
+  enabled     INTEGER NOT NULL CHECK (enabled IN (0,1)),
+  channels    TEXT    NOT NULL CHECK (json_valid(channels)),   -- JSON 배열: ["telegram","in_app"]
+  note        TEXT,
+  updated_at  INTEGER NOT NULL
+) STRICT;
 
-CREATE TABLE app.alert_events (
-  id          bigserial   PRIMARY KEY,
-  alert_id    uuid        NOT NULL REFERENCES app.alerts(id) ON DELETE CASCADE,
-  kind        text        NOT NULL CHECK (kind IN ('price','indicator')),
-  fired_at    timestamptz NOT NULL,
-  bar_t       bigint      NOT NULL,       -- 판단에 쓴 봉의 시작 시각(가격 알림은 체결이 속한 1분 구간 시작)
-  bar_source  text        NOT NULL CHECK (bar_source IN ('realtime','kiwoom')),  -- BarSource 직렬화 이름
-  message     text        NOT NULL,
-  delivered   jsonb       NOT NULL        -- 채널별 성공/실패
-);
+CREATE TABLE alert_events (
+  id          INTEGER PRIMARY KEY,                    -- rowid. 자동으로 는다
+  alert_id    TEXT    NOT NULL REFERENCES alerts(id) ON DELETE CASCADE,
+  kind        TEXT    NOT NULL CHECK (kind IN ('price','indicator')),
+  fired_at    INTEGER NOT NULL,                       -- Unix 초
+  bar_t       INTEGER NOT NULL,       -- 판단에 쓴 봉의 시작 시각(가격 알림은 체결이 속한 1분 구간 시작)
+  bar_source  TEXT    NOT NULL CHECK (bar_source IN ('realtime','kiwoom')),  -- BarSource 직렬화 이름
+  message     TEXT    NOT NULL,
+  delivered   TEXT    NOT NULL CHECK (json_valid(delivered))  -- 채널별 성공/실패
+) STRICT;
+CREATE INDEX alert_events_by_time ON alert_events (fired_at DESC);
 -- 지표 알림만 (alert_id, bar_t) 중복을 막는다(D9). 가격 알림은 같은 1분 안에 여러 번 울릴 수 있다(every).
-CREATE UNIQUE INDEX alert_events_once_per_bar ON app.alert_events (alert_id, bar_t)
+-- SQLite도 부분 인덱스를 지원한다.
+CREATE UNIQUE INDEX alert_events_once_per_bar ON alert_events (alert_id, bar_t)
   WHERE kind = 'indicator';
 ```
 
+- `STRICT` 테이블이라 열 타입이 어긋난 값은 들어가지 않는다.
 - 첫 마이그레이션이 "기본" 레이아웃 하나를 넣는다(1칸, 코스피 지수 일봉, `sync` 둘 다 `true`). #3에서 차트 설정 자동 저장은 이 레이아웃의 칸을 고치는 것이다. 레이아웃이 0개인 상태는 없다. 마지막 레이아웃은 지울 수 없다.
 - 드로잉 점 개수는 도구마다 고정이다: 추세선 2, 수평선 1, 수직선 1, 사각형 2, 피보나치 되돌림 2, 텍스트 1. 서버가 검사한다.
 - 드로잉 점의 가격은 0.01 단위 정수가 아니라 실수다. 드로잉은 봉 가격이 아닌 아무 가격에나 놓을 수 있다.
+- 중복 금지 인덱스에 걸리면(`SQLITE_CONSTRAINT_UNIQUE`) 이미 울린 것이므로 보내지 않는다(§7.3).
 
-### 7.2 알림의 타입과 판단
+### 7.3 알림의 타입과 판단
 
 ```rust
 pub enum AlertCondition {
@@ -1675,7 +1713,7 @@ pub struct Line {
 
 pub struct Output { pub lines: Vec<Line> }
 
-/// 한 번에 전부 계산한다. 서버의 지표 알림은 이것만 쓴다(§7.2).
+/// 한 번에 전부 계산한다. 서버의 지표 알림은 이것만 쓴다(§7.3).
 pub fn compute(spec: &Spec, bars: &Columns) -> Output;
 ```
 
@@ -1786,7 +1824,7 @@ pub fn future_bar_starts(period: &str, last_start: f64, n: usize) -> Result<Vec<
 | 스토캐스틱 슬로우 | `StochSlow { k, d, smooth }` | 5, 3, 3 | `k` `d` | 국내 HTS 관행 |
 
 - **참조값**: 공개된 계산 예시표(Wilder의 RSI 원문 예시, StockCharts 예시 등)를 고정 파일로 커밋한다. 출처를 파일 머리에 적는다. 키움 HTS 화면 값으로 몇 점을 더 확인한다. 특히 일목 선행스팬 이동량과 스토캐스틱 값은 HTS와 맞춰 본다.
-- EMA 계열(EMA, MACD, RSI)은 입력이 시작하는 봉에 따라 값이 조금 다르다. 서버 알림은 최근 N개로 매번 다시 계산하고(§7.2) 화면은 불러온 봉 전체로 계산한다. 그래서 두 값이 아주 조금 다를 수 있다.
+- EMA 계열(EMA, MACD, RSI)은 입력이 시작하는 봉에 따라 값이 조금 다르다. 서버 알림은 최근 N개로 매번 다시 계산하고(§7.3) 화면은 불러온 봉 전체로 계산한다. 그래서 두 값이 아주 조금 다를 수 있다.
 
 ---
 
@@ -1801,7 +1839,7 @@ pub fn future_bar_starts(period: &str, last_start: f64, n: usize) -> Result<Vec<
 | 체결 날짜 정하기 | 수신 시각과 체결시간 쌍을 손으로 쓴다. 창 밖, 미래, 너무 과거 | `domain` | #4 |
 | 현재 봉 집계 | 손으로 쓴 체결 목록 → `aggregate` → 손으로 쓴 확정 봉 목록·현재 봉과 비교. 시드 경계(`DayCum`, `Unknown`), 늦은 체결, 체결 없는 분, 단일가 체결 한 건, 불완전한 봉의 `needs_verify` | `domain` | #4 |
 | 알림 판단 | 손으로 쓴 체결 목록으로 가격 알림: 아래에서 위로 넘어섬, 만들 때 이미 넘어 있음(안 울림), 반대편 갔다 다시 넘어섬(every), 기준 가격 없음 → 첫 체결은 기준만. 손으로 쓴 지표 값 쌍으로 교차: 같은 값, NaN | `domain` | #8 |
-| 지표 알림 기록 | `sqlx::test`(#3부터의 Postgres)로 같은 (알림, `bar_t`) 두 번 → 한 번만 보냄. `bar_source` 직렬화 이름이 `realtime`/`kiwoom` | `server::alert` | #8 |
+| 지표 알림 기록 | `sqlx::test`(sqlite)로 같은 (알림, `bar_t`) 두 번 → 한 번만 보냄. `bar_source` 직렬화 이름이 `realtime`/`kiwoom` | `server::alert` | #8 |
 | 구독 관리자 | `hold`/`release`/`plan`을 시각과 함께 부르는 시나리오: 30초 유예, 유예 중 `hold`로 취소, 200 한도, 새 종목이 기존 칸·알림을 밀어내지 않음, 유예 종목 → 관심종목만 잡은 종목 순으로 밀려남, 넘친 관심종목 → `polled`, `release_conn`, 자리가 나면 `rejected` 회복 | `server::market`(순수 부분) | #4 |
 | 복구 순서 | 가짜 `BarService`로: 복구 중 체결 쌓기, 세대가 다른 응답 버리기, 복구 중 재단절, 실패 뒤 재시도 | `server::market` | #4 |
 | 지표 | 지표 종류마다 참조값 고정 파일(CSV)과 대조(허용 오차 1e-6). §9.2 불변식을 proptest로: 무작위 봉 목록에서 증분 결과 = 전체 계산 결과 | `indicators` | #5 |
@@ -1814,6 +1852,7 @@ pub fn future_bar_starts(period: &str, last_start: f64, n: usize) -> Result<Vec<
 | 정적 파일 | `/api/없는경로` → JSON 404, `/assets/없는.js` → 404, `/layout/x` → index.html, `.wasm` MIME, 캐시 헤더 | `server::http` | #2 |
 | 브라우저 계약 | ts-rs 생성 파일이 커밋된 것과 같은지 CI 검사. 서버 → 브라우저 메시지 JSON 스냅숏 테스트 | `server::http` | #2·#4 |
 | 잠금 파일 | 임시 디렉터리의 잠금 파일로: 첫 `InstanceLock::acquire` 성공, 같은 경로 두 번째는 `Held { pid }`, 첫 잠금을 drop하면 다시 잡힘, 남아 있는 파일(잠금 없음)은 막지 않음. 통합 테스트: 서버 두 번째 실행이 종료 코드 1로 끝나고 키움 요청을 보내지 않음 | `server::instance` | #2 |
+| 사용자 자료 | `sqlx::test`(sqlite, 테스트마다 새 DB)로: 마이그레이션, 레이아웃 PUT 두 번(같은 결과), 레이아웃 지우면 칸도 지워짐(`foreign_keys`), 마지막 레이아웃 삭제 거절, `ui_state`의 모르는 키 왕복과 64KB 초과 거절, 잘못된 JSON은 `json_valid`로 거절. 연결 설정(`journal_mode=wal`, `foreign_keys=1`, `busy_timeout=5000`)을 `PRAGMA`로 읽어 확인 | `server::store` | #3 |
 | 비밀값 | `Config`, `KiwoomAuth`, 텔레그램 클라이언트의 `Debug` 출력에 비밀값이 없는지 | `server::config` | #2 |
 
 **키움 파서 고정 입력**(kiwoom.md에서 옮긴다)
@@ -1844,7 +1883,7 @@ pub fn future_bar_starts(period: &str, last_start: f64, n: usize) -> Result<Vec<
 |---|---|---|
 | `VALLY_KIWOOM_APP_KEY` | 예 | 실계좌 앱키(ADR 0004) |
 | `VALLY_KIWOOM_APP_SECRET` | 예 | 실계좌 시크릿(ADR 0004) |
-| `VALLY_DATABASE_URL` | #3부터 예 | Postgres 접속 문자열(사용자 자료만). 예: `127.0.0.1:5433`의 Docker compose Postgres. #2에서는 읽지 않는다 |
+| `VALLY_DB_PATH` | 아니오 | 사용자 자료 SQLite 파일 경로. 기본 `data/vally.db`. #2에서는 읽지 않는다 |
 | `VALLY_LOCK_PATH` | 아니오 | 잠금 파일 경로(§4.1). 기본 `$XDG_RUNTIME_DIR/vallythevally/server.lock`, 없으면 `/tmp/vallythevally-<uid>/server.lock` |
 | `VALLY_BIND` | 아니오 | 받는 주소. 기본 `127.0.0.1:8080` |
 | `VALLY_TELEGRAM_BOT_TOKEN` | 아니오 | 없으면 텔레그램 채널을 끈다(#8 전에는 없어도 된다) |
@@ -1898,7 +1937,8 @@ impl<T> Secret<T> { pub fn expose(&self) -> &T; }
 | 수정주가 | `upd=1`에 `base_dt=오늘`로 연속조회하면 과거 전체가 수정주가 | §6.3 |
 | 재시작 비용 | 처음 열 때 일봉·분봉 1회, 주봉 2회, 월봉 3회 조회. 캐시 없이도 몇 초 안에 뜬다 | §0, §6.1 |
 | `_AL` 차트 조회 | 일봉·분봉에서 통한다. 일봉은 NXT 이전 구간을 KRX 값으로 끊김 없이 채운다 | §2.1 |
-| 분봉 시각 | 구간 시작. 60분봉은 정시. 주·월봉 `dt`는 구간 첫날 | §3.2 |
+| 분봉 시각 | 구간 시작. 60분봉은 정시 | §3.2 |
+| 주·월봉 `dt` | 구간의 첫 관측일(예: 11월 월봉 `20261102`). 주봉은 월요일, 월봉은 1일로 맞춘다 | §3.2 |
 | 체결 없는 분 | 키움도 건너뛴다 | §3.2 |
 | 마지막 체결 | 19:59:59. 체결 창 [08:00, 20:00) | §3.1 |
 | 일봉 종가 | 그날 마지막 봉(19:59)의 종가. 일봉은 20:00 뒤에 확정 | §3.3 |
@@ -1913,6 +1953,13 @@ impl<T> Secret<T> { pub fn expose(&self) -> &T; }
 | WebSocket 주소, LOGIN, PING | 문서대로. PING은 10초마다 텍스트 메시지 | §5.1 |
 | REG | 한 원소에 여러 종목. type 섞어도 된다 | §5.1 |
 | REMOVE | type별로 따로. 섞으면 105112 | §5.1 |
+| 요청 개수 초과 | HTTP 429, `return_code: 5`, `[1700:… 유량=5 …]`. 100ms 안에 7회까지 통과, 8번째에 걸림(창 방식은 모름). 운영은 초당 4회 | §4.2, §4.3 |
+| 토큰 무효 | HTTP 200, `return_code: 3`, `[8005:Token이 유효하지 않습니다]`. HTTP 401이 아니다 | §4.3 |
+| `next-key` 유효 시간 | 15분 묵혀도 통함. 이어 받은 봉에 빠짐·겹침 없음 | §6.3 |
+| 주봉·월봉 `_AL` | 통한다. NXT 이전은 KRX와 같다. 진행 중인 주·달도 봉으로 준다 | §2.1, §5.4 |
+| 지수 주봉·월봉 | ka20007·ka20008. 배열 `inds_stk_pole_qry`·`inds_mth_pole_qry`. 값은 100배 정수, 부호 없음. 한 페이지 300·240 | §4.4, §4.6 |
+| ka10095 | 한 번에 100종목까지. 101종목부터 `return_code: 5`, `[1634]`. 기준가 `base_pric`, 방향 `pred_pre_sig`. 연속조회 없음 | §4.3, §4.6, §5.3 |
+| WebSocket REG 한도 | 그룹당 200(`105118`), 접속 전체 200(`105115`). 0J도 여기에 센다. 원소 하나의 한도는 없다 | §5.1, §5.3 |
 | 토큰 유효 기간 | 발급 후 24시간 | §4.1 |
 | 같은 토큰으로 다시 접속 | 매번 LOGIN 성공 | §5.1 |
 
@@ -1936,15 +1983,9 @@ impl<T> Secret<T> { pub fn expose(&self) -> &T; }
 
 | # | 항목 | 기본값 | 바꿀 곳 |
 |---|---|---|---|
-| 1 | 초당 몇 회에서 요청 개수 초과가 나는가, 그때의 응답(HTTP 429인지, 상세 코드 1700인지) | 초당 4회로 운영. 판정은 둘 다 | §4.2, §4.3 |
-| 2 | 토큰 무효 응답 형태(HTTP 401인지, 상세 코드 8005인지) | 둘 다 | §4.3 |
-| 3 | `next-key`가 얼마 동안 유효한가 | 몇 분. 만료되면 오늘부터 다시 따라간다 | §6.3 |
-| 4 | 주봉·월봉(ka10082/83)에 `_AL`이 통하는가 | 통한다 | `kiwoom_stock_code` |
-| 5 | 지수 주봉·월봉 api-id(ka20007/08) | 이대로 | `ApiId` |
-| 6 | ka10095(여러 종목 현재가)의 형식과 한 번에 넣을 수 있는 종목 수 | 있다, 100 | §5.3 넘친 관심종목 |
-| 7 | REG 한 원소에 넣을 수 있는 종목 수, 전체 한도 | 100, 200 이상 | §5.1, `REALTIME_LIMIT` |
-| 8 | 1일이 주말인 달의 월봉 `dt` | 어느 쪽이든 `bucket`이 1일로 맞춘다 | §3.2 |
-| 9 | **키움이 수정주가를 언제 반영하는가**: 권리락·액면분할 당일 07:45 이전에 `upd_stkpc_tp=1` 조회가 이미 수정된 값을 주는가. 즉 07:45 비우기가 충분한가. 수정 사유가 생기는 날(권리락일 전후)에 07:45·08:00·장중 세 번 일봉을 받아 비교한다 | 충분하다(07:45 전에 반영된다) | 늦게 반영되면 비우기 시각을 늦추거나(예: 08:00 직전), 장중 한 번 더 비운다. §6.2 |
+| 1 | 만료된 진짜 토큰의 응답이 가짜 토큰과 같은 형태(HTTP 200, `return_code: 3`, `[8005]`)인가. 2026-11-09 22:48 만료 뒤에 확인할 수 있다 | 같다 | §4.3 |
+| 2 | `next-key`가 15분을 넘겨도 통하는가, 장중에 새 봉이 붙는 동안에도 같은 자리를 가리키는가 | 15분 안에만 쓴다. 넘으면 오늘부터 다시 따라간다 | §6.3 |
+| 3 | **키움이 수정주가를 언제 반영하는가**: 권리락·액면분할 당일 07:45 이전에 `upd_stkpc_tp=1` 조회가 이미 수정된 값을 주는가. 즉 07:45 비우기가 충분한가. 수정 사유가 생기는 날(권리락일 전후)에 07:45·08:00·장중 세 번 일봉을 받아 비교한다 | 충분하다(07:45 전에 반영된다) | 늦게 반영되면 비우기 시각을 늦추거나(예: 08:00 직전), 장중 한 번 더 비운다. §6.2 |
 
 ---
 
