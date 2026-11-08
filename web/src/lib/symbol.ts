@@ -20,10 +20,12 @@ export function symbolSub(code: SymbolCode, info: SymbolInfo | undefined): strin
   return info?.kind === "index" || isIndexCode(code) ? KIND_LABEL.index : code;
 }
 
-/** #2에서 켜지는 봉 주기(일·주·월). */
-export const PERIODS_ON = ["D", "W", "M"] as const satisfies readonly Period[];
-export type PeriodOn = (typeof PERIODS_ON)[number];
-export const isPeriodOn = (p: string): p is PeriodOn => (PERIODS_ON as readonly string[]).includes(p);
+/** 봉 주기, 짧은 것부터. 위쪽 막대와 `[` `]`가 이 순서를 쓴다. */
+export const PERIODS = ["1m", "3m", "5m", "15m", "30m", "60m", "D", "W", "M"] as const satisfies readonly Period[];
+// 계약에 봉 주기가 늘면 여기서 타입 오류가 난다.
+const _allPeriodsListed: Exclude<Period, (typeof PERIODS)[number]> extends never ? true : never = true;
+void _allPeriodsListed;
+export const isPeriod = (p: string): p is Period => (PERIODS as readonly string[]).includes(p);
 
 export const PERIOD_LABEL: Record<Period, string> = {
   "1m": "1분",

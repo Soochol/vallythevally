@@ -1,7 +1,10 @@
-import { PERIOD_LABEL, PERIODS_ON } from "../../lib/symbol";
+import type { Period } from "../../api/generated/Period";
+import { PERIOD_LABEL } from "../../lib/symbol";
 import { type CellState, useLayoutStore } from "../../stores/layout";
 
-/** 휴대폰 봉 주기 칩. #2에는 일·주·월만 있다. */
+const CHIPS = ["5m", "15m", "60m", "D", "W", "M"] as const satisfies readonly Period[];
+
+/** 휴대폰 봉 주기 칩(frontend.md §4). */
 export function PeriodChips({ cell }: { cell: CellState }) {
   const setPeriod = useLayoutStore((s) => s.setPeriod);
   return (
@@ -9,7 +12,7 @@ export function PeriodChips({ cell }: { cell: CellState }) {
       aria-label="봉 주기"
       className="hidden gap-1 overflow-x-auto border-b border-line px-3 pb-2 [grid-area:mper] [scrollbar-width:none] max-md:flex"
     >
-      {PERIODS_ON.map((p) => (
+      {CHIPS.map((p) => (
         <button
           key={p}
           type="button"

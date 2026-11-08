@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 import { isTypingTarget, matchHotkey } from "../lib/hotkeys";
-import { PERIODS_ON } from "../lib/symbol";
+import { PERIODS } from "../lib/symbol";
 import { useLayoutStore } from "../stores/layout";
 import { useSelectionStore } from "../stores/selection";
 
@@ -28,8 +28,8 @@ export function useHotkeys() {
         case "period":
           return layout.setPeriod(slot, action.period);
         case "periodStep": {
-          const i = (PERIODS_ON as readonly string[]).indexOf(cell.period);
-          const next = PERIODS_ON[Math.min(PERIODS_ON.length - 1, Math.max(0, i + action.step))];
+          const i = PERIODS.indexOf(cell.period);
+          const next = PERIODS[Math.min(PERIODS.length - 1, Math.max(0, i + action.step))];
           return next && layout.setPeriod(slot, next);
         }
         case "toggleLog":

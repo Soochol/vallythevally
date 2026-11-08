@@ -7,6 +7,7 @@ import {
   type ISeriesApi,
   LineStyle,
   PriceScaleMode,
+  type TickMarkType,
   type Time,
   type UTCTimestamp,
 } from "lightweight-charts";
@@ -23,7 +24,7 @@ import { Legend } from "./legend";
 import { addMainSeries, addVolumeSeries, applyMainColors, type MainSeries, priceFormat, setMainData, setVolumeData } from "./series";
 import type { ChartSettings } from "./settings";
 import type { ThemeTokens } from "./theme";
-import { formatBarTime, fromChartTime } from "./time";
+import { formatBarTime, formatTickMark, fromChartTime, isIntraday } from "./time";
 
 /** 왼쪽 끝이 이 봉 수 안으로 들어오면 과거 페이지를 받는다(frontend.md §5.7). */
 const LOAD_OLDER_WITHIN = 50;
@@ -110,6 +111,7 @@ export class ChartController {
         mode: next.settings.scale === "log" ? PriceScaleMode.Logarithmic : PriceScaleMode.Normal,
       });
     }
+    if (prev?.period !== next.period) this.chart.applyOptions({ timeScale: { timeVisible: isIntraday(next.period) } });
     if (prev?.symbol !== next.symbol || prev.venue !== next.venue || prev.period !== next.period) {
       if (prev && isIndexCode(prev.symbol) !== isIndex) this.main.api.applyOptions({ priceFormat: priceFormat(isIndex) });
       this.history = null;
@@ -163,12 +165,22 @@ export class ChartController {
       grid: { vertLines: { color: t.grid }, horzLines: { color: t.grid } },
       crosshair: { mode: CrosshairMode.Normal, vertLine: crossLine, horzLine: crossLine },
       rightPriceScale: { borderColor: t.line, scaleMargins: { top: 0.14, bottom: 0.22 } },
-      timeScale: { borderColor: t.line, rightOffset: RIGHT_OFFSET, timeVisible: false },
+      timeScale: {
+        borderColor: t.line,
+        rightOffset: RIGHT_OFFSET,
+        timeVisible: isIntraday(this.period()),
+        secondsVisible: false,
+        tickMarkFormatter: (time: Time, type: TickMarkType) => formatTickMark(time as UTCTimestamp, type, this.period()),
+      },
       localization: {
         locale: "ko-KR",
-        timeFormatter: (time: Time) => formatBarTime(fromChartTime(time as UTCTimestamp), this.view?.period ?? "D"),
+        timeFormatter: (time: Time) => formatBarTime(fromChartTime(time as UTCTimestamp), this.period()),
       },
     };
+  }
+
+  private period(): Period {
+    return this.view?.period ?? "D";
   }
 
   private recreateMain(isIndex: boolean): void {

@@ -26,3 +26,13 @@ test("수식키가 붙은 글자는 단축키가 아니다", () => {
   expect(matchHotkey(key("KeyL", { shiftKey: true }))).toBeNull();
   expect(matchHotkey(key("BracketRight"))).toEqual({ kind: "periodStep", step: 1 });
 });
+
+test("숫자는 분봉이다. Shift를 붙이면 15·30·60분", () => {
+  expect(matchHotkey(key("Digit1"))).toEqual({ kind: "period", period: "1m" });
+  expect(matchHotkey(key("Digit5"))).toEqual({ kind: "period", period: "5m" });
+  expect(matchHotkey(key("Digit1", { shiftKey: true }))).toEqual({ kind: "period", period: "15m" });
+  expect(matchHotkey(key("Digit3", { shiftKey: true }))).toEqual({ kind: "period", period: "30m" });
+  expect(matchHotkey(key("Digit6", { shiftKey: true }))).toEqual({ kind: "period", period: "60m" });
+  expect(matchHotkey(key("Digit6"))).toBeNull();
+  expect(matchHotkey(key("Digit1", { ctrlKey: true }))).toBeNull();
+});

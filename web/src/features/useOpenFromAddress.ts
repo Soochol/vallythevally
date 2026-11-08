@@ -3,7 +3,7 @@ import { useEffect } from "react";
 import { useSearchParams } from "react-router";
 import { ApiRequestError } from "../api/http";
 import { fetchSymbolInfo } from "../api/queries";
-import { isPeriodOn } from "../lib/symbol";
+import { isPeriod } from "../lib/symbol";
 import { isVenue, venueFor, type VenueTarget } from "../lib/venue";
 import { useLayoutStore } from "../stores/layout";
 import { useSelectionStore } from "../stores/selection";
@@ -28,7 +28,7 @@ export function useOpenFromAddress() {
     setParams({}, { replace: true });
     // 종목과 봉 주기를 한 번에 바꾼다. 따로 바꾸면 지금 종목의 새 봉 주기를 쓸데없이 한 번 더 받는다.
     const open = (target: VenueTarget | null) => {
-      if (period !== null && isPeriodOn(period)) setPeriod(slot, period);
+      if (period !== null && isPeriod(period)) setPeriod(slot, period);
       if (target !== null) setSymbol(slot, target, venue);
     };
     if (symbol === null) return open(null);
