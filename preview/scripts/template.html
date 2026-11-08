@@ -1,0 +1,545 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>종목 페이지 미리보기 · 삼성전자</title>
+<style>
+.pv{
+  --pv-bg:var(--background,#fcfcfb); --pv-fg:var(--foreground,#171717);
+  --pv-card:var(--card,#ffffff); --pv-muted:var(--muted,#f1f0ec); --pv-mfg:var(--muted-foreground,#5f5e5a);
+  --pv-border:var(--border,#e2e0da); --pv-c1:var(--chart-1,#2a78d6); --pv-c2:var(--chart-2,#eb6834); --pv-c3:var(--chart-3,#1baf7a);
+  font-family:var(--font-sans,ui-sans-serif,system-ui,-apple-system,"Apple SD Gothic Neo","Noto Sans KR",sans-serif);
+  background:var(--pv-bg); color:var(--pv-fg); padding:20px 18px 28px; line-height:1.5; font-size:14px;
+}
+.pv *{box-sizing:border-box}
+.pv .eyebrow{font-size:12px;color:var(--pv-mfg);letter-spacing:.02em}
+.pv h1{font-size:22px;line-height:1.3;margin:4px 0 6px;font-weight:700}
+.pv .lede{color:var(--pv-mfg);margin:0 0 12px;max-width:820px}
+.pv .badges{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:14px}
+.pv .badge{font-size:12px;padding:2px 8px;border-radius:999px;background:var(--pv-muted);color:var(--pv-mfg);border:1px solid var(--pv-border)}
+.pv .badge.warn{border-style:dashed}
+.pv .tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:10px;margin-bottom:14px}
+.pv .tile{background:var(--pv-card);border:1px solid var(--pv-border);border-radius:var(--radius,10px);padding:12px 14px}
+.pv .tile h3{font-size:13px;margin:0 0 8px;font-weight:600}
+.pv .kv{display:grid;grid-template-columns:auto 1fr;gap:3px 12px;font-size:13px}
+.pv .kv dt{color:var(--pv-mfg)}
+.pv .kv dd{margin:0;font-variant-numeric:tabular-nums;text-align:right}
+.pv .pending{color:var(--pv-mfg);font-style:normal;border-bottom:1px dashed var(--pv-mfg)}
+.pv .controls{display:flex;flex-wrap:wrap;gap:8px 14px;align-items:center;background:var(--pv-card);border:1px solid var(--pv-border);border-radius:var(--radius,10px);padding:10px 12px;margin-bottom:8px}
+.pv .seg{display:inline-flex;border:1px solid var(--input,#d6d4cd);border-radius:8px;overflow:hidden}
+.pv .seg button{font:inherit;font-size:13px;white-space:nowrap;border:0;background:transparent;color:var(--pv-fg);padding:5px 10px;cursor:pointer;border-right:1px solid var(--input,#d6d4cd)}
+.pv .seg button:last-child{border-right:0}
+.pv .seg button[aria-pressed="true"]{background:var(--primary,#1f2937);color:var(--primary-foreground,#fff)}
+.pv .seg button:hover:not([aria-pressed="true"]){background:var(--accent,#efeee9);color:var(--accent-foreground,#171717)}
+.pv .ctl-label{font-size:12px;color:var(--pv-mfg);margin-right:4px}
+.pv .replay{display:flex;flex-wrap:wrap;align-items:center;gap:8px;flex:1 1 280px;min-width:0}
+.pv .replay input[type=range]{min-width:120px}
+.pv .replay input[type=range]{flex:1;accent-color:var(--primary,#1f2937)}
+.pv .replay-date{font-variant-numeric:tabular-nums;font-size:13px;min-width:0}
+.pv .banner{display:none;font-size:13px;padding:7px 12px;border-radius:8px;margin-bottom:8px;background:var(--pv-muted);border:1px dashed var(--pv-mfg)}
+.pv .banner.on{display:block}
+.pv .readout{position:sticky;top:0;z-index:2;display:flex;flex-wrap:wrap;gap:4px 16px;font-size:12.5px;background:var(--pv-card);border:1px solid var(--pv-border);border-radius:8px;padding:7px 12px;margin-bottom:6px;font-variant-numeric:tabular-nums;min-height:36px}
+.pv .readout b{font-weight:600}
+.pv .readout .k{color:var(--pv-mfg)}
+.pv .sw{display:inline-block;width:10px;height:3px;border-radius:2px;vertical-align:middle;margin-right:4px}
+.pv .charts{background:var(--pv-card);border:1px solid var(--pv-border);border-radius:var(--radius,10px);padding:6px 0 4px;outline:none;touch-action:pan-y}
+.pv .charts:focus-visible{box-shadow:0 0 0 2px var(--ring,#2a78d6)}
+.pv .ptitle{display:flex;justify-content:space-between;align-items:baseline;gap:8px;padding:6px 14px 0;font-size:12.5px;font-weight:600}
+.pv .ptitle span{font-weight:400;color:var(--pv-mfg);font-size:12px}
+.pv svg{display:block;width:100%;overflow:visible}
+.pv svg text{font-family:inherit;font-size:11px;fill:var(--pv-mfg);font-variant-numeric:tabular-nums}
+.pv svg .lbl{font-size:11.5px;font-weight:600}
+.pv .legend{display:flex;flex-wrap:wrap;gap:4px 14px;font-size:12px;color:var(--pv-mfg);padding:0 14px}
+.pv .note{font-size:12px;color:var(--pv-mfg)}
+.pv .envpick{display:flex;flex-wrap:wrap;gap:6px 16px;padding:6px 14px 2px}
+.pv .envgroup{display:inline-flex;flex-wrap:wrap;align-items:center;gap:4px}
+.pv .envpick button{font:inherit;font-size:12.5px;border:1px solid var(--input,#d6d4cd);border-radius:999px;background:transparent;color:var(--pv-fg);padding:2px 10px;cursor:pointer;white-space:nowrap}
+.pv .envpick button.more{border-style:dashed;color:var(--pv-mfg)}
+.pv .envpick button[aria-pressed="true"]{background:var(--primary,#1f2937);color:var(--primary-foreground,#fff);border-color:transparent}
+.pv .envpick button:hover:not([aria-pressed="true"]){background:var(--accent,#efeee9);color:var(--accent-foreground,#171717)}
+.pv .ptitle.sub{font-size:12px;padding-top:10px}
+.pv section.block{margin-top:16px}
+.pv h2{font-size:16px;margin:0 0 8px}
+.pv table{border-collapse:collapse;width:100%;font-size:13px;font-variant-numeric:tabular-nums}
+.pv th,.pv td{border-bottom:1px solid var(--pv-border);padding:6px 8px;text-align:left;vertical-align:top}
+.pv th{font-weight:600;color:var(--pv-mfg);font-size:12px}
+.pv td.num{text-align:right}
+.pv .chip{display:inline-block;font-size:12px;padding:1px 7px;border-radius:6px;border:1px solid var(--pv-border)}
+.pv .chip.L{background:color-mix(in srgb,var(--pv-c3) 22%,transparent)}
+.pv .chip.X{background:repeating-linear-gradient(135deg,color-mix(in srgb,var(--pv-mfg) 28%,transparent) 0 3px,transparent 3px 7px)}
+.pv .tablewrap{overflow-x:auto;background:var(--pv-card);border:1px solid var(--pv-border);border-radius:var(--radius,10px)}
+.pv ol.events{margin:0;padding:0;list-style:none}
+.pv ol.events li{display:grid;grid-template-columns:28px 92px 1fr;gap:8px;padding:8px 0;border-bottom:1px solid var(--pv-border);font-size:13px}
+.pv .num-dot{display:inline-flex;width:20px;height:20px;border-radius:50%;align-items:center;justify-content:center;font-size:11px;border:1px solid var(--pv-mfg);color:var(--pv-fg)}
+.pv a{color:var(--primary,#1f4fa0)}
+.pv details{background:var(--pv-card);border:1px solid var(--pv-border);border-radius:var(--radius,10px);padding:10px 14px;margin-top:10px}
+.pv summary{cursor:pointer;font-weight:600;font-size:13.5px}
+.pv details ul{margin:8px 0 0;padding-left:18px;font-size:13px}
+.pv details li{margin:3px 0}
+.pv .empty{padding:30px;text-align:center;color:var(--pv-mfg)}
+@media (max-width:560px){.pv{padding:14px 10px}.pv .ptitle{display:block}.pv .ptitle span{display:block}.pv .kv{grid-template-columns:1fr;gap:0}.pv .kv dd{text-align:left;margin-bottom:6px}.pv .tiles{grid-template-columns:1fr}.pv h1{font-size:19px}.pv ol.events li{grid-template-columns:24px 1fr}.pv ol.events li .ev-date{grid-column:2}.pv ol.events li .ev-body{grid-column:2}}
+</style>
+</head>
+<body style="margin:0;background:var(--background,#fcfcfb)">
+<div class="pv" id="pv">
+  <div class="eyebrow">종목 페이지 틀 미리보기 · 005930 · 코스피 · 반도체</div>
+  <h1>삼성전자 — 주도, 상실, 그리고 재등장</h1>
+  <p class="lede">한 종목의 가격·거래대금·상대강도·실적·시장환경을 하나의 날짜축으로 겹쳐 봅니다. 배경의 단계 띠는 아래 <b>예시 규칙</b>이 그날까지의 자료만으로 판정한 결과이며, 비교 기준을 바꾸면 판정도 바뀝니다.</p>
+  <div class="badges">
+    <span class="badge warn">미리보기 — 야후 일별 시세, 교차검증 전</span>
+    <span class="badge warn">판정 규칙은 예시 (Phase 0에서 확정)</span>
+    <span class="badge warn">재무 패널: 데이터 확보 전</span>
+    <span class="badge" id="asof"></span>
+  </div>
+
+  <div class="tiles" id="tiles"></div>
+
+  <div class="controls" role="group" aria-label="차트 설정">
+    <span><span class="ctl-label">기간</span><span class="seg" id="ctl-range">
+      <button data-v="all">전체</button><button data-v="a">2020~22 사이클</button><button data-v="b">2024~26 사이클</button></span></span>
+    <span><span class="ctl-label">판정 기준</span><span class="seg" id="ctl-bench">
+      <button data-v="kospi">코스피 대비</button><button data-v="etf">섹터 ETF 대비</button><button data-v="basket">동종 3종목 대비</button></span></span>
+    <span><span class="ctl-label">가격 축</span><span class="seg" id="ctl-scale">
+      <button data-v="log">로그</button><button data-v="lin">일반</button></span></span>
+    <span class="replay"><span class="seg" id="ctl-replay"><button data-v="off">전체 보기</button><button data-v="on">복기 모드</button></span>
+      <input type="range" id="replay-slider" aria-label="복기 기준일" disabled><span class="replay-date" id="replay-date"></span></span>
+  </div>
+  <div class="banner" id="banner"></div>
+
+  <div class="readout" id="readout" aria-live="polite"></div>
+  <div class="charts" id="charts" tabindex="0" aria-label="연동 차트. 좌우 화살표로 날짜 이동, Shift와 함께 20거래일 이동, Esc로 해제">
+    <div class="ptitle">① 가격 · 이동평균 · 단계 띠 <span id="p1-sub"></span></div>
+    <div class="legend"><span><span class="sw" style="background:var(--pv-fg)"></span>종가</span><span><span class="sw" style="background:var(--pv-mfg);height:2px"></span>200일선</span><span><span class="sw" style="background:repeating-linear-gradient(90deg,var(--pv-mfg) 0 4px,transparent 4px 7px)"></span>50일선</span><span><span class="chip L">주도</span></span><span><span class="chip X">상실</span></span><span>①②… 사건</span><span>▲ 종가 정점</span></div>
+    <svg id="p-price" role="img" aria-label="삼성전자 일별 종가와 이동평균, 생애 단계"></svg>
+    <div class="ptitle">② 거래대금 <span>추정치 = 종가 × 거래량 · 억원 · 거래량 미관측일은 비움</span></div>
+    <svg id="p-tv" role="img" aria-label="일별 추정 거래대금"></svg>
+    <div class="ptitle">③ 상대강도 3종 <span>종목 ÷ 비교대상, 보이는 기간 첫날 = 100</span></div>
+    <div class="legend"><span><span class="sw" style="background:var(--pv-c1)"></span>코스피 대비</span><span><span class="sw" style="background:var(--pv-c2)"></span>섹터 ETF(KODEX 반도체) 대비</span><span><span class="sw" style="background:var(--pv-c3)"></span>동종 3종목 동일가중(자기 제외) 대비</span></div>
+    <svg id="p-rs" role="img" aria-label="코스피, 섹터 ETF, 동종 종목 대비 상대강도"></svg>
+    <div class="ptitle">④ 분기 실적 <span>매출·영업이익 막대 + 영업이익률 선 · 실제 발표일부터 계단 표시</span></div>
+    <svg id="p-fin" role="img" aria-label="분기 실적 패널 자리. 데이터 확보 전"></svg>
+    <div class="ptitle">⑤ 시장환경 (선택) <span>기본 = 코스피 낙폭 · 미국 10년물 · 원/달러 · 지표마다 세로축 분리 · 해외 값은 다음 한국 관측일부터 반영</span></div>
+    <div class="envpick" id="env-pick" role="group" aria-label="시장환경 지표 선택"></div>
+    <div id="env-panels"></div>
+  </div>
+  <details><summary>아직 넣지 않은 시장 지표와 이유</summary><ul id="env-missing"></ul></details>
+
+  <section class="block">
+    <h2>생애 구간 <span class="note" id="seg-note"></span></h2>
+    <div class="tablewrap"><table id="seg-table"></table></div>
+    <p class="note">판정 규칙(예시) — <b>주도</b>: 상대강도가 직전 250거래일 고점 대비 −10% 이내 · 종가가 200일선 위 · 종가가 직전 250일 최고 종가 대비 −25% 이내. <b>상실</b>: 상대강도가 250일 고점 대비 −20% 이하 · 종가가 200일선 아래. 그 밖은 <b>중립</b>. 새 판정이 10관측일 연속일 때 10번째 날부터 전환합니다. 모두 그날까지의 자료만 씁니다.</p>
+  </section>
+
+  <section class="block">
+    <h2>사건과 발표일</h2>
+    <ol class="events" id="events"></ol>
+    <p class="note" id="events-note"></p>
+  </section>
+
+  <details>
+    <summary>자료와 계산 기준 · 알려진 한계</summary>
+    <ul id="method"></ul>
+  </details>
+</div>
+
+<script id="pv-data" type="application/json">/*__DATA__*/</script>
+<script>
+(() => {
+const D = JSON.parse(document.getElementById('pv-data').textContent);
+const N = D.d.length, $ = id => document.getElementById(id);
+const S = { range: 'all', bench: 'kospi', scale: 'log', replay: false, replayIdx: N - 1, cursor: null, env: new Set(['kdd', 'tnx', 'fx']), envMore: false };
+const RANGES = { all: [D.d[0], D.d[N - 1]], a: ['2019-12-01', '2023-06-30'], b: ['2023-12-01', D.d[N - 1]] };
+const BENCH_NAME = { kospi: '코스피', etf: '섹터 ETF', basket: '동종 3종목' };
+const STATE_NAME = { L: '주도', M: '중립', X: '상실', _: '판정 전' };
+const fmt = (v, d = 0) => v == null || !isFinite(v) ? '—' : v.toLocaleString('ko-KR', { minimumFractionDigits: d, maximumFractionDigits: d });
+const pct = (v, d = 1) => v == null || !isFinite(v) ? '—' : (v > 0 ? '+' : '') + (v * 100).toFixed(d) + '%';
+const days = (a, b) => Math.round((Date.parse(b) - Date.parse(a)) / 864e5);
+const idxOnOrAfter = date => { let lo = 0, hi = N; while (lo < hi) { const m = (lo + hi) >> 1; D.d[m] < date ? lo = m + 1 : hi = m; } return lo; };
+const idxOnOrBefore = date => { const i = idxOnOrAfter(date); return (i < N && D.d[i] === date) ? i : i - 1; };
+const limitIdx = () => S.replay ? S.replayIdx : N - 1;
+const benchArr = b => b === 'kospi' ? D.k : b === 'etf' ? D.e : D.b;
+const rsRaw = b => { const B = benchArr(b); return D.c.map((c, i) => (c != null && B[i] != null) ? c / B[i] : null); };
+const RS = { kospi: rsRaw('kospi'), etf: rsRaw('etf'), basket: rsRaw('basket') };
+const NS = 'http://www.w3.org/2000/svg';
+const el = (tag, attrs, parent) => { const e = document.createElementNS(NS, tag); for (const k in attrs) e.setAttribute(k, attrs[k]); parent && parent.appendChild(e); return e; };
+
+$('asof').textContent = `자료 범위 ${D.d[0]} ~ ${D.d[N - 1]} · 확인 ${D.meta.accessed}`;
+
+// ---- 공통 x축(거래일 순번) ----
+function view() {
+  const [a, b] = RANGES[S.range];
+  const i0 = idxOnOrAfter(a), i1 = Math.min(idxOnOrBefore(b), limitIdx());
+  return { i0, i1, ok: i1 > i0 + 5 };
+}
+const PAD = { l: 58, r: 92 }; // 좁은 화면에서는 frame()이 줄임
+function niceTicks(lo, hi, n, log) {
+  if (log) {
+    const out = []; for (let e = Math.floor(Math.log10(lo)); e <= Math.ceil(Math.log10(hi)); e++) for (const m of [1, 2, 5]) { const v = m * 10 ** e; if (v >= lo && v <= hi) out.push(v); }
+    if (out.length >= 3) return out;
+    // 범위가 좁으면 일반 눈금으로
+  }
+  // 선형 눈금: 최소 2개가 나올 때까지 간격을 줄임
+  for (let k = n; k <= n * 8; k *= 2) {
+    const step0 = (hi - lo) / k, mag = 10 ** Math.floor(Math.log10(step0));
+    const step = [1, 2, 2.5, 5, 10].map(m => m * mag).find(s => s >= step0) || mag * 10;
+    const out = []; for (let v = Math.ceil(lo / step) * step; v <= hi + 1e-9; v += step) out.push(+v.toFixed(10));
+    if (out.length >= 2) return out;
+  }
+  return [lo, hi];
+}
+function frame(svg, h, v) {
+  svg.innerHTML = '';
+  const W = svg.clientWidth || svg.parentNode.clientWidth;
+  PAD.r = W < 520 ? 70 : 92; PAD.l = W < 520 ? 44 : 58;
+  svg.setAttribute('viewBox', `0 0 ${W} ${h}`); svg.setAttribute('height', h);
+  const pw = Math.max(40, W - PAD.l - PAD.r);
+  const x = i => PAD.l + (i - v.i0) / (v.i1 - v.i0) * pw;
+  return { W, h, pw, x, top: 8, bot: h - 18 };
+}
+function yScale(f, lo, hi, log) {
+  const t = log ? (val => Math.log(val)) : (val => val);
+  const a = t(lo), b = t(hi);
+  return val => f.bot - (t(val) - a) / (b - a || 1) * (f.bot - f.top);
+}
+function axisY(svg, f, y, ticks, fmtT) {
+  for (const tv of ticks) {
+    const yy = y(tv); if (yy < f.top - 1 || yy > f.bot + 1) continue;
+    el('line', { x1: PAD.l, x2: PAD.l + f.pw, y1: yy, y2: yy, style: 'stroke:var(--pv-border);stroke-width:1' }, svg);
+    const t = el('text', { x: PAD.l - 6, y: yy + 3.5, 'text-anchor': 'end' }, svg); t.textContent = fmtT(tv);
+  }
+}
+function axisX(svg, f, v, withLabels) {
+  let lastY = null;
+  for (let i = v.i0; i <= v.i1; i++) {
+    const yr = D.d[i].slice(0, 4), mo = D.d[i].slice(5, 7);
+    const span = v.i1 - v.i0;
+    const key = span > 900 ? yr : yr + (mo < '07' ? 'H1' : 'H2');
+    if (key !== lastY) {
+      if (lastY !== null) {
+        const xx = f.x(i);
+        el('line', { x1: xx, x2: xx, y1: f.top, y2: f.bot, style: 'stroke:var(--pv-border);stroke-width:1;stroke-dasharray:2 3' }, svg);
+        if (withLabels) { const t = el('text', { x: xx + 3, y: f.h - 5 }, svg); t.textContent = span > 900 ? yr : `${yr}.${mo}`; }
+      }
+      lastY = key;
+    }
+  }
+}
+function path(svg, f, v, vals, y, style) {
+  let d = '', pen = false;
+  for (let i = v.i0; i <= v.i1; i++) {
+    const val = vals[i];
+    if (val == null || !isFinite(val)) { pen = false; continue; }
+    d += (pen ? 'L' : 'M') + f.x(i).toFixed(1) + ' ' + y(val).toFixed(1); pen = true;
+  }
+  return el('path', { d, style: 'fill:none;stroke-linejoin:round;stroke-linecap:round;' + style }, svg);
+}
+function cursorLine(svg, f) {
+  return el('line', { class: 'cur', x1: -10, x2: -10, y1: f.top, y2: f.bot, style: 'stroke:var(--pv-fg);stroke-width:1;opacity:.55;display:none' }, svg);
+}
+function ensureHatch(svg) {
+  const defs = el('defs', {}, svg);
+  const p = el('pattern', { id: 'hatch-' + svg.id, width: 7, height: 7, patternUnits: 'userSpaceOnUse', patternTransform: 'rotate(135)' }, defs);
+  el('rect', { width: 7, height: 7, style: 'fill:color-mix(in srgb,var(--pv-mfg) 6%,transparent)' }, p);
+  el('line', { x1: 0, y1: 0, x2: 0, y2: 7, style: 'stroke:var(--pv-mfg);stroke-width:2;opacity:.28' }, p);
+}
+function stateRuns(v) {
+  const st = D.st[S.bench], runs = [];
+  for (let i = v.i0; i <= v.i1; i++) {
+    const s = st[i];
+    if (runs.length && runs[runs.length - 1].s === s) runs[runs.length - 1].b = i; else runs.push({ s, a: i, b: i });
+  }
+  return runs;
+}
+
+// ---- 패널 ----
+const cursors = [];
+function drawPrice(v) {
+  const svg = $('p-price'), f = frame(svg, 290, v); ensureHatch(svg); f.bot = f.h - 30;
+  const vals = []; for (let i = v.i0; i <= v.i1; i++) for (const a of [D.c, D.m200, D.m50]) if (a[i] != null) vals.push(a[i]);
+  let lo = Math.min(...vals), hi = Math.max(...vals); const log = S.scale === 'log';
+  if (log) { lo *= .94; hi *= 1.07; } else { const p = (hi - lo) * .06; lo = Math.max(0, lo - p); hi += p * 1.2; }
+  const y = yScale(f, lo, hi, log);
+  // 단계 띠
+  for (const r of stateRuns(v)) {
+    if (r.s !== 'L' && r.s !== 'X') continue;
+    const xa = f.x(r.a), xb = f.x(Math.min(r.b + 1, v.i1));
+    el('rect', { x: xa, y: f.top, width: Math.max(1, xb - xa), height: f.bot - f.top, style: r.s === 'L' ? 'fill:color-mix(in srgb,var(--pv-c3) 17%,transparent)' : `fill:url(#hatch-${svg.id})` }, svg);
+    if (xb - xa > 30) { const t = el('text', { x: xa + 4, y: f.top + 12, class: 'lbl' }, svg); t.textContent = STATE_NAME[r.s]; }
+  }
+  axisY(svg, f, y, niceTicks(lo, hi, 5, log), t => t >= 1e4 ? (t / 1e4).toLocaleString('ko-KR') + '만' : fmt(t));
+  axisX(svg, f, v, false);
+  path(svg, f, v, D.m200, y, 'stroke:var(--pv-mfg);stroke-width:1.5;opacity:.85');
+  path(svg, f, v, D.m50, y, 'stroke:var(--pv-mfg);stroke-width:1.25;stroke-dasharray:4 3;opacity:.85');
+  path(svg, f, v, D.c, y, 'stroke:var(--pv-fg);stroke-width:1.6');
+  // 사이클별 종가 정점(보이는 범위 + 복기 한계 안에서만)
+  for (const cy of D.cycles) {
+    const a = Math.max(idxOnOrAfter(cy.start), v.i0), b = Math.min(idxOnOrBefore(cy.end), v.i1);
+    if (b <= a) continue;
+    let m = a; for (let i = a; i <= b; i++) if (D.c[i] != null && D.c[i] > D.c[m]) m = i;
+    const xx = f.x(m), yy = y(D.c[m]);
+    el('path', { d: `M${xx} ${yy - 5} l-5 -8 h10 z`, style: 'fill:var(--pv-fg)' }, svg);
+    const t = el('text', { x: xx, y: yy - 16, 'text-anchor': xx > f.W - 140 ? 'end' : 'middle', class: 'lbl', style: 'fill:var(--pv-fg)' }, svg);
+    t.textContent = `${S.replay && b === v.i1 ? '그날까지 최고 ' : ''}${D.d[m]} ${fmt(D.c[m])}`;
+  }
+  // 사건 마커
+  D.events.forEach((ev, k) => {
+    const i = idxOnOrAfter(ev.date); if (i < v.i0 || i > v.i1) return;
+    const xx = f.x(i);
+    el('line', { x1: xx, x2: xx, y1: f.top, y2: f.bot + 6, style: 'stroke:var(--pv-fg);stroke-width:1;stroke-dasharray:1 3;opacity:.6' }, svg);
+    el('circle', { cx: xx, cy: f.bot + 15, r: 8, style: 'fill:var(--pv-card);stroke:var(--pv-fg);stroke-width:1' }, svg);
+    const t = el('text', { x: xx, y: f.bot + 18.5, 'text-anchor': 'middle', style: 'fill:var(--pv-fg);font-size:10px' }, svg); t.textContent = k + 1;
+  });
+  cursors.push({ line: cursorLine(svg, f), f });
+}
+function drawTV(v) {
+  const svg = $('p-tv'), f = frame(svg, 86, v);
+  let hi = 0; for (let i = v.i0; i <= v.i1; i++) if (D.tv[i] != null) hi = Math.max(hi, D.tv[i]);
+  const y = yScale(f, 0, hi * 1.08 || 1, false);
+  axisY(svg, f, y, niceTicks(0, hi, 2, false), t => t >= 1e4 ? (t / 1e4).toLocaleString('ko-KR') + '조' : fmt(t));
+  axisX(svg, f, v, false);
+  const bw = Math.max(.6, f.pw / (v.i1 - v.i0 + 1) * .8);
+  let d = '';
+  for (let i = v.i0; i <= v.i1; i++) { const val = D.tv[i]; if (val == null) continue; const xx = f.x(i) - bw / 2, yy = y(val); d += `M${xx.toFixed(1)} ${f.bot}V${yy.toFixed(1)}h${bw.toFixed(2)}V${f.bot}z`; }
+  el('path', { d, style: 'fill:var(--pv-mfg);opacity:.55' }, svg);
+  cursors.push({ line: cursorLine(svg, f), f });
+}
+function rebased(b, v) {
+  const r = RS[b]; let base = null;
+  for (let i = v.i0; i <= v.i1 && base == null; i++) if (r[i] != null) base = r[i];
+  return r.map((x, i) => (x != null && base != null && i >= v.i0 && i <= v.i1) ? x / base * 100 : null);
+}
+let RB = {};
+function drawRS(v) {
+  const svg = $('p-rs'), f = frame(svg, 190, v);
+  RB = { kospi: rebased('kospi', v), etf: rebased('etf', v), basket: rebased('basket', v) };
+  const vals = []; for (const b in RB) for (let i = v.i0; i <= v.i1; i++) if (RB[b][i] != null) vals.push(RB[b][i]);
+  let lo = Math.min(...vals, 100), hi = Math.max(...vals, 100); lo *= .95; hi *= 1.05;
+  const y = yScale(f, lo, hi, true);
+  axisY(svg, f, y, niceTicks(lo, hi, 4, true), t => fmt(t));
+  axisX(svg, f, v, false);
+  el('line', { x1: PAD.l, x2: PAD.l + f.pw, y1: y(100), y2: y(100), style: 'stroke:var(--pv-mfg);stroke-width:1;stroke-dasharray:3 3' }, svg);
+  const narrow = f.W < 520;
+  const spec = [['kospi', 'var(--pv-c1)', '코스피'], ['etf', 'var(--pv-c2)', narrow ? '섹터' : '섹터 ETF'], ['basket', 'var(--pv-c3)', narrow ? '동종' : '동종 3종목']];
+  const ends = [];
+  for (const [b, col, name] of spec) {
+    path(svg, f, v, RB[b], y, `stroke:${col};stroke-width:${b === S.bench ? 2.4 : 1.6};opacity:${b === S.bench ? 1 : .8}`);
+    let last = null; for (let i = v.i1; i >= v.i0; i--) if (RB[b][i] != null) { last = i; break; }
+    if (last != null) ends.push({ yy: y(RB[b][last]), name, col, val: RB[b][last] });
+  }
+  ends.sort((a, b) => a.yy - b.yy); for (let k = 1; k < ends.length; k++) if (ends[k].yy - ends[k - 1].yy < 13) ends[k].yy = ends[k - 1].yy + 13;
+  for (const e of ends) {
+    el('rect', { x: PAD.l + f.pw + 5, y: e.yy - 2, width: 8, height: 3, rx: 1.5, style: `fill:${e.col}` }, svg);
+    const t = el('text', { x: PAD.l + f.pw + 16, y: e.yy + 3.5, class: 'lbl', style: 'fill:var(--pv-fg)' }, svg); t.textContent = `${e.name} ${fmt(e.val)}`;
+  }
+  cursors.push({ line: cursorLine(svg, f), f });
+}
+function drawFin(v) {
+  const svg = $('p-fin'), noEnv = S.env.size === 0, f = frame(svg, noEnv ? 98 : 84, v);
+  if (noEnv) f.bot = f.h - 18;
+  axisX(svg, f, v, noEnv);
+  el('rect', { x: PAD.l, y: f.top, width: f.pw, height: f.bot - f.top, rx: 6, style: 'fill:none;stroke:var(--pv-mfg);stroke-dasharray:5 4;opacity:.7' }, svg);
+  D.events.forEach(ev => { if (!ev.earnings) return; const i = idxOnOrAfter(ev.date); if (i < v.i0 || i > v.i1) return; const xx = f.x(i);
+    el('line', { x1: xx, x2: xx, y1: f.top + 2, y2: f.bot - 2, style: 'stroke:var(--pv-fg);stroke-width:1.2' }, svg); });
+  const narrow = f.pw < 420, bw = narrow ? f.pw - 16 : 380;
+  el('rect', { x: PAD.l + f.pw / 2 - bw / 2, y: (f.top + f.bot) / 2 - 17, width: bw, height: 38, rx: 6, style: 'fill:var(--pv-card)' }, svg);
+  const t = el('text', { x: PAD.l + f.pw / 2, y: (f.top + f.bot) / 2 - 2, 'text-anchor': 'middle', style: 'fill:var(--pv-fg);font-size:12px' }, svg);
+  t.textContent = narrow ? '재무 데이터 확보 후 채울 자리' : 'OpenDART 키 확보 후 채울 자리 · 값을 임의로 만들지 않았습니다';
+  const t2 = el('text', { x: PAD.l + f.pw / 2, y: (f.top + f.bot) / 2 + 14, 'text-anchor': 'middle' }, svg);
+  t2.textContent = narrow ? '세로 눈금 = 출처 확인된 실적 발표일' : '세로 눈금 = 기존 연구에서 출처를 확인한 실적 발표일';
+  D.events.forEach((ev, k) => {
+    if (!ev.earnings) return; const i = idxOnOrAfter(ev.date); if (i < v.i0 || i > v.i1) return;
+    const xx = f.x(i);
+    const tt = el('text', { x: xx + 3, y: f.top + 11, style: 'font-size:10px;fill:var(--pv-fg)' }, svg); tt.textContent = k + 1;
+  });
+  cursors.push({ line: cursorLine(svg, f), f });
+}
+const pctTick = t => (t * 100).toFixed(0) + '%';
+const ENV = [
+  { key: 'kdd', group: '기본', short: '코스피 낙폭', name: '코스피 고점 대비 낙폭', unit: '%', src: '^KS11 계산 · 그날까지의 최고 종가 기준', type: 'dd', get: i => D.kdd[i], fmt: v => pct(v), tick: pctTick },
+  { key: 'tnx', group: '기본', short: '美 10년물', name: '미국 10년 국채금리', unit: '%', src: 'FRED DGS10(미 재무부 고정만기, H.15) · 직전 미국 영업일 값', type: 'line', lag: 'tnxl', get: i => D.tnx[i], fmt: v => v == null ? '—' : v.toFixed(2) + '%', tick: t => t.toFixed(1) + '%' },
+  { key: 'fx', group: '기본', short: '원/달러', name: '원/달러', unit: '원', src: 'FRED DEXKOUS(뉴욕 정오 기준, H.10) · 직전 미국 영업일 값 · 주 단위 공표라 최근 며칠은 비어 있음', type: 'line', lag: 'fxl', get: i => D.fx[i], fmt: v => v == null ? '—' : fmt(v, 1) + '원', tick: t => fmt(t) },
+  { key: 'rate', group: '추가', short: '한국 기준금리', name: '한국은행 기준금리', unit: '%', src: '한국은행 기준금리 변경표 · 표의 날짜 다음 관측일부터', type: 'step', get: i => D.rate[i], fmt: v => v == null ? '—' : v.toFixed(2) + '%', tick: t => t.toFixed(2) + '%' },
+  { key: 'kgap', group: '추가', short: '200일선 이격', name: '코스피 200일선 이격', unit: '%', src: '^KS11 계산', type: 'zero', get: i => D.kgap[i], fmt: v => pct(v), tick: pctTick },
+  { key: 'rv', group: '추가', short: '실현변동성', name: '코스피 20일 실현변동성', unit: '연율 %', src: '^KS11 일간 로그수익률 표준편차×√252 · VKOSPI 아님', type: 'line', zeroMin: true, get: i => D.rv[i], fmt: v => v == null ? '—' : (v * 100).toFixed(1) + '%', tick: pctTick },
+  { key: 'kqks', group: '추가', short: '코스닥÷코스피', name: '코스닥 ÷ 코스피', unit: '보이는 기간 첫날 = 100', src: '^KQ11 ÷ ^KS11 · 두 시장의 상대 흐름', type: 'rebase', log: true, get: i => D.kq[i] / D.k[i], fmt: v => fmt(v, 1), tick: t => fmt(t) },
+  { key: 'sox', group: '추가', short: 'SOX', name: '필라델피아 반도체지수(SOX)', unit: 'pt · 로그 축', src: '야후 ^SOX · 직전 미국 거래일 종가', type: 'line', log: true, lag: 'soxl', get: i => D.sox[i], fmt: v => fmt(v), tick: t => fmt(t) },
+  { key: 'vix', group: '추가', short: 'VIX', name: 'VIX (미국 S&P500 옵션 기대변동성)', unit: 'pt', src: '야후 ^VIX · 직전 미국 거래일 종가 · 한국 시장 지표 아님', type: 'line', zeroMin: true, lag: 'vixl', get: i => D.vix[i], fmt: v => fmt(v, 1), tick: t => fmt(t) },
+];
+const ENV_VALS = {};
+// 칩은 한 번만 만들고(포커스 유지) 렌더 때는 눌림 상태만 갱신
+function initPick() {
+  const chips = g => ENV.filter(e => e.group === g).map(e => `<button type="button" data-k="${e.key}">${e.short}</button>`).join('');
+  $('env-pick').innerHTML = `<span class="envgroup"><span class="ctl-label">기본</span>${chips('기본')}</span>
+    <button type="button" class="more" aria-expanded="false" aria-controls="env-extra">추가 지표 ▸</button>
+    <span class="envgroup" id="env-extra" hidden>${chips('추가')}</span>`;
+}
+function syncPick() {
+  for (const b of $('env-pick').querySelectorAll('button[data-k]')) b.setAttribute('aria-pressed', S.env.has(b.dataset.k));
+  const more = $('env-pick').querySelector('.more'), extraOn = ENV.filter(e => e.group === '추가' && S.env.has(e.key)).length;
+  $('env-extra').hidden = !S.envMore; more.setAttribute('aria-expanded', S.envMore);
+  more.textContent = (S.envMore ? '추가 지표 ▾' : '추가 지표 ▸') + (extraOn ? ` (${extraOn}개 켜짐)` : '');
+}
+function drawEnvPanels(v) {
+  const box = $('env-panels'); box.innerHTML = '';
+  const sel = ENV.filter(e => S.env.has(e.key));
+  sel.forEach((e, k) => {
+    const last = k === sel.length - 1;
+    const head = document.createElement('div'); head.className = 'ptitle sub'; head.innerHTML = `${e.name} <span>${e.unit} · ${e.src}</span>`; box.appendChild(head);
+    const svg = document.createElementNS(NS, 'svg'); svg.id = 'env-' + e.key; svg.setAttribute('role', 'img'); svg.setAttribute('aria-label', e.name); box.appendChild(svg);
+    const f = frame(svg, last ? 106 : 88, v);
+    const vals = new Array(N).fill(null);
+    for (let i = v.i0; i <= v.i1; i++) { const x = e.get(i); vals[i] = (x != null && isFinite(x)) ? x : null; }
+    if (e.type === 'rebase') { let base = null; for (let i = v.i0; i <= v.i1 && base == null; i++) if (vals[i] != null) base = vals[i]; for (let i = v.i0; i <= v.i1; i++) vals[i] = vals[i] != null ? vals[i] / base * 100 : null; }
+    ENV_VALS[e.key] = vals;
+    const fin = []; for (let i = v.i0; i <= v.i1; i++) if (vals[i] != null) fin.push(vals[i]);
+    if (!fin.length) { const t = el('text', { x: PAD.l + 6, y: f.h / 2 }, svg); t.textContent = '이 기간에는 계산 가능한 값이 없습니다 (계산 준비 기간 포함)'; cursors.push({ line: cursorLine(svg, f), f }); return; }
+    let lo = Math.min(...fin), hi = Math.max(...fin);
+    if (e.type === 'dd') { hi = 0; lo = lo * 1.08 - .01; }
+    else if (e.type === 'zero') { lo = Math.min(lo * 1.1, -.01); hi = Math.max(hi * 1.1, .01); }
+    else if (e.log || e.type === 'rebase') { lo *= .95; hi *= 1.05; }
+    else { const p = (hi - lo) * .1 || Math.abs(hi) * .05 || 1; lo = e.zeroMin ? Math.max(0, lo - p) : lo - p; hi += p; }
+    const y = yScale(f, lo, hi, !!e.log);
+    axisY(svg, f, y, niceTicks(lo, hi, 3, !!e.log), e.tick);
+    axisX(svg, f, v, last);
+    if (e.type === 'zero' || e.type === 'rebase') { const b = e.type === 'zero' ? 0 : 100; el('line', { x1: PAD.l, x2: PAD.l + f.pw, y1: y(b), y2: y(b), style: 'stroke:var(--pv-mfg);stroke-width:1;stroke-dasharray:3 3' }, svg); }
+    if (e.type === 'dd') {
+      let d = '', pen = false, lastX = null;
+      for (let i = v.i0; i <= v.i1; i++) { if (vals[i] == null) continue; const xx = f.x(i); if (!pen) { d += `M${xx.toFixed(1)} ${y(0)}`; pen = true; } d += `L${xx.toFixed(1)} ${y(vals[i]).toFixed(1)}`; lastX = xx; }
+      d += `L${lastX} ${y(0)}z`;
+      el('path', { d, style: 'fill:color-mix(in srgb,var(--pv-mfg) 22%,transparent);stroke:var(--pv-mfg);stroke-width:1' }, svg);
+    } else if (e.type === 'step') {
+      let d = '', pen = false, lastLblX = -1e9;
+      for (let i = v.i0; i <= v.i1; i++) {
+        if (vals[i] == null) { pen = false; continue; }
+        const xx = f.x(i), yy = y(vals[i]);
+        if (!pen) { d += `M${xx.toFixed(1)} ${yy.toFixed(1)}`; pen = true; }
+        else if (vals[i] !== vals[i - 1]) d += `H${xx.toFixed(1)}V${yy.toFixed(1)}`;
+        if ((i === v.i0 || vals[i] !== vals[i - 1]) && xx - lastLblX > (f.W < 520 ? 40 : 22) && PAD.l + f.pw - xx > 34) { const t = el('text', { x: xx + 2, y: yy - 4, style: 'font-size:10px;fill:var(--pv-fg)' }, svg); t.textContent = vals[i].toFixed(2); lastLblX = xx; }
+      }
+      d += `H${f.x(v.i1).toFixed(1)}`;
+      el('path', { d, style: 'fill:none;stroke:var(--pv-fg);stroke-width:1.6' }, svg);
+    } else {
+      path(svg, f, v, vals, y, 'stroke:var(--pv-fg);stroke-width:1.4');
+    }
+    // 오른쪽 여백에 보이는 기간의 마지막 값
+    let li = null; for (let i = v.i1; i >= v.i0; i--) if (vals[i] != null) { li = i; break; }
+    if (li != null) { const t = el('text', { x: PAD.l + f.pw + 6, y: Math.max(f.top + 8, Math.min(f.bot, y(vals[li]) + 3.5)), class: 'lbl', style: 'fill:var(--pv-fg)' }, svg); t.textContent = e.fmt(vals[li]).replace('원', ''); }
+    cursors.push({ line: cursorLine(svg, f), f });
+  });
+  if (!sel.length) { const p = document.createElement('p'); p.className = 'note'; p.style.padding = '4px 14px 8px'; p.textContent = '위에서 지표를 하나 이상 고르세요.'; box.appendChild(p); }
+}
+
+// ---- 카드·표·사건 ----
+function tiles() {
+  const lim = limitIdx(), box = $('tiles'); box.innerHTML = '';
+  for (const cy of D.cycles) {
+    const a = idxOnOrAfter(cy.start), b = Math.min(idxOnOrBefore(cy.end), lim);
+    const div = document.createElement('div'); div.className = 'tile';
+    if (b <= a) { div.innerHTML = `<h3>${cy.label}</h3><p class="note">복기 기준일 이전이라 아직 관측 전입니다.</p>`; box.appendChild(div); continue; }
+    let ms = a, mk = a; for (let i = a; i <= b; i++) { if (D.c[i] != null && D.c[i] > D.c[ms]) ms = i; if (D.k[i] > D.k[mk]) mk = i; }
+    const open = idxOnOrBefore(cy.end) > lim || D.d[N - 1] < cy.end;
+    // 종목 정점 이전(같은 날 포함)에 시작한 가장 최근 '주도' 구간의 시작일 — 사이클 시작 전부터 이어진 구간도 실제 시작일로 표시
+    const st = D.st[S.bench]; let lead = null;
+    for (let i = ms; i >= 0; i--) { if (st[i] === 'L' && (i === 0 || st[i - 1] !== 'L')) { lead = i; break; } if (i < a && st[i] !== 'L') break; }
+    const lag = days(D.d[ms], D.d[mk]);
+    const peakLbl = open ? (S.replay ? '그날까지 최고 종가' : '관측 기간 최고 종가') : '종가 정점';
+    div.innerHTML = `<h3>${cy.label}${open ? ' <span class="badge">진행 중 · 정점 미확정</span>' : ''}</h3><dl class="kv">
+      <dt>${open ? '최고 종가' : '정점'} 직전 '주도' 판정 시작 (${BENCH_NAME[S.bench]} 기준)</dt><dd>${lead != null ? `${D.d[lead]} · ${open ? '최고 종가' : '정점'} ${days(D.d[lead], D.d[ms])}일 전` : `${open ? '최고 종가' : '정점'} 전 주도 판정 없음`}</dd>
+      <dt>실적 개선이 확인된 발표일</dt><dd><span class="pending">재무 데이터 확보 후</span></dd>
+      <dt>삼성전자 ${peakLbl}</dt><dd>${D.d[ms]} · ${fmt(D.c[ms])}원</dd>
+      <dt>코스피 ${peakLbl}</dt><dd>${D.d[mk]} · ${fmt(D.k[mk], 2)}</dd>
+      <dt>${open ? '종목 최고 → 지수 최고' : '종목 정점 → 지수 정점'}</dt><dd>${lag === 0 ? '같은 날' : lag > 0 ? `종목이 ${lag}일 먼저` : `종목이 ${-lag}일 늦게`}</dd></dl>`;
+    box.appendChild(div);
+  }
+}
+function segTable(v) {
+  const runs = stateRuns(v), tb = $('seg-table');
+  $('seg-note').textContent = `· ${BENCH_NAME[S.bench]} 기준 · ${D.d[v.i0]} ~ ${D.d[v.i1]}`;
+  let h = '<thead><tr><th>판정</th><th>시작</th><th>끝</th><th class="num">거래일</th><th class="num">종목 수익률</th><th class="num">코스피</th><th class="num">상대강도 변화</th></tr></thead><tbody>';
+  for (const r of runs) {
+    const c0 = D.c[r.a] ?? D.c[r.a + 1], c1 = D.c[r.b] ?? D.c[r.b - 1];
+    const R = RS[S.bench], r0 = R[r.a] ?? R[r.a + 1], r1 = R[r.b] ?? R[r.b - 1];
+    h += `<tr><td><span class="chip ${r.s}">${STATE_NAME[r.s]}</span></td><td>${D.d[r.a]}</td><td>${D.d[r.b]}${S.replay && r.b === v.i1 ? ' <span class="note">(진행 중)</span>' : ''}</td><td class="num">${r.b - r.a + 1}</td><td class="num">${pct(c1 / c0 - 1)}</td><td class="num">${pct(D.k[r.b] / D.k[r.a] - 1)}</td><td class="num">${pct(r1 / r0 - 1)}</td></tr>`;
+  }
+  tb.innerHTML = h + '</tbody>';
+}
+function events() {
+  const lim = D.d[limitIdx()], ol = $('events'); ol.innerHTML = ''; let hidden = 0;
+  D.events.forEach((ev, k) => {
+    if (S.replay && ev.date > lim) { hidden++; return; }
+    const li = document.createElement('li');
+    li.innerHTML = `<span class="num-dot">${k + 1}</span><span class="ev-date">${ev.date}</span><span class="ev-body"><b>${ev.title}</b> <a href="${ev.url}" target="_blank" rel="noopener">원문</a><br><span class="note">${ev.detail}</span></span>`;
+    ol.appendChild(li);
+  });
+  $('events-note').textContent = (hidden ? `복기 기준일 이후 사건 ${hidden}건은 숨겼습니다. ` : '') + D.meta.eventsNote;
+}
+
+// ---- 커서 ----
+function setCursor(i) {
+  const v = view(); if (!v.ok) return;
+  if (i != null) i = Math.max(v.i0, Math.min(v.i1, i));
+  S.cursor = i;
+  for (const c of cursors) { const show = i != null; c.line.style.display = show ? '' : 'none'; if (show) { const xx = c.f.x(i); c.line.setAttribute('x1', xx); c.line.setAttribute('x2', xx); } }
+  const j = i ?? v.i1, st = D.st[S.bench][j];
+  const vsMA = D.c[j] != null && D.m200[j] != null ? D.c[j] / D.m200[j] - 1 : null;
+  $('readout').innerHTML = `<span><b>${D.d[j]}</b>${i == null ? ' <span class="k">(마지막 날)</span>' : ''}</span>
+    <span><span class="k">종가</span> ${D.c[j] == null ? '<span class="k">미관측</span>' : fmt(D.c[j]) + '원'}</span>
+    <span><span class="k">200일선 대비</span> ${pct(vsMA)}</span>
+    <span><span class="k">거래대금</span> ${D.tv[j] == null ? '<span class="k">미관측</span>' : fmt(D.tv[j]) + '억'}</span>
+    <span><span class="sw" style="background:var(--pv-c1)"></span>${fmt(RB.kospi[j], 1)} <span class="sw" style="background:var(--pv-c2)"></span>${RB.etf[j] == null ? '<span class="k">결측</span>' : fmt(RB.etf[j], 1)} <span class="sw" style="background:var(--pv-c3)"></span>${fmt(RB.basket[j], 1)}</span>
+    <span><span class="k">판정(${BENCH_NAME[S.bench]})</span> <span class="chip ${st}">${STATE_NAME[st]}</span></span>
+    ${ENV.filter(e => S.env.has(e.key)).map(e => { const val = (ENV_VALS[e.key] || [])[j]; const lag = e.lag ? D[e.lag][j] : null;
+      const src = (lag != null && val != null) ? ` <span class="k">(현지 ${new Date(Date.parse(D.d[j]) - lag * 864e5).toISOString().slice(5, 10)})</span>` : '';
+      return `<span><span class="k">${e.short}</span> ${e.fmt(val)}${src}</span>`; }).join('')}`;
+}
+const charts = $('charts');
+function idxFromEvent(e) {
+  const v = view(), r = charts.getBoundingClientRect(), svgW = $('p-price').getBoundingClientRect().width;
+  const pw = svgW - PAD.l - PAD.r, xr = e.clientX - r.left - PAD.l;
+  return Math.round(v.i0 + xr / pw * (v.i1 - v.i0));
+}
+charts.addEventListener('pointermove', e => setCursor(idxFromEvent(e)));
+charts.addEventListener('pointerdown', e => setCursor(idxFromEvent(e)));
+charts.addEventListener('pointerleave', e => { if (e.pointerType === 'mouse') setCursor(null); });
+charts.addEventListener('keydown', e => {
+  const v = view(), step = e.shiftKey ? 20 : 1, cur = S.cursor ?? v.i1;
+  if (e.key === 'ArrowLeft') setCursor(cur - step); else if (e.key === 'ArrowRight') setCursor(cur + step);
+  else if (e.key === 'Home') setCursor(v.i0); else if (e.key === 'End') setCursor(v.i1); else if (e.key === 'Escape') setCursor(null); else return;
+  e.preventDefault();
+});
+
+// ---- 렌더 ----
+function render() {
+  cursors.length = 0;
+  const v = view();
+  for (const [id, key] of [['ctl-range', 'range'], ['ctl-bench', 'bench'], ['ctl-scale', 'scale']]) for (const b of $(id).querySelectorAll('button')) b.setAttribute('aria-pressed', b.dataset.v === S[key]);
+  for (const b of $('ctl-replay').querySelectorAll('button')) b.setAttribute('aria-pressed', (b.dataset.v === 'on') === S.replay);
+  $('replay-slider').disabled = !S.replay; $('replay-date').textContent = S.replay ? D.d[S.replayIdx] : '';
+  const bn = $('banner'); bn.classList.toggle('on', S.replay);
+  bn.textContent = S.replay ? `복기 모드 — ${D.d[S.replayIdx]}까지 공개된 자료만 표시합니다. 이후 가격·사건·정점은 숨겼고, 단계 판정은 원래 그날까지의 자료만 씁니다.` : '';
+  tiles(); events(); syncPick();
+  if (!v.ok) { for (const id of ['p-price', 'p-tv', 'p-rs', 'p-fin']) $(id).innerHTML = ''; $('env-panels').innerHTML = ''; $('readout').innerHTML = '<span class="k">선택한 기간에 표시할 자료가 없습니다. 복기 기준일을 뒤로 옮기거나 기간을 바꾸세요.</span>'; $('seg-table').innerHTML = ''; return; }
+  $('p1-sub').textContent = `${D.d[v.i0]} ~ ${D.d[v.i1]} · ${S.scale === 'log' ? '로그' : '일반'} 축 · 띠 = ${BENCH_NAME[S.bench]} 기준 판정`;
+  drawPrice(v); drawTV(v); drawRS(v); drawFin(v); drawEnvPanels(v); segTable(v);
+  setCursor(S.cursor);
+}
+const bind = (id, key) => $(id).addEventListener('click', e => { const b = e.target.closest('button'); if (!b) return; S[key] = b.dataset.v; render(); });
+bind('ctl-range', 'range'); bind('ctl-bench', 'bench'); bind('ctl-scale', 'scale');
+$('ctl-replay').addEventListener('click', e => { const b = e.target.closest('button'); if (!b) return; S.replay = b.dataset.v === 'on'; S.cursor = null; render(); });
+const sl = $('replay-slider'); sl.min = 0; sl.max = N - 1; sl.value = idxOnOrBefore('2021-03-31'); S.replayIdx = +sl.value;
+sl.addEventListener('input', () => { S.replayIdx = +sl.value; S.cursor = null; render(); });
+$('method').innerHTML = D.meta.method.map(m => `<li>${m}</li>`).join('');
+$('env-missing').innerHTML = D.meta.envMissing.map(m => `<li>${m}</li>`).join('');
+initPick();
+const pick = $('env-pick');
+for (const ev of ['pointerdown', 'pointermove']) pick.addEventListener(ev, e => e.stopPropagation());
+pick.addEventListener('click', e => { const b = e.target.closest('button'); if (!b) return;
+  if (b.classList.contains('more')) { S.envMore = !S.envMore; syncPick(); return; }
+  const k = b.dataset.k; S.env.has(k) ? S.env.delete(k) : S.env.add(k); render(); });
+new ResizeObserver(() => render()).observe(charts);
+render();
+})();
+</script>
+</body>
+</html>
