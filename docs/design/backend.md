@@ -17,13 +17,16 @@ vallythevally Rust 백엔드의 설계다. #2의 코드(`crates/domain`, `crates
 | 이슈 | 단계 | 켜지는 것 | 아직 없는 것 |
 |---|---|---|---|
 | #2 | 1단계 기반 | 1칸 고정, REST `/api/symbols`·`/api/bars`, 메모리 캐시(07:45 비우기), 종목 목록(메모리), 키움 조회 대기열, 잠금 파일, 차트 설정은 브라우저 메모리에 | WebSocket, WASM, DB |
+| #14 | 1.5단계 거래소 | 칸마다 거래소(통합·KRX·NXT), `/api/bars`의 `venue`, `SymbolInfo.nxtEnabled`, 분봉(1·3·5·15·30·60분) 과거 조회. 분봉의 진행 중 구간은 조회 스냅숏 | WebSocket, 실시간 현재 봉 |
 | #3 | 2단계 저장 | SQLite 파일 `data/vally.db`(sqlx 마이그레이션), 기본 레이아웃 마이그레이션, 관심종목, `UiState`, 자동 저장. 관심종목 현재가는 REST 조회 | WebSocket |
-| #4 | 3단계 실시간 | WebSocket, 구독, 현재 봉 집계, `seq`, 분봉 | |
+| #4 | 3단계 실시간 | WebSocket, 구독, 실시간 현재 봉 집계(일·주·월봉과 분봉), `seq` | |
 | #5 | 4단계 지표 | WASM 지표, 비교 종목 | |
 | #6~#9 | 5~8단계 | 드로잉 → 여러 칸 → 알림 → 클라우드 | |
 
 - **#2의 진행 중 구간**(D3, D12): 실시간이 아직 없다. 그래서 REST 최신 페이지의 `current`로 진행 중 구간을 보여 준다. 이 값은 키움 조회가 준 오늘 봉(이번 주, 이번 달 봉)이다. 종목이나 봉 주기를 바꾸거나 새로고침할 때만 새로 받는다. `BarsPage.seq`는 `null`이다.
 - **#2 완료 조건**(D14): 서버를 다시 켜도 차트가 몇 초 안에 다시 뜬다. 캐시는 비어 있으므로 키움에서 다시 받는다(일봉 1회 조회).
+- **#14는 #3보다 먼저다**(D17): #3의 레이아웃 저장 형식이 처음부터 칸의 거래소를 담게 하려는 것이다. 표는 이슈 번호가 아니라 켜지는 순서로 놓았다. 분봉 과거 조회도 #4에서 이 단계로 당겼다. #4에 남는 것은 실시간 현재 봉이다.
+- **#14의 진행 중 구간**: #2와 같다. 분봉도 최신 페이지의 `current`(키움 조회 스냅숏)로 보여 준다.
 - **DB는 #3부터, SQLite 파일 하나**(D14, D15, ADR 0006): #2 서버는 DB 없이 뜬다. #3에서 사용자 자료용 SQLite 파일(`data/vally.db`, git 제외)을 처음 만든다. 따로 띄우는 DB 서버는 없다. 시세는 DB에 두지 않는다(ADR 0003).
 
 ---
@@ -98,7 +101,7 @@ web(WASM) ───▶ indicators(feature "wasm")
 
 ### 2.1 종목코드
 
-"통합 시세 고정"을 타입으로 건다. KRX만, NXT만 고르는 값은 아예 없다. 지수는 거래소가 하나라 통합 시세라는 개념이 없다. 그래서 별도 변형으로 둔다.
+종목과 거래소를 나눠 둔다(ADR 0007, D17). `Symbol`은 거래소와 무관한 단위다. 드로잉처럼 거래소와 상관없는 것이 여기에 붙는다. 차트가 그리는 시세는 `Feed`다. 주식은 거래소를 고르고, 지수에는 거래소가 없다. 지수에 거래소를 주는 상태는 `Feed`로 만들 수 없다.
 
 ```rust
 /// KRX 단축코드 6자리. 영문 대문자가 섞일 수 있다(예: "0000D0", "03481K"). 끝자리도 글자일 수 있다.
@@ -116,9 +119,10 @@ impl StockCode {
 #[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct IndexCode([u8; 3]);
 
+/// 종목 또는 지수. 거래소와 무관한 단위다. 차트로 그리는 시세는 Feed다.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum Symbol {
-    /// 주식(보통주·우선주·리츠)과 ETF. 시세는 언제나 통합 시세다.
+    /// 주식(보통주·우선주·리츠)과 ETF.
     Stock(StockCode),
     Index(IndexCode),
 }
@@ -128,14 +132,49 @@ impl Symbol {
     pub fn parse(s: &str) -> Result<Self, SymbolError>;
     pub fn as_wire(&self) -> String;
 }
+
+/// 시세가 체결된 곳(용어집 "거래소"). 칸마다 하나를 고르고 기본은 통합이다. 지수에는 없다.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
+pub enum Venue {
+    /// KRX와 NXT를 합친 통합 시세.
+    #[default]
+    Combined,
+    Krx,
+    Nxt,
+}
+
+impl Venue {
+    pub const ALL: [Venue; 3];
+    pub fn as_wire(self) -> &'static str;          // "combined" "krx" "nxt"
+    pub fn parse(s: &str) -> Option<Self>;         // 이 세 값만. "KRX"는 None
+}
+
+/// 차트가 그리는 시세 하나.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum Feed {
+    Stock(StockCode, Venue),
+    Index(IndexCode),
+}
+
+impl Feed {
+    /// 지수에 거래소를 주면 None. 주식에 거래소를 주지 않으면 통합이다.
+    pub fn new(symbol: Symbol, venue: Option<Venue>) -> Option<Feed>;
+    pub fn symbol(self) -> Symbol;
+    pub fn venue(self) -> Option<Venue>;           // 지수면 None
+}
 ```
 
-키움에 보낼 코드는 `domain`에 두지 않는다. `005930_AL` 같은 통합 시세 접미사는 `server::kiwoom::wire`의 함수 하나가 만든다. 접미사를 만드는 곳은 거기뿐이다.
+키움에 보낼 코드는 `domain`에 두지 않는다. 거래소 접미사는 `server::kiwoom::api`의 함수 하나가 만든다. 키움 종목코드를 만드는 곳은 거기뿐이다(kiwoom.md 3·12·13절).
 
 ```rust
-// server::kiwoom::wire
-fn kiwoom_stock_code(code: StockCode) -> String; // "005930_AL"
+// server::kiwoom::api
+pub fn kiwoom_stock_code(code: StockCode, venue: Venue) -> String;
+// Combined → "005930_AL", Krx → "005930", Nxt → "005930_NX"
 ```
+
+- 지수는 거래소 구분이 없다. ka20005~ka20008의 `inds_cd`는 업종코드 3자리 그대로다(kiwoom.md 12.4).
+- NXT 이력은 2025-03부터다. 그 전 구간은 `_NX`로 받으면 봉이 없다. `_AL`은 NXT 이전 구간을 KRX 값으로 채운다.
+- NXT에서 거래되지 않는 종목(`nxt_enabled = false`, 주식의 약 78%)은 통합과 KRX가 같다(kiwoom.md 12.4).
 
 종목 정보(목록·검색용)는 따로 둔다.
 
@@ -150,9 +189,10 @@ pub struct SymbolInfo {
     pub name: String,
     pub kind: SymbolKind,
     pub market: Market,
-    /// 검색용 초성열. 예: "삼성전자" → "ㅅㅅㅈㅈ". 목록을 받을 때 만든다.
-    choseong: String,
+    /// NXT에서 거래되는 종목인가(ka10099 nxtEnable == "Y"). 지수는 언제나 false.
+    pub nxt_enabled: bool,
 }
+// 검색용 초성열은 server::symbols의 목록 안에 따로 둔다. 목록을 받을 때 만든다.
 ```
 
 ### 2.2 가격과 수량
@@ -313,15 +353,18 @@ pub enum SeedBoundary {
 ### 2.7 캐시 키
 
 ```rust
+/// 캐시 키: (종목, 거래소, 봉 주기). 지수에는 거래소가 없다(ADR 0007).
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
-pub struct SeriesKey { pub symbol: Symbol, pub period: Period }
+pub struct SeriesKey { pub feed: Feed, pub period: Period }
 ```
+
+- 같은 종목도 거래소가 다르면 다른 시리즈다. `005930` 통합 일봉과 KRX 일봉은 따로 받고 따로 캐시한다.
 
 ---
 
 ## 3. 시간 모델
 
-> 켜지는 단계: #2(일·주·월 경계), #4(체결 날짜, 분봉, 확정 타이머)
+> 켜지는 단계: #2(봉 경계와 `confirm_at`. 분봉 경계도 `Period::bucket`에 있다), #14(분봉 조회에 씀), #4(체결 날짜, 확정 타이머)
 
 ### 3.1 0B 체결시간에 날짜 정하기
 
@@ -549,6 +592,7 @@ pub struct MergeScope(pub u64);
 성공 응답이어도 한 번 더 검사한다.
 
 4. **빈 행**: 없는 종목코드·지수코드는 성공 응답(`return_code: 0`)에 모든 필드가 `""`인 행 하나로 온다. 첫 행의 `dt`(일·주·월봉)나 `cntr_tm`(분봉)이 빈 문자열이면 `UnknownSymbol`로 바꾼다. 정상 응답에는 빈 행이 없었다.
+   - NXT에서 거래되지 않는 종목의 `_NX` 요청도 같은 빈 행을 준다(kiwoom.md 12.4, 13절). 응답만으로는 "없는 종목"과 구별할 수 없다. 그래서 `BarService`는 `nxt_enabled = false`인 종목의 `Venue::Nxt` 요청을 키움에 보내기 전에 `BadRequest`로 거절한다(§8.2, #14).
 
 ```rust
 pub struct KiwoomStatus {
@@ -644,7 +688,30 @@ impl DailyChart {
 
 // 지수: IndexDailyChart(ka20006), IndexWeeklyChart(ka20007), IndexMonthlyChart(ka20008).
 // 본문은 { inds_cd, base_dt }이고 수정주가 필드가 없다.
+
+// #14에서 더한다. 분봉은 base_dt로 과거 날짜를 받는다(§6.3 분봉의 예외).
+#[derive(Serialize)]
+pub struct MinuteChart {          // ka10080
+    stk_cd: String,               // kiwoom_stock_code(code, venue)
+    tic_scope: &'static str,      // "1" "3" "5" "15" "30" "60"
+    upd_stkpc_tp: &'static str,   // "1"
+    base_dt: String,              // 최신 페이지는 시리즈의 base_date. 과거로 바로 갈 때는 그 날짜
+}
+
+#[derive(Serialize)]
+pub struct IndexMinuteChart {     // ka20005
+    inds_cd: String,
+    tic_scope: &'static str,
+    base_dt: String,
+}
+
+impl MinuteChart {
+    pub fn new(code: StockCode, venue: Venue, period: Period, base: KstDate) -> Self; // period는 분봉만
+}
 ```
+
+- **분봉 응답**(kiwoom.md 1·2·13절): 한 페이지 900봉, 최신순. `cntr_tm`은 `YYYYMMDDHHMMSS`이고 구간이 시작하는 KST다. `_AL`·KRX·`_NX` 모두 행 모양이 같다. 시·고·저·종에 부호가 붙는다(§4.6).
+- **`base_dt`로 과거로 바로 가기**: `base_dt`에 과거 날짜를 넣으면 그날의 마지막 봉부터 거꾸로 온다. 예를 들어 `base_dt=20260601`이면 첫 봉이 `20260601195900`이다(kiwoom.md 1절). ka20005도 같다.
 
 ### 4.6 응답 단위와 부호
 
@@ -752,7 +819,7 @@ pub enum StreamEvent {
 - **REMOVE**: **type별로 따로 보낸다.** 0B와 0J를 한 요청에 섞으면 `105112`로 실패한다.
 - **한 번에 하나**: REG/REMOVE 응답에는 요청 번호가 없다. 그래서 제어 메시지는 하나씩 보내고 응답을 기다린다. 5초 안에 응답이 없으면 실패로 본다.
 - **키움 쪽 목록은 응답을 보고 바꾼다**: 세션은 키움이 받아들인 종목 목록(`accepted`)을 따로 든다. REG·REMOVE의 성공 응답을 받은 뒤에만 `accepted`를 바꾼다. 실패하면 한 번 다시 보낸다. 또 실패하면 세션을 닫고 다시 연결한다. 다시 연결하면 `accepted`를 비우고 원하는 집합 전체를 처음부터 REG 하므로 어긋남이 없어진다. 200 한도 계산(§5.3)은 원하는 집합으로 한다.
-- 주식은 `0B`, 지수는 `0J`로 REG 한다. 코드는 `kiwoom_stock_code`가 만든다.
+- 주식은 `0B`, 지수는 `0J`로 REG 한다. 코드는 `kiwoom_stock_code`가 만든다. 주식은 거래소와 상관없이 `_AL` 하나만 REG 하는 방안을 먼저 검토한다(§5.3, ADR 0007).
 - **REAL**: `data[]`의 각 항목을 `parse_real_0b/0j`로 바꾼다. 실패한 항목은 버리고 카운터를 올린다.
 - 같은 토큰으로 순서대로 다시 접속하면 매번 LOGIN이 성공했다. 그래서 다시 연결할 때 토큰을 새로 받지 않는다.
 
@@ -782,7 +849,10 @@ pub enum StreamEvent {
 
 ### 5.3 구독 관리자
 
-키움 쪽 구독 단위는 **종목**이다. 브라우저 구독 단위는 **(종목, 봉 주기)** 다. 서버는 종목 하나의 체결을 그 종목의 모든 봉 주기 집계기로 나눠 보낸다.
+키움 쪽 구독 단위는 **종목**이다. 브라우저 구독 단위는 **`SeriesKey`**, 곧 (종목, 거래소, 봉 주기)다. 서버는 종목 하나의 체결을 그 종목의 모든 (거래소, 봉 주기) 집계기로 나눠 보낸다.
+
+- **거래소별 현재 봉**(ADR 0007, #4에서 정한다): `_AL` 0B 한 흐름은 KRX와 NXT 체결을 모두 준다. 체결마다 `9081`이 `"KRX"` 또는 `"NXT"`다(kiwoom.md 11.1·11.2). 그래서 `_AL` 하나만 REG 하고, 통합 집계기에는 모든 체결을, KRX·NXT 집계기에는 `9081`이 맞는 체결만 넣는 방안을 먼저 검토한다. 이러면 거래소를 골라도 REG 수가 늘지 않는다.
+- 애프터마켓 시간대(16:00~20:00)의 `9081` 값은 아직 재지 않았다(§12.2). 이 값이 거래소를 가르지 못하면 KRX·NXT 칸은 거래소 코드(`005930`, `005930_NX`)를 따로 REG 해야 하고, 200 한도 계산도 그 수로 한다.
 
 ```rust
 /// 누가 이 종목의 구독을 잡고 있는가.
@@ -926,7 +996,7 @@ pub struct HubSnapshot {
 
 ## 6. 캐시 (ADR 0003)
 
-> 켜지는 단계: #2(일·주·월, 메모리 시리즈, 07:45 비우기), #4(분봉, 실시간으로 만든 봉, 끊긴 구간)
+> 켜지는 단계: #2(일·주·월, 메모리 시리즈, 07:45 비우기), #14(거래소별 시리즈, 분봉 과거 조회), #4(실시간으로 만든 봉, 끊긴 구간)
 
 ### 6.1 저장 위치
 
@@ -984,7 +1054,7 @@ struct Series {
 pub struct SeriesId(u64);
 ```
 
-- **캐시 키**: `SeriesKey` = (종목, 봉 주기). 봉 하나의 키는 (종목, 봉 주기, `t`)다.
+- **캐시 키**: `SeriesKey` = (종목, 거래소, 봉 주기). 봉 하나의 키는 (종목, 거래소, 봉 주기, `t`)다.
 - **#4에서 더할 것**: 실시간으로 만든 봉을 붙이려면 "키움에서 받은 가장 늦은 봉"(`kiwoom_newest`)을 시리즈가 알아야 한다(§6.3 앞으로 늘리기). #2에는 실시간 쓰기가 없어서 이 필드가 없다.
 - **내리기**: 시리즈를 "쓰는 곳"은 그 키의 브라우저 구독(#4), 그 키를 잡은 켜진 알림(#8), 최근 10분 안의 REST 요청이다. 셋 다 없게 된 지 10분이 지나면 맵에서 지운다. 1분 타이머가 판단한다. #2·#3에는 구독이 없으므로 마지막 REST 요청으로부터 10분이다.
 - **매일 07:45에 모두 비우기**(ADR 0003)
@@ -1013,6 +1083,12 @@ pub struct SeriesId(u64);
   - 키가 없거나, 15분이 넘었거나, 위 조건이 맞지 않으면 오늘부터 다시 따라간다(`follow_from_today`). 처음부터 연속조회 체인을 따라 내려가고, 가진 구간 아래로 한 페이지 넘어가면 멈춘다. 받은 페이지 중 이미 메모리에 있는 부분은 키움 값으로 덮어쓴다. 이것은 출처 교체(§6.4)이기도 하다. [실측 대기: 15분 넘는 유효 시간, 장중에 새 봉이 붙는 동안의 키]
   - 키움이 더 줄 것이 없으면(`cont-yn: N`) `reached_origin = true`.
   - 연속조회 키와 `reached_origin`은 받은 페이지가 가진 구간의 가장 이른 봉까지 내려왔을 때만 바꾼다.
+- **분봉의 예외: 묵은 키는 날짜로 건너뛴다**(#14)
+  - 분봉에서 연속조회 키가 없거나 15분을 넘겨 묵었으면 오늘부터 다시 따라가지 않는다. 가진 가장 이른 봉의 KST 날짜를 `base_dt`로 두고 바로 그날로 간다. ka10080·ka20005는 과거 `base_dt`로 바로 간다(kiwoom.md 1절).
+  - 이유는 비용이다. 1분봉 1년이 `_AL` 191페이지다(kiwoom.md 2절). 초당 4회로 따라가면 요청 하나가 약 48초 걸린다.
+  - 그날 페이지에는 이미 가진 봉(그날 가장 이른 봉부터 19:59까지)이 겹쳐 온다. 겹친 봉은 키움 값으로 덮어쓴다(같은 `t`). 그 페이지의 연속조회 키가 다음 과거 페이지를 가리킨다.
+  - 키를 믿는 조건이 맞지 않을 때(위)도 같은 방법으로 건너뛴다.
+  - **받아들인 위험**: 일·주·월봉이 과거 `base_dt`를 쓰지 않는 이유(그 날짜 뒤의 권리발생이 빠질 수 있다)는 분봉에도 그대로다. 1년 안에 액면분할이 있던 종목은 건너뛴 날 이전 분봉이 수정 전 가격일 수 있다. 실측하지 않았다(§12.3). 07:45 비우기 뒤 다시 받으면 처음 페이지는 `base_date`에서 시작하므로, 문제는 15분 넘게 스크롤하지 않다가 다시 과거로 갈 때만 생긴다.
 - **앞으로 늘리기**(최신으로 따라잡기, `refresh_latest`)
   - #2: 최신 페이지 한 장을 받는다. 그 페이지의 가장 이른 확정 봉이 메모리의 가장 늦은 봉과 같거나 이르면 이어 붙인다. 이어지지 않으면 시리즈를 비우고 받은 페이지로 새로 만든다. `info` 로그를 남긴다.
   - #4: 최신 페이지부터 받아 과거로 연속조회한다. 받은 봉이 `kiwoom_newest`에 닿으면 멈춘다. 그러면 그 사이의 실시간으로 만든 봉이 모두 키움 값으로 바뀐다. 연속조회가 끝까지 가도 닿지 않으면 그 시리즈를 버리고 받은 것으로 새로 만든다.
@@ -1081,12 +1157,11 @@ impl BarService {
 
 - **처음 열 때**: 최근 500봉(`limit` 기본 500). 한 페이지에 일봉 600, 분봉 900, 주봉 300, 월봉 240개가 온다(kiwoom.md §1). 그래서 일봉과 분봉은 1회, 주봉은 2회, 월봉은 3회 조회한다.
 - **과거로 스크롤**: 브라우저가 `before` 커서로 다음 500봉을 요청한다. 메모리의 캐시 구간 안이면 바로, 밖이면 키움에서 받아 구간을 늘린다.
-- **분봉은 최근 1년만**(U1, ADR 0003)
-  - 하한 `floor = (그 시리즈의 마지막 관측일 − 1년)의 00:00 KST`. 마지막 관측일은 그 키의 가장 늦은 확정 봉의 KST 날짜다.
-  - 실측에서 키움이 준 가장 이른 분봉은 마지막 관측일(2026-11-06)로부터 1년인 2025-11-03이었다(kiwoom.md §2). 이 식은 그 결과와 맞는다.
-  - `t < floor`인 분봉은 돌려주지 않는다. 받아도 메모리에 넣지 않는다.
-  - 다음 페이지가 하한 아래로만 가게 되면 `nextBefore = null`.
-  - 일·주·월봉에는 하한이 없다. 일봉은 1985년까지 받을 수 있다.
+- **분봉은 최근 1년만**(U1, ADR 0003, #14)
+  - 하한은 키움이 정한다. 키움은 분봉을 마지막 관측일로부터 1년까지 주고, 거기서 `cont-yn: N`으로 연속조회를 끝낸다(kiwoom.md 2절: `_AL`·KRX·지수 모두 2025-11-03에서 끝남. 13절: `_NX`도 같은 날). 서버는 따로 날짜를 계산하지 않고 이 끝을 `reached_origin`으로 받는다. 그 지점에서 `nextBefore = null`이다.
+  - U1의 "캐시에 더 오래된 분봉이 있어도 돌려주지 않는다"는 따로 할 일이 없다. 캐시는 메모리에만 있고 매일 07:45에 비우므로, 키움이 주지 않는 분봉을 가질 수 없다.
+  - 거래소마다 하루 봉 수가 달라 1년의 페이지 수도 다르다. 1분봉은 `_AL` 191페이지, KRX 115페이지다. 60분봉은 3~4페이지다.
+  - 일·주·월봉에는 하한이 없다. 일봉은 1985년까지 받을 수 있다. NXT는 2025-03부터만 있어서 `_NX` 일·주·월봉은 거기서 끝난다.
 - **지표 알림**: 알림이 잡은 키는 지표 계산에 필요한 N개(§7.3)를 서버가 미리 채운다. 서버를 켤 때와 07:45 비우기 뒤에도 다시 채운다.
 
 ### 6.6 종목 목록과 검색
@@ -1112,6 +1187,7 @@ impl BarService {
 - 스팩은 코스닥 보통주로 둔다. #2 범위("주식")에 들기 때문이다. 가리는 규칙은 kiwoom.md §5에 있다.
 - 코스피·코스닥 지수 두 개(`IDX:001` 코스피, `IDX:101` 코스닥)는 코드에 고정해서 넣는다.
 - 목록에 없는 종목코드로 봉을 요청하면 `unknown_symbol`이다.
+- **NXT 가능 여부**: 행의 `nxtEnable`이 `"Y"`이면 `nxt_enabled = true`다. 지수 두 개는 `false`다. 2026-11-09 기준 주식 2,744개 중 603개(22%)가 NXT 가능이다(kiwoom.md 12.4). 이 값은 종목 목록과 함께 매일 07:45에 바뀐다.
 
 **검색**(D5, D12): 메모리에서 한다.
 
@@ -1185,12 +1261,15 @@ CREATE TABLE layout_cells (
   layout_id      TEXT    NOT NULL REFERENCES layouts(id) ON DELETE CASCADE,
   slot           INTEGER NOT NULL CHECK (slot BETWEEN 0 AND 3),
   symbol         TEXT    NOT NULL,
+  venue          TEXT    CHECK (venue IN ('combined','krx','nxt')),  -- 거래소(ADR 0007). 지수면 NULL
   period         TEXT    NOT NULL,
   symbol_link    INTEGER NOT NULL CHECK (symbol_link IN (0,1)),   -- 종목 연동
   chart_settings TEXT    NOT NULL CHECK (json_valid(chart_settings)),  -- 지표·기간·축·비교 종목. 프런트엔드 소유
-  PRIMARY KEY (layout_id, slot)
+  PRIMARY KEY (layout_id, slot),
+  CHECK ((symbol LIKE 'IDX:%') = (venue IS NULL))   -- 지수에는 거래소가 없고, 주식에는 언제나 있다
 ) STRICT;
 -- 칸 개수와 arrangement가 맞는지는 서버가 쓰기 전에 검사한다('1'→1칸, '2h'/'2v'→2칸, '3'→3칸, '4'→4칸).
+-- 칸의 거래소가 그 종목에 허용되는지(NXT 불가 종목의 'nxt')는 서버가 쓰기 전에 종목 목록으로 검사한다.
 
 -- 마지막으로 연 레이아웃, 테마 같은 화면 상태. 64KB 이하. 모르는 키도 그대로 저장한다.
 CREATE TABLE ui_state (
@@ -1198,7 +1277,7 @@ CREATE TABLE ui_state (
   state     TEXT    NOT NULL CHECK (json_valid(state))
 ) STRICT;
 
--- 드로잉: 종목에 붙는다. 봉 주기와 레이아웃에는 붙지 않는다.
+-- 드로잉: 종목에 붙는다. 거래소, 봉 주기, 레이아웃에는 붙지 않는다(ADR 0007).
 CREATE TABLE drawings (
   id         TEXT    PRIMARY KEY,
   symbol     TEXT    NOT NULL,
@@ -1240,7 +1319,7 @@ CREATE UNIQUE INDEX alert_events_once_per_bar ON alert_events (alert_id, bar_t)
 ```
 
 - `STRICT` 테이블이라 열 타입이 어긋난 값은 들어가지 않는다.
-- 첫 마이그레이션이 "기본" 레이아웃 하나를 넣는다(1칸, 코스피 지수 일봉, `sync` 둘 다 `true`). #3에서 차트 설정 자동 저장은 이 레이아웃의 칸을 고치는 것이다. 레이아웃이 0개인 상태는 없다. 마지막 레이아웃은 지울 수 없다.
+- 첫 마이그레이션이 "기본" 레이아웃 하나를 넣는다(1칸, 코스피 지수 일봉, `venue` NULL, `sync` 둘 다 `true`). #3은 처음부터 `venue` 열이 있는 형식으로 시작한다(D17). #3에서 차트 설정 자동 저장은 이 레이아웃의 칸을 고치는 것이다. 레이아웃이 0개인 상태는 없다. 마지막 레이아웃은 지울 수 없다.
 - 드로잉 점 개수는 도구마다 고정이다: 추세선 2, 수평선 1, 수직선 1, 사각형 2, 피보나치 되돌림 2, 텍스트 1. 서버가 검사한다.
 - 드로잉 점의 가격은 0.01 단위 정수가 아니라 실수다. 드로잉은 봉 가격이 아닌 아무 가격에나 놓을 수 있다.
 - 중복 금지 인덱스에 걸리면(`SQLITE_CONSTRAINT_UNIQUE`) 이미 울린 것이므로 보내지 않는다(§7.3).
@@ -1315,6 +1394,7 @@ pub fn judge_cross(dir: CrossDir, prev: (f64, f64), cur: (f64, f64)) -> bool;
 - `Once`: 한 번 울리면 `enabled = false`로 저장한다.
 - `Every`: 가격 알림은 반대편으로 갔다가 다시 넘어설 때 또 울린다. 지표 알림은 교차가 다시 일어날 때 울린다.
 - 켜진 알림의 종목은 `Holder::Alert`로 구독을 잡는다. 지표 알림은 그 `(종목, 봉 주기)` 집계기도 연다.
+- **거래소**: 알림에는 거래소 열이 없다. 가격 알림과 지표 알림 모두 통합 시세로 판단한다(ADR 0007의 기본). 거래소별 알림이 필요해지면 `alerts`에 `venue` 열을 더한다.
 
 ---
 
@@ -1329,7 +1409,8 @@ pub fn judge_cross(dir: CrossDir, prev: (f64, f64), cur: (f64, f64)) -> bool;
   - KST로 보여 주는 것은 브라우저 일이다. Lightweight Charts는 UTC로 표시하므로 표시용으로 `t + 32400`을 넘기는 방법이 흔하다.
   - 저장·전송하는 값은 언제나 원래 `t`다. 드로잉 점을 저장할 때 표시용 값을 되돌리는 것을 잊지 않는다.
 - 봉 시작 시각 규칙: 분봉은 정시 기준 n분 경계, 일봉은 그 날짜 00:00 KST, 주봉은 그 주 월요일 00:00 KST, 월봉은 1일 00:00 KST(1일이 주말이어도).
-- 분봉은 **최근 1년만** 온다(#4). 과거로 받다가 `nextBefore`가 `null`이 되면 끝이다. 프런트는 "분봉은 최근 1년까지" 안내를 띄운다.
+- 분봉은 **최근 1년만** 온다(#14). 과거로 받다가 `nextBefore`가 `null`이 되면 끝이다. 프런트는 "분봉은 최근 1년까지" 안내를 띄운다.
+- **거래소**(#14, ADR 0007): 주식은 칸마다 `combined`(통합, 기본), `krx`, `nxt` 중 하나를 고른다. 지수에는 거래소가 없다(`null`). 봉은 그 거래소의 봉이다. 같은 날 같은 종목도 거래소마다 종가가 다르다. 예: 005930 일봉 2026-11-06 종가는 통합 193,400, KRX 193,500, NXT 193,400이다(kiwoom.md 3·12절).
 - 가격은 자연 단위의 `number`다(주식 원, 지수 포인트). 주식은 정수, 지수는 소수 둘째 자리까지다.
 - 거래량은 `number`(정수)다. 지수의 거래량 단위는 아직 확인하지 못했다. 받은 값을 그대로 보여 준다.
 - 오류 응답은 HTTP 4xx/5xx와 본문 `ApiError`다. 코드마다 HTTP 상태가 하나다(`http::status_of`).
@@ -1349,6 +1430,7 @@ pub fn judge_cross(dir: CrossDir, prev: (f64, f64), cur: (f64, f64)) -> bool;
 type UnixSeconds = number;
 type SymbolCode = string; // 주식·ETF "005930", 지수 "IDX:001"(코스피) "IDX:101"(코스닥)
 type Period = "1m" | "3m" | "5m" | "15m" | "30m" | "60m" | "D" | "W" | "M";
+type Venue = "combined" | "krx" | "nxt";   // 거래소. 주식에만 있다
 type Uuid = string;       // 브라우저가 만드는 UUID v7
 type BarSource = "realtime" | "kiwoom";   // 봉 출처. 백엔드 BarSource의 직렬화 이름
 
@@ -1394,18 +1476,22 @@ interface SymbolInfo {
   name: string;
   kind: "index" | "common" | "preferred" | "etf" | "reit";
   market: "kospi" | "kosdaq";
+  nxtEnabled: boolean;   // NXT를 고를 수 있는가(ka10099 nxtEnable). 지수는 false
 }
 ```
 
-#### 봉 (#2, `seq`는 #4)
+#### 봉 (#2, `venue`와 분봉은 #14, `seq`는 #4)
 
 ```ts
-// GET /api/bars?symbol=005930&period=D&limit=500[&before=1730000000]
+// GET /api/bars?symbol=005930&venue=krx&period=5m&limit=500[&before=1730000000]
 // before 없음: 최신 페이지. current와 seq 포함.
 // before 있음: t < before 인 확정 봉 중 최신 limit개. current와 seq는 null.
 // limit 기본 500, 최대 1000. 키움 조회를 기다리면 수 초 걸릴 수 있다.
+// venue: 주식에서 빼면 combined. 지수에 주거나 모르는 값이면 400 bad_request.
+//        nxtEnabled가 false인 종목에 nxt를 주면 400 bad_request(키움에 보내지 않는다).
 interface BarsPage {
   symbol: SymbolCode;
+  venue: Venue | null;             // 이 페이지의 거래소. 지수면 null
   period: Period;
   bars: Bar[];                     // 확정 봉, t 오름차순
   current: Bar | null;             // 최신 페이지일 때만. 진행 중 구간의 봉
@@ -1414,7 +1500,10 @@ interface BarsPage {
 }
 ```
 
-- 과거로 스크롤할 때는 받은 `nextBefore`를 그대로 `before`에 넣는다.
+- 과거로 스크롤할 때는 받은 `nextBefore`를 그대로 `before`에 넣는다. `venue`도 최신 페이지와 같은 값을 넣는다.
+- **NXT 불가 종목의 `nxt`를 거절하는 이유**: 키움은 그런 `_NX` 요청에 "없는 종목"과 같은 빈 행을 준다(kiwoom.md 13절). 보내면 `unknown_symbol`과 구별할 수 없다.
+- **분봉**(#14): 봉의 `t`는 구간 시작 KST다(키움 `cntr_tm`). 한 페이지 900봉이라 최신 500봉은 키움 1회 조회다. 진행 중 구간은 `current`(키움 조회 스냅숏)로 온다. 저절로 바뀌지 않는다. 실시간 현재 봉은 #4다.
+- **정규장 종가**: 계약에 없다(D17, 2026-11-09 사용자 결정). `Bar`에 `rc` 같은 필드를 두지 않는다. KRX 일봉 종가도 2026-09-14부터는 애프터마켓의 마지막 체결가다.
 - **#2·#3의 최신 페이지**(D3, D12): `current`는 키움 조회가 준 오늘(이번 주, 이번 달) 봉, 즉 진행 중 구간이다. 저절로 바뀌지 않는다. 종목이나 봉 주기를 바꾸거나 새로고침할 때만 새로 받는다. `seq`는 `null`이다.
 - **#4 이후의 `current`**: 서버가 체결로 만든 현재 봉의 스냅숏이다.
 - **서버를 다시 켜면**: 서버에는 시세 캐시가 남지 않는다. 첫 요청은 키움에서 받으므로 1~3초 걸릴 수 있다. 키움이 응답하지 않으면 `503 kiwoom_unavailable`이다.
@@ -1467,6 +1556,7 @@ type Arrangement = "1" | "2h" | "2v" | "3" | "4";   // 2h 좌우, 2v 상하
 interface Cell {
   slot: 0 | 1 | 2 | 3;
   symbol: SymbolCode;
+  venue: Venue | null;           // 거래소(ADR 0007). 지수면 null, 주식이면 언제나 값이 있다. 기본 combined
   period: Period;
   symbolLink: boolean;           // 종목 연동
   chartSettings: unknown;        // 프런트엔드가 모양을 정한다. 64KB 이하. 서버는 그대로 저장
@@ -1604,13 +1694,14 @@ type SpecValidation =
 
 ```ts
 type ClientMessage =
-  // (종목, 봉 주기) 구독. sub는 브라우저가 정하는 연결 안에서 유일한 문자열.
-  // 칸의 주 종목과 비교 종목 각각이 구독 하나다.
-  | { type: "subscribe"; sub: string; symbol: SymbolCode; period: Period }
+  // (종목, 거래소, 봉 주기) 구독. sub는 브라우저가 정하는 연결 안에서 유일한 문자열.
+  // 칸의 주 종목과 비교 종목 각각이 구독 하나다. venue 규칙은 GET /api/bars와 같다.
+  | { type: "subscribe"; sub: string; symbol: SymbolCode; venue: Venue | null; period: Period }
   | { type: "unsubscribe"; sub: string };
 ```
 
-- 같은 연결에서 같은 `(symbol, period)`를 여러 `sub`로 구독해도 된다. 메시지는 `sub`마다 따로 온다. `seq`는 같은 `(symbol, period)` 흐름의 번호라서 같은 값이 온다.
+- 같은 연결에서 같은 `(symbol, venue, period)`를 여러 `sub`로 구독해도 된다. 메시지는 `sub`마다 따로 온다. `seq`는 같은 `(symbol, venue, period)` 흐름의 번호라서 같은 값이 온다.
+- `subscribe`의 `venue`는 #4에서 확정한다. 위 모양은 `SeriesKey`에 맞춘 초안이다.
 - 해지하거나 연결이 끊기면 서버는 그 종목을 30초 더 받은 뒤 해지한다. 그래서 칸의 종목을 바꿨다가 바로 돌아오거나 새로고침해도 다시 받기 시작하는 지연이 없다.
 
 #### 서버 → 브라우저
@@ -1898,8 +1989,11 @@ pub fn future_bar_starts(period: &str, last_start: f64, n: usize) -> Result<Vec<
 | 지표 설정 JSON | `Spec`의 JSON 왕복. 적어도 `{"kind":"ichimoku","conversion":9,"base":26,"spanB":52,"displacement":26}`와 `{"kind":"volume","maPeriod":20}`, `stochSlow`가 그대로 오가는지. ts-rs 생성 파일에 같은 이름이 나오는지 | `indicators` | #5 |
 | 키움 파서 | `docs/kiwoom.md`의 응답 예시를 `server/tests/fixtures/kiwoom/*.json`로 그대로 옮긴다. 파일 머리에 출처(문서 절)를 적는다. 아래 목록 참고 | `server::kiwoom::wire` | #2 |
 | 허용 목록 | 소스 전체에서 주문·계좌 경로와 api-id 문자열을 찾는 구조 검사(§4.4) | `server` | #2 |
+| 거래소 | `Venue` 직렬화 왕복과 `"KRX"` 거절, `Feed::new`(지수 + 거래소 → None, 주식 + 없음 → 통합), `kiwoom_stock_code`(`_AL`·없음·`_NX`), 요청 본문의 `stk_cd` | `domain`, `server::kiwoom::api` | #14 |
+| 봉 질의 | `venue` 생략(주식 → combined, 지수 → null), 지수 + `venue` → 400, 모르는 값 → 400, NXT 불가 종목 + `nxt` → 400이고 키움 요청 0건, `BarsPage.venue` | `server::http` | #14 |
+| 분봉 과거 조회 | 가짜 응답으로: 900봉 페이지, `cntr_tm` → 구간 시작, 15분 넘은 키는 가장 이른 봉의 날짜로 건너뜀(오늘부터 따라가지 않음), 겹친 날 덮어쓰기, `cont-yn: N`에서 `nextBefore = null` | `server::bars` | #14 |
 | 대기열 | 가짜 시계와 가짜 전송으로: 어느 1초 구간에도 4회 이하(토큰 발급·다시 보내기·연속조회 포함), 토큰 발급 먼저, `Screen` 먼저, 같은 요청 한 번, 합치기 범위가 다르면 따로 보냄, 요청 개수 초과 뒤 1초 멈춤, `[8005]` 뒤 한 번 발급하고 한 번 다시 보냄, au10001 실패 시 기다리던 요청 모두 실패. `Recovery` 몫(4번 중 1번)은 #4 | `server::kiwoom::rest` | #2 |
-| 메모리 캐시 | DB 없이 가짜 `MarketRequest` 응답과 가짜 시계로: 과거로 늘리기, 앞으로 늘리기, 실시간으로 만든 봉 붙이기 조건(세션 끊김, 시리즈 없음), 출처 교체(키움은 덮어쓰고 실시간은 못 덮어씀), **시리즈를 내린 뒤·07:45 비운 뒤 도착한 응답은 버림(`SeriesId`가 다름)**, 응답이 시리즈를 새로 만들지 않음, 10분 내리기(구독·알림·최근 REST 요청 중 하나라도 있으면 유지), 07:45 비우기 뒤 구독 중인 키 다시 채우기와 `reload { reason: "daily_reset" }`, 분봉 1년 하한, 같은 요청 합치기 | `server::bars` | #2·#4 |
+| 메모리 캐시 | DB 없이 가짜 `MarketRequest` 응답과 가짜 시계로: 같은 종목의 거래소별 시리즈가 따로임, 과거로 늘리기, 앞으로 늘리기, 실시간으로 만든 봉 붙이기 조건(세션 끊김, 시리즈 없음), 출처 교체(키움은 덮어쓰고 실시간은 못 덮어씀), **시리즈를 내린 뒤·07:45 비운 뒤 도착한 응답은 버림(`SeriesId`가 다름)**, 응답이 시리즈를 새로 만들지 않음, 10분 내리기(구독·알림·최근 REST 요청 중 하나라도 있으면 유지), 07:45 비우기 뒤 구독 중인 키 다시 채우기와 `reload { reason: "daily_reset" }`, 같은 요청 합치기 | `server::bars` | #2·#4 |
 | 종목 목록·검색 | 켤 때 목록 받기 전 요청은 기다림, 07:45 갱신 실패 시 이전 목록 유지. ka10099 고정 입력으로 `marketCode` 거르기, 우선주 코드 규칙(`03481K` 포함). 검색 순위·동점 순서·이름 순서(`삼성전자` < `삼성SDI`)·초성·정규화 표 기반 테스트 | `server::symbols` | #2 |
 | 정적 파일 | `/api/없는경로` → JSON 404, `/assets/없는.js` → 404, `/layout/x` → index.html, `.wasm` MIME, 캐시 헤더 | `server::http` | #2 |
 | 브라우저 계약 | ts-rs 생성 파일이 커밋된 것과 같은지 CI 검사. 서버 → 브라우저 메시지 JSON 스냅숏 테스트 | `server::http` | #2·#4 |
@@ -1915,7 +2009,9 @@ pub fn future_bar_starts(period: &str, last_start: f64, n: usize) -> Result<Vec<
 - ka20006 지수 일봉: `505969` → 5,059.69(§6).
 - ka20006 코스피 1996-11-04: 저가가 종가보다 높은 실제 행(§4.6 보정).
 - ka10082·ka10083, ka20007·ka20008: 주봉·월봉 `dt` 맞추기(10.4·10.5절).
-- ka10099 행과 ka10100 응답(§5).
+- ka10099 행과 ka10100 응답(§5). `nxtEnable` `Y`·`N`이 둘 다 있는 행.
+- ka10080 `_AL`·KRX·`_NX` 1분봉과 60분봉 행, ka20005 지수 분봉(1·13절). #14에서 옮긴다.
+- NXT 불가 종목의 `_NX` 빈 행: `005935_NX` 일봉과 1분봉(12.4·13절). #14에서 옮긴다.
 - 없는 코드의 빈 행: ka10081 `stk_cd=999999`, ka20006 `inds_cd=999`(§9).
 - 필수 입력 누락: `return_code: 2`, `return_msg`의 `[1511:…]`(§9).
 - WebSocket: LOGIN 응답, REG 응답, PING, REMOVE `105112`(§8).
@@ -2031,6 +2127,10 @@ impl<T> Secret<T> { pub fn expose(&self) -> &T; }
 | 20:00 이후 체결(11.8, D16) | 20:00:00~20:00:03 체결이 온다. 키움은 19:59 봉에 넣는다 | §3.1, §3.3 |
 | 새 토큰과 WebSocket(11.10, D16) | 새 토큰은 기존 세션을 끊지 않는다. 옛 토큰의 REST가 `[8005]`로 실패한다. 세션을 끊는 것은 같은 앱키의 두 번째 LOGIN(close 1000)이다 | §4.1, §5.1 |
 | 08:00 첫 체결(11.9) | 08:00 정각에 접속하면 첫 체결을 놓칠 수 있다 | §5.2 |
+| 거래소별 일봉(12.1) | `_AL`·KRX·`_NX`가 거래소마다 다른 봉을 준다. 2026-09-14부터 KRX 일봉 종가도 애프터마켓의 마지막 체결가다 | §2.1, §8.2 |
+| NXT 불가 종목의 `_NX`(12.4, 13절) | 없는 종목과 같은 빈 행 하나. `_AL`은 KRX와 같다 | §4.3, §8.2 |
+| `_NX` 분봉(13절) | 온다. 한 페이지 900봉, `cntr_tm`은 구간 시작 KST, 하루 08:00~19:59. 1년 끝도 `_AL`과 같다(2025-11-03) | §4.5, §6.5 |
+| 분봉 시작 경계(13절) | 3·30분봉의 시작이 모두 자정 기준 N분 경계 | §3.2 |
 
 ### 12.2 장중 실측 대기(장중에만 잴 수 있다)
 
@@ -2041,7 +2141,7 @@ D16(kiwoom.md 11절)으로 풀린 항목은 12.1로 옮겼다. 남은 것은 아
 | 1 | 0B 누적거래량(13)의 하루 합계가 일봉 `trde_qty` 기준인가 분봉 합 기준인가. 분 안의 증분은 REST 분봉과 같다(11.4) | 모른다 → 시드 경계를 믿지 않음(`Unknown`) | §5.4. 같으면 `DayCum`으로 바꾼다 |
 | 2 | 0J 13·15의 단위(11.5) | 받은 값 그대로 | §4.6 |
 | 3 | 09:00 시가 단일가가 0B 한 건으로 오는가(11.6) | 한 건, 그 체결시간의 구간 | 집계 테스트 |
-| 4 | KRX 코드의 15:30~16:00 체결, 15:35 봉의 정체, 애프터마켓 시간대의 `290`·`9081` 값(11.7) | `_AL`만 쓰므로 영향 없음 | — |
+| 4 | KRX 코드의 15:30~16:00 체결, 15:35 봉의 정체(`_NX`에도 있다), 애프터마켓 시간대의 `290`·`9081` 값(11.7, 13절) | REST 봉은 키움이 준 대로 그린다. 실시간은 `_AL` 한 흐름을 `9081`로 나눈다 | §5.3. `9081`이 애프터마켓에서 거래소를 가르지 못하면 거래소 코드를 따로 REG 한다 |
 | 5 | 20:00:03보다 늦은 체결이 오는가(11.8) | 20:00:10까지만 받는다 | §3.1 창, `CLOSE_GRACE_SECS` |
 | 6 | 07:50 강제 단절의 Close 코드와 다시 접속되는 시각, 일요일 05:00(11.9) | 바로 붙는다. 안 되면 30초마다 재시도 | §5.2 |
 | 7 | ka10099 `lastPrice`가 장중에 오늘 기준가인가(11.11) | 쓰지 않는다 | §4.6 |
@@ -2051,8 +2151,9 @@ D16(kiwoom.md 11절)으로 풀린 항목은 12.1로 옮겼다. 남은 것은 아
 | # | 항목 | 기본값 | 바꿀 곳 |
 |---|---|---|---|
 | 1 | 만료된 진짜 토큰의 응답이 가짜 토큰과 같은 형태(HTTP 200, `return_code: 3`, `[8005]`)인가. 2026-11-09 22:48 만료 뒤에 확인할 수 있다 | 같다 | §4.3 |
-| 2 | `next-key`가 15분을 넘겨도 통하는가, 장중에 새 봉이 붙는 동안에도 같은 자리를 가리키는가 | 15분 안에만 쓴다. 넘으면 오늘부터 다시 따라간다 | §6.3 |
+| 2 | `next-key`가 15분을 넘겨도 통하는가, 장중에 새 봉이 붙는 동안에도 같은 자리를 가리키는가 | 15분 안에만 쓴다. 넘으면 일·주·월봉은 오늘부터 다시 따라가고, 분봉은 날짜로 건너뛴다 | §6.3 |
 | 3 | **키움이 수정주가를 언제 반영하는가**: 권리락·액면분할 당일 07:45 이전에 `upd_stkpc_tp=1` 조회가 이미 수정된 값을 주는가. 즉 07:45 비우기가 충분한가. 수정 사유가 생기는 날(권리락일 전후)에 07:45·08:00·장중 세 번 일봉을 받아 비교한다 | 충분하다(07:45 전에 반영된다) | 늦게 반영되면 비우기 시각을 늦추거나(예: 08:00 직전), 장중 한 번 더 비운다. §6.2 |
+| 4 | **분봉 과거 `base_dt`와 수정주가**: `upd_stkpc_tp=1`에 과거 `base_dt`를 주면 그 날짜 뒤의 액면분할·권리락이 반영된 값이 오는가. 1년 안에 분할이 있었던 종목으로 `base_dt=오늘`의 연속조회 결과와 `base_dt=분할 전 날짜`의 결과를 같은 날짜에서 비교한다 | 반영된다고 가정하고 날짜로 건너뛴다 | 반영되지 않으면 분봉도 오늘부터 따라가거나, 건너뛴 페이지를 오늘부터 받은 페이지와 겹치는 날에서 비율로 맞춘다. §6.3 |
 
 ---
 
@@ -2068,5 +2169,8 @@ GLOSSARY.md와 ADR은 고치지 않았다. 아래는 제안이다. ADR 0004에 �
 
 - **기준가**(새 용어 후보, kiwoom.md에서도 제안): 등락의 기준이 되는 가격(보통 전일 종가). 현재가의 `change`가 이것에 기대고 있다(§4.6). 용어집 "정규장 종가" 항목이 이미 이 말을 쓴다. 표제어로 넣기를 제안한다.
 - **끊긴 구간**(새 용어 후보): 실시간 연결이 끊겨 체결을 받지 못한 시간. 다시 연결되면 조회로 메운다. ADR 0003이 "실시간 연결이 끊겼던 구간"이라고 풀어 쓰는 개념이다.
-- **캐시 구간**(새 용어 후보): (종목, 봉 주기)마다 캐시가 빠짐없이 갖고 있는 시각 범위.
+- **캐시 구간**(새 용어 후보): (종목, 거래소, 봉 주기)마다 캐시가 빠짐없이 갖고 있는 시각 범위.
 - **ADR 0004의 "저장소 루트 `.env`"**: 서버는 `VALLY_ENV_FILE`(절대 경로)로만 설정 파일을 읽는다(§11.1). ADR 문구를 "`VALLY_ENV_FILE`이 가리키는 파일"로 고치기를 제안한다.
+- **ADR 0003의 "(종목, 봉 주기)"**: 캐시 단위는 이제 (종목, 거래소, 봉 주기)다(ADR 0007, §2.7). ADR 0003의 "계층"과 "단위" 문구에 거래소를 더하기를 제안한다.
+- **decisions-r1 D3 표**: #14(1.5단계: 칸마다 거래소, 분봉 과거 조회) 행이 없고, #4 행에 "분봉"이 남아 있다. 이 문서 §0처럼 고치기를 제안한다.
+- **decisions-r1 D16의 첫 "확인됨" 항목**: 차트를 통합 시세로만 그린다는 문구를 D17과 ADR 0007이 바꿨다. D16 항목에 "D17로 바뀜"을 붙이기를 제안한다.
