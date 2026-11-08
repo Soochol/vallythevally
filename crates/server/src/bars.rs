@@ -126,7 +126,7 @@ impl BarService {
         };
         // 키움은 NXT 불가 종목의 `_NX`에 없는 코드와 같은 빈 행을 준다(kiwoom.md §12.4, §13). 보내기 전에 거른다.
         if key.feed.venue() == Some(Venue::Nxt) && !info.nxt_enabled {
-            return Err(BarError::BadRequest(format!("{}({})은 NXT에서 거래되지 않습니다", info.name, key.feed.symbol().as_wire())));
+            return Err(BarError::BadRequest(format!("NXT에서 거래되지 않는 종목입니다: {}({})", info.name, key.feed.symbol().as_wire())));
         }
         let slot = self.slot(key);
         let seen_latest = slot.latest_fetches.load(Ordering::SeqCst);
@@ -809,7 +809,7 @@ mod tests {
     async fn nxt_is_rejected_before_kiwoom_for_symbols_not_on_nxt() {
         let h = std_harness(Duration::ZERO);
         let r = h.bars.page(venue_key(NOT_ON_NXT, Venue::Nxt, Period::Day), None, 10).await;
-        assert!(matches!(&r, Err(BarError::BadRequest(m)) if m.contains("NXT에서 거래되지 않습니다")), "{r:?}");
+        assert!(matches!(&r, Err(BarError::BadRequest(m)) if m.contains("NXT에서 거래되지 않는 종목입니다")), "{r:?}");
         assert!(h.chart_calls().is_empty(), "키움을 부르지 않는다");
         assert_eq!(h.bars.series_count(), 0, "시리즈도 만들지 않는다");
         h.bars.page(venue_key(NOT_ON_NXT, Venue::Krx, Period::Day), None, 10).await.unwrap();

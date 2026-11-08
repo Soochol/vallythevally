@@ -342,7 +342,7 @@ mod tests {
         let (s, v) = json(&f.app, "/api/bars?symbol=005930&period=D&venue=krx").await;
         assert_eq!((s, v["venue"].as_str()), (StatusCode::OK, Some("krx")));
         let (s, v) = json(&f.app, "/api/bars?symbol=005935&period=D&venue=nxt").await;
-        assert!(v["error"]["message"].as_str().unwrap().contains("NXT에서 거래되지 않습니다"), "{s} {v}");
+        assert!(v["error"]["message"].as_str().unwrap().contains("NXT에서 거래되지 않는 종목입니다"), "{s} {v}");
         for (uri, code, status) in [
             ("/api/bars?symbol=005930", "bad_request", StatusCode::BAD_REQUEST),
             ("/api/bars?symbol=005930&period=X", "bad_request", StatusCode::BAD_REQUEST),
