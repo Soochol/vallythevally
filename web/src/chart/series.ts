@@ -24,7 +24,8 @@ export type MainSeries =
 export const VOLUME_SCALE_ID = "volume";
 
 export function priceFormat(isIndex: boolean): PriceFormat {
-  return { type: "custom", minMove: isIndex ? 0.01 : 1, formatter: (p: number) => formatPrice(p, isIndex) };
+  // 가격 축은 거래량을 깔아 둔 아래 여백까지 이어져 0 밑 눈금을 낸다. 가격은 0보다 크니 비운다.
+  return { type: "custom", minMove: isIndex ? 0.01 : 1, formatter: (p: number) => (p <= 0 ? "" : formatPrice(p, isIndex)) };
 }
 
 function colors(style: ChartStyle, t: ThemeTokens) {
