@@ -339,7 +339,7 @@ impl Inner {
             return Step::Again;
         };
         let Some((token, generation)) = self.auth.current(now_kst) else {
-            q.lanes[0].push_front(id);
+            q.requeue_front(id);
             return Step::Again;
         };
         let job = q.jobs.get_mut(&id).expect("대기열의 id는 jobs에 있다");

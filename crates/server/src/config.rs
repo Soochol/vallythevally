@@ -183,7 +183,7 @@ fn parse_env(text: &str) -> Result<BTreeMap<String, String>, ConfigError> {
         let v = [('"', '"'), ('\'', '\'')]
             .iter()
             .find_map(|&(a, b)| v.strip_prefix(a).and_then(|s| s.strip_suffix(b)))
-            .unwrap_or(v);
+            .unwrap_or_else(|| v.split_once(" #").map_or(v, |(before, _)| before.trim_end()));
         out.insert(k.trim().to_owned(), v.to_owned());
     }
     Ok(out)
@@ -272,9 +272,10 @@ mod tests {
 
     #[test]
     fn env_file_parsing() {
-        let m = parse_env("# c\n\nVALLY_A=1\nexport VALLY_B = \"two words\"\nVALLY_C='x=y'\n").unwrap();
+        let m = parse_env("# c\n\nVALLY_A=1 # 주석\nexport VALLY_B = \"two # words\"\nVALLY_C='x=y'\nVALLY_D=a#b\n").unwrap();
+        assert_eq!(m["VALLY_D"], "a#b");
         assert_eq!(m["VALLY_A"], "1");
-        assert_eq!(m["VALLY_B"], "two words");
+        assert_eq!(m["VALLY_B"], "two # words");
         assert_eq!(m["VALLY_C"], "x=y");
         assert!(parse_env("NOEQUALS\n").is_err());
         assert!(read_env_file(Path::new("relative/.env")).is_err());
