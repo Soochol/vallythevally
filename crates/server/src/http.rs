@@ -260,6 +260,12 @@ mod tests {
             if kiwoom_down {
                 return status(503, json!({}));
             }
+            if s.api_id == ApiId::Ka10080 {
+                return ok(json!({"stk_min_pole_chart_qry": [
+                    {"cntr_tm": "20261106195500", "open_pric": "-193700", "high_pric": "-193700", "low_pric": "-193400", "cur_prc": "-193400", "trde_qty": "79320"},
+                    {"cntr_tm": "20261106195000", "open_pric": "-193600", "high_pric": "+193800", "low_pric": "-193500", "cur_prc": "-193700", "trde_qty": "1000"}
+                ], "return_code": 0}), None);
+            }
             ok(json!({"stk_dt_pole_chart_qry": [
                 {"dt": "20261106", "open_pric": "185000", "high_pric": "196500", "low_pric": "175300", "cur_prc": "193400", "trde_qty": "56147847"},
                 {"dt": "20261105", "open_pric": "211500", "high_pric": "214000", "low_pric": "199800", "cur_prc": "201500", "trde_qty": "38560685"}
@@ -329,6 +335,10 @@ mod tests {
         assert_eq!(v["nextBefore"], Value::Null);
         assert_eq!(v["bars"][1], json!({"t": 1_793_890_800, "o": 185000.0, "h": 196500.0, "l": 175300.0, "c": 193400.0, "v": 56147847}));
         assert_eq!(v["venue"], "combined", "거래소를 주지 않으면 통합");
+        let (s, v) = json(&f.app, "/api/bars?symbol=005930&period=5m&venue=nxt").await;
+        assert_eq!((s, v["period"].as_str(), v["venue"].as_str()), (StatusCode::OK, Some("5m"), Some("nxt")), "{v}");
+        let ts: Vec<_> = v["bars"].as_array().unwrap().iter().map(|b| (b["t"].as_i64().unwrap(), b["c"].as_f64().unwrap())).collect();
+        assert_eq!(ts, [(1_793_962_200, 193_700.0), (1_793_962_500, 193_400.0)], "2026-11-06 19:50·19:55 봉, 오름차순");
         let (s, v) = json(&f.app, "/api/bars?symbol=005930&period=D&venue=krx").await;
         assert_eq!((s, v["venue"].as_str()), (StatusCode::OK, Some("krx")));
         let (s, v) = json(&f.app, "/api/bars?symbol=005935&period=D&venue=nxt").await;
@@ -342,7 +352,6 @@ mod tests {
             ("/api/bars?symbol=005930&period=D&venue=tokyo", "bad_request", StatusCode::BAD_REQUEST),
             ("/api/bars?symbol=IDX:001&period=D&venue=krx", "bad_request", StatusCode::BAD_REQUEST),
             ("/api/bars?symbol=005935&period=D&venue=nxt", "bad_request", StatusCode::BAD_REQUEST),
-            ("/api/bars?symbol=005930&period=5m", "bad_request", StatusCode::BAD_REQUEST),
             ("/api/bars?symbol=000660&period=D", "unknown_symbol", StatusCode::NOT_FOUND),
         ] {
             let (s, v) = json(&f.app, uri).await;

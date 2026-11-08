@@ -1,4 +1,4 @@
-//! 일·주·월봉 메모리 캐시(backend.md §6.2~6.5, ADR 0003, D4, D14).
+//! 봉 메모리 캐시(backend.md §6.2~6.5, ADR 0003, D4, D14). (종목, 거래소, 봉 주기)마다 시리즈 하나다.
 //!
 //! 시리즈 하나 = 캐시 구간 하나. 오름차순 확정 봉이 빠짐없이 들어 있고, 양 끝으로만 늘어난다.
 //! #2에는 실시간으로 만든 봉을 붙이는 쓰기가 없다. 그래서 키별 잠금을 키움 조회 동안에도 쥔다.
@@ -12,14 +12,17 @@ use std::sync::{Arc, Mutex};
 use domain::{ConfirmedBar, Feed, KstDate, KstTime, Period, SeriesKey, Venue};
 
 use crate::clock::Clock;
-use crate::kiwoom::api::{DailyChart, IndexDailyChart, IndexMonthlyChart, IndexWeeklyChart, MarketRequest, MonthlyChart, WeeklyChart};
+use crate::kiwoom::api::{
+    DailyChart, IndexDailyChart, IndexMinuteChart, IndexMonthlyChart, IndexWeeklyChart, MarketRequest, MinuteChart, MonthlyChart, WeeklyChart,
+};
 use crate::kiwoom::rest::{ContKey, KiwoomError, KiwoomRest, MergeScope, Priority};
 use crate::kiwoom::wire::{ChartBody, ChartRows, KiwoomBar, parse_chart};
 use crate::symbols::SymbolDirectory;
 
 pub const DEFAULT_LIMIT: usize = 500;
 pub const MAX_LIMIT: usize = 1000;
-/// `next-key`는 15분 묵혀도 통했다(kiwoom.md §10.3). 그보다 오래되면 오늘부터 다시 따라간다.
+/// `next-key`는 15분 묵혀도 통했다(kiwoom.md §10.3). 그보다 오래되면 일·주·월봉은 오늘부터 다시 따라가고,
+/// 분봉은 가진 가장 이른 봉의 날짜로 건너뛴다.
 const CONT_FRESH_SECS: i64 = 15 * 60;
 pub const IDLE_EVICT_SECS: i64 = 10 * 60;
 
@@ -68,14 +71,23 @@ pub struct BarPage {
 }
 
 struct Series {
-    /// 이 시리즈의 모든 조회가 쓰는 `base_dt`. 07:45에 시리즈를 모두 비우므로 하루 안에서 바뀌지 않는다.
-    base_date: KstDate,
+    /// 최신 페이지와 일·주·월봉 조회가 쓰는 `base_dt`(오늘). 07:45에 시리즈를 모두 비우므로 하루 안에서 바뀌지 않는다.
+    today: KstDate,
     bars: Vec<ConfirmedBar>,
+    /// 키움이 연속조회를 끝냈다(`cont-yn: N`). 분봉은 여기가 1년 끝이다(kiwoom.md §2, U1).
     reached_origin: bool,
-    /// 지금 가진 가장 이른 봉 바로 앞을 가리키는 연속조회 키와 받은 시각.
-    cont: Option<(ContKey, KstTime)>,
+    /// 지금 가진 가장 이른 봉 바로 앞을 가리키는 연속조회.
+    cont: Option<Cont>,
     /// 마지막 최신 페이지 조회가 준 진행 중 구간 봉. 캐시 구간에는 넣지 않는다.
     current: Option<KiwoomBar>,
+}
+
+#[derive(Clone)]
+struct Cont {
+    key: ContKey,
+    /// 이 키를 낸 조회의 `base_dt`. 이어 받을 때도 같은 본문을 보낸다.
+    base: KstDate,
+    received_at: KstTime,
 }
 
 struct Slot {
@@ -108,9 +120,6 @@ impl BarService {
 
     /// `before`가 None이면 최신 페이지다.
     pub async fn page(&self, key: SeriesKey, before: Option<KstTime>, limit: usize) -> Result<BarPage, BarError> {
-        if key.period.is_intraday() {
-            return Err(BarError::BadRequest("분봉은 아직 열리지 않았습니다(#4에서 열립니다)".into()));
-        }
         let dir = self.symbols.ready().await.map_err(|_| BarError::Unavailable("종목 목록을 아직 받지 못했습니다".into()))?;
         let Some(info) = dir.get(key.feed.symbol()) else {
             return Err(BarError::UnknownSymbol);
@@ -181,7 +190,7 @@ impl BarService {
                 last_access: AtomicI64::new(now.unix()),
                 latest_fetches: AtomicU64::new(0),
                 series: tokio::sync::Mutex::new(Series {
-                    base_date: now.kst_date(),
+                    today: now.kst_date(),
                     bars: Vec::new(),
                     reached_origin: false,
                     cont: None,
@@ -199,7 +208,8 @@ impl BarService {
 
     /// 키움 최신 페이지를 받아 앞으로 늘린다(D4). 이어지지 않으면 시리즈를 버리고 새로 만든다.
     async fn refresh_latest(&self, key: SeriesKey, s: &mut Series) -> Result<(), BarError> {
-        let page = self.fetch(key, s.base_date, None).await?;
+        let today = s.today;
+        let page = self.fetch(key, today, None).await?;
         let (confirmed, current) = split_current(&page.rows, self.clock.now());
         s.current = current;
         let connects = match (confirmed.first(), s.bars.last()) {
@@ -212,15 +222,15 @@ impl BarService {
             s.cont = None;
             s.reached_origin = false;
         }
-        self.ingest(s, confirmed, page.next);
+        self.ingest(s, confirmed, page.next, today);
         Ok(())
     }
 
     /// 가장 이른 봉보다 과거를 적어도 한 페이지 더 받는다(§6.3 과거로 늘리기).
     async fn extend_older(&self, key: SeriesKey, s: &mut Series) -> Result<(), BarError> {
         let now = self.clock.now();
-        if let Some((cont, at)) = s.cont.clone().filter(|(_, at)| now.unix() - at.unix() < CONT_FRESH_SECS) {
-            let page = self.fetch(key, s.base_date, Some(&cont)).await?;
+        if let Some(c) = s.cont.clone().filter(|c| now.unix() - c.received_at.unix() < CONT_FRESH_SECS) {
+            let page = self.fetch(key, c.base, Some(&c.key)).await?;
             let below = match (page.rows.last(), s.bars.first()) {
                 (Some(newest_new), Some(oldest_old)) => newest_new.bucket.start() < oldest_old.bucket.start(),
                 (None, _) => true,
@@ -228,27 +238,33 @@ impl BarService {
             };
             if below {
                 let (confirmed, _) = split_current(&page.rows, now);
-                self.ingest(s, confirmed, page.next);
+                self.ingest(s, confirmed, page.next, c.base);
                 return Ok(());
             }
-            tracing::info!(symbol = %key.feed.symbol().as_wire(), venue = ?key.feed.venue(), cont_age_secs = now.unix() - at.unix(), "연속조회 키가 기대한 위치를 주지 않아 오늘부터 다시 따라갑니다");
+            tracing::info!(symbol = %key.feed.symbol().as_wire(), venue = ?key.feed.venue(), cont_age_secs = now.unix() - c.received_at.unix(), "연속조회 키가 기대한 위치를 주지 않아 다시 따라갑니다");
         }
-        self.follow_from_today(key, s).await
+        // 분봉은 오늘부터 따라가면 1분봉 1년이 191페이지다(kiwoom.md §2). 과거 base_dt는 그날 19:59부터
+        // 거꾸로 주므로(§1) 가진 가장 이른 봉의 날짜에서 시작하면 첫 페이지가 그 봉과 겹치고 그 아래로 내려간다.
+        let start = match s.bars.first() {
+            Some(oldest) if key.period.is_intraday() => oldest.bucket.start().kst_date(),
+            _ => s.today,
+        };
+        self.follow_from(key, s, start).await
     }
 
-    /// 오늘부터 연속조회 체인을 따라 내려가며 받은 봉을 모두 덮어쓴다. 가진 구간 아래로 한 페이지 넘어가면 멈춘다.
-    async fn follow_from_today(&self, key: SeriesKey, s: &mut Series) -> Result<(), BarError> {
+    /// `base`부터 연속조회 체인을 따라 내려가며 받은 봉을 모두 덮어쓴다. 가진 구간 아래로 한 페이지 넘어가면 멈춘다.
+    async fn follow_from(&self, key: SeriesKey, s: &mut Series, base: KstDate) -> Result<(), BarError> {
         let target = s.bars.first().map(|b| b.bucket.start());
         let mut cont: Option<ContKey> = None;
         loop {
-            let page = self.fetch(key, s.base_date, cont.as_ref()).await?;
+            let page = self.fetch(key, base, cont.as_ref()).await?;
             let (confirmed, _) = split_current(&page.rows, self.clock.now());
             let reached = match (confirmed.first(), target) {
                 (Some(oldest_new), Some(t)) => oldest_new.bucket.start() < t,
                 _ => true,
             };
             cont = page.next.clone();
-            self.ingest(s, confirmed, page.next);
+            self.ingest(s, confirmed, page.next, base);
             if reached || cont.is_none() {
                 return Ok(());
             }
@@ -256,34 +272,36 @@ impl BarService {
     }
 
     /// 받은 확정 봉을 합친다. 같은 `t`는 키움 값이 덮는다.
-    /// 이 페이지가 가진 구간의 가장 이른 봉까지 내려왔을 때만 연속조회 키와 끝 여부를 바꾼다.
-    fn ingest(&self, s: &mut Series, confirmed: Vec<ConfirmedBar>, next: Option<ContKey>) {
+    /// 이 페이지가 가진 구간의 가장 이른 봉까지 내려왔거나 키움이 연속조회를 끝냈을 때만 연속조회 키와 끝 여부를 바꾼다.
+    /// `base`는 이 페이지를 받은 조회의 `base_dt`다.
+    fn ingest(&self, s: &mut Series, confirmed: Vec<ConfirmedBar>, next: Option<ContKey>, base: KstDate) {
         let reaches_oldest = match (confirmed.first(), s.bars.first()) {
             (Some(new), Some(old)) => new.bucket.start() <= old.bucket.start(),
-            (None, _) => next.is_none(),
             (Some(_), None) => true,
+            (None, _) => false,
         };
         s.bars = merge(std::mem::take(&mut s.bars), confirmed);
-        if reaches_oldest {
+        if reaches_oldest || next.is_none() {
             s.reached_origin = next.is_none();
-            s.cont = next.map(|k| (k, self.clock.now()));
+            s.cont = next.map(|key| Cont { key, base, received_at: self.clock.now() });
         }
     }
 
     async fn fetch(&self, key: SeriesKey, base: KstDate, cont: Option<&ContKey>) -> Result<Fetched, BarError> {
+        const MINUTE: &str = "일·주·월봉이 아니면 분봉이다";
         let p = key.period;
         match key.feed {
             Feed::Stock(c, v) => match p {
                 Period::Day => self.fetch_tr(&DailyChart::new(c, v, base), cont, p).await,
                 Period::Week => self.fetch_tr(&WeeklyChart::new(c, v, base), cont, p).await,
                 Period::Month => self.fetch_tr(&MonthlyChart::new(c, v, base), cont, p).await,
-                _ => Err(BarError::BadRequest("분봉은 아직 열리지 않았습니다(#4에서 열립니다)".into())),
+                _ => self.fetch_tr(&MinuteChart::new(c, v, p, base).expect(MINUTE), cont, p).await,
             },
             Feed::Index(c) => match p {
                 Period::Day => self.fetch_tr(&IndexDailyChart::new(c, base), cont, p).await,
                 Period::Week => self.fetch_tr(&IndexWeeklyChart::new(c, base), cont, p).await,
                 Period::Month => self.fetch_tr(&IndexMonthlyChart::new(c, base), cont, p).await,
-                _ => Err(BarError::BadRequest("분봉은 아직 열리지 않았습니다(#4에서 열립니다)".into())),
+                _ => self.fetch_tr(&IndexMinuteChart::new(c, p, base).expect(MINUTE), cont, p).await,
             },
         }
     }
@@ -370,13 +388,32 @@ mod tests {
         kst(date(2026, 11, 9), 0, 34, 0)
     }
 
-    /// 가짜 키움 차트 하나: 최신순 dt 목록과 페이지 크기.
+    /// 가짜 키움 차트 하나: 최신순 봉 시작 시각과 페이지 크기.
     struct FakeChart {
-        dts: Vec<KstDate>,
+        ts: Vec<KstTime>,
         page: usize,
+        intraday: bool,
     }
 
     impl FakeChart {
+        fn dated(dts: Vec<KstDate>, page: usize) -> Self {
+            FakeChart { ts: dts.into_iter().map(midnight).collect(), page, intraday: false }
+        }
+
+        /// 1분봉. 평일 08:00~19:59(하루 720봉)를 11-06 19:59부터 거꾸로 n개. 페이지는 900봉(kiwoom.md §1).
+        fn minutes(n: usize) -> Self {
+            let mut ts = Vec::with_capacity(n);
+            let mut d = date(2026, 11, 6);
+            while ts.len() < n {
+                if !matches!(d.weekday(), Weekday::Sat | Weekday::Sun) {
+                    let close = kst(d, 19, 59, 0);
+                    ts.extend((0..720).map(|i| close.plus_secs(-60 * i)).take(n - ts.len()));
+                }
+                d = d.add_days(-1);
+            }
+            FakeChart { ts, page: 900, intraday: true }
+        }
+
         fn daily(n: usize) -> Self {
             let mut d = date(2026, 11, 6);
             let mut dts = Vec::new();
@@ -386,13 +423,13 @@ mod tests {
                 }
                 d = d.add_days(-1);
             }
-            FakeChart { dts, page: 600 }
+            FakeChart::dated(dts, 600)
         }
 
         /// 주봉 dt는 그 주의 첫 관측일이다. 몇 주는 화요일로 둔다(kiwoom.md §10.8).
         fn weekly(n: usize) -> Self {
             let dts = (0..n).map(|i| date(2026, 11, 2).add_days(-7 * i as i64 + if i % 5 == 3 { 1 } else { 0 })).collect();
-            FakeChart { dts, page: 300 }
+            FakeChart::dated(dts, 300)
         }
 
         /// 월봉 dt는 그 달의 첫 관측일이다. 2026-11은 02일.
@@ -407,22 +444,35 @@ mod tests {
                 dts.push(obs);
                 d = d.first_of_prev_month();
             }
-            FakeChart { dts, page: 240 }
+            FakeChart::dated(dts, 240)
         }
 
+        /// 연속조회 키는 `P<행 번호>`다. 키가 없으면 `base_dt` 날짜의 마지막 봉부터 준다(kiwoom.md §1).
         fn respond(&self, s: &Sent, array: &str) -> Result<crate::kiwoom::transport::HttpResponse, crate::kiwoom::transport::TransportError> {
-            let offset: usize = s.cont.as_deref().map_or(0, |k| k.trim_start_matches('P').parse().unwrap());
-            let end = (offset + self.page).min(self.dts.len());
-            let rows: Vec<_> = self.dts[offset..end]
+            let body: serde_json::Value = serde_json::from_str(&s.body).unwrap();
+            let base = KstDate::parse_yyyymmdd(body["base_dt"].as_str().unwrap()).unwrap();
+            let offset: usize = match s.cont.as_deref() {
+                Some(k) => k.trim_start_matches('P').parse().unwrap(),
+                None => self.ts.partition_point(|t| t.kst_date() > base),
+            };
+            let end = (offset + self.page).min(self.ts.len());
+            let rows: Vec<_> = self.ts[offset..end]
                 .iter()
                 .enumerate()
-                .map(|(i, d)| {
+                .map(|(i, t)| {
                     let p = 1000 + (offset + i) as u64;
-                    json!({"dt": d.yyyymmdd(), "open_pric": p.to_string(), "high_pric": (p + 5).to_string(),
-                           "low_pric": (p - 5).to_string(), "cur_prc": format!("-{p}"), "trde_qty": "10", "upd_rt": ""})
+                    let mut row = json!({"open_pric": p.to_string(), "high_pric": (p + 5).to_string(),
+                           "low_pric": (p - 5).to_string(), "cur_prc": format!("-{p}"), "trde_qty": "10", "upd_rt": ""});
+                    if self.intraday {
+                        let tod = t.kst_time_of_day().secs();
+                        row["cntr_tm"] = format!("{}{:02}{:02}00", t.kst_date().yyyymmdd(), tod / 3600, tod / 60 % 60).into();
+                    } else {
+                        row["dt"] = t.kst_date().yyyymmdd().into();
+                    }
+                    row
                 })
                 .collect();
-            let next = (end < self.dts.len()).then(|| format!("P{end}"));
+            let next = (end < self.ts.len()).then(|| format!("P{end}"));
             ok(json!({array: rows, "return_code": 0, "return_msg": "정상적으로 처리되었습니다"}), next.as_deref())
         }
     }
@@ -435,6 +485,8 @@ mod tests {
             ApiId::Ka20006 => "inds_dt_pole_qry",
             ApiId::Ka20007 => "inds_stk_pole_qry",
             ApiId::Ka20008 => "inds_mth_pole_qry",
+            ApiId::Ka10080 => "stk_min_pole_chart_qry",
+            ApiId::Ka20005 => "inds_min_pole_qry",
             other => panic!("{other:?}"),
         }
     }
@@ -456,19 +508,33 @@ mod tests {
     const NOT_ON_NXT: &str = "005935";
     const EMPTY_ROW: &str = "999990";
 
-    fn harness(now: KstTime, latency: Duration, day: FakeChart, week: FakeChart, month: FakeChart) -> Harness {
+    struct Charts {
+        minute: FakeChart,
+        day: FakeChart,
+        week: FakeChart,
+        month: FakeChart,
+    }
+
+    impl Default for Charts {
+        fn default() -> Self {
+            Charts { minute: FakeChart::minutes(3000), day: FakeChart::daily(2000), week: FakeChart::weekly(1000), month: FakeChart::monthly(800) }
+        }
+    }
+
+    fn harness(now: KstTime, latency: Duration, charts: Charts) -> Harness {
         let tokens = AtomicUsize::new(0);
         let fake = Arc::new(FakeTransport::new(latency, move |s| {
             if s.api_id == ApiId::Au10001 {
                 return token(tokens.fetch_add(1, Ordering::SeqCst) + 1);
             }
             if s.body.contains(EMPTY_ROW) {
-                return ok(json!({"stk_dt_pole_chart_qry": [{"dt": "", "cur_prc": ""}], "return_code": 0}), None);
+                return ok(json!({array_of(s.api_id): [{"dt": "", "cntr_tm": "", "cur_prc": ""}], "return_code": 0}), None);
             }
             let chart = match s.api_id {
-                ApiId::Ka10081 | ApiId::Ka20006 => &day,
-                ApiId::Ka10082 | ApiId::Ka20007 => &week,
-                _ => &month,
+                ApiId::Ka10080 | ApiId::Ka20005 => &charts.minute,
+                ApiId::Ka10081 | ApiId::Ka20006 => &charts.day,
+                ApiId::Ka10082 | ApiId::Ka20007 => &charts.week,
+                _ => &charts.month,
             };
             chart.respond(s, array_of(s.api_id))
         }));
@@ -481,7 +547,7 @@ mod tests {
     }
 
     fn std_harness(latency: Duration) -> Harness {
-        harness(monday_night(), latency, FakeChart::daily(2000), FakeChart::weekly(1000), FakeChart::monthly(800))
+        harness(monday_night(), latency, Charts::default())
     }
 
     fn key(symbol: &str, period: Period) -> SeriesKey {
@@ -571,7 +637,7 @@ mod tests {
 
     #[tokio::test(start_paused = true)]
     async fn next_before_is_null_at_the_origin() {
-        let h = harness(monday_night(), Duration::ZERO, FakeChart::daily(700), FakeChart::weekly(10), FakeChart::monthly(10));
+        let h = harness(monday_night(), Duration::ZERO, Charts { day: FakeChart::daily(700), week: FakeChart::weekly(10), ..Charts::default() });
         let k = key(SAMSUNG, Period::Day);
         let latest = h.bars.page(k, None, 500).await.unwrap();
         assert!(latest.next_before.is_some());
@@ -650,12 +716,93 @@ mod tests {
     }
 
     #[tokio::test(start_paused = true)]
-    async fn unknown_symbols_and_intraday_are_rejected() {
+    async fn unknown_symbols_are_rejected() {
         let h = std_harness(Duration::ZERO);
         assert_eq!(h.bars.page(key("000660", Period::Day), None, 10).await, Err(BarError::UnknownSymbol));
         assert!(h.chart_calls().is_empty(), "목록에 없으면 키움을 부르지 않는다");
         assert_eq!(h.bars.page(key(EMPTY_ROW, Period::Day), None, 10).await, Err(BarError::UnknownSymbol));
-        assert!(matches!(h.bars.page(key(SAMSUNG, Period::M5), None, 10).await, Err(BarError::BadRequest(_))));
+        assert_eq!(h.bars.page(key(EMPTY_ROW, Period::M5), None, 10).await, Err(BarError::UnknownSymbol));
+    }
+
+    fn body(s: &Sent) -> serde_json::Value {
+        serde_json::from_str(&s.body).unwrap()
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn each_venue_is_its_own_series_with_its_own_code() {
+        let h = std_harness(Duration::ZERO);
+        for v in [Venue::Krx, Venue::Combined, Venue::Nxt] {
+            h.bars.page(venue_key(SAMSUNG, v, Period::Day), None, 10).await.unwrap();
+        }
+        h.bars.page(venue_key(SAMSUNG, Venue::Krx, Period::Day), None, 10).await.unwrap();
+        h.bars.page(venue_key(SAMSUNG, Venue::Krx, Period::M1), None, 10).await.unwrap();
+        let sent: Vec<_> = h.chart_calls().iter().map(|s| (s.api_id, body(s)["stk_cd"].as_str().unwrap().to_owned())).collect();
+        let want = [(ApiId::Ka10081, "005930"), (ApiId::Ka10081, "005930_AL"), (ApiId::Ka10081, "005930_NX"), (ApiId::Ka10081, "005930"), (ApiId::Ka10080, "005930")];
+        assert_eq!(sent, want.map(|(a, c)| (a, c.to_owned())), "KRX를 받아도 통합은 따로 받는다");
+        assert_eq!(h.bars.series_count(), 4);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn minute_latest_page_is_one_call_with_today_and_tic_scope() {
+        let h = std_harness(Duration::ZERO);
+        let p = h.bars.page(venue_key(SAMSUNG, Venue::Nxt, Period::M1), None, 500).await.unwrap();
+        assert_eq!(p.bars.len(), 500);
+        assert_eq!(p.bars.last().unwrap().bucket.start(), kst(date(2026, 11, 6), 19, 59, 0));
+        assert_eq!(p.current, None, "금요일 봉은 모두 확정");
+        assert_contiguous_asc(&p.bars);
+        let calls = h.chart_calls();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].api_id, ApiId::Ka10080);
+        assert_eq!(body(&calls[0]), json!({"stk_cd": "005930_NX", "tic_scope": "1", "upd_stkpc_tp": "1", "base_dt": "20261109"}));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn index_minutes_use_ka20005() {
+        let h = std_harness(Duration::ZERO);
+        let p = h.bars.page(key("IDX:001", Period::M30), None, 100).await.unwrap();
+        assert_eq!(p.bars.len(), 100);
+        let calls = h.chart_calls();
+        assert_eq!(calls[0].api_id, ApiId::Ka20005);
+        assert_eq!(body(&calls[0]), json!({"inds_cd": "001", "tic_scope": "30", "base_dt": "20261109"}));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn minutes_end_where_kiwoom_ends_the_chain() {
+        let h = harness(monday_night(), Duration::ZERO, Charts { minute: FakeChart::minutes(1500), ..Charts::default() });
+        let k = venue_key(SAMSUNG, Venue::Combined, Period::M1);
+        let latest = h.bars.page(k, None, 500).await.unwrap();
+        assert!(latest.next_before.is_some());
+        let older = h.bars.page(k, latest.next_before, 1000).await.unwrap();
+        assert_eq!(older.bars.len(), 1000);
+        assert_eq!(older.next_before, None, "cont-yn: N이 1년 끝이다");
+        assert_eq!(h.chart_calls().len(), 2);
+        let again = h.bars.page(k, Some(older.bars[0].bucket.start()), 500).await.unwrap();
+        assert!(again.bars.is_empty() && again.next_before.is_none());
+        assert_eq!(h.chart_calls().len(), 2);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn stale_minute_continuation_jumps_to_the_oldest_date() {
+        let h = std_harness(Duration::ZERO);
+        let k = venue_key(SAMSUNG, Venue::Nxt, Period::M1);
+        let latest = h.bars.page(k, None, 500).await.unwrap();
+        h.clock.jump(16 * 60);
+        // 첫 페이지 900봉의 가장 이른 봉은 11-05 17:00이다(11-06 720봉 + 11-05 180봉).
+        let older = h.bars.page(k, latest.next_before, 1000).await.unwrap();
+        assert_eq!(older.bars.len(), 1000);
+        let calls = h.chart_calls();
+        assert_eq!(calls.len(), 2, "묵은 키에서는 한 번 건너뛰어 받는다");
+        assert_eq!((calls[1].cont.as_deref(), body(&calls[1])["base_dt"].as_str()), (None, Some("20261105")));
+        let all = [older.bars.clone(), latest.bars.clone()].concat();
+        assert_contiguous_asc(&all);
+        assert!(all.windows(2).all(|w| w[1].bucket.start().unix() - w[0].bucket.start().unix() == 60 || w[1].bucket.start().kst_date() != w[0].bucket.start().kst_date()), "겹친 날에 구멍이 없다");
+        assert_eq!(older.next_before, Some(older.bars[0].bucket.start()));
+
+        // 건너뛴 조회가 준 키로 이어 받는다. 본문도 그 조회와 같다.
+        h.bars.page(k, older.next_before, 1000).await.unwrap();
+        let calls = h.chart_calls();
+        assert_eq!(calls.len(), 3);
+        assert_eq!((calls[2].cont.as_deref(), body(&calls[2])["base_dt"].as_str()), (Some("P1620"), Some("20261105")));
     }
 
     #[tokio::test(start_paused = true)]
