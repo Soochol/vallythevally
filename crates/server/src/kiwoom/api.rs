@@ -1,6 +1,6 @@
 //! 시세 API만 허용(backend.md §4.4). 이 enum에 없는 api-id와 경로는 보낼 수 없다.
 
-use domain::{IndexCode, KstDate, StockCode};
+use domain::{IndexCode, KstDate, StockCode, Venue};
 use serde::Serialize;
 
 use super::wire;
@@ -77,9 +77,14 @@ pub trait MarketRequest: sealed::Sealed + Serialize + Send + Sync {
     type Response: serde::de::DeserializeOwned;
 }
 
-/// 주식 시세는 언제나 통합 시세(`_AL`)로 받는다. 키움 종목코드는 이 함수로만 만든다.
-pub fn kiwoom_stock_code(code: StockCode) -> String {
-    format!("{}_AL", code.as_str())
+/// 거래소는 종목코드 접미사로 고른다(kiwoom.md 3·12·13절). 키움 종목코드는 이 함수로만 만든다.
+pub fn kiwoom_stock_code(code: StockCode, venue: Venue) -> String {
+    let suffix = match venue {
+        Venue::Combined => "_AL",
+        Venue::Krx => "",
+        Venue::Nxt => "_NX",
+    };
+    format!("{}{suffix}", code.as_str())
 }
 
 const ADJUSTED_PRICE: &str = "1";
@@ -94,8 +99,8 @@ macro_rules! stock_chart {
             upd_stkpc_tp: &'static str,
         }
         impl $name {
-            pub fn new(code: StockCode, today: KstDate) -> Self {
-                $name { stk_cd: kiwoom_stock_code(code), base_dt: today.yyyymmdd(), upd_stkpc_tp: ADJUSTED_PRICE }
+            pub fn new(code: StockCode, venue: Venue, today: KstDate) -> Self {
+                $name { stk_cd: kiwoom_stock_code(code, venue), base_dt: today.yyyymmdd(), upd_stkpc_tp: ADJUSTED_PRICE }
             }
         }
         impl sealed::Sealed for $name {}
@@ -163,10 +168,11 @@ mod tests {
     fn request_bodies_match_the_probed_shape() {
         let c = StockCode::parse("005930").unwrap();
         assert_eq!(
-            serde_json::to_value(DailyChart::new(c, today())).unwrap(),
+            serde_json::to_value(DailyChart::new(c, Venue::Combined, today())).unwrap(),
             json!({"stk_cd": "005930_AL", "base_dt": "20261109", "upd_stkpc_tp": "1"})
         );
-        assert_eq!(serde_json::to_value(MonthlyChart::new(c, today())).unwrap()["stk_cd"], "005930_AL");
+        assert_eq!(serde_json::to_value(MonthlyChart::new(c, Venue::Krx, today())).unwrap()["stk_cd"], "005930");
+        assert_eq!(serde_json::to_value(WeeklyChart::new(c, Venue::Nxt, today())).unwrap()["stk_cd"], "005930_NX");
         assert_eq!(
             serde_json::to_value(IndexWeeklyChart::new(IndexCode::KOSDAQ, today())).unwrap(),
             json!({"inds_cd": "101", "base_dt": "20261109"})

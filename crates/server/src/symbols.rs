@@ -33,8 +33,8 @@ impl Directory {
     /// 코스피·코스닥 지수 두 개는 언제나 넣는다.
     pub fn build(stocks: Vec<SymbolInfo>) -> Directory {
         let fixed = [
-            SymbolInfo { symbol: Symbol::Index(IndexCode::KOSPI), name: "코스피".into(), kind: SymbolKind::Index, market: Market::Kospi },
-            SymbolInfo { symbol: Symbol::Index(IndexCode::KOSDAQ), name: "코스닥".into(), kind: SymbolKind::Index, market: Market::Kosdaq },
+            SymbolInfo { symbol: Symbol::Index(IndexCode::KOSPI), name: "코스피".into(), kind: SymbolKind::Index, market: Market::Kospi, nxt_enabled: false },
+            SymbolInfo { symbol: Symbol::Index(IndexCode::KOSDAQ), name: "코스닥".into(), kind: SymbolKind::Index, market: Market::Kosdaq, nxt_enabled: false },
         ];
         let mut dir = Directory { entries: Vec::new(), by_symbol: HashMap::new() };
         for info in fixed.into_iter().chain(stocks) {
@@ -201,7 +201,7 @@ mod tests {
 
     fn stock(code: &str, name: &str, kind: SymbolKind) -> SymbolInfo {
         let market = if kind == SymbolKind::Etf { Market::Kospi } else { Market::Kosdaq };
-        SymbolInfo { symbol: Symbol::Stock(StockCode::parse(code).unwrap()), name: name.into(), kind, market }
+        SymbolInfo { symbol: Symbol::Stock(StockCode::parse(code).unwrap()), name: name.into(), kind, market, nxt_enabled: false }
     }
 
     fn dir() -> Directory {

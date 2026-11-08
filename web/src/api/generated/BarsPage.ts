@@ -3,11 +3,17 @@ import type { Bar } from "./Bar";
 import type { Period } from "./Period";
 import type { SymbolCode } from "./SymbolCode";
 import type { UnixSeconds } from "./UnixSeconds";
+import type { Venue } from "./Venue";
 
 /**
- * `GET /api/bars?symbol=005930&period=D&limit=500[&before=…]`
+ * `GET /api/bars?symbol=005930&venue=krx&period=D&limit=500[&before=…]`.
+ * `venue`는 주식에서 생략하면 `combined`이고, 지수에 주면 `bad_request`다.
  */
-export type BarsPage = { symbol: SymbolCode, period: Period, 
+export type BarsPage = { symbol: SymbolCode, 
+/**
+ * 지수면 null.
+ */
+venue: Venue | null, period: Period, 
 /**
  * 확정 봉, t 오름차순.
  */

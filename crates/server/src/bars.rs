@@ -9,7 +9,7 @@ use std::fmt;
 use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
-use domain::{ConfirmedBar, KstDate, KstTime, Period, SeriesKey, Symbol};
+use domain::{ConfirmedBar, Feed, KstDate, KstTime, Period, SeriesKey};
 
 use crate::clock::Clock;
 use crate::kiwoom::api::{DailyChart, IndexDailyChart, IndexMonthlyChart, IndexWeeklyChart, MarketRequest, MonthlyChart, WeeklyChart};
@@ -112,7 +112,7 @@ impl BarService {
             return Err(BarError::BadRequest("분봉은 아직 열리지 않았습니다(#4에서 열립니다)".into()));
         }
         let dir = self.symbols.ready().await.map_err(|_| BarError::Unavailable("종목 목록을 아직 받지 못했습니다".into()))?;
-        if dir.get(key.symbol).is_none() {
+        if dir.get(key.feed.symbol()).is_none() {
             return Err(BarError::UnknownSymbol);
         }
         let slot = self.slot(key);
@@ -136,7 +136,7 @@ impl BarService {
             }
         }
         if !self.is_live(key, slot.id) {
-            tracing::info!(symbol = %key.symbol.as_wire(), period = key.period.as_wire(), "시리즈가 그사이 내려가 받은 봉을 메모리에 남기지 않습니다");
+            tracing::info!(symbol = %key.feed.symbol().as_wire(), venue = ?key.feed.venue(), period = key.period.as_wire(), "시리즈가 그사이 내려가 받은 봉을 메모리에 남기지 않습니다");
         }
         slot.last_access.store(self.clock.now().unix(), Ordering::SeqCst);
         Ok(build_page(&s, before, limit))
@@ -203,7 +203,7 @@ impl BarService {
             _ => false,
         };
         if !connects && !s.bars.is_empty() {
-            tracing::info!(symbol = %key.symbol.as_wire(), period = key.period.as_wire(), "최신 페이지가 메모리 구간과 이어지지 않아 시리즈를 새로 만듭니다");
+            tracing::info!(symbol = %key.feed.symbol().as_wire(), venue = ?key.feed.venue(), period = key.period.as_wire(), "최신 페이지가 메모리 구간과 이어지지 않아 시리즈를 새로 만듭니다");
             s.bars.clear();
             s.cont = None;
             s.reached_origin = false;
@@ -227,7 +227,7 @@ impl BarService {
                 self.ingest(s, confirmed, page.next);
                 return Ok(());
             }
-            tracing::info!(symbol = %key.symbol.as_wire(), cont_age_secs = now.unix() - at.unix(), "연속조회 키가 기대한 위치를 주지 않아 오늘부터 다시 따라갑니다");
+            tracing::info!(symbol = %key.feed.symbol().as_wire(), venue = ?key.feed.venue(), cont_age_secs = now.unix() - at.unix(), "연속조회 키가 기대한 위치를 주지 않아 오늘부터 다시 따라갑니다");
         }
         self.follow_from_today(key, s).await
     }
@@ -268,14 +268,14 @@ impl BarService {
 
     async fn fetch(&self, key: SeriesKey, base: KstDate, cont: Option<&ContKey>) -> Result<Fetched, BarError> {
         let p = key.period;
-        match key.symbol {
-            Symbol::Stock(c) => match p {
-                Period::Day => self.fetch_tr(&DailyChart::new(c, base), cont, p).await,
-                Period::Week => self.fetch_tr(&WeeklyChart::new(c, base), cont, p).await,
-                Period::Month => self.fetch_tr(&MonthlyChart::new(c, base), cont, p).await,
+        match key.feed {
+            Feed::Stock(c, v) => match p {
+                Period::Day => self.fetch_tr(&DailyChart::new(c, v, base), cont, p).await,
+                Period::Week => self.fetch_tr(&WeeklyChart::new(c, v, base), cont, p).await,
+                Period::Month => self.fetch_tr(&MonthlyChart::new(c, v, base), cont, p).await,
                 _ => Err(BarError::BadRequest("분봉은 아직 열리지 않았습니다(#4에서 열립니다)".into())),
             },
-            Symbol::Index(c) => match p {
+            Feed::Index(c) => match p {
                 Period::Day => self.fetch_tr(&IndexDailyChart::new(c, base), cont, p).await,
                 Period::Week => self.fetch_tr(&IndexWeeklyChart::new(c, base), cont, p).await,
                 Period::Month => self.fetch_tr(&IndexMonthlyChart::new(c, base), cont, p).await,
@@ -342,7 +342,7 @@ mod tests {
     use std::sync::atomic::AtomicUsize;
     use std::time::Duration;
 
-    use domain::{Market, SymbolInfo, SymbolKind, TimeOfDay, Weekday};
+    use domain::{Market, Symbol, SymbolInfo, SymbolKind, TimeOfDay, Weekday};
     use serde_json::json;
 
     use super::*;
@@ -469,7 +469,7 @@ mod tests {
         let clock = Clock::fake(now);
         let rest = KiwoomRest::new(Arc::new(fake.clone()), KiwoomAuth::new(Secret::new("k".into()), Secret::new("s".into())), clock.clone());
         let symbols = Arc::new(SymbolDirectory::default());
-        let stock = |code: &str| SymbolInfo { symbol: Symbol::parse(code).unwrap(), name: code.into(), kind: SymbolKind::Common, market: Market::Kospi };
+        let stock = |code: &str| SymbolInfo { symbol: Symbol::parse(code).unwrap(), name: code.into(), kind: SymbolKind::Common, market: Market::Kospi, nxt_enabled: true };
         symbols.replace(Directory::build(vec![stock(SAMSUNG), stock(EMPTY_ROW)]));
         Harness { fake, bars: Arc::new(BarService::new(rest, symbols, clock.clone())), clock }
     }
@@ -479,7 +479,7 @@ mod tests {
     }
 
     fn key(symbol: &str, period: Period) -> SeriesKey {
-        SeriesKey { symbol: Symbol::parse(symbol).unwrap(), period }
+        SeriesKey { feed: Feed::new(Symbol::parse(symbol).unwrap(), None).unwrap(), period }
     }
 
     fn assert_contiguous_asc(bars: &[ConfirmedBar]) {

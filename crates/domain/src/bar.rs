@@ -2,7 +2,7 @@ use std::fmt;
 
 use crate::period::{Bucket, Period};
 use crate::price::{Price, Volume};
-use crate::symbol::Symbol;
+use crate::symbol::Feed;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OhlcvError {
@@ -91,10 +91,10 @@ impl ConfirmedBar {
     }
 }
 
-/// 캐시 키: (종목, 봉 주기).
+/// 캐시 키: (종목, 거래소, 봉 주기). 지수에는 거래소가 없다(ADR 0007).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct SeriesKey {
-    pub symbol: Symbol,
+    pub feed: Feed,
     pub period: Period,
 }
 

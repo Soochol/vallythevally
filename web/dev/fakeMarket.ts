@@ -148,6 +148,7 @@ export function barsPage(s: FakeSymbol, period: Period, limit: number, before: n
   const first = bars[0];
   return {
     symbol: s.code,
+    venue: null,
     period,
     bars,
     current: before === null ? (all[all.length - 1] ?? null) : null,

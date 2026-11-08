@@ -3,7 +3,7 @@
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
-use domain::{KstDate, Market, Period, SeriesKey, Symbol, SymbolInfo, SymbolKind};
+use domain::{Feed, KstDate, Market, Period, SeriesKey, Symbol, SymbolInfo, SymbolKind};
 use futures::future::BoxFuture;
 use serde_json::json;
 use server::bars::BarService;
@@ -55,9 +55,9 @@ async fn reopening_right_after_the_daily_reset_does_not_reuse_the_pre_reset_resp
     let rest = KiwoomRest::new(Arc::new(transport), KiwoomAuth::new(Secret::new("k".into()), Secret::new("s".into())), clock.clone());
     let symbol = Symbol::parse("005930").unwrap();
     let symbols = Arc::new(SymbolDirectory::default());
-    symbols.replace(Directory::build(vec![SymbolInfo { symbol, name: "삼성전자".into(), kind: SymbolKind::Common, market: Market::Kospi }]));
+    symbols.replace(Directory::build(vec![SymbolInfo { symbol, name: "삼성전자".into(), kind: SymbolKind::Common, market: Market::Kospi, nxt_enabled: true }]));
     let bars = Arc::new(BarService::new(rest, symbols, clock.clone()));
-    let key = SeriesKey { symbol, period: Period::Day };
+    let key = SeriesKey { feed: Feed::new(symbol, None).unwrap(), period: Period::Day };
 
     let before_reset = tokio::spawn({
         let bars = bars.clone();

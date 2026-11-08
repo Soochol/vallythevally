@@ -79,7 +79,7 @@ impl fmt::Debug for IndexCode {
     }
 }
 
-/// 종목 또는 지수. 주식 시세는 언제나 통합 시세라 KRX만, NXT만 고르는 값이 없다.
+/// 종목 또는 지수. 드로잉처럼 거래소와 무관한 것이 붙는 단위다. 차트로 그리는 시세는 `Feed`다.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum Symbol {
     /// 주식(보통주·우선주·리츠)과 ETF.
@@ -106,6 +106,64 @@ impl Symbol {
     }
 }
 
+/// 시세가 체결된 곳(ADR 0007). 칸마다 하나를 고르고 기본은 통합이다. 지수에는 없다.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
+pub enum Venue {
+    /// KRX와 NXT를 합친 통합 시세.
+    #[default]
+    Combined,
+    Krx,
+    Nxt,
+}
+
+impl Venue {
+    pub const ALL: [Venue; 3] = [Venue::Combined, Venue::Krx, Venue::Nxt];
+
+    pub fn as_wire(self) -> &'static str {
+        match self {
+            Venue::Combined => "combined",
+            Venue::Krx => "krx",
+            Venue::Nxt => "nxt",
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<Self> {
+        Venue::ALL.into_iter().find(|v| v.as_wire() == s)
+    }
+}
+
+/// 차트가 그리는 시세 하나. 주식은 거래소를 고르고, 지수에는 거래소가 없다.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum Feed {
+    Stock(StockCode, Venue),
+    Index(IndexCode),
+}
+
+impl Feed {
+    /// 지수에 거래소를 주면 `None`. 주식에 거래소를 주지 않으면 통합이다.
+    pub fn new(symbol: Symbol, venue: Option<Venue>) -> Option<Feed> {
+        match (symbol, venue) {
+            (Symbol::Stock(c), v) => Some(Feed::Stock(c, v.unwrap_or_default())),
+            (Symbol::Index(c), None) => Some(Feed::Index(c)),
+            (Symbol::Index(_), Some(_)) => None,
+        }
+    }
+
+    pub fn symbol(self) -> Symbol {
+        match self {
+            Feed::Stock(c, _) => Symbol::Stock(c),
+            Feed::Index(c) => Symbol::Index(c),
+        }
+    }
+
+    pub fn venue(self) -> Option<Venue> {
+        match self {
+            Feed::Stock(_, v) => Some(v),
+            Feed::Index(_) => None,
+        }
+    }
+}
+
 /// 검색에서 같은 순위일 때 이 순서로 앞에 둔다(D5): Index > Common > Preferred > Etf > Reit.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum SymbolKind {
@@ -128,6 +186,8 @@ pub struct SymbolInfo {
     pub name: String,
     pub kind: SymbolKind,
     pub market: Market,
+    /// NXT에서 거래되는 종목인가(ka10099 `nxtEnable`). 지수는 언제나 false.
+    pub nxt_enabled: bool,
 }
 
 #[cfg(test)]
@@ -161,6 +221,20 @@ mod tests {
         for bad in ["IDX:", "IDX:01", "IDX:ABC", "idx:001", "IDX:0001"] {
             assert!(Symbol::parse(bad).is_err(), "{bad}");
         }
+    }
+
+    #[test]
+    fn venue_wire_round_trips_and_index_has_none() {
+        for v in Venue::ALL {
+            assert_eq!(Venue::parse(v.as_wire()), Some(v));
+        }
+        assert_eq!(Venue::parse("KRX"), None);
+        let stock = Symbol::parse("005930").unwrap();
+        let kospi = Symbol::Index(IndexCode::KOSPI);
+        assert_eq!(Feed::new(stock, None).unwrap().venue(), Some(Venue::Combined));
+        assert_eq!(Feed::new(stock, Some(Venue::Nxt)).unwrap().symbol(), stock);
+        assert_eq!(Feed::new(kospi, None), Some(Feed::Index(IndexCode::KOSPI)));
+        assert_eq!(Feed::new(kospi, Some(Venue::Krx)), None);
     }
 
     #[test]

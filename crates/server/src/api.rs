@@ -69,6 +69,27 @@ impl From<Period> for domain::Period {
     }
 }
 
+/// 거래소(ADR 0007). 주식에만 있고 지수에는 없다(`null`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub enum Venue {
+    /// 통합 시세(KRX + NXT). 칸의 기본값.
+    Combined,
+    Krx,
+    Nxt,
+}
+
+impl From<domain::Venue> for Venue {
+    fn from(v: domain::Venue) -> Self {
+        match v {
+            domain::Venue::Combined => Venue::Combined,
+            domain::Venue::Krx => Venue::Krx,
+            domain::Venue::Nxt => Venue::Nxt,
+        }
+    }
+}
+
 /// 봉 하나. 가격은 자연 단위(주식 원, 지수 포인트), 거래량은 정수.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, TS)]
 #[ts(export)]
@@ -101,12 +122,15 @@ impl Bar {
     }
 }
 
-/// `GET /api/bars?symbol=005930&period=D&limit=500[&before=…]`
+/// `GET /api/bars?symbol=005930&venue=krx&period=D&limit=500[&before=…]`.
+/// `venue`는 주식에서 생략하면 `combined`이고, 지수에 주면 `bad_request`다.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export)]
 pub struct BarsPage {
     pub symbol: SymbolCode,
+    /// 지수면 null.
+    pub venue: Option<Venue>,
     pub period: Period,
     /// 확정 봉, t 오름차순.
     pub bars: Vec<Bar>,
@@ -161,12 +185,15 @@ impl From<domain::Market> for Market {
 
 /// `GET /api/symbols?q=` → `SymbolInfo[]`, `GET /api/symbols/:code` → `SymbolInfo`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
 #[ts(export)]
 pub struct SymbolInfo {
     pub code: SymbolCode,
     pub name: String,
     pub kind: SymbolKind,
     pub market: Market,
+    /// NXT를 고를 수 있는가. 지수는 false.
+    pub nxt_enabled: bool,
 }
 
 impl From<&domain::SymbolInfo> for SymbolInfo {
@@ -176,6 +203,7 @@ impl From<&domain::SymbolInfo> for SymbolInfo {
             name: s.name.clone(),
             kind: s.kind.into(),
             market: s.market.into(),
+            nxt_enabled: s.nxt_enabled,
         }
     }
 }
@@ -220,6 +248,7 @@ mod tests {
     fn bars_page_json_shape() {
         let page = BarsPage {
             symbol: SymbolCode("IDX:001".into()),
+            venue: None,
             period: Period::Day,
             bars: vec![Bar { t: UnixSeconds(1_793_890_800), o: 5263.26, h: 5269.1, l: 4911.28, c: 5059.69, v: 323_267 }],
             current: None,
@@ -229,7 +258,7 @@ mod tests {
         assert_eq!(
             serde_json::to_value(&page).unwrap(),
             json!({
-                "symbol": "IDX:001", "period": "D",
+                "symbol": "IDX:001", "venue": null, "period": "D",
                 "bars": [{"t": 1_793_890_800, "o": 5263.26, "h": 5269.1, "l": 4911.28, "c": 5059.69, "v": 323_267}],
                 "current": null, "nextBefore": 1_793_890_800, "seq": null
             })
@@ -240,10 +269,10 @@ mod tests {
     fn error_and_symbol_json_shape() {
         let err = ApiError { error: ApiErrorBody { code: ApiErrorCode::KiwoomUnavailable, message: "m".into() } };
         assert_eq!(serde_json::to_value(&err).unwrap(), json!({"error": {"code": "kiwoom_unavailable", "message": "m"}}));
-        let info = SymbolInfo { code: SymbolCode("005935".into()), name: "삼성전자우".into(), kind: SymbolKind::Preferred, market: Market::Kospi };
+        let info = SymbolInfo { code: SymbolCode("005935".into()), name: "삼성전자우".into(), kind: SymbolKind::Preferred, market: Market::Kospi, nxt_enabled: false };
         assert_eq!(
             serde_json::to_value(&info).unwrap(),
-            json!({"code": "005935", "name": "삼성전자우", "kind": "preferred", "market": "kospi"})
+            json!({"code": "005935", "name": "삼성전자우", "kind": "preferred", "market": "kospi", "nxtEnabled": false})
         );
     }
 

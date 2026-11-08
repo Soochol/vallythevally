@@ -2,7 +2,7 @@ import { expect, test } from "vitest";
 import type { SymbolInfo } from "../../api/generated/SymbolInfo";
 import { searchList } from "./searchList";
 
-const info = (code: string, name: string): SymbolInfo => ({ code, name, kind: "common", market: "kospi" });
+const info = (code: string, name: string): SymbolInfo => ({ code, name, kind: "common", market: "kospi", nxtEnabled: false });
 const samsung = info("005930", "삼성전자");
 const naver = info("035420", "NAVER");
 

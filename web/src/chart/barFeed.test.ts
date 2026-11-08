@@ -8,6 +8,7 @@ import { BarFeed, displayBars, type History, prependOlder } from "./barFeed";
 const bar = (t: number, c = t): Bar => ({ t, o: c, h: c, l: c, c, v: 1 });
 const page = (bars: Bar[], nextBefore: number | null, current: Bar | null = null): BarsPage => ({
   symbol: "005930",
+  venue: "combined",
   period: "D",
   bars,
   current,

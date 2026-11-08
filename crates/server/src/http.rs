@@ -9,7 +9,7 @@ use axum::extract::{Path, Query, State};
 use axum::http::{HeaderValue, StatusCode, Uri, header};
 use axum::response::{IntoResponse, Json, Response};
 use axum::routing::{any, get};
-use domain::{KstTime, Period, SeriesKey, Symbol};
+use domain::{Feed, KstTime, Period, SeriesKey, Symbol, Venue};
 use tower_http::compression::CompressionLayer;
 
 use crate::api;
@@ -122,6 +122,11 @@ fn parse_bars_query(q: &HashMap<String, String>) -> Result<BarsQuery, ApiFailure
     let required = |k: &str| q.get(k).ok_or_else(|| ApiFailure::bad_request(format!("{k}가 없습니다")));
     let symbol = Symbol::parse(required("symbol")?).map_err(|e| ApiFailure::bad_request(e.to_string()))?;
     let period = Period::parse(required("period")?).map_err(|e| ApiFailure::bad_request(e.to_string()))?;
+    let venue = match q.get("venue") {
+        None => None,
+        Some(s) => Some(Venue::parse(s).ok_or_else(|| ApiFailure::bad_request(format!("거래소는 combined, krx, nxt 중 하나입니다: {s}")))?),
+    };
+    let feed = Feed::new(symbol, venue).ok_or_else(|| ApiFailure::bad_request("지수에는 거래소가 없습니다"))?;
     let limit = match q.get("limit") {
         None => DEFAULT_LIMIT,
         Some(s) => s
@@ -136,14 +141,15 @@ fn parse_bars_query(q: &HashMap<String, String>) -> Result<BarsQuery, ApiFailure
             s.parse().map_err(|_| ApiFailure::bad_request(format!("before는 Unix 초여야 합니다: {s}")))?,
         )),
     };
-    Ok(BarsQuery { key: SeriesKey { symbol, period }, before, limit })
+    Ok(BarsQuery { key: SeriesKey { feed, period }, before, limit })
 }
 
 async fn bars(State(st): State<Arc<AppState>>, Query(q): Query<HashMap<String, String>>) -> Result<Json<api::BarsPage>, ApiFailure> {
     let q = parse_bars_query(&q)?;
     let page = st.bars.page(q.key, q.before, q.limit).await?;
     Ok(Json(api::BarsPage {
-        symbol: api::SymbolCode(q.key.symbol.as_wire()),
+        symbol: api::SymbolCode(q.key.feed.symbol().as_wire()),
+        venue: q.key.feed.venue().map(api::Venue::from),
         period: q.key.period.into(),
         bars: page.bars.iter().map(api::Bar::from).collect(),
         current: page.current.map(|c| api::Bar::new(c.bucket, &c.ohlcv)),
@@ -268,6 +274,7 @@ mod tests {
                 name: "삼성전자".into(),
                 kind: SymbolKind::Common,
                 market: Market::Kospi,
+                nxt_enabled: true,
             }]));
         }
         let bars = Arc::new(BarService::new(rest, symbols.clone(), clock));
@@ -302,7 +309,7 @@ mod tests {
         let f = fixture(false, true);
         let (s, v) = json(&f.app, "/api/symbols?q=%EC%82%BC%EC%84%B1").await;
         assert_eq!(s, StatusCode::OK);
-        assert_eq!(v, json!([{"code": "005930", "name": "삼성전자", "kind": "common", "market": "kospi"}]));
+        assert_eq!(v, json!([{"code": "005930", "name": "삼성전자", "kind": "common", "market": "kospi", "nxtEnabled": true}]));
         assert_eq!(json(&f.app, "/api/symbols?q=").await, (StatusCode::OK, json!([])));
         assert_eq!(json(&f.app, "/api/symbols").await, (StatusCode::OK, json!([])));
         assert_eq!(json(&f.app, "/api/symbols/IDX:101").await.1["name"], "코스닥");

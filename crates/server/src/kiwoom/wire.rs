@@ -142,6 +142,7 @@ pub struct ListRow {
     pub name: String,
     pub market_code: String,
     pub company_class_name: String,
+    pub nxt_enable: String,
 }
 
 /// ka10099 한 행을 가른 결과(§6.6 표).
@@ -168,7 +169,7 @@ pub fn classify(row: &ListRow) -> Listing {
         "60" | "70" | "90" | "2" | "4" => return Listing::Exclude,
         other => return Listing::Unknown(format!("모르는 marketCode {other:?}({} {})", row.code, row.name)),
     };
-    Listing::Include(SymbolInfo { symbol: Symbol::Stock(code), name: row.name.clone(), kind, market })
+    Listing::Include(SymbolInfo { symbol: Symbol::Stock(code), name: row.name.clone(), kind, market, nxt_enabled: row.nxt_enable == "Y" })
 }
 
 /// 스팩은 코스닥 보통주로 둔다(D13). 가리는 규칙은 kiwoom.md §5.
