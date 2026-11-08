@@ -22,7 +22,8 @@ fn fixture(name: &str) -> String {
 
 /// (`base_dt`, 연속조회 키)마다 실측한 응답 하나. 실측하지 않은 조합을 물으면 테스트가 멈춘다.
 struct Recorded {
-    sent: Arc<Mutex<Vec<(String, Option<String>)>>>,
+    /// 보낸 차트 조회의 `base_dt`.
+    base_dts: Arc<Mutex<Vec<String>>>,
 }
 
 impl Transport for Recorded {
@@ -37,7 +38,7 @@ impl Transport for Recorded {
         let body: Value = serde_json::from_str(req.body.expose()).unwrap();
         let base = body["base_dt"].as_str().unwrap().to_owned();
         let cont = req.cont.as_ref().map(|c| c.as_str().to_owned());
-        self.sent.lock().unwrap().push((base.clone(), cont.clone()));
+        self.base_dts.lock().unwrap().push(base.clone());
         match (base.as_str(), cont.as_deref()) {
             ("20261109", None) => reply(fixture("ka10080_196170_AL_60_today_p1"), Some("today-p2")),
             ("20261109", Some("today-p2")) => reply(fixture("ka10080_196170_AL_60_today_p2"), Some("today-p3")),
@@ -50,8 +51,8 @@ impl Transport for Recorded {
 #[tokio::test(start_paused = true)]
 async fn stale_continuation_keeps_alteogen_minutes_on_todays_adjustment_basis() {
     let clock = Clock::fake(kst(KstDate::new(2026, 11, 9).unwrap(), 2, 39, 0));
-    let sent = Arc::new(Mutex::new(Vec::new()));
-    let rest = KiwoomRest::new(Arc::new(Recorded { sent: sent.clone() }), KiwoomAuth::new(Secret::new("k".into()), Secret::new("s".into())), clock.clone());
+    let base_dts = Arc::new(Mutex::new(Vec::new()));
+    let rest = KiwoomRest::new(Arc::new(Recorded { base_dts: base_dts.clone() }), KiwoomAuth::new(Secret::new("k".into()), Secret::new("s".into())), clock.clone());
     let symbol = Symbol::parse("196170").unwrap();
     let symbols = Arc::new(SymbolDirectory::default());
     symbols.replace(Directory::build(vec![SymbolInfo { symbol, name: "알테오젠".into(), kind: SymbolKind::Common, market: Market::Kosdaq, nxt_enabled: true }]));
@@ -78,5 +79,5 @@ async fn stale_continuation_keeps_alteogen_minutes_on_todays_adjustment_basis() 
     assert_eq!(cached.bars.iter().zip(&first.bars).filter(|(a, b)| a != b).count(), 0, "이미 보낸 봉의 가격이 바뀌지 않는다");
     let newest_older = older.bars.last().unwrap();
     assert_eq!(won(newest_older).1, 211_997, "07-16 14:00 종가가 다음 봉 시가와 이어진다");
-    assert!(sent.lock().unwrap().iter().all(|(base, _)| base == "20261109"), "{:?}", sent.lock().unwrap());
+    assert!(base_dts.lock().unwrap().iter().all(|b| b == "20261109"), "{:?}", base_dts.lock().unwrap());
 }
