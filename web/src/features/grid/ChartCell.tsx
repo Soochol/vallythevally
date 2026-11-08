@@ -3,7 +3,8 @@ import { useSymbolInfo } from "../../api/queries";
 import { type CellStatus, ChartController } from "../../chart/ChartController";
 import { readThemeTokens } from "../../chart/theme";
 import { PERIOD_LABEL } from "../../lib/symbol";
-import { type Slot, useCell } from "../../stores/layout";
+import { venueLabel } from "../../lib/venue";
+import { type Slot, useCell, useLayoutStore } from "../../stores/layout";
 import { useSelectionStore } from "../../stores/selection";
 import { useThemeStore } from "../../stores/theme";
 import { cellErrorView, olderErrorView } from "./cellError";
@@ -52,7 +53,7 @@ export function ChartCell({ slot, status, onStatus }: Props) {
   return (
     <section
       tabIndex={0}
-      aria-label={`칸 ${slot + 1}: ${name} ${PERIOD_LABEL[cell.period]}`}
+      aria-label={`칸 ${slot + 1}: ${[name, venueLabel(cell.symbol, cell.venue), PERIOD_LABEL[cell.period]].filter(Boolean).join(" ")}`}
       aria-busy={status.kind === "loading"}
       className="relative min-h-0 min-w-0 bg-chart-bg focus-visible:outline-offset-[-2px]"
     >
@@ -75,6 +76,17 @@ export function ChartCell({ slot, status, onStatus }: Props) {
               다시 시도
             </button>
           )}
+        </div>
+      )}
+      {status.kind === "ready" && status.intradayEnd && (
+        <div
+          role="status"
+          className="absolute left-2 top-1/2 z-[5] flex max-w-[min(44ch,calc(100%-96px))] -translate-y-1/2 flex-col items-start gap-2 rounded-m border border-line bg-surface px-3 py-2 text-s text-text-2 shadow-dialog"
+        >
+          <p>분봉은 최근 1년까지 볼 수 있습니다. 더 과거는 일봉으로 보세요</p>
+          <button type="button" className="tb-btn border border-line" onClick={() => useLayoutStore.getState().setPeriod(slot, "D")}>
+            일봉으로 보기
+          </button>
         </div>
       )}
       {error && (

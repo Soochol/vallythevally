@@ -19,6 +19,7 @@ import type { SymbolInfo } from "../api/generated/SymbolInfo";
 import type { Venue } from "../api/generated/Venue";
 import { ApiRequestError } from "../api/http";
 import { isIndexCode, PERIOD_LABEL, symbolSub } from "../lib/symbol";
+import { venueLabel } from "../lib/venue";
 import { BarFeed, displayBars, type FetchPage, type History } from "./barFeed";
 import { Legend } from "./legend";
 import { addMainSeries, addVolumeSeries, applyMainColors, type MainSeries, priceFormat, setMainData, setVolumeData } from "./series";
@@ -41,8 +42,19 @@ export interface CellView {
 /** React가 그리는 칸 상태: 불러오는 중, 오류, 또는 마지막 봉(휴대폰 머리용). */
 export type CellStatus =
   | { kind: "loading" }
-  | { kind: "ready"; latest: Bar; prev: Bar | null; isCurrent: boolean; fetchedAt: number; olderError: ApiRequestError | null }
+  | {
+      kind: "ready";
+      latest: Bar;
+      prev: Bar | null;
+      isCurrent: boolean;
+      fetchedAt: number;
+      olderError: ApiRequestError | null;
+      /** 분봉의 가장 이른 봉이 보이고 더 받을 과거가 없다(U1: 분봉은 최근 1년까지). */
+      intradayEnd: boolean;
+    }
   | { kind: "error"; error: ApiRequestError };
+
+type ReadyStatus = Extract<CellStatus, { kind: "ready" }>;
 
 export interface ControllerDeps {
   tokens: ThemeTokens;
@@ -63,7 +75,7 @@ export class ChartController {
   private history: History | null = null;
   private bars: Bar[] = [];
   private hoverIndex: number | null = null;
-  private ready: Extract<CellStatus, { kind: "ready" }> | null = null;
+  private ready: ReadyStatus | null = null;
   private settingData = false;
   private disposed = false;
 
@@ -78,7 +90,7 @@ export class ChartController {
       reset: (h) => this.onReset(h),
       prepended: (h, added) => this.onPrepended(h, added),
       failed: (e) => this.onFailed(e),
-      olderFailed: (e) => this.emitReady(e),
+      olderFailed: (e) => this.patchReady({ olderError: e }),
     });
 
     this.chart.subscribeCrosshairMove((p) => {
@@ -91,6 +103,7 @@ export class ChartController {
       if (this.settingData) return;
       const r = this.chart.timeScale().getVisibleLogicalRange();
       if (r && r.from < LOAD_OLDER_WITHIN) this.feed.needOlder();
+      this.updateIntradayEnd();
     });
     // 캔버스 글자는 글꼴을 다 받은 뒤 다시 그려야 Pretendard로 보인다.
     void document.fonts?.ready.then(() => {
@@ -103,7 +116,12 @@ export class ChartController {
     const prev = this.view;
     this.view = next;
     const isIndex = isIndexCode(next.symbol);
-    this.legend.setHead(next.info?.name ?? next.symbol, symbolSub(next.symbol, next.info), PERIOD_LABEL[next.period]);
+    this.legend.setHead({
+      name: next.info?.name ?? next.symbol,
+      sub: symbolSub(next.symbol, next.info),
+      venue: venueLabel(next.symbol, next.venue),
+      period: PERIOD_LABEL[next.period],
+    });
 
     if (prev?.settings.style !== next.settings.style) this.recreateMain(isIndex);
     if (prev?.settings.scale !== next.settings.scale) {
@@ -133,7 +151,7 @@ export class ChartController {
 
   /** 실패한 과거 페이지를 다시 받는다(과거 봉 오류의 `다시 시도`). */
   retryOlder(): void {
-    this.emitReady(null);
+    this.patchReady({ olderError: null });
     this.feed.retryOlder();
   }
 
@@ -228,8 +246,10 @@ export class ChartController {
         isCurrent: h.current !== null && latest.t === h.current.t,
         fetchedAt: Date.now(),
         olderError: null,
+        intradayEnd: false,
       };
       this.onStatus(this.ready);
+      this.updateIntradayEnd();
     } else {
       this.onStatus({ kind: "error", error: new ApiRequestError("internal", "받은 봉이 없습니다") });
     }
@@ -237,7 +257,7 @@ export class ChartController {
 
   private onPrepended(h: History, added: number): void {
     this.history = h;
-    if (added === 0) return;
+    if (added === 0) return this.updateIntradayEnd();
     const range = this.chart.timeScale().getVisibleLogicalRange();
     this.withDataGuard(() => {
       this.setBars(displayBars(h));
@@ -245,12 +265,20 @@ export class ChartController {
     });
     if (this.hoverIndex !== null) this.hoverIndex += added;
     this.renderLegend();
+    this.updateIntradayEnd();
   }
 
-  private emitReady(olderError: ApiRequestError | null): void {
+  private patchReady(patch: Partial<Pick<ReadyStatus, "olderError" | "intradayEnd">>): void {
     if (!this.ready) return;
-    this.ready = { ...this.ready, olderError };
+    this.ready = { ...this.ready, ...patch };
     this.onStatus(this.ready);
+  }
+
+  private updateIntradayEnd(): void {
+    if (!this.ready || !this.view) return;
+    const r = this.chart.timeScale().getVisibleLogicalRange();
+    const end = isIntraday(this.view.period) && this.history?.nextBefore === null && r !== null && r.from < 0.5;
+    if (end !== this.ready.intradayEnd) this.patchReady({ intradayEnd: end });
   }
 
   private onFailed(error: ApiRequestError): void {

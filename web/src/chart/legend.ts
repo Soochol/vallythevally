@@ -30,6 +30,7 @@ export class Legend {
   readonly root = el("div", "pointer-events-none absolute left-2 top-1 z-[4] flex max-w-[calc(100%-90px)] flex-col gap-px");
   private readonly name = el("span", "text-m font-[650]");
   private readonly sub = el("span", "text-s text-text-3");
+  private readonly venue = el("span", "text-s text-text-2");
   private readonly period = el("span", "text-s text-text-3");
   private readonly priceRow = el("div", `${ROW} flex items-baseline gap-2 whitespace-nowrap max-md:hidden`);
   private readonly close = el("span", "text-xl font-semibold tracking-[-0.02em]");
@@ -44,17 +45,20 @@ export class Legend {
 
   constructor(parent: HTMLElement) {
     const head = el("div", `${ROW} flex items-baseline gap-1.5 whitespace-nowrap max-md:hidden`);
-    head.append(this.name, this.sub, this.period);
+    head.append(this.name, this.sub, this.venue, this.period);
     this.fetched.title = "키움에서 조회한 값입니다. 체결마다 바뀌지 않습니다.";
     this.priceRow.append(this.close, this.change, this.time, this.fetched);
     this.root.append(head, this.priceRow, this.ohlc);
     parent.append(this.root);
   }
 
-  setHead(name: string, sub: string, periodLabel: string): void {
-    this.name.textContent = name;
-    this.sub.textContent = sub;
-    this.period.textContent = periodLabel;
+  /** venue가 빈 글자(지수)면 그 자리를 숨긴다. */
+  setHead(h: { name: string; sub: string; venue: string; period: string }): void {
+    this.name.textContent = h.name;
+    this.sub.textContent = h.sub;
+    this.venue.textContent = h.venue;
+    this.venue.hidden = h.venue === "";
+    this.period.textContent = h.period;
   }
 
   show(v: LegendBar | null): void {
