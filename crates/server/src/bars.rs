@@ -393,11 +393,13 @@ mod tests {
         ts: Vec<KstTime>,
         page: usize,
         intraday: bool,
+        /// 이날 1:2 권리발생(주식만). 그 전 봉은 `base_dt`가 이날보다 이르면 수정 전 가격(2배)으로 온다(kiwoom.md §4).
+        rights_on: Option<KstDate>,
     }
 
     impl FakeChart {
         fn dated(dts: Vec<KstDate>, page: usize) -> Self {
-            FakeChart { ts: dts.into_iter().map(midnight).collect(), page, intraday: false }
+            FakeChart { ts: dts.into_iter().map(midnight).collect(), page, intraday: false, rights_on: None }
         }
 
         /// 1분봉. 평일 08:00~19:59(하루 720봉)를 11-06 19:59부터 거꾸로 n개. 페이지는 900봉(kiwoom.md §1).
@@ -411,7 +413,7 @@ mod tests {
                 }
                 d = d.add_days(-1);
             }
-            FakeChart { ts, page: 900, intraday: true }
+            FakeChart { ts, page: 900, intraday: true, rights_on: None }
         }
 
         fn daily(n: usize) -> Self {
@@ -456,11 +458,12 @@ mod tests {
                 None => self.ts.partition_point(|t| t.kst_date() > base),
             };
             let end = (offset + self.page).min(self.ts.len());
+            let unadjusted_before = self.rights_on.filter(|&r| body.get("upd_stkpc_tp").is_some() && base < r);
             let rows: Vec<_> = self.ts[offset..end]
                 .iter()
                 .enumerate()
                 .map(|(i, t)| {
-                    let p = 1000 + (offset + i) as u64;
+                    let p = (1000 + (offset + i) as u64) * if unadjusted_before.is_some_and(|r| t.kst_date() < r) { 2 } else { 1 };
                     let mut row = json!({"open_pric": p.to_string(), "high_pric": (p + 5).to_string(),
                            "low_pric": (p - 5).to_string(), "cur_prc": format!("-{p}"), "trde_qty": "10", "upd_rt": ""});
                     if self.intraday {
@@ -781,17 +784,46 @@ mod tests {
         assert_eq!(h.chart_calls().len(), 2);
     }
 
+    /// 오래된 봉일수록 1원씩 비싸다(`FakeChart::respond`). 기준이 하나면 이웃한 두 봉의 종가 차이는 언제나 1원이다.
+    fn assert_one_basis(bars: &[ConfirmedBar]) {
+        let bad: Vec<_> = bars.windows(2).filter(|w| w[0].ohlcv.close().centi() != w[1].ohlcv.close().centi() + 100).map(|w| (w[1].bucket.start(), w[0].ohlcv.close().centi(), w[1].ohlcv.close().centi())).collect();
+        assert!(bad.is_empty(), "수정주가 기준이 섞였다: {:?}", &bad[..bad.len().min(3)]);
+    }
+
     #[tokio::test(start_paused = true)]
-    async fn stale_minute_continuation_jumps_to_the_oldest_date() {
-        let h = std_harness(Duration::ZERO);
+    async fn stale_stock_minute_continuation_keeps_todays_adjustment_basis() {
+        let minute = FakeChart { rights_on: Some(date(2026, 11, 6)), ..FakeChart::minutes(3000) };
+        let h = harness(monday_night(), Duration::ZERO, Charts { minute, ..Charts::default() });
         let k = venue_key(SAMSUNG, Venue::Nxt, Period::M1);
+        // 첫 페이지 900봉에는 권리발생 전날(11-05) 봉이 들어 있다.
+        let latest = h.bars.page(k, None, 900).await.unwrap();
+        h.clock.jump(16 * 60);
+        let older = h.bars.page(k, latest.next_before, 1000).await.unwrap();
+        assert_eq!(older.bars.len(), 1000);
+        let cached = h.bars.page(k, Some(latest.bars.last().unwrap().bucket.start().plus_secs(1)), 900).await.unwrap();
+        assert_eq!(cached.bars.len(), latest.bars.len());
+        let changed = cached.bars.iter().zip(&latest.bars).filter(|(a, b)| a != b).count();
+        assert_eq!(changed, 0, "이미 보낸 봉의 가격이 바뀌지 않는다");
+        let all = [older.bars.clone(), latest.bars.clone()].concat();
+        assert_contiguous_asc(&all);
+        assert_one_basis(&all);
+        let calls = h.chart_calls();
+        assert!(calls.iter().all(|c| body(c)["base_dt"] == "20261109"), "주식 분봉은 오늘 기준만 쓴다: {:?}", calls.iter().map(|c| body(c)["base_dt"].clone()).collect::<Vec<_>>());
+        let conts: Vec<_> = calls.iter().map(|c| c.cont.clone()).collect();
+        assert_eq!(conts, [None, None, Some("P900".to_string()), Some("P1800".to_string())], "묵은 키는 오늘부터 다시 따라간다");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn stale_index_minute_continuation_jumps_to_the_oldest_date() {
+        let h = std_harness(Duration::ZERO);
+        let k = key("IDX:001", Period::M1);
         let latest = h.bars.page(k, None, 500).await.unwrap();
         h.clock.jump(16 * 60);
         // 첫 페이지 900봉의 가장 이른 봉은 11-05 17:00이다(11-06 720봉 + 11-05 180봉).
         let older = h.bars.page(k, latest.next_before, 1000).await.unwrap();
         assert_eq!(older.bars.len(), 1000);
         let calls = h.chart_calls();
-        assert_eq!(calls.len(), 2, "묵은 키에서는 한 번 건너뛰어 받는다");
+        assert_eq!(calls.len(), 2, "지수는 묵은 키에서 한 번 건너뛰어 받는다");
         assert_eq!((calls[1].cont.as_deref(), body(&calls[1])["base_dt"].as_str()), (None, Some("20261105")));
         let all = [older.bars.clone(), latest.bars.clone()].concat();
         assert_contiguous_asc(&all);
