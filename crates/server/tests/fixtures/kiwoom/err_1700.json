@@ -1,0 +1,6 @@
+{
+ "_source": "tools/kiwoom-probe/out/burst.json 8번째 응답(kiwoom.md §10.1)",
+ "_status": 429,
+ "return_code": 5,
+ "return_msg": "허용된 요청 개수를 초과하였습니다[1700:허용된 API 요청 개수를 초과하였습니다. 유량=5, API ID=ka10100]"
+}

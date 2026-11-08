@@ -1,0 +1,24 @@
+{
+ "_source": "tools/kiwoom-probe/out/info_005930.json(kiwoom.md §5)",
+ "_headers": {
+  "cont-yn": "N",
+  "next-key": ""
+ },
+ "auditInfo": "정상",
+ "code": "005930",
+ "companyClassName": "",
+ "kind": "A",
+ "lastPrice": "00201500",
+ "listCount": "0000005846278608",
+ "marketCode": "0",
+ "marketName": "거래소",
+ "name": "삼성전자",
+ "nxtEnable": "Y",
+ "orderWarning": "0",
+ "regDay": "19750611",
+ "return_code": 0,
+ "return_msg": "정상적으로 처리되었습니다",
+ "state": "증거금20%|담보대출|신용가능",
+ "upName": "전기/전자",
+ "upSizeName": "대형주"
+}

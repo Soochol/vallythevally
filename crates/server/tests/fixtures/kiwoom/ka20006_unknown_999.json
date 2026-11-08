@@ -1,0 +1,21 @@
+{
+ "_source": "tools/kiwoom-probe/out/err_badidx.json(kiwoom.md §9 없는 지수코드)",
+ "_headers": {
+  "cont-yn": "N",
+  "next-key": ""
+ },
+ "inds_cd": "999",
+ "inds_dt_pole_qry": [
+  {
+   "cur_prc": "",
+   "dt": "",
+   "high_pric": "",
+   "low_pric": "",
+   "open_pric": "",
+   "trde_prica": "",
+   "trde_qty": ""
+  }
+ ],
+ "return_code": 0,
+ "return_msg": "정상적으로 처리되었습니다"
+}

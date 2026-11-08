@@ -1,0 +1,282 @@
+{
+ "_source": "tools/kiwoom-probe/out/ka20008_001.json 행 0~29(kiwoom.md §10.5). 2026-11-08 실측 응답을 줄였다",
+ "_headers": {
+  "cont-yn": "Y",
+  "next-key": "00120061101"
+ },
+ "inds_cd": "001",
+ "return_code": 0,
+ "return_msg": "정상적으로 처리되었습니다",
+ "inds_mth_pole_qry": [
+  {
+   "cur_prc": "505969",
+   "dt": "20261102",
+   "high_pric": "591083",
+   "low_pric": "491128",
+   "open_pric": "563777",
+   "trde_prica": "106995734",
+   "trde_qty": "1282910"
+  },
+  {
+   "cur_prc": "573074",
+   "dt": "20261001",
+   "high_pric": "704467",
+   "low_pric": "530598",
+   "open_pric": "681449",
+   "trde_prica": "407301056",
+   "trde_qty": "5615685"
+  },
+  {
+   "cur_prc": "683804",
+   "dt": "20260901",
+   "high_pric": "717152",
+   "low_pric": "643949",
+   "open_pric": "678429",
+   "trde_prica": "427209063",
+   "trde_qty": "5705687"
+  },
+  {
+   "cur_prc": "682002",
+   "dt": "20260803",
+   "high_pric": "721662",
+   "low_pric": "608025",
+   "open_pric": "635827",
+   "trde_prica": "516920546",
+   "trde_qty": "6478327"
+  },
+  {
+   "cur_prc": "659545",
+   "dt": "20260701",
+   "high_pric": "862015",
+   "low_pric": "526277",
+   "open_pric": "859150",
+   "trde_prica": "811259612",
+   "trde_qty": "9512546"
+  },
+  {
+   "cur_prc": "847648",
+   "dt": "20260601",
+   "high_pric": "938559",
+   "low_pric": "739446",
+   "open_pric": "848567",
+   "trde_prica": "1057289780",
+   "trde_qty": "10290334"
+  },
+  {
+   "cur_prc": "847615",
+   "dt": "20260504",
+   "high_pric": "847615",
+   "low_pric": "674163",
+   "open_pric": "678293",
+   "trde_prica": "903865728",
+   "trde_qty": "12578293"
+  },
+  {
+   "cur_prc": "659887",
+   "dt": "20260401",
+   "high_pric": "675027",
+   "low_pric": "517027",
+   "open_pric": "533004",
+   "trde_prica": "650114843",
+   "trde_qty": "20838014"
+  },
+  {
+   "cur_prc": "505246",
+   "dt": "20260303",
+   "high_pric": "618045",
+   "low_pric": "504299",
+   "open_pric": "616515",
+   "trde_prica": "633002902",
+   "trde_qty": "23260802"
+  },
+  {
+   "cur_prc": "624413",
+   "dt": "20260202",
+   "high_pric": "634741",
+   "low_pric": "489930",
+   "open_pric": "512262",
+   "trde_prica": "547974068",
+   "trde_qty": "17823586"
+  },
+  {
+   "cur_prc": "522436",
+   "dt": "20260102",
+   "high_pric": "532168",
+   "low_pric": "421668",
+   "open_pric": "422453",
+   "trde_prica": "568178526",
+   "trde_qty": "11550206"
+  },
+  {
+   "cur_prc": "421417",
+   "dt": "20251201",
+   "high_pric": "422636",
+   "low_pric": "389208",
+   "open_pric": "396792",
+   "trde_prica": "302753842",
+   "trde_qty": "8409732"
+  },
+  {
+   "cur_prc": "392659",
+   "dt": "20251103",
+   "high_pric": "422675",
+   "low_pric": "383335",
+   "open_pric": "412336",
+   "trde_prica": "348668627",
+   "trde_qty": "7295810"
+  },
+  {
+   "cur_prc": "410750",
+   "dt": "20251001",
+   "high_pric": "414672",
+   "low_pric": "344042",
+   "open_pric": "344406",
+   "trde_prica": "325508608",
+   "trde_qty": "8657082"
+  },
+  {
+   "cur_prc": "342460",
+   "dt": "20250901",
+   "high_pric": "349795",
+   "low_pric": "313502",
+   "open_pric": "316458",
+   "trde_prica": "254193390",
+   "trde_qty": "8198286"
+  },
+  {
+   "cur_prc": "318601",
+   "dt": "20250801",
+   "high_pric": "324217",
+   "low_pric": "307927",
+   "open_pric": "321032",
+   "trde_prica": "207859539",
+   "trde_qty": "6355222"
+  },
+  {
+   "cur_prc": "324544",
+   "dt": "20250701",
+   "high_pric": "328826",
+   "low_pric": "303247",
+   "open_pric": "308964",
+   "trde_prica": "298074525",
+   "trde_qty": "11312480"
+  },
+  {
+   "cur_prc": "307170",
+   "dt": "20250602",
+   "high_pric": "312909",
+   "low_pric": "268514",
+   "open_pric": "269291",
+   "trde_prica": "288796057",
+   "trde_qty": "10771342"
+  },
+  {
+   "cur_prc": "269767",
+   "dt": "20250502",
+   "high_pric": "272064",
+   "low_pric": "254057",
+   "open_pric": "255652",
+   "trde_prica": "169683507",
+   "trde_qty": "8023267"
+  },
+  {
+   "cur_prc": "255661",
+   "dt": "20250401",
+   "high_pric": "257141",
+   "low_pric": "228472",
+   "open_pric": "251124",
+   "trde_prica": "174050383",
+   "trde_qty": "11379142"
+  },
+  {
+   "cur_prc": "248112",
+   "dt": "20250304",
+   "high_pric": "265463",
+   "low_pric": "247946",
+   "open_pric": "252220",
+   "trde_prica": "213746242",
+   "trde_qty": "9442348"
+  },
+  {
+   "cur_prc": "253278",
+   "dt": "20250203",
+   "high_pric": "268070",
+   "low_pric": "243761",
+   "open_pric": "246874",
+   "trde_prica": "244388148",
+   "trde_qty": "9552419"
+  },
+  {
+   "cur_prc": "251737",
+   "dt": "20250102",
+   "high_pric": "255257",
+   "low_pric": "238684",
+   "open_pric": "240087",
+   "trde_prica": "173120298",
+   "trde_qty": "8301457"
+  },
+  {
+   "cur_prc": "239949",
+   "dt": "20241202",
+   "high_pric": "251562",
+   "low_pric": "236018",
+   "open_pric": "247902",
+   "trde_prica": "174706950",
+   "trde_qty": "9925022"
+  },
+  {
+   "cur_prc": "245591",
+   "dt": "20241101",
+   "high_pric": "259315",
+   "low_pric": "239056",
+   "open_pric": "254296",
+   "trde_prica": "208348834",
+   "trde_qty": "10063354"
+  },
+  {
+   "cur_prc": "255615",
+   "dt": "20241002",
+   "high_pric": "263532",
+   "low_pric": "255236",
+   "open_pric": "256655",
+   "trde_prica": "194137190",
+   "trde_qty": "7744506"
+  },
+  {
+   "cur_prc": "259327",
+   "dt": "20240902",
+   "high_pric": "269559",
+   "low_pric": "249130",
+   "open_pric": "268380",
+   "trde_prica": "186177641",
+   "trde_qty": "6525454"
+  },
+  {
+   "cur_prc": "267431",
+   "dt": "20240801",
+   "high_pric": "279411",
+   "low_pric": "238696",
+   "open_pric": "278727",
+   "trde_prica": "223557309",
+   "trde_qty": "8692884"
+  },
+  {
+   "cur_prc": "277069",
+   "dt": "20240701",
+   "high_pric": "289643",
+   "low_pric": "270386",
+   "open_pric": "279296",
+   "trde_prica": "276774482",
+   "trde_qty": "10790451"
+  },
+  {
+   "cur_prc": "279782",
+   "dt": "20240603",
+   "high_pric": "281262",
+   "low_pric": "265781",
+   "open_pric": "265781",
+   "trde_prica": "246335018",
+   "trde_qty": "12186077"
+  }
+ ]
+}

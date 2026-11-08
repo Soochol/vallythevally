@@ -1,0 +1,8 @@
+{
+ "_source": "형태는 키움 명세 au10001, expires_dt는 kiwoom.md 머리말의 실제 만료 시각. 토큰 값은 가짜다",
+ "expires_dt": "20261109224806",
+ "token_type": "bearer",
+ "token": "FAKE-TOKEN-fixture-0000",
+ "return_code": 0,
+ "return_msg": "정상적으로 처리되었습니다"
+}
