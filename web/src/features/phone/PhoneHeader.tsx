@@ -7,12 +7,13 @@ import type { CellState } from "../../stores/layout";
 import { useSelectionStore } from "../../stores/selection";
 import { useThemeStore } from "../../stores/theme";
 import { MoonIcon, SunIcon } from "../icons";
+import { VenuePicker } from "../venue/VenuePicker";
 import { Attribution } from "../status/attribution";
 
 const DIR_CLASS = { up: "text-up", down: "text-down", flat: "text-text-2" } as const;
 
 /**
- * 휴대폰 머리(frontend.md §4): 종목, 현재 봉 종가(24px, 등락색), 등락, 그리고 셋째 줄에
+ * 휴대폰 머리(frontend.md §4): 종목과 거래소(주식만), 현재 봉 종가(24px, 등락색), 등락, 그리고 셋째 줄에
  * 마지막 조회 시각과 라이브러리 표기. 범례의 머리줄과 가격줄을 대신한다.
  */
 export function PhoneHeader({ cell, info, status }: { cell: CellState; info: SymbolInfo | undefined; status: CellStatus }) {
@@ -26,10 +27,13 @@ export function PhoneHeader({ cell, info, status }: { cell: CellState; info: Sym
   return (
     <header className="hidden items-center gap-2 px-3 pb-1 pt-2 [grid-area:mhead] max-md:flex">
       <div className="min-w-0 flex-1">
-        <button type="button" className="max-w-full truncate text-left" aria-haspopup="dialog" onClick={() => openDialog("search")}>
-          <b className="text-l font-[650]">{info?.name ?? cell.symbol}</b>
-          <small className="ml-1 text-s text-text-3">{symbolSub(cell.symbol, info)}</small>
-        </button>
+        <div className="flex items-center gap-2">
+          <button type="button" className="min-w-0 flex-1 truncate text-left" aria-haspopup="dialog" onClick={() => openDialog("search")}>
+            <b className="text-l font-[650]">{info?.name ?? cell.symbol}</b>
+            <small className="ml-1 text-s text-text-3">{symbolSub(cell.symbol, info)}</small>
+          </button>
+          <VenuePicker cell={cell} info={info} variant="phone" />
+        </div>
         <div className="flex h-[32px] items-baseline gap-2">
           {ready ? (
             <>
