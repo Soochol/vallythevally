@@ -1,0 +1,10 @@
+[package]
+name = "domain"
+edition.workspace = true
+version.workspace = true
+publish.workspace = true
+
+[dependencies]
+
+[lints]
+workspace = true

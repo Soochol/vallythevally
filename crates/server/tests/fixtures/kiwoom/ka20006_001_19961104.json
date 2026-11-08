@@ -1,0 +1,57 @@
+{
+ "_source": "tools/kiwoom-probe/out/idx_d_001.json 행 7491~7495(kiwoom.md §6, 1996-11-04 행은 저가가 종가보다 높다). 2026-11-08 실측 응답을 줄였다",
+ "_headers": {
+  "cont-yn": "Y",
+  "next-key": "TRIMMED"
+ },
+ "inds_cd": "001",
+ "return_code": 0,
+ "return_msg": "정상적으로 처리되었습니다",
+ "inds_dt_pole_qry": [
+  {
+   "cur_prc": "74729",
+   "dt": "19961106",
+   "high_pric": "74729",
+   "low_pric": "73442",
+   "open_pric": "73655",
+   "trde_prica": "479185",
+   "trde_qty": "31676"
+  },
+  {
+   "cur_prc": "73365",
+   "dt": "19961105",
+   "high_pric": "73944",
+   "low_pric": "72632",
+   "open_pric": "73702",
+   "trde_prica": "488598",
+   "trde_qty": "32845"
+  },
+  {
+   "cur_prc": "74742",
+   "dt": "19961104",
+   "high_pric": "76453",
+   "low_pric": "74743",
+   "open_pric": "76453",
+   "trde_prica": "467589",
+   "trde_qty": "30649"
+  },
+  {
+   "cur_prc": "76573",
+   "dt": "19961102",
+   "high_pric": "77445",
+   "low_pric": "76573",
+   "open_pric": "77445",
+   "trde_prica": "341598",
+   "trde_qty": "21529"
+  },
+  {
+   "cur_prc": "76787",
+   "dt": "19961101",
+   "high_pric": "76787",
+   "low_pric": "76188",
+   "open_pric": "76361",
+   "trde_prica": "460618",
+   "trde_qty": "29177"
+  }
+ ]
+}

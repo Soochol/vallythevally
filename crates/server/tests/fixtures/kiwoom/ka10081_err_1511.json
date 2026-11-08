@@ -1,0 +1,9 @@
+{
+ "_source": "tools/kiwoom-probe/out/err_nobase.json(kiwoom.md §9 base_dt 누락)",
+ "_headers": {
+  "cont-yn": "N",
+  "next-key": ""
+ },
+ "return_code": 2,
+ "return_msg": "입력 값 오류입니다[1511:필수 입력 값에 값이 존재하지 않습니다. 필수입력 파라미터=base_dt]"
+}

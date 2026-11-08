@@ -1,0 +1,77 @@
+@import "tailwindcss";
+@import "pretendard/dist/web/variable/pretendardvariable-dynamic-subset.css";
+@import "./tokens.css";
+
+/* Tailwind 테마는 토큰 변수만 가리킨다. 기본 색·글자 크기는 지워 토큰 밖의 값을 못 쓰게 한다. */
+@theme inline {
+  --color-*: initial;
+  --color-bg: var(--bg);
+  --color-chart-bg: var(--chart-bg);
+  --color-surface: var(--surface);
+  --color-raised: var(--raised);
+  --color-line: var(--line);
+  --color-text: var(--text);
+  --color-text-2: var(--text-2);
+  --color-text-3: var(--text-3);
+  --color-accent: var(--accent);
+  --color-accent-ink: var(--accent-ink);
+  --color-accent-soft: var(--accent-soft);
+  --color-up: var(--up);
+  --color-down: var(--down);
+  --color-transparent: transparent;
+
+  --text-*: initial;
+  --text-xs: var(--fs-xs);
+  --text-s: var(--fs-s);
+  --text-m: var(--fs-m);
+  --text-l: var(--fs-l);
+  --text-xl: var(--fs-xl);
+
+  --radius-*: initial;
+  --radius-s: var(--r-s);
+  --radius-m: var(--r-m);
+  --radius-l: var(--r-l);
+
+  --font-sans: var(--font-sans);
+  --shadow-dialog: var(--shadow);
+}
+
+@layer base {
+  html, body, #root { height: 100%; }
+  body {
+    font-family: var(--font-sans); font-size: var(--fs-m); line-height: 1.35;
+    background: var(--bg); color: var(--text);
+    font-variant-numeric: tabular-nums;
+    -webkit-font-smoothing: antialiased;
+  }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; border-radius: var(--r-s); }
+  kbd {
+    font-family: inherit; font-size: var(--fs-xs); color: var(--text-2); line-height: 1.3;
+    border: 1px solid var(--line); border-bottom-width: 2px; border-radius: var(--r-s); padding: 0 4px; background: var(--surface);
+  }
+}
+
+/* 여러 곳에서 쓰는 버튼 모양(목업 styles.css의 .tb-btn, .seg, .btn, .icon-btn) */
+@layer components {
+  .tb-btn {
+    height: 28px; padding: 0 var(--s3); border-radius: var(--r-m);
+    display: inline-flex; align-items: center; gap: 6px; color: var(--text); white-space: nowrap;
+  }
+  .tb-btn:hover { background: var(--raised); }
+  .tb-btn[aria-pressed="true"] { color: var(--accent); }
+  .seg-btn {
+    height: 26px; min-width: 28px; padding: 0 6px; border-radius: var(--r-s); color: var(--text-2); font-size: var(--fs-s);
+  }
+  .seg-btn:hover { background: var(--raised); color: var(--text); }
+  .seg-btn[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+  .icon-btn {
+    width: 26px; height: 26px; display: grid; place-items: center; border-radius: var(--r-s); color: var(--text-2);
+  }
+  .icon-btn:hover { background: var(--raised); color: var(--text); }
+  .btn-primary {
+    height: 32px; padding: 0 var(--s5); border-radius: var(--r-m);
+    background: var(--accent); color: var(--accent-ink); border: 1px solid var(--accent); font-weight: 650;
+  }
+  .btn-primary:hover { filter: brightness(1.06); }
+  .tb-sep { width: 1px; height: 20px; background: var(--line); margin: 0 var(--s2); flex: none; }
+}

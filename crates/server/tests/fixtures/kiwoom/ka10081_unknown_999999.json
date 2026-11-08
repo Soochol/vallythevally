@@ -1,0 +1,26 @@
+{
+ "_source": "tools/kiwoom-probe/out/err_badcode.json(kiwoom.md §9 없는 종목코드)",
+ "_headers": {
+  "cont-yn": "N",
+  "next-key": ""
+ },
+ "return_code": 0,
+ "return_msg": "정상적으로 처리되었습니다",
+ "stk_cd": "999999",
+ "stk_dt_pole_chart_qry": [
+  {
+   "cur_prc": "",
+   "dt": "",
+   "high_pric": "",
+   "low_pric": "",
+   "open_pric": "",
+   "pred_pre": "",
+   "pred_pre_sig": "",
+   "trde_prica": "",
+   "trde_qty": "",
+   "trde_tern_rt": "",
+   "upd_rt": "",
+   "upd_stkpc_tp": ""
+  }
+ ]
+}

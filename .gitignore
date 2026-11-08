@@ -11,3 +11,10 @@ tools/kiwoom-probe/
 
 # 사용자 자료 SQLite 파일(ADR 0006)
 data/
+
+# ts-rs 기본 출력 위치(쓰지 않는다)
+bindings/
+
+# 웹 프런트 의존성과 빌드 산출물
+web/node_modules/
+web/dist/

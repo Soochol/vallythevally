@@ -1,0 +1,6 @@
+{
+ "_source": "tools/kiwoom-probe/out/fake_token.json(kiwoom.md §10.2 가짜 토큰으로 보낸 ka10100)",
+ "_status": 200,
+ "return_code": 3,
+ "return_msg": "인증에 실패했습니다[8005:Token이 유효하지 않습니다]"
+}
