@@ -117,10 +117,12 @@ impl BarService {
         let seen_latest = slot.latest_fetches.load(Ordering::SeqCst);
         let mut s = slot.series.lock().await;
         match before {
-            None if slot.latest_fetches.load(Ordering::SeqCst) != seen_latest => {}
             None => {
-                self.refresh_latest(key, &mut s).await?;
-                slot.latest_fetches.fetch_add(1, Ordering::SeqCst);
+                // 잠금을 기다리는 동안 다른 요청이 최신 페이지를 받았으면 그 결과를 같이 쓴다.
+                if slot.latest_fetches.load(Ordering::SeqCst) == seen_latest {
+                    self.refresh_latest(key, &mut s).await?;
+                    slot.latest_fetches.fetch_add(1, Ordering::SeqCst);
+                }
                 while s.bars.len() < limit && !s.reached_origin {
                     self.extend_older(key, &mut s).await?;
                 }
@@ -590,6 +592,16 @@ mod tests {
         assert_eq!(a.as_ref().unwrap(), b.as_ref().unwrap());
         assert_eq!(c.unwrap().bars.len(), 100);
         assert_eq!(h.chart_calls().len(), 1);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_joined_request_with_a_bigger_limit_still_fills_its_limit() {
+        let h = std_harness(Duration::from_millis(400));
+        let k = key(SAMSUNG, Period::Week);
+        let (small, big) = tokio::join!(h.bars.page(k, None, 100), h.bars.page(k, None, 500));
+        assert_eq!((small.unwrap().bars.len(), big.unwrap().bars.len()), (100, 500));
+        let conts: Vec<_> = h.chart_calls().into_iter().map(|s| s.cont).collect();
+        assert_eq!(conts, [None, Some("P300".to_string())], "최신 페이지는 한 번만, 모자란 만큼만 이어 받는다");
     }
 
     #[tokio::test(start_paused = true)]
