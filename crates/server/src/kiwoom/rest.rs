@@ -422,13 +422,14 @@ impl Inner {
         match verdict {
             Verdict::Ok(page) => q.finish(id, Ok(page)),
             Verdict::RateLimited => {
+                tracing::warn!(api_id = api_id.as_str(), "요청 개수 초과. 260ms 간격이 모자랐습니다. 대기열을 1초 멈춥니다");
                 job.rate_limited += 1;
-                if job.rate_limited >= MAX_RATE_LIMITED {
+                let gave_up = job.rate_limited >= MAX_RATE_LIMITED;
+                q.pause_until = Some(Instant::now() + RATE_LIMIT_PAUSE);
+                if gave_up {
                     tracing::warn!(api_id = api_id.as_str(), "요청 개수 초과가 세 번 연속이라 실패로 돌려줍니다");
                     q.finish(id, Err(KiwoomError::RateLimited));
                 } else {
-                    tracing::warn!(api_id = api_id.as_str(), "요청 개수 초과. 260ms 간격이 모자랐습니다. 대기열을 1초 멈춥니다");
-                    q.pause_until = Some(Instant::now() + RATE_LIMIT_PAUSE);
                     q.requeue_front(id);
                 }
             }
@@ -726,6 +727,27 @@ mod tests {
         let after: Vec<_> = sent.iter().filter(|s| s.at > first).collect();
         assert!(after.iter().all(|s| s.at.duration_since(first) >= RATE_LIMIT_PAUSE), "429 뒤 1초 동안 아무것도 나가지 않는다");
         assert_eq!(after[0].cont.as_deref(), Some("k0"), "같은 요청을 맨 앞에 다시 넣는다");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn the_third_rate_limit_also_pauses_the_whole_queue() {
+        let tokens = token_counter();
+        let fake = Arc::new(FakeTransport::new(Duration::ZERO, move |s| {
+            if let Some(t) = tokens(s) {
+                return t;
+            }
+            if s.body.contains("\"0\"") {
+                return status(429, json!({"return_code": 5, "return_msg": "허용된 요청 개수를 초과하였습니다[1700:유량=5]"}));
+            }
+            list_ok()
+        }));
+        let rest = rest(&fake);
+        let scope = MergeScope::default();
+        assert_eq!(rest.call(&StockList::EXCHANGE, None, Priority::Screen, scope).await.err(), Some(KiwoomError::RateLimited));
+        rest.call(&StockList::KOSDAQ, None, Priority::Screen, scope).await.unwrap();
+        let sent = fake.market_sent();
+        assert_eq!(sent.len(), 4);
+        assert!(sent[3].at.duration_since(sent[2].at) >= RATE_LIMIT_PAUSE, "세 번째 429 뒤에도 다른 요청을 1초 기다린다");
     }
 
     #[tokio::test(start_paused = true)]
