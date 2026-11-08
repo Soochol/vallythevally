@@ -8,9 +8,13 @@ import { useSelectionStore } from "../stores/selection";
 export function useHotkeys() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.defaultPrevented || e.isComposing || isTypingTarget(e.target)) return;
+      if (e.defaultPrevented || e.isComposing) return;
       const sel = useSelectionStore.getState();
-      if (sel.dialog) return;
+      if (sel.dialog) {
+        if (e.key === "Escape") sel.closeDialog();
+        return;
+      }
+      if (isTypingTarget(e.target)) return;
       const action = matchHotkey(e);
       if (!action) return;
       e.preventDefault();

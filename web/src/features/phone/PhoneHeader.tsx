@@ -49,7 +49,7 @@ export function PhoneHeader({ cell, info, status }: { cell: CellState; info: Sym
           <Attribution text="Lightweight Charts™" className="text-text-3 underline underline-offset-2" />
         </div>
       </div>
-      <button type="button" className="icon-btn !h-9 !w-9" title="테마 바꾸기" aria-label="테마 바꾸기" onClick={toggle}>
+      <button type="button" className="icon-btn h-9 w-9" title="테마 바꾸기" aria-label="테마 바꾸기" onClick={toggle}>
         {theme === "dark" ? <SunIcon size={20} /> : <MoonIcon size={20} />}
       </button>
     </header>
