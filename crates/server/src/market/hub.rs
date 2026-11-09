@@ -958,6 +958,23 @@ mod tests {
         assert!(!realtime.needs_verify, "체결로 시작한 봉은 완전하다");
     }
 
+    /// 이슈 #4 완료 조건: 칸을 열어 두고 10분 넘게 REST 요청이 없어도 시리즈가 캐시에 남고, 확정된 실시간 봉이 붙는다.
+    #[tokio::test(start_paused = true)]
+    async fn a_subscribed_series_outlives_ten_idle_minutes_and_takes_realtime_bars() {
+        let h = std_harness();
+        let (_, out) = subscribed_samsung(&h).await;
+        h.clock.sleep_until(at(9, 13, 30)).await;
+        out.take(true);
+        assert_eq!(h.bars.series_count(), 1, "구독이 잡은 시리즈는 1분 내리기 타이머를 견딘다");
+        h.events.send(trade(&h, (9, 13, 40), 130, 2, Some(Exchange::Krx))).await.unwrap();
+        h.events.send(trade(&h, (9, 14, 0), 131, 1, Some(Exchange::Krx))).await.unwrap();
+        settle().await;
+        assert_eq!(h.bars.series_count(), 1);
+        let page = h.bars.page(samsung(), Some(at(9, 14, 0)), 3).await.unwrap();
+        let last = page.bars.last().expect("봉이 있다");
+        assert_eq!((last.bucket.start(), last.source), (at(9, 13, 0), BarSource::Realtime), "다시 만든 시리즈가 아니라 실시간 봉이 붙은 그 시리즈다");
+    }
+
     #[tokio::test(start_paused = true)]
     async fn the_timer_confirms_a_bar_without_a_new_trade() {
         let h = std_harness();
