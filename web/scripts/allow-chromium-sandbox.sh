@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Ubuntu 23.10+는 AppArmor 프로필이 `userns`를 허락한 프로그램만 사용자 이름공간을 만들게 하고,
-# Chromium 샌드박스는 사용자 이름공간이 있어야 뜬다. Playwright의 headless shell 하나에만 허락한다.
+# Chromium 샌드박스는 사용자 이름공간이 있어야 뜬다.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
