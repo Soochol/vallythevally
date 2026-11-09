@@ -362,7 +362,7 @@ impl fmt::Display for Failure {
             Transient => match &self.note {
                 Note::Transport(t) if t.timed_out => write!(
                     f,
-                    "키움 응답이 {}초 안에 오지 않았습니다({ev}, {} 단계). 이 PC의 보안 프로그램(예: AhnLab ASTx)이 연결을 막고 있을 수 있습니다",
+                    "키움 응답이 {}초 안에 오지 않았습니다({ev}, {} 단계)",
                     SEND_TIMEOUT.as_secs(),
                     t.stage.label()
                 ),
@@ -730,14 +730,12 @@ mod tests {
     }
 
     #[test]
-    fn a_timeout_names_the_stage_and_the_security_program_that_may_block_it() {
+    fn a_timeout_names_the_seconds_and_the_stage() {
         use crate::kiwoom::transport::{Stage, TransportError};
         let text = Failure::transport(ApiId::Ka10081, TransportError { stage: Stage::AwaitResponse, timed_out: true }).to_string();
-        assert!(text.contains("키움 응답이 15초 안에 오지 않았습니다"), "{text}");
-        assert!(text.contains("응답 대기 단계"), "{text}");
-        assert!(text.contains("이 PC의 보안 프로그램(예: AhnLab ASTx)이 연결을 막고 있을 수 있습니다"), "{text}");
+        assert_eq!(text, "키움 응답이 15초 안에 오지 않았습니다(ka10081, 응답 대기 단계)");
         let refused = Failure::transport(ApiId::Ka10081, TransportError { stage: Stage::Connect, timed_out: false }).to_string();
-        assert!(refused.contains("연결 단계") && !refused.contains("ASTx"), "{refused}");
+        assert!(refused.contains("연결 단계") && !refused.contains("초 안에 오지 않았습니다"), "{refused}");
     }
 
     #[test]
