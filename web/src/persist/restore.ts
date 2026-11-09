@@ -4,11 +4,13 @@ import type { LayoutSummary } from "../api/generated/LayoutSummary";
 import type { SymbolCode } from "../api/generated/SymbolCode";
 import type { SymbolInfo } from "../api/generated/SymbolInfo";
 import type { Watchlist } from "../api/generated/Watchlist";
+import type { Watchlists } from "../api/generated/Watchlists";
 import { ApiRequestError } from "../api/http";
 import { parseChartSettings } from "../chart/settings";
 import { venueFor } from "../lib/venue";
 import { type CellState, DEFAULT_LAYOUT, type EditableLayout } from "../stores/layout";
-import { layoutPath, UI_STATE_PATH, WATCHLIST_PATH } from "../api/userData";
+import { layoutPath, UI_STATE_PATH, WATCHLISTS_PATH } from "../api/userData";
+import { isWatchlists } from "../lib/watchlist";
 import type { SaveTarget } from "../stores/persist";
 import type { Unsaved } from "./saver";
 import { parseUiState, type UiExtra, type UiPrefs } from "./uiState";
@@ -18,7 +20,7 @@ export interface RestoreSources {
   uiState(): Promise<unknown>;
   layouts(): Promise<LayoutSummary[]>;
   layout(id: string): Promise<Layout>;
-  watchlist(): Promise<Watchlist>;
+  watchlists(): Promise<Watchlists>;
   symbolInfo(code: SymbolCode): Promise<SymbolInfo>;
   unsaved(target: SaveTarget): Unsaved | null;
 }
@@ -28,7 +30,7 @@ export interface Restored {
   layoutDirty: boolean;
   ui: { prefs: UiPrefs; extra: UiExtra };
   uiDirty: boolean;
-  watchlist: readonly SymbolCode[];
+  watchlists: readonly Watchlist[];
   watchlistDirty: boolean;
   serverRevisions: Record<SaveTarget, number>;
   revisions: Record<SaveTarget, number>;
@@ -54,12 +56,12 @@ function asLayout(v: Record<string, unknown>, stored: Layout): Layout | null {
 }
 
 export async function restore(src: RestoreSources): Promise<Restored> {
-  const [rawUi, serverWatch] = await Promise.all([src.uiState(), src.watchlist()]);
+  const [rawUi, serverWatch] = await Promise.all([src.uiState(), src.watchlists()]);
   const serverUi = revisionOf(rawUi);
   const localUi = newer(src.unsaved("ui"), UI_STATE_PATH, serverUi);
   const ui = parseUiState(localUi?.value ?? rawUi);
-  const localWatch = newer(src.unsaved("watchlist"), WATCHLIST_PATH, serverWatch.revision);
-  const localSymbols = localWatch && Array.isArray(localWatch.value.symbols) && localWatch.value.symbols.every((s) => typeof s === "string") ? (localWatch.value.symbols as SymbolCode[]) : null;
+  const localWatch = newer(src.unsaved("watchlist"), WATCHLISTS_PATH, serverWatch.revision);
+  const localLists = localWatch && isWatchlists(localWatch.value.lists) ? localWatch.value.lists : null;
 
   const stored = await openLayout(src, ui.prefs.lastLayoutId);
   const localLayout = stored && newer(src.unsaved("layout"), layoutPath(stored.id), stored.revision);
@@ -74,13 +76,13 @@ export async function restore(src: RestoreSources): Promise<Restored> {
     layoutDirty: stored === null || opened !== stored || cells.some((c) => c.dirty),
     ui: lastLayoutFixed ? { ...ui, prefs: { ...ui.prefs, lastLayoutId: layout.id } } : ui,
     uiDirty: lastLayoutFixed || localUi !== null,
-    watchlist: localSymbols ?? serverWatch.symbols,
-    watchlistDirty: localSymbols !== null,
+    watchlists: localLists ?? serverWatch.lists,
+    watchlistDirty: localLists !== null,
     serverRevisions,
     revisions: {
       layout: Math.max(serverRevisions.layout, opened !== stored ? (localLayout?.revision ?? 0) : 0),
       ui: Math.max(serverUi, localUi?.revision ?? 0),
-      watchlist: Math.max(serverWatch.revision, localSymbols ? localWatch!.revision : 0),
+      watchlist: Math.max(serverWatch.revision, localLists ? localWatch!.revision : 0),
     },
     notices,
   };

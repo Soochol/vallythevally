@@ -11,7 +11,7 @@ use axum::routing::get;
 use domain::{Symbol, Venue};
 use serde::de::DeserializeOwned;
 
-use crate::api::{self, ApiErrorCode, Layout, LayoutInput, LayoutSummary, Revision, UiState, UnixSeconds, Watchlist};
+use crate::api::{self, ApiErrorCode, Layout, LayoutInput, LayoutSummary, Revision, UiState, UnixSeconds, Watchlists};
 use crate::http::{ApiFailure, AppState, symbol_list};
 use crate::userdata::{self, StoreError};
 
@@ -20,7 +20,7 @@ pub const LAYOUT_LIMIT: usize = 4 * JSON_LIMIT + 16 * 1024;
 
 pub fn routes() -> Router<Arc<AppState>> {
     Router::new()
-        .route("/api/watchlist", get(get_watchlist).put(put_watchlist))
+        .route("/api/watchlists", get(get_watchlists).put(put_watchlists))
         .route("/api/layouts", get(list_layouts))
         .route("/api/layouts/{id}", get(get_layout).put(put_layout).delete(delete_layout))
         .route("/api/ui-state", get(get_ui_state).put(put_ui_state))
@@ -57,21 +57,48 @@ fn parse_symbol(code: &str) -> Result<Symbol, ApiFailure> {
     Symbol::parse(code).map_err(|e| ApiFailure::bad_request(format!("{e}: {code}")))
 }
 
-async fn get_watchlist(State(st): State<Arc<AppState>>) -> Result<Json<Watchlist>, ApiFailure> {
-    Ok(Json(userdata::get_watchlist(&st.db).await?))
+pub const MAX_WATCHLISTS: usize = 20;
+pub const MAX_WATCHLIST_NAME_CHARS: usize = 20;
+const MAX_WATCHLIST_ID_BYTES: usize = 64;
+const LONGEST_WATCHLIST_WRAPPER_BYTES: usize = r#"{"id":"","name":"","symbols":[]},"#.len() + MAX_WATCHLIST_ID_BYTES + 4 * MAX_WATCHLIST_NAME_CHARS;
+pub const WATCHLISTS_LIMIT: usize = JSON_LIMIT + MAX_WATCHLISTS * LONGEST_WATCHLIST_WRAPPER_BYTES;
+
+async fn get_watchlists(State(st): State<Arc<AppState>>) -> Result<Json<Watchlists>, ApiFailure> {
+    Ok(Json(userdata::get_watchlists(&st.db).await?))
+}
+
+async fn put_watchlists(State(st): State<Arc<AppState>>, body: Body) -> Result<Json<Watchlists>, ApiFailure> {
+    let all: Watchlists = read_json(body, WATCHLISTS_LIMIT, "관심종목 본문").await?;
+    check_watchlists(&all)?;
+    userdata::put_watchlists(&st.db, &all).await?;
+    Ok(Json(all))
 }
 
 /// 종목 목록에 없는 코드도 받는다. 상장폐지된 종목이 목록에서 사라져도 관심종목은 남아야 한다.
-async fn put_watchlist(State(st): State<Arc<AppState>>, body: Body) -> Result<Json<Watchlist>, ApiFailure> {
-    let list: Watchlist = read_json(body, JSON_LIMIT, "관심종목 본문").await?;
-    let mut seen = HashSet::new();
-    for code in &list.symbols {
-        if !seen.insert(parse_symbol(&code.0)?) {
-            return Err(ApiFailure::bad_request(format!("관심종목에 같은 종목이 두 번 있습니다: {}", code.0)));
+fn check_watchlists(all: &Watchlists) -> Result<(), ApiFailure> {
+    if all.lists.is_empty() || all.lists.len() > MAX_WATCHLISTS {
+        return Err(ApiFailure::bad_request(format!("관심종목 목록은 1~{MAX_WATCHLISTS}개여야 합니다: {}개", all.lists.len())));
+    }
+    let (mut ids, mut names) = (HashSet::new(), HashSet::new());
+    for list in &all.lists {
+        if list.id.is_empty() || list.id.len() > MAX_WATCHLIST_ID_BYTES || !ids.insert(list.id.as_str()) {
+            return Err(ApiFailure::bad_request(format!("관심종목 목록 id가 비었거나 길거나 겹칩니다: {}", list.id)));
+        }
+        let name = list.name.trim();
+        if name.is_empty() || name != list.name || name.chars().count() > MAX_WATCHLIST_NAME_CHARS {
+            return Err(ApiFailure::bad_request(format!("관심종목 목록 이름은 앞뒤 공백 없이 1~{MAX_WATCHLIST_NAME_CHARS}자여야 합니다: {:?}", list.name)));
+        }
+        if !names.insert(name) {
+            return Err(ApiFailure::bad_request(format!("같은 이름의 관심종목 목록이 두 개 있습니다: {name}")));
+        }
+        let mut seen = HashSet::new();
+        for code in &list.symbols {
+            if !seen.insert(parse_symbol(&code.0)?) {
+                return Err(ApiFailure::bad_request(format!("관심종목 목록 {name}에 같은 종목이 두 번 있습니다: {}", code.0)));
+            }
         }
     }
-    userdata::put_watchlist(&st.db, &list).await?;
-    Ok(Json(list))
+    Ok(())
 }
 
 async fn list_layouts(State(st): State<Arc<AppState>>) -> Result<Json<Vec<LayoutSummary>>, ApiFailure> {
