@@ -1,5 +1,3 @@
-//! 테스트용 가짜 키움 서버. Rust 통합 테스트와 브라우저 e2e가 같이 쓴다. 실제 키움에는 절대 연결하지 않는다.
-
 use std::collections::HashMap;
 use std::io;
 use std::net::SocketAddr;
@@ -74,7 +72,6 @@ impl FakeKiwoom {
         FakeKiwoom::bind(SocketAddr::from(([127, 0, 0, 1], 0))).await.unwrap()
     }
 
-    /// `/_fake/*` 관리 경로가 같은 포트에 있어 루프백 주소에만 연다.
     pub async fn bind(addr: SocketAddr) -> io::Result<FakeKiwoom> {
         if !addr.ip().is_loopback() {
             return Err(io::Error::new(io::ErrorKind::InvalidInput, format!("가짜 키움은 루프백 주소(127.0.0.0/8, ::1)에만 엽니다: {addr}")));
@@ -240,16 +237,17 @@ async fn handle(State(seen): State<Arc<Seen>>, headers: HeaderMap, body: String)
         "ka20008" => "ka20008_001",
         _ => return (StatusCode::INTERNAL_SERVER_ERROR, "가짜 키움이 모르는 api-id").into_response(),
     };
-    let mut v = fixture(name);
-    if continuation {
-        // 이어 받는 페이지는 행 없이 끝낸다. 고정 입력은 첫 페이지만 담고 있다.
-        for (_, field) in v.as_object_mut().unwrap().iter_mut() {
-            if let Value::Array(rows) = field {
-                rows.clear();
-            }
+    let v = if continuation { without_rows(fixture(name)) } else { fixture(name) };
+    respond(v, continuation)
+}
+
+fn without_rows(mut first_page: Value) -> Value {
+    for (_, field) in first_page.as_object_mut().unwrap().iter_mut() {
+        if let Value::Array(rows) = field {
+            rows.clear();
         }
     }
-    respond(v, continuation)
+    first_page
 }
 
 const DEEP_DAILY_SYMBOL: &str = "086520";

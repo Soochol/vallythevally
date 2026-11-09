@@ -1,5 +1,3 @@
-//! 통합 테스트용 서버 프로세스. 가짜 키움은 `fake_kiwoom` 크레이트에 있다.
-
 #![allow(dead_code)]
 
 use std::net::SocketAddr;
