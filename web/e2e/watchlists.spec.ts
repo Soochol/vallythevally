@@ -111,3 +111,59 @@ test("이름이 겹치면 만들지 않고 까닭을 보인다", async ({ page }
   await input.press("Escape");
   await expect(listButton(page)).toHaveAccessibleName("관심종목 목록: 기본");
 });
+
+async function seed(url: string, lists: { id: string; name: string; symbols: string[] }[]) {
+  const res = await fetch(`${url}/api/watchlists`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ lists, revision: 100 }) });
+  expect(res.status).toBe(200);
+}
+
+test("휴대폰에서 목록이 20개여도 옮기기·복사 메뉴의 모든 대상을 누를 수 있다", async ({ app, page }) => {
+  const symbols = Array.from({ length: 20 }, (_, i) => String(100_000 + i));
+  await seed(app.url, Array.from({ length: 20 }, (_, i) => ({ id: `L${i}`, name: `목록 ${i}`, symbols: i === 0 ? symbols : [] })));
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/");
+  await page.getByRole("navigation", { name: "휴대폰 탭" }).getByRole("button", { name: "관심종목" }).click();
+  const sheet = page.getByRole("region", { name: "관심종목", exact: true });
+  await sheet.getByRole("button", { name: "편집", exact: true }).click();
+
+  for (const code of [symbols[0], symbols[6], symbols.at(-1)]) {
+    const transfer = sheet.locator(`li[data-code="${code}"]`).getByRole("button", { name: /다른 목록으로$/ });
+    await transfer.scrollIntoViewIfNeeded();
+    await transfer.click();
+    const transferMenu = page.getByRole("menu", { name: /다른 목록으로$/ });
+    const box = (await transferMenu.boundingBox())!;
+    expect(box.y, code).toBeGreaterThanOrEqual(0);
+    expect(box.y + box.height, code).toBeLessThanOrEqual(844);
+    const targets = transferMenu.getByRole("menuitem");
+    await expect(targets).toHaveCount(38);
+    for (const target of await targets.all()) await target.click({ trial: true, timeout: 2_000 });
+    await targets.last().click();
+    await expect(page.getByText(new RegExp(`^복사했습니다: .+ → 목록 19$`))).toBeVisible();
+  }
+});
+
+test("값 열을 모두 꺼도 패널이 기본 폭보다 좁아지지 않아 종목 정보가 읽힌다", async ({ app, page }) => {
+  await seed(app.url, [{ id: "L0", name: "기본", symbols: ["005930"] }]);
+  await page.goto("/?symbol=005930");
+  const info = panel(page).getByRole("region", { name: "종목 정보" });
+  await expect(info.locator("dd").first()).not.toHaveText("—");
+  const before = (await panel(page).boundingBox())!.width;
+
+  await openListMenu(page);
+  await menu(page).getByRole("menuitemcheckbox", { name: "현재가", exact: true }).click();
+  await menu(page).getByRole("menuitemcheckbox", { name: "등락률", exact: true }).click();
+  await expect(menu(page).getByRole("menuitemcheckbox", { checked: true })).toHaveCount(0);
+  await page.keyboard.press("Escape");
+
+  await expect.poll(async () => (await panel(page).boundingBox())!.width).toBe(before);
+  const rows = await info.locator("dl > div").evaluateAll((divs) =>
+    divs.map((d) => {
+      const label = d.querySelector("dt")!.getBoundingClientRect();
+      const value = d.querySelector("dd")!.getBoundingClientRect();
+      return { label: d.querySelector("dt")!.textContent, labelWidth: label.width, overlap: label.right > value.left };
+    }),
+  );
+  expect(rows.length).toBeGreaterThan(0);
+  for (const r of rows) expect(r, r.label ?? "").toMatchObject({ overlap: false });
+  for (const r of rows) expect(r.labelWidth, r.label ?? "").toBeGreaterThan(0);
+});
