@@ -61,6 +61,14 @@ describe("placement", () => {
 });
 
 describe("selection and editing", () => {
+  test("registered modes receive clicks and drags; unregistered demonstration gestures pan", () => {
+    const c = { ...context(), mode: "eraser" as const, registeredModes: new Set(["eraser" as const]) };
+    const s = step(IDLE, down(20, 20, "body"), c).state;
+    expect(step(s, up(20, 20), c).effects).toEqual([{ kind: "mode", mode: "eraser", action: "erase", path: [{ x: 20, y: 20 }] }]);
+    const alt = { ...mods, alt: true };
+    expect(captures(step(IDLE, down(20, 20, "body", alt), context()).state)).toBe(false);
+    expect(captures(step(IDLE, down(20, 20, "empty", alt), context()).state)).toBe(false);
+  });
   test("Ctrl click toggles; Ctrl drag body clones; empty Ctrl drag selects a box", () => {
     const c = context(); const ctrl = { ...mods, ctrl: true };
     let s = step(IDLE, down(20, 20, "body", ctrl), c).state;

@@ -74,6 +74,7 @@ test("테마를 바꾸면 모르는 키와 함께 UiState를 보낸다", async (
         recentSymbols: ["IDX:001"],
         activeWatchlistId: null,
         watchColumns: ["price", "changeRate"],
+        drawing: DEFAULT_UI_PREFS.drawing,
         revision: expect.any(Number),
       },
       keepalive: false,

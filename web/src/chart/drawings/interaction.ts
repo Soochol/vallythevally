@@ -5,6 +5,7 @@ import { toolOf } from "./tools";
 import type { DrawingBody, DrawingPoint, ScreenPoint } from "./types";
 
 export const PRESS_DISTANCE = 4;
+type Anchors = [DrawingPoint, ...DrawingPoint[]];
 
 interface Press {
   start: ScreenPoint;
@@ -15,8 +16,8 @@ interface Press {
 export type Interaction =
   | { kind: "idle" }
   | ({ kind: "pressing" } & Press)
-  | { kind: "placing"; tool: Tool; fixed: DrawingPoint[]; cursor: DrawingPoint }
-  | { kind: "drawing"; tool: Tool; points: DrawingPoint[]; start: ScreenPoint }
+  | { kind: "placing"; tool: Tool; fixed: Anchors; cursor: DrawingPoint }
+  | { kind: "drawing"; tool: Tool; points: Anchors; start: ScreenPoint }
   | ({ kind: "dragging"; action: "move" | "clone" | "handle"; originals: DrawingBody[]; preview: DrawingBody[]; lock: AxisLock } & Press)
   | { kind: "box"; start: ScreenPoint; end: ScreenPoint }
   | { kind: "mode"; mode: ModeId; action: DragAction; path: ScreenPoint[] };
@@ -42,6 +43,7 @@ export interface Context {
   drawings: readonly DrawingBody[];
   lockAll: boolean;
   registeredModes: ReadonlySet<ModeId>;
+  mode?: ModeId | null;
   ctx: ToolContext;
   point(at: ScreenPoint, action: DragAction, mods: Mods): DrawingPoint | null;
 }
@@ -51,14 +53,18 @@ const result = (state: Interaction, ...effects: Effect[]): Transition => ({ stat
 const distance = (a: ScreenPoint, b: ScreenPoint) => Math.hypot(a.x - b.x, a.y - b.y);
 
 function constrained(tool: Tool, fixed: readonly DrawingPoint[], at: ScreenPoint, mods: Mods, c: Context): DrawingPoint | null {
+  const snapped = c.point(at, "place", mods);
+  if (snapped === null) return null;
   const pivot = fixed.at(-1);
   const screen = pivot === undefined ? null : c.ctx.toScreen(pivot);
-  let next = at;
+  const target = c.ctx.toScreen(snapped);
+  let next = target ?? at;
   if (holds("place", mods).has("constrainShape") && screen !== null && tool.placement.kind === "points") {
-    if (tool.placement.shift === "angle45") next = constrainAngle45(screen, at);
-    if (tool.placement.shift === "square") next = constrainSquare(screen, at);
+    if (tool.placement.shift === "angle45") next = constrainAngle45(screen, next);
+    if (tool.placement.shift === "square") next = constrainSquare(screen, next);
+    return c.ctx.fromScreen(next);
   }
-  return c.point(next, "place", mods);
+  return snapped;
 }
 
 function placed(tool: Tool, points: DrawingPoint[], c: Context): Transition {
@@ -77,7 +83,8 @@ function click(s: Extract<Interaction, { kind: "pressing" }>, c: Context): Trans
       if (tool === null || point === null) return result(IDLE);
       return result({ kind: "placing", tool, fixed: [point], cursor: point });
     }
-    case "keepSelection": case "eraseOne": return result(IDLE);
+    case "eraseOne": return result(IDLE, { kind: "mode", mode: "eraser", action: s.resolution.drag, path: [s.start] });
+    case "keepSelection": return result(IDLE);
   }
 }
 
@@ -101,11 +108,12 @@ function drag(s: Extract<Interaction, { kind: "dragging" }>, at: ScreenPoint, mo
     const tool = toolOf(original.tool);
     const handle = tool?.handles({ ...original, selected: true }, c.ctx)[s.hit.index];
     if (!handle) return s;
-    let target = at;
+    let point = c.point(at, "handle", mods);
+    let target = point === null ? at : c.ctx.toScreen(point) ?? at;
     if (holds("handle", mods).has("constrainShape") && handle.constrain) {
-      target = handle.constrain.rule === "angle45" ? constrainAngle45(handle.constrain.pivot, at) : constrainSquare(handle.constrain.pivot, at);
+      target = handle.constrain.rule === "angle45" ? constrainAngle45(handle.constrain.pivot, target) : constrainSquare(handle.constrain.pivot, target);
+      point = c.ctx.fromScreen(target);
     }
-    const point = c.point(target, "handle", mods);
     return point === null ? s : { ...s, preview: [{ ...original, points: handle.move(original.points, point, c.ctx) }] };
   }
   let delta = { x: at.x - s.start.x, y: at.y - s.start.y };
@@ -137,27 +145,30 @@ export function step(s: Interaction, e: Input, c: Context): Transition {
     if (p === null) return result(s);
     if (e.kind === "move") return result({ ...s, cursor: p });
     if (e.kind !== "down") return result(s);
-    const points = [...s.fixed, p];
+    const last = s.fixed.at(-1);
+    if (last?.t === p.t && last.price === p.price) return result(s);
+    const points: Anchors = [s.fixed[0], ...s.fixed.slice(1), p];
     const placement = s.tool.placement;
     const max = placement.kind === "points" ? placement.count : placement.max;
     return points.length >= max ? placed(s.tool, points, c) : result({ ...s, fixed: points, cursor: p });
   }
   if (s.kind === "drawing") {
-    const p = constrained(s.tool, [s.points[0]!], e.at, e.mods, c);
+    const first = s.points[0];
+    const p = constrained(s.tool, [first], e.at, e.mods, c);
     if (p === null) return result(s);
     const placement = s.tool.placement;
-    const points = placement.kind === "freehand" ? [...s.points, p].slice(0, placement.max) : [s.points[0]!, p];
+    const points: Anchors = placement.kind === "freehand" ? [first, ...[...s.points.slice(1), p].slice(0, placement.max - 1)] : [first, p];
     if (e.kind === "move") return result({ ...s, points });
     if (e.kind === "up") {
       if (placement.kind === "freehand") return points.length >= placement.min ? placed(s.tool, points, c) : result(IDLE);
       if (distance(s.start, e.at) >= PRESS_DISTANCE && placement.kind === "points" && placement.count === 2) return placed(s.tool, points, c);
-      return result({ kind: "placing", tool: s.tool, fixed: [s.points[0]!], cursor: p });
+      return result({ kind: "placing", tool: s.tool, fixed: [first], cursor: p });
     }
     return result(s);
   }
   if (s.kind === "idle") {
     if (e.kind !== "down") return result(s);
-    const resolution = resolvePress(c.tool ? "draw" : "select", e.hit.kind, e.mods, c.registeredModes);
+    const resolution = resolvePress(c.tool ? "draw" : c.mode === "eraser" ? "erase" : "select", e.hit.kind, e.mods, c.registeredModes);
     if (!resolution) return result(s);
     if (c.tool) {
       const p = c.point(e.at, "place", e.mods);

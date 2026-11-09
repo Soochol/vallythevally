@@ -33,6 +33,7 @@ impl Server {
             .env("VALLY_KIWOOM_APP_KEY", APP_KEY)
             .env("VALLY_KIWOOM_APP_SECRET", APP_SECRET)
             .env("VALLY_KIWOOM_BASE_URL", fake.base_url())
+            .env("VALLY_KIWOOM_WS_URL", fake.base_url().replacen("http", "ws", 1) + "/api/dostk/websocket")
             .env("VALLY_LOCK_PATH", lock)
             .env("VALLY_DB_PATH", db)
             .env("VALLY_TOKEN_PATH", token_path(lock))

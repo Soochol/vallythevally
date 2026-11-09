@@ -125,9 +125,16 @@ export const trendline = defineTool<TrendStyle>({
     style: [
       ...strokeFields("선", L("line")),
       select("연장", EXTEND_OPTIONS, L("extend")),
+      select("시작 모양", [{ value: "plain", label: "없음" }, { value: "arrow", label: "화살표" }], L("ends", "left")),
+      select("끝 모양", [{ value: "plain", label: "없음" }, { value: "arrow", label: "화살표" }], L("ends", "right")),
       { kind: "toggle", label: "가운데 점", lens: L("middlePoint") },
       { kind: "toggle", label: "가격 라벨", lens: L("priceLabels") },
       { kind: "toggle", label: "통계 늘 보이기", lens: L("stats", "always") },
+      { kind: "toggle", label: "가격 차", lens: L("stats", "priceDiff") },
+      { kind: "toggle", label: "변화율", lens: L("stats", "percent") },
+      { kind: "toggle", label: "봉 수", lens: L("stats", "bars") },
+      { kind: "toggle", label: "걸린 시간", lens: L("stats", "duration") },
+      { kind: "toggle", label: "각도", lens: L("stats", "angle") },
     ],
     text: [
       { kind: "text", label: "글자", multiline: true },

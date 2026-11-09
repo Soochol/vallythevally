@@ -27,7 +27,9 @@ export type GestureRow =
 export function gesturesFor(clone: CloneModifier): readonly GestureRow[] {
   return [
     { kind: "drag", mode: "select", target: "body", mod: clone, action: "clone", label: "복제" },
+    { kind: "drag", mode: "select", target: "body", mod: "alt", action: "pan", label: "차트 옮기기" },
     { kind: "drag", mode: "select", target: "body", mod: null, action: "move", label: "옮기기" },
+    { kind: "drag", mode: "select", target: "handle", mod: "alt", action: "pan", label: "차트 옮기기" },
     { kind: "drag", mode: "select", target: "handle", mod: null, action: "handle", label: "점 옮기기" },
     { kind: "drag", mode: "select", target: "empty", mod: "ctrl", action: "box", label: "상자로 고르기" },
     { kind: "drag", mode: "select", target: "empty", mod: "alt", action: "demo", label: "시연 커서" },

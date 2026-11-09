@@ -25,7 +25,7 @@ describe("복제 수정키(Q1)는 한 줄이다", () => {
     const rows = gesturesFor(clone);
     const other: CloneModifier = clone === "ctrl" ? "alt" : "ctrl";
     expect(resolvePress("select", "body", { ...none, [clone]: true }, all, rows)?.drag).toBe("clone");
-    expect(resolvePress("select", "body", { ...none, [other]: true }, all, rows)?.drag).toBe("move");
+    expect(resolvePress("select", "body", { ...none, [other]: true }, all, rows)?.drag).toBe(other === "alt" ? "pan" : "move");
     expect(rows.filter((r) => r.kind !== "hold" && r.action === "clone")).toHaveLength(1);
     const cloneHelp = gestureHelp(all, rows).find((h) => h.label === "복제");
     expect(cloneHelp?.keys).toBe(`${clone === "ctrl" ? "Ctrl" : "Alt"}+드로잉 끌기`);

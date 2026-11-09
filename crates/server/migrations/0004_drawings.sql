@@ -1,5 +1,3 @@
--- 드로잉(#6, docs/design/drawing-proposal.md §5.2). tool과 점 수는 서버의 DrawingTool이 검사한다.
--- layout_id에 ON DELETE가 없다. 레이아웃을 지울 때 그 범위 드로잉의 처리는 Q7이 정한다. 그 전에는 외래 키가 막는다.
 CREATE TABLE drawings (
   id         TEXT    PRIMARY KEY,
   symbol     TEXT    NOT NULL,

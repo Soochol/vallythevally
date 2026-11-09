@@ -1,5 +1,6 @@
-import type { QueryClient } from "@tanstack/react-query";
+import { isCancelledError, type QueryClient } from "@tanstack/react-query";
 import { useSyncExternalStore } from "react";
+import { create } from "zustand";
 import { ApiRequestError, deleteJson, getJson, putJson } from "../../api/http";
 import type { SaveState } from "../../persist/saver";
 import { usePersistStore } from "../../stores/persist";
@@ -11,6 +12,7 @@ import { opId, type Drawing, type DrawingBody, type DrawingOp } from "./types";
 const key = (symbol: string) => ["drawings", symbol] as const;
 export const drawingPath = (id: string) => `/api/drawings/${encodeURIComponent(id)}`;
 const toast = (text: string) => useSelectionStore.getState().showToast(text);
+export const useDrawingSave = create<{ state: SaveState; retry(): void }>()(() => ({ state: { kind: "idle" }, retry: () => {} }));
 
 export class DrawingSync {
   private outbox: queue.Outbox = queue.EMPTY_OUTBOX;
@@ -24,6 +26,7 @@ export class DrawingSync {
   save: SaveState = { kind: "idle" };
 
   constructor(private client: QueryClient) {
+    useDrawingSave.setState({ retry: () => this.retry() });
     const records: queue.LaneRecord[] = [];
     try {
       for (const k of Object.keys(localStorage)) {
@@ -41,7 +44,7 @@ export class DrawingSync {
 
   subscribe = (f: () => void) => { this.listeners.add(f); return () => { this.listeners.delete(f); }; };
   snapshot = () => this.version;
-  private emit() { this.version++; this.listeners.forEach((f) => f()); }
+  private emit() { this.version++; if (useDrawingSave.getState().state !== this.save) useDrawingSave.setState({ state: this.save }); this.listeners.forEach((f) => f()); }
   loadError(symbol: string) { return this.errors.get(symbol) ?? null; }
 
   load(symbol: string): Promise<unknown> {
@@ -50,7 +53,7 @@ export class DrawingSync {
     if (loading) return loading;
     const task = this.client.fetchQuery({ queryKey: key(symbol), queryFn: ({ signal }) => getJson<Drawing[]>(`/api/drawings?symbol=${encodeURIComponent(symbol)}`, signal), staleTime: 0, retry: false })
       .then(() => { this.errors.delete(symbol); })
-      .catch((e: unknown) => { this.errors.set(symbol, e instanceof Error ? e.message : "드로잉을 불러오지 못했습니다"); })
+      .catch((e: unknown) => { if (!isCancelledError(e)) this.errors.set(symbol, e instanceof Error ? e.message : "드로잉을 불러오지 못했습니다"); })
       .finally(() => { this.loads.delete(symbol); this.emit(); });
     this.loads.set(symbol, task);
     return task;
@@ -104,10 +107,20 @@ export class DrawingSync {
   private changeOutbox(next: queue.Outbox) {
     const changes = queue.recordChanges(this.outbox, next);
     try {
-      for (const r of changes.write) localStorage.setItem(queue.recordKey(r.id), JSON.stringify(r));
-      for (const id of changes.remove) localStorage.removeItem(queue.recordKey(id));
+      for (const r of changes.write) {
+        const old = this.stored(r.id);
+        if (!old || old.lastRevision <= r.lastRevision) localStorage.setItem(queue.recordKey(r.id), JSON.stringify(r));
+      }
+      for (const id of changes.remove) {
+        const old = this.stored(id);
+        if (!old || old.lastRevision <= queue.lastRevision(this.outbox, id)) localStorage.removeItem(queue.recordKey(id));
+      }
     } catch { toast("복구 저장소를 쓸 수 없습니다. 이 탭을 닫기 전에 저장 상태를 확인하세요"); }
     this.outbox = next;
+  }
+  private stored(id: string): queue.LaneRecord | null {
+    const raw = localStorage.getItem(queue.recordKey(id));
+    try { return raw === null ? null : queue.parseRecord(JSON.parse(raw)); } catch { return null; }
   }
 
   private pump() {
@@ -124,7 +137,8 @@ export class DrawingSync {
     this.save = { kind: "saving" }; this.emit();
     const { want, symbol } = started.send;
     const sending = want.kind === "delete" ? deleteJson(drawingPath(id), { keepalive }) : putJson<Drawing>(drawingPath(id), want.body, { keepalive });
-    void sending.then((saved) => {
+    void sending.then(async (saved) => {
+      await this.client.cancelQueries({ queryKey: key(symbol) });
       this.client.setQueryData<Drawing[]>(key(symbol), (old = []) => [...old.filter((d) => d.id !== id), ...(saved ? [saved] : [])]);
       this.settle(id, { kind: "ok" });
     }).catch((e: unknown) => {

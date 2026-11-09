@@ -26,6 +26,7 @@ import type { ChartSettings } from "./settings";
 import { composeSnapshot, snapshotFileName } from "./snapshot";
 import type { ThemeTokens } from "./theme";
 import { formatBarTime, formatTickMark, fromChartTime, isIntraday } from "./time";
+import type { ChartExtension, ExtensionFactory } from "./extensions";
 
 /** 왼쪽 끝이 이 봉 수 안으로 들어오면 과거 페이지를 받는다(frontend.md §5.7). */
 const LOAD_OLDER_WITHIN = 50;
@@ -79,6 +80,7 @@ export class ChartController {
   private ready: ReadyStatus | null = null;
   private settingData = false;
   private disposed = false;
+  private extensions = new Set<ChartExtension>();
 
   constructor(el: HTMLElement, deps: ControllerDeps) {
     this.el = el;
@@ -188,9 +190,17 @@ export class ChartController {
 
   dispose(): void {
     this.disposed = true;
+    this.extensions.forEach((ext) => ext.dispose());
+    this.extensions.clear();
     this.feed.dispose();
     this.legend.dispose();
     this.chart.remove();
+  }
+
+  attach(factory: ExtensionFactory): () => void {
+    const ext = factory({ el: this.el, chart: this.chart, series: () => this.main.api, bars: () => this.bars, view: () => this.view });
+    this.extensions.add(ext);
+    return () => { if (this.extensions.delete(ext)) ext.dispose(); };
   }
 
   private chartOptions(): DeepPartial<ChartOptions> {
@@ -229,6 +239,7 @@ export class ChartController {
     const range = this.chart.timeScale().getVisibleLogicalRange();
     this.chart.removeSeries(this.main.api);
     this.main = addMainSeries(this.chart, this.view?.settings.style ?? "candle", this.tokens, isIndex);
+    this.extensions.forEach((ext) => ext.reattach());
     this.withDataGuard(() => {
       setMainData(this.main, this.bars);
       if (range) this.chart.timeScale().setVisibleLogicalRange(range);

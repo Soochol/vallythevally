@@ -1,5 +1,3 @@
-//! 드로잉 계약(backend.md §8.2 "드로잉 (#6)"). `api`와 같은 규칙으로 ts-rs가 `web/src/api/generated/`에 쓴다.
-
 use std::ops::RangeInclusive;
 
 use serde::{Deserialize, Serialize};

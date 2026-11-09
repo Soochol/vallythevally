@@ -1,5 +1,3 @@
-//! 드로잉 저장(backend.md §7.2 `drawings`, §8.2 "드로잉 (#6)").
-
 use std::sync::Arc;
 
 use axum::Router;
@@ -293,7 +291,7 @@ mod tests {
     }
 
     #[sqlx::test(migrations = "./migrations")]
-    async fn a_layout_scoped_drawing_blocks_deleting_its_layout_until_q7(_: SqlitePoolOptions, opts: SqliteConnectOptions) {
+    async fn a_layout_scoped_drawing_blocks_deleting_its_layout(_: SqlitePoolOptions, opts: SqliteConnectOptions) {
         let db = AppDb::connect(opts).await.unwrap();
         let cell = Cell { slot: 0, symbol: SymbolCode("005930".into()), venue: Some(Venue::Krx), period: Period::Day, symbol_link: false, chart_settings: json!({}) };
         let second = LayoutInput { id: "L2".into(), name: "둘".into(), arrangement: Arrangement::One, sync: LayoutSync { crosshair: true, scroll: true }, cells: vec![cell], revision: Revision(1) };

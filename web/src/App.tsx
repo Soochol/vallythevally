@@ -18,6 +18,7 @@ import { PhoneWatch, WatchPanel } from "./features/watch/Watchlist";
 import { usePersistStore } from "./stores/persist";
 import { useSelectionStore } from "./stores/selection";
 import { useUiStore } from "./stores/ui";
+import { DrawingToolbar } from "./features/drawings/DrawingToolbar";
 
 export function ChartRoute() {
   const restoring = usePersistStore((s) => s.phase.kind === "restoring");
@@ -52,7 +53,8 @@ function ChartScreen() {
       <Topbar />
       <PhoneHeader cell={cell} info={info} status={status} />
       <PeriodChips cell={cell} />
-      <main aria-label="칸" className="grid min-h-0 min-w-0 grid-cols-1 grid-rows-1 bg-line [grid-area:grid]">
+      <main aria-label="칸" className="grid min-h-0 min-w-0 grid-cols-[44px_minmax(0,1fr)] grid-rows-1 bg-line [grid-area:grid] max-md:grid-cols-1">
+        <DrawingToolbar />
         <ChartCell slot={slot} status={status} onStatus={setStatus} />
       </main>
       <WatchPanel />
