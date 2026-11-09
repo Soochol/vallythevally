@@ -873,6 +873,7 @@ class ChartController {
 ```
 
 - `fetchPage`는 테스트가 가짜 응답을 넣는 자리다. 기본은 `api/bars.ts`의 `fetchBarsPage`다.
+- 컨트롤러는 봉 열을 바꿀 때마다 칸의 차트 요소에 `data-bar-count`, `data-first-bar-t`, `data-last-bar-t`를 쓴다. 브라우저 e2e(`web/e2e/`)는 캔버스 픽셀 대신 이 값으로 그린 봉을 확인한다.
 - 봉 받기와 세대는 `chart/barFeed.ts`의 `BarFeed`가 맡는다. 컨트롤러는 `BarFeed`가 알려 주는 `reset`, `prepended`, `failed`, `olderFailed`를 받아 그린다.
 
 **React와의 경계**

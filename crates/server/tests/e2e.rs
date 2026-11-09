@@ -214,3 +214,44 @@ async fn designated_terminal_8050_with_http_200_halts_everything() {
 async fn designated_terminal_8050_with_http_403_halts_everything() {
     designated_terminal_stops_after_one_token_attempt(403).await;
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn scrolling_back_through_086520_daily_follows_the_kiwoom_chain_to_its_origin() {
+    let fake = FakeKiwoom::start().await;
+    let tmp = tempfile::tempdir().unwrap();
+    let server = Server::spawn(&fake, &tmp.path().join("run/server.lock"), &static_dir(tmp.path()));
+    let base = format!("http://{}", server.addr().await);
+    let client = reqwest::Client::new();
+
+    let mut path = "/api/bars?symbol=086520&period=D&limit=500".to_owned();
+    let (mut status, mut page) = get(&client, &base, &path).await;
+    for _ in 0..100 {
+        if status != 503 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        (status, page) = get(&client, &base, &path).await;
+    }
+    let mut sizes = Vec::new();
+    let mut oldest_seen = i64::MAX;
+    loop {
+        assert_eq!(status, 200, "{path}: {page}");
+        let ts: Vec<i64> = page["bars"].as_array().unwrap().iter().map(|b| b["t"].as_i64().unwrap()).collect();
+        assert!(ts.windows(2).all(|w| w[0] < w[1]), "{path}: 봉은 오름차순이다");
+        assert!(*ts.last().unwrap() < oldest_seen, "{path}: 앞 페이지보다 모두 과거다");
+        oldest_seen = ts[0];
+        sizes.push(ts.len());
+        match page["nextBefore"].as_i64() {
+            Some(before) => {
+                assert_eq!(before, ts[0]);
+                path = format!("/api/bars?symbol=086520&period=D&limit=500&before={before}");
+                (status, page) = get(&client, &base, &path).await;
+            }
+            None => break,
+        }
+    }
+    assert_eq!(sizes, [500, 500, 200]);
+    let chain: Vec<String> = fake.api_ids().into_iter().filter(|a| a == "ka10081").collect();
+    assert_eq!(chain.len(), 4, "키움 네 페이지를 한 번씩 받는다");
+    server.stop().await;
+}

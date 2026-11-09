@@ -497,6 +497,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "fake-kiwoom"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "domain",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
 name = "fastrand"
 version = "2.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1681,6 +1693,7 @@ version = "0.1.0"
 dependencies = [
  "axum",
  "domain",
+ "fake-kiwoom",
  "futures",
  "http-body-util",
  "indicators",
