@@ -9,7 +9,7 @@ use std::fmt;
 use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
-use domain::{BarSource, ConfirmedBar, Feed, KstDate, KstTime, Period, SeriesKey, Venue};
+use domain::{BarSource, Bucket, ConfirmedBar, Feed, KstDate, KstTime, Period, SeriesKey, Venue};
 
 use crate::clock::Clock;
 use crate::kiwoom::api::{
@@ -176,6 +176,15 @@ impl BarService {
         self.refresh_latest(key, &mut s, prio).await?;
         slot.latest_fetches.fetch_add(1, Ordering::SeqCst);
         Ok(Seed { current: s.current, tail: s.bars[s.bars.len().saturating_sub(SEED_TAIL)..].to_vec() })
+    }
+
+    pub(crate) async fn verify_confirmed(&self, key: SeriesKey, bucket: Bucket) -> Result<Option<ConfirmedBar>, BarError> {
+        self.check(key).await?;
+        let slot = self.slot(key);
+        let mut s = slot.series.lock().await;
+        self.refresh_latest(key, &mut s, Priority::Recovery).await?;
+        slot.latest_fetches.fetch_add(1, Ordering::SeqCst);
+        Ok(s.bars.iter().find(|b| b.bucket == bucket && b.source == BarSource::Kiwoom && b.bucket.is_confirmed_at(self.clock.now())).copied())
     }
 
     /// 실시간으로 만든 확정 봉을 캐시 구간 끝에 붙인다(§6.3). 키움 세션이 그 사이 끊기지 않았는지는 부르는 쪽(`MarketHub`)이 판단한다.

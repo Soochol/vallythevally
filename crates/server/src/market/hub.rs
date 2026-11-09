@@ -3,13 +3,13 @@
 //! 허브는 자기 입력 말고는 아무것도 기다리지 않는다. 키움 조회(`BarService`)는 허브가 띄운 태스크가 기다리고 결과를 입력으로 돌려준다.
 //! 브라우저로 보낼 것은 연결마다의 `Outbox`에 넣기만 한다.
 
-use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use domain::{
-    Aggregator, Applied, BarSource, CLOSE_GRACE_SECS, ConfirmedBar, CurrentBar, Feed, KstTime, SESSION_CLOSE, SeriesKey, Symbol, TRADING_OPEN,
+    Aggregator, Applied, Bucket, CLOSE_GRACE_SECS, ConfirmedBar, CurrentBar, Feed, KstTime, Ohlcv, SESSION_CLOSE, SeriesKey, Symbol, TRADING_OPEN,
     Trade, TradeTimeError, Venue, resolve_trade_time,
 };
 use tokio::sync::{mpsc, oneshot};
@@ -26,7 +26,7 @@ use crate::kiwoom::stream::{Exchange, KiwoomStream, RealTick, StreamEvent};
 /// 시드 조회가 실패하면 이 간격으로 다시 받는다. 그 뒤로는 마지막 값.
 const SEED_RETRY_SECS: [u64; 5] = [1, 2, 5, 10, 30];
 /// 불완전한 봉이 확정되고 키움 값과 대조하기까지. 키움이 그 분봉을 내놓을 시간을 준다.
-const VERIFY_DELAY: Duration = Duration::from_secs(5);
+const VERIFY_DELAY_SECS: i64 = 5;
 /// 키움 값이 아직 없거나 조회가 실패해도 이만큼만 다시 대조한다.
 const VERIFY_ATTEMPTS: u32 = 3;
 const RECENT_CONFIRMED: usize = 3;
@@ -98,7 +98,7 @@ enum HubInput {
     Snapshot { key: SeriesKey, reply: oneshot::Sender<Option<HubSnapshot>> },
     DailyReset,
     Seeded { key: SeriesKey, generation: u64, result: Result<Seed, BarError> },
-    Verified { key: SeriesKey, generation: u64, sent: ConfirmedBar, attempt: u32, result: Result<Seed, BarError> },
+    Verified { key: SeriesKey, generation: u64, bucket: Bucket, attempt: u32, result: Result<Option<ConfirmedBar>, BarError> },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -130,14 +130,48 @@ struct KeyState {
     feed: KeyFeed,
     seq: u64,
     recent_confirmed: VecDeque<ConfirmedBar>,
+    verifications: BTreeMap<Bucket, Verification>,
     subs: BTreeSet<(ConnId, SubId)>,
     /// 시드 뒤로 키움 세션이 한 번도 끊기지 않았다. 이때만 실시간 확정 봉을 캐시에 붙인다.
     contiguous: bool,
-    /// 구독이 모두 빠진 시각.
     idle_since: Option<KstTime>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum VerificationPhase {
+    Waiting { at: KstTime },
+    InFlight,
+    Exhausted,
+}
+
+struct Verification {
+    previous: Option<Ohlcv>,
+    attempts: u32,
+    phase: VerificationPhase,
+}
+
+impl Verification {
+    fn failed(&mut self, now: KstTime) {
+        self.phase = if self.attempts < VERIFY_ATTEMPTS {
+            VerificationPhase::Waiting { at: now.plus_secs(VERIFY_DELAY_SECS * i64::from(self.attempts + 1)) }
+        } else {
+            VerificationPhase::Exhausted
+        };
+    }
+}
+
 impl KeyState {
+    fn register_verification(&mut self, bucket: Bucket, previous: Option<Ohlcv>, now: KstTime) {
+        let verification = self.verifications.entry(bucket).or_insert(Verification {
+            previous,
+            attempts: 0,
+            phase: VerificationPhase::Waiting { at: bucket.confirm_at().max(now).plus_secs(VERIFY_DELAY_SECS) },
+        });
+        if previous.is_some() {
+            verification.previous = previous;
+        }
+    }
+
     fn current(&self) -> Option<CurrentBar> {
         match &self.feed {
             KeyFeed::Live(agg) => agg.current().copied(),
@@ -271,7 +305,7 @@ impl MarketHub {
                 self.reseed_all(SeedPurpose::Reload { reason: ReloadReason::DailyReset, from: None });
             }
             HubInput::Seeded { key, generation, result } => self.on_seeded(key, generation, result, now),
-            HubInput::Verified { key, generation, sent, attempt, result } => self.on_verified(key, generation, sent, attempt, result),
+            HubInput::Verified { key, generation, bucket, attempt, result } => self.on_verified(key, generation, bucket, attempt, result, now),
         }
     }
 
@@ -325,7 +359,6 @@ impl MarketHub {
         }
     }
 
-    /// 구독을 키에 붙이고 `subscribed`를 보낸다. 키가 처음이면 시드를 받기 시작한다.
     fn attach(&mut self, conn: ConnId, sub: SubId, key: SeriesKey) {
         if !self.keys.contains_key(&key) {
             let generation = self.new_generation();
@@ -336,6 +369,7 @@ impl MarketHub {
                     feed: KeyFeed::Seeding { purpose: SeedPurpose::Initial, attempt: 0, reported: false, last_dropped: None },
                     seq: 0,
                     recent_confirmed: VecDeque::new(),
+                    verifications: BTreeMap::new(),
                     subs: BTreeSet::new(),
                     contiguous: false,
                     idle_since: None,
@@ -350,7 +384,6 @@ impl MarketHub {
         push(&self.conns, &mut self.closing, conn, msg);
     }
 
-    /// 계획을 다시 세우고 키움 세션에 원하는 집합을 준다. 거절이 바뀐 구독에 알린다.
     fn replan(&mut self, now: KstTime) {
         let plan = self.manager.plan(now);
         self.stream.set_desired(plan.realtime);
@@ -400,6 +433,15 @@ impl MarketHub {
         for key in keys {
             let generation = self.new_generation();
             let ks = self.keys.get_mut(&key).expect("방금 본 키");
+            if matches!(purpose, SeedPurpose::Reload { reason: ReloadReason::DailyReset, .. }) {
+                ks.verifications.clear();
+            } else {
+                for verification in ks.verifications.values_mut() {
+                    if verification.phase == VerificationPhase::InFlight {
+                        verification.failed(self.clock.now());
+                    }
+                }
+            }
             ks.generation = generation;
             ks.feed = KeyFeed::Seeding { purpose, attempt: 0, reported: false, last_dropped: None };
             ks.contiguous = false;
@@ -463,27 +505,30 @@ impl MarketHub {
         }
     }
 
-    fn on_verified(&mut self, key: SeriesKey, generation: u64, sent: ConfirmedBar, attempt: u32, result: Result<Seed, BarError>) {
+    fn on_verified(&mut self, key: SeriesKey, generation: u64, bucket: Bucket, attempt: u32, result: Result<Option<ConfirmedBar>, BarError>, now: KstTime) {
         let Some(ks) = self.keys.get_mut(&key).filter(|ks| ks.generation == generation && matches!(ks.feed, KeyFeed::Live(_))) else {
             return;
         };
-        let kiwoom = result.as_ref().ok().and_then(|s| s.tail.iter().find(|b| b.bucket == sent.bucket && b.source == BarSource::Kiwoom)).copied();
-        match kiwoom {
-            Some(k) => {
-                if let Some(r) = ks.recent_confirmed.iter_mut().find(|b| b.bucket == k.bucket) {
+        let Some(verification) = ks.verifications.get_mut(&bucket).filter(|v| v.attempts == attempt && v.phase == VerificationPhase::InFlight) else {
+            return;
+        };
+        match result {
+            Ok(Some(k)) => {
+                if let Some(r) = ks.recent_confirmed.iter_mut().find(|b| b.bucket == bucket) {
                     *r = k;
                 }
-                if k.ohlcv != sent.ohlcv {
+                if verification.previous != Some(k.ohlcv) {
                     ks.seq += 1;
-                    let (seq, from) = (ks.seq, Some(UnixSeconds(sent.bucket.start().unix())));
+                    let (seq, from) = (ks.seq, Some(UnixSeconds(bucket.start().unix())));
                     emit(&self.conns, &mut self.closing, &ks.subs, |sub| ServerMessage::Reload { sub, seq, reason: ReloadReason::Replaced, from });
                 }
+                ks.verifications.remove(&bucket);
             }
-            None if attempt + 1 < VERIFY_ATTEMPTS => {
-                spawn_verify(&self.bars, &self.tx, key, generation, sent, attempt + 1);
-            }
-            None => {
-                tracing::info!(symbol = %key.feed.symbol().as_wire(), period = key.period.as_wire(), error = ?result.err(), "불완전한 봉을 키움 값과 대조하지 못했습니다");
+            result => {
+                verification.failed(now);
+                if verification.phase == VerificationPhase::Exhausted {
+                    tracing::info!(symbol = %key.feed.symbol().as_wire(), period = key.period.as_wire(), error = ?result.err(), "불완전한 봉을 키움 값과 대조하지 못했습니다");
+                }
             }
         }
     }
@@ -551,11 +596,13 @@ impl MarketHub {
             self.counters.unknown_exchange += 1;
         }
         let trade = Trade { at, price: tick.price, qty: tick.qty };
+        let now = self.clock.now();
         for (key, ks) in self.keys.iter_mut().filter(|(k, _)| k.feed.symbol() == tick.symbol && accepts(k.feed, tick.exchange)) {
             let agg = match &mut ks.feed {
                 KeyFeed::Live(agg) => agg,
                 KeyFeed::Seeding { last_dropped, .. } => {
                     *last_dropped = (*last_dropped).max(Some(at));
+                    ks.register_verification(key.period.trade_bucket(at), None, now);
                     self.counters.while_seeding += 1;
                     continue;
                 }
@@ -568,7 +615,7 @@ impl MarketHub {
                 }
                 Applied::Rolled { confirmed } => {
                     let cur = *agg.current().expect("넘겼으면 새 현재 봉이 있다");
-                    on_confirmed(&self.bars, &self.tx, &self.conns, &mut self.closing, *key, ks, confirmed);
+                    on_confirmed(&self.bars, &self.conns, &mut self.closing, *key, ks, confirmed, now);
                     ks.seq += 1;
                     set_bar(&self.conns, &ks.subs, ks.seq, &cur);
                 }
@@ -584,7 +631,14 @@ impl MarketHub {
                 continue;
             };
             if let Some(confirmed) = agg.close_if_due(now) {
-                on_confirmed(&self.bars, &self.tx, &self.conns, &mut self.closing, *key, ks, confirmed);
+                on_confirmed(&self.bars, &self.conns, &mut self.closing, *key, ks, confirmed, now);
+            }
+            for (bucket, verification) in &mut ks.verifications {
+                if matches!(verification.phase, VerificationPhase::Waiting { at } if at <= now) {
+                    verification.attempts += 1;
+                    verification.phase = VerificationPhase::InFlight;
+                    spawn_verify(&self.bars, &self.tx, *key, ks.generation, *bucket, verification.attempts);
+                }
             }
         }
         self.replan(now);
@@ -674,12 +728,12 @@ fn gap_overlaps_trading(from: KstTime, to: KstTime) -> bool {
 
 fn on_confirmed(
     bars: &Arc<BarService>,
-    tx: &mpsc::UnboundedSender<HubInput>,
     conns: &HashMap<ConnId, Conn>,
     closing: &mut Vec<ConnId>,
     key: SeriesKey,
     ks: &mut KeyState,
     confirmed: ConfirmedBar,
+    now: KstTime,
 ) {
     ks.seq += 1;
     let (seq, bar) = (ks.seq, api::Bar::from(&confirmed));
@@ -696,16 +750,15 @@ fn on_confirmed(
         });
     }
     if confirmed.needs_verify {
-        spawn_verify(bars, tx, key, ks.generation, confirmed, 0);
+        ks.register_verification(confirmed.bucket, Some(confirmed.ohlcv), now);
     }
 }
 
-fn spawn_verify(bars: &Arc<BarService>, tx: &mpsc::UnboundedSender<HubInput>, key: SeriesKey, generation: u64, sent: ConfirmedBar, attempt: u32) {
+fn spawn_verify(bars: &Arc<BarService>, tx: &mpsc::UnboundedSender<HubInput>, key: SeriesKey, generation: u64, bucket: Bucket, attempt: u32) {
     let (bars, tx) = (bars.clone(), tx.clone());
     tokio::spawn(async move {
-        tokio::time::sleep(VERIFY_DELAY * (attempt + 1)).await;
-        let result = bars.seed(key, Priority::Recovery).await;
-        let _ = tx.send(HubInput::Verified { key, generation, sent, attempt, result });
+        let result = bars.verify_confirmed(key, bucket).await;
+        let _ = tx.send(HubInput::Verified { key, generation, bucket, attempt, result });
     });
 }
 
@@ -736,7 +789,7 @@ fn set_bar(conns: &HashMap<ConnId, Conn>, subs: &BTreeSet<(ConnId, SubId)>, seq:
 mod tests {
     use std::sync::Mutex;
 
-    use domain::{KstDate, Market, Period, Price, StockCode, SymbolInfo, SymbolKind, TimeOfDay, Volume};
+    use domain::{BarSource, KstDate, Market, Period, Price, StockCode, SymbolInfo, SymbolKind, TimeOfDay, Volume};
     use serde_json::json;
     use tokio::sync::watch;
 
@@ -781,6 +834,7 @@ mod tests {
         desired: watch::Receiver<BTreeSet<Symbol>>,
         bars: Arc<BarService>,
         chart: Arc<Mutex<Chart>>,
+        fake: Arc<FakeTransport>,
         clock: Clock,
     }
 
@@ -819,7 +873,7 @@ mod tests {
             ok(json!({"stk_min_pole_chart_qry": rows, "return_code": 0}), None)
         }));
         let clock = Clock::fake(start);
-        let rest = KiwoomRest::new(Arc::new(fake), KiwoomAuth::new(Secret::new("k".into()), Secret::new("s".into()), None), clock.clone());
+        let rest = KiwoomRest::new(Arc::new(fake.clone()), KiwoomAuth::new(Secret::new("k".into()), Secret::new("s".into()), None), clock.clone());
         let symbols = Arc::new(SymbolDirectory::default());
         let stock = |code: &str, nxt_enabled| SymbolInfo { symbol: Symbol::parse(code).unwrap(), name: code.into(), kind: SymbolKind::Common, market: Market::Kospi, nxt_enabled };
         let mut listed = vec![stock(SAMSUNG, true), stock(NOT_ON_NXT, false)];
@@ -829,7 +883,7 @@ mod tests {
         let (stream, desired) = KiwoomStream::detached();
         let (events, rx) = mpsc::channel(64);
         let hub = MarketHub::spawn(bars.clone(), stream, rx, clock.clone());
-        Harness { hub, events, desired, bars, chart, clock }
+        Harness { hub, events, desired, bars, chart, fake, clock }
     }
 
     fn std_harness() -> Harness {
@@ -1057,6 +1111,7 @@ mod tests {
         let page = h.bars.page(samsung(), Some(at(9, 1, 0)), 1).await.unwrap();
         let [b] = page.bars.as_slice() else { panic!("{:?}", page.bars) };
         assert_eq!((b.bucket.start(), b.source, Bar::from(b)), (at(9, 0, 0), BarSource::Kiwoom, bar(at(9, 0, 0), [100, 110, 100, 110, 10])), "키움 값으로 바뀐다");
+        assert_eq!(h.fake.market_sent().len(), 2, "버린 체결과 needs_verify가 같은 구간의 대조 하나를 공유한다");
     }
 
     #[tokio::test(start_paused = true)]
@@ -1283,15 +1338,141 @@ mod tests {
         h.chart.lock().unwrap().set(at(9, 0, 0), [100, 100, 100, 100, 7]);
         h.clock.sleep_until(at(9, 1, 3)).await;
         h.events.send(trade(&h, (9, 1, 3), 110, 3, Some(Exchange::Krx))).await.unwrap();
-        h.clock.sleep_until(at(9, 2, 40)).await;
+        h.clock.sleep_until(at(9, 1, 20)).await;
         settle().await;
         let snap = h.hub.snapshot(samsung()).await.unwrap();
         let page = h.bars.page(samsung(), Some(at(9, 1, 0)), 1).await.unwrap();
-        println!("dropped-only now={} snapshot={snap:?} messages={:?} historical_page={:?}", h.clock.now(), out.take(true).messages, page.bars);
-        let explicit_refresh = h.bars.page(samsung(), None, 10).await.unwrap();
-        let upstream = explicit_refresh.bars.iter().find(|b| b.bucket.start() == at(9, 0, 0));
-        println!("explicit latest-page refresh finally fetches available upstream missing minute: {upstream:?}");
-        assert_eq!(upstream.map(|b| b.ohlcv.volume().0), Some(7), "fake upstream really has the missing minute; it is only automatic recovery that is absent");
+        let messages = out.take(true).messages;
+        let restored = messages.iter().filter(|m| matches!(m, ServerMessage::Reload { reason: ReloadReason::Replaced, from: Some(t), .. } if *t == UnixSeconds(at(9, 0, 0).unix()))).collect::<Vec<_>>();
+        assert_eq!(restored.len(), 1, "누락 봉을 복구한 뒤 한 번만 reload한다: {messages:?}");
+        assert!(matches!(restored[0], ServerMessage::Reload { seq: 2, .. }), "복구가 기존 seq를 올린다");
+        assert_eq!(snap.seq, 2);
+        assert_eq!(snap.current.map(|c| api::Bar::new(c.bucket(), c.ohlcv())), Some(bar(at(9, 1, 0), [110, 110, 110, 110, 3])), "누락 봉 복구가 진행 중 집계기를 바꾸지 않는다");
+        assert!(snap.recent_confirmed.is_empty(), "누락 봉을 최근 확정 큐에 끼워 넣지 않는다");
         assert_eq!(page.bars.last().map(|b| (b.bucket.start(), b.ohlcv.volume().0)), Some((at(9, 0, 0), 7)), "the observed dropped minute must be fetched and restored even when its next live tick is in a later minute");
+        println!("dropped-only restored bucket={} volume=7, replaced count=1 seq=2, actual fake chart requests={}, current bucket={} volume=3", at(9, 0, 0), h.fake.market_sent().len(), snap.current.unwrap().bucket().start());
+        h.clock.sleep_until(at(9, 2, 40)).await;
+        settle().await;
+        let page = h.bars.page(samsung(), Some(at(9, 1, 0)), 1).await.unwrap();
+        assert_eq!(page.bars.last().map(|b| (b.bucket.start(), b.ohlcv.volume().0)), Some((at(9, 0, 0), 7)), "원래 회귀 시각에도 복구한 봉을 유지한다");
+        assert!(!out.take(true).messages.iter().any(|m| matches!(m, ServerMessage::Reload { reason: ReloadReason::Replaced, .. })), "성공한 대상은 reload를 다시 만들지 않는다");
+        println!("dropped-only original boundary now={} historical bucket={} volume=7, additional replaced count=0", h.clock.now(), at(9, 0, 0));
     }
+
+    async fn subscribe_with_dropped_tick(h: &Harness, hhmmss: (u32, u32, u32)) -> Arc<Outbox> {
+        live(h).await;
+        let (conn, out) = connect(h).await;
+        h.hub.subscribe(conn, sub("a"), samsung());
+        settle().await;
+        h.events.send(trade(h, hhmmss, 100, 7, Some(Exchange::Krx))).await.unwrap();
+        settle().await;
+        out
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn duplicate_dropped_ticks_and_gap_reseeds_share_three_verification_requests() {
+        let h = harness(at(9, 0, 5), Chart::default(), Duration::from_secs(3));
+        let out = subscribe_with_dropped_tick(&h, (9, 0, 7)).await;
+        h.events.send(trade(&h, (9, 0, 7), 100, 7, Some(Exchange::Krx))).await.unwrap();
+        h.clock.sleep_until(at(9, 1, 8)).await;
+        settle().await;
+        assert_eq!(h.fake.market_sent().len(), 2, "최초 시드와 아직 진행 중인 첫 대조");
+        let gap = h.clock.now();
+        h.events.send(StreamEvent::Down { at: gap }).await.unwrap();
+        live(&h).await;
+        tokio::time::sleep(Duration::from_secs(60)).await;
+        assert_eq!(h.fake.market_sent().len(), 5, "시드 둘과 대조 셋. 구세대 진행 중 요청도 한 번으로 센다");
+        assert!(!out.take(true).messages.iter().any(|m| matches!(m, ServerMessage::Reload { reason: ReloadReason::Replaced, .. })));
+        let gap = h.clock.now();
+        h.events.send(StreamEvent::Down { at: gap }).await.unwrap();
+        live(&h).await;
+        tokio::time::sleep(Duration::from_secs(60)).await;
+        assert_eq!(h.fake.market_sent().len(), 6, "소진한 구간은 재시드로 되살리지 않는다");
+        println!("bounded verification actual fake chart requests=5 (2 seed + 3 verify), exhausted reseed total=6");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn an_old_generation_verification_cannot_reload_or_retry() {
+        let h = harness(at(9, 0, 5), Chart::default(), Duration::from_secs(3));
+        let out = subscribe_with_dropped_tick(&h, (9, 0, 7)).await;
+        tokio::time::sleep(Duration::from_secs(8)).await;
+        h.chart.lock().unwrap().set(at(9, 0, 0), [100, 100, 100, 100, 7]);
+        h.clock.sleep_until(at(9, 1, 8)).await;
+        settle().await;
+        assert_eq!(h.fake.market_sent().len(), 2);
+        let gap = h.clock.now();
+        h.events.send(StreamEvent::Down { at: gap }).await.unwrap();
+        live(&h).await;
+        h.clock.sleep_until(at(9, 1, 15)).await;
+        let messages = take(&out).await;
+        assert!(!messages.iter().any(|m| matches!(m, ServerMessage::Reload { reason: ReloadReason::Replaced, .. })), "진행 중이던 구세대 결과는 알리지 않는다: {messages:?}");
+        assert_eq!(h.fake.market_sent().len(), 3, "구세대 성공은 새 즉시 대조를 만들지 않는다");
+        h.clock.sleep_until(at(9, 1, 35)).await;
+        let messages = take(&out).await;
+        assert_eq!(messages.iter().filter(|m| matches!(m, ServerMessage::Reload { reason: ReloadReason::Replaced, .. })).count(), 1, "새 세대가 보존한 대상은 그 세대의 대조로만 완료한다: {messages:?}");
+        assert_eq!(h.fake.market_sent().len(), 4);
+        assert_eq!(h.hub.snapshot(samsung()).await.unwrap().seq, 2, "gap reload와 새 세대의 replaced만 seq를 올린다");
+        println!("stale generation ignored; current generation replaced count=1 seq=2; actual fake chart requests=4");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn daily_reset_clears_pending_verification_and_ignores_its_inflight_result() {
+        let h = harness(at(9, 0, 5), Chart::default(), Duration::from_secs(3));
+        let out = subscribe_with_dropped_tick(&h, (9, 0, 7)).await;
+        tokio::time::sleep(Duration::from_secs(8)).await;
+        h.chart.lock().unwrap().set(at(9, 0, 0), [100, 100, 100, 100, 7]);
+        h.clock.sleep_until(at(9, 1, 8)).await;
+        settle().await;
+        assert_eq!(h.fake.market_sent().len(), 2);
+        h.bars.clear_all();
+        h.hub.daily_reset();
+        tokio::time::sleep(Duration::from_secs(60)).await;
+        assert_eq!(h.fake.market_sent().len(), 3, "daily reset 시드 하나 외에는 예전 대상을 다시 조회하지 않는다");
+        let messages = out.take(true).messages;
+        assert_eq!(messages.iter().filter(|m| matches!(m, ServerMessage::Reload { reason: ReloadReason::DailyReset, .. })).count(), 1);
+        assert!(!messages.iter().any(|m| matches!(m, ServerMessage::Reload { reason: ReloadReason::Replaced, .. })), "reset 전 진행 중 결과를 알리지 않는다: {messages:?}");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn dropped_session_close_tick_waits_for_grace_and_verification_delay() {
+        let h = harness(at(20, 0, 0), Chart::default(), Duration::from_secs(1));
+        let out = subscribe_with_dropped_tick(&h, (20, 0, 3)).await;
+        h.chart.lock().unwrap().set(at(19, 59, 0), [100, 100, 100, 100, 7]);
+        h.clock.sleep_until(at(20, 0, 14)).await;
+        assert_eq!(h.fake.market_sent().len(), 1, "20:00:10 확정과 5초 대기 전에는 시드만 보낸다");
+        h.clock.sleep_until(at(20, 0, 18)).await;
+        let messages = take(&out).await;
+        assert_eq!(h.fake.market_sent().len(), 2);
+        assert!(messages.iter().any(|m| matches!(m, ServerMessage::Reload { reason: ReloadReason::Replaced, from: Some(t), .. } if *t == UnixSeconds(at(19, 59, 0).unix()))), "20:00 체결의 복구 구간도 19:59다: {messages:?}");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn every_dropped_bucket_is_verified_even_before_the_five_bar_seed_tail() {
+        let h = harness(at(9, 0, 5), Chart::default(), Duration::from_secs(10));
+        let out = subscribe_with_dropped_tick(&h, (9, 0, 7)).await;
+        tokio::time::sleep(Duration::from_secs(10)).await;
+        for minute in 1..7 {
+            h.clock.jump(60);
+            h.events.send(trade(&h, (9, minute, 7), 100, 7, Some(Exchange::Krx))).await.unwrap();
+            settle().await;
+        }
+        assert_eq!(h.fake.market_sent().len(), 1, "시드 중 실제로 버린 일곱 구간을 기록한다");
+        for minute in 0..12 {
+            h.chart.lock().unwrap().set(at(9, minute, 0), [100, 100, 100, 100, 7]);
+        }
+        h.clock.jump(6 * 60);
+        tokio::time::sleep(Duration::from_secs(100)).await;
+        let messages = out.take(true).messages;
+        let replaced = messages.iter().filter_map(|m| match m {
+            ServerMessage::Reload { reason: ReloadReason::Replaced, from: Some(t), .. } => Some(*t),
+            _ => None,
+        }).collect::<BTreeSet<_>>();
+        assert_eq!(replaced, (0..7).map(|minute| UnixSeconds(at(9, minute, 0).unix())).collect(), "최근 다섯 개보다 오래된 대상도 캐시 전체에서 찾는다: {messages:?}");
+        let requests = h.fake.market_sent();
+        assert_eq!(requests.len(), 8, "최초 시드와 일곱 구간 대조만 보낸다");
+        assert!(requests.iter().all(|r| r.cont.is_none()), "대조가 과거 연속조회를 시작하지 않는다");
+        let snap = h.hub.snapshot(samsung()).await.unwrap();
+        assert_eq!((snap.seq, snap.current, snap.recent_confirmed.len()), (7, None, 0));
+    }
+
 }

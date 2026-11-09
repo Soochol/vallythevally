@@ -1,5 +1,5 @@
 use crate::bar::{BarSource, ConfirmedBar, Ohlcv};
-use crate::period::{Bucket, CLOSE_GRACE_SECS, Period, SESSION_CLOSE};
+use crate::period::{Bucket, Period};
 use crate::time::KstTime;
 use crate::trade::Trade;
 
@@ -79,7 +79,7 @@ impl Aggregator {
     }
 
     pub fn trades_dropped_until(mut self, last_dropped: Option<KstTime>) -> Self {
-        self.dropped_through = last_dropped.map(|at| self.period.bucket(self.effective_at(at)));
+        self.dropped_through = last_dropped.map(|at| self.period.trade_bucket(at));
         self
     }
 
@@ -92,7 +92,7 @@ impl Aggregator {
     }
 
     pub fn apply(&mut self, trade: &Trade) -> Applied {
-        let bucket = self.period.bucket(self.effective_at(trade.at));
+        let bucket = self.period.trade_bucket(trade.at);
         if self.closed_through.is_some_and(|closed| bucket <= closed) {
             return Applied::Ignored(IgnoreReason::Late);
         }
@@ -121,12 +121,6 @@ impl Aggregator {
         self.current = None;
         self.closed_through = Some(cur.bucket);
         Some(cur.confirm())
-    }
-
-    /// [20:00:00, 20:00:10)의 체결도 키움은 19:59 봉에 넣는다(D16). 분봉에서만 그날 마지막 분 구간으로 당긴다.
-    fn effective_at(&self, at: KstTime) -> KstTime {
-        let close = KstTime::from_kst_civil(at.kst_date(), SESSION_CLOSE);
-        if self.period.is_intraday() && close <= at && at < close.plus_secs(CLOSE_GRACE_SECS) { close.plus_secs(-1) } else { at }
     }
 }
 
