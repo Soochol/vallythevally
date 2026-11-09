@@ -265,6 +265,7 @@ impl Session {
                 SessionState::Live { conn, since, accepted, attempt } => {
                     let entered = Instant::now();
                     let end = self.live(conn, accepted).await;
+                    let live_duration = entered.elapsed();
                     if matches!(end, End::Shutdown) {
                         return;
                     }
@@ -273,7 +274,7 @@ impl Session {
                     if self.events.send(StreamEvent::Down { at }).await.is_err() {
                         return;
                     }
-                    let attempt = if entered.elapsed() >= self.timings.live_resets_backoff_after {
+                    let attempt = if live_duration >= self.timings.live_resets_backoff_after {
                         self.rebuild = ControlBudget::Fresh;
                         0
                     } else {
