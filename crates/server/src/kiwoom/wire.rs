@@ -260,7 +260,6 @@ fn parse_quote_row(r: &QuoteRow) -> Result<StockQuote, WireError> {
     Ok(StockQuote { code, price_centi, base_centi, volume: Volume(unsigned(&r.trde_qty)?), at })
 }
 
-/// ka10001 응답. 명세에 있는 것 중 종목 정보 패널이 쓰는 필드만 읽는다.
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(default)]
 pub struct StockBasicInfoResponse {
@@ -280,7 +279,6 @@ pub struct StockBasicInfoResponse {
     pub low_250: String,
 }
 
-/// ka10001에서 읽은 값. 자연 단위(원, 주, %, 배)다. 키움이 빈 문자열을 준 값은 None이다.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct StockFundamentals {
     pub market_cap_won: Option<u64>,
@@ -301,10 +299,9 @@ pub enum BasicInfo {
 }
 
 const WON_PER_EOK: u64 = 100_000_000;
+/// 명세는 `flo_stk` 단위를 천원이라 적지만 실제로는 천 주다(kiwoom.md §14).
 const SHARES_PER_FLO_STK_UNIT: u64 = 1_000;
 
-/// 시가총액은 억원, 상장주식은 천 주로 온다. 250일 최고·최저는 가격이라 부호를 떼고, PER·ROE·EPS·BPS는 적자면
-/// 음수이므로 부호를 지킨다.
 pub fn parse_basic_info(r: StockBasicInfoResponse) -> Result<BasicInfo, WireError> {
     if r.stk_nm.is_empty() {
         return Ok(BasicInfo::UnknownSymbol);

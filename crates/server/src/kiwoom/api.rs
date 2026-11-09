@@ -236,7 +236,6 @@ impl MarketRequest for StockQuotes {
     type Response = wire::StockQuotesResponse;
 }
 
-/// ka10001 주식기본정보. 언제나 통합(`_AL`) 코드로 묻는다. 현재가(ka10095)와 같은 시세를 본다.
 #[derive(Serialize)]
 pub struct StockBasicInfo {
     stk_cd: String,

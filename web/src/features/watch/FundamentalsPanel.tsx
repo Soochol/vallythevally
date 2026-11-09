@@ -24,7 +24,6 @@ const ROWS: ReadonlyArray<[label: string, pick: (f: Fundamentals) => number | nu
   ["52주 최저", (f) => f.low52w, (x) => formatPrice(x, false)],
 ];
 
-/** 활성 칸 종목의 기본 정보(frontend.md §2.1 "오른쪽 관심종목"). 지수에는 값이 없어 자리째 숨긴다. */
 export function FundamentalsPanel() {
   const slot = useSelectionStore((s) => s.activeSlot);
   const code = useCell(slot).symbol;

@@ -75,7 +75,6 @@ export function useSymbolInfos(codes: readonly SymbolCode[]): SymbolInfo[] {
 
 const FUNDAMENTALS_STALE_MS = 60_000;
 
-/** `GET /api/symbols/:code/fundamentals`. 주식만. 지수는 400이다. */
 export function useFundamentals(code: SymbolCode) {
   return useQuery({
     queryKey: ["fundamentals", code],

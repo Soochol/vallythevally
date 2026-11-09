@@ -42,14 +42,12 @@ export function formatVolume(v: number): string {
   return int.format(v);
 }
 
-/** 원 금액. 1조 이상은 `1,130.67조`, 1억 이상은 `2,345억`, 그 아래는 `9,500원`. */
 export function formatWonAmount(won: number): string {
   if (won >= 1e12) return two.format(won / 1e12) + "조";
   if (won >= 1e8) return int.format(Math.round(won / 1e8)) + "억";
   return int.format(won) + "원";
 }
 
-/** 소수 둘째 자리. 음수는 U+2212(`−3.10`). */
 export function formatDecimal(x: number): string {
   const rounded = Math.round(x * 100) / 100;
   return (rounded < 0 ? MINUS : "") + two.format(Math.abs(rounded));
