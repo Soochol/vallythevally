@@ -7,7 +7,7 @@ mod symbol;
 mod time;
 
 pub use bar::{BarSource, ConfirmedBar, Ohlcv, OhlcvError, SeriesKey};
-pub use period::{Bucket, CLOSE_GRACE_SECS, Period, PeriodError, SESSION_CLOSE};
+pub use period::{Bucket, CLOSE_GRACE_SECS, Period, PeriodError, SESSION_CLOSE, SESSION_OPEN};
 pub use price::{Price, Volume};
 pub use symbol::{Feed, IndexCode, Market, StockCode, Symbol, SymbolError, SymbolInfo, SymbolKind, Venue};
 pub use time::{KstDate, KstTime, TimeOfDay, Weekday};
