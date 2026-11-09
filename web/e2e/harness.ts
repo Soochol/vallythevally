@@ -22,6 +22,12 @@ export interface FakeReply {
 }
 
 export interface Fake {
+  /** 가짜 키움 WebSocket이 그 (type, item)을 REG한 세션에 REAL 프레임을 보낸다. 받은 세션 수를 돌려준다. */
+  pushReal(type: "0B" | "0J", item: string, values: Record<string, string>): Promise<number>;
+  /** 가짜 키움 WebSocket 세션을 모두 이 close 코드로 닫는다. */
+  dropWs(code: number, reason: string): Promise<void>;
+  /** 지금 REG된 항목(type → item 목록). */
+  registered(): Promise<Record<string, string[]>>;
   respondWith(reply: FakeReply): Promise<void>;
   delay(apiId: string, ms: number): Promise<void>;
   rejectToken(token: string): Promise<void>;
@@ -100,6 +106,13 @@ function fakeClient(base: string): Fake {
     if (res.status !== 204) throw new Error(`/_fake/${route}: HTTP ${res.status} ${await res.text()}`);
   };
   return {
+    pushReal: async (type, item, values) => {
+      const res = await fetch(`${base}/_fake/ws/real`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ type, item, values }) });
+      if (!res.ok) throw new Error(`/_fake/ws/real: HTTP ${res.status} ${await res.text()}`);
+      return ((await res.json()) as { delivered: number }).delivered;
+    },
+    dropWs: (code, reason) => post("ws/drop", { code, reason }),
+    registered: async () => ((await (await fetch(`${base}/_fake/ws/stats`)).json()) as { registered: Record<string, string[]> }).registered,
     respondWith: (reply) => post("respond-with", reply),
     delay: (apiId, ms) => post("delay", { apiId, ms }),
     rejectToken: (token) => post("reject-token", { token }),
@@ -107,8 +120,9 @@ function fakeClient(base: string): Fake {
   };
 }
 
-function serverEnv(dir: string, fakeBase: string, bind: string): Record<string, string> {
+function serverEnv(dir: string, fakeBase: string, bind: string, clockStart: string | null): Record<string, string> {
   return {
+    ...(clockStart ? { VALLY_CLOCK_START: clockStart } : {}),
     VALLY_KIWOOM_APP_KEY: FAKE_APP_KEY,
     VALLY_KIWOOM_APP_SECRET: FAKE_APP_SECRET,
     VALLY_KIWOOM_BASE_URL: fakeBase,
@@ -131,10 +145,12 @@ async function waitUntilSymbolListSettles(url: string): Promise<void> {
   throw new Error("서버가 종목 목록을 받지 못했습니다");
 }
 
-export const test = base.extend<{ app: App; bootReplies: FakeReply[] }>({
+export const test = base.extend<{ app: App; bootReplies: FakeReply[]; clockStart: string | null }>({
   bootReplies: [[], { option: true }],
+  /** 서버 시계가 시작할 KST 시각(`YYYYMMDDHHMMSS`, 시험용 `VALLY_CLOCK_START`). 서버는 장 시간 밖의 체결을 버린다. */
+  clockStart: [null, { option: true }],
 
-  app: async ({ bootReplies }, use, testInfo) => {
+  app: async ({ bootReplies, clockStart }, use, testInfo) => {
     if (!existsSync(path.join(STATIC_DIR, "index.html"))) throw new Error(`${STATIC_DIR}가 없습니다. 먼저 pnpm build`);
     const dir = await mkdtemp(path.join(tmpdir(), "vally-e2e-"));
     const fake = new Proc(path.join(BIN_DIR, "fake-kiwoom"), [], {});
@@ -145,7 +161,7 @@ export const test = base.extend<{ app: App; bootReplies: FakeReply[] }>({
       for (const reply of bootReplies) await client.respondWith(reply);
 
       const startServer = async (bind: string) => {
-        const server = new Proc(path.join(BIN_DIR, "vally-server"), [], serverEnv(dir, fakeBase, bind));
+        const server = new Proc(path.join(BIN_DIR, "vally-server"), [], serverEnv(dir, fakeBase, bind, clockStart));
         servers.push(server);
         return server.waitFor(/포트를 열었습니다 addr=(\S+)/, "vally-server");
       };
