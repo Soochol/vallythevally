@@ -1,12 +1,13 @@
 // dev 서버 전용 가짜 /api. vite.config.ts가 VITE_FAKE_API=0이 아닐 때만 붙인다(apply: "serve").
 // 999999는 어디서나 unknown_symbol이다. 555555(조회실패시험)의 봉은 kiwoom_unavailable,
 // 888888(상장폐지시험)은 검색에는 나오지만 봉은 unknown_symbol로 답한다(칸 오류 화면 확인용).
+// 005930은 NXT에서 거래되고 005935는 거래되지 않는다(NXT를 주면 400).
 import type { ServerResponse } from "node:http";
 import type { Plugin } from "vite";
 import type { ApiError } from "../src/api/generated/ApiError.ts";
 import type { ApiErrorCode } from "../src/api/generated/ApiErrorCode.ts";
 import type { Period } from "../src/api/generated/Period.ts";
-import { barsPage, findSymbol, publicInfo, search } from "./fakeMarket.ts";
+import { barsPage, findSymbol, publicInfo, resolveVenue, search } from "./fakeMarket.ts";
 
 const LATEST_PAGE_DELAY_MS = 800;
 const PAST_PAGE_DELAY_MS = 400;
@@ -54,7 +55,9 @@ export function fakeApi(): Plugin {
           if (s.fail === "kiwoom_unavailable") {
             return fail(res, 503, "kiwoom_unavailable", "키움 조회가 응답하지 않습니다. 잠시 뒤 다시 시도하세요.");
           }
-          return send(res, 200, barsPage(s, period, limit, before === null ? null : Number(before), Date.now()));
+          const v = resolveVenue(s, url.searchParams.get("venue"));
+          if ("error" in v) return fail(res, 400, "bad_request", v.error);
+          return send(res, 200, barsPage(s, v.venue, period, limit, before === null ? null : Number(before), Date.now()));
         }
         return fail(res, 404, "not_found", "없는 API 경로입니다");
       });

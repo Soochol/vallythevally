@@ -6,4 +6,8 @@ import type { SymbolKind } from "./SymbolKind";
 /**
  * `GET /api/symbols?q=` → `SymbolInfo[]`, `GET /api/symbols/:code` → `SymbolInfo`.
  */
-export type SymbolInfo = { code: SymbolCode, name: string, kind: SymbolKind, market: Market, };
+export type SymbolInfo = { code: SymbolCode, name: string, kind: SymbolKind, market: Market, 
+/**
+ * NXT를 고를 수 있는가. 지수는 false.
+ */
+nxtEnabled: boolean, };

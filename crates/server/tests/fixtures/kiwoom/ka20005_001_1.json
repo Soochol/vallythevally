@@ -1,0 +1,342 @@
+{
+ "_source": "tools/kiwoom-probe/out/idx_m1_001.json 행 0~29(kiwoom.md §6. 2026-11-08 실측 코스피 1분봉 첫 페이지를 줄였다)",
+ "_headers": {
+  "cont-yn": "Y",
+  "next-key": "00120261104124000"
+ },
+ "inds_cd": "001",
+ "inds_min_pole_qry": [
+  {
+   "acc_trde_qty": "323267",
+   "cntr_tm": "20261106153000",
+   "cur_prc": "-505969",
+   "high_pric": "+505969",
+   "low_pric": "+505029",
+   "open_pric": "+505029",
+   "pred_pre": "--32411",
+   "pred_pre_sig": "5",
+   "trde_qty": "35375"
+  },
+  {
+   "acc_trde_qty": "287892",
+   "cntr_tm": "20261106152000",
+   "cur_prc": "-505029",
+   "high_pric": "+505029",
+   "low_pric": "+505029",
+   "open_pric": "+505029",
+   "pred_pre": "--33351",
+   "pred_pre_sig": "5",
+   "trde_qty": "169"
+  },
+  {
+   "acc_trde_qty": "287723",
+   "cntr_tm": "20261106151900",
+   "cur_prc": "-504489",
+   "high_pric": "+505547",
+   "low_pric": "+504196",
+   "open_pric": "+505547",
+   "pred_pre": "--33891",
+   "pred_pre_sig": "5",
+   "trde_qty": "1241"
+  },
+  {
+   "acc_trde_qty": "286482",
+   "cntr_tm": "20261106151800",
+   "cur_prc": "-505741",
+   "high_pric": "+505952",
+   "low_pric": "+505531",
+   "open_pric": "+505531",
+   "pred_pre": "--32639",
+   "pred_pre_sig": "5",
+   "trde_qty": "783"
+  },
+  {
+   "acc_trde_qty": "285699",
+   "cntr_tm": "20261106151700",
+   "cur_prc": "-505513",
+   "high_pric": "+505767",
+   "low_pric": "+505262",
+   "open_pric": "+505613",
+   "pred_pre": "--32867",
+   "pred_pre_sig": "5",
+   "trde_qty": "1015"
+  },
+  {
+   "acc_trde_qty": "284684",
+   "cntr_tm": "20261106151600",
+   "cur_prc": "-505679",
+   "high_pric": "+506255",
+   "low_pric": "+505595",
+   "open_pric": "+506191",
+   "pred_pre": "--32701",
+   "pred_pre_sig": "5",
+   "trde_qty": "1003"
+  },
+  {
+   "acc_trde_qty": "283681",
+   "cntr_tm": "20261106151500",
+   "cur_prc": "-505575",
+   "high_pric": "+505575",
+   "low_pric": "+503730",
+   "open_pric": "+503730",
+   "pred_pre": "--32805",
+   "pred_pre_sig": "5",
+   "trde_qty": "1592"
+  },
+  {
+   "acc_trde_qty": "282089",
+   "cntr_tm": "20261106151400",
+   "cur_prc": "-503783",
+   "high_pric": "+503963",
+   "low_pric": "+503729",
+   "open_pric": "+503963",
+   "pred_pre": "--34597",
+   "pred_pre_sig": "5",
+   "trde_qty": "1048"
+  },
+  {
+   "acc_trde_qty": "281041",
+   "cntr_tm": "20261106151300",
+   "cur_prc": "-504153",
+   "high_pric": "+504225",
+   "low_pric": "+504069",
+   "open_pric": "+504069",
+   "pred_pre": "--34227",
+   "pred_pre_sig": "5",
+   "trde_qty": "926"
+  },
+  {
+   "acc_trde_qty": "280115",
+   "cntr_tm": "20261106151200",
+   "cur_prc": "-504415",
+   "high_pric": "+504568",
+   "low_pric": "+503770",
+   "open_pric": "+503770",
+   "pred_pre": "--33965",
+   "pred_pre_sig": "5",
+   "trde_qty": "1222"
+  },
+  {
+   "acc_trde_qty": "278893",
+   "cntr_tm": "20261106151100",
+   "cur_prc": "-503691",
+   "high_pric": "+504738",
+   "low_pric": "+503691",
+   "open_pric": "+504738",
+   "pred_pre": "--34689",
+   "pred_pre_sig": "5",
+   "trde_qty": "1100"
+  },
+  {
+   "acc_trde_qty": "277793",
+   "cntr_tm": "20261106151000",
+   "cur_prc": "-504916",
+   "high_pric": "+505493",
+   "low_pric": "+504916",
+   "open_pric": "+505258",
+   "pred_pre": "--33464",
+   "pred_pre_sig": "5",
+   "trde_qty": "1071"
+  },
+  {
+   "acc_trde_qty": "276722",
+   "cntr_tm": "20261106150900",
+   "cur_prc": "-505336",
+   "high_pric": "+505831",
+   "low_pric": "+505336",
+   "open_pric": "+505831",
+   "pred_pre": "--33044",
+   "pred_pre_sig": "5",
+   "trde_qty": "1083"
+  },
+  {
+   "acc_trde_qty": "275639",
+   "cntr_tm": "20261106150800",
+   "cur_prc": "-506073",
+   "high_pric": "+506617",
+   "low_pric": "+506073",
+   "open_pric": "+506609",
+   "pred_pre": "--32307",
+   "pred_pre_sig": "5",
+   "trde_qty": "1224"
+  },
+  {
+   "acc_trde_qty": "274415",
+   "cntr_tm": "20261106150700",
+   "cur_prc": "-506527",
+   "high_pric": "+506997",
+   "low_pric": "+506527",
+   "open_pric": "+506997",
+   "pred_pre": "--31853",
+   "pred_pre_sig": "5",
+   "trde_qty": "913"
+  },
+  {
+   "acc_trde_qty": "273502",
+   "cntr_tm": "20261106150600",
+   "cur_prc": "-507042",
+   "high_pric": "+507271",
+   "low_pric": "+506931",
+   "open_pric": "+507271",
+   "pred_pre": "--31338",
+   "pred_pre_sig": "5",
+   "trde_qty": "852"
+  },
+  {
+   "acc_trde_qty": "272650",
+   "cntr_tm": "20261106150500",
+   "cur_prc": "-507302",
+   "high_pric": "+507636",
+   "low_pric": "+506949",
+   "open_pric": "+507425",
+   "pred_pre": "--31078",
+   "pred_pre_sig": "5",
+   "trde_qty": "1060"
+  },
+  {
+   "acc_trde_qty": "271590",
+   "cntr_tm": "20261106150400",
+   "cur_prc": "-507285",
+   "high_pric": "+507748",
+   "low_pric": "+506882",
+   "open_pric": "+507748",
+   "pred_pre": "--31095",
+   "pred_pre_sig": "5",
+   "trde_qty": "1158"
+  },
+  {
+   "acc_trde_qty": "270432",
+   "cntr_tm": "20261106150300",
+   "cur_prc": "-508039",
+   "high_pric": "+508607",
+   "low_pric": "+508039",
+   "open_pric": "+508555",
+   "pred_pre": "--30341",
+   "pred_pre_sig": "5",
+   "trde_qty": "768"
+  },
+  {
+   "acc_trde_qty": "269664",
+   "cntr_tm": "20261106150200",
+   "cur_prc": "-508725",
+   "high_pric": "+509113",
+   "low_pric": "+508302",
+   "open_pric": "+509113",
+   "pred_pre": "--29655",
+   "pred_pre_sig": "5",
+   "trde_qty": "1037"
+  },
+  {
+   "acc_trde_qty": "268627",
+   "cntr_tm": "20261106150100",
+   "cur_prc": "-509203",
+   "high_pric": "+509510",
+   "low_pric": "+508963",
+   "open_pric": "+509390",
+   "pred_pre": "--29177",
+   "pred_pre_sig": "5",
+   "trde_qty": "927"
+  },
+  {
+   "acc_trde_qty": "267700",
+   "cntr_tm": "20261106150000",
+   "cur_prc": "-509819",
+   "high_pric": "+510102",
+   "low_pric": "+509819",
+   "open_pric": "+509908",
+   "pred_pre": "--28561",
+   "pred_pre_sig": "5",
+   "trde_qty": "827"
+  },
+  {
+   "acc_trde_qty": "266873",
+   "cntr_tm": "20261106145900",
+   "cur_prc": "-510144",
+   "high_pric": "+510231",
+   "low_pric": "+509655",
+   "open_pric": "+509655",
+   "pred_pre": "--28236",
+   "pred_pre_sig": "5",
+   "trde_qty": "779"
+  },
+  {
+   "acc_trde_qty": "266094",
+   "cntr_tm": "20261106145800",
+   "cur_prc": "-509818",
+   "high_pric": "+509987",
+   "low_pric": "+509742",
+   "open_pric": "+509854",
+   "pred_pre": "--28562",
+   "pred_pre_sig": "5",
+   "trde_qty": "742"
+  },
+  {
+   "acc_trde_qty": "265352",
+   "cntr_tm": "20261106145700",
+   "cur_prc": "-509824",
+   "high_pric": "+510272",
+   "low_pric": "+509824",
+   "open_pric": "+510251",
+   "pred_pre": "--28556",
+   "pred_pre_sig": "5",
+   "trde_qty": "717"
+  },
+  {
+   "acc_trde_qty": "264635",
+   "cntr_tm": "20261106145600",
+   "cur_prc": "-510454",
+   "high_pric": "+510665",
+   "low_pric": "+510357",
+   "open_pric": "+510456",
+   "pred_pre": "--27926",
+   "pred_pre_sig": "5",
+   "trde_qty": "808"
+  },
+  {
+   "acc_trde_qty": "263827",
+   "cntr_tm": "20261106145500",
+   "cur_prc": "-510718",
+   "high_pric": "+511419",
+   "low_pric": "+510718",
+   "open_pric": "+511411",
+   "pred_pre": "--27662",
+   "pred_pre_sig": "5",
+   "trde_qty": "785"
+  },
+  {
+   "acc_trde_qty": "263042",
+   "cntr_tm": "20261106145400",
+   "cur_prc": "-511354",
+   "high_pric": "+511869",
+   "low_pric": "+511354",
+   "open_pric": "+511593",
+   "pred_pre": "--27026",
+   "pred_pre_sig": "5",
+   "trde_qty": "723"
+  },
+  {
+   "acc_trde_qty": "262319",
+   "cntr_tm": "20261106145300",
+   "cur_prc": "-511788",
+   "high_pric": "+511852",
+   "low_pric": "+511384",
+   "open_pric": "+511575",
+   "pred_pre": "--26592",
+   "pred_pre_sig": "5",
+   "trde_qty": "711"
+  },
+  {
+   "acc_trde_qty": "261608",
+   "cntr_tm": "20261106145200",
+   "cur_prc": "-512051",
+   "high_pric": "+512095",
+   "low_pric": "+511684",
+   "open_pric": "+511893",
+   "pred_pre": "--26329",
+   "pred_pre_sig": "5",
+   "trde_qty": "609"
+  }
+ ],
+ "return_code": 0,
+ "return_msg": "정상적으로 처리되었습니다"
+}

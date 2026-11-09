@@ -1,9 +1,10 @@
 # 프런트엔드 설계: 차트 화면
 
-차트 화면의 생김새, 조작, 프런트엔드 코드 구조를 정한다. 로드맵 #12의 1~7단계(#2~#8)가 이 문서를 따른다. 8단계(#9) 배포는 화면에 영향이 없다.
+차트 화면의 생김새, 조작, 프런트엔드 코드 구조를 정한다. 로드맵 #12의 1~7단계(#2~#8)와 1.5단계(#14)가 이 문서를 따른다. 8단계(#9) 배포는 화면에 영향이 없다.
 
-- **기준 문서**: `GLOSSARY.md`, `docs/adr/0001`~`0004`, 백엔드 설계 `docs/design/backend.md`. 백엔드 쪽 경계는 그 문서의 §8(브라우저 계약)과 §9(지표 크레이트 API)다.
+- **기준 문서**: `GLOSSARY.md`, `docs/adr/0001`~`0007`, 백엔드 설계 `docs/design/backend.md`. 백엔드 쪽 경계는 그 문서의 §8(브라우저 계약)과 §9(지표 크레이트 API)다.
 - **1차 수정(2026-11-08)**: 코디네이터 결정 `docs/design/decisions-r1.md`(U1·U2, D1~D11)와 교차 리뷰 `docs/design/review-w4.md`의 프런트 지적(W4-25, 28, 29, 31, 32)을 반영했다. 계약 이름은 decisions-r1.md를 글자 그대로 따른다. 이 문서와 그 문서가 다르면 그 문서가 맞다.
+- **2차 수정(2026-11-09)**: #2의 코드(`web/src`)에 맞췄다. #2에서 켜진 절은 코드가 지금의 사실이다. D12~D17과 ADR 0007(칸마다 거래소)도 반영했다.
 - **목업**: `docs/design/mockup/index.html`. 빌드 없이 브라우저로 연다. 데이터는 시드로 만든 가짜 값이다.
   - 화면 상태는 주소의 질의 문자열로 고른다.
     - `?layout=4|1`: 4칸 또는 1칸
@@ -38,8 +39,9 @@ D3의 표를 그대로 옮긴다. 단계 번호는 이슈 번호다. 이 문서�
 | 이슈 | 단계 | 켜지는 것 | 아직 없는 것 |
 |---|---|---|---|
 | #2 | 1단계 기반 | 1칸 고정, REST `/api/symbols`·`/api/bars`, 캐시, 키움 조회 대기열, 차트 설정은 브라우저 메모리에 | WebSocket, WASM, 사용자 자료 DB |
+| #14 | 1.5단계 거래소 | 칸마다 거래소(통합·KRX·NXT), 분봉(1·3·5·15·30·60분) 과거 조회. 분봉의 진행 중 구간은 조회 스냅숏 | WebSocket, 실시간 현재 봉 |
 | #3 | 2단계 저장 | 사용자 자료 스키마, 기본 레이아웃 마이그레이션, 관심종목, `UiState`, 자동 저장. 관심종목 현재가는 REST 조회 | WebSocket |
-| #4 | 3단계 실시간 | WebSocket, 구독, 현재 봉 집계, `seq`, 분봉 | |
+| #4 | 3단계 실시간 | WebSocket, 구독, 실시간 현재 봉 집계(일·주·월봉과 분봉), `seq` | |
 | #5 | 4단계 지표 | WASM 지표, 비교 종목 | |
 | #6~#9 | 5~8단계 | 드로잉 → 여러 칸 → 알림 → 클라우드 | |
 
@@ -49,6 +51,17 @@ D3의 표를 그대로 옮긴다. 단계 번호는 이슈 번호다. 이 문서�
 - **거래량**: 지표가 아니라 봉의 `v`를 그대로 막대로 그린다. 계산이 없으므로 WASM이 필요 없다. 이동평균을 곁들인 거래량 지표는 #5에서 바꾼다.
 - **테마**: `UiState`가 없으므로 localStorage에만 둔다. #3부터는 `UiState.theme`이 원본이다.
 - **연결 상태**: WebSocket이 없으므로 연결 상태 점을 숨기고 `조회 모드`라고만 적는다.
+
+**#14에서 프런트가 더하는 것**(ADR 0007, D17). #14는 #3보다 먼저 한다. #3의 레이아웃 저장 형식이 처음부터 칸의 거래소를 담게 하려는 것이다.
+- **칸 상태**: 칸이 거래소를 갖는다(`CellState.venue`, §5.3). 지수면 `null`이다.
+- **위 막대**: 종목 버튼 뒤에 거래소 선택기(통합 / KRX / NXT)를 둔다(§2.1). 지수면 숨기고, NXT 불가 종목이면 NXT를 비활성으로 둔다.
+- **봉 주기**: 1·3·5·15·30·60분을 켠다. 위 막대 봉 주기는 9개가 된다(지금 코드의 `PERIODS_ON`은 일·주·월 셋이다). 단축키 `1` `3` `5`, `Shift+1` `Shift+3` `Shift+6`도 켠다(§3.2).
+- **분봉의 진행 중 구간**: #2와 같이 `current`(키움 조회 스냅숏)로 그리고 `조회 값`을 붙인다. 실시간 현재 봉은 #4다.
+- **1년 끝**: 분봉에서 과거 끝에 닿으면 "분봉은 최근 1년까지"를 안내한다(U1, §5.4).
+- **범례**: 머리줄에 거래소를 적는다(§2.3).
+- **주소**: `/?symbol=005930&venue=krx&period=5m`(§5.1).
+- **휴대폰**: 같은 선택기와 분봉 칩(§4).
+- **정규장 종가**: 표시하지 않는다(D17). 범례와 휴대폰 머리의 종가는 그 거래소 봉의 종가다.
 
 ---
 
@@ -80,7 +93,7 @@ D3의 표를 그대로 옮긴다. 단계 번호는 이슈 번호다. 이 문서�
 
 ### 1.2 디자인 토큰(CSS 변수)
 
-목업 `styles.css`의 변수가 원본이다. 실제 앱에서는 이 값들을 `web/src/styles/tokens.css`에 두고 Tailwind 테마가 변수를 참조하게 한다(§5.1).
+목업 `styles.css`의 변수가 원본이다. 실제 앱에서는 이 값들을 `web/src/styles/tokens.css`에 둔다. Tailwind는 v4이고 설정 파일(`tailwind.config.ts`)이 없다. `web/src/styles/index.css`의 `@theme inline`이 토큰 변수만 가리킨다(`--color-up: var(--up)` 등). Tailwind 기본 색은 `--color-*: initial`로 지워서 토큰 밖의 색을 쓸 수 없다(§5.1).
 
 **색**
 
@@ -149,7 +162,7 @@ D3의 표를 그대로 옮긴다. 단계 번호는 이슈 번호다. 이 문서�
 - **높은 밀도를 기본으로 한다.** 데스크톱 1440×900에서 4칸이 각각 지표 패널 1~2개와 함께 들어가고, 관심종목 13종목이 스크롤 없이 보인다.
 - **줄이는 것과 지키는 것**
   - 줄이는 것: 칸 머리줄을 따로 두지 않는다. 범례가 머리줄을 겸한다. 그래서 차트 면적이 커진다.
-  - 지키는 것: 클릭 대상은 데스크톱 26px 이상, 휴대폰 36px 이상으로 둔다. 범례 줄 높이는 18px이다.
+  - 지키는 것: 클릭 대상은 데스크톱 26px 이상, 휴대폰 36px 이상으로 둔다. 범례 줄 높이는 18px이다. 휴대폰의 봉 주기 칩과 테마 버튼도 36px이다(목업보다 크다).
 - **범례의 반투명 바탕**: 여러 칸 화면에서는 범례가 봉을 가리지 않게 가격 패널의 위 여백을 26%로 잡는다(`scaleMargins.top`). 범례 줄마다 `--chart-bg` 78%의 바탕을 깔아 봉 위에서도 글자가 읽힌다.
 
 ---
@@ -160,9 +173,9 @@ D3의 표를 그대로 옮긴다. 단계 번호는 이슈 번호다. 이 문서�
 
 ```
 ┌──┬────────────────────────────────────────────────────────────────────────┬─────────────┐
-│VV│ [⌕ 삼성전자 005930  /] │1분 3분 5분 15분 30분 60분 일 주 월│ 봉모양▾ 지표 비교 로그 │ 장중 4칸▾ ⧉ ▭▯▭⊟⊞ │ ●십자선 ●스크롤 │ 알림 ☼ │  ← 위쪽 막대 40px
+│VV│ [⌕ 삼성전자 005930  /] [통합|KRX|NXT] │1분 3분 5분 15분 30분 60분 일 주 월│ 봉모양▾ 지표 비교 로그 │ 장중 4칸▾ ⧉ ▭▯▭⊟⊞ │ ●십자선 ●스크롤 │ 알림 ☼ │  ← 위쪽 막대 40px
 ├──┼───────────────────────────────────┬────────────────────────────────────┼─────────────┤
-│↖ │A 삼성전자 005930 5분       3개 지표│A 삼성전자 005930 일                │ 관심종목 13 +›│
+│↖ │A 삼성전자 005930 KRX 5분   3개 지표│A 삼성전자 005930 통합 일           │ 관심종목 13 +›│
 │╱ │85,400 −100 −0.12% 19:55           │85,400 −500 −0.58%                  │ 삼성전자  85,400│
 │─ │시 85,500 고 … 량 4594             │시 … 량 33만                        │ 005930   −0.58%│
 ││ │— 이동평균 5  85,480               │— 볼린저 밴드 20 2 …                │ SK하이닉스 …  │
@@ -179,20 +192,24 @@ D3의 표를 그대로 옮긴다. 단계 번호는 이슈 번호다. 이 문서�
  왼쪽 도구 40px                                                         오른쪽 관심종목 264px
 ```
 
-**영역마다 켜지는 단계**: 위 막대의 종목·봉 주기·봉 모양·로그와 범례는 #2, 관심종목과 자동 저장 표시는 #3, 연결 상태는 #4, 지표·비교는 #5, 왼쪽 도구는 #6, 칸 배치·레이아웃 메뉴·동기화 칩은 #7, 알림은 #8부터 보인다. 켜지기 전에는 자리째 숨긴다. 꺼진 버튼으로 남겨 두지 않는다.
+**영역마다 켜지는 단계**: 위 막대의 종목·봉 주기(일·주·월)·봉 모양·로그와 범례는 #2, 거래소 선택기와 분봉 봉 주기는 #14, 관심종목과 자동 저장 표시는 #3, 연결 상태는 #4, 지표·비교는 #5, 왼쪽 도구는 #6, 칸 배치·레이아웃 메뉴·동기화 칩은 #7, 알림은 #8부터 보인다. 켜지기 전에는 자리째 숨긴다. 꺼진 버튼으로 남겨 두지 않는다.
 
 **위쪽 막대**: 왼쪽에서 오른쪽으로, 활성 칸에 대한 것에서 화면 전체에 대한 것 순서로 놓는다.
 
 1. 종목 버튼(활성 칸의 종목, 누르면 검색)
-2. 봉 주기 9개(분 여섯과 일·주·월 사이에 간격)
-3. 봉 모양 메뉴(캔들·바·라인·영역)
-4. 지표, 비교, 로그 축
-5. 빈 공간
-6. 레이아웃 이름 메뉴, 새 레이아웃으로 복제, 칸 배치 5개
-7. 동기화 토글(십자선, 스크롤)
-8. 알림, 테마
+2. 거래소 선택기(#14): `통합` `KRX` `NXT` 세 칸의 분할 버튼. 고른 칸은 봉 주기와 같은 `aria-pressed` 모양이다.
+   - 지수면 자리째 숨긴다. 지수에는 거래소가 없다.
+   - NXT 불가 종목(`SymbolInfo.nxtEnabled = false`)이면 `NXT`를 `aria-disabled`로 두고, `title`과 접근성 이름에 `NXT에서 거래되지 않는 종목`을 적는다. `disabled`가 아니라서 초점을 받아 이유를 읽을 수 있다.
+   - 종목 정보를 아직 못 받았으면 `NXT`를 비활성으로 둔다. 받은 뒤 켠다.
+3. 봉 주기 9개(분 여섯과 일·주·월 사이에 간격). #2에는 일·주·월만, #14부터 9개다.
+4. 봉 모양 메뉴(캔들·바·라인·영역)
+5. 지표, 비교, 로그 축
+6. 빈 공간
+7. 레이아웃 이름 메뉴, 새 레이아웃으로 복제, 칸 배치 5개
+8. 동기화 토글(십자선, 스크롤)
+9. 알림, 테마
 
-봉 주기, 봉 모양, 지표, 비교, 로그는 **활성 칸**에만 적용된다. 활성 칸은 호박색 1px 안쪽 테두리로 표시한다. 1칸일 때는 테두리를 숨긴다.
+거래소, 봉 주기, 봉 모양, 지표, 비교, 로그는 **활성 칸**에만 적용된다. 활성 칸은 호박색 1px 안쪽 테두리로 표시한다. 1칸일 때는 테두리를 숨긴다.
 
 **왼쪽 드로잉 도구**
 - 차례: 선택·이동, 추세선, 수평선, 수직선, 사각형, 피보나치 되돌림, 텍스트, 구분선, 자석 모드, 되돌리기, 지우기.
@@ -250,8 +267,8 @@ D3의 표를 그대로 옮긴다. 단계 번호는 이슈 번호다. 이 문서�
 
 범례는 칸 왼쪽 위에 겹쳐 놓는다(목업 `.legend`). 줄 순서는 다음과 같다.
 
-1. **머리줄**: 종목 연동 꼬리표, 종목 이름(650), 코드(지수는 시장 이름), 봉 주기
-2. **가격줄**: 종가(크게, 등락색), 전 봉 대비 변화량과 %, 봉 시각
+1. **머리줄**: 종목 연동 꼬리표, 종목 이름(650), 코드(지수는 목업처럼 `지수`. 코드의 `symbolSub`), 거래소(#14. `통합`·`KRX`·`NXT`, 지수는 없음), 봉 주기
+2. **가격줄**: 종가(크게, 등락색), 전 봉 대비 변화량과 %, 봉 시각. 분봉의 봉 시각은 날짜까지 쓴다(`2026-11-06 19:55`). 1년치를 스크롤할 때 시각만 있으면 어느 날인지 알 수 없다. 시간축 눈금만 하루 안을 `HH:mm`, 날짜가 바뀌는 눈금을 `11-06`으로 쓴다(#14).
 3. **OHLCV 줄**: `시 고 저 종 량`. 이름표 글자는 `--text-3`, 값은 `--text`
 4. **가격 패널 지표**: 줄마다 색 견본 10×2px, 이름과 설정값(`이동평균 20`, `볼린저 밴드 20 2`), 값
 5. **비교 종목**: 이름(`--text` 색)과 % 변화(등락색). 기준은 화면 왼쪽 끝 봉이다
@@ -298,6 +315,7 @@ D3의 표를 그대로 옮긴다. 단계 번호는 이슈 번호다. 이 문서�
   - 예: `ㅅㅅ` → 삼성물산, 삼성바이오로직스, 삼성생명, 삼성전기, 삼성전자, 삼성SDI, 신세계(모두 초성 접두·보통주), 삼성전자우(우선주).
   - 브라우저는 결과를 다시 정렬하지 않는다. `Intl.Collator('ko')`는 숫자를 한글보다 앞에 두므로 서버 규칙과 다르다. 목업의 `V.search`는 이 Collator를 쓰는 근사이고, 숫자가 섞인 이름에서는 서버와 순서가 다를 수 있다.
   - 브라우저는 서버가 준 순서를 그대로 보인다. 목업의 `V.search`는 이 규칙을 흉내 낸 대역이다.
+- **종목을 열 때의 거래소**(#14): 활성 칸의 거래소는 §5.3 `setSymbol`의 세 규칙을 따른다. 고른 종목이 지수면 거래소가 사라지고, 주식이면 지금 거래소를 그 종목이 허용할 때 유지한다. 결과의 `SymbolInfo.nxtEnabled`로 판단하므로 따로 조회하지 않는다.
 - **봉 주기 단축키와의 충돌**: 아무 글자나 치면 검색이 열리는 방식은 쓰지 않는다. 숫자와 D·W·M을 봉 주기 단축키로 쓰기 때문이다. 검색은 `/`로 연다.
 
 ### 3.2 키보드 단축키
@@ -323,6 +341,7 @@ D3의 표를 그대로 옮긴다. 단계 번호는 이슈 번호다. 이 문서�
 | `←` `→` | 십자선을 한 봉씩 옮기기(키보드로 범례 읽기) |
 | `+` `−` / `Home` `End` | 확대·축소 / 처음·최신 봉으로 |
 
+- **#2에서 켜진 키**: `/`, `Ctrl+K`, `D` `W` `M`, `[` `]`, `L`, 대화상자의 `Esc`. #14에서 분봉 키(`1` `3` `5`, `Shift+1` `Shift+3` `Shift+6`)를 켠다. `[` `]`도 9개 봉 주기를 오간다. 거래소에는 단축키를 두지 않는다. 표 하나(`lib/hotkeys.ts`의 `HOTKEYS`)에 정의하고 `event.code`로 판단한다. 한글 입력 상태에서도 같게 동작한다.
 - **충돌 정리**: `Ctrl+1~4`는 브라우저 탭 전환과 부딪히고, `Alt+숫자`는 리눅스 Chrome 탭 전환과 부딪힌다. 그래서 칸 이동은 `` ` ``와 `Tab`으로 한다.
 - **목업**
   - 왼쪽 도구와 위 막대 버튼의 툴팁이 이 표와 같다.
@@ -437,7 +456,7 @@ D3의 표를 그대로 옮긴다. 단계 번호는 이슈 번호다. 이 문서�
   - 60분봉에서 14:00에 찍은 점은 일봉에서 그날 봉 안의 `14/24` 자리에 보인다.
   - 이렇게 하면 일봉에서 그은 추세선이 60분봉에서도 같은 날·같은 가격에 놓인다(#6 완료 조건). 두 순간이 8시간 다르다는 사실은 저장값에 그대로 남고, 화면은 체결이 없는 틈을 접어서 보여 줄 뿐이다.
 
-**종목에 붙는다**: 드로잉은 `symbol` 단위로 받는다(`GET /api/drawings?symbol=`). 같은 종목을 연 칸이 여럿이면 모두 같은 드로잉을 보인다. 한 칸에서 고치면 다른 칸도 곧바로 다시 그린다(같은 탭 안은 스토어 공유, 다른 탭은 `data_changed`).
+**종목에 붙는다**: 드로잉은 `symbol` 단위로 받는다(`GET /api/drawings?symbol=`). 거래소와 무관하다(ADR 0007). KRX 칸과 NXT 칸에 같은 종목을 열면 같은 드로잉이 보인다. 같은 종목을 연 칸이 여럿이면 모두 같은 드로잉을 보인다. 한 칸에서 고치면 다른 칸도 곧바로 다시 그린다(같은 탭 안은 스토어 공유, 다른 탭은 `data_changed`).
 
 **비교 종목이 있을 때**: % 축이라도 드로잉은 주 종목의 가격으로 고정한다. 좌표 변환은 주 시리즈의 `priceToCoordinate`가 % 모드를 고려해 해 준다.
 
@@ -449,7 +468,7 @@ D3의 표를 그대로 옮긴다. 단계 번호는 이슈 번호다. 이 문서�
 |---|---|---|---|
 | 십자선 | 위 막대 칩 `십자선` | 켬 | 한 칸에서 십자선을 움직이면 다른 칸은 그 시각의 봉(없으면 직전 봉)의 종가에 십자선을 둔다. 봉 주기가 달라도 맞춘다 |
 | 스크롤 | 위 막대 칩 `스크롤` | 켬 | 같은 봉 주기 칸끼리만 보이는 범위를 맞춘다. 봉 주기가 다른 칸은 따라오지 않는다 |
-| 종목 연동 | 칸 범례 머리의 꼬리표 | 칸마다 | 꼬리표를 누르면 켜고 끈다. 연동이 켜진 칸끼리는 종목이 같다. 하나를 바꾸면 모두 바뀐다. 봉 주기는 따라가지 않는다 |
+| 종목 연동 | 칸 범례 머리의 꼬리표 | 칸마다 | 꼬리표를 누르면 켜고 끈다. 연동이 켜진 칸끼리는 종목이 같다. 하나를 바꾸면 모두 바뀐다. 봉 주기와 거래소는 따라가지 않는다. 각 칸의 거래소는 §5.3 `setSymbol` 규칙으로 정한다. 그래서 KRX 칸과 NXT 칸을 연동해 두고 종목만 바꿔 볼 수 있다 |
 
 - **연동 그룹**: 백엔드 계약에서 종목 연동은 칸마다 `Cell.symbolLink: boolean`이다. 그래서 그룹은 하나다. 꼬리표는 켜짐이면 호박색 `A`, 꺼짐이면 회색 `·`이다. 여러 그룹은 확장 후보로 남긴다.
 - **스크롤 동기화의 기준**
@@ -493,6 +512,8 @@ D3의 표를 그대로 옮긴다. 단계 번호는 이슈 번호다. 이 문서�
 | 비교 종목 | 그 비교 종목 선만 그리지 않는다. 범례 줄에 흐린 이름과 `찾을 수 없음`, 지우기 버튼을 남긴다 |
 | 관심종목 행 | 이름을 흐리게, 현재가 자리에 `찾을 수 없음`을 적는다. 사용자가 지울 때까지 목록에 남긴다 |
 | 주소의 `?symbol=` | 지금 칸은 그대로 두고 화면 아래 알림으로 `주소의 종목 999999를 찾을 수 없습니다`를 6초 띄운다 |
+| 주소의 `?venue=`(#14) | 종목이 그 거래소를 허용하지 않으면(지수에 거래소, NXT 불가 종목에 `nxt`, 모르는 값) 통합으로 연다. 지수면 거래소 없이 연다. NXT 불가 종목에 `nxt`를 바랐으면 화면 아래 알림으로 `NXT에서 거래되지 않아 통합으로 엽니다`를 띄운다. 모르는 값은 알림 없이 통합이다. 종목 정보를 받지 못하면(`unknown_symbol` 밖의 실패) NXT 허용을 모르므로 알림 없이 통합으로 연다 |
+| 봉 요청의 `bad_request`(#14) | 브라우저가 허용되지 않는 거래소를 보내는 것은 버그다. 칸 오류와 같이 `message`를 칸 가운데에 적고 `다시 시도`를 둔다 |
 
 **`payload_too_large`**(#3~, 413): `chartSettings`·`UiState`·드로잉 `style`이 64KB를 넘었다.
 - **미리 막는다**: 자동 저장은 보내기 전에 본문의 바이트 수(`TextEncoder`)를 잰다. 64KB를 넘으면 보내지 않고 바로 아래 실패 상태로 간다. 413은 이 검사가 놓친 경우의 마지막 방어다.
@@ -561,7 +582,7 @@ D3의 표를 그대로 옮긴다. 단계 번호는 이슈 번호다. 이 문서�
 
 ```
 ┌──────────────────────────────┐
-│삼성전자 005930            ☼  │  머리: 종목, 현재가(24px, 등락색), 등락
+│삼성전자 005930  [통합|KRX|NXT] ☼│  머리: 종목, 거래소 선택기(#14), 현재가(24px, 등락색), 등락
 │85,400 −500 −0.58%            │
 │● 실시간 14:32:08  Lightweight…│  연결 상태·마지막 갱신 시각, 라이브러리 표기(11px)
 │(5분)(15분)(60분)(일)(주)(월) ⌇│  봉 주기 칩(가로 스크롤) + 지표 버튼
@@ -595,7 +616,8 @@ D3의 표를 그대로 옮긴다. 단계 번호는 이슈 번호다. 이 문서�
   - 아래 탭의 `관심종목`을 누르면 전체 화면 목록이 된다. 행을 누르면 그 종목으로 차트 탭에 돌아온다.
   - 행 높이는 44px 이상이다.
   - 순서 바꾸기, 추가, 삭제는 할 수 있다. 길게 눌러 끌기, 왼쪽으로 밀어 삭제다.
-- **봉 주기 전환**: 칩 여섯 개(5분, 15분, 60분, 일, 주, 월)를 둔다. 1·3·30분은 칩을 길게 누르면 나오는 메뉴에 둔다(D11에서 확정). 칩을 늘리지 않는다.
+- **거래소 전환**(#14): 머리 첫 줄의 종목 이름 오른쪽, 테마 버튼 앞에 데스크톱과 같은 `통합` `KRX` `NXT` 분할 버튼을 둔다. 버튼 높이는 36px이다. 지수면 숨기고, NXT 불가 종목이면 `NXT`를 비활성으로 둔다. 종목 이름이 길면 이름을 줄여(말줄임) 자리를 낸다.
+- **봉 주기 전환**: 칩 여섯 개(5분, 15분, 60분, 일, 주, 월)를 둔다. 1·3·30분은 칩을 길게 누르거나 상황 메뉴 키로 여는 메뉴에 둔다(D11에서 확정). 칩을 늘리지 않는다. 다만 메뉴로 고른 1·3·30분을 보는 동안에는 지금 주기를 알 수 있게 그 칩을 맨 앞에 하나 더 보인다. #2의 칩은 일·주·월 셋이고(`PeriodChips`, 높이 36px), 분봉 칩은 #14에서 켠다.
 - **지표 전환**
   - 칩 줄 끝의 지표 버튼으로 시트를 연다. 이 칸 지표들을 켜고 끄며, 지표 종류를 기본값으로 추가하거나 지운다.
   - 설정값 편집은 데스크톱에서 한다. 휴대폰은 "보기 위주"이므로 입력 폼을 줄인다.
@@ -611,7 +633,7 @@ D3의 표를 그대로 옮긴다. 단계 번호는 이슈 번호다. 이 문서�
 
 **휴대폰 차트 상태의 저장 위치**
 - 휴대폰에서 종목을 바꿀 때마다 데스크톱 레이아웃의 칸이 바뀌면 안 된다.
-- 그래서 휴대폰 칸 하나의 상태 `{ symbol, period, chartSettings }`를 `UiState.phone`에 따로 둔다. 서버는 모르는 키를 버리지 않고 왕복시키며, `UiState` 전체는 64KB 제한을 받는다(D10). 지표 수십 개를 넣어도 넘지 않는다.
+- 그래서 휴대폰 칸 하나의 상태 `{ symbol, venue, period, chartSettings }`를 `UiState.phone`에 따로 둔다. `venue`는 `Cell.venue`와 같은 규칙이다(지수면 `null`). 서버는 모르는 키를 버리지 않고 왕복시키며, `UiState` 전체는 64KB 제한을 받는다(D10). 지표 수십 개를 넣어도 넘지 않는다.
 - 처음에는 마지막 레이아웃의 첫 칸에서 복사한다.
 
 **머리줄**: 범례의 머리줄과 가격줄은 휴대폰 머리로 올라간다. 칸 안 범례에는 OHLCV 줄과 지표 줄만 남는다.
@@ -622,63 +644,76 @@ D3의 표를 그대로 옮긴다. 단계 번호는 이슈 번호다. 이 문서�
 
 ### 5.1 폴더와 라우트
 
+`(#N)`이 붙은 것은 그 단계에서 만든다. 붙지 않은 것은 #2에 있다.
+
 ```
 web/
   index.html
-  vite.config.ts            # wasm 플러그인 없이 동작(§5.6). /api 프록시 → 127.0.0.1 서버
-  tailwind.config.ts        # 색·간격·글꼴은 CSS 변수 참조: colors.up = "var(--up)" 등
+  vite.config.ts            # @tailwindcss/vite. 기본은 dev 서버가 가짜 API(dev/fakeApi.ts)로 답한다.
+                            # VITE_FAKE_API=0이면 /api를 127.0.0.1:8080 서버로 보낸다. wasm 플러그인 없음(§5.6)
+  dev/
+    fakeApi.ts              # 개발용 가짜 /api. fakeMarket.ts가 봉을 만든다
   src/
-    main.tsx                # QueryClient, Router, 테마 적용
-    styles/tokens.css       # §1.2 토큰. :root(다크) + [data-theme="light"]
+    main.tsx                # QueryClient, Router
+    App.tsx                 # ChartScreen: 데스크톱·휴대폰 껍데기
+    styles/
+      tokens.css            # §1.2 토큰. :root(다크) + [data-theme="light"]
+      index.css             # Tailwind v4 @theme inline(토큰 변수만 가리킴), 글꼴, 공통 클래스
     api/
-      generated.ts          # ts-rs가 만든 계약 타입(백엔드 §8). 손대지 않는다
-      http.ts               # fetch 래퍼, ApiError 해석
-      queries.ts            # TanStack Query 훅: useSymbolSearch, useLayouts, useLayout, useDrawings, useWatchlist, useAlerts, useUiState
-      socket.ts             # MarketSocket: WebSocket 하나, 구독 다중화, 다시 연결
+      generated/            # ts-rs가 만든 계약 타입(백엔드 §8). 타입마다 한 파일. 손대지 않는다
+      http.ts               # fetch 래퍼, ApiError 해석(ApiRequestError)
+      bars.ts               # fetchBarsPage. 봉은 React Query가 아니라 컨트롤러가 갖는다
+      queries.ts            # TanStack Query 훅: useSymbolSearch, useSymbolInfo. (#3~) useLayouts, useWatchlist, useUiState …
+      socket.ts             # (#4) MarketSocket: WebSocket 하나, 구독 다중화, 다시 연결
     chart/                  # React를 모르는 명령형 코드
       ChartController.ts    # 칸 하나의 차트 엔진 래퍼(§5.4)
-      series.ts             # 봉 모양별 주 시리즈 생성, 테마 적용
-      indicators/
-        worker.ts           # Web Worker: WASM 로드, Engine 보관(§5.6)
-        client.ts           # 워커와 주고받는 Promise API
-        render.ts           # Output → LWC 시리즈/pane 매핑
-      drawings/
-        DrawingPrimitive.ts # ISeriesPrimitive 구현(그리기, hit-test)
-        tools.ts            # 도구별 점 수, 그리기, 손잡이
-        anchor.ts           # (t, price) ↔ 좌표 변환(§3.5)
-        magnet.ts
-      CloudPrimitive.ts     # 일목 구름 채우기
-      sync.ts               # 칸 사이 십자선·스크롤 동기화 버스
-      time.ts               # KST 표시 변환(t + 32400), 봉 주기 길이
+      barFeed.ts            # 칸 하나의 봉 받기: 세대, 최신 페이지, 과거 페이지 이어 붙이기
+      legend.ts             # 범례 DOM(§2.3)
+      series.ts             # 봉 모양별 주 시리즈와 거래량 시리즈, 색 적용
+      settings.ts           # ChartSettings(§5.5)
+      theme.ts              # CSS 변수 → ThemeTokens
+      time.ts               # KST 표시 변환(t + 32400), 봉 시각 표기
+      indicators/           # (#5) worker.ts, client.ts, render.ts(§5.6)
+      drawings/             # (#6) DrawingPrimitive.ts, tools.ts, anchor.ts(§3.5), magnet.ts
+      CloudPrimitive.ts     # (#5) 일목 구름 채우기
+      sync.ts               # (#7) 칸 사이 십자선·스크롤 동기화 버스
     stores/
-      layout.ts             # useLayoutStore
-      selection.ts          # useSelectionStore
-      drawingHistory.ts     # useDrawingHistoryStore
-      connection.ts         # useConnectionStore(상태 줄 전용, 작은 스토어)
+      layout.ts             # useLayoutStore(§5.3). #2는 메모리의 기본 1칸
+      selection.ts          # useSelectionStore: 활성 칸, 열린 대화상자, 아래 알림
+      recent.ts             # 최근 본 종목(#2는 메모리, #3~ UiState.recentSymbols)
+      theme.ts              # 테마(localStorage, #3~ UiState.theme)
+      drawingHistory.ts     # (#6) useDrawingHistoryStore
+      connection.ts         # (#4) useConnectionStore(상태 줄 전용, 작은 스토어)
     features/
-      topbar/               # 종목 버튼, 봉 주기, 지표·비교·로그, 레이아웃 메뉴, 동기화 칩
-      tools/                # 왼쪽 드로잉 도구
-      grid/                 # 칸 배치, ChartCell(컨트롤러를 붙였다 떼는 얇은 컴포넌트)
-      watchlist/
-      status/
-      search/               # 검색 대화상자, 초성 강조
-      indicator-dialog/
-      alert-dialog/
-      phone/                # 휴대폰 머리, 칩, 아래 탭, 시트
+      topbar/               # 종목 버튼, 봉 주기, 봉 모양 메뉴(StyleMenu), 로그. (#5~) 지표·비교, (#7) 레이아웃 메뉴, 동기화 칩
+      grid/                 # ChartCell(컨트롤러를 붙였다 떼는 얇은 컴포넌트), cellError.ts(§3.7a 오류 문장)
+      search/               # 검색 대화상자, 결과 목록, 초성 강조
+      status/               # 상태 줄, 라이브러리 표기
+      toast/                # 화면 아래 알림(주소의 종목을 찾을 수 없음 등)
+      phone/                # 휴대폰 머리, 봉 주기 칩, 아래 탭
+      useHotkeys.ts         # §3.2 단축키
+      useOpenFromAddress.ts # 주소의 ?symbol=&period=(#14~ &venue=)로 활성 칸 열기
+      tools/                # (#6) 왼쪽 드로잉 도구
+      watchlist/            # (#3)
+      indicator-dialog/     # (#5)
+      alert-dialog/         # (#8)
     lib/
       format.ts             # 가격·거래량·% 표기(§1.3)
-      hotkeys.ts            # §3.2 표 하나로 정의, 도움말도 이 표에서 생성
-      autosave.ts           # 1초 디바운스, 재시도, keepalive
+      hotkeys.ts            # §3.2 표 하나로 정의. (#3~) 도움말도 이 표에서 생성
+      symbol.ts             # 지수 판별, 봉 주기 이름, 켜진 봉 주기(PERIODS_ON)
+      autosave.ts           # (#3) 1초 디바운스, 재시도, keepalive
 ```
 
 **라우트**(React Router): 데스크톱과 휴대폰은 같은 라우트를 쓰고 폭에 따라 화면 껍데기만 바꾼다.
 
 | 경로 | 화면 |
 |---|---|
-| `/` | `UiState.lastLayoutId`로 이동. 없으면 첫 레이아웃 |
-| `/layout/:layoutId` | 차트 화면. 데스크톱은 레이아웃, 휴대폰은 `UiState.phone` 칸(#3~. #2에는 `/`만 있고 메모리의 기본 1칸을 보인다) |
-| `/layout/:layoutId?symbol=005930&period=D` | 활성 칸을 이 종목으로 열기(알림 메시지 링크, 외부 바로가기) |
-| `/alerts` | 알림 목록 서랍을 연 상태(7단계) |
+| `/` | #2: 메모리의 기본 1칸(코스피 일봉). #3~: `UiState.lastLayoutId`로 이동. 없으면 첫 레이아웃 |
+| `/?symbol=005930&venue=krx&period=5m` | 활성 칸을 이 종목·거래소·봉 주기로 열기(알림 메시지 링크, 외부 바로가기). 읽은 뒤 주소에서 지운다. #2에는 `venue`가 없다. 셋 다 빠져도 된다. `venue`가 없으면 §5.3 `setSymbol` 규칙을 따른다. 그 종목이 허용하지 않는 거래소면 통합으로 열고 알린다(§3.7a) |
+| `/layout/:layoutId` | (#3~) 차트 화면. 데스크톱은 레이아웃, 휴대폰은 `UiState.phone` 칸 |
+| `/layout/:layoutId?symbol=005930&venue=krx&period=5m` | (#3~) 위와 같이 활성 칸을 열기 |
+| `/alerts` | (#8) 알림 목록 서랍을 연 상태 |
+| 그 밖 | `/`로 보낸다 |
 
 대화상자(검색, 지표, 알림 만들기)는 라우트로 만들지 않는다. 뒤로 가기로 닫히는 것보다 `Esc`가 일관된다.
 
@@ -697,17 +732,59 @@ web/
 
 ### 5.3 Zustand 스토어 나누기
 
+**#2·#14의 `stores/layout.ts`**: 서버 `Layout`이 아직 없다(#3). 메모리에 칸 목록만 둔다.
+
+```ts
+interface CellState {
+  slot: Slot;
+  symbol: SymbolCode;
+  venue: Venue | null;                  // #14. 지수면 null, 주식이면 언제나 값이 있다. 기본 "combined"
+  period: Period;
+  chartSettings: ChartSettings;
+}
+const DEFAULT_CELL: CellState = { slot: 0, symbol: "IDX:001", venue: null, period: "D", chartSettings: DEFAULT_CHART_SETTINGS };
+
+interface LayoutState {
+  cells: CellState[];
+  setSymbol(slot: Slot, info: SymbolInfo): void;   // #14부터 SymbolInfo를 받는다. 거래소 규칙에 nxtEnabled가 필요하다
+  setVenue(slot: Slot, v: Venue): void;            // #14. 지수 칸이나 허용되지 않는 거래소는 무시한다
+  setPeriod(slot: Slot, p: Period): void;
+  setStyle(slot: Slot, s: ChartStyle): void;
+  setScale(slot: Slot, s: PriceScale): void;
+}
+```
+
+**종목을 바꿀 때의 거래소**(#14, ADR 0007): `setSymbol`이 정한다. 규칙은 셋이다.
+
+1. 새 종목이 지수면 `venue = null`이다.
+2. 새 종목이 주식이고 지금 거래소가 있으면, 그 종목이 허용할 때 유지하고 아니면 `combined`다. 허용되지 않는 것은 `nxtEnabled = false`인 종목의 `nxt` 하나뿐이다.
+3. 지수에서 주식으로 오면(`venue`가 `null`이었으면) `combined`다.
+
+```ts
+function venueFor(prev: Venue | null, next: SymbolInfo): Venue | null {
+  if (next.kind === "index") return null;
+  if (prev === null) return "combined";
+  return prev === "nxt" && !next.nxtEnabled ? "combined" : prev;
+}
+```
+
+- 이 함수 하나를 검색(§3.1), 주소(§5.1), 종목 연동(§3.6, #7), 휴대폰(§4)이 함께 쓴다.
+- 주소처럼 거래소를 직접 받는 경로는 받은 값을 `venueFor`의 `prev` 자리에 넣는다. 결과가 받은 값과 다르면 알린다(§3.7a).
+
+**#3~의 모양**(서버 `Layout`의 편집 사본). `Cell`에 `venue`가 있고, 행동 이름은 위와 같다.
+
 ```ts
 // stores/layout.ts: 지금 열린 레이아웃 하나(서버 Layout의 편집 사본)
 // type Slot = Cell["slot"]  (0 | 1 | 2 | 3). 코드에서 pane은 Lightweight Charts의 패널만 뜻한다(D10)
 interface LayoutState {
-  layout: Layout;                       // generated.ts의 Layout. cells[].chartSettings는 ChartSettings로 해석해 둔다
+  layout: Layout;                       // api/generated/의 Layout(#3~). cells[].chartSettings는 ChartSettings로 해석해 둔다
   dirty: boolean;
   saveState: "idle" | "pending" | "saving" | "saved" | "failed";
   savedAt: number | null;
   // 행동: 모두 layout을 바꾸고 dirty = true, autosave가 1초 뒤 PUT
   setArrangement(a: Arrangement): void;
-  setSymbol(slot: Slot, code: SymbolCode): void;   // 종목 연동이 켜진 칸들에 함께 적용
+  setSymbol(slot: Slot, info: SymbolInfo): void;   // 종목 연동이 켜진 칸들에 함께 적용. 칸마다 venueFor로 거래소를 정한다
+  setVenue(slot: Slot, v: Venue): void;
   setPeriod(slot: Slot, p: Period): void;
   setStyle(slot: Slot, s: ChartStyle): void;
   addIndicator(slot: Slot, ind: IndicatorConfig): void;
@@ -750,16 +827,36 @@ interface DrawingHistoryState {
 ### 5.4 차트 엔진 래퍼: 칸마다 명령형 컨트롤러
 
 ```ts
+interface CellView {
+  symbol: SymbolCode;
+  venue: Venue | null;                      // #14
+  period: Period;
+  settings: ChartSettings;
+  info: SymbolInfo | undefined;             // 범례 머리줄의 이름. 아직 못 받았으면 코드만 쓴다
+}
+
+/** React가 그리는 칸 상태. 휴대폰 머리와 칸 오류·과거 봉 오류 꼬리표가 쓴다. */
+type CellStatus =
+  | { kind: "loading" }
+  | { kind: "ready"; latest: Bar; prev: Bar | null; isCurrent: boolean; fetchedAt: number; olderError: ApiRequestError | null }
+  | { kind: "error"; error: ApiRequestError };
+
 class ChartController {
-  constructor(el: HTMLElement, deps: { socket: MarketSocket; indicators: IndicatorClient; sync: SyncBus; theme: ThemeTokens });
-  // 칸의 설정을 맞춘다. 바뀐 부분만 반영(diff): 종목·봉 주기가 바뀌면 데이터부터, 지표만 바뀌면 그 지표만
-  apply(cell: { symbol: SymbolCode; period: Period; settings: ChartSettings }): void;
+  constructor(el: HTMLElement, deps: { tokens: ThemeTokens; onStatus: (s: CellStatus) => void; fetchPage?: FetchPage });
+  // (#4~) deps에 socket: MarketSocket, (#5~) indicators: IndicatorClient, (#7~) sync: SyncBus를 더한다
+  // 칸의 설정을 맞춘다. 바뀐 부분만 반영(diff): 종목·거래소·봉 주기가 바뀌면 데이터부터, 봉 모양·축만 바뀌면 그것만
+  apply(cell: CellView): void;
+  reload(): void;                           // 같은 종목·봉 주기를 처음부터(칸 오류의 `다시 시도`)
+  retryOlder(): void;                       // 실패한 과거 페이지를 다시(과거 봉 오류의 `다시 시도`)
   setTheme(t: ThemeTokens): void;           // 모든 시리즈·primitive 색 다시 적용
-  setDrawings(list: Drawing[], editable: boolean): void;
-  setActive(active: boolean): void;
+  setDrawings(list: Drawing[], editable: boolean): void;   // (#6~)
+  setActive(active: boolean): void;                         // (#7~)
   dispose(): void;                          // 구독 해지, 워커 엔진 해제, chart.remove()
 }
 ```
+
+- `fetchPage`는 테스트가 가짜 응답을 넣는 자리다. 기본은 `api/bars.ts`의 `fetchBarsPage`다.
+- 봉 받기와 세대는 `chart/barFeed.ts`의 `BarFeed`가 맡는다. 컨트롤러는 `BarFeed`가 알려 주는 `reset`, `prepended`, `failed`, `olderFailed`를 받아 그린다.
 
 **React와의 경계**
 - `features/grid/ChartCell.tsx`는 `useEffect`로 컨트롤러를 만들고, 칸 설정이 바뀌면 `apply`만 부른다.
@@ -768,16 +865,17 @@ class ChartController {
 
 **시리즈 세대**(D1)
 - 칸마다 `generation: number`를 둔다. 주 종목과 비교 종목 각각의 시리즈 묶음이 세대 하나를 공유한다.
-- 세대를 올리는 때: 종목·봉 주기가 바뀔 때, `reload`를 받을 때, 브라우저↔서버 WebSocket이 다시 연결될 때(새 `hello`).
+- 세대를 올리는 때: 종목·거래소·봉 주기가 바뀔 때, `reload`를 받을 때, 브라우저↔서버 WebSocket이 다시 연결될 때(새 `hello`).
 - REST 요청, 워커 요청은 보낼 때의 세대를 들고 간다. 응답이 왔을 때 세대가 지금과 다르면 버린다. 과거 페이지 요청도, WASM 결과도 같다.
 
 **데이터 흐름**(한 칸. D1의 처리 순서)
 
 ```
-apply(symbol, period)  또는  reload  또는  새 hello      ── generation += 1, 시리즈와 엔진을 비운다
-  1. socket.subscribe(sub, symbol, period)                  (#4~. #2·#3에는 1·2·4가 없다)
+apply(symbol, venue, period)  또는  reload  또는  새 hello ── generation += 1, 시리즈와 엔진을 비운다
+  1. socket.subscribe(sub, symbol, venue, period)           (#4~. #2·#14·#3에는 1·2·4가 없다)
   2. 그 sub의 메시지(subscribed/bar/confirmed/reload)를 버퍼에 쌓는다. 메시지마다 seq가 있다
-  3. GET /api/bars (최신 페이지) → page.bars + page.current, page.seq
+  3. GET /api/bars?symbol=&venue=&period= (최신 페이지) → page.bars + page.current, page.seq
+     (지수면 venue를 빼고 보낸다. BarsQuery.venue)
      → series.setData(page.bars + page.current)             ← 세대마다 한 번만 setData
      → indicators.create(spec들, 확정 봉 열)                 (#5~)
   4. 버퍼에서 seq > page.seq 인 메시지만 seq 순서로 적용, 나머지는 버린다
@@ -791,7 +889,7 @@ apply(symbol, period)  또는  reload  또는  새 hello      ── generation 
                   → 엔진은 이미 이 봉을 커밋했다. 지표 선과 범례를 tail로 갱신한다
      reload     → 세대를 올리고 1~4를 처음부터(구독은 유지하므로 1은 건너뛴다)
 과거로 스크롤(subscribeVisibleLogicalRangeChange, 왼쪽 끝이 50봉 안으로 들어오면)
-  └─ GET /api/bars?before=nextBefore
+  └─ GET /api/bars?before=nextBefore (symbol, venue, period는 최신 페이지와 같다)
      → 과거 구간의 확정 봉만 담긴다. 이미 가진 봉보다 늦은 t는 덮어쓰지 않는다(D1)
      → 앞에 붙여 setData, 보이는 범위 유지
      → indicators.create로 엔진을 다시 만든다(EMA 계열은 앞이 바뀌면 덧붙일 수 없다: 백엔드 §9.2)
@@ -810,13 +908,13 @@ apply(symbol, period)  또는  reload  또는  새 hello      ── generation 
   - 과거로 스크롤해 받아 둔 구간은 버린다. 보이는 범위는 최신 쪽으로 돌아간다. 드로잉은 따로 저장되므로 영향이 없다.
   - "`confirmed`를 빠짐없이 보낸다"는 보장은 연결이 살아 있는 동안에만 적용되기 때문이다.
 - **분봉은 최근 1년까지**(U1, ADR 0003)
-  - 분봉에서 과거로 스크롤하다 `nextBefore`가 `null`이 되면 가격 패널 왼쪽 끝 위에 `분봉은 최근 1년까지 볼 수 있습니다. 더 과거는 일봉으로 보세요` 꼬리표를 띄운다. 꼬리표의 `일봉으로 보기`를 누르면 활성 칸의 봉 주기가 일봉으로 바뀐다.
-  - 일·주·월봉에서 `null`이면 상장 이후 첫 봉이라 따로 알리지 않는다.
+  - 분봉에서 과거로 스크롤하다 `nextBefore`가 `null`이 되면 `분봉은 최근 1년까지 볼 수 있습니다. 더 과거는 일봉으로 보세요` 꼬리표를 띄운다(#14). 자리는 칸 왼쪽 가운데다. 왼쪽 위는 범례가 차지하고, 과거 봉 오류 안내와 같은 자리다. 1년의 끝은 서버가 정한다. 브라우저는 날짜를 계산하지 않고 `nextBefore = null`만 본다. 꼬리표의 `일봉으로 보기`를 누르면 활성 칸의 봉 주기가 일봉으로 바뀐다.
+  - 일·주·월봉에서 `null`이면 상장 이후 첫 봉이라 따로 알리지 않는다. NXT 일·주·월봉은 2025-03(NXT 시작)에서 끝나는데, 이것도 따로 알리지 않는다.
 - **과거 페이지를 받지 못했을 때**
   - 가진 봉은 그대로 둔다. 가격 패널 왼쪽 끝에 `과거 봉을 받지 못했습니다.`와 `ApiError.message`를 꼬리표로 띄운다(`role="alert"`).
   - 실패한 뒤에는 스크롤해도 과거 페이지를 다시 보내지 않는다. 인증 실패(`kiwoom_auth_failed`)는 운영자가 고쳐야 하므로 버튼을 두지 않는다. 그 밖의 오류는 `다시 시도` 버튼을 둔다(칸 오류의 §3.7a 판정과 같다).
-  - 종목·봉 주기를 바꾸거나 칸을 다시 열면 꼬리표를 걷는다.
-- **#2·#3의 흐름**(D3): WebSocket이 없으므로 1·2·4번과 이후 메시지 처리가 없다. 3번만 하고, `page.current`를 현재 봉 자리에 그린다. `page.seq`는 `null`이다.
+  - 종목·거래소·봉 주기를 바꾸거나 칸을 다시 열면 꼬리표를 걷는다.
+- **#2·#14·#3의 흐름**(D3): WebSocket이 없으므로 1·2·4번과 이후 메시지 처리가 없다. 3번만 하고, `page.current`를 현재 봉 자리에 그린다. `page.seq`는 `null`이다. 분봉도 같다.
 - **시각 변환**
   - 계약의 `t`는 진짜 Unix 초다. Lightweight Charts는 UTC로 표시한다.
   - 그래서 시리즈에 넘길 때 `t + 32400`(KST)을 쓴다. 이 변환은 `chart/time.ts` 한 곳에만 둔다.
@@ -922,7 +1020,7 @@ interface IndicatorConfig {
 
 ### 6.1 요구와 확인의 상태
 
-초안의 요구 8건과 1차 수정의 확인 5건이 모두 `backend.md`에 반영되었다(2026-11-08 대조). 남은 요구는 없다.
+초안의 요구 8건과 1차 수정의 확인 5건이 모두 `backend.md`에 반영되었다(2026-11-08 대조). #14의 거래소 계약도 반영되었다(2026-11-09 대조). 남은 것은 #4에서 정할 구독의 거래소 하나다.
 
 | 요구·확인 | 상태 | `backend.md`의 근거 |
 |---|---|---|
@@ -939,6 +1037,11 @@ interface IndicatorConfig {
 | 알림 기록의 봉 시각·봉 출처 | 반영됨 | §8.2 `AlertEvent.barT`, `AlertEvent.barSource`(D9, D13). 화면은 §3.8 |
 | 검색 동점의 이름 순서 | 반영됨 | §8.2. 한글 음절 < 라틴 문자 < 숫자 < 그 밖 |
 | 확정 순간의 지표 값 | 반영됨 | §9.2·§9.4 `pushConfirmed`가 `Tail`을 돌려준다(D13). 화면은 §5.4 |
+| 칸마다 거래소(#14) | 반영됨 | §8.1 `Venue`, §8.2 `GET /api/bars?venue=`와 `BarsPage.venue`(지수 null). 코드: 커밋 `003c532` |
+| NXT 가능 여부 | 반영됨 | §8.2 `SymbolInfo.nxtEnabled`. NXT 불가 종목의 `nxt` 요청은 400 `bad_request` |
+| 레이아웃 칸의 거래소(#3) | 반영됨 | §7.2 `layout_cells.venue`, §8.2 `Cell.venue` |
+| 분봉 과거 조회와 1년 끝(#14) | 반영됨 | §6.3·§6.5, §8.2. `nextBefore = null`이 1년 끝이다 |
+| 구독의 거래소(#4) | #4에서 확정 | §8.3 `subscribe.venue`는 초안이다 |
 
 계약에 이미 있어서 그대로 쓰는 것: `seq`와 `BarsPage.seq`(D1), `reload` 세 가지 이유, 연결이 살아 있는 동안의 `confirmed` 보장(D2), 관심종목 `quotes`, `data_changed`, `ConnectionStatus`, 레이아웃 복제를 새 id로 `PUT`하는 방식, 드로잉 점 `{ t, price }`, 알림 조건 타입, `validateSpec`(D6).
 
