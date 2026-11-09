@@ -82,4 +82,4 @@ The Rust code is not in rustfmt style. Do not run `cargo fmt` in a feature or fi
 
 ### This PC's environment (docs/dev-environment.md)
 
-AhnLab ASTx can drop connections, including loopback ones, while its session is active. Run local tests inside a network namespace: `unshare -Urn sh -c 'ip link set lo up && cargo test --offline'`. If Kiwoom returns `[8050]`, the public IP probably changed. Do not reissue tokens. Ask the user to register the new IP on the Kiwoom portal.
+If Kiwoom returns `[8050]`, the public IP probably changed. Do not reissue tokens. Ask the user to register the new IP on the Kiwoom portal.

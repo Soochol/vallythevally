@@ -2,20 +2,10 @@
 
 이 PC(로컬 개발·운영)에서 실제로 겪은 문제와 대처 방법이다. 자세한 진단은 이슈 #23에 있다.
 
-## AhnLab ASTx가 연결을 끊는다
-- **증상**
-  - 키움 조회가 15초 시간 초과로 끝난다. `error sending request` 또는 `error decoding response body`가 난다.
-  - 로컬 주소(127.0.0.1) 연결도 가끔 `hyper::Error(Io, ETIMEDOUT)`로 약 47초 뒤 실패한다.
-  - 같은 요청을 `curl`로 보내면 빨리 성공한다.
-- **원인(2026-11-09 확인)**
-  - 은행·증권 사이트 등이 ASTx 세션을 켜면, `astxdaemon`이 새 연결마다 어느 프로그램의 연결인지 검사한다.
-  - 일부 연결에는 `iptables -A astx-input … -j DROP` 규칙을 넣어 이미 맺어진 연결의 패킷을 버린다.
-  - 세션을 끈 뒤 같은 시험을 1,299회 돌렸을 때 실패는 0회였다. 세션이 켜져 있을 때는 232회 중 2회 실패했다.
-- **확인 방법**: `journalctl -t astxdaemon --since today | grep -E 'showTray|hideTray'`. 마지막이 `showTray`면 세션이 켜져 있다.
-- **대처**
-  - 세션을 연 금융 사이트 탭이나 브라우저를 닫는다.
-  - 그래도 남으면 `sudo systemctl restart astxdaemon.service`를 실행한다(사용자가 직접). 세션이 끝나면 저널에 `hideTray`가 찍힌다.
-- **테스트**: 세션이 켜져 있을 수 있으므로 로컬 테스트는 네트워크 이름공간 안에서 돌린다. 예: `unshare -Urn sh -c 'ip link set lo up && cargo test --offline'`. CI에는 ASTx가 없다.
+## 드문 경우: AhnLab ASTx가 연결을 끊는다
+- 이 PC에서 금융 사이트가 ASTx 세션을 켜면 생길 수 있다(2026-11-09 이후 다시 생기지 않음). 자세한 진단은 이슈 #23에 있다.
+- **증상**: 키움 조회가 15초 시간 초과로 끝나거나, 로컬 주소(127.0.0.1) 연결도 가끔 끊긴다. 같은 요청을 `curl`로 보내면 빨리 성공한다.
+- **확인과 대처**: `journalctl -t astxdaemon --since today | grep -E 'showTray|hideTray'`의 마지막이 `showTray`면 세션이 켜져 있다. 금융 사이트 탭이나 브라우저를 닫는다.
 - **하지 말 것**: ASTx를 지우거나 설정을 바꾸지 않는다. 금융 사이트 이용에 영향을 준다.
 
 ## 공인 IP가 바뀌면 키움이 8050을 준다

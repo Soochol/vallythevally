@@ -25,7 +25,7 @@ test("다시 보낼 수 있는 오류는 연결 상태를 멈춤으로 바꾸지
 });
 
 test("키움 응답 시간 초과는 상태 줄에 안내를 남기고, 다음 성공에서 지운다", async () => {
-  const message = "키움 응답이 15초 안에 오지 않았습니다(ka10095, 응답 대기 단계). 이 PC의 보안 프로그램(예: AhnLab ASTx)이 연결을 막고 있을 수 있습니다";
+  const message = "키움 응답이 15초 안에 오지 않았습니다(ka10095, 응답 대기 단계)";
   reply(503, { error: { code: "kiwoom_unavailable", message, reason: "kiwoom_timeout", retryAt: 1, manualActionRequired: false } });
   await expect(getJson("/api/quotes?symbols=005930")).rejects.toBeInstanceOf(ApiRequestError);
   expect(useKiwoomStore.getState().notice).toBe(message);
