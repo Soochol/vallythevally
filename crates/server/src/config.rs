@@ -315,6 +315,21 @@ mod tests {
         assert!(warnings[0].contains("VALLY_BIDN"));
     }
 
+    /// 시험이 REST만 가짜로 돌리면 서버가 실제 키움 WS에 붙는다(2026-11-09 사고). 둘이 짝을 이뤄야 시작한다.
+    #[test]
+    fn kiwoom_urls_must_both_be_real_or_both_fake() {
+        let keys = [("VALLY_KIWOOM_APP_KEY", KEY), ("VALLY_KIWOOM_APP_SECRET", SECRET)];
+        let rest = ("VALLY_KIWOOM_BASE_URL", "http://127.0.0.1:5");
+        let ws = ("VALLY_KIWOOM_WS_URL", "ws://127.0.0.1:5/api/dostk/websocket");
+        let start = |extra: &[(&str, &str)]| Config::from_vars(vars(&keys), vars(extra), lock, token);
+        assert!(start(&[rest]).is_err(), "기본 WS + 가짜 REST");
+        assert!(start(&[ws]).is_err(), "가짜 WS + 기본 REST");
+        let (c, _) = start(&[rest, ws]).expect("둘 다 가짜");
+        assert_eq!((c.kiwoom_base_url.as_str(), c.kiwoom_ws_url.as_str()), (rest.1, ws.1));
+        let (c, _) = start(&[]).expect("둘 다 실제 키움");
+        assert_eq!((c.kiwoom_base_url.as_str(), c.kiwoom_ws_url.as_str()), (DEFAULT_KIWOOM_BASE_URL, DEFAULT_KIWOOM_WS_URL));
+    }
+
     #[test]
     fn clock_start_needs_a_fake_kiwoom() {
         let keys = [("VALLY_KIWOOM_APP_KEY", KEY), ("VALLY_KIWOOM_APP_SECRET", SECRET), ("VALLY_CLOCK_START", "20261109100000")];
