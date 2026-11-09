@@ -4,6 +4,7 @@ import { PERIODS } from "../lib/symbol";
 import { useLayoutStore } from "../stores/layout";
 import { useSelectionStore } from "../stores/selection";
 import { useUiStore } from "../stores/ui";
+import { saveSnapshot } from "./snapshot/saveSnapshot";
 
 /** 화면 전체의 단축키. 대화상자가 열려 있거나 입력칸에 초점이 있으면 쓰지 않는다. */
 export function useHotkeys() {
@@ -35,6 +36,8 @@ export function useHotkeys() {
           const next = PERIODS[Math.min(PERIODS.length - 1, Math.max(0, i + action.step))];
           return next && layout.setPeriod(slot, next);
         }
+        case "snapshot":
+          return saveSnapshot(slot, action.mode);
         case "toggleLog":
           return layout.setScale(slot, cell.chartSettings.scale === "log" ? "normal" : "log");
         default: {

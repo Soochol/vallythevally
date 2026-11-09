@@ -41,3 +41,10 @@ test("Alt+W는 관심종목 접기, W만 누르면 주봉", () => {
   expect(matchHotkey(key("KeyW", { altKey: true }))).toEqual({ kind: "toggleWatch" });
   expect(matchHotkey(key("KeyW"))).toEqual({ kind: "period", period: "W" });
 });
+
+test("Alt+S는 차트 이미지 내려받기, Alt+Shift+S는 복사, S만 누르면 아무것도 아니다", () => {
+  expect(matchHotkey(key("KeyS", { altKey: true }))).toEqual({ kind: "snapshot", mode: "download" });
+  expect(matchHotkey(key("KeyS", { altKey: true, shiftKey: true }))).toEqual({ kind: "snapshot", mode: "copy" });
+  expect(matchHotkey(key("KeyS"))).toBeNull();
+  expect(matchHotkey(key("KeyS", { altKey: true, ctrlKey: true }))).toBeNull();
+});

@@ -6,7 +6,8 @@ import { isIndexCode, symbolSub } from "../../lib/symbol";
 import type { CellState } from "../../stores/layout";
 import { useSelectionStore } from "../../stores/selection";
 import { useTheme, useUiStore } from "../../stores/ui";
-import { MoonIcon, SunIcon } from "../icons";
+import { CameraIcon, MoonIcon, SunIcon } from "../icons";
+import { saveSnapshot } from "../snapshot/saveSnapshot";
 import { VenuePicker } from "../venue/VenuePicker";
 import { Attribution } from "../status/attribution";
 
@@ -54,6 +55,15 @@ export function PhoneHeader({ cell, info, status }: { cell: CellState; info: Sym
           <Attribution text="Lightweight Charts™" className="text-text-3 underline underline-offset-2" />
         </div>
       </div>
+      <button
+        type="button"
+        className="icon-btn h-9 w-9"
+        title="차트 이미지 내려받기"
+        aria-label="차트 이미지 내려받기"
+        onClick={() => saveSnapshot(cell.slot, "download")}
+      >
+        <CameraIcon size={20} />
+      </button>
       <button type="button" className="icon-btn h-9 w-9" title="테마 바꾸기" aria-label="테마 바꾸기" onClick={toggle}>
         {theme === "dark" ? <SunIcon size={20} /> : <MoonIcon size={20} />}
       </button>

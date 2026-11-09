@@ -9,6 +9,7 @@ import { type Slot, useCell, useLayoutStore } from "../../stores/layout";
 import { useSelectionStore } from "../../stores/selection";
 import { useTheme } from "../../stores/ui";
 import { cellErrorView, olderErrorView } from "./cellError";
+import { attachController } from "./controllers";
 
 interface Props {
   slot: Slot;
@@ -39,6 +40,8 @@ export function ChartCell({ slot, status, onStatus }: Props) {
       ctl.current = null;
     };
   }, []);
+
+  useEffect(() => attachController(slot, ctl.current!), [slot]);
 
   useEffect(() => {
     ctl.current?.apply({ symbol: cell.symbol, venue, period: cell.period, settings: cell.chartSettings, info });

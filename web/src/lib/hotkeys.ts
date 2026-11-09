@@ -6,7 +6,8 @@ export type HotkeyAction =
   | { kind: "period"; period: Period }
   | { kind: "periodStep"; step: -1 | 1 }
   | { kind: "toggleLog" }
-  | { kind: "toggleWatch" };
+  | { kind: "toggleWatch" }
+  | { kind: "snapshot"; mode: "download" | "copy" };
 
 export interface KeyLike {
   code: string;
@@ -39,6 +40,18 @@ export const HOTKEYS: { keys: string; label: string; action: HotkeyAction; match
       label: "관심종목 접기/펴기",
       action: { kind: "toggleWatch" },
       match: (e) => e.code === "KeyW" && e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey,
+    },
+    {
+      keys: "Alt+S",
+      label: "차트 이미지 내려받기",
+      action: { kind: "snapshot", mode: "download" },
+      match: (e) => e.code === "KeyS" && e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey,
+    },
+    {
+      keys: "Alt+Shift+S",
+      label: "차트 이미지 복사",
+      action: { kind: "snapshot", mode: "copy" },
+      match: (e) => e.code === "KeyS" && e.altKey && !e.ctrlKey && !e.metaKey && e.shiftKey,
     },
   ];
 })();

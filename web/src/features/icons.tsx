@@ -97,3 +97,15 @@ export const ListIcon = ({ size }: P) => (
     <circle cx="4.5" cy="18" r="1" fill="currentColor" stroke="none" />
   </Icon>
 );
+export const CameraIcon = ({ size }: P) => (
+  <Icon size={size}>
+    <path d="M4 8.5A1.5 1.5 0 0 1 5.5 7h2l1.5-2h6l1.5 2h2A1.5 1.5 0 0 1 20 8.5v9a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 17.5z" />
+    <circle cx="12" cy="13" r="3.5" />
+  </Icon>
+);
+export const CopyIcon = ({ size }: P) => (
+  <Icon size={size}>
+    <rect x="8.5" y="8.5" width="11" height="11" rx="1.5" />
+    <path d="M15.5 8.5V6a1.5 1.5 0 0 0-1.5-1.5H6A1.5 1.5 0 0 0 4.5 6v8A1.5 1.5 0 0 0 6 15.5h2.5" />
+  </Icon>
+);
