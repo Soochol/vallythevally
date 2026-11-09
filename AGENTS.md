@@ -60,6 +60,7 @@ Architect's Agree checkpoint (phase C) is off by default. The coordinator's spec
 The worker turns it on itself if `pstack:how` turns up one of these. At the checkpoint, the worker sends the sketch and its rationale to the coordinator with `ask` and waits for the reply before it writes the implementation.
 
 Code review runs outside the worker. After the PR, the coordinator starts a Codex reviewer, then a new worker for the fix round with the Bug fix playbook. The worker records Feature step 7 as `skip: Codex review follows`.
+Independent code review agents use `gpt-6-astra` with `high` reasoning effort.
 
 ### Kiwoom access (ADR 0004)
 
