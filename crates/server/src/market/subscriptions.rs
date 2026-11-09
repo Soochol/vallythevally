@@ -51,14 +51,14 @@ impl SubscriptionManager {
     }
 
     pub fn release(&mut self, symbol: Symbol, h: &Holder, now: KstTime) {
-        if self.remove_holder(symbol, h) && self.admitted.contains(&symbol) {
+        if self.remove_holder_left_empty(symbol, h) && self.admitted.contains(&symbol) {
             self.released_at.insert(symbol, now);
         }
     }
 
     /// 유예 없이 놓는다. 키움에 없는 종목처럼 받을 이유가 없는 보유자에 쓴다.
     pub fn forget(&mut self, symbol: Symbol, h: &Holder) {
-        if self.remove_holder(symbol, h) {
+        if self.remove_holder_left_empty(symbol, h) {
             self.admitted.remove(&symbol);
         }
     }
@@ -79,8 +79,7 @@ impl SubscriptionManager {
         self.admitted.contains(&symbol)
     }
 
-    /// 보유자가 모두 빠졌으면 true.
-    fn remove_holder(&mut self, symbol: Symbol, h: &Holder) -> bool {
+    fn remove_holder_left_empty(&mut self, symbol: Symbol, h: &Holder) -> bool {
         let Some(hs) = self.holders.get_mut(&symbol) else {
             return false;
         };
@@ -155,7 +154,6 @@ mod tests {
         Holder::Cell { conn: ConnId(conn), sub: SubId(sub.into()) }
     }
 
-    /// 종목 n개를 연결 1의 칸으로 하나씩 잡는다.
     fn fill(m: &mut SubscriptionManager, n: usize) {
         for i in 0..n {
             m.hold(stock(i), cell(1, &format!("s{i}")));

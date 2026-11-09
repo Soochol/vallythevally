@@ -749,12 +749,9 @@ mod tests {
     use crate::symbols::{Directory, SymbolDirectory};
 
     const SAMSUNG: &str = "005930";
-    /// NXT에서 거래되지 않는다.
     const NOT_ON_NXT: &str = "005935";
-    /// 종목 목록에 없다.
     const UNLISTED: &str = "000020";
 
-    /// 2026-11-09(월).
     fn at(h: u32, m: u32, s: u32) -> KstTime {
         kst(KstDate::new(2026, 11, 9).unwrap(), h, m, s)
     }
@@ -763,8 +760,7 @@ mod tests {
     #[derive(Default)]
     struct Chart {
         rows: Vec<(KstTime, [u64; 5])>,
-        /// 이만큼 503으로 답한다.
-        fail: usize,
+        answer_503_times: usize,
     }
 
     impl Chart {
@@ -802,8 +798,8 @@ mod tests {
             }
             assert_eq!(s.api_id, ApiId::Ka10080, "허브 시험은 주식 분봉만 받는다");
             let mut c = script.lock().unwrap();
-            if c.fail > 0 {
-                c.fail -= 1;
+            if c.answer_503_times > 0 {
+                c.answer_503_times -= 1;
                 return status(503, json!({}));
             }
             let rows: Vec<_> = c
@@ -823,7 +819,7 @@ mod tests {
         let symbols = Arc::new(SymbolDirectory::default());
         let stock = |code: &str, nxt_enabled| SymbolInfo { symbol: Symbol::parse(code).unwrap(), name: code.into(), kind: SymbolKind::Common, market: Market::Kospi, nxt_enabled };
         let mut listed = vec![stock(SAMSUNG, true), stock(NOT_ON_NXT, false)];
-        listed.extend((0..REALTIME_LIMIT).map(|i| stock(&filler(i), false)));
+        listed.extend((0..REALTIME_LIMIT).map(|i| stock(&listed_filler(i), false)));
         symbols.replace(Directory::build(listed));
         let bars = Arc::new(BarService::new(rest, symbols, clock.clone()));
         let (stream, desired) = KiwoomStream::detached();
@@ -836,8 +832,7 @@ mod tests {
         harness(at(9, 0, 50), morning_chart(), Duration::ZERO)
     }
 
-    /// 한도 시험용 종목. 목록에 있다.
-    fn filler(i: usize) -> String {
+    fn listed_filler(i: usize) -> String {
         format!("{:06}", 100_000 + i)
     }
 
@@ -857,7 +852,6 @@ mod tests {
         Price::from_centi(v * 100).unwrap()
     }
 
-    /// 체결 하나. 받은 시각은 지금이다.
     fn trade(h: &Harness, hhmmss: (u32, u32, u32), price: u64, qty: u64, exchange: Option<Exchange>) -> StreamEvent {
         let tick = RealTick {
             symbol: Symbol::Stock(StockCode::parse(SAMSUNG).unwrap()),
@@ -873,12 +867,10 @@ mod tests {
         Bar { t: UnixSeconds(t.unix()), o: o as f64, h: h as f64, l: l as f64, c: c as f64, v }
     }
 
-    /// 허브와 시드 태스크가 할 일을 마친다. 시드 하나는 토큰과 조회 간격(260ms)으로 520ms쯤 걸린다.
     async fn settle() {
         tokio::time::sleep(Duration::from_millis(600)).await;
     }
 
-    /// 연결 하나를 열고 hello를 확인한다.
     async fn connect(h: &Harness) -> (ConnId, Arc<Outbox>) {
         let out = Outbox::new();
         let conn = h.hub.connect(out.clone());
@@ -958,7 +950,6 @@ mod tests {
         assert!(!realtime.needs_verify, "체결로 시작한 봉은 완전하다");
     }
 
-    /// 이슈 #4 완료 조건: 칸을 열어 두고 10분 넘게 REST 요청이 없어도 시리즈가 캐시에 남고, 확정된 실시간 봉이 붙는다.
     #[tokio::test(start_paused = true)]
     async fn a_subscribed_series_outlives_ten_idle_minutes_and_takes_realtime_bars() {
         let h = std_harness();
@@ -1099,7 +1090,7 @@ mod tests {
         let down_at = h.clock.now();
         h.events.send(StreamEvent::Down { at: down_at }).await.unwrap();
         assert_eq!(statuses(&take(&out).await), [(RealtimeState::Reconnecting, false)]);
-        h.chart.lock().unwrap().fail = 2;
+        h.chart.lock().unwrap().answer_503_times = 2;
         h.events.send(StreamEvent::Down { at: down_at.plus_secs(1) }).await.unwrap();
         live(&h).await;
         settle().await;
@@ -1190,7 +1181,7 @@ mod tests {
     #[tokio::test(start_paused = true)]
     async fn kiwoom_unavailable_is_reported_once_and_the_seed_is_retried() {
         let h = harness(at(9, 0, 5), morning_chart(), Duration::ZERO);
-        h.chart.lock().unwrap().fail = 2;
+        h.chart.lock().unwrap().answer_503_times = 2;
         live(&h).await;
         let (conn, out) = connect(&h).await;
         h.hub.subscribe(conn, sub("a"), samsung());
@@ -1221,10 +1212,10 @@ mod tests {
         live(&h).await;
         let (conn, out) = connect(&h).await;
         for i in 0..REALTIME_LIMIT - 1 {
-            h.hub.subscribe(conn, sub(&format!("f{i}")), key(&filler(i), Venue::Combined));
+            h.hub.subscribe(conn, sub(&format!("f{i}")), key(&listed_filler(i), Venue::Combined));
         }
         h.hub.subscribe(conn, sub("a"), samsung());
-        h.hub.subscribe(conn, sub("over"), key(&filler(REALTIME_LIMIT - 1), Venue::Combined));
+        h.hub.subscribe(conn, sub("over"), key(&listed_filler(REALTIME_LIMIT - 1), Venue::Combined));
         settle().await;
         let msgs = out.take(true).messages;
         assert!(msgs.contains(&sub_error("over", SubErrorCode::RealtimeLimit)));
@@ -1235,7 +1226,7 @@ mod tests {
         let msgs = out.take(true).messages;
         assert!(msgs.contains(&subscribed("over", 0, None)), "유예 중인 종목을 빼서 자리를 만들고 같은 sub로 다시 알린다: {msgs:?}");
         assert!(!h.desired.borrow().contains(&samsung().feed.symbol()));
-        assert!(h.desired.borrow().contains(&Symbol::parse(&filler(REALTIME_LIMIT - 1)).unwrap()));
+        assert!(h.desired.borrow().contains(&Symbol::parse(&listed_filler(REALTIME_LIMIT - 1)).unwrap()));
     }
 
     #[test]

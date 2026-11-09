@@ -4,7 +4,6 @@ import type { Connection } from "../../api/socket";
 import { connectionView } from "./connectionView";
 
 const kst = (iso: string) => Date.parse(`${iso}+09:00`) / 1000;
-// 2026-11-09는 월요일이다.
 const MON_1000 = kst("2026-11-09T10:00:00");
 const open = (status: Partial<ConnectionStatus>): Connection => ({
   socket: "open",

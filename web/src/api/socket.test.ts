@@ -8,7 +8,6 @@ import { type Connection, type Connect, MarketSocket, sameOriginWsUrl, type SubE
 const LIVE: ConnectionStatus = { realtime: "live", since: 1_000, backfilling: false };
 const key: SeriesKey = { symbol: "005930", venue: "combined", period: "1m" };
 
-/** 가짜 WebSocket 연결. 연결 시도마다 하나씩 생긴다. */
 class FakeTransport {
   readonly sent: ClientMessage[] = [];
   closed = false;

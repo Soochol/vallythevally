@@ -778,7 +778,6 @@ mod tests {
         ConfirmedBar { bucket, ohlcv: domain::Ohlcv::try_new(p, p, p, p, domain::Volume(7)).unwrap(), source: BarSource::Realtime, needs_verify: false }
     }
 
-    /// 이슈 #4 완료 조건: 칸을 열어 두고 10분 넘게 요청이 없어도 시리즈가 남고, 확정된 실시간 봉이 붙는다.
     #[tokio::test(start_paused = true)]
     async fn held_series_survive_idle_eviction_and_take_realtime_bars() {
         let h = std_harness(Duration::ZERO);

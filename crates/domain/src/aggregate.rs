@@ -142,7 +142,6 @@ mod tests {
     use crate::price::{Price, Volume};
     use crate::time::{KstDate, TimeOfDay};
 
-    /// 2026-11-02(월) ~ 2026-11-06(금).
     fn at_on(day: u8, h: u32, m: u32, s: u32) -> KstTime {
         KstTime::from_kst_civil(KstDate::new(2026, 11, day).unwrap(), TimeOfDay::hms(h, m, s).unwrap())
     }
@@ -173,7 +172,6 @@ mod tests {
         trades: Vec<Trade>,
         now: KstTime,
         confirmed: Vec<ConfirmedBar>,
-        /// (구간, OHLCV, is_complete)
         current: Option<(Bucket, Ohlcv, bool)>,
     }
 

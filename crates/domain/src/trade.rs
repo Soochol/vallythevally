@@ -10,7 +10,6 @@ pub struct Trade {
     pub qty: Volume,
 }
 
-/// 체결이 들어오는 시간의 시작(포함).
 pub const TRADING_OPEN: TimeOfDay = match TimeOfDay::hms(8, 0, 0) {
     Some(t) => t,
     None => unreachable!(),

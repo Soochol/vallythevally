@@ -558,8 +558,7 @@ mod tests {
         KiwoomRest::new(Arc::new(transport), KiwoomAuth::new(Secret::new(APP_KEY.into()), Secret::new(APP_SECRET.into()), None), Clock::system())
     }
 
-    /// 발급 요청 시각을 남기지 않고 토큰을 쥐여 준다. 그래서 다시 발급할 때 10분 간격에 막히지 않는다.
-    fn holding(rest: &KiwoomRest, token: &str) {
+    fn holding_unrecorded(rest: &KiwoomRest, token: &str) {
         rest.auth().record_issued(TokenResponse { token: token.into(), expires_dt: "20991231000000".into() }, Clock::system().now()).unwrap();
     }
 
@@ -691,7 +690,7 @@ mod tests {
     async fn a_rejected_login_reissues_the_token_once_and_recovers() {
         let fake = FakeKiwoom::start().await;
         let rest = rest(&fake);
-        holding(&rest, "FAKE-TOKEN-revoked");
+        holding_unrecorded(&rest, "FAKE-TOKEN-revoked");
         let (_stream, mut events) = start(&fake, rest, fast(), &[samsung()]);
         assert!(matches!(next(&mut events).await, StreamEvent::Live { .. }));
         assert_eq!(fake.issued(), 1);
@@ -703,7 +702,7 @@ mod tests {
         let fake = FakeKiwoom::start().await;
         fake.reject_token(TOKEN);
         let rest = rest(&fake);
-        holding(&rest, "FAKE-TOKEN-revoked");
+        holding_unrecorded(&rest, "FAKE-TOKEN-revoked");
         let (_stream, mut events) = start(&fake, rest.clone(), fast(), &[samsung()]);
         assert_eq!(next(&mut events).await, StreamEvent::Halted);
         assert!(timeout(Duration::from_millis(300), events.recv()).await.unwrap().is_none(), "멈추면 태스크가 끝난다");

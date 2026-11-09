@@ -46,7 +46,6 @@ test("displayBars는 확정 봉 뒤에 현재 봉을 붙인다", () => {
   expect(displayBars({ bars: [bar(1)], current: null, nextBefore: null }).map((b) => b.t)).toEqual([1]);
 });
 
-/** 구독을 기록하고 메시지를 손으로 보내는 가짜 소켓. */
 function fakeSocket() {
   const subs = new Map<number, { key: SeriesKey; handler: (m: SubEvent) => void }>();
   let next = 0;

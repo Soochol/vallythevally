@@ -48,12 +48,10 @@ impl Ohlcv {
         }
     }
 
-    /// 체결 하나로 시작하는 봉.
     pub fn from_trade(t: &Trade) -> Self {
         Ohlcv { open: t.price, high: t.price, low: t.price, close: t.price, volume: t.qty }
     }
 
-    /// 체결을 더한다. 불변식이 저절로 유지된다.
     pub fn absorb(&mut self, t: &Trade) {
         self.high = self.high.max(t.price);
         self.low = self.low.min(t.price);
