@@ -8,6 +8,7 @@ use std::time::Duration;
 
 use common::{APP_KEY, APP_SECRET, FakeKiwoom, Server, TOKEN, token_for, token_path};
 use serde_json::{Value, json};
+use server::kiwoom::token_file::credential_id;
 
 fn static_dir(root: &Path) -> PathBuf {
     let dir = root.join("dist");
@@ -72,6 +73,7 @@ async fn restarting_three_times_issues_one_token_kept_in_a_private_file() {
     assert_eq!(std::fs::metadata(file.parent().unwrap()).unwrap().permissions().mode() & 0o777, 0o700);
     let saved: Value = serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
     assert_eq!(saved["token"]["value"], TOKEN);
+    assert_eq!(saved["credential"], credential_id(APP_KEY));
     assert_eq!(saved["token"]["expires_dt"], "20991231000000");
     assert!(saved["last_request_at"].as_i64().unwrap() > now_unix() - 60);
     for secret in [APP_KEY, APP_SECRET, TOKEN] {
@@ -85,7 +87,7 @@ async fn a_valid_saved_token_is_used_without_issuing() {
     let tmp = tempfile::tempdir().unwrap();
     let lock = tmp.path().join("run/server.lock");
     let at = now_unix() - 3600;
-    write_token_file(&lock, json!({"token": {"value": TOKEN, "expires_dt": "20991231000000", "issued_at": at}, "last_request_at": at}));
+    write_token_file(&lock, json!({"credential": credential_id(APP_KEY), "token": {"value": TOKEN, "expires_dt": "20991231000000", "issued_at": at}, "last_request_at": at}));
     run_until_symbols_load(&fake, &lock, &static_dir(tmp.path())).await;
     assert_eq!(fake.issued(), 0, "{:?}", fake.api_ids());
     let auths = fake.seen.authorizations.lock().unwrap().clone();
@@ -115,7 +117,7 @@ async fn an_invalid_saved_token_is_reissued_once() {
     let tmp = tempfile::tempdir().unwrap();
     let lock = tmp.path().join("run/server.lock");
     let at = now_unix() - 3600;
-    write_token_file(&lock, json!({"token": {"value": "FAKE-TOKEN-old-0001", "expires_dt": "20991231000000", "issued_at": at}, "last_request_at": at}));
+    write_token_file(&lock, json!({"credential": credential_id(APP_KEY), "token": {"value": "FAKE-TOKEN-old-0001", "expires_dt": "20991231000000", "issued_at": at}, "last_request_at": at}));
     let logs = run_until_symbols_load(&fake, &lock, &static_dir(tmp.path())).await;
     assert_eq!(fake.issued(), 1, "{:?}", fake.api_ids());
     let saved: Value = serde_json::from_str(&std::fs::read_to_string(token_path(&lock)).unwrap()).unwrap();

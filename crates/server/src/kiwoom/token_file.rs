@@ -6,12 +6,16 @@ use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 
 use crate::instance::InstanceLock;
 
 /// 파일 내용. 토큰이 들어 있으므로 `Debug`를 두지 않는다.
 #[derive(Serialize, Deserialize, PartialEq, Eq)]
 pub struct Saved {
+    /// 토큰을 받은 앱키의 `credential_id`. 없으면 이 필드가 생기기 전의 파일이다.
+    #[serde(default)]
+    pub credential: Option<String>,
     pub token: Option<SavedToken>,
     /// 유닉스 초. 키움 실측 프로그램도 이 파일을 읽고 쓴다.
     pub last_request_at: i64,
@@ -23,6 +27,12 @@ pub struct SavedToken {
     /// au10001 응답의 `expires_dt` 그대로(KST `YYYYMMDDhhmmss`).
     pub expires_dt: String,
     pub issued_at: i64,
+}
+
+/// 앱키를 파일에 남기지 않고 토큰의 주인을 가려낸다.
+pub fn credential_id(app_key: &str) -> String {
+    let hex: String = Sha256::digest(app_key.as_bytes()).iter().map(|b| format!("{b:02x}")).collect();
+    format!("sha256:{hex}")
 }
 
 /// 경로와 원인. 파일 내용은 담지 않는다.
@@ -104,6 +114,7 @@ mod tests {
         let (_dir, _lock, file) = temp_token_file();
         assert!(file.load().unwrap().is_none());
         let saved = Saved {
+            credential: Some(credential_id("FAKE-APPKEY-file-1")),
             token: Some(SavedToken { value: "FAKE-TOKEN-file-1".into(), expires_dt: "20261110090000".into(), issued_at: 10 }),
             last_request_at: 9,
         };

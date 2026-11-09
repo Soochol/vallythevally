@@ -19,6 +19,7 @@ futures = "0.3"
 reqwest = { version = "0.13", default-features = false, features = ["rustls"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+sha2 = "0.10"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "time", "sync", "fs", "signal"] }
 tower-http = { version = "0.6", features = ["compression-gzip", "compression-br"] }
 tracing = "0.1"

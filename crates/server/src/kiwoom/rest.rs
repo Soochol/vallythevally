@@ -670,12 +670,12 @@ mod tests {
     type Guards = (tempfile::TempDir, crate::instance::InstanceLock);
 
     fn rest_with_saved_token(fake: &Arc<FakeTransport>) -> (KiwoomRest, Guards) {
-        use crate::kiwoom::token_file::{Saved, SavedToken, testing::temp_token_file};
+        use crate::kiwoom::token_file::{Saved, SavedToken, credential_id, testing::temp_token_file};
         let start = kst(KstDate::new(2026, 11, 9).unwrap(), 9, 0, 0);
         let (dir, lock, file) = temp_token_file();
         let an_hour_ago = start.unix() - 3600;
         let token = SavedToken { value: "tok-0".into(), expires_dt: "20991231000000".into(), issued_at: an_hour_ago };
-        file.save(&Saved { token: Some(token), last_request_at: an_hour_ago }).unwrap();
+        file.save(&Saved { credential: Some(credential_id("k")), token: Some(token), last_request_at: an_hour_ago }).unwrap();
         let auth = KiwoomAuth::new(Secret::new("k".into()), Secret::new("s".into()), Some(file));
         (KiwoomRest::new(Arc::new(fake.clone()), auth, Clock::fake(start)), (dir, lock))
     }

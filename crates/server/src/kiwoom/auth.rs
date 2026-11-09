@@ -6,7 +6,7 @@ use std::sync::Mutex;
 use domain::{KstTime, TimeOfDay};
 use serde::Serialize;
 
-use super::token_file::{FileError, Saved, SavedToken, TokenFile};
+use super::token_file::{FileError, Saved, SavedToken, TokenFile, credential_id};
 use super::wire::{TokenResponse, parse_kst_datetime};
 use crate::config::Secret;
 
@@ -68,6 +68,7 @@ struct State {
 pub struct KiwoomAuth {
     app_key: Secret<String>,
     app_secret: Secret<String>,
+    credential: String,
     file: Option<TokenFile>,
     state: Mutex<State>,
 }
@@ -98,15 +99,16 @@ struct TokenRequest<'a> {
 
 impl KiwoomAuth {
     pub fn new(app_key: Secret<String>, app_secret: Secret<String>, file: Option<TokenFile>) -> Self {
+        let credential = credential_id(app_key.expose());
         let state = match file.as_ref().map(TokenFile::load) {
             None | Some(Ok(None)) => State::default(),
-            Some(Ok(Some(saved))) => restore(saved),
+            Some(Ok(Some(saved))) => restore(saved, &credential),
             Some(Err(e)) => {
                 tracing::error!(error = %e, "토큰 파일을 읽지 못했습니다. 마지막 발급 요청 시각을 모르므로 조회와 토큰 발급을 멈춥니다");
                 State { halted: Some(Halt::TokenFileUnreadable(e)), ..State::default() }
             }
         };
-        KiwoomAuth { app_key, app_secret, file, state: Mutex::new(state) }
+        KiwoomAuth { app_key, app_secret, credential, file, state: Mutex::new(state) }
     }
 
     fn lock(&self) -> std::sync::MutexGuard<'_, State> {
@@ -116,6 +118,7 @@ impl KiwoomAuth {
     fn save(&self, st: &State) -> Result<(), FileError> {
         let Some(file) = &self.file else { return Ok(()) };
         let saved = Saved {
+            credential: Some(self.credential.clone()),
             token: st.issued.as_ref().map(|i| SavedToken {
                 value: i.token.expose().clone(),
                 expires_dt: format_kst_datetime(i.expires_at),
@@ -203,8 +206,12 @@ impl KiwoomAuth {
     }
 }
 
-fn restore(saved: Saved) -> State {
-    let issued = saved.token.and_then(|t| {
+fn restore(saved: Saved, credential: &str) -> State {
+    let ours = saved.credential.as_deref() == Some(credential);
+    if saved.token.is_some() && !ours {
+        tracing::warn!("토큰 파일의 토큰은 지금 앱키로 받은 것이 아니라 쓰지 않습니다. 발급 요청 간격은 그대로 지킵니다");
+    }
+    let issued = saved.token.filter(|_| ours).and_then(|t| {
         let expires_at = parse_kst_datetime(&t.expires_dt);
         if expires_at.is_none() {
             tracing::warn!("토큰 파일의 만료 시각을 읽지 못해 토큰을 버립니다");
@@ -333,5 +340,19 @@ mod tests {
         a.record_issued(resp("t2", "20261110200500"), kst(d(9), 20, 5, 1)).unwrap();
         assert!(!a.due_daily_reissue(kst(d(9), 20, 15, 0)));
         assert!(a.due_daily_reissue(kst(d(10), 20, 5, 0)));
+    }
+
+    #[test]
+    fn a_token_from_another_or_unknown_app_key_is_dropped_but_its_request_time_is_kept() {
+        let t0 = kst(d(9), 9, 0, 0);
+        for credential in [Some(credential_id("FAKE-APPKEY-other")), None] {
+            let (_dir, _lock, file) = crate::kiwoom::token_file::testing::temp_token_file();
+            let token = SavedToken { value: TOKEN.into(), expires_dt: "20991231000000".into(), issued_at: t0.unix() };
+            file.save(&Saved { credential: credential.clone(), token: Some(token), last_request_at: t0.unix() }).unwrap();
+            let a = KiwoomAuth::new(Secret::new(KEY.into()), Secret::new(SECRET.into()), Some(file));
+            let later = t0.plus_secs(60);
+            assert!(a.current(later).is_none(), "{credential:?}");
+            assert_eq!(a.issue_blocked_until(later), Some(t0.plus_secs(600)), "{credential:?}");
+        }
     }
 }
