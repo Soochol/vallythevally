@@ -3,10 +3,11 @@ import { useSymbolInfo } from "../../api/queries";
 import { type CellStatus, ChartController } from "../../chart/ChartController";
 import { readThemeTokens } from "../../chart/theme";
 import { PERIOD_LABEL } from "../../lib/symbol";
-import { venueLabel } from "../../lib/venue";
+import { shownVenue, venueLabel } from "../../lib/venue";
+import { NXT_FALLBACK_NOTICE } from "../../persist/restore";
 import { type Slot, useCell, useLayoutStore } from "../../stores/layout";
 import { useSelectionStore } from "../../stores/selection";
-import { useThemeStore } from "../../stores/theme";
+import { useTheme } from "../../stores/ui";
 import { cellErrorView, olderErrorView } from "./cellError";
 
 interface Props {
@@ -19,8 +20,9 @@ interface Props {
 export function ChartCell({ slot, status, onStatus }: Props) {
   const cell = useCell(slot);
   const info = useSymbolInfo(cell.symbol).data;
-  const theme = useThemeStore((s) => s.theme);
-  const openDialog = useSelectionStore((s) => s.openDialog);
+  const venue = shownVenue(cell.venue, info);
+  const theme = useTheme();
+  const openSearch = useSelectionStore((s) => s.openSearch);
   const chartEl = useRef<HTMLDivElement>(null);
   const ctl = useRef<ChartController | null>(null);
   const onStatusRef = useRef(onStatus);
@@ -39,8 +41,17 @@ export function ChartCell({ slot, status, onStatus }: Props) {
   }, []);
 
   useEffect(() => {
-    ctl.current?.apply({ symbol: cell.symbol, venue: cell.venue, period: cell.period, settings: cell.chartSettings, info });
-  }, [cell, info]);
+    ctl.current?.apply({ symbol: cell.symbol, venue, period: cell.period, settings: cell.chartSettings, info });
+  }, [cell, venue, info]);
+
+  // 복원 때 종목 정보를 못 받아 확인하지 못한 NXT가 나중에 NXT 불가로 확인되면, 그때 저장 원본을 고친다.
+  // 그대로 두면 다음 저장을 서버가 400으로 거절한다.
+  useEffect(() => {
+    if (info?.code === cell.symbol && cell.venue === "nxt" && !info.nxtEnabled) {
+      useLayoutStore.getState().setVenue(slot, "combined");
+      useSelectionStore.getState().showToast(NXT_FALLBACK_NOTICE);
+    }
+  }, [info, cell.symbol, cell.venue, slot]);
 
   useEffect(() => {
     ctl.current?.setTheme(readThemeTokens());
@@ -53,7 +64,7 @@ export function ChartCell({ slot, status, onStatus }: Props) {
   return (
     <section
       tabIndex={0}
-      aria-label={`칸 ${slot + 1}: ${[name, venueLabel(cell.symbol, cell.venue), PERIOD_LABEL[cell.period]].filter(Boolean).join(" ")}`}
+      aria-label={`칸 ${slot + 1}: ${[name, venueLabel(cell.symbol, venue), PERIOD_LABEL[cell.period]].filter(Boolean).join(" ")}`}
       aria-busy={status.kind === "loading"}
       className="relative min-h-0 min-w-0 bg-chart-bg focus-visible:outline-offset-[-2px]"
     >
@@ -94,7 +105,7 @@ export function ChartCell({ slot, status, onStatus }: Props) {
           <div className="flex max-w-[44ch] flex-col items-center gap-4 text-center" role="alert">
             <p className="text-m text-text">{error.text}</p>
             {error.action === "search" && (
-              <button type="button" className="btn-primary" onClick={() => openDialog("search")}>
+              <button type="button" className="btn-primary" onClick={() => openSearch()}>
                 종목 검색
               </button>
             )}

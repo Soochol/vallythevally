@@ -5,7 +5,7 @@ import { direction, formatChange, formatPercent, formatPrice } from "../../lib/f
 import { isIndexCode, symbolSub } from "../../lib/symbol";
 import type { CellState } from "../../stores/layout";
 import { useSelectionStore } from "../../stores/selection";
-import { useThemeStore } from "../../stores/theme";
+import { useTheme, useUiStore } from "../../stores/ui";
 import { MoonIcon, SunIcon } from "../icons";
 import { VenuePicker } from "../venue/VenuePicker";
 import { Attribution } from "../status/attribution";
@@ -17,8 +17,9 @@ const DIR_CLASS = { up: "text-up", down: "text-down", flat: "text-text-2" } as c
  * 마지막 조회 시각과 라이브러리 표기. 범례의 머리줄과 가격줄을 대신한다.
  */
 export function PhoneHeader({ cell, info, status }: { cell: CellState; info: SymbolInfo | undefined; status: CellStatus }) {
-  const openDialog = useSelectionStore((s) => s.openDialog);
-  const { theme, toggle } = useThemeStore();
+  const openSearch = useSelectionStore((s) => s.openSearch);
+  const theme = useTheme();
+  const toggle = useUiStore((s) => s.toggleTheme);
   const isIndex = isIndexCode(cell.symbol);
   const ready = status.kind === "ready" ? status : null;
   const chg = ready?.prev ? ready.latest.c - ready.prev.c : 0;
@@ -28,7 +29,7 @@ export function PhoneHeader({ cell, info, status }: { cell: CellState; info: Sym
     <header className="hidden items-center gap-2 px-3 pb-1 pt-2 [grid-area:mhead] max-md:flex">
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
-          <button type="button" className="min-w-0 flex-1 truncate text-left" aria-haspopup="dialog" onClick={() => openDialog("search")}>
+          <button type="button" className="min-w-0 flex-1 truncate text-left" aria-haspopup="dialog" onClick={() => openSearch()}>
             <b className="text-l font-[650]">{info?.name ?? cell.symbol}</b>
             <small className="ml-1 text-s text-text-3">{symbolSub(cell.symbol, info)}</small>
           </button>

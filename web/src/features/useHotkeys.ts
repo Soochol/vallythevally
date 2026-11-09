@@ -3,6 +3,7 @@ import { isTypingTarget, matchHotkey } from "../lib/hotkeys";
 import { PERIODS } from "../lib/symbol";
 import { useLayoutStore } from "../stores/layout";
 import { useSelectionStore } from "../stores/selection";
+import { useUiStore } from "../stores/ui";
 
 /** 화면 전체의 단축키. 대화상자가 열려 있거나 입력칸에 초점이 있으면 쓰지 않는다. */
 export function useHotkeys() {
@@ -20,11 +21,13 @@ export function useHotkeys() {
       e.preventDefault();
       const layout = useLayoutStore.getState();
       const slot = sel.activeSlot;
-      const cell = layout.cells.find((c) => c.slot === slot);
+      const cell = layout.layout.cells.find((c) => c.slot === slot);
       if (!cell) return;
       switch (action.kind) {
         case "search":
-          return sel.openDialog("search");
+          return sel.openSearch();
+        case "toggleWatch":
+          return useUiStore.getState().toggleWatch();
         case "period":
           return layout.setPeriod(slot, action.period);
         case "periodStep": {
@@ -34,6 +37,10 @@ export function useHotkeys() {
         }
         case "toggleLog":
           return layout.setScale(slot, cell.chartSettings.scale === "log" ? "normal" : "log");
+        default: {
+          const _exhaustive: never = action;
+          return _exhaustive;
+        }
       }
     };
     window.addEventListener("keydown", onKey);

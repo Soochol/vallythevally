@@ -100,6 +100,63 @@ async fn serves_symbols_and_bars_from_fake_kiwoom_and_never_logs_secrets() {
     }
 }
 
+async fn put(client: &reqwest::Client, base: &str, path: &str, body: &Value) -> (u16, Value) {
+    let resp = client.put(format!("{base}{path}")).header("content-type", "application/json").body(body.to_string()).send().await.unwrap();
+    let status = resp.status().as_u16();
+    (status, serde_json::from_str(&resp.text().await.unwrap()).unwrap())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn user_data_survives_a_restart_and_quotes_come_from_kiwoom() {
+    let fake = FakeKiwoom::start().await;
+    let tmp = tempfile::tempdir().unwrap();
+    let lock = tmp.path().join("run/server.lock");
+    let dist = static_dir(tmp.path());
+    let server = Server::spawn(&fake, &lock, &dist);
+    let base = format!("http://{}", server.addr().await);
+    let client = reqwest::Client::new();
+
+    let watchlist = serde_json::json!({"symbols": ["005930", "IDX:001", "000660"], "revision": 1_794_152_040_001_i64});
+    let layout = serde_json::json!({"id": "0193aaaa-0000-7000-8000-000000000002", "name": "둘", "arrangement": "2v", "revision": 1_794_152_040_002_i64,
+        "sync": {"crosshair": true, "scroll": false}, "cells": [
+            {"slot": 0, "symbol": "005930", "venue": "nxt", "period": "15m", "symbolLink": true, "chartSettings": {"v": 1, "indicators": ["ma"]}},
+            {"slot": 1, "symbol": "IDX:001", "venue": null, "period": "W", "symbolLink": false, "chartSettings": {"v": 1}}]});
+    let ui = serde_json::json!({"lastLayoutId": layout["id"], "theme": "light", "watchCollapsed": true, "revision": 1_794_152_040_003_i64});
+    assert_eq!(put(&client, &base, "/api/watchlist", &watchlist).await, (200, watchlist.clone()));
+    let mut saved = Value::Null;
+    for _ in 0..100 {
+        let (status, body) = put(&client, &base, &format!("/api/layouts/{}", layout["id"].as_str().unwrap()), &layout).await;
+        if status != 503 {
+            assert_eq!(status, 200, "{body}");
+            saved = body;
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    assert!(saved["updatedAt"].as_i64().unwrap() > 1_700_000_000, "{saved}");
+    assert_eq!(put(&client, &base, "/api/ui-state", &ui).await, (200, ui.clone()));
+
+    let (status, quotes) = get(&client, &base, "/api/quotes?symbols=005930,IDX:001,000660").await;
+    assert_eq!(status, 200, "{quotes}");
+    let got: Vec<(&str, f64)> = quotes.as_array().unwrap().iter().map(|q| (q["symbol"].as_str().unwrap(), q["price"].as_f64().unwrap())).collect();
+    assert_eq!(got, [("005930", 50_000.0), ("IDX:001", 5_059.69), ("000660", 120_500.0)]);
+    assert_eq!(quotes[0]["change"].as_f64(), Some(-1_000.0));
+    let first_logs = server.stop().await;
+    assert!(tmp.path().join("run/vally.db").exists(), "DB는 VALLY_DB_PATH(임시 디렉터리)에 있다");
+
+    let server = Server::spawn(&fake, &lock, &dist);
+    let base = format!("http://{}", server.addr().await);
+    assert_eq!(get(&client, &base, "/api/watchlist").await, (200, watchlist));
+    assert_eq!(get(&client, &base, &format!("/api/layouts/{}", layout["id"].as_str().unwrap())).await, (200, saved));
+    let (_, list) = get(&client, &base, "/api/layouts").await;
+    assert_eq!(list.as_array().unwrap().iter().map(|l| l["name"].as_str().unwrap()).collect::<Vec<_>>(), ["기본", "둘"]);
+    assert_eq!(get(&client, &base, "/api/ui-state").await, (200, ui));
+    let logs = first_logs + &server.stop().await;
+    for secret in [APP_KEY, APP_SECRET, TOKEN] {
+        assert!(!logs.contains(secret), "로그에 비밀값 {secret}이 있다");
+    }
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn second_instance_exits_1_without_touching_kiwoom() {
     let first_kiwoom = FakeKiwoom::start().await;

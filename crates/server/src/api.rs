@@ -208,6 +208,155 @@ impl From<&domain::SymbolInfo> for SymbolInfo {
     }
 }
 
+/// 현재가 값의 출처. #3은 언제나 `polled`(REST 조회), #4부터 실시간이면 `realtime`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub enum QuoteSource {
+    Realtime,
+    Polled,
+}
+
+/// `GET /api/quotes?symbols=005930,IDX:001` → `Quote[]`.
+/// 주식은 통합 시세(ka10095 `_AL`), 지수는 지수 일봉의 최신 페이지에서 만든다.
+/// 값을 얻지 못한 종목(없는 코드, 빈 행)은 응답에서 빠진다. 순서는 요청 순서다.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct Quote {
+    pub symbol: SymbolCode,
+    pub price: f64,
+    /// 현재가 − 기준가. 부호 있음.
+    pub change: f64,
+    /// %, 부호 있음.
+    pub change_rate: f64,
+    /// 당일 누적.
+    #[ts(type = "number")]
+    pub volume: u64,
+    pub t: UnixSeconds,
+    pub source: QuoteSource,
+}
+
+/// 저장 순서 번호. 브라우저가 저장할 때마다 늘려 보낸다(`max(지금 ms, 마지막 + 1)`).
+/// PUT은 저장된 것보다 클 때만 받고, 아니면 409 `stale_revision`이다. GET은 저장된 값을 돌려준다. 처음은 0.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct Revision(#[ts(type = "number")] pub i64);
+
+/// `GET /api/watchlist` 응답이자 `PUT /api/watchlist` 본문. 표시 순서대로. 중복은 400.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct Watchlist {
+    pub symbols: Vec<SymbolCode>,
+    pub revision: Revision,
+}
+
+/// 칸 배치. `2h` 좌우, `2v` 상하. #3은 `1`만 쓴다.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub enum Arrangement {
+    #[serde(rename = "1")]
+    One,
+    #[serde(rename = "2h")]
+    TwoH,
+    #[serde(rename = "2v")]
+    TwoV,
+    #[serde(rename = "3")]
+    Three,
+    #[serde(rename = "4")]
+    Four,
+}
+
+impl Arrangement {
+    pub const fn cell_count(self) -> usize {
+        match self {
+            Arrangement::One => 1,
+            Arrangement::TwoH | Arrangement::TwoV => 2,
+            Arrangement::Three => 3,
+            Arrangement::Four => 4,
+        }
+    }
+}
+
+/// 칸 동기화. 저장된 값에 키가 빠져 있으면 true로 읽는다.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct LayoutSync {
+    #[serde(default = "yes")]
+    pub crosshair: bool,
+    #[serde(default = "yes")]
+    pub scroll: bool,
+}
+
+const fn yes() -> bool {
+    true
+}
+
+/// 레이아웃의 칸 하나. 칸 = (종목, 거래소, 봉 주기, 차트 설정).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct Cell {
+    /// 0부터. 칸 수보다 작다.
+    #[ts(type = "0 | 1 | 2 | 3")]
+    pub slot: u8,
+    pub symbol: SymbolCode,
+    /// 지수면 null, 주식이면 언제나 값이 있다(ADR 0007).
+    pub venue: Option<Venue>,
+    pub period: Period,
+    /// 종목 연동(#7).
+    pub symbol_link: bool,
+    /// 프런트엔드가 모양을 정한다. 64KB 이하. 서버는 모르는 키까지 그대로 저장한다.
+    #[ts(type = "unknown")]
+    pub chart_settings: serde_json::Value,
+}
+
+/// `GET /api/layouts` → `LayoutSummary[]`(표시 순서).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct LayoutSummary {
+    pub id: String,
+    pub name: String,
+    pub arrangement: Arrangement,
+    pub updated_at: UnixSeconds,
+}
+
+/// `GET /api/layouts/:id` → `Layout`. `PUT /api/layouts/:id`의 응답.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct Layout {
+    /// 브라우저가 만드는 UUID v7.
+    pub id: String,
+    pub name: String,
+    pub arrangement: Arrangement,
+    pub sync: LayoutSync,
+    /// 길이는 arrangement의 칸 수와 같다. slot 0부터 차례로.
+    pub cells: Vec<Cell>,
+    pub updated_at: UnixSeconds,
+    pub revision: Revision,
+}
+
+/// `PUT /api/layouts/:id` 본문(없으면 만들고 있으면 바꾼다). `id`는 주소의 id와 같아야 한다.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct LayoutInput {
+    pub id: String,
+    pub name: String,
+    pub arrangement: Arrangement,
+    pub sync: LayoutSync,
+    pub cells: Vec<Cell>,
+    pub revision: Revision,
+}
+
+/// `GET /api/ui-state`, `PUT /api/ui-state`. 64KB 이하. 서버는 객체인지만 보고 모르는 키까지 그대로 왕복시킨다.
+/// `revision`(저장 순서 번호, `Revision`)만은 서버가 읽는다. PUT에 없거나 정수가 아니면 400이다.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export, type = r#"{ lastLayoutId: string | null; theme: "dark" | "light"; revision: number; [k: string]: unknown }"#)]
+pub struct UiState(pub serde_json::Map<String, serde_json::Value>);
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "snake_case")]
 #[ts(export)]
@@ -221,6 +370,10 @@ pub enum ApiErrorCode {
     KiwoomAuthFailed,
     Conflict,
     PayloadTooLarge,
+    /// 저장된 것보다 크지 않은 revision으로 저장하려 했다. 더 새 편집이 이미 저장돼 있다.
+    StaleRevision,
+    /// 있는 API 경로에 틀린 메서드를 보냈다.
+    MethodNotAllowed,
     Internal,
 }
 
@@ -273,6 +426,40 @@ mod tests {
         assert_eq!(
             serde_json::to_value(&info).unwrap(),
             json!({"code": "005935", "name": "삼성전자우", "kind": "preferred", "market": "kospi", "nxtEnabled": false})
+        );
+    }
+
+    #[test]
+    fn user_data_json_shape() {
+        let layout: LayoutInput = serde_json::from_value(json!({
+            "id": "01900000-0000-7000-8000-000000000001", "name": "기본", "arrangement": "1", "sync": {"scroll": false},
+            "cells": [{"slot": 0, "symbol": "005930", "venue": "nxt", "period": "5m", "symbolLink": false,
+                       "chartSettings": {"v": 1, "future": [1, 2]}}],
+            "revision": 1_794_152_040_123_i64
+        }))
+        .unwrap();
+        assert_eq!(layout.sync, LayoutSync { crosshair: true, scroll: false });
+        assert_eq!(layout.cells[0].venue, Some(Venue::Nxt));
+        assert_eq!(layout.cells[0].chart_settings, json!({"v": 1, "future": [1, 2]}));
+        assert_eq!(layout.arrangement.cell_count(), 1);
+        assert_eq!(layout.revision, Revision(1_794_152_040_123), "Date.now() 크기의 ms도 정확히 받는다");
+
+        let ui: UiState = serde_json::from_value(json!({"lastLayoutId": null, "theme": "light", "watchCollapsed": true})).unwrap();
+        assert_eq!(serde_json::to_value(&ui).unwrap(), json!({"lastLayoutId": null, "theme": "light", "watchCollapsed": true}));
+
+        let q = Quote {
+            symbol: SymbolCode("005930".into()),
+            price: 193_400.0,
+            change: -8_100.0,
+            change_rate: -4.02,
+            volume: 56_147_847,
+            t: UnixSeconds(1_794_131_999),
+            source: QuoteSource::Polled,
+        };
+        assert_eq!(
+            serde_json::to_value(&q).unwrap(),
+            json!({"symbol": "005930", "price": 193_400.0, "change": -8_100.0, "changeRate": -4.02,
+                   "volume": 56_147_847, "t": 1_794_131_999, "source": "polled"})
         );
     }
 

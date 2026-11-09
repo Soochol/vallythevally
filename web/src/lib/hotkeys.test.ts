@@ -36,3 +36,8 @@ test("숫자는 분봉이다. Shift를 붙이면 15·30·60분", () => {
   expect(matchHotkey(key("Digit6"))).toBeNull();
   expect(matchHotkey(key("Digit1", { ctrlKey: true }))).toBeNull();
 });
+
+test("Alt+W는 관심종목 접기, W만 누르면 주봉", () => {
+  expect(matchHotkey(key("KeyW", { altKey: true }))).toEqual({ kind: "toggleWatch" });
+  expect(matchHotkey(key("KeyW"))).toEqual({ kind: "period", period: "W" });
+});

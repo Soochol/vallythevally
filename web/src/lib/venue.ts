@@ -25,4 +25,12 @@ export function venueFor(target: VenueTarget, wanted: Venue | null): Venue | nul
   return wanted !== null && isVenueAllowed(target, wanted) ? wanted : "combined";
 }
 
+export type ShownVenue = Venue & { readonly __shown: true };
+
+export function shownVenue(saved: Venue | null, info: VenueTarget | undefined): ShownVenue | null {
+  if (saved === null) return null;
+  const venue = info === undefined ? (saved === "nxt" ? "combined" : saved) : venueFor(info, saved);
+  return venue as ShownVenue | null;
+}
+
 export const venueLabel = (code: SymbolCode, venue: Venue | null) => (isIndexCode(code) || venue === null ? "" : VENUE_LABEL[venue]);

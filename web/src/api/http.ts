@@ -8,6 +8,8 @@ const API_ERROR_CODES = [
   "kiwoom_auth_failed",
   "conflict",
   "payload_too_large",
+  "stale_revision",
+  "method_not_allowed",
   "internal",
 ] as const satisfies readonly ApiErrorCode[];
 
@@ -48,13 +50,41 @@ async function parseError(res: Response): Promise<ApiRequestError> {
 
 /** GET 하나. 실패하면 ApiRequestError를 던진다. 중단(AbortError)은 그대로 던진다. */
 export async function getJson<T>(path: string, signal?: AbortSignal): Promise<T> {
+  return (await (await request(path, { method: "GET", signal })).json()) as T;
+}
+
+export function putJson<T>(path: string, body: unknown, opts: SendOptions = {}): Promise<T> {
+  return sendJson<T>("PUT", path, JSON.stringify(body), opts);
+}
+
+export async function deleteJson(path: string, opts: SendOptions = {}): Promise<void> {
+  await request(path, { method: "DELETE", signal: opts.signal, keepalive: opts.keepalive });
+}
+
+export interface SendOptions {
+  signal?: AbortSignal;
+  keepalive?: boolean;
+}
+
+export async function sendJson<T>(method: "PUT" | "POST", path: string, json: string, opts: SendOptions = {}): Promise<T> {
+  const res = await request(path, {
+    method,
+    body: json,
+    signal: opts.signal,
+    keepalive: opts.keepalive,
+    headers: { "Content-Type": "application/json" },
+  });
+  return (await res.json()) as T;
+}
+
+async function request(path: string, init: RequestInit): Promise<Response> {
   let res: Response;
   try {
-    res = await fetch(path, { signal, headers: { Accept: "application/json" } });
+    res = await fetch(path, { ...init, headers: { Accept: "application/json", ...init.headers } });
   } catch (e) {
-    if (signal?.aborted) throw e;
+    if (init.signal?.aborted) throw e;
     throw new ApiRequestError("network", "서버에 연결하지 못했습니다");
   }
   if (!res.ok) throw await parseError(res);
-  return (await res.json()) as T;
+  return res;
 }

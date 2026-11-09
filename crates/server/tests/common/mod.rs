@@ -28,6 +28,7 @@ pub struct Seen {
     pub api_ids: Mutex<Vec<String>>,
     pub authorizations: Mutex<Vec<String>>,
     pub token_bodies: Mutex<Vec<Value>>,
+    pub overrides: Mutex<std::collections::HashMap<String, (u16, Value)>>,
 }
 
 pub struct FakeKiwoom {
@@ -53,6 +54,14 @@ impl FakeKiwoom {
         format!("http://{}", self.addr)
     }
 
+    pub fn respond_with(&self, api_id: &str, status: u16, body: Value) {
+        self.seen.overrides.lock().unwrap().insert(api_id.to_owned(), (status, body));
+    }
+
+    pub fn api_ids(&self) -> Vec<String> {
+        self.seen.api_ids.lock().unwrap().clone()
+    }
+
     pub fn requests(&self) -> usize {
         self.seen.requests.load(Ordering::SeqCst)
     }
@@ -70,6 +79,11 @@ async fn handle(State(seen): State<Arc<Seen>>, headers: HeaderMap, body: String)
     seen.api_ids.lock().unwrap().push(api_id.clone());
     seen.authorizations.lock().unwrap().push(h("authorization"));
     let continuation = h("cont-yn") == "Y";
+    if let Some((status, body)) = seen.overrides.lock().unwrap().get(&api_id).cloned() {
+        let mut resp = (StatusCode::from_u16(status).unwrap(), body.to_string()).into_response();
+        resp.headers_mut().insert("content-type", "application/json;charset=UTF-8".parse().unwrap());
+        return resp;
+    }
     let name = match api_id.as_str() {
         "au10001" => {
             seen.token_bodies.lock().unwrap().push(serde_json::from_str(&body).unwrap_or(Value::Null));
@@ -88,6 +102,7 @@ async fn handle(State(seen): State<Arc<Seen>>, headers: HeaderMap, body: String)
         "ka10080" if body.contains("_NX") => "ka10080_005930_NX_1",
         "ka10080" => "ka10080_005930_3",
         "ka20005" => "ka20005_001_1",
+        "ka10095" => "ka10095_synthetic",
         "ka10082" => "ka10082_005930_AL",
         "ka10083" => "ka10083_005930_AL",
         "ka20006" => "ka20006_001",
@@ -134,13 +149,16 @@ pub struct Server {
 
 impl Server {
     /// 환경변수를 비우고 필요한 것만 넣어 서버를 띄운다. 사용자의 VALLY_* 와 XDG_RUNTIME_DIR이 새어 들지 않는다.
+    /// DB는 잠금 파일 옆 `vally.db`다. 저장소의 `data/`에 쓰지 않는다.
     pub fn spawn(fake: &FakeKiwoom, lock: &Path, static_dir: &Path) -> Server {
+        let db = lock.parent().expect("잠금 파일은 임시 디렉터리 안에 있다").join("vally.db");
         let mut child = Command::new(env!("CARGO_BIN_EXE_vally-server"))
             .env_clear()
             .env("VALLY_KIWOOM_APP_KEY", APP_KEY)
             .env("VALLY_KIWOOM_APP_SECRET", APP_SECRET)
             .env("VALLY_KIWOOM_BASE_URL", fake.base_url())
             .env("VALLY_LOCK_PATH", lock)
+            .env("VALLY_DB_PATH", db)
             .env("VALLY_BIND", "127.0.0.1:0")
             .env("VALLY_STATIC_DIR", static_dir)
             .env("VALLY_LOG", "trace")

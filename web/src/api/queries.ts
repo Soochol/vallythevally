@@ -1,8 +1,9 @@
-import { keepPreviousData, useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useQueries, useQuery } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import type { SymbolCode } from "./generated/SymbolCode";
 import type { SymbolInfo } from "./generated/SymbolInfo";
 import { getJson } from "./http";
+import { fetchQuotes } from "./userData";
 
 const SEARCH_DEBOUNCE_MS = 100;
 
@@ -38,13 +39,34 @@ export function useSymbolSearch(normalized: string) {
 
 /** `GET /api/symbols/:code`. 없으면 unknown_symbol. */
 export function useSymbolInfo(code: SymbolCode) {
-  return useQuery({
-    queryKey: ["symbol", code],
-    queryFn: ({ signal }) => fetchSymbolInfo(code, signal),
-    staleTime: Infinity,
-  });
+  return useQuery(symbolInfoQuery(code));
 }
 
 export function fetchSymbolInfo(code: SymbolCode, signal?: AbortSignal): Promise<SymbolInfo> {
   return getJson<SymbolInfo>(`/api/symbols/${encodeURIComponent(code)}`, signal);
+}
+
+const QUOTES_REFETCH_MS = 60_000;
+
+export function useQuotes(symbols: readonly SymbolCode[]) {
+  return useQuery({
+    queryKey: ["quotes", symbols.join(",")],
+    queryFn: async ({ signal }) => new Map((await fetchQuotes(symbols, signal)).map((q) => [q.symbol, q])),
+    enabled: symbols.length > 0,
+    placeholderData: keepPreviousData,
+    refetchInterval: QUOTES_REFETCH_MS,
+  });
+}
+
+const symbolInfoQuery = (code: SymbolCode) => ({
+  queryKey: ["symbol", code],
+  queryFn: ({ signal }: { signal: AbortSignal }) => fetchSymbolInfo(code, signal),
+  staleTime: Infinity,
+});
+
+export function useSymbolInfos(codes: readonly SymbolCode[]): SymbolInfo[] {
+  return useQueries({
+    queries: codes.map(symbolInfoQuery),
+    combine: (results) => results.flatMap((r) => (r.data ? [r.data] : [])),
+  });
 }

@@ -1,5 +1,5 @@
 import type { SymbolInfo } from "../../api/generated/SymbolInfo";
-import { NXT_UNAVAILABLE, VENUE_LABEL, VENUES } from "../../lib/venue";
+import { NXT_UNAVAILABLE, shownVenue, VENUE_LABEL, VENUES } from "../../lib/venue";
 import { type CellState, useLayoutStore } from "../../stores/layout";
 
 const LOOKING_UP = "종목 정보를 받는 중";
@@ -16,7 +16,7 @@ const CLASS = {
  */
 export function VenuePicker({ cell, info, variant }: { cell: CellState; info: SymbolInfo | undefined; variant: keyof typeof CLASS }) {
   const setVenue = useLayoutStore((s) => s.setVenue);
-  const current = cell.venue;
+  const current = shownVenue(cell.venue, info);
   if (current === null) return null;
   const nxtReason = info === undefined ? LOOKING_UP : info.nxtEnabled ? null : NXT_UNAVAILABLE;
 

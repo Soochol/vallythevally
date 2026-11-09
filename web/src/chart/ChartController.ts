@@ -16,10 +16,9 @@ import type { Bar } from "../api/generated/Bar";
 import type { Period } from "../api/generated/Period";
 import type { SymbolCode } from "../api/generated/SymbolCode";
 import type { SymbolInfo } from "../api/generated/SymbolInfo";
-import type { Venue } from "../api/generated/Venue";
 import { ApiRequestError } from "../api/http";
 import { isIndexCode, PERIOD_LABEL, symbolSub } from "../lib/symbol";
-import { venueLabel } from "../lib/venue";
+import { type ShownVenue, venueLabel } from "../lib/venue";
 import { BarFeed, displayBars, type FetchPage, type History } from "./barFeed";
 import { Legend } from "./legend";
 import { addMainSeries, addVolumeSeries, applyMainColors, type MainSeries, priceFormat, setMainData, setVolumeData } from "./series";
@@ -33,7 +32,7 @@ const RIGHT_OFFSET = 6;
 
 export interface CellView {
   symbol: SymbolCode;
-  venue: Venue | null;
+  venue: ShownVenue | null;
   period: Period;
   settings: ChartSettings;
   info: SymbolInfo | undefined;

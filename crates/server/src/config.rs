@@ -92,6 +92,8 @@ pub struct Config {
     pub lock_path: PathBuf,
     pub bind: BindAddr,
     pub static_dir: PathBuf,
+    /// 사용자 자료 SQLite 파일(§7.1). 상대 경로면 서버 작업 디렉터리 기준.
+    pub db_path: PathBuf,
     pub log_filter: String,
 }
 
@@ -140,6 +142,7 @@ impl Config {
             },
             bind: BindAddr::parse(vars.get("VALLY_BIND").map_or("127.0.0.1:8080", String::as_str))?,
             static_dir: PathBuf::from(vars.get("VALLY_STATIC_DIR").map_or("web/dist", String::as_str)),
+            db_path: PathBuf::from(vars.get("VALLY_DB_PATH").map_or("data/vally.db", String::as_str)),
             log_filter: vars.get("VALLY_LOG").cloned().unwrap_or_else(|| "info".to_owned()),
         };
         Ok((config, warnings))
@@ -238,6 +241,7 @@ mod tests {
         assert_eq!(c.kiwoom_base_url, "http://127.0.0.1:5");
         assert_eq!(c.bind.socket_addr().port(), 9);
         assert_eq!(c.static_dir, PathBuf::from("web/dist"));
+        assert_eq!(c.db_path, PathBuf::from("data/vally.db"));
         assert_eq!(c.log_filter, "info");
         assert_eq!(c.lock_path, PathBuf::from("/nonexistent/test.lock"));
 

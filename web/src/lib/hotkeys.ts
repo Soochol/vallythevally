@@ -5,7 +5,8 @@ export type HotkeyAction =
   | { kind: "search" }
   | { kind: "period"; period: Period }
   | { kind: "periodStep"; step: -1 | 1 }
-  | { kind: "toggleLog" };
+  | { kind: "toggleLog" }
+  | { kind: "toggleWatch" };
 
 export interface KeyLike {
   code: string;
@@ -33,6 +34,12 @@ export const HOTKEYS: { keys: string; label: string; action: HotkeyAction; match
     { keys: "[", label: "이전 봉 주기", action: { kind: "periodStep", step: -1 }, match: plain("BracketLeft") },
     { keys: "]", label: "다음 봉 주기", action: { kind: "periodStep", step: 1 }, match: plain("BracketRight") },
     { keys: "L", label: "로그 축 켜기/끄기", action: { kind: "toggleLog" }, match: plain("KeyL") },
+    {
+      keys: "Alt+W",
+      label: "관심종목 접기/펴기",
+      action: { kind: "toggleWatch" },
+      match: (e) => e.code === "KeyW" && e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey,
+    },
   ];
 })();
 
