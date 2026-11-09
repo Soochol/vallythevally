@@ -63,6 +63,7 @@ export interface ControllerDeps {
 
 /** 칸 하나의 차트 엔진 래퍼(frontend.md §5.4). React 밖의 명령형 객체다. */
 export class ChartController {
+  private readonly el: HTMLElement;
   private readonly chart: IChartApi;
   private main: MainSeries;
   private readonly volume: ISeriesApi<"Histogram">;
@@ -79,6 +80,7 @@ export class ChartController {
   private disposed = false;
 
   constructor(el: HTMLElement, deps: ControllerDeps) {
+    this.el = el;
     this.tokens = deps.tokens;
     this.onStatus = deps.onStatus;
     this.chart = createChart(el, { ...this.chartOptions(), autoSize: true });
@@ -214,6 +216,14 @@ export class ChartController {
     this.bars = bars;
     setMainData(this.main, bars);
     setVolumeData(this.volume, bars, this.tokens);
+    this.exposeBarsToE2e();
+  }
+
+  private exposeBarsToE2e(): void {
+    const d = this.el.dataset;
+    d.barCount = String(this.bars.length);
+    d.firstBarT = String(this.bars[0]?.t ?? "");
+    d.lastBarT = String(this.bars[this.bars.length - 1]?.t ?? "");
   }
 
   /** setData가 보이는 범위 변경을 일으켜 과거 페이지를 연달아 받지 않게 막는다. */
