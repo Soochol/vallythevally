@@ -1,5 +1,3 @@
-//! 토큰 파일(ADR 0004, backend.md §4.1): 재시작은 발급이 아니다. 발급 사이는 10분 넘게 띄운다.
-
 mod common;
 
 use std::os::unix::fs::PermissionsExt;
@@ -125,14 +123,18 @@ async fn an_invalid_saved_token_is_reissued_once() {
     assert!(!logs.contains("FAKE-TOKEN-old-0001"), "{logs}");
 }
 
-type Setup = Box<dyn Fn(&Path) -> (PathBuf, PathBuf)>;
+struct Case {
+    token: PathBuf,
+    untouched: PathBuf,
+}
 
-/// 토큰 경로와, 서버가 건드리지 않아야 하는 파일을 만든다.
+type Setup = Box<dyn Fn(&Path) -> Case>;
+
 fn with_contents(contents: &'static str) -> Setup {
     Box::new(move |root: &Path| {
         let path = root.join("state/token.json");
         write_private(&path, contents.as_bytes());
-        (path.clone(), path)
+        Case { token: path.clone(), untouched: path }
     })
 }
 
@@ -144,7 +146,7 @@ fn with_modes(dir_mode: u32, file_mode: u32) -> Setup {
         write_private(&path, valid.to_string().as_bytes());
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(file_mode)).unwrap();
         std::fs::set_permissions(path.parent().unwrap(), std::fs::Permissions::from_mode(dir_mode)).unwrap();
-        (path.clone(), path)
+        Case { token: path.clone(), untouched: path }
     })
 }
 
@@ -154,8 +156,8 @@ async fn assert_never_issues(fake: &FakeKiwoom, cases: Vec<(&str, Setup)>) {
     for (name, setup) in cases {
         let root = tmp.path().join(name);
         std::fs::create_dir_all(&root).unwrap();
-        let (token, witness) = setup(&root);
-        let before = std::fs::read(&witness).unwrap();
+        let Case { token, untouched } = setup(&root);
+        let before = std::fs::read(&untouched).unwrap();
         let lock = root.join("run/server.lock");
         for _ in 0..3 {
             let server = Server::spawn_with(fake, &lock, &dist, &[("VALLY_TOKEN_PATH", token.as_os_str())]);
@@ -167,7 +169,7 @@ async fn assert_never_issues(fake: &FakeKiwoom, cases: Vec<(&str, Setup)>) {
             assert!(logs.contains(&token.display().to_string()), "{name}: 로그에 경로가 있다\n{logs}");
         }
         assert_eq!(fake.requests(), 0, "{name}: {:?}", fake.api_ids());
-        assert_eq!(std::fs::read(&witness).unwrap(), before, "{name}: 고치지 않고 그대로 둔다");
+        assert_eq!(std::fs::read(&untouched).unwrap(), before, "{name}: 고치지 않고 그대로 둔다");
     }
 }
 
@@ -176,7 +178,7 @@ async fn an_unreadable_token_file_issues_nothing_across_restarts_and_is_left_as_
     let parent_is_a_file: Setup = Box::new(|root: &Path| {
         let blocker = root.join("blocker");
         std::fs::write(&blocker, "not a directory").unwrap();
-        (blocker.join("token.json"), blocker)
+        Case { token: blocker.join("token.json"), untouched: blocker }
     });
     let cases = vec![("빈 파일", with_contents("")), ("깨진 JSON", with_contents("{\"token\": ")), ("부모가 일반 파일", parent_is_a_file)];
     assert_never_issues(&FakeKiwoom::start().await, cases).await;

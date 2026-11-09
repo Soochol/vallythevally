@@ -35,7 +35,6 @@ pub fn auth_failed_message(detail: Option<u16>) -> String {
     }
 }
 
-/// 서버를 다시 켜야 풀린다.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Halt {
     Rejected(u16),
@@ -130,7 +129,6 @@ impl KiwoomAuth {
         file.save(&saved)
     }
 
-    /// 발급 요청 시각을 파일에 남기지 못하면 본문을 내주지 않는다. 다시 켠 서버가 그 시각을 알아야 10분을 지킨다.
     pub fn begin_issue(&self, now: KstTime) -> Result<Secret<String>, FileError> {
         let mut st = self.lock();
         let previous = st.last_request_at.replace(now);

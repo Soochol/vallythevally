@@ -155,7 +155,6 @@ fn respond(mut v: Value, last_page: bool) -> Response {
     resp
 }
 
-/// 앱키마다 다른 토큰을 준다. `APP_KEY`면 `TOKEN`이다.
 pub fn token_for(app_key: &str) -> String {
     if app_key == APP_KEY { TOKEN.to_owned() } else { format!("FAKE-TOKEN-for-{app_key}") }
 }
@@ -176,7 +175,6 @@ impl Server {
         Server::spawn_with(fake, lock, static_dir, &[])
     }
 
-    /// `overrides`가 기본 환경변수를 덮는다.
     pub fn spawn_with(fake: &FakeKiwoom, lock: &Path, static_dir: &Path, overrides: &[(&str, &std::ffi::OsStr)]) -> Server {
         let db = lock.parent().expect("잠금 파일은 임시 디렉터리 안에 있다").join("vally.db");
         let mut child = Command::new(env!("CARGO_BIN_EXE_vally-server"))

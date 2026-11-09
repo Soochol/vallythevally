@@ -157,7 +157,7 @@ impl SymbolDirectory {
         Ok(())
     }
 
-    /// 목록이 아직 없으면 최대 10초 기다린다. 키움 조회가 막혀 있거나 기다리는 사이 멈추면 그 이유로 곧바로 끝난다.
+    /// 목록이 아직 없으면 최대 10초 기다린다.
     pub async fn ready(&self, rest: &KiwoomRest) -> Result<Arc<Directory>, NotReady> {
         if let Some(e) = rest.blocked() {
             return Err(NotReady::Kiwoom(e));

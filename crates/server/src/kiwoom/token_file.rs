@@ -10,10 +10,8 @@ use sha2::{Digest, Sha256};
 
 use crate::instance::InstanceLock;
 
-/// 파일 내용. 토큰이 들어 있으므로 `Debug`를 두지 않는다.
 #[derive(Serialize, Deserialize, PartialEq, Eq)]
 pub struct Saved {
-    /// 토큰을 받은 앱키의 `credential_id`. 없으면 이 필드가 생기기 전의 파일이다.
     #[serde(default)]
     pub credential: Option<String>,
     pub token: Option<SavedToken>,
@@ -29,13 +27,11 @@ pub struct SavedToken {
     pub issued_at: i64,
 }
 
-/// 앱키를 파일에 남기지 않고 토큰의 주인을 가려낸다.
 pub fn credential_id(app_key: &str) -> String {
     let hex: String = Sha256::digest(app_key.as_bytes()).iter().map(|b| format!("{b:02x}")).collect();
     format!("sha256:{hex}")
 }
 
-/// 경로와 원인. 파일 내용은 담지 않는다.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FileError(String);
 
@@ -66,7 +62,6 @@ impl TokenFile {
         self.path.parent().filter(|d| !d.as_os_str().is_empty()).unwrap_or(Path::new("."))
     }
 
-    /// 파일이 없으면(처음 실행) `None`. 있는데 못 읽으면 오류다.
     pub fn load(&self) -> Result<Option<Saved>, FileError> {
         let mut file = match std::fs::File::open(&self.path) {
             Ok(f) => f,
@@ -83,7 +78,6 @@ impl TokenFile {
         serde_json::from_str(&text).map(Some).map_err(|e| self.error(format_args!("JSON {:?} 오류, {}번째 줄", e.classify(), e.line())))
     }
 
-    /// 토큰 파일이 든 디렉터리는 이 서버 전용이다. 없으면 700으로 만들고, 있는데 열려 있으면 거절한다.
     /// `VALLY_TOKEN_PATH`가 홈 같은 공용 디렉터리를 가리킬 수 있어 chmod는 하지 않는다.
     fn private_dir(&self) -> Result<(), FileError> {
         let dir = self.dir();
