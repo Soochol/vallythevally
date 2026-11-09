@@ -21,3 +21,9 @@
   - e2e는 `chromiumSandbox: true`로 Chromium을 띄운다(PR #32 R2). Orca 안에서는 통과한다. Orca가 `orca-ide (unconfined)` 프로필 아래에서 돌고(`cat /proc/self/attr/current`), 그 자식인 Chromium이 이 프로필을 물려받기 때문이다. 일반 터미널에는 이런 프로필이 없다.
 - **대처**: CI와 같은 프로필을 사용자가 직접 깐다. `web/`에서 `./scripts/allow-chromium-sandbox.sh`(sudo를 묻는다). 설치된 Playwright headless shell 하나에만 `userns`를 허락한다. Playwright를 올려 브라우저 경로가 바뀌면 다시 실행한다.
 - **하지 말 것**: 샌드박스를 끄거나(`chromiumSandbox: false`) `sysctl`로 PC 전체의 제한을 풀지 않는다.
+
+## push 전에 로컬 검사가 돈다
+- 이 PC의 `.git/hooks/pre-push`가 `git push` 때 `scripts/check.sh`를 돌린다. CI의 lint, test, build, e2e와 같은 명령이다. 하나라도 실패하면 push가 막힌다. 새 worktree에서는 빌드부터 해서 약 1분 30초가 걸린다.
+- 커밋하지 않은 변경이 있으면 push를 막는다. 검사는 작업 트리를 보기 때문이다.
+- 외부 네트워크 차단과 Chromium 샌드박스 프로필은 sudo가 필요해서 CI에만 있다. 병합 판정은 GitHub CI가 한다.
+- 이 hook은 저장소에 올라가지 않는다. 끄려면 `.git/hooks/pre-push`를 지운다.
