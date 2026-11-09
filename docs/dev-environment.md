@@ -23,7 +23,9 @@
 - **하지 말 것**: 샌드박스를 끄거나(`chromiumSandbox: false`) `sysctl`로 PC 전체의 제한을 풀지 않는다.
 
 ## push 전에 로컬 검사가 돈다
-- 이 PC의 `.git/hooks/pre-push`가 `git push` 때 `scripts/check.sh`를 돌린다. CI의 lint, test, build, e2e와 같은 명령이다. 하나라도 실패하면 push가 막힌다. 새 worktree에서는 빌드부터 해서 약 1분 30초가 걸린다.
+- 이 PC의 `.git/hooks/pre-push`가 `git push` 때 `scripts/check.sh`를 돌린다. CI의 lint, test, build, wasm, e2e와 같은 명령이다. 하나라도 실패하면 push가 막힌다. 새 worktree에서는 빌드부터 해서 약 1분 30초가 걸린다.
 - 커밋하지 않은 변경이 있으면 push를 막는다. 검사는 작업 트리를 보기 때문이다.
-- 외부 네트워크 차단과 Chromium 샌드박스 프로필은 sudo가 필요해서 CI에만 있다. 병합 판정은 GitHub CI가 한다.
+- **GitHub Actions CI는 꺼져 있다**(2026-11-09 사용자 결정, `gh workflow disable CI`). 브랜치 보호의 필수 검사도 뺐다. 되돌릴 때는 `gh workflow enable CI`, 필수 검사 목록은 lint, test, build, e2e였다.
+- 병합 판정은 로컬 검사로 한다. 코디네이터가 병합 직전에 PR 머리 커밋의 깨끗한 worktree에서 `scripts/check.sh`를 다시 돌리고, 통과 결과를 PR 댓글에 남긴 뒤 병합한다.
+- CI에만 있던 외부 네트워크 차단(`unshare --net`)과 Chromium 샌드박스 프로필이 로컬에는 없다. 시험 서버의 키움 REST·WS 주소가 모두 가짜인지 확인한다. 로컬에서 네트워크를 막는 일은 #48이다.
 - 이 hook은 저장소에 올라가지 않는다. 끄려면 `.git/hooks/pre-push`를 지운다.
