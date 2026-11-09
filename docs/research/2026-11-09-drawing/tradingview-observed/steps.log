@@ -1,0 +1,25 @@
+2026-11-09T11:42:25.674Z tradingview.com/chart NASDAQ:AAPL 1D, not logged in, headless Chromium 1400x850
+A: Alt+T, click (250,620), move to (550,450) without button
+shot 01-trend-after-first-click-moving
+shot 02-trend-after-second-click
+B: Alt+T then press-drag (300,700)->(650,560)
+shot 03-trend-press-drag-holding
+shot 04-trend-press-drag-released
+C: Alt+T, click (150,300), Shift held, click (450,280)
+shot 05-trend-shift-preview
+shot 06-trend-shift-done
+D: select first trend line by clicking its middle (400,535)
+shot 07-hover-trend
+shot 08-trend-selected
+E: Ctrl+drag the selected trend line body down 120px
+shot 09-after-ctrl-drag
+F: Ctrl+Z
+shot 10-after-undo
+G: Alt+H click (600,250)
+shot 11-hline
+H: Alt+Shift+R rectangle click (650,150) click (850,230)
+shot 12-rect
+I: Alt+F fib click (120,680) click (500,200)
+shot 13-fib
+J: right-click on rectangle border (650,190)
+shot 14-context-menu

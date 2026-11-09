@@ -1,0 +1,113 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><style>html,body{margin:0;background:#fff}#c{width:900px;height:500px}</style></head>
+<body><div id="c"></div>
+<script>
+
+const BLUE = "rgb(0, 0, 255)";
+
+function makeBars(n) {
+  const bars = [];
+  let p = 100;
+  const t0 = 1700000000;
+  for (let i = 0; i < n; i++) {
+    const o = p, c = p + Math.sin(i / 7) * 2, h = Math.max(o, c) + 1, l = Math.min(o, c) - 1;
+    bars.push({ time: t0 + i * 86400, open: o, high: h, low: l, close: c });
+    p = c;
+  }
+  return bars;
+}
+
+function distToSegment(px, py, x1, y1, x2, y2) {
+  const dx = x2 - x1, dy = y2 - y1, len2 = dx * dx + dy * dy;
+  const u = len2 === 0 ? 0 : Math.max(0, Math.min(1, ((px - x1) * dx + (py - y1) * dy) / len2));
+  return Math.hypot(px - (x1 + u * dx), py - (y1 + u * dy));
+}
+
+class LinesPrimitive {
+  constructor(lines, opts = {}) {
+    this.lines = lines;
+    this.opts = opts;
+    this.hitCalls = 0;
+    this.hitMs = 0;
+    this.drawMs = 0;
+    this.draws = 0;
+    this.updateMs = 0;
+    const self = this;
+    this.view = {
+      zOrder: () => opts.zOrder ?? "top",
+      renderer: () => ({
+        draw(target) {
+          const t0 = performance.now();
+          target.useMediaCoordinateSpace(({ context: ctx }) => {
+            ctx.lineWidth = 2;
+            ctx.strokeStyle = "#2962ff";
+            for (const s of self.screen) {
+              ctx.beginPath(); ctx.moveTo(s[0], s[1]); ctx.lineTo(s[2], s[3]); ctx.stroke();
+            }
+            if (opts.box) {
+              ctx.fillStyle = BLUE;
+              ctx.fillRect(opts.box.x, opts.box.y, opts.box.w, opts.box.h);
+            }
+          });
+          self.drawMs += performance.now() - t0;
+          self.draws++;
+        },
+      }),
+    };
+    this.views = [this.view];
+    this.screen = [];
+    this.priceViews = opts.priceLabel ? [{
+      coordinate: () => self.series.priceToCoordinate(opts.priceLabel),
+      text: () => String(opts.priceLabel), textColor: () => "#fff", backColor: () => "rgb(255, 0, 255)",
+    }] : [];
+    this.timeViews = opts.timeLabel ? [{
+      coordinate: () => self.chart.timeScale().timeToCoordinate(opts.timeLabel),
+      text: () => "VLINE", textColor: () => "#fff", backColor: () => "rgb(0, 200, 0)",
+    }] : [];
+  }
+  attached({ chart, series, requestUpdate }) { this.chart = chart; this.series = series; this.requestUpdate = requestUpdate; }
+  updateAllViews() {
+    const t0 = performance.now();
+    const ts = this.chart.timeScale();
+    this.screen = this.lines.map((l) => [
+      ts.logicalToCoordinate(l.l1), this.series.priceToCoordinate(l.p1),
+      ts.logicalToCoordinate(l.l2), this.series.priceToCoordinate(l.p2), l.id,
+    ]);
+    this.updateMs += performance.now() - t0;
+  }
+  paneViews() { return this.views; }
+  priceAxisViews() { return this.priceViews; }
+  timeAxisViews() { return this.timeViews; }
+  autoscaleInfo() { return this.opts.autoscale ? { priceRange: { minValue: this.opts.autoscale[0], maxValue: this.opts.autoscale[1] } } : null; }
+  hitTest(x, y) {
+    const t = performance.now();
+    this.hitCalls++;
+    let best = null;
+    for (const s of this.screen) {
+      const d = distToSegment(x, y, s[0], s[1], s[2], s[3]);
+      if (d <= 6 && (!best || d < best.distance)) best = { externalId: s[4], zOrder: "top", cursorStyle: "pointer", distance: d, hitTestPriority: 1 };
+    }
+    this.hitMs += performance.now() - t;
+    return best;
+  }
+}
+
+window.probe = {
+  setup(opts = {}) {
+    document.getElementById("c").innerHTML = "";
+    const chart = window.LightweightCharts.createChart(document.getElementById("c"), {
+      width: 900, height: 500,
+      crosshair: { mode: window.LightweightCharts.CrosshairMode.Normal, vertLine: { color: "rgb(255, 0, 0)", width: 4, style: window.LightweightCharts.LineStyle.Solid, labelVisible: false }, horzLine: { color: "rgb(255, 0, 0)", width: 4, style: window.LightweightCharts.LineStyle.Solid, labelVisible: false } },
+      layout: { attributionLogo: false },
+    });
+    const series = chart.addSeries(window.LightweightCharts.CandlestickSeries);
+    const bars = makeBars(opts.bars ?? 300);
+    series.setData(bars);
+    window.chart = chart; window.series = series; window.bars = bars;
+    window.clicks = [];
+    chart.subscribeClick((p) => window.clicks.push({ objectId: p.hoveredInfo?.objectId ?? null, legacy: p.hoveredObjectId ?? null, logical: p.logical ?? null, time: p.time ?? null }));
+    return true;
+  },
+  addLines(lines, opts) { const p = new LinesPrimitive(lines, opts); series.attachPrimitive(p); return p; },
+};
+</script></body></html>
