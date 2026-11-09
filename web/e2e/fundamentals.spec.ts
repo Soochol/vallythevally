@@ -43,3 +43,19 @@ test("키움이 실패하면 종목 정보만 오류를 보이고 차트는 그�
   await alert.getByRole("button", { name: "다시 시도" }).click();
   await expect(value(page, "PER")).toHaveText("28.51배");
 });
+
+test("휴대폰에서는 종목 정보를 묻지 않고, 데스크톱 폭이 되면 묻는다", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const asked: string[] = [];
+  page.on("request", (r) => {
+    if (r.url().endsWith("/fundamentals")) asked.push(r.url());
+  });
+  await page.goto("/?symbol=005930");
+  await expect(chartOf(cell(page))).not.toHaveAttribute("data-bar-count", "0");
+  await page.waitForLoadState("networkidle");
+  expect(asked).toEqual([]);
+
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await expect(value(page, "PER")).toHaveText("28.51배");
+  expect(asked).toHaveLength(1);
+});
