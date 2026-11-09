@@ -1436,6 +1436,7 @@ pub fn judge_cross(dir: CrossDir, prev: (f64, f64), cur: (f64, f64)) -> bool;
 | `unknown_symbol` | 404 | 종목 목록에 없거나 키움이 빈 행을 준 종목 |
 | `conflict` | 409 | 마지막 레이아웃 지우기 같은 충돌 |
 | `payload_too_large` | 413 | 한도를 넘는 본문. 화면 상태·관심종목 64KB, 칸 하나의 `chartSettings` 64KB, 레이아웃 본문 272KB(4 × 64KB + 16KB) |
+| `method_not_allowed` | 405 | 있는 API 경로에 틀린 메서드를 보냈다(`POST /api/ui-state` 등) |
 | `internal` | 500 | 서버 버그(파싱 실패, 키움이 거절한 요청) |
 | `kiwoom_auth_failed` | 502 | 키움이 우리 인증을 거절했다. 다시 시도해도 낫지 않는다. 운영자가 설정을 고친다 |
 | `kiwoom_unavailable` | 503 | 키움에 닿지 못했거나 요청 개수 초과가 이어졌거나 종목 목록을 아직 못 받았다. 다시 시도할 수 있다 |
@@ -1460,7 +1461,7 @@ interface ApiError {
       | "bad_request" | "not_found" | "unknown_symbol"
       | "kiwoom_unavailable"  // 키움 조회 실패(네트워크, 5xx, 요청 개수 초과 반복)
       | "kiwoom_auth_failed"  // 운영자가 고쳐야 한다
-      | "conflict" | "payload_too_large" | "internal";
+      | "conflict" | "payload_too_large" | "method_not_allowed" | "internal";
     message: string;          // 사람이 읽는 한국어 문장
   };
 }

@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use axum::Router;
 use axum::extract::{Path, Query, State};
-use axum::http::{HeaderValue, StatusCode, Uri, header};
+use axum::http::{HeaderValue, Method, StatusCode, Uri, header};
 use axum::response::{IntoResponse, Json, Response};
 use axum::routing::{any, get};
 use domain::{Feed, KstTime, Period, SeriesKey, Symbol, Venue};
@@ -37,6 +37,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .merge(crate::user_routes::routes())
         .route("/api", any(api_not_found))
         .route("/api/{*rest}", any(api_not_found))
+        .method_not_allowed_fallback(method_not_allowed)
         .fallback(static_file)
         .layer(CompressionLayer::new())
         .with_state(state)
@@ -69,6 +70,7 @@ pub fn status_of(code: api::ApiErrorCode) -> StatusCode {
         KiwoomAuthFailed => StatusCode::BAD_GATEWAY,
         Conflict => StatusCode::CONFLICT,
         PayloadTooLarge => StatusCode::PAYLOAD_TOO_LARGE,
+        MethodNotAllowed => StatusCode::METHOD_NOT_ALLOWED,
         Internal => StatusCode::INTERNAL_SERVER_ERROR,
     }
 }
@@ -186,6 +188,10 @@ async fn quotes(State(st): State<Arc<AppState>>, Query(q): Query<HashMap<String,
         }
     }
     Ok(Json(crate::quotes::quotes(&st.rest, &st.bars, &symbols).await?))
+}
+
+async fn method_not_allowed(method: Method, uri: Uri) -> ApiFailure {
+    ApiFailure::new(api::ApiErrorCode::MethodNotAllowed, format!("{}에는 {method}를 쓸 수 없습니다", uri.path()))
 }
 
 async fn api_not_found(uri: Uri) -> ApiFailure {
@@ -608,6 +614,17 @@ mod tests {
         assert_eq!((s, v["error"]["code"].as_str()), (StatusCode::SERVICE_UNAVAILABLE, Some("kiwoom_unavailable")));
     }
 
+    /// R4: 있는 경로에 틀린 메서드를 보내면 axum 기본 405(빈 본문)가 아니라 계약의 ApiError다.
+    #[tokio::test]
+    async fn wrong_method_is_405_with_api_error() {
+        let f = live_fixture(true).await;
+        for (method, uri) in [("POST", "/api/ui-state"), ("DELETE", "/api/watchlist"), ("POST", "/api/layouts/x"), ("PUT", "/api/bars"), ("POST", "/api/symbols")] {
+            let (s, v) = send(&f.app, method, uri, "{}").await;
+            assert_eq!((s, code(&v)), (StatusCode::METHOD_NOT_ALLOWED, "method_not_allowed"), "{method} {uri}: {v}");
+            assert!(v["error"]["message"].as_str().unwrap().contains(method), "{v}");
+        }
+    }
+
     #[test]
     fn every_error_code_has_one_status() {
         use api::ApiErrorCode::*;
@@ -619,6 +636,7 @@ mod tests {
             (KiwoomAuthFailed, 502),
             (Conflict, 409),
             (PayloadTooLarge, 413),
+            (MethodNotAllowed, 405),
             (Internal, 500),
         ];
         for (code, want) in table {

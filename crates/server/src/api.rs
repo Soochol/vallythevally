@@ -360,6 +360,8 @@ pub enum ApiErrorCode {
     KiwoomAuthFailed,
     Conflict,
     PayloadTooLarge,
+    /// 있는 API 경로에 틀린 메서드를 보냈다.
+    MethodNotAllowed,
     Internal,
 }
 
