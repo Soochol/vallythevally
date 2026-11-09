@@ -29,6 +29,7 @@ pub struct Seen {
     pub authorizations: Mutex<Vec<String>>,
     pub token_bodies: Mutex<Vec<Value>>,
     pub overrides: Mutex<std::collections::HashMap<String, (u16, Value)>>,
+    pub rejected_tokens: Mutex<Vec<String>>,
 }
 
 pub struct FakeKiwoom {
@@ -59,6 +60,15 @@ impl FakeKiwoom {
         self.seen.overrides.lock().unwrap().insert(api_id.to_owned(), (status, body));
     }
 
+    /// 이 토큰으로 온 시세 요청에는 토큰 무효(8005)로 답한다.
+    pub fn reject_token(&self, token: &str) {
+        self.seen.rejected_tokens.lock().unwrap().push(format!("Bearer {token}"));
+    }
+
+    pub fn issued(&self) -> usize {
+        self.api_ids().iter().filter(|a| *a == "au10001").count()
+    }
+
     pub fn api_ids(&self) -> Vec<String> {
         self.seen.api_ids.lock().unwrap().clone()
     }
@@ -84,6 +94,9 @@ async fn handle(State(seen): State<Arc<Seen>>, headers: HeaderMap, body: String)
         let mut resp = (StatusCode::from_u16(status).unwrap(), body.to_string()).into_response();
         resp.headers_mut().insert("content-type", "application/json;charset=UTF-8".parse().unwrap());
         return resp;
+    }
+    if seen.rejected_tokens.lock().unwrap().contains(&h("authorization")) {
+        return respond(serde_json::json!({"return_code": 3, "return_msg": "인증에 실패했습니다[8005:Token이 유효하지 않습니다]"}), true);
     }
     let name = match api_id.as_str() {
         "au10001" => {
@@ -143,6 +156,11 @@ fn respond(mut v: Value, last_page: bool) -> Response {
     resp
 }
 
+/// 서버가 쓰는 토큰 파일. 잠금 파일 옆에 둔다.
+pub fn token_path(lock: &Path) -> std::path::PathBuf {
+    lock.with_file_name("token.json")
+}
+
 pub struct Server {
     pub child: Child,
     pub logs: Arc<Mutex<String>>,
@@ -160,6 +178,7 @@ impl Server {
             .env("VALLY_KIWOOM_BASE_URL", fake.base_url())
             .env("VALLY_LOCK_PATH", lock)
             .env("VALLY_DB_PATH", db)
+            .env("VALLY_TOKEN_PATH", token_path(lock))
             .env("VALLY_BIND", "127.0.0.1:0")
             .env("VALLY_STATIC_DIR", static_dir)
             .env("VALLY_LOG", "trace")

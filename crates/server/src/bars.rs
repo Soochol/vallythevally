@@ -37,13 +37,15 @@ pub enum BarError {
     /// 종목 목록을 아직 못 받았거나 키움이 응답하지 않는다.
     Unavailable(String),
     AuthFailed { detail: Option<u16> },
+    /// 토큰 발급 간격(10분) 안이라 토큰이 없다. 저절로 풀린다.
+    TokenWait(String),
     Internal(String),
 }
 
 impl fmt::Display for BarError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            BarError::BadRequest(m) | BarError::Unavailable(m) | BarError::Internal(m) => f.write_str(m),
+            BarError::BadRequest(m) | BarError::Unavailable(m) | BarError::TokenWait(m) | BarError::Internal(m) => f.write_str(m),
             BarError::UnknownSymbol => f.write_str("없는 종목입니다"),
             BarError::AuthFailed { detail } => f.write_str(&crate::kiwoom::auth::auth_failed_message(*detail)),
         }
@@ -55,6 +57,7 @@ impl From<KiwoomError> for BarError {
         match e {
             KiwoomError::RateLimited | KiwoomError::Transport(_) => BarError::Unavailable(e.to_string()),
             KiwoomError::AuthFailed { detail } => BarError::AuthFailed { detail },
+            KiwoomError::IssueTooSoon { .. } => BarError::TokenWait(e.to_string()),
             KiwoomError::BadRequest { .. } | KiwoomError::Parse { .. } => BarError::Internal(e.to_string()),
         }
     }
@@ -120,7 +123,7 @@ impl BarService {
 
     /// `before`가 None이면 최신 페이지다.
     pub async fn page(&self, key: SeriesKey, before: Option<KstTime>, limit: usize) -> Result<BarPage, BarError> {
-        if let Some(e) = self.rest.halted() {
+        if let Some(e) = self.rest.blocked() {
             return Err(e.into());
         }
         let dir = self.symbols.ready().await.map_err(|_| BarError::Unavailable("종목 목록을 아직 받지 못했습니다".into()))?;
@@ -160,9 +163,9 @@ impl BarService {
 
     /// 07:45에 부른다. 진행 중인 조회의 응답은 내려간 시리즈에만 쓰이고 버려진다.
     /// 비운 뒤의 조회는 비우기 전 조회와 합쳐지지 않는다.
-    /// 키움이 인증을 거절해 모든 조회를 멈췄으면 그 오류.
-    pub fn halted(&self) -> Option<KiwoomError> {
-        self.rest.halted()
+    /// 지금 키움에 보내 봐야 바로 실패할 이유(`KiwoomRest::blocked`).
+    pub fn blocked(&self) -> Option<KiwoomError> {
+        self.rest.blocked()
     }
 
     pub fn clear_all(&self) {
@@ -550,7 +553,7 @@ mod tests {
             chart.respond(s, array_of(s.api_id))
         }));
         let clock = Clock::fake(now);
-        let rest = KiwoomRest::new(Arc::new(fake.clone()), KiwoomAuth::new(Secret::new("k".into()), Secret::new("s".into())), clock.clone());
+        let rest = KiwoomRest::new(Arc::new(fake.clone()), KiwoomAuth::new(Secret::new("k".into()), Secret::new("s".into()), None), clock.clone());
         let symbols = Arc::new(SymbolDirectory::default());
         let stock = |code: &str, nxt_enabled| SymbolInfo { symbol: Symbol::parse(code).unwrap(), name: code.into(), kind: SymbolKind::Common, market: Market::Kospi, nxt_enabled };
         symbols.replace(Directory::build(vec![stock(SAMSUNG, true), stock(NOT_ON_NXT, false), stock(EMPTY_ROW, true)]));

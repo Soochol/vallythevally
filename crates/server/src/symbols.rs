@@ -310,7 +310,7 @@ mod tests {
             ok(if s.body.contains("\"10\"") { kosdaq.clone() } else { exchange.clone() }, None)
         }));
         let clock = crate::clock::Clock::fake(crate::clock::kst(domain::KstDate::new(2026, 11, 9).unwrap(), 7, 45, 0));
-        let auth = crate::kiwoom::auth::KiwoomAuth::new(crate::config::Secret::new("k".into()), crate::config::Secret::new("s".into()));
+        let auth = crate::kiwoom::auth::KiwoomAuth::new(crate::config::Secret::new("k".into()), crate::config::Secret::new("s".into()), None);
         let rest = KiwoomRest::new(Arc::new(fake.clone()), auth, clock);
         let symbols = SymbolDirectory::default();
         symbols.refresh(&rest, Priority::Screen).await.unwrap();

@@ -110,6 +110,7 @@ impl Lookup {
                 ApiFailure::new(KiwoomUnavailable, "키움 조회에 실패했습니다. 잠시 뒤 다시 시도하세요")
             }
             BarError::AuthFailed { detail } => ApiFailure::new(KiwoomAuthFailed, auth_failed_message(detail)),
+            BarError::TokenWait(m) => ApiFailure::new(KiwoomUnavailable, m),
             BarError::Internal(m) => {
                 tracing::error!(reason = %m, "{what} 요청 처리 중 내부 오류");
                 ApiFailure::new(Internal, "서버 내부 오류입니다")
@@ -120,7 +121,7 @@ impl Lookup {
 
 /// 종목 목록이 필요한 요청이 먼저 부른다. 인증 거절로 멈췄으면 목록은 오지 않으므로 기다리지 않고 원인을 돌려준다.
 pub(crate) async fn symbol_list(st: &AppState) -> Result<Arc<crate::symbols::Directory>, ApiFailure> {
-    if let Some(e) = st.bars.halted() {
+    if let Some(e) = st.bars.blocked() {
         return Err(Lookup::Symbols.failure(e.into()));
     }
     st.symbols
@@ -363,7 +364,7 @@ mod tests {
             ], "return_code": 0}), None)
         }));
         let clock = Clock::fake(kst(KstDate::new(2026, 11, 9).unwrap(), 0, 34, 0));
-        let rest = KiwoomRest::new(Arc::new(fake.clone()), KiwoomAuth::new(Secret::new("k".into()), Secret::new("s".into())), clock.clone());
+        let rest = KiwoomRest::new(Arc::new(fake.clone()), KiwoomAuth::new(Secret::new("k".into()), Secret::new("s".into()), None), clock.clone());
         let symbols = Arc::new(SymbolDirectory::default());
         if loaded {
             let stock = |code: &str, name: &str, kind, nxt_enabled| SymbolInfo { symbol: Symbol::parse(code).unwrap(), name: name.into(), kind, market: Market::Kospi, nxt_enabled };

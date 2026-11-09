@@ -1,6 +1,6 @@
 //! 서버를 켜는 순서와 하루 타이머(backend.md §4.1, §6.2, §6.6).
 //!
-//! 순서: 설정 → 잠금 파일 → 사용자 자료 DB → 포트 열기 → 첫 토큰 → 종목 목록 받기 시작 → 요청 받기.
+//! 순서: 설정 → 잠금 파일 → 사용자 자료 DB → 포트 열기 → 토큰 파일(유효하면 다시 쓰고, 없으면 발급) → 종목 목록 받기 시작 → 요청 받기.
 //! 잠금은 키움 요청보다 먼저다. 두 번째 서버는 키움에 아무것도 보내지 않고 끝난다.
 
 use std::process::ExitCode;
@@ -18,6 +18,7 @@ use crate::http::{AppState, router};
 use crate::instance::InstanceLock;
 use crate::kiwoom::auth::{DAILY_REISSUE_AT, KiwoomAuth};
 use crate::kiwoom::rest::{KiwoomRest, Priority};
+use crate::kiwoom::token_file::TokenFile;
 use crate::kiwoom::transport::ReqwestTransport;
 use crate::symbols::SymbolDirectory;
 
@@ -42,7 +43,7 @@ pub fn main() -> ExitCode {
     for w in warnings {
         tracing::warn!("{w}");
     }
-    let _lock = match InstanceLock::acquire(&config.lock_path) {
+    let lock = match InstanceLock::acquire(&config.lock_path) {
         Ok(lock) => lock,
         Err(e) => {
             tracing::error!("{e}");
@@ -56,7 +57,10 @@ pub fn main() -> ExitCode {
             return ExitCode::from(1);
         }
     };
-    runtime.block_on(serve(config))
+    let token_file = TokenFile::new(config.token_path.clone(), &lock);
+    let code = runtime.block_on(serve(config, token_file));
+    drop(lock);
+    code
 }
 
 fn init_logging(filter: &str) {
@@ -67,7 +71,7 @@ fn init_logging(filter: &str) {
     tracing_subscriber::fmt().with_env_filter(filter).with_writer(std::io::stderr).with_ansi(false).init();
 }
 
-async fn serve(config: Config) -> ExitCode {
+async fn serve(config: Config, token_file: TokenFile) -> ExitCode {
     let db = match AppDb::open(&config.db_path).await {
         Ok(db) => db,
         Err(e) => {
@@ -97,10 +101,12 @@ async fn serve(config: Config) -> ExitCode {
     let clock = Clock::system();
     let rest = KiwoomRest::new(
         Arc::new(transport),
-        KiwoomAuth::new(config.kiwoom_app_key.clone(), config.kiwoom_app_secret.clone()),
+        KiwoomAuth::new(config.kiwoom_app_key.clone(), config.kiwoom_app_secret.clone(), Some(token_file)),
         clock.clone(),
     );
-    if let Err(e) = rest.issue_token().await {
+    if !rest.auth().needs_issue(clock.now()) {
+        tracing::info!(path = %config.token_path.display(), "파일의 토큰을 다시 씁니다. 발급하지 않습니다");
+    } else if let Err(e) = rest.issue_token().await {
         tracing::error!(error = %e, "첫 토큰을 받지 못했습니다. 조회가 들어오면 다시 받아 봅니다");
     }
     let symbols = Arc::new(SymbolDirectory::default());

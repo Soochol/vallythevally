@@ -52,7 +52,7 @@ async fn reopening_right_after_the_daily_reset_does_not_reuse_the_pre_reset_resp
     let count = Arc::new(AtomicUsize::new(0));
     let clock = Clock::fake(kst(KstDate::new(2026, 11, 9).unwrap(), 7, 44, 59));
     let transport = HeldChart { sent: sent.clone(), gate: gate.clone(), count: count.clone() };
-    let rest = KiwoomRest::new(Arc::new(transport), KiwoomAuth::new(Secret::new("k".into()), Secret::new("s".into())), clock.clone());
+    let rest = KiwoomRest::new(Arc::new(transport), KiwoomAuth::new(Secret::new("k".into()), Secret::new("s".into()), None), clock.clone());
     let symbol = Symbol::parse("005930").unwrap();
     let symbols = Arc::new(SymbolDirectory::default());
     symbols.replace(Directory::build(vec![SymbolInfo { symbol, name: "삼성전자".into(), kind: SymbolKind::Common, market: Market::Kospi, nxt_enabled: true }]));

@@ -13,11 +13,12 @@ use tokio::sync::{Notify, oneshot};
 use tokio::time::Instant;
 
 use super::api::{ApiId, MarketRequest};
-use super::auth::{AuthError, KiwoomAuth, TokenGen, auth_failed_message};
+use super::auth::{AuthError, KiwoomAuth, MIN_ISSUE_INTERVAL_SECS, TokenGen, auth_failed_message};
 use super::transport::{HttpRequest, HttpResponse, Transport, TransportError};
 use super::wire::{Envelope, TokenResponse, detail_code};
 use crate::clock::Clock;
 use crate::config::Secret;
+use domain::KstTime;
 
 pub const SEND_SPACING: Duration = Duration::from_millis(260);
 const RATE_LIMIT_PAUSE: Duration = Duration::from_secs(1);
@@ -73,6 +74,8 @@ pub enum KiwoomError {
     RateLimited,
     /// 토큰을 받을 수 없거나 인증이 거절됐다.
     AuthFailed { detail: Option<u16> },
+    /// 토큰이 없는데 마지막 발급 요청에서 10분이 지나지 않았다. `until`부터 다시 발급한다.
+    IssueTooSoon { until: KstTime },
     /// 우리 코드가 잘못 보낸 요청(1501~1999, 1634, 상세 코드 없는 실패).
     BadRequest { detail: Option<u16>, msg: String },
     /// 네트워크 오류, HTTP 5xx 등. URL과 헤더는 빼고 적는다.
@@ -85,6 +88,11 @@ impl fmt::Display for KiwoomError {
         match self {
             KiwoomError::RateLimited => f.write_str("키움 요청 개수 초과가 계속됩니다"),
             KiwoomError::AuthFailed { detail } => write!(f, "키움 인증 실패(상세 코드 {detail:?})"),
+            KiwoomError::IssueTooSoon { until } => write!(
+                f,
+                "키움 토큰은 발급 사이를 {}분 띄웁니다. {until}부터 다시 받으니 그 뒤에 다시 시도하세요",
+                MIN_ISSUE_INTERVAL_SECS / 60
+            ),
             KiwoomError::BadRequest { detail, msg } => write!(f, "키움이 요청을 거절했습니다(상세 코드 {detail:?}): {msg}"),
             KiwoomError::Transport(m) => write!(f, "키움에 닿지 못했습니다: {m}"),
             KiwoomError::Parse { api_id, detail } => write!(f, "{} 응답을 읽지 못했습니다: {detail}", api_id.as_str()),
@@ -220,6 +228,16 @@ impl KiwoomRest {
         self.0.auth.halted().map(|d| KiwoomError::AuthFailed { detail: Some(d) })
     }
 
+    /// 지금 보내면 키움에 닿지 않고 바로 실패할 이유: 인증 거절로 멈췄거나, 토큰이 없는데 발급 간격 안이다.
+    pub fn blocked(&self) -> Option<KiwoomError> {
+        let auth = &self.0.auth;
+        let now = self.0.clock.now();
+        self.halted().or_else(|| {
+            let until = auth.needs_issue(now).then(|| auth.issue_blocked_until(now)).flatten()?;
+            Some(KiwoomError::IssueTooSoon { until })
+        })
+    }
+
     /// 토큰을 새로 받는다. 서버를 켤 때와 매일 20:05에만 부른다.
     pub async fn issue_token(&self) -> Result<TokenGen, KiwoomError> {
         let (tx, rx) = oneshot::channel();
@@ -339,6 +357,15 @@ impl Inner {
         if !wants_issue && !has_market {
             return Step::Idle;
         }
+        if let Some(until) = self.auth.issue_blocked_until(now_kst).filter(|_| wants_issue) {
+            let err = KiwoomError::IssueTooSoon { until };
+            tracing::warn!(%until, "마지막 토큰 발급 요청에서 10분이 지나지 않아 발급하지 않고 기다리던 요청을 실패시킵니다");
+            q.fail_queued(&err);
+            for w in q.issue_waiters.drain(..) {
+                let _ = w.send(Err(err.clone()));
+            }
+            return Step::Idle;
+        }
         let now = Instant::now();
         let ready = q.last_send.map(|t| t + SEND_SPACING).into_iter().chain(q.pause_until).max();
         if let Some(r) = ready.filter(|&r| r > now) {
@@ -367,7 +394,7 @@ impl Inner {
     }
 
     async fn issue(&self) {
-        let req = HttpRequest { api_id: ApiId::Au10001, token: None, cont: None, body: self.auth.issue_body() };
+        let req = HttpRequest { api_id: ApiId::Au10001, token: None, cont: None, body: self.auth.begin_issue(self.clock.now()) };
         let started = Instant::now();
         let res = self.transport.send(req).await;
         let outcome = self.judge_issue(res, started);
@@ -444,7 +471,7 @@ impl Inner {
                 let already = job.resent_after_invalid_token;
                 job.resent_after_invalid_token = true;
                 let invalid = KiwoomError::AuthFailed { detail: Some(8005) };
-                match (already, self.auth.invalidate(generation, self.clock.now())) {
+                match (already, self.auth.invalidate(generation)) {
                     (false, Ok(())) => q.requeue_front(id),
                     (_, Err(AuthError::Halted { detail })) => q.finish(id, Err(KiwoomError::AuthFailed { detail: Some(detail) })),
                     _ => {
@@ -613,8 +640,26 @@ mod tests {
 
     fn rest(fake: &Arc<FakeTransport>) -> KiwoomRest {
         let clock = Clock::fake(kst(KstDate::new(2026, 11, 9).unwrap(), 9, 0, 0));
-        let auth = KiwoomAuth::new(Secret::new("k".into()), Secret::new("s".into()));
+        let auth = KiwoomAuth::new(Secret::new("k".into()), Secret::new("s".into()), None);
         KiwoomRest::new(Arc::new(fake.clone()), auth, clock)
+    }
+
+    type Guards = (tempfile::TempDir, crate::instance::InstanceLock);
+
+    /// 한 시간 전에 받아 파일에 둔 `tok-0`으로 시작한다. 켠 뒤에는 발급 간격에 걸리지 않는다.
+    fn rest_with_saved_token(fake: &Arc<FakeTransport>) -> (KiwoomRest, Guards) {
+        use crate::kiwoom::token_file::{Saved, SavedToken, testing::temp_token_file};
+        let start = kst(KstDate::new(2026, 11, 9).unwrap(), 9, 0, 0);
+        let (dir, lock, file) = temp_token_file();
+        let an_hour_ago = start.unix() - 3600;
+        let token = SavedToken { value: "tok-0".into(), expires_dt: "20991231000000".into(), issued_at: an_hour_ago };
+        file.save(&Saved { token: Some(token), last_request_at: an_hour_ago }).unwrap();
+        let auth = KiwoomAuth::new(Secret::new("k".into()), Secret::new("s".into()), Some(file));
+        (KiwoomRest::new(Arc::new(fake.clone()), auth, Clock::fake(start)), (dir, lock))
+    }
+
+    fn invalid_token() -> Result<HttpResponse, TransportError> {
+        ok(json!({"return_code": 3, "return_msg": "인증에 실패했습니다[8005:Token이 유효하지 않습니다]"}), None)
     }
 
     fn list_ok() -> Result<HttpResponse, TransportError> {
@@ -768,15 +813,9 @@ mod tests {
     async fn invalid_token_reissues_once_and_every_request_uses_the_new_token() {
         let tokens = token_counter();
         let fake = Arc::new(FakeTransport::new(Duration::from_millis(50), move |s| {
-            if let Some(t) = tokens(s) {
-                return t;
-            }
-            if s.token.as_deref() == Some("tok-1") {
-                return ok(json!({"return_code": 3, "return_msg": "인증에 실패했습니다[8005:Token이 유효하지 않습니다]"}), None);
-            }
-            list_ok()
+            tokens(s).unwrap_or_else(|| if s.token.as_deref() == Some("tok-0") { invalid_token() } else { list_ok() })
         }));
-        let rest = rest(&fake);
+        let (rest, _guards) = rest_with_saved_token(&fake);
         let (a, b, c) = tokio::join!(
             call_k(&rest, 0, Priority::Screen),
             call_k(&rest, 1, Priority::Screen),
@@ -784,10 +823,10 @@ mod tests {
         );
         assert!(a.is_ok() && b.is_ok() && c.is_ok());
         let sent = fake.sent();
-        assert_eq!(sent.iter().filter(|s| s.api_id == ApiId::Au10001).count(), 2, "옛 세대의 무효 응답은 다시 발급하지 않는다");
-        let second_issue = sent.iter().rposition(|s| s.api_id == ApiId::Au10001).unwrap();
-        assert!(sent[second_issue + 1..].iter().all(|s| s.token.as_deref() == Some("tok-2")));
-        assert_eq!(sent.iter().rfind(|s| s.cont.as_deref() == Some("k2")).unwrap().token.as_deref(), Some("tok-2"));
+        assert_eq!(sent.iter().filter(|s| s.api_id == ApiId::Au10001).count(), 1, "옛 세대의 무효 응답은 다시 발급하지 않는다");
+        let issue = sent.iter().position(|s| s.api_id == ApiId::Au10001).unwrap();
+        assert!(sent[issue + 1..].iter().all(|s| s.token.as_deref() == Some("tok-1")));
+        assert_eq!(sent.iter().rfind(|s| s.cont.as_deref() == Some("k2")).unwrap().token.as_deref(), Some("tok-1"));
         assert_every_market_request_has_a_token(&sent);
     }
 
@@ -798,13 +837,36 @@ mod tests {
     #[tokio::test(start_paused = true)]
     async fn invalid_token_twice_is_auth_failed() {
         let tokens = token_counter();
-        let fake = Arc::new(FakeTransport::new(Duration::ZERO, move |s| {
-            tokens(s).unwrap_or_else(|| ok(json!({"return_code": 3, "return_msg": "인증에 실패했습니다[8005:x]"}), None))
-        }));
-        let rest = rest(&fake);
+        let fake = Arc::new(FakeTransport::new(Duration::ZERO, move |s| tokens(s).unwrap_or_else(invalid_token)));
+        let (rest, _guards) = rest_with_saved_token(&fake);
         let r = rest.call(&StockList::EXCHANGE, None, Priority::Screen, MergeScope::default()).await;
         assert_eq!(r.err(), Some(KiwoomError::AuthFailed { detail: Some(8005) }));
         assert_eq!(fake.market_sent().len(), 2);
+        assert_eq!(fake.sent().len(), 3, "다시 발급은 한 번");
+    }
+
+    /// 토큰 무효를 받아도 마지막 발급 요청에서 10분 안이면 발급하지 않고, 기다리지 않고 이유와 함께 실패시킨다.
+    #[tokio::test(start_paused = true)]
+    async fn no_reissue_within_ten_minutes_of_the_last_issue_request() {
+        let tokens = token_counter();
+        let fake = Arc::new(FakeTransport::new(Duration::ZERO, move |s| {
+            tokens(s).unwrap_or_else(|| if s.token.as_deref() == Some("tok-1") { invalid_token() } else { list_ok() })
+        }));
+        let rest = rest(&fake);
+        let first_issue = rest.0.clock.now();
+        let until = first_issue.plus_secs(MIN_ISSUE_INTERVAL_SECS);
+        assert_eq!(call_k(&rest, 0, Priority::Screen).await.err(), Some(KiwoomError::IssueTooSoon { until }));
+        assert_eq!(rest.blocked(), Some(KiwoomError::IssueTooSoon { until }));
+        assert_eq!(call_k(&rest, 1, Priority::Screen).await.err(), Some(KiwoomError::IssueTooSoon { until }));
+        assert_eq!(rest.issue_token().await.err(), Some(KiwoomError::IssueTooSoon { until }));
+        assert_eq!(fake.sent().len(), 2, "발급 한 번, 조회 한 번");
+
+        tokio::time::sleep(Duration::from_secs(MIN_ISSUE_INTERVAL_SECS as u64)).await;
+        assert_eq!(rest.blocked(), None);
+        call_k(&rest, 2, Priority::Screen).await.unwrap();
+        let issues: Vec<_> = fake.sent().into_iter().filter(|s| s.api_id == ApiId::Au10001).collect();
+        assert_eq!(issues.len(), 2);
+        assert!(issues[1].at.duration_since(issues[0].at) >= Duration::from_secs(600));
     }
 
     #[tokio::test(start_paused = true)]
