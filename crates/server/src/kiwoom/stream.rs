@@ -520,8 +520,9 @@ impl Conn {
         self.ws.send(Message::Text(text.into())).await.map_err(|e| End::Transport(e.to_string()))
     }
 
+    /// 반쯤 열린 연결이면 close가 끝나지 않을 수 있어 기다리는 시간을 둔다.
     async fn close(mut self) {
-        let _ = self.ws.close(None).await;
+        let _ = timeout(self.silence, self.ws.close(None)).await;
     }
 }
 
