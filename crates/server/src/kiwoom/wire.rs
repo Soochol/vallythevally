@@ -260,23 +260,22 @@ fn parse_quote_row(r: &QuoteRow) -> Result<StockQuote, WireError> {
     Ok(StockQuote { code, price_centi, base_centi, volume: Volume(unsigned(&r.trde_qty)?), at })
 }
 
-#[derive(Debug, Clone, Default, Deserialize)]
-#[serde(default)]
-pub struct StockBasicInfoResponse {
-    pub stk_cd: String,
-    pub stk_nm: String,
-    pub mac: String,
-    pub flo_stk: String,
-    pub per: String,
-    pub pbr: String,
-    pub roe: String,
-    pub eps: String,
-    pub bps: String,
-    pub for_exh_rt: String,
+#[derive(Deserialize)]
+pub struct BasicInfoRow {
+    stk_cd: String,
+    stk_nm: String,
+    mac: String,
+    flo_stk: String,
+    per: String,
+    pbr: String,
+    roe: String,
+    eps: String,
+    bps: String,
+    for_exh_rt: String,
     #[serde(rename = "250hgst")]
-    pub high_250: String,
+    high_250: String,
     #[serde(rename = "250lwst")]
-    pub low_250: String,
+    low_250: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
@@ -293,32 +292,41 @@ pub struct StockFundamentals {
     pub low_250_won: Option<u64>,
 }
 
-pub enum BasicInfo {
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(try_from = "BasicInfoRow")]
+pub enum StockBasicInfoResponse {
     UnknownSymbol,
-    Found(StockFundamentals),
+    Found { kiwoom_code: String, fundamentals: StockFundamentals },
 }
 
 const WON_PER_EOK: u64 = 100_000_000;
 /// 명세는 `flo_stk` 단위를 천원이라 적지만 실제로는 천 주다(kiwoom.md §14).
 const SHARES_PER_FLO_STK_UNIT: u64 = 1_000;
 
-pub fn parse_basic_info(r: StockBasicInfoResponse) -> Result<BasicInfo, WireError> {
-    if r.stk_nm.is_empty() {
-        return Ok(BasicInfo::UnknownSymbol);
+impl TryFrom<BasicInfoRow> for StockBasicInfoResponse {
+    type Error = WireError;
+
+    fn try_from(r: BasicInfoRow) -> Result<Self, WireError> {
+        match (r.stk_cd.is_empty(), r.stk_nm.is_empty()) {
+            (true, true) => return Ok(StockBasicInfoResponse::UnknownSymbol),
+            (false, false) => {}
+            _ => return Err(WireError(format!("종목코드와 종목명 중 하나만 비었습니다: {:?}", r.stk_cd))),
+        }
+        let scaled = |s: &str, by: u64| optional(s, unsigned)?.map(|n| n.checked_mul(by).ok_or_else(|| WireError(format!("값이 너무 큽니다: {s:?}")))).transpose();
+        let fundamentals = StockFundamentals {
+            market_cap_won: scaled(&r.mac, WON_PER_EOK)?,
+            listed_shares: scaled(&r.flo_stk, SHARES_PER_FLO_STK_UNIT)?,
+            per: optional(&r.per, decimal)?,
+            pbr: optional(&r.pbr, decimal)?,
+            roe_pct: optional(&r.roe, decimal)?,
+            eps_won: optional(&r.eps, signed)?,
+            bps_won: optional(&r.bps, signed)?,
+            foreign_exhaustion_pct: optional(&r.for_exh_rt, decimal)?,
+            high_250_won: optional(&r.high_250, unsigned)?,
+            low_250_won: optional(&r.low_250, unsigned)?,
+        };
+        Ok(StockBasicInfoResponse::Found { kiwoom_code: r.stk_cd, fundamentals })
     }
-    let scaled = |s: &str, by: u64| optional(s, unsigned)?.map(|n| n.checked_mul(by).ok_or_else(|| WireError(format!("값이 너무 큽니다: {s:?}")))).transpose();
-    Ok(BasicInfo::Found(StockFundamentals {
-        market_cap_won: scaled(&r.mac, WON_PER_EOK)?,
-        listed_shares: scaled(&r.flo_stk, SHARES_PER_FLO_STK_UNIT)?,
-        per: optional(&r.per, decimal)?,
-        pbr: optional(&r.pbr, decimal)?,
-        roe_pct: optional(&r.roe, decimal)?,
-        eps_won: optional(&r.eps, signed)?,
-        bps_won: optional(&r.bps, signed)?,
-        foreign_exhaustion_pct: optional(&r.for_exh_rt, decimal)?,
-        high_250_won: optional(&r.high_250, unsigned)?,
-        low_250_won: optional(&r.low_250, unsigned)?,
-    }))
 }
 
 fn optional<T>(s: &str, parse: fn(&str) -> Result<T, WireError>) -> Result<Option<T>, WireError> {
@@ -498,9 +506,9 @@ mod tests {
     }
 
     fn basic_info(name: &str) -> StockFundamentals {
-        match parse_basic_info(serde_json::from_str(&fixture(name)).unwrap()).unwrap() {
-            BasicInfo::Found(f) => f,
-            BasicInfo::UnknownSymbol => panic!("{name}: UnknownSymbol"),
+        match serde_json::from_str(&fixture(name)).unwrap() {
+            StockBasicInfoResponse::Found { fundamentals, .. } => fundamentals,
+            StockBasicInfoResponse::UnknownSymbol => panic!("{name}: UnknownSymbol"),
         }
     }
 
@@ -530,14 +538,23 @@ mod tests {
         let etf = basic_info("ka10001_069500_AL");
         assert_eq!((etf.per, etf.pbr, etf.roe_pct, etf.eps_won, etf.bps_won), (None, None, None, None, None));
         assert_eq!((etf.market_cap_won, etf.high_250_won, etf.low_250_won), (Some(19_438_000_000_000), Some(152_455), Some(53_925)));
-        assert!(matches!(parse_basic_info(serde_json::from_str(&fixture("ka10001_999999_AL")).unwrap()), Ok(BasicInfo::UnknownSymbol)));
+        assert_eq!(serde_json::from_str::<StockBasicInfoResponse>(&fixture("ka10001_999999_AL")).unwrap(), StockBasicInfoResponse::UnknownSymbol);
     }
 
     #[test]
-    fn basic_info_rejects_values_that_are_not_numbers() {
-        let body = |v: serde_json::Value| parse_basic_info(serde_json::from_value(v).unwrap());
-        assert!(body(serde_json::json!({"stk_nm": "가", "per": "N/A"})).is_err());
-        assert!(body(serde_json::json!({"stk_nm": "가", "mac": "999999999999999"})).is_err(), "원으로 바꾸면 u64를 넘는다");
+    fn basic_info_rejects_bodies_that_do_not_match_the_observed_shape() {
+        let edited = |field: &str, v: serde_json::Value| {
+            let mut body: serde_json::Value = serde_json::from_str(&fixture("ka10001_005930_AL")).unwrap();
+            body[field] = v;
+            serde_json::from_value::<StockBasicInfoResponse>(body)
+        };
+        assert!(edited("per", "N/A".into()).is_err());
+        assert!(edited("mac", "999999999999999".into()).is_err(), "원으로 바꾸면 u64를 넘는다");
+        assert!(edited("stk_cd", "".into()).is_err(), "이름은 있는데 코드가 비었다");
+        assert!(edited("stk_nm", "".into()).is_err(), "코드는 있는데 이름이 비었다");
+        let mut missing: serde_json::Value = serde_json::from_str(&fixture("ka10001_005930_AL")).unwrap();
+        missing.as_object_mut().unwrap().remove("per");
+        assert!(serde_json::from_value::<StockBasicInfoResponse>(missing).is_err(), "빈 값과 빠진 필드는 다르다");
     }
 
     #[test]

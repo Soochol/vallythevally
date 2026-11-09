@@ -4,13 +4,12 @@ use crate::api;
 use crate::bars::BarError;
 use crate::kiwoom::api::StockBasicInfo;
 use crate::kiwoom::rest::{KiwoomRest, MergeScope, Priority};
-use crate::kiwoom::wire::{BasicInfo, parse_basic_info};
+use crate::kiwoom::wire::StockBasicInfoResponse;
 
 pub async fn fundamentals(rest: &KiwoomRest, code: StockCode) -> Result<api::Fundamentals, BarError> {
-    let page = rest.call(&StockBasicInfo::new(code), None, Priority::Screen, MergeScope::default()).await?;
-    let f = match parse_basic_info(page.body).map_err(|e| BarError::Internal(format!("ka10001 응답을 읽지 못했습니다: {e}")))? {
-        BasicInfo::UnknownSymbol => return Err(BarError::UnknownSymbol),
-        BasicInfo::Found(f) => f,
+    let f = match rest.call(&StockBasicInfo::new(code), None, Priority::Screen, MergeScope::default()).await?.body {
+        StockBasicInfoResponse::UnknownSymbol => return Err(BarError::UnknownSymbol),
+        StockBasicInfoResponse::Found { fundamentals, .. } => fundamentals,
     };
     Ok(api::Fundamentals {
         symbol: api::SymbolCode(Symbol::Stock(code).as_wire()),
