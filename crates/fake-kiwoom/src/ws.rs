@@ -30,6 +30,7 @@ pub struct WsHub {
     controls: Mutex<Vec<String>>,
     muted: AtomicBool,
     ping_every: watch::Sender<Duration>,
+    reg_limit: AtomicUsize,
 }
 
 struct Session {
@@ -89,6 +90,7 @@ impl Default for WsHub {
             controls: Mutex::default(),
             muted: AtomicBool::default(),
             ping_every: watch::Sender::new(DEFAULT_PING_EVERY),
+            reg_limit: AtomicUsize::new(REG_LIMIT),
         }
     }
 }
@@ -115,6 +117,11 @@ impl WsHub {
 
     pub fn mute(&self, on: bool) {
         self.muted.store(on, Ordering::SeqCst);
+    }
+
+    /// 키움이 받는 실시간 등록 수. 0이면 모든 REG를 105118로 거절한다.
+    pub fn set_reg_limit(&self, limit: usize) {
+        self.reg_limit.store(limit, Ordering::SeqCst);
     }
 
     pub fn set_ping_every(&self, every: Duration) {
@@ -177,7 +184,7 @@ impl WsHub {
             (100013, "로그인 전 요청입니다")
         } else {
             match control.trnm.as_str() {
-                "REG" => register(session, &control),
+                "REG" => register(session, &control, self.reg_limit.load(Ordering::SeqCst)),
                 "REMOVE" => remove(session, &control),
                 _ => return None,
             }
@@ -215,12 +222,12 @@ fn subscriptions(control: &Control) -> BTreeSet<Subscription> {
         .collect()
 }
 
-fn register(session: &mut Session, control: &Control) -> (i64, &'static str) {
+fn register(session: &mut Session, control: &Control, limit: usize) -> (i64, &'static str) {
     let after: BTreeSet<Subscription> = session.registered.union(&subscriptions(control)).cloned().collect();
-    if after.iter().filter(|s| s.grp_no == control.grp_no).count() > REG_LIMIT {
+    if after.iter().filter(|s| s.grp_no == control.grp_no).count() > limit {
         return (105118, "등록 종목이 그룹번호에 등록할 수 있는 허용 개수(200)를 초과했습니다");
     }
-    if after.len() > REG_LIMIT {
+    if after.len() > limit {
         return (105115, "등록 종목이 허용 개수(200)를 초과했습니다");
     }
     session.registered = after;
@@ -315,6 +322,11 @@ struct Mute {
 }
 
 #[derive(Deserialize)]
+struct RegLimit {
+    limit: usize,
+}
+
+#[derive(Deserialize)]
 struct PingEvery {
     ms: u64,
 }
@@ -326,6 +338,7 @@ pub(crate) fn routes() -> Router<Arc<Seen>> {
         .route("/_fake/ws/drop", post(admin_drop))
         .route("/_fake/ws/mute", post(admin_mute))
         .route("/_fake/ws/ping-every", post(admin_ping_every))
+        .route("/_fake/ws/reg-limit", post(admin_reg_limit))
         .route("/_fake/ws/stats", get(admin_stats))
 }
 
@@ -340,6 +353,11 @@ async fn admin_drop(State(seen): State<Arc<Seen>>, Json(d): Json<DropOrder>) -> 
 
 async fn admin_mute(State(seen): State<Arc<Seen>>, Json(m): Json<Mute>) -> StatusCode {
     seen.ws.mute(m.on);
+    StatusCode::NO_CONTENT
+}
+
+async fn admin_reg_limit(State(seen): State<Arc<Seen>>, Json(r): Json<RegLimit>) -> StatusCode {
+    seen.ws.set_reg_limit(r.limit);
     StatusCode::NO_CONTENT
 }
 

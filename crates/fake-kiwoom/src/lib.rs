@@ -127,6 +127,10 @@ impl FakeKiwoom {
         self.seen.ws.set_ping_every(every);
     }
 
+    pub fn set_reg_limit(&self, limit: usize) {
+        self.seen.ws.set_reg_limit(limit);
+    }
+
     pub fn ws_stats(&self) -> WsStats {
         self.seen.ws.stats()
     }

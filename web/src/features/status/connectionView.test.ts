@@ -32,7 +32,7 @@ test.each<[string, Connection, number, ReturnType<typeof connectionView>]>([
     MON_1000,
     { tone: "amber", pulse: false, text: "키움에 다시 연결하는 중 (14:02부터)" },
   ],
-  ["halted", open({ realtime: "halted", backfilling: true }), MON_1000, { tone: "red", pulse: false, text: "키움 인증 실패: 서버 설정을 확인하세요" }],
+  ["halted", open({ realtime: "halted", backfilling: true }), MON_1000, { tone: "red", pulse: false, text: "실시간 멈춤: 서버를 다시 켜야 합니다" }],
 ])("%s", (_name, c, now, expected) => {
   expect(connectionView(c, now)).toEqual(expected);
 });

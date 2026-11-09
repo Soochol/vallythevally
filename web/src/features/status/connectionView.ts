@@ -16,7 +16,7 @@ export function connectionView(c: Connection, now: UnixSeconds): ConnectionView 
   const { realtime, since, backfilling } = c.status;
   switch (realtime) {
     case "halted":
-      return { tone: "red", pulse: false, text: "키움 인증 실패: 서버 설정을 확인하세요" };
+      return { tone: "red", pulse: false, text: "실시간 멈춤: 서버를 다시 켜야 합니다" };
     case "reconnecting":
       return { tone: "amber", pulse: false, text: `키움에 다시 연결하는 중 (${formatKstClock(since)}부터)` };
     case "live":

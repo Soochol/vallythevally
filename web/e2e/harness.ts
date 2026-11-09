@@ -26,6 +26,8 @@ export interface Fake {
   pushReal(type: "0B" | "0J", item: string, values: Record<string, string>): Promise<number>;
   /** 가짜 키움 WebSocket 세션을 모두 이 close 코드로 닫는다. */
   dropWs(code: number, reason: string): Promise<void>;
+  /** 0이면 모든 REG를 105118로 거절한다. */
+  setRegLimit(limit: number): Promise<void>;
   /** 지금 REG된 항목(type → item 목록). */
   registered(): Promise<Record<string, string[]>>;
   respondWith(reply: FakeReply): Promise<void>;
@@ -112,6 +114,7 @@ function fakeClient(base: string): Fake {
       return ((await res.json()) as { delivered: number }).delivered;
     },
     dropWs: (code, reason) => post("ws/drop", { code, reason }),
+    setRegLimit: (limit) => post("ws/reg-limit", { limit }),
     registered: async () => ((await (await fetch(`${base}/_fake/ws/stats`)).json()) as { registered: Record<string, string[]> }).registered,
     respondWith: (reply) => post("respond-with", reply),
     delay: (apiId, ms) => post("delay", { apiId, ms }),

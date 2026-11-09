@@ -59,3 +59,18 @@ test("분봉은 다음 분 체결에서 봉이 확정되고 새 현재 봉이 �
   await app.fake.pushReal("0B", "005930_AL", trade("100100", 200_500, 3));
   await expect.poll(() => lastBar(chart)).toEqual({ t: AT_1000 + 60, close: 200_500, count: before.count + 2 });
 });
+
+test("다시 구성한 세션에서도 REG가 거절되면 실시간만 멈추고 조회 차트는 그대로 쓴다", async ({ page, app }) => {
+  await page.goto("/?symbol=005930");
+  await expect(cell(page)).toHaveAttribute("aria-busy", "false");
+  await waitRegistered(app, "005930_AL");
+
+  await app.fake.setRegLimit(0);
+  await app.fake.dropWs(1000, "Bye");
+  await expect(page.getByRole("contentinfo")).toContainText("실시간 멈춤: 서버를 다시 켜야 합니다", { timeout: 15_000 });
+
+  await page.goto("/?symbol=005930&period=1m");
+  await expect(cell(page)).toHaveAttribute("aria-busy", "false");
+  await expect.poll(async () => Number(await chartOf(cell(page)).getAttribute("data-bar-count"))).toBeGreaterThan(0);
+  await expect(page.getByRole("contentinfo")).toContainText("실시간 멈춤: 서버를 다시 켜야 합니다");
+});
