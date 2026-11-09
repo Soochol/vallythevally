@@ -118,3 +118,17 @@ async fn a_request_already_waiting_for_the_symbol_list_ends_when_the_list_path_s
     assert_eq!(waiting, after, "먼저 기다리던 요청도 같은 원인으로 끝난다");
     assert_eq!(fake.api_ids().iter().filter(|id| *id == "ka10099").count(), 1);
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_startup_list_retry_waits_for_the_shared_gate() {
+    let fake = FakeKiwoom::start().await;
+    fake.respond_with("ka10099", 503, json!({}));
+    let tmp = tempfile::tempdir().unwrap();
+    let server = Server::spawn(&fake, &tmp.path().join("run/server.lock"), &static_dir(tmp.path()));
+    server.addr().await;
+    let longer_than_one_startup_list_retry = Duration::from_secs(12);
+    tokio::time::sleep(longer_than_one_startup_list_retry).await;
+    let logs = server.stop().await;
+    let list_requests = fake.api_ids().iter().filter(|id| *id == "ka10099").count();
+    assert_eq!(list_requests, 2, "화면 요청 한 번과 0.5초 뒤 한 번. 바깥 타이머도 30초 관문을 기다린다\n{logs}");
+}

@@ -1169,6 +1169,107 @@ mod tests {
         assert_eq!(gaps, [1, 2, 4]);
     }
 
+    fn replies(seq: Vec<Result<HttpResponse, TransportError>>) -> impl Fn(&Sent) -> Result<HttpResponse, TransportError> {
+        let tokens = token_counter();
+        let n = AtomicUsize::new(0);
+        move |s| tokens(s).unwrap_or_else(|| seq.get(n.fetch_add(1, Ordering::SeqCst)).cloned().unwrap_or_else(|| status(503, json!({}))))
+    }
+
+    fn rate_limited() -> Result<HttpResponse, TransportError> {
+        status(429, json!({"return_code": 5, "return_msg": "허용된 요청 개수를 초과하였습니다[1700:유량=5]"}))
+    }
+
+    fn unavailable() -> Result<HttpResponse, TransportError> {
+        status(503, json!({}))
+    }
+
+    fn indeterminate() -> Result<HttpResponse, TransportError> {
+        ok(json!({"return_code": 3, "return_msg": "인증에 실패했습니다[8003:토큰 조회 실패]"}), None)
+    }
+
+    fn gated_for(rest: &KiwoomRest, e: &KiwoomError) -> Option<i64> {
+        matches!(e, KiwoomError::Gated { .. }).then(|| e.retry_at().unwrap().unix() - rest.0.clock.now().unix())
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn one_request_sends_at_most_four_times_on_screen_and_six_otherwise() {
+        for (priority, budget) in [(Priority::Screen, 4), (Priority::Background, 6)] {
+            let seq = vec![rate_limited(), rate_limited(), invalid_token(), unavailable(), unavailable(), unavailable(), unavailable(), unavailable()];
+            let fake = Arc::new(FakeTransport::new(Duration::ZERO, replies(seq)));
+            let rest = rest(&fake);
+            let err = call_k(&rest, 0, priority).await.unwrap_err();
+            assert_eq!(fake.market_sent().len(), budget, "{priority:?}: 한도 초과·토큰 무효·일시 장애가 번갈아도 총 전송은 예산까지");
+            assert!(gated_for(&rest, &err).is_some(), "{priority:?}: {err:?}");
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn exhausted_transient_failures_close_a_shared_gate_for_thirty_seconds() {
+        let fake = Arc::new(FakeTransport::new(Duration::ZERO, replies(vec![unavailable(), unavailable(), list_ok(), list_ok()])));
+        let rest = rest(&fake);
+        let err = call_k(&rest, 0, Priority::Screen).await.unwrap_err();
+        assert_eq!(gated_for(&rest, &err), Some(30));
+        assert_eq!(category(Some(err)), Some(Category::Transient));
+        let blocked = call_k(&rest, 1, Priority::Background).await.unwrap_err();
+        assert_eq!(blocked.retry_at(), rest.gate_until(), "다른 요청도 같은 관문에서 기다린다");
+        assert_eq!(fake.market_sent().len(), 2, "관문이 닫힌 동안 보내지 않는다");
+        tokio::time::sleep(Duration::from_secs(30)).await;
+        call_k(&rest, 1, Priority::Background).await.unwrap();
+        call_k(&rest, 2, Priority::Screen).await.unwrap();
+        assert_eq!(fake.market_sent().len(), 4, "확인 요청이 성공하면 다시 연다");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn three_failed_checks_stretch_the_gate_to_five_minutes() {
+        let fake = Arc::new(FakeTransport::new(Duration::ZERO, replies(vec![])));
+        let rest = rest(&fake);
+        call_k(&rest, 0, Priority::Screen).await.unwrap_err();
+        let mut waits = Vec::new();
+        for i in 1..=4 {
+            let wait = rest.gate_until().unwrap().unix() - rest.0.clock.now().unix();
+            tokio::time::sleep(Duration::from_secs(wait as u64)).await;
+            let (probe, held) = tokio::join!(call_k(&rest, i, Priority::Screen), call_k(&rest, 100 + i, Priority::Screen));
+            waits.push(gated_for(&rest, &probe.unwrap_err()).unwrap());
+            assert!(matches!(held, Err(KiwoomError::Gated { .. })), "확인 요청이 나가는 동안 다른 요청은 보내지 않는다");
+        }
+        assert_eq!(waits, [30, 30, 300, 300]);
+        assert_eq!(fake.market_sent().len(), 2 + 4, "확인은 한 번에 하나, 다시 보내지 않는다");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn only_the_check_request_reopens_the_gate() {
+        let tokens = token_counter();
+        let fake = Arc::new(FakeTransport::new(Duration::from_secs(1), move |s| {
+            tokens(s).unwrap_or_else(|| if s.cont.as_deref() == Some("k0") { unavailable() } else { list_ok() })
+        }));
+        let rest = rest(&fake);
+        rest.issue_token().await.unwrap();
+        let failing = rest.clone();
+        let failing = tokio::spawn(async move { call_k(&failing, 0, Priority::Screen).await });
+        tokio::time::sleep(Duration::from_millis(2000)).await;
+        call_k(&rest, 1, Priority::Screen).await.unwrap();
+        assert!(matches!(failing.await.unwrap(), Err(KiwoomError::Gated { .. })));
+        assert!(matches!(call_k(&rest, 2, Priority::Screen).await, Err(KiwoomError::Gated { .. })), "관문이 닫힌 뒤 도착한 다른 성공은 관문을 열지 않는다");
+        assert_eq!(fake.market_sent().len(), 3);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn an_ambiguous_auth_failure_on_a_market_request_holds_every_request_for_ten_minutes_then_stops() {
+        let fake = Arc::new(FakeTransport::new(Duration::ZERO, replies(vec![indeterminate(), indeterminate()])));
+        let rest = rest(&fake);
+        let first = call_k(&rest, 0, Priority::Screen).await.unwrap_err();
+        assert_eq!(category(Some(first.clone())), Some(Category::AuthIndeterminate));
+        assert_eq!(gated_for(&rest, &first), Some(MIN_ISSUE_INTERVAL_SECS));
+        let daily = crate::kiwoom::api::DailyChart::new(domain::StockCode::parse("005930").unwrap(), domain::Venue::Krx, KstDate::new(2026, 11, 9).unwrap());
+        assert!(matches!(rest.call(&daily, None, Priority::Screen, MergeScope::default()).await, Err(KiwoomError::Gated { .. })), "다른 API도 같은 자격증명이라 기다린다");
+        assert_eq!(fake.market_sent().len(), 1);
+        tokio::time::sleep(Duration::from_secs(MIN_ISSUE_INTERVAL_SECS as u64)).await;
+        let second = call_k(&rest, 1, Priority::Screen).await.unwrap_err();
+        assert!(matches!(&second, KiwoomError::Stopped(f) if f.category() == Category::AuthIndeterminate), "{second:?}");
+        assert!(matches!(call_k(&rest, 2, Priority::Screen).await, Err(KiwoomError::Stopped(_))));
+        assert_eq!(fake.market_sent().len(), 2, "10분 뒤 확인 한 번, 그 뒤로는 사람이 다시 켤 때까지 보내지 않는다");
+    }
+
     #[tokio::test(start_paused = true)]
     async fn unparseable_body_is_a_parse_error() {
         let tokens = token_counter();
