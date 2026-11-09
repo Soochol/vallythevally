@@ -79,10 +79,12 @@ impl Aggregator {
         Aggregator { period, current, closed_through: newest_confirmed, dropped_through: None }
     }
 
-    pub fn confirm_through(&mut self, bucket: Bucket) {
+    pub fn confirm_through(&mut self, bucket: Bucket) -> bool {
         let closed = self.closed_through.map_or(bucket, |closed| closed.max(bucket));
         self.closed_through = Some(closed);
+        let retired_current = self.current.is_some_and(|c| c.bucket <= closed);
         self.current = self.current.filter(|c| c.bucket > closed);
+        retired_current
     }
 
     pub fn trades_dropped_until(mut self, last_dropped: Option<KstTime>) -> Self {
@@ -405,8 +407,10 @@ mod tests {
                         agg.apply(&trade);
                     }
                 }
-                let expected = agg.current().copied().filter(|c| c.bucket() > boundary);
-                agg.confirm_through(boundary);
+                let previous = agg.current().copied();
+                let expected = previous.filter(|c| c.bucket() > boundary);
+                assert_eq!(agg.confirm_through(boundary), previous.is_some() && expected.is_none());
+                assert!(!agg.confirm_through(boundary));
                 assert_eq!(agg.current().copied(), expected, "minute={minute:?}, seeded={seeded}");
                 assert_eq!(agg.apply(&tr(at(9, 1, 59), 200, 9)), Applied::Ignored(IgnoreReason::Late));
                 assert_eq!(agg.current().copied(), expected);

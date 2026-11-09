@@ -146,7 +146,7 @@ enum VerificationPhase {
 }
 
 struct Verification {
-    previous: Option<Ohlcv>,
+    last_published: Option<Ohlcv>,
     attempts: u32,
     phase: VerificationPhase,
 }
@@ -162,17 +162,25 @@ impl Verification {
 }
 
 impl KeyState {
-    fn register_verification(&mut self, bucket: Bucket, previous: Option<Ohlcv>, now: KstTime) {
+    fn register_verification(&mut self, bucket: Bucket, last_published: Option<Ohlcv>, now: KstTime) {
         let verification = self.verifications.entry(bucket).or_insert(Verification {
-            previous,
+            last_published,
             attempts: 0,
             phase: VerificationPhase::Waiting { at: bucket.confirm_at().max(now).plus_secs(VERIFY_DELAY_SECS) },
         });
         if verification.phase == VerificationPhase::Complete {
             return;
         }
-        if previous.is_some() {
-            verification.previous = previous;
+        if last_published.is_some() {
+            verification.last_published = last_published;
+        }
+    }
+
+    fn note_published(&mut self, bucket: Bucket, ohlcv: Ohlcv) {
+        if let Some(verification) = self.verifications.get_mut(&bucket)
+            && verification.phase != VerificationPhase::Complete
+        {
+            verification.last_published = Some(ohlcv);
         }
     }
 
@@ -474,6 +482,7 @@ impl MarketHub {
                 match purpose {
                     SeedPurpose::Initial => {
                         if let Some(c) = current {
+                            ks.note_published(c.bucket(), *c.ohlcv());
                             ks.seq += 1;
                             set_bar(&self.conns, &ks.subs, ks.seq, &c);
                         }
@@ -521,19 +530,21 @@ impl MarketHub {
         };
         match result {
             Ok(Some(k)) => {
-                if let KeyFeed::Live(agg) = &mut ks.feed {
-                    agg.confirm_through(bucket);
-                }
+                let changed = verification.last_published != Some(k.ohlcv);
+                let retired_current = match &mut ks.feed {
+                    KeyFeed::Live(agg) => agg.confirm_through(bucket),
+                    KeyFeed::Seeding { .. } => unreachable!(),
+                };
                 if let Some(r) = ks.recent_confirmed.iter_mut().find(|b| b.bucket == bucket) {
                     *r = k;
                 }
-                if verification.previous != Some(k.ohlcv) {
+                verification.last_published = Some(k.ohlcv);
+                verification.phase = VerificationPhase::Complete;
+                if changed || retired_current {
                     ks.seq += 1;
                     let (seq, from) = (ks.seq, Some(UnixSeconds(bucket.start().unix())));
                     emit(&self.conns, &mut self.closing, &ks.subs, |sub| ServerMessage::Reload { sub, seq, reason: ReloadReason::Replaced, from });
                 }
-                verification.previous = Some(k.ohlcv);
-                verification.phase = VerificationPhase::Complete;
             }
             result => {
                 verification.failed(now);
@@ -621,12 +632,14 @@ impl MarketHub {
             match agg.apply(&trade) {
                 Applied::Updated => {
                     let cur = *agg.current().expect("반영했으면 현재 봉이 있다");
+                    ks.note_published(cur.bucket(), *cur.ohlcv());
                     ks.seq += 1;
                     set_bar(&self.conns, &ks.subs, ks.seq, &cur);
                 }
                 Applied::Rolled { confirmed } => {
                     let cur = *agg.current().expect("넘겼으면 새 현재 봉이 있다");
                     on_confirmed(&self.bars, &self.conns, &mut self.closing, *key, ks, confirmed, now);
+                    ks.note_published(cur.bucket(), *cur.ohlcv());
                     ks.seq += 1;
                     set_bar(&self.conns, &ks.subs, ks.seq, &cur);
                 }
@@ -746,6 +759,7 @@ fn on_confirmed(
     confirmed: ConfirmedBar,
     now: KstTime,
 ) {
+    ks.note_published(confirmed.bucket, confirmed.ohlcv);
     ks.seq += 1;
     let (seq, bar) = (ks.seq, api::Bar::from(&confirmed));
     emit(conns, closing, &ks.subs, |sub| ServerMessage::Confirmed { sub, seq, bar });
@@ -1526,18 +1540,87 @@ mod tests {
             feed: KeyFeed::Live(Aggregator::new(Period::M1, None, Some(bucket))),
             seq: 1,
             recent_confirmed: VecDeque::new(),
-            verifications: BTreeMap::from([(bucket, Verification { previous: Some(accepted), attempts: 2, phase: VerificationPhase::Complete })]),
+            verifications: BTreeMap::from([(bucket, Verification { last_published: Some(accepted), attempts: 2, phase: VerificationPhase::Complete })]),
             subs: BTreeSet::new(),
             contiguous: true,
             idle_since: None,
         };
         for previous in [None, Some(other)] {
             ks.register_verification(bucket, previous, at(9, 1, 20));
+            ks.note_published(bucket, other);
             let verification = &ks.verifications[&bucket];
-            assert_eq!(verification.previous, Some(accepted));
+            assert_eq!(verification.last_published, Some(accepted));
             assert_eq!(verification.attempts, 2);
             assert_eq!(verification.phase, VerificationPhase::Complete);
         }
+    }
+
+    #[test]
+    fn n3_n4_publication_only_updates_existing_unfinished_comparison() {
+        let bucket = Period::M1.bucket(at(9, 0, 0));
+        let published = Ohlcv::try_new(won(125), won(125), won(125), won(125), Volume(2)).unwrap();
+        let mut ks = KeyState {
+            generation: 1,
+            feed: KeyFeed::Live(Aggregator::new(Period::M1, None, None)),
+            seq: 0,
+            recent_confirmed: VecDeque::new(),
+            verifications: BTreeMap::new(),
+            subs: BTreeSet::new(),
+            contiguous: true,
+            idle_since: None,
+        };
+        ks.note_published(bucket, published);
+        assert!(ks.verifications.is_empty());
+        for (attempts, phase) in [
+            (0, VerificationPhase::Waiting { at: at(9, 1, 7) }),
+            (2, VerificationPhase::Waiting { at: at(9, 1, 40) }),
+            (1, VerificationPhase::InFlight),
+            (VERIFY_ATTEMPTS, VerificationPhase::Exhausted),
+        ] {
+            ks.verifications.insert(bucket, Verification { last_published: None, attempts, phase });
+            ks.note_published(bucket, published);
+            ks.note_published(Period::M1.bucket(at(9, 1, 0)), published);
+            assert_eq!(ks.verifications.len(), 1);
+            let verification = &ks.verifications[&bucket];
+            assert_eq!(verification.last_published, Some(published));
+            assert_eq!((verification.attempts, verification.phase), (attempts, phase));
+            assert_eq!((ks.seq, ks.current(), ks.recent_confirmed.len()), (0, None, 0));
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn n3_n4_complete_trade_publications_create_no_verification_requests() {
+        let h = harness(at(9, 0, 5), Chart::default(), Duration::ZERO);
+        live(&h).await;
+        let (conn, out) = connect(&h).await;
+        h.hub.subscribe(conn, sub("a"), samsung());
+        take(&out).await;
+        h.events.send(trade(&h, (9, 0, 10), 100, 7, Some(Exchange::Krx))).await.unwrap();
+        assert_eq!(take(&out).await, vec![bar_msg("a", 1, bar(at(9, 0, 0), [100, 100, 100, 100, 7]))]);
+        h.clock.sleep_until(at(9, 1, 0)).await;
+        h.events.send(trade(&h, (9, 1, 0), 125, 2, Some(Exchange::Krx))).await.unwrap();
+        assert_eq!(take(&out).await, vec![
+            confirmed("a", 2, bar(at(9, 0, 0), [100, 100, 100, 100, 7])),
+            bar_msg("a", 3, bar(at(9, 1, 0), [125, 125, 125, 125, 2])),
+        ]);
+        h.clock.sleep_until(at(9, 2, 30)).await;
+        assert_eq!(take(&out).await, vec![confirmed("a", 4, bar(at(9, 1, 0), [125, 125, 125, 125, 2]))]);
+        assert_eq!(h.fake.market_sent().len(), 1, "publication alone only uses the initial seed request");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn n3_n4_equal_verification_without_current_needs_no_reload() {
+        let h = std_harness();
+        let (_, out) = subscribed_samsung(&h).await;
+        h.clock.sleep_until(at(9, 1, 25)).await;
+        let messages = take(&out).await;
+        assert_eq!(messages, vec![confirmed("a", 2, bar(at(9, 0, 0), [100, 110, 95, 105, 50]))]);
+        let snapshot = h.hub.snapshot(samsung()).await.unwrap();
+        assert_eq!((snapshot.seq, snapshot.current), (2, None));
+        assert_eq!(h.fake.market_sent().len(), 2);
+        h.clock.sleep_until(at(9, 2, 0)).await;
+        assert!(take(&out).await.is_empty());
+        assert_eq!(h.fake.market_sent().len(), 2);
     }
 
     #[tokio::test(start_paused = true)]
@@ -1776,6 +1859,46 @@ mod tests {
         assert_eq!(corrected.iter().filter(|m| matches!(m, ServerMessage::Reload { reason: ReloadReason::Replaced, .. })).count(), 1, "a published partial Q needs a repair even when original P equals recovered P");
         assert_eq!(after.seq, before_result.seq + 1);
         assert!(!after.recent_confirmed.iter().any(|b| b.ohlcv.volume().0 == 2));
+        assert_eq!(h.fake.market_sent().len(), 3);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn n3_n4_equal_published_current_still_reloads_when_retired() {
+        let mut chart = Chart::default();
+        chart.set(at(9, 0, 0), [125, 125, 125, 125, 2]);
+        let h = harness(at(9, 0, 45), chart, Duration::from_millis(3250));
+        live(&h).await;
+        let (conn, out) = connect(&h).await;
+        h.hub.subscribe(conn, sub("a"), samsung());
+        h.clock.sleep_until(at(9, 1, 3)).await;
+        assert_eq!(h.hub.snapshot(samsung()).await.unwrap().current, None);
+        h.chart.lock().unwrap().rows.clear();
+        h.events.send(StreamEvent::Down { at: h.clock.now() }).await.unwrap();
+        live(&h).await;
+        let reseed = h.fake.market_sent().last().unwrap().at;
+        tokio::time::sleep_until(reseed + Duration::from_millis(3300)).await;
+        assert_eq!(h.hub.snapshot(samsung()).await.unwrap().current, None);
+        h.chart.lock().unwrap().set(at(9, 0, 0), [125, 125, 125, 125, 2]);
+        h.clock.sleep_until(at(9, 1, 7)).await;
+        settle().await;
+        assert_eq!(h.fake.market_sent().len(), 3);
+        let request = h.fake.market_sent().last().unwrap().at;
+        tokio::time::sleep_until(request + Duration::from_millis(3100)).await;
+        out.take(true);
+        h.events.send(trade(&h, (9, 0, 59), 125, 2, Some(Exchange::Krx))).await.unwrap();
+        for _ in 0..20 {
+            tokio::task::yield_now().await;
+        }
+        let partial = out.take(true).messages;
+        assert!(partial.iter().any(|m| matches!(m, ServerMessage::Bar { bar, .. } if *bar == self::bar(at(9, 0, 0), [125, 125, 125, 125, 2]))));
+        let before = h.hub.snapshot(samsung()).await.unwrap();
+        assert_eq!(before.current.unwrap().ohlcv().volume().0, 2);
+        tokio::time::sleep_until(request + Duration::from_millis(3500)).await;
+        assert_eq!(take(&out).await, vec![reload("a", before.seq + 1, ReloadReason::Replaced, Some(at(9, 0, 0)))]);
+        let after = h.hub.snapshot(samsung()).await.unwrap();
+        assert_eq!((after.seq, after.current), (before.seq + 1, None));
+        h.clock.sleep_until(at(9, 1, 40)).await;
+        assert!(take(&out).await.is_empty());
         assert_eq!(h.fake.market_sent().len(), 3);
     }
 
