@@ -1167,6 +1167,16 @@ mod tests {
     }
 
     #[tokio::test(start_paused = true)]
+    async fn a_schema_failure_keeps_the_http_status_and_return_code_it_received() {
+        let tokens = token_counter();
+        let fake = Arc::new(FakeTransport::new(Duration::ZERO, move |s| tokens(s).unwrap_or_else(|| ok(json!({"return_code": 0, "return_msg": "정상"}), None))));
+        let rest = rest(&fake);
+        let err = rest.call(&StockList::EXCHANGE, None, Priority::Screen, MergeScope::default()).await.unwrap_err();
+        let f = err.failure().unwrap();
+        assert_eq!((f.category(), f.http_status(), f.return_code()), (Category::Protocol, Some(200), Some(0)));
+    }
+
+    #[tokio::test(start_paused = true)]
     async fn continuation_headers_round_trip() {
         let tokens = token_counter();
         let fake = Arc::new(FakeTransport::new(Duration::ZERO, move |s| {
