@@ -9,6 +9,11 @@ use std::time::Duration;
 
 use domain::{KstTime, TimeOfDay};
 use tokio::net::TcpListener;
+use tracing::{Level, Metadata};
+use tracing_subscriber::{Layer, Registry};
+use tracing_subscriber::filter::{FilterExt, filter_fn};
+use tracing_subscriber::layer::{Filter, SubscriberExt};
+use tracing_subscriber::util::SubscriberInitExt;
 
 use crate::bars::BarService;
 use crate::clock::{Clock, next_daily};
@@ -65,18 +70,25 @@ pub fn main() -> ExitCode {
 }
 
 fn init_logging(filter: &str) {
-    tracing_subscriber::fmt().with_env_filter(log_filter(filter)).with_writer(std::io::stderr).with_ansi(false).init();
+    tracing_subscriber::registry().with(tracing_subscriber::fmt::layer().with_writer(std::io::stderr).with_ansi(false).with_filter(log_filter(filter))).init();
 }
 
 /// tungstenite는 trace에서 보내는 프레임 내용을 그대로 찍는다. LOGIN 프레임에는 토큰이 있다.
-const WS_LIBRARY_CAP: [&str; 2] = ["tungstenite=debug", "tokio_tungstenite=debug"];
+/// EnvFilter 안의 지시문은 더 구체적인 target이 이기므로, 사용자 지시문과 따로 거른다.
+const WS_LIBRARIES: [&str; 2] = ["tungstenite", "tokio_tungstenite"];
 
-fn log_filter(spec: &str) -> tracing_subscriber::EnvFilter {
-    let filter = tracing_subscriber::EnvFilter::try_new(spec).unwrap_or_else(|e| {
+fn below_ws_library_trace(meta: &Metadata<'_>) -> bool {
+    let target = meta.target();
+    let from_ws_library = WS_LIBRARIES.iter().any(|lib| target.strip_prefix(lib).is_some_and(|rest| rest.is_empty() || rest.starts_with("::")));
+    !from_ws_library || *meta.level() <= Level::DEBUG
+}
+
+fn log_filter(spec: &str) -> impl Filter<Registry> + Send + Sync + 'static {
+    let user = tracing_subscriber::EnvFilter::try_new(spec).unwrap_or_else(|e| {
         eprintln!("VALLY_LOG를 읽을 수 없어 info로 둡니다: {e}");
         tracing_subscriber::EnvFilter::new("info")
     });
-    WS_LIBRARY_CAP.iter().fold(filter, |f, d| f.add_directive(d.parse().expect("고정 지시문")))
+    user.and(filter_fn(below_ws_library_trace))
 }
 
 async fn serve(config: Config, token_file: TokenFile) -> ExitCode {
@@ -253,10 +265,10 @@ mod tests {
         }
     }
 
-    async fn logs_of_one_ws_login(filter: tracing_subscriber::EnvFilter) -> String {
+    async fn logs_of_one_ws_login(filter: impl Filter<Registry> + Send + Sync + 'static) -> String {
         let out = Captured::default();
         let writer = out.clone();
-        let subscriber = tracing_subscriber::fmt().with_env_filter(filter).with_writer(move || writer.clone()).with_ansi(false).finish();
+        let subscriber = tracing_subscriber::registry().with(tracing_subscriber::fmt::layer().with_writer(move || writer.clone()).with_ansi(false).with_filter(filter));
         let _guard = tracing::subscriber::set_default(subscriber);
         let fake = FakeKiwoom::start().await;
         let transport = ReqwestTransport::new(fake.base_url()).unwrap();

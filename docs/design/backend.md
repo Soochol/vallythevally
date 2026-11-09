@@ -876,7 +876,7 @@ pub enum StreamEvent {
 - **REAL**: `data[]`의 각 항목을 `RealTick`으로 바꾼다. 실패한 항목은 버리고 카운터를 올린다.
   - 0B: `10`의 방향 부호를 떼고 원 → centi. `15`는 절댓값. **`15`가 0인 프레임은 버린다.** 0은 동시호가에만 나온다(kiwoom.md 11.3). 예상 체결가로 봉을 움직이지 않으려는 것이다. [장중 실측 대기: §12.2 8번]
   - 0J: `10`은 방향 부호가 붙은 소수 문자열이다(kiwoom.md 11.5). `15`가 `"0"`이라 체결량은 그 지수의 앞 프레임 대비 `13`(누적거래량)의 증가분으로 센다. 연결마다 새로 센다. 첫 프레임과 줄어든 경우는 0이다.
-- **로그**: tungstenite는 trace 수준에서 보낸 프레임을 그대로 찍는다. LOGIN 프레임에는 토큰이 있다. 그래서 `VALLY_LOG`와 상관없이 `tungstenite`·`tokio_tungstenite`를 debug로 묶는다(`app.rs`, 시험으로 고정).
+- **로그**: tungstenite는 trace 수준에서 보낸 프레임을 그대로 찍는다. LOGIN 프레임에는 토큰이 있다. 그래서 `VALLY_LOG`와 상관없이 `tungstenite`·`tokio_tungstenite`의 trace를 버린다. `VALLY_LOG` 안에 지시문을 더하면 `tungstenite::protocol=trace`처럼 더 구체적인 target이 이기므로, 사용자 필터와 따로 겹친 필터로 거른다(`app.rs`, 평문·16진 토큰 시험으로 고정).
 - 같은 토큰으로 순서대로 다시 접속하면 매번 LOGIN이 성공했다. 그래서 다시 연결할 때 토큰을 새로 받지 않는다.
 
 ### 5.2 다시 연결과 끊긴 구간 복구
