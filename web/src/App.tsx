@@ -13,6 +13,7 @@ import { useHotkeys } from "./features/useHotkeys";
 import { useOpenFromAddress } from "./features/useOpenFromAddress";
 import { useCell } from "./stores/layout";
 import { PhoneSaveBand } from "./features/status/SaveStatus";
+import { desktopPanelWidth } from "./features/watch/columns";
 import { PhoneWatch, WatchPanel } from "./features/watch/Watchlist";
 import { usePersistStore } from "./stores/persist";
 import { useSelectionStore } from "./stores/selection";
@@ -29,6 +30,7 @@ function ChartScreen() {
   const info = useSymbolInfo(cell.symbol).data;
   const pushRecent = useUiStore((s) => s.pushRecent);
   const watchCollapsed = useUiStore((s) => s.prefs.watchCollapsed);
+  const watchColumns = useUiStore((s) => s.prefs.watchColumns);
   const [status, setStatus] = useState<CellStatus>({ kind: "loading" });
 
   useHotkeys();
@@ -39,6 +41,7 @@ function ChartScreen() {
 
   return (
     <div
+      style={{ "--watch-w": `${desktopPanelWidth(watchColumns)}px` } as React.CSSProperties}
       className={
         "grid h-dvh " +
         (watchCollapsed ? "grid-cols-[minmax(0,1fr)_28px] " : "grid-cols-[minmax(0,1fr)_var(--watch-w)] ") +

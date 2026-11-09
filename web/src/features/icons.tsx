@@ -109,3 +109,10 @@ export const CopyIcon = ({ size }: P) => (
     <path d="M15.5 8.5V6a1.5 1.5 0 0 0-1.5-1.5H6A1.5 1.5 0 0 0 4.5 6v8A1.5 1.5 0 0 0 6 15.5h2.5" />
   </Icon>
 );
+export const MoreIcon = ({ size = 16 }: P) => (
+  <Icon size={size}>
+    <circle cx="6" cy="12" r="1.2" fill="currentColor" stroke="none" />
+    <circle cx="12" cy="12" r="1.2" fill="currentColor" stroke="none" />
+    <circle cx="18" cy="12" r="1.2" fill="currentColor" stroke="none" />
+  </Icon>
+);

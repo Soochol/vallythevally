@@ -9,6 +9,12 @@ import type { SaveTarget } from "../stores/persist";
 import { NXT_FALLBACK_NOTICE, restore, type RestoreSources } from "./restore";
 import type { Unsaved } from "./saver";
 
+const SERVER_LISTS = [
+  { id: "W1", name: "기본", symbols: ["005930", "IDX:001"] },
+  { id: "W2", name: "반도체", symbols: ["000660"] },
+];
+const LOCAL_LISTS = [{ id: "W1", name: "기본", symbols: ["000660"] }];
+
 afterEach(() => vi.restoreAllMocks());
 
 const info = (code: string, nxtEnabled: boolean): SymbolInfo => ({ code, name: code, kind: "common", market: "kospi", nxtEnabled });
@@ -37,7 +43,7 @@ function sources(
       if (!l) throw new ApiRequestError("not_found", "없음");
       return l;
     },
-    watchlist: async () => ({ symbols: ["005930", "IDX:001"], revision: 30 }),
+    watchlists: async () => ({ lists: SERVER_LISTS, revision: 30 }),
     unsaved: (target) => opts.unsaved?.[target] ?? null,
     symbolInfo:
       opts.symbolInfo ??
@@ -56,7 +62,7 @@ test("저장된 값을 그대로 열면 아무것도 저장하지 않는다", as
   expect(r.uiDirty).toBe(false);
   expect(r.ui.prefs.theme).toBe("light");
   expect(r.ui.extra).toEqual({ extraKey: 1 });
-  expect(r.watchlist).toEqual(["005930", "IDX:001"]);
+  expect(r.watchlists).toEqual(SERVER_LISTS);
   expect(r.notices).toEqual([]);
   expect(r.revisions).toEqual({ layout: 10, ui: 20, watchlist: 30 });
   expect(r.ui.extra).not.toHaveProperty("revision");
@@ -73,17 +79,24 @@ test("R2: 지난 페이지가 남긴 미저장 본문이 서버 것보다 새로
       unsaved: {
         layout: unsaved("/api/layouts/L1", 11, input),
         ui: unsaved("/api/ui-state", 21, { lastLayoutId: "L1", theme: "dark", extraKey: 2 }),
-        watchlist: unsaved("/api/watchlist", 31, { symbols: ["000660"] }),
+        watchlist: unsaved("/api/watchlists", 31, { lists: LOCAL_LISTS }),
       },
     }),
   );
   expect(r.layout.cells[0]!.period).toBe("M");
   expect(r.ui.prefs.theme).toBe("dark");
   expect(r.ui.extra).toEqual({ extraKey: 2 });
-  expect(r.watchlist).toEqual(["000660"]);
+  expect(r.watchlists).toEqual(LOCAL_LISTS);
   expect([r.layoutDirty, r.uiDirty, r.watchlistDirty]).toEqual([true, true, true]);
   expect(r.revisions).toEqual({ layout: 11, ui: 21, watchlist: 31 });
   expect(r.serverRevisions).toEqual({ layout: 10, ui: 20, watchlist: 30 });
+});
+
+test("배포 전 경로(/api/watchlist)의 미저장 본문이나 목록 모양이 아닌 본문은 열지 않는다", async () => {
+  for (const u of [unsaved("/api/watchlist", 99, { symbols: ["000660"] }), unsaved("/api/watchlists", 99, { lists: [] })]) {
+    const r = await restore(sources({ unsaved: { watchlist: u } }));
+    expect([r.watchlists, r.watchlistDirty, r.revisions.watchlist]).toEqual([SERVER_LISTS, false, 30]);
+  }
 });
 
 test("R2: 서버가 이미 가진 것(같거나 큰 revision)이나 다른 레이아웃의 미저장 본문은 열지 않는다", async () => {
@@ -92,12 +105,12 @@ test("R2: 서버가 이미 가진 것(같거나 큰 revision)이나 다른 레�
       unsaved: {
         layout: unsaved("/api/layouts/OTHER", 99, { id: "OTHER" }),
         ui: unsaved("/api/ui-state", 20, { lastLayoutId: "L1", theme: "dark" }),
-        watchlist: unsaved("/api/watchlist", 5, { symbols: ["000660"] }),
+        watchlist: unsaved("/api/watchlists", 5, { lists: LOCAL_LISTS }),
       },
     }),
   );
   expect(r.ui.prefs.theme).toBe("light");
-  expect(r.watchlist).toEqual(["005930", "IDX:001"]);
+  expect(r.watchlists).toEqual(SERVER_LISTS);
   expect([r.layoutDirty, r.uiDirty, r.watchlistDirty]).toEqual([false, false, false]);
   expect(r.revisions).toEqual({ layout: 10, ui: 20, watchlist: 30 });
 });

@@ -59,9 +59,9 @@ export function fakeApi(): Plugin {
           if (method === "GET") return reply(res, user.getUiState());
           if (method === "PUT") return reply(res, user.putUiState(await readJson(req)));
         }
-        if (path === "/watchlist") {
-          if (method === "GET") return reply(res, user.getWatchlist());
-          if (method === "PUT") return reply(res, user.putWatchlist(await readJson(req)));
+        if (path === "/watchlists") {
+          if (method === "GET") return reply(res, user.getWatchlists());
+          if (method === "PUT") return reply(res, user.putWatchlists(await readJson(req)));
         }
         if (path === "/quotes") {
           const codes = (url.searchParams.get("symbols") ?? "").split(",").filter(Boolean);

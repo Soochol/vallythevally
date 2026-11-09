@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import type { SymbolCode } from "../api/generated/SymbolCode";
-import { DEFAULT_UI_PREFS, MAX_RECENT, type Theme, type UiExtra, type UiPrefs } from "../persist/uiState";
+import type { WatchColumn } from "../lib/watchlist";
+import { DEFAULT_UI_PREFS, MAX_RECENT, sortColumns, type Theme, type UiExtra, type UiPrefs } from "../persist/uiState";
 
 interface UiStore {
   prefs: UiPrefs;
@@ -12,6 +13,8 @@ interface UiStore {
   pushRecent(code: SymbolCode): void;
   clearRecent(): void;
   setLastLayoutId(id: string): void;
+  setActiveWatchlist(id: string): void;
+  toggleWatchColumn(column: WatchColumn): void;
 }
 
 export const useUiStore = create<UiStore>()((set) => {
@@ -35,6 +38,12 @@ export const useUiStore = create<UiStore>()((set) => {
       ),
     clearRecent: () => edit((p) => (p.recentSymbols.length === 0 ? p : { ...p, recentSymbols: [] })),
     setLastLayoutId: (id) => edit((p) => (p.lastLayoutId === id ? p : { ...p, lastLayoutId: id })),
+    setActiveWatchlist: (id) => edit((p) => (p.activeWatchlistId === id ? p : { ...p, activeWatchlistId: id })),
+    toggleWatchColumn: (column) =>
+      edit((p) => ({
+        ...p,
+        watchColumns: p.watchColumns.includes(column) ? p.watchColumns.filter((c) => c !== column) : sortColumns([...p.watchColumns, column]),
+      })),
   };
 });
 

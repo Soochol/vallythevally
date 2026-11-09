@@ -4,9 +4,24 @@ import { DEFAULT_UI_PREFS, parseUiState, toUiState } from "./uiState";
 afterEach(() => vi.restoreAllMocks());
 
 test("아는 키는 읽고 모르는 키는 extra에 남겨 그대로 돌려보낸다", () => {
-  const raw = { lastLayoutId: "L1", theme: "light", watchCollapsed: true, recentSymbols: ["005930"], phone: { symbol: "000660" } };
+  const raw = {
+    lastLayoutId: "L1",
+    theme: "light",
+    watchCollapsed: true,
+    recentSymbols: ["005930"],
+    activeWatchlistId: "W2",
+    watchColumns: ["price", "volume"],
+    phone: { symbol: "000660" },
+  };
   const { prefs, extra } = parseUiState(raw);
-  expect(prefs).toEqual({ lastLayoutId: "L1", theme: "light", watchCollapsed: true, recentSymbols: ["005930"] });
+  expect(prefs).toEqual({
+    lastLayoutId: "L1",
+    theme: "light",
+    watchCollapsed: true,
+    recentSymbols: ["005930"],
+    activeWatchlistId: "W2",
+    watchColumns: ["price", "volume"],
+  });
   expect(extra).toEqual({ phone: { symbol: "000660" } });
   expect(toUiState(prefs, extra)).toEqual(raw);
 });
@@ -19,7 +34,7 @@ test("마이그레이션이 넣은 처음 값(접힘·최근 종목 없음)은 �
 
 test("틀린 값은 그 키만 기본값으로 바꾸고 콘솔에 남긴다", () => {
   const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-  const { prefs } = parseUiState({ lastLayoutId: 3, theme: "blue", watchCollapsed: "yes", recentSymbols: [1] });
+  const { prefs } = parseUiState({ lastLayoutId: 3, theme: "blue", watchCollapsed: "yes", recentSymbols: [1], activeWatchlistId: 1, watchColumns: ["price", "bid"] });
   expect(prefs).toEqual(DEFAULT_UI_PREFS);
   expect(warn).toHaveBeenCalledOnce();
 });
@@ -32,4 +47,11 @@ test("최근 본 종목은 10개까지만 읽는다", () => {
 test("객체가 아니면 기본값으로 연다", () => {
   vi.spyOn(console, "warn").mockImplementation(() => {});
   expect(parseUiState([1, 2])).toEqual({ prefs: DEFAULT_UI_PREFS, extra: {} });
+});
+
+test("고른 열은 정해진 차례로 읽고, 겹치면 틀린 값으로 본다", () => {
+  vi.spyOn(console, "warn").mockImplementation(() => {});
+  expect(parseUiState({ lastLayoutId: null, theme: "dark", watchColumns: ["volume", "price"] }).prefs.watchColumns).toEqual(["price", "volume"]);
+  expect(parseUiState({ lastLayoutId: null, theme: "dark", watchColumns: [] }).prefs.watchColumns).toEqual([]);
+  expect(parseUiState({ lastLayoutId: null, theme: "dark", watchColumns: ["price", "price"] }).prefs.watchColumns).toEqual(DEFAULT_UI_PREFS.watchColumns);
 });
