@@ -132,3 +132,31 @@ async fn the_startup_list_retry_waits_for_the_shared_gate() {
     let list_requests = fake.api_ids().iter().filter(|id| *id == "ka10099").count();
     assert_eq!(list_requests, 2, "화면 요청 한 번과 0.5초 뒤 한 번. 바깥 타이머도 30초 관문을 기다린다\n{logs}");
 }
+
+async fn browser_error(api_id: &str, status: u16, reply: Value, path: &str) -> (u16, Value) {
+    let fake = FakeKiwoom::start().await;
+    fake.respond_with(api_id, status, reply);
+    let tmp = tempfile::tempdir().unwrap();
+    let server = Server::spawn(&fake, &tmp.path().join("run/server.lock"), &static_dir(tmp.path()));
+    let base = format!("http://{}", server.addr().await);
+    let (status, body) = get(&reqwest::Client::new(), &base, path).await;
+    server.stop().await;
+    (status, body["error"].clone())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_browser_learns_whether_and_when_it_may_ask_again() {
+    let (status, e) = browser_error("ka10095", 200, json!({"return_code": 7, "return_msg": "[1902:종목정보가 없습니다]"}), "/api/quotes?symbols=005930").await;
+    assert_eq!(status, 503, "{e}");
+    assert_eq!((&e["reason"], &e["retryAt"], &e["manualActionRequired"]), (&json!("symbol_mismatch"), &Value::Null, &json!(false)), "묶음의 종목 불일치는 다시 보내지 않지만 다른 종목은 멈추지 않는다: {e}");
+
+    let (status, e) = browser_error("ka10095", 503, json!({}), "/api/quotes?symbols=005930").await;
+    assert_eq!(status, 503, "{e}");
+    assert_eq!(e["reason"], json!("kiwoom_error"), "{e}");
+    assert!(e["retryAt"].is_i64() && e["manualActionRequired"] == json!(false), "일시 장애는 관문이 열리는 시각을 준다: {e}");
+
+    let (status, e) = browser_error("ka10095", 200, json!({"return_code": 1, "return_msg": "알 수 없음"}), "/api/quotes?symbols=005930").await;
+    assert_eq!(status, 503, "{e}");
+    assert_eq!((&e["reason"], &e["retryAt"], &e["manualActionRequired"]), (&json!("unknown_failure"), &Value::Null, &json!(true)), "{e}");
+    assert!(!e["message"].as_str().unwrap().contains("잠시 뒤 다시 시도하세요"), "멈춘 경로를 잠시 뒤에 풀린다고 말하지 않는다: {e}");
+}

@@ -22,3 +22,9 @@ test("다른 오류는 연결 상태를 건드리지 않는다", async () => {
   await expect(getJson("/api/bars")).rejects.toBeInstanceOf(ApiRequestError);
   expect(useKiwoomStore.getState().authFailure).toBeNull();
 });
+
+test("오류 본문의 사유, 다시 보낼 시각, 사람 조치 여부를 그대로 읽는다", async () => {
+  reply(503, { error: { code: "kiwoom_unavailable", message: "m", reason: "rate_limited", retryAt: 1_794_182_430, manualActionRequired: false } });
+  const e = await getJson("/api/quotes?symbols=005930").catch((x: unknown) => x);
+  expect(e).toMatchObject({ code: "kiwoom_unavailable", reason: "rate_limited", retryAt: 1_794_182_430, manualActionRequired: false });
+});
