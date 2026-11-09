@@ -12,7 +12,7 @@ use domain::{Symbol, Venue};
 use serde::de::DeserializeOwned;
 
 use crate::api::{self, ApiErrorCode, Layout, LayoutInput, LayoutSummary, Revision, UiState, UnixSeconds, Watchlist};
-use crate::http::{ApiFailure, AppState, not_ready};
+use crate::http::{ApiFailure, AppState, symbol_list};
 use crate::userdata::{self, StoreError};
 
 pub const JSON_LIMIT: usize = 64 * 1024;
@@ -89,7 +89,7 @@ async fn put_layout(State(st): State<Arc<AppState>>, Path(id): Path<String>, bod
     }
     let nxt = check_layout(&id, &input)?;
     if !nxt.is_empty() {
-        let dir = st.symbols.ready().await.map_err(|_| not_ready())?;
+        let dir = symbol_list(&st).await?;
         if let Some(info) = nxt.iter().find_map(|s| dir.get(*s).filter(|i| !i.nxt_enabled)) {
             return Err(ApiFailure::bad_request(format!("NXT에서 거래되지 않는 종목입니다: {}({})", info.name, info.symbol.as_wire())));
         }

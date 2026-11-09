@@ -17,6 +17,7 @@ use crate::bars::{BarError, BarService, DEFAULT_LIMIT, MAX_LIMIT};
 use crate::clock::Clock;
 use crate::db::AppDb;
 use crate::kiwoom::rest::KiwoomRest;
+use crate::kiwoom::auth::auth_failed_message;
 use crate::symbols::SymbolDirectory;
 
 pub struct AppState {
@@ -84,6 +85,7 @@ impl IntoResponse for ApiFailure {
 
 #[derive(Clone, Copy)]
 enum Lookup {
+    Symbols,
     Bars,
     Quotes,
 }
@@ -91,6 +93,7 @@ enum Lookup {
 impl Lookup {
     fn label(self) -> &'static str {
         match self {
+            Lookup::Symbols => "종목",
             Lookup::Bars => "봉",
             Lookup::Quotes => "현재가",
         }
@@ -106,7 +109,7 @@ impl Lookup {
                 tracing::warn!(reason = %m, "{what} 요청에 답하지 못했습니다");
                 ApiFailure::new(KiwoomUnavailable, "키움 조회에 실패했습니다. 잠시 뒤 다시 시도하세요")
             }
-            BarError::AuthFailed => ApiFailure::new(KiwoomAuthFailed, "키움 인증에 실패했습니다. 운영자가 설정을 확인해야 합니다"),
+            BarError::AuthFailed { detail } => ApiFailure::new(KiwoomAuthFailed, auth_failed_message(detail)),
             BarError::Internal(m) => {
                 tracing::error!(reason = %m, "{what} 요청 처리 중 내부 오류");
                 ApiFailure::new(Internal, "서버 내부 오류입니다")
@@ -115,8 +118,15 @@ impl Lookup {
     }
 }
 
-pub(crate) fn not_ready() -> ApiFailure {
-    ApiFailure::new(api::ApiErrorCode::KiwoomUnavailable, "종목 목록을 아직 받지 못했습니다. 잠시 뒤 다시 시도하세요")
+/// 종목 목록이 필요한 요청이 먼저 부른다. 인증 거절로 멈췄으면 목록은 오지 않으므로 기다리지 않고 원인을 돌려준다.
+pub(crate) async fn symbol_list(st: &AppState) -> Result<Arc<crate::symbols::Directory>, ApiFailure> {
+    if let Some(e) = st.bars.halted() {
+        return Err(Lookup::Symbols.failure(e.into()));
+    }
+    st.symbols
+        .ready()
+        .await
+        .map_err(|_| ApiFailure::new(api::ApiErrorCode::KiwoomUnavailable, "종목 목록을 아직 받지 못했습니다. 잠시 뒤 다시 시도하세요"))
 }
 
 async fn search(State(st): State<Arc<AppState>>, Query(q): Query<HashMap<String, String>>) -> Result<Json<Vec<api::SymbolInfo>>, ApiFailure> {
@@ -124,13 +134,13 @@ async fn search(State(st): State<Arc<AppState>>, Query(q): Query<HashMap<String,
     if crate::symbols::normalize(query).is_empty() {
         return Ok(Json(Vec::new()));
     }
-    let dir = st.symbols.ready().await.map_err(|_| not_ready())?;
+    let dir = symbol_list(&st).await?;
     Ok(Json(dir.search(query).iter().map(api::SymbolInfo::from).collect()))
 }
 
 async fn symbol(State(st): State<Arc<AppState>>, Path(code): Path<String>) -> Result<Json<api::SymbolInfo>, ApiFailure> {
     let symbol = Symbol::parse(&code).map_err(|e| ApiFailure::bad_request(e.to_string()))?;
-    let dir = st.symbols.ready().await.map_err(|_| not_ready())?;
+    let dir = symbol_list(&st).await?;
     dir.get(symbol)
         .map(|i| Json(api::SymbolInfo::from(i)))
         .ok_or_else(|| ApiFailure::new(api::ApiErrorCode::UnknownSymbol, format!("없는 종목입니다: {code}")))

@@ -54,6 +54,7 @@ impl FakeKiwoom {
         format!("http://{}", self.addr)
     }
 
+    /// 이 api-id에는 고정 입력 대신 이 상태와 본문으로 답한다.
     pub fn respond_with(&self, api_id: &str, status: u16, body: Value) {
         self.seen.overrides.lock().unwrap().insert(api_id.to_owned(), (status, body));
     }
