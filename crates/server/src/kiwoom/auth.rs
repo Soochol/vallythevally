@@ -6,7 +6,7 @@ use std::sync::Mutex;
 use domain::{KstTime, TimeOfDay};
 use serde::Serialize;
 
-use super::token_file::{Saved, SavedToken, TokenFile};
+use super::token_file::{FileError, Saved, SavedToken, TokenFile};
 use super::wire::{TokenResponse, parse_kst_datetime};
 use crate::config::Secret;
 
@@ -34,10 +34,16 @@ pub fn auth_failed_message(detail: Option<u16>) -> String {
     }
 }
 
+/// 서버를 다시 켜야 풀린다.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Halt {
+    Rejected(u16),
+    TokenFileUnreadable(FileError),
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AuthError {
-    /// 앱키·IP 같은 되돌릴 수 없는 인증 실패(8001~8200 중 8005 밖). 서버를 다시 켜야 한다.
-    Halted { detail: u16 },
+    Halted(Halt),
     /// au10001 응답에 토큰이나 만료 시각이 없다.
     BadTokenResponse,
 }
@@ -55,7 +61,7 @@ struct State {
     last_request_at: Option<KstTime>,
     /// 토큰 무효 응답을 받아 다시 발급해야 한다.
     stale: bool,
-    halted: Option<u16>,
+    halted: Option<Halt>,
     issued_count: u64,
 }
 
@@ -96,8 +102,8 @@ impl KiwoomAuth {
             None | Some(Ok(None)) => State::default(),
             Some(Ok(Some(saved))) => restore(saved),
             Some(Err(e)) => {
-                tracing::warn!(path = %file.as_ref().map_or(String::new(), |f| f.path().display().to_string()), error = %e, "토큰 파일을 읽지 못해 없는 것으로 봅니다");
-                State::default()
+                tracing::error!(error = %e, "토큰 파일을 읽지 못했습니다. 마지막 발급 요청 시각을 모르므로 조회와 토큰 발급을 멈춥니다");
+                State { halted: Some(Halt::TokenFileUnreadable(e)), ..State::default() }
             }
         };
         KiwoomAuth { app_key, app_secret, file, state: Mutex::new(state) }
@@ -107,8 +113,8 @@ impl KiwoomAuth {
         self.state.lock().expect("auth 잠금")
     }
 
-    fn save(&self, st: &State) {
-        let Some(file) = &self.file else { return };
+    fn save(&self, st: &State) -> Result<(), FileError> {
+        let Some(file) = &self.file else { return Ok(()) };
         let saved = Saved {
             token: st.issued.as_ref().map(|i| SavedToken {
                 value: i.token.expose().clone(),
@@ -117,21 +123,23 @@ impl KiwoomAuth {
             }),
             last_request_at: st.last_request_at.map_or(0, KstTime::unix),
         };
-        if let Err(e) = file.save(&saved) {
-            tracing::error!(path = %file.path().display(), error = %e, "토큰 파일에 쓰지 못했습니다. 다시 켜면 발급 간격을 지키지 못할 수 있습니다");
-        }
+        file.save(&saved)
     }
 
-    pub fn begin_issue(&self, now: KstTime) -> Secret<String> {
+    /// 발급 요청 시각을 파일에 남기지 못하면 본문을 내주지 않는다. 다시 켠 서버가 그 시각을 알아야 10분을 지킨다.
+    pub fn begin_issue(&self, now: KstTime) -> Result<Secret<String>, FileError> {
         let mut st = self.lock();
-        st.last_request_at = Some(now);
-        self.save(&st);
+        let previous = st.last_request_at.replace(now);
+        if let Err(e) = self.save(&st) {
+            st.last_request_at = previous;
+            return Err(e);
+        }
         let req = TokenRequest {
             grant_type: "client_credentials",
             appkey: self.app_key.expose(),
             secretkey: self.app_secret.expose(),
         };
-        Secret::new(serde_json::to_string(&req).expect("문자열만 담은 구조체"))
+        Ok(Secret::new(serde_json::to_string(&req).expect("문자열만 담은 구조체")))
     }
 
     pub fn issue_blocked_until(&self, now: KstTime) -> Option<KstTime> {
@@ -153,12 +161,12 @@ impl KiwoomAuth {
         self.halted().is_none() && self.current(now).is_none()
     }
 
-    pub fn halted(&self) -> Option<u16> {
-        self.lock().halted
+    pub fn halted(&self) -> Option<Halt> {
+        self.lock().halted.clone()
     }
 
     pub fn halt(&self, detail: u16) {
-        self.lock().halted = Some(detail);
+        self.lock().halted = Some(Halt::Rejected(detail));
     }
 
     pub fn record_issued(&self, resp: TokenResponse, now: KstTime) -> Result<TokenGen, AuthError> {
@@ -171,14 +179,16 @@ impl KiwoomAuth {
         let generation = TokenGen(st.issued_count);
         st.issued = Some(Issued { token: Secret::new(resp.token), issued_at: now, expires_at, generation });
         st.stale = false;
-        self.save(&st);
+        if let Err(e) = self.save(&st) {
+            tracing::error!(error = %e, "받은 토큰을 파일에 쓰지 못했습니다. 다시 켜면 발급 간격이 지난 뒤 새로 받습니다");
+        }
         Ok(generation)
     }
 
     pub fn invalidate(&self, seen: TokenGen) -> Result<(), AuthError> {
         let mut st = self.lock();
-        if let Some(d) = st.halted {
-            return Err(AuthError::Halted { detail: d });
+        if let Some(h) = &st.halted {
+            return Err(AuthError::Halted(h.clone()));
         }
         if st.issued.as_ref().map(|i| i.generation) == Some(seen) {
             st.stale = true;
@@ -244,14 +254,14 @@ mod tests {
         for s in [KEY, SECRET, TOKEN] {
             assert!(!dbg.contains(s), "{dbg}");
         }
-        let body = a.begin_issue(kst(d(9), 9, 0, 0));
+        let body = a.begin_issue(kst(d(9), 9, 0, 0)).unwrap();
         assert!(body.expose().contains(KEY));
         assert_eq!(format!("{body:?}"), "[가림]");
     }
 
     #[test]
     fn issue_body_shape() {
-        let v: serde_json::Value = serde_json::from_str(auth().begin_issue(kst(d(9), 9, 0, 0)).expose()).unwrap();
+        let v: serde_json::Value = serde_json::from_str(auth().begin_issue(kst(d(9), 9, 0, 0)).unwrap().expose()).unwrap();
         assert_eq!(v, serde_json::json!({"grant_type": "client_credentials", "appkey": KEY, "secretkey": SECRET}));
     }
 
@@ -282,7 +292,7 @@ mod tests {
         assert_eq!(a.current(t0).unwrap().1, g2, "옛 세대의 무효는 새 토큰을 건드리지 않는다");
         a.halt(8001);
         assert!(!a.needs_issue(t0) && a.current(t0).is_none());
-        assert_eq!(a.invalidate(g2), Err(AuthError::Halted { detail: 8001 }));
+        assert_eq!(a.invalidate(g2), Err(AuthError::Halted(Halt::Rejected(8001))));
     }
 
     #[test]
@@ -290,7 +300,7 @@ mod tests {
         let a = auth();
         let t0 = kst(d(9), 9, 0, 0);
         assert_eq!(a.issue_blocked_until(t0), None);
-        a.begin_issue(t0);
+        a.begin_issue(t0).unwrap();
         assert_eq!(a.issue_blocked_until(t0.plus_secs(599)), Some(t0.plus_secs(600)), "실패한 요청도 센다");
         assert_eq!(a.issue_blocked_until(t0.plus_secs(600)), None);
     }
@@ -301,7 +311,7 @@ mod tests {
         let path = file.path().to_owned();
         let t0 = kst(d(9), 9, 0, 0);
         let first = KiwoomAuth::new(Secret::new(KEY.into()), Secret::new(SECRET.into()), Some(file));
-        first.begin_issue(t0);
+        first.begin_issue(t0).unwrap();
         first.record_issued(resp(TOKEN, "20261110090000"), t0.plus_secs(1)).unwrap();
         drop(first);
 

@@ -13,7 +13,8 @@ use tokio::sync::{Notify, oneshot};
 use tokio::time::Instant;
 
 use super::api::{ApiId, MarketRequest};
-use super::auth::{AuthError, KiwoomAuth, MIN_ISSUE_INTERVAL_SECS, TokenGen, auth_failed_message};
+use super::auth::{AuthError, Halt, KiwoomAuth, MIN_ISSUE_INTERVAL_SECS, TokenGen, auth_failed_message};
+use super::token_file::FileError;
 use super::transport::{HttpRequest, HttpResponse, Transport, TransportError};
 use super::wire::{Envelope, TokenResponse, detail_code};
 use crate::clock::Clock;
@@ -75,6 +76,7 @@ pub enum KiwoomError {
     /// 토큰을 받을 수 없거나 인증이 거절됐다.
     AuthFailed { detail: Option<u16> },
     IssueTooSoon { until: KstTime },
+    TokenFile(FileError),
     /// 우리 코드가 잘못 보낸 요청(1501~1999, 1634, 상세 코드 없는 실패).
     BadRequest { detail: Option<u16>, msg: String },
     /// 네트워크 오류, HTTP 5xx 등. URL과 헤더는 빼고 적는다.
@@ -92,6 +94,11 @@ impl fmt::Display for KiwoomError {
                 "키움 토큰은 발급 사이를 {}분 띄웁니다. {until}부터 다시 받으니 그 뒤에 다시 시도하세요",
                 MIN_ISSUE_INTERVAL_SECS / 60
             ),
+            KiwoomError::TokenFile(e) => write!(
+                f,
+                "토큰 파일을 쓸 수 없어 키움 토큰을 발급하지 않습니다({e}). 파일을 고치거나, 마지막 발급 요청에서 {}분이 지난 뒤 지우고 서버를 다시 켜세요",
+                MIN_ISSUE_INTERVAL_SECS / 60
+            ),
             KiwoomError::BadRequest { detail, msg } => write!(f, "키움이 요청을 거절했습니다(상세 코드 {detail:?}): {msg}"),
             KiwoomError::Transport(m) => write!(f, "키움에 닿지 못했습니다: {m}"),
             KiwoomError::Parse { api_id, detail } => write!(f, "{} 응답을 읽지 못했습니다: {detail}", api_id.as_str()),
@@ -100,6 +107,15 @@ impl fmt::Display for KiwoomError {
 }
 
 impl std::error::Error for KiwoomError {}
+
+impl From<Halt> for KiwoomError {
+    fn from(h: Halt) -> Self {
+        match h {
+            Halt::Rejected(detail) => KiwoomError::AuthFailed { detail: Some(detail) },
+            Halt::TokenFileUnreadable(e) => KiwoomError::TokenFile(e),
+        }
+    }
+}
 
 #[derive(Clone)]
 struct RawPage {
@@ -223,7 +239,7 @@ impl KiwoomRest {
     }
 
     pub fn halted(&self) -> Option<KiwoomError> {
-        self.0.auth.halted().map(|d| KiwoomError::AuthFailed { detail: Some(d) })
+        self.0.auth.halted().map(KiwoomError::from)
     }
 
     pub fn blocked(&self) -> Option<KiwoomError> {
@@ -341,8 +357,8 @@ impl Inner {
     fn next_step(&self) -> Step {
         let now_kst = self.clock.now();
         let mut q = self.lock();
-        if let Some(detail) = self.auth.halted() {
-            let err = KiwoomError::AuthFailed { detail: Some(detail) };
+        if let Some(halt) = self.auth.halted() {
+            let err = KiwoomError::from(halt);
             q.fail_queued(&err);
             for w in q.issue_waiters.drain(..) {
                 let _ = w.send(Err(err.clone()));
@@ -394,10 +410,17 @@ impl Inner {
     }
 
     async fn issue(&self) {
-        let req = HttpRequest { api_id: ApiId::Au10001, token: None, cont: None, body: self.auth.begin_issue(self.clock.now()) };
-        let started = Instant::now();
-        let res = self.transport.send(req).await;
-        let outcome = self.judge_issue(res, started);
+        let outcome = match self.auth.begin_issue(self.clock.now()) {
+            Ok(body) => {
+                let started = Instant::now();
+                let res = self.transport.send(HttpRequest { api_id: ApiId::Au10001, token: None, cont: None, body }).await;
+                self.judge_issue(res, started)
+            }
+            Err(e) => {
+                tracing::error!(error = %e, "토큰 파일에 발급 요청 시각을 쓰지 못해 발급 요청을 보내지 않습니다");
+                Err(KiwoomError::TokenFile(e))
+            }
+        };
         let mut q = self.lock();
         if let Err(e) = &outcome {
             if matches!(e, KiwoomError::RateLimited) {
@@ -473,7 +496,7 @@ impl Inner {
                 let invalid = KiwoomError::AuthFailed { detail: Some(8005) };
                 match (already, self.auth.invalidate(generation)) {
                     (false, Ok(())) => q.requeue_front(id),
-                    (_, Err(AuthError::Halted { detail })) => q.finish(id, Err(KiwoomError::AuthFailed { detail: Some(detail) })),
+                    (_, Err(AuthError::Halted(halt))) => q.finish(id, Err(halt.into())),
                     _ => {
                         tracing::error!(api_id = api_id.as_str(), "새 토큰으로도 토큰 무효 응답을 받았습니다");
                         q.finish(id, Err(invalid));

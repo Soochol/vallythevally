@@ -111,6 +111,7 @@ impl Lookup {
             }
             BarError::AuthFailed { detail } => ApiFailure::new(KiwoomAuthFailed, auth_failed_message(detail)),
             BarError::TokenWait(m) => ApiFailure::new(KiwoomUnavailable, m),
+            BarError::TokenFile(m) => ApiFailure::new(KiwoomAuthFailed, m),
             BarError::Internal(m) => {
                 tracing::error!(reason = %m, "{what} 요청 처리 중 내부 오류");
                 ApiFailure::new(Internal, "서버 내부 오류입니다")
