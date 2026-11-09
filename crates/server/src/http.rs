@@ -716,4 +716,37 @@ mod tests {
         let (_, h, _) = get_with(&f.app, "/assets/app-1234.js", Some("gzip")).await;
         assert_eq!(header(&h, "content-encoding"), "gzip");
     }
+
+    #[tokio::test(start_paused = true)]
+    async fn requests_already_waiting_for_the_symbol_list_end_when_kiwoom_rejects_auth() {
+        let dir = tempfile::tempdir().unwrap();
+        tokio::time::resume();
+        let db = AppDb::open(&dir.path().join("vally.db")).await.unwrap();
+        tokio::time::pause();
+        let fake = Arc::new(FakeTransport::new(Duration::from_millis(300), |s| {
+            if s.api_id == ApiId::Au10001 {
+                return token(1);
+            }
+            status(403, json!({"return_code": 3, "return_msg": "지정단말기 인증에 실패했습니다[8050:지정단말기 인증 실패]"}))
+        }));
+        let clock = Clock::fake(kst(KstDate::new(2026, 11, 9).unwrap(), 9, 0, 0));
+        let rest = KiwoomRest::new(Arc::new(fake.clone()), KiwoomAuth::new(Secret::new("k".into()), Secret::new("s".into()), None), clock.clone());
+        let symbols = Arc::new(SymbolDirectory::default());
+        let bars = Arc::new(BarService::new(rest.clone(), symbols.clone(), clock.clone()));
+        let app = router(Arc::new(AppState { symbols: symbols.clone(), bars, rest: rest.clone(), db, clock, static_dir: dir.path().to_owned() }));
+
+        let nxt_layout = two_cells("005930");
+        let started = tokio::time::Instant::now();
+        let (symbol, bar, layout, list) = tokio::join!(
+            json(&app, "/api/symbols/005930"),
+            json(&app, "/api/bars?symbol=005930&period=D"),
+            put(&app, "/api/layouts/L2", &nxt_layout),
+            symbols.refresh(&rest, crate::kiwoom::rest::Priority::Screen),
+        );
+        assert_eq!(list.err(), Some(crate::kiwoom::rest::KiwoomError::AuthFailed { detail: Some(8050) }));
+        for (what, (s, v)) in [("종목", symbol), ("봉", bar), ("NXT 레이아웃", layout)] {
+            assert_eq!((s, code(&v)), (StatusCode::BAD_GATEWAY, "kiwoom_auth_failed"), "{what}: {v}");
+        }
+        assert!(started.elapsed() < Duration::from_secs(2), "8050을 받자마자 끝난다: {:?}", started.elapsed());
+    }
 }
