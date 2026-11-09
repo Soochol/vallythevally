@@ -2253,9 +2253,9 @@ pub fn future_bar_starts(period: &str, last_start: f64, n: usize) -> Result<Vec<
 | `VALLY_ENV_FILE` | 아니오 | 위 설정 파일의 절대 경로 |
 | `VALLY_KIWOOM_APP_KEY` | 예 | 실계좌 앱키(ADR 0004) |
 | `VALLY_KIWOOM_APP_SECRET` | 예 | 실계좌 시크릿(ADR 0004) |
-| `VALLY_KIWOOM_BASE_URL` | 아니오 | 키움 REST 주소. 기본 `https://api.kiwoom.com`. 통합 테스트가 가짜 키움 서버를 가리키는 데 쓴다 |
-| `VALLY_KIWOOM_WS_URL` | 아니오 | 키움 WebSocket 주소(#4). 기본 `wss://api.kiwoom.com:10000/api/dostk/websocket`. 시험이 가짜 키움을 가리키는 데 쓴다. `VALLY_KIWOOM_BASE_URL`과 짝이다: 두 주소를 파싱한 호스트로 판정해 둘 다 `kiwoom.com`이거나 둘 다 루프백(가짜 키움)이어야 시작한다. 그 밖의 호스트는 받지 않는다. `VALLY_CLOCK_START`는 둘 다 루프백일 때만 쓴다. REST만 가짜로 돌린 시험 서버가 실제 키움 WS에 가짜 토큰으로 LOGIN한 일이 있었다(2026-11-09) |
-| `VALLY_CLOCK_START` | 아니오 | **시험용**. KST `YYYYMMDDHHMMSS`. 서버 시계가 이 시각에서 시작해 실제 시간만큼 흐른다. 장 시간 밖에도 e2e가 실시간 경로를 돌게 하려는 것이다. 위 두 주소 중 하나라도 실제 키움(기본값)이면 시작하지 않는다. 실서버 `.env`에는 두지 않는다 |
+| `VALLY_KIWOOM_BASE_URL` | 예 | 키움 REST 주소. 기본값이 없다(2026-11-09 사용자 결정). 실제 키움은 `https://api.kiwoom.com`. 시험은 가짜 키움(루프백)을 적는다. 없거나 비면 무엇을 `.env`에 적을지 알리고 시작하지 않는다 |
+| `VALLY_KIWOOM_WS_URL` | 예 | 키움 WebSocket 주소(#4). 기본값이 없다. 실제 키움은 `wss://api.kiwoom.com:10000/api/dostk/websocket`. 시험은 가짜 키움을 적는다. `VALLY_KIWOOM_BASE_URL`과 짝이다: 두 주소를 파싱한 호스트로 판정해 둘 다 `kiwoom.com`이거나 둘 다 루프백(가짜 키움)이어야 시작한다. 그 밖의 호스트는 받지 않는다. `VALLY_CLOCK_START`는 둘 다 루프백일 때만 쓴다. REST만 가짜로 돌린 시험 서버가 실제 키움 WS에 가짜 토큰으로 LOGIN한 일이 있었다(2026-11-09) |
+| `VALLY_CLOCK_START` | 아니오 | **시험용**. KST `YYYYMMDDHHMMSS`. 서버 시계가 이 시각에서 시작해 실제 시간만큼 흐른다. 장 시간 밖에도 e2e가 실시간 경로를 돌게 하려는 것이다. 위 두 주소가 실제 키움이면 시작하지 않는다. 실서버 `.env`에는 두지 않는다 |
 | `VALLY_DB_PATH` | 아니오 | 사용자 자료 SQLite 파일 경로. 기본 `data/vally.db`. #2에서는 읽지 않는다 |
 | `VALLY_LOCK_PATH` | 아니오 | 잠금 파일 경로(§4.1). 기본 `$XDG_RUNTIME_DIR/vallythevally/server.lock`, 없으면 `/tmp/vallythevally-<uid>/server.lock` |
 | `VALLY_TOKEN_PATH` | 아니오 | 토큰 파일 경로(§4.1). 기본 `$XDG_STATE_HOME/vallythevally/token.json`, 없으면 `~/.local/state/vallythevally/token.json`. 저장소 안을 가리키지 않는다. 통합 테스트가 임시 디렉터리를 가리키는 데 쓴다 |
