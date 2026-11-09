@@ -2108,6 +2108,8 @@ pub fn future_bar_starts(period: &str, last_start: f64, n: usize) -> Result<Vec<
 | 잠금 파일 | 임시 디렉터리의 잠금 파일로: 첫 `InstanceLock::acquire` 성공, 같은 경로 두 번째는 `Held { pid }`, 첫 잠금을 drop하면 다시 잡힘, 남아 있는 파일(잠금 없음)은 막지 않음. 통합 테스트: 서버 두 번째 실행이 종료 코드 1로 끝나고 키움 요청을 보내지 않음 | `server::instance` | #2 |
 | 사용자 자료 | `sqlx::test`(sqlite, 테스트마다 새 DB)로: 마이그레이션, 레이아웃 PUT 두 번(같은 결과), 레이아웃 지우면 칸도 지워짐(`foreign_keys`), 마지막 레이아웃 삭제 거절, `ui_state`의 모르는 키 왕복과 64KB 초과 거절, 잘못된 JSON은 `json_valid`로 거절. 연결 설정(`journal_mode=wal`, `foreign_keys=1`, `busy_timeout=5000`)을 `PRAGMA`로 읽어 확인 | `server::db`, `server::userdata` | #3 |
 | 비밀값 | `Config`, `KiwoomAuth`, 텔레그램 클라이언트의 `Debug` 출력에 비밀값이 없는지 | `server::config` | #2 |
+| 가짜 키움 | 통합 테스트와 브라우저 e2e가 같은 `crates/fake-kiwoom`(lib + `fake-kiwoom` 바이너리)과 같은 고정 입력을 쓴다. 루프백 주소에만 연다. 관리 경로 `/_fake/respond-with`, `delay`, `reject-token`, `reset`, `stats`로 오류를 넣고 요청을 센다. 086520 일봉은 합성 300행 × 4페이지라 과거 페이지가 이어진다 | `fake-kiwoom` | #25 |
+| 브라우저 e2e | `web/e2e/`(Playwright, Chromium). 테스트마다 임시 디렉터리에 `fake-kiwoom`과 `vally-server`를 띄우고 빌드된 `web/dist`로 사용자 흐름을 돈다: 검색과 과거 스크롤, 거래소·봉 주기, 새로고침과 재시작 뒤 복원, 저장 중 탭 닫기, 오류 표시. CI `e2e` 검사는 외부 네트워크를 막은 이름공간에서 돈다 | `web/e2e` | #25 |
 
 **키움 파서 고정 입력**(kiwoom.md에서 옮긴다)
 
