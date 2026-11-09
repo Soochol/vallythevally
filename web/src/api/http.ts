@@ -1,4 +1,3 @@
-import { useKiwoomStore } from "../stores/kiwoom";
 import type { ApiErrorCode } from "./generated/ApiErrorCode";
 
 const API_ERROR_CODES = [
@@ -89,10 +88,6 @@ async function request(path: string, init: RequestInit): Promise<Response> {
     if (init.signal?.aborted) throw e;
     throw new ApiRequestError("network", "서버에 연결하지 못했습니다");
   }
-  if (!res.ok) {
-    const error = await parseError(res);
-    if (error.code === "kiwoom_auth_failed") useKiwoomStore.getState().reportAuthFailure(error.message);
-    throw error;
-  }
+  if (!res.ok) throw await parseError(res);
   return res;
 }

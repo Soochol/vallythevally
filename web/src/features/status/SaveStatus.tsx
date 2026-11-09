@@ -1,6 +1,5 @@
 import { retryFailedSaves } from "../../persist/autosave";
 import { type SaveIndicator, saveIndicator } from "../../persist/saveStatus";
-import { useKiwoomStore } from "../../stores/kiwoom";
 import { usePersistStore } from "../../stores/persist";
 import { CheckIcon } from "../icons";
 
@@ -65,22 +64,18 @@ export function SaveStatus() {
 /** 휴대폰에는 자동 저장 표시를 두지 않고, 저장하지 못할 때만 띠로 알린다(frontend.md §4). */
 export function PhoneSaveBand() {
   const { indicator, offline } = useSaveView();
-  const authFailure = useKiwoomStore((s) => s.authFailure);
   const text = offline
     ? offline
-    : authFailure
-      ? `키움 조회 멈춤: ${authFailure}`
-      : indicator.kind === "failed"
-        ? "저장하지 못했습니다"
-        : indicator.kind === "tooLarge"
-          ? "저장하지 못했습니다: 설정이 64KB를 넘습니다"
-          : null;
-  const saveRetry = !offline && !authFailure && indicator.kind === "failed";
+    : indicator.kind === "failed"
+      ? "저장하지 못했습니다"
+      : indicator.kind === "tooLarge"
+        ? "저장하지 못했습니다: 설정이 64KB를 넘습니다"
+        : null;
   if (!text) return null;
   return (
     <div role="alert" className="fixed inset-x-0 bottom-[56px] z-40 flex items-center gap-2 border-t border-accent bg-accent-soft px-3 py-2 text-s text-text md:hidden">
       <span className="min-w-0 flex-1">{text}</span>
-      {(offline || saveRetry) && (
+      {(offline || indicator.kind === "failed") && (
         <button type="button" className={RETRY_BUTTON} onClick={offline ? () => location.reload() : retryFailedSaves}>
           {offline ? "다시 불러오기" : "다시 시도"}
         </button>

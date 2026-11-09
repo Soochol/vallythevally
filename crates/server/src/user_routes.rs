@@ -13,7 +13,7 @@ use domain::{Symbol, Venue};
 use serde::de::DeserializeOwned;
 
 use crate::api::{self, ApiErrorCode, Layout, LayoutInput, LayoutSummary, UiState, UnixSeconds, Watchlist};
-use crate::http::{ApiFailure, AppState, symbol_list};
+use crate::http::{ApiFailure, AppState, not_ready};
 use crate::userdata::{self, StoreError};
 
 /// 화면 상태, 관심종목 본문, 칸 하나의 `chartSettings`.
@@ -89,7 +89,7 @@ async fn put_layout(State(st): State<Arc<AppState>>, Path(id): Path<String>, bod
     }
     let nxt = check_layout(&id, &input)?;
     if !nxt.is_empty() {
-        let dir = symbol_list(&st).await?;
+        let dir = st.symbols.ready().await.map_err(|_| not_ready())?;
         if let Some(info) = nxt.iter().find_map(|s| dir.get(*s).filter(|i| !i.nxt_enabled)) {
             return Err(ApiFailure::bad_request(format!("NXT에서 거래되지 않는 종목입니다: {}({})", info.name, info.symbol.as_wire())));
         }
