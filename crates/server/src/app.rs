@@ -152,7 +152,10 @@ async fn load_symbols_at_startup(rest: KiwoomRest, symbols: Arc<SymbolDirectory>
     loop {
         match symbols.refresh(&rest, Priority::Screen).await {
             Ok(()) => return,
-            Err(_) if rest.halted().is_some() => return,
+            Err(e) if !e.outer_retry() => {
+                tracing::error!(error = %e, "종목 목록을 받지 못했습니다. 다시 받지 않습니다");
+                return;
+            }
             Err(e) => {
                 tracing::warn!(error = %e, "종목 목록을 받지 못했습니다. 10초 뒤 다시 받습니다");
                 tokio::time::sleep(STARTUP_LIST_RETRY).await;
@@ -176,7 +179,8 @@ async fn daily_reset(clock: Clock, rest: KiwoomRest, symbols: Arc<SymbolDirector
         bars.clear_all();
         let deadline = next_daily(clock.now(), DAILY_RESET_AT);
         while let Err(e) = symbols.refresh(&rest, Priority::Background).await {
-            if rest.halted().is_some() {
+            if !e.outer_retry() {
+                tracing::error!(error = %e, "07:45 종목 목록 갱신에 실패했습니다. 이전 목록을 쓰고 다시 받지 않습니다");
                 break;
             }
             if clock.now().plus_secs(DAILY_LIST_RETRY.as_secs() as i64) >= deadline {
@@ -197,7 +201,8 @@ async fn daily_token(clock: Clock, rest: KiwoomRest) {
         }
         let deadline = next_daily(clock.now(), DAILY_RESET_AT);
         while let Err(e) = rest.issue_token().await {
-            if rest.halted().is_some() {
+            if !e.outer_retry() {
+                tracing::error!(error = %e, "20:05 토큰 발급에 실패했습니다. 다시 받지 않습니다");
                 break;
             }
             if clock.now().plus_secs(DAILY_TOKEN_RETRY.as_secs() as i64) >= deadline {

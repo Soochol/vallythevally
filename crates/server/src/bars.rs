@@ -15,6 +15,7 @@ use crate::clock::Clock;
 use crate::kiwoom::api::{
     DailyChart, IndexDailyChart, IndexMinuteChart, IndexMonthlyChart, IndexWeeklyChart, MarketRequest, MinuteChart, MonthlyChart, WeeklyChart,
 };
+use crate::kiwoom::error::Surface;
 use crate::kiwoom::rest::{ContKey, KiwoomError, KiwoomRest, MergeScope, Priority};
 use crate::kiwoom::wire::{ChartBody, ChartRows, KiwoomBar, parse_chart};
 use crate::symbols::{NotReady, SymbolDirectory};
@@ -36,7 +37,7 @@ pub enum BarError {
     UnknownSymbol,
     /// 종목 목록을 아직 못 받았거나 키움이 응답하지 않는다.
     Unavailable(String),
-    AuthFailed { detail: Option<u16> },
+    AuthFailed(String),
     TokenWait(String),
     TokenFile(String),
     Internal(String),
@@ -45,21 +46,28 @@ pub enum BarError {
 impl fmt::Display for BarError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            BarError::BadRequest(m) | BarError::Unavailable(m) | BarError::TokenWait(m) | BarError::TokenFile(m) | BarError::Internal(m) => f.write_str(m),
+            BarError::BadRequest(m)
+            | BarError::Unavailable(m)
+            | BarError::AuthFailed(m)
+            | BarError::TokenWait(m)
+            | BarError::TokenFile(m)
+            | BarError::Internal(m) => f.write_str(m),
             BarError::UnknownSymbol => f.write_str("없는 종목입니다"),
-            BarError::AuthFailed { detail } => f.write_str(&crate::kiwoom::auth::auth_failed_message(*detail)),
         }
     }
 }
 
 impl From<KiwoomError> for BarError {
     fn from(e: KiwoomError) -> Self {
-        match e {
-            KiwoomError::RateLimited | KiwoomError::Transport(_) => BarError::Unavailable(e.to_string()),
-            KiwoomError::AuthFailed { detail } => BarError::AuthFailed { detail },
+        match &e {
+            KiwoomError::Failed(f) => match f.surface() {
+                Surface::Unavailable => BarError::Unavailable(e.to_string()),
+                Surface::AuthFailed => BarError::AuthFailed(e.to_string()),
+                Surface::UnknownSymbol => BarError::UnknownSymbol,
+                Surface::Internal => BarError::Internal(e.to_string()),
+            },
             KiwoomError::IssueTooSoon { .. } => BarError::TokenWait(e.to_string()),
             KiwoomError::TokenFile(_) => BarError::TokenFile(e.to_string()),
-            KiwoomError::BadRequest { .. } | KiwoomError::Parse { .. } => BarError::Internal(e.to_string()),
         }
     }
 }

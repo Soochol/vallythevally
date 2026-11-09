@@ -17,7 +17,6 @@ use crate::bars::{BarError, BarService, DEFAULT_LIMIT, MAX_LIMIT};
 use crate::clock::Clock;
 use crate::db::AppDb;
 use crate::kiwoom::rest::KiwoomRest;
-use crate::kiwoom::auth::auth_failed_message;
 use crate::symbols::{NotReady, SymbolDirectory};
 
 pub struct AppState {
@@ -109,7 +108,7 @@ impl Lookup {
                 tracing::warn!(reason = %m, "{what} 요청에 답하지 못했습니다");
                 ApiFailure::new(KiwoomUnavailable, "키움 조회에 실패했습니다. 잠시 뒤 다시 시도하세요")
             }
-            BarError::AuthFailed { detail } => ApiFailure::new(KiwoomAuthFailed, auth_failed_message(detail)),
+            BarError::AuthFailed(m) => ApiFailure::new(KiwoomAuthFailed, m),
             BarError::TokenWait(m) => ApiFailure::new(KiwoomUnavailable, m),
             BarError::TokenFile(m) => ApiFailure::new(KiwoomAuthFailed, m),
             BarError::Internal(m) => {
@@ -740,7 +739,9 @@ mod tests {
             put(&app, "/api/layouts/L2", &nxt_layout),
             symbols.refresh(&rest, crate::kiwoom::rest::Priority::Screen),
         );
-        assert_eq!(list.err(), Some(crate::kiwoom::rest::KiwoomError::AuthFailed { detail: Some(8050) }));
+        let list = list.unwrap_err();
+        let failure = list.failure().expect("키움 판정");
+        assert_eq!((failure.category(), failure.detail()), (crate::kiwoom::error::Category::AuthBlocked, Some(crate::kiwoom::error::CodeKey::Rest(8050))));
         for (what, (s, v)) in [("종목", symbol), ("봉", bar), ("NXT 레이아웃", layout)] {
             assert_eq!((s, code(&v)), (StatusCode::BAD_GATEWAY, "kiwoom_auth_failed"), "{what}: {v}");
         }

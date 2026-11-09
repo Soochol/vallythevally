@@ -7,6 +7,7 @@ use domain::{KstTime, TimeOfDay};
 use serde::Serialize;
 use tokio::sync::watch;
 
+use super::error::Failure;
 use super::token_file::{FileError, Saved, SavedToken, TokenFile, credential_id};
 use super::wire::{TokenResponse, parse_kst_datetime};
 use crate::config::Secret;
@@ -24,20 +25,9 @@ pub const DAILY_REISSUE_AT: TimeOfDay = match TimeOfDay::hms(20, 5, 0) {
     None => unreachable!(),
 };
 
-pub fn auth_failed_message(detail: Option<u16>) -> String {
-    match detail {
-        Some(8050) => "키움이 지정단말기 인증 실패([8050])로 거절했습니다. 키움 IP 미등록 또는 반복 발급 잠금입니다. \
-                       지금 공인 IP를 키움 포털에 등록하세요. 반복 발급 잠금이면 포털에서 해제됐는지 확인하세요. \
-                       조회와 토큰 발급을 모두 멈췄습니다. 고친 뒤 서버를 다시 켜야 합니다"
-            .into(),
-        Some(d) => format!("키움 인증에 실패했습니다([{d}]). 조회와 토큰 발급을 모두 멈췄습니다. 운영자가 설정을 고치고 서버를 다시 켜야 합니다"),
-        None => "키움 인증에 실패했습니다. 운영자가 설정을 확인해야 합니다".into(),
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Halt {
-    Rejected(u16),
+    Rejected(Failure),
     TokenFileUnreadable(FileError),
 }
 
@@ -167,8 +157,8 @@ impl KiwoomAuth {
         self.halted.borrow().clone()
     }
 
-    pub fn halt(&self, detail: u16) {
-        self.halted.send_replace(Some(Halt::Rejected(detail)));
+    pub fn halt(&self, failure: Failure) {
+        self.halted.send_replace(Some(Halt::Rejected(failure)));
     }
 
     pub async fn until_halted(&self) -> Halt {
@@ -302,9 +292,10 @@ mod tests {
         let g2 = a.record_issued(resp("t2", "20261110090000"), t0).unwrap();
         a.invalidate(g1).unwrap();
         assert_eq!(a.current(t0).unwrap().1, g2, "옛 세대의 무효는 새 토큰을 건드리지 않는다");
-        a.halt(8001);
+        let rejected = crate::kiwoom::error::judge(crate::kiwoom::api::ApiId::Ka10081, 200, r#"{"return_code": 3, "return_msg": "[8001:앱키]"}"#).unwrap_err();
+        a.halt(rejected.clone());
         assert!(!a.needs_issue(t0) && a.current(t0).is_none());
-        assert_eq!(a.invalidate(g2), Err(AuthError::Halted(Halt::Rejected(8001))));
+        assert_eq!(a.invalidate(g2), Err(AuthError::Halted(Halt::Rejected(rejected))));
     }
 
     #[test]
