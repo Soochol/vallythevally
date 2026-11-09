@@ -1416,7 +1416,7 @@ pub enum Repeat { Once, Every }
 
 **서버가 알림을 받을 때 하는 검사**(D6, D8). 틀리면 `bad_request`와 한국어 `message`를 돌려준다.
 
-- `spec`이 `Spec::validate`를 통과해야 한다.
+- `spec`이 `Spec::parse_valid`를 통과해야 한다(§9.1 `ValidSpec`).
 - `line`이 그 `spec`의 출력 선이어야 한다. 이동평균 지표에 `rsi` 선을 고르면 거절한다. 예: "이동평균 지표에는 'rsi' 선이 없습니다."
 - 이동량이 0이 아닌 선은 거절한다. 일목 선행스팬 A·B(`spanA`, `spanB`)와 후행스팬(`lagging`)이 그렇다. 예: "이동된 선(선행스팬·후행스팬)은 알림에 쓸 수 없습니다."
 
@@ -1923,12 +1923,12 @@ struct ConnWriter {
 
 ```rust
 /// 열 단위 입력. WASM 경계에서 Float64Array 여섯 개로 그대로 받을 수 있다.
-/// 필드는 비공개다. 길이가 같고 t가 순증가하는 것만 new로 만들 수 있다.
+/// 필드는 비공개다. 길이가 같고, t가 순증가하고, 가격·거래량이 모두 유한한 수인 것만 new로 만들 수 있다.
 pub struct Columns<'a> { /* t: &'a [i64] (봉 시작 시각, Unix 초), open, high, low, close, volume: &'a [f64] */ }
 
 impl<'a> Columns<'a> {
     pub fn new(t: &'a [i64], open: &'a [f64], high: &'a [f64], low: &'a [f64], close: &'a [f64], volume: &'a [f64])
-        -> Result<Self, ColumnsError>;   // LengthMismatch | NotAscending
+        -> Result<Self, BarError>;   // LengthMismatch | NotAscending { index } | NotFinite { index, field }
 }
 
 /// 브라우저 계약의 IndicatorSpec과 같은 모양(serde, ts-rs).
@@ -1946,11 +1946,9 @@ pub enum Spec {
 }
 
 impl Spec {
-    /// JSON 읽기와 validate를 한 번에. 브라우저 validateSpec과 서버의 알림 저장이 같은 판정을 쓴다.
+    /// JSON 읽기와 ValidSpec::new를 한 번에. 브라우저 validateSpec과 서버의 알림 저장이 같은 판정을 쓴다.
     /// JSON을 읽지 못하면 field가 빈 문자열인 오류 하나.
-    pub fn parse_valid(json: &str) -> Result<Spec, Vec<SpecError>>;
-    /// 설정값 검사(기간 1 이상, 볼린저 k > 0, fast < slow). 오류의 field는 JSON 필드 이름(`spanB`, `maPeriod`), message는 한국어 문장.
-    pub fn validate(&self) -> Result<(), Vec<SpecError>>;
+    pub fn parse_valid(json: &str) -> Result<ValidSpec, Vec<SpecError>>;
     /// 마지막 봉에서 모든 선에 값이 있으려면 필요한 봉 수. 그보다 짧으면 어느 선이든 NaN이 있다.
     pub fn warmup(&self) -> usize;
     pub fn lines(&self) -> Vec<LineId>;
@@ -1958,6 +1956,14 @@ impl Spec {
 }
 
 pub struct SpecError { pub field: String, pub message: String }
+
+/// 검사를 통과한 Spec. 이것으로만 계산한다. Deref로 Spec의 메서드를 그대로 쓴다.
+pub struct ValidSpec(Spec);
+
+impl ValidSpec {
+    /// 설정값 검사(기간 1 이상, 볼린저 k > 0, fast < slow). 오류의 field는 JSON 필드 이름(`spanB`, `maPeriod`), message는 한국어 문장.
+    pub fn new(spec: Spec) -> Result<ValidSpec, Vec<SpecError>>;
+}
 
 /// 선 하나의 값. values[i]는 입력 봉 i + shift 번째 위치의 값이다. 값이 없으면 NaN.
 pub struct Line {
@@ -1969,9 +1975,11 @@ pub struct Line {
 pub struct Output { pub lines: Vec<Line> }
 
 /// 한 번에 전부 계산한다. 서버의 지표 알림은 이것만 쓴다(§7.3).
-/// validate를 통과하지 않은 spec도 패닉하지 않는다. 값이 NaN일 뿐이다.
-pub fn compute(spec: &Spec, bars: &Columns) -> Output;
+pub fn compute(spec: &ValidSpec, bars: &Columns) -> Output;
 ```
+
+- **경계에서 거절한다.** 잘못된 설정은 `ValidSpec`이 되지 못해 계산에 닿지 않는다. 잘못된 봉(시각이 순증가가 아님, 가격·거래량의 NaN·무한값)은 `Columns::new`와 `push_confirmed`·`preview`가 같은 검사 함수로 거절한다. 그래서 내부 계산은 유한한 입력만 받는다고 믿는다.
+- **결측 가격은 지원하지 않는다.** 시세 출처(키움)에 결측 가격이 없다. 결측을 받아 숫자를 만들면 지표 알림(#8)이 그 숫자로 울릴 수 있다. 2026-11-09 PR #42 리뷰에서 NaN 가격이 `[NaN,50,50]` 같은 유효해 보이는 RSI·스토캐스틱 값을 내는 것을 확인하고 이렇게 정했다.
 
 - `Line`, `Output`, `Tail`은 `PartialEq`를 두지 않는다. NaN이 섞여 있어 `==`가 뜻과 다르게 동작하기 때문이다. 테스트는 비트 단위로 비교한다.
 
@@ -1986,6 +1994,7 @@ pub fn compute(spec: &Spec, bars: &Columns) -> Output;
 pub struct Engine {
     state: State,      // 확정 봉까지 계산한 상태. 지표 종류마다 다르다(EMA 직전 값, 창 버퍼 등)
     output: Output,    // 확정 봉까지의 출력
+    last_t: Option<i64>, // 마지막 확정 봉의 시각. 다음 봉은 이보다 뒤여야 한다
 }
 
 pub struct BarInput { pub t: i64, pub open: f64, pub high: f64, pub low: f64, pub close: f64, pub volume: f64 }
@@ -1996,11 +2005,13 @@ pub struct Tail { pub values: Vec<(LineId, f64)> }
 
 impl Engine {
     /// 확정 봉 전체로 만든다. compute와 같은 결과를 output에 담는다.
-    pub fn new(spec: &Spec, confirmed: &Columns) -> Self;
+    pub fn new(spec: &ValidSpec, confirmed: &Columns) -> Self;
     /// 확정 봉 하나를 더한다. O(창 크기) 이하. 확정 순간의 최종 값을 돌려준다.
-    pub fn push_confirmed(&mut self, bar: &BarInput) -> Tail;
-    /// 현재 봉을 넣었을 때의 마지막 값. 상태를 바꾸지 않는다.
-    pub fn preview(&self, current: &BarInput) -> Tail;
+    /// 봉이 Columns::new가 거절할 봉이면(마지막 확정 시각 이하, NaN·무한값) 상태를 바꾸지 않고 같은 BarError.
+    pub fn push_confirmed(&mut self, bar: &BarInput) -> Result<Tail, BarError>;
+    /// 현재 봉을 넣었을 때의 마지막 값. 상태를 바꾸지 않는다. 거절 규칙은 push_confirmed와 같다.
+    /// 같은 다음 봉을 값만 바꿔 몇 번이든 미리 볼 수 있다.
+    pub fn preview(&self, current: &BarInput) -> Result<Tail, BarError>;
     pub fn output(&self) -> &Output;
 }
 ```
@@ -2050,15 +2061,16 @@ pub struct WasmEngine { engine: Engine, lines: Vec<LineId> }
 
 #[wasm_bindgen]
 impl WasmEngine {
-    /// spec이 validate를 통과하지 않거나, 열 길이가 다르거나, t가 정수·순증가가 아니면 JsError.
+    /// spec이 검사를 통과하지 않거나, 열 길이가 다르거나, t가 정수·순증가가 아니거나, 가격·거래량에 NaN·무한값이 있으면 JsError.
     #[wasm_bindgen(constructor)]
     pub fn new(spec_json: &str, t: &[f64], o: &[f64], h: &[f64], l: &[f64], c: &[f64], v: &[f64])
         -> Result<WasmEngine, JsError>;
     /// [line0, line1, …] 순서의 Float64Array. 선 순서는 lines()와 같다. 확정 순간의 최종 값.
+    /// t가 정수가 아니거나(소수·NaN·무한), 생성자가 거절할 봉이면 JsError. 상태는 그대로다.
     #[wasm_bindgen(js_name = pushConfirmed)]
-    pub fn push_confirmed(&mut self, t: f64, o: f64, h: f64, l: f64, c: f64, v: f64) -> Vec<f64>;
-    /// 위와 같은 순서. 상태를 바꾸지 않는다.
-    pub fn preview(&self, t: f64, o: f64, h: f64, l: f64, c: f64, v: f64) -> Vec<f64>;
+    pub fn push_confirmed(&mut self, t: f64, o: f64, h: f64, l: f64, c: f64, v: f64) -> Result<Vec<f64>, JsError>;
+    /// 위와 같은 순서와 거절 규칙. 상태를 바꾸지 않는다.
+    pub fn preview(&self, t: f64, o: f64, h: f64, l: f64, c: f64, v: f64) -> Result<Vec<f64>, JsError>;
     /// 선 하나 전체. shift는 shift(index)로 따로 받는다. index가 범위 밖이면 JsError.
     pub fn line(&self, index: usize) -> Result<Vec<f64>, JsError>;
     pub fn shift(&self, index: usize) -> Result<i32, JsError>;
@@ -2070,8 +2082,8 @@ impl WasmEngine {
 pub fn future_bar_starts(period: &str, last_start: f64, n: usize) -> Result<Vec<f64>, JsError>;
 ```
 
-- **빌드**: `web/scripts/build-wasm.sh`(`pnpm wasm`). `wasm-pack build --release --target web --out-name indicators`로 `web/src/wasm/indicators/`에 쓴다. LTO와 `opt-level = "s"`는 이 스크립트 안에서 환경 변수로만 켠다. 서버의 릴리스 빌드에는 걸리지 않는다. 2026-11-09 측정: `indicators_bg.wasm` 134,813바이트, gzip 56,315바이트. 기본 릴리스 설정(LTO 없음, `opt-level = 3`)으로는 185,727바이트(gzip 78,739)였다.
-- **확인**: `web/scripts/wasm-smoke.mjs`(`pnpm wasm:smoke`)가 빌드된 wasm을 Node에서 불러온다. 그리고 Rust 테스트와 같은 참조 CSV로 대조하고, `validateSpec`, `futureBarStarts`, `preview`와 `pushConfirmed`가 같은 값인지 확인한다. CI의 `wasm` 작업과 `scripts/check.sh`가 이 둘을 돌린다.
+- **빌드**: `web/scripts/build-wasm.sh`(`pnpm wasm`). `wasm-pack build --release --target web --out-name indicators`로 `web/src/wasm/indicators/`에 쓴다. LTO와 `opt-level = "s"`는 이 스크립트 안에서 환경 변수로만 켠다. 서버의 릴리스 빌드에는 걸리지 않는다. 2026-11-09 측정: `indicators_bg.wasm` 136,552바이트, gzip 57,005바이트. 기본 릴리스 설정(LTO 없음, `opt-level = 3`)으로는 185,727바이트(gzip 78,739)였다.
+- **확인**: `web/scripts/wasm-smoke.mjs`(`pnpm wasm:smoke`)가 빌드된 wasm을 Node에서 불러온다. 그리고 Rust 테스트와 같은 참조 CSV로 대조하고, `validateSpec`, `futureBarStarts`, `preview`와 `pushConfirmed`가 같은 값인지, 두 함수가 잘못된 시각·NaN 가격을 상태를 바꾸지 않고 거절하는지 확인한다. CI의 `wasm` 작업과 `scripts/check.sh`가 이 둘을 돌린다.
 
 계산은 React 렌더링 밖에서 한다(#5). Web Worker를 권한다. 이것은 프런트엔드 설계의 몫이다.
 
@@ -2083,9 +2095,9 @@ pub fn future_bar_starts(period: &str, last_start: f64, n: usize) -> Result<Vec<
 | 볼린저 밴드 | `Bollinger { period, k }` | 20, 2.0 | `upper` `middle` `lower` | 표준편차는 모표준편차(n으로 나눔) |
 | 일목균형표 | `Ichimoku { … }` | 9, 26, 52, 26 | `conversion` `base` `spanA` `spanB` `lagging` | 선행스팬은 shift +(displacement−1), 후행스팬 −(displacement−1). 기본 26이면 25봉 앞(오늘을 1로 세어 26번째) |
 | 거래량 | `Volume { ma_period }` | 20 | `volume`, `ma` | 이동평균 여러 개는 지표를 여러 개 띄워서 본다 |
-| RSI | `Rsi { period, signal }` | 14, null | `rsi`, `signal` | Wilder 평활. 첫 값은 변화 `period`개의 단순평균이라 `period + 1`번째 봉부터 나온다. signal은 RSI의 단순평균. 오르내림이 모두 0이면 50 |
+| RSI | `Rsi { period, signal }` | 14, null | `rsi`, `signal` | Wilder 평활. 첫 값은 변화 `period`개의 단순평균이라 `period + 1`번째 봉부터 나온다. signal은 RSI의 단순평균. 오르내림이 모두 0이면 50. TA-Lib 0.8.3의 `RSI`도 50이라 같다 |
 | MACD | `Macd { fast, slow, signal }` | 12, 26, 9 | `macd` `signal` `histogram` | 위 EMA 두 개의 차이. 두 EMA는 각자 자기 첫 `period`개 평균에서 시작한다. signal은 MACD 값이 나온 봉부터 잰 EMA. TA-Lib의 `MACD` 함수와는 처음 몇 십 봉이 다르다. 그 함수는 빠른 EMA를 느린 EMA의 첫 봉에 맞춰 늦게 시작하기 때문이다 |
-| 스토캐스틱 슬로우 | `StochSlow { k, d, smooth }` | 5, 3, 3 | `k` `d` | 국내 HTS 관행. `k`: 최고·최저가를 보는 봉 수, `smooth`: Fast %K의 단순평균 봉 수(이것이 `k` 선), `d`: 그 `k` 선의 단순평균 봉 수. 최고가와 최저가가 같으면 Fast %K는 50 |
+| 스토캐스틱 슬로우 | `StochSlow { k, d, smooth }` | 5, 3, 3 | `k` `d` | 국내 HTS 관행. `k`: 최고·최저가를 보는 봉 수, `smooth`: Fast %K의 단순평균 봉 수(이것이 `k` 선), `d`: 그 `k` 선의 단순평균 봉 수. 최고가와 최저가가 같으면 Fast %K는 50. TA-Lib 0.8.3의 `STOCH`는 0을 내므로 이것은 이 프로젝트의 선택이다(0이면 "과매도" 알림이 거짓으로 울릴 수 있다) |
 
 - **참조값**(#5 앞부분에서 만듦): `crates/indicators/tests/reference/*.csv`. `generate.py`가 TA-Lib 0.8.3(C 0.8.3)과 numpy 2.5.4로 만든다. 버전은 스크립트 머리의 PEP 723 블록에 고정했고, 다시 만들 때는 `uv run crates/indicators/tests/reference/generate.py`를 쓴다. 입력은 고정 시드로 만든 합성 400봉이라 실제 시세가 아니다. 출처 함수와 입력은 각 CSV 머리에 적었다. 일목균형표는 TA-Lib에 없어 numpy의 창 최고·최저로 따로 구현했다. `talib.STOCH`는 `k`·`d` 선을 늦은 쪽에 맞춰 함께 시작해서, 앞쪽 몇 봉은 비교하지 않는다. 그 구간은 `warmup` 성질 테스트가 맡는다.
 - **아직 못 한 대조**: 키움 HTS 화면 값으로 몇 점을 더 확인한다. 특히 일목 선행스팬 이동량과 스토캐스틱 값(HTS가 Slow %K를 Fast %K의 단순평균으로 내는지)은 HTS와 맞춰 본다. 이 대조는 키움 화면이 필요해서 #5 앞부분에서는 하지 않았다.

@@ -916,7 +916,7 @@ apply(symbol, venue, period)  또는  reload  또는  새 hello ── generatio
 
 - **확정 순간의 지표 값**(W4-25)
   - 서버는 확정 직전의 `bar`를 건너뛰고 `confirmed`만 보낼 수 있다. 그래서 확정 봉의 지표 값은 반드시 `confirmed`의 봉으로 다시 계산해 그린다.
-  - 워커의 `confirm(key, bar)`는 WASM의 `pushConfirmed(bar)` 하나만 부른다. 이 함수가 상태를 커밋하고 확정 순간의 최종 값(`Tail`, 선 순서대로의 `Float64Array`)을 돌려준다(백엔드 §9.2·§9.4, D13). 워커는 그 값을 그대로 메인 스레드에 보낸다. `preview`는 부르지 않는다.
+  - 워커의 `confirm(key, bar)`는 WASM의 `pushConfirmed(bar)` 하나만 부른다. 이 함수가 상태를 커밋하고 확정 순간의 최종 값(`Tail`, 선 순서대로의 `Float64Array`)을 돌려준다(백엔드 §9.2·§9.4, D13). 워커는 그 값을 그대로 메인 스레드에 보낸다. `preview`는 부르지 않는다. `pushConfirmed`와 `preview`는 마지막 확정 시각 이하의 봉이나 NaN·무한 가격을 받으면 상태를 바꾸지 않고 던진다(백엔드 §9.1).
   - 그다음에 오는 `bar`는 새 현재 봉이다.
 - **처리 순서와 그리기 묶기**
   - 계산과 상태 변경(`confirmed`, `reload`, `bar`의 `preview`)은 칸마다 하나의 처리 줄에서 도착 순서대로 한다. 건너뛰거나 합치지 않는다.
