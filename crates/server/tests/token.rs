@@ -136,6 +136,18 @@ fn with_contents(contents: &'static str) -> Setup {
     })
 }
 
+fn with_modes(dir_mode: u32, file_mode: u32) -> Setup {
+    Box::new(move |root: &Path| {
+        let path = root.join("state/token.json");
+        let at = now_unix() - 3600;
+        let valid = json!({"credential": credential_id(APP_KEY), "token": {"value": TOKEN, "expires_dt": "20991231000000", "issued_at": at}, "last_request_at": at});
+        write_private(&path, valid.to_string().as_bytes());
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(file_mode)).unwrap();
+        std::fs::set_permissions(path.parent().unwrap(), std::fs::Permissions::from_mode(dir_mode)).unwrap();
+        (path.clone(), path)
+    })
+}
+
 async fn assert_never_issues(fake: &FakeKiwoom, cases: Vec<(&str, Setup)>) {
     let tmp = tempfile::tempdir().unwrap();
     let dist = static_dir(tmp.path());
@@ -200,4 +212,10 @@ async fn a_token_saved_for_another_app_key_is_never_sent_and_the_interval_still_
     let auths = fake.seen.authorizations.lock().unwrap()[sent_before..].to_vec();
     assert!(!auths.contains(&format!("Bearer {TOKEN}")), "옛 앱키의 토큰을 보냈다: {auths:?}");
     assert!(auths.contains(&format!("Bearer {}", token_for(OTHER_KEY))), "{auths:?}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_token_file_others_can_read_is_not_used() {
+    let cases = vec![("파일 644", with_modes(0o700, 0o644)), ("디렉터리 755", with_modes(0o755, 0o600))];
+    assert_never_issues(&FakeKiwoom::start().await, cases).await;
 }

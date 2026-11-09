@@ -135,4 +135,43 @@ mod tests {
         let err = file.load().err().unwrap().to_string();
         assert!(!err.contains("FAKE-TOKEN-broken") && err.contains("token.json"), "{err}");
     }
+
+    fn set_mode(p: &Path, mode: u32) {
+        std::fs::set_permissions(p, std::fs::Permissions::from_mode(mode)).unwrap();
+    }
+
+    fn saved() -> Saved {
+        Saved { credential: None, token: None, last_request_at: 9 }
+    }
+
+    #[test]
+    fn a_planted_temp_file_does_not_decide_the_token_file_mode() {
+        let (_dir, _lock, file) = temp_token_file();
+        let dir = file.path().parent().unwrap();
+        std::fs::DirBuilder::new().recursive(true).mode(0o700).create(dir).unwrap();
+        let planted = dir.join(format!(".token.json.{}.tmp", std::process::id()));
+        std::fs::write(&planted, "").unwrap();
+        set_mode(&planted, 0o644);
+        file.save(&saved()).unwrap();
+        assert_eq!(mode(file.path()), 0o600);
+    }
+
+    #[test]
+    fn a_file_or_directory_others_can_read_is_refused_and_left_as_is() {
+        let (_dir, _lock, file) = temp_token_file();
+        let dir = file.path().parent().unwrap();
+        file.save(&saved()).unwrap();
+
+        set_mode(file.path(), 0o644);
+        let err = file.load().err().expect("644 파일은 읽지 않는다").to_string();
+        assert!(err.contains("chmod 600"), "{err}");
+        assert_eq!(mode(file.path()), 0o644);
+
+        set_mode(file.path(), 0o600);
+        set_mode(dir, 0o755);
+        let err = file.load().err().expect("755 디렉터리의 파일은 읽지 않는다").to_string();
+        assert!(err.contains("chmod 700"), "{err}");
+        assert!(file.save(&saved()).is_err(), "755 디렉터리에는 쓰지 않는다");
+        assert_eq!(mode(dir), 0o755, "디렉터리 권한을 바꾸지 않는다");
+    }
 }
