@@ -64,11 +64,18 @@ pub fn main() -> ExitCode {
 }
 
 fn init_logging(filter: &str) {
-    let filter = tracing_subscriber::EnvFilter::try_new(filter).unwrap_or_else(|e| {
+    tracing_subscriber::fmt().with_env_filter(log_filter(filter)).with_writer(std::io::stderr).with_ansi(false).init();
+}
+
+/// tungstenite는 trace에서 보내는 프레임 내용을 그대로 찍는다. LOGIN 프레임에는 토큰이 있다.
+const WS_LIBRARY_CAP: [&str; 2] = ["tungstenite=debug", "tokio_tungstenite=debug"];
+
+fn log_filter(spec: &str) -> tracing_subscriber::EnvFilter {
+    let filter = tracing_subscriber::EnvFilter::try_new(spec).unwrap_or_else(|e| {
         eprintln!("VALLY_LOG를 읽을 수 없어 info로 둡니다: {e}");
         tracing_subscriber::EnvFilter::new("info")
     });
-    tracing_subscriber::fmt().with_env_filter(filter).with_writer(std::io::stderr).with_ansi(false).init();
+    WS_LIBRARY_CAP.iter().fold(filter, |f, d| f.add_directive(d.parse().expect("고정 지시문")))
 }
 
 async fn serve(config: Config, token_file: TokenFile) -> ExitCode {
@@ -223,5 +230,57 @@ async fn daily_token(clock: Clock, rest: KiwoomRest) {
             tracing::warn!(error = %e, %at, "20:05 토큰 발급에 실패했습니다. 그 시각에 다시 받습니다");
             clock.sleep_until(at).await;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::io::Write;
+    use std::sync::{Arc, Mutex};
+
+    use fake_kiwoom::{APP_KEY, APP_SECRET, FakeKiwoom, TOKEN};
+
+    use super::*;
+    use crate::config::Secret;
+    use crate::kiwoom::stream::{KiwoomStream, StreamEvent};
+
+    #[derive(Clone, Default)]
+    struct Captured(Arc<Mutex<Vec<u8>>>);
+
+    impl Write for Captured {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(buf);
+            Ok(buf.len())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    async fn logs_of_one_ws_login(filter: tracing_subscriber::EnvFilter) -> String {
+        let out = Captured::default();
+        let writer = out.clone();
+        let subscriber = tracing_subscriber::fmt().with_env_filter(filter).with_writer(move || writer.clone()).with_ansi(false).finish();
+        let _guard = tracing::subscriber::set_default(subscriber);
+        let fake = FakeKiwoom::start().await;
+        let transport = ReqwestTransport::new(fake.base_url()).unwrap();
+        let rest = KiwoomRest::new(Arc::new(transport), KiwoomAuth::new(Secret::new(APP_KEY.into()), Secret::new(APP_SECRET.into()), None), Clock::system());
+        let (_stream, mut events) = KiwoomStream::spawn(fake.ws_url(), rest, Clock::system());
+        let live = tokio::time::timeout(Duration::from_secs(3), events.recv()).await.unwrap();
+        assert!(matches!(live, Some(StreamEvent::Live { .. })), "{live:?}");
+        String::from_utf8(out.0.lock().unwrap().clone()).unwrap()
+    }
+
+    #[tokio::test]
+    async fn trace_logs_never_carry_the_ws_login_token() {
+        let _ = tracing_log::LogTracer::init();
+        let hex: String = TOKEN.bytes().map(|b| format!("{b:02x}")).collect();
+        let leaks = |logs: &str| logs.contains(TOKEN) || logs.contains(&hex);
+        let uncapped = logs_of_one_ws_login(tracing_subscriber::EnvFilter::new("trace")).await;
+        assert!(leaks(&uncapped), "막지 않으면 tungstenite가 LOGIN 프레임을 찍는다(이 시험이 새는 것을 알아본다)");
+        let capped = logs_of_one_ws_login(log_filter("trace")).await;
+        assert!(capped.contains("키움 WebSocket 상태"), "로그는 그대로 남는다");
+        assert!(!leaks(&capped));
     }
 }

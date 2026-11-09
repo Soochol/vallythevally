@@ -34,6 +34,7 @@ fake-kiwoom = { path = "../fake-kiwoom" }
 tokio = { version = "1", features = ["test-util", "process", "io-util"] }
 tower = { version = "0.5", features = ["util"] }
 http-body-util = "0.1"
+tracing-log = "0.2"
 
 [lints]
 workspace = true
