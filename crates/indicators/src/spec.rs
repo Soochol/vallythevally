@@ -9,7 +9,6 @@ pub enum MaMethod {
     Ema,
 }
 
-/// 브라우저 계약의 IndicatorSpec(backend.md §8.2). 기간은 봉 수다.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[serde(tag = "kind", rename_all = "camelCase", rename_all_fields = "camelCase")]
 #[ts(export, rename = "IndicatorSpec")]
@@ -20,7 +19,6 @@ pub enum Spec {
     Volume { ma_period: Option<u16> },
     Rsi { period: u16, signal: Option<u16> },
     Macd { fast: u16, slow: u16, signal: u16 },
-    /// k: 최고·최저를 보는 봉 수, smooth: %K를 단순평균하는 봉 수, d: 그 %K를 다시 단순평균하는 봉 수.
     StochSlow { k: u16, d: u16, smooth: u16 },
 }
 
@@ -88,7 +86,6 @@ impl LineId {
     }
 }
 
-/// field는 JSON 필드 이름(`spanB`, `maPeriod`)이다. JSON을 읽지 못했으면 빈 문자열이다.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct SpecError {
     pub field: String,
@@ -108,7 +105,6 @@ fn at_least_one(errors: &mut Vec<SpecError>, field: &str, value: u16) {
 }
 
 impl Spec {
-    /// JSON을 읽고 설정값을 검사한다. 브라우저의 validateSpec과 서버의 알림 저장이 같은 판정을 쓴다.
     pub fn parse_valid(json: &str) -> Result<Spec, Vec<SpecError>> {
         let spec: Spec = serde_json::from_str(json)
             .map_err(|e| vec![SpecError::new("", &format!("지표 설정을 읽을 수 없습니다: {e}"))])?;
@@ -160,7 +156,6 @@ impl Spec {
         if errors.is_empty() { Ok(()) } else { Err(errors) }
     }
 
-    /// 마지막 봉에서 모든 선에 값이 있으려면 필요한 봉 수.
     pub fn warmup(&self) -> usize {
         let n = |v: u16| usize::from(v);
         match *self {
@@ -188,7 +183,6 @@ impl Spec {
         }
     }
 
-    /// 선의 값 i가 그려지는 봉 위치는 i + shift다. 이 spec의 선이 아니면 None.
     pub fn shift_of(&self, line: LineId) -> Option<i32> {
         if !self.lines().contains(&line) {
             return None;

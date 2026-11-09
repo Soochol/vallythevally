@@ -20,7 +20,6 @@ impl fmt::Display for ColumnsError {
 
 impl std::error::Error for ColumnsError {}
 
-/// 열 단위 입력. 길이가 같고 시각이 오름차순인 것만 만들 수 있다.
 #[derive(Debug, Clone, Copy)]
 pub struct Columns<'a> {
     open: &'a [f64],
@@ -32,7 +31,6 @@ pub struct Columns<'a> {
 }
 
 impl<'a> Columns<'a> {
-    /// t는 봉 시작 시각(Unix 초)이다.
     pub fn new(
         t: &'a [i64],
         open: &'a [f64],
@@ -82,7 +80,6 @@ pub struct BarInput {
     pub volume: f64,
 }
 
-/// values[i]는 입력 봉 i의 값이고, 봉 위치 i + shift에 그린다. 값이 없으면 NaN.
 #[derive(Debug, Clone)]
 pub struct Line {
     pub id: LineId,
@@ -95,13 +92,11 @@ pub struct Output {
     pub lines: Vec<Line>,
 }
 
-/// 마지막 입력 봉의 값. 선마다 하나, Spec::lines() 순서다.
 #[derive(Debug, Clone)]
 pub struct Tail {
     pub values: Vec<(LineId, f64)>,
 }
 
-/// 확정 봉까지의 상태와 출력. 현재 봉은 preview로 상태를 바꾸지 않고 미리 본다(backend.md §9.2).
 #[derive(Debug, Clone)]
 pub struct Engine {
     state: State,
@@ -147,7 +142,6 @@ impl Engine {
     }
 }
 
-/// 한 번에 전부 계산한다. 서버의 지표 알림은 이것만 쓴다(backend.md §7.3).
 pub fn compute(spec: &Spec, bars: &Columns) -> Output {
     Engine::new(spec, bars).output
 }

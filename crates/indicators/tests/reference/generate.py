@@ -2,12 +2,6 @@
 # requires-python = "==3.13.*"
 # dependencies = ["TA-Lib==0.8.3", "numpy==2.5.4"]
 # ///
-"""Writes the reference CSVs that crates/indicators/tests/reference.rs checks against.
-
-Run from the repository root:
-    uv run crates/indicators/tests/reference/generate.py
-"""
-
 import pathlib
 
 import numpy as np

@@ -1,5 +1,3 @@
-//! 지표마다 tests/reference/*.csv(외부 라이브러리 값)와 대조한다. 출처·버전·입력은 각 파일 머리에 있다.
-
 use std::collections::HashMap;
 use std::path::Path;
 

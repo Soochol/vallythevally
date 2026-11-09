@@ -13,7 +13,6 @@ fn values(head: &[f64]) -> Values {
     out
 }
 
-/// 값 x에 대해서만 걸음을 옮긴다. 앞선 지표가 아직 값을 내지 않은 봉은 건너뛴다.
 fn on_defined(x: f64, step: impl FnOnce(f64) -> f64) -> f64 {
     if x.is_nan() { NAN } else { step(x) }
 }
@@ -68,7 +67,6 @@ impl Sma {
     }
 }
 
-/// 첫 period개의 단순평균에서 시작한다(backend.md §9.5).
 #[derive(Debug, Clone)]
 struct Ema {
     alpha: f64,
@@ -126,7 +124,6 @@ struct Wilder {
 }
 
 impl Wilder {
-    /// 첫 RSI는 종가 변화 period개의 단순평균, 그 뒤는 (이전 × (n−1) + 이번) / n.
     fn step(&mut self, close: f64) -> f64 {
         let Some(prev) = self.prev_close.replace(close) else { return NAN };
         let change = close - prev;
@@ -149,7 +146,6 @@ impl Wilder {
     }
 }
 
-/// part / whole × 100. 값이 움직이지 않아 whole이 0이면 가운데인 50이다.
 fn balance(part: f64, whole: f64) -> f64 {
     if whole == 0.0 { 50.0 } else { 100.0 * part / whole }
 }
@@ -193,7 +189,6 @@ impl State {
         })
     }
 
-    /// 한 봉을 더하고 그 봉 위치의 값을 Spec::lines() 순서로 돌려준다.
     pub(crate) fn step(&mut self, bar: &BarInput) -> Values {
         match &mut self.0 {
             Kind::Ma(Average::Sma(sma)) => values(&[sma.step(bar.close)]),

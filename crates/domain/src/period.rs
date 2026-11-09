@@ -101,7 +101,7 @@ impl Period {
     }
 }
 
-/// 체결이 들어오는 시간의 시작. 분봉의 미래 봉 시각은 이 시각부터 다시 센다(backend.md §9.3).
+/// 체결이 들어오는 시간의 시작. NXT가 08:00에 연다(kiwoom.md §1).
 pub const SESSION_OPEN: TimeOfDay = match TimeOfDay::hms(8, 0, 0) {
     Some(t) => t,
     None => unreachable!(),
@@ -206,7 +206,7 @@ impl Bucket {
         self.start <= t && t < self.end()
     }
 
-    /// 이 봉 다음부터 n개의 봉 시작 시각. 공휴일은 모르므로 건너뛰지 않는다(backend.md §9.3).
+    /// 공휴일 달력이 없어 공휴일도 봉이 생기는 날로 센다.
     pub fn future_starts(self, n: usize) -> Vec<KstTime> {
         let mut out = Vec::with_capacity(n);
         let mut bucket = self;

@@ -1,5 +1,3 @@
-//! backend.md §9.2 불변식: 증분 계산(push_confirmed, preview)은 전체 계산(compute)과 비트 단위로 같다.
-
 use indicators::{BarInput, Columns, Engine, LineId, MaMethod, Output, Spec, Tail, compute};
 use proptest::prelude::*;
 
@@ -71,7 +69,6 @@ fn spec() -> impl Strategy<Value = Spec> {
     ]
 }
 
-/// 원 단위 가격. 같은 가격이 이어지는 봉(변화 0, 고가 = 저가)도 나온다.
 fn bar() -> impl Strategy<Value = (f64, f64, f64, f64, f64)> {
     (1_000u32..1_100, 1_000u32..1_100, 0u32..30, 0u32..30, 0u32..1_000_000).prop_map(|(o, c, up, down, v)| {
         let (o, c) = (f64::from(o), f64::from(c));
