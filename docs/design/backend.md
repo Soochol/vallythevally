@@ -1625,9 +1625,9 @@ interface Fundamentals {
   symbol: SymbolCode;
   marketCap: number | null;      // 시가총액(원)
   listedShares: number | null;   // 상장주식수(주)
-  per: number | null;            // 배. 적자면 음수
+  per: number | null;            // 배. 적자 종목, ETF, 우선주는 null
   pbr: number | null;            // 배
-  roe: number | null;            // %
+  roe: number | null;            // %. 적자면 음수
   eps: number | null;            // 원. 적자면 음수
   bps: number | null;            // 원
   foreignExhaustionRate: number | null;  // 외국인 소진율(%)
@@ -1637,7 +1637,8 @@ interface Fundamentals {
 ```
 
 - 원천은 ka10001 통합(`_AL`) 코드 한 번이다. 현재가(ka10095)와 같은 시세를 본다. 칸의 거래소와 상관없다.
-- 키움 단위는 서버가 자연 단위로 바꾼다(`wire::parse_basic_info`). 시가총액 `mac`은 억원, 상장주식 `flo_stk`는 천 주다. 가격인 250일 최고·최저는 부호를 떼고, PER·ROE·EPS·BPS는 부호를 지킨다.
+- 키움 단위는 서버가 자연 단위로 바꾼다(`wire::parse_basic_info`). 시가총액 `mac`은 억원, 상장주식 `flo_stk`는 천 주다(kiwoom.md §14). 가격인 250일 최고·최저는 부호를 떼고, PER·ROE·EPS·BPS는 부호를 지킨다.
+- 250일 최고·최저는 통합 일봉의 최근 250관측일 고가·저가와 같다(kiwoom.md §14). 차트의 기본 거래소와 같은 기준이다.
 - 키움이 빈 문자열을 준 값은 `null`이다. 키움이 `stk_nm`까지 비운 행을 주면 404 `unknown_symbol`이다.
 - 서버는 캐시하지 않는다(ADR 0003). 같은 순간의 같은 요청은 조회 대기열이 합친다. 브라우저는 60초 동안 메모리에 둔다.
 - 키움 오류는 다른 조회와 같은 범주와 응답이다(ADR 0009). `/api/dostk/stkinfo` 경로를 ka10095·ka10099·ka10100과 함께 쓰므로, 알 수 없는 오류로 그 경로가 멈추면 현재가와 종목 목록 갱신도 함께 멈춘다.

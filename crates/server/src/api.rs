@@ -238,7 +238,7 @@ pub struct Quote {
 }
 
 /// `GET /api/symbols/:code/fundamentals` → 주식의 기본 정보(ka10001, 통합 시세). 지수는 400 `bad_request`.
-/// 키움이 값을 주지 않은 항목(ETF의 PER 등)은 null이다.
+/// 키움이 값을 주지 않은 항목은 null이다. ETF·우선주는 PER·PBR·ROE·EPS·BPS가, 적자 종목은 PER가 null이다.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export)]
@@ -250,13 +250,13 @@ pub struct Fundamentals {
     /// 주.
     #[ts(type = "number | null")]
     pub listed_shares: Option<u64>,
-    /// 배. 적자면 음수일 수 있다.
+    /// 배.
     pub per: Option<f64>,
     /// 배.
     pub pbr: Option<f64>,
-    /// %.
+    /// %. 적자면 음수.
     pub roe: Option<f64>,
-    /// 원.
+    /// 원. 적자면 음수.
     #[ts(type = "number | null")]
     pub eps: Option<i64>,
     /// 원.

@@ -3,7 +3,7 @@ import type { SymbolCode } from "./SymbolCode";
 
 /**
  * `GET /api/symbols/:code/fundamentals` → 주식의 기본 정보(ka10001, 통합 시세). 지수는 400 `bad_request`.
- * 키움이 값을 주지 않은 항목(ETF의 PER 등)은 null이다.
+ * 키움이 값을 주지 않은 항목은 null이다. ETF·우선주는 PER·PBR·ROE·EPS·BPS가, 적자 종목은 PER가 null이다.
  */
 export type Fundamentals = { symbol: SymbolCode, 
 /**
@@ -15,7 +15,7 @@ marketCap: number | null,
  */
 listedShares: number | null, 
 /**
- * 배. 적자면 음수일 수 있다.
+ * 배.
  */
 per: number | null, 
 /**
@@ -23,11 +23,11 @@ per: number | null,
  */
 pbr: number | null, 
 /**
- * %.
+ * %. 적자면 음수.
  */
 roe: number | null, 
 /**
- * 원.
+ * 원. 적자면 음수.
  */
 eps: number | null, 
 /**

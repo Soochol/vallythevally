@@ -10,9 +10,9 @@ const value = (page: Page, label: string) =>
 test("종목을 바꾸면 종목 정보가 그 종목의 값으로 바뀐다", async ({ page }) => {
   await page.goto("/?symbol=005930");
   await expect(panel(page)).toContainText("삼성전자");
-  await expect(value(page, "시가총액")).toHaveText("1,130.67조");
-  await expect(value(page, "PER")).toHaveText("21.50배");
-  await expect(value(page, "52주 최고")).toHaveText("214,000");
+  await expect(value(page, "시가총액")).toHaveText("1,093.84조");
+  await expect(value(page, "PER")).toHaveText("28.51배");
+  await expect(value(page, "52주 최고")).toHaveText("380,000");
 
   await page.getByTitle(SEARCH_BUTTON_TITLE).click();
   const dialog = page.getByRole("dialog", { name: "종목 검색" });
@@ -20,8 +20,9 @@ test("종목을 바꾸면 종목 정보가 그 종목의 값으로 바뀐다", a
   await dialog.getByRole("option").filter({ hasText: "086520" }).click();
 
   await expect(panel(page)).toContainText("에코프로");
-  await expect(value(page, "시가총액")).toHaveText("12.92조");
-  await expect(value(page, "EPS")).toHaveText("−1,138원");
+  await expect(value(page, "시가총액")).toHaveText("8.17조");
+  await expect(value(page, "EPS")).toHaveText("−1,103원")
+  await expect(value(page, "PER")).toHaveText("—");
 });
 
 test("지수를 열면 종목 정보를 숨긴다", async ({ page }) => {
@@ -40,5 +41,5 @@ test("키움이 실패하면 종목 정보만 오류를 보이고 차트는 그�
 
   await app.fake.reset();
   await alert.getByRole("button", { name: "다시 시도" }).click();
-  await expect(value(page, "PER")).toHaveText("21.50배");
+  await expect(value(page, "PER")).toHaveText("28.51배");
 });

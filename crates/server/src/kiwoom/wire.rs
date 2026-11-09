@@ -510,31 +510,35 @@ mod tests {
     #[test]
     fn basic_info_is_in_natural_units_with_prices_unsigned() {
         assert_eq!(
-            basic_info("ka10001_005930_AL_synthetic"),
+            basic_info("ka10001_005930_AL"),
             StockFundamentals {
-                market_cap_won: Some(1_130_670_300_000_000),
+                market_cap_won: Some(1_093_838_700_000_000),
                 listed_shares: Some(5_846_279_000),
-                per: Some(21.5),
-                pbr: Some(2.97),
-                roe_pct: Some(9.8),
-                eps_won: Some(8_996),
-                bps_won: Some(65_120),
-                foreign_exhaustion_pct: Some(52.31),
-                high_250_won: Some(214_000),
-                low_250_won: Some(52_100),
+                per: Some(28.51),
+                pbr: Some(2.92),
+                roe_pct: Some(10.9),
+                eps_won: Some(6_564),
+                bps_won: Some(63_997),
+                foreign_exhaustion_pct: Some(45.93),
+                high_250_won: Some(380_000),
+                low_250_won: Some(93_500),
             }
         );
     }
 
     #[test]
-    fn basic_info_keeps_loss_signs_and_leaves_blanks_empty() {
+    fn basic_info_keeps_loss_signs_and_leaves_what_kiwoom_omits_empty() {
+        let loss = basic_info("ka10001_086520_AL");
+        assert_eq!((loss.per, loss.eps_won, loss.roe_pct, loss.bps_won), (None, Some(-1_103), Some(-8.4), Some(14_563)));
+        let etf = basic_info("ka10001_069500_AL");
+        assert_eq!((etf.per, etf.pbr, etf.roe_pct, etf.eps_won, etf.bps_won), (None, None, None, None, None));
+        assert_eq!((etf.market_cap_won, etf.high_250_won, etf.low_250_won), (Some(19_438_000_000_000), Some(152_455), Some(53_925)));
+        assert!(matches!(parse_basic_info(serde_json::from_str(&fixture("ka10001_999999_AL")).unwrap()), Ok(BasicInfo::UnknownSymbol)));
+    }
+
+    #[test]
+    fn basic_info_rejects_values_that_are_not_numbers() {
         let body = |v: serde_json::Value| parse_basic_info(serde_json::from_value(v).unwrap());
-        let Ok(BasicInfo::Found(f)) = body(serde_json::json!({"stk_nm": "적자회사", "per": "-3.10", "eps": "-1520", "roe": "-12.5", "bps": "+8000", "250lwst": "-900", "mac": "", "pbr": " "})) else {
-            panic!("Found가 아닙니다");
-        };
-        assert_eq!((f.per, f.eps_won, f.roe_pct, f.bps_won, f.low_250_won), (Some(-3.1), Some(-1_520), Some(-12.5), Some(8_000), Some(900)));
-        assert_eq!((f.market_cap_won, f.pbr, f.listed_shares, f.high_250_won), (None, None, None, None));
-        assert!(matches!(body(serde_json::json!({"stk_cd": "999999_AL", "stk_nm": "", "per": ""})), Ok(BasicInfo::UnknownSymbol)));
         assert!(body(serde_json::json!({"stk_nm": "가", "per": "N/A"})).is_err());
         assert!(body(serde_json::json!({"stk_nm": "가", "mac": "999999999999999"})).is_err(), "원으로 바꾸면 u64를 넘는다");
     }

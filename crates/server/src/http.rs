@@ -414,11 +414,9 @@ mod tests {
                 let path = format!("{}/tests/fixtures/kiwoom/ka10095_synthetic.json", env!("CARGO_MANIFEST_DIR"));
                 return ok(serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap(), None);
             }
-            if s.api_id == ApiId::Ka10001 && s.body.contains("005935") {
-                return ok(json!({"stk_cd": "005935_AL", "stk_nm": "", "per": "", "return_code": 0}), None);
-            }
             if s.api_id == ApiId::Ka10001 {
-                let path = format!("{}/tests/fixtures/kiwoom/ka10001_005930_AL_synthetic.json", env!("CARGO_MANIFEST_DIR"));
+                let name = if s.body.contains("005935") { "ka10001_999999_AL" } else { "ka10001_005930_AL" };
+                let path = format!("{}/tests/fixtures/kiwoom/{name}.json", env!("CARGO_MANIFEST_DIR"));
                 return ok(serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap(), None);
             }
             if s.api_id == ApiId::Ka20006 && s.body.contains("\"101\"") {
@@ -551,8 +549,8 @@ mod tests {
         assert_eq!(s, StatusCode::OK, "{v}");
         assert_eq!(
             v,
-            json!({"symbol": "005930", "marketCap": 1_130_670_300_000_000u64, "listedShares": 5_846_279_000u64, "per": 21.5, "pbr": 2.97, "roe": 9.8,
-                   "eps": 8996, "bps": 65120, "foreignExhaustionRate": 52.31, "high52w": 214_000, "low52w": 52_100})
+            json!({"symbol": "005930", "marketCap": 1_093_838_700_000_000u64, "listedShares": 5_846_279_000u64, "per": 28.51, "pbr": 2.92, "roe": 10.9,
+                   "eps": 6564, "bps": 63997, "foreignExhaustionRate": 45.93, "high52w": 380_000, "low52w": 93_500})
         );
         let bodies: Vec<String> = f.fake.market_sent().into_iter().filter(|s| s.api_id == ApiId::Ka10001).map(|s| s.body).collect();
         assert_eq!(bodies, [r#"{"stk_cd":"005930_AL"}"#]);
