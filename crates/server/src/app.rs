@@ -278,4 +278,14 @@ mod tests {
         assert!(capped.contains("키움 WebSocket 상태"), "로그는 그대로 남는다");
         assert!(!leaks(&capped));
     }
+
+    #[tokio::test]
+    async fn a_more_specific_trace_target_still_cannot_log_the_ws_login_token() {
+        let _ = tracing_log::LogTracer::init();
+        let hex: String = TOKEN.bytes().map(|b| format!("{b:02x}")).collect();
+        let logs = logs_of_one_ws_login(log_filter("info,tungstenite::protocol=trace,tokio_tungstenite=trace")).await;
+        assert!(logs.contains("키움 WebSocket 상태"), "로그는 그대로 남는다");
+        assert!(!logs.contains(TOKEN), "평문 토큰");
+        assert!(!logs.contains(&hex), "16진 토큰");
+    }
 }
