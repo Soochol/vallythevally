@@ -15,6 +15,8 @@ pub enum ApiId {
     Ka10100,
     /// 지정종목 정보(여러 종목 현재가, 한 번에 100개까지)
     Ka10095,
+    /// 주식기본정보(시가총액, PER, 250일 최고·최저 등)
+    Ka10001,
     /// 주식 분봉
     Ka10080,
     /// 주식 일봉
@@ -37,7 +39,7 @@ impl ApiId {
     pub const fn path(self) -> &'static str {
         match self {
             ApiId::Au10001 => "/oauth2/token",
-            ApiId::Ka10099 | ApiId::Ka10100 | ApiId::Ka10095 => "/api/dostk/stkinfo",
+            ApiId::Ka10099 | ApiId::Ka10100 | ApiId::Ka10095 | ApiId::Ka10001 => "/api/dostk/stkinfo",
             ApiId::Ka10080
             | ApiId::Ka10081
             | ApiId::Ka10082
@@ -55,6 +57,7 @@ impl ApiId {
             ApiId::Ka10099 => "ka10099",
             ApiId::Ka10100 => "ka10100",
             ApiId::Ka10095 => "ka10095",
+            ApiId::Ka10001 => "ka10001",
             ApiId::Ka10080 => "ka10080",
             ApiId::Ka10081 => "ka10081",
             ApiId::Ka10082 => "ka10082",
@@ -75,6 +78,10 @@ mod sealed {
 pub trait MarketRequest: sealed::Sealed + Serialize + Send + Sync {
     const API_ID: ApiId;
     type Response: serde::de::DeserializeOwned;
+
+    fn answers(&self, _: &Self::Response) -> bool {
+        true
+    }
 }
 
 /// 거래소는 종목코드 접미사로 고른다(kiwoom.md 3·12·13절). 키움 종목코드는 이 함수로만 만든다.
@@ -233,6 +240,30 @@ impl MarketRequest for StockQuotes {
     type Response = wire::StockQuotesResponse;
 }
 
+#[derive(Serialize)]
+pub struct StockBasicInfo {
+    stk_cd: String,
+}
+
+impl StockBasicInfo {
+    pub fn new(code: StockCode) -> Self {
+        StockBasicInfo { stk_cd: kiwoom_stock_code(code, Venue::Combined) }
+    }
+}
+
+impl sealed::Sealed for StockBasicInfo {}
+impl MarketRequest for StockBasicInfo {
+    const API_ID: ApiId = ApiId::Ka10001;
+    type Response = wire::StockBasicInfoResponse;
+
+    fn answers(&self, r: &wire::StockBasicInfoResponse) -> bool {
+        match r {
+            wire::StockBasicInfoResponse::UnknownSymbol => true,
+            wire::StockBasicInfoResponse::Found { kiwoom_code, .. } => *kiwoom_code == self.stk_cd,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -289,6 +320,14 @@ mod tests {
         assert!(StockQuotes::new(&many[..100]).is_some());
         assert!(StockQuotes::new(&many).is_none(), "101개는 1634로 거절된다");
         assert!(StockQuotes::new(&[]).is_none());
+    }
+
+    #[test]
+    fn basic_info_body_asks_for_the_combined_code() {
+        let c = StockCode::parse("005930").unwrap();
+        assert_eq!(serde_json::to_value(StockBasicInfo::new(c)).unwrap(), json!({"stk_cd": "005930_AL"}));
+        assert_eq!(<StockBasicInfo as MarketRequest>::API_ID.as_str(), "ka10001");
+        assert_eq!(<StockBasicInfo as MarketRequest>::API_ID.path(), "/api/dostk/stkinfo");
     }
 
     #[test]

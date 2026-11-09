@@ -1,5 +1,6 @@
 import { keepPreviousData, useQueries, useQuery } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
+import type { Fundamentals } from "./generated/Fundamentals";
 import type { SymbolCode } from "./generated/SymbolCode";
 import type { SymbolInfo } from "./generated/SymbolInfo";
 import { getJson } from "./http";
@@ -69,5 +70,15 @@ export function useSymbolInfos(codes: readonly SymbolCode[]): SymbolInfo[] {
   return useQueries({
     queries: codes.map(symbolInfoQuery),
     combine: (results) => results.flatMap((r) => (r.data ? [r.data] : [])),
+  });
+}
+
+const FUNDAMENTALS_STALE_MS = 60_000;
+
+export function useFundamentals(code: SymbolCode) {
+  return useQuery({
+    queryKey: ["fundamentals", code],
+    queryFn: ({ signal }) => getJson<Fundamentals>(`/api/symbols/${encodeURIComponent(code)}/fundamentals`, signal),
+    staleTime: FUNDAMENTALS_STALE_MS,
   });
 }

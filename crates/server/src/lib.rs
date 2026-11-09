@@ -6,6 +6,7 @@ pub mod bars;
 pub mod clock;
 pub mod config;
 pub mod db;
+pub mod fundamentals;
 pub mod http;
 pub mod instance;
 pub mod kiwoom;

@@ -41,3 +41,14 @@ export function formatVolume(v: number): string {
   if (v >= 1e4) return int.format(Math.round(v / 1e4)) + "만";
   return int.format(v);
 }
+
+export function formatWonAmount(won: number): string {
+  if (won >= 1e12) return two.format(won / 1e12) + "조";
+  if (won >= 1e8) return int.format(Math.round(won / 1e8)) + "억";
+  return int.format(won) + "원";
+}
+
+export function formatDecimal(x: number): string {
+  const rounded = Math.round(x * 100) / 100;
+  return (rounded < 0 ? MINUS : "") + two.format(Math.abs(rounded));
+}

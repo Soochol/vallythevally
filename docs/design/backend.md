@@ -685,6 +685,7 @@ pub enum ApiId {
     Ka10099, // 종목정보 리스트            /api/dostk/stkinfo
     Ka10100, // 종목정보 하나              /api/dostk/stkinfo
     Ka10095, // 지정종목 정보(여러 종목 현재가, 한 번에 100개까지) /api/dostk/stkinfo
+    Ka10001, // 주식기본정보(시가총액, PER, 250일 최고·최저 등, #35) /api/dostk/stkinfo
     Ka10080, // 주식 분봉                  /api/dostk/chart
     Ka10081, // 주식 일봉                  /api/dostk/chart
     Ka10082, // 주식 주봉                  /api/dostk/chart
@@ -1613,6 +1614,36 @@ interface Quote {
 - **주식**: ka10095 통합(`_AL`) 시세다. 칸의 거래소와 상관없다. 100개씩 나눠 보낸다(101개는 1634로 거절, kiwoom.md §10.6). 등락은 §4.6 "현재가의 등락"을 따른다. `t`는 응답의 `dt`·`cntr_tm`(KST)이다.
 - **지수**: ka10095는 지수를 받지 않는다. 지수 일봉 최신 페이지(§6)에서 만든다. 현재가는 마지막 봉(진행 중 봉이 있으면 그것)의 종가, 기준가는 그 앞 확정 봉의 종가다. `volume`과 `t`는 마지막 봉의 거래량과 시작 시각이다. 봉이 둘 없으면 빠진다.
 - #3의 `source`는 언제나 `polled`다.
+
+#### 종목 기본 정보 (#35)
+
+```ts
+// GET /api/symbols/005930/fundamentals → Fundamentals
+// 주식만 된다. 지수(IDX:…)나 형식이 틀린 코드는 400 bad_request, 종목 목록에 없는 코드는 404 unknown_symbol이다.
+// 둘 다 키움에 묻지 않는다. 종목 목록을 아직 못 받았으면 /api/symbols와 같은 503이다.
+interface Fundamentals {
+  symbol: SymbolCode;
+  marketCap: number | null;      // 시가총액(원)
+  listedShares: number | null;   // 상장주식수(주)
+  per: number | null;            // 배. 적자 종목, ETF, 우선주는 null
+  pbr: number | null;            // 배
+  roe: number | null;            // %. 적자면 음수
+  eps: number | null;            // 원. 적자면 음수
+  bps: number | null;            // 원
+  foreignExhaustionRate: number | null;  // 외국인 소진율(%)
+  high52w: number | null;        // 최근 250관측일 최고가(원)
+  low52w: number | null;         // 최근 250관측일 최저가(원)
+}
+```
+
+- 원천은 ka10001 통합(`_AL`) 코드 한 번이다. 현재가(ka10095)와 같은 시세를 본다. 칸의 거래소와 상관없다.
+- 키움 단위는 서버가 응답을 역직렬화하면서 자연 단위로 바꾼다(`wire::StockBasicInfoResponse`). 시가총액 `mac`은 억원, 상장주식 `flo_stk`는 천 주다(kiwoom.md §14). 가격인 250일 최고·최저는 부호를 떼고, PER·ROE·EPS·BPS는 부호를 지킨다.
+- 250일 최고·최저는 통합 일봉의 최근 250관측일 고가·저가와 같다(kiwoom.md §14). 차트의 기본 거래소와 같은 기준이다.
+- 키움이 빈 문자열을 준 값은 `null`이다. 키움이 `stk_cd`와 `stk_nm`을 모두 비운 행을 주면 404 `unknown_symbol`이다. 없는 코드의 실측 응답이 이 모양이다(kiwoom.md §14).
+- 다음은 형식 오류다(§4.3 "응답 파싱 실패"). 필드가 빠진 성공 응답, 숫자 자리에 숫자가 아닌 값, `stk_cd`와 `stk_nm` 중 하나만 빈 행, 응답 `stk_cd`가 요청한 통합 코드(`005930_AL`)와 다른 행이다. 모두 `rest.call` 안에서 판정되어 ka10001 경로를 멈추고 500 `internal`, `reason: protocol`, `manualActionRequired`로 답한다.
+- 서버는 캐시하지 않는다(ADR 0003). 같은 순간의 같은 요청은 조회 대기열이 합친다. 브라우저는 60초 동안 메모리에 둔다.
+- 키움 오류는 다른 조회와 같은 범주와 응답이다(ADR 0009). 경로 멈춤은 api-id 단위다(정책 표). 그래서 ka10001이 멈춰도 URL `/api/dostk/stkinfo`를 함께 쓰는 ka10095·ka10099·ka10100은 계속 보낸다.
+- PER·ROE는 키움 명세상 외부 벤더 값이고 주 1회나 실적 발표 때 바뀐다.
 
 #### 저장 순서 (#3, R2)
 

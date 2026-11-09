@@ -260,6 +260,87 @@ fn parse_quote_row(r: &QuoteRow) -> Result<StockQuote, WireError> {
     Ok(StockQuote { code, price_centi, base_centi, volume: Volume(unsigned(&r.trde_qty)?), at })
 }
 
+#[derive(Deserialize)]
+pub struct BasicInfoRow {
+    stk_cd: String,
+    stk_nm: String,
+    mac: String,
+    flo_stk: String,
+    per: String,
+    pbr: String,
+    roe: String,
+    eps: String,
+    bps: String,
+    for_exh_rt: String,
+    #[serde(rename = "250hgst")]
+    high_250: String,
+    #[serde(rename = "250lwst")]
+    low_250: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct StockFundamentals {
+    pub market_cap_won: Option<u64>,
+    pub listed_shares: Option<u64>,
+    pub per: Option<f64>,
+    pub pbr: Option<f64>,
+    pub roe_pct: Option<f64>,
+    pub eps_won: Option<i64>,
+    pub bps_won: Option<i64>,
+    pub foreign_exhaustion_pct: Option<f64>,
+    pub high_250_won: Option<u64>,
+    pub low_250_won: Option<u64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(try_from = "BasicInfoRow")]
+pub enum StockBasicInfoResponse {
+    UnknownSymbol,
+    Found { kiwoom_code: String, fundamentals: StockFundamentals },
+}
+
+const WON_PER_EOK: u64 = 100_000_000;
+/// 명세는 `flo_stk` 단위를 천원이라 적지만 실제로는 천 주다(kiwoom.md §14).
+const SHARES_PER_FLO_STK_UNIT: u64 = 1_000;
+
+impl TryFrom<BasicInfoRow> for StockBasicInfoResponse {
+    type Error = WireError;
+
+    fn try_from(r: BasicInfoRow) -> Result<Self, WireError> {
+        match (r.stk_cd.is_empty(), r.stk_nm.is_empty()) {
+            (true, true) => return Ok(StockBasicInfoResponse::UnknownSymbol),
+            (false, false) => {}
+            _ => return Err(WireError(format!("종목코드와 종목명 중 하나만 비었습니다: {:?}", r.stk_cd))),
+        }
+        let scaled = |s: &str, by: u64| optional(s, unsigned)?.map(|n| n.checked_mul(by).ok_or_else(|| WireError(format!("값이 너무 큽니다: {s:?}")))).transpose();
+        let fundamentals = StockFundamentals {
+            market_cap_won: scaled(&r.mac, WON_PER_EOK)?,
+            listed_shares: scaled(&r.flo_stk, SHARES_PER_FLO_STK_UNIT)?,
+            per: optional(&r.per, decimal)?,
+            pbr: optional(&r.pbr, decimal)?,
+            roe_pct: optional(&r.roe, decimal)?,
+            eps_won: optional(&r.eps, signed)?,
+            bps_won: optional(&r.bps, signed)?,
+            foreign_exhaustion_pct: optional(&r.for_exh_rt, decimal)?,
+            high_250_won: optional(&r.high_250, unsigned)?,
+            low_250_won: optional(&r.low_250, unsigned)?,
+        };
+        Ok(StockBasicInfoResponse::Found { kiwoom_code: r.stk_cd, fundamentals })
+    }
+}
+
+fn optional<T>(s: &str, parse: fn(&str) -> Result<T, WireError>) -> Result<Option<T>, WireError> {
+    if s.trim().is_empty() { Ok(None) } else { parse(s.trim()).map(Some) }
+}
+
+fn signed(s: &str) -> Result<i64, WireError> {
+    s.strip_prefix('+').unwrap_or(s).parse().map_err(|_| WireError(format!("정수가 아닙니다: {s:?}")))
+}
+
+fn decimal(s: &str) -> Result<f64, WireError> {
+    s.parse::<f64>().ok().filter(|x| x.is_finite()).ok_or_else(|| WireError(format!("소수가 아닙니다: {s:?}")))
+}
+
 /// au10001 응답. 토큰은 받자마자 `Secret`으로 감싼다(호출자 몫).
 #[derive(Deserialize)]
 pub struct TokenResponse {
@@ -422,6 +503,58 @@ mod tests {
         assert_eq!(index_price("+505969").unwrap().centi(), 505_969);
         assert!(stock_price("0").is_err());
         assert!(stock_price("").is_err());
+    }
+
+    fn basic_info(name: &str) -> StockFundamentals {
+        match serde_json::from_str(&fixture(name)).unwrap() {
+            StockBasicInfoResponse::Found { fundamentals, .. } => fundamentals,
+            StockBasicInfoResponse::UnknownSymbol => panic!("{name}: UnknownSymbol"),
+        }
+    }
+
+    #[test]
+    fn basic_info_is_in_natural_units_with_prices_unsigned() {
+        assert_eq!(
+            basic_info("ka10001_005930_AL"),
+            StockFundamentals {
+                market_cap_won: Some(1_093_838_700_000_000),
+                listed_shares: Some(5_846_279_000),
+                per: Some(28.51),
+                pbr: Some(2.92),
+                roe_pct: Some(10.9),
+                eps_won: Some(6_564),
+                bps_won: Some(63_997),
+                foreign_exhaustion_pct: Some(45.93),
+                high_250_won: Some(380_000),
+                low_250_won: Some(93_500),
+            }
+        );
+    }
+
+    #[test]
+    fn basic_info_keeps_loss_signs_and_leaves_what_kiwoom_omits_empty() {
+        let loss = basic_info("ka10001_086520_AL");
+        assert_eq!((loss.per, loss.eps_won, loss.roe_pct, loss.bps_won), (None, Some(-1_103), Some(-8.4), Some(14_563)));
+        let etf = basic_info("ka10001_069500_AL");
+        assert_eq!((etf.per, etf.pbr, etf.roe_pct, etf.eps_won, etf.bps_won), (None, None, None, None, None));
+        assert_eq!((etf.market_cap_won, etf.high_250_won, etf.low_250_won), (Some(19_438_000_000_000), Some(152_455), Some(53_925)));
+        assert_eq!(serde_json::from_str::<StockBasicInfoResponse>(&fixture("ka10001_999999_AL")).unwrap(), StockBasicInfoResponse::UnknownSymbol);
+    }
+
+    #[test]
+    fn basic_info_rejects_bodies_that_do_not_match_the_observed_shape() {
+        let edited = |field: &str, v: serde_json::Value| {
+            let mut body: serde_json::Value = serde_json::from_str(&fixture("ka10001_005930_AL")).unwrap();
+            body[field] = v;
+            serde_json::from_value::<StockBasicInfoResponse>(body)
+        };
+        assert!(edited("per", "N/A".into()).is_err());
+        assert!(edited("mac", "999999999999999".into()).is_err(), "원으로 바꾸면 u64를 넘는다");
+        assert!(edited("stk_cd", "".into()).is_err(), "이름은 있는데 코드가 비었다");
+        assert!(edited("stk_nm", "".into()).is_err(), "코드는 있는데 이름이 비었다");
+        let mut missing: serde_json::Value = serde_json::from_str(&fixture("ka10001_005930_AL")).unwrap();
+        missing.as_object_mut().unwrap().remove("per");
+        assert!(serde_json::from_value::<StockBasicInfoResponse>(missing).is_err(), "빈 값과 빠진 필드는 다르다");
     }
 
     #[test]
