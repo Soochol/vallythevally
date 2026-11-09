@@ -11,11 +11,8 @@ export function cellErrorView(error: ApiRequestError, symbol: SymbolCode): CellE
   switch (error.code) {
     case "unknown_symbol":
       return { text: `종목 ${symbol}을 찾을 수 없습니다. 상장 폐지되었거나 코드가 바뀌었을 수 있습니다.`, action: "search" };
-    case "kiwoom_auth_failed":
-      // 운영자가 서버 설정을 고쳐야 한다. 다시 시도해도 같다.
-      return { text: error.message, action: null };
     default:
-      return { text: error.message, action: "retry" };
+      return { text: error.message, action: error.manualActionRequired ? null : "retry" };
   }
 }
 
