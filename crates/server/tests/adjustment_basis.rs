@@ -68,7 +68,7 @@ async fn stale_continuation_keeps_alteogen_minutes_on_todays_adjustment_basis() 
     clock.jump(8 * 60);
     bars.page(key, held, 1).await.unwrap();
     clock.jump(8 * 60);
-    bars.evict_idle();
+    bars.evict_idle(&std::collections::HashSet::new());
     assert_eq!(bars.series_count(), 1);
 
     let older = bars.page(key, first.next_before, 200).await.unwrap();

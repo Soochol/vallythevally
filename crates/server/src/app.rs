@@ -177,7 +177,7 @@ async fn evict_idle_series(bars: Arc<BarService>) {
     let mut tick = tokio::time::interval(EVICT_EVERY);
     loop {
         tick.tick().await;
-        bars.evict_idle();
+        bars.evict_idle(&std::collections::HashSet::new());
     }
 }
 
