@@ -502,7 +502,7 @@ impl KiwoomRest {
 - **토큰은 메모리에만 둔다**: 서버를 다시 켜면 새로 발급한다. 재시작은 드물어서 받아들인다.
 - 토큰 폐기(au10002)는 허용 목록에 넣지 않는다. 폐기할 일이 없다.
 
-**켜는 순서**(`app.rs`): 설정 → 잠금 파일 → 포트 열기 → 첫 토큰 발급 → 종목 목록 받기를 태스크로 띄움 → 요청 받기. 목록이 오기 전에 요청을 받아야 "목록을 최대 10초 기다림"(§6.6)이 성립한다.
+**켜는 순서**(`app.rs`): 설정 → 잠금 파일 → 사용자 자료 DB 열기(§7.1, 실패하면 종료 코드 1) → 포트 열기 → 첫 토큰 발급 → 종목 목록 받기를 태스크로 띄움 → 요청 받기. 목록이 오기 전에 요청을 받아야 "목록을 최대 10초 기다림"(§6.6)이 성립한다.
 
 #### 토큰을 가진 프로세스는 하나: 잠금 파일
 
@@ -1247,7 +1247,7 @@ impl AppDb {
   - `foreign_keys = ON`: SQLite는 연결마다 꺼진 채로 시작하므로 모든 연결에 건다. `ON DELETE CASCADE`가 이것에 기댄다.
   - `busy_timeout = 5000`(5초): 잠금을 기다리다 곧바로 `SQLITE_BUSY`로 실패하지 않게 한다.
   - `synchronous = NORMAL`: WAL에서 권장되는 값이다. 전원이 나가면 마지막 몇 개의 커밋을 잃을 수 있지만 파일은 깨지지 않는다. 자동 저장 자료라 받아들인다.
-- **풀 크기**: 쓰기 풀 1, 읽기 풀 4. SQLite는 쓰는 사람이 한 번에 하나뿐이다. 쓰기 연결을 하나로 두면 쓰기끼리 `SQLITE_BUSY`로 부딪히지 않는다. 쓰기는 자동 저장으로 1초에 한 번 정도라 충분하다.
+- **풀 크기**: 쓰기 풀 1, 읽기 풀 4(읽기 전용 연결). SQLite는 쓰는 사람이 한 번에 하나뿐이다. 쓰기 연결을 하나로 두면 쓰기끼리 `SQLITE_BUSY`로 부딪히지 않는다. 쓰기는 자동 저장으로 1초에 한 번 정도라 충분하다.
 - **트랜잭션**: 쓰기 트랜잭션은 `BEGIN IMMEDIATE`로 연다. 레이아웃과 칸처럼 여러 테이블을 함께 바꾸는 쓰기는 한 트랜잭션이다.
 - **백업**: 파일 복사로 한다. 서버가 켜져 있을 때는 `VACUUM INTO 'data/backup-YYYYMMDD.db'`로 한다(WAL 파일까지 일관되게 담긴다). 자동 백업은 v1에 두지 않는다.
 - 서버 하나 보장은 잠금 파일이 맡는다(§4.1). 그래서 같은 DB 파일을 두 서버가 여는 일은 없다.
@@ -1435,7 +1435,7 @@ pub fn judge_cross(dir: CrossDir, prev: (f64, f64), cur: (f64, f64)) -> bool;
 | `not_found` | 404 | 없는 API 경로, 없는 사용자 자료 |
 | `unknown_symbol` | 404 | 종목 목록에 없거나 키움이 빈 행을 준 종목 |
 | `conflict` | 409 | 마지막 레이아웃 지우기 같은 충돌 |
-| `payload_too_large` | 413 | 64KB를 넘는 본문 |
+| `payload_too_large` | 413 | 한도를 넘는 본문. 화면 상태·관심종목 64KB, 칸 하나의 `chartSettings` 64KB, 레이아웃 본문 272KB(4 × 64KB + 16KB) |
 | `internal` | 500 | 서버 버그(파싱 실패, 키움이 거절한 요청) |
 | `kiwoom_auth_failed` | 502 | 키움이 우리 인증을 거절했다. 다시 시도해도 낫지 않는다. 운영자가 설정을 고친다 |
 | `kiwoom_unavailable` | 503 | 키움에 닿지 못했거나 요청 개수 초과가 이어졌거나 종목 목록을 아직 못 받았다. 다시 시도할 수 있다 |
@@ -1541,6 +1541,12 @@ interface Quote {
 }
 ```
 
+- `symbols`를 빼거나 비우면 `[]`이다. 201개 이상이거나 형식이 틀린 코드가 있으면 400 `bad_request`다. 중복은 한 번만 답한다.
+- 응답은 요청 순서다. 값을 얻지 못한 종목(없는 코드, 키움이 빈 행을 준 종목)은 빠진다. `unknown_symbol`을 내지 않는다.
+- **주식**: ka10095 통합(`_AL`) 시세다. 칸의 거래소와 상관없다. 100개씩 나눠 보낸다(101개는 1634로 거절, kiwoom.md §10.6). 등락은 §4.6 "현재가의 등락"을 따른다. `t`는 응답의 `dt`·`cntr_tm`(KST)이다.
+- **지수**: ka10095는 지수를 받지 않는다. 지수 일봉 최신 페이지(§6)에서 만든다. 현재가는 마지막 봉(진행 중 봉이 있으면 그것)의 종가, 기준가는 그 앞 확정 봉의 종가다. `volume`과 `t`는 마지막 봉의 거래량과 시작 시각이다. 봉이 둘 없으면 빠진다.
+- #3의 `source`는 언제나 `polled`다.
+
 #### 관심종목 (#3)
 
 ```ts
@@ -1549,6 +1555,7 @@ type WatchlistResponse = { symbols: SymbolCode[] };   // 표시 순서대로
 
 // PUT /api/watchlist         본문: { symbols: SymbolCode[] }
 // 목록 전체를 바꾼다. 추가·삭제·순서 바꾸기 모두 이것 하나로 한다. 중복은 400.
+// 형식만 맞으면 종목 목록에 없는 코드도 받는다(상장폐지 종목). 화면은 "찾을 수 없음"으로 보여 준다.
 // 응답: WatchlistResponse
 ```
 
@@ -1582,6 +1589,17 @@ interface Cell {
 // DELETE /api/layouts/:id           → 204. 마지막 레이아웃이면 409 conflict
 // "새 레이아웃으로 복제"는 브라우저가 새 id로 PUT 한다.
 ```
+
+- **PUT 검사**: 다음은 모두 400 `bad_request`다.
+  - 주소의 id와 본문의 `id`가 다르다.
+  - 이름이 비었다.
+  - 칸 수가 `arrangement`와 다르거나 slot이 0부터 n−1까지 하나씩이 아니다.
+  - 지수 칸에 거래소가 있거나 주식 칸에 거래소가 없다.
+  - `nxtEnabled`가 false인 종목에 `nxt`를 줬다.
+- 같은 이름의 다른 레이아웃이 있으면 409 `conflict`다. 없는 id의 GET·DELETE는 404 `not_found`다.
+- 종목 목록에 없는 주식은 막지 않는다(상장폐지 종목을 연 칸).
+- `nxt` 칸이 있을 때만 종목 목록을 기다린다(최대 10초, 넘으면 503). 그래서 서버를 막 켰을 때도 `nxt`가 없는 자동 저장은 바로 된다.
+- `updatedAt`은 서버 시각이다. 응답의 `cells`는 slot 순서다. 새 레이아웃은 목록의 맨 끝에 놓인다.
 
 코드에서 `pane`은 Lightweight Charts의 패널만 뜻한다. 칸은 `cell`이다.
 
@@ -2012,7 +2030,7 @@ pub fn future_bar_starts(period: &str, last_start: f64, n: usize) -> Result<Vec<
 | 정적 파일 | `/api/없는경로` → JSON 404, `/assets/없는.js` → 404, `/layout/x` → index.html, `.wasm` MIME, 캐시 헤더 | `server::http` | #2 |
 | 브라우저 계약 | ts-rs 생성 파일이 커밋된 것과 같은지 CI 검사. 서버 → 브라우저 메시지 JSON 스냅숏 테스트 | `server::http` | #2·#4 |
 | 잠금 파일 | 임시 디렉터리의 잠금 파일로: 첫 `InstanceLock::acquire` 성공, 같은 경로 두 번째는 `Held { pid }`, 첫 잠금을 drop하면 다시 잡힘, 남아 있는 파일(잠금 없음)은 막지 않음. 통합 테스트: 서버 두 번째 실행이 종료 코드 1로 끝나고 키움 요청을 보내지 않음 | `server::instance` | #2 |
-| 사용자 자료 | `sqlx::test`(sqlite, 테스트마다 새 DB)로: 마이그레이션, 레이아웃 PUT 두 번(같은 결과), 레이아웃 지우면 칸도 지워짐(`foreign_keys`), 마지막 레이아웃 삭제 거절, `ui_state`의 모르는 키 왕복과 64KB 초과 거절, 잘못된 JSON은 `json_valid`로 거절. 연결 설정(`journal_mode=wal`, `foreign_keys=1`, `busy_timeout=5000`)을 `PRAGMA`로 읽어 확인 | `server::store` | #3 |
+| 사용자 자료 | `sqlx::test`(sqlite, 테스트마다 새 DB)로: 마이그레이션, 레이아웃 PUT 두 번(같은 결과), 레이아웃 지우면 칸도 지워짐(`foreign_keys`), 마지막 레이아웃 삭제 거절, `ui_state`의 모르는 키 왕복과 64KB 초과 거절, 잘못된 JSON은 `json_valid`로 거절. 연결 설정(`journal_mode=wal`, `foreign_keys=1`, `busy_timeout=5000`)을 `PRAGMA`로 읽어 확인 | `server::db`, `server::userdata` | #3 |
 | 비밀값 | `Config`, `KiwoomAuth`, 텔레그램 클라이언트의 `Debug` 출력에 비밀값이 없는지 | `server::config` | #2 |
 
 **키움 파서 고정 입력**(kiwoom.md에서 옮긴다)
