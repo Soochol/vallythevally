@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import type { SymbolCode } from "./generated/SymbolCode";
 import type { SymbolInfo } from "./generated/SymbolInfo";
 import { getJson } from "./http";
+import { fetchQuotes } from "./userData";
 
 const SEARCH_DEBOUNCE_MS = 100;
 
@@ -47,4 +48,17 @@ export function useSymbolInfo(code: SymbolCode) {
 
 export function fetchSymbolInfo(code: SymbolCode, signal?: AbortSignal): Promise<SymbolInfo> {
   return getJson<SymbolInfo>(`/api/symbols/${encodeURIComponent(code)}`, signal);
+}
+
+const QUOTES_REFETCH_MS = 60_000;
+
+/** 관심종목 현재가(#3은 REST 조회). 60초마다 다시 묻는다. 종목코드로 찾는 표를 돌려준다. */
+export function useQuotes(symbols: readonly SymbolCode[]) {
+  return useQuery({
+    queryKey: ["quotes", symbols.join(",")],
+    queryFn: async ({ signal }) => new Map((await fetchQuotes(symbols, signal)).map((q) => [q.symbol, q])),
+    enabled: symbols.length > 0,
+    placeholderData: keepPreviousData,
+    refetchInterval: QUOTES_REFETCH_MS,
+  });
 }

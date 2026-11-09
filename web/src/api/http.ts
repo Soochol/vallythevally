@@ -48,13 +48,45 @@ async function parseError(res: Response): Promise<ApiRequestError> {
 
 /** GET 하나. 실패하면 ApiRequestError를 던진다. 중단(AbortError)은 그대로 던진다. */
 export async function getJson<T>(path: string, signal?: AbortSignal): Promise<T> {
+  return (await (await request(path, { method: "GET", signal })).json()) as T;
+}
+
+/** PUT 하나. 본문은 JSON으로 보낸다. 응답 본문을 돌려준다. */
+export function putJson<T>(path: string, body: unknown, opts: SendOptions = {}): Promise<T> {
+  return sendJson<T>("PUT", path, JSON.stringify(body), opts);
+}
+
+/** DELETE 하나. 응답 본문은 읽지 않는다. */
+export async function deleteJson(path: string, opts: SendOptions = {}): Promise<void> {
+  await request(path, { method: "DELETE", signal: opts.signal, keepalive: opts.keepalive });
+}
+
+export interface SendOptions {
+  signal?: AbortSignal;
+  /** 탭이 닫히는 중에도 요청을 끝까지 보낸다(frontend.md §3.7). */
+  keepalive?: boolean;
+}
+
+/** 이미 직렬화한 JSON 본문을 보낸다. 자동 저장이 바이트 수를 잰 그 문자열을 그대로 보낸다. */
+export async function sendJson<T>(method: "PUT" | "POST", path: string, json: string, opts: SendOptions = {}): Promise<T> {
+  const res = await request(path, {
+    method,
+    body: json,
+    signal: opts.signal,
+    keepalive: opts.keepalive,
+    headers: { "Content-Type": "application/json" },
+  });
+  return (await res.json()) as T;
+}
+
+async function request(path: string, init: RequestInit): Promise<Response> {
   let res: Response;
   try {
-    res = await fetch(path, { signal, headers: { Accept: "application/json" } });
+    res = await fetch(path, { ...init, headers: { Accept: "application/json", ...init.headers } });
   } catch (e) {
-    if (signal?.aborted) throw e;
+    if (init.signal?.aborted) throw e;
     throw new ApiRequestError("network", "서버에 연결하지 못했습니다");
   }
   if (!res.ok) throw await parseError(res);
-  return (await res.json()) as T;
+  return res;
 }

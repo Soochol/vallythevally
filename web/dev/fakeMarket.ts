@@ -4,6 +4,7 @@
 import type { Bar } from "../src/api/generated/Bar.ts";
 import type { BarsPage } from "../src/api/generated/BarsPage.ts";
 import type { Period } from "../src/api/generated/Period.ts";
+import type { Quote } from "../src/api/generated/Quote.ts";
 import type { SymbolInfo } from "../src/api/generated/SymbolInfo.ts";
 import type { Venue } from "../src/api/generated/Venue.ts";
 import fixture from "./fixtures/symbols.json" with { type: "json" };
@@ -333,4 +334,24 @@ export function search(raw: string): SymbolInfo[] {
     .sort((a, b) => a.r - b.r || KIND_ORDER.indexOf(a.s.kind) - KIND_ORDER.indexOf(b.s.kind) || compareNames(a.s.name, b.s.name))
     .slice(0, 20)
     .map((x) => publicInfo(x.s));
+}
+
+// ---- 현재가(GET /api/quotes의 대역) ----
+/** 통합 일봉의 마지막 두 봉으로 만든 현재가. 숫자는 위의 무작위 걸음에서 나온 가짜 값이다. 봉을 못 주는 종목은 null. */
+export function quoteOf(s: FakeSymbol, nowMs: number): Quote | null {
+  if (s.fail === "unknown_symbol") return null;
+  const bars = seriesOf(s, s.kind === "index" ? null : "combined", "D", nowMs);
+  const last = bars[bars.length - 1];
+  const prev = bars[bars.length - 2];
+  if (!last || !prev) return null;
+  const change = last.c - prev.c;
+  return {
+    symbol: s.code,
+    price: last.c,
+    change: s.kind === "index" ? Math.round(change * 100) / 100 : change,
+    changeRate: Math.round((change / prev.c) * 10000) / 100,
+    volume: last.v,
+    t: Math.floor(nowMs / 1000),
+    source: "polled",
+  };
 }
