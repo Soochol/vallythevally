@@ -358,3 +358,37 @@ describe("BarFeed", () => {
     expect(events).toEqual([]);
   });
 });
+
+test("HTTP 페이지보다 늦게 온 옛 subscribed는 봉을 되돌리지 않는다", async () => {
+  const { feed, calls, flush, history, push } = realtime();
+  feed.open(key("005930", "1m"));
+  calls[0]!.resolve(withSeq(page([bar(0)], null, bar(60, 200)), 12));
+  await flush();
+  push({ type: "subscribed", sub: "s1", seq: 10, current: bar(60, 100) });
+  expect(shown(history())).toEqual(["0:0", "60:200"]);
+});
+
+test("다시 받은 페이지보다 옛 bar는 봉을 되돌리지 않는다", async () => {
+  const { feed, calls, flush, history, push } = realtime();
+  feed.open(key("005930", "1m"));
+  calls[0]!.resolve(withSeq(page([bar(0)], null, bar(60, 100)), 10));
+  await flush();
+  push({ type: "reload", sub: "s1", seq: 11, reason: "gap_filled", from: 0 });
+  calls[1]!.resolve(withSeq(page([bar(0)], null, bar(60, 200)), 13));
+  await flush();
+  push({ type: "bar", sub: "s1", seq: 12, bar: bar(60, 150) });
+  expect(shown(history())).toEqual(["0:0", "60:200"]);
+});
+
+test("페이지보다 옛 confirmed와 reload는 버린다", async () => {
+  const { feed, calls, flush, history, push } = realtime();
+  feed.open(key("005930", "1m"));
+  calls[0]!.resolve(withSeq(page([bar(0)], null, bar(60, 200)), 12));
+  await flush();
+  push({ type: "confirmed", sub: "s1", seq: 11, bar: bar(60, 100) });
+  push({ type: "reload", sub: "s1", seq: 12, reason: "gap_filled", from: 0 });
+  expect(shown(history())).toEqual(["0:0", "60:200"]);
+  expect(calls).toHaveLength(1);
+  push({ type: "bar", sub: "s1", seq: 13, bar: bar(60, 210) });
+  expect(shown(history())).toEqual(["0:0", "60:210"]);
+});
