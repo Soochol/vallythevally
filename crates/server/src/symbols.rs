@@ -173,6 +173,7 @@ impl SymbolDirectory {
                 _ => Err(NotReady::Timeout),
             },
             e = rest.until_halted() => Err(NotReady::Kiwoom(e)),
+            e = rest.until_stopped(ApiId::Ka10099) => Err(NotReady::Kiwoom(e)),
         }
     }
 }

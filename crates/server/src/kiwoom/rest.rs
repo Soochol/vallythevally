@@ -229,6 +229,7 @@ struct Inner {
     clock: Clock,
     queue: Mutex<Queue>,
     wake: Notify,
+    path_stopped: Notify,
 }
 
 #[derive(Clone)]
@@ -251,7 +252,7 @@ enum Step {
 impl KiwoomRest {
     /// 보내는 태스크를 하나 띄운다. tokio 런타임 안에서 부른다.
     pub fn new(transport: Arc<dyn Transport>, auth: KiwoomAuth, clock: Clock) -> Self {
-        let inner = Arc::new(Inner { transport, auth, clock, queue: Mutex::new(Queue::default()), wake: Notify::new() });
+        let inner = Arc::new(Inner { transport, auth, clock, queue: Mutex::new(Queue::default()), wake: Notify::new(), path_stopped: Notify::new() });
         tokio::spawn(run(inner.clone()));
         KiwoomRest(inner)
     }
@@ -281,6 +282,18 @@ impl KiwoomRest {
 
     pub fn stopped(&self, api_id: ApiId) -> Option<KiwoomError> {
         self.0.lock().stopped(api_id)
+    }
+
+    pub async fn until_stopped(&self, api_id: ApiId) -> KiwoomError {
+        loop {
+            let notified = self.0.path_stopped.notified();
+            tokio::pin!(notified);
+            notified.as_mut().enable();
+            if let Some(e) = self.stopped(api_id) {
+                return e;
+            }
+            notified.await;
+        }
     }
 
     /// 토큰을 새로 받는다. 서버를 켤 때와 매일 20:05에만 부른다.
@@ -504,6 +517,7 @@ impl Inner {
             Stop::Path | Stop::PathOnRepeat => {
                 tracing::error!(api_id = api_id.as_str(), "{failure}");
                 q.stop_path(failure);
+                self.path_stopped.notify_waiters();
             }
         }
     }
