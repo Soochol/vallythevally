@@ -55,12 +55,10 @@ impl FakeKiwoom {
         format!("http://{}", self.addr)
     }
 
-    /// 이 api-id에는 고정 입력 대신 이 상태와 본문으로 답한다.
     pub fn respond_with(&self, api_id: &str, status: u16, body: Value) {
         self.seen.overrides.lock().unwrap().insert(api_id.to_owned(), (status, body));
     }
 
-    /// 이 토큰으로 온 시세 요청에는 토큰 무효(8005)로 답한다.
     pub fn reject_token(&self, token: &str) {
         self.seen.rejected_tokens.lock().unwrap().push(format!("Bearer {token}"));
     }
@@ -156,7 +154,6 @@ fn respond(mut v: Value, last_page: bool) -> Response {
     resp
 }
 
-/// 서버가 쓰는 토큰 파일. 잠금 파일 옆에 둔다.
 pub fn token_path(lock: &Path) -> std::path::PathBuf {
     lock.with_file_name("token.json")
 }

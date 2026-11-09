@@ -37,7 +37,6 @@ pub enum BarError {
     /// 종목 목록을 아직 못 받았거나 키움이 응답하지 않는다.
     Unavailable(String),
     AuthFailed { detail: Option<u16> },
-    /// 토큰 발급 간격(10분) 안이라 토큰이 없다. 저절로 풀린다.
     TokenWait(String),
     Internal(String),
 }
@@ -163,7 +162,6 @@ impl BarService {
 
     /// 07:45에 부른다. 진행 중인 조회의 응답은 내려간 시리즈에만 쓰이고 버려진다.
     /// 비운 뒤의 조회는 비우기 전 조회와 합쳐지지 않는다.
-    /// 지금 키움에 보내 봐야 바로 실패할 이유(`KiwoomRest::blocked`).
     pub fn blocked(&self) -> Option<KiwoomError> {
         self.rest.blocked()
     }

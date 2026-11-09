@@ -168,7 +168,6 @@ fn default_lock_path() -> Result<PathBuf, ConfigError> {
     Ok(PathBuf::from(format!("/tmp/vallythevally-{uid}/server.lock")))
 }
 
-/// `$XDG_STATE_HOME/vallythevally/token.json`, 없으면 `$HOME/.local/state/vallythevally/token.json`(§4.1).
 fn default_token_path() -> Result<PathBuf, ConfigError> {
     token_path_from(std::env::var_os("XDG_STATE_HOME"), std::env::var_os("HOME"))
 }

@@ -74,7 +74,6 @@ pub enum KiwoomError {
     RateLimited,
     /// 토큰을 받을 수 없거나 인증이 거절됐다.
     AuthFailed { detail: Option<u16> },
-    /// 토큰이 없는데 마지막 발급 요청에서 10분이 지나지 않았다. `until`부터 다시 발급한다.
     IssueTooSoon { until: KstTime },
     /// 우리 코드가 잘못 보낸 요청(1501~1999, 1634, 상세 코드 없는 실패).
     BadRequest { detail: Option<u16>, msg: String },
@@ -223,12 +222,10 @@ impl KiwoomRest {
         &self.0.auth
     }
 
-    /// 인증 거절로 멈췄으면 그 오류. 종목 목록처럼 다시는 오지 않을 것을 기다리기 전에 본다.
     pub fn halted(&self) -> Option<KiwoomError> {
         self.0.auth.halted().map(|d| KiwoomError::AuthFailed { detail: Some(d) })
     }
 
-    /// 지금 보내면 키움에 닿지 않고 바로 실패할 이유: 인증 거절로 멈췄거나, 토큰이 없는데 발급 간격 안이다.
     pub fn blocked(&self) -> Option<KiwoomError> {
         let auth = &self.0.auth;
         let now = self.0.clock.now();
@@ -423,7 +420,7 @@ impl Inner {
         let env: Envelope = serde_json::from_str(&resp.body).unwrap_or_default();
         let detail = env.return_msg.as_deref().and_then(detail_code);
         tracing::info!(api_id = "au10001", elapsed_ms, http = resp.status, return_code = ?env.return_code, detail = ?detail, "토큰 발급 응답");
-        // 인증 거절의 상세 코드는 HTTP 상태보다 먼저 본다. 놓치면 조회마다 다시 발급해 계정이 잠긴다(8050).
+        // 키움은 8050을 HTTP 200이 아닌 상태로도 줄 수 있다. 전송 오류로 넘기면 조회마다 다시 발급해 계정이 잠긴다.
         if let Some(d) = detail.filter(|d| is_halting(*d)) {
             tracing::error!(detail = d, "{}", auth_failed_message(Some(d)));
             self.auth.halt(d);
@@ -508,7 +505,7 @@ impl Inner {
     }
 }
 
-/// 되돌릴 수 없는 인증 거절(8001~8200 중 토큰 무효 8005 밖). 받으면 서버를 다시 켤 때까지 키움에 아무것도 보내지 않는다.
+/// 키움 명세의 8001~8200은 인증 오류이고, 그중 8005만 토큰 무효라 다시 받으면 풀린다.
 fn is_halting(detail: u16) -> bool {
     (8001..=8200).contains(&detail) && detail != 8005
 }
@@ -646,7 +643,6 @@ mod tests {
 
     type Guards = (tempfile::TempDir, crate::instance::InstanceLock);
 
-    /// 한 시간 전에 받아 파일에 둔 `tok-0`으로 시작한다. 켠 뒤에는 발급 간격에 걸리지 않는다.
     fn rest_with_saved_token(fake: &Arc<FakeTransport>) -> (KiwoomRest, Guards) {
         use crate::kiwoom::token_file::{Saved, SavedToken, testing::temp_token_file};
         let start = kst(KstDate::new(2026, 11, 9).unwrap(), 9, 0, 0);
@@ -845,7 +841,6 @@ mod tests {
         assert_eq!(fake.sent().len(), 3, "다시 발급은 한 번");
     }
 
-    /// 토큰 무효를 받아도 마지막 발급 요청에서 10분 안이면 발급하지 않고, 기다리지 않고 이유와 함께 실패시킨다.
     #[tokio::test(start_paused = true)]
     async fn no_reissue_within_ten_minutes_of_the_last_issue_request() {
         let tokens = token_counter();
@@ -882,7 +877,6 @@ mod tests {
         assert_eq!(fake.sent().len(), 2, "멈춘 뒤에는 아무것도 보내지 않는다");
     }
 
-    /// 인증 거절 상세 코드는 HTTP 상태가 200이 아니어도 멈춘다. 5xx 재시도로 넘기면 같은 거절을 되풀이한다.
     #[tokio::test(start_paused = true)]
     async fn designated_terminal_rejection_halts_even_on_a_non_200_status() {
         let tokens = token_counter();

@@ -23,7 +23,6 @@ pub const DAILY_REISSUE_AT: TimeOfDay = match TimeOfDay::hms(20, 5, 0) {
     None => unreachable!(),
 };
 
-/// 키움이 인증을 거절했을 때 운영자에게 보일 원인과 조치. 로그와 브라우저 오류 문장에 같은 것을 쓴다.
 pub fn auth_failed_message(detail: Option<u16>) -> String {
     match detail {
         Some(8050) => "키움이 지정단말기 인증 실패([8050])로 거절했습니다. 키움 IP 미등록 또는 반복 발급 잠금입니다. \
@@ -63,7 +62,6 @@ struct State {
 pub struct KiwoomAuth {
     app_key: Secret<String>,
     app_secret: Secret<String>,
-    /// 없으면 메모리에만 둔다(단위 테스트).
     file: Option<TokenFile>,
     state: Mutex<State>,
 }
@@ -93,7 +91,6 @@ struct TokenRequest<'a> {
 }
 
 impl KiwoomAuth {
-    /// 토큰 파일이 있으면 읽어 그 토큰과 마지막 발급 요청 시각을 이어 쓴다. 읽지 못하면 없는 것으로 본다.
     pub fn new(app_key: Secret<String>, app_secret: Secret<String>, file: Option<TokenFile>) -> Self {
         let state = match file.as_ref().map(TokenFile::load) {
             None | Some(Ok(None)) => State::default(),
@@ -125,7 +122,6 @@ impl KiwoomAuth {
         }
     }
 
-    /// au10001 본문을 내주고, 보내기 전에 발급 요청 시각을 파일에 남긴다. 앱키와 시크릿이 들어 있으므로 `Secret`으로만 내보낸다.
     pub fn begin_issue(&self, now: KstTime) -> Secret<String> {
         let mut st = self.lock();
         st.last_request_at = Some(now);
@@ -138,7 +134,6 @@ impl KiwoomAuth {
         Secret::new(serde_json::to_string(&req).expect("문자열만 담은 구조체"))
     }
 
-    /// 마지막 발급 요청에서 10분이 지나지 않았으면 다시 보낼 수 있는 시각.
     pub fn issue_blocked_until(&self, now: KstTime) -> Option<KstTime> {
         let until = self.lock().last_request_at?.plus_secs(MIN_ISSUE_INTERVAL_SECS);
         (now < until).then_some(until)
@@ -180,8 +175,6 @@ impl KiwoomAuth {
         Ok(generation)
     }
 
-    /// 토큰 무효 응답을 받았을 때만 부른다. `seen`이 지금 세대일 때만 다시 발급하도록 표시한다.
-    /// 이미 새 세대가 있으면 그대로 다시 보내면 된다. 다시 발급하는 때는 발급 간격이 정한다.
     pub fn invalidate(&self, seen: TokenGen) -> Result<(), AuthError> {
         let mut st = self.lock();
         if let Some(d) = st.halted {

@@ -12,7 +12,7 @@ use crate::instance::InstanceLock;
 #[derive(Serialize, Deserialize, PartialEq, Eq)]
 pub struct Saved {
     pub token: Option<SavedToken>,
-    /// 마지막으로 au10001을 보낸 시각(유닉스 초). 성공 여부와 상관없이 보내기 전에 남긴다.
+    /// 유닉스 초. 키움 실측 프로그램도 이 파일을 읽고 쓴다.
     pub last_request_at: i64,
 }
 
@@ -29,7 +29,6 @@ pub struct TokenFile {
 }
 
 impl TokenFile {
-    /// 잠금을 쥔 프로세스만 토큰 파일을 연다.
     pub fn new(path: PathBuf, _held: &InstanceLock) -> Self {
         TokenFile { path }
     }
@@ -38,7 +37,6 @@ impl TokenFile {
         &self.path
     }
 
-    /// 파일이 없으면 `Ok(None)`. 오류 문장에는 파일 내용을 싣지 않는다.
     pub fn load(&self) -> Result<Option<Saved>, String> {
         let text = match std::fs::read_to_string(&self.path) {
             Ok(t) => t,
@@ -48,7 +46,6 @@ impl TokenFile {
         serde_json::from_str(&text).map(Some).map_err(|e| format!("{:?} 오류, {}번째 줄", e.classify(), e.line()))
     }
 
-    /// 같은 디렉터리의 임시 파일(권한 600)에 쓰고 rename한다. 디렉터리가 없으면 700으로 만든다.
     pub fn save(&self, saved: &Saved) -> std::io::Result<()> {
         let dir = self.path.parent().filter(|d| !d.as_os_str().is_empty()).unwrap_or(Path::new("."));
         std::fs::DirBuilder::new().recursive(true).mode(0o700).create(dir)?;
@@ -64,7 +61,6 @@ impl TokenFile {
 pub mod testing {
     use super::*;
 
-    /// 임시 디렉터리에 잠금을 잡고 토큰 파일을 연다. 셋 다 테스트가 끝날 때까지 쥐고 있어야 한다.
     pub fn temp_token_file() -> (tempfile::TempDir, InstanceLock, TokenFile) {
         let dir = tempfile::tempdir().unwrap();
         let lock = InstanceLock::acquire(&dir.path().join("server.lock")).unwrap();

@@ -146,7 +146,6 @@ async fn load_symbols_at_startup(rest: KiwoomRest, symbols: Arc<SymbolDirectory>
     loop {
         match symbols.refresh(&rest, Priority::Screen).await {
             Ok(()) => return,
-            // 인증 거절로 멈췄다. 다시 받아도 키움에 닿지 않고 같은 실패만 되풀이한다.
             Err(_) if rest.halted().is_some() => return,
             Err(e) => {
                 tracing::warn!(error = %e, "종목 목록을 받지 못했습니다. 10초 뒤 다시 받습니다");

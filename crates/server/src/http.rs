@@ -119,7 +119,6 @@ impl Lookup {
     }
 }
 
-/// 종목 목록이 필요한 요청이 먼저 부른다. 인증 거절로 멈췄으면 목록은 오지 않으므로 기다리지 않고 원인을 돌려준다.
 pub(crate) async fn symbol_list(st: &AppState) -> Result<Arc<crate::symbols::Directory>, ApiFailure> {
     if let Some(e) = st.bars.blocked() {
         return Err(Lookup::Symbols.failure(e.into()));

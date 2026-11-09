@@ -26,7 +26,6 @@ async fn get(base: &str, path: &str) -> (u16, Value) {
     (status, serde_json::from_str(&resp.text().await.unwrap()).unwrap_or(Value::Null))
 }
 
-/// 종목 목록을 받을 때까지 기다린 뒤 끝낸다. 목록을 받았다는 것은 토큰을 썼다는 뜻이다.
 async fn run_until_symbols_load(fake: &FakeKiwoom, lock: &Path, dist: &Path) -> String {
     let server = Server::spawn(fake, lock, dist);
     let base = format!("http://{}", server.addr().await);
@@ -83,7 +82,6 @@ async fn a_valid_saved_token_is_used_without_issuing() {
     assert!(auths.iter().all(|a| *a == format!("Bearer {TOKEN}")), "{auths:?}");
 }
 
-/// 마지막 발급 요청이 10분 안이면, 토큰이 없어도 발급하지 않고 시세 요청을 이유와 함께 실패시킨다.
 #[tokio::test(flavor = "multi_thread")]
 async fn no_issue_within_ten_minutes_of_the_last_request_even_across_restarts() {
     let fake = FakeKiwoom::start().await;

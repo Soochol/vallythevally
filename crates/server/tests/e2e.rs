@@ -179,7 +179,6 @@ async fn second_instance_exits_1_without_touching_kiwoom() {
     first.stop().await;
 }
 
-/// 8050(지정단말기): 토큰 발급을 한 번만 하고, 재시도·재발급을 모두 멈추고, 원인과 조치를 로그와 응답에 싣는다.
 /// 실제 8050 응답의 HTTP 상태를 아직 재지 못해 200과 403 두 모양을 다 본다.
 async fn designated_terminal_stops_after_one_token_attempt(http_status: u16) {
     let fake = FakeKiwoom::start().await;
@@ -198,8 +197,8 @@ async fn designated_terminal_stops_after_one_token_attempt(http_status: u16) {
     let message = last["error"]["message"].as_str().unwrap();
     assert!(message.contains("8050") && message.contains("공인 IP를 키움 포털에 등록하세요"), "{message}");
 
-    // 켤 때의 종목 목록 재시도(10초)가 한 번은 돌 만큼 기다린다.
-    tokio::time::sleep(Duration::from_secs(11)).await;
+    let longer_than_one_startup_list_retry = Duration::from_secs(11);
+    tokio::time::sleep(longer_than_one_startup_list_retry).await;
     assert_eq!(fake.api_ids(), ["au10001"], "발급 시도는 한 번뿐이고 시세 요청은 없다");
     let logs = server.stop().await;
     assert!(logs.contains("공인 IP를 키움 포털에 등록하세요"), "{logs}");
