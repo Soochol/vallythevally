@@ -2,8 +2,9 @@
 import type { Arrangement } from "./Arrangement";
 import type { Cell } from "./Cell";
 import type { LayoutSync } from "./LayoutSync";
+import type { Revision } from "./Revision";
 
 /**
  * `PUT /api/layouts/:id` 본문(없으면 만들고 있으면 바꾼다). `id`는 주소의 id와 같아야 한다.
  */
-export type LayoutInput = { id: string, name: string, arrangement: Arrangement, sync: LayoutSync, cells: Array<Cell>, };
+export type LayoutInput = { id: string, name: string, arrangement: Arrangement, sync: LayoutSync, cells: Array<Cell>, revision: Revision, };

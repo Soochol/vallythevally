@@ -11,8 +11,11 @@ export type Slot = Cell["slot"];
 /** 칸 하나. 계약의 `Cell`에서 chartSettings만 해석해 둔 것(frontend.md §5.5). */
 export type CellState = Omit<Cell, "chartSettings"> & { chartSettings: ChartSettings };
 
-/** 서버 `Layout`의 편집 사본(frontend.md §5.3). `updatedAt`은 서버가 정하므로 들고 있지 않는다. */
-export type EditableLayout = Omit<Layout, "cells" | "updatedAt"> & { cells: CellState[] };
+/**
+ * 서버 `Layout`의 편집 사본(frontend.md §5.3). `updatedAt`은 서버가 정하고, `revision`(저장 순서 번호)은 자동 저장이 보낼 때 붙이므로
+ * 들고 있지 않는다.
+ */
+export type EditableLayout = Omit<Layout, "cells" | "updatedAt" | "revision"> & { cells: CellState[] };
 
 /** 마이그레이션이 만드는 기본 레이아웃(backend.md §7.2). 서버에 닿지 못할 때도 이것으로 연다. */
 export const DEFAULT_LAYOUT_ID = "01900000-0000-7000-8000-000000000001";

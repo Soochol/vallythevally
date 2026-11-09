@@ -5,7 +5,9 @@ import type { SymbolInfo } from "../api/generated/SymbolInfo";
 import { ApiRequestError } from "../api/http";
 import { DEFAULT_CHART_SETTINGS } from "../chart/settings";
 import { DEFAULT_LAYOUT } from "../stores/layout";
+import type { SaveTarget } from "../stores/persist";
 import { NXT_FALLBACK_NOTICE, restore, type RestoreSources } from "./restore";
+import type { Unsaved } from "./saver";
 
 afterEach(() => vi.restoreAllMocks());
 
@@ -21,19 +23,22 @@ const cell = (over: Partial<Cell>): Cell => ({
   chartSettings: DEFAULT_CHART_SETTINGS,
   ...over,
 });
-const layout = (id: string, c: Cell): Layout => ({ id, name: id, arrangement: "1", sync: { crosshair: true, scroll: true }, cells: [c], updatedAt: 1 });
+const layout = (id: string, c: Cell): Layout => ({ id, name: id, arrangement: "1", sync: { crosshair: true, scroll: true }, cells: [c], updatedAt: 1, revision: 10 });
 
-function sources(opts: { lastLayoutId?: string | null; layouts?: Layout[]; symbolInfo?: RestoreSources["symbolInfo"] } = {}): RestoreSources {
+function sources(
+  opts: { lastLayoutId?: string | null; layouts?: Layout[]; symbolInfo?: RestoreSources["symbolInfo"]; unsaved?: Partial<Record<SaveTarget, Unsaved>> } = {},
+): RestoreSources {
   const layouts = opts.layouts ?? [layout("L1", cell({}))];
   return {
-    uiState: async () => ({ lastLayoutId: opts.lastLayoutId === undefined ? "L1" : opts.lastLayoutId, theme: "light", extraKey: 1 }),
+    uiState: async () => ({ lastLayoutId: opts.lastLayoutId === undefined ? "L1" : opts.lastLayoutId, theme: "light", extraKey: 1, revision: 20 }),
     layouts: async () => layouts.map(({ id, name, arrangement, updatedAt }) => ({ id, name, arrangement, updatedAt })),
     layout: async (id) => {
       const l = layouts.find((x) => x.id === id);
       if (!l) throw new ApiRequestError("not_found", "없음");
       return l;
     },
-    watchlist: async () => ({ symbols: ["005930", "IDX:001"] }),
+    watchlist: async () => ({ symbols: ["005930", "IDX:001"], revision: 30 }),
+    unsaved: (target) => opts.unsaved?.[target] ?? null,
     symbolInfo:
       opts.symbolInfo ??
       (async (code) => {
@@ -53,6 +58,48 @@ test("저장된 값을 그대로 열면 아무것도 저장하지 않는다", as
   expect(r.ui.extra).toEqual({ extraKey: 1 });
   expect(r.watchlist).toEqual(["005930", "IDX:001"]);
   expect(r.notices).toEqual([]);
+  expect(r.revisions).toEqual({ layout: 10, ui: 20, watchlist: 30 });
+  expect(r.ui.extra).not.toHaveProperty("revision");
+});
+
+const unsaved = (path: string, revision: number, value: object): Unsaved => ({ path, revision, body: JSON.stringify({ ...value, revision }) });
+
+test("R2: 지난 페이지가 남긴 미저장 본문이 서버 것보다 새로우면 그것을 열고 다시 저장한다", async () => {
+  const stored = layout("L1", cell({ period: "D" }));
+  const { updatedAt: _, revision: _r, ...input } = { ...stored, cells: [cell({ period: "M" })] };
+  const r = await restore(
+    sources({
+      layouts: [stored],
+      unsaved: {
+        layout: unsaved("/api/layouts/L1", 11, input),
+        ui: unsaved("/api/ui-state", 21, { lastLayoutId: "L1", theme: "dark", extraKey: 2 }),
+        watchlist: unsaved("/api/watchlist", 31, { symbols: ["000660"] }),
+      },
+    }),
+  );
+  expect(r.layout.cells[0]!.period).toBe("M");
+  expect(r.ui.prefs.theme).toBe("dark");
+  expect(r.ui.extra).toEqual({ extraKey: 2 });
+  expect(r.watchlist).toEqual(["000660"]);
+  expect([r.layoutDirty, r.uiDirty, r.watchlistDirty]).toEqual([true, true, true]);
+  expect(r.revisions).toEqual({ layout: 11, ui: 21, watchlist: 31 });
+  expect(r.serverRevisions).toEqual({ layout: 10, ui: 20, watchlist: 30 });
+});
+
+test("R2: 서버가 이미 가진 것(같거나 큰 revision)이나 다른 레이아웃의 미저장 본문은 열지 않는다", async () => {
+  const r = await restore(
+    sources({
+      unsaved: {
+        layout: unsaved("/api/layouts/OTHER", 99, { id: "OTHER" }),
+        ui: unsaved("/api/ui-state", 20, { lastLayoutId: "L1", theme: "dark" }),
+        watchlist: unsaved("/api/watchlist", 5, { symbols: ["000660"] }),
+      },
+    }),
+  );
+  expect(r.ui.prefs.theme).toBe("light");
+  expect(r.watchlist).toEqual(["005930", "IDX:001"]);
+  expect([r.layoutDirty, r.uiDirty, r.watchlistDirty]).toEqual([false, false, false]);
+  expect(r.revisions).toEqual({ layout: 10, ui: 20, watchlist: 30 });
 });
 
 test("NXT 불가 종목에 NXT가 저장돼 있으면 통합으로 열고, 고친 값을 저장하고, 알린다", async () => {

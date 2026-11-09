@@ -2,7 +2,7 @@
 
 use sqlx::Row;
 
-use crate::api::{Arrangement, Cell, Layout, LayoutInput, LayoutSummary, LayoutSync, SymbolCode, UiState, UnixSeconds, Watchlist};
+use crate::api::{Arrangement, Cell, Layout, LayoutInput, LayoutSummary, LayoutSync, Revision, SymbolCode, UiState, UnixSeconds, Watchlist};
 use crate::db::{AppDb, DbError};
 
 #[derive(Debug)]
@@ -10,6 +10,8 @@ pub enum StoreError {
     NotFound,
     /// 같은 이름의 레이아웃, 마지막 레이아웃 지우기.
     Conflict(String),
+    /// 보낸 revision이 저장된 것(안의 값)보다 크지 않다. 저장하지 않았다.
+    Stale(Revision),
     Db(DbError),
 }
 
@@ -36,14 +38,27 @@ fn from_wire_name<T: serde::de::DeserializeOwned>(what: &str, s: String) -> Resu
     serde_json::from_value(serde_json::Value::String(s)).map_err(|e| corrupt(what, e))
 }
 
+/// 보낸 revision이 저장된 것보다 커야 저장한다(R2). 쓰기 트랜잭션 안에서 부른다.
+fn check_newer(stored: Option<i64>, sent: Revision) -> Result<(), StoreError> {
+    match stored {
+        Some(r) if sent.0 <= r => Err(StoreError::Stale(Revision(r))),
+        _ => Ok(()),
+    }
+}
+
 pub async fn get_watchlist(db: &AppDb) -> Result<Watchlist, StoreError> {
-    let symbols: Vec<String> = sqlx::query_scalar("SELECT symbol FROM watchlist ORDER BY position").fetch_all(db.read()).await?;
-    Ok(Watchlist { symbols: symbols.into_iter().map(SymbolCode).collect() })
+    let mut tx = db.read().begin().await?;
+    let symbols: Vec<String> = sqlx::query_scalar("SELECT symbol FROM watchlist ORDER BY position").fetch_all(&mut *tx).await?;
+    let revision: i64 = sqlx::query_scalar("SELECT revision FROM watchlist_revision WHERE singleton = 1").fetch_one(&mut *tx).await?;
+    Ok(Watchlist { symbols: symbols.into_iter().map(SymbolCode).collect(), revision: Revision(revision) })
 }
 
 /// 목록 전체를 바꾼다. 중복은 호출자가 먼저 거른다.
 pub async fn put_watchlist(db: &AppDb, list: &Watchlist) -> Result<(), StoreError> {
     let mut tx = db.begin_write().await?;
+    let stored: Option<i64> = sqlx::query_scalar("SELECT revision FROM watchlist_revision WHERE singleton = 1").fetch_optional(&mut *tx).await?;
+    check_newer(stored, list.revision)?;
+    sqlx::query("UPDATE watchlist_revision SET revision = ? WHERE singleton = 1").bind(list.revision.0).execute(&mut *tx).await?;
     sqlx::query("DELETE FROM watchlist").execute(&mut *tx).await?;
     for (position, symbol) in list.symbols.iter().enumerate() {
         sqlx::query("INSERT INTO watchlist (symbol, position) VALUES (?, ?)").bind(&symbol.0).bind(position as i64).execute(&mut *tx).await?;
@@ -69,7 +84,7 @@ pub async fn list_layouts(db: &AppDb) -> Result<Vec<LayoutSummary>, StoreError> 
 /// 레이아웃 행과 칸을 한 읽기 트랜잭션에서 읽는다. WAL에서는 첫 SELECT가 스냅숏을 고정한다.
 pub async fn get_layout(db: &AppDb, id: &str) -> Result<Layout, StoreError> {
     let mut tx = db.read().begin().await?;
-    let row = sqlx::query("SELECT name, arrangement, sync, updated_at FROM layouts WHERE id = ?")
+    let row = sqlx::query("SELECT name, arrangement, sync, updated_at, revision FROM layouts WHERE id = ?")
         .bind(id)
         .fetch_optional(&mut *tx)
         .await?
@@ -93,12 +108,23 @@ pub async fn get_layout(db: &AppDb, id: &str) -> Result<Layout, StoreError> {
         .collect::<Result<Vec<_>, StoreError>>()?;
     let arrangement: Arrangement = from_wire_name("arrangement", row.get("arrangement"))?;
     let sync: LayoutSync = serde_json::from_str(row.get("sync")).map_err(|e| corrupt("sync", e))?;
-    Ok(Layout { id: id.to_owned(), name: row.get("name"), arrangement, sync, cells, updated_at: UnixSeconds(row.get("updated_at")) })
+    Ok(Layout {
+        id: id.to_owned(),
+        name: row.get("name"),
+        arrangement,
+        sync,
+        cells,
+        updated_at: UnixSeconds(row.get("updated_at")),
+        revision: Revision(row.get("revision")),
+    })
 }
 
 /// 없으면 만들고 있으면 바꾼다. 칸은 모두 지우고 다시 넣는다. 새 레이아웃은 목록의 맨 끝에 놓인다.
+/// 있는 레이아웃은 저장된 것보다 큰 revision일 때만 바꾼다.
 pub async fn put_layout(db: &AppDb, input: &LayoutInput, now: UnixSeconds) -> Result<Layout, StoreError> {
     let mut tx = db.begin_write().await?;
+    let stored: Option<i64> = sqlx::query_scalar("SELECT revision FROM layouts WHERE id = ?").bind(&input.id).fetch_optional(&mut *tx).await?;
+    check_newer(stored, input.revision)?;
     let taken: Option<String> = sqlx::query_scalar("SELECT id FROM layouts WHERE name = ? AND id <> ?")
         .bind(&input.name)
         .bind(&input.id)
@@ -109,16 +135,18 @@ pub async fn put_layout(db: &AppDb, input: &LayoutInput, now: UnixSeconds) -> Re
     }
     let sync = serde_json::to_string(&input.sync).expect("LayoutSync는 언제나 직렬화된다");
     sqlx::query(
-        "INSERT INTO layouts (id, name, arrangement, sync, position, updated_at)
-         VALUES (?, ?, ?, ?, (SELECT COALESCE(MAX(position), -1) + 1 FROM layouts), ?)
+        "INSERT INTO layouts (id, name, arrangement, sync, position, updated_at, revision)
+         VALUES (?, ?, ?, ?, (SELECT COALESCE(MAX(position), -1) + 1 FROM layouts), ?, ?)
          ON CONFLICT(id) DO UPDATE SET name = excluded.name, arrangement = excluded.arrangement,
-                                       sync = excluded.sync, updated_at = excluded.updated_at",
+                                       sync = excluded.sync, updated_at = excluded.updated_at,
+                                       revision = excluded.revision",
     )
     .bind(&input.id)
     .bind(&input.name)
     .bind(wire_name(&input.arrangement))
     .bind(sync)
     .bind(now.0)
+    .bind(input.revision.0)
     .execute(&mut *tx)
     .await?;
     sqlx::query("DELETE FROM layout_cells WHERE layout_id = ?").bind(&input.id).execute(&mut *tx).await?;
@@ -139,7 +167,15 @@ pub async fn put_layout(db: &AppDb, input: &LayoutInput, now: UnixSeconds) -> Re
         .await?;
     }
     tx.commit().await?;
-    Ok(Layout { id: input.id.clone(), name: input.name.clone(), arrangement: input.arrangement, sync: input.sync, cells, updated_at: now })
+    Ok(Layout {
+        id: input.id.clone(),
+        name: input.name.clone(),
+        arrangement: input.arrangement,
+        sync: input.sync,
+        cells,
+        updated_at: now,
+        revision: input.revision,
+    })
 }
 
 /// 마지막 레이아웃은 지울 수 없다(레이아웃이 0개인 상태는 없다).
@@ -158,18 +194,30 @@ pub async fn delete_layout(db: &AppDb, id: &str) -> Result<(), StoreError> {
     Ok(())
 }
 
+/// `revision` 키는 열에 따로 두고, 돌려줄 때 다시 넣는다.
 pub async fn get_ui_state(db: &AppDb) -> Result<UiState, StoreError> {
-    let state: String = sqlx::query_scalar("SELECT state FROM ui_state WHERE singleton = 1").fetch_one(db.read()).await?;
-    serde_json::from_str(&state).map_err(|e| corrupt("ui_state", e))
+    let row = sqlx::query("SELECT state, revision FROM ui_state WHERE singleton = 1").fetch_one(db.read()).await?;
+    let mut state: UiState = serde_json::from_str(row.get("state")).map_err(|e| corrupt("ui_state", e))?;
+    state.0.insert("revision".into(), row.get::<i64, _>("revision").into());
+    Ok(state)
 }
 
-pub async fn put_ui_state(db: &AppDb, state: &UiState) -> Result<(), StoreError> {
-    let text = serde_json::to_string(state).expect("UiState는 언제나 직렬화된다");
+/// `state`의 `revision` 키는 저장하지 않는다. 순서는 `revision` 인자로 본다.
+pub async fn put_ui_state(db: &AppDb, state: &UiState, revision: Revision) -> Result<(), StoreError> {
+    let mut fields = state.0.clone();
+    fields.remove("revision");
+    let text = serde_json::to_string(&fields).expect("UiState는 언제나 직렬화된다");
     let mut tx = db.begin_write().await?;
-    sqlx::query("INSERT INTO ui_state (singleton, state) VALUES (1, ?) ON CONFLICT(singleton) DO UPDATE SET state = excluded.state")
-        .bind(text)
-        .execute(&mut *tx)
-        .await?;
+    let stored: Option<i64> = sqlx::query_scalar("SELECT revision FROM ui_state WHERE singleton = 1").fetch_optional(&mut *tx).await?;
+    check_newer(stored, revision)?;
+    sqlx::query(
+        "INSERT INTO ui_state (singleton, state, revision) VALUES (1, ?, ?)
+         ON CONFLICT(singleton) DO UPDATE SET state = excluded.state, revision = excluded.revision",
+    )
+    .bind(text)
+    .bind(revision.0)
+    .execute(&mut *tx)
+    .await?;
     tx.commit().await?;
     Ok(())
 }
@@ -193,7 +241,11 @@ mod tests {
     }
 
     fn watch(codes: &[&str]) -> Watchlist {
-        Watchlist { symbols: codes.iter().map(|c| SymbolCode((*c).into())).collect() }
+        watch_at(codes, 1)
+    }
+
+    fn watch_at(codes: &[&str], revision: i64) -> Watchlist {
+        Watchlist { symbols: codes.iter().map(|c| SymbolCode((*c).into())).collect(), revision: Revision(revision) }
     }
 
     fn cell(slot: u8, symbol: &str, venue: Option<Venue>) -> Cell {
@@ -201,7 +253,11 @@ mod tests {
     }
 
     fn layout(id: &str, name: &str, arrangement: Arrangement, cells: Vec<Cell>) -> LayoutInput {
-        LayoutInput { id: id.into(), name: name.into(), arrangement, sync: LayoutSync { crosshair: false, scroll: true }, cells }
+        layout_at(id, name, arrangement, cells, 1)
+    }
+
+    fn layout_at(id: &str, name: &str, arrangement: Arrangement, cells: Vec<Cell>, revision: i64) -> LayoutInput {
+        LayoutInput { id: id.into(), name: name.into(), arrangement, sync: LayoutSync { crosshair: false, scroll: true }, cells, revision: Revision(revision) }
     }
 
     #[sqlx::test(migrations = "./migrations")]
@@ -210,7 +266,7 @@ mod tests {
         assert!(get_watchlist(&db).await.unwrap().symbols.is_empty());
         put_watchlist(&db, &watch(&["005930", "IDX:001", "000660"])).await.unwrap();
         assert_eq!(codes(&get_watchlist(&db).await.unwrap()), ["005930", "IDX:001", "000660"]);
-        put_watchlist(&db, &watch(&["000660", "005930"])).await.unwrap();
+        put_watchlist(&db, &watch_at(&["000660", "005930"], 2)).await.unwrap();
         assert_eq!(codes(&get_watchlist(&db).await.unwrap()), ["000660", "005930"], "순서 바꾸기와 지우기");
     }
 
@@ -229,7 +285,7 @@ mod tests {
         assert_eq!(read.cells[1].chart_settings, json!({"v": 1, "future": [1]}), "모르는 키도 그대로");
         assert_eq!(read.sync, LayoutSync { crosshair: false, scroll: true });
 
-        let one = layout("L2", "둘 바꿈", Arrangement::One, vec![cell(0, "000660", Some(Venue::Krx))]);
+        let one = layout_at("L2", "둘 바꿈", Arrangement::One, vec![cell(0, "000660", Some(Venue::Krx))], 2);
         put_layout(&db, &one, UnixSeconds(200)).await.unwrap();
         let read = get_layout(&db, "L2").await.unwrap();
         assert_eq!((read.cells.len(), read.updated_at, read.name.as_str()), (1, UnixSeconds(200), "둘 바꿈"), "칸을 통째로 바꾼다");
@@ -264,6 +320,31 @@ mod tests {
         assert!(matches!(get_layout(&db, "L2").await, Err(StoreError::NotFound)), "실패한 트랜잭션은 레이아웃도 남기지 않는다");
     }
 
+    /// R2: 늦게 도착한 옛 PUT(revision이 저장된 것 이하)은 새 값을 덮지 못한다. 같은 revision을 다시 보내도 거절한다.
+    #[sqlx::test(migrations = "./migrations")]
+    async fn older_or_equal_revisions_never_overwrite(_: SqlitePoolOptions, opts: SqliteConnectOptions) {
+        let db = db(opts).await;
+        put_watchlist(&db, &watch_at(&["005930", "000660"], 20)).await.unwrap();
+        for stale in [19, 20] {
+            assert!(matches!(put_watchlist(&db, &watch_at(&["005930"], stale)).await, Err(StoreError::Stale(Revision(20)))), "{stale}");
+        }
+        let list = get_watchlist(&db).await.unwrap();
+        assert_eq!((codes(&list), list.revision), (vec!["005930", "000660"], Revision(20)));
+
+        let new = layout_at("L2", "새", Arrangement::One, vec![cell(0, "005930", Some(Venue::Krx))], 20);
+        put_layout(&db, &new, UnixSeconds(1)).await.unwrap();
+        let old = layout_at("L2", "옛", Arrangement::One, vec![cell(0, "000660", Some(Venue::Krx))], 19);
+        assert!(matches!(put_layout(&db, &old, UnixSeconds(2)).await, Err(StoreError::Stale(Revision(20)))));
+        let read = get_layout(&db, "L2").await.unwrap();
+        assert_eq!((read.name.as_str(), read.revision, read.updated_at), ("새", Revision(20), UnixSeconds(1)));
+
+        let ui = |theme: &str| -> UiState { serde_json::from_value(json!({"lastLayoutId": null, "theme": theme})).unwrap() };
+        put_ui_state(&db, &ui("light"), Revision(20)).await.unwrap();
+        assert!(matches!(put_ui_state(&db, &ui("dark"), Revision(20)).await, Err(StoreError::Stale(Revision(20)))));
+        let read = get_ui_state(&db).await.unwrap();
+        assert_eq!(serde_json::to_value(read).unwrap(), json!({"lastLayoutId": null, "theme": "light", "revision": 20}));
+    }
+
     /// R3: 레이아웃 행과 칸을 서로 다른 커밋에서 읽으면 `2v`에 칸 1개 같은, 저장된 적 없는 조합이 나온다.
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn get_layout_never_mixes_two_commits() {
@@ -277,7 +358,8 @@ mod tests {
             let (db, stop) = (db.clone(), stop.clone());
             tokio::spawn(async move {
                 for i in 0..400 {
-                    put_layout(&db, if i % 2 == 0 { &two } else { &one }, UnixSeconds(i)).await.unwrap();
+                    let next = LayoutInput { revision: Revision(i + 2), ..if i % 2 == 0 { two.clone() } else { one.clone() } };
+                    put_layout(&db, &next, UnixSeconds(i)).await.unwrap();
                 }
                 stop.store(true, std::sync::atomic::Ordering::SeqCst);
             })
@@ -313,9 +395,9 @@ mod tests {
     async fn ui_state_keeps_unknown_keys(_: SqlitePoolOptions, opts: SqliteConnectOptions) {
         let db = db(opts).await;
         let seeded = serde_json::to_value(get_ui_state(&db).await.unwrap()).unwrap();
-        assert_eq!(seeded, json!({"lastLayoutId": DEFAULT_ID, "theme": "dark"}));
-        let state: UiState = serde_json::from_value(json!({"lastLayoutId": null, "theme": "light", "watchCollapsed": true, "nested": {"a": [1]}})).unwrap();
-        put_ui_state(&db, &state).await.unwrap();
+        assert_eq!(seeded, json!({"lastLayoutId": DEFAULT_ID, "theme": "dark", "revision": 0}));
+        let state: UiState = serde_json::from_value(json!({"lastLayoutId": null, "theme": "light", "watchCollapsed": true, "nested": {"a": [1]}, "revision": 1})).unwrap();
+        put_ui_state(&db, &state, Revision(1)).await.unwrap();
         assert_eq!(get_ui_state(&db).await.unwrap(), state);
     }
 }

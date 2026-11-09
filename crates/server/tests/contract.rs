@@ -43,6 +43,7 @@ fn generated_typescript_matches_the_committed_files() {
         generated::<Market>(),
         generated::<Period>(),
         generated::<Quote>(),
+        generated::<Revision>(),
         generated::<QuoteSource>(),
         generated::<SymbolCode>(),
         generated::<SymbolInfo>(),

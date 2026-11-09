@@ -68,7 +68,7 @@ pub fn status_of(code: api::ApiErrorCode) -> StatusCode {
         KiwoomUnavailable => StatusCode::SERVICE_UNAVAILABLE,
         // 키움이 우리 인증을 거절했다. 다시 시도해도 낫지 않으므로 503이 아니라 502로 둔다.
         KiwoomAuthFailed => StatusCode::BAD_GATEWAY,
-        Conflict => StatusCode::CONFLICT,
+        Conflict | StaleRevision => StatusCode::CONFLICT,
         PayloadTooLarge => StatusCode::PAYLOAD_TOO_LARGE,
         MethodNotAllowed => StatusCode::METHOD_NOT_ALLOWED,
         Internal => StatusCode::INTERNAL_SERVER_ERROR,
@@ -411,7 +411,7 @@ mod tests {
     const DEFAULT_ID: &str = "01900000-0000-7000-8000-000000000001";
 
     fn two_cells(nxt_symbol: &str) -> Value {
-        json!({"id": "L2", "name": "둘", "arrangement": "2h", "sync": {"crosshair": false}, "cells": [
+        json!({"id": "L2", "name": "둘", "arrangement": "2h", "sync": {"crosshair": false}, "revision": 1, "cells": [
             {"slot": 1, "symbol": nxt_symbol, "venue": "nxt", "period": "5m", "symbolLink": true, "chartSettings": {"v": 1, "x": [1]}},
             {"slot": 0, "symbol": "IDX:101", "venue": null, "period": "D", "symbolLink": false, "chartSettings": {}}
         ]})
@@ -458,15 +458,17 @@ mod tests {
     #[tokio::test]
     async fn watchlist_round_trip_and_rejections() {
         let f = live_fixture(true).await;
-        assert_eq!(json(&f.app, "/api/watchlist").await, (StatusCode::OK, json!({"symbols": []})));
-        let list = json!({"symbols": ["005930", "IDX:001", "999990"]});
+        assert_eq!(json(&f.app, "/api/watchlist").await, (StatusCode::OK, json!({"symbols": [], "revision": 0})));
+        let list = json!({"symbols": ["005930", "IDX:001", "999990"], "revision": 1});
         assert_eq!(put(&f.app, "/api/watchlist", &list).await, (StatusCode::OK, list.clone()), "목록에 없는 코드도 받는다");
         assert_eq!(json(&f.app, "/api/watchlist").await, (StatusCode::OK, list));
         for (body, status, want) in [
-            (json!({"symbols": ["005930", "005930"]}).to_string(), StatusCode::BAD_REQUEST, "bad_request"),
-            (json!({"symbols": ["abc"]}).to_string(), StatusCode::BAD_REQUEST, "bad_request"),
+            (json!({"symbols": ["005930", "005930"], "revision": 2}).to_string(), StatusCode::BAD_REQUEST, "bad_request"),
+            (json!({"symbols": ["abc"], "revision": 2}).to_string(), StatusCode::BAD_REQUEST, "bad_request"),
+            (json!({"symbols": ["005930"]}).to_string(), StatusCode::BAD_REQUEST, "bad_request"),
             ("{\"symbols\": [".to_owned(), StatusCode::BAD_REQUEST, "bad_request"),
-            (json!({"symbols": ["005930"], "pad": "x".repeat(70_000)}).to_string(), StatusCode::PAYLOAD_TOO_LARGE, "payload_too_large"),
+            (json!({"symbols": ["005930"], "revision": 2, "pad": "x".repeat(70_000)}).to_string(), StatusCode::PAYLOAD_TOO_LARGE, "payload_too_large"),
+            (json!({"symbols": ["005930"], "revision": 1}).to_string(), StatusCode::CONFLICT, "stale_revision"),
         ] {
             let (s, v) = send(&f.app, "PUT", "/api/watchlist", body).await;
             assert_eq!((s, code(&v)), (status, want), "{v}");
@@ -489,11 +491,12 @@ mod tests {
         assert_eq!(saved["sync"], json!({"crosshair": false, "scroll": true}), "빠진 키는 true");
         assert_eq!(saved["cells"][0]["slot"], 0, "slot 순서로 돌려준다");
         assert_eq!(json(&f.app, "/api/layouts/L2").await, (StatusCode::OK, saved));
-        assert_eq!(put(&f.app, "/api/layouts/L3", &json!({"id": "L3", "name": "폐지", "arrangement": "1", "sync": {}, "cells": [
+        assert_eq!(put(&f.app, "/api/layouts/L3", &json!({"id": "L3", "name": "폐지", "arrangement": "1", "sync": {}, "revision": 1, "cells": [
             {"slot": 0, "symbol": "999990", "venue": "nxt", "period": "D", "symbolLink": false, "chartSettings": {}}]})).await.0, StatusCode::OK, "목록에 없는 종목은 막지 않는다");
 
         let with = |f: &dyn Fn(&mut Value)| {
             let mut v = two_cells("005930");
+            v["revision"] = json!(2);
             f(&mut v);
             v
         };
@@ -510,13 +513,17 @@ mod tests {
             ("/api/layouts/L2", with(&|v| v["name"] = json!("기본")), StatusCode::CONFLICT, "conflict"),
             ("/api/layouts/L2", with(&|v| v["cells"][0]["chartSettings"] = json!({"pad": "x".repeat(65_536)})), StatusCode::PAYLOAD_TOO_LARGE, "payload_too_large"),
             ("/api/layouts/L2", with(&|v| v["pad"] = json!("x".repeat(LAYOUT_LIMIT))), StatusCode::PAYLOAD_TOO_LARGE, "payload_too_large"),
+            ("/api/layouts/L2", with(&|v| v["revision"] = json!(null)), StatusCode::BAD_REQUEST, "bad_request"),
+            ("/api/layouts/L2", with(&|v| v["revision"] = json!(1)), StatusCode::CONFLICT, "stale_revision"),
+            ("/api/layouts/L2", with(&|v| v["revision"] = json!(0)), StatusCode::CONFLICT, "stale_revision"),
         ] {
             let (s, v) = put(&f.app, uri, &body).await;
             assert_eq!((s, code(&v)), (status, want), "{uri} {v}");
         }
         let (_, v) = put(&f.app, "/api/layouts/L2", &two_cells("005935")).await;
         assert!(v["error"]["message"].as_str().unwrap().contains("NXT에서 거래되지 않는 종목입니다"), "{v}");
-        let mut four_big = json!({"id": "L4", "name": "넷", "arrangement": "4", "sync": {}, "cells": []});
+        assert_eq!(json(&f.app, "/api/layouts/L2").await.1["revision"], 1, "거절한 PUT은 저장하지 않는다");
+        let mut four_big = json!({"id": "L4", "name": "넷", "arrangement": "4", "sync": {}, "revision": 1, "cells": []});
         for slot in 0..4 {
             four_big["cells"].as_array_mut().unwrap().push(json!({"slot": slot, "symbol": "IDX:001", "venue": null, "period": "D", "symbolLink": false,
                 "chartSettings": {"pad": "x".repeat(60_000)}}));
@@ -551,14 +558,17 @@ mod tests {
     #[tokio::test]
     async fn ui_state_round_trips_unknown_keys_and_rejects_non_objects() {
         let f = live_fixture(true).await;
-        assert_eq!(json(&f.app, "/api/ui-state").await, (StatusCode::OK, json!({"lastLayoutId": DEFAULT_ID, "theme": "dark"})));
-        let state = json!({"lastLayoutId": null, "theme": "light", "watchCollapsed": true, "nested": {"a": [1, 2]}});
+        assert_eq!(json(&f.app, "/api/ui-state").await, (StatusCode::OK, json!({"lastLayoutId": DEFAULT_ID, "theme": "dark", "revision": 0})));
+        let state = json!({"lastLayoutId": null, "theme": "light", "watchCollapsed": true, "nested": {"a": [1, 2]}, "revision": 5});
         assert_eq!(put(&f.app, "/api/ui-state", &state).await, (StatusCode::OK, state.clone()));
         assert_eq!(json(&f.app, "/api/ui-state").await, (StatusCode::OK, state));
         for (body, status, want) in [
             (json!([1, 2]), StatusCode::BAD_REQUEST, "bad_request"),
             (json!("x"), StatusCode::BAD_REQUEST, "bad_request"),
             (json!({"theme": "dark", "pad": "x".repeat(65_536)}), StatusCode::PAYLOAD_TOO_LARGE, "payload_too_large"),
+            (json!({"theme": "dark"}), StatusCode::BAD_REQUEST, "bad_request"),
+            (json!({"theme": "dark", "revision": "6"}), StatusCode::BAD_REQUEST, "bad_request"),
+            (json!({"theme": "dark", "revision": 5}), StatusCode::CONFLICT, "stale_revision"),
         ] {
             let (s, v) = put(&f.app, "/api/ui-state", &body).await;
             assert_eq!((s, code(&v)), (status, want), "{v}");
@@ -650,6 +660,7 @@ mod tests {
             (KiwoomUnavailable, 503),
             (KiwoomAuthFailed, 502),
             (Conflict, 409),
+            (StaleRevision, 409),
             (PayloadTooLarge, 413),
             (MethodNotAllowed, 405),
             (Internal, 500),

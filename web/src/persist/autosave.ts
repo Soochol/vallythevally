@@ -6,7 +6,8 @@ import { type SaveTarget, usePersistStore } from "../stores/persist";
 import { useUiStore } from "../stores/ui";
 import { useWatchlistStore } from "../stores/watchlist";
 import { exceedsLimit } from "./bytes";
-import { createSaver, type Saver } from "./saver";
+import { createSaver, type Saver, type SaverOptions } from "./saver";
+import { clearUnsaved, writeUnsaved } from "./unsaved";
 import { toUiState } from "./uiState";
 
 const DEBOUNCE_MS = 1000;
@@ -16,6 +17,10 @@ export interface AutosaveDeps {
   /** 이미 직렬화한 본문을 PUT한다. */
   put(path: string, json: string, opts: { keepalive: boolean }): Promise<unknown>;
   toast(text: string): void;
+  /** 자료마다 지금까지 쓴 가장 큰 revision(복원이 읽은 서버 값과 되살린 미저장 본문 중 큰 것). */
+  revisions: Record<SaveTarget, number>;
+  /** 미저장 본문을 둘 곳. 기본은 localStorage(`persist/unsaved.ts`). */
+  unsaved?: (target: SaveTarget) => SaverOptions<object>["unsaved"];
 }
 
 export interface Autosave {
@@ -39,8 +44,10 @@ export function retryFailedSaves() {
  */
 export function startAutosave(deps: AutosaveDeps): Autosave {
   const setSave = usePersistStore.getState().setSave;
+  const unsaved =
+    deps.unsaved ?? ((target: SaveTarget) => ({ write: (u) => writeUnsaved(target, u), clear: (upTo) => clearUnsaved(target, upTo) }));
 
-  const layout = createSaver<LayoutInput>({
+  const layout = createSaver<Omit<LayoutInput, "revision">>({
     debounceMs: DEBOUNCE_MS,
     read: () => {
       const { id, name, arrangement, sync, cells } = useLayoutStore.getState().layout;
@@ -48,7 +55,10 @@ export function startAutosave(deps: AutosaveDeps): Autosave {
     },
     // 서버는 칸마다 chartSettings를 64KB로 막는다.
     tooLarge: (l) => l.cells.some((c) => exceedsLimit(c.chartSettings)),
-    send: (json, o) => deps.put(layoutPath(useLayoutStore.getState().layout.id), json, o),
+    path: () => layoutPath(useLayoutStore.getState().layout.id),
+    revision: deps.revisions.layout,
+    send: deps.put,
+    unsaved: unsaved("layout"),
     onState: (s) => setSave("layout", s),
   });
 
@@ -58,7 +68,8 @@ export function startAutosave(deps: AutosaveDeps): Autosave {
       const { prefs, extra } = useUiStore.getState();
       return toUiState(prefs, extra);
     },
-    tooLarge: exceedsLimit,
+    // 서버는 revision까지 담은 본문을 잰다. 가장 긴 revision으로 잰다.
+    tooLarge: (v) => exceedsLimit({ ...v, revision: Number.MAX_SAFE_INTEGER }),
     // 화면이 스스로 줄일 수 있는 것은 최근 본 종목뿐이다(frontend.md §3.7a).
     shrink: () => {
       const store = useUiStore.getState();
@@ -67,15 +78,21 @@ export function startAutosave(deps: AutosaveDeps): Autosave {
       deps.toast(RECENT_CLEARED);
       return true;
     },
-    send: (json, o) => deps.put(UI_STATE_PATH, json, o),
+    path: () => UI_STATE_PATH,
+    revision: deps.revisions.ui,
+    send: deps.put,
+    unsaved: unsaved("ui"),
     onState: (s) => setSave("ui", s),
   });
 
-  const watchlist = createSaver<Watchlist>({
+  const watchlist = createSaver<Omit<Watchlist, "revision">>({
     debounceMs: 0,
     read: () => ({ symbols: [...useWatchlistStore.getState().symbols] }),
     tooLarge: () => false,
-    send: (json, o) => deps.put(WATCHLIST_PATH, json, o),
+    path: () => WATCHLIST_PATH,
+    revision: deps.revisions.watchlist,
+    send: deps.put,
+    unsaved: unsaved("watchlist"),
     onState: (s) => setSave("watchlist", s),
   });
 

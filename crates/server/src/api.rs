@@ -237,11 +237,18 @@ pub struct Quote {
     pub source: QuoteSource,
 }
 
+/// 저장 순서 번호(R2). 브라우저가 저장할 때마다 늘려 보낸다(`max(지금 ms, 마지막 + 1)`).
+/// PUT은 저장된 것보다 클 때만 받고, 아니면 409 `stale_revision`이다. GET은 저장된 값을 돌려준다. 처음은 0.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct Revision(#[ts(type = "number")] pub i64);
+
 /// `GET /api/watchlist` 응답이자 `PUT /api/watchlist` 본문. 표시 순서대로. 중복은 400.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[ts(export)]
 pub struct Watchlist {
     pub symbols: Vec<SymbolCode>,
+    pub revision: Revision,
 }
 
 /// 칸 배치. `2h` 좌우, `2v` 상하. #3은 `1`만 쓴다.
@@ -328,6 +335,7 @@ pub struct Layout {
     /// 길이는 arrangement의 칸 수와 같다. slot 0부터 차례로.
     pub cells: Vec<Cell>,
     pub updated_at: UnixSeconds,
+    pub revision: Revision,
 }
 
 /// `PUT /api/layouts/:id` 본문(없으면 만들고 있으면 바꾼다). `id`는 주소의 id와 같아야 한다.
@@ -340,11 +348,13 @@ pub struct LayoutInput {
     pub arrangement: Arrangement,
     pub sync: LayoutSync,
     pub cells: Vec<Cell>,
+    pub revision: Revision,
 }
 
 /// `GET /api/ui-state`, `PUT /api/ui-state`. 64KB 이하. 서버는 객체인지만 보고 모르는 키까지 그대로 왕복시킨다.
+/// `revision`(저장 순서 번호, `Revision`)만은 서버가 읽는다. PUT에 없거나 정수가 아니면 400이다.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
-#[ts(export, type = r#"{ lastLayoutId: string | null; theme: "dark" | "light"; [k: string]: unknown }"#)]
+#[ts(export, type = r#"{ lastLayoutId: string | null; theme: "dark" | "light"; revision: number; [k: string]: unknown }"#)]
 pub struct UiState(pub serde_json::Map<String, serde_json::Value>);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -360,6 +370,8 @@ pub enum ApiErrorCode {
     KiwoomAuthFailed,
     Conflict,
     PayloadTooLarge,
+    /// 저장된 것보다 크지 않은 revision으로 저장하려 했다. 더 새 편집이 이미 저장돼 있다.
+    StaleRevision,
     /// 있는 API 경로에 틀린 메서드를 보냈다.
     MethodNotAllowed,
     Internal,
@@ -422,13 +434,15 @@ mod tests {
         let layout: LayoutInput = serde_json::from_value(json!({
             "id": "01900000-0000-7000-8000-000000000001", "name": "기본", "arrangement": "1", "sync": {"scroll": false},
             "cells": [{"slot": 0, "symbol": "005930", "venue": "nxt", "period": "5m", "symbolLink": false,
-                       "chartSettings": {"v": 1, "future": [1, 2]}}]
+                       "chartSettings": {"v": 1, "future": [1, 2]}}],
+            "revision": 1_794_152_040_123_i64
         }))
         .unwrap();
         assert_eq!(layout.sync, LayoutSync { crosshair: true, scroll: false });
         assert_eq!(layout.cells[0].venue, Some(Venue::Nxt));
         assert_eq!(layout.cells[0].chart_settings, json!({"v": 1, "future": [1, 2]}));
         assert_eq!(layout.arrangement.cell_count(), 1);
+        assert_eq!(layout.revision, Revision(1_794_152_040_123), "Date.now() 크기의 ms도 정확히 받는다");
 
         let ui: UiState = serde_json::from_value(json!({"lastLayoutId": null, "theme": "light", "watchCollapsed": true})).unwrap();
         assert_eq!(serde_json::to_value(&ui).unwrap(), json!({"lastLayoutId": null, "theme": "light", "watchCollapsed": true}));

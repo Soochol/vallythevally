@@ -117,12 +117,12 @@ async fn user_data_survives_a_restart_and_quotes_come_from_kiwoom() {
     let base = format!("http://{}", server.addr().await);
     let client = reqwest::Client::new();
 
-    let watchlist = serde_json::json!({"symbols": ["005930", "IDX:001", "000660"]});
-    let layout = serde_json::json!({"id": "0193aaaa-0000-7000-8000-000000000002", "name": "둘", "arrangement": "2v",
+    let watchlist = serde_json::json!({"symbols": ["005930", "IDX:001", "000660"], "revision": 1_794_152_040_001_i64});
+    let layout = serde_json::json!({"id": "0193aaaa-0000-7000-8000-000000000002", "name": "둘", "arrangement": "2v", "revision": 1_794_152_040_002_i64,
         "sync": {"crosshair": true, "scroll": false}, "cells": [
             {"slot": 0, "symbol": "005930", "venue": "nxt", "period": "15m", "symbolLink": true, "chartSettings": {"v": 1, "indicators": ["ma"]}},
             {"slot": 1, "symbol": "IDX:001", "venue": null, "period": "W", "symbolLink": false, "chartSettings": {"v": 1}}]});
-    let ui = serde_json::json!({"lastLayoutId": layout["id"], "theme": "light", "watchCollapsed": true});
+    let ui = serde_json::json!({"lastLayoutId": layout["id"], "theme": "light", "watchCollapsed": true, "revision": 1_794_152_040_003_i64});
     assert_eq!(put(&client, &base, "/api/watchlist", &watchlist).await, (200, watchlist.clone()));
     let mut saved = Value::Null;
     for _ in 0..100 {

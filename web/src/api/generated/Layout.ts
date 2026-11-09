@@ -2,6 +2,7 @@
 import type { Arrangement } from "./Arrangement";
 import type { Cell } from "./Cell";
 import type { LayoutSync } from "./LayoutSync";
+import type { Revision } from "./Revision";
 import type { UnixSeconds } from "./UnixSeconds";
 
 /**
@@ -15,4 +16,4 @@ id: string, name: string, arrangement: Arrangement, sync: LayoutSync,
 /**
  * 길이는 arrangement의 칸 수와 같다. slot 0부터 차례로.
  */
-cells: Array<Cell>, updatedAt: UnixSeconds, };
+cells: Array<Cell>, updatedAt: UnixSeconds, revision: Revision, };

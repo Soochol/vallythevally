@@ -12,7 +12,7 @@ use axum::routing::get;
 use domain::{Symbol, Venue};
 use serde::de::DeserializeOwned;
 
-use crate::api::{self, ApiErrorCode, Layout, LayoutInput, LayoutSummary, UiState, UnixSeconds, Watchlist};
+use crate::api::{self, ApiErrorCode, Layout, LayoutInput, LayoutSummary, Revision, UiState, UnixSeconds, Watchlist};
 use crate::http::{ApiFailure, AppState, not_ready};
 use crate::userdata::{self, StoreError};
 
@@ -34,6 +34,9 @@ impl From<StoreError> for ApiFailure {
         match e {
             StoreError::NotFound => ApiFailure::new(ApiErrorCode::NotFound, "없는 레이아웃입니다"),
             StoreError::Conflict(m) => ApiFailure::new(ApiErrorCode::Conflict, m),
+            StoreError::Stale(stored) => {
+                ApiFailure::new(ApiErrorCode::StaleRevision, format!("더 새 편집(revision {})이 이미 저장돼 있습니다", stored.0))
+            }
             StoreError::Db(e) => {
                 tracing::error!(error = %e, "사용자 자료 DB 오류");
                 ApiFailure::new(ApiErrorCode::Internal, "사용자 자료를 읽거나 쓰지 못했습니다")
@@ -142,6 +145,11 @@ async fn get_ui_state(State(st): State<Arc<AppState>>) -> Result<Json<UiState>, 
 /// 객체인지만 본다. 모르는 키도 그대로 저장한다.
 async fn put_ui_state(State(st): State<Arc<AppState>>, body: Body) -> Result<Json<UiState>, ApiFailure> {
     let state: UiState = read_json(body, JSON_LIMIT, "화면 상태 본문").await?;
-    userdata::put_ui_state(&st.db, &state).await?;
+    let revision = state
+        .0
+        .get("revision")
+        .and_then(serde_json::Value::as_i64)
+        .ok_or_else(|| ApiFailure::bad_request("화면 상태에 정수 revision이 있어야 합니다"))?;
+    userdata::put_ui_state(&st.db, &state, Revision(revision)).await?;
     Ok(Json(state))
 }

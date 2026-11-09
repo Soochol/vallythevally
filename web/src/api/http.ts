@@ -8,6 +8,7 @@ const API_ERROR_CODES = [
   "kiwoom_auth_failed",
   "conflict",
   "payload_too_large",
+  "stale_revision",
   "method_not_allowed",
   "internal",
 ] as const satisfies readonly ApiErrorCode[];

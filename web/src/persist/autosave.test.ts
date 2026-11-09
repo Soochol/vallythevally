@@ -26,6 +26,8 @@ beforeEach(() => {
       puts.push({ path, body: JSON.parse(json), keepalive });
     },
     toast: (t) => toasts.push(t),
+    revisions: { layout: 0, ui: 0, watchlist: 0 },
+    unsaved: () => undefined,
   });
 });
 
@@ -62,7 +64,7 @@ test("테마를 바꾸면 모르는 키와 함께 UiState를 보낸다", async (
   expect(puts).toEqual([
     {
       path: "/api/ui-state",
-      body: { phone: 1, lastLayoutId: DEFAULT_LAYOUT.id, theme: "light", watchCollapsed: false, recentSymbols: ["IDX:001"] },
+      body: { phone: 1, lastLayoutId: DEFAULT_LAYOUT.id, theme: "light", watchCollapsed: false, recentSymbols: ["IDX:001"], revision: expect.any(Number) },
       keepalive: false,
     },
   ]);
@@ -71,12 +73,12 @@ test("테마를 바꾸면 모르는 키와 함께 UiState를 보낸다", async (
 test("관심종목은 바꾸자마자 보낸다", async () => {
   useWatchlistStore.getState().add("000660");
   await vi.advanceTimersByTimeAsync(0);
-  expect(puts).toEqual([{ path: "/api/watchlist", body: { symbols: ["005930", "000660"] }, keepalive: false }]);
+  expect(puts).toEqual([{ path: "/api/watchlist", body: { symbols: ["005930", "000660"], revision: expect.any(Number) }, keepalive: false }]);
 });
 
 test("UiState가 64KB를 넘으면 최근 본 종목을 지우고 한 번 다시 보낸다", async () => {
   const prefs = { ...DEFAULT_UI_PREFS, lastLayoutId: DEFAULT_LAYOUT.id };
-  const base = JSON.stringify(toUiState(prefs, { blob: "" })).length;
+  const base = JSON.stringify({ ...toUiState(prefs, { blob: "" }), revision: Number.MAX_SAFE_INTEGER }).length;
   const blob = "x".repeat(PAYLOAD_LIMIT_BYTES - base);
   useUiStore.getState().load({ ...prefs, recentSymbols: ["005930", "000660"] }, { blob });
   useUiStore.getState().toggleWatch();
@@ -112,12 +114,13 @@ test("탭이 숨으면 기다리던 레이아웃을 keepalive로 곧바로 보�
 });
 
 test("R1: 종목 정보를 못 받아 통합으로 그리는 NXT 칸은, 봉 주기만 바꿔 저장해도 nxt로 저장된다", async () => {
-  const stored = { ...DEFAULT_LAYOUT, cells: [{ ...DEFAULT_LAYOUT.cells[0]!, symbol: "005930", venue: "nxt" as const }], updatedAt: 1 };
+  const stored = { ...DEFAULT_LAYOUT, cells: [{ ...DEFAULT_LAYOUT.cells[0]!, symbol: "005930", venue: "nxt" as const }], updatedAt: 1, revision: 1 };
   const r = await restore({
     uiState: async () => ({ lastLayoutId: DEFAULT_LAYOUT.id, theme: "dark" }),
     layouts: async () => [],
     layout: async () => stored,
-    watchlist: async () => ({ symbols: [] }),
+    watchlist: async () => ({ symbols: [], revision: 0 }),
+    unsaved: () => null,
     symbolInfo: async () => Promise.reject(new ApiRequestError("kiwoom_unavailable", "잠시 뒤")),
   });
   useLayoutStore.getState().load(r.layout);

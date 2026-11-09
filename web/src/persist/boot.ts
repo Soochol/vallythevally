@@ -3,12 +3,13 @@ import { ApiRequestError, sendJson } from "../api/http";
 import { fetchSymbolInfo } from "../api/queries";
 import { fetchLayout, fetchLayouts, fetchUiState, fetchWatchlist } from "../api/userData";
 import { useLayoutStore } from "../stores/layout";
-import { usePersistStore } from "../stores/persist";
+import { SAVE_TARGETS, usePersistStore } from "../stores/persist";
 import { useSelectionStore } from "../stores/selection";
 import { useUiStore } from "../stores/ui";
 import { useWatchlistStore } from "../stores/watchlist";
 import { startAutosave } from "./autosave";
 import { restore } from "./restore";
+import { clearUnsaved, readUnsaved } from "./unsaved";
 import { DEFAULT_UI_PREFS, type Theme } from "./uiState";
 
 // index.html의 인라인 스크립트가 첫 그리기 전에 이 키를 읽는다. 원본은 UiState.theme이고 이것은 그림용 사본이다.
@@ -51,14 +52,19 @@ export async function boot(queryClient: QueryClient) {
           staleTime: Infinity,
           retry: false,
         }),
+      unsaved: readUnsaved,
     });
     useLayoutStore.getState().load(restored.layout);
     useUiStore.getState().load(restored.ui.prefs, restored.ui.extra);
     useWatchlistStore.getState().load(restored.watchlist);
     followTheme();
-    const autosave = startAutosave({ put: (path, json, o) => sendJson("PUT", path, json, o), toast });
+    // 서버가 이미 가진 것보다 오래된 미저장 본문은 할 일을 마쳤다. 되살린 본문은 아래 changed()가 새 revision으로 다시 남긴다.
+    for (const target of SAVE_TARGETS) clearUnsaved(target, restored.serverRevisions[target]);
+    const autosave = startAutosave({ put: (path, json, o) => sendJson("PUT", path, json, o), toast, revisions: restored.revisions });
     if (restored.layoutDirty) autosave.savers.layout.changed();
     if (restored.uiDirty) autosave.savers.ui.changed();
+    if (restored.watchlistDirty) autosave.savers.watchlist.changed();
+    // 탭을 닫거나 새로고침할 때도 hidden이 온다. 미저장 본문은 편집마다 이미 남겨 두었으므로 여기서는 보내 보기만 한다.
     document.addEventListener("visibilitychange", () => {
       if (document.visibilityState === "hidden") autosave.flush();
     });

@@ -1261,6 +1261,12 @@ CREATE TABLE watchlist (
   position INTEGER NOT NULL UNIQUE
 ) STRICT;
 
+-- 관심종목의 저장 순서 번호(0002). 목록이 여러 행이라 한 행짜리 표에 둔다
+CREATE TABLE watchlist_revision (
+  singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+  revision  INTEGER NOT NULL
+) STRICT;
+
 -- 레이아웃
 CREATE TABLE layouts (
   id          TEXT    PRIMARY KEY,                     -- UUID v7
@@ -1268,7 +1274,8 @@ CREATE TABLE layouts (
   arrangement TEXT    NOT NULL CHECK (arrangement IN ('1','2h','2v','3','4')),
   sync        TEXT    NOT NULL CHECK (json_valid(sync)),  -- { crosshair: bool, scroll: bool }. 빠진 키는 true로 읽는다
   position    INTEGER NOT NULL,
-  updated_at  INTEGER NOT NULL                         -- Unix 초
+  updated_at  INTEGER NOT NULL,                        -- Unix 초
+  revision    INTEGER NOT NULL DEFAULT 0               -- 저장 순서 번호(0002, §8.2 "저장 순서")
 ) STRICT;
 
 CREATE TABLE layout_cells (
@@ -1288,7 +1295,8 @@ CREATE TABLE layout_cells (
 -- 마지막으로 연 레이아웃, 테마 같은 화면 상태. 64KB 이하. 모르는 키도 그대로 저장한다.
 CREATE TABLE ui_state (
   singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
-  state     TEXT    NOT NULL CHECK (json_valid(state))
+  state     TEXT    NOT NULL CHECK (json_valid(state)),   -- revision 키는 빼고 저장한다
+  revision  INTEGER NOT NULL DEFAULT 0                    -- 저장 순서 번호(0002)
 ) STRICT;
 
 -- 드로잉: 종목에 붙는다. 거래소, 봉 주기, 레이아웃에는 붙지 않는다(ADR 0007).
@@ -1435,6 +1443,7 @@ pub fn judge_cross(dir: CrossDir, prev: (f64, f64), cur: (f64, f64)) -> bool;
 | `not_found` | 404 | 없는 API 경로, 없는 사용자 자료 |
 | `unknown_symbol` | 404 | 종목 목록에 없거나 키움이 빈 행을 준 종목 |
 | `conflict` | 409 | 마지막 레이아웃 지우기 같은 충돌 |
+| `stale_revision` | 409 | 사용자 자료 PUT의 `revision`이 저장된 것보다 크지 않다. 더 새 편집이 이미 저장돼 있어 저장하지 않았다(§8.2 "저장 순서") |
 | `payload_too_large` | 413 | 한도를 넘는 본문. 화면 상태·관심종목 64KB, 칸 하나의 `chartSettings` 64KB, 레이아웃 본문 272KB(4 × 64KB + 16KB) |
 | `method_not_allowed` | 405 | 있는 API 경로에 틀린 메서드를 보냈다(`POST /api/ui-state` 등) |
 | `internal` | 500 | 서버 버그(파싱 실패, 키움이 거절한 요청) |
@@ -1461,7 +1470,7 @@ interface ApiError {
       | "bad_request" | "not_found" | "unknown_symbol"
       | "kiwoom_unavailable"  // 키움 조회 실패(네트워크, 5xx, 요청 개수 초과 반복)
       | "kiwoom_auth_failed"  // 운영자가 고쳐야 한다
-      | "conflict" | "payload_too_large" | "method_not_allowed" | "internal";
+      | "conflict" | "stale_revision" | "payload_too_large" | "method_not_allowed" | "internal";
     message: string;          // 사람이 읽는 한국어 문장
   };
 }
@@ -1548,13 +1557,22 @@ interface Quote {
 - **지수**: ka10095는 지수를 받지 않는다. 지수 일봉 최신 페이지(§6)에서 만든다. 현재가는 마지막 봉(진행 중 봉이 있으면 그것)의 종가, 기준가는 그 앞 확정 봉의 종가다. `volume`과 `t`는 마지막 봉의 거래량과 시작 시각이다. 봉이 둘 없으면 빠진다.
 - #3의 `source`는 언제나 `polled`다.
 
+#### 저장 순서 (#3, R2)
+
+관심종목, 레이아웃, 화면 상태의 PUT은 본문에 `revision: number`(저장 순서 번호)를 싣는다. 브라우저가 보낼 때마다 `max(Date.now(), 지금까지 쓴 것 + 1)`로 늘린다.
+
+- 서버는 저장된 것보다 **큰** revision만 받는다. 같거나 작으면 409 `stale_revision`이고 아무것도 바꾸지 않는다. 확인과 쓰기는 한 쓰기 트랜잭션(`BEGIN IMMEDIATE`)이다.
+- 그래서 늦게 도착한 옛 요청이 새 요청을 덮지 못한다. 브라우저는 앞 요청이 진행 중이어도 탭이 숨을 때 최신 편집을 곧바로 보낼 수 있다(frontend.md §3.7).
+- GET은 저장된 revision을 돌려준다. 처음은 0이다. 새 레이아웃 id는 어떤 revision이든 받는다.
+- 다른 탭·기기 사이에서는 revision(편집 시각에 가깝다)이 큰 쪽이 이긴다. 기기 시계가 몇 초 늦으면 그 기기의 편집이 그 사이 다른 기기의 편집에 밀릴 수 있다. 탭 사이 동기화는 #4(`data_changed`)다.
+
 #### 관심종목 (#3)
 
 ```ts
 // GET /api/watchlist
-type WatchlistResponse = { symbols: SymbolCode[] };   // 표시 순서대로
+type WatchlistResponse = { symbols: SymbolCode[]; revision: number };   // 표시 순서대로
 
-// PUT /api/watchlist         본문: { symbols: SymbolCode[] }
+// PUT /api/watchlist         본문: { symbols: SymbolCode[]; revision: number }
 // 목록 전체를 바꾼다. 추가·삭제·순서 바꾸기 모두 이것 하나로 한다. 중복은 400.
 // 형식만 맞으면 종목 목록에 없는 코드도 받는다(상장폐지 종목). 화면은 "찾을 수 없음"으로 보여 준다.
 // 응답: WatchlistResponse
@@ -1572,6 +1590,7 @@ interface Layout {
   sync: { crosshair: boolean; scroll: boolean };  // 둘 다 기본 true. 저장된 값에 빠져 있으면 true로 읽는다
   cells: Cell[];                  // 길이는 arrangement 칸 수와 같다. slot 0부터
   updatedAt: UnixSeconds;
+  revision: number;               // 저장 순서 번호(위 "저장 순서")
 }
 type Arrangement = "1" | "2h" | "2v" | "3" | "4";   // 2h 좌우, 2v 상하
 
@@ -1612,7 +1631,8 @@ interface Cell {
 // GET /api/ui-state                 → UiState
 // PUT /api/ui-state   본문: UiState → UiState
 // 64KB 이하(넘으면 413 payload_too_large). 서버는 모르는 키를 버리지 않고 그대로 돌려준다.
-interface UiState { lastLayoutId: Uuid | null; theme: "dark" | "light"; [k: string]: unknown }
+// revision만은 서버가 읽어 ui_state.revision 열에 따로 둔다. 없거나 정수가 아니면 400이다.
+interface UiState { lastLayoutId: Uuid | null; theme: "dark" | "light"; revision: number; [k: string]: unknown }
 ```
 
 #### 드로잉 (#6)
