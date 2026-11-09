@@ -142,6 +142,7 @@ enum VerificationPhase {
     Waiting { at: KstTime },
     InFlight,
     Exhausted,
+    Complete,
 }
 
 struct Verification {
@@ -167,6 +168,9 @@ impl KeyState {
             attempts: 0,
             phase: VerificationPhase::Waiting { at: bucket.confirm_at().max(now).plus_secs(VERIFY_DELAY_SECS) },
         });
+        if verification.phase == VerificationPhase::Complete {
+            return;
+        }
         if previous.is_some() {
             verification.previous = previous;
         }
@@ -459,7 +463,10 @@ impl MarketHub {
         };
         match result {
             Ok(seed) => {
-                let agg = start_aggregator(key, &seed, now).trades_dropped_until(last_dropped);
+                let mut agg = start_aggregator(key, &seed, now).trades_dropped_until(last_dropped);
+                if let Some((bucket, _)) = ks.verifications.iter().rev().find(|(_, v)| v.phase == VerificationPhase::Complete) {
+                    agg.confirm_through(*bucket);
+                }
                 let current = agg.current().copied();
                 ks.feed = KeyFeed::Live(agg);
                 ks.contiguous = self.session_live;
@@ -514,6 +521,9 @@ impl MarketHub {
         };
         match result {
             Ok(Some(k)) => {
+                if let KeyFeed::Live(agg) = &mut ks.feed {
+                    agg.confirm_through(bucket);
+                }
                 if let Some(r) = ks.recent_confirmed.iter_mut().find(|b| b.bucket == bucket) {
                     *r = k;
                 }
@@ -522,7 +532,8 @@ impl MarketHub {
                     let (seq, from) = (ks.seq, Some(UnixSeconds(bucket.start().unix())));
                     emit(&self.conns, &mut self.closing, &ks.subs, |sub| ServerMessage::Reload { sub, seq, reason: ReloadReason::Replaced, from });
                 }
-                ks.verifications.remove(&bucket);
+                verification.previous = Some(k.ohlcv);
+                verification.phase = VerificationPhase::Complete;
             }
             result => {
                 verification.failed(now);
@@ -1484,6 +1495,130 @@ mod tests {
         live(h).await;
         h.events.send(trade(h, (9, 0, 7), 100, 7, Some(Exchange::Krx))).await.unwrap();
         settle().await;
+    }
+
+    async fn n3_n4_completed_recovery() -> (Harness, ConnId, Arc<Outbox>) {
+        let mut chart = Chart::default();
+        chart.set(at(8, 59, 0), [90, 90, 90, 90, 1]);
+        let h = harness(at(9, 0, 5), chart, Duration::from_secs(3));
+        live(&h).await;
+        let (conn, out) = connect(&h).await;
+        h.hub.subscribe(conn, sub("a"), samsung());
+        settle().await;
+        h.events.send(trade(&h, (9, 0, 7), 100, 7, Some(Exchange::Krx))).await.unwrap();
+        tokio::time::sleep(Duration::from_secs(8)).await;
+        h.chart.lock().unwrap().set(at(9, 0, 0), [100, 100, 100, 100, 7]);
+        h.clock.sleep_until(at(9, 1, 20)).await;
+        settle().await;
+        assert_eq!(h.fake.market_sent().len(), 2);
+        assert_eq!(h.hub.snapshot(samsung()).await.unwrap().seq, 1);
+        assert_eq!(n3_n4_replaced(&out.take(true).messages), 1);
+        (h, conn, out)
+    }
+
+    #[test]
+    fn n3_n4_complete_registration_preserves_accepted_value_and_consumed_attempts() {
+        let bucket = Period::M1.bucket(at(9, 0, 0));
+        let accepted = Ohlcv::try_new(won(100), won(100), won(100), won(100), Volume(7)).unwrap();
+        let other = Ohlcv::try_new(won(125), won(125), won(125), won(125), Volume(2)).unwrap();
+        let mut ks = KeyState {
+            generation: 1,
+            feed: KeyFeed::Live(Aggregator::new(Period::M1, None, Some(bucket))),
+            seq: 1,
+            recent_confirmed: VecDeque::new(),
+            verifications: BTreeMap::from([(bucket, Verification { previous: Some(accepted), attempts: 2, phase: VerificationPhase::Complete })]),
+            subs: BTreeSet::new(),
+            contiguous: true,
+            idle_since: None,
+        };
+        for previous in [None, Some(other)] {
+            ks.register_verification(bucket, previous, at(9, 1, 20));
+            let verification = &ks.verifications[&bucket];
+            assert_eq!(verification.previous, Some(accepted));
+            assert_eq!(verification.attempts, 2);
+            assert_eq!(verification.phase, VerificationPhase::Complete);
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn n3_n4_recovered_boundary_survives_an_omitted_seed_tail() {
+        let (h, _, out) = n3_n4_completed_recovery().await;
+        h.chart.lock().unwrap().rows.retain(|(t, _)| *t < at(9, 0, 0));
+        n3_n4_reconnect_with_duplicate(&h).await;
+        tokio::time::sleep(Duration::from_secs(8)).await;
+        let messages = out.take(true).messages;
+        assert_eq!(messages.iter().filter(|m| matches!(m, ServerMessage::Reload { reason: ReloadReason::GapFilled, .. })).count(), 1);
+        assert_eq!(n3_n4_replaced(&messages), 0);
+        let before = h.hub.snapshot(samsung()).await.unwrap();
+        assert_eq!((before.seq, before.current, before.recent_confirmed.len()), (2, None, 0));
+        h.events.send(trade(&h, (9, 0, 59), 125, 2, Some(Exchange::Krx))).await.unwrap();
+        tokio::time::sleep(Duration::from_secs(20)).await;
+        assert!(out.take(true).messages.is_empty());
+        assert_eq!(h.hub.snapshot(samsung()).await.unwrap(), before);
+        assert_eq!(h.fake.market_sent().len(), 3, "the omitted completed bucket only costs a seed request");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn n3_n4_late_recovered_trade_preserves_newer_current_exactly() {
+        let (h, _, out) = n3_n4_completed_recovery().await;
+        h.events.send(trade(&h, (9, 1, 20), 110, 3, Some(Exchange::Krx))).await.unwrap();
+        assert_eq!(take(&out).await, vec![bar_msg("a", 2, bar(at(9, 1, 0), [110, 110, 110, 110, 3]))]);
+        let before = h.hub.snapshot(samsung()).await.unwrap();
+        assert!(before.current.unwrap().is_complete());
+        h.events.send(trade(&h, (9, 0, 59), 125, 2, Some(Exchange::Krx))).await.unwrap();
+        assert!(take(&out).await.is_empty());
+        assert_eq!(h.hub.snapshot(samsung()).await.unwrap(), before);
+        assert_eq!(h.fake.market_sent().len(), 2);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn n3_n4_completed_recovery_survives_idle_grace_and_resubscription() {
+        let (h, conn, out) = n3_n4_completed_recovery().await;
+        h.hub.unsubscribe(conn, sub("a"));
+        tokio::time::sleep(Duration::from_secs(10)).await;
+        h.hub.subscribe(conn, sub("a"), samsung());
+        let messages = take(&out).await;
+        assert!(messages.iter().any(|m| *m == subscribed("a", 1, None)), "{messages:?}");
+        out.take(true);
+        let before = h.hub.snapshot(samsung()).await.unwrap();
+        h.events.send(trade(&h, (9, 0, 59), 125, 2, Some(Exchange::Krx))).await.unwrap();
+        tokio::time::sleep(Duration::from_secs(20)).await;
+        assert!(out.take(true).messages.is_empty());
+        assert_eq!(h.hub.snapshot(samsung()).await.unwrap(), before);
+        assert_eq!(h.fake.market_sent().len(), 2, "the retained key gets no new seed or verification budget");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn n3_n4_daily_reset_allows_a_new_recovery_for_a_completed_bucket() {
+        let (h, _, out) = n3_n4_completed_recovery().await;
+        h.bars.clear_all();
+        h.hub.daily_reset();
+        settle().await;
+        h.events.send(trade(&h, (9, 0, 59), 125, 2, Some(Exchange::Krx))).await.unwrap();
+        tokio::time::sleep(Duration::from_secs(20)).await;
+        let messages = out.take(true).messages;
+        assert_eq!(messages.iter().filter(|m| matches!(m, ServerMessage::Reload { reason: ReloadReason::DailyReset, .. })).count(), 1);
+        assert_eq!(n3_n4_replaced(&messages), 1, "daily reset clears the completed recovery ledger: {messages:?}");
+        assert_eq!(h.hub.snapshot(samsung()).await.unwrap().seq, 3);
+        assert_eq!(h.fake.market_sent().len(), 4, "each lifetime has one seed and one verification");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn n3_n4_key_removal_allows_a_new_recovery_for_a_completed_bucket() {
+        let (h, conn, out) = n3_n4_completed_recovery().await;
+        h.hub.unsubscribe(conn, sub("a"));
+        tokio::time::sleep(Duration::from_secs(32)).await;
+        assert!(h.hub.snapshot(samsung()).await.is_none());
+        out.take(true);
+        h.hub.subscribe(conn, sub("a"), samsung());
+        settle().await;
+        h.events.send(trade(&h, (9, 0, 59), 125, 2, Some(Exchange::Krx))).await.unwrap();
+        tokio::time::sleep(Duration::from_secs(20)).await;
+        let messages = out.take(true).messages;
+        assert!(messages.iter().any(|m| *m == subscribed("a", 0, None)), "{messages:?}");
+        assert_eq!(n3_n4_replaced(&messages), 1, "a new key owns a new recovery ledger: {messages:?}");
+        assert_eq!(h.hub.snapshot(samsung()).await.unwrap().seq, 1);
+        assert_eq!(h.fake.market_sent().len(), 4, "each key lifetime has one seed and one verification");
     }
 
     #[tokio::test(start_paused = true)]

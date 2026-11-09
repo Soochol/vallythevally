@@ -75,7 +75,14 @@ pub struct Aggregator {
 impl Aggregator {
     /// newest_confirmed: 키움 조회로 아는 가장 새 확정 봉 구간. 그 구간까지의 체결은 늦은 체결이다.
     pub fn new(period: Period, seed: Option<CurrentBar>, newest_confirmed: Option<Bucket>) -> Self {
-        Aggregator { period, current: seed, closed_through: newest_confirmed, dropped_through: None }
+        let current = seed.filter(|c| newest_confirmed.is_none_or(|closed| c.bucket > closed));
+        Aggregator { period, current, closed_through: newest_confirmed, dropped_through: None }
+    }
+
+    pub fn confirm_through(&mut self, bucket: Bucket) {
+        let closed = self.closed_through.map_or(bucket, |closed| closed.max(bucket));
+        self.closed_through = Some(closed);
+        self.current = self.current.filter(|c| c.bucket > closed);
     }
 
     pub fn trades_dropped_until(mut self, last_dropped: Option<KstTime>) -> Self {
@@ -382,5 +389,64 @@ mod tests {
         agg.apply(&tr(at(9, 0, 1), 100, 1));
         let confirmed = realtime(Period::M1.bucket(at(9, 0, 0)), ohlcv(100, 100, 100, 100, 1), false);
         assert_eq!(agg.apply(&tr(at(9, 1, 0), 101, 1)), Applied::Rolled { confirmed });
+    }
+
+    #[test]
+    fn confirmed_boundary_retires_only_covered_current() {
+        let boundary = Period::M1.bucket(at(9, 1, 0));
+        for minute in [None, Some(0), Some(1), Some(2)] {
+            for seeded in [false, true] {
+                let mut agg = fresh(Period::M1);
+                if let Some(minute) = minute {
+                    let trade = tr(at(9, minute, 30), 110, 7);
+                    if seeded {
+                        agg = Aggregator::new(Period::M1, Some(CurrentBar::seed(Period::M1.trade_bucket(trade.at), Ohlcv::from_trade(&trade))), None);
+                    } else {
+                        agg.apply(&trade);
+                    }
+                }
+                let expected = agg.current().copied().filter(|c| c.bucket() > boundary);
+                agg.confirm_through(boundary);
+                assert_eq!(agg.current().copied(), expected, "minute={minute:?}, seeded={seeded}");
+                assert_eq!(agg.apply(&tr(at(9, 1, 59), 200, 9)), Applied::Ignored(IgnoreReason::Late));
+                assert_eq!(agg.current().copied(), expected);
+                assert_eq!(agg.close_if_due(at(9, 2, 2)), None);
+            }
+        }
+    }
+
+    #[test]
+    fn constructor_retires_current_at_or_before_confirmed_boundary() {
+        let boundary = Period::M1.bucket(at(9, 1, 0));
+        for minute in [None, Some(0), Some(1), Some(2)] {
+            let seed = minute.map(|m| CurrentBar::seed(Period::M1.bucket(at(9, m, 0)), ohlcv(100, 120, 90, 110, 7)));
+            let mut agg = Aggregator::new(Period::M1, seed, Some(boundary));
+            assert_eq!(agg.current().copied(), seed.filter(|c| c.bucket() > boundary));
+            assert_eq!(agg.apply(&tr(at(9, 1, 59), 200, 9)), Applied::Ignored(IgnoreReason::Late));
+            assert_eq!(agg.close_if_due(at(9, 2, 2)), None);
+        }
+    }
+
+    #[test]
+    fn confirmation_is_monotonic_before_and_after_natural_roll_and_close() {
+        let bucket = |minute| Period::M1.bucket(at(9, minute, 0));
+        let mut agg = fresh(Period::M1);
+        agg.confirm_through(bucket(2));
+        agg.confirm_through(bucket(2));
+        agg.confirm_through(bucket(0));
+        assert_eq!(agg.apply(&tr(at(9, 2, 59), 200, 9)), Applied::Ignored(IgnoreReason::Late));
+        assert_eq!(agg.apply(&tr(at(9, 3, 10), 100, 1)), Applied::Updated);
+        let current = agg.current().copied();
+        agg.confirm_through(bucket(1));
+        assert_eq!(agg.current().copied(), current);
+        assert_eq!(agg.apply(&tr(at(9, 4, 0), 110, 2)), Applied::Rolled { confirmed: realtime(bucket(3), ohlcv(100, 100, 100, 100, 1), false) });
+        agg.confirm_through(bucket(2));
+        assert_eq!(agg.apply(&tr(at(9, 3, 59), 200, 9)), Applied::Ignored(IgnoreReason::Late));
+        assert_eq!(agg.close_if_due(at(9, 5, 2)), Some(realtime(bucket(4), ohlcv(110, 110, 110, 110, 2), false)));
+        agg.confirm_through(bucket(3));
+        assert_eq!(agg.apply(&tr(at(9, 4, 59), 200, 9)), Applied::Ignored(IgnoreReason::Late));
+        assert_eq!(agg.close_if_due(at(9, 8, 0)), None);
+        assert_eq!(agg.apply(&tr(at(9, 5, 20), 120, 3)), Applied::Updated);
+        assert_eq!(agg.current().map(|c| (c.bucket(), *c.ohlcv(), c.is_complete())), Some((bucket(5), ohlcv(120, 120, 120, 120, 3), true)));
     }
 }
