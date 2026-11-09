@@ -109,9 +109,9 @@ jobs:
         working-directory: web
         run: |
           sysctl kernel.apparmor_restrict_unprivileged_userns || true
-          sudo --preserve-env=PATH unshare --net bash -euc '
+          sudo --preserve-env=PATH,CI unshare --net bash -euc '
             ip link set lo up
-            exec sudo -u "$SUDO_USER" --preserve-env=PATH,CI env -u XDG_RUNTIME_DIR pnpm exec playwright test
+            exec sudo -u "$SUDO_USER" --preserve-env=PATH,CI env -u XDG_RUNTIME_DIR ./node_modules/.bin/playwright test
           '
       - uses: actions/upload-artifact@v4
         if: failure()
