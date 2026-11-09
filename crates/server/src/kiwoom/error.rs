@@ -5,7 +5,7 @@ use std::fmt;
 use serde_json::Value;
 
 use super::api::ApiId;
-use super::transport::TransportError;
+use super::transport::{SEND_TIMEOUT, TransportError};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum CodeKey {
@@ -367,8 +367,16 @@ impl fmt::Display for Failure {
             TokenInvalid => write!(f, "키움이 토큰을 무효로 봅니다({ev})"),
             AuthIndeterminate => write!(f, "키움 인증이 원인을 알 수 없게 실패했습니다({ev}). 곧바로 다시 발급하지 않습니다"),
             RateLimit => write!(f, "키움 요청 개수 초과가 계속됩니다({ev})"),
-            Transient if self.http_status.is_none() => write!(f, "키움에 닿지 못했습니다({ev}){note}"),
-            Transient => write!(f, "키움이 일시적으로 응답하지 못했습니다({ev})"),
+            Transient => match &self.note {
+                Note::Transport(t) if t.timed_out => write!(
+                    f,
+                    "키움 응답이 {}초 안에 오지 않았습니다({ev}, {} 단계). 이 PC의 보안 프로그램(예: AhnLab ASTx)이 연결을 막고 있을 수 있습니다",
+                    SEND_TIMEOUT.as_secs(),
+                    t.stage.label()
+                ),
+                _ if self.http_status.is_none() => write!(f, "키움에 닿지 못했습니다({ev}){note}"),
+                _ => write!(f, "키움이 일시적으로 응답하지 못했습니다({ev})"),
+            },
             InvalidRequest | BatchLimit => write!(f, "키움이 요청을 거절했습니다({ev}){note}"),
             SymbolMismatch => write!(f, "키움에 종목이나 시장 정보가 없습니다({ev})"),
             Unsupported => write!(f, "키움이 이 계좌에서 지원하지 않는 API입니다({ev}). 이 조회를 멈췄습니다"),

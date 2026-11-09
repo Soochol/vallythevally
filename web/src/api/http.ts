@@ -137,10 +137,13 @@ async function request(path: string, init: RequestInit): Promise<Response> {
     if (init.signal?.aborted) throw e;
     throw new ApiRequestError("network", "서버에 연결하지 못했습니다");
   }
+  const kiwoom = useKiwoomStore.getState();
   if (!res.ok) {
     const error = await parseError(res);
-    if (error.code === "kiwoom_auth_failed") useKiwoomStore.getState().reportAuthFailure(error.message);
+    if (error.manualActionRequired) kiwoom.reportStopped(error.message);
+    if (error.reason === "kiwoom_timeout") kiwoom.reportNotice(error.message);
     throw error;
   }
+  kiwoom.clearNotice();
   return res;
 }

@@ -39,6 +39,16 @@ pub struct TransportError {
 
 pub const SEND_TIMEOUT: Duration = Duration::from_secs(15);
 
+impl Stage {
+    pub fn label(self) -> &'static str {
+        match self {
+            Stage::Connect => "연결",
+            Stage::AwaitResponse => "응답 대기",
+            Stage::ReadBody => "본문 수신",
+        }
+    }
+}
+
 impl TransportError {
     pub fn refused() -> Self {
         TransportError { stage: Stage::Connect, timed_out: false }
@@ -52,11 +62,7 @@ impl TransportError {
 
 impl std::fmt::Display for TransportError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let stage = match self.stage {
-            Stage::Connect => "연결",
-            Stage::AwaitResponse => "응답 대기",
-            Stage::ReadBody => "본문 수신",
-        };
+        let stage = self.stage.label();
         if self.timed_out {
             write!(f, "{stage} 단계에서 {}초 시간 초과", SEND_TIMEOUT.as_secs())
         } else {
