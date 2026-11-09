@@ -365,7 +365,23 @@ pub fn judge(api_id: ApiId, status: u16, body: &str) -> Result<(), Failure> {
         _ => None,
     };
     let return_code = object.as_ref().map_or(ReturnCode::Malformed, |m| read_return_code(m.get("return_code")));
-    let msg = object.as_ref().and_then(|m| m.get("return_msg")).and_then(Value::as_str).unwrap_or("");
+    let msg = match object.as_ref().and_then(|m| m.get("return_msg")) {
+        None | Some(Value::Null) => "",
+        Some(Value::String(s)) => s,
+        Some(_) => {
+            return Err(Failure {
+                category: Protocol,
+                api_id,
+                http_status: Some(status),
+                return_code: match return_code {
+                    ReturnCode::Number(n) => Some(n),
+                    _ => None,
+                },
+                detail: None,
+                note: "return_msg가 문자열이 아닙니다".to_owned(),
+            });
+        }
+    };
     let details = rest_details(msg);
     let blocking = details.iter().copied().find(|&d| classify(Rest(d)) == AuthBlocked);
     let (category, detail) = match (details.as_slice(), blocking) {
