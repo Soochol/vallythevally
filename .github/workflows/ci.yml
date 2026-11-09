@@ -105,6 +105,8 @@ jobs:
         working-directory: web
       - run: pnpm exec playwright install --with-deps --only-shell chromium
         working-directory: web
+      - run: ./scripts/allow-chromium-sandbox.sh
+        working-directory: web
       - name: E2E with loopback networking only
         working-directory: web
         run: |
