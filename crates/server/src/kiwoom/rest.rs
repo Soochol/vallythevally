@@ -363,15 +363,14 @@ impl KiwoomRest {
         };
         let rx = self.0.enqueue(key, priority);
         let raw = rx.await.unwrap_or_else(|_| Err(queue_gone(R::API_ID)))?;
-        match serde_json::from_str::<R::Response>(&raw.body) {
-            Ok(body) => Ok(Page { body, next: raw.next }),
-            Err(e) => {
-                let note = Note::Schema { line: e.line(), column: e.column() };
-                tracing::error!(api_id = R::API_ID.as_str(), %note, "키움 응답을 읽지 못했습니다");
-                let failure = Failure::schema(R::API_ID, raw.envelope, note);
-                Err(self.0.settle(&mut self.0.lock(), failure))
-            }
-        }
+        let note = match serde_json::from_str::<R::Response>(&raw.body) {
+            Ok(body) if req.answers(&body) => return Ok(Page { body, next: raw.next }),
+            Ok(_) => Note::AnotherRequestsAnswer,
+            Err(e) => Note::Schema { line: e.line(), column: e.column() },
+        };
+        tracing::error!(api_id = R::API_ID.as_str(), %note, "키움 응답을 읽지 못했습니다");
+        let failure = Failure::schema(R::API_ID, raw.envelope, note);
+        Err(self.0.settle(&mut self.0.lock(), failure))
     }
 }
 

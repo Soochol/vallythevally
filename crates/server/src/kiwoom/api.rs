@@ -78,6 +78,10 @@ mod sealed {
 pub trait MarketRequest: sealed::Sealed + Serialize + Send + Sync {
     const API_ID: ApiId;
     type Response: serde::de::DeserializeOwned;
+
+    fn answers(&self, _: &Self::Response) -> bool {
+        true
+    }
 }
 
 /// 거래소는 종목코드 접미사로 고른다(kiwoom.md 3·12·13절). 키움 종목코드는 이 함수로만 만든다.
@@ -251,6 +255,13 @@ impl sealed::Sealed for StockBasicInfo {}
 impl MarketRequest for StockBasicInfo {
     const API_ID: ApiId = ApiId::Ka10001;
     type Response = wire::StockBasicInfoResponse;
+
+    fn answers(&self, r: &wire::StockBasicInfoResponse) -> bool {
+        match r {
+            wire::StockBasicInfoResponse::UnknownSymbol => true,
+            wire::StockBasicInfoResponse::Found { kiwoom_code, .. } => *kiwoom_code == self.stk_cd,
+        }
+    }
 }
 
 #[cfg(test)]
