@@ -6,6 +6,7 @@
 use std::path::Path;
 use std::process::Command;
 
+use indicators::{LineId, MaMethod, Spec as IndicatorSpec};
 use server::api::*;
 use ts_rs::TS;
 
@@ -37,10 +38,13 @@ fn generated_typescript_matches_the_committed_files() {
         generated::<Bar>(),
         generated::<BarsPage>(),
         generated::<Cell>(),
+        generated::<IndicatorSpec>(),
         generated::<Layout>(),
         generated::<LayoutInput>(),
         generated::<LayoutSummary>(),
         generated::<LayoutSync>(),
+        generated::<LineId>(),
+        generated::<MaMethod>(),
         generated::<Market>(),
         generated::<Period>(),
         generated::<Quote>(),
