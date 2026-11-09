@@ -16,5 +16,4 @@ Single-context: one `GLOSSARY.md` and `docs/adr/` at the repo root. See `docs/ag
 
 This repository is public.
 - **Never commit secrets**, and never write them into issues, PR bodies, or comments: `.env`, app keys, app secrets, tokens.
-- **Recommended**: avoid committing whole raw Kiwoom response JSON. Build new test fixtures from synthetic data that keeps the real response shape. Kiwoom's terms (Article 5③) forbid providing quotes to third parties.
-- A few example numbers, verification numbers, and screenshots are allowed.
+- Real Kiwoom response JSON, real numbers in docs, verification numbers, and screenshots are allowed. The account-level risk under Kiwoom's terms (Article 5③) was accepted knowingly (ADR 0008).
