@@ -1,4 +1,4 @@
-import type { Locator } from "@playwright/test";
+import type { Locator, WebSocketRoute } from "@playwright/test";
 import { type App, cell, chartOf, expect, test } from "./harness";
 
 const MONDAY_1000_KST_DURING_MARKET_HOURS = "20261109100000";
@@ -74,3 +74,47 @@ test("다시 구성한 세션에서도 REG가 거절되면 실시간만 멈추�
   await expect.poll(async () => Number(await chartOf(cell(page)).getAttribute("data-bar-count"))).toBeGreaterThan(0);
   await expect(page.getByRole("contentinfo")).toContainText("실시간 멈춤: 서버를 다시 켜야 합니다");
 });
+
+test("둘째 탭에 HTTP 페이지보다 늦게 온 옛 subscribed가 새 봉을 되돌리지 않는다", async ({ page, app, context }) => {
+  await page.goto("/?symbol=005930");
+  const firstChart = chartOf(cell(page));
+  await expect(cell(page)).toHaveAttribute("aria-busy", "false");
+  await waitRegistered(app, "005930_AL");
+  await expect(async () => {
+    await app.fake.pushReal("0B", "005930_AL", trade("100001", 201_000, 1));
+    await expect(firstChart).toHaveAttribute("data-last-close", "201000");
+  }).toPass();
+
+  const second = await context.newPage();
+  const held: string[] = [];
+  let socket: WebSocketRoute | undefined;
+  await second.routeWebSocket("**/api/ws", (ws) => {
+    socket = ws;
+    const upstream = ws.connectToServer();
+    upstream.onMessage((message) => {
+      const type = (JSON.parse(String(message)) as { type: string }).type;
+      if (["subscribed", "bar", "confirmed", "reload"].includes(type)) held.push(String(message));
+      else ws.send(message);
+    });
+  });
+  let releasePage!: () => void;
+  const gate = new Promise<void>((resolve) => (releasePage = resolve));
+  await second.route("**/api/bars?**", async (route) => {
+    await gate;
+    await route.continue();
+  });
+  await second.goto("/?symbol=005930");
+  await expect.poll(() => held.some((m) => (JSON.parse(m) as { type: string }).type === "subscribed")).toBe(true);
+  const subscribed = held.find((m) => (JSON.parse(m) as { type: string }).type === "subscribed")!;
+  expect((JSON.parse(subscribed) as { current: { c: number } }).current.c).toBe(201_000);
+
+  await app.fake.pushReal("0B", "005930_AL", trade("100002", 202_000, 1));
+  await expect(firstChart).toHaveAttribute("data-last-close", "202000");
+  releasePage();
+  const secondChart = chartOf(cell(second));
+  await expect(secondChart).toHaveAttribute("data-last-close", "202000");
+  socket!.send(subscribed);
+  await second.waitForTimeout(500);
+  await expect(secondChart).toHaveAttribute("data-last-close", "202000");
+});
+
