@@ -36,7 +36,7 @@ pub enum BarError {
     UnknownSymbol,
     /// 종목 목록을 아직 못 받았거나 키움이 응답하지 않는다.
     Unavailable(String),
-    AuthFailed,
+    AuthFailed { detail: Option<u16> },
     Internal(String),
 }
 
@@ -45,7 +45,7 @@ impl fmt::Display for BarError {
         match self {
             BarError::BadRequest(m) | BarError::Unavailable(m) | BarError::Internal(m) => f.write_str(m),
             BarError::UnknownSymbol => f.write_str("없는 종목입니다"),
-            BarError::AuthFailed => f.write_str("키움 인증에 실패했습니다"),
+            BarError::AuthFailed { detail } => f.write_str(&crate::kiwoom::auth::auth_failed_message(*detail)),
         }
     }
 }
@@ -54,7 +54,7 @@ impl From<KiwoomError> for BarError {
     fn from(e: KiwoomError) -> Self {
         match e {
             KiwoomError::RateLimited | KiwoomError::Transport(_) => BarError::Unavailable(e.to_string()),
-            KiwoomError::AuthFailed { .. } => BarError::AuthFailed,
+            KiwoomError::AuthFailed { detail } => BarError::AuthFailed { detail },
             KiwoomError::BadRequest { .. } | KiwoomError::Parse { .. } => BarError::Internal(e.to_string()),
         }
     }
@@ -120,6 +120,9 @@ impl BarService {
 
     /// `before`가 None이면 최신 페이지다.
     pub async fn page(&self, key: SeriesKey, before: Option<KstTime>, limit: usize) -> Result<BarPage, BarError> {
+        if let Some(e) = self.rest.halted() {
+            return Err(e.into());
+        }
         let dir = self.symbols.ready().await.map_err(|_| BarError::Unavailable("종목 목록을 아직 받지 못했습니다".into()))?;
         let Some(info) = dir.get(key.feed.symbol()) else {
             return Err(BarError::UnknownSymbol);

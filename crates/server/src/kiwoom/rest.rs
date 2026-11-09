@@ -13,7 +13,7 @@ use tokio::sync::{Notify, oneshot};
 use tokio::time::Instant;
 
 use super::api::{ApiId, MarketRequest};
-use super::auth::{AuthError, KiwoomAuth, TokenGen};
+use super::auth::{AuthError, KiwoomAuth, TokenGen, auth_failed_message};
 use super::transport::{HttpRequest, HttpResponse, Transport, TransportError};
 use super::wire::{Envelope, TokenResponse, detail_code};
 use crate::clock::Clock;
@@ -215,6 +215,11 @@ impl KiwoomRest {
         &self.0.auth
     }
 
+    /// 인증 거절로 멈췄으면 그 오류. 종목 목록처럼 다시는 오지 않을 것을 기다리기 전에 본다.
+    pub fn halted(&self) -> Option<KiwoomError> {
+        self.0.auth.halted().map(|d| KiwoomError::AuthFailed { detail: Some(d) })
+    }
+
     /// 토큰을 새로 받는다. 서버를 켤 때와 매일 20:05에만 부른다.
     pub async fn issue_token(&self) -> Result<TokenGen, KiwoomError> {
         let (tx, rx) = oneshot::channel();
@@ -391,6 +396,12 @@ impl Inner {
         let env: Envelope = serde_json::from_str(&resp.body).unwrap_or_default();
         let detail = env.return_msg.as_deref().and_then(detail_code);
         tracing::info!(api_id = "au10001", elapsed_ms, http = resp.status, return_code = ?env.return_code, detail = ?detail, "토큰 발급 응답");
+        // 인증 거절의 상세 코드는 HTTP 상태와 상관없이 먼저 본다. 놓치면 조회마다 다시 발급해 계정이 잠긴다(8050).
+        if let Some(d) = detail.filter(|d| is_halting(*d)) {
+            tracing::error!(detail = d, "{}", auth_failed_message(Some(d)));
+            self.auth.halt(d);
+            return Err(KiwoomError::AuthFailed { detail });
+        }
         if resp.status == 429 || detail == Some(1700) {
             return Err(KiwoomError::RateLimited);
         }
@@ -398,10 +409,6 @@ impl Inner {
             return Err(KiwoomError::Transport(format!("au10001 HTTP {}", resp.status)));
         }
         if env.return_code != Some(0) {
-            if let Some(d @ 8001..=8200) = detail {
-                tracing::error!(detail = d, "키움 인증이 거절됐습니다. 설정을 고치고 서버를 다시 켜야 합니다");
-                self.auth.halt(d);
-            }
             return Err(KiwoomError::AuthFailed { detail });
         }
         let token: TokenResponse = serde_json::from_str(&resp.body).map_err(|_| KiwoomError::AuthFailed { detail: None })?;
@@ -447,7 +454,7 @@ impl Inner {
                 }
             }
             Verdict::Halt(detail) => {
-                tracing::error!(api_id = api_id.as_str(), detail, "키움 인증이 거절됐습니다. 모든 조회를 멈춥니다. 설정을 고치고 서버를 다시 켜야 합니다");
+                tracing::error!(api_id = api_id.as_str(), detail, "{}", auth_failed_message(Some(detail)));
                 self.auth.halt(detail);
                 q.finish(id, Err(KiwoomError::AuthFailed { detail: Some(detail) }));
             }
@@ -474,6 +481,11 @@ impl Inner {
     }
 }
 
+/// 되돌릴 수 없는 인증 거절(8001~8200 중 토큰 무효 8005 밖). 받으면 서버를 다시 켤 때까지 키움에 아무것도 보내지 않는다.
+fn is_halting(detail: u16) -> bool {
+    (8001..=8200).contains(&detail) && detail != 8005
+}
+
 /// 응답 세 겹 판정(§4.3): HTTP 상태 → 최상위 return_code → return_msg 안의 상세 코드.
 fn judge(api_id: ApiId, priority: Priority, res: Result<HttpResponse, TransportError>, started: Instant) -> Verdict {
     let elapsed_ms = started.elapsed().as_millis() as u64;
@@ -488,6 +500,9 @@ fn judge(api_id: ApiId, priority: Priority, res: Result<HttpResponse, TransportE
     let msg = env.return_msg.clone().unwrap_or_default();
     let detail = detail_code(&msg);
     tracing::info!(api_id = api_id.as_str(), ?priority, elapsed_ms, http = resp.status, return_code = ?env.return_code, detail = ?detail, "키움 조회");
+    if let Some(d) = detail.filter(|d| is_halting(*d)) {
+        return Verdict::Halt(d);
+    }
     if resp.status == 429 || detail == Some(1700) {
         return Verdict::RateLimited;
     }
@@ -500,7 +515,6 @@ fn judge(api_id: ApiId, priority: Priority, res: Result<HttpResponse, TransportE
     match (env.return_code, detail) {
         (None | Some(0), _) => Verdict::Ok(RawPage { body: resp.body.into(), next: resp.next_key.map(ContKey) }),
         (Some(_), Some(8005)) => Verdict::TokenInvalid,
-        (Some(_), Some(d @ 8001..=8200)) => Verdict::Halt(d),
         (Some(rc), d) => {
             tracing::error!(api_id = api_id.as_str(), return_code = rc, detail = ?d, return_msg = %msg, "키움이 요청을 거절했습니다. 우리 코드의 버그입니다");
             Verdict::Fail(KiwoomError::BadRequest { detail: d, msg })
@@ -804,6 +818,21 @@ mod tests {
         assert_eq!(rest.call(&StockList::KOSDAQ, None, Priority::Screen, MergeScope::default()).await.err(), Some(KiwoomError::AuthFailed { detail: Some(8030) }));
         assert_eq!(rest.issue_token().await.err(), Some(KiwoomError::AuthFailed { detail: Some(8030) }));
         assert_eq!(fake.sent().len(), 2, "멈춘 뒤에는 아무것도 보내지 않는다");
+    }
+
+    /// 인증 거절 상세 코드는 HTTP 상태가 200이 아니어도 멈춘다. 5xx 재시도로 넘기면 같은 거절을 되풀이한다.
+    #[tokio::test(start_paused = true)]
+    async fn designated_terminal_rejection_halts_even_on_a_non_200_status() {
+        let tokens = token_counter();
+        let fake = Arc::new(FakeTransport::new(Duration::ZERO, move |s| {
+            tokens(s).unwrap_or_else(|| status(503, json!({"return_code": 3, "return_msg": "인증에 실패했습니다[8050:지정단말기]"})))
+        }));
+        let rest = rest(&fake);
+        let halted = Some(KiwoomError::AuthFailed { detail: Some(8050) });
+        assert_eq!(rest.call(&StockList::EXCHANGE, None, Priority::Screen, MergeScope::default()).await.err(), halted);
+        assert_eq!(rest.call(&StockList::KOSDAQ, None, Priority::Screen, MergeScope::default()).await.err(), halted);
+        assert_eq!(rest.issue_token().await.err(), halted);
+        assert_eq!(fake.sent().len(), 2, "토큰 한 번, 조회 한 번. 재시도도 재발급도 없다");
     }
 
     #[tokio::test(start_paused = true)]

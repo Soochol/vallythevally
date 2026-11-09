@@ -22,6 +22,18 @@ pub const DAILY_REISSUE_AT: TimeOfDay = match TimeOfDay::hms(20, 5, 0) {
     None => unreachable!(),
 };
 
+/// 키움이 인증을 거절했을 때 운영자에게 보일 원인과 조치. 로그와 브라우저 오류 문장에 같은 것을 쓴다.
+pub fn auth_failed_message(detail: Option<u16>) -> String {
+    match detail {
+        Some(8050) => "키움이 지정단말기 인증 실패([8050])로 거절했습니다. 키움 IP 미등록일 수 있습니다. \
+                       지금 공인 IP를 키움 포털에 등록하세요. 반복 발급 잠금일 수도 있습니다. \
+                       조회와 토큰 발급을 모두 멈췄습니다. 고친 뒤 서버를 다시 켜야 합니다"
+            .into(),
+        Some(d) => format!("키움 인증에 실패했습니다([{d}]). 조회와 토큰 발급을 모두 멈췄습니다. 운영자가 설정을 고치고 서버를 다시 켜야 합니다"),
+        None => "키움 인증에 실패했습니다. 운영자가 설정을 확인해야 합니다".into(),
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AuthError {
     /// 앱키·IP 같은 되돌릴 수 없는 인증 실패(8001~8200 중 8005 밖). 서버를 다시 켜야 한다.
