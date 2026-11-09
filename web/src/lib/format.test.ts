@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { direction, formatChange, formatPercent, formatPrice, formatVolume } from "./format";
+import { direction, formatChange, formatDecimal, formatPercent, formatPrice, formatVolume, formatWonAmount } from "./format";
 
 describe("formatPrice", () => {
   test.each([
@@ -50,4 +50,28 @@ describe("formatVolume", () => {
 
 test("direction", () => {
   expect([direction(3), direction(-1), direction(0)]).toEqual(["up", "down", "flat"]);
+});
+
+describe("formatWonAmount", () => {
+  test.each([
+    [1_130_670_300_000_000, "1,130.67조"],
+    [1e12, "1.00조"],
+    [234_500_000_000, "2,345억"],
+    [100_000_000, "1억"],
+    [9_500, "9,500원"],
+  ])("%d → %s", (won, want) => {
+    expect(formatWonAmount(won)).toBe(want);
+  });
+});
+
+describe("formatDecimal", () => {
+  test.each([
+    [21.5, "21.50"],
+    [-3.1, "−3.10"],
+    [0, "0.00"],
+    [-0.001, "0.00"],
+    [1234.567, "1,234.57"],
+  ])("%d → %s", (x, want) => {
+    expect(formatDecimal(x)).toBe(want);
+  });
 });

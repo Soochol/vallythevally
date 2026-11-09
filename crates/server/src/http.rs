@@ -33,6 +33,7 @@ pub fn router(state: Arc<AppState>) -> Router {
     Router::new()
         .route("/api/symbols", get(search))
         .route("/api/symbols/{code}", get(symbol))
+        .route("/api/symbols/{code}/fundamentals", get(fundamentals))
         .route("/api/bars", get(bars))
         .route("/api/quotes", get(quotes))
         .merge(crate::user_routes::routes())
@@ -126,6 +127,7 @@ enum Lookup {
     Symbols,
     Bars,
     Quotes,
+    Fundamentals,
 }
 
 impl Lookup {
@@ -134,6 +136,7 @@ impl Lookup {
             Lookup::Symbols => "종목",
             Lookup::Bars => "봉",
             Lookup::Quotes => "현재가",
+            Lookup::Fundamentals => "종목 기본 정보",
         }
     }
 
@@ -206,6 +209,16 @@ async fn symbol(State(st): State<Arc<AppState>>, Path(code): Path<String>) -> Re
     dir.get(symbol)
         .map(|i| Json(api::SymbolInfo::from(i)))
         .ok_or_else(|| ApiFailure::new(api::ApiErrorCode::UnknownSymbol, format!("없는 종목입니다: {code}")))
+}
+
+async fn fundamentals(State(st): State<Arc<AppState>>, Path(code): Path<String>) -> Result<Json<api::Fundamentals>, ApiFailure> {
+    let Symbol::Stock(stock) = Symbol::parse(&code).map_err(|e| ApiFailure::bad_request(e.to_string()))? else {
+        return Err(ApiFailure::bad_request("지수에는 종목 기본 정보가 없습니다"));
+    };
+    if symbol_list(&st).await?.get(Symbol::Stock(stock)).is_none() {
+        return Err(ApiFailure::new(api::ApiErrorCode::UnknownSymbol, format!("없는 종목입니다: {code}")));
+    }
+    Ok(Json(crate::fundamentals::fundamentals(&st.rest, stock).await.map_err(|e| Lookup::Fundamentals.failure(e, st.clock.now()))?))
 }
 
 struct BarsQuery {
@@ -401,6 +414,13 @@ mod tests {
                 let path = format!("{}/tests/fixtures/kiwoom/ka10095_synthetic.json", env!("CARGO_MANIFEST_DIR"));
                 return ok(serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap(), None);
             }
+            if s.api_id == ApiId::Ka10001 && s.body.contains("005935") {
+                return ok(json!({"stk_cd": "005935_AL", "stk_nm": "", "per": "", "return_code": 0}), None);
+            }
+            if s.api_id == ApiId::Ka10001 {
+                let path = format!("{}/tests/fixtures/kiwoom/ka10001_005930_AL_synthetic.json", env!("CARGO_MANIFEST_DIR"));
+                return ok(serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap(), None);
+            }
             if s.api_id == ApiId::Ka20006 && s.body.contains("\"101\"") {
                 return ok(json!({"inds_dt_pole_qry": [
                     {"dt": "20261109", "open_pric": "90000", "high_pric": "90500", "low_pric": "89000", "cur_prc": "-89900", "trde_qty": "77"},
@@ -521,6 +541,36 @@ mod tests {
         }
         let f = fixture(true, true).await;
         let (s, v) = json(&f.app, "/api/quotes?symbols=005930").await;
+        assert_eq!((s, code(&v)), (StatusCode::SERVICE_UNAVAILABLE, "kiwoom_unavailable"));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn fundamentals_come_from_one_combined_basic_info_request() {
+        let f = fixture(false, true).await;
+        let (s, v) = json(&f.app, "/api/symbols/005930/fundamentals").await;
+        assert_eq!(s, StatusCode::OK, "{v}");
+        assert_eq!(
+            v,
+            json!({"symbol": "005930", "marketCap": 1_130_670_300_000_000u64, "listedShares": 5_846_279_000u64, "per": 21.5, "pbr": 2.97, "roe": 9.8,
+                   "eps": 8996, "bps": 65120, "foreignExhaustionRate": 52.31, "high52w": 214_000, "low52w": 52_100})
+        );
+        let bodies: Vec<String> = f.fake.market_sent().into_iter().filter(|s| s.api_id == ApiId::Ka10001).map(|s| s.body).collect();
+        assert_eq!(bodies, [r#"{"stk_cd":"005930_AL"}"#]);
+
+        for (uri, want) in [
+            ("/api/symbols/IDX:001/fundamentals", (StatusCode::BAD_REQUEST, "bad_request")),
+            ("/api/symbols/bad/fundamentals", (StatusCode::BAD_REQUEST, "bad_request")),
+            ("/api/symbols/000660/fundamentals", (StatusCode::NOT_FOUND, "unknown_symbol")),
+            ("/api/symbols/005935/fundamentals", (StatusCode::NOT_FOUND, "unknown_symbol")),
+        ] {
+            let (s, v) = json(&f.app, uri).await;
+            assert_eq!((s, code(&v)), want, "{uri}: {v}");
+        }
+        let asked: Vec<String> = f.fake.market_sent().into_iter().filter(|s| s.api_id == ApiId::Ka10001).map(|s| s.body).collect();
+        assert_eq!(asked.len(), 2, "지수와 목록에 없는 종목은 키움에 묻지 않는다: {asked:?}");
+
+        let f = fixture(true, true).await;
+        let (s, v) = json(&f.app, "/api/symbols/005930/fundamentals").await;
         assert_eq!((s, code(&v)), (StatusCode::SERVICE_UNAVAILABLE, "kiwoom_unavailable"));
     }
 

@@ -9,6 +9,7 @@ import { useCell, useLayoutStore } from "../../stores/layout";
 import { useSelectionStore } from "../../stores/selection";
 import { useUiStore } from "../../stores/ui";
 import { useWatchlistStore } from "../../stores/watchlist";
+import { FundamentalsPanel } from "./FundamentalsPanel";
 import { ArrowIcon, ChevronRightIcon, CloseIcon, PlusIcon } from "../icons";
 
 const DIR_CLASS = { up: "text-up", down: "text-down", flat: "text-text-2" } as const;
@@ -35,6 +36,7 @@ export function WatchPanel() {
       </WatchHead>
       <WatchList variant="desktop" editing={false} />
       <p className="flex-none border-t border-line px-3 py-2 text-s text-text-3">끌거나 Alt+↑↓로 순서를 바꿉니다</p>
+      <FundamentalsPanel />
     </aside>
   );
 }

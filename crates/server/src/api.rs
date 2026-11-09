@@ -237,6 +237,41 @@ pub struct Quote {
     pub source: QuoteSource,
 }
 
+/// `GET /api/symbols/:code/fundamentals` → 주식의 기본 정보(ka10001, 통합 시세). 지수는 400 `bad_request`.
+/// 키움이 값을 주지 않은 항목(ETF의 PER 등)은 null이다.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct Fundamentals {
+    pub symbol: SymbolCode,
+    /// 원.
+    #[ts(type = "number | null")]
+    pub market_cap: Option<u64>,
+    /// 주.
+    #[ts(type = "number | null")]
+    pub listed_shares: Option<u64>,
+    /// 배. 적자면 음수일 수 있다.
+    pub per: Option<f64>,
+    /// 배.
+    pub pbr: Option<f64>,
+    /// %.
+    pub roe: Option<f64>,
+    /// 원.
+    #[ts(type = "number | null")]
+    pub eps: Option<i64>,
+    /// 원.
+    #[ts(type = "number | null")]
+    pub bps: Option<i64>,
+    /// %. 외국인 보유 한도 대비 보유 비율.
+    pub foreign_exhaustion_rate: Option<f64>,
+    /// 최근 250관측일 최고가(원).
+    #[ts(type = "number | null")]
+    pub high52w: Option<u64>,
+    /// 최근 250관측일 최저가(원).
+    #[ts(type = "number | null")]
+    pub low52w: Option<u64>,
+}
+
 /// 저장 순서 번호. 브라우저가 저장할 때마다 늘려 보낸다(`max(지금 ms, 마지막 + 1)`).
 /// PUT은 저장된 것보다 클 때만 받고, 아니면 409 `stale_revision`이다. GET은 저장된 값을 돌려준다. 처음은 0.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, TS)]

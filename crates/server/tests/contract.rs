@@ -38,6 +38,7 @@ fn generated_typescript_matches_the_committed_files() {
         generated::<Bar>(),
         generated::<BarsPage>(),
         generated::<Cell>(),
+        generated::<Fundamentals>(),
         generated::<IndicatorSpec>(),
         generated::<Layout>(),
         generated::<LayoutInput>(),
