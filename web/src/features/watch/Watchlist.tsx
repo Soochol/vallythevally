@@ -417,6 +417,18 @@ function WatchRow({ list, code, index, last, quote, columns, template, variant, 
   );
 }
 
+const MENU_GAP = 4;
+const MENU_MIN_BELOW = 240;
+
+function menuPlacement({ top, bottom }: { top: number; bottom: number }): React.CSSProperties {
+  const below = window.innerHeight - bottom - 2 * MENU_GAP;
+  const above = top - 2 * MENU_GAP;
+  const cap = window.innerHeight * 0.6;
+  return below >= MENU_MIN_BELOW || below >= above
+    ? { top: bottom + MENU_GAP, maxHeight: Math.min(cap, below) }
+    : { bottom: window.innerHeight - top + MENU_GAP, maxHeight: Math.min(cap, above) };
+}
+
 function TransferMenu({ list, code, name, buttonClass }: { list: Watchlist; code: SymbolCode; name: string; buttonClass: string }) {
   const others = useWatchlistStore((s) => s.lists).filter((l) => l.id !== list.id);
   const [at, setAt] = useState<{ right: number; top: number; bottom: number } | null>(null);
@@ -441,7 +453,6 @@ function TransferMenu({ list, code, name, buttonClass }: { list: Watchlist; code
     { kind: "heading", label: "다른 목록에 복사" },
     ...others.map((l): MenuItem => ({ kind: "action", label: l.name, onSelect: () => send(l, "copy") })),
   ];
-  const below = at !== null && at.bottom + 240 < window.innerHeight;
   return (
     <div ref={root}>
       <button
@@ -467,8 +478,8 @@ function TransferMenu({ list, code, name, buttonClass }: { list: Watchlist; code
             items={items}
             onClose={close}
             root={root}
-            className="fixed max-h-[60vh] overflow-auto"
-            style={below ? { right: at.right, top: at.bottom + 4 } : { right: at.right, bottom: window.innerHeight - at.top + 4 }}
+            className="fixed overflow-auto"
+            style={{ right: at.right, ...menuPlacement(at) }}
           />,
           document.body,
         )}
