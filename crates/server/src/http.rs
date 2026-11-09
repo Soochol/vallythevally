@@ -573,25 +573,45 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn watchlist_round_trip_and_rejections() {
+    async fn watchlists_round_trip_and_rejections() {
         let f = live_fixture(true).await;
-        assert_eq!(json(&f.app, "/api/watchlist").await, (StatusCode::OK, json!({"symbols": [], "revision": 0})));
-        let list = json!({"symbols": ["005930", "IDX:001", "999990"], "revision": 1});
-        assert_eq!(put(&f.app, "/api/watchlist", &list).await, (StatusCode::OK, list.clone()), "목록에 없는 코드도 받는다");
-        assert_eq!(json(&f.app, "/api/watchlist").await, (StatusCode::OK, list));
+        let first = "01900000-0000-7000-8000-000000000002";
+        assert_eq!(
+            json(&f.app, "/api/watchlists").await,
+            (StatusCode::OK, json!({"lists": [{"id": first, "name": "기본", "symbols": []}], "revision": 0}))
+        );
+        let all = json!({"lists": [
+            {"id": first, "name": "기본", "symbols": ["005930", "IDX:001", "999990"]},
+            {"id": "B", "name": "반도체", "symbols": ["000660", "005930"]},
+            {"id": "C", "name": "빈 목록", "symbols": []},
+        ], "revision": 1});
+        assert_eq!(put(&f.app, "/api/watchlists", &all).await, (StatusCode::OK, all.clone()), "목록에 없는 코드, 목록 사이 같은 종목도 받는다");
+        assert_eq!(json(&f.app, "/api/watchlists").await, (StatusCode::OK, all));
+        let one = |name: &str, symbols: Value| json!({"id": "X", "name": name, "symbols": symbols});
+        let body = |lists: Value, revision: i64| json!({"lists": lists, "revision": revision}).to_string();
+        let many: Vec<Value> = (0..21).map(|i| json!({"id": format!("L{i}"), "name": format!("목록 {i}"), "symbols": []})).collect();
         for (body, status, want) in [
-            (json!({"symbols": ["005930", "005930"], "revision": 2}).to_string(), StatusCode::BAD_REQUEST, "bad_request"),
-            (json!({"symbols": ["abc"], "revision": 2}).to_string(), StatusCode::BAD_REQUEST, "bad_request"),
-            (json!({"symbols": ["005930"]}).to_string(), StatusCode::BAD_REQUEST, "bad_request"),
-            ("{\"symbols\": [".to_owned(), StatusCode::BAD_REQUEST, "bad_request"),
-            (json!({"symbols": ["005930"], "revision": 2, "pad": "x".repeat(70_000)}).to_string(), StatusCode::PAYLOAD_TOO_LARGE, "payload_too_large"),
-            (json!({"symbols": ["005930"], "revision": 1}).to_string(), StatusCode::CONFLICT, "stale_revision"),
+            (body(json!([one("가", json!(["005930", "005930"]))]), 2), StatusCode::BAD_REQUEST, "bad_request"),
+            (body(json!([one("가", json!(["abc"]))]), 2), StatusCode::BAD_REQUEST, "bad_request"),
+            (body(json!([]), 2), StatusCode::BAD_REQUEST, "bad_request"),
+            (body(json!(many), 2), StatusCode::BAD_REQUEST, "bad_request"),
+            (body(json!([one("가", json!([])), {"id": "Y", "name": "가", "symbols": []}]), 2), StatusCode::BAD_REQUEST, "bad_request"),
+            (body(json!([one("가", json!([])), {"id": "X", "name": "나", "symbols": []}]), 2), StatusCode::BAD_REQUEST, "bad_request"),
+            (body(json!([one(" ", json!([]))]), 2), StatusCode::BAD_REQUEST, "bad_request"),
+            (body(json!([one(" 가", json!([]))]), 2), StatusCode::BAD_REQUEST, "bad_request"),
+            (body(json!([one(&"가".repeat(21), json!([]))]), 2), StatusCode::BAD_REQUEST, "bad_request"),
+            (json!({"lists": [one("가", json!([]))]}).to_string(), StatusCode::BAD_REQUEST, "bad_request"),
+            ("{\"lists\": [".to_owned(), StatusCode::BAD_REQUEST, "bad_request"),
+            (json!({"lists": [one("가", json!([]))], "revision": 2, "pad": "x".repeat(70_000)}).to_string(), StatusCode::PAYLOAD_TOO_LARGE, "payload_too_large"),
+            (body(json!([one("가", json!([]))]), 1), StatusCode::CONFLICT, "stale_revision"),
         ] {
-            let (s, v) = send(&f.app, "PUT", "/api/watchlist", body).await;
+            let (s, v) = send(&f.app, "PUT", "/api/watchlists", body).await;
             assert_eq!((s, code(&v)), (status, want), "{v}");
             assert!(!v["error"]["message"].as_str().unwrap().is_empty());
         }
-        assert_eq!(json(&f.app, "/api/watchlist").await.1["symbols"].as_array().unwrap().len(), 3, "거절한 PUT은 목록을 바꾸지 않는다");
+        assert_eq!(json(&f.app, "/api/watchlists").await.1["lists"].as_array().unwrap().len(), 3, "거절한 PUT은 목록을 바꾸지 않는다");
+        let twenty: Vec<Value> = many[..20].to_vec();
+        assert_eq!(put(&f.app, "/api/watchlists", &json!({"lists": twenty, "revision": 3})).await.0, StatusCode::OK, "20개까지 받는다");
     }
 
     #[tokio::test]
@@ -759,7 +779,7 @@ mod tests {
     #[tokio::test]
     async fn wrong_method_is_405_with_api_error() {
         let f = live_fixture(true).await;
-        for (method, uri) in [("POST", "/api/ui-state"), ("DELETE", "/api/watchlist"), ("POST", "/api/layouts/x"), ("PUT", "/api/bars"), ("POST", "/api/symbols")] {
+        for (method, uri) in [("POST", "/api/ui-state"), ("DELETE", "/api/watchlists"), ("POST", "/api/layouts/x"), ("PUT", "/api/bars"), ("POST", "/api/symbols")] {
             let (s, v) = send(&f.app, method, uri, "{}").await;
             assert_eq!((s, code(&v)), (StatusCode::METHOD_NOT_ALLOWED, "method_not_allowed"), "{method} {uri}: {v}");
             assert!(v["error"]["message"].as_str().unwrap().contains(method), "{v}");

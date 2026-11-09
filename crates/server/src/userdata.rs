@@ -1,7 +1,7 @@
 
 use sqlx::Row;
 
-use crate::api::{Arrangement, Cell, Layout, LayoutInput, LayoutSummary, LayoutSync, Revision, SymbolCode, UiState, UnixSeconds, Watchlist};
+use crate::api::{Arrangement, Cell, Layout, LayoutInput, LayoutSummary, LayoutSync, Revision, SymbolCode, UiState, UnixSeconds, Watchlist, Watchlists};
 use crate::db::{AppDb, DbError};
 
 #[derive(Debug)]
@@ -40,22 +40,46 @@ fn check_newer(stored: Option<i64>, sent: Revision) -> Result<(), StoreError> {
     }
 }
 
-pub async fn get_watchlist(db: &AppDb) -> Result<Watchlist, StoreError> {
+pub async fn get_watchlists(db: &AppDb) -> Result<Watchlists, StoreError> {
     let mut tx = db.read().begin().await?;
-    let symbols: Vec<String> = sqlx::query_scalar("SELECT symbol FROM watchlist ORDER BY position").fetch_all(&mut *tx).await?;
+    let mut lists: Vec<Watchlist> = sqlx::query("SELECT id, name FROM watchlists ORDER BY position")
+        .fetch_all(&mut *tx)
+        .await?
+        .into_iter()
+        .map(|r| Watchlist { id: r.get("id"), name: r.get("name"), symbols: Vec::new() })
+        .collect();
+    let items = sqlx::query("SELECT list_id, symbol FROM watchlist_items ORDER BY list_id, position").fetch_all(&mut *tx).await?;
+    for item in items {
+        let list_id: String = item.get("list_id");
+        let list = lists.iter_mut().find(|l| l.id == list_id).ok_or_else(|| corrupt("watchlist_items", &list_id))?;
+        list.symbols.push(SymbolCode(item.get("symbol")));
+    }
     let revision: i64 = sqlx::query_scalar("SELECT revision FROM watchlist_revision WHERE singleton = 1").fetch_one(&mut *tx).await?;
-    Ok(Watchlist { symbols: symbols.into_iter().map(SymbolCode).collect(), revision: Revision(revision) })
+    Ok(Watchlists { lists, revision: Revision(revision) })
 }
 
-/// 목록 전체를 바꾼다. 중복은 호출자가 먼저 거른다.
-pub async fn put_watchlist(db: &AppDb, list: &Watchlist) -> Result<(), StoreError> {
+/// 목록 전체를 바꾼다. 개수, 이름, 중복은 호출자가 먼저 거른다.
+pub async fn put_watchlists(db: &AppDb, all: &Watchlists) -> Result<(), StoreError> {
     let mut tx = db.begin_write().await?;
     let stored: Option<i64> = sqlx::query_scalar("SELECT revision FROM watchlist_revision WHERE singleton = 1").fetch_optional(&mut *tx).await?;
-    check_newer(stored, list.revision)?;
-    sqlx::query("UPDATE watchlist_revision SET revision = ? WHERE singleton = 1").bind(list.revision.0).execute(&mut *tx).await?;
-    sqlx::query("DELETE FROM watchlist").execute(&mut *tx).await?;
-    for (position, symbol) in list.symbols.iter().enumerate() {
-        sqlx::query("INSERT INTO watchlist (symbol, position) VALUES (?, ?)").bind(&symbol.0).bind(position as i64).execute(&mut *tx).await?;
+    check_newer(stored, all.revision)?;
+    sqlx::query("UPDATE watchlist_revision SET revision = ? WHERE singleton = 1").bind(all.revision.0).execute(&mut *tx).await?;
+    sqlx::query("DELETE FROM watchlists").execute(&mut *tx).await?;
+    for (list_position, list) in all.lists.iter().enumerate() {
+        sqlx::query("INSERT INTO watchlists (id, name, position) VALUES (?, ?, ?)")
+            .bind(&list.id)
+            .bind(&list.name)
+            .bind(list_position as i64)
+            .execute(&mut *tx)
+            .await?;
+        for (position, symbol) in list.symbols.iter().enumerate() {
+            sqlx::query("INSERT INTO watchlist_items (list_id, symbol, position) VALUES (?, ?, ?)")
+                .bind(&list.id)
+                .bind(&symbol.0)
+                .bind(position as i64)
+                .execute(&mut *tx)
+                .await?;
+        }
     }
     tx.commit().await?;
     Ok(())
@@ -225,16 +249,18 @@ mod tests {
         AppDb::connect(opts).await.unwrap()
     }
 
-    fn codes(list: &Watchlist) -> Vec<&str> {
-        list.symbols.iter().map(|s| s.0.as_str()).collect()
+    const FIRST_LIST_ID: &str = "01900000-0000-7000-8000-000000000002";
+
+    fn codes(all: &Watchlists) -> Vec<(&str, Vec<&str>)> {
+        all.lists.iter().map(|l| (l.name.as_str(), l.symbols.iter().map(|s| s.0.as_str()).collect())).collect()
     }
 
-    fn watch(codes: &[&str]) -> Watchlist {
-        watch_at(codes, 1)
+    fn list(id: &str, name: &str, codes: &[&str]) -> Watchlist {
+        Watchlist { id: id.into(), name: name.into(), symbols: codes.iter().map(|c| SymbolCode((*c).into())).collect() }
     }
 
-    fn watch_at(codes: &[&str], revision: i64) -> Watchlist {
-        Watchlist { symbols: codes.iter().map(|c| SymbolCode((*c).into())).collect(), revision: Revision(revision) }
+    fn watch(lists: Vec<Watchlist>, revision: i64) -> Watchlists {
+        Watchlists { lists, revision: Revision(revision) }
     }
 
     fn cell(slot: u8, symbol: &str, venue: Option<Venue>) -> Cell {
@@ -250,13 +276,39 @@ mod tests {
     }
 
     #[sqlx::test(migrations = "./migrations")]
-    async fn watchlist_round_trips_in_order_and_reorders(_: SqlitePoolOptions, opts: SqliteConnectOptions) {
+    async fn watchlists_round_trip_in_order_and_replace_whole(_: SqlitePoolOptions, opts: SqliteConnectOptions) {
         let db = db(opts).await;
-        assert!(get_watchlist(&db).await.unwrap().symbols.is_empty());
-        put_watchlist(&db, &watch(&["005930", "IDX:001", "000660"])).await.unwrap();
-        assert_eq!(codes(&get_watchlist(&db).await.unwrap()), ["005930", "IDX:001", "000660"]);
-        put_watchlist(&db, &watch_at(&["000660", "005930"], 2)).await.unwrap();
-        assert_eq!(codes(&get_watchlist(&db).await.unwrap()), ["000660", "005930"], "순서 바꾸기와 지우기");
+        let seeded = get_watchlists(&db).await.unwrap();
+        assert_eq!((codes(&seeded), seeded.lists[0].id.as_str(), seeded.revision), (vec![("기본", vec![])], FIRST_LIST_ID, Revision(0)));
+
+        let three = watch(vec![list("B", "둘", &["000660", "005930"]), list(FIRST_LIST_ID, "기본", &["005930", "IDX:001"]), list("C", "셋", &[])], 1);
+        put_watchlists(&db, &three).await.unwrap();
+        assert_eq!(get_watchlists(&db).await.unwrap(), three, "목록 사이 순서와 목록 안 순서를 그대로 돌려준다");
+
+        let two = watch(vec![list(FIRST_LIST_ID, "기본", &["IDX:001"]), list("C", "셋 바꿈", &["005930"])], 2);
+        put_watchlists(&db, &two).await.unwrap();
+        assert_eq!(get_watchlists(&db).await.unwrap(), two, "지운 목록과 그 종목은 남지 않는다");
+        let orphans: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM watchlist_items WHERE list_id = 'B'").fetch_one(db.read()).await.unwrap();
+        assert_eq!(orphans, 0);
+    }
+
+    #[tokio::test]
+    async fn migration_moves_the_single_watchlist_into_the_first_list() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("vally.db");
+        {
+            let pool = SqlitePoolOptions::new().connect_with(SqliteConnectOptions::new().filename(&path).create_if_missing(true)).await.unwrap();
+            sqlx::migrate!("./migrations").run_to(2, &pool).await.unwrap();
+            for (symbol, position) in [("005930", 0), ("IDX:001", 1), ("000660", 2)] {
+                sqlx::query("INSERT INTO watchlist (symbol, position) VALUES (?, ?)").bind(symbol).bind(position).execute(&pool).await.unwrap();
+            }
+            sqlx::query("UPDATE watchlist_revision SET revision = 1794222949877").execute(&pool).await.unwrap();
+            pool.close().await;
+        }
+        let db = AppDb::open(&path).await.unwrap();
+        let migrated = get_watchlists(&db).await.unwrap();
+        assert_eq!(migrated, watch(vec![list(FIRST_LIST_ID, "기본", &["005930", "IDX:001", "000660"])], 1_794_222_949_877));
+        assert!(matches!(put_watchlists(&db, &watch(vec![list(FIRST_LIST_ID, "기본", &[])], 1_794_222_949_877)).await, Err(StoreError::Stale(_))), "옛 탭의 늦은 저장은 여전히 막힌다");
     }
 
     #[sqlx::test(migrations = "./migrations")]
@@ -312,12 +364,13 @@ mod tests {
     #[sqlx::test(migrations = "./migrations")]
     async fn older_or_equal_revisions_never_overwrite(_: SqlitePoolOptions, opts: SqliteConnectOptions) {
         let db = db(opts).await;
-        put_watchlist(&db, &watch_at(&["005930", "000660"], 20)).await.unwrap();
+        let newest = watch(vec![list(FIRST_LIST_ID, "기본", &["005930", "000660"])], 20);
+        put_watchlists(&db, &newest).await.unwrap();
         for stale in [19, 20] {
-            assert!(matches!(put_watchlist(&db, &watch_at(&["005930"], stale)).await, Err(StoreError::Stale(Revision(20)))), "{stale}");
+            let old = watch(vec![list(FIRST_LIST_ID, "기본", &["005930"])], stale);
+            assert!(matches!(put_watchlists(&db, &old).await, Err(StoreError::Stale(Revision(20)))), "{stale}");
         }
-        let list = get_watchlist(&db).await.unwrap();
-        assert_eq!((codes(&list), list.revision), (vec!["005930", "000660"], Revision(20)));
+        assert_eq!(get_watchlists(&db).await.unwrap(), newest);
 
         let new = layout_at("L2", "새", Arrangement::One, vec![cell(0, "005930", Some(Venue::Krx))], 20);
         put_layout(&db, &new, UnixSeconds(1)).await.unwrap();
