@@ -1358,7 +1358,7 @@ CREATE TABLE ui_state (
   revision  INTEGER NOT NULL DEFAULT 0                    -- 저장 순서 번호(0002)
 ) STRICT;
 
--- 드로잉(0003): 종목에 붙는다. 보이는 곳은 scope가 좁힌다. 거래소, 봉 주기와는 상관없다(ADR 0007).
+-- 드로잉(0004): 종목에 붙는다. 보이는 곳은 scope가 좁힌다. 거래소, 봉 주기와는 상관없다(ADR 0007).
 CREATE TABLE drawings (
   id         TEXT    PRIMARY KEY,
   symbol     TEXT    NOT NULL,
@@ -1829,6 +1829,8 @@ type DrawingScope =
 - `updatedAt`은 서버 시각이다.
 - DELETE는 지운 기록을 남기지 않는다. 지운 뒤 늦게 도착한 옛 PUT은 드로잉을 다시 만든다.
 - `GET`의 `symbol`이 없거나 형식이 틀리면 400이다. 칸마다 범위를 거르는 일은 브라우저가 한다.
+- `0003`은 관심종목 여러 목록(#37)이다. 드로잉 표는 `0004_drawings.sql`로 만든다.
+- 현재 main에는 #4의 변경 알림 경로가 없다. 드로잉은 창 초점·`visibilitychange` 때 다시 조회하고, `data_changed` 연결은 #47에서 맡는다.
 
 점의 `t`는 아무 시각이나 될 수 있다. 봉 시작 시각과 맞을 필요가 없다. 봉 주기가 다른 차트에서 어느 자리에 그릴지는 브라우저가 정한다.
 

@@ -364,12 +364,20 @@ D3의 표를 그대로 옮긴다. 단계 번호는 이슈 번호다. 이 문서�
 | `Alt+A` | 알림 만들기 |
 | `Alt+W` | 관심종목 접기/펴기 |
 | `Alt+S` / `Alt+Shift+S` | 활성 칸 차트 이미지 내려받기 / 클립보드 복사(데스크톱만) |
-| `V` `T` `H` `Shift+V` `R` `F` `X` | 선택, 추세선, 수평선, 수직선, 사각형, 피보나치 되돌림, 텍스트 |
-| `G` | 자석 모드 켜기/끄기. 그리는 동안 `Ctrl`을 누르고 있으면 잠시 반대로 |
-| `Delete` / `Backspace` | 고른 드로잉 지우기 |
-| `Ctrl+Z` / `Ctrl+Shift+Z`(`Ctrl+Y`) | 되돌리기 / 다시 하기 |
+| `V` | 선택 도구 |
+| `T`(`Alt+T`), `H`(`Alt+H`), `Alt+J`, `Shift+V`(`Alt+V`), `R`(`Shift+Alt+R`), `F`(`Alt+F`), `X` | 추세선, 수평선, 수평 광선, 수직선, 사각형, 피보나치 되돌림, 텍스트. 괄호 안은 TradingView 별칭(drawing-proposal Q2) |
+| `G` / `Shift+G` | 자석 켜기/끄기 / 약↔강 |
+| `Ctrl` 누르고 있기 | 그리기·핸들 끌기 동안 자석 잠시 반대로 |
+| `Shift`(그리는 중, 끄는 중) | 45°·정사각형·원 / 수평·수직으로만 옮기기 |
+| `Ctrl`+몸통 끌기 | 복제(drawing-proposal Q1, 2026-11-09) |
+| `Ctrl`+클릭 / `Ctrl`+빈 곳 끌기 | 여러 개 고르기 / 상자로 고르기 |
+| `Ctrl+C` / `Ctrl+V` | 고른 드로잉 복사 / 활성 칸에 붙여넣기 |
+| `Delete` / `Backspace` | 고른 드로잉 지우기(잠긴 것은 빼고) |
+| `Ctrl+Z` / `Ctrl+Y`(`Ctrl+Shift+Z`) | 되돌리기 / 다시 하기 |
+| `Ctrl+Alt+H` | 모든 드로잉 숨기기 켜고 끄기 |
+| `?` | 드로잉 수정키 도움말. `gestures.ts`의 동작 표에서 만든다 |
 | `Esc` | 그리던 드로잉 취소, 선택 풀기, 대화상자 닫기 |
-| `←` `→` | 십자선을 한 봉씩 옮기기(키보드로 범례 읽기) |
+| `←` `→` `↑` `↓` | 고른 드로잉이 있으면 옮기기(`←` `→` 1봉, `↑` `↓` 1px). 없으면 `←` `→`로 십자선을 한 봉씩 옮기기 |
 | `+` `−` / `Home` `End` | 확대·축소 / 처음·최신 봉으로 |
 
 - **#2에서 켜진 키**: `/`, `Ctrl+K`, `D` `W` `M`, `[` `]`, `L`, 대화상자의 `Esc`. #14에서 분봉 키(`1` `3` `5`, `Shift+1` `Shift+3` `Shift+6`)를 켠다. `[` `]`도 9개 봉 주기를 오간다. 거래소에는 단축키를 두지 않는다. #38에서 `Alt+S`와 `Alt+Shift+S`를 켠다. `Ctrl+S`는 브라우저의 페이지 저장과 부딪혀 쓰지 않는다. 휴대폰 폭(`DESKTOP_QUERY`가 아닐 때)은 내려받기만 하므로 `Alt+Shift+S`를 받지 않는다(`HOTKEYS`의 `desktopOnly`). 표 하나(`lib/hotkeys.ts`의 `HOTKEYS`)에 정의하고 `event.code`로 판단한다. 한글 입력 상태에서도 같게 동작한다.
@@ -446,10 +454,11 @@ D3의 표를 그대로 옮긴다. 단계 번호는 이슈 번호다. 이 문서�
 
 **흐름**
 
-1. **도구 고르기**: 왼쪽 도구나 단축키로 고른다. 커서가 십자로 바뀐다.
+1. **도구 고르기**: 왼쪽 도구나 단축키로 고른다. 커서가 십자로 바뀐다. 도구는 21개이고 도구별 명세는 `drawing-proposal.md` §2에 있다. #6 엔진 PR은 추세선과 수평선을 넣고, 나머지는 도구 묶음 PR이 더한다.
 2. **점 찍기**
    - 두 점 도구(추세선, 사각형, 피보나치 되돌림)는 누르고 끌어 놓아도 되고, 두 번 클릭해도 된다.
    - 한 점 도구(수평선, 수직선, 텍스트)는 한 번 누르면 된다.
+   - 세 점 도구는 세 번 클릭한다. 경로는 클릭마다 점을 더하고 더블클릭이나 `Esc`로 끝낸다. 붓은 누르는 동안 점을 모으고 놓으면 끝낸다. 이 상태 기계는 엔진이 맡고 도구는 `Placement`만 낸다.
    - 텍스트는 찍은 자리에 입력칸이 뜬다. `Enter`로 확정하고 `Esc`로 취소한다.
 3. **끝내기**
    - 다 그리면 선택 도구로 돌아가고, 방금 그린 드로잉이 골라진 상태가 된다.
@@ -457,14 +466,16 @@ D3의 표를 그대로 옮긴다. 단계 번호는 이슈 번호다. 이 문서�
 4. **자석 모드**(기본 켬)
    - 점을 찍을 때 마우스 x에 가장 가까운 봉으로 시각을 붙인다.
    - 가격은 그 봉의 시·고·저·종 중 마우스 y에 가장 가까운 값에 붙는다(#6).
-   - 붙는 범위는 화면 거리 16px 안이다. 그보다 멀면 마우스 위치 그대로 둔다.
+   - 세기는 둘이다. **약**(기본)은 화면 거리 16px 안일 때만 붙고, 그보다 멀면 마우스 위치 그대로 둔다. **강**은 거리와 상관없이 붙는다(`Shift+G`, drawing-proposal §3.4).
    - 붙을 자리에 작은 원을 미리 보인다.
 
 **선택·이동·삭제**
-- **고르기**: 선에서 6px 안을 누르면 고른다. 고른 드로잉은 끝점에 손잡이(원)를 보이고, 위에 작은 막대(색, 굵기, 알림 만들기, 지우기)를 띄운다. 목업의 추세선이 고른 상태다.
-- **옮기기**: 몸통을 끌면 전체가 옮겨지고, 손잡이를 끌면 그 점만 옮겨진다. 옮길 때도 자석이 적용된다.
+- **고르기**: 선에서 6px 안을 누르면 고른다. 핸들은 지름 8px, 판정 반경 6px다. 핸들, 선, 채운 안쪽 순으로 잡고 같은 종류에서는 `z`가 큰 것이 이긴다. `Ctrl`+클릭으로 여러 개를 고르고 `Ctrl`+빈 곳 끌기로 상자를 그린다.
+- **옮기기**: 몸통을 끌면 고른 드로잉들이 함께 옮겨지고, 핸들을 끌면 그 점만 옮겨진다. 옮길 때도 자석이 적용된다. `Shift`+몸통 끌기는 처음 8px 방향으로 수평·수직을 정하고, `Shift`+핸들은 화면 45°로 맞춘다.
+- **막대**: 공통 스타일 칸과 설정, 잠금, 지우기, 더 보기를 둔다. 선택 영역 위 14px, 위쪽 여백이 부족하면 아래 14px에 놓고 칸 안으로 제한한다. 끌어서 옮긴 자리는 탭 메모리에 둔다. 오른쪽 클릭 메뉴도 같은 행동을 쓴다. 알림과 템플릿은 후속 PR에서 더한다.
+- **설정·개체**: 설정 창의 미리보기는 서버에 쓰지 않고 `확인` 때 한 번 저장한다. `취소`는 초안을 버린다. 좌표는 한국 시각·가격으로 편집한다. 오른쪽 패널의 개체 탭에서 고르고 숨기고 잠그고 순서를 바꾼다. 글자 입력은 DOM `textarea`이며 한글 조합 중 `Enter`를 확정으로 받지 않는다.
 - **지우기**: `Delete`/`Backspace`, 막대의 지우기, 왼쪽 도구의 휴지통 중 하나로 지운다.
-- **되돌리기**: `Ctrl+Z`. 기록은 브라우저 메모리에만 둔다(#6, ADR 0003). 새로고침하면 사라진다.
+- **되돌리기**: `Ctrl+Z`. 기록은 브라우저 메모리에만 둔다(#6, ADR 0003). 새로고침하면 사라진다. 한 번의 동작(여러 개를 함께 옮기기 등)이 기록 한 칸이다. 되돌리기 직전에 지금 값이 기록의 `after`와 내용이 같을 때만 되돌린다. 다르면 다른 탭이 바꾼 것이라 그 칸을 버리고 알린다(drawing-proposal §3.11).
 
 **저장**
 - 다 그리거나 옮기기를 끝내는 순간(pointerup) 그 드로잉 하나를 `PUT /api/drawings/:id`로 저장한다.
@@ -481,13 +492,13 @@ D3의 표를 그대로 옮긴다. 단계 번호는 이슈 번호다. 이 문서�
   2. **체결이 없는 틈**(밤, 주말, 휴일, 거래정지): 바로 다음 봉의 시작 자리, 즉 논리 index `k + 1`에 놓는다.
   3. **마지막 봉 뒤**: 고정 초 길이로 외삽하지 않는다. `futureBarStarts`로 실제 봉 경계를 만든 뒤 1·2번을 그대로 적용한다. 월봉이면 다음 달 1일, 주봉이면 다음 월요일이다.
   4. **첫 봉 앞**: 그리지 않는다. 과거 구간의 확정 봉을 더 받으면 나타난다.
-  5. 논리 index → x는 `timeScale().logicalToCoordinate()`로 바꾼다.
+  5. 논리 index → x는 엔진이 직접 계산한다. 라이브러리의 `logicalToCoordinate()`는 소수 index에 `0`을 돌려준다(drawing-proposal §6.3). 정수 index `k`의 좌표에 `(logical − k) × barSpacing`을 더한다.
 - **보이는 모습**
   - 일봉에서 자석으로 찍은 점(00:00 KST)은 60분봉에서 2번 규칙에 걸린다. 그래서 그날 첫 60분봉(08:00)의 왼쪽 끝에 보인다. 저장값은 여전히 00:00이다.
   - 60분봉에서 14:00에 찍은 점은 일봉에서 그날 봉 안의 `14/24` 자리에 보인다.
   - 이렇게 하면 일봉에서 그은 추세선이 60분봉에서도 같은 날·같은 가격에 놓인다(#6 완료 조건). 두 순간이 8시간 다르다는 사실은 저장값에 그대로 남고, 화면은 체결이 없는 틈을 접어서 보여 줄 뿐이다.
 
-**종목에 붙는다**: 드로잉은 `symbol` 단위로 받는다(`GET /api/drawings?symbol=`). 거래소와 무관하다(ADR 0007). KRX 칸과 NXT 칸에 같은 종목을 열면 같은 드로잉이 보인다. 같은 종목을 연 칸이 여럿이면 모두 같은 드로잉을 보인다. 한 칸에서 고치면 다른 칸도 곧바로 다시 그린다(같은 탭 안은 스토어 공유, 다른 탭은 `data_changed`).
+**종목에 붙는다**: 드로잉은 `symbol` 단위로 받는다(`GET /api/drawings?symbol=`). 거래소와 무관하다(ADR 0007). `scope`와 보이는 봉 주기로 칸마다 거른다. 같은 탭의 칸들은 서버 캐시와 안 보낸 쓰기를 공유하며 끄는 동안의 미리보기는 그 칸에만 있다. 다른 칸에는 놓을 때 반영한다. 다른 탭은 현재 창 초점·`visibilitychange`에서 다시 받는다. #4의 `data_changed`로 옮기는 일은 #47이다.
 
 **비교 종목이 있을 때**: % 축이라도 드로잉은 주 종목의 가격으로 고정한다. 좌표 변환은 주 시리즈의 `priceToCoordinate`가 % 모드를 고려해 해 준다.
 
@@ -709,7 +720,8 @@ web/
       theme.ts              # CSS 변수 → ThemeTokens
       time.ts               # KST 표시 변환(t + 32400), 봉 시각 표기
       indicators/           # (#5) worker.ts, client.ts, render.ts(§5.6)
-      drawings/             # (#6) DrawingPrimitive.ts, tools.ts, anchor.ts(§3.5), magnet.ts
+      drawings/             # (#6) DrawingLayer.ts, DrawingSurface.ts, interaction.ts, gestures.ts, anchor.ts, magnet.ts, sync.ts, tools/index.ts
+      extensions.ts         # ChartController.attach가 넘기는 ChartHost 계약
       CloudPrimitive.ts     # (#5) 일목 구름 채우기
       sync.ts               # (#7) 칸 사이 십자선·스크롤 동기화 버스
     stores/
@@ -717,11 +729,12 @@ web/
       selection.ts          # useSelectionStore: 활성 칸, 열린 대화상자, 아래 알림
       recent.ts             # 최근 본 종목(#2는 메모리, #3~ UiState.recentSymbols)
       theme.ts              # 테마(localStorage, #3~ UiState.theme)
-      drawingHistory.ts     # (#6) useDrawingHistoryStore
+      drawingSession.ts     # (#6) 도구, 여러 개 선택, 복사본, 메뉴·설정·글자 초안
       connection.ts         # (#4) useConnectionStore(상태 줄 전용, 작은 스토어)
     features/
       topbar/               # 종목 버튼, 봉 주기, 봉 모양 메뉴(StyleMenu), 로그. (#5~) 지표·비교, (#7) 레이아웃 메뉴, 동기화 칩
       grid/                 # ChartCell(컨트롤러를 붙였다 떼는 얇은 컴포넌트), cellError.ts(§3.7a 오류 문장)
+      drawings/             # 도구 막대, 떠 있는 막대, 설정·글자 입력, 개체 목록, 공통 StyleField 입력칸
       search/               # 검색 대화상자, 결과 목록, 초성 강조
       status/               # 상태 줄, 라이브러리 표기
       toast/                # 화면 아래 알림(주소의 종목을 찾을 수 없음 등)
@@ -759,7 +772,7 @@ web/
 | 서버 자료(레이아웃 목록, 관심종목, 드로잉, 알림, UiState, 종목 검색) | TanStack Query | 캐시·무효화·재시도. `data_changed` → `invalidateQueries` |
 | 지금 편집 중인 레이아웃 | Zustand `layout` | 1초 디바운스 저장 전까지 즉시 반영해야 한다 |
 | 활성 칸, 고른 도구, 고른 드로잉, 열린 대화상자 | Zustand `selection` | 저장하지 않는 화면 상태 |
-| 드로잉 되돌리기 기록 | Zustand `drawingHistory` | 브라우저 메모리에만(#6) |
+| 드로잉 되돌리기 기록 | `drawings/sync.ts`의 칸별 `History` | 브라우저 메모리에만, 한 칸은 `DrawingOp[]`, 최대 100칸(#6) |
 | 봉, 현재 봉, 지표 값, 십자선 위치, 시리즈 세대 | **컨트롤러(일반 JS 객체)** | 초당 수십 번 바뀐다. React 상태에 두면 매번 다시 그린다 |
 | 관심종목 현재가 | 관심종목 전용 작은 저장소(구독형) | 행마다 `useSyncExternalStore`로 자기 종목만 구독 |
 
@@ -834,29 +847,35 @@ interface LayoutState {
 // stores/selection.ts: 저장하지 않는 화면 상태
 interface SelectionState {
   activeSlot: Slot;
-  tool: "select" | "trendline" | "hline" | "vline" | "rect" | "fib" | "text";
-  toolLocked: boolean;
-  magnet: boolean;
-  selectedDrawingId: Uuid | null;
   dialog: null | { kind: "search" | "indicator" | "compare" | "alert"; payload?: unknown };
   watchCollapsed: boolean;              // UiState에도 반영
 }
 
-// stores/drawingHistory.ts: 되돌리기 기록. 종목별이 아니라 탭 전체 하나
+// stores/drawingSession.ts
+interface DrawingSession {
+  tool: DrawingTool | null;              // 서버 계약은 21개. 등록된 ToolSpec만 고를 수 있다
+  pinnedTool: DrawingTool | null;
+  selected: Uuid[];
+  clip: Clip | null;
+  editor: DrawingEditor | null;
+  popup: Popup | null;
+  panel: "watch" | "objects";
+}
+
+// chart/drawings/sync.ts: 칸별 되돌리기 기록
 type DrawingOp =
   | { kind: "create"; after: Drawing }
   | { kind: "update"; before: Drawing; after: Drawing }
   | { kind: "delete"; before: Drawing };
 interface DrawingHistoryState {
-  past: DrawingOp[];                    // 최대 100개
-  future: DrawingOp[];
-  record(op: DrawingOp): void;          // future 비움
-  undo(): DrawingOp | null;             // 호출자가 반대 작업을 서버에 PUT/DELETE
-  redo(): DrawingOp | null;
+  past: DrawingOp[][];                  // 최대 100칸. 여러 드로잉의 한 동작이 한 칸
+  future: DrawingOp[][];
 }
 ```
 
-- **드로잉 자체를 두는 곳**: TanStack Query 캐시(`["drawings", symbol]`)다. 스토어에는 기록만 둔다. 같은 드로잉이 두 곳에 있으면 어긋나기 때문이다.
+- **드로잉 자체를 두는 곳**: 서버 확정본은 TanStack Query 캐시(`["drawings", symbol]`)다. `drawings/sync.ts`만 캐시·요청 줄·기록을 쓴다. 읽을 때 확정본 위에 안 보낸 쓰기와 설정 초안을 얹는다. 이 합친 값은 다시 저장하지 않는다.
+- **저장 순서와 복구**: id마다 PUT·DELETE 요청 하나만 보낸다. 기다리는 편집은 최신 하나로 모은다. `revision`은 편집할 때 정하고 재시도·새로고침 복구에서도 보존한다. 복구 본문은 `vv.unsaved.drawing.<id>`에 둔다. 서버의 409는 그 본문을 버리고 다시 받는다. 상태 줄은 다른 사용자 자료의 자동 저장과 드로잉 요청 줄을 함께 보여 준다.
+- **드로잉 환경**: `UiState.drawing`은 자석 켬·세기, 연속 그리기, 전체 잠금·숨김, 도구별 마지막 스타일, 지표 자석 여부, 새 범위를 담는다. `ui` 스토어의 기존 자동 저장을 쓰며 `watchColumns`와 `activeWatchlistId`를 함께 보존한다.
 - **컨트롤러가 스토어를 읽는 법**: 컨트롤러는 `useLayoutStore.subscribe(selector, …)`로 자기 칸의 설정만 지켜본다. React를 거치지 않는다.
 
 ### 5.4 차트 엔진 래퍼: 칸마다 명령형 컨트롤러
@@ -884,7 +903,7 @@ class ChartController {
   reload(): void;                           // 같은 종목·봉 주기를 처음부터(칸 오류의 `다시 시도`)
   retryOlder(): void;                       // 실패한 과거 페이지를 다시(과거 봉 오류의 `다시 시도`)
   setTheme(t: ThemeTokens): void;           // 모든 시리즈·primitive 색 다시 적용
-  setDrawings(list: Drawing[], editable: boolean): void;   // (#6~)
+  attach(factory: (host: ChartHost) => ChartExtension): () => void; // (#6) 드로잉 층 연결·정리
   setActive(active: boolean): void;                         // (#7~)
   snapshot(takenAt: UnixSeconds): { canvas: HTMLCanvasElement; fileName: string } | null;  // (#38) 머리 띠를 붙인 차트 이미지
   dispose(): void;                          // 구독 해지, 워커 엔진 해제, chart.remove()
@@ -900,6 +919,8 @@ class ChartController {
 - 이 컴포넌트는 봉 데이터를 props로 받지 않는다.
 - 범례와 지표 패널 범례의 DOM도 컨트롤러가 만들고 고친다(§2.3).
 - `ChartCell`은 컨트롤러를 `features/grid/controllers.ts`에 칸 번호로 등록한다. 위 막대, 휴대폰 머리, 단축키는 이 등록표로 활성 칸의 컨트롤러를 찾아 `snapshot`을 부른다(#38).
+- `useDrawingSurface`는 `ChartController.attach`로 드로잉을 붙인다. 주 시리즈가 바뀌면 컨트롤러가 확장에 `reattach`를 알리고, 컨트롤러를 지우기 전에 확장을 정리한다. 확장은 `ChartHost`의 시리즈·봉·현재 칸 getter를 읽는다. `BarFeed`는 드로잉을 모른다.
+- 도구 묶음은 `drawings/tools/<id>.ts`의 순수 `ToolSpec`과 테스트를 만들고 `tools/index.ts`에 한 줄만 더한다. 그리기·판정·설정 입력칸·배치 상태 기계는 엔진이 맡는다. `Shape`, `StyleField`, `Placement`, `ToolContext`의 새 종류가 필요하면 코디네이터에게 엔진 변경을 청한다.
 
 **차트 이미지**(#38)
 - `chart.takeScreenshot(true, false)`로 primitive까지 찍고 십자선은 뺀다. 지표 선과 드로잉 primitive는 따로 손대지 않아도 찍힌다.
@@ -1047,7 +1068,7 @@ interface IndicatorConfig {
 | 가격 패널 지표 | 같은 pane 0에 `LineSeries` | `priceLineVisible: false`, `lastValueVisible: false` |
 | 볼린저·일목 구름 채우기 | series primitive(`CloudPrimitive`, `zOrder: "bottom"`) | 두 선 사이 채우기 기능이 없어서다 |
 | 일목 미래 구간 | 선행스팬 시리즈가 미래 시각의 점을 갖는다 | 주 시리즈에 빈 시각(whitespace)을 붙이지 않는다(§5.6, W4-28) |
-| 드로잉 | series primitive(`DrawingPrimitive`, `zOrder: "top"`) | `paneViews()`가 그리기, `hitTest(x, y)`가 고르기. 좌표는 §3.5 |
+| 드로잉 | 칸마다 series primitive 하나(`DrawingLayer`, `zOrder: "normal"`) | `"top"`은 십자선을 가린다(drawing-proposal §6). `paneViews()`가 그리기, 클릭 판정은 엔진이 `Shape`마다 한다. 좌표는 §3.5 |
 | 고른 드로잉의 가격 라벨 | primitive `priceAxisViews()` | 수평선은 축에 가격 라벨을 낸다 |
 | 비교 종목 | `mainSeries.priceScale().applyOptions({ mode: PriceScaleMode.Percentage })` | 가격 패널 축만. 지표 패널 축은 `Normal` 유지 |
 | 로그 축 | `PriceScaleMode.Logarithmic` | |
