@@ -29,6 +29,7 @@ pub struct Seen {
     pub authorizations: Mutex<Vec<String>>,
     pub token_bodies: Mutex<Vec<Value>>,
     pub overrides: Mutex<std::collections::HashMap<String, (u16, Value)>>,
+    pub rejected_tokens: Mutex<Vec<String>>,
 }
 
 pub struct FakeKiwoom {
@@ -58,6 +59,14 @@ impl FakeKiwoom {
         self.seen.overrides.lock().unwrap().insert(api_id.to_owned(), (status, body));
     }
 
+    pub fn reject_token(&self, token: &str) {
+        self.seen.rejected_tokens.lock().unwrap().push(format!("Bearer {token}"));
+    }
+
+    pub fn issued(&self) -> usize {
+        self.api_ids().iter().filter(|a| *a == "au10001").count()
+    }
+
     pub fn api_ids(&self) -> Vec<String> {
         self.seen.api_ids.lock().unwrap().clone()
     }
@@ -84,11 +93,15 @@ async fn handle(State(seen): State<Arc<Seen>>, headers: HeaderMap, body: String)
         resp.headers_mut().insert("content-type", "application/json;charset=UTF-8".parse().unwrap());
         return resp;
     }
+    if seen.rejected_tokens.lock().unwrap().contains(&h("authorization")) {
+        return respond(serde_json::json!({"return_code": 3, "return_msg": "인증에 실패했습니다[8005:Token이 유효하지 않습니다]"}), true);
+    }
     let name = match api_id.as_str() {
         "au10001" => {
-            seen.token_bodies.lock().unwrap().push(serde_json::from_str(&body).unwrap_or(Value::Null));
+            let body: Value = serde_json::from_str(&body).unwrap_or(Value::Null);
             let mut v = fixture("au10001_ok");
-            v["token"] = TOKEN.into();
+            v["token"] = token_for(body["appkey"].as_str().unwrap_or("")).into();
+            seen.token_bodies.lock().unwrap().push(body);
             v["expires_dt"] = "20991231000000".into();
             return respond(v, false);
         }
@@ -142,6 +155,14 @@ fn respond(mut v: Value, last_page: bool) -> Response {
     resp
 }
 
+pub fn token_for(app_key: &str) -> String {
+    if app_key == APP_KEY { TOKEN.to_owned() } else { format!("FAKE-TOKEN-for-{app_key}") }
+}
+
+pub fn token_path(lock: &Path) -> std::path::PathBuf {
+    lock.with_file_name("token.json")
+}
+
 pub struct Server {
     pub child: Child,
     pub logs: Arc<Mutex<String>>,
@@ -151,6 +172,10 @@ impl Server {
     /// 환경변수를 비우고 필요한 것만 넣어 서버를 띄운다. 사용자의 VALLY_* 와 XDG_RUNTIME_DIR이 새어 들지 않는다.
     /// DB는 잠금 파일 옆 `vally.db`다. 저장소의 `data/`에 쓰지 않는다.
     pub fn spawn(fake: &FakeKiwoom, lock: &Path, static_dir: &Path) -> Server {
+        Server::spawn_with(fake, lock, static_dir, &[])
+    }
+
+    pub fn spawn_with(fake: &FakeKiwoom, lock: &Path, static_dir: &Path, overrides: &[(&str, &std::ffi::OsStr)]) -> Server {
         let db = lock.parent().expect("잠금 파일은 임시 디렉터리 안에 있다").join("vally.db");
         let mut child = Command::new(env!("CARGO_BIN_EXE_vally-server"))
             .env_clear()
@@ -159,9 +184,11 @@ impl Server {
             .env("VALLY_KIWOOM_BASE_URL", fake.base_url())
             .env("VALLY_LOCK_PATH", lock)
             .env("VALLY_DB_PATH", db)
+            .env("VALLY_TOKEN_PATH", token_path(lock))
             .env("VALLY_BIND", "127.0.0.1:0")
             .env("VALLY_STATIC_DIR", static_dir)
             .env("VALLY_LOG", "trace")
+            .envs(overrides.iter().copied())
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())

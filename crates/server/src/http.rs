@@ -17,7 +17,8 @@ use crate::bars::{BarError, BarService, DEFAULT_LIMIT, MAX_LIMIT};
 use crate::clock::Clock;
 use crate::db::AppDb;
 use crate::kiwoom::rest::KiwoomRest;
-use crate::symbols::SymbolDirectory;
+use crate::kiwoom::auth::auth_failed_message;
+use crate::symbols::{NotReady, SymbolDirectory};
 
 pub struct AppState {
     pub symbols: Arc<SymbolDirectory>,
@@ -84,6 +85,7 @@ impl IntoResponse for ApiFailure {
 
 #[derive(Clone, Copy)]
 enum Lookup {
+    Symbols,
     Bars,
     Quotes,
 }
@@ -91,6 +93,7 @@ enum Lookup {
 impl Lookup {
     fn label(self) -> &'static str {
         match self {
+            Lookup::Symbols => "종목",
             Lookup::Bars => "봉",
             Lookup::Quotes => "현재가",
         }
@@ -106,7 +109,9 @@ impl Lookup {
                 tracing::warn!(reason = %m, "{what} 요청에 답하지 못했습니다");
                 ApiFailure::new(KiwoomUnavailable, "키움 조회에 실패했습니다. 잠시 뒤 다시 시도하세요")
             }
-            BarError::AuthFailed => ApiFailure::new(KiwoomAuthFailed, "키움 인증에 실패했습니다. 운영자가 설정을 확인해야 합니다"),
+            BarError::AuthFailed { detail } => ApiFailure::new(KiwoomAuthFailed, auth_failed_message(detail)),
+            BarError::TokenWait(m) => ApiFailure::new(KiwoomUnavailable, m),
+            BarError::TokenFile(m) => ApiFailure::new(KiwoomAuthFailed, m),
             BarError::Internal(m) => {
                 tracing::error!(reason = %m, "{what} 요청 처리 중 내부 오류");
                 ApiFailure::new(Internal, "서버 내부 오류입니다")
@@ -115,8 +120,11 @@ impl Lookup {
     }
 }
 
-pub(crate) fn not_ready() -> ApiFailure {
-    ApiFailure::new(api::ApiErrorCode::KiwoomUnavailable, "종목 목록을 아직 받지 못했습니다. 잠시 뒤 다시 시도하세요")
+pub(crate) async fn symbol_list(st: &AppState) -> Result<Arc<crate::symbols::Directory>, ApiFailure> {
+    st.symbols.ready(&st.rest).await.map_err(|e| match e {
+        NotReady::Kiwoom(e) => Lookup::Symbols.failure(e.into()),
+        NotReady::Timeout => ApiFailure::new(api::ApiErrorCode::KiwoomUnavailable, "종목 목록을 아직 받지 못했습니다. 잠시 뒤 다시 시도하세요"),
+    })
 }
 
 async fn search(State(st): State<Arc<AppState>>, Query(q): Query<HashMap<String, String>>) -> Result<Json<Vec<api::SymbolInfo>>, ApiFailure> {
@@ -124,13 +132,13 @@ async fn search(State(st): State<Arc<AppState>>, Query(q): Query<HashMap<String,
     if crate::symbols::normalize(query).is_empty() {
         return Ok(Json(Vec::new()));
     }
-    let dir = st.symbols.ready().await.map_err(|_| not_ready())?;
+    let dir = symbol_list(&st).await?;
     Ok(Json(dir.search(query).iter().map(api::SymbolInfo::from).collect()))
 }
 
 async fn symbol(State(st): State<Arc<AppState>>, Path(code): Path<String>) -> Result<Json<api::SymbolInfo>, ApiFailure> {
     let symbol = Symbol::parse(&code).map_err(|e| ApiFailure::bad_request(e.to_string()))?;
-    let dir = st.symbols.ready().await.map_err(|_| not_ready())?;
+    let dir = symbol_list(&st).await?;
     dir.get(symbol)
         .map(|i| Json(api::SymbolInfo::from(i)))
         .ok_or_else(|| ApiFailure::new(api::ApiErrorCode::UnknownSymbol, format!("없는 종목입니다: {code}")))
@@ -353,7 +361,7 @@ mod tests {
             ], "return_code": 0}), None)
         }));
         let clock = Clock::fake(kst(KstDate::new(2026, 11, 9).unwrap(), 0, 34, 0));
-        let rest = KiwoomRest::new(Arc::new(fake.clone()), KiwoomAuth::new(Secret::new("k".into()), Secret::new("s".into())), clock.clone());
+        let rest = KiwoomRest::new(Arc::new(fake.clone()), KiwoomAuth::new(Secret::new("k".into()), Secret::new("s".into()), None), clock.clone());
         let symbols = Arc::new(SymbolDirectory::default());
         if loaded {
             let stock = |code: &str, name: &str, kind, nxt_enabled| SymbolInfo { symbol: Symbol::parse(code).unwrap(), name: name.into(), kind, market: Market::Kospi, nxt_enabled };
@@ -704,5 +712,38 @@ mod tests {
         assert_eq!(header(&h, "content-encoding"), "br");
         let (_, h, _) = get_with(&f.app, "/assets/app-1234.js", Some("gzip")).await;
         assert_eq!(header(&h, "content-encoding"), "gzip");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn requests_already_waiting_for_the_symbol_list_end_when_kiwoom_rejects_auth() {
+        let dir = tempfile::tempdir().unwrap();
+        tokio::time::resume();
+        let db = AppDb::open(&dir.path().join("vally.db")).await.unwrap();
+        tokio::time::pause();
+        let fake = Arc::new(FakeTransport::new(Duration::from_millis(300), |s| {
+            if s.api_id == ApiId::Au10001 {
+                return token(1);
+            }
+            status(403, json!({"return_code": 3, "return_msg": "지정단말기 인증에 실패했습니다[8050:지정단말기 인증 실패]"}))
+        }));
+        let clock = Clock::fake(kst(KstDate::new(2026, 11, 9).unwrap(), 9, 0, 0));
+        let rest = KiwoomRest::new(Arc::new(fake.clone()), KiwoomAuth::new(Secret::new("k".into()), Secret::new("s".into()), None), clock.clone());
+        let symbols = Arc::new(SymbolDirectory::default());
+        let bars = Arc::new(BarService::new(rest.clone(), symbols.clone(), clock.clone()));
+        let app = router(Arc::new(AppState { symbols: symbols.clone(), bars, rest: rest.clone(), db, clock, static_dir: dir.path().to_owned() }));
+
+        let nxt_layout = two_cells("005930");
+        let started = tokio::time::Instant::now();
+        let (symbol, bar, layout, list) = tokio::join!(
+            json(&app, "/api/symbols/005930"),
+            json(&app, "/api/bars?symbol=005930&period=D"),
+            put(&app, "/api/layouts/L2", &nxt_layout),
+            symbols.refresh(&rest, crate::kiwoom::rest::Priority::Screen),
+        );
+        assert_eq!(list.err(), Some(crate::kiwoom::rest::KiwoomError::AuthFailed { detail: Some(8050) }));
+        for (what, (s, v)) in [("종목", symbol), ("봉", bar), ("NXT 레이아웃", layout)] {
+            assert_eq!((s, code(&v)), (StatusCode::BAD_GATEWAY, "kiwoom_auth_failed"), "{what}: {v}");
+        }
+        assert!(started.elapsed() < Duration::from_secs(2), "8050을 받자마자 끝난다: {:?}", started.elapsed());
     }
 }

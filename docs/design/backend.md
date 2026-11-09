@@ -458,51 +458,70 @@ pub struct KiwoomAuth { /* app_key, app_secret: Secret, Mutex<State> */ }
 
 struct State {
     issued: Option<Issued>,    // { token: Secret<String>, issued_at, expires_at, generation }
+    last_request_at: Option<KstTime>, // 마지막으로 au10001을 보낸 시각. 실패한 요청도 센다
     stale: bool,               // 토큰 무효 응답을 받아 다시 발급해야 한다
-    last_invalidate: Option<KstTime>,
-    halted: Option<u16>,       // 되돌릴 수 없는 인증 실패의 상세 코드
 }
+// KiwoomAuth.halted: watch::Sender<Option<Halt>>. 기다리는 쪽(종목 목록 대기)이 멈춤을 바로 안다.
+pub enum Halt { Rejected(u16), TokenFileUnreadable(FileError) }
 
 /// 토큰이 다시 발급될 때마다 1씩 는다.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct TokenGen(pub u64);
 
 impl KiwoomAuth {
+    /// 토큰 파일(아래)이 있으면 읽어 토큰과 마지막 발급 요청 시각을 이어 쓴다. None이면 메모리에만 둔다(단위 테스트).
+    pub fn new(app_key: Secret<String>, app_secret: Secret<String>, file: Option<TokenFile>) -> Self;
     /// 지금 보낼 때 쓸 토큰. 무효로 표시됐거나, 멈췄거나, 만료까지 10분이 안 남았으면 None.
     pub fn current(&self, now: KstTime) -> Option<(Secret<String>, TokenGen)>;
     pub fn needs_issue(&self, now: KstTime) -> bool;
-    /// au10001 본문. 앱키와 시크릿이 들어 있으므로 Secret으로만 낸다.
-    pub fn issue_body(&self) -> Secret<String>;
+    /// au10001 본문. 보내기 전에 last_request_at을 지금으로 적고 파일에 남긴다. 남기지 못하면 Err이고 대기열은 보내지 않는다. 앱키와 시크릿이 들어 있으므로 Secret으로만 낸다.
+    pub fn begin_issue(&self, now: KstTime) -> Result<Secret<String>, FileError>;
+    /// last_request_at에서 10분이 지나지 않았으면 다시 보낼 수 있는 시각.
+    pub fn issue_blocked_until(&self, now: KstTime) -> Option<KstTime>;
     pub fn record_issued(&self, resp: TokenResponse, now: KstTime) -> Result<TokenGen, AuthError>;
     /// 토큰 무효 응답을 받았을 때만 부른다. seen이 지금 세대일 때만 다시 발급하도록 표시한다.
-    /// 5분 안에 두 번째로 부르면 InvalidAgain.
-    pub fn invalidate(&self, seen: TokenGen, now: KstTime) -> Result<(), AuthError>;
+    pub fn invalidate(&self, seen: TokenGen) -> Result<(), AuthError>;
     /// 매일 20:05: 지금 토큰이 그날 20:05 전에 발급된 것인가.
     pub fn due_daily_reissue(&self, now: KstTime) -> bool;
     pub fn halt(&self, detail: u16);
+    pub fn halted(&self) -> Option<Halt>;
+    pub async fn until_halted(&self) -> Halt;
 }
 
 impl KiwoomRest {
-    /// au10001을 대기열 맨 앞에 넣고 결과를 기다린다. 서버를 켤 때와 20:05에만 부른다.
+    /// au10001을 대기열 맨 앞에 넣고 결과를 기다린다. 서버를 켤 때(유효한 토큰이 없을 때)와 20:05에만 부른다.
     pub async fn issue_token(&self) -> Result<TokenGen, KiwoomError>;
+    /// 지금 보내면 키움에 닿지 않고 바로 실패할 이유: 멈췄거나(AuthFailed, TokenFile), 토큰이 없는데 발급 간격 안이다(IssueTooSoon).
+    pub fn blocked(&self) -> Option<KiwoomError>;
+    pub async fn until_halted(&self) -> KiwoomError;
 }
 ```
 
 - **키는 하나**: 실계좌 키 하나만 쓴다(`VALLY_KIWOOM_APP_KEY`, `VALLY_KIWOOM_APP_SECRET`). 모의 키 설정은 없다.
-- **발급하는 때**(ADR 0004): 발급을 되풀이하지 않는다.
-  1. 서버를 켤 때 한 번. 토큰은 메모리에만 있으므로 피할 수 없다. 이 발급이 실패해도 서버는 뜬다. 다음 조회가 들어오면 대기열이 발급부터 다시 한다.
+- **발급하는 때**(ADR 0004): 발급을 되풀이하지 않는다. **재시작은 발급이 아니다.**
+  1. 토큰 파일에 유효한 토큰(만료 10분 전보다 이름)이 없을 때. 서버를 켤 때 파일의 토큰이 유효하면 발급하지 않고 `info` 로그 "파일의 토큰을 다시 씁니다"를 남긴다. 켤 때의 발급이 실패해도 서버는 뜬다. 다음 조회가 들어오면 대기열이 발급부터 다시 한다(아래 최소 간격을 따른다).
   2. 하루 한 번, 장이 끝난 뒤. 매일 20:05에, 지금 토큰이 그날 20:05 전에 발급된 것이면 다시 발급한다. 토큰은 24시간 유효하므로 만료가 장중에 오지 않는다. 20:05에 실패하면 07:45까지 10분마다 다시 시도한다.
-  3. 토큰 무효 응답(`[8005]`)을 받았을 때. 그 요청은 `invalidate`를 한 번 부르고 한 번 다시 보낸다. 다시 보낼 때 대기열이 먼저 발급한다. 그래도 `[8005]`면 그 요청은 `AuthFailed`다. 5분 안에 두 번은 발급하지 않는다.
+  3. 토큰 무효 응답(`[8005]`)을 받았을 때. 그 요청은 `invalidate`를 한 번 부르고 한 번 다시 보낸다. 다시 보낼 때 대기열이 먼저 발급한다. 그래도 `[8005]`면 그 요청은 `AuthFailed`다.
   4. 안전장치: 만료까지 10분이 안 남으면 `current`가 `None`을 주고, 대기열이 다음 요청 전에 발급한다.
+- **발급 사이 최소 10분**: 위 넷 모두에 걸린다. 대기열은 au10001을 보내기 **전에** `last_request_at`을 파일에 적고, 적지 못하면 보내지 않는다(`TokenFile` 오류, 브라우저에는 `kiwoom_auth_failed`). 그래서 실패한 요청(8050, 네트워크 오류)도 세고, 재시작해도 파일의 시각을 따른다. 10분이 지나지 않았는데 발급해야 하면 보내지 않고, 기다리던 시세 요청과 `issue_token`을 곧바로 `IssueTooSoon { until }`으로 실패시킨다. 브라우저에는 `kiwoom_unavailable`(503)과 "키움 토큰은 발급 사이를 10분 띄웁니다. <시각>부터 다시 받으니 그 뒤에 다시 시도하세요"가 간다. 저절로 풀리므로 `kiwoom_auth_failed`가 아니다. 종목 목록을 기다리는 요청도 기다리지 않고 같은 이유로 실패한다(`SymbolDirectory::ready`가 먼저 `blocked`를 본다).
 - **토큰은 보내는 순간에 읽는다**(D16): 대기 중인 요청은 토큰을 쥐고 있지 않다. 대기열이 요청을 내보낼 때 `current`로 읽는다. 그래서 새 토큰은 그 뒤의 모든 REST 요청에 바로 쓰인다. 옛 토큰으로 보낸 REST는 `[8005]`로 실패하기 때문이다(kiwoom.md 11.10).
 - **au10001이 실패하면**: 기다리던 시세 요청을 모두 실패로 돌려준다. 토큰 없이는 어느 요청도 보낼 수 없다.
 - **토큰과 WebSocket**(#4, D16)
   - 새 토큰을 받아도 기존 WebSocket 세션은 끊기지 않는다(kiwoom.md 11.10). 그래서 세대가 바뀌어도 세션을 일부러 닫지 않는다. 다음에 다시 연결할 때 그때의 토큰으로 LOGIN한다.
   - 같은 앱키로 두 번째 LOGIN을 하면 기존 세션이 close 1000 'Bye'로 끊긴다. 그래서 서버 하나 원칙(ADR 0004, 아래 잠금 파일)을 지킨다.
-- **토큰은 메모리에만 둔다**: 서버를 다시 켜면 새로 발급한다. 재시작은 드물어서 받아들인다.
+- **토큰 파일**(ADR 0004 개정, D18): 토큰은 저장소 밖 파일에 두고 다시 쓴다.
+  - 경로: `VALLY_TOKEN_PATH`(§11.1). 기본은 `$XDG_STATE_HOME/vallythevally/token.json`, `XDG_STATE_HOME`이 없으면 `~/.local/state/vallythevally/token.json`이다. 둘 다 없으면 시작하지 않는다.
+  - 내용: `{"credential", "token": {"value", "expires_dt", "issued_at"} 또는 null, "last_request_at"}`. `credential`은 `token_file::credential_id(앱키)`(`"sha256:<16진수>"`)다. `expires_dt`는 au10001 응답의 KST `YYYYMMDDhhmmss`, 두 시각은 유닉스 초다.
+  - 앱키 대조: `credential`이 지금 앱키와 다르거나 없으면(이 필드가 생기기 전의 파일) 토큰은 버리고 `last_request_at`은 따른다.
+  - 권한: 토큰 파일이 든 디렉터리는 이 서버 전용이다. 없으면 700으로 만든다. 디렉터리나 파일에 그룹·다른 사용자 권한이 있으면 읽지도 쓰지도 않고 `chmod` 명령을 담은 오류를 낸다. `VALLY_TOKEN_PATH`가 홈 같은 공용 디렉터리를 가리킬 수 있어 권한을 고쳐 주지는 않는다. 쓰기는 같은 디렉터리에 `tempfile`로 새 임시 파일(배타적 생성, 600)을 만들어 쓰고 `sync_all` 뒤 rename한다.
+  - 쓰기 실패: 발급 요청 시각을 쓰지 못하면 위처럼 보내지 않는다. 받은 토큰을 쓰지 못하면 `error` 로그를 남기고 메모리의 토큰으로 계속한다. 요청 시각은 이미 파일에 있으니 다시 켜도 간격을 지킨다.
+  - 잠금: `TokenFile::new(path, &InstanceLock)`이라 잠금을 쥔 프로세스만 연다. 실측 프로그램도 같은 잠금을 잡은 뒤 같은 파일을 쓴다(kiwoom.md 머리말).
+  - 파일 없음(처음 실행)은 "토큰 없음"이다. 파일이 있는데 못 읽으면(빈 파일, 깨진 JSON, 권한, 부모가 디렉터리가 아님) 마지막 발급 요청 시각을 모르므로 `Halt::TokenFileUnreadable`로 조회와 발급을 멈춘다. 경로와 원인을 `error` 로그와 `kiwoom_auth_failed` 응답(상태 표시줄)에 낸다. 파일은 덮어쓰지 않는다. 운영자가 고치거나, 마지막 발급에서 10분이 지난 뒤 지우고 다시 켠다. 로그에는 파일 내용을 싣지 않는다.
+  - 읽을 수 없는 만료 시각만 있는 토큰은 버린다.
+  - 8050으로 멈춘 상태는 파일에 남기지 않는다. 서버를 다시 켜는 것이 사람이 원인을 고쳤다는 표시다.
 - 토큰 폐기(au10002)는 허용 목록에 넣지 않는다. 폐기할 일이 없다.
 
-**켜는 순서**(`app.rs`): 설정 → 잠금 파일 → 사용자 자료 DB 열기(§7.1, 실패하면 종료 코드 1) → 포트 열기 → 첫 토큰 발급 → 종목 목록 받기를 태스크로 띄움 → 요청 받기. 목록이 오기 전에 요청을 받아야 "목록을 최대 10초 기다림"(§6.6)이 성립한다.
+**켜는 순서**(`app.rs`): 설정 → 잠금 파일 → 사용자 자료 DB 열기(§7.1, 실패하면 종료 코드 1) → 포트 열기 → 토큰 파일 읽기(유효하면 다시 쓰고, 없으면 발급) → 종목 목록 받기를 태스크로 띄움 → 요청 받기. 목록이 오기 전에 요청을 받아야 "목록을 최대 10초 기다림"(§6.6)이 성립한다.
 
 #### 토큰을 가진 프로세스는 하나: 잠금 파일
 
@@ -585,6 +604,7 @@ pub struct MergeScope(pub u64);
 
 키움 응답은 세 겹으로 판정한다. 실측 결과(kiwoom.md §9)를 따른다.
 
+0. **인증 거절 상세 코드**: `return_msg`에 멈출 상세 코드가 있으면 HTTP 상태와 상관없이 먼저 멈춘다(아래 표). 지금 구현(`is_halting`)은 8001~8200 중 8005 밖을 모두 멈춤으로 본다. 이것은 키움이 보장한 범주가 아니라 임시 판정이고, ADR 0009의 코드 표와 다르다. #20에서 명시 코드 표로 바꾼다. 8050이 HTTP 200으로 오는지 4xx/5xx로 오는지 아직 재지 못했다. 4xx/5xx를 전송 오류로 넘기면 조회마다 토큰을 다시 발급해 계정이 잠긴다(가짜 키움에서 HTTP 403 + `[8050]`이면 11초에 8번 발급했다).
 1. **HTTP 상태**: 200이 아니면 전송 오류, 요청 개수 초과(429), 서버 오류(5xx)다. 토큰 무효는 HTTP 200으로 온다.
 2. **최상위 `return_code`**: 0이면 성공이다. 0이 아니면 실패다. 이 숫자는 키움 오류 코드가 아니라 오류의 큰 갈래다. 관측한 값은 2(입력 값 오류), 3(인증 실패), 5(요청 개수 초과 갈래)다. **같은 5에 1700과 1634가 함께 오므로** 대응은 상세 코드로 가른다.
 3. **`return_msg` 안의 상세 코드**: 키움 오류 코드는 메시지 속 대괄호에 들어 있다. 예: `"입력 값 오류입니다[1511:필수 입력 값에 값이 존재하지 않습니다. …]"`. 파서는 정규식 `\[(\d{4}):`로 꺼낸다. 없으면 `None`이다.
@@ -615,7 +635,8 @@ pub enum KiwoomError {
 |---|---|---|
 | 요청 개수 초과 | HTTP 429, `return_code: 5`, 상세 코드 1700(`유량=5`가 메시지에 있다). 판정은 HTTP 429 또는 상세 1700 | 같은 요청을 그 대기열 맨 앞에 다시 넣는다. 대기열 전체를 1초 멈춘다. 같은 요청이 3번 연속 걸리면 실패로 돌려준다. 260ms 간격이 모자랐다는 뜻이므로 `warn` 로그를 남긴다. |
 | 토큰 무효·만료 | **HTTP 200**, `return_code: 3`, 상세 코드 8005. 판정은 상세 8005. 만료된 진짜 토큰도 같은 형태인지는 [실측 대기] | `invalidate` 한 번, 그다음 같은 요청을 한 번 다시 보낸다. 그래도 실패하면 `AuthFailed`. |
-| 앱키·IP·투자구분 인증 실패 | 상세 코드 8001~8200 중 8005 밖 | 되돌릴 수 없는 설정 문제다. 모든 조회와 실시간을 멈춘다. 상태를 `halted`로 바꿔 브라우저에 알린다. 다시 발급을 반복하지 않는다. 운영자가 고치고 서버를 다시 켠다. |
+| 앱키·IP·투자구분 인증 실패 | 지금은 상세 코드 8001~8200 중 8005 밖(임시 판정, #20에서 ADR 0009 표로). HTTP 상태는 보지 않는다 | 되돌릴 수 없는 설정 문제다. 모든 조회와 실시간을 멈춘다. 다시 발급하지 않는다. 켤 때의 종목 목록 재시도(10초), 07:45 목록 갱신 재시도, 20:05 토큰 재발급도 멈춘다. 종목 목록을 기다리는 요청(`/api/symbols`, `/api/bars`)도 기다리지 않고 곧바로 `kiwoom_auth_failed`다. 오류 문장과 `error` 로그에 원인과 조치를 적는다(`auth::auth_failed_message`). 운영자가 고치고 서버를 다시 켠다. |
+| 지정단말기 인증 실패 | 상세 코드 **8050** | 위와 같이 멈춘다. 문장: "키움 IP 미등록 또는 반복 발급 잠금입니다. 지금 공인 IP를 키움 포털에 등록하세요. 반복 발급 잠금이면 포털에서 해제됐는지 확인하세요." 공인 IP는 외부 서비스로 알아내지 않는다. 2026-11-09에 IP 미등록으로 실제로 겪었다(ADR 0004). |
 | 한 번에 넣은 종목이 너무 많음 | HTTP 200, `return_code: 5`, 상세 코드 1634(ka10095에 101종목 이상) | 우리 코드의 버그다(§5.3이 100개씩 나눈다). 물러서거나 다시 보내지 않는다. `error` 로그. 1700과 섞으면 같은 요청을 되풀이하게 되므로 반드시 상세 코드로 가른다. |
 | 없는 종목 | 성공 응답의 빈 행 | 다시 보내지 않는다. 브라우저에는 `unknown_symbol`. |
 | 잘못된 요청 | 상세 코드 1501~1999 | 다시 보내지 않는다. 우리 코드의 버그이므로 `error` 로그. 브라우저에는 `internal`. |
@@ -2095,6 +2116,7 @@ pub fn future_bar_starts(period: &str, last_start: f64, n: usize) -> Result<Vec<
 | `VALLY_KIWOOM_BASE_URL` | 아니오 | 키움 REST 주소. 기본 `https://api.kiwoom.com`. 통합 테스트가 가짜 키움 서버를 가리키는 데 쓴다 |
 | `VALLY_DB_PATH` | 아니오 | 사용자 자료 SQLite 파일 경로. 기본 `data/vally.db`. #2에서는 읽지 않는다 |
 | `VALLY_LOCK_PATH` | 아니오 | 잠금 파일 경로(§4.1). 기본 `$XDG_RUNTIME_DIR/vallythevally/server.lock`, 없으면 `/tmp/vallythevally-<uid>/server.lock` |
+| `VALLY_TOKEN_PATH` | 아니오 | 토큰 파일 경로(§4.1). 기본 `$XDG_STATE_HOME/vallythevally/token.json`, 없으면 `~/.local/state/vallythevally/token.json`. 저장소 안을 가리키지 않는다. 통합 테스트가 임시 디렉터리를 가리키는 데 쓴다 |
 | `VALLY_BIND` | 아니오 | 받는 주소. 기본 `127.0.0.1:8080` |
 | `VALLY_TELEGRAM_BOT_TOKEN` | 아니오 | 없으면 텔레그램 채널을 끈다(#8 전에는 없어도 된다) |
 | `VALLY_TELEGRAM_CHAT_ID` | 아니오 | 위와 함께 |
@@ -2125,6 +2147,7 @@ impl<T> Secret<T> { pub fn expose(&self) -> &T; }
 ```
 
 - 앱키, 시크릿, 접근토큰, 텔레그램 봇 토큰, DB 비밀번호가 들어간 URL은 모두 `Secret`이다.
+- 토큰 파일(§4.1)은 `.env`와 같은 수준으로 다룬다: 저장소 밖, 권한 600. 파일 내용 구조체에는 `Debug`가 없다. 파일 경로는 로그에 남겨도 되지만 내용은 남기지 않는다.
 - 키움 요청을 로그에 남길 때는 api-id, 우선순위, 소요 시간, `return_code`, 상세 코드만 남긴다. 헤더와 au10001 요청·응답 본문은 남기지 않는다.
 - 텔레그램 봇 토큰은 URL 경로에 들어간다(`/bot<token>/sendMessage`). `reqwest` 오류는 URL을 품고 있으므로, 로그에 남기기 전에 `without_url()`로 지운다.
 - WebSocket LOGIN 메시지는 로그에 남기지 않는다.

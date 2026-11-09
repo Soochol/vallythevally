@@ -17,7 +17,7 @@ use crate::kiwoom::api::{
 };
 use crate::kiwoom::rest::{ContKey, KiwoomError, KiwoomRest, MergeScope, Priority};
 use crate::kiwoom::wire::{ChartBody, ChartRows, KiwoomBar, parse_chart};
-use crate::symbols::SymbolDirectory;
+use crate::symbols::{NotReady, SymbolDirectory};
 
 pub const DEFAULT_LIMIT: usize = 500;
 pub const MAX_LIMIT: usize = 1000;
@@ -36,16 +36,18 @@ pub enum BarError {
     UnknownSymbol,
     /// 종목 목록을 아직 못 받았거나 키움이 응답하지 않는다.
     Unavailable(String),
-    AuthFailed,
+    AuthFailed { detail: Option<u16> },
+    TokenWait(String),
+    TokenFile(String),
     Internal(String),
 }
 
 impl fmt::Display for BarError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            BarError::BadRequest(m) | BarError::Unavailable(m) | BarError::Internal(m) => f.write_str(m),
+            BarError::BadRequest(m) | BarError::Unavailable(m) | BarError::TokenWait(m) | BarError::TokenFile(m) | BarError::Internal(m) => f.write_str(m),
             BarError::UnknownSymbol => f.write_str("없는 종목입니다"),
-            BarError::AuthFailed => f.write_str("키움 인증에 실패했습니다"),
+            BarError::AuthFailed { detail } => f.write_str(&crate::kiwoom::auth::auth_failed_message(*detail)),
         }
     }
 }
@@ -54,7 +56,9 @@ impl From<KiwoomError> for BarError {
     fn from(e: KiwoomError) -> Self {
         match e {
             KiwoomError::RateLimited | KiwoomError::Transport(_) => BarError::Unavailable(e.to_string()),
-            KiwoomError::AuthFailed { .. } => BarError::AuthFailed,
+            KiwoomError::AuthFailed { detail } => BarError::AuthFailed { detail },
+            KiwoomError::IssueTooSoon { .. } => BarError::TokenWait(e.to_string()),
+            KiwoomError::TokenFile(_) => BarError::TokenFile(e.to_string()),
             KiwoomError::BadRequest { .. } | KiwoomError::Parse { .. } => BarError::Internal(e.to_string()),
         }
     }
@@ -120,7 +124,10 @@ impl BarService {
 
     /// `before`가 None이면 최신 페이지다.
     pub async fn page(&self, key: SeriesKey, before: Option<KstTime>, limit: usize) -> Result<BarPage, BarError> {
-        let dir = self.symbols.ready().await.map_err(|_| BarError::Unavailable("종목 목록을 아직 받지 못했습니다".into()))?;
+        let dir = self.symbols.ready(&self.rest).await.map_err(|e| match e {
+            NotReady::Kiwoom(e) => e.into(),
+            NotReady::Timeout => BarError::Unavailable("종목 목록을 아직 받지 못했습니다".into()),
+        })?;
         let Some(info) = dir.get(key.feed.symbol()) else {
             return Err(BarError::UnknownSymbol);
         };
@@ -542,7 +549,7 @@ mod tests {
             chart.respond(s, array_of(s.api_id))
         }));
         let clock = Clock::fake(now);
-        let rest = KiwoomRest::new(Arc::new(fake.clone()), KiwoomAuth::new(Secret::new("k".into()), Secret::new("s".into())), clock.clone());
+        let rest = KiwoomRest::new(Arc::new(fake.clone()), KiwoomAuth::new(Secret::new("k".into()), Secret::new("s".into()), None), clock.clone());
         let symbols = Arc::new(SymbolDirectory::default());
         let stock = |code: &str, nxt_enabled| SymbolInfo { symbol: Symbol::parse(code).unwrap(), name: code.into(), kind: SymbolKind::Common, market: Market::Kospi, nxt_enabled };
         symbols.replace(Directory::build(vec![stock(SAMSUNG, true), stock(NOT_ON_NXT, false), stock(EMPTY_ROW, true)]));

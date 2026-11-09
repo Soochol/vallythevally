@@ -52,7 +52,7 @@ impl Transport for Recorded {
 async fn stale_continuation_keeps_alteogen_minutes_on_todays_adjustment_basis() {
     let clock = Clock::fake(kst(KstDate::new(2026, 11, 9).unwrap(), 2, 39, 0));
     let base_dts = Arc::new(Mutex::new(Vec::new()));
-    let rest = KiwoomRest::new(Arc::new(Recorded { base_dts: base_dts.clone() }), KiwoomAuth::new(Secret::new("k".into()), Secret::new("s".into())), clock.clone());
+    let rest = KiwoomRest::new(Arc::new(Recorded { base_dts: base_dts.clone() }), KiwoomAuth::new(Secret::new("k".into()), Secret::new("s".into()), None), clock.clone());
     let symbol = Symbol::parse("196170").unwrap();
     let symbols = Arc::new(SymbolDirectory::default());
     symbols.replace(Directory::build(vec![SymbolInfo { symbol, name: "알테오젠".into(), kind: SymbolKind::Common, market: Market::Kosdaq, nxt_enabled: true }]));

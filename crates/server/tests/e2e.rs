@@ -178,3 +178,39 @@ async fn second_instance_exits_1_without_touching_kiwoom() {
     assert!(first_kiwoom.requests() >= 1);
     first.stop().await;
 }
+
+/// 실제 8050 응답의 HTTP 상태를 아직 재지 못해 200과 403 두 모양을 다 본다.
+async fn designated_terminal_stops_after_one_token_attempt(http_status: u16) {
+    let fake = FakeKiwoom::start().await;
+    fake.respond_with("au10001", http_status, serde_json::json!({"return_code": 3, "return_msg": "인증에 실패했습니다[8050:지정단말기 인증에 실패했습니다]"}));
+    let tmp = tempfile::tempdir().unwrap();
+    let server = Server::spawn(&fake, &tmp.path().join("run/server.lock"), &static_dir(tmp.path()));
+    let base = format!("http://{}", server.addr().await);
+    let client = reqwest::Client::new();
+
+    let mut last = Value::Null;
+    for path in ["/api/symbols/005930", "/api/symbols?q=%EC%82%BC%EC%84%B1", "/api/bars?symbol=005930&period=D", "/api/quotes?symbols=005930", "/api/bars?symbol=IDX:001&period=D"] {
+        let (status, body) = get(&client, &base, path).await;
+        assert_eq!((status, body["error"]["code"].as_str()), (502, Some("kiwoom_auth_failed")), "{path}: {body}");
+        last = body;
+    }
+    let message = last["error"]["message"].as_str().unwrap();
+    assert!(message.contains("8050") && message.contains("공인 IP를 키움 포털에 등록하세요"), "{message}");
+
+    let longer_than_one_startup_list_retry = Duration::from_secs(11);
+    tokio::time::sleep(longer_than_one_startup_list_retry).await;
+    assert_eq!(fake.api_ids(), ["au10001"], "발급 시도는 한 번뿐이고 시세 요청은 없다");
+    let logs = server.stop().await;
+    assert!(logs.contains("공인 IP를 키움 포털에 등록하세요"), "{logs}");
+    assert!(!logs.contains("10초 뒤 다시 받습니다"), "멈춘 뒤에는 종목 목록을 다시 받지 않는다:\n{logs}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn designated_terminal_8050_with_http_200_halts_everything() {
+    designated_terminal_stops_after_one_token_attempt(200).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn designated_terminal_8050_with_http_403_halts_everything() {
+    designated_terminal_stops_after_one_token_attempt(403).await;
+}

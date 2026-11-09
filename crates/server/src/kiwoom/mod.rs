@@ -3,5 +3,6 @@
 pub mod api;
 pub mod auth;
 pub mod rest;
+pub mod token_file;
 pub mod transport;
 pub mod wire;

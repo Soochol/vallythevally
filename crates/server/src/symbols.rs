@@ -133,8 +133,11 @@ pub struct SymbolDirectory {
     current: watch::Sender<Option<Arc<Directory>>>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct NotReady;
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum NotReady {
+    Timeout,
+    Kiwoom(KiwoomError),
+}
 
 impl Default for SymbolDirectory {
     fn default() -> Self {
@@ -155,12 +158,18 @@ impl SymbolDirectory {
     }
 
     /// 목록이 아직 없으면 최대 10초 기다린다.
-    pub async fn ready(&self) -> Result<Arc<Directory>, NotReady> {
+    pub async fn ready(&self, rest: &KiwoomRest) -> Result<Arc<Directory>, NotReady> {
+        if let Some(e) = rest.blocked() {
+            return Err(NotReady::Kiwoom(e));
+        }
         let mut rx = self.current.subscribe();
-        let wait = rx.wait_for(Option::is_some);
-        match tokio::time::timeout(READY_WAIT, wait).await {
-            Ok(Ok(dir)) => Ok(dir.clone().expect("wait_for가 Some을 기다렸다")),
-            _ => Err(NotReady),
+        tokio::select! {
+            biased;
+            dir = tokio::time::timeout(READY_WAIT, rx.wait_for(Option::is_some)) => match dir {
+                Ok(Ok(dir)) => Ok(dir.clone().expect("wait_for가 Some을 기다렸다")),
+                _ => Err(NotReady::Timeout),
+            },
+            e = rest.until_halted() => Err(NotReady::Kiwoom(e)),
         }
     }
 }
@@ -310,25 +319,29 @@ mod tests {
             ok(if s.body.contains("\"10\"") { kosdaq.clone() } else { exchange.clone() }, None)
         }));
         let clock = crate::clock::Clock::fake(crate::clock::kst(domain::KstDate::new(2026, 11, 9).unwrap(), 7, 45, 0));
-        let auth = crate::kiwoom::auth::KiwoomAuth::new(crate::config::Secret::new("k".into()), crate::config::Secret::new("s".into()));
+        let auth = crate::kiwoom::auth::KiwoomAuth::new(crate::config::Secret::new("k".into()), crate::config::Secret::new("s".into()), None);
         let rest = KiwoomRest::new(Arc::new(fake.clone()), auth, clock);
         let symbols = SymbolDirectory::default();
         symbols.refresh(&rest, Priority::Screen).await.unwrap();
-        let d = symbols.ready().await.unwrap();
+        let d = symbols.ready(&rest).await.unwrap();
         assert_eq!(d.len(), 2 + 15 + 11, "ETN·인프라·뮤추얼펀드 다섯 행은 빠진다");
         assert_eq!(d.search("03481K")[0].kind, SymbolKind::Preferred);
         assert_eq!(d.search("삼성전자")[0].symbol.as_wire(), "005930");
         down.store(true, Ordering::SeqCst);
         assert!(symbols.refresh(&rest, Priority::Background).await.is_err());
-        assert_eq!(symbols.ready().await.unwrap().len(), 28, "실패하면 이전 목록을 쓴다");
+        assert_eq!(symbols.ready(&rest).await.unwrap().len(), 28, "실패하면 이전 목록을 쓴다");
     }
 
     #[tokio::test(start_paused = true)]
     async fn requests_wait_for_the_first_list_up_to_ten_seconds() {
+        let fake = Arc::new(crate::kiwoom::rest::testing::FakeTransport::new(Duration::ZERO, |_| unreachable!("목록을 받으러 가지 않는다")));
+        let clock = crate::clock::Clock::fake(crate::clock::kst(domain::KstDate::new(2026, 11, 9).unwrap(), 9, 0, 0));
+        let auth = crate::kiwoom::auth::KiwoomAuth::new(crate::config::Secret::new("k".into()), crate::config::Secret::new("s".into()), None);
+        let rest = KiwoomRest::new(Arc::new(fake), auth, clock);
         let symbols = Arc::new(SymbolDirectory::default());
         let early = {
-            let s = symbols.clone();
-            tokio::spawn(async move { s.ready().await.map(|d| d.len()) })
+            let (s, rest) = (symbols.clone(), rest.clone());
+            tokio::spawn(async move { s.ready(&rest).await.map(|d| d.len()) })
         };
         tokio::time::sleep(Duration::from_secs(3)).await;
         symbols.replace(dir());
@@ -336,7 +349,7 @@ mod tests {
 
         let empty = SymbolDirectory::default();
         let started = tokio::time::Instant::now();
-        assert_eq!(empty.ready().await.err(), Some(NotReady));
+        assert_eq!(empty.ready(&rest).await.err(), Some(NotReady::Timeout));
         assert_eq!(started.elapsed(), READY_WAIT);
     }
 }

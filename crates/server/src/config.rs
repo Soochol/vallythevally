@@ -76,6 +76,7 @@ const KNOWN_KEYS: &[&str] = &[
     "VALLY_KIWOOM_BASE_URL",
     "VALLY_DB_PATH",
     "VALLY_LOCK_PATH",
+    "VALLY_TOKEN_PATH",
     "VALLY_BIND",
     "VALLY_TELEGRAM_BOT_TOKEN",
     "VALLY_TELEGRAM_CHAT_ID",
@@ -90,6 +91,7 @@ pub struct Config {
     /// 테스트가 가짜 키움 서버를 가리키게 하려고 둔 키. 기본은 실제 키움 주소다.
     pub kiwoom_base_url: String,
     pub lock_path: PathBuf,
+    pub token_path: PathBuf,
     pub bind: BindAddr,
     pub static_dir: PathBuf,
     /// 사용자 자료 SQLite 파일(§7.1). 상대 경로면 서버 작업 디렉터리 기준.
@@ -107,7 +109,7 @@ impl Config {
             Some(path) => read_env_file(Path::new(path))?,
             None => BTreeMap::new(),
         };
-        Config::from_vars(file, process, default_lock_path)
+        Config::from_vars(file, process, default_lock_path, default_token_path)
     }
 
     /// 파일 값 위에 프로세스 값을 덮어 설정을 만든다.
@@ -115,6 +117,7 @@ impl Config {
         file: BTreeMap<String, String>,
         process: BTreeMap<String, String>,
         default_lock: impl FnOnce() -> Result<PathBuf, ConfigError>,
+        default_token: impl FnOnce() -> Result<PathBuf, ConfigError>,
     ) -> Result<(Config, ConfigWarnings), ConfigError> {
         let mut vars = file;
         vars.extend(process);
@@ -140,6 +143,10 @@ impl Config {
                 Some(p) => PathBuf::from(p),
                 None => default_lock()?,
             },
+            token_path: match vars.get("VALLY_TOKEN_PATH") {
+                Some(p) => PathBuf::from(p),
+                None => default_token()?,
+            },
             bind: BindAddr::parse(vars.get("VALLY_BIND").map_or("127.0.0.1:8080", String::as_str))?,
             static_dir: PathBuf::from(vars.get("VALLY_STATIC_DIR").map_or("web/dist", String::as_str)),
             db_path: PathBuf::from(vars.get("VALLY_DB_PATH").map_or("data/vally.db", String::as_str)),
@@ -159,6 +166,20 @@ fn default_lock_path() -> Result<PathBuf, ConfigError> {
         .map_err(|e| ConfigError(format!("사용자 번호를 알 수 없어 잠금 파일 경로를 정할 수 없습니다: {e}")))?
         .uid();
     Ok(PathBuf::from(format!("/tmp/vallythevally-{uid}/server.lock")))
+}
+
+fn default_token_path() -> Result<PathBuf, ConfigError> {
+    token_path_from(std::env::var_os("XDG_STATE_HOME"), std::env::var_os("HOME"))
+}
+
+fn token_path_from(state_home: Option<std::ffi::OsString>, home: Option<std::ffi::OsString>) -> Result<PathBuf, ConfigError> {
+    let nonempty = |v: Option<std::ffi::OsString>| v.filter(|d| !d.is_empty()).map(PathBuf::from);
+    let state = match (nonempty(state_home), nonempty(home)) {
+        (Some(state), _) => state,
+        (None, Some(home)) => home.join(".local/state"),
+        (None, None) => return Err(ConfigError("XDG_STATE_HOME도 HOME도 없어 토큰 파일 경로를 정할 수 없습니다. VALLY_TOKEN_PATH를 주세요".into())),
+    };
+    Ok(state.join("vallythevally").join("token.json"))
 }
 
 fn read_env_file(path: &Path) -> Result<BTreeMap<String, String>, ConfigError> {
@@ -207,6 +228,10 @@ mod tests {
         Ok(PathBuf::from("/nonexistent/test.lock"))
     }
 
+    fn token() -> Result<PathBuf, ConfigError> {
+        Ok(PathBuf::from("/nonexistent/token.json"))
+    }
+
     #[test]
     fn secret_never_prints_its_value() {
         let s = Secret::new(KEY.to_owned());
@@ -221,6 +246,7 @@ mod tests {
             vars(&[("VALLY_KIWOOM_APP_KEY", KEY), ("VALLY_KIWOOM_APP_SECRET", SECRET)]),
             BTreeMap::new(),
             lock,
+            token,
         )
         .unwrap();
         let dbg = format!("{c:?} {c:#?}");
@@ -234,6 +260,7 @@ mod tests {
             vars(&[("VALLY_KIWOOM_APP_KEY", "file"), ("VALLY_KIWOOM_APP_SECRET", SECRET), ("VALLY_BIND", "127.0.0.1:9")]),
             vars(&[("VALLY_KIWOOM_APP_KEY", KEY), ("VALLY_KIWOOM_BASE_URL", "http://127.0.0.1:5/")]),
             lock,
+            token,
         )
         .unwrap();
         assert!(warnings.is_empty());
@@ -244,24 +271,34 @@ mod tests {
         assert_eq!(c.db_path, PathBuf::from("data/vally.db"));
         assert_eq!(c.log_filter, "info");
         assert_eq!(c.lock_path, PathBuf::from("/nonexistent/test.lock"));
+        assert_eq!(c.token_path, PathBuf::from("/nonexistent/token.json"));
 
-        let (c, _) = Config::from_vars(vars(&[("VALLY_KIWOOM_APP_KEY", KEY), ("VALLY_KIWOOM_APP_SECRET", SECRET)]), BTreeMap::new(), lock).unwrap();
+        let (c, _) = Config::from_vars(vars(&[("VALLY_KIWOOM_APP_KEY", KEY), ("VALLY_KIWOOM_APP_SECRET", SECRET)]), BTreeMap::new(), lock, token).unwrap();
         assert_eq!(c.kiwoom_base_url, DEFAULT_KIWOOM_BASE_URL);
         assert_eq!(c.bind.socket_addr(), "127.0.0.1:8080".parse().unwrap());
     }
 
     #[test]
     fn missing_keys_fail_and_unknown_keys_warn() {
-        assert!(Config::from_vars(vars(&[("VALLY_KIWOOM_APP_KEY", KEY)]), BTreeMap::new(), lock).is_err());
-        assert!(Config::from_vars(vars(&[("VALLY_KIWOOM_APP_KEY", KEY), ("VALLY_KIWOOM_APP_SECRET", "")]), BTreeMap::new(), lock).is_err());
+        assert!(Config::from_vars(vars(&[("VALLY_KIWOOM_APP_KEY", KEY)]), BTreeMap::new(), lock, token).is_err());
+        assert!(Config::from_vars(vars(&[("VALLY_KIWOOM_APP_KEY", KEY), ("VALLY_KIWOOM_APP_SECRET", "")]), BTreeMap::new(), lock, token).is_err());
         let (_, warnings) = Config::from_vars(
             vars(&[("VALLY_KIWOOM_APP_KEY", KEY), ("VALLY_KIWOOM_APP_SECRET", SECRET), ("VALLY_BIDN", "x")]),
             BTreeMap::new(),
             lock,
+            token,
         )
         .unwrap();
         assert_eq!(warnings.len(), 1);
         assert!(warnings[0].contains("VALLY_BIDN"));
+    }
+
+    #[test]
+    fn token_path_follows_xdg_state_home_then_home() {
+        let os = |s: &str| Some(std::ffi::OsString::from(s));
+        assert_eq!(token_path_from(os("/s"), os("/h")).unwrap(), PathBuf::from("/s/vallythevally/token.json"));
+        assert_eq!(token_path_from(os(""), os("/h")).unwrap(), PathBuf::from("/h/.local/state/vallythevally/token.json"));
+        assert!(token_path_from(None, None).is_err());
     }
 
     #[test]
