@@ -899,6 +899,17 @@ mod tests {
         assert_eq!((bars.len(), current), (3, None), "허브가 이미 확정한 구간의 키움 현재 봉은 버린다");
     }
 
+    #[test]
+    fn a_page_that_crossed_a_minute_after_the_snapshot_keeps_its_own_current() {
+        let page = vec![domain::ConfirmedBar::from_kiwoom(m1(8, 59), ohlcv(200)), domain::ConfirmedBar::from_kiwoom(m1(9, 0), ohlcv(300))];
+        let kiwoom_current = Some(crate::kiwoom::wire::KiwoomBar { bucket: m1(9, 1), ohlcv: ohlcv(400) });
+        let snap = HubSnapshot { seq: 7, current: Some(domain::CurrentBar::seed(m1(9, 0), ohlcv(250))), recent_confirmed: vec![] };
+        let (bars, current, seq) = with_snapshot(page, kiwoom_current, Some(snap));
+        let newest = bars.last().unwrap().bucket.start().unix();
+        assert!(current.is_some_and(|c| c.t.0 > newest), "현재 봉은 모든 확정 봉보다 늦다: {current:?}");
+        assert_eq!((current.map(|c| (c.t.0, c.c)), seq), (Some((m1(9, 1).start().unix(), 4.0)), Some(7)), "페이지의 09:01 현재 봉, seq는 스냅숏의 것");
+    }
+
     #[tokio::test(start_paused = true)]
     async fn only_the_latest_page_of_a_subscribed_key_has_a_seq() {
         let f = fixture(false, true).await;
