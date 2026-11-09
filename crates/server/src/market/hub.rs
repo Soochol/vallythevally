@@ -1475,4 +1475,114 @@ mod tests {
         assert_eq!((snap.seq, snap.current, snap.recent_confirmed.len()), (7, None, 0));
     }
 
+    fn n3_n4_replaced(messages: &[ServerMessage]) -> usize {
+        messages.iter().filter(|m| matches!(m, ServerMessage::Reload { reason: ReloadReason::Replaced, .. })).count()
+    }
+
+    async fn n3_n4_reconnect_with_duplicate(h: &Harness) {
+        h.events.send(StreamEvent::Down { at: h.clock.now() }).await.unwrap();
+        live(h).await;
+        h.events.send(trade(h, (9, 0, 7), 100, 7, Some(Exchange::Krx))).await.unwrap();
+        settle().await;
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn n3_n4_recovery_success_does_not_revive_same_bucket_budget() {
+        let h = harness(at(9, 0, 5), Chart::default(), Duration::from_secs(3));
+        let started = tokio::time::Instant::now();
+        let out = subscribe_with_dropped_tick(&h, (9, 0, 7)).await;
+        h.clock.sleep_until(at(9, 0, 30)).await;
+        h.chart.lock().unwrap().set(at(9, 0, 0), [100, 100, 100, 100, 7]);
+        h.clock.sleep_until(at(9, 1, 15)).await;
+        settle().await;
+        assert_eq!(h.fake.market_sent().len(), 2);
+        assert_eq!(h.hub.snapshot(samsung()).await.unwrap().seq, 1);
+        for _ in 0..4 {
+            n3_n4_reconnect_with_duplicate(&h).await;
+            tokio::time::sleep(Duration::from_secs(20)).await;
+        }
+        let requests = h.fake.market_sent();
+        let messages = out.take(true).messages;
+        let replaced = n3_n4_replaced(&messages);
+        let gap = messages.iter().filter(|m| matches!(m, ServerMessage::Reload { reason: ReloadReason::GapFilled, .. })).count();
+        let seq = h.hub.snapshot(samsung()).await.unwrap().seq;
+        let times: Vec<_> = requests.iter().map(|r| (r.at - started).as_secs_f64()).collect();
+        println!("N3 same-bucket delayed duplicate now={} requests={} (5 seeds + {} verifies) seq={seq} replaced={replaced} gap={gap} offsets={times:?}", h.clock.now(), requests.len(), requests.len() - 5);
+        assert_eq!(gap, 4);
+        assert_eq!(replaced, 1, "unchanged successful bucket has no redundant replaced reload");
+        assert_eq!(requests.len(), 6, "five seeds and one completed verification");
+        assert_eq!(seq, 5);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn n3_n4_recovered_missing_bucket_must_reject_a_delayed_trade() {
+        let mut chart = Chart::default();
+        chart.set(at(8, 59, 0), [90, 90, 90, 90, 1]);
+        let h = harness(at(9, 0, 5), chart, Duration::from_secs(3));
+        let out = subscribe_with_dropped_tick(&h, (9, 0, 7)).await;
+        tokio::time::sleep(Duration::from_secs(8)).await;
+        h.chart.lock().unwrap().set(at(9, 0, 0), [100, 100, 100, 100, 7]);
+        h.clock.sleep_until(at(9, 1, 20)).await;
+        settle().await;
+        let snap = h.hub.snapshot(samsung()).await.unwrap();
+        assert_eq!((snap.seq, snap.current), (1, None));
+        let messages = out.take(true).messages;
+        assert_eq!(messages.iter().filter(|m| matches!(m, ServerMessage::Reload { reason: ReloadReason::Replaced, .. })).count(), 1);
+        let cached = h.bars.page(samsung(), Some(at(9, 1, 0)), 1).await.unwrap().bars[0];
+        assert_eq!((cached.bucket.start(), cached.ohlcv.volume().0, cached.source), (at(9, 0, 0), 7, BarSource::Kiwoom));
+        h.events.send(trade(&h, (9, 0, 59), 125, 2, Some(Exchange::Krx))).await.unwrap();
+        let mut late_messages = take(&out).await;
+        tokio::time::sleep(Duration::from_secs(2)).await;
+        late_messages.extend(out.take(true).messages);
+        let after = h.hub.snapshot(samsung()).await.unwrap();
+        let cache_after = h.bars.page(samsung(), Some(at(9, 1, 0)), 1).await.unwrap().bars[0];
+        assert_eq!((cache_after.source, cache_after.ohlcv.volume().0), (BarSource::Kiwoom, 7));
+        println!("N4 cache remains Kiwoom q7");
+        println!("N4 recovered missing 09:00 cache source={:?} volume={} seq-before={}; delayed 09:00:59 p125/q2 at09:01:20 produces messages={late_messages:?}, seq-after={}, recent={:?}; expected no bar/confirmed after recovered confirmed bucket", cached.source, cached.ohlcv.volume().0, snap.seq, after.seq, after.recent_confirmed);
+        h.clock.sleep_until(at(9, 1, 40)).await;
+        let later = take(&out).await;
+        println!("N4 later messages={later:?}; fake requests={}", h.fake.market_sent().len());
+        assert!(later.is_empty(), "completed bucket needs no second verification or reload");
+        assert_eq!(h.fake.market_sent().len(), 2);
+        assert!(!late_messages.iter().any(|m| matches!(m, ServerMessage::Bar { .. } | ServerMessage::Confirmed { .. })), "late trade must not publish a partial replacement of the already recovered confirmed bucket");
+        assert_eq!(after.seq, snap.seq);
+        assert_eq!(after.recent_confirmed, snap.recent_confirmed);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn n3_n4_recovered_complete_bucket_must_reject_its_already_counted_trade() {
+        let mut chart = Chart::default();
+        chart.set(at(8, 59, 0), [90, 90, 90, 90, 1]);
+        let h = harness(at(9, 0, 5), chart, Duration::from_secs(3));
+        let out = subscribe_with_dropped_tick(&h, (9, 0, 7)).await;
+        tokio::time::sleep(Duration::from_secs(8)).await;
+        h.clock.sleep_until(at(9, 1, 0)).await;
+        h.chart.lock().unwrap().set(at(9, 0, 0), [100, 125, 100, 125, 9]);
+        h.clock.sleep_until(at(9, 1, 20)).await;
+        settle().await;
+        let snap = h.hub.snapshot(samsung()).await.unwrap();
+        assert_eq!((snap.seq, snap.current), (1, None));
+        let messages = out.take(true).messages;
+        assert_eq!(messages.iter().filter(|m| matches!(m, ServerMessage::Reload { reason: ReloadReason::Replaced, .. })).count(), 1);
+        let cached = h.bars.page(samsung(), Some(at(9, 1, 0)), 1).await.unwrap().bars[0];
+        assert_eq!((cached.bucket.start(), cached.ohlcv.volume().0, cached.source), (at(9, 0, 0), 9, BarSource::Kiwoom));
+        h.events.send(trade(&h, (9, 0, 59), 125, 2, Some(Exchange::Krx))).await.unwrap();
+        let mut late_messages = take(&out).await;
+        tokio::time::sleep(Duration::from_secs(2)).await;
+        late_messages.extend(out.take(true).messages);
+        let after = h.hub.snapshot(samsung()).await.unwrap();
+        let cache_after = h.bars.page(samsung(), Some(at(9, 1, 0)), 1).await.unwrap().bars[0];
+        assert_eq!((cache_after.source, cache_after.ohlcv.volume().0), (BarSource::Kiwoom, 9));
+        println!("N4 cache remains Kiwoom q9 (both original q7 and delayed q2 already counted)");
+        println!("N4 recovered missing 09:00 cache source={:?} volume={} seq-before={}; delayed 09:00:59 p125/q2 at09:01:20 produces messages={late_messages:?}, seq-after={}, recent={:?}; expected no bar/confirmed after recovered confirmed bucket", cached.source, cached.ohlcv.volume().0, snap.seq, after.seq, after.recent_confirmed);
+        h.clock.sleep_until(at(9, 1, 40)).await;
+        let later = take(&out).await;
+        println!("N4 later messages={later:?}; fake requests={}", h.fake.market_sent().len());
+        assert!(later.is_empty(), "completed bucket needs no second verification or reload");
+        assert_eq!(h.fake.market_sent().len(), 2);
+        assert!(!late_messages.iter().any(|m| matches!(m, ServerMessage::Bar { .. } | ServerMessage::Confirmed { .. })), "late trade must not publish a partial replacement of the already recovered confirmed bucket");
+        assert_eq!(after.seq, snap.seq);
+        assert_eq!(after.recent_confirmed, snap.recent_confirmed);
+    }
+
 }
