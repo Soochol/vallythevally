@@ -8,7 +8,7 @@ use crate::trade::Trade;
 pub enum SeedBoundary {
     /// 체결 하나로 시작했다. 빠진 체결이 없다.
     FromTrade,
-    /// 키움 조회값으로 시작했고 경계를 모른다. 체결이 빠졌거나 겹쳤을 수 있다.
+    /// 키움 조회값으로 시작했거나 이 구간의 체결을 버린 적이 있다. 체결이 빠졌거나 겹쳤을 수 있다.
     Unknown,
 }
 
@@ -26,8 +26,9 @@ impl CurrentBar {
         CurrentBar { bucket, ohlcv, boundary: SeedBoundary::Unknown }
     }
 
-    fn from_trade(bucket: Bucket, trade: &Trade) -> Self {
-        CurrentBar { bucket, ohlcv: Ohlcv::from_trade(trade), boundary: SeedBoundary::FromTrade }
+    fn from_trade(bucket: Bucket, trade: &Trade, dropped_through: Option<Bucket>) -> Self {
+        let boundary = if dropped_through.is_some_and(|m| bucket <= m) { SeedBoundary::Unknown } else { SeedBoundary::FromTrade };
+        CurrentBar { bucket, ohlcv: Ohlcv::from_trade(trade), boundary }
     }
 
     pub fn bucket(&self) -> Bucket {
@@ -68,12 +69,18 @@ pub struct Aggregator {
     period: Period,
     current: Option<CurrentBar>,
     closed_through: Option<Bucket>,
+    dropped_through: Option<Bucket>,
 }
 
 impl Aggregator {
     /// newest_confirmed: 키움 조회로 아는 가장 새 확정 봉 구간. 그 구간까지의 체결은 늦은 체결이다.
     pub fn new(period: Period, seed: Option<CurrentBar>, newest_confirmed: Option<Bucket>) -> Self {
-        Aggregator { period, current: seed, closed_through: newest_confirmed }
+        Aggregator { period, current: seed, closed_through: newest_confirmed, dropped_through: None }
+    }
+
+    pub fn trades_dropped_until(mut self, last_dropped: Option<KstTime>) -> Self {
+        self.dropped_through = last_dropped.map(|at| self.period.bucket(self.effective_at(at)));
+        self
     }
 
     pub fn period(&self) -> Period {
@@ -91,7 +98,7 @@ impl Aggregator {
         }
         match &mut self.current {
             None => {
-                self.current = Some(CurrentBar::from_trade(bucket, trade));
+                self.current = Some(CurrentBar::from_trade(bucket, trade, self.dropped_through));
                 Applied::Updated
             }
             Some(cur) if cur.bucket == bucket => {
@@ -101,7 +108,7 @@ impl Aggregator {
             Some(cur) if cur.bucket < bucket => {
                 let confirmed = cur.confirm();
                 self.closed_through = Some(cur.bucket);
-                *cur = CurrentBar::from_trade(bucket, trade);
+                *cur = CurrentBar::from_trade(bucket, trade, self.dropped_through);
                 Applied::Rolled { confirmed }
             }
             Some(_) => Applied::Ignored(IgnoreReason::Late),

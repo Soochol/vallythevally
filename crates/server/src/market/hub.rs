@@ -120,7 +120,7 @@ impl SeedPurpose {
 
 enum KeyFeed {
     /// 시드를 받는 중. 이 동안 온 체결은 버린다(시드에 대개 들어 있다).
-    Seeding { purpose: SeedPurpose, attempt: u32, reported: bool },
+    Seeding { purpose: SeedPurpose, attempt: u32, reported: bool, last_dropped: Option<KstTime> },
     Live(Aggregator),
 }
 
@@ -333,7 +333,7 @@ impl MarketHub {
                 key,
                 KeyState {
                     generation,
-                    feed: KeyFeed::Seeding { purpose: SeedPurpose::Initial, attempt: 0, reported: false },
+                    feed: KeyFeed::Seeding { purpose: SeedPurpose::Initial, attempt: 0, reported: false, last_dropped: None },
                     seq: 0,
                     recent_confirmed: VecDeque::new(),
                     subs: BTreeSet::new(),
@@ -401,7 +401,7 @@ impl MarketHub {
             let generation = self.new_generation();
             let ks = self.keys.get_mut(&key).expect("방금 본 키");
             ks.generation = generation;
-            ks.feed = KeyFeed::Seeding { purpose, attempt: 0, reported: false };
+            ks.feed = KeyFeed::Seeding { purpose, attempt: 0, reported: false, last_dropped: None };
             ks.contiguous = false;
             self.start_seed(key, Duration::ZERO);
         }
@@ -412,12 +412,12 @@ impl MarketHub {
         let Some(ks) = self.keys.get_mut(&key).filter(|ks| ks.generation == generation) else {
             return;
         };
-        let KeyFeed::Seeding { purpose, attempt, reported } = ks.feed else {
+        let KeyFeed::Seeding { purpose, attempt, reported, last_dropped } = ks.feed else {
             return;
         };
         match result {
             Ok(seed) => {
-                let agg = start_aggregator(key, &seed, now);
+                let agg = start_aggregator(key, &seed, now).trades_dropped_until(last_dropped);
                 let current = agg.current().copied();
                 ks.feed = KeyFeed::Live(agg);
                 ks.contiguous = self.session_live;
@@ -457,7 +457,7 @@ impl MarketHub {
                 if purpose == SeedPurpose::Initial && !reported {
                     emit(&self.conns, &mut self.closing, &ks.subs, |sub| ServerMessage::SubError { sub, code: SubErrorCode::KiwoomUnavailable });
                 }
-                ks.feed = KeyFeed::Seeding { purpose, attempt: attempt + 1, reported: reported || purpose == SeedPurpose::Initial };
+                ks.feed = KeyFeed::Seeding { purpose, attempt: attempt + 1, reported: reported || purpose == SeedPurpose::Initial, last_dropped };
                 self.start_seed(key, delay);
             }
         }
@@ -552,9 +552,13 @@ impl MarketHub {
         }
         let trade = Trade { at, price: tick.price, qty: tick.qty };
         for (key, ks) in self.keys.iter_mut().filter(|(k, _)| k.feed.symbol() == tick.symbol && accepts(k.feed, tick.exchange)) {
-            let KeyFeed::Live(agg) = &mut ks.feed else {
-                self.counters.while_seeding += 1;
-                continue;
+            let agg = match &mut ks.feed {
+                KeyFeed::Live(agg) => agg,
+                KeyFeed::Seeding { last_dropped, .. } => {
+                    *last_dropped = (*last_dropped).max(Some(at));
+                    self.counters.while_seeding += 1;
+                    continue;
+                }
             };
             match agg.apply(&trade) {
                 Applied::Updated => {

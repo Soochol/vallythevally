@@ -994,11 +994,13 @@ impl CurrentBar {
 
 /// (종목, 거래소, 봉 주기) 하나의 집계기. 현재 봉 하나와 마지막으로 확정한 구간을 기억한다.
 /// 타이머로 확정해 현재 봉이 비어도, 그 구간의 늦은 체결을 알아본다.
-pub struct Aggregator { period: Period, current: Option<CurrentBar>, closed_through: Option<Bucket> }
+pub struct Aggregator { period: Period, current: Option<CurrentBar>, closed_through: Option<Bucket>, dropped_through: Option<Bucket> }
 
 impl Aggregator {
     /// newest_confirmed: 키움 조회로 아는 가장 새 확정 봉 구간. 그 구간까지의 체결은 늦은 체결이다.
     pub fn new(period: Period, seed: Option<CurrentBar>, newest_confirmed: Option<Bucket>) -> Self;
+    /// 시드를 기다리며 버린 마지막 체결의 시각. 그 구간까지는 체결로 시작한 봉도 Unknown이다.
+    pub fn trades_dropped_until(self, last_dropped: Option<KstTime>) -> Self;
     /// 현재 봉이 없으면 이 체결로 시작한다(FromTrade).
     pub fn apply(&mut self, trade: &Trade) -> Applied;
     /// confirm_at이 지났으면 현재 봉을 확정하고 비운다.
@@ -1021,8 +1023,8 @@ pub fn aggregate(agg: Aggregator, trades: &[Trade], now: KstTime) -> (Vec<Confir
   - 화면에는 그대로 보낸다.
   - 확정되면 `needs_verify = true`인 `Realtime` 봉으로 캐시에 들어간다. 그 즉시 그 키의 `refresh_latest(Priority::Recovery)`를 예약해 키움 값으로 바꾼다.
   - 지표 알림은 키움 값으로 바뀐 뒤 그 봉을 **처음으로** 판단한다. 소급이 아니라 첫 판단이다.
-  - 시드 다음 구간부터는 체결로 시작하므로 완전하다. 그래서 불완전한 봉은 키마다 시드 직후 하나뿐이다.
-- **구독을 조회보다 먼저**: 실시간 REG를 조회보다 먼저 한다. 시드를 기다리는 동안 들어온 체결은 버린다(§5.2 2번과 같은 이유). 시드가 그 체결을 대개 담고 있고, 담지 못한 것은 `needs_verify` 교체가 바로잡는다.
+  - 시드 다음 구간부터는 체결로 시작하므로 완전하다. 단 시드를 기다리며 버린 체결의 구간까지는 체결로 시작해도 불완전하다. 시드가 그 구간을 담지 못했을 수 있어서다. 그래서 불완전한 봉은 키마다 시드 직후의 한두 구간에만 있다.
+- **구독을 조회보다 먼저**: 실시간 REG를 조회보다 먼저 한다. 시드를 기다리는 동안 들어온 체결은 버린다(§5.2 2번과 같은 이유). 시드가 그 체결을 대개 담고 있고, 담지 못한 것은 `needs_verify` 교체가 바로잡는다. 허브는 버린 마지막 체결의 시각을 `Seeding`에 들고 있다가 집계기에 넘긴다(`Aggregator::trades_dropped_until`).
 
 ### 5.5 `MarketHub` 액터와 `seq`
 
@@ -1046,7 +1048,7 @@ impl HubHandle {
 
 enum KeyFeed {
     /// 시드를 받는 중. 이 동안 온 체결은 버린다.
-    Seeding { purpose: SeedPurpose /* Initial | Reload { reason, from } */, attempt: u32, reported: bool },
+    Seeding { purpose: SeedPurpose /* Initial | Reload { reason, from } */, attempt: u32, reported: bool, last_dropped: Option<KstTime> },
     Live(Aggregator),
 }
 
