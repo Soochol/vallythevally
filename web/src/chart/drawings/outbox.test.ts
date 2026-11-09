@@ -1,4 +1,5 @@
 import { describe, expect, test } from "vitest";
+import { reserve } from "./outbox";
 import { RETRY_DELAYS_MS } from "../../persist/saver";
 import {
   EMPTY_OUTBOX,
@@ -216,4 +217,18 @@ describe("localStorage 줄 기록", () => {
 test("wantOf: 만들기·바꾸기는 PUT, 지우기는 DELETE", () => {
   expect(wantOf({ kind: "create", after: body("a", 1) })).toEqual(put(body("a", 1)));
   expect(wantOf({ kind: "delete", before: body("a", 1) })).toEqual(del);
+});
+
+test("reserved revisions survive retries and reloads without becoming newer edits", () => {
+  let o = reserve(EMPTY_OUTBOX, { id: "a", symbol: "005930", want: put(body("a", 1)) }, () => 100);
+  let started = send(o, "a", 900);
+  expect(started.send.want).toMatchObject({ body: { revision: 100 } });
+  o = settle(started.outbox, "a", { kind: "networkError" }, 1000)!.outbox;
+  started = send(o, "a", 9000);
+  expect(started.send.want).toMatchObject({ body: { revision: 100 } });
+  const records = recordChanges(EMPTY_OUTBOX, started.outbox).write.map((r) => parseRecord(JSON.parse(JSON.stringify(r)))!);
+  o = restore(records);
+  expect(send(o, "a", 10000).send.want).toMatchObject({ body: { revision: 100 } });
+  o = reserve(o, { id: "a", symbol: "005930", want: put(body("a", 2)) }, () => 101);
+  expect(send(o, "a", 20000).send.want).toMatchObject({ body: { revision: 101 } });
 });

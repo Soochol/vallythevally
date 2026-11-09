@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import type { SymbolCode } from "../api/generated/SymbolCode";
 import type { WatchColumn } from "../lib/watchlist";
+import type { DrawingPrefs } from "../chart/drawings/prefs";
 import { DEFAULT_UI_PREFS, MAX_RECENT, sortColumns, type Theme, type UiExtra, type UiPrefs } from "../persist/uiState";
 
 interface UiStore {
@@ -15,6 +16,7 @@ interface UiStore {
   setLastLayoutId(id: string): void;
   setActiveWatchlist(id: string): void;
   toggleWatchColumn(column: WatchColumn): void;
+  setDrawingPrefs(patch: Partial<DrawingPrefs>): void;
 }
 
 export const useUiStore = create<UiStore>()((set) => {
@@ -39,6 +41,7 @@ export const useUiStore = create<UiStore>()((set) => {
     clearRecent: () => edit((p) => (p.recentSymbols.length === 0 ? p : { ...p, recentSymbols: [] })),
     setLastLayoutId: (id) => edit((p) => (p.lastLayoutId === id ? p : { ...p, lastLayoutId: id })),
     setActiveWatchlist: (id) => edit((p) => (p.activeWatchlistId === id ? p : { ...p, activeWatchlistId: id })),
+    setDrawingPrefs: (patch) => edit((p) => ({ ...p, drawing: { ...p.drawing, ...patch } })),
     toggleWatchColumn: (column) =>
       edit((p) => ({
         ...p,

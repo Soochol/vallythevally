@@ -3,7 +3,7 @@ import { isPeriod } from "../../lib/symbol";
 import { RETRY_DELAYS_MS } from "../../persist/saver";
 import { type DrawingBody, type DrawingId, type DrawingOp, type DrawingPoint, type DrawingScope, isDrawingTool, TOOL_POINTS } from "./types";
 
-export type Want = { kind: "put"; body: DrawingBody } | { kind: "delete" };
+export type Want = { kind: "put"; body: DrawingBody; reserved?: true } | { kind: "delete" };
 
 interface LaneBase {
   readonly id: DrawingId;
@@ -62,6 +62,13 @@ export function enqueue(o: Outbox, send: Send): Outbox {
   });
 }
 
+export function reserve(o: Outbox, send: Send, clock: () => number): Outbox {
+  if (send.want.kind === "delete") return enqueue(o, send);
+  const revision = Math.max(clock(), send.want.body.revision + 1, lastRevision(o, send.id) + 1);
+  const want: Want = { kind: "put", body: { ...send.want.body, revision }, reserved: true };
+  return enqueue({ ...o, revisions: new Map(o.revisions).set(send.id, revision) }, { ...send, want });
+}
+
 export function nextToSend(o: Outbox, now: number): DrawingId[] {
   return [...o.lanes.values()].filter((l) => l.state === "waiting" && l.retryAt <= now).map((l) => l.id);
 }
@@ -71,7 +78,7 @@ export function start(o: Outbox, id: DrawingId, clock: () => number): { outbox: 
   if (lane?.state !== "waiting") return null;
   let want = lane.want;
   let revisions = o.revisions;
-  if (want.kind === "put") {
+  if (want.kind === "put" && !want.reserved) {
     const revision = Math.max(clock(), want.body.revision + 1, lastRevision(o, id) + 1);
     want = { kind: "put", body: { ...want.body, revision } };
     revisions = new Map(o.revisions).set(id, revision);
@@ -223,7 +230,7 @@ function parseWant(raw: unknown): Want | null {
   if (f?.kind === "delete") return { kind: "delete" };
   if (f?.kind !== "put") return null;
   const body = parseDrawingBody(f.body);
-  return body === null ? null : { kind: "put", body };
+  return body === null ? null : { kind: "put", body, ...(f.reserved === true ? { reserved: true } : {}) };
 }
 
 export function parseRecord(raw: unknown): LaneRecord | null {
