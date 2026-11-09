@@ -161,7 +161,7 @@ function NameInput({ naming, onDone }: { naming: Naming; onDone(): void }) {
   const self = naming.kind === "rename" ? naming.id : null;
   const [value, setValue] = useState(() => (naming.kind === "rename" ? (lists.find((l) => l.id === naming.id)?.name ?? "") : nextListName(lists)));
   const input = useRef<HTMLInputElement>(null);
-  const problem = nameProblem(lists, value.trim(), self);
+  const problem = nameProblem(lists, value, self);
   useEffect(() => input.current?.select(), []);
 
   const commit = () => {

@@ -36,8 +36,8 @@ export function nextListName(lists: readonly Watchlist[]): string {
   for (let n = 1; ; n++) if (!taken.has(`목록 ${n}`)) return `목록 ${n}`;
 }
 
-/** 이름을 쓸 수 없으면 그 까닭을, 쓸 수 있으면 null. `name`은 앞뒤 공백을 지운 값이어야 한다. */
-export function nameProblem(lists: readonly Watchlist[], name: string, self: string | null): string | null {
+export function nameProblem(lists: readonly Watchlist[], typed: string, self: string | null): string | null {
+  const name = typed.trim();
   if (name === "") return "이름을 입력하세요";
   if ([...name].length > MAX_WATCHLIST_NAME) return `이름은 ${MAX_WATCHLIST_NAME}자까지입니다`;
   if (lists.some((l) => l.name === name && l.id !== self)) return "같은 이름의 목록이 있습니다";
@@ -46,13 +46,14 @@ export function nameProblem(lists: readonly Watchlist[], name: string, self: str
 
 export type Transfer = "move" | "copy";
 
-/** 대상 목록의 끝에 붙인다. 이미 있으면 붙이지 않고, 옮기기는 원래 목록에서 빼기만 한다. */
 export function transferSymbol(lists: readonly Watchlist[], from: string, to: string, code: SymbolCode, how: Transfer): readonly Watchlist[] {
+  const source = lists.find((l) => l.id === from);
   const target = lists.find((l) => l.id === to);
-  const inTarget = target?.symbols.includes(code) ?? true;
-  if (from === to || target === undefined || !lists.some((l) => l.id === from && l.symbols.includes(code)) || (how === "copy" && inTarget)) return lists;
+  if (from === to || !source?.symbols.includes(code) || target === undefined) return lists;
+  const alreadyInTarget = target.symbols.includes(code);
+  if (how === "copy" && alreadyInTarget) return lists;
   return lists.map((l) => {
-    if (l.id === to) return inTarget ? l : { ...l, symbols: [...l.symbols, code] };
+    if (l.id === to) return alreadyInTarget ? l : { ...l, symbols: [...l.symbols, code] };
     if (l.id === from && how === "move") return { ...l, symbols: [...removeSymbol(l.symbols, code)] };
     return l;
   });

@@ -13,6 +13,5 @@ const NAME_MIN = 96;
 export const columnTemplate = (variant: WatchVariant, columns: readonly WatchColumn[]) =>
   ["minmax(0,1fr)", ...columns.map((c) => `${WIDTH[variant][c]}px`)].join(" ");
 
-/** 데스크톱 패널 폭. 기본 열(현재가, 등락률)에서 264px이고, 열을 더하면 이름 칸이 줄지 않게 넓힌다. */
 export const desktopPanelWidth = (columns: readonly WatchColumn[]) =>
   PADDING_X + NAME_MIN + columns.reduce((w, c) => w + GAP + WIDTH.desktop[c], 0);

@@ -55,7 +55,6 @@ export const useWatchlistStore = create<WatchlistState>()((set) => {
   };
 });
 
-/** UiState가 가리키는 목록이 없으면(지워졌거나 처음) 첫 목록이다. */
 export function activeWatchlist(lists: readonly Watchlist[], activeId: string | null): Watchlist {
   return lists.find((l) => l.id === activeId) ?? lists[0]!;
 }

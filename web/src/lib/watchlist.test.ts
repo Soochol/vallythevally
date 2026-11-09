@@ -48,9 +48,10 @@ test("새 목록 이름은 비어 있는 가장 작은 번호다", () => {
   expect(nextListName([{ id: "a", name: "목록 1", symbols: [] }, { id: "b", name: "목록 3", symbols: [] }])).toBe("목록 2");
 });
 
-test("이름은 비지 않고 20자까지이며 다른 목록과 겹치지 않는다. 자기 이름은 그대로 둘 수 있다", () => {
+test("이름은 앞뒤 공백을 지우고 비지 않으며 20자까지이며 다른 목록과 겹치지 않는다. 자기 이름은 그대로 둘 수 있다", () => {
   const two = [{ id: "a", name: "기본", symbols: [] }, { id: "b", name: "반도체", symbols: [] }];
-  expect(nameProblem(two, "", null)).toBe("이름을 입력하세요");
+  expect(nameProblem(two, "  ", null)).toBe("이름을 입력하세요");
+  expect(nameProblem(two, " 기본 ", null)).toBe("같은 이름의 목록이 있습니다");
   expect(nameProblem(two, "가".repeat(21), null)).toBe("이름은 20자까지입니다");
   expect(nameProblem(two, "가".repeat(20), null)).toBeNull();
   expect(nameProblem(two, "반도체", "a")).toBe("같은 이름의 목록이 있습니다");

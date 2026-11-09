@@ -1,5 +1,3 @@
--- 관심종목 여러 목록(#37). 지금의 목록 하나는 첫 목록 '기본'이 된다. watchlist_revision은 목록 전체의 저장 순서 번호로 그대로 쓴다.
-
 CREATE TABLE watchlists (
   id       TEXT    PRIMARY KEY,
   name     TEXT    NOT NULL UNIQUE,

@@ -58,7 +58,6 @@ pub async fn get_watchlists(db: &AppDb) -> Result<Watchlists, StoreError> {
     Ok(Watchlists { lists, revision: Revision(revision) })
 }
 
-/// 목록 전체를 바꾼다. 개수, 이름, 중복은 호출자가 먼저 거른다.
 pub async fn put_watchlists(db: &AppDb, all: &Watchlists) -> Result<(), StoreError> {
     let mut tx = db.begin_write().await?;
     let stored: Option<i64> = sqlx::query_scalar("SELECT revision FROM watchlist_revision WHERE singleton = 1").fetch_optional(&mut *tx).await?;

@@ -15,15 +15,12 @@ const ROLE = { radio: "menuitemradio", check: "menuitemcheckbox", action: "menui
 interface Props {
   label: string;
   items: readonly MenuItem[];
-  /** restoreFocus면 메뉴를 연 버튼으로 초점을 돌려야 한다(Esc, 고름). 바깥을 누르거나 Tab이면 false. */
   onClose: (restoreFocus: boolean) => void;
-  /** 이 안을 누르면 바깥으로 치지 않는다(여는 버튼과 메뉴를 함께 감싼 요소). */
   root: RefObject<HTMLElement | null>;
   className: string;
   style?: React.CSSProperties;
 }
 
-/** 펼침 메뉴. 열리면 고른 항목(없으면 첫 항목)에 초점, ↑↓로 옮기고 Enter로 고르고 Esc로 닫는다. 체크 항목은 눌러도 닫지 않는다. */
 export function Menu({ label, items, onClose, root, className, style }: Props) {
   const self = useRef<HTMLDivElement>(null);
   const buttons = useRef<(HTMLButtonElement | null)[]>([]);
