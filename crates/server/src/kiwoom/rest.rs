@@ -85,7 +85,6 @@ impl KiwoomError {
         }
     }
 
-    /// 바깥 타이머가 나중에 다시 해 봐도 되는가(정책 표의 `outer_retry`).
     pub fn outer_retry(&self) -> bool {
         match self {
             KiwoomError::Failed(f) => f.policy().outer_retry,
@@ -168,10 +167,8 @@ struct Queue {
     last_send: Option<Instant>,
     pause_until: Option<Instant>,
     next_id: u64,
-    /// 정책 표의 `Stop::Path`로 멈춘 경로. au10001이면 발급 경로다. 서버를 다시 켜야 풀린다.
-    stopped: HashMap<ApiId, Failure>,
-    /// `Stop::PathOnRepeat`의 첫 실패를 본 경로.
-    struck: HashSet<ApiId>,
+    stopped_paths: HashMap<ApiId, Failure>,
+    failed_once: HashSet<ApiId>,
 }
 
 impl Queue {
@@ -204,7 +201,7 @@ impl Queue {
 
     fn stop_path(&mut self, failure: &Failure) {
         let api_id = failure.api_id();
-        self.stopped.insert(api_id, failure.clone());
+        self.stopped_paths.insert(api_id, failure.clone());
         let jobs = &self.jobs;
         let mut ids = Vec::new();
         for lane in &mut self.lanes {
@@ -222,7 +219,7 @@ impl Queue {
     }
 
     fn stopped(&self, api_id: ApiId) -> Option<KiwoomError> {
-        self.stopped.get(&api_id).cloned().map(KiwoomError::Failed)
+        self.stopped_paths.get(&api_id).cloned().map(KiwoomError::Failed)
     }
 }
 
@@ -483,7 +480,7 @@ impl Inner {
         let mut q = self.lock();
         match &outcome {
             Ok(_) => {
-                q.struck.remove(&ApiId::Au10001);
+                q.failed_once.remove(&ApiId::Au10001);
             }
             Err(e) => {
                 if let Some(f) = e.failure() {
@@ -500,7 +497,6 @@ impl Inner {
         }
     }
 
-    /// 정책 표의 `Stop` 열을 따른다.
     fn stop(&self, q: &mut Queue, failure: &Failure) {
         let api_id = failure.api_id();
         match failure.policy().stop {
@@ -509,7 +505,7 @@ impl Inner {
                 tracing::error!(api_id = api_id.as_str(), "{failure}");
                 self.auth.halt(failure.clone());
             }
-            Stop::PathOnRepeat if q.struck.insert(api_id) => {
+            Stop::PathOnRepeat if q.failed_once.insert(api_id) => {
                 tracing::warn!(api_id = api_id.as_str(), "{failure}. 다음 발급도 같은 범주로 실패하면 발급을 멈춥니다");
             }
             Stop::Path | Stop::PathOnRepeat => {
@@ -565,7 +561,6 @@ impl Inner {
         self.wake.notify_one();
     }
 
-    /// 정책 표의 `Retry` 열을 따른다.
     fn market_failed(self: &Arc<Self>, q: &mut Queue, id: u64, generation: TokenGen, failure: Failure) {
         let api_id = failure.api_id().as_str();
         match failure.category() {

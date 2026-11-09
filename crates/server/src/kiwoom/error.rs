@@ -58,7 +58,7 @@ pub enum Basis {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Rule {
     Known(Category, Basis),
-    /// WS에서 온다는 근거가 약한 후보(docs/kiwoom-ws-errors.md §4). 받으면 `Unknown`으로 다룬다.
+    /// docs/kiwoom-ws-errors.md §4: WS에서 온다는 근거가 약한 후보.
     Candidate { proposed: Category },
 }
 
@@ -166,22 +166,16 @@ impl Phase {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Retry {
     Never,
-    /// 대기열 전체를 물러서게 한 뒤 같은 요청을 다시 보낸다.
     AfterPause,
-    /// 우선순위별 간격으로 다시 보낸다.
     Backoff,
-    /// 실패한 토큰 세대를 버리고 한 번 다시 발급해 같은 요청을 한 번 다시 보낸다.
     RefreshTokenOnce,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Stop {
     Nothing,
-    /// 그 api-id 경로만 사람이 서버를 다시 켤 때까지. au10001이면 발급 경로다.
     Path,
-    /// 같은 경로에서 두 번 이어지면 `Path`.
     PathOnRepeat,
-    /// 같은 자격증명의 키움 요청과 발급 전부.
     Everything,
 }
 
@@ -189,7 +183,6 @@ pub enum Stop {
 pub struct Policy {
     pub retry: Retry,
     pub stop: Stop,
-    /// 바깥 타이머(켤 때 목록, 07:45 목록, 20:05 발급)가 나중에 다시 해 봐도 되는가.
     pub outer_retry: bool,
 }
 
@@ -197,7 +190,6 @@ const fn p(retry: Retry, stop: Stop, outer_retry: bool) -> Policy {
     Policy { retry, stop, outer_retry }
 }
 
-/// 범주와 단계가 대응을 정하는 유일한 표(ADR 0009, kiwoom-errors-proposal.md §5).
 pub const fn policy(phase: Phase, category: Category) -> Policy {
     use Retry::*;
     use Stop::*;
@@ -218,7 +210,6 @@ pub const fn policy(phase: Phase, category: Category) -> Policy {
     }
 }
 
-/// 브라우저 오류 코드로의 투영. 기존 `ApiErrorCode`와 HTTP 상태를 그대로 쓴다.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Surface {
     Unavailable,
@@ -368,7 +359,6 @@ fn in_phase(api_id: ApiId, category: Category) -> Category {
     }
 }
 
-/// REST 응답 하나의 판정. 성공은 HTTP 200, 정수(또는 숫자 문자열) `return_code == 0`, 실패 상세 없음을 모두 요구한다.
 pub fn judge(api_id: ApiId, status: u16, body: &str) -> Result<(), Failure> {
     let object = match serde_json::from_str::<Value>(body) {
         Ok(Value::Object(m)) => Some(m),
