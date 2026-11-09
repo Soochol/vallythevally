@@ -1031,6 +1031,31 @@ mod tests {
     }
 
     #[tokio::test(start_paused = true)]
+    async fn a_bar_started_after_trades_dropped_while_seeding_is_verified_and_replaced() {
+        let mut chart = Chart::default();
+        chart.set(at(8, 59, 0), [90, 90, 90, 90, 1]);
+        let h = harness(at(9, 0, 5), chart, Duration::from_secs(3));
+        live(&h).await;
+        let (conn, _) = connect(&h).await;
+        h.hub.subscribe(conn, sub("a"), samsung());
+        settle().await;
+        h.events.send(trade(&h, (9, 0, 7), 100, 7, Some(Exchange::Krx))).await.unwrap();
+        tokio::time::sleep(Duration::from_secs(8)).await;
+        h.events.send(trade(&h, (9, 0, 15), 110, 3, Some(Exchange::Krx))).await.unwrap();
+        settle().await;
+        h.chart.lock().unwrap().set(at(9, 0, 0), [100, 110, 100, 110, 10]);
+        h.clock.sleep_until(at(9, 1, 3)).await;
+        settle().await;
+        let snap = h.hub.snapshot(samsung()).await.unwrap();
+        let confirmed = snap.recent_confirmed.iter().find(|b| b.bucket.start() == at(9, 0, 0)).expect("09:00 봉이 확정됐다");
+        assert!(confirmed.needs_verify, "시드를 기다리며 버린 체결이 있는 구간은 불완전하다");
+        tokio::time::sleep(Duration::from_secs(35)).await;
+        let page = h.bars.page(samsung(), Some(at(9, 1, 0)), 1).await.unwrap();
+        let [b] = page.bars.as_slice() else { panic!("{:?}", page.bars) };
+        assert_eq!((b.bucket.start(), b.source, Bar::from(b)), (at(9, 0, 0), BarSource::Kiwoom, bar(at(9, 0, 0), [100, 110, 100, 110, 10])), "키움 값으로 바뀐다");
+    }
+
+    #[tokio::test(start_paused = true)]
     async fn subs_of_one_key_share_its_seq() {
         let h = std_harness();
         let (_, a) = subscribed_samsung(&h).await;
