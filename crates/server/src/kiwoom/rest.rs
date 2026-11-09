@@ -349,18 +349,21 @@ impl Inner {
             }
             return Step::Idle;
         }
-        let has_market = q.has_market_work();
-        let wants_issue = !q.issue_waiters.is_empty() || (has_market && self.auth.needs_issue(now_kst));
-        if !wants_issue && !has_market {
-            return Step::Idle;
-        }
-        if let Some(until) = self.auth.issue_blocked_until(now_kst).filter(|_| wants_issue) {
+        let mut has_market = q.has_market_work();
+        let market_needs_token = has_market && self.auth.needs_issue(now_kst);
+        if let Some(until) = self.auth.issue_blocked_until(now_kst).filter(|_| market_needs_token || !q.issue_waiters.is_empty()) {
             let err = KiwoomError::IssueTooSoon { until };
-            tracing::warn!(%until, "마지막 토큰 발급 요청에서 10분이 지나지 않아 발급하지 않고 기다리던 요청을 실패시킵니다");
-            q.fail_queued(&err);
+            tracing::warn!(%until, "마지막 토큰 발급 요청에서 10분이 지나지 않아 발급하지 않습니다");
             for w in q.issue_waiters.drain(..) {
                 let _ = w.send(Err(err.clone()));
             }
+            if market_needs_token {
+                q.fail_queued(&err);
+                has_market = false;
+            }
+        }
+        let wants_issue = !q.issue_waiters.is_empty() || (has_market && self.auth.needs_issue(now_kst));
+        if !wants_issue && !has_market {
             return Step::Idle;
         }
         let now = Instant::now();
@@ -839,6 +842,19 @@ mod tests {
         assert_eq!(r.err(), Some(KiwoomError::AuthFailed { detail: Some(8005) }));
         assert_eq!(fake.market_sent().len(), 2);
         assert_eq!(fake.sent().len(), 3, "다시 발급은 한 번");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_blocked_daily_reissue_does_not_fail_requests_that_have_a_valid_token() {
+        let tokens = token_counter();
+        let fake = Arc::new(FakeTransport::new(Duration::ZERO, move |s| tokens(s).unwrap_or_else(list_ok)));
+        let rest = rest(&fake);
+        rest.issue_token().await.unwrap();
+        tokio::time::sleep(Duration::from_secs(60)).await;
+        let (issue, page) = tokio::join!(rest.issue_token(), call_k(&rest, 0, Priority::Screen));
+        assert!(matches!(issue, Err(KiwoomError::IssueTooSoon { .. })), "{issue:?}");
+        assert!(page.is_ok(), "{page:?}");
+        assert_eq!(fake.market_sent()[0].token.as_deref(), Some("tok-1"));
     }
 
     #[tokio::test(start_paused = true)]
