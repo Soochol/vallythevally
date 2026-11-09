@@ -9,7 +9,7 @@ import type { Mods } from "./gestures";
 const mods: Mods = { ctrl: false, shift: false, alt: false };
 const ctx: ToolContext = {
   toScreen: (p) => ({ x: p.t, y: p.price }), fromScreen: (p) => ({ t: p.x, price: p.y }),
-  xOf: (t) => t, yOf: (p) => p, shiftBars: (t, n) => t + n,
+  xOf: (t) => t, yOf: (p) => p, timeAt: (x) => x, priceAt: (y) => y, shiftBars: (t, n) => t + n,
   barsBetween: () => ({ count: 2, volume: 10 }), paneWidth: 800, paneHeight: 600,
   formatPrice: String, formatTime: String, logScale: false,
 };
@@ -61,6 +61,25 @@ describe("placement", () => {
 });
 
 describe("selection and editing", () => {
+  test.each([false, true])("price-only body movement preserves hidden time with clone=%s", (clone) => {
+    const outside = { ...ctx, toScreen: (p: { t: number; price: number }) => p.t < 0 ? null : ctx.toScreen(p) };
+    const line = { ...d, tool: hline.tool, points: [{ t: -100, price: 10 }], style: hline.defaultStyle() };
+    const c = { ...context(null, [line]), ctx: outside };
+    const held = { ...mods, ctrl: clone };
+    let s = step(IDLE, down(100, 10, "body", held), c).state;
+    s = step(s, move(140, 30, held), c).state;
+    expect(step(s, up(140, 30, held), c).effects).toMatchObject([
+      { kind: "change", clone, preview: [{ points: [{ t: -100, price: 30 }] }] },
+    ]);
+  });
+  test("time-anchored body before loaded history stays unchanged", () => {
+    const outside = { ...ctx, toScreen: (p: { t: number; price: number }) => p.t < 0 ? null : ctx.toScreen(p) };
+    const line = { ...d, points: [{ t: -100, price: 10 }, { t: 50, price: 50 }] };
+    const c = { ...context(null, [line]), ctx: outside };
+    let s = step(IDLE, down(100, 10, "body"), c).state;
+    s = step(s, move(140, 30), c).state;
+    expect(step(s, up(140, 30), c).effects).toMatchObject([{ kind: "change", preview: [line] }]);
+  });
   test("registered modes receive clicks and drags; unregistered demonstration gestures pan", () => {
     const c = { ...context(), mode: "eraser" as const, registeredModes: new Set(["eraser" as const]) };
     const s = step(IDLE, down(20, 20, "body"), c).state;

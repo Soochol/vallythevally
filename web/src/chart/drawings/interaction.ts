@@ -5,6 +5,7 @@ import { toolOf } from "./tools";
 import type { DrawingBody, DrawingPoint, ScreenPoint } from "./types";
 
 export const PRESS_DISTANCE = 4;
+export const FREEHAND_CAPTURE_LIMIT = 4096;
 type Anchors = [DrawingPoint, ...DrawingPoint[]];
 
 interface Press {
@@ -67,8 +68,17 @@ function constrained(tool: Tool, fixed: readonly DrawingPoint[], at: ScreenPoint
   return snapped;
 }
 
+function limitPoints(points: readonly DrawingPoint[], max: number): DrawingPoint[] {
+  if (points.length <= max) return [...points];
+  const indices = new Set(Array.from({ length: max }, (_, i) => Math.floor(i * (points.length - 1) / (max - 1))));
+  return points.filter((_, i) => indices.has(i));
+}
+
 function placed(tool: Tool, points: DrawingPoint[], c: Context): Transition {
-  return result(IDLE, { kind: "place", tool, points: tool.finalize?.(points, c.ctx) ?? points });
+  const finalized = tool.finalize?.(points, c.ctx) ?? points;
+  const saved = tool.placement.kind === "freehand" ? limitPoints(finalized, tool.placement.max) : finalized;
+  if (tool.placement.kind === "freehand" && saved.length < tool.placement.min) return result(IDLE);
+  return result(IDLE, { kind: "place", tool, points: saved });
 }
 
 function click(s: Extract<Interaction, { kind: "pressing" }>, c: Context): Transition {
@@ -126,7 +136,19 @@ function drag(s: Extract<Interaction, { kind: "dragging" }>, at: ScreenPoint, mo
   if (screen !== null && raw !== null) delta = { x: screen.x - s.start.x, y: screen.y - s.start.y };
   if (holds(s.action, mods).has("axisLock")) ({ delta } = constrainAxis(lock, delta));
   const preview = s.originals.map((d) => {
-    const moved = d.points.map((p) => {
+    const tool = toolOf(d.tool);
+    const moved = d.points.map((p, index) => {
+      const uses = tool?.pointRoles?.[index]?.uses ?? "both";
+      if (uses === "price") {
+        const y = c.ctx.yOf(p.price);
+        const price = y === null ? null : c.ctx.priceAt(y + delta.y);
+        return price === null ? null : { ...p, price };
+      }
+      if (uses === "time") {
+        const x = c.ctx.xOf(p.t);
+        const t = x === null ? null : c.ctx.timeAt(x + delta.x);
+        return t === null ? null : { ...p, t };
+      }
       const screenPoint = c.ctx.toScreen(p);
       return screenPoint === null ? null : c.ctx.fromScreen({ x: screenPoint.x + delta.x, y: screenPoint.y + delta.y });
     });
@@ -157,11 +179,15 @@ export function step(s: Interaction, e: Input, c: Context): Transition {
     const p = constrained(s.tool, [first], e.at, e.mods, c);
     if (p === null) return result(s);
     const placement = s.tool.placement;
-    const points: Anchors = placement.kind === "freehand" ? [first, ...[...s.points.slice(1), p].slice(0, placement.max - 1)] : [first, p];
+    const captured = s.points.length >= FREEHAND_CAPTURE_LIMIT ? limitPoints(s.points, FREEHAND_CAPTURE_LIMIT / 2) : s.points;
+    const points: Anchors = placement.kind === "freehand" ? [first, ...captured.slice(1), p] : [first, p];
     if (e.kind === "move") return result({ ...s, points });
     if (e.kind === "up") {
       if (placement.kind === "freehand") return points.length >= placement.min ? placed(s.tool, points, c) : result(IDLE);
-      if (distance(s.start, e.at) >= PRESS_DISTANCE && placement.kind === "points" && placement.count === 2) return placed(s.tool, points, c);
+      if (distance(s.start, e.at) >= PRESS_DISTANCE && placement.kind === "points") {
+        if (placement.count === 2) return placed(s.tool, points, c);
+        return result({ kind: "placing", tool: s.tool, fixed: points, cursor: p });
+      }
       return result({ kind: "placing", tool: s.tool, fixed: [first], cursor: p });
     }
     return result(s);

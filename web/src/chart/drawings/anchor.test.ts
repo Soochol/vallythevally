@@ -202,6 +202,13 @@ describe("화면 좌표", () => {
     expect(ctx.barsBetween(kst(2026, 11, 2), kst(2026, 11, 4, 12))).toEqual({ count: 2, volume: 300 });
     expect(ctx.barsBetween(kst(2026, 10, 30), kst(2026, 11, 4))).toBeNull();
   });
+
+  test("축 역변환은 다른 축의 투영 가능 여부와 무관하다", () => {
+    const ctx = toolContext(frame, { price: String, time: String });
+    expect(ctx.priceAt(750)).toBe(2500);
+    expect(ctx.timeAt(19)).toBe(kst(2026, 11, 3, 12));
+    expect(ctx.timeAt(0)).toBeNull();
+  });
 });
 
 describe("frontend.md §3.5 보이는 모습", () => {

@@ -56,6 +56,8 @@ export interface ToolContext {
   fromScreen(s: ScreenPoint): DrawingPoint | null;
   xOf(t: UnixSeconds): number | null;
   yOf(price: number): number | null;
+  timeAt(x: number): UnixSeconds | null;
+  priceAt(y: number): number | null;
   shiftBars(t: UnixSeconds, n: number): UnixSeconds | null;
   barsBetween(t1: UnixSeconds, t2: UnixSeconds): { count: number; volume: number } | null;
   paneWidth: number;

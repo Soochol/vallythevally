@@ -7,6 +7,8 @@ const fakeContext = (overrides: Partial<ToolContext> = {}): ToolContext => ({
   fromScreen: (s) => ({ t: s.x * 10, price: 500 - s.y }),
   xOf: (t) => (t < 0 ? null : t / 10),
   yOf: (price) => 500 - price,
+  timeAt: (x) => x * 10,
+  priceAt: (y) => 500 - y,
   shiftBars: (t, n) => t + n * 60,
   barsBetween: (t1, t2) => ({ count: Math.round(Math.abs(t2 - t1) / 60), volume: 0 }),
   paneWidth: 800,

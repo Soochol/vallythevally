@@ -177,6 +177,11 @@ export function timeToX(p: Projection, t: UnixSeconds): number | null {
   return logical === null ? null : logicalToX(p.axes.time, logical);
 }
 
+export function xToTime(p: Projection, x: number): UnixSeconds | null {
+  const logical = xToLogical(p.axes.time, x);
+  return logical === null ? null : logicalToT(p.timeline, logical);
+}
+
 export function toScreen(p: Projection, point: DrawingPoint): ScreenPoint | null {
   const x = timeToX(p, point.t);
   const y = p.axes.price.toY(point.price);
@@ -184,8 +189,7 @@ export function toScreen(p: Projection, point: DrawingPoint): ScreenPoint | null
 }
 
 export function fromScreen(p: Projection, s: ScreenPoint): DrawingPoint | null {
-  const logical = xToLogical(p.axes.time, s.x);
-  const t = logical === null ? null : logicalToT(p.timeline, logical);
+  const t = xToTime(p, s.x);
   const price = p.axes.price.toPrice(s.y);
   return t === null || price === null ? null : { t, price };
 }
@@ -213,6 +217,8 @@ export function toolContext(f: Frame, format: { price(p: number): string; time(t
     fromScreen: (s) => fromScreen(f, s),
     xOf: (t) => timeToX(f, t),
     yOf: (price) => f.axes.price.toY(price),
+    timeAt: (x) => xToTime(f, x),
+    priceAt: (y) => f.axes.price.toPrice(y),
     shiftBars: (t, n) => shiftBars(f.timeline, t, n),
     barsBetween: (t1, t2) => barsBetween(f, t1, t2),
     paneWidth: f.pane.width,
