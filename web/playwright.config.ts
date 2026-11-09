@@ -12,6 +12,7 @@ export default defineConfig({
     screenshot: "only-on-failure",
     locale: "ko-KR",
     timezoneId: "Asia/Seoul",
+    launchOptions: { chromiumSandbox: true },
   },
   projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"], viewport: { width: 1440, height: 900 } } }],
 });
