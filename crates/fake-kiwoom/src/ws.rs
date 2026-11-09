@@ -119,7 +119,6 @@ impl WsHub {
         self.muted.store(on, Ordering::SeqCst);
     }
 
-    /// 키움이 받는 실시간 등록 수. 0이면 모든 REG를 105118로 거절한다.
     pub fn set_reg_limit(&self, limit: usize) {
         self.reg_limit.store(limit, Ordering::SeqCst);
     }

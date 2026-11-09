@@ -179,7 +179,6 @@ impl Config {
     }
 }
 
-/// 키움 주소가 가리키는 곳. 원문이 아니라 파싱한 호스트로 정한다. 대소문자나 끝 점만 다른 실제 키움 주소를 가짜로 보면 안 된다.
 #[derive(Debug, PartialEq, Eq)]
 enum Endpoint {
     Kiwoom,

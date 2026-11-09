@@ -26,7 +26,6 @@ export interface Fake {
   pushReal(type: "0B" | "0J", item: string, values: Record<string, string>): Promise<number>;
   /** 가짜 키움 WebSocket 세션을 모두 이 close 코드로 닫는다. */
   dropWs(code: number, reason: string): Promise<void>;
-  /** 0이면 모든 REG를 105118로 거절한다. */
   setRegLimit(limit: number): Promise<void>;
   /** 지금 REG된 항목(type → item 목록). */
   registered(): Promise<Record<string, string[]>>;
