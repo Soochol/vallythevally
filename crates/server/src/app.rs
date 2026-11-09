@@ -147,12 +147,10 @@ async fn shutdown_signal() {
     tracing::info!("끝냅니다");
 }
 
-/// 다음 시도 시각. 관문이 더 늦게 열리면 그 시각이다.
 fn next_try(clock: &Clock, retry_at: KstTime, at_least: Duration) -> KstTime {
     retry_at.max(clock.now().plus_secs(at_least.as_secs() as i64))
 }
 
-/// 켤 때는 `Screen`으로 받고, 실패하면 10초 뒤(관문이 닫혀 있으면 열리는 시각)에 다시 받는다.
 async fn load_symbols_at_startup(clock: Clock, rest: KiwoomRest, symbols: Arc<SymbolDirectory>) {
     loop {
         let e = match symbols.refresh(&rest, Priority::Screen).await {

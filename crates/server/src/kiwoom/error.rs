@@ -1,5 +1,3 @@
-//! 키움 응답을 닫힌 범주로 바꾸는 한 곳과, 범주마다의 대응 정책 표(ADR 0009, docs/design/kiwoom-errors-proposal.md §2·§5).
-
 use std::fmt;
 
 use serde_json::Value;
@@ -172,18 +170,12 @@ pub enum Retry {
     RefreshTokenOnce,
 }
 
-/// 재시도를 다 쓴 뒤 무엇을 막는가.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Stop {
-    /// 이 요청만 실패한다.
     Nothing,
-    /// 조회 전체의 공유 관문을 30초 닫는다. 그 뒤 확인 요청 하나만 나간다.
     Gate,
-    /// 같은 자격증명의 조회 전체를 발급 간격(10분)만큼 닫는다. 확인도 같은 범주로 실패하면 전부 멈춘다.
     AuthGate,
-    /// 발급 간격(10분)이 지난 뒤 다음 발급을 허락한다.
     IssueInterval,
-    /// 처음에는 발급 간격을 기다리고, 두 번째에는 그 경로를 멈춘다.
     PathOnRepeat,
     Path,
     Everything,
@@ -429,7 +421,6 @@ fn in_phase(api_id: ApiId, category: Category) -> Category {
     }
 }
 
-/// 성공으로 판정한 응답 봉투.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Envelope {
     pub http_status: u16,

@@ -7,16 +7,4 @@ export type ApiErrorBody = { code: ApiErrorCode,
 /**
  * 사람이 읽는 한국어 문장.
  */
-message: string, 
-/**
- * 키움 실패일 때만 있다.
- */
-reason: ApiErrorReason | null, 
-/**
- * 이 시각이 있을 때만 브라우저가 스스로 다시 보내도 된다. 그 전에는 보내지 않는다.
- */
-retryAt: UnixSeconds | null, 
-/**
- * 사람이 고치고 서버를 다시 켜야 풀린다. 다시 보내도 같은 답이다.
- */
-manualActionRequired: boolean, };
+message: string, reason: ApiErrorReason | null, retryAt: UnixSeconds | null, manualActionRequired: boolean, };

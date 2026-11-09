@@ -377,20 +377,17 @@ pub enum ApiErrorCode {
     Internal,
 }
 
-/// 키움 실패의 사유. 브라우저는 키움 숫자 코드를 다시 판정하지 않고 이것만 본다.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "snake_case")]
 #[ts(export)]
 pub enum ApiErrorReason {
     RateLimited,
     KiwoomUnreachable,
-    /// 키움 응답이 시간 안에 오지 않았다.
     KiwoomTimeout,
     KiwoomError,
     TokenInvalid,
     AuthBlocked,
     AuthIndeterminate,
-    /// 마지막 발급 요청에서 10분이 지나지 않았다.
     IssueInterval,
     TokenFile,
     SymbolMismatch,
@@ -408,11 +405,8 @@ pub struct ApiErrorBody {
     pub code: ApiErrorCode,
     /// 사람이 읽는 한국어 문장.
     pub message: String,
-    /// 키움 실패일 때만 있다.
     pub reason: Option<ApiErrorReason>,
-    /// 이 시각이 있을 때만 브라우저가 스스로 다시 보내도 된다. 그 전에는 보내지 않는다.
     pub retry_at: Option<UnixSeconds>,
-    /// 사람이 고치고 서버를 다시 켜야 풀린다. 다시 보내도 같은 답이다.
     pub manual_action_required: bool,
 }
 

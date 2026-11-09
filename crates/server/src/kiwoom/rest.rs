@@ -79,14 +79,10 @@ pub struct Page<T> {
     pub next: Option<ContKey>,
 }
 
-/// 요청이 끝난 모양. 무엇이 다시 나갈 수 있는지는 변형이 말한다.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum KiwoomError {
-    /// 이 요청만 실패했다. 같은 입력을 자동으로 다시 보내지 않는다.
     Failed(Failure),
-    /// `until`까지 관문이 닫혀 있다. 그 뒤에는 확인 요청 하나가 나갈 수 있다.
     Gated { until: KstTime, cause: GateCause },
-    /// 사람이 고치고 서버를 다시 켤 때까지 이 경로(또는 전부)로 보내지 않는다.
     Stopped(Failure),
     TokenFile(FileError),
 }
@@ -188,7 +184,6 @@ struct Job {
     resent_after_invalid_token: bool,
 }
 
-/// 조회 전체가 함께 지나는 관문. 확인 요청이 성공해야만 다시 열린다.
 #[derive(Default)]
 enum Gate {
     #[default]
@@ -569,7 +564,6 @@ impl Inner {
         }
     }
 
-    /// 재시도를 다 쓴 실패에 정책 표의 멈춤 범위를 적용하고, 요청에 돌려줄 결과를 만든다.
     fn settle(&self, q: &mut Queue, failure: Failure) -> KiwoomError {
         let api_id = failure.api_id();
         match failure.policy().stop {
@@ -665,7 +659,6 @@ impl Inner {
         self.wake.notify_one();
     }
 
-    /// 확인 요청은 다시 보내지 않는다. 관문을 닫은 것과 같은 종류로 실패하면 관문을 다시 닫고, 아니면 연다.
     fn probe_failed(self: &Arc<Self>, q: &mut Queue, id: u64, generation: TokenGen, failure: Failure) {
         let Gate::Probing { cause, misses, .. } = std::mem::take(&mut q.gate) else {
             unreachable!("send_market이 확인 요청임을 확인했다")

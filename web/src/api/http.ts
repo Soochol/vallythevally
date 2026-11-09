@@ -41,7 +41,6 @@ const API_ERROR_REASONS = [
 const _allReasonsListed: Exclude<ApiErrorReason, (typeof API_ERROR_REASONS)[number]> extends never ? true : never = true;
 void _allReasonsListed;
 
-/** 서버가 정한, 다시 보내도 되는지와 언제인지. */
 export interface Resume {
   reason: ApiErrorReason | null;
   retryAt: UnixSeconds | null;
