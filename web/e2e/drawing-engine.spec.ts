@@ -145,7 +145,10 @@ test("drawing engine: settings preview, cancellation, coordinates and text", asy
   const original = (await drawings(app))[0]!;
   await page.getByRole("button", { name: "드로잉 설정" }).click();
   const dialog = page.getByRole("dialog", { name: "추세선 설정" });
+  const defaultColor = await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue("--draw").trim());
+  await expect(dialog.getByRole("textbox", { name: "선 색", exact: true })).toHaveValue(defaultColor);
   await dialog.getByLabel("선 굵기").selectOption("4");
+  await dialog.getByRole("textbox", { name: "선 색", exact: true }).fill("#224466");
   expect((await drawings(app))[0]!.style).toEqual(original.style);
   await dialog.getByRole("button", { name: "취소", exact: true }).click();
   expect((await drawings(app))[0]!.style).toEqual(original.style);
@@ -153,11 +156,13 @@ test("drawing engine: settings preview, cancellation, coordinates and text", asy
   await dialog.getByRole("tab", { name: "좌표", exact: true }).click();
   await dialog.getByLabel("점 1 가격").fill(String(original.points[0]!.price + 10));
   await dialog.getByRole("tab", { name: "글자", exact: true }).click();
+  await expect(dialog.getByRole("textbox", { name: "글자 색", exact: true })).toHaveValue(defaultColor);
   await dialog.getByRole("textbox", { name: "글자", exact: true }).fill("지지 구간");
   await page.screenshot({ path: testInfo.outputPath("settings.png") });
   await dialog.getByRole("button", { name: "확인", exact: true }).click();
   await expect.poll(async () => (await drawings(app))[0]!.text).toBe("지지 구간");
   expect((await drawings(app))[0]!.points[0]!.price).toBe(original.points[0]!.price + 10);
+  expect((await drawings(app))[0]!.style).toMatchObject({ line: { color: "$draw" }, label: { color: "$draw" } });
   await page.getByRole("button", { name: "개체 목록 열기" }).click();
   await expect(page.getByRole("button", { name: "고르기: 지지 구간" })).toBeVisible();
   await page.screenshot({ path: testInfo.outputPath("desktop.png") });

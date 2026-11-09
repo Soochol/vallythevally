@@ -6,7 +6,7 @@ export const INPUT = "draw-input";
 export function ColorInput({ label, value, onChange }: { label: string; value: string; onChange(v: string): void }) {
   const color = drawingColor(value);
   return <span className="draw-color"><input aria-label={`${label} 색 고르기`} type="color" value={/^#[0-9a-f]{6}$/i.test(color) ? color : "#12b5a5"} onChange={(e) => onChange(e.target.value)} />
-    <input className={INPUT} aria-label={label} value={value} onChange={(e) => onChange(e.target.value)} placeholder="$draw 또는 #26a69a" /></span>;
+    <input className={INPUT} aria-label={label} value={color} onChange={(e) => onChange(e.target.value)} placeholder="#26a69a" /></span>;
 }
 export function WidthInput({ label, value, onChange }: { label: string; value: Width; onChange(v: Width): void }) {
   return <select className={INPUT} aria-label={label} value={value} onChange={(e) => { const n = Number(e.target.value); if (n === 1 || n === 2 || n === 3 || n === 4) onChange(n); }}>
