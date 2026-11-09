@@ -1,5 +1,6 @@
 import type { Page } from "@playwright/test";
-import { parseDrawingBody, parseRecord, recordKey } from "../src/chart/drawings/outbox";
+import { parseDrawingBody, recordKey } from "../src/chart/drawings/outbox";
+import { parseJournalRecord } from "../src/chart/drawings/journal";
 import { test, expect, cell, chartOf, type App } from "./harness";
 
 const mirror = (page: Page) => chartOf(cell(page)).locator(".drawing-mirror");
@@ -26,7 +27,7 @@ async function drawings(app: App) {
 
 async function journal(page: Page, id: string) {
   const raw = await page.evaluate((key) => localStorage.getItem(key), recordKey(id));
-  return raw === null ? null : parseRecord(JSON.parse(raw));
+  return raw === null ? null : parseJournalRecord(JSON.parse(raw));
 }
 
 for (const offset of [0, -60_000]) {

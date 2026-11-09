@@ -7,6 +7,7 @@ import { usePersistStore } from "../../stores/persist";
 import { useSelectionStore } from "../../stores/selection";
 import { EMPTY_HISTORY, planRedo, planUndo, record, sameContent, type History } from "./history";
 import * as queue from "./outbox";
+import { compareIntent, DrawingJournal } from "./journal";
 import { opId, type Drawing, type DrawingBody, type DrawingOp } from "./types";
 
 const key = (symbol: string) => ["drawings", symbol] as const;
@@ -16,6 +17,14 @@ export const useDrawingSave = create<{ state: SaveState; retry(): void }>()(() =
 
 export class DrawingSync {
   private outbox: queue.Outbox = queue.EMPTY_OUTBOX;
+  private desired = new Map<string, { intent: queue.Intent; state: "pending" | "admitted" }>();
+  private journal: DrawingJournal | null = null;
+  private admissions = new Map<string, Promise<void>>();
+  private recoveryIds = new Set<string>();
+  private cleanups = new Map<string, queue.Intent>();
+  private recoveryError: string | null = null;
+  private stageFailed = false;
+  private saveFailure: SaveState | null = null;
   private histories = new Map<number, History>();
   private listeners = new Set<() => void>();
   private version = 0;
@@ -27,19 +36,20 @@ export class DrawingSync {
 
   constructor(private client: QueryClient) {
     useDrawingSave.setState({ retry: () => this.retry() });
-    const records: queue.LaneRecord[] = [];
     try {
-      for (const k of Object.keys(localStorage)) {
-        if (!k.startsWith(queue.UNSAVED_PREFIX)) continue;
-        try { const parsed = queue.parseRecord(JSON.parse(localStorage.getItem(k) ?? "null")); if (parsed) records.push(parsed); } catch { continue; }
+      this.journal = new DrawingJournal();
+      const snapshot = this.journal.snapshot();
+      for (const intent of snapshot.intents) {
+        const previous = this.desired.get(intent.id);
+        if (!previous || compareIntent(intent, previous.intent) > 0) this.desired.set(intent.id, { intent, state: "pending" });
       }
-    } catch { toast("복구 저장소를 쓸 수 없습니다. 이 탭을 닫기 전에 저장 상태를 확인하세요"); }
-    this.outbox = queue.restore(records);
+      for (const id of snapshot.ids) { this.recoveryIds.add(id); this.recover(id); }
+    } catch { this.recoveryFailed(); }
     this.client.getQueryCache().subscribe((e) => { if (e.query.queryKey[0] === "drawings") this.emit(); });
     window.addEventListener("focus", () => this.refresh());
     document.addEventListener("visibilitychange", () => document.visibilityState === "visible" ? this.refresh() : this.flush());
     window.addEventListener("pagehide", () => this.flush());
-    if (records.length) this.pump();
+    if (this.desired.size || this.recoveryError) this.updateSave();
   }
 
   subscribe = (f: () => void) => { this.listeners.add(f); return () => { this.listeners.delete(f); }; };
@@ -64,28 +74,35 @@ export class DrawingSync {
 
   drawings(symbol: string): DrawingBody[] {
     const merged = new Map<string, DrawingBody>((this.client.getQueryData<Drawing[]>(key(symbol)) ?? []).map((d) => [d.id, d]));
-    for (const lane of this.outbox.lanes.values()) {
-      if (lane.symbol !== symbol) continue;
-      const want = queue.latestWant(lane);
-      if (want.kind === "delete") merged.delete(lane.id); else merged.set(lane.id, want.body);
+    for (const { intent } of this.desired.values()) {
+      if (intent.symbol !== symbol) continue;
+      if (intent.want.kind === "delete") merged.delete(intent.id); else merged.set(intent.id, intent.want.body);
     }
     return [...merged.values()].sort((a, b) => a.z - b.z);
   }
 
   history(slot: number) { return this.histories.get(slot) ?? EMPTY_HISTORY; }
   commit(slot: number, ops: readonly DrawingOp[], addHistory = true) {
-    if (usePersistStore.getState().phase.kind !== "ready") { toast("서버 연결을 복구한 뒤 드로잉을 편집하세요"); return; }
+    if (usePersistStore.getState().phase.kind !== "ready") { toast("서버 연결을 복구한 뒤 드로잉을 편집하세요"); return false; }
     const changed = ops.filter((op) => op.kind !== "update" || !sameContent(op.before, op.after));
-    if (!changed.length) return;
-    if (addHistory) this.histories.set(slot, record(this.history(slot), changed));
-    let next = this.outbox;
+    if (!changed.length) return false;
+    if (!this.journal) { this.recoveryFailed(); return false; }
+    let stagingSucceeded = true;
+    const staged: { op: DrawingOp; intent: queue.Intent }[] = [];
     for (const op of changed) {
       const body = op.kind === "delete" ? op.before : op.after;
-      next = queue.reserve(next, { id: opId(op), symbol: body.symbol, want: queue.wantOf(op) }, Date.now);
+      try {
+        const intent = this.journal.stage({ id: opId(op), symbol: body.symbol, want: queue.wantOf(op), observedRevision: op.kind === "create" ? body.revision : Math.max(body.revision, op.before.revision) });
+        staged.push({ op, intent });
+        this.desired.set(intent.id, { intent, state: "pending" });
+        this.admit(intent);
+      } catch { stagingSucceeded = false; this.stageFailed = true; this.recoveryFailed(); break; }
     }
-    this.changeOutbox(next);
-    this.save = { kind: "pending" };
-    this.emit(); this.pump();
+    if (stagingSucceeded) { if (this.stageFailed) this.recoveryError = null; this.stageFailed = false; }
+    if (addHistory && staged.length) this.histories.set(slot, record(this.history(slot), staged.map(({ op }) => op)));
+    this.saveFailure = null;
+    this.updateSave(); this.pump();
+    return staged.length > 0;
   }
 
   undo(slot: number, redo = false) {
@@ -95,32 +112,88 @@ export class DrawingSync {
     };
     const plan = (redo ? planRedo : planUndo)(this.history(slot), current);
     if (plan.kind === "nothing") return;
-    this.histories.set(slot, plan.history);
-    if (plan.kind === "conflict") toast("다른 곳에서 바뀐 드로잉이라 되돌리지 않았습니다");
-    else this.commit(slot, plan.ops, false);
+    if (plan.kind === "conflict") {
+      this.histories.set(slot, plan.history);
+      toast("다른 곳에서 바뀐 드로잉이라 되돌리지 않았습니다");
+    } else if (this.commit(slot, plan.ops, false)) this.histories.set(slot, plan.history);
     this.emit();
   }
 
-  retry() { this.changeOutbox(queue.retryFailed(this.outbox)); this.pump(); }
+  retry() {
+    this.recoveryError = null; this.saveFailure = null;
+    try {
+      this.journal ??= new DrawingJournal();
+      const completing = new Set([...this.cleanups.values()].map((intent) => intent.id));
+      for (const id of this.journal.snapshot().ids) if (!this.desired.has(id) && !completing.has(id)) this.recoveryIds.add(id);
+    } catch { this.recoveryFailed(); return; }
+    for (const id of this.recoveryIds) this.recover(id);
+    for (const { intent, state } of this.desired.values()) if (state === "pending") this.admit(intent);
+    for (const intent of this.cleanups.values()) this.cleanup(intent);
+    this.outbox = queue.retryFailed(this.outbox);
+    this.updateSave(); this.pump();
+  }
   private flush() { for (const id of queue.flushable(this.outbox)) this.send(id, true); }
 
-  private changeOutbox(next: queue.Outbox) {
-    const changes = queue.recordChanges(this.outbox, next);
-    try {
-      for (const r of changes.write) {
-        const old = this.stored(r.id);
-        if (!old || old.lastRevision <= r.lastRevision) localStorage.setItem(queue.recordKey(r.id), JSON.stringify(r));
-      }
-      for (const id of changes.remove) {
-        const old = this.stored(id);
-        if (!old || old.lastRevision <= queue.lastRevision(this.outbox, id)) localStorage.removeItem(queue.recordKey(id));
-      }
-    } catch { toast("복구 저장소를 쓸 수 없습니다. 이 탭을 닫기 전에 저장 상태를 확인하세요"); }
-    this.outbox = next;
+  private recoveryFailed() {
+    this.recoveryError = "복구 저장소를 쓸 수 없습니다. 이 탭을 닫기 전에 저장 상태를 확인하세요";
+    toast(this.recoveryError); this.updateSave();
   }
-  private stored(id: string): queue.LaneRecord | null {
-    const raw = localStorage.getItem(queue.recordKey(id));
-    try { return raw === null ? null : queue.parseRecord(JSON.parse(raw)); } catch { return null; }
+
+  private updateSave() {
+    if (this.stageFailed || this.recoveryError) this.save = { kind: "failed", reason: "error", message: this.recoveryError ?? "드로잉 복구 기록을 저장하지 못했습니다" };
+    else if (this.saveFailure) this.save = this.saveFailure;
+    else if ([...this.outbox.lanes.values()].some(queue.isFailed)) this.save = { kind: "failed", reason: "error", message: "드로잉 저장 실패" };
+    else if ([...this.outbox.lanes.values()].some((lane) => lane.state === "flying")) this.save = { kind: "saving" };
+    else this.save = this.desired.size || this.admissions.size || this.cleanups.size || this.recoveryIds.size ? { kind: "pending" } : { kind: "saved", at: Date.now() };
+    this.emit();
+  }
+
+  private accept(intent: queue.Intent) {
+    const desired = this.desired.get(intent.id);
+    if (desired && desired.intent.uuid !== intent.uuid) return;
+    this.desired.set(intent.id, { intent, state: "admitted" });
+    const lane = this.outbox.lanes.get(intent.id);
+    if (!lane || queue.latestIntent(lane).uuid !== intent.uuid) this.outbox = queue.enqueue(this.outbox, intent);
+  }
+
+  private recover(id: string) {
+    const journal = this.journal;
+    if (!journal) return;
+    void journal.recover(id).then((intent) => {
+      this.recoveryIds.delete(id);
+      if (intent) {
+        const desired = this.desired.get(id);
+        if (!desired || compareIntent(intent, desired.intent) >= 0) {
+          this.desired.set(id, { intent, state: "admitted" });
+          this.accept(intent);
+        }
+      } else {
+        const desired = this.desired.get(id);
+        if (desired && !this.admissions.has(id)) this.desired.delete(id);
+      }
+      this.updateSave(); this.pump();
+    }).catch(() => this.recoveryFailed());
+  }
+
+  private admit(intent: queue.Intent) {
+    const journal = this.journal;
+    if (!journal) return;
+    const previous = this.admissions.get(intent.id) ?? Promise.resolve();
+    const task = previous.then(() => journal.admit(intent)).then((admitted) => {
+      if (admitted) this.accept(intent);
+      else if (this.desired.get(intent.id)?.intent.uuid === intent.uuid) this.desired.delete(intent.id);
+    }).catch(() => this.recoveryFailed()).finally(() => {
+      if (this.admissions.get(intent.id) === task) this.admissions.delete(intent.id);
+      this.updateSave(); this.pump();
+    });
+    this.admissions.set(intent.id, task);
+  }
+
+  private cleanup(intent: queue.Intent) {
+    this.cleanups.set(intent.uuid, intent);
+    void this.journal?.complete(intent).then(() => {
+      this.cleanups.delete(intent.uuid); this.updateSave(); this.pump();
+    }).catch(() => this.recoveryFailed());
   }
 
   private pump() {
@@ -131,15 +204,29 @@ export class DrawingSync {
   }
 
   private send(id: string, keepalive: boolean) {
-    const started = queue.start(this.outbox, id, Date.now);
+    const lane = this.outbox.lanes.get(id);
+    if (lane?.state !== "waiting") return;
+    const desired = this.desired.get(id);
+    if (desired?.intent.uuid !== lane.intent.uuid || desired.state !== "admitted") { this.outbox = queue.drop(this.outbox, id); return; }
+    try {
+      if (!this.journal?.isSendable(lane.intent)) {
+        this.outbox = queue.drop(this.outbox, id); this.desired.delete(id); this.updateSave(); return;
+      }
+    } catch { this.outbox = queue.pause(this.outbox, id); this.recoveryFailed(); return; }
+    const started = queue.start(this.outbox, id);
     if (!started) return;
-    this.changeOutbox(started.outbox);
-    this.save = { kind: "saving" }; this.emit();
+    this.outbox = started.outbox;
+    this.updateSave();
     const { want, symbol } = started.send;
     const sending = want.kind === "delete" ? deleteJson(drawingPath(id), { keepalive }) : putJson<Drawing>(drawingPath(id), want.body, { keepalive });
     void sending.then(async (saved) => {
-      await this.client.cancelQueries({ queryKey: key(symbol) });
-      this.client.setQueryData<Drawing[]>(key(symbol), (old = []) => [...old.filter((d) => d.id !== id), ...(saved ? [saved] : [])]);
+      let loading = this.loads.get(symbol);
+      while (loading) { await loading; loading = this.loads.get(symbol); }
+      this.client.setQueryData<Drawing[]>(key(symbol), (old = []) => {
+        const current = old.find((d) => d.id === id);
+        if (saved && current && current.revision > saved.revision) return old;
+        return [...old.filter((d) => d.id !== id), ...(saved ? [saved] : [])];
+      });
       this.settle(id, { kind: "ok" });
     }).catch((e: unknown) => {
       const outcome: queue.Outcome = e instanceof ApiRequestError && e.code === "stale_revision" ? { kind: "stale" }
@@ -153,11 +240,14 @@ export class DrawingSync {
   private settle(id: string, outcome: queue.Outcome) {
     const settled = queue.settle(this.outbox, id, outcome, Date.now());
     if (!settled) return;
-    this.changeOutbox(settled.outbox);
-    if (settled.settled.kind === "rejected") this.save = settled.settled.tooLarge ? { kind: "failed", reason: "too_large" } : { kind: "failed", reason: "error", message: "드로잉 저장 실패" };
-    else if ([...this.outbox.lanes.values()].some(queue.isFailed)) this.save = { kind: "failed", reason: "error", message: "드로잉 저장 실패" };
-    else this.save = this.outbox.lanes.size ? { kind: "pending" } : { kind: "saved", at: Date.now() };
-    this.emit(); this.pump();
+    const lane = this.outbox.lanes.get(id);
+    this.outbox = settled.outbox;
+    if (lane?.state === "flying" && outcome.kind !== "networkError") {
+      if (this.desired.get(id)?.intent.uuid === lane.sent.uuid) this.desired.delete(id);
+      this.cleanup(lane.sent);
+    }
+    if (settled.settled.kind === "rejected") this.saveFailure = settled.settled.tooLarge ? { kind: "failed", reason: "too_large" } : { kind: "failed", reason: "error", message: "드로잉 저장 실패" };
+    this.updateSave(); this.pump();
   }
 }
 

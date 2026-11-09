@@ -5,27 +5,22 @@ import { type DrawingBody, type DrawingId, type DrawingOp, type DrawingPoint, ty
 
 export type Want = { kind: "put"; body: DrawingBody; reserved?: true } | { kind: "delete" };
 
-interface LaneBase {
+export interface Intent {
+  readonly v: 2;
   readonly id: DrawingId;
   readonly symbol: SymbolCode;
+  readonly uuid: string;
+  readonly order: number;
+  readonly want: Want;
+  readonly lastRevision: number;
 }
 
 export type Lane =
-  | (LaneBase & { readonly state: "waiting"; readonly want: Want; readonly failures: number; readonly retryAt: number })
-  | (LaneBase & { readonly state: "flying"; readonly sent: Want; readonly next: Want | null; readonly failures: number });
+  | { readonly state: "waiting"; readonly intent: Intent; readonly failures: number; readonly retryAt: number }
+  | { readonly state: "flying"; readonly sent: Intent; readonly next: Intent | null; readonly failures: number };
 
-export interface Outbox {
-  readonly lanes: ReadonlyMap<DrawingId, Lane>;
-  readonly revisions: ReadonlyMap<DrawingId, number>;
-}
-
-export const EMPTY_OUTBOX: Outbox = { lanes: new Map(), revisions: new Map() };
-
-export interface Send {
-  id: DrawingId;
-  symbol: SymbolCode;
-  want: Want;
-}
+export interface Outbox { readonly lanes: ReadonlyMap<DrawingId, Lane> }
+export const EMPTY_OUTBOX: Outbox = { lanes: new Map() };
 
 export type Outcome =
   | { kind: "ok" }
@@ -37,58 +32,34 @@ export function wantOf(op: DrawingOp): Want {
   return op.kind === "delete" ? { kind: "delete" } : { kind: "put", body: op.after };
 }
 
-function withLane(o: Outbox, lane: Lane): Outbox {
-  const lanes = new Map(o.lanes);
-  lanes.set(lane.id, lane);
-  return { ...o, lanes };
+function withLane(o: Outbox, id: DrawingId, lane: Lane): Outbox {
+  return { lanes: new Map(o.lanes).set(id, lane) };
 }
 
-function without(o: Outbox, id: DrawingId): Outbox {
+export function drop(o: Outbox, id: DrawingId): Outbox {
   const lanes = new Map(o.lanes);
   lanes.delete(id);
-  return { ...o, lanes };
+  return { lanes };
 }
 
-export function enqueue(o: Outbox, send: Send): Outbox {
-  const lane = o.lanes.get(send.id);
-  if (lane?.state === "flying") return withLane(o, { ...lane, next: send.want });
-  return withLane(o, {
-    state: "waiting",
-    id: send.id,
-    symbol: send.symbol,
-    want: send.want,
-    failures: 0,
-    retryAt: 0,
-  });
-}
-
-export function reserve(o: Outbox, send: Send, clock: () => number): Outbox {
-  if (send.want.kind === "delete") return enqueue(o, send);
-  const revision = Math.max(clock(), send.want.body.revision + 1, lastRevision(o, send.id) + 1);
-  const want: Want = { kind: "put", body: { ...send.want.body, revision }, reserved: true };
-  return enqueue({ ...o, revisions: new Map(o.revisions).set(send.id, revision) }, { ...send, want });
+export function enqueue(o: Outbox, intent: Intent): Outbox {
+  const lane = o.lanes.get(intent.id);
+  if (lane?.state === "flying") return withLane(o, intent.id, { ...lane, next: intent });
+  return withLane(o, intent.id, { state: "waiting", intent, failures: 0, retryAt: 0 });
 }
 
 export function nextToSend(o: Outbox, now: number): DrawingId[] {
-  return [...o.lanes.values()].filter((l) => l.state === "waiting" && l.retryAt <= now).map((l) => l.id);
+  return [...o.lanes].filter(([, l]) => l.state === "waiting" && l.retryAt <= now).map(([id]) => id);
 }
 
-export function start(o: Outbox, id: DrawingId, clock: () => number): { outbox: Outbox; send: Send } | null {
+export function start(o: Outbox, id: DrawingId): { outbox: Outbox; send: Intent } | null {
   const lane = o.lanes.get(id);
   if (lane?.state !== "waiting") return null;
-  let want = lane.want;
-  let revisions = o.revisions;
-  if (want.kind === "put" && !want.reserved) {
-    const revision = Math.max(clock(), want.body.revision + 1, lastRevision(o, id) + 1);
-    want = { kind: "put", body: { ...want.body, revision } };
-    revisions = new Map(o.revisions).set(id, revision);
-  }
-  const flying: Lane = { state: "flying", id, symbol: lane.symbol, sent: want, next: null, failures: lane.failures };
-  return { outbox: withLane({ ...o, revisions }, flying), send: { id, symbol: lane.symbol, want } };
+  return { outbox: withLane(o, id, { state: "flying", sent: lane.intent, next: null, failures: lane.failures }), send: lane.intent };
 }
 
 export type Settled =
-  | { kind: "acked"; sent: Want }
+  | { kind: "acked"; sent: Intent }
   | { kind: "stale" }
   | { kind: "rejected"; tooLarge: boolean }
   | { kind: "retrying"; at: number }
@@ -97,16 +68,13 @@ export type Settled =
 export function settle(o: Outbox, id: DrawingId, outcome: Outcome, now: number): { outbox: Outbox; settled: Settled } | null {
   const lane = o.lanes.get(id);
   if (lane?.state !== "flying") return null;
-  const waiting = (want: Want, failures: number, retryAt: number): Outbox =>
-    withLane(o, { state: "waiting", id, symbol: lane.symbol, want, failures, retryAt });
-  const done = (settled: Settled) => ({ outbox: lane.next === null ? without(o, id) : waiting(lane.next, 0, 0), settled });
+  const waiting = (intent: Intent, failures: number, retryAt: number): Outbox =>
+    withLane(o, id, { state: "waiting", intent, failures, retryAt });
+  const done = (settled: Settled) => ({ outbox: lane.next === null ? drop(o, id) : waiting(lane.next, 0, 0), settled });
   switch (outcome.kind) {
-    case "ok":
-      return done({ kind: "acked", sent: lane.sent });
-    case "stale":
-      return done({ kind: "stale" });
-    case "clientError":
-      return done({ kind: "rejected", tooLarge: outcome.tooLarge });
+    case "ok": return done({ kind: "acked", sent: lane.sent });
+    case "stale": return done({ kind: "stale" });
+    case "clientError": return done({ kind: "rejected", tooLarge: outcome.tooLarge });
     case "networkError": {
       const failures = lane.failures + 1;
       const delay = RETRY_DELAYS_MS[failures - 1];
@@ -118,61 +86,22 @@ export function settle(o: Outbox, id: DrawingId, outcome: Outcome, now: number):
 
 export function retryFailed(o: Outbox): Outbox {
   let out = o;
-  for (const lane of o.lanes.values())
-    if (lane.state === "waiting" && lane.retryAt === Infinity) out = withLane(out, { ...lane, failures: 0, retryAt: 0 });
+  for (const [id, lane] of o.lanes)
+    if (lane.state === "waiting" && lane.retryAt === Infinity) out = withLane(out, id, { ...lane, failures: 0, retryAt: 0 });
   return out;
 }
-
+export function pause(o: Outbox, id: DrawingId): Outbox {
+  const lane = o.lanes.get(id);
+  return lane?.state === "waiting" ? withLane(o, id, { ...lane, retryAt: Infinity }) : o;
+}
 export const isFailed = (lane: Lane): boolean => lane.state === "waiting" && lane.retryAt === Infinity;
-
-export function latestWant(lane: Lane): Want {
-  return lane.state === "waiting" ? lane.want : (lane.next ?? lane.sent);
-}
-
-export function pendingWants(o: Outbox): ReadonlyMap<DrawingId, Want> {
-  return new Map([...o.lanes].map(([id, lane]) => [id, latestWant(lane)]));
-}
-
-export function flushable(o: Outbox): DrawingId[] {
-  return [...o.lanes.values()].filter((l) => l.state === "waiting").map((l) => l.id);
-}
+export function latestIntent(lane: Lane): Intent { return lane.state === "waiting" ? lane.intent : (lane.next ?? lane.sent); }
+export function latestWant(lane: Lane): Want { return latestIntent(lane).want; }
+export function flushable(o: Outbox): DrawingId[] { return [...o.lanes].filter(([, l]) => l.state === "waiting").map(([id]) => id); }
 
 export const UNSAVED_PREFIX = "vv.unsaved.drawing.";
 export const recordKey = (id: DrawingId) => `${UNSAVED_PREFIX}${id}`;
-
-export interface LaneRecord {
-  v: 1;
-  id: DrawingId;
-  symbol: SymbolCode;
-  want: Want;
-  lastRevision: number;
-}
-
-export const lastRevision = (o: Outbox, id: DrawingId): number => o.revisions.get(id) ?? 0;
-
-export function toRecord(o: Outbox, lane: Lane): LaneRecord {
-  return { v: 1, id: lane.id, symbol: lane.symbol, want: latestWant(lane), lastRevision: lastRevision(o, lane.id) };
-}
-
-export function recordChanges(before: Outbox, after: Outbox): { write: LaneRecord[]; remove: DrawingId[] } {
-  const write: LaneRecord[] = [];
-  for (const lane of after.lanes.values()) {
-    const old = before.lanes.get(lane.id);
-    const changed = old === undefined || latestWant(old) !== latestWant(lane) || lastRevision(before, lane.id) !== lastRevision(after, lane.id);
-    if (changed) write.push(toRecord(after, lane));
-  }
-  const remove = [...before.lanes.keys()].filter((id) => !after.lanes.has(id));
-  return { write, remove };
-}
-
-export function restore(records: readonly LaneRecord[]): Outbox {
-  let o = EMPTY_OUTBOX;
-  for (const r of records) {
-    o = enqueue(o, { id: r.id, symbol: r.symbol, want: r.want });
-    o = { ...o, revisions: new Map(o.revisions).set(r.id, Math.max(lastRevision(o, r.id), r.lastRevision)) };
-  }
-  return o;
-}
+export interface LaneRecord { v: 1; id: DrawingId; symbol: SymbolCode; want: Want; lastRevision: number }
 
 type Fields = Record<string, unknown>;
 
