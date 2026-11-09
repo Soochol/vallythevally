@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import { isTypingTarget, matchHotkey } from "../lib/hotkeys";
+import { DESKTOP_QUERY } from "../lib/media";
 import { PERIODS } from "../lib/symbol";
 import { useLayoutStore } from "../stores/layout";
 import { useSelectionStore } from "../stores/selection";
@@ -17,7 +18,7 @@ export function useHotkeys() {
         return;
       }
       if (isTypingTarget(e.target)) return;
-      const action = matchHotkey(e);
+      const action = matchHotkey(e, matchMedia(DESKTOP_QUERY).matches ? "desktop" : "phone");
       if (!action) return;
       e.preventDefault();
       const layout = useLayoutStore.getState();
