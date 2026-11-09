@@ -274,6 +274,17 @@ impl Failure {
         Failure { category: Protocol, api_id, http_status: None, return_code: None, detail: None, note }
     }
 
+    pub fn schema(api_id: ApiId, envelope: Envelope, note: Note) -> Failure {
+        Failure {
+            category: Protocol,
+            api_id,
+            http_status: Some(envelope.http_status),
+            return_code: Some(envelope.return_code),
+            detail: None,
+            note,
+        }
+    }
+
     pub fn note(&self) -> &Note {
         &self.note
     }
@@ -401,7 +412,14 @@ fn in_phase(api_id: ApiId, category: Category) -> Category {
     }
 }
 
-pub fn judge(api_id: ApiId, status: u16, body: &str) -> Result<(), Failure> {
+/// 성공으로 판정한 응답 봉투.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Envelope {
+    pub http_status: u16,
+    pub return_code: i64,
+}
+
+pub fn judge(api_id: ApiId, status: u16, body: &str) -> Result<Envelope, Failure> {
     let object = match serde_json::from_str::<Value>(body) {
         Ok(Value::Object(m)) => Some(m),
         _ => None,
@@ -433,7 +451,7 @@ pub fn judge(api_id: ApiId, status: u16, body: &str) -> Result<(), Failure> {
         ([], None) => match (status, return_code) {
             (429, _) => (RateLimit, None),
             (500.., _) => (Transient, None),
-            (200, ReturnCode::Number(0)) => return Ok(()),
+            (200, ReturnCode::Number(0)) => return Ok(Envelope { http_status: 200, return_code: 0 }),
             (200, ReturnCode::Number(_)) => (Unknown, None),
             (200, ReturnCode::Missing | ReturnCode::Malformed) => (Protocol, None),
             _ => (Unknown, None),
@@ -591,7 +609,7 @@ mod tests {
             assert_eq!((f.category(), f.detail(), f.http_status()), (want, Some(Rest(code)), Some(status)), "{name}");
         }
         for name in ["ka10081_005930", "ka10081_unknown_999999", "ka20006_unknown_999", "ka10099_0", "au10001_ok"] {
-            assert_eq!(judge(ApiId::Ka10081, 200, &fixture(name)), Ok(()), "{name}");
+            assert_eq!(judge(ApiId::Ka10081, 200, &fixture(name)).map(|_| ()), Ok(()), "{name}");
         }
     }
 
@@ -619,8 +637,8 @@ mod tests {
         ] {
             assert_eq!(category(ApiId::Ka10099, 200, body), Some(Protocol), "{body:?}");
         }
-        assert_eq!(judge(ApiId::Ka10099, 200, r#"{"return_code": "0", "list": []}"#), Ok(()));
-        assert_eq!(judge(ApiId::Ka10099, 200, r#"{"return_code": "0000", "list": []}"#), Ok(()));
+        assert_eq!(judge(ApiId::Ka10099, 200, r#"{"return_code": "0", "list": []}"#).map(|_| ()), Ok(()));
+        assert_eq!(judge(ApiId::Ka10099, 200, r#"{"return_code": "0000", "list": []}"#).map(|_| ()), Ok(()));
         assert_eq!(category(ApiId::Ka10099, 200, r#"{"return_code": 0, "return_msg": "실패[8050:x]"}"#), Some(AuthBlocked), "상위 0이어도 실패 상세가 이긴다");
         assert_eq!(category(ApiId::Ka10099, 204, ""), Some(Unknown));
     }

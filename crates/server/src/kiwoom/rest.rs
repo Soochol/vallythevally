@@ -126,6 +126,7 @@ impl From<Halt> for KiwoomError {
 struct RawPage {
     body: Arc<str>,
     next: Option<ContKey>,
+    envelope: error::Envelope,
 }
 
 type JobResult = Result<RawPage, KiwoomError>;
@@ -311,7 +312,7 @@ impl KiwoomRest {
             Err(e) => {
                 let note = Note::Schema { line: e.line(), column: e.column() };
                 tracing::error!(api_id = R::API_ID.as_str(), %note, "키움 응답을 읽지 못했습니다");
-                let failure = Failure::protocol(R::API_ID, note);
+                let failure = Failure::schema(R::API_ID, raw.envelope, note);
                 self.0.stop(&mut self.0.lock(), &failure);
                 Err(KiwoomError::Failed(failure))
             }
@@ -636,7 +637,7 @@ fn judge_market(api_id: ApiId, priority: Priority, res: Result<HttpResponse, Tra
         detail = ?failed.and_then(Failure::detail),
         "키움 조회"
     );
-    judged.map(|()| RawPage { body: resp.body.into(), next: resp.next_key.map(ContKey) })
+    judged.map(|envelope| RawPage { body: resp.body.into(), next: resp.next_key.map(ContKey), envelope })
 }
 
 #[cfg(test)]
