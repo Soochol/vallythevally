@@ -149,10 +149,11 @@ impl Config {
             None => None,
             Some(s) => Some(parse_kst_datetime(s).ok_or_else(|| ConfigError(format!("VALLY_CLOCK_START는 KST YYYYMMDDHHMMSS입니다: {s}")))?),
         };
-        if (kiwoom_base_url == DEFAULT_KIWOOM_BASE_URL) != (kiwoom_ws_url == DEFAULT_KIWOOM_WS_URL) {
-            return Err(ConfigError("VALLY_KIWOOM_BASE_URL과 VALLY_KIWOOM_WS_URL은 둘 다 실제 키움이거나 둘 다 다른 곳이어야 합니다".into()));
+        let rest_endpoint = Endpoint::of("VALLY_KIWOOM_BASE_URL", &kiwoom_base_url)?;
+        if rest_endpoint != Endpoint::of("VALLY_KIWOOM_WS_URL", &kiwoom_ws_url)? {
+            return Err(ConfigError("VALLY_KIWOOM_BASE_URL과 VALLY_KIWOOM_WS_URL은 둘 다 실제 키움이거나 둘 다 가짜 키움(루프백)이어야 합니다".into()));
         }
-        if clock_start.is_some() && kiwoom_base_url == DEFAULT_KIWOOM_BASE_URL {
+        if clock_start.is_some() && rest_endpoint == Endpoint::Kiwoom {
             return Err(ConfigError("VALLY_CLOCK_START는 가짜 키움(VALLY_KIWOOM_BASE_URL, VALLY_KIWOOM_WS_URL)과만 쓸 수 있습니다".into()));
         }
         let config = Config {
@@ -175,6 +176,26 @@ impl Config {
             log_filter: vars.get("VALLY_LOG").cloned().unwrap_or_else(|| "info".to_owned()),
         };
         Ok((config, warnings))
+    }
+}
+
+/// 키움 주소가 가리키는 곳. 원문이 아니라 파싱한 호스트로 정한다. 대소문자나 끝 점만 다른 실제 키움 주소를 가짜로 보면 안 된다.
+#[derive(Debug, PartialEq, Eq)]
+enum Endpoint {
+    Kiwoom,
+    Loopback,
+}
+
+impl Endpoint {
+    fn of(key: &str, url: &str) -> Result<Endpoint, ConfigError> {
+        let invalid = || ConfigError(format!("{key}는 kiwoom.com이거나 루프백(가짜 키움) 주소여야 합니다: {url}"));
+        let parsed = reqwest::Url::parse(url).map_err(|_| invalid())?;
+        let host = parsed.host_str().ok_or_else(invalid)?.trim_end_matches('.');
+        if host == "kiwoom.com" || host.ends_with(".kiwoom.com") {
+            return Ok(Endpoint::Kiwoom);
+        }
+        let loopback = host == "localhost" || host.trim_start_matches('[').trim_end_matches(']').parse::<IpAddr>().is_ok_and(|ip| ip.is_loopback());
+        if loopback { Ok(Endpoint::Loopback) } else { Err(invalid()) }
     }
 }
 
