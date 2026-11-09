@@ -967,4 +967,20 @@ mod tests {
         assert_eq!(p2.next, None);
         assert_eq!(fake.market_sent()[1].cont.as_deref(), Some("NEXT-1"));
     }
+
+    #[tokio::test(start_paused = true)]
+    async fn nothing_is_sent_when_the_issue_request_time_cannot_be_saved() {
+        let (_dir, _lock, file) = crate::kiwoom::token_file::testing::temp_token_file();
+        let state_dir = file.path().parent().unwrap().to_owned();
+        let auth = KiwoomAuth::new(Secret::new("k".into()), Secret::new("s".into()), Some(file));
+        std::fs::create_dir_all(state_dir.parent().unwrap()).unwrap();
+        std::fs::write(&state_dir, "디렉터리 자리를 일반 파일이 막는다").unwrap();
+        let tokens = token_counter();
+        let fake = Arc::new(FakeTransport::new(Duration::ZERO, move |s| tokens(s).unwrap_or_else(list_ok)));
+        let rest = KiwoomRest::new(Arc::new(fake.clone()), auth, Clock::fake(kst(KstDate::new(2026, 11, 9).unwrap(), 9, 0, 0)));
+        assert!(rest.issue_token().await.is_err());
+        assert!(call_k(&rest, 0, Priority::Screen).await.is_err());
+        assert!(rest.issue_token().await.is_err());
+        assert_eq!(fake.sent().len(), 0, "{:?}", fake.sent().iter().map(|s| s.api_id).collect::<Vec<_>>());
+    }
 }

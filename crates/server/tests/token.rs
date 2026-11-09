@@ -39,9 +39,15 @@ async fn run_until_symbols_load(fake: &FakeKiwoom, lock: &Path, dist: &Path) -> 
 }
 
 fn write_token_file(lock: &Path, contents: Value) {
-    let path = token_path(lock);
-    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-    std::fs::write(&path, contents.to_string()).unwrap();
+    write_private(&token_path(lock), contents.to_string().as_bytes());
+}
+
+fn write_private(path: &Path, contents: &[u8]) {
+    let dir = path.parent().unwrap();
+    std::fs::create_dir_all(dir).unwrap();
+    std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700)).unwrap();
+    std::fs::write(path, contents).unwrap();
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600)).unwrap();
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -111,4 +117,49 @@ async fn an_invalid_saved_token_is_reissued_once() {
     let saved: Value = serde_json::from_str(&std::fs::read_to_string(token_path(&lock)).unwrap()).unwrap();
     assert_eq!(saved["token"]["value"], TOKEN);
     assert!(!logs.contains("FAKE-TOKEN-old-0001"), "{logs}");
+}
+
+type Setup = Box<dyn Fn(&Path) -> (PathBuf, PathBuf)>;
+
+/// 토큰 경로와, 서버가 건드리지 않아야 하는 파일을 만든다.
+fn with_contents(contents: &'static str) -> Setup {
+    Box::new(move |root: &Path| {
+        let path = root.join("state/token.json");
+        write_private(&path, contents.as_bytes());
+        (path.clone(), path)
+    })
+}
+
+async fn assert_never_issues(fake: &FakeKiwoom, cases: Vec<(&str, Setup)>) {
+    let tmp = tempfile::tempdir().unwrap();
+    let dist = static_dir(tmp.path());
+    for (name, setup) in cases {
+        let root = tmp.path().join(name);
+        std::fs::create_dir_all(&root).unwrap();
+        let (token, witness) = setup(&root);
+        let before = std::fs::read(&witness).unwrap();
+        let lock = root.join("run/server.lock");
+        for _ in 0..3 {
+            let server = Server::spawn_with(fake, &lock, &dist, &[("VALLY_TOKEN_PATH", token.as_os_str())]);
+            let base = format!("http://{}", server.addr().await);
+            let (status, body) = get(&base, "/api/symbols/005930").await;
+            let logs = server.stop().await;
+            assert_eq!((status, body["error"]["code"].as_str()), (502, Some("kiwoom_auth_failed")), "{name}: {body}\n{logs}");
+            assert!(body["error"]["message"].as_str().unwrap().contains("토큰 파일"), "{name}: {body}");
+            assert!(logs.contains(&token.display().to_string()), "{name}: 로그에 경로가 있다\n{logs}");
+        }
+        assert_eq!(fake.requests(), 0, "{name}: {:?}", fake.api_ids());
+        assert_eq!(std::fs::read(&witness).unwrap(), before, "{name}: 고치지 않고 그대로 둔다");
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_unreadable_token_file_issues_nothing_across_restarts_and_is_left_as_is() {
+    let parent_is_a_file: Setup = Box::new(|root: &Path| {
+        let blocker = root.join("blocker");
+        std::fs::write(&blocker, "not a directory").unwrap();
+        (blocker.join("token.json"), blocker)
+    });
+    let cases = vec![("빈 파일", with_contents("")), ("깨진 JSON", with_contents("{\"token\": ")), ("부모가 일반 파일", parent_is_a_file)];
+    assert_never_issues(&FakeKiwoom::start().await, cases).await;
 }
