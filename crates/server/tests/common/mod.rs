@@ -30,6 +30,7 @@ pub struct Seen {
     pub token_bodies: Mutex<Vec<Value>>,
     pub overrides: Mutex<std::collections::HashMap<String, (u16, Value)>>,
     pub rejected_tokens: Mutex<Vec<String>>,
+    pub delays: Mutex<std::collections::HashMap<String, Duration>>,
 }
 
 pub struct FakeKiwoom {
@@ -57,6 +58,10 @@ impl FakeKiwoom {
 
     pub fn respond_with(&self, api_id: &str, status: u16, body: Value) {
         self.seen.overrides.lock().unwrap().insert(api_id.to_owned(), (status, body));
+    }
+
+    pub fn delay(&self, api_id: &str, by: Duration) {
+        self.seen.delays.lock().unwrap().insert(api_id.to_owned(), by);
     }
 
     pub fn reject_token(&self, token: &str) {
@@ -88,6 +93,10 @@ async fn handle(State(seen): State<Arc<Seen>>, headers: HeaderMap, body: String)
     seen.api_ids.lock().unwrap().push(api_id.clone());
     seen.authorizations.lock().unwrap().push(h("authorization"));
     let continuation = h("cont-yn") == "Y";
+    let delay = seen.delays.lock().unwrap().get(&api_id).copied();
+    if let Some(by) = delay {
+        tokio::time::sleep(by).await;
+    }
     if let Some((status, body)) = seen.overrides.lock().unwrap().get(&api_id).cloned() {
         let mut resp = (StatusCode::from_u16(status).unwrap(), body.to_string()).into_response();
         resp.headers_mut().insert("content-type", "application/json;charset=UTF-8".parse().unwrap());

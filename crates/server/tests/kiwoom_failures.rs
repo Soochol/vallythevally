@@ -98,3 +98,23 @@ async fn kiwoom_failure_messages_and_bodies_never_reach_logs_or_the_browser() {
         }
     }
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_request_already_waiting_for_the_symbol_list_ends_when_the_list_path_stops() {
+    let fake = FakeKiwoom::start().await;
+    fake.delay("ka10099", Duration::from_secs(1));
+    fake.respond_with("ka10099", 200, json!({}));
+    let tmp = tempfile::tempdir().unwrap();
+    let server = Server::spawn(&fake, &tmp.path().join("run/server.lock"), &static_dir(tmp.path()));
+    let base = format!("http://{}", server.addr().await);
+    let client = reqwest::Client::new();
+
+    let started = std::time::Instant::now();
+    let waiting = get(&client, &base, "/api/symbols/005930").await;
+    let waited = started.elapsed();
+    let after = get(&client, &base, "/api/symbols/005930").await;
+    server.stop().await;
+    assert!(waited < Duration::from_secs(5), "목록 대기 10초를 다 채우지 않는다: {waited:?}");
+    assert_eq!(waiting, after, "먼저 기다리던 요청도 같은 원인으로 끝난다");
+    assert_eq!(fake.api_ids().iter().filter(|id| *id == "ka10099").count(), 1);
+}
