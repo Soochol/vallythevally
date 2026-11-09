@@ -405,6 +405,7 @@ pub fn judge(api_id: ApiId, status: u16, body: &str) -> Result<(), Failure> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
 
     fn fixture(name: &str) -> String {
         let path = format!("{}/tests/fixtures/kiwoom/{name}.json", env!("CARGO_MANIFEST_DIR"));
@@ -565,6 +566,20 @@ mod tests {
         assert_eq!(judge(ApiId::Ka10099, 200, r#"{"return_code": "0000", "list": []}"#), Ok(()));
         assert_eq!(category(ApiId::Ka10099, 200, r#"{"return_code": 0, "return_msg": "실패[8050:x]"}"#), Some(AuthBlocked), "상위 0이어도 실패 상세가 이긴다");
         assert_eq!(category(ApiId::Ka10099, 204, ""), Some(Unknown));
+    }
+
+    #[test]
+    fn a_return_message_that_is_not_a_string_is_never_success() {
+        for msg in [json!(["[8050:blocked]"]), json!({"detail": "[8050:blocked]"}), json!(42), json!(false)] {
+            let body = json!({"return_code": 0, "return_msg": msg, "list": []}).to_string();
+            assert_eq!(category(ApiId::Ka10099, 200, &body), Some(Protocol), "{msg}");
+            assert_eq!(category(ApiId::Ka10099, 429, &body), Some(Protocol), "{msg}: 429여도 형식 오류가 이긴다");
+        }
+        for msg in [json!(null), json!("정상")] {
+            let body = json!({"return_code": 0, "return_msg": msg, "list": []}).to_string();
+            assert_eq!(judge(ApiId::Ka10099, 200, &body).map(|_| ()), Ok(()), "{msg}");
+        }
+        assert_eq!(judge(ApiId::Ka10099, 200, r#"{"return_code": 0, "list": []}"#).map(|_| ()), Ok(()), "메시지가 없어도 된다");
     }
 
     #[test]
