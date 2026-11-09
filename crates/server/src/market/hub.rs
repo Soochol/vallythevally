@@ -1268,4 +1268,30 @@ mod tests {
         assert!(gap_overlaps_trading(d(9, 21, 0, 0), d(10, 9, 0, 0)), "다음 날 장중");
         assert!(!gap_overlaps_trading(d(9, 21, 0, 0), d(10, 7, 0, 0)));
     }
+
+    #[tokio::test(start_paused = true)]
+    async fn rereview_dropped_only_tick_is_recovered_without_a_later_tick_in_its_minute() {
+        let mut chart = Chart::default();
+        chart.set(at(8, 59, 0), [90, 90, 90, 90, 1]);
+        let h = harness(at(9, 0, 5), chart, Duration::from_secs(3));
+        live(&h).await;
+        let (conn, out) = connect(&h).await;
+        h.hub.subscribe(conn, sub("a"), samsung());
+        settle().await;
+        h.events.send(trade(&h, (9, 0, 7), 100, 7, Some(Exchange::Krx))).await.unwrap();
+        tokio::time::sleep(Duration::from_secs(8)).await;
+        h.chart.lock().unwrap().set(at(9, 0, 0), [100, 100, 100, 100, 7]);
+        h.clock.sleep_until(at(9, 1, 3)).await;
+        h.events.send(trade(&h, (9, 1, 3), 110, 3, Some(Exchange::Krx))).await.unwrap();
+        h.clock.sleep_until(at(9, 2, 40)).await;
+        settle().await;
+        let snap = h.hub.snapshot(samsung()).await.unwrap();
+        let page = h.bars.page(samsung(), Some(at(9, 1, 0)), 1).await.unwrap();
+        println!("dropped-only now={} snapshot={snap:?} messages={:?} historical_page={:?}", h.clock.now(), out.take(true).messages, page.bars);
+        let explicit_refresh = h.bars.page(samsung(), None, 10).await.unwrap();
+        let upstream = explicit_refresh.bars.iter().find(|b| b.bucket.start() == at(9, 0, 0));
+        println!("explicit latest-page refresh finally fetches available upstream missing minute: {upstream:?}");
+        assert_eq!(upstream.map(|b| b.ohlcv.volume().0), Some(7), "fake upstream really has the missing minute; it is only automatic recovery that is absent");
+        assert_eq!(page.bars.last().map(|b| (b.bucket.start(), b.ohlcv.volume().0)), Some((at(9, 0, 0), 7)), "the observed dropped minute must be fetched and restored even when its next live tick is in a later minute");
+    }
 }

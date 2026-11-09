@@ -793,6 +793,7 @@ mod tests {
         Code(u32),
         Silent,
         OkThenBye,
+        OkThenFlood,
         Refuse,
     }
 
@@ -826,6 +827,12 @@ mod tests {
                             let ack = |code: u32| Message::Text(serde_json::json!({"trnm": trnm, "return_code": code, "return_msg": ""}).to_string().into());
                             match script(conn, &trnm, *nth) {
                                 Reply::Ok => ws.send(ack(0)).await.unwrap(),
+                                Reply::OkThenFlood => {
+                                    ws.send(ack(0)).await.unwrap();
+                                    let item = serde_json::json!({"type":"0B", "name":"주식체결", "item":"005930_AL", "values":trade_0b("093001", 71000, 1, 100, "KRX")});
+                                    let frame = serde_json::json!({"trnm":"REAL", "data":vec![item; EVENT_BUFFER]});
+                                    ws.send(Message::Text(frame.to_string().into())).await.unwrap();
+                                }
                                 Reply::Code(code) => ws.send(ack(code)).await.unwrap(),
                                 Reply::Silent | Reply::Refuse => {}
                                 Reply::OkThenBye => {
@@ -987,5 +994,38 @@ mod tests {
         assert_eq!(next(&mut events).await, StreamEvent::Halted);
         assert_eq!(peer.logins(), 5, "07:50 같은 단절과 접속 실패 뒤에도 거절된 REG에 다시 구성 한 번이 남아 있다");
     }
-}
 
+    #[tokio::test]
+    async fn down_delivery_delay_does_not_reset_the_control_budget() {
+        let fake = FakeKiwoom::start().await;
+        let peer = Peer::start(|conn, trnm, nth| match (conn, trnm, nth) {
+            (0, "REG", _) | (1, "REG", 2) => Reply::Code(105118),
+            (1, "REG", 1) => Reply::OkThenFlood,
+            _ => Reply::Ok,
+        }).await;
+        let (stream, desired) = KiwoomStream::detached();
+        let (events_tx, mut events) = mpsc::channel(EVENT_BUFFER);
+        let session = Session { url: peer.url.clone(), rest: rest(&fake), clock: Clock::system(), timings: Timings::default(), desired, events: events_tx, budget: TokenBudget::Fresh, rebuild: ControlBudget::Fresh, dropped: Dropped::default() };
+        let sender = session.events.clone();
+        stream.set_desired([samsung()].into());
+        tokio::spawn(session.run());
+        assert!(matches!(next(&mut events).await, StreamEvent::Live { .. }));
+        assert_eq!(peer.logins(), 2, "one rebuild already spent");
+        let live_at = Instant::now();
+        until("4096 real WS ticks fill the production event queue", || sender.capacity() == 0).await;
+        stream.set_desired([samsung(), kospi()].into());
+        until("second capacity rejection", || peer.controls(1).len() == 3).await;
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert!(live_at.elapsed() < Duration::from_secs(1));
+        assert_eq!(sender.capacity(), 0);
+        tokio::time::pause();
+        tokio::time::advance(Duration::from_secs(61)).await;
+        tokio::time::resume();
+        for _ in 0..EVENT_BUFFER { assert!(matches!(events.recv().await.unwrap(), StreamEvent::Tick { .. })); }
+        assert!(matches!(next(&mut events).await, StreamEvent::Down { .. }));
+        let actual = next(&mut events).await;
+        println!("second control failure at <1s Live; Down delivery stalled 61s; actual={actual:?}, LOGIN={}", peer.logins());
+        assert_eq!(actual, StreamEvent::Halted, "time after connection close is not stable Live time");
+        assert_eq!(peer.logins(), 2);
+    }
+}
