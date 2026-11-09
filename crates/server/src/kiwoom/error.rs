@@ -172,11 +172,20 @@ pub enum Retry {
     RefreshTokenOnce,
 }
 
+/// 재시도를 다 쓴 뒤 무엇을 막는가.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Stop {
+    /// 이 요청만 실패한다.
     Nothing,
-    Path,
+    /// 조회 전체의 공유 관문을 30초 닫는다. 그 뒤 확인 요청 하나만 나간다.
+    Gate,
+    /// 같은 자격증명의 조회 전체를 발급 간격(10분)만큼 닫는다. 확인도 같은 범주로 실패하면 전부 멈춘다.
+    AuthGate,
+    /// 발급 간격(10분)이 지난 뒤 다음 발급을 허락한다.
+    IssueInterval,
+    /// 처음에는 발급 간격을 기다리고, 두 번째에는 그 경로를 멈춘다.
     PathOnRepeat,
+    Path,
     Everything,
 }
 
@@ -184,30 +193,30 @@ pub enum Stop {
 pub struct Policy {
     pub retry: Retry,
     pub stop: Stop,
-    pub outer_retry: bool,
 }
 
-const fn p(retry: Retry, stop: Stop, outer_retry: bool) -> Policy {
-    Policy { retry, stop, outer_retry }
+const fn p(retry: Retry, stop: Stop) -> Policy {
+    Policy { retry, stop }
 }
 
 pub const fn policy(phase: Phase, category: Category) -> Policy {
     use Retry::*;
     use Stop::*;
     match (phase, category) {
-        (_, AuthBlocked) => p(Never, Everything, false),
-        (Phase::Market, RateLimit) => p(AfterPause, Nothing, true),
-        (Phase::Market, Transient) => p(Backoff, Nothing, true),
-        (Phase::Market, TokenInvalid) => p(RefreshTokenOnce, Nothing, false),
-        (Phase::Market, AuthIndeterminate | InvalidRequest | SymbolMismatch | BatchLimit) => p(Never, Nothing, false),
-        (Phase::Market, Unsupported | Unknown | Protocol) => p(Never, Path, false),
-        (Phase::Market, RealtimeCapacity | ControlRejected | SubscriptionMismatch) => p(Never, Path, false),
-        (Phase::Issue, RateLimit | Transient) => p(Never, Nothing, true),
-        (Phase::Issue, TokenInvalid | AuthIndeterminate) => p(Never, PathOnRepeat, false),
+        (_, AuthBlocked) => p(Never, Everything),
+        (Phase::Market, RateLimit) => p(AfterPause, Gate),
+        (Phase::Market, Transient) => p(Backoff, Gate),
+        (Phase::Market, TokenInvalid) => p(RefreshTokenOnce, Nothing),
+        (Phase::Market, AuthIndeterminate) => p(Never, AuthGate),
+        (Phase::Market, InvalidRequest | SymbolMismatch | BatchLimit) => p(Never, Nothing),
+        (Phase::Market, Unsupported | Unknown | Protocol) => p(Never, Path),
+        (Phase::Market, RealtimeCapacity | ControlRejected | SubscriptionMismatch) => p(Never, Path),
+        (Phase::Issue, RateLimit | Transient) => p(Never, IssueInterval),
+        (Phase::Issue, TokenInvalid | AuthIndeterminate) => p(Never, PathOnRepeat),
         (
             Phase::Issue,
             InvalidRequest | SymbolMismatch | BatchLimit | Unsupported | Unknown | Protocol | RealtimeCapacity | ControlRejected | SubscriptionMismatch,
-        ) => p(Never, Path, false),
+        ) => p(Never, Path),
     }
 }
 
@@ -691,15 +700,19 @@ mod tests {
     fn retry_and_stop_by_category() {
         for phase in [Phase::Issue, Phase::Market] {
             for c in [AuthBlocked, Unknown, Protocol, AuthIndeterminate, InvalidRequest] {
-                let pol = policy(phase, c);
-                assert_eq!((pol.retry, pol.outer_retry), (Retry::Never, false), "{phase:?} {c:?}");
+                assert_eq!(policy(phase, c).retry, Retry::Never, "{phase:?} {c:?}");
             }
             assert_eq!(policy(phase, AuthBlocked).stop, Stop::Everything);
         }
         assert_eq!(policy(Phase::Market, Unknown).stop, Stop::Path);
         assert_eq!(policy(Phase::Market, Protocol).stop, Stop::Path);
+        assert_eq!(policy(Phase::Market, SymbolMismatch).stop, Stop::Nothing, "다른 종목은 계속 받는다");
+        assert_eq!(policy(Phase::Market, RateLimit).stop, Stop::Gate);
+        assert_eq!(policy(Phase::Market, Transient).stop, Stop::Gate);
+        assert_eq!(policy(Phase::Market, AuthIndeterminate).stop, Stop::AuthGate);
         assert_eq!(policy(Phase::Issue, Unknown).stop, Stop::Path);
         assert_eq!(policy(Phase::Issue, AuthIndeterminate).stop, Stop::PathOnRepeat);
+        assert_eq!(policy(Phase::Issue, Transient).stop, Stop::IssueInterval);
         assert_eq!(policy(Phase::Market, TokenInvalid).retry, Retry::RefreshTokenOnce);
         assert_eq!(policy(Phase::Issue, Transient).retry, Retry::Never, "발급은 일반 재시도를 쓰지 않는다");
     }

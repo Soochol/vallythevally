@@ -59,15 +59,15 @@ impl fmt::Display for BarError {
 
 impl From<KiwoomError> for BarError {
     fn from(e: KiwoomError) -> Self {
-        match &e {
-            KiwoomError::Failed(f) => match f.surface() {
+        match e.failure() {
+            Some(f) => match f.surface() {
                 Surface::Unavailable => BarError::Unavailable(e.to_string()),
                 Surface::AuthFailed => BarError::AuthFailed(e.to_string()),
                 Surface::UnknownSymbol => BarError::UnknownSymbol,
                 Surface::Internal => BarError::Internal(e.to_string()),
             },
-            KiwoomError::IssueTooSoon { .. } => BarError::TokenWait(e.to_string()),
-            KiwoomError::TokenFile(_) => BarError::TokenFile(e.to_string()),
+            None if matches!(e, KiwoomError::TokenFile(_)) => BarError::TokenFile(e.to_string()),
+            None => BarError::TokenWait(e.to_string()),
         }
     }
 }
