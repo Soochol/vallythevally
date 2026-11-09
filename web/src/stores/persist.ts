@@ -4,7 +4,6 @@ import type { SaveState } from "../persist/saver";
 export const SAVE_TARGETS = ["layout", "ui", "watchlist"] as const;
 export type SaveTarget = (typeof SAVE_TARGETS)[number];
 
-/** 첫 화면을 열기까지. `offline`이면 서버에 닿지 못해 기본 화면으로 열었고 저장하지 않는다. */
 export type BootPhase = { kind: "restoring" } | { kind: "ready" } | { kind: "offline"; message: string };
 
 interface PersistState {

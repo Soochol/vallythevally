@@ -25,16 +25,11 @@ function paintTheme(theme: Theme) {
   }
 }
 
-/** 테마가 바뀌면 문서와 localStorage에 반영한다. */
 function followTheme() {
   paintTheme(useUiStore.getState().prefs.theme);
   useUiStore.subscribe((s, prev) => s.prefs.theme !== prev.prefs.theme && paintTheme(s.prefs.theme));
 }
 
-/**
- * 첫 화면을 서버에서 되살리고 자동 저장을 켠다. 페이지마다 한 번, React 밖에서 부른다.
- * 끝날 때까지 `phase`는 `restoring`이고 화면은 차트를 그리지 않는다.
- */
 export async function boot(queryClient: QueryClient) {
   const { setPhase } = usePersistStore.getState();
   const toast = (text: string) => useSelectionStore.getState().showToast(text);
@@ -44,7 +39,6 @@ export async function boot(queryClient: QueryClient) {
       layouts: () => fetchLayouts(),
       layout: (id) => fetchLayout(id),
       watchlist: () => fetchWatchlist(),
-      // 칸이 곧 같은 키로 종목 정보를 쓴다. 복원을 오래 붙잡지 않도록 다시 묻지 않는다.
       symbolInfo: (code) =>
         queryClient.fetchQuery({
           queryKey: ["symbol", code],
@@ -58,7 +52,6 @@ export async function boot(queryClient: QueryClient) {
     useUiStore.getState().load(restored.ui.prefs, restored.ui.extra);
     useWatchlistStore.getState().load(restored.watchlist);
     followTheme();
-    // 서버가 이미 가진 것보다 오래된 미저장 본문은 할 일을 마쳤다. 되살린 본문은 아래 changed()가 새 revision으로 다시 남긴다.
     for (const target of SAVE_TARGETS) clearUnsaved(target, restored.serverRevisions[target]);
     const autosave = startAutosave({ put: (path, json, o) => sendJson("PUT", path, json, o), toast, revisions: restored.revisions });
     if (restored.layoutDirty) autosave.savers.layout.changed();

@@ -14,7 +14,6 @@ import { ArrowIcon, ChevronRightIcon, CloseIcon, PlusIcon } from "../icons";
 const DIR_CLASS = { up: "text-up", down: "text-down", flat: "text-text-2" } as const;
 const COLS = "grid grid-cols-[minmax(0,1fr)_76px_60px] gap-1 max-md:grid-cols-[minmax(0,1fr)_96px_72px]";
 
-/** 데스크톱 오른쪽 관심종목(frontend.md §2.1). 264px, 머리의 `›`나 Alt+W로 28px 띠까지 접는다. */
 export function WatchPanel() {
   const collapsed = useUiStore((s) => s.prefs.watchCollapsed);
   const toggle = useUiStore((s) => s.toggleWatch);
@@ -40,7 +39,6 @@ export function WatchPanel() {
   );
 }
 
-/** 휴대폰 `관심종목` 탭의 전체 화면 목록(frontend.md §4). 순서와 삭제는 `편집`에서 한다. */
 export function PhoneWatch() {
   const shown = useSelectionStore((s) => s.phoneTab === "watch");
   const [editing, setEditing] = useState(false);
@@ -90,7 +88,6 @@ function WatchList({ variant, editing }: { variant: Variant; editing: boolean })
   const list = useRef<HTMLUListElement>(null);
   const [focusCode, setFocusCode] = useState<SymbolCode | null>(null);
 
-  // Alt+↑/↓로 옮긴 행에 초점을 다시 둔다.
   useEffect(() => {
     if (focusCode === null) return;
     list.current?.querySelector<HTMLElement>(`[data-code="${CSS.escape(focusCode)}"] [data-main]`)?.focus();

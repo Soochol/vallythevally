@@ -74,7 +74,6 @@ export const PlusIcon = ({ size = 16 }: P) => (
     <path d="M12 5v14M5 12h14" />
   </Icon>
 );
-/** 오른쪽(›). 접힌 띠에서는 뒤집어 왼쪽(‹)으로 쓴다. */
 export const ChevronRightIcon = ({ size = 16, flip = false }: P & { flip?: boolean }) => (
   <Icon size={size}>
     <path d={flip ? "m14.5 6-6 6 6 6" : "m9.5 6 6 6-6 6"} />

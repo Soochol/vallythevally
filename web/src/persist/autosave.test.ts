@@ -17,7 +17,6 @@ beforeEach(() => {
   vi.useFakeTimers();
   puts = [];
   toasts = [];
-  // 복원이 하는 일: 서버 값을 스토어에 싣는다.
   useLayoutStore.getState().load(DEFAULT_LAYOUT);
   useUiStore.getState().load({ ...DEFAULT_UI_PREFS, lastLayoutId: DEFAULT_LAYOUT.id, recentSymbols: ["IDX:001"] }, { phone: 1 });
   useWatchlistStore.getState().load(["005930"]);

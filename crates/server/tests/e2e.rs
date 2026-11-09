@@ -106,7 +106,6 @@ async fn put(client: &reqwest::Client, base: &str, path: &str, body: &Value) -> 
     (status, serde_json::from_str(&resp.text().await.unwrap()).unwrap())
 }
 
-/// 새로고침이나 서버를 다시 켠 뒤에도 마지막 화면이 돌아온다(#3). 서버는 SIGKILL로 끝낸다.
 #[tokio::test(flavor = "multi_thread")]
 async fn user_data_survives_a_restart_and_quotes_come_from_kiwoom() {
     let fake = FakeKiwoom::start().await;

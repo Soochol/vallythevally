@@ -1,4 +1,3 @@
-//! 사용자 자료 저장소(backend.md §7.2). 입력은 경계(http)에서 검사를 마친 값이다.
 
 use sqlx::Row;
 
@@ -8,9 +7,7 @@ use crate::db::{AppDb, DbError};
 #[derive(Debug)]
 pub enum StoreError {
     NotFound,
-    /// 같은 이름의 레이아웃, 마지막 레이아웃 지우기.
     Conflict(String),
-    /// 보낸 revision이 저장된 것(안의 값)보다 크지 않다. 저장하지 않았다.
     Stale(Revision),
     Db(DbError),
 }
@@ -21,12 +18,10 @@ impl From<sqlx::Error> for StoreError {
     }
 }
 
-/// 저장된 텍스트를 계약 타입으로 되읽지 못했다. 마이그레이션의 CHECK를 지나 들어온 값이라 버그다.
 fn corrupt(what: &str, e: impl std::fmt::Display) -> StoreError {
     StoreError::Db(DbError(format!("저장된 {what}를 읽지 못했습니다: {e}")))
 }
 
-/// 계약 enum의 직렬화 이름("1", "2h", "D", "nxt" …). DB에도 같은 문자열을 쓴다.
 fn wire_name<T: serde::Serialize>(v: &T) -> String {
     match serde_json::to_value(v) {
         Ok(serde_json::Value::String(s)) => s,
@@ -38,7 +33,6 @@ fn from_wire_name<T: serde::de::DeserializeOwned>(what: &str, s: String) -> Resu
     serde_json::from_value(serde_json::Value::String(s)).map_err(|e| corrupt(what, e))
 }
 
-/// 보낸 revision이 저장된 것보다 커야 저장한다(R2). 쓰기 트랜잭션 안에서 부른다.
 fn check_newer(stored: Option<i64>, sent: Revision) -> Result<(), StoreError> {
     match stored {
         Some(r) if sent.0 <= r => Err(StoreError::Stale(Revision(r))),
@@ -119,8 +113,6 @@ pub async fn get_layout(db: &AppDb, id: &str) -> Result<Layout, StoreError> {
     })
 }
 
-/// 없으면 만들고 있으면 바꾼다. 칸은 모두 지우고 다시 넣는다. 새 레이아웃은 목록의 맨 끝에 놓인다.
-/// 있는 레이아웃은 저장된 것보다 큰 revision일 때만 바꾼다.
 pub async fn put_layout(db: &AppDb, input: &LayoutInput, now: UnixSeconds) -> Result<Layout, StoreError> {
     let mut tx = db.begin_write().await?;
     let stored: Option<i64> = sqlx::query_scalar("SELECT revision FROM layouts WHERE id = ?").bind(&input.id).fetch_optional(&mut *tx).await?;
@@ -178,7 +170,6 @@ pub async fn put_layout(db: &AppDb, input: &LayoutInput, now: UnixSeconds) -> Re
     })
 }
 
-/// 마지막 레이아웃은 지울 수 없다(레이아웃이 0개인 상태는 없다).
 pub async fn delete_layout(db: &AppDb, id: &str) -> Result<(), StoreError> {
     let mut tx = db.begin_write().await?;
     let exists: Option<i64> = sqlx::query_scalar("SELECT 1 FROM layouts WHERE id = ?").bind(id).fetch_optional(&mut *tx).await?;
@@ -194,7 +185,6 @@ pub async fn delete_layout(db: &AppDb, id: &str) -> Result<(), StoreError> {
     Ok(())
 }
 
-/// `revision` 키는 열에 따로 두고, 돌려줄 때 다시 넣는다.
 pub async fn get_ui_state(db: &AppDb) -> Result<UiState, StoreError> {
     let row = sqlx::query("SELECT state, revision FROM ui_state WHERE singleton = 1").fetch_one(db.read()).await?;
     let mut state: UiState = serde_json::from_str(row.get("state")).map_err(|e| corrupt("ui_state", e))?;
@@ -202,7 +192,6 @@ pub async fn get_ui_state(db: &AppDb) -> Result<UiState, StoreError> {
     Ok(state)
 }
 
-/// `state`의 `revision` 키는 저장하지 않는다. 순서는 `revision` 인자로 본다.
 pub async fn put_ui_state(db: &AppDb, state: &UiState, revision: Revision) -> Result<(), StoreError> {
     let mut fields = state.0.clone();
     fields.remove("revision");
@@ -320,7 +309,6 @@ mod tests {
         assert!(matches!(get_layout(&db, "L2").await, Err(StoreError::NotFound)), "실패한 트랜잭션은 레이아웃도 남기지 않는다");
     }
 
-    /// R2: 늦게 도착한 옛 PUT(revision이 저장된 것 이하)은 새 값을 덮지 못한다. 같은 revision을 다시 보내도 거절한다.
     #[sqlx::test(migrations = "./migrations")]
     async fn older_or_equal_revisions_never_overwrite(_: SqlitePoolOptions, opts: SqliteConnectOptions) {
         let db = db(opts).await;
@@ -345,7 +333,6 @@ mod tests {
         assert_eq!(serde_json::to_value(read).unwrap(), json!({"lastLayoutId": null, "theme": "light", "revision": 20}));
     }
 
-    /// R3: 레이아웃 행과 칸을 서로 다른 커밋에서 읽으면 `2v`에 칸 1개 같은, 저장된 적 없는 조합이 나온다.
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn get_layout_never_mixes_two_commits() {
         let tmp = tempfile::tempdir().unwrap();

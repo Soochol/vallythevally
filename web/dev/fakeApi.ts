@@ -2,7 +2,6 @@
 // 999999는 어디서나 unknown_symbol이다. 555555(조회실패시험)의 봉은 kiwoom_unavailable,
 // 888888(상장폐지시험)은 검색에는 나오지만 봉은 unknown_symbol로 답한다(칸 오류 화면 확인용).
 // 005930은 NXT에서 거래되고 005935는 거래되지 않는다(NXT를 주면 400).
-// 사용자 자료(레이아웃, UiState, 관심종목)는 dev 서버 메모리에만 있다(fakeUserData.ts).
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { Plugin } from "vite";
 import type { ApiError } from "../src/api/generated/ApiError.ts";

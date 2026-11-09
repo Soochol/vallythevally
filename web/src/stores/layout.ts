@@ -8,16 +8,10 @@ import { venueFor, type VenueTarget } from "../lib/venue";
 
 export type Slot = Cell["slot"];
 
-/** 칸 하나. 계약의 `Cell`에서 chartSettings만 해석해 둔 것(frontend.md §5.5). */
 export type CellState = Omit<Cell, "chartSettings"> & { chartSettings: ChartSettings };
 
-/**
- * 서버 `Layout`의 편집 사본(frontend.md §5.3). `updatedAt`은 서버가 정하고, `revision`(저장 순서 번호)은 자동 저장이 보낼 때 붙이므로
- * 들고 있지 않는다.
- */
 export type EditableLayout = Omit<Layout, "cells" | "updatedAt" | "revision"> & { cells: CellState[] };
 
-/** 마이그레이션이 만드는 기본 레이아웃(backend.md §7.2). 서버에 닿지 못할 때도 이것으로 연다. */
 export const DEFAULT_LAYOUT_ID = "01900000-0000-7000-8000-000000000001";
 export const DEFAULT_LAYOUT: EditableLayout = {
   id: DEFAULT_LAYOUT_ID,
@@ -29,9 +23,7 @@ export const DEFAULT_LAYOUT: EditableLayout = {
 
 interface LayoutState {
   layout: EditableLayout;
-  /** 편집할 때마다 1 늘어난다. `load`는 늘리지 않는다. 자동 저장은 이 값만 지켜본다. */
   revision: number;
-  /** 서버 값으로 바꾼다. 저장을 부르지 않는다. */
   load(layout: EditableLayout): void;
   setSymbol(slot: Slot, target: VenueTarget, venue?: Venue): void;
   setVenue(slot: Slot, venue: Venue): void;
@@ -41,7 +33,6 @@ interface LayoutState {
 }
 
 export const useLayoutStore = create<LayoutState>()((set) => {
-  /** f가 칸을 그대로 돌려주면 아무것도 바꾸지 않는다(저장도 하지 않는다). */
   const patchCell = (slot: Slot, f: (c: CellState) => CellState) =>
     set((s) => {
       const cells = s.layout.cells.map((c) => (c.slot === slot ? f(c) : c));

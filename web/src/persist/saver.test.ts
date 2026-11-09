@@ -5,7 +5,6 @@ import { createSaver, type SaveState, type SaverOptions, type Unsaved } from "./
 beforeEach(() => vi.useFakeTimers());
 afterEach(() => vi.useRealTimers());
 
-/** 값 하나를 저장하는 saver. send는 기본으로 성공한다. 보낸 본문과 지나간 상태, 미저장 본문을 모은다. */
 type Value = { n: number; pad?: string };
 type Send = SaverOptions<Value>["send"];
 
@@ -42,7 +41,6 @@ function setup({ send: sendImpl, revision = 100 }: { send?: Send; revision?: num
     value = v;
     saver.changed();
   };
-  /** 보낸 본문들의 n. */
   const ns = () => sent.map((s) => (JSON.parse(s.json) as Value).n);
   const revisions = () => sent.map((s) => (JSON.parse(s.json) as { revision: number }).revision);
   return { saver, edit, send, sent, ns, revisions, states, state: () => last, unsaved: () => unsaved };
@@ -205,7 +203,6 @@ test("R2: 앞 저장이 진행 중일 때 탭이 숨으면 최신 편집을 곧�
   expect(t.sent[1]!.keepalive).toBe(true);
   const [first, second] = t.revisions();
   expect(second).toBeGreaterThan(first!);
-  // 응답이 거꾸로 와도(나중 것 먼저) 저장됨으로 끝나고 다시 보내지 않는다.
   pending[1]!();
   await vi.advanceTimersByTimeAsync(0);
   pending[0]!();
@@ -224,10 +221,8 @@ test("R2: 미저장 본문은 편집 즉시 남고, 서버가 받았을 때만 �
   await vi.advanceTimersByTimeAsync(1000);
   t.edit({ n: 2 });
   expect(JSON.parse(t.unsaved()!.body)).toMatchObject({ n: 2 });
-  // 탭이 닫혀 응답 처리기가 끝내 돌지 않아도, 최신 편집은 미저장 본문으로 남아 있다.
   pending[0]!(true);
   await vi.advanceTimersByTimeAsync(0);
-  // 앞 요청의 성공은 더 새 본문을 지우지 않는다.
   expect(JSON.parse(t.unsaved()!.body)).toMatchObject({ n: 2 });
   await vi.advanceTimersByTimeAsync(1000);
   pending[1]!(false);

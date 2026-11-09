@@ -35,10 +35,6 @@ const PRICE_SCALES = ["normal", "log"] as const satisfies readonly PriceScale[];
 const isOneOf = <T extends string>(xs: readonly T[], x: unknown): x is T => typeof x === "string" && (xs as readonly string[]).includes(x);
 const isEmptyArray = (x: unknown): x is never[] => Array.isArray(x) && x.length === 0;
 
-/**
- * 서버에서 받은 `Cell.chartSettings`를 한 번 검사한다(frontend.md §5.5). 모양이 틀리면 기본 설정을 돌려준다.
- * 지표와 패널은 #5 전이라 빈 배열만 받는다.
- */
 export function parseChartSettings(raw: unknown): ChartSettings {
   const parsed = readChartSettings(raw);
   if (parsed) return parsed;

@@ -14,20 +14,15 @@ const DEBOUNCE_MS = 1000;
 export const RECENT_CLEARED = "최근 본 종목 기록을 지웠습니다";
 
 export interface AutosaveDeps {
-  /** 이미 직렬화한 본문을 PUT한다. */
   put(path: string, json: string, opts: { keepalive: boolean }): Promise<unknown>;
   toast(text: string): void;
-  /** 자료마다 지금까지 쓴 가장 큰 revision(복원이 읽은 서버 값과 되살린 미저장 본문 중 큰 것). */
   revisions: Record<SaveTarget, number>;
-  /** 미저장 본문을 둘 곳. 기본은 localStorage(`persist/unsaved.ts`). */
   unsaved?: (target: SaveTarget) => SaverOptions<object>["unsaved"];
 }
 
 export interface Autosave {
   savers: Record<SaveTarget, Saver>;
-  /** 실패한 저장을 다시 보낸다(상태 줄의 다시 시도 버튼). */
   retry(): void;
-  /** 보내지 못한 편집을 keepalive로 지금 보낸다(탭이 숨을 때). */
   flush(): void;
   stop(): void;
 }
@@ -38,10 +33,6 @@ export function retryFailedSaves() {
   active?.retry();
 }
 
-/**
- * 세 스토어의 편집(`revision`)을 지켜보고 자료마다 PUT으로 통째 저장한다(frontend.md §3.7).
- * 레이아웃과 UiState는 마지막 편집 1초 뒤, 관심종목은 곧바로 보낸다. 스토어의 `load`는 저장을 부르지 않는다.
- */
 export function startAutosave(deps: AutosaveDeps): Autosave {
   const setSave = usePersistStore.getState().setSave;
   const unsaved =
@@ -70,7 +61,6 @@ export function startAutosave(deps: AutosaveDeps): Autosave {
     },
     // 서버는 revision까지 담은 본문을 잰다. 가장 긴 revision으로 잰다.
     tooLarge: (v) => exceedsLimit({ ...v, revision: Number.MAX_SAFE_INTEGER }),
-    // 화면이 스스로 줄일 수 있는 것은 최근 본 종목뿐이다(frontend.md §3.7a).
     shrink: () => {
       const store = useUiStore.getState();
       if (store.prefs.recentSymbols.length === 0) return false;

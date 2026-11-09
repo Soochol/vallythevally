@@ -48,7 +48,6 @@ export function fetchSymbolInfo(code: SymbolCode, signal?: AbortSignal): Promise
 
 const QUOTES_REFETCH_MS = 60_000;
 
-/** 관심종목 현재가(#3은 REST 조회). 60초마다 다시 묻는다. 종목코드로 찾는 표를 돌려준다. */
 export function useQuotes(symbols: readonly SymbolCode[]) {
   return useQuery({
     queryKey: ["quotes", symbols.join(",")],
@@ -65,7 +64,6 @@ const symbolInfoQuery = (code: SymbolCode) => ({
   staleTime: Infinity,
 });
 
-/** 여러 종목의 정보. 받은 것만 순서대로 돌려준다(없는 종목과 받는 중인 종목은 빠진다). */
 export function useSymbolInfos(codes: readonly SymbolCode[]): SymbolInfo[] {
   return useQueries({
     queries: codes.map(symbolInfoQuery),

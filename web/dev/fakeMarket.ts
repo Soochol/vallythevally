@@ -336,8 +336,6 @@ export function search(raw: string): SymbolInfo[] {
     .map((x) => publicInfo(x.s));
 }
 
-// ---- 현재가(GET /api/quotes의 대역) ----
-/** 통합 일봉의 마지막 두 봉으로 만든 현재가. 숫자는 위의 무작위 걸음에서 나온 가짜 값이다. 봉을 못 주는 종목은 null. */
 export function quoteOf(s: FakeSymbol, nowMs: number): Quote | null {
   if (s.fail === "unknown_symbol") return null;
   const bars = seriesOf(s, s.kind === "index" ? null : "combined", "D", nowMs);

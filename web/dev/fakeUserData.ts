@@ -1,6 +1,3 @@
-// 가짜 API의 사용자 자료(dev·테스트 전용). 서버를 다시 켜면 처음 값으로 돌아간다.
-// 계약(backend.md §8.2)의 오류만 흉내 낸다: 없는 레이아웃 404, 64KB 넘는 UiState·chartSettings 413, 관심종목 중복 400,
-// 저장된 것보다 크지 않은 revision 409 stale_revision.
 import type { ApiErrorCode } from "../src/api/generated/ApiErrorCode.ts";
 import type { Layout } from "../src/api/generated/Layout.ts";
 import type { LayoutInput } from "../src/api/generated/LayoutInput.ts";

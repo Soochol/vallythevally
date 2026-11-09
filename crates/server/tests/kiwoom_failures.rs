@@ -21,7 +21,6 @@ async fn get(client: &reqwest::Client, base: &str, path: &str) -> (u16, Value) {
     (status, serde_json::from_str(&text).unwrap_or(Value::String(text)))
 }
 
-/// R5: 현재가(ka10095) 실패를 "봉 요청"으로 적지 않는다.
 #[tokio::test(flavor = "multi_thread")]
 async fn quote_failure_is_logged_as_a_quote_request() {
     let fake = FakeKiwoom::start().await;

@@ -228,7 +228,6 @@ pub struct StockQuote {
 }
 
 /// 빈 행(없는 코드, NXT 불가 종목의 `_NX`, kiwoom.md §12.4)과 통합(`_AL`)이 아닌 행은 뺀다.
-/// 읽을 수 없는 행 하나 때문에 목록 전체를 버리지 않는다. 경고만 남기고 뺀다.
 pub fn parse_quotes(body: StockQuotesResponse) -> Vec<StockQuote> {
     body.atn_stk_infr
         .iter()

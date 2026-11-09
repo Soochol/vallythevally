@@ -220,7 +220,6 @@ pub struct StockQuotes {
 impl StockQuotes {
     pub const MAX: usize = 100;
 
-    /// 비었거나 100개를 넘으면 None.
     pub fn new(codes: &[StockCode]) -> Option<Self> {
         (1..=Self::MAX).contains(&codes.len()).then(|| StockQuotes {
             stk_cd: codes.iter().map(|c| kiwoom_stock_code(*c, Venue::Combined)).collect::<Vec<_>>().join("|"),

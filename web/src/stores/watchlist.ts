@@ -2,10 +2,8 @@ import { create } from "zustand";
 import type { SymbolCode } from "../api/generated/SymbolCode";
 import { addSymbol, moveSymbol, moveSymbolBy, removeSymbol } from "../lib/watchlist";
 
-/** 관심종목 목록의 편집 사본(#3). 바뀌면 자동 저장이 곧바로 PUT한다(frontend.md §3.7). */
 interface WatchlistState {
   symbols: readonly SymbolCode[];
-  /** 편집할 때마다 1 늘어난다. `load`는 늘리지 않는다. */
   revision: number;
   load(symbols: readonly SymbolCode[]): void;
   add(code: SymbolCode): void;

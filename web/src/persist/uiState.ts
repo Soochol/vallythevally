@@ -5,13 +5,10 @@ export type Theme = UiState["theme"];
 
 export const MAX_RECENT = 10;
 
-/** `UiState`에서 이 화면이 쓰는 값(#3). 나머지 키는 `extra`로 들고 있다가 그대로 돌려보낸다(D10). */
 export interface UiPrefs {
   lastLayoutId: string | null;
   theme: Theme;
-  /** 데스크톱 관심종목을 28px 띠로 접었는가(frontend.md §2.1). */
   watchCollapsed: boolean;
-  /** 최근 본 종목. 최근 것 먼저, 최대 10개(frontend.md §3.1). */
   recentSymbols: SymbolCode[];
 }
 
@@ -21,16 +18,11 @@ export const DEFAULT_UI_PREFS: UiPrefs = { lastLayoutId: null, theme: "dark", wa
 
 const isStringArray = (x: unknown): x is string[] => Array.isArray(x) && x.every((s) => typeof s === "string");
 
-/**
- * 서버의 `UiState`를 해석한다. 틀린 값은 그 키만 기본값으로 바꾸고 콘솔에 남긴다.
- * 모르는 키는 `extra`에 그대로 둔다.
- */
 export function parseUiState(raw: unknown): { prefs: UiPrefs; extra: UiExtra } {
   if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
     console.warn("UiState가 객체가 아니어서 기본값으로 엽니다", raw);
     return { prefs: DEFAULT_UI_PREFS, extra: {} };
   }
-  // revision은 저장 순서 번호다(R2). 자동 저장이 보낼 때마다 새로 붙이므로 extra에 들고 있지 않는다.
   const { lastLayoutId, theme, watchCollapsed, recentSymbols, revision: _revision, ...extra } = raw as Record<string, unknown>;
   const bad: string[] = [];
   const pick = <T>(key: string, value: unknown, ok: (x: unknown) => x is T, fallback: T, missingOk = false): T => {
@@ -48,7 +40,6 @@ export function parseUiState(raw: unknown): { prefs: UiPrefs; extra: UiExtra } {
   return { prefs, extra };
 }
 
-/** 보낼 `UiState`(`revision`은 자동 저장이 붙인다). 모르는 키를 먼저 펼쳐, 이 화면이 아는 키가 이긴다. */
 export function toUiState(prefs: UiPrefs, extra: UiExtra): Omit<UiState, "revision"> {
   return { ...extra, ...prefs };
 }

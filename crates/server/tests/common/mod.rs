@@ -28,7 +28,6 @@ pub struct Seen {
     pub api_ids: Mutex<Vec<String>>,
     pub authorizations: Mutex<Vec<String>>,
     pub token_bodies: Mutex<Vec<Value>>,
-    /// api-id마다 고정 입력 대신 돌려줄 (HTTP 상태, 본문).
     pub overrides: Mutex<std::collections::HashMap<String, (u16, Value)>>,
 }
 
@@ -55,7 +54,6 @@ impl FakeKiwoom {
         format!("http://{}", self.addr)
     }
 
-    /// 이 api-id에는 앞으로 늘 이 응답을 준다.
     pub fn respond_with(&self, api_id: &str, status: u16, body: Value) {
         self.seen.overrides.lock().unwrap().insert(api_id.to_owned(), (status, body));
     }

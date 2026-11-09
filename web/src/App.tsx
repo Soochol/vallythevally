@@ -18,16 +18,11 @@ import { usePersistStore } from "./stores/persist";
 import { useSelectionStore } from "./stores/selection";
 import { useUiStore } from "./stores/ui";
 
-/**
- * 차트 화면. 서버에서 마지막 화면을 되살리기 전에는 그리지 않는다. 기본 칸(코스피)으로 먼저 봉을 받았다가
- * 곧바로 바꾸는 낭비와 깜박임을 막는다. 주소의 `?symbol=`도 되살린 뒤에 적용된다.
- */
 export function ChartRoute() {
   const restoring = usePersistStore((s) => s.phase.kind === "restoring");
   return restoring ? <div className="h-dvh bg-bg" aria-busy="true" aria-label="마지막 화면을 불러오는 중" /> : <ChartScreen />;
 }
 
-/** 데스크톱과 휴대폰이 같은 라우트를 쓰고 폭에 따라 껍데기만 바꾼다(frontend.md §5.1). */
 function ChartScreen() {
   const slot = useSelectionStore((s) => s.activeSlot);
   const cell = useCell(slot);

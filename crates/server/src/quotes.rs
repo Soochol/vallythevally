@@ -1,5 +1,4 @@
-//! 현재가(backend.md §8.2 "현재가"). 주식은 ka10095 통합(`_AL`) 시세, 지수는 지수 일봉의 최신 페이지에서 만든다.
-//! ka10095는 지수 코드를 받지 않는다.
+//! ka10095는 지수 코드를 받지 않는다. 그래서 지수 현재가는 지수 일봉의 최신 페이지에서 만든다.
 
 use std::collections::HashMap;
 
@@ -11,7 +10,6 @@ use crate::kiwoom::api::StockQuotes;
 use crate::kiwoom::rest::{KiwoomRest, MergeScope, Priority};
 use crate::kiwoom::wire::parse_quotes;
 
-/// 지수 현재가에 쓰는 봉: 마지막 봉과 그 앞 봉(기준가).
 const INDEX_BARS: usize = 2;
 
 /// `symbols`는 중복이 없어야 한다. 값을 얻은 종목만 요청 순서대로 돌려준다.
@@ -36,7 +34,6 @@ pub async fn quotes(rest: &KiwoomRest, bars: &BarService, symbols: &[Symbol]) ->
     Ok(symbols.iter().filter_map(|s| by_symbol.remove(s)).collect())
 }
 
-/// 마지막 봉(진행 중 봉이 있으면 그것)의 종가가 현재가, 그 앞 확정 봉의 종가가 기준가다. 봉이 둘 없으면 뺀다.
 async fn index_quote(bars: &BarService, code: IndexCode) -> Result<Option<(Symbol, api::Quote)>, BarError> {
     let key = SeriesKey { feed: Feed::Index(code), period: Period::Day };
     let page = match bars.page(key, None, INDEX_BARS).await {
@@ -52,7 +49,6 @@ async fn index_quote(bars: &BarService, code: IndexCode) -> Result<Option<(Symbo
     Ok(Some((symbol, quote(symbol, last.close().centi(), prev.close().centi(), last.volume().0, bucket.start().unix()))))
 }
 
-/// 등락은 정수 centi로 계산한다. 기준가가 0이면 등락률은 0이다.
 fn quote(symbol: Symbol, price_centi: u64, base_centi: u64, volume: u64, t: i64) -> api::Quote {
     let change_centi = price_centi as i64 - base_centi as i64;
     api::Quote {

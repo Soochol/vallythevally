@@ -237,7 +237,7 @@ pub struct Quote {
     pub source: QuoteSource,
 }
 
-/// 저장 순서 번호(R2). 브라우저가 저장할 때마다 늘려 보낸다(`max(지금 ms, 마지막 + 1)`).
+/// 저장 순서 번호. 브라우저가 저장할 때마다 늘려 보낸다(`max(지금 ms, 마지막 + 1)`).
 /// PUT은 저장된 것보다 클 때만 받고, 아니면 409 `stale_revision`이다. GET은 저장된 값을 돌려준다. 처음은 0.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, TS)]
 #[ts(export)]

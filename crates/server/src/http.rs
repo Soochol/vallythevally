@@ -82,7 +82,6 @@ impl IntoResponse for ApiFailure {
     }
 }
 
-/// 키움 조회가 필요한 요청. 실패를 로그에 남길 때 어느 요청인지 적는다.
 #[derive(Clone, Copy)]
 enum Lookup {
     Bars,
@@ -186,7 +185,6 @@ async fn bars(State(st): State<Arc<AppState>>, Query(q): Query<HashMap<String, S
 /// 한 번에 묻는 종목 수 상한. ka10095 두 번(100개씩)이다.
 pub const MAX_QUOTE_SYMBOLS: usize = 200;
 
-/// `symbols`를 빼거나 비우면 `[]`. 중복은 한 번만 답한다.
 async fn quotes(State(st): State<Arc<AppState>>, Query(q): Query<HashMap<String, String>>) -> Result<Json<Vec<api::Quote>>, ApiFailure> {
     let raw = q.get("symbols").map_or("", String::as_str);
     if raw.is_empty() {
@@ -308,7 +306,6 @@ mod tests {
         build(kiwoom_down, loaded, dir, db)
     }
 
-    /// 시계를 멈추지 않는 테스트용. 사용자 자료 경로는 DB를 쓰므로 이쪽을 쓴다.
     async fn live_fixture(loaded: bool) -> Fixture {
         let dir = tempfile::tempdir().unwrap();
         let db = AppDb::open(&dir.path().join("vally.db")).await.unwrap();
@@ -639,7 +636,6 @@ mod tests {
         assert_eq!((s, v["error"]["code"].as_str()), (StatusCode::SERVICE_UNAVAILABLE, Some("kiwoom_unavailable")));
     }
 
-    /// R4: 있는 경로에 틀린 메서드를 보내면 axum 기본 405(빈 본문)가 아니라 계약의 ApiError다.
     #[tokio::test]
     async fn wrong_method_is_405_with_api_error() {
         let f = live_fixture(true).await;

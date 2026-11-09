@@ -1,4 +1,3 @@
-//! 관심종목, 레이아웃, 화면 상태 REST(backend.md §8.2). 본문 크기와 모양은 여기서 한 번 검사한다.
 
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -16,9 +15,7 @@ use crate::api::{self, ApiErrorCode, Layout, LayoutInput, LayoutSummary, Revisio
 use crate::http::{ApiFailure, AppState, not_ready};
 use crate::userdata::{self, StoreError};
 
-/// 화면 상태, 관심종목 본문, 칸 하나의 `chartSettings`.
 pub const JSON_LIMIT: usize = 64 * 1024;
-/// 레이아웃 본문: 칸 4개의 `chartSettings`와 나머지 필드.
 pub const LAYOUT_LIMIT: usize = 4 * JSON_LIMIT + 16 * 1024;
 
 pub fn routes() -> Router<Arc<AppState>> {
@@ -101,7 +98,6 @@ async fn put_layout(State(st): State<Arc<AppState>>, Path(id): Path<String>, bod
     Ok(Json(userdata::put_layout(&st.db, &input, now).await?))
 }
 
-/// 종목 목록 없이 할 수 있는 검사. NXT를 고른 주식 칸의 종목을 돌려준다(종목 목록으로 더 검사한다).
 /// 목록에 없는 주식은 막지 않는다. 상장폐지된 종목을 연 칸도 저장되어야 한다.
 fn check_layout(path_id: &str, input: &LayoutInput) -> Result<Vec<Symbol>, ApiFailure> {
     if input.id != path_id {
@@ -142,7 +138,6 @@ async fn get_ui_state(State(st): State<Arc<AppState>>) -> Result<Json<UiState>, 
     Ok(Json(userdata::get_ui_state(&st.db).await?))
 }
 
-/// 객체인지만 본다. 모르는 키도 그대로 저장한다.
 async fn put_ui_state(State(st): State<Arc<AppState>>, body: Body) -> Result<Json<UiState>, ApiFailure> {
     let state: UiState = read_json(body, JSON_LIMIT, "화면 상태 본문").await?;
     let revision = state

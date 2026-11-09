@@ -9,7 +9,6 @@ const clock = (ms: number) => {
   return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
 };
 
-/** 자동 저장 표시와 복원 실패 안내(frontend.md §3.7). 빨강은 쓰지 않는다. */
 export function useSaveView(): { indicator: SaveIndicator; offline: string | null } {
   const saves = usePersistStore((s) => s.saves);
   const phase = usePersistStore((s) => s.phase);
@@ -18,7 +17,6 @@ export function useSaveView(): { indicator: SaveIndicator; offline: string | nul
 
 const RETRY_BUTTON = "rounded-s px-1 font-[650] text-accent underline underline-offset-2 hover:bg-accent-soft";
 
-/** 데스크톱 상태 줄의 자동 저장 표시. */
 export function SaveStatus() {
   const { indicator, offline } = useSaveView();
   if (offline) {
@@ -61,7 +59,6 @@ export function SaveStatus() {
   }
 }
 
-/** 휴대폰에는 자동 저장 표시를 두지 않고, 저장하지 못할 때만 띠로 알린다(frontend.md §4). */
 export function PhoneSaveBand() {
   const { indicator, offline } = useSaveView();
   const text = offline

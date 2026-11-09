@@ -29,14 +29,12 @@ impl From<sqlx::Error> for DbError {
 
 #[derive(Clone)]
 pub struct AppDb {
-    /// 읽기 풀. 크기 4.
     read: SqlitePool,
     /// 쓰기 풀. 크기 1. 모든 쓰기가 이 연결 하나로 줄 선다.
     write: SqlitePool,
 }
 
 impl AppDb {
-    /// 파일과 상위 디렉터리가 없으면 만든다. 열고 나서 마이그레이션을 돌린다.
     pub async fn open(path: &Path) -> Result<AppDb, DbError> {
         if let Some(dir) = path.parent().filter(|d| !d.as_os_str().is_empty()) {
             std::fs::create_dir_all(dir).map_err(|e| DbError(format!("{}를 만들 수 없습니다: {e}", dir.display())))?;
@@ -44,7 +42,6 @@ impl AppDb {
         AppDb::connect(SqliteConnectOptions::new().filename(path).create_if_missing(true)).await
     }
 
-    /// 연결마다 WAL, foreign_keys, busy_timeout, synchronous를 건다.
     pub async fn connect(options: SqliteConnectOptions) -> Result<AppDb, DbError> {
         let options = options
             .journal_mode(SqliteJournalMode::Wal)
@@ -61,7 +58,6 @@ impl AppDb {
         &self.read
     }
 
-    /// 쓰기 트랜잭션. `BEGIN IMMEDIATE`로 쓰기 잠금을 먼저 잡는다.
     pub async fn begin_write(&self) -> Result<Transaction<'static, Sqlite>, sqlx::Error> {
         self.write.begin_with("BEGIN IMMEDIATE").await
     }

@@ -1,7 +1,6 @@
 import { Attribution } from "./attribution";
 import { SaveStatus } from "./SaveStatus";
 
-/** 아래 상태 줄. WebSocket이 없으므로(#4 전) 연결 상태 점 없이 `조회 모드`라고 적고, 그 옆에 자동 저장 표시를 둔다. */
 export function StatusBar() {
   return (
     <footer className="flex min-w-0 items-center gap-4 border-t border-line bg-bg px-3 text-xs text-text-2 [grid-area:status] max-md:hidden">

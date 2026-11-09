@@ -53,23 +53,19 @@ export async function getJson<T>(path: string, signal?: AbortSignal): Promise<T>
   return (await (await request(path, { method: "GET", signal })).json()) as T;
 }
 
-/** PUT 하나. 본문은 JSON으로 보낸다. 응답 본문을 돌려준다. */
 export function putJson<T>(path: string, body: unknown, opts: SendOptions = {}): Promise<T> {
   return sendJson<T>("PUT", path, JSON.stringify(body), opts);
 }
 
-/** DELETE 하나. 응답 본문은 읽지 않는다. */
 export async function deleteJson(path: string, opts: SendOptions = {}): Promise<void> {
   await request(path, { method: "DELETE", signal: opts.signal, keepalive: opts.keepalive });
 }
 
 export interface SendOptions {
   signal?: AbortSignal;
-  /** 탭이 닫히는 중에도 요청을 끝까지 보낸다(frontend.md §3.7). */
   keepalive?: boolean;
 }
 
-/** 이미 직렬화한 JSON 본문을 보낸다. 자동 저장이 바이트 수를 잰 그 문자열을 그대로 보낸다. */
 export async function sendJson<T>(method: "PUT" | "POST", path: string, json: string, opts: SendOptions = {}): Promise<T> {
   const res = await request(path, {
     method,

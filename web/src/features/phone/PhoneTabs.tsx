@@ -1,7 +1,6 @@
 import { useSelectionStore } from "../../stores/selection";
 import { ChartIcon, ListIcon, SearchIcon } from "../icons";
 
-/** 휴대폰 아래 탭: 차트, 관심종목, 검색(frontend.md §4). 검색은 시트로 연다. */
 export function PhoneTabs() {
   const searching = useSelectionStore((s) => s.dialog?.kind === "search");
   const tab = useSelectionStore((s) => s.phoneTab);
