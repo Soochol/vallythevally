@@ -2,6 +2,7 @@
 
 pub mod api;
 pub mod auth;
+pub mod error;
 pub mod rest;
 pub mod token_file;
 pub mod transport;

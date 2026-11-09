@@ -7,7 +7,7 @@ use std::process::ExitCode;
 use std::sync::Arc;
 use std::time::Duration;
 
-use domain::TimeOfDay;
+use domain::{KstTime, TimeOfDay};
 use tokio::net::TcpListener;
 
 use crate::bars::BarService;
@@ -94,7 +94,7 @@ async fn serve(config: Config, token_file: TokenFile) -> ExitCode {
     let transport = match ReqwestTransport::new(config.kiwoom_base_url.clone()) {
         Ok(t) => t,
         Err(e) => {
-            tracing::error!(error = %e.0, "HTTP 클라이언트를 만들 수 없습니다");
+            tracing::error!(error = %e, "HTTP 클라이언트를 만들 수 없습니다");
             return ExitCode::from(1);
         }
     };
@@ -116,7 +116,7 @@ async fn serve(config: Config, token_file: TokenFile) -> ExitCode {
         }
     }
     let symbols = Arc::new(SymbolDirectory::default());
-    tokio::spawn(load_symbols_at_startup(rest.clone(), symbols.clone()));
+    tokio::spawn(load_symbols_at_startup(clock.clone(), rest.clone(), symbols.clone()));
     let bars = Arc::new(BarService::new(rest.clone(), symbols.clone(), clock.clone()));
     tokio::spawn(evict_idle_series(bars.clone()));
     tokio::spawn(daily_reset(clock.clone(), rest.clone(), symbols.clone(), bars.clone()));
@@ -147,17 +147,23 @@ async fn shutdown_signal() {
     tracing::info!("끝냅니다");
 }
 
-/// 켤 때는 `Screen`으로 받고, 실패하면 10초마다 다시 받는다.
-async fn load_symbols_at_startup(rest: KiwoomRest, symbols: Arc<SymbolDirectory>) {
+fn next_try(clock: &Clock, retry_at: KstTime, at_least: Duration) -> KstTime {
+    retry_at.max(clock.now().plus_secs(at_least.as_secs() as i64))
+}
+
+async fn load_symbols_at_startup(clock: Clock, rest: KiwoomRest, symbols: Arc<SymbolDirectory>) {
     loop {
-        match symbols.refresh(&rest, Priority::Screen).await {
+        let e = match symbols.refresh(&rest, Priority::Screen).await {
             Ok(()) => return,
-            Err(_) if rest.halted().is_some() => return,
-            Err(e) => {
-                tracing::warn!(error = %e, "종목 목록을 받지 못했습니다. 10초 뒤 다시 받습니다");
-                tokio::time::sleep(STARTUP_LIST_RETRY).await;
-            }
-        }
+            Err(e) => e,
+        };
+        let Some(retry_at) = e.retry_at() else {
+            tracing::error!(error = %e, "종목 목록을 받지 못했습니다. 다시 받지 않습니다");
+            return;
+        };
+        let at = next_try(&clock, retry_at, STARTUP_LIST_RETRY);
+        tracing::warn!(error = %e, %at, "종목 목록을 받지 못했습니다. 그 시각에 다시 받습니다");
+        clock.sleep_until(at).await;
     }
 }
 
@@ -176,14 +182,16 @@ async fn daily_reset(clock: Clock, rest: KiwoomRest, symbols: Arc<SymbolDirector
         bars.clear_all();
         let deadline = next_daily(clock.now(), DAILY_RESET_AT);
         while let Err(e) = symbols.refresh(&rest, Priority::Background).await {
-            if rest.halted().is_some() {
+            let Some(retry_at) = e.retry_at() else {
+                tracing::error!(error = %e, "07:45 종목 목록 갱신에 실패했습니다. 이전 목록을 쓰고 다시 받지 않습니다");
+                break;
+            };
+            let at = next_try(&clock, retry_at, DAILY_LIST_RETRY);
+            if at >= deadline {
                 break;
             }
-            if clock.now().plus_secs(DAILY_LIST_RETRY.as_secs() as i64) >= deadline {
-                break;
-            }
-            tracing::warn!(error = %e, "종목 목록 갱신에 실패했습니다. 이전 목록을 쓰고 5분 뒤 다시 받습니다");
-            tokio::time::sleep(DAILY_LIST_RETRY).await;
+            tracing::warn!(error = %e, %at, "종목 목록 갱신에 실패했습니다. 이전 목록을 쓰고 그 시각에 다시 받습니다");
+            clock.sleep_until(at).await;
         }
     }
 }
@@ -197,15 +205,17 @@ async fn daily_token(clock: Clock, rest: KiwoomRest) {
         }
         let deadline = next_daily(clock.now(), DAILY_RESET_AT);
         while let Err(e) = rest.issue_token().await {
-            if rest.halted().is_some() {
+            let Some(retry_at) = e.retry_at() else {
+                tracing::error!(error = %e, "20:05 토큰 발급에 실패했습니다. 다시 받지 않습니다");
                 break;
-            }
-            if clock.now().plus_secs(DAILY_TOKEN_RETRY.as_secs() as i64) >= deadline {
+            };
+            let at = next_try(&clock, retry_at, DAILY_TOKEN_RETRY);
+            if at >= deadline {
                 tracing::error!(error = %e, "20:05 토큰 발급이 07:45까지 실패했습니다");
                 break;
             }
-            tracing::warn!(error = %e, "20:05 토큰 발급에 실패했습니다. 10분 뒤 다시 받습니다");
-            tokio::time::sleep(DAILY_TOKEN_RETRY).await;
+            tracing::warn!(error = %e, %at, "20:05 토큰 발급에 실패했습니다. 그 시각에 다시 받습니다");
+            clock.sleep_until(at).await;
         }
     }
 }

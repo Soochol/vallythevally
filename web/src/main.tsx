@@ -2,17 +2,16 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { createBrowserRouter, Navigate, RouterProvider } from "react-router";
-import { ApiRequestError } from "./api/http";
+import { retryDelay, shouldRetry } from "./api/retry";
 import { ChartRoute } from "./App";
 import { boot } from "./persist/boot";
 import "./styles/index.css";
 
-const RETRYABLE = new Set(["kiwoom_unavailable", "network"]);
-
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
-      retry: (count, e) => count < 2 && e instanceof ApiRequestError && RETRYABLE.has(e.code),
+      retry: (count, e) => shouldRetry(count, e),
+      retryDelay: (count, e) => retryDelay(count, e),
       refetchOnWindowFocus: false,
     },
   },

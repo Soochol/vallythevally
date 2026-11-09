@@ -7,7 +7,7 @@ use std::time::Duration;
 use domain::{IndexCode, Market, Symbol, SymbolInfo, SymbolKind};
 use tokio::sync::watch;
 
-use crate::kiwoom::api::StockList;
+use crate::kiwoom::api::{ApiId, StockList};
 use crate::kiwoom::rest::{KiwoomError, KiwoomRest, MergeScope, Priority};
 use crate::kiwoom::wire::{Listing, classify};
 
@@ -163,6 +163,9 @@ impl SymbolDirectory {
             return Err(NotReady::Kiwoom(e));
         }
         let mut rx = self.current.subscribe();
+        if let Some(e) = rest.stopped(ApiId::Ka10099).filter(|_| rx.borrow().is_none()) {
+            return Err(NotReady::Kiwoom(e));
+        }
         tokio::select! {
             biased;
             dir = tokio::time::timeout(READY_WAIT, rx.wait_for(Option::is_some)) => match dir {
@@ -170,6 +173,7 @@ impl SymbolDirectory {
                 _ => Err(NotReady::Timeout),
             },
             e = rest.until_halted() => Err(NotReady::Kiwoom(e)),
+            e = rest.until_stopped(ApiId::Ka10099) => Err(NotReady::Kiwoom(e)),
         }
     }
 }
@@ -314,7 +318,7 @@ mod tests {
                 return token(1);
             }
             if down2.load(Ordering::SeqCst) {
-                return Err(crate::kiwoom::transport::TransportError("점검".into()));
+                return Err(crate::kiwoom::transport::TransportError::refused());
             }
             ok(if s.body.contains("\"10\"") { kosdaq.clone() } else { exchange.clone() }, None)
         }));

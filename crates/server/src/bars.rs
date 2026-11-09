@@ -15,6 +15,7 @@ use crate::clock::Clock;
 use crate::kiwoom::api::{
     DailyChart, IndexDailyChart, IndexMinuteChart, IndexMonthlyChart, IndexWeeklyChart, MarketRequest, MinuteChart, MonthlyChart, WeeklyChart,
 };
+use crate::kiwoom::error::{Failure, Surface};
 use crate::kiwoom::rest::{ContKey, KiwoomError, KiwoomRest, MergeScope, Priority};
 use crate::kiwoom::wire::{ChartBody, ChartRows, KiwoomBar, parse_chart};
 use crate::symbols::{NotReady, SymbolDirectory};
@@ -34,32 +35,27 @@ pub struct SeriesId(u64);
 pub enum BarError {
     BadRequest(String),
     UnknownSymbol,
-    /// 종목 목록을 아직 못 받았거나 키움이 응답하지 않는다.
-    Unavailable(String),
-    AuthFailed { detail: Option<u16> },
-    TokenWait(String),
-    TokenFile(String),
+    ListNotReady,
+    Kiwoom(KiwoomError),
     Internal(String),
 }
 
 impl fmt::Display for BarError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            BarError::BadRequest(m) | BarError::Unavailable(m) | BarError::TokenWait(m) | BarError::TokenFile(m) | BarError::Internal(m) => f.write_str(m),
+            BarError::BadRequest(m) | BarError::Internal(m) => f.write_str(m),
             BarError::UnknownSymbol => f.write_str("없는 종목입니다"),
-            BarError::AuthFailed { detail } => f.write_str(&crate::kiwoom::auth::auth_failed_message(*detail)),
+            BarError::ListNotReady => f.write_str("종목 목록을 아직 받지 못했습니다"),
+            BarError::Kiwoom(e) => e.fmt(f),
         }
     }
 }
 
 impl From<KiwoomError> for BarError {
     fn from(e: KiwoomError) -> Self {
-        match e {
-            KiwoomError::RateLimited | KiwoomError::Transport(_) => BarError::Unavailable(e.to_string()),
-            KiwoomError::AuthFailed { detail } => BarError::AuthFailed { detail },
-            KiwoomError::IssueTooSoon { .. } => BarError::TokenWait(e.to_string()),
-            KiwoomError::TokenFile(_) => BarError::TokenFile(e.to_string()),
-            KiwoomError::BadRequest { .. } | KiwoomError::Parse { .. } => BarError::Internal(e.to_string()),
+        match e.failure().map(Failure::surface) {
+            Some(Surface::UnknownSymbol) => BarError::UnknownSymbol,
+            _ => BarError::Kiwoom(e),
         }
     }
 }
@@ -126,7 +122,7 @@ impl BarService {
     pub async fn page(&self, key: SeriesKey, before: Option<KstTime>, limit: usize) -> Result<BarPage, BarError> {
         let dir = self.symbols.ready(&self.rest).await.map_err(|e| match e {
             NotReady::Kiwoom(e) => e.into(),
-            NotReady::Timeout => BarError::Unavailable("종목 목록을 아직 받지 못했습니다".into()),
+            NotReady::Timeout => BarError::ListNotReady,
         })?;
         let Some(info) = dir.get(key.feed.symbol()) else {
             return Err(BarError::UnknownSymbol);

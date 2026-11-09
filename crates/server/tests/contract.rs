@@ -32,6 +32,7 @@ fn generated_typescript_matches_the_committed_files() {
         generated::<ApiError>(),
         generated::<ApiErrorBody>(),
         generated::<ApiErrorCode>(),
+        generated::<ApiErrorReason>(),
         generated::<Arrangement>(),
         generated::<Bar>(),
         generated::<BarsPage>(),

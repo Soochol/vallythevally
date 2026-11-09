@@ -4,7 +4,7 @@
 //! - 토큰 발급이 먼저 나가고, 그다음 `Screen` > `Recovery` > `Background` 순서다.
 //! - 토큰은 보내는 순간에 읽는다(D16). 대기 중인 요청은 토큰을 쥐고 있지 않다.
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::fmt;
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
@@ -13,10 +13,11 @@ use tokio::sync::{Notify, oneshot};
 use tokio::time::Instant;
 
 use super::api::{ApiId, MarketRequest};
-use super::auth::{AuthError, Halt, KiwoomAuth, MIN_ISSUE_INTERVAL_SECS, TokenGen, auth_failed_message};
+use super::auth::{AuthError, Halt, KiwoomAuth, MIN_ISSUE_INTERVAL_SECS, TokenGen};
+use super::error::{self, Category, Failure, Note, Retry, Stop};
 use super::token_file::FileError;
 use super::transport::{HttpRequest, HttpResponse, Transport, TransportError};
-use super::wire::{Envelope, TokenResponse, detail_code};
+use super::wire::TokenResponse;
 use crate::clock::Clock;
 use crate::config::Secret;
 use domain::KstTime;
@@ -26,7 +27,12 @@ const RATE_LIMIT_PAUSE: Duration = Duration::from_secs(1);
 const MAX_RATE_LIMITED: u8 = 3;
 const SCREEN_RETRY_DELAYS: &[Duration] = &[Duration::from_millis(500)];
 const OTHER_RETRY_DELAYS: &[Duration] = &[Duration::from_secs(1), Duration::from_secs(2), Duration::from_secs(4)];
-const PARSE_LOG_BYTES: usize = 2048;
+const SCREEN_SEND_BUDGET: u8 = 4;
+const OTHER_SEND_BUDGET: u8 = 6;
+const GATE_WAIT: Duration = Duration::from_secs(30);
+const GATE_LONG_WAIT: Duration = Duration::from_secs(5 * 60);
+const GATE_MISSES_BEFORE_LONG_WAIT: u8 = 3;
+const AUTH_GATE_WAIT: Duration = Duration::from_secs(MIN_ISSUE_INTERVAL_SECS as u64);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Priority {
@@ -41,6 +47,10 @@ pub enum Priority {
 impl Priority {
     fn lane(self) -> usize {
         self as usize
+    }
+
+    fn send_budget(self) -> u8 {
+        if self == Priority::Screen { SCREEN_SEND_BUDGET } else { OTHER_SEND_BUDGET }
     }
 }
 
@@ -71,37 +81,57 @@ pub struct Page<T> {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum KiwoomError {
-    /// 요청 개수 초과가 세 번 연속.
-    RateLimited,
-    /// 토큰을 받을 수 없거나 인증이 거절됐다.
-    AuthFailed { detail: Option<u16> },
-    IssueTooSoon { until: KstTime },
+    Failed(Failure),
+    Gated { until: KstTime, cause: GateCause },
+    Stopped(Failure),
     TokenFile(FileError),
-    /// 우리 코드가 잘못 보낸 요청(1501~1999, 1634, 상세 코드 없는 실패).
-    BadRequest { detail: Option<u16>, msg: String },
-    /// 네트워크 오류, HTTP 5xx 등. URL과 헤더는 빼고 적는다.
-    Transport(String),
-    Parse { api_id: ApiId, detail: String },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum GateCause {
+    IssueInterval,
+    Failure(Failure),
+}
+
+impl KiwoomError {
+    pub fn failure(&self) -> Option<&Failure> {
+        match self {
+            KiwoomError::Failed(f) | KiwoomError::Stopped(f) | KiwoomError::Gated { cause: GateCause::Failure(f), .. } => Some(f),
+            KiwoomError::Gated { cause: GateCause::IssueInterval, .. } | KiwoomError::TokenFile(_) => None,
+        }
+    }
+
+    pub fn retry_at(&self) -> Option<KstTime> {
+        match self {
+            KiwoomError::Gated { until, .. } => Some(*until),
+            KiwoomError::Failed(_) | KiwoomError::Stopped(_) | KiwoomError::TokenFile(_) => None,
+        }
+    }
+
+    pub fn manual_action_required(&self) -> bool {
+        matches!(self, KiwoomError::Stopped(_) | KiwoomError::TokenFile(_))
+    }
 }
 
 impl fmt::Display for KiwoomError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            KiwoomError::RateLimited => f.write_str("키움 요청 개수 초과가 계속됩니다"),
-            KiwoomError::AuthFailed { detail } => write!(f, "키움 인증 실패(상세 코드 {detail:?})"),
-            KiwoomError::IssueTooSoon { until } => write!(
+            KiwoomError::Failed(failure) => failure.fmt(f),
+            KiwoomError::Gated { until, cause: GateCause::IssueInterval } => write!(
                 f,
                 "키움 토큰은 발급 사이를 {}분 띄웁니다. {until}부터 다시 받으니 그 뒤에 다시 시도하세요",
                 MIN_ISSUE_INTERVAL_SECS / 60
             ),
+            KiwoomError::Gated { until, cause: GateCause::Failure(failure) } => write!(f, "{failure}. {until}에 확인 요청 하나를 보냅니다"),
+            KiwoomError::Stopped(failure) => match failure.category() {
+                Category::AuthBlocked | Category::Unsupported | Category::Unknown | Category::Protocol => failure.fmt(f),
+                _ => write!(f, "{failure}. 운영자가 확인하고 서버를 다시 켤 때까지 보내지 않습니다"),
+            },
             KiwoomError::TokenFile(e) => write!(
                 f,
                 "토큰 파일을 쓸 수 없어 키움 토큰을 발급하지 않습니다({e}). 파일을 고치거나, 마지막 발급 요청에서 {}분이 지난 뒤 지우고 서버를 다시 켜세요",
                 MIN_ISSUE_INTERVAL_SECS / 60
             ),
-            KiwoomError::BadRequest { detail, msg } => write!(f, "키움이 요청을 거절했습니다(상세 코드 {detail:?}): {msg}"),
-            KiwoomError::Transport(m) => write!(f, "키움에 닿지 못했습니다: {m}"),
-            KiwoomError::Parse { api_id, detail } => write!(f, "{} 응답을 읽지 못했습니다: {detail}", api_id.as_str()),
         }
     }
 }
@@ -111,7 +141,7 @@ impl std::error::Error for KiwoomError {}
 impl From<Halt> for KiwoomError {
     fn from(h: Halt) -> Self {
         match h {
-            Halt::Rejected(detail) => KiwoomError::AuthFailed { detail: Some(detail) },
+            Halt::Rejected(failure) => KiwoomError::Stopped(failure),
             Halt::TokenFileUnreadable(e) => KiwoomError::TokenFile(e),
         }
     }
@@ -121,6 +151,7 @@ impl From<Halt> for KiwoomError {
 struct RawPage {
     body: Arc<str>,
     next: Option<ContKey>,
+    envelope: error::Envelope,
 }
 
 type JobResult = Result<RawPage, KiwoomError>;
@@ -147,9 +178,18 @@ struct Job {
     priority: Priority,
     state: JobState,
     waiters: Vec<oneshot::Sender<JobResult>>,
+    sends: u8,
     rate_limited: u8,
     transport_failures: usize,
     resent_after_invalid_token: bool,
+}
+
+#[derive(Default)]
+enum Gate {
+    #[default]
+    Open,
+    Closed { opens: Instant, until: KstTime, cause: Failure, misses: u8 },
+    Probing { probe: u64, cause: Failure, misses: u8 },
 }
 
 #[derive(Default)]
@@ -161,6 +201,9 @@ struct Queue {
     last_send: Option<Instant>,
     pause_until: Option<Instant>,
     next_id: u64,
+    stopped_paths: HashMap<ApiId, Failure>,
+    failed_once: HashSet<ApiId>,
+    gate: Gate,
 }
 
 impl Queue {
@@ -190,6 +233,29 @@ impl Queue {
             self.finish(id, Err(err.clone()));
         }
     }
+
+    fn stop_path(&mut self, failure: &Failure) {
+        let api_id = failure.api_id();
+        self.stopped_paths.insert(api_id, failure.clone());
+        let jobs = &self.jobs;
+        let mut ids = Vec::new();
+        for lane in &mut self.lanes {
+            lane.retain(|id| {
+                let hit = jobs.get(id).is_some_and(|j| j.key.api_id == api_id);
+                if hit {
+                    ids.push(*id);
+                }
+                !hit
+            });
+        }
+        for id in ids {
+            self.finish(id, Err(KiwoomError::Stopped(failure.clone())));
+        }
+    }
+
+    fn stopped(&self, api_id: ApiId) -> Option<KiwoomError> {
+        self.stopped_paths.get(&api_id).cloned().map(KiwoomError::Stopped)
+    }
 }
 
 struct Inner {
@@ -198,6 +264,7 @@ struct Inner {
     clock: Clock,
     queue: Mutex<Queue>,
     wake: Notify,
+    path_stopped: Notify,
 }
 
 #[derive(Clone)]
@@ -217,19 +284,10 @@ enum Step {
     Again,
 }
 
-enum Verdict {
-    Ok(RawPage),
-    RateLimited,
-    TokenInvalid,
-    Halt(u16),
-    Fail(KiwoomError),
-    Retry(String),
-}
-
 impl KiwoomRest {
     /// 보내는 태스크를 하나 띄운다. tokio 런타임 안에서 부른다.
     pub fn new(transport: Arc<dyn Transport>, auth: KiwoomAuth, clock: Clock) -> Self {
-        let inner = Arc::new(Inner { transport, auth, clock, queue: Mutex::new(Queue::default()), wake: Notify::new() });
+        let inner = Arc::new(Inner { transport, auth, clock, queue: Mutex::new(Queue::default()), wake: Notify::new(), path_stopped: Notify::new() });
         tokio::spawn(run(inner.clone()));
         KiwoomRest(inner)
     }
@@ -250,9 +308,35 @@ impl KiwoomRest {
         let auth = &self.0.auth;
         let now = self.0.clock.now();
         self.halted().or_else(|| {
-            let until = auth.needs_issue(now).then(|| auth.issue_blocked_until(now)).flatten()?;
-            Some(KiwoomError::IssueTooSoon { until })
+            if !auth.needs_issue(now) {
+                return None;
+            }
+            self.stopped(ApiId::Au10001)
+                .or_else(|| Some(KiwoomError::Gated { until: auth.issue_blocked_until(now)?, cause: GateCause::IssueInterval }))
         })
+    }
+
+    pub fn gate_until(&self) -> Option<KstTime> {
+        match &self.0.lock().gate {
+            Gate::Closed { until, .. } => Some(*until),
+            Gate::Open | Gate::Probing { .. } => None,
+        }
+    }
+
+    pub fn stopped(&self, api_id: ApiId) -> Option<KiwoomError> {
+        self.0.lock().stopped(api_id)
+    }
+
+    pub async fn until_stopped(&self, api_id: ApiId) -> KiwoomError {
+        loop {
+            let notified = self.0.path_stopped.notified();
+            tokio::pin!(notified);
+            notified.as_mut().enable();
+            if let Some(e) = self.stopped(api_id) {
+                return e;
+            }
+            notified.await;
+        }
     }
 
     /// 토큰을 새로 받는다. 서버를 켤 때와 매일 20:05에만 부른다.
@@ -260,7 +344,7 @@ impl KiwoomRest {
         let (tx, rx) = oneshot::channel();
         self.0.lock().issue_waiters.push(tx);
         self.0.wake.notify_one();
-        rx.await.unwrap_or_else(|_| Err(KiwoomError::Transport("대기열이 멈췄습니다".into())))
+        rx.await.unwrap_or_else(|_| Err(queue_gone(ApiId::Au10001)))
     }
 
     /// 한 페이지를 받는다. `cont`가 있으면 그 연속조회 키로 다음 페이지를 받는다.
@@ -278,23 +362,21 @@ impl KiwoomRest {
             cont: cont.cloned(),
         };
         let rx = self.0.enqueue(key, priority);
-        let raw = rx.await.unwrap_or_else(|_| Err(KiwoomError::Transport("대기열이 멈췄습니다".into())))?;
+        let raw = rx.await.unwrap_or_else(|_| Err(queue_gone(R::API_ID)))?;
         match serde_json::from_str::<R::Response>(&raw.body) {
             Ok(body) => Ok(Page { body, next: raw.next }),
             Err(e) => {
-                tracing::error!(api_id = R::API_ID.as_str(), error = %e, body = head(&raw.body, PARSE_LOG_BYTES), "키움 응답을 읽지 못했습니다");
-                Err(KiwoomError::Parse { api_id: R::API_ID, detail: e.to_string() })
+                let note = Note::Schema { line: e.line(), column: e.column() };
+                tracing::error!(api_id = R::API_ID.as_str(), %note, "키움 응답을 읽지 못했습니다");
+                let failure = Failure::schema(R::API_ID, raw.envelope, note);
+                Err(self.0.settle(&mut self.0.lock(), failure))
             }
         }
     }
 }
 
-fn head(s: &str, max: usize) -> &str {
-    let mut end = s.len().min(max);
-    while !s.is_char_boundary(end) {
-        end -= 1;
-    }
-    &s[..end]
+fn queue_gone(api_id: ApiId) -> KiwoomError {
+    KiwoomError::Failed(Failure::queue_gone(api_id))
 }
 
 async fn run(inner: Arc<Inner>) {
@@ -324,6 +406,10 @@ impl Inner {
     fn enqueue(&self, key: DedupeKey, priority: Priority) -> oneshot::Receiver<JobResult> {
         let (tx, rx) = oneshot::channel();
         let mut q = self.lock();
+        if let Some(err) = q.stopped(key.api_id) {
+            let _ = tx.send(Err(err));
+            return rx;
+        }
         if let Some(&id) = q.by_key.get(&key) {
             let job = q.jobs.get_mut(&id).expect("by_key와 jobs는 함께 바뀐다");
             job.waiters.push(tx);
@@ -346,6 +432,7 @@ impl Inner {
                     priority,
                     state: JobState::Queued,
                     waiters: vec![tx],
+                    sends: 0,
                     rate_limited: 0,
                     transport_failures: 0,
                     resent_after_invalid_token: false,
@@ -371,8 +458,17 @@ impl Inner {
         }
         let mut has_market = q.has_market_work();
         let market_needs_token = has_market && self.auth.needs_issue(now_kst);
+        if let Some(err) = q.stopped(ApiId::Au10001).filter(|_| market_needs_token || !q.issue_waiters.is_empty()) {
+            for w in q.issue_waiters.drain(..) {
+                let _ = w.send(Err(err.clone()));
+            }
+            if market_needs_token {
+                q.fail_queued(&err);
+                has_market = false;
+            }
+        }
         if let Some(until) = self.auth.issue_blocked_until(now_kst).filter(|_| market_needs_token || !q.issue_waiters.is_empty()) {
-            let err = KiwoomError::IssueTooSoon { until };
+            let err = KiwoomError::Gated { until, cause: GateCause::IssueInterval };
             tracing::warn!(%until, "마지막 토큰 발급 요청에서 10분이 지나지 않아 발급하지 않습니다");
             for w in q.issue_waiters.drain(..) {
                 let _ = w.send(Err(err.clone()));
@@ -382,11 +478,22 @@ impl Inner {
                 has_market = false;
             }
         }
+        let now = Instant::now();
+        if has_market {
+            match &q.gate {
+                Gate::Closed { opens, until, cause, .. } if now < *opens => {
+                    let err = KiwoomError::Gated { until: *until, cause: GateCause::Failure(cause.clone()) };
+                    q.fail_queued(&err);
+                    has_market = false;
+                }
+                Gate::Probing { .. } => has_market = false,
+                Gate::Open | Gate::Closed { .. } => {}
+            }
+        }
         let wants_issue = !q.issue_waiters.is_empty() || (has_market && self.auth.needs_issue(now_kst));
         if !wants_issue && !has_market {
             return Step::Idle;
         }
-        let now = Instant::now();
         let ready = q.last_send.map(|t| t + SEND_SPACING).into_iter().chain(q.pause_until).max();
         if let Some(r) = ready.filter(|&r| r > now) {
             return Step::Wait(r);
@@ -402,8 +509,18 @@ impl Inner {
             q.requeue_front(id);
             return Step::Again;
         };
+        let api_id = q.jobs.get(&id).expect("대기열의 id는 jobs에 있다").key.api_id;
+        if let Some(err) = q.stopped(api_id) {
+            q.finish(id, Err(err));
+            return Step::Again;
+        }
+        if let Gate::Closed { cause, misses, .. } = std::mem::take(&mut q.gate) {
+            tracing::info!(api_id = api_id.as_str(), "관문을 확인하는 요청 하나를 보냅니다");
+            q.gate = Gate::Probing { probe: id, cause, misses };
+        }
         let job = q.jobs.get_mut(&id).expect("대기열의 id는 jobs에 있다");
         job.state = JobState::InFlight;
+        job.sends += 1;
         let req = HttpRequest {
             api_id: job.key.api_id,
             token: Some(token),
@@ -414,22 +531,32 @@ impl Inner {
     }
 
     async fn issue(&self) {
-        let outcome = match self.auth.begin_issue(self.clock.now()) {
+        let (mut q, outcome) = match self.auth.begin_issue(self.clock.now()) {
             Ok(body) => {
                 let started = Instant::now();
                 let res = self.transport.send(HttpRequest { api_id: ApiId::Au10001, token: None, cont: None, body }).await;
-                self.judge_issue(res, started)
+                let judged = self.judge_issue(res, started);
+                let mut q = self.lock();
+                let outcome = match judged {
+                    Ok(generation) => {
+                        q.failed_once.remove(&ApiId::Au10001);
+                        Ok(generation)
+                    }
+                    Err(failure) => {
+                        if failure.category() == Category::RateLimit {
+                            q.pause_until = Some(Instant::now() + RATE_LIMIT_PAUSE);
+                        }
+                        Err(self.settle(&mut q, failure))
+                    }
+                };
+                (q, outcome)
             }
             Err(e) => {
                 tracing::error!(error = %e, "토큰 파일에 발급 요청 시각을 쓰지 못해 발급 요청을 보내지 않습니다");
-                Err(KiwoomError::TokenFile(e))
+                (self.lock(), Err(KiwoomError::TokenFile(e)))
             }
         };
-        let mut q = self.lock();
         if let Err(e) = &outcome {
-            if matches!(e, KiwoomError::RateLimited) {
-                q.pause_until = Some(Instant::now() + RATE_LIMIT_PAUSE);
-            }
             q.fail_queued(e);
         }
         for w in q.issue_waiters.drain(..) {
@@ -437,36 +564,72 @@ impl Inner {
         }
     }
 
+    fn settle(&self, q: &mut Queue, failure: Failure) -> KiwoomError {
+        let api_id = failure.api_id();
+        match failure.policy().stop {
+            Stop::Nothing => KiwoomError::Failed(failure),
+            Stop::Gate | Stop::AuthGate => self.close_gate(q, failure, 0),
+            Stop::IssueInterval => self.wait_issue_interval(failure),
+            Stop::PathOnRepeat if q.failed_once.insert(api_id) => {
+                tracing::warn!(api_id = api_id.as_str(), "{failure}. 다음 발급도 같은 범주로 실패하면 발급을 멈춥니다");
+                self.wait_issue_interval(failure)
+            }
+            Stop::Path | Stop::PathOnRepeat => {
+                tracing::error!(api_id = api_id.as_str(), "{failure}");
+                q.stop_path(&failure);
+                self.path_stopped.notify_waiters();
+                KiwoomError::Stopped(failure)
+            }
+            Stop::Everything => {
+                tracing::error!(api_id = api_id.as_str(), "{failure}");
+                self.auth.halt(failure.clone());
+                KiwoomError::Stopped(failure)
+            }
+        }
+    }
+
+    fn close_gate(&self, q: &mut Queue, cause: Failure, misses: u8) -> KiwoomError {
+        let wait = match cause.policy().stop {
+            Stop::AuthGate => AUTH_GATE_WAIT,
+            _ if misses >= GATE_MISSES_BEFORE_LONG_WAIT => GATE_LONG_WAIT,
+            _ => GATE_WAIT,
+        };
+        let until = self.clock.now().plus_secs(wait.as_secs() as i64);
+        tracing::warn!(api_id = cause.api_id().as_str(), category = ?cause.category(), misses, %until, "조회 관문을 닫습니다. 그 시각에 확인 요청 하나만 보냅니다");
+        q.gate = Gate::Closed { opens: Instant::now() + wait, until, cause: cause.clone(), misses };
+        KiwoomError::Gated { until, cause: GateCause::Failure(cause) }
+    }
+
+    fn wait_issue_interval(&self, failure: Failure) -> KiwoomError {
+        let now = self.clock.now();
+        KiwoomError::Gated { until: self.auth.issue_blocked_until(now).unwrap_or(now), cause: GateCause::Failure(failure) }
+    }
+
     /// au10001 응답 판정. 본문에는 토큰이 있으므로 로그에 남기지 않는다.
-    fn judge_issue(&self, res: Result<HttpResponse, TransportError>, started: Instant) -> Result<TokenGen, KiwoomError> {
+    fn judge_issue(&self, res: Result<HttpResponse, TransportError>, started: Instant) -> Result<TokenGen, Failure> {
         let elapsed_ms = started.elapsed().as_millis() as u64;
         let resp = match res {
             Ok(r) => r,
             Err(e) => {
-                tracing::warn!(api_id = "au10001", elapsed_ms, error = %e.0, "토큰 발급 요청이 키움에 닿지 못했습니다");
-                return Err(KiwoomError::Transport(e.0));
+                tracing::warn!(api_id = "au10001", elapsed_ms, error = %e, "토큰 발급 요청이 키움에 닿지 못했습니다");
+                return Err(Failure::transport(ApiId::Au10001, e));
             }
         };
-        let env: Envelope = serde_json::from_str(&resp.body).unwrap_or_default();
-        let detail = env.return_msg.as_deref().and_then(detail_code);
-        tracing::info!(api_id = "au10001", elapsed_ms, http = resp.status, return_code = ?env.return_code, detail = ?detail, "토큰 발급 응답");
-        // 키움은 8050을 HTTP 200이 아닌 상태로도 줄 수 있다. 전송 오류로 넘기면 조회마다 다시 발급해 계정이 잠긴다.
-        if let Some(d) = detail.filter(|d| is_halting(*d)) {
-            tracing::error!(detail = d, "{}", auth_failed_message(Some(d)));
-            self.auth.halt(d);
-            return Err(KiwoomError::AuthFailed { detail });
-        }
-        if resp.status == 429 || detail == Some(1700) {
-            return Err(KiwoomError::RateLimited);
-        }
-        if resp.status != 200 {
-            return Err(KiwoomError::Transport(format!("au10001 HTTP {}", resp.status)));
-        }
-        if env.return_code != Some(0) {
-            return Err(KiwoomError::AuthFailed { detail });
-        }
-        let token: TokenResponse = serde_json::from_str(&resp.body).map_err(|_| KiwoomError::AuthFailed { detail: None })?;
-        let generation = self.auth.record_issued(token, self.clock.now()).map_err(|_| KiwoomError::AuthFailed { detail: None })?;
+        let judged = error::judge(ApiId::Au10001, resp.status, &resp.body);
+        let failed = judged.as_ref().err();
+        tracing::info!(
+            api_id = "au10001",
+            elapsed_ms,
+            http = resp.status,
+            category = ?failed.map(Failure::category),
+            return_code = ?failed.and_then(Failure::return_code),
+            detail = ?failed.and_then(Failure::detail),
+            "토큰 발급 응답"
+        );
+        judged?;
+        let bad_token = || Failure::protocol(ApiId::Au10001, Note::BadTokenResponse);
+        let token: TokenResponse = serde_json::from_str(&resp.body).map_err(|_| bad_token())?;
+        let generation = self.auth.record_issued(token, self.clock.now()).map_err(|_| bad_token())?;
         tracing::info!(generation = generation.0, "새 토큰을 받았습니다");
         Ok(generation)
     }
@@ -475,104 +638,137 @@ impl Inner {
         let api_id = req.api_id;
         let started = Instant::now();
         let res = self.transport.send(req).await;
-        let verdict = judge(api_id, priority, res, started);
+        let outcome = judge_market(api_id, priority, res, started);
         let mut q = self.lock();
-        let Some(job) = q.jobs.get_mut(&id) else {
+        if !q.jobs.contains_key(&id) {
             return;
-        };
-        match verdict {
-            Verdict::Ok(page) => q.finish(id, Ok(page)),
-            Verdict::RateLimited => {
-                tracing::warn!(api_id = api_id.as_str(), "요청 개수 초과. 260ms 간격이 모자랐습니다. 대기열을 1초 멈춥니다");
-                job.rate_limited += 1;
-                let gave_up = job.rate_limited >= MAX_RATE_LIMITED;
-                q.pause_until = Some(Instant::now() + RATE_LIMIT_PAUSE);
-                if gave_up {
-                    tracing::warn!(api_id = api_id.as_str(), "요청 개수 초과가 세 번 연속이라 실패로 돌려줍니다");
-                    q.finish(id, Err(KiwoomError::RateLimited));
-                } else {
-                    q.requeue_front(id);
+        }
+        let probe = matches!(q.gate, Gate::Probing { probe, .. } if probe == id);
+        match outcome {
+            Ok(page) => {
+                if probe {
+                    tracing::info!(api_id = api_id.as_str(), "확인 요청이 성공해 관문을 엽니다");
+                    q.gate = Gate::Open;
                 }
+                q.finish(id, Ok(page));
             }
-            Verdict::TokenInvalid => {
-                let already = job.resent_after_invalid_token;
-                job.resent_after_invalid_token = true;
-                let invalid = KiwoomError::AuthFailed { detail: Some(8005) };
-                match (already, self.auth.invalidate(generation)) {
-                    (false, Ok(())) => q.requeue_front(id),
-                    (_, Err(AuthError::Halted(halt))) => q.finish(id, Err(halt.into())),
-                    _ => {
-                        tracing::error!(api_id = api_id.as_str(), "새 토큰으로도 토큰 무효 응답을 받았습니다");
-                        q.finish(id, Err(invalid));
-                    }
-                }
-            }
-            Verdict::Halt(detail) => {
-                tracing::error!(api_id = api_id.as_str(), detail, "{}", auth_failed_message(Some(detail)));
-                self.auth.halt(detail);
-                q.finish(id, Err(KiwoomError::AuthFailed { detail: Some(detail) }));
-            }
-            Verdict::Fail(e) => q.finish(id, Err(e)),
-            Verdict::Retry(msg) => {
-                let delays = if job.priority == Priority::Screen { SCREEN_RETRY_DELAYS } else { OTHER_RETRY_DELAYS };
-                match delays.get(job.transport_failures) {
-                    Some(&delay) => {
-                        job.transport_failures += 1;
-                        job.state = JobState::Backoff;
-                        let inner = self.clone();
-                        tokio::spawn(async move {
-                            tokio::time::sleep(delay).await;
-                            inner.lock().requeue_front(id);
-                            inner.wake.notify_one();
-                        });
-                    }
-                    None => q.finish(id, Err(KiwoomError::Transport(msg))),
-                }
-            }
+            Err(failure) if probe => self.probe_failed(&mut q, id, generation, failure),
+            Err(failure) => self.market_failed(&mut q, id, generation, failure),
         }
         drop(q);
         self.wake.notify_one();
     }
+
+    fn probe_failed(self: &Arc<Self>, q: &mut Queue, id: u64, generation: TokenGen, failure: Failure) {
+        let Gate::Probing { cause, misses, .. } = std::mem::take(&mut q.gate) else {
+            unreachable!("send_market이 확인 요청임을 확인했다")
+        };
+        let err = match (cause.policy().stop, failure.policy().stop) {
+            (Stop::Gate, Stop::Gate) => {
+                if failure.category() == Category::RateLimit {
+                    q.pause_until = Some(Instant::now() + RATE_LIMIT_PAUSE);
+                }
+                self.close_gate(q, failure, misses + 1)
+            }
+            (Stop::AuthGate, Stop::AuthGate) => {
+                tracing::error!(api_id = failure.api_id().as_str(), "{failure}. 10분 뒤 확인도 실패해 조회와 토큰 발급을 멈춥니다");
+                self.auth.halt(failure.clone());
+                KiwoomError::Stopped(failure)
+            }
+            _ => return self.market_failed(q, id, generation, failure),
+        };
+        q.finish(id, Err(err));
+    }
+
+    fn market_failed(self: &Arc<Self>, q: &mut Queue, id: u64, generation: TokenGen, failure: Failure) {
+        let api_id = failure.api_id().as_str();
+        match failure.category() {
+            Category::RateLimit => {
+                tracing::warn!(api_id, "요청 개수 초과. 260ms 간격이 모자랐습니다. 대기열을 1초 멈춥니다");
+                q.pause_until = Some(Instant::now() + RATE_LIMIT_PAUSE);
+            }
+            Category::InvalidRequest | Category::BatchLimit => tracing::error!(api_id, "{failure}. 우리 코드의 버그입니다"),
+            _ => {}
+        }
+        let job = q.jobs.get_mut(&id).expect("send_market이 확인했다");
+        let resend = match failure.policy().retry {
+            _ if job.sends >= job.priority.send_budget() => {
+                tracing::warn!(api_id, sends = job.sends, "요청 하나의 전송 예산을 다 썼습니다");
+                false
+            }
+            Retry::Never => false,
+            Retry::AfterPause => {
+                job.rate_limited += 1;
+                let again = job.rate_limited < MAX_RATE_LIMITED;
+                if !again {
+                    tracing::warn!(api_id, "요청 개수 초과가 세 번이라 실패로 돌려줍니다");
+                }
+                again
+            }
+            Retry::RefreshTokenOnce if job.resent_after_invalid_token => {
+                tracing::error!(api_id, "새 토큰으로도 토큰 무효 응답을 받았습니다. 조회와 토큰 발급을 멈춥니다");
+                self.auth.halt(failure.clone());
+                q.finish(id, Err(KiwoomError::Stopped(failure)));
+                return;
+            }
+            Retry::RefreshTokenOnce => {
+                job.resent_after_invalid_token = true;
+                match self.auth.invalidate(generation) {
+                    Ok(()) => true,
+                    Err(AuthError::Halted(halt)) => {
+                        q.finish(id, Err(halt.into()));
+                        return;
+                    }
+                    Err(AuthError::BadTokenResponse) => false,
+                }
+            }
+            Retry::Backoff => {
+                let delays = if job.priority == Priority::Screen { SCREEN_RETRY_DELAYS } else { OTHER_RETRY_DELAYS };
+                if let Some(&delay) = delays.get(job.transport_failures) {
+                    job.transport_failures += 1;
+                    job.state = JobState::Backoff;
+                    let inner = self.clone();
+                    tokio::spawn(async move {
+                        tokio::time::sleep(delay).await;
+                        inner.lock().requeue_front(id);
+                        inner.wake.notify_one();
+                    });
+                    return;
+                }
+                false
+            }
+        };
+        if resend {
+            q.requeue_front(id);
+        } else {
+            let err = self.settle(q, failure);
+            q.finish(id, Err(err));
+        }
+    }
 }
 
-fn is_halting(detail: u16) -> bool {
-    (8001..=8200).contains(&detail) && detail != 8005
-}
-
-/// 응답 세 겹 판정(§4.3): HTTP 상태 → 최상위 return_code → return_msg 안의 상세 코드.
-fn judge(api_id: ApiId, priority: Priority, res: Result<HttpResponse, TransportError>, started: Instant) -> Verdict {
+fn judge_market(api_id: ApiId, priority: Priority, res: Result<HttpResponse, TransportError>, started: Instant) -> Result<RawPage, Failure> {
     let elapsed_ms = started.elapsed().as_millis() as u64;
     let resp = match res {
         Ok(r) => r,
         Err(e) => {
-            tracing::warn!(api_id = api_id.as_str(), ?priority, elapsed_ms, error = %e.0, "키움에 닿지 못했습니다");
-            return Verdict::Retry(e.0);
+            tracing::warn!(api_id = api_id.as_str(), ?priority, elapsed_ms, error = %e, "키움에 닿지 못했습니다");
+            return Err(Failure::transport(api_id, e));
         }
     };
-    let env: Envelope = serde_json::from_str(&resp.body).unwrap_or_default();
-    let msg = env.return_msg.clone().unwrap_or_default();
-    let detail = detail_code(&msg);
-    tracing::info!(api_id = api_id.as_str(), ?priority, elapsed_ms, http = resp.status, return_code = ?env.return_code, detail = ?detail, "키움 조회");
-    if let Some(d) = detail.filter(|d| is_halting(*d)) {
-        return Verdict::Halt(d);
-    }
-    if resp.status == 429 || detail == Some(1700) {
-        return Verdict::RateLimited;
-    }
-    if resp.status >= 500 {
-        return Verdict::Retry(format!("HTTP {}", resp.status));
-    }
-    if resp.status != 200 {
-        return Verdict::Fail(KiwoomError::Transport(format!("HTTP {}", resp.status)));
-    }
-    match (env.return_code, detail) {
-        (None | Some(0), _) => Verdict::Ok(RawPage { body: resp.body.into(), next: resp.next_key.map(ContKey) }),
-        (Some(_), Some(8005)) => Verdict::TokenInvalid,
-        (Some(rc), d) => {
-            tracing::error!(api_id = api_id.as_str(), return_code = rc, detail = ?d, return_msg = %msg, "키움이 요청을 거절했습니다. 우리 코드의 버그입니다");
-            Verdict::Fail(KiwoomError::BadRequest { detail: d, msg })
-        }
-    }
+    let judged = error::judge(api_id, resp.status, &resp.body);
+    let failed = judged.as_ref().err();
+    tracing::info!(
+        api_id = api_id.as_str(),
+        ?priority,
+        elapsed_ms,
+        http = resp.status,
+        category = ?failed.map(Failure::category),
+        return_code = ?failed.and_then(Failure::return_code),
+        detail = ?failed.and_then(Failure::detail),
+        "키움 조회"
+    );
+    judged.map(|envelope| RawPage { body: resp.body.into(), next: resp.next_key.map(ContKey), envelope })
 }
 
 #[cfg(test)]
@@ -660,6 +856,7 @@ mod tests {
 
     use super::testing::*;
     use super::*;
+    use crate::kiwoom::error::CodeKey;
     use crate::clock::kst;
     use crate::kiwoom::api::StockList;
     use domain::KstDate;
@@ -698,6 +895,14 @@ mod tests {
 
     async fn call_k(rest: &KiwoomRest, i: usize, p: Priority) -> Result<Page<crate::kiwoom::wire::StockListResponse>, KiwoomError> {
         rest.call(&StockList::EXCHANGE, Some(&cont(i)), p, MergeScope::default()).await
+    }
+
+    fn verdict(e: Option<KiwoomError>) -> Option<(Category, Option<CodeKey>)> {
+        e.and_then(|e| e.failure().map(|f| (f.category(), f.detail())))
+    }
+
+    fn category(e: Option<KiwoomError>) -> Option<Category> {
+        verdict(e).map(|(c, _)| c)
     }
 
     fn token_counter() -> impl Fn(&Sent) -> Option<Result<HttpResponse, TransportError>> {
@@ -802,9 +1007,10 @@ mod tests {
             call_k(&rest, 0, Priority::Screen),
             call_k(&rest, 1, Priority::Screen)
         );
-        assert_eq!(a.err(), Some(KiwoomError::RateLimited));
-        assert!(b.is_ok());
+        assert_eq!(category(a.err()), Some(Category::RateLimit));
+        assert!(matches!(b, Err(KiwoomError::Gated { .. })), "세 번째 429 뒤 공유 관문이 닫혀 뒤의 요청도 기다린다: {b:?}");
         let sent = fake.market_sent();
+        assert!(sent.iter().all(|s| s.cont.as_deref() == Some("k0")));
         let k0: Vec<_> = sent.iter().filter(|s| s.cont.as_deref() == Some("k0")).collect();
         assert_eq!(k0.len(), 3);
         let first = k0[0].at;
@@ -827,11 +1033,13 @@ mod tests {
         }));
         let rest = rest(&fake);
         let scope = MergeScope::default();
-        assert_eq!(rest.call(&StockList::EXCHANGE, None, Priority::Screen, scope).await.err(), Some(KiwoomError::RateLimited));
+        assert_eq!(category(rest.call(&StockList::EXCHANGE, None, Priority::Screen, scope).await.err()), Some(Category::RateLimit));
+        assert!(matches!(rest.call(&StockList::KOSDAQ, None, Priority::Screen, scope).await, Err(KiwoomError::Gated { .. })));
+        assert_eq!(fake.market_sent().len(), 3, "세 번째 429 뒤 다른 요청은 관문에서 기다린다");
+        tokio::time::sleep(GATE_WAIT).await;
         rest.call(&StockList::KOSDAQ, None, Priority::Screen, scope).await.unwrap();
         let sent = fake.market_sent();
-        assert_eq!(sent.len(), 4);
-        assert!(sent[3].at.duration_since(sent[2].at) >= RATE_LIMIT_PAUSE, "세 번째 429 뒤에도 다른 요청을 1초 기다린다");
+        assert!(sent[3].at.duration_since(sent[2].at) >= GATE_WAIT);
     }
 
     #[tokio::test(start_paused = true)]
@@ -860,14 +1068,19 @@ mod tests {
     }
 
     #[tokio::test(start_paused = true)]
-    async fn invalid_token_twice_is_auth_failed() {
+    async fn invalid_token_on_the_new_token_halts_everything() {
         let tokens = token_counter();
         let fake = Arc::new(FakeTransport::new(Duration::ZERO, move |s| tokens(s).unwrap_or_else(invalid_token)));
         let (rest, _guards) = rest_with_saved_token(&fake);
         let r = rest.call(&StockList::EXCHANGE, None, Priority::Screen, MergeScope::default()).await;
-        assert_eq!(r.err(), Some(KiwoomError::AuthFailed { detail: Some(8005) }));
+        let invalid = Some((Category::TokenInvalid, Some(CodeKey::Rest(8005))));
+        assert_eq!(verdict(r.err()), invalid);
         assert_eq!(fake.market_sent().len(), 2);
         assert_eq!(fake.sent().len(), 3, "다시 발급은 한 번");
+        assert_eq!(verdict(rest.halted()), invalid);
+        tokio::time::sleep(Duration::from_secs(MIN_ISSUE_INTERVAL_SECS as u64)).await;
+        assert_eq!(verdict(call_k(&rest, 1, Priority::Screen).await.err()), invalid);
+        assert_eq!(fake.sent().len(), 3, "멈춘 뒤에는 10분이 지나도 보내지 않는다");
     }
 
     #[tokio::test(start_paused = true)]
@@ -878,7 +1091,7 @@ mod tests {
         rest.issue_token().await.unwrap();
         tokio::time::sleep(Duration::from_secs(60)).await;
         let (issue, page) = tokio::join!(rest.issue_token(), call_k(&rest, 0, Priority::Screen));
-        assert!(matches!(issue, Err(KiwoomError::IssueTooSoon { .. })), "{issue:?}");
+        assert!(matches!(issue, Err(KiwoomError::Gated { cause: GateCause::IssueInterval, .. })), "{issue:?}");
         assert!(page.is_ok(), "{page:?}");
         assert_eq!(fake.market_sent()[0].token.as_deref(), Some("tok-1"));
     }
@@ -892,10 +1105,10 @@ mod tests {
         let rest = rest(&fake);
         let first_issue = rest.0.clock.now();
         let until = first_issue.plus_secs(MIN_ISSUE_INTERVAL_SECS);
-        assert_eq!(call_k(&rest, 0, Priority::Screen).await.err(), Some(KiwoomError::IssueTooSoon { until }));
-        assert_eq!(rest.blocked(), Some(KiwoomError::IssueTooSoon { until }));
-        assert_eq!(call_k(&rest, 1, Priority::Screen).await.err(), Some(KiwoomError::IssueTooSoon { until }));
-        assert_eq!(rest.issue_token().await.err(), Some(KiwoomError::IssueTooSoon { until }));
+        assert_eq!(call_k(&rest, 0, Priority::Screen).await.err(), Some(KiwoomError::Gated { until, cause: GateCause::IssueInterval }));
+        assert_eq!(rest.blocked(), Some(KiwoomError::Gated { until, cause: GateCause::IssueInterval }));
+        assert_eq!(call_k(&rest, 1, Priority::Screen).await.err(), Some(KiwoomError::Gated { until, cause: GateCause::IssueInterval }));
+        assert_eq!(rest.issue_token().await.err(), Some(KiwoomError::Gated { until, cause: GateCause::IssueInterval }));
         assert_eq!(fake.sent().len(), 2, "발급 한 번, 조회 한 번");
 
         tokio::time::sleep(Duration::from_secs(MIN_ISSUE_INTERVAL_SECS as u64)).await;
@@ -913,9 +1126,10 @@ mod tests {
             tokens(s).unwrap_or_else(|| ok(json!({"return_code": 3, "return_msg": "인증 실패[8030:투자구분]"}), None))
         }));
         let rest = rest(&fake);
-        assert_eq!(rest.call(&StockList::EXCHANGE, None, Priority::Screen, MergeScope::default()).await.err(), Some(KiwoomError::AuthFailed { detail: Some(8030) }));
-        assert_eq!(rest.call(&StockList::KOSDAQ, None, Priority::Screen, MergeScope::default()).await.err(), Some(KiwoomError::AuthFailed { detail: Some(8030) }));
-        assert_eq!(rest.issue_token().await.err(), Some(KiwoomError::AuthFailed { detail: Some(8030) }));
+        let rejected = Some((Category::AuthBlocked, Some(CodeKey::Rest(8030))));
+        assert_eq!(verdict(rest.call(&StockList::EXCHANGE, None, Priority::Screen, MergeScope::default()).await.err()), rejected);
+        assert_eq!(verdict(rest.call(&StockList::KOSDAQ, None, Priority::Screen, MergeScope::default()).await.err()), rejected);
+        assert_eq!(verdict(rest.issue_token().await.err()), rejected);
         assert_eq!(fake.sent().len(), 2, "멈춘 뒤에는 아무것도 보내지 않는다");
     }
 
@@ -926,10 +1140,10 @@ mod tests {
             tokens(s).unwrap_or_else(|| status(503, json!({"return_code": 3, "return_msg": "인증에 실패했습니다[8050:지정단말기]"})))
         }));
         let rest = rest(&fake);
-        let halted = Some(KiwoomError::AuthFailed { detail: Some(8050) });
-        assert_eq!(rest.call(&StockList::EXCHANGE, None, Priority::Screen, MergeScope::default()).await.err(), halted);
-        assert_eq!(rest.call(&StockList::KOSDAQ, None, Priority::Screen, MergeScope::default()).await.err(), halted);
-        assert_eq!(rest.issue_token().await.err(), halted);
+        let halted = Some((Category::AuthBlocked, Some(CodeKey::Rest(8050))));
+        assert_eq!(verdict(rest.call(&StockList::EXCHANGE, None, Priority::Screen, MergeScope::default()).await.err()), halted);
+        assert_eq!(verdict(rest.call(&StockList::KOSDAQ, None, Priority::Screen, MergeScope::default()).await.err()), halted);
+        assert_eq!(verdict(rest.issue_token().await.err()), halted);
         assert_eq!(fake.sent().len(), 2, "토큰 한 번, 조회 한 번. 재시도도 재발급도 없다");
     }
 
@@ -944,29 +1158,239 @@ mod tests {
             })
         }));
         let rest = rest(&fake);
-        for (i, detail) in [(0, Some(1511)), (1, Some(1634)), (2, None)] {
-            match call_k(&rest, i, Priority::Screen).await {
-                Err(KiwoomError::BadRequest { detail: d, .. }) => assert_eq!(d, detail),
-                other => panic!("{other:?}"),
-            }
+        let expected = [
+            (Category::InvalidRequest, Some(CodeKey::Rest(1511))),
+            (Category::BatchLimit, Some(CodeKey::Rest(1634))),
+            (Category::Unknown, None),
+        ];
+        for (i, want) in expected.into_iter().enumerate() {
+            assert_eq!(verdict(call_k(&rest, i, Priority::Screen).await.err()), Some(want), "k{i}");
         }
         assert_eq!(fake.market_sent().len(), 3);
     }
 
     #[tokio::test(start_paused = true)]
+    async fn unknown_and_protocol_failures_stop_their_path_until_restart() {
+        for (name, reply) in [
+            ("상세 없는 비0", json!({"return_code": 1, "return_msg": "알 수 없음"})),
+            ("표에 없는 상세", json!({"return_code": 3, "return_msg": "실패[8100:처음 보는 코드]"})),
+            ("return_code 없음", json!({"list": []})),
+            ("빈 봉투", json!({})),
+            ("목록 필드 없음", json!({"return_code": 0})),
+        ] {
+            let tokens = token_counter();
+            let fake = Arc::new(FakeTransport::new(Duration::ZERO, move |s| {
+                tokens(s).unwrap_or_else(|| match s.api_id {
+                    ApiId::Ka10099 => ok(reply.clone(), None),
+                    _ => ok(json!({"return_code": 0, "stk_dt_pole_chart_qry": []}), None),
+                })
+            }));
+            let rest = rest(&fake);
+            let first = category(call_k(&rest, 0, Priority::Background).await.err());
+            assert!(matches!(first, Some(Category::Unknown | Category::Protocol)), "{name}: {first:?}");
+            assert_eq!(category(call_k(&rest, 1, Priority::Screen).await.err()), first, "{name}");
+            assert_eq!(fake.market_sent().len(), 1, "{name}: 다시 보내지 않고, 다른 요청도 같은 경로로 보내지 않는다");
+            assert!(rest.stopped(ApiId::Ka10099).is_some() && rest.halted().is_none(), "{name}: 그 경로만 멈춘다");
+            let daily = crate::kiwoom::api::DailyChart::new(domain::StockCode::parse("005930").unwrap(), domain::Venue::Krx, KstDate::new(2026, 11, 9).unwrap());
+            rest.call(&daily, None, Priority::Screen, MergeScope::default()).await.unwrap();
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn the_same_detail_gets_the_same_handling_on_any_http_status() {
+        for http in [200, 403, 429, 500] {
+            let tokens = token_counter();
+            let fake = Arc::new(FakeTransport::new(Duration::ZERO, move |s| {
+                tokens(s).unwrap_or_else(|| status(http, json!({"return_code": 3, "return_msg": "인증에 실패했습니다[8050:지정단말기]"})))
+            }));
+            let blocked = rest(&fake);
+            assert_eq!(category(call_k(&blocked, 0, Priority::Screen).await.err()), Some(Category::AuthBlocked), "8050 HTTP {http}");
+            assert_eq!(fake.sent().len(), 2, "8050 HTTP {http}: 발급 한 번, 조회 한 번");
+
+            let tokens = token_counter();
+            let fake = Arc::new(FakeTransport::new(Duration::ZERO, move |s| {
+                tokens(s).unwrap_or_else(|| if s.token.as_deref() == Some("tok-0") { status(http, json!({"return_code": 3, "return_msg": "[8005:Token이 유효하지 않습니다]"})) } else { list_ok() })
+            }));
+            let (saved, _guards) = rest_with_saved_token(&fake);
+            call_k(&saved, 0, Priority::Screen).await.unwrap();
+            let ids: Vec<_> = fake.sent().iter().map(|s| s.api_id).collect();
+            assert_eq!(ids, [ApiId::Ka10099, ApiId::Au10001, ApiId::Ka10099], "8005 HTTP {http}: 한 번 다시 발급해 한 번 다시 보낸다");
+
+            let tokens = token_counter();
+            let fake = Arc::new(FakeTransport::new(Duration::ZERO, move |s| {
+                tokens(s).unwrap_or_else(|| status(http, json!({"return_code": 2, "return_msg": "[1511:필수]"})))
+            }));
+            let fresh = rest(&fake);
+            assert_eq!(category(call_k(&fresh, 0, Priority::Background).await.err()), Some(Category::InvalidRequest), "1511 HTTP {http}");
+            assert_eq!(fake.market_sent().len(), 1, "1511 HTTP {http}: 다시 보내지 않는다");
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn an_issue_failure_that_is_not_transient_stops_issuing_but_not_requests_with_a_valid_token() {
+        let fake = Arc::new(FakeTransport::new(Duration::ZERO, move |s| match s.api_id {
+            ApiId::Au10001 => ok(json!({"return_code": 1, "return_msg": "알 수 없음"}), None),
+            _ => list_ok(),
+        }));
+        let (rest, _guards) = rest_with_saved_token(&fake);
+        tokio::time::sleep(Duration::from_secs(MIN_ISSUE_INTERVAL_SECS as u64)).await;
+        assert_eq!(category(rest.issue_token().await.err()), Some(Category::Unknown));
+        call_k(&rest, 0, Priority::Screen).await.unwrap();
+        tokio::time::sleep(Duration::from_secs(MIN_ISSUE_INTERVAL_SECS as u64)).await;
+        assert_eq!(category(rest.issue_token().await.err()), Some(Category::Unknown));
+        let ids: Vec<_> = fake.sent().iter().map(|s| s.api_id).collect();
+        assert_eq!(ids, [ApiId::Au10001, ApiId::Ka10099], "발급은 한 번만, 쥐고 있는 토큰의 조회는 계속");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn an_ambiguous_issue_failure_waits_ten_minutes_and_stops_after_the_second() {
+        let fake = Arc::new(FakeTransport::new(Duration::ZERO, move |s| match s.api_id {
+            ApiId::Au10001 => ok(json!({"return_code": 3, "return_msg": "인증에 실패했습니다[8003:토큰 조회 실패]"}), None),
+            _ => list_ok(),
+        }));
+        let rest = rest(&fake);
+        assert_eq!(category(call_k(&rest, 0, Priority::Screen).await.err()), Some(Category::AuthIndeterminate));
+        assert!(matches!(call_k(&rest, 1, Priority::Screen).await, Err(KiwoomError::Gated { cause: GateCause::IssueInterval, .. })));
+        tokio::time::sleep(Duration::from_secs(MIN_ISSUE_INTERVAL_SECS as u64)).await;
+        assert_eq!(category(call_k(&rest, 2, Priority::Screen).await.err()), Some(Category::AuthIndeterminate));
+        tokio::time::sleep(Duration::from_secs(MIN_ISSUE_INTERVAL_SECS as u64)).await;
+        assert_eq!(category(call_k(&rest, 3, Priority::Screen).await.err()), Some(Category::AuthIndeterminate));
+        assert_eq!(category(rest.blocked()), Some(Category::AuthIndeterminate));
+        assert_eq!(fake.sent().len(), 2, "발급 두 번, 그 뒤로는 아무것도 보내지 않는다");
+        assert!(rest.halted().is_none());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_broken_token_response_stops_issuing() {
+        let fake = Arc::new(FakeTransport::new(Duration::ZERO, move |s| match s.api_id {
+            ApiId::Au10001 => ok(json!({"return_code": 0, "return_msg": "정상"}), None),
+            _ => list_ok(),
+        }));
+        let rest = rest(&fake);
+        assert_eq!(category(rest.issue_token().await.err()), Some(Category::Protocol));
+        tokio::time::sleep(Duration::from_secs(MIN_ISSUE_INTERVAL_SECS as u64)).await;
+        assert_eq!(category(call_k(&rest, 0, Priority::Screen).await.err()), Some(Category::Protocol));
+        assert_eq!(fake.sent().len(), 1);
+    }
+
+    #[tokio::test(start_paused = true)]
     async fn network_errors_retry_by_priority() {
         let tokens = token_counter();
-        let fake = Arc::new(FakeTransport::new(Duration::ZERO, move |s| tokens(s).unwrap_or_else(|| Err(TransportError("연결 거부".into())))));
+        let fake = Arc::new(FakeTransport::new(Duration::ZERO, move |s| tokens(s).unwrap_or_else(|| Err(TransportError::refused()))));
         let rest = rest(&fake);
-        assert!(matches!(call_k(&rest, 0, Priority::Screen).await, Err(KiwoomError::Transport(_))));
+        assert_eq!(category(call_k(&rest, 0, Priority::Screen).await.err()), Some(Category::Transient));
         let screen: Vec<_> = fake.market_sent();
         assert_eq!(screen.len(), 2);
         assert!(screen[1].at.duration_since(screen[0].at) >= Duration::from_millis(500));
-        assert!(matches!(call_k(&rest, 1, Priority::Background).await, Err(KiwoomError::Transport(_))));
+        let tokens = token_counter();
+        let fake = Arc::new(FakeTransport::new(Duration::ZERO, move |s| tokens(s).unwrap_or_else(|| Err(TransportError::refused()))));
+        let rest = super::tests::rest(&fake);
+        assert_eq!(category(call_k(&rest, 1, Priority::Background).await.err()), Some(Category::Transient));
         let bg: Vec<_> = fake.market_sent().into_iter().filter(|s| s.cont.as_deref() == Some("k1")).collect();
         assert_eq!(bg.len(), 4);
         let gaps: Vec<u64> = bg.windows(2).map(|w| w[1].at.duration_since(w[0].at).as_secs()).collect();
         assert_eq!(gaps, [1, 2, 4]);
+    }
+
+    fn replies(seq: Vec<Result<HttpResponse, TransportError>>) -> impl Fn(&Sent) -> Result<HttpResponse, TransportError> {
+        let tokens = token_counter();
+        let n = AtomicUsize::new(0);
+        move |s| tokens(s).unwrap_or_else(|| seq.get(n.fetch_add(1, Ordering::SeqCst)).cloned().unwrap_or_else(|| status(503, json!({}))))
+    }
+
+    fn rate_limited() -> Result<HttpResponse, TransportError> {
+        status(429, json!({"return_code": 5, "return_msg": "허용된 요청 개수를 초과하였습니다[1700:유량=5]"}))
+    }
+
+    fn unavailable() -> Result<HttpResponse, TransportError> {
+        status(503, json!({}))
+    }
+
+    fn indeterminate() -> Result<HttpResponse, TransportError> {
+        ok(json!({"return_code": 3, "return_msg": "인증에 실패했습니다[8003:토큰 조회 실패]"}), None)
+    }
+
+    fn gated_for(rest: &KiwoomRest, e: &KiwoomError) -> Option<i64> {
+        matches!(e, KiwoomError::Gated { .. }).then(|| e.retry_at().unwrap().unix() - rest.0.clock.now().unix())
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn one_request_sends_at_most_four_times_on_screen_and_six_otherwise() {
+        for (priority, budget) in [(Priority::Screen, 4), (Priority::Background, 6)] {
+            let seq = vec![rate_limited(), rate_limited(), invalid_token(), unavailable(), unavailable(), unavailable(), unavailable(), unavailable()];
+            let fake = Arc::new(FakeTransport::new(Duration::ZERO, replies(seq)));
+            let (rest, _guards) = rest_with_saved_token(&fake);
+            let err = call_k(&rest, 0, priority).await.unwrap_err();
+            assert_eq!(fake.market_sent().len(), budget, "{priority:?}: 한도 초과·토큰 무효·일시 장애가 번갈아도 총 전송은 예산까지");
+            assert!(gated_for(&rest, &err).is_some(), "{priority:?}: {err:?}");
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn exhausted_transient_failures_close_a_shared_gate_for_thirty_seconds() {
+        let fake = Arc::new(FakeTransport::new(Duration::ZERO, replies(vec![unavailable(), unavailable(), list_ok(), list_ok()])));
+        let rest = rest(&fake);
+        let err = call_k(&rest, 0, Priority::Screen).await.unwrap_err();
+        assert_eq!(gated_for(&rest, &err), Some(30));
+        assert_eq!(category(Some(err)), Some(Category::Transient));
+        let blocked = call_k(&rest, 1, Priority::Background).await.unwrap_err();
+        assert_eq!(blocked.retry_at(), rest.gate_until(), "다른 요청도 같은 관문에서 기다린다");
+        assert_eq!(fake.market_sent().len(), 2, "관문이 닫힌 동안 보내지 않는다");
+        tokio::time::sleep(Duration::from_secs(30)).await;
+        call_k(&rest, 1, Priority::Background).await.unwrap();
+        call_k(&rest, 2, Priority::Screen).await.unwrap();
+        assert_eq!(fake.market_sent().len(), 4, "확인 요청이 성공하면 다시 연다");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn three_failed_checks_stretch_the_gate_to_five_minutes() {
+        let fake = Arc::new(FakeTransport::new(Duration::ZERO, replies(vec![])));
+        let rest = rest(&fake);
+        call_k(&rest, 0, Priority::Screen).await.unwrap_err();
+        let mut waits = Vec::new();
+        for i in 1..=4 {
+            let wait = rest.gate_until().unwrap().unix() - rest.0.clock.now().unix();
+            tokio::time::sleep(Duration::from_secs(wait as u64)).await;
+            let (probe, held) = tokio::join!(call_k(&rest, i, Priority::Screen), call_k(&rest, 100 + i, Priority::Screen));
+            waits.push(gated_for(&rest, &probe.unwrap_err()).unwrap());
+            assert!(matches!(held, Err(KiwoomError::Gated { .. })), "확인 요청이 나가는 동안 다른 요청은 보내지 않는다");
+        }
+        assert_eq!(waits, [30, 30, 300, 300]);
+        assert_eq!(fake.market_sent().len(), 2 + 4, "확인은 한 번에 하나, 다시 보내지 않는다");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn only_the_check_request_reopens_the_gate() {
+        let tokens = token_counter();
+        let fake = Arc::new(FakeTransport::new(Duration::from_secs(1), move |s| {
+            tokens(s).unwrap_or_else(|| if s.cont.as_deref() == Some("k0") { unavailable() } else { list_ok() })
+        }));
+        let rest = rest(&fake);
+        rest.issue_token().await.unwrap();
+        let failing = rest.clone();
+        let failing = tokio::spawn(async move { call_k(&failing, 0, Priority::Screen).await });
+        tokio::time::sleep(Duration::from_millis(2000)).await;
+        call_k(&rest, 1, Priority::Screen).await.unwrap();
+        assert!(matches!(failing.await.unwrap(), Err(KiwoomError::Gated { .. })));
+        assert!(matches!(call_k(&rest, 2, Priority::Screen).await, Err(KiwoomError::Gated { .. })), "관문이 닫힌 뒤 도착한 다른 성공은 관문을 열지 않는다");
+        assert_eq!(fake.market_sent().len(), 3);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn an_ambiguous_auth_failure_on_a_market_request_holds_every_request_for_ten_minutes_then_stops() {
+        let fake = Arc::new(FakeTransport::new(Duration::ZERO, replies(vec![indeterminate(), indeterminate()])));
+        let rest = rest(&fake);
+        let first = call_k(&rest, 0, Priority::Screen).await.unwrap_err();
+        assert_eq!(category(Some(first.clone())), Some(Category::AuthIndeterminate));
+        assert_eq!(gated_for(&rest, &first), Some(MIN_ISSUE_INTERVAL_SECS));
+        let daily = crate::kiwoom::api::DailyChart::new(domain::StockCode::parse("005930").unwrap(), domain::Venue::Krx, KstDate::new(2026, 11, 9).unwrap());
+        assert!(matches!(rest.call(&daily, None, Priority::Screen, MergeScope::default()).await, Err(KiwoomError::Gated { .. })), "다른 API도 같은 자격증명이라 기다린다");
+        assert_eq!(fake.market_sent().len(), 1);
+        tokio::time::sleep(Duration::from_secs(MIN_ISSUE_INTERVAL_SECS as u64)).await;
+        let second = call_k(&rest, 1, Priority::Screen).await.unwrap_err();
+        assert!(matches!(&second, KiwoomError::Stopped(f) if f.category() == Category::AuthIndeterminate), "{second:?}");
+        assert!(matches!(call_k(&rest, 2, Priority::Screen).await, Err(KiwoomError::Stopped(_))));
+        assert_eq!(fake.market_sent().len(), 2, "10분 뒤 확인 한 번, 그 뒤로는 사람이 다시 켤 때까지 보내지 않는다");
     }
 
     #[tokio::test(start_paused = true)]
@@ -976,8 +1400,19 @@ mod tests {
             tokens(s).unwrap_or_else(|| ok(json!({"list": "not a list", "return_code": 0}), None))
         }));
         let rest = rest(&fake);
-        assert!(matches!(rest.call(&StockList::EXCHANGE, None, Priority::Screen, MergeScope::default()).await, Err(KiwoomError::Parse { api_id: ApiId::Ka10099, .. })));
-        assert_eq!(fake.market_sent().len(), 1);
+        assert_eq!(category(rest.call(&StockList::EXCHANGE, None, Priority::Screen, MergeScope::default()).await.err()), Some(Category::Protocol));
+        assert_eq!(category(rest.call(&StockList::KOSDAQ, None, Priority::Screen, MergeScope::default()).await.err()), Some(Category::Protocol));
+        assert_eq!(fake.market_sent().len(), 1, "형식이 틀린 경로로는 다시 보내지 않는다");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_schema_failure_keeps_the_http_status_and_return_code_it_received() {
+        let tokens = token_counter();
+        let fake = Arc::new(FakeTransport::new(Duration::ZERO, move |s| tokens(s).unwrap_or_else(|| ok(json!({"return_code": 0, "return_msg": "정상"}), None))));
+        let rest = rest(&fake);
+        let err = rest.call(&StockList::EXCHANGE, None, Priority::Screen, MergeScope::default()).await.unwrap_err();
+        let f = err.failure().unwrap();
+        assert_eq!((f.category(), f.http_status(), f.return_code()), (Category::Protocol, Some(200), Some(0)));
     }
 
     #[tokio::test(start_paused = true)]

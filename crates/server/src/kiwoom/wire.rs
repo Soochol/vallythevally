@@ -58,7 +58,6 @@ macro_rules! chart_body {
     ($name:ident, $field:ident, $scale:ident, $time:ident) => {
         #[derive(Debug, Deserialize)]
         pub struct $name {
-            #[serde(default)]
             $field: Vec<ChartRow>,
         }
         impl ChartBody for $name {
@@ -151,7 +150,6 @@ fn index_price(s: &str) -> Result<Price, WireError> {
 
 #[derive(Debug, Deserialize)]
 pub struct StockListResponse {
-    #[serde(default)]
     pub list: Vec<ListRow>,
 }
 
@@ -280,22 +278,6 @@ pub fn parse_kst_datetime(s: &str) -> Option<KstTime> {
     let n = |r: std::ops::Range<usize>| s[r].parse::<u32>().ok();
     let tod = TimeOfDay::hms(n(8..10)?, n(10..12)?, n(12..14)?)?;
     Some(KstTime::from_kst_civil(date, tod))
-}
-
-/// 응답 공통 부분. 상세 코드는 `return_msg` 안 대괄호에 있다(§4.3).
-#[derive(Debug, Default, Deserialize)]
-#[serde(default)]
-pub struct Envelope {
-    pub return_code: Option<i64>,
-    pub return_msg: Option<String>,
-}
-
-/// `\[(\d{4})` 첫 자리. 예: "입력 값 오류입니다[1511:…]" → 1511, "…[1634]" → 1634.
-pub fn detail_code(msg: &str) -> Option<u16> {
-    msg.match_indices('[').find_map(|(i, _)| {
-        let digits = msg.get(i + 1..i + 5)?;
-        digits.bytes().all(|b| b.is_ascii_digit()).then(|| digits.parse().ok()).flatten()
-    })
 }
 
 #[cfg(test)]
@@ -459,20 +441,6 @@ mod tests {
         assert_eq!((mismatch[0].price_centi, mismatch[0].base_centi), (10_000, 9_000), "방향이 어긋나도 계산한 값을 쓴다");
         let krx_bad_time = vec![row("005930", "2"), row("005930_NX", "2"), QuoteRow { cntr_tm: "99".into(), ..row("000660_AL", "2") }];
         assert!(parse_quotes(StockQuotesResponse { atn_stk_infr: krx_bad_time }).is_empty());
-    }
-
-    #[test]
-    fn detail_codes() {
-        let env: Envelope = serde_json::from_str(&fixture("ka10081_err_1511")).unwrap();
-        assert_eq!(env.return_code, Some(2));
-        assert_eq!(detail_code(&env.return_msg.unwrap()), Some(1511));
-        for (name, code) in [("err_8005", 8005), ("err_1700", 1700), ("err_1634", 1634)] {
-            let env: Envelope = serde_json::from_str(&fixture(name)).unwrap();
-            assert_eq!(detail_code(env.return_msg.as_deref().unwrap()), Some(code), "{name}");
-        }
-        assert_eq!(detail_code("정상적으로 처리되었습니다"), None);
-        assert_eq!(detail_code("[12]"), None);
-        assert_eq!(detail_code("a[x] b[8005:y]"), Some(8005));
     }
 
     fn listing(name: &str) -> Vec<(String, Listing)> {

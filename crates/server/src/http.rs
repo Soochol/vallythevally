@@ -16,8 +16,8 @@ use crate::api;
 use crate::bars::{BarError, BarService, DEFAULT_LIMIT, MAX_LIMIT};
 use crate::clock::Clock;
 use crate::db::AppDb;
-use crate::kiwoom::rest::KiwoomRest;
-use crate::kiwoom::auth::auth_failed_message;
+use crate::kiwoom::error::{Category, Failure, Note, Surface};
+use crate::kiwoom::rest::{KiwoomError, KiwoomRest};
 use crate::symbols::{NotReady, SymbolDirectory};
 
 pub struct AppState {
@@ -49,11 +49,41 @@ pub fn router(state: Arc<AppState>) -> Router {
 pub struct ApiFailure {
     code: api::ApiErrorCode,
     message: String,
+    reason: Option<api::ApiErrorReason>,
+    retry_at: Option<KstTime>,
+    manual_action_required: bool,
 }
 
 impl ApiFailure {
     pub(crate) fn new(code: api::ApiErrorCode, message: impl Into<String>) -> Self {
-        ApiFailure { code, message: message.into() }
+        ApiFailure { code, message: message.into(), reason: None, retry_at: None, manual_action_required: false }
+    }
+
+    fn kiwoom(e: &KiwoomError) -> Self {
+        use api::ApiErrorCode::*;
+        let code = match e.failure().map(Failure::surface) {
+            Some(Surface::Unavailable) => KiwoomUnavailable,
+            Some(Surface::AuthFailed) => KiwoomAuthFailed,
+            Some(Surface::UnknownSymbol) => UnknownSymbol,
+            Some(Surface::Internal) => Internal,
+            None if matches!(e, KiwoomError::TokenFile(_)) => KiwoomAuthFailed,
+            None => KiwoomUnavailable,
+        };
+        ApiFailure {
+            code,
+            message: e.to_string(),
+            reason: Some(reason(e)),
+            retry_at: e.retry_at(),
+            manual_action_required: e.manual_action_required(),
+        }
+    }
+
+    fn list_not_ready(now: KstTime) -> Self {
+        ApiFailure {
+            reason: Some(api::ApiErrorReason::SymbolListLoading),
+            retry_at: Some(now),
+            ..ApiFailure::new(api::ApiErrorCode::KiwoomUnavailable, "종목 목록을 아직 받지 못했습니다. 잠시 뒤 다시 시도하세요")
+        }
     }
 
     pub(crate) fn bad_request(message: impl Into<String>) -> Self {
@@ -78,7 +108,15 @@ pub fn status_of(code: api::ApiErrorCode) -> StatusCode {
 
 impl IntoResponse for ApiFailure {
     fn into_response(self) -> Response {
-        let body = api::ApiError { error: api::ApiErrorBody { code: self.code, message: self.message } };
+        let body = api::ApiError {
+            error: api::ApiErrorBody {
+                code: self.code,
+                message: self.message,
+                reason: self.reason,
+                retry_at: self.retry_at.map(|t| api::UnixSeconds(t.unix())),
+                manual_action_required: self.manual_action_required,
+            },
+        };
         (status_of(self.code), Json(body)).into_response()
     }
 }
@@ -99,19 +137,22 @@ impl Lookup {
         }
     }
 
-    fn failure(self, e: BarError) -> ApiFailure {
+    fn failure(self, e: BarError, now: KstTime) -> ApiFailure {
         use api::ApiErrorCode::*;
         let what = self.label();
         match e {
             BarError::BadRequest(m) => ApiFailure::new(BadRequest, m),
             BarError::UnknownSymbol => ApiFailure::new(UnknownSymbol, "없는 종목입니다"),
-            BarError::Unavailable(m) => {
-                tracing::warn!(reason = %m, "{what} 요청에 답하지 못했습니다");
-                ApiFailure::new(KiwoomUnavailable, "키움 조회에 실패했습니다. 잠시 뒤 다시 시도하세요")
+            BarError::ListNotReady => ApiFailure::list_not_ready(now),
+            BarError::Kiwoom(e) => {
+                let failure = ApiFailure::kiwoom(&e);
+                if failure.code == Internal {
+                    tracing::error!(reason = %e, "{what} 요청에 답하지 못했습니다");
+                } else {
+                    tracing::warn!(reason = %e, "{what} 요청에 답하지 못했습니다");
+                }
+                failure
             }
-            BarError::AuthFailed { detail } => ApiFailure::new(KiwoomAuthFailed, auth_failed_message(detail)),
-            BarError::TokenWait(m) => ApiFailure::new(KiwoomUnavailable, m),
-            BarError::TokenFile(m) => ApiFailure::new(KiwoomAuthFailed, m),
             BarError::Internal(m) => {
                 tracing::error!(reason = %m, "{what} 요청 처리 중 내부 오류");
                 ApiFailure::new(Internal, "서버 내부 오류입니다")
@@ -120,10 +161,33 @@ impl Lookup {
     }
 }
 
+fn reason(e: &KiwoomError) -> api::ApiErrorReason {
+    use api::ApiErrorReason as R;
+    let Some(f) = e.failure() else {
+        return if matches!(e, KiwoomError::TokenFile(_)) { R::TokenFile } else { R::IssueInterval };
+    };
+    match f.category() {
+        Category::RateLimit => R::RateLimited,
+        Category::Transient => match f.note() {
+            Note::Transport(t) if t.timed_out => R::KiwoomTimeout,
+            Note::Transport(_) | Note::QueueGone => R::KiwoomUnreachable,
+            _ => R::KiwoomError,
+        },
+        Category::TokenInvalid => R::TokenInvalid,
+        Category::AuthBlocked => R::AuthBlocked,
+        Category::AuthIndeterminate => R::AuthIndeterminate,
+        Category::InvalidRequest | Category::BatchLimit => R::InvalidRequest,
+        Category::SymbolMismatch => R::SymbolMismatch,
+        Category::Unsupported => R::Unsupported,
+        Category::Protocol => R::Protocol,
+        Category::Unknown | Category::RealtimeCapacity | Category::ControlRejected | Category::SubscriptionMismatch => R::UnknownFailure,
+    }
+}
+
 pub(crate) async fn symbol_list(st: &AppState) -> Result<Arc<crate::symbols::Directory>, ApiFailure> {
     st.symbols.ready(&st.rest).await.map_err(|e| match e {
-        NotReady::Kiwoom(e) => Lookup::Symbols.failure(e.into()),
-        NotReady::Timeout => ApiFailure::new(api::ApiErrorCode::KiwoomUnavailable, "종목 목록을 아직 받지 못했습니다. 잠시 뒤 다시 시도하세요"),
+        NotReady::Kiwoom(e) => Lookup::Symbols.failure(e.into(), st.clock.now()),
+        NotReady::Timeout => ApiFailure::list_not_ready(st.clock.now()),
     })
 }
 
@@ -178,7 +242,7 @@ fn parse_bars_query(q: &HashMap<String, String>) -> Result<BarsQuery, ApiFailure
 
 async fn bars(State(st): State<Arc<AppState>>, Query(q): Query<HashMap<String, String>>) -> Result<Json<api::BarsPage>, ApiFailure> {
     let q = parse_bars_query(&q)?;
-    let page = st.bars.page(q.key, q.before, q.limit).await.map_err(|e| Lookup::Bars.failure(e))?;
+    let page = st.bars.page(q.key, q.before, q.limit).await.map_err(|e| Lookup::Bars.failure(e, st.clock.now()))?;
     Ok(Json(api::BarsPage {
         symbol: api::SymbolCode(q.key.feed.symbol().as_wire()),
         venue: q.key.feed.venue().map(api::Venue::from),
@@ -208,7 +272,7 @@ async fn quotes(State(st): State<Arc<AppState>>, Query(q): Query<HashMap<String,
             symbols.push(s);
         }
     }
-    Ok(Json(crate::quotes::quotes(&st.rest, &st.bars, &symbols).await.map_err(|e| Lookup::Quotes.failure(e))?))
+    Ok(Json(crate::quotes::quotes(&st.rest, &st.bars, &symbols).await.map_err(|e| Lookup::Quotes.failure(e, st.clock.now()))?))
 }
 
 async fn method_not_allowed(method: Method, uri: Uri) -> ApiFailure {
@@ -740,7 +804,9 @@ mod tests {
             put(&app, "/api/layouts/L2", &nxt_layout),
             symbols.refresh(&rest, crate::kiwoom::rest::Priority::Screen),
         );
-        assert_eq!(list.err(), Some(crate::kiwoom::rest::KiwoomError::AuthFailed { detail: Some(8050) }));
+        let list = list.unwrap_err();
+        let failure = list.failure().expect("키움 판정");
+        assert_eq!((failure.category(), failure.detail()), (crate::kiwoom::error::Category::AuthBlocked, Some(crate::kiwoom::error::CodeKey::Rest(8050))));
         for (what, (s, v)) in [("종목", symbol), ("봉", bar), ("NXT 레이아웃", layout)] {
             assert_eq!((s, code(&v)), (StatusCode::BAD_GATEWAY, "kiwoom_auth_failed"), "{what}: {v}");
         }

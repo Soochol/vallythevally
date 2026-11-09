@@ -7,6 +7,7 @@ import type { Plugin } from "vite";
 import type { ApiError } from "../src/api/generated/ApiError.ts";
 import type { ApiErrorCode } from "../src/api/generated/ApiErrorCode.ts";
 import type { Period } from "../src/api/generated/Period.ts";
+import type { Resume } from "../src/api/http.ts";
 import { barsPage, findSymbol, publicInfo, quoteOf, resolveVenue, search } from "./fakeMarket.ts";
 import { createUserData, type Reply } from "./fakeUserData.ts";
 
@@ -32,8 +33,8 @@ function send(res: ServerResponse, status: number, body: unknown) {
   res.setHeader("Content-Type", "application/json; charset=utf-8");
   res.end(JSON.stringify(body));
 }
-function fail(res: ServerResponse, status: number, code: ApiErrorCode, message: string) {
-  const body: ApiError = { error: { code, message } };
+function fail(res: ServerResponse, status: number, code: ApiErrorCode, message: string, resume: Partial<Resume> = {}) {
+  const body: ApiError = { error: { code, message, reason: null, retryAt: null, manualActionRequired: false, ...resume } };
   send(res, status, body);
 }
 
@@ -96,7 +97,10 @@ export function fakeApi(): Plugin {
           if (!s) return fail(res, 404, "unknown_symbol", `종목 ${code}을 찾을 수 없습니다`);
           if (s.fail === "unknown_symbol") return fail(res, 404, "unknown_symbol", `종목 ${code}을 찾을 수 없습니다`);
           if (s.fail === "kiwoom_unavailable") {
-            return fail(res, 503, "kiwoom_unavailable", "키움 조회가 응답하지 않습니다. 잠시 뒤 다시 시도하세요.");
+            return fail(res, 503, "kiwoom_unavailable", "키움 조회가 응답하지 않습니다. 잠시 뒤 다시 시도하세요.", {
+              reason: "kiwoom_error",
+              retryAt: Math.floor(Date.now() / 1000) + 5,
+            });
           }
           const v = resolveVenue(s, url.searchParams.get("venue"));
           if ("error" in v) return fail(res, 400, "bad_request", v.error);

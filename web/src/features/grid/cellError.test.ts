@@ -20,16 +20,19 @@ test("서버에 닿지 못해도 다시 시도할 수 있다", () => {
   expect(cellErrorView(new ApiRequestError("network", "서버에 연결하지 못했습니다"), "005930").action).toBe("retry");
 });
 
-test("키움 인증 실패는 다시 시도 버튼이 없다", () => {
-  expect(cellErrorView(new ApiRequestError("kiwoom_auth_failed", "키움 인증 실패"), "005930").action).toBeNull();
+test("사람이 고쳐야 하는 실패는 다시 시도 버튼이 없다", () => {
+  const stopped = new ApiRequestError("kiwoom_auth_failed", "키움 인증 실패", { reason: "auth_blocked", manualActionRequired: true });
+  expect(cellErrorView(stopped, "005930").action).toBeNull();
+  const path = new ApiRequestError("internal", "응답 형식이 다릅니다", { reason: "protocol", manualActionRequired: true });
+  expect(cellErrorView(path, "005930").action).toBeNull();
 });
 
-test("과거 페이지 실패는 서버 문장을 붙이고, 인증 실패만 다시 시도를 두지 않는다", () => {
+test("과거 페이지 실패는 서버 문장을 붙이고, 사람이 고쳐야 할 때만 다시 시도를 두지 않는다", () => {
   expect(olderErrorView(new ApiRequestError("kiwoom_unavailable", "키움 조회에 실패했습니다. 잠시 뒤 다시 시도하세요"), "005930")).toEqual({
     text: "과거 봉을 받지 못했습니다. 키움 조회에 실패했습니다. 잠시 뒤 다시 시도하세요",
     retry: true,
   });
-  expect(olderErrorView(new ApiRequestError("kiwoom_auth_failed", "키움 인증에 실패했습니다. 운영자가 설정을 확인해야 합니다"), "005930")).toEqual({
+  expect(olderErrorView(new ApiRequestError("kiwoom_auth_failed", "키움 인증에 실패했습니다. 운영자가 설정을 확인해야 합니다", { manualActionRequired: true }), "005930")).toEqual({
     text: "과거 봉을 받지 못했습니다. 키움 인증에 실패했습니다. 운영자가 설정을 확인해야 합니다",
     retry: false,
   });

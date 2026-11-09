@@ -1,5 +1,7 @@
 import { useKiwoomStore } from "../stores/kiwoom";
 import type { ApiErrorCode } from "./generated/ApiErrorCode";
+import type { ApiErrorReason } from "./generated/ApiErrorReason";
+import type { UnixSeconds } from "./generated/UnixSeconds";
 
 const API_ERROR_CODES = [
   "bad_request",
@@ -18,19 +20,66 @@ const API_ERROR_CODES = [
 const _allCodesListed: Exclude<ApiErrorCode, (typeof API_ERROR_CODES)[number]> extends never ? true : never = true;
 void _allCodesListed;
 
+const API_ERROR_REASONS = [
+  "rate_limited",
+  "kiwoom_unreachable",
+  "kiwoom_timeout",
+  "kiwoom_error",
+  "token_invalid",
+  "auth_blocked",
+  "auth_indeterminate",
+  "issue_interval",
+  "token_file",
+  "symbol_mismatch",
+  "invalid_request",
+  "unsupported",
+  "unknown_failure",
+  "protocol",
+  "symbol_list_loading",
+] as const satisfies readonly ApiErrorReason[];
+
+const _allReasonsListed: Exclude<ApiErrorReason, (typeof API_ERROR_REASONS)[number]> extends never ? true : never = true;
+void _allReasonsListed;
+
+export interface Resume {
+  reason: ApiErrorReason | null;
+  retryAt: UnixSeconds | null;
+  manualActionRequired: boolean;
+}
+
 /** 서버의 ApiError, 또는 서버에 닿지 못한 경우("network"). */
-export class ApiRequestError extends Error {
+export class ApiRequestError extends Error implements Resume {
+  readonly reason: ApiErrorReason | null;
+  readonly retryAt: UnixSeconds | null;
+  readonly manualActionRequired: boolean;
+
   constructor(
     readonly code: ApiErrorCode | "network",
     message: string,
+    resume: Partial<Resume> = {},
   ) {
     super(message);
     this.name = "ApiRequestError";
+    this.reason = resume.reason ?? null;
+    this.retryAt = resume.retryAt ?? null;
+    this.manualActionRequired = resume.manualActionRequired ?? false;
   }
 }
 
 function isApiErrorCode(x: unknown): x is ApiErrorCode {
   return typeof x === "string" && (API_ERROR_CODES as readonly string[]).includes(x);
+}
+
+function isApiErrorReason(x: unknown): x is ApiErrorReason {
+  return typeof x === "string" && (API_ERROR_REASONS as readonly string[]).includes(x);
+}
+
+function readResume(err: { reason?: unknown; retryAt?: unknown; manualActionRequired?: unknown }): Resume {
+  return {
+    reason: isApiErrorReason(err.reason) ? err.reason : null,
+    retryAt: typeof err.retryAt === "number" && Number.isFinite(err.retryAt) ? err.retryAt : null,
+    manualActionRequired: err.manualActionRequired === true,
+  };
 }
 
 async function parseError(res: Response): Promise<ApiRequestError> {
@@ -39,8 +88,9 @@ async function parseError(res: Response): Promise<ApiRequestError> {
     if (typeof body === "object" && body !== null && "error" in body) {
       const err = (body as { error: unknown }).error;
       if (typeof err === "object" && err !== null) {
-        const { code, message } = err as { code?: unknown; message?: unknown };
-        if (isApiErrorCode(code) && typeof message === "string") return new ApiRequestError(code, message);
+        const fields = err as { code?: unknown; message?: unknown; reason?: unknown; retryAt?: unknown; manualActionRequired?: unknown };
+        const { code, message } = fields;
+        if (isApiErrorCode(code) && typeof message === "string") return new ApiRequestError(code, message, readResume(fields));
       }
     }
   } catch {
@@ -86,10 +136,13 @@ async function request(path: string, init: RequestInit): Promise<Response> {
     if (init.signal?.aborted) throw e;
     throw new ApiRequestError("network", "서버에 연결하지 못했습니다");
   }
+  const kiwoom = useKiwoomStore.getState();
   if (!res.ok) {
     const error = await parseError(res);
-    if (error.code === "kiwoom_auth_failed") useKiwoomStore.getState().reportAuthFailure(error.message);
+    if (error.manualActionRequired) kiwoom.reportStopped(error.message);
+    if (error.reason === "kiwoom_timeout") kiwoom.reportNotice(error.message);
     throw error;
   }
+  kiwoom.clearNotice();
   return res;
 }
