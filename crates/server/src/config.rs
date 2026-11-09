@@ -378,4 +378,29 @@ mod tests {
         assert!(parse_env("NOEQUALS\n").is_err());
         assert!(read_env_file(Path::new("relative/.env")).is_err());
     }
+
+    #[test]
+    fn a_kiwoom_url_counts_as_real_by_its_parsed_host_and_fake_means_loopback() {
+        let keys = [("VALLY_KIWOOM_APP_KEY", KEY), ("VALLY_KIWOOM_APP_SECRET", SECRET)];
+        let start = |rest: &str, ws: &str, clock: bool| {
+            let mut process = vars(&[("VALLY_KIWOOM_BASE_URL", rest), ("VALLY_KIWOOM_WS_URL", ws)]);
+            if clock {
+                process.insert("VALLY_CLOCK_START".into(), "20261109100000".into());
+            }
+            Config::from_vars(vars(&keys), process, lock, token)
+        };
+        let fake_rest = "http://127.0.0.1:5";
+        let fake_ws = "ws://127.0.0.1:5/api/dostk/websocket";
+        for real_ws in ["wss://API.KIWOOM.COM:10000/api/dostk/websocket", "wss://api.kiwoom.com:10000/api/dostk/websocket?", "wss://api.kiwoom.com./api/dostk/websocket", "wss://mockapi.kiwoom.com:10000/api/dostk/websocket"] {
+            assert!(start(fake_rest, real_ws, true).is_err(), "가짜 REST + 실제 WS: {real_ws}");
+            assert!(start(fake_rest, real_ws, false).is_err(), "가짜 REST + 실제 WS: {real_ws}");
+        }
+        assert!(start("https://API.kiwoom.com", fake_ws, true).is_err(), "실제 REST + 가짜 WS");
+        assert!(start("https://api.kiwoom.com", "wss://API.KIWOOM.COM:10000/api/dostk/websocket", true).is_err(), "시험 시계 + 실제 키움");
+        assert!(start("https://api.kiwoom.com", "wss://API.KIWOOM.COM:10000/api/dostk/websocket", false).is_ok(), "둘 다 실제 키움");
+        assert!(start("http://example.com", "ws://example.com/ws", true).is_err(), "가짜는 루프백만");
+        assert!(start("not a url", fake_ws, true).is_err());
+        assert!(start("http://localhost:5", "ws://[::1]:5/ws", true).is_ok(), "루프백 이름과 IPv6");
+    }
 }
+
