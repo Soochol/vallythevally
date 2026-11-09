@@ -3,6 +3,7 @@ use std::fmt;
 use crate::period::{Bucket, Period};
 use crate::price::{Price, Volume};
 use crate::symbol::Feed;
+use crate::trade::Trade;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OhlcvError {
@@ -45,6 +46,19 @@ impl Ohlcv {
         } else {
             Err(OhlcvError { open, high, low, close })
         }
+    }
+
+    /// 체결 하나로 시작하는 봉.
+    pub fn from_trade(t: &Trade) -> Self {
+        Ohlcv { open: t.price, high: t.price, low: t.price, close: t.price, volume: t.qty }
+    }
+
+    /// 체결을 더한다. 불변식이 저절로 유지된다.
+    pub fn absorb(&mut self, t: &Trade) {
+        self.high = self.high.max(t.price);
+        self.low = self.low.min(t.price);
+        self.close = t.price;
+        self.volume = Volume(self.volume.0.saturating_add(t.qty.0));
     }
 
     pub fn open(&self) -> Price {
