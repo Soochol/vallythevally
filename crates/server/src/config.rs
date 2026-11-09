@@ -5,6 +5,10 @@ use std::fmt;
 use std::net::{IpAddr, SocketAddr};
 use std::path::{Path, PathBuf};
 
+use domain::KstTime;
+
+use crate::kiwoom::wire::parse_kst_datetime;
+
 /// Debug와 Display 모두 "[가림]"만 낸다. 값은 `expose()`로만 꺼낸다(§11.3).
 #[derive(Clone, PartialEq, Eq)]
 pub struct Secret<T>(T);
@@ -68,12 +72,15 @@ impl BindAddr {
 }
 
 pub const DEFAULT_KIWOOM_BASE_URL: &str = "https://api.kiwoom.com";
+pub const DEFAULT_KIWOOM_WS_URL: &str = "wss://api.kiwoom.com:10000/api/dostk/websocket";
 
 const KNOWN_KEYS: &[&str] = &[
     "VALLY_ENV_FILE",
     "VALLY_KIWOOM_APP_KEY",
     "VALLY_KIWOOM_APP_SECRET",
     "VALLY_KIWOOM_BASE_URL",
+    "VALLY_KIWOOM_WS_URL",
+    "VALLY_CLOCK_START",
     "VALLY_DB_PATH",
     "VALLY_LOCK_PATH",
     "VALLY_TOKEN_PATH",
@@ -90,6 +97,9 @@ pub struct Config {
     pub kiwoom_app_secret: Secret<String>,
     /// 테스트가 가짜 키움 서버를 가리키게 하려고 둔 키. 기본은 실제 키움 주소다.
     pub kiwoom_base_url: String,
+    pub kiwoom_ws_url: String,
+    /// 시험용. 서버 시계가 이 KST 시각에서 시작해 실제 시간만큼 흐른다. 실제 키움 주소와 함께 주면 시작하지 않는다.
+    pub clock_start: Option<KstTime>,
     pub lock_path: PathBuf,
     pub token_path: PathBuf,
     pub bind: BindAddr,
@@ -132,13 +142,22 @@ impl Config {
                 .cloned()
                 .ok_or_else(|| ConfigError(format!("{k}가 없습니다")))
         };
+        let url = |k: &str, default: &str| vars.get(k).map(|s| s.trim_end_matches('/').to_owned()).unwrap_or_else(|| default.to_owned());
+        let kiwoom_base_url = url("VALLY_KIWOOM_BASE_URL", DEFAULT_KIWOOM_BASE_URL);
+        let kiwoom_ws_url = url("VALLY_KIWOOM_WS_URL", DEFAULT_KIWOOM_WS_URL);
+        let clock_start = match vars.get("VALLY_CLOCK_START") {
+            None => None,
+            Some(s) => Some(parse_kst_datetime(s).ok_or_else(|| ConfigError(format!("VALLY_CLOCK_START는 KST YYYYMMDDHHMMSS입니다: {s}")))?),
+        };
+        if clock_start.is_some() && (kiwoom_base_url == DEFAULT_KIWOOM_BASE_URL || kiwoom_ws_url == DEFAULT_KIWOOM_WS_URL) {
+            return Err(ConfigError("VALLY_CLOCK_START는 가짜 키움(VALLY_KIWOOM_BASE_URL, VALLY_KIWOOM_WS_URL)과만 쓸 수 있습니다".into()));
+        }
         let config = Config {
             kiwoom_app_key: Secret::new(required("VALLY_KIWOOM_APP_KEY")?),
             kiwoom_app_secret: Secret::new(required("VALLY_KIWOOM_APP_SECRET")?),
-            kiwoom_base_url: vars
-                .get("VALLY_KIWOOM_BASE_URL")
-                .map(|s| s.trim_end_matches('/').to_owned())
-                .unwrap_or_else(|| DEFAULT_KIWOOM_BASE_URL.to_owned()),
+            kiwoom_base_url,
+            kiwoom_ws_url,
+            clock_start,
             lock_path: match vars.get("VALLY_LOCK_PATH") {
                 Some(p) => PathBuf::from(p),
                 None => default_lock()?,
@@ -291,6 +310,24 @@ mod tests {
         .unwrap();
         assert_eq!(warnings.len(), 1);
         assert!(warnings[0].contains("VALLY_BIDN"));
+    }
+
+    #[test]
+    fn clock_start_needs_a_fake_kiwoom() {
+        let keys = [("VALLY_KIWOOM_APP_KEY", KEY), ("VALLY_KIWOOM_APP_SECRET", SECRET), ("VALLY_CLOCK_START", "20261109100000")];
+        let fake = [("VALLY_KIWOOM_BASE_URL", "http://127.0.0.1:5"), ("VALLY_KIWOOM_WS_URL", "ws://127.0.0.1:5/api/dostk/websocket")];
+        let (c, _) = Config::from_vars(vars(&keys), vars(&fake), lock, token).unwrap();
+        assert_eq!(c.clock_start.map(|t| t.to_string()), Some("2026-11-09 10:00:00 KST".to_owned()));
+        assert_eq!(c.kiwoom_ws_url, "ws://127.0.0.1:5/api/dostk/websocket");
+
+        assert!(Config::from_vars(vars(&keys), BTreeMap::new(), lock, token).is_err(), "실제 키움 주소와 함께면 거부");
+        assert!(Config::from_vars(vars(&keys), vars(&fake[..1]), lock, token).is_err(), "WS만 실제 키움이어도 거부");
+        assert!(Config::from_vars(vars(&keys), vars(&fake[1..]), lock, token).is_err(), "REST만 실제 키움이어도 거부");
+        let bad = [("VALLY_KIWOOM_APP_KEY", KEY), ("VALLY_KIWOOM_APP_SECRET", SECRET), ("VALLY_CLOCK_START", "2026-11-09")];
+        assert!(Config::from_vars(vars(&bad), vars(&fake), lock, token).is_err());
+
+        let (c, _) = Config::from_vars(vars(&keys[..2]), BTreeMap::new(), lock, token).unwrap();
+        assert_eq!((c.clock_start, c.kiwoom_ws_url.as_str()), (None, DEFAULT_KIWOOM_WS_URL));
     }
 
     #[test]

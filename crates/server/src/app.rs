@@ -98,7 +98,13 @@ async fn serve(config: Config, token_file: TokenFile) -> ExitCode {
             return ExitCode::from(1);
         }
     };
-    let clock = Clock::system();
+    let clock = match config.clock_start {
+        None => Clock::system(),
+        Some(start) => {
+            tracing::warn!(%start, "시험용 시계로 켭니다(VALLY_CLOCK_START)");
+            Clock::fake(start)
+        }
+    };
     let rest = KiwoomRest::new(
         Arc::new(transport),
         KiwoomAuth::new(config.kiwoom_app_key.clone(), config.kiwoom_app_secret.clone(), Some(token_file)),
