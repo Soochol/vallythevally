@@ -460,8 +460,9 @@ struct State {
     issued: Option<Issued>,    // { token: Secret<String>, issued_at, expires_at, generation }
     last_request_at: Option<KstTime>, // 마지막으로 au10001을 보낸 시각. 실패한 요청도 센다
     stale: bool,               // 토큰 무효 응답을 받아 다시 발급해야 한다
-    halted: Option<u16>,       // 되돌릴 수 없는 인증 실패의 상세 코드
 }
+// KiwoomAuth.halted: watch::Sender<Option<Halt>>. 기다리는 쪽(종목 목록 대기)이 멈춤을 바로 안다.
+pub enum Halt { Rejected(u16), TokenFileUnreadable(FileError) }
 
 /// 토큰이 다시 발급될 때마다 1씩 는다.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -473,8 +474,8 @@ impl KiwoomAuth {
     /// 지금 보낼 때 쓸 토큰. 무효로 표시됐거나, 멈췄거나, 만료까지 10분이 안 남았으면 None.
     pub fn current(&self, now: KstTime) -> Option<(Secret<String>, TokenGen)>;
     pub fn needs_issue(&self, now: KstTime) -> bool;
-    /// au10001 본문. 보내기 전에 last_request_at을 지금으로 적고 파일에 남긴다. 앱키와 시크릿이 들어 있으므로 Secret으로만 낸다.
-    pub fn begin_issue(&self, now: KstTime) -> Secret<String>;
+    /// au10001 본문. 보내기 전에 last_request_at을 지금으로 적고 파일에 남긴다. 남기지 못하면 Err이고 대기열은 보내지 않는다. 앱키와 시크릿이 들어 있으므로 Secret으로만 낸다.
+    pub fn begin_issue(&self, now: KstTime) -> Result<Secret<String>, FileError>;
     /// last_request_at에서 10분이 지나지 않았으면 다시 보낼 수 있는 시각.
     pub fn issue_blocked_until(&self, now: KstTime) -> Option<KstTime>;
     pub fn record_issued(&self, resp: TokenResponse, now: KstTime) -> Result<TokenGen, AuthError>;
@@ -483,13 +484,16 @@ impl KiwoomAuth {
     /// 매일 20:05: 지금 토큰이 그날 20:05 전에 발급된 것인가.
     pub fn due_daily_reissue(&self, now: KstTime) -> bool;
     pub fn halt(&self, detail: u16);
+    pub fn halted(&self) -> Option<Halt>;
+    pub async fn until_halted(&self) -> Halt;
 }
 
 impl KiwoomRest {
     /// au10001을 대기열 맨 앞에 넣고 결과를 기다린다. 서버를 켤 때(유효한 토큰이 없을 때)와 20:05에만 부른다.
     pub async fn issue_token(&self) -> Result<TokenGen, KiwoomError>;
-    /// 지금 보내면 키움에 닿지 않고 바로 실패할 이유: 인증 거절로 멈췄거나(AuthFailed), 토큰이 없는데 발급 간격 안이다(IssueTooSoon).
+    /// 지금 보내면 키움에 닿지 않고 바로 실패할 이유: 멈췄거나(AuthFailed, TokenFile), 토큰이 없는데 발급 간격 안이다(IssueTooSoon).
     pub fn blocked(&self) -> Option<KiwoomError>;
+    pub async fn until_halted(&self) -> KiwoomError;
 }
 ```
 
@@ -499,7 +503,7 @@ impl KiwoomRest {
   2. 하루 한 번, 장이 끝난 뒤. 매일 20:05에, 지금 토큰이 그날 20:05 전에 발급된 것이면 다시 발급한다. 토큰은 24시간 유효하므로 만료가 장중에 오지 않는다. 20:05에 실패하면 07:45까지 10분마다 다시 시도한다.
   3. 토큰 무효 응답(`[8005]`)을 받았을 때. 그 요청은 `invalidate`를 한 번 부르고 한 번 다시 보낸다. 다시 보낼 때 대기열이 먼저 발급한다. 그래도 `[8005]`면 그 요청은 `AuthFailed`다.
   4. 안전장치: 만료까지 10분이 안 남으면 `current`가 `None`을 주고, 대기열이 다음 요청 전에 발급한다.
-- **발급 사이 최소 10분**: 위 넷 모두에 걸린다. 대기열은 au10001을 보내기 **전에** `last_request_at`을 파일에 적는다. 그래서 실패한 요청(8050, 네트워크 오류)도 세고, 재시작해도 파일의 시각을 따른다. 10분이 지나지 않았는데 발급해야 하면 보내지 않고, 기다리던 시세 요청과 `issue_token`을 곧바로 `IssueTooSoon { until }`으로 실패시킨다. 브라우저에는 `kiwoom_unavailable`(503)과 "키움 토큰은 발급 사이를 10분 띄웁니다. <시각>부터 다시 받으니 그 뒤에 다시 시도하세요"가 간다. 저절로 풀리므로 `kiwoom_auth_failed`가 아니다. 종목 목록을 기다리는 요청도 기다리지 않고 같은 이유로 실패한다(`blocked`).
+- **발급 사이 최소 10분**: 위 넷 모두에 걸린다. 대기열은 au10001을 보내기 **전에** `last_request_at`을 파일에 적고, 적지 못하면 보내지 않는다(`TokenFile` 오류, 브라우저에는 `kiwoom_auth_failed`). 그래서 실패한 요청(8050, 네트워크 오류)도 세고, 재시작해도 파일의 시각을 따른다. 10분이 지나지 않았는데 발급해야 하면 보내지 않고, 기다리던 시세 요청과 `issue_token`을 곧바로 `IssueTooSoon { until }`으로 실패시킨다. 브라우저에는 `kiwoom_unavailable`(503)과 "키움 토큰은 발급 사이를 10분 띄웁니다. <시각>부터 다시 받으니 그 뒤에 다시 시도하세요"가 간다. 저절로 풀리므로 `kiwoom_auth_failed`가 아니다. 종목 목록을 기다리는 요청도 기다리지 않고 같은 이유로 실패한다(`SymbolDirectory::ready`가 먼저 `blocked`를 본다).
 - **토큰은 보내는 순간에 읽는다**(D16): 대기 중인 요청은 토큰을 쥐고 있지 않다. 대기열이 요청을 내보낼 때 `current`로 읽는다. 그래서 새 토큰은 그 뒤의 모든 REST 요청에 바로 쓰인다. 옛 토큰으로 보낸 REST는 `[8005]`로 실패하기 때문이다(kiwoom.md 11.10).
 - **au10001이 실패하면**: 기다리던 시세 요청을 모두 실패로 돌려준다. 토큰 없이는 어느 요청도 보낼 수 없다.
 - **토큰과 WebSocket**(#4, D16)
@@ -507,10 +511,13 @@ impl KiwoomRest {
   - 같은 앱키로 두 번째 LOGIN을 하면 기존 세션이 close 1000 'Bye'로 끊긴다. 그래서 서버 하나 원칙(ADR 0004, 아래 잠금 파일)을 지킨다.
 - **토큰 파일**(ADR 0004 개정, D18): 토큰은 저장소 밖 파일에 두고 다시 쓴다.
   - 경로: `VALLY_TOKEN_PATH`(§11.1). 기본은 `$XDG_STATE_HOME/vallythevally/token.json`, `XDG_STATE_HOME`이 없으면 `~/.local/state/vallythevally/token.json`이다. 둘 다 없으면 시작하지 않는다.
-  - 내용: `{"token": {"value", "expires_dt", "issued_at"} 또는 null, "last_request_at"}`. `expires_dt`는 au10001 응답의 KST `YYYYMMDDhhmmss`, 두 시각은 유닉스 초다.
-  - 권한: 파일 600, 디렉터리 700(없으면 만든다). 쓰기는 같은 디렉터리의 임시 파일(600)에 쓰고 `sync_all` 뒤 rename한다. 쓰지 못하면 `error` 로그를 남기고 메모리의 토큰으로 계속한다.
+  - 내용: `{"credential", "token": {"value", "expires_dt", "issued_at"} 또는 null, "last_request_at"}`. `credential`은 `token_file::credential_id(앱키)`(`"sha256:<16진수>"`)다. `expires_dt`는 au10001 응답의 KST `YYYYMMDDhhmmss`, 두 시각은 유닉스 초다.
+  - 앱키 대조: `credential`이 지금 앱키와 다르거나 없으면(이 필드가 생기기 전의 파일) 토큰은 버리고 `last_request_at`은 따른다.
+  - 권한: 토큰 파일이 든 디렉터리는 이 서버 전용이다. 없으면 700으로 만든다. 디렉터리나 파일에 그룹·다른 사용자 권한이 있으면 읽지도 쓰지도 않고 `chmod` 명령을 담은 오류를 낸다. `VALLY_TOKEN_PATH`가 홈 같은 공용 디렉터리를 가리킬 수 있어 권한을 고쳐 주지는 않는다. 쓰기는 같은 디렉터리에 `tempfile`로 새 임시 파일(배타적 생성, 600)을 만들어 쓰고 `sync_all` 뒤 rename한다.
+  - 쓰기 실패: 발급 요청 시각을 쓰지 못하면 위처럼 보내지 않는다. 받은 토큰을 쓰지 못하면 `error` 로그를 남기고 메모리의 토큰으로 계속한다. 요청 시각은 이미 파일에 있으니 다시 켜도 간격을 지킨다.
   - 잠금: `TokenFile::new(path, &InstanceLock)`이라 잠금을 쥔 프로세스만 연다. 실측 프로그램도 같은 잠금을 잡은 뒤 같은 파일을 쓴다(kiwoom.md 머리말).
-  - 읽기 실패(깨진 파일, 읽을 수 없는 만료 시각)는 "토큰 없음"으로 본다. 로그에는 파일 내용을 싣지 않는다.
+  - 파일 없음(처음 실행)은 "토큰 없음"이다. 파일이 있는데 못 읽으면(빈 파일, 깨진 JSON, 권한, 부모가 디렉터리가 아님) 마지막 발급 요청 시각을 모르므로 `Halt::TokenFileUnreadable`로 조회와 발급을 멈춘다. 경로와 원인을 `error` 로그와 `kiwoom_auth_failed` 응답(상태 표시줄)에 낸다. 파일은 덮어쓰지 않는다. 운영자가 고치거나, 마지막 발급에서 10분이 지난 뒤 지우고 다시 켠다. 로그에는 파일 내용을 싣지 않는다.
+  - 읽을 수 없는 만료 시각만 있는 토큰은 버린다.
   - 8050으로 멈춘 상태는 파일에 남기지 않는다. 서버를 다시 켜는 것이 사람이 원인을 고쳤다는 표시다.
 - 토큰 폐기(au10002)는 허용 목록에 넣지 않는다. 폐기할 일이 없다.
 
@@ -597,7 +604,7 @@ pub struct MergeScope(pub u64);
 
 키움 응답은 세 겹으로 판정한다. 실측 결과(kiwoom.md §9)를 따른다.
 
-0. **인증 거절 상세 코드**: `return_msg`에 8001~8200 중 8005 밖의 상세 코드가 있으면 HTTP 상태와 상관없이 먼저 멈춘다(아래 표). 8050이 HTTP 200으로 오는지 4xx/5xx로 오는지 아직 재지 못했다. 4xx/5xx를 전송 오류로 넘기면 조회마다 토큰을 다시 발급해 계정이 잠긴다(가짜 키움에서 HTTP 403 + `[8050]`이면 11초에 8번 발급했다).
+0. **인증 거절 상세 코드**: `return_msg`에 멈출 상세 코드가 있으면 HTTP 상태와 상관없이 먼저 멈춘다(아래 표). 지금 구현(`is_halting`)은 8001~8200 중 8005 밖을 모두 멈춤으로 본다. 이것은 키움이 보장한 범주가 아니라 임시 판정이고, ADR 0009의 코드 표와 다르다. #20에서 명시 코드 표로 바꾼다. 8050이 HTTP 200으로 오는지 4xx/5xx로 오는지 아직 재지 못했다. 4xx/5xx를 전송 오류로 넘기면 조회마다 토큰을 다시 발급해 계정이 잠긴다(가짜 키움에서 HTTP 403 + `[8050]`이면 11초에 8번 발급했다).
 1. **HTTP 상태**: 200이 아니면 전송 오류, 요청 개수 초과(429), 서버 오류(5xx)다. 토큰 무효는 HTTP 200으로 온다.
 2. **최상위 `return_code`**: 0이면 성공이다. 0이 아니면 실패다. 이 숫자는 키움 오류 코드가 아니라 오류의 큰 갈래다. 관측한 값은 2(입력 값 오류), 3(인증 실패), 5(요청 개수 초과 갈래)다. **같은 5에 1700과 1634가 함께 오므로** 대응은 상세 코드로 가른다.
 3. **`return_msg` 안의 상세 코드**: 키움 오류 코드는 메시지 속 대괄호에 들어 있다. 예: `"입력 값 오류입니다[1511:필수 입력 값에 값이 존재하지 않습니다. …]"`. 파서는 정규식 `\[(\d{4}):`로 꺼낸다. 없으면 `None`이다.
@@ -628,7 +635,7 @@ pub enum KiwoomError {
 |---|---|---|
 | 요청 개수 초과 | HTTP 429, `return_code: 5`, 상세 코드 1700(`유량=5`가 메시지에 있다). 판정은 HTTP 429 또는 상세 1700 | 같은 요청을 그 대기열 맨 앞에 다시 넣는다. 대기열 전체를 1초 멈춘다. 같은 요청이 3번 연속 걸리면 실패로 돌려준다. 260ms 간격이 모자랐다는 뜻이므로 `warn` 로그를 남긴다. |
 | 토큰 무효·만료 | **HTTP 200**, `return_code: 3`, 상세 코드 8005. 판정은 상세 8005. 만료된 진짜 토큰도 같은 형태인지는 [실측 대기] | `invalidate` 한 번, 그다음 같은 요청을 한 번 다시 보낸다. 그래도 실패하면 `AuthFailed`. |
-| 앱키·IP·투자구분 인증 실패 | 상세 코드 8001~8200 중 8005 밖. HTTP 상태는 보지 않는다 | 되돌릴 수 없는 설정 문제다. 모든 조회와 실시간을 멈춘다. 다시 발급하지 않는다. 켤 때의 종목 목록 재시도(10초), 07:45 목록 갱신 재시도, 20:05 토큰 재발급도 멈춘다. 종목 목록을 기다리는 요청(`/api/symbols`, `/api/bars`)도 기다리지 않고 곧바로 `kiwoom_auth_failed`다. 오류 문장과 `error` 로그에 원인과 조치를 적는다(`auth::auth_failed_message`). 운영자가 고치고 서버를 다시 켠다. |
+| 앱키·IP·투자구분 인증 실패 | 지금은 상세 코드 8001~8200 중 8005 밖(임시 판정, #20에서 ADR 0009 표로). HTTP 상태는 보지 않는다 | 되돌릴 수 없는 설정 문제다. 모든 조회와 실시간을 멈춘다. 다시 발급하지 않는다. 켤 때의 종목 목록 재시도(10초), 07:45 목록 갱신 재시도, 20:05 토큰 재발급도 멈춘다. 종목 목록을 기다리는 요청(`/api/symbols`, `/api/bars`)도 기다리지 않고 곧바로 `kiwoom_auth_failed`다. 오류 문장과 `error` 로그에 원인과 조치를 적는다(`auth::auth_failed_message`). 운영자가 고치고 서버를 다시 켠다. |
 | 지정단말기 인증 실패 | 상세 코드 **8050** | 위와 같이 멈춘다. 문장: "키움 IP 미등록 또는 반복 발급 잠금입니다. 지금 공인 IP를 키움 포털에 등록하세요. 반복 발급 잠금이면 포털에서 해제됐는지 확인하세요." 공인 IP는 외부 서비스로 알아내지 않는다. 2026-11-09에 IP 미등록으로 실제로 겪었다(ADR 0004). |
 | 한 번에 넣은 종목이 너무 많음 | HTTP 200, `return_code: 5`, 상세 코드 1634(ka10095에 101종목 이상) | 우리 코드의 버그다(§5.3이 100개씩 나눈다). 물러서거나 다시 보내지 않는다. `error` 로그. 1700과 섞으면 같은 요청을 되풀이하게 되므로 반드시 상세 코드로 가른다. |
 | 없는 종목 | 성공 응답의 빈 행 | 다시 보내지 않는다. 브라우저에는 `unknown_symbol`. |

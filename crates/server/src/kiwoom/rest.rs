@@ -535,7 +535,6 @@ impl Inner {
     }
 }
 
-/// 키움 명세의 8001~8200은 인증 오류이고, 그중 8005만 토큰 무효라 다시 받으면 풀린다.
 fn is_halting(detail: u16) -> bool {
     (8001..=8200).contains(&detail) && detail != 8005
 }

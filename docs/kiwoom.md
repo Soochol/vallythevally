@@ -14,8 +14,9 @@
 - **실측 프로그램의 토큰 규칙**(2026-11-10부터, ADR 0004·backend.md §4.1): 서버와 같은 토큰 파일과 잠금을 쓴다.
   - 먼저 서버 잠금(`$XDG_RUNTIME_DIR/vallythevally/server.lock`, `flock -n`)을 잡는다. 못 잡으면 키움에 아무것도 보내지 않고 끝낸다.
   - 토큰은 `$XDG_STATE_HOME/vallythevally/token.json`(기본 `~/.local/state/vallythevally/token.json`)을 읽고 쓴다. `tools/kiwoom-probe/.token`은 더 쓰지 않는다.
-  - 파일 모양: `{"token": {"value", "expires_dt", "issued_at"} 또는 null, "last_request_at"}`. 두 시각은 유닉스 초다. 쓰기는 같은 디렉터리의 임시 파일(권한 600)에 쓰고 rename한다.
-  - 만료 10분 전보다 이르면 그 토큰을 쓴다. 발급해야 하면 `last_request_at`에서 10분이 지났는지 먼저 보고, au10001을 보내기 **전에** `last_request_at`을 지금으로 적는다.
+  - 파일 모양: `{"credential", "token": {"value", "expires_dt", "issued_at"} 또는 null, "last_request_at"}`. 두 시각은 유닉스 초다. `credential`은 `"sha256:"` 뒤에 앱키 SHA-256의 16진수다. 이 값이 지금 앱키와 다르거나 없으면 그 토큰은 쓰지 않는다. 쓰기는 같은 디렉터리의 새 임시 파일(배타적 생성, 권한 600)에 쓰고 rename한다.
+  - 파일이나 디렉터리에 그룹·다른 사용자 권한이 있거나, 파일이 있는데 읽지 못하면 키움에 아무것도 보내지 않고 끝낸다. 파일을 덮어쓰지 않는다.
+  - 만료 10분 전보다 이르면 그 토큰을 쓴다. 발급해야 하면 `last_request_at`에서 10분이 지났는지 먼저 보고, au10001을 보내기 **전에** `last_request_at`을 지금으로 적는다. 적지 못하면 보내지 않는다.
   - 상세 코드 8050을 받으면 HTTP 상태와 상관없이 그 자리에서 멈춘다. 다시 보내지 않는다.
 - **호출 간격**: 300ms 이상(초당 약 3.3회)으로 두었다. 이 간격에서는 1700대 한도 오류가 나지 않았다. 일부러 몰아 보낸 시험은 10.1절에 있다.
 - 응답 원본은 `tools/kiwoom-probe/out/*.json`에 있다. 아래 예시에는 토큰이 들어 있지 않다. 토큰은 요청 헤더와 LOGIN 프레임에만 실리고, 둘 다 기록하지 않았다.
