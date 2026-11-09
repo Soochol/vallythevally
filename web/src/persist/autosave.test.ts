@@ -8,7 +8,7 @@ import { PAYLOAD_LIMIT_BYTES } from "./bytes";
 import { ApiRequestError } from "../api/http";
 import { restore } from "./restore";
 import { DEFAULT_UI_PREFS, toUiState } from "./uiState";
-import { FIRST_WATCHLIST_ID } from "../lib/watchlist";
+import { FIRST_WATCHLIST_ID, MAX_WATCHLIST_NAME, MAX_WATCHLISTS } from "../lib/watchlist";
 
 const FIRST = { id: FIRST_WATCHLIST_ID, name: "기본" };
 
@@ -102,6 +102,24 @@ test("목록을 만들고 종목을 옮기면 목록 전체를 한 본문으로 
     ],
     revision: expect.any(Number),
   });
+});
+
+test("옛 한 목록 한도(64KB)에 들던 종목을 가장 긴 감싸개 20개로 감싸도 순서 변경을 보낸다", async () => {
+  const legacyBytes = (symbols: string[]) => JSON.stringify({ symbols, revision: Number.MAX_SAFE_INTEGER }).length;
+  const codes: string[] = [];
+  while (legacyBytes(codes) <= PAYLOAD_LIMIT_BYTES) codes.push(String(100_000 + codes.length));
+  codes.pop();
+  expect(codes.length).toBeGreaterThanOrEqual(7_274);
+  const lists = Array.from({ length: MAX_WATCHLISTS }, (_, i) => ({
+    id: String(i).padStart(64, "0"),
+    name: "𝄞".repeat(MAX_WATCHLIST_NAME - String(i).length) + i,
+    symbols: i === 0 ? codes : [],
+  }));
+  useWatchlistStore.getState().load(lists);
+  useWatchlistStore.getState().move(lists[0]!.id, codes[1]!, 0);
+  await vi.advanceTimersByTimeAsync(0);
+  expect(usePersistStore.getState().saves.watchlist).not.toEqual({ kind: "failed", reason: "too_large" });
+  expect(puts.at(-1)!.body).toEqual({ lists: [{ ...lists[0], symbols: [codes[1], codes[0], ...codes.slice(2)] }, ...lists.slice(1)], revision: expect.any(Number) });
 });
 
 test("UiState가 64KB를 넘으면 최근 본 종목을 지우고 한 번 다시 보낸다", async () => {

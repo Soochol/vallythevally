@@ -615,6 +615,26 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn watchlists_take_every_list_the_old_single_list_limit_took() {
+        let f = live_fixture(true).await;
+        let legacy_body = |codes: &[String]| json!({"symbols": codes, "revision": i64::MAX}).to_string();
+        let mut codes: Vec<String> = Vec::new();
+        while legacy_body(&codes).len() <= crate::user_routes::JSON_LIMIT {
+            codes.push(format!("{:06}", 100_000 + codes.len()));
+        }
+        codes.pop();
+        assert!(codes.len() >= 7_274, "리뷰 반례(7,274종목)보다 크다: {}", codes.len());
+
+        let lists: Vec<Value> = (0..20)
+            .map(|i| json!({"id": format!("{i:0>64}"), "name": format!("{i:𝄞>20}"), "symbols": if i == 0 { codes.clone() } else { vec![] }}))
+            .collect();
+        let all = json!({"lists": lists, "revision": i64::MAX});
+        let (s, v) = put(&f.app, "/api/watchlists", &all).await;
+        assert_eq!(s, StatusCode::OK, "옛 한도에 들던 목록을 가장 긴 감싸개 20개로 감싸도 받는다: {}", v["error"]);
+        assert_eq!(json(&f.app, "/api/watchlists").await, (StatusCode::OK, all));
+    }
+
+    #[tokio::test]
     async fn layouts_round_trip_and_rejections() {
         let f = live_fixture(true).await;
         let (s, v) = json(&f.app, "/api/layouts").await;
