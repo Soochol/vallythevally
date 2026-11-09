@@ -18,3 +18,7 @@ bindings/
 # 웹 프런트 의존성과 빌드 산출물
 web/node_modules/
 web/dist/
+
+# Playwright e2e 결과
+web/test-results/
+web/playwright-report/
