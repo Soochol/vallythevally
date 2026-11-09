@@ -1,3 +1,4 @@
+import { CHART_CREDIT } from "../../chart/snapshot";
 import { useKiwoomStore } from "../../stores/kiwoom";
 import { Attribution } from "./attribution";
 import { SaveStatus } from "./SaveStatus";
@@ -20,7 +21,7 @@ export function StatusBar() {
       )}
       <SaveStatus />
       <span className="flex-1" />
-      <Attribution text="Charts by TradingView Lightweight Charts™" className="text-text-2 underline underline-offset-2" />
+      <Attribution text={CHART_CREDIT} className="text-text-2 underline underline-offset-2" />
     </footer>
   );
 }

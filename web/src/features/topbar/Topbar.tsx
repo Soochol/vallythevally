@@ -5,11 +5,12 @@ import { PERIOD_LABEL, PERIODS, symbolSub } from "../../lib/symbol";
 import { useCell, useLayoutStore } from "../../stores/layout";
 import { useSelectionStore } from "../../stores/selection";
 import { useTheme, useUiStore } from "../../stores/ui";
-import { BrandIcon, MoonIcon, SearchIcon, SunIcon } from "../icons";
+import { BrandIcon, CameraIcon, CopyIcon, MoonIcon, SearchIcon, SunIcon } from "../icons";
+import { canCopyImage, saveSnapshot } from "../snapshot/saveSnapshot";
 import { VenuePicker } from "../venue/VenuePicker";
 import { StyleMenu } from "./StyleMenu";
 
-/** 위쪽 막대(frontend.md §2.1). 종목, 거래소(주식만), 봉 주기, 봉 모양, 로그 축, 테마. */
+/** 위쪽 막대(frontend.md §2.1). 종목, 거래소(주식만), 봉 주기, 봉 모양, 로그 축, 차트 이미지, 테마. */
 export function Topbar() {
   const slot = useSelectionStore((s) => s.activeSlot);
   const openSearch = useSelectionStore((s) => s.openSearch);
@@ -75,6 +76,27 @@ export function Topbar() {
       >
         로그
       </button>
+      <span className="tb-sep" />
+      <button
+        type="button"
+        className="icon-btn"
+        title="차트 이미지 내려받기 (Alt+S)"
+        aria-label="차트 이미지 내려받기"
+        onClick={() => saveSnapshot(slot, "download")}
+      >
+        <CameraIcon />
+      </button>
+      {canCopyImage() && (
+        <button
+          type="button"
+          className="icon-btn"
+          title="차트 이미지 복사 (Alt+Shift+S)"
+          aria-label="차트 이미지 복사"
+          onClick={() => saveSnapshot(slot, "copy")}
+        >
+          <CopyIcon />
+        </button>
+      )}
       <span className="flex-1" />
       <button type="button" className="icon-btn" title="테마 바꾸기" aria-label="테마 바꾸기" onClick={toggle}>
         {theme === "dark" ? <SunIcon /> : <MoonIcon />}

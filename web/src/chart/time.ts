@@ -30,8 +30,12 @@ export function isIntraday(period: Period): boolean {
 
 /** 봉 시각. 일·주·월봉은 날짜만, 분봉은 `2026-11-06 19:55`. */
 export function formatBarTime(t: UnixSeconds, period: Period): string {
+  return isIntraday(period) ? formatKstMinute(t) : kstParts(t).date;
+}
+
+export function formatKstMinute(t: UnixSeconds): string {
   const { date, clock } = kstParts(t);
-  return isIntraday(period) ? `${date} ${clock}` : date;
+  return `${date} ${clock}`;
 }
 
 /** 한국 시각 `HH:MM`. */

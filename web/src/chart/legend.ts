@@ -1,6 +1,6 @@
 import type { Bar } from "../api/generated/Bar";
 import type { Period } from "../api/generated/Period";
-import { direction, formatChange, formatPercent, formatPrice, formatVolume } from "../lib/format";
+import { type Direction, direction, formatChange, formatPercent, formatPrice, formatVolume } from "../lib/format";
 import { formatBarTime } from "./time";
 
 const ROW = "w-max pr-1 rounded-s bg-[color-mix(in_srgb,var(--chart-bg)_78%,transparent)]";
@@ -13,6 +13,31 @@ export interface LegendBar {
   isCurrent: boolean;
   isIndex: boolean;
   period: Period;
+}
+
+export interface LegendParts {
+  close: string;
+  change: string;
+  dir: Direction;
+  time: string;
+  cells: [label: string, value: string][];
+}
+
+export function legendParts({ bar, prev, isIndex, period }: LegendBar): LegendParts {
+  const chg = prev ? bar.c - prev.c : 0;
+  return {
+    close: formatPrice(bar.c, isIndex),
+    change: prev ? `${formatChange(chg, isIndex)}  ${formatPercent((chg / prev.c) * 100)}` : "",
+    dir: direction(chg),
+    time: formatBarTime(bar.t, period),
+    cells: [
+      ["시", formatPrice(bar.o, isIndex)],
+      ["고", formatPrice(bar.h, isIndex)],
+      ["저", formatPrice(bar.l, isIndex)],
+      ["종", formatPrice(bar.c, isIndex)],
+      ["량", formatVolume(bar.v)],
+    ],
+  };
 }
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, className: string, text = ""): HTMLElementTagNameMap[K] {
@@ -64,24 +89,16 @@ export class Legend {
     this.priceRow.hidden = v === null;
     this.ohlc.hidden = v === null;
     if (!v) return;
-    const { bar, prev, isIndex } = v;
-    const chg = prev ? bar.c - prev.c : 0;
-    const dir = DIR_CLASS[direction(chg)];
-    this.close.textContent = formatPrice(bar.c, isIndex);
+    const parts = legendParts(v);
+    const dir = DIR_CLASS[parts.dir];
+    this.close.textContent = parts.close;
     this.close.className = `text-xl font-semibold tracking-[-0.02em] ${dir}`;
-    this.change.textContent = prev ? `${formatChange(chg, isIndex)}  ${formatPercent((chg / prev.c) * 100)}` : "";
+    this.change.textContent = parts.change;
     this.change.className = `text-s whitespace-pre ${dir}`;
-    this.time.textContent = formatBarTime(bar.t, v.period);
+    this.time.textContent = parts.time;
     this.fetched.hidden = !v.isCurrent;
-    const cells: [string, string][] = [
-      ["시", formatPrice(bar.o, isIndex)],
-      ["고", formatPrice(bar.h, isIndex)],
-      ["저", formatPrice(bar.l, isIndex)],
-      ["종", formatPrice(bar.c, isIndex)],
-      ["량", formatVolume(bar.v)],
-    ];
     this.ohlc.replaceChildren(
-      ...cells.map(([k, val]) => {
+      ...parts.cells.map(([k, val]) => {
         const span = el("span", "");
         span.append(el("i", "mr-[3px] not-italic text-text-3", k), val);
         return span;

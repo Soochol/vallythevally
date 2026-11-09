@@ -1,7 +1,9 @@
 /** 차트가 쓰는 토큰 값. CSS 변수에서 읽는다(테마를 바꾸면 다시 읽어 setTheme). */
 export interface ThemeTokens {
   chartBg: string;
+  text: string;
   text2: string;
+  text3: string;
   line: string;
   grid: string;
   raised: string;
@@ -20,7 +22,9 @@ export function readThemeTokens(root: HTMLElement = document.documentElement): T
   const v = (name: string) => s.getPropertyValue(name).trim();
   return {
     chartBg: v("--chart-bg"),
+    text: v("--text"),
     text2: v("--text-2"),
+    text3: v("--text-3"),
     line: v("--line"),
     grid: v("--grid"),
     raised: v("--raised"),

@@ -6,7 +6,8 @@ export type HotkeyAction =
   | { kind: "period"; period: Period }
   | { kind: "periodStep"; step: -1 | 1 }
   | { kind: "toggleLog" }
-  | { kind: "toggleWatch" };
+  | { kind: "toggleWatch" }
+  | { kind: "snapshot"; mode: "download" | "copy" };
 
 export interface KeyLike {
   code: string;
@@ -16,7 +17,9 @@ export interface KeyLike {
   shiftKey: boolean;
 }
 
-export const HOTKEYS: { keys: string; label: string; action: HotkeyAction; match: (e: KeyLike) => boolean }[] = (() => {
+export type Layout = "desktop" | "phone";
+
+export const HOTKEYS: { keys: string; label: string; action: HotkeyAction; match: (e: KeyLike) => boolean; desktopOnly?: true }[] = (() => {
   const plain = (code: string) => (e: KeyLike) => e.code === code && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey;
   const shifted = (code: string) => (e: KeyLike) => e.code === code && !e.ctrlKey && !e.metaKey && !e.altKey && e.shiftKey;
   return [
@@ -40,6 +43,19 @@ export const HOTKEYS: { keys: string; label: string; action: HotkeyAction; match
       action: { kind: "toggleWatch" },
       match: (e) => e.code === "KeyW" && e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey,
     },
+    {
+      keys: "Alt+S",
+      label: "차트 이미지 내려받기",
+      action: { kind: "snapshot", mode: "download" },
+      match: (e) => e.code === "KeyS" && e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey,
+    },
+    {
+      keys: "Alt+Shift+S",
+      label: "차트 이미지 복사",
+      action: { kind: "snapshot", mode: "copy" },
+      match: (e) => e.code === "KeyS" && e.altKey && !e.ctrlKey && !e.metaKey && e.shiftKey,
+      desktopOnly: true,
+    },
   ];
 })();
 
@@ -47,8 +63,8 @@ export function periodKey(p: Period): string | undefined {
   return HOTKEYS.find((h) => h.action.kind === "period" && h.action.period === p)?.keys;
 }
 
-export function matchHotkey(e: KeyLike): HotkeyAction | null {
-  return HOTKEYS.find((h) => h.match(e))?.action ?? null;
+export function matchHotkey(e: KeyLike, layout: Layout): HotkeyAction | null {
+  return HOTKEYS.find((h) => h.match(e) && (layout === "desktop" || !h.desktopOnly))?.action ?? null;
 }
 
 /** 입력칸에 초점이 있으면 단축키를 쓰지 않는다. */
