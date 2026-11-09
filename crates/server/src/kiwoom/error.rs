@@ -731,6 +731,17 @@ mod tests {
     }
 
     #[test]
+    fn a_timeout_names_the_stage_and_the_security_program_that_may_block_it() {
+        use crate::kiwoom::transport::{Stage, TransportError};
+        let text = Failure::transport(ApiId::Ka10081, TransportError { stage: Stage::AwaitResponse, timed_out: true }).to_string();
+        assert!(text.contains("키움 응답이 15초 안에 오지 않았습니다"), "{text}");
+        assert!(text.contains("응답 대기 단계"), "{text}");
+        assert!(text.contains("이 PC의 보안 프로그램(예: AhnLab ASTx)이 연결을 막고 있을 수 있습니다"), "{text}");
+        let refused = Failure::transport(ApiId::Ka10081, TransportError { stage: Stage::Connect, timed_out: false }).to_string();
+        assert!(refused.contains("연결 단계") && !refused.contains("ASTx"), "{refused}");
+    }
+
+    #[test]
     fn issue_failures_keep_no_message() {
         let body = r#"{"return_code": 3, "return_msg": "실패[8002:FAKE-APPKEY-err-1111]"}"#;
         let f = judge(ApiId::Au10001, 200, body).unwrap_err();
