@@ -104,10 +104,16 @@ async fn serve(config: Config, token_file: TokenFile) -> ExitCode {
         KiwoomAuth::new(config.kiwoom_app_key.clone(), config.kiwoom_app_secret.clone(), Some(token_file)),
         clock.clone(),
     );
-    if !rest.auth().needs_issue(clock.now()) {
-        tracing::info!(path = %config.token_path.display(), "파일의 토큰을 다시 씁니다. 발급하지 않습니다");
-    } else if let Err(e) = rest.issue_token().await {
-        tracing::error!(error = %e, "첫 토큰을 받지 못했습니다. 조회가 들어오면 다시 받아 봅니다");
+    match rest.halted() {
+        Some(_) => {}
+        None if !rest.auth().needs_issue(clock.now()) => {
+            tracing::info!(path = %config.token_path.display(), "파일의 토큰을 다시 씁니다. 발급하지 않습니다");
+        }
+        None => {
+            if let Err(e) = rest.issue_token().await {
+                tracing::error!(error = %e, "첫 토큰을 받지 못했습니다. 조회가 들어오면 다시 받아 봅니다");
+            }
+        }
     }
     let symbols = Arc::new(SymbolDirectory::default());
     tokio::spawn(load_symbols_at_startup(rest.clone(), symbols.clone()));

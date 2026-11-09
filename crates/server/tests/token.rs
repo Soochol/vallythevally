@@ -166,7 +166,9 @@ async fn assert_never_issues(fake: &FakeKiwoom, cases: Vec<(&str, Setup)>) {
             let logs = server.stop().await;
             assert_eq!((status, body["error"]["code"].as_str()), (502, Some("kiwoom_auth_failed")), "{name}: {body}\n{logs}");
             assert!(body["error"]["message"].as_str().unwrap().contains("토큰 파일"), "{name}: {body}");
-            assert!(logs.contains(&token.display().to_string()), "{name}: 로그에 경로가 있다\n{logs}");
+            let error = logs.lines().find(|l| l.contains("ERROR") && l.contains("토큰 파일을 읽지 못했습니다"));
+            assert!(error.is_some_and(|l| l.contains(&token.display().to_string())), "{name}: 오류 로그에 경로가 있다\n{logs}");
+            assert!(!logs.contains("파일의 토큰을 다시 씁니다"), "{name}\n{logs}");
         }
         assert_eq!(fake.requests(), 0, "{name}: {:?}", fake.api_ids());
         assert_eq!(std::fs::read(&untouched).unwrap(), before, "{name}: 고치지 않고 그대로 둔다");
