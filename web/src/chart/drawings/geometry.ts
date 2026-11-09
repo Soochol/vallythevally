@@ -1,7 +1,9 @@
 import type { UnixSeconds } from "../../api/generated/UnixSeconds";
 import type { PriceAxis } from "./anchor";
 import type { Shape } from "./toolSpec";
-import type { DrawingId, DrawingPoint, Extend, ScreenPoint, TextStyle } from "./types";
+import { approxTextMeasure, textBounds, textLayout, textLocalPoint, type TextMeasure } from "./textLayout";
+import type { DrawingId, DrawingPoint, Extend, ScreenPoint } from "./types";
+export { approxTextMeasure, type TextMeasure } from "./textLayout";
 
 export const LINE_HIT_PX = 6;
 export const HANDLE_HIT_PX = 6;
@@ -12,14 +14,6 @@ export interface Pane {
   width: number;
   height: number;
 }
-
-export type TextMeasure = (text: string, style: TextStyle) => { width: number; height: number };
-
-export const approxTextMeasure: TextMeasure = (text, style) => {
-  const lines = text.split("\n");
-  const longest = Math.max(...lines.map((l) => l.length));
-  return { width: longest * style.size * 0.6, height: lines.length * style.size * 1.2 };
-};
 
 export interface HitItem {
   id: DrawingId;
@@ -107,17 +101,6 @@ function boxEdgeDistance(box: Box, p: ScreenPoint): number {
   return polylineDistance(corners, true, p);
 }
 
-function textBox(s: Extract<Shape, { kind: "text" }>, measure: TextMeasure): Box {
-  const m = measure(s.text, s.style);
-  const pad = s.box?.padding ?? 0;
-  const vertical = s.orientation === "vertical";
-  const w = (vertical ? m.height : m.width) + 2 * pad;
-  const h = (vertical ? m.width : m.height) + 2 * pad;
-  const x1 = s.align === "left" ? s.at.x : s.align === "center" ? s.at.x - w / 2 : s.at.x - w;
-  const y1 = s.baseline === "top" ? s.at.y : s.baseline === "middle" ? s.at.y - h / 2 : s.at.y - h;
-  return { x1, y1, x2: x1 + w, y2: y1 + h };
-}
-
 function ellipseDistance(c: ScreenPoint, rx: number, ry: number, p: ScreenPoint): number {
   if (rx === 0 || ry === 0) return distanceToSegment({ x: c.x - rx, y: c.y - ry }, { x: c.x + rx, y: c.y + ry }, p);
   const d = Math.hypot((p.x - c.x) / rx, (p.y - c.y) / ry);
@@ -153,7 +136,7 @@ export function hitShape(s: Shape, p: ScreenPoint, pane: Pane, measure: TextMeas
       return s.fill?.on === true && d <= s.r ? "fill" : null;
     }
     case "text":
-      return inBox(textBox(s, measure), p) ? "fill" : null;
+      return inBox(textLayout(s, measure).bounds, textLocalPoint(s, p)) ? "fill" : null;
     case "hband":
       return s.fill.on && inBox(normalize({ x: s.x1, y: s.y1 }, { x: s.x2, y: s.y2 }), p) ? "fill" : null;
     case "vline":
@@ -209,7 +192,7 @@ export function shapeBounds(s: Shape, pane: Pane, measure: TextMeasure = approxT
     case "circle":
       return { x1: s.c.x - s.r, y1: s.c.y - s.r, x2: s.c.x + s.r, y2: s.c.y + s.r };
     case "text":
-      return textBox(s, measure);
+      return textBounds(s, textLayout(s, measure));
     case "hband":
       return normalize({ x: s.x1, y: s.y1 }, { x: s.x2, y: s.y2 });
     case "vline":

@@ -1,6 +1,7 @@
 import type { IPrimitivePaneRenderer, IPrimitivePaneView, ISeriesPrimitive, ISeriesPrimitiveAxisView, IPanePrimitive, PrimitiveHoveredItem, SeriesAttachedParameter } from "lightweight-charts";
 import { frameHit, type RenderFrame } from "./frame";
 import { HANDLE_DIAMETER_PX } from "./geometry";
+import { prepareText, textFont, textLayout, type TextMeasure } from "./textLayout";
 import type { Shape } from "./toolSpec";
 import type { Fill, ScreenPoint, Stroke } from "./types";
 
@@ -22,6 +23,14 @@ function arrow(c: CanvasRenderingContext2D, from: ScreenPoint, to: ScreenPoint, 
   const angle = Math.atan2(to.y - from.y, to.x - from.x); const size = 7 + s.width;
   c.beginPath(); c.moveTo(to.x - size * Math.cos(angle - 0.45), to.y - size * Math.sin(angle - 0.45));
   c.lineTo(to.x, to.y); c.lineTo(to.x - size * Math.cos(angle + 0.45), to.y - size * Math.sin(angle + 0.45)); stroke(c, { ...s, dash: "solid" });
+}
+
+function canvasTextMeasure(c: CanvasRenderingContext2D): TextMeasure {
+  return (text, style) => {
+    c.font = textFont(style); c.textAlign = "left"; c.textBaseline = "top";
+    const m = c.measureText(text);
+    return { width: m.width, height: style.size * 1.2, ink: { x1: -m.actualBoundingBoxLeft, y1: -m.actualBoundingBoxAscent, x2: m.actualBoundingBoxRight, y2: m.actualBoundingBoxDescent } };
+  };
 }
 
 export function paintShape(c: CanvasRenderingContext2D, s: Shape, pane: { width: number; height: number }) {
@@ -57,22 +66,13 @@ export function paintShape(c: CanvasRenderingContext2D, s: Shape, pane: { width:
     case "hband": c.rect(s.x1, s.y1, s.x2 - s.x1, s.y2 - s.y1); fill(c, s.fill); break;
     case "vline": c.moveTo(s.x, 0); c.lineTo(s.x, pane.height); stroke(c, s.stroke); break;
     case "text": {
-      const t = s.style; c.font = `${t.italic ? "italic " : ""}${t.bold ? "600 " : ""}${t.size}px Pretendard, sans-serif`;
-      let lines = s.text.split("\n");
-      const wrapWidth = s.box?.wrapWidth;
-      if (wrapWidth) lines = lines.flatMap((line) => {
-        const rows: string[] = []; let row = "";
-        for (const letter of line) { if (row && c.measureText(row + letter).width > wrapWidth) { rows.push(row); row = ""; } row += letter; }
-        return [...rows, row];
-      });
+      const layout = textLayout(s, canvasTextMeasure(c)); c.font = layout.font;
       c.translate(s.at.x, s.at.y); if (s.orientation === "vertical") c.rotate(-Math.PI / 2);
-      const w = Math.max(0, ...lines.map((line) => c.measureText(line).width)); const h = lines.length * t.size * 1.2;
-      const x = s.align === "center" ? -w / 2 : s.align === "right" ? -w : 0;
-      const y = s.baseline === "middle" ? -h / 2 : s.baseline === "bottom" ? -h : 0;
-      const pad = s.box?.padding ?? 0;
-      c.beginPath(); c.rect(x - pad, y - pad, w + pad * 2, h + pad * 2); fill(c, s.box?.background); stroke(c, s.box?.border);
-      c.fillStyle = drawingColor(t.color); c.textAlign = "left"; c.textBaseline = "top";
-      lines.forEach((line, i) => c.fillText(line, x, y + i * t.size * 1.2)); break;
+      const b = layout.box;
+      c.beginPath(); c.rect(b.x1, b.y1, b.x2 - b.x1, b.y2 - b.y1); fill(c, s.box?.background); stroke(c, s.box?.border);
+      c.fillStyle = drawingColor(s.style.color); c.textAlign = "left"; c.textBaseline = "top";
+      for (const line of layout.lines) c.fillText(line.text, line.x, line.y);
+      break;
     }
   }
   c.restore();
@@ -84,21 +84,39 @@ export class DrawingLayer implements ISeriesPrimitive {
   private prices: ISeriesPrimitiveAxisView[] = [];
   private times: ISeriesPrimitiveAxisView[] = [];
   private readonly views: readonly IPrimitivePaneView[];
+  private readonly measure: TextMeasure;
+  private readonly fontsLoaded = () => this.refresh();
+  private attachment = 0;
 
   constructor(private build: () => RenderFrame) {
-    this.frame = build();
+    const context = document.createElement("canvas").getContext("2d");
+    if (!context) throw new Error("Drawing text canvas unavailable");
+    this.measure = canvasTextMeasure(context);
+    this.frame = this.prepare(build());
     this.views = [{ zOrder: () => "normal", renderer: () => ({ draw: (target: Target) => this.draw(target) }) }];
   }
-  attached(p: SeriesAttachedParameter) { this.requestUpdate = p.requestUpdate; this.refresh(); }
-  detached() { this.requestUpdate = null; }
+  attached(p: SeriesAttachedParameter) {
+    this.requestUpdate = p.requestUpdate;
+    const attachment = ++this.attachment;
+    document.fonts.addEventListener("loadingdone", this.fontsLoaded);
+    void document.fonts.ready.then(() => { if (this.attachment === attachment) this.refresh(); });
+    this.refresh();
+  }
+  detached() { this.attachment++; document.fonts.removeEventListener("loadingdone", this.fontsLoaded); this.requestUpdate = null; }
   refresh() { this.updateAllViews(); this.requestUpdate?.(); }
   current() { return this.frame; }
   paneViews() { return this.views; }
   priceAxisViews() { return this.prices; }
   timeAxisViews() { return this.times; }
 
+  private prepare(frame: RenderFrame): RenderFrame {
+    const shape = (s: Shape) => s.kind === "text" ? prepareText(s, this.measure) : s;
+    return { ...frame, items: frame.items.map((item) => ({ ...item, shapes: item.shapes.map(shape) })), preview: frame.preview.map(shape),
+      transient: frame.transient ? { ...frame.transient, shapes: frame.transient.shapes.map(shape) } : undefined };
+  }
+
   updateAllViews() {
-    this.frame = this.build(); this.prices = []; this.times = [];
+    this.frame = this.prepare(this.build()); this.prices = []; this.times = [];
     for (const item of this.frame.items) for (const label of item.labels) {
       const coordinate = label.axis === "price" ? this.frame.ctx.yOf(label.value) : this.frame.ctx.xOf(label.value);
       if (coordinate === null) continue;
