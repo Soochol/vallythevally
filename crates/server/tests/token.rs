@@ -4,7 +4,8 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use common::{APP_KEY, APP_SECRET, FakeKiwoom, Server, TOKEN, token_for, token_path};
+use common::{APP_KEY, APP_SECRET, FakeKiwoom, Server, TOKEN, token_path};
+use fake_kiwoom::token_for;
 use serde_json::{Value, json};
 use server::kiwoom::token_file::credential_id;
 
