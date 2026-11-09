@@ -48,6 +48,7 @@ The worker runs implementation, fix, and diagnosis work under `pstack:poteto-mod
 - The worker does every step of the chosen playbook, or records the step as `skip: <reason>`.
 - The worker cites a principle only if it invoked that `pstack:principle-*` skill in this session.
 - `worker_done` lists the skills the worker invoked, the playbooks it read, and each skipped step with its reason. The coordinator checks this list against the session log.
+- The worker leaves auto-memory files unchanged. It reports proposed memory changes to the coordinator, who maintains them.
 
 The worker owns a feature's design and its implementation. Per the Feature playbook, it runs `pstack:how` and `pstack:architect`, delegates code-writing to `pstack:poteto-agent` subagents, and reviews their diff. Every task in this repository permits `pstack:poteto-agent` subagents and the subagents that `pstack:architect` and `pstack:arena` start.
 
@@ -63,6 +64,7 @@ Code review runs outside the worker. After the PR, the coordinator starts a Code
 ### Kiwoom access (ADR 0004)
 
 - One process holds the Kiwoom token at a time. Ask the coordinator before any live Kiwoom call.
+- Approval covers the stated measurement method. Before changing that method, ask the coordinator again and wait for approval before making the live call.
 - Call market-data APIs only. Never add `/api/dostk/ordr` or `/api/dostk/acnt`.
 - Never print app keys, app secrets, or tokens to logs, docs, or chat.
 
