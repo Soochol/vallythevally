@@ -4,21 +4,34 @@ use crate::spec::{LineId, Spec};
 use crate::state::State;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ColumnsError {
+pub enum BarError {
     LengthMismatch { t: usize, other: usize },
     NotAscending { index: usize },
+    NotFinite { index: usize, field: &'static str },
 }
 
-impl fmt::Display for ColumnsError {
+impl fmt::Display for BarError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            ColumnsError::LengthMismatch { t, other } => write!(f, "봉 열의 길이가 다릅니다: 시각 {t}개, 다른 열 {other}개"),
-            ColumnsError::NotAscending { index } => write!(f, "봉 시각이 오름차순이 아닙니다: {index}번째"),
+            BarError::LengthMismatch { t, other } => write!(f, "봉 열의 길이가 다릅니다: 시각 {t}개, 다른 열 {other}개"),
+            BarError::NotAscending { index } => write!(f, "봉 시각이 오름차순이 아닙니다: {index}번째"),
+            BarError::NotFinite { index, field } => write!(f, "봉 {field} 값이 유한한 수가 아닙니다: {index}번째"),
         }
     }
 }
 
-impl std::error::Error for ColumnsError {}
+impl std::error::Error for BarError {}
+
+fn check_bar(index: usize, prev_t: Option<i64>, bar: &BarInput) -> Result<(), BarError> {
+    if prev_t.is_some_and(|prev| bar.t <= prev) {
+        return Err(BarError::NotAscending { index });
+    }
+    let fields = [("open", bar.open), ("high", bar.high), ("low", bar.low), ("close", bar.close), ("volume", bar.volume)];
+    match fields.into_iter().find(|(_, v)| !v.is_finite()) {
+        Some((field, _)) => Err(BarError::NotFinite { index, field }),
+        None => Ok(()),
+    }
+}
 
 #[derive(Debug, Clone, Copy)]
 pub struct Columns<'a> {
@@ -38,16 +51,17 @@ impl<'a> Columns<'a> {
         low: &'a [f64],
         close: &'a [f64],
         volume: &'a [f64],
-    ) -> Result<Self, ColumnsError> {
+    ) -> Result<Self, BarError> {
         for other in [open, high, low, close, volume] {
             if other.len() != t.len() {
-                return Err(ColumnsError::LengthMismatch { t: t.len(), other: other.len() });
+                return Err(BarError::LengthMismatch { t: t.len(), other: other.len() });
             }
         }
-        if let Some(index) = t.windows(2).position(|w| w[0] >= w[1]) {
-            return Err(ColumnsError::NotAscending { index: index + 1 });
+        let columns = Columns { open, high, low, close, volume, t };
+        for i in 0..columns.len() {
+            check_bar(i, i.checked_sub(1).map(|prev| t[prev]), &columns.bar(i))?;
         }
-        Ok(Columns { open, high, low, close, volume, t })
+        Ok(columns)
     }
 
     pub fn len(&self) -> usize {
