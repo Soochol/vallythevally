@@ -1,5 +1,5 @@
 use domain::{KstTime, Period};
-use indicators::{BarInput, Columns, Engine, LineId, Spec, SpecError, Tail};
+use indicators::{BarError, BarInput, Columns, Engine, LineId, Spec, SpecError, Tail};
 use wasm_bindgen::prelude::*;
 
 #[wasm_bindgen(typescript_custom_section)]
@@ -38,12 +38,13 @@ pub struct WasmEngine {
     lines: Vec<LineId>,
 }
 
-fn bar(t: f64, open: f64, high: f64, low: f64, close: f64, volume: f64) -> BarInput {
-    BarInput { t: t as i64, open, high, low, close, volume }
+fn bar(t: f64, open: f64, high: f64, low: f64, close: f64, volume: f64) -> Result<BarInput, JsError> {
+    Ok(BarInput { t: unix_seconds(t)?, open, high, low, close, volume })
 }
 
-fn tail_values(tail: Tail) -> Vec<f64> {
-    tail.values.into_iter().map(|(_, v)| v).collect()
+fn tail_values(tail: Result<Tail, BarError>) -> Result<Vec<f64>, JsError> {
+    let tail = tail.map_err(|e| JsError::new(&e.to_string()))?;
+    Ok(tail.values.into_iter().map(|(_, v)| v).collect())
 }
 
 #[wasm_bindgen]
@@ -65,12 +66,12 @@ impl WasmEngine {
     }
 
     #[wasm_bindgen(js_name = pushConfirmed)]
-    pub fn push_confirmed(&mut self, t: f64, open: f64, high: f64, low: f64, close: f64, volume: f64) -> Vec<f64> {
-        tail_values(self.engine.push_confirmed(&bar(t, open, high, low, close, volume)))
+    pub fn push_confirmed(&mut self, t: f64, open: f64, high: f64, low: f64, close: f64, volume: f64) -> Result<Vec<f64>, JsError> {
+        tail_values(self.engine.push_confirmed(&bar(t, open, high, low, close, volume)?))
     }
 
-    pub fn preview(&self, t: f64, open: f64, high: f64, low: f64, close: f64, volume: f64) -> Vec<f64> {
-        tail_values(self.engine.preview(&bar(t, open, high, low, close, volume)))
+    pub fn preview(&self, t: f64, open: f64, high: f64, low: f64, close: f64, volume: f64) -> Result<Vec<f64>, JsError> {
+        tail_values(self.engine.preview(&bar(t, open, high, low, close, volume)?))
     }
 
     pub fn line(&self, index: usize) -> Result<Vec<f64>, JsError> {

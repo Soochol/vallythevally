@@ -60,6 +60,18 @@ assert.equal(validateSpec("{").errors[0].field, "");
 assert.throws(() => new WasmEngine('{"kind":"ma","method":"sma","period":0}', t, ...cols), /period/);
 assert.throws(() => new WasmEngine('{"kind":"ma","method":"sma","period":5}', t.subarray(1), ...cols), /길이/);
 
+const sma2 = new WasmEngine('{"kind":"ma","method":"sma","period":2}', [60], [10], [10], [10], [10], [10]);
+for (const t of [60, 59, 120.5, NaN, Infinity]) {
+  assert.throws(() => sma2.preview(t, 30, 30, 30, 30, 30), Error, `preview t=${t}`);
+  assert.throws(() => sma2.pushConfirmed(t, 30, 30, 30, 30, 30), Error, `pushConfirmed t=${t}`);
+}
+assert.throws(() => sma2.pushConfirmed(120, 30, 30, 30, NaN, 30), /close/);
+assert.throws(() => new WasmEngine('{"kind":"ma","method":"sma","period":2}', [60, 120], [10, 30], [10, 30], [10, 30], [10, NaN], [10, 30]), /close/);
+assert.equal(sma2.line(0).length, 1, "rejected bars changed the state");
+assert.deepEqual(Array.from(sma2.preview(120, 30, 30, 30, 30, 30)), Array.from(sma2.preview(120, 30, 30, 30, 30, 30)));
+assert.deepEqual(Array.from(sma2.pushConfirmed(120, 30, 30, 30, 30, 30)), [20]);
+sma2.free();
+
 const kst = (iso) => Date.parse(`${iso}+09:00`) / 1000;
 assert.deepEqual(Array.from(futureBarStarts("1m", kst("2026-11-06T19:59:00"), 2)), [kst("2026-11-09T08:00:00"), kst("2026-11-09T08:01:00")]);
 assert.deepEqual(Array.from(futureBarStarts("M", kst("2026-10-01T00:00:00"), 1)), [kst("2026-11-01T00:00:00")]);

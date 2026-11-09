@@ -115,6 +115,7 @@ pub struct Tail {
 pub struct Engine {
     state: State,
     output: Output,
+    last_t: Option<i64>,
 }
 
 impl Engine {
@@ -128,27 +129,38 @@ impl Engine {
                 values: Vec::with_capacity(confirmed.len()),
             })
             .collect();
-        let mut engine = Engine { state: State::new(spec), output: Output { lines } };
+        let mut engine = Engine { state: State::new(spec), output: Output { lines }, last_t: None };
         for i in 0..confirmed.len() {
-            engine.push_confirmed(&confirmed.bar(i));
+            engine.confirm(&confirmed.bar(i));
         }
         engine
     }
 
-    pub fn push_confirmed(&mut self, bar: &BarInput) -> Tail {
-        let values = self.state.step(bar);
-        for (line, v) in self.output.lines.iter_mut().zip(values) {
-            line.values.push(v);
-        }
-        self.tail(&values)
+    pub fn push_confirmed(&mut self, bar: &BarInput) -> Result<Tail, BarError> {
+        self.check_next(bar)?;
+        Ok(self.confirm(bar))
     }
 
-    pub fn preview(&self, current: &BarInput) -> Tail {
-        self.tail(&self.state.clone().step(current))
+    pub fn preview(&self, current: &BarInput) -> Result<Tail, BarError> {
+        self.check_next(current)?;
+        Ok(self.tail(&self.state.clone().step(current)))
     }
 
     pub fn output(&self) -> &Output {
         &self.output
+    }
+
+    fn check_next(&self, bar: &BarInput) -> Result<(), BarError> {
+        check_bar(self.output.lines[0].values.len(), self.last_t, bar)
+    }
+
+    fn confirm(&mut self, bar: &BarInput) -> Tail {
+        let values = self.state.step(bar);
+        for (line, v) in self.output.lines.iter_mut().zip(values) {
+            line.values.push(v);
+        }
+        self.last_t = Some(bar.t);
+        self.tail(&values)
     }
 
     fn tail(&self, values: &[f64]) -> Tail {

@@ -94,7 +94,7 @@ proptest! {
         let head = Bars::from(&bars[..split]);
         let mut engine = Engine::new(&spec, &head.columns());
         for n in split..bars.len() {
-            let tail = engine.push_confirmed(&bars[n]);
+            let tail = engine.push_confirmed(&bars[n]).unwrap();
             prop_assert_eq!(tail_bits(&tail), last_of(&compute_bars(&spec, &bars[..=n])));
         }
         assert_same_output(engine.output(), &compute_bars(&spec, &bars));
@@ -105,7 +105,7 @@ proptest! {
         let (current, confirmed) = bars.split_last().unwrap();
         let engine = Engine::new(&spec, &Bars::from(confirmed).columns());
         let before = engine.output().clone();
-        let preview = engine.preview(current);
+        let preview = engine.preview(current).unwrap();
         prop_assert_eq!(tail_bits(&preview), last_of(&compute_bars(&spec, &bars)));
         assert_same_output(engine.output(), &before);
     }
@@ -182,4 +182,37 @@ fn invalid_specs_compute_without_panicking() {
         let _ = spec.warmup();
         assert_eq!(compute_bars(&spec, &bars).lines[0].values.len(), 5);
     }
+}
+
+#[test]
+fn pushing_or_previewing_a_bad_next_bar_is_rejected_like_the_full_input() {
+    let first = BarInput { t: 60, open: 10.0, high: 10.0, low: 10.0, close: 10.0, volume: 10.0 };
+    let next = BarInput { t: 120, open: 30.0, high: 30.0, low: 30.0, close: 30.0, volume: 30.0 };
+    let spec = Spec::Ma { method: MaMethod::Sma, period: 2 };
+    for bad in [
+        BarInput { t: 60, ..next },
+        BarInput { t: 59, ..next },
+        BarInput { close: f64::NAN, ..next },
+        BarInput { volume: f64::INFINITY, ..next },
+    ] {
+        let full = Bars::from(&[first, bad]);
+        let full_error =
+            Columns::new(&full.t, &full.open, &full.high, &full.low, &full.close, &full.volume).unwrap_err();
+        let mut engine = Engine::new(&spec, &Bars::from(&[first]).columns());
+        assert_eq!(engine.preview(&bad).unwrap_err(), full_error, "{bad:?}");
+        assert_eq!(engine.push_confirmed(&bad).unwrap_err(), full_error, "{bad:?}");
+        assert_eq!(engine.output().lines[0].values.len(), 1, "{bad:?}");
+        assert_eq!(tail_bits(&engine.push_confirmed(&next).unwrap()), [(LineId::Ma, 20f64.to_bits())]);
+    }
+}
+
+#[test]
+fn previewing_the_same_next_bar_again_is_allowed() {
+    let bars: Vec<BarInput> =
+        (0..3).map(|i| BarInput { t: 60 * i, open: 1.0, high: 2.0, low: 0.5, close: 1.5, volume: 3.0 }).collect();
+    let engine = Engine::new(&Spec::Ma { method: MaMethod::Sma, period: 2 }, &Bars::from(&bars[..2]).columns());
+    let first = engine.preview(&bars[2]).unwrap();
+    let changed = engine.preview(&BarInput { close: 2.5, ..bars[2] }).unwrap();
+    assert_eq!(tail_bits(&engine.preview(&bars[2]).unwrap()), tail_bits(&first));
+    assert_ne!(tail_bits(&changed), tail_bits(&first));
 }
