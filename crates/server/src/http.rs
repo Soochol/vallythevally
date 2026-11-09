@@ -82,19 +82,34 @@ impl IntoResponse for ApiFailure {
     }
 }
 
-impl From<BarError> for ApiFailure {
-    fn from(e: BarError) -> Self {
+/// 키움 조회가 필요한 요청. 실패를 로그에 남길 때 어느 요청인지 적는다.
+#[derive(Clone, Copy)]
+enum Lookup {
+    Bars,
+    Quotes,
+}
+
+impl Lookup {
+    fn label(self) -> &'static str {
+        match self {
+            Lookup::Bars => "봉",
+            Lookup::Quotes => "현재가",
+        }
+    }
+
+    fn failure(self, e: BarError) -> ApiFailure {
         use api::ApiErrorCode::*;
+        let what = self.label();
         match e {
             BarError::BadRequest(m) => ApiFailure::new(BadRequest, m),
             BarError::UnknownSymbol => ApiFailure::new(UnknownSymbol, "없는 종목입니다"),
             BarError::Unavailable(m) => {
-                tracing::warn!(reason = %m, "봉 요청에 답하지 못했습니다");
+                tracing::warn!(reason = %m, "{what} 요청에 답하지 못했습니다");
                 ApiFailure::new(KiwoomUnavailable, "키움 조회에 실패했습니다. 잠시 뒤 다시 시도하세요")
             }
             BarError::AuthFailed => ApiFailure::new(KiwoomAuthFailed, "키움 인증에 실패했습니다. 운영자가 설정을 확인해야 합니다"),
             BarError::Internal(m) => {
-                tracing::error!(reason = %m, "봉 요청 처리 중 내부 오류");
+                tracing::error!(reason = %m, "{what} 요청 처리 중 내부 오류");
                 ApiFailure::new(Internal, "서버 내부 오류입니다")
             }
         }
@@ -156,7 +171,7 @@ fn parse_bars_query(q: &HashMap<String, String>) -> Result<BarsQuery, ApiFailure
 
 async fn bars(State(st): State<Arc<AppState>>, Query(q): Query<HashMap<String, String>>) -> Result<Json<api::BarsPage>, ApiFailure> {
     let q = parse_bars_query(&q)?;
-    let page = st.bars.page(q.key, q.before, q.limit).await?;
+    let page = st.bars.page(q.key, q.before, q.limit).await.map_err(|e| Lookup::Bars.failure(e))?;
     Ok(Json(api::BarsPage {
         symbol: api::SymbolCode(q.key.feed.symbol().as_wire()),
         venue: q.key.feed.venue().map(api::Venue::from),
@@ -187,7 +202,7 @@ async fn quotes(State(st): State<Arc<AppState>>, Query(q): Query<HashMap<String,
             symbols.push(s);
         }
     }
-    Ok(Json(crate::quotes::quotes(&st.rest, &st.bars, &symbols).await?))
+    Ok(Json(crate::quotes::quotes(&st.rest, &st.bars, &symbols).await.map_err(|e| Lookup::Quotes.failure(e))?))
 }
 
 async fn method_not_allowed(method: Method, uri: Uri) -> ApiFailure {
