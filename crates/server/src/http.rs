@@ -14,11 +14,17 @@ use tower_http::compression::CompressionLayer;
 
 use crate::api;
 use crate::bars::{BarError, BarService, DEFAULT_LIMIT, MAX_LIMIT};
+use crate::clock::Clock;
+use crate::db::AppDb;
+use crate::kiwoom::rest::KiwoomRest;
 use crate::symbols::SymbolDirectory;
 
 pub struct AppState {
     pub symbols: Arc<SymbolDirectory>,
     pub bars: Arc<BarService>,
+    pub rest: KiwoomRest,
+    pub db: AppDb,
+    pub clock: Clock,
     pub static_dir: PathBuf,
 }
 
@@ -27,6 +33,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/api/symbols", get(search))
         .route("/api/symbols/{code}", get(symbol))
         .route("/api/bars", get(bars))
+        .merge(crate::user_routes::routes())
         .route("/api", any(api_not_found))
         .route("/api/{*rest}", any(api_not_found))
         .fallback(static_file)
@@ -42,11 +49,11 @@ pub struct ApiFailure {
 }
 
 impl ApiFailure {
-    fn new(code: api::ApiErrorCode, message: impl Into<String>) -> Self {
+    pub(crate) fn new(code: api::ApiErrorCode, message: impl Into<String>) -> Self {
         ApiFailure { code, message: message.into() }
     }
 
-    fn bad_request(message: impl Into<String>) -> Self {
+    pub(crate) fn bad_request(message: impl Into<String>) -> Self {
         ApiFailure::new(api::ApiErrorCode::BadRequest, message)
     }
 }
@@ -91,7 +98,7 @@ impl From<BarError> for ApiFailure {
     }
 }
 
-fn not_ready() -> ApiFailure {
+pub(crate) fn not_ready() -> ApiFailure {
     ApiFailure::new(api::ApiErrorCode::KiwoomUnavailable, "종목 목록을 아직 받지 못했습니다. 잠시 뒤 다시 시도하세요")
 }
 
@@ -233,6 +240,7 @@ mod tests {
 
     use super::*;
     use crate::clock::{Clock, kst};
+    use crate::user_routes::LAYOUT_LIMIT;
     use crate::config::Secret;
     use crate::kiwoom::api::ApiId;
     use crate::kiwoom::auth::KiwoomAuth;
@@ -246,8 +254,23 @@ mod tests {
         _dir: tempfile::TempDir,
     }
 
-    fn fixture(kiwoom_down: bool, loaded: bool) -> Fixture {
+    /// `start_paused` 테스트용. 멈춘 시계는 sqlx 연결 대기 시간을 곧바로 넘겨 버리므로 DB는 시계를 잠깐 풀고 연다.
+    async fn fixture(kiwoom_down: bool, loaded: bool) -> Fixture {
         let dir = tempfile::tempdir().unwrap();
+        tokio::time::resume();
+        let db = AppDb::open(&dir.path().join("vally.db")).await.unwrap();
+        tokio::time::pause();
+        build(kiwoom_down, loaded, dir, db)
+    }
+
+    /// 시계를 멈추지 않는 테스트용. 사용자 자료 경로는 DB를 쓰므로 이쪽을 쓴다.
+    async fn live_fixture(loaded: bool) -> Fixture {
+        let dir = tempfile::tempdir().unwrap();
+        let db = AppDb::open(&dir.path().join("vally.db")).await.unwrap();
+        build(false, loaded, dir, db)
+    }
+
+    fn build(kiwoom_down: bool, loaded: bool, dir: tempfile::TempDir, db: AppDb) -> Fixture {
         std::fs::create_dir_all(dir.path().join("assets")).unwrap();
         std::fs::write(dir.path().join("index.html"), "<!doctype html><title>vally</title>").unwrap();
         std::fs::write(dir.path().join("assets/app-1234.js"), "console.log('x');".repeat(100)).unwrap();
@@ -281,8 +304,8 @@ mod tests {
                 stock("005935", "삼성전자우", SymbolKind::Preferred, false),
             ]));
         }
-        let bars = Arc::new(BarService::new(rest, symbols.clone(), clock));
-        Fixture { app: router(Arc::new(AppState { symbols, bars, static_dir: dir.path().to_owned() })), _dir: dir }
+        let bars = Arc::new(BarService::new(rest.clone(), symbols.clone(), clock.clone()));
+        Fixture { app: router(Arc::new(AppState { symbols, bars, rest, db, clock, static_dir: dir.path().to_owned() })), _dir: dir }
     }
 
     async fn get(app: &Router, uri: &str) -> (StatusCode, axum::http::HeaderMap, Vec<u8>) {
@@ -308,9 +331,146 @@ mod tests {
         h.get(k).map_or("", |v| v.to_str().unwrap())
     }
 
+    async fn send(app: &Router, method: &str, uri: &str, body: impl Into<Body>) -> (StatusCode, Value) {
+        let req = Request::builder().method(method).uri(uri).header("content-type", "application/json").body(body.into()).unwrap();
+        let resp = app.clone().oneshot(req).await.unwrap();
+        let status = resp.status();
+        let bytes = resp.into_body().collect().await.unwrap().to_bytes();
+        (status, if bytes.is_empty() { Value::Null } else { serde_json::from_slice(&bytes).unwrap_or_else(|_| panic!("{uri}: JSON이 아님: {}", String::from_utf8_lossy(&bytes))) })
+    }
+
+    async fn put(app: &Router, uri: &str, body: &Value) -> (StatusCode, Value) {
+        send(app, "PUT", uri, body.to_string()).await
+    }
+
+    fn code(v: &Value) -> &str {
+        v["error"]["code"].as_str().unwrap_or("")
+    }
+
+    const DEFAULT_ID: &str = "01900000-0000-7000-8000-000000000001";
+
+    fn two_cells(nxt_symbol: &str) -> Value {
+        json!({"id": "L2", "name": "둘", "arrangement": "2h", "sync": {"crosshair": false}, "cells": [
+            {"slot": 1, "symbol": nxt_symbol, "venue": "nxt", "period": "5m", "symbolLink": true, "chartSettings": {"v": 1, "x": [1]}},
+            {"slot": 0, "symbol": "IDX:101", "venue": null, "period": "D", "symbolLink": false, "chartSettings": {}}
+        ]})
+    }
+
+    #[tokio::test]
+    async fn watchlist_round_trip_and_rejections() {
+        let f = live_fixture(true).await;
+        assert_eq!(json(&f.app, "/api/watchlist").await, (StatusCode::OK, json!({"symbols": []})));
+        let list = json!({"symbols": ["005930", "IDX:001", "999990"]});
+        assert_eq!(put(&f.app, "/api/watchlist", &list).await, (StatusCode::OK, list.clone()), "목록에 없는 코드도 받는다");
+        assert_eq!(json(&f.app, "/api/watchlist").await, (StatusCode::OK, list));
+        for (body, status, want) in [
+            (json!({"symbols": ["005930", "005930"]}).to_string(), StatusCode::BAD_REQUEST, "bad_request"),
+            (json!({"symbols": ["abc"]}).to_string(), StatusCode::BAD_REQUEST, "bad_request"),
+            ("{\"symbols\": [".to_owned(), StatusCode::BAD_REQUEST, "bad_request"),
+            (json!({"symbols": ["005930"], "pad": "x".repeat(70_000)}).to_string(), StatusCode::PAYLOAD_TOO_LARGE, "payload_too_large"),
+        ] {
+            let (s, v) = send(&f.app, "PUT", "/api/watchlist", body).await;
+            assert_eq!((s, code(&v)), (status, want), "{v}");
+            assert!(!v["error"]["message"].as_str().unwrap().is_empty());
+        }
+        assert_eq!(json(&f.app, "/api/watchlist").await.1["symbols"].as_array().unwrap().len(), 3, "거절한 PUT은 목록을 바꾸지 않는다");
+    }
+
+    #[tokio::test]
+    async fn layouts_round_trip_and_rejections() {
+        let f = live_fixture(true).await;
+        let (s, v) = json(&f.app, "/api/layouts").await;
+        assert_eq!((s, v), (StatusCode::OK, json!([{"id": DEFAULT_ID, "name": "기본", "arrangement": "1", "updatedAt": 0}])));
+        let (s, v) = json(&f.app, &format!("/api/layouts/{DEFAULT_ID}")).await;
+        assert_eq!((s, v["cells"][0]["symbol"].as_str(), v["sync"].clone()), (StatusCode::OK, Some("IDX:001"), json!({"crosshair": true, "scroll": true})));
+
+        let (s, saved) = put(&f.app, "/api/layouts/L2", &two_cells("005930")).await;
+        assert_eq!(s, StatusCode::OK, "{saved}");
+        assert_eq!(saved["updatedAt"], 1_794_152_040, "서버 시계(2026-11-09 00:34 KST)");
+        assert_eq!(saved["sync"], json!({"crosshair": false, "scroll": true}), "빠진 키는 true");
+        assert_eq!(saved["cells"][0]["slot"], 0, "slot 순서로 돌려준다");
+        assert_eq!(json(&f.app, "/api/layouts/L2").await, (StatusCode::OK, saved));
+        assert_eq!(put(&f.app, "/api/layouts/L3", &json!({"id": "L3", "name": "폐지", "arrangement": "1", "sync": {}, "cells": [
+            {"slot": 0, "symbol": "999990", "venue": "nxt", "period": "D", "symbolLink": false, "chartSettings": {}}]})).await.0, StatusCode::OK, "목록에 없는 종목은 막지 않는다");
+
+        let with = |f: &dyn Fn(&mut Value)| {
+            let mut v = two_cells("005930");
+            f(&mut v);
+            v
+        };
+        for (uri, body, status, want) in [
+            ("/api/layouts/OTHER", two_cells("005930"), StatusCode::BAD_REQUEST, "bad_request"),
+            ("/api/layouts/L2", with(&|v| v["arrangement"] = json!("3")), StatusCode::BAD_REQUEST, "bad_request"),
+            ("/api/layouts/L2", with(&|v| v["cells"][0]["slot"] = json!(0)), StatusCode::BAD_REQUEST, "bad_request"),
+            ("/api/layouts/L2", with(&|v| v["cells"][1]["venue"] = json!("krx")), StatusCode::BAD_REQUEST, "bad_request"),
+            ("/api/layouts/L2", with(&|v| v["cells"][0]["venue"] = json!(null)), StatusCode::BAD_REQUEST, "bad_request"),
+            ("/api/layouts/L2", with(&|v| v["cells"][0]["symbol"] = json!("bad")), StatusCode::BAD_REQUEST, "bad_request"),
+            ("/api/layouts/L2", with(&|v| v["name"] = json!(" ")), StatusCode::BAD_REQUEST, "bad_request"),
+            ("/api/layouts/L2", with(&|v| v["cells"][0]["period"] = json!("2m")), StatusCode::BAD_REQUEST, "bad_request"),
+            ("/api/layouts/L2", two_cells("005935"), StatusCode::BAD_REQUEST, "bad_request"),
+            ("/api/layouts/L2", with(&|v| v["name"] = json!("기본")), StatusCode::CONFLICT, "conflict"),
+            ("/api/layouts/L2", with(&|v| v["cells"][0]["chartSettings"] = json!({"pad": "x".repeat(65_536)})), StatusCode::PAYLOAD_TOO_LARGE, "payload_too_large"),
+            ("/api/layouts/L2", with(&|v| v["pad"] = json!("x".repeat(LAYOUT_LIMIT))), StatusCode::PAYLOAD_TOO_LARGE, "payload_too_large"),
+        ] {
+            let (s, v) = put(&f.app, uri, &body).await;
+            assert_eq!((s, code(&v)), (status, want), "{uri} {v}");
+        }
+        let (_, v) = put(&f.app, "/api/layouts/L2", &two_cells("005935")).await;
+        assert!(v["error"]["message"].as_str().unwrap().contains("NXT에서 거래되지 않는 종목입니다"), "{v}");
+        let mut four_big = json!({"id": "L4", "name": "넷", "arrangement": "4", "sync": {}, "cells": []});
+        for slot in 0..4 {
+            four_big["cells"].as_array_mut().unwrap().push(json!({"slot": slot, "symbol": "IDX:001", "venue": null, "period": "D", "symbolLink": false,
+                "chartSettings": {"pad": "x".repeat(60_000)}}));
+        }
+        assert_eq!(put(&f.app, "/api/layouts/L4", &four_big).await.0, StatusCode::OK, "칸마다 64KB 아래면 합이 64KB를 넘어도 된다");
+
+        let (s, v) = json(&f.app, "/api/layouts/nope").await;
+        assert_eq!((s, code(&v)), (StatusCode::NOT_FOUND, "not_found"));
+        assert_eq!(send(&f.app, "DELETE", "/api/layouts/nope", Body::empty()).await.0, StatusCode::NOT_FOUND);
+        for id in ["L2", "L3", "L4"] {
+            assert_eq!(send(&f.app, "DELETE", &format!("/api/layouts/{id}"), Body::empty()).await, (StatusCode::NO_CONTENT, Value::Null));
+        }
+        let (s, v) = send(&f.app, "DELETE", &format!("/api/layouts/{DEFAULT_ID}"), Body::empty()).await;
+        assert_eq!((s, code(&v)), (StatusCode::CONFLICT, "conflict"), "마지막 레이아웃");
+    }
+
+    #[tokio::test]
+    async fn layout_without_nxt_saves_before_the_symbol_list_arrives() {
+        let f = live_fixture(false).await;
+        let mut body = two_cells("005930");
+        body["cells"][0]["venue"] = json!("combined");
+        assert_eq!(put(&f.app, "/api/layouts/L2", &body).await.0, StatusCode::OK);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn layout_with_nxt_waits_for_the_symbol_list() {
+        let f = fixture(false, false).await;
+        let (s, v) = put(&f.app, "/api/layouts/L2", &two_cells("005930")).await;
+        assert_eq!((s, code(&v)), (StatusCode::SERVICE_UNAVAILABLE, "kiwoom_unavailable"));
+    }
+
+    #[tokio::test]
+    async fn ui_state_round_trips_unknown_keys_and_rejects_non_objects() {
+        let f = live_fixture(true).await;
+        assert_eq!(json(&f.app, "/api/ui-state").await, (StatusCode::OK, json!({"lastLayoutId": DEFAULT_ID, "theme": "dark"})));
+        let state = json!({"lastLayoutId": null, "theme": "light", "watchCollapsed": true, "nested": {"a": [1, 2]}});
+        assert_eq!(put(&f.app, "/api/ui-state", &state).await, (StatusCode::OK, state.clone()));
+        assert_eq!(json(&f.app, "/api/ui-state").await, (StatusCode::OK, state));
+        for (body, status, want) in [
+            (json!([1, 2]), StatusCode::BAD_REQUEST, "bad_request"),
+            (json!("x"), StatusCode::BAD_REQUEST, "bad_request"),
+            (json!({"theme": "dark", "pad": "x".repeat(65_536)}), StatusCode::PAYLOAD_TOO_LARGE, "payload_too_large"),
+        ] {
+            let (s, v) = put(&f.app, "/api/ui-state", &body).await;
+            assert_eq!((s, code(&v)), (status, want), "{v}");
+        }
+        let (s, v) = send(&f.app, "PUT", "/api/ui-state", "{not json").await;
+        assert_eq!((s, code(&v)), (StatusCode::BAD_REQUEST, "bad_request"));
+    }
+
     #[tokio::test(start_paused = true)]
     async fn symbols_endpoints() {
-        let f = fixture(false, true);
+        let f = fixture(false, true).await;
         let (s, v) = json(&f.app, "/api/symbols?q=%EC%82%BC%EC%84%B1").await;
         assert_eq!(s, StatusCode::OK);
         assert_eq!(v[0], json!({"code": "005930", "name": "삼성전자", "kind": "common", "market": "kospi", "nxtEnabled": true}));
@@ -325,7 +485,7 @@ mod tests {
 
     #[tokio::test(start_paused = true)]
     async fn bars_endpoint_shape_and_errors() {
-        let f = fixture(false, true);
+        let f = fixture(false, true).await;
         let (s, v) = json(&f.app, "/api/bars?symbol=005930&period=D").await;
         assert_eq!(s, StatusCode::OK);
         assert_eq!(v["symbol"], "005930");
@@ -362,10 +522,10 @@ mod tests {
 
     #[tokio::test(start_paused = true)]
     async fn kiwoom_down_and_list_missing_are_503() {
-        let f = fixture(true, true);
+        let f = fixture(true, true).await;
         let (s, v) = json(&f.app, "/api/bars?symbol=005930&period=D").await;
         assert_eq!((s, v["error"]["code"].as_str()), (StatusCode::SERVICE_UNAVAILABLE, Some("kiwoom_unavailable")));
-        let f = fixture(false, false);
+        let f = fixture(false, false).await;
         let (s, v) = json(&f.app, "/api/symbols?q=x").await;
         assert_eq!((s, v["error"]["code"].as_str()), (StatusCode::SERVICE_UNAVAILABLE, Some("kiwoom_unavailable")));
     }
@@ -390,7 +550,7 @@ mod tests {
 
     #[tokio::test(start_paused = true)]
     async fn static_files_follow_the_table() {
-        let f = fixture(false, true);
+        let f = fixture(false, true).await;
         let (s, v) = json(&f.app, "/api/nope").await;
         assert_eq!((s, v["error"]["code"].as_str()), (StatusCode::NOT_FOUND, Some("not_found")));
         assert_eq!(json(&f.app, "/api").await.0, StatusCode::NOT_FOUND);
@@ -421,7 +581,7 @@ mod tests {
 
     #[tokio::test(start_paused = true)]
     async fn js_is_compressed() {
-        let f = fixture(false, true);
+        let f = fixture(false, true).await;
         let (_, h, _) = get_with(&f.app, "/assets/app-1234.js", Some("br")).await;
         assert_eq!(header(&h, "content-encoding"), "br");
         let (_, h, _) = get_with(&f.app, "/assets/app-1234.js", Some("gzip")).await;

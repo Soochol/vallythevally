@@ -1,6 +1,6 @@
 //! 서버를 켜는 순서와 하루 타이머(backend.md §4.1, §6.2, §6.6).
 //!
-//! 순서: 설정 → 잠금 파일 → 포트 열기 → 첫 토큰 → 종목 목록 받기 시작 → 요청 받기.
+//! 순서: 설정 → 잠금 파일 → 사용자 자료 DB → 포트 열기 → 첫 토큰 → 종목 목록 받기 시작 → 요청 받기.
 //! 잠금은 키움 요청보다 먼저다. 두 번째 서버는 키움에 아무것도 보내지 않고 끝난다.
 
 use std::process::ExitCode;
@@ -13,6 +13,7 @@ use tokio::net::TcpListener;
 use crate::bars::BarService;
 use crate::clock::{Clock, next_daily};
 use crate::config::Config;
+use crate::db::AppDb;
 use crate::http::{AppState, router};
 use crate::instance::InstanceLock;
 use crate::kiwoom::auth::{DAILY_REISSUE_AT, KiwoomAuth};
@@ -67,6 +68,14 @@ fn init_logging(filter: &str) {
 }
 
 async fn serve(config: Config) -> ExitCode {
+    let db = match AppDb::open(&config.db_path).await {
+        Ok(db) => db,
+        Err(e) => {
+            tracing::error!(path = %config.db_path.display(), error = %e, "사용자 자료 DB를 열 수 없습니다");
+            return ExitCode::from(1);
+        }
+    };
+    tracing::info!(path = %config.db_path.display(), "사용자 자료 DB를 열었습니다");
     let listener = match TcpListener::bind(config.bind.socket_addr()).await {
         Ok(l) => l,
         Err(e) => {
@@ -101,7 +110,7 @@ async fn serve(config: Config) -> ExitCode {
     tokio::spawn(daily_reset(clock.clone(), rest.clone(), symbols.clone(), bars.clone()));
     tokio::spawn(daily_token(clock.clone(), rest.clone()));
 
-    let app = router(Arc::new(AppState { symbols, bars, static_dir: config.static_dir.clone() }));
+    let app = router(Arc::new(AppState { symbols, bars, rest, db, clock, static_dir: config.static_dir.clone() }));
     tracing::info!(static_dir = %config.static_dir.display(), "요청을 받기 시작합니다");
     if let Err(e) = axum::serve(listener, app).with_graceful_shutdown(shutdown_signal()).await {
         tracing::error!(error = %e, "서버가 멈췄습니다");
