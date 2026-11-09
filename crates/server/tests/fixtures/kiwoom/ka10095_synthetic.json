@@ -1,0 +1,27 @@
+{
+ "_source": "합성 값. 필드 이름과 모양만 kiwoom.md §10.6, §12.4를 따른다. 가격·거래량은 지어낸 것이고 |cur_prc| − base_pric = pred_pre를 지킨다",
+ "_headers": {
+  "cont-yn": "N",
+  "next-key": ""
+ },
+ "atn_stk_infr": [
+  {"stk_cd": "005930_AL", "stk_nm": "가상종목A", "cur_prc": "-50000", "base_pric": "51000", "pred_pre": "-1000",
+   "pred_pre_sig": "5", "flu_rt": "-1.96", "trde_qty": "1234567", "trde_prica": "61728",
+   "open_pric": "+51200", "high_pric": "+51500", "low_pric": "-49800", "close_pric": "-50000",
+   "cntr_tm": "195959", "dt": "20261106", "upl_pric": "+66300", "lst_pric": "-35700"},
+  {"stk_cd": "000660_AL", "stk_nm": "가상종목B", "cur_prc": "+120500", "base_pric": "120000", "pred_pre": "+500",
+   "pred_pre_sig": "2", "flu_rt": "+0.42", "trde_qty": "765432", "trde_prica": "92234",
+   "open_pric": "119000", "high_pric": "+121000", "low_pric": "-118500", "close_pric": "+120500",
+   "cntr_tm": "153000", "dt": "20261106", "upl_pric": "+156000", "lst_pric": "-84000"},
+  {"stk_cd": "035720_AL", "stk_nm": "가상종목C", "cur_prc": "42000", "base_pric": "42000", "pred_pre": "0",
+   "pred_pre_sig": "3", "flu_rt": "0.00", "trde_qty": "1000", "trde_prica": "42",
+   "open_pric": "42000", "high_pric": "42000", "low_pric": "42000", "close_pric": "42000",
+   "cntr_tm": "195500", "dt": "20261106", "upl_pric": "+54600", "lst_pric": "-29400"},
+  {"stk_cd": "005935_NX", "stk_nm": "가상종목D", "cur_prc": "", "base_pric": "", "pred_pre": "",
+   "pred_pre_sig": "", "flu_rt": "", "trde_qty": "", "trde_prica": "",
+   "open_pric": "", "high_pric": "", "low_pric": "", "close_pric": "",
+   "cntr_tm": "", "dt": "", "upl_pric": "", "lst_pric": ""}
+ ],
+ "return_code": 0,
+ "return_msg": "정상적으로 처리되었습니다"
+}

@@ -197,6 +197,72 @@ fn is_spac(row: &ListRow) -> bool {
     row.company_class_name == "스팩" || row.name.contains("스팩") || row.name.contains("기업인수목적")
 }
 
+/// ka10095 응답. 행 순서는 요청 순서였지만(kiwoom.md §10.6) 호출자는 `stk_cd`로 맞춘다.
+#[derive(Debug, Deserialize)]
+pub struct StockQuotesResponse {
+    #[serde(default)]
+    pub atn_stk_infr: Vec<QuoteRow>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(default)]
+pub struct QuoteRow {
+    pub stk_cd: String,
+    pub cur_prc: String,
+    pub base_pric: String,
+    pub pred_pre_sig: String,
+    pub trde_qty: String,
+    pub dt: String,
+    pub cntr_tm: String,
+}
+
+/// ka10095 한 행의 통합 시세. 가격은 centi(원 × 100)다. 거래정지 종목은 현재가가 0일 수 있어 `Price`가 아니다.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct StockQuote {
+    pub code: StockCode,
+    pub price_centi: u64,
+    /// 기준가(`base_pric`). 등락은 현재가 − 기준가다(backend.md §4.6 "현재가의 등락").
+    pub base_centi: u64,
+    pub volume: Volume,
+    pub at: KstTime,
+}
+
+/// 빈 행(없는 코드, NXT 불가 종목의 `_NX`, kiwoom.md §12.4)과 통합(`_AL`)이 아닌 행은 뺀다.
+/// 읽을 수 없는 행 하나 때문에 목록 전체를 버리지 않는다. 경고만 남기고 뺀다.
+pub fn parse_quotes(body: StockQuotesResponse) -> Vec<StockQuote> {
+    body.atn_stk_infr
+        .iter()
+        .filter(|r| !r.cur_prc.is_empty() && !r.base_pric.is_empty())
+        .filter_map(|r| match parse_quote_row(r) {
+            Ok(q) => Some(q),
+            Err(e) => {
+                tracing::warn!(stk_cd = %r.stk_cd, error = %e, "ka10095 행을 읽지 못해 뺍니다");
+                None
+            }
+        })
+        .collect()
+}
+
+fn parse_quote_row(r: &QuoteRow) -> Result<StockQuote, WireError> {
+    let code = r.stk_cd.strip_suffix("_AL").ok_or_else(|| WireError(format!("통합 시세(_AL)가 아닙니다: {:?}", r.stk_cd)))?;
+    let code = StockCode::parse(code).map_err(|e| WireError(format!("{e}: {:?}", r.stk_cd)))?;
+    let won = |s: &str| unsigned(s)?.checked_mul(100).ok_or_else(|| WireError(format!("가격이 너무 큽니다: {s:?}")));
+    let (price_centi, base_centi) = (won(&r.cur_prc)?, won(&r.base_pric)?);
+    let at = parse_kst_datetime(&format!("{}{}", r.dt, r.cntr_tm)).ok_or_else(|| WireError(format!("dt·cntr_tm이 시각이 아닙니다: {:?} {:?}", r.dt, r.cntr_tm)))?;
+    let computed = price_centi.cmp(&base_centi);
+    // 방향 필드: 1 상한, 2 상승, 3 보합, 4 하한, 5 하락(§4.6).
+    let signalled = match r.pred_pre_sig.as_str() {
+        "1" | "2" => Some(std::cmp::Ordering::Greater),
+        "3" => Some(std::cmp::Ordering::Equal),
+        "4" | "5" => Some(std::cmp::Ordering::Less),
+        _ => None,
+    };
+    if signalled != Some(computed) {
+        tracing::warn!(stk_cd = %r.stk_cd, cur_prc = %r.cur_prc, base_pric = %r.base_pric, pred_pre_sig = %r.pred_pre_sig, "등락 방향 필드가 현재가 − 기준가와 맞지 않습니다. 계산한 값을 씁니다");
+    }
+    Ok(StockQuote { code, price_centi, base_centi, volume: Volume(unsigned(&r.trde_qty)?), at })
+}
+
 /// au10001 응답. 토큰은 받자마자 `Secret`으로 감싼다(호출자 몫).
 #[derive(Deserialize)]
 pub struct TokenResponse {
@@ -375,6 +441,25 @@ mod tests {
         assert_eq!(index_price("+505969").unwrap().centi(), 505_969);
         assert!(stock_price("0").is_err());
         assert!(stock_price("").is_err());
+    }
+
+    #[test]
+    fn quotes_take_abs_price_and_base_and_skip_empty_and_non_combined_rows() {
+        let body: StockQuotesResponse = serde_json::from_str(&fixture("ka10095_synthetic")).unwrap();
+        let quotes = parse_quotes(body);
+        let got: Vec<_> = quotes.iter().map(|q| (q.code.as_str(), q.price_centi, q.base_centi, q.volume.0)).collect();
+        assert_eq!(got, [("005930", 5_000_000, 5_100_000, 1_234_567), ("000660", 12_050_000, 12_000_000, 765_432), ("035720", 4_200_000, 4_200_000, 1_000)], "005935_NX 빈 행은 빠진다");
+        let at = KstTime::from_kst_civil(KstDate::parse_yyyymmdd("20261106").unwrap(), TimeOfDay::hms(19, 59, 59).unwrap());
+        assert_eq!(quotes[0].at, at);
+
+        let row = |stk_cd: &str, sig: &str| QuoteRow {
+            stk_cd: stk_cd.into(), cur_prc: "-100".into(), base_pric: "90".into(), pred_pre_sig: sig.into(),
+            trde_qty: "5".into(), dt: "20261106".into(), cntr_tm: "090000".into(),
+        };
+        let mismatch = parse_quotes(StockQuotesResponse { atn_stk_infr: vec![row("005930_AL", "5")] });
+        assert_eq!((mismatch[0].price_centi, mismatch[0].base_centi), (10_000, 9_000), "방향이 어긋나도 계산한 값을 쓴다");
+        let krx_bad_time = vec![row("005930", "2"), row("005930_NX", "2"), QuoteRow { cntr_tm: "99".into(), ..row("000660_AL", "2") }];
+        assert!(parse_quotes(StockQuotesResponse { atn_stk_infr: krx_bad_time }).is_empty());
     }
 
     #[test]
