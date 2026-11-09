@@ -21,3 +21,7 @@ This repository is public.
 ### Comments (poteto-mode)
 
 Keep a comment only for a non-obvious constraint that comes from outside the code. Example: Kiwoom also sends `[8050]` with HTTP 403. Express everything the repository controls through names, types, tests, and structure, not comments. Before opening or updating a PR, run `pstack:no-comments` on the PR diff.
+
+### This PC's environment (docs/dev-environment.md)
+
+AhnLab ASTx can drop connections, including loopback ones, while its session is active. Run local tests inside a network namespace: `unshare -Urn sh -c 'ip link set lo up && cargo test --offline'`. If Kiwoom returns `[8050]`, the public IP probably changed. Do not reissue tokens. Ask the user to register the new IP on the Kiwoom portal.
