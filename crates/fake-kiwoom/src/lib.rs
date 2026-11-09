@@ -14,6 +14,9 @@ use domain::{KstDate, Weekday};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
+mod ws;
+pub use ws::{DEFAULT_PING_EVERY, WsHub, WsStats, tick_0j, trade_0b};
+
 pub const APP_KEY: &str = "FAKE-APPKEY-e2e-7f3a91c2";
 pub const APP_SECRET: &str = "FAKE-SECRET-e2e-c0ffee42";
 pub const TOKEN: &str = "FAKE-TOKEN-e2e-5eed1234";
@@ -27,6 +30,7 @@ pub struct Seen {
     pub overrides: Mutex<HashMap<String, (StatusCode, Value)>>,
     pub rejected_tokens: Mutex<Vec<String>>,
     pub delays: Mutex<HashMap<String, Duration>>,
+    pub ws: WsHub,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -50,7 +54,12 @@ impl Seen {
         self.rejected_tokens.lock().unwrap().push(format!("Bearer {token}"));
     }
 
+    pub fn is_rejected(&self, token: &str) -> bool {
+        self.rejected_tokens.lock().unwrap().contains(&format!("Bearer {token}"))
+    }
+
     pub fn reset(&self) {
+        self.ws.reset();
         self.overrides.lock().unwrap().clear();
         self.delays.lock().unwrap().clear();
         self.rejected_tokens.lock().unwrap().clear();
@@ -86,6 +95,7 @@ impl FakeKiwoom {
             .route("/_fake/reject-token", post(admin_reject_token))
             .route("/_fake/reset", post(admin_reset))
             .route("/_fake/stats", get(admin_stats))
+            .merge(ws::routes())
             .with_state(seen.clone());
         let listener = tokio::net::TcpListener::bind(addr).await?;
         let addr = listener.local_addr()?;
@@ -95,6 +105,30 @@ impl FakeKiwoom {
 
     pub fn base_url(&self) -> String {
         format!("http://{}", self.addr)
+    }
+
+    pub fn ws_url(&self) -> String {
+        format!("ws://{}/api/dostk/websocket", self.addr)
+    }
+
+    pub fn push_real(&self, kind: &str, item: &str, values: Value) -> usize {
+        self.seen.ws.push_real(kind, item, values)
+    }
+
+    pub fn drop_sessions(&self, code: u16, reason: &str) {
+        self.seen.ws.drop_sessions(code, reason);
+    }
+
+    pub fn mute_ws(&self, on: bool) {
+        self.seen.ws.mute(on);
+    }
+
+    pub fn set_ping_every(&self, every: Duration) {
+        self.seen.ws.set_ping_every(every);
+    }
+
+    pub fn ws_stats(&self) -> WsStats {
+        self.seen.ws.stats()
     }
 
     pub fn respond_with(&self, api_id: &str, status: u16, body: Value) {

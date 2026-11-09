@@ -560,10 +560,12 @@ version = "0.1.0"
 dependencies = [
  "axum",
  "domain",
+ "futures-util",
  "reqwest",
  "serde",
  "serde_json",
  "tokio",
+ "tokio-tungstenite",
 ]
 
 [[package]]
