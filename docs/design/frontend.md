@@ -711,7 +711,7 @@ web/
       bars.ts               # fetchBarsPage. 봉은 React Query가 아니라 컨트롤러가 갖는다
       queries.ts            # TanStack Query 훅: useSymbolSearch, useSymbolInfo. (#3~) useLayouts, useWatchlist, useUiState …
       socket.ts             # (#4) MarketSocket: WebSocket 하나, 구독 다중화, 다시 연결
-    chart/                  # React를 모르는 명령형 코드
+    chart/                  # 명령형 봉·드로잉 엔진. useDrawingSurface는 React 연결 훅
       ChartController.ts    # 칸 하나의 차트 엔진 래퍼(§5.4)
       barFeed.ts            # 칸 하나의 봉 받기: 세대, 최신 페이지, 과거 페이지 이어 붙이기
       legend.ts             # 범례 DOM(§2.3)
