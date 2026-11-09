@@ -1,8 +1,8 @@
 //! 저장소 밖 토큰 파일(ADR 0004, backend.md §4.1). 서버와 키움 실측 프로그램이 같은 파일을 쓴다.
 
 use std::fmt;
-use std::io::Write;
-use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
+use std::io::{Read, Write};
+use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
@@ -62,25 +62,47 @@ impl TokenFile {
         FileError(format!("{}: {what}", self.path.display()))
     }
 
+    fn dir(&self) -> &Path {
+        self.path.parent().filter(|d| !d.as_os_str().is_empty()).unwrap_or(Path::new("."))
+    }
+
     /// 파일이 없으면(처음 실행) `None`. 있는데 못 읽으면 오류다.
     pub fn load(&self) -> Result<Option<Saved>, FileError> {
-        let text = match std::fs::read_to_string(&self.path) {
-            Ok(t) => t,
+        let mut file = match std::fs::File::open(&self.path) {
+            Ok(f) => f,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
             Err(e) => return Err(self.error(e)),
         };
+        self.private_dir()?;
+        let mode = file.metadata().map_err(|e| self.error(e))?.permissions().mode() & 0o777;
+        if mode & 0o077 != 0 {
+            return Err(self.error(format_args!("권한이 {mode:o}라 다른 사용자가 읽을 수 있어 쓰지 않습니다. chmod 600 {}", self.path.display())));
+        }
+        let mut text = String::new();
+        file.read_to_string(&mut text).map_err(|e| self.error(e))?;
         serde_json::from_str(&text).map(Some).map_err(|e| self.error(format_args!("JSON {:?} 오류, {}번째 줄", e.classify(), e.line())))
     }
 
+    /// 토큰 파일이 든 디렉터리는 이 서버 전용이다. 없으면 700으로 만들고, 있는데 열려 있으면 거절한다.
+    /// `VALLY_TOKEN_PATH`가 홈 같은 공용 디렉터리를 가리킬 수 있어 chmod는 하지 않는다.
+    fn private_dir(&self) -> Result<(), FileError> {
+        let dir = self.dir();
+        std::fs::DirBuilder::new().recursive(true).mode(0o700).create(dir).map_err(|e| self.error(e))?;
+        let mode = std::fs::metadata(dir).map_err(|e| self.error(e))?.permissions().mode() & 0o777;
+        if mode & 0o077 != 0 {
+            return Err(self.error(format_args!("디렉터리 권한이 {mode:o}라 다른 사용자가 읽을 수 있어 쓰지 않습니다. chmod 700 {}", dir.display())));
+        }
+        Ok(())
+    }
+
     pub fn save(&self, saved: &Saved) -> Result<(), FileError> {
-        let dir = self.path.parent().filter(|d| !d.as_os_str().is_empty()).unwrap_or(Path::new("."));
+        self.private_dir()?;
         let write = || -> std::io::Result<()> {
-            std::fs::DirBuilder::new().recursive(true).mode(0o700).create(dir)?;
-            let tmp = dir.join(format!(".token.json.{}.tmp", std::process::id()));
-            let mut file = std::fs::OpenOptions::new().write(true).create(true).truncate(true).mode(0o600).open(&tmp)?;
-            file.write_all(&serde_json::to_vec(saved).expect("문자열과 정수만 담은 구조체"))?;
-            file.sync_all()?;
-            std::fs::rename(&tmp, &self.path)
+            let mut tmp = tempfile::Builder::new().prefix(".token.json.").tempfile_in(self.dir())?;
+            tmp.write_all(&serde_json::to_vec(saved).expect("문자열과 정수만 담은 구조체"))?;
+            tmp.as_file().sync_all()?;
+            tmp.persist(&self.path).map_err(|e| e.error)?;
+            Ok(())
         };
         write().map_err(|e| self.error(e))
     }
