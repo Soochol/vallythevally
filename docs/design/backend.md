@@ -1503,7 +1503,7 @@ pub fn judge_cross(dir: CrossDir, prev: (f64, f64), cur: (f64, f64)) -> bool;
 | `unknown_symbol` | 404 | 종목 목록에 없거나 키움이 빈 행을 준 종목 |
 | `conflict` | 409 | 마지막 레이아웃 지우기 같은 충돌 |
 | `stale_revision` | 409 | 사용자 자료 PUT의 `revision`이 저장된 것보다 크지 않다. 더 새 편집이 이미 저장돼 있어 저장하지 않았다(§8.2 "저장 순서") |
-| `payload_too_large` | 413 | 한도를 넘는 본문. 화면 상태·관심종목(모든 목록) 64KB, 칸 하나의 `chartSettings` 64KB, 레이아웃 본문 272KB(4 × 64KB + 16KB) |
+| `payload_too_large` | 413 | 한도를 넘는 본문. 화면 상태 64KB, 관심종목(모든 목록) 69,076바이트(64KB + 20 × 가장 긴 목록 감싸개 177바이트: id 64바이트, 이름 20자 × 4바이트. 옛 한 목록 본문이 64KB 안에 들던 종목은 이관 뒤에도 저장할 수 있다), 칸 하나의 `chartSettings` 64KB, 레이아웃 본문 272KB(4 × 64KB + 16KB) |
 | `method_not_allowed` | 405 | 있는 API 경로에 틀린 메서드를 보냈다(`POST /api/ui-state` 등) |
 | `internal` | 500 | 서버 버그(파싱 실패, 키움이 거절한 요청) |
 | `kiwoom_auth_failed` | 502 | 키움이 우리 인증을 거절했다. 다시 시도해도 낫지 않는다. 운영자가 설정을 고친다 |

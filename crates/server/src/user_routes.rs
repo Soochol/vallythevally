@@ -60,13 +60,15 @@ fn parse_symbol(code: &str) -> Result<Symbol, ApiFailure> {
 pub const MAX_WATCHLISTS: usize = 20;
 pub const MAX_WATCHLIST_NAME_CHARS: usize = 20;
 const MAX_WATCHLIST_ID_BYTES: usize = 64;
+const LONGEST_WATCHLIST_WRAPPER_BYTES: usize = r#"{"id":"","name":"","symbols":[]},"#.len() + MAX_WATCHLIST_ID_BYTES + 4 * MAX_WATCHLIST_NAME_CHARS;
+pub const WATCHLISTS_LIMIT: usize = JSON_LIMIT + MAX_WATCHLISTS * LONGEST_WATCHLIST_WRAPPER_BYTES;
 
 async fn get_watchlists(State(st): State<Arc<AppState>>) -> Result<Json<Watchlists>, ApiFailure> {
     Ok(Json(userdata::get_watchlists(&st.db).await?))
 }
 
 async fn put_watchlists(State(st): State<Arc<AppState>>, body: Body) -> Result<Json<Watchlists>, ApiFailure> {
-    let all: Watchlists = read_json(body, JSON_LIMIT, "관심종목 본문").await?;
+    let all: Watchlists = read_json(body, WATCHLISTS_LIMIT, "관심종목 본문").await?;
     check_watchlists(&all)?;
     userdata::put_watchlists(&st.db, &all).await?;
     Ok(Json(all))

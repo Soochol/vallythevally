@@ -5,7 +5,7 @@ import { useLayoutStore } from "../stores/layout";
 import { type SaveTarget, usePersistStore } from "../stores/persist";
 import { useUiStore } from "../stores/ui";
 import { useWatchlistStore } from "../stores/watchlist";
-import { exceedsLimit } from "./bytes";
+import { exceedsLimit, WATCHLISTS_LIMIT_BYTES } from "./bytes";
 import { createSaver, type Saver, type SaverOptions } from "./saver";
 import { clearUnsaved, writeUnsaved } from "./unsaved";
 import { toUiState } from "./uiState";
@@ -78,7 +78,7 @@ export function startAutosave(deps: AutosaveDeps): Autosave {
   const watchlist = createSaver<Omit<Watchlists, "revision">>({
     debounceMs: 0,
     read: () => ({ lists: [...useWatchlistStore.getState().lists] }),
-    tooLarge: (v) => exceedsLimit({ ...v, revision: Number.MAX_SAFE_INTEGER }),
+    tooLarge: (v) => exceedsLimit({ ...v, revision: Number.MAX_SAFE_INTEGER }, WATCHLISTS_LIMIT_BYTES),
     path: () => WATCHLISTS_PATH,
     revision: deps.revisions.watchlist,
     send: deps.put,

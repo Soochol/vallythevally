@@ -635,6 +635,19 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn watchlists_body_limit_is_exact() {
+        let f = live_fixture(true).await;
+        let padded = |bytes: usize, revision: i64| {
+            let bare = json!({"lists": [{"id": "X", "name": "가", "symbols": []}], "revision": revision, "pad": ""}).to_string();
+            json!({"lists": [{"id": "X", "name": "가", "symbols": []}], "revision": revision, "pad": "x".repeat(bytes - bare.len())}).to_string()
+        };
+        let limit = crate::user_routes::WATCHLISTS_LIMIT;
+        assert_eq!(send(&f.app, "PUT", "/api/watchlists", padded(limit, 10)).await.0, StatusCode::OK);
+        let (s, v) = send(&f.app, "PUT", "/api/watchlists", padded(limit + 1, 11)).await;
+        assert_eq!((s, code(&v)), (StatusCode::PAYLOAD_TOO_LARGE, "payload_too_large"));
+    }
+
+    #[tokio::test]
     async fn layouts_round_trip_and_rejections() {
         let f = live_fixture(true).await;
         let (s, v) = json(&f.app, "/api/layouts").await;
