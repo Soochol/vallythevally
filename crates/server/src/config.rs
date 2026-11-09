@@ -149,7 +149,10 @@ impl Config {
             None => None,
             Some(s) => Some(parse_kst_datetime(s).ok_or_else(|| ConfigError(format!("VALLY_CLOCK_START는 KST YYYYMMDDHHMMSS입니다: {s}")))?),
         };
-        if clock_start.is_some() && (kiwoom_base_url == DEFAULT_KIWOOM_BASE_URL || kiwoom_ws_url == DEFAULT_KIWOOM_WS_URL) {
+        if (kiwoom_base_url == DEFAULT_KIWOOM_BASE_URL) != (kiwoom_ws_url == DEFAULT_KIWOOM_WS_URL) {
+            return Err(ConfigError("VALLY_KIWOOM_BASE_URL과 VALLY_KIWOOM_WS_URL은 둘 다 실제 키움이거나 둘 다 다른 곳이어야 합니다".into()));
+        }
+        if clock_start.is_some() && kiwoom_base_url == DEFAULT_KIWOOM_BASE_URL {
             return Err(ConfigError("VALLY_CLOCK_START는 가짜 키움(VALLY_KIWOOM_BASE_URL, VALLY_KIWOOM_WS_URL)과만 쓸 수 있습니다".into()));
         }
         let config = Config {
@@ -277,7 +280,7 @@ mod tests {
     fn process_overrides_file_and_defaults_apply() {
         let (c, warnings) = Config::from_vars(
             vars(&[("VALLY_KIWOOM_APP_KEY", "file"), ("VALLY_KIWOOM_APP_SECRET", SECRET), ("VALLY_BIND", "127.0.0.1:9")]),
-            vars(&[("VALLY_KIWOOM_APP_KEY", KEY), ("VALLY_KIWOOM_BASE_URL", "http://127.0.0.1:5/")]),
+            vars(&[("VALLY_KIWOOM_APP_KEY", KEY), ("VALLY_KIWOOM_BASE_URL", "http://127.0.0.1:5/"), ("VALLY_KIWOOM_WS_URL", "ws://127.0.0.1:5/api/dostk/websocket")]),
             lock,
             token,
         )
@@ -323,6 +326,9 @@ mod tests {
         assert!(Config::from_vars(vars(&keys), BTreeMap::new(), lock, token).is_err(), "실제 키움 주소와 함께면 거부");
         assert!(Config::from_vars(vars(&keys), vars(&fake[..1]), lock, token).is_err(), "WS만 실제 키움이어도 거부");
         assert!(Config::from_vars(vars(&keys), vars(&fake[1..]), lock, token).is_err(), "REST만 실제 키움이어도 거부");
+        let real_keys = &keys[..2];
+        assert!(Config::from_vars(vars(real_keys), vars(&fake[..1]), lock, token).is_err(), "REST만 가짜면 WS가 실제 키움으로 새므로 거부");
+        assert!(Config::from_vars(vars(real_keys), vars(&fake[1..]), lock, token).is_err(), "WS만 가짜여도 거부");
         let bad = [("VALLY_KIWOOM_APP_KEY", KEY), ("VALLY_KIWOOM_APP_SECRET", SECRET), ("VALLY_CLOCK_START", "2026-11-09")];
         assert!(Config::from_vars(vars(&bad), vars(&fake), lock, token).is_err());
 
