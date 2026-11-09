@@ -155,6 +155,19 @@ fn columns_reject_ragged_or_unordered_input() {
 }
 
 #[test]
+fn columns_reject_missing_or_infinite_prices_and_volume() {
+    let x = [1.0, 2.0];
+    for bad in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+        let y = [1.0, bad];
+        assert!(Columns::new(&[1, 2], &y, &x, &x, &x, &x).is_err(), "open {bad}");
+        assert!(Columns::new(&[1, 2], &x, &y, &x, &x, &x).is_err(), "high {bad}");
+        assert!(Columns::new(&[1, 2], &x, &x, &y, &x, &x).is_err(), "low {bad}");
+        assert!(Columns::new(&[1, 2], &x, &x, &x, &y, &x).is_err(), "close {bad}");
+        assert!(Columns::new(&[1, 2], &x, &x, &x, &x, &y).is_err(), "volume {bad}");
+    }
+}
+
+#[test]
 fn invalid_specs_compute_without_panicking() {
     let bars: Vec<BarInput> =
         (0..5).map(|i| BarInput { t: i, open: 1.0, high: 2.0, low: 0.5, close: 1.5, volume: 3.0 }).collect();
