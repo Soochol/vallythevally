@@ -4,7 +4,7 @@ import { periodKey } from "../../lib/hotkeys";
 import { PERIOD_LABEL, PERIODS, symbolSub } from "../../lib/symbol";
 import { useCell, useLayoutStore } from "../../stores/layout";
 import { useSelectionStore } from "../../stores/selection";
-import { useThemeStore } from "../../stores/theme";
+import { useTheme, useUiStore } from "../../stores/ui";
 import { BrandIcon, MoonIcon, SearchIcon, SunIcon } from "../icons";
 import { VenuePicker } from "../venue/VenuePicker";
 import { StyleMenu } from "./StyleMenu";
@@ -12,11 +12,12 @@ import { StyleMenu } from "./StyleMenu";
 /** 위쪽 막대(frontend.md §2.1). 종목, 거래소(주식만), 봉 주기, 봉 모양, 로그 축, 테마. */
 export function Topbar() {
   const slot = useSelectionStore((s) => s.activeSlot);
-  const openDialog = useSelectionStore((s) => s.openDialog);
+  const openSearch = useSelectionStore((s) => s.openSearch);
   const cell = useCell(slot);
   const info = useSymbolInfo(cell.symbol).data;
   const { setPeriod, setStyle, setScale } = useLayoutStore.getState();
-  const { theme, toggle } = useThemeStore();
+  const theme = useTheme();
+  const toggle = useUiStore((s) => s.toggleTheme);
   const log = cell.chartSettings.scale === "log";
 
   return (
@@ -33,7 +34,7 @@ export function Topbar() {
         className="tb-btn min-w-[168px] justify-start border border-line bg-surface"
         aria-haspopup="dialog"
         title="종목 검색 (/ 또는 Ctrl+K)"
-        onClick={() => openDialog("search")}
+        onClick={() => openSearch()}
       >
         <SearchIcon />
         <b className="font-semibold">{info?.name ?? cell.symbol}</b>

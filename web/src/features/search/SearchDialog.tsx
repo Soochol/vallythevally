@@ -1,25 +1,28 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { useEffect, useId, useRef, useState } from "react";
+import { Fragment, useEffect, useId, useRef, useState } from "react";
 import type { SymbolInfo } from "../../api/generated/SymbolInfo";
-import { useSymbolSearch } from "../../api/queries";
+import { useSymbolInfos, useSymbolSearch } from "../../api/queries";
 import { KIND_LABEL, MARKET_LABEL } from "../../lib/symbol";
 import { useLayoutStore } from "../../stores/layout";
-import { useRecentStore } from "../../stores/recent";
-import { useSelectionStore } from "../../stores/selection";
+import { type SearchPurpose, useSelectionStore } from "../../stores/selection";
+import { useUiStore } from "../../stores/ui";
+import { useWatchlistStore } from "../../stores/watchlist";
 import { SearchIcon } from "../icons";
 import { highlight, normalizeQuery } from "./highlight";
-import { searchList } from "./searchList";
+import { GROUP_LABEL, searchList } from "./searchList";
 
 /** 종목 검색(frontend.md §3.1). 데스크톱은 가운데 대화상자, 휴대폰은 아래에서 올라오는 시트. */
 export function SearchDialog() {
-  const open = useSelectionStore((s) => s.dialog?.kind === "search");
-  return open ? <SearchDialogBody /> : null;
+  const dialog = useSelectionStore((s) => s.dialog);
+  return dialog?.kind === "search" ? <SearchDialogBody purpose={dialog.purpose} /> : null;
 }
 
-function SearchDialogBody() {
+function SearchDialogBody({ purpose }: { purpose: SearchPurpose }) {
   const close = useSelectionStore((s) => s.closeDialog);
   const slot = useSelectionStore((s) => s.activeSlot);
-  const recent = useRecentStore((s) => s.recent);
+  const watch = useSymbolInfos(useWatchlistStore((s) => s.symbols));
+  const recent = useSymbolInfos(useUiStore((s) => s.prefs.recentSymbols));
+  const watched = useWatchlistStore((s) => s.symbols);
   const queryClient = useQueryClient();
   const [input, setInput] = useState("");
   const [active, setActive] = useState(0);
@@ -28,7 +31,7 @@ function SearchDialogBody() {
   const ids = useId();
   const opener = useRef<Element | null>(document.activeElement);
 
-  const { rows, selectable, recent: showingRecent } = searchList(query, recent, search.data);
+  const { rows, selectable, empty: showingRecent } = searchList(query, { watch, recent }, search.data);
   const activeIndex = selectable ? Math.min(active, rows.length - 1) : -1;
   const optionId = (i: number) => `${ids}-opt-${i}`;
 
@@ -43,11 +46,23 @@ function SearchDialogBody() {
     };
   }, []);
 
-  const choose = (info: SymbolInfo) => {
+  const open = (info: SymbolInfo) => {
     queryClient.setQueryData(["symbol", info.code], info);
     useLayoutStore.getState().setSymbol(slot, info);
+    useSelectionStore.getState().setPhoneTab("chart");
     close();
   };
+  const addToWatch = (info: SymbolInfo) => {
+    queryClient.setQueryData(["symbol", info.code], info);
+    const { showToast } = useSelectionStore.getState();
+    if (watched.includes(info.code)) showToast(`${info.name}은 이미 관심종목에 있습니다`);
+    else {
+      useWatchlistStore.getState().add(info.code);
+      showToast(`관심종목에 넣었습니다: ${info.name}`);
+    }
+    close();
+  };
+  const choose = purpose === "watch" ? addToWatch : open;
 
   const onKeyDown = (e: React.KeyboardEvent) => {
     if (e.nativeEvent.isComposing) return;
@@ -60,7 +75,7 @@ function SearchDialogBody() {
       case "Enter": {
         e.preventDefault();
         const row = selectable ? rows[activeIndex] : undefined;
-        if (row) choose(row);
+        if (row) (e.ctrlKey || e.metaKey ? addToWatch : choose)(row.info);
         return;
       }
       case "Escape":
@@ -95,7 +110,7 @@ function SearchDialogBody() {
         }
       >
         <h2 id={`${ids}-title`} className="sr-only">
-          종목 검색
+          {purpose === "watch" ? "관심종목에 넣을 종목 검색" : "종목 검색"}
         </h2>
         <label className="flex h-[46px] flex-none items-center gap-1.5 border-b border-line px-4 text-l text-text-3">
           <SearchIcon />
@@ -119,18 +134,18 @@ function SearchDialogBody() {
         <ul
           id={`${ids}-list`}
           role="listbox"
-          aria-label={showingRecent ? "최근 본 종목" : "검색 결과"}
+          aria-label={purpose === "watch" ? "관심종목에 넣을 종목" : showingRecent ? "관심종목과 최근 본 종목" : "검색 결과"}
           aria-busy={!selectable && !search.isError}
           className="max-h-[380px] overflow-auto p-1 max-md:max-h-none max-md:flex-1"
         >
-          {showingRecent && rows.length > 0 && (
-            <li role="presentation" className="px-3 pb-1 pt-2 text-xs text-text-3">
-              최근 본 종목
-            </li>
-          )}
-          {rows.map((s, i) => (
+          {rows.map(({ info: s, group }, i) => (
+            <Fragment key={`${group}-${s.code}`}>
+            {showingRecent && group !== rows[i - 1]?.group && (
+              <li role="presentation" className="px-3 pb-1 pt-2 text-xs text-text-3">
+                {GROUP_LABEL[group]}
+              </li>
+            )}
             <li
-              key={s.code}
               id={optionId(i)}
               role="option"
               aria-selected={i === activeIndex}
@@ -149,6 +164,7 @@ function SearchDialogBody() {
                 {MARKET_LABEL[s.market]} {KIND_LABEL[s.kind]}
               </span>
             </li>
+            </Fragment>
           ))}
           {message && (
             <li role="presentation" className="px-3 py-3 text-m text-text-2">
@@ -158,7 +174,13 @@ function SearchDialogBody() {
         </ul>
         <div className="flex flex-none items-center gap-2 border-t border-line px-4 py-2 text-s text-text-3 max-md:hidden">
           <kbd>↑</kbd>
-          <kbd>↓</kbd> 고르기 <kbd>Enter</kbd> 이 칸에 열기 <kbd>Esc</kbd> 닫기
+          <kbd>↓</kbd> 고르기 <kbd>Enter</kbd> {purpose === "watch" ? "관심종목에 넣기" : "이 칸에 열기"}
+          {purpose === "open" && (
+            <>
+              <kbd>Ctrl+Enter</kbd> 관심종목에 넣기
+            </>
+          )}
+          <kbd>Esc</kbd> 닫기
         </div>
       </div>
     </div>

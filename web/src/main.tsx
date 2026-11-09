@@ -3,7 +3,8 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { createBrowserRouter, Navigate, RouterProvider } from "react-router";
 import { ApiRequestError } from "./api/http";
-import { ChartScreen } from "./App";
+import { ChartRoute } from "./App";
+import { boot } from "./persist/boot";
 import "./styles/index.css";
 
 const RETRYABLE = new Set(["kiwoom_unavailable", "network"]);
@@ -17,8 +18,11 @@ const queryClient = new QueryClient({
   },
 });
 
+// React 밖에서 한 번만 되살린다. StrictMode가 효과를 두 번 부르더라도 복원은 한 번이다.
+void boot(queryClient);
+
 const router = createBrowserRouter([
-  { path: "/", element: <ChartScreen /> },
+  { path: "/", element: <ChartRoute /> },
   { path: "*", element: <Navigate to="/" replace /> },
 ]);
 

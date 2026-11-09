@@ -1,18 +1,27 @@
 import { useSelectionStore } from "../../stores/selection";
-import { ChartIcon, SearchIcon } from "../icons";
+import { ChartIcon, ListIcon, SearchIcon } from "../icons";
 
-/** 휴대폰 아래 탭. #2에는 차트와 검색만 있다(관심종목은 #3). */
+/** 휴대폰 아래 탭: 차트, 관심종목, 검색(frontend.md §4). 검색은 시트로 연다. */
 export function PhoneTabs() {
   const searching = useSelectionStore((s) => s.dialog?.kind === "search");
-  const { openDialog, closeDialog } = useSelectionStore.getState();
-  const tab = "flex flex-col items-center justify-center gap-0.5 text-xs text-text-3 aria-pressed:text-accent";
+  const tab = useSelectionStore((s) => s.phoneTab);
+  const { openSearch, closeDialog, setPhoneTab } = useSelectionStore.getState();
+  const show = (t: "chart" | "watch") => {
+    closeDialog();
+    setPhoneTab(t);
+  };
+  const cls = "flex flex-col items-center justify-center gap-0.5 text-xs text-text-3 aria-pressed:text-accent";
   return (
-    <nav aria-label="휴대폰 탭" className="hidden grid-cols-2 border-t border-line bg-bg [grid-area:mtabs] max-md:grid">
-      <button type="button" className={tab} aria-pressed={!searching} onClick={closeDialog}>
+    <nav aria-label="휴대폰 탭" className="hidden grid-cols-3 border-t border-line bg-bg [grid-area:mtabs] max-md:grid">
+      <button type="button" className={cls} aria-pressed={!searching && tab === "chart"} onClick={() => show("chart")}>
         <ChartIcon size={22} />
         차트
       </button>
-      <button type="button" className={tab} aria-pressed={searching} onClick={() => openDialog("search")}>
+      <button type="button" className={cls} aria-pressed={!searching && tab === "watch"} onClick={() => show("watch")}>
+        <ListIcon size={22} />
+        관심종목
+      </button>
+      <button type="button" className={cls} aria-pressed={searching} onClick={() => openSearch()}>
         <SearchIcon size={22} />
         검색
       </button>

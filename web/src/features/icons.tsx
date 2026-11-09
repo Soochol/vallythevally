@@ -69,3 +69,32 @@ export const CheckIcon = ({ size = 14 }: P) => (
     <path d="m5 12.5 4.5 4.5L19 7.5" />
   </Icon>
 );
+export const PlusIcon = ({ size = 16 }: P) => (
+  <Icon size={size}>
+    <path d="M12 5v14M5 12h14" />
+  </Icon>
+);
+/** 오른쪽(›). 접힌 띠에서는 뒤집어 왼쪽(‹)으로 쓴다. */
+export const ChevronRightIcon = ({ size = 16, flip = false }: P & { flip?: boolean }) => (
+  <Icon size={size}>
+    <path d={flip ? "m14.5 6-6 6 6 6" : "m9.5 6 6 6-6 6"} />
+  </Icon>
+);
+export const CloseIcon = ({ size = 14 }: P) => (
+  <Icon size={size}>
+    <path d="M6.5 6.5l11 11M17.5 6.5l-11 11" />
+  </Icon>
+);
+export const ArrowIcon = ({ size = 16, dir }: P & { dir: "up" | "down" }) => (
+  <Icon size={size}>
+    <path d={dir === "up" ? "M12 19V5M6 11l6-6 6 6" : "M12 5v14M6 13l6 6 6-6"} />
+  </Icon>
+);
+export const ListIcon = ({ size }: P) => (
+  <Icon size={size}>
+    <path d="M9 6h11M9 12h11M9 18h11" />
+    <circle cx="4.5" cy="6" r="1" fill="currentColor" stroke="none" />
+    <circle cx="4.5" cy="12" r="1" fill="currentColor" stroke="none" />
+    <circle cx="4.5" cy="18" r="1" fill="currentColor" stroke="none" />
+  </Icon>
+);

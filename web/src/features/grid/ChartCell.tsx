@@ -6,7 +6,7 @@ import { PERIOD_LABEL } from "../../lib/symbol";
 import { venueLabel } from "../../lib/venue";
 import { type Slot, useCell, useLayoutStore } from "../../stores/layout";
 import { useSelectionStore } from "../../stores/selection";
-import { useThemeStore } from "../../stores/theme";
+import { useTheme } from "../../stores/ui";
 import { cellErrorView, olderErrorView } from "./cellError";
 
 interface Props {
@@ -19,8 +19,8 @@ interface Props {
 export function ChartCell({ slot, status, onStatus }: Props) {
   const cell = useCell(slot);
   const info = useSymbolInfo(cell.symbol).data;
-  const theme = useThemeStore((s) => s.theme);
-  const openDialog = useSelectionStore((s) => s.openDialog);
+  const theme = useTheme();
+  const openSearch = useSelectionStore((s) => s.openSearch);
   const chartEl = useRef<HTMLDivElement>(null);
   const ctl = useRef<ChartController | null>(null);
   const onStatusRef = useRef(onStatus);
@@ -94,7 +94,7 @@ export function ChartCell({ slot, status, onStatus }: Props) {
           <div className="flex max-w-[44ch] flex-col items-center gap-4 text-center" role="alert">
             <p className="text-m text-text">{error.text}</p>
             {error.action === "search" && (
-              <button type="button" className="btn-primary" onClick={() => openDialog("search")}>
+              <button type="button" className="btn-primary" onClick={() => openSearch()}>
                 종목 검색
               </button>
             )}
