@@ -20,6 +20,10 @@ const GAP = 6;
 const LABEL_GAP = 3;
 const LINE_HEIGHT = 22;
 const PAD_BOTTOM = 12;
+const FOOT_HEIGHT = 18;
+const FOOT_BASELINE = 13;
+
+export const CHART_CREDIT = "Charts by TradingView Lightweight Charts™";
 
 interface Run {
   text: string;
@@ -66,41 +70,54 @@ export function composeSnapshot(chart: HTMLCanvasElement, head: SnapshotHead, to
       : [];
 
   const width = chart.width / pxPerCssPx;
+  const lineEnd = width - PAD_X;
+  const fit = (group: KeepTogether): KeepTogether => {
+    const max = lineEnd - PAD_X;
+    if (groupWidth(group) <= max) return group;
+    const head = group.slice(0, -1);
+    const last = group[group.length - 1]!;
+    const cut = (chars: string[]) => [...head, { ...last, text: `${chars.join("")}…` }];
+    const chars = [...last.text];
+    while (chars.length > 1 && groupWidth(cut(chars)) > max) chars.pop();
+    return cut(chars);
+  };
   const takenAt = run(`${formatKstMinute(head.takenAt)} KST`, 12, 400, tokens.text3);
   const lines: { group: KeepTogether; x: number }[][] = [];
   const place = (groups: KeepTogether[], firstLineEnd: number) => {
     lines.push([]);
     let x = PAD_X;
     let end = firstLineEnd;
-    for (const group of groups.filter((g) => g.length > 0)) {
+    for (const group of groups.filter((g) => g.length > 0).map(fit)) {
       const w = groupWidth(group);
-      if (x > PAD_X && x + w > end) {
+      if (x + w > end && (x > PAD_X || end < lineEnd)) {
         lines.push([]);
         x = PAD_X;
-        end = width - PAD_X;
+        end = lineEnd;
       }
       lines[lines.length - 1]!.push({ group, x });
       x += w + GAP;
     }
   };
-  place(title, width - PAD_X - groupWidth(takenAt) - GAP);
-  lines[0]!.push({ group: takenAt, x: width - PAD_X - groupWidth(takenAt) });
-  if (legendGroups.length > 0) place(legendGroups, width - PAD_X);
+  place(title, lineEnd - groupWidth(takenAt) - GAP);
+  lines[0]!.push({ group: takenAt, x: lineEnd - groupWidth(takenAt) });
+  if (legendGroups.length > 0) place(legendGroups, lineEnd);
+  const credit = fit(run(CHART_CREDIT, 10, 400, tokens.text3));
 
   const headPx = Math.round((lines.length * LINE_HEIGHT + PAD_BOTTOM) * pxPerCssPx);
   const border = Math.max(1, Math.round(pxPerCssPx));
   out.width = chart.width;
-  out.height = chart.height + headPx;
+  out.height = headPx + chart.height + Math.round(FOOT_HEIGHT * pxPerCssPx);
   ctx.fillStyle = tokens.chartBg;
-  ctx.fillRect(0, 0, out.width, headPx);
+  ctx.fillRect(0, 0, out.width, out.height);
   ctx.drawImage(chart, 0, headPx);
   ctx.fillStyle = tokens.line;
   ctx.fillRect(0, headPx - border, out.width, border);
 
   ctx.scale(pxPerCssPx, pxPerCssPx);
   ctx.textBaseline = "alphabetic";
-  lines.forEach((line, i) => {
-    const y = (i + 1) * LINE_HEIGHT;
+  const footY = headPx / pxPerCssPx + chart.height / pxPerCssPx + FOOT_BASELINE;
+  const rows = [...lines.map((line, i) => ({ line, y: (i + 1) * LINE_HEIGHT })), { line: [{ group: credit, x: lineEnd - groupWidth(credit) }], y: footY }];
+  rows.forEach(({ line, y }) => {
     for (const { group, x: start } of line) {
       let x = start;
       for (const r of group) {
