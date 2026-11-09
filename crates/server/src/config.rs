@@ -262,6 +262,8 @@ mod tests {
     const KEY: &str = "FAKE-APPKEY-cfg-1111";
     const SECRET: &str = "FAKE-SECRET-cfg-2222";
 
+    const REAL: [(&str, &str); 2] = [("VALLY_KIWOOM_BASE_URL", "https://api.kiwoom.com"), ("VALLY_KIWOOM_WS_URL", "wss://api.kiwoom.com:10000/api/dostk/websocket")];
+
     fn vars(pairs: &[(&str, &str)]) -> BTreeMap<String, String> {
         pairs.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect()
     }
@@ -315,8 +317,7 @@ mod tests {
         assert_eq!(c.lock_path, PathBuf::from("/nonexistent/test.lock"));
         assert_eq!(c.token_path, PathBuf::from("/nonexistent/token.json"));
 
-        let (c, _) = Config::from_vars(vars(&[("VALLY_KIWOOM_APP_KEY", KEY), ("VALLY_KIWOOM_APP_SECRET", SECRET)]), BTreeMap::new(), lock, token).unwrap();
-        assert_eq!(c.kiwoom_base_url, DEFAULT_KIWOOM_BASE_URL);
+        let (c, _) = Config::from_vars(vars(&[("VALLY_KIWOOM_APP_KEY", KEY), ("VALLY_KIWOOM_APP_SECRET", SECRET)]), vars(&REAL), lock, token).unwrap();
         assert_eq!(c.bind.socket_addr(), "127.0.0.1:8080".parse().unwrap());
     }
 
@@ -326,7 +327,7 @@ mod tests {
         assert!(Config::from_vars(vars(&[("VALLY_KIWOOM_APP_KEY", KEY), ("VALLY_KIWOOM_APP_SECRET", "")]), BTreeMap::new(), lock, token).is_err());
         let (_, warnings) = Config::from_vars(
             vars(&[("VALLY_KIWOOM_APP_KEY", KEY), ("VALLY_KIWOOM_APP_SECRET", SECRET), ("VALLY_BIDN", "x")]),
-            BTreeMap::new(),
+            vars(&REAL),
             lock,
             token,
         )
@@ -341,12 +342,19 @@ mod tests {
         let rest = ("VALLY_KIWOOM_BASE_URL", "http://127.0.0.1:5");
         let ws = ("VALLY_KIWOOM_WS_URL", "ws://127.0.0.1:5/api/dostk/websocket");
         let start = |extra: &[(&str, &str)]| Config::from_vars(vars(&keys), vars(extra), lock, token);
-        assert!(start(&[rest]).is_err(), "기본 WS + 가짜 REST");
-        assert!(start(&[ws]).is_err(), "가짜 WS + 기본 REST");
+        let missing = start(&[]).unwrap_err().0;
+        assert!(missing.contains("VALLY_KIWOOM_BASE_URL") && missing.contains("VALLY_KIWOOM_WS_URL") && missing.contains(".env"), "무엇을 적을지 알려 준다: {missing}");
+        assert!(start(&[rest]).is_err(), "가짜 REST만");
+        assert!(start(&[ws]).is_err(), "가짜 WS만");
+        assert!(start(&REAL[..1]).is_err(), "실제 REST만");
+        assert!(start(&REAL[1..]).is_err(), "실제 WS만");
+        assert!(start(&[rest, ("VALLY_KIWOOM_WS_URL", "")]).is_err(), "빈 값");
+        assert!(start(&[rest, REAL[1]]).is_err(), "가짜 REST + 실제 WS");
+        assert!(start(&[REAL[0], ws]).is_err(), "실제 REST + 가짜 WS");
         let (c, _) = start(&[rest, ws]).expect("둘 다 가짜");
         assert_eq!((c.kiwoom_base_url.as_str(), c.kiwoom_ws_url.as_str()), (rest.1, ws.1));
-        let (c, _) = start(&[]).expect("둘 다 실제 키움");
-        assert_eq!((c.kiwoom_base_url.as_str(), c.kiwoom_ws_url.as_str()), (DEFAULT_KIWOOM_BASE_URL, DEFAULT_KIWOOM_WS_URL));
+        let (c, _) = start(&REAL).expect("둘 다 실제 키움");
+        assert_eq!((c.kiwoom_base_url.as_str(), c.kiwoom_ws_url.as_str()), (REAL[0].1, REAL[1].1));
     }
 
     #[test]
@@ -357,17 +365,12 @@ mod tests {
         assert_eq!(c.clock_start.map(|t| t.to_string()), Some("2026-11-09 10:00:00 KST".to_owned()));
         assert_eq!(c.kiwoom_ws_url, "ws://127.0.0.1:5/api/dostk/websocket");
 
-        assert!(Config::from_vars(vars(&keys), BTreeMap::new(), lock, token).is_err(), "실제 키움 주소와 함께면 거부");
-        assert!(Config::from_vars(vars(&keys), vars(&fake[..1]), lock, token).is_err(), "WS만 실제 키움이어도 거부");
-        assert!(Config::from_vars(vars(&keys), vars(&fake[1..]), lock, token).is_err(), "REST만 실제 키움이어도 거부");
-        let real_keys = &keys[..2];
-        assert!(Config::from_vars(vars(real_keys), vars(&fake[..1]), lock, token).is_err(), "REST만 가짜면 WS가 실제 키움으로 새므로 거부");
-        assert!(Config::from_vars(vars(real_keys), vars(&fake[1..]), lock, token).is_err(), "WS만 가짜여도 거부");
+        assert!(Config::from_vars(vars(&keys), vars(&REAL), lock, token).is_err(), "실제 키움 주소와 함께면 거부");
         let bad = [("VALLY_KIWOOM_APP_KEY", KEY), ("VALLY_KIWOOM_APP_SECRET", SECRET), ("VALLY_CLOCK_START", "2026-11-09")];
         assert!(Config::from_vars(vars(&bad), vars(&fake), lock, token).is_err());
 
-        let (c, _) = Config::from_vars(vars(&keys[..2]), BTreeMap::new(), lock, token).unwrap();
-        assert_eq!((c.clock_start, c.kiwoom_ws_url.as_str()), (None, DEFAULT_KIWOOM_WS_URL));
+        let (c, _) = Config::from_vars(vars(&keys[..2]), vars(&REAL), lock, token).unwrap();
+        assert_eq!(c.clock_start, None);
     }
 
     #[test]
