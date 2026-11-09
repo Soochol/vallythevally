@@ -66,16 +66,17 @@ pub async fn list_layouts(db: &AppDb) -> Result<Vec<LayoutSummary>, StoreError> 
         .collect()
 }
 
+/// 레이아웃 행과 칸을 한 읽기 트랜잭션에서 읽는다. WAL에서는 첫 SELECT가 스냅숏을 고정한다.
 pub async fn get_layout(db: &AppDb, id: &str) -> Result<Layout, StoreError> {
-    let mut conn = db.read().acquire().await?;
+    let mut tx = db.read().begin().await?;
     let row = sqlx::query("SELECT name, arrangement, sync, updated_at FROM layouts WHERE id = ?")
         .bind(id)
-        .fetch_optional(&mut *conn)
+        .fetch_optional(&mut *tx)
         .await?
         .ok_or(StoreError::NotFound)?;
     let cells = sqlx::query("SELECT slot, symbol, venue, period, symbol_link, chart_settings FROM layout_cells WHERE layout_id = ? ORDER BY slot")
         .bind(id)
-        .fetch_all(&mut *conn)
+        .fetch_all(&mut *tx)
         .await?
         .into_iter()
         .map(|c| {
@@ -261,6 +262,51 @@ mod tests {
             assert!(matches!(&err, StoreError::Db(e) if e.0.contains("CHECK")), "{err:?}");
         }
         assert!(matches!(get_layout(&db, "L2").await, Err(StoreError::NotFound)), "실패한 트랜잭션은 레이아웃도 남기지 않는다");
+    }
+
+    /// R3: 레이아웃 행과 칸을 서로 다른 커밋에서 읽으면 `2v`에 칸 1개 같은, 저장된 적 없는 조합이 나온다.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn get_layout_never_mixes_two_commits() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db = AppDb::open(&tmp.path().join("vally.db")).await.unwrap();
+        let one = layout("R", "race", Arrangement::One, vec![cell(0, "005930", Some(Venue::Krx))]);
+        let two = layout("R", "race", Arrangement::TwoV, vec![cell(0, "005930", Some(Venue::Krx)), cell(1, "000660", Some(Venue::Krx))]);
+        put_layout(&db, &one, UnixSeconds(0)).await.unwrap();
+        let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let writer = {
+            let (db, stop) = (db.clone(), stop.clone());
+            tokio::spawn(async move {
+                for i in 0..400 {
+                    put_layout(&db, if i % 2 == 0 { &two } else { &one }, UnixSeconds(i)).await.unwrap();
+                }
+                stop.store(true, std::sync::atomic::Ordering::SeqCst);
+            })
+        };
+        let readers: Vec<_> = (0..4)
+            .map(|_| {
+                let (db, stop) = (db.clone(), stop.clone());
+                tokio::spawn(async move {
+                    let (mut reads, mut torn) = (0, Vec::new());
+                    while !stop.load(std::sync::atomic::Ordering::SeqCst) {
+                        let l = get_layout(&db, "R").await.unwrap();
+                        reads += 1;
+                        if l.cells.len() != l.arrangement.cell_count() {
+                            torn.push((l.arrangement, l.cells.len()));
+                        }
+                    }
+                    (reads, torn)
+                })
+            })
+            .collect();
+        writer.await.unwrap();
+        let (mut reads, mut torn) = (0, Vec::new());
+        for r in readers {
+            let (n, t) = r.await.unwrap();
+            reads += n;
+            torn.extend(t);
+        }
+        assert!(reads > 0);
+        assert!(torn.is_empty(), "쓰기 400회 중 읽기 {reads}회에서 섞인 응답 {}개: {:?}", torn.len(), &torn[..torn.len().min(3)]);
     }
 
     #[sqlx::test(migrations = "./migrations")]
