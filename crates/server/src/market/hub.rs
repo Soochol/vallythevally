@@ -1720,4 +1720,73 @@ mod tests {
         assert_eq!(after.recent_confirmed, snap.recent_confirmed);
     }
 
+    async fn n3_n4_equal_previous_after_omitted_seed(confirm_partial_before_result: bool) {
+        let mut chart = Chart::default();
+        chart.set(at(9, 0, 0), [100, 125, 95, 125, 50]);
+        let h = harness(at(9, 0, 45), chart, Duration::from_millis(3250));
+        live(&h).await;
+        let (conn, out) = connect(&h).await;
+        h.hub.subscribe(conn, sub("a"), samsung());
+        h.clock.sleep_until(at(9, 1, 3)).await;
+        let initial = h.hub.snapshot(samsung()).await.unwrap();
+        assert_eq!(initial.current, None);
+        assert_eq!(initial.recent_confirmed.last().unwrap().ohlcv.volume().0, 50);
+        assert_eq!(h.fake.market_sent().len(), 1);
+        h.chart.lock().unwrap().rows.clear();
+        h.events.send(StreamEvent::Down { at: h.clock.now() }).await.unwrap();
+        live(&h).await;
+        let reseed = h.fake.market_sent().last().unwrap().at;
+        tokio::time::sleep_until(reseed + Duration::from_millis(3300)).await;
+        let seeded = h.hub.snapshot(samsung()).await.unwrap();
+        assert_eq!((seeded.current, seeded.recent_confirmed.len()), (None, 0));
+        assert_eq!(h.fake.market_sent().len(), 2);
+        h.chart.lock().unwrap().set(at(9, 0, 0), [100, 125, 95, 125, 50]);
+        h.clock.sleep_until(at(9, 1, 7)).await;
+        settle().await;
+        assert_eq!(h.fake.market_sent().len(), 3, "seed, empty reseed, pending verification");
+        let request = h.fake.market_sent().last().unwrap().at;
+        let offset = if confirm_partial_before_result { 2100 } else { 3100 };
+        tokio::time::sleep_until(request + Duration::from_millis(offset)).await;
+        out.take(true);
+        h.events.send(trade(&h, (9, 0, 59), 125, 2, Some(Exchange::Krx))).await.unwrap();
+        for _ in 0..20 {
+            tokio::task::yield_now().await;
+        }
+        let mut partial = out.take(true).messages;
+        if confirm_partial_before_result {
+            tokio::time::sleep_until(request + Duration::from_millis(3100)).await;
+            partial.extend(out.take(true).messages);
+        }
+        let before_result = h.hub.snapshot(samsung()).await.unwrap();
+        assert!(partial.iter().any(|m| matches!(m, ServerMessage::Bar { bar, .. } if bar.v == 2)), "must publish partial Q before recovery result: {partial:?}");
+        if confirm_partial_before_result {
+            assert!(partial.iter().any(|m| matches!(m, ServerMessage::Confirmed { bar, .. } if bar.v == 2)), "must publish partial Q confirmation before recovery result: {partial:?}");
+            assert_eq!(before_result.current, None);
+            assert_eq!(before_result.recent_confirmed.last().unwrap().ohlcv.volume().0, 2);
+        } else {
+            assert_eq!(before_result.current.unwrap().ohlcv().volume().0, 2);
+        }
+        tokio::time::sleep_until(request + Duration::from_millis(3500)).await;
+        let corrected = take(&out).await;
+        let after = h.hub.snapshot(samsung()).await.unwrap();
+        let canonical = h.bars.page(samsung(), Some(at(9, 1, 0)), 1).await.unwrap().bars[0];
+        assert_eq!((canonical.source, canonical.ohlcv.volume().0), (BarSource::Kiwoom, 50));
+        println!("equal-previous confirmed-before-result={confirm_partial_before_result} partial={partial:?} correction={corrected:?} seq-before={} seq-after={} current-after={:?} recent-after={:?} requests={}", before_result.seq, after.seq, after.current, after.recent_confirmed, h.fake.market_sent().len());
+        assert_eq!(after.current, None);
+        assert_eq!(corrected.iter().filter(|m| matches!(m, ServerMessage::Reload { reason: ReloadReason::Replaced, .. })).count(), 1, "a published partial Q needs a repair even when original P equals recovered P");
+        assert_eq!(after.seq, before_result.seq + 1);
+        assert!(!after.recent_confirmed.iter().any(|b| b.ohlcv.volume().0 == 2));
+        assert_eq!(h.fake.market_sent().len(), 3);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn n3_n4_equal_previous_repairs_partial_current_after_reseed() {
+        n3_n4_equal_previous_after_omitted_seed(false).await;
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn n3_n4_equal_previous_repairs_partial_confirmed_after_reseed() {
+        n3_n4_equal_previous_after_omitted_seed(true).await;
+    }
+
 }
