@@ -52,4 +52,4 @@ If your output contradicts an existing ADR, surface it explicitly rather than si
 
 ## Who edits these files
 
-`AGENTS.md` ("Who changes which docs") says who changes `GLOSSARY.md` and `docs/adr/`, and when.
+[document-policy.md](document-policy.md) says who changes `GLOSSARY.md` and `docs/adr/`, and when.
