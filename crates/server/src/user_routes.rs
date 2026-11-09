@@ -48,12 +48,12 @@ fn too_large(what: &str, limit: usize) -> ApiFailure {
 
 /// axum 기본 본문 한도(2MB)는 우리 오류 본문이 아닌 응답을 낸다. 그래서 `Body`를 직접 받아 한도까지만 읽는다.
 /// 읽다 실패하는 경우는 한도 초과뿐이다(연결이 끊기면 응답을 받을 쪽도 없다).
-async fn read_json<T: DeserializeOwned>(body: Body, limit: usize, what: &str) -> Result<T, ApiFailure> {
+pub(crate) async fn read_json<T: DeserializeOwned>(body: Body, limit: usize, what: &str) -> Result<T, ApiFailure> {
     let bytes: Bytes = axum::body::to_bytes(body, limit).await.map_err(|_| too_large(what, limit))?;
     serde_json::from_slice(&bytes).map_err(|e| ApiFailure::bad_request(format!("{what}의 JSON이 틀렸습니다: {e}")))
 }
 
-fn parse_symbol(code: &str) -> Result<Symbol, ApiFailure> {
+pub(crate) fn parse_symbol(code: &str) -> Result<Symbol, ApiFailure> {
     Symbol::parse(code).map_err(|e| ApiFailure::bad_request(format!("{e}: {code}")))
 }
 

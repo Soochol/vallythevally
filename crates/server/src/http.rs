@@ -37,6 +37,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/api/bars", get(bars))
         .route("/api/quotes", get(quotes))
         .merge(crate::user_routes::routes())
+        .merge(crate::drawings::routes())
         .route("/api", any(api_not_found))
         .route("/api/{*rest}", any(api_not_found))
         .method_not_allowed_fallback(method_not_allowed)

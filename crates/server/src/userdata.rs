@@ -18,22 +18,22 @@ impl From<sqlx::Error> for StoreError {
     }
 }
 
-fn corrupt(what: &str, e: impl std::fmt::Display) -> StoreError {
+pub(crate) fn corrupt(what: &str, e: impl std::fmt::Display) -> StoreError {
     StoreError::Db(DbError(format!("저장된 {what}를 읽지 못했습니다: {e}")))
 }
 
-fn wire_name<T: serde::Serialize>(v: &T) -> String {
+pub(crate) fn wire_name<T: serde::Serialize>(v: &T) -> String {
     match serde_json::to_value(v) {
         Ok(serde_json::Value::String(s)) => s,
         other => unreachable!("계약 enum은 문자열로 직렬화된다: {other:?}"),
     }
 }
 
-fn from_wire_name<T: serde::de::DeserializeOwned>(what: &str, s: String) -> Result<T, StoreError> {
+pub(crate) fn from_wire_name<T: serde::de::DeserializeOwned>(what: &str, s: String) -> Result<T, StoreError> {
     serde_json::from_value(serde_json::Value::String(s)).map_err(|e| corrupt(what, e))
 }
 
-fn check_newer(stored: Option<i64>, sent: Revision) -> Result<(), StoreError> {
+pub(crate) fn check_newer(stored: Option<i64>, sent: Revision) -> Result<(), StoreError> {
     match stored {
         Some(r) if sent.0 <= r => Err(StoreError::Stale(Revision(r))),
         _ => Ok(()),

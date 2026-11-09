@@ -1358,15 +1358,27 @@ CREATE TABLE ui_state (
   revision  INTEGER NOT NULL DEFAULT 0                    -- 저장 순서 번호(0002)
 ) STRICT;
 
--- 드로잉: 종목에 붙는다. 거래소, 봉 주기, 레이아웃에는 붙지 않는다(ADR 0007).
+-- 드로잉(0003): 종목에 붙는다. 보이는 곳은 scope가 좁힌다. 거래소, 봉 주기와는 상관없다(ADR 0007).
 CREATE TABLE drawings (
   id         TEXT    PRIMARY KEY,
   symbol     TEXT    NOT NULL,
-  tool       TEXT    NOT NULL CHECK (tool IN ('trendline','hline','vline','rect','fib','text')),
+  tool       TEXT    NOT NULL,                              -- DrawingTool. CHECK 없이 서버의 enum이 검사한다
   points     TEXT    NOT NULL CHECK (json_valid(points)),   -- [{ t: Unix 초, price: number }]
   text       TEXT,
   style      TEXT    NOT NULL CHECK (json_valid(style)),
-  updated_at INTEGER NOT NULL
+  locked     INTEGER NOT NULL DEFAULT 0 CHECK (locked IN (0, 1)),
+  hidden     INTEGER NOT NULL DEFAULT 0 CHECK (hidden IN (0, 1)),
+  periods    TEXT    CHECK (periods IS NULL OR json_valid(periods)),   -- Period[]. NULL이면 모든 봉 주기
+  z          REAL    NOT NULL,                                         -- 큰 것이 위
+  group_name TEXT    CHECK (group_name IS NULL OR length(group_name) BETWEEN 1 AND 100),
+  scope      TEXT    NOT NULL DEFAULT 'symbol' CHECK (scope IN ('symbol', 'layout', 'cell')),
+  layout_id  TEXT    REFERENCES layouts(id),                -- ON DELETE 없음. 그 범위 드로잉이 있으면 레이아웃을 지울 수 없다(Q7 전까지)
+  slot       INTEGER,
+  updated_at INTEGER NOT NULL,
+  revision   INTEGER NOT NULL,                              -- 저장 순서 번호(§8.2 "저장 순서")
+  CHECK ((scope = 'symbol' AND layout_id IS NULL AND slot IS NULL)
+      OR (scope = 'layout' AND layout_id IS NOT NULL AND slot IS NULL)
+      OR (scope = 'cell'   AND layout_id IS NOT NULL AND slot IS NOT NULL))
 ) STRICT;
 CREATE INDEX drawings_by_symbol ON drawings (symbol);
 
@@ -1401,7 +1413,8 @@ CREATE UNIQUE INDEX alert_events_once_per_bar ON alert_events (alert_id, bar_t)
 
 - `STRICT` 테이블이라 열 타입이 어긋난 값은 들어가지 않는다.
 - 첫 마이그레이션이 "기본" 레이아웃 하나를 넣는다(1칸, 코스피 지수 일봉, `venue` NULL, `sync` 둘 다 `true`). #3은 처음부터 `venue` 열이 있는 형식으로 시작한다(D17). #3에서 차트 설정 자동 저장은 이 레이아웃의 칸을 고치는 것이다. 레이아웃이 0개인 상태는 없다. 마지막 레이아웃은 지울 수 없다.
-- 드로잉 점 개수는 도구마다 고정이다: 추세선 2, 수평선 1, 수직선 1, 사각형 2, 피보나치 되돌림 2, 텍스트 1. 서버가 검사한다.
+- 드로잉 점 개수는 도구가 정한다(§8.2 "드로잉 (#6)"의 표). 서버가 검사한다.
+- 드로잉의 `slot`에는 `layout_cells` 외래 키가 없다. 레이아웃 PUT이 칸을 지우고 다시 넣기 때문이다. 칸이 있는지는 드로잉 PUT이 검사한다.
 - 드로잉 점의 가격은 0.01 단위 정수가 아니라 실수다. 드로잉은 봉 가격이 아닌 아무 가격에나 놓을 수 있다.
 - 중복 금지 인덱스에 걸리면(`SQLITE_CONSTRAINT_UNIQUE`) 이미 울린 것이므로 보내지 않는다(§7.3).
 
@@ -1503,7 +1516,7 @@ pub fn judge_cross(dir: CrossDir, prev: (f64, f64), cur: (f64, f64)) -> bool;
 | `unknown_symbol` | 404 | 종목 목록에 없거나 키움이 빈 행을 준 종목 |
 | `conflict` | 409 | 마지막 레이아웃 지우기 같은 충돌 |
 | `stale_revision` | 409 | 사용자 자료 PUT의 `revision`이 저장된 것보다 크지 않다. 더 새 편집이 이미 저장돼 있어 저장하지 않았다(§8.2 "저장 순서") |
-| `payload_too_large` | 413 | 한도를 넘는 본문. 화면 상태 64KB, 관심종목(모든 목록) 69,076바이트(64KB + 20 × 가장 긴 목록 감싸개 177바이트: id 64바이트, 이름 20자 × 4바이트. 옛 한 목록 본문이 64KB 안에 들던 종목은 이관 뒤에도 저장할 수 있다), 칸 하나의 `chartSettings` 64KB, 레이아웃 본문 272KB(4 × 64KB + 16KB) |
+| `payload_too_large` | 413 | 한도를 넘는 본문. 화면 상태 64KB, 관심종목(모든 목록) 69,076바이트(64KB + 20 × 가장 긴 목록 감싸개 177바이트: id 64바이트, 이름 20자 × 4바이트. 옛 한 목록 본문이 64KB 안에 들던 종목은 이관 뒤에도 저장할 수 있다), 칸 하나의 `chartSettings` 64KB, 레이아웃 본문 272KB(4 × 64KB + 16KB), 드로잉 PUT 본문 64KB |
 | `method_not_allowed` | 405 | 있는 API 경로에 틀린 메서드를 보냈다(`POST /api/ui-state` 등) |
 | `internal` | 500 | 서버 버그(파싱 실패, 키움이 거절한 요청) |
 | `kiwoom_auth_failed` | 502 | 키움이 우리 인증을 거절했다. 다시 시도해도 낫지 않는다. 운영자가 설정을 고친다 |
@@ -1657,11 +1670,11 @@ interface Fundamentals {
 
 #### 저장 순서 (#3, R2)
 
-관심종목, 레이아웃, 화면 상태의 PUT은 본문에 `revision: number`(저장 순서 번호)를 싣는다. 브라우저가 보낼 때마다 `max(Date.now(), 지금까지 쓴 것 + 1)`로 늘린다.
+관심종목, 레이아웃, 화면 상태, 드로잉의 PUT은 본문에 `revision: number`(저장 순서 번호)를 싣는다. 브라우저가 보낼 때마다 `max(Date.now(), 지금까지 쓴 것 + 1)`로 늘린다.
 
 - 서버는 저장된 것보다 **큰** revision만 받는다. 같거나 작으면 409 `stale_revision`이고 아무것도 바꾸지 않는다. 확인과 쓰기는 한 쓰기 트랜잭션(`BEGIN IMMEDIATE`)이다.
 - 그래서 늦게 도착한 옛 요청이 새 요청을 덮지 못한다. 브라우저는 앞 요청이 진행 중이어도 탭이 숨을 때 최신 편집을 곧바로 보낼 수 있다(frontend.md §3.7).
-- GET은 저장된 revision을 돌려준다. 처음은 0이다. 새 레이아웃 id는 어떤 revision이든 받는다.
+- GET은 저장된 revision을 돌려준다. 처음은 0이다. 새 레이아웃·드로잉 id는 어떤 revision이든 받는다.
 - 다른 탭·기기 사이에서는 revision(편집 시각에 가깝다)이 큰 쪽이 이긴다. 기기 시계가 몇 초 늦으면 그 기기의 편집이 그 사이 다른 기기의 편집에 밀릴 수 있다. 탭 사이 동기화는 #4(`data_changed`)다.
 
 #### 관심종목 (#3, 여러 목록 #37)
@@ -1740,24 +1753,82 @@ interface UiState { lastLayoutId: Uuid | null; theme: "dark" | "light"; revision
 // 서버가 해석하지 않는 프런트엔드 키 예: watchCollapsed, recentSymbols, activeWatchlistId(#37), watchColumns(#37, "price"|"change"|"changeRate"|"volume")
 ```
 
+브라우저는 드로잉 설정을 `drawing` 키 하나에 둔다. 서버는 다른 키처럼 그대로 저장한다.
+
+```ts
+drawing?: {
+  magnet: boolean;
+  magnetStrength: "weak" | "strong";                   // 끈 동안에도 남는다. 켤 때 이 세기로 켠다
+  keepDrawing: boolean;                                // 연속 그리기
+  lockAll: boolean;
+  hideAll: boolean;
+  lastStyle: Partial<Record<DrawingTool, unknown>>;    // 도구마다 마지막 스타일
+  snapToIndicators: boolean;                           // 자석이 지표 값에도 붙는다
+  newScope: "symbol" | "layout" | "cell";              // 새 드로잉의 범위
+};
+```
+
 #### 드로잉 (#6)
 
 ```ts
+type DrawingTool =
+  | "trendline" | "ray" | "extline" | "hline" | "hray" | "vline" | "channel"
+  | "fib" | "fibext"
+  | "rect" | "ellipse" | "arrow" | "path" | "brush"
+  | "text" | "callout" | "pricelabel"
+  | "pricerange" | "daterange" | "long" | "short";
+
 interface Drawing {
   id: Uuid;
   symbol: SymbolCode;
-  tool: "trendline" | "hline" | "vline" | "rect" | "fib" | "text";
-  points: DrawingPoint[];   // trendline 2, hline 1, vline 1, rect 2, fib 2, text 1
-  text: string | null;      // tool이 text일 때
-  style: unknown;           // 프런트엔드 소유. 64KB 이하
+  tool: DrawingTool;
+  points: DrawingPoint[];   // 수는 아래 표
+  text: string | null;
+  style: unknown;           // 도구가 모양을 정한다. 서버는 그대로 저장한다
+  locked: boolean;
+  hidden: boolean;
+  periods: Period[] | null; // null이면 모든 봉 주기. 빈 배열은 400
+  z: number;                // 실수. 큰 것이 위
+  group: string | null;     // 그룹 이름. 1~100자
+  scope: DrawingScope;
+  revision: number;         // 저장 순서 번호(위 "저장 순서")
   updatedAt: UnixSeconds;
 }
 interface DrawingPoint { t: UnixSeconds; price: number }  // 봉 순서가 아니라 시각과 가격
+type DrawingScope =
+  | { kind: "symbol" }
+  | { kind: "layout"; layoutId: Uuid }
+  | { kind: "cell"; layoutId: Uuid; slot: 0 | 1 | 2 | 3 };
 
-// GET    /api/drawings?symbol=005930   → Drawing[]
-// PUT    /api/drawings/:id   본문: Omit<Drawing, "updatedAt">  → Drawing
-// DELETE /api/drawings/:id             → 204
+// GET    /api/drawings?symbol=005930   → Drawing[]  (모든 범위, z 오름차순)
+// PUT    /api/drawings/:id   본문: Omit<Drawing, "updatedAt">  → Drawing   (없으면 만들고 있으면 바꾼다. 본문 64KB 이하)
+// DELETE /api/drawings/:id             → 204. 없는 id도 204다
 ```
+
+| tool | 점 수 |
+|---|---|
+| `hline` `hray` `vline` `text` `pricelabel` | 1 |
+| `trendline` `ray` `extline` `arrow` `fib` `rect` `ellipse` `callout` `pricerange` `daterange` | 2 |
+| `channel` `fibext` `long` `short` | 3 |
+| `path` | 2~100 |
+| `brush` | 2~1,000 |
+
+표는 `server::drawing_api::DrawingTool::point_count` 하나에 있다. 점마다의 뜻은 `docs/design/drawing-proposal.md` §5.3이다.
+
+- **PUT 검사**: 다음은 모두 400 `bad_request`다. 서버는 받을 때 한 번 검사한다.
+  - 주소의 id와 본문의 `id`가 다르다.
+  - `symbol`이 종목 코드 형식이 아니다.
+  - `tool`이 `DrawingTool`에 없거나 점 수가 표와 다르다.
+  - 점의 `t`가 정수가 아니거나 `price`가 유한한 수가 아니다.
+  - `periods`가 빈 배열이거나 `Period`가 아닌 값이 있다.
+  - `z`가 유한한 수가 아니다.
+  - `group`이 빈 문자열이거나 100자를 넘는다.
+  - `scope`의 `layoutId`가 없는 레이아웃이거나, `slot`이 그 레이아웃에 없는 칸이다.
+- 본문이 64KB를 넘으면 413 `payload_too_large`다. 붓 1,000점이 약 35KB다.
+- revision이 저장된 것보다 크지 않으면 409 `stale_revision`이다. 범위 확인, revision 확인, 쓰기는 한 쓰기 트랜잭션이다.
+- `updatedAt`은 서버 시각이다.
+- DELETE는 지운 기록을 남기지 않는다. 지운 뒤 늦게 도착한 옛 PUT은 드로잉을 다시 만든다.
+- `GET`의 `symbol`이 없거나 형식이 틀리면 400이다. 칸마다 범위를 거르는 일은 브라우저가 한다.
 
 점의 `t`는 아무 시각이나 될 수 있다. 봉 시작 시각과 맞을 필요가 없다. 봉 주기가 다른 차트에서 어느 자리에 그릴지는 브라우저가 정한다.
 
@@ -2180,7 +2251,7 @@ pub fn future_bar_starts(period: &str, last_start: f64, n: usize) -> Result<Vec<
 | 정적 파일 | `/api/없는경로` → JSON 404, `/assets/없는.js` → 404, `/layout/x` → index.html, `.wasm` MIME, 캐시 헤더 | `server::http` | #2 |
 | 브라우저 계약 | ts-rs 생성 파일이 커밋된 것과 같은지 CI 검사. 서버 → 브라우저 메시지 JSON 스냅숏 테스트 | `server::http` | #2·#4 |
 | 잠금 파일 | 임시 디렉터리의 잠금 파일로: 첫 `InstanceLock::acquire` 성공, 같은 경로 두 번째는 `Held { pid }`, 첫 잠금을 drop하면 다시 잡힘, 남아 있는 파일(잠금 없음)은 막지 않음. 통합 테스트: 서버 두 번째 실행이 종료 코드 1로 끝나고 키움 요청을 보내지 않음 | `server::instance` | #2 |
-| 사용자 자료 | `sqlx::test`(sqlite, 테스트마다 새 DB)로: 마이그레이션, 레이아웃 PUT 두 번(같은 결과), 레이아웃 지우면 칸도 지워짐(`foreign_keys`), 마지막 레이아웃 삭제 거절, `ui_state`의 모르는 키 왕복과 64KB 초과 거절, 잘못된 JSON은 `json_valid`로 거절. 연결 설정(`journal_mode=wal`, `foreign_keys=1`, `busy_timeout=5000`)을 `PRAGMA`로 읽어 확인 | `server::db`, `server::userdata` | #3 |
+| 사용자 자료 | `sqlx::test`(sqlite, 테스트마다 새 DB)로: 마이그레이션, 레이아웃 PUT 두 번(같은 결과), 레이아웃 지우면 칸도 지워짐(`foreign_keys`), 마지막 레이아웃 삭제 거절, 드로잉 왕복·`z` 순서·옛 revision 거절·없는 범위 거절·지우기 반복, 레이아웃 범위 드로잉이 레이아웃 삭제를 막음, `ui_state`의 모르는 키 왕복과 64KB 초과 거절, 잘못된 JSON은 `json_valid`로 거절. 연결 설정(`journal_mode=wal`, `foreign_keys=1`, `busy_timeout=5000`)을 `PRAGMA`로 읽어 확인 | `server::db`, `server::userdata`, `server::drawings` | #3·#6 |
 | 비밀값 | `Config`, `KiwoomAuth`, 텔레그램 클라이언트의 `Debug` 출력에 비밀값이 없는지 | `server::config` | #2 |
 | 가짜 키움 | 통합 테스트와 브라우저 e2e가 같은 `crates/fake-kiwoom`(lib + `fake-kiwoom` 바이너리)과 같은 고정 입력을 쓴다. 루프백 주소에만 연다. 관리 경로 `/_fake/respond-with`, `delay`, `reject-token`, `reset`, `stats`로 오류를 넣고 요청을 센다. 086520 일봉은 합성 300행 × 4페이지라 과거 페이지가 이어진다 | `fake-kiwoom` | #25 |
 | 브라우저 e2e | `web/e2e/`(Playwright, Chromium). 테스트마다 임시 디렉터리에 `fake-kiwoom`과 `vally-server`를 띄우고 빌드된 `web/dist`로 사용자 흐름을 돈다: 검색과 과거 스크롤, 거래소·봉 주기, 새로고침과 재시작 뒤 복원, 저장 중 탭 닫기, 오류 표시. Chromium은 샌드박스를 켜고 띄우며 `web/e2e/sandbox.spec.ts`가 명령줄에 `--no-sandbox`가 없음을 확인한다. CI `e2e` 검사는 외부 네트워크를 막은 이름공간에서 돌고, 앞서 `web/scripts/allow-chromium-sandbox.sh`로 headless shell에만 `userns`를 허락하는 AppArmor 프로필을 깐다 | `web/e2e` | #25 |
