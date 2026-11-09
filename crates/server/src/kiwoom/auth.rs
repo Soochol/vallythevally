@@ -5,6 +5,7 @@ use std::sync::Mutex;
 
 use domain::{KstTime, TimeOfDay};
 use serde::Serialize;
+use tokio::sync::watch;
 
 use super::token_file::{FileError, Saved, SavedToken, TokenFile, credential_id};
 use super::wire::{TokenResponse, parse_kst_datetime};
@@ -61,7 +62,6 @@ struct State {
     last_request_at: Option<KstTime>,
     /// 토큰 무효 응답을 받아 다시 발급해야 한다.
     stale: bool,
-    halted: Option<Halt>,
     issued_count: u64,
 }
 
@@ -71,6 +71,7 @@ pub struct KiwoomAuth {
     credential: String,
     file: Option<TokenFile>,
     state: Mutex<State>,
+    halted: watch::Sender<Option<Halt>>,
 }
 
 impl fmt::Debug for KiwoomAuth {
@@ -85,7 +86,7 @@ impl fmt::Debug for KiwoomAuth {
             .field("expires_at", &st.issued.as_ref().map(|i| i.expires_at))
             .field("last_request_at", &st.last_request_at)
             .field("stale", &st.stale)
-            .field("halted", &st.halted)
+            .field("halted", &*self.halted.borrow())
             .finish()
     }
 }
@@ -100,15 +101,15 @@ struct TokenRequest<'a> {
 impl KiwoomAuth {
     pub fn new(app_key: Secret<String>, app_secret: Secret<String>, file: Option<TokenFile>) -> Self {
         let credential = credential_id(app_key.expose());
-        let state = match file.as_ref().map(TokenFile::load) {
-            None | Some(Ok(None)) => State::default(),
-            Some(Ok(Some(saved))) => restore(saved, &credential),
+        let (state, halt) = match file.as_ref().map(TokenFile::load) {
+            None | Some(Ok(None)) => (State::default(), None),
+            Some(Ok(Some(saved))) => (restore(saved, &credential), None),
             Some(Err(e)) => {
                 tracing::error!(error = %e, "토큰 파일을 읽지 못했습니다. 마지막 발급 요청 시각을 모르므로 조회와 토큰 발급을 멈춥니다");
-                State { halted: Some(Halt::TokenFileUnreadable(e)), ..State::default() }
+                (State::default(), Some(Halt::TokenFileUnreadable(e)))
             }
         };
-        KiwoomAuth { app_key, app_secret, credential, file, state: Mutex::new(state) }
+        KiwoomAuth { app_key, app_secret, credential, file, state: Mutex::new(state), halted: watch::channel(halt).0 }
     }
 
     fn lock(&self) -> std::sync::MutexGuard<'_, State> {
@@ -153,7 +154,7 @@ impl KiwoomAuth {
     /// 지금 보낼 때 쓸 토큰. 무효로 표시됐거나 만료가 가까우면 없다.
     pub fn current(&self, now: KstTime) -> Option<(Secret<String>, TokenGen)> {
         let st = self.lock();
-        if st.stale || st.halted.is_some() {
+        if st.stale || self.halted.borrow().is_some() {
             return None;
         }
         let i = st.issued.as_ref()?;
@@ -165,11 +166,17 @@ impl KiwoomAuth {
     }
 
     pub fn halted(&self) -> Option<Halt> {
-        self.lock().halted.clone()
+        self.halted.borrow().clone()
     }
 
     pub fn halt(&self, detail: u16) {
-        self.lock().halted = Some(Halt::Rejected(detail));
+        self.halted.send_replace(Some(Halt::Rejected(detail)));
+    }
+
+    pub async fn until_halted(&self) -> Halt {
+        let mut rx = self.halted.subscribe();
+        let halt = rx.wait_for(Option::is_some).await.expect("보내는 쪽은 self가 쥐고 있다");
+        halt.clone().expect("Some을 기다렸다")
     }
 
     pub fn record_issued(&self, resp: TokenResponse, now: KstTime) -> Result<TokenGen, AuthError> {
@@ -189,10 +196,10 @@ impl KiwoomAuth {
     }
 
     pub fn invalidate(&self, seen: TokenGen) -> Result<(), AuthError> {
-        let mut st = self.lock();
-        if let Some(h) = &st.halted {
-            return Err(AuthError::Halted(h.clone()));
+        if let Some(h) = self.halted() {
+            return Err(AuthError::Halted(h));
         }
+        let mut st = self.lock();
         if st.issued.as_ref().map(|i| i.generation) == Some(seen) {
             st.stale = true;
         }

@@ -242,6 +242,10 @@ impl KiwoomRest {
         self.0.auth.halted().map(KiwoomError::from)
     }
 
+    pub async fn until_halted(&self) -> KiwoomError {
+        self.0.auth.until_halted().await.into()
+    }
+
     pub fn blocked(&self) -> Option<KiwoomError> {
         let auth = &self.0.auth;
         let now = self.0.clock.now();

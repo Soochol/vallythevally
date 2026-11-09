@@ -18,7 +18,7 @@ use crate::clock::Clock;
 use crate::db::AppDb;
 use crate::kiwoom::rest::KiwoomRest;
 use crate::kiwoom::auth::auth_failed_message;
-use crate::symbols::SymbolDirectory;
+use crate::symbols::{NotReady, SymbolDirectory};
 
 pub struct AppState {
     pub symbols: Arc<SymbolDirectory>,
@@ -121,13 +121,10 @@ impl Lookup {
 }
 
 pub(crate) async fn symbol_list(st: &AppState) -> Result<Arc<crate::symbols::Directory>, ApiFailure> {
-    if let Some(e) = st.bars.blocked() {
-        return Err(Lookup::Symbols.failure(e.into()));
-    }
-    st.symbols
-        .ready()
-        .await
-        .map_err(|_| ApiFailure::new(api::ApiErrorCode::KiwoomUnavailable, "종목 목록을 아직 받지 못했습니다. 잠시 뒤 다시 시도하세요"))
+    st.symbols.ready(&st.rest).await.map_err(|e| match e {
+        NotReady::Kiwoom(e) => Lookup::Symbols.failure(e.into()),
+        NotReady::Timeout => ApiFailure::new(api::ApiErrorCode::KiwoomUnavailable, "종목 목록을 아직 받지 못했습니다. 잠시 뒤 다시 시도하세요"),
+    })
 }
 
 async fn search(State(st): State<Arc<AppState>>, Query(q): Query<HashMap<String, String>>) -> Result<Json<Vec<api::SymbolInfo>>, ApiFailure> {

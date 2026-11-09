@@ -17,7 +17,7 @@ use crate::kiwoom::api::{
 };
 use crate::kiwoom::rest::{ContKey, KiwoomError, KiwoomRest, MergeScope, Priority};
 use crate::kiwoom::wire::{ChartBody, ChartRows, KiwoomBar, parse_chart};
-use crate::symbols::SymbolDirectory;
+use crate::symbols::{NotReady, SymbolDirectory};
 
 pub const DEFAULT_LIMIT: usize = 500;
 pub const MAX_LIMIT: usize = 1000;
@@ -124,10 +124,10 @@ impl BarService {
 
     /// `before`가 None이면 최신 페이지다.
     pub async fn page(&self, key: SeriesKey, before: Option<KstTime>, limit: usize) -> Result<BarPage, BarError> {
-        if let Some(e) = self.rest.blocked() {
-            return Err(e.into());
-        }
-        let dir = self.symbols.ready().await.map_err(|_| BarError::Unavailable("종목 목록을 아직 받지 못했습니다".into()))?;
+        let dir = self.symbols.ready(&self.rest).await.map_err(|e| match e {
+            NotReady::Kiwoom(e) => e.into(),
+            NotReady::Timeout => BarError::Unavailable("종목 목록을 아직 받지 못했습니다".into()),
+        })?;
         let Some(info) = dir.get(key.feed.symbol()) else {
             return Err(BarError::UnknownSymbol);
         };
@@ -164,10 +164,6 @@ impl BarService {
 
     /// 07:45에 부른다. 진행 중인 조회의 응답은 내려간 시리즈에만 쓰이고 버려진다.
     /// 비운 뒤의 조회는 비우기 전 조회와 합쳐지지 않는다.
-    pub fn blocked(&self) -> Option<KiwoomError> {
-        self.rest.blocked()
-    }
-
     pub fn clear_all(&self) {
         let n = {
             let mut slots = self.slots.lock().expect("slots 잠금");
