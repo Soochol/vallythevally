@@ -6,7 +6,7 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use common::{APP_KEY, APP_SECRET, FakeKiwoom, Server, TOKEN, token_path};
+use common::{APP_KEY, APP_SECRET, FakeKiwoom, Server, TOKEN, token_for, token_path};
 use serde_json::{Value, json};
 
 fn static_dir(root: &Path) -> PathBuf {
@@ -27,7 +27,11 @@ async fn get(base: &str, path: &str) -> (u16, Value) {
 }
 
 async fn run_until_symbols_load(fake: &FakeKiwoom, lock: &Path, dist: &Path) -> String {
-    let server = Server::spawn(fake, lock, dist);
+    run_until_symbols_load_with(fake, lock, dist, &[]).await
+}
+
+async fn run_until_symbols_load_with(fake: &FakeKiwoom, lock: &Path, dist: &Path, overrides: &[(&str, &std::ffi::OsStr)]) -> String {
+    let server = Server::spawn_with(fake, lock, dist, overrides);
     let base = format!("http://{}", server.addr().await);
     for _ in 0..100 {
         if get(&base, "/api/symbols/005930").await.0 == 200 {
@@ -162,4 +166,36 @@ async fn an_unreadable_token_file_issues_nothing_across_restarts_and_is_left_as_
     });
     let cases = vec![("빈 파일", with_contents("")), ("깨진 JSON", with_contents("{\"token\": ")), ("부모가 일반 파일", parent_is_a_file)];
     assert_never_issues(&FakeKiwoom::start().await, cases).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_token_saved_for_another_app_key_is_never_sent_and_the_interval_still_holds() {
+    const OTHER_KEY: &str = "FAKE-APPKEY-other-b2b2b2b2";
+    let other: &[(&str, &std::ffi::OsStr)] = &[("VALLY_KIWOOM_APP_KEY", OTHER_KEY.as_ref())];
+    let fake = FakeKiwoom::start().await;
+    let tmp = tempfile::tempdir().unwrap();
+    let lock = tmp.path().join("run/server.lock");
+    let dist = static_dir(tmp.path());
+    run_until_symbols_load(&fake, &lock, &dist).await;
+    assert_eq!(fake.issued(), 1);
+    let sent_before = fake.requests();
+
+    let server = Server::spawn_with(&fake, &lock, &dist, other);
+    let base = format!("http://{}", server.addr().await);
+    let (status, body) = get(&base, "/api/bars?symbol=005930&period=D").await;
+    let logs = server.stop().await;
+    assert_eq!((status, body["error"]["code"].as_str()), (503, Some("kiwoom_unavailable")), "{body}\n{logs}");
+    assert!(body["error"]["message"].as_str().unwrap().contains("10분"), "{body}");
+    assert_eq!(fake.requests(), sent_before, "앱키가 바뀌어도 10분 안에는 아무것도 보내지 않는다: {:?}", fake.api_ids());
+
+    let path = token_path(&lock);
+    let mut saved: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    saved["last_request_at"] = json!(now_unix() - 3600);
+    std::fs::write(&path, saved.to_string()).unwrap();
+    run_until_symbols_load_with(&fake, &lock, &dist, other).await;
+    let bodies = fake.seen.token_bodies.lock().unwrap().clone();
+    assert_eq!(bodies.iter().map(|b| b["appkey"].as_str().unwrap()).collect::<Vec<_>>(), [APP_KEY, OTHER_KEY]);
+    let auths = fake.seen.authorizations.lock().unwrap()[sent_before..].to_vec();
+    assert!(!auths.contains(&format!("Bearer {TOKEN}")), "옛 앱키의 토큰을 보냈다: {auths:?}");
+    assert!(auths.contains(&format!("Bearer {}", token_for(OTHER_KEY))), "{auths:?}");
 }

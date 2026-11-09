@@ -98,9 +98,10 @@ async fn handle(State(seen): State<Arc<Seen>>, headers: HeaderMap, body: String)
     }
     let name = match api_id.as_str() {
         "au10001" => {
-            seen.token_bodies.lock().unwrap().push(serde_json::from_str(&body).unwrap_or(Value::Null));
+            let body: Value = serde_json::from_str(&body).unwrap_or(Value::Null);
             let mut v = fixture("au10001_ok");
-            v["token"] = TOKEN.into();
+            v["token"] = token_for(body["appkey"].as_str().unwrap_or("")).into();
+            seen.token_bodies.lock().unwrap().push(body);
             v["expires_dt"] = "20991231000000".into();
             return respond(v, false);
         }
@@ -152,6 +153,11 @@ fn respond(mut v: Value, last_page: bool) -> Response {
     resp.headers_mut().insert("cont-yn", cont.parse().unwrap());
     resp.headers_mut().insert("next-key", next.parse().unwrap());
     resp
+}
+
+/// 앱키마다 다른 토큰을 준다. `APP_KEY`면 `TOKEN`이다.
+pub fn token_for(app_key: &str) -> String {
+    if app_key == APP_KEY { TOKEN.to_owned() } else { format!("FAKE-TOKEN-for-{app_key}") }
 }
 
 pub fn token_path(lock: &Path) -> std::path::PathBuf {
