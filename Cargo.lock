@@ -1042,11 +1042,20 @@ name = "indicators"
 version = "0.1.0"
 dependencies = [
  "domain",
- "js-sys",
  "proptest",
  "serde",
  "serde_json",
  "ts-rs",
+]
+
+[[package]]
+name = "indicators-wasm"
+version = "0.1.0"
+dependencies = [
+ "domain",
+ "indicators",
+ "js-sys",
+ "serde_json",
  "wasm-bindgen",
 ]
 

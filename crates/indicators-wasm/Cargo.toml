@@ -1,0 +1,18 @@
+[package]
+name = "indicators-wasm"
+edition.workspace = true
+version.workspace = true
+publish.workspace = true
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+domain = { path = "../domain" }
+indicators = { path = "../indicators" }
+js-sys = "0.3"
+serde_json = "1"
+wasm-bindgen = "0.2"
+
+[lints]
+workspace = true

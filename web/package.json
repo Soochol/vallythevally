@@ -9,7 +9,9 @@
     "typecheck": "tsc -b",
     "test": "vitest run",
     "e2e": "playwright test",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "wasm": "scripts/build-wasm.sh",
+    "wasm:smoke": "node scripts/wasm-smoke.mjs"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.107.1",
