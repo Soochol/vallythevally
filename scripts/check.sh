@@ -11,7 +11,7 @@ step "test: offline loopback setup failure propagation"
 step "lint: cargo clippy"
 cargo clippy --locked --all-targets --quiet -- -D warnings
 
-step "test: cargo test (loopback only)"
+step "test: cargo test (offline.sh)"
 "$offline" cargo test --locked --quiet
 
 step "test: generated TypeScript matches the commit"
@@ -25,7 +25,7 @@ pnpm install --frozen-lockfile --silent
 step "lint: typecheck"
 pnpm -s typecheck
 
-step "test: vitest (loopback only)"
+step "test: vitest (offline.sh)"
 "$offline" pnpm -s test
 
 step "build"
@@ -34,13 +34,13 @@ pnpm -s build
 step "wasm: build indicators"
 ./scripts/build-wasm.sh
 
-step "wasm: check against the reference values (loopback only)"
+step "wasm: check against the reference values (offline.sh)"
 "$offline" node scripts/wasm-smoke.mjs
 
 step "e2e: build server and fake Kiwoom"
 cargo build --locked --quiet -p server -p fake-kiwoom
 
-step "e2e: playwright (loopback only)"
+step "e2e: playwright (offline.sh)"
 "$offline" ./node_modules/.bin/playwright test
 
 printf '\n== all checks passed\n'
