@@ -16,8 +16,10 @@ use crate::config::Config;
 use crate::db::AppDb;
 use crate::http::{AppState, router};
 use crate::instance::InstanceLock;
+use crate::market::hub::{HubHandle, MarketHub};
 use crate::kiwoom::auth::{DAILY_REISSUE_AT, KiwoomAuth};
 use crate::kiwoom::rest::{KiwoomRest, Priority};
+use crate::kiwoom::stream::KiwoomStream;
 use crate::kiwoom::token_file::TokenFile;
 use crate::kiwoom::transport::ReqwestTransport;
 use crate::symbols::SymbolDirectory;
@@ -29,7 +31,6 @@ const DAILY_RESET_AT: TimeOfDay = match TimeOfDay::hms(7, 45, 0) {
 const STARTUP_LIST_RETRY: Duration = Duration::from_secs(10);
 const DAILY_LIST_RETRY: Duration = Duration::from_secs(5 * 60);
 const DAILY_TOKEN_RETRY: Duration = Duration::from_secs(10 * 60);
-const EVICT_EVERY: Duration = Duration::from_secs(60);
 
 pub fn main() -> ExitCode {
     let (config, warnings) = match Config::from_env() {
@@ -131,11 +132,12 @@ async fn serve(config: Config, token_file: TokenFile) -> ExitCode {
     let symbols = Arc::new(SymbolDirectory::default());
     tokio::spawn(load_symbols_at_startup(clock.clone(), rest.clone(), symbols.clone()));
     let bars = Arc::new(BarService::new(rest.clone(), symbols.clone(), clock.clone()));
-    tokio::spawn(evict_idle_series(bars.clone()));
-    tokio::spawn(daily_reset(clock.clone(), rest.clone(), symbols.clone(), bars.clone()));
+    let (stream, events) = KiwoomStream::spawn(config.kiwoom_ws_url.clone(), rest.clone(), clock.clone());
+    let hub = MarketHub::spawn(bars.clone(), stream, events, clock.clone());
+    tokio::spawn(daily_reset(clock.clone(), rest.clone(), symbols.clone(), bars.clone(), hub.clone()));
     tokio::spawn(daily_token(clock.clone(), rest.clone()));
 
-    let app = router(Arc::new(AppState { symbols, bars, rest, db, clock, static_dir: config.static_dir.clone() }));
+    let app = router(Arc::new(AppState { symbols, bars, rest, db, clock, static_dir: config.static_dir.clone(), hub }));
     tracing::info!(static_dir = %config.static_dir.display(), "요청을 받기 시작합니다");
     if let Err(e) = axum::serve(listener, app).with_graceful_shutdown(shutdown_signal()).await {
         tracing::error!(error = %e, "서버가 멈췄습니다");
@@ -180,19 +182,12 @@ async fn load_symbols_at_startup(clock: Clock, rest: KiwoomRest, symbols: Arc<Sy
     }
 }
 
-async fn evict_idle_series(bars: Arc<BarService>) {
-    let mut tick = tokio::time::interval(EVICT_EVERY);
-    loop {
-        tick.tick().await;
-        bars.evict_idle(&std::collections::HashSet::new());
-    }
-}
-
-/// 매일 07:45: 시세 캐시를 모두 비우고 종목 목록을 `Background`로 다시 받는다. 실패하면 5분마다, 다음 07:45 전까지.
-async fn daily_reset(clock: Clock, rest: KiwoomRest, symbols: Arc<SymbolDirectory>, bars: Arc<BarService>) {
+/// 매일 07:45: 시세 캐시를 모두 비우고 실시간 키를 다시 시드한 뒤, 종목 목록을 `Background`로 다시 받는다. 실패하면 5분마다, 다음 07:45 전까지.
+async fn daily_reset(clock: Clock, rest: KiwoomRest, symbols: Arc<SymbolDirectory>, bars: Arc<BarService>, hub: HubHandle) {
     loop {
         clock.sleep_until(next_daily(clock.now(), DAILY_RESET_AT)).await;
         bars.clear_all();
+        hub.daily_reset();
         let deadline = next_daily(clock.now(), DAILY_RESET_AT);
         while let Err(e) = symbols.refresh(&rest, Priority::Background).await {
             let Some(retry_at) = e.retry_at() else {

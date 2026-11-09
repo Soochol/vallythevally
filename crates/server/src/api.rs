@@ -90,6 +90,16 @@ impl From<domain::Venue> for Venue {
     }
 }
 
+impl From<Venue> for domain::Venue {
+    fn from(v: Venue) -> Self {
+        match v {
+            Venue::Combined => domain::Venue::Combined,
+            Venue::Krx => domain::Venue::Krx,
+            Venue::Nxt => domain::Venue::Nxt,
+        }
+    }
+}
+
 /// 봉 하나. 가격은 자연 단위(주식 원, 지수 포인트), 거래량은 정수.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, TS)]
 #[ts(export)]

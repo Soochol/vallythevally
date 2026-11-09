@@ -18,6 +18,7 @@ use crate::clock::Clock;
 use crate::db::AppDb;
 use crate::kiwoom::error::{Category, Failure, Note, Surface};
 use crate::kiwoom::rest::{KiwoomError, KiwoomRest};
+use crate::market::hub::{HubHandle, HubSnapshot};
 use crate::symbols::{NotReady, SymbolDirectory};
 
 pub struct AppState {
@@ -27,6 +28,7 @@ pub struct AppState {
     pub db: AppDb,
     pub clock: Clock,
     pub static_dir: PathBuf,
+    pub hub: HubHandle,
 }
 
 pub fn router(state: Arc<AppState>) -> Router {
@@ -36,6 +38,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/api/symbols/{code}/fundamentals", get(fundamentals))
         .route("/api/bars", get(bars))
         .route("/api/quotes", get(quotes))
+        .route("/api/ws", get(crate::ws::upgrade))
         .merge(crate::user_routes::routes())
         .route("/api", any(api_not_found))
         .route("/api/{*rest}", any(api_not_found))
@@ -255,16 +258,43 @@ fn parse_bars_query(q: &HashMap<String, String>) -> Result<BarsQuery, ApiFailure
 
 async fn bars(State(st): State<Arc<AppState>>, Query(q): Query<HashMap<String, String>>) -> Result<Json<api::BarsPage>, ApiFailure> {
     let q = parse_bars_query(&q)?;
+    let snapshot_before_page = match q.before {
+        None => st.hub.snapshot(q.key).await,
+        Some(_) => None,
+    };
     let page = st.bars.page(q.key, q.before, q.limit).await.map_err(|e| Lookup::Bars.failure(e, st.clock.now()))?;
+    let (bars, current, seq) = with_snapshot(page.bars, page.current, snapshot_before_page);
     Ok(Json(api::BarsPage {
         symbol: api::SymbolCode(q.key.feed.symbol().as_wire()),
         venue: q.key.feed.venue().map(api::Venue::from),
         period: q.key.period.into(),
-        bars: page.bars.iter().map(api::Bar::from).collect(),
-        current: page.current.map(|c| api::Bar::new(c.bucket, &c.ohlcv)),
+        bars: bars.iter().map(api::Bar::from).collect(),
+        current,
         next_before: page.next_before.map(|t| api::UnixSeconds(t.unix())),
-        seq: None,
+        seq,
     }))
+}
+
+/// 최신 페이지에 허브 스냅숏을 합친다. 캐시에 아직 붙지 않은 최근 확정 봉을 잇고, 현재 봉은 허브 것을 쓴다.
+fn with_snapshot(
+    mut bars: Vec<domain::ConfirmedBar>,
+    kiwoom_current: Option<crate::kiwoom::wire::KiwoomBar>,
+    snapshot: Option<HubSnapshot>,
+) -> (Vec<domain::ConfirmedBar>, Option<api::Bar>, Option<u64>) {
+    let Some(snap) = snapshot else {
+        return (bars, kiwoom_current.map(|c| api::Bar::new(c.bucket, &c.ohlcv)), None);
+    };
+    for b in snap.recent_confirmed {
+        if bars.last().is_none_or(|last| last.bucket.start() < b.bucket.start()) {
+            bars.push(b);
+        }
+    }
+    let newest = bars.last().map(|b| b.bucket.start());
+    let current = match snap.current {
+        Some(c) => Some(api::Bar::new(c.bucket(), c.ohlcv())),
+        None => kiwoom_current.filter(|c| newest.is_none_or(|n| n < c.bucket.start())).map(|c| api::Bar::new(c.bucket, &c.ohlcv)),
+    };
+    (bars, current, Some(snap.seq))
 }
 
 /// 한 번에 묻는 종목 수 상한. ka10095 두 번(100개씩)이다.
@@ -379,6 +409,7 @@ mod tests {
     struct Fixture {
         app: Router,
         fake: Arc<FakeTransport>,
+        hub: HubHandle,
         _dir: tempfile::TempDir,
     }
 
@@ -453,7 +484,9 @@ mod tests {
             ]));
         }
         let bars = Arc::new(BarService::new(rest.clone(), symbols.clone(), clock.clone()));
-        Fixture { app: router(Arc::new(AppState { symbols, bars, rest, db, clock, static_dir: dir.path().to_owned() })), fake, _dir: dir }
+        let (hub, _events) = crate::market::hub::MarketHub::detached(bars.clone(), clock.clone());
+        let app = router(Arc::new(AppState { symbols, bars, rest, db, clock, static_dir: dir.path().to_owned(), hub: hub.clone() }));
+        Fixture { app, fake, hub, _dir: dir }
     }
 
     async fn get(app: &Router, uri: &str) -> (StatusCode, axum::http::HeaderMap, Vec<u8>) {
@@ -826,6 +859,95 @@ mod tests {
         assert_eq!(header(&h, "content-encoding"), "gzip");
     }
 
+    fn m1(h: u32, m: u32) -> domain::Bucket {
+        Period::M1.bucket(kst(KstDate::new(2026, 11, 9).unwrap(), h, m, 0))
+    }
+
+    fn ohlcv(c: u64) -> domain::Ohlcv {
+        let p = domain::Price::from_centi(c).unwrap();
+        domain::Ohlcv::try_new(p, p, p, p, domain::Volume(1)).unwrap()
+    }
+
+    fn realtime(b: domain::Bucket, c: u64) -> domain::ConfirmedBar {
+        domain::ConfirmedBar { bucket: b, ohlcv: ohlcv(c), source: domain::BarSource::Realtime, needs_verify: false }
+    }
+
+    #[test]
+    fn the_latest_page_takes_seq_current_and_unwritten_bars_from_the_hub() {
+        let page = vec![domain::ConfirmedBar::from_kiwoom(m1(8, 58), ohlcv(100)), domain::ConfirmedBar::from_kiwoom(m1(8, 59), ohlcv(200))];
+        let kiwoom_current = Some(crate::kiwoom::wire::KiwoomBar { bucket: m1(9, 0), ohlcv: ohlcv(300) });
+        let t = |b: &[domain::ConfirmedBar]| b.iter().map(|b| (b.bucket.start(), b.source)).collect::<Vec<_>>();
+
+        let (bars, current, seq) = with_snapshot(page.clone(), kiwoom_current, None);
+        assert_eq!((bars.len(), current.map(|c| c.c), seq), (2, Some(3.0), None), "허브가 모르는 키는 키움 값");
+
+        let snap = HubSnapshot { seq: 7, current: Some(domain::CurrentBar::seed(m1(9, 1), ohlcv(500))), recent_confirmed: vec![realtime(m1(8, 59), 1), realtime(m1(9, 0), 400)] };
+        let (bars, current, seq) = with_snapshot(page.clone(), kiwoom_current, Some(snap));
+        assert_eq!(
+            t(&bars),
+            [(m1(8, 58).start(), domain::BarSource::Kiwoom), (m1(8, 59).start(), domain::BarSource::Kiwoom), (m1(9, 0).start(), domain::BarSource::Realtime)],
+            "캐시에 있는 봉은 그대로, 더 새 확정 봉만 잇는다"
+        );
+        assert_eq!((current.map(|c| (c.t.0, c.c)), seq), (Some((m1(9, 1).start().unix(), 5.0)), Some(7)));
+
+        let seeding = HubSnapshot { seq: 3, current: None, recent_confirmed: vec![] };
+        let (_, current, seq) = with_snapshot(page.clone(), kiwoom_current, Some(seeding));
+        assert_eq!((current.map(|c| c.c), seq), (Some(3.0), Some(3)), "시드 중이면 키움의 현재 봉");
+
+        let closed = HubSnapshot { seq: 4, current: None, recent_confirmed: vec![realtime(m1(9, 0), 400)] };
+        let (bars, current, _) = with_snapshot(page, kiwoom_current, Some(closed));
+        assert_eq!((bars.len(), current), (3, None), "허브가 이미 확정한 구간의 키움 현재 봉은 버린다");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn only_the_latest_page_of_a_subscribed_key_has_a_seq() {
+        let f = fixture(false, true).await;
+        let (_, v) = json(&f.app, "/api/bars?symbol=005930&period=D").await;
+        assert_eq!(v["seq"], Value::Null, "구독이 없으면 null");
+        let out = crate::market::outbox::Outbox::new();
+        let conn = f.hub.connect(out.clone());
+        let key = SeriesKey { feed: Feed::new(Symbol::parse("005930").unwrap(), None).unwrap(), period: Period::Day };
+        f.hub.subscribe(conn, crate::market::SubId("c0".into()), key);
+        tokio::time::sleep(Duration::from_secs(1)).await;
+        let (_, v) = json(&f.app, "/api/bars?symbol=005930&period=D").await;
+        assert_eq!(v["seq"], json!(0));
+        let (_, v) = json(&f.app, "/api/bars?symbol=005930&period=D&before=1793890800").await;
+        assert_eq!(v["seq"], Value::Null, "과거 페이지는 null");
+    }
+
+    type Client = tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>;
+
+    async fn recv_json(ws: &mut Client) -> Value {
+        use futures::StreamExt;
+        loop {
+            if let tokio_tungstenite::tungstenite::Message::Text(t) = tokio::time::timeout(Duration::from_secs(5), ws.next()).await.expect("5초 안에 온다").unwrap().unwrap() {
+                return serde_json::from_str(t.as_str()).unwrap();
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn websocket_says_hello_and_answers_subscribe() {
+        use futures::SinkExt;
+        use tokio_tungstenite::tungstenite::Message;
+        let f = live_fixture(true).await;
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(axum::serve(listener, f.app.clone()).into_future());
+        let (mut ws, _) = tokio_tungstenite::connect_async(format!("ws://{addr}/api/ws")).await.unwrap();
+        let hello = recv_json(&mut ws).await;
+        assert_eq!((hello["type"].as_str(), hello["protocol"].as_i64()), (Some("hello"), Some(1)), "{hello}");
+        for text in [
+            "not json",
+            r#"{"type":"subscribe","sub":"bad","symbol":"IDX:001","venue":"krx","period":"D"}"#,
+            r#"{"type":"subscribe","sub":"c0","symbol":"005930","venue":null,"period":"D"}"#,
+        ] {
+            ws.send(Message::Text(text.into())).await.unwrap();
+        }
+        assert_eq!(recv_json(&mut ws).await, json!({"type": "sub_error", "sub": "bad", "code": "bad_request"}), "읽을 수 없는 메시지는 버리고, 지수에 거래소는 bad_request");
+        assert_eq!(recv_json(&mut ws).await, json!({"type": "subscribed", "sub": "c0", "seq": 0, "current": null}));
+    }
+
     #[tokio::test(start_paused = true)]
     async fn requests_already_waiting_for_the_symbol_list_end_when_kiwoom_rejects_auth() {
         let dir = tempfile::tempdir().unwrap();
@@ -842,13 +964,14 @@ mod tests {
         let rest = KiwoomRest::new(Arc::new(fake.clone()), KiwoomAuth::new(Secret::new("k".into()), Secret::new("s".into()), None), clock.clone());
         let symbols = Arc::new(SymbolDirectory::default());
         let bars = Arc::new(BarService::new(rest.clone(), symbols.clone(), clock.clone()));
-        let app = router(Arc::new(AppState { symbols: symbols.clone(), bars, rest: rest.clone(), db, clock, static_dir: dir.path().to_owned() }));
+        let (hub, _events) = crate::market::hub::MarketHub::detached(bars.clone(), clock.clone());
+        let app = router(Arc::new(AppState { symbols: symbols.clone(), bars, rest: rest.clone(), db, clock, static_dir: dir.path().to_owned(), hub }));
 
         let nxt_layout = two_cells("005930");
         let started = tokio::time::Instant::now();
         let (symbol, bar, layout, list) = tokio::join!(
             json(&app, "/api/symbols/005930"),
-            json(&app, "/api/bars?symbol=005930&period=D"),
+            json(&app, "/api/bars?symbol=005930&period=D&before=1794182400"),
             put(&app, "/api/layouts/L2", &nxt_layout),
             symbols.refresh(&rest, crate::kiwoom::rest::Priority::Screen),
         );

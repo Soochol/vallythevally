@@ -15,3 +15,4 @@ pub mod quotes;
 pub mod symbols;
 pub mod user_routes;
 pub mod userdata;
+pub mod ws;
