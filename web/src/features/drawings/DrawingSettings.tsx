@@ -10,6 +10,7 @@ import { useDrawingSession, type DrawingEditor } from "../../stores/drawingSessi
 import { useSelectionStore } from "../../stores/selection";
 import { useUiStore } from "../../stores/ui";
 import { INPUT, StyleFields } from "./StyleFields";
+import { calendarTime, parseCalendarTime, parseSeconds } from "./timeInput";
 
 const close = (slot: number) => { useDrawingSession.setState({ editor: null }); surfaceFor(slot)?.focus(); };
 function confirm(slot: number, editor: DrawingEditor) {
@@ -48,10 +49,12 @@ export function DrawingSettings({ slot, editor }: { slot: number; editor: Drawin
         {fields.length > 0 && <StyleFields fields={fields} style={editor.draft.style} text={editor.draft.text} change={(style) => draft({ style })} setText={(text) => draft({ text: text || null })} />}
         {tab === "coordinates" && editor.draft.points.map((p, i) => {
           const role = tool.pointRoles?.[i];
-          const value = new Date((p.t + 9 * 3600) * 1000).toISOString().slice(0, 19);
+          const value = role?.uses === "price" ? null : calendarTime(p.t);
           const update = (patch: Partial<typeof p>) => draft({ points: editor.draft.points.map((point, j) => i === j ? { ...point, ...patch } : point) });
           return <fieldset className="draw-coordinate" key={i}><legend>{role?.label ?? `점 ${i + 1}`}</legend>
-            {role?.uses !== "price" && <label>시각 (KST)<input aria-label={`점 ${i + 1} 시각`} className={INPUT} type="datetime-local" step={1} value={value} onChange={(e) => { const t = Math.round(Date.parse(`${e.target.value}+09:00`) / 1000); if (Number.isSafeInteger(t)) update({ t }); }} /></label>}
+            {role?.uses !== "price" && (value === null
+              ? <label>시각 (Unix 초)<input aria-label={`점 ${i + 1} 시각 (Unix 초)`} className={INPUT} type="text" inputMode="numeric" value={p.t} onChange={(e) => { const t = parseSeconds(e.target.value); if (t !== null) update({ t }); }} /></label>
+              : <label>시각 (KST)<input aria-label={`점 ${i + 1} 시각`} className={INPUT} type="datetime-local" step={1} value={value} onChange={(e) => { const t = parseCalendarTime(e.target.value); if (t !== null) update({ t }); }} /></label>)}
             {role?.uses !== "time" && <label>가격<input aria-label={`점 ${i + 1} 가격`} className={INPUT} type="number" step="any" value={p.price} onChange={(e) => { if (Number.isFinite(e.target.valueAsNumber)) update({ price: e.target.valueAsNumber }); }} /></label>}
           </fieldset>;
         })}

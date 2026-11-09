@@ -96,3 +96,25 @@ test('late PUT response must not allow undo to delete newer other-tab work', asy
   console.log('BROWSER_LATE_ACK',JSON.stringify({initialRevision:initial.revision,newerRevision:remote.revision,newerStyle:remote.style,afterUndo:await drawings(app)}));
   expect((await drawings(app)).map(d=>d.id)).toContain(initial.id);
 });
+
+test('visible extreme timestamp has a safe numeric editor and preserves unrelated edits', async ({page,app}) => {
+  await open(page); await draw(page);
+  await expect.poll(async ()=>(await drawings(app)).length).toBe(1);
+  const d=(await drawings(app))[0]!;
+  const point=d.points[0]!;
+  const response=await fetch(`${app.url}/api/drawings/${d.id}`,{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify({...d,tool:'trendline',points:[{...point,t:Number.MAX_SAFE_INTEGER},{...point,t:point.t+86400}],revision:d.revision+100})});
+  expect(response.status).toBe(200);
+  await page.reload(); await expect.poll(async ()=>(await mirror(page)).length).toBe(1);
+  await page.getByRole('button',{name:'개체 목록 열기'}).click();
+  await page.getByRole('button',{name:'고르기: 추세선'}).click();
+  await page.getByRole('button',{name:'드로잉 설정',exact:true}).click();
+  await page.getByRole('tab',{name:'좌표',exact:true}).click();
+  const seconds=page.getByRole('textbox',{name:'점 1 시각 (Unix 초)'});
+  await expect(seconds).toHaveValue(String(Number.MAX_SAFE_INTEGER));
+  await seconds.fill('9007199254740992');
+  await expect(seconds).toHaveValue(String(Number.MAX_SAFE_INTEGER));
+  await page.getByRole('spinbutton',{name:'점 1 가격'}).fill('5600');
+  await page.getByRole('button',{name:'확인',exact:true}).click();
+  await expect.poll(async ()=>(await drawings(app))[0]?.points[0]?.price).toBe(5600);
+  expect((await drawings(app))[0]?.points[0]?.t).toBe(Number.MAX_SAFE_INTEGER);
+});
