@@ -738,6 +738,7 @@ mod tests {
 
     use super::*;
     use crate::api::Bar;
+    use crate::market::subscriptions::REALTIME_LIMIT;
     use crate::clock::kst;
     use crate::config::Secret;
     use crate::kiwoom::api::ApiId;
@@ -821,7 +822,9 @@ mod tests {
         let rest = KiwoomRest::new(Arc::new(fake), KiwoomAuth::new(Secret::new("k".into()), Secret::new("s".into()), None), clock.clone());
         let symbols = Arc::new(SymbolDirectory::default());
         let stock = |code: &str, nxt_enabled| SymbolInfo { symbol: Symbol::parse(code).unwrap(), name: code.into(), kind: SymbolKind::Common, market: Market::Kospi, nxt_enabled };
-        symbols.replace(Directory::build(vec![stock(SAMSUNG, true), stock(NOT_ON_NXT, false)]));
+        let mut listed = vec![stock(SAMSUNG, true), stock(NOT_ON_NXT, false)];
+        listed.extend((0..REALTIME_LIMIT).map(|i| stock(&filler(i), false)));
+        symbols.replace(Directory::build(listed));
         let bars = Arc::new(BarService::new(rest, symbols, clock.clone()));
         let (stream, desired) = KiwoomStream::detached();
         let (events, rx) = mpsc::channel(64);
@@ -831,6 +834,11 @@ mod tests {
 
     fn std_harness() -> Harness {
         harness(at(9, 0, 50), morning_chart(), Duration::ZERO)
+    }
+
+    /// 한도 시험용 종목. 목록에 있다.
+    fn filler(i: usize) -> String {
+        format!("{:06}", 100_000 + i)
     }
 
     fn key(code: &str, venue: Venue) -> SeriesKey {
@@ -1082,7 +1090,7 @@ mod tests {
         assert_eq!(statuses(&msgs), [(RealtimeState::Live, true)], "{msgs:?}");
         tokio::time::sleep(Duration::from_secs(10)).await;
         let msgs = out.take(true).messages;
-        assert_eq!(msgs[0], reload("a", 2, ReloadReason::GapFilled, Some(down_at)), "다시 끊겨도 처음 끊긴 시각");
+        assert_eq!(msgs[0], reload("a", 2, ReloadReason::GapFilled, Some(down_at)), "다시 끊겨도 처음 끊긴 시각. Recovery 우선순위라 503 두 번을 조회 안에서 다시 보낸다");
         assert_eq!(statuses(&msgs), [(RealtimeState::Live, false)]);
         h.events.send(trade(&h, (9, 1, 10), 120, 1, Some(Exchange::Krx))).await.unwrap();
         let msgs = take(&out).await;
@@ -1188,6 +1196,29 @@ mod tests {
         assert_eq!(snap.seq, 3);
         assert_eq!(snap.current.map(|c| c.bucket().start()), Some(at(9, 1, 0)));
         assert_eq!(snap.recent_confirmed.iter().map(|b| b.bucket.start()).collect::<Vec<_>>(), [at(9, 0, 0)]);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn over_the_limit_a_sub_is_rejected_and_comes_back_when_room_frees() {
+        let h = std_harness();
+        live(&h).await;
+        let (conn, out) = connect(&h).await;
+        for i in 0..REALTIME_LIMIT - 1 {
+            h.hub.subscribe(conn, sub(&format!("f{i}")), key(&filler(i), Venue::Combined));
+        }
+        h.hub.subscribe(conn, sub("a"), samsung());
+        h.hub.subscribe(conn, sub("over"), key(&filler(REALTIME_LIMIT - 1), Venue::Combined));
+        settle().await;
+        let msgs = out.take(true).messages;
+        assert!(msgs.contains(&sub_error("over", SubErrorCode::RealtimeLimit)));
+        assert!(!msgs.iter().any(|m| matches!(m, ServerMessage::Subscribed { sub, .. } if sub == "over")), "거절된 구독에는 subscribed가 없다");
+        assert_eq!(h.desired.borrow().len(), REALTIME_LIMIT);
+        h.hub.unsubscribe(conn, sub("a"));
+        tokio::time::sleep(Duration::from_secs(2)).await;
+        let msgs = out.take(true).messages;
+        assert!(msgs.contains(&subscribed("over", 0, None)), "유예 중인 종목을 빼서 자리를 만들고 같은 sub로 다시 알린다: {msgs:?}");
+        assert!(!h.desired.borrow().contains(&samsung().feed.symbol()));
+        assert!(h.desired.borrow().contains(&Symbol::parse(&filler(REALTIME_LIMIT - 1)).unwrap()));
     }
 
     #[test]
