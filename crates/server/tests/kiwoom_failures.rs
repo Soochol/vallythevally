@@ -67,3 +67,34 @@ async fn an_unknown_failure_stops_the_symbol_list_path() {
 async fn a_missing_envelope_is_not_an_empty_symbol_list() {
     the_symbol_list_is_not_fetched_again_after(json!({}), "internal").await;
 }
+
+async fn logs_after_failures(api_id: &str, reply: Value, browser_path: &str) -> String {
+    let fake = FakeKiwoom::start().await;
+    fake.respond_with(api_id, 200, reply);
+    let tmp = tempfile::tempdir().unwrap();
+    let server = Server::spawn(&fake, &tmp.path().join("run/server.lock"), &static_dir(tmp.path()));
+    let base = format!("http://{}", server.addr().await);
+    let (status, body) = get(&reqwest::Client::new(), &base, browser_path).await;
+    assert!(status >= 400, "{status} {body}");
+    let body = body.to_string();
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    server.stop().await + &body
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn kiwoom_failure_messages_and_bodies_never_reach_logs_or_the_browser() {
+    use common::{APP_KEY, APP_SECRET, TOKEN};
+    let echo = format!("appkey={APP_KEY} secretkey={APP_SECRET} token={TOKEN}");
+    let cases = [
+        ("ka10099", json!({"return_code": 1, "return_msg": format!("[8999:{echo}]")}), "/api/symbols?q=005930"),
+        ("ka10099", json!({"return_code": 0, "return_msg": "정상", "list": echo}), "/api/symbols?q=005930"),
+        ("ka10095", json!({"return_code": 2, "return_msg": format!("입력 값 오류입니다[1511:{echo}]")}), "/api/quotes?symbols=005930"),
+        ("ka10095", json!({"return_code": 9, "return_msg": echo}), "/api/quotes?symbols=005930"),
+    ];
+    for (api_id, reply, path) in cases {
+        let seen = logs_after_failures(api_id, reply.clone(), path).await;
+        for marker in [APP_KEY, APP_SECRET, TOKEN] {
+            assert!(!seen.contains(marker), "{api_id} {reply}: {marker}가 로그나 브라우저 응답에 남았습니다\n{seen}");
+        }
+    }
+}

@@ -646,6 +646,19 @@ mod tests {
     }
 
     #[test]
+    fn market_failures_keep_no_message() {
+        let secret = "FAKE-SECRET-err-2222";
+        for body in [
+            format!(r#"{{"return_code": 1, "return_msg": "실패[8999:{secret}]"}}"#),
+            format!(r#"{{"return_code": 2, "return_msg": "입력 값 오류입니다[1511:{secret}]"}}"#),
+            format!(r#"{{"return_code": 9, "return_msg": "{secret}"}}"#),
+        ] {
+            let f = judge(ApiId::Ka10081, 200, &body).unwrap_err();
+            assert!(!format!("{f} {f:?}").contains(secret), "{f:?}");
+        }
+    }
+
+    #[test]
     fn issue_failures_keep_no_message() {
         let body = r#"{"return_code": 3, "return_msg": "실패[8002:FAKE-APPKEY-err-1111]"}"#;
         let f = judge(ApiId::Au10001, 200, body).unwrap_err();
