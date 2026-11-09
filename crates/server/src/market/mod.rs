@@ -1,5 +1,7 @@
 //! 실시간(backend.md §5.3, §5.5): 구독 관리자와 `MarketHub` 액터.
 
+pub mod hub;
+pub mod outbox;
 pub mod subscriptions;
 
 /// 브라우저 WebSocket 연결 하나. 서버가 연결마다 새로 붙인다.
