@@ -287,11 +287,10 @@ pub struct Trade {
     pub at: KstTime,
     pub price: Price,
     pub qty: Volume,
-    /// 0B 누적거래량(필드 13). 조회로 받은 시드와의 경계를 판단하는 데 쓴다(§5.4).
-    /// 0J처럼 없거나 믿을 수 없으면 None.
-    pub day_cum: Option<Volume>,
 }
 ```
+
+- 0B 누적거래량(필드 13)으로 시드 경계를 판단하는 `day_cum`은 장중 실측(§12.2 1번) 뒤 #39에서 더한다. 그 전에는 시드 경계를 언제나 모른다(§5.4).
 
 0B에는 체결시간(HHMMSS)만 있고 날짜가 없다. `Trade`는 날짜가 정해진 뒤에만 만들 수 있다(§3.1의 `resolve_trade_time`).
 
@@ -343,9 +342,7 @@ pub struct CurrentBar {
 pub enum SeedBoundary {
     /// 체결 하나로 시작했다. 빠진 체결이 없다.
     FromTrade,
-    /// 조회 응답의 당일 누적거래량. 이 값 이하의 day_cum을 단 체결은 이미 들어 있다.
-    DayCum(Volume),
-    /// 경계를 모른다. 이 봉은 불완전하다.
+    /// 경계를 모른다. 이 봉은 불완전하다. 당일 누적거래량 경계(`DayCum`)는 실측 뒤 #39.
     Unknown,
 }
 ```
@@ -883,13 +880,13 @@ pub enum StreamEvent {
 
 **복구 순서**(열려 있는 `SeriesKey`마다)
 
-1. 키에 **복구 세대** `recovery_gen`을 하나 올린다. 키 상태를 `Recovering { gen, from: down_at, buffer }`로 바꾼다.
-2. 이 상태에서 들어오는 체결은 `buffer`에 시각순으로 쌓는다. 현재 봉에 바로 넣지 않는다. 브라우저에 `bar`를 보내지 않는다. 가격 알림은 체결마다 그대로 판단한다. 체결 자체는 진짜이기 때문이다.
-3. `BarService::refresh_latest(key, Priority::Recovery)`를 부른다. 응답에는 `gen`이 붙어 돌아온다.
+1. 키에 **복구 세대**를 하나 올린다. 키 상태를 시드 기다림(`Seeding`)으로 바꾼다.
+2. 이 상태에서 들어오는 체결은 **버린다**(카운터만 올린다). 브라우저에 `bar`를 보내지 않는다. 시드 경계를 모르므로(§5.4) 쌓았다가 다시 적용하면 시드에 이미 든 체결을 두 번 센다. 시드는 다시 연결한 뒤에 받으므로 그 전 체결은 대개 시드에 들어 있다(2026-11-09 사용자 결정). 가격 알림(#8)이 생기면 이 규칙을 다시 본다.
+3. `BarService::seed(key, Priority::Recovery)`를 부른다. 응답에는 세대가 붙어 돌아온다.
 4. 응답이 오면 그 키의 `recovery_gen`과 비교한다. 다르면 그 응답은 버린다(복구 중에 또 끊겨 새 복구가 시작된 경우).
 5. 같으면:
    1. 받은 확정 봉이 캐시에 들어간다(`BarSource::Kiwoom`, §6.4).
-   2. 진행 중 구간의 봉으로 새 현재 봉을 만든다(§5.4의 시드). `buffer`의 체결 중 시드 경계 뒤의 것만 시각순으로 적용한다. 적용하다 구간을 넘으면 그때 봉을 확정한다.
+   2. 진행 중 구간의 봉으로 새 현재 봉을 만든다(§5.4의 시드). 그 뒤 체결부터 더한다.
    3. 키 상태를 `Live`로 돌린다. 브라우저에 `reload { reason: "gap_filled", from }`를 보낸다. 브라우저는 칸을 통째로 다시 만든다(§8.3). 새 현재 봉은 그 뒤 `bar`로 간다.
 6. 실패하면 상태를 그대로 두고 1·2·5·10·30초 간격으로 3번부터 다시 한다. 그동안 `status.backfilling = true`다.
 7. 복구 중에 또 끊기면 1번으로 간다. 이때 `from`은 처음 끊긴 시각을 그대로 둔다.
@@ -910,8 +907,7 @@ pub enum StreamEvent {
 pub enum Holder {
     /// 브라우저 연결 하나의 구독 하나. 칸의 주 종목과 비교 종목 모두 여기에 든다.
     Cell { conn: ConnId, sub: SubId },
-    Alert(AlertId),
-    Watchlist,
+    // Alert(AlertId)는 #8, Watchlist는 #39에서 더한다.
 }
 
 pub struct SubscriptionManager {
@@ -929,8 +925,6 @@ pub const REALTIME_LIMIT: usize = 200;
 pub struct Plan {
     /// 키움에 REG 할 집합. 크기 ≤ 200.
     pub realtime: BTreeSet<Symbol>,
-    /// 한도를 넘어 1분마다 조회로 현재가를 받을 관심종목.
-    pub polled: BTreeSet<Symbol>,
     /// 한도를 넘어 받을 수 없는 칸·알림 보유자. 브라우저와 알림 목록에 알린다.
     pub rejected: BTreeSet<Holder>,
 }
@@ -953,12 +947,12 @@ impl SubscriptionManager {
 2. **빼기**: 보유자가 없고 30초가 지난 종목은 `admitted`에서 뺀다.
 3. **새로 받기**: `admitted`에 없는 후보를 우선순위 순서로 넣는다. 우선순위는 칸 > 알림 > 관심종목만 잡은 종목이다. 같은 우선순위 안에서는 보유자가 생긴 시각이 이른 순서다.
 4. **자리가 없을 때**: 새 후보가 칸이나 알림이면 자리를 만든다. 먼저 30초 유예 중인 종목을 뺀다. 그래도 없으면 관심종목만 잡은 종목을 뺀다. 둘 다 없으면 그 보유자는 `rejected`다.
-5. 관심종목만 잡았는데 실시간에 못 든 종목은 `polled`로 간다. 1분마다 `Ka10095`로 **100종목씩** 묶어 조회한다(`Background`). 101종목 이상은 `1634`로 거절된다.
+5. (#39) 관심종목만 잡았는데 실시간에 못 든 종목의 처리. 실시간은 WebSocket으로만 받고 갱신용 REST 조회는 하지 않는다(2026-11-09 사용자 결정). 이 규칙은 #39가 정한다.
 6. **회복**: 자리가 나면 `rejected`였던 보유자를 3번 규칙으로 다시 넣는다. 들어가면 알린다. 칸이면 같은 `sub`로 `subscribed`를 다시 보낸다. 알림이면 `Alert.warning`을 `null`로 되돌린다.
 
 `MarketHub`는 보유자가 바뀔 때와 1초 타이머마다 `plan`을 다시 계산한다. `realtime`이 바뀌었으면 `KiwoomStream::set_desired`를 부른다.
 
-관심종목 현재가는 실시간 구독이든 조회든 같은 `quotes` 메시지로 브라우저에 간다(§8.3). `source` 필드로 어느 쪽인지 알린다.
+- **#4의 범위**: 보유자는 칸뿐이다. 칸 넷과 비교 종목으로는 200에 닿기 어렵지만, 0~4·6번 규칙은 그대로 만들고 시나리오 시험으로 고정한다. 관심종목 실시간(`quotes` 메시지)은 #39, 알림 보유자는 #8이다. 그때까지 관심종목 현재가는 #3의 REST 조회 그대로다.
 
 ### 5.4 현재 봉 집계(순수 함수, `domain::aggregate`)
 
@@ -973,23 +967,29 @@ pub enum Applied {
 }
 
 impl CurrentBar {
-    /// 키움 조회에서 받은 진행 중 구간의 봉으로 시작한다.
-    pub fn seed(bar: KiwoomBar, boundary_trusted: bool) -> Self;
+    /// 키움 조회에서 받은 진행 중 구간의 봉으로 시작한다. 경계를 모르므로(Unknown) 불완전하다.
+    pub fn seed(bucket: Bucket, ohlcv: Ohlcv) -> Self;
     pub fn bucket(&self) -> Bucket;
     pub fn ohlcv(&self) -> &Ohlcv;
-    /// SeedBoundary::Unknown 이거나, 경계 판단에 실패한 체결을 받은 적이 있으면 false.
     pub fn is_complete(&self) -> bool;
 }
 
-/// 체결 하나를 반영한다. state가 None이면 이 체결로 새 현재 봉을 시작한다(FromTrade).
-pub fn apply_trade(state: &mut Option<CurrentBar>, period: Period, trade: &Trade) -> Applied;
+/// (종목, 거래소, 봉 주기) 하나의 집계기. 현재 봉 하나와 마지막으로 확정한 구간을 기억한다.
+/// 타이머로 확정해 현재 봉이 비어도, 그 구간의 늦은 체결을 알아본다.
+pub struct Aggregator { period: Period, current: Option<CurrentBar>, closed_through: Option<Bucket> }
 
-/// confirm_at이 지났으면 현재 봉을 확정하고 비운다.
-pub fn close_if_due(state: &mut Option<CurrentBar>, now: KstTime) -> Option<ConfirmedBar>;
+impl Aggregator {
+    /// newest_confirmed: 키움 조회로 아는 가장 새 확정 봉 구간. 그 구간까지의 체결은 늦은 체결이다.
+    pub fn new(period: Period, seed: Option<CurrentBar>, newest_confirmed: Option<Bucket>) -> Self;
+    /// 현재 봉이 없으면 이 체결로 시작한다(FromTrade).
+    pub fn apply(&mut self, trade: &Trade) -> Applied;
+    /// confirm_at이 지났으면 현재 봉을 확정하고 비운다.
+    pub fn close_if_due(&mut self, now: KstTime) -> Option<ConfirmedBar>;
+    pub fn current(&self) -> Option<&CurrentBar>;
+}
 
-/// 테스트용: 체결 목록 전체를 접는다.
-pub fn aggregate(period: Period, seed: Option<CurrentBar>, trades: &[Trade], now: KstTime)
-    -> (Vec<ConfirmedBar>, Option<CurrentBar>);
+/// 테스트용: 체결 목록 전체를 접은 뒤 close_if_due(now)를 한 번 부른다.
+pub fn aggregate(agg: Aggregator, trades: &[Trade], now: KstTime) -> (Vec<ConfirmedBar>, Aggregator);
 ```
 
 - 체결 하나는 그 종목의 열린 봉 주기 집계기 모두에 들어간다. 일·주·월봉 현재 봉도 체결로 직접 만든다. 다른 봉 주기의 봉에서 만들지 않는다(ADR 0003).
@@ -997,14 +997,14 @@ pub fn aggregate(period: Period, seed: Option<CurrentBar>, trades: &[Trade], now
 - **시드 경계**: 시드에 어디까지의 체결이 들어 있는지 알아야 그 뒤 체결만 더할 수 있다. 서버가 응답을 받은 시각은 그 경계가 아니다. 키움이 스냅숏을 만든 시각과 응답이 도착한 시각 사이의 체결이 빠지기 때문이다. 그래서 수신 시각은 쓰지 않는다.
   - **후보**: 당일 누적거래량. 분봉 행의 `acc_trde_qty`와 0B 필드 13을 쓴다. 0B의 누적거래량이 시드의 값 이하인 체결은 이미 들어 있다.
   - 이 둘이 같은 기준인지는 [장중 실측 대기]다. 분봉 `acc_trde_qty`는 분봉 합과 같고 일봉 거래량과는 다르다(kiwoom.md §3).
-  - **확인 전 기본값**: 경계를 믿지 않는다(`boundary_trusted = false` → `SeedBoundary::Unknown`). 시드 뒤 모든 체결을 더한다. 그 현재 봉은 불완전하다.
+  - **확인 전 기본값**: 경계를 믿지 않는다(`SeedBoundary::Unknown`). 시드를 받은 뒤의 체결을 모두 더한다. 그 현재 봉은 불완전하다. `DayCum` 경계는 실측 뒤 #39.
   - 일·주·월봉 시드는 확인 뒤에도 일봉 `trde_qty`의 기준이 0B와 같을 때만 믿는다.
 - **불완전한 봉의 처리**
   - 화면에는 그대로 보낸다.
   - 확정되면 `needs_verify = true`인 `Realtime` 봉으로 캐시에 들어간다. 그 즉시 그 키의 `refresh_latest(Priority::Recovery)`를 예약해 키움 값으로 바꾼다.
   - 지표 알림은 키움 값으로 바뀐 뒤 그 봉을 **처음으로** 판단한다. 소급이 아니라 첫 판단이다.
   - 시드 다음 구간부터는 체결로 시작하므로 완전하다. 그래서 불완전한 봉은 키마다 시드 직후 하나뿐이다.
-- **구독을 조회보다 먼저**: 실시간 REG를 조회보다 먼저 한다. REG와 조회 사이에 들어온 체결은 집계기 앞에 쌓아 둔다. 시드가 오면 경계 뒤의 것만 반영한다.
+- **구독을 조회보다 먼저**: 실시간 REG를 조회보다 먼저 한다. 시드를 기다리는 동안 들어온 체결은 버린다(§5.2 2번과 같은 이유). 시드가 그 체결을 대개 담고 있고, 담지 못한 것은 `needs_verify` 교체가 바로잡는다.
 
 ### 5.5 `MarketHub` 액터와 `seq`
 
@@ -1204,7 +1204,7 @@ impl BarService {
   - 응답이 시리즈를 새로 만드는 경로는 없다. 시리즈를 만드는 것은 요청뿐이다.
   - 07:45 비우기는 합치기 범위(`MergeScope`)도 바꾼다. 비우기 전에 출발한 키움 조회의 응답을 비운 뒤의 요청이 나눠 받지 않는다(§4.2).
 - **키별 잠금**(#2·#14): 한 시리즈의 읽기와 쓰기는 그 키의 `tokio::Mutex`로 줄 세운다. #2에는 실시간 쓰기가 없어서 키움 조회 동안에도 잠금을 쥔다. 같은 키의 요청을 합치는 일도 이 잠금이 한다(§6.3).
-  - #4에서 다시 본다. 실시간으로 만든 봉을 붙이는 쓰기가 키움 조회(수 초)를 기다리면 안 되기 때문이다. 그때는 키움을 기다리는 동안 잠금을 놓고, 응답을 반영할 때만 쥔다. 반영할 때 `SeriesId`를 비교해 다르면 버린다.
+  - #4도 키움 조회 동안 잠금을 쥔다(2026-11-09 결정). 실시간으로 만든 봉을 붙이는 `append_realtime`은 `MarketHub`가 따로 띄운 태스크가 잠금을 기다려 쓴다. 허브는 기다리지 않는다. 같은 키의 확정은 적어도 1분 간격이라 붙이는 순서가 꼬이지 않는다. 잠금을 기다리는 동안 아직 캐시에 없는 확정 봉은 허브 스냅숏의 `recent_confirmed`가 최신 페이지에 채운다(§5.5).
 - **출처 교체 규칙**
   - 키움에서 받은 봉은 같은 `t`의 봉을 언제나 덮어쓴다(`source = Kiwoom`, `needs_verify = false`).
   - 실시간으로 만든 봉은 같은 `t`에 봉이 이미 있으면 넣지 않는다. 뒤늦게 도착한 실시간 쓰기가 키움 값을 되돌리지 못한다.
@@ -1823,7 +1823,7 @@ type SpecValidation =
 
 이 TS 타입들은 서버가 Rust 타입(`crates/server/src/api.rs`)에서 생성한다(`ts-rs`). 생성 파일은 `web/src/api/generated/` 디렉터리에 타입마다 한 파일(`BarsPage.ts`, `Venue.ts` 등)로 둔다. 손대지 않는다. `crates/server/tests/contract.rs`가 생성 결과와 커밋된 파일이 같은지 검사한다. JSON 왕복 테스트(§10)가 위 필드 이름(`spanB`, `maPeriod` 등)을 고정한다.
 
-#### 변경 알림 (#4)
+#### 변경 알림 (#4에서 뺐다. 아직 이슈 없음)
 
 같은 사용자가 탭을 여러 개 열 수 있다. 한 탭에서 사용자 자료를 바꾸면 서버가 모든 연결에 `data_changed`(§8.3)를 보낸다. 다른 탭은 그 자료를 다시 받는다. 쓰기 충돌은 나중에 쓴 쪽이 이긴다.
 
@@ -1842,7 +1842,7 @@ type ClientMessage =
 ```
 
 - 같은 연결에서 같은 `(symbol, venue, period)`를 여러 `sub`로 구독해도 된다. 메시지는 `sub`마다 따로 온다. `seq`는 같은 `(symbol, venue, period)` 흐름의 번호라서 같은 값이 온다.
-- `subscribe`의 `venue`는 #4에서 확정한다. 위 모양은 `SeriesKey`에 맞춘 초안이다.
+- `venue`가 틀렸거나(지수에 거래소, NXT 불가 종목에 `nxt`) 종목 코드 형식이 틀리면 `sub_error { code: "bad_request" }`다.
 - 해지하거나 연결이 끊기면 서버는 그 종목을 30초 더 받은 뒤 해지한다. 그래서 칸의 종목을 바꿨다가 바로 돌아오거나 새로고침해도 다시 받기 시작하는 지연이 없다.
 
 #### 서버 → 브라우저
@@ -1855,7 +1855,7 @@ type ServerMessage =
   // 구독 응답. seq는 지금 이 흐름의 번호, current는 지금의 현재 봉(없으면 null).
   // 실시간 한도로 거절되었다가 자리가 나면 같은 sub로 다시 온다.
   | { type: "subscribed"; sub: string; seq: number; current: Bar | null }
-  | { type: "sub_error"; sub: string; code: "unknown_symbol" | "realtime_limit" | "kiwoom_unavailable" }
+  | { type: "sub_error"; sub: string; code: "bad_request" | "unknown_symbol" | "realtime_limit" | "kiwoom_unavailable" }
 
   // 현재 봉 갱신. 구독 하나당 초당 최대 10회. 중간 값은 건너뛸 수 있다.
   | { type: "bar"; sub: string; seq: number; bar: Bar }
@@ -1868,15 +1868,16 @@ type ServerMessage =
   //  gap_filled: 실시간 연결이 끊겼던 구간을 조회로 메웠다
   //  replaced:   실시간으로 만든 봉이 키움 값으로 교체되었다
   //  daily_reset: 매일 07:45에 서버가 시세 캐시를 모두 비우고 다시 받았다(수정주가 반영 등)
-  // from은 바뀐 범위의 시작이다. 참고용이고 브라우저는 쓰지 않아도 된다.
-  | { type: "reload"; sub: string; seq: number; reason: "gap_filled" | "replaced"; from: UnixSeconds }
-  | { type: "reload"; sub: string; seq: number; reason: "daily_reset" }
+  // from은 바뀐 범위의 시작이다. daily_reset이면 null이다. 참고용이고 브라우저는 쓰지 않아도 된다.
+  | { type: "reload"; sub: string; seq: number; reason: "gap_filled" | "replaced" | "daily_reset"; from: UnixSeconds | null }
 
-  // 관심종목 현재가. 관심종목 전체에 대해 서버가 알아서 보낸다(구독 메시지 불필요).
+  // 아래 셋은 #4에 없다. 브라우저는 모르는 type을 무시한다.
+  // (#39) 관심종목 현재가. 관심종목 전체에 대해 서버가 알아서 보낸다(구독 메시지 불필요).
   // 종목 하나당 초당 최대 2회. 한 메시지에 여러 종목이 묶일 수 있다.
   | { type: "quotes"; quotes: Quote[] }
-
+  // (#8)
   | { type: "alert_fired"; event: AlertEvent }
+  // (다른 탭 동기화, 아직 이슈 없음)
   | { type: "data_changed"; entity: "watchlist" | "layout" | "drawing" | "alert" | "ui_state"; id: Uuid | null };
 
 interface ConnectionStatus {
@@ -1888,15 +1889,13 @@ interface ConnectionStatus {
   since: UnixSeconds;
   // 끊긴 구간을 조회로 메우는 중
   backfilling: boolean;
-  // 실시간 한도(200종목)를 넘어 일부 관심종목을 1분마다 조회 중
-  watchlistPolling: boolean;
 }
 ```
 
 - **연결 직후**: 서버가 `hello`를 보낸다. 브라우저는 필요한 구독을 모두 `subscribe` 한다.
 - **현재 봉 갱신 빈도**: 서버는 구독마다 최신 값 하나만 들고 있다가 100ms마다 바뀐 것만 보낸다. 그래서 구독 하나당 초당 최대 10회다.
 - **확정 순간**: 봉이 확정되면 들고 있던 갱신을 버리고 `confirmed`를 바로 보낸다. `confirmed`는 연결이 살아 있는 동안 건너뛰지 않는다.
-- **느린 브라우저**: 연결의 보내기 버퍼가 차면 서버는 `bar`와 `quotes`를 먼저 버린다. 그래도 `confirmed`를 넣을 자리가 없으면 연결을 닫는다. 브라우저는 다시 연결한다(아래 6번).
+- **느린 브라우저**: 연결의 보내기 버퍼가 차면 서버는 `bar`를 먼저 버린다. 그래도 `confirmed`를 넣을 자리가 없으면 연결을 닫는다. 브라우저는 다시 연결한다(아래 6번).
 - **장이 닫혀 있을 때**(20:00~08:00, 주말): 연결과 구독은 그대로 된다. `bar` 메시지가 오지 않을 뿐이다.
 
 #### 브라우저 쪽 처리 순서(D1, D2, D12)
@@ -2207,6 +2206,8 @@ pub fn future_bar_starts(period: &str, last_start: f64, n: usize) -> Result<Vec<
 | `VALLY_KIWOOM_APP_KEY` | 예 | 실계좌 앱키(ADR 0004) |
 | `VALLY_KIWOOM_APP_SECRET` | 예 | 실계좌 시크릿(ADR 0004) |
 | `VALLY_KIWOOM_BASE_URL` | 아니오 | 키움 REST 주소. 기본 `https://api.kiwoom.com`. 통합 테스트가 가짜 키움 서버를 가리키는 데 쓴다 |
+| `VALLY_KIWOOM_WS_URL` | 아니오 | 키움 WebSocket 주소(#4). 기본 `wss://api.kiwoom.com:10000/api/dostk/websocket`. 시험이 가짜 키움을 가리키는 데 쓴다 |
+| `VALLY_CLOCK_START` | 아니오 | **시험용**. KST `YYYYMMDDHHMMSS`. 서버 시계가 이 시각에서 시작해 실제 시간만큼 흐른다. 장 시간 밖에도 e2e가 실시간 경로를 돌게 하려는 것이다. 위 두 주소 중 하나라도 실제 키움(기본값)이면 시작하지 않는다. 실서버 `.env`에는 두지 않는다 |
 | `VALLY_DB_PATH` | 아니오 | 사용자 자료 SQLite 파일 경로. 기본 `data/vally.db`. #2에서는 읽지 않는다 |
 | `VALLY_LOCK_PATH` | 아니오 | 잠금 파일 경로(§4.1). 기본 `$XDG_RUNTIME_DIR/vallythevally/server.lock`, 없으면 `/tmp/vallythevally-<uid>/server.lock` |
 | `VALLY_TOKEN_PATH` | 아니오 | 토큰 파일 경로(§4.1). 기본 `$XDG_STATE_HOME/vallythevally/token.json`, 없으면 `~/.local/state/vallythevally/token.json`. 저장소 안을 가리키지 않는다. 통합 테스트가 임시 디렉터리를 가리키는 데 쓴다 |
