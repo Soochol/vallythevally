@@ -83,6 +83,28 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
 
+  wasm:
+    name: wasm
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-pack
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+      - name: Build indicators wasm
+        run: ./scripts/build-wasm.sh
+        working-directory: web
+      - name: Check wasm against the reference values
+        run: node scripts/wasm-smoke.mjs
+        working-directory: web
+
   e2e:
     name: e2e
     runs-on: ubuntu-latest

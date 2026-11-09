@@ -462,7 +462,7 @@ D3의 표를 그대로 옮긴다. 단계 번호는 이슈 번호다. 이 문서�
 - **`t` → x 변환**: 지금 봉 주기의 봉 구간 `[시작, 다음 봉 시작)` 목록 위에서 한다. 계산은 모두 진짜 Unix 초로 한다.
   1. **봉 구간 안**(`시작 ≤ t < 시작 + 길이`): 논리 index = `k + (t − 시작) / 길이`. 길이는 그 봉 주기의 실제 길이다. 분봉은 n분, 일봉은 24시간, 주봉은 7일, 월봉은 그달 일수다.
   2. **체결이 없는 틈**(밤, 주말, 휴일, 거래정지): 바로 다음 봉의 시작 자리, 즉 논리 index `k + 1`에 놓는다.
-  3. **마지막 봉 뒤**: 고정 초 길이로 외삽하지 않는다. `future_bar_starts`로 실제 봉 경계를 만든 뒤 1·2번을 그대로 적용한다. 월봉이면 다음 달 1일, 주봉이면 다음 월요일이다.
+  3. **마지막 봉 뒤**: 고정 초 길이로 외삽하지 않는다. `futureBarStarts`로 실제 봉 경계를 만든 뒤 1·2번을 그대로 적용한다. 월봉이면 다음 달 1일, 주봉이면 다음 월요일이다.
   4. **첫 봉 앞**: 그리지 않는다. 과거 구간의 확정 봉을 더 받으면 나타난다.
   5. 논리 index → x는 `timeScale().logicalToCoordinate()`로 바꾼다.
 - **보이는 모습**
@@ -916,7 +916,7 @@ apply(symbol, venue, period)  또는  reload  또는  새 hello ── generatio
 
 - **확정 순간의 지표 값**(W4-25)
   - 서버는 확정 직전의 `bar`를 건너뛰고 `confirmed`만 보낼 수 있다. 그래서 확정 봉의 지표 값은 반드시 `confirmed`의 봉으로 다시 계산해 그린다.
-  - 워커의 `confirm(key, bar)`는 WASM의 `pushConfirmed(bar)` 하나만 부른다. 이 함수가 상태를 커밋하고 확정 순간의 최종 값(`Tail`, 선 순서대로의 `Float64Array`)을 돌려준다(백엔드 §9.2·§9.4, D13). 워커는 그 값을 그대로 메인 스레드에 보낸다. `preview`는 부르지 않는다.
+  - 워커의 `confirm(key, bar)`는 WASM의 `pushConfirmed(bar)` 하나만 부른다. 이 함수가 상태를 커밋하고 확정 순간의 최종 값(`Tail`, 선 순서대로의 `Float64Array`)을 돌려준다(백엔드 §9.2·§9.4, D13). 워커는 그 값을 그대로 메인 스레드에 보낸다. `preview`는 부르지 않는다. `pushConfirmed`와 `preview`는 마지막 확정 시각 이하의 봉이나 NaN·무한 가격을 받으면 상태를 바꾸지 않고 던진다(백엔드 §9.1).
   - 그다음에 오는 `bar`는 새 현재 봉이다.
 - **처리 순서와 그리기 묶기**
   - 계산과 상태 변경(`confirmed`, `reload`, `bar`의 `preview`)은 칸마다 하나의 처리 줄에서 도착 순서대로 한다. 건너뛰거나 합치지 않는다.
@@ -967,8 +967,10 @@ interface IndicatorConfig {
 
 ### 5.6 WASM 지표를 불러오는 방식 (#5~)
 
-- **빌드**: `wasm-pack build crates/indicators --target web --features wasm --out-dir web/src/wasm/indicators`.
-  - 결과물(`indicators_bg.wasm`, JS 접착 코드)은 저장소에 커밋하지 않는다. `web` 빌드 스크립트가 먼저 만든다.
+- **빌드**: `pnpm wasm`(`web/scripts/build-wasm.sh`). `crates/indicators-wasm`을 wasm-pack으로 빌드해 `web/src/wasm/indicators/`에 `indicators.js`, `indicators.d.ts`, `indicators_bg.wasm`을 쓴다(백엔드 §9.4). wasm32 타깃과 wasm-pack이 있어야 한다.
+  - 결과물은 저장소에 커밋하지 않는다(`.gitignore`).
+  - #5 앞부분에서는 앱 코드가 wasm을 import하지 않는다. 그래서 `pnpm build`·`typecheck`·`test`는 wasm 없이 돈다. 확인은 CI의 `wasm` 작업이 따로 맡는다(빌드 뒤 `pnpm wasm:smoke`). 차트에 연결하는 2차에서 앱 코드가 wasm을 import하면, `build`·`typecheck`·`test` 앞에 `pnpm wasm`을 붙인다. 그리고 그 명령을 돌리는 CI 작업(lint, test, build, e2e)에 wasm32 타깃과 wasm-pack을 깐다.
+  - `validateSpec`의 결과 타입 `SpecValidation`은 `indicators.d.ts`에서 가져온다. `IndicatorSpec`·`LineId`·`MaMethod`는 `web/src/api/generated/`에 있다(ts-rs).
 - **불러오기**
   - Web Worker 하나(`chart/indicators/worker.ts`, Vite `new Worker(new URL(…), { type: "module" })`)가 접착 코드의 `init(wasmUrl)`을 한 번 부른다.
   - wasm 파일은 Vite의 `?url` import로 해시 붙은 정적 파일이 된다. `vite-plugin-wasm` 같은 플러그인은 필요 없다.
@@ -983,7 +985,7 @@ interface IndicatorConfig {
 | `create(key, gen, specJson, cols)` | 선 전체. `Float64Array[]`와 `shift[]` |
 | `preview(key, gen, bar)` | 선마다 현재 봉 위치(`i + shift`)의 값 |
 | `confirm(key, gen, bar)` | 선마다 확정 봉 위치의 최종 값. WASM `pushConfirmed`의 반환값(`Tail`) 그대로다(§5.4, D13) |
-| `futureStarts(period, lastStart, n)` | 미래 봉 시작 시각 n개(`future_bar_starts`) |
+| `futureStarts(period, lastStart, n)` | 미래 봉 시작 시각 n개(`futureBarStarts`) |
 | `dispose(key)` | 없음 |
 
 `gen`은 시리즈 세대다. 워커는 세대를 그대로 돌려주고, 메인 스레드가 지금 세대와 다르면 결과를 버린다(D1). `validateSpec`은 엔진이 필요 없으므로 워커를 거치지 않는다(§3.3).
@@ -993,7 +995,7 @@ interface IndicatorConfig {
   - **주 시리즈에는 빈 시각을 붙이지 않는다.** 주 시리즈 끝에 미래 시각을 붙이면 현재 봉이 시리즈의 마지막 시각보다 과거가 된다. 그러면 Lightweight Charts의 `series.update`(마지막 시각 이상만 받음)로 현재 봉을 갱신할 수 없다. 목업 초판이 이 방식이었고 고쳤다.
   - **미래 시각은 선행스팬 시리즈 자신이 갖는다.** 선의 점 `i`는 시각 `T[i + shift]`에 놓인다. `T`는 확정 봉과 현재 봉의 시작 시각 뒤에 `futureStarts`로 만든 미래 시각을 이은 배열이다. 시간축은 모든 시리즈 시각의 합집합이므로, 선행스팬 시리즈만으로 미래 구간이 생긴다.
   - **미래 시각의 개수**: 칸에 띄운 모든 지표의 양의 `shift` 중 최댓값이다. 일목균형표를 둘 이상 띄우고 displacement가 다르면 큰 쪽을 따른다. 25로 정해 두지 않는다. 일목균형표를 지우면 그 선행스팬 시리즈와 함께 미래 구간도 사라진다.
-  - **미래 시각을 만드는 법**: 늘 `future_bar_starts`로 만든다. 봉 주기마다 경계 규칙이 다르기 때문이다. 분봉은 08:00~20:00 밖과 주말을 건너뛰지만, 월봉은 1일이 주말이어도 그날이 경계이고, 주봉은 월요일이 경계다. 브라우저가 초 단위 덧셈으로 만들지 않는다.
+  - **미래 시각을 만드는 법**: 늘 `futureBarStarts`로 만든다. 봉 주기마다 경계 규칙이 다르기 때문이다. 분봉은 08:00~20:00 밖과 주말을 건너뛰지만, 월봉은 1일이 주말이어도 그날이 경계이고, 주봉은 월요일이 경계다. 브라우저가 초 단위 덧셈으로 만들지 않는다.
   - **갱신할 점은 언제나 그 선 시리즈의 마지막 점이다.** 선의 마지막 값은 현재 봉(index `n−1`)에서 나오고 시각 `T[n−1+shift]`에 놓인다. 어느 선 시리즈도 끝에 빈 시각(whitespace)을 붙이지 않으므로, 이 점이 그 시리즈의 마지막 점이다.
 
   | 선 | `shift` | 현재 봉이 바뀔 때 갱신할 점 | 새 현재 봉이 생길 때 |
@@ -1050,7 +1052,7 @@ interface IndicatorConfig {
 | 알림 만들 때 spec 재검증과 한국어 `message` | 반영됨 | §8.2 "거절되는 `LineRef`", §9.4 `validateSpec`(D6) |
 | `hello.protocol` | 반영됨 | §8.3. 다르면 `새 버전이 있습니다: 새로고침` |
 | 분봉의 미래 시각 | 반영됨 | §9.3 |
-| `future_bar_starts`의 봉 주기별 경계 | 반영됨 | §9.3 표(주봉은 다음 월요일, 월봉은 1일이 주말이어도 1일, 주말 건너뛰기는 분·일봉만)와 §10 테스트 표(2026-11-01(일), 2027-05-01(토) 등). JS 이름은 `futureBarStarts` |
+| `Bucket::future_starts`의 봉 주기별 경계 | 반영됨 | §9.3 표(주봉은 다음 월요일, 월봉은 1일이 주말이어도 1일, 주말 건너뛰기는 분·일봉만)와 §10 테스트 표(2026-11-01(일), 2027-05-01(토) 등). JS 이름은 `futureBarStarts` |
 | #2의 `BarsPage.current`와 `seq = null` | 반영됨 | §8.2 봉. #2·#3의 `current`는 키움 조회가 준 진행 중 구간의 봉이고 `seq`는 `null`(D3, D12) |
 | 알림 기록의 봉 시각·봉 출처 | 반영됨 | §8.2 `AlertEvent.barT`, `AlertEvent.barSource`(D9, D13). 화면은 §3.8 |
 | 검색 동점의 이름 순서 | 반영됨 | §8.2. 한글 음절 < 라틴 문자 < 숫자 < 그 밖 |

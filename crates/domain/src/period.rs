@@ -101,6 +101,12 @@ impl Period {
     }
 }
 
+/// 체결이 들어오는 시간의 시작. NXT가 08:00에 연다(kiwoom.md §1).
+pub const SESSION_OPEN: TimeOfDay = match TimeOfDay::hms(8, 0, 0) {
+    Some(t) => t,
+    None => unreachable!(),
+};
+
 /// 체결이 들어오는 시간의 끝(배타). 이 시각 바로 뒤에 온 체결도 키움은 19:59 봉에 넣는다(D16).
 pub const SESSION_CLOSE: TimeOfDay = match TimeOfDay::hms(20, 0, 0) {
     Some(t) => t,
@@ -199,6 +205,42 @@ impl Bucket {
     pub fn contains(self, t: KstTime) -> bool {
         self.start <= t && t < self.end()
     }
+
+    /// 공휴일 달력이 없어 공휴일도 봉이 생기는 날로 센다.
+    pub fn future_starts(self, n: usize) -> Vec<KstTime> {
+        let mut out = Vec::with_capacity(n);
+        let mut bucket = self;
+        for _ in 0..n {
+            bucket = bucket.next_trading();
+            out.push(bucket.start);
+        }
+        out
+    }
+
+    fn next_trading(self) -> Bucket {
+        let next = self.next();
+        let skips_weekend = self.period.is_intraday() || self.period == Period::Day;
+        if !skips_weekend {
+            return next;
+        }
+        let mut date = next.start.kst_date();
+        let mut tod = next.start.kst_time_of_day();
+        if self.period.is_intraday() {
+            if tod >= SESSION_CLOSE {
+                date = date.add_days(1);
+                tod = SESSION_OPEN;
+            } else if tod < SESSION_OPEN {
+                tod = SESSION_OPEN;
+            }
+        }
+        while matches!(date.weekday(), Weekday::Sat | Weekday::Sun) {
+            date = date.add_days(1);
+            if self.period.is_intraday() {
+                tod = SESSION_OPEN;
+            }
+        }
+        self.period.bucket(KstTime::from_kst_civil(date, tod))
+    }
 }
 
 #[cfg(test)]
@@ -272,6 +314,27 @@ mod tests {
         let m5 = Period::M5.bucket(at("20261106", 23, 58, 0));
         assert_eq!(m5.next().start(), midnight("20261107"));
         assert_eq!(m5.next().prev(), m5);
+    }
+
+    #[test]
+    fn future_starts_skip_nights_and_weekends_only_where_bars_cannot_start() {
+        let cases = [
+            (Period::M1, at("20261106", 19, 58, 0), vec![at("20261106", 19, 59, 0), at("20261109", 8, 0, 0), at("20261109", 8, 1, 0)]),
+            (Period::M1, at("20261105", 19, 59, 0), vec![at("20261106", 8, 0, 0)]),
+            (Period::M5, at("20261105", 7, 50, 0), vec![at("20261105", 8, 0, 0), at("20261105", 8, 5, 0)]),
+            (Period::M30, at("20261105", 19, 30, 0), vec![at("20261106", 8, 0, 0)]),
+            (Period::M60, at("20261106", 19, 0, 0), vec![at("20261109", 8, 0, 0), at("20261109", 9, 0, 0)]),
+            (Period::Day, midnight("20261105"), vec![midnight("20261106"), midnight("20261109"), midnight("20261110")]),
+            (Period::Week, midnight("20261221"), vec![midnight("20261228"), midnight("20270104")]),
+            (Period::Week, midnight("20260525"), vec![midnight("20260601")]),
+            (Period::Month, midnight("20261001"), vec![midnight("20261101"), midnight("20261201"), midnight("20270101")]),
+            (Period::Month, midnight("20270401"), vec![midnight("20270501")]),
+        ];
+        for (p, last, want) in cases {
+            let got = p.bucket(last).future_starts(want.len());
+            assert_eq!(got, want, "{p:?} {last}");
+        }
+        assert!(Period::Day.bucket(midnight("20261105")).future_starts(0).is_empty());
     }
 
     #[test]

@@ -21,3 +21,6 @@ web/dist/
 
 web/test-results/
 web/playwright-report/
+
+# 지표 wasm 빌드 산출물(web/scripts/build-wasm.sh)
+web/src/wasm/indicators/

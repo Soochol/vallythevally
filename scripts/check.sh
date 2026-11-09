@@ -28,6 +28,12 @@ pnpm -s test
 step "build"
 pnpm -s build
 
+step "wasm: build indicators"
+./scripts/build-wasm.sh
+
+step "wasm: check against the reference values"
+node scripts/wasm-smoke.mjs
+
 step "e2e: build server and fake Kiwoom"
 cargo build --locked --quiet -p server -p fake-kiwoom
 

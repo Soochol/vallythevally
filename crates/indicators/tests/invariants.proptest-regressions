@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc b59c5db9d7e85ad7692fa90ce4e3f47faa8bdc5aef12b064b615b3af6c0c9aa0 # shrinks to spec = Rsi { period: 1, signal: None }, bars = [BarInput { t: 0, open: 1000.0, high: 1000.0, low: 1000.0, close: 1000.0, volume: 0.0 }]
