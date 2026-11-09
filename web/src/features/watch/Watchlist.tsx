@@ -4,6 +4,7 @@ import type { SymbolCode } from "../../api/generated/SymbolCode";
 import { ApiRequestError } from "../../api/http";
 import { useQuotes, useSymbolInfo } from "../../api/queries";
 import { direction, formatPercent, formatPrice } from "../../lib/format";
+import { DESKTOP_QUERY, useMediaQuery } from "../../lib/media";
 import { isIndexCode, symbolSub } from "../../lib/symbol";
 import { useCell, useLayoutStore } from "../../stores/layout";
 import { useSelectionStore } from "../../stores/selection";
@@ -18,6 +19,7 @@ const COLS = "grid grid-cols-[minmax(0,1fr)_76px_60px] gap-1 max-md:grid-cols-[m
 export function WatchPanel() {
   const collapsed = useUiStore((s) => s.prefs.watchCollapsed);
   const toggle = useUiStore((s) => s.toggleWatch);
+  const desktop = useMediaQuery(DESKTOP_QUERY);
   if (collapsed) {
     return (
       <aside aria-label="관심종목" className="flex flex-col items-center border-l border-line bg-bg pt-1.5 [grid-area:watch] max-md:hidden">
@@ -36,7 +38,7 @@ export function WatchPanel() {
       </WatchHead>
       <WatchList variant="desktop" editing={false} />
       <p className="flex-none border-t border-line px-3 py-2 text-s text-text-3">끌거나 Alt+↑↓로 순서를 바꿉니다</p>
-      <FundamentalsPanel />
+      {desktop && <FundamentalsPanel />}
     </aside>
   );
 }
