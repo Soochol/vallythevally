@@ -20,9 +20,10 @@ import { ApiRequestError } from "../api/http";
 import { isIndexCode, PERIOD_LABEL, symbolSub } from "../lib/symbol";
 import { type ShownVenue, venueLabel } from "../lib/venue";
 import { BarFeed, displayBars, type FetchPage, type History } from "./barFeed";
-import { Legend } from "./legend";
+import { Legend, legendParts } from "./legend";
 import { addMainSeries, addVolumeSeries, applyMainColors, type MainSeries, priceFormat, setMainData, setVolumeData } from "./series";
 import type { ChartSettings } from "./settings";
+import { composeSnapshot, snapshotFileName } from "./snapshot";
 import type { ThemeTokens } from "./theme";
 import { formatBarTime, formatTickMark, fromChartTime, isIntraday } from "./time";
 
@@ -154,6 +155,28 @@ export class ChartController {
   retryOlder(): void {
     this.patchReady({ olderError: null });
     this.feed.retryOlder();
+  }
+
+  snapshot(takenAt: number): { canvas: HTMLCanvasElement; fileName: string } | null {
+    const view = this.view;
+    if (!view) return null;
+    const shot = this.chart.takeScreenshot(true, false);
+    const n = this.bars.length;
+    const bar = this.bars[n - 1];
+    const head = {
+      name: view.info?.name ?? view.symbol,
+      sub: symbolSub(view.symbol, view.info),
+      venue: venueLabel(view.symbol, view.venue),
+      period: PERIOD_LABEL[view.period],
+      takenAt,
+      legend: bar
+        ? legendParts({ bar, prev: this.bars[n - 2] ?? null, isCurrent: false, isIndex: isIndexCode(view.symbol), period: view.period })
+        : null,
+    };
+    return {
+      canvas: composeSnapshot(shot, head, this.tokens, shot.width / Math.max(1, this.el.clientWidth)),
+      fileName: snapshotFileName(view.symbol, view.venue, view.period, takenAt),
+    };
   }
 
   setTheme(tokens: ThemeTokens): void {
