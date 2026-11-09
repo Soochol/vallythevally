@@ -738,4 +738,166 @@ mod tests {
         let result = timeout(WAIT, connect_async(url.as_str())).await.expect("시간 안에 끝난다");
         assert!(result.is_err(), "평문 HTTP 포트와는 TLS가 맺어지지 않는다");
     }
+
+    #[derive(Clone, Copy)]
+    enum Reply {
+        Ok,
+        Code(u32),
+        Silent,
+        OkThenBye,
+        Refuse,
+    }
+
+    /// 연결 번호, 받은 trnm, 그 연결에서 그 trnm을 받은 횟수(1부터)로 답을 정하는 키움 대역. 연결을 받을 때는 trnm "CONNECT"로 묻는다.
+    struct Peer {
+        url: String,
+        seen: Arc<std::sync::Mutex<Vec<(usize, String, Instant)>>>,
+    }
+
+    impl Peer {
+        async fn start(script: impl Fn(usize, &str, usize) -> Reply + Send + Sync + 'static) -> Peer {
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let url = format!("ws://{}/api/dostk/websocket", listener.local_addr().unwrap());
+            let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
+            let script = Arc::new(script);
+            let log = seen.clone();
+            tokio::spawn(async move {
+                for conn in 0.. {
+                    let (tcp, _) = listener.accept().await.unwrap();
+                    if matches!(script(conn, "CONNECT", 1), Reply::Refuse) {
+                        drop(tcp);
+                        continue;
+                    }
+                    let (script, log) = (script.clone(), log.clone());
+                    tokio::spawn(async move {
+                        let Ok(mut ws) = tokio_tungstenite::accept_async(tcp).await else { return };
+                        let mut counts: HashMap<String, usize> = HashMap::new();
+                        while let Some(Ok(Message::Text(text))) = ws.next().await {
+                            let trnm = serde_json::from_str::<serde_json::Value>(text.as_str()).unwrap()["trnm"].as_str().unwrap().to_owned();
+                            log.lock().unwrap().push((conn, trnm.clone(), Instant::now()));
+                            let nth = counts.entry(trnm.clone()).and_modify(|n| *n += 1).or_insert(1);
+                            let ack = |code: u32| Message::Text(serde_json::json!({"trnm": trnm, "return_code": code, "return_msg": ""}).to_string().into());
+                            match script(conn, &trnm, *nth) {
+                                Reply::Ok => ws.send(ack(0)).await.unwrap(),
+                                Reply::Code(code) => ws.send(ack(code)).await.unwrap(),
+                                Reply::Silent | Reply::Refuse => {}
+                                Reply::OkThenBye => {
+                                    ws.send(ack(0)).await.unwrap();
+                                    let _ = ws.close(Some(tokio_tungstenite::tungstenite::protocol::CloseFrame { code: 1000.into(), reason: "Bye".into() })).await;
+                                }
+                            }
+                        }
+                    });
+                }
+            });
+            Peer { url, seen }
+        }
+
+        fn controls(&self, conn: usize) -> Vec<String> {
+            self.seen.lock().unwrap().iter().filter(|(c, ..)| *c == conn).map(|(_, t, _)| t.clone()).collect()
+        }
+
+        fn logins(&self) -> usize {
+            self.seen.lock().unwrap().iter().filter(|(_, t, _)| t == "LOGIN").count()
+        }
+
+        fn sent_at(&self, conn: usize, trnm: &str) -> Vec<Instant> {
+            self.seen.lock().unwrap().iter().filter(|(c, t, _)| *c == conn && t == trnm).map(|(.., at)| *at).collect()
+        }
+    }
+
+    fn start_with(peer: &Peer, fake: &FakeKiwoom, timings: Timings, desired: &[Symbol]) -> (KiwoomStream, mpsc::Receiver<StreamEvent>) {
+        let (stream, events) = KiwoomStream::spawn_with(peer.url.clone(), rest(fake), Clock::system(), timings);
+        stream.set_desired(desired.iter().copied().collect());
+        (stream, events)
+    }
+
+    #[tokio::test]
+    async fn a_control_answered_too_late_drops_the_connection_instead_of_resending_on_it() {
+        let fake = FakeKiwoom::start().await;
+        let peer = Peer::start(|conn, trnm, _| match (conn, trnm) {
+            (0, "REG") => Reply::Silent,
+            _ => Reply::Ok,
+        })
+        .await;
+        let (_stream, mut events) = start_with(&peer, &fake, fast(), &[samsung()]);
+        assert!(matches!(next(&mut events).await, StreamEvent::Live { .. }));
+        assert_eq!(peer.controls(0), ["LOGIN", "REG"], "응답 없는 REG를 같은 연결로 다시 보내면 늦은 ACK가 어느 요청의 것인지 모른다");
+        assert_eq!(peer.controls(1), ["LOGIN", "REG"]);
+    }
+
+    #[tokio::test]
+    async fn a_registration_refused_for_capacity_rebuilds_once_then_halts_only_the_stream() {
+        for code in [105115, 105118] {
+            let fake = FakeKiwoom::start().await;
+            let peer = Peer::start(move |_, trnm, _| if trnm == "REG" { Reply::Code(code) } else { Reply::Ok }).await;
+            let (_stream, mut events) = start_with(&peer, &fake, fast(), &[samsung()]);
+            assert_eq!(next(&mut events).await, StreamEvent::Halted, "{code}");
+            assert_eq!(peer.logins(), 2, "{code}: 처음 하나와 다시 구성 한 번");
+            assert_eq!(fake.issued(), 1);
+        }
+    }
+
+    #[tokio::test]
+    async fn a_rate_limited_registration_waits_before_it_is_sent_again_on_the_same_connection() {
+        let fake = FakeKiwoom::start().await;
+        let peer = Peer::start(|_, trnm, nth| if (trnm, nth) == ("REG", 1) { Reply::Code(105110) } else { Reply::Ok }).await;
+        let (_stream, mut events) = start_with(&peer, &fake, fast(), &[samsung()]);
+        assert!(matches!(next(&mut events).await, StreamEvent::Live { .. }));
+        let regs = peer.sent_at(0, "REG");
+        assert_eq!(regs.len(), 2, "같은 연결에서 다시 보낸다");
+        assert!(regs[1] - regs[0] >= Duration::from_millis(200), "105110 뒤 바로 다시 보냈다: {:?}", regs[1] - regs[0]);
+        assert_eq!(peer.logins(), 1);
+    }
+
+    #[tokio::test]
+    async fn sessions_that_drop_right_after_turning_live_back_off_further_each_time() {
+        let fake = FakeKiwoom::start().await;
+        let timings = Timings { backoff: [Duration::from_millis(100), Duration::from_millis(300), Duration::from_millis(700), Duration::from_millis(700), Duration::from_millis(700)], ..fast() };
+        let (_stream, mut events) = start(&fake, rest(&fake), timings, &[samsung()]);
+        assert!(matches!(next(&mut events).await, StreamEvent::Live { .. }));
+        let mut waits = Vec::new();
+        for _ in 0..3 {
+            fake.drop_sessions(1000, "Bye");
+            assert!(matches!(next(&mut events).await, StreamEvent::Down { .. }));
+            let at = Instant::now();
+            assert!(matches!(next(&mut events).await, StreamEvent::Live { .. }));
+            waits.push(at.elapsed());
+        }
+        assert!(waits[1] >= Duration::from_millis(300) && waits[2] >= Duration::from_millis(700), "곧 끊기는 세션은 실패로 쌓인다: {waits:?}");
+    }
+
+    #[tokio::test]
+    async fn replacing_one_of_two_hundred_registrations_removes_before_it_registers() {
+        let fake = FakeKiwoom::start().await;
+        let stock = |n: u32| Symbol::Stock(StockCode::parse(&format!("{n:06}")).unwrap());
+        let desired: Vec<Symbol> = (1..=200).map(stock).collect();
+        let (stream, mut events) = start(&fake, rest(&fake), fast(), &desired);
+        assert!(matches!(next(&mut events).await, StreamEvent::Live { .. }));
+        stream.set_desired((2..=201).map(stock).collect());
+        until("바꾼 종목이 등록됐다", || fake.ws_stats().registered.get("0B").is_some_and(|items| items.contains(&"000201_AL".to_owned()))).await;
+        let stats = fake.ws_stats();
+        assert_eq!((stats.logins, stats.controls), (1, vec!["LOGIN".to_owned(), "REG".to_owned(), "REMOVE".to_owned(), "REG".to_owned()]), "201개가 되는 순간이 없어야 나머지 199개가 끊기지 않는다");
+        assert!(events.try_recv().is_err(), "끊기지 않았다");
+    }
+
+    #[tokio::test]
+    async fn dropped_sessions_and_failed_connections_never_spend_the_control_rebuild() {
+        let fake = FakeKiwoom::start().await;
+        let peer = Peer::start(|conn, trnm, _| match (conn, trnm) {
+            (0 | 1, "CONNECT") => Reply::Refuse,
+            (2..=4, "REG") => Reply::OkThenBye,
+            (_, "REG") => Reply::Code(105118),
+            _ => Reply::Ok,
+        })
+        .await;
+        let (_stream, mut events) = start_with(&peer, &fake, fast(), &[samsung()]);
+        for _ in 2..=4 {
+            assert!(matches!(next(&mut events).await, StreamEvent::Live { .. }));
+            assert!(matches!(next(&mut events).await, StreamEvent::Down { .. }));
+        }
+        assert_eq!(next(&mut events).await, StreamEvent::Halted);
+        assert_eq!(peer.logins(), 5, "07:50 같은 단절과 접속 실패 뒤에도 거절된 REG에 다시 구성 한 번이 남아 있다");
+    }
 }
+
