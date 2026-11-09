@@ -62,16 +62,36 @@ test("NXT 불가 종목에 NXT가 저장돼 있으면 통합으로 열고, 고�
   expect(r.notices).toEqual([NXT_FALLBACK_NOTICE]);
 });
 
-test("종목 정보를 잠깐 못 받으면 NXT를 통합으로 열되 저장된 값은 덮어쓰지 않는다", async () => {
+test("종목 정보를 잠깐 못 받으면 저장된 NXT를 그대로 둔다(통합은 그릴 때만 쓴다)", async () => {
   const r = await restore(
     sources({
       layouts: [layout("L1", cell({ venue: "nxt" }))],
       symbolInfo: async () => Promise.reject(new ApiRequestError("kiwoom_unavailable", "잠시 뒤")),
     }),
   );
-  expect(r.layout.cells[0]!.venue).toBe("combined");
+  expect(r.layout.cells[0]!.venue).toBe("nxt");
   expect(r.layoutDirty).toBe(false);
   expect(r.notices).toEqual([]);
+});
+
+test("한 칸의 확인된 NXT 불가를 고쳐 저장해도, 확인하지 못한 다른 칸의 NXT는 그대로다", async () => {
+  const two: Layout = {
+    ...layout("L1", cell({ slot: 0, symbol: "005935", venue: "nxt" })),
+    arrangement: "2h",
+    cells: [cell({ slot: 0, symbol: "005935", venue: "nxt" }), cell({ slot: 1, symbol: "000660", venue: "nxt" })],
+  };
+  const r = await restore(
+    sources({
+      layouts: [two],
+      symbolInfo: async (code) => {
+        if (code === "005935") return INFOS["005935"]!;
+        throw new ApiRequestError("kiwoom_unavailable", "잠시 뒤");
+      },
+    }),
+  );
+  expect(r.layout.cells.map((c) => c.venue)).toEqual(["combined", "nxt"]);
+  expect(r.layoutDirty).toBe(true);
+  expect(r.notices).toEqual([NXT_FALLBACK_NOTICE]);
 });
 
 test("종목 정보를 잠깐 못 받아도 KRX는 그대로 연다", async () => {

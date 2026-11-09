@@ -5,6 +5,8 @@ import { useUiStore } from "../stores/ui";
 import { useWatchlistStore } from "../stores/watchlist";
 import { type Autosave, RECENT_CLEARED, startAutosave } from "./autosave";
 import { PAYLOAD_LIMIT_BYTES } from "./bytes";
+import { ApiRequestError } from "../api/http";
+import { restore } from "./restore";
 import { DEFAULT_UI_PREFS, toUiState } from "./uiState";
 
 let autosave: Autosave;
@@ -107,4 +109,21 @@ test("탭이 숨으면 기다리던 레이아웃을 keepalive로 곧바로 보�
   autosave.flush();
   await vi.advanceTimersByTimeAsync(0);
   expect(puts.map((p) => [p.path, p.keepalive])).toEqual([[`/api/layouts/${DEFAULT_LAYOUT.id}`, true]]);
+});
+
+test("R1: 종목 정보를 못 받아 통합으로 그리는 NXT 칸은, 봉 주기만 바꿔 저장해도 nxt로 저장된다", async () => {
+  const stored = { ...DEFAULT_LAYOUT, cells: [{ ...DEFAULT_LAYOUT.cells[0]!, symbol: "005930", venue: "nxt" as const }], updatedAt: 1 };
+  const r = await restore({
+    uiState: async () => ({ lastLayoutId: DEFAULT_LAYOUT.id, theme: "dark" }),
+    layouts: async () => [],
+    layout: async () => stored,
+    watchlist: async () => ({ symbols: [] }),
+    symbolInfo: async () => Promise.reject(new ApiRequestError("kiwoom_unavailable", "잠시 뒤")),
+  });
+  useLayoutStore.getState().load(r.layout);
+  expect(r.layoutDirty).toBe(false);
+  useLayoutStore.getState().setPeriod(0, "W");
+  await vi.advanceTimersByTimeAsync(1000);
+  expect(puts).toHaveLength(1);
+  expect(puts[0]!.body).toMatchObject({ cells: [{ symbol: "005930", venue: "nxt", period: "W" }] });
 });

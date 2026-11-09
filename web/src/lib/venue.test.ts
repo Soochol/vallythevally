@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { isVenue, venueFor } from "./venue";
+import { isVenue, shownVenue, venueFor } from "./venue";
 
 const samsung = { code: "005930", nxtEnabled: true };
 const samsungPref = { code: "005935", nxtEnabled: false };
@@ -28,4 +28,18 @@ test("주소의 거래소 값은 셋 중 하나만 받는다", () => {
   expect(isVenue("krx")).toBe(true);
   expect(isVenue("KRX")).toBe(false);
   expect(isVenue("")).toBe(false);
+});
+
+test("그리는 거래소: 종목 정보가 있으면 저장된 거래소를 그 정보로 확인한다", () => {
+  expect(shownVenue("nxt", samsung)).toBe("nxt");
+  expect(shownVenue("nxt", samsungPref)).toBe("combined");
+  expect(shownVenue("krx", samsungPref)).toBe("krx");
+  expect(shownVenue(null, kospi)).toBeNull();
+});
+
+test("그리는 거래소: 종목 정보가 없으면(받는 중·실패) NXT만 통합으로 그린다", () => {
+  expect(shownVenue("nxt", undefined)).toBe("combined");
+  expect(shownVenue("krx", undefined)).toBe("krx");
+  expect(shownVenue("combined", undefined)).toBe("combined");
+  expect(shownVenue(null, undefined)).toBeNull();
 });

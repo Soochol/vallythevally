@@ -77,24 +77,19 @@ interface RestoredCell {
 }
 
 /**
- * 저장된 거래소를 `venueFor`로 다시 확인한다(ADR 0007).
+ * 저장된 거래소를 `venueFor`로 다시 확인한다(ADR 0007). 칸의 `venue`는 저장 원본이므로 확인된 경우에만 바꾼다.
  * - 종목 정보를 받으면 그 결과를 쓰고, 바뀌었으면 저장한다.
- * - `unknown_symbol`이면 칸을 그대로 둔다. 칸이 열면서 오류를 보인다(frontend.md §3.7a).
- * - 그 밖의 실패면 NXT 허용을 모르므로 NXT를 통합으로 열되, 저장된 값은 덮어쓰지 않는다.
+ * - 받지 못하면(`unknown_symbol`, 일시 실패) 칸을 그대로 둔다. 그릴 때 `shownVenue`가 NXT를 통합으로 그린다.
  */
 async function restoreCell(src: RestoreSources, raw: Cell): Promise<RestoredCell> {
   const cell: CellState = { ...raw, chartSettings: parseChartSettings(raw.chartSettings) };
   let info: Pick<SymbolInfo, "code" | "nxtEnabled">;
-  let known: boolean;
   try {
     info = await src.symbolInfo(cell.symbol);
-    known = true;
-  } catch (e) {
-    if (e instanceof ApiRequestError && e.code === "unknown_symbol") return { cell, dirty: false, nxtFellBack: false };
-    info = { code: cell.symbol, nxtEnabled: false };
-    known = false;
+  } catch {
+    return { cell, dirty: false, nxtFellBack: false };
   }
   const venue = venueFor(info, cell.venue);
   if (venue === cell.venue) return { cell, dirty: false, nxtFellBack: false };
-  return { cell: { ...cell, venue }, dirty: known, nxtFellBack: known && cell.venue === "nxt" };
+  return { cell: { ...cell, venue }, dirty: true, nxtFellBack: cell.venue === "nxt" };
 }

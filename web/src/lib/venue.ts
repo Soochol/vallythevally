@@ -25,4 +25,20 @@ export function venueFor(target: VenueTarget, wanted: Venue | null): Venue | nul
   return wanted !== null && isVenueAllowed(target, wanted) ? wanted : "combined";
 }
 
+/**
+ * 칸이 지금 그리는 거래소. 저장하지 않는 파생값이다. 저장 원본(`CellState.venue`, 사용자가 고른 것)과 섞이지 않게 타입을 나눈다.
+ * 차트와 거래소 표시는 이 타입만 받는다.
+ */
+export type ShownVenue = Venue & { readonly __shown: true };
+
+/**
+ * 저장된 거래소를 종목 정보로 확인해 그릴 거래소를 정한다(ADR 0007).
+ * 종목 정보가 없으면(받는 중, 일시 실패) NXT 허용을 모르므로 NXT만 통합으로 그린다. 저장된 값은 바꾸지 않는다.
+ */
+export function shownVenue(saved: Venue | null, info: VenueTarget | undefined): ShownVenue | null {
+  if (saved === null) return null;
+  const venue = info === undefined ? (saved === "nxt" ? "combined" : saved) : venueFor(info, saved);
+  return venue as ShownVenue | null;
+}
+
 export const venueLabel = (code: SymbolCode, venue: Venue | null) => (isIndexCode(code) || venue === null ? "" : VENUE_LABEL[venue]);
