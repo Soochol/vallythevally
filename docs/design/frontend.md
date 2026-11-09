@@ -628,6 +628,7 @@ D3의 표를 그대로 옮긴다. 단계 번호는 이슈 번호다. 이 문서�
 **머리의 셋째 줄: 연결 상태와 표기**(W4-32)
 - 데스크톱의 상태 줄을 대신한다. 휴대폰에서도 시세가 멈췄는지와 라이브러리 표기가 늘 보여야 하기 때문이다.
 - 왼쪽: §2.2의 점과 짧은 문장, 그리고 마지막으로 값을 받은 시각.
+  - #4는 §2.2의 점과 문장을 그대로 쓴다. 아래의 휴대폰 문구(마지막 값 시각, 현재가 70%)는 아직 없다.
   - `live`: 민트 점, `실시간 14:32:08`.
   - 브라우저↔서버 끊김, `reconnecting`, `halted`: 점 색은 §2.2와 같고, 문장은 `키움 재연결 중: 14:02부터 멈춤`처럼 멈춘 시각을 함께 적는다. 현재가 숫자는 70% 불투명도로 낮춘다(`phone-390-stalled-dark.png`).
   - 장 닫힘: `장 닫힘: 마지막 체결 19:59:58`.
@@ -865,12 +866,13 @@ interface CellView {
 /** React가 그리는 칸 상태. 휴대폰 머리와 칸 오류·과거 봉 오류 꼬리표가 쓴다. */
 type CellStatus =
   | { kind: "loading" }
-  | { kind: "ready"; latest: Bar; prev: Bar | null; isCurrent: boolean; fetchedAt: number; olderError: ApiRequestError | null }
+  | { kind: "ready"; latest: Bar; prev: Bar | null; isCurrent: boolean; olderError: ApiRequestError | null; intradayEnd: boolean }
   | { kind: "error"; error: ApiRequestError };
 
 class ChartController {
   constructor(el: HTMLElement, deps: { tokens: ThemeTokens; onStatus: (s: CellStatus) => void; fetchPage?: FetchPage });
-  // (#4~) deps에 socket: MarketSocket, (#5~) indicators: IndicatorClient, (#7~) sync: SyncBus를 더한다
+  // (#4) deps.socket?: MarketSocketLike(api/socket.ts). 없으면 #3처럼 조회만 한다(시험).
+  // (#5~) indicators: IndicatorClient, (#7~) sync: SyncBus를 더한다
   // 칸의 설정을 맞춘다. 바뀐 부분만 반영(diff): 종목·거래소·봉 주기가 바뀌면 데이터부터, 봉 모양·축만 바뀌면 그것만
   apply(cell: CellView): void;
   reload(): void;                           // 같은 종목·봉 주기를 처음부터(칸 오류의 `다시 시도`)
@@ -942,6 +944,9 @@ apply(symbol, venue, period)  또는  reload  또는  새 hello ── generatio
   - 그리기만 `requestAnimationFrame` 한 번에 묶는다. 같은 프레임에 같은 시리즈의 `update`가 여럿이면 마지막 값만 그린다. 서버가 구독당 초당 10회로 줄여 보내지만, 4칸에 비교 종목까지 열면 초당 100회가 넘을 수 있다.
 - **브라우저 재연결**(D2)
   - 브라우저와 서버의 WebSocket이 다시 연결되면(새 `hello`) 칸마다 세대를 올리고 시리즈·지표 엔진을 **모두 비운 뒤 최신 페이지부터 다시 만든다**.
+  - 첫 `hello`도 같다(#4). 연결 전에 생긴 칸은 서버가 구독을 알기 전에 최신 페이지를 받았을 수 있어서다. 칸마다 최신 페이지 조회가 한 번 더 늘 수 있다.
+  - 새 페이지가 올 때까지는 가진 봉을 그대로 둔다. 데이터는 처음부터 다시 만들되 빈 화면이 깜빡이지 않게 하려는 것이다.
+  - 연결 하나는 `api/socket.ts`의 `MarketSocket`이 맡는다(탭에 하나, `stores/realtime.ts`). 끊기면 1·2·5·10초, 그 뒤 10초마다 다시 붙는다.
   - 과거로 스크롤해 받아 둔 구간은 버린다. 보이는 범위는 최신 쪽으로 돌아간다. 드로잉은 따로 저장되므로 영향이 없다.
   - "`confirmed`를 빠짐없이 보낸다"는 보장은 연결이 살아 있는 동안에만 적용되기 때문이다.
 - **분봉은 최근 1년까지**(U1, ADR 0003)
