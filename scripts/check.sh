@@ -5,6 +5,9 @@ offline="$PWD/scripts/offline.sh"
 
 step() { printf '\n== %s\n' "$1"; }
 
+step "test: offline loopback setup failure propagation"
+./scripts/test-offline.sh
+
 step "lint: cargo clippy"
 cargo clippy --locked --all-targets --quiet -- -D warnings
 
