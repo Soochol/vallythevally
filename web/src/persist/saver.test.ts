@@ -249,3 +249,21 @@ test("R2: stale_revision은 서버에 더 새 편집이 있다는 뜻이다. 실
   await vi.advanceTimersByTimeAsync(10 * 60_000);
   expect(t.send).toHaveBeenCalledOnce();
 });
+
+test("R2: 나중 요청이 실패해도 같은 편집을 담은 앞 요청이 성공하면 저장됨이다", async () => {
+  const pending: ((ok: boolean) => void)[] = [];
+  const t = setup({
+    send: () => new Promise<void>((resolve, reject) => pending.push((ok) => (ok ? resolve() : reject(new ApiRequestError("network", "x"))))),
+  });
+  t.edit({ n: 1 });
+  await vi.advanceTimersByTimeAsync(1000);
+  t.saver.flush(); // 앞 요청과 같은 편집을 keepalive로 한 번 더(탭 전환)
+  await vi.advanceTimersByTimeAsync(0);
+  expect(t.send).toHaveBeenCalledTimes(2);
+  pending[1]!(false);
+  await vi.advanceTimersByTimeAsync(0);
+  pending[0]!(true);
+  await vi.advanceTimersByTimeAsync(60_000);
+  expect(t.state()).toEqual({ kind: "saved", at: 42 });
+  expect(t.send).toHaveBeenCalledTimes(2);
+});

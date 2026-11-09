@@ -117,6 +117,13 @@ export function createSaver<T extends object>(o: SaverOptions<T>): Saver {
     const tooLarge = error instanceof ApiRequestError && error.code === "payload_too_large";
     if (done || tooLarge) o.unsaved?.clear(req.revision);
     if (done) savedEdits = Math.max(savedEdits, upTo);
+    if (inFlight === 0 && edits === savedEdits) {
+      // 이 요청이든 앞 요청이든, 모든 편집이 저장됐다. 나중 요청의 실패로 잡아 둔 재시도도 필요 없다.
+      cancel();
+      failures = 0;
+      o.onState({ kind: "saved", at: now() });
+      return;
+    }
     if (req.revision !== newest) {
       // 더 나중 요청이 상태를 맡는다. 그 요청이 먼저 끝나 기다리던 편집이 남았으면 이제 보낸다.
       if (inFlight === 0 && edits > savedEdits && timer === null) schedule(o.debounceMs);
