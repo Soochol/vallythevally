@@ -919,6 +919,7 @@ apply(symbol, venue, period)  또는  reload  또는  새 hello ── generatio
      → indicators.create(spec들, 확정 봉 열)                 (#5~)
   4. 버퍼에서 seq > page.seq 인 메시지만 seq 순서로 적용, 나머지는 버린다
      (page.seq가 null이면 버퍼를 모두 적용한다)
+     이 세대 동안 뒤에 오는 메시지도 seq <= page.seq면 버린다(HTTP와 WS는 다른 연결이라 옛 메시지가 늦게 온다)
   이후 WebSocket, 칸마다 하나의 처리 줄(queue)에서 도착 순서대로:
      bar        → series.update(bar)                        ← React 렌더 없음
                   indicators.preview(bar) → 지표 선 마지막 점 갱신

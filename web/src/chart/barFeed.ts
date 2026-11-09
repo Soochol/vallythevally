@@ -90,7 +90,9 @@ type StreamMessage = Extract<SubEvent, { seq: number }>;
 /**
  * 칸 하나의 봉 받기. 종목·거래소·봉 주기를 열 때마다 세대를 올리고, 이전 세대의 응답은 버린다(D1).
  * 과거 페이지는 한 번에 하나만 받는다. 실패하면 스크롤로 다시 보내지 않는다.
- * socket이 있으면 최신 페이지를 받는 동안 온 실시간 메시지를 쌓아 두었다가 `seq > page.seq`만 차례로 적용한다(backend.md §8.3).
+ * socket이 있으면 최신 페이지를 받는 동안 온 실시간 메시지를 쌓아 두었다가 차례로 적용한다.
+ * 그 세대 동안 `seq <= page.seq`인 메시지는 쌓인 것이든 페이지 뒤에 온 것이든 버린다(backend.md §8.3).
+ * HTTP와 WebSocket은 다른 연결이라 페이지보다 옛 메시지가 페이지 뒤에 올 수 있다.
  */
 export class BarFeed {
   private generation = 0;
@@ -98,6 +100,8 @@ export class BarFeed {
   private history: History | null = null;
   /** 최신 페이지를 기다리는 동안 쌓는 메시지. 페이지를 적용하면 null이다. */
   private buffer: StreamMessage[] | null = null;
+  /** 이 세대의 최신 페이지가 이미 담은 seq. */
+  private pageSeq: number | null = null;
   private unsubscribe: (() => void) | null = null;
   private olderInFlight = false;
   private olderFailed = false;
@@ -125,6 +129,7 @@ export class BarFeed {
     const gen = ++this.generation;
     this.history = null;
     this.buffer = [];
+    this.pageSeq = null;
     this.olderInFlight = false;
     this.olderFailed = false;
     if (this.socket && !this.unsubscribe) this.unsubscribe = this.socket.subscribe(key, (m) => this.onSocket(m));
@@ -134,9 +139,9 @@ export class BarFeed {
         const buffered = this.buffer ?? [];
         this.buffer = null;
         this.history = historyFromLatest(page);
+        this.pageSeq = page.seq;
         this.listener.reset(this.history);
         for (const m of buffered) {
-          if (page.seq !== null && m.seq <= page.seq) continue;
           this.applyStream(m);
           if (gen !== this.generation) return;
         }
@@ -216,6 +221,7 @@ export class BarFeed {
   private applyStream(m: StreamMessage): void {
     const h = this.history;
     if (!h) return;
+    if (this.pageSeq !== null && m.seq <= this.pageSeq) return;
     switch (m.type) {
       case "reload":
         return this.reload();
