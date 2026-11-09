@@ -491,7 +491,7 @@ impl KiwoomAuth {
 impl KiwoomRest {
     /// au10001을 대기열 맨 앞에 넣고 결과를 기다린다. 서버를 켤 때(유효한 토큰이 없을 때)와 20:05에만 부른다.
     pub async fn issue_token(&self) -> Result<TokenGen, KiwoomError>;
-    /// 지금 보내면 키움에 닿지 않고 바로 실패할 이유: 전체가 멈췄거나(Failed, TokenFile), 토큰이 없는데 발급 경로가 멈췄거나(Failed) 발급 간격 안이다(IssueTooSoon).
+    /// 지금 보내면 키움에 닿지 않고 바로 실패할 이유: 전체가 멈췄거나(Stopped, TokenFile), 토큰이 없는데 발급 경로가 멈췄거나(Stopped) 발급 간격 안이다(Gated, 원인 IssueInterval).
     pub fn blocked(&self) -> Option<KiwoomError>;
     pub async fn until_halted(&self) -> KiwoomError;
 }
@@ -503,7 +503,7 @@ impl KiwoomRest {
   2. 하루 한 번, 장이 끝난 뒤. 매일 20:05에, 지금 토큰이 그날 20:05 전에 발급된 것이면 다시 발급한다. 토큰은 24시간 유효하므로 만료가 장중에 오지 않는다. 20:05에 실패하면 07:45까지 10분마다 다시 시도한다.
   3. 토큰 무효 응답(`[8005]`)을 받았을 때. 그 요청은 `invalidate`를 한 번 부르고 한 번 다시 보낸다. 다시 보낼 때 대기열이 먼저 발급한다. 새 토큰도 `[8005]`면 조회와 발급을 모두 멈춘다(§4.3).
   4. 안전장치: 만료까지 10분이 안 남으면 `current`가 `None`을 주고, 대기열이 다음 요청 전에 발급한다.
-- **발급 사이 최소 10분**: 위 넷 모두에 걸린다. 대기열은 au10001을 보내기 **전에** `last_request_at`을 파일에 적고, 적지 못하면 보내지 않는다(`TokenFile` 오류, 브라우저에는 `kiwoom_auth_failed`). 그래서 실패한 요청(8050, 네트워크 오류)도 세고, 재시작해도 파일의 시각을 따른다. 10분이 지나지 않았는데 발급해야 하면 보내지 않고, 기다리던 시세 요청과 `issue_token`을 곧바로 `IssueTooSoon { until }`으로 실패시킨다. 브라우저에는 `kiwoom_unavailable`(503)과 "키움 토큰은 발급 사이를 10분 띄웁니다. <시각>부터 다시 받으니 그 뒤에 다시 시도하세요"가 간다. 저절로 풀리므로 `kiwoom_auth_failed`가 아니다. 종목 목록을 기다리는 요청도 기다리지 않고 같은 이유로 실패한다(`SymbolDirectory::ready`가 먼저 `blocked`를 본다).
+- **발급 사이 최소 10분**: 위 넷 모두에 걸린다. 대기열은 au10001을 보내기 **전에** `last_request_at`을 파일에 적고, 적지 못하면 보내지 않는다(`TokenFile` 오류, 브라우저에는 `kiwoom_auth_failed`). 그래서 실패한 요청(8050, 네트워크 오류)도 세고, 재시작해도 파일의 시각을 따른다. 10분이 지나지 않았는데 발급해야 하면 보내지 않고, 기다리던 시세 요청과 `issue_token`을 곧바로 `Gated { until, cause: IssueInterval }`으로 실패시킨다. 브라우저에는 `kiwoom_unavailable`(503), `reason: "issue_interval"`, `retryAt`과 "키움 토큰은 발급 사이를 10분 띄웁니다. <시각>부터 다시 받으니 그 뒤에 다시 시도하세요"가 간다. 저절로 풀리므로 `kiwoom_auth_failed`가 아니다. 종목 목록을 기다리는 요청도 기다리지 않고 같은 이유로 실패한다(`SymbolDirectory::ready`가 먼저 `blocked`를 본다).
 - **토큰은 보내는 순간에 읽는다**(D16): 대기 중인 요청은 토큰을 쥐고 있지 않다. 대기열이 요청을 내보낼 때 `current`로 읽는다. 그래서 새 토큰은 그 뒤의 모든 REST 요청에 바로 쓰인다. 옛 토큰으로 보낸 REST는 `[8005]`로 실패하기 때문이다(kiwoom.md 11.10).
 - **au10001이 실패하면**: 기다리던 시세 요청을 모두 실패로 돌려준다. 토큰 없이는 어느 요청도 보낼 수 없다.
 - **토큰과 WebSocket**(#4, D16)
@@ -602,19 +602,28 @@ pub struct MergeScope(pub u64);
 
 ### 4.3 응답 판정과 오류 대응
 
-키움 응답은 `kiwoom/error.rs`에서 **한 번만** 판정해 닫힌 범주(`Category`)로 바꾼다(ADR 0009). 재시도, 대기열 멈춤, 경로 멈춤, 전체 멈춤, 바깥 타이머 재시도는 `error::policy(단계, 범주)` 표 하나에서만 나온다. `rest.rs`, `app.rs`, `bars.rs`, `http.rs`는 키움 숫자를 다시 보지 않는다. 설계 근거와 코드 출처는 `docs/design/kiwoom-errors-proposal.md`(§2·§5)와 `docs/kiwoom-ws-errors.md`에 있다.
+키움 응답은 `kiwoom/error.rs`에서 **한 번만** 판정해 닫힌 범주(`Category`)로 바꾼다(ADR 0009). 재시도, 대기열 멈춤, 관문, 경로 멈춤, 전체 멈춤은 `error::policy(단계, 범주)` 표 하나에서만 나온다. `rest.rs`, `app.rs`, `bars.rs`, `http.rs`는 키움 숫자를 다시 보지 않는다. 설계 근거와 코드 출처는 `docs/design/kiwoom-errors-proposal.md`(§2·§5)와 `docs/kiwoom-ws-errors.md`에 있다.
 
 **판정 순서**(`error::judge`)
 
 1. `return_msg`에서 상세 코드를 찾는다. `[` 바로 뒤 네 자리 숫자이고, 그 뒤가 `:` 또는 `]`여야 한다(`[1511:…]`, `[1634]`). `[17000]`은 상세 코드가 아니다. 찾은 상세는 **HTTP 상태와 `return_code`보다 먼저** 본다. 같은 상세 코드는 HTTP 200·403·429·500 어디서 와도 같은 범주다.
 2. 상세가 여럿이면 그중 인증 차단이 있을 때 인증 차단, 아니면 형식 오류다.
 3. 상세가 없으면 HTTP 429는 한도 초과, 5xx는 일시 장애다(본문이 HTML이어도 같다). 그 밖의 비200은 알 수 없음이다. 401·403만으로 토큰을 다시 받지 않는다.
-4. HTTP 200에서 성공으로 보려면 본문이 JSON 객체이고 `return_code`가 정수 0(또는 `"0"`, `"0000"`)이어야 한다. `return_code`가 없거나, `null`이거나, 정수가 아니거나, 본문이 JSON이 아니면 **형식 오류**다. 0이 아닌데 상세가 없으면 알 수 없음이다.
+4. HTTP 200에서 성공으로 보려면 본문이 JSON 객체이고 `return_code`가 정수 0(또는 `"0"`, `"0000"`)이어야 한다. `return_code`가 없거나, `null`이거나, 정수가 아니거나, 본문이 JSON이 아니면 **형식 오류**다. `return_msg`는 없거나 `null`이거나 문자열이어야 한다. 배열·객체·숫자·불리언이면 HTTP 상태와 상관없이 형식 오류다. 0이 아닌데 상세가 없으면 알 수 없음이다.
 5. 표에 없는 상세 코드는 알 수 없음이다. 8000번대라는 이유로 인증 차단이 되지 않는다. 429·5xx에 실려 와도 재시도 권한을 얻지 않는다.
 6. 발급(au10001)에서 받은 8005는 토큰 무효가 아니라 인증 불확실이다. 발급을 발급으로 고치지 않는다.
 7. 성공 본문의 필수 배열(`list`, 봉 배열)이 없으면 형식 오류다. 빈 목록으로 바꾸지 않는다. 빈 행 하나는 `ChartRows::UnknownSymbol`이다(아래 "빈 행").
 
-`KiwoomError::Failed(Failure)`는 범주, api-id, HTTP 상태, `return_code`, 상세 코드를 들고 바깥으로 간다. 발급 응답의 `return_msg`는 담지 않는다.
+`Failure`는 범주, api-id, HTTP 상태, `return_code`, 상세 코드, 고정된 사유(`Note`)만 든다. `return_msg` 원문, serde 오류 문장, 응답 본문, reqwest 오류 문장은 담지도 로그에 남기지도 않는다. 키움 메시지가 앱키·토큰을 되돌려 줄 수 있어서다. 길이 자르기는 비밀값 제거가 아니다. 전송 실패는 단계(연결, 응답 대기, 본문 수신)와 시간 초과 여부만 남긴다. 성공 봉투 뒤의 스키마 오류도 받은 HTTP 상태와 `return_code`를 남긴다.
+
+`KiwoomError`는 요청이 끝난 모양이다. 브라우저 계약은 이 변형에서만 나온다(`http.rs`).
+
+| 변형 | 뜻 | `retryAt` | `manualActionRequired` |
+|---|---|---|---|
+| `Failed(Failure)` | 이 요청만 실패했다. 같은 입력을 자동으로 다시 보내지 않는다 | 없음 | false |
+| `Gated { until, cause }` | 관문이 `until`까지 닫혀 있다. 원인은 실패 하나 또는 발급 간격 | `until` | false |
+| `Stopped(Failure)` | 그 경로 또는 전부가 서버를 다시 켤 때까지 멈췄다 | 없음 | true |
+| `TokenFile` | 토큰 파일을 쓸 수 없다 | 없음 | true |
 
 **명시 코드 표**(`error::CODE_TABLE`). REST 상세, WebSocket 제어 `return_code`, WebSocket close는 서로 다른 이름공간이다.
 
@@ -639,25 +648,28 @@ REST는 공식 37개와 실측 1634다. WebSocket 실행기는 아직 없다(#4)
 
 **정책 표**(`error::policy`). "경로"는 api-id 하나다. au10001이면 발급 경로다. 멈춘 경로와 전체 멈춤은 서버를 다시 켜야 풀린다. 260ms 간격과 발급 사이 10분(§4.1)은 모든 범주에 그대로 적용된다.
 
-| 범주 | 조회(시세 api-id) | 발급(au10001) | 바깥 타이머 | 브라우저 |
+| 범주 | 조회(시세 api-id) | 발급(au10001) | 결과 | 브라우저 |
 |---|---|---|---|---|
-| 한도 초과 | 대기열 전체 1초 멈춤, 같은 요청을 맨 앞에 다시. 세 번째에 실패 | 대기열 1초 멈춤, 다시 보내지 않음 | 다시 함 | 503 `kiwoom_unavailable` |
-| 일시 장애 | `Screen` 0.5초 뒤 한 번, 나머지 1·2·4초 세 번 | 다시 보내지 않음(10분 간격) | 다시 함 | 503 |
-| 토큰 무효 | 그 세대를 버리고 한 번 다시 발급해 한 번 다시 보냄. 새 토큰도 8005면 전체 멈춤 | (인증 불확실로 바뀜) | 안 함 | 502 `kiwoom_auth_failed` |
-| 인증 차단 | 전체 멈춤: 조회와 발급 모두 | 전체 멈춤 | 안 함 | 502, 원인과 조치 문장(8050은 IP 등록 안내) |
-| 인증 불확실 | 그 요청만 실패 | 다시 보내지 않음. 10분 간격 뒤 한 번 더 받아 보고, 또 실패하면 발급 경로 멈춤 | 안 함 | 502 |
-| 잘못된 요청, 묶음 한도 | 그 요청만 실패, `error` 로그(우리 코드의 버그) | 발급 경로 멈춤 | 안 함 | 500 `internal`(발급이면 502) |
-| 종목·시장 불일치 | 그 요청만 실패 | 발급 경로 멈춤 | 안 함 | 404 `unknown_symbol`. 여러 종목 묶음(ka10095, ka10099)이면 503 |
-| 미지원, 알 수 없음, 형식 오류 | 그 경로 멈춤 | 발급 경로 멈춤 | 안 함 | 미지원·형식 오류 500, 알 수 없음 503(발급이면 모두 502) |
+| 한도 초과 | 대기열 전체 1초 멈춤, 같은 요청을 맨 앞에 다시. 세 번째에 공유 관문 | 대기열 1초 멈춤, 다시 보내지 않음 | `Gated` | 503 `kiwoom_unavailable`, `rate_limited` |
+| 일시 장애 | `Screen` 0.5초 뒤 한 번, 나머지 1·2·4초 세 번. 그 뒤 공유 관문 | 다시 보내지 않음, 발급 간격 뒤 | `Gated` | 503, `kiwoom_error`·`kiwoom_unreachable`·`kiwoom_timeout` |
+| 토큰 무효 | 그 세대를 버리고 한 번 다시 발급해 한 번 다시 보냄. 새 토큰도 8005면 전체 멈춤 | (인증 불확실로 바뀜) | `Failed` 또는 `Stopped` | 502 `kiwoom_auth_failed` |
+| 인증 차단 | 전체 멈춤: 조회와 발급 모두 | 전체 멈춤 | `Stopped` | 502, 원인과 조치 문장(8050은 IP 등록 안내) |
+| 인증 불확실 | 조회 전체 관문 10분. 10분 뒤 확인 하나도 인증 불확실이면 전체 멈춤 | 다시 보내지 않음. 10분 간격 뒤 한 번 더 받아 보고, 또 실패하면 발급 경로 멈춤 | `Gated`, 그다음 `Stopped` | 502, `auth_indeterminate` |
+| 잘못된 요청, 묶음 한도 | 그 요청만 실패, `error` 로그(우리 코드의 버그) | 발급 경로 멈춤 | `Failed` | 500 `internal`(발급이면 502) |
+| 종목·시장 불일치 | 그 요청만 실패. 다른 종목은 계속 받는다 | 발급 경로 멈춤 | `Failed` | 404 `unknown_symbol`. 여러 종목 묶음(ka10095, ka10099)이면 503, `retryAt` 없음 |
+| 미지원, 알 수 없음, 형식 오류 | 그 경로 멈춤 | 발급 경로 멈춤 | `Stopped` | 미지원·형식 오류 500, 알 수 없음 503(발급이면 모두 502). `manualActionRequired` |
 
 - 전체 멈춤이면 대기 중인 조회와 발급 대기자도 같은 원인으로 바로 끝난다. 종목 목록을 기다리는 요청(`/api/symbols`, `/api/bars`)도 기다리지 않고 `kiwoom_auth_failed`다. 운영자가 고치고 서버를 다시 켠다.
 - 경로가 멈추면 그 api-id로 대기 중인 요청도 같은 원인으로 끝나고, 새 요청은 보내지 않고 바로 실패한다. 발급 경로가 멈춰도 쥐고 있는 유효한 토큰으로 조회는 계속한다.
-- 바깥 타이머(켤 때 종목 목록 10초, 07:45 목록 5분, 20:05 발급 10분)는 `KiwoomError::outer_retry()`가 참일 때만 다시 한다. 한도 초과, 일시 장애, 발급 간격 대기만 참이다.
-- 반복 예산(요청당 총 전송), 30초 공유 관문, 브라우저의 `reason`·`retryAt`·`manualActionRequired`는 #21이다. 브라우저는 `kiwoom_unavailable`을 두 번 자동 재요청하지만(`web/src/main.tsx`), 멈춘 경로는 서버가 키움에 보내지 않는다.
+- **반복 예산**: 요청 하나의 총 전송(처음과 다시 보낸 것)은 `Screen` 4회, 나머지 6회다. 한도 초과·토큰 무효·일시 장애가 번갈아도 리셋하지 않는다. 토큰 발급은 이 예산에 넣지 않는다(발급 사이 10분이 따로 막는다).
+- **공유 관문**: 한도 초과나 일시 장애로 재시도를 다 쓰면 조회 전체의 관문을 30초 닫는다. 닫힌 동안 대기 중인 요청과 새 요청은 보내지 않고 `Gated`로 끝난다. 시각이 지나면 확인 요청 하나만 나가고, 나머지는 그 결과를 기다린다. 확인이 성공해야만 연다. 확인 요청이 아닌 다른 성공은 관문을 열지 않는다. 확인이 3회 실패하면 간격을 5분으로 늘린다. 시세 단계의 인증 불확실도 같은 관문을 10분 닫는다.
+- **바깥 타이머**(켤 때 종목 목록 10초, 07:45 목록 5분, 20:05 발급 10분)는 `retry_at()`이 있을 때만 다시 하고, 정한 간격과 관문이 열리는 시각 중 늦은 쪽에 보낸다.
+- **사람 재개**: 멈춘 경로와 전체 멈춤은 운영자가 원인을 고치고 서버를 다시 켜면 풀린다. 브라우저에는 `manualActionRequired: true`가 간다.
+- **브라우저**: `ApiError`에 `reason`, `retryAt`, `manualActionRequired`가 있다(§10). 브라우저는 `retryAt`이 있고 1분 안이며 사람 조치가 필요 없을 때만, 그 시각에 두 번까지 다시 보낸다(`web/src/api/retry.ts`). 서버에 닿지 못한 경우만 스스로 다시 보낸다. 관심종목 현재가의 주기 조회도 같은 값으로 멈추거나 관문 시각까지 미룬다.
 
 **빈 행**: 없는 종목코드·지수코드는 성공 응답(`return_code: 0`)에 모든 필드가 `""`인 행 하나로 온다. 첫 행의 `dt`(일·주·월봉)나 `cntr_tm`(분봉)이 빈 문자열이면 `UnknownSymbol`로 바꾼다. 정상 응답에는 빈 행이 없었다. NXT에서 거래되지 않는 종목의 `_NX` 요청도 같은 빈 행을 준다(kiwoom.md 12.4, 13절). 응답만으로는 "없는 종목"과 구별할 수 없다. 그래서 `BarService`는 `nxt_enabled = false`인 종목의 `Venue::Nxt` 요청을 키움에 보내기 전에 `BadRequest`로 거절한다(§8.2, #14).
 
-**응답 파싱 실패**: 응답 원문 앞 2KB를 `error` 로그로 남긴다(차트·종목 조회 응답만. §11.3). 형식 오류이므로 그 경로를 멈춘다.
+**응답 파싱 실패**: api-id와 본문의 행·열만 `error` 로그로 남긴다. 원문은 남기지 않는다(§11.3). 형식 오류이므로 그 경로를 멈춘다.
 
 ### 4.4 시세 API만 허용
 
@@ -1506,8 +1518,17 @@ interface ApiError {
       | "kiwoom_auth_failed"  // 운영자가 고쳐야 한다
       | "conflict" | "stale_revision" | "payload_too_large" | "method_not_allowed" | "internal";
     message: string;          // 사람이 읽는 한국어 문장
+    reason: ApiErrorReason | null;   // 키움 실패일 때만
+    retryAt: UnixSeconds | null;     // 이 시각이 있을 때만 브라우저가 스스로 다시 보낸다
+    manualActionRequired: boolean;   // 사람이 고치고 서버를 다시 켜야 풀린다
   };
 }
+
+type ApiErrorReason =
+  | "rate_limited" | "kiwoom_unreachable" | "kiwoom_timeout" | "kiwoom_error"
+  | "token_invalid" | "auth_blocked" | "auth_indeterminate" | "issue_interval" | "token_file"
+  | "symbol_mismatch" | "invalid_request" | "unsupported" | "unknown_failure" | "protocol"
+  | "symbol_list_loading";
 ```
 
 ### 8.2 REST
@@ -2164,7 +2185,7 @@ impl<T> Secret<T> { pub fn expose(&self) -> &T; }
 - 키움 요청을 로그에 남길 때는 api-id, 우선순위, 소요 시간, `return_code`, 상세 코드만 남긴다. 헤더와 au10001 요청·응답 본문은 남기지 않는다.
 - 텔레그램 봇 토큰은 URL 경로에 들어간다(`/bot<token>/sendMessage`). `reqwest` 오류는 URL을 품고 있으므로, 로그에 남기기 전에 `without_url()`로 지운다.
 - WebSocket LOGIN 메시지는 로그에 남기지 않는다.
-- 파싱 실패 로그에 응답 원문을 남기는 것은 차트·종목 조회 응답만이다.
+- 키움 응답 원문, `return_msg`, serde·reqwest 오류 문장은 어느 로그에도 남기지 않는다. 고정된 사유와 구조 필드만 남긴다(§4.3).
 
 ---
 
