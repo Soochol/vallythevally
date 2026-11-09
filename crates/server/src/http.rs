@@ -33,6 +33,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/api/symbols", get(search))
         .route("/api/symbols/{code}", get(symbol))
         .route("/api/bars", get(bars))
+        .route("/api/quotes", get(quotes))
         .merge(crate::user_routes::routes())
         .route("/api", any(api_not_found))
         .route("/api/{*rest}", any(api_not_found))
@@ -165,6 +166,28 @@ async fn bars(State(st): State<Arc<AppState>>, Query(q): Query<HashMap<String, S
     }))
 }
 
+/// 한 번에 묻는 종목 수 상한. ka10095 두 번(100개씩)이다.
+pub const MAX_QUOTE_SYMBOLS: usize = 200;
+
+/// `symbols`를 빼거나 비우면 `[]`. 중복은 한 번만 답한다.
+async fn quotes(State(st): State<Arc<AppState>>, Query(q): Query<HashMap<String, String>>) -> Result<Json<Vec<api::Quote>>, ApiFailure> {
+    let raw = q.get("symbols").map_or("", String::as_str);
+    if raw.is_empty() {
+        return Ok(Json(Vec::new()));
+    }
+    if raw.split(',').count() > MAX_QUOTE_SYMBOLS {
+        return Err(ApiFailure::bad_request(format!("종목은 한 번에 {MAX_QUOTE_SYMBOLS}개까지입니다")));
+    }
+    let mut symbols: Vec<Symbol> = Vec::new();
+    for code in raw.split(',') {
+        let s = Symbol::parse(code).map_err(|e| ApiFailure::bad_request(format!("{e}: {code}")))?;
+        if !symbols.contains(&s) {
+            symbols.push(s);
+        }
+    }
+    Ok(Json(crate::quotes::quotes(&st.rest, &st.bars, &symbols).await?))
+}
+
 async fn api_not_found(uri: Uri) -> ApiFailure {
     ApiFailure::new(api::ApiErrorCode::NotFound, format!("없는 API 경로입니다: {}", uri.path()))
 }
@@ -251,6 +274,7 @@ mod tests {
 
     struct Fixture {
         app: Router,
+        fake: Arc<FakeTransport>,
         _dir: tempfile::TempDir,
     }
 
@@ -283,6 +307,22 @@ mod tests {
             if kiwoom_down {
                 return status(503, json!({}));
             }
+            if s.api_id == ApiId::Ka10095 {
+                let path = format!("{}/tests/fixtures/kiwoom/ka10095_synthetic.json", env!("CARGO_MANIFEST_DIR"));
+                return ok(serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap(), None);
+            }
+            if s.api_id == ApiId::Ka20006 && s.body.contains("\"101\"") {
+                return ok(json!({"inds_dt_pole_qry": [
+                    {"dt": "20261109", "open_pric": "90000", "high_pric": "90500", "low_pric": "89000", "cur_prc": "-89900", "trde_qty": "77"},
+                    {"dt": "20261106", "open_pric": "90100", "high_pric": "91000", "low_pric": "89500", "cur_prc": "90000", "trde_qty": "66"}
+                ], "return_code": 0}), None);
+            }
+            if s.api_id == ApiId::Ka20006 {
+                return ok(json!({"inds_dt_pole_qry": [
+                    {"dt": "20261106", "open_pric": "250100", "high_pric": "251000", "low_pric": "249000", "cur_prc": "-250050", "trde_qty": "4321"},
+                    {"dt": "20261105", "open_pric": "249000", "high_pric": "250500", "low_pric": "248000", "cur_prc": "250000", "trde_qty": "1234"}
+                ], "return_code": 0}), None);
+            }
             if s.api_id == ApiId::Ka10080 {
                 return ok(json!({"stk_min_pole_chart_qry": [
                     {"cntr_tm": "20261106195500", "open_pric": "-193700", "high_pric": "-193700", "low_pric": "-193400", "cur_prc": "-193400", "trde_qty": "79320"},
@@ -295,7 +335,7 @@ mod tests {
             ], "return_code": 0}), None)
         }));
         let clock = Clock::fake(kst(KstDate::new(2026, 11, 9).unwrap(), 0, 34, 0));
-        let rest = KiwoomRest::new(Arc::new(fake), KiwoomAuth::new(Secret::new("k".into()), Secret::new("s".into())), clock.clone());
+        let rest = KiwoomRest::new(Arc::new(fake.clone()), KiwoomAuth::new(Secret::new("k".into()), Secret::new("s".into())), clock.clone());
         let symbols = Arc::new(SymbolDirectory::default());
         if loaded {
             let stock = |code: &str, name: &str, kind, nxt_enabled| SymbolInfo { symbol: Symbol::parse(code).unwrap(), name: name.into(), kind, market: Market::Kospi, nxt_enabled };
@@ -305,7 +345,7 @@ mod tests {
             ]));
         }
         let bars = Arc::new(BarService::new(rest.clone(), symbols.clone(), clock.clone()));
-        Fixture { app: router(Arc::new(AppState { symbols, bars, rest, db, clock, static_dir: dir.path().to_owned() })), _dir: dir }
+        Fixture { app: router(Arc::new(AppState { symbols, bars, rest, db, clock, static_dir: dir.path().to_owned() })), fake, _dir: dir }
     }
 
     async fn get(app: &Router, uri: &str) -> (StatusCode, axum::http::HeaderMap, Vec<u8>) {
@@ -354,6 +394,44 @@ mod tests {
             {"slot": 1, "symbol": nxt_symbol, "venue": "nxt", "period": "5m", "symbolLink": true, "chartSettings": {"v": 1, "x": [1]}},
             {"slot": 0, "symbol": "IDX:101", "venue": null, "period": "D", "symbolLink": false, "chartSettings": {}}
         ]})
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn quotes_follow_request_order_and_omit_what_has_no_value() {
+        let f = fixture(false, true).await;
+        let (s, mut v) = json(&f.app, "/api/quotes?symbols=IDX:001,000660,005930,IDX:999,005935,005930,IDX:101").await;
+        assert_eq!(s, StatusCode::OK, "{v}");
+        let rates: Vec<f64> = v.as_array_mut().unwrap().iter_mut().map(|q| q.as_object_mut().unwrap().remove("changeRate").unwrap().as_f64().unwrap()).collect();
+        for (got, want) in rates.iter().zip([0.5 / 2500.0 * 100.0, 500.0 / 120_000.0 * 100.0, -1_000.0 / 51_000.0 * 100.0, -1.0 / 900.0 * 100.0]) {
+            assert!((got - want).abs() < 1e-9, "{rates:?}");
+        }
+        assert_eq!(
+            v,
+            json!([
+                {"symbol": "IDX:001", "price": 2500.5, "change": 0.5, "volume": 4321, "t": 1_793_890_800, "source": "polled"},
+                {"symbol": "000660", "price": 120_500.0, "change": 500.0, "volume": 765_432, "t": 1_793_890_800 + 15 * 3600 + 30 * 60, "source": "polled"},
+                {"symbol": "005930", "price": 50_000.0, "change": -1_000.0, "volume": 1_234_567, "t": 1_793_890_800 + 71_999, "source": "polled"},
+                {"symbol": "IDX:101", "price": 899.0, "change": -1.0, "volume": 77, "t": 1_794_150_000, "source": "polled"},
+            ]),
+            "요청 순서. 없는 지수, 빈 행, 중복은 빠진다. IDX:101은 진행 중인 오늘 봉과 그 앞 확정 봉"
+        );
+        let bodies: Vec<String> = f.fake.market_sent().into_iter().filter(|s| s.api_id == ApiId::Ka10095).map(|s| s.body).collect();
+        assert_eq!(bodies, [r#"{"stk_cd":"000660_AL|005930_AL|005935_AL"}"#]);
+
+        assert_eq!(json(&f.app, "/api/quotes?symbols=").await, (StatusCode::OK, json!([])));
+        assert_eq!(json(&f.app, "/api/quotes").await, (StatusCode::OK, json!([])));
+        let many: Vec<String> = (1..=150).map(|i| format!("{i:06}")).collect();
+        assert_eq!(json(&f.app, &format!("/api/quotes?symbols={}", many.join(","))).await.0, StatusCode::OK);
+        let sizes: Vec<usize> = f.fake.market_sent().into_iter().filter(|s| s.api_id == ApiId::Ka10095).skip(1).map(|s| s.body.matches("_AL").count()).collect();
+        assert_eq!(sizes, [100, 50], "ka10095는 100개씩 나눠 보낸다");
+        let too_many: Vec<String> = (1..=201).map(|i| format!("{i:06}")).collect();
+        for uri in ["/api/quotes?symbols=bad".to_owned(), "/api/quotes?symbols=005930,,000660".to_owned(), format!("/api/quotes?symbols={}", too_many.join(","))] {
+            let (s, v) = json(&f.app, &uri).await;
+            assert_eq!((s, code(&v)), (StatusCode::BAD_REQUEST, "bad_request"), "{v}");
+        }
+        let f = fixture(true, true).await;
+        let (s, v) = json(&f.app, "/api/quotes?symbols=005930").await;
+        assert_eq!((s, code(&v)), (StatusCode::SERVICE_UNAVAILABLE, "kiwoom_unavailable"));
     }
 
     #[tokio::test]

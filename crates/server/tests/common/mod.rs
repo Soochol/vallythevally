@@ -88,6 +88,7 @@ async fn handle(State(seen): State<Arc<Seen>>, headers: HeaderMap, body: String)
         "ka10080" if body.contains("_NX") => "ka10080_005930_NX_1",
         "ka10080" => "ka10080_005930_3",
         "ka20005" => "ka20005_001_1",
+        "ka10095" => "ka10095_synthetic",
         "ka10082" => "ka10082_005930_AL",
         "ka10083" => "ka10083_005930_AL",
         "ka20006" => "ka20006_001",

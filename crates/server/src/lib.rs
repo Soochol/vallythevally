@@ -9,6 +9,7 @@ pub mod db;
 pub mod http;
 pub mod instance;
 pub mod kiwoom;
+pub mod quotes;
 pub mod symbols;
 pub mod user_routes;
 pub mod userdata;
