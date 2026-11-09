@@ -41,7 +41,7 @@ pub enum StreamEvent {
     Live { since: KstTime },
     /// 세션이 끊겼다. 다음 Live까지는 체결이 빠졌을 수 있다.
     Down { at: KstTime },
-    /// 인증 실패. 운영자가 고칠 때까지 다시 연결하지 않는다. REST는 그대로 쓴다.
+    /// 인증 실패나, 다시 구성한 세션에서도 제어가 실패했다. 서버를 다시 켜기 전까지 다시 연결하지 않는다. REST는 그대로 쓴다.
     Halted,
 }
 
@@ -58,7 +58,7 @@ impl KiwoomStream {
     pub(crate) fn spawn_with(url: String, rest: KiwoomRest, clock: Clock, timings: Timings) -> (KiwoomStream, mpsc::Receiver<StreamEvent>) {
         let (stream, desired) = KiwoomStream::detached();
         let (events, rx) = mpsc::channel(EVENT_BUFFER);
-        let session = Session { url, rest, clock, timings, desired, events, budget: TokenBudget::Fresh, dropped: Dropped::default() };
+        let session = Session { url, rest, clock, timings, desired, events, budget: TokenBudget::Fresh, rebuild: ControlBudget::Fresh, dropped: Dropped::default() };
         tokio::spawn(session.run());
         (stream, rx)
     }
@@ -81,6 +81,8 @@ impl KiwoomStream {
 const EVENT_BUFFER: usize = 4096;
 const BACKOFF: [Duration; 5] = [Duration::from_secs(1), Duration::from_secs(2), Duration::from_secs(5), Duration::from_secs(10), Duration::from_secs(30)];
 const DROP_WARN_EVERY: Duration = Duration::from_secs(60);
+const STABLE: Duration = Duration::from_secs(60);
+const RATE_LIMIT_PAUSE: Duration = Duration::from_secs(1);
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct Timings {
@@ -90,11 +92,15 @@ pub(crate) struct Timings {
     pub silence: Duration,
     /// n번째 다시 연결 전에 쉬는 시간. 끝 값을 계속 쓴다.
     pub backoff: [Duration; 5],
+    /// Live가 이만큼 이어진 뒤에 끊겨야 backoff와 제어 예산을 처음으로 되돌린다.
+    pub stable: Duration,
+    /// 105110 뒤 같은 제어를 다시 보내기 전에 쉬는 시간. 키움 REG 유량은 공개 기록으로 약 초당 5회다(kiwoom-ws-errors.md).
+    pub rate_limit: Duration,
 }
 
 impl Default for Timings {
     fn default() -> Timings {
-        Timings { control: Duration::from_secs(5), silence: Duration::from_secs(30), backoff: BACKOFF }
+        Timings { control: Duration::from_secs(5), silence: Duration::from_secs(30), backoff: BACKOFF, stable: STABLE, rate_limit: RATE_LIMIT_PAUSE }
     }
 }
 
@@ -105,11 +111,11 @@ impl Timings {
 }
 
 enum SessionState {
-    /// `attempt`: Live 뒤로 연달아 실패한 횟수. 다음 쉬는 시간을 정한다.
+    /// `attempt`: 안정된 Live 뒤로 연달아 실패한 횟수. 다음 쉬는 시간을 정한다.
     Disconnected { retry_at: Instant, attempt: u32 },
     Connecting { attempt: u32 },
     LoggingIn { conn: Conn, attempt: u32 },
-    Live { conn: Conn, since: KstTime, accepted: BTreeSet<Symbol> },
+    Live { conn: Conn, since: KstTime, accepted: BTreeSet<Symbol>, attempt: u32 },
     Halted,
 }
 
@@ -132,6 +138,14 @@ enum TokenBudget {
     Reissued,
 }
 
+/// 제어(REG·REMOVE)가 실패하면 세션을 한 번만 다시 구성한다. 다시 구성한 세션에서도 실패하면 실시간만 멈춘다(ADR 0009).
+/// 안정된 Live 뒤에 다시 채운다. 연결 끊김과 Live 전 접속 실패는 이 예산을 쓰지 않는다.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ControlBudget {
+    Fresh,
+    Rebuilt,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Control {
     Reg(BTreeSet<Symbol>),
@@ -139,15 +153,14 @@ enum Control {
 }
 
 impl Control {
+    /// 해지가 먼저다. 200개가 찬 채로 하나를 바꿀 때 REG를 먼저 보내면 잠깐 201개라 키움이 거절한다.
     fn next(desired: &BTreeSet<Symbol>, accepted: &BTreeSet<Symbol>) -> Option<Control> {
-        let added: BTreeSet<Symbol> = desired.difference(accepted).copied().collect();
-        if !added.is_empty() {
-            return Some(Control::Reg(added));
-        }
-        [RealType::Trade, RealType::Index].into_iter().find_map(|kind| {
+        let remove = [RealType::Trade, RealType::Index].into_iter().find_map(|kind| {
             let removed: BTreeSet<Symbol> = accepted.difference(desired).copied().filter(|&s| RealType::of(s) == kind).collect();
             (!removed.is_empty()).then_some(Control::Remove(kind, removed))
-        })
+        });
+        let added: BTreeSet<Symbol> = desired.difference(accepted).copied().collect();
+        remove.or_else(|| (!added.is_empty()).then_some(Control::Reg(added)))
     }
 
     fn kind(&self) -> WsControl {
@@ -181,6 +194,12 @@ enum End {
     ControlRejected(WsControl, WsRejection),
     /// 손잡이나 이벤트 받는 쪽이 사라졌다. 태스크를 끝낸다.
     Shutdown,
+}
+
+impl End {
+    fn is_control_failure(&self) -> bool {
+        matches!(self, End::ControlTimeout(_) | End::ControlRejected(..))
+    }
 }
 
 impl std::fmt::Display for End {
@@ -218,6 +237,7 @@ struct Session {
     desired: watch::Receiver<BTreeSet<Symbol>>,
     events: mpsc::Sender<StreamEvent>,
     budget: TokenBudget,
+    rebuild: ControlBudget,
     dropped: Dropped,
 }
 
@@ -246,7 +266,8 @@ impl Session {
                     Some(next) => next,
                     None => return,
                 },
-                SessionState::Live { conn, since, accepted } => {
+                SessionState::Live { conn, since, accepted, attempt } => {
+                    let entered = Instant::now();
                     let end = self.live(conn, accepted).await;
                     if matches!(end, End::Shutdown) {
                         return;
@@ -256,10 +277,16 @@ impl Session {
                     if self.events.send(StreamEvent::Down { at }).await.is_err() {
                         return;
                     }
-                    self.retry_later(0)
+                    let attempt = if entered.elapsed() >= self.timings.stable {
+                        self.rebuild = ControlBudget::Fresh;
+                        0
+                    } else {
+                        attempt
+                    };
+                    self.after(end, attempt)
                 }
                 SessionState::Halted => {
-                    tracing::error!("키움 WebSocket 인증에 실패해 다시 연결하지 않습니다. 조회(REST)는 그대로 씁니다");
+                    tracing::error!("키움 WebSocket을 멈췄습니다. 서버를 다시 켜야 다시 연결합니다. 조회(REST)는 그대로 씁니다");
                     let _ = self.events.send(StreamEvent::Halted).await;
                     return;
                 }
@@ -275,6 +302,24 @@ impl Session {
 
     fn retry_later(&self, attempt: u32) -> SessionState {
         SessionState::Disconnected { retry_at: Instant::now() + self.timings.backoff(attempt), attempt: attempt + 1 }
+    }
+
+    /// 연결을 닫은 뒤. 제어 실패만 다시 구성 예산을 쓴다.
+    fn after(&mut self, end: End, attempt: u32) -> SessionState {
+        if !end.is_control_failure() {
+            return self.retry_later(attempt);
+        }
+        match self.rebuild {
+            ControlBudget::Fresh => {
+                self.rebuild = ControlBudget::Rebuilt;
+                tracing::warn!(%end, budget = ?ControlBudget::Fresh, "제어가 실패했습니다. 세션을 한 번 다시 구성합니다");
+                self.retry_later(attempt)
+            }
+            ControlBudget::Rebuilt => {
+                tracing::error!(%end, budget = ?ControlBudget::Rebuilt, "다시 구성한 세션에서도 제어가 실패했습니다. 실시간만 멈춥니다");
+                SessionState::Halted
+            }
+        }
     }
 
     /// 토큰이 없으면 발급 대기열에 받아 달라고 한다. 발급 간격(10분)은 대기열이 지킨다.
@@ -367,14 +412,14 @@ impl Session {
                 Err(end) => {
                     tracing::warn!(%end, "처음 REG를 마치지 못했습니다");
                     conn.close().await;
-                    return Some(self.retry_later(attempt));
+                    return Some(self.after(end, attempt));
                 }
             }
         }
         let since = self.clock.now();
         self.budget = TokenBudget::Fresh;
         self.events.send(StreamEvent::Live { since }).await.ok()?;
-        Some(SessionState::Live { conn, since, accepted })
+        Some(SessionState::Live { conn, since, accepted, attempt })
     }
 
     async fn live(&mut self, mut conn: Conn, mut accepted: BTreeSet<Symbol>) -> End {
@@ -398,27 +443,37 @@ impl Session {
         end
     }
 
-    /// 실패하면 같은 메시지를 한 번 다시 보낸다. 또 실패하면 연결을 닫는다. 다시 연결하면 처음부터 REG 한다.
+    /// 거절되면 같은 메시지를 한 번 다시 보낸다. 105110이면 쉬었다 보낸다.
+    /// 응답에 요청 번호가 없어서, 시간 안에 응답이 없으면 늦은 응답이 어느 요청의 것인지 알 수 없다. 그 연결로는 더 보내지 않는다.
     async fn control(&mut self, conn: &mut Conn, control: &Control) -> Result<(), End> {
         let message = control.message();
-        let mut last = None;
-        for sent in 1..=2 {
-            tracing::debug!(trnm = control.kind().trnm(), sent, message = %message, "제어 메시지를 보냅니다");
+        let mut resent = false;
+        loop {
+            tracing::debug!(trnm = control.kind().trnm(), resent, message = %message, "제어 메시지를 보냅니다");
             conn.send(message.clone()).await?;
-            match self.await_ack(conn, control.kind()).await {
+            let rejection = match self.await_ack(conn, control.kind()).await {
                 Ok(()) => return Ok(()),
-                Err(End::ControlRejected(kind, rejection)) if rejection.category == Category::RealtimeCapacity => {
-                    tracing::error!(?rejection, "키움 실시간 등록 한도를 넘었습니다. MarketHub가 200개 안으로 지켜야 하는 버그입니다. 다시 연결합니다");
-                    return Err(End::ControlRejected(kind, rejection));
-                }
-                Err(end @ (End::ControlRejected(..) | End::ControlTimeout(_))) => {
-                    tracing::warn!(%end, sent, "제어 메시지가 받아들여지지 않았습니다");
-                    last = Some(end);
-                }
+                Err(End::ControlRejected(_, rejection)) if !resent && rejection.category != Category::RealtimeCapacity => rejection,
                 Err(end) => return Err(end),
+            };
+            tracing::warn!(?rejection, "제어 메시지가 거절됐습니다. 한 번 다시 보냅니다");
+            if rejection.category == Category::RateLimit {
+                self.pause(conn, self.timings.rate_limit).await?;
+            }
+            resent = true;
+        }
+    }
+
+    /// 쉬는 동안에도 PING에 답하고 체결을 받는다.
+    async fn pause(&mut self, conn: &mut Conn, wait: Duration) -> Result<(), End> {
+        let until = Instant::now() + wait;
+        loop {
+            match self.recv(conn, Some(until), false).await? {
+                Wake::Deadline => return Ok(()),
+                Wake::Ack(got, _) => tracing::debug!(trnm = got.trnm(), "기다리지 않던 응답을 버립니다"),
+                Wake::Desired => {}
             }
         }
-        Err(last.expect("두 번 보냈다"))
     }
 
     async fn await_ack(&mut self, conn: &mut Conn, control: WsControl) -> Result<(), End> {
@@ -550,7 +605,7 @@ mod tests {
     }
 
     fn fast() -> Timings {
-        Timings { control: Duration::from_millis(500), silence: Duration::from_secs(2), backoff: [Duration::from_millis(50); 5] }
+        Timings { control: Duration::from_millis(500), silence: Duration::from_secs(2), backoff: [Duration::from_millis(50); 5], stable: Duration::from_secs(60), rate_limit: Duration::from_millis(300) }
     }
 
     fn rest(fake: &FakeKiwoom) -> KiwoomRest {
@@ -846,7 +901,7 @@ mod tests {
         assert!(matches!(next(&mut events).await, StreamEvent::Live { .. }));
         let regs = peer.sent_at(0, "REG");
         assert_eq!(regs.len(), 2, "같은 연결에서 다시 보낸다");
-        assert!(regs[1] - regs[0] >= Duration::from_millis(200), "105110 뒤 바로 다시 보냈다: {:?}", regs[1] - regs[0]);
+        assert!(regs[1] - regs[0] >= fast().rate_limit, "105110 뒤 바로 다시 보냈다: {:?}", regs[1] - regs[0]);
         assert_eq!(peer.logins(), 1);
     }
 
@@ -865,6 +920,47 @@ mod tests {
             waits.push(at.elapsed());
         }
         assert!(waits[1] >= Duration::from_millis(300) && waits[2] >= Duration::from_millis(700), "곧 끊기는 세션은 실패로 쌓인다: {waits:?}");
+    }
+
+    #[tokio::test]
+    async fn a_session_that_stayed_live_long_enough_starts_the_backoff_over() {
+        let fake = FakeKiwoom::start().await;
+        let timings = Timings { backoff: [Duration::from_millis(100), Duration::from_millis(700), Duration::from_millis(700), Duration::from_millis(700), Duration::from_millis(700)], stable: Duration::from_millis(400), ..fast() };
+        let (_stream, mut events) = start(&fake, rest(&fake), timings, &[samsung()]);
+        assert!(matches!(next(&mut events).await, StreamEvent::Live { .. }));
+        fake.drop_sessions(1000, "Bye");
+        assert!(matches!(next(&mut events).await, StreamEvent::Down { .. }));
+        assert!(matches!(next(&mut events).await, StreamEvent::Live { .. }));
+        tokio::time::sleep(timings.stable).await;
+        fake.drop_sessions(1000, "Bye");
+        assert!(matches!(next(&mut events).await, StreamEvent::Down { .. }));
+        let at = Instant::now();
+        assert!(matches!(next(&mut events).await, StreamEvent::Live { .. }));
+        assert!(at.elapsed() < Duration::from_millis(500), "안정된 연결 뒤에는 첫 간격으로 돌아간다: {:?}", at.elapsed());
+    }
+
+    #[tokio::test]
+    async fn a_stable_session_gets_its_control_rebuild_back() {
+        let fake = FakeKiwoom::start().await;
+        let peer = Peer::start(|conn, trnm, nth| match (conn, trnm, nth) {
+            (0, "REG", _) => Reply::Silent,
+            (1 | 2, "REG", 2) => Reply::Silent,
+            _ => Reply::Ok,
+        })
+        .await;
+        let timings = Timings { control: Duration::from_millis(200), stable: Duration::from_millis(300), ..fast() };
+        let (stream, mut events) = start_with(&peer, &fake, timings, &[samsung()]);
+        assert!(matches!(next(&mut events).await, StreamEvent::Live { .. }));
+        tokio::time::sleep(timings.stable).await;
+        stream.set_desired([samsung(), kospi()].into());
+        assert!(matches!(next(&mut events).await, StreamEvent::Down { .. }));
+        assert!(matches!(next(&mut events).await, StreamEvent::Live { .. }), "안정된 세션 뒤라 다시 구성한다");
+        stream.set_desired([samsung()].into());
+        until("REMOVE가 받아들여졌다", || peer.controls(2).contains(&"REMOVE".to_owned())).await;
+        stream.set_desired([samsung(), kospi()].into());
+        assert!(matches!(next(&mut events).await, StreamEvent::Down { .. }));
+        assert_eq!(next(&mut events).await, StreamEvent::Halted, "다시 구성한 세션이 안정되기 전에 또 실패했다");
+        assert_eq!(peer.logins(), 3);
     }
 
     #[tokio::test]

@@ -831,14 +831,18 @@ pub enum Direction { UpperLimit, Up, Flat, LowerLimit, Down }
 ```rust
 // server::kiwoom::stream. 소켓은 연결된 두 상태 안에만 있다. 소켓 없는 Live는 만들 수 없다.
 enum SessionState {
+    /// `attempt`: 안정된 Live 뒤로 연달아 실패한 횟수. 다음 쉬는 시간을 정한다.
     Disconnected { retry_at: Instant, attempt: u32 },
     Connecting { attempt: u32 },
     /// LOGIN과 원하는 집합 전체의 첫 REG까지.
     LoggingIn { conn: Conn, attempt: u32 },
-    Live { conn: Conn, since: KstTime, accepted: BTreeSet<Symbol> },
-    /// 인증 실패. 운영자가 고칠 때까지 다시 연결하지 않는다. WS만 멈추고 REST는 그대로다.
+    Live { conn: Conn, since: KstTime, accepted: BTreeSet<Symbol>, attempt: u32 },
+    /// 인증 실패, 또는 다시 구성한 세션에서도 제어 실패. 서버를 다시 켜기 전까지 다시 연결하지 않는다. WS만 멈추고 REST는 그대로다.
     Halted,
 }
+
+/// 세션 세대 밖에서 기억한다. 제어 실패만 쓰고, 안정된 Live 뒤에 다시 채운다(ADR 0009).
+enum ControlBudget { Fresh, Rebuilt }
 
 pub struct KiwoomStream { /* 원하는 집합을 보내는 watch 하나 */ }
 
@@ -868,10 +872,15 @@ pub enum StreamEvent {
 - **LOGIN은 앱키당 하나**: 같은 앱키로 다른 곳에서 LOGIN하면 기존 세션이 close 1000 'Bye'로 끊긴다(D16, kiwoom.md 11.9). 서버 하나 원칙(§4.1 잠금 파일)이 이것을 막는다.
 - **PING**: 서버가 10초마다 `{"trnm":"PING"}` 텍스트 메시지를 보낸다. 받은 문자열을 그대로 돌려보낸다. WebSocket 프로토콜의 Ping 프레임은 오지 않는다. 30초 동안 아무 메시지도 없으면 연결이 죽었다고 보고 다시 연결한다.
 - **REG**: `data`는 `{"item":[…],"type":[…]}`의 배열이다. 한 원소에 종목 여럿을 넣을 수 있고 원소 하나의 한도는 따로 없다. 서버는 type별 원소 하나에 모두 담는다.
-- **REG 한도**: 그룹당 200(`105118`), **접속 전체 200**(`105115`)이다. 그룹을 나눠도 늘지 않는다. **0J 지수도 이 200에 든다**(kiwoom.md §10.7). 서버는 §5.3의 `REALTIME_LIMIT`로 미리 지키므로 이 오류는 우리 버그다. 받으면 `error` 로그를 남기고 세션을 다시 연결해 원하는 집합을 처음부터 맞춘다. 그룹 번호는 `grp_no: "1"` 하나만 쓴다. `refresh: "1"`(기존 것 유지)로 보낸다.
+- **REG 한도**: 그룹당 200(`105118`), **접속 전체 200**(`105115`)이다. 그룹을 나눠도 늘지 않는다. **0J 지수도 이 200에 든다**(kiwoom.md §10.7). 서버는 §5.3의 `REALTIME_LIMIT`로 미리 지키므로 이 오류는 우리 버그다. 같은 연결로 다시 보내지 않고 아래 **제어 실패 예산**을 쓴다. 그룹 번호는 `grp_no: "1"` 하나만 쓴다. `refresh: "1"`(기존 것 유지)로 보낸다.
 - **REMOVE**: **type별로 따로 보낸다.** 0B와 0J를 한 요청에 섞으면 `105112`로 실패한다.
-- **한 번에 하나**: REG/REMOVE 응답에는 요청 번호가 없다. 그래서 제어 메시지는 하나씩 보내고 응답을 기다린다. 5초 안에 응답이 없으면 실패로 본다.
-- **키움 쪽 목록은 응답을 보고 바꾼다**: 세션은 키움이 받아들인 종목 목록(`accepted`)을 따로 든다. REG·REMOVE의 성공 응답을 받은 뒤에만 `accepted`를 바꾼다. 실패하면 한 번 다시 보낸다. 또 실패하면 세션을 닫고 다시 연결한다. 다시 연결하면 `accepted`를 비우고 원하는 집합 전체를 처음부터 REG 하므로 어긋남이 없어진다. 200 한도 계산(§5.3)은 원하는 집합으로 한다.
+- **한 번에 하나**: REG/REMOVE 응답에는 요청 번호가 없다. 그래서 제어 메시지는 하나씩 보내고 응답을 기다린다. 5초 안에 응답이 없으면 그 연결은 버린다. 늦게 온 응답이 다음 요청의 응답으로 붙기 때문이다(PR #46 리뷰 R1). 같은 연결로 다시 보내지 않는다.
+- **해지가 먼저**: 원하는 집합이 바뀌면 type별 REMOVE를 먼저, REG를 나중에 보낸다. 200개가 찬 채로 하나를 바꿀 때 REG가 먼저면 잠깐 201개라 `105118`로 거절된다(R7).
+- **키움 쪽 목록은 응답을 보고 바꾼다**: 세션은 키움이 받아들인 종목 목록(`accepted`)을 따로 든다. REG·REMOVE의 성공 응답을 받은 뒤에만 `accepted`를 바꾼다. 다시 연결하면 `accepted`를 비우고 원하는 집합 전체를 처음부터 REG 하므로 어긋남이 없어진다. 200 한도 계산(§5.3)은 원하는 집합으로 한다.
+- **거절에 다시 보내기**: 응답이 분명한 거절(`105110`, 그 밖의 제어 거절)은 같은 연결로 한 번 다시 보낸다. `105110`(유량)이면 1초 쉬었다 보낸다. 쉬는 동안에도 PING에 답하고 체결을 받는다. `105115`·`105118`은 다시 보내지 않는다.
+- **제어 실패 예산**(ADR 0009): 시간 초과, `105115`·`105118`, 다시 보낸 뒤의 거절이 **제어 실패**다. 제어 실패면 연결을 닫는다. 예산이 `Fresh`면 `Rebuilt`로 바꾸고 backoff를 지켜 한 번 다시 구성한다. `Rebuilt`에서 또 실패하면 실시간만 `Halted`로 멈춘다. 같은 집합이 계속 거절되면 LOGIN 두 번 뒤 멈춘다. `error` 로그에 마지막 거절(`return_code`)과 `budget=Rebuilt`를 남긴다. 브라우저 상태 줄은 `실시간 멈춤: 서버를 다시 켜야 합니다`다. 서버를 다시 켜야 풀린다(경로 멈춤과 같은 규칙).
+- **안정 기준**: Live가 60초 넘게 이어진 뒤 끊기면 backoff를 처음(1초)으로, 제어 예산을 `Fresh`로 되돌린다. 60초 안에 끊기면 실패 횟수가 이어져 간격이 늘어난다(R3). 키움 PING 10초 여섯 번, 침묵 판정 30초의 두 배다.
+- **예산을 쓰지 않는 것**: 키움이 닫은 연결(07:50 정기 단절 포함), 침묵, 전송 오류, Live 전 접속·LOGIN 실패는 제어 실패가 아니다. 접속 backoff만 따른다.
 - 주식은 `0B`, 지수는 `0J`로 REG 한다. 코드는 `kiwoom_stock_code`가 만든다. 주식은 거래소와 상관없이 `_AL` 하나만 REG 하는 방안을 먼저 검토한다(§5.3, ADR 0007).
 - **REAL**: `data[]`의 각 항목을 `RealTick`으로 바꾼다. 실패한 항목은 버리고 카운터를 올린다.
   - 0B: `10`의 방향 부호를 떼고 원 → centi. `15`는 절댓값. **`15`가 0인 프레임은 버린다.** 0은 동시호가에만 나온다(kiwoom.md 11.3). 예상 체결가로 봉을 움직이지 않으려는 것이다. [장중 실측 대기: §12.2 8번]
@@ -881,7 +890,7 @@ pub enum StreamEvent {
 
 ### 5.2 다시 연결과 끊긴 구간 복구
 
-- 끊기면 1·2·5·10·30초 간격으로 다시 연결한다. 그 뒤로는 30초 고정이다. 07:50 강제 단절도 같은 경로다. 토큰 세대가 바뀌어도 세션을 닫지 않는다(§4.1).
+- 끊기면 1·2·5·10·30초 간격으로 다시 연결한다. 그 뒤로는 30초 고정이다. 안정된 Live(60초, §5.1) 뒤에만 1초로 돌아간다. 07:50 강제 단절도 같은 경로다. 토큰 세대가 바뀌어도 세션을 닫지 않는다(§4.1).
 - **08:00 전에 붙어 있기**: 08:00 정각에 접속하면 첫 체결을 놓칠 수 있다(kiwoom.md 11.9). 07:50 단절 뒤에는 07:55부터 다시 붙어 08:00 전에 `Live`가 되게 한다(D16).
 - **20:00 뒤의 연결**: 20:00:00~20:00:03 체결을 받으려고 20:00:10까지는 연결을 그대로 둔다(§3.1). 장이 닫혀도 연결을 일부러 끊지는 않는다.
 - 다시 연결되면 LOGIN → 원하는 집합 전체를 다시 REG → `StreamEvent::Live`를 보낸다.
@@ -2201,7 +2210,7 @@ pub fn future_bar_starts(period: &str, last_start: f64, n: usize) -> Result<Vec<
 | 잠금 파일 | 임시 디렉터리의 잠금 파일로: 첫 `InstanceLock::acquire` 성공, 같은 경로 두 번째는 `Held { pid }`, 첫 잠금을 drop하면 다시 잡힘, 남아 있는 파일(잠금 없음)은 막지 않음. 통합 테스트: 서버 두 번째 실행이 종료 코드 1로 끝나고 키움 요청을 보내지 않음 | `server::instance` | #2 |
 | 사용자 자료 | `sqlx::test`(sqlite, 테스트마다 새 DB)로: 마이그레이션, 레이아웃 PUT 두 번(같은 결과), 레이아웃 지우면 칸도 지워짐(`foreign_keys`), 마지막 레이아웃 삭제 거절, `ui_state`의 모르는 키 왕복과 64KB 초과 거절, 잘못된 JSON은 `json_valid`로 거절. 연결 설정(`journal_mode=wal`, `foreign_keys=1`, `busy_timeout=5000`)을 `PRAGMA`로 읽어 확인 | `server::db`, `server::userdata` | #3 |
 | 비밀값 | `Config`, `KiwoomAuth`, 텔레그램 클라이언트의 `Debug` 출력에 비밀값이 없는지 | `server::config` | #2 |
-| 가짜 키움 | 통합 테스트와 브라우저 e2e가 같은 `crates/fake-kiwoom`(lib + `fake-kiwoom` 바이너리)과 같은 고정 입력을 쓴다. 루프백 주소에만 연다. 관리 경로 `/_fake/respond-with`, `delay`, `reject-token`, `reset`, `stats`로 오류를 넣고 요청을 센다. #4부터 같은 포트의 `/api/dostk/websocket`이 LOGIN·PING·REG/REMOVE(105112·105115·105118)·REAL을 흉내 내고, `/_fake/ws/{real,drop,mute,ping-every,stats}`로 체결을 넣고 단절을 일으킨다. 시험 서버는 REST와 WS 주소를 둘 다 가짜로 받아야 시작한다(§11.1) 086520 일봉은 합성 300행 × 4페이지라 과거 페이지가 이어진다 | `fake-kiwoom` | #25 |
+| 가짜 키움 | 통합 테스트와 브라우저 e2e가 같은 `crates/fake-kiwoom`(lib + `fake-kiwoom` 바이너리)과 같은 고정 입력을 쓴다. 루프백 주소에만 연다. 관리 경로 `/_fake/respond-with`, `delay`, `reject-token`, `reset`, `stats`로 오류를 넣고 요청을 센다. #4부터 같은 포트의 `/api/dostk/websocket`이 LOGIN·PING·REG/REMOVE(105112·105115·105118)·REAL을 흉내 내고, `/_fake/ws/{real,drop,mute,ping-every,reg-limit,stats}`로 체결을 넣고 단절과 REG 거절을 일으킨다. 시험 서버는 REST와 WS 주소를 둘 다 가짜로 받아야 시작한다(§11.1) 086520 일봉은 합성 300행 × 4페이지라 과거 페이지가 이어진다 | `fake-kiwoom` | #25 |
 | 브라우저 e2e | `web/e2e/`(Playwright, Chromium). 테스트마다 임시 디렉터리에 `fake-kiwoom`과 `vally-server`를 띄우고 빌드된 `web/dist`로 사용자 흐름을 돈다: 검색과 과거 스크롤, 거래소·봉 주기, 새로고침과 재시작 뒤 복원, 저장 중 탭 닫기, 오류 표시, 실시간(#4: `VALLY_CLOCK_START=20261109100000`으로 서버 시계를 장중에 두고 가짜 키움 WS로 체결을 넣어 일봉·분봉 현재 봉이 움직이는지, 강제 단절 뒤 이어지는지). Chromium은 샌드박스를 켜고 띄우며 `web/e2e/sandbox.spec.ts`가 명령줄에 `--no-sandbox`가 없음을 확인한다. CI `e2e` 검사는 외부 네트워크를 막은 이름공간에서 돌고, 앞서 `web/scripts/allow-chromium-sandbox.sh`로 headless shell에만 `userns`를 허락하는 AppArmor 프로필을 깐다 | `web/e2e` | #25 |
 
 **키움 파서 고정 입력**(kiwoom.md에서 옮긴다)
