@@ -1352,13 +1352,23 @@ impl AppDb {
 ### 7.2 테이블
 
 ```sql
--- 관심종목: 목록 하나
-CREATE TABLE watchlist (
-  symbol   TEXT    PRIMARY KEY,
+-- 관심종목 목록(0003, #37). 0002까지의 목록 하나(watchlist 표)는 id 01900000-0000-7000-8000-000000000002, 이름 '기본'인 첫 목록이 되었다.
+-- 목록 사이 순서는 watchlists.position, 목록 안 순서는 watchlist_items.position이다(실시간 우선순위 "목록의 위부터"가 읽는다, #39).
+CREATE TABLE watchlists (
+  id       TEXT    PRIMARY KEY,                       -- 브라우저가 만든 UUID
+  name     TEXT    NOT NULL UNIQUE,
   position INTEGER NOT NULL UNIQUE
 ) STRICT;
 
--- 관심종목의 저장 순서 번호(0002). 목록이 여러 행이라 한 행짜리 표에 둔다
+CREATE TABLE watchlist_items (
+  list_id  TEXT    NOT NULL REFERENCES watchlists(id) ON DELETE CASCADE,
+  symbol   TEXT    NOT NULL,
+  position INTEGER NOT NULL,
+  PRIMARY KEY (list_id, symbol),
+  UNIQUE (list_id, position)
+) STRICT;
+
+-- 관심종목 전체(모든 목록)의 저장 순서 번호(0002). 한 행짜리 표에 둔다
 CREATE TABLE watchlist_revision (
   singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
   revision  INTEGER NOT NULL
@@ -1541,7 +1551,7 @@ pub fn judge_cross(dir: CrossDir, prev: (f64, f64), cur: (f64, f64)) -> bool;
 | `unknown_symbol` | 404 | 종목 목록에 없거나 키움이 빈 행을 준 종목 |
 | `conflict` | 409 | 마지막 레이아웃 지우기 같은 충돌 |
 | `stale_revision` | 409 | 사용자 자료 PUT의 `revision`이 저장된 것보다 크지 않다. 더 새 편집이 이미 저장돼 있어 저장하지 않았다(§8.2 "저장 순서") |
-| `payload_too_large` | 413 | 한도를 넘는 본문. 화면 상태·관심종목 64KB, 칸 하나의 `chartSettings` 64KB, 레이아웃 본문 272KB(4 × 64KB + 16KB) |
+| `payload_too_large` | 413 | 한도를 넘는 본문. 화면 상태 64KB, 관심종목(모든 목록) 69,076바이트(64KB + 20 × 가장 긴 목록 감싸개 177바이트: id 64바이트, 이름 20자 × 4바이트. 옛 한 목록 본문이 64KB 안에 들던 종목은 이관 뒤에도 저장할 수 있다), 칸 하나의 `chartSettings` 64KB, 레이아웃 본문 272KB(4 × 64KB + 16KB) |
 | `method_not_allowed` | 405 | 있는 API 경로에 틀린 메서드를 보냈다(`POST /api/ui-state` 등) |
 | `internal` | 500 | 서버 버그(파싱 실패, 키움이 거절한 요청) |
 | `kiwoom_auth_failed` | 502 | 키움이 우리 인증을 거절했다. 다시 시도해도 낫지 않는다. 운영자가 설정을 고친다 |
@@ -1702,17 +1712,23 @@ interface Fundamentals {
 - GET은 저장된 revision을 돌려준다. 처음은 0이다. 새 레이아웃 id는 어떤 revision이든 받는다.
 - 다른 탭·기기 사이에서는 revision(편집 시각에 가깝다)이 큰 쪽이 이긴다. 기기 시계가 몇 초 늦으면 그 기기의 편집이 그 사이 다른 기기의 편집에 밀릴 수 있다. 탭 사이 동기화는 #4(`data_changed`)다.
 
-#### 관심종목 (#3)
+#### 관심종목 (#3, 여러 목록 #37)
 
 ```ts
-// GET /api/watchlist
-type WatchlistResponse = { symbols: SymbolCode[]; revision: number };   // 표시 순서대로
+interface Watchlist { id: string; name: string; symbols: SymbolCode[] }   // symbols는 표시 순서대로
+// GET /api/watchlists
+type Watchlists = { lists: Watchlist[]; revision: number };               // lists는 표시 순서대로
 
-// PUT /api/watchlist         본문: { symbols: SymbolCode[]; revision: number }
-// 목록 전체를 바꾼다. 추가·삭제·순서 바꾸기 모두 이것 하나로 한다. 중복은 400.
+// PUT /api/watchlists        본문: Watchlists
+// 모든 목록을 통째로 바꾼다. 목록 만들기·이름 바꾸기·지우기·순서, 종목 추가·삭제·순서·옮기기·복사 모두 이것 하나로 한다.
+// 목록을 옮기거나 복사해도 한 요청이라 중간 상태(두 목록에서 다 빠지거나 둘 다에 남는 것)가 저장되지 않는다.
+// 400: 목록 0개 또는 21개 이상, id가 비었거나 64바이트를 넘거나 겹침, 이름이 앞뒤 공백을 갖거나 비었거나 20자를 넘거나 겹침, 한 목록 안의 종목 중복.
+// 같은 종목이 여러 목록에 있는 것은 받는다.
 // 형식만 맞으면 종목 목록에 없는 코드도 받는다(상장폐지 종목). 화면은 "찾을 수 없음"으로 보여 준다.
-// 응답: WatchlistResponse
+// 응답: Watchlists
 ```
+
+지금 보는 목록(`activeWatchlistId`)과 고른 열(`watchColumns`)은 `UiState`에 둔다(frontend.md §3.7).
 
 #### 레이아웃 (#3: 기본 1칸만, #7: 여러 칸·여러 레이아웃)
 
@@ -1769,6 +1785,7 @@ interface Cell {
 // 64KB 이하(넘으면 413 payload_too_large). 서버는 모르는 키를 버리지 않고 그대로 돌려준다.
 // revision만은 서버가 읽어 ui_state.revision 열에 따로 둔다. 없거나 정수가 아니면 400이다.
 interface UiState { lastLayoutId: Uuid | null; theme: "dark" | "light"; revision: number; [k: string]: unknown }
+// 서버가 해석하지 않는 프런트엔드 키 예: watchCollapsed, recentSymbols, activeWatchlistId(#37), watchColumns(#37, "price"|"change"|"changeRate"|"volume")
 ```
 
 #### 드로잉 (#6)

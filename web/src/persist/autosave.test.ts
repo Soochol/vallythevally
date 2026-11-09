@@ -8,6 +8,9 @@ import { PAYLOAD_LIMIT_BYTES } from "./bytes";
 import { ApiRequestError } from "../api/http";
 import { restore } from "./restore";
 import { DEFAULT_UI_PREFS, toUiState } from "./uiState";
+import { FIRST_WATCHLIST_ID, MAX_WATCHLIST_NAME, MAX_WATCHLISTS } from "../lib/watchlist";
+
+const FIRST = { id: FIRST_WATCHLIST_ID, name: "기본" };
 
 let autosave: Autosave;
 let puts: { path: string; body: unknown; keepalive: boolean }[];
@@ -19,7 +22,7 @@ beforeEach(() => {
   toasts = [];
   useLayoutStore.getState().load(DEFAULT_LAYOUT);
   useUiStore.getState().load({ ...DEFAULT_UI_PREFS, lastLayoutId: DEFAULT_LAYOUT.id, recentSymbols: ["IDX:001"] }, { phone: 1 });
-  useWatchlistStore.getState().load(["005930"]);
+  useWatchlistStore.getState().load([{ ...FIRST, symbols: ["005930"] }]);
   autosave = startAutosave({
     put: async (path, json, { keepalive }) => {
       puts.push({ path, body: JSON.parse(json), keepalive });
@@ -63,16 +66,60 @@ test("테마를 바꾸면 모르는 키와 함께 UiState를 보낸다", async (
   expect(puts).toEqual([
     {
       path: "/api/ui-state",
-      body: { phone: 1, lastLayoutId: DEFAULT_LAYOUT.id, theme: "light", watchCollapsed: false, recentSymbols: ["IDX:001"], revision: expect.any(Number) },
+      body: {
+        phone: 1,
+        lastLayoutId: DEFAULT_LAYOUT.id,
+        theme: "light",
+        watchCollapsed: false,
+        recentSymbols: ["IDX:001"],
+        activeWatchlistId: null,
+        watchColumns: ["price", "changeRate"],
+        revision: expect.any(Number),
+      },
       keepalive: false,
     },
   ]);
 });
 
 test("관심종목은 바꾸자마자 보낸다", async () => {
-  useWatchlistStore.getState().add("000660");
+  useWatchlistStore.getState().add(FIRST_WATCHLIST_ID, "000660");
   await vi.advanceTimersByTimeAsync(0);
-  expect(puts).toEqual([{ path: "/api/watchlist", body: { symbols: ["005930", "000660"], revision: expect.any(Number) }, keepalive: false }]);
+  expect(puts).toEqual([
+    { path: "/api/watchlists", body: { lists: [{ ...FIRST, symbols: ["005930", "000660"] }], revision: expect.any(Number) }, keepalive: false },
+  ]);
+});
+
+test("목록을 만들고 종목을 옮기면 목록 전체를 한 본문으로 보낸다", async () => {
+  const store = useWatchlistStore.getState();
+  store.create("L2", "반도체");
+  store.transfer(FIRST_WATCHLIST_ID, "L2", "005930", "move");
+  await vi.advanceTimersByTimeAsync(0);
+  await vi.advanceTimersByTimeAsync(0);
+  expect(puts.at(-1)!.body).toEqual({
+    lists: [
+      { ...FIRST, symbols: [] },
+      { id: "L2", name: "반도체", symbols: ["005930"] },
+    ],
+    revision: expect.any(Number),
+  });
+});
+
+test("옛 한 목록 한도(64KB)에 들던 종목을 가장 긴 감싸개 20개로 감싸도 순서 변경을 보낸다", async () => {
+  const legacyBytes = (symbols: string[]) => JSON.stringify({ symbols, revision: Number.MAX_SAFE_INTEGER }).length;
+  const codes: string[] = [];
+  while (legacyBytes(codes) <= PAYLOAD_LIMIT_BYTES) codes.push(String(100_000 + codes.length));
+  codes.pop();
+  expect(codes.length).toBeGreaterThanOrEqual(7_274);
+  const lists = Array.from({ length: MAX_WATCHLISTS }, (_, i) => ({
+    id: String(i).padStart(64, "0"),
+    name: "𝄞".repeat(MAX_WATCHLIST_NAME - String(i).length) + i,
+    symbols: i === 0 ? codes : [],
+  }));
+  useWatchlistStore.getState().load(lists);
+  useWatchlistStore.getState().move(lists[0]!.id, codes[1]!, 0);
+  await vi.advanceTimersByTimeAsync(0);
+  expect(usePersistStore.getState().saves.watchlist).not.toEqual({ kind: "failed", reason: "too_large" });
+  expect(puts.at(-1)!.body).toEqual({ lists: [{ ...lists[0], symbols: [codes[1], codes[0], ...codes.slice(2)] }, ...lists.slice(1)], revision: expect.any(Number) });
 });
 
 test("UiState가 64KB를 넘으면 최근 본 종목을 지우고 한 번 다시 보낸다", async () => {
@@ -118,7 +165,7 @@ test("R1: 종목 정보를 못 받아 통합으로 그리는 NXT 칸은, 봉 주
     uiState: async () => ({ lastLayoutId: DEFAULT_LAYOUT.id, theme: "dark" }),
     layouts: async () => [],
     layout: async () => stored,
-    watchlist: async () => ({ symbols: [], revision: 0 }),
+    watchlists: async () => ({ lists: [{ ...FIRST, symbols: [] }], revision: 0 }),
     unsaved: () => null,
     symbolInfo: async () => Promise.reject(new ApiRequestError("kiwoom_unavailable", "잠시 뒤")),
   });

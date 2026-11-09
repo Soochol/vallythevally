@@ -384,11 +384,20 @@ pub struct Fundamentals {
 #[ts(export)]
 pub struct Revision(#[ts(type = "number")] pub i64);
 
-/// `GET /api/watchlist` 응답이자 `PUT /api/watchlist` 본문. 표시 순서대로. 중복은 400.
+/// 관심종목 목록 하나. `symbols`는 표시 순서대로이고 중복이 없다.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[ts(export)]
 pub struct Watchlist {
+    pub id: String,
+    pub name: String,
     pub symbols: Vec<SymbolCode>,
+}
+
+/// `GET /api/watchlists` 응답이자 `PUT /api/watchlists` 본문. `lists`는 표시 순서대로이고 1~20개다.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct Watchlists {
+    pub lists: Vec<Watchlist>,
     pub revision: Revision,
 }
 

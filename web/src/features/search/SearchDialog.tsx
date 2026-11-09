@@ -6,7 +6,7 @@ import { KIND_LABEL, MARKET_LABEL } from "../../lib/symbol";
 import { useLayoutStore } from "../../stores/layout";
 import { type SearchPurpose, useSelectionStore } from "../../stores/selection";
 import { useUiStore } from "../../stores/ui";
-import { useWatchlistStore } from "../../stores/watchlist";
+import { useActiveWatchlist, useWatchlistStore } from "../../stores/watchlist";
 import { SearchIcon } from "../icons";
 import { highlight, normalizeQuery } from "./highlight";
 import { GROUP_LABEL, searchList } from "./searchList";
@@ -20,9 +20,9 @@ export function SearchDialog() {
 function SearchDialogBody({ purpose }: { purpose: SearchPurpose }) {
   const close = useSelectionStore((s) => s.closeDialog);
   const slot = useSelectionStore((s) => s.activeSlot);
-  const watch = useSymbolInfos(useWatchlistStore((s) => s.symbols));
+  const watchlist = useActiveWatchlist();
+  const watch = useSymbolInfos(watchlist.symbols);
   const recent = useSymbolInfos(useUiStore((s) => s.prefs.recentSymbols));
-  const watched = useWatchlistStore((s) => s.symbols);
   const queryClient = useQueryClient();
   const [input, setInput] = useState("");
   const [active, setActive] = useState(0);
@@ -55,10 +55,10 @@ function SearchDialogBody({ purpose }: { purpose: SearchPurpose }) {
   const addToWatch = (info: SymbolInfo) => {
     queryClient.setQueryData(["symbol", info.code], info);
     const { showToast } = useSelectionStore.getState();
-    if (watched.includes(info.code)) showToast(`${info.name}은 이미 관심종목에 있습니다`);
+    if (watchlist.symbols.includes(info.code)) showToast(`${info.name}은 이미 ${watchlist.name}에 있습니다`);
     else {
-      useWatchlistStore.getState().add(info.code);
-      showToast(`관심종목에 넣었습니다: ${info.name}`);
+      useWatchlistStore.getState().add(watchlist.id, info.code);
+      showToast(`${watchlist.name}에 넣었습니다: ${info.name}`);
     }
     close();
   };

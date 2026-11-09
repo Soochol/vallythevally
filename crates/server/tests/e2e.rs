@@ -116,13 +116,17 @@ async fn user_data_survives_a_restart_and_quotes_come_from_kiwoom() {
     let base = format!("http://{}", server.addr().await);
     let client = reqwest::Client::new();
 
-    let watchlist = serde_json::json!({"symbols": ["005930", "IDX:001", "000660"], "revision": 1_794_152_040_001_i64});
+    let watchlist = serde_json::json!({"lists": [
+        {"id": "01900000-0000-7000-8000-000000000002", "name": "기본", "symbols": ["005930", "IDX:001"]},
+        {"id": "L2", "name": "반도체", "symbols": ["000660", "005930"]},
+        {"id": "L3", "name": "지수", "symbols": ["IDX:101"]},
+    ], "revision": 1_794_152_040_001_i64});
     let layout = serde_json::json!({"id": "0193aaaa-0000-7000-8000-000000000002", "name": "둘", "arrangement": "2v", "revision": 1_794_152_040_002_i64,
         "sync": {"crosshair": true, "scroll": false}, "cells": [
             {"slot": 0, "symbol": "005930", "venue": "nxt", "period": "15m", "symbolLink": true, "chartSettings": {"v": 1, "indicators": ["ma"]}},
             {"slot": 1, "symbol": "IDX:001", "venue": null, "period": "W", "symbolLink": false, "chartSettings": {"v": 1}}]});
     let ui = serde_json::json!({"lastLayoutId": layout["id"], "theme": "light", "watchCollapsed": true, "revision": 1_794_152_040_003_i64});
-    assert_eq!(put(&client, &base, "/api/watchlist", &watchlist).await, (200, watchlist.clone()));
+    assert_eq!(put(&client, &base, "/api/watchlists", &watchlist).await, (200, watchlist.clone()));
     let mut saved = Value::Null;
     for _ in 0..100 {
         let (status, body) = put(&client, &base, &format!("/api/layouts/{}", layout["id"].as_str().unwrap()), &layout).await;
@@ -146,7 +150,7 @@ async fn user_data_survives_a_restart_and_quotes_come_from_kiwoom() {
 
     let server = Server::spawn(&fake, &lock, &dist);
     let base = format!("http://{}", server.addr().await);
-    assert_eq!(get(&client, &base, "/api/watchlist").await, (200, watchlist));
+    assert_eq!(get(&client, &base, "/api/watchlists").await, (200, watchlist));
     assert_eq!(get(&client, &base, &format!("/api/layouts/{}", layout["id"].as_str().unwrap())).await, (200, saved));
     let (_, list) = get(&client, &base, "/api/layouts").await;
     assert_eq!(list.as_array().unwrap().iter().map(|l| l["name"].as_str().unwrap()).collect::<Vec<_>>(), ["기본", "둘"]);

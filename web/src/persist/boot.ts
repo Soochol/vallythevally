@@ -1,7 +1,7 @@
 import type { QueryClient } from "@tanstack/react-query";
 import { ApiRequestError, sendJson } from "../api/http";
 import { fetchSymbolInfo } from "../api/queries";
-import { fetchLayout, fetchLayouts, fetchUiState, fetchWatchlist } from "../api/userData";
+import { fetchLayout, fetchLayouts, fetchUiState, fetchWatchlists } from "../api/userData";
 import { useLayoutStore } from "../stores/layout";
 import { SAVE_TARGETS, usePersistStore } from "../stores/persist";
 import { useSelectionStore } from "../stores/selection";
@@ -38,7 +38,7 @@ export async function boot(queryClient: QueryClient) {
       uiState: () => fetchUiState(),
       layouts: () => fetchLayouts(),
       layout: (id) => fetchLayout(id),
-      watchlist: () => fetchWatchlist(),
+      watchlists: () => fetchWatchlists(),
       symbolInfo: (code) =>
         queryClient.fetchQuery({
           queryKey: ["symbol", code],
@@ -50,7 +50,7 @@ export async function boot(queryClient: QueryClient) {
     });
     useLayoutStore.getState().load(restored.layout);
     useUiStore.getState().load(restored.ui.prefs, restored.ui.extra);
-    useWatchlistStore.getState().load(restored.watchlist);
+    useWatchlistStore.getState().load(restored.watchlists);
     followTheme();
     for (const target of SAVE_TARGETS) clearUnsaved(target, restored.serverRevisions[target]);
     const autosave = startAutosave({ put: (path, json, o) => sendJson("PUT", path, json, o), toast, revisions: restored.revisions });

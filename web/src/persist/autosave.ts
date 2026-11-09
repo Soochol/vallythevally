@@ -1,11 +1,11 @@
 import type { LayoutInput } from "../api/generated/LayoutInput";
-import type { Watchlist } from "../api/generated/Watchlist";
-import { layoutPath, UI_STATE_PATH, WATCHLIST_PATH } from "../api/userData";
+import type { Watchlists } from "../api/generated/Watchlists";
+import { layoutPath, UI_STATE_PATH, WATCHLISTS_PATH } from "../api/userData";
 import { useLayoutStore } from "../stores/layout";
 import { type SaveTarget, usePersistStore } from "../stores/persist";
 import { useUiStore } from "../stores/ui";
 import { useWatchlistStore } from "../stores/watchlist";
-import { exceedsLimit } from "./bytes";
+import { exceedsLimit, WATCHLISTS_LIMIT_BYTES } from "./bytes";
 import { createSaver, type Saver, type SaverOptions } from "./saver";
 import { clearUnsaved, writeUnsaved } from "./unsaved";
 import { toUiState } from "./uiState";
@@ -75,11 +75,11 @@ export function startAutosave(deps: AutosaveDeps): Autosave {
     onState: (s) => setSave("ui", s),
   });
 
-  const watchlist = createSaver<Omit<Watchlist, "revision">>({
+  const watchlist = createSaver<Omit<Watchlists, "revision">>({
     debounceMs: 0,
-    read: () => ({ symbols: [...useWatchlistStore.getState().symbols] }),
-    tooLarge: () => false,
-    path: () => WATCHLIST_PATH,
+    read: () => ({ lists: [...useWatchlistStore.getState().lists] }),
+    tooLarge: (v) => exceedsLimit({ ...v, revision: Number.MAX_SAFE_INTEGER }, WATCHLISTS_LIMIT_BYTES),
+    path: () => WATCHLISTS_PATH,
     revision: deps.revisions.watchlist,
     send: deps.put,
     unsaved: unsaved("watchlist"),

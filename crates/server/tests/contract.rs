@@ -64,6 +64,7 @@ fn generated_typescript_matches_the_committed_files() {
         generated::<UnixSeconds>(),
         generated::<Venue>(),
         generated::<Watchlist>(),
+        generated::<Watchlists>(),
     ];
     let mut committed: Vec<String> = git(&["ls-tree", "--name-only", "HEAD", &format!("{DIR}/")])
         .lines()
