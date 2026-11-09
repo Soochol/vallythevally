@@ -82,3 +82,42 @@ jobs:
           cache-dependency-path: web/pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
+
+  e2e:
+    name: e2e
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --locked -p server -p fake-kiwoom
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 11.6.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+        working-directory: web
+      - run: pnpm build
+        working-directory: web
+      - run: pnpm exec playwright install --with-deps --only-shell chromium
+        working-directory: web
+      - name: E2E with loopback networking only
+        working-directory: web
+        run: |
+          sysctl kernel.apparmor_restrict_unprivileged_userns || true
+          sudo --preserve-env=PATH unshare --net bash -euc '
+            ip link set lo up
+            exec sudo -u "$SUDO_USER" --preserve-env=PATH,CI env -u XDG_RUNTIME_DIR pnpm exec playwright test
+          '
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-results
+          path: |
+            web/test-results/
+            web/playwright-report/
+          if-no-files-found: ignore
