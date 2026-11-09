@@ -275,7 +275,6 @@ async fn bars(State(st): State<Arc<AppState>>, Query(q): Query<HashMap<String, S
     }))
 }
 
-/// 최신 페이지에 허브 스냅숏을 합친다. 캐시에 아직 붙지 않은 최근 확정 봉을 잇고, 현재 봉은 허브 것을 쓴다.
 fn with_snapshot(
     mut bars: Vec<domain::ConfirmedBar>,
     kiwoom_current: Option<crate::kiwoom::wire::KiwoomBar>,
@@ -289,10 +288,10 @@ fn with_snapshot(
             bars.push(b);
         }
     }
-    let newest = bars.last().map(|b| b.bucket.start());
-    let current = match snap.current {
+    let after_confirmed = |b: domain::Bucket| bars.last().is_none_or(|last| last.bucket < b);
+    let current = match snap.current.filter(|c| after_confirmed(c.bucket())) {
         Some(c) => Some(api::Bar::new(c.bucket(), c.ohlcv())),
-        None => kiwoom_current.filter(|c| newest.is_none_or(|n| n < c.bucket.start())).map(|c| api::Bar::new(c.bucket, &c.ohlcv)),
+        None => kiwoom_current.filter(|c| after_confirmed(c.bucket)).map(|c| api::Bar::new(c.bucket, &c.ohlcv)),
     };
     (bars, current, Some(snap.seq))
 }
