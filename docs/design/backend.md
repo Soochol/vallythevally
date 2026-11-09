@@ -42,7 +42,8 @@ vallythevally/
 ├── Cargo.toml            # workspace
 ├── crates/
 │   ├── domain/           # 순수. 체결·봉·봉 주기·종목코드·시각·현재 봉 집계·알림 판단
-│   ├── indicators/       # 순수. 지표 종류 일곱 가지. feature "wasm"으로 브라우저용 빌드
+│   ├── indicators/       # 순수. 지표 종류 일곱 가지
+│   ├── indicators-wasm/  # indicators의 wasm-bindgen 바인딩(cdylib). 브라우저용 빌드만 쓴다
 │   └── server/           # 바이너리 하나. Axum + 키움 + 메모리 캐시 + 실시간 + 알림 + SQLite(#3부터, 사용자 자료만)
 ├── migrations/           # sqlx 마이그레이션(SQLite 사용자 자료, #3부터)
 ├── data/                 # vally.db (git 제외, #3부터)
@@ -52,10 +53,10 @@ vallythevally/
 ```
 indicators ──▶ domain
 server ──────▶ domain, indicators
-web(WASM) ───▶ indicators(feature "wasm")
+web(WASM) ───▶ indicators-wasm ──▶ indicators, domain
 ```
 
-크레이트는 세 개다. 후보였던 `kiwoom`과 `store`는 크레이트로 만들지 않는다. `server` 안의 모듈로 둔다.
+제품 크레이트는 네 개다(`domain`, `indicators`, `indicators-wasm`, `server`). 시험용 `fake-kiwoom`은 따로 친다. 후보였던 `kiwoom`과 `store`는 크레이트로 만들지 않는다. `server` 안의 모듈로 둔다.
 
 ### 경계마다의 근거
 
@@ -63,6 +64,7 @@ web(WASM) ───▶ indicators(feature "wasm")
 |---|---|
 | `domain` 크레이트 | ADR 0003은 봉 집계와 알림 판단을 "체결 목록을 받는 순수 함수"로 만들라고 한다. 별도 크레이트로 두면 `Cargo.toml`에 tokio·sqlx·reqwest가 없다. 그래서 순수성을 **컴파일러가 강제**한다. 시계도 읽지 않는다. 현재 시각은 인자로 받는다. 호출자는 `server`와 `indicators` 둘이다. |
 | `indicators` 크레이트 | 브라우저(WASM)와 서버(지표 알림)가 같은 코드를 쓴다(ADR 0002). WASM으로 빌드되어야 하므로 IO 의존이 없어야 한다. 호출자가 둘이다. |
+| `indicators-wasm` 크레이트 | wasm-pack은 cdylib 크레이트 형식이 있어야 한다. 이것을 `indicators`에 두면 서버 빌드도 cdylib를 링크한다. 바인딩만 따로 두면 서버 빌드에는 `wasm-bindgen`이 들어가지 않는다. 호출자는 브라우저 하나다(#5). |
 | `indicators` → `domain` | 일목균형표 선행스팬은 마지막 봉 뒤의 미래 봉 시작 시각이 필요하다. 봉 경계 규칙의 유일한 정의는 `domain::Period`다. 그래서 브라우저도 같은 함수를 WASM으로 받는다(§9.3). |
 | `domain`은 `indicators`를 모른다 | 지표 알림의 판단은 "지표 값 두 쌍이 교차했나"뿐이다. `domain::alert`는 `f64` 값만 받는다. 지표 계산은 `server`가 `indicators`로 해서 넘긴다. 그래서 순환이 없다. |
 | `kiwoom`은 모듈 | 호출자는 `server` 하나다. 실측 프로그램(#1)은 버릴 코드라 두 번째 호출자로 치지 않는다. 크레이트로 나눠서 얻는 것은 파서 테스트의 빌드 격리 정도인데, 모듈 테스트로 충분하다. 시세 API만 쓰게 하는 장치(§4.4)는 타입과 테스트로 건다. |
@@ -1921,13 +1923,12 @@ struct ConnWriter {
 
 ```rust
 /// 열 단위 입력. WASM 경계에서 Float64Array 여섯 개로 그대로 받을 수 있다.
-pub struct Columns<'a> {
-    pub t: &'a [i64],      // 봉 시작 시각, Unix 초. 오름차순
-    pub open: &'a [f64],
-    pub high: &'a [f64],
-    pub low: &'a [f64],
-    pub close: &'a [f64],
-    pub volume: &'a [f64],
+/// 필드는 비공개다. 길이가 같고 t가 순증가하는 것만 new로 만들 수 있다.
+pub struct Columns<'a> { /* t: &'a [i64] (봉 시작 시각, Unix 초), open, high, low, close, volume: &'a [f64] */ }
+
+impl<'a> Columns<'a> {
+    pub fn new(t: &'a [i64], open: &'a [f64], high: &'a [f64], low: &'a [f64], close: &'a [f64], volume: &'a [f64])
+        -> Result<Self, ColumnsError>;   // LengthMismatch | NotAscending
 }
 
 /// 브라우저 계약의 IndicatorSpec과 같은 모양(serde, ts-rs).
@@ -1945,9 +1946,12 @@ pub enum Spec {
 }
 
 impl Spec {
-    /// 설정값 검사(기간 1 이상, fast < slow 등). 오류는 필드 이름과 한국어 문장.
+    /// JSON 읽기와 validate를 한 번에. 브라우저 validateSpec과 서버의 알림 저장이 같은 판정을 쓴다.
+    /// JSON을 읽지 못하면 field가 빈 문자열인 오류 하나.
+    pub fn parse_valid(json: &str) -> Result<Spec, Vec<SpecError>>;
+    /// 설정값 검사(기간 1 이상, 볼린저 k > 0, fast < slow). 오류의 field는 JSON 필드 이름(`spanB`, `maPeriod`), message는 한국어 문장.
     pub fn validate(&self) -> Result<(), Vec<SpecError>>;
-    /// 첫 유효 값이 나오기까지 필요한 봉 수.
+    /// 마지막 봉에서 모든 선에 값이 있으려면 필요한 봉 수. 그보다 짧으면 어느 선이든 NaN이 있다.
     pub fn warmup(&self) -> usize;
     pub fn lines(&self) -> Vec<LineId>;
     pub fn shift_of(&self, line: LineId) -> Option<i32>; // 그 spec의 선이 아니면 None
@@ -1965,8 +1969,11 @@ pub struct Line {
 pub struct Output { pub lines: Vec<Line> }
 
 /// 한 번에 전부 계산한다. 서버의 지표 알림은 이것만 쓴다(§7.3).
+/// validate를 통과하지 않은 spec도 패닉하지 않는다. 값이 NaN일 뿐이다.
 pub fn compute(spec: &Spec, bars: &Columns) -> Output;
 ```
+
+- `Line`, `Output`, `Tail`은 `PartialEq`를 두지 않는다. NaN이 섞여 있어 `==`가 뜻과 다르게 동작하기 때문이다. 테스트는 비트 단위로 비교한다.
 
 - 출력 위치는 **봉 순서(index)** 다. 시각이 아니다. 시각으로 바꾸는 것은 호출자가 `t[i + shift]`로 한다.
 - `i + shift`가 입력 범위를 넘으면(선행스팬의 마지막 displacement−1개) 미래 봉 시작 시각이 필요하다. 이것은 `future_bar_starts`가 만든다(§9.3).
@@ -1977,7 +1984,6 @@ pub fn compute(spec: &Spec, bars: &Columns) -> Output;
 
 ```rust
 pub struct Engine {
-    spec: Spec,
     state: State,      // 확정 봉까지 계산한 상태. 지표 종류마다 다르다(EMA 직전 값, 창 버퍼 등)
     output: Output,    // 확정 봉까지의 출력
 }
@@ -1990,7 +1996,7 @@ pub struct Tail { pub values: Vec<(LineId, f64)> }
 
 impl Engine {
     /// 확정 봉 전체로 만든다. compute와 같은 결과를 output에 담는다.
-    pub fn new(spec: Spec, confirmed: &Columns) -> Self;
+    pub fn new(spec: &Spec, confirmed: &Columns) -> Self;
     /// 확정 봉 하나를 더한다. O(창 크기) 이하. 확정 순간의 최종 값을 돌려준다.
     pub fn push_confirmed(&mut self, bar: &BarInput) -> Tail;
     /// 현재 봉을 넣었을 때의 마지막 값. 상태를 바꾸지 않는다.
@@ -1999,6 +2005,7 @@ impl Engine {
 }
 ```
 
+- **구현**: 지표 종류마다 봉 하나를 받아 그 봉 위치의 값을 내는 상태 기계(`state.rs`의 `State::step`) 하나만 있다. `compute`는 그것을 처음부터 돌린 것이고, `push_confirmed`는 한 걸음, `preview`는 상태 복사본으로 한 걸음이다. 그래서 아래 불변식은 구조로 성립하고, 테스트는 그것이 앞으로도 깨지지 않게 막는다. 창 평균은 매 걸음 창 전체를 다시 더한다. 누적 합을 빼고 더하면 긴 시리즈에서 부동소수 오차가 쌓인다.
 - 과거로 스크롤해서 앞쪽 봉이 늘면 `Engine::new`로 다시 만든다. 앞쪽이 바뀌면 EMA 계열 값이 모두 바뀌므로 덧붙일 수 없다.
 - **불변식(테스트로 고정)**
   - 어떤 봉 목록이든 `Engine::new(앞 n−1개)` 뒤 `push_confirmed(n번째)`의 출력은 `compute(n개)`와 같다.
@@ -2008,10 +2015,10 @@ impl Engine {
 ### 9.3 미래 봉 시각(일목 선행스팬, 드로잉 외삽)
 
 ```rust
-// domain::Period
-/// last 다음부터 n개의 봉 시작 시각. 공휴일은 모르므로 건너뛰지 않는다(알려진 한계).
-/// 이 함수는 indicators의 wasm feature로 브라우저에도 나간다.
-pub fn future_bar_starts(self, last: Bucket, n: usize) -> Vec<KstTime>;
+// domain::Bucket. 봉 주기는 Bucket이 들고 있으므로 따로 받지 않는다.
+/// 이 봉 다음부터 n개의 봉 시작 시각. 공휴일은 모르므로 건너뛰지 않는다(알려진 한계).
+/// 브라우저에는 indicators-wasm의 futureBarStarts로 나간다.
+pub fn future_starts(self, n: usize) -> Vec<KstTime>;
 ```
 
 봉 주기마다 다음 봉 시작 시각을 만드는 규칙이 다르다. "주말 건너뛰기"는 분봉과 일봉에만 해당한다.
@@ -2029,19 +2036,21 @@ pub fn future_bar_starts(self, last: Bucket, n: usize) -> Vec<KstTime>;
 
 ### 9.4 WASM 바인딩
 
-`indicators`에 `wasm` feature를 둔다. 켜면 `wasm-bindgen`으로 다음을 내보낸다. 서버 빌드에는 `wasm-bindgen`이 들어가지 않는다.
+바인딩은 따로 된 크레이트 `crates/indicators-wasm`(cdylib)에 둔다. `indicators`에 feature로 두면 cdylib 크레이트 형식 때문에 서버를 빌드할 때마다 `indicators`의 공유 라이브러리도 함께 링크된다. 크레이트를 나누면 서버 빌드에는 `wasm-bindgen`도 cdylib도 들어가지 않는다. 다음을 내보낸다.
 
 ```rust
 /// 계산 엔진을 만들지 않고 spec만 검사한다. 입력할 때마다 불러도 된다.
 /// 결과는 SpecValidation(§8.2) JSON 객체. JSON 파싱 실패도 { ok: false, errors: [{ field: "", message }] }.
-#[wasm_bindgen(js_name = validateSpec)]
+/// SpecValidation 타입은 typescript_custom_section으로 생성된 indicators.d.ts에 들어간다.
+#[wasm_bindgen(js_name = validateSpec, unchecked_return_type = "SpecValidation")]
 pub fn validate_spec(spec_json: &str) -> JsValue;
 
 #[wasm_bindgen]
-pub struct WasmEngine(Engine);
+pub struct WasmEngine { engine: Engine, lines: Vec<LineId> }
 
 #[wasm_bindgen]
 impl WasmEngine {
+    /// spec이 validate를 통과하지 않거나, 열 길이가 다르거나, t가 정수·순증가가 아니면 JsError.
     #[wasm_bindgen(constructor)]
     pub fn new(spec_json: &str, t: &[f64], o: &[f64], h: &[f64], l: &[f64], c: &[f64], v: &[f64])
         -> Result<WasmEngine, JsError>;
@@ -2050,15 +2059,19 @@ impl WasmEngine {
     pub fn push_confirmed(&mut self, t: f64, o: f64, h: f64, l: f64, c: f64, v: f64) -> Vec<f64>;
     /// 위와 같은 순서. 상태를 바꾸지 않는다.
     pub fn preview(&self, t: f64, o: f64, h: f64, l: f64, c: f64, v: f64) -> Vec<f64>;
-    /// 선 하나 전체. shift는 shift(index)로 따로 받는다.
-    pub fn line(&self, index: usize) -> Vec<f64>;
-    pub fn shift(&self, index: usize) -> i32;
+    /// 선 하나 전체. shift는 shift(index)로 따로 받는다. index가 범위 밖이면 JsError.
+    pub fn line(&self, index: usize) -> Result<Vec<f64>, JsError>;
+    pub fn shift(&self, index: usize) -> Result<i32, JsError>;
     pub fn lines(&self) -> Vec<String>;
 }
 
+/// period는 계약의 봉 주기 이름("1m", "D" 등). last_start가 그 봉 주기의 봉 시작 시각이 아니면 JsError.
 #[wasm_bindgen(js_name = futureBarStarts)]
 pub fn future_bar_starts(period: &str, last_start: f64, n: usize) -> Result<Vec<f64>, JsError>;
 ```
+
+- **빌드**: `web/scripts/build-wasm.sh`(`pnpm wasm`). `wasm-pack build --release --target web --out-name indicators`로 `web/src/wasm/indicators/`에 쓴다. LTO와 `opt-level = "s"`는 이 스크립트 안에서 환경 변수로만 켠다. 서버의 릴리스 빌드에는 걸리지 않는다. 2026-11-09 측정: `indicators_bg.wasm` 134,813바이트, gzip 56,315바이트. 기본 릴리스 설정(LTO 없음, `opt-level = 3`)으로는 185,727바이트(gzip 78,739)였다.
+- **확인**: `web/scripts/wasm-smoke.mjs`(`pnpm wasm:smoke`)가 빌드된 wasm을 Node에서 불러온다. 그리고 Rust 테스트와 같은 참조 CSV로 대조하고, `validateSpec`, `futureBarStarts`, `preview`와 `pushConfirmed`가 같은 값인지 확인한다. CI의 `wasm` 작업과 `scripts/check.sh`가 이 둘을 돌린다.
 
 계산은 React 렌더링 밖에서 한다(#5). Web Worker를 권한다. 이것은 프런트엔드 설계의 몫이다.
 
@@ -2070,11 +2083,12 @@ pub fn future_bar_starts(period: &str, last_start: f64, n: usize) -> Result<Vec<
 | 볼린저 밴드 | `Bollinger { period, k }` | 20, 2.0 | `upper` `middle` `lower` | 표준편차는 모표준편차(n으로 나눔) |
 | 일목균형표 | `Ichimoku { … }` | 9, 26, 52, 26 | `conversion` `base` `spanA` `spanB` `lagging` | 선행스팬은 shift +(displacement−1), 후행스팬 −(displacement−1). 기본 26이면 25봉 앞(오늘을 1로 세어 26번째) |
 | 거래량 | `Volume { ma_period }` | 20 | `volume`, `ma` | 이동평균 여러 개는 지표를 여러 개 띄워서 본다 |
-| RSI | `Rsi { period, signal }` | 14, null | `rsi`, `signal` | Wilder 평활. signal은 RSI의 단순평균 |
-| MACD | `Macd { fast, slow, signal }` | 12, 26, 9 | `macd` `signal` `histogram` | EMA |
-| 스토캐스틱 슬로우 | `StochSlow { k, d, smooth }` | 5, 3, 3 | `k` `d` | 국내 HTS 관행 |
+| RSI | `Rsi { period, signal }` | 14, null | `rsi`, `signal` | Wilder 평활. 첫 값은 변화 `period`개의 단순평균이라 `period + 1`번째 봉부터 나온다. signal은 RSI의 단순평균. 오르내림이 모두 0이면 50 |
+| MACD | `Macd { fast, slow, signal }` | 12, 26, 9 | `macd` `signal` `histogram` | 위 EMA 두 개의 차이. 두 EMA는 각자 자기 첫 `period`개 평균에서 시작한다. signal은 MACD 값이 나온 봉부터 잰 EMA. TA-Lib의 `MACD` 함수와는 처음 몇 십 봉이 다르다. 그 함수는 빠른 EMA를 느린 EMA의 첫 봉에 맞춰 늦게 시작하기 때문이다 |
+| 스토캐스틱 슬로우 | `StochSlow { k, d, smooth }` | 5, 3, 3 | `k` `d` | 국내 HTS 관행. `k`: 최고·최저가를 보는 봉 수, `smooth`: Fast %K의 단순평균 봉 수(이것이 `k` 선), `d`: 그 `k` 선의 단순평균 봉 수. 최고가와 최저가가 같으면 Fast %K는 50 |
 
-- **참조값**: 공개된 계산 예시표(Wilder의 RSI 원문 예시, StockCharts 예시 등)를 고정 파일로 커밋한다. 출처를 파일 머리에 적는다. 키움 HTS 화면 값으로 몇 점을 더 확인한다. 특히 일목 선행스팬 이동량과 스토캐스틱 값은 HTS와 맞춰 본다.
+- **참조값**(#5 앞부분에서 만듦): `crates/indicators/tests/reference/*.csv`. `generate.py`가 TA-Lib 0.8.3(C 0.8.3)과 numpy 2.5.4로 만든다. 버전은 스크립트 머리의 PEP 723 블록에 고정했고, 다시 만들 때는 `uv run crates/indicators/tests/reference/generate.py`를 쓴다. 입력은 고정 시드로 만든 합성 400봉이라 실제 시세가 아니다. 출처 함수와 입력은 각 CSV 머리에 적었다. 일목균형표는 TA-Lib에 없어 numpy의 창 최고·최저로 따로 구현했다. `talib.STOCH`는 `k`·`d` 선을 늦은 쪽에 맞춰 함께 시작해서, 앞쪽 몇 봉은 비교하지 않는다. 그 구간은 `warmup` 성질 테스트가 맡는다.
+- **아직 못 한 대조**: 키움 HTS 화면 값으로 몇 점을 더 확인한다. 특히 일목 선행스팬 이동량과 스토캐스틱 값(HTS가 Slow %K를 Fast %K의 단순평균으로 내는지)은 HTS와 맞춰 본다. 이 대조는 키움 화면이 필요해서 #5 앞부분에서는 하지 않았다.
 - EMA 계열(EMA, MACD, RSI)은 입력이 시작하는 봉에 따라 값이 조금 다르다. 서버 알림은 최근 N개로 매번 다시 계산하고(§7.3) 화면은 불러온 봉 전체로 계산한다. 그래서 두 값이 아주 조금 다를 수 있다.
 
 ---
@@ -2086,7 +2100,7 @@ pub fn future_bar_starts(period: &str, last_start: f64, n: usize) -> Result<Vec<
 | 대상 | 방법 | 위치 | 단계 |
 |---|---|---|---|
 | 봉 경계·확정 시각 | 표 기반 테스트. 봉 주기마다 08:00:00, 08:59:59, 09:00:00, 15:30:00, 19:59:59, 20:00:03(19:59 봉), 20:00:10(창 밖), 금요일 20:00:10, 장 중간 분봉의 끝 + 2초, 월말 마지막 평일, 월초. 다음 구간 체결로 닫기와 타이머로 닫기 중 먼저 오는 쪽 | `domain` | #2·#4 |
-| 미래 봉 시각 | `future_bar_starts` 표 기반 테스트. 분봉: 19:59 다음은 다음 평일 08:00, 금요일 19:59 다음은 월요일 08:00. 일봉: 금요일 다음은 월요일. 주봉: 연말을 넘는 주(예: 2026-12-28 → 2027-01-04), 월요일이 1일인 주. 월봉: 12월 → 다음 해 1월, 1일이 토·일인 달(예: 2026-11-01(일), 2027-05-01(토))도 1일 | `domain` | #5 |
+| 미래 봉 시각 | `Bucket::future_starts` 표 기반 테스트. 분봉: 19:59 다음은 다음 평일 08:00, 금요일 19:59 다음은 월요일 08:00. 일봉: 금요일 다음은 월요일. 주봉: 연말을 넘는 주(예: 2026-12-28 → 2027-01-04), 월요일이 1일인 주. 월봉: 12월 → 다음 해 1월, 1일이 토·일인 달(예: 2026-11-01(일), 2027-05-01(토))도 1일 | `domain` | #5 |
 | 체결 날짜 정하기 | 수신 시각과 체결시간 쌍을 손으로 쓴다. 창 밖, 미래, 너무 과거 | `domain` | #4 |
 | 현재 봉 집계 | 손으로 쓴 체결 목록 → `aggregate` → 손으로 쓴 확정 봉 목록·현재 봉과 비교. 시드 경계(`DayCum`, `Unknown`), 늦은 체결, 체결 없는 분, 단일가 체결 한 건, 불완전한 봉의 `needs_verify` | `domain` | #4 |
 | 알림 판단 | 손으로 쓴 체결 목록으로 가격 알림: 아래에서 위로 넘어섬, 만들 때 이미 넘어 있음(안 울림), 반대편 갔다 다시 넘어섬(every), 기준 가격 없음 → 첫 체결은 기준만. 손으로 쓴 지표 값 쌍으로 교차: 같은 값, NaN | `domain` | #8 |
