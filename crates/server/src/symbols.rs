@@ -317,7 +317,7 @@ mod tests {
                 return token(1);
             }
             if down2.load(Ordering::SeqCst) {
-                return Err(crate::kiwoom::transport::TransportError("점검".into()));
+                return Err(crate::kiwoom::transport::TransportError::refused());
             }
             ok(if s.body.contains("\"10\"") { kosdaq.clone() } else { exchange.clone() }, None)
         }));

@@ -24,9 +24,46 @@ pub struct HttpResponse {
     pub body: String,
 }
 
-/// URL과 헤더를 뺀 설명.
-#[derive(Debug, Clone)]
-pub struct TransportError(pub String);
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Stage {
+    Connect,
+    AwaitResponse,
+    ReadBody,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TransportError {
+    pub stage: Stage,
+    pub timed_out: bool,
+}
+
+pub const SEND_TIMEOUT: Duration = Duration::from_secs(15);
+
+impl TransportError {
+    pub fn refused() -> Self {
+        TransportError { stage: Stage::Connect, timed_out: false }
+    }
+
+    fn of(stage: Stage, e: &reqwest::Error) -> Self {
+        let stage = if e.is_connect() { Stage::Connect } else { stage };
+        TransportError { stage, timed_out: e.is_timeout() }
+    }
+}
+
+impl std::fmt::Display for TransportError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let stage = match self.stage {
+            Stage::Connect => "연결",
+            Stage::AwaitResponse => "응답 대기",
+            Stage::ReadBody => "본문 수신",
+        };
+        if self.timed_out {
+            write!(f, "{stage} 단계에서 {}초 시간 초과", SEND_TIMEOUT.as_secs())
+        } else {
+            write!(f, "{stage} 단계에서 실패")
+        }
+    }
+}
 
 pub trait Transport: Send + Sync + 'static {
     fn send(&self, req: HttpRequest) -> BoxFuture<'static, Result<HttpResponse, TransportError>>;
@@ -38,11 +75,8 @@ pub struct ReqwestTransport {
 }
 
 impl ReqwestTransport {
-    pub fn new(base_url: String) -> Result<Self, TransportError> {
-        let client = reqwest::Client::builder()
-            .timeout(Duration::from_secs(15))
-            .build()
-            .map_err(|e| TransportError(e.without_url().to_string()))?;
+    pub fn new(base_url: String) -> Result<Self, reqwest::Error> {
+        let client = reqwest::Client::builder().timeout(SEND_TIMEOUT).build().map_err(reqwest::Error::without_url)?;
         Ok(ReqwestTransport { client, base_url })
     }
 }
@@ -62,12 +96,11 @@ impl Transport for ReqwestTransport {
             builder = builder.header("cont-yn", "Y").header("next-key", cont.as_str());
         }
         Box::pin(async move {
-            let err = |e: reqwest::Error| TransportError(e.without_url().to_string());
-            let resp = builder.send().await.map_err(err)?;
+            let resp = builder.send().await.map_err(|e| TransportError::of(Stage::AwaitResponse, &e))?;
             let status = resp.status().as_u16();
             let header = |name: &str| resp.headers().get(name).and_then(|v| v.to_str().ok()).unwrap_or("").to_owned();
             let next_key = (header("cont-yn") == "Y").then(|| header("next-key")).filter(|k| !k.is_empty());
-            let body = resp.text().await.map_err(err)?;
+            let body = resp.text().await.map_err(|e| TransportError::of(Stage::ReadBody, &e))?;
             Ok(HttpResponse { status, next_key, body })
         })
     }

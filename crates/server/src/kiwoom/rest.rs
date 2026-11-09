@@ -14,7 +14,7 @@ use tokio::time::Instant;
 
 use super::api::{ApiId, MarketRequest};
 use super::auth::{AuthError, Halt, KiwoomAuth, MIN_ISSUE_INTERVAL_SECS, TokenGen};
-use super::error::{self, Category, Failure, Retry, Stop};
+use super::error::{self, Category, Failure, Note, Retry, Stop};
 use super::token_file::FileError;
 use super::transport::{HttpRequest, HttpResponse, Transport, TransportError};
 use super::wire::TokenResponse;
@@ -27,7 +27,6 @@ const RATE_LIMIT_PAUSE: Duration = Duration::from_secs(1);
 const MAX_RATE_LIMITED: u8 = 3;
 const SCREEN_RETRY_DELAYS: &[Duration] = &[Duration::from_millis(500)];
 const OTHER_RETRY_DELAYS: &[Duration] = &[Duration::from_secs(1), Duration::from_secs(2), Duration::from_secs(4)];
-const PARSE_LOG_BYTES: usize = 2048;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Priority {
@@ -310,8 +309,9 @@ impl KiwoomRest {
         match serde_json::from_str::<R::Response>(&raw.body) {
             Ok(body) => Ok(Page { body, next: raw.next }),
             Err(e) => {
-                tracing::error!(api_id = R::API_ID.as_str(), error = %e, body = head(&raw.body, PARSE_LOG_BYTES), "키움 응답을 읽지 못했습니다");
-                let failure = Failure::protocol(R::API_ID, e.to_string());
+                let note = Note::Schema { line: e.line(), column: e.column() };
+                tracing::error!(api_id = R::API_ID.as_str(), %note, "키움 응답을 읽지 못했습니다");
+                let failure = Failure::protocol(R::API_ID, note);
                 self.0.stop(&mut self.0.lock(), &failure);
                 Err(KiwoomError::Failed(failure))
             }
@@ -320,15 +320,7 @@ impl KiwoomRest {
 }
 
 fn queue_gone(api_id: ApiId) -> KiwoomError {
-    KiwoomError::Failed(Failure::transport(api_id, "대기열이 멈췄습니다"))
-}
-
-fn head(s: &str, max: usize) -> &str {
-    let mut end = s.len().min(max);
-    while !s.is_char_boundary(end) {
-        end -= 1;
-    }
-    &s[..end]
+    KiwoomError::Failed(Failure::queue_gone(api_id))
 }
 
 async fn run(inner: Arc<Inner>) {
@@ -521,8 +513,8 @@ impl Inner {
         let resp = match res {
             Ok(r) => r,
             Err(e) => {
-                tracing::warn!(api_id = "au10001", elapsed_ms, error = %e.0, "토큰 발급 요청이 키움에 닿지 못했습니다");
-                return Err(KiwoomError::Failed(Failure::transport(ApiId::Au10001, e.0)));
+                tracing::warn!(api_id = "au10001", elapsed_ms, error = %e, "토큰 발급 요청이 키움에 닿지 못했습니다");
+                return Err(KiwoomError::Failed(Failure::transport(ApiId::Au10001, e)));
             }
         };
         let judged = error::judge(ApiId::Au10001, resp.status, &resp.body);
@@ -537,7 +529,7 @@ impl Inner {
             "토큰 발급 응답"
         );
         judged.map_err(KiwoomError::Failed)?;
-        let bad_token = || KiwoomError::Failed(Failure::protocol(ApiId::Au10001, "토큰이나 만료 시각을 읽지 못했습니다"));
+        let bad_token = || KiwoomError::Failed(Failure::protocol(ApiId::Au10001, Note::BadTokenResponse));
         let token: TokenResponse = serde_json::from_str(&resp.body).map_err(|_| bad_token())?;
         let generation = self.auth.record_issued(token, self.clock.now()).map_err(|_| bad_token())?;
         tracing::info!(generation = generation.0, "새 토큰을 받았습니다");
@@ -628,8 +620,8 @@ fn judge_market(api_id: ApiId, priority: Priority, res: Result<HttpResponse, Tra
     let resp = match res {
         Ok(r) => r,
         Err(e) => {
-            tracing::warn!(api_id = api_id.as_str(), ?priority, elapsed_ms, error = %e.0, "키움에 닿지 못했습니다");
-            return Err(Failure::transport(api_id, e.0));
+            tracing::warn!(api_id = api_id.as_str(), ?priority, elapsed_ms, error = %e, "키움에 닿지 못했습니다");
+            return Err(Failure::transport(api_id, e));
         }
     };
     let judged = error::judge(api_id, resp.status, &resp.body);
@@ -1149,7 +1141,7 @@ mod tests {
     #[tokio::test(start_paused = true)]
     async fn network_errors_retry_by_priority() {
         let tokens = token_counter();
-        let fake = Arc::new(FakeTransport::new(Duration::ZERO, move |s| tokens(s).unwrap_or_else(|| Err(TransportError("연결 거부".into())))));
+        let fake = Arc::new(FakeTransport::new(Duration::ZERO, move |s| tokens(s).unwrap_or_else(|| Err(TransportError::refused()))));
         let rest = rest(&fake);
         assert_eq!(category(call_k(&rest, 0, Priority::Screen).await.err()), Some(Category::Transient));
         let screen: Vec<_> = fake.market_sent();

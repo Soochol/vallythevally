@@ -5,6 +5,7 @@ use std::fmt;
 use serde_json::Value;
 
 use super::api::ApiId;
+use super::transport::TransportError;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum CodeKey {
@@ -218,6 +219,38 @@ pub enum Surface {
     Internal,
 }
 
+/// 실패를 설명하는 고정된 사유. 키움 메시지 원문은 비밀값을 되돌려 줄 수 있어 담지 않는다.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Note {
+    None,
+    NotJsonObject,
+    MissingReturnCode,
+    MalformedReturnCode,
+    MalformedReturnMessage,
+    MultipleDetails(Vec<u16>),
+    Schema { line: usize, column: usize },
+    BadTokenResponse,
+    Transport(TransportError),
+    QueueGone,
+}
+
+impl fmt::Display for Note {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Note::None => Ok(()),
+            Note::NotJsonObject => f.write_str("JSON 객체가 아닙니다"),
+            Note::MissingReturnCode => f.write_str("return_code가 없습니다"),
+            Note::MalformedReturnCode => f.write_str("return_code가 정수가 아닙니다"),
+            Note::MalformedReturnMessage => f.write_str("return_msg가 문자열이 아닙니다"),
+            Note::MultipleDetails(codes) => write!(f, "상세 코드가 여럿입니다: {codes:?}"),
+            Note::Schema { line, column } => write!(f, "응답 본문이 예상한 모양이 아닙니다({line}행 {column}열)"),
+            Note::BadTokenResponse => f.write_str("토큰이나 만료 시각을 읽지 못했습니다"),
+            Note::Transport(e) => write!(f, "{e}"),
+            Note::QueueGone => f.write_str("대기열이 멈췄습니다"),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Failure {
     category: Category,
@@ -225,18 +258,24 @@ pub struct Failure {
     http_status: Option<u16>,
     return_code: Option<i64>,
     detail: Option<CodeKey>,
-    note: String,
+    note: Note,
 }
 
-const NOTE_CHARS: usize = 200;
-
 impl Failure {
-    pub fn transport(api_id: ApiId, note: impl Into<String>) -> Failure {
-        Failure { category: Transient, api_id, http_status: None, return_code: None, detail: None, note: note.into() }
+    pub fn transport(api_id: ApiId, e: TransportError) -> Failure {
+        Failure { category: Transient, api_id, http_status: None, return_code: None, detail: None, note: Note::Transport(e) }
     }
 
-    pub fn protocol(api_id: ApiId, note: impl Into<String>) -> Failure {
-        Failure { category: Protocol, api_id, http_status: None, return_code: None, detail: None, note: note.into() }
+    pub fn queue_gone(api_id: ApiId) -> Failure {
+        Failure { category: Transient, api_id, http_status: None, return_code: None, detail: None, note: Note::QueueGone }
+    }
+
+    pub fn protocol(api_id: ApiId, note: Note) -> Failure {
+        Failure { category: Protocol, api_id, http_status: None, return_code: None, detail: None, note }
+    }
+
+    pub fn note(&self) -> &Note {
+        &self.note
     }
 
     pub fn category(&self) -> Category {
@@ -294,7 +333,10 @@ impl Failure {
 impl fmt::Display for Failure {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let ev = self.evidence();
-        let note = &self.note;
+        let note = match &self.note {
+            Note::None => String::new(),
+            n => format!(": {n}"),
+        };
         match self.category {
             AuthBlocked if self.detail == Some(Rest(8050)) => f.write_str(
                 "키움이 지정단말기 인증 실패([8050])로 거절했습니다. 키움 IP 미등록 또는 반복 발급 잠금입니다. \
@@ -305,14 +347,14 @@ impl fmt::Display for Failure {
             TokenInvalid => write!(f, "키움이 토큰을 무효로 봅니다({ev})"),
             AuthIndeterminate => write!(f, "키움 인증이 원인을 알 수 없게 실패했습니다({ev}). 곧바로 다시 발급하지 않습니다"),
             RateLimit => write!(f, "키움 요청 개수 초과가 계속됩니다({ev})"),
-            Transient if self.http_status.is_none() => write!(f, "키움에 닿지 못했습니다({ev}): {note}"),
+            Transient if self.http_status.is_none() => write!(f, "키움에 닿지 못했습니다({ev}){note}"),
             Transient => write!(f, "키움이 일시적으로 응답하지 못했습니다({ev})"),
-            InvalidRequest | BatchLimit => write!(f, "키움이 요청을 거절했습니다({ev}): {note}"),
+            InvalidRequest | BatchLimit => write!(f, "키움이 요청을 거절했습니다({ev}){note}"),
             SymbolMismatch => write!(f, "키움에 종목이나 시장 정보가 없습니다({ev})"),
             Unsupported => write!(f, "키움이 이 계좌에서 지원하지 않는 API입니다({ev}). 이 조회를 멈췄습니다"),
-            Unknown => write!(f, "키움이 알 수 없는 실패를 돌려줬습니다({ev}): {note}. 운영자가 확인하고 서버를 다시 켤 때까지 이 경로로 보내지 않습니다"),
-            Protocol => write!(f, "키움 응답 형식이 예상과 다릅니다({ev}): {note}. 운영자가 확인하고 서버를 다시 켤 때까지 이 경로로 보내지 않습니다"),
-            RealtimeCapacity | ControlRejected | SubscriptionMismatch => write!(f, "키움 실시간 제어가 거절됐습니다({ev}): {note}"),
+            Unknown => write!(f, "키움이 알 수 없는 실패를 돌려줬습니다({ev}){note}. 운영자가 확인하고 서버를 다시 켤 때까지 이 경로로 보내지 않습니다"),
+            Protocol => write!(f, "키움 응답 형식이 예상과 다릅니다({ev}){note}. 운영자가 확인하고 서버를 다시 켤 때까지 이 경로로 보내지 않습니다"),
+            RealtimeCapacity | ControlRejected | SubscriptionMismatch => write!(f, "키움 실시간 제어가 거절됐습니다({ev}){note}"),
         }
     }
 }
@@ -378,7 +420,7 @@ pub fn judge(api_id: ApiId, status: u16, body: &str) -> Result<(), Failure> {
                     _ => None,
                 },
                 detail: None,
-                note: "return_msg가 문자열이 아닙니다".to_owned(),
+                note: Note::MalformedReturnMessage,
             });
         }
     };
@@ -398,12 +440,11 @@ pub fn judge(api_id: ApiId, status: u16, body: &str) -> Result<(), Failure> {
         },
     };
     let note = match (object.is_some(), return_code, details.len()) {
-        (false, ..) => "JSON 객체가 아닙니다".to_owned(),
-        (_, _, n) if n > 1 => format!("상세 코드가 여럿입니다: {details:?}"),
-        (_, ReturnCode::Missing, _) => "return_code가 없습니다".to_owned(),
-        (_, ReturnCode::Malformed, _) => "return_code가 정수가 아닙니다".to_owned(),
-        _ if api_id == ApiId::Au10001 => String::new(),
-        _ => msg.chars().take(NOTE_CHARS).collect(),
+        (false, ..) => Note::NotJsonObject,
+        (_, _, n) if n > 1 => Note::MultipleDetails(details.clone()),
+        (_, ReturnCode::Missing, _) => Note::MissingReturnCode,
+        (_, ReturnCode::Malformed, _) => Note::MalformedReturnCode,
+        _ => Note::None,
     };
     Err(Failure {
         category,

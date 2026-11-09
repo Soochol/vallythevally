@@ -94,7 +94,7 @@ async fn serve(config: Config, token_file: TokenFile) -> ExitCode {
     let transport = match ReqwestTransport::new(config.kiwoom_base_url.clone()) {
         Ok(t) => t,
         Err(e) => {
-            tracing::error!(error = %e.0, "HTTP 클라이언트를 만들 수 없습니다");
+            tracing::error!(error = %e, "HTTP 클라이언트를 만들 수 없습니다");
             return ExitCode::from(1);
         }
     };
