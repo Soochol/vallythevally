@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::path::Path;
 
-use indicators::{Columns, MaMethod, Spec, compute};
+use indicators::{Columns, MaMethod, Spec, ValidSpec, compute};
 
 const TOLERANCE: f64 = 1e-6;
 
@@ -37,7 +37,7 @@ fn check(spec: Spec, file: &str, start: Start) {
     let t: Vec<i64> = (0..close.len() as i64).map(|i| 1_700_000_000 + i * 86_400).collect();
     let bars = Columns::new(&t, &open, &high, &low, &close, &volume).unwrap();
     let expected = read(file);
-    let output = compute(&spec, &bars);
+    let output = compute(&ValidSpec::new(spec).unwrap(), &bars);
     assert_eq!(output.lines.len(), expected.columns.len(), "{file}: 선 개수");
     for line in &output.lines {
         let want = &expected.columns[line.id.as_wire()];

@@ -1,6 +1,6 @@
 use std::fmt;
 
-use crate::spec::{LineId, Spec};
+use crate::spec::{LineId, ValidSpec};
 use crate::state::State;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -119,7 +119,7 @@ pub struct Engine {
 }
 
 impl Engine {
-    pub fn new(spec: &Spec, confirmed: &Columns) -> Self {
+    pub fn new(spec: &ValidSpec, confirmed: &Columns) -> Self {
         let lines = spec
             .lines()
             .into_iter()
@@ -168,6 +168,6 @@ impl Engine {
     }
 }
 
-pub fn compute(spec: &Spec, bars: &Columns) -> Output {
+pub fn compute(spec: &ValidSpec, bars: &Columns) -> Output {
     Engine::new(spec, bars).output
 }

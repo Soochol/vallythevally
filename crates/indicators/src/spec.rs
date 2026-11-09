@@ -1,3 +1,5 @@
+use std::ops::Deref;
+
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
@@ -104,15 +106,32 @@ fn at_least_one(errors: &mut Vec<SpecError>, field: &str, value: u16) {
     }
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct ValidSpec(Spec);
+
+impl ValidSpec {
+    pub fn new(spec: Spec) -> Result<Self, Vec<SpecError>> {
+        spec.validate()?;
+        Ok(ValidSpec(spec))
+    }
+}
+
+impl Deref for ValidSpec {
+    type Target = Spec;
+
+    fn deref(&self) -> &Spec {
+        &self.0
+    }
+}
+
 impl Spec {
-    pub fn parse_valid(json: &str) -> Result<Spec, Vec<SpecError>> {
+    pub fn parse_valid(json: &str) -> Result<ValidSpec, Vec<SpecError>> {
         let spec: Spec = serde_json::from_str(json)
             .map_err(|e| vec![SpecError::new("", &format!("지표 설정을 읽을 수 없습니다: {e}"))])?;
-        spec.validate()?;
-        Ok(spec)
+        ValidSpec::new(spec)
     }
 
-    pub fn validate(&self) -> Result<(), Vec<SpecError>> {
+    fn validate(&self) -> Result<(), Vec<SpecError>> {
         let mut errors = Vec::new();
         match *self {
             Spec::Ma { period, .. } => at_least_one(&mut errors, "period", period),

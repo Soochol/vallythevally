@@ -38,7 +38,7 @@ impl Window {
     }
 
     fn is_full(&self) -> bool {
-        self.len > 0 && self.buf.len() == self.len
+        self.buf.len() == self.len
     }
 
     fn mean(&self) -> f64 {

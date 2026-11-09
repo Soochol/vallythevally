@@ -1,4 +1,4 @@
-use indicators::{BarInput, Columns, Engine, LineId, MaMethod, Output, Spec, Tail, compute};
+use indicators::{BarInput, Columns, Engine, LineId, MaMethod, Output, Spec, Tail, ValidSpec, compute};
 use proptest::prelude::*;
 
 struct Bars {
@@ -28,7 +28,11 @@ impl Bars {
     }
 }
 
-fn compute_bars(spec: &Spec, bars: &[BarInput]) -> Output {
+fn valid(spec: Spec) -> ValidSpec {
+    ValidSpec::new(spec).unwrap()
+}
+
+fn compute_bars(spec: &ValidSpec, bars: &[BarInput]) -> Output {
     compute(spec, &Bars::from(bars).columns())
 }
 
@@ -56,7 +60,7 @@ fn period() -> impl Strategy<Value = u16> {
     1u16..30
 }
 
-fn spec() -> impl Strategy<Value = Spec> {
+fn spec() -> impl Strategy<Value = ValidSpec> {
     prop_oneof![
         (prop_oneof![Just(MaMethod::Sma), Just(MaMethod::Ema)], period()).prop_map(|(method, period)| Spec::Ma { method, period }),
         (period(), 0.5f64..3.0).prop_map(|(period, k)| Spec::Bollinger { period, k }),
@@ -67,6 +71,7 @@ fn spec() -> impl Strategy<Value = Spec> {
         (period(), 1u16..20, period()).prop_map(|(fast, gap, signal)| Spec::Macd { fast, slow: fast + gap, signal }),
         (period(), period(), period()).prop_map(|(k, d, smooth)| Spec::StochSlow { k, d, smooth }),
     ]
+    .prop_map(|spec| ValidSpec::new(spec).unwrap())
 }
 
 fn bar() -> impl Strategy<Value = (f64, f64, f64, f64, f64)> {
@@ -140,9 +145,9 @@ proptest! {
 fn flat_prices_sit_in_the_middle_of_rsi_and_stochastic() {
     let flat: Vec<BarInput> =
         (0..40).map(|i| BarInput { t: i, open: 100.0, high: 100.0, low: 100.0, close: 100.0, volume: 1.0 }).collect();
-    let rsi = compute_bars(&Spec::Rsi { period: 14, signal: None }, &flat);
+    let rsi = compute_bars(&valid(Spec::Rsi { period: 14, signal: None }), &flat);
     assert_eq!(rsi.lines[0].values[39], 50.0);
-    let stoch = compute_bars(&Spec::StochSlow { k: 5, d: 3, smooth: 3 }, &flat);
+    let stoch = compute_bars(&valid(Spec::StochSlow { k: 5, d: 3, smooth: 3 }), &flat);
     assert_eq!((stoch.lines[0].values[39], stoch.lines[1].values[39]), (50.0, 50.0));
 }
 
@@ -168,19 +173,18 @@ fn columns_reject_missing_or_infinite_prices_and_volume() {
 }
 
 #[test]
-fn invalid_specs_compute_without_panicking() {
-    let bars: Vec<BarInput> =
-        (0..5).map(|i| BarInput { t: i, open: 1.0, high: 2.0, low: 0.5, close: 1.5, volume: 3.0 }).collect();
-    for spec in [
-        Spec::Ma { method: MaMethod::Ema, period: 0 },
-        Spec::Rsi { period: 0, signal: Some(0) },
-        Spec::Macd { fast: 0, slow: 0, signal: 0 },
-        Spec::StochSlow { k: 0, d: 0, smooth: 0 },
-        Spec::Ichimoku { conversion: 0, base: 0, span_b: 0, displacement: 0 },
+fn invalid_specs_never_become_valid() {
+    for (spec, field) in [
+        (Spec::Bollinger { period: 2, k: -2.0 }, "k"),
+        (Spec::Macd { fast: 3, slow: 2, signal: 1 }, "slow"),
+        (Spec::Ichimoku { conversion: 1, base: 1, span_b: 1, displacement: 0 }, "displacement"),
+        (Spec::Ma { method: MaMethod::Ema, period: 0 }, "period"),
+        (Spec::Rsi { period: 14, signal: Some(0) }, "signal"),
+        (Spec::StochSlow { k: 5, d: 0, smooth: 3 }, "d"),
+        (Spec::Volume { ma_period: Some(0) }, "maPeriod"),
     ] {
-        assert!(spec.validate().is_err());
-        let _ = spec.warmup();
-        assert_eq!(compute_bars(&spec, &bars).lines[0].values.len(), 5);
+        let errors = ValidSpec::new(spec.clone()).unwrap_err();
+        assert_eq!(errors.iter().map(|e| e.field.as_str()).collect::<Vec<_>>(), [field], "{spec:?}");
     }
 }
 
@@ -188,7 +192,7 @@ fn invalid_specs_compute_without_panicking() {
 fn pushing_or_previewing_a_bad_next_bar_is_rejected_like_the_full_input() {
     let first = BarInput { t: 60, open: 10.0, high: 10.0, low: 10.0, close: 10.0, volume: 10.0 };
     let next = BarInput { t: 120, open: 30.0, high: 30.0, low: 30.0, close: 30.0, volume: 30.0 };
-    let spec = Spec::Ma { method: MaMethod::Sma, period: 2 };
+    let spec = valid(Spec::Ma { method: MaMethod::Sma, period: 2 });
     for bad in [
         BarInput { t: 60, ..next },
         BarInput { t: 59, ..next },
@@ -210,7 +214,7 @@ fn pushing_or_previewing_a_bad_next_bar_is_rejected_like_the_full_input() {
 fn previewing_the_same_next_bar_again_is_allowed() {
     let bars: Vec<BarInput> =
         (0..3).map(|i| BarInput { t: 60 * i, open: 1.0, high: 2.0, low: 0.5, close: 1.5, volume: 3.0 }).collect();
-    let engine = Engine::new(&Spec::Ma { method: MaMethod::Sma, period: 2 }, &Bars::from(&bars[..2]).columns());
+    let engine = Engine::new(&valid(Spec::Ma { method: MaMethod::Sma, period: 2 }), &Bars::from(&bars[..2]).columns());
     let first = engine.preview(&bars[2]).unwrap();
     let changed = engine.preview(&BarInput { close: 2.5, ..bars[2] }).unwrap();
     assert_eq!(tail_bits(&engine.preview(&bars[2]).unwrap()), tail_bits(&first));
