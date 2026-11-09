@@ -121,7 +121,6 @@ mod tests {
         }
     }
 
-    /// 허브 쪽 넣기와 쓰기 태스크 쪽 꺼내기를 섞어도 구독마다 받는 seq는 늘어나기만 하고, 버리면 안 되는 메시지는 모두 간다.
     #[test]
     fn seq_only_increases_per_sub_under_any_interleaving() {
         let subs = ["a", "b", "c"];

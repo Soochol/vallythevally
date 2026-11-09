@@ -194,7 +194,6 @@ async fn load_symbols_at_startup(clock: Clock, rest: KiwoomRest, symbols: Arc<Sy
     }
 }
 
-/// 매일 07:45: 시세 캐시를 모두 비우고 실시간 키를 다시 시드한 뒤, 종목 목록을 `Background`로 다시 받는다. 실패하면 5분마다, 다음 07:45 전까지.
 async fn daily_reset(clock: Clock, rest: KiwoomRest, symbols: Arc<SymbolDirectory>, bars: Arc<BarService>, hub: HubHandle) {
     loop {
         clock.sleep_until(next_daily(clock.now(), DAILY_RESET_AT)).await;

@@ -2,7 +2,6 @@ import { useEffect, useState } from "react";
 import { useRealtimeStore } from "../../stores/realtime";
 import { type ConnectionView, connectionView } from "./connectionView";
 
-/** 장 닫힘은 시각으로 판단하므로 연결이 그대로여도 문장이 바뀐다. */
 const CLOCK_TICK_MS = 30_000;
 
 export function useConnectionView(): ConnectionView {

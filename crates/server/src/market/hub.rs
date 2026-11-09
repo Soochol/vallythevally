@@ -23,11 +23,8 @@ use crate::clock::Clock;
 use crate::kiwoom::rest::Priority;
 use crate::kiwoom::stream::{Exchange, KiwoomStream, RealTick, StreamEvent};
 
-/// 시드 조회가 실패하면 이 간격으로 다시 받는다. 그 뒤로는 마지막 값.
 const SEED_RETRY_SECS: [u64; 5] = [1, 2, 5, 10, 30];
-/// 불완전한 봉이 확정되고 키움 값과 대조하기까지. 키움이 그 분봉을 내놓을 시간을 준다.
 const VERIFY_DELAY_SECS: i64 = 5;
-/// 키움 값이 아직 없거나 조회가 실패해도 이만큼만 다시 대조한다.
 const VERIFY_ATTEMPTS: u32 = 3;
 const RECENT_CONFIRMED: usize = 3;
 const EVICT_EVERY_TICKS: u64 = 60;
@@ -103,9 +100,7 @@ enum HubInput {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum SeedPurpose {
-    /// 처음 연 키. 끝나면 현재 봉을 `bar`로 보낸다.
     Initial,
-    /// 이미 보낸 봉이 바뀌었을 수 있다. 끝나면 `reload`를 보낸다.
     Reload { reason: ReloadReason, from: Option<KstTime> },
 }
 
@@ -119,20 +114,17 @@ impl SeedPurpose {
 }
 
 enum KeyFeed {
-    /// 시드를 받는 중. 이 동안 온 체결은 버린다(시드에 대개 들어 있다).
     Seeding { purpose: SeedPurpose, attempt: u32, reported: bool, last_dropped: Option<KstTime> },
     Live(Aggregator),
 }
 
 struct KeyState {
-    /// 시드를 새로 시작할 때마다 바뀐다. 다른 세대의 조회 결과는 버린다.
     generation: u64,
     feed: KeyFeed,
     seq: u64,
     recent_confirmed: VecDeque<ConfirmedBar>,
     verifications: BTreeMap<Bucket, Verification>,
     subs: BTreeSet<(ConnId, SubId)>,
-    /// 시드 뒤로 키움 세션이 한 번도 끊기지 않았다. 이때만 실시간 확정 봉을 캐시에 붙인다.
     contiguous: bool,
     idle_since: Option<KstTime>,
 }
@@ -201,7 +193,6 @@ struct Conn {
     subs: HashMap<SubId, SeriesKey>,
 }
 
-/// 체결마다 경고하지 않고 1분마다 센 것을 한 번 남긴다.
 #[derive(Debug, Default)]
 struct Counters {
     outside_window: u64,
@@ -223,7 +214,6 @@ pub struct MarketHub {
     keys: HashMap<SeriesKey, KeyState>,
     next_generation: u64,
     session_live: bool,
-    /// 메우지 못한 끊긴 구간의 시작. 복구 중에 또 끊겨도 처음 끊긴 시각을 둔다.
     gap_from: Option<KstTime>,
     realtime: RealtimeState,
     realtime_since: KstTime,
@@ -717,7 +707,6 @@ impl MarketHub {
     }
 }
 
-/// 시드로 집계기를 만든다. 조회 뒤 그사이 확정 시각이 지난 현재 봉은 시드로 쓰지 않고, 그 구간까지의 체결은 늦은 체결로 본다.
 fn start_aggregator(key: SeriesKey, seed: &Seed, now: KstTime) -> Aggregator {
     let newest = seed.tail.last().map(|b| b.bucket);
     match seed.current {
@@ -736,7 +725,6 @@ fn accepts(feed: Feed, exchange: Option<Exchange>) -> bool {
     }
 }
 
-/// [from, to)가 어느 날의 체결 시간 [08:00:00, 20:00:10)과 겹치는가.
 fn gap_overlaps_trading(from: KstTime, to: KstTime) -> bool {
     let mut d = from.kst_date();
     while d <= to.kst_date() {
@@ -838,7 +826,6 @@ mod tests {
         kst(KstDate::new(2026, 11, 9).unwrap(), h, m, s)
     }
 
-    /// 가짜 키움 분봉. 봉 시작과 원 단위 [시, 고, 저, 종, 거래량]. 오름차순으로 들고 최신순으로 준다.
     #[derive(Default)]
     struct Chart {
         rows: Vec<(KstTime, [u64; 5])>,
@@ -863,7 +850,6 @@ mod tests {
         clock: Clock,
     }
 
-    /// 분봉 08:58, 08:59는 확정, 09:00은 진행 중(시 100 고 110 저 95 종 105 거래량 50).
     fn morning_chart() -> Chart {
         let mut c = Chart::default();
         c.set(at(8, 58, 0), [90, 95, 85, 92, 10]);
@@ -989,7 +975,6 @@ mod tests {
         ServerMessage::Reload { sub: s.into(), seq, reason, from: from.map(|t| UnixSeconds(t.unix())) }
     }
 
-    /// 시드를 받고 09:00 현재 봉(키움 값)을 bar로 받은 상태.
     async fn subscribed_samsung(h: &Harness) -> (ConnId, Arc<Outbox>) {
         live(h).await;
         let (conn, out) = connect(h).await;

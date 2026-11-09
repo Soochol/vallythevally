@@ -43,7 +43,6 @@ import { formatBarTime, formatTickMark, fromChartTime, isIntraday } from "./time
 /** 왼쪽 끝이 이 봉 수 안으로 들어오면 과거 페이지를 받는다(frontend.md §5.7). */
 const LOAD_OLDER_WITHIN = 50;
 const RIGHT_OFFSET = 6;
-/** 체결마다 React를 다시 그리지 않도록 칸 상태(휴대폰 머리)는 이 간격보다 자주 알리지 않는다. */
 const STATUS_INTERVAL_MS = 250;
 
 const SUB_ERROR_TEXT: Record<SubErrorCode, string> = {
@@ -55,7 +54,6 @@ const SUB_ERROR_TEXT: Record<SubErrorCode, string> = {
 
 const nowSeconds = (): UnixSeconds => Math.floor(Date.now() / 1000);
 
-/** next가 prev의 마지막 봉 하나만 바꾸거나 하나만 붙였는가. 그렇다면 `update()`로 그릴 수 있다. */
 function isTailChange(prev: Bar[], next: Bar[], bar: Bar): boolean {
   if (next[next.length - 1] !== bar) return false;
   const kept = next.length - 1;
@@ -112,12 +110,10 @@ export class ChartController {
   private ready: ReadyStatus | null = null;
   private settingData = false;
   private disposed = false;
-  /** 다음 프레임에 `update()`로 그릴 봉. t 오름차순이고 같은 t는 마지막 값만 남는다. */
   private readonly pendingDraw = new Map<UnixSeconds, Bar>();
   private frame: number | null = null;
   private statusTimer: ReturnType<typeof setTimeout> | null = null;
   private lastStatusAt = 0;
-  /** 이 세대에 실시간 봉을 받았다. 받았으면 현재 봉은 더는 `조회 값`이 아니다. */
   private realtimeSeen = false;
   private realtimeLive = false;
   private lastRealtimeAt: UnixSeconds | null = null;
@@ -308,7 +304,6 @@ export class ChartController {
     d.lastClose = String(last?.c ?? "");
   }
 
-  /** 실시간 봉(현재 봉 갱신이나 확정). 상태는 바로 바꾸고 그리기는 다음 프레임에 묶는다(frontend.md §5.4). */
   private onRealtime(h: History, bar: Bar): void {
     const prev = this.bars;
     const next = displayBars(h);

@@ -15,10 +15,8 @@ pub const TRADING_OPEN: TimeOfDay = match TimeOfDay::hms(8, 0, 0) {
     None => unreachable!(),
 };
 
-/// 서버 시계가 늦어 체결시간이 수신 시각보다 앞서도 받아 주는 한도.
 const MAX_FUTURE_SECS: i64 = 60;
 
-/// 밀린 메시지이거나 서버 시계가 빨라도 받아 주는 한도.
 const MAX_AGE_SECS: i64 = 300;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

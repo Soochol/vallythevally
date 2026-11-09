@@ -109,7 +109,6 @@ impl Timings {
 }
 
 enum SessionState {
-    /// `attempt`: 안정된 Live 뒤로 연달아 실패한 횟수. 다음 쉬는 시간을 정한다.
     Disconnected { retry_at: Instant, attempt: u32 },
     Connecting { attempt: u32 },
     LoggingIn { conn: Conn, attempt: u32 },
@@ -129,7 +128,6 @@ impl SessionState {
     }
 }
 
-/// LOGIN의 8005는 실패 하나에 한 번만 토큰을 다시 받아 넘긴다(ADR 0009). Live가 되면 다시 채운다.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum TokenBudget {
     Fresh,
@@ -188,7 +186,6 @@ enum End {
     Transport(String),
     ControlTimeout(WsControl),
     ControlRejected(WsControl, WsRejection),
-    /// 손잡이나 이벤트 받는 쪽이 사라졌다. 태스크를 끝낸다.
     Shutdown,
 }
 
@@ -318,7 +315,6 @@ impl Session {
         }
     }
 
-    /// 토큰이 없으면 발급 대기열에 받아 달라고 한다. 발급 간격(10분)은 대기열이 지킨다.
     async fn wait_and_get_token(&mut self, retry_at: Instant, attempt: u32) -> Option<SessionState> {
         tokio::select! {
             () = sleep_until(retry_at) => {}
@@ -363,7 +359,6 @@ impl Session {
         }
     }
 
-    /// LOGIN, 그다음 원하는 집합 전체를 REG. 둘 다 받아들여져야 Live다.
     async fn log_in(&mut self, mut conn: Conn, attempt: u32) -> Option<SessionState> {
         let Some((token, generation)) = self.rest.auth().current(self.clock.now()) else {
             conn.close().await;
@@ -482,7 +477,6 @@ impl Session {
         }
     }
 
-    /// PING과 REAL은 여기서 처리하고, 제어 응답·기한·원하는 집합의 변화만 돌려준다.
     async fn recv(&mut self, conn: &mut Conn, deadline: Option<Instant>, watch_desired: bool) -> Result<Wake, End> {
         loop {
             let message = tokio::select! {

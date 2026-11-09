@@ -30,12 +30,9 @@ pub struct Plan {
 #[derive(Debug, Default)]
 pub struct SubscriptionManager {
     holders: BTreeMap<Symbol, BTreeSet<Holder>>,
-    /// 보유자가 생긴 순서. 같은 우선순위 안에서 먼저 잡은 종목이 먼저 들어간다.
     held_order: BTreeMap<Symbol, u64>,
     next_order: u64,
-    /// 보유자가 모두 빠진 시각. RELEASE_GRACE_SECS 뒤 해지한다.
     released_at: BTreeMap<Symbol, KstTime>,
-    /// 실시간으로 받기로 허락된 종목. 새 종목이 들어온다고 보유자가 있는 종목을 빼지 않는다.
     admitted: BTreeSet<Symbol>,
 }
 

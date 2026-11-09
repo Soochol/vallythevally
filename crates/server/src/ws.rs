@@ -43,7 +43,6 @@ async fn serve(socket: WebSocket, hub: HubHandle) {
     outbox.close();
 }
 
-/// 버리면 안 되는 메시지는 들어오는 대로, `bar`는 BAR_FLUSH마다 보낸다. outbox가 닫히면 연결을 닫는다.
 async fn write(mut sink: SplitSink<WebSocket, Message>, outbox: Arc<Outbox>) {
     let mut tick = tokio::time::interval(BAR_FLUSH);
     loop {

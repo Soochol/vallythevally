@@ -147,10 +147,6 @@ export class MarketSocket implements MarketSocketLike {
     }
   }
 
-  /**
-   * 구독마다 다시 보내고 칸을 처음부터 만들게 한다. 첫 `hello`도 같다.
-   * 연결 전에 생긴 구독은 서버가 구독을 알기 전에 최신 페이지를 받았을 수 있어서다.
-   */
   private onHello(status: ConnectionStatus): void {
     this.attempt = 0;
     this.setConnection({ socket: "open", status });

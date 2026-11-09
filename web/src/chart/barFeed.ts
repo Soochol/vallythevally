@@ -54,7 +54,6 @@ function replaceLast(bars: Bar[], b: Bar): Bar[] {
   return bars.slice(0, -1).concat(b);
 }
 
-/** 현재 봉이 바뀌었다. 마지막 확정 봉과 같은 구간이면 그 확정 봉을 바꾼다. */
 function withLive(h: History, b: Bar): History {
   const last = h.bars[h.bars.length - 1];
   if (last?.t === b.t) return { ...h, bars: replaceLast(h.bars, b), current: h.current && h.current.t <= b.t ? null : h.current };
@@ -96,7 +95,6 @@ export class BarFeed {
   private generation = 0;
   private key: SeriesKey | null = null;
   private history: History | null = null;
-  /** 최신 페이지를 기다리는 동안 쌓는 메시지. 페이지를 적용하면 null이다. */
   private buffer: StreamMessage[] | null = null;
   private seqFloor: number | null = null;
   private unsubscribe: (() => void) | null = null;
