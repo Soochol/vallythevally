@@ -21,6 +21,21 @@ Default vocabulary: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-
 
 Single-context: one `GLOSSARY.md` and `docs/adr/` at the repo root. See `docs/agents/domain.md`.
 
+### Who changes which docs
+
+Subagents and reviewers change no docs. The worker and the coordinator follow this table.
+
+| Docs | Who changes them | When |
+|---|---|---|
+| `GLOSSARY.md`, `docs/adr/` | The coordinator | The user decides something, or the coordinator accepts a worker's proposal. The worker does not edit these. It writes proposals under "ADR·용어 제안" in the PR body. |
+| `docs/design/backend.md`, `docs/design/frontend.md` | The worker | The implementation departs from the design. Fix the doc in the same PR as the code. |
+| `docs/design/*-proposal.md` | The worker that wrote it | A research task before implementation. Afterwards only the coordinator edits its status line. |
+| `docs/kiwoom.md`, `docs/kiwoom-ws-errors.md` | The worker that measured it | A live Kiwoom measurement shows a new fact. Write the date and what was measured. |
+| `docs/verification/` | The worker | A PR checked a real screen. Add files only. |
+| `docs/dev-environment.md` | The worker or the coordinator | A new trap on this PC is confirmed. |
+
+Deleting, moving, or renaming a doc needs the user's approval through the coordinator. The worker proposes it in the PR body.
+
 ### Workflow (poteto-mode)
 
 The worker runs implementation, fix, and diagnosis work under `pstack:poteto-mode`.
