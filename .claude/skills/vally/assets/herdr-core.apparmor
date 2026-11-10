@@ -1,7 +1,0 @@
-# SKILL.md Setup fills in the placeholder on the profile line with this PC's herdr-core path.
-abi <abi/4.0>,
-include <tunables/global>
-
-profile herdr-core @HERDR_CORE@ flags=(unconfined) {
-  userns,
-}
