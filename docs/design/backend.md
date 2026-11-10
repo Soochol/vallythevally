@@ -856,7 +856,7 @@ impl KiwoomStream {
 /// 날짜가 아직 없는 실시간 체결. `exchange`는 0B `9081`(지수와 모르는 값은 None).
 /// `day`는 프레임의 11(전일대비)·13(누적거래량)이다. 하나라도 없거나 읽지 못하면 None이고, 봉 집계는 이 값을 쓰지 않는다(#66).
 pub struct RealTick { pub symbol: Symbol, pub hhmmss: TimeOfDay, pub price: Price, pub qty: Volume, pub exchange: Option<Exchange>, pub day: Option<DayTotals> }
-pub struct DayTotals { pub change_centi: i64, pub volume: Volume }
+pub struct DayTotals { pub change_centi: i64, pub cumulative: Volume }
 
 pub enum StreamEvent {
     Tick { tick: RealTick, received_at: KstTime },
@@ -971,7 +971,7 @@ impl SubscriptionManager {
     /// 30초 유예 중인 종목이면 유예를 취소한다.
     pub fn hold(&mut self, symbol: Symbol, h: Holder);
     pub fn release(&mut self, symbol: Symbol, h: &Holder, now: KstTime);
-    /// 그 연결의 관심종목을 통째로 바꾼다. 위에서부터, 중복 없음. 빠진 줄은 release처럼 30초 유예한다.
+    /// 그 연결의 관심종목을 통째로 바꾼다. 위에서부터. 같은 종목이 두 번 오면 처음 줄을 쓴다. 빠진 줄은 release처럼 30초 유예한다.
     pub fn set_watch(&mut self, conn: ConnId, symbols: Vec<Symbol>, now: KstTime);
     /// 연결이 끊긴 브라우저의 모든 구독과 관심종목을 놓는다.
     pub fn release_conn(&mut self, conn: ConnId, now: KstTime);
@@ -995,7 +995,7 @@ impl SubscriptionManager {
 
 `MarketHub`는 칸 보유자가 바뀔 때와 1초 타이머마다 `plan`을 다시 계산한다. 관심종목(`watch`)은 보유자만 바꾸고 1초 타이머에서만 다시 계산한다. 순서를 연달아 바꿔도 REG·REMOVE는 1초에 한 번만 바뀐다. `realtime`이 바뀌었으면 `KiwoomStream::set_desired`를 부른다.
 
-- **종목 목록에 없는 코드**: 칸은 시드의 `unknown_symbol`로 걸러지지만 관심종목은 시드가 없다. 키움이 REG를 거절하면 세션이 끊기므로(§5.1 제어 실패 예산), 허브는 종목 목록(§6.6)에 있는 줄만 `set_watch`에 넘긴다. 목록이 아직 없거나 07:45에 바뀌면 1초 타이머가 다시 거른다.
+- **종목 목록에 없는 코드**: 칸은 시드의 `unknown_symbol`로 걸러지지만 관심종목은 시드가 없다. 없는 코드를 REG하면 키움이 거절할 수 있고(실측 없음), 거절되면 제어 실패로 세션을 닫는다(§5.1 제어 실패 예산). 그래서 허브는 종목 목록(§6.6)에 있는 줄만 `set_watch`에 넘긴다. 목록이 아직 없거나 07:45에 바뀌면 1초 타이머가 다시 거른다.
 - **알림 보유자**(#8)는 아직 없다. `Rank`에 칸과 관심종목 사이로 들어간다.
 
 ### 5.4 현재 봉 집계(순수 함수, `domain::aggregate`)
