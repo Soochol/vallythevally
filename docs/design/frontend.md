@@ -910,7 +910,7 @@ class ChartController {
   apply(cell: CellView): void;
   reload(): void;                           // 같은 종목·봉 주기를 처음부터(칸 오류의 `다시 시도`)
   retryOlder(): void;                       // 실패한 과거 페이지를 다시(과거 봉 오류의 `다시 시도`)
-  setTheme(t: ThemeTokens): void;           // 모든 시리즈·primitive 색 다시 적용
+  setTheme(t: ThemeTokens): void;           // 대기 중인 그리기를 먼저 비운 뒤(#58) 모든 시리즈·primitive 색 다시 적용
   attach(factory: (host: ChartHost) => ChartExtension): () => void; // (#6) 드로잉 층 연결·정리
   setActive(active: boolean): void;                         // (#7~)
   snapshot(takenAt: UnixSeconds): { canvas: HTMLCanvasElement; fileName: string } | null;  // (#38) 머리 띠를 붙인 차트 이미지
@@ -982,6 +982,7 @@ apply(symbol, venue, period)  또는  reload  또는  새 hello ── generatio
 - **처리 순서와 그리기 묶기**
   - 계산과 상태 변경(`confirmed`, `reload`, `bar`의 `preview`)은 칸마다 하나의 처리 줄에서 도착 순서대로 한다. 건너뛰거나 합치지 않는다.
   - 그리기만 `requestAnimationFrame` 한 번에 묶는다. 같은 프레임에 같은 시리즈의 `update`가 여럿이면 마지막 값만 그린다. 서버가 구독당 초당 10회로 줄여 보내지만, 4칸에 비교 종목까지 열면 초당 100회가 넘을 수 있다.
+  - 예외는 테마 변경 하나다. `setTheme`은 프레임을 기다리지 않고 대기 중인 봉을 `flushPendingDraw`로 먼저 가격·거래량 시리즈에 그린 뒤 색을 바꾼다(#58, 2026-11-10 확인). 거래량 시리즈만 최신 `bars`로 바꾸면 보류된 프레임이 지나간 봉을 `update`하다 `Cannot update oldest data`를 던지고, 그 뒤 프레임마다 같은 예외가 반복된다. 예약된 프레임은 빈 큐를 보고 범례만 갱신한다.
 - **브라우저 재연결**(D2)
   - 브라우저와 서버의 WebSocket이 다시 연결되면(새 `hello`) 칸마다 세대를 올리고 시리즈·지표 엔진을 **모두 비운 뒤 최신 페이지부터 다시 만든다**.
   - 첫 `hello`도 같다(#4). 연결 전에 생긴 칸은 서버가 구독을 알기 전에 최신 페이지를 받았을 수 있어서다. 칸마다 최신 페이지 조회가 한 번 더 늘 수 있다.
