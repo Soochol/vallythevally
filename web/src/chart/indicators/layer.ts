@@ -6,6 +6,7 @@ import {
   LineSeries,
   LineStyle,
   type PriceFormat,
+  PriceScaleMode,
 } from "lightweight-charts";
 import type { Bar } from "../../api/generated/Bar";
 import type { LineId } from "../../api/generated/LineId";
@@ -19,6 +20,7 @@ import { toChartTime } from "../time";
 import type { IndicatorPort, OpenPort } from "./client";
 import { applyToPoints, DrawQueue, pointAtTime } from "./drawQueue";
 import { isBarLine, lineColor, specLines, specName } from "./kinds";
+import { addOverlayLine, type OverlayPoint, type OverlaySeries } from "./overlayLine";
 import type { BarTuple, Columns, EngineErrorKind, EngineResult, FromWorker, LineInfo, Point } from "./protocol";
 import { syncOp } from "./sync";
 
@@ -26,14 +28,15 @@ type Status = { kind: "pending" } | { kind: "ready" } | { kind: "hidden" } | { k
 
 type Kind = IndicatorConfig["spec"]["kind"];
 
-interface Line {
+type Plot = { overlay: true; series: OverlaySeries } | { overlay: false; series: ISeriesApi<"Line"> | ISeriesApi<"Histogram"> };
+
+type Line = Plot & {
   id: LineId;
   kind: Kind;
   shift: number;
-  series: ISeriesApi<"Line"> | ISeriesApi<"Histogram">;
   points: Point[];
   guides: IPriceLine[];
-}
+};
 
 interface Shown {
   config: IndicatorConfig;
@@ -76,6 +79,19 @@ function columnsOf(bars: readonly Bar[]): Columns {
 }
 
 const transferOf = (c: Columns) => [c.t.buffer, c.o.buffer, c.h.buffer, c.l.buffer, c.c.buffer, c.v.buffer];
+
+const isOverlay = (config: IndicatorConfig, id: LineId) => config.panel === "price" && !isBarLine(id);
+
+function firstAtOrAfter(bars: readonly Bar[], t: UnixSeconds): number {
+  let lo = 0;
+  let hi = bars.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (bars[mid]!.t < t) lo = mid + 1;
+    else hi = mid;
+  }
+  return lo;
+}
 
 const ERROR_TEXT: Record<EngineErrorKind, string> = { spec: "설정 오류", calc: "계산 오류" };
 export const indicatorErrorText = (kind: EngineErrorKind) => ERROR_TEXT[kind];
@@ -184,6 +200,7 @@ export class IndicatorLayer {
     this.history = h;
     this.display = next;
     if (op === "confirm") this.committedT = bar.t;
+    if (next.length > prev.length || next.at(-1)?.c !== prev.at(-1)?.c) this.rebaseLeadingSpans();
     if (this.configs.some((c) => c.visible) && !this.broken) {
       this.port.post({ type: "bar", chart: this.port.chart, kind: op, bar: tuple(bar) });
     }
@@ -197,7 +214,7 @@ export class IndicatorLayer {
     for (const [line, p] of this.queue.drain()) {
       try {
         if (p === "redraw") this.draw(line, line.points);
-        else for (const pt of p) line.series.update(this.toChart(line, pt));
+        else for (const pt of p) this.put(line, pt);
       } catch (e) {
         console.error(`지표 선(${line.id})을 점 사본으로 다시 그림: ${e instanceof Error ? e.message : String(e)}`);
         this.draw(line, line.points);
@@ -315,8 +332,9 @@ export class IndicatorLayer {
     r.draws.forEach((d, i) => {
       const line = s.lines[i];
       if (!line) return;
+      const firstPoint = d.op === "update" && line.overlay && line.points.length === 0;
       line.points = applyToPoints(line.points, d);
-      if (!lines) return this.queue.push(line, d);
+      if (!lines) return this.queue.push(line, firstPoint ? { op: "set", points: line.points } : d);
       this.queue.forget(line);
       this.draw(line, line.points);
     });
@@ -359,15 +377,23 @@ export class IndicatorLayer {
   private addLines(config: IndicatorConfig, kept: readonly Line[]): Line[] {
     const pane = this.paneOf(config);
     return specLines(config.spec).map((id, i): Line => {
-      const options = { ...this.lineOptions(config, id, i), priceFormat: this.priceFormat(config) };
-      const series = isBarLine(id)
-        ? this.host.chart.addSeries(HistogramSeries, options, pane)
-        : this.host.chart.addSeries(LineSeries, options, pane);
-      if (pane > 0) series.priceScale().applyOptions({ scaleMargins: id === "volume" ? { top: 0.12, bottom: 0 } : { top: 0.14, bottom: 0.08 } });
+      const plot = this.addPlot(config, id, i, pane);
+      const { series } = plot;
+      // 새 pane은 차트 단위 rightPriceScale을 물려받는데, 가격 패널의 축 모드(%·로그)를 바꾸면 그 값도 바뀐다.
+      if (pane > 0) series.priceScale().applyOptions({ mode: PriceScaleMode.Normal, scaleMargins: id === "volume" ? { top: 0.12, bottom: 0 } : { top: 0.14, bottom: 0.08 } });
       const guides = i === 0 ? (GUIDES[config.spec.kind] ?? []).map((price) => series.createPriceLine(this.guide(price))) : [];
       const same = kept[i]?.id === id ? kept[i] : undefined;
-      return { id, kind: config.spec.kind, shift: same?.shift ?? 0, series, points: same?.points ?? [], guides };
+      return { ...plot, id, kind: config.spec.kind, shift: same?.shift ?? 0, points: same?.points ?? [], guides };
     });
+  }
+
+  private addPlot(config: IndicatorConfig, id: LineId, i: number, pane: number): Plot {
+    const options = { ...this.lineOptions(config, id, i), priceFormat: this.priceFormat(config) };
+    if (isOverlay(config, id)) return { overlay: true, series: addOverlayLine(this.host.chart, options, pane) };
+    const series = isBarLine(id)
+      ? this.host.chart.addSeries(HistogramSeries, options, pane)
+      : this.host.chart.addSeries(LineSeries, options, pane);
+    return { overlay: false, series };
   }
 
   private guide(price: number) {
@@ -377,7 +403,9 @@ export class IndicatorLayer {
   private lineOptions(config: IndicatorConfig, id: LineId, i: number) {
     const color = this.host.tokens().ind[lineColor(config.spec, config.style.colors, i)];
     const common = { visible: config.visible, priceLineVisible: false, lastValueVisible: config.panel !== "price", title: "" };
-    return isBarLine(id) ? common : { ...common, color, lineWidth: config.style.width, crosshairMarkerVisible: false };
+    if (isBarLine(id)) return common;
+    const line = { ...common, color, lineWidth: config.style.width };
+    return isOverlay(config, id) ? line : { ...line, crosshairMarkerVisible: false };
   }
 
   private styleLines(s: Shown): void {
@@ -406,7 +434,31 @@ export class IndicatorLayer {
   }
 
   private draw(line: Line, points: readonly Point[]): void {
-    line.series.setData(points.map((pt) => this.toChart(line, pt)));
+    if (line.overlay) line.series.setData(this.overlayRows(points));
+    else line.series.setData(points.map((pt) => this.toChart(line, pt)));
+  }
+
+  private put(line: Line, pt: Point): void {
+    if (line.overlay) line.series.update(this.overlayPoint(pt));
+    else line.series.update(this.toChart(line, pt));
+  }
+
+  private overlayRows(points: readonly Point[]): OverlayPoint[] {
+    const first = points[0];
+    if (!first) return [];
+    const warmup = this.display.slice(0, firstAtOrAfter(this.display, first.t));
+    return [...warmup.map((b) => ({ time: toChartTime(b.t), base: b.c })), ...points.map((pt) => this.overlayPoint(pt))];
+  }
+
+  private overlayPoint(pt: Point): OverlayPoint {
+    const main = this.display[firstAtOrAfter(this.display, pt.t)];
+    return { time: toChartTime(pt.t), value: pt.v, base: main?.t === pt.t ? main.c : pt.v };
+  }
+
+  private rebaseLeadingSpans(): void {
+    for (const s of this.shown.values()) {
+      for (const line of s.lines) if (line.overlay && line.shift > 0 && line.points.length) this.queue.push(line, { op: "set", points: line.points });
+    }
   }
 
   private toChart(line: Line, pt: Point) {

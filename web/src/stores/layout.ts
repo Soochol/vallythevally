@@ -4,6 +4,7 @@ import type { Layout } from "../api/generated/Layout";
 import type { Period } from "../api/generated/Period";
 import type { Venue } from "../api/generated/Venue";
 import type { IndicatorSpec } from "../api/generated/IndicatorSpec";
+import type { SymbolCode } from "../api/generated/SymbolCode";
 import * as edit from "../chart/settings";
 import { type ChartSettings, type ChartStyle, DEFAULT_CHART_SETTINGS, type IndicatorConfig, type Panel, type PriceScale } from "../chart/settings";
 import { venueFor, type VenueTarget } from "../lib/venue";
@@ -37,6 +38,8 @@ interface LayoutState {
   removeIndicator(slot: Slot, id: string): void;
   movePanel(slot: Slot, panelId: string, step: -1 | 1): void;
   setPanelStretches(slot: Slot, stretches: readonly Panel["stretch"][]): void;
+  addCompare(slot: Slot, code: SymbolCode): void;
+  removeCompare(slot: Slot, code: SymbolCode): void;
 }
 
 export const useLayoutStore = create<LayoutState>()((set) => {
@@ -71,6 +74,11 @@ export const useLayoutStore = create<LayoutState>()((set) => {
     removeIndicator: (slot, id) => patchSettings(slot, (s) => edit.removeIndicator(s, id)),
     movePanel: (slot, panelId, step) => patchSettings(slot, (s) => edit.movePanel(s, panelId, step)),
     setPanelStretches: (slot, stretches) => patchSettings(slot, (s) => edit.setPanelStretches(s, stretches)),
+    addCompare: (slot, code) => patchCell(slot, (c) => {
+      const chartSettings = edit.addCompare(c.chartSettings, code, c.symbol);
+      return chartSettings === c.chartSettings ? c : { ...c, chartSettings };
+    }),
+    removeCompare: (slot, code) => patchSettings(slot, (s) => edit.removeCompare(s, code)),
   };
 });
 

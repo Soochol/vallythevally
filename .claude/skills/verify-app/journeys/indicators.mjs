@@ -72,7 +72,7 @@ export default async function (page, { expect, api, fake, screenshot }) {
   const s = await probe();
   const mainLast = s.find((x) => x.type === "Candlestick" && x.count > 0).last;
   expect(typeof mainLast).toBe("number");
-  const drawn = s.filter((x) => x.type === "Line" && x.count > 0);
+  const drawn = s.filter((x) => (x.type === "Line" || x.type === "Custom") && x.count > 0);
   const future = drawn.filter((x) => x.last > mainLast);
   expect(future).toHaveLength(2);
 
@@ -112,7 +112,7 @@ export default async function (page, { expect, api, fake, screenshot }) {
   const futureAfterReload = async () => {
     const now = await probe();
     const last = now.find((x) => x.type === "Candlestick" && x.count > 0)?.last;
-    return typeof last === "number" ? now.filter((x) => x.type === "Line" && x.count > 0 && x.last > last).length : -1;
+    return typeof last === "number" ? now.filter((x) => (x.type === "Line" || x.type === "Custom") && x.count > 0 && x.last > last).length : -1;
   };
   await expect.poll(futureAfterReload).toBe(2);
   await screenshot("after-reload");

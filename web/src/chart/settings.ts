@@ -3,7 +3,7 @@ import type { SymbolCode } from "../api/generated/SymbolCode";
 import { INDICATOR_COLORS, type IndicatorColor, KINDS, placementOf } from "./indicators/kinds";
 
 export type ChartStyle = "candle" | "bar" | "line" | "area";
-export type PriceScale = "normal" | "log";
+export type PriceScale = "normal" | "log" | "percent";
 export type LineWidth = 1 | 2 | 3;
 
 export interface IndicatorConfig {
@@ -31,6 +31,7 @@ export interface ChartSettings {
 }
 
 export const DEFAULT_PANEL_STRETCH = 0.25;
+export const MAX_COMPARE = 3;
 
 const DEFAULT_VOLUME_ID = "01900000-0000-7000-8000-00000000a001";
 const DEFAULT_VOLUME_PANEL = "01900000-0000-7000-8000-00000000b001";
@@ -60,7 +61,7 @@ export const CHART_STYLE_LABEL: Record<ChartStyle, string> = {
 };
 
 const CHART_STYLES = ["candle", "bar", "line", "area"] as const satisfies readonly ChartStyle[];
-const PRICE_SCALES = ["normal", "log"] as const satisfies readonly PriceScale[];
+const PRICE_SCALES = ["normal", "log", "percent"] as const satisfies readonly PriceScale[];
 const WIDTHS = [1, 2, 3] as const satisfies readonly LineWidth[];
 
 const isOneOf = <T extends string | number>(xs: readonly T[], x: unknown): x is T => (xs as readonly unknown[]).includes(x);
@@ -80,7 +81,7 @@ function readChartSettings(raw: unknown): ChartSettings | null {
   if (!isRecord(raw)) return null;
   const { v, style, scale, indicators, compare, panels } = raw;
   if (!isOneOf(CHART_STYLES, style) || !isOneOf(PRICE_SCALES, scale)) return null;
-  if (!Array.isArray(compare) || !compare.every((c): c is SymbolCode => typeof c === "string")) return null;
+  if (!isCompareList(compare)) return null;
   if (v === 1) return migrateV1({ style, scale, compare, indicators, panels });
   if (v !== 2 || !Array.isArray(indicators) || !Array.isArray(panels)) return null;
   const readPanels = panels.map(readPanel);
@@ -134,6 +135,9 @@ export function readSpecShape(raw: unknown): IndicatorSpec | null {
 }
 
 const allDistinct = (xs: readonly string[]) => new Set(xs).size === xs.length;
+
+const isCompareList = (x: unknown): x is SymbolCode[] =>
+  Array.isArray(x) && x.length <= MAX_COMPARE && x.every((c) => typeof c === "string") && allDistinct(x);
 
 function panelsMatch(s: Pick<ChartSettings, "indicators" | "panels">): boolean {
   const panelIds = s.panels.map((p) => p.id);
@@ -191,4 +195,25 @@ export function setPanelStretches(s: ChartSettings, stretches: readonly Panel["s
   if (stretches.length !== s.panels.length || stretches.some((x) => !(Number.isFinite(x) && x > 0))) return s;
   if (stretches.every((x, i) => Math.abs(x - s.panels[i]!.stretch) < 1e-3)) return s;
   return { ...s, panels: s.panels.map((p, i) => ({ ...p, stretch: Math.round(stretches[i]! * 1000) / 1000 })) };
+}
+
+export function shownScale(s: Pick<ChartSettings, "scale" | "compare">): PriceScale {
+  return s.compare.length > 0 ? "percent" : s.scale;
+}
+
+export type CompareRefusal = "full" | "dup" | "main";
+
+export function compareRefusal(s: Pick<ChartSettings, "compare">, code: SymbolCode, main: SymbolCode): CompareRefusal | null {
+  if (code === main) return "main";
+  if (s.compare.includes(code)) return "dup";
+  if (s.compare.length >= MAX_COMPARE) return "full";
+  return null;
+}
+
+export function addCompare(s: ChartSettings, code: SymbolCode, main: SymbolCode): ChartSettings {
+  return compareRefusal(s, code, main) ? s : { ...s, compare: [...s.compare, code] };
+}
+
+export function removeCompare(s: ChartSettings, code: SymbolCode): ChartSettings {
+  return s.compare.includes(code) ? { ...s, compare: s.compare.filter((c) => c !== code) } : s;
 }
