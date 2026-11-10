@@ -1,17 +1,17 @@
-import { useSelectionStore } from "../../stores/selection";
-import { ChartIcon, ListIcon, SearchIcon } from "../icons";
+import { type PhoneTab, useSelectionStore } from "../../stores/selection";
+import { ChartIcon, FunnelIcon, ListIcon, SearchIcon } from "../icons";
 
 export function PhoneTabs() {
   const searching = useSelectionStore((s) => s.dialog?.kind === "search");
   const tab = useSelectionStore((s) => s.phoneTab);
   const { openSearch, closeDialog, setPhoneTab } = useSelectionStore.getState();
-  const show = (t: "chart" | "watch") => {
+  const show = (t: PhoneTab) => {
     closeDialog();
     setPhoneTab(t);
   };
   const cls = "flex flex-col items-center justify-center gap-0.5 text-xs text-text-3 aria-pressed:text-accent";
   return (
-    <nav aria-label="휴대폰 탭" className="hidden grid-cols-3 border-t border-line bg-bg [grid-area:mtabs] max-md:grid">
+    <nav aria-label="휴대폰 탭" className="hidden grid-cols-4 border-t border-line bg-bg [grid-area:mtabs] max-md:grid">
       <button type="button" className={cls} aria-pressed={!searching && tab === "chart"} onClick={() => show("chart")}>
         <ChartIcon size={22} />
         차트
@@ -19,6 +19,10 @@ export function PhoneTabs() {
       <button type="button" className={cls} aria-pressed={!searching && tab === "watch"} onClick={() => show("watch")}>
         <ListIcon size={22} />
         관심종목
+      </button>
+      <button type="button" className={cls} aria-pressed={!searching && tab === "screener"} onClick={() => show("screener")}>
+        <FunnelIcon size={22} />
+        스크리너
       </button>
       <button type="button" className={cls} aria-pressed={searching} onClick={() => openSearch()}>
         <SearchIcon size={22} />

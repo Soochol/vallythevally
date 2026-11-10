@@ -13,6 +13,7 @@ import type { UpdatePhase } from "../../api/generated/UpdatePhase";
 import { useScreenerStatus, useScreens, useUpdateCommands } from "../../api/screener";
 import { direction, formatPercent, formatPrice } from "../../lib/format";
 import { isTypingTarget } from "../../lib/hotkeys";
+import { DESKTOP_QUERY, useMediaQuery } from "../../lib/media";
 import {
   conditionSentence,
   dayLabel,
@@ -58,7 +59,9 @@ const editScreen = (id: string | null) => useSelectionStore.getState().openScree
 const count = (n: number) => n.toLocaleString("ko-KR");
 
 function openResult(code: SymbolCode) {
-  useLayoutStore.getState().setSymbol(useSelectionStore.getState().activeSlot, { code, nxtEnabled: false }, "krx");
+  const selection = useSelectionStore.getState();
+  useLayoutStore.getState().setSymbol(selection.activeSlot, { code, nxtEnabled: false }, "krx");
+  selection.setPhoneTab("chart");
 }
 
 function useChosenScreen() {
@@ -112,6 +115,17 @@ export function ScreenerBadge() {
       {shown > BADGE_MAX ? `${BADGE_MAX}+` : shown}
       <span className="sr-only">종목</span>
     </span>
+  );
+}
+
+export function PhoneScreener() {
+  const shown = useSelectionStore((s) => s.phoneTab === "screener");
+  const desktop = useMediaQuery(DESKTOP_QUERY);
+  if (!shown || desktop) return null;
+  return (
+    <div className="fixed inset-x-0 bottom-[56px] top-0 z-30 flex flex-col bg-bg">
+      <ScreenerPanel />
+    </div>
   );
 }
 
