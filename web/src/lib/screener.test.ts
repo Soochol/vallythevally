@@ -14,6 +14,7 @@ import {
   runBlock,
   showsUpdateBand,
   sortRows,
+  statusFooter,
   todayNotStored,
 } from "./screener";
 
@@ -144,4 +145,14 @@ test("대기 중 다음 상태 조회는 KST 20:00이나 자정에서 5초 뒤�
   expect(msUntilStatusTurns(at("2026-11-11T20:00:00"))).toBe(4 * 3_600_000 + 5_000);
   expect(msUntilStatusTurns(at("2026-11-11T23:59:00"))).toBe(65_000);
   expect(msUntilStatusTurns(at("2026-11-12T00:00:00"))).toBe(20 * 3_600_000 + 5_000);
+});
+
+test("아래 줄은 상태 조회가 실패하면 읽어 둔 상태가 있어도 오류를 보이고, 띠가 보이면 비운다", () => {
+  const failed = new Error("서버에 연결하지 못했습니다");
+  expect(statusFooter(undefined, null)).toEqual({ kind: "reading" });
+  expect(statusFooter(undefined, failed)).toEqual({ kind: "unreadable", message: "서버에 연결하지 못했습니다", stale: false });
+  expect(statusFooter(ready, failed)).toEqual({ kind: "unreadable", message: "서버에 연결하지 못했습니다", stale: true });
+  expect(statusFooter(ready, null)).toEqual({ kind: "store", lastDay: "2026-11-10" });
+  expect(statusFooter({ ...ready, update: running("backfill") }, null)).toEqual({ kind: "none" });
+  expect(statusFooter({ ...ready, update: running("backfill") }, failed)).toMatchObject({ kind: "unreadable", stale: true });
 });

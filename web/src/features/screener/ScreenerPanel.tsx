@@ -30,6 +30,8 @@ import {
   runBlock,
   showsUpdateBand,
   sortRows,
+  type StatusFooter,
+  statusFooter,
   todayNotStored,
 } from "../../lib/screener";
 import { addSymbols, listNameFrom, MAX_WATCHLISTS } from "../../lib/watchlist";
@@ -144,7 +146,7 @@ export function ScreenerPanel() {
       ) : (
         <NoScreen query={screens} />
       )}
-      {status === undefined ? <StatusProblem query={statusQuery} /> : !band && status.lastDay !== null && <StoreLine status={status} lastDay={status.lastDay} />}
+      <StatusFooterLine footer={statusFooter(status, statusQuery.error)} status={status} onRetry={() => void statusQuery.refetch()} />
     </aside>
   );
 }
@@ -662,13 +664,16 @@ function UpdateBand({ status }: { status: ScreenerStatus }) {
   return null;
 }
 
-function StatusProblem({ query }: { query: UseQueryResult<ScreenerStatus> }) {
+function StatusFooterLine({ footer, status, onRetry }: { footer: StatusFooter; status: ScreenerStatus | undefined; onRetry(): void }) {
+  if (footer.kind === "none") return null;
+  if (footer.kind === "store" && status) return <StoreLine status={status} lastDay={footer.lastDay} />;
+  const failed = footer.kind === "unreadable";
   return (
-    <footer role={query.isError ? "alert" : undefined} className="flex flex-none items-center gap-2 border-t border-line px-3 py-2">
-      <span className={`min-w-0 flex-1 truncate text-xs ${query.isError ? "text-up" : "text-text-3"}`}>
-        {query.isError ? `저장소 상태를 읽지 못했습니다: ${query.error.message}` : "저장소 상태를 읽는 중"}
+    <footer role={failed ? "alert" : undefined} className="flex flex-none items-center gap-2 border-t border-line px-3 py-2">
+      <span className={`min-w-0 flex-1 truncate text-xs ${failed ? "text-up" : "text-text-3"}`} title={failed ? footer.message : undefined}>
+        {failed ? `저장소 상태를 ${footer.stale ? "다시 " : ""}읽지 못했습니다: ${footer.message}` : "저장소 상태를 읽는 중"}
       </span>
-      {query.isError && <RetryButton onClick={() => void query.refetch()} />}
+      {failed && <RetryButton onClick={onRetry} />}
     </footer>
   );
 }

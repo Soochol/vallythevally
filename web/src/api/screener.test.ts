@@ -1,5 +1,6 @@
 import { environmentManager, focusManager, QueryClient, QueryObserver } from "@tanstack/react-query";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import { statusFooter } from "../lib/screener";
 import type { ScreenerStatus } from "./generated/ScreenerStatus";
 import { screenerCommands, screenerStatusQuery } from "./screener";
 
@@ -35,10 +36,8 @@ afterEach(() => {
   environmentManager.setIsServer(() => typeof window === "undefined");
 });
 
-const watchStatus = () => {
-  const observer = new QueryObserver(client, screenerStatusQuery(1_000));
-  return observer.subscribe(() => {});
-};
+const statusObserver = () => new QueryObserver(client, screenerStatusQuery(1_000));
+const watchStatus = () => statusObserver().subscribe(() => {});
 const cached = () => client.getQueryData<ScreenerStatus>(screenerStatusQuery(1_000).queryKey);
 
 test("업데이트 명령보다 먼저 떠난 상태 조회가 늦게 와도 명령이 돌려준 진행 상태를 덮지 않고, 명령 뒤에 다시 묻는다", async () => {
@@ -84,6 +83,28 @@ test("탭이 다시 보이면 상태를 다시 묻는다", async () => {
   focusManager.setFocused(false);
   focusManager.setFocused(true);
   await vi.waitFor(() => expect(statusReads).toBe(2));
+  focusManager.setFocused(undefined);
+  stop();
+});
+
+test("상태를 한 번 읽은 뒤 탭 복귀 조회가 실패하면 아래 줄이 오류와 다시 시도를 보이고, 다시 읽으면 저장소 줄로 돌아간다", async () => {
+  const observer = statusObserver();
+  const stop = observer.subscribe(() => {});
+  await vi.waitFor(() => expect(cached()).toEqual(idle));
+  const footer = () => {
+    const shown = observer.getCurrentResult();
+    return statusFooter(shown.data, shown.error);
+  };
+  expect(footer()).toEqual({ kind: "store", lastDay: "2026-11-10" });
+
+  answerStatus = async () => new Response(JSON.stringify({ error: { code: "internal", message: "저장소를 열지 못했습니다" } }), { status: 500 });
+  focusManager.setFocused(false);
+  focusManager.setFocused(true);
+  await vi.waitFor(() => expect(footer()).toEqual({ kind: "unreadable", message: "저장소를 열지 못했습니다", stale: true }));
+
+  answerStatus = async () => reply(idle);
+  await observer.refetch();
+  expect(footer()).toEqual({ kind: "store", lastDay: "2026-11-10" });
   focusManager.setFocused(undefined);
   stop();
 });

@@ -129,5 +129,18 @@ export function msUntilStatusTurns(now: number): number {
   return (sinceMidnight < CLOSE_MS ? CLOSE_MS : DAY_MS) - sinceMidnight + SETTLE_MS;
 }
 
+export type StatusFooter =
+  | { kind: "reading" }
+  | { kind: "unreadable"; message: string; stale: boolean }
+  | { kind: "store"; lastDay: KstDate }
+  | { kind: "none" };
+
+export function statusFooter(status: ScreenerStatus | undefined, error: Error | null): StatusFooter {
+  if (error) return { kind: "unreadable", message: error.message, stale: status !== undefined };
+  if (!status) return { kind: "reading" };
+  if (showsUpdateBand(status) || status.lastDay === null) return { kind: "none" };
+  return { kind: "store", lastDay: status.lastDay };
+}
+
 export const todayNotStored = (status: ScreenerStatus): boolean =>
   status.todayAvailable && (status.lastDay === null || status.needDay === null || status.lastDay <= status.needDay);
