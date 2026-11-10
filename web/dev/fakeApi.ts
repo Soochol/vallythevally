@@ -84,7 +84,10 @@ export function fakeApi(screenerScenario: string | undefined): Plugin {
           if (method === "GET") return reply(res, user.getWatchlists());
           if (method === "PUT") return reply(res, user.putWatchlists(await readJson(req)));
         }
-        if (path === "/screens" && method === "GET") return reply(res, user.getScreens());
+        if (path === "/screens") {
+          if (method === "GET") return reply(res, user.getScreens());
+          if (method === "PUT") return reply(res, user.putScreens(await readJson(req)));
+        }
         if (path === "/screener/status" && method === "GET") return reply(res, screener.status());
         if (path === "/screener/update" && method === "POST") return reply(res, screener.start(await readJson(req)));
         if (path === "/screener/update/cancel" && method === "POST") return reply(res, screener.cancel());
