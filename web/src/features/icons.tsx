@@ -135,3 +135,10 @@ export const EyeIcon = ({ size = 16, off = false }: P & { off?: boolean }) => (
     {off && <path d="m4 4 16 16" />}
   </Icon>
 );
+export const DrawingsIcon = ({ size }: P) => (
+  <Icon size={size}>
+    <path d="M6.5 17.5 17.5 6.5" />
+    <circle cx="5" cy="19" r="2" />
+    <circle cx="19" cy="5" r="2" />
+  </Icon>
+);

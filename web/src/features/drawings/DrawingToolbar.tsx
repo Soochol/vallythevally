@@ -53,7 +53,7 @@ export function DrawingToolbar() {
       const all = sync.drawings(symbol).filter((d) => !d.locked && !prefs.lockAll);
       if (all.length && window.confirm(`이 종목의 드로잉 ${all.length}개를 지울까요?`)) sync.commit(slot, all.map((before) => ({ kind: "delete", before })));
     })}><ToolIcon path="M4 6 H20 M9 6 V3 H15 V6 M6 6 L7 21 H17 L18 6 M10 10 V17 M14 10 V17" /></button>
-    <div className="draw-toolbar-bottom"><button className="draw-tool" aria-label="개체 목록 열기" title="개체 목록" onClick={() => useDrawingSession.setState({ panel: "objects" })}><ToolIcon path="M9 5 H21 M9 12 H21 M9 19 H21 M3 4 H5 V6 H3 Z M3 11 H5 V13 H3 Z M3 18 H5 V20 H3 Z" /></button>
+    <div className="draw-toolbar-bottom"><button className="draw-tool" aria-label="개체 목록 열기" title="개체 목록" onClick={() => useSelectionStore.getState().showRightPanel("objects")}><ToolIcon path="M9 5 H21 M9 12 H21 M9 19 H21 M3 4 H5 V6 H3 Z M3 11 H5 V13 H3 Z M3 18 H5 V20 H3 Z" /></button>
       <button className="draw-tool" aria-label="드로잉 단축키 도움말" title="드로잉 단축키" onClick={() => setHelp(!help)}>?</button></div>
     {help && <div className="drawing-help" role="dialog" aria-label="드로잉 단축키"><div className="draw-dialog-head"><strong>드로잉 단축키</strong><button className="icon-btn" aria-label="도움말 닫기" onClick={() => setHelp(false)}>×</button></div>{gestureHelp(registeredModes()).map((h) => <p key={h.keys}><kbd>{h.keys}</kbd><span>{h.label}</span></p>)}</div>}
   </nav>;

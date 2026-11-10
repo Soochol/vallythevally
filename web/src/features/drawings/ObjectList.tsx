@@ -40,8 +40,3 @@ export function ObjectList() {
     <p className="draw-objects-foot">Ctrl+클릭으로 여러 개 선택 · 끌어서 순서 변경</p>
   </section>;
 }
-
-export function WatchObjectTabs() {
-  const panel = useDrawingSession((s) => s.panel);
-  return <div className="draw-panel-tabs" role="tablist" aria-label="오른쪽 패널"><button role="tab" aria-selected={panel === "watch"} onClick={() => useDrawingSession.setState({ panel: "watch" })}>관심종목</button><button role="tab" aria-selected={panel === "objects"} onClick={() => useDrawingSession.setState({ panel: "objects" })}>개체</button></div>;
-}

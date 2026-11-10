@@ -14,8 +14,8 @@ import { useHotkeys } from "./features/useHotkeys";
 import { useOpenFromAddress } from "./features/useOpenFromAddress";
 import { useCell } from "./stores/layout";
 import { PhoneSaveBand } from "./features/status/SaveStatus";
-import { desktopPanelWidth } from "./features/watch/columns";
-import { PhoneWatch, WatchPanel } from "./features/watch/Watchlist";
+import { RightPanel, useRightPanelWidth } from "./features/panel/RightPanel";
+import { PhoneWatch } from "./features/watch/Watchlist";
 import { usePersistStore } from "./stores/persist";
 import { useSelectionStore } from "./stores/selection";
 import { useUiStore } from "./stores/ui";
@@ -31,8 +31,7 @@ function ChartScreen() {
   const cell = useCell(slot);
   const info = useSymbolInfo(cell.symbol).data;
   const pushRecent = useUiStore((s) => s.pushRecent);
-  const watchCollapsed = useUiStore((s) => s.prefs.watchCollapsed);
-  const watchColumns = useUiStore((s) => s.prefs.watchColumns);
+  const panelWidth = useRightPanelWidth();
   const [status, setStatus] = useState<CellStatus>({ kind: "loading" });
 
   useHotkeys();
@@ -43,10 +42,9 @@ function ChartScreen() {
 
   return (
     <div
-      style={{ "--watch-w": `${desktopPanelWidth(watchColumns)}px` } as React.CSSProperties}
+      style={{ "--watch-w": `${panelWidth}px` } as React.CSSProperties}
       className={
-        "grid h-dvh " +
-        (watchCollapsed ? "grid-cols-[minmax(0,1fr)_28px] " : "grid-cols-[minmax(0,1fr)_var(--watch-w)] ") +
+        "grid h-dvh grid-cols-[minmax(0,1fr)_var(--watch-w)] " +
         "grid-rows-[var(--topbar-h)_minmax(0,1fr)_var(--status-h)] [grid-template-areas:'top_top'_'grid_watch'_'status_status'] " +
         "max-md:grid-cols-[minmax(0,1fr)] max-md:grid-rows-[auto_auto_minmax(0,1fr)_56px] max-md:[grid-template-areas:'mhead'_'mper'_'grid'_'mtabs']"
       }
@@ -58,7 +56,7 @@ function ChartScreen() {
         <DrawingToolbar />
         <ChartCell slot={slot} status={status} onStatus={setStatus} />
       </main>
-      <WatchPanel />
+      <RightPanel />
       <StatusBar />
       <PhoneTabs />
       <PhoneWatch />

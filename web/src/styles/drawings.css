@@ -24,9 +24,6 @@
 .draw-grip { cursor:grab; color:var(--text-3); width:18px; height:28px; touch-action:none; font-size:20px; }
 .draw-grip:active { cursor:grabbing; }
 .draw-bar-sep { width:1px; height:20px; background:var(--line); margin:0 3px; }
-.draw-panel-tabs { display:flex; flex-shrink:0; height:36px; gap:18px; padding:0 14px; border-bottom:1px solid var(--line); }
-.draw-panel-tabs button { padding:0 2px; font-size:var(--fs-s); font-weight:600; color:var(--text-3); border-bottom:2px solid transparent; }
-.draw-panel-tabs [aria-selected=true] { color:var(--text); border-color:var(--accent); }
 .drawing-objects { display:flex; min-height:0; flex:1; flex-direction:column; }
 .draw-objects-head { display:flex; justify-content:space-between; padding:12px; color:var(--text-3); font-size:var(--fs-xs); }
 .draw-objects-head b { color:var(--text-2); font-weight:500; margin-left:5px; }
