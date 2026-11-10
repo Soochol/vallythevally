@@ -28,7 +28,7 @@
 - **증상**: `playwright test`가 모든 테스트에서 `Chromium sandboxing failed!`, `No usable sandbox!`로 실패한다.
 - **원인(2026-11-09 확인)**
   - 이 PC는 `kernel.apparmor_restrict_unprivileged_userns = 1`이다. AppArmor 프로필이 `userns`를 허락하지 않은 프로그램은 사용자 이름공간을 만들지 못하고, Chromium 샌드박스는 사용자 이름공간이 있어야 뜬다.
-  - e2e는 `chromiumSandbox: true`로 Chromium을 띄운다(PR #32 R2). Orca 안에서는 통과한다. Orca가 `orca-ide (unconfined)` 프로필 아래에서 돌고(`cat /proc/self/attr/current`), 그 자식인 Chromium이 이 프로필을 물려받기 때문이다. 일반 터미널에는 이런 프로필이 없다.
+  - e2e는 `chromiumSandbox: true`로 Chromium을 띄운다(PR #32 R2). hc 터미널 안에서는 통과한다. herdr-core가 `userns`를 허락하는 AppArmor 프로필 아래에서 돌고, 그 자식인 Chromium이 이 프로필을 물려받기 때문이다(2026-11-10 verify-vally로 확인. 예전 Orca도 `orca-ide (unconfined)` 프로필로 같은 방식이었다). 일반 터미널에는 이런 프로필이 없다.
 - **대처**: CI와 같은 프로필을 사용자가 직접 깐다. `web/`에서 `./scripts/allow-chromium-sandbox.sh`(sudo를 묻는다). 설치된 Playwright headless shell 하나에만 `userns`를 허락한다. Playwright를 올려 브라우저 경로가 바뀌면 다시 실행한다.
   - 이 프로필을 깔아도 `check.sh`는 일반 터미널에서 기본 설정으로 돌지 않는다. 시험을 감싸는 `scripts/offline.sh`가 이름공간을 만들지 못한다. 아래 절의 명시적 해제는 이 네트워크 차단만 해제하며, Chromium 샌드박스 설정은 별도로 필요하다.
 - **하지 말 것**: 샌드박스를 끄거나(`chromiumSandbox: false`) `sysctl`로 PC 전체의 제한을 풀지 않는다.
@@ -52,9 +52,14 @@
   - 감싸지 않은 단계: `cargo clippy`, `cargo build`(빌드 스크립트와 proc macro 포함), `pnpm install`, `pnpm build`, `build-wasm.sh`. 의존성을 받아야 해서 일부러 밖에 둔다.
   - 파일 경로가 있는 Unix 소켓. 네트워크 이름공간이 나누지 않는다. D-Bus 세션 버스를 통해 `systemd-run --user`로 실행한 명령과 Docker 소켓을 통해 `--network host`로 실행한 컨테이너는 호스트 네트워크를 쓸 수 있다. PR #51 리뷰에서 두 경로 모두 호스트의 임시 루프백 서버에 접속했다(2026-11-09). 외부 사이트나 실제 키움으로 우회 접속하지는 않았다.
   - 이 장치는 시험이 실수로 실제 주소에 직접 접속하는 일을 막는다. 일부러 호스트 데몬을 호출해 우회하는 코드는 범위 밖으로 받아들인다(2026-11-09 사용자 결정). PR #46의 키움 주소 필수화는 주소가 빠진 서버를 시작 단계에서 막는 별도 장치다.
-- **일반 터미널에서는 이름공간을 만들지 못한다**: `kernel.apparmor_restrict_unprivileged_userns = 1`이라 일반 터미널(`unconfined`)에서 만든 사용자 이름공간은 `unprivileged_userns` 프로필로 옮겨져 capability를 모두 잃는다. 그래서 `unshare`가 `write failed /proc/self/uid_map: Operation not permitted`로 실패하고, `offline.sh`는 기본 설정에서 안내를 찍고 멈춘다(2026-11-09, Orca 안에서 `systemd-run --user`로 일반 터미널과 같은 `unconfined` 프로필의 프로세스를 띄워 확인했다. 실제 터미널 창에서는 돌려 보지 않았다). 기본 설정으로 검사하려면 Orca 안에서 push한다.
+- **일반 터미널에서는 이름공간을 만들지 못한다**: `kernel.apparmor_restrict_unprivileged_userns = 1`이라 일반 터미널(`unconfined`)에서 만든 사용자 이름공간은 `unprivileged_userns` 프로필로 옮겨져 capability를 모두 잃는다. 그래서 `unshare`가 `write failed /proc/self/uid_map: Operation not permitted`로 실패하고, `offline.sh`는 기본 설정에서 안내를 찍고 멈춘다(2026-11-09, Orca 안에서 `systemd-run --user`로 일반 터미널과 같은 `unconfined` 프로필의 프로세스를 띄워 확인했다. 실제 터미널 창에서는 돌려 보지 않았다). 기본 설정으로 검사하려면 hc 터미널 안에서 push한다(아래 절).
 - **명시적 해제**: 이름공간을 만들 수 없는 환경에서 네트워크 차단 없이 같은 시험을 돌리려면 `VALLY_CHECK_ALLOW_NETWORK=1 scripts/check.sh`를 실행한다. push에도 적용하려면 `VALLY_CHECK_ALLOW_NETWORK=1 git push`를 쓴다. 이 값이 정확히 `1`일 때만 허용한다. 각 시험 전에 표준 오류로 큰 경고를 출력한다. 외부 TCP 연결과 DNS 조회, 실제 키움 접속이 막히지 않아 시험의 잘못된 주소가 실제 요청을 보낼 수 있다. 시험이 가짜 키움과 로컬 주소만 사용하는지 먼저 확인한다.
   - 이름공간을 만들 수 있으면 이 변수가 있어도 네트워크를 차단한다. 루프백 준비 실패나 자식 명령 실패를 네트워크 허용으로 재시도하지 않는다. 이 해제는 Chromium 샌드박스를 끄지 않는다.
   - **해제 경로 확인(2026-11-09)**: `systemd-run --user`의 `unconfined` 환경에서 변수 없이는 자식을 실행하지 않고 종료 1이었다. 값이 `1`이면 경고 후 같은 `check.sh`가 Rust 253개, Vitest 164개, wasm 참조값 7개를 통과했다. e2e 21개는 위의 별도 Chromium 샌드박스 제한(`No usable sandbox!`)으로 실패했다. 실제 일반 터미널 창에서 실행한 결과는 아니다.
 - **안 되는 대안**: `bwrap --unshare-net`은 두 환경 모두에서 `lo`를 켜고 네트워크를 막는다. 하지만 자식 프로세스가 `unpriv_bwrap` 프로필에서 capability를 잃어 Chromium이 `No usable sandbox!`로 뜨지 않는다.
 - **하지 말 것**: `offline.sh`를 빼거나 `sysctl`로 PC 전체의 제한을 풀지 않는다. 해제가 필요하면 위의 명시적 해제를 사용한다.
+
+## hc 터미널은 herdr-core AppArmor 프로필이 있어야 네트워크 격리가 된다
+- **증상**: hc 터미널에서 `scripts/offline.sh`가 이름공간을 만들지 못해 push와 `check.sh`가 멈춘다.
+- **원인**: 위와 같은 `kernel.apparmor_restrict_unprivileged_userns = 1`. herdr-core에 `userns`를 허락하는 프로필이 없으면 hc 터미널도 일반 터미널과 같다.
+- **대처**: `.claude/skills/vally/SKILL.md`의 Setup대로 `/etc/apparmor.d/herdr-core`를 깔고 `hc server restart`. 프로필보다 먼저 떠 있던 hc holder가 띄운 터미널은 프로필을 물려받지 않는다. `.claude/skills/vally/scripts/doctor.sh`가 이 상태를 알려 준다(2026-11-10 확인: 프로필 설치 뒤 새 holder의 터미널에서 `check.sh` 통과).

@@ -6,7 +6,7 @@ Confirm `pstack:poteto-mode` is in your skill list. If it is missing, send `hc s
 
 ## Work
 
-1. Read `AGENTS.md`, the spec, and the issue (`gh issue view <issue>`). For documents, follow `docs/agents/document-policy.md` with the Worker permissions. Wherever those documents say "the coordinator", that is the lead: reach it with `ask`.
+1. Read `AGENTS.md`, the spec, and the issue (`gh issue view <issue>`). For documents, follow `docs/agents/document-policy.md` with the Worker permissions. Reach the coordinator (the lead) with `ask`.
 2. Run `pstack:poteto-mode` and name the chosen playbook in your first reply. Do every step of the playbook or record it as `skip: <reason>`. Record the independent-review step as `skip: the lead runs review`.
 3. Turn on architect's Agree checkpoint when the work touches shared state, concurrent writers, a state machine, a policy the user decides, or a Kiwoom constraint (token, WebSocket session, `[8050]`). Write the sketch to a file, send `ask <issue> <question> <file>`, and end your turn until the answer arrives.
 4. Delegate code-writing to `pstack:poteto-agent` subagents when it helps, and review their diff. Your subagents report to you only.
