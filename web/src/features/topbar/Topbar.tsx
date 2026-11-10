@@ -1,16 +1,20 @@
 import { Fragment } from "react";
 import { useSymbolInfo } from "../../api/queries";
+import { shownScale } from "../../chart/settings";
 import { periodKey } from "../../lib/hotkeys";
 import { PERIOD_LABEL, PERIODS, symbolSub } from "../../lib/symbol";
 import { useCell, useLayoutStore } from "../../stores/layout";
 import { useSelectionStore } from "../../stores/selection";
 import { useTheme, useUiStore } from "../../stores/ui";
+import { AXIS_LOCKED, LOG_LOCKED, pressScale } from "../indicator-dialog/compareForm";
 import { BrandIcon, CameraIcon, CopyIcon, IndicatorIcon, MoonIcon, SearchIcon, SunIcon } from "../icons";
 import { canCopyImage, saveSnapshot } from "../snapshot/saveSnapshot";
 import { VenuePicker } from "../venue/VenuePicker";
 import { StyleMenu } from "./StyleMenu";
 
-/** 위쪽 막대(frontend.md §2.1). 종목, 거래소(주식만), 봉 주기, 봉 모양, 로그 축, 지표, 차트 이미지, 테마. */
+const AXIS_BTN = "tb-btn disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-transparent";
+
+/** 위쪽 막대(frontend.md §2.1). 종목, 거래소(주식만), 봉 주기, 봉 모양, 로그·% 축, 지표, 차트 이미지, 테마. */
 export function Topbar() {
   const slot = useSelectionStore((s) => s.activeSlot);
   const openSearch = useSelectionStore((s) => s.openSearch);
@@ -20,7 +24,12 @@ export function Topbar() {
   const { setPeriod, setStyle, setScale } = useLayoutStore.getState();
   const theme = useTheme();
   const toggle = useUiStore((s) => s.toggleTheme);
-  const log = cell.chartSettings.scale === "log";
+  const shown = shownScale(cell.chartSettings);
+  const locked = cell.chartSettings.compare.length > 0;
+  const press = (button: "log" | "percent") => {
+    const next = pressScale(cell.chartSettings, button);
+    if (next) setScale(slot, next);
+  };
 
   return (
     <header
@@ -70,12 +79,23 @@ export function Topbar() {
       <StyleMenu value={cell.chartSettings.style} onChange={(s) => setStyle(slot, s)} />
       <button
         type="button"
-        className="tb-btn"
-        aria-pressed={log}
-        title="로그 축 (L)"
-        onClick={() => setScale(slot, log ? "normal" : "log")}
+        className={AXIS_BTN}
+        aria-pressed={shown === "log"}
+        disabled={locked}
+        title={locked ? LOG_LOCKED : "로그 축 (L)"}
+        onClick={() => press("log")}
       >
         로그
+      </button>
+      <button
+        type="button"
+        className={AXIS_BTN}
+        aria-pressed={shown === "percent"}
+        disabled={locked}
+        title={locked ? AXIS_LOCKED : "가격축을 화면 왼쪽 끝 봉 기준 % 변화로"}
+        onClick={() => press("percent")}
+      >
+        %
       </button>
       <span className="tb-sep" />
       <button type="button" className="tb-btn" aria-haspopup="dialog" title="지표 (I)" onClick={() => openIndicators(slot)}>

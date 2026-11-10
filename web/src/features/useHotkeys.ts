@@ -5,6 +5,7 @@ import { PERIODS } from "../lib/symbol";
 import { useLayoutStore } from "../stores/layout";
 import { useSelectionStore } from "../stores/selection";
 import { useUiStore } from "../stores/ui";
+import { pressScale } from "./indicator-dialog/compareForm";
 import { saveSnapshot } from "./snapshot/saveSnapshot";
 
 /** 화면 전체의 단축키. 대화상자가 열려 있거나 입력칸에 초점이 있으면 쓰지 않는다. */
@@ -41,8 +42,10 @@ export function useHotkeys() {
         }
         case "snapshot":
           return saveSnapshot(slot, action.mode);
-        case "toggleLog":
-          return layout.setScale(slot, cell.chartSettings.scale === "log" ? "normal" : "log");
+        case "toggleLog": {
+          const next = pressScale(cell.chartSettings, "log");
+          return next && layout.setScale(slot, next);
+        }
         default: {
           const _exhaustive: never = action;
           return _exhaustive;
