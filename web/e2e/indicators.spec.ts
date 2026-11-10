@@ -152,3 +152,91 @@ test("일목균형표를 띄운 채 과거로 스크롤해도 다가갈 때마�
   expect(older).toHaveLength(1);
   await expect(page.locator('[data-indicator-row="i1"]')).toContainText(/\d/);
 });
+
+declare global {
+  interface Window {
+    workerReplies: number;
+  }
+}
+
+function countWorkerReplies(): void {
+  window.workerReplies = 0;
+  const Base = window.Worker;
+  window.Worker = class extends Base {
+    constructor(url: string | URL, options?: WorkerOptions) {
+      super(url, options);
+      this.addEventListener("message", () => {
+        window.workerReplies++;
+      });
+    }
+  };
+}
+
+test.describe("체결 없던 분 뒤", () => {
+  test.use({ clockStart: "20261109100330" });
+
+  test("선행스팬을 다시 놓은 프레임에 그 봉 확정과 다음 봉이 겹쳐도, 모든 선을 시각 순서대로 끝까지 그린다", async ({ page, app }) => {
+    const errors: string[] = [];
+    const delivered: number[] = [];
+    page.on("pageerror", (e) => errors.push(e.message));
+    page.on("console", (m) => {
+      if (m.type() === "error" && m.text().includes("지표")) errors.push(m.text());
+    });
+    page.on("websocket", (socket) => socket.on("framereceived", ({ payload }) => {
+      const m = JSON.parse(String(payload));
+      if (m.type === "bar" || m.type === "confirmed") delivered.push(m.bar.c);
+    }));
+    const style = { colors: ["ind-1"], width: 1 };
+    await seedLayout(app, "1m", [
+      { id: "i1", spec: ICHIMOKU_FOR_30_MINUTE_BARS, panel: "price", visible: true, style },
+      { id: "i2", spec: { kind: "bollinger", period: 20, k: 2 }, panel: "price", visible: true, style },
+      { id: "i3", spec: { kind: "volume", maPeriod: 5 }, panel: "p1", visible: true, style },
+    ], [{ id: "p1", stretch: 0.25 }]);
+    await page.addInitScript(installFrameProbe);
+    await page.addInitScript(countWorkerReplies);
+    await page.goto("/");
+    await expect(cell(page)).toHaveAttribute("aria-busy", "false");
+    const drawn = async () => {
+      const snap = await series(page);
+      const lastMain = Number(snap.find((s) => s.type === "Candlestick")!.data.at(-1)!.time);
+      return { lastMain, lines: snap.filter((s) => s.type !== "Candlestick" && s.data.length > 0) };
+    };
+    await expect.poll(async () => (await drawn()).lines.length).toBe(10);
+    const lagging = async () => {
+      const { lastMain, lines } = await drawn();
+      const behind = lines.filter((l) => Number(l.data.at(-1)!.time) < lastMain);
+      return behind.map((l) => (l.data.at(-1) as { value: number }).value);
+    };
+
+    await expect(async () => {
+      await trade(app, page, delivered, 201_000, "100031");
+    }).toPass({ timeout: 15_000 });
+    await expect.poll(lagging).toEqual([201_000]);
+
+    await page.evaluate(() => window.frameProbe.hold());
+    const repliesBefore = await page.evaluate(() => window.workerReplies);
+    const deliveredBefore = delivered.length;
+    for (const [price, time] of [[202_000, "100201"], [203_000, "100301"]] as const) {
+      expect(await app.fake.pushReal("0B", "005930_AL", {
+        "20": time, "10": `+${price}`, "15": "+1", "13": "1000", "9081": "KRX", "11": "+0", "12": "+0.00", "25": "2",
+      })).toBeGreaterThan(0);
+      await expect.poll(() => delivered.includes(price)).toBe(true);
+    }
+    await expect.poll(async () => (await page.evaluate(() => window.workerReplies)) - repliesBefore).toBe(delivered.length - deliveredBefore);
+    await page.evaluate(() => window.frameProbe.release());
+    await expect(chartOf(cell(page))).toHaveAttribute("data-last-close", "203000");
+
+    expect(errors).toEqual([]);
+    const { lastMain, lines } = await drawn();
+    for (const line of lines) {
+      const times = line.updates.map((u) => Number(u.time));
+      expect(times).toEqual([...times].sort((a, b) => a - b));
+    }
+    const ends = lines.map((l) => Number(l.data.at(-1)!.time));
+    const ahead = ends.filter((t) => t > lastMain);
+    expect(ahead).toHaveLength(2);
+    expect(ahead[0]).toBe(ahead[1]);
+    expect(ends.filter((t) => t === lastMain)).toHaveLength(lines.length - 3);
+    expect(await lagging()).toEqual([203_000]);
+  });
+});
