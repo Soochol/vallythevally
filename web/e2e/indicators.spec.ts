@@ -52,6 +52,11 @@ test("후행스팬이 있는 칸에서 체결을 흘려도 모든 선의 update�
   }).toPass({ timeout: 45_000 });
   await trade(app, page, delivered, 203_500, "100102");
   await expect(chartOf(cell(page))).toHaveAttribute("data-bar-count", String(barsBefore + 1));
+  const beforeSameClose = delivered.length;
+  await trade(app, page, delivered, 203_500, "100103");
+  await expect.poll(() => delivered.length).toBeGreaterThan(beforeSameClose);
+  const updatedLast = async () => (await series(page)).filter((s) => s.type === "Custom").map((l) => Number(l.updates.at(-1)?.time) === Number(l.data.at(-1)?.time));
+  await expect.poll(updatedLast).toEqual([true, true, true, true, true]);
 
   const snap = await series(page);
   const main = snap.find((s) => s.type === "Candlestick")!;

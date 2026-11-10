@@ -200,7 +200,7 @@ export class IndicatorLayer {
     this.history = h;
     this.display = next;
     if (op === "confirm") this.committedT = bar.t;
-    if (next.length > prev.length) this.rebaseLeadingSpans();
+    if (next.length > prev.length || next.at(-1)?.c !== prev.at(-1)?.c) this.rebaseLeadingSpans();
     if (this.configs.some((c) => c.visible) && !this.broken) {
       this.port.post({ type: "bar", chart: this.port.chart, kind: op, bar: tuple(bar) });
     }
