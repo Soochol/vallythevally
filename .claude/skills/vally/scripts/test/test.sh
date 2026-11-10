@@ -752,6 +752,30 @@ t_orphan_status_shows_what_was_reported() {
   ok grep -q '^- w60-review0 \[reviewer\] 이슈 #60: 막힘 (리드 t9 없음)$' "$T/out"
 }
 
+t_start_and_check_stop_on_an_issue_without_live_lead() {
+  make_pr 61 fix/58-theme OPEN '["web/a.ts"]'
+  as_t2 "$agent/start.sh" impl 58 --branch fix/58-theme --spec "$T/spec.md" >/dev/null || return 1
+  kill_lead t2
+  m=$(mark); before=$(git worktree list --porcelain)
+  ! "$agent/start.sh" review 58 --pr 61 --round 0 2>"$T/err" && ok grep -q '(주인 없음): w58-impl .*take.sh 58$' "$T/err" &&
+  ! "$agent/check-pr.sh" 58 --pr 61 2>"$T/err" && ok grep -q '(주인 없음): w58-impl .*take.sh 58$' "$T/err" &&
+  ok test -z "$(changes_since "$m")" && ok test "$(git worktree list --porcelain)" = "$before" || return 1
+  "$agent/take.sh" 58 >/dev/null && "$agent/start.sh" review 58 --pr 61 --round 0 >/dev/null &&
+  ok test "$(labels_of w58-review0 | jq -r '.["vally.owner"]')" = t1@1000
+}
+
+t_finish_keeps_what_has_no_live_lead_and_starts_no_gardener() {
+  make_pr 61 fix/58-theme MERGED '["web/a.ts"]'; merge_pr fix/58-theme
+  "$agent/start.sh" impl 58 --branch fix/58-theme --spec "$T/spec.md" >/dev/null || return 1
+  add_terminal t9 w58-review0 /w '{"vally.issue":"58","vally.role":"reviewer","vally.owner":"t8@5"}' idle ''
+  "$agent/finish.sh" 58 --pr 61 > "$T/out" 2>&1; code=$?
+  cat "$T/out"
+  ok test $code = 0 && ok grep -q '^retired ' "$T/out" && ok grep -q '^kept w58-review0: no live lead' "$T/out" &&
+  ok grep -q '^no gardener: issue #58 has things without a live lead (주인 없음): w58-review0\. .*take.sh 58, then start.sh garden 58 --pr 61$' "$T/out" &&
+  ok test -z "$(labels_of w58-impl)" && ok test -n "$(labels_of w58-review0)" &&
+  ok test ! -d "$VALLY_WORKTREES/fix-58-theme" && ok test -z "$(ran run | grep docs-garden)"
+}
+
 t_scripts_print_their_usage() {
   for s in check-pr finish report retire start take; do
     "$agent/$s.sh" > /dev/null 2>"$T/err"; code=$?
