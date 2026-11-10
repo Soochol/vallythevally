@@ -45,6 +45,7 @@ pub struct DayBar {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Tail {
     pub code: StockCode,
+    pub listed_on: Option<KstDate>,
     pub last: Option<(KstDate, Price)>,
 }
 
@@ -129,18 +130,18 @@ impl Store {
     pub fn tails(&self) -> Result<Vec<Tail>, StoreError> {
         let conn = self.conn();
         let mut stmt = conn.prepare(
-            "SELECT listed.code, last.day, last.close FROM listed
+            "SELECT listed.code, listed.listed_on, last.day, last.close FROM listed
              LEFT JOIN (SELECT code, max(day) AS day, arg_max(close, day) AS close FROM daily GROUP BY code) AS last USING (code)
              ORDER BY listed.code",
         )?;
-        let rows = stmt.query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<i32>>(1)?, row.get::<_, Option<u64>>(2)?)))?;
+        let rows = stmt.query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<i32>>(1)?, row.get::<_, Option<i32>>(2)?, row.get::<_, Option<u64>>(3)?)))?;
         rows.map(|row| {
-            let (code, day, close) = row?;
+            let (code, listed_on, day, close) = row?;
             let last = match (day, close) {
                 (Some(day), Some(close)) => Some((date_of(day), price_of(close)?)),
                 _ => None,
             };
-            Ok(Tail { code: stock_code(&code)?, last })
+            Ok(Tail { code: stock_code(&code)?, listed_on: listed_on.map(date_of), last })
         })
         .collect()
     }
@@ -207,14 +208,14 @@ impl Store {
         Ok(())
     }
 
-    pub fn backfill_queue(&self) -> Result<Vec<StockCode>, StoreError> {
+    pub fn backfill_queue(&self, target: KstDate) -> Result<Vec<StockCode>, StoreError> {
         let conn = self.conn();
         let mut stmt = conn.prepare(
             "SELECT listed.code FROM listed LEFT JOIN history USING (code)
-             WHERE NOT coalesce(history.complete, false) OR coalesce(history.refetch, false)
+             WHERE (NOT coalesce(history.complete, false) OR coalesce(history.refetch, false)) AND NOT coalesce(listed.listed_on > ?, false)
              ORDER BY listed.code",
         )?;
-        let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
+        let rows = stmt.query_map(params![date_value(target)], |row| row.get::<_, String>(0))?;
         rows.map(|code| stock_code(&code?)).collect()
     }
 }

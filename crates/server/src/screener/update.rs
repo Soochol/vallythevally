@@ -4,7 +4,7 @@ use domain::{KstDate, Price, StockCode, Venue};
 use futures::{StreamExt, TryStreamExt, stream};
 
 use super::{CalendarUse, Screener};
-use super::store::{DayBar, Store, Tail, Write};
+use super::store::{DayBar, Store, StoreError, Tail, Write};
 use crate::api::UpdatePhase;
 use crate::bars::BarError;
 use crate::kiwoom::api::{DailyChart, StockList, StockQuotes};
@@ -28,13 +28,36 @@ struct DailyPage {
     next: Option<ContKey>,
 }
 
+pub(super) enum UpdateError {
+    Failed(BarError),
+    NoDailyBars(StockCode),
+}
+
+impl From<BarError> for UpdateError {
+    fn from(e: BarError) -> Self {
+        UpdateError::Failed(e)
+    }
+}
+
+impl From<KiwoomError> for UpdateError {
+    fn from(e: KiwoomError) -> Self {
+        UpdateError::Failed(e.into())
+    }
+}
+
+impl From<StoreError> for UpdateError {
+    fn from(e: StoreError) -> Self {
+        UpdateError::Failed(e.into())
+    }
+}
+
 fn base_moved(base: Price, stored_close: Price) -> bool {
     let (base, close) = (base.centi(), stored_close.centi());
     10 * base.abs_diff(close) > 3 * close
 }
 
 impl Screener {
-    pub(super) async fn update(&self, id: u64, full: bool) -> Result<(), BarError> {
+    pub(super) async fn update(&self, id: u64, full: bool) -> Result<(), UpdateError> {
         tracing::info!(full, "스크리너 업데이트를 시작합니다");
         let listing = self.fetch_listing(id).await?;
         tracing::info!(count = listing.len(), "스크리너 종목 목록을 받았습니다");
@@ -48,7 +71,7 @@ impl Screener {
         self.backfill(id, target).await
     }
 
-    async fn fetch_listing(&self, id: u64) -> Result<Vec<ScreenerListing>, BarError> {
+    async fn fetch_listing(&self, id: u64) -> Result<Vec<ScreenerListing>, UpdateError> {
         let mut listing = Vec::new();
         self.report(id, UpdatePhase::Symbols, 0, LIST_MARKETS);
         for (done, req) in [StockList::EXCHANGE, StockList::KOSDAQ].into_iter().enumerate() {
@@ -66,11 +89,14 @@ impl Screener {
         Ok(listing)
     }
 
-    async fn recent(&self, id: u64, target: KstDate, day_before_target: Option<KstDate>) -> Result<(), BarError> {
+    async fn recent(&self, id: u64, target: KstDate, day_before_target: Option<KstDate>) -> Result<(), UpdateError> {
         let tails = self.with_store(Store::tails).await?;
         let mut one_day = Vec::new();
         let mut catchups = Vec::new();
-        for Tail { code, last } in tails {
+        for Tail { code, listed_on, last } in tails {
+            if listed_on.is_some_and(|listed| listed > target) {
+                continue;
+            }
             match last {
                 Some((day, _)) if day >= target => {}
                 Some((day, close)) if Some(day) == day_before_target => one_day.push((code, day, close)),
@@ -102,9 +128,7 @@ impl Screener {
         }
         let mut written = stream::iter(catchups).map(|(code, how)| self.catch_up(code, how, target)).buffered(IN_FLIGHT);
         while let Some(write) = written.try_next().await? {
-            if let Some(write) = write {
-                self.with_store(move |s| s.write(&[write])).await?;
-            }
+            self.with_store(move |s| s.write(&[write])).await?;
             done += 1;
             self.report(id, UpdatePhase::Recent, done, total);
         }
@@ -112,33 +136,29 @@ impl Screener {
         Ok(())
     }
 
-    async fn backfill(&self, id: u64, target: KstDate) -> Result<(), BarError> {
-        let queue = self.with_store(Store::backfill_queue).await?;
+    async fn backfill(&self, id: u64, target: KstDate) -> Result<(), UpdateError> {
+        let queue = self.with_store(move |s| s.backfill_queue(target)).await?;
         let total = queue.len();
         self.report(id, UpdatePhase::Backfill, 0, total);
         let mut written = stream::iter(queue).map(|code| self.catch_up(code, Catchup::WholeHistory, target)).buffered(IN_FLIGHT);
         let mut done = 0;
         while let Some(write) = written.try_next().await? {
-            if let Some(write) = write {
-                self.with_store(move |s| s.write(&[write])).await?;
-            }
+            self.with_store(move |s| s.write(&[write])).await?;
             done += 1;
             self.report(id, UpdatePhase::Backfill, done, total);
         }
         Ok(())
     }
 
-    async fn catch_up(&self, code: StockCode, how: Catchup, target: KstDate) -> Result<Option<Write>, BarError> {
+    async fn catch_up(&self, code: StockCode, how: Catchup, target: KstDate) -> Result<Write, UpdateError> {
         let Catchup::FirstPage { stored_through } = how else {
-            return Ok(self.whole_history(code, target).await?.map(|bars| Write::Replace { code, bars }));
+            return Ok(Write::Replace { code, bars: self.whole_history(code, target).await? });
         };
         let req = DailyChart::new(code, Venue::Krx, self.clock.now().kst_date());
-        let Some(page) = self.daily_page(&req, None, target).await? else {
-            return Ok(None);
-        };
+        let page = self.daily_page(code, &req, None, target).await?;
         let reached_origin = page.next.is_none();
         let Some(stored_through) = stored_through else {
-            return Ok(Some(Write::Extend { code, bars: page.bars, reached_origin }));
+            return if page.bars.is_empty() { Err(UpdateError::NoDailyBars(code)) } else { Ok(Write::Extend { code, bars: page.bars, reached_origin }) };
         };
         let reaches_stored = page.bars.first().is_some_and(|b| b.day <= stored_through);
         let (overlap, fresh): (Vec<DayBar>, Vec<DayBar>) = page.bars.into_iter().partition(|b| b.day <= stored_through);
@@ -147,44 +167,42 @@ impl Screener {
             self.with_store(move |s| s.bars_from(code, from)).await? == overlap
         };
         if matches_stored {
-            return Ok(Some(Write::Extend { code, bars: fresh, reached_origin }));
+            return Ok(Write::Extend { code, bars: fresh, reached_origin });
         }
         tracing::info!(code = code.as_str(), reaches_stored, "최근 일봉이 저장된 봉과 달라 전체 이력을 다시 받습니다");
-        Ok(self.whole_history(code, target).await?.map(|bars| Write::Replace { code, bars }))
+        Ok(Write::Replace { code, bars: self.whole_history(code, target).await? })
     }
 
-    async fn whole_history(&self, code: StockCode, target: KstDate) -> Result<Option<Vec<DayBar>>, BarError> {
+    async fn whole_history(&self, code: StockCode, target: KstDate) -> Result<Vec<DayBar>, UpdateError> {
         let req = DailyChart::new(code, Venue::Krx, self.clock.now().kst_date());
         let mut pages = Vec::new();
         let mut cont = None;
         for _ in 0..MAX_HISTORY_PAGES {
-            let Some(page) = self.daily_page(&req, cont.as_ref(), target).await? else {
-                return Ok(None);
-            };
+            let page = self.daily_page(code, &req, cont.as_ref(), target).await?;
             pages.push(page.bars);
             cont = page.next;
             if cont.is_none() {
                 let mut bars: Vec<DayBar> = pages.into_iter().rev().flatten().collect();
                 bars.dedup_by_key(|b| b.day);
-                return Ok(Some(bars).filter(|bars| !bars.is_empty()));
+                return if bars.is_empty() { Err(UpdateError::NoDailyBars(code)) } else { Ok(bars) };
             }
         }
-        Err(BarError::Internal(format!("{} 일봉이 {MAX_HISTORY_PAGES}페이지를 넘어 받기를 멈췄습니다", code.as_str())))
+        Err(BarError::Internal(format!("{} 일봉이 {MAX_HISTORY_PAGES}페이지를 넘어 받기를 멈췄습니다", code.as_str())).into())
     }
 
-    async fn daily_page(&self, req: &DailyChart, cont: Option<&ContKey>, target: KstDate) -> Result<Option<DailyPage>, BarError> {
+    async fn daily_page(&self, code: StockCode, req: &DailyChart, cont: Option<&ContKey>, target: KstDate) -> Result<DailyPage, UpdateError> {
         let page = match self.rest.call(req, cont, Priority::Background, MergeScope::default()).await {
             Ok(page) => page,
-            Err(e) if unknown_symbol(&e) => return Ok(None),
+            Err(e) if unknown_symbol(&e) => return Err(UpdateError::NoDailyBars(code)),
             Err(e) => return Err(e.into()),
         };
         match parse_krx_daily(page.body) {
             Ok(Some(rows)) => {
                 let bars = rows.into_iter().map(|r| DayBar { day: r.day, ohlcv: r.ohlcv, traded: r.traded }).filter(|b| b.day <= target).collect();
-                Ok(Some(DailyPage { bars, next: page.next }))
+                Ok(DailyPage { bars, next: page.next })
             }
-            Ok(None) => Ok(None),
-            Err(e) => Err(BarError::Internal(format!("키움 일봉 응답을 읽지 못했습니다: {e}"))),
+            Ok(None) => Err(UpdateError::NoDailyBars(code)),
+            Err(e) => Err(BarError::Internal(format!("키움 일봉 응답을 읽지 못했습니다: {e}")).into()),
         }
     }
 }

@@ -18,7 +18,15 @@ pub struct KrxStock {
     pub reg_day: KstDate,
     pub audit_info: String,
     pub quoted: bool,
+    pub daily: DailyAnswer,
     pub bars: Vec<KrxBar>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DailyAnswer {
+    Bars,
+    EmptyRow,
+    UnknownCode,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -148,6 +156,7 @@ fn sample_stock(p: &Profile, k: usize, days: &[KstDate], as_of: KstDate) -> KrxS
         reg_day: p.reg_day,
         audit_info: p.audit_info.into(),
         quoted: true,
+        daily: DailyAnswer::Bars,
         bars,
     }
 }
@@ -177,7 +186,11 @@ pub fn respond(market: &KrxMarket, api_id: &str, body: &Value, next_key: Option<
         "ka20006" => Some(paged(market.days.len(), next_key, "IDX", |range, headers| index_daily(market, range, headers))),
         "ka10081" => {
             let stock = market.stock(body["stk_cd"].as_str()?)?;
-            Some(paged(stock.bars.len(), next_key, &stock.code, |range, headers| stock_daily(stock, range, headers)))
+            Some(match stock.daily {
+                DailyAnswer::Bars => paged(stock.bars.len(), next_key, &stock.code, |range, headers| stock_daily(stock, range, headers)),
+                DailyAnswer::EmptyRow => KrxPage::Page { body: empty_daily_row(stock), last: true },
+                DailyAnswer::UnknownCode => KrxPage::Page { body: json!({"return_code": 2, "return_msg": "입력 값 오류입니다[1902:종목 정보가 없습니다]"}), last: true },
+            })
         }
         "ka10095" => {
             let codes: Vec<&str> = body["stk_cd"].as_str()?.split('|').collect();
@@ -235,6 +248,12 @@ fn stock_daily(stock: &KrxStock, range: std::ops::Range<usize>, headers: Value) 
         })
         .collect();
     json!({"_headers": headers, "return_code": 0, "return_msg": "정상적으로 처리되었습니다", "stk_cd": stock.code, "stk_dt_pole_chart_qry": rows})
+}
+
+fn empty_daily_row(stock: &KrxStock) -> Value {
+    let fields = ["cur_prc", "dt", "high_pric", "low_pric", "open_pric", "pred_pre", "pred_pre_sig", "trde_prica", "trde_qty", "trde_tern_rt", "upd_rt", "upd_stkpc_tp"];
+    let row: serde_json::Map<String, Value> = fields.iter().map(|f| (f.to_string(), json!(""))).collect();
+    json!({"return_code": 0, "return_msg": "정상적으로 처리되었습니다", "stk_cd": stock.code, "stk_dt_pole_chart_qry": [row]})
 }
 
 fn index_daily(market: &KrxMarket, range: std::ops::Range<usize>, headers: Value) -> Value {
