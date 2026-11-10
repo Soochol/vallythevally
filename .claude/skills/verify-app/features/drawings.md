@@ -8,7 +8,7 @@
 ## How to get to it (user POV)
 Focus a cell, press `T` (or pick the tool), drag on the chart.
 
-## Driving it with verify-vally
+## Driving it with verify-app
 Focus `region "칸 1: …"`, press `T`, drag inside `[data-bar-count]`'s bounding box from (0.76, 0.35) to (0.86, 0.25) of its width/height. Proof: `.drawing-mirror[data-drawings]` JSON has one entry, `ctx.api("/api/drawings?symbol=IDX%3A001")` (the default 코스피 cell) returns one drawing with the same points, and it is still there after `page.reload()`. Worked paths: `web/e2e/drawing-engine.spec.ts`.
 
 ## Gotchas

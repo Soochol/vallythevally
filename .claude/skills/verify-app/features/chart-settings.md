@@ -8,7 +8,7 @@
 ## How to get to it (user POV)
 Toolbar `차트 도구 막대`: groups `거래소` and `봉 주기`; theme button at the top right. On narrow screens periods become a navigation `봉 주기` of chips.
 
-## Driving it with verify-vally
+## Driving it with verify-app
 Click `toolbar "차트 도구 막대"` → `group "거래소"` → button `NXT`, then `group "봉 주기"` → button `주` (`exact: true`). Proof: both buttons have `aria-pressed="true"`, footer shows `자동 저장됨`, cell `aria-label` names the venue and period, and all of it holds after `page.reload()`. Worked paths: `web/e2e/restore.spec.ts`, `venue-period.spec.ts`, `theme-held-frame.spec.ts`.
 
 ## Gotchas

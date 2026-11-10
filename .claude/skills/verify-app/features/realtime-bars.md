@@ -10,7 +10,7 @@
 ## How to get to it (user POV)
 Open any symbol during market hours; the chart updates by itself. Footer shows `실시간 연결됨`.
 
-## Driving it with verify-vally
+## Driving it with verify-app
 Run with `--clock 20261109100000` (market hours). Open 삼성전자 005930, wait until `await ctx.fake.registered()` has `"0B"` containing `005930_AL`, then push trades: `ctx.fake.pushReal("0B", "005930_AL", { "20": "100001", "10": "+201000", "15": "+1", "13": "1000", "9081": "KRX", "11": "+0", "12": "+0.00", "25": "2" })` (`20` = HHMMSS, `10` = price, `15` = qty). Proof: chart `data-last-close` and `data-last-bar-t` change; for minute bars `data-bar-count` grows by one at the minute boundary. Retry the push inside `expect(...).toPass()` as `web/e2e/realtime.spec.ts` does.
 
 ## Gotchas

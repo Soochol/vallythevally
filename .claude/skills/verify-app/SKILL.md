@@ -1,9 +1,9 @@
 ---
-name: verify-vally
-description: Drive the real vallythevally web app (Rust vally-server + React chart UI) in sandboxed Chromium against a fake Kiwoom, and capture screenshots, a trace, server logs and API state as proof. Use when a change needs to be shown working in the real app, not only in unit tests, or when asked to verify, reproduce, or screenshot a vally feature.
+name: verify-app
+description: Drive the real vallythevally web app (Rust vally-server + React chart UI) in sandboxed Chromium against a fake Kiwoom, and capture screenshots, a trace, server logs and API state as proof. Use when a change needs to be shown working in the real app, not only in unit tests, or when asked to verify, reproduce, or screenshot an app feature. It checks the app, not the vally lead skill (that one has its own scripts/test/test.sh).
 ---
 
-# verify-vally
+# verify-app
 
 One command launches a throwaway **fake-kiwoom** and **vally-server** pair with its own temp data dir, drives one journey in sandboxed Chromium, keeps the evidence, and tears the pair down. It never touches the real server (the `vally-server` hc terminal on 127.0.0.1:8080), its DB (`data/vally.db`), its lock, or its Kiwoom token, and never reaches the real Kiwoom: the whole run sits inside `scripts/offline.sh`, a loopback-only network namespace, with fake app keys.
 
@@ -14,7 +14,7 @@ Paths below are relative to the repo root. Run from any checkout or worktree; th
 Run first, and whenever anything looks off. Read-only.
 
 ```sh
-.claude/skills/verify-vally/scripts/doctor.sh
+.claude/skills/verify-app/scripts/doctor.sh
 ```
 
 Each `FAIL` line names its fix. It checks: `fake-kiwoom` and `vally-server` binaries exist and are newer than the last `crates/` commit, the wasm indicators and `web/dist` are built and newer than the last `web/src` commit, Chromium launches with its sandbox on, and `scripts/offline.sh` can create the namespace (it can inside hc terminals; a plain terminal on this PC cannot, see `docs/dev-environment.md`).
@@ -24,7 +24,7 @@ A fresh worktree needs, in order: `pnpm --dir web install`, `bash web/scripts/bu
 ## Launch, drive, clean up
 
 ```sh
-.claude/skills/verify-vally/scripts/run.sh .claude/skills/verify-vally/journeys/<journey>.mjs [--clock YYYYMMDDHHMMSS] [--name label]
+.claude/skills/verify-app/scripts/run.sh .claude/skills/verify-app/journeys/<journey>.mjs [--clock YYYYMMDDHHMMSS] [--name label]
 ```
 
 - **Launch**: `run.sh` starts `fake-kiwoom` (ready at `fake-kiwoom listening addr=`), then `vally-server` on `127.0.0.1:0` with `VALLY_DB_PATH`, `VALLY_LOCK_PATH`, `VALLY_TOKEN_PATH` in a new `mktemp -d` dir (ready at `포트를 열었습니다 addr=`). Ready means usable: it waits until `/api/symbols` stops answering 503 (the symbol list arrived from the fake) and `/` serves `web/dist`. An empty data dir is fine; the server runs its migrations on start. The real server can keep running alongside: ports, lock, DB and token are all separate.
