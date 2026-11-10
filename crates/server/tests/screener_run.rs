@@ -410,6 +410,119 @@ async fn a_run_is_refused_while_recent_days_fill_and_when_the_store_lacks_the_ne
     server.stop().await;
 }
 
+#[tokio::test(flavor = "multi_thread")]
+async fn a_partly_stored_first_week_or_month_is_history_short_until_backfill_fills_it() {
+    let today = day(2026, 11, 4);
+    let days = last_open_days(1_300, today);
+    let first_page = &days[days.len() - 600..];
+    let first_stored = first_page[0];
+    let its_monday = first_stored.add_days(-first_stored.weekday().days_from_monday());
+    let mut mondays: Vec<KstDate> = first_page.iter().map(|d| d.add_days(-d.weekday().days_from_monday())).collect();
+    mondays.dedup();
+    let mut months: Vec<(i32, u8)> = first_page.iter().map(|d| (d.year(), d.month())).collect();
+    months.dedup();
+    assert_eq!((first_stored, its_monday, mondays.len(), months.len()), (day(2024, 7, 18), day(2024, 7, 15), 121, 29), "최근 600관측일은 목요일에 시작해 그 주와 그달의 앞부분이 빠진다");
+
+    let earlier = stock("200010", priced(&days[days.len() - 650..], |i| 10_000 - i as u64));
+    let gapped = stock("200020", priced(&days, |i| if days[i] == its_monday { 300 } else if days[i] == today { 200 } else { 100 }));
+    let fake = FakeKiwoom::start().await;
+    fake.set_krx_market(KrxMarket { days: days.clone(), stocks: vec![earlier, gapped] });
+    let dir = tempfile::tempdir().unwrap();
+    let server = boot(&fake, dir.path(), &at(today, "2030"));
+    let api = Api::of(&server).await;
+    let judged = |r: &Value| (r["excluded"].clone(), hits(r));
+    let weekly = |n: u32| screen("W", &[("high", n, 1)], &[]);
+    let monthly = |n: u32| screen("M", &[("high", n, 1)], &[]);
+
+    fake.delay("ka10081", Duration::from_secs(1));
+    api.update().await;
+    api.wait_for("과거 이어 받기", |s| s["update"]["phase"] == "backfill").await;
+    api.cancel().await;
+    assert_eq!(api.status().await["fullHistory"], json!({"done": 0, "total": 2}));
+    assert_eq!(judged(&api.result(&weekly(121)).await), (excluded(0, 2), vec![]), "필요한 첫 주의 7-15·16·17이 저장되지 않았다");
+    assert_eq!(judged(&api.result(&weekly(120)).await), (excluded(0, 0), vec![hit("200020", day(2026, 11, 2))]), "필요한 첫 주가 7-22 주면 다 저장돼 있다");
+    assert_eq!(judged(&api.result(&monthly(29)).await), (excluded(0, 2), vec![]), "필요한 첫 달의 7-01~17이 저장되지 않았다");
+    assert_eq!(judged(&api.result(&monthly(28)).await), (excluded(0, 0), vec![hit("200020", day(2026, 11, 1))]));
+
+    api.update().await;
+    api.wait_for("200010의 과거", |s| s["fullHistory"]["done"] == 1).await;
+    api.cancel().await;
+    assert_eq!(judged(&api.result(&weekly(121)).await), (excluded(0, 1), vec![]), "200010이 7-15를 저장했어도 200020은 7-18부터다");
+    assert_eq!(judged(&api.result(&monthly(29)).await), (excluded(0, 1), vec![]));
+
+    fake.reset();
+    api.update().await;
+    assert_eq!(api.settled().await["fullHistory"], json!({"done": 2, "total": 2}));
+    assert_eq!(judged(&api.result(&weekly(121)).await), (excluded(0, 0), vec![]), "7-15 고가 300이 창에 들어 이번 주는 신고가가 아니다");
+    assert_eq!(judged(&api.result(&monthly(29)).await), (excluded(0, 0), vec![]));
+    server.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn runs_racing_into_recent_read_the_store_from_before_recent_or_are_refused() {
+    let days = fortnight();
+    let (yesterday, today) = (days[13], days[14]);
+    let stopped_trading = stock("200020", priced(&days[..9], |_| 100));
+    let delisted_today = stock("200030", priced(&days[..14], |_| 100));
+    let fake = FakeKiwoom::start().await;
+    fake.set_krx_market(KrxMarket { days: days[..14].to_vec(), stocks: vec![stopped_trading.clone(), delisted_today] });
+    let dir = tempfile::tempdir().unwrap();
+    let server = boot(&fake, dir.path(), &at(yesterday, "2030"));
+    let api = Api::of(&server).await;
+    api.update().await;
+    api.settled().await;
+    server.stop().await;
+
+    fake.set_krx_market(KrxMarket { days: days.clone(), stocks: vec![stock("200010", priced(&days[5..], |_| 100)), stopped_trading] });
+    let server = boot(&fake, dir.path(), &at(today, "2030"));
+    let api = Api::of(&server).await;
+    let new_high = daily(&[("high", 3, 3)]);
+    let before = api.result(&new_high).await;
+    assert_eq!(
+        (before["asOf"].clone(), before["universe"].clone(), hits(&before)),
+        (json!(yesterday.to_string()), json!(2), vec![hit("200030", yesterday)]),
+        "어제 자료가 있어 저녁 업데이트 전에도 실행된다"
+    );
+
+    let calendar_calls = || fake.calls().iter().filter(|c| c.api_id == "ka20006").count();
+    let seen = calendar_calls();
+    fake.delay("ka20006", Duration::from_millis(1_500));
+    api.update().await;
+    for _ in 0..400 {
+        if calendar_calls() > seen {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+    assert!(calendar_calls() > seen, "업데이트가 목록을 바꾸고 코스피 달력을 묻는 중이다");
+    let racing = futures::future::join_all((0..200).map(|_| api.run(&new_high))).await;
+    let mut outcomes = std::collections::BTreeMap::new();
+    for (status, body) in &racing {
+        let outcome = match (*status, body["asOf"].as_str()) {
+            (409, _) => {
+                assert_eq!(body["error"]["reason"], "updating", "{body}");
+                "refused"
+            }
+            (200, Some(d)) if d == yesterday.to_string() => {
+                assert_eq!((body["universe"].clone(), body["excluded"].clone(), hits(body)), (json!(2), excluded(0, 1), vec![]), "최근 채우기 전의 저장소라 200010은 목록에만 있고 봉이 없다");
+                "before recent"
+            }
+            (200, Some(d)) if d == today.to_string() => {
+                assert_eq!(hits(body), [hit("200010", today)], "{body}");
+                "after recent"
+            }
+            _ => panic!("{status}: {body}"),
+        };
+        *outcomes.entry(outcome).or_insert(0) += 1;
+    }
+    eprintln!("최근 채우기에 들어가는 업데이트와 겨룬 실행 {}개: {outcomes:?}", racing.len());
+    fake.reset();
+    api.settled().await;
+    let after = api.result(&new_high).await;
+    assert_eq!((after["asOf"].clone(), hits(&after)), (json!(today.to_string()), vec![hit("200010", today)]));
+    server.stop().await;
+}
+
 const LARGE_STOCKS: usize = 4_000;
 const LARGE_BARS: usize = 3_000;
 

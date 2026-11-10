@@ -1,15 +1,16 @@
 use std::collections::HashMap;
 
 use domain::{Bucket, KstDate, KstTime, Period, Price, StockCode, TimeOfDay};
-use duckdb::{Transaction, params};
+use duckdb::{Connection, Transaction, params};
 
-use super::store::{Store, StoreError, date_of, date_value, exclusion_mask, price_of, stock_code};
+use super::store::{StoreError, date_of, date_value, exclusion_mask, price_of, stock_code};
 use crate::api::{self, BarField, NewHigh, Screen, ScreenPeriod, ScreenerExcluded, ScreenerResult, ScreenerRow, SymbolCode};
 
 type Cell = i64;
 
 struct Cells {
     buckets: Vec<Bucket>,
+    first_stored_days: Vec<KstDate>,
     of_day: Vec<(KstDate, Cell)>,
 }
 
@@ -20,15 +21,17 @@ fn midnight(day: KstDate) -> KstTime {
 impl Cells {
     fn new(period: Period, days: &[KstDate]) -> Cells {
         let mut buckets: Vec<Bucket> = Vec::new();
+        let mut first_stored_days = Vec::new();
         let mut of_day = Vec::with_capacity(days.len());
         for &day in days {
             let bucket = period.bucket(midnight(day));
             if buckets.last() != Some(&bucket) {
                 buckets.push(bucket);
+                first_stored_days.push(day);
             }
             of_day.push((day, buckets.len() as Cell - 1));
         }
-        Cells { buckets, of_day }
+        Cells { buckets, first_stored_days, of_day }
     }
 
     fn as_of(&self) -> Cell {
@@ -45,6 +48,14 @@ impl Cells {
 
     fn start_day(&self, cell: Cell) -> KstDate {
         self.buckets[cell as usize].start().kst_date()
+    }
+
+    fn first_possible_day(&self, cell: Cell) -> Option<KstDate> {
+        match cell {
+            0 => Some(self.start_day(0)),
+            c if c > 0 => self.first_stored_days.get(c as usize).copied(),
+            _ => None,
+        }
     }
 }
 
@@ -92,7 +103,8 @@ impl Reach {
             return Standing::ListedTooShort;
         }
         let needed = start.map_or(self.earliest_needed, |s| self.earliest_needed.max(s));
-        if !stock.complete && first.is_none_or(|f| f > needed) {
+        let stored_from_needed = stock.first_day.zip(cells.first_possible_day(needed)).is_some_and(|(first, possible)| first <= possible);
+        if !stock.complete && !stored_from_needed {
             return Standing::HistoryShort;
         }
         Standing::Judged { start }
@@ -106,38 +118,48 @@ struct Hit {
     previous_close: Option<Price>,
 }
 
-pub(super) fn screen(store: &Store, screen: &Screen) -> Result<ScreenerResult, StoreError> {
-    let mut conn = store.reader()?;
-    let tx = conn.transaction()?;
-    let as_of = tx.query_row("SELECT last_day FROM store_meta", [], |row| row.get::<_, Option<i32>>(0))?.map(date_of);
-    let as_of = as_of.ok_or_else(|| StoreError("마지막 관측일이 없는 저장소로는 실행할 수 없습니다".into()))?;
-    let period = period_of(screen.period);
-    let cells = Cells::new(period, &observation_days(&tx, as_of)?);
-    let reach = Reach::of(&screen.conditions, cells.as_of());
-    let unwanted = exclusion_mask(&screen.exclude);
-    let universe: Vec<Stock> = stocks(&tx, as_of)?.into_iter().filter(|s| s.excludable_as & unwanted == 0).collect();
-    let mut excluded = ScreenerExcluded { listed_too_short: 0, history_short: 0 };
-    let mut judged = Vec::new();
-    for stock in &universe {
-        match reach.standing(stock, &cells) {
-            Standing::ListedTooShort => excluded.listed_too_short += 1,
-            Standing::HistoryShort => excluded.history_short += 1,
-            Standing::Judged { start } => judged.push((stock.code, start)),
-        }
+pub(super) struct Snapshot<'a> {
+    tx: Transaction<'a>,
+    pub(super) last_day: Option<KstDate>,
+}
+
+impl<'a> Snapshot<'a> {
+    pub(super) fn begin(conn: &'a mut Connection) -> Result<Snapshot<'a>, StoreError> {
+        let tx = conn.transaction()?;
+        let last_day = tx.query_row("SELECT last_day FROM store_meta", [], |row| row.get::<_, Option<i32>>(0))?.map(date_of);
+        Ok(Snapshot { tx, last_day })
     }
-    let names: HashMap<StockCode, &str> = universe.iter().map(|s| (s.code, s.name.as_str())).collect();
-    let mut rows: Vec<ScreenerRow> = new_highs(&tx, &cells, &reach, period, &screen.conditions, &judged)?
-        .into_iter()
-        .map(|hit| ScreenerRow {
-            symbol: SymbolCode(hit.code.as_str().to_owned()),
-            name: names[&hit.code].to_owned(),
-            close: hit.close.to_f64(),
-            change_rate: hit.previous_close.map(|previous| change_rate(hit.close, previous)),
-            high_date: api::KstDate(cells.start_day(hit.high_cell)),
-        })
-        .collect();
-    rows.sort_by(|a, b| b.high_date.cmp(&a.high_date).then_with(|| a.symbol.0.cmp(&b.symbol.0)));
-    Ok(ScreenerResult { as_of: api::KstDate(as_of), universe: universe.len() as u32, excluded, rows })
+
+    pub(super) fn screen(&self, screen: &Screen, as_of: KstDate) -> Result<ScreenerResult, StoreError> {
+        let tx = &self.tx;
+        let period = period_of(screen.period);
+        let cells = Cells::new(period, &observation_days(tx, as_of)?);
+        let reach = Reach::of(&screen.conditions, cells.as_of());
+        let unwanted = exclusion_mask(&screen.exclude);
+        let universe: Vec<Stock> = stocks(tx, as_of)?.into_iter().filter(|s| s.excludable_as & unwanted == 0).collect();
+        let mut excluded = ScreenerExcluded { listed_too_short: 0, history_short: 0 };
+        let mut judged = Vec::new();
+        for stock in &universe {
+            match reach.standing(stock, &cells) {
+                Standing::ListedTooShort => excluded.listed_too_short += 1,
+                Standing::HistoryShort => excluded.history_short += 1,
+                Standing::Judged { start } => judged.push((stock.code, start)),
+            }
+        }
+        let names: HashMap<StockCode, &str> = universe.iter().map(|s| (s.code, s.name.as_str())).collect();
+        let mut rows: Vec<ScreenerRow> = new_highs(tx, &cells, &reach, period, &screen.conditions, &judged)?
+            .into_iter()
+            .map(|hit| ScreenerRow {
+                symbol: SymbolCode(hit.code.as_str().to_owned()),
+                name: names[&hit.code].to_owned(),
+                close: hit.close.to_f64(),
+                change_rate: hit.previous_close.map(|previous| change_rate(hit.close, previous)),
+                high_date: api::KstDate(cells.start_day(hit.high_cell)),
+            })
+            .collect();
+        rows.sort_by(|a, b| b.high_date.cmp(&a.high_date).then_with(|| a.symbol.0.cmp(&b.symbol.0)));
+        Ok(ScreenerResult { as_of: api::KstDate(as_of), universe: universe.len() as u32, excluded, rows })
+    }
 }
 
 fn period_of(period: ScreenPeriod) -> Period {
