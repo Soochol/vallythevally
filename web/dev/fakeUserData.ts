@@ -2,6 +2,8 @@ import type { ApiErrorCode } from "../src/api/generated/ApiErrorCode.ts";
 import type { Layout } from "../src/api/generated/Layout.ts";
 import type { LayoutInput } from "../src/api/generated/LayoutInput.ts";
 import type { LayoutSummary } from "../src/api/generated/LayoutSummary.ts";
+import type { Screen } from "../src/api/generated/Screen.ts";
+import type { Screens } from "../src/api/generated/Screens.ts";
 import type { Watchlist } from "../src/api/generated/Watchlist.ts";
 import type { Watchlists } from "../src/api/generated/Watchlists.ts";
 
@@ -22,7 +24,7 @@ const isWatchlist = (x: unknown): x is Watchlist =>
   isObject(x) && typeof x.id === "string" && typeof x.name === "string" && Array.isArray(x.symbols) && x.symbols.every((s) => typeof s === "string");
 const stale = (stored: number) => fail(409, "stale_revision", `더 새 편집(revision ${stored})이 이미 저장돼 있습니다`);
 
-export function createUserData(seedWatchlist: string[], nowSec: () => number = () => Math.floor(Date.now() / 1000)) {
+export function createUserData(seedWatchlist: string[], seedScreens: Screen[], nowSec: () => number = () => Math.floor(Date.now() / 1000)) {
   const layouts = new Map<string, Layout>([
     [
       DEFAULT_LAYOUT_ID,
@@ -48,6 +50,7 @@ export function createUserData(seedWatchlist: string[], nowSec: () => number = (
   ]);
   let uiState: Record<string, unknown> = { lastLayoutId: DEFAULT_LAYOUT_ID, theme: "dark", revision: 0 };
   let watchlists: Watchlists = { lists: [{ id: FIRST_WATCHLIST_ID, name: "기본", symbols: [...seedWatchlist] }], revision: 0 };
+  const screens: Screens = { screens: seedScreens, revision: 0 };
 
   return {
     listLayouts: (): Reply =>
@@ -82,6 +85,7 @@ export function createUserData(seedWatchlist: string[], nowSec: () => number = (
       return ok(uiState);
     },
     getWatchlists: (): Reply => ok(watchlists),
+    getScreens: (): Reply => ok(screens),
     putWatchlists: (body: unknown): Reply => {
       if (!isObject(body) || !Array.isArray(body.lists) || !body.lists.every(isWatchlist)) return fail(400, "bad_request", "관심종목 본문이 아닙니다");
       if (bytes(body) > PAYLOAD_LIMIT_BYTES) return fail(413, "payload_too_large", "관심종목이 64KB를 넘습니다");

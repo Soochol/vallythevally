@@ -21,7 +21,7 @@ export const publicInfo = ({ code, name, kind, market, nxtEnabled }: FakeSymbol)
 export const findSymbol = (code: string) => SYMBOLS.find((s) => s.code === code);
 
 // ---- 무작위 ----
-function mulberry32(seed: number) {
+export function mulberry32(seed: number) {
   let a = seed;
   return () => {
     a = (a + 0x6d2b79f5) | 0;
@@ -30,7 +30,7 @@ function mulberry32(seed: number) {
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   };
 }
-function seedOf(s: string) {
+export function seedOf(s: string) {
   let h = 2166136261;
   for (const c of s) h = Math.imul(h ^ c.charCodeAt(0), 16777619);
   return h >>> 0;

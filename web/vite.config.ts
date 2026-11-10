@@ -9,7 +9,7 @@ export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), "VITE_");
   const useFakeApi = env.VITE_FAKE_API !== "0";
   return {
-    plugins: [react(), tailwindcss(), useFakeApi ? fakeApi() : null],
+    plugins: [react(), tailwindcss(), useFakeApi ? fakeApi(env.VITE_FAKE_SCREENER) : null],
     server: {
       host: "127.0.0.1",
       proxy: useFakeApi ? undefined : { "/api": { target: "http://127.0.0.1:8080", ws: true } },
