@@ -32,7 +32,7 @@ import {
   sortRows,
   todayNotStored,
 } from "../../lib/screener";
-import { listNameFrom, MAX_WATCHLISTS } from "../../lib/watchlist";
+import { addSymbols, listNameFrom, MAX_WATCHLISTS } from "../../lib/watchlist";
 import { useCell, useLayoutStore } from "../../stores/layout";
 import { type Rerun, rerunReason, runOf, type ScreenRun, shownResult, useScreenerStore } from "../../stores/screener";
 import { useSelectionStore } from "../../stores/selection";
@@ -302,11 +302,11 @@ function sendToWatchlist(listId: string, codes: readonly SymbolCode[]) {
   const store = useWatchlistStore.getState();
   const list = store.lists.find((l) => l.id === listId);
   if (!list) return;
-  const fresh = codes.filter((c) => !list.symbols.includes(c));
-  for (const code of fresh) store.add(listId, code);
-  const skipped = codes.length - fresh.length;
-  if (fresh.length === 0) return toast(`${list.name}에 이미 모두 있습니다`);
-  toast(`${list.name}에 ${count(fresh.length)}종목을 넣었습니다${skipped > 0 ? ` (이미 있던 ${count(skipped)}종목은 건너뜀)` : ""}`);
+  const added = addSymbols(list.symbols, codes).length - list.symbols.length;
+  store.addAll(listId, codes);
+  const skipped = codes.length - added;
+  if (added === 0) return toast(`${list.name}에 이미 모두 있습니다`);
+  toast(`${list.name}에 ${count(added)}종목을 넣었습니다${skipped > 0 ? ` (이미 있던 ${count(skipped)}종목은 건너뜀)` : ""}`);
 }
 
 function sendToNewWatchlist(name: string, codes: readonly SymbolCode[]) {

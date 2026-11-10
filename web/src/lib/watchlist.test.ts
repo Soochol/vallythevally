@@ -1,11 +1,17 @@
 import { expect, test } from "vitest";
-import { addSymbol, listNameFrom, moveSymbol, moveSymbolBy, nameProblem, nextListName, removeSymbol, transferSymbol } from "./watchlist";
+import { addSymbol, addSymbols, listNameFrom, moveSymbol, moveSymbolBy, nameProblem, nextListName, removeSymbol, transferSymbol } from "./watchlist";
 
 const list = ["005930", "000660", "035420"] as const;
 
 test("넣으면 끝에 붙고, 이미 있으면 그대로다", () => {
   expect(addSymbol(list, "IDX:001")).toEqual([...list, "IDX:001"]);
   expect(addSymbol(list, "000660")).toBe(list);
+});
+
+test("여러 종목을 넣으면 없던 것만 처음 나온 순서대로 끝에 붙고, 새 것이 없으면 그대로다", () => {
+  expect(addSymbols(list, ["035720", "000660", "035720", "051910"])).toEqual([...list, "035720", "051910"]);
+  expect(addSymbols(list, ["005930", "000660"])).toBe(list);
+  expect(addSymbols(list, [])).toBe(list);
 });
 
 test("지우면 그 종목만 빠지고, 없는 종목이면 그대로다", () => {

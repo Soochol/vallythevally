@@ -15,6 +15,12 @@ export function addSymbol(list: readonly SymbolCode[], code: SymbolCode): readon
   return list.includes(code) ? list : [...list, code];
 }
 
+export function addSymbols(list: readonly SymbolCode[], codes: readonly SymbolCode[]): readonly SymbolCode[] {
+  const have = new Set(list);
+  const fresh = [...new Set(codes)].filter((c) => !have.has(c));
+  return fresh.length === 0 ? list : [...list, ...fresh];
+}
+
 export function removeSymbol(list: readonly SymbolCode[], code: SymbolCode): readonly SymbolCode[] {
   return list.includes(code) ? list.filter((c) => c !== code) : list;
 }

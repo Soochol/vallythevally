@@ -3,6 +3,7 @@ import type { SymbolCode } from "../api/generated/SymbolCode";
 import type { Watchlist } from "../api/generated/Watchlist";
 import {
   addSymbol,
+  addSymbols,
   DEFAULT_WATCHLISTS,
   MAX_WATCHLISTS,
   moveSymbol,
@@ -21,6 +22,7 @@ interface WatchlistState {
   rename(id: string, name: string): void;
   removeList(id: string): void;
   add(list: string, code: SymbolCode): void;
+  addAll(list: string, codes: readonly SymbolCode[]): void;
   remove(list: string, code: SymbolCode): void;
   move(list: string, code: SymbolCode, to: number): void;
   moveBy(list: string, code: SymbolCode, step: -1 | 1): void;
@@ -48,6 +50,7 @@ export const useWatchlistStore = create<WatchlistState>()((set) => {
     rename: (id, name) => edit((lists) => (lists.some((l) => l.id === id && l.name !== name) ? lists.map((l) => (l.id === id ? { ...l, name } : l)) : lists)),
     removeList: (id) => edit((lists) => (lists.length <= 1 || !lists.some((l) => l.id === id) ? lists : lists.filter((l) => l.id !== id))),
     add: (list, code) => editSymbols(list, (l) => addSymbol(l, code)),
+    addAll: (list, codes) => editSymbols(list, (l) => addSymbols(l, codes)),
     remove: (list, code) => editSymbols(list, (l) => removeSymbol(l, code)),
     move: (list, code, to) => editSymbols(list, (l) => moveSymbol(l, code, to)),
     moveBy: (list, code, step) => editSymbols(list, (l) => moveSymbolBy(l, code, step)),
