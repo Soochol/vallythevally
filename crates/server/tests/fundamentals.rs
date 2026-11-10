@@ -47,7 +47,9 @@ impl Fixture {
         let (stream, _desired) = KiwoomStream::detached();
         let (_events, events) = tokio::sync::mpsc::channel(1);
         let hub = MarketHub::spawn(bars.clone(), stream, events, clock.clone());
-        let app = router(Arc::new(AppState { symbols, bars, rest: rest.clone(), db, clock, static_dir: tmp.path().to_owned(), hub }));
+        let store = server::screener::store::Store::open(&tmp.path().join("screener.duckdb")).unwrap();
+        let screener = Arc::new(server::screener::Screener::new(store, rest.clone(), bars.clone(), clock.clone()));
+        let app = router(Arc::new(AppState { symbols, bars, rest: rest.clone(), db, clock, static_dir: tmp.path().to_owned(), hub, screener }));
         Fixture { fake, rest, app, _tmp: tmp }
     }
 

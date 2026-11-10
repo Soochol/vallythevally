@@ -21,13 +21,13 @@ pub struct Server {
 
 impl Server {
     /// 환경변수를 비우고 필요한 것만 넣어 서버를 띄운다. 사용자의 VALLY_* 와 XDG_RUNTIME_DIR이 새어 들지 않는다.
-    /// DB는 잠금 파일 옆 `vally.db`다. 저장소의 `data/`에 쓰지 않는다.
+    /// DB는 잠금 파일 옆 `vally.db`와 `screener.duckdb`다. 저장소의 `data/`에 쓰지 않는다.
     pub fn spawn(fake: &FakeKiwoom, lock: &Path, static_dir: &Path) -> Server {
         Server::spawn_with(fake, lock, static_dir, &[])
     }
 
     pub fn spawn_with(fake: &FakeKiwoom, lock: &Path, static_dir: &Path, overrides: &[(&str, &std::ffi::OsStr)]) -> Server {
-        let db = lock.parent().expect("잠금 파일은 임시 디렉터리 안에 있다").join("vally.db");
+        let dir = lock.parent().expect("잠금 파일은 임시 디렉터리 안에 있다");
         let mut child = Command::new(env!("CARGO_BIN_EXE_vally-server"))
             .env_clear()
             .env("VALLY_KIWOOM_APP_KEY", APP_KEY)
@@ -35,7 +35,8 @@ impl Server {
             .env("VALLY_KIWOOM_BASE_URL", fake.base_url())
             .env("VALLY_KIWOOM_WS_URL", fake.ws_url())
             .env("VALLY_LOCK_PATH", lock)
-            .env("VALLY_DB_PATH", db)
+            .env("VALLY_DB_PATH", dir.join("vally.db"))
+            .env("VALLY_SCREENER_DB_PATH", dir.join("screener.duckdb"))
             .env("VALLY_TOKEN_PATH", token_path(lock))
             .env("VALLY_BIND", "127.0.0.1:0")
             .env("VALLY_STATIC_DIR", static_dir)

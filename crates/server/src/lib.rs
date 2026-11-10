@@ -14,6 +14,7 @@ pub mod instance;
 pub mod kiwoom;
 pub mod market;
 pub mod quotes;
+pub mod screener;
 pub mod symbols;
 pub mod user_routes;
 pub mod userdata;

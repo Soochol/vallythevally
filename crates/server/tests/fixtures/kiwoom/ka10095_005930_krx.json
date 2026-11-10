@@ -1,0 +1,28 @@
+{
+ "_source": "tools/kiwoom-probe/out/v_q_mix.json의 KRX(접미사 없는 코드) 행 하나. 2026-11-06 마감 뒤 실측 응답에서 필드를 줄였다",
+ "_headers": {
+  "cont-yn": "N",
+  "next-key": ""
+ },
+ "return_code": 0,
+ "return_msg": "정상적으로 처리되었습니다",
+ "atn_stk_infr": [
+  {
+   "stk_cd": "005930",
+   "stk_nm": "삼성전자",
+   "cur_prc": "-193500",
+   "base_pric": "201500",
+   "pred_pre": "-8000",
+   "pred_pre_sig": "5",
+   "flu_rt": "-3.97",
+   "open_pric": "-180000",
+   "high_pric": "-196500",
+   "low_pric": "-179200",
+   "close_pric": "-193500",
+   "trde_qty": "35516270",
+   "trde_prica": "6706958",
+   "cntr_tm": "195959",
+   "dt": "20261106"
+  }
+ ]
+}

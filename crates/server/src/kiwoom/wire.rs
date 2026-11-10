@@ -8,6 +8,7 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 
 use super::api::kiwoom_stock_code;
+use crate::api::ExcludeKind;
 use super::error::{WsRejection, judge_ws_ack};
 use super::stream::{DayTotals, Exchange, RealTick};
 use crate::config::Secret;
@@ -35,6 +36,7 @@ pub struct ChartRow {
     pub low_pric: String,
     pub cur_prc: String,
     pub trde_qty: String,
+    pub trde_prica: String,
 }
 
 /// 가격 배율이 TR 묶음마다 다르다. 그래서 공통 "자연 단위 → centi" 함수를 두지 않는다.
@@ -133,12 +135,43 @@ fn parse_row(r: &ChartRow, time: RowTime, period: Period, price: fn(&str) -> Res
             // 실제 지수 일봉에 저가 > 종가 같은 행이 있다(코스피 1996-11-04 등). 행을 버리면 구간에 구멍이 생기므로
             // 고가·저가를 네 값의 최대·최소로 넓혀 받는다.
             tracing::warn!(dt = %r.dt, cntr_tm = %r.cntr_tm, error = %e, "키움 봉의 시고저종이 맞지 않아 고가·저가를 넓혔습니다");
-            let high = o.max(h).max(l).max(c);
-            let low = o.min(h).min(l).min(c);
-            Ohlcv::try_new(o, high, low, c, v).expect("넓힌 고가·저가는 언제나 시가·종가를 감싼다")
+            spanning(o, h, l, c, v)
         }
     };
     Ok(KiwoomBar { bucket, ohlcv })
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+pub struct MillionWon(pub u64);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct KrxDailyRow {
+    pub day: KstDate,
+    pub ohlcv: Ohlcv,
+    pub traded: MillionWon,
+}
+
+pub fn parse_krx_daily(body: DailyChartResponse) -> Result<Option<Vec<KrxDailyRow>>, WireError> {
+    let rows = body.into_rows();
+    if rows.first().is_some_and(|r| r.dt.is_empty() && r.cntr_tm.is_empty()) {
+        return Ok(None);
+    }
+    let mut out = rows
+        .iter()
+        .rev()
+        .map(|r| {
+            let bar = parse_row(r, RowTime::Date, Period::Day, stock_price)?;
+            Ok(KrxDailyRow { day: bar.bucket.start().kst_date(), ohlcv: bar.ohlcv, traded: MillionWon(unsigned(&r.trde_prica)?) })
+        })
+        .collect::<Result<Vec<_>, WireError>>()?;
+    out.dedup_by_key(|r| r.day);
+    Ok(Some(out))
+}
+
+fn spanning(o: Price, h: Price, l: Price, c: Price, v: Volume) -> Ohlcv {
+    let high = o.max(h).max(l).max(c);
+    let low = o.min(h).min(l).min(c);
+    Ohlcv::try_new(o, high, low, c, v).expect("넓힌 고가·저가는 언제나 시가·종가를 감싼다")
 }
 
 /// 앞의 `+`/`-`(이중 부호 포함)를 모두 뗀 절댓값.
@@ -168,6 +201,8 @@ pub struct ListRow {
     pub market_code: String,
     pub company_class_name: String,
     pub nxt_enable: String,
+    pub reg_day: String,
+    pub audit_info: String,
 }
 
 /// ka10099 한 행을 가른 결과(§6.6 표).
@@ -202,6 +237,49 @@ fn is_spac(row: &ListRow) -> bool {
     row.company_class_name == "스팩" || row.name.contains("스팩") || row.name.contains("기업인수목적")
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ScreenerListing {
+    pub code: StockCode,
+    pub name: String,
+    pub listed_on: Option<KstDate>,
+    pub excludable_as: Vec<ExcludeKind>,
+}
+
+pub fn screener_listing(row: &ListRow) -> Option<ScreenerListing> {
+    let Listing::Include(SymbolInfo { symbol: Symbol::Stock(code), name, kind, market, .. }) = classify(row) else {
+        return None;
+    };
+    let kind = match kind {
+        SymbolKind::Etf => Some(ExcludeKind::Etf),
+        SymbolKind::Reit => Some(ExcludeKind::Reit),
+        SymbolKind::Preferred => Some(ExcludeKind::Preferred),
+        SymbolKind::Common if market == Market::Kosdaq && is_spac(row) => Some(ExcludeKind::Spac),
+        SymbolKind::Common | SymbolKind::Index => None,
+    };
+    let states = row.audit_info.split('|').map(str::trim).filter_map(|label| match audit_state(label) {
+        Ok(state) => state,
+        Err(()) => {
+            tracing::warn!(code = %row.code, label, "auditInfo에 모르는 상태가 있어 상태 제외에 넣지 않습니다");
+            None
+        }
+    });
+    Some(ScreenerListing { code, name, listed_on: KstDate::parse_yyyymmdd(&row.reg_day), excludable_as: kind.into_iter().chain(states).collect() })
+}
+
+fn audit_state(label: &str) -> Result<Option<ExcludeKind>, ()> {
+    Ok(Some(match label {
+        "정상" | "" => return Ok(None),
+        "관리종목" => ExcludeKind::Managed,
+        "투자주의환기종목" => ExcludeKind::InvestmentCautionAlert,
+        "투자경고" => ExcludeKind::InvestmentWarning,
+        "투자위험" => ExcludeKind::InvestmentDanger,
+        "투자주의" => ExcludeKind::InvestmentCaution,
+        "단기과열" => ExcludeKind::ShortTermOverheated,
+        "거래정지" => ExcludeKind::TradingHalted,
+        _ => return Err(()),
+    }))
+}
+
 /// ka10095 응답. 행 순서는 요청 순서였지만(kiwoom.md §10.6) 호출자는 `stk_cd`로 맞춘다.
 #[derive(Debug, Deserialize)]
 pub struct StockQuotesResponse {
@@ -219,6 +297,10 @@ pub struct QuoteRow {
     pub trde_qty: String,
     pub dt: String,
     pub cntr_tm: String,
+    pub open_pric: String,
+    pub high_pric: String,
+    pub low_pric: String,
+    pub trde_prica: String,
 }
 
 /// ka10095 한 행의 통합 시세. 가격은 centi(원 × 100)다. 거래정지 종목은 현재가가 0일 수 있어 `Price`가 아니다.
@@ -245,6 +327,46 @@ pub fn parse_quotes(body: StockQuotesResponse) -> Vec<StockQuote> {
             }
         })
         .collect()
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct KrxDayQuote {
+    pub code: StockCode,
+    pub day: KstDate,
+    pub ohlcv: Ohlcv,
+    pub traded: MillionWon,
+    pub base: Price,
+}
+
+pub fn parse_krx_quotes(body: StockQuotesResponse) -> Vec<KrxDayQuote> {
+    body.atn_stk_infr
+        .iter()
+        .filter(|r| !r.cur_prc.is_empty() && !r.base_pric.is_empty())
+        .filter_map(|r| match parse_krx_quote_row(r) {
+            Ok(q) => Some(q),
+            Err(e) => {
+                tracing::warn!(stk_cd = %r.stk_cd, error = %e, "ka10095 KRX 행을 읽지 못해 뺍니다");
+                None
+            }
+        })
+        .collect()
+}
+
+fn parse_krx_quote_row(r: &QuoteRow) -> Result<KrxDayQuote, WireError> {
+    let code = StockCode::parse(&r.stk_cd).map_err(|e| WireError(format!("{e}: {:?}", r.stk_cd)))?;
+    let day = KstDate::parse_yyyymmdd(&r.dt).ok_or_else(|| WireError(format!("dt가 날짜가 아닙니다: {:?}", r.dt)))?;
+    let close = stock_price(&r.cur_prc)?;
+    let volume = Volume(unsigned(&r.trde_qty)?);
+    let ohlcv = if volume.0 == 0 {
+        spanning(close, close, close, close, volume)
+    } else {
+        let (o, h, l) = (stock_price(&r.open_pric)?, stock_price(&r.high_pric)?, stock_price(&r.low_pric)?);
+        Ohlcv::try_new(o, h, l, close, volume).unwrap_or_else(|e| {
+            tracing::warn!(stk_cd = %r.stk_cd, dt = %r.dt, error = %e, "ka10095 KRX 행의 시고저종이 맞지 않아 고가·저가를 넓혔습니다");
+            spanning(o, h, l, close, volume)
+        })
+    };
+    Ok(KrxDayQuote { code, day, ohlcv, traded: MillionWon(unsigned(&r.trde_prica)?), base: stock_price(&r.base_pric)? })
 }
 
 fn parse_quote_row(r: &QuoteRow) -> Result<StockQuote, WireError> {
@@ -754,12 +876,24 @@ mod tests {
 
         let row = |stk_cd: &str, sig: &str| QuoteRow {
             stk_cd: stk_cd.into(), cur_prc: "-100".into(), base_pric: "90".into(), pred_pre_sig: sig.into(),
-            trde_qty: "5".into(), dt: "20261106".into(), cntr_tm: "090000".into(),
+            trde_qty: "5".into(), dt: "20261106".into(), cntr_tm: "090000".into(), ..QuoteRow::default()
         };
         let mismatch = parse_quotes(StockQuotesResponse { atn_stk_infr: vec![row("005930_AL", "5")] });
         assert_eq!((mismatch[0].price_centi, mismatch[0].base_centi), (10_000, 9_000), "방향이 어긋나도 계산한 값을 쓴다");
         let krx_bad_time = vec![row("005930", "2"), row("005930_NX", "2"), QuoteRow { cntr_tm: "99".into(), ..row("000660_AL", "2") }];
         assert!(parse_quotes(StockQuotesResponse { atn_stk_infr: krx_bad_time }).is_empty());
+    }
+
+    #[test]
+    fn krx_ka10095_and_ka10081_report_the_traded_value_of_a_day_in_the_same_million_won() {
+        let quote: StockQuotesResponse = serde_json::from_str(&fixture("ka10095_005930_krx")).unwrap();
+        let quote = parse_krx_quotes(quote)[0];
+        let daily: DailyChartResponse = serde_json::from_str(&fixture("ka10081_005930")).unwrap();
+        let daily = parse_krx_daily(daily).unwrap().unwrap();
+        let same_day = daily.iter().find(|r| r.day == quote.day).unwrap();
+        assert_eq!((quote.day, quote.ohlcv, quote.traded), (same_day.day, same_day.ohlcv, same_day.traded), "마감 뒤 ka10095 KRX 행은 그날 KRX 일봉 행과 같다");
+        let average_won = quote.traded.0 * 1_000_000 / quote.ohlcv.volume().0;
+        assert!((quote.ohlcv.low().centi() / 100..=quote.ohlcv.high().centi() / 100).contains(&average_won), "백만원 단위면 평균 체결가 {average_won}원이 그날 저가·고가 사이다");
     }
 
     fn listing(name: &str) -> Vec<(String, Listing)> {
