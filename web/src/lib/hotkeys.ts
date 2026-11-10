@@ -6,6 +6,7 @@ export type HotkeyAction =
   | { kind: "period"; period: Period }
   | { kind: "periodStep"; step: -1 | 1 }
   | { kind: "toggleLog" }
+  | { kind: "indicators" }
   | { kind: "toggleWatch" }
   | { kind: "snapshot"; mode: "download" | "copy" };
 
@@ -37,6 +38,7 @@ export const HOTKEYS: { keys: string; label: string; action: HotkeyAction; match
     { keys: "[", label: "이전 봉 주기", action: { kind: "periodStep", step: -1 }, match: plain("BracketLeft") },
     { keys: "]", label: "다음 봉 주기", action: { kind: "periodStep", step: 1 }, match: plain("BracketRight") },
     { keys: "L", label: "로그 축 켜기/끄기", action: { kind: "toggleLog" }, match: plain("KeyL") },
+    { keys: "I", label: "지표 추가", action: { kind: "indicators" }, match: plain("KeyI") },
     {
       keys: "Alt+W",
       label: "관심종목 접기/펴기",

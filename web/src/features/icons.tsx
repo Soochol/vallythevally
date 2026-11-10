@@ -116,3 +116,22 @@ export const MoreIcon = ({ size = 16 }: P) => (
     <circle cx="18" cy="12" r="1.2" fill="currentColor" stroke="none" />
   </Icon>
 );
+export const IndicatorIcon = ({ size }: P) => (
+  <Icon size={size}>
+    <path d="M3 17c3-1 4-9 7-9s3 6 6 6 3-4 5-5" />
+    <path d="M3 21h18" />
+  </Icon>
+);
+export const GearIcon = ({ size = 16 }: P) => (
+  <Icon size={size}>
+    <circle cx="12" cy="12" r="3" />
+    <path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M5.6 18.4l2.1-2.1M16.3 7.7l2.1-2.1" />
+  </Icon>
+);
+export const EyeIcon = ({ size = 16, off = false }: P & { off?: boolean }) => (
+  <Icon size={size}>
+    <path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z" />
+    <circle cx="12" cy="12" r="2.6" />
+    {off && <path d="m4 4 16 16" />}
+  </Icon>
+);

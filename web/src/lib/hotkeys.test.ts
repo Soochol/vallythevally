@@ -54,3 +54,10 @@ test("휴대폰은 내려받기만 하므로 Alt+Shift+S가 단축키가 아니�
   expect(matchHotkey(key("KeyS", { altKey: true, shiftKey: true }), "phone")).toBeNull();
   expect(matchHotkey(key("KeyD"), "phone")).toEqual({ kind: "period", period: "D" });
 });
+
+test("I는 데스크톱과 휴대폰 모두 지표 대화상자를 연다", () => {
+  expect(matchHotkey(key("KeyI"), "desktop")).toEqual({ kind: "indicators" });
+  expect(matchHotkey(key("KeyI"), "phone")).toEqual({ kind: "indicators" });
+  expect(matchHotkey(key("KeyI", { shiftKey: true }), "desktop")).toBeNull();
+  expect(matchHotkey(key("KeyI", { ctrlKey: true }), "desktop")).toBeNull();
+});

@@ -2,6 +2,8 @@ import { useCallback, useId, useRef, useState } from "react";
 import type { Period } from "../../api/generated/Period";
 import { PERIOD_LABEL } from "../../lib/symbol";
 import { type CellState, useLayoutStore } from "../../stores/layout";
+import { useSelectionStore } from "../../stores/selection";
+import { IndicatorIcon } from "../icons";
 import { RadioMenu } from "../menu/RadioMenu";
 
 const CHIPS = ["5m", "15m", "60m", "D", "W", "M"] as const satisfies readonly Period[];
@@ -17,10 +19,11 @@ const CHIP =
 /**
  * 휴대폰 봉 주기 칩(frontend.md §4, D11). 칩은 5·15·60분과 일·주·월 여섯이고,
  * 칩을 길게 누르면(또는 상황 메뉴 키) 1·3·30분 메뉴가 열린다.
- * 그 메뉴의 봉 주기를 보는 동안에는 그 칩을 맨 앞에 눌린 채로 보인다.
+ * 그 메뉴의 봉 주기를 보는 동안에는 그 칩을 맨 앞에 눌린 채로 보인다. 줄 끝에 지표 버튼을 둔다.
  */
 export function PeriodChips({ cell }: { cell: CellState }) {
   const setPeriod = useLayoutStore((s) => s.setPeriod);
+  const openIndicators = useSelectionStore((s) => s.openIndicators);
   const [menuOpen, setMenuOpen] = useState(false);
   const root = useRef<HTMLDivElement>(null);
   const opener = useRef<HTMLButtonElement | null>(null);
@@ -45,8 +48,8 @@ export function PeriodChips({ cell }: { cell: CellState }) {
   const chips: readonly Period[] = isMenuPeriod(cell.period) ? [cell.period, ...CHIPS] : CHIPS;
 
   return (
-    <div ref={root} className="relative hidden border-b border-line [grid-area:mper] max-md:block">
-      <nav aria-label="봉 주기" className="flex gap-1 overflow-x-auto px-3 pb-2 [scrollbar-width:none]">
+    <div ref={root} className="relative hidden border-b border-line [grid-area:mper] max-md:flex">
+      <nav aria-label="봉 주기" className="flex min-w-0 flex-1 gap-1 overflow-x-auto px-3 pb-2 [scrollbar-width:none]">
         {chips.map((p) => (
           <button
             key={p}
@@ -79,6 +82,16 @@ export function PeriodChips({ cell }: { cell: CellState }) {
           </button>
         ))}
       </nav>
+      <button
+        type="button"
+        aria-haspopup="dialog"
+        aria-label="지표"
+        title="지표 (I)"
+        className="mb-2 mr-3 grid h-[36px] w-[44px] flex-none place-items-center rounded-full border border-line text-text"
+        onClick={() => openIndicators(cell.slot)}
+      >
+        <IndicatorIcon />
+      </button>
       <span id={hintId} hidden>
         길게 누르면 1분, 3분, 30분
       </span>
