@@ -231,6 +231,7 @@ export class ChartController {
   }
 
   setTheme(tokens: ThemeTokens): void {
+    this.flushPendingDraw();
     this.tokens = tokens;
     this.chart.applyOptions(this.chartOptions());
     applyMainColors(this.main, tokens);
@@ -348,17 +349,20 @@ export class ChartController {
   }
 
   private drawFrame(): void {
-    if (this.pendingDraw.size > 0) {
-      this.withDataGuard(() => {
-        for (const b of this.pendingDraw.values()) {
-          updateMainBar(this.main, b);
-          updateVolumeBar(this.volume, b, this.tokens);
-        }
-      });
-      this.pendingDraw.clear();
-      this.exposeBarsToE2e();
-    }
+    this.flushPendingDraw();
     this.renderLegend();
+  }
+
+  private flushPendingDraw(): void {
+    if (this.pendingDraw.size === 0) return;
+    this.withDataGuard(() => {
+      for (const b of this.pendingDraw.values()) {
+        updateMainBar(this.main, b);
+        updateVolumeBar(this.volume, b, this.tokens);
+      }
+    });
+    this.pendingDraw.clear();
+    this.exposeBarsToE2e();
   }
 
   private refreshReady(): void {
