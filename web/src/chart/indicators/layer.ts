@@ -1,0 +1,428 @@
+import {
+  HistogramSeries,
+  type IChartApi,
+  type IPriceLine,
+  type ISeriesApi,
+  LineSeries,
+  LineStyle,
+  type PriceFormat,
+} from "lightweight-charts";
+import type { Bar } from "../../api/generated/Bar";
+import type { LineId } from "../../api/generated/LineId";
+import type { Period } from "../../api/generated/Period";
+import type { UnixSeconds } from "../../api/generated/UnixSeconds";
+import { formatPrice, formatVolume } from "../../lib/format";
+import { displayBars, type History } from "../barFeed";
+import type { IndicatorConfig, Panel } from "../settings";
+import type { ThemeTokens } from "../theme";
+import { toChartTime } from "../time";
+import type { IndicatorPort, OpenPort } from "./client";
+import { applyToPoints, DrawQueue, pointAtTime } from "./drawQueue";
+import { isBarLine, lineColor, specLines, specName } from "./kinds";
+import type { BarTuple, Columns, EngineErrorKind, EngineResult, FromWorker, LineInfo, Point } from "./protocol";
+import { syncOp } from "./sync";
+
+type Status = { kind: "pending" } | { kind: "ready" } | { kind: "hidden" } | { kind: "error"; error: EngineErrorKind; message: string };
+
+type Kind = IndicatorConfig["spec"]["kind"];
+
+interface Line {
+  id: LineId;
+  kind: Kind;
+  shift: number;
+  series: ISeriesApi<"Line"> | ISeriesApi<"Histogram">;
+  points: Point[];
+  guides: IPriceLine[];
+}
+
+interface Shown {
+  config: IndicatorConfig;
+  gen: number;
+  status: Status;
+  lines: Line[];
+}
+
+export interface LegendValue {
+  text: string;
+  color: string;
+}
+
+export interface IndicatorRow {
+  id: string;
+  name: string;
+  color: string;
+  values: LegendValue[];
+  state: "ok" | "pending" | "hidden" | EngineErrorKind;
+  /** 지표 패널이면 그 패널의 순서(0부터)와 패널 수. 가격 패널이면 null. */
+  panel: { index: number; count: number } | null;
+}
+
+export interface LayerHost {
+  chart: IChartApi;
+  tokens(): ThemeTokens;
+  isIndex(): boolean;
+  period(): Period;
+  /** 워커 응답이 왔다. 다음 프레임에 그린다. */
+  changed(): void;
+}
+
+const GUIDES: Partial<Record<Kind, number[]>> = { rsi: [70, 30], stochSlow: [80, 20] };
+
+const tuple = (b: Bar): BarTuple => [b.t, b.o, b.h, b.l, b.c, b.v];
+
+function columnsOf(bars: readonly Bar[]): Columns {
+  const col = (f: (b: Bar) => number) => Float64Array.from(bars, f);
+  return { t: col((b) => b.t), o: col((b) => b.o), h: col((b) => b.h), l: col((b) => b.l), c: col((b) => b.c), v: col((b) => b.v) };
+}
+
+const transferOf = (c: Columns) => [c.t.buffer, c.o.buffer, c.h.buffer, c.l.buffer, c.c.buffer, c.v.buffer];
+
+const ERROR_TEXT: Record<EngineErrorKind, string> = { spec: "설정 오류", calc: "계산 오류" };
+export const indicatorErrorText = (kind: EngineErrorKind) => ERROR_TEXT[kind];
+
+/**
+ * 칸 하나의 지표(frontend.md §5.4·§5.6). 워커에 엔진을 만들고 봉을 넘기며, 응답을 세대로 걸러 선 시리즈에 그린다.
+ * 그리기는 `flush`(컨트롤러의 프레임) 때만 한다.
+ */
+export class IndicatorLayer {
+  private readonly port: IndicatorPort;
+  private readonly shown = new Map<string, Shown>();
+  private readonly queue = new DrawQueue<Line>();
+  private configs: IndicatorConfig[] = [];
+  private panels: Panel[] = [];
+  private gen = 0;
+  private history: History | null = null;
+  private display: Bar[] = [];
+  private committedT: UnixSeconds | null = null;
+  private broken = false;
+
+  constructor(
+    private readonly host: LayerHost,
+    open: OpenPort,
+  ) {
+    this.port = open({ message: (m) => this.onMessage(m), broken: () => this.onBroken() });
+  }
+
+  /** 칸 설정의 지표·패널을 맞춘다. 바뀐 지표만 엔진을 다시 만든다. */
+  setConfigs(configs: IndicatorConfig[], panels: Panel[]): void {
+    const prevConfigs = this.configs;
+    const prevPanels = this.panels;
+    this.configs = configs;
+    this.panels = panels;
+    const keep = new Set(configs.map((c) => c.id));
+    const dropped = [...this.shown.keys()].filter((id) => !keep.has(id));
+    for (const id of dropped) this.removeShown(id);
+    if (dropped.length) this.port.post({ type: "drop", cell: this.port.cell, ids: dropped });
+
+    const panelOrderChanged = prevPanels.length !== panels.length || prevPanels.some((p, i) => p.id !== panels[i]?.id);
+    const fresh: IndicatorConfig[] = [];
+    for (const config of configs) {
+      const s = this.shown.get(config.id);
+      if (!s || s.config.spec !== config.spec) {
+        if (s) this.removeShown(config.id);
+        this.shown.set(config.id, { config, gen: 0, status: { kind: config.visible ? "pending" : "hidden" }, lines: [] });
+        if (config.visible) fresh.push(config);
+        continue;
+      }
+      const prev = s.config;
+      s.config = config;
+      if (prev.visible !== config.visible) {
+        if (config.visible) {
+          s.status = { kind: "pending" };
+          fresh.push(config);
+        } else {
+          s.status = { kind: "hidden" };
+          s.gen = 0;
+          this.clearLines(s);
+          this.port.post({ type: "drop", cell: this.port.cell, ids: [config.id] });
+        }
+      }
+      if (prev.style !== config.style || prev.visible !== config.visible) this.styleLines(s);
+    }
+    const orderChanged = configs.length !== prevConfigs.length || configs.some((c, i) => c.id !== prevConfigs[i]?.id);
+    if (panelOrderChanged || orderChanged || [...this.shown.values()].some((s) => s.lines.length === 0)) this.rebuildSeries();
+    this.applyStretch();
+    this.create(fresh);
+  }
+
+  /** 새 봉 열(최신 페이지, 과거 페이지, 바꿔치기). 지표 선을 바로 비우고 엔진을 모두 다시 만든다. */
+  reset(h: History): void {
+    this.history = h;
+    this.display = displayBars(h);
+    this.committedT = h.bars[h.bars.length - 1]?.t ?? null;
+    const visible = this.configs.filter((c) => c.visible);
+    for (const s of this.shown.values()) {
+      this.clearLines(s);
+      if (s.config.visible) s.status = { kind: "pending" };
+    }
+    this.create(visible);
+  }
+
+  /** 종목·거래소·봉 주기가 바뀌었거나 봉을 받지 못했다. */
+  clear(): void {
+    this.history = null;
+    this.display = [];
+    this.committedT = null;
+    this.port.post({ type: "drop", cell: this.port.cell, ids: "all" });
+    for (const s of this.shown.values()) {
+      s.gen = 0;
+      this.clearLines(s);
+      if (s.config.visible && s.status.kind !== "error") s.status = { kind: "pending" };
+    }
+  }
+
+  /** 실시간 봉 하나. 주 시리즈가 꼬리만 바뀌었으면 엔진에 그 봉만 넘기고, 아니면 다시 만든다. */
+  advance(h: History, bar: Bar, kind: "live" | "confirmed"): void {
+    const prev = this.display;
+    const next = displayBars(h);
+    const op = syncOp(prev, next, bar, kind, this.committedT);
+    if (op === "create" || !this.history) return this.reset(h);
+    this.history = h;
+    this.display = next;
+    if (op === "confirm") this.committedT = bar.t;
+    if (this.configs.some((c) => c.visible) && !this.broken) {
+      this.port.post({ type: "bar", cell: this.port.cell, kind: op, bar: tuple(bar) });
+    }
+  }
+
+  /** 쌓인 점을 그린다. 테마를 바꾸거나 시리즈를 다시 만들기 전에도 부른다(#58). */
+  flush(): void {
+    for (const [line, p] of this.queue.drain()) {
+      if (p.set) this.draw(line, p.set);
+      for (const pt of p.updates) line.series.update(this.toChart(line, pt) as never);
+    }
+  }
+
+  setTheme(): void {
+    this.flush();
+    for (const s of this.shown.values()) {
+      this.styleLines(s);
+      for (const line of s.lines) if (isBarLine(line.id)) this.draw(line, line.points);
+    }
+  }
+
+  /** 주 시리즈의 가격 표기(주식·지수)가 바뀌었다. */
+  setIndex(): void {
+    for (const s of this.shown.values()) for (const line of s.lines) line.series.applyOptions({ priceFormat: this.priceFormat(s.config) });
+  }
+
+  rows(t: UnixSeconds | null): IndicatorRow[] {
+    const tokens = this.host.tokens();
+    return this.configs.map((config) => {
+      const s = this.shown.get(config.id);
+      const status = s?.status ?? { kind: "pending" };
+      const state = status.kind === "error" ? status.error : status.kind === "ready" ? "ok" : status.kind;
+      const lines = specLines(config.spec);
+      const panelIndex = config.panel === "price" ? -1 : this.panels.findIndex((p) => p.id === config.panel);
+      const values: LegendValue[] =
+        state !== "ok" || t === null || !s
+          ? []
+          : s.lines.map((line, i) => {
+              const pt = pointAtTime(line.points, t);
+              const color = isBarLine(line.id) ? tokens.text2 : tokens.ind[lineColor(config.spec, config.style.colors, i)];
+              return { text: pt ? this.format(config, pt.v) : "—", color };
+            });
+      const primary = lines.findIndex((l) => !isBarLine(l));
+      return {
+        id: config.id,
+        name: specName(config.spec),
+        color: primary < 0 ? tokens.text2 : tokens.ind[lineColor(config.spec, config.style.colors, primary)],
+        values,
+        state,
+        panel: panelIndex < 0 ? null : { index: panelIndex, count: this.panels.length },
+      };
+    });
+  }
+
+  /** 지표 패널 높이 비율(가격 패널 대비). 사용자가 패널 경계를 끌었는지 보는 데 쓴다. */
+  stretches(): number[] {
+    const panes = this.host.chart.panes();
+    const base = panes[0]?.getStretchFactor() ?? 1;
+    return this.panels.map((_, i) => (panes[i + 1]?.getStretchFactor() ?? base) / base);
+  }
+
+  dispose(): void {
+    this.port.close();
+    for (const id of [...this.shown.keys()]) this.removeShown(id);
+  }
+
+  private create(configs: IndicatorConfig[]): void {
+    const h = this.history;
+    if (!h || configs.length === 0) return;
+    const gen = ++this.gen;
+    for (const c of configs) {
+      const s = this.shown.get(c.id);
+      if (!s) continue;
+      s.gen = gen;
+      if (this.broken) s.status = { kind: "error", error: "calc", message: "" };
+    }
+    if (this.broken) return;
+    const last = this.display[this.display.length - 1];
+    const current = last && last !== h.bars[h.bars.length - 1] ? tuple(last) : null;
+    const cols = columnsOf(h.bars);
+    this.port.post(
+      {
+        type: "create",
+        cell: this.port.cell,
+        gen,
+        period: this.host.period(),
+        cols,
+        current,
+        engines: configs.map((c) => ({ id: c.id, spec: JSON.stringify(c.spec) })),
+      },
+      transferOf(cols),
+    );
+  }
+
+  private onMessage(m: Exclude<FromWorker, { type: "fatal" }>): void {
+    if (m.type === "created") for (const r of m.results) this.accept(r, r.ok ? r.lines : null);
+    else for (const r of m.results) this.accept(r, null);
+    this.host.changed();
+  }
+
+  private accept(r: EngineResult, lines: LineInfo[] | null): void {
+    const s = this.shown.get(r.id);
+    if (!s || s.gen !== r.gen || s.status.kind === "hidden") return;
+    if (!r.ok) {
+      s.status = { kind: "error", error: r.error, message: r.message };
+      s.gen = 0;
+      this.clearLines(s);
+      if (r.error === "spec") console.warn(`지표 설정 오류(${specName(s.config.spec)}): ${r.message}`);
+      else console.error(`지표 계산 오류(${specName(s.config.spec)}): ${r.message}`);
+      return;
+    }
+    lines?.forEach((l, i) => {
+      const line = s.lines[i];
+      if (line) line.shift = l.shift;
+    });
+    s.status = { kind: "ready" };
+    r.draws.forEach((d, i) => {
+      const line = s.lines[i];
+      if (!line) return;
+      line.points = applyToPoints(line.points, d);
+      if (!lines) return this.queue.push(line, d);
+      this.queue.forget(line);
+      this.draw(line, line.points);
+    });
+  }
+
+  private onBroken(): void {
+    this.broken = true;
+    for (const s of this.shown.values()) {
+      if (s.status.kind === "hidden") continue;
+      s.status = { kind: "error", error: "calc", message: "" };
+      s.gen = 0;
+      this.clearLines(s);
+    }
+    this.host.changed();
+  }
+
+  private paneOf(config: IndicatorConfig): number {
+    return config.panel === "price" ? 0 : 1 + this.panels.findIndex((p) => p.id === config.panel);
+  }
+
+  /** 지표 시리즈를 패널 순서대로 다시 붙인다. 빈 pane은 라이브러리가 지우므로 앞 pane부터 붙인다. */
+  private rebuildSeries(): void {
+    this.flush();
+    const old = new Map<string, Line[]>();
+    for (const [id, s] of this.shown) {
+      old.set(id, s.lines);
+      for (const line of s.lines) this.removeLine(line);
+      s.lines = [];
+    }
+    const ordered = [...this.configs].sort((a, b) => this.paneOf(a) - this.paneOf(b));
+    for (const config of ordered) {
+      const s = this.shown.get(config.id);
+      if (s) s.lines = this.addLines(config, old.get(config.id) ?? []);
+    }
+    for (const s of this.shown.values()) for (const line of s.lines) if (line.points.length) this.draw(line, line.points);
+  }
+
+  private addLines(config: IndicatorConfig, kept: readonly Line[]): Line[] {
+    const pane = this.paneOf(config);
+    return specLines(config.spec).map((id, i): Line => {
+      const options = { ...this.lineOptions(config, id, i), priceFormat: this.priceFormat(config) };
+      const series = isBarLine(id)
+        ? this.host.chart.addSeries(HistogramSeries, options, pane)
+        : this.host.chart.addSeries(LineSeries, options, pane);
+      if (pane > 0) series.priceScale().applyOptions({ scaleMargins: id === "volume" ? { top: 0.12, bottom: 0 } : { top: 0.14, bottom: 0.08 } });
+      const guides = i === 0 ? (GUIDES[config.spec.kind] ?? []).map((price) => series.createPriceLine(this.guide(price))) : [];
+      const same = kept[i]?.id === id ? kept[i] : undefined;
+      return { id, kind: config.spec.kind, shift: same?.shift ?? 0, series, points: same?.points ?? [], guides };
+    });
+  }
+
+  private guide(price: number) {
+    return { price, color: this.host.tokens().line, lineWidth: 1 as const, lineStyle: LineStyle.Dashed, axisLabelVisible: false, title: "" };
+  }
+
+  private lineOptions(config: IndicatorConfig, id: LineId, i: number) {
+    const color = this.host.tokens().ind[lineColor(config.spec, config.style.colors, i)];
+    const common = { visible: config.visible, priceLineVisible: false, lastValueVisible: config.panel !== "price", title: "" };
+    return isBarLine(id) ? common : { ...common, color, lineWidth: config.style.width, crosshairMarkerVisible: false };
+  }
+
+  private styleLines(s: Shown): void {
+    s.lines.forEach((line, i) => {
+      line.series.applyOptions(this.lineOptions(s.config, line.id, i));
+      line.guides.forEach((g) => g.applyOptions({ color: this.host.tokens().line }));
+    });
+  }
+
+  private priceFormat(config: IndicatorConfig): PriceFormat {
+    if (config.spec.kind === "rsi" || config.spec.kind === "stochSlow") return { type: "price", precision: 2, minMove: 0.01 };
+    return { type: "custom", minMove: 0.01, formatter: (v: number) => this.format(config, v) };
+  }
+
+  private format(config: IndicatorConfig, v: number): string {
+    switch (config.spec.kind) {
+      case "volume":
+        return formatVolume(v);
+      case "rsi":
+      case "stochSlow":
+      case "macd":
+        return formatPrice(v, true);
+      default:
+        return formatPrice(v, this.host.isIndex());
+    }
+  }
+
+  private draw(line: Line, points: readonly Point[]): void {
+    line.series.setData(points.map((pt) => this.toChart(line, pt)) as never);
+  }
+
+  private toChart(line: Line, pt: Point) {
+    const time = toChartTime(pt.t);
+    if (!isBarLine(line.id)) return { time, value: pt.v };
+    const t = this.host.tokens();
+    const up = line.kind === "volume" ? pt.up !== false : pt.v >= 0;
+    return { time, value: pt.v, color: up ? t.upVol : t.downVol };
+  }
+
+  private clearLines(s: Shown): void {
+    for (const line of s.lines) {
+      this.queue.forget(line);
+      if (line.points.length) line.series.setData([]);
+      line.points = [];
+    }
+  }
+
+  private removeLine(line: Line): void {
+    this.queue.forget(line);
+    this.host.chart.removeSeries(line.series);
+  }
+
+  private removeShown(id: string): void {
+    const s = this.shown.get(id);
+    if (!s) return;
+    for (const line of s.lines) this.removeLine(line);
+    this.shown.delete(id);
+  }
+
+  private applyStretch(): void {
+    const panes = this.host.chart.panes();
+    panes[0]?.setStretchFactor(1);
+    this.panels.forEach((p, i) => panes[i + 1]?.setStretchFactor(p.stretch));
+  }
+}
+

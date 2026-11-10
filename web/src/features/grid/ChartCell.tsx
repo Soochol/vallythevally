@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import { useSymbolInfo } from "../../api/queries";
 import { type CellStatus, ChartController } from "../../chart/ChartController";
+import type { IndicatorCommand } from "../../chart/indicators/legendRows";
 import { readThemeTokens } from "../../chart/theme";
 import { PERIOD_LABEL } from "../../lib/symbol";
 import { shownVenue, venueLabel } from "../../lib/venue";
@@ -13,6 +14,23 @@ import { cellErrorView, olderErrorView } from "./cellError";
 import { useDrawingSurface } from "../../chart/drawings/useDrawingSurface";
 import { DrawingOverlay } from "../drawings/DrawingOverlay";
 import { attachController } from "./controllers";
+
+function runIndicatorCommand(slot: Slot, id: string, command: IndicatorCommand): void {
+  const store = useLayoutStore.getState();
+  const config = store.layout.cells.find((c) => c.slot === slot)?.chartSettings.indicators.find((i) => i.id === id);
+  if (!config) return;
+  switch (command) {
+    case "edit":
+      return useSelectionStore.getState().openIndicators(slot, id);
+    case "toggle":
+      return store.updateIndicator(slot, id, { visible: !config.visible });
+    case "remove":
+      return store.removeIndicator(slot, id);
+    case "up":
+    case "down":
+      return store.movePanel(slot, config.panel, command === "up" ? -1 : 1);
+  }
+}
 
 interface Props {
   slot: Slot;
@@ -31,12 +49,16 @@ export function ChartCell({ slot, status, onStatus }: Props) {
   const ctl = useRef<ChartController | null>(null);
   const onStatusRef = useRef(onStatus);
   onStatusRef.current = onStatus;
+  const slotRef = useRef(slot);
+  slotRef.current = slot;
 
   useEffect(() => {
     const c = new ChartController(chartEl.current!, {
       tokens: readThemeTokens(),
       onStatus: (s) => onStatusRef.current(s),
       socket: marketSocket,
+      onIndicatorCommand: (id, command) => runIndicatorCommand(slotRef.current, id, command),
+      onPanelStretch: (stretches) => useLayoutStore.getState().setPanelStretches(slotRef.current, stretches),
     });
     ctl.current = c;
     return () => {

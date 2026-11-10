@@ -4,7 +4,6 @@ import {
   CrosshairMode,
   type DeepPartial,
   type IChartApi,
-  type ISeriesApi,
   LineStyle,
   PriceScaleMode,
   type TickMarkType,
@@ -23,18 +22,12 @@ import type { Connection, MarketSocketLike } from "../api/socket";
 import { isIndexCode, PERIOD_LABEL, symbolSub } from "../lib/symbol";
 import { type ShownVenue, venueLabel } from "../lib/venue";
 import { BarFeed, displayBars, type FetchPage, type History } from "./barFeed";
+import { type OpenPort, openIndicatorPort } from "./indicators/client";
+import { IndicatorLayer } from "./indicators/layer";
+import { type IndicatorCommand, IndicatorLegend } from "./indicators/legendRows";
+import { isTailChange } from "./indicators/sync";
 import { Legend, legendParts } from "./legend";
-import {
-  addMainSeries,
-  addVolumeSeries,
-  applyMainColors,
-  type MainSeries,
-  priceFormat,
-  setMainData,
-  setVolumeData,
-  updateMainBar,
-  updateVolumeBar,
-} from "./series";
+import { addMainSeries, applyMainColors, type MainSeries, priceFormat, setMainData, updateMainBar } from "./series";
 import type { ChartSettings } from "./settings";
 import { composeSnapshot, snapshotFileName } from "./snapshot";
 import type { ThemeTokens } from "./theme";
@@ -54,13 +47,6 @@ const SUB_ERROR_TEXT: Record<SubErrorCode, string> = {
 };
 
 const nowSeconds = (): UnixSeconds => Math.floor(Date.now() / 1000);
-
-function isTailChange(prev: Bar[], next: Bar[], bar: Bar): boolean {
-  if (next[next.length - 1] !== bar) return false;
-  const kept = next.length - 1;
-  if (kept !== prev.length && !(kept === prev.length - 1 && prev[kept]?.t === bar.t)) return false;
-  return kept === 0 || next[kept - 1] === prev[kept - 1];
-}
 
 export interface CellView {
   symbol: SymbolCode;
@@ -92,6 +78,11 @@ export interface ControllerDeps {
   fetchPage?: FetchPage;
   /** 없으면 실시간 없이 조회한 봉만 그린다. */
   socket?: MarketSocketLike;
+  indicators?: OpenPort;
+  /** 범례 지표 줄의 버튼(설정·숨기기·지우기·패널 위로·아래로). */
+  onIndicatorCommand?: (id: string, command: IndicatorCommand) => void;
+  /** 사용자가 패널 경계를 끌어 지표 패널 높이 비율(가격 패널 대비)이 바뀌었다. */
+  onPanelStretch?: (stretches: number[]) => void;
 }
 
 /** 칸 하나의 차트 엔진 래퍼(frontend.md §5.4). React 밖의 명령형 객체다. */
@@ -99,7 +90,8 @@ export class ChartController {
   private readonly el: HTMLElement;
   private readonly chart: IChartApi;
   private main: MainSeries;
-  private readonly volume: ISeriesApi<"Histogram">;
+  private readonly indicators: IndicatorLayer;
+  private readonly indicatorLegend: IndicatorLegend;
   private readonly legend: Legend;
   private readonly feed: BarFeed;
   private readonly onStatus: (s: CellStatus) => void;
@@ -127,9 +119,31 @@ export class ChartController {
     this.tokens = deps.tokens;
     this.onStatus = deps.onStatus;
     this.chart = createChart(el, { ...this.chartOptions(), autoSize: true });
-    this.volume = addVolumeSeries(this.chart);
+    // 주 시리즈를 바꿔 붙이는 동안 가격 pane이 비어도 라이브러리가 지우지 않게 한다. 지우면 지표 패널이 0번이 된다.
+    this.chart.panes()[0]?.setPreserveEmptyPane(true);
     this.main = addMainSeries(this.chart, "candle", this.tokens, false);
     this.legend = new Legend(el);
+    this.indicators = new IndicatorLayer(
+      {
+        chart: this.chart,
+        tokens: () => this.tokens,
+        isIndex: () => this.view !== null && isIndexCode(this.view.symbol),
+        period: () => this.period(),
+        changed: () => this.scheduleFrame(),
+      },
+      deps.indicators ?? openIndicatorPort,
+    );
+    this.indicatorLegend = new IndicatorLegend(el, (id, command) => deps.onIndicatorCommand?.(id, command));
+    this.legend.root.append(this.indicatorLegend.priceBox);
+    const onPanelStretch = deps.onPanelStretch;
+    if (onPanelStretch) {
+      el.addEventListener("pointerup", () => {
+        const now = this.indicators.stretches();
+        const saved = this.view?.settings.panels ?? [];
+        if (now.some((x, i) => Math.abs(x - (saved[i]?.stretch ?? x)) > 1e-3)) onPanelStretch(now);
+        this.renderLegend();
+      });
+    }
     this.feed = new BarFeed(
       deps.fetchPage ?? fetchBarsPage,
       {
@@ -137,8 +151,8 @@ export class ChartController {
         prepended: (h, added) => this.onPrepended(h, added),
         failed: (e) => this.onFailed(e),
         olderFailed: (e) => this.patchReady({ olderError: e }),
-        live: (h, bar) => this.onRealtime(h, bar),
-        confirmed: (h, bar) => this.onRealtime(h, bar),
+        live: (h, bar) => this.onRealtime(h, bar, "live"),
+        confirmed: (h, bar) => this.onRealtime(h, bar, "confirmed"),
         subError: (code) => this.legend.setNotice(code === null ? null : SUB_ERROR_TEXT[code]),
       },
       deps.socket,
@@ -183,15 +197,22 @@ export class ChartController {
     }
     if (prev?.period !== next.period) this.chart.applyOptions({ timeScale: { timeVisible: isIntraday(next.period) } });
     if (prev?.symbol !== next.symbol || prev.venue !== next.venue || prev.period !== next.period) {
-      if (prev && isIndexCode(prev.symbol) !== isIndex) this.main.api.applyOptions({ priceFormat: priceFormat(isIndex) });
+      if (prev && isIndexCode(prev.symbol) !== isIndex) {
+        this.main.api.applyOptions({ priceFormat: priceFormat(isIndex) });
+        this.indicators.setIndex();
+      }
       this.history = null;
       this.ready = null;
       this.legend.setNotice(null);
       this.setBars([]);
-      this.renderLegend();
+      this.indicators.clear();
       this.onStatus({ kind: "loading" });
       this.feed.open({ symbol: next.symbol, venue: next.venue, period: next.period });
     }
+    if (prev?.settings.indicators !== next.settings.indicators || prev?.settings.panels !== next.settings.panels) {
+      this.indicators.setConfigs(next.settings.indicators, next.settings.panels);
+    }
+    this.renderLegend();
   }
 
   /** 같은 봉 열을 처음부터 다시 받는다(오류 뒤 `다시 시도`). */
@@ -223,6 +244,10 @@ export class ChartController {
       legend: bar
         ? legendParts({ bar, prev: this.bars[n - 2] ?? null, isCurrent: false, stalledAt: this.stalledAt, isIndex: isIndexCode(view.symbol), period: view.period })
         : null,
+      indicators: this.indicators
+        .rows(bar?.t ?? null)
+        .filter((r) => r.state === "ok")
+        .map((r) => ({ name: r.name, color: r.color, values: r.values })),
     };
     return {
       canvas: composeSnapshot(shot, head, this.tokens, shot.width / Math.max(1, this.el.clientWidth)),
@@ -232,10 +257,12 @@ export class ChartController {
 
   setTheme(tokens: ThemeTokens): void {
     this.flushPendingDraw();
+    this.indicators.flush();
     this.tokens = tokens;
     this.chart.applyOptions(this.chartOptions());
     applyMainColors(this.main, tokens);
-    setVolumeData(this.volume, this.bars, tokens);
+    this.indicators.setTheme();
+    this.renderLegend();
   }
 
   dispose(): void {
@@ -246,6 +273,8 @@ export class ChartController {
     if (this.statusTimer !== null) clearTimeout(this.statusTimer);
     this.unwatch();
     this.feed.dispose();
+    this.indicators.dispose();
+    this.indicatorLegend.dispose();
     this.legend.dispose();
     this.chart.remove();
   }
@@ -266,10 +295,11 @@ export class ChartController {
         fontFamily: t.fontFamily,
         fontSize: 11,
         attributionLogo: false,
+        panes: { enableResize: true, separatorColor: t.line, separatorHoverColor: t.raised },
       },
       grid: { vertLines: { color: t.grid }, horzLines: { color: t.grid } },
       crosshair: { mode: CrosshairMode.Normal, vertLine: crossLine, horzLine: crossLine },
-      rightPriceScale: { borderColor: t.line, scaleMargins: { top: 0.14, bottom: 0.22 } },
+      rightPriceScale: { borderColor: t.line, scaleMargins: { top: 0.14, bottom: 0.08 } },
       timeScale: {
         borderColor: t.line,
         rightOffset: RIGHT_OFFSET,
@@ -289,6 +319,7 @@ export class ChartController {
   }
 
   private recreateMain(isIndex: boolean): void {
+    this.indicators.flush();
     const range = this.chart.timeScale().getVisibleLogicalRange();
     this.chart.removeSeries(this.main.api);
     this.main = addMainSeries(this.chart, this.view?.settings.style ?? "candle", this.tokens, isIndex);
@@ -303,7 +334,6 @@ export class ChartController {
     this.bars = bars;
     this.pendingDraw.clear();
     setMainData(this.main, bars);
-    setVolumeData(this.volume, bars, this.tokens);
     this.exposeBarsToE2e();
   }
 
@@ -316,7 +346,7 @@ export class ChartController {
     d.lastClose = String(last?.c ?? "");
   }
 
-  private onRealtime(h: History, bar: Bar): void {
+  private onRealtime(h: History, bar: Bar, kind: "live" | "confirmed"): void {
     const prev = this.bars;
     const next = displayBars(h);
     this.history = h;
@@ -329,6 +359,7 @@ export class ChartController {
     } else {
       this.withDataGuard(() => this.setBars(next));
     }
+    this.indicators.advance(h, bar, kind);
     this.scheduleFrame();
     this.refreshReady();
   }
@@ -350,16 +381,14 @@ export class ChartController {
 
   private drawFrame(): void {
     this.flushPendingDraw();
+    this.indicators.flush();
     this.renderLegend();
   }
 
   private flushPendingDraw(): void {
     if (this.pendingDraw.size === 0) return;
     this.withDataGuard(() => {
-      for (const b of this.pendingDraw.values()) {
-        updateMainBar(this.main, b);
-        updateVolumeBar(this.volume, b, this.tokens);
-      }
+      for (const b of this.pendingDraw.values()) updateMainBar(this.main, b);
     });
     this.pendingDraw.clear();
     this.exposeBarsToE2e();
@@ -411,6 +440,7 @@ export class ChartController {
       this.setBars(bars);
       this.chart.timeScale().setVisibleLogicalRange({ from: bars.length - show, to: bars.length - 1 + RIGHT_OFFSET });
     });
+    this.indicators.reset(h);
     this.renderLegend();
     const latest = bars[bars.length - 1];
     if (latest) {
@@ -435,6 +465,7 @@ export class ChartController {
     const range = this.chart.timeScale().getVisibleLogicalRange();
     this.withDataGuard(() => {
       this.setBars(displayBars(h));
+      this.indicators.reset(h);
       if (range) this.chart.timeScale().setVisibleLogicalRange({ from: range.from + added, to: range.to + added });
     });
     if (this.hoverIndex !== null) this.hoverIndex += added;
@@ -459,14 +490,22 @@ export class ChartController {
     this.ready = null;
     this.history = null;
     this.setBars([]);
+    this.indicators.clear();
     this.renderLegend();
     this.onStatus({ kind: "error", error });
+  }
+
+  /** 칸 위에서 잰 pane마다의 위쪽 끝(px). 지표 패널 범례 자리다. */
+  private paneTops(): number[] {
+    const top = this.el.getBoundingClientRect().top;
+    return this.chart.panes().map((p) => (p.getHTMLElement()?.getBoundingClientRect().top ?? top) - top);
   }
 
   private renderLegend(): void {
     const view = this.view;
     const i = this.hoverIndex ?? this.bars.length - 1;
     const bar = this.bars[i];
+    this.indicatorLegend.render(this.indicators.rows(bar?.t ?? null), this.paneTops());
     if (!view || !bar) return this.legend.show(null);
     this.legend.show({
       bar,

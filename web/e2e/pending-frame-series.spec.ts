@@ -59,6 +59,8 @@ test("replacement consumes queued rollover in both real series and retains newer
   await page.evaluate(() => window.frameProbe.hold());
   await trade(202_000, "100059", 2);
   await trade(203_000, "100100", 3);
+  // 거래량은 지표 워커가 계산해 돌려준다. 프레임을 붙잡은 동안에도 응답은 오므로 그 응답이 쌓이기를 기다린다.
+  await page.waitForTimeout(200);
   await page.getByRole("menuitemradio", { name: "라인", exact: true }).evaluate((element) => {
     if (element instanceof HTMLElement) element.click();
   });
