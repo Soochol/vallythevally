@@ -597,7 +597,7 @@ function UpdateBand({ status }: { status: ScreenerStatus }) {
           <span className="block h-full bg-accent" style={{ width: `${percent}%` }} />
         </div>
         <p className="mt-1.5 text-xs leading-[1.45] text-text-2">
-          {PHASE_NOTE[update.phase]} {todayNote(status)}
+          {stored} {PHASE_NOTE[update.phase]} {todayNote(status)}
         </p>
       </section>
     );
