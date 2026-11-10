@@ -1,3 +1,5 @@
+import { INDICATOR_COLORS, type IndicatorColor } from "./indicators/kinds";
+
 /** 차트가 쓰는 토큰 값. CSS 변수에서 읽는다(테마를 바꾸면 다시 읽어 setTheme). */
 export interface ThemeTokens {
   chartBg: string;
@@ -15,6 +17,7 @@ export interface ThemeTokens {
   seriesLine: string;
   seriesFill: string;
   fontFamily: string;
+  ind: Record<IndicatorColor, string>;
 }
 
 export function readThemeTokens(root: HTMLElement = document.documentElement): ThemeTokens {
@@ -36,5 +39,6 @@ export function readThemeTokens(root: HTMLElement = document.documentElement): T
     seriesLine: v("--series-line"),
     seriesFill: v("--series-fill"),
     fontFamily: v("--font-sans"),
+    ind: Object.fromEntries(INDICATOR_COLORS.map((c) => [c, v(`--${c}`)])) as Record<IndicatorColor, string>,
   };
 }

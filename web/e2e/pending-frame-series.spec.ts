@@ -59,6 +59,7 @@ test("replacement consumes queued rollover in both real series and retains newer
   await page.evaluate(() => window.frameProbe.hold());
   await trade(202_000, "100059", 2);
   await trade(203_000, "100100", 3);
+  await page.waitForTimeout(200);
   await page.getByRole("menuitemradio", { name: "라인", exact: true }).evaluate((element) => {
     if (element instanceof HTMLElement) element.click();
   });

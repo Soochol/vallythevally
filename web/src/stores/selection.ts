@@ -2,7 +2,9 @@ import { create } from "zustand";
 import type { Slot } from "./layout";
 
 export type SearchPurpose = "open" | "watch";
-export type Dialog = { kind: "search"; purpose: SearchPurpose };
+export type Dialog =
+  | { kind: "search"; purpose: SearchPurpose }
+  | { kind: "indicator"; slot: Slot; editId: string | null };
 export type PhoneTab = "chart" | "watch";
 
 /** 저장하지 않는 화면 상태(frontend.md §5.3). */
@@ -12,6 +14,7 @@ interface SelectionState {
   phoneTab: PhoneTab;
   toast: null | { id: number; text: string };
   openSearch(purpose?: SearchPurpose): void;
+  openIndicators(slot: Slot, editId?: string | null): void;
   closeDialog(): void;
   setPhoneTab(tab: PhoneTab): void;
   showToast(text: string): void;
@@ -26,6 +29,7 @@ export const useSelectionStore = create<SelectionState>()((set) => ({
   phoneTab: "chart",
   toast: null,
   openSearch: (purpose = "open") => set({ dialog: { kind: "search", purpose } }),
+  openIndicators: (slot, editId = null) => set({ dialog: { kind: "indicator", slot, editId } }),
   closeDialog: () => set({ dialog: null }),
   setPhoneTab: (phoneTab) => set({ phoneTab }),
   showToast: (text) => set({ toast: { id: ++toastId, text } }),

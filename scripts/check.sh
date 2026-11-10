@@ -22,6 +22,9 @@ cd web
 step "pnpm install"
 pnpm install --frozen-lockfile --silent
 
+step "wasm: build indicators"
+./scripts/build-wasm.sh
+
 step "lint: typecheck"
 pnpm -s typecheck
 
@@ -30,9 +33,6 @@ step "test: vitest (offline.sh)"
 
 step "build"
 pnpm -s build
-
-step "wasm: build indicators"
-./scripts/build-wasm.sh
 
 step "wasm: check against the reference values (offline.sh)"
 "$offline" node scripts/wasm-smoke.mjs

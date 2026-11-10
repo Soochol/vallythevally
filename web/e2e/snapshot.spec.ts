@@ -136,7 +136,7 @@ async function expectSnapshotImage(page: Page, png: Buffer, chart: Locator): Pro
   return { lines, drawn };
 }
 
-async function expectSnapshot(page: Page, download: Download, chart: Locator, headLines: (n: number) => boolean = (n) => n === 2) {
+async function expectSnapshot(page: Page, download: Download, chart: Locator, headLines: (n: number) => boolean = (n) => n === 3) {
   expect(download.suggestedFilename()).toMatch(/^005930_combined_D_\d{8}-\d{4}\.png$/);
   const png = await readFile((await download.path())!);
   const { lines, drawn } = await expectSnapshotImage(page, png, chart);
@@ -164,8 +164,9 @@ test.describe("데스크톱", () => {
     const chart = await openSamsung(page);
     const button = page.getByRole("toolbar", { name: "차트 도구 막대" }).getByRole("button", { name: "차트 이미지 내려받기" });
 
-    const { png } = await download(page, chart, () => button.click());
+    const { png, drawn } = await download(page, chart, () => button.click());
     await testInfo.attach("snapshot-desktop.png", { body: png, contentType: "image/png" });
+    expect(drawn.map((t) => t.text), "기본 거래량 지표 줄").toContain("거래량");
 
     await chart.click();
     await download(page, chart, () => page.keyboard.press("Alt+KeyS"));
@@ -179,7 +180,7 @@ test.describe("데스크톱", () => {
 
     const png = await readClipboardPng(page);
     expect(png, "클립보드의 PNG").not.toBeNull();
-    expect((await expectSnapshotImage(page, png!, chart)).lines).toBe(2);
+    expect((await expectSnapshotImage(page, png!, chart)).lines).toBe(3);
   });
 });
 

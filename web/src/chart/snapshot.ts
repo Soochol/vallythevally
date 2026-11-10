@@ -13,6 +13,7 @@ export interface SnapshotHead {
   period: string;
   takenAt: UnixSeconds;
   legend: LegendParts | null;
+  indicators: { name: string; color: string; values: { text: string; color: string }[] }[];
 }
 
 const PAD_X = 12;
@@ -69,6 +70,11 @@ export function composeSnapshot(chart: HTMLCanvasElement, head: SnapshotHead, to
         ]
       : [];
 
+  const indicatorGroups: KeepTogether[] = head.indicators.map((ind) => [
+    ...run(ind.name, 12, 400, ind.color),
+    ...ind.values.flatMap((v) => run(v.text, 12, 500, v.color)),
+  ]);
+
   const width = chart.width / pxPerCssPx;
   const lineEnd = width - PAD_X;
   const fit = (group: KeepTogether): KeepTogether => {
@@ -101,6 +107,7 @@ export function composeSnapshot(chart: HTMLCanvasElement, head: SnapshotHead, to
   place(title, lineEnd - groupWidth(takenAt) - GAP);
   lines[0]!.push({ group: takenAt, x: lineEnd - groupWidth(takenAt) });
   if (legendGroups.length > 0) place(legendGroups, lineEnd);
+  if (indicatorGroups.length > 0) place(indicatorGroups, lineEnd);
   const credit = fit(run(CHART_CREDIT, 10, 400, tokens.text3));
 
   const headPx = Math.round((lines.length * LINE_HEIGHT + PAD_BOTTOM) * pxPerCssPx);

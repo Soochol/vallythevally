@@ -5,9 +5,9 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc -b && vite build",
-    "typecheck": "tsc -b",
-    "test": "vitest run",
+    "build": "pnpm wasm && tsc -b && vite build",
+    "typecheck": "pnpm wasm && tsc -b",
+    "test": "pnpm wasm && vitest run",
     "e2e": "playwright test",
     "preview": "vite preview",
     "wasm": "scripts/build-wasm.sh",

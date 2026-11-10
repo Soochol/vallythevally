@@ -2,14 +2,13 @@ import {
   AreaSeries,
   BarSeries,
   CandlestickSeries,
-  HistogramSeries,
   type IChartApi,
   type ISeriesApi,
   LineSeries,
   type PriceFormat,
 } from "lightweight-charts";
 import type { Bar } from "../api/generated/Bar";
-import { formatPrice, formatVolume } from "../lib/format";
+import { formatPrice } from "../lib/format";
 import type { ChartStyle } from "./settings";
 import type { ThemeTokens } from "./theme";
 import { toChartTime } from "./time";
@@ -21,11 +20,8 @@ export type MainSeries =
   | { style: "line"; api: ISeriesApi<"Line"> }
   | { style: "area"; api: ISeriesApi<"Area"> };
 
-export const VOLUME_SCALE_ID = "volume";
-
 export function priceFormat(isIndex: boolean): PriceFormat {
-  // 가격 축은 거래량을 깔아 둔 아래 여백까지 이어져 0 밑 눈금을 낸다. 가격은 0보다 크니 비운다.
-  return { type: "custom", minMove: isIndex ? 0.01 : 1, formatter: (p: number) => (p <= 0 ? "" : formatPrice(p, isIndex)) };
+  return { type: "custom", minMove: isIndex ? 0.01 : 1, formatter: (p: number) => formatPrice(p, isIndex) };
 }
 
 function colors(style: ChartStyle, t: ThemeTokens) {
@@ -72,27 +68,6 @@ export function setMainData(main: MainSeries, bars: Bar[]): void {
   }
 }
 
-/** 거래량은 지표가 아니라 봉의 v를 그대로 막대로 그린다(#2). 칸 아래쪽 20%에 자기 축으로 둔다. */
-export function addVolumeSeries(chart: IChartApi): ISeriesApi<"Histogram"> {
-  const s = chart.addSeries(HistogramSeries, {
-    priceScaleId: VOLUME_SCALE_ID,
-    priceFormat: { type: "custom", minMove: 1, formatter: formatVolume },
-    priceLineVisible: false,
-    lastValueVisible: false,
-  });
-  chart.priceScale(VOLUME_SCALE_ID).applyOptions({ scaleMargins: { top: 0.8, bottom: 0 } });
-  return s;
-}
-
-/** 점마다 색이 들어가므로 테마를 바꾸면 다시 setData 해야 한다. */
-export function setVolumeData(series: ISeriesApi<"Histogram">, bars: Bar[], t: ThemeTokens): void {
-  series.setData(bars.map((b) => volumePoint(b, t)));
-}
-
-function volumePoint(b: Bar, t: ThemeTokens) {
-  return { time: toChartTime(b.t), value: b.v, color: b.c >= b.o ? t.upVol : t.downVol };
-}
-
 /** 마지막 봉 하나를 바꾸거나 뒤에 붙인다. b.t는 시리즈의 마지막 시각보다 이르면 안 된다. */
 export function updateMainBar(main: MainSeries, b: Bar): void {
   switch (main.style) {
@@ -105,8 +80,4 @@ export function updateMainBar(main: MainSeries, b: Bar): void {
       main.api.update({ time: toChartTime(b.t), value: b.c });
       return;
   }
-}
-
-export function updateVolumeBar(series: ISeriesApi<"Histogram">, b: Bar, t: ThemeTokens): void {
-  series.update(volumePoint(b, t));
 }
