@@ -6,7 +6,7 @@
 
 궁금한 것을 표의 왼쪽에서 찾고, 오른쪽 문서를 연다. `docs/` 안의 문서와 폴더는 모두 이 지도에 있다. 경로는 이 파일이 있는 `docs/`를 기준으로 쓴다.
 
-문서는 한 줄에 하나씩 싣는다. 폴더째 싣는 것은 `design/mockup/`, `research/` 아래의 주제 폴더, `verification/issue-<번호>/`뿐이다. 폴더 줄은 그 폴더 아래의 파일과 폴더를 모두 맡는다.
+문서는 한 줄에 하나씩 싣는다. 폴더째 싣는 것은 `design/mockup/`, `research/` 아래의 주제 폴더, `verification/issue-<번호>/`뿐이다. 폴더 줄은 링크한 폴더 아래의 파일과 폴더를 모두 맡는다.
 
 ## 제품과 말뜻
 
@@ -66,7 +66,7 @@
 |---|---|
 | 종목 분석 리포트 미리보기(삼성전자)는 어떤 원자료와 스크립트로 만들었나? | [`research/2026-11-08-samsung-preview/`](research/2026-11-08-samsung-preview/) |
 | 드로잉 제안서의 근거는 어디 있고, 얼마나 믿을 만한가? | [`research/2026-11-09-drawing/`](research/2026-11-09-drawing/) (안내: 그 폴더의 `README.md`) |
-| PR이 실제 화면을 확인한 스크린숏과 기록은 어디 있나? | [`verification/issue-<번호>/`](verification/) (번호는 그 PR이 닫은 이슈) |
+| PR이 실제 화면을 확인한 스크린숏과 기록은 어디 있나? | [`verification/issue-<번호>/`](verification/) (번호는 그 PR이 다룬 이슈) |
 
 ## 에이전트와 문서 규칙
 
@@ -99,7 +99,7 @@
 
 문서를 옮기거나 지우는 PR은 같은 PR에서 이 지도와, 그 경로를 적은 다른 문서(양식 포함)를 고친다. 누가 어느 문서를 고치는지는 [`agents/document-policy.md`](agents/document-policy.md)에 있다.
 
-모든 문서의 첫 세 줄은 같은 모양이다.
+양식으로 쓴 문서의 첫 세 줄은 같은 모양이다.
 
 | 줄 | 쓰는 값 |
 |---|---|
