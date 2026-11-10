@@ -2,6 +2,7 @@ import { QueryClient } from "@tanstack/react-query";
 import { afterEach, expect, test, vi } from "vitest";
 import { usePersistStore } from "../../stores/persist";
 import { DrawingSync } from "./sync";
+import { completionKey } from "./journal";
 import type { Drawing, DrawingBody } from "./types";
 
 const body: DrawingBody = { id: "new", symbol: "005930", tool: "hline", points: [{ t: 1, price: 100 }], text: null, style: {}, locked: false, hidden: false, periods: null, z: 1, group: null, scope: { kind: "symbol" }, revision: 0 };
@@ -83,7 +84,7 @@ test("retry after an initial storage scan failure restores the persisted intent 
   sync.retry();
   await vi.waitFor(() => expect(sync.save.kind).toBe("saved"));
   expect(sent).toEqual([{ ...body, revision: 10 }]);
-  expect(Object.keys(values)).toEqual([]);
+  expect(Object.keys(values)).toEqual([completionKey(body.id)]);
 });
 
 

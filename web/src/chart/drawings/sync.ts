@@ -20,6 +20,7 @@ export class DrawingSync {
   private desired = new Map<string, { intent: queue.Intent; state: "pending" | "admitted" }>();
   private journal: DrawingJournal | null = null;
   private admissions = new Map<string, Promise<void>>();
+  private launches = new Set<string>();
   private recoveryIds = new Set<string>();
   private cleanups = new Map<string, queue.Intent>();
   private recoveryError: string | null = null;
@@ -205,35 +206,50 @@ export class DrawingSync {
 
   private send(id: string, keepalive: boolean) {
     const lane = this.outbox.lanes.get(id);
-    if (lane?.state !== "waiting") return;
+    if (lane?.state !== "waiting" || this.launches.has(id)) return;
     const desired = this.desired.get(id);
     if (desired?.intent.uuid !== lane.intent.uuid || desired.state !== "admitted") { this.outbox = queue.drop(this.outbox, id); return; }
-    try {
-      if (!this.journal?.isSendable(lane.intent)) {
-        this.outbox = queue.drop(this.outbox, id); this.desired.delete(id); this.updateSave(); return;
-      }
-    } catch { this.outbox = queue.pause(this.outbox, id); this.recoveryFailed(); return; }
-    const started = queue.start(this.outbox, id);
-    if (!started) return;
-    this.outbox = started.outbox;
-    this.updateSave();
-    const { want, symbol } = started.send;
-    const sending = want.kind === "delete" ? deleteJson(drawingPath(id), { keepalive }) : putJson<Drawing>(drawingPath(id), want.body, { keepalive });
-    void sending.then(async (saved) => {
-      let loading = this.loads.get(symbol);
-      while (loading) { await loading; loading = this.loads.get(symbol); }
-      this.client.setQueryData<Drawing[]>(key(symbol), (old = []) => {
-        const current = old.find((d) => d.id === id);
-        if (saved && current && current.revision > saved.revision) return old;
-        return [...old.filter((d) => d.id !== id), ...(saved ? [saved] : [])];
+    const journal = this.journal;
+    if (!journal) { this.outbox = queue.pause(this.outbox, id); this.recoveryFailed(); return; }
+    this.launches.add(id);
+    void journal.launch(lane.intent, () => {
+      const current = this.outbox.lanes.get(id);
+      const latest = this.desired.get(id);
+      if (current?.state !== "waiting" || current.intent.uuid !== lane.intent.uuid || latest?.intent.uuid !== lane.intent.uuid || latest.state !== "admitted") return false;
+      const started = queue.start(this.outbox, id);
+      if (!started) return false;
+      this.outbox = started.outbox;
+      const { want, symbol } = started.send;
+      const sending = want.kind === "delete" ? deleteJson(drawingPath(id), { keepalive }) : putJson<Drawing>(drawingPath(id), want.body, { keepalive });
+      this.updateSave();
+      void sending.then(async (saved) => {
+        let loading = this.loads.get(symbol);
+        while (loading) { await loading; loading = this.loads.get(symbol); }
+        this.client.setQueryData<Drawing[]>(key(symbol), (old = []) => {
+          const current = old.find((d) => d.id === id);
+          if (saved && current && current.revision > saved.revision) return old;
+          return [...old.filter((d) => d.id !== id), ...(saved ? [saved] : [])];
+        });
+        this.settle(id, { kind: "ok" });
+      }).catch((e: unknown) => {
+        const outcome: queue.Outcome = e instanceof ApiRequestError && e.code === "stale_revision" ? { kind: "stale" }
+          : e instanceof ApiRequestError && (e.code === "bad_request" || e.code === "payload_too_large" || e.code === "not_found") ? { kind: "clientError", tooLarge: e.code === "payload_too_large" }
+          : { kind: "networkError" };
+        this.settle(id, outcome);
+        if (outcome.kind === "stale" || outcome.kind === "clientError") { void this.load(symbol); toast(outcome.kind === "stale" ? "다른 곳의 새 수정이 있어 드로잉을 다시 불러왔습니다" : "드로잉을 저장하지 못했습니다"); }
       });
-      this.settle(id, { kind: "ok" });
-    }).catch((e: unknown) => {
-      const outcome: queue.Outcome = e instanceof ApiRequestError && e.code === "stale_revision" ? { kind: "stale" }
-        : e instanceof ApiRequestError && (e.code === "bad_request" || e.code === "payload_too_large" || e.code === "not_found") ? { kind: "clientError", tooLarge: e.code === "payload_too_large" }
-        : { kind: "networkError" };
-      this.settle(id, outcome);
-      if (outcome.kind === "stale" || outcome.kind === "clientError") { void this.load(symbol); toast(outcome.kind === "stale" ? "다른 곳의 새 수정이 있어 드로잉을 다시 불러왔습니다" : "드로잉을 저장하지 못했습니다"); }
+      return true;
+    }).then((launched) => {
+      if (launched) return;
+      const current = this.outbox.lanes.get(id);
+      if (current?.state === "waiting" && current.intent.uuid === lane.intent.uuid) this.outbox = queue.drop(this.outbox, id);
+      if (this.desired.get(id)?.intent.uuid === lane.intent.uuid) this.desired.delete(id);
+    }).catch(() => {
+      const current = this.outbox.lanes.get(id);
+      if (current?.state === "waiting" && current.intent.uuid === lane.intent.uuid) this.outbox = queue.pause(this.outbox, id);
+      this.recoveryFailed();
+    }).finally(() => {
+      this.launches.delete(id); this.updateSave(); this.pump();
     });
   }
 

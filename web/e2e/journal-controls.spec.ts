@@ -2,7 +2,7 @@ import { test as browserTest, type Page } from "@playwright/test";
 import path from "node:path";
 import { createServer } from "vite";
 import { parseDrawingBody, recordKey, UNSAVED_PREFIX } from "../src/chart/drawings/outbox";
-import { parseJournalRecord, stageKey, STAGING_PREFIX } from "../src/chart/drawings/journal";
+import { parseJournalRecord, stageKey, STAGING_PREFIX, COMPLETION_PREFIX, completionKey } from "../src/chart/drawings/journal";
 import { test, expect, cell, chartOf, type App } from "./harness";
 import type {} from "./journal-probe";
 
@@ -156,6 +156,44 @@ test("actual app + HTTP/SQLite: reload transmits the staged PUT's fixed revision
   await info.attach("restored-fixed-revision.json", { body: JSON.stringify({ staged, sent }, null, 2), contentType: "application/json" });
 });
 
+
+test("actual app + HTTP/SQLite: completion quota failure retains recovery work and retry cleans without retransmission", async ({ page, app }, info) => {
+  const requests: { method: string; body: unknown }[] = [];
+  page.on("request", request => {
+    if (request.url().includes("/api/drawings/") && ["PUT", "DELETE"].includes(request.method())) requests.push({ method: request.method(), body: request.postDataJSON() });
+  });
+  await page.addInitScript(prefix => {
+    document.addEventListener("DOMContentLoaded", () => { document.documentElement.dataset.denyCompletion = "true"; }, { once: true });
+    const nativeSet = Storage.prototype.setItem;
+    Storage.prototype.setItem = function(key, value) {
+      if (key.startsWith(prefix) && document.documentElement.dataset.denyCompletion === "true") throw new DOMException("Injected completion quota", "QuotaExceededError");
+      nativeSet.call(this, key, value);
+    };
+  }, COMPLETION_PREFIX);
+  await open(page);
+  await createLine(page);
+  const retry = page.getByRole("button", { name: "다시 시도", exact: true }).first();
+  await expect(retry).toBeVisible();
+  const [saved] = await storedDrawings(app);
+  if (!saved) throw new Error("Expected the acknowledged SQLite drawing");
+  expect(requests.map(request => request.method)).toEqual(["PUT"]);
+  expect(await pendingRecords(page)).toHaveLength(2);
+  expect(await page.evaluate(key => localStorage.getItem(key), completionKey(saved.id))).toBeNull();
+  await retry.click();
+  await expect(retry).toBeVisible();
+  expect(await pendingRecords(page)).toHaveLength(2);
+  expect(requests.map(request => request.method)).toEqual(["PUT"]);
+  await page.evaluate(() => { document.documentElement.dataset.denyCompletion = "false"; });
+  await retry.click();
+  await expect(page.getByText(/^자동 저장됨 /)).toBeVisible();
+  await expect.poll(() => pendingRecords(page)).toEqual([]);
+  const completion = await page.evaluate(key => JSON.parse(localStorage.getItem(key) ?? "null"), completionKey(saved.id));
+  expect(completion).toMatchObject({ id: saved.id, lastRevision: saved.revision });
+  expect(await storedDrawings(app)).toEqual([saved]);
+  expect(requests.map(request => request.method)).toEqual(["PUT"]);
+  await info.attach("completion-quota-retry.json", { body: JSON.stringify({ requests, saved, completion }), contentType: "application/json" });
+});
+
 const adapterTest = browserTest.extend<{ journalUrl: string }>({
   journalUrl: async ({}, use) => {
     const server = await createServer({
@@ -236,7 +274,7 @@ for (const first of ["cleanup", "admission"] as const) {
         await journal.complete(newer);
         return { resurrected: await journal.admit(older), recovered: await journal.recover(probe.body.id), records: Object.keys(localStorage) };
       });
-      expect(settled).toEqual({ resurrected: false, recovered: null, records: [] });
+      expect(settled).toEqual({ resurrected: false, recovered: null, records: [completionKey(admitted.newer.id)] });
       await page.reload();
       await page.waitForFunction(() => window.journalProbe !== undefined);
       expect(await page.evaluate(() => new window.journalProbe.DrawingJournal().recover(window.journalProbe.body.id))).toBeNull();
@@ -348,8 +386,8 @@ adapterTest("actual journal adapter: cleanup storage failure preserves the lates
   });
   expect(result.failed).toBe(true);
   expect(result.shared).toEqual(result.latest);
-  expect(result.recovered).toEqual(result.latest);
+  expect(result.recovered).toBeNull();
   expect(result.resurrected).toBe(false);
-  expect(result.remaining).toEqual([]);
+  expect(result.remaining).toEqual([completionKey(result.latest.id)]);
   await info.attach("cleanup-storage-failure.json", { body: JSON.stringify(result), contentType: "application/json" });
 });
