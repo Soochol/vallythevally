@@ -673,6 +673,85 @@ t_issue_handed_to_gardener_stays_with_its_lead() {
   ok test "$(lock_of "$VALLY_WORKTREES/docs-garden-55")" = "vally owner t2@2000"
 }
 
+won_issue_58_alone() { # <winner exit> <loser exit> <loser output> <winner name> <winner owner id>
+  ok test "$1" = 0 && ok test "$2" != 0 && ok grep -q "issue #58 belongs to the live lead $4" "$3" &&
+  ok test "$(jq -r '[.terminals[] | select(.labels["vally.issue"] == "58") | .labels["vally.owner"]] | unique | join(" ")' "$FAKE_DIR/terminals.json")" = "$5"
+}
+
+t_start_sees_a_lead_that_started_while_it_waited() {
+  make_pr 61 fix/58-theme OPEN '["web/a.ts"]'
+  park_t1_in git '^fetch -q origin$'
+  "$agent/start.sh" review 58 --pr 61 --round 0 > "$T/t1" 2>&1 & p1=$!
+  wait_for "$FAKE_DIR/parked" || return 1
+  add_lead t3 /c/macheck2 3000000
+  HC_TERMINAL_ID=t3 "$agent/start.sh" impl 58 --branch fix/58-theme --spec "$T/spec.md" > "$T/t3" 2>&1 & p3=$!
+  free_t1_when_ended_or_after_3s $p3
+  wait $p1; c1=$?; wait $p3; c3=$?
+  cat "$T/t1" "$T/t3"
+  if [ $c3 = 0 ]; then won_issue_58_alone $c3 $c1 "$T/t1" macheck2 t3@3000; else won_issue_58_alone $c1 $c3 "$T/t3" main t1@1000; fi
+}
+
+t_takes_of_one_gardener_for_two_issues_give_it_to_one_lead() {
+  add_lead t3 /c/macheck2 3000000
+  HC_TERMINAL_ID=t3 "$agent/start.sh" garden 50 --pr 55 >/dev/null &&
+  HC_TERMINAL_ID=t3 "$agent/start.sh" garden 58 --pr 61 >/dev/null || return 1
+  kill_lead t3
+  park_t1_in hc '^label .* vally\.owner='
+  "$agent/take.sh" 50 > "$T/t1" 2>&1 & p1=$!
+  wait_for "$FAKE_DIR/parked" || return 1
+  as_t2 "$agent/take.sh" 58 > "$T/t2" 2>&1 & p2=$!
+  free_t1_when_ended_or_after_3s $p2
+  wait $p1; c1=$?; wait $p2; c2=$?
+  cat "$T/t1" "$T/t2"
+  if [ $c1 = 0 ]; then w=t1@1000 c=$c2 out=$T/t2 name=main; else w=t2@2000 c=$c1 out=$T/t1 name=ochestra1; fi
+  ok test $c != 0 && ok grep -q "belongs to the live lead $name" "$out" &&
+  ok test "$(labels_of docs-garden-t3 | jq -r '.["vally.owner"]')" = "$w" &&
+  ok test "$(lock_of "$VALLY_WORKTREES/docs-garden-55")" = "vally owner $w"
+}
+
+t_retire_during_a_forced_take_stops_only_its_own_agent() {
+  "$agent/start.sh" impl 58 --branch fix/58-theme --spec "$T/spec.md" >/dev/null || return 1
+  park_t1_in hc '^kill w58-impl$'
+  "$agent/retire.sh" w58-impl > "$T/t1" 2>&1 & p1=$!
+  wait_for "$FAKE_DIR/parked" || return 1
+  as_t2 "$agent/take.sh" 58 --force > "$T/t2" 2>&1 & p2=$!
+  free_t1_when_ended_or_after_3s $p2
+  wait $p1; wait $p2; c2=$?
+  cat "$T/t1" "$T/t2"
+  ok test $c2 = 0 && ok test "$(lock_of "$VALLY_WORKTREES/fix-58-theme")" = "vally owner t2@2000 issue 58" || return 1
+  if grep -q '^took w58-impl' "$T/t2"; then ok test "$(labels_of w58-impl | jq -r '.["vally.owner"]')" = t2@2000
+  else ok test -z "$(labels_of w58-impl)"; fi
+}
+
+t_report_during_a_take_reaches_the_new_lead() {
+  as_t2 "$agent/start.sh" impl 58 --branch fix/58-theme --spec "$T/spec.md" >/dev/null || return 1
+  w=$(jq -r '.terminals[] | select(.name == "w58-impl") | .address' "$FAKE_DIR/terminals.json")
+  kill_lead t2
+  park_t1_in hc '^label .* vally\.owner='
+  "$agent/take.sh" 58 > "$T/t1" 2>&1 & p1=$!
+  wait_for "$FAKE_DIR/parked" || return 1
+  HC_TERMINAL_ID=$w "$agent/report.sh" "done 58 PR #61 /r.md" > "$T/w" 2>&1 & pw=$!
+  free_t1_when_ended_or_after_3s $pw
+  wait $p1; wait $pw; cw=$?
+  cat "$T/t1" "$T/w"
+  ok test $cw = 0 && ok grep -q '^send t1 done 58 PR #61 /r.md$' "$FAKE_DIR/hc.log" &&
+  ok test "$(labels_of w58-impl | jq -r '.["vally.orphan"]')" = null
+}
+
+t_orphan_status_shows_what_was_reported() {
+  add_terminal t51 w58-impl /w1 '{"vally.issue":"58","vally.role":"worker","vally.owner":"t9@5"}' idle ''
+  add_terminal t52 w59-impl /w2 '{"vally.issue":"59","vally.role":"worker","vally.owner":"t9@5"}' idle ''
+  add_terminal t53 w60-review0 /w3 '{"vally.issue":"60","vally.role":"reviewer","vally.owner":"t9@5"}' idle ''
+  HC_TERMINAL_ID=t51 "$agent/report.sh" "done 58 PR #61 /r/a.md" >/dev/null
+  HC_TERMINAL_ID=t52 "$agent/report.sh" "ask 59 which branch? /r/q.md" >/dev/null
+  HC_TERMINAL_ID=t53 "$agent/report.sh" "blocked 60 missing approval" >/dev/null
+  ok test "$(for t in t51 t52 t53; do labels_of $t | jq -r '.["vally.orphan"]'; done | tr '\n' ' ')" = "done ask blocked " &&
+  "$agent/status.sh" > "$T/out" || return 1
+  ok grep -q '^- w58-impl \[worker\] 이슈 #58: 보고 완료 (리드 t9 없음)$' "$T/out" &&
+  ok grep -q '^- w59-impl \[worker\] 이슈 #59: 질문 대기 (리드 t9 없음)$' "$T/out" &&
+  ok grep -q '^- w60-review0 \[reviewer\] 이슈 #60: 막힘 (리드 t9 없음)$' "$T/out"
+}
+
 t_scripts_print_their_usage() {
   for s in check-pr finish report retire start take; do
     "$agent/$s.sh" > /dev/null 2>"$T/err"; code=$?
