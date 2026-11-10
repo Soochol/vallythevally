@@ -818,6 +818,18 @@ t_take_moves_every_issue_its_gardener_holds() {
   ! as_t2 "$agent/start.sh" impl 58 --branch fix/58-next --spec "$T/spec.md" 2>"$T/err" && ok grep -q 'issue #58 belongs to the live lead main' "$T/err"
 }
 
+t_take_stops_when_an_issue_its_gardener_also_holds_is_a_live_leads() {
+  add_terminal t7 docs-garden-t9 /g '{"vally.role":"gardener","vally.issue":"50","vally.garden.58":"1","vally.owner":"t9@5"}' idle ''
+  add_terminal t8 w50-impl /w '{"vally.role":"worker","vally.issue":"50","vally.owner":"t2@2000000"}' working ''
+  m=$(mark)
+  ! "$agent/take.sh" 58 2>"$T/err" &&
+  ok grep -q 'issue #50 belongs to the live lead ochestra1 (holds: w50-impl); take.sh 58 takes #50, #58 together, since a gardener holds them; .*take.sh 58 --force$' "$T/err" &&
+  ok test -z "$(changes_since "$m")" || return 1
+  "$agent/take.sh" 58 --force > "$T/out" || { cat "$T/out"; return 1; }
+  ok test "$(for t in t7 t8; do labels_of $t | jq -r '.["vally.owner"]'; done | sort -u)" = "$(id_of t1)" &&
+  ok grep -q '^send t2 vally: 사용자가 강제해서 이슈 #50를 ' "$FAKE_DIR/hc.log" && ok grep -qx 'took issues #50, #58' "$T/out"
+}
+
 end_t1_on_send() {
   local end_t1_jq=$1
   rm -f "$T/bin/hc"
