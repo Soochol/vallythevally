@@ -18,7 +18,7 @@ use crate::kiwoom::api::{
 use crate::kiwoom::error::{Failure, Surface};
 use crate::kiwoom::rest::{ContKey, KiwoomError, KiwoomRest, MergeScope, Priority};
 use crate::kiwoom::wire::{ChartBody, ChartRows, KiwoomBar, parse_chart};
-use crate::symbols::{NotReady, SymbolDirectory};
+use crate::symbols::{Directory, NotReady, SymbolDirectory};
 
 pub const DEFAULT_LIMIT: usize = 500;
 pub const MAX_LIMIT: usize = 1000;
@@ -134,6 +134,10 @@ struct Fetched {
 impl BarService {
     pub fn new(rest: KiwoomRest, symbols: Arc<SymbolDirectory>, clock: Clock) -> Self {
         BarService { rest, symbols, clock, slots: Mutex::new(HashMap::new()), next_id: AtomicU64::new(1), resets: AtomicU64::new(0) }
+    }
+
+    pub fn directory_updates(&self) -> tokio::sync::watch::Receiver<Option<Arc<Directory>>> {
+        self.symbols.updates()
     }
 
     /// `before`가 None이면 최신 페이지다.

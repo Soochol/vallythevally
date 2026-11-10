@@ -9,10 +9,10 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use domain::{
-    Aggregator, Applied, Bucket, CLOSE_GRACE_SECS, ConfirmedBar, CurrentBar, Feed, KstTime, Ohlcv, SESSION_CLOSE, SeriesKey, Symbol, TRADING_OPEN,
-    Trade, TradeTimeError, Venue, resolve_trade_time,
+    Aggregator, Applied, Bucket, CLOSE_GRACE_SECS, ConfirmedBar, CurrentBar, Feed, KstTime, Ohlcv, Price, SESSION_CLOSE, SeriesKey, Symbol,
+    TRADING_OPEN, Trade, TradeTimeError, Venue, resolve_trade_time,
 };
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::{mpsc, oneshot, watch};
 
 use super::outbox::Outbox;
 use super::subscriptions::{Holder, SubscriptionManager};
@@ -21,7 +21,9 @@ use crate::api::{self, ConnectionStatus, RealtimeState, ReloadReason, ServerMess
 use crate::bars::{BarError, BarService, Seed};
 use crate::clock::Clock;
 use crate::kiwoom::rest::Priority;
-use crate::kiwoom::stream::{Exchange, KiwoomStream, RealTick, StreamEvent};
+use crate::kiwoom::stream::{DayTotals, Exchange, KiwoomStream, RealTick, StreamEvent};
+use crate::quotes;
+use crate::symbols::Directory;
 
 const SEED_RETRY_SECS: [u64; 5] = [1, 2, 5, 10, 30];
 const VERIFY_DELAY_SECS: i64 = 5;
@@ -68,6 +70,11 @@ impl HubHandle {
         self.send(HubInput::Disconnect(conn));
     }
 
+    /// 그 연결이 보는 관심종목 목록을 통째로 바꾼다. 위가 먼저 실시간 자리를 받는다.
+    pub fn watch(&self, conn: ConnId, symbols: Vec<Symbol>) {
+        self.send(HubInput::Watch { conn, symbols });
+    }
+
     /// 실시간 집계 중인 키가 아니면 None.
     pub async fn snapshot(&self, key: SeriesKey) -> Option<HubSnapshot> {
         let (reply, rx) = oneshot::channel();
@@ -92,6 +99,7 @@ enum HubInput {
     Subscribe { conn: ConnId, sub: SubId, key: SeriesKey },
     Unsubscribe { conn: ConnId, sub: SubId },
     Disconnect(ConnId),
+    Watch { conn: ConnId, symbols: Vec<Symbol> },
     Snapshot { key: SeriesKey, reply: oneshot::Sender<Option<HubSnapshot>> },
     DailyReset,
     Seeded { key: SeriesKey, generation: u64, result: Result<Seed, BarError> },
@@ -191,6 +199,8 @@ impl KeyState {
 struct Conn {
     outbox: Arc<Outbox>,
     subs: HashMap<SubId, SeriesKey>,
+    requested_watch: Vec<Symbol>,
+    limited_sent: BTreeSet<Symbol>,
 }
 
 #[derive(Debug, Default)]
@@ -210,6 +220,7 @@ pub struct MarketHub {
     tx: mpsc::UnboundedSender<HubInput>,
     manager: SubscriptionManager,
     rejected: BTreeSet<Holder>,
+    directory: watch::Receiver<Option<Arc<Directory>>>,
     conns: HashMap<ConnId, Conn>,
     keys: HashMap<SeriesKey, KeyState>,
     next_generation: u64,
@@ -229,6 +240,7 @@ impl MarketHub {
         let (tx, rx) = mpsc::unbounded_channel();
         let now = clock.now();
         let hub = MarketHub {
+            directory: bars.directory_updates(),
             bars,
             stream,
             clock,
@@ -283,7 +295,7 @@ impl MarketHub {
             HubInput::Connect { conn, outbox } => {
                 let hello = ServerMessage::Hello { protocol: PROTOCOL, server_time: UnixSeconds(now.unix()), status: self.status() };
                 if outbox.push(hello).is_ok() {
-                    self.conns.insert(conn, Conn { outbox, subs: HashMap::new() });
+                    self.conns.insert(conn, Conn { outbox, subs: HashMap::new(), requested_watch: Vec::new(), limited_sent: BTreeSet::new() });
                 }
             }
             HubInput::Subscribe { conn, sub, key } => self.subscribe(conn, sub, key, now),
@@ -294,6 +306,7 @@ impl MarketHub {
                 }
             }
             HubInput::Disconnect(conn) => self.drop_conn(conn, now),
+            HubInput::Watch { conn, symbols } => self.watch(conn, symbols, now),
             HubInput::Snapshot { key, reply } => {
                 let snap = self.keys.get(&key).map(|ks| HubSnapshot {
                     seq: ks.seq,
@@ -347,7 +360,27 @@ impl MarketHub {
         for (sub, key) in c.subs {
             self.release(conn, sub, key, now);
         }
+        self.manager.release_conn(conn, now);
         self.replan(now);
+    }
+
+    fn watch(&mut self, conn: ConnId, symbols: Vec<Symbol>, now: KstTime) {
+        let Some(c) = self.conns.get_mut(&conn) else {
+            return;
+        };
+        c.requested_watch = symbols;
+        self.hold_listed_watch_rows(conn, now);
+    }
+
+    fn hold_listed_watch_rows(&mut self, conn: ConnId, now: KstTime) {
+        let Some(c) = self.conns.get(&conn) else {
+            return;
+        };
+        let known: Vec<Symbol> = match &*self.directory.borrow() {
+            Some(dir) => c.requested_watch.iter().copied().filter(|s| dir.get(*s).is_some()).collect(),
+            None => Vec::new(),
+        };
+        self.manager.set_watch(conn, known, now);
     }
 
     fn close_overflowed(&mut self) {
@@ -392,7 +425,7 @@ impl MarketHub {
         let newly: Vec<Holder> = plan.rejected.difference(&self.rejected).cloned().collect();
         let recovered: Vec<Holder> = self.rejected.difference(&plan.rejected).cloned().collect();
         self.rejected = plan.rejected;
-        for Holder::Cell { conn, sub } in newly {
+        for (conn, sub) in newly.into_iter().filter_map(cell_of) {
             if let Some(key) = self.conns.get(&conn).and_then(|c| c.subs.get(&sub)).copied()
                 && let Some(ks) = self.keys.get_mut(&key)
             {
@@ -403,9 +436,39 @@ impl MarketHub {
             }
             push(&self.conns, &mut self.closing, conn, ServerMessage::SubError { sub: sub.0, code: SubErrorCode::RealtimeLimit });
         }
-        for Holder::Cell { conn, sub } in recovered {
+        for (conn, sub) in recovered.into_iter().filter_map(cell_of) {
             if let Some(key) = self.conns.get(&conn).and_then(|c| c.subs.get(&sub)).copied() {
                 self.attach(conn, sub, key);
+            }
+        }
+        self.publish_limited();
+    }
+
+    fn publish_limited(&mut self) {
+        for (&conn, c) in &mut self.conns {
+            let limited: BTreeSet<Symbol> = c.requested_watch.iter().copied().filter(|&symbol| self.rejected.contains(&Holder::Watch { conn, symbol })).collect();
+            if limited == c.limited_sent {
+                continue;
+            }
+            let symbols = c.requested_watch.iter().filter(|s| limited.contains(s)).map(|s| api::SymbolCode(s.as_wire())).collect();
+            c.limited_sent = limited;
+            if c.outbox.push(ServerMessage::WatchLimited { symbols }).is_err() {
+                self.closing.push(conn);
+            }
+        }
+    }
+
+    fn publish_quote(&self, symbol: Symbol, price: Price, day: DayTotals, at: KstTime) {
+        let mut watchers = self.manager.watchers(symbol).peekable();
+        if watchers.peek().is_none() {
+            return;
+        }
+        let Some(quote) = quotes::realtime(symbol, price, day, at) else {
+            return;
+        };
+        for conn in watchers {
+            if let Some(c) = self.conns.get(&conn) {
+                c.outbox.set_quote(quote.clone());
             }
         }
     }
@@ -607,6 +670,9 @@ impl MarketHub {
         if matches!(tick.symbol, Symbol::Stock(_)) && tick.exchange.is_none() {
             self.counters.unknown_exchange += 1;
         }
+        if let Some(day) = tick.day {
+            self.publish_quote(tick.symbol, tick.price, day, at);
+        }
         let trade = Trade { at, price: tick.price, qty: tick.qty };
         let now = self.clock.now();
         for (key, ks) in self.keys.iter_mut().filter(|(k, _)| k.feed.symbol() == tick.symbol && accepts(k.feed, tick.exchange)) {
@@ -653,6 +719,13 @@ impl MarketHub {
                     verification.phase = VerificationPhase::InFlight;
                     spawn_verify(&self.bars, &self.tx, *key, ks.generation, *bucket, verification.attempts);
                 }
+            }
+        }
+        if self.directory.has_changed().unwrap_or(false) {
+            self.directory.borrow_and_update();
+            let conns: Vec<ConnId> = self.conns.keys().copied().collect();
+            for conn in conns {
+                self.hold_listed_watch_rows(conn, now);
             }
         }
         self.replan(now);
@@ -775,6 +848,13 @@ fn spawn_verify(bars: &Arc<BarService>, tx: &mpsc::UnboundedSender<HubInput>, ke
     });
 }
 
+fn cell_of(h: Holder) -> Option<(ConnId, SubId)> {
+    match h {
+        Holder::Cell { conn, sub } => Some((conn, sub)),
+        Holder::Watch { .. } => None,
+    }
+}
+
 fn push(conns: &HashMap<ConnId, Conn>, closing: &mut Vec<ConnId>, conn: ConnId, msg: ServerMessage) {
     if let Some(c) = conns.get(&conn)
         && c.outbox.push(msg).is_err()
@@ -802,9 +882,8 @@ fn set_bar(conns: &HashMap<ConnId, Conn>, subs: &BTreeSet<(ConnId, SubId)>, seq:
 mod tests {
     use std::sync::Mutex;
 
-    use domain::{BarSource, KstDate, Market, Period, Price, StockCode, SymbolInfo, SymbolKind, TimeOfDay, Volume};
+    use domain::{BarSource, KstDate, Market, Period, StockCode, SymbolInfo, SymbolKind, TimeOfDay, Volume};
     use serde_json::json;
-    use tokio::sync::watch;
 
     use super::*;
     use crate::api::Bar;
@@ -816,7 +895,7 @@ mod tests {
     use crate::kiwoom::rest::KiwoomRest;
     use crate::kiwoom::rest::testing::{FakeTransport, ok, status, token};
     use crate::market::outbox::Outbox;
-    use crate::symbols::{Directory, SymbolDirectory};
+    use crate::symbols::SymbolDirectory;
 
     const SAMSUNG: &str = "005930";
     const NOT_ON_NXT: &str = "005935";
@@ -845,6 +924,7 @@ mod tests {
         events: mpsc::Sender<StreamEvent>,
         desired: watch::Receiver<BTreeSet<Symbol>>,
         bars: Arc<BarService>,
+        symbols: Arc<SymbolDirectory>,
         chart: Arc<Mutex<Chart>>,
         fake: Arc<FakeTransport>,
         clock: Clock,
@@ -890,11 +970,11 @@ mod tests {
         let mut listed = vec![stock(SAMSUNG, true), stock(NOT_ON_NXT, false)];
         listed.extend((0..REALTIME_LIMIT).map(|i| stock(&listed_filler(i), false)));
         symbols.replace(Directory::build(listed));
-        let bars = Arc::new(BarService::new(rest, symbols, clock.clone()));
+        let bars = Arc::new(BarService::new(rest, symbols.clone(), clock.clone()));
         let (stream, desired) = KiwoomStream::detached();
         let (events, rx) = mpsc::channel(64);
         let hub = MarketHub::spawn(bars.clone(), stream, rx, clock.clone());
-        Harness { hub, events, desired, bars, chart, fake, clock }
+        Harness { hub, events, desired, bars, symbols, chart, fake, clock }
     }
 
     fn std_harness() -> Harness {
@@ -928,8 +1008,40 @@ mod tests {
             price: won(price),
             qty: Volume(qty),
             exchange,
+            day: None,
         };
         StreamEvent::Tick { tick, received_at: h.clock.now() }
+    }
+
+    fn day_trade(h: &Harness, hhmmss: (u32, u32, u32), price: u64, exchange: Exchange, change_won: i64, cumulative: u64) -> StreamEvent {
+        let StreamEvent::Tick { mut tick, received_at } = trade(h, hhmmss, price, 1, Some(exchange)) else {
+            unreachable!("trade는 Tick이다")
+        };
+        tick.day = Some(DayTotals { change_centi: change_won * 100, cumulative: Volume(cumulative) });
+        StreamEvent::Tick { tick, received_at }
+    }
+
+    fn quote_msg(code: &str, price: f64, change: f64, volume: u64, t: KstTime) -> ServerMessage {
+        let base = price - change;
+        ServerMessage::Quotes {
+            quotes: vec![api::Quote {
+                symbol: api::SymbolCode(code.into()),
+                price,
+                change,
+                change_rate: change / base * 100.0,
+                volume,
+                t: UnixSeconds(t.unix()),
+                source: api::QuoteSource::Realtime,
+            }],
+        }
+    }
+
+    fn limited(codes: &[String]) -> ServerMessage {
+        ServerMessage::WatchLimited { symbols: codes.iter().map(|c| api::SymbolCode(c.clone())).collect() }
+    }
+
+    fn fillers(n: usize) -> Vec<Symbol> {
+        (0..n).map(|i| Symbol::parse(&listed_filler(i)).unwrap()).collect()
     }
 
     fn bar(t: KstTime, [o, h, l, c, v]: [u64; 5]) -> Bar {
@@ -1321,6 +1433,135 @@ mod tests {
         assert!(msgs.contains(&subscribed("over", 0, None)), "유예 중인 종목을 빼서 자리를 만들고 같은 sub로 다시 알린다: {msgs:?}");
         assert!(!h.desired.borrow().contains(&samsung().feed.symbol()));
         assert!(h.desired.borrow().contains(&Symbol::parse(&listed_filler(REALTIME_LIMIT - 1)).unwrap()));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_trade_moves_the_combined_cell_and_the_watch_row_to_the_same_price() {
+        let h = std_harness();
+        let (conn, out) = subscribed_samsung(&h).await;
+        h.hub.watch(conn, vec![samsung().feed.symbol()]);
+        settle().await;
+        h.events.send(day_trade(&h, (9, 0, 51), 112, Exchange::Krx, 12, 1_000)).await.unwrap();
+        let msgs = take(&out).await;
+        assert_eq!(msgs, vec![bar_msg("a", 2, bar(at(9, 0, 0), [100, 112, 95, 112, 51])), quote_msg(SAMSUNG, 112.0, 12.0, 1_000, at(9, 0, 51))], "같은 묶음으로 나간다");
+        h.events.send(day_trade(&h, (9, 0, 52), 90, Exchange::Nxt, -10, 1_001)).await.unwrap();
+        let msgs = take(&out).await;
+        let close = msgs.iter().find_map(|m| if let ServerMessage::Bar { bar, .. } = m { Some(bar.c) } else { None });
+        let price = msgs.iter().find_map(|m| if let ServerMessage::Quotes { quotes } = m { Some(quotes[0].price) } else { None });
+        assert_eq!((close, price), (Some(90.0), Some(90.0)), "NXT 체결도 통합 칸과 관심종목이 함께 받는다");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_trade_without_day_totals_moves_only_the_cell() {
+        let h = std_harness();
+        let (conn, out) = subscribed_samsung(&h).await;
+        h.hub.watch(conn, vec![samsung().feed.symbol()]);
+        h.events.send(trade(&h, (9, 0, 51), 112, 2, Some(Exchange::Krx))).await.unwrap();
+        assert_eq!(take(&out).await, vec![bar_msg("a", 2, bar(at(9, 0, 0), [100, 112, 95, 112, 52]))]);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn over_the_limit_watch_rows_are_reported_and_cleared_when_room_frees() {
+        let h = std_harness();
+        live(&h).await;
+        let (conn, out) = connect(&h).await;
+        h.hub.subscribe(conn, sub("a"), samsung());
+        h.hub.watch(conn, fillers(REALTIME_LIMIT));
+        tokio::time::sleep(Duration::from_secs(2)).await;
+        let msgs = out.take(true).messages;
+        assert!(msgs.contains(&limited(&[listed_filler(REALTIME_LIMIT - 1)])), "칸이 한 자리를 쓰니 맨 아랫줄이 넘친다: {msgs:?}");
+        assert_eq!(h.desired.borrow().len(), REALTIME_LIMIT);
+        h.hub.unsubscribe(conn, sub("a"));
+        tokio::time::sleep(Duration::from_secs(2)).await;
+        let msgs = out.take(true).messages;
+        assert!(msgs.contains(&limited(&[])), "유예 중인 칸 종목을 빼서 자리를 만든다: {msgs:?}");
+        assert!(h.desired.borrow().contains(&fillers(REALTIME_LIMIT)[REALTIME_LIMIT - 1]));
+        assert!(!h.desired.borrow().contains(&samsung().feed.symbol()));
+        tokio::time::sleep(Duration::from_secs(2)).await;
+        assert!(!out.take(true).messages.iter().any(|m| matches!(m, ServerMessage::WatchLimited { .. })), "바뀌지 않으면 다시 보내지 않는다");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn reordering_watch_rows_changes_the_kiwoom_set_once_per_tick() {
+        let h = std_harness();
+        let t0 = tokio::time::Instant::now();
+        live(&h).await;
+        let (conn, _out) = connect(&h).await;
+        let samsung = samsung().feed.symbol();
+        let mut rows = fillers(REALTIME_LIMIT);
+        rows.push(samsung);
+        let mut moved = vec![samsung];
+        moved.extend(fillers(REALTIME_LIMIT));
+        h.hub.watch(conn, rows.clone());
+        tokio::time::sleep_until(t0 + Duration::from_millis(3_100)).await;
+        let mut desired = h.desired.clone();
+        assert!(!desired.borrow_and_update().contains(&samsung));
+        for _ in 0..3 {
+            h.hub.watch(conn, moved.clone());
+            h.hub.watch(conn, rows.clone());
+        }
+        h.hub.watch(conn, moved.clone());
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        assert!(!desired.has_changed().unwrap(), "watch 입력은 REG 집합을 바로 바꾸지 않는다");
+        tokio::time::sleep_until(t0 + Duration::from_millis(4_100)).await;
+        assert!(desired.has_changed().unwrap());
+        let now = desired.borrow_and_update().clone();
+        assert!(now.contains(&samsung) && !now.contains(&fillers(REALTIME_LIMIT)[REALTIME_LIMIT - 1]), "다음 1초 타이머에 마지막 순서로 한 번 바뀐다");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn watch_rows_outside_the_symbol_list_are_registered_only_once_it_lists_them() {
+        let h = std_harness();
+        live(&h).await;
+        let (conn, _out) = connect(&h).await;
+        let unlisted = Symbol::parse(UNLISTED).unwrap();
+        h.hub.watch(conn, vec![unlisted, samsung().feed.symbol()]);
+        tokio::time::sleep(Duration::from_secs(2)).await;
+        assert_eq!(*h.desired.borrow(), BTreeSet::from([samsung().feed.symbol()]), "없는 코드는 REG하지 않는다");
+        let info = |symbol| SymbolInfo { symbol, name: "x".into(), kind: SymbolKind::Common, market: Market::Kospi, nxt_enabled: false };
+        h.symbols.replace(Directory::build(vec![info(unlisted), info(samsung().feed.symbol())]));
+        tokio::time::sleep(Duration::from_secs(2)).await;
+        assert_eq!(*h.desired.borrow(), BTreeSet::from([unlisted, samsung().feed.symbol()]), "종목 목록이 바뀌면 다시 맞춘다");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_closed_watchlist_keeps_its_symbols_for_thirty_seconds() {
+        let h = std_harness();
+        live(&h).await;
+        let (conn, _out) = connect(&h).await;
+        h.hub.watch(conn, vec![samsung().feed.symbol()]);
+        tokio::time::sleep(Duration::from_secs(2)).await;
+        assert_eq!(*h.desired.borrow(), BTreeSet::from([samsung().feed.symbol()]));
+        h.hub.watch(conn, Vec::new());
+        tokio::time::sleep(Duration::from_secs(29)).await;
+        assert_eq!(*h.desired.borrow(), BTreeSet::from([samsung().feed.symbol()]));
+        tokio::time::sleep(Duration::from_secs(2)).await;
+        assert_eq!(*h.desired.borrow(), BTreeSet::new());
+        h.hub.watch(conn, vec![samsung().feed.symbol()]);
+        tokio::time::sleep(Duration::from_secs(2)).await;
+        h.hub.disconnect(conn);
+        tokio::time::sleep(Duration::from_secs(29)).await;
+        assert_eq!(*h.desired.borrow(), BTreeSet::from([samsung().feed.symbol()]), "연결이 끊겨도 30초 유예");
+        tokio::time::sleep(Duration::from_secs(2)).await;
+        assert_eq!(*h.desired.borrow(), BTreeSet::new());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_watched_symbol_stays_registered_but_its_closed_cell_key_is_dropped_after_thirty_seconds() {
+        let h = std_harness();
+        let (conn, out) = subscribed_samsung(&h).await;
+        let symbol = samsung().feed.symbol();
+        h.hub.watch(conn, vec![symbol]);
+        settle().await;
+        h.hub.unsubscribe(conn, sub("a"));
+        tokio::time::sleep(Duration::from_secs(29)).await;
+        assert!(h.hub.snapshot(samsung()).await.is_some(), "닫은 칸의 키는 30초 유예");
+        tokio::time::sleep(Duration::from_secs(2)).await;
+        assert_eq!(h.hub.snapshot(samsung()).await, None, "관심종목이 종목을 잡고 있어도 닫은 칸의 키는 내린다");
+        assert_eq!(*h.desired.borrow(), BTreeSet::from([symbol]), "관심종목 줄이 REG를 지킨다");
+        out.take(true);
+        h.events.send(day_trade(&h, (9, 1, 23), 112, Exchange::Krx, 12, 1_000)).await.unwrap();
+        assert_eq!(take(&out).await, vec![quote_msg(SAMSUNG, 112.0, 12.0, 1_000, at(9, 1, 23))], "키가 없어도 관심종목 줄은 체결을 받는다");
     }
 
     #[test]

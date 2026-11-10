@@ -146,6 +146,11 @@ impl Default for SymbolDirectory {
 }
 
 impl SymbolDirectory {
+    /// 처음 받기 전에는 None.
+    pub fn updates(&self) -> watch::Receiver<Option<Arc<Directory>>> {
+        self.current.subscribe()
+    }
+
     pub fn replace(&self, dir: Directory) {
         self.current.send_replace(Some(Arc::new(dir)));
     }

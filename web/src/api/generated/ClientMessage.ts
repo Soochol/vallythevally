@@ -7,4 +7,4 @@ import type { Venue } from "./Venue";
  * `/api/ws` 브라우저 → 서버. `sub`는 브라우저가 정하는 연결 안에서 유일한 문자열이다.
  * `venue` 규칙은 `GET /api/bars`와 같다(주식에서 빼면 combined, 지수에 주면 bad_request).
  */
-export type ClientMessage = { "type": "subscribe", sub: string, symbol: SymbolCode, venue: Venue | null, period: Period, } | { "type": "unsubscribe", sub: string, };
+export type ClientMessage = { "type": "subscribe", sub: string, symbol: SymbolCode, venue: Venue | null, period: Period, } | { "type": "unsubscribe", sub: string, } | { "type": "watch", symbols: Array<SymbolCode>, };
