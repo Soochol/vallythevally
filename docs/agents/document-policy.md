@@ -28,4 +28,5 @@ Deleting, moving, or renaming a doc needs the user's approval through the coordi
 
 New folders:
 - A subfolder that follows a pattern in the table, such as `docs/verification/issue-25/`, needs no approval. It follows the rules of its row.
+- A folder that already has a row in the table, such as `docs/architecture/`, needs no approval. A later PR creates it and follows the rules of its row.
 - Any other new folder under `docs/` needs the user's approval through the coordinator. The worker does not create it. It proposes the folder under "문서 구조 제안" in the PR body: the name, what goes in it, and who changes it when. The folder lands only in the same PR that adds its row to this table.
