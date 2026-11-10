@@ -292,10 +292,18 @@ t_status_stops_when_hc_is_down() {
 
 # ---- sync-templates.sh, lib.sh
 
+t_impl_writer_starts_writer() {
+  "$agent/start.sh" impl 58 --branch docs/58-x --spec "$T/spec.md" --writer >/dev/null || return 1
+  ok grep -q -- '--name w58-impl --label vally.role=writer .* vally-writer' "$FAKE_DIR/hc.log" &&
+  ok grep -q '^command: env VALLY_ROLE=writer claude ' "$VALLY_TEMPLATES/vally-writer.md" &&
+  ok grep -q 'pstack:technical-writing' "$VALLY_TEMPLATES/vally-writer.md" &&
+  ! grep -q 'poteto-mode' "$VALLY_TEMPLATES/vally-writer.md"
+}
+
 t_sync_templates_writes_three() {
-  printf 'worker claude opus -\nreviewer codex gpt-x high\ngardener claude sonnet -\n' > "$T/models.conf"
+  printf 'worker claude opus -\nreviewer codex gpt-x high\ngardener claude sonnet -\nwriter claude w -\n' > "$T/models.conf"
   VALLY_MODELS=$T/models.conf "$agent/sync-templates.sh" >/dev/null || return 1
-  for r in worker reviewer gardener; do
+  for r in worker reviewer gardener writer; do
     ok grep -q "^name: vally-$r$" "$VALLY_TEMPLATES/vally-$r.md" || return 1
     ok grep -q "^command: env VALLY_ROLE=$r " "$VALLY_TEMPLATES/vally-$r.md" || return 1
   done
@@ -303,7 +311,7 @@ t_sync_templates_writes_three() {
 }
 
 t_models_conf_sets_each_role() {
-  printf 'worker codex gpt-x low\nreviewer claude sonnet high\ngardener claude haiku -\n' > "$T/models.conf"
+  printf 'worker codex gpt-x low\nreviewer claude sonnet high\ngardener claude haiku -\nwriter claude w -\n' > "$T/models.conf"
   VALLY_MODELS=$T/models.conf "$agent/sync-templates.sh" >/dev/null || return 1
   ok grep -q '^command: env VALLY_ROLE=worker codex --no-daemon -m gpt-x -c model_reasoning_effort=low --approve-for-me$' "$VALLY_TEMPLATES/vally-worker.md" &&
   ok grep -q '^command: env VALLY_ROLE=reviewer claude --model sonnet --effort high$' "$VALLY_TEMPLATES/vally-reviewer.md" &&
@@ -313,12 +321,12 @@ t_models_conf_sets_each_role() {
 t_models_conf_rejects_missing_role_and_bad_agent() {
   printf 'worker claude opus -\n' > "$T/models.conf"
   ! VALLY_MODELS=$T/models.conf "$agent/sync-templates.sh" >/dev/null 2>"$T/err" && ok grep -q 'no line for role reviewer' "$T/err" || return 1
-  printf 'worker gemini x -\nreviewer codex y -\ngardener claude z -\n' > "$T/models.conf"
+  printf 'worker gemini x -\nreviewer codex y -\ngardener claude z -\nwriter claude w -\n' > "$T/models.conf"
   ! VALLY_MODELS=$T/models.conf "$agent/sync-templates.sh" >/dev/null 2>"$T/err" && ok grep -q "unknown agent 'gemini'" "$T/err"
 }
 
 t_start_uses_current_models_conf() {
-  printf 'worker claude sonnet -\nreviewer codex y -\ngardener claude z -\n' > "$T/models.conf"
+  printf 'worker claude sonnet -\nreviewer codex y -\ngardener claude z -\nwriter claude w -\n' > "$T/models.conf"
   VALLY_MODELS=$T/models.conf "$agent/start.sh" impl 58 --branch fix/58-x --spec "$T/spec.md" >/dev/null || return 1
   ok grep -q '^command: env VALLY_ROLE=worker claude --model sonnet$' "$VALLY_TEMPLATES/vally-worker.md"
 }
