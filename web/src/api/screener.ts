@@ -1,4 +1,4 @@
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { type QueryClient, queryOptions, useQuery, useQueryClient } from "@tanstack/react-query";
 import { isUpdating } from "../lib/screener";
 import type { Screen } from "./generated/Screen";
 import type { ScreenerResult } from "./generated/ScreenerResult";
@@ -16,21 +16,27 @@ export function useScreens() {
   return useQuery({ queryKey: SCREENS_KEY, queryFn: ({ signal }) => getJson<Screens>("/api/screens", signal) });
 }
 
-export function useScreenerStatus(pollWhileUpdatingMs: number) {
-  return useQuery({
+export const screenerStatusQuery = (pollWhileUpdatingMs: number) =>
+  queryOptions({
     queryKey: STATUS_KEY,
     queryFn: ({ signal }) => getJson<ScreenerStatus>("/api/screener/status", signal),
     refetchInterval: (query) => (isUpdating(query.state.data) ? pollWhileUpdatingMs : false),
   });
-}
 
-export function useUpdateCommands() {
-  const client = useQueryClient();
-  const show = (status: ScreenerStatus) => void client.setQueryData(STATUS_KEY, status);
+export const useScreenerStatus = (pollWhileUpdatingMs: number) => useQuery(screenerStatusQuery(pollWhileUpdatingMs));
+
+export function screenerCommands(client: QueryClient) {
+  const command = async (path: string, body: string) => {
+    const status = await sendJson<ScreenerStatus>("POST", path, body);
+    await client.cancelQueries({ queryKey: STATUS_KEY });
+    client.setQueryData(STATUS_KEY, status);
+    void client.invalidateQueries({ queryKey: STATUS_KEY });
+  };
   return {
-    start: (full: boolean) =>
-      sendJson<ScreenerStatus>("POST", "/api/screener/update", JSON.stringify({ full } satisfies ScreenerUpdateRequest)).then(show),
-    cancel: () => sendJson<ScreenerStatus>("POST", "/api/screener/update/cancel", "{}").then(show),
+    start: (full: boolean) => command("/api/screener/update", JSON.stringify({ full } satisfies ScreenerUpdateRequest)),
+    cancel: () => command("/api/screener/update/cancel", "{}"),
     refresh: () => client.invalidateQueries({ queryKey: STATUS_KEY }),
   };
 }
+
+export const useUpdateCommands = () => screenerCommands(useQueryClient());
