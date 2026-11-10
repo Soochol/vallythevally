@@ -11,7 +11,9 @@ async function layoutOf(app: App): Promise<Layout> {
 
 const settingsOf = async (app: App) => (await layoutOf(app)).cells[0]!.chartSettings as { scale: string; compare: string[] };
 
-async function seed(app: App, over: { compare?: string[]; scale?: string } = {}, period = "1m") {
+const VOLUME = { id: "v1", spec: { kind: "volume", maPeriod: null }, panel: "p1", visible: true, style: { colors: ["ind-1"], width: 1 } };
+
+async function seed(app: App, over: { compare?: string[]; scale?: string; indicators?: object[]; panels?: object[] } = {}, period = "1m") {
   const { id, name, arrangement, sync, revision } = await layoutOf(app);
   const chartSettings = { v: 2, style: "candle", scale: "normal", indicators: [], compare: [], panels: [], ...over };
   const body = { id, name, arrangement, sync, revision: revision + 1, cells: [{ slot: 0, symbol: "005930", venue: "combined", period, symbolLink: false, chartSettings }] };
@@ -194,4 +196,24 @@ test("일반 축에서 그린 드로잉은 % 축이 되고 스크롤로 기준 �
   await expect.poll(onCandles).toBe(true);
   expect(await (await fetch(`${app.url}/api/drawings?symbol=005930`)).json()).toHaveLength(1);
   console.log("DRAWING_Y", JSON.stringify({ normal: before, percent: inPercent, afterScroll: await drawnY() }));
+});
+
+test("비교 종목이 저장된 칸을 열어도 지표 패널 축은 % 축이 아니다", async ({ page, app }) => {
+  await seed(app, { compare: ["IDX:001"], indicators: [VOLUME], panels: [{ id: "p1", stretch: 0.25 }] }, "D");
+  await page.addInitScript(installFrameProbe);
+  await page.goto("/");
+  await expect(cell(page)).toHaveAttribute("aria-busy", "false");
+  await expect(chartOf(cell(page))).toHaveAttribute("data-price-scale", "percent");
+  const modes = async () => {
+    const snap = await page.evaluate(() => window.frameProbe.snapshot());
+    return { main: snap.find((s) => s.type === "Candlestick")?.scaleMode, volume: snap.find((s) => s.type === "Histogram")?.scaleMode };
+  };
+  await expect.poll(modes).toEqual({ main: 2, volume: 0 });
+
+  await openCompareTab(page);
+  await page.getByRole("dialog").getByRole("button", { name: "코스피 지우기" }).click();
+  await page.keyboard.press("Escape");
+  await expect(chartOf(cell(page))).toHaveAttribute("data-price-scale", "normal");
+  await page.getByRole("toolbar", { name: "차트 도구 막대" }).getByRole("button", { name: "로그", exact: true }).click();
+  await expect.poll(modes).toEqual({ main: 1, volume: 0 });
 });

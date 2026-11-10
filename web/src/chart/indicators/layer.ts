@@ -6,6 +6,7 @@ import {
   LineSeries,
   LineStyle,
   type PriceFormat,
+  PriceScaleMode,
 } from "lightweight-charts";
 import type { Bar } from "../../api/generated/Bar";
 import type { LineId } from "../../api/generated/LineId";
@@ -378,7 +379,8 @@ export class IndicatorLayer {
     return specLines(config.spec).map((id, i): Line => {
       const plot = this.addPlot(config, id, i, pane);
       const { series } = plot;
-      if (pane > 0) series.priceScale().applyOptions({ scaleMargins: id === "volume" ? { top: 0.12, bottom: 0 } : { top: 0.14, bottom: 0.08 } });
+      // 새 pane은 차트 단위 rightPriceScale을 물려받는데, 가격 패널의 축 모드(%·로그)를 바꾸면 그 값도 바뀐다.
+      if (pane > 0) series.priceScale().applyOptions({ mode: PriceScaleMode.Normal, scaleMargins: id === "volume" ? { top: 0.12, bottom: 0 } : { top: 0.14, bottom: 0.08 } });
       const guides = i === 0 ? (GUIDES[config.spec.kind] ?? []).map((price) => series.createPriceLine(this.guide(price))) : [];
       const same = kept[i]?.id === id ? kept[i] : undefined;
       return { ...plot, id, kind: config.spec.kind, shift: same?.shift ?? 0, points: same?.points ?? [], guides };
