@@ -14,7 +14,9 @@ use domain::{KstDate, Weekday};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
+pub mod krx;
 mod ws;
+pub use krx::{KrxBar, KrxMarket, KrxStock};
 pub use ws::{DEFAULT_PING_EVERY, WsHub, WsStats, tick_0j, trade_0b};
 
 pub const APP_KEY: &str = "FAKE-APPKEY-e2e-7f3a91c2";
@@ -31,7 +33,16 @@ pub struct Seen {
     pub rejected_tokens: Mutex<Vec<String>>,
     pub delays: Mutex<HashMap<String, Duration>>,
     pub extra_kospi_stocks: AtomicUsize,
+    pub krx_market: Mutex<Option<Arc<KrxMarket>>>,
+    pub calls: Mutex<Vec<Call>>,
     pub ws: WsHub,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Call {
+    pub api_id: String,
+    pub body: Value,
+    pub next_key: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -136,6 +147,14 @@ impl FakeKiwoom {
         self.seen.extra_kospi_stocks.store(n, Ordering::SeqCst);
     }
 
+    pub fn set_krx_market(&self, market: KrxMarket) {
+        *self.seen.krx_market.lock().unwrap() = Some(Arc::new(market));
+    }
+
+    pub fn calls(&self) -> Vec<Call> {
+        self.seen.calls.lock().unwrap().clone()
+    }
+
     pub fn ws_stats(&self) -> WsStats {
         self.seen.ws.stats()
     }
@@ -234,6 +253,9 @@ async fn handle(State(seen): State<Arc<Seen>>, headers: HeaderMap, body: String)
     seen.api_ids.lock().unwrap().push(api_id.clone());
     seen.authorizations.lock().unwrap().push(h("authorization"));
     let continuation = h("cont-yn") == "Y";
+    let next_key = continuation.then(|| h("next-key"));
+    let request: Value = serde_json::from_str(&body).unwrap_or(Value::Null);
+    seen.calls.lock().unwrap().push(Call { api_id: api_id.clone(), body: request.clone(), next_key: next_key.clone() });
     let delay = seen.delays.lock().unwrap().get(&api_id).copied();
     if let Some(by) = delay {
         tokio::time::sleep(by).await;
@@ -246,8 +268,15 @@ async fn handle(State(seen): State<Arc<Seen>>, headers: HeaderMap, body: String)
     if seen.rejected_tokens.lock().unwrap().contains(&h("authorization")) {
         return respond(json!({"return_code": 3, "return_msg": "인증에 실패했습니다[8005:Token이 유효하지 않습니다]"}), true);
     }
+    let market = seen.krx_market.lock().unwrap().clone();
+    if let Some(page) = market.and_then(|m| krx::respond(&m, &api_id, &request, next_key.as_deref())) {
+        return match page {
+            krx::KrxPage::Page { body, last } => respond(body, last),
+            krx::KrxPage::UnknownNextKey(k) => (StatusCode::INTERNAL_SERVER_ERROR, format!("가짜 키움이 모르는 next-key: {k}")).into_response(),
+        };
+    }
     if api_id == "ka10081" {
-        let req: Value = serde_json::from_str(&body).unwrap_or(Value::Null);
+        let req = &request;
         if let Some(stk_cd) = req["stk_cd"].as_str().filter(|c| c.starts_with(DEEP_DAILY_SYMBOL)) {
             let next_key = if continuation { h("next-key") } else { String::new() };
             return deep_daily(stk_cd, &next_key);
