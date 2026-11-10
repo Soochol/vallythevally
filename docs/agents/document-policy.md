@@ -13,6 +13,16 @@ Subagents created to assist a parent agent and independent reviewers do not edit
 | `docs/verification/issue-<number>/` | The worker | A PR checked a real screen. Add files only. |
 | `docs/research/<YYYY-MM-DD>-<topic>/` | The worker that did the research | A research task keeps its sources and raw data. |
 | `docs/dev-environment.md` | The worker or the coordinator | A new trap on this PC is confirmed. |
+| `docs/README.md` (the doc map) | The agent whose PR adds, moves, renames, or deletes a doc or folder under `docs/` | In that same PR. Add, fix, or remove the map row. |
+| `docs/product/` | The coordinator | The user decides a feature's goal or done criteria, or a feature ships. |
+| `docs/policies/` | The coordinator | The user decides or changes an operating rule. The worker does not edit these. It proposes the change in the PR body. |
+| `docs/architecture/` | The worker | The implementation departs from the design. Fix the doc in the same PR as the code. |
+| `docs/proposals/` | The worker that wrote it | A research task before implementation. Afterwards only the coordinator edits its status line. |
+| `docs/reference/` | The worker that measured it | A live measurement shows a new fact. Write the date and what was measured. |
+| `docs/guides/` | The worker or the coordinator | A new trap or procedure on this PC is confirmed. |
+| `docs/templates/` | The coordinator, or the worker whose PR adds a folder that no template fits | A doc kind needs a section that its template lacks, or a new folder needs its own template. |
+
+A row for a folder that does not exist yet applies from the PR that creates the folder.
 
 Deleting, moving, or renaming a doc needs the user's approval through the coordinator. The worker proposes it in the PR body.
 

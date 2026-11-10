@@ -14,6 +14,10 @@ Default vocabulary: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-
 
 Single-context: one `GLOSSARY.md` and `docs/adr/` at the repo root. See `docs/agents/domain.md`.
 
+## Document map
+
+To find a doc, start at [docs/README.md](docs/README.md): it maps each question to the doc that answers it. To write a new doc, copy its template from `docs/templates/`. A PR that adds, moves, or deletes a doc also updates `docs/README.md`.
+
 ## Document policy
 
 Before editing documents, proposing document changes, or assigning document work, read [docs/agents/document-policy.md](docs/agents/document-policy.md) for ownership, approval, and folder rules.
