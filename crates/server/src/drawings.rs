@@ -354,7 +354,8 @@ mod tests {
         let rest = KiwoomRest::new(Arc::new(kiwoom.clone()), KiwoomAuth::new(Secret::new("k".into()), Secret::new("s".into()), None), clock.clone());
         let symbols = Arc::new(SymbolDirectory::default());
         let bars = Arc::new(BarService::new(rest.clone(), symbols.clone(), clock.clone()));
-        let app = crate::http::router(Arc::new(AppState { symbols, bars, rest, db, clock, static_dir: dir.path().to_owned() }));
+        let (hub, _events) = crate::market::hub::MarketHub::detached(bars.clone(), clock.clone());
+        let app = crate::http::router(Arc::new(AppState { symbols, bars, rest, db, clock, static_dir: dir.path().to_owned(), hub }));
         Fixture { app, kiwoom, _dir: dir }
     }
 

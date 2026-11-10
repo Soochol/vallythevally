@@ -9,6 +9,11 @@ use std::time::Duration;
 
 use domain::{KstTime, TimeOfDay};
 use tokio::net::TcpListener;
+use tracing::{Level, Metadata};
+use tracing_subscriber::{Layer, Registry};
+use tracing_subscriber::filter::{FilterExt, filter_fn};
+use tracing_subscriber::layer::{Filter, SubscriberExt};
+use tracing_subscriber::util::SubscriberInitExt;
 
 use crate::bars::BarService;
 use crate::clock::{Clock, next_daily};
@@ -16,8 +21,10 @@ use crate::config::Config;
 use crate::db::AppDb;
 use crate::http::{AppState, router};
 use crate::instance::InstanceLock;
+use crate::market::hub::{HubHandle, MarketHub};
 use crate::kiwoom::auth::{DAILY_REISSUE_AT, KiwoomAuth};
 use crate::kiwoom::rest::{KiwoomRest, Priority};
+use crate::kiwoom::stream::KiwoomStream;
 use crate::kiwoom::token_file::TokenFile;
 use crate::kiwoom::transport::ReqwestTransport;
 use crate::symbols::SymbolDirectory;
@@ -29,7 +36,6 @@ const DAILY_RESET_AT: TimeOfDay = match TimeOfDay::hms(7, 45, 0) {
 const STARTUP_LIST_RETRY: Duration = Duration::from_secs(10);
 const DAILY_LIST_RETRY: Duration = Duration::from_secs(5 * 60);
 const DAILY_TOKEN_RETRY: Duration = Duration::from_secs(10 * 60);
-const EVICT_EVERY: Duration = Duration::from_secs(60);
 
 pub fn main() -> ExitCode {
     let (config, warnings) = match Config::from_env() {
@@ -64,11 +70,25 @@ pub fn main() -> ExitCode {
 }
 
 fn init_logging(filter: &str) {
-    let filter = tracing_subscriber::EnvFilter::try_new(filter).unwrap_or_else(|e| {
+    tracing_subscriber::registry().with(tracing_subscriber::fmt::layer().with_writer(std::io::stderr).with_ansi(false).with_filter(log_filter(filter))).init();
+}
+
+/// tungstenite는 trace에서 보내는 프레임 내용을 그대로 찍는다. LOGIN 프레임에는 토큰이 있다.
+/// EnvFilter 안의 지시문은 더 구체적인 target이 이기므로, 사용자 지시문과 따로 거른다.
+const WS_LIBRARIES: [&str; 2] = ["tungstenite", "tokio_tungstenite"];
+
+fn below_ws_library_trace(meta: &Metadata<'_>) -> bool {
+    let target = meta.target();
+    let from_ws_library = WS_LIBRARIES.iter().any(|lib| target.strip_prefix(lib).is_some_and(|rest| rest.is_empty() || rest.starts_with("::")));
+    !from_ws_library || *meta.level() <= Level::DEBUG
+}
+
+fn log_filter(spec: &str) -> impl Filter<Registry> + Send + Sync + 'static {
+    let user = tracing_subscriber::EnvFilter::try_new(spec).unwrap_or_else(|e| {
         eprintln!("VALLY_LOG를 읽을 수 없어 info로 둡니다: {e}");
         tracing_subscriber::EnvFilter::new("info")
     });
-    tracing_subscriber::fmt().with_env_filter(filter).with_writer(std::io::stderr).with_ansi(false).init();
+    user.and(filter_fn(below_ws_library_trace))
 }
 
 async fn serve(config: Config, token_file: TokenFile) -> ExitCode {
@@ -98,7 +118,13 @@ async fn serve(config: Config, token_file: TokenFile) -> ExitCode {
             return ExitCode::from(1);
         }
     };
-    let clock = Clock::system();
+    let clock = match config.clock_start {
+        None => Clock::system(),
+        Some(start) => {
+            tracing::warn!(%start, "시험용 시계로 켭니다(VALLY_CLOCK_START)");
+            Clock::fake(start)
+        }
+    };
     let rest = KiwoomRest::new(
         Arc::new(transport),
         KiwoomAuth::new(config.kiwoom_app_key.clone(), config.kiwoom_app_secret.clone(), Some(token_file)),
@@ -118,11 +144,12 @@ async fn serve(config: Config, token_file: TokenFile) -> ExitCode {
     let symbols = Arc::new(SymbolDirectory::default());
     tokio::spawn(load_symbols_at_startup(clock.clone(), rest.clone(), symbols.clone()));
     let bars = Arc::new(BarService::new(rest.clone(), symbols.clone(), clock.clone()));
-    tokio::spawn(evict_idle_series(bars.clone()));
-    tokio::spawn(daily_reset(clock.clone(), rest.clone(), symbols.clone(), bars.clone()));
+    let (stream, events) = KiwoomStream::spawn(config.kiwoom_ws_url.clone(), rest.clone(), clock.clone());
+    let hub = MarketHub::spawn(bars.clone(), stream, events, clock.clone());
+    tokio::spawn(daily_reset(clock.clone(), rest.clone(), symbols.clone(), bars.clone(), hub.clone()));
     tokio::spawn(daily_token(clock.clone(), rest.clone()));
 
-    let app = router(Arc::new(AppState { symbols, bars, rest, db, clock, static_dir: config.static_dir.clone() }));
+    let app = router(Arc::new(AppState { symbols, bars, rest, db, clock, static_dir: config.static_dir.clone(), hub }));
     tracing::info!(static_dir = %config.static_dir.display(), "요청을 받기 시작합니다");
     if let Err(e) = axum::serve(listener, app).with_graceful_shutdown(shutdown_signal()).await {
         tracing::error!(error = %e, "서버가 멈췄습니다");
@@ -167,19 +194,11 @@ async fn load_symbols_at_startup(clock: Clock, rest: KiwoomRest, symbols: Arc<Sy
     }
 }
 
-async fn evict_idle_series(bars: Arc<BarService>) {
-    let mut tick = tokio::time::interval(EVICT_EVERY);
-    loop {
-        tick.tick().await;
-        bars.evict_idle();
-    }
-}
-
-/// 매일 07:45: 시세 캐시를 모두 비우고 종목 목록을 `Background`로 다시 받는다. 실패하면 5분마다, 다음 07:45 전까지.
-async fn daily_reset(clock: Clock, rest: KiwoomRest, symbols: Arc<SymbolDirectory>, bars: Arc<BarService>) {
+async fn daily_reset(clock: Clock, rest: KiwoomRest, symbols: Arc<SymbolDirectory>, bars: Arc<BarService>, hub: HubHandle) {
     loop {
         clock.sleep_until(next_daily(clock.now(), DAILY_RESET_AT)).await;
         bars.clear_all();
+        hub.daily_reset();
         let deadline = next_daily(clock.now(), DAILY_RESET_AT);
         while let Err(e) = symbols.refresh(&rest, Priority::Background).await {
             let Some(retry_at) = e.retry_at() else {
@@ -217,5 +236,67 @@ async fn daily_token(clock: Clock, rest: KiwoomRest) {
             tracing::warn!(error = %e, %at, "20:05 토큰 발급에 실패했습니다. 그 시각에 다시 받습니다");
             clock.sleep_until(at).await;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::io::Write;
+    use std::sync::{Arc, Mutex};
+
+    use fake_kiwoom::{APP_KEY, APP_SECRET, FakeKiwoom, TOKEN};
+
+    use super::*;
+    use crate::config::Secret;
+    use crate::kiwoom::stream::{KiwoomStream, StreamEvent};
+
+    #[derive(Clone, Default)]
+    struct Captured(Arc<Mutex<Vec<u8>>>);
+
+    impl Write for Captured {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(buf);
+            Ok(buf.len())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    async fn logs_of_one_ws_login(filter: impl Filter<Registry> + Send + Sync + 'static) -> String {
+        let out = Captured::default();
+        let writer = out.clone();
+        let subscriber = tracing_subscriber::registry().with(tracing_subscriber::fmt::layer().with_writer(move || writer.clone()).with_ansi(false).with_filter(filter));
+        let _guard = tracing::subscriber::set_default(subscriber);
+        let fake = FakeKiwoom::start().await;
+        let transport = ReqwestTransport::new(fake.base_url()).unwrap();
+        let rest = KiwoomRest::new(Arc::new(transport), KiwoomAuth::new(Secret::new(APP_KEY.into()), Secret::new(APP_SECRET.into()), None), Clock::system());
+        let (_stream, mut events) = KiwoomStream::spawn(fake.ws_url(), rest, Clock::system());
+        let live = tokio::time::timeout(Duration::from_secs(3), events.recv()).await.unwrap();
+        assert!(matches!(live, Some(StreamEvent::Live { .. })), "{live:?}");
+        String::from_utf8(out.0.lock().unwrap().clone()).unwrap()
+    }
+
+    #[tokio::test]
+    async fn trace_logs_never_carry_the_ws_login_token() {
+        let _ = tracing_log::LogTracer::init();
+        let hex: String = TOKEN.bytes().map(|b| format!("{b:02x}")).collect();
+        let leaks = |logs: &str| logs.contains(TOKEN) || logs.contains(&hex);
+        let uncapped = logs_of_one_ws_login(tracing_subscriber::EnvFilter::new("trace")).await;
+        assert!(leaks(&uncapped), "막지 않으면 tungstenite가 LOGIN 프레임을 찍는다(이 시험이 새는 것을 알아본다)");
+        let capped = logs_of_one_ws_login(log_filter("trace")).await;
+        assert!(capped.contains("키움 WebSocket 상태"), "로그는 그대로 남는다");
+        assert!(!leaks(&capped));
+    }
+
+    #[tokio::test]
+    async fn a_more_specific_trace_target_still_cannot_log_the_ws_login_token() {
+        let _ = tracing_log::LogTracer::init();
+        let hex: String = TOKEN.bytes().map(|b| format!("{b:02x}")).collect();
+        let logs = logs_of_one_ws_login(log_filter("info,tungstenite::protocol=trace,tokio_tungstenite=trace")).await;
+        assert!(logs.contains("키움 WebSocket 상태"), "로그는 그대로 남는다");
+        assert!(!logs.contains(TOKEN), "평문 토큰");
+        assert!(!logs.contains(&hex), "16진 토큰");
     }
 }

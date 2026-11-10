@@ -3,6 +3,7 @@ import type { BarsQuery, SeriesKey } from "../api/bars";
 import type { Bar } from "../api/generated/Bar";
 import type { BarsPage } from "../api/generated/BarsPage";
 import { ApiRequestError } from "../api/http";
+import type { SubEvent } from "../api/socket";
 import { BarFeed, displayBars, type History, prependOlder } from "./barFeed";
 
 const key = (symbol: string, period: SeriesKey["period"], venue: SeriesKey["venue"] = "combined"): SeriesKey => ({
@@ -45,8 +46,26 @@ test("displayBars는 확정 봉 뒤에 현재 봉을 붙인다", () => {
   expect(displayBars({ bars: [bar(1)], current: null, nextBefore: null }).map((b) => b.t)).toEqual([1]);
 });
 
+function fakeSocket() {
+  const subs = new Map<number, { key: SeriesKey; handler: (m: SubEvent) => void }>();
+  let next = 0;
+  return {
+    socket: {
+      subscribe(k: SeriesKey, handler: (m: SubEvent) => void) {
+        const id = next++;
+        subs.set(id, { key: k, handler });
+        return () => subs.delete(id);
+      },
+    },
+    subscribedKeys: () => [...subs.values()].map((s) => `${s.key.symbol}/${s.key.period}`),
+    push(m: SubEvent) {
+      for (const s of [...subs.values()]) s.handler(m);
+    },
+  };
+}
+
 /** 응답을 손으로 풀어 주는 가짜 fetch. */
-function harness() {
+function harness(socket?: ReturnType<typeof fakeSocket>["socket"]) {
   const calls: { q: BarsQuery; resolve: (p: BarsPage) => void; reject: (e: unknown) => void }[] = [];
   const events: string[] = [];
   let last: History | null = null;
@@ -57,11 +76,153 @@ function harness() {
       prepended: (h, added) => { last = h; events.push(`prepend ${added}`); },
       failed: (e) => events.push(`failed ${e.code}`),
       olderFailed: (e) => events.push(`olderFailed ${e.code}`),
+      live: (h, b) => { last = h; events.push(`live ${b.t}:${b.c}`); },
+      confirmed: (h, b) => { last = h; events.push(`confirmed ${b.t}:${b.c}`); },
+      subError: (code) => events.push(`subError ${code}`),
     },
+    socket,
   );
   const flush = () => new Promise((r) => setTimeout(r, 0));
   return { feed, calls, events, flush, history: () => last };
 }
+
+function realtime() {
+  const s = fakeSocket();
+  return { ...harness(s.socket), ...s };
+}
+
+const shown = (h: History | null) => (h ? displayBars(h).map((b) => `${b.t}:${b.c}`) : null);
+const withSeq = (p: BarsPage, seq: number | null): BarsPage => ({ ...p, seq });
+
+describe("BarFeed 실시간", () => {
+  test("페이지를 받기 전에 온 메시지를 쌓았다가 seq > page.seq만 차례로 적용한다", async () => {
+    const { feed, calls, events, flush, history, push } = realtime();
+    feed.open(key("005930", "1m"));
+    push({ type: "subscribed", sub: "s1", seq: 10, current: bar(60, 1) });
+    push({ type: "bar", sub: "s1", seq: 11, bar: bar(60, 2) });
+    push({ type: "confirmed", sub: "s1", seq: 12, bar: bar(60, 3) });
+    push({ type: "bar", sub: "s1", seq: 13, bar: bar(120, 4) });
+    expect(events).toEqual(["subError null"]);
+    calls[0]!.resolve(withSeq(page([bar(0)], null, bar(60, 2)), 11));
+    await flush();
+    expect(events).toEqual(["subError null", "reset 1", "confirmed 60:3", "live 120:4"]);
+    expect(shown(history())).toEqual(["0:0", "60:3", "120:4"]);
+  });
+
+  test("page.seq가 null이면 쌓인 메시지를 모두 적용한다", async () => {
+    const { feed, calls, events, flush, push } = realtime();
+    feed.open(key("005930", "1m"));
+    push({ type: "subscribed", sub: "s1", seq: 1, current: bar(60, 1) });
+    push({ type: "bar", sub: "s1", seq: 2, bar: bar(60, 2) });
+    calls[0]!.resolve(page([bar(0)], null));
+    await flush();
+    expect(events).toEqual(["subError null", "reset 1", "live 60:1", "live 60:2"]);
+  });
+
+  test("페이지 뒤에는 도착 순서대로 바로 적용한다. 확정 다음의 bar는 새 현재 봉이다", async () => {
+    const { feed, calls, events, flush, history, push } = realtime();
+    feed.open(key("005930", "1m"));
+    calls[0]!.resolve(withSeq(page([bar(0)], null, bar(60, 5)), 3));
+    await flush();
+    push({ type: "bar", sub: "s1", seq: 4, bar: bar(60, 6) });
+    expect(shown(history())).toEqual(["0:0", "60:6"]);
+    push({ type: "confirmed", sub: "s1", seq: 5, bar: bar(60, 7) });
+    expect(history()?.current).toBeNull();
+    push({ type: "bar", sub: "s1", seq: 6, bar: bar(120, 8) });
+    expect(events).toEqual(["reset 1", "live 60:6", "confirmed 60:7", "live 120:8"]);
+    expect(history()?.bars.map((b) => b.t)).toEqual([0, 60]);
+    expect(shown(history())).toEqual(["0:0", "60:7", "120:8"]);
+  });
+
+  test("가진 봉보다 이른 bar와 confirmed는 버린다", async () => {
+    const { feed, calls, events, flush, history, push } = realtime();
+    feed.open(key("005930", "1m"));
+    calls[0]!.resolve(page([bar(0), bar(60)], null, bar(120, 9)));
+    await flush();
+    push({ type: "bar", sub: "s1", seq: 1, bar: bar(60, 1) });
+    push({ type: "confirmed", sub: "s1", seq: 2, bar: bar(0, 1) });
+    expect(events).toEqual(["reset 2"]);
+    expect(shown(history())).toEqual(["0:0", "60:60", "120:9"]);
+  });
+
+  test("마지막 확정 봉과 같은 t의 bar는 그 확정 봉을 바꾼다", async () => {
+    const { feed, calls, flush, history, push } = realtime();
+    feed.open(key("005930", "1m"));
+    calls[0]!.resolve(page([bar(0), bar(60)], null));
+    await flush();
+    push({ type: "bar", sub: "s1", seq: 1, bar: bar(60, 99) });
+    expect(history()?.bars.map((b) => `${b.t}:${b.c}`)).toEqual(["0:0", "60:99"]);
+    expect(history()?.current).toBeNull();
+  });
+
+  test("reload 메시지는 새 세대로 다시 받는다. 구독은 그대로이고 이전 페이지는 버린다", async () => {
+    const { feed, calls, events, flush, history, push, subscribedKeys } = realtime();
+    feed.open(key("005930", "1m"));
+    calls[0]!.resolve(withSeq(page([bar(0)], null), 1));
+    await flush();
+    push({ type: "reload", sub: "s1", seq: 2, reason: "gap_filled", from: 0 });
+    expect(calls).toHaveLength(2);
+    expect(calls[1]!.q.before).toBeUndefined();
+    push({ type: "bar", sub: "s1", seq: 3, bar: bar(60, 1) });
+    calls[1]!.resolve(withSeq(page([bar(0), bar(60)], null), 2));
+    await flush();
+    expect(events).toEqual(["reset 1", "reset 2", "live 60:1"]);
+    expect(shown(history())).toEqual(["0:0", "60:1"]);
+    expect(subscribedKeys()).toEqual(["005930/1m"]);
+  });
+
+  test("쌓아 둔 reload도 seq로 거른다. 페이지가 이미 반영했으면 버린다", async () => {
+    const { feed, calls, flush, push } = realtime();
+    feed.open(key("005930", "1m"));
+    push({ type: "reload", sub: "s1", seq: 2, reason: "daily_reset", from: null });
+    calls[0]!.resolve(withSeq(page([bar(0)], null), 2));
+    await flush();
+    expect(calls).toHaveLength(1);
+  });
+
+  test("resync는 페이지를 받는 중이어도 처음부터 다시 받는다", async () => {
+    const { feed, calls, events, flush, push } = realtime();
+    feed.open(key("005930", "1m"));
+    push({ type: "bar", sub: "s1", seq: 1, bar: bar(60, 1) });
+    push({ type: "resync" });
+    calls[0]!.resolve(page([bar(0)], null));
+    calls[1]!.resolve(page([bar(0), bar(60)], null));
+    await flush();
+    expect(calls).toHaveLength(2);
+    expect(events).toEqual(["reset 2"]);
+  });
+
+  test("sub_error와 이어지는 subscribed를 알린다", () => {
+    const { feed, events, push } = realtime();
+    feed.open(key("005930", "1m"));
+    push({ type: "sub_error", sub: "s1", code: "realtime_limit" });
+    push({ type: "subscribed", sub: "s1", seq: 1, current: null });
+    expect(events).toEqual(["subError realtime_limit", "subError null"]);
+  });
+
+  test("다시 열면 이전 구독을 풀고, dispose하면 구독이 남지 않는다", () => {
+    const { feed, subscribedKeys } = realtime();
+    feed.open(key("005930", "1m"));
+    feed.reload();
+    expect(subscribedKeys()).toEqual(["005930/1m"]);
+    feed.open(key("005930", "5m"));
+    expect(subscribedKeys()).toEqual(["005930/5m"]);
+    feed.dispose();
+    expect(subscribedKeys()).toEqual([]);
+  });
+
+  test("최신 페이지를 받지 못하면 쌓은 메시지를 버린다", async () => {
+    const { feed, calls, events, flush, push } = realtime();
+    feed.open(key("005930", "1m"));
+    calls[0]!.reject(new ApiRequestError("network", "서버에 연결하지 못했습니다"));
+    await flush();
+    push({ type: "bar", sub: "s1", seq: 1, bar: bar(60, 1) });
+    feed.reload();
+    calls[1]!.resolve(page([bar(0)], null));
+    await flush();
+    expect(events).toEqual(["failed network", "reset 1"]);
+  });
+});
 
 describe("BarFeed", () => {
   test("이전 세대의 응답은 버린다", async () => {
@@ -196,4 +357,38 @@ describe("BarFeed", () => {
     await flush();
     expect(events).toEqual([]);
   });
+});
+
+test("HTTP 페이지보다 늦게 온 옛 subscribed는 봉을 되돌리지 않는다", async () => {
+  const { feed, calls, flush, history, push } = realtime();
+  feed.open(key("005930", "1m"));
+  calls[0]!.resolve(withSeq(page([bar(0)], null, bar(60, 200)), 12));
+  await flush();
+  push({ type: "subscribed", sub: "s1", seq: 10, current: bar(60, 100) });
+  expect(shown(history())).toEqual(["0:0", "60:200"]);
+});
+
+test("다시 받은 페이지보다 옛 bar는 봉을 되돌리지 않는다", async () => {
+  const { feed, calls, flush, history, push } = realtime();
+  feed.open(key("005930", "1m"));
+  calls[0]!.resolve(withSeq(page([bar(0)], null, bar(60, 100)), 10));
+  await flush();
+  push({ type: "reload", sub: "s1", seq: 11, reason: "gap_filled", from: 0 });
+  calls[1]!.resolve(withSeq(page([bar(0)], null, bar(60, 200)), 13));
+  await flush();
+  push({ type: "bar", sub: "s1", seq: 12, bar: bar(60, 150) });
+  expect(shown(history())).toEqual(["0:0", "60:200"]);
+});
+
+test("페이지보다 옛 confirmed와 reload는 버린다", async () => {
+  const { feed, calls, flush, history, push } = realtime();
+  feed.open(key("005930", "1m"));
+  calls[0]!.resolve(withSeq(page([bar(0)], null, bar(60, 200)), 12));
+  await flush();
+  push({ type: "confirmed", sub: "s1", seq: 11, bar: bar(60, 100) });
+  push({ type: "reload", sub: "s1", seq: 12, reason: "gap_filled", from: 0 });
+  expect(shown(history())).toEqual(["0:0", "60:200"]);
+  expect(calls).toHaveLength(1);
+  push({ type: "bar", sub: "s1", seq: 13, bar: bar(60, 210) });
+  expect(shown(history())).toEqual(["0:0", "60:210"]);
 });

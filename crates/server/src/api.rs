@@ -90,6 +90,16 @@ impl From<domain::Venue> for Venue {
     }
 }
 
+impl From<Venue> for domain::Venue {
+    fn from(v: Venue) -> Self {
+        match v {
+            Venue::Combined => domain::Venue::Combined,
+            Venue::Krx => domain::Venue::Krx,
+            Venue::Nxt => domain::Venue::Nxt,
+        }
+    }
+}
+
 /// 봉 하나. 가격은 자연 단위(주식 원, 지수 포인트), 거래량은 정수.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, TS)]
 #[ts(export)]
@@ -141,6 +151,102 @@ pub struct BarsPage {
     /// 이 스냅숏이 반영한 마지막 seq. #2·#3에서는 언제나 null.
     #[ts(type = "number | null")]
     pub seq: Option<u64>,
+}
+
+/// `/api/ws` 브라우저 → 서버. `sub`는 브라우저가 정하는 연결 안에서 유일한 문자열이다.
+/// `venue` 규칙은 `GET /api/bars`와 같다(주식에서 빼면 combined, 지수에 주면 bad_request).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(tag = "type", rename_all = "snake_case", rename_all_fields = "camelCase")]
+#[ts(export)]
+pub enum ClientMessage {
+    Subscribe { sub: String, symbol: SymbolCode, venue: Option<Venue>, period: Period },
+    Unsubscribe { sub: String },
+}
+
+/// `/api/ws` 서버 → 브라우저. `seq`는 (종목, 거래소, 봉 주기) 흐름마다 하나씩 늘어나는 번호다.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(tag = "type", rename_all = "snake_case", rename_all_fields = "camelCase")]
+#[ts(export)]
+pub enum ServerMessage {
+    Hello {
+        #[ts(type = "1")]
+        protocol: u8,
+        server_time: UnixSeconds,
+        status: ConnectionStatus,
+    },
+    Status { status: ConnectionStatus },
+    /// 구독 응답. 실시간 한도로 거절되었다가 자리가 나면 같은 sub로 다시 온다.
+    Subscribed {
+        sub: String,
+        #[ts(type = "number")]
+        seq: u64,
+        current: Option<Bar>,
+    },
+    SubError { sub: String, code: SubErrorCode },
+    /// 현재 봉 갱신. 구독 하나당 초당 최대 10회. 중간 값은 건너뛸 수 있다.
+    Bar {
+        sub: String,
+        #[ts(type = "number")]
+        seq: u64,
+        bar: Bar,
+    },
+    /// 봉 확정. 연결이 살아 있는 동안 빠짐없이, 순서대로 온다.
+    Confirmed {
+        sub: String,
+        #[ts(type = "number")]
+        seq: u64,
+        bar: Bar,
+    },
+    /// 확정 봉이 서버 쪽에서 바뀌었다. 브라우저는 칸을 통째로 다시 만든다. `from`은 `daily_reset`이면 null이다.
+    Reload {
+        sub: String,
+        #[ts(type = "number")]
+        seq: u64,
+        reason: ReloadReason,
+        from: Option<UnixSeconds>,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum SubErrorCode {
+    BadRequest,
+    UnknownSymbol,
+    RealtimeLimit,
+    KiwoomUnavailable,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum ReloadReason {
+    /// 실시간 연결이 끊겼던 구간을 조회로 메웠다.
+    GapFilled,
+    /// 실시간으로 만든 봉이 키움 값으로 교체되었다.
+    Replaced,
+    /// 매일 07:45에 시세 캐시를 모두 비우고 다시 받았다.
+    DailyReset,
+}
+
+/// 키움 실시간 연결. `reconnecting`이면 `since`부터 현재 봉이 멈춰 있을 수 있다. `halted`는 운영자가 고쳐야 한다.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub enum RealtimeState {
+    Live,
+    Reconnecting,
+    Halted,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct ConnectionStatus {
+    pub realtime: RealtimeState,
+    pub since: UnixSeconds,
+    /// 끊긴 구간을 조회로 메우는 중.
+    pub backfilling: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -541,6 +647,40 @@ mod tests {
             json!({"symbol": "005930", "price": 193_400.0, "change": -8_100.0, "changeRate": -4.02,
                    "volume": 56_147_847, "t": 1_794_131_999, "source": "polled"})
         );
+    }
+
+    #[test]
+    fn websocket_message_json_shape() {
+        let sub: ClientMessage = serde_json::from_value(json!({"type": "subscribe", "sub": "c0", "symbol": "005930", "venue": "krx", "period": "1m"})).unwrap();
+        assert_eq!(sub, ClientMessage::Subscribe { sub: "c0".into(), symbol: SymbolCode("005930".into()), venue: Some(Venue::Krx), period: Period::M1 });
+        let unsub: ClientMessage = serde_json::from_value(json!({"type": "unsubscribe", "sub": "c0"})).unwrap();
+        assert_eq!(unsub, ClientMessage::Unsubscribe { sub: "c0".into() });
+
+        let status = ConnectionStatus { realtime: RealtimeState::Reconnecting, since: UnixSeconds(1_794_182_400), backfilling: true };
+        let bar = Bar { t: UnixSeconds(1_794_182_400), o: 1.0, h: 2.0, l: 1.0, c: 2.0, v: 3 };
+        let cases = [
+            (
+                ServerMessage::Hello { protocol: 1, server_time: UnixSeconds(5), status },
+                json!({"type": "hello", "protocol": 1, "serverTime": 5, "status": {"realtime": "reconnecting", "since": 1_794_182_400, "backfilling": true}}),
+            ),
+            (ServerMessage::Subscribed { sub: "c0".into(), seq: 7, current: None }, json!({"type": "subscribed", "sub": "c0", "seq": 7, "current": null})),
+            (ServerMessage::SubError { sub: "c0".into(), code: SubErrorCode::RealtimeLimit }, json!({"type": "sub_error", "sub": "c0", "code": "realtime_limit"})),
+            (
+                ServerMessage::Confirmed { sub: "c0".into(), seq: 8, bar },
+                json!({"type": "confirmed", "sub": "c0", "seq": 8, "bar": {"t": 1_794_182_400, "o": 1.0, "h": 2.0, "l": 1.0, "c": 2.0, "v": 3}}),
+            ),
+            (
+                ServerMessage::Reload { sub: "c0".into(), seq: 9, reason: ReloadReason::GapFilled, from: Some(UnixSeconds(4)) },
+                json!({"type": "reload", "sub": "c0", "seq": 9, "reason": "gap_filled", "from": 4}),
+            ),
+            (
+                ServerMessage::Reload { sub: "c0".into(), seq: 9, reason: ReloadReason::DailyReset, from: None },
+                json!({"type": "reload", "sub": "c0", "seq": 9, "reason": "daily_reset", "from": null}),
+            ),
+        ];
+        for (msg, want) in cases {
+            assert_eq!(serde_json::to_value(&msg).unwrap(), want);
+        }
     }
 
     #[test]

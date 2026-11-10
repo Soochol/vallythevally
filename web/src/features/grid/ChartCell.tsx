@@ -6,6 +6,7 @@ import { PERIOD_LABEL } from "../../lib/symbol";
 import { shownVenue, venueLabel } from "../../lib/venue";
 import { NXT_FALLBACK_NOTICE } from "../../persist/restore";
 import { type Slot, useCell, useLayoutStore } from "../../stores/layout";
+import { marketSocket } from "../../stores/realtime";
 import { useSelectionStore } from "../../stores/selection";
 import { useTheme } from "../../stores/ui";
 import { cellErrorView, olderErrorView } from "./cellError";
@@ -35,6 +36,7 @@ export function ChartCell({ slot, status, onStatus }: Props) {
     const c = new ChartController(chartEl.current!, {
       tokens: readThemeTokens(),
       onStatus: (s) => onStatusRef.current(s),
+      socket: marketSocket,
     });
     ctl.current = c;
     return () => {

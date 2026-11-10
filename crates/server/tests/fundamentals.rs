@@ -10,9 +10,11 @@ use server::clock::Clock;
 use server::config::Secret;
 use server::db::AppDb;
 use server::http::{AppState, router};
+use server::market::hub::MarketHub;
 use server::kiwoom::api::ApiId;
 use server::kiwoom::auth::KiwoomAuth;
 use server::kiwoom::rest::KiwoomRest;
+use server::kiwoom::stream::KiwoomStream;
 use server::kiwoom::transport::ReqwestTransport;
 use server::symbols::{Directory, SymbolDirectory};
 use tower::ServiceExt;
@@ -42,7 +44,10 @@ impl Fixture {
         let tmp = tempfile::tempdir().unwrap();
         let db = AppDb::open(&tmp.path().join("db.sqlite")).await.unwrap();
         let bars = Arc::new(BarService::new(rest.clone(), symbols.clone(), clock.clone()));
-        let app = router(Arc::new(AppState { symbols, bars, rest: rest.clone(), db, clock, static_dir: tmp.path().to_owned() }));
+        let (stream, _desired) = KiwoomStream::detached();
+        let (_events, events) = tokio::sync::mpsc::channel(1);
+        let hub = MarketHub::spawn(bars.clone(), stream, events, clock.clone());
+        let app = router(Arc::new(AppState { symbols, bars, rest: rest.clone(), db, clock, static_dir: tmp.path().to_owned(), hub }));
         Fixture { fake, rest, app, _tmp: tmp }
     }
 

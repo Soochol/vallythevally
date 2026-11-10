@@ -24,6 +24,14 @@ function kstParts(t: UnixSeconds) {
   return { year, month, day, date: `${year}-${day}`, clock: `${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}` };
 }
 
+/** 평일 08:00~20:00(KST). 공휴일은 모른다(frontend.md §2.2). */
+export function isMarketOpen(t: UnixSeconds): boolean {
+  const d = new Date((t + KST_OFFSET) * 1000);
+  const day = d.getUTCDay();
+  const hour = d.getUTCHours();
+  return day >= 1 && day <= 5 && hour >= 8 && hour < 20;
+}
+
 export function isIntraday(period: Period): boolean {
   return period !== "D" && period !== "W" && period !== "M";
 }

@@ -5,6 +5,10 @@ use std::fmt;
 use std::net::{IpAddr, SocketAddr};
 use std::path::{Path, PathBuf};
 
+use domain::KstTime;
+
+use crate::kiwoom::wire::parse_kst_datetime;
+
 /// Debug와 Display 모두 "[가림]"만 낸다. 값은 `expose()`로만 꺼낸다(§11.3).
 #[derive(Clone, PartialEq, Eq)]
 pub struct Secret<T>(T);
@@ -67,13 +71,14 @@ impl BindAddr {
     }
 }
 
-pub const DEFAULT_KIWOOM_BASE_URL: &str = "https://api.kiwoom.com";
 
 const KNOWN_KEYS: &[&str] = &[
     "VALLY_ENV_FILE",
     "VALLY_KIWOOM_APP_KEY",
     "VALLY_KIWOOM_APP_SECRET",
     "VALLY_KIWOOM_BASE_URL",
+    "VALLY_KIWOOM_WS_URL",
+    "VALLY_CLOCK_START",
     "VALLY_DB_PATH",
     "VALLY_LOCK_PATH",
     "VALLY_TOKEN_PATH",
@@ -88,8 +93,10 @@ const KNOWN_KEYS: &[&str] = &[
 pub struct Config {
     pub kiwoom_app_key: Secret<String>,
     pub kiwoom_app_secret: Secret<String>,
-    /// 테스트가 가짜 키움 서버를 가리키게 하려고 둔 키. 기본은 실제 키움 주소다.
     pub kiwoom_base_url: String,
+    pub kiwoom_ws_url: String,
+    /// 시험용. 서버 시계가 이 KST 시각에서 시작해 실제 시간만큼 흐른다. 실제 키움 주소와 함께 주면 시작하지 않는다.
+    pub clock_start: Option<KstTime>,
     pub lock_path: PathBuf,
     pub token_path: PathBuf,
     pub bind: BindAddr,
@@ -132,13 +139,29 @@ impl Config {
                 .cloned()
                 .ok_or_else(|| ConfigError(format!("{k}가 없습니다")))
         };
+        let url = |k: &str| vars.get(k).filter(|v| !v.is_empty()).map(|s| s.trim_end_matches('/').to_owned());
+        let (Some(kiwoom_base_url), Some(kiwoom_ws_url)) = (url("VALLY_KIWOOM_BASE_URL"), url("VALLY_KIWOOM_WS_URL")) else {
+            return Err(ConfigError(
+                "VALLY_KIWOOM_BASE_URL과 VALLY_KIWOOM_WS_URL을 .env에 둘 다 적어야 합니다. 실제 키움은 VALLY_KIWOOM_BASE_URL=https://api.kiwoom.com, VALLY_KIWOOM_WS_URL=wss://api.kiwoom.com:10000/api/dostk/websocket 입니다".into(),
+            ));
+        };
+        let clock_start = match vars.get("VALLY_CLOCK_START") {
+            None => None,
+            Some(s) => Some(parse_kst_datetime(s).ok_or_else(|| ConfigError(format!("VALLY_CLOCK_START는 KST YYYYMMDDHHMMSS입니다: {s}")))?),
+        };
+        let rest_endpoint = Endpoint::of("VALLY_KIWOOM_BASE_URL", &kiwoom_base_url)?;
+        if rest_endpoint != Endpoint::of("VALLY_KIWOOM_WS_URL", &kiwoom_ws_url)? {
+            return Err(ConfigError("VALLY_KIWOOM_BASE_URL과 VALLY_KIWOOM_WS_URL은 둘 다 실제 키움이거나 둘 다 가짜 키움(루프백)이어야 합니다".into()));
+        }
+        if clock_start.is_some() && rest_endpoint == Endpoint::Kiwoom {
+            return Err(ConfigError("VALLY_CLOCK_START는 가짜 키움(VALLY_KIWOOM_BASE_URL, VALLY_KIWOOM_WS_URL)과만 쓸 수 있습니다".into()));
+        }
         let config = Config {
             kiwoom_app_key: Secret::new(required("VALLY_KIWOOM_APP_KEY")?),
             kiwoom_app_secret: Secret::new(required("VALLY_KIWOOM_APP_SECRET")?),
-            kiwoom_base_url: vars
-                .get("VALLY_KIWOOM_BASE_URL")
-                .map(|s| s.trim_end_matches('/').to_owned())
-                .unwrap_or_else(|| DEFAULT_KIWOOM_BASE_URL.to_owned()),
+            kiwoom_base_url,
+            kiwoom_ws_url,
+            clock_start,
             lock_path: match vars.get("VALLY_LOCK_PATH") {
                 Some(p) => PathBuf::from(p),
                 None => default_lock()?,
@@ -153,6 +176,25 @@ impl Config {
             log_filter: vars.get("VALLY_LOG").cloned().unwrap_or_else(|| "info".to_owned()),
         };
         Ok((config, warnings))
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum Endpoint {
+    Kiwoom,
+    Loopback,
+}
+
+impl Endpoint {
+    fn of(key: &str, url: &str) -> Result<Endpoint, ConfigError> {
+        let invalid = || ConfigError(format!("{key}는 kiwoom.com이거나 루프백(가짜 키움) 주소여야 합니다: {url}"));
+        let parsed = reqwest::Url::parse(url).map_err(|_| invalid())?;
+        let host = parsed.host_str().ok_or_else(invalid)?.trim_end_matches('.');
+        if host == "kiwoom.com" || host.ends_with(".kiwoom.com") {
+            return Ok(Endpoint::Kiwoom);
+        }
+        let loopback = host == "localhost" || host.trim_start_matches('[').trim_end_matches(']').parse::<IpAddr>().is_ok_and(|ip| ip.is_loopback());
+        if loopback { Ok(Endpoint::Loopback) } else { Err(invalid()) }
     }
 }
 
@@ -220,6 +262,8 @@ mod tests {
     const KEY: &str = "FAKE-APPKEY-cfg-1111";
     const SECRET: &str = "FAKE-SECRET-cfg-2222";
 
+    const REAL: [(&str, &str); 2] = [("VALLY_KIWOOM_BASE_URL", "https://api.kiwoom.com"), ("VALLY_KIWOOM_WS_URL", "wss://api.kiwoom.com:10000/api/dostk/websocket")];
+
     fn vars(pairs: &[(&str, &str)]) -> BTreeMap<String, String> {
         pairs.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect()
     }
@@ -244,7 +288,7 @@ mod tests {
     fn config_debug_hides_keys() {
         let (c, _) = Config::from_vars(
             vars(&[("VALLY_KIWOOM_APP_KEY", KEY), ("VALLY_KIWOOM_APP_SECRET", SECRET)]),
-            BTreeMap::new(),
+            vars(&REAL),
             lock,
             token,
         )
@@ -258,7 +302,7 @@ mod tests {
     fn process_overrides_file_and_defaults_apply() {
         let (c, warnings) = Config::from_vars(
             vars(&[("VALLY_KIWOOM_APP_KEY", "file"), ("VALLY_KIWOOM_APP_SECRET", SECRET), ("VALLY_BIND", "127.0.0.1:9")]),
-            vars(&[("VALLY_KIWOOM_APP_KEY", KEY), ("VALLY_KIWOOM_BASE_URL", "http://127.0.0.1:5/")]),
+            vars(&[("VALLY_KIWOOM_APP_KEY", KEY), ("VALLY_KIWOOM_BASE_URL", "http://127.0.0.1:5/"), ("VALLY_KIWOOM_WS_URL", "ws://127.0.0.1:5/api/dostk/websocket")]),
             lock,
             token,
         )
@@ -273,8 +317,7 @@ mod tests {
         assert_eq!(c.lock_path, PathBuf::from("/nonexistent/test.lock"));
         assert_eq!(c.token_path, PathBuf::from("/nonexistent/token.json"));
 
-        let (c, _) = Config::from_vars(vars(&[("VALLY_KIWOOM_APP_KEY", KEY), ("VALLY_KIWOOM_APP_SECRET", SECRET)]), BTreeMap::new(), lock, token).unwrap();
-        assert_eq!(c.kiwoom_base_url, DEFAULT_KIWOOM_BASE_URL);
+        let (c, _) = Config::from_vars(vars(&[("VALLY_KIWOOM_APP_KEY", KEY), ("VALLY_KIWOOM_APP_SECRET", SECRET)]), vars(&REAL), lock, token).unwrap();
         assert_eq!(c.bind.socket_addr(), "127.0.0.1:8080".parse().unwrap());
     }
 
@@ -284,13 +327,50 @@ mod tests {
         assert!(Config::from_vars(vars(&[("VALLY_KIWOOM_APP_KEY", KEY), ("VALLY_KIWOOM_APP_SECRET", "")]), BTreeMap::new(), lock, token).is_err());
         let (_, warnings) = Config::from_vars(
             vars(&[("VALLY_KIWOOM_APP_KEY", KEY), ("VALLY_KIWOOM_APP_SECRET", SECRET), ("VALLY_BIDN", "x")]),
-            BTreeMap::new(),
+            vars(&REAL),
             lock,
             token,
         )
         .unwrap();
         assert_eq!(warnings.len(), 1);
         assert!(warnings[0].contains("VALLY_BIDN"));
+    }
+
+    #[test]
+    fn kiwoom_urls_must_both_be_real_or_both_fake() {
+        let keys = [("VALLY_KIWOOM_APP_KEY", KEY), ("VALLY_KIWOOM_APP_SECRET", SECRET)];
+        let rest = ("VALLY_KIWOOM_BASE_URL", "http://127.0.0.1:5");
+        let ws = ("VALLY_KIWOOM_WS_URL", "ws://127.0.0.1:5/api/dostk/websocket");
+        let start = |extra: &[(&str, &str)]| Config::from_vars(vars(&keys), vars(extra), lock, token);
+        let missing = start(&[]).unwrap_err().0;
+        assert!(missing.contains("VALLY_KIWOOM_BASE_URL") && missing.contains("VALLY_KIWOOM_WS_URL") && missing.contains(".env"), "무엇을 적을지 알려 준다: {missing}");
+        assert!(start(&[rest]).is_err(), "가짜 REST만");
+        assert!(start(&[ws]).is_err(), "가짜 WS만");
+        assert!(start(&REAL[..1]).is_err(), "실제 REST만");
+        assert!(start(&REAL[1..]).is_err(), "실제 WS만");
+        assert!(start(&[rest, ("VALLY_KIWOOM_WS_URL", "")]).is_err(), "빈 값");
+        assert!(start(&[rest, REAL[1]]).is_err(), "가짜 REST + 실제 WS");
+        assert!(start(&[REAL[0], ws]).is_err(), "실제 REST + 가짜 WS");
+        let (c, _) = start(&[rest, ws]).expect("둘 다 가짜");
+        assert_eq!((c.kiwoom_base_url.as_str(), c.kiwoom_ws_url.as_str()), (rest.1, ws.1));
+        let (c, _) = start(&REAL).expect("둘 다 실제 키움");
+        assert_eq!((c.kiwoom_base_url.as_str(), c.kiwoom_ws_url.as_str()), (REAL[0].1, REAL[1].1));
+    }
+
+    #[test]
+    fn clock_start_needs_a_fake_kiwoom() {
+        let keys = [("VALLY_KIWOOM_APP_KEY", KEY), ("VALLY_KIWOOM_APP_SECRET", SECRET), ("VALLY_CLOCK_START", "20261109100000")];
+        let fake = [("VALLY_KIWOOM_BASE_URL", "http://127.0.0.1:5"), ("VALLY_KIWOOM_WS_URL", "ws://127.0.0.1:5/api/dostk/websocket")];
+        let (c, _) = Config::from_vars(vars(&keys), vars(&fake), lock, token).unwrap();
+        assert_eq!(c.clock_start.map(|t| t.to_string()), Some("2026-11-09 10:00:00 KST".to_owned()));
+        assert_eq!(c.kiwoom_ws_url, "ws://127.0.0.1:5/api/dostk/websocket");
+
+        assert!(Config::from_vars(vars(&keys), vars(&REAL), lock, token).is_err(), "실제 키움 주소와 함께면 거부");
+        let bad = [("VALLY_KIWOOM_APP_KEY", KEY), ("VALLY_KIWOOM_APP_SECRET", SECRET), ("VALLY_CLOCK_START", "2026-11-09")];
+        assert!(Config::from_vars(vars(&bad), vars(&fake), lock, token).is_err());
+
+        let (c, _) = Config::from_vars(vars(&keys[..2]), vars(&REAL), lock, token).unwrap();
+        assert_eq!(c.clock_start, None);
     }
 
     #[test]
@@ -321,4 +401,29 @@ mod tests {
         assert!(parse_env("NOEQUALS\n").is_err());
         assert!(read_env_file(Path::new("relative/.env")).is_err());
     }
+
+    #[test]
+    fn a_kiwoom_url_counts_as_real_by_its_parsed_host_and_fake_means_loopback() {
+        let keys = [("VALLY_KIWOOM_APP_KEY", KEY), ("VALLY_KIWOOM_APP_SECRET", SECRET)];
+        let start = |rest: &str, ws: &str, clock: bool| {
+            let mut process = vars(&[("VALLY_KIWOOM_BASE_URL", rest), ("VALLY_KIWOOM_WS_URL", ws)]);
+            if clock {
+                process.insert("VALLY_CLOCK_START".into(), "20261109100000".into());
+            }
+            Config::from_vars(vars(&keys), process, lock, token)
+        };
+        let fake_rest = "http://127.0.0.1:5";
+        let fake_ws = "ws://127.0.0.1:5/api/dostk/websocket";
+        for real_ws in ["wss://API.KIWOOM.COM:10000/api/dostk/websocket", "wss://api.kiwoom.com:10000/api/dostk/websocket?", "wss://api.kiwoom.com./api/dostk/websocket", "wss://mockapi.kiwoom.com:10000/api/dostk/websocket"] {
+            assert!(start(fake_rest, real_ws, true).is_err(), "가짜 REST + 실제 WS: {real_ws}");
+            assert!(start(fake_rest, real_ws, false).is_err(), "가짜 REST + 실제 WS: {real_ws}");
+        }
+        assert!(start("https://API.kiwoom.com", fake_ws, true).is_err(), "실제 REST + 가짜 WS");
+        assert!(start("https://api.kiwoom.com", "wss://API.KIWOOM.COM:10000/api/dostk/websocket", true).is_err(), "시험 시계 + 실제 키움");
+        assert!(start("https://api.kiwoom.com", "wss://API.KIWOOM.COM:10000/api/dostk/websocket", false).is_ok(), "둘 다 실제 키움");
+        assert!(start("http://example.com", "ws://example.com/ws", true).is_err(), "가짜는 루프백만");
+        assert!(start("not a url", fake_ws, true).is_err());
+        assert!(start("http://localhost:5", "ws://[::1]:5/ws", true).is_ok(), "루프백 이름과 IPv6");
+    }
 }
+

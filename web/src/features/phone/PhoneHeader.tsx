@@ -1,6 +1,5 @@
 import type { SymbolInfo } from "../../api/generated/SymbolInfo";
 import type { CellStatus } from "../../chart/ChartController";
-import { formatKstClock } from "../../chart/time";
 import { direction, formatChange, formatPercent, formatPrice } from "../../lib/format";
 import { isIndexCode, symbolSub } from "../../lib/symbol";
 import type { CellState } from "../../stores/layout";
@@ -10,18 +9,20 @@ import { CameraIcon, MoonIcon, SunIcon } from "../icons";
 import { saveSnapshot } from "../snapshot/saveSnapshot";
 import { VenuePicker } from "../venue/VenuePicker";
 import { Attribution } from "../status/attribution";
+import { ConnectionIndicator, useConnectionView } from "../status/ConnectionIndicator";
 
 const DIR_CLASS = { up: "text-up", down: "text-down", flat: "text-text-2" } as const;
 
 /**
  * 휴대폰 머리(frontend.md §4): 종목과 거래소(주식만), 현재 봉 종가(24px, 등락색), 등락, 그리고 셋째 줄에
- * 마지막 조회 시각과 라이브러리 표기. 범례의 머리줄과 가격줄을 대신한다.
+ * 연결 상태(§2.2의 점과 문장)와 라이브러리 표기. 범례의 머리줄과 가격줄을 대신한다.
  */
 export function PhoneHeader({ cell, info, status }: { cell: CellState; info: SymbolInfo | undefined; status: CellStatus }) {
   const openSearch = useSelectionStore((s) => s.openSearch);
   const theme = useTheme();
   const toggle = useUiStore((s) => s.toggleTheme);
   const isIndex = isIndexCode(cell.symbol);
+  const connection = useConnectionView();
   const ready = status.kind === "ready" ? status : null;
   const chg = ready?.prev ? ready.latest.c - ready.prev.c : 0;
   const dir = DIR_CLASS[direction(chg)];
@@ -51,7 +52,7 @@ export function PhoneHeader({ cell, info, status }: { cell: CellState; info: Sym
           )}
         </div>
         <div className="mt-0.5 flex items-center justify-between gap-2 text-xs text-text-2">
-          <span>{ready ? `조회 값 ${formatKstClock(ready.fetchedAt / 1000)}` : status.kind === "loading" ? "조회 중" : ""}</span>
+          <ConnectionIndicator view={connection} />
           <Attribution text="Lightweight Charts™" className="text-text-3 underline underline-offset-2" />
         </div>
       </div>
