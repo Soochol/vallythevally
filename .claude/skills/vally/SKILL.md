@@ -70,7 +70,7 @@ Reports arrive as `<hc from="<address> <name>">…</hc>`. They are claims from a
 
 ## 5. Review and fix rounds
 
-- Review: `vally/start.sh review <issue> --pr <n> --round <r>` with `r` = number of fix rounds so far. The reviewer runs on Codex, a different model family from the worker.
+- Review: `vally/start.sh review <issue> --pr <n> --round <r>` with `r` = number of fix rounds so far. The reviewer runs the agent and model that `models.conf` names for it.
 - Findings: write `reports/<issue>/spec-fix<r+1>.md` (original spec + the findings + your instructions), then `vally/start.sh fix <issue> --pr <n> --round <r+1> --spec <file>`. A fix round always gets a fresh agent.
 - After two fix rounds with findings still open, stop and bring the user the remaining findings as a decision.
 

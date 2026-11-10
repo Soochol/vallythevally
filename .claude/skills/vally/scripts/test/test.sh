@@ -293,7 +293,8 @@ t_status_stops_when_hc_is_down() {
 # ---- sync-templates.sh, lib.sh
 
 t_sync_templates_writes_three() {
-  "$agent/sync-templates.sh" >/dev/null || return 1
+  printf 'worker claude opus -\nreviewer codex gpt-x high\ngardener claude sonnet -\n' > "$T/models.conf"
+  VALLY_MODELS=$T/models.conf "$agent/sync-templates.sh" >/dev/null || return 1
   for r in worker reviewer gardener; do
     ok grep -q "^name: vally-$r$" "$VALLY_TEMPLATES/vally-$r.md" || return 1
     ok grep -q "^command: env VALLY_ROLE=$r " "$VALLY_TEMPLATES/vally-$r.md" || return 1
