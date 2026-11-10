@@ -1,5 +1,5 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { useEffect, useId, useRef, useState } from "react";
+import { type Ref, useEffect, useId, useRef, useState } from "react";
 import type { BarField } from "../../api/generated/BarField";
 import type { Screen } from "../../api/generated/Screen";
 import type { Screens } from "../../api/generated/Screens";
@@ -21,6 +21,7 @@ import {
   excludesIn,
   MAX_CONDITIONS,
   removeCondition,
+  type ScreenDraft,
   toggleExclude,
   withScreen,
 } from "./screenForm";
@@ -116,71 +117,7 @@ function ScreenDialogBody({ editId, opened }: { editId: string | null; opened: S
       </div>
 
       <form ref={formRef} onSubmit={submit} noValidate className="flex min-h-0 flex-1 flex-col">
-        <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-auto p-4">
-          <Row label="이름" labelFor={`${ids}-name`}>
-            <input
-              ref={nameRef}
-              id={`${ids}-name`}
-              value={draft.name}
-              onChange={(e) => setDraft((d) => ({ ...d, name: e.target.value }))}
-              aria-invalid={nameError !== null}
-              aria-describedby={nameError ? `${ids}-name-error` : undefined}
-              placeholder="예: 고가 200일 신고가"
-              autoComplete="off"
-              spellCheck={false}
-              className={`${FIELD_BOX} w-full max-w-[360px] px-2 placeholder:text-text-3`}
-            />
-            <Errors id={`${ids}-name-error`} messages={nameError ? [nameError] : []} />
-          </Row>
-
-          <Row label="봉 주기">
-            <Segment label="봉 주기" options={PERIODS} value={draft.period} onChange={(period) => setDraft((d) => ({ ...d, period }))} />
-          </Row>
-
-          <Row label="조건">
-            <ol aria-label="조건" className="flex flex-col gap-2.5">
-              {draft.conditions.map((c, i) => (
-                <ConditionLine
-                  key={c.key}
-                  ids={ids}
-                  index={i}
-                  condition={c}
-                  period={draft.period}
-                  removable={draft.conditions.length > 1}
-                  onChange={(patch) => setDraft((d) => editCondition(d, c.key, patch))}
-                  onRemove={() => setDraft((d) => removeCondition(d, c.key))}
-                />
-              ))}
-            </ol>
-            <span className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1">
-              <button
-                type="button"
-                className="tb-btn h-8 border border-line px-2.5 text-s disabled:opacity-40"
-                disabled={draft.conditions.length >= MAX_CONDITIONS}
-                onClick={() => setDraft(addCondition)}
-              >
-                <PlusIcon size={14} />
-                조건 더하기
-              </button>
-              <span className="text-xs text-text-3">
-                조건을 모두 만족하는 종목만 찾습니다 · {draft.conditions.length}/{MAX_CONDITIONS}줄
-              </span>
-            </span>
-          </Row>
-
-          {EXCLUDE_ROWS.map(({ group, label }) => (
-            <Row key={group} label={label}>
-              <div role="group" aria-label={label} className="flex flex-wrap gap-1.5 pt-px">
-                {excludesIn(group).map((k) => (
-                  <button key={k} type="button" aria-pressed={draft.exclude.includes(k)} onClick={() => setDraft((d) => toggleExclude(d, k))} className={CHIP}>
-                    {EXCLUDE_LABEL[k]}
-                  </button>
-                ))}
-              </div>
-              {group === "status" && <p className="text-xs leading-[1.5] text-text-3">고른 종류와 상태의 종목은 결과에서 뺍니다. 아무것도 고르지 않으면 전 종목이 대상입니다.</p>}
-            </Row>
-          ))}
-        </div>
+        <ScreenFields ids={ids} draft={draft} nameError={nameError} nameRef={nameRef} locked={busy} onChange={setDraft} />
 
         {notice && (
           <p role="alert" className="flex-none border-t border-line px-4 py-2 text-s leading-[1.45] text-up">
@@ -206,6 +143,87 @@ function ScreenDialogBody({ editId, opened }: { editId: string | null; opened: S
         </div>
       </form>
     </DialogFrame>
+  );
+}
+
+interface FieldsProps {
+  ids: string;
+  draft: ScreenDraft;
+  nameError: string | null;
+  nameRef?: Ref<HTMLInputElement>;
+  locked: boolean;
+  onChange(change: (draft: ScreenDraft) => ScreenDraft): void;
+}
+
+export function ScreenFields({ ids, draft, nameError, nameRef, locked, onChange }: FieldsProps) {
+  return (
+    <div className={`flex min-h-0 flex-1 flex-col gap-4 overflow-auto p-4 ${locked ? "opacity-60" : ""}`}>
+      <fieldset disabled={locked} className="contents">
+        <Row label="이름" labelFor={`${ids}-name`}>
+          <input
+            ref={nameRef}
+            id={`${ids}-name`}
+            value={draft.name}
+            onChange={(e) => onChange((d) => ({ ...d, name: e.target.value }))}
+            aria-invalid={nameError !== null}
+            aria-describedby={nameError ? `${ids}-name-error` : undefined}
+            placeholder="예: 고가 200일 신고가"
+            autoComplete="off"
+            spellCheck={false}
+            className={`${FIELD_BOX} w-full max-w-[360px] px-2 placeholder:text-text-3`}
+          />
+          <Errors id={`${ids}-name-error`} messages={nameError ? [nameError] : []} />
+        </Row>
+
+        <Row label="봉 주기">
+          <Segment label="봉 주기" options={PERIODS} value={draft.period} onChange={(period) => onChange((d) => ({ ...d, period }))} />
+        </Row>
+
+        <Row label="조건">
+          <ol aria-label="조건" className="flex flex-col gap-2.5">
+            {draft.conditions.map((c, i) => (
+              <ConditionLine
+                key={c.key}
+                ids={ids}
+                index={i}
+                condition={c}
+                period={draft.period}
+                removable={draft.conditions.length > 1}
+                onChange={(patch) => onChange((d) => editCondition(d, c.key, patch))}
+                onRemove={() => onChange((d) => removeCondition(d, c.key))}
+              />
+            ))}
+          </ol>
+          <span className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1">
+            <button
+              type="button"
+              className="tb-btn h-8 border border-line px-2.5 text-s disabled:opacity-40"
+              disabled={draft.conditions.length >= MAX_CONDITIONS}
+              onClick={() => onChange(addCondition)}
+            >
+              <PlusIcon size={14} />
+              조건 더하기
+            </button>
+            <span className="text-xs text-text-3">
+              조건을 모두 만족하는 종목만 찾습니다 · {draft.conditions.length}/{MAX_CONDITIONS}줄
+            </span>
+          </span>
+        </Row>
+
+        {EXCLUDE_ROWS.map(({ group, label }) => (
+          <Row key={group} label={label}>
+            <div role="group" aria-label={label} className="flex flex-wrap gap-1.5 pt-px">
+              {excludesIn(group).map((k) => (
+                <button key={k} type="button" aria-pressed={draft.exclude.includes(k)} onClick={() => onChange((d) => toggleExclude(d, k))} className={CHIP}>
+                  {EXCLUDE_LABEL[k]}
+                </button>
+              ))}
+            </div>
+            {group === "status" && <p className="text-xs leading-[1.5] text-text-3">고른 종류와 상태의 종목은 결과에서 뺍니다. 아무것도 고르지 않으면 전 종목이 대상입니다.</p>}
+          </Row>
+        ))}
+      </fieldset>
+    </div>
   );
 }
 
