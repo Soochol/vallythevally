@@ -11,9 +11,9 @@ use axum::routing::get;
 use domain::{Symbol, Venue};
 use serde::de::DeserializeOwned;
 
-use crate::api::{self, ApiErrorCode, Layout, LayoutInput, LayoutSummary, Revision, UiState, UnixSeconds, Watchlists};
+use crate::api::{self, ApiErrorCode, Layout, LayoutInput, LayoutSummary, Revision, Screen, Screens, UiState, UnixSeconds, Watchlists};
 use crate::http::{ApiFailure, AppState, symbol_list};
-use crate::userdata::{self, StoreError};
+use crate::userdata::{self, StoreError, wire_name};
 
 pub const JSON_LIMIT: usize = 64 * 1024;
 pub const LAYOUT_LIMIT: usize = 4 * JSON_LIMIT + 16 * 1024;
@@ -21,6 +21,7 @@ pub const LAYOUT_LIMIT: usize = 4 * JSON_LIMIT + 16 * 1024;
 pub fn routes() -> Router<Arc<AppState>> {
     Router::new()
         .route("/api/watchlists", get(get_watchlists).put(put_watchlists))
+        .route("/api/screens", get(get_screens).put(put_screens))
         .route("/api/layouts", get(list_layouts))
         .route("/api/layouts/{id}", get(get_layout).put(put_layout).delete(delete_layout))
         .route("/api/ui-state", get(get_ui_state).put(put_ui_state))
@@ -97,6 +98,54 @@ fn check_watchlists(all: &Watchlists) -> Result<(), ApiFailure> {
                 return Err(ApiFailure::bad_request(format!("관심종목 목록 {name}에 같은 종목이 두 번 있습니다: {}", code.0)));
             }
         }
+    }
+    Ok(())
+}
+
+const MAX_SCREENS: usize = 50;
+const MAX_SCREEN_NAME_CHARS: usize = 40;
+const MAX_SCREEN_CONDITIONS: usize = 10;
+const MAX_SCREEN_ID_BYTES: usize = 64;
+
+async fn get_screens(State(st): State<Arc<AppState>>) -> Result<Json<Screens>, ApiFailure> {
+    Ok(Json(userdata::get_screens(&st.db).await?))
+}
+
+async fn put_screens(State(st): State<Arc<AppState>>, body: Body) -> Result<Json<Screens>, ApiFailure> {
+    let all: Screens = read_json(body, JSON_LIMIT, "조건식 본문").await?;
+    check_screens(&all)?;
+    userdata::put_screens(&st.db, &all).await?;
+    Ok(Json(all))
+}
+
+fn check_screens(all: &Screens) -> Result<(), ApiFailure> {
+    if all.screens.len() > MAX_SCREENS {
+        return Err(ApiFailure::bad_request(format!("조건식은 {MAX_SCREENS}개까지 저장할 수 있습니다: {}개", all.screens.len())));
+    }
+    let mut ids = HashSet::new();
+    for screen in &all.screens {
+        if screen.id.is_empty() || screen.id.len() > MAX_SCREEN_ID_BYTES || !ids.insert(screen.id.as_str()) {
+            return Err(ApiFailure::bad_request(format!("조건식 id가 비었거나 길거나 겹칩니다: {}", screen.id)));
+        }
+        check_screen(screen)?;
+    }
+    Ok(())
+}
+
+fn check_screen(screen: &Screen) -> Result<(), ApiFailure> {
+    let name = &screen.name;
+    if !(1..=MAX_SCREEN_NAME_CHARS).contains(&name.trim().chars().count()) {
+        return Err(ApiFailure::bad_request(format!("조건식 이름은 공백을 빼고 1~{MAX_SCREEN_NAME_CHARS}자여야 합니다: {name:?}")));
+    }
+    if !(1..=MAX_SCREEN_CONDITIONS).contains(&screen.conditions.len()) {
+        return Err(ApiFailure::bad_request(format!("조건식 {name}의 조건은 1~{MAX_SCREEN_CONDITIONS}줄이어야 합니다: {}줄", screen.conditions.len())));
+    }
+    if let Some(c) = screen.conditions.iter().find(|c| !(1..=c.n).contains(&c.m)) {
+        return Err(ApiFailure::bad_request(format!("조건식 {name}의 조건은 1 ≤ m ≤ n이어야 합니다: n={}, m={}", c.n, c.m)));
+    }
+    let mut kinds = HashSet::new();
+    if let Some(kind) = screen.exclude.iter().find(|k| !kinds.insert(**k)) {
+        return Err(ApiFailure::bad_request(format!("조건식 {name}의 제외 목록에 {}가 두 번 있습니다", wire_name(kind))));
     }
     Ok(())
 }
