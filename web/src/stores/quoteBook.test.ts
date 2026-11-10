@@ -144,6 +144,24 @@ describe("QuoteBook", () => {
     expect(fetches.map((f) => f.symbols)).toEqual([["005930", "000660"], ["000660"]]);
   });
 
+  test("빠졌다가 서버가 새로 알리기 전에 다시 들어온 종목은 마지막 watch_limited대로 실시간 아님이다", async () => {
+    const { book, emit } = setup();
+    const release = book.lease(["005930", "000660"]);
+    await settle();
+    emit({ type: "watch_limited", symbols: ["000660"] });
+
+    release();
+    await settle();
+    expect(book.get("000660").limited).toBe(false);
+    book.lease(["005930", "000660"]);
+    await settle();
+    expect(book.get("000660").limited).toBe(true);
+    expect(book.get("005930").limited).toBe(false);
+
+    emit({ type: "watch_limited", symbols: [] });
+    expect(book.get("000660").limited).toBe(false);
+  });
+
   test("두 목록이 빌리면 순서대로 합치고 겹친 종목은 처음 자리만 남긴다. 마지막 lease가 풀리면 빈 목록을 알린다", async () => {
     const { book, watches, fetches } = setup();
     const desktop = book.lease(["005930", "000660"]);

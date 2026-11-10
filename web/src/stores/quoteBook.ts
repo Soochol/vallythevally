@@ -29,6 +29,8 @@ export class QuoteBook {
   private readonly leases = new Set<{ symbols: readonly SymbolCode[] }>();
   private watched: readonly SymbolCode[] = [];
   private members = new Set<SymbolCode>();
+  // 서버는 이 집합이 바뀔 때만 다시 보낸다. 줄이 빠졌다 들어와도 서버가 새로 알리기 전까지는 이 값이 맞다.
+  private serverLimited = new Set<SymbolCode>();
   private readonly rows = new Map<SymbolCode, WatchQuote>();
   private readonly listeners = new Map<SymbolCode, Set<() => void>>();
   private scheduled = false;
@@ -77,6 +79,7 @@ export class QuoteBook {
     for (const code of before) if (!this.members.has(code) && this.rows.delete(code)) this.notify(code);
     this.deps.socket.setWatch(next);
     const added = next.filter((c) => !before.has(c));
+    for (const code of added) if (this.serverLimited.has(code)) this.setLimited(code, true);
     if (added.length > 0) void this.load(added, 0);
   }
 
@@ -103,12 +106,12 @@ export class QuoteBook {
       case "quotes":
         for (const q of e.quotes) if (this.members.has(q.symbol)) this.put(q.symbol, { quote: q, limited: this.get(q.symbol).limited });
         return;
-      case "watch_limited": {
-        const limited = new Set(e.symbols);
-        for (const code of this.watched) this.setLimited(code, limited.has(code));
+      case "watch_limited":
+        this.serverLimited = new Set(e.symbols);
+        for (const code of this.watched) this.setLimited(code, this.serverLimited.has(code));
         return;
-      }
       case "resync":
+        this.serverLimited = new Set();
         for (const code of this.watched) this.setLimited(code, false);
         return;
     }
