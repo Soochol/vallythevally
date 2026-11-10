@@ -1,0 +1,5 @@
+{
+  "worker": {"agent": "codex", "model": "gpt-6.1-sol", "effort": "high"},
+  "reviewer": {"agent": "codex", "model": "gpt-6-astra", "effort": "high"},
+  "decision_author_ids": [150162001]
+}

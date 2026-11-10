@@ -1,62 +1,43 @@
 ---
 name: vally-coordinate
-description: Coordinate Orca implementation workers, independent reviews, fix rounds, and approved merges for Soochol/vallythevally.
+description: Coordinate Vally GitHub Feature/Ticket work, Orca assignments, task-specific evidence, independent review, and scoped PR readiness.
 ---
 
-# Vally Coordination
+# Vally coordination
 
-Coordinate implementation assignments, evidence checks, independent reviews, fixes, and approved merges. A worker's `worker_done` ends its assignment, not the overall task.
+GitHub Issues own business scope, conditions, native relations, phase, and acknowledged decisions. GitHub PRs own current heads and merge metadata. Orca owns executions. Local files preserve immutable source snapshots, operation intents, receipts, and evidence, plus narrow launch reservations. There is no local business-state database.
 
-## Start
+AGENTS.md owns common policy, pstack owns engineering playbooks, and the installed version-matched Orca guide owns execution, communication, placement, and recovery. Keep this one explicit entry skill. `worker_done` ends an execution, not a Ticket or Feature.
 
-1. Read the repository's `AGENTS.md` and task spec. Reconcile work, approvals, and open questions with actual Git/PR state. Before making, approving, or assigning documentation changes, read `docs/agents/document-policy.md` at the repository root.
-2. Use the installed `orchestration` skill's current guide for communication, recovery, and CLI selection. Set `ORCA_CLI_COMMAND` to that same executable.
-3. Identify whether this continues an existing Run or starts new work, and pass `--run` explicitly. Do not bypass an unresolved execution with a new Task.
+## Select work from GitHub
 
-## Dispatch
+1. Read AGENTS.md and the approved assignment. Before document work, read `docs/agents/document-policy.md`. Read the current Feature/Ticket through `gh` per `docs/agents/issue-tracker.md`.
+2. Load the installed `orchestration` guide, select its executable, and set `ORCA_CLI_COMMAND`. Load placement guidance before creation and recovery guidance for any uncertain operation. Use one-shot reads and notifications, not mail-consuming loops.
+3. Run `status --feature NUMBER` for native child Tickets, phases, blockers, and frontier. One coordinator may manage several independent Features. Feature bodies hold the overall goal and index, not a duplicate Ticket-status table. Native sub-issues/dependencies are authoritative. Assignees are advisory, not locks.
+4. Read [the contract format](references/contracts.md). Executable Tickets have one canonical versioned JSON block containing their human-readable goal, observable conditions, verification/evidence plan, scope, constraints, and capabilities. If formatting is missing or malformed, ask the coordinator to fix the source. Never silently rewrite business scope to fit a parser.
+5. Create only an execution request selecting source condition IDs, semantic revision, and a scoped runtime brief. Conditions and evidence tools come from this task. Fake Kiwoom, Playwright, HTTP, or SQLite product tests are examples, not a universal suite. Read-only smoke can explain why product checks are inapplicable; partial evidence does not pass an entire source condition.
 
-- Specify the goal, rationale, edit scope, completion evidence, prohibited access, approval gates, and push/PR permissions. `scripts/dispatch.py` injects the role and model; `ROLES` is the source of model defaults. Apply user-requested model changes there.
-- Use `worker` for implementation and fixes, and a different agent as `reviewer` for independent review. Assign review fixes to a fresh worker.
-- A review spec names the PR, exact head, approved exclusions, reproduction criteria, and separate evidence path. Keep original code, docs, Git, and PR state read-only.
-- Start subagents with the parent's creation tool. State their task role, scope, and parent-reporting relationship in the brief; do not copy the external Orca reporting protocol.
+Read [commands and recovery](references/operations.md) before dispatch or publication. Canonical skill source stays in Git; the coordinator handles global installation separately.
 
-Run from the skill directory. `--coordinator` is the actual coordinator checkout. `preview` only reads Git; inspect it, then replace `preview` with `start` using the same arguments.
+## Dispatch and inspect evidence
 
-```bash
-python3 scripts/dispatch.py preview --role reviewer --run RUN_ID \
-  --coordinator /absolute/coordinator-checkout \
-  --spec /absolute/review.md --title 'Independent PR review' \
-  --worktree /absolute/worker-worktree --head FULL_HEAD_SHA
-```
+- `config.json` supplies external worker Sol/high and reviewer Astra/high defaults. Task-authorized `--config` overrides only that dispatch. Pstack's internal-role settings remain separate. Preserve requested config, Orca receipt values, and provider execution model or unknown; receipt equality is not provider-model verification.
+- Preview, inspect the literal assembled brief and source identity/revision, then start with the same inputs and stable operation ID. The script injects role, selected source conditions, verification plan, capabilities, scope, and output requirements. Required skills name paths/revisions/dependencies; missing tools/access stay explicitly unavailable or unverified. Do not install tools/plugins or broaden account/data access implicitly.
+- New local implementation/reviewer workspaces default to `new-child`. Run from the actual coordinator checkout. The CLI compares official cwd-derived current identity with explicit coordinator identity, launches from that same cwd, and reads back actual child parent ID/instance. This verifies Orca workspace placement, not an undocumented independent chat binding. Git base and UI parent are separate. Top-level requires an explicit independent-workspace request; remote child creation is unsupported.
+- Existing worktrees retain their hierarchy. Review needs a clean separate worktree and exact full head. Dirty implementation handover needs authorized `--allow-dirty`. Setup defaults to `run`; use `--setup skip` for the coordinator-owned smoke here because registered setup copies credentials and fetches dependencies.
+- Native helpers use the parent's native tool, scoped relevant instructions, and parent-only reports. Do not give them external Orca reporting protocols. They and independent reviewers keep repository documents read-only under project policy.
+- After launching independent work, end the turn and wait for notifications. A failed start, unknown receipt, or wrong parent may leave a worker. Preserve receipts and follow installed recovery; never start another blindly or reclaim from time, missing inventory, or unverifiable liveness.
 
-For new implementation work, use `--role worker` and `--new-worktree NAME --repo /absolute/repository --base origin/main`, omitting `--worktree` and `--head`. Orca creates the worktree. Check existing worktrees for competing assignments. Use `--allow-dirty` only for approved implementation handovers that preserve uncommitted work.
+Worker and reviewer each return a human report plus compact structured result. Record it locally with `record --file`; this is a claim, not a verdict. Check actual Task/Dispatch, source revision, selected conditions, exact PR/head, report availability, capability observations, procedures, and reproduction evidence. Supplied snapshots carry source/scope/time/omissions and remain supplied evidence.
 
-`start` creates a new Task; do not use it to retry, change models, or reassign the same Task. Follow Orca's recovery guide, preserving the Task ID and required user instructions. Preserve and investigate receipts for failed starts or response/model mismatches; do not rerun automatically. Record Task, Dispatch, worktree, and head after comparing the receipt with actual state.
+## Decide and publish
 
-After dispatching independent work, end the turn and continue on Orca notifications. Do not supervise by polling or typing into worker terminals.
+The coordinator inspects claims and publishes explicit condition-scoped acceptance using `record --publish`. Use stable operation IDs and actual source/user references. Publication records intent before mutation and acknowledges only matching remote content/state read-back. A comment acknowledgment and a phase/closure acknowledgment are different facts. An uncertain publication is reconciled by marker/ID, never re-POSTed blindly.
 
-## Handle notifications
+`ready --ticket NUMBER` reads current source, acknowledged decisions, and actual PR heads. Ticket/execution/PR relations are many-to-many; evaluate each subject/condition/head separately. Historical results remain historical. Old criteria or review heads do not pass current requirements. Independent review uses a distinct exact-head assignment; proven findings block until a fresh accepted review resolves them. Approved exclusions remain visibly unverified. Design/account approval never substitutes for applicable merge/closure approval.
 
-| Notification | Action |
-|---|---|
-| `question` | Read the evidence and answer technical choices within existing approval. Ask the user about new policy, live-account access, or permissions; keep dependent work waiting for the answer. |
-| Blocker, usage limit, or `stopReason` | Establish the remaining state and continue independent work. Follow Orca's recovery guide for stopping or replacing workers. Silence or `unverifiable` does not prove exit. |
-| Implementation `worker_done` | Complete the evidence checks below and dispatch independent review when ready. |
-| Review findings | Turn proven findings within the approved scope into a fix spec. After fixes, arrange the same reproductions and independent rereview of the changed head. |
-| No review findings | Check the results, then proceed to the merge steps. |
+Record only approvals actually given, with the original instruction and scope. Reuse valid session approval rather than asking again to fill a record. Role flags, author allowlists, issue comments, and topology metadata are not authorization capabilities. Helpers sharing account credentials cannot be cryptographically distinguished by this CLI. New policy, account access, or measurement methods need the applicable user approval.
 
-## Check results
+A coordinator may explicitly publish a phase or Ticket-close decision after checking current complete Ticket conditions, delivery, review/final checks, findings, exclusions, and approval scope. A selected-condition execution cannot close the whole Ticket. Closing children never automatically closes the Feature; overall acceptance needs integration evidence. This CLI runs no merge and spawns no follow-on agents.
 
-- Read reports and execution evidence. Compare local/PR heads, scope, worktree state, and completion criteria. Distinguish self-report, automated checks, and independent review; keep failures and unverified results explicit. For bug fixes, confirm the same reproduction fails before and passes after the fix.
-- Compare reported skills, playbooks, and `skip` entries with the session record. On Codex, reading SKILL.md and applying its procedure counts as skill use; reading alone does not.
-- Repeat full checks only for new changes, failures, evidence gaps, or the repository's required pre-merge check.
-
-## Merge and finish
-
-1. Confirm independent review passed for the current head and the worktree is clean. Design judgments and implementer tests do not replace independent review. Run the repository's coordinator final check and post its result on the PR.
-2. Present the PR, changes, checks, and remaining limitations to the user and obtain approval to merge that PR. Reuse existing approval for the same scope; approval for another PR or PR creation does not cover merging.
-3. Merge the approved head. If it changes, inspect the difference and refresh the necessary checks and review. Live-account access, Kiwoom connections, and measurements require separate approval.
-4. After confirming the merge, follow approved cleanup rules and the Orca guide. Read existing cleanup scripts and preview their targets first. Preserve dirty worktrees, open PRs, active assignments, and unverified executions.
-5. Report each PR's outcome and remaining verification. Do not mark the overall task complete while independent review or measurements remain.
-
-Follow repository rules for permissions, secrets, Kiwoom access, and changes to measurement methods. This skill grants no additional authority; role wording and script checks are not security boundaries.
+Report PR/head and source Issue IDs/revisions, verified behavior, unverified exclusions, actual skills/playbooks/skips, and next action. Coordinator-owned independent review, live pilot, final repository check, installation, and separate merge authorization remain explicit until completed. Preserve dirty worktrees, open PRs, unrelated metadata, and uncertain executions.

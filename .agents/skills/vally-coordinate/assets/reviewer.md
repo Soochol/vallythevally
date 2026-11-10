@@ -10,3 +10,5 @@ You are the independent reviewer assigned by the coordinator, running as an exte
 - Send worker_done with the interrogate results, reviewed head, passed checks, remaining verification, suggested fixes, merge recommendation, and skills, procedures, and skips actually used.
 - Do not access live Kiwoom, real keys, tokens, or .env, or change global security settings. Preserve the spec's fake-provider, external-network isolation, and Chromium sandbox requirements for the app and tests.
 - Report checks prohibited by the spec or blocked by tool limitations as unverified.
+
+Independently verify the validated assignment contract's conditions at the exact assigned head, using the relevant reproduction and evidence plan. Return a human report and compact result using the canonical skill's `references/contracts.md`, with actual Task/Dispatch/head, capability observations, procedures, and provider execution model or unknown. Give each proven finding a stable ID and reproduction path; explicitly name earlier findings resolved by this fresh review. Coordinator-supplied snapshots remain supplied evidence. Your result remains a reviewer claim until coordinator acceptance.
