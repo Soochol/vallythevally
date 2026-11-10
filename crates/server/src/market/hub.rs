@@ -1546,6 +1546,24 @@ mod tests {
         assert_eq!(*h.desired.borrow(), BTreeSet::new());
     }
 
+    #[tokio::test(start_paused = true)]
+    async fn a_watched_symbol_stays_registered_but_its_closed_cell_key_is_dropped_after_thirty_seconds() {
+        let h = std_harness();
+        let (conn, out) = subscribed_samsung(&h).await;
+        let symbol = samsung().feed.symbol();
+        h.hub.watch(conn, vec![symbol]);
+        settle().await;
+        h.hub.unsubscribe(conn, sub("a"));
+        tokio::time::sleep(Duration::from_secs(29)).await;
+        assert!(h.hub.snapshot(samsung()).await.is_some(), "닫은 칸의 키는 30초 유예");
+        tokio::time::sleep(Duration::from_secs(2)).await;
+        assert_eq!(h.hub.snapshot(samsung()).await, None, "관심종목이 종목을 잡고 있어도 닫은 칸의 키는 내린다");
+        assert_eq!(*h.desired.borrow(), BTreeSet::from([symbol]), "관심종목 줄이 REG를 지킨다");
+        out.take(true);
+        h.events.send(day_trade(&h, (9, 1, 23), 112, Exchange::Krx, 12, 1_000)).await.unwrap();
+        assert_eq!(take(&out).await, vec![quote_msg(SAMSUNG, 112.0, 12.0, 1_000, at(9, 1, 23))], "키가 없어도 관심종목 줄은 체결을 받는다");
+    }
+
     #[test]
     fn gaps_overlap_trading_hours_on_any_day() {
         let d = |day: u8, h, m, s| kst(KstDate::new(2026, 11, day).unwrap(), h, m, s);
