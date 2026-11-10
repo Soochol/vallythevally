@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Start one vally agent in its own worktree as a child of the calling terminal (the lead).
-#   start.sh impl   <issue> --branch feat/58-x --spec FILE
-#   start.sh fix    <issue> --pr 61 --round 1 --spec FILE
+#   start.sh impl   <issue> --branch feat/58-x --spec FILE [--writer]
+#   start.sh fix    <issue> --pr 61 --round 1 --spec FILE [--writer]
 #   start.sh review <issue> --pr 61 --round 0 [--spec FILE]
 #   start.sh garden <issue> --pr 61
 source "$(dirname "$0")/lib.sh"
@@ -10,8 +10,9 @@ usage() { sed -n '2,6p' "$0" >&2; exit 2; }
 [ $# -ge 2 ] || usage
 kind=$1 issue=$2; shift 2
 need_issue "$issue"
-branch='' pr='' round='' spec=''
+branch='' pr='' round='' spec='' writer=''
 while [ $# -gt 0 ]; do
+  [ "$1" = --writer ] && { writer=1; shift; continue; }
   [ $# -ge 2 ] || usage
   case $1 in
     --branch) branch=$2;; --pr) pr=$2;; --round) round=$2;; --spec) spec=$2;;
@@ -31,6 +32,7 @@ case $kind in
     [ -n "$spec" ] || die "impl needs --spec"
     [[ $branch =~ ^(feat|fix|chore|docs|test|ci)/[a-z0-9][a-z0-9.-]*$ ]] || die "impl needs --branch like fix/58-theme-frame: '$branch'"
     role=worker template=vally-worker name=w$issue-impl round=${round:-0}
+    [ -z "$writer" ] || role=writer template=vally-writer
     worktree=$(worktree_for_branch "$branch")
     if [ ! -d "$worktree" ]; then
       if git show-ref --verify --quiet "refs/heads/$branch"; then git worktree add -q "$worktree" "$branch"
@@ -41,6 +43,7 @@ case $kind in
   fix)
     [ -n "$spec" ] && [ -n "$pr" ] && [ -n "$round" ] || die "fix needs --pr, --round and --spec"
     role=worker template=vally-worker name=w$issue-fix$round
+    [ -z "$writer" ] || role=writer template=vally-writer
     branch=$(gh pr view "$pr" --json headRefName --jq .headRefName)
     worktree=$(worktree_for_branch "$branch")
     if [ ! -d "$worktree" ]; then

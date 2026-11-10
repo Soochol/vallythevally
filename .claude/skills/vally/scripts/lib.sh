@@ -5,7 +5,7 @@ VALLY_WORKTREES=${VALLY_WORKTREES:-$HOME/.vally/worktrees/vallythevally}
 VALLY_STATE=${VALLY_STATE:-$HOME/.vally/state/vallythevally}
 VALLY_REPORTS=$VALLY_STATE/reports
 VALLY_TEMPLATES=${VALLY_TEMPLATES:-$HOME/.config/herdr-core/templates}
-VALLY_ROLES="worker reviewer gardener"
+VALLY_ROLES="worker reviewer gardener writer"
 VALLY_MODELS=${VALLY_MODELS:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/models.conf}
 
 # The command a role runs, built from its line in models.conf.

@@ -52,7 +52,7 @@ Write the spec to `reports/<issue>/spec-impl.md`:
 <"실제 호출 없음" unless the user approved a live call and its method>
 ```
 
-Then `vally/start.sh impl <issue> --branch <fix|feat|…>/<issue>-<slug> --spec <spec>`. The script makes the worktree, starts the agent as your child, labels it, and shows it as a tab. Which agent and model each role runs comes from `vally/../models.conf` (`.claude/skills/vally/models.conf`), which `start.sh` reads at every launch; when the user wants a different model for a role, edit that file. Tell the user it started, then **end your turn**: reports arrive as your next input, and the user can talk to you meanwhile.
+Then `vally/start.sh impl <issue> --branch <fix|feat|…>/<issue>-<slug> --spec <spec>`. For an issue that only writes or reorganizes documents (no code, no scripts), add `--writer`: the agent runs the `writer` role, which uses `pstack:technical-writing` instead of `pstack:poteto-mode`. Its fix rounds take `--writer` too. Moving or splitting files counts as documents; a docs check script does not. The script makes the worktree, starts the agent as your child, labels it, and shows it as a tab. Which agent and model each role runs comes from `vally/../models.conf` (`.claude/skills/vally/models.conf`), which `start.sh` reads at every launch; when the user wants a different model for a role, edit that file. Tell the user it started, then **end your turn**: reports arrive as your next input, and the user can talk to you meanwhile.
 
 ## 4. Handle reports
 
