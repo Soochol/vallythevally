@@ -9,13 +9,14 @@ use duckdb::{Config, Connection, OptionalExt, params};
 use crate::api::ExcludeKind;
 use crate::kiwoom::wire::{MillionWon, ScreenerListing};
 
-const SCHEMA_VERSION: i32 = 2;
+const SCHEMA_VERSION: i32 = 3;
 
 const SCHEMA: &str = "
 CREATE TABLE store_meta (schema_version INTEGER NOT NULL, last_day DATE);
 CREATE TABLE listed (code VARCHAR NOT NULL, name VARCHAR NOT NULL, listed_on DATE, excludable_as USMALLINT NOT NULL);
 CREATE TABLE history (code VARCHAR PRIMARY KEY, complete BOOLEAN NOT NULL, refetch BOOLEAN NOT NULL);
 CREATE TABLE daily (code VARCHAR NOT NULL, day DATE NOT NULL, open UBIGINT NOT NULL, high UBIGINT NOT NULL, low UBIGINT NOT NULL, close UBIGINT NOT NULL, volume UBIGINT NOT NULL, traded_million_won UBIGINT NOT NULL);
+CREATE TABLE calendar (day DATE PRIMARY KEY);
 ";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -189,6 +190,24 @@ impl Store {
             for b in bars {
                 let o = &b.ohlcv;
                 appender.append_row(params![code.as_str(), date_value(b.day), o.open().centi(), o.high().centi(), o.low().centi(), o.close().centi(), o.volume().0, b.traded.0])?;
+            }
+            appender.flush()?;
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
+    pub fn calendar_last_day(&self) -> Result<Option<KstDate>, StoreError> {
+        Ok(self.conn().query_row("SELECT max(day) FROM calendar", [], |row| row.get::<_, Option<i32>>(0))?.map(date_of))
+    }
+
+    pub fn extend_calendar(&self, days: &[KstDate]) -> Result<(), StoreError> {
+        let mut conn = self.conn();
+        let tx = conn.transaction()?;
+        {
+            let mut appender = tx.appender("calendar")?;
+            for &day in days {
+                appender.append_row(params![date_value(day)])?;
             }
             appender.flush()?;
         }

@@ -10,7 +10,7 @@ type Cell = i64;
 
 struct Cells {
     buckets: Vec<Bucket>,
-    first_stored_days: Vec<KstDate>,
+    first_observation_days: Vec<KstDate>,
     of_day: Vec<(KstDate, Cell)>,
 }
 
@@ -21,17 +21,17 @@ fn midnight(day: KstDate) -> KstTime {
 impl Cells {
     fn new(period: Period, days: &[KstDate]) -> Cells {
         let mut buckets: Vec<Bucket> = Vec::new();
-        let mut first_stored_days = Vec::new();
+        let mut first_observation_days = Vec::new();
         let mut of_day = Vec::with_capacity(days.len());
         for &day in days {
             let bucket = period.bucket(midnight(day));
             if buckets.last() != Some(&bucket) {
                 buckets.push(bucket);
-                first_stored_days.push(day);
+                first_observation_days.push(day);
             }
             of_day.push((day, buckets.len() as Cell - 1));
         }
-        Cells { buckets, first_stored_days, of_day }
+        Cells { buckets, first_observation_days, of_day }
     }
 
     fn as_of(&self) -> Cell {
@@ -50,12 +50,8 @@ impl Cells {
         self.buckets[cell as usize].start().kst_date()
     }
 
-    fn first_possible_day(&self, cell: Cell) -> Option<KstDate> {
-        match cell {
-            0 => Some(self.start_day(0)),
-            c if c > 0 => self.first_stored_days.get(c as usize).copied(),
-            _ => None,
-        }
+    fn first_observation_day(&self, cell: Cell) -> Option<KstDate> {
+        usize::try_from(cell).ok().and_then(|c| self.first_observation_days.get(c)).copied()
     }
 }
 
@@ -65,7 +61,7 @@ struct Stock {
     listed_on: Option<KstDate>,
     excludable_as: u16,
     complete: bool,
-    first_day: Option<KstDate>,
+    first_stored_day: Option<KstDate>,
 }
 
 enum Standing {
@@ -96,14 +92,14 @@ impl Reach {
     }
 
     fn standing(&self, stock: &Stock, cells: &Cells) -> Standing {
-        let first = stock.first_day.map(|d| cells.at_or_after(d));
+        let first_stored_cell = stock.first_stored_day.map(|d| cells.at_or_after(d));
         let listed = stock.listed_on.and_then(|d| cells.of_listing(d));
-        let start = if stock.complete { listed.max(first) } else { listed };
+        let start = if stock.complete { listed.max(first_stored_cell) } else { listed };
         if start.is_some_and(|s| self.as_of - s + 1 < self.longest_n) {
             return Standing::ListedTooShort;
         }
         let needed = start.map_or(self.earliest_needed, |s| self.earliest_needed.max(s));
-        let stored_from_needed = stock.first_day.zip(cells.first_possible_day(needed)).is_some_and(|(first, possible)| first <= possible);
+        let stored_from_needed = stock.first_stored_day.zip(cells.first_observation_day(needed)).is_some_and(|(stored, observed)| stored <= observed);
         if !stock.complete && !stored_from_needed {
             return Standing::HistoryShort;
         }
@@ -186,10 +182,10 @@ fn change_rate(close: Price, previous: Price) -> f64 {
 }
 
 fn observation_days(tx: &Transaction, as_of: KstDate) -> Result<Vec<KstDate>, StoreError> {
-    let mut stmt = tx.prepare("SELECT DISTINCT day FROM daily WHERE day <= ? ORDER BY day")?;
-    let mut days = stmt.query_map(params![date_value(as_of)], |row| row.get::<_, i32>(0))?.map(|day| day.map(date_of)).collect::<Result<Vec<_>, _>>()?;
+    let mut stmt = tx.prepare("SELECT day FROM calendar WHERE day <= ? ORDER BY day")?;
+    let days = stmt.query_map(params![date_value(as_of)], |row| row.get::<_, i32>(0))?.map(|day| day.map(date_of)).collect::<Result<Vec<_>, _>>()?;
     if days.last() != Some(&as_of) {
-        days.push(as_of);
+        return Err(StoreError(format!("관측일 달력에 기준 관측일 {as_of}이 없습니다")));
     }
     Ok(days)
 }
@@ -204,8 +200,8 @@ fn stocks(tx: &Transaction, as_of: KstDate) -> Result<Vec<Stock>, StoreError> {
         Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, Option<i32>>(2)?, row.get::<_, u16>(3)?, row.get::<_, bool>(4)?, row.get::<_, Option<i32>>(5)?))
     })?;
     rows.map(|row| {
-        let (code, name, listed_on, excludable_as, complete, first_day) = row?;
-        Ok(Stock { code: stock_code(&code)?, name, listed_on: listed_on.map(date_of), excludable_as, complete, first_day: first_day.map(date_of) })
+        let (code, name, listed_on, excludable_as, complete, first_stored_day) = row?;
+        Ok(Stock { code: stock_code(&code)?, name, listed_on: listed_on.map(date_of), excludable_as, complete, first_stored_day: first_stored_day.map(date_of) })
     })
     .collect()
 }

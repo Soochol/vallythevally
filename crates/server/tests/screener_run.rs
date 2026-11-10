@@ -459,13 +459,83 @@ async fn a_partly_stored_first_week_or_month_is_history_short_until_backfill_fil
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn the_update_stores_the_kospi_calendar_back_to_its_first_day_once_then_appends_only_new_days() {
+    let days = last_open_days(1_301, day(2026, 11, 6));
+    let (yesterday, today) = (days[1_299], days[1_300]);
+    let calendar_keys = |calls: &[fake_kiwoom::Call]| calls.iter().filter(|c| c.api_id == "ka20006").map(|c| c.next_key.clone()).collect::<Vec<_>>();
+    let fake = FakeKiwoom::start().await;
+    fake.set_krx_market(KrxMarket { days: days[..1_300].to_vec(), stocks: vec![stock("200010", priced(&days[1_270..1_300], |_| 100))] });
+    let dir = tempfile::tempdir().unwrap();
+    let server = boot(&fake, dir.path(), &at(yesterday, "2030"));
+    let api = Api::of(&server).await;
+    api.update().await;
+    api.settled().await;
+    let first = calendar_keys(&fake.calls());
+    assert!(first.contains(&Some("IDX-1".to_owned())) && first.contains(&Some("IDX-2".to_owned())), "1,300관측일을 600행씩 연속조회로 끝까지 받는다: {first:?}");
+    server.stop().await;
+
+    let seen = fake.calls().len();
+    fake.set_krx_market(KrxMarket { days: days.clone(), stocks: vec![stock("200010", priced(&days[1_270..], |_| 100))] });
+    let server = boot(&fake, dir.path(), &at(today, "2030"));
+    let api = Api::of(&server).await;
+    api.update().await;
+    api.settled().await;
+    let next = calendar_keys(&fake.calls()[seen..]);
+    assert!(!next.is_empty() && next.iter().all(Option::is_none), "다음 날은 최근 코스피 일봉에서 하루를 덧붙이고 연속조회하지 않는다: {next:?}");
+    assert_eq!(api.result(&daily(&[("high", 5, 1)])).await["asOf"], json!(today.to_string()), "덧붙인 오늘이 달력에 있어 오늘 기준으로 실행된다");
+    server.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_delisted_stocks_old_bars_do_not_fill_in_the_unstored_start_of_a_new_listings_first_week() {
+    let today = day(2026, 11, 4);
+    let days = last_open_days(1_300, today);
+    let delisted = stock("200030", priced(&days.iter().copied().filter(|d| (d.year(), d.month()) == (2024, 5)).collect::<Vec<_>>(), |_| 100));
+    let listed_from = days.iter().position(|&d| d == day(2024, 7, 1)).unwrap();
+    let listed_days = &days[listed_from..];
+    let new_listing = stock("200020", priced(listed_days, |i| if listed_days[i] == day(2024, 7, 15) { 300 } else if listed_days[i] == today { 200 } else { 100 }));
+    assert_eq!(new_listing.bars[new_listing.bars.len() - 600].day, day(2024, 7, 18), "최근 600관측일은 7-18(목)부터라 7-15·16·17이 빠진다");
+    let fake = FakeKiwoom::start().await;
+    fake.set_krx_market(KrxMarket { days: days.clone(), stocks: vec![delisted] });
+    let dir = tempfile::tempdir().unwrap();
+    let server = boot(&fake, dir.path(), &at(today, "2030"));
+    let api = Api::of(&server).await;
+    api.update().await;
+    api.settled().await;
+
+    fake.set_krx_market(KrxMarket { days, stocks: vec![new_listing] });
+    fake.delay("ka10081", Duration::from_secs(1));
+    api.update().await;
+    api.wait_for("과거 이어 받기", |s| s["update"]["phase"] == "backfill").await;
+    api.cancel().await;
+    assert_eq!(api.status().await["fullHistory"], json!({"done": 0, "total": 1}), "상장폐지된 200030은 목록에서 빠지고 2024-05 봉만 남았다");
+    let judged = |r: &Value| (r["universe"].clone(), r["excluded"].clone(), hits(r));
+    let cases = [
+        (screen("W", &[("high", 121, 1)], &[]), excluded(0, 1), vec![]),
+        (screen("M", &[("high", 29, 1)], &[]), excluded(0, 1), vec![]),
+        (screen("W", &[("high", 120, 1)], &[]), excluded(0, 0), vec![hit("200020", day(2026, 11, 2))]),
+        (screen("M", &[("high", 28, 1)], &[]), excluded(0, 0), vec![hit("200020", day(2026, 11, 1))]),
+    ];
+    for (screen, want_excluded, want_hits) in cases {
+        assert_eq!(judged(&api.result(&screen).await), (json!(1), want_excluded, want_hits), "{screen}: 필요한 첫 주·달의 첫 관측일은 코스피 달력의 7-15·7-01이다");
+    }
+
+    fake.reset();
+    api.update().await;
+    assert_eq!(api.settled().await["fullHistory"], json!({"done": 1, "total": 1}));
+    for screen in [screen("W", &[("high", 121, 1)], &[]), screen("M", &[("high", 29, 1)], &[])] {
+        assert_eq!(judged(&api.result(&screen).await), (json!(1), excluded(0, 0), vec![]), "{screen}: 과거를 채우면 7-15 고가 300이 창에 들어 신고가가 아니다");
+    }
+    server.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn runs_racing_into_recent_read_the_store_from_before_recent_or_are_refused() {
     let days = fortnight();
     let (yesterday, today) = (days[13], days[14]);
     let stopped_trading = stock("200020", priced(&days[..9], |_| 100));
-    let delisted_today = stock("200030", priced(&days[..14], |_| 100));
     let fake = FakeKiwoom::start().await;
-    fake.set_krx_market(KrxMarket { days: days[..14].to_vec(), stocks: vec![stopped_trading.clone(), delisted_today] });
+    fake.set_krx_market(KrxMarket { days: days[..14].to_vec(), stocks: vec![stopped_trading.clone()] });
     let dir = tempfile::tempdir().unwrap();
     let server = boot(&fake, dir.path(), &at(yesterday, "2030"));
     let api = Api::of(&server).await;
@@ -478,11 +548,7 @@ async fn runs_racing_into_recent_read_the_store_from_before_recent_or_are_refuse
     let api = Api::of(&server).await;
     let new_high = daily(&[("high", 3, 3)]);
     let before = api.result(&new_high).await;
-    assert_eq!(
-        (before["asOf"].clone(), before["universe"].clone(), hits(&before)),
-        (json!(yesterday.to_string()), json!(2), vec![hit("200030", yesterday)]),
-        "어제 자료가 있어 저녁 업데이트 전에도 실행된다"
-    );
+    assert_eq!((before["asOf"].clone(), before["universe"].clone(), hits(&before)), (json!(yesterday.to_string()), json!(1), vec![]), "어제 자료가 있어 저녁 업데이트 전에도 실행된다");
 
     let calendar_calls = || fake.calls().iter().filter(|c| c.api_id == "ka20006").count();
     let seen = calendar_calls();
@@ -495,7 +561,7 @@ async fn runs_racing_into_recent_read_the_store_from_before_recent_or_are_refuse
         tokio::time::sleep(Duration::from_millis(5)).await;
     }
     assert!(calendar_calls() > seen, "업데이트가 목록을 바꾸고 코스피 달력을 묻는 중이다");
-    let racing = futures::future::join_all((0..200).map(|_| api.run(&new_high))).await;
+    let racing = futures::future::join_all((0..400).map(|_| api.run(&new_high))).await;
     let mut outcomes = std::collections::BTreeMap::new();
     for (status, body) in &racing {
         let outcome = match (*status, body["asOf"].as_str()) {
@@ -551,6 +617,7 @@ fn fill_large_store(path: &Path, days: &[KstDate]) {
     let codes: Vec<StockCode> = (0..LARGE_STOCKS).map(|i| StockCode::parse(&format!("{:05}0", 10_000 + i)).unwrap()).collect();
     let listing: Vec<ScreenerListing> = codes.iter().map(|&code| ScreenerListing { code, name: format!("가상{}", code.as_str()), listed_on: Some(days[0]), excludable_as: vec![] }).collect();
     store.replace_listing(&listing).unwrap();
+    store.extend_calendar(days).unwrap();
     for (k, chunk) in codes.chunks(100).enumerate() {
         let writes: Vec<Write> = chunk.iter().enumerate().map(|(i, &code)| Write::Replace { code, bars: random_walk((k * 100 + i) as u64, days) }).collect();
         store.write(&writes).unwrap();
