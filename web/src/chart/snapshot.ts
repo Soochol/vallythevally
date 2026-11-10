@@ -13,7 +13,6 @@ export interface SnapshotHead {
   period: string;
   takenAt: UnixSeconds;
   legend: LegendParts | null;
-  /** 보이는 지표마다 이름과 마지막 봉의 값(frontend.md §5.4 차트 이미지). */
   indicators: { name: string; color: string; values: { text: string; color: string }[] }[];
 }
 

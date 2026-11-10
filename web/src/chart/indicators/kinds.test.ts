@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { colorsFrom, firstUnusedColor, KIND_ORDER, KINDS, lineColor, primaryLine, shownColor, specLines, specName } from "./kinds";
+import { colorsFrom, firstUnusedColor, KIND_ORDER, KINDS, lineColor, colorLine, shownColor, specLines, specName } from "./kinds";
 
 test("기본값은 backend.md §9.5 표를 따른다", () => {
   expect(KIND_ORDER.map((k) => KINDS[k].defaults)).toEqual([
@@ -23,8 +23,8 @@ test("이름에 설정값을 붙인다", () => {
 test("거래량은 막대 말고 이동평균 선이 색을 고른다", () => {
   const vol = { kind: "volume", maPeriod: 20 } as const;
   expect(specLines(vol)).toEqual(["volume", "ma"]);
-  expect(primaryLine(vol)).toBe(1);
-  expect(primaryLine({ kind: "volume", maPeriod: null })).toBeNull();
+  expect(colorLine(vol)).toBe(1);
+  expect(colorLine({ kind: "volume", maPeriod: null })).toBeNull();
   expect(colorsFrom(vol, "ind-3")).toEqual(["ind-2", "ind-3"]);
   expect(shownColor(vol, colorsFrom(vol, "ind-3"))).toBe("ind-3");
 });

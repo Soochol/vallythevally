@@ -34,7 +34,6 @@ const WIDTHS = [
 const NUMBER_INPUT =
   "h-[30px] w-24 rounded-m border border-line bg-chart-bg px-2 text-text outline-none focus:border-accent aria-invalid:border-up aria-invalid:focus:border-up disabled:opacity-50";
 
-/** 지표 추가·편집(frontend.md §3.3). 추가해도 닫지 않는다. 이동평균 5·20·60·120을 연달아 넣기 위해서다. */
 export function IndicatorDialog() {
   const dialog = useSelectionStore((s) => s.dialog);
   return dialog?.kind === "indicator" ? <IndicatorDialogBody slot={dialog.slot} editId={dialog.editId} /> : null;
@@ -85,7 +84,7 @@ function IndicatorDialogBody({ slot, editId }: { slot: Slot; editId: string | nu
   const check = checkForm(draft.form, typeof validator === "function" ? validator : null);
   const placed = placeErrors(kind, check.errors);
   const rest = validator === "failed" ? [...placed.rest, "지표 설정 검사기를 불러오지 못했습니다. 새로 고침해 보세요."] : placed.rest;
-  const color = draft.color ?? nextColor(indicators);
+  const color = draft.color === "auto" ? nextColor(indicators) : draft.color;
   const kinds = editing ? KIND_ORDER : matchKinds(query);
   const optionId = (k: IndicatorKind) => `${ids}-kind-${k}`;
 
@@ -101,7 +100,7 @@ function IndicatorDialogBody({ slot, editId }: { slot: Slot; editId: string | nu
   }, [editingId]);
 
   const setText = (key: string, value: string) => setDraft((d) => ({ ...d, form: { ...d.form, text: { ...d.form.text, [key]: value } } }));
-  const setOn = (key: string, on: boolean) => setDraft((d) => ({ ...d, form: { ...d.form, on: { ...d.form.on, [key]: on } } }));
+  const setEnabled = (key: string, on: boolean) => setDraft((d) => ({ ...d, form: { ...d.form, enabled: { ...d.form.enabled, [key]: on } } }));
   const chooseKind = (k: IndicatorKind) => {
     if (!editing && k !== kind) setDraft(startDraft(null, k));
   };
@@ -115,7 +114,7 @@ function IndicatorDialogBody({ slot, editId }: { slot: Slot; editId: string | nu
     if (next) chooseKind(next);
   };
 
-  const submit = (e: React.FormEvent) => {
+  const submit = (e: React.SyntheticEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (!check.ok) return;
     const style = { colors: colorsFrom(check.spec, color), width: draft.width };
@@ -124,7 +123,7 @@ function IndicatorDialogBody({ slot, editId }: { slot: Slot; editId: string | nu
       openIndicators(slot, null);
     } else {
       addIndicator(slot, check.spec, style);
-      setDraft((d) => ({ ...d, color: null }));
+      setDraft((d) => ({ ...d, color: "auto" }));
     }
   };
   const remove = (id: string) => {
@@ -292,13 +291,13 @@ function IndicatorDialogBody({ slot, editId }: { slot: Slot; editId: string | nu
                       </Row>
                     );
                   }
-                  const on = f.type !== "optionalInt" || draft.form.on[f.key] === true;
+                  const on = f.type !== "optionalInt" || draft.form.enabled[f.key] === true;
                   return (
                     <Row key={f.key} label={f.label} labelFor={inputId}>
                       <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
                         {f.type === "optionalInt" && (
                           <label className="flex items-center gap-1.5 text-s">
-                            <input type="checkbox" checked={on} onChange={(e) => setOn(f.key, e.target.checked)} />
+                            <input type="checkbox" checked={on} onChange={(e) => setEnabled(f.key, e.target.checked)} />
                             {f.toggle}
                           </label>
                         )}

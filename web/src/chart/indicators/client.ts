@@ -6,26 +6,23 @@ export interface WorkerLike {
   onerror: ((e: ErrorEvent) => void) | null;
 }
 
-/** 컨트롤러 하나가 쓰는 워커 연결. cell은 컨트롤러 인스턴스 번호다(칸 번호가 아니다). */
 export interface IndicatorPort {
-  readonly cell: number;
+  readonly chart: number;
   post(msg: ToWorker, transfer?: Transferable[]): void;
   close(): void;
 }
 
 export interface PortListener {
   message(m: Exclude<FromWorker, { type: "fatal" }>): void;
-  /** wasm init 실패, 워커 오류. 그 뒤로는 계산하지 않는다. */
   broken(message: string): void;
 }
 
 export type OpenPort = (listener: PortListener) => IndicatorPort;
 
-/** 탭에 워커 하나를 두고 칸마다 응답을 나눠 준다(frontend.md §5.6). */
 export function createHub(makeWorker: () => WorkerLike): OpenPort {
   let worker: WorkerLike | null = null;
   let brokenWith: string | null = null;
-  let nextCell = 0;
+  let nextChart = 0;
   const listeners = new Map<number, PortListener>();
 
   const breakAll = (message: string) => {
@@ -45,28 +42,28 @@ export function createHub(makeWorker: () => WorkerLike): OpenPort {
     worker.onmessage = (e) => {
       const m = e.data;
       if (m.type === "fatal") return breakAll(m.message);
-      listeners.get(m.cell)?.message(m);
+      listeners.get(m.chart)?.message(m);
     };
     worker.onerror = (e) => breakAll(e.message || "지표 워커 오류");
     return worker;
   };
 
   return (listener) => {
-    const cell = ++nextCell;
+    const chart = ++nextChart;
     ensure();
-    listeners.set(cell, listener);
+    listeners.set(chart, listener);
     if (brokenWith !== null) {
       const message = brokenWith;
-      queueMicrotask(() => listeners.get(cell)?.broken(message));
+      queueMicrotask(() => listeners.get(chart)?.broken(message));
     }
     return {
-      cell,
+      chart,
       post: (msg, transfer = []) => {
         if (brokenWith === null) ensure()?.postMessage(msg, transfer);
       },
       close: () => {
-        if (!listeners.delete(cell)) return;
-        if (brokenWith === null && worker) worker.postMessage({ type: "drop", cell, ids: "all" }, []);
+        if (!listeners.delete(chart)) return;
+        if (brokenWith === null && worker) worker.postMessage({ type: "drop", chart, ids: "all" }, []);
       },
     };
   };

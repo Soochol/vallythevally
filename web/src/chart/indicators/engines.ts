@@ -1,7 +1,6 @@
 import type { Period } from "../../api/generated/Period";
 import type { BarTuple, Columns, Created, EngineErrorKind, EngineResult, Failed, FromWorker, LineDraw, LineInfo, Point, ToWorker } from "./protocol";
 
-/** 워커가 쓰는 wasm 표면. 시험은 실제 wasm을, 고장 시험은 일부러 던지는 가짜를 넣는다. */
 export interface Engine {
   lines(): string[];
   shift(index: number): number;
@@ -40,36 +39,32 @@ class EngineFailure extends Error {
 
 const messageOf = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
-/**
- * 워커 안의 엔진들(frontend.md §5.6). 칸마다 `Map<지표 id, 엔진>`을 들고, 선의 점 i를 시각 `T[i + shift]`에 놓는다.
- * `T`는 봉 시각 뒤에 `futureBarStarts`로 만든 미래 시각을 이은 것이다. 엔진 하나의 실패는 그 엔진만 버린다.
- */
 export class Engines {
-  private readonly cells = new Map<number, { period: Period; held: Map<string, Held> }>();
+  private readonly charts = new Map<number, { period: Period; held: Map<string, Held> }>();
 
   constructor(private readonly wasm: Wasm) {}
 
   handle(msg: ToWorker): FromWorker | null {
     switch (msg.type) {
       case "create":
-        return { type: "created", cell: msg.cell, results: this.create(msg) };
+        return { type: "created", chart: msg.chart, results: this.create(msg) };
       case "bar":
-        return { type: "tail", cell: msg.cell, results: this.bar(msg.cell, msg.kind, msg.bar) };
+        return { type: "tail", chart: msg.chart, results: this.bar(msg.chart, msg.kind, msg.bar) };
       case "drop":
-        this.drop(msg.cell, msg.ids);
+        this.drop(msg.chart, msg.ids);
         return null;
     }
   }
 
   private create(msg: Extract<ToWorker, { type: "create" }>): (Created | Failed)[] {
-    const cell = this.cells.get(msg.cell) ?? { period: msg.period, held: new Map() };
-    cell.period = msg.period;
-    this.cells.set(msg.cell, cell);
+    const chart = this.charts.get(msg.chart) ?? { period: msg.period, held: new Map() };
+    chart.period = msg.period;
+    this.charts.set(msg.chart, chart);
     return msg.engines.map(({ id, spec }): Created | Failed => {
-      this.free(cell.held, id);
+      this.free(chart.held, id);
       try {
         const held = this.build(msg, spec);
-        cell.held.set(id, held);
+        chart.held.set(id, held);
         return { id, gen: msg.gen, ok: true, lines: held.lines, draws: held.lines.map((_, li): LineDraw => ({ op: "set", points: this.allPoints(held, li) })) };
       } catch (e) {
         const kind = e instanceof EngineFailure ? e.kind : "calc";
@@ -102,14 +97,14 @@ export class Engines {
     }
   }
 
-  private bar(cellId: number, kind: "preview" | "confirm", bar: BarTuple): EngineResult[] {
-    const cell = this.cells.get(cellId);
-    if (!cell) return [];
-    return [...cell.held].map(([id, held]): EngineResult => {
+  private bar(chartId: number, kind: "preview" | "confirm", bar: BarTuple): EngineResult[] {
+    const chart = this.charts.get(chartId);
+    if (!chart) return [];
+    return [...chart.held].map(([id, held]): EngineResult => {
       try {
-        return { id, gen: held.gen, ok: true, draws: this.step(cell.period, held, kind, bar) };
+        return { id, gen: held.gen, ok: true, draws: this.step(chart.period, held, kind, bar) };
       } catch (e) {
-        this.free(cell.held, id);
+        this.free(chart.held, id);
         return { id, gen: held.gen, ok: false, error: "calc", message: messageOf(e) };
       }
     });
@@ -159,11 +154,11 @@ export class Engines {
     return li === held.volumeLine ? { t, v, up: held.up[index]! } : { t, v };
   }
 
-  private drop(cellId: number, ids: string[] | "all"): void {
-    const cell = this.cells.get(cellId);
-    if (!cell) return;
-    for (const id of ids === "all" ? [...cell.held.keys()] : ids) this.free(cell.held, id);
-    if (cell.held.size === 0) this.cells.delete(cellId);
+  private drop(chartId: number, ids: string[] | "all"): void {
+    const chart = this.charts.get(chartId);
+    if (!chart) return;
+    for (const id of ids === "all" ? [...chart.held.keys()] : ids) this.free(chart.held, id);
+    if (chart.held.size === 0) this.charts.delete(chartId);
   }
 
   private free(held: Map<string, Held>, id: string): void {
@@ -178,7 +173,5 @@ export class Engines {
 function safeFree(engine: Engine): void {
   try {
     engine.free();
-  } catch {
-    /* 이미 버린 엔진 */
-  }
+  } catch {}
 }

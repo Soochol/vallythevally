@@ -19,7 +19,7 @@ const CHIP =
 /**
  * 휴대폰 봉 주기 칩(frontend.md §4, D11). 칩은 5·15·60분과 일·주·월 여섯이고,
  * 칩을 길게 누르면(또는 상황 메뉴 키) 1·3·30분 메뉴가 열린다.
- * 그 메뉴의 봉 주기를 보는 동안에는 그 칩을 맨 앞에 눌린 채로 보인다. 줄 끝에 지표 버튼을 둔다.
+ * 그 메뉴의 봉 주기를 보는 동안에는 그 칩을 맨 앞에 눌린 채로 보인다.
  */
 export function PeriodChips({ cell }: { cell: CellState }) {
   const setPeriod = useLayoutStore((s) => s.setPeriod);

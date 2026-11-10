@@ -13,7 +13,7 @@ export type IndicatorColor = (typeof INDICATOR_COLORS)[number];
 export type SpecField =
   | { key: string; label: string; type: "int"; unit?: string }
   | { key: string; label: string; type: "float" }
-  | { key: string; label: string; type: "optionalInt"; unit?: string; toggle: string }
+  | { key: string; label: string; type: "optionalInt"; unit?: string; toggle: string; start: number }
   | { key: string; label: string; type: "method" };
 
 interface KindInfo<K extends IndicatorKind> {
@@ -29,7 +29,6 @@ type Registry = { [K in IndicatorKind]: KindInfo<K> };
 
 const int = (key: string, label: string, unit?: string): SpecField => ({ key, label, type: "int", unit });
 
-/** 지표 종류 일곱 가지(frontend.md §3.3). 기본값은 backend.md §9.5, 선 순서는 `indicators::Spec::lines`와 같다. */
 export const KINDS: Registry = {
   ma: {
     label: "이동평균",
@@ -59,7 +58,7 @@ export const KINDS: Registry = {
     label: "거래량",
     place: "panel",
     defaults: { kind: "volume", maPeriod: 20 },
-    fields: [{ key: "maPeriod", label: "이동평균", type: "optionalInt", unit: "봉", toggle: "이동평균 함께 그리기" }],
+    fields: [{ key: "maPeriod", label: "이동평균", type: "optionalInt", unit: "봉", toggle: "이동평균 함께 그리기", start: 20 }],
     name: () => "거래량",
     lines: (s) => (s.maPeriod === null ? ["volume"] : ["volume", "ma"]),
   },
@@ -67,7 +66,7 @@ export const KINDS: Registry = {
     label: "RSI",
     place: "panel",
     defaults: { kind: "rsi", period: 14, signal: null },
-    fields: [int("period", "기간", "봉"), { key: "signal", label: "시그널", type: "optionalInt", unit: "봉", toggle: "시그널 함께 그리기" }],
+    fields: [int("period", "기간", "봉"), { key: "signal", label: "시그널", type: "optionalInt", unit: "봉", toggle: "시그널 함께 그리기", start: 9 }],
     name: (s) => (s.signal === null ? `RSI ${s.period}` : `RSI ${s.period} ${s.signal}`),
     lines: (s) => (s.signal === null ? ["rsi"] : ["rsi", "signal"]),
   },
@@ -105,7 +104,6 @@ export function placementOf(spec: IndicatorSpec): Placement {
   return KINDS[spec.kind].place;
 }
 
-/** 막대로 그리는 선. 색은 설정이 아니라 등락(거래량)이나 부호(MACD 히스토그램)로 정한다. */
 export const isBarLine = (line: LineId): boolean => line === "volume" || line === "histogram";
 
 export const LINE_LABEL: Record<LineId, string> = {
@@ -127,36 +125,31 @@ export const LINE_LABEL: Record<LineId, string> = {
   d: "%D",
 };
 
-/** 색을 고를 선: 막대가 아닌 첫 선. 없으면(이동평균 없는 거래량) 고를 색이 없다. */
-export function primaryLine(spec: IndicatorSpec): number | null {
+export function colorLine(spec: IndicatorSpec): number | null {
   const i = specLines(spec).findIndex((l) => !isBarLine(l));
   return i < 0 ? null : i;
 }
 
 const wrap = (i: number) => INDICATOR_COLORS[((i % INDICATOR_COLORS.length) + INDICATOR_COLORS.length) % INDICATOR_COLORS.length]!;
 
-/** 색을 고를 선이 base 색을 갖고, 나머지 선은 견본 순서대로 잇는다. */
 export function colorsFrom(spec: IndicatorSpec, base: IndicatorColor): IndicatorColor[] {
-  const p = primaryLine(spec) ?? 0;
+  const p = colorLine(spec) ?? 0;
   const b = INDICATOR_COLORS.indexOf(base);
   return specLines(spec).map((_, i) => wrap(b + i - p));
 }
 
-/** 다섯 견본 중 아직 쓰지 않은 첫 색(frontend.md §3.3). 다 썼으면 첫 색. */
 export function firstUnusedColor(used: readonly IndicatorColor[]): IndicatorColor {
   return INDICATOR_COLORS.find((c) => !used.includes(c)) ?? INDICATOR_COLORS[0];
 }
 
-/** 지표가 대표로 쓰는 색(색을 고를 선의 색). */
 export function shownColor(spec: IndicatorSpec, colors: readonly IndicatorColor[]): IndicatorColor {
-  return lineColor(spec, colors, primaryLine(spec) ?? 0);
+  return lineColor(spec, colors, colorLine(spec) ?? 0);
 }
 
-/** 선 i의 색. 저장된 색이 모자라면(선이 늘어난 설정) 대표 색에서 견본 순서대로 채운다. */
 export function lineColor(spec: IndicatorSpec, colors: readonly IndicatorColor[], i: number): IndicatorColor {
   const own = colors[i];
   if (own) return own;
-  const p = primaryLine(spec) ?? 0;
+  const p = colorLine(spec) ?? 0;
   const base = colors[p] ?? colors[0] ?? INDICATOR_COLORS[0];
   return wrap(INDICATOR_COLORS.indexOf(base) + i - p);
 }

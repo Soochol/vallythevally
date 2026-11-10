@@ -43,7 +43,7 @@ const VOLUME: IndicatorSpec = { kind: "volume", maPeriod: 20 };
 
 function create(engines: Engines, specs: IndicatorSpec[], confirmed: BarTuple[], current: BarTuple | null, period: Period = "D", gen = 1) {
   const out = engines.handle({
-    type: "create", cell: 1, gen, period, cols: columns(confirmed), current,
+    type: "create", chart: 1, gen, period, cols: columns(confirmed), current,
     engines: specs.map((s, i) => ({ id: `e${i}`, spec: JSON.stringify(s) })),
   });
   if (out?.type !== "created") throw new Error("created가 아님");
@@ -51,7 +51,7 @@ function create(engines: Engines, specs: IndicatorSpec[], confirmed: BarTuple[],
 }
 
 const bar = (engines: Engines, kind: "preview" | "confirm", b: BarTuple) => {
-  const out = engines.handle({ type: "bar", cell: 1, kind, bar: b }) as Extract<FromWorker, { type: "tail" }>;
+  const out = engines.handle({ type: "bar", chart: 1, kind, bar: b }) as Extract<FromWorker, { type: "tail" }>;
   return out.results;
 };
 

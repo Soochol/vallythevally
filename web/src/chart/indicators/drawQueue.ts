@@ -5,10 +5,6 @@ export interface Pending {
   updates: Point[];
 }
 
-/**
- * 다음 프레임에 그릴 지표 점. 시리즈마다 `set` 하나와 그 뒤의 `update`를 점 시각마다 하나씩 둔다.
- * 시리즈당 마지막 값만 남기면 한 프레임에 온 확정 봉의 최종 값과 다음 봉의 첫 값 중 하나를 잃는다.
- */
 export class DrawQueue<K> {
   private readonly pending = new Map<K, Pending>();
 
@@ -40,7 +36,6 @@ export class DrawQueue<K> {
   }
 }
 
-/** 점 사본에 그리기를 반영한다. 차트에 그릴 것과 같은 규칙: 마지막 점과 같은 t는 바꾸고, 늦은 t는 덧붙인다. */
 export function applyToPoints(points: Point[], draw: LineDraw): Point[] {
   if (draw.op === "none") return points;
   if (draw.op === "set") return draw.points;

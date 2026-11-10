@@ -53,7 +53,6 @@ export interface IndicatorRow {
   color: string;
   values: LegendValue[];
   state: "ok" | "pending" | "hidden" | EngineErrorKind;
-  /** 지표 패널이면 그 패널의 순서(0부터)와 패널 수. 가격 패널이면 null. */
   panel: { index: number; count: number } | null;
 }
 
@@ -62,8 +61,7 @@ export interface LayerHost {
   tokens(): ThemeTokens;
   isIndex(): boolean;
   period(): Period;
-  /** 워커 응답이 왔다. 다음 프레임에 그린다. */
-  changed(): void;
+  requestFrame(): void;
 }
 
 const GUIDES: Partial<Record<Kind, number[]>> = { rsi: [70, 30], stochSlow: [80, 20] };
@@ -80,10 +78,6 @@ const transferOf = (c: Columns) => [c.t.buffer, c.o.buffer, c.h.buffer, c.l.buff
 const ERROR_TEXT: Record<EngineErrorKind, string> = { spec: "설정 오류", calc: "계산 오류" };
 export const indicatorErrorText = (kind: EngineErrorKind) => ERROR_TEXT[kind];
 
-/**
- * 칸 하나의 지표(frontend.md §5.4·§5.6). 워커에 엔진을 만들고 봉을 넘기며, 응답을 세대로 걸러 선 시리즈에 그린다.
- * 그리기는 `flush`(컨트롤러의 프레임) 때만 한다.
- */
 export class IndicatorLayer {
   private readonly port: IndicatorPort;
   private readonly shown = new Map<string, Shown>();
@@ -103,7 +97,6 @@ export class IndicatorLayer {
     this.port = open({ message: (m) => this.onMessage(m), broken: () => this.onBroken() });
   }
 
-  /** 칸 설정의 지표·패널을 맞춘다. 바뀐 지표만 엔진을 다시 만든다. */
   setConfigs(configs: IndicatorConfig[], panels: Panel[]): void {
     const prevConfigs = this.configs;
     const prevPanels = this.panels;
@@ -112,7 +105,7 @@ export class IndicatorLayer {
     const keep = new Set(configs.map((c) => c.id));
     const dropped = [...this.shown.keys()].filter((id) => !keep.has(id));
     for (const id of dropped) this.removeShown(id);
-    if (dropped.length) this.port.post({ type: "drop", cell: this.port.cell, ids: dropped });
+    if (dropped.length) this.port.post({ type: "drop", chart: this.port.chart, ids: dropped });
 
     const panelOrderChanged = prevPanels.length !== panels.length || prevPanels.some((p, i) => p.id !== panels[i]?.id);
     const fresh: IndicatorConfig[] = [];
@@ -134,7 +127,7 @@ export class IndicatorLayer {
           s.status = { kind: "hidden" };
           s.gen = 0;
           this.clearLines(s);
-          this.port.post({ type: "drop", cell: this.port.cell, ids: [config.id] });
+          this.port.post({ type: "drop", chart: this.port.chart, ids: [config.id] });
         }
       }
       if (prev.style !== config.style || prev.visible !== config.visible) this.styleLines(s);
@@ -145,7 +138,6 @@ export class IndicatorLayer {
     this.create(fresh);
   }
 
-  /** 새 봉 열(최신 페이지, 과거 페이지, 바꿔치기). 지표 선을 바로 비우고 엔진을 모두 다시 만든다. */
   reset(h: History): void {
     this.history = h;
     this.display = displayBars(h);
@@ -158,12 +150,11 @@ export class IndicatorLayer {
     this.create(visible);
   }
 
-  /** 종목·거래소·봉 주기가 바뀌었거나 봉을 받지 못했다. */
   clear(): void {
     this.history = null;
     this.display = [];
     this.committedT = null;
-    this.port.post({ type: "drop", cell: this.port.cell, ids: "all" });
+    this.port.post({ type: "drop", chart: this.port.chart, ids: "all" });
     for (const s of this.shown.values()) {
       s.gen = 0;
       this.clearLines(s);
@@ -171,7 +162,6 @@ export class IndicatorLayer {
     }
   }
 
-  /** 실시간 봉 하나. 주 시리즈가 꼬리만 바뀌었으면 엔진에 그 봉만 넘기고, 아니면 다시 만든다. */
   advance(h: History, bar: Bar, kind: "live" | "confirmed"): void {
     const prev = this.display;
     const next = displayBars(h);
@@ -181,11 +171,10 @@ export class IndicatorLayer {
     this.display = next;
     if (op === "confirm") this.committedT = bar.t;
     if (this.configs.some((c) => c.visible) && !this.broken) {
-      this.port.post({ type: "bar", cell: this.port.cell, kind: op, bar: tuple(bar) });
+      this.port.post({ type: "bar", chart: this.port.chart, kind: op, bar: tuple(bar) });
     }
   }
 
-  /** 쌓인 점을 그린다. 테마를 바꾸거나 시리즈를 다시 만들기 전에도 부른다(#58). */
   flush(): void {
     for (const [line, p] of this.queue.drain()) {
       if (p.set) this.draw(line, p.set);
@@ -201,8 +190,7 @@ export class IndicatorLayer {
     }
   }
 
-  /** 주 시리즈의 가격 표기(주식·지수)가 바뀌었다. */
-  setIndex(): void {
+  refreshPriceFormat(): void {
     for (const s of this.shown.values()) for (const line of s.lines) line.series.applyOptions({ priceFormat: this.priceFormat(s.config) });
   }
 
@@ -234,8 +222,7 @@ export class IndicatorLayer {
     });
   }
 
-  /** 지표 패널 높이 비율(가격 패널 대비). 사용자가 패널 경계를 끌었는지 보는 데 쓴다. */
-  stretches(): number[] {
+  stretches(): Panel["stretch"][] {
     const panes = this.host.chart.panes();
     const base = panes[0]?.getStretchFactor() ?? 1;
     return this.panels.map((_, i) => (panes[i + 1]?.getStretchFactor() ?? base) / base);
@@ -263,7 +250,7 @@ export class IndicatorLayer {
     this.port.post(
       {
         type: "create",
-        cell: this.port.cell,
+        chart: this.port.chart,
         gen,
         period: this.host.period(),
         cols,
@@ -277,7 +264,7 @@ export class IndicatorLayer {
   private onMessage(m: Exclude<FromWorker, { type: "fatal" }>): void {
     if (m.type === "created") for (const r of m.results) this.accept(r, r.ok ? r.lines : null);
     else for (const r of m.results) this.accept(r, null);
-    this.host.changed();
+    this.host.requestFrame();
   }
 
   private accept(r: EngineResult, lines: LineInfo[] | null): void {
@@ -314,14 +301,14 @@ export class IndicatorLayer {
       s.gen = 0;
       this.clearLines(s);
     }
-    this.host.changed();
+    this.host.requestFrame();
   }
 
   private paneOf(config: IndicatorConfig): number {
     return config.panel === "price" ? 0 : 1 + this.panels.findIndex((p) => p.id === config.panel);
   }
 
-  /** 지표 시리즈를 패널 순서대로 다시 붙인다. 빈 pane은 라이브러리가 지우므로 앞 pane부터 붙인다. */
+  /** 빈 pane은 라이브러리가 지우므로 앞 pane부터 붙인다. */
   private rebuildSeries(): void {
     this.flush();
     const old = new Map<string, Line[]>();

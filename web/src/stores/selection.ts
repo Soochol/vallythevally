@@ -4,7 +4,6 @@ import type { Slot } from "./layout";
 export type SearchPurpose = "open" | "watch";
 export type Dialog =
   | { kind: "search"; purpose: SearchPurpose }
-  /** editId가 있으면 그 지표의 편집 상태로 연다(frontend.md §3.3). */
   | { kind: "indicator"; slot: Slot; editId: string | null };
 export type PhoneTab = "chart" | "watch";
 

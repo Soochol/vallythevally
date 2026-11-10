@@ -28,7 +28,7 @@ import { type IndicatorCommand, IndicatorLegend } from "./indicators/legendRows"
 import { isTailChange } from "./indicators/sync";
 import { Legend, legendParts } from "./legend";
 import { addMainSeries, applyMainColors, type MainSeries, priceFormat, setMainData, updateMainBar } from "./series";
-import type { ChartSettings } from "./settings";
+import type { ChartSettings, Panel } from "./settings";
 import { composeSnapshot, snapshotFileName } from "./snapshot";
 import type { ThemeTokens } from "./theme";
 import { formatBarTime, formatTickMark, fromChartTime, isIntraday } from "./time";
@@ -79,10 +79,8 @@ export interface ControllerDeps {
   /** 없으면 실시간 없이 조회한 봉만 그린다. */
   socket?: MarketSocketLike;
   indicators?: OpenPort;
-  /** 범례 지표 줄의 버튼(설정·숨기기·지우기·패널 위로·아래로). */
   onIndicatorCommand?: (id: string, command: IndicatorCommand) => void;
-  /** 사용자가 패널 경계를 끌어 지표 패널 높이 비율(가격 패널 대비)이 바뀌었다. */
-  onPanelStretch?: (stretches: number[]) => void;
+  onPanelStretch?: (stretches: Panel["stretch"][]) => void;
 }
 
 /** 칸 하나의 차트 엔진 래퍼(frontend.md §5.4). React 밖의 명령형 객체다. */
@@ -130,7 +128,7 @@ export class ChartController {
         tokens: () => this.tokens,
         isIndex: () => this.view !== null && isIndexCode(this.view.symbol),
         period: () => this.period(),
-        changed: () => this.scheduleFrame(),
+        requestFrame: () => this.scheduleFrame(),
       },
       deps.indicators ?? openIndicatorPort,
     );
@@ -202,7 +200,7 @@ export class ChartController {
     if (prev?.symbol !== next.symbol || prev.venue !== next.venue || prev.period !== next.period) {
       if (prev && isIndexCode(prev.symbol) !== isIndex) {
         this.main.api.applyOptions({ priceFormat: priceFormat(isIndex) });
-        this.indicators.setIndex();
+        this.indicators.refreshPriceFormat();
       }
       this.history = null;
       this.ready = null;
@@ -499,7 +497,6 @@ export class ChartController {
     this.onStatus({ kind: "error", error });
   }
 
-  /** 칸 위에서 잰 pane마다의 위쪽 끝(px). 지표 패널 범례 자리다. */
   private paneTops(): number[] {
     const top = this.el.getBoundingClientRect().top;
     return this.chart.panes().map((p) => (p.getHTMLElement()?.getBoundingClientRect().top ?? top) - top);

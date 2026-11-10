@@ -66,13 +66,13 @@ test("워커는 첫 칸이 열 때 하나 만들고, 응답은 그 칸에만 간
   const p1 = open(one);
   const p2 = open(two);
   expect(make).toHaveBeenCalledOnce();
-  p1.post({ type: "drop", cell: p1.cell, ids: "all" });
-  f.reply({ type: "tail", cell: p2.cell, results: [] });
+  p1.post({ type: "drop", chart: p1.chart, ids: "all" });
+  f.reply({ type: "tail", chart: p2.chart, results: [] });
   expect(two.message).toHaveBeenCalledOnce();
   expect(one.message).not.toHaveBeenCalled();
   p2.close();
-  expect(f.sent.at(-1)).toEqual({ type: "drop", cell: p2.cell, ids: "all" });
-  f.reply({ type: "tail", cell: p2.cell, results: [] });
+  expect(f.sent.at(-1)).toEqual({ type: "drop", chart: p2.chart, ids: "all" });
+  f.reply({ type: "tail", chart: p2.chart, results: [] });
   expect(two.message).toHaveBeenCalledOnce();
 });
 
@@ -81,13 +81,13 @@ test("wasm init 실패나 워커 오류면 모든 칸이 계산 오류를 알고
   const open = createHub(() => f.w);
   const one = { message: vi.fn(), broken: vi.fn() };
   const p1 = open(one);
-  p1.post({ type: "drop", cell: p1.cell, ids: "all" });
+  p1.post({ type: "drop", chart: p1.chart, ids: "all" });
   f.reply({ type: "fatal", message: "init 실패" });
   expect(one.broken).toHaveBeenCalledWith("init 실패");
   f.w.onerror?.({ message: "또" } as ErrorEvent);
   expect(one.broken).toHaveBeenCalledOnce();
   const sent = f.sent.length;
-  p1.post({ type: "drop", cell: p1.cell, ids: "all" });
+  p1.post({ type: "drop", chart: p1.chart, ids: "all" });
   expect(f.sent).toHaveLength(sent);
   const late = { message: vi.fn(), broken: vi.fn() };
   open(late);
@@ -101,7 +101,7 @@ test("워커를 만들지 못해도 칸은 계산 오류만 한 번 받는다", 
   });
   const one = { message: vi.fn(), broken: vi.fn() };
   const p = open(one);
-  expect(() => p.post({ type: "drop", cell: p.cell, ids: "all" })).not.toThrow();
+  expect(() => p.post({ type: "drop", chart: p.chart, ids: "all" })).not.toThrow();
   await Promise.resolve();
   expect(one.broken).toHaveBeenCalledOnce();
   expect(one.broken).toHaveBeenCalledWith("Worker 없음");

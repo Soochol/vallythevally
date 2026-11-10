@@ -26,10 +26,6 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, className: string, te
   return e;
 }
 
-/**
- * 범례의 지표 줄(frontend.md §2.3). 가격 패널 지표는 범례 아래에, 지표 패널 지표는 그 패널 왼쪽 위에 한 줄로 둔다.
- * 줄에 마우스나 초점이 오면 설정·숨기기·지우기(지표 패널은 위로·아래로도)가 보인다.
- */
 export class IndicatorLegend {
   readonly priceBox = el("div", "flex flex-col gap-px");
   private readonly rows = new Map<string, RowEls>();

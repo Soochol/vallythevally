@@ -1,6 +1,3 @@
-// Issue #75. Add seven indicator kinds through the dialog (moving average four times), edit one from its legend row,
-// stream a trade and watch the values move, prove the Ichimoku leading span sits after the last bar, and reload.
-// Run with --clock 20261109100000 (market hours).
 const LAYOUT = "/api/layouts/01900000-0000-7000-8000-000000000001";
 
 function installSeriesProbe() {
@@ -86,7 +83,7 @@ export default async function (page, { expect, api, fake, screenshot }) {
   const price = Math.round(Number(closeBefore) * 1.2);
   await expect(async () => {
     await fake.pushReal("0B", "086520_AL", { "20": "100001", "10": `+${price}`, "15": "+3000000", "13": "1000", "9081": "KRX", "11": "+0", "12": "+0.00", "25": "2" });
-    await expect(chart).toHaveAttribute("data-last-close", String(price), { timeout: 1000 });
+    await expect(chart, "체결이 반영되지 않는다. run.sh에 장 시간 --clock(예: 20261109100000)을 주었는가").toHaveAttribute("data-last-close", String(price), { timeout: 1000 });
   }).toPass({ timeout: 15_000 });
   await expect.poll(() => row("이동평균 단순 5").innerText()).not.toBe(ma5Before);
   await expect.poll(() => row("거래량").innerText()).not.toBe(volumeBefore);

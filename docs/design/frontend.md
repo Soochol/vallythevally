@@ -1047,21 +1047,21 @@ interface IndicatorConfig {
   - 서버는 `.wasm`을 `application/wasm`으로 내보내야 한다. 그래야 `instantiateStreaming`이 동작한다(백엔드 §8.5).
   - 대화상자의 `validateSpec`은 메인 스레드에서 따로 init한다(`chart/indicators/validate.ts`). 대화상자를 열 때 한 번이다.
 - **워커 안의 상태**(`chart/indicators/engines.ts`. 워커 셸 없이 node에서 실제 wasm으로 시험한다)
-  - 칸마다 `Map<지표 id, 엔진>`. 칸은 컨트롤러 인스턴스 번호다. 칸 번호(slot)로 하지 않는 것은, 다시 마운트된 칸이 옛 컨트롤러의 응답을 받지 않게 하려는 것이다.
+  - 차트마다 `Map<지표 id, 엔진>`. 메시지의 `chart`는 컨트롤러 인스턴스 번호다. 칸 번호(slot)로 하지 않는 것은, 다시 마운트된 칸이 옛 컨트롤러의 응답을 받지 않게 하려는 것이다.
   - 엔진마다 봉 시각 열(확정 봉 + 현재 봉), 막대 등락, 현재 봉의 미리 보기 값, 미래 시각을 든다.
   - 메인 스레드는 확정 봉 열을 `Float64Array` 여섯 개로 전송(transfer)한다.
 - **메시지**(`chart/indicators/protocol.ts`)
 
 | 메인 → 워커 | 하는 일 |
 |---|---|
-| `create(cell, gen, period, cols, current, engines[{ id, spec }])` | 같은 확정 봉 열로 엔진들을 만든다. 같은 키의 옛 엔진은 `free`. `current`가 있으면 바로 `preview`까지 한다 |
-| `bar(cell, kind: preview \| confirm, bar)` | 그 칸의 모든 엔진에 도착 순서대로 `preview` 또는 `pushConfirmed`(§5.4, D13) |
-| `drop(cell, ids \| all)` | 엔진 해제 |
+| `create(chart, gen, period, cols, current, engines[{ id, spec }])` | 같은 확정 봉 열로 엔진들을 만든다. 같은 키의 옛 엔진은 `free`. `current`가 있으면 바로 `preview`까지 한다 |
+| `bar(chart, kind: preview \| confirm, bar)` | 그 차트의 모든 엔진에 도착 순서대로 `preview` 또는 `pushConfirmed`(§5.4, D13) |
+| `drop(chart, ids \| all)` | 엔진 해제 |
 
 | 워커 → 메인 | 내용 |
 |---|---|
-| `created(cell, results[])` | 엔진마다 `{ id, gen, lines[{ id, shift }], draws }` 또는 `{ id, gen, error: spec \| calc, message }` |
-| `tail(cell, results[])` | 엔진마다 선마다 `update`(점 하나), `set`(점 전체) 또는 `none` |
+| `created(chart, results[])` | 엔진마다 `{ id, gen, lines[{ id, shift }], draws }` 또는 `{ id, gen, error: spec \| calc, message }` |
+| `tail(chart, results[])` | 엔진마다 선마다 `update`(점 하나), `set`(점 전체) 또는 `none` |
 | `fatal(message)` | wasm init 실패. 그 뒤로는 계산하지 않는다 |
 
 - **점의 자리는 워커가 정한다.** 점은 `{ t, v }`(진짜 Unix 초)이고 거래량 막대 점은 등락(`up`)을 싣는다. 차트 시각 변환은 메인 스레드가 `time.ts`로 한다.

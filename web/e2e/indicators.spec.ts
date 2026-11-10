@@ -5,8 +5,7 @@ import { type App, cell, chartOf, DEFAULT_LAYOUT_ID, expect, test } from "./harn
 
 test.use({ clockStart: "20261109100030" });
 
-// 가짜 키움의 1분봉은 30개뿐이라, 다섯 선이 모두 점을 갖도록 기간을 줄인다.
-const ICHIMOKU = { kind: "ichimoku", conversion: 3, base: 5, spanB: 8, displacement: 6 };
+const ICHIMOKU_FOR_30_MINUTE_BARS = { kind: "ichimoku", conversion: 3, base: 5, spanB: 8, displacement: 6 };
 
 async function seedLayout(app: App, period: string, indicators: object[], panels: object[]) {
   const current: Layout = await (await fetch(`${app.url}/api/layouts/${DEFAULT_LAYOUT_ID}`)).json();
@@ -35,7 +34,7 @@ test("후행스팬이 있는 칸에서 체결을 흘려도 모든 선의 update�
     const m = JSON.parse(String(payload));
     if (m.type === "bar" || m.type === "confirmed") delivered.push(m.bar.c);
   }));
-  await seedLayout(app, "1m", [{ id: "i1", spec: ICHIMOKU, panel: "price", visible: true, style: { colors: ["ind-1"], width: 1 } }], []);
+  await seedLayout(app, "1m", [{ id: "i1", spec: ICHIMOKU_FOR_30_MINUTE_BARS, panel: "price", visible: true, style: { colors: ["ind-1"], width: 1 } }], []);
   await page.addInitScript(installFrameProbe);
   await page.goto("/");
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");

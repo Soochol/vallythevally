@@ -9,8 +9,7 @@ export type LineWidth = 1 | 2 | 3;
 export interface IndicatorConfig {
   id: string;
   spec: IndicatorSpec;
-  /** "price" 또는 `ChartSettings.panels[].id`. */
-  panel: "price" | string;
+  panel: "price" | Panel["id"];
   visible: boolean;
   style: { colors: IndicatorColor[]; width: LineWidth };
 }
@@ -77,25 +76,23 @@ export function parseChartSettings(raw: unknown): ChartSettings {
   return DEFAULT_CHART_SETTINGS;
 }
 
-/**
- * v1은 지표·패널이 빈 배열만 될 수 있었고, 그때 거래량은 늘 그려졌다. 읽을 때만 v2로 바꾸고
- * 저장은 사용자가 편집할 때 한다.
- */
 function readChartSettings(raw: unknown): ChartSettings | null {
   if (!isRecord(raw)) return null;
   const { v, style, scale, indicators, compare, panels } = raw;
   if (!isOneOf(CHART_STYLES, style) || !isOneOf(PRICE_SCALES, scale)) return null;
   if (!Array.isArray(compare) || !compare.every((c): c is SymbolCode => typeof c === "string")) return null;
-  if (v === 1) {
-    if (!isEmptyArray(indicators) || !isEmptyArray(panels)) return null;
-    return { ...DEFAULT_CHART_SETTINGS, style, scale, compare };
-  }
+  if (v === 1) return migrateV1({ style, scale, compare, indicators, panels });
   if (v !== 2 || !Array.isArray(indicators) || !Array.isArray(panels)) return null;
   const readPanels = panels.map(readPanel);
   const readIndicators = indicators.map(readIndicator);
   if (readPanels.includes(null) || readIndicators.includes(null)) return null;
   const settings: ChartSettings = { v: 2, style, scale, compare, panels: readPanels as Panel[], indicators: readIndicators as IndicatorConfig[] };
   return panelsMatch(settings) ? settings : null;
+}
+
+function migrateV1(v1: Pick<ChartSettings, "style" | "scale" | "compare"> & { indicators: unknown; panels: unknown }): ChartSettings | null {
+  if (!isEmptyArray(v1.indicators) || !isEmptyArray(v1.panels)) return null;
+  return { ...DEFAULT_CHART_SETTINGS, style: v1.style, scale: v1.scale, compare: v1.compare };
 }
 
 function readPanel(raw: unknown): Panel | null {
@@ -105,7 +102,7 @@ function readPanel(raw: unknown): Panel | null {
 
 function readIndicator(raw: unknown): IndicatorConfig | null {
   if (!isRecord(raw) || typeof raw.id !== "string" || typeof raw.panel !== "string" || typeof raw.visible !== "boolean") return null;
-  const spec = readSpec(raw.spec);
+  const spec = readSpecShape(raw.spec);
   const style = raw.style;
   if (!spec || !isRecord(style) || !isOneOf(WIDTHS, style.width)) return null;
   const colors = style.colors;
@@ -113,8 +110,7 @@ function readIndicator(raw: unknown): IndicatorConfig | null {
   return { id: raw.id, spec, panel: raw.panel, visible: raw.visible, style: { colors: colors as IndicatorColor[], width: style.width } };
 }
 
-/** 모양만 본다. 값이 맞는지는 엔진을 만들 때 wasm이 본다(frontend.md §3.3). */
-export function readSpec(raw: unknown): IndicatorSpec | null {
+export function readSpecShape(raw: unknown): IndicatorSpec | null {
   if (!isRecord(raw) || typeof raw.kind !== "string" || !(raw.kind in KINDS)) return null;
   const r = raw;
   switch (raw.kind as IndicatorSpec["kind"]) {
@@ -137,14 +133,14 @@ export function readSpec(raw: unknown): IndicatorSpec | null {
   }
 }
 
-/** 가격 패널 지표는 "price", 지표 패널 지표는 자기 패널 하나를 갖고, 패널마다 지표가 하나다(D11). */
+const allDistinct = (xs: readonly string[]) => new Set(xs).size === xs.length;
+
 function panelsMatch(s: Pick<ChartSettings, "indicators" | "panels">): boolean {
   const panelIds = s.panels.map((p) => p.id);
-  if (new Set(panelIds).size !== panelIds.length) return false;
-  if (new Set(s.indicators.map((i) => i.id)).size !== s.indicators.length) return false;
-  const used = s.indicators.filter((i) => placementOf(i.spec) === "panel").map((i) => i.panel);
-  const pricePanelOk = s.indicators.every((i) => (placementOf(i.spec) === "price") === (i.panel === "price"));
-  return pricePanelOk && used.length === panelIds.length && new Set(used).size === used.length && used.every((id) => panelIds.includes(id));
+  const panelOwners = s.indicators.filter((i) => placementOf(i.spec) === "panel").map((i) => i.panel);
+  const eachOnItsPane = s.indicators.every((i) => (placementOf(i.spec) === "price") === (i.panel === "price"));
+  const onePerPanel = panelOwners.length === panelIds.length && allDistinct(panelOwners) && panelOwners.every((id) => panelIds.includes(id));
+  return allDistinct(panelIds) && allDistinct(s.indicators.map((i) => i.id)) && eachOnItsPane && onePerPanel;
 }
 
 const newId = () => crypto.randomUUID();
@@ -191,8 +187,7 @@ export function movePanel(s: ChartSettings, panelId: string, step: -1 | 1): Char
   return { ...s, panels };
 }
 
-/** stretches는 panels 순서대로, 가격 패널 대비 비율이다. */
-export function setPanelStretches(s: ChartSettings, stretches: readonly number[]): ChartSettings {
+export function setPanelStretches(s: ChartSettings, stretches: readonly Panel["stretch"][]): ChartSettings {
   if (stretches.length !== s.panels.length || stretches.some((x) => !(Number.isFinite(x) && x > 0))) return s;
   if (stretches.every((x, i) => Math.abs(x - s.panels[i]!.stretch) < 1e-3)) return s;
   return { ...s, panels: s.panels.map((p, i) => ({ ...p, stretch: Math.round(stretches[i]! * 1000) / 1000 })) };

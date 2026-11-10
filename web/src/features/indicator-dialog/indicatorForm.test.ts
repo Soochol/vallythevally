@@ -17,10 +17,10 @@ import {
 } from "./indicatorForm";
 
 const pass: Validate = () => ({ ok: true });
-const edit = (form: SpecForm, text: Record<string, string>, on: Record<string, boolean> = {}): SpecForm => ({
+const edit = (form: SpecForm, text: Record<string, string>, enabled: Record<string, boolean> = {}): SpecForm => ({
   ...form,
   text: { ...form.text, ...text },
-  on: { ...form.on, ...on },
+  enabled: { ...form.enabled, ...enabled },
 });
 const specOf = (form: SpecForm) => checkForm(form, pass).spec;
 
@@ -40,11 +40,11 @@ test("종류마다 기본값을 입력으로 바꿨다가 그대로 읽는다", 
 
 test("꺼진 선택 칸은 null이고, 켜면 보이던 값을 쓴다", () => {
   const volume = formFromSpec({ kind: "volume", maPeriod: null });
-  expect(volume).toEqual({ kind: "volume", text: { maPeriod: "20" }, on: { maPeriod: false } });
+  expect(volume).toEqual({ kind: "volume", text: { maPeriod: "20" }, enabled: { maPeriod: false } });
   expect(specOf(edit(volume, {}, { maPeriod: true }))).toEqual({ kind: "volume", maPeriod: 20 });
 
   const rsi = formFromSpec(KINDS.rsi.defaults);
-  expect(rsi.on.signal).toBe(false);
+  expect(rsi.enabled.signal).toBe(false);
   expect(specOf(edit(rsi, {}, { signal: true }))).toEqual({ kind: "rsi", period: 14, signal: 9 });
   expect(specOf(edit(rsi, { signal: "엉망" }))).toEqual({ kind: "rsi", period: 14, signal: null });
 });
@@ -139,8 +139,8 @@ test("편집은 그 지표의 설정과 모양으로, 추가는 기본값과 자
     visible: true,
     style: { colors: ["ind-2", "ind-4"], width: 2 },
   };
-  expect(startDraft(editing, "ma")).toEqual({ form: { kind: "volume", text: { maPeriod: "60" }, on: { maPeriod: true } }, color: "ind-4", width: 2 });
-  expect(startDraft(null, "macd")).toEqual({ form: formFromSpec(KINDS.macd.defaults), color: null, width: 1 });
+  expect(startDraft(editing, "ma")).toEqual({ form: { kind: "volume", text: { maPeriod: "60" }, enabled: { maPeriod: true } }, color: "ind-4", width: 2 });
+  expect(startDraft(null, "macd")).toEqual({ form: formFromSpec(KINDS.macd.defaults), color: "auto", width: 1 });
 });
 
 test("새 지표의 색은 이 칸에서 아직 쓰지 않은 첫 색이다", () => {

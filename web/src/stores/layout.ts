@@ -5,7 +5,7 @@ import type { Period } from "../api/generated/Period";
 import type { Venue } from "../api/generated/Venue";
 import type { IndicatorSpec } from "../api/generated/IndicatorSpec";
 import * as edit from "../chart/settings";
-import { type ChartSettings, type ChartStyle, DEFAULT_CHART_SETTINGS, type IndicatorConfig, type PriceScale } from "../chart/settings";
+import { type ChartSettings, type ChartStyle, DEFAULT_CHART_SETTINGS, type IndicatorConfig, type Panel, type PriceScale } from "../chart/settings";
 import { venueFor, type VenueTarget } from "../lib/venue";
 
 export type Slot = Cell["slot"];
@@ -32,12 +32,11 @@ interface LayoutState {
   setPeriod(slot: Slot, p: Period): void;
   setStyle(slot: Slot, s: ChartStyle): void;
   setScale(slot: Slot, s: PriceScale): void;
-  /** 새 지표의 id를 돌려준다. */
-  addIndicator(slot: Slot, spec: IndicatorSpec, style: IndicatorConfig["style"]): string;
+  addIndicator(slot: Slot, spec: IndicatorSpec, style: IndicatorConfig["style"]): void;
   updateIndicator(slot: Slot, id: string, patch: Partial<Pick<IndicatorConfig, "spec" | "style" | "visible">>): void;
   removeIndicator(slot: Slot, id: string): void;
   movePanel(slot: Slot, panelId: string, step: -1 | 1): void;
-  setPanelStretches(slot: Slot, stretches: readonly number[]): void;
+  setPanelStretches(slot: Slot, stretches: readonly Panel["stretch"][]): void;
 }
 
 export const useLayoutStore = create<LayoutState>()((set) => {
@@ -67,15 +66,7 @@ export const useLayoutStore = create<LayoutState>()((set) => {
     setPeriod: (slot, period) => patchCell(slot, (c) => (c.period === period ? c : { ...c, period })),
     setStyle: (slot, style) => patchSetting(slot, "style", style),
     setScale: (slot, scale) => patchSetting(slot, "scale", scale),
-    addIndicator: (slot, spec, style) => {
-      let id = "";
-      patchSettings(slot, (s) => {
-        const added = edit.addIndicator(s, spec, style);
-        id = added.id;
-        return added.settings;
-      });
-      return id;
-    },
+    addIndicator: (slot, spec, style) => patchSettings(slot, (s) => edit.addIndicator(s, spec, style).settings),
     updateIndicator: (slot, id, patch) => patchSettings(slot, (s) => edit.updateIndicator(s, id, patch)),
     removeIndicator: (slot, id) => patchSettings(slot, (s) => edit.removeIndicator(s, id)),
     movePanel: (slot, panelId, step) => patchSettings(slot, (s) => edit.movePanel(s, panelId, step)),
