@@ -270,3 +270,45 @@ test("가격 패널 지표 선과 가격 사이에 놓인 드로잉도 눌러 �
   await expect.poll(async () => (await (await fetch(`${app.url}/api/drawings?symbol=005930`)).json())[0].points[0].price).toBeLessThan(drawn.points[0].price);
   console.log("BAND_DRAWING", JSON.stringify({ lo, hi, price: drawn.points[0].price, at: at.time }));
 });
+
+test("% 축에서 같은 봉에 체결이 더 와도, 가격 패널 선마다 그 봉 시각 점의 기준값은 주 봉의 지금 종가다", async ({ page, app }) => {
+  const errors: string[] = [];
+  page.on("pageerror", (e) => errors.push(e.message));
+  const style = { colors: ["ind-1"], width: 1 };
+  await seed(app, {
+    scale: "percent",
+    indicators: [
+      { id: "i1", spec: { kind: "ichimoku", conversion: 3, base: 5, spanB: 8, displacement: 6 }, panel: "price", visible: true, style },
+      { id: "i2", spec: { kind: "ma", method: "sma", period: 5 }, panel: "price", visible: true, style },
+      { id: "i3", spec: { kind: "bollinger", period: 5, k: 2 }, panel: "price", visible: true, style },
+    ],
+  });
+  await page.addInitScript(installFrameProbe);
+  await page.goto("/");
+  await expect(cell(page)).toHaveAttribute("aria-busy", "false");
+  type Row = { time: number; value?: number; close?: number; base?: number };
+  const snap = async () => (await page.evaluate(() => window.frameProbe.snapshot())) as unknown as { type: string; data: Row[] }[];
+  await expect.poll(async () => (await snap()).filter((s) => s.type === "Custom" && s.data.length > 0).length).toBe(9);
+  const chart = chartOf(cell(page));
+  const lagging = async () => {
+    const s = await snap();
+    const main = s.find((x) => x.type === "Candlestick")!.data.at(-1)!;
+    return s.filter((x) => x.type === "Custom" && x.data.at(-1)!.time < main.time).map((x) => x.data.at(-1)!.value);
+  };
+
+  for (const [price, time] of [[201_000, "100031"], [207_000, "100032"]] as const) {
+    await expect(async () => {
+      await app.fake.pushReal("0B", "005930_AL", tradeValues(price, time));
+      await expect(chart).toHaveAttribute("data-last-close", String(price), { timeout: 1000 });
+    }).toPass({ timeout: 15_000 });
+    await expect.poll(lagging).toEqual([price]);
+  }
+
+  const s = await snap();
+  const main = s.find((x) => x.type === "Candlestick")!.data.at(-1)!;
+  const atMain = s.filter((x) => x.type === "Custom").flatMap((x) => x.data.filter((r) => r.time === main.time));
+  expect(main.close).toBe(207_000);
+  expect(atMain).toHaveLength(8);
+  expect(atMain.map((r) => r.base)).toEqual(atMain.map(() => main.close));
+  expect(errors).toEqual([]);
+});

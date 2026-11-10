@@ -256,6 +256,39 @@ test.each([true, false])("가격 패널 선은 기준값만 든 점을 첫 실�
   expect(f.line("spanA").data.find((r) => r.time === toChartTime(at(23)))?.base).toBe(close(23));
 });
 
+type Order = "응답 뒤 그리기" | "그리기 뒤 응답" | "한 프레임에 모두";
+
+test.each<Order>(["응답 뒤 그리기", "그리기 뒤 응답", "한 프레임에 모두"])("같은 봉의 체결과 확정으로 종가가 바뀌어도, 모든 가격 패널 선의 기준값은 그 시각 주 봉의 지금 종가다 (%s)", (order) => {
+  const f = fixture();
+  f.layer.reset({ bars: CONFIRMED, current: null, nextBefore: null });
+  f.reply(created(1));
+  const ticks: { kind: "live" | "confirmed"; c: number }[] = [
+    { kind: "live", c: 120 },
+    { kind: "live", c: 150 },
+    { kind: "live", c: 150 },
+    { kind: "confirmed", c: 140 },
+  ];
+  ticks.forEach(({ kind, c }, i) => {
+    const b = bar(20, c);
+    const h: History = kind === "live" ? { bars: CONFIRMED, current: b, nextBefore: null } : { bars: [...CONFIRMED, b], current: null, nextBefore: null };
+    f.layer.advance(h, b, kind);
+    if (order === "그리기 뒤 응답") f.layer.flush();
+    f.reply(tail(1, { conversion: update(20, i), base: update(20, i), spanA: update(25, i), spanB: update(25, i), lagging: update(15, i) }));
+    if (order !== "한 프레임에 모두") f.layer.flush();
+  });
+  f.layer.flush();
+  const closeAt = new Map<number, number>([...CONFIRMED, bar(20, 140)].map((b) => [toChartTime(b.t), b.c]));
+  const current = toChartTime(at(20));
+
+  expect(f.series.flatMap((s) => s.rejected)).toEqual([]);
+  expect(consoleError).not.toHaveBeenCalled();
+  for (const id of LINES) {
+    const rows = f.line(id).data;
+    expect(rows.map((r) => r.base)).toEqual(rows.map((r) => closeAt.get(r.time) ?? r.value));
+  }
+  expect(LINES.filter((id) => f.line(id).data.some((r) => r.time === current))).toEqual(["conversion", "base", "spanA", "spanB"]);
+});
+
 test("한 선의 update가 실패해도 같은 프레임의 다른 선은 그리고, 실패한 선만 점 사본으로 다시 맞춘다", () => {
   const steps: Step[] = [{ minute: 20, kind: "live", draws: { conversion: update(20, 2), base: update(20, 2), spanA: update(25, 2), spanB: update(25, 2), lagging: update(15, 2) } }];
   const each = feedTails(steps, true);
