@@ -21,8 +21,8 @@ take_worktree() { # <path> <issue for an unlocked worktree>
 
 holders=$(issue_holders "$issue") || exit 1
 previous=''
-while IFS=$'\t' read -r owner what; do
-  [ -n "$owner$what" ] || continue
+while IFS=$'\t' read -r what owner; do
+  [ -n "$what$owner" ] || continue
   [ "$(owner_state "$owner")" = live ] || continue
   [ -n "$force" ] || die "issue #$issue belongs to the live lead $(lead_label "$owner") (holds: $what); take it from a live lead only when the user forces it: take.sh $issue --force"
   previous+="${owner%%@*}"$'\n'

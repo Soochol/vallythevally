@@ -178,16 +178,16 @@ issue_holders() {
   ts=$(issue_terminals "$1") || exit 1
   for t in $ts; do
     info=$(terminal_json "$t") || exit 1
-    printf '%s\t%s\n' "$(owner_of <<<"$info")" "$(jq -r --arg t "$t" '.name // $t' <<<"$info")"
+    printf '%s\t%s\n' "$(jq -r --arg t "$t" '.name // $t' <<<"$info")" "$(owner_of <<<"$info")"
   done
-  worktree_locks | awk -F'\t' -v i="$1" '$3 == i { print $2 "\t" $1 }'
+  worktree_locks | awk -F'\t' -v i="$1" '$3 == i { print $1 "\t" $2 }'
 }
 
 need_issue_open() {
   local holders owner what lead='' live='' gone=''
   holders=$(issue_holders "$1") || exit 1
-  while IFS=$'\t' read -r owner what; do
-    [ -n "$owner$what" ] || continue
+  while IFS=$'\t' read -r what owner; do
+    [ -n "$what$owner" ] || continue
     case $(owner_state "$owner") in
       live) lead=$(lead_label "$owner"); live+=" $what";;
       gone) gone+=" $what";;
