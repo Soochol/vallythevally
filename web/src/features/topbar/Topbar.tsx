@@ -5,15 +5,16 @@ import { PERIOD_LABEL, PERIODS, symbolSub } from "../../lib/symbol";
 import { useCell, useLayoutStore } from "../../stores/layout";
 import { useSelectionStore } from "../../stores/selection";
 import { useTheme, useUiStore } from "../../stores/ui";
-import { BrandIcon, CameraIcon, CopyIcon, MoonIcon, SearchIcon, SunIcon } from "../icons";
+import { BrandIcon, CameraIcon, CopyIcon, IndicatorIcon, MoonIcon, SearchIcon, SunIcon } from "../icons";
 import { canCopyImage, saveSnapshot } from "../snapshot/saveSnapshot";
 import { VenuePicker } from "../venue/VenuePicker";
 import { StyleMenu } from "./StyleMenu";
 
-/** 위쪽 막대(frontend.md §2.1). 종목, 거래소(주식만), 봉 주기, 봉 모양, 로그 축, 차트 이미지, 테마. */
+/** 위쪽 막대(frontend.md §2.1). 종목, 거래소(주식만), 봉 주기, 봉 모양, 로그 축, 지표, 차트 이미지, 테마. */
 export function Topbar() {
   const slot = useSelectionStore((s) => s.activeSlot);
   const openSearch = useSelectionStore((s) => s.openSearch);
+  const openIndicators = useSelectionStore((s) => s.openIndicators);
   const cell = useCell(slot);
   const info = useSymbolInfo(cell.symbol).data;
   const { setPeriod, setStyle, setScale } = useLayoutStore.getState();
@@ -75,6 +76,11 @@ export function Topbar() {
         onClick={() => setScale(slot, log ? "normal" : "log")}
       >
         로그
+      </button>
+      <span className="tb-sep" />
+      <button type="button" className="tb-btn" aria-haspopup="dialog" title="지표 (I)" onClick={() => openIndicators(slot)}>
+        <IndicatorIcon />
+        지표
       </button>
       <span className="tb-sep" />
       <button

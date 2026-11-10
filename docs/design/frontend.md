@@ -48,7 +48,7 @@ D3의 표를 그대로 옮긴다. 단계 번호는 이슈 번호다. 이 문서�
 **#2에서 프런트가 하는 일**(W4-18, D3)
 - **화면**: 레이아웃 스토어는 메모리에 기본 1칸(코스피 일봉)만 갖는다. 위 막대에는 종목 버튼, 봉 주기(일·주·월), 봉 모양, 로그 축, 테마만 켠다. 왼쪽 도구, 관심종목, 알림, 칸 배치는 숨긴다.
 - **현재 봉**: 실시간이 없다. 진행 중인 구간은 REST 최신 페이지의 `current`로 보여 준다. 이 값은 키움 조회가 준 오늘 봉이다. 종목이나 봉 주기를 바꾸거나 새로고침할 때만 새로 받는다. 범례 시각 옆에 `조회 값`이라고 적어, 체결마다 움직이는 값이 아님을 알린다.
-- **거래량**: 지표가 아니라 봉의 `v`를 그대로 막대로 그린다. 계산이 없으므로 WASM이 필요 없다. 이동평균을 곁들인 거래량 지표는 #5에서 바꾼다.
+- **거래량**: 지표가 아니라 봉의 `v`를 그대로 막대로 그린다. 계산이 없으므로 WASM이 필요 없다. 이동평균을 곁들인 거래량 지표는 #5에서 바꾼다(#75에서 바꿨다. §5.5).
 - **테마**: `UiState`가 없으므로 localStorage에만 둔다. #3부터는 `UiState.theme`이 원본이다.
 - **연결 상태**: WebSocket이 없으므로 연결 상태 점을 숨기고 `조회 모드`라고만 적는다.
 
@@ -71,7 +71,7 @@ D3의 표를 그대로 옮긴다. 단계 번호는 이슈 번호다. 이 문서�
 - **서버에 닿지 못하면**: 기본 칸으로 열고 상태 줄(휴대폰은 아래 띠)에 알린다. 저장된 값을 덮어쓰지 않도록 그동안의 변경은 저장하지 않는다.
 - **휴대폰 칸**: `UiState.phone`(§4)은 #3에 두지 않는다. 휴대폰도 데스크톱 레이아웃의 활성 칸을 함께 쓴다.
 - **상태를 두는 곳**(§5.2와 다름): 관심종목 목록들(#37)과 `UiState`도 레이아웃처럼 Zustand 편집 사본(`stores/watchlist.ts`, `stores/ui.ts`)에 둔다. 셋 다 `load`로 싣고, 편집마다 늘어나는 `revision`을 자동 저장이 지켜본다(§5.3의 `dirty`·`saveState` 대신. 저장 상태는 `stores/persist.ts`). 관심종목 현재가는 TanStack Query가 아니라 관심종목 전용 저장소(§5.2 표)에 둔다. 종목이 목록에 처음 들어올 때 REST로 한 번 받고, 그 뒤로는 WebSocket `quotes`로만 바뀐다(#66).
-- **`chartSettings` 검사**(§5.5와 다름): zod 대신 손으로 쓴 검사(`parseChartSettings`). 지표·패널은 #5 전이라 빈 배열만 받는다.
+- **`chartSettings` 검사**(§5.5와 다름): zod 대신 손으로 쓴 검사(`parseChartSettings`). 지표·패널은 #5 전이라 빈 배열만 받는다. #75에서 지표·패널을 받는 v2로 넓혔다(§5.5).
 - **휴대폰 관심종목**(§4와 다름): 길게 눌러 끌기와 밀어 지우기 대신 머리의 `편집`에서 위·아래·지우기 버튼을 쓴다.
 - **관심종목의 `+`**: 같은 검색 대화상자를 "관심종목에 넣기" 목적으로 연다. `Enter`가 칸에 열지 않고 관심종목에 넣는다.
 
@@ -393,7 +393,7 @@ D3의 표를 그대로 옮긴다. 단계 번호는 이슈 번호다. 이 문서�
 
 **구성**(`desktop-indicator-dialog-dark.png`)
 
-- **머리**: 제목, `지표 / 비교 종목` 탭, 대상 칸(`칸 1: 삼성전자 일`).
+- **머리**: 제목, `지표 / 비교 종목` 탭, 대상 칸(`칸 1: 삼성전자 일`). `비교 종목` 탭은 #76까지 보이되 꺼 둔다(#75).
 - **왼쪽 목록**
   - 지표 종류 일곱 가지를 둘로 묶는다.
     - "가격 패널에 겹쳐 그림": 이동평균, 볼린저 밴드, 일목균형표
@@ -417,20 +417,20 @@ D3의 표를 그대로 옮긴다. 단계 번호는 이슈 번호다. 이 문서�
   type SpecValidation = { ok: true } | { ok: false; errors: { field: string; message: string }[] }
   ```
 - `ok: false`이면 `errors[].field`에 해당하는 입력칸 아래에 `message`를 그대로 적고 주 버튼을 끈다. 예: `빠른 기간은 느린 기간보다 짧아야 합니다`. `field`가 입력칸과 맞지 않으면 설정 묶음 맨 아래에 적는다.
-- 서버에서 불러온 `chartSettings`의 지표도 칸을 열 때 같은 함수로 검사한다. 틀린 지표는 그리지 않고 범례에 흐린 글자와 `설정 오류`를 남긴다.
+- 서버에서 불러온 `chartSettings`의 지표는 칸을 열 때 워커가 엔진을 만들며 같은 검사를 한다(메인 스레드의 wasm을 칸 열기 전에 기다리지 않는다, §5.5·§5.6). 틀린 지표는 그리지 않고 범례에 흐린 글자와 `설정 오류`를 남긴다.
 
 **같은 지표 종류 여러 개**
 - 지표마다 브라우저가 UUID를 붙인다(§5.5 `chartSettings`).
 - 이동평균 5와 이동평균 20은 서로 다른 지표다. 같은 설정의 지표를 또 추가하면 색만 다르게 하나 더 생긴다. 막지 않는다.
 
 **설정 편집**
-- 범례 지표 줄의 설정 버튼을 누르거나 선을 더블클릭하면 같은 대화상자가 그 지표의 편집 상태로 열린다.
-- 이때 주 버튼은 `변경 적용`이다.
+- 범례 지표 줄이나 "이 칸에 띄운 지표" 목록의 설정 버튼을 누르면 같은 대화상자가 그 지표의 편집 상태로 열린다. 선을 더블클릭해 여는 것은 후속이다(#75에서 미룸).
+- 이때 주 버튼은 `변경 적용`이다. 적용하면 대화상자는 닫히지 않고 그 종류의 추가 상태로 돌아간다.
 
 **지표 패널 관리**
 - **기본**: 지표 패널 쪽 지표는 추가할 때마다 새 패널을 아래에 붙인다. Lightweight Charts의 pane 하나가 패널 하나다.
 - **높이**: 패널 경계를 끌어 바꾼다(`layout.panes.enableResize`). 바꾼 비율은 `chartSettings.panels[].stretch`에 저장한다.
-- **순서**: 지표 패널 범례의 메뉴에 `위로`, `아래로`, `패널 닫기`가 있다. `패널 닫기`는 그 패널의 지표를 지운다.
+- **순서**: 지표 패널 범례 줄에 마우스나 초점이 오면 `위로`, `아래로`, `패널 닫기` 버튼이 보인다(메뉴 대신 줄 안의 버튼, #75). `패널 닫기`는 그 패널의 지표를 지운다.
 - **패널 하나에 지표 하나**(D11): v1은 지표 패널 하나에 지표 하나만 둔다. RSI와 스토캐스틱을 한 패널에 겹치는 기능은 넣지 않는다. `IndicatorConfig.panel`이 패널 id를 가리키므로 나중에 저장 모양을 바꾸지 않고 넣을 수 있다.
 - **한 칸의 지표 패널 수**: 최대 4개를 권하고 막지는 않는다. 4칸 화면에서는 2개를 넘으면 가격 패널이 너무 낮아진다.
 - **숨긴 지표**: 계산을 멈추고 시리즈를 `visible: false`로 둔다. 범례에는 흐린 글자로 남긴다.
@@ -716,14 +716,14 @@ web/
       ChartController.ts    # 칸 하나의 차트 엔진 래퍼(§5.4)
       barFeed.ts            # 칸 하나의 봉 받기: 세대, 최신 페이지, 과거 페이지 이어 붙이기
       legend.ts             # 범례 DOM(§2.3)
-      series.ts             # 봉 모양별 주 시리즈와 거래량 시리즈, 색 적용
+      series.ts             # 봉 모양별 주 시리즈, 색 적용(거래량은 거래량 지표로 indicators/가 그린다, #75)
       settings.ts           # ChartSettings(§5.5)
       theme.ts              # CSS 변수 → ThemeTokens
       time.ts               # KST 표시 변환(t + 32400), 봉 시각 표기
-      indicators/           # (#5) worker.ts, client.ts, render.ts(§5.6)
+      indicators/           # (#5) worker.ts, engines.ts, client.ts, layer.ts, kinds.ts(§5.6)
       drawings/             # (#6) DrawingLayer.ts, DrawingSurface.ts, interaction.ts, gestures.ts, anchor.ts, magnet.ts, sync.ts, tools/index.ts
       extensions.ts         # ChartController.attach가 넘기는 ChartHost 계약
-      CloudPrimitive.ts     # (#5) 일목 구름 채우기
+      CloudPrimitive.ts     # (#5, #75 뒤 후속) 일목 구름 채우기
       sync.ts               # (#7) 칸 사이 십자선·스크롤 동기화 버스
     stores/
       layout.ts             # useLayoutStore(§5.3). #2는 메모리의 기본 1칸
@@ -905,7 +905,7 @@ type CellStatus =
 class ChartController {
   constructor(el: HTMLElement, deps: { tokens: ThemeTokens; onStatus: (s: CellStatus) => void; fetchPage?: FetchPage });
   // (#4) deps.socket?: MarketSocketLike(api/socket.ts). 없으면 #3처럼 조회만 한다(시험).
-  // (#5~) indicators: IndicatorClient, (#7~) sync: SyncBus를 더한다
+  // (#5~) indicators?: OpenPort(chart/indicators/client.ts), onIndicatorCommand, onPanelStretch. (#7~) sync: SyncBus를 더한다
   // 칸의 설정을 맞춘다. 바뀐 부분만 반영(diff): 종목·거래소·봉 주기가 바뀌면 데이터부터, 봉 모양·축만 바뀌면 그것만
   apply(cell: CellView): void;
   reload(): void;                           // 같은 종목·봉 주기를 처음부터(칸 오류의 `다시 시도`)
@@ -982,7 +982,7 @@ apply(symbol, venue, period)  또는  reload  또는  새 hello ── generatio
 - **처리 순서와 그리기 묶기**
   - 계산과 상태 변경(`confirmed`, `reload`, `bar`의 `preview`)은 칸마다 하나의 처리 줄에서 도착 순서대로 한다. 건너뛰거나 합치지 않는다.
   - 그리기만 `requestAnimationFrame` 한 번에 묶는다. 같은 프레임에 같은 시리즈의 `update`가 여럿이면 마지막 값만 그린다. 서버가 구독당 초당 10회로 줄여 보내지만, 4칸에 비교 종목까지 열면 초당 100회가 넘을 수 있다.
-  - 예외는 테마 변경 하나다. `setTheme`은 프레임을 기다리지 않고 대기 중인 봉을 `flushPendingDraw`로 먼저 가격·거래량 시리즈에 그린 뒤 색을 바꾼다(#58, 2026-11-10 확인). 거래량 시리즈만 최신 `bars`로 바꾸면 보류된 프레임이 지나간 봉을 `update`하다 `Cannot update oldest data`를 던지고, 그 뒤 프레임마다 같은 예외가 반복된다. 예약된 프레임은 빈 큐를 보고 범례만 갱신한다.
+  - 예외는 테마 변경 하나다. `setTheme`은 프레임을 기다리지 않고 대기 중인 봉을 `flushPendingDraw`로 먼저 주 시리즈에, 대기 중인 지표 점을 `indicators.flush()`로 지표 시리즈에 그린 뒤 색을 바꾼다(#58, 2026-11-10 확인. 그때는 거래량 시리즈였고 #75에서 거래량이 지표가 되었다). 시리즈만 최신 `bars`로 바꾸면 보류된 프레임이 지나간 봉을 `update`하다 `Cannot update oldest data`를 던지고, 그 뒤 프레임마다 같은 예외가 반복된다. 예약된 프레임은 빈 큐를 보고 범례만 갱신한다.
 - **브라우저 재연결**(D2)
   - 브라우저와 서버의 WebSocket이 다시 연결되면(새 `hello`) 칸마다 세대를 올리고 시리즈·지표 엔진을 **모두 비운 뒤 최신 페이지부터 다시 만든다**.
   - 첫 `hello`도 같다(#4). 연결 전에 생긴 칸은 서버가 구독을 알기 전에 최신 페이지를 받았을 수 있어서다. 칸마다 최신 페이지 조회가 한 번 더 늘 수 있다.
@@ -1007,72 +1007,103 @@ apply(symbol, venue, period)  또는  reload  또는  새 hello ── generatio
 
 ### 5.5 `chartSettings`의 모양(프런트엔드 소유)
 
-계약은 `Cell.chartSettings: unknown`으로 두고 프런트엔드가 모양을 정하게 했다(D10에서 `Pane` → `Cell`). 다음과 같이 정한다.
+계약은 `Cell.chartSettings: unknown`으로 두고 프런트엔드가 모양을 정하게 했다(D10에서 `Pane` → `Cell`). 코드는 `chart/settings.ts`다(#75).
 
 ```ts
 interface ChartSettings {
-  v: 1;                                     // 모양 버전. 바꾸면 불러올 때 이주
+  v: 2;                                     // 모양 버전. 바꾸면 불러올 때 이주
   style: "candle" | "bar" | "line" | "area";
   scale: "normal" | "log";                  // 비교 종목이 있으면 화면에서는 %로 그린다(저장 값은 그대로)
   indicators: IndicatorConfig[];            // 그리는 순서
   compare: SymbolCode[];                    // 0~3개
-  panels: { id: Uuid; stretch: number }[];  // 지표 패널 순서와 높이 비율. 가격 패널은 늘 맨 위
+  panels: { id: string; stretch: number }[]; // 지표 패널 순서와 높이 비율(가격 패널 1 대비). 가격 패널은 늘 맨 위
 }
 interface IndicatorConfig {
-  id: Uuid;
+  id: string;                               // crypto.randomUUID()
   spec: IndicatorSpec;                      // 계약 §8.2 그대로. 알림에 그대로 넘긴다
-  panel: "price" | Uuid;                    // 가격 패널 또는 panels[].id
+  panel: "price" | string;                  // "price" 또는 panels[].id
   visible: boolean;
-  style: { colors: string[]; width: 1 | 2 | 3 };  // colors는 토큰 이름("ind-2")으로 저장해 테마를 따라가게 한다
+  style: { colors: IndicatorColor[]; width: 1 | 2 | 3 };  // 선 순서(lines(spec))대로 토큰 이름("ind-2"). 테마를 따라간다
 }
 ```
 
-- **불러올 때의 검사**: 서버에서 받은 `chartSettings`는 경계에서 한 번 검사한다(zod). 모양이 틀리면 기본 설정으로 열고 콘솔에 남긴다.
+- **놓는 곳**: 이동평균·볼린저 밴드·일목균형표는 `panel: "price"`. 거래량·RSI·MACD·스토캐스틱 슬로우는 추가할 때마다 `panels` 끝에 자기 패널 하나를 붙인다. 패널마다 지표는 하나다(D11). 지표를 지우면 그 패널도 지운다.
+- **색**: `colors`가 선 수보다 모자라면(RSI에 시그널을 켜는 등 선이 늘어난 설정) 대표 색에서 견본 순서대로 채운다(`kinds.ts`의 `lineColor`). 대표 색은 막대가 아닌 첫 선의 색이다. 거래량 막대와 MACD 히스토그램은 색을 저장하지 않고 등락·부호로 칠한다.
+- **새 차트의 기본값**: 거래량 지표 하나(`{ kind: "volume", maPeriod: null }`)와 그 패널(`stretch: 0.25`). id는 고정 UUID다(칸 안에서만 유일하면 된다). 대화상자로 거래량을 더할 때의 기본은 §9.5대로 `maPeriod: 20`이다.
+- **v1 → v2 이주**(#75): v1은 지표·패널이 빈 배열만 될 수 있었고, 그때 거래량은 늘 그려졌다. 그래서 v1을 읽으면 v2에 기본 거래량 지표를 넣는다. 이주는 읽을 때만 한다. 열기만 해서는 서버에 쓰지 않고(`load`는 `revision`을 올리지 않는다), 사용자가 편집할 때 v2로 저장된다. 서버의 기본 레이아웃 시드(`migrations/0001`)는 v1 그대로다.
+- **불러올 때의 검사**: 서버에서 받은 `chartSettings`는 경계에서 한 번 검사한다(손으로 쓴 `parseChartSettings`). 키와 타입, `spec`의 `kind`와 필드, "가격 밖 지표의 `panel`이 `panels`에 있고 패널마다 지표가 정확히 하나"를 본다. 모양이 틀리면 기본 설정으로 열고 콘솔에 남긴다. 설정값의 뜻(예: 기간 0)은 여기서 보지 않는다. 워커가 엔진을 만들 때 거절하면 그 지표만 그리지 않고 범례에 흐린 글자와 `설정 오류`를 남긴다(§3.3).
 - **크기**: 64KB 제한은 지표 수십 개로도 넘지 않는다.
 
 ### 5.6 WASM 지표를 불러오는 방식 (#5~)
 
 - **빌드**: `pnpm wasm`(`web/scripts/build-wasm.sh`). `crates/indicators-wasm`을 wasm-pack으로 빌드해 `web/src/wasm/indicators/`에 `indicators.js`, `indicators.d.ts`, `indicators_bg.wasm`을 쓴다(백엔드 §9.4). wasm32 타깃과 wasm-pack이 있어야 한다.
   - 결과물은 저장소에 커밋하지 않는다(`.gitignore`).
-  - #5 앞부분에서는 앱 코드가 wasm을 import하지 않는다. 그래서 `pnpm build`·`typecheck`·`test`는 wasm 없이 돈다. 확인은 CI의 `wasm` 작업이 따로 맡는다(빌드 뒤 `pnpm wasm:smoke`). 차트에 연결하는 2차에서 앱 코드가 wasm을 import하면, `build`·`typecheck`·`test` 앞에 `pnpm wasm`을 붙인다. 그리고 그 명령을 돌리는 CI 작업(lint, test, build, e2e)에 wasm32 타깃과 wasm-pack을 깐다.
+  - 앱 코드가 wasm을 import하므로 `pnpm build`·`typecheck`·`test`는 앞에서 `pnpm wasm`을 돌린다(#75). `scripts/check.sh`도 wasm을 맨 앞에서 빌드하고, CI의 lint·test·build·e2e 작업은 wasm32 타깃과 wasm-pack을 깐다. 한 번 빌드한 뒤에는 네트워크 없이 캐시로 된다(`offline.sh` 안에서 확인).
   - `validateSpec`의 결과 타입 `SpecValidation`은 `indicators.d.ts`에서 가져온다. `IndicatorSpec`·`LineId`·`MaMethod`는 `web/src/api/generated/`에 있다(ts-rs).
+  - 실제 wasm을 쓰는 단위 시험은 `*.node.test.ts`로 이름 짓는다. wasm 파일을 `node:fs`로 읽으므로 `tsconfig.node.json`이 검사한다.
 - **불러오기**
-  - Web Worker 하나(`chart/indicators/worker.ts`, Vite `new Worker(new URL(…), { type: "module" })`)가 접착 코드의 `init(wasmUrl)`을 한 번 부른다.
+  - 탭에 Web Worker 하나(`chart/indicators/worker.ts`, Vite `new Worker(new URL(…), { type: "module" })`)가 접착 코드의 `init(wasmUrl)`을 한 번 부른다. 첫 칸의 컨트롤러가 생길 때 워커를 만들어, 최신 페이지를 받는 동안 wasm을 준비한다(`chart/indicators/client.ts`).
   - wasm 파일은 Vite의 `?url` import로 해시 붙은 정적 파일이 된다. `vite-plugin-wasm` 같은 플러그인은 필요 없다.
   - 서버는 `.wasm`을 `application/wasm`으로 내보내야 한다. 그래야 `instantiateStreaming`이 동작한다(백엔드 §8.5).
-- **워커 안의 상태**
-  - `Map<engineKey, WasmEngine>`. `engineKey`는 `(칸, 지표 id)`다.
-  - 메인 스레드는 봉 열을 `Float64Array` 여섯 개로 전송(transfer)한다.
-- **메시지**
+  - 대화상자의 `validateSpec`은 메인 스레드에서 따로 init한다(`chart/indicators/validate.ts`). 대화상자를 열 때 한 번이다.
+- **워커 안의 상태**(`chart/indicators/engines.ts`. 워커 셸 없이 node에서 실제 wasm으로 시험한다)
+  - 차트마다 `Map<지표 id, 엔진>`. 메시지의 `chart`는 컨트롤러 인스턴스 번호다. 칸 번호(slot)로 하지 않는 것은, 다시 마운트된 칸이 옛 컨트롤러의 응답을 받지 않게 하려는 것이다.
+  - 엔진마다 봉 시각 열(확정 봉 + 현재 봉), 막대 등락, 현재 봉의 미리 보기 값, 미래 시각을 든다.
+  - 메인 스레드는 확정 봉 열을 `Float64Array` 여섯 개로 전송(transfer)한다.
+- **메시지**(`chart/indicators/protocol.ts`)
 
-| 메시지 | 응답 |
+| 메인 → 워커 | 하는 일 |
 |---|---|
-| `create(key, gen, specJson, cols)` | 선 전체. `Float64Array[]`와 `shift[]` |
-| `preview(key, gen, bar)` | 선마다 현재 봉 위치(`i + shift`)의 값 |
-| `confirm(key, gen, bar)` | 선마다 확정 봉 위치의 최종 값. WASM `pushConfirmed`의 반환값(`Tail`) 그대로다(§5.4, D13) |
-| `futureStarts(period, lastStart, n)` | 미래 봉 시작 시각 n개(`futureBarStarts`) |
-| `dispose(key)` | 없음 |
+| `create(chart, gen, period, cols, current, engines[{ id, spec }])` | 같은 확정 봉 열로 엔진들을 만든다. 같은 키의 옛 엔진은 `free`. `current`가 있으면 바로 `preview`까지 한다 |
+| `bar(chart, kind: preview \| confirm, bar)` | 그 차트의 모든 엔진에 도착 순서대로 `preview` 또는 `pushConfirmed`(§5.4, D13) |
+| `drop(chart, ids \| all)` | 엔진 해제 |
 
-`gen`은 시리즈 세대다. 워커는 세대를 그대로 돌려주고, 메인 스레드가 지금 세대와 다르면 결과를 버린다(D1). `validateSpec`은 엔진이 필요 없으므로 워커를 거치지 않는다(§3.3).
+| 워커 → 메인 | 내용 |
+|---|---|
+| `created(chart, results[])` | 엔진마다 `{ id, gen, lines[{ id, shift }], draws }` 또는 `{ id, gen, error: spec \| calc, message }` |
+| `tail(chart, results[])` | 엔진마다 선마다 `update`(점 하나), `set`(점 전체) 또는 `none` |
+| `fatal(message)` | wasm init 실패. 그 뒤로는 계산하지 않는다 |
 
+- **점의 자리는 워커가 정한다.** 점은 `{ t, v }`(진짜 Unix 초)이고 거래량 막대 점은 등락(`up`)을 싣는다. 차트 시각 변환은 메인 스레드가 `time.ts`로 한다.
+- **§5.6 초판과 다른 점**(#75): `futureStarts` 왕복 메시지를 두지 않는다. 새 현재 봉의 첫 `preview`와 경주하기 때문이다. 워커가 `create`의 `period`로 `futureBarStarts`를 직접 부른다. 주·월봉 `t`는 서버가 구간 시작(월요일, 1일)으로 맞추므로(`kiwoom/wire.rs`) `futureBarStarts`가 던지지 않는다.
+- **세대**: 메인 스레드는 컨트롤러마다 `gen`을 `create`를 보낼 때마다 올리고 그 묶음의 엔진 기록에 적는다. 응답은 "기록이 있고 `기록.gen === 응답.gen`"일 때만 받는다(D1). `bar`는 세대 없이 보내고, 워커가 엔진마다의 세대를 붙여 돌려준다.
+- **칸마다의 처리 줄**: 컨트롤러는 BarFeed 콜백 안에서 동기로 정하고 바로 `postMessage`한다. 메인 스레드에 `await`가 없으므로 순서는 postMessage의 FIFO와 워커의 단일 스레드가 지킨다(`chart/indicators/sync.ts`).
+
+```
+committedT = 엔진에 커밋한 마지막 확정 봉 t (create 때 h.bars의 마지막, confirm 때 갱신)
+종목·거래소·봉 주기 변경, 최신 페이지 실패 → 지표 선을 바로 비우고 drop all
+reset(최신 페이지), prepended(added > 0)    → 지표 선을 바로 비우고 create all
+live·confirmed:
+  isTailChange(prev, next, bar) && bar.t > committedT → bar{preview | confirm}
+  그 밖(같은 t로 확정 봉 바꿔치기, 확정 안 된 현재 봉이 사라짐, 앞이 바뀜) → 지표 선을 바로 비우고 create all
+```
+
+  - `isTailChange`만으로는 못 가린다. `BarFeed`가 마지막 확정 봉과 같은 t의 봉을 내놓을 수 있고(`replaceLast`), 그때 엔진은 던진다.
+  - 주 시리즈가 `setData`되면 지표 선도 바로 비운다. 시간축은 모든 시리즈 시각의 합집합이라, 옛 시각이 남으면 범례의 `hoverIndex = round(logical)`과 범위 계산이 어긋난다.
+  - 숨긴 지표는 엔진을 만들지 않는다. 다시 켜면 그 지표 하나만 만든다. 설정을 바꾸면 그 지표만 drop하고 다시 만든다.
+- **그리기 묶기**: 지표 점은 `(선 시리즈, 점 시각)`마다 하나씩 큐에 쌓고(`drawQueue.ts`) 주 시리즈와 같은 `requestAnimationFrame`에서 그린다. 시리즈당 마지막 값만 남기면 한 프레임에 온 확정 봉의 최종 값을 잃기 때문이다. `set`이 온 선은 그 프레임의 `update`를 따로 그리지 않는다. 그 `update`는 점 사본에 이미 들어 있으므로, 프레임에서 점 사본으로 `setData`를 한 번 한다. 큐가 `set` 배열을 따로 들면 그 배열이 점 사본과 같은 배열이라 뒤의 `update`로 늘어난다. 그러면 큐에 남은 앞선 `update`가 늘어난 끝보다 과거가 되어, Lightweight Charts가 `Cannot update oldest data`로 거절한다(#75 리뷰, 체결 없던 분 뒤 선행스팬). 선 하나를 그리다 예외가 나면 그 선만 점 사본으로 다시 그리고 `console.error`를 남긴 뒤 다음 선을 그린다. `setTheme`과 주 시리즈를 바꿔 붙이기 전에 큐를 먼저 비운다(#58). 메인 스레드는 선마다 점 사본을 들고 범례 값(그 시각에 그려진 점)과 테마를 바꿀 때의 막대 색에 쓴다.
+- **실패**(#75)
+  - 설정값이 틀리면 `spec` 오류, 그 밖의 실패(이어지지 않는 봉, 엔진 panic)는 `calc` 오류다. 엔진마다 따로 잡아 그 엔진만 버린다. 같은 칸의 다른 엔진은 계속 계산한다.
+  - wasm init 실패(`fatal`), 워커 `onerror`, 워커를 만들지 못함은 탭의 모든 칸에 알린다. 주 차트(봉)는 그대로 그리고, 지표 범례에 흐린 글자와 `계산 오류`를 남긴다.
 - **현재 봉 갱신**: 체결마다 `preview`만 부르고 선마다 한 점만 갱신한다(#5 "그 봉에 걸린 값만 다시 계산"). 어느 시각의 점인지는 선의 `shift`가 정한다. 아래 일목균형표 항목을 본다.
 - **일목균형표와 이동된 선**(W4-28)
   - **주 시리즈에는 빈 시각을 붙이지 않는다.** 주 시리즈 끝에 미래 시각을 붙이면 현재 봉이 시리즈의 마지막 시각보다 과거가 된다. 그러면 Lightweight Charts의 `series.update`(마지막 시각 이상만 받음)로 현재 봉을 갱신할 수 없다. 목업 초판이 이 방식이었고 고쳤다.
-  - **미래 시각은 선행스팬 시리즈 자신이 갖는다.** 선의 점 `i`는 시각 `T[i + shift]`에 놓인다. `T`는 확정 봉과 현재 봉의 시작 시각 뒤에 `futureStarts`로 만든 미래 시각을 이은 배열이다. 시간축은 모든 시리즈 시각의 합집합이므로, 선행스팬 시리즈만으로 미래 구간이 생긴다.
-  - **미래 시각의 개수**: 칸에 띄운 모든 지표의 양의 `shift` 중 최댓값이다. 일목균형표를 둘 이상 띄우고 displacement가 다르면 큰 쪽을 따른다. 25로 정해 두지 않는다. 일목균형표를 지우면 그 선행스팬 시리즈와 함께 미래 구간도 사라진다.
+  - **미래 시각은 선행스팬 시리즈 자신이 갖는다.** 선의 점 `i`는 시각 `T[i + shift]`에 놓인다. `T`는 확정 봉과 현재 봉의 시작 시각 뒤에 `futureBarStarts`로 만든 미래 시각을 이은 배열이다. 시간축은 모든 시리즈 시각의 합집합이므로, 선행스팬 시리즈만으로 미래 구간이 생긴다.
+  - **미래 시각의 개수**: 엔진마다 자기 양의 `shift` 최댓값만큼 만든다. 시간축이 합집합이므로 칸 전체로는 띄운 지표의 양의 `shift` 중 최댓값이 된다. 일목균형표를 지우면 그 선행스팬 시리즈와 함께 미래 구간도 사라진다.
   - **미래 시각을 만드는 법**: 늘 `futureBarStarts`로 만든다. 봉 주기마다 경계 규칙이 다르기 때문이다. 분봉은 08:00~20:00 밖과 주말을 건너뛰지만, 월봉은 1일이 주말이어도 그날이 경계이고, 주봉은 월요일이 경계다. 브라우저가 초 단위 덧셈으로 만들지 않는다.
-  - **갱신할 점은 언제나 그 선 시리즈의 마지막 점이다.** 선의 마지막 값은 현재 봉(index `n−1`)에서 나오고 시각 `T[n−1+shift]`에 놓인다. 어느 선 시리즈도 끝에 빈 시각(whitespace)을 붙이지 않으므로, 이 점이 그 시리즈의 마지막 점이다.
+  - **미래 칸이 예측과 다를 때**: 새 봉의 시각이 직전에 만든 미래 시각의 첫 칸과 다르면(체결 없던 분, 공휴일) 양의 `shift` 선은 `set`으로 다시 놓는다. 그 밖에는 한 점 `update`다.
+  - **갱신할 점은 언제나 그 선 시리즈의 마지막 점이다.** 선의 마지막 값은 현재 봉(index `n−1`)에서 나오고 시각 `T[n−1+shift]`에 놓인다. 어느 선 시리즈도 끝에 빈 시각(whitespace)을 붙이지 않으므로, 이 점이 그 시리즈의 마지막 점이다. NaN(워밍업)과 `T` 밖(후행스팬 앞부분)은 점을 만들지 않는다.
 
   | 선 | `shift` | 현재 봉이 바뀔 때 갱신할 점 | 새 현재 봉이 생길 때 |
   |---|---|---|---|
   | 이동 없는 선(이동평균, 전환선, 기준선 등) | 0 | 현재 봉 시각의 점 | 새 시각의 점을 덧붙인다 |
-  | 선행스팬 A·B | 양수 | 현재 봉에서 `shift`만큼 앞 미래 시각의 점 | `futureStarts`로 미래 시각을 하나 더 만들고 그 점을 덧붙인다 |
+  | 선행스팬 A·B | 양수 | 현재 봉에서 `shift`만큼 앞 미래 시각의 점 | `futureBarStarts`로 미래 시각을 다시 만들고 그 점을 덧붙인다 |
   | 후행스팬 | 음수 | 현재 봉에서 `|shift|`만큼 뒤 과거 시각의 점. 시간축으로는 과거지만 이 시리즈의 마지막 점이다 | 다음 과거 시각의 점을 덧붙인다 |
 
   - 그래서 모든 선을 보통의 `series.update(point)`로 갱신한다. v5.2의 `update(point, historicalUpdate = true)`는 쓰지 않는다. 쓰게 되는 것은 시리즈 끝에 빈 시각을 붙였을 때뿐인데, 그 방식은 위에서 버렸다.
-  - **확인할 것**: 이 성질은 "선 시리즈 끝에 빈 시각을 두지 않는다"에 달려 있다. 구현 때 후행스팬이 있는 칸에서 체결을 흘려 `series.update`가 예외 없이 마지막 점만 바꾸는지 테스트로 고정한다.
+  - **고정한 시험**: `engines.node.test.ts`가 체결을 흘려 모든 선의 `update`가 그 선의 마지막 점 이상이고, 점진 결과가 처음부터 다시 만든 결과와 같음을 실제 wasm으로 본다. `e2e/indicators.spec.ts`는 일목균형표가 있는 1분봉 칸에 가짜 키움 체결을 흘려, 실제 Lightweight Charts의 Line 시리즈마다 `update` 시각이 그 시리즈의 마지막 점 시각이고 page error가 없음을 본다.
   - 알림에서 이동된 선을 고르지 못하는 것은 §3.8(D8)이다.
-- **타입**: `indicators` 크레이트의 `Spec`과 계약의 `IndicatorSpec`은 같은 정의다(ts-rs). 워커에는 `JSON.stringify(spec)`을 넘긴다.
+- **타입**: `indicators` 크레이트의 `Spec`과 계약의 `IndicatorSpec`은 같은 정의다(ts-rs). 워커에는 `JSON.stringify(spec)`을 넘긴다. 선 순서는 `kinds.ts`의 `specLines`가 크레이트의 `Spec::lines`를 따라 쓰고, 시험이 wasm 엔진의 `lines()`와 같은지 본다.
 - **목업과의 차이**: 목업의 `data.js` 지표 함수는 화면을 그리려고 만든 대역이다. 실제 앱에서는 쓰지 않는다.
 
 ### 5.7 Lightweight Charts 활용
@@ -1081,9 +1112,11 @@ interface IndicatorConfig {
 |---|---|---|
 | 봉 모양 4가지 | `chart.addSeries(CandlestickSeries \| BarSeries \| LineSeries \| AreaSeries, opts)` | 모양을 바꾸면 주 시리즈를 지우고 새로 만든다. 드로잉 primitive도 새 시리즈에 다시 붙인다 |
 | 지표 패널 | `addSeries(…, opts, paneIndex)`, `chart.panes()[i].setStretchFactor()` | 패널 하나 = pane 하나. pane 순서는 `chartSettings.panels` 순서 |
-| 지표 패널 범례 위치 | `pane.getHeight()` 누적 | 칸 크기가 바뀔 때마다 다시 잡는다(`ResizeObserver`). 목업 초판에서 휴대폰 범례가 어긋났던 원인이다 |
+| 지표 패널 범례 위치 | `pane.getHTMLElement()`의 위쪽 끝 | 범례를 그릴 때마다 다시 재고, 칸 크기가 바뀌면(`ResizeObserver`) 다음 프레임에 다시 그린다. 목업 초판에서 휴대폰 범례가 어긋났던 원인이다 |
+| 패널 높이 저장 | `layout.panes.enableResize`, `pane.getStretchFactor()` | v5.2에는 pane 크기가 바뀌었다는 이벤트가 없다. 차트의 `pointerup` 뒤에 비율을 읽어 바뀌었으면 `panels[].stretch`에 저장한다(#75) |
+| 가격 pane 지키기 | `pane.setPreserveEmptyPane(true)` | 주 시리즈를 바꿔 붙이는 동안 가격 pane이 비면 라이브러리가 pane을 지우고 지표 패널이 0번이 된다(#75) |
 | 가격 패널 지표 | 같은 pane 0에 `LineSeries` | `priceLineVisible: false`, `lastValueVisible: false` |
-| 볼린저·일목 구름 채우기 | series primitive(`CloudPrimitive`, `zOrder: "bottom"`) | 두 선 사이 채우기 기능이 없어서다 |
+| 볼린저·일목 구름 채우기 | series primitive(`CloudPrimitive`, `zOrder: "bottom"`) | 두 선 사이 채우기 기능이 없어서다. #75는 선만 그리고 채우기는 후속이다 |
 | 일목 미래 구간 | 선행스팬 시리즈가 미래 시각의 점을 갖는다 | 주 시리즈에 빈 시각(whitespace)을 붙이지 않는다(§5.6, W4-28) |
 | 드로잉 | 칸마다 series primitive 하나(`DrawingLayer`, `zOrder: "normal"`) | `"top"`은 십자선을 가린다(drawing-proposal §6). `paneViews()`가 그리기, 클릭 판정은 엔진이 `Shape`마다 한다. 좌표는 §3.5 |
 | 고른 드로잉의 가격 라벨 | primitive `priceAxisViews()` | 수평선은 축에 가격 라벨을 낸다 |

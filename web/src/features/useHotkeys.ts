@@ -28,6 +28,8 @@ export function useHotkeys() {
       switch (action.kind) {
         case "search":
           return sel.openSearch();
+        case "indicators":
+          return sel.openIndicators(slot);
         case "toggleWatch":
           return useUiStore.getState().toggleWatch();
         case "period":
