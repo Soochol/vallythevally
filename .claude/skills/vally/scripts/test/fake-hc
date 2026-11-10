@@ -2,6 +2,7 @@
 # Fake hc for vally script tests, shaped like real hc 0.1.19 JSON.
 # Every call is appended to $FAKE_DIR/hc.log. FAKE_HC_FAIL=<command> makes that command fail.
 set -euo pipefail
+exec {mutex}>"$FAKE_DIR/hc.mutex"; flock "$mutex"
 db=$FAKE_DIR/terminals.json
 [ -f "$db" ] || echo '{"terminals":[]}' > "$db"
 printf '%s\n' "$*" >> "$FAKE_DIR/hc.log"
@@ -40,8 +41,8 @@ case $cmd in
     fi
     id=$(cat "$FAKE_DIR/next_id" 2>/dev/null || echo 100); echo $((id + 1)) > "$FAKE_DIR/next_id"
     addr=t$id
-    save --arg a "$addr" --arg n "$name" --arg c "$cwd" --arg p "$parent" --argjson l "$labels" --argjson ms "$((id * 1000))" \
-      '.terminals += [{address: $a, name: (if $n == "" then null else $n end), cwd: $c, parent: (if $p == "" then null else $p end), created_ms: $ms, state: "live", status: {app: "claude-code", state: "working"}, labels: $l}]'
+    save --arg a "$addr" --arg n "$name" --arg c "$cwd" --arg p "$parent" --argjson l "$labels" \
+      '.terminals += [{address: $a, name: (if $n == "" then null else $n end), cwd: $c, parent: (if $p == "" then null else $p end), created_ms: (([.terminals[].created_ms] | max // 0) + 1000), state: "live", status: {app: "claude-code", state: "working"}, labels: $l}]'
     echo "{\"address\":\"$addr\",\"first_message\":{\"sent\":${FAKE_SENT:-true},\"started\":true,\"turn\":0}}" ;;
   send)
     exists "$1"

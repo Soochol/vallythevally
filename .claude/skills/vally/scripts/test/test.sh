@@ -47,7 +47,7 @@ db_edit() { jq "$@" "$FAKE_DIR/terminals.json" > "$FAKE_DIR/t.tmp" && mv "$FAKE_
 
 add_terminal() {
   db_edit --arg a "$1" --arg n "$2" --arg c "$3" --argjson l "$4" --arg s "${5:-idle}" --arg p "${6-t1}" \
-    '.terminals += [{address: $a, name: $n, cwd: $c, parent: (if $p == "" then null else $p end), created_ms: 1, state: "live", status: {state: $s}, labels: $l}]'
+    '.terminals += [{address: $a, name: $n, cwd: $c, parent: (if $p == "" then null else $p end), created_ms: (([.terminals[].created_ms] | max // 0) + 1000), state: "live", status: {state: $s}, labels: $l}]'
 }
 
 add_lead() {
@@ -62,6 +62,25 @@ lock_of() { git worktree list --porcelain | awk -v w="$1" '/^worktree / { p = su
 
 changes_since() { tail -n +$(( $1 + 1 )) "$FAKE_DIR/hc.log" | grep -E '^(send|kill|rm|run|label) ' | grep -vE '^label (t1|t2) vally\.lead=' || true; }
 mark() { wc -l < "$FAKE_DIR/hc.log" 2>/dev/null || echo 0; }
+
+park_t1_in() { # <tool> <regex>
+  local tool=$1 real
+  if [ "$tool" = hc ]; then real=$here/fake-hc; else real=$(command -v "$tool"); fi
+  rm -f "$T/bin/$tool"
+  { echo '#!/usr/bin/env bash'; printf 're=%q real=%q\n' "$2" "$real"
+    cat <<'SH'
+if [ "$HC_TERMINAL_ID" = t1 ] && [[ "$*" =~ $re ]]; then
+  touch "$FAKE_DIR/parked"
+  for ((i = 0; i < 600; i++)); do [ -e "$FAKE_DIR/go" ] && break; sleep 0.05; done
+fi
+exec "$real" "$@"
+SH
+  } > "$T/bin/$tool"
+  chmod +x "$T/bin/$tool"
+}
+wait_for() { for ((i = 0; i < 200; i++)); do [ -e "$1" ] && return 0; sleep 0.05; done; echo "    never appeared: $1"; return 1; }
+free_t1_when_ended_or_after_3s() { for ((i = 0; i < 60; i++)); do kill -0 "$1" 2>/dev/null || break; sleep 0.05; done; touch "$FAKE_DIR/go"; }
+section() { sed -n "/^## $2/,/^## /p" "$1"; }
 
 ran() { grep "^$1" "$FAKE_DIR/hc.log" 2>/dev/null; }
 ok() { if "$@"; then return 0; else echo "    failed: $*"; return 1; fi; }
@@ -542,6 +561,107 @@ t_same_lead_names_show_the_address() {
   ok grep -q '^- 다른 리드 사용 중: main(t2) (이슈 #66)$' "$T/out" &&
   ok grep -q '^- 다른 리드 사용 중: ochestra1(t3) (이슈 #75)$' "$T/out" &&
   ok grep -q '^- 다른 리드 사용 중: ochestra1(t4) (이슈 #76)$' "$T/out"
+}
+
+t_starts_at_once_give_the_issue_to_one_lead() {
+  make_pr 61 fix/58-theme OPEN '["web/a.ts"]'
+  park_t1_in git '^worktree add'
+  "$agent/start.sh" fix 58 --pr 61 --round 1 --spec "$T/spec.md" > "$T/t1" 2>&1 & p1=$!
+  wait_for "$FAKE_DIR/parked" || return 1
+  as_t2 "$agent/start.sh" review 58 --pr 61 --round 0 > "$T/t2" 2>&1 & p2=$!
+  free_t1_when_ended_or_after_3s $p2
+  wait $p1; c1=$?; wait $p2; c2=$?
+  cat "$T/t1" "$T/t2"
+  ok test $c1 = 0 && ok test $c2 != 0 && ok grep -q 'issue #58 belongs to the live lead main' "$T/t2" &&
+  ok test -z "$(labels_of w58-review0)" && ok test "$(git worktree list --porcelain | grep -c '^locked')" = 1
+}
+
+t_check_and_start_at_once_give_the_issue_to_one_lead() {
+  make_pr 61 fix/58-theme OPEN '["web/a.ts"]'
+  park_t1_in git '^worktree add'
+  "$agent/check-pr.sh" 58 --pr 61 > "$T/t1" 2>&1 & p1=$!
+  wait_for "$FAKE_DIR/parked" || return 1
+  as_t2 "$agent/start.sh" impl 58 --branch fix/58-other --spec "$T/spec.md" > "$T/t2" 2>&1 & p2=$!
+  free_t1_when_ended_or_after_3s $p2
+  wait $p1; c1=$?; wait $p2; c2=$?
+  cat "$T/t1" "$T/t2"
+  ok test $c1 = 0 && ok test $c2 != 0 && ok grep -q 'issue #58 belongs to the live lead main' "$T/t2" &&
+  ok test -z "$(labels_of w58-impl)" && ok test ! -d "$VALLY_WORKTREES/fix-58-other"
+}
+
+t_takes_at_once_give_the_issue_to_one_lead() {
+  as_t2 "$agent/start.sh" impl 58 --branch fix/58-theme --spec "$T/spec.md" >/dev/null || return 1
+  kill_lead t2; add_lead t3 /c/macheck2 3000000
+  park_t1_in hc '^label .* vally\.owner='
+  "$agent/take.sh" 58 > "$T/t1" 2>&1 & p1=$!
+  wait_for "$FAKE_DIR/parked" || return 1
+  HC_TERMINAL_ID=t3 "$agent/take.sh" 58 > "$T/t3" 2>&1 & p3=$!
+  free_t1_when_ended_or_after_3s $p3
+  wait $p1; c1=$?; wait $p3; c3=$?
+  cat "$T/t1" "$T/t3"
+  ok test $c1 = 0 && ok test $c3 != 0 && ok grep -q 'issue #58 belongs to the live lead main' "$T/t3" &&
+  ok test "$(labels_of w58-impl | jq -r '.["vally.owner"]')" = t1@1000 &&
+  ok test "$(lock_of "$VALLY_WORKTREES/fix-58-theme")" = "vally owner t1@1000 issue 58"
+}
+
+t_agent_without_owner_belongs_to_an_older_parent_only() {
+  add_terminal t5 w58-impl /w '{"vally.issue":"58","vally.role":"worker"}' working t2
+  as_t2 "$agent/status.sh" > "$T/out" && ok grep -q '^- w58-impl \[worker\] 이슈 #58: working$' "$T/out" &&
+  "$agent/status.sh" > "$T/out" && ok grep -q '^- 다른 리드 사용 중: ochestra1 (이슈 #58)$' "$T/out" || return 1
+  kill_lead t2; add_lead t2 /recycled/lead 9000000
+  m=$(mark)
+  HC_TERMINAL_ID=t5 "$agent/report.sh" 'done 58 /r.md' > "$T/out"; code=$?
+  ok test $code = 3 && ok test "$(labels_of t5 | jq -r '.["vally.orphan"]')" = 1 &&
+  ! as_t2 "$agent/retire.sh" w58-impl 2>"$T/err" && ok grep -q 'w58-impl has no live lead (주인 없음, was t2)' "$T/err" &&
+  ok test -z "$(changes_since "$m" | grep -E '^(send|kill|rm) ')"
+}
+
+t_take_moves_gardener_with_its_worktree() {
+  as_t2 "$agent/start.sh" garden 58 --pr 61 >/dev/null || return 1
+  kill_lead t2
+  "$agent/take.sh" 58 > "$T/out" || { cat "$T/out"; return 1; }
+  ok test "$(labels_of docs-garden-t2 | jq -r '.["vally.owner"]')" = t1@1000 &&
+  ok test "$(lock_of "$VALLY_WORKTREES/docs-garden-61")" = "vally owner t1@1000" &&
+  "$agent/retire.sh" docs-garden-t2 --worktree > "$T/out" 2>&1 && ok test ! -d "$VALLY_WORKTREES/docs-garden-61"
+}
+
+t_agent_without_any_record_is_shown_without_lead() {
+  add_terminal t5 w58-impl /w '{"vally.issue":"58","vally.role":"worker"}' working ''
+  HC_TERMINAL_ID=t5 "$agent/report.sh" 'done 58 /r.md' >/dev/null
+  "$agent/status.sh" > "$T/out" 2>&1 || { cat "$T/out"; return 1; }
+  ok grep -q '^- w58-impl \[worker\] 이슈 #58: 보고 완료 (리드 기록 없음)$' "$T/out" && ! grep -q 'bad array' "$T/out" &&
+  "$agent/take.sh" 58 >/dev/null && ok test "$(labels_of t5 | jq -r '.["vally.owner"]')" = t1@1000
+}
+
+t_status_lists_my_pr_while_checking_and_after_a_push() {
+  make_pr 61 fix/58-theme OPEN '["web/a.ts"]'
+  jq '[. + {number: 61, title: "mine"}]' "$FAKE_DIR/gh/pr-61.json" > "$FAKE_DIR/gh/pr-list.json"
+  "$agent/check-pr.sh" 58 --pr 61 >/dev/null && "$agent/status.sh" > "$T/out" || return 1
+  ok test -n "$(section "$T/out" '내 PR' | grep '^- #61 mine ')" || return 1
+  jq '.[0].headRefOid = "pushed"' "$FAKE_DIR/gh/pr-list.json" > "$T/l" && mv "$T/l" "$FAKE_DIR/gh/pr-list.json"
+  "$agent/status.sh" > "$T/out" && ok test -n "$(section "$T/out" '내 PR' | grep '^- #61 mine ')" || return 1
+  db_edit 'del(.terminals[] | select(.name == "check-61-t1"))'
+  jq '.[0].closingIssuesReferences = [{number: 58}] | . + [{number: 62, title: "theirs", headRefName: "feat/66-x", headRefOid: "y", closingIssuesReferences: [{number: 66}]}]' \
+    "$FAKE_DIR/gh/pr-list.json" > "$T/l" && mv "$T/l" "$FAKE_DIR/gh/pr-list.json"
+  "$agent/status.sh" > "$T/out" &&
+  ok test -n "$(section "$T/out" '내 PR' | grep '^- #61 mine ')" && ok test -z "$(section "$T/out" '내 PR' | grep '#62')"
+}
+
+t_issue_handed_to_gardener_stays_with_its_lead() {
+  echo '[{"number":58,"title":"docs"},{"number":80,"title":"free"}]' > "$FAKE_DIR/gh/issue-list.json"
+  "$agent/start.sh" garden 50 --pr 55 >/dev/null && "$agent/start.sh" garden 58 --pr 61 >/dev/null || return 1
+  m=$(mark)
+  ! as_t2 "$agent/start.sh" garden 58 --pr 61 2>"$T/err" && ok grep -q 'issue #58 belongs to the live lead main' "$T/err" &&
+  ! as_t2 "$agent/start.sh" impl 58 --branch fix/58-theme --spec "$T/spec.md" 2>/dev/null &&
+  ok test -z "$(changes_since "$m")" || return 1
+  "$agent/status.sh" > "$T/out" && ok grep -q '^- docs-garden-t1 \[gardener\] 이슈 #50, #58 PR #55: working$' "$T/out" &&
+  ok grep -q '^- #58: docs-garden-t1$' "$T/out" &&
+  as_t2 "$agent/status.sh" > "$T/out" && ok grep -q '^- 다른 리드 사용 중: main (이슈 #50, #58)$' "$T/out" &&
+  ok grep -q '^- #80 free$' "$T/out" && ! grep -q '^- #58 docs$' "$T/out" || return 1
+  kill_lead t1
+  as_t2 "$agent/take.sh" 58 >/dev/null &&
+  ok test "$(labels_of docs-garden-t1 | jq -r '.["vally.owner"]')" = t2@2000 &&
+  ok test "$(lock_of "$VALLY_WORKTREES/docs-garden-55")" = "vally owner t2@2000"
 }
 
 t_scripts_print_their_usage() {
