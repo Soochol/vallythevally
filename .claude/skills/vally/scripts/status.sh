@@ -47,10 +47,15 @@ done
 spaces=$(jq -s '.' <<<"$spaces")
 
 all=$(jq -cs 'add | map(. + {issue: (.labels["vally.issue"]? // .issue // "")})' <<<"$agents$spaces")
+leads=$(jq -r '[.[] | select(.state == "live") | .owner | split("@")[0]] | unique | .[]' <<<"$all")
+declare -A lead_names=()
+for a in $leads; do lead_names[$a]=$(lead_label "$a"); done
 others=''
-for a in $(jq -r '[.[] | select(.state == "live") | .owner | split("@")[0]] | unique | .[]' <<<"$all"); do
+for a in $leads; do
+  name=${lead_names[$a]}
+  [ "$(printf '%s\n' "${lead_names[@]}" | grep -cxF "$name")" = 1 ] || name="$name($a)"
   issues=$(jq -r --arg a "$a" '[.[] | select((.owner | split("@")[0]) == $a and .issue != "") | "#" + .issue] | unique | join(", ")' <<<"$all")
-  others+="- 다른 리드 사용 중: $(lead_label "$a")${issues:+ (이슈 $issues)}"$'\n'
+  others+="- 다른 리드 사용 중: $name${issues:+ (이슈 $issues)}"$'\n'
 done
 held=$(jq -c '[.[] | select(.state != "none" and .issue != "") | .issue] | unique' <<<"$all")
 mine=$(jq -c '[.[] | select(.state == "me") | (.issue, .labels["vally.pr"]?, .branch?) | select(. != null and . != "")] | unique' <<<"$all")

@@ -518,6 +518,32 @@ t_templates_report_through_script() {
   done
 }
 
+t_finish_and_retire_unlock_and_remove_own_worktrees() {
+  make_pr 61 fix/58-theme OPEN '["web/a.ts"]'
+  "$agent/start.sh" fix 58 --pr 61 --round 1 --spec "$T/spec.md" >/dev/null &&
+  "$agent/start.sh" review 58 --pr 61 --round 0 >/dev/null || return 1
+  head=$(jq -r .headRefOid "$FAKE_DIR/gh/pr-61.json")
+  ok test -n "$(lock_of "$VALLY_WORKTREES/review-58-${head:0:7}")" || return 1
+  jq '.state = "MERGED"' "$FAKE_DIR/gh/pr-61.json" > "$T/pr" && mv "$T/pr" "$FAKE_DIR/gh/pr-61.json" && merge_pr fix/58-theme
+  "$agent/finish.sh" 58 --pr 61 > "$T/out" 2>&1 || { cat "$T/out"; return 1; }
+  ok test ! -d "$VALLY_WORKTREES/fix-58-theme" && ok test ! -d "$VALLY_WORKTREES/review-58-${head:0:7}" &&
+  ok test -z "$(git branch --list fix/58-theme)" && ok test -d "$VALLY_WORKTREES/docs-garden-61" || return 1
+  ok test "$(git worktree list --porcelain | grep -c '^locked')" = 1 &&
+  "$agent/retire.sh" docs-garden-t1 --worktree > "$T/out" 2>&1 || { cat "$T/out"; return 1; }
+  ok test ! -d "$VALLY_WORKTREES/docs-garden-61" && ok test -z "$(git worktree list --porcelain | grep '^locked')"
+}
+
+t_same_lead_names_show_the_address() {
+  kill_lead t2; add_lead t2 "$T/lead/sub" 2000000; add_lead t3 /a/ochestra1 3000000; add_lead t4 /b/ochestra1 4000000
+  as_t2 "$agent/start.sh" impl 66 --branch feat/66-x --spec "$T/spec.md" >/dev/null &&
+  HC_TERMINAL_ID=t3 "$agent/start.sh" impl 75 --branch feat/75-x --spec "$T/spec.md" >/dev/null &&
+  HC_TERMINAL_ID=t4 "$agent/start.sh" impl 76 --branch feat/76-x --spec "$T/spec.md" >/dev/null || return 1
+  "$agent/status.sh" > "$T/out" || return 1
+  ok grep -q '^- 다른 리드 사용 중: main(t2) (이슈 #66)$' "$T/out" &&
+  ok grep -q '^- 다른 리드 사용 중: ochestra1(t3) (이슈 #75)$' "$T/out" &&
+  ok grep -q '^- 다른 리드 사용 중: ochestra1(t4) (이슈 #76)$' "$T/out"
+}
+
 t_scripts_print_their_usage() {
   for s in check-pr finish report retire start take; do
     "$agent/$s.sh" > /dev/null 2>"$T/err"; code=$?
