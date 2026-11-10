@@ -12,6 +12,7 @@ const API_ERROR_CODES = [
   "conflict",
   "payload_too_large",
   "stale_revision",
+  "screener_not_ready",
   "method_not_allowed",
   "internal",
 ] as const satisfies readonly ApiErrorCode[];
@@ -36,6 +37,8 @@ const API_ERROR_REASONS = [
   "unknown_failure",
   "protocol",
   "symbol_list_loading",
+  "missing_day",
+  "updating",
 ] as const satisfies readonly ApiErrorReason[];
 
 const _allReasonsListed: Exclude<ApiErrorReason, (typeof API_ERROR_REASONS)[number]> extends never ? true : never = true;

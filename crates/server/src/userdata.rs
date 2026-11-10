@@ -1,7 +1,7 @@
 
 use sqlx::Row;
 
-use crate::api::{Arrangement, Cell, Layout, LayoutInput, LayoutSummary, LayoutSync, Revision, SymbolCode, UiState, UnixSeconds, Watchlist, Watchlists};
+use crate::api::{Arrangement, Cell, Layout, LayoutInput, LayoutSummary, LayoutSync, Revision, Screens, SymbolCode, UiState, UnixSeconds, Watchlist, Watchlists};
 use crate::db::{AppDb, DbError};
 
 #[derive(Debug)]
@@ -80,6 +80,22 @@ pub async fn put_watchlists(db: &AppDb, all: &Watchlists) -> Result<(), StoreErr
                 .await?;
         }
     }
+    tx.commit().await?;
+    Ok(())
+}
+
+pub async fn get_screens(db: &AppDb) -> Result<Screens, StoreError> {
+    let row = sqlx::query("SELECT list, revision FROM screens WHERE singleton = 1").fetch_one(db.read()).await?;
+    let screens = serde_json::from_str(row.get("list")).map_err(|e| corrupt("screens", e))?;
+    Ok(Screens { screens, revision: Revision(row.get("revision")) })
+}
+
+pub async fn put_screens(db: &AppDb, all: &Screens) -> Result<(), StoreError> {
+    let list = serde_json::to_string(&all.screens).expect("Screen은 언제나 직렬화된다");
+    let mut tx = db.begin_write().await?;
+    let stored: Option<i64> = sqlx::query_scalar("SELECT revision FROM screens WHERE singleton = 1").fetch_optional(&mut *tx).await?;
+    check_newer(stored, all.revision)?;
+    sqlx::query("UPDATE screens SET list = ?, revision = ? WHERE singleton = 1").bind(list).bind(all.revision.0).execute(&mut *tx).await?;
     tx.commit().await?;
     Ok(())
 }

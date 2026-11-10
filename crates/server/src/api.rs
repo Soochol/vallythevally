@@ -513,6 +513,162 @@ pub struct LayoutInput {
 #[ts(export, type = r#"{ lastLayoutId: string | null; theme: "dark" | "light"; revision: number; [k: string]: unknown }"#)]
 pub struct UiState(pub serde_json::Map<String, serde_json::Value>);
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, TS)]
+#[ts(export, type = "string")]
+pub struct KstDate(pub domain::KstDate);
+
+impl Serialize for KstDate {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        s.collect_str(&self.0)
+    }
+}
+
+impl<'de> Deserialize<'de> for KstDate {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let text = String::deserialize(d)?;
+        domain::KstDate::parse_yyyymmdd(&text.replace('-', ""))
+            .filter(|date| date.to_string() == text)
+            .map(KstDate)
+            .ok_or_else(|| serde::de::Error::custom(format!("날짜는 YYYY-MM-DD여야 합니다: {text}")))
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub enum ScreenPeriod {
+    #[serde(rename = "D")]
+    Day,
+    #[serde(rename = "W")]
+    Week,
+    #[serde(rename = "M")]
+    Month,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum BarField {
+    Open,
+    High,
+    Low,
+    Close,
+    Volume,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum ExcludeKind {
+    Etf,
+    Preferred,
+    Reit,
+    Spac,
+    Managed,
+    InvestmentCautionAlert,
+    InvestmentWarning,
+    InvestmentDanger,
+    InvestmentCaution,
+    ShortTermOverheated,
+    TradingHalted,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct NewHigh {
+    pub field: BarField,
+    pub n: u32,
+    pub m: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct Screen {
+    pub id: String,
+    pub name: String,
+    pub period: ScreenPeriod,
+    pub exclude: Vec<ExcludeKind>,
+    pub conditions: Vec<NewHigh>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct Screens {
+    pub screens: Vec<Screen>,
+    pub revision: Revision,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct ScreenerResult {
+    pub as_of: KstDate,
+    pub universe: u32,
+    pub excluded: ScreenerExcluded,
+    pub rows: Vec<ScreenerRow>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct ScreenerExcluded {
+    pub listed_too_short: u32,
+    pub history_short: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct ScreenerRow {
+    pub symbol: SymbolCode,
+    pub name: String,
+    pub close: f64,
+    pub change_rate: Option<f64>,
+    pub high_date: KstDate,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct ScreenerUpdateRequest {
+    pub full: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum UpdatePhase {
+    Symbols,
+    Recent,
+    Backfill,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct ScreenerUpdate {
+    pub phase: UpdatePhase,
+    pub done: u32,
+    pub total: u32,
+    pub error: Option<ApiErrorBody>,
+    pub full: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct FullHistory {
+    pub done: u32,
+    pub total: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct ScreenerStatus {
+    pub last_day: Option<KstDate>,
+    pub need_day: Option<KstDate>,
+    pub today_available: bool,
+    pub full_history: FullHistory,
+    pub update: Option<ScreenerUpdate>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "snake_case")]
 #[ts(export)]
@@ -528,6 +684,7 @@ pub enum ApiErrorCode {
     PayloadTooLarge,
     /// 저장된 것보다 크지 않은 revision으로 저장하려 했다. 더 새 편집이 이미 저장돼 있다.
     StaleRevision,
+    ScreenerNotReady,
     /// 있는 API 경로에 틀린 메서드를 보냈다.
     MethodNotAllowed,
     Internal,
@@ -552,6 +709,8 @@ pub enum ApiErrorReason {
     UnknownFailure,
     Protocol,
     SymbolListLoading,
+    MissingDay,
+    Updating,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -703,6 +862,48 @@ mod tests {
         ];
         for (msg, want) in cases {
             assert_eq!(serde_json::to_value(&msg).unwrap(), want);
+        }
+    }
+
+    #[test]
+    fn screener_json_shape() {
+        let every_kind = json!(["etf", "preferred", "reit", "spac", "managed", "investment_caution_alert", "investment_warning",
+                                "investment_danger", "investment_caution", "short_term_overheated", "trading_halted"]);
+        let sent = json!({"screens": [{"id": "S1", "name": "고가 200주", "period": "W", "exclude": every_kind,
+                                       "conditions": [{"field": "high", "n": 200, "m": 5}, {"field": "volume", "n": 60, "m": 1}]}],
+                          "revision": 1_794_152_040_123_i64});
+        let screens: Screens = serde_json::from_value(sent.clone()).unwrap();
+        assert_eq!((screens.screens[0].period, screens.screens[0].exclude.len()), (ScreenPeriod::Week, 11));
+        assert_eq!(screens.screens[0].conditions[1], NewHigh { field: BarField::Volume, n: 60, m: 1 });
+        assert_eq!(serde_json::to_value(&screens).unwrap(), sent);
+
+        let day = |y, m, d| KstDate(domain::KstDate::new(y, m, d).unwrap());
+        let result = ScreenerResult {
+            as_of: day(2026, 11, 10),
+            universe: 3957,
+            excluded: ScreenerExcluded { listed_too_short: 14, history_short: 120 },
+            rows: vec![ScreenerRow { symbol: SymbolCode("005930".into()), name: "삼성전자".into(), close: 193_400.0, change_rate: None, high_date: day(2026, 11, 9) }],
+        };
+        let result_json = json!({"asOf": "2026-11-10", "universe": 3957, "excluded": {"listedTooShort": 14, "historyShort": 120},
+                                 "rows": [{"symbol": "005930", "name": "삼성전자", "close": 193_400.0, "changeRate": null, "highDate": "2026-11-09"}]});
+        assert_eq!(serde_json::to_value(&result).unwrap(), result_json);
+        assert_eq!(serde_json::from_value::<ScreenerResult>(result_json).unwrap(), result);
+
+        let status = ScreenerStatus {
+            last_day: None,
+            need_day: Some(day(2026, 11, 10)),
+            today_available: false,
+            full_history: FullHistory { done: 0, total: 3960 },
+            update: Some(ScreenerUpdate { phase: UpdatePhase::Recent, done: 12, total: 3960, error: None, full: false }),
+        };
+        assert_eq!(
+            serde_json::to_value(&status).unwrap(),
+            json!({"lastDay": null, "needDay": "2026-11-10", "todayAvailable": false, "fullHistory": {"done": 0, "total": 3960},
+                   "update": {"phase": "recent", "done": 12, "total": 3960, "error": null, "full": false}})
+        );
+        assert_eq!(serde_json::from_value::<ScreenerUpdateRequest>(json!({"full": true})).unwrap(), ScreenerUpdateRequest { full: true });
+        for bad in ["20261110", "2026-1-10", "2026-02-30", "2026-11-10T00:00"] {
+            assert!(serde_json::from_value::<KstDate>(json!(bad)).is_err(), "{bad}");
         }
     }
 

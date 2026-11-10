@@ -104,7 +104,7 @@ pub fn status_of(code: api::ApiErrorCode) -> StatusCode {
         KiwoomUnavailable => StatusCode::SERVICE_UNAVAILABLE,
         // 키움이 우리 인증을 거절했다. 다시 시도해도 낫지 않으므로 503이 아니라 502로 둔다.
         KiwoomAuthFailed => StatusCode::BAD_GATEWAY,
-        Conflict | StaleRevision => StatusCode::CONFLICT,
+        Conflict | StaleRevision | ScreenerNotReady => StatusCode::CONFLICT,
         PayloadTooLarge => StatusCode::PAYLOAD_TOO_LARGE,
         MethodNotAllowed => StatusCode::METHOD_NOT_ALLOWED,
         Internal => StatusCode::INTERNAL_SERVER_ERROR,
@@ -863,6 +863,7 @@ mod tests {
             (KiwoomAuthFailed, 502),
             (Conflict, 409),
             (StaleRevision, 409),
+            (ScreenerNotReady, 409),
             (PayloadTooLarge, 413),
             (MethodNotAllowed, 405),
             (Internal, 500),
