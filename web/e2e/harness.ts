@@ -147,15 +147,17 @@ async function waitUntilSymbolListSettles(url: string): Promise<void> {
   throw new Error("서버가 종목 목록을 받지 못했습니다");
 }
 
-export const test = base.extend<{ app: App; bootReplies: FakeReply[]; clockStart: string | null }>({
+export const test = base.extend<{ app: App; bootReplies: FakeReply[]; clockStart: string | null; extraKospiStocks: number }>({
   bootReplies: [[], { option: true }],
+  /** 가짜 키움 ka10099 코스피 목록 끝에 붙일 합성 종목(`FAKE_KIWOOM_EXTRA_STOCKS`). 실시간 200자리를 넘길 때 쓴다. */
+  extraKospiStocks: [0, { option: true }],
   /** 서버 시계가 시작할 KST 시각(`YYYYMMDDHHMMSS`, 시험용 `VALLY_CLOCK_START`). 서버는 장 시간 밖의 체결을 버린다. */
   clockStart: [null, { option: true }],
 
-  app: async ({ bootReplies, clockStart }, use, testInfo) => {
+  app: async ({ bootReplies, clockStart, extraKospiStocks }, use, testInfo) => {
     if (!existsSync(path.join(STATIC_DIR, "index.html"))) throw new Error(`${STATIC_DIR}가 없습니다. 먼저 pnpm build`);
     const dir = await mkdtemp(path.join(tmpdir(), "vally-e2e-"));
-    const fake = new Proc(path.join(BIN_DIR, "fake-kiwoom"), [], {});
+    const fake = new Proc(path.join(BIN_DIR, "fake-kiwoom"), [], extraKospiStocks > 0 ? { FAKE_KIWOOM_EXTRA_STOCKS: String(extraKospiStocks) } : {});
     const servers: Proc[] = [];
     try {
       const fakeBase = `http://${await fake.waitFor(/fake-kiwoom listening addr=(\S+)/, "가짜 키움")}`;
