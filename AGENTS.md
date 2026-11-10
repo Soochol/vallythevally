@@ -1,3 +1,7 @@
+## Roles
+
+"The coordinator" in this file and in `docs/agents/` is the vally lead: the one agent the user talks to (`.claude/skills/vally`). It starts workers and reviewers, answers their `ask`, and merges. Workers and reviewers reach it through hc.
+
 ## Issue tracker
 
 Issues are tracked in this repo's GitHub Issues via the `gh` CLI. See `docs/agents/issue-tracker.md`.
@@ -20,6 +24,14 @@ Before editing documents, proposing document changes, or assigning document work
 - Approval covers the stated measurement method. Before changing that method, ask the coordinator again and wait for approval before making the live call.
 - Call market-data APIs only. Never add `/api/dostk/ordr` or `/api/dostk/acnt`.
 - Never print app keys, app secrets, or tokens to logs, docs, or chat.
+
+## The user's server
+
+The user's own server runs from the main checkout in the hc terminal `vally-server` on 127.0.0.1:8080, uses `data/vally.db` there, and holds the Kiwoom token. Do not stop, restart, or write to it or its DB. Start your own instances with temporary data dirs instead: `verify-vally` or the e2e harness.
+
+## Verifying in the real app
+
+When a change alters what a user sees or does in the app, prove it in the real app with `.claude/skills/verify-vally` (fake Kiwoom, no network) and put the evidence path in your report. When the PR checked a real screen, copy the screenshots that prove it into `docs/verification/issue-<n>/`.
 
 ## Public repository rules (ADR 0008)
 

@@ -15,7 +15,7 @@ EOF
   fi
   cat >&2 <<'EOF'
 offline: 외부 네트워크 없는 이름공간을 만들지 못했습니다.
-  이 PC의 일반 터미널은 AppArmor(kernel.apparmor_restrict_unprivileged_userns = 1) 때문에 만들 수 없습니다. Orca 안에서 돌리세요.
+  이 PC의 일반 터미널은 AppArmor(kernel.apparmor_restrict_unprivileged_userns = 1) 때문에 만들 수 없습니다. hc 터미널에서 돌리세요(herdr-core AppArmor 프로필 필요).
   외부 네트워크를 명시적으로 허용하려면 VALLY_CHECK_ALLOW_NETWORK=1을 설정하세요.
   자세한 내용: docs/dev-environment.md "시험은 외부 네트워크 없이 돈다"
 EOF
