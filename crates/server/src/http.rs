@@ -19,6 +19,7 @@ use crate::db::AppDb;
 use crate::kiwoom::error::{Category, Failure, Note, Surface};
 use crate::kiwoom::rest::{KiwoomError, KiwoomRest};
 use crate::market::hub::{HubHandle, HubSnapshot};
+use crate::screener::Screener;
 use crate::symbols::{NotReady, SymbolDirectory};
 
 pub struct AppState {
@@ -29,6 +30,7 @@ pub struct AppState {
     pub clock: Clock,
     pub static_dir: PathBuf,
     pub hub: HubHandle,
+    pub screener: Arc<Screener>,
 }
 
 pub fn router(state: Arc<AppState>) -> Router {
@@ -41,6 +43,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/api/ws", get(crate::ws::upgrade))
         .merge(crate::user_routes::routes())
         .merge(crate::drawings::routes())
+        .merge(crate::screener::routes())
         .route("/api", any(api_not_found))
         .route("/api/{*rest}", any(api_not_found))
         .method_not_allowed_fallback(method_not_allowed)
@@ -111,27 +114,32 @@ pub fn status_of(code: api::ApiErrorCode) -> StatusCode {
     }
 }
 
+impl ApiFailure {
+    pub(crate) fn into_body(self) -> api::ApiErrorBody {
+        api::ApiErrorBody {
+            code: self.code,
+            message: self.message,
+            reason: self.reason,
+            retry_at: self.retry_at.map(|t| api::UnixSeconds(t.unix())),
+            manual_action_required: self.manual_action_required,
+        }
+    }
+}
+
 impl IntoResponse for ApiFailure {
     fn into_response(self) -> Response {
-        let body = api::ApiError {
-            error: api::ApiErrorBody {
-                code: self.code,
-                message: self.message,
-                reason: self.reason,
-                retry_at: self.retry_at.map(|t| api::UnixSeconds(t.unix())),
-                manual_action_required: self.manual_action_required,
-            },
-        };
-        (status_of(self.code), Json(body)).into_response()
+        let status = status_of(self.code);
+        (status, Json(api::ApiError { error: self.into_body() })).into_response()
     }
 }
 
 #[derive(Clone, Copy)]
-enum Lookup {
+pub(crate) enum Lookup {
     Symbols,
     Bars,
     Quotes,
     Fundamentals,
+    ScreenerUpdate,
 }
 
 impl Lookup {
@@ -141,10 +149,11 @@ impl Lookup {
             Lookup::Bars => "봉",
             Lookup::Quotes => "현재가",
             Lookup::Fundamentals => "종목 기본 정보",
+            Lookup::ScreenerUpdate => "스크리너 업데이트",
         }
     }
 
-    fn failure(self, e: BarError, now: KstTime) -> ApiFailure {
+    pub(crate) fn failure(self, e: BarError, now: KstTime) -> ApiFailure {
         use api::ApiErrorCode::*;
         let what = self.label();
         match e {
@@ -485,7 +494,8 @@ mod tests {
         }
         let bars = Arc::new(BarService::new(rest.clone(), symbols.clone(), clock.clone()));
         let (hub, _events) = crate::market::hub::MarketHub::detached(bars.clone(), clock.clone());
-        let app = router(Arc::new(AppState { symbols, bars, rest, db, clock, static_dir: dir.path().to_owned(), hub: hub.clone() }));
+        let screener = Arc::new(Screener::new(crate::screener::store::Store::open(&dir.path().join("screener.duckdb")).unwrap(), rest.clone(), bars.clone(), clock.clone()));
+        let app = router(Arc::new(AppState { symbols, bars, rest, db, clock, static_dir: dir.path().to_owned(), hub: hub.clone(), screener }));
         Fixture { app, fake, hub, _dir: dir }
     }
 
@@ -1030,7 +1040,8 @@ mod tests {
         let symbols = Arc::new(SymbolDirectory::default());
         let bars = Arc::new(BarService::new(rest.clone(), symbols.clone(), clock.clone()));
         let (hub, _events) = crate::market::hub::MarketHub::detached(bars.clone(), clock.clone());
-        let app = router(Arc::new(AppState { symbols: symbols.clone(), bars, rest: rest.clone(), db, clock, static_dir: dir.path().to_owned(), hub }));
+        let screener = Arc::new(Screener::new(crate::screener::store::Store::open(&dir.path().join("screener.duckdb")).unwrap(), rest.clone(), bars.clone(), clock.clone()));
+        let app = router(Arc::new(AppState { symbols: symbols.clone(), bars, rest: rest.clone(), db, clock, static_dir: dir.path().to_owned(), hub, screener }));
 
         let nxt_layout = two_cells("005930");
         let started = tokio::time::Instant::now();

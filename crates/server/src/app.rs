@@ -27,6 +27,8 @@ use crate::kiwoom::rest::{KiwoomRest, Priority};
 use crate::kiwoom::stream::KiwoomStream;
 use crate::kiwoom::token_file::TokenFile;
 use crate::kiwoom::transport::ReqwestTransport;
+use crate::screener::Screener;
+use crate::screener::store::Store;
 use crate::symbols::SymbolDirectory;
 
 const DAILY_RESET_AT: TimeOfDay = match TimeOfDay::hms(7, 45, 0) {
@@ -100,6 +102,19 @@ async fn serve(config: Config, token_file: TokenFile) -> ExitCode {
         }
     };
     tracing::info!(path = %config.db_path.display(), "사용자 자료 DB를 열었습니다");
+    let screener_path = config.screener_db_path.clone();
+    let screener_store = match tokio::task::spawn_blocking(move || Store::open(&screener_path)).await {
+        Ok(Ok(store)) => store,
+        Ok(Err(e)) => {
+            tracing::error!(path = %config.screener_db_path.display(), error = %e, "스크리너 저장소를 열 수 없습니다");
+            return ExitCode::from(1);
+        }
+        Err(e) => {
+            tracing::error!(path = %config.screener_db_path.display(), error = %e, "스크리너 저장소를 여는 작업이 끝나지 못했습니다");
+            return ExitCode::from(1);
+        }
+    };
+    tracing::info!(path = %config.screener_db_path.display(), "스크리너 저장소를 열었습니다");
     let listener = match TcpListener::bind(config.bind.socket_addr()).await {
         Ok(l) => l,
         Err(e) => {
@@ -148,8 +163,9 @@ async fn serve(config: Config, token_file: TokenFile) -> ExitCode {
     let hub = MarketHub::spawn(bars.clone(), stream, events, clock.clone());
     tokio::spawn(daily_reset(clock.clone(), rest.clone(), symbols.clone(), bars.clone(), hub.clone()));
     tokio::spawn(daily_token(clock.clone(), rest.clone()));
+    let screener = Arc::new(Screener::new(screener_store, rest.clone(), bars.clone(), clock.clone()));
 
-    let app = router(Arc::new(AppState { symbols, bars, rest, db, clock, static_dir: config.static_dir.clone(), hub }));
+    let app = router(Arc::new(AppState { symbols, bars, rest, db, clock, static_dir: config.static_dir.clone(), hub, screener }));
     tracing::info!(static_dir = %config.static_dir.display(), "요청을 받기 시작합니다");
     if let Err(e) = axum::serve(listener, app).with_graceful_shutdown(shutdown_signal()).await {
         tracing::error!(error = %e, "서버가 멈췄습니다");

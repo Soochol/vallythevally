@@ -1,0 +1,209 @@
+pub mod store;
+mod update;
+
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex, MutexGuard};
+
+use axum::Router;
+use axum::body::Body;
+use axum::extract::State;
+use axum::response::Json;
+use axum::routing::{get, post};
+use domain::{Feed, IndexCode, KstDate, KstTime, Period, SeriesKey, TimeOfDay};
+
+use crate::api::{self, ApiErrorBody, FullHistory, ScreenerStatus, ScreenerUpdate, ScreenerUpdateRequest, UpdatePhase};
+use crate::bars::{BarError, BarService};
+use crate::clock::Clock;
+use crate::http::{ApiFailure, AppState, Lookup};
+use crate::kiwoom::rest::KiwoomRest;
+use crate::user_routes::{JSON_LIMIT, read_json};
+use store::{Store, StoreError};
+
+const CALENDAR_DAYS: usize = 10;
+const CALENDAR_FRESH_SECS: i64 = 5 * 60;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Progress {
+    phase: UpdatePhase,
+    done: u32,
+    total: u32,
+    full: bool,
+}
+
+enum Run {
+    Idle,
+    Running { id: u64, progress: Progress, task: tokio::task::AbortHandle },
+    Failed { progress: Progress, error: ApiErrorBody },
+}
+
+struct Calendar {
+    fetched_at: KstTime,
+    days: Vec<KstDate>,
+}
+
+impl Calendar {
+    fn last_before(&self, day: KstDate) -> Option<KstDate> {
+        self.days.iter().rev().find(|d| **d < day).copied()
+    }
+
+    fn need_day(&self, now: KstTime) -> Option<KstDate> {
+        self.last_before(now.kst_date())
+    }
+
+    fn target(&self, now: KstTime) -> Option<KstDate> {
+        let today = now.kst_date();
+        let today_confirmed = self.days.last() == Some(&today) && Period::Day.bucket(KstTime::from_kst_civil(today, TimeOfDay::MIDNIGHT)).is_confirmed_at(now);
+        if today_confirmed { Some(today) } else { self.need_day(now) }
+    }
+}
+
+pub struct Screener {
+    store: Arc<Store>,
+    rest: KiwoomRest,
+    bars: Arc<BarService>,
+    clock: Clock,
+    run: Mutex<Run>,
+    next_run: AtomicU64,
+    calendar: tokio::sync::Mutex<Option<Arc<Calendar>>>,
+}
+
+impl Screener {
+    pub fn new(store: Store, rest: KiwoomRest, bars: Arc<BarService>, clock: Clock) -> Self {
+        Screener { store: Arc::new(store), rest, bars, clock, run: Mutex::new(Run::Idle), next_run: AtomicU64::new(1), calendar: tokio::sync::Mutex::new(None) }
+    }
+
+    fn run(&self) -> MutexGuard<'_, Run> {
+        self.run.lock().expect("업데이트 상태 잠금")
+    }
+
+    async fn with_store<T: Send + 'static>(&self, f: impl FnOnce(&Store) -> Result<T, StoreError> + Send + 'static) -> Result<T, StoreError> {
+        let store = self.store.clone();
+        tokio::task::spawn_blocking(move || f(&store)).await.map_err(|e| StoreError(format!("저장소 작업이 끝나지 못했습니다: {e}")))?
+    }
+
+    pub fn start(self: &Arc<Self>, full: bool) {
+        let mut run = self.run();
+        if matches!(*run, Run::Running { .. }) {
+            return;
+        }
+        let id = self.next_run.fetch_add(1, Ordering::SeqCst);
+        let me = self.clone();
+        let task = tokio::spawn(async move {
+            let outcome = me.update(id, full).await;
+            me.finish(id, outcome);
+        });
+        *run = Run::Running { id, progress: Progress { phase: UpdatePhase::Symbols, done: 0, total: 0, full }, task: task.abort_handle() };
+    }
+
+    pub fn cancel(&self) {
+        let mut run = self.run();
+        if let Run::Running { task, .. } = &*run {
+            task.abort();
+            tracing::info!("스크리너 업데이트를 취소했습니다");
+        }
+        *run = Run::Idle;
+    }
+
+    fn report(&self, id: u64, phase: UpdatePhase, done: usize, total: usize) {
+        if let Run::Running { id: running, progress, .. } = &mut *self.run()
+            && *running == id
+        {
+            *progress = Progress { phase, done: done as u32, total: total as u32, full: progress.full };
+        }
+    }
+
+    fn finish(&self, id: u64, outcome: Result<(), BarError>) {
+        let mut run = self.run();
+        let Run::Running { id: running, progress, .. } = &*run else {
+            return;
+        };
+        if *running != id {
+            return;
+        }
+        let progress = *progress;
+        *run = match outcome {
+            Ok(()) => {
+                tracing::info!(full = progress.full, "스크리너 업데이트를 마쳤습니다");
+                Run::Idle
+            }
+            Err(e) => Run::Failed { progress, error: Lookup::ScreenerUpdate.failure(e, self.clock.now()).into_body() },
+        };
+    }
+
+    async fn calendar(&self, fresh: bool) -> Result<Arc<Calendar>, BarError> {
+        let mut cached = self.calendar.lock().await;
+        let now = self.clock.now();
+        if let Some(c) = cached.as_ref().filter(|c| !fresh && c.fetched_at.kst_date() == now.kst_date() && now.unix() - c.fetched_at.unix() < CALENDAR_FRESH_SECS) {
+            return Ok(c.clone());
+        }
+        let page = self.bars.page(SeriesKey { feed: Feed::Index(IndexCode::KOSPI), period: Period::Day }, None, CALENDAR_DAYS).await?;
+        let days = page.bars.iter().map(|b| b.bucket).chain(page.current.map(|c| c.bucket)).map(|b| b.start().kst_date()).collect();
+        let calendar = Arc::new(Calendar { fetched_at: now, days });
+        *cached = Some(calendar.clone());
+        Ok(calendar)
+    }
+
+    pub async fn status(&self) -> Result<ScreenerStatus, StoreError> {
+        let summary = self.with_store(Store::summary).await?;
+        let calendar = match self.calendar(false).await {
+            Ok(c) => Some(c),
+            Err(e) => {
+                tracing::warn!(error = %e, "코스피 일봉을 받지 못해 필요 관측일을 모릅니다");
+                None
+            }
+        };
+        let now = self.clock.now();
+        let today = now.kst_date();
+        let update = match &*self.run() {
+            Run::Idle => None,
+            Run::Running { progress, .. } => Some(update_view(progress, None)),
+            Run::Failed { progress, error } => Some(update_view(progress, Some(error.clone()))),
+        };
+        Ok(ScreenerStatus {
+            last_day: summary.last_day.map(api::KstDate),
+            need_day: calendar.as_ref().and_then(|c| c.need_day(now)).map(api::KstDate),
+            today_available: calendar.as_ref().and_then(|c| c.target(now)) == Some(today) && summary.last_day < Some(today),
+            full_history: FullHistory { done: summary.complete, total: summary.listed },
+            update,
+        })
+    }
+}
+
+fn update_view(p: &Progress, error: Option<ApiErrorBody>) -> ScreenerUpdate {
+    ScreenerUpdate { phase: p.phase, done: p.done, total: p.total, error, full: p.full }
+}
+
+impl From<StoreError> for ApiFailure {
+    fn from(e: StoreError) -> Self {
+        tracing::error!(error = %e, "스크리너 저장소 오류");
+        ApiFailure::new(api::ApiErrorCode::Internal, "스크리너 저장소를 읽거나 쓰지 못했습니다")
+    }
+}
+
+impl From<StoreError> for BarError {
+    fn from(e: StoreError) -> Self {
+        BarError::Internal(format!("스크리너 저장소 오류: {e}"))
+    }
+}
+
+pub fn routes() -> Router<Arc<AppState>> {
+    Router::new()
+        .route("/api/screener/update", post(start_update))
+        .route("/api/screener/update/cancel", post(cancel_update))
+        .route("/api/screener/status", get(status))
+}
+
+async fn start_update(State(st): State<Arc<AppState>>, body: Body) -> Result<Json<ScreenerStatus>, ApiFailure> {
+    let request: ScreenerUpdateRequest = read_json(body, JSON_LIMIT, "업데이트 본문").await?;
+    st.screener.start(request.full);
+    Ok(Json(st.screener.status().await?))
+}
+
+async fn cancel_update(State(st): State<Arc<AppState>>) -> Result<Json<ScreenerStatus>, ApiFailure> {
+    st.screener.cancel();
+    Ok(Json(st.screener.status().await?))
+}
+
+async fn status(State(st): State<Arc<AppState>>) -> Result<Json<ScreenerStatus>, ApiFailure> {
+    Ok(Json(st.screener.status().await?))
+}
