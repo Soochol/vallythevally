@@ -1,12 +1,14 @@
 import type { ISeriesApi, SeriesType } from "lightweight-charts";
 
-type Series = Pick<ISeriesApi<SeriesType>, "data" | "seriesType" | "update">;
+type Series = Pick<ISeriesApi<SeriesType>, "data" | "seriesType" | "update" | "priceToCoordinate">;
 type Update = Parameters<Series["update"]>[0];
 
 declare global {
   interface Window {
     frameProbe: {
       snapshot(): { type: SeriesType; data: ReturnType<Series["data"]>; updates: Update[] }[];
+      /** 주 봉 시리즈(Candlestick)가 이 가격을 그리는 y. */
+      candleY(price: number): number | null;
       hold(): void;
       release(): void;
     };
@@ -45,6 +47,7 @@ export function installFrameProbe(): void {
   };
   window.frameProbe = {
     snapshot: () => [...series].map(([api, updates]) => ({ type: api.seriesType(), data: api.data(), updates })),
+    candleY: (price) => [...series.keys()].find((api) => api.seriesType() === "Candlestick")?.priceToCoordinate(price) ?? null,
     hold() {
       window.requestAnimationFrame = (callback) => { pending.set(++id, callback); return id; };
       window.cancelAnimationFrame = (key) => { if (!pending.delete(key)) cancel(key); };
