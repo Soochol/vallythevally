@@ -1,7 +1,10 @@
 import type { ApiErrorCode } from "../src/api/generated/ApiErrorCode.ts";
+import type { BarField } from "../src/api/generated/BarField.ts";
+import type { ExcludeKind } from "../src/api/generated/ExcludeKind.ts";
 import type { Layout } from "../src/api/generated/Layout.ts";
 import type { LayoutInput } from "../src/api/generated/LayoutInput.ts";
 import type { LayoutSummary } from "../src/api/generated/LayoutSummary.ts";
+import type { NewHigh } from "../src/api/generated/NewHigh.ts";
 import type { Screen } from "../src/api/generated/Screen.ts";
 import type { Screens } from "../src/api/generated/Screens.ts";
 import type { Watchlist } from "../src/api/generated/Watchlist.ts";
@@ -12,6 +15,25 @@ export const DEFAULT_LAYOUT_ID = "01900000-0000-7000-8000-000000000001";
 export const FIRST_WATCHLIST_ID = "01900000-0000-7000-8000-000000000002";
 const MAX_WATCHLISTS = 20;
 const MAX_WATCHLIST_NAME = 20;
+const MAX_SCREENS = 50;
+const MAX_SCREEN_NAME = 40;
+const MAX_SCREEN_CONDITIONS = 10;
+const MAX_SCREEN_ID_BYTES = 64;
+const MAX_U32 = 4_294_967_295;
+const BAR_FIELDS: readonly string[] = ["open", "high", "low", "close", "volume"] satisfies BarField[];
+const EXCLUDE_KINDS: readonly string[] = [
+  "etf",
+  "preferred",
+  "reit",
+  "spac",
+  "managed",
+  "investment_caution_alert",
+  "investment_warning",
+  "investment_danger",
+  "investment_caution",
+  "short_term_overheated",
+  "trading_halted",
+] satisfies ExcludeKind[];
 const CELLS_OF = { "1": 1, "2h": 2, "2v": 2, "3": 3, "4": 4 } as const;
 
 export type Reply = { status: number; body: unknown };
@@ -23,6 +45,34 @@ const isRevision = (x: unknown): x is number => typeof x === "number" && Number.
 const isWatchlist = (x: unknown): x is Watchlist =>
   isObject(x) && typeof x.id === "string" && typeof x.name === "string" && Array.isArray(x.symbols) && x.symbols.every((s) => typeof s === "string");
 const stale = (stored: number) => fail(409, "stale_revision", `더 새 편집(revision ${stored})이 이미 저장돼 있습니다`);
+const isU32 = (x: unknown): x is number => Number.isInteger(x) && (x as number) >= 0 && (x as number) <= MAX_U32;
+const isNewHigh = (x: unknown): x is NewHigh => isObject(x) && typeof x.field === "string" && BAR_FIELDS.includes(x.field) && isU32(x.n) && isU32(x.m);
+const isScreen = (x: unknown): x is Screen =>
+  isObject(x) &&
+  typeof x.id === "string" &&
+  typeof x.name === "string" &&
+  (x.period === "D" || x.period === "W" || x.period === "M") &&
+  Array.isArray(x.exclude) &&
+  x.exclude.every((k) => typeof k === "string" && EXCLUDE_KINDS.includes(k)) &&
+  Array.isArray(x.conditions) &&
+  x.conditions.every(isNewHigh);
+
+function screensProblem(screens: readonly Screen[]): string | null {
+  if (screens.length > MAX_SCREENS) return `조건식은 ${MAX_SCREENS}개까지 저장할 수 있습니다: ${screens.length}개`;
+  const ids = new Set<string>();
+  for (const s of screens) {
+    const idBytes = new TextEncoder().encode(s.id).length;
+    if (idBytes === 0 || idBytes > MAX_SCREEN_ID_BYTES || ids.has(s.id)) return `조건식 id가 비었거나 길거나 겹칩니다: ${s.id}`;
+    ids.add(s.id);
+    const nameChars = [...s.name.trim()].length;
+    if (nameChars < 1 || nameChars > MAX_SCREEN_NAME) return `조건식 이름은 공백을 빼고 1~${MAX_SCREEN_NAME}자여야 합니다: ${JSON.stringify(s.name)}`;
+    if (s.conditions.length < 1 || s.conditions.length > MAX_SCREEN_CONDITIONS) return `조건식 ${s.name}의 조건은 1~${MAX_SCREEN_CONDITIONS}줄이어야 합니다: ${s.conditions.length}줄`;
+    const bad = s.conditions.find((c) => c.m < 1 || c.m > c.n);
+    if (bad) return `조건식 ${s.name}의 조건은 1 ≤ m ≤ n이어야 합니다: n=${bad.n}, m=${bad.m}`;
+    if (new Set(s.exclude).size !== s.exclude.length) return `조건식 ${s.name}의 제외 목록에 같은 것이 두 번 있습니다`;
+  }
+  return null;
+}
 
 export function createUserData(seedWatchlist: string[], seedScreens: Screen[], nowSec: () => number = () => Math.floor(Date.now() / 1000)) {
   const layouts = new Map<string, Layout>([
@@ -50,7 +100,7 @@ export function createUserData(seedWatchlist: string[], seedScreens: Screen[], n
   ]);
   let uiState: Record<string, unknown> = { lastLayoutId: DEFAULT_LAYOUT_ID, theme: "dark", revision: 0 };
   let watchlists: Watchlists = { lists: [{ id: FIRST_WATCHLIST_ID, name: "기본", symbols: [...seedWatchlist] }], revision: 0 };
-  const screens: Screens = { screens: seedScreens, revision: 0 };
+  let screens: Screens = { screens: seedScreens, revision: 0 };
 
   return {
     listLayouts: (): Reply =>
@@ -86,6 +136,15 @@ export function createUserData(seedWatchlist: string[], seedScreens: Screen[], n
     },
     getWatchlists: (): Reply => ok(watchlists),
     getScreens: (): Reply => ok(screens),
+    putScreens: (body: unknown): Reply => {
+      if (!isObject(body) || !Array.isArray(body.screens) || !body.screens.every(isScreen)) return fail(400, "bad_request", "조건식 본문의 JSON이 틀렸습니다");
+      if (!isRevision(body.revision)) return fail(400, "bad_request", "revision이 없습니다");
+      const problem = screensProblem(body.screens);
+      if (problem) return fail(400, "bad_request", problem);
+      if (body.revision <= screens.revision) return stale(screens.revision);
+      screens = { screens: body.screens, revision: body.revision };
+      return ok(screens);
+    },
     putWatchlists: (body: unknown): Reply => {
       if (!isObject(body) || !Array.isArray(body.lists) || !body.lists.every(isWatchlist)) return fail(400, "bad_request", "관심종목 본문이 아닙니다");
       if (bytes(body) > PAYLOAD_LIMIT_BYTES) return fail(413, "payload_too_large", "관심종목이 64KB를 넘습니다");

@@ -5,15 +5,29 @@ import type { ScreenerResult } from "./generated/ScreenerResult";
 import type { ScreenerStatus } from "./generated/ScreenerStatus";
 import type { ScreenerUpdateRequest } from "./generated/ScreenerUpdateRequest";
 import type { Screens } from "./generated/Screens";
-import { getJson, sendJson } from "./http";
+import { ApiRequestError, getJson, putJson, sendJson } from "./http";
 
 const SCREENS_KEY = ["screens"] as const;
 const STATUS_KEY = ["screener", "status"] as const;
 
 export const runScreen = (screen: Screen) => sendJson<ScreenerResult>("POST", "/api/screener/run", JSON.stringify(screen));
 
-export function useScreens() {
-  return useQuery({ queryKey: SCREENS_KEY, queryFn: ({ signal }) => getJson<Screens>("/api/screens", signal) });
+export const screensQuery = queryOptions({ queryKey: SCREENS_KEY, queryFn: ({ signal }) => getJson<Screens>("/api/screens", signal) });
+
+export const useScreens = () => useQuery(screensQuery);
+
+export type SaveOutcome = { kind: "saved" } | { kind: "stale"; latest: Screens };
+
+export async function saveScreens(client: QueryClient, base: Screens, edit: (screens: readonly Screen[]) => Screen[]): Promise<SaveOutcome> {
+  try {
+    const saved = await putJson<Screens>("/api/screens", { screens: edit(base.screens), revision: base.revision + 1 } satisfies Screens);
+    await client.cancelQueries({ queryKey: SCREENS_KEY });
+    client.setQueryData(SCREENS_KEY, saved);
+    return { kind: "saved" };
+  } catch (e) {
+    if (!(e instanceof ApiRequestError && e.code === "stale_revision")) throw e;
+    return { kind: "stale", latest: await client.fetchQuery({ ...screensQuery, staleTime: 0 }) };
+  }
 }
 
 export const screenerStatusQuery = (pollWhileUpdatingMs: number) =>
