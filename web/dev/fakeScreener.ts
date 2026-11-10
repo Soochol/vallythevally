@@ -61,7 +61,7 @@ function observationDaysBefore(day: KstDate, count: number): KstDate {
 }
 
 const needDayAt = (now: number) => observationDaysBefore(kstToday(now), 1);
-const todayAvailableAt = (now: number) => isObservationDay(kstToday(now)) && new Date(now + KST_MS).getUTCHours() >= CLOSE_HOUR_KST;
+const todayConfirmedAt = (now: number) => isObservationDay(kstToday(now)) && new Date(now + KST_MS).getUTCHours() >= CLOSE_HOUR_KST;
 
 function barStart(period: ScreenPeriod, asOf: KstDate, barsAgo: number): KstDate {
   if (period === "D") return observationDaysBefore(asOf, barsAgo);
@@ -158,7 +158,8 @@ export function createScreener(scenario: FakeScreenerScenario, clock: () => numb
   function status(): ScreenerStatus {
     const now = clock();
     const update = advance(now);
-    return { lastDay, needDay: needDayAt(now), todayAvailable: todayAvailableAt(now), fullHistory: { done: historyDone, total }, update };
+    const todayAvailable = todayConfirmedAt(now) && (lastDay === null || lastDay < kstToday(now));
+    return { lastDay, needDay: needDayAt(now), todayAvailable, fullHistory: { done: historyDone, total }, update };
   }
 
   return {
@@ -171,7 +172,7 @@ export function createScreener(scenario: FakeScreenerScenario, clock: () => numb
       job = {
         full: body.full,
         startedAt: now,
-        target: todayAvailableAt(now) ? kstToday(now) : needDayAt(now),
+        target: todayConfirmedAt(now) ? kstToday(now) : needDayAt(now),
         historyFrom: body.full ? 0 : historyDone,
         failAt: failNext ? Math.floor(total * FAILING_SHARE) : null,
       };

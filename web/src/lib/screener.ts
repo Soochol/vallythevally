@@ -142,5 +142,5 @@ export function statusFooter(status: ScreenerStatus | undefined, error: Error | 
   return { kind: "store", lastDay: status.lastDay };
 }
 
-export const todayNotStored = (status: ScreenerStatus): boolean =>
-  status.todayAvailable && (status.lastDay === null || status.needDay === null || status.lastDay <= status.needDay);
+export const todayConfirmed = ({ todayAvailable, lastDay, needDay }: ScreenerStatus): boolean =>
+  todayAvailable || (lastDay !== null && needDay !== null && lastDay > needDay);

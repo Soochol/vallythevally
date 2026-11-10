@@ -33,7 +33,7 @@ import {
   sortRows,
   type StatusFooter,
   statusFooter,
-  todayNotStored,
+  todayConfirmed,
 } from "../../lib/screener";
 import { addSymbols, listNameFrom, MAX_WATCHLISTS } from "../../lib/watchlist";
 import { useCell, useLayoutStore } from "../../stores/layout";
@@ -574,7 +574,7 @@ const PHASE_NOTE: Record<UpdatePhase, string> = {
 const progressText = ({ phase, done, total }: ScreenerUpdate) =>
   phase === "symbols" ? `${total > 0 ? Math.floor((done * 100) / total) : 0}%` : `${count(done)}/${count(total)}종목`;
 
-const todayNote = (status: ScreenerStatus) => (status.todayAvailable ? "오늘 자료까지 받습니다." : "당일 봉은 20:00 뒤에 받습니다.");
+const todayNote = (status: ScreenerStatus) => (todayConfirmed(status) ? "오늘 자료까지 받습니다." : "당일 봉은 20:00 뒤에 받습니다.");
 
 function UpdateBand({ status }: { status: ScreenerStatus }) {
   const { start, cancel } = useUpdateCommands();
@@ -694,9 +694,9 @@ function StatusFooterLine({ footer, status, onRetry }: { footer: StatusFooter; s
 
 function StoreLine({ status, lastDay }: { status: ScreenerStatus; lastDay: KstDate }) {
   const { start } = useUpdateCommands();
-  const today = todayNotStored(status);
+  const today = status.todayAvailable;
   const history = status.fullHistory.done < status.fullHistory.total ? `과거 이력 ${count(status.fullHistory.done)}/${count(status.fullHistory.total)}종목` : null;
-  const notes = [today ? "오늘 자료를 받을 수 있습니다" : status.todayAvailable ? "빠진 관측일 없음" : "당일 봉은 20:00 뒤에 받습니다", history].filter((n) => n !== null);
+  const notes = [today ? "오늘 자료를 받을 수 있습니다" : todayConfirmed(status) ? "빠진 관측일 없음" : "당일 봉은 20:00 뒤에 받습니다", history].filter((n) => n !== null);
   return (
     <footer aria-label="KRX 일봉 저장소" className="flex flex-none items-center gap-2 border-t border-line px-3 py-2">
       <span className="conn-dot" data-tone={today ? "amber" : "mint"} />
