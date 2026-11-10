@@ -4,7 +4,7 @@
 
 use std::collections::HashMap;
 
-use domain::{Feed, IndexCode, KstTime, Period, Price, SeriesKey, StockCode, Symbol};
+use domain::{Feed, IndexCode, KstTime, Period, Price, SeriesKey, StockCode, Symbol, Venue};
 
 use crate::api;
 use crate::bars::{BarError, BarService};
@@ -22,7 +22,7 @@ pub async fn quotes(rest: &KiwoomRest, bars: &BarService, symbols: &[Symbol]) ->
     let stock_quotes = async {
         let mut out = Vec::new();
         for chunk in stocks.chunks(StockQuotes::MAX) {
-            let req = StockQuotes::new(chunk).expect("chunks는 1~MAX개다");
+            let req = StockQuotes::new(chunk, Venue::Combined).expect("chunks는 1~MAX개다");
             let page = rest.call(&req, None, Priority::Screen, MergeScope::default()).await?;
             out.extend(parse_quotes(page.body).into_iter().map(|q| {
                 let symbol = Symbol::Stock(q.code);

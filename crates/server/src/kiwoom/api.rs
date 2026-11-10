@@ -217,7 +217,7 @@ impl MarketRequest for StockList {
     type Response = wire::StockListResponse;
 }
 
-/// ka10095 여러 종목 현재가. 언제나 통합(`_AL`) 시세다. 한 번에 100종목까지 된다. 101개부터는
+/// ka10095 여러 종목 현재가. 거래소는 종목코드 접미사로 고른다. 한 번에 100종목까지 된다. 101개부터는
 /// 행 없이 1634로 거절된다(kiwoom.md §10.6). 생성자가 개수를 막으므로 넘치는 요청은 만들 수 없다.
 #[derive(Serialize)]
 pub struct StockQuotes {
@@ -227,9 +227,9 @@ pub struct StockQuotes {
 impl StockQuotes {
     pub const MAX: usize = 100;
 
-    pub fn new(codes: &[StockCode]) -> Option<Self> {
+    pub fn new(codes: &[StockCode], venue: Venue) -> Option<Self> {
         (1..=Self::MAX).contains(&codes.len()).then(|| StockQuotes {
-            stk_cd: codes.iter().map(|c| kiwoom_stock_code(*c, Venue::Combined)).collect::<Vec<_>>().join("|"),
+            stk_cd: codes.iter().map(|c| kiwoom_stock_code(*c, venue)).collect::<Vec<_>>().join("|"),
         })
     }
 }
@@ -312,14 +312,15 @@ mod tests {
     }
 
     #[test]
-    fn quote_body_joins_combined_codes_and_caps_at_100() {
+    fn quote_body_joins_codes_of_one_venue_and_caps_at_100() {
         let codes: Vec<StockCode> = ["005930", "000660"].iter().map(|c| StockCode::parse(c).unwrap()).collect();
-        assert_eq!(serde_json::to_value(StockQuotes::new(&codes).unwrap()).unwrap(), json!({"stk_cd": "005930_AL|000660_AL"}));
+        assert_eq!(serde_json::to_value(StockQuotes::new(&codes, Venue::Combined).unwrap()).unwrap(), json!({"stk_cd": "005930_AL|000660_AL"}));
+        assert_eq!(serde_json::to_value(StockQuotes::new(&codes, Venue::Krx).unwrap()).unwrap(), json!({"stk_cd": "005930|000660"}));
         assert_eq!(<StockQuotes as MarketRequest>::API_ID.path(), "/api/dostk/stkinfo");
         let many = vec![codes[0]; 101];
-        assert!(StockQuotes::new(&many[..100]).is_some());
-        assert!(StockQuotes::new(&many).is_none(), "101개는 1634로 거절된다");
-        assert!(StockQuotes::new(&[]).is_none());
+        assert!(StockQuotes::new(&many[..100], Venue::Krx).is_some());
+        assert!(StockQuotes::new(&many, Venue::Krx).is_none(), "101개는 1634로 거절된다");
+        assert!(StockQuotes::new(&[], Venue::Combined).is_none());
     }
 
     #[test]
