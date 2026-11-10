@@ -45,7 +45,6 @@ esac
 
 lock_and_load_live
 need_issue_open "$issue"
-lock_issue=$issue
 case $kind in
   impl)
     role=worker template=vally-worker name=w$issue-impl round=${round:-0}
@@ -80,6 +79,7 @@ case $kind in
       fi
       report=$VALLY_REPORTS/$issue/docs-garden-pr$pr.md
       mkdir -p "$VALLY_REPORTS/$issue"
+      lock_issue_too "$(terminal_json "$live" | jq -r .cwd)" "$issue" || die "could not record issue #$issue on the worktree of the gardener $live"
       hc label "$live" vally.garden."$issue"=1 >/dev/null || die "could not record issue #$issue on the gardener $live"
       hc send "$live" "PR #$pr (이슈 #$issue)도 병합됐다. 먼저 git fetch origin && git rebase origin/main 으로 브랜치를 최신 main 위에 올린 뒤 같은 방식으로 문서를 점검하라. 보고서는 $report 에 쓰고 done $issue 로 알려라." \
         || die "could not hand PR #$pr to $live (it may be blocked); check with: hc read $live"
@@ -87,7 +87,7 @@ case $kind in
       echo "handed PR #$pr to the live gardener $live"
       exit 0
     fi
-    role=gardener template=vally-gardener name=docs-garden-$HC_TERMINAL_ID round=0 lock_issue=''
+    role=gardener template=vally-gardener name=docs-garden-$HC_TERMINAL_ID round=0
     branch=docs/garden-$pr
     worktree=$(worktree_for_branch "$branch")
     add=(git worktree add -q --no-track -b "$branch" "$worktree" origin/main)
@@ -108,7 +108,7 @@ if [ "$kind" = review ]; then
   [ "$(git -C "$worktree" rev-parse HEAD)" = "$head" ] || die "review worktree $worktree is not at PR head $head"
   is_clean "$worktree" || die "review worktree is dirty: $worktree"
 fi
-[ "$(worktree_owner "$worktree")" = "$ME" ] || lock_worktree "$worktree" "$lock_issue"
+[ "$(worktree_owner "$worktree")" = "$ME" ] || lock_worktree "$worktree" "$issue"
 
 out=$VALLY_REPORTS/$issue
 mkdir -p "$out"

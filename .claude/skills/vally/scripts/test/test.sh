@@ -97,7 +97,7 @@ t_impl_starts_worker() {
   "$agent/start.sh" impl 58 --branch fix/58-theme --spec "$T/spec.md" || return 1
   wt=$VALLY_WORKTREES/fix-58-theme
   ok test "$(git -C "$wt" branch --show-current)" = fix/58-theme &&
-  ok grep -q -- '--outlive-parent --name w58-impl --label vally.role=worker --label vally.issue=58 --label vally.round=0 --label vally.owner=t1@1000 --label herdr.space=sp1 --cwd '"$wt"' vally-worker' "$FAKE_DIR/hc.log" &&
+  ok grep -q -- '--outlive-parent --name w58-impl --label vally.role=worker --label vally.issue=58 --label vally.round=0 --label vally.owner=t1@1000000 --label herdr.space=sp1 --cwd '"$wt"' vally-worker' "$FAKE_DIR/hc.log" &&
   ok test -f "$VALLY_STATE/reports/58/w58-impl.spec.md" &&
   ok test -f "$VALLY_STATE/reports/58/w58-impl.launch.json" &&
   ok grep -q "보고서는 $VALLY_STATE/reports/58/w58-impl.md" "$FAKE_DIR/hc.log"
@@ -156,7 +156,7 @@ t_review_uses_exact_head() {
   "$agent/start.sh" review 58 --pr 61 --round 0 >/dev/null || return 1
   wt=$VALLY_WORKTREES/review-58-${head:0:7}
   ok test "$(git -C "$wt" rev-parse HEAD)" = "$head" &&
-  ok grep -q -- '--name w58-review0 --label vally.role=reviewer --label vally.issue=58 --label vally.round=0 --label vally.owner=t1@1000 --label vally.pr=61' "$FAKE_DIR/hc.log" &&
+  ok grep -q -- '--name w58-review0 --label vally.role=reviewer --label vally.issue=58 --label vally.round=0 --label vally.owner=t1@1000000 --label vally.pr=61' "$FAKE_DIR/hc.log" &&
   ok grep -q "vally-reviewer" "$FAKE_DIR/hc.log"
 }
 
@@ -383,13 +383,13 @@ t_docs_classifiers() {
 
 t_lead_owner_is_recorded_on_agent_lead_and_worktree() {
   "$agent/start.sh" impl 58 --branch fix/58-theme --spec "$T/spec.md" >/dev/null || return 1
-  ok test "$(labels_of w58-impl | jq -r '.["vally.owner"]')" = t1@1000 &&
+  ok test "$(labels_of w58-impl | jq -r '.["vally.owner"]')" = t1@1000000 &&
   ok test "$(jq -r '.terminals[] | select(.name == "w58-impl") | .parent' "$FAKE_DIR/terminals.json")" = t1 &&
-  ok test "$(labels_of t1 | jq -r '.["vally.lead"] + " " + .["vally.lead.since"]')" = "main 1000" &&
-  ok test "$(lock_of "$VALLY_WORKTREES/fix-58-theme")" = "vally owner t1@1000 issue 58" &&
+  ok test "$(labels_of t1 | jq -r '.["vally.lead"] + " " + .["vally.lead.since"]')" = "main 1000000" &&
+  ok test "$(lock_of "$VALLY_WORKTREES/fix-58-theme")" = "vally owner t1@1000000 issue 58" &&
   as_t2 "$agent/start.sh" impl 66 --branch feat/66-x --spec "$T/spec.md" >/dev/null &&
   ok test "$(labels_of t2 | jq -r '.["vally.lead"]')" = ochestra1 &&
-  ok test "$(labels_of w66-impl | jq -r '.["vally.owner"]')" = t2@2000
+  ok test "$(labels_of w66-impl | jq -r '.["vally.owner"]')" = t2@2000000
 }
 
 t_start_refuses_issue_of_live_lead() {
@@ -433,7 +433,7 @@ t_dead_lead_is_shown_not_taken() {
   ! "$agent/retire.sh" w58-impl 2>"$T/err" && ok grep -q '주인 없음.*take.sh 58' "$T/err" &&
   ! "$agent/start.sh" impl 58 --branch fix/58-theme --spec "$T/spec.md" 2>"$T/err" && ok grep -q 'take.sh 58' "$T/err" &&
   ok test -z "$(changes_since "$m")" &&
-  ok test "$(lock_of "$VALLY_WORKTREES/fix-58-theme")" = "vally owner t2@2000 issue 58"
+  ok test "$(lock_of "$VALLY_WORKTREES/fix-58-theme")" = "vally owner t2@2000000 issue 58"
 }
 
 t_take_adopts_issue_of_dead_lead() {
@@ -443,9 +443,9 @@ t_take_adopts_issue_of_dead_lead() {
   kill_lead t2; HC_TERMINAL_ID=$w "$agent/report.sh" "done 58 PR #61 /r.md" >/dev/null 2>&1
   ok test "$(labels_of w58-impl | jq -r '.["vally.orphan"]')" = done || return 1
   "$agent/take.sh" 58 > "$T/out" || { cat "$T/out"; return 1; }
-  ok test "$(labels_of w58-impl | jq -c '[.["vally.owner"], .["vally.orphan"]]')" = '["t1@1000",null]' &&
+  ok test "$(labels_of w58-impl | jq -c '[.["vally.owner"], .["vally.orphan"]]')" = '["t1@1000000",null]' &&
   ok grep -q "^send $w lead is now t1" "$FAKE_DIR/hc.log" &&
-  ok test "$(lock_of "$VALLY_WORKTREES/fix-58-theme")" = "vally owner t1@1000 issue 58" &&
+  ok test "$(lock_of "$VALLY_WORKTREES/fix-58-theme")" = "vally owner t1@1000000 issue 58" &&
   "$agent/retire.sh" w58-impl > "$T/out" && ok grep -q 'retired w58-impl' "$T/out"
 }
 
@@ -455,9 +455,9 @@ t_take_refuses_live_lead_unless_forced() {
   ! "$agent/take.sh" 58 2>"$T/err" && ok grep -q 'live lead ochestra1.*--force' "$T/err" &&
   ok test -z "$(changes_since "$m")" || return 1
   "$agent/take.sh" 58 --force > "$T/out" || return 1
-  ok test "$(labels_of w58-impl | jq -r '.["vally.owner"]')" = t1@1000 &&
+  ok test "$(labels_of w58-impl | jq -r '.["vally.owner"]')" = t1@1000000 &&
   ok grep -q '^send t2 vally: 사용자가 강제해서 이슈 #58' "$FAKE_DIR/hc.log" &&
-  ok test "$(lock_of "$VALLY_WORKTREES/fix-58-theme")" = "vally owner t1@1000 issue 58"
+  ok test "$(lock_of "$VALLY_WORKTREES/fix-58-theme")" = "vally owner t1@1000000 issue 58"
 }
 
 t_reused_address_is_not_the_old_lead() {
@@ -466,14 +466,14 @@ t_reused_address_is_not_the_old_lead() {
   as_t2 "$agent/status.sh" >/dev/null || return 1
   "$agent/status.sh" > "$T/out" &&
   ok grep -q 'w58-impl .*(리드 t2 없음)' "$T/out" && "$agent/take.sh" 58 >/dev/null &&
-  ok test "$(labels_of w58-impl | jq -r '.["vally.owner"]')" = t1@1000
+  ok test "$(labels_of w58-impl | jq -r '.["vally.owner"]')" = t1@1000000
 }
 
 t_check_terminals_are_per_lead() {
   make_pr 61 fix/58-theme OPEN '["web/a.ts"]'
   as_t2 "$agent/check-pr.sh" 59 --pr 61 > "$T/out2" && "$agent/check-pr.sh" 58 --pr 61 > "$T/out" || { cat "$T/out2" "$T/out"; return 1; }
   ok grep -q '^terminal: check-61-t2$' "$T/out2" && ok grep -q '^terminal: check-61-t1$' "$T/out" &&
-  ok test "$(labels_of check-61-t1 | jq -r '.["vally.owner"]')" = t1@1000
+  ok test "$(labels_of check-61-t1 | jq -r '.["vally.owner"]')" = t1@1000000
 }
 
 t_finish_hands_docs_only_to_own_gardener() {
@@ -506,7 +506,7 @@ t_status_shows_only_my_space() {
 }
 
 t_report_reaches_live_lead() {
-  add_terminal t5 w58-impl /w '{"vally.issue":"58","vally.role":"worker","vally.owner":"t1@1000"}' working ''
+  add_terminal t5 w58-impl /w '{"vally.issue":"58","vally.role":"worker","vally.owner":"t1@1000000"}' working ''
   HC_TERMINAL_ID=t1 "$agent/status.sh" >/dev/null
   HC_TERMINAL_ID=t5 "$agent/report.sh" "done 58 PR #61 /r/w58-impl.md" > "$T/out" || return 1
   ok grep -q '^send t1 done 58 PR #61 /r/w58-impl.md$' "$FAKE_DIR/hc.log" && ok test "$(labels_of t5 | jq -r '.["vally.orphan"]')" = null
@@ -524,7 +524,7 @@ t_report_without_lead_marks_orphan_and_notifies() {
 t_report_to_blocked_lead_is_not_orphan() {
   as_t2 "$agent/status.sh" >/dev/null || return 1
   db_edit '(.terminals[] | select(.address == "t2") | .status.state) = "blocked"'
-  add_terminal t5 w66-impl /w '{"vally.issue":"66","vally.role":"worker","vally.owner":"t2@2000"}' idle ''
+  add_terminal t5 w66-impl /w '{"vally.issue":"66","vally.role":"worker","vally.owner":"t2@2000000"}' idle ''
   ! HC_TERMINAL_ID=t5 "$agent/report.sh" "done 66 PR #70 /r.md" >/dev/null 2>"$T/err" &&
   ok grep -q 'it may be blocked' "$T/err" && ok test "$(labels_of t5 | jq -r '.["vally.orphan"]')" = null &&
   ok test ! -s "$FAKE_DIR/notify.log"
@@ -600,8 +600,8 @@ t_takes_at_once_give_the_issue_to_one_lead() {
   wait $p1; c1=$?; wait $p3; c3=$?
   cat "$T/t1" "$T/t3"
   ok test $c1 = 0 && ok test $c3 != 0 && ok grep -q 'issue #58 belongs to the live lead main' "$T/t3" &&
-  ok test "$(labels_of w58-impl | jq -r '.["vally.owner"]')" = t1@1000 &&
-  ok test "$(lock_of "$VALLY_WORKTREES/fix-58-theme")" = "vally owner t1@1000 issue 58"
+  ok test "$(labels_of w58-impl | jq -r '.["vally.owner"]')" = t1@1000000 &&
+  ok test "$(lock_of "$VALLY_WORKTREES/fix-58-theme")" = "vally owner t1@1000000 issue 58"
 }
 
 t_agent_without_owner_belongs_to_an_older_parent_only() {
@@ -620,8 +620,8 @@ t_take_moves_gardener_with_its_worktree() {
   as_t2 "$agent/start.sh" garden 58 --pr 61 >/dev/null || return 1
   kill_lead t2
   "$agent/take.sh" 58 > "$T/out" || { cat "$T/out"; return 1; }
-  ok test "$(labels_of docs-garden-t2 | jq -r '.["vally.owner"]')" = t1@1000 &&
-  ok test "$(lock_of "$VALLY_WORKTREES/docs-garden-61")" = "vally owner t1@1000" &&
+  ok test "$(labels_of docs-garden-t2 | jq -r '.["vally.owner"]')" = t1@1000000 &&
+  ok test "$(lock_of "$VALLY_WORKTREES/docs-garden-61")" = "vally owner t1@1000000 issue 58" &&
   "$agent/retire.sh" docs-garden-t2 --worktree > "$T/out" 2>&1 && ok test ! -d "$VALLY_WORKTREES/docs-garden-61"
 }
 
@@ -631,7 +631,7 @@ t_agent_without_any_record_is_shown_without_lead() {
   "$agent/status.sh" > "$T/out" 2>&1 || { cat "$T/out"; return 1; }
   ok grep -q '^- w58-impl \[worker\] 이슈 #58: 보고 완료 (리드 기록 없음)$' "$T/out" && ! grep -q 'bad array' "$T/out" &&
   ! "$agent/start.sh" impl 58 --branch fix/58-x --spec "$T/spec.md" 2>"$T/err" && ok grep -q '(주인 없음): w58-impl\.' "$T/err" &&
-  "$agent/take.sh" 58 >/dev/null && ok test "$(labels_of t5 | jq -r '.["vally.owner"]')" = t1@1000
+  "$agent/take.sh" 58 >/dev/null && ok test "$(labels_of t5 | jq -r '.["vally.owner"]')" = t1@1000000
 }
 
 t_take_locks_the_unlocked_worktree_of_its_agent() {
@@ -639,7 +639,7 @@ t_take_locks_the_unlocked_worktree_of_its_agent() {
   add_terminal t5 w58-impl "$VALLY_WORKTREES/fix-58-old" '{"vally.issue":"58","vally.role":"worker","vally.owner":"t9@5"}'
   "$agent/take.sh" 58 > "$T/out" || { cat "$T/out"; return 1; }
   ok grep -qx "took $VALLY_WORKTREES/fix-58-old" "$T/out" &&
-  ok test "$(lock_of "$VALLY_WORKTREES/fix-58-old")" = "vally owner t1@1000 issue 58"
+  ok test "$(lock_of "$VALLY_WORKTREES/fix-58-old")" = "vally owner t1@1000000 issue 58"
 }
 
 t_status_lists_my_pr_while_checking_and_after_a_push() {
@@ -664,13 +664,13 @@ t_issue_handed_to_gardener_stays_with_its_lead() {
   ! as_t2 "$agent/start.sh" impl 58 --branch fix/58-theme --spec "$T/spec.md" 2>/dev/null &&
   ok test -z "$(changes_since "$m")" || return 1
   "$agent/status.sh" > "$T/out" && ok grep -q '^- docs-garden-t1 \[gardener\] 이슈 #50, #58 PR #55: working$' "$T/out" &&
-  ok grep -q '^- #58: docs-garden-t1$' "$T/out" &&
+  ok grep -q '^- #58: docs-garden-t1, docs-garden-55$' "$T/out" &&
   as_t2 "$agent/status.sh" > "$T/out" && ok grep -q '^- 다른 리드 사용 중: main (이슈 #50, #58)$' "$T/out" &&
   ok grep -q '^- #80 free$' "$T/out" && ! grep -q '^- #58 docs$' "$T/out" || return 1
   kill_lead t1
   as_t2 "$agent/take.sh" 58 >/dev/null &&
-  ok test "$(labels_of docs-garden-t1 | jq -r '.["vally.owner"]')" = t2@2000 &&
-  ok test "$(lock_of "$VALLY_WORKTREES/docs-garden-55")" = "vally owner t2@2000"
+  ok test "$(labels_of docs-garden-t1 | jq -r '.["vally.owner"]')" = t2@2000000 &&
+  ok test "$(lock_of "$VALLY_WORKTREES/docs-garden-55")" = "vally owner t2@2000000 issue 50,58"
 }
 
 won_issue_58_alone() { # <winner exit> <loser exit> <loser output> <winner name> <winner owner id>
@@ -688,7 +688,7 @@ t_start_sees_a_lead_that_started_while_it_waited() {
   free_t1_when_ended_or_after_3s $p3
   wait $p1; c1=$?; wait $p3; c3=$?
   cat "$T/t1" "$T/t3"
-  if [ $c3 = 0 ]; then won_issue_58_alone $c3 $c1 "$T/t1" macheck2 t3@3000; else won_issue_58_alone $c1 $c3 "$T/t3" main t1@1000; fi
+  if [ $c3 = 0 ]; then won_issue_58_alone $c3 $c1 "$T/t1" macheck2 t3@3000000; else won_issue_58_alone $c1 $c3 "$T/t3" main t1@1000000; fi
 }
 
 t_takes_of_one_gardener_for_two_issues_give_it_to_one_lead() {
@@ -703,10 +703,10 @@ t_takes_of_one_gardener_for_two_issues_give_it_to_one_lead() {
   free_t1_when_ended_or_after_3s $p2
   wait $p1; c1=$?; wait $p2; c2=$?
   cat "$T/t1" "$T/t2"
-  if [ $c1 = 0 ]; then w=t1@1000 c=$c2 out=$T/t2 name=main; else w=t2@2000 c=$c1 out=$T/t1 name=ochestra1; fi
+  if [ $c1 = 0 ]; then w=t1@1000000 c=$c2 out=$T/t2 name=main; else w=t2@2000000 c=$c1 out=$T/t1 name=ochestra1; fi
   ok test $c != 0 && ok grep -q "belongs to the live lead $name" "$out" &&
   ok test "$(labels_of docs-garden-t3 | jq -r '.["vally.owner"]')" = "$w" &&
-  ok test "$(lock_of "$VALLY_WORKTREES/docs-garden-55")" = "vally owner $w"
+  ok test "$(lock_of "$VALLY_WORKTREES/docs-garden-55")" = "vally owner $w issue 50,58"
 }
 
 t_retire_during_a_forced_take_stops_only_its_own_agent() {
@@ -718,8 +718,8 @@ t_retire_during_a_forced_take_stops_only_its_own_agent() {
   free_t1_when_ended_or_after_3s $p2
   wait $p1; wait $p2; c2=$?
   cat "$T/t1" "$T/t2"
-  ok test $c2 = 0 && ok test "$(lock_of "$VALLY_WORKTREES/fix-58-theme")" = "vally owner t2@2000 issue 58" || return 1
-  if grep -q '^took w58-impl' "$T/t2"; then ok test "$(labels_of w58-impl | jq -r '.["vally.owner"]')" = t2@2000
+  ok test $c2 = 0 && ok test "$(lock_of "$VALLY_WORKTREES/fix-58-theme")" = "vally owner t2@2000000 issue 58" || return 1
+  if grep -q '^took w58-impl' "$T/t2"; then ok test "$(labels_of w58-impl | jq -r '.["vally.owner"]')" = t2@2000000
   else ok test -z "$(labels_of w58-impl)"; fi
 }
 
@@ -761,7 +761,7 @@ t_start_and_check_stop_on_an_issue_without_live_lead() {
   ! "$agent/check-pr.sh" 58 --pr 61 2>"$T/err" && ok grep -q '(주인 없음): w58-impl .*take.sh 58$' "$T/err" &&
   ok test -z "$(changes_since "$m")" && ok test "$(git worktree list --porcelain)" = "$before" || return 1
   "$agent/take.sh" 58 >/dev/null && "$agent/start.sh" review 58 --pr 61 --round 0 >/dev/null &&
-  ok test "$(labels_of w58-review0 | jq -r '.["vally.owner"]')" = t1@1000
+  ok test "$(labels_of w58-review0 | jq -r '.["vally.owner"]')" = t1@1000000
 }
 
 t_finish_keeps_what_has_no_live_lead_and_starts_no_gardener() {
@@ -792,6 +792,8 @@ t_take_moves_a_gone_gardener_worktree_with_every_issue_it_holds() {
   as_t2 "$agent/start.sh" garden 50 --pr 55 >/dev/null && as_t2 "$agent/start.sh" garden 58 --pr 61 >/dev/null || return 1
   ok test "$(lock_of "$VALLY_WORKTREES/docs-garden-55")" = "vally owner $(id_of t2) issue 50,58" || return 1
   as_t2 "$agent/retire.sh" docs-garden-t2 >/dev/null && kill_lead t2
+  ! "$agent/start.sh" impl 50 --branch fix/50-x --spec "$T/spec.md" 2>"$T/err" &&
+  ok grep -q "issue #50 has things without a live lead (주인 없음): $VALLY_WORKTREES/docs-garden-55\." "$T/err" || return 1
   "$agent/take.sh" 58 > "$T/out" || { cat "$T/out"; return 1; }
   ok grep -qx 'took issues #50, #58' "$T/out" &&
   ok test "$(lock_of "$VALLY_WORKTREES/docs-garden-55")" = "vally owner $(id_of t1) issue 50,58" &&

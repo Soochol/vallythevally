@@ -15,7 +15,8 @@ issue=$(jq -r '.labels["vally.issue"] // "?"' <<<"$info")
 
 if lead_alive "$owner"; then
   hc send "${owner%%@*}" "$1" >/dev/null && { echo "sent to the lead ${owner%%@*}"; exit 0; }
-  die "could not reach the lead ${owner%%@*}; it may be blocked. Try again in a minute"
+  load_live
+  ! lead_alive "$owner" || die "could not reach the lead ${owner%%@*}; it may be blocked. Try again in a minute"
 fi
 hc label "$HC_TERMINAL_ID" "vally.orphan=$kind" >/dev/null || warn "could not label $HC_TERMINAL_ID vally.orphan=$kind"
 release_lock

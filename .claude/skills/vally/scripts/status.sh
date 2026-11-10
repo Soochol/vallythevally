@@ -22,7 +22,7 @@ for role in $VALLY_ROLES; do
     owner=$(owner_of <<<"$info")
     agents+=$(jq -c --arg t "$t" --arg o "$owner" --arg s "$(state "$owner")" \
       '{address: $t, name: (.name // $t), cwd, labels, run: (.status | if type == "object" then .state else . end), owner: $o, state: $s,
-        issues: ([.labels["vally.issue"] // empty] + [.labels | to_entries[] | select((.key | startswith("vally.garden.")) and .value == "1") | .key | ltrimstr("vally.garden.")])}' <<<"$info")$'\n'
+        issues: '"$ISSUES_JQ}" <<<"$info")$'\n'
   done
 done
 agents=$(jq -s '.' <<<"$agents")
@@ -35,7 +35,7 @@ for w in "$VALLY_WORKTREES"/*/; do
   owner=${lock%%$'\t'*} issue=${lock#*$'\t'}
   if [ -z "$lock" ]; then
     owner=$(jq -r --arg w "$w" 'first(.[] | select(.cwd == $w) | .owner) // empty' <<<"$agents")
-    issue=$(jq -r --arg w "$w" 'first(.[] | select(.cwd == $w) | .labels["vally.issue"]) // empty' <<<"$agents")
+    issue=$(jq -r --arg w "$w" 'first(.[] | select(.cwd == $w) | .issues | join(",")) // empty' <<<"$agents")
   fi
   b=$(git -C "$w" branch --show-current)
   live=false; grep -qxF "$w" <<<"$cwds" && live=true
@@ -45,7 +45,7 @@ for w in "$VALLY_WORKTREES"/*/; do
   dirty=false; is_clean "$w" || dirty=true
   spaces+=$(jq -nc --arg w "$w" --arg b "$b" --arg h "$head" --arg o "$owner" --arg i "$issue" --arg s "$([ -z "$owner" ] && echo none || state "$owner")" \
     --argjson live "$live" --argjson pr "$haspr" --argjson dirty "$dirty" \
-    '{path: $w, branch: $b, head: $h, owner: $o, issues: [$i | select(. != "")], state: $s, live: $live, pr: $pr, dirty: $dirty}')$'\n'
+    '{path: $w, branch: $b, head: $h, owner: $o, issues: ($i | split(",") | map(select(. != ""))), state: $s, live: $live, pr: $pr, dirty: $dirty}')$'\n'
 done
 spaces=$(jq -s '.' <<<"$spaces")
 

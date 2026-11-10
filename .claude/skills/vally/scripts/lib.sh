@@ -74,10 +74,10 @@ retire_terminal() {
 }
 
 # A lead is the hc terminal that runs these scripts. Its owner id is <address>@<since>, since being the
-# terminal's creation time in UTC seconds: hc keeps its address counter in its state folder, and a lost
+# terminal's creation time in UTC milliseconds: hc keeps its address counter in its state folder, and a lost
 # state folder starts the counter over, so an address alone could name a newer terminal.
 
-since_of() { jq -r '.labels["vally.lead.since"] // (.created_ms / 1000 | floor | tostring)'; }
+since_of() { jq -r '.labels["vally.lead.since"] // (.created_ms | tostring)'; }
 
 owner_of() {
   local info parent p
@@ -163,6 +163,15 @@ worktree_owner() { worktree_lock "$1" | cut -f1; }
 
 lock_worktree() { git worktree lock --reason "vally owner $ME${2:+ issue $2}" "$1"; }
 
+has_issue() { [[ ",$1," == *",$2,"* ]]; }
+
+lock_issue_too() { # <worktree> <issue>
+  local owner issues
+  IFS=$'\t' read -r owner issues < <(worktree_lock "$1") || return 0
+  [ "$owner" = "$ME" ] && ! has_issue "$issues" "$2" || return 0
+  git worktree unlock "$1" && lock_worktree "$1" "${issues:+$issues,}$2"
+}
+
 remove_worktree() {
   [ "$(worktree_owner "$1")" != "$ME" ] || git worktree unlock "$1"
   git worktree remove "$1"
@@ -181,7 +190,24 @@ issue_holders() {
     info=$(terminal_json "$t") || exit 1
     printf '%s\t%s\n' "$(jq -r --arg t "$t" '.name // $t' <<<"$info")" "$(owner_of <<<"$info")"
   done
-  worktree_locks | awk -F'\t' -v i="$1" '$3 == i { print $1 "\t" $2 }'
+  worktree_locks | awk -F'\t' -v i="$1" 'index("," $3 ",", "," i ",") { print $1 "\t" $2 }'
+}
+
+ISSUES_JQ='([.labels["vally.issue"] // empty] + [.labels | to_entries[] | select((.key | startswith("vally.garden.")) and .value == "1") | .key | ltrimstr("vally.garden.")])'
+
+terminal_issues() { jq -r "$ISSUES_JQ | join(\",\")"; }
+
+issue_group() {
+  local -A seen=([$1]=1)
+  local todo=("$1") i t ts info more j
+  while [ ${#todo[@]} -gt 0 ]; do
+    i=${todo[0]} todo=("${todo[@]:1}")
+    more=$(worktree_locks | awk -F'\t' -v i="$i" 'index("," $3 ",", "," i ",") { print $3 }')
+    ts=$(issue_terminals "$i") || exit 1
+    for t in $ts; do info=$(terminal_json "$t") || exit 1; more+=,$(terminal_issues <<<"$info"); done
+    for j in ${more//,/ }; do [ -n "${seen[$j]-}" ] || { seen[$j]=1; todo+=("$j"); }; done
+  done
+  printf '%s\n' "${!seen[@]}" | sort -n
 }
 
 issue_orphans() {
