@@ -17,7 +17,7 @@ files=$(jq -r '.files[].path' <<<"$view")
 nfiles=$(jq '.files | length' <<<"$view")
 git fetch -q origin
 
-hold_vally_lock
+lock_and_load_live
 need_issue_open "$issue"
 agents=$(terminals_with vally.issue="$issue")
 for t in $agents; do
@@ -43,7 +43,7 @@ if git show-ref --verify --quiet "refs/heads/$branch"; then
   elif branch_is_safe_to_delete "$branch"; then git branch -D "$branch" >/dev/null && echo "deleted branch $branch"
   else echo "kept branch $branch: it has commits that are not on origin"; fi
 fi
-release_vally_lock
+release_lock
 
 if [[ $branch == docs/garden-* ]]; then
   echo "gardener PR: no gardener"

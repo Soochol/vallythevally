@@ -9,7 +9,7 @@ source "$(dirname "$0")/lib.sh"
 name=$1
 as_lead
 [ $# = 1 ] || git fetch -q origin
-hold_vally_lock
+lock_and_load_live
 info=$(terminal_json "$name")
 [ -n "$(jq -r '.labels["vally.role"] // empty' <<<"$info")" ] || die "$name has no vally.role label; not a vally agent"
 need_mine "$(owner_of <<<"$info")" "$name" "$(jq -r '.labels["vally.issue"] // "<issue>"' <<<"$info")"

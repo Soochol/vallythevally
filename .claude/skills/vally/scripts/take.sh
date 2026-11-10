@@ -9,7 +9,7 @@ source "$(dirname "$0")/lib.sh"
 issue=$1 force=${2-}
 need_issue "$issue"
 as_lead
-hold_vally_lock
+lock_and_load_live
 
 take_worktree() { # <path> <issue for an unlocked worktree>
   local owner issue

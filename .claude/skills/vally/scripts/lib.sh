@@ -110,16 +110,14 @@ as_lead() {
 
 load_live() { LIVE=$(hc ls --json | jq -r '.terminals[].address') || die "hc ls failed; is herdr-core running?"; }
 
-# Every script that decides or changes who owns an agent, a worktree or an issue does it holding this
-# one lock, and reads which leads are live only once it holds it.
-hold_vally_lock() {
+lock_and_load_live() {
   mkdir -p "$VALLY_STATE/locks"
   exec {vally_lock}>>"$VALLY_STATE/locks/vally.lock"
   flock -x -w 120 "$vally_lock" || die "another vally script has held $VALLY_STATE/locks/vally.lock for 120 s; try again when it ends"
   load_live
 }
 
-release_vally_lock() { exec {vally_lock}>&-; }
+release_lock() { exec {vally_lock}>&-; }
 
 lead_alive() {
   [[ $1 == *@* ]] && grep -qxF "${1%%@*}" <<<"$LIVE" || return 1

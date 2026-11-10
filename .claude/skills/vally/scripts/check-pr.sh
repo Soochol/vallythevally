@@ -16,7 +16,7 @@ head=$(jq -r .headRefOid <<<"$view")
 files=$(jq -r '.files[].path' <<<"$view")
 git fetch -q origin main "pull/$pr/head"
 git merge-base --is-ancestor origin/main "$head" || die "PR #$pr is behind main; have its worker rebase on origin/main and push, then check again"
-hold_vally_lock
+lock_and_load_live
 need_issue_open "$issue"
 worktree=$VALLY_WORKTREES/review-$issue-${head:0:7}
 if [ -d "$worktree" ]; then
@@ -34,7 +34,7 @@ mkdir -p "$VALLY_REPORTS/$issue"
 log=$VALLY_REPORTS/$issue/check-pr$pr-${head:0:7}.log
 name=check-$pr-$HC_TERMINAL_ID
 hc run --bg --json --name "$name" --label vally.issue="$issue" --label vally.pr="$pr" --label vally.owner="$ME" --cwd "$worktree" -- bash -c "scripts/check.sh > '$log' 2>&1" >/dev/null
-release_vally_lock
+release_lock
 if [ "$(jq '.files | length' <<<"$view")" -lt 100 ] && docs_only "$files" && ! touches_agent_rules "$files"; then merge=auto; else merge=user; fi
 echo "$name running at ${head:0:7}; log: $log"
 echo "terminal: $name"

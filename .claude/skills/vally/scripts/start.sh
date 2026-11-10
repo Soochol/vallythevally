@@ -43,7 +43,7 @@ case $kind in
   *) usage;;
 esac
 
-hold_vally_lock
+lock_and_load_live
 need_issue_open "$issue"
 lock_issue=$issue
 case $kind in
