@@ -211,17 +211,21 @@ export class DrawingJournal {
       if (current?.uuid === intent.uuid && !sameIntent(current, intent)) throw invalid();
       if (!staged && (!current || !sameIntent(current, intent))) return;
       const greatest = previous && compareIntent(previous, intent) > 0 ? previous : intent;
-      const completed: Completion = { v: 1, id: intent.id, order: greatest.order, uuid: greatest.uuid, lastRevision: Math.max(previous?.lastRevision ?? 0, intent.lastRevision) };
-      this.storage.setItem(completionKey(intent.id), JSON.stringify(completed));
+      const shared = current && compareIntent(current, greatest) <= 0 ? current : null;
+      let lastRevision = Math.max(previous?.lastRevision ?? 0, intent.lastRevision, shared?.lastRevision ?? 0);
       const retired: Intent[] = [];
       for (const key of Object.keys(this.storage)) {
         if (!key.startsWith(STAGING_PREFIX)) continue;
         const stage = parseJournalRecord(json(this.storage.getItem(key)));
-        if (stage && key === stageKey(stage.uuid) && stage.id === intent.id && compareIntent(stage, completed) <= 0) retired.push(stage);
+        if (stage && key === stageKey(stage.uuid) && stage.id === intent.id && compareIntent(stage, greatest) <= 0) {
+          retired.push(stage);
+          lastRevision = Math.max(lastRevision, stage.lastRevision);
+        }
       }
+      const completed: Completion = { v: 1, id: intent.id, order: greatest.order, uuid: greatest.uuid, lastRevision };
+      this.storage.setItem(completionKey(intent.id), JSON.stringify(completed));
       for (const stage of retired.sort(compareIntent)) this.retire(stage);
-      const shared = this.current(intent.id);
-      if (shared && compareIntent(shared, completed) <= 0) this.retire(shared);
+      if (shared) this.retire(shared);
     });
   }
 }

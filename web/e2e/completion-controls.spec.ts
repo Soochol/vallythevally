@@ -405,3 +405,91 @@ test("native completion adapter: failed legacy cleanup keeps the first migration
   expect(recovered).toEqual(first);
   await info.attach("partial-legacy-migration.json", { body: JSON.stringify({ first, recovered }), contentType: "application/json" });
 });
+
+for (const failure of ["none", "quota", "read", "partial"]) {
+  test(`native completion: migrated revision survives retirement, ${failure} failure and late ACK after reload`, async ({ page, completionUrl }, info) => {
+    await open(page, completionUrl);
+    const result = await page.evaluate(async (failure) => {
+      const p = window.completionProbe;
+      localStorage.setItem(p.recordKey(p.body.id), JSON.stringify({ v: 1, id: p.body.id, symbol: p.body.symbol, want: { kind: "put", body: p.body }, lastRevision: 0 }));
+      const journal = new p.DrawingJournal();
+      const terminal = journal.stage({ id: p.body.id, symbol: p.body.symbol, want: { kind: "delete" }, observedRevision: 1 }, () => 200);
+      const terminalRaw = localStorage.getItem(p.stageKey(terminal.uuid));
+      if (!terminalRaw) throw new Error("Expected DELETE stage");
+      localStorage.removeItem(p.stageKey(terminal.uuid));
+      const clock = Date.now;
+      Date.now = () => 900;
+      let older;
+      try { older = await new p.DrawingJournal().recover(p.body.id); } finally { Date.now = clock; }
+      if (!older) throw new Error("Expected migrated PUT");
+      localStorage.setItem(p.stageKey(terminal.uuid), terminalRaw);
+      await journal.admit(terminal);
+      const before = Object.entries(localStorage).sort();
+      const nativeSet = Storage.prototype.setItem;
+      const nativeGet = Storage.prototype.getItem;
+      const nativeRemove = Storage.prototype.removeItem;
+      const removed: string[] = [];
+      const writes: string[] = [];
+      const floorsAtRemoval: unknown[] = [];
+      Storage.prototype.setItem = function(key, value) {
+        if (key === p.completionKey(terminal.id)) {
+          writes.push(value);
+          if (failure === "quota") throw new DOMException("retirement quota", "QuotaExceededError");
+        }
+        nativeSet.call(this, key, value);
+      };
+      Storage.prototype.getItem = function(key) {
+        if (failure === "read" && key === p.stageKey(older.uuid)) throw new DOMException("retirement read", "SecurityError");
+        return nativeGet.call(this, key);
+      };
+      Storage.prototype.removeItem = function(key) {
+        floorsAtRemoval.push(JSON.parse(nativeGet.call(localStorage, p.completionKey(terminal.id)) ?? "null"));
+        removed.push(key);
+        if (failure === "partial" && removed.length === 2) throw new DOMException("retirement removal", "QuotaExceededError");
+        nativeRemove.call(this, key);
+      };
+      let error = "";
+      try { await journal.complete(terminal); } catch (caught) { error = caught instanceof Error ? caught.message : String(caught); }
+      finally { Storage.prototype.setItem = nativeSet; Storage.prototype.getItem = nativeGet; Storage.prototype.removeItem = nativeRemove; }
+      const after = Object.entries(localStorage).sort();
+      const afterFailure = localStorage.getItem(p.completionKey(terminal.id));
+      if (failure === "quota" || failure === "read") await journal.complete(terminal);
+      return { older, terminal, before, after, removed, writes, floorsAtRemoval, error, afterFailure, retained: localStorage.getItem(p.completionKey(terminal.id)) };
+    }, failure);
+    expect(result.older).toMatchObject({ order: 0, lastRevision: 900 });
+    expect(result.terminal.lastRevision).toBe(1);
+    if (failure === "quota" || failure === "read") {
+      expect(result.error).toBe(`retirement ${failure}`);
+      expect(result.removed).toEqual([]);
+      expect(result.after).toEqual(result.before);
+      expect(result.afterFailure).toBeNull();
+    } else if (failure === "partial") {
+      expect(result.error).toBe("retirement removal");
+      expect(result.removed).toHaveLength(2);
+    } else expect(result.error).toBe("");
+    expect(result.writes).toHaveLength(failure === "read" ? 0 : 1);
+    const expected = { v: 1, id: result.terminal.id, order: result.terminal.order, uuid: result.terminal.uuid, lastRevision: 900 };
+    expect(JSON.parse(result.retained ?? "null")).toEqual(expected);
+    for (const floor of result.floorsAtRemoval) expect(floor).toEqual(expected);
+    await page.reload();
+    await page.waitForFunction(() => window.completionProbe !== undefined);
+    const restored = await page.evaluate(async ({ older, terminal }) => {
+      const p = window.completionProbe;
+      const journal = new p.DrawingJournal();
+      const recovered = await journal.recover(terminal.id);
+      const beforeAck = localStorage.getItem(p.completionKey(terminal.id));
+      await journal.complete(older);
+      await journal.complete(terminal);
+      const afterAck = localStorage.getItem(p.completionKey(terminal.id));
+      const keys = Object.keys(localStorage);
+      const undo = journal.stage({ id: p.body.id, symbol: p.body.symbol, want: { kind: "put", body: p.body }, observedRevision: 1 }, () => 1);
+      return { recovered, beforeAck, afterAck, keys, undo };
+    }, result);
+    expect(restored.recovered).toBeNull();
+    expect(restored.beforeAck).toBe(result.retained);
+    expect(restored.afterAck).toBe(result.retained);
+    expect(restored.keys).toEqual([`vv.drawing.completed.${result.terminal.id}`]);
+    expect(restored.undo.lastRevision).toBe(901);
+    await info.attach("retirement-revision-reload.json", { body: JSON.stringify({ failure, result, restored }, null, 2), contentType: "application/json" });
+  });
+}

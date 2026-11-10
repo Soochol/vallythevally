@@ -181,6 +181,34 @@ describe("durable drawing completion", () => {
     expect(undo.lastRevision).toBe(901);
   });
 
+  test("retirement excludes greater, unrelated and incorrectly keyed stage revisions", async () => {
+    const f = fixture(); const journal = f.journal();
+    const terminal = journal.stage(deletion(), () => 200);
+    const older: Intent = { v: 2, id: "a", symbol: "005930", uuid: "older", order: 100, want: { kind: "put", reserved: true, body: body("a", 900) }, lastRevision: 900 };
+    f.values[stageKey(older.uuid)] = JSON.stringify(older);
+    const greater = journal.stage({ ...input(), observedRevision: 1000 }, () => 300);
+    const unrelated = journal.stage({ ...input("b"), observedRevision: 2000 }, () => 400);
+    f.values[stageKey("incorrect-key")] = JSON.stringify({ ...older, uuid: "different-uuid", lastRevision: 3000 });
+    const untouched = [stageKey(greater.uuid), stageKey(unrelated.uuid), stageKey("incorrect-key")].map(key => [key, f.values[key]]);
+    await journal.complete(terminal);
+    expect(completion(f.values)).toMatchObject({ order: terminal.order, uuid: terminal.uuid, lastRevision: 900 });
+    expect([stageKey(greater.uuid), stageKey(unrelated.uuid), stageKey("incorrect-key")].map(key => [key, f.values[key]])).toEqual(untouched);
+    expect(await f.journal().recover("a")).toEqual(greater);
+    expect(await f.journal().recover("b")).toEqual(unrelated);
+  });
+
+  test("retired maximum safe revision survives cleanup and refuses overflowing PUT reservation", async () => {
+    const f = fixture(); const journal = f.journal();
+    const terminal = journal.stage(deletion(), () => 200);
+    const older: Intent = { v: 2, id: "a", symbol: "005930", uuid: "maximum", order: 100, want: { kind: "put", reserved: true, body: body("a", Number.MAX_SAFE_INTEGER) }, lastRevision: Number.MAX_SAFE_INTEGER };
+    f.values[stageKey(older.uuid)] = JSON.stringify(older);
+    await journal.complete(terminal);
+    await journal.complete(older);
+    expect(completion(f.values)).toMatchObject({ order: terminal.order, uuid: terminal.uuid, lastRevision: Number.MAX_SAFE_INTEGER });
+    expect(() => f.journal().stage(input(), () => 1)).toThrow("범위");
+    expect(pendingKeys(f.values)).toEqual([]);
+  });
+
   test("launch starts synchronous work under the lock and releases before its HTTP response", async () => {
     const f = fixture(); const journal = f.journal();
     const intent = journal.stage(input(), () => 100); await journal.admit(intent);
