@@ -36,6 +36,7 @@ pub struct ChartRow {
     pub low_pric: String,
     pub cur_prc: String,
     pub trde_qty: String,
+    pub trde_prica: String,
 }
 
 /// 가격 배율이 TR 묶음마다 다르다. 그래서 공통 "자연 단위 → centi" 함수를 두지 않는다.
@@ -138,6 +139,33 @@ fn parse_row(r: &ChartRow, time: RowTime, period: Period, price: fn(&str) -> Res
         }
     };
     Ok(KiwoomBar { bucket, ohlcv })
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+pub struct MillionWon(pub u64);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct KrxDailyRow {
+    pub day: KstDate,
+    pub ohlcv: Ohlcv,
+    pub traded: MillionWon,
+}
+
+pub fn parse_krx_daily(body: DailyChartResponse) -> Result<Option<Vec<KrxDailyRow>>, WireError> {
+    let rows = body.into_rows();
+    if rows.first().is_some_and(|r| r.dt.is_empty() && r.cntr_tm.is_empty()) {
+        return Ok(None);
+    }
+    let mut out = rows
+        .iter()
+        .rev()
+        .map(|r| {
+            let bar = parse_row(r, RowTime::Date, Period::Day, stock_price)?;
+            Ok(KrxDailyRow { day: bar.bucket.start().kst_date(), ohlcv: bar.ohlcv, traded: MillionWon(unsigned(&r.trde_prica)?) })
+        })
+        .collect::<Result<Vec<_>, WireError>>()?;
+    out.dedup_by_key(|r| r.day);
+    Ok(Some(out))
 }
 
 fn spanning(o: Price, h: Price, l: Price, c: Price, v: Volume) -> Ohlcv {
@@ -272,6 +300,7 @@ pub struct QuoteRow {
     pub open_pric: String,
     pub high_pric: String,
     pub low_pric: String,
+    pub trde_prica: String,
 }
 
 /// ka10095 한 행의 통합 시세. 가격은 centi(원 × 100)다. 거래정지 종목은 현재가가 0일 수 있어 `Price`가 아니다.
@@ -305,6 +334,7 @@ pub struct KrxDayQuote {
     pub code: StockCode,
     pub day: KstDate,
     pub ohlcv: Ohlcv,
+    pub traded: MillionWon,
     pub base: Price,
 }
 
@@ -336,7 +366,7 @@ fn parse_krx_quote_row(r: &QuoteRow) -> Result<KrxDayQuote, WireError> {
             spanning(o, h, l, close, volume)
         })
     };
-    Ok(KrxDayQuote { code, day, ohlcv, base: stock_price(&r.base_pric)? })
+    Ok(KrxDayQuote { code, day, ohlcv, traded: MillionWon(unsigned(&r.trde_prica)?), base: stock_price(&r.base_pric)? })
 }
 
 fn parse_quote_row(r: &QuoteRow) -> Result<StockQuote, WireError> {
@@ -852,6 +882,18 @@ mod tests {
         assert_eq!((mismatch[0].price_centi, mismatch[0].base_centi), (10_000, 9_000), "방향이 어긋나도 계산한 값을 쓴다");
         let krx_bad_time = vec![row("005930", "2"), row("005930_NX", "2"), QuoteRow { cntr_tm: "99".into(), ..row("000660_AL", "2") }];
         assert!(parse_quotes(StockQuotesResponse { atn_stk_infr: krx_bad_time }).is_empty());
+    }
+
+    #[test]
+    fn krx_ka10095_and_ka10081_report_the_traded_value_of_a_day_in_the_same_million_won() {
+        let quote: StockQuotesResponse = serde_json::from_str(&fixture("ka10095_005930_krx")).unwrap();
+        let quote = parse_krx_quotes(quote)[0];
+        let daily: DailyChartResponse = serde_json::from_str(&fixture("ka10081_005930")).unwrap();
+        let daily = parse_krx_daily(daily).unwrap().unwrap();
+        let same_day = daily.iter().find(|r| r.day == quote.day).unwrap();
+        assert_eq!((quote.day, quote.ohlcv, quote.traded), (same_day.day, same_day.ohlcv, same_day.traded), "마감 뒤 ka10095 KRX 행은 그날 KRX 일봉 행과 같다");
+        let average_won = quote.traded.0 * 1_000_000 / quote.ohlcv.volume().0;
+        assert!((quote.ohlcv.low().centi() / 100..=quote.ohlcv.high().centi() / 100).contains(&average_won), "백만원 단위면 평균 체결가 {average_won}원이 그날 저가·고가 사이다");
     }
 
     fn listing(name: &str) -> Vec<(String, Listing)> {

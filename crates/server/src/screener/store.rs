@@ -7,15 +7,15 @@ use duckdb::types::Value;
 use duckdb::{Config, Connection, OptionalExt, params};
 
 use crate::api::ExcludeKind;
-use crate::kiwoom::wire::ScreenerListing;
+use crate::kiwoom::wire::{MillionWon, ScreenerListing};
 
-const SCHEMA_VERSION: i32 = 1;
+const SCHEMA_VERSION: i32 = 2;
 
 const SCHEMA: &str = "
 CREATE TABLE store_meta (schema_version INTEGER NOT NULL, last_day DATE);
 CREATE TABLE listed (code VARCHAR NOT NULL, name VARCHAR NOT NULL, listed_on DATE, excludable_as USMALLINT NOT NULL);
 CREATE TABLE history (code VARCHAR PRIMARY KEY, complete BOOLEAN NOT NULL, refetch BOOLEAN NOT NULL);
-CREATE TABLE daily (code VARCHAR NOT NULL, day DATE NOT NULL, open UBIGINT NOT NULL, high UBIGINT NOT NULL, low UBIGINT NOT NULL, close UBIGINT NOT NULL, volume UBIGINT NOT NULL);
+CREATE TABLE daily (code VARCHAR NOT NULL, day DATE NOT NULL, open UBIGINT NOT NULL, high UBIGINT NOT NULL, low UBIGINT NOT NULL, close UBIGINT NOT NULL, volume UBIGINT NOT NULL, traded_million_won UBIGINT NOT NULL);
 ";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -39,6 +39,7 @@ impl From<duckdb::Error> for StoreError {
 pub struct DayBar {
     pub day: KstDate,
     pub ohlcv: Ohlcv,
+    pub traded: MillionWon,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -146,14 +147,14 @@ impl Store {
 
     pub fn bars_from(&self, code: StockCode, from: KstDate) -> Result<Vec<DayBar>, StoreError> {
         let conn = self.conn();
-        let mut stmt = conn.prepare("SELECT day, open, high, low, close, volume FROM daily WHERE code = ? AND day >= ? ORDER BY day")?;
+        let mut stmt = conn.prepare("SELECT day, open, high, low, close, volume, traded_million_won FROM daily WHERE code = ? AND day >= ? ORDER BY day")?;
         let rows = stmt.query_map(params![code.as_str(), date_value(from)], |row| {
-            Ok((row.get::<_, i32>(0)?, [row.get::<_, u64>(1)?, row.get(2)?, row.get(3)?, row.get(4)?], row.get::<_, u64>(5)?))
+            Ok((row.get::<_, i32>(0)?, [row.get::<_, u64>(1)?, row.get(2)?, row.get(3)?, row.get(4)?], row.get::<_, u64>(5)?, row.get::<_, u64>(6)?))
         })?;
         rows.map(|row| {
-            let (day, [o, h, l, c], v) = row?;
+            let (day, [o, h, l, c], v, traded) = row?;
             let ohlcv = Ohlcv::try_new(price_of(o)?, price_of(h)?, price_of(l)?, price_of(c)?, Volume(v)).map_err(|e| StoreError(format!("저장된 봉이 틀렸습니다({code:?}): {e}")))?;
-            Ok(DayBar { day: date_of(day), ohlcv })
+            Ok(DayBar { day: date_of(day), ohlcv, traded: MillionWon(traded) })
         })
         .collect()
     }
@@ -182,7 +183,7 @@ impl Store {
             let mut appender = tx.appender("daily")?;
             for b in bars {
                 let o = &b.ohlcv;
-                appender.append_row(params![code.as_str(), date_value(b.day), o.open().centi(), o.high().centi(), o.low().centi(), o.close().centi(), o.volume().0])?;
+                appender.append_row(params![code.as_str(), date_value(b.day), o.open().centi(), o.high().centi(), o.low().centi(), o.close().centi(), o.volume().0, b.traded.0])?;
             }
             appender.flush()?;
         }
@@ -206,14 +207,14 @@ impl Store {
         Ok(())
     }
 
-    pub fn backfill_queue(&self, refetch: bool) -> Result<Vec<StockCode>, StoreError> {
+    pub fn backfill_queue(&self) -> Result<Vec<StockCode>, StoreError> {
         let conn = self.conn();
         let mut stmt = conn.prepare(
             "SELECT listed.code FROM listed LEFT JOIN history USING (code)
-             WHERE NOT coalesce(history.complete, false) OR (? AND coalesce(history.refetch, false))
+             WHERE NOT coalesce(history.complete, false) OR coalesce(history.refetch, false)
              ORDER BY listed.code",
         )?;
-        let rows = stmt.query_map(params![refetch], |row| row.get::<_, String>(0))?;
+        let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
         rows.map(|code| stock_code(&code?)).collect()
     }
 }

@@ -15,7 +15,7 @@ use crate::api::{self, ApiErrorBody, FullHistory, ScreenerStatus, ScreenerUpdate
 use crate::bars::{BarError, BarService};
 use crate::clock::Clock;
 use crate::http::{ApiFailure, AppState, Lookup};
-use crate::kiwoom::rest::KiwoomRest;
+use crate::kiwoom::rest::{KiwoomRest, Priority};
 use crate::user_routes::{JSON_LIMIT, read_json};
 use store::{Store, StoreError};
 
@@ -34,6 +34,12 @@ enum Run {
     Idle,
     Running { id: u64, progress: Progress, task: tokio::task::AbortHandle },
     Failed { progress: Progress, error: ApiErrorBody },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CalendarUse {
+    Status,
+    Update,
 }
 
 struct Calendar {
@@ -100,8 +106,8 @@ impl Screener {
         if let Run::Running { task, .. } = &*run {
             task.abort();
             tracing::info!("스크리너 업데이트를 취소했습니다");
+            *run = Run::Idle;
         }
-        *run = Run::Idle;
     }
 
     fn report(&self, id: u64, phase: UpdatePhase, done: usize, total: usize) {
@@ -130,13 +136,17 @@ impl Screener {
         };
     }
 
-    async fn calendar(&self, fresh: bool) -> Result<Arc<Calendar>, BarError> {
+    async fn calendar(&self, using: CalendarUse) -> Result<Arc<Calendar>, BarError> {
         let mut cached = self.calendar.lock().await;
         let now = self.clock.now();
-        if let Some(c) = cached.as_ref().filter(|c| !fresh && c.fetched_at.kst_date() == now.kst_date() && now.unix() - c.fetched_at.unix() < CALENDAR_FRESH_SECS) {
+        let (reuse, priority) = match using {
+            CalendarUse::Status => (true, Priority::Screen),
+            CalendarUse::Update => (false, Priority::Background),
+        };
+        if let Some(c) = cached.as_ref().filter(|c| reuse && c.fetched_at.kst_date() == now.kst_date() && now.unix() - c.fetched_at.unix() < CALENDAR_FRESH_SECS) {
             return Ok(c.clone());
         }
-        let page = self.bars.page(SeriesKey { feed: Feed::Index(IndexCode::KOSPI), period: Period::Day }, None, CALENDAR_DAYS).await?;
+        let page = self.bars.page_with(SeriesKey { feed: Feed::Index(IndexCode::KOSPI), period: Period::Day }, None, CALENDAR_DAYS, priority).await?;
         let days = page.bars.iter().map(|b| b.bucket).chain(page.current.map(|c| c.bucket)).map(|b| b.start().kst_date()).collect();
         let calendar = Arc::new(Calendar { fetched_at: now, days });
         *cached = Some(calendar.clone());
@@ -145,7 +155,7 @@ impl Screener {
 
     pub async fn status(&self) -> Result<ScreenerStatus, StoreError> {
         let summary = self.with_store(Store::summary).await?;
-        let calendar = match self.calendar(false).await {
+        let calendar = match self.calendar(CalendarUse::Status).await {
             Ok(c) => Some(c),
             Err(e) => {
                 tracing::warn!(error = %e, "코스피 일봉을 받지 못해 필요 관측일을 모릅니다");

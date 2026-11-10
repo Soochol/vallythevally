@@ -142,8 +142,11 @@ impl BarService {
 
     /// `before`가 None이면 최신 페이지다.
     pub async fn page(&self, key: SeriesKey, before: Option<KstTime>, limit: usize) -> Result<BarPage, BarError> {
+        self.page_with(key, before, limit, Priority::Screen).await
+    }
+
+    pub async fn page_with(&self, key: SeriesKey, before: Option<KstTime>, limit: usize, prio: Priority) -> Result<BarPage, BarError> {
         self.check(key).await?;
-        let prio = Priority::Screen;
         let slot = self.slot(key);
         let seen_latest = slot.latest_fetches.load(Ordering::SeqCst);
         let mut s = slot.series.lock().await;

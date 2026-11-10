@@ -29,6 +29,7 @@ pub struct KrxBar {
     pub low: u64,
     pub close: u64,
     pub volume: u64,
+    pub traded_million_won: u64,
     pub base: u64,
     pub adjustment_rate: Option<&'static str>,
 }
@@ -130,10 +131,11 @@ fn sample_stock(p: &Profile, k: usize, days: &[KstDate], as_of: KstDate) -> KrxS
         let close = swing(i);
         let base = if bars.is_empty() { close } else { regular_close(i - 1) };
         let bar = match halted_close.filter(|_| p.code == HALTED && d >= sample_halt_from()) {
-            Some(last) => KrxBar { day: d, open: last, high: last, low: last, close: last, volume: 0, base: last, adjustment_rate: None },
+            Some(last) => KrxBar { day: d, open: last, high: last, low: last, close: last, volume: 0, traded_million_won: 0, base: last, adjustment_rate: None },
             None => {
                 let wick = p.level / 200;
-                KrxBar { day: d, open: base, high: base.max(close) + wick, low: base.min(close) - wick, close, volume: 100_000 + (i * 7_919 % 50_000) as u64, base, adjustment_rate: None }
+                let volume = 100_000 + (i * 7_919 % 50_000) as u64;
+                KrxBar { day: d, open: base, high: base.max(close) + wick, low: base.min(close) - wick, close, volume, traded_million_won: volume * (base + close) / 2 / 1_000_000, base, adjustment_rate: None }
             }
         };
         bars.push(if split_applies { split_adjusted(bar) } else { bar });
@@ -224,7 +226,7 @@ fn stock_daily(stock: &KrxStock, range: std::ops::Range<usize>, headers: Value) 
                 "open_pric": b.open.to_string(),
                 "pred_pre": pred_pre,
                 "pred_pre_sig": sig,
-                "trde_prica": (b.volume * b.close / 1_000_000).to_string(),
+                "trde_prica": b.traded_million_won.to_string(),
                 "trde_qty": b.volume.to_string(),
                 "trde_tern_rt": "+0.10",
                 "upd_rt": b.adjustment_rate.unwrap_or(""),
@@ -307,7 +309,7 @@ fn quotes(market: &KrxMarket, codes: &[&str]) -> Value {
                     "low_pric": traded(b.low),
                     "close_pric": b.close.to_string(),
                     "trde_qty": b.volume.to_string(),
-                    "trde_prica": (b.volume * b.close / 1_000_000).to_string(),
+                    "trde_prica": b.traded_million_won.to_string(),
                     "cntr_tm": "195959",
                     "dt": b.day.yyyymmdd(),
                 })

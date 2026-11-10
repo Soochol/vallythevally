@@ -1,16 +1,16 @@
 use std::collections::HashMap;
 
-use domain::{KstDate, Period, Price, StockCode, Venue};
+use domain::{KstDate, Price, StockCode, Venue};
 use futures::{StreamExt, TryStreamExt, stream};
 
-use super::Screener;
+use super::{CalendarUse, Screener};
 use super::store::{DayBar, Store, Tail, Write};
 use crate::api::UpdatePhase;
 use crate::bars::BarError;
 use crate::kiwoom::api::{DailyChart, StockList, StockQuotes};
 use crate::kiwoom::error::{Failure, Surface};
 use crate::kiwoom::rest::{ContKey, KiwoomError, MergeScope, Priority};
-use crate::kiwoom::wire::{ChartRows, KrxDayQuote, ScreenerListing, parse_chart, parse_krx_quotes, screener_listing};
+use crate::kiwoom::wire::{KrxDayQuote, ScreenerListing, parse_krx_daily, parse_krx_quotes, screener_listing};
 
 const IN_FLIGHT: usize = 2;
 const MAX_LIST_PAGES: usize = 10;
@@ -42,10 +42,10 @@ impl Screener {
         if full {
             self.with_store(Store::mark_refetch).await?;
         }
-        let calendar = self.calendar(true).await?;
+        let calendar = self.calendar(CalendarUse::Update).await?;
         let target = calendar.target(self.clock.now()).ok_or_else(|| BarError::Internal("코스피 일봉에 관측일이 없어 목표 관측일을 정할 수 없습니다".into()))?;
         self.recent(id, target, calendar.last_before(target)).await?;
-        self.backfill(id, target, full).await
+        self.backfill(id, target).await
     }
 
     async fn fetch_listing(&self, id: u64) -> Result<Vec<ScreenerListing>, BarError> {
@@ -93,7 +93,7 @@ impl Screener {
                         tracing::info!(code = code.as_str(), base = q.base.centi() / 100, stored_close = stored_close.centi() / 100, "기준가가 저장된 종가와 30% 넘게 달라 전체 이력을 다시 받습니다");
                         catchups.push((code, Catchup::WholeHistory));
                     }
-                    Some(q) => writes.push(Write::Extend { code, bars: vec![DayBar { day: q.day, ohlcv: q.ohlcv }], reached_origin: false }),
+                    Some(q) => writes.push(Write::Extend { code, bars: vec![DayBar { day: q.day, ohlcv: q.ohlcv, traded: q.traded }], reached_origin: false }),
                 }
             }
             done += writes.len();
@@ -112,8 +112,8 @@ impl Screener {
         Ok(())
     }
 
-    async fn backfill(&self, id: u64, target: KstDate, refetch: bool) -> Result<(), BarError> {
-        let queue = self.with_store(move |s| s.backfill_queue(refetch)).await?;
+    async fn backfill(&self, id: u64, target: KstDate) -> Result<(), BarError> {
+        let queue = self.with_store(Store::backfill_queue).await?;
         let total = queue.len();
         self.report(id, UpdatePhase::Backfill, 0, total);
         let mut written = stream::iter(queue).map(|code| self.catch_up(code, Catchup::WholeHistory, target)).buffered(IN_FLIGHT);
@@ -178,12 +178,12 @@ impl Screener {
             Err(e) if unknown_symbol(&e) => return Ok(None),
             Err(e) => return Err(e.into()),
         };
-        match parse_chart(page.body, Period::Day) {
-            Ok(ChartRows::Rows(rows)) => {
-                let bars = rows.into_iter().map(|r| DayBar { day: r.bucket.start().kst_date(), ohlcv: r.ohlcv }).filter(|b| b.day <= target).collect();
+        match parse_krx_daily(page.body) {
+            Ok(Some(rows)) => {
+                let bars = rows.into_iter().map(|r| DayBar { day: r.day, ohlcv: r.ohlcv, traded: r.traded }).filter(|b| b.day <= target).collect();
                 Ok(Some(DailyPage { bars, next: page.next }))
             }
-            Ok(ChartRows::UnknownSymbol) => Ok(None),
+            Ok(None) => Ok(None),
             Err(e) => Err(BarError::Internal(format!("키움 일봉 응답을 읽지 못했습니다: {e}"))),
         }
     }

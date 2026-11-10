@@ -326,7 +326,7 @@ async fn a_history_cut_off_midway_is_fetched_again_from_its_first_page_and_only_
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn a_store_with_another_schema_version_starts_empty() {
+async fn a_store_left_by_schema_version_1_starts_empty() {
     let fake = FakeKiwoom::start().await;
     let tmp = tempfile::tempdir().unwrap();
     let today = day(2026, 11, 6);
@@ -335,7 +335,7 @@ async fn a_store_with_another_schema_version_starts_empty() {
 
     let path = tmp.path().join("run/screener.duckdb");
     let other = duckdb::Connection::open(&path).unwrap();
-    other.execute("UPDATE store_meta SET schema_version = schema_version + 1", []).unwrap();
+    other.execute("UPDATE store_meta SET schema_version = 1", []).unwrap();
     drop(other);
 
     fake.set_krx_market(market.clone());
@@ -456,4 +456,123 @@ async fn a_full_update_fetches_every_history_again_and_a_plain_one_after_it_fetc
 
     let (_, calls) = update_once(&fake, tmp.path(), &market, &at(today, "2050"), false).await;
     assert_eq!(count(&calls, "ka10081") + count(&calls, "ka10095"), 0, "다 받은 저장소에서는 받을 것이 없다");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_cancelled_full_update_is_resumed_by_the_next_plain_update() {
+    let fake = FakeKiwoom::start().await;
+    let tmp = tempfile::tempdir().unwrap();
+    let today = day(2026, 11, 6);
+    let market = KrxMarket::sample(today);
+    update_once(&fake, tmp.path(), &market, &at(today, "2030"), false).await;
+
+    let (server, api) = boot(&fake, tmp.path(), &at(today, "2040")).await;
+    fake.delay("ka10081", Duration::from_millis(300));
+    api.update(true).await;
+    let midway = api.wait_for("전체 다시 받기 중간", |s| s["update"]["phase"] == "backfill" && s["update"]["done"].as_u64() >= Some(2)).await;
+    assert_eq!((midway["update"]["full"].as_bool(), midway["update"]["total"].as_u64()), (Some(true), Some(10)), "{midway}");
+    api.cancel().await;
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    let refetched = midway["update"]["done"].as_u64().unwrap() as usize;
+
+    fake.reset();
+    let seen = fake.calls().len();
+    let resumed = api.update(false).await;
+    assert_eq!(resumed["update"]["full"].as_bool(), Some(false));
+    let finished = api.settled().await;
+    assert_eq!((finished["update"].clone(), finished["fullHistory"].clone()), (Value::Null, json!({"done": 10, "total": 10})));
+    let chains = daily_chains(&fake.calls()[seen..]);
+    for (code, chain) in &chains {
+        assert_eq!(*chain, whole_history_of(&market, code), "{code}");
+    }
+    assert!((10 - refetched).saturating_sub(2) <= chains.len() && chains.len() <= 10 - refetched, "일반 업데이트가 취소 전에 다시 받지 못한 종목을 받는다. 취소 전에 {refetched}종목, 이번에 {}종목", chains.len());
+
+    let seen = fake.calls().len();
+    api.update(false).await;
+    api.settled().await;
+    assert_eq!(count(&fake.calls()[seen..], "ka10081"), 0, "다 받은 뒤에는 다시 받을 표시가 남지 않는다");
+    server.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_traded_value_that_differs_on_an_overlapping_day_refetches_that_whole_history() {
+    let fake = FakeKiwoom::start().await;
+    let tmp = tempfile::tempdir().unwrap();
+    update_once(&fake, tmp.path(), &KrxMarket::sample(day(2026, 11, 4)), &at(day(2026, 11, 4), "2030"), false).await;
+
+    let mut market = KrxMarket::sample(day(2026, 11, 6));
+    let stored_day = market.stock_mut(krx::COMMON).bars.iter_mut().rev().find(|b| b.day == day(2026, 11, 3)).unwrap();
+    stored_day.traded_million_won += 1;
+    let (status, calls) = update_once(&fake, tmp.path(), &market, &at(day(2026, 11, 6), "2030"), false).await;
+    assert_eq!(status["lastDay"], wire(day(2026, 11, 6)));
+    let mut want = first_pages(&market.codes().iter().map(String::as_str).collect::<Vec<_>>());
+    want.get_mut(krx::COMMON).unwrap().extend(whole_history_of(&market, krx::COMMON));
+    assert_eq!(daily_chains(&calls), want, "저장한 거래대금과 키움의 거래대금이 다른 종목만 전체를 다시 받는다");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn cancelling_after_a_failed_update_keeps_its_error_until_the_next_start() {
+    let fake = FakeKiwoom::start().await;
+    let today = day(2026, 11, 6);
+    fake.set_krx_market(KrxMarket::sample(today));
+    let tmp = tempfile::tempdir().unwrap();
+    let (server, api) = boot(&fake, tmp.path(), &at(today, "2030")).await;
+    fake.respond_with("ka10081", 200, fixture("ka10081_err_1511"));
+    api.update(false).await;
+    let failed = api.settled().await;
+    assert_eq!(failed["update"]["error"]["reason"], "invalid_request", "{failed}");
+    assert_eq!(api.cancel().await, failed, "취소는 돌고 있는 업데이트만 멈춘다");
+    assert_eq!(api.status().await, failed);
+
+    fake.reset();
+    let restarted = api.update(false).await;
+    assert_eq!((restarted["update"]["phase"].as_str(), restarted["update"]["error"].clone()), (Some("symbols"), Value::Null), "오류는 다음 시작에서 지워진다");
+    api.settled().await;
+    server.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_update_asks_for_the_kospi_calendar_behind_chart_requests_that_came_later() {
+    let fake = FakeKiwoom::start().await;
+    let today = day(2026, 11, 6);
+    let market = KrxMarket::sample(today);
+    fake.set_krx_market(market.clone());
+    let tmp = tempfile::tempdir().unwrap();
+    let (server, api) = boot(&fake, tmp.path(), &at(today, "2030")).await;
+    api.status().await;
+    let base = format!("http://{}", server.addr().await);
+    let charts: Vec<String> = market
+        .codes()
+        .iter()
+        .flat_map(|code| ["period=D", "period=W", "period=M", "period=W&venue=krx", "period=M&venue=krx"].map(|q| format!("{base}/api/bars?symbol={code}&{q}&limit=1")))
+        .collect();
+    let flood = |urls: &[String]| {
+        let client = reqwest::Client::new();
+        urls.iter().map(|url| tokio::spawn(client.get(url).send())).collect::<Vec<_>>()
+    };
+
+    fake.delay("ka10099", Duration::from_millis(1_500));
+    let seen = fake.calls().len();
+    api.update(false).await;
+    for _ in 0..400 {
+        if fake.calls()[seen..].iter().any(|c| c.api_id == "ka10099" && c.body["mrkt_tp"] == "10") {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    let earlier = flood(&charts[..20]);
+    tokio::time::sleep(Duration::from_millis(2_500)).await;
+    let later = flood(&charts[20..40]);
+    for chart in earlier.into_iter().chain(later) {
+        assert_eq!(chart.await.unwrap().unwrap().status(), 200);
+    }
+    api.settled().await;
+
+    let calls = &fake.calls()[seen..];
+    let is_chart = |c: &Call| matches!(c.api_id.as_str(), "ka10082" | "ka10083") || (c.api_id == "ka10081" && c.body["stk_cd"].as_str().unwrap().ends_with("_AL"));
+    let calendar = calls.iter().position(|c| c.api_id == "ka20006").expect("업데이트가 코스피 일봉을 받았다");
+    let last_chart = calls.iter().rposition(is_chart).unwrap();
+    assert_eq!(calls.iter().filter(|c| is_chart(c)).count(), 40);
+    assert!(calendar > last_chart, "목록을 받은 뒤 들어온 차트 요청 40개가 먼저 나가고 코스피 일봉은 그 뒤에 나간다(Background): 코스피 {calendar}번째, 마지막 차트 {last_chart}번째");
+    server.stop().await;
 }
