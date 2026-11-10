@@ -20,6 +20,7 @@ vallythevally Rust 백엔드의 설계다. #2의 코드(`crates/domain`, `crates
 | #14 | 1.5단계 거래소 | 칸마다 거래소(통합·KRX·NXT), `/api/bars`의 `venue`, `SymbolInfo.nxtEnabled`, 분봉(1·3·5·15·30·60분) 과거 조회. 분봉의 진행 중 구간은 조회 스냅숏 | WebSocket, 실시간 현재 봉 |
 | #3 | 2단계 저장 | SQLite 파일 `data/vally.db`(sqlx 마이그레이션), 기본 레이아웃 마이그레이션, 관심종목, `UiState`, 자동 저장. 관심종목 현재가는 REST 조회 | WebSocket |
 | #4 | 3단계 실시간 | WebSocket, 구독, 실시간 현재 봉 집계(일·주·월봉과 분봉), `seq` | |
+| #66 | 관심종목 실시간 | 관심종목 보유자, 200개 자리 배분(칸 → 관심종목 목록 위부터), WebSocket `watch`·`quotes`·`watch_limited`. 관심종목 현재가 주기 조회를 지운다 | 알림 보유자(#8) |
 | #5 | 4단계 지표 | WASM 지표, 비교 종목 | |
 | #6~#9 | 5~8단계 | 드로잉 → 여러 칸 → 알림 → 클라우드 | |
 
@@ -562,7 +563,7 @@ pub enum Priority {
     Screen,
     /// 끊긴 구간 복구, 불완전한 봉의 교체, 07:45 비우기 뒤 구독 중인 키 다시 채우기(§5.2, §5.4, §6.2).
     Recovery,
-    /// 관심종목 현재가 1분 조회, 07:45 종목 목록 갱신, 20:05 정리 조회.
+    /// 07:45 종목 목록 갱신, 20:05 정리 조회.
     Background,
 }
 
@@ -811,8 +812,8 @@ pub enum Direction { UpperLimit, Up, Flat, LowerLimit, Down }
 현재가(`Quote`)의 등락은 **기준가와 방향 필드**로 계산한다. 가격 부호로 계산하지 않는다.
 
 - 기준가는 등락의 기준이 되는 가격이다(보통 전일 종가). 종목마다 그날 한 번 정한다.
-  - 실시간이 있으면 첫 0B에서 `기준가 = 현재가 − 방향 부호 × |전일대비|`로 구한다. 방향 부호는 상승·상한이면 +1, 하락·하한이면 −1, 보합이면 0이다.
-  - 실시간이 없으면(#3, 넘친 관심종목) ka10095를 쓴다. 기준가는 `base_pric`(부호 없음), 방향은 `pred_pre_sig`, 현재가는 `cur_prc`의 절댓값이다. 실측에서 100종목 모두 `|cur_prc| − base_pric = pred_pre`가 성립했고, `pred_pre_sig`도 `cur_prc` 부호와 맞았다(kiwoom.md §10.6).
+  - 실시간(0B·0J, #66)은 체결마다 `기준가 = |현재가| − 전일대비`(필드 10, 11)로 구한다. 11은 부호가 곧 값이라(kiwoom.md §11.3, §11.5) 방향 필드가 필요 없고, 상태 없이 체결마다 같은 식을 쓴다. `|10| − 11`은 5종목 모두 전일 종가와 맞았다(kiwoom.md §11.3). 기준가가 0 이하로 나오면 그 체결로는 현재가를 만들지 않는다.
+  - REST 조회(`GET /api/quotes`)는 ka10095를 쓴다. 관심종목은 종목이 목록에 처음 들어올 때 이것을 한 번 부른다(§8.2). 기준가는 `base_pric`(부호 없음), 방향은 `pred_pre_sig`, 현재가는 `cur_prc`의 절댓값이다. 실측에서 100종목 모두 `|cur_prc| − base_pric = pred_pre`가 성립했고, `pred_pre_sig`도 `cur_prc` 부호와 맞았다(kiwoom.md §10.6).
   - ka10099의 `lastPrice`는 마지막 관측일의 기준가였다(kiwoom.md §5). 현재가로 쓰지 않는다. 장중에 이 값이 오늘 기준가인지는 [장중 실측 대기]다.
 - `change = 현재가 − 기준가`, `changeRate = change / 기준가 × 100`.
 - 계산한 `change`의 부호가 방향 필드와 어긋나면 `warn` 로그를 남긴다. 값은 계산한 것을 쓴다.
@@ -853,7 +854,9 @@ impl KiwoomStream {
 }
 
 /// 날짜가 아직 없는 실시간 체결. `exchange`는 0B `9081`(지수와 모르는 값은 None).
-pub struct RealTick { pub symbol: Symbol, pub hhmmss: TimeOfDay, pub price: Price, pub qty: Volume, pub exchange: Option<Exchange> }
+/// `day`는 프레임의 11(전일대비)·13(누적거래량)이다. 하나라도 없거나 읽지 못하면 None이고, 봉 집계는 이 값을 쓰지 않는다(#66).
+pub struct RealTick { pub symbol: Symbol, pub hhmmss: TimeOfDay, pub price: Price, pub qty: Volume, pub exchange: Option<Exchange>, pub day: Option<DayTotals> }
+pub struct DayTotals { pub change_centi: i64, pub volume: Volume }
 
 pub enum StreamEvent {
     Tick { tick: RealTick, received_at: KstTime },
@@ -885,6 +888,7 @@ pub enum StreamEvent {
 - **REAL**: `data[]`의 각 항목을 `RealTick`으로 바꾼다. 실패한 항목은 버리고 카운터를 올린다.
   - 0B: `10`의 방향 부호를 떼고 원 → centi. `15`는 절댓값. **`15`가 0인 프레임은 버린다.** 0은 동시호가에만 나온다(kiwoom.md 11.3). 예상 체결가로 봉을 움직이지 않으려는 것이다. [장중 실측 대기: §12.2 8번]
   - 0J: `10`은 방향 부호가 붙은 소수 문자열이다(kiwoom.md 11.5). `15`가 `"0"`이라 체결량은 그 지수의 앞 프레임 대비 `13`(누적거래량)의 증가분으로 센다. 연결마다 새로 센다. 첫 프레임과 줄어든 경우는 0이다.
+  - `day`(#66): 0B `11`은 부호 있는 정수(원), 0J `11`은 부호 있는 소수 2자리다. 둘 다 centi로 둔다. `13`은 그대로 누적거래량이다. 관심종목 현재가만 이 값을 쓴다(§4.6 "현재가의 등락").
 - **로그**: tungstenite는 trace 수준에서 보낸 프레임을 그대로 찍는다. LOGIN 프레임에는 토큰이 있다. 그래서 `VALLY_LOG`와 상관없이 `tungstenite`·`tokio_tungstenite`의 trace를 버린다. `VALLY_LOG` 안에 지시문을 더하면 `tungstenite::protocol=trace`처럼 더 구체적인 target이 이기므로, 사용자 필터와 따로 겹친 필터로 거른다(`app.rs`, 평문·16진 토큰 시험으로 고정).
 - 같은 토큰으로 순서대로 다시 접속하면 매번 LOGIN이 성공했다. 그래서 다시 연결할 때 토큰을 새로 받지 않는다.
 
@@ -914,6 +918,8 @@ pub enum StreamEvent {
 
 ### 5.3 구독 관리자
 
+**원칙**(2026-11-10 사용자 결정): 서버가 WebSocket으로 받는 종목은 화면 어디에 나오든 체결마다 값이 바뀐다. 실시간 갱신을 위한 REST 주기 조회는 하지 않는다(2026-11-09 결정, #39). 실시간 자리를 못 받은 관심종목은 처음 한 번 받은 값을 그대로 두고 "실시간 아님"을 보인다.
+
 키움 쪽 구독 단위는 **종목**이다. 브라우저 구독 단위는 **`SeriesKey`**, 곧 (종목, 거래소, 봉 주기)다. 서버는 종목 하나의 체결을 그 종목의 모든 (거래소, 봉 주기) 집계기로 나눠 보낸다.
 
 - **거래소별 현재 봉**(ADR 0007, #4에서 정한다): `_AL` 0B 한 흐름은 KRX와 NXT 체결을 모두 준다. 체결마다 `9081`이 `"KRX"` 또는 `"NXT"`다(kiwoom.md 11.1·11.2). 그래서 `_AL` 하나만 REG 하고, 통합 집계기에는 모든 체결을, KRX·NXT 집계기에는 `9081`이 맞는 체결만 넣는 방안을 먼저 검토한다. 이러면 거래소를 골라도 REG 수가 늘지 않는다.
@@ -925,15 +931,29 @@ pub enum StreamEvent {
 pub enum Holder {
     /// 브라우저 연결 하나의 구독 하나. 칸의 주 종목과 비교 종목 모두 여기에 든다.
     Cell { conn: ConnId, sub: SubId },
-    // Alert(AlertId)는 #8, Watchlist는 #39에서 더한다.
+    /// 브라우저 연결 하나가 보는 관심종목 목록의 한 줄(#66).
+    Watch { conn: ConnId, symbol: Symbol },
+    // Alert(AlertId)는 #8에서 더한다. 순위는 Cell과 Watch 사이다.
+}
+
+/// 종목이 자리를 받는 순서. 그 종목의 보유자 가운데 가장 앞선 것. 칸이 관심종목보다 앞선다.
+enum Rank {
+    /// 먼저 잡은 종목이 앞선다.
+    Cell { held: u64 },
+    /// 목록 위가 앞선다. 같은 줄이면 먼저 잡은 종목.
+    Watch { row: usize, held: u64 },
 }
 
 pub struct SubscriptionManager {
     holders: BTreeMap<Symbol, BTreeSet<Holder>>,
+    /// 종목을 처음 잡은 순서. Rank의 held.
+    held_order: BTreeMap<Symbol, u64>,
     /// 보유자가 모두 빠진 시각. 30초 뒤 해지 후보.
     released_at: BTreeMap<Symbol, KstTime>,
     /// 지금 실시간으로 받기로 허락된 종목. 계획이 바뀌어도 함부로 빼지 않는다.
     admitted: BTreeSet<Symbol>,
+    /// 연결마다 관심종목의 줄 번호(0이 맨 위).
+    watch_rows: BTreeMap<ConnId, BTreeMap<Symbol, usize>>,
 }
 
 pub const RELEASE_GRACE_SECS: i64 = 30;
@@ -943,7 +963,7 @@ pub const REALTIME_LIMIT: usize = 200;
 pub struct Plan {
     /// 키움에 REG 할 집합. 크기 ≤ 200.
     pub realtime: BTreeSet<Symbol>,
-    /// 한도를 넘어 받을 수 없는 칸·알림 보유자. 브라우저와 알림 목록에 알린다.
+    /// 보유자가 있는데 자리를 받지 못한 종목의 보유자 전부. 칸은 sub_error, 관심종목은 watch_limited로 알린다.
     pub rejected: BTreeSet<Holder>,
 }
 
@@ -951,8 +971,12 @@ impl SubscriptionManager {
     /// 30초 유예 중인 종목이면 유예를 취소한다.
     pub fn hold(&mut self, symbol: Symbol, h: Holder);
     pub fn release(&mut self, symbol: Symbol, h: &Holder, now: KstTime);
-    /// 연결이 끊긴 브라우저의 모든 구독을 놓는다.
+    /// 그 연결의 관심종목을 통째로 바꾼다. 위에서부터, 중복 없음. 빠진 줄은 release처럼 30초 유예한다.
+    pub fn set_watch(&mut self, conn: ConnId, symbols: Vec<Symbol>, now: KstTime);
+    /// 연결이 끊긴 브라우저의 모든 구독과 관심종목을 놓는다.
     pub fn release_conn(&mut self, conn: ConnId, now: KstTime);
+    /// 이 종목을 관심종목에 둔 연결들. 체결의 현재가를 이 연결들에 보낸다.
+    pub fn watchers(&self, symbol: Symbol) -> impl Iterator<Item = ConnId>;
     /// 같은 상태와 now면 언제나 같은 계획. admitted를 갱신한다.
     pub fn plan(&mut self, now: KstTime) -> Plan;
 }
@@ -960,17 +984,19 @@ impl SubscriptionManager {
 
 `plan`의 규칙:
 
-0. **지수 몫**: 0J 지수도 200에 든다. 그리고 지수는 ka10095로 조회할 수 없어 넘쳐도 1분 조회로 돌릴 수 없다. 그래서 누가 잡았든(관심종목만이라도) 지수는 칸과 같은 우선순위로 받는다. 종목이 쓸 수 있는 자리는 `200 − 받는 지수 수`다. v1의 지수는 코스피·코스닥 둘뿐이라 종목 자리는 198 이상이다.
-1. **유지**: `admitted`에 있는 종목 중 보유자가 있거나 30초 유예 중인 종목은 그대로 둔다. 새 종목이 들어온다고 칸·알림이 잡은 종목을 밀어내지 않는다.
+- 0J 지수도 200에 든다. 지수에 따로 몫을 두지 않는다. 지수도 잡은 보유자의 순위를 따른다. (예전 규칙 "넘친 지수는 1분 조회로 돌릴 수 없으니 칸 순위로 받는다"는 #66에서 지웠다. 이제 넘친 종목은 주식도 조회하지 않는다.)
+
+1. **유지**: `admitted`에 있는 종목 중 보유자가 있거나 30초 유예 중인 종목은 그대로 둔다. 칸이 잡은 종목은 어떤 후보에게도 밀리지 않는다.
 2. **빼기**: 보유자가 없고 30초가 지난 종목은 `admitted`에서 뺀다.
-3. **새로 받기**: `admitted`에 없는 후보를 우선순위 순서로 넣는다. 우선순위는 칸 > 알림 > 관심종목만 잡은 종목이다. 같은 우선순위 안에서는 보유자가 생긴 시각이 이른 순서다.
-4. **자리가 없을 때**: 새 후보가 칸이나 알림이면 자리를 만든다. 먼저 30초 유예 중인 종목을 뺀다. 그래도 없으면 관심종목만 잡은 종목을 뺀다. 둘 다 없으면 그 보유자는 `rejected`다.
-5. (#39) 관심종목만 잡았는데 실시간에 못 든 종목의 처리. 실시간은 WebSocket으로만 받고 갱신용 REST 조회는 하지 않는다(2026-11-09 사용자 결정). 이 규칙은 #39가 정한다.
-6. **회복**: 자리가 나면 `rejected`였던 보유자를 3번 규칙으로 다시 넣는다. 들어가면 알린다. 칸이면 같은 `sub`로 `subscribed`를 다시 보낸다. 알림이면 `Alert.warning`을 `null`로 되돌린다.
+3. **새로 받기**: `admitted`에 없는 후보를 `Rank` 순서로 넣는다. 칸 > (알림, #8) > 관심종목. 칸끼리는 먼저 잡은 순서, 관심종목끼리는 목록의 위부터다. 연결이 여럿이면 줄 번호끼리 비교한다.
+4. **자리가 없을 때**: 먼저 30초 유예 중인 가장 오래된 종목을 뺀다. 없으면 **관심종목만 잡은 종목 가운데 가장 뒤 순위**가 후보보다 뒤일 때 그것을 유예 없이 뺀다. 둘 다 안 되면 후보의 보유자는 `rejected`다. 그래서 칸이 관심종목만 잡은 종목의 자리를 가져가고, 관심종목끼리는 결국 목록 위부터 남은 자리만큼 받는다. 목록 순서를 바꿔 아래 종목을 위로 올리면 맨 아래의 실시간 종목이 자리를 내준다.
+5. **자리를 못 받은 관심종목**: 실시간은 WebSocket으로만 받는다. 브라우저는 그 줄의 처음 REST 값을 그대로 두고 "실시간 아님"을 보인다(frontend.md §2.1). 다시 조회하지 않는다.
+6. **회복**: 자리가 나면 `rejected`였던 보유자를 3번 규칙으로 다시 넣는다. 칸이면 같은 `sub`로 `subscribed`를 다시 보낸다. 관심종목이면 그 연결의 `watch_limited`에서 빠진다. 알림(#8)이면 `Alert.warning`을 `null`로 되돌린다.
 
-`MarketHub`는 보유자가 바뀔 때와 1초 타이머마다 `plan`을 다시 계산한다. `realtime`이 바뀌었으면 `KiwoomStream::set_desired`를 부른다.
+`MarketHub`는 칸 보유자가 바뀔 때와 1초 타이머마다 `plan`을 다시 계산한다. 관심종목(`watch`)은 보유자만 바꾸고 1초 타이머에서만 다시 계산한다. 순서를 연달아 바꿔도 REG·REMOVE는 1초에 한 번만 바뀐다. `realtime`이 바뀌었으면 `KiwoomStream::set_desired`를 부른다.
 
-- **#4의 범위**: 보유자는 칸뿐이다. 칸 넷과 비교 종목으로는 200에 닿기 어렵지만, 0~4·6번 규칙은 그대로 만들고 시나리오 시험으로 고정한다. 관심종목 실시간(`quotes` 메시지)은 #39, 알림 보유자는 #8이다. 그때까지 관심종목 현재가는 #3의 REST 조회 그대로다.
+- **종목 목록에 없는 코드**: 칸은 시드의 `unknown_symbol`로 걸러지지만 관심종목은 시드가 없다. 키움이 REG를 거절하면 세션이 끊기므로(§5.1 제어 실패 예산), 허브는 종목 목록(§6.6)에 있는 줄만 `set_watch`에 넘긴다. 목록이 아직 없거나 07:45에 바뀌면 1초 타이머가 다시 거른다.
+- **알림 보유자**(#8)는 아직 없다. `Rank`에 칸과 관심종목 사이로 들어간다.
 
 ### 5.4 현재 봉 집계(순수 함수, `domain::aggregate`)
 
@@ -1048,6 +1074,8 @@ impl HubHandle {
     pub fn subscribe(&self, conn: ConnId, sub: SubId, key: SeriesKey);
     pub fn unsubscribe(&self, conn: ConnId, sub: SubId);
     pub fn disconnect(&self, conn: ConnId);
+    /// 그 연결이 보는 관심종목 목록 전체(§5.3, #66).
+    pub fn watch(&self, conn: ConnId, symbols: Vec<Symbol>);
     pub async fn snapshot(&self, key: SeriesKey) -> Option<HubSnapshot>;
     /// 07:45 BarService::clear_all 바로 뒤에 부른다.
     pub fn daily_reset(&self);
@@ -1085,10 +1113,11 @@ pub struct HubSnapshot {
 - **`BarsPage.seq`**: 최신 페이지를 만들 때 HTTP 처리기가 **`bars.page`를 부르기 전에** 허브 스냅숏을 한 번 받는다. 그래서 페이지는 적어도 "seq까지 반영한 상태"다. 그 뒤의 메시지를 브라우저가 다시 적용해도 같은 `t`를 덮어쓸 뿐이다. 브라우저는 가진 봉보다 이른 `t`의 갱신을 버린다. 페이지에는 스냅숏의 `recent_confirmed` 중 페이지의 마지막 봉보다 늦은 것을 덧붙인다. `current`는 스냅숏의 현재 봉이 그렇게 합친 마지막 확정 봉보다 늦으면 그것, 아니면 키움 조회 값이 그보다 늦을 때 그것이다. 페이지를 기다리는 동안 분 경계를 넘으면 페이지가 스냅숏의 현재 봉 구간을 확정 봉으로 가져오기 때문이다. 이때도 `seq`는 스냅숏의 것이다. 페이지가 그 `seq` 뒤의 상태까지 담았을 뿐이라 그 뒤 메시지를 다시 적용해도 같은 `t`를 덮어쓰거나 이른 `t`로 버려진다. 더 큰 `seq`를 붙이면 페이지에 없는 메시지를 브라우저가 버릴 수 있다. `BarService`는 허브를 모른다(bars → hub → bars 순환을 만들지 않는다). 그 키에 실시간 집계기가 없을 때와 과거 페이지에서는 `seq`가 `null`이다.
 - **체결 하나의 처리 순서**
   1. 가격 알림 판단.
-  2. 그 종목의 각 `SeriesKey` 집계기에 `Aggregator::apply`. 거래소 필터: 통합 키는 모든 체결, KRX·NXT 키는 `exchange`가 맞는 체결만, 지수 키는 모두.
-  3. `Rolled`면 `confirmed`를 보내고 확정 봉을 `recent_confirmed`에 넣는다. `contiguous`면 `append_realtime`을 띄운다. `needs_verify`면 구간별 대조 항목을 등록한다(§5.4, 키움 값이 다르면 `reload { replaced }`). 지표 알림 판단 예약은 #8.
-  4. 그 키를 구독한 브라우저 구독들의 Outbox에 새 현재 봉을 둔다. 실제로 보내는 일은 연결마다의 쓰기 태스크가 한다(§8.4).
-- **1초 타이머**: `close_if_due`, 도래한 구간별 대조 시작, `plan` 다시 계산, 구독이 모두 빠지고 30초가 지난 키 지우기. 60초마다 `bars.evict_idle(허브가 가진 키)`. 보유자 상태의 주인이 허브라서 내리기 타이머도 허브가 쥔다.
+  2. (#66) `day`가 있으면 그 종목을 관심종목에 둔 연결마다 `Outbox::set_quote`로 현재가(§4.6)를 둔다. 통합(`_AL`) 체결을 거래소와 상관없이 모두 쓴다. 그래서 같은 종목의 **통합 칸이 실시간 집계 중일 때** 칸의 종가와 관심종목 현재가가 같다. KRX·NXT 칸은 그 거래소 체결만 집계하므로 다른 거래소 체결 뒤에는 다르다. 통합 칸도 시드를 받는 동안과 늦게 온 체결(`Ignored`)에서는 잠깐 다를 수 있다.
+  3. 그 종목의 각 `SeriesKey` 집계기에 `Aggregator::apply`. 거래소 필터: 통합 키는 모든 체결, KRX·NXT 키는 `exchange`가 맞는 체결만, 지수 키는 모두.
+  4. `Rolled`면 `confirmed`를 보내고 확정 봉을 `recent_confirmed`에 넣는다. `contiguous`면 `append_realtime`을 띄운다. `needs_verify`면 구간별 대조 항목을 등록한다(§5.4, 키움 값이 다르면 `reload { replaced }`). 지표 알림 판단 예약은 #8.
+  5. 그 키를 구독한 브라우저 구독들의 Outbox에 새 현재 봉을 둔다. 실제로 보내는 일은 연결마다의 쓰기 태스크가 한다(§8.4).
+- **1초 타이머**: `close_if_due`, 도래한 구간별 대조 시작, 종목 목록이 바뀌었으면 관심종목 다시 거르기, `plan` 다시 계산과 연결마다 `watch_limited` 갱신, 구독이 모두 빠지고 30초가 지난 키 지우기. 60초마다 `bars.evict_idle(허브가 가진 키)`. 보유자 상태의 주인이 허브라서 내리기 타이머도 허브가 쥔다.
 - 허브가 켜질 때를 끊긴 상태로 본다. 첫 `Live`가 장 시간 안이고 그때 키가 있으면 `gap_filled`로 다시 시드한다.
 
 ---
@@ -1354,7 +1383,7 @@ impl AppDb {
 
 ```sql
 -- 관심종목 목록(0003, #37). 0002까지의 목록 하나(watchlist 표)는 id 01900000-0000-7000-8000-000000000002, 이름 '기본'인 첫 목록이 되었다.
--- 목록 사이 순서는 watchlists.position, 목록 안 순서는 watchlist_items.position이다(실시간 우선순위 "목록의 위부터"가 읽는다, #39).
+-- 목록 사이 순서는 watchlists.position, 목록 안 순서는 watchlist_items.position이다(실시간 우선순위 "목록의 위부터"는 브라우저가 이 순서대로 보내는 `watch`를 쓴다, §5.3).
 CREATE TABLE watchlists (
   id       TEXT    PRIMARY KEY,                       -- 브라우저가 만든 UUID
   name     TEXT    NOT NULL UNIQUE,
@@ -1667,7 +1696,7 @@ interface BarsPage {
 
 ```ts
 // GET /api/quotes?symbols=005930,000660,IDX:001
-// 관심종목을 처음 그릴 때 쓴다. #4부터는 이후 갱신이 WebSocket quotes 메시지로 온다.
+// 종목이 관심종목 목록에 처음 들어올 때 한 번 쓴다. 이후 값은 WebSocket quotes로만 온다. 다시 조회하지 않는다(#66).
 type QuotesResponse = Quote[];
 
 interface Quote {
@@ -1685,7 +1714,7 @@ interface Quote {
 - 응답은 요청 순서다. 값을 얻지 못한 종목(없는 코드, 키움이 빈 행을 준 종목)은 빠진다. `unknown_symbol`을 내지 않는다.
 - **주식**: ka10095 통합(`_AL`) 시세다. 칸의 거래소와 상관없다. 100개씩 나눠 보낸다(101개는 1634로 거절, kiwoom.md §10.6). 등락은 §4.6 "현재가의 등락"을 따른다. `t`는 응답의 `dt`·`cntr_tm`(KST)이다.
 - **지수**: ka10095는 지수를 받지 않는다. 지수 일봉 최신 페이지(§6)에서 만든다. 현재가는 마지막 봉(진행 중 봉이 있으면 그것)의 종가, 기준가는 그 앞 확정 봉의 종가다. `volume`과 `t`는 마지막 봉의 거래량과 시작 시각이다. 봉이 둘 없으면 빠진다.
-- #3의 `source`는 언제나 `polled`다.
+- REST의 `source`는 언제나 `polled`다. WebSocket `quotes`는 `realtime`이다.
 
 #### 종목 기본 정보 (#35)
 
@@ -1977,12 +2006,15 @@ type ClientMessage =
   // (종목, 거래소, 봉 주기) 구독. sub는 브라우저가 정하는 연결 안에서 유일한 문자열.
   // 칸의 주 종목과 비교 종목 각각이 구독 하나다. venue 규칙은 GET /api/bars와 같다.
   | { type: "subscribe"; sub: string; symbol: SymbolCode; venue: Venue | null; period: Period }
-  | { type: "unsubscribe"; sub: string };
+  | { type: "unsubscribe"; sub: string }
+  // (#66) 지금 보이는 관심종목 목록 전체, 위에서부터. 받을 때마다 통째로 바꾼다. 빈 배열은 목록을 닫았다는 뜻이다.
+  | { type: "watch"; symbols: SymbolCode[] };
 ```
 
 - 같은 연결에서 같은 `(symbol, venue, period)`를 여러 `sub`로 구독해도 된다. 메시지는 `sub`마다 따로 온다. `seq`는 같은 `(symbol, venue, period)` 흐름의 번호라서 같은 값이 온다.
 - `venue`가 틀렸거나(지수에 거래소, NXT 불가 종목에 `nxt`) 종목 코드 형식이 틀리면 `sub_error { code: "bad_request" }`다.
 - 해지하거나 연결이 끊기면 서버는 그 종목을 30초 더 받은 뒤 해지한다. 그래서 칸의 종목을 바꿨다가 바로 돌아오거나 새로고침해도 다시 받기 시작하는 지연이 없다.
+- **`watch`**(#66): 순서가 곧 실시간 우선순위다(§5.3). 목록에서 빠진 종목과 목록을 닫은 종목(빈 배열)은 다른 곳에서 쓰지 않으면 30초 뒤 해지된다. 형식이 틀린 코드는 빼고, 같은 종목은 처음 자리만 남긴다. 종목 목록에 없는 코드는 받지 않는다(`quotes`도 `watch_limited`도 오지 않는다). 서버는 1초 타이머에서 자리를 다시 나눈다.
 
 #### 서버 → 브라우저
 
@@ -2010,10 +2042,14 @@ type ServerMessage =
   // from은 바뀐 범위의 시작이다. daily_reset이면 null이다. 참고용이고 브라우저는 쓰지 않아도 된다.
   | { type: "reload"; sub: string; seq: number; reason: "gap_filled" | "replaced" | "daily_reset"; from: UnixSeconds | null }
 
-  // 아래 셋은 #4에 없다. 브라우저는 모르는 type을 무시한다.
-  // (#39) 관심종목 현재가. 관심종목 전체에 대해 서버가 알아서 보낸다(구독 메시지 불필요).
-  // 종목 하나당 초당 최대 2회. 한 메시지에 여러 종목이 묶일 수 있다.
+  // (#66) 관심종목 현재가(source: "realtime"). watch로 보낸 종목 가운데 실시간으로 받는 종목의 체결마다.
+  // bar와 같은 100ms 묶음으로 바뀐 종목만, 종목마다 가장 새 값 하나다. 그래서 종목 하나당 초당 최대 10회다.
   | { type: "quotes"; quotes: Quote[] }
+  // (#66) 이 연결의 관심종목 가운데 실시간 한도로 받지 못하는 종목, 목록 순서. 바뀔 때만 온다. 브라우저는 통째로 바꾼다.
+  // 새 연결은 빈 상태에서 시작한다.
+  | { type: "watch_limited"; symbols: SymbolCode[] }
+
+  // 아래 둘은 아직 없다. 브라우저는 모르는 type을 무시한다.
   // (#8)
   | { type: "alert_fired"; event: AlertEvent }
   // (다른 탭 동기화, 아직 이슈 없음)
@@ -2054,11 +2090,13 @@ interface ConnectionStatus {
 /// 잠금은 넣기 한 번, 꺼내기 한 번만 쥔다.
 pub struct Outbox { /* Mutex<{ must: VecDeque<ServerMessage>, bars: HashMap<SubId, (u64, Bar)>, closed }> + Notify */ }
 impl Outbox {
-    /// hello, status, subscribed, sub_error, confirmed, reload. 256개가 차면 연결을 닫는다.
+    /// hello, status, subscribed, sub_error, confirmed, reload, watch_limited. 256개가 차면 연결을 닫는다.
     /// 넣을 때 그 구독의 기다리던 bar를 버린다.
     pub fn push(&self, msg: ServerMessage) -> Result<(), Closed>;
     /// 구독마다 최신 현재 봉 하나만 든다.
     pub fn set_bar(&self, sub: &SubId, seq: u64, bar: Bar);
+    /// 종목마다 최신 현재가 하나만 든다. 100ms마다 bar 뒤에 quotes 메시지 하나로 나간다(#66).
+    pub fn set_quote(&self, quote: Quote);
     /// must를 먼저, 그다음 bar. 쓰기 태스크는 must가 오면 바로, bar는 100ms마다 꺼낸다.
     pub fn take(&self, with_bars: bool) -> Batch;
 }
@@ -2291,7 +2329,7 @@ pub fn future_bar_starts(period: &str, last_start: f64, n: usize) -> Result<Vec<
 | 현재 봉 집계 | 손으로 쓴 체결 목록 → `aggregate` → 손으로 쓴 확정 봉 목록·현재 봉과 비교. 시드 경계(`Unknown`. `DayCum`은 #39), 타이머로 닫은 뒤의 늦은 체결, 체결 없는 분, 단일가 체결 한 건, 불완전한 봉의 `needs_verify` | `domain` | #4 |
 | 알림 판단 | 손으로 쓴 체결 목록으로 가격 알림: 아래에서 위로 넘어섬, 만들 때 이미 넘어 있음(안 울림), 반대편 갔다 다시 넘어섬(every), 기준 가격 없음 → 첫 체결은 기준만. 손으로 쓴 지표 값 쌍으로 교차: 같은 값, NaN | `domain` | #8 |
 | 지표 알림 기록 | `sqlx::test`(sqlite)로 같은 (알림, `bar_t`) 두 번 → 한 번만 보냄. `bar_source` 직렬화 이름이 `realtime`/`kiwoom` | `server::alert` | #8 |
-| 구독 관리자 | `hold`/`release`/`plan`을 시각과 함께 부르는 시나리오: 30초 유예, 유예 중 `hold`로 취소, 200 한도, 새 종목이 기존 칸·알림을 밀어내지 않음, 유예 종목이 먼저 밀려남(관심종목·`polled`는 #39), `release_conn`, 자리가 나면 `rejected` 회복 | `server::market`(순수 부분) | #4 |
+| 구독 관리자 | `hold`/`release`/`plan`을 시각과 함께 부르는 시나리오: 30초 유예, 유예 중 `hold`로 취소, 200 한도, 새 종목이 기존 칸·알림을 밀어내지 않음, 유예 종목이 먼저 밀려남, `release_conn`, 자리가 나면 `rejected` 회복. (#66) 관심종목은 목록 위부터, 순서를 바꾸면 자리가 옮겨 감, 칸이 관심종목만 잡은 종목을 밀어냄, 관심종목이 칸을 밀지 못함, 빠진 줄의 30초 유예 | `server::market`(순수 부분) | #4, #66 |
 | 복구 순서 | 가짜 전송 위의 `BarService`와 손으로 넣는 `StreamEvent`로: 시드 중 체결 버리기, 세대가 다른 응답 버리기, 장 시간 안의 끊김 → `Recovery`로 다시 시드 → `reload gap_filled`, 장 시간 밖은 그대로, 07:45 `daily_reset`, 불완전한 봉 대조 → `replaced`, 실패 뒤 재시도, 200 한도 거절과 회복, 구독 키는 10분 넘게 요청이 없어도 남고 실시간 봉이 붙음(이슈 #4 완료 조건) | `server::market::hub` | #4 |
 | 키움 WS 세션 | 가짜 키움 WS로: LOGIN → REG → Live, 0B·0J 파싱(체결량 0 버리기, 0J 체결량은 13 증가분), PING 메아리, type별 REMOVE, 1000 Bye 뒤 같은 토큰으로 다시 Live, 30초 침묵 → Down, 8005 → 한 번만 재발급, 두 번째 8005 → Halted, 발급 간격에 막히면 기다림. tungstenite trace 로그에 토큰이 없음 | `server::kiwoom::stream`, `server::app` | #4 |
 | 연결 쓰기 | `Outbox` 순서 불변식(무작위 200가지), 100ms 묶음, 256 넘치면 닫기. `/api/ws` 실제 소켓 왕복 | `server::market::outbox`, `server::http` | #4 |
