@@ -18,7 +18,11 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
+          targets: wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-pack
       - name: Clippy
         run: cargo clippy --all-targets -- -D warnings
       - uses: pnpm/action-setup@v6
@@ -40,7 +44,12 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-pack
       - name: Fetch Rust dependencies
         run: cargo fetch --locked
       - name: Test with loopback networking only
@@ -72,6 +81,13 @@ jobs:
         working-directory: web
     steps:
       - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-pack
       - uses: pnpm/action-setup@v6
         with:
           version: 11.6.0
@@ -111,7 +127,12 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-pack
       - run: cargo build --locked -p server -p fake-kiwoom
       - uses: pnpm/action-setup@v6
         with:
