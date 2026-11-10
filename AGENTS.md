@@ -27,11 +27,11 @@ Before editing documents, proposing document changes, or assigning document work
 
 ## The user's server
 
-The user's own server runs from the main checkout in the hc terminal `vally-server` on 127.0.0.1:8080, uses `data/vally.db` there, and holds the Kiwoom token. Do not stop, restart, or write to it or its DB. Start your own instances with temporary data dirs instead: `verify-vally` or the e2e harness.
+The user's own server runs from the main checkout in the hc terminal `vally-server` on 127.0.0.1:8080, uses `data/vally.db` there, and holds the Kiwoom token. Do not stop, restart, or write to it or its DB. Start your own instances with temporary data dirs instead: `verify-app` or the e2e harness.
 
 ## Verifying in the real app
 
-When a change alters what a user sees or does in the app, prove it in the real app with `.claude/skills/verify-vally` (fake Kiwoom, no network) and put the evidence path in your report. When the PR checked a real screen, copy the screenshots that prove it into `docs/verification/issue-<n>/`.
+When a change alters what a user sees or does in the app, prove it in the real app with `.claude/skills/verify-app` (fake Kiwoom, no network) and put the evidence path in your report. When the PR checked a real screen, copy the screenshots that prove it into `docs/verification/issue-<n>/`.
 
 ## Public repository rules (ADR 0008)
 

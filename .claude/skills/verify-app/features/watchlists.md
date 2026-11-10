@@ -9,7 +9,7 @@
 ## How to get to it (user POV)
 Right panel, tab `관심종목` (`complementary "관심종목"`). `관심종목에 넣기` (+) opens dialog `관심종목에 넣을 종목 검색`. The list menu is the button named `관심종목 목록: <name>`.
 
-## Driving it with verify-vally
+## Driving it with verify-app
 Click `관심종목에 넣기`, fill the dialog's `종목 검색` combobox, click the option with the code. Proof: `li[data-code="<code>"]` appears in the panel, `ctx.api("/api/watchlists")` contains the code, and both survive `page.reload()`. Worked paths: `web/e2e/watchlists.spec.ts`.
 
 ## Gotchas

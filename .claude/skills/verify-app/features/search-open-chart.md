@@ -8,7 +8,7 @@
 ## How to get to it (user POV)
 Top bar search box (title `종목 검색 (/ 또는 Ctrl+K)`), or press `/` or `Ctrl+K`. A dialog `종목 검색` opens with a combobox of the same name; results are `option`s showing the code.
 
-## Driving it with verify-vally
+## Driving it with verify-app
 `run.sh journeys/search-open-chart.mjs`. Proof: cell 1's `aria-label` becomes `칸 1: 에코프로 통합 일`, `[data-bar-count]` is `500`, a `PUT /api/layouts/…` succeeds, `GET /api/layouts/01900000-0000-7000-8000-000000000001` contains `086520`, and both survive `page.reload()`. Older pages: see `dragTowardPast` in `web/e2e/harness.ts`.
 
 ## Gotchas

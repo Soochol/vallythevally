@@ -28,7 +28,7 @@
 - **증상**: `playwright test`가 모든 테스트에서 `Chromium sandboxing failed!`, `No usable sandbox!`로 실패한다.
 - **원인(2026-11-09 확인)**
   - 이 PC는 `kernel.apparmor_restrict_unprivileged_userns = 1`이다. AppArmor 프로필이 `userns`를 허락하지 않은 프로그램은 사용자 이름공간을 만들지 못하고, Chromium 샌드박스는 사용자 이름공간이 있어야 뜬다.
-  - e2e는 `chromiumSandbox: true`로 Chromium을 띄운다(PR #32 R2). hc 터미널 안에서는 통과한다. herdr-core가 `userns`를 허락하는 AppArmor 프로필 아래에서 돌고, 그 자식인 Chromium이 이 프로필을 물려받기 때문이다(2026-11-10 verify-vally로 확인. 예전 Orca도 `orca-ide (unconfined)` 프로필로 같은 방식이었다). 일반 터미널에는 이런 프로필이 없다.
+  - e2e는 `chromiumSandbox: true`로 Chromium을 띄운다(PR #32 R2). hc 터미널 안에서는 통과한다. herdr-core가 `userns`를 허락하는 AppArmor 프로필 아래에서 돌고, 그 자식인 Chromium이 이 프로필을 물려받기 때문이다(2026-11-10 verify-app로 확인. 예전 Orca도 `orca-ide (unconfined)` 프로필로 같은 방식이었다). 일반 터미널에는 이런 프로필이 없다.
 - **대처**: CI와 같은 프로필을 사용자가 직접 깐다. `web/`에서 `./scripts/allow-chromium-sandbox.sh`(sudo를 묻는다). 설치된 Playwright headless shell 하나에만 `userns`를 허락한다. Playwright를 올려 브라우저 경로가 바뀌면 다시 실행한다.
   - 이 프로필을 깔아도 `check.sh`는 일반 터미널에서 기본 설정으로 돌지 않는다. 시험을 감싸는 `scripts/offline.sh`가 이름공간을 만들지 못한다. 아래 절의 명시적 해제는 이 네트워크 차단만 해제하며, Chromium 샌드박스 설정은 별도로 필요하다.
 - **하지 말 것**: 샌드박스를 끄거나(`chromiumSandbox: false`) `sysctl`로 PC 전체의 제한을 풀지 않는다.

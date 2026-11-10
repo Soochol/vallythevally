@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Launch a throwaway fake-Kiwoom + vally-server pair, drive one journey in Chromium, keep the evidence, tear down.
-#   .claude/skills/verify-vally/scripts/run.sh <journey.mjs> [--clock YYYYMMDDHHMMSS] [--name label]
+#   .claude/skills/verify-app/scripts/run.sh <journey.mjs> [--clock YYYYMMDDHHMMSS] [--name label]
 # Runs itself inside scripts/offline.sh (loopback-only network namespace), so nothing can reach the real Kiwoom.
 # Evidence: $VERIFY_OUT (default ~/.vally/state/vallythevally/verify/<stamp>-<name>/), never removed by cleanup.
 set -euo pipefail
@@ -27,7 +27,7 @@ done
 bin=${VERIFY_BIN_DIR:-$repo/target/debug}
 out=${VERIFY_OUT:-$HOME/.vally/state/vallythevally/verify/$(date +%Y%m%d-%H%M%S)-$name}
 mkdir -p "$out"
-data=$(mktemp -d "${TMPDIR:-/tmp}/verify-vally-XXXXXX")
+data=$(mktemp -d "${TMPDIR:-/tmp}/verify-app-XXXXXX")
 chmod 700 "$data"
 pids=()
 

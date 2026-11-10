@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Read-only: is this checkout worth driving? Prints ok/FAIL per check with the fix. Exit 1 on any FAIL.
-#   .claude/skills/verify-vally/scripts/doctor.sh
+#   .claude/skills/verify-app/scripts/doctor.sh
 set -uo pipefail
 repo=$(cd "$(dirname "$0")/../../../.." && pwd)
 bin=${VERIFY_BIN_DIR:-$repo/target/debug}
