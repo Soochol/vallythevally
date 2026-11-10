@@ -1,12 +1,16 @@
 import { afterEach, expect, test, vi } from "vitest";
 import {
+  addCompare,
   addIndicator,
   type ChartSettings,
   DEFAULT_CHART_SETTINGS,
   movePanel,
   parseChartSettings,
+  compareRefusal,
+  removeCompare,
   removeIndicator,
   setPanelStretches,
+  shownScale,
   updateIndicator,
 } from "./settings";
 
@@ -60,8 +64,10 @@ test.each([
   ["문자열", "candle"],
   ["다른 버전", { ...rsi, v: 3 }],
   ["모르는 봉 모양", { ...rsi, style: "heikin" }],
-  ["모르는 축", { ...rsi, scale: "percent" }],
+  ["모르는 축", { ...rsi, scale: "pct" }],
   ["비교 종목이 문자열 배열이 아님", { ...rsi, compare: [5930] }],
+  ["비교 종목 4개", { ...rsi, compare: ["005930", "000660", "035420", "IDX:001"] }],
+  ["같은 비교 종목 둘", { ...rsi, compare: ["000660", "000660"] }],
   ["빠진 키", { v: 2, style: "candle", scale: "normal" }],
   ["v1인데 지표가 있음", { v: 1, style: "candle", scale: "normal", indicators: [rsi.indicators[0]], compare: [], panels: [] }],
   ["모르는 지표 종류", ind({ spec: { kind: "wma", period: 5 } })],
@@ -117,4 +123,36 @@ test("패널 순서와 높이 비율", () => {
   expect(setPanelStretches(two, [0.4, 0.6]).panels.map((p) => p.stretch)).toEqual([0.4, 0.6]);
   expect(setPanelStretches(two, [0.3, 0.5])).toBe(two);
   expect(setPanelStretches(two, [0.3])).toBe(two);
+});
+
+test("% 축은 저장할 수 있고, v2 그대로 읽는다", () => {
+  const pct = { ...rsi, scale: "percent" };
+  expect(parseChartSettings(pct)).toEqual(pct);
+});
+
+test("비교 종목이 있으면 저장된 축과 상관없이 %로 그리고, 모두 지우면 저장된 축으로 돌아간다", () => {
+  expect(shownScale({ scale: "log", compare: ["000660"] })).toBe("percent");
+  expect(shownScale({ scale: "log", compare: [] })).toBe("log");
+  expect(shownScale({ scale: "percent", compare: [] })).toBe("percent");
+  expect(removeCompare({ ...rsi, compare: ["000660"] }, "000660")).toMatchObject({ scale: "log", compare: [] });
+});
+
+test("비교 종목은 3개까지, 서로 다르게, 주 종목이 아닌 것만 더한다", () => {
+  const one = addCompare({ ...rsi, compare: [] }, "000660", "005930");
+  expect(one.compare).toEqual(["000660"]);
+  const three = addCompare(addCompare(one, "035420", "005930"), "IDX:001", "005930");
+  expect(three.compare).toEqual(["000660", "035420", "IDX:001"]);
+  expect(parseChartSettings(three)).toEqual(three);
+  expect(compareRefusal(three, "051910", "005930")).toBe("full");
+  expect(addCompare(three, "051910", "005930")).toBe(three);
+  expect(compareRefusal(one, "000660", "005930")).toBe("dup");
+  expect(addCompare(one, "000660", "005930")).toBe(one);
+  expect(compareRefusal(one, "005930", "005930")).toBe("main");
+  expect(compareRefusal(one, "035420", "005930")).toBeNull();
+});
+
+test("비교 종목을 빼면 나머지 순서를 지키고, 없는 종목이면 같은 객체를 돌려준다", () => {
+  const s = { ...rsi, compare: ["000660", "035420", "IDX:001"] };
+  expect(removeCompare(s, "035420").compare).toEqual(["000660", "IDX:001"]);
+  expect(removeCompare(s, "051910")).toBe(s);
 });
