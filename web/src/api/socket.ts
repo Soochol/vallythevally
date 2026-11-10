@@ -2,11 +2,15 @@ import type { SeriesKey } from "./bars";
 import type { ClientMessage } from "./generated/ClientMessage";
 import type { ConnectionStatus } from "./generated/ConnectionStatus";
 import type { ServerMessage } from "./generated/ServerMessage";
+import type { SymbolCode } from "./generated/SymbolCode";
 
 /** 구독 하나에 오는 메시지. `resync`는 서버와 다시 연결되어 칸을 처음부터 만들어야 한다는 뜻이다(backend.md §8.3의 6). */
 export type SubEvent =
   | Extract<ServerMessage, { type: "subscribed" | "bar" | "confirmed" | "reload" | "sub_error" }>
   | { type: "resync" };
+
+/** 관심종목 현재가 쪽 메시지. `resync`는 새 연결이라 서버의 `watch_limited`가 빈 상태부터 다시 온다는 뜻이다. */
+export type QuoteEvent = Extract<ServerMessage, { type: "quotes" | "watch_limited" }> | { type: "resync" };
 
 /** 브라우저↔서버 연결. `open`은 `hello`를 받은 뒤다. */
 export type Connection = { socket: "connecting" | "closed" } | { socket: "open"; status: ConnectionStatus };
@@ -15,6 +19,9 @@ export interface MarketSocketLike {
   subscribe(key: SeriesKey, handler: (m: SubEvent) => void): () => void;
   /** 지금 연결 상태로 한 번 부르고, 바뀔 때마다 부른다. */
   watch(listener: (c: Connection) => void): () => void;
+  /** 지금 보이는 관심종목 전체, 위에서부터. 마지막 것이 비어 있지 않으면 새 `hello`마다 다시 보낸다. */
+  setWatch(symbols: readonly SymbolCode[]): void;
+  onQuotes(handler: (e: QuoteEvent) => void): () => void;
 }
 
 export interface Transport {
@@ -70,6 +77,8 @@ export class MarketSocket implements MarketSocketLike {
   private connection: Connection = { socket: "connecting" };
   private readonly subs = new Map<string, Subscription>();
   private readonly watchers = new Set<(c: Connection) => void>();
+  private watchSymbols: SymbolCode[] = [];
+  private readonly quoteHandlers = new Set<(e: QuoteEvent) => void>();
 
   constructor(private readonly opts: { url: () => string; connect?: Connect }) {}
 
@@ -102,6 +111,16 @@ export class MarketSocket implements MarketSocketLike {
     this.watchers.add(listener);
     listener(this.connection);
     return () => this.watchers.delete(listener);
+  }
+
+  setWatch(symbols: readonly SymbolCode[]): void {
+    this.watchSymbols = [...symbols];
+    if (this.connection.socket === "open") this.sendWatch();
+  }
+
+  onQuotes(handler: (e: QuoteEvent) => void): () => void {
+    this.quoteHandlers.add(handler);
+    return () => this.quoteHandlers.delete(handler);
   }
 
   private connect(): void {
@@ -142,6 +161,9 @@ export class MarketSocket implements MarketSocketLike {
       case "reload":
         this.subs.get(m.sub)?.handler(m);
         return;
+      case "quotes":
+      case "watch_limited":
+        return this.emitQuotes(m);
       default:
         return;
     }
@@ -153,6 +175,16 @@ export class MarketSocket implements MarketSocketLike {
     const subs = [...this.subs];
     for (const [sub, { key }] of subs) this.sendSubscribe(sub, key);
     for (const [sub, { handler }] of subs) if (this.subs.has(sub)) handler({ type: "resync" });
+    if (this.watchSymbols.length > 0) this.sendWatch();
+    this.emitQuotes({ type: "resync" });
+  }
+
+  private sendWatch(): void {
+    this.send({ type: "watch", symbols: this.watchSymbols });
+  }
+
+  private emitQuotes(e: QuoteEvent): void {
+    for (const h of this.quoteHandlers) h(e);
   }
 
   private sendSubscribe(sub: string, key: SeriesKey): void {

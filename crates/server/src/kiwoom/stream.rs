@@ -32,6 +32,16 @@ pub struct RealTick {
     pub qty: Volume,
     /// 지수(0J)와 `9081`이 없거나 모르는 값이면 None.
     pub exchange: Option<Exchange>,
+    /// 프레임에 11·13이 없거나 읽지 못하면 None.
+    pub day: Option<DayTotals>,
+}
+
+/// 체결 프레임에 같이 오는 그날 값(kiwoom.md §11.3, §11.5).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DayTotals {
+    /// 11 전일대비. 부호가 곧 값이다.
+    pub change_centi: i64,
+    pub cumulative: Volume,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -516,10 +526,11 @@ impl Session {
         for item in items {
             let tick = match item {
                 Ok(RealItem::Trade(tick)) => tick,
-                Ok(RealItem::Index { index, hhmmss, price, cumulative }) => {
+                Ok(RealItem::Index { index, hhmmss, price, cumulative, change_centi }) => {
                     let before = conn.index_cumulative.insert(index, cumulative);
                     let qty = before.map_or(0, |b| cumulative.saturating_sub(b));
-                    RealTick { symbol: Symbol::Index(index), hhmmss, price, qty: Volume(qty), exchange: None }
+                    let day = change_centi.map(|change_centi| DayTotals { change_centi, cumulative: Volume(cumulative) });
+                    RealTick { symbol: Symbol::Index(index), hhmmss, price, qty: Volume(qty), exchange: None, day }
                 }
                 Ok(RealItem::AuctionOnly) => {
                     self.dropped.auction_only += 1;

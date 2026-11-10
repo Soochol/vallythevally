@@ -1,10 +1,10 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
 import type { Quote } from "../../api/generated/Quote";
 import type { SymbolCode } from "../../api/generated/SymbolCode";
 import type { Watchlist } from "../../api/generated/Watchlist";
 import { ApiRequestError } from "../../api/http";
-import { useQuotes, useSymbolInfo } from "../../api/queries";
+import { useSymbolInfo } from "../../api/queries";
 import { direction, formatChange, formatPercent, formatPrice, formatVolume } from "../../lib/format";
 import { DESKTOP_QUERY, useMediaQuery } from "../../lib/media";
 import { isIndexCode, symbolSub } from "../../lib/symbol";
@@ -19,6 +19,8 @@ import {
   type WatchColumn,
 } from "../../lib/watchlist";
 import { useCell, useLayoutStore } from "../../stores/layout";
+import type { WatchQuote } from "../../stores/quoteBook";
+import { quoteBook } from "../../stores/realtime";
 import { useSelectionStore } from "../../stores/selection";
 import { useUiStore } from "../../stores/ui";
 import { useActiveWatchlist, useWatchlistStore } from "../../stores/watchlist";
@@ -224,12 +226,15 @@ function WatchList({ variant, editing }: { variant: WatchVariant; editing: boole
   const symbols = list.symbols;
   const chosen = useUiStore((s) => s.prefs.watchColumns);
   const columns = editing ? [] : chosen;
-  const quotes = useQuotes(symbols).data;
+  const desktop = useMediaQuery(DESKTOP_QUERY);
+  const onScreen = variant === "desktop" ? desktop : !desktop;
   const [dragOver, setDragOver] = useState<number | null>(null);
   const [dragged, setDragged] = useState<SymbolCode | null>(null);
   const ul = useRef<HTMLUListElement>(null);
   const [focusCode, setFocusCode] = useState<SymbolCode | null>(null);
   const template = { gridTemplateColumns: columnTemplate(variant, columns) };
+
+  useEffect(() => (onScreen ? quoteBook.lease(symbols) : undefined), [onScreen, symbols]);
 
   useEffect(() => {
     if (focusCode === null) return;
@@ -256,7 +261,6 @@ function WatchList({ variant, editing }: { variant: WatchVariant; editing: boole
             code={code}
             index={i}
             last={i === symbols.length - 1}
-            quote={quotes?.get(code)}
             columns={columns}
             template={template}
             variant={variant}
@@ -288,7 +292,6 @@ interface RowProps {
   code: SymbolCode;
   index: number;
   last: boolean;
-  quote: Quote | undefined;
   columns: readonly WatchColumn[];
   template: React.CSSProperties;
   variant: WatchVariant;
@@ -313,7 +316,28 @@ function cellText(column: WatchColumn, quote: Quote, isIndex: boolean): string {
 
 const SIGNED: ReadonlySet<WatchColumn> = new Set(["change", "changeRate"]);
 
-function WatchRow({ list, code, index, last, quote, columns, template, variant, editing, dropBefore, onMoved, drag }: RowProps) {
+function useWatchQuote(code: SymbolCode): WatchQuote {
+  const subscribe = useCallback((listener: () => void) => quoteBook.subscribe(code, listener), [code]);
+  return useSyncExternalStore(subscribe, () => quoteBook.get(code));
+}
+
+function QuoteCell({ column, quote, limited, isIndex }: { column: WatchColumn; quote: Quote | undefined; limited: boolean; isIndex: boolean }) {
+  if (column === "price" && limited)
+    return (
+      <span className="text-right text-text-3">
+        {quote && <span className="block">{cellText(column, quote, isIndex)}</span>}
+        <small className="whitespace-nowrap text-xs">실시간 아님</small>
+      </span>
+    );
+  if (!quote) return <span className="text-right text-text-3">—</span>;
+  return (
+    <span className={`text-right ${SIGNED.has(column) ? `text-s font-[550] ${DIR_CLASS[direction(quote.change)]}` : ""}`}>
+      {cellText(column, quote, isIndex)}
+    </span>
+  );
+}
+
+function WatchRow({ list, code, index, last, columns, template, variant, editing, dropBefore, onMoved, drag }: RowProps) {
   const slot = useSelectionStore((s) => s.activeSlot);
   const active = useCell(slot).symbol === code;
   const infoQuery = useSymbolInfo(code);
@@ -321,8 +345,10 @@ function WatchRow({ list, code, index, last, quote, columns, template, variant, 
   const unknown = infoQuery.error instanceof ApiRequestError && infoQuery.error.code === "unknown_symbol";
   const isIndex = isIndexCode(code);
   const name = info?.name ?? code;
+  const { quote, limited } = useWatchQuote(code);
   const { remove, moveBy } = useWatchlistStore.getState();
   const values = quote ? columns.map((c) => cellText(c, quote, isIndex)).join(" ") : "";
+  const label = unknown ? [name, "찾을 수 없음"] : [name, values, limited ? "실시간 아님" : ""];
 
   const open = () => {
     useLayoutStore.getState().setSymbol(slot, info ?? { code, nxtEnabled: false });
@@ -359,7 +385,7 @@ function WatchRow({ list, code, index, last, quote, columns, template, variant, 
         type="button"
         data-main
         aria-current={active || undefined}
-        aria-label={`${name} ${unknown ? "찾을 수 없음" : values}`.trim()}
+        aria-label={label.filter((part) => part !== "").join(" ")}
         aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown"
         onClick={editing ? undefined : open}
         onKeyDown={(e) => {
@@ -383,17 +409,7 @@ function WatchRow({ list, code, index, last, quote, columns, template, variant, 
             </span>
           )
         ) : (
-          columns.map((c) =>
-            quote ? (
-              <span key={c} className={`text-right ${SIGNED.has(c) ? `text-s font-[550] ${DIR_CLASS[direction(quote.change)]}` : ""}`}>
-                {cellText(c, quote, isIndex)}
-              </span>
-            ) : (
-              <span key={c} className="text-right text-text-3">
-                —
-              </span>
-            ),
-          )
+          columns.map((c) => <QuoteCell key={c} column={c} quote={quote} limited={limited} isIndex={isIndex} />)
         )}
       </button>
       {variant === "desktop" ? (

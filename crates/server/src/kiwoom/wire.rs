@@ -9,7 +9,7 @@ use serde_json::{Value, json};
 
 use super::api::kiwoom_stock_code;
 use super::error::{WsRejection, judge_ws_ack};
-use super::stream::{Exchange, RealTick};
+use super::stream::{DayTotals, Exchange, RealTick};
 use crate::config::Secret;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -423,7 +423,7 @@ pub enum RealItem {
     /// 0B `15`가 0: 동시호가에만 나온다(kiwoom.md 11.3). 체결이 아니라 버린다.
     AuctionOnly,
     /// 0J. 체결량은 `13`(누적거래량)의 증가분이라 세션이 앞 프레임과 비교해 정한다.
-    Index { index: IndexCode, hhmmss: TimeOfDay, price: Price, cumulative: u64 },
+    Index { index: IndexCode, hhmmss: TimeOfDay, price: Price, cumulative: u64, change_centi: Option<i64> },
     OtherType(String),
 }
 
@@ -466,11 +466,16 @@ fn parse_real_item(entry: &Value) -> Result<RealItem, WireError> {
                 Some("NXT") => Some(Exchange::Nxt),
                 _ => None,
             };
-            Ok(RealItem::Trade(RealTick { symbol: Symbol::Stock(code), hhmmss: hhmmss(field("20")?)?, price: stock_price(field("10")?)?, qty: Volume(qty), exchange }))
+            let day = (|| {
+                let change_centi = signed(field("11").ok()?).ok()?.checked_mul(100)?;
+                Some(DayTotals { change_centi, cumulative: Volume(unsigned(field("13").ok()?).ok()?) })
+            })();
+            Ok(RealItem::Trade(RealTick { symbol: Symbol::Stock(code), hhmmss: hhmmss(field("20")?)?, price: stock_price(field("10")?)?, qty: Volume(qty), exchange, day }))
         }
         "0J" => {
             let index = IndexCode::parse(item).map_err(|e| WireError(format!("{e}: {item:?}")))?;
-            Ok(RealItem::Index { index, hhmmss: hhmmss(field("20")?)?, price: index_level(field("10")?)?, cumulative: unsigned(field("13")?)? })
+            let change_centi = field("11").ok().and_then(signed_level_centi);
+            Ok(RealItem::Index { index, hhmmss: hhmmss(field("20")?)?, price: index_level(field("10")?)?, cumulative: unsigned(field("13")?)?, change_centi })
         }
         other => Ok(RealItem::OtherType(other.to_owned())),
     }
@@ -487,16 +492,29 @@ fn hhmmss(s: &str) -> Result<TimeOfDay, WireError> {
 
 /// 0J 지수는 소수 2자리 문자열이고 앞에 등락 부호가 붙는다(kiwoom.md 11.5). REST 지수(100배 정수)와 다르다.
 fn index_level(s: &str) -> Result<Price, WireError> {
-    let bad = || WireError(format!("지수가 소수 2자리 이하의 양수가 아닙니다: {s:?}"));
-    let abs = s.trim_start_matches(['+', '-']);
+    level_centi(s.trim_start_matches(['+', '-']))
+        .and_then(Price::from_centi)
+        .ok_or_else(|| WireError(format!("지수가 소수 2자리 이하의 양수가 아닙니다: {s:?}")))
+}
+
+fn signed_level_centi(s: &str) -> Option<i64> {
+    let (negative, abs) = match s.strip_prefix('-') {
+        Some(abs) => (true, abs),
+        None => (false, s.strip_prefix('+').unwrap_or(s)),
+    };
+    let centi = i64::try_from(level_centi(abs)?).ok()?;
+    Some(if negative { -centi } else { centi })
+}
+
+fn level_centi(abs: &str) -> Option<u64> {
     let (int, frac) = abs.split_once('.').unwrap_or((abs, ""));
     let digits = |x: &str| x.bytes().all(|b| b.is_ascii_digit());
     if int.is_empty() || frac.len() > 2 || !digits(int) || !digits(frac) {
-        return Err(bad());
+        return None;
     }
-    let int: u64 = int.parse().map_err(|_| bad())?;
+    let int: u64 = int.parse().ok()?;
     let frac: u64 = format!("{frac:0<2}").parse().expect("두 자리 숫자");
-    int.checked_mul(100).and_then(|c| c.checked_add(frac)).and_then(Price::from_centi).ok_or_else(bad)
+    int.checked_mul(100)?.checked_add(frac)
 }
 
 /// REG·REMOVE의 `item`. 주식은 거래소와 상관없이 `_AL` 하나만 받는다(ADR 0007).
@@ -863,11 +881,30 @@ mod tests {
     #[test]
     fn real_0b_is_a_combined_trade_with_abs_price_and_qty() {
         let code = StockCode::parse("005930").unwrap();
-        let tick = |exchange| RealTick { symbol: Symbol::Stock(code), hhmmss: TimeOfDay::hms(9, 30, 1).unwrap(), price: Price::from_centi(7_120_000).unwrap(), qty: Volume(15), exchange };
+        let day = Some(DayTotals { change_centi: 0, cumulative: Volume(100) });
+        let tick = |exchange| RealTick { symbol: Symbol::Stock(code), hhmmss: TimeOfDay::hms(9, 30, 1).unwrap(), price: Price::from_centi(7_120_000).unwrap(), qty: Volume(15), exchange, day };
         assert_eq!(one("0B", "005930_AL", fake_kiwoom::trade_0b("093001", -71_200, -15, 100, "NXT")), Ok(RealItem::Trade(tick(Some(Exchange::Nxt)))));
         assert_eq!(one("0B", "005930_AL", fake_kiwoom::trade_0b("093001", 71_200, 15, 100, "KRX")), Ok(RealItem::Trade(tick(Some(Exchange::Krx)))));
         assert_eq!(one("0B", "005930_AL", fake_kiwoom::trade_0b("093001", 71_200, 15, 100, "1")), Ok(RealItem::Trade(tick(None))));
         assert_eq!(one("0B", "005930_AL", fake_kiwoom::trade_0b("093001", 71_200, 0, 100, "KRX")), Ok(RealItem::AuctionOnly));
+    }
+
+    #[test]
+    fn real_0b_day_totals_are_the_signed_change_and_the_cumulative_volume() {
+        let day = |values: Value| match one("0B", "005930_AL", values) {
+            Ok(RealItem::Trade(tick)) => tick.day,
+            other => panic!("{other:?}"),
+        };
+        let mut v = fake_kiwoom::trade_0b("093001", -193_400, 15, 56_147_847, "KRX");
+        v["11"] = "-8100".into();
+        assert_eq!(day(v.clone()), Some(DayTotals { change_centi: -810_000, cumulative: Volume(56_147_847) }));
+        for (fid, bad) in [("11", "x"), ("13", "")] {
+            let mut broken = v.clone();
+            broken[fid] = bad.into();
+            assert_eq!(day(broken), None, "{fid}={bad:?}: 체결은 그대로 받고 그날 값만 없다");
+        }
+        v.as_object_mut().unwrap().remove("11");
+        assert_eq!(day(v), None);
     }
 
     #[test]
@@ -889,7 +926,12 @@ mod tests {
     fn real_0j_level_is_a_signed_decimal_and_volume_is_cumulative() {
         let index = IndexCode::KOSPI;
         let at = TimeOfDay::hms(10, 56, 2).unwrap();
-        assert_eq!(one("0J", "001", fake_kiwoom::tick_0j("105602", -505_969, 28_264)), Ok(RealItem::Index { index, hhmmss: at, price: Price::from_centi(505_969).unwrap(), cumulative: 28_264 }));
+        assert_eq!(one("0J", "001", fake_kiwoom::tick_0j("105602", -505_969, 28_264)), Ok(RealItem::Index { index, hhmmss: at, price: Price::from_centi(505_969).unwrap(), cumulative: 28_264, change_centi: None }));
+        let change = |s: &str| match one("0J", "150", json!({"20": "105602", "10": "-1327.93", "11": s, "13": "28264"})) {
+            Ok(RealItem::Index { change_centi, .. }) => change_centi,
+            other => panic!("{other:?}"),
+        };
+        assert_eq!((change("-43.69"), change("+0.5"), change("0.00"), change("x")), (Some(-4_369), Some(50), Some(0), None));
         let level = |s: &str| one("0J", "001", json!({"20": "105602", "10": s, "13": "1"})).map(|i| match i {
             RealItem::Index { price, .. } => price.centi(),
             other => panic!("{other:?}"),

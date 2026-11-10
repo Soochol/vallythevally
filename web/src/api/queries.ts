@@ -4,8 +4,6 @@ import type { Fundamentals } from "./generated/Fundamentals";
 import type { SymbolCode } from "./generated/SymbolCode";
 import type { SymbolInfo } from "./generated/SymbolInfo";
 import { getJson } from "./http";
-import { pollInterval } from "./retry";
-import { fetchQuotes } from "./userData";
 
 const SEARCH_DEBOUNCE_MS = 100;
 
@@ -46,18 +44,6 @@ export function useSymbolInfo(code: SymbolCode) {
 
 export function fetchSymbolInfo(code: SymbolCode, signal?: AbortSignal): Promise<SymbolInfo> {
   return getJson<SymbolInfo>(`/api/symbols/${encodeURIComponent(code)}`, signal);
-}
-
-const QUOTES_REFETCH_MS = 60_000;
-
-export function useQuotes(symbols: readonly SymbolCode[]) {
-  return useQuery({
-    queryKey: ["quotes", symbols.join(",")],
-    queryFn: async ({ signal }) => new Map((await fetchQuotes(symbols, signal)).map((q) => [q.symbol, q])),
-    enabled: symbols.length > 0,
-    placeholderData: keepPreviousData,
-    refetchInterval: (query) => pollInterval(query.state.error, QUOTES_REFETCH_MS),
-  });
 }
 
 const symbolInfoQuery = (code: SymbolCode) => ({

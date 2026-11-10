@@ -19,9 +19,3 @@ export function shouldRetry(failureCount: number, error: unknown, now = Date.now
 export function retryDelay(failureCount: number, error: unknown, now = Date.now()): number {
   return autoWaitMs(error, failureCount, now) ?? 0;
 }
-
-export function pollInterval(error: unknown, normalMs: number, now = Date.now()): number | false {
-  if (!(error instanceof ApiRequestError) || error.code === "network") return normalMs;
-  if (error.manualActionRequired || error.retryAt === null) return false;
-  return Math.max(normalMs, error.retryAt * 1000 - now);
-}

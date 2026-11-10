@@ -3,7 +3,8 @@ import type { SeriesKey } from "./bars";
 import type { ClientMessage } from "./generated/ClientMessage";
 import type { ConnectionStatus } from "./generated/ConnectionStatus";
 import type { ServerMessage } from "./generated/ServerMessage";
-import { type Connection, type Connect, MarketSocket, sameOriginWsUrl, type SubEvent, type TransportEvents } from "./socket";
+import type { Quote } from "./generated/Quote";
+import { type Connection, type Connect, MarketSocket, type QuoteEvent, sameOriginWsUrl, type SubEvent, type TransportEvents } from "./socket";
 
 const LIVE: ConnectionStatus = { realtime: "live", since: 1_000, backfilling: false };
 const key: SeriesKey = { symbol: "005930", venue: "combined", period: "1m" };
@@ -21,7 +22,7 @@ class FakeTransport {
   close() {
     this.closed = true;
   }
-  receive(m: ServerMessage | { type: "quotes"; quotes: [] }) {
+  receive(m: ServerMessage | { type: "data_changed" }) {
     this.on.message(JSON.stringify(m));
   }
   drop() {
@@ -78,7 +79,7 @@ describe("MarketSocket", () => {
     socket.subscribe({ ...key, period: "D" }, (m) => b.push(m));
     const barMsg: ServerMessage = { type: "bar", sub: "s2", seq: 1, bar: { t: 0, o: 1, h: 1, l: 1, c: 1, v: 1 } };
     last().receive(barMsg);
-    last().receive({ type: "quotes", quotes: [] });
+    last().receive({ type: "data_changed" });
     expect(a).toEqual([]);
     expect(b).toEqual([barMsg]);
   });
@@ -151,6 +152,63 @@ describe("MarketSocket", () => {
     last().receive(hello());
     last().receive({ type: "status", status: { realtime: "halted", since: 3_000, backfilling: false } });
     expect(seen[seen.length - 1]).toEqual({ socket: "open", status: { realtime: "halted", since: 3_000, backfilling: false } });
+  });
+
+  test("관심종목은 연결 전이면 hello에서, 열려 있으면 바로 보낸다", () => {
+    const { socket, last } = setup();
+    socket.start();
+    socket.setWatch(["005930", "000660"]);
+    expect(last().sent).toEqual([]);
+    last().receive(hello());
+    expect(last().sent).toEqual([{ type: "watch", symbols: ["005930", "000660"] }]);
+    socket.setWatch(["000660"]);
+    socket.setWatch([]);
+    expect(last().sent.slice(1)).toEqual([
+      { type: "watch", symbols: ["000660"] },
+      { type: "watch", symbols: [] },
+    ]);
+  });
+
+  test("quotes와 watch_limited는 onQuotes로 간다", () => {
+    const { socket, last } = setup();
+    socket.start();
+    last().receive(hello());
+    const events: QuoteEvent[] = [];
+    socket.onQuotes((e) => events.push(e));
+    const quote: Quote = { symbol: "005930", price: 71_000, change: 500, changeRate: 0.71, volume: 10, t: 1_000, source: "realtime" };
+    last().receive({ type: "quotes", quotes: [quote] });
+    last().receive({ type: "watch_limited", symbols: ["000660"] });
+    expect(events).toEqual([
+      { type: "quotes", quotes: [quote] },
+      { type: "watch_limited", symbols: ["000660"] },
+    ]);
+  });
+
+  test("다시 연결되면 마지막 관심종목을 다시 보내고 onQuotes에 resync를 준다", () => {
+    const { socket, last } = setup();
+    socket.start();
+    last().receive(hello());
+    const events: QuoteEvent[] = [];
+    socket.onQuotes((e) => events.push(e));
+    socket.setWatch(["005930"]);
+    socket.setWatch(["005930", "IDX:001"]);
+    last().drop();
+    vi.advanceTimersByTime(1000);
+    last().receive(hello());
+    expect(last().sent).toEqual([{ type: "watch", symbols: ["005930", "IDX:001"] }]);
+    expect(events).toEqual([{ type: "resync" }]);
+  });
+
+  test("관심종목을 비운 뒤 다시 연결되면 watch를 보내지 않는다. 새 연결의 서버는 빈 상태로 시작한다", () => {
+    const { socket, last } = setup();
+    socket.start();
+    last().receive(hello());
+    socket.setWatch(["005930"]);
+    socket.setWatch([]);
+    last().drop();
+    vi.advanceTimersByTime(1000);
+    last().receive(hello());
+    expect(last().sent).toEqual([]);
   });
 
   test("stop하면 연결을 닫고 다시 붙지 않는다", () => {

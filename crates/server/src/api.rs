@@ -161,6 +161,8 @@ pub struct BarsPage {
 pub enum ClientMessage {
     Subscribe { sub: String, symbol: SymbolCode, venue: Option<Venue>, period: Period },
     Unsubscribe { sub: String },
+    /// 지금 보이는 관심종목 목록 전체, 위에서부터. 받을 때마다 통째로 바꾼다. 빈 배열은 목록을 닫았다는 뜻이다.
+    Watch { symbols: Vec<SymbolCode> },
 }
 
 /// `/api/ws` 서버 → 브라우저. `seq`는 (종목, 거래소, 봉 주기) 흐름마다 하나씩 늘어나는 번호다.
@@ -205,6 +207,10 @@ pub enum ServerMessage {
         reason: ReloadReason,
         from: Option<UnixSeconds>,
     },
+    /// 관심종목 현재가(`source: realtime`). `bar`와 같은 100ms 묶음으로 바뀐 종목만 온다. 종목마다 가장 새 값 하나다.
+    Quotes { quotes: Vec<Quote> },
+    /// 이 연결의 관심종목 가운데 실시간 한도로 받지 못하는 종목, 목록 순서. 바뀔 때만 온다. 브라우저는 통째로 바꾼다.
+    WatchLimited { symbols: Vec<SymbolCode> },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -314,7 +320,7 @@ impl From<&domain::SymbolInfo> for SymbolInfo {
     }
 }
 
-/// 현재가 값의 출처. #3은 언제나 `polled`(REST 조회), #4부터 실시간이면 `realtime`.
+/// 현재가 값의 출처. REST `/api/quotes`는 `polled`, WebSocket `quotes`는 `realtime`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export)]
@@ -655,6 +661,8 @@ mod tests {
         assert_eq!(sub, ClientMessage::Subscribe { sub: "c0".into(), symbol: SymbolCode("005930".into()), venue: Some(Venue::Krx), period: Period::M1 });
         let unsub: ClientMessage = serde_json::from_value(json!({"type": "unsubscribe", "sub": "c0"})).unwrap();
         assert_eq!(unsub, ClientMessage::Unsubscribe { sub: "c0".into() });
+        let watch: ClientMessage = serde_json::from_value(json!({"type": "watch", "symbols": ["005930", "IDX:001"]})).unwrap();
+        assert_eq!(watch, ClientMessage::Watch { symbols: vec![SymbolCode("005930".into()), SymbolCode("IDX:001".into())] });
 
         let status = ConnectionStatus { realtime: RealtimeState::Reconnecting, since: UnixSeconds(1_794_182_400), backfilling: true };
         let bar = Bar { t: UnixSeconds(1_794_182_400), o: 1.0, h: 2.0, l: 1.0, c: 2.0, v: 3 };
@@ -677,6 +685,21 @@ mod tests {
                 ServerMessage::Reload { sub: "c0".into(), seq: 9, reason: ReloadReason::DailyReset, from: None },
                 json!({"type": "reload", "sub": "c0", "seq": 9, "reason": "daily_reset", "from": null}),
             ),
+            (
+                ServerMessage::Quotes {
+                    quotes: vec![Quote {
+                        symbol: SymbolCode("005930".into()),
+                        price: 71_200.0,
+                        change: 200.0,
+                        change_rate: 0.5,
+                        volume: 9,
+                        t: UnixSeconds(4),
+                        source: QuoteSource::Realtime,
+                    }],
+                },
+                json!({"type": "quotes", "quotes": [{"symbol": "005930", "price": 71_200.0, "change": 200.0, "changeRate": 0.5, "volume": 9, "t": 4, "source": "realtime"}]}),
+            ),
+            (ServerMessage::WatchLimited { symbols: vec![SymbolCode("000660".into())] }, json!({"type": "watch_limited", "symbols": ["000660"]})),
         ];
         for (msg, want) in cases {
             assert_eq!(serde_json::to_value(&msg).unwrap(), want);

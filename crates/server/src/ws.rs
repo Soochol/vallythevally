@@ -10,7 +10,7 @@ use domain::{Feed, SeriesKey, Symbol};
 use futures::stream::SplitSink;
 use futures::{SinkExt, StreamExt};
 
-use crate::api::{ClientMessage, ServerMessage, SubErrorCode};
+use crate::api::{ClientMessage, ServerMessage, SubErrorCode, SymbolCode};
 use crate::http::AppState;
 use crate::market::hub::HubHandle;
 use crate::market::outbox::Outbox;
@@ -76,6 +76,19 @@ fn on_text(hub: &HubHandle, outbox: &Outbox, conn: ConnId, text: &str) {
             }
         }
         Ok(ClientMessage::Unsubscribe { sub }) => hub.unsubscribe(conn, SubId(sub)),
+        Ok(ClientMessage::Watch { symbols }) => hub.watch(conn, watch_symbols(&symbols)),
         Err(e) => tracing::debug!(error = %e, "읽을 수 없는 브라우저 메시지를 버립니다"),
     }
+}
+
+fn watch_symbols(codes: &[SymbolCode]) -> Vec<Symbol> {
+    let mut out: Vec<Symbol> = Vec::with_capacity(codes.len());
+    for code in codes {
+        match Symbol::parse(&code.0) {
+            Ok(s) if !out.contains(&s) => out.push(s),
+            Ok(_) => {}
+            Err(e) => tracing::debug!(error = %e, code = %code.0, "관심종목의 읽을 수 없는 코드를 뺍니다"),
+        }
+    }
+    out
 }
