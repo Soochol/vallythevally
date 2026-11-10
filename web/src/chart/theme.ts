@@ -18,6 +18,7 @@ export interface ThemeTokens {
   seriesFill: string;
   fontFamily: string;
   ind: Record<IndicatorColor, string>;
+  cmp: Record<1 | 2 | 3, string>;
 }
 
 export function readThemeTokens(root: HTMLElement = document.documentElement): ThemeTokens {
@@ -40,5 +41,6 @@ export function readThemeTokens(root: HTMLElement = document.documentElement): T
     seriesFill: v("--series-fill"),
     fontFamily: v("--font-sans"),
     ind: Object.fromEntries(INDICATOR_COLORS.map((c) => [c, v(`--${c}`)])) as Record<IndicatorColor, string>,
+    cmp: { 1: v("--cmp-1"), 2: v("--cmp-2"), 3: v("--cmp-3") },
   };
 }

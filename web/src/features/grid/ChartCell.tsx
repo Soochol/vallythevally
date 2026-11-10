@@ -1,5 +1,5 @@
-import { useEffect, useRef } from "react";
-import { useSymbolInfo } from "../../api/queries";
+import { useEffect, useMemo, useRef } from "react";
+import { useSymbolInfo, useSymbolInfos } from "../../api/queries";
 import { type CellStatus, ChartController } from "../../chart/ChartController";
 import type { IndicatorCommand } from "../../chart/indicators/legendRows";
 import { readThemeTokens } from "../../chart/theme";
@@ -43,6 +43,9 @@ export function ChartCell({ slot, status, onStatus }: Props) {
   const cell = useCell(slot);
   const info = useSymbolInfo(cell.symbol).data;
   const venue = shownVenue(cell.venue, info);
+  const compareInfos = useSymbolInfos(cell.chartSettings.compare);
+  const compareKey = compareInfos.map((i) => `${i.code}:${i.name}`).join("|");
+  const compareNames = useMemo(() => Object.fromEntries(compareInfos.map((i) => [i.code, i.name])), [compareKey]);
   const theme = useTheme();
   const openSearch = useSelectionStore((s) => s.openSearch);
   const chartEl = useRef<HTMLDivElement>(null);
@@ -59,6 +62,7 @@ export function ChartCell({ slot, status, onStatus }: Props) {
       socket: marketSocket,
       onIndicatorCommand: (id, command) => runIndicatorCommand(slotRef.current, id, command),
       onPanelStretch: (stretches) => useLayoutStore.getState().setPanelStretches(slotRef.current, stretches),
+      onCompareRemove: (code) => useLayoutStore.getState().removeCompare(slotRef.current, code),
     });
     ctl.current = c;
     return () => {
@@ -70,8 +74,8 @@ export function ChartCell({ slot, status, onStatus }: Props) {
   useEffect(() => attachController(slot, ctl.current!), [slot]);
 
   useEffect(() => {
-    ctl.current?.apply({ symbol: cell.symbol, venue, period: cell.period, settings: cell.chartSettings, info });
-  }, [cell, venue, info]);
+    ctl.current?.apply({ symbol: cell.symbol, venue, period: cell.period, settings: cell.chartSettings, info, compareNames });
+  }, [cell, venue, info, compareNames]);
 
   // 복원 때 종목 정보를 못 받아 확인하지 못한 NXT가 나중에 NXT 불가로 확인되면, 그때 저장 원본을 고친다.
   // 그대로 두면 다음 저장을 서버가 400으로 거절한다.

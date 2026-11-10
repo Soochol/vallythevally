@@ -22,13 +22,15 @@ import type { Connection, MarketSocketLike } from "../api/socket";
 import { isIndexCode, PERIOD_LABEL, symbolSub } from "../lib/symbol";
 import { type ShownVenue, venueLabel } from "../lib/venue";
 import { BarFeed, displayBars, type FetchPage, type History } from "./barFeed";
+import { type CompareEntry, CompareLayer, compareVenue } from "./compare";
+import { CompareLegend } from "./compareLegend";
 import { type OpenPort, openIndicatorPort } from "./indicators/client";
 import { IndicatorLayer } from "./indicators/layer";
 import { type IndicatorCommand, IndicatorLegend } from "./indicators/legendRows";
 import { isTailChange } from "./indicators/sync";
 import { Legend, legendParts } from "./legend";
 import { addMainSeries, applyMainColors, type MainSeries, priceFormat, setMainData, updateMainBar } from "./series";
-import type { ChartSettings, Panel } from "./settings";
+import { type ChartSettings, type Panel, type PriceScale, shownScale } from "./settings";
 import { composeSnapshot, snapshotFileName } from "./snapshot";
 import type { ThemeTokens } from "./theme";
 import { formatBarTime, formatTickMark, fromChartTime, isIntraday } from "./time";
@@ -48,12 +50,20 @@ const SUB_ERROR_TEXT: Record<SubErrorCode, string> = {
 
 const nowSeconds = (): UnixSeconds => Math.floor(Date.now() / 1000);
 
+const PRICE_MODE: Record<PriceScale, PriceScaleMode> = {
+  normal: PriceScaleMode.Normal,
+  log: PriceScaleMode.Logarithmic,
+  percent: PriceScaleMode.Percentage,
+};
+
 export interface CellView {
   symbol: SymbolCode;
   venue: ShownVenue | null;
   period: Period;
   settings: ChartSettings;
   info: SymbolInfo | undefined;
+  /** 비교 종목 이름. 아직 못 받은 종목은 코드로 보인다. */
+  compareNames?: Readonly<Partial<Record<SymbolCode, string>>>;
 }
 
 /** React가 그리는 칸 상태: 불러오는 중, 오류, 또는 마지막 봉(휴대폰 머리용). */
@@ -81,6 +91,7 @@ export interface ControllerDeps {
   indicators?: OpenPort;
   onIndicatorCommand?: (id: string, command: IndicatorCommand) => void;
   onPanelStretch?: (stretches: Panel["stretch"][]) => void;
+  onCompareRemove?: (code: SymbolCode) => void;
 }
 
 /** 칸 하나의 차트 엔진 래퍼(frontend.md §5.4). React 밖의 명령형 객체다. */
@@ -90,6 +101,8 @@ export class ChartController {
   private main: MainSeries;
   private readonly indicators: IndicatorLayer;
   private readonly indicatorLegend: IndicatorLegend;
+  private readonly compare: CompareLayer;
+  private readonly compareLegend: CompareLegend;
   private readonly legend: Legend;
   private readonly feed: BarFeed;
   private readonly onStatus: (s: CellStatus) => void;
@@ -134,7 +147,8 @@ export class ChartController {
       deps.indicators ?? openIndicatorPort,
     );
     this.indicatorLegend = new IndicatorLegend(el, (id, command) => deps.onIndicatorCommand?.(id, command));
-    this.legend.root.append(this.indicatorLegend.priceBox);
+    this.compareLegend = new CompareLegend((code) => deps.onCompareRemove?.(code));
+    this.legend.root.append(this.indicatorLegend.priceBox, this.compareLegend.box);
     this.resize = new ResizeObserver(() => this.scheduleFrame());
     this.resize.observe(el);
     const onPanelStretch = deps.onPanelStretch;
@@ -159,6 +173,17 @@ export class ChartController {
       },
       deps.socket,
     );
+    this.compare = new CompareLayer(
+      {
+        chart: this.chart,
+        tokens: () => this.tokens,
+        mainBars: () => this.bars,
+        requestFrame: () => this.scheduleFrame(),
+        guard: (draw) => this.withDataGuard(draw),
+      },
+      deps.fetchPage ?? fetchBarsPage,
+      deps.socket,
+    );
     this.unwatch = deps.socket?.watch((c) => this.onConnection(c)) ?? (() => {});
 
     this.chart.subscribeCrosshairMove((p) => {
@@ -172,6 +197,8 @@ export class ChartController {
       const r = this.chart.timeScale().getVisibleLogicalRange();
       if (r && r.from < LOAD_OLDER_WITHIN) this.feed.needOlder();
       this.updateIntradayEnd();
+      this.compare.coverFrom(this.leftT());
+      if (this.view?.settings.compare.length) this.renderLegend();
     });
     // 캔버스 글자는 글꼴을 다 받은 뒤 다시 그려야 Pretendard로 보인다.
     void document.fonts?.ready.then(() => {
@@ -192,10 +219,10 @@ export class ChartController {
     });
 
     if (prev?.settings.style !== next.settings.style) this.recreateMain(isIndex);
-    if (prev?.settings.scale !== next.settings.scale) {
-      this.chart.priceScale("right").applyOptions({
-        mode: next.settings.scale === "log" ? PriceScaleMode.Logarithmic : PriceScaleMode.Normal,
-      });
+    const scale = shownScale(next.settings);
+    if (!prev || shownScale(prev.settings) !== scale) {
+      this.chart.priceScale("right").applyOptions({ mode: PRICE_MODE[scale] });
+      this.el.dataset.priceScale = scale;
     }
     if (prev?.period !== next.period) this.chart.applyOptions({ timeScale: { timeVisible: isIntraday(next.period) } });
     if (prev?.symbol !== next.symbol || prev.venue !== next.venue || prev.period !== next.period) {
@@ -214,6 +241,7 @@ export class ChartController {
     if (prev?.settings.indicators !== next.settings.indicators || prev?.settings.panels !== next.settings.panels) {
       this.indicators.setConfigs(next.settings.indicators, next.settings.panels);
     }
+    this.compare.setCodes(compareEntries(next), { period: next.period, venueFor: (code) => compareVenue(code, next) });
     this.renderLegend();
   }
 
@@ -223,6 +251,7 @@ export class ChartController {
     this.ready = null;
     this.onStatus({ kind: "loading" });
     this.feed.reload();
+    this.compare.reload();
   }
 
   /** 실패한 과거 페이지를 다시 받는다(과거 봉 오류의 `다시 시도`). */
@@ -259,11 +288,13 @@ export class ChartController {
 
   setTheme(tokens: ThemeTokens): void {
     this.flushPendingDraw();
+    this.compare.flush();
     this.indicators.flush();
     this.tokens = tokens;
     this.chart.applyOptions(this.chartOptions());
     applyMainColors(this.main, tokens);
     this.indicators.setTheme();
+    this.compare.setTheme();
     this.renderLegend();
   }
 
@@ -276,8 +307,10 @@ export class ChartController {
     this.resize.disconnect();
     this.unwatch();
     this.feed.dispose();
+    this.compare.dispose();
     this.indicators.dispose();
     this.indicatorLegend.dispose();
+    this.compareLegend.dispose();
     this.legend.dispose();
     this.chart.remove();
   }
@@ -337,6 +370,7 @@ export class ChartController {
     this.bars = bars;
     this.pendingDraw.clear();
     setMainData(this.main, bars);
+    this.compare.realign();
     this.exposeBarsToE2e();
   }
 
@@ -384,6 +418,7 @@ export class ChartController {
 
   private drawFrame(): void {
     this.flushPendingDraw();
+    this.compare.flush();
     this.indicators.flush();
     this.renderLegend();
   }
@@ -445,6 +480,7 @@ export class ChartController {
       this.chart.timeScale().setVisibleLogicalRange({ from: bars.length - show, to: bars.length - 1 + RIGHT_OFFSET });
     });
     this.indicators.reset(h);
+    this.compare.coverFrom(this.leftT());
     this.renderLegend();
     const latest = bars[bars.length - 1];
     if (latest) {
@@ -473,6 +509,7 @@ export class ChartController {
       if (range) this.chart.timeScale().setVisibleLogicalRange({ from: range.from + added, to: range.to + added });
     });
     if (this.hoverIndex !== null) this.hoverIndex += added;
+    this.compare.coverFrom(this.leftT());
     this.renderLegend();
     this.updateIntradayEnd();
   }
@@ -504,11 +541,20 @@ export class ChartController {
     return this.chart.panes().map((p) => (p.getHTMLElement()?.getBoundingClientRect().top ?? top) - top);
   }
 
+  /** 화면 왼쪽 끝 봉의 시각. % 축은 이 봉을 0%로 잡는다(라이브러리의 `floor(논리 범위 왼쪽)`). */
+  private leftT(): UnixSeconds | null {
+    const r = this.chart.timeScale().getVisibleLogicalRange();
+    const n = this.bars.length;
+    if (!r || n === 0) return null;
+    return this.bars[Math.min(n - 1, Math.max(0, Math.floor(r.from)))]!.t;
+  }
+
   private renderLegend(): void {
     const view = this.view;
     const i = this.hoverIndex ?? this.bars.length - 1;
     const bar = this.bars[i];
     this.indicatorLegend.render(this.indicators.rows(bar?.t ?? null), this.paneTops());
+    this.compareLegend.render(this.compare.rows(this.leftT(), bar?.t ?? null));
     if (!view || !bar) return this.legend.show(null);
     this.legend.show({
       bar,
@@ -519,4 +565,10 @@ export class ChartController {
       stalledAt: this.stalledAt,
     });
   }
+}
+
+function compareEntries(view: CellView): CompareEntry[] {
+  return view.settings.compare.flatMap((code, i) =>
+    code === view.symbol ? [] : [{ code, slot: (i + 1) as CompareEntry["slot"], name: view.compareNames?.[code] ?? code }],
+  );
 }
