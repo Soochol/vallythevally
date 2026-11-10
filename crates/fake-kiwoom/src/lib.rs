@@ -106,6 +106,7 @@ impl FakeKiwoom {
             .route("/_fake/delay", post(admin_delay))
             .route("/_fake/reject-token", post(admin_reject_token))
             .route("/_fake/reset", post(admin_reset))
+            .route("/_fake/krx-market", post(admin_krx_market))
             .route("/_fake/stats", get(admin_stats))
             .merge(ws::routes())
             .with_state(seen.clone());
@@ -217,6 +218,12 @@ struct RejectToken {
     token: String,
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SampleKrxMarket {
+    as_of: String,
+}
+
 async fn admin_respond_with(State(seen): State<Arc<Seen>>, Json(r): Json<RespondWith>) -> Response {
     match StatusCode::from_u16(r.status) {
         Ok(status) => {
@@ -240,6 +247,16 @@ async fn admin_reject_token(State(seen): State<Arc<Seen>>, Json(r): Json<RejectT
 async fn admin_reset(State(seen): State<Arc<Seen>>) -> StatusCode {
     seen.reset();
     StatusCode::NO_CONTENT
+}
+
+async fn admin_krx_market(State(seen): State<Arc<Seen>>, Json(m): Json<SampleKrxMarket>) -> Response {
+    match KstDate::parse_yyyymmdd(&m.as_of) {
+        Some(as_of) => {
+            *seen.krx_market.lock().unwrap() = Some(Arc::new(KrxMarket::sample(as_of)));
+            StatusCode::NO_CONTENT.into_response()
+        }
+        None => (StatusCode::BAD_REQUEST, format!("asOf는 YYYYMMDD입니다: {}", m.as_of)).into_response(),
+    }
 }
 
 async fn admin_stats(State(seen): State<Arc<Seen>>) -> Json<Stats> {
