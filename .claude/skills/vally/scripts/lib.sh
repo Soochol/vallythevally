@@ -77,7 +77,18 @@ retire_terminal() {
 # terminal's creation time in UTC seconds: hc keeps its address counter in its state folder, and a lost
 # state folder starts the counter over, so an address alone could name a newer terminal.
 
-owner_of() { jq -r '.labels["vally.owner"] // .parent // empty'; }
+since_of() { jq -r '.labels["vally.lead.since"] // (.created_ms / 1000 | floor | tostring)'; }
+
+owner_of() {
+  local info parent p
+  info=$(cat)
+  jq -re '.labels["vally.owner"] // empty' <<<"$info" && return
+  parent=$(jq -r '.parent // empty' <<<"$info")
+  [ -n "$parent" ] || return 0
+  if p=$(hc get "$parent" --json 2>/dev/null) && [ "$(jq .created_ms <<<"$p")" -le "$(jq .created_ms <<<"$info")" ]; then
+    echo "$parent@$(since_of <<<"$p")"
+  else echo "$parent"; fi
+}
 
 lead_name() {
   local main
@@ -89,7 +100,7 @@ as_lead() {
   [ -n "${HC_TERMINAL_ID-}" ] || die "run from the lead's hc terminal (HC_TERMINAL_ID is unset)"
   local info name since
   info=$(terminal_json "$HC_TERMINAL_ID")
-  since=$(jq -r '.labels["vally.lead.since"] // (.created_ms / 1000 | floor | tostring)' <<<"$info")
+  since=$(since_of <<<"$info")
   name=$(lead_name "$(jq -r .cwd <<<"$info")")
   if [ "$(jq -r '.labels["vally.lead"] // ""' <<<"$info")" != "$name" ] || [ "$(jq -r '.labels["vally.lead.since"] // ""' <<<"$info")" != "$since" ]; then
     hc label "$HC_TERMINAL_ID" "vally.lead=$name" "vally.lead.since=$since" >/dev/null || die "could not label $HC_TERMINAL_ID as a lead"
@@ -101,17 +112,21 @@ as_lead() {
 load_live() { LIVE=$(hc ls --json | jq -r '.terminals[].address') || die "hc ls failed; is herdr-core running?"; }
 
 lead_alive() {
-  local addr=${1%%@*} since=
-  [ -n "$1" ] && grep -qxF "$addr" <<<"$LIVE" || return 1
-  [[ $1 == *@* ]] || return 0
-  since=${1#*@}
-  [ "$(hc get "$addr" --json 2>/dev/null | jq -r '.labels["vally.lead.since"] // empty')" = "$since" ]
+  [[ $1 == *@* ]] && grep -qxF "${1%%@*}" <<<"$LIVE" || return 1
+  [ "$(hc get "${1%%@*}" --json 2>/dev/null | since_of)" = "${1#*@}" ]
 }
 
 owner_state() {
   if [ "$1" = "$ME" ]; then echo me
-  elif lead_alive "$1"; then if [ "${1%%@*}" = "$HC_TERMINAL_ID" ]; then echo me; else echo live; fi
+  elif lead_alive "$1"; then echo live
   else echo gone; fi
+}
+
+# Hold issue <n>'s lock until this script exits.
+hold_issue_lock() {
+  mkdir -p "$VALLY_STATE/locks"
+  exec {issue_lock}>>"$VALLY_STATE/locks/issue-$1.lock"
+  flock -x -w 120 "$issue_lock" || die "issue #$1 stays busy: another vally script holds $VALLY_STATE/locks/issue-$1.lock"
 }
 
 lead_label() {
@@ -152,11 +167,18 @@ remove_worktree() {
   git worktree remove "$1"
 }
 
+issue_terminals() {
+  local a b
+  a=$(terminals_with vally.issue="$1") && b=$(terminals_with vally.garden."$1"=1) || exit 1
+  printf '%s\n' $a $b | sort -u
+}
+
 issue_holders() {
-  local ts t
-  ts=$(terminals_with vally.issue="$1") || exit 1
+  local ts t info
+  ts=$(issue_terminals "$1") || exit 1
   for t in $ts; do
-    terminal_json "$t" | jq -r --arg t "$t" '"\(.labels["vally.owner"] // .parent // "")\t\(.name // $t)"' || exit 1
+    info=$(terminal_json "$t") || exit 1
+    printf '%s\t%s\n' "$(owner_of <<<"$info")" "$(jq -r --arg t "$t" '.name // $t' <<<"$info")"
   done
   worktree_locks | awk -F'\t' -v i="$1" '$3 == i { print $2 "\t" $1 }'
 }

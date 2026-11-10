@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Take over an issue whose lead is gone: relabel its live terminals vally.owner=<this lead>, tell its
-# agents where to report, and relock its worktrees. Run it only when the user says so.
+# agents where to report, and relock its worktrees and the worktrees its agents work in. Run it only when the user says so.
 # An issue a live lead holds is refused; --force takes it anyway and tells that lead.
 #   take.sh <issue> [--force]
 source "$(dirname "$0")/lib.sh"
@@ -9,6 +9,15 @@ source "$(dirname "$0")/lib.sh"
 issue=$1 force=${2-}
 need_issue "$issue"
 as_lead
+hold_issue_lock "$issue"
+
+take_worktree() { # <path> <issue for an unlocked worktree>
+  local owner issue
+  IFS=$'\t' read -r owner issue < <(worktree_lock "$1") || true
+  [ "$owner" != "$ME" ] || return 0
+  if [ -n "$owner" ]; then git worktree unlock "$1"; lock_worktree "$1" "$issue"; else lock_worktree "$1" "$2"; fi
+  echo "took $1${owner:+ from $(lead_label "$owner")}"
+}
 
 holders=$(issue_holders "$issue") || exit 1
 previous=''
@@ -19,7 +28,7 @@ while IFS=$'\t' read -r owner what; do
   previous+="${owner%%@*}"$'\n'
 done <<<"$holders"
 
-ts=$(terminals_with vally.issue="$issue")
+ts=$(issue_terminals "$issue")
 taken=0
 for t in $ts; do
   info=$(terminal_json "$t")
@@ -34,13 +43,12 @@ for t in $ts; do
   echo "took $name from $(lead_label "$owner")"
   taken=1
   w=$(jq -r .cwd <<<"$info")
-  case $w in "$VALLY_WORKTREES"/*) [ -n "$(worktree_owner "$w")" ] || { lock_worktree "$w" "$issue" && echo "took $w"; };; esac
+  case $w in "$VALLY_WORKTREES"/*) take_worktree "$w" "$issue";; esac
 done
 
 while IFS=$'\t' read -r path owner lock_issue; do
   [ "$lock_issue" = "$issue" ] && [ "$owner" != "$ME" ] || continue
-  git worktree unlock "$path" && lock_worktree "$path" "$issue"
-  echo "took $path from $(lead_label "$owner")"
+  take_worktree "$path" "$issue"
   taken=1
 done < <(worktree_locks)
 

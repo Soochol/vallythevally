@@ -28,6 +28,7 @@ git rev-parse --git-dir >/dev/null 2>&1 || die "run from a vallythevally checkou
 as_lead
 
 git fetch -q origin
+hold_issue_lock "$issue"
 need_issue_open "$issue"
 lock_issue=$issue
 case $kind in
@@ -72,6 +73,7 @@ case $kind in
       fi
       report=$VALLY_REPORTS/$issue/docs-garden-pr$pr.md
       mkdir -p "$VALLY_REPORTS/$issue"
+      hc label "$live" vally.garden."$issue"=1 >/dev/null || die "could not record issue #$issue on the gardener $live"
       hc send "$live" "PR #$pr (이슈 #$issue)도 병합됐다. 먼저 git fetch origin && git rebase origin/main 으로 브랜치를 최신 main 위에 올린 뒤 같은 방식으로 문서를 점검하라. 보고서는 $report 에 쓰고 done $issue 로 알려라." \
         || die "could not hand PR #$pr to $live (it may be blocked); check with: hc read $live"
       echo "$pr" >> "$handed"

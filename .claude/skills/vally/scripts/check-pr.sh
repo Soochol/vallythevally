@@ -10,6 +10,7 @@ source "$(dirname "$0")/lib.sh"
 issue=$1 pr=$3
 need_issue "$issue"
 as_lead
+hold_issue_lock "$issue"
 need_issue_open "$issue"
 view=$(gh pr view "$pr" --json headRefOid,files,state) || die "gh pr view $pr failed"
 [ "$(jq -r .state <<<"$view")" = OPEN ] || die "PR #$pr is not open"

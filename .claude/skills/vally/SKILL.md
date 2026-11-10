@@ -10,7 +10,7 @@ You are the **lead**: the one agent the user talks to. You turn goals into GitHu
 
 Run every script from the main checkout (the first entry of `git worktree list`, on `main`), not from a vally worktree; they use its git, and its copy of this skill is the one that runs.
 
-Several leads can run at once, each in its own hc terminal. A lead is its terminal (`$HC_TERMINAL_ID`); people see it by its folder name (`main` for the main checkout, else the folder, such as `ochestra1`). Your space is what you started: agents labelled `vally.owner=<you>` and worktrees locked with `git worktree lock --reason "vally owner <you> …"`. An issue belongs to the lead whose agents or locked worktrees it has. Reports go to `~/.vally/state/vallythevally/reports/<issue>/` (written `reports/` below), worktrees to `~/.vally/worktrees/vallythevally/`. Orca's folders (`~/orca/`, `~/.local/state/vallythevally/orchestration/`) belong to the old harness; leave them alone.
+Several leads can run at once, each in its own hc terminal. A lead is its terminal (`$HC_TERMINAL_ID`); people see it by its folder name (`main` for the main checkout, else the folder, such as `ochestra1`). Your space is what you started: agents labelled `vally.owner=<you>` and worktrees locked with `git worktree lock --reason "vally owner <you> …"`. An issue belongs to the lead whose agents or locked worktrees it has; a gardener an issue was handed to holds it too (label `vally.garden.<issue>=1`). An agent from before `vally.owner` belongs to its hc parent only when that parent terminal is older than the agent; otherwise it has no live lead. `start.sh`, `check-pr.sh` and `take.sh` check and claim an issue under one lock per issue, so two leads at once cannot both get it. Reports go to `~/.vally/state/vallythevally/reports/<issue>/` (written `reports/` below), worktrees to `~/.vally/worktrees/vallythevally/`. Orca's folders (`~/orca/`, `~/.local/state/vallythevally/orchestration/`) belong to the old harness; leave them alone.
 
 ## Talking to the user
 
@@ -26,7 +26,7 @@ Every message to the user, in Korean:
 1. Run `vally/doctor.sh`. Each `FAIL` line names its fix; a missing template is fixed by `vally/sync-templates.sh`. While the network sandbox check fails, workers cannot push and `check-pr.sh` cannot pass: tell the user before taking work.
 2. Run `vally/status.sh`. It labels your terminal as a lead and shows only your space, with agents that have no live lead (주인 없는 에이전트) at the top and one line per other live lead.
 3. For each of your own agents: `hc read --lines 40 <name>` to pick up a report it sent while you were away. Send nothing to any agent at start.
-4. 주인 없는 에이전트 and 작업 공간 (their lead's terminal is gone): show the user each one with its issue and progress (보고 완료, 작업 중, 막힘), and ask whether to bring it over. Only on a yes: `vally/take.sh <issue>`. It relabels the issue's agents to you, tells them your address, and relocks its worktrees. hc still types their blocked/exit notes into the terminal that started them, so recheck taken agents with `vally/status.sh` instead of waiting for notes.
+4. 주인 없는 에이전트 and 작업 공간 (their lead's terminal is gone): show the user each one with its issue and progress (보고 완료, 작업 중, 막힘), and ask whether to bring it over. Only on a yes: `vally/take.sh <issue>`. It relabels the issue's agents (a gardener it was handed to included) to you, tells them your address, and relocks the issue's worktrees and the worktrees those agents work in, a gardener's too. hc still types their blocked/exit notes into the terminal that started them, so recheck taken agents with `vally/status.sh` instead of waiting for notes.
 5. Your leftover worktrees (`일하는 에이전트도 열린 PR도 없음`): ask once whether to remove them.
 
 Tell the user what is running and what is waiting. Done when every one of your agents and PRs has a known next step.
@@ -92,7 +92,7 @@ PR #61 <what the user gets, one line>
 - 할 일: 병합할까요? (추천: 예)
 ```
 
-5. After the merge: `vally/finish.sh <issue> --pr <n>`. It retires your agents of the issue, removes your clean worktrees and the branch (keeping anything a live agent uses, that holds unpushed commits, or that has no live lead), starts your own docs gardener after code PRs or hands the PR to it, and prints status. For the gardener's own PR, run the same `finish.sh`, then `vally/retire.sh docs-garden-$HC_TERMINAL_ID --worktree` once it has nothing left.
+5. After the merge: `vally/finish.sh <issue> --pr <n>`. It retires your agents of the issue, removes your clean worktrees and the branch (keeping anything a live agent uses, that holds unpushed commits, or that has no live lead), starts your own docs gardener after code PRs or hands the PR to it (the gardener then holds that issue for you), and prints status. For the gardener's own PR, run the same `finish.sh`, then `vally/retire.sh docs-garden-$HC_TERMINAL_ID --worktree` once it has nothing left.
 
 ## Kiwoom
 
