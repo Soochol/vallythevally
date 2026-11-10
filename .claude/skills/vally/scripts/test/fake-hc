@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
 # Fake hc for vally script tests, shaped like real hc 0.1.19 JSON.
-# State: $FAKE_DIR/terminals.json {"terminals":[{address,name,cwd,state,status:{state},labels}]}.
 # Every call is appended to $FAKE_DIR/hc.log. FAKE_HC_FAIL=<command> makes that command fail.
 set -euo pipefail
 db=$FAKE_DIR/terminals.json
@@ -10,6 +9,7 @@ cmd=$1; shift
 [ "${FAKE_HC_FAIL-}" != "$cmd" ] || { echo '{"error":{"kind":"unavailable"}}' >&2; exit 1; }
 save() { jq "$@" "$db" > "$db.tmp" && mv "$db.tmp" "$db"; }
 find_t='.terminals[] | select(.address == $t or .name == $t)'
+exists() { [ -n "$(jq --arg t "$1" "$find_t" "$db")" ] || { echo '{"error":{"kind":"not_found"}}' >&2; exit 3; }; }
 case $cmd in
   ls)
     filter='select(.state == "live")'
@@ -17,17 +17,17 @@ case $cmd in
       if [ "$1" = --label ]; then k=${2%%=*} v=${2#*=}; filter="$filter | select(.labels[\"$k\"] == \"$v\")"; shift; fi
       shift
     done
-    jq "{hidden_finished: 0, terminals: [.terminals[] | $filter | {address, name, cwd, status: .status.state, state}]}" "$db" ;;
+    jq "{hidden_finished: 0, terminals: [.terminals[] | $filter | {address, name, cwd, parent, status: .status.state, state}]}" "$db" ;;
   get)
-    out=$(jq --arg t "$1" "$find_t" "$db")
-    [ -n "$out" ] || { echo '{"error":{"kind":"not_found"}}' >&2; exit 3; }
-    echo "$out" ;;
+    exists "$1"; jq --arg t "$1" "$find_t" "$db" ;;
   run)
-    name='' cwd='' labels='{}'
+    name='' cwd='' labels='{}' parent=${HC_TERMINAL_ID-}
     while [ $# -gt 0 ]; do
       case $1 in
         --name) name=$2; shift;;
         --cwd) cwd=$2; shift;;
+        --parent) parent=$2; shift;;
+        --no-parent) parent='';;
         --label) labels=$(jq --arg k "${2%%=*}" --arg v "${2#*=}" '. + {($k): $v}' <<<"$labels"); shift;;
         --) shift; break;;
         --*) ;;
@@ -35,11 +35,18 @@ case $cmd in
       esac
       shift
     done
-    addr=t$(( $(jq '.terminals | length' "$db") + 100 ))
-    save --arg a "$addr" --arg n "$name" --arg c "$cwd" --argjson l "$labels" \
-      '.terminals += [{address: $a, name: $n, cwd: $c, state: "live", status: {app: "claude-code", state: "working"}, labels: $l}]'
+    if [ -n "$name" ] && [ -n "$(jq --arg n "$name" '.terminals[] | select(.name == $n and .state == "live")' "$db")" ]; then
+      echo "{\"error\":{\"kind\":\"name_taken\",\"message\":\"a live terminal is already named \\\"$name\\\"\"}}" >&2; exit 1
+    fi
+    id=$(cat "$FAKE_DIR/next_id" 2>/dev/null || echo 100); echo $((id + 1)) > "$FAKE_DIR/next_id"
+    addr=t$id
+    save --arg a "$addr" --arg n "$name" --arg c "$cwd" --arg p "$parent" --argjson l "$labels" --argjson ms "$((id * 1000))" \
+      '.terminals += [{address: $a, name: (if $n == "" then null else $n end), cwd: $c, parent: (if $p == "" then null else $p end), created_ms: $ms, state: "live", status: {app: "claude-code", state: "working"}, labels: $l}]'
     echo "{\"address\":\"$addr\",\"first_message\":{\"sent\":${FAKE_SENT:-true},\"started\":true,\"turn\":0}}" ;;
   send)
+    exists "$1"
+    st=$(jq -r --arg t "$1" "$find_t | .state" "$db")
+    [ "$st" = live ] || { echo '{"error":{"kind":"finished"}}' >&2; exit 1; }
     st=$(jq -r --arg t "$1" "$find_t | .status.state" "$db")
     [ "$st" != blocked ] || { echo '{"error":{"kind":"blocked"}}' >&2; exit 9; } ;;
   kill)
@@ -48,6 +55,14 @@ case $cmd in
     st=$(jq -r --arg t "$1" "$find_t | .state" "$db")
     [ "$st" = finished ] || { echo '{"error":{"kind":"status_mismatch"}}' >&2; exit 10; }
     save --arg t "$1" "del($find_t)"; echo "{\"removed\":\"$1\"}" ;;
-  label) ;;
+  label)
+    t=$1; shift; exists "$t"
+    for kv in "$@"; do
+      [ "$kv" != --json ] || continue
+      k=${kv%%=*} v=${kv#*=}
+      if [ -z "$v" ]; then save --arg t "$t" --arg k "$k" "($find_t | .labels) |= del(.[\$k])"
+      else save --arg t "$t" --arg k "$k" --arg v "$v" "($find_t | .labels[\$k]) = \$v"; fi
+    done
+    jq --arg t "$t" "$find_t" "$db" ;;
   *) echo "fake hc: unsupported $cmd" >&2; exit 1 ;;
 esac

@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
-# Start one vally agent in its own worktree as a child of the calling terminal (the lead).
+# Start one vally agent in its own locked worktree as a child of the calling terminal (the lead).
+# Stops when another live lead holds the issue, the worktree, or the name.
 #   start.sh impl   <issue> --branch feat/58-x --spec FILE [--writer]
 #   start.sh fix    <issue> --pr 61 --round 1 --spec FILE [--writer]
 #   start.sh review <issue> --pr 61 --round 0 [--spec FILE]
 #   start.sh garden <issue> --pr 61
 source "$(dirname "$0")/lib.sh"
 
-usage() { sed -n '2,6p' "$0" >&2; exit 2; }
+usage() { sed -n '4,7p' "$0" >&2; exit 2; }
 [ $# -ge 2 ] || usage
 kind=$1 issue=$2; shift 2
 need_issue "$issue"
@@ -20,13 +21,15 @@ while [ $# -gt 0 ]; do
   esac
   shift 2
 done
-[ -n "${HC_TERMINAL_ID-}" ] || die "run from the lead's hc terminal (HC_TERMINAL_ID is unset)"
 git rev-parse --git-dir >/dev/null 2>&1 || die "run from a vallythevally checkout"
 [ -z "$spec" ] || [ -f "$spec" ] || die "spec not found: $spec"
 [ -z "$pr" ] || [[ $pr =~ ^[0-9]+$ ]] || die "--pr must be a number: $pr"
 [ -z "$round" ] || [[ $round =~ ^[0-9]+$ ]] || die "--round must be a number: $round"
+as_lead
 
 git fetch -q origin
+need_issue_open "$issue"
+lock_issue=$issue
 case $kind in
   impl)
     [ -n "$spec" ] || die "impl needs --spec"
@@ -34,11 +37,9 @@ case $kind in
     role=worker template=vally-worker name=w$issue-impl round=${round:-0}
     [ -z "$writer" ] || role=writer template=vally-writer
     worktree=$(worktree_for_branch "$branch")
-    if [ ! -d "$worktree" ]; then
-      if git show-ref --verify --quiet "refs/heads/$branch"; then git worktree add -q "$worktree" "$branch"
-      elif git show-ref --verify --quiet "refs/remotes/origin/$branch"; then git worktree add -q -b "$branch" "$worktree" "origin/$branch"
-      else git worktree add -q --no-track -b "$branch" "$worktree" origin/main; fi
-    fi
+    if git show-ref --verify --quiet "refs/heads/$branch"; then add=(git worktree add -q "$worktree" "$branch")
+    elif git show-ref --verify --quiet "refs/remotes/origin/$branch"; then add=(git worktree add -q -b "$branch" "$worktree" "origin/$branch")
+    else add=(git worktree add -q --no-track -b "$branch" "$worktree" origin/main); fi
     ;;
   fix)
     [ -n "$spec" ] && [ -n "$pr" ] && [ -n "$round" ] || die "fix needs --pr, --round and --spec"
@@ -46,10 +47,8 @@ case $kind in
     [ -z "$writer" ] || role=writer template=vally-writer
     branch=$(gh pr view "$pr" --json headRefName --jq .headRefName)
     worktree=$(worktree_for_branch "$branch")
-    if [ ! -d "$worktree" ]; then
-      if git show-ref --verify --quiet "refs/heads/$branch"; then git worktree add -q "$worktree" "$branch"
-      else git worktree add -q -b "$branch" "$worktree" "origin/$branch"; fi
-    fi
+    if git show-ref --verify --quiet "refs/heads/$branch"; then add=(git worktree add -q "$worktree" "$branch")
+    else add=(git worktree add -q -b "$branch" "$worktree" "origin/$branch"); fi
     ;;
   review)
     [ -n "$pr" ] && [ -n "$round" ] || die "review needs --pr and --round"
@@ -57,15 +56,16 @@ case $kind in
     head=$(gh pr view "$pr" --json headRefOid --jq .headRefOid)
     git fetch -q origin "pull/$pr/head"
     worktree=$VALLY_WORKTREES/review-$issue-${head:0:7}
-    [ -d "$worktree" ] || git worktree add -q --detach "$worktree" "$head"
-    [ "$(git -C "$worktree" rev-parse HEAD)" = "$head" ] || die "review worktree $worktree is not at PR head $head"
-    is_clean "$worktree" || die "review worktree is dirty: $worktree"
+    add=(git worktree add -q --detach "$worktree" "$head")
     ;;
   garden)
     [ -n "$pr" ] || die "garden needs --pr"
     handed=$VALLY_STATE/garden-handed
     gardeners=$(terminals_with vally.role=gardener)
-    live=$(head -n1 <<<"$gardeners")
+    live=''
+    for g in $gardeners; do
+      [ "$(owner_state "$(terminal_json "$g" | owner_of)")" = me ] && { live=$g; break; }
+    done
     if [ -n "$live" ]; then
       if [ "$(label_of "$live" vally.pr)" = "$pr" ] || grep -qxF "$pr" "$handed" 2>/dev/null; then
         echo "PR #$pr is already with the gardener $live"; exit 0
@@ -78,16 +78,29 @@ case $kind in
       echo "handed PR #$pr to the live gardener $live"
       exit 0
     fi
-    role=gardener template=vally-gardener name=docs-garden round=0
+    role=gardener template=vally-gardener name=docs-garden-$HC_TERMINAL_ID round=0 lock_issue=''
     branch=docs/garden-$pr
     worktree=$(worktree_for_branch "$branch")
-    [ -d "$worktree" ] || git worktree add -q --no-track -b "$branch" "$worktree" origin/main
+    add=(git worktree add -q --no-track -b "$branch" "$worktree" origin/main)
     ;;
   *) usage;;
 esac
 
+live_names=$(hc ls --json | jq -r '.terminals[].name // empty') || die "hc ls failed; is herdr-core running?"
+! grep -qxF "$name" <<<"$live_names" || die "a live terminal is already named $name; see vally/status.sh"
 cwds=$(live_cwds)
-! grep -qxF "$worktree" <<<"$cwds" || die "a live terminal already works in $worktree; retire it first: retire.sh <name>"
+if [ -d "$worktree" ]; then
+  owner=$(worktree_owner "$worktree")
+  [ -z "$owner" ] || need_mine "$owner" "worktree $worktree" "$issue"
+  ! grep -qxF "$worktree" <<<"$cwds" || die "a live terminal already works in $worktree; retire it first: retire.sh <name>"
+else
+  "${add[@]}"
+fi
+if [ "$kind" = review ]; then
+  [ "$(git -C "$worktree" rev-parse HEAD)" = "$head" ] || die "review worktree $worktree is not at PR head $head"
+  is_clean "$worktree" || die "review worktree is dirty: $worktree"
+fi
+[ "$(worktree_owner "$worktree")" = "$ME" ] || lock_worktree "$worktree" "$lock_issue"
 
 out=$VALLY_REPORTS/$issue
 mkdir -p "$out"
@@ -97,7 +110,7 @@ if [ -n "$spec" ]; then cp "$spec" "$out/$name.spec.md"; task="$task 명세: $ou
 [ "$kind" != garden ] || name_report=docs-garden-pr$pr
 task="$task 보고서는 $out/${name_report:-$name}.md 에 쓴다."
 
-labels=(--label vally.role=$role --label vally.issue=$issue --label vally.round=$round)
+labels=(--label vally.role=$role --label vally.issue=$issue --label vally.round=$round --label vally.owner=$ME)
 [ -z "$pr" ] || labels+=(--label vally.pr=$pr)
 space=$(label_of "$HC_TERMINAL_ID" herdr.space)
 [ -z "$space" ] || [ "${VALLY_SHOW-1}" = 0 ] || labels+=(--label herdr.space=$space)

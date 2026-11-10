@@ -72,3 +72,105 @@ retire_terminal() {
   hc kill "$1" >/dev/null 2>&1 || true
   if hc rm "$1" >/dev/null 2>&1; then echo "retired $1"; else warn "could not remove terminal $1; check with: hc get $1"; fi
 }
+
+# A lead is the hc terminal that runs these scripts. Its owner id is <address>@<since>, since being the
+# terminal's creation time in UTC seconds: hc keeps its address counter in its state folder, and a lost
+# state folder starts the counter over, so an address alone could name a newer terminal.
+
+owner_of() { jq -r '.labels["vally.owner"] // .parent // empty'; }
+
+lead_name() {
+  local main
+  main=$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")
+  case $1 in "$main"|"$main"/*) echo main;; *) basename "$1";; esac
+}
+
+as_lead() {
+  [ -n "${HC_TERMINAL_ID-}" ] || die "run from the lead's hc terminal (HC_TERMINAL_ID is unset)"
+  local info name since
+  info=$(terminal_json "$HC_TERMINAL_ID")
+  since=$(jq -r '.labels["vally.lead.since"] // (.created_ms / 1000 | floor | tostring)' <<<"$info")
+  name=$(lead_name "$(jq -r .cwd <<<"$info")")
+  if [ "$(jq -r '.labels["vally.lead"] // ""' <<<"$info")" != "$name" ] || [ "$(jq -r '.labels["vally.lead.since"] // ""' <<<"$info")" != "$since" ]; then
+    hc label "$HC_TERMINAL_ID" "vally.lead=$name" "vally.lead.since=$since" >/dev/null || die "could not label $HC_TERMINAL_ID as a lead"
+  fi
+  ME=$HC_TERMINAL_ID@$since MY_NAME=$name
+  load_live
+}
+
+load_live() { LIVE=$(hc ls --json | jq -r '.terminals[].address') || die "hc ls failed; is herdr-core running?"; }
+
+lead_alive() {
+  local addr=${1%%@*} since=
+  [ -n "$1" ] && grep -qxF "$addr" <<<"$LIVE" || return 1
+  [[ $1 == *@* ]] || return 0
+  since=${1#*@}
+  [ "$(hc get "$addr" --json 2>/dev/null | jq -r '.labels["vally.lead.since"] // empty')" = "$since" ]
+}
+
+owner_state() {
+  if [ "$1" = "$ME" ]; then echo me
+  elif lead_alive "$1"; then if [ "${1%%@*}" = "$HC_TERMINAL_ID" ]; then echo me; else echo live; fi
+  else echo gone; fi
+}
+
+lead_label() {
+  local addr=${1%%@*} info name
+  [ -n "$1" ] || { echo "(기록 없음)"; return; }
+  lead_alive "$1" && info=$(hc get "$addr" --json 2>/dev/null) || { echo "$addr"; return; }
+  name=$(jq -r '.labels["vally.lead"] // empty' <<<"$info")
+  [ -n "$name" ] || name=$(lead_name "$(jq -r .cwd <<<"$info")")
+  [ "$addr" = "$HC_TERMINAL_ID" ] || [ "$name" != "${MY_NAME-}" ] || name="$name($addr)"
+  echo "$name"
+}
+
+need_mine() {
+  case $(owner_state "$1") in
+    me) ;;
+    live) die "$2 belongs to the live lead $(lead_label "$1"); leave it to that lead";;
+    *) die "$2 has no live lead (주인 없음, was $(lead_label "$1")); only when the user says so: take.sh $3";;
+  esac
+}
+
+worktree_locks() {
+  git worktree list --porcelain | awk '
+    /^worktree / { path = substr($0, 10) }
+    /^locked vally owner / { n = split(substr($0, 20), f, " "); print path "\t" f[1] "\t" (f[2] == "issue" ? f[3] : "") }'
+}
+
+worktree_lock() {
+  local p; p=$(realpath -m "$1")
+  worktree_locks | while IFS=$'\t' read -r path owner issue; do [ "$(realpath -m "$path")" != "$p" ] || printf '%s\t%s\n' "$owner" "$issue"; done
+}
+
+worktree_owner() { worktree_lock "$1" | cut -f1; }
+
+lock_worktree() { git worktree lock --reason "vally owner $ME${2:+ issue $2}" "$1"; }
+
+remove_worktree() {
+  [ "$(worktree_owner "$1")" != "$ME" ] || git worktree unlock "$1"
+  git worktree remove "$1"
+}
+
+issue_holders() {
+  local ts t
+  ts=$(terminals_with vally.issue="$1") || exit 1
+  for t in $ts; do
+    terminal_json "$t" | jq -r --arg t "$t" '"\(.labels["vally.owner"] // .parent // "")\t\(.name // $t)"' || exit 1
+  done
+  worktree_locks | awk -F'\t' -v i="$1" '$3 == i { print $2 "\t" $1 }'
+}
+
+need_issue_open() {
+  local holders owner what lead='' live='' gone=''
+  holders=$(issue_holders "$1") || exit 1
+  while IFS=$'\t' read -r owner what; do
+    [ -n "$owner$what" ] || continue
+    case $(owner_state "$owner") in
+      live) lead=$(lead_label "$owner"); live+=" $what";;
+      gone) gone+=" $what";;
+    esac
+  done <<<"$holders"
+  [ -z "$live" ] || die "issue #$1 belongs to the live lead $lead (holds:$live); leave it to that lead"
+  [ -z "$gone" ] || warn "issue #$1 has things without a live lead (주인 없음):$gone. Ask the user; only on a yes: take.sh $1"
+}
