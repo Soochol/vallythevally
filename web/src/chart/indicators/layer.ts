@@ -195,8 +195,13 @@ export class IndicatorLayer {
 
   private drain(): void {
     for (const [line, p] of this.queue.drain()) {
-      if (p.set) this.draw(line, p.set);
-      for (const pt of p.updates) line.series.update(this.toChart(line, pt) as never);
+      try {
+        if (p === "redraw") this.draw(line, line.points);
+        else for (const pt of p) line.series.update(this.toChart(line, pt));
+      } catch (e) {
+        console.error(`지표 선(${line.id})을 점 사본으로 다시 그림: ${e instanceof Error ? e.message : String(e)}`);
+        this.draw(line, line.points);
+      }
     }
   }
 
@@ -401,7 +406,7 @@ export class IndicatorLayer {
   }
 
   private draw(line: Line, points: readonly Point[]): void {
-    line.series.setData(points.map((pt) => this.toChart(line, pt)) as never);
+    line.series.setData(points.map((pt) => this.toChart(line, pt)));
   }
 
   private toChart(line: Line, pt: Point) {

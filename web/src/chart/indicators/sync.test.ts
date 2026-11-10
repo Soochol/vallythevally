@@ -25,17 +25,18 @@ test("커밋한 확정 봉보다 늦은 꼬리 변경은 preview·confirm, 나�
   expect(syncOp([], [cur], cur, "live", null)).toBe("preview");
 });
 
-test("그리기 큐는 시리즈마다 점 시각별로 하나씩 남기고, set은 앞의 update를 지운다", () => {
+test("그리기 큐는 시리즈마다 점 시각별로 하나씩 남기고, set은 앞뒤의 update와 함께 다시 그리기 하나가 된다", () => {
   const q = new DrawQueue<string>();
   q.push("s", { op: "update", point: { t: 60, v: 1 } });
   q.push("s", { op: "update", point: { t: 60, v: 2 } });
   q.push("s", { op: "update", point: { t: 120, v: 3 } });
   q.push("s", { op: "none" });
-  expect(q.drain()).toEqual([["s", { set: null, updates: [{ t: 60, v: 2 }, { t: 120, v: 3 }] }]]);
+  expect(q.drain()).toEqual([["s", [{ t: 60, v: 2 }, { t: 120, v: 3 }]]]);
   q.push("s", { op: "update", point: { t: 60, v: 1 } });
   q.push("s", { op: "set", points: [{ t: 0, v: 0 }] });
   q.push("s", { op: "update", point: { t: 60, v: 4 } });
-  expect(q.drain()).toEqual([["s", { set: [{ t: 0, v: 0 }], updates: [{ t: 60, v: 4 }] }]]);
+  q.push("u", { op: "update", point: { t: 60, v: 5 } });
+  expect(q.drain()).toEqual([["s", "redraw"], ["u", [{ t: 60, v: 5 }]]]);
   q.push("s", { op: "update", point: { t: 60, v: 1 } });
   q.forget("s");
   expect(q.size).toBe(0);

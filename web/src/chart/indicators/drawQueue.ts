@@ -1,24 +1,22 @@
 import type { LineDraw, Point } from "./protocol";
 
-export interface Pending {
-  set: Point[] | null;
-  updates: Point[];
-}
+export type Pending = "redraw" | Point[];
 
 export class DrawQueue<K> {
   private readonly pending = new Map<K, Pending>();
 
   push(key: K, draw: LineDraw): void {
     if (draw.op === "none") return;
-    if (draw.op === "set") {
-      this.pending.set(key, { set: draw.points, updates: [] });
+    const p = this.pending.get(key);
+    if (draw.op === "set" || p === "redraw") {
+      this.pending.set(key, "redraw");
       return;
     }
-    const p = this.pending.get(key) ?? { set: null, updates: [] };
-    const last = p.updates[p.updates.length - 1];
-    if (last?.t === draw.point.t) p.updates[p.updates.length - 1] = draw.point;
-    else p.updates.push(draw.point);
-    this.pending.set(key, p);
+    const updates = p ?? [];
+    const last = updates[updates.length - 1];
+    if (last?.t === draw.point.t) updates[updates.length - 1] = draw.point;
+    else updates.push(draw.point);
+    this.pending.set(key, updates);
   }
 
   forget(key: K): void {
