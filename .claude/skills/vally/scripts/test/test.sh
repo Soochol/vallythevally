@@ -300,6 +300,11 @@ t_impl_writer_starts_writer() {
   ! grep -q 'poteto-mode' "$VALLY_TEMPLATES/vally-writer.md"
 }
 
+t_reviewer_reviews_docs_alone() {
+  "$agent/sync-templates.sh" >/dev/null || return 1
+  ok grep -q 'documents only.*no `pstack:interrogate`, no subagents' "$VALLY_TEMPLATES/vally-reviewer.md"
+}
+
 t_sync_templates_writes_three() {
   printf 'worker claude opus -\nreviewer codex gpt-x high\ngardener claude sonnet -\nwriter claude w -\n' > "$T/models.conf"
   VALLY_MODELS=$T/models.conf "$agent/sync-templates.sh" >/dev/null || return 1
