@@ -1,4 +1,4 @@
-import { environmentManager, QueryClient, QueryObserver } from "@tanstack/react-query";
+import { environmentManager, focusManager, QueryClient, QueryObserver } from "@tanstack/react-query";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type { ScreenerStatus } from "./generated/ScreenerStatus";
 import { screenerCommands, screenerStatusQuery } from "./screener";
@@ -57,5 +57,33 @@ test("업데이트 명령보다 먼저 떠난 상태 조회가 늦게 와도 명
   await new Promise((resolve) => setTimeout(resolve, 10));
 
   expect(cached()?.update?.phase).toBe("recent");
+  stop();
+});
+
+test("업데이트가 없으면 KST 20:00과 자정 바로 뒤에만 상태를 다시 묻는다", async () => {
+  vi.useFakeTimers({ now: Date.parse("2026-11-11T19:58:00+09:00"), toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval", "Date"] });
+  const stop = watchStatus();
+  await vi.advanceTimersByTimeAsync(0);
+  expect(statusReads).toBe(1);
+
+  await vi.advanceTimersByTimeAsync(2 * 60_000);
+  expect(statusReads).toBe(1);
+  await vi.advanceTimersByTimeAsync(10_000);
+  expect(statusReads).toBe(2);
+
+  await vi.advanceTimersByTimeAsync(3 * 3_600_000 + 59 * 60_000);
+  expect(statusReads).toBe(2);
+  await vi.advanceTimersByTimeAsync(2 * 60_000);
+  expect(statusReads).toBe(3);
+  stop();
+});
+
+test("탭이 다시 보이면 상태를 다시 묻는다", async () => {
+  const stop = watchStatus();
+  await vi.waitFor(() => expect(cached()).toEqual(idle));
+  focusManager.setFocused(false);
+  focusManager.setFocused(true);
+  await vi.waitFor(() => expect(statusReads).toBe(2));
+  focusManager.setFocused(undefined);
   stop();
 });

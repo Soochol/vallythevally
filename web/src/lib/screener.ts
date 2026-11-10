@@ -120,5 +120,14 @@ export function runBlock(status: ScreenerStatus): RunBlock | null {
 
 export const showsUpdateBand = (status: ScreenerStatus): boolean => status.update !== null || runBlock(status) !== null;
 
+const KST_OFFSET_MS = 9 * 3_600_000;
+const CLOSE_MS = 20 * 3_600_000;
+const SETTLE_MS = 5_000;
+
+export function msUntilStatusTurns(now: number): number {
+  const sinceMidnight = (now + KST_OFFSET_MS) % DAY_MS;
+  return (sinceMidnight < CLOSE_MS ? CLOSE_MS : DAY_MS) - sinceMidnight + SETTLE_MS;
+}
+
 export const todayNotStored = (status: ScreenerStatus): boolean =>
   status.todayAvailable && (status.lastDay === null || status.needDay === null || status.lastDay <= status.needDay);

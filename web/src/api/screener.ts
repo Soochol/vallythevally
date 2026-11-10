@@ -1,5 +1,5 @@
 import { type QueryClient, queryOptions, useQuery, useQueryClient } from "@tanstack/react-query";
-import { isUpdating } from "../lib/screener";
+import { isUpdating, msUntilStatusTurns } from "../lib/screener";
 import type { Screen } from "./generated/Screen";
 import type { ScreenerResult } from "./generated/ScreenerResult";
 import type { ScreenerStatus } from "./generated/ScreenerStatus";
@@ -20,7 +20,8 @@ export const screenerStatusQuery = (pollWhileUpdatingMs: number) =>
   queryOptions({
     queryKey: STATUS_KEY,
     queryFn: ({ signal }) => getJson<ScreenerStatus>("/api/screener/status", signal),
-    refetchInterval: (query) => (isUpdating(query.state.data) ? pollWhileUpdatingMs : false),
+    refetchInterval: (query) => (isUpdating(query.state.data) ? pollWhileUpdatingMs : msUntilStatusTurns(Date.now())),
+    refetchOnWindowFocus: true,
   });
 
 export const useScreenerStatus = (pollWhileUpdatingMs: number) => useQuery(screenerStatusQuery(pollWhileUpdatingMs));

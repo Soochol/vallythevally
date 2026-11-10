@@ -9,6 +9,7 @@ import {
   excludedInOrder,
   excludedText,
   highDateText,
+  msUntilStatusTurns,
   nextSort,
   runBlock,
   showsUpdateBand,
@@ -135,4 +136,12 @@ test("오늘 자료 안내는 받을 수 있고 아직 저장소에 없을 때�
   expect(todayNotStored({ ...ready, todayAvailable: true, lastDay: "2026-11-11" })).toBe(false);
   expect(todayNotStored({ ...ready, todayAvailable: true, lastDay: null })).toBe(true);
   expect(todayNotStored(ready)).toBe(false);
+});
+
+test("대기 중 다음 상태 조회는 KST 20:00이나 자정에서 5초 뒤다", () => {
+  const at = (kst: string) => Date.parse(`${kst}+09:00`);
+  expect(msUntilStatusTurns(at("2026-11-11T19:59:00"))).toBe(65_000);
+  expect(msUntilStatusTurns(at("2026-11-11T20:00:00"))).toBe(4 * 3_600_000 + 5_000);
+  expect(msUntilStatusTurns(at("2026-11-11T23:59:00"))).toBe(65_000);
+  expect(msUntilStatusTurns(at("2026-11-12T00:00:00"))).toBe(20 * 3_600_000 + 5_000);
 });
