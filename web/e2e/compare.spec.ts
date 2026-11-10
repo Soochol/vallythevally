@@ -217,3 +217,56 @@ test("비교 종목이 저장된 칸을 열어도 지표 패널 축은 % 축이 
   await page.getByRole("toolbar", { name: "차트 도구 막대" }).getByRole("button", { name: "로그", exact: true }).click();
   await expect.poll(modes).toEqual({ main: 1, volume: 0 });
 });
+
+test("가격 패널 지표 선과 가격 사이에 놓인 드로잉도 눌러 고르고 끌 수 있다", async ({ page, app }) => {
+  const style = { colors: ["ind-1"], width: 1 };
+  await seed(app, { indicators: [{ id: "b1", spec: { kind: "bollinger", period: 20, k: 2 }, panel: "price", visible: true, style }] }, "D");
+  await page.addInitScript(installFrameProbe);
+  await page.goto("/");
+  await expect(cell(page)).toHaveAttribute("aria-busy", "false");
+  type Row = { time: number; value?: number; close?: number; base?: number };
+  const snap = async () => (await page.evaluate(() => window.frameProbe.snapshot())) as unknown as { type: string; data: Row[] }[];
+  await expect.poll(async () => (await snap()).filter((s) => s.type === "Custom" && s.data.length > 0).length).toBe(3);
+  const s = await snap();
+  const candles = s.find((x) => x.type === "Candlestick")!.data;
+  const bands = s.filter((x) => x.type === "Custom").map((x) => x.data.filter((r) => r.value !== undefined));
+  const upper = bands.reduce((a, b) => (a.at(-1)!.value! > b.at(-1)!.value! ? a : b));
+  const tail = upper.slice(-5);
+  const closeAt = (t: number) => candles.find((c) => c.time === t)!.close!;
+  const lo = Math.max(...tail.map((r) => closeAt(r.time)));
+  const hi = Math.min(...tail.map((r) => r.value!));
+  expect(lo).toBeLessThan(hi);
+  const price = (lo + hi) / 2;
+
+  const chart = chartOf(cell(page));
+  const box = (await chart.boundingBox())!;
+  const y = box.y + (await page.evaluate((p) => window.frameProbe.candleY(p), price))!;
+  const n = candles.length;
+  const paneWidth = box.width - 70;
+  const x = box.x + ((n - 3 - (n - 130)) / 135) * paneWidth;
+
+  await cell(page).focus();
+  await page.keyboard.press("H");
+  await page.mouse.click(x, y);
+  await expect.poll(async () => (await (await fetch(`${app.url}/api/drawings?symbol=005930`)).json()).length).toBe(1);
+  const [drawn] = await (await fetch(`${app.url}/api/drawings?symbol=005930`)).json();
+  const at = candles.reduce((a, c) => (Math.abs(c.time - drawn.points[0].t - 32400) < Math.abs(a.time - drawn.points[0].t - 32400) ? c : a));
+  expect(tail.map((r) => r.time)).toContain(at.time);
+  expect(closeAt(at.time)).toBeLessThan(drawn.points[0].price);
+  expect(tail.find((r) => r.time === at.time)!.value!).toBeGreaterThan(drawn.points[0].price);
+
+  const mirror = cell(page).locator(".drawing-mirror[data-drawings]");
+  const selected = async () => (JSON.parse((await mirror.getAttribute("data-drawings"))!) as { selected: boolean }[])[0]?.selected;
+  await page.keyboard.press("Escape");
+  await page.mouse.click(box.x + box.width * 0.2, box.y + box.height * 0.9);
+  await expect.poll(selected).toBe(false);
+
+  await page.mouse.click(x, y);
+  await expect.poll(selected).toBe(true);
+  await page.mouse.move(x, y);
+  await page.mouse.down();
+  await page.mouse.move(x, y + 40, { steps: 8 });
+  await page.mouse.up();
+  await expect.poll(async () => (await (await fetch(`${app.url}/api/drawings?symbol=005930`)).json())[0].points[0].price).toBeLessThan(drawn.points[0].price);
+  console.log("BAND_DRAWING", JSON.stringify({ lo, hi, price: drawn.points[0].price, at: at.time }));
+});
