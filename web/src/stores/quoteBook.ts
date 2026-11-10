@@ -28,7 +28,8 @@ const sameOrder = (a: readonly SymbolCode[], b: readonly SymbolCode[]) => a.leng
 export class QuoteBook {
   private readonly leases = new Set<{ symbols: readonly SymbolCode[] }>();
   private watched: readonly SymbolCode[] = [];
-  private members = new Set<SymbolCode>();
+  private entries = new Map<SymbolCode, number>();
+  private lastEntry = 0;
   // 서버는 이 집합이 바뀔 때만 다시 보낸다. 줄이 빠졌다 들어와도 서버가 새로 알리기 전까지는 이 값이 맞다.
   private serverLimited = new Set<SymbolCode>();
   private readonly rows = new Map<SymbolCode, WatchQuote>();
@@ -73,10 +74,10 @@ export class QuoteBook {
     this.scheduled = false;
     const next = union([...this.leases].map((l) => l.symbols));
     if (sameOrder(next, this.watched)) return;
-    const before = this.members;
+    const before = this.entries;
     this.watched = next;
-    this.members = new Set(next);
-    for (const code of before) if (!this.members.has(code) && this.rows.delete(code)) this.notify(code);
+    this.entries = new Map(next.map((c) => [c, before.get(c) ?? ++this.lastEntry]));
+    for (const code of before.keys()) if (!this.entries.has(code) && this.rows.delete(code)) this.notify(code);
     this.deps.socket.setWatch(next);
     const added = next.filter((c) => !before.has(c));
     for (const code of added) if (this.serverLimited.has(code)) this.setLimited(code, true);
@@ -84,27 +85,29 @@ export class QuoteBook {
   }
 
   private async load(symbols: readonly SymbolCode[], failures: number): Promise<void> {
+    const asked = new Map(symbols.map((c) => [c, this.entries.get(c)] as const));
+    const sameEntry = (c: SymbolCode) => asked.has(c) && asked.get(c) === this.entries.get(c);
     let quotes: Quote[];
     try {
       quotes = await this.deps.fetchQuotes(symbols);
     } catch (e) {
       if (!shouldRetry(failures, e)) return;
       setTimeout(() => {
-        const missing = symbols.filter((c) => this.members.has(c) && this.get(c).quote === undefined);
+        const missing = symbols.filter((c) => sameEntry(c) && this.get(c).quote === undefined);
         if (missing.length > 0) void this.load(missing, failures + 1);
       }, retryDelay(failures, e));
       return;
     }
     for (const q of quotes) {
       const row = this.get(q.symbol);
-      if (this.members.has(q.symbol) && row.quote === undefined) this.put(q.symbol, { quote: q, limited: row.limited });
+      if (sameEntry(q.symbol) && row.quote === undefined) this.put(q.symbol, { quote: q, limited: row.limited });
     }
   }
 
   private onEvent(e: QuoteEvent): void {
     switch (e.type) {
       case "quotes":
-        for (const q of e.quotes) if (this.members.has(q.symbol)) this.put(q.symbol, { quote: q, limited: this.get(q.symbol).limited });
+        for (const q of e.quotes) if (this.entries.has(q.symbol)) this.put(q.symbol, { quote: q, limited: this.get(q.symbol).limited });
         return;
       case "watch_limited":
         this.serverLimited = new Set(e.symbols);
