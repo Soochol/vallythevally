@@ -13,18 +13,23 @@ import type { FromWorker, LineDraw, ToWorker } from "./protocol";
 
 interface Datum {
   time: number;
-  value: number;
+  value?: number;
+  base?: number;
 }
 
 class FakeSeries {
   data: Datum[] = [];
-  setDataCalls = 0;
+  readonly sets: Datum[][] = [];
   readonly rejected: string[] = [];
   failNextUpdate = false;
 
+  get setDataCalls(): number {
+    return this.sets.length;
+  }
+
   setData(data: Datum[]): void {
     this.data = [...data];
-    this.setDataCalls++;
+    this.sets.push(this.data);
   }
 
   update(d: Datum): void {
@@ -56,10 +61,11 @@ const TOKENS = { text2: "text2", line: "line", upVol: "upVol", downVol: "downVol
 const T0 = Date.parse("2026-11-09T09:00:00+09:00") / 1000;
 const at = (minute: number): UnixSeconds => T0 + minute * 60;
 const range = (from: number, to: number) => Array.from({ length: to - from + 1 }, (_, i) => from + i);
-const bar = (minute: number, c = 100): Bar => ({ t: at(minute), o: 100, h: 110, l: 90, c, v: 1000 });
+const close = (minute: number) => 100 + minute;
+const bar = (minute: number, c = close(minute)): Bar => ({ t: at(minute), o: 100, h: 110, l: 90, c, v: 1000 });
 const set = (minutes: number[], v: number): LineDraw => ({ op: "set", points: minutes.map((m) => ({ t: at(m), v })) });
 const update = (minute: number, v: number): LineDraw => ({ op: "update", point: { t: at(minute), v } });
-const drawn = (minute: number, value: number): Datum => ({ time: toChartTime(at(minute)), value });
+const drawn = (minute: number, value: number, base: number): Datum => ({ time: toChartTime(at(minute)), value, base });
 
 const ICHIMOKU: IndicatorConfig = {
   id: "ichi",
@@ -94,12 +100,14 @@ function fixture() {
   const series: FakeSeries[] = [];
   const sent: ToWorker[] = [];
   const port: { listener?: PortListener } = {};
+  const add = () => {
+    const s = new FakeSeries();
+    series.push(s);
+    return s;
+  };
   const chart = {
-    addSeries: () => {
-      const s = new FakeSeries();
-      series.push(s);
-      return s;
-    },
+    addSeries: add,
+    addCustomSeries: add,
     removeSeries: () => {},
     panes: () => [],
   };
@@ -124,14 +132,14 @@ interface Step {
 
 type Fixture = ReturnType<typeof fixture>;
 
-function feedTails(steps: Step[], flushEach: boolean, beforeLastFlush: (f: Fixture) => void = () => {}) {
+function feedTails(steps: Step[], flushEach: boolean, beforeLastFlush: (f: Fixture) => void = () => {}, createdDraws: Draws = CREATED) {
   const f = fixture();
   let bars = CONFIRMED;
   f.layer.reset({ bars, current: null, nextBefore: null });
-  f.reply(created(1));
+  f.reply(created(1, createdDraws));
   const setsBefore = perLine((id) => f.line(id).setDataCalls);
   for (const step of steps) {
-    const b = bar(step.minute, 100 + step.minute);
+    const b = bar(step.minute);
     if (step.kind === "confirmed") bars = [...bars, b];
     const h: History = { bars, current: step.kind === "live" ? b : null, nextBefore: null };
     f.layer.advance(h, b, step.kind);
@@ -173,11 +181,11 @@ test("선행스팬을 다시 놓은 프레임에 그 봉 확정과 다음 봉이
   expect(consoleError).not.toHaveBeenCalled();
   expect(once.data()).toEqual(each.data());
   expect(perLine((id) => lastOf(once.line(id)))).toEqual({
-    conversion: drawn(22, 4),
-    base: drawn(22, 4),
-    spanA: drawn(27, 4),
-    spanB: drawn(27, 4),
-    lagging: drawn(16, 4),
+    conversion: drawn(22, 4, close(22)),
+    base: drawn(22, 4, close(22)),
+    spanA: drawn(27, 4, 4),
+    spanB: drawn(27, 4, 4),
+    lagging: drawn(16, 4, close(16)),
   });
   const { conversion, base, lagging } = once.setsInFrame();
   expect({ conversion, base, lagging }).toEqual({ conversion: 0, base: 0, lagging: 0 });
@@ -211,7 +219,41 @@ test.each<[string, Step[]]>([
   expect(consoleError).not.toHaveBeenCalled();
   expect(once.data()).toEqual(each.data());
   const last = steps[steps.length - 1]!.draws.spanA as Extract<LineDraw, { op: "update" }>;
-  expect(lastOf(once.line("spanA"))).toEqual({ time: toChartTime(last.point.t), value: last.point.v });
+  expect(lastOf(once.line("spanA"))).toEqual({ time: toChartTime(last.point.t), value: last.point.v, base: last.point.v });
+});
+
+test.each([true, false])("가격 패널 선은 기준값만 든 점을 첫 실제 점 앞에 주 봉마다 하나씩만 두고, 실제 점의 기준값은 그 시각의 주 봉 종가다 (메시지마다 그리기: %s)", (flushEach) => {
+  const warmup: Draws = { conversion: set(range(2, 19), 1), base: set([], 1), spanA: set(range(12, 24), 1), spanB: set(range(15, 24), 1), lagging: set([], 1) };
+  const regrid = (from: number) => set([...range(from, 20), ...range(22, 27)], 4);
+  const steps: Step[] = [
+    { minute: 20, kind: "live", draws: { conversion: update(20, 2), base: update(20, 2), spanA: update(25, 2), spanB: update(25, 2) } },
+    { minute: 20, kind: "confirmed", draws: { conversion: update(20, 3), base: update(20, 3), spanA: update(25, 3), spanB: update(25, 3), lagging: set(range(0, 15), 3) } },
+    { minute: 22, kind: "live", draws: { conversion: update(22, 4), base: update(22, 4), spanA: regrid(12), spanB: regrid(15), lagging: update(16, 4) } },
+    { minute: 22, kind: "confirmed", draws: { conversion: update(22, 4), base: update(22, 4), spanA: update(27, 4), spanB: update(27, 4), lagging: update(16, 4) } },
+    { minute: 23, kind: "live", draws: { conversion: update(23, 5), spanA: update(28, 5), spanB: update(28, 5), lagging: update(17, 5) } },
+  ];
+  const f = feedTails(steps, flushEach, undefined, warmup);
+  const mains = [...CONFIRMED, bar(20), bar(22), bar(23)];
+  const closeAt = new Map<number, number>(mains.map((b) => [toChartTime(b.t), b.c]));
+
+  expect(f.line("lagging").sets[0]).toEqual([]);
+  expect(f.line("base").data[0]).toEqual({ time: toChartTime(at(0)), base: close(0) });
+  for (const id of LINES) {
+    const sets = f.line(id).sets.filter((rows) => rows.length > 0);
+    expect(sets.length).toBeGreaterThan(0);
+    for (const rows of sets) {
+      const first = rows.findIndex((r) => r.value !== undefined);
+      const warm = rows.slice(0, first);
+      expect(first).toBeGreaterThanOrEqual(0);
+      expect(rows.slice(first).every((r) => r.value !== undefined)).toBe(true);
+      expect(warm.map((r) => r.time)).toEqual(CONFIRMED.map((b) => toChartTime(b.t)).filter((t) => t < rows[first]!.time));
+      expect(warm.map((r) => r.base)).toEqual(warm.map((r) => closeAt.get(r.time)));
+    }
+    const real = f.line(id).data.filter((r) => r.value !== undefined);
+    expect(real.map((r) => r.base)).toEqual(real.map((r) => closeAt.get(r.time) ?? r.value));
+  }
+  expect(lastOf(f.line("spanA"))).toEqual(drawn(28, 5, 5));
+  expect(f.line("spanA").data.find((r) => r.time === toChartTime(at(23)))?.base).toBe(close(23));
 });
 
 test("한 선의 update가 실패해도 같은 프레임의 다른 선은 그리고, 실패한 선만 점 사본으로 다시 맞춘다", () => {
@@ -222,7 +264,8 @@ test("한 선의 update가 실패해도 같은 프레임의 다른 선은 그리
   });
 
   expect(once.data()).toEqual(each.data());
-  expect(once.setsInFrame()).toEqual({ conversion: 1, base: 0, spanA: 0, spanB: 0, lagging: 0 });
+  const plain = each.setsInFrame();
+  expect(once.setsInFrame()).toEqual({ ...plain, conversion: plain.conversion + 1 });
   expect(consoleError).toHaveBeenCalledTimes(1);
 });
 

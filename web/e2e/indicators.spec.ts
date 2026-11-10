@@ -40,7 +40,7 @@ test("후행스팬이 있는 칸에서 체결을 흘려도 모든 선의 update�
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
   const row = page.locator('[data-indicator-row="i1"]');
   await expect(row).toContainText("일목균형표 3 5 8 6");
-  await expect.poll(async () => (await series(page)).filter((s) => s.type === "Line" && s.data.length > 0).length).toBe(5);
+  await expect.poll(async () => (await series(page)).filter((s) => s.type === "Custom" && s.data.length > 0).length).toBe(5);
 
   await expect(async () => {
     await trade(app, page, delivered, 201_000, "100031");
@@ -56,7 +56,7 @@ test("후행스팬이 있는 칸에서 체결을 흘려도 모든 선의 update�
   const snap = await series(page);
   const main = snap.find((s) => s.type === "Candlestick")!;
   const lastMain = Number(main.data.at(-1)!.time);
-  const lines = snap.filter((s) => s.type === "Line");
+  const lines = snap.filter((s) => s.type === "Custom");
   expect(lines).toHaveLength(5);
   for (const line of lines) {
     const times = line.updates.map((u) => Number(u.time));

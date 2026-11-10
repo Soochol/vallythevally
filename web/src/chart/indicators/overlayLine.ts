@@ -1,0 +1,80 @@
+import {
+  type CustomData,
+  type CustomSeriesOptions,
+  type CustomSeriesWhitespaceData,
+  customSeriesDefaultOptions,
+  type IChartApi,
+  type ICustomSeriesPaneRenderer,
+  type ICustomSeriesPaneView,
+  type ISeriesApi,
+  type LineWidth,
+  type PaneRendererCustomData,
+  type SeriesPartialOptions,
+  type Time,
+  type WhitespaceData,
+} from "lightweight-charts";
+
+export interface OverlayPoint extends CustomData<Time> {
+  value?: number;
+  base: number;
+}
+
+export interface OverlayOptions extends CustomSeriesOptions {
+  lineWidth: LineWidth;
+}
+
+export type OverlaySeries = ISeriesApi<"Custom", Time, OverlayPoint | WhitespaceData<Time>, OverlayOptions>;
+
+export class OverlayLineView implements ICustomSeriesPaneView<Time, OverlayPoint, OverlayOptions> {
+  private data: PaneRendererCustomData<Time, OverlayPoint> | null = null;
+  private options: OverlayOptions | null = null;
+
+  renderer(): ICustomSeriesPaneRenderer {
+    return {
+      draw: (target, toY) =>
+        target.useMediaCoordinateSpace(({ context: ctx }) => {
+          const { data, options } = this;
+          if (!data?.visibleRange || !options) return;
+          ctx.beginPath();
+          let started = false;
+          for (let i = data.visibleRange.from; i < data.visibleRange.to; i++) {
+            const bar = data.bars[i];
+            const v = bar?.originalData.value;
+            if (bar === undefined || v === undefined) continue;
+            const y = toY(v);
+            if (y === null) continue;
+            if (started) ctx.lineTo(bar.x, y);
+            else ctx.moveTo(bar.x, y);
+            started = true;
+          }
+          ctx.lineWidth = options.lineWidth;
+          ctx.strokeStyle = options.color;
+          ctx.lineJoin = "round";
+          ctx.lineCap = "butt";
+          ctx.stroke();
+        }),
+    };
+  }
+
+  update(data: PaneRendererCustomData<Time, OverlayPoint>, options: OverlayOptions): void {
+    this.data = data;
+    this.options = options;
+  }
+
+  /** Lightweight Charts는 마지막 값을 종가로 보고 % 기준으로 쓴다. */
+  priceValueBuilder(p: OverlayPoint): number[] {
+    return p.value === undefined ? [p.base] : [p.value, p.base];
+  }
+
+  isWhitespace(p: OverlayPoint | CustomSeriesWhitespaceData<Time>): p is CustomSeriesWhitespaceData<Time> {
+    return !("base" in p);
+  }
+
+  defaultOptions(): OverlayOptions {
+    return { ...customSeriesDefaultOptions, lineWidth: 1 };
+  }
+}
+
+export function addOverlayLine(chart: IChartApi, options: SeriesPartialOptions<OverlayOptions>, pane: number): OverlaySeries {
+  return chart.addCustomSeries(new OverlayLineView(), options, pane);
+}
