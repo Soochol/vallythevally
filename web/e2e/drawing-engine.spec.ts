@@ -2,6 +2,8 @@ import { test, expect, cell, chartOf, type App } from "./harness";
 import type { Page } from "@playwright/test";
 import type { Drawing } from "../src/api/generated/Drawing";
 import type { Bar } from "../src/api/generated/Bar";
+import type { DrawingBody } from "../src/chart/drawings/types";
+import { completionKey } from "../src/chart/drawings/journal";
 
 interface Mirror { id: string; tool: string; selected: boolean; points: ({ x: number; y: number } | null)[]; handles: { x: number; y: number }[] }
 async function mirror(page: Page): Promise<Mirror[]> {
@@ -229,16 +231,42 @@ test("drawing engine: another tab's edit prevents undoing its content", async ({
   await other.close();
 });
 
-test("drawing engine: recovery retains old revision so a newer server edit wins", async ({ page, app }) => {
+test("drawing engine: completed legacy replay is retired locally and the newer server edit wins", async ({ page, app }) => {
   await open(page); await draw(page); await expect.poll(async () => (await drawings(app)).length).toBe(1);
+  await expect(page.getByText(/^자동 저장됨 /)).toBeVisible();
   const original = (await drawings(app))[0]!;
   const changed = { ...original, points: original.points.map((p) => ({ ...p, price: p.price + 100 })), revision: original.revision + 100 };
   const put = await fetch(`${app.url}/api/drawings/${original.id}`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(changed) });
   expect(put.status).toBe(200);
+  const completed = await page.evaluate(key => localStorage.getItem(key), completionKey(original.id));
+  expect(completed).not.toBeNull();
   await page.evaluate((d) => localStorage.setItem(`vv.unsaved.drawing.${d.id}`, JSON.stringify({ v: 1, id: d.id, symbol: d.symbol, lastRevision: d.revision, want: { kind: "put", body: d, reserved: true } })), original);
-  const stale = page.waitForResponse((r) => r.url().endsWith(`/api/drawings/${original.id}`) && r.status() === 409);
-  await page.reload(); await stale;
+  const requests: string[] = [];
+  page.on("request", request => { if (request.url().endsWith(`/api/drawings/${original.id}`) && request.method() === "PUT") requests.push(request.method()); });
+  await page.reload();
   await expect.poll(() => page.evaluate((id) => localStorage.getItem(`vv.unsaved.drawing.${id}`), original.id)).toBeNull();
+  await expect(page.getByText(/^자동 저장됨 /)).toBeVisible();
+  expect(requests).toEqual([]);
+  expect(await page.evaluate(key => localStorage.getItem(key), completionKey(original.id))).toBe(completed);
+  expect((await drawings(app))[0]!.points).toEqual(changed.points);
+});
+
+test("drawing engine: pre-upgrade legacy recovery keeps its fixed revision and receives the server conflict", async ({ page, app }) => {
+  const original: DrawingBody = { id: "01900000-0000-7000-8000-000000000054", symbol: "IDX:001", tool: "hline", points: [{ t: 1700000000, price: 6000 }], text: null, style: {}, locked: false, hidden: false, periods: null, z: 1, group: null, scope: { kind: "symbol" }, revision: 731 };
+  const changed = { ...original, points: original.points.map(point => ({ ...point, price: point.price + 100 })), revision: 831 };
+  for (const body of [original, changed]) {
+    const response = await fetch(`${app.url}/api/drawings/${body.id}`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+    expect(response.status).toBe(200);
+  }
+  await page.route("**/__legacy-fixture", route => route.fulfill({ contentType: "text/html", body: "<!doctype html><title>Legacy origin fixture</title>" }));
+  await page.goto("/__legacy-fixture");
+  expect(await page.evaluate(key => localStorage.getItem(key), completionKey(original.id))).toBeNull();
+  await page.evaluate(d => localStorage.setItem(`vv.unsaved.drawing.${d.id}`, JSON.stringify({ v: 1, id: d.id, symbol: d.symbol, lastRevision: d.revision, want: { kind: "put", body: d, reserved: true } })), original);
+  const stale = page.waitForResponse(response => response.url().endsWith(`/api/drawings/${original.id}`) && response.status() === 409);
+  await open(page);
+  const rejected = await stale;
+  expect(rejected.request().postDataJSON()).toEqual(original);
+  await expect.poll(() => page.evaluate(id => localStorage.getItem(`vv.unsaved.drawing.${id}`), original.id)).toBeNull();
   expect((await drawings(app))[0]!.points).toEqual(changed.points);
   await expect(page.getByText("다른 곳의 새 수정이 있어 드로잉을 다시 불러왔습니다")).toBeVisible();
 });
