@@ -11,7 +11,7 @@ export interface WatchQuote {
 
 const EMPTY: WatchQuote = { quote: undefined, limited: false };
 
-export type FetchQuotes = (symbols: readonly SymbolCode[]) => Promise<Quote[]>;
+type FetchQuotes = (symbols: readonly SymbolCode[]) => Promise<Quote[]>;
 
 function union(lists: Iterable<readonly SymbolCode[]>): SymbolCode[] {
   const seen = new Set<SymbolCode>();
@@ -37,7 +37,6 @@ export class QuoteBook {
     deps.socket.onQuotes((e) => this.onEvent(e));
   }
 
-  /** 보이는 목록 하나가 빌린다. 돌려준 함수로 푼다. */
   lease(symbols: readonly SymbolCode[]): () => void {
     const lease = { symbols };
     this.leases.add(lease);
