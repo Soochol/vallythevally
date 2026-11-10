@@ -18,7 +18,7 @@ use crate::kiwoom::api::{
 use crate::kiwoom::error::{Failure, Surface};
 use crate::kiwoom::rest::{ContKey, KiwoomError, KiwoomRest, MergeScope, Priority};
 use crate::kiwoom::wire::{ChartBody, ChartRows, KiwoomBar, parse_chart};
-use crate::symbols::{NotReady, SymbolDirectory};
+use crate::symbols::{Directory, NotReady, SymbolDirectory};
 
 pub const DEFAULT_LIMIT: usize = 500;
 pub const MAX_LIMIT: usize = 1000;
@@ -137,6 +137,10 @@ impl BarService {
     }
 
     /// `before`가 None이면 최신 페이지다.
+    pub fn directory_updates(&self) -> tokio::sync::watch::Receiver<Option<Arc<Directory>>> {
+        self.symbols.updates()
+    }
+
     pub async fn page(&self, key: SeriesKey, before: Option<KstTime>, limit: usize) -> Result<BarPage, BarError> {
         self.check(key).await?;
         let prio = Priority::Screen;

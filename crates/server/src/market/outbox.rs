@@ -10,7 +10,7 @@ use std::sync::{Arc, Mutex};
 use tokio::sync::Notify;
 
 use super::SubId;
-use crate::api::{Bar, ServerMessage};
+use crate::api::{Bar, Quote, ServerMessage};
 
 pub const MUST_CAPACITY: usize = 256;
 
@@ -28,6 +28,7 @@ pub struct Outbox {
 struct State {
     must: VecDeque<ServerMessage>,
     bars: BTreeMap<String, (u64, Bar)>,
+    quotes: BTreeMap<String, Quote>,
     closed: bool,
 }
 
@@ -68,6 +69,14 @@ impl Outbox {
         }
     }
 
+    /// 그 종목의 대기 중 현재가를 덮어쓴다. `bar`와 같은 100ms 묶음으로 나간다.
+    pub fn set_quote(&self, quote: Quote) {
+        let mut s = self.state.lock().expect("outbox 잠금");
+        if !s.closed {
+            s.quotes.insert(quote.symbol.0.clone(), quote);
+        }
+    }
+
     pub fn close(&self) {
         self.state.lock().expect("outbox 잠금").closed = true;
         self.wake.notify_one();
@@ -79,6 +88,9 @@ impl Outbox {
         let mut messages: Vec<ServerMessage> = s.must.drain(..).collect();
         if with_bars {
             messages.extend(std::mem::take(&mut s.bars).into_iter().map(|(sub, (seq, bar))| ServerMessage::Bar { sub, seq, bar }));
+            if !s.quotes.is_empty() {
+                messages.push(ServerMessage::Quotes { quotes: std::mem::take(&mut s.quotes).into_values().collect() });
+            }
         }
         Batch { messages, closed: s.closed }
     }
@@ -96,7 +108,7 @@ fn sub_of(msg: &ServerMessage) -> Option<&str> {
         | ServerMessage::Bar { sub, .. }
         | ServerMessage::Confirmed { sub, .. }
         | ServerMessage::Reload { sub, .. } => Some(sub),
-        ServerMessage::Hello { .. } | ServerMessage::Status { .. } => None,
+        ServerMessage::Hello { .. } | ServerMessage::Status { .. } | ServerMessage::Quotes { .. } | ServerMessage::WatchLimited { .. } => None,
     }
 }
 
@@ -180,6 +192,33 @@ mod tests {
         assert_eq!(out.take(false).messages, vec![], "곧바로 보내는 꺼내기에는 bar가 없다");
         assert_eq!(out.take(true).messages, vec![ServerMessage::Bar { sub: "a".into(), seq: 2, bar: bar(2.0) }]);
         assert_eq!(out.take(true).messages, vec![], "보낸 bar는 다시 가지 않는다");
+    }
+
+    #[test]
+    fn quotes_keep_the_newest_per_symbol_and_go_with_the_bars_in_one_message() {
+        let out = Outbox::new();
+        let quote = |code: &str, price: f64| Quote {
+            symbol: crate::api::SymbolCode(code.into()),
+            price,
+            change: 0.0,
+            change_rate: 0.0,
+            volume: 1,
+            t: UnixSeconds(0),
+            source: crate::api::QuoteSource::Realtime,
+        };
+        out.set_quote(quote("005930", 1.0));
+        out.set_quote(quote("000660", 5.0));
+        out.set_quote(quote("005930", 2.0));
+        out.set_bar(&SubId("a".into()), 1, bar(2.0));
+        assert_eq!(out.take(false).messages, vec![], "곧바로 보내는 꺼내기에는 현재가가 없다");
+        assert_eq!(
+            out.take(true).messages,
+            vec![
+                ServerMessage::Bar { sub: "a".into(), seq: 1, bar: bar(2.0) },
+                ServerMessage::Quotes { quotes: vec![quote("000660", 5.0), quote("005930", 2.0)] },
+            ]
+        );
+        assert_eq!(out.take(true).messages, vec![]);
     }
 
     #[test]
