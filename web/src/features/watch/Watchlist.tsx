@@ -26,6 +26,8 @@ import { ArrowIcon, ChevronIcon, ChevronRightIcon, CloseIcon, MoreIcon, PlusIcon
 import { Menu, type MenuItem } from "../menu/Menu";
 import { columnTemplate, type WatchVariant } from "./columns";
 import { FundamentalsPanel } from "./FundamentalsPanel";
+import { useDrawingSession } from "../../stores/drawingSession";
+import { ObjectList, WatchObjectTabs } from "../drawings/ObjectList";
 
 const DIR_CLASS = { up: "text-up", down: "text-down", flat: "text-text-2" } as const;
 const ROW_GRID = "grid gap-1";
@@ -34,6 +36,7 @@ export function WatchPanel() {
   const collapsed = useUiStore((s) => s.prefs.watchCollapsed);
   const toggle = useUiStore((s) => s.toggleWatch);
   const desktop = useMediaQuery(DESKTOP_QUERY);
+  const panel = useDrawingSession((s) => s.panel);
   if (collapsed) {
     return (
       <aside aria-label="관심종목" className="flex flex-col items-center border-l border-line bg-bg pt-1.5 [grid-area:watch] max-md:hidden">
@@ -45,6 +48,8 @@ export function WatchPanel() {
   }
   return (
     <aside aria-label="관심종목" className="flex min-h-0 flex-col border-l border-line bg-bg [grid-area:watch] max-md:hidden">
+      <WatchObjectTabs />
+      {panel === "objects" ? <ObjectList /> : <>
       <WatchHead>
         <button type="button" className="icon-btn" title="관심종목 접기 (Alt+W)" aria-label="관심종목 접기" aria-expanded onClick={toggle}>
           <ChevronRightIcon />
@@ -53,6 +58,7 @@ export function WatchPanel() {
       <WatchList variant="desktop" editing={false} />
       <p className="flex-none border-t border-line px-3 py-2 text-s text-text-3">끌거나 Alt+↑↓로 순서를 바꿉니다</p>
       {desktop && <FundamentalsPanel />}
+      </>}
     </aside>
   );
 }

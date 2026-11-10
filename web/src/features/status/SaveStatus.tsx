@@ -2,6 +2,8 @@ import { retryFailedSaves } from "../../persist/autosave";
 import { type SaveIndicator, saveIndicator } from "../../persist/saveStatus";
 import { usePersistStore } from "../../stores/persist";
 import { CheckIcon } from "../icons";
+import { useDrawingSave } from "../../chart/drawings/sync";
+const retryAll = () => { retryFailedSaves(); useDrawingSave.getState().retry(); };
 
 const pad = (n: number) => String(n).padStart(2, "0");
 const clock = (ms: number) => {
@@ -12,7 +14,8 @@ const clock = (ms: number) => {
 export function useSaveView(): { indicator: SaveIndicator; offline: string | null } {
   const saves = usePersistStore((s) => s.saves);
   const phase = usePersistStore((s) => s.phase);
-  return { indicator: saveIndicator(saves), offline: phase.kind === "offline" ? phase.message : null };
+  const drawing = useDrawingSave((s) => s.state);
+  return { indicator: saveIndicator(saves, drawing), offline: phase.kind === "offline" ? phase.message : null };
 }
 
 const RETRY_BUTTON = "rounded-s px-1 font-[650] text-accent underline underline-offset-2 hover:bg-accent-soft";
@@ -45,7 +48,7 @@ export function SaveStatus() {
       return (
         <span className="flex items-center gap-1 text-accent" role="alert">
           저장하지 못했습니다:
-          <button type="button" className={RETRY_BUTTON} onClick={retryFailedSaves}>
+          <button type="button" className={RETRY_BUTTON} onClick={retryAll}>
             다시 시도
           </button>
         </span>
@@ -73,7 +76,7 @@ export function PhoneSaveBand() {
     <div role="alert" className="fixed inset-x-0 bottom-[56px] z-40 flex items-center gap-2 border-t border-accent bg-accent-soft px-3 py-2 text-s text-text md:hidden">
       <span className="min-w-0 flex-1">{text}</span>
       {(offline || indicator.kind === "failed") && (
-        <button type="button" className={RETRY_BUTTON} onClick={offline ? () => location.reload() : retryFailedSaves}>
+        <button type="button" className={RETRY_BUTTON} onClick={offline ? () => location.reload() : retryAll}>
           {offline ? "다시 불러오기" : "다시 시도"}
         </button>
       )}

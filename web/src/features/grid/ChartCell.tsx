@@ -10,6 +10,8 @@ import { marketSocket } from "../../stores/realtime";
 import { useSelectionStore } from "../../stores/selection";
 import { useTheme } from "../../stores/ui";
 import { cellErrorView, olderErrorView } from "./cellError";
+import { useDrawingSurface } from "../../chart/drawings/useDrawingSurface";
+import { DrawingOverlay } from "../drawings/DrawingOverlay";
 import { attachController } from "./controllers";
 
 interface Props {
@@ -62,6 +64,8 @@ export function ChartCell({ slot, status, onStatus }: Props) {
     ctl.current?.setTheme(readThemeTokens());
   }, [theme]);
 
+  useDrawingSurface(ctl, slot);
+
   const name = info?.name ?? cell.symbol;
   const error = status.kind === "error" ? cellErrorView(status.error, cell.symbol) : null;
   const olderError = status.kind === "ready" && status.olderError ? olderErrorView(status.olderError, cell.symbol) : null;
@@ -74,6 +78,7 @@ export function ChartCell({ slot, status, onStatus }: Props) {
       className="relative min-h-0 min-w-0 bg-chart-bg focus-visible:outline-offset-[-2px]"
     >
       <div ref={chartEl} className="absolute inset-0" />
+      <DrawingOverlay slot={slot} />
       {status.kind === "loading" && (
         <div className="pointer-events-none absolute inset-0 z-[5] grid place-items-center">
           <p className="rounded-m bg-surface px-3 py-2 text-s text-text-2 shadow-dialog" role="status">

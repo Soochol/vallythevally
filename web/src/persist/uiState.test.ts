@@ -11,6 +11,7 @@ test("아는 키는 읽고 모르는 키는 extra에 남겨 그대로 돌려보�
     recentSymbols: ["005930"],
     activeWatchlistId: "W2",
     watchColumns: ["price", "volume"],
+    drawing: DEFAULT_UI_PREFS.drawing,
     phone: { symbol: "000660" },
   };
   const { prefs, extra } = parseUiState(raw);
@@ -21,6 +22,7 @@ test("아는 키는 읽고 모르는 키는 extra에 남겨 그대로 돌려보�
     recentSymbols: ["005930"],
     activeWatchlistId: "W2",
     watchColumns: ["price", "volume"],
+    drawing: DEFAULT_UI_PREFS.drawing,
   });
   expect(extra).toEqual({ phone: { symbol: "000660" } });
   expect(toUiState(prefs, extra)).toEqual(raw);

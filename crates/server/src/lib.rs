@@ -6,6 +6,8 @@ pub mod bars;
 pub mod clock;
 pub mod config;
 pub mod db;
+pub mod drawing_api;
+pub mod drawings;
 pub mod fundamentals;
 pub mod http;
 pub mod instance;

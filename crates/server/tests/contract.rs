@@ -8,6 +8,7 @@ use std::process::Command;
 
 use indicators::{LineId, MaMethod, Spec as IndicatorSpec};
 use server::api::*;
+use server::drawing_api::*;
 use ts_rs::TS;
 
 const DIR: &str = "web/src/api/generated";
@@ -38,6 +39,11 @@ fn generated_typescript_matches_the_committed_files() {
         generated::<Bar>(),
         generated::<BarsPage>(),
         generated::<Cell>(),
+        generated::<Drawing>(),
+        generated::<DrawingInput>(),
+        generated::<DrawingPoint>(),
+        generated::<DrawingScope>(),
+        generated::<DrawingTool>(),
         generated::<ClientMessage>(),
         generated::<ConnectionStatus>(),
         generated::<Fundamentals>(),
