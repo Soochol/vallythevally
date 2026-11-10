@@ -36,6 +36,18 @@ export function nextListName(lists: readonly Watchlist[]): string {
   for (let n = 1; ; n++) if (!taken.has(`목록 ${n}`)) return `목록 ${n}`;
 }
 
+export function listNameFrom(lists: readonly Watchlist[], base: string): string {
+  const taken = new Set(lists.map((l) => l.name));
+  const cut = (room: number) => [...base.trim()].slice(0, room).join("").trim();
+  const whole = cut(MAX_WATCHLIST_NAME);
+  if (!taken.has(whole)) return whole;
+  for (let n = 2; ; n++) {
+    const suffix = ` ${n}`;
+    const name = cut(MAX_WATCHLIST_NAME - suffix.length) + suffix;
+    if (!taken.has(name)) return name;
+  }
+}
+
 export function nameProblem(lists: readonly Watchlist[], typed: string, self: string | null): string | null {
   const name = typed.trim();
   if (name === "") return "이름을 입력하세요";

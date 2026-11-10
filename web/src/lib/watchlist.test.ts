@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { addSymbol, moveSymbol, moveSymbolBy, nameProblem, nextListName, removeSymbol, transferSymbol } from "./watchlist";
+import { addSymbol, listNameFrom, moveSymbol, moveSymbolBy, nameProblem, nextListName, removeSymbol, transferSymbol } from "./watchlist";
 
 const list = ["005930", "000660", "035420"] as const;
 
@@ -46,6 +46,19 @@ test("복사는 원래 목록을 그대로 둔다. 이미 있거나 원래 목�
 test("새 목록 이름은 비어 있는 가장 작은 번호다", () => {
   expect(nextListName([])).toBe("목록 1");
   expect(nextListName([{ id: "a", name: "목록 1", symbols: [] }, { id: "b", name: "목록 3", symbols: [] }])).toBe("목록 2");
+});
+
+test("다른 이름에서 만든 새 목록 이름은 20자로 자르고, 겹치면 뒤에 번호를 붙인다", () => {
+  const named = (...names: string[]) => names.map((name, i) => ({ id: `${i}`, name, symbols: [] }));
+  expect(listNameFrom(named("기본"), "  고가 200일 신고가 ")).toBe("고가 200일 신고가");
+  expect(listNameFrom(named("고가 200일 신고가"), "고가 200일 신고가")).toBe("고가 200일 신고가 2");
+  expect(listNameFrom(named("고가 200일 신고가", "고가 200일 신고가 2"), "고가 200일 신고가")).toBe("고가 200일 신고가 3");
+  const long = "최근 5일 고가 200일 신고가와 거래량 60일 신고거래량";
+  const cut = listNameFrom([], long);
+  expect(cut).toBe("최근 5일 고가 200일 신고가와 거");
+  expect([...cut].length).toBeLessThanOrEqual(20);
+  expect(listNameFrom(named(cut), long)).toBe("최근 5일 고가 200일 신고가와 2");
+  for (const name of [cut, listNameFrom(named(cut), long)]) expect(nameProblem([], name, null)).toBeNull();
 });
 
 test("이름은 앞뒤 공백을 지우고 비지 않으며 20자까지이며 다른 목록과 겹치지 않는다. 자기 이름은 그대로 둘 수 있다", () => {

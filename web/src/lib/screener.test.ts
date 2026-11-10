@@ -1,0 +1,138 @@
+import { expect, test } from "vitest";
+import type { Screen } from "../api/generated/Screen";
+import type { ScreenerRow } from "../api/generated/ScreenerRow";
+import type { ScreenerStatus } from "../api/generated/ScreenerStatus";
+import {
+  conditionSentence,
+  dayLabel,
+  DEFAULT_SORT,
+  excludedInOrder,
+  excludedText,
+  highDateText,
+  nextSort,
+  runBlock,
+  showsUpdateBand,
+  sortRows,
+  todayNotStored,
+} from "./screener";
+
+test("조건 문장은 봉 주기의 단위와 M이 1인지에 따라 바뀐다", () => {
+  expect(conditionSentence("D", { field: "high", n: 200, m: 5 })).toBe("최근 5일 안에 고가가 200일 신고가인 봉이 있다");
+  expect(conditionSentence("D", { field: "volume", n: 60, m: 1 })).toBe("당일 거래량이 60일 신고거래량이다");
+  expect(conditionSentence("W", { field: "close", n: 52, m: 1 })).toBe("이번 주 종가가 52주 신고가다");
+  expect(conditionSentence("M", { field: "low", n: 12, m: 3 })).toBe("최근 3개월 안에 저가가 12개월 신고가인 봉이 있다");
+  expect(conditionSentence("W", { field: "volume", n: 104, m: 8 })).toBe("최근 8주 안에 거래량이 104주 신고거래량인 봉이 있다");
+  expect(conditionSentence("D", { field: "open", n: 1200, m: 20 })).toBe("최근 20일 안에 시가가 1,200일 신고가인 봉이 있다");
+});
+
+test("제외 목록은 저장 순서와 상관없이 종류, 상태 순으로 보인다", () => {
+  expect(excludedInOrder(["trading_halted", "etf", "managed", "spac"])).toEqual(["etf", "spac", "managed", "trading_halted"]);
+  expect(excludedInOrder([])).toEqual([]);
+});
+
+test("빠진 종목 수는 조건 가운데 가장 큰 N을 상장 기준으로 적는다", () => {
+  const screen: Screen = {
+    id: "s",
+    name: "주봉",
+    period: "W",
+    exclude: [],
+    conditions: [
+      { field: "high", n: 52, m: 1 },
+      { field: "volume", n: 104, m: 4 },
+    ],
+  };
+  expect(excludedText(screen, { listedTooShort: 14, historyShort: 1120 })).toBe("상장 104주 미만 14 · 이력 덜 참 1,120");
+});
+
+test("날짜는 기준과 같은 해면 연도를 빼고 요일을 붙인다", () => {
+  expect(dayLabel("2026-11-10", "2026-11-11")).toBe("11-10(화)");
+  expect(dayLabel("2025-12-30", "2026-01-02")).toBe("2025-12-30(화)");
+});
+
+test("신고가 날짜가 기준 관측일의 봉이면 당일·이번 주·이번 달로 보인다", () => {
+  expect(highDateText("D", "2026-11-10", "2026-11-10")).toEqual({ text: "당일", current: true });
+  expect(highDateText("D", "2026-11-06", "2026-11-10")).toEqual({ text: "11-06", current: false });
+  expect(highDateText("D", "2025-12-30", "2026-01-02")).toEqual({ text: "2025-12-30", current: false });
+
+  expect(highDateText("W", "2026-11-09", "2026-11-11")).toEqual({ text: "이번 주", current: true });
+  expect(highDateText("W", "2025-12-29", "2026-01-02")).toEqual({ text: "이번 주", current: true });
+  expect(highDateText("W", "2026-11-02", "2026-11-11")).toEqual({ text: "11-02 주", current: false });
+
+  expect(highDateText("M", "2026-11-02", "2026-11-10")).toEqual({ text: "이번 달", current: true });
+  expect(highDateText("M", "2026-10-01", "2026-11-10")).toEqual({ text: "10월", current: false });
+  expect(highDateText("M", "2025-12-01", "2026-01-05")).toEqual({ text: "2025년 12월", current: false });
+});
+
+const row = (symbol: string, name: string, close: number, changeRate: number | null, highDate: string): ScreenerRow => ({
+  symbol,
+  name,
+  close,
+  changeRate,
+  highDate,
+});
+const rows: readonly ScreenerRow[] = [
+  row("000100", "나", 5000, 1.5, "2026-11-10"),
+  row("000200", "가", 7000, null, "2026-11-06"),
+  row("000300", "다", 3000, -2, "2026-11-10"),
+  row("000050", "라", 7000, 3, "2026-11-06"),
+];
+const order = (sorted: readonly ScreenerRow[]) => sorted.map((r) => r.symbol);
+
+test("결과는 기본으로 신고가 날짜 최신순이고, 같으면 종목코드 순이다", () => {
+  expect(order(sortRows(rows, DEFAULT_SORT))).toEqual(["000100", "000300", "000050", "000200"]);
+});
+
+test("열을 바꿔 정렬해도 같은 값은 종목코드 순이고, 등락률이 없는 행은 늘 끝이다", () => {
+  expect(order(sortRows(rows, { key: "close", descending: true }))).toEqual(["000050", "000200", "000100", "000300"]);
+  expect(order(sortRows(rows, { key: "changeRate", descending: true }))).toEqual(["000050", "000100", "000300", "000200"]);
+  expect(order(sortRows(rows, { key: "changeRate", descending: false }))).toEqual(["000300", "000100", "000050", "000200"]);
+  expect(order(sortRows(rows, { key: "name", descending: false }))).toEqual(["000200", "000100", "000300", "000050"]);
+  expect(order(rows)).toEqual(["000100", "000200", "000300", "000050"]);
+});
+
+test("같은 열 머리를 다시 누르면 방향이 뒤집히고, 새 열은 이름만 오름차순으로 시작한다", () => {
+  const byClose = nextSort(DEFAULT_SORT, "close");
+  expect(byClose).toEqual({ key: "close", descending: true });
+  expect(nextSort(byClose, "close")).toEqual({ key: "close", descending: false });
+  expect(nextSort(byClose, "name")).toEqual({ key: "name", descending: false });
+  expect(nextSort(DEFAULT_SORT, "highDate")).toEqual({ key: "highDate", descending: false });
+});
+
+const ready: ScreenerStatus = {
+  lastDay: "2026-11-10",
+  needDay: "2026-11-10",
+  todayAvailable: false,
+  fullHistory: { done: 3960, total: 3960 },
+  update: null,
+};
+const running = (phase: "symbols" | "recent" | "backfill") => ({ phase, done: 12, total: 3960, error: null, full: false });
+const stopped = {
+  ...running("recent"),
+  error: { code: "kiwoom_unavailable" as const, message: "키움 조회가 응답하지 않습니다", reason: "kiwoom_error" as const, retryAt: null, manualActionRequired: false },
+};
+
+test("실행은 빈 저장소, 직전 관측일이 없는 저장소, 최근 채우기 중에만 막힌다", () => {
+  expect(runBlock(ready)).toBeNull();
+  expect(runBlock({ ...ready, lastDay: null })).toBe("empty");
+  expect(runBlock({ ...ready, lastDay: "2026-11-06" })).toBe("missing_day");
+  expect(runBlock({ ...ready, update: running("recent") })).toBe("updating");
+  expect(runBlock({ ...ready, update: running("backfill") })).toBeNull();
+  expect(runBlock({ ...ready, update: stopped })).toBeNull();
+  expect(runBlock({ ...ready, lastDay: "2026-11-06", update: stopped })).toBe("missing_day");
+  expect(runBlock({ ...ready, needDay: null })).toBeNull();
+});
+
+test("위쪽 띠는 업데이트가 돌거나 멈췄을 때와 실행이 막혔을 때만 보인다", () => {
+  expect(showsUpdateBand(ready)).toBe(false);
+  expect(showsUpdateBand({ ...ready, update: running("backfill") })).toBe(true);
+  expect(showsUpdateBand({ ...ready, update: stopped })).toBe(true);
+  expect(showsUpdateBand({ ...ready, lastDay: null })).toBe(true);
+  expect(showsUpdateBand({ ...ready, lastDay: "2026-11-06" })).toBe(true);
+});
+
+test("오늘 자료 안내는 받을 수 있고 아직 저장소에 없을 때만 나온다", () => {
+  expect(todayNotStored({ ...ready, todayAvailable: true })).toBe(true);
+  expect(todayNotStored({ ...ready, todayAvailable: true, lastDay: "2026-11-11" })).toBe(false);
+  expect(todayNotStored({ ...ready, todayAvailable: true, lastDay: null })).toBe(true);
+  expect(todayNotStored(ready)).toBe(false);
+});
