@@ -1,3 +1,4 @@
+mod engine;
 pub mod store;
 mod update;
 
@@ -11,12 +12,12 @@ use axum::response::Json;
 use axum::routing::{get, post};
 use domain::{Feed, IndexCode, KstDate, KstTime, Period, SeriesKey, TimeOfDay};
 
-use crate::api::{self, ApiErrorBody, FullHistory, ScreenerStatus, ScreenerUpdate, ScreenerUpdateRequest, UpdatePhase};
+use crate::api::{self, ApiErrorBody, ApiErrorReason, FullHistory, Screen, ScreenerResult, ScreenerStatus, ScreenerUpdate, ScreenerUpdateRequest, UpdatePhase};
 use crate::bars::{BarError, BarService};
 use crate::clock::Clock;
 use crate::http::{ApiFailure, AppState, Lookup};
 use crate::kiwoom::rest::{KiwoomRest, Priority};
-use crate::user_routes::{JSON_LIMIT, read_json};
+use crate::user_routes::{JSON_LIMIT, check_screen, read_json};
 use store::{Store, StoreError};
 use update::UpdateError;
 
@@ -183,6 +184,23 @@ impl Screener {
             update,
         })
     }
+
+    pub async fn run_screen(&self, screen: Screen) -> Result<ScreenerResult, ApiFailure> {
+        if matches!(&*self.run(), Run::Running { progress, .. } if progress.phase == UpdatePhase::Recent) {
+            return Err(ApiFailure::screener_not_ready(ApiErrorReason::Updating, "최근 관측일을 채우는 동안에는 실행할 수 없습니다. 과거 이어 받기로 넘어가거나 업데이트가 끝나면 실행하세요"));
+        }
+        let now = self.clock.now();
+        let need_day = self.calendar(CalendarUse::Status).await.map_err(|e| Lookup::ScreenerRun.failure(e, now))?.need_day(now);
+        let last_day = self.with_store(Store::summary).await?.last_day;
+        if last_day.is_none_or(|last| need_day.is_some_and(|need| last < need)) {
+            let message = match need_day {
+                Some(need) => format!("저장소에 필요 관측일 {need}의 자료가 없습니다. 업데이트하세요"),
+                None => "스크리너 저장소가 비어 있습니다. 업데이트하세요".to_owned(),
+            };
+            return Err(ApiFailure::screener_not_ready(ApiErrorReason::MissingDay, message));
+        }
+        Ok(self.with_store(move |s| engine::screen(s, &screen)).await?)
+    }
 }
 
 fn update_view(p: &Progress, error: Option<ApiErrorBody>) -> ScreenerUpdate {
@@ -207,6 +225,7 @@ pub fn routes() -> Router<Arc<AppState>> {
         .route("/api/screener/update", post(start_update))
         .route("/api/screener/update/cancel", post(cancel_update))
         .route("/api/screener/status", get(status))
+        .route("/api/screener/run", post(run_screen))
 }
 
 async fn start_update(State(st): State<Arc<AppState>>, body: Body) -> Result<Json<ScreenerStatus>, ApiFailure> {
@@ -222,4 +241,10 @@ async fn cancel_update(State(st): State<Arc<AppState>>) -> Result<Json<ScreenerS
 
 async fn status(State(st): State<Arc<AppState>>) -> Result<Json<ScreenerStatus>, ApiFailure> {
     Ok(Json(st.screener.status().await?))
+}
+
+async fn run_screen(State(st): State<Arc<AppState>>, body: Body) -> Result<Json<ScreenerResult>, ApiFailure> {
+    let screen: Screen = read_json(body, JSON_LIMIT, "조건식 본문").await?;
+    check_screen(&screen)?;
+    Ok(Json(st.screener.run_screen(screen).await?))
 }

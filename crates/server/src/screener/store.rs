@@ -62,7 +62,7 @@ pub enum Write {
     Replace { code: StockCode, bars: Vec<DayBar> },
 }
 
-fn exclusion_mask(kinds: &[ExcludeKind]) -> u16 {
+pub(super) fn exclusion_mask(kinds: &[ExcludeKind]) -> u16 {
     kinds.iter().fold(0, |mask, kind| mask | 1 << *kind as u16)
 }
 
@@ -97,6 +97,10 @@ impl Store {
 
     fn conn(&self) -> MutexGuard<'_, Connection> {
         self.conn.lock().expect("스크리너 저장소 잠금")
+    }
+
+    pub(super) fn reader(&self) -> Result<Connection, StoreError> {
+        Ok(self.conn().try_clone()?)
     }
 
     pub fn summary(&self) -> Result<Summary, StoreError> {
@@ -252,18 +256,18 @@ fn create(mut conn: Connection) -> Result<Connection, StoreError> {
     Ok(conn)
 }
 
-fn date_value(day: KstDate) -> Value {
+pub(super) fn date_value(day: KstDate) -> Value {
     Value::Date32(day.days_since_epoch() as i32)
 }
 
-fn date_of(days: i32) -> KstDate {
+pub(super) fn date_of(days: i32) -> KstDate {
     KstDate::from_days_since_epoch(i64::from(days))
 }
 
-fn price_of(centi: u64) -> Result<Price, StoreError> {
+pub(super) fn price_of(centi: u64) -> Result<Price, StoreError> {
     Price::from_centi(centi).ok_or_else(|| StoreError("저장된 가격이 0입니다".into()))
 }
 
-fn stock_code(code: &str) -> Result<StockCode, StoreError> {
+pub(super) fn stock_code(code: &str) -> Result<StockCode, StoreError> {
     StockCode::parse(code).map_err(|e| StoreError(format!("저장된 종목코드가 틀렸습니다: {e}")))
 }
