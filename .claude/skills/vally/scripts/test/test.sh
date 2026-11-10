@@ -776,6 +776,82 @@ t_finish_keeps_what_has_no_live_lead_and_starts_no_gardener() {
   ok test ! -d "$VALLY_WORKTREES/fix-58-theme" && ok test -z "$(ran run | grep docs-garden)"
 }
 
+id_of() { echo "$1@$(labels_of "$1" | jq -r '.["vally.lead.since"]')"; }
+
+t_take_finds_a_gardener_worktree_whose_terminal_is_gone() {
+  as_t2 "$agent/start.sh" garden 58 --pr 61 >/dev/null && as_t2 "$agent/retire.sh" docs-garden-t2 >/dev/null || return 1
+  kill_lead t2
+  "$agent/take.sh" 58 > "$T/out" || { cat "$T/out"; return 1; }
+  ok grep -qx "took $VALLY_WORKTREES/docs-garden-61 from t2" "$T/out" &&
+  ok test "$(lock_of "$VALLY_WORKTREES/docs-garden-61")" = "vally owner $(id_of t1) issue 58" &&
+  "$agent/start.sh" garden 58 --pr 61 > "$T/out" 2>&1 || { cat "$T/out"; return 1; }
+  ok test "$(labels_of docs-garden-t1 | jq -r '.["vally.owner"]')" = "$(id_of t1)"
+}
+
+t_take_moves_a_gone_gardener_worktree_with_every_issue_it_holds() {
+  as_t2 "$agent/start.sh" garden 50 --pr 55 >/dev/null && as_t2 "$agent/start.sh" garden 58 --pr 61 >/dev/null || return 1
+  ok test "$(lock_of "$VALLY_WORKTREES/docs-garden-55")" = "vally owner $(id_of t2) issue 50,58" || return 1
+  as_t2 "$agent/retire.sh" docs-garden-t2 >/dev/null && kill_lead t2
+  "$agent/take.sh" 58 > "$T/out" || { cat "$T/out"; return 1; }
+  ok grep -qx 'took issues #50, #58' "$T/out" &&
+  ok test "$(lock_of "$VALLY_WORKTREES/docs-garden-55")" = "vally owner $(id_of t1) issue 50,58" &&
+  "$agent/start.sh" impl 50 --branch fix/50-x --spec "$T/spec.md" >/dev/null
+}
+
+t_take_moves_every_issue_its_gardener_holds() {
+  make_pr 61 fix/58-theme MERGED '["web/a.ts"]'; merge_pr fix/58-theme
+  as_t2 "$agent/start.sh" impl 58 --branch fix/58-theme --spec "$T/spec.md" >/dev/null || return 1
+  echo wip > "$VALLY_WORKTREES/fix-58-theme/wip.txt"
+  as_t2 "$agent/start.sh" garden 50 --pr 55 >/dev/null && as_t2 "$agent/finish.sh" 58 --pr 61 > "$T/out" 2>&1 || { cat "$T/out"; return 1; }
+  ok grep -q '^handed PR #61 to the live gardener' "$T/out" || return 1
+  m=$(mark)
+  ! "$agent/take.sh" 50 2>"$T/err" && ok grep -q 'live lead ochestra1.*--force' "$T/err" && ok test -z "$(changes_since "$m")" || return 1
+  "$agent/take.sh" 50 --force > "$T/out" || { cat "$T/out"; return 1; }
+  cat "$T/out"
+  ok test "$(lock_of "$VALLY_WORKTREES/fix-58-theme")" = "vally owner $(id_of t1) issue 58" &&
+  ok test "$(labels_of docs-garden-t2 | jq -r '.["vally.owner"]')" = "$(id_of t1)" &&
+  ok grep -qx 'took issues #50, #58' "$T/out" &&
+  ok grep -q '^send t2 vally: 사용자가 강제해서 이슈 #50, #58' "$FAKE_DIR/hc.log" &&
+  "$agent/start.sh" impl 58 --branch fix/58-new --spec "$T/spec.md" >/dev/null &&
+  ! as_t2 "$agent/start.sh" impl 58 --branch fix/58-next --spec "$T/spec.md" 2>"$T/err" && ok grep -q 'issue #58 belongs to the live lead main' "$T/err"
+}
+
+end_t1_on_send() { # <jq edit that ends t1>
+  rm -f "$T/bin/hc"
+  { echo '#!/usr/bin/env bash'; printf 'end=%q real=%q\n' "$1" "$here/fake-hc"
+    cat <<'SH'
+if [ "$1 $2" = "send t1" ]; then jq "$end" "$FAKE_DIR/terminals.json" > "$FAKE_DIR/end.tmp" && mv "$FAKE_DIR/end.tmp" "$FAKE_DIR/terminals.json"; fi
+exec "$real" "$@"
+SH
+  } > "$T/bin/hc"
+  chmod +x "$T/bin/hc"
+}
+
+report_marks_orphan_when_t1_ends_during_the_send() { # <jq edit that ends t1>
+  "$agent/start.sh" impl 58 --branch fix/58-theme --spec "$T/spec.md" >/dev/null || return 1
+  w=$(jq -r '.terminals[] | select(.name == "w58-impl") | .address' "$FAKE_DIR/terminals.json")
+  end_t1_on_send "$1"
+  HC_TERMINAL_ID=$w "$agent/report.sh" "done 58 PR #61 /r/w58-impl.md" > "$T/out" 2>&1; code=$?
+  cat "$T/out"
+  ok test $code = 3 && ok grep -q '^리드가 없어 보고하지 못했다: done 58 PR #61 /r/w58-impl.md$' "$T/out" &&
+  ok test "$(labels_of w58-impl | jq -r '.["vally.orphan"]')" = done &&
+  ok grep -q '^vally #58 리드 없음: done 58 PR #61 /r/w58-impl.md$' "$FAKE_DIR/notify.log"
+}
+t_report_marks_orphan_when_its_lead_is_removed_during_the_send() { report_marks_orphan_when_t1_ends_during_the_send 'del(.terminals[] | select(.address == "t1"))'; }
+t_report_marks_orphan_when_its_lead_finishes_during_the_send() { report_marks_orphan_when_t1_ends_during_the_send '(.terminals[] | select(.address == "t1") | .state) = "finished"'; }
+
+t_lead_address_reused_within_a_second_is_another_lead() {
+  "$agent/start.sh" impl 58 --branch fix/58-theme --spec "$T/spec.md" >/dev/null || return 1
+  w=$(jq -r '.terminals[] | select(.name == "w58-impl") | .address' "$FAKE_DIR/terminals.json")
+  HC_TERMINAL_ID=$w "$agent/report.sh" "ask 58 which? /r/q.md" >/dev/null && ok grep -q '^send t1 ask 58' "$FAKE_DIR/hc.log" || return 1
+  kill_lead t1; add_lead t1 "$T/lead" 1000999
+  m=$(mark)
+  HC_TERMINAL_ID=$w "$agent/report.sh" "done 58 PR #61 /r.md" > "$T/out" 2>&1; code=$?
+  cat "$T/out"
+  ok test $code = 3 && ok test -z "$(changes_since "$m" | grep '^send ')" &&
+  ok test "$(labels_of w58-impl | jq -r '.["vally.orphan"]')" = done
+}
+
 t_scripts_print_their_usage() {
   for s in check-pr finish report retire start take; do
     "$agent/$s.sh" > /dev/null 2>"$T/err"; code=$?
