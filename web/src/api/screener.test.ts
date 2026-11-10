@@ -1,8 +1,10 @@
 import { environmentManager, focusManager, QueryClient, QueryObserver } from "@tanstack/react-query";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { statusFooter } from "../lib/screener";
+import type { Screen } from "./generated/Screen";
 import type { ScreenerStatus } from "./generated/ScreenerStatus";
-import { screenerCommands, screenerStatusQuery } from "./screener";
+import type { Screens } from "./generated/Screens";
+import { saveScreens, screenerCommands, screenerStatusQuery, screensQuery } from "./screener";
 
 const idle: ScreenerStatus = { lastDay: "2026-11-10", needDay: "2026-11-10", todayAvailable: false, fullHistory: { done: 28, total: 28 }, update: null };
 const running: ScreenerStatus = { ...idle, update: { phase: "recent", done: 0, total: 28, error: null, full: false } };
@@ -107,4 +109,68 @@ test("상태를 한 번 읽은 뒤 탭 복귀 조회가 실패하면 아래 줄�
   expect(footer()).toEqual({ kind: "store", lastDay: "2026-11-10" });
   focusManager.setFocused(undefined);
   stop();
+});
+
+const high: Screen = { id: "a", name: "고가 200일 신고가", period: "D", exclude: [], conditions: [{ field: "high", n: 200, m: 5 }] };
+const close: Screen = { ...high, id: "b", name: "종가 60일 신고가", conditions: [{ field: "close", n: 60, m: 1 }] };
+const volume: Screen = { ...high, id: "c", name: "신고거래량", conditions: [{ field: "volume", n: 60, m: 1 }] };
+
+function screensServer(initial: Screens) {
+  let stored = initial;
+  const puts: Screens[] = [];
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (path: string, init: RequestInit) => {
+      if (path !== "/api/screens") return reply(idle);
+      if (init.method !== "PUT") return reply(stored);
+      const sent = JSON.parse(init.body as string) as Screens;
+      puts.push(sent);
+      if (sent.revision <= stored.revision) {
+        return new Response(JSON.stringify({ error: { code: "stale_revision", message: `더 새 편집(revision ${stored.revision})이 이미 저장돼 있습니다` } }), { status: 409 });
+      }
+      stored = sent;
+      return reply(stored);
+    }),
+  );
+  return {
+    puts,
+    stored: () => stored,
+    saveElsewhere: (screens: Screen[]) => (stored = { screens, revision: stored.revision + 1 }),
+  };
+}
+
+const watchScreens = async () => {
+  const stop = new QueryObserver(client, screensQuery).subscribe(() => {});
+  await vi.waitFor(() => expect(client.getQueryData(screensQuery.queryKey)).toBeDefined());
+  return stop;
+};
+
+test("조건식을 저장하면 목록 전체를 보내고, 서버가 받은 목록이 패널의 목록이 된다", async () => {
+  const server = screensServer({ screens: [high], revision: 1_762_000_000_000 });
+  const stop = await watchScreens();
+  await saveScreens(client, (saved) => [...saved, close]);
+  expect(server.stored().screens).toEqual([high, close]);
+  expect(client.getQueryData(screensQuery.queryKey)).toEqual(server.stored());
+  stop();
+});
+
+test("다른 탭이 먼저 저장했으면 이 탭의 낡은 목록으로 덮어쓰지 않고 stale_revision을 알린 뒤 새 목록을 읽어 온다", async () => {
+  const server = screensServer({ screens: [high], revision: 1_762_000_000_000 });
+  const stop = await watchScreens();
+  server.saveElsewhere([high, volume]);
+
+  await expect(saveScreens(client, (saved) => [...saved, close])).rejects.toMatchObject({ code: "stale_revision" });
+  expect(server.stored().screens).toEqual([high, volume]);
+  expect(server.puts).toHaveLength(1);
+  expect(client.getQueryData(screensQuery.queryKey)).toEqual(server.stored());
+
+  await saveScreens(client, (saved) => [...saved, close]);
+  expect(server.stored().screens).toEqual([high, volume, close]);
+  stop();
+});
+
+test("목록을 아직 읽지 않았으면 먼저 읽고 그 위에 저장한다", async () => {
+  const server = screensServer({ screens: [high, close], revision: 3 });
+  await saveScreens(client, (saved) => saved.filter((s) => s.id !== high.id));
+  expect(server.stored().screens).toEqual([close]);
 });
