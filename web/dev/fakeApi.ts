@@ -7,16 +7,35 @@ import type { Plugin } from "vite";
 import type { ApiError } from "../src/api/generated/ApiError.ts";
 import type { ApiErrorCode } from "../src/api/generated/ApiErrorCode.ts";
 import type { Period } from "../src/api/generated/Period.ts";
+import type { Screen } from "../src/api/generated/Screen.ts";
 import type { Resume } from "../src/api/http.ts";
 import { barsPage, findSymbol, publicInfo, quoteOf, resolveVenue, search } from "./fakeMarket.ts";
+import { createScreener, parseScenario } from "./fakeScreener.ts";
 import { createUserData, type Reply } from "./fakeUserData.ts";
 
 const LATEST_PAGE_DELAY_MS = 800;
 const PAST_PAGE_DELAY_MS = 400;
+const SCREENER_RUN_DELAY_MS = 600;
 const PERIODS: Period[] = ["1m", "3m", "5m", "15m", "30m", "60m", "D", "W", "M"];
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const SEED_WATCHLIST = ["005930", "000660", "373220", "035420", "005935", "069500", "IDX:001", "IDX:101"];
+const SEED_SCREENS: Screen[] = [
+  { id: "01900000-0000-7000-8000-0000000000a1", name: "고가 200일 신고가", period: "D", exclude: [], conditions: [{ field: "high", n: 200, m: 5 }] },
+  {
+    id: "01900000-0000-7000-8000-0000000000a2",
+    name: "52주 신고가와 신고거래량",
+    period: "W",
+    exclude: ["etf", "spac", "managed", "trading_halted"],
+    conditions: [
+      { field: "high", n: 52, m: 1 },
+      { field: "volume", n: 52, m: 4 },
+    ],
+  },
+  { id: "01900000-0000-7000-8000-0000000000a3", name: "종가 12개월 신고가", period: "M", exclude: ["etf", "preferred", "reit", "spac"], conditions: [{ field: "close", n: 12, m: 3 }] },
+  { id: "01900000-0000-7000-8000-0000000000a4", name: "종가 10년 신고가", period: "D", exclude: ["etf"], conditions: [{ field: "close", n: 2500, m: 1 }] },
+  { id: "01900000-0000-7000-8000-0000000000a5", name: "고가 1,000일 신고가", period: "D", exclude: [], conditions: [{ field: "high", n: 1000, m: 20 }] },
+];
 
 async function readJson(req: IncomingMessage): Promise<unknown> {
   const chunks: Buffer[] = [];
@@ -38,12 +57,14 @@ function fail(res: ServerResponse, status: number, code: ApiErrorCode, message: 
   send(res, status, body);
 }
 
-export function fakeApi(): Plugin {
+export function fakeApi(screenerScenario: string | undefined): Plugin {
+  const scenario = parseScenario(screenerScenario);
   return {
     name: "vv-fake-api",
     apply: "serve",
     configureServer(server) {
-      const user = createUserData(SEED_WATCHLIST);
+      const user = createUserData(SEED_WATCHLIST, SEED_SCREENS);
+      const screener = createScreener(scenario);
       const reply = (res: ServerResponse, r: Reply) => send(res, r.status, r.body);
       server.middlewares.use("/api", async (req, res) => {
         const url = new URL(req.url ?? "/", "http://fake");
@@ -62,6 +83,15 @@ export function fakeApi(): Plugin {
         if (path === "/watchlists") {
           if (method === "GET") return reply(res, user.getWatchlists());
           if (method === "PUT") return reply(res, user.putWatchlists(await readJson(req)));
+        }
+        if (path === "/screens" && method === "GET") return reply(res, user.getScreens());
+        if (path === "/screener/status" && method === "GET") return reply(res, screener.status());
+        if (path === "/screener/update" && method === "POST") return reply(res, screener.start(await readJson(req)));
+        if (path === "/screener/update/cancel" && method === "POST") return reply(res, screener.cancel());
+        if (path === "/screener/run" && method === "POST") {
+          const body = await readJson(req);
+          await sleep(SCREENER_RUN_DELAY_MS);
+          return reply(res, screener.run(body));
         }
         if (path === "/quotes") {
           const codes = (url.searchParams.get("symbols") ?? "").split(",").filter(Boolean);

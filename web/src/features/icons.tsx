@@ -135,3 +135,32 @@ export const EyeIcon = ({ size = 16, off = false }: P & { off?: boolean }) => (
     {off && <path d="m4 4 16 16" />}
   </Icon>
 );
+export const FunnelIcon = ({ size }: P) => (
+  <Icon size={size}>
+    <path d="M4 5h16l-6 7.5V19l-4-2v-4.5z" />
+  </Icon>
+);
+export const DrawingsIcon = ({ size }: P) => (
+  <Icon size={size}>
+    <path d="M6.5 17.5 17.5 6.5" />
+    <circle cx="5" cy="19" r="2" />
+    <circle cx="19" cy="5" r="2" />
+  </Icon>
+);
+export const PenIcon = ({ size = 16 }: P) => (
+  <Icon size={size}>
+    <path d="M4 20l1.2-4.6L15.8 4.8a2 2 0 0 1 2.8 0l.6.6a2 2 0 0 1 0 2.8L8.6 18.8z" />
+    <path d="M13.5 7l3.5 3.5" />
+  </Icon>
+);
+export const PlayIcon = ({ size = 10 }: P) => (
+  <svg viewBox="0 0 12 12" width={size} height={size} aria-hidden="true" className="flex-none">
+    <path d="M3 1.8v8.4L10 6z" fill="currentColor" />
+  </svg>
+);
+export const SpinnerIcon = ({ size = 12 }: P) => (
+  <svg viewBox="0 0 24 24" width={size} height={size} aria-hidden="true" className="flex-none animate-spin motion-reduce:animate-none">
+    <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" strokeOpacity="0.25" strokeWidth="3" />
+    <path d="M21 12a9 9 0 0 0-9-9" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
+  </svg>
+);

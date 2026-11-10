@@ -28,6 +28,21 @@ test("종목 편집은 그 목록만 바꾸고 편집마다 revision이 는다",
   expect(after.revision - s.revision).toBe(4);
 });
 
+test("결과 전체를 한 번에 넣으면 revision은 한 번만 는다", () => {
+  const s = useWatchlistStore.getState();
+  s.create("L2", "둘");
+  s.add("L2", "000002");
+  const codes = Array.from({ length: 3960 }, (_, i) => String(i).padStart(6, "0"));
+  const before = useWatchlistStore.getState().revision;
+  useWatchlistStore.getState().addAll("L2", codes);
+  const after = useWatchlistStore.getState();
+  expect(after.revision - before).toBe(1);
+  expect(after.lists[1]!.symbols).toHaveLength(3960);
+  expect(after.lists[1]!.symbols.slice(0, 3)).toEqual(["000002", "000000", "000001"]);
+  useWatchlistStore.getState().addAll("L2", codes);
+  expect(useWatchlistStore.getState().revision).toBe(after.revision);
+});
+
 test("가리키는 목록이 없으면 첫 목록을 본다", () => {
   const two = [...DEFAULT_WATCHLISTS, { id: "L2", name: "둘", symbols: [] }];
   expect(activeWatchlist(two, "L2").id).toBe("L2");

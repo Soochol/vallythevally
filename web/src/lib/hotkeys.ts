@@ -41,7 +41,7 @@ export const HOTKEYS: { keys: string; label: string; action: HotkeyAction; match
     { keys: "I", label: "지표 추가", action: { kind: "indicators" }, match: plain("KeyI") },
     {
       keys: "Alt+W",
-      label: "관심종목 접기/펴기",
+      label: "오른쪽 패널 접기/펴기",
       action: { kind: "toggleWatch" },
       match: (e) => e.code === "KeyW" && e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey,
     },

@@ -1,11 +1,17 @@
 import { expect, test } from "vitest";
-import { addSymbol, moveSymbol, moveSymbolBy, nameProblem, nextListName, removeSymbol, transferSymbol } from "./watchlist";
+import { addSymbol, addSymbols, listNameFrom, moveSymbol, moveSymbolBy, nameProblem, nextListName, removeSymbol, transferSymbol } from "./watchlist";
 
 const list = ["005930", "000660", "035420"] as const;
 
 test("넣으면 끝에 붙고, 이미 있으면 그대로다", () => {
   expect(addSymbol(list, "IDX:001")).toEqual([...list, "IDX:001"]);
   expect(addSymbol(list, "000660")).toBe(list);
+});
+
+test("여러 종목을 넣으면 없던 것만 처음 나온 순서대로 끝에 붙고, 새 것이 없으면 그대로다", () => {
+  expect(addSymbols(list, ["035720", "000660", "035720", "051910"])).toEqual([...list, "035720", "051910"]);
+  expect(addSymbols(list, ["005930", "000660"])).toBe(list);
+  expect(addSymbols(list, [])).toBe(list);
 });
 
 test("지우면 그 종목만 빠지고, 없는 종목이면 그대로다", () => {
@@ -46,6 +52,19 @@ test("복사는 원래 목록을 그대로 둔다. 이미 있거나 원래 목�
 test("새 목록 이름은 비어 있는 가장 작은 번호다", () => {
   expect(nextListName([])).toBe("목록 1");
   expect(nextListName([{ id: "a", name: "목록 1", symbols: [] }, { id: "b", name: "목록 3", symbols: [] }])).toBe("목록 2");
+});
+
+test("다른 이름에서 만든 새 목록 이름은 20자로 자르고, 겹치면 뒤에 번호를 붙인다", () => {
+  const named = (...names: string[]) => names.map((name, i) => ({ id: `${i}`, name, symbols: [] }));
+  expect(listNameFrom(named("기본"), "  고가 200일 신고가 ")).toBe("고가 200일 신고가");
+  expect(listNameFrom(named("고가 200일 신고가"), "고가 200일 신고가")).toBe("고가 200일 신고가 2");
+  expect(listNameFrom(named("고가 200일 신고가", "고가 200일 신고가 2"), "고가 200일 신고가")).toBe("고가 200일 신고가 3");
+  const long = "최근 5일 고가 200일 신고가와 거래량 60일 신고거래량";
+  const cut = listNameFrom([], long);
+  expect(cut).toBe("최근 5일 고가 200일 신고가와 거");
+  expect([...cut].length).toBeLessThanOrEqual(20);
+  expect(listNameFrom(named(cut), long)).toBe("최근 5일 고가 200일 신고가와 2");
+  for (const name of [cut, listNameFrom(named(cut), long)]) expect(nameProblem([], name, null)).toBeNull();
 });
 
 test("이름은 앞뒤 공백을 지우고 비지 않으며 20자까지이며 다른 목록과 겹치지 않는다. 자기 이름은 그대로 둘 수 있다", () => {
