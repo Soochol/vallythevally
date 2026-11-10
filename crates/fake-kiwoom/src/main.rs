@@ -19,6 +19,16 @@ async fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
+    match std::env::var("FAKE_KIWOOM_EXTRA_STOCKS") {
+        Err(_) => {}
+        Ok(n) => match n.parse() {
+            Ok(n) => fake.set_extra_stocks(n),
+            Err(_) => {
+                eprintln!("FAKE_KIWOOM_EXTRA_STOCKS는 0 이상의 정수입니다: {n:?}");
+                return ExitCode::from(2);
+            }
+        },
+    }
     println!("fake-kiwoom listening addr={}", fake.addr);
     std::future::pending::<()>().await;
     ExitCode::SUCCESS

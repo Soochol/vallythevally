@@ -2,7 +2,7 @@ use std::net::SocketAddr;
 use std::process::Stdio;
 use std::time::{Duration, Instant};
 
-use fake_kiwoom::{APP_KEY, FakeKiwoom, TOKEN};
+use fake_kiwoom::{APP_KEY, FakeKiwoom, TOKEN, extra_stock_code};
 use serde_json::{Value, json};
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
@@ -190,4 +190,20 @@ async fn the_binary_refuses_a_non_loopback_bind() {
     assert!(!out.status.success());
     assert!(out.stdout.is_empty());
     assert!(String::from_utf8_lossy(&out.stderr).contains("루프백"), "{}", String::from_utf8_lossy(&out.stderr));
+}
+
+#[tokio::test]
+async fn extra_stocks_are_appended_to_the_kospi_list_only_when_asked() {
+    let fake = FakeKiwoom::start().await;
+    let codes = |r: Reply| r.body["list"].as_array().unwrap().iter().map(|row| row["code"].as_str().unwrap().to_owned()).collect::<Vec<_>>();
+    let base = fake.base_url();
+    let kospi = || kiwoom(&base, "ka10099", json!({"mrkt_tp": "0"}), None);
+    let plain = codes(kospi().await);
+    assert!(!plain.contains(&extra_stock_code(0)), "변수가 없으면 고정 입력 그대로다");
+    fake.set_extra_stocks(3);
+    let more = codes(kospi().await);
+    assert_eq!(more[..plain.len()], plain[..]);
+    assert_eq!(more[plain.len()..], [extra_stock_code(0), extra_stock_code(1), extra_stock_code(2)]);
+    let kosdaq = codes(kiwoom(&base, "ka10099", json!({"mrkt_tp": "10"}), None).await);
+    assert!(!kosdaq.contains(&extra_stock_code(0)), "코스닥 목록에는 붙이지 않는다");
 }
