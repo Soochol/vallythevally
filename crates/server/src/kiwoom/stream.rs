@@ -32,17 +32,16 @@ pub struct RealTick {
     pub qty: Volume,
     /// 지수(0J)와 `9081`이 없거나 모르는 값이면 None.
     pub exchange: Option<Exchange>,
-    /// 프레임에 11·13이 없거나 읽지 못하면 None. 봉 집계는 이 값을 쓰지 않는다.
+    /// 프레임에 11·13이 없거나 읽지 못하면 None.
     pub day: Option<DayTotals>,
 }
 
-/// 체결 프레임에 같이 오는 그날 값(kiwoom.md §11.3, §11.5). 관심종목 현재가를 만든다.
+/// 체결 프레임에 같이 오는 그날 값(kiwoom.md §11.3, §11.5).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DayTotals {
-    /// 11 전일대비. 부호가 곧 값이다. 주식은 원, 지수는 소수 2자리를 centi로.
+    /// 11 전일대비. 부호가 곧 값이다.
     pub change_centi: i64,
-    /// 13 누적거래량.
-    pub volume: Volume,
+    pub cumulative: Volume,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -530,7 +529,7 @@ impl Session {
                 Ok(RealItem::Index { index, hhmmss, price, cumulative, change_centi }) => {
                     let before = conn.index_cumulative.insert(index, cumulative);
                     let qty = before.map_or(0, |b| cumulative.saturating_sub(b));
-                    let day = change_centi.map(|change_centi| DayTotals { change_centi, volume: Volume(cumulative) });
+                    let day = change_centi.map(|change_centi| DayTotals { change_centi, cumulative: Volume(cumulative) });
                     RealTick { symbol: Symbol::Index(index), hhmmss, price, qty: Volume(qty), exchange: None, day }
                 }
                 Ok(RealItem::AuctionOnly) => {

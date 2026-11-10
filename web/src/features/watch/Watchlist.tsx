@@ -227,15 +227,14 @@ function WatchList({ variant, editing }: { variant: WatchVariant; editing: boole
   const chosen = useUiStore((s) => s.prefs.watchColumns);
   const columns = editing ? [] : chosen;
   const desktop = useMediaQuery(DESKTOP_QUERY);
-  // 두 목록은 폭에 따라 CSS로만 숨는다. 보이는 쪽만 실시간 자리를 빌린다.
-  const shown = variant === "desktop" ? desktop : !desktop;
+  const onScreen = variant === "desktop" ? desktop : !desktop;
   const [dragOver, setDragOver] = useState<number | null>(null);
   const [dragged, setDragged] = useState<SymbolCode | null>(null);
   const ul = useRef<HTMLUListElement>(null);
   const [focusCode, setFocusCode] = useState<SymbolCode | null>(null);
   const template = { gridTemplateColumns: columnTemplate(variant, columns) };
 
-  useEffect(() => (shown ? quoteBook.lease(symbols) : undefined), [shown, symbols]);
+  useEffect(() => (onScreen ? quoteBook.lease(symbols) : undefined), [onScreen, symbols]);
 
   useEffect(() => {
     if (focusCode === null) return;

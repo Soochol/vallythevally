@@ -199,10 +199,8 @@ impl KeyState {
 struct Conn {
     outbox: Arc<Outbox>,
     subs: HashMap<SubId, SeriesKey>,
-    /// 브라우저가 보낸 관심종목, 위에서부터. 종목 목록에 없는 코드도 든다.
-    watch: Vec<Symbol>,
-    /// 마지막으로 알린 `watch_limited`.
-    limited: BTreeSet<Symbol>,
+    requested_watch: Vec<Symbol>,
+    limited_sent: BTreeSet<Symbol>,
 }
 
 #[derive(Debug, Default)]
@@ -297,7 +295,7 @@ impl MarketHub {
             HubInput::Connect { conn, outbox } => {
                 let hello = ServerMessage::Hello { protocol: PROTOCOL, server_time: UnixSeconds(now.unix()), status: self.status() };
                 if outbox.push(hello).is_ok() {
-                    self.conns.insert(conn, Conn { outbox, subs: HashMap::new(), watch: Vec::new(), limited: BTreeSet::new() });
+                    self.conns.insert(conn, Conn { outbox, subs: HashMap::new(), requested_watch: Vec::new(), limited_sent: BTreeSet::new() });
                 }
             }
             HubInput::Subscribe { conn, sub, key } => self.subscribe(conn, sub, key, now),
@@ -362,26 +360,24 @@ impl MarketHub {
         for (sub, key) in c.subs {
             self.release(conn, sub, key, now);
         }
-        self.manager.set_watch(conn, Vec::new(), now);
+        self.manager.release_conn(conn, now);
         self.replan(now);
     }
 
-    /// 계획은 1초 타이머에서만 다시 세운다. 목록 순서를 연달아 바꿔도 REG·REMOVE는 1초에 한 번만 바뀐다.
     fn watch(&mut self, conn: ConnId, symbols: Vec<Symbol>, now: KstTime) {
         let Some(c) = self.conns.get_mut(&conn) else {
             return;
         };
-        c.watch = symbols;
-        self.sync_watch(conn, now);
+        c.requested_watch = symbols;
+        self.hold_listed_watch_rows(conn, now);
     }
 
-    /// 종목 목록에 있는 줄만 잡는다. 칸과 달리 시드가 없어 없는 코드를 걸러 줄 곳이 여기뿐이다. 키움이 REG를 거절하면 세션이 끊긴다.
-    fn sync_watch(&mut self, conn: ConnId, now: KstTime) {
+    fn hold_listed_watch_rows(&mut self, conn: ConnId, now: KstTime) {
         let Some(c) = self.conns.get(&conn) else {
             return;
         };
         let known: Vec<Symbol> = match &*self.directory.borrow() {
-            Some(dir) => c.watch.iter().copied().filter(|s| dir.get(*s).is_some()).collect(),
+            Some(dir) => c.requested_watch.iter().copied().filter(|s| dir.get(*s).is_some()).collect(),
             None => Vec::new(),
         };
         self.manager.set_watch(conn, known, now);
@@ -450,12 +446,12 @@ impl MarketHub {
 
     fn publish_limited(&mut self) {
         for (&conn, c) in &mut self.conns {
-            let limited: BTreeSet<Symbol> = c.watch.iter().copied().filter(|&symbol| self.rejected.contains(&Holder::Watch { conn, symbol })).collect();
-            if limited == c.limited {
+            let limited: BTreeSet<Symbol> = c.requested_watch.iter().copied().filter(|&symbol| self.rejected.contains(&Holder::Watch { conn, symbol })).collect();
+            if limited == c.limited_sent {
                 continue;
             }
-            let symbols = c.watch.iter().filter(|s| limited.contains(s)).map(|s| api::SymbolCode(s.as_wire())).collect();
-            c.limited = limited;
+            let symbols = c.requested_watch.iter().filter(|s| limited.contains(s)).map(|s| api::SymbolCode(s.as_wire())).collect();
+            c.limited_sent = limited;
             if c.outbox.push(ServerMessage::WatchLimited { symbols }).is_err() {
                 self.closing.push(conn);
             }
@@ -729,7 +725,7 @@ impl MarketHub {
             self.directory.borrow_and_update();
             let conns: Vec<ConnId> = self.conns.keys().copied().collect();
             for conn in conns {
-                self.sync_watch(conn, now);
+                self.hold_listed_watch_rows(conn, now);
             }
         }
         self.replan(now);
@@ -1017,12 +1013,11 @@ mod tests {
         StreamEvent::Tick { tick, received_at: h.clock.now() }
     }
 
-    /// 11·13이 붙은 체결. `change`는 전일대비(원).
-    fn day_trade(h: &Harness, hhmmss: (u32, u32, u32), price: u64, exchange: Exchange, change: i64, cumulative: u64) -> StreamEvent {
+    fn day_trade(h: &Harness, hhmmss: (u32, u32, u32), price: u64, exchange: Exchange, change_won: i64, cumulative: u64) -> StreamEvent {
         let StreamEvent::Tick { mut tick, received_at } = trade(h, hhmmss, price, 1, Some(exchange)) else {
             unreachable!("trade는 Tick이다")
         };
-        tick.day = Some(DayTotals { change_centi: change * 100, volume: Volume(cumulative) });
+        tick.day = Some(DayTotals { change_centi: change_won * 100, cumulative: Volume(cumulative) });
         StreamEvent::Tick { tick, received_at }
     }
 

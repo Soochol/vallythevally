@@ -199,8 +199,8 @@ async fn extra_stocks_are_appended_to_the_kospi_list_only_when_asked() {
     let base = fake.base_url();
     let kospi = || kiwoom(&base, "ka10099", json!({"mrkt_tp": "0"}), None);
     let plain = codes(kospi().await);
-    assert!(!plain.contains(&extra_stock_code(0)), "변수가 없으면 고정 입력 그대로다");
-    fake.set_extra_stocks(3);
+    assert!((0..1000).map(extra_stock_code).all(|c| !plain.contains(&c)), "합성 코드는 고정 입력과 겹치지 않고, 변수가 없으면 고정 입력 그대로다");
+    fake.set_extra_kospi_stocks(3);
     let more = codes(kospi().await);
     assert_eq!(more[..plain.len()], plain[..]);
     assert_eq!(more[plain.len()..], [extra_stock_code(0), extra_stock_code(1), extra_stock_code(2)]);

@@ -146,7 +146,7 @@ impl Default for SymbolDirectory {
 }
 
 impl SymbolDirectory {
-    /// 목록이 바뀔 때마다 새 값을 본다. 처음 받기 전에는 None.
+    /// 처음 받기 전에는 None.
     pub fn updates(&self) -> watch::Receiver<Option<Arc<Directory>>> {
         self.current.subscribe()
     }

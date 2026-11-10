@@ -1,4 +1,4 @@
-//! 현재가(backend.md §4.6 "현재가의 등락", §8.2). REST 조회 값과 실시간 체결 값을 같은 식으로 만든다.
+//! 현재가(backend.md §4.6 "현재가의 등락", §8.2).
 //!
 //! ka10095는 지수 코드를 받지 않는다. 그래서 지수 현재가는 지수 일봉의 최신 페이지에서 만든다.
 
@@ -52,10 +52,10 @@ async fn index_quote(bars: &BarService, code: IndexCode) -> Result<Option<(Symbo
     Ok(Some((symbol, quote(symbol, last.close().centi(), prev.close().centi(), last.volume().0, bucket.start().unix(), api::QuoteSource::Polled))))
 }
 
-/// 체결 하나의 현재가. 기준가는 |현재가| − 전일대비다(kiwoom.md §11.3). 기준가가 0 이하로 나오면 만들지 않는다.
+/// 기준가는 |현재가| − 전일대비다(kiwoom.md §11.3).
 pub fn realtime(symbol: Symbol, price: Price, day: DayTotals, at: KstTime) -> Option<api::Quote> {
     let base_centi = u64::try_from(price.centi() as i64 - day.change_centi).ok().filter(|b| *b > 0)?;
-    Some(quote(symbol, price.centi(), base_centi, day.volume.0, at.unix(), api::QuoteSource::Realtime))
+    Some(quote(symbol, price.centi(), base_centi, day.cumulative.0, at.unix(), api::QuoteSource::Realtime))
 }
 
 fn quote(symbol: Symbol, price_centi: u64, base_centi: u64, volume: u64, t: i64, source: api::QuoteSource) -> api::Quote {
@@ -83,10 +83,10 @@ mod tests {
         let symbol = Symbol::parse("005930").unwrap();
         let at = kst(KstDate::new(2026, 11, 9).unwrap(), 10, 0, 1);
         let price = Price::from_centi(19_340_000).unwrap();
-        let q = realtime(symbol, price, DayTotals { change_centi: -810_000, volume: Volume(56_147_847) }, at).unwrap();
+        let q = realtime(symbol, price, DayTotals { change_centi: -810_000, cumulative: Volume(56_147_847) }, at).unwrap();
         assert_eq!(q, quote(symbol, 19_340_000, 20_150_000, 56_147_847, at.unix(), api::QuoteSource::Realtime));
         assert_eq!((q.price, q.change, q.volume, q.source), (193_400.0, -8_100.0, 56_147_847, api::QuoteSource::Realtime));
         assert!((q.change_rate - -4.0198).abs() < 1e-3, "{}", q.change_rate);
-        assert_eq!(realtime(symbol, price, DayTotals { change_centi: 19_340_000, volume: Volume(1) }, at), None, "기준가 0");
+        assert_eq!(realtime(symbol, price, DayTotals { change_centi: 19_340_000, cumulative: Volume(1) }, at), None, "기준가 0");
     }
 }

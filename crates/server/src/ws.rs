@@ -81,7 +81,6 @@ fn on_text(hub: &HubHandle, outbox: &Outbox, conn: ConnId, text: &str) {
     }
 }
 
-/// 읽을 수 없는 코드는 빼고, 같은 종목은 처음 자리만 남긴다.
 fn watch_symbols(codes: &[SymbolCode]) -> Vec<Symbol> {
     let mut out: Vec<Symbol> = Vec::with_capacity(codes.len());
     for code in codes {

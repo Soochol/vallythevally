@@ -30,8 +30,7 @@ pub struct Seen {
     pub overrides: Mutex<HashMap<String, (StatusCode, Value)>>,
     pub rejected_tokens: Mutex<Vec<String>>,
     pub delays: Mutex<HashMap<String, Duration>>,
-    /// ka10099(코스피) 목록 끝에 붙일 합성 종목 수. 실시간 200개 한도를 화면에서 넘길 때 쓴다.
-    pub extra_stocks: AtomicUsize,
+    pub extra_kospi_stocks: AtomicUsize,
     pub ws: WsHub,
 }
 
@@ -133,8 +132,8 @@ impl FakeKiwoom {
         self.seen.ws.set_reg_limit(limit);
     }
 
-    pub fn set_extra_stocks(&self, n: usize) {
-        self.seen.extra_stocks.store(n, Ordering::SeqCst);
+    pub fn set_extra_kospi_stocks(&self, n: usize) {
+        self.seen.extra_kospi_stocks.store(n, Ordering::SeqCst);
     }
 
     pub fn ws_stats(&self) -> WsStats {
@@ -285,11 +284,10 @@ async fn handle(State(seen): State<Arc<Seen>>, headers: HeaderMap, body: String)
         _ => return (StatusCode::INTERNAL_SERVER_ERROR, "가짜 키움이 모르는 api-id").into_response(),
     };
     let v = if continuation { without_rows(fixture(name)) } else { fixture(name) };
-    let v = if name == "ka10099_0" { with_extra_stocks(v, seen.extra_stocks.load(Ordering::SeqCst)) } else { v };
+    let v = if name == "ka10099_0" { with_extra_stocks(v, seen.extra_kospi_stocks.load(Ordering::SeqCst)) } else { v };
     respond(v, continuation)
 }
 
-/// 합성 종목 코드는 `95xxx0`이다. 고정 입력의 코드와 겹치지 않는다.
 pub fn extra_stock_code(i: usize) -> String {
     format!("{:06}", 950_000 + i * 10)
 }

@@ -422,7 +422,7 @@ pub enum RealItem {
     Trade(RealTick),
     /// 0B `15`가 0: 동시호가에만 나온다(kiwoom.md 11.3). 체결이 아니라 버린다.
     AuctionOnly,
-    /// 0J. 체결량은 `13`(누적거래량)의 증가분이라 세션이 앞 프레임과 비교해 정한다. `change_centi`는 11이 없거나 읽지 못하면 None.
+    /// 0J. 체결량은 `13`(누적거래량)의 증가분이라 세션이 앞 프레임과 비교해 정한다.
     Index { index: IndexCode, hhmmss: TimeOfDay, price: Price, cumulative: u64, change_centi: Option<i64> },
     OtherType(String),
 }
@@ -468,7 +468,7 @@ fn parse_real_item(entry: &Value) -> Result<RealItem, WireError> {
             };
             let day = (|| {
                 let change_centi = signed(field("11").ok()?).ok()?.checked_mul(100)?;
-                Some(DayTotals { change_centi, volume: Volume(unsigned(field("13").ok()?).ok()?) })
+                Some(DayTotals { change_centi, cumulative: Volume(unsigned(field("13").ok()?).ok()?) })
             })();
             Ok(RealItem::Trade(RealTick { symbol: Symbol::Stock(code), hhmmss: hhmmss(field("20")?)?, price: stock_price(field("10")?)?, qty: Volume(qty), exchange, day }))
         }
@@ -497,7 +497,6 @@ fn index_level(s: &str) -> Result<Price, WireError> {
         .ok_or_else(|| WireError(format!("지수가 소수 2자리 이하의 양수가 아닙니다: {s:?}")))
 }
 
-/// 0J 11(전일대비). 부호가 곧 값이다.
 fn signed_level_centi(s: &str) -> Option<i64> {
     let (negative, abs) = match s.strip_prefix('-') {
         Some(abs) => (true, abs),
@@ -507,7 +506,6 @@ fn signed_level_centi(s: &str) -> Option<i64> {
     Some(if negative { -centi } else { centi })
 }
 
-/// 부호 없는 소수 2자리 이하의 수를 centi로.
 fn level_centi(abs: &str) -> Option<u64> {
     let (int, frac) = abs.split_once('.').unwrap_or((abs, ""));
     let digits = |x: &str| x.bytes().all(|b| b.is_ascii_digit());
@@ -883,7 +881,7 @@ mod tests {
     #[test]
     fn real_0b_is_a_combined_trade_with_abs_price_and_qty() {
         let code = StockCode::parse("005930").unwrap();
-        let day = Some(DayTotals { change_centi: 0, volume: Volume(100) });
+        let day = Some(DayTotals { change_centi: 0, cumulative: Volume(100) });
         let tick = |exchange| RealTick { symbol: Symbol::Stock(code), hhmmss: TimeOfDay::hms(9, 30, 1).unwrap(), price: Price::from_centi(7_120_000).unwrap(), qty: Volume(15), exchange, day };
         assert_eq!(one("0B", "005930_AL", fake_kiwoom::trade_0b("093001", -71_200, -15, 100, "NXT")), Ok(RealItem::Trade(tick(Some(Exchange::Nxt)))));
         assert_eq!(one("0B", "005930_AL", fake_kiwoom::trade_0b("093001", 71_200, 15, 100, "KRX")), Ok(RealItem::Trade(tick(Some(Exchange::Krx)))));
@@ -899,7 +897,7 @@ mod tests {
         };
         let mut v = fake_kiwoom::trade_0b("093001", -193_400, 15, 56_147_847, "KRX");
         v["11"] = "-8100".into();
-        assert_eq!(day(v.clone()), Some(DayTotals { change_centi: -810_000, volume: Volume(56_147_847) }));
+        assert_eq!(day(v.clone()), Some(DayTotals { change_centi: -810_000, cumulative: Volume(56_147_847) }));
         for (fid, bad) in [("11", "x"), ("13", "")] {
             let mut broken = v.clone();
             broken[fid] = bad.into();

@@ -1,6 +1,6 @@
 //! 구독 관리자(backend.md §5.3). 순수하다. 같은 상태와 같은 `now`면 언제나 같은 계획을 낸다.
 //!
-//! 키움 쪽 구독 단위는 종목이다. 보유자는 브라우저 칸의 구독 하나, 또는 브라우저가 보는 관심종목 목록의 한 줄이다.
+//! 키움 쪽 구독 단위는 종목이다.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -17,24 +17,26 @@ pub const REALTIME_LIMIT: usize = 200;
 pub enum Holder {
     /// 브라우저 연결 하나의 구독 하나.
     Cell { conn: ConnId, sub: SubId },
-    /// 브라우저 연결 하나가 보는 관심종목 목록의 한 줄.
     Watch { conn: ConnId, symbol: Symbol },
 }
 
-/// 종목이 실시간 자리를 받는 순서. 앞선 것이 작다. 칸이 관심종목보다 앞선다.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 enum Rank {
-    /// 먼저 잡은 종목이 앞선다.
     Cell { held: u64 },
-    /// 목록 위가 앞선다. 같은 줄이면 먼저 잡은 종목.
     Watch { row: usize, held: u64 },
+}
+
+impl Rank {
+    /// 보유자 가운데 가장 앞선 순위라서, 관심종목 순위면 칸이 잡지 않은 종목이다.
+    fn is_watch_only(self) -> bool {
+        matches!(self, Rank::Watch { .. })
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Plan {
     /// 키움에 REG 할 집합. 크기 ≤ REALTIME_LIMIT.
     pub realtime: BTreeSet<Symbol>,
-    /// 보유자가 있는데 실시간 자리를 받지 못한 종목의 보유자 전부.
     pub rejected: BTreeSet<Holder>,
 }
 
@@ -45,7 +47,6 @@ pub struct SubscriptionManager {
     next_order: u64,
     released_at: BTreeMap<Symbol, KstTime>,
     admitted: BTreeSet<Symbol>,
-    /// 연결마다 관심종목의 줄 번호(0이 맨 위).
     watch_rows: BTreeMap<ConnId, BTreeMap<Symbol, usize>>,
 }
 
@@ -73,9 +74,11 @@ impl SubscriptionManager {
         }
     }
 
-    /// 그 연결의 관심종목을 통째로 바꾼다. `symbols`는 위에서부터이고 중복이 없어야 한다. 빠진 줄은 `release`처럼 유예한다.
     pub fn set_watch(&mut self, conn: ConnId, symbols: Vec<Symbol>, now: KstTime) {
-        let rows: BTreeMap<Symbol, usize> = symbols.into_iter().enumerate().map(|(row, s)| (s, row)).collect();
+        let mut rows: BTreeMap<Symbol, usize> = BTreeMap::new();
+        for (row, s) in symbols.into_iter().enumerate() {
+            rows.entry(s).or_insert(row);
+        }
         let old = if rows.is_empty() { self.watch_rows.remove(&conn) } else { self.watch_rows.insert(conn, rows.clone()) }.unwrap_or_default();
         for &symbol in old.keys().filter(|s| !rows.contains_key(s)) {
             self.release(symbol, &Holder::Watch { conn, symbol }, now);
@@ -85,7 +88,6 @@ impl SubscriptionManager {
         }
     }
 
-    /// 연결이 끊긴 브라우저의 모든 구독과 관심종목을 놓는다.
     pub fn release_conn(&mut self, conn: ConnId, now: KstTime) {
         let held: Vec<(Symbol, Holder)> = self
             .holders
@@ -102,7 +104,6 @@ impl SubscriptionManager {
         self.admitted.contains(&symbol)
     }
 
-    /// 이 종목을 관심종목에 둔 연결들.
     pub fn watchers(&self, symbol: Symbol) -> impl Iterator<Item = ConnId> + '_ {
         self.holders.get(&symbol).into_iter().flatten().filter_map(|h| match h {
             Holder::Watch { conn, .. } => Some(*conn),
@@ -144,14 +145,13 @@ impl SubscriptionManager {
         Plan { realtime: self.admitted.clone(), rejected }
     }
 
-    /// 유예 중인 가장 오래된 종목을 뺀다. 없으면 `rank`보다 뒤인, 관심종목만 잡은 종목 가운데 가장 뒤의 것을 뺀다.
     fn make_room(&mut self, rank: Rank) -> bool {
         let out = self.oldest_in_grace().or_else(|| {
             self.admitted
                 .iter()
                 .filter(|s| self.holders.contains_key(s))
                 .map(|s| (self.rank(*s), *s))
-                .filter(|(r, _)| matches!(r, Rank::Watch { .. }) && *r > rank)
+                .filter(|(r, _)| r.is_watch_only() && *r > rank)
                 .max()
                 .map(|(_, s)| s)
         });

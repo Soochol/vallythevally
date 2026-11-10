@@ -136,11 +136,11 @@ impl BarService {
         BarService { rest, symbols, clock, slots: Mutex::new(HashMap::new()), next_id: AtomicU64::new(1), resets: AtomicU64::new(0) }
     }
 
-    /// `before`가 None이면 최신 페이지다.
     pub fn directory_updates(&self) -> tokio::sync::watch::Receiver<Option<Arc<Directory>>> {
         self.symbols.updates()
     }
 
+    /// `before`가 None이면 최신 페이지다.
     pub async fn page(&self, key: SeriesKey, before: Option<KstTime>, limit: usize) -> Result<BarPage, BarError> {
         self.check(key).await?;
         let prio = Priority::Screen;

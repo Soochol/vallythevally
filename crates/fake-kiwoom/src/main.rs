@@ -22,7 +22,7 @@ async fn main() -> ExitCode {
     match std::env::var("FAKE_KIWOOM_EXTRA_STOCKS") {
         Err(_) => {}
         Ok(n) => match n.parse() {
-            Ok(n) => fake.set_extra_stocks(n),
+            Ok(n) => fake.set_extra_kospi_stocks(n),
             Err(_) => {
                 eprintln!("FAKE_KIWOOM_EXTRA_STOCKS는 0 이상의 정수입니다: {n:?}");
                 return ExitCode::from(2);
