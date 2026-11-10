@@ -3,20 +3,24 @@ import { DESKTOP_QUERY, useMediaQuery } from "../../lib/media";
 import { type RightPanel as View, useSelectionStore } from "../../stores/selection";
 import { useUiStore } from "../../stores/ui";
 import { ObjectList } from "../drawings/ObjectList";
-import { ChevronRightIcon, DrawingsIcon, ListIcon } from "../icons";
+import { ChevronRightIcon, DrawingsIcon, FunnelIcon, ListIcon } from "../icons";
+import { ScreenerBadge, ScreenerPanel } from "../screener/ScreenerPanel";
 import { desktopPanelWidth } from "../watch/columns";
 import { WatchPanel } from "../watch/Watchlist";
 
 const RAIL_WIDTH = 44;
+const SCREENER_WIDTH = 392;
 
 interface ViewSpec {
   label: string;
   icon: ReactNode;
   Content: ComponentType;
+  Badge?: ComponentType;
 }
 
 const VIEWS: Record<View, ViewSpec> = {
   watch: { label: "관심종목", icon: <ListIcon size={19} />, Content: WatchPanel },
+  screener: { label: "스크리너", icon: <FunnelIcon size={19} />, Content: ScreenerPanel, Badge: ScreenerBadge },
   objects: { label: "개체", icon: <DrawingsIcon size={19} />, Content: ObjectList },
 };
 const VIEW_ORDER = Object.keys(VIEWS) as View[];
@@ -24,8 +28,9 @@ const VIEW_ORDER = Object.keys(VIEWS) as View[];
 export function useRightPanelWidth(): number {
   const collapsed = useUiStore((s) => s.prefs.watchCollapsed);
   const columns = useUiStore((s) => s.prefs.watchColumns);
+  const view = useSelectionStore((s) => s.rightPanel);
   if (collapsed) return RAIL_WIDTH;
-  return RAIL_WIDTH + desktopPanelWidth(columns);
+  return RAIL_WIDTH + (view === "screener" ? SCREENER_WIDTH : desktopPanelWidth(columns));
 }
 
 export function RightPanel() {
@@ -52,7 +57,7 @@ function Rail({ view, collapsed }: { view: View; collapsed: boolean }) {
   return (
     <nav aria-label="오른쪽 패널" className="flex w-11 flex-none flex-col items-center gap-1 border-l border-line py-1.5">
       {VIEW_ORDER.map((to) => {
-        const { label, icon } = VIEWS[to];
+        const { label, icon, Badge } = VIEWS[to];
         const open = !collapsed && to === view;
         return (
           <button
@@ -65,6 +70,7 @@ function Rail({ view, collapsed }: { view: View; collapsed: boolean }) {
           >
             <span className="sr-only">{label}</span>
             {icon}
+            {Badge && <Badge />}
           </button>
         );
       })}

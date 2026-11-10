@@ -7,7 +7,7 @@ export type Dialog =
   | { kind: "search"; purpose: SearchPurpose }
   | { kind: "indicator"; slot: Slot; editId: string | null };
 export type PhoneTab = "chart" | "watch";
-export type RightPanel = "watch" | "objects";
+export type RightPanel = "watch" | "screener" | "objects";
 
 /** 저장하지 않는 화면 상태(frontend.md §5.3). */
 interface SelectionState {
