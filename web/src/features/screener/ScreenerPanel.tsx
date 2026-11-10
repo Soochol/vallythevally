@@ -34,7 +34,7 @@ import {
 } from "../../lib/screener";
 import { listNameFrom, MAX_WATCHLISTS } from "../../lib/watchlist";
 import { useCell, useLayoutStore } from "../../stores/layout";
-import { runOf, type ScreenRun, shownResult, useScreenerStore } from "../../stores/screener";
+import { type Rerun, rerunReason, runOf, type ScreenRun, shownResult, useScreenerStore } from "../../stores/screener";
 import { useSelectionStore } from "../../stores/selection";
 import { useUiStore } from "../../stores/ui";
 import { useWatchlistStore } from "../../stores/watchlist";
@@ -68,6 +68,15 @@ function useChosenScreen() {
   return { screens, screen, run };
 }
 
+function useStoreStatus(pollWhileUpdatingMs: number) {
+  const query = useScreenerStatus(pollWhileUpdatingMs);
+  const seeStatus = useScreenerStore((s) => s.seeStatus);
+  useEffect(() => {
+    if (query.data) seeStatus(query.data);
+  }, [query.data, seeStatus]);
+  return query;
+}
+
 function useActiveSymbol(): SymbolCode {
   return useCell(useSelectionStore((s) => s.activeSlot)).symbol;
 }
@@ -84,7 +93,7 @@ function useMenuToggle() {
 }
 
 export function ScreenerBadge() {
-  const updating = isUpdating(useScreenerStatus(RAIL_POLL_MS).data);
+  const updating = isUpdating(useStoreStatus(RAIL_POLL_MS).data);
   const shown = shownResult(useChosenScreen().run)?.rows.length;
   if (updating) {
     return (
@@ -106,7 +115,7 @@ export function ScreenerBadge() {
 
 export function ScreenerPanel() {
   const { screens, screen, run } = useChosenScreen();
-  const statusQuery = useScreenerStatus(PANEL_POLL_MS);
+  const statusQuery = useStoreStatus(PANEL_POLL_MS);
   const status = statusQuery.data;
   const block = status ? runBlock(status) : null;
   const sort = useScreenerStore((s) => s.sort);
@@ -408,6 +417,8 @@ interface ResultsProps {
 
 function Results({ screen, run, rows, status, block, onRun }: ResultsProps) {
   const result = shownResult(run);
+  const storeVersion = useScreenerStore((s) => s.storeVersion);
+  const rerun = block === null ? rerunReason(run, storeVersion, status) : null;
   if (run?.kind === "failed") {
     return (
       <Notice title="실행하지 못했습니다" tone="alert" action={<RetryButton label="다시 실행" disabled={block !== null} onClick={onRun} />}>
@@ -415,23 +426,23 @@ function Results({ screen, run, rows, status, block, onRun }: ResultsProps) {
       </Notice>
     );
   }
-  if (result) return <ResultList screen={screen} result={result} rows={rows} running={run?.kind === "running"} status={status} block={block} onRun={onRun} />;
+  if (result) return <ResultList screen={screen} result={result} rows={rows} running={run?.kind === "running"} rerun={rerun} onRun={onRun} />;
   if (run?.kind === "running") return <Notice title="찾는 중입니다" />;
   const { title, body } = NOT_RUN[block ?? "ready"];
   return <Notice title={title}>{body}</Notice>;
 }
 
-interface ResultListProps extends Omit<ResultsProps, "run"> {
+interface ResultListProps extends Omit<ResultsProps, "run" | "status" | "block"> {
   result: ScreenerResult;
   running: boolean;
+  rerun: Rerun | null;
 }
 
-function ResultList({ screen, result, rows, running, status, block, onRun }: ResultListProps) {
+function ResultList({ screen, result, rows, running, rerun, onRun }: ResultListProps) {
   const active = useActiveSymbol();
   const list = useRef<HTMLUListElement>(null);
   useFollowActive(list, active, rows);
   const sort = useScreenerStore((s) => s.sort);
-  const newer = status && status.lastDay !== null && status.lastDay > result.asOf && block === null ? status.lastDay : null;
   const left = result.excluded.listedTooShort + result.excluded.historyShort;
   return (
     <section aria-label="결과" aria-busy={running} className={`flex min-h-0 flex-1 flex-col ${running ? "opacity-50" : ""}`}>
@@ -446,9 +457,9 @@ function ResultList({ screen, result, rows, running, status, block, onRun }: Res
       <p className="flex-none px-3 pb-2 pt-1 text-xs text-text-3">
         대상 {count(result.universe)}종목 · 빠짐: {excludedText(screen, result.excluded)}
       </p>
-      {newer && (
+      {rerun && (
         <p className="mx-3 mb-2 flex flex-none items-center gap-2 rounded-s bg-accent-soft px-2 py-1.5 text-xs text-accent">
-          {dayLabel(newer, result.asOf)} 자료가 들어왔습니다
+          {rerun.kind === "new_day" ? `${dayLabel(rerun.day, result.asOf)} 자료가 들어왔습니다` : "저장소 자료가 바뀌었습니다"}
           <span className="flex-1" />
           <button type="button" className="font-[650] underline underline-offset-2" disabled={running} onClick={onRun}>
             새 자료로 다시 실행

@@ -34,6 +34,7 @@ const SEED_SCREENS: Screen[] = [
   },
   { id: "01900000-0000-7000-8000-0000000000a3", name: "종가 12개월 신고가", period: "M", exclude: ["etf", "preferred", "reit", "spac"], conditions: [{ field: "close", n: 12, m: 3 }] },
   { id: "01900000-0000-7000-8000-0000000000a4", name: "종가 10년 신고가", period: "D", exclude: ["etf"], conditions: [{ field: "close", n: 2500, m: 1 }] },
+  { id: "01900000-0000-7000-8000-0000000000a5", name: "고가 1,000일 신고가", period: "D", exclude: [], conditions: [{ field: "high", n: 1000, m: 20 }] },
 ];
 
 async function readJson(req: IncomingMessage): Promise<unknown> {
