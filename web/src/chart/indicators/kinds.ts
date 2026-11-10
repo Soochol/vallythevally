@@ -131,13 +131,30 @@ export function primaryLine(spec: IndicatorSpec): number | null {
   return i < 0 ? null : i;
 }
 
-/** 칸에서 아직 쓰지 않은 첫 견본부터 선마다 차례로 색을 준다(frontend.md §3.3). */
-export function pickColors(spec: IndicatorSpec, used: readonly IndicatorColor[]): IndicatorColor[] {
-  const first = Math.max(0, INDICATOR_COLORS.findIndex((c) => !used.includes(c)));
-  return specLines(spec).map((_, i) => INDICATOR_COLORS[(first + i) % INDICATOR_COLORS.length]!);
+const wrap = (i: number) => INDICATOR_COLORS[((i % INDICATOR_COLORS.length) + INDICATOR_COLORS.length) % INDICATOR_COLORS.length]!;
+
+/** 색을 고를 선이 base 색을 갖고, 나머지 선은 견본 순서대로 잇는다. */
+export function colorsFrom(spec: IndicatorSpec, base: IndicatorColor): IndicatorColor[] {
+  const p = primaryLine(spec) ?? 0;
+  const b = INDICATOR_COLORS.indexOf(base);
+  return specLines(spec).map((_, i) => wrap(b + i - p));
 }
 
-/** 선 i의 색. 저장된 색이 모자라면(선이 늘어난 설정) 그 종류의 기본 순서로 채운다. */
-export function lineColor(colors: readonly IndicatorColor[], i: number): IndicatorColor {
-  return colors[i] ?? INDICATOR_COLORS[((INDICATOR_COLORS.indexOf(colors[0] ?? "ind-1") + i) % INDICATOR_COLORS.length)]!;
+/** 다섯 견본 중 아직 쓰지 않은 첫 색(frontend.md §3.3). 다 썼으면 첫 색. */
+export function firstUnusedColor(used: readonly IndicatorColor[]): IndicatorColor {
+  return INDICATOR_COLORS.find((c) => !used.includes(c)) ?? INDICATOR_COLORS[0];
+}
+
+/** 지표가 대표로 쓰는 색(색을 고를 선의 색). */
+export function shownColor(spec: IndicatorSpec, colors: readonly IndicatorColor[]): IndicatorColor {
+  return lineColor(spec, colors, primaryLine(spec) ?? 0);
+}
+
+/** 선 i의 색. 저장된 색이 모자라면(선이 늘어난 설정) 대표 색에서 견본 순서대로 채운다. */
+export function lineColor(spec: IndicatorSpec, colors: readonly IndicatorColor[], i: number): IndicatorColor {
+  const own = colors[i];
+  if (own) return own;
+  const p = primaryLine(spec) ?? 0;
+  const base = colors[p] ?? colors[0] ?? INDICATOR_COLORS[0];
+  return wrap(INDICATOR_COLORS.indexOf(base) + i - p);
 }

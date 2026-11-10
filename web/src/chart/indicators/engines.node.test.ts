@@ -5,6 +5,7 @@ import type { Period } from "../../api/generated/Period";
 import init, * as wasm from "../../wasm/indicators/indicators.js";
 import { type Engine, Engines, type Wasm } from "./engines";
 import type { BarTuple, Columns, Created, EngineResult, FromWorker, LineDraw, Point } from "./protocol";
+import { KIND_ORDER, KINDS, specLines } from "./kinds";
 import { wasmAdapter } from "./wasm";
 
 let real: Wasm;
@@ -155,4 +156,13 @@ test("엔진 하나가 panic해도 같은 칸의 다른 엔진은 계속 계산�
   expect(first.map((r) => (r.ok ? "ok" : r.error))).toEqual(["calc", "ok"]);
   const after = bar(engines, "confirm", bars[30]!);
   expect(after.map((r) => [r.id, r.ok])).toEqual([["e1", true]]);
+});
+
+test("kinds.ts의 선 순서는 wasm 엔진의 선 순서와 같다", () => {
+  const specs: IndicatorSpec[] = [...KIND_ORDER.map((k) => KINDS[k].defaults), { kind: "volume", maPeriod: null }, { kind: "rsi", period: 14, signal: 9 }];
+  for (const spec of specs) {
+    const e = real.newEngine(JSON.stringify(spec), columns(bars.slice(0, 5)));
+    expect(e.lines(), spec.kind).toEqual(specLines(spec));
+    e.free();
+  }
 });
