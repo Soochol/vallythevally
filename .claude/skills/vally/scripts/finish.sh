@@ -10,13 +10,15 @@ source "$(dirname "$0")/lib.sh"
 issue=$1 pr=$3
 need_issue "$issue"
 as_lead
-need_issue_open "$issue"
 view=$(gh pr view "$pr" --json state,headRefName,files) || die "gh pr view $pr failed"
 [ "$(jq -r .state <<<"$view")" = MERGED ] || die "PR #$pr is not merged"
 branch=$(jq -r .headRefName <<<"$view")
 files=$(jq -r '.files[].path' <<<"$view")
 nfiles=$(jq '.files | length' <<<"$view")
+git fetch -q origin
 
+hold_vally_lock
+need_issue_open "$issue"
 agents=$(terminals_with vally.issue="$issue")
 for t in $agents; do
   info=$(terminal_json "$t")
@@ -26,7 +28,6 @@ for t in $agents; do
   else echo "kept $(jq -r --arg t "$t" '.name // $t' <<<"$info"): no live lead (주인 없음, was $(lead_label "$owner")); only when the user says so: take.sh $issue"; fi
 done
 
-git fetch -q origin
 cwds=$(live_cwds)
 kept=0
 for w in "$(worktree_for_branch "$branch")" "$VALLY_WORKTREES"/review-"$issue"-*; do
@@ -42,6 +43,7 @@ if git show-ref --verify --quiet "refs/heads/$branch"; then
   elif branch_is_safe_to_delete "$branch"; then git branch -D "$branch" >/dev/null && echo "deleted branch $branch"
   else echo "kept branch $branch: it has commits that are not on origin"; fi
 fi
+release_vally_lock
 
 if [[ $branch == docs/garden-* ]]; then
   echo "gardener PR: no gardener"

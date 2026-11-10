@@ -4,6 +4,7 @@
 source "$(dirname "$0")/lib.sh"
 
 as_lead
+load_live
 mkdir -p "$VALLY_STATE"
 report=$VALLY_STATE/status-$HC_TERMINAL_ID.md
 cwds=$(live_cwds)
@@ -70,7 +71,7 @@ mine=$(jq -c --arg checked "$checked" 'map(select(.state == "me")) |
   echo "# vally 현황: 리드 $MY_NAME ($(date '+%Y-%m-%d %H:%M'))"
   echo
   echo "## 주인 없는 에이전트 (사용자가 예라고 할 때만 take.sh <이슈>)"
-  jq -r '.[] | select(.state == "gone") | "- \(.name) [\(.labels["vally.role"])] 이슈 \(.issues | map("#" + .) | join(", ")): \(if .labels["vally.orphan"] == "1" then "보고 완료" elif .run == "blocked" then "막힘" elif .run == "working" then "작업 중" else "멈춤 (\(.run))" end) (\(if .owner == "" then "리드 기록 없음" else "리드 \(.owner | split("@")[0]) 없음" end))"' <<<"$agents" | grep . || echo "- 없음"
+  jq -r '.[] | select(.state == "gone") | "- \(.name) [\(.labels["vally.role"])] 이슈 \(.issues | map("#" + .) | join(", ")): \(if .labels["vally.orphan"] then {done: "보고 완료", ask: "질문 대기", blocked: "막힘"}[.labels["vally.orphan"]] // "보고 못 함" elif .run == "blocked" then "막힘" elif .run == "working" then "작업 중" else "멈춤 (\(.run))" end) (\(if .owner == "" then "리드 기록 없음" else "리드 \(.owner | split("@")[0]) 없음" end))"' <<<"$agents" | grep . || echo "- 없음"
   echo
   echo "## 내 에이전트"
   jq -r '.[] | select(.state == "me") | "- \(.name) [\(.labels["vally.role"])] 이슈 \(.issues | map("#" + .) | join(", "))\(if .labels["vally.pr"] then " PR #"+.labels["vally.pr"] else "" end): \(.run)"' <<<"$agents" | grep . || echo "- 없음"

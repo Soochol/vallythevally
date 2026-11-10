@@ -28,13 +28,26 @@ git rev-parse --git-dir >/dev/null 2>&1 || die "run from a vallythevally checkou
 as_lead
 
 git fetch -q origin
-hold_issue_lock "$issue"
+case $kind in
+  impl)
+    [ -n "$spec" ] || die "impl needs --spec"
+    [[ $branch =~ ^(feat|fix|chore|docs|test|ci)/[a-z0-9][a-z0-9.-]*$ ]] || die "impl needs --branch like fix/58-theme-frame: '$branch'";;
+  fix)
+    [ -n "$spec" ] && [ -n "$pr" ] && [ -n "$round" ] || die "fix needs --pr, --round and --spec"
+    branch=$(gh pr view "$pr" --json headRefName --jq .headRefName);;
+  review)
+    [ -n "$pr" ] && [ -n "$round" ] || die "review needs --pr and --round"
+    head=$(gh pr view "$pr" --json headRefOid --jq .headRefOid)
+    git fetch -q origin "pull/$pr/head";;
+  garden) [ -n "$pr" ] || die "garden needs --pr";;
+  *) usage;;
+esac
+
+hold_vally_lock
 need_issue_open "$issue"
 lock_issue=$issue
 case $kind in
   impl)
-    [ -n "$spec" ] || die "impl needs --spec"
-    [[ $branch =~ ^(feat|fix|chore|docs|test|ci)/[a-z0-9][a-z0-9.-]*$ ]] || die "impl needs --branch like fix/58-theme-frame: '$branch'"
     role=worker template=vally-worker name=w$issue-impl round=${round:-0}
     [ -z "$writer" ] || role=writer template=vally-writer
     worktree=$(worktree_for_branch "$branch")
@@ -43,24 +56,18 @@ case $kind in
     else add=(git worktree add -q --no-track -b "$branch" "$worktree" origin/main); fi
     ;;
   fix)
-    [ -n "$spec" ] && [ -n "$pr" ] && [ -n "$round" ] || die "fix needs --pr, --round and --spec"
     role=worker template=vally-worker name=w$issue-fix$round
     [ -z "$writer" ] || role=writer template=vally-writer
-    branch=$(gh pr view "$pr" --json headRefName --jq .headRefName)
     worktree=$(worktree_for_branch "$branch")
     if git show-ref --verify --quiet "refs/heads/$branch"; then add=(git worktree add -q "$worktree" "$branch")
     else add=(git worktree add -q -b "$branch" "$worktree" "origin/$branch"); fi
     ;;
   review)
-    [ -n "$pr" ] && [ -n "$round" ] || die "review needs --pr and --round"
     role=reviewer template=vally-reviewer name=w$issue-review$round
-    head=$(gh pr view "$pr" --json headRefOid --jq .headRefOid)
-    git fetch -q origin "pull/$pr/head"
     worktree=$VALLY_WORKTREES/review-$issue-${head:0:7}
     add=(git worktree add -q --detach "$worktree" "$head")
     ;;
   garden)
-    [ -n "$pr" ] || die "garden needs --pr"
     handed=$VALLY_STATE/garden-handed
     gardeners=$(terminals_with vally.role=gardener)
     live=''
@@ -85,7 +92,6 @@ case $kind in
     worktree=$(worktree_for_branch "$branch")
     add=(git worktree add -q --no-track -b "$branch" "$worktree" origin/main)
     ;;
-  *) usage;;
 esac
 
 live_names=$(hc ls --json | jq -r '.terminals[].name // empty') || die "hc ls failed; is herdr-core running?"

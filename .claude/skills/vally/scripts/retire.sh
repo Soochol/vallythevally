@@ -8,6 +8,8 @@ source "$(dirname "$0")/lib.sh"
 [ $# -ge 1 ] && { [ $# = 1 ] || [ "$2" = --worktree ]; } || { sed -n '5p' "$0" >&2; exit 2; }
 name=$1
 as_lead
+[ $# = 1 ] || git fetch -q origin
+hold_vally_lock
 info=$(terminal_json "$name")
 [ -n "$(jq -r '.labels["vally.role"] // empty' <<<"$info")" ] || die "$name has no vally.role label; not a vally agent"
 need_mine "$(owner_of <<<"$info")" "$name" "$(jq -r '.labels["vally.issue"] // "<issue>"' <<<"$info")"
@@ -22,7 +24,6 @@ retire_terminal "$name"
 
 is_clean "$worktree" || die "kept $worktree: uncommitted changes"
 branch=$(git -C "$worktree" branch --show-current)
-git fetch -q origin
 if [ -n "$branch" ] && ! branch_is_safe_to_delete "$branch"; then die "kept $worktree: $branch has commits that are not on origin"; fi
 remove_worktree "$worktree" && echo "removed $worktree"
 [ -z "$branch" ] || { git branch -D "$branch" >/dev/null && echo "deleted branch $branch"; }

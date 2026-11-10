@@ -106,10 +106,20 @@ as_lead() {
     hc label "$HC_TERMINAL_ID" "vally.lead=$name" "vally.lead.since=$since" >/dev/null || die "could not label $HC_TERMINAL_ID as a lead"
   fi
   ME=$HC_TERMINAL_ID@$since MY_NAME=$name
-  load_live
 }
 
 load_live() { LIVE=$(hc ls --json | jq -r '.terminals[].address') || die "hc ls failed; is herdr-core running?"; }
+
+# Every script that decides or changes who owns an agent, a worktree or an issue does it holding this
+# one lock, and reads which leads are live only once it holds it.
+hold_vally_lock() {
+  mkdir -p "$VALLY_STATE/locks"
+  exec {vally_lock}>>"$VALLY_STATE/locks/vally.lock"
+  flock -x -w 120 "$vally_lock" || die "another vally script has held $VALLY_STATE/locks/vally.lock for 120 s; try again when it ends"
+  load_live
+}
+
+release_vally_lock() { exec {vally_lock}>&-; }
 
 lead_alive() {
   [[ $1 == *@* ]] && grep -qxF "${1%%@*}" <<<"$LIVE" || return 1
@@ -120,13 +130,6 @@ owner_state() {
   if [ "$1" = "$ME" ]; then echo me
   elif lead_alive "$1"; then echo live
   else echo gone; fi
-}
-
-# Hold issue <n>'s lock until this script exits.
-hold_issue_lock() {
-  mkdir -p "$VALLY_STATE/locks"
-  exec {issue_lock}>>"$VALLY_STATE/locks/issue-$1.lock"
-  flock -x -w 120 "$issue_lock" || die "issue #$1 stays busy: another vally script holds $VALLY_STATE/locks/issue-$1.lock"
 }
 
 lead_label() {

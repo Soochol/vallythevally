@@ -441,7 +441,7 @@ t_take_adopts_issue_of_dead_lead() {
   w=$(jq -r '.terminals[] | select(.name == "w58-impl") | .address' "$FAKE_DIR/terminals.json")
   HC_TERMINAL_ID=$w "$agent/report.sh" "done 58 PR #61 /r.md" >/dev/null 2>&1
   kill_lead t2; HC_TERMINAL_ID=$w "$agent/report.sh" "done 58 PR #61 /r.md" >/dev/null 2>&1
-  ok test "$(labels_of w58-impl | jq -r '.["vally.orphan"]')" = 1 || return 1
+  ok test "$(labels_of w58-impl | jq -r '.["vally.orphan"]')" = done || return 1
   "$agent/take.sh" 58 > "$T/out" || { cat "$T/out"; return 1; }
   ok test "$(labels_of w58-impl | jq -c '[.["vally.owner"], .["vally.orphan"]]')" = '["t1@1000",null]' &&
   ok grep -q "^send $w lead is now t1" "$FAKE_DIR/hc.log" &&
@@ -516,7 +516,7 @@ t_report_without_lead_marks_orphan_and_notifies() {
   add_terminal t5 w58-impl /w '{"vally.issue":"58","vally.role":"worker","vally.owner":"t9@5"}' idle ''
   HC_TERMINAL_ID=t5 "$agent/report.sh" "done 58 PR #61 /r/w58-impl.md" > "$T/out"; code=$?
   ok test $code = 3 && ok grep -q '^리드가 없어 보고하지 못했다: done 58 PR #61 /r/w58-impl.md$' "$T/out" &&
-  ok test "$(labels_of t5 | jq -r '.["vally.orphan"]')" = 1 &&
+  ok test "$(labels_of t5 | jq -r '.["vally.orphan"]')" = done &&
   ok grep -q '^vally #58 리드 없음: done 58 PR #61 /r/w58-impl.md$' "$FAKE_DIR/notify.log" && ok test -z "$(ran 'send t9')" &&
   "$agent/status.sh" > "$T/out" && ok grep -q '^- w58-impl \[worker\] 이슈 #58: 보고 완료 (리드 t9 없음)$' "$T/out"
 }
@@ -611,7 +611,7 @@ t_agent_without_owner_belongs_to_an_older_parent_only() {
   kill_lead t2; add_lead t2 /recycled/lead 9000000
   m=$(mark)
   HC_TERMINAL_ID=t5 "$agent/report.sh" 'done 58 /r.md' > "$T/out"; code=$?
-  ok test $code = 3 && ok test "$(labels_of t5 | jq -r '.["vally.orphan"]')" = 1 &&
+  ok test $code = 3 && ok test "$(labels_of t5 | jq -r '.["vally.orphan"]')" = done &&
   ! as_t2 "$agent/retire.sh" w58-impl 2>"$T/err" && ok grep -q 'w58-impl has no live lead (주인 없음, was t2)' "$T/err" &&
   ok test -z "$(changes_since "$m" | grep -E '^(send|kill|rm) ')"
 }
