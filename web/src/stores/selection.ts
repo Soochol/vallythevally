@@ -5,7 +5,8 @@ import { useUiStore } from "./ui";
 export type SearchPurpose = "open" | "watch";
 export type Dialog =
   | { kind: "search"; purpose: SearchPurpose }
-  | { kind: "indicator"; slot: Slot; editId: string | null };
+  | { kind: "indicator"; slot: Slot; editId: string | null }
+  | { kind: "screen"; editId: string | null };
 export type PhoneTab = "chart" | "watch";
 export type RightPanel = "watch" | "screener" | "objects";
 
@@ -18,6 +19,7 @@ interface SelectionState {
   toast: null | { id: number; text: string };
   openSearch(purpose?: SearchPurpose): void;
   openIndicators(slot: Slot, editId?: string | null): void;
+  openScreenEditor(editId: string | null): void;
   closeDialog(): void;
   setPhoneTab(tab: PhoneTab): void;
   showRightPanel(panel: RightPanel): void;
@@ -35,6 +37,7 @@ export const useSelectionStore = create<SelectionState>()((set) => ({
   toast: null,
   openSearch: (purpose = "open") => set({ dialog: { kind: "search", purpose } }),
   openIndicators: (slot, editId = null) => set({ dialog: { kind: "indicator", slot, editId } }),
+  openScreenEditor: (editId) => set({ dialog: { kind: "screen", editId } }),
   closeDialog: () => set({ dialog: null }),
   setPhoneTab: (phoneTab) => set({ phoneTab }),
   showRightPanel: (rightPanel) => {

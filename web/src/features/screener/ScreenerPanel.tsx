@@ -54,7 +54,7 @@ const FULL_RELOAD_CONFIRM =
 const toast = (text: string) => useSelectionStore.getState().showToast(text);
 const reasonOf = (e: unknown) => (e instanceof Error ? e.message : String(e));
 const showCommandError = (e: unknown) => toast(`업데이트 명령을 보내지 못했습니다: ${reasonOf(e)}`);
-const openScreenEditor = () => toast("조건식 편집 화면은 아직 없습니다");
+const editScreen = (id: string | null) => useSelectionStore.getState().openScreenEditor(id);
 const count = (n: number) => n.toLocaleString("ko-KR");
 
 function openResult(code: SymbolCode) {
@@ -213,11 +213,11 @@ function ScreenHeader({ screen, screens, run, block, status, rows, onRun }: Head
       <div className="flex items-center gap-1">
         <ScreenPicker screens={screens} screen={screen} />
         <span className="flex-1" />
-        <button type="button" className="tb-btn h-7 gap-1 px-2 text-s text-text-2" title="조건식 편집" onClick={openScreenEditor}>
+        <button type="button" className="tb-btn h-7 gap-1 px-2 text-s text-text-2" title="조건식 편집" onClick={() => editScreen(screen.id)}>
           <PenIcon size={14} />
           편집
         </button>
-        <button type="button" className="icon-btn" title="새 조건식" aria-label="새 조건식" onClick={openScreenEditor}>
+        <button type="button" className="icon-btn" title="새 조건식" aria-label="새 조건식" onClick={() => editScreen(null)}>
           <PlusIcon />
         </button>
         <PanelMenu screen={screen} rows={rows} status={status} />
@@ -245,7 +245,7 @@ function ScreenPicker({ screens, screen }: { screens: readonly Screen[]; screen:
   const items: MenuItem[] = [
     ...screens.map((s): MenuItem => ({ kind: "radio", label: `${s.name} · ${PERIOD_NAME[s.period]}`, checked: s.id === screen.id, onSelect: () => choose(s.id) })),
     { kind: "separator" },
-    { kind: "action", label: "새 조건식…", onSelect: openScreenEditor },
+    { kind: "action", label: "새 조건식…", onSelect: () => editScreen(null) },
   ];
   return (
     <div ref={menu.root} className="relative -ml-1.5 min-w-0">
@@ -383,7 +383,7 @@ function NoScreen({ query }: { query: UseQueryResult<Screens> }) {
     <Notice
       title="저장한 조건식이 없습니다"
       action={
-        <button type="button" className="btn-primary mt-1 flex h-8 items-center gap-1.5 px-3 text-s" onClick={openScreenEditor}>
+        <button type="button" className="btn-primary mt-1 flex h-8 items-center gap-1.5 px-3 text-s" onClick={() => editScreen(null)}>
           <PlusIcon size={14} />새 조건식
         </button>
       }
@@ -475,7 +475,7 @@ function ResultList({ screen, result, rows, running, rerun, onRun }: ResultListP
             대상 {count(result.universe)}종목 가운데 조건을 모두 만족하는 종목이 없습니다.
             {left > 0 && ` 상장 기간이나 이력이 짧아 ${count(left)}종목이 빠졌습니다.`}
           </p>
-          <button type="button" className="tb-btn mt-3 h-8 border border-line text-s" onClick={openScreenEditor}>
+          <button type="button" className="tb-btn mt-3 h-8 border border-line text-s" onClick={() => editScreen(screen.id)}>
             <PenIcon size={14} />
             조건식 고치기
           </button>

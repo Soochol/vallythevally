@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 import type { Screen } from "../../api/generated/Screen";
-import { addCondition, checkDraft, draftOf, editCondition, excludesIn, removeCondition, type ScreenDraft, toggleExclude, withScreen } from "./screenForm";
+import { addCondition, type ConditionErrors, checkCondition, checkDraft, draftOf, editCondition, excludesIn, removeCondition, type ScreenDraft, toggleExclude, withScreen } from "./screenForm";
 
 const weekly: Screen = {
   id: "s1",
@@ -22,9 +22,16 @@ const withCounts = (n: string, m: string, period: ScreenDraft["period"] = "D"): 
   const draft = { ...draftOf(null), name: "시험", period };
   return editCondition(draft, draft.conditions[0]!.key, { n, m });
 };
+const rowErrors = (n: string, m: string, period: ScreenDraft["period"] = "D"): ConditionErrors => {
+  const draft = withCounts(n, m, period);
+  expect(checkDraft(draft, "new", []).ok).toBe(false);
+  const row = checkCondition(draft.conditions[0]!, period);
+  if (row.ok) throw new Error("조건 검사를 통과하면 안 된다");
+  return row.errors;
+};
 
 test("새 조건식은 이름이 비면 이름 칸에 이유를 달고 막는다", () => {
-  expect(errorsOf(draftOf(null))).toEqual({ name: "이름을 넣으세요", conditions: [{ n: null, m: null }], list: null });
+  expect(errorsOf(draftOf(null))).toEqual({ name: "이름을 넣으세요", list: null });
   expect(errorsOf({ ...draftOf(null), name: "   " }).name).toBe("이름을 넣으세요");
 });
 
@@ -35,18 +42,18 @@ test("이름은 앞뒤 공백을 빼고 40자까지다", () => {
 });
 
 test("M이 N보다 크면 M 칸에 봉 주기 단위로 이유를 단다", () => {
-  expect(errorsOf(withCounts("200", "201")).conditions).toEqual([{ n: null, m: "신고가 기간 200일보다 길 수 없습니다" }]);
-  expect(errorsOf(withCounts("52", "53", "W")).conditions).toEqual([{ n: null, m: "신고가 기간 52주보다 길 수 없습니다" }]);
-  expect(errorsOf(withCounts("12", "13", "M")).conditions).toEqual([{ n: null, m: "신고가 기간 12개월보다 길 수 없습니다" }]);
+  expect(rowErrors("200", "201")).toEqual({ n: null, m: "신고가 기간 200일보다 길 수 없습니다" });
+  expect(rowErrors("52", "53", "W")).toEqual({ n: null, m: "신고가 기간 52주보다 길 수 없습니다" });
+  expect(rowErrors("12", "13", "M")).toEqual({ n: null, m: "신고가 기간 12개월보다 길 수 없습니다" });
   expect(checkDraft(withCounts("200", "200"), "new", []).ok).toBe(true);
 });
 
 test("N과 M은 1 이상의 정수여야 하고, N은 u32 끝까지 받는다", () => {
   for (const bad of ["", "0", "1.5", "-3", "abc", "2e3", "1,00"]) {
-    expect(errorsOf(withCounts(bad, "1")).conditions[0]!.n).toBe("1 이상의 정수를 넣으세요");
-    expect(errorsOf(withCounts("200", bad)).conditions[0]!.m).toBe("1 이상의 정수를 넣으세요");
+    expect(rowErrors(bad, "1").n).toBe("1 이상의 정수를 넣으세요");
+    expect(rowErrors("200", bad).m).toBe("1 이상의 정수를 넣으세요");
   }
-  expect(errorsOf(withCounts("4294967296", "1")).conditions[0]!.n).toBe("4,294,967,295 이하로 넣으세요");
+  expect(rowErrors("4294967296", "1")).toEqual({ n: "4,294,967,295 이하로 넣으세요", m: null });
   const longest = checkDraft(withCounts(" 4294967295 ", "1,000"), "new", []);
   expect(longest.ok && longest.screen.conditions).toEqual([{ field: "high", n: 4_294_967_295, m: 1000 }]);
 });

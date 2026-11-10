@@ -5,8 +5,8 @@ import type { Screen } from "../../api/generated/Screen";
 import type { ScreenPeriod } from "../../api/generated/ScreenPeriod";
 import { excludedInOrder, UNIT } from "../../lib/screener";
 
-export const MAX_SCREENS = 50;
-export const MAX_SCREEN_NAME = 40;
+const MAX_SCREENS = 50;
+const MAX_SCREEN_NAME = 40;
 export const MAX_CONDITIONS = 10;
 const MAX_BARS = 4_294_967_295;
 
@@ -29,9 +29,10 @@ export interface ConditionErrors {
   m: string | null;
 }
 
+export type ConditionCheck = { ok: true; condition: NewHigh } | { ok: false; errors: ConditionErrors };
+
 export interface DraftErrors {
   name: string | null;
-  conditions: readonly ConditionErrors[];
   list: string | null;
 }
 
@@ -105,21 +106,25 @@ function checkName(name: string): string | null {
   return null;
 }
 
+export function checkCondition({ field, n: nText, m: mText }: ConditionDraft, period: ScreenPeriod): ConditionCheck {
+  const n = readCount(nText);
+  const m = readCount(mText);
+  const mError = !m.ok ? m.error : n.ok && m.value > n.value ? `신고가 기간 ${count(n.value)}${UNIT[period]}보다 길 수 없습니다` : null;
+  if (n.ok && m.ok && mError === null) return { ok: true, condition: { field, n: n.value, m: m.value } };
+  return { ok: false, errors: { n: n.ok ? null : n.error, m: mError } };
+}
+
 export function checkDraft(draft: ScreenDraft, id: string, saved: readonly Screen[]): DraftCheck {
   const name = checkName(draft.name);
   const list = !saved.some((s) => s.id === id) && saved.length >= MAX_SCREENS ? `조건식은 ${MAX_SCREENS}개까지 저장할 수 있습니다. 하나를 지운 뒤 만드세요.` : null;
-  const conditions: NewHigh[] = [];
-  const errors = draft.conditions.map(({ field, n: nText, m: mText }): ConditionErrors => {
-    const n = readCount(nText);
-    const m = readCount(mText);
-    const mError = !m.ok ? m.error : n.ok && m.value > n.value ? `신고가 기간 ${count(n.value)}${UNIT[draft.period]}보다 길 수 없습니다` : null;
-    if (n.ok && m.ok && mError === null) conditions.push({ field, n: n.value, m: m.value });
-    return { n: n.ok ? null : n.error, m: mError };
+  const conditions = draft.conditions.flatMap((c) => {
+    const row = checkCondition(c, draft.period);
+    return row.ok ? [row.condition] : [];
   });
   if (name === null && list === null && conditions.length === draft.conditions.length) {
     return { ok: true, screen: { id, name: draft.name.trim(), period: draft.period, exclude: [...draft.exclude], conditions } };
   }
-  return { ok: false, errors: { name, conditions: errors, list } };
+  return { ok: false, errors: { name, list } };
 }
 
 export function withScreen(saved: readonly Screen[], screen: Screen): Screen[] {

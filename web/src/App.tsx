@@ -6,6 +6,7 @@ import { PeriodChips } from "./features/phone/PeriodChips";
 import { PhoneHeader } from "./features/phone/PhoneHeader";
 import { PhoneTabs } from "./features/phone/PhoneTabs";
 import { IndicatorDialog } from "./features/indicator-dialog/IndicatorDialog";
+import { ScreenDialog } from "./features/screen-dialog/ScreenDialog";
 import { SearchDialog } from "./features/search/SearchDialog";
 import { StatusBar } from "./features/status/StatusBar";
 import { Toast } from "./features/toast/Toast";
@@ -63,6 +64,7 @@ function ChartScreen() {
       <PhoneSaveBand />
       <SearchDialog />
       <IndicatorDialog />
+      <ScreenDialog />
       <Toast />
     </div>
   );
