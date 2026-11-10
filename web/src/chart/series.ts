@@ -86,5 +86,27 @@ export function addVolumeSeries(chart: IChartApi): ISeriesApi<"Histogram"> {
 
 /** 점마다 색이 들어가므로 테마를 바꾸면 다시 setData 해야 한다. */
 export function setVolumeData(series: ISeriesApi<"Histogram">, bars: Bar[], t: ThemeTokens): void {
-  series.setData(bars.map((b) => ({ time: toChartTime(b.t), value: b.v, color: b.c >= b.o ? t.upVol : t.downVol })));
+  series.setData(bars.map((b) => volumePoint(b, t)));
+}
+
+function volumePoint(b: Bar, t: ThemeTokens) {
+  return { time: toChartTime(b.t), value: b.v, color: b.c >= b.o ? t.upVol : t.downVol };
+}
+
+/** 마지막 봉 하나를 바꾸거나 뒤에 붙인다. b.t는 시리즈의 마지막 시각보다 이르면 안 된다. */
+export function updateMainBar(main: MainSeries, b: Bar): void {
+  switch (main.style) {
+    case "candle":
+    case "bar":
+      main.api.update({ time: toChartTime(b.t), open: b.o, high: b.h, low: b.l, close: b.c });
+      return;
+    case "line":
+    case "area":
+      main.api.update({ time: toChartTime(b.t), value: b.c });
+      return;
+  }
+}
+
+export function updateVolumeBar(series: ISeriesApi<"Histogram">, b: Bar, t: ThemeTokens): void {
+  series.update(volumePoint(b, t));
 }

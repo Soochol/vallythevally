@@ -1,15 +1,15 @@
 //! 봉 메모리 캐시(backend.md §6.2~6.5, ADR 0003, D4, D14). (종목, 거래소, 봉 주기)마다 시리즈 하나다.
 //!
 //! 시리즈 하나 = 캐시 구간 하나. 오름차순 확정 봉이 빠짐없이 들어 있고, 양 끝으로만 늘어난다.
-//! #2에는 실시간으로 만든 봉을 붙이는 쓰기가 없다. 그래서 키별 잠금을 키움 조회 동안에도 쥔다.
-//! 같은 키의 요청은 이 잠금에서 줄을 서고, 앞 요청이 받은 결과를 메모리에서 바로 쓴다.
+//! 키별 잠금은 키움 조회 동안에도 쥔다. 같은 키의 요청은 이 잠금에서 줄을 서고, 앞 요청이 받은 결과를 메모리에서 바로 쓴다.
+//! 실시간으로 만든 봉(#4)도 이 잠금을 기다려 붙는다. `MarketHub`는 기다리지 않고 따로 띄운 태스크가 기다린다.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
-use domain::{ConfirmedBar, Feed, KstDate, KstTime, Period, SeriesKey, Venue};
+use domain::{BarSource, Bucket, ConfirmedBar, Feed, KstDate, KstTime, Period, SeriesKey, Venue};
 
 use crate::clock::Clock;
 use crate::kiwoom::api::{
@@ -70,6 +70,24 @@ pub struct BarPage {
     pub next_before: Option<KstTime>,
 }
 
+/// 실시간 집계기를 시작할 재료. `tail`은 캐시의 가장 늦은 확정 봉 몇 개다(오름차순).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Seed {
+    pub current: Option<KiwoomBar>,
+    pub tail: Vec<ConfirmedBar>,
+}
+
+const SEED_TAIL: usize = 5;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Appended {
+    Appended,
+    /// 시리즈가 메모리에 없다. 다음에 열 때 키움에서 받는다.
+    NoSeries,
+    /// 같은 `t`나 더 늦은 봉이 이미 있다. 키움 값을 실시간 값으로 덮지 않는다.
+    NotAfterNewest,
+}
+
 struct Series {
     /// 최신 페이지와 일·주·월봉 조회가 쓰는 `base_dt`(오늘). 07:45에 시리즈를 모두 비우므로 하루 안에서 바뀌지 않는다.
     today: KstDate,
@@ -120,6 +138,73 @@ impl BarService {
 
     /// `before`가 None이면 최신 페이지다.
     pub async fn page(&self, key: SeriesKey, before: Option<KstTime>, limit: usize) -> Result<BarPage, BarError> {
+        self.check(key).await?;
+        let prio = Priority::Screen;
+        let slot = self.slot(key);
+        let seen_latest = slot.latest_fetches.load(Ordering::SeqCst);
+        let mut s = slot.series.lock().await;
+        match before {
+            None => {
+                // 잠금을 기다리는 동안 다른 요청이 최신 페이지를 받았으면 그 결과를 같이 쓴다.
+                if slot.latest_fetches.load(Ordering::SeqCst) == seen_latest {
+                    self.refresh_latest(key, &mut s, prio).await?;
+                    slot.latest_fetches.fetch_add(1, Ordering::SeqCst);
+                }
+                while s.bars.len() < limit && !s.reached_origin {
+                    self.extend_older(key, &mut s, prio).await?;
+                }
+            }
+            Some(before) => {
+                while s.bars.partition_point(|b| b.bucket.start() < before) < limit && !s.reached_origin {
+                    self.extend_older(key, &mut s, prio).await?;
+                }
+            }
+        }
+        if !self.is_live(key, slot.id) {
+            tracing::info!(symbol = %key.feed.symbol().as_wire(), venue = ?key.feed.venue(), period = key.period.as_wire(), "시리즈가 그사이 내려가 받은 봉을 메모리에 남기지 않습니다");
+        }
+        slot.last_access.store(self.clock.now().unix(), Ordering::SeqCst);
+        Ok(build_page(&s, before, limit))
+    }
+
+    /// 실시간 집계기를 시작하거나 끊긴 구간을 메울 때 부른다. 언제나 키움 최신 페이지를 새로 받는다.
+    /// 그사이 기다리던 `page` 요청은 이 결과를 같이 쓴다. 받은 확정 봉은 같은 `t`의 실시간 봉을 덮는다.
+    pub async fn seed(&self, key: SeriesKey, prio: Priority) -> Result<Seed, BarError> {
+        self.check(key).await?;
+        let slot = self.slot(key);
+        let mut s = slot.series.lock().await;
+        self.refresh_latest(key, &mut s, prio).await?;
+        slot.latest_fetches.fetch_add(1, Ordering::SeqCst);
+        Ok(Seed { current: s.current, tail: s.bars[s.bars.len().saturating_sub(SEED_TAIL)..].to_vec() })
+    }
+
+    pub(crate) async fn verify_confirmed(&self, key: SeriesKey, bucket: Bucket) -> Result<Option<ConfirmedBar>, BarError> {
+        self.check(key).await?;
+        let slot = self.slot(key);
+        let mut s = slot.series.lock().await;
+        self.refresh_latest(key, &mut s, Priority::Recovery).await?;
+        slot.latest_fetches.fetch_add(1, Ordering::SeqCst);
+        Ok(s.bars.iter().find(|b| b.bucket == bucket && b.source == BarSource::Kiwoom && b.bucket.is_confirmed_at(self.clock.now())).copied())
+    }
+
+    /// 실시간으로 만든 확정 봉을 캐시 구간 끝에 붙인다(§6.3). 키움 세션이 그 사이 끊기지 않았는지는 부르는 쪽(`MarketHub`)이 판단한다.
+    pub async fn append_realtime(&self, key: SeriesKey, bar: ConfirmedBar) -> Appended {
+        debug_assert_eq!(bar.source, BarSource::Realtime);
+        let Some(slot) = self.slots.lock().expect("slots 잠금").get(&key).cloned() else {
+            return Appended::NoSeries;
+        };
+        let mut s = slot.series.lock().await;
+        if s.bars.last().is_none_or(|newest| newest.bucket.start() >= bar.bucket.start()) {
+            return Appended::NotAfterNewest;
+        }
+        if s.current.is_some_and(|c| c.bucket.start() <= bar.bucket.start()) {
+            s.current = None;
+        }
+        s.bars.push(bar);
+        Appended::Appended
+    }
+
+    async fn check(&self, key: SeriesKey) -> Result<(), BarError> {
         let dir = self.symbols.ready(&self.rest).await.map_err(|e| match e {
             NotReady::Kiwoom(e) => e.into(),
             NotReady::Timeout => BarError::ListNotReady,
@@ -131,31 +216,7 @@ impl BarService {
         if key.feed.venue() == Some(Venue::Nxt) && !info.nxt_enabled {
             return Err(BarError::BadRequest(format!("NXT에서 거래되지 않는 종목입니다: {}({})", info.name, key.feed.symbol().as_wire())));
         }
-        let slot = self.slot(key);
-        let seen_latest = slot.latest_fetches.load(Ordering::SeqCst);
-        let mut s = slot.series.lock().await;
-        match before {
-            None => {
-                // 잠금을 기다리는 동안 다른 요청이 최신 페이지를 받았으면 그 결과를 같이 쓴다.
-                if slot.latest_fetches.load(Ordering::SeqCst) == seen_latest {
-                    self.refresh_latest(key, &mut s).await?;
-                    slot.latest_fetches.fetch_add(1, Ordering::SeqCst);
-                }
-                while s.bars.len() < limit && !s.reached_origin {
-                    self.extend_older(key, &mut s).await?;
-                }
-            }
-            Some(before) => {
-                while s.bars.partition_point(|b| b.bucket.start() < before) < limit && !s.reached_origin {
-                    self.extend_older(key, &mut s).await?;
-                }
-            }
-        }
-        if !self.is_live(key, slot.id) {
-            tracing::info!(symbol = %key.feed.symbol().as_wire(), venue = ?key.feed.venue(), period = key.period.as_wire(), "시리즈가 그사이 내려가 받은 봉을 메모리에 남기지 않습니다");
-        }
-        slot.last_access.store(self.clock.now().unix(), Ordering::SeqCst);
-        Ok(build_page(&s, before, limit))
+        Ok(())
     }
 
     /// 07:45에 부른다. 진행 중인 조회의 응답은 내려간 시리즈에만 쓰이고 버려진다.
@@ -171,11 +232,11 @@ impl BarService {
         tracing::info!(count = n, "시세 캐시를 모두 비웠습니다");
     }
 
-    /// 1분 타이머가 부른다. 10분 동안 요청이 없던 시리즈를 내린다. 조회 중인 시리즈는 남긴다.
-    pub fn evict_idle(&self) {
+    /// 1분 타이머가 부른다. 10분 동안 요청이 없던 시리즈를 내린다. 조회 중인 시리즈와 `held`(실시간 구독이 잡은 키)는 남긴다.
+    pub fn evict_idle(&self, held: &HashSet<SeriesKey>) {
         let now = self.clock.now().unix();
-        self.slots.lock().expect("slots 잠금").retain(|_, slot| {
-            now - slot.last_access.load(Ordering::SeqCst) < IDLE_EVICT_SECS || slot.series.try_lock().is_err()
+        self.slots.lock().expect("slots 잠금").retain(|key, slot| {
+            held.contains(key) || now - slot.last_access.load(Ordering::SeqCst) < IDLE_EVICT_SECS || slot.series.try_lock().is_err()
         });
     }
 
@@ -210,9 +271,9 @@ impl BarService {
     }
 
     /// 키움 최신 페이지를 받아 앞으로 늘린다(D4). 이어지지 않으면 시리즈를 버리고 새로 만든다.
-    async fn refresh_latest(&self, key: SeriesKey, s: &mut Series) -> Result<(), BarError> {
+    async fn refresh_latest(&self, key: SeriesKey, s: &mut Series, prio: Priority) -> Result<(), BarError> {
         let today = s.today;
-        let page = self.fetch(key, today, None).await?;
+        let page = self.fetch(key, today, None, prio).await?;
         let (confirmed, current) = split_current(&page.rows, self.clock.now());
         s.current = current;
         let connects = match (confirmed.first(), s.bars.last()) {
@@ -230,10 +291,10 @@ impl BarService {
     }
 
     /// 가장 이른 봉보다 과거를 적어도 한 페이지 더 받는다(§6.3 과거로 늘리기).
-    async fn extend_older(&self, key: SeriesKey, s: &mut Series) -> Result<(), BarError> {
+    async fn extend_older(&self, key: SeriesKey, s: &mut Series, prio: Priority) -> Result<(), BarError> {
         let now = self.clock.now();
         if let Some(c) = s.cont.clone().filter(|c| now.unix() - c.received_at.unix() < CONT_FRESH_SECS) {
-            let page = self.fetch(key, c.base, Some(&c.key)).await?;
+            let page = self.fetch(key, c.base, Some(&c.key), prio).await?;
             let below = match (page.rows.last(), s.bars.first()) {
                 (Some(newest_new), Some(oldest_old)) => newest_new.bucket.start() < oldest_old.bucket.start(),
                 (None, _) => true,
@@ -252,15 +313,15 @@ impl BarService {
             (Feed::Index(_), Some(oldest)) if key.period.is_intraday() => oldest.bucket.start().kst_date(),
             _ => s.today,
         };
-        self.follow_from(key, s, start).await
+        self.follow_from(key, s, start, prio).await
     }
 
     /// `base`부터 연속조회 체인을 따라 내려가며 받은 봉을 모두 덮어쓴다. 가진 구간 아래로 한 페이지 넘어가면 멈춘다.
-    async fn follow_from(&self, key: SeriesKey, s: &mut Series, base: KstDate) -> Result<(), BarError> {
+    async fn follow_from(&self, key: SeriesKey, s: &mut Series, base: KstDate, prio: Priority) -> Result<(), BarError> {
         let target = s.bars.first().map(|b| b.bucket.start());
         let mut cont: Option<ContKey> = None;
         loop {
-            let page = self.fetch(key, base, cont.as_ref()).await?;
+            let page = self.fetch(key, base, cont.as_ref(), prio).await?;
             let (confirmed, _) = split_current(&page.rows, self.clock.now());
             let reached = match (confirmed.first(), target) {
                 (Some(oldest_new), Some(t)) => oldest_new.bucket.start() < t,
@@ -290,32 +351,32 @@ impl BarService {
         }
     }
 
-    async fn fetch(&self, key: SeriesKey, base: KstDate, cont: Option<&ContKey>) -> Result<Fetched, BarError> {
+    async fn fetch(&self, key: SeriesKey, base: KstDate, cont: Option<&ContKey>, prio: Priority) -> Result<Fetched, BarError> {
         const MINUTE: &str = "일·주·월봉이 아니면 분봉이다";
         let p = key.period;
         match key.feed {
             Feed::Stock(c, v) => match p {
-                Period::Day => self.fetch_tr(&DailyChart::new(c, v, base), cont, p).await,
-                Period::Week => self.fetch_tr(&WeeklyChart::new(c, v, base), cont, p).await,
-                Period::Month => self.fetch_tr(&MonthlyChart::new(c, v, base), cont, p).await,
-                _ => self.fetch_tr(&MinuteChart::new(c, v, p, base).expect(MINUTE), cont, p).await,
+                Period::Day => self.fetch_tr(&DailyChart::new(c, v, base), cont, p, prio).await,
+                Period::Week => self.fetch_tr(&WeeklyChart::new(c, v, base), cont, p, prio).await,
+                Period::Month => self.fetch_tr(&MonthlyChart::new(c, v, base), cont, p, prio).await,
+                _ => self.fetch_tr(&MinuteChart::new(c, v, p, base).expect(MINUTE), cont, p, prio).await,
             },
             Feed::Index(c) => match p {
-                Period::Day => self.fetch_tr(&IndexDailyChart::new(c, base), cont, p).await,
-                Period::Week => self.fetch_tr(&IndexWeeklyChart::new(c, base), cont, p).await,
-                Period::Month => self.fetch_tr(&IndexMonthlyChart::new(c, base), cont, p).await,
-                _ => self.fetch_tr(&IndexMinuteChart::new(c, p, base).expect(MINUTE), cont, p).await,
+                Period::Day => self.fetch_tr(&IndexDailyChart::new(c, base), cont, p, prio).await,
+                Period::Week => self.fetch_tr(&IndexWeeklyChart::new(c, base), cont, p, prio).await,
+                Period::Month => self.fetch_tr(&IndexMonthlyChart::new(c, base), cont, p, prio).await,
+                _ => self.fetch_tr(&IndexMinuteChart::new(c, p, base).expect(MINUTE), cont, p, prio).await,
             },
         }
     }
 
-    async fn fetch_tr<R>(&self, req: &R, cont: Option<&ContKey>, period: Period) -> Result<Fetched, BarError>
+    async fn fetch_tr<R>(&self, req: &R, cont: Option<&ContKey>, period: Period, prio: Priority) -> Result<Fetched, BarError>
     where
         R: MarketRequest,
         R::Response: ChartBody,
     {
         let scope = MergeScope(self.resets.load(Ordering::SeqCst));
-        let page = self.rest.call(req, cont, Priority::Screen, scope).await?;
+        let page = self.rest.call(req, cont, prio, scope).await?;
         match parse_chart(page.body, period) {
             Ok(ChartRows::Rows(rows)) => Ok(Fetched { rows, next: page.next }),
             Ok(ChartRows::UnknownSymbol) => Err(BarError::UnknownSymbol),
@@ -714,11 +775,57 @@ mod tests {
         h.clock.jump(9 * 60);
         h.bars.page(key(SAMSUNG, Period::Week), None, 10).await.unwrap();
         h.clock.jump(2 * 60);
-        h.bars.evict_idle();
+        h.bars.evict_idle(&HashSet::new());
         assert_eq!(h.bars.series_count(), 1);
         h.clock.jump(9 * 60);
-        h.bars.evict_idle();
+        h.bars.evict_idle(&HashSet::new());
         assert_eq!(h.bars.series_count(), 0);
+    }
+
+    fn realtime(bucket: domain::Bucket, close: u64) -> ConfirmedBar {
+        let p = domain::Price::from_centi(close).unwrap();
+        ConfirmedBar { bucket, ohlcv: domain::Ohlcv::try_new(p, p, p, p, domain::Volume(7)).unwrap(), source: BarSource::Realtime, needs_verify: false }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn held_series_survive_idle_eviction_and_take_realtime_bars() {
+        let h = std_harness(Duration::ZERO);
+        let k = key(SAMSUNG, Period::M1);
+        let seed = h.bars.seed(k, Priority::Screen).await.unwrap();
+        let newest = seed.tail.last().unwrap().bucket;
+        assert_eq!(newest.start(), kst(date(2026, 11, 6), 19, 59, 0));
+        h.clock.jump(11 * 60);
+        h.bars.evict_idle(&HashSet::from([k]));
+        assert_eq!(h.bars.series_count(), 1, "구독이 잡은 키는 내리지 않는다");
+
+        let next = Period::M1.bucket(kst(date(2026, 11, 9), 8, 0, 0));
+        assert_eq!(h.bars.append_realtime(k, realtime(next, 77_700)).await, Appended::Appended);
+        assert_eq!(h.bars.append_realtime(k, realtime(next, 1)).await, Appended::NotAfterNewest, "같은 t는 다시 붙이지 않는다");
+        assert_eq!(h.bars.append_realtime(k, realtime(newest, 1)).await, Appended::NotAfterNewest);
+        let page = h.bars.page(k, Some(next.end()), 3).await.unwrap();
+        let last = page.bars.last().unwrap();
+        assert_eq!((last.bucket, last.source, last.ohlcv.close().centi()), (next, BarSource::Realtime, 77_700));
+
+        h.bars.evict_idle(&HashSet::new());
+        assert_eq!(h.bars.series_count(), 1, "방금 page 요청이 있었다");
+        h.clock.jump(11 * 60);
+        h.bars.evict_idle(&HashSet::new());
+        assert_eq!(h.bars.series_count(), 0, "구독이 없으면 10분 뒤 내린다");
+        assert_eq!(h.bars.append_realtime(k, realtime(next.next(), 1)).await, Appended::NoSeries);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn seed_always_fetches_and_kiwoom_replaces_realtime_bars() {
+        let h = std_harness(Duration::ZERO);
+        let k = key(SAMSUNG, Period::Day);
+        h.bars.seed(k, Priority::Screen).await.unwrap();
+        let today = Period::Day.bucket(midnight(date(2026, 11, 9)));
+        h.bars.append_realtime(k, realtime(today, 5)).await;
+        let calls = h.chart_calls().len();
+        let seed = h.bars.seed(k, Priority::Recovery).await.unwrap();
+        assert_eq!(h.chart_calls().len(), calls + 1, "시드는 메모리를 다시 쓰지 않는다");
+        assert_eq!(seed.tail.last().unwrap().source, BarSource::Realtime, "키움에 없는 구간의 실시간 봉은 남는다");
+        assert_eq!(seed.tail.len(), SEED_TAIL);
     }
 
     #[tokio::test(start_paused = true)]

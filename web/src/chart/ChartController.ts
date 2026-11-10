@@ -14,14 +14,27 @@ import {
 import { fetchBarsPage } from "../api/bars";
 import type { Bar } from "../api/generated/Bar";
 import type { Period } from "../api/generated/Period";
+import type { SubErrorCode } from "../api/generated/SubErrorCode";
 import type { SymbolCode } from "../api/generated/SymbolCode";
 import type { SymbolInfo } from "../api/generated/SymbolInfo";
+import type { UnixSeconds } from "../api/generated/UnixSeconds";
 import { ApiRequestError } from "../api/http";
+import type { Connection, MarketSocketLike } from "../api/socket";
 import { isIndexCode, PERIOD_LABEL, symbolSub } from "../lib/symbol";
 import { type ShownVenue, venueLabel } from "../lib/venue";
 import { BarFeed, displayBars, type FetchPage, type History } from "./barFeed";
 import { Legend, legendParts } from "./legend";
-import { addMainSeries, addVolumeSeries, applyMainColors, type MainSeries, priceFormat, setMainData, setVolumeData } from "./series";
+import {
+  addMainSeries,
+  addVolumeSeries,
+  applyMainColors,
+  type MainSeries,
+  priceFormat,
+  setMainData,
+  setVolumeData,
+  updateMainBar,
+  updateVolumeBar,
+} from "./series";
 import type { ChartSettings } from "./settings";
 import { composeSnapshot, snapshotFileName } from "./snapshot";
 import type { ThemeTokens } from "./theme";
@@ -30,6 +43,23 @@ import { formatBarTime, formatTickMark, fromChartTime, isIntraday } from "./time
 /** 왼쪽 끝이 이 봉 수 안으로 들어오면 과거 페이지를 받는다(frontend.md §5.7). */
 const LOAD_OLDER_WITHIN = 50;
 const RIGHT_OFFSET = 6;
+const STATUS_INTERVAL_MS = 250;
+
+const SUB_ERROR_TEXT: Record<SubErrorCode, string> = {
+  realtime_limit: "실시간 한도 초과: 조회 값만 보입니다",
+  kiwoom_unavailable: "키움 조회 실패: 잠시 뒤 다시 시도합니다",
+  unknown_symbol: "실시간 시세가 없는 종목: 조회 값만 보입니다",
+  bad_request: "실시간 구독 실패: 조회 값만 보입니다",
+};
+
+const nowSeconds = (): UnixSeconds => Math.floor(Date.now() / 1000);
+
+function isTailChange(prev: Bar[], next: Bar[], bar: Bar): boolean {
+  if (next[next.length - 1] !== bar) return false;
+  const kept = next.length - 1;
+  if (kept !== prev.length && !(kept === prev.length - 1 && prev[kept]?.t === bar.t)) return false;
+  return kept === 0 || next[kept - 1] === prev[kept - 1];
+}
 
 export interface CellView {
   symbol: SymbolCode;
@@ -47,7 +77,6 @@ export type CellStatus =
       latest: Bar;
       prev: Bar | null;
       isCurrent: boolean;
-      fetchedAt: number;
       olderError: ApiRequestError | null;
       /** 분봉의 가장 이른 봉이 보이고 더 받을 과거가 없다(U1: 분봉은 최근 1년까지). */
       intradayEnd: boolean;
@@ -60,6 +89,8 @@ export interface ControllerDeps {
   tokens: ThemeTokens;
   onStatus: (s: CellStatus) => void;
   fetchPage?: FetchPage;
+  /** 없으면 실시간 없이 조회한 봉만 그린다. */
+  socket?: MarketSocketLike;
 }
 
 /** 칸 하나의 차트 엔진 래퍼(frontend.md §5.4). React 밖의 명령형 객체다. */
@@ -79,6 +110,15 @@ export class ChartController {
   private ready: ReadyStatus | null = null;
   private settingData = false;
   private disposed = false;
+  private readonly pendingDraw = new Map<UnixSeconds, Bar>();
+  private frame: number | null = null;
+  private statusTimer: ReturnType<typeof setTimeout> | null = null;
+  private lastStatusAt = 0;
+  private realtimeSeen = false;
+  private realtimeLive = false;
+  private lastRealtimeAt: UnixSeconds | null = null;
+  private stalledAt: UnixSeconds | null = null;
+  private readonly unwatch: () => void;
 
   constructor(el: HTMLElement, deps: ControllerDeps) {
     this.el = el;
@@ -88,12 +128,20 @@ export class ChartController {
     this.volume = addVolumeSeries(this.chart);
     this.main = addMainSeries(this.chart, "candle", this.tokens, false);
     this.legend = new Legend(el);
-    this.feed = new BarFeed(deps.fetchPage ?? fetchBarsPage, {
-      reset: (h) => this.onReset(h),
-      prepended: (h, added) => this.onPrepended(h, added),
-      failed: (e) => this.onFailed(e),
-      olderFailed: (e) => this.patchReady({ olderError: e }),
-    });
+    this.feed = new BarFeed(
+      deps.fetchPage ?? fetchBarsPage,
+      {
+        reset: (h) => this.onReset(h),
+        prepended: (h, added) => this.onPrepended(h, added),
+        failed: (e) => this.onFailed(e),
+        olderFailed: (e) => this.patchReady({ olderError: e }),
+        live: (h, bar) => this.onRealtime(h, bar),
+        confirmed: (h, bar) => this.onRealtime(h, bar),
+        subError: (code) => this.legend.setNotice(code === null ? null : SUB_ERROR_TEXT[code]),
+      },
+      deps.socket,
+    );
+    this.unwatch = deps.socket?.watch((c) => this.onConnection(c)) ?? (() => {});
 
     this.chart.subscribeCrosshairMove((p) => {
       const n = this.bars.length;
@@ -136,6 +184,7 @@ export class ChartController {
       if (prev && isIndexCode(prev.symbol) !== isIndex) this.main.api.applyOptions({ priceFormat: priceFormat(isIndex) });
       this.history = null;
       this.ready = null;
+      this.legend.setNotice(null);
       this.setBars([]);
       this.renderLegend();
       this.onStatus({ kind: "loading" });
@@ -170,7 +219,7 @@ export class ChartController {
       period: PERIOD_LABEL[view.period],
       takenAt,
       legend: bar
-        ? legendParts({ bar, prev: this.bars[n - 2] ?? null, isCurrent: false, isIndex: isIndexCode(view.symbol), period: view.period })
+        ? legendParts({ bar, prev: this.bars[n - 2] ?? null, isCurrent: false, stalledAt: this.stalledAt, isIndex: isIndexCode(view.symbol), period: view.period })
         : null,
     };
     return {
@@ -188,6 +237,9 @@ export class ChartController {
 
   dispose(): void {
     this.disposed = true;
+    if (this.frame !== null) cancelAnimationFrame(this.frame);
+    if (this.statusTimer !== null) clearTimeout(this.statusTimer);
+    this.unwatch();
     this.feed.dispose();
     this.legend.dispose();
     this.chart.remove();
@@ -237,6 +289,7 @@ export class ChartController {
 
   private setBars(bars: Bar[]): void {
     this.bars = bars;
+    this.pendingDraw.clear();
     setMainData(this.main, bars);
     setVolumeData(this.volume, bars, this.tokens);
     this.exposeBarsToE2e();
@@ -244,9 +297,82 @@ export class ChartController {
 
   private exposeBarsToE2e(): void {
     const d = this.el.dataset;
+    const last = this.bars[this.bars.length - 1];
     d.barCount = String(this.bars.length);
     d.firstBarT = String(this.bars[0]?.t ?? "");
-    d.lastBarT = String(this.bars[this.bars.length - 1]?.t ?? "");
+    d.lastBarT = String(last?.t ?? "");
+    d.lastClose = String(last?.c ?? "");
+  }
+
+  private onRealtime(h: History, bar: Bar): void {
+    const prev = this.bars;
+    const next = displayBars(h);
+    this.history = h;
+    this.realtimeSeen = true;
+    this.lastRealtimeAt = nowSeconds();
+    if (this.realtimeLive) this.stalledAt = null;
+    if (isTailChange(prev, next, bar)) {
+      this.bars = next;
+      this.pendingDraw.set(bar.t, bar);
+    } else {
+      this.withDataGuard(() => this.setBars(next));
+    }
+    this.scheduleFrame();
+    this.refreshReady();
+  }
+
+  private onConnection(c: Connection): void {
+    const live = c.socket === "open" && c.status.realtime === "live";
+    if (this.realtimeLive && !live && this.stalledAt === null) this.stalledAt = this.lastRealtimeAt ?? nowSeconds();
+    this.realtimeLive = live;
+    this.scheduleFrame();
+  }
+
+  private scheduleFrame(): void {
+    if (this.frame !== null || this.disposed) return;
+    this.frame = requestAnimationFrame(() => {
+      this.frame = null;
+      this.drawFrame();
+    });
+  }
+
+  private drawFrame(): void {
+    if (this.pendingDraw.size > 0) {
+      this.withDataGuard(() => {
+        for (const b of this.pendingDraw.values()) {
+          updateMainBar(this.main, b);
+          updateVolumeBar(this.volume, b, this.tokens);
+        }
+      });
+      this.pendingDraw.clear();
+      this.exposeBarsToE2e();
+    }
+    this.renderLegend();
+  }
+
+  private refreshReady(): void {
+    const latest = this.bars[this.bars.length - 1];
+    if (!latest) return;
+    this.ready = {
+      kind: "ready",
+      latest,
+      prev: this.bars[this.bars.length - 2] ?? null,
+      isCurrent: this.history?.current?.t === latest.t,
+      olderError: this.ready?.olderError ?? null,
+      intradayEnd: this.ready?.intradayEnd ?? false,
+    };
+    if (this.statusTimer !== null) return;
+    const wait = this.lastStatusAt + STATUS_INTERVAL_MS - Date.now();
+    if (wait <= 0) return this.emitReady();
+    this.statusTimer = setTimeout(() => {
+      this.statusTimer = null;
+      this.emitReady();
+    }, wait);
+  }
+
+  private emitReady(): void {
+    this.lastStatusAt = Date.now();
+    if (this.ready) this.onStatus(this.ready);
   }
 
   /** setData가 보이는 범위 변경을 일으켜 과거 페이지를 연달아 받지 않게 막는다. */
@@ -262,6 +388,8 @@ export class ChartController {
   private onReset(h: History): void {
     this.history = h;
     this.hoverIndex = null;
+    this.realtimeSeen = false;
+    if (this.realtimeLive) this.stalledAt = null;
     const bars = displayBars(h);
     const show = matchMedia("(max-width: 767px)").matches ? 90 : 130;
     this.withDataGuard(() => {
@@ -276,7 +404,6 @@ export class ChartController {
         latest,
         prev: bars[bars.length - 2] ?? null,
         isCurrent: h.current !== null && latest.t === h.current.t,
-        fetchedAt: Date.now(),
         olderError: null,
         intradayEnd: false,
       };
@@ -329,9 +456,10 @@ export class ChartController {
     this.legend.show({
       bar,
       prev: this.bars[i - 1] ?? null,
-      isCurrent: this.history?.current?.t === bar.t,
+      isCurrent: this.history?.current?.t === bar.t && !this.realtimeSeen,
       isIndex: isIndexCode(view.symbol),
       period: view.period,
+      stalledAt: this.stalledAt,
     });
   }
 }

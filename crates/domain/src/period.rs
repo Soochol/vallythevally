@@ -78,6 +78,13 @@ impl Period {
         }
     }
 
+    /// [20:00:00, 20:00:10)의 체결도 키움은 그날 마지막 분봉에 넣는다(D16).
+    pub fn trade_bucket(self, at: KstTime) -> Bucket {
+        let close = KstTime::from_kst_civil(at.kst_date(), SESSION_CLOSE);
+        let effective = if self.is_intraday() && close <= at && at < close.plus_secs(CLOSE_GRACE_SECS) { close.plus_secs(-1) } else { at };
+        self.bucket(effective)
+    }
+
     /// 시각 t가 속한 봉 구간. 봉 시작 시각을 만드는 유일한 방법이다.
     /// 주봉은 그 주 월요일, 월봉은 그달 1일(주말이어도)로 맞춘다. 키움의 주·월봉 `dt`는
     /// 그 구간의 첫 관측일이라(kiwoom.md §10.8) 파서가 반드시 이 함수를 거친다.

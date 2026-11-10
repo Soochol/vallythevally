@@ -5,6 +5,7 @@ import { createBrowserRouter, Navigate, RouterProvider } from "react-router";
 import { retryDelay, shouldRetry } from "./api/retry";
 import { ChartRoute } from "./App";
 import { boot } from "./persist/boot";
+import { marketSocket } from "./stores/realtime";
 import "./styles/index.css";
 
 const queryClient = new QueryClient({
@@ -19,6 +20,7 @@ const queryClient = new QueryClient({
 
 // React 밖에서 한 번만 되살린다. StrictMode가 효과를 두 번 부르더라도 복원은 한 번이다.
 void boot(queryClient);
+marketSocket.start();
 
 const router = createBrowserRouter([
   { path: "/", element: <ChartRoute /> },

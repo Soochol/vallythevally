@@ -1,9 +1,16 @@
 //! 키움 응답 → `domain` 타입(backend.md §4.6). 숫자는 모두 문자열로 오고, 가격 부호는 믿지 않는다.
 
+use std::collections::BTreeSet;
 use std::fmt;
 
-use domain::{Bucket, KstDate, KstTime, Market, Ohlcv, Period, Price, StockCode, Symbol, SymbolInfo, SymbolKind, TimeOfDay, Volume};
+use domain::{Bucket, IndexCode, KstDate, KstTime, Market, Ohlcv, Period, Price, StockCode, Symbol, SymbolInfo, SymbolKind, TimeOfDay, Venue, Volume};
 use serde::Deserialize;
+use serde_json::{Value, json};
+
+use super::api::kiwoom_stock_code;
+use super::error::{WsRejection, judge_ws_ack};
+use super::stream::{Exchange, RealTick};
+use crate::config::Secret;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WireError(pub String);
@@ -361,6 +368,167 @@ pub fn parse_kst_datetime(s: &str) -> Option<KstTime> {
     Some(KstTime::from_kst_civil(date, tod))
 }
 
+/// 응답을 기다리는 WebSocket 제어 메시지. 응답에 요청 번호가 없어 `trnm`으로만 짝을 맞춘다(backend.md §5.1).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WsControl {
+    Login,
+    Reg,
+    Remove,
+}
+
+impl WsControl {
+    pub fn trnm(self) -> &'static str {
+        match self {
+            WsControl::Login => "LOGIN",
+            WsControl::Reg => "REG",
+            WsControl::Remove => "REMOVE",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum RealType {
+    Trade,
+    Index,
+}
+
+impl RealType {
+    pub fn of(symbol: Symbol) -> RealType {
+        match symbol {
+            Symbol::Stock(_) => RealType::Trade,
+            Symbol::Index(_) => RealType::Index,
+        }
+    }
+
+    pub fn as_wire(self) -> &'static str {
+        match self {
+            RealType::Trade => "0B",
+            RealType::Index => "0J",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum WsFrame {
+    /// 받은 글자 그대로 돌려보낸다.
+    Ping,
+    Ack { control: WsControl, result: Result<(), WsRejection> },
+    Real(Vec<Result<RealItem, WireError>>),
+    Other(String),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RealItem {
+    Trade(RealTick),
+    /// 0B `15`가 0: 동시호가에만 나온다(kiwoom.md 11.3). 체결이 아니라 버린다.
+    AuctionOnly,
+    /// 0J. 체결량은 `13`(누적거래량)의 증가분이라 세션이 앞 프레임과 비교해 정한다.
+    Index { index: IndexCode, hhmmss: TimeOfDay, price: Price, cumulative: u64 },
+    OtherType(String),
+}
+
+pub fn parse_ws_frame(text: &str) -> Result<WsFrame, WireError> {
+    let Ok(Value::Object(frame)) = serde_json::from_str::<Value>(text) else {
+        return Err(WireError("WebSocket 메시지가 JSON 객체가 아닙니다".into()));
+    };
+    let trnm = frame.get("trnm").and_then(Value::as_str).ok_or_else(|| WireError("WebSocket 메시지에 trnm이 없습니다".into()))?;
+    let control = match trnm {
+        "PING" => return Ok(WsFrame::Ping),
+        "REAL" => {
+            let Some(Value::Array(data)) = frame.get("data") else {
+                return Err(WireError("REAL에 data 배열이 없습니다".into()));
+            };
+            return Ok(WsFrame::Real(data.iter().map(parse_real_item).collect()));
+        }
+        "LOGIN" => WsControl::Login,
+        "REG" => WsControl::Reg,
+        "REMOVE" => WsControl::Remove,
+        other => return Ok(WsFrame::Other(other.to_owned())),
+    };
+    Ok(WsFrame::Ack { control, result: judge_ws_ack(&frame) })
+}
+
+fn parse_real_item(entry: &Value) -> Result<RealItem, WireError> {
+    let text = |k: &str| entry.get(k).and_then(Value::as_str).ok_or_else(|| WireError(format!("REAL 항목에 {k}가 없습니다")));
+    let (kind, item) = (text("type")?, text("item")?);
+    let values = entry.get("values").ok_or_else(|| WireError(format!("{kind} {item}: values가 없습니다")))?;
+    let field = |fid: &str| values.get(fid).and_then(Value::as_str).ok_or_else(|| WireError(format!("{kind} {item}: FID {fid}가 없습니다")));
+    match kind {
+        "0B" => {
+            let code = item.strip_suffix("_AL").ok_or_else(|| WireError(format!("0B 통합 시세(_AL)가 아닙니다: {item:?}")))?;
+            let code = StockCode::parse(code).map_err(|e| WireError(format!("{e}: {item:?}")))?;
+            let qty = unsigned(field("15")?)?;
+            if qty == 0 {
+                return Ok(RealItem::AuctionOnly);
+            }
+            let exchange = match values.get("9081").and_then(Value::as_str) {
+                Some("KRX") => Some(Exchange::Krx),
+                Some("NXT") => Some(Exchange::Nxt),
+                _ => None,
+            };
+            Ok(RealItem::Trade(RealTick { symbol: Symbol::Stock(code), hhmmss: hhmmss(field("20")?)?, price: stock_price(field("10")?)?, qty: Volume(qty), exchange }))
+        }
+        "0J" => {
+            let index = IndexCode::parse(item).map_err(|e| WireError(format!("{e}: {item:?}")))?;
+            Ok(RealItem::Index { index, hhmmss: hhmmss(field("20")?)?, price: index_level(field("10")?)?, cumulative: unsigned(field("13")?)? })
+        }
+        other => Ok(RealItem::OtherType(other.to_owned())),
+    }
+}
+
+fn hhmmss(s: &str) -> Result<TimeOfDay, WireError> {
+    let bad = || WireError(format!("체결시각이 HHMMSS가 아닙니다: {s:?}"));
+    if s.len() != 6 || !s.bytes().all(|b| b.is_ascii_digit()) {
+        return Err(bad());
+    }
+    let n = |r: std::ops::Range<usize>| s[r].parse::<u32>().expect("ASCII 숫자");
+    TimeOfDay::hms(n(0..2), n(2..4), n(4..6)).ok_or_else(bad)
+}
+
+/// 0J 지수는 소수 2자리 문자열이고 앞에 등락 부호가 붙는다(kiwoom.md 11.5). REST 지수(100배 정수)와 다르다.
+fn index_level(s: &str) -> Result<Price, WireError> {
+    let bad = || WireError(format!("지수가 소수 2자리 이하의 양수가 아닙니다: {s:?}"));
+    let abs = s.trim_start_matches(['+', '-']);
+    let (int, frac) = abs.split_once('.').unwrap_or((abs, ""));
+    let digits = |x: &str| x.bytes().all(|b| b.is_ascii_digit());
+    if int.is_empty() || frac.len() > 2 || !digits(int) || !digits(frac) {
+        return Err(bad());
+    }
+    let int: u64 = int.parse().map_err(|_| bad())?;
+    let frac: u64 = format!("{frac:0<2}").parse().expect("두 자리 숫자");
+    int.checked_mul(100).and_then(|c| c.checked_add(frac)).and_then(Price::from_centi).ok_or_else(bad)
+}
+
+/// REG·REMOVE의 `item`. 주식은 거래소와 상관없이 `_AL` 하나만 받는다(ADR 0007).
+fn real_item_code(symbol: Symbol) -> String {
+    match symbol {
+        Symbol::Stock(code) => kiwoom_stock_code(code, Venue::Combined),
+        Symbol::Index(index) => index.as_str().to_owned(),
+    }
+}
+
+fn real_entry(kind: RealType, symbols: impl Iterator<Item = Symbol>) -> Value {
+    json!({"item": symbols.map(real_item_code).collect::<Vec<_>>(), "type": [kind.as_wire()]})
+}
+
+pub fn login_message(token: &Secret<String>) -> Secret<String> {
+    Secret::new(json!({"trnm": "LOGIN", "token": token.expose()}).to_string())
+}
+
+pub fn reg_message(symbols: &BTreeSet<Symbol>) -> String {
+    let data: Vec<Value> = [RealType::Trade, RealType::Index]
+        .into_iter()
+        .filter(|&kind| symbols.iter().any(|&s| RealType::of(s) == kind))
+        .map(|kind| real_entry(kind, symbols.iter().copied().filter(move |&s| RealType::of(s) == kind)))
+        .collect();
+    json!({"trnm": "REG", "grp_no": "1", "refresh": "1", "data": data}).to_string()
+}
+
+/// 0B와 0J를 한 REMOVE에 섞으면 105112로 실패한다(kiwoom.md §8). 그래서 종류 하나만 받는다.
+pub fn remove_message(kind: RealType, symbols: &BTreeSet<Symbol>) -> String {
+    json!({"trnm": "REMOVE", "grp_no": "1", "data": [real_entry(kind, symbols.iter().copied())]}).to_string()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -633,5 +801,130 @@ mod tests {
         assert_eq!(at.kst_date(), KstDate::new(2026, 11, 9).unwrap());
         assert_eq!(at.kst_time_of_day(), TimeOfDay::hms(22, 48, 6).unwrap());
         assert!(parse_kst_datetime("2026110922480").is_none());
+    }
+
+    fn ack(text: &str) -> Result<(), WsRejection> {
+        match parse_ws_frame(text).unwrap() {
+            WsFrame::Ack { result, .. } => result,
+            other => panic!("{other:?}"),
+        }
+    }
+
+    fn category(text: &str) -> crate::kiwoom::error::Category {
+        ack(text).unwrap_err().category
+    }
+
+    #[test]
+    fn ws_ack_return_code_is_an_int_or_a_numeric_string_and_nothing_else() {
+        use crate::kiwoom::error::Category::*;
+        assert_eq!(parse_ws_frame(r#"{"trnm":"LOGIN","return_code":0,"return_msg":"","sor_yn":"Y"}"#).unwrap(), WsFrame::Ack { control: WsControl::Login, result: Ok(()) });
+        assert_eq!(ack(r#"{"trnm":"REG","return_code":"0","return_msg":""}"#), Ok(()));
+        assert_eq!(ack(r#"{"trnm":"REMOVE","return_code":"0000"}"#), Ok(()));
+        assert_eq!(category(r#"{"trnm":"REMOVE","return_code":105112,"return_msg":"실시간 항목 해지에 실패했습니다 (ERROR=서비스를 처리하는 중에 오류가 발생했습니다)"}"#), ControlRejected);
+        assert_eq!(category(r#"{"trnm":"REG","return_code":"105118","return_msg":"등록 종목이 그룹번호에 등록할 수 있는 허용 개수(200)를 초과했습니다"}"#), RealtimeCapacity);
+        assert_eq!(category(r#"{"trnm":"REG","return_code":105115}"#), RealtimeCapacity);
+        for missing in [r#"{"trnm":"LOGIN"}"#, r#"{"trnm":"LOGIN","return_code":null}"#, r#"{"trnm":"LOGIN","return_code":""}"#, r#"{"trnm":"LOGIN","return_code":"ok"}"#, r#"{"trnm":"LOGIN","return_code":true}"#, r#"{"trnm":"LOGIN","return_code":0,"return_msg":5}"#] {
+            assert_eq!(category(missing), Protocol, "{missing}: 성공이 아니다");
+        }
+        assert_eq!(category(r#"{"trnm":"LOGIN","return_code":-1}"#), Unknown);
+    }
+
+    #[test]
+    fn ws_login_token_invalid_is_read_from_the_message() {
+        use crate::kiwoom::error::Category::*;
+        let code_eq = ack(r#"{"trnm":"LOGIN","return_code":3,"return_msg":"인증에 실패했습니다 (CODE=8005, Token이 유효하지 않습니다)"}"#).unwrap_err();
+        assert_eq!((code_eq.category, code_eq.return_code, code_eq.detail), (TokenInvalid, Some(3), Some(8005)));
+        assert_eq!(category(r#"{"trnm":"LOGIN","return_code":"3","return_msg":"인증에 실패했습니다[8005:Token이 유효하지 않습니다]"}"#), TokenInvalid);
+        assert_eq!(category(r#"{"trnm":"LOGIN","return_code":3,"return_msg":"(CODE=8103)"}"#), AuthBlocked);
+        assert_eq!(category(r#"{"trnm":"LOGIN","return_code":3,"return_msg":"(CODE=80051)"}"#), Unknown, "네 자리가 아니면 상세가 아니다");
+    }
+
+    #[test]
+    fn ws_frames_other_than_acks() {
+        assert_eq!(parse_ws_frame(r#"{"trnm":"PING"}"#).unwrap(), WsFrame::Ping);
+        assert_eq!(parse_ws_frame(r#"{"trnm":"SYSTEM","code":"x"}"#).unwrap(), WsFrame::Other("SYSTEM".into()));
+        for bad in ["", "[]", "PING", r#"{"return_code":0}"#, r#"{"trnm":"REAL"}"#] {
+            assert!(parse_ws_frame(bad).is_err(), "{bad:?}");
+        }
+    }
+
+    fn real(kind: &str, item: &str, values: Value) -> Vec<Result<RealItem, WireError>> {
+        let text = json!({"trnm": "REAL", "data": [{"type": kind, "name": "", "item": item, "values": values}]}).to_string();
+        match parse_ws_frame(&text).unwrap() {
+            WsFrame::Real(items) => items,
+            other => panic!("{other:?}"),
+        }
+    }
+
+    fn one(kind: &str, item: &str, values: Value) -> Result<RealItem, WireError> {
+        real(kind, item, values).remove(0)
+    }
+
+    #[test]
+    fn real_0b_is_a_combined_trade_with_abs_price_and_qty() {
+        let code = StockCode::parse("005930").unwrap();
+        let tick = |exchange| RealTick { symbol: Symbol::Stock(code), hhmmss: TimeOfDay::hms(9, 30, 1).unwrap(), price: Price::from_centi(7_120_000).unwrap(), qty: Volume(15), exchange };
+        assert_eq!(one("0B", "005930_AL", fake_kiwoom::trade_0b("093001", -71_200, -15, 100, "NXT")), Ok(RealItem::Trade(tick(Some(Exchange::Nxt)))));
+        assert_eq!(one("0B", "005930_AL", fake_kiwoom::trade_0b("093001", 71_200, 15, 100, "KRX")), Ok(RealItem::Trade(tick(Some(Exchange::Krx)))));
+        assert_eq!(one("0B", "005930_AL", fake_kiwoom::trade_0b("093001", 71_200, 15, 100, "1")), Ok(RealItem::Trade(tick(None))));
+        assert_eq!(one("0B", "005930_AL", fake_kiwoom::trade_0b("093001", 71_200, 0, 100, "KRX")), Ok(RealItem::AuctionOnly));
+    }
+
+    #[test]
+    fn real_0b_that_cannot_be_read_is_an_error() {
+        let ok = fake_kiwoom::trade_0b("093001", 71_200, 15, 100, "KRX");
+        assert!(one("0B", "005930", ok.clone()).is_err(), "_AL만 등록한다");
+        assert!(one("0B", "00593_AL", ok.clone()).is_err());
+        for (fid, bad) in [("20", "093060"), ("20", "9301"), ("10", "0"), ("10", "x"), ("15", "")] {
+            let mut v = ok.clone();
+            v[fid] = bad.into();
+            assert!(one("0B", "005930_AL", v).is_err(), "{fid}={bad:?}");
+        }
+        let mut no_time = ok.clone();
+        no_time.as_object_mut().unwrap().remove("20");
+        assert!(one("0B", "005930_AL", no_time).is_err());
+    }
+
+    #[test]
+    fn real_0j_level_is_a_signed_decimal_and_volume_is_cumulative() {
+        let index = IndexCode::KOSPI;
+        let at = TimeOfDay::hms(10, 56, 2).unwrap();
+        assert_eq!(one("0J", "001", fake_kiwoom::tick_0j("105602", -505_969, 28_264)), Ok(RealItem::Index { index, hhmmss: at, price: Price::from_centi(505_969).unwrap(), cumulative: 28_264 }));
+        let level = |s: &str| one("0J", "001", json!({"20": "105602", "10": s, "13": "1"})).map(|i| match i {
+            RealItem::Index { price, .. } => price.centi(),
+            other => panic!("{other:?}"),
+        });
+        assert_eq!(level("-1327.93"), Ok(132_793));
+        assert_eq!(level("+1327.9"), Ok(132_790));
+        assert_eq!(level("1327"), Ok(132_700));
+        for bad in ["1327.931", "0.00", ".5", "+", "1,327.93", "13a7.93"] {
+            assert!(level(bad).is_err(), "{bad:?}");
+        }
+        assert!(one("0J", "001_AL", fake_kiwoom::tick_0j("105602", 1, 1)).is_err());
+    }
+
+    #[test]
+    fn real_frames_keep_each_item_separately() {
+        let text = json!({"trnm": "REAL", "data": [
+            {"type": "0B", "item": "005930_AL", "values": fake_kiwoom::trade_0b("093001", 71_200, 15, 100, "KRX")},
+            {"type": "0B", "item": "005930_AL", "values": {"20": "x"}},
+            {"type": "0D", "item": "005930_AL", "values": {}},
+        ]}).to_string();
+        let WsFrame::Real(items) = parse_ws_frame(&text).unwrap() else { panic!() };
+        assert!(matches!(items.as_slice(), [Ok(RealItem::Trade(_)), Err(_), Ok(RealItem::OtherType(k))] if k == "0D"));
+    }
+
+    #[test]
+    fn reg_and_remove_messages() {
+        let stock = Symbol::Stock(StockCode::parse("005930").unwrap());
+        let both: BTreeSet<Symbol> = [stock, Symbol::Index(IndexCode::KOSPI)].into();
+        let v: Value = serde_json::from_str(&reg_message(&both)).unwrap();
+        assert_eq!(v, json!({"trnm": "REG", "grp_no": "1", "refresh": "1", "data": [{"item": ["005930_AL"], "type": ["0B"]}, {"item": ["001"], "type": ["0J"]}]}));
+        let v: Value = serde_json::from_str(&reg_message(&[Symbol::Index(IndexCode::KOSDAQ)].into())).unwrap();
+        assert_eq!(v["data"], json!([{"item": ["101"], "type": ["0J"]}]), "빈 원소는 넣지 않는다");
+        let v: Value = serde_json::from_str(&remove_message(RealType::Trade, &[stock].into())).unwrap();
+        assert_eq!(v, json!({"trnm": "REMOVE", "grp_no": "1", "data": [{"item": ["005930_AL"], "type": ["0B"]}]}));
+        let login: Value = serde_json::from_str(login_message(&Secret::new("t".into())).expose()).unwrap();
+        assert_eq!(login, json!({"trnm": "LOGIN", "token": "t"}));
     }
 }

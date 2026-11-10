@@ -416,6 +416,55 @@ pub fn rest_details(msg: &str) -> Vec<u16> {
     found
 }
 
+/// WebSocket `return_msg`의 상세 코드. REST와 같은 `[NNNN`에 더해 `CODE=NNNN`도 읽는다(docs/kiwoom-ws-errors.md §2).
+pub fn ws_details(msg: &str) -> Vec<u16> {
+    let mut found = rest_details(msg);
+    for (i, _) in msg.match_indices("CODE=") {
+        let rest = &msg.as_bytes()[i + 5..];
+        let digits = rest.iter().take_while(|b| b.is_ascii_digit()).count();
+        if digits == 4 {
+            let code = std::str::from_utf8(&rest[..4]).expect("ASCII 숫자").parse().expect("네 자리");
+            if !found.contains(&code) {
+                found.push(code);
+            }
+        }
+    }
+    found
+}
+
+/// LOGIN·REG·REMOVE 응답 하나를 거절로 바꾼 것. `return_msg` 원문은 담지 않는다.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct WsRejection {
+    pub category: Category,
+    pub return_code: Option<i64>,
+    pub detail: Option<u16>,
+}
+
+/// REST의 `judge`와 같은 순서: 상세 코드가 먼저, 그다음 `return_code`. 정수 0(또는 `"0"`)만 성공이다.
+pub fn judge_ws_ack(reply: &serde_json::Map<String, Value>) -> Result<(), WsRejection> {
+    let return_code = read_return_code(reply.get("return_code"));
+    let number = match return_code {
+        ReturnCode::Number(n) => Some(n),
+        ReturnCode::Missing | ReturnCode::Malformed => None,
+    };
+    let reject = |category, detail| Err(WsRejection { category, return_code: number, detail });
+    let msg = match reply.get("return_msg") {
+        None | Some(Value::Null) => "",
+        Some(Value::String(s)) => s,
+        Some(_) => return reject(Protocol, None),
+    };
+    let details = ws_details(msg);
+    let blocking = details.iter().copied().find(|&d| classify(WsControl(d.into())) == AuthBlocked);
+    match (details.as_slice(), blocking, return_code) {
+        (_, Some(d), _) => reject(AuthBlocked, Some(d)),
+        (&[d], None, _) => reject(classify(WsControl(d.into())), Some(d)),
+        ([_, _, ..], None, _) => reject(Protocol, None),
+        ([], None, ReturnCode::Number(0)) => Ok(()),
+        ([], None, ReturnCode::Number(n)) => reject(u32::try_from(n).map_or(Unknown, |c| classify(WsControl(c))), None),
+        ([], None, ReturnCode::Missing | ReturnCode::Malformed) => reject(Protocol, None),
+    }
+}
+
 fn in_phase(api_id: ApiId, category: Category) -> Category {
     match (Phase::of(api_id), category) {
         (Phase::Issue, TokenInvalid) => AuthIndeterminate,

@@ -160,3 +160,31 @@ async fn the_browser_learns_whether_and_when_it_may_ask_again() {
     assert_eq!((&e["reason"], &e["retryAt"], &e["manualActionRequired"]), (&json!("unknown_failure"), &Value::Null, &json!(true)), "{e}");
     assert!(!e["message"].as_str().unwrap().contains("잠시 뒤 다시 시도하세요"), "멈춘 경로를 잠시 뒤에 풀린다고 말하지 않는다: {e}");
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_stream_halted_by_refused_registrations_logs_the_code_and_the_spent_rebuild() {
+    use futures::{SinkExt, StreamExt};
+    use tokio_tungstenite::tungstenite::Message;
+
+    let fake = FakeKiwoom::start().await;
+    fake.set_reg_limit(0);
+    let tmp = tempfile::tempdir().unwrap();
+    let server = Server::spawn(&fake, &tmp.path().join("run/server.lock"), &static_dir(tmp.path()));
+    let (mut ws, _) = tokio_tungstenite::connect_async(format!("ws://{}/api/ws", server.addr().await)).await.unwrap();
+    ws.send(Message::Text(r#"{"type":"subscribe","sub":"c0","symbol":"005930","venue":null,"period":"D"}"#.into())).await.unwrap();
+    let halted = tokio::time::timeout(Duration::from_secs(10), async {
+        while let Some(Ok(message)) = ws.next().await {
+            if message.to_text().unwrap_or_default().contains(r#""realtime":"halted""#) {
+                return;
+            }
+        }
+        panic!("연결이 닫혔다");
+    });
+    halted.await.expect("실시간이 멈췄다고 알리지 않았다");
+    assert_eq!(fake.ws_stats().logins, 2, "처음 하나와 다시 구성 한 번");
+    let logs = server.stop().await;
+    let line = logs.lines().find(|l| l.contains("다시 구성한 세션에서도 제어가 실패했습니다")).unwrap_or_else(|| panic!("{logs}"));
+    assert!(line.contains("ERROR") && line.contains("return_code: Some(105118)") && line.contains("budget=Rebuilt"), "{line}");
+    assert!(!logs.contains(common::TOKEN));
+}
+
