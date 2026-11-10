@@ -1112,7 +1112,7 @@ live·confirmed:
 |---|---|---|
 | 봉 모양 4가지 | `chart.addSeries(CandlestickSeries \| BarSeries \| LineSeries \| AreaSeries, opts)` | 모양을 바꾸면 주 시리즈를 지우고 새로 만든다. 드로잉 primitive도 새 시리즈에 다시 붙인다 |
 | 지표 패널 | `addSeries(…, opts, paneIndex)`, `chart.panes()[i].setStretchFactor()` | 패널 하나 = pane 하나. pane 순서는 `chartSettings.panels` 순서 |
-| 지표 패널 범례 위치 | `pane.getHTMLElement()`의 위쪽 끝 | 범례를 그릴 때마다 다시 잰다. 목업 초판에서 휴대폰 범례가 어긋났던 원인이다 |
+| 지표 패널 범례 위치 | `pane.getHTMLElement()`의 위쪽 끝 | 범례를 그릴 때마다 다시 재고, 칸 크기가 바뀌면(`ResizeObserver`) 다음 프레임에 다시 그린다. 목업 초판에서 휴대폰 범례가 어긋났던 원인이다 |
 | 패널 높이 저장 | `layout.panes.enableResize`, `pane.getStretchFactor()` | v5.2에는 pane 크기가 바뀌었다는 이벤트가 없다. 차트의 `pointerup` 뒤에 비율을 읽어 바뀌었으면 `panels[].stretch`에 저장한다(#75) |
 | 가격 pane 지키기 | `pane.setPreserveEmptyPane(true)` | 주 시리즈를 바꿔 붙이는 동안 가격 pane이 비면 라이브러리가 pane을 지우고 지표 패널이 0번이 된다(#75) |
 | 가격 패널 지표 | 같은 pane 0에 `LineSeries` | `priceLineVisible: false`, `lastValueVisible: false` |

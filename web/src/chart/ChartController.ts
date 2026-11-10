@@ -113,6 +113,7 @@ export class ChartController {
   private lastRealtimeAt: UnixSeconds | null = null;
   private stalledAt: UnixSeconds | null = null;
   private readonly unwatch: () => void;
+  private readonly resize: ResizeObserver;
 
   constructor(el: HTMLElement, deps: ControllerDeps) {
     this.el = el;
@@ -135,6 +136,8 @@ export class ChartController {
     );
     this.indicatorLegend = new IndicatorLegend(el, (id, command) => deps.onIndicatorCommand?.(id, command));
     this.legend.root.append(this.indicatorLegend.priceBox);
+    this.resize = new ResizeObserver(() => this.scheduleFrame());
+    this.resize.observe(el);
     const onPanelStretch = deps.onPanelStretch;
     if (onPanelStretch) {
       el.addEventListener("pointerup", () => {
@@ -271,6 +274,7 @@ export class ChartController {
     this.extensions.clear();
     if (this.frame !== null) cancelAnimationFrame(this.frame);
     if (this.statusTimer !== null) clearTimeout(this.statusTimer);
+    this.resize.disconnect();
     this.unwatch();
     this.feed.dispose();
     this.indicators.dispose();
