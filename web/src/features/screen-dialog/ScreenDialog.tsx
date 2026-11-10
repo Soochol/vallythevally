@@ -2,8 +2,8 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useId, useRef, useState } from "react";
 import type { BarField } from "../../api/generated/BarField";
 import type { Screen } from "../../api/generated/Screen";
+import type { Screens } from "../../api/generated/Screens";
 import type { ScreenPeriod } from "../../api/generated/ScreenPeriod";
-import { ApiRequestError } from "../../api/http";
 import { saveScreens, useScreens } from "../../api/screener";
 import { conditionSentence, EXCLUDE_LABEL, FIELD_LABEL, PERIOD_NAME, UNIT } from "../../lib/screener";
 import { useScreenerStore } from "../../stores/screener";
@@ -35,25 +35,26 @@ const FIELD_BOX = "h-[30px] rounded-m border border-line bg-chart-bg text-text o
 const CHIP =
   "h-7 rounded-full border border-line px-2.5 text-s text-text-2 hover:text-text " +
   "aria-pressed:border-accent aria-pressed:bg-accent-soft aria-pressed:font-[600] aria-pressed:text-accent max-md:h-9";
-const STALE_SAVE = "다른 탭이나 기기에서 조건식 목록이 먼저 바뀌어 덮어쓰지 않았습니다. 바뀐 목록을 불러왔으니 확인하고 다시 저장하세요.";
-const STALE_DELETE = "다른 탭이나 기기에서 조건식 목록이 먼저 바뀌어 삭제하지 않았습니다. 바뀐 목록을 불러왔으니 다시 삭제하세요.";
+const STALE_SAVE = "이 대화상자를 연 뒤 다른 탭이나 기기에서 조건식 목록이 바뀌어 덮어쓰지 않았습니다. 바뀐 목록을 불러왔습니다. 다시 저장하면 이 조건식을 지금 보이는 내용으로 바꿉니다.";
+const STALE_DELETE = "이 대화상자를 연 뒤 다른 탭이나 기기에서 조건식 목록이 바뀌어 삭제하지 않았습니다. 바뀐 목록을 불러왔으니 다시 삭제하세요.";
 
 type Saving = { kind: "idle" } | { kind: "saving" } | { kind: "failed"; message: string };
 
 export function ScreenDialog() {
   const dialog = useSelectionStore((s) => s.dialog);
-  const saved = useScreens().data?.screens;
-  return dialog?.kind === "screen" && saved ? <ScreenDialogBody editId={dialog.editId} saved={saved} /> : null;
+  const screens = useScreens().data;
+  return dialog?.kind === "screen" && screens ? <ScreenDialogBody editId={dialog.editId} opened={screens} /> : null;
 }
 
-function ScreenDialogBody({ editId, saved }: { editId: string | null; saved: readonly Screen[] }) {
+function ScreenDialogBody({ editId, opened }: { editId: string | null; opened: Screens }) {
   const closeDialog = useSelectionStore((s) => s.closeDialog);
   const client = useQueryClient();
   const ids = useId();
   const nameRef = useRef<HTMLInputElement>(null);
   const formRef = useRef<HTMLFormElement>(null);
   const [id] = useState(() => editId ?? crypto.randomUUID());
-  const [initial] = useState(() => draftOf(saved.find((s) => s.id === editId) ?? null));
+  const [base, setBase] = useState(opened);
+  const [initial] = useState(() => draftOf(opened.screens.find((s) => s.id === editId) ?? null));
   const [draft, setDraft] = useState(initial);
   const [tried, setTried] = useState(false);
   const [saving, setSaving] = useState<Saving>({ kind: "idle" });
@@ -62,7 +63,7 @@ function ScreenDialogBody({ editId, saved }: { editId: string | null; saved: rea
 
   const busy = saving.kind === "saving";
   const editing = editId !== null;
-  const check = checkDraft(draft, id, saved);
+  const check = checkDraft(draft, id, base.screens);
   const errors = check.ok ? null : check.errors;
   const nameError = tried || draft.name !== initial.name ? (errors?.name ?? null) : null;
   const notice = saving.kind === "failed" ? saving.message : errors?.list;
@@ -73,11 +74,12 @@ function ScreenDialogBody({ editId, saved }: { editId: string | null; saved: rea
   const store = async (change: (list: readonly Screen[]) => Screen[], stale: string, done: () => void) => {
     setSaving({ kind: "saving" });
     try {
-      await saveScreens(client, change);
-      done();
+      const outcome = await saveScreens(client, base, change);
+      if (outcome.kind === "saved") return done();
+      setBase(outcome.latest);
+      setSaving({ kind: "failed", message: stale });
     } catch (e) {
-      const message = e instanceof ApiRequestError && e.code === "stale_revision" ? stale : `저장하지 못했습니다: ${e instanceof Error ? e.message : String(e)}`;
-      setSaving({ kind: "failed", message });
+      setSaving({ kind: "failed", message: `저장하지 못했습니다: ${e instanceof Error ? e.message : String(e)}` });
     }
   };
 
@@ -97,7 +99,7 @@ function ScreenDialogBody({ editId, saved }: { editId: string | null; saved: rea
   };
 
   const remove = () => {
-    const name = saved.find((s) => s.id === id)?.name ?? initial.name;
+    const name = base.screens.find((s) => s.id === id)?.name ?? initial.name;
     if (busy || !window.confirm(`"${name}" 조건식을 삭제할까요? 되돌릴 수 없습니다.`)) return;
     void store((list) => list.filter((s) => s.id !== id), STALE_DELETE, closeDialog);
   };

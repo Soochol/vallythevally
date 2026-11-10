@@ -16,16 +16,17 @@ export const screensQuery = queryOptions({ queryKey: SCREENS_KEY, queryFn: ({ si
 
 export const useScreens = () => useQuery(screensQuery);
 
-export async function saveScreens(client: QueryClient, edit: (saved: readonly Screen[]) => Screen[]): Promise<void> {
-  const known = await client.ensureQueryData(screensQuery);
-  const next: Screens = { screens: edit(known.screens), revision: known.revision + 1 };
+export type SaveOutcome = { kind: "saved" } | { kind: "stale"; latest: Screens };
+
+export async function saveScreens(client: QueryClient, base: Screens, edit: (screens: readonly Screen[]) => Screen[]): Promise<SaveOutcome> {
   try {
-    const saved = await putJson<Screens>("/api/screens", next);
+    const saved = await putJson<Screens>("/api/screens", { screens: edit(base.screens), revision: base.revision + 1 } satisfies Screens);
     await client.cancelQueries({ queryKey: SCREENS_KEY });
     client.setQueryData(SCREENS_KEY, saved);
+    return { kind: "saved" };
   } catch (e) {
-    if (e instanceof ApiRequestError && e.code === "stale_revision") await client.invalidateQueries({ queryKey: SCREENS_KEY });
-    throw e;
+    if (!(e instanceof ApiRequestError && e.code === "stale_revision")) throw e;
+    return { kind: "stale", latest: await client.fetchQuery({ ...screensQuery, staleTime: 0 }) };
   }
 }
 
