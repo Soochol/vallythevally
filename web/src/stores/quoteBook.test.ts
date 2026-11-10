@@ -250,6 +250,63 @@ describe("QuoteBook", () => {
     expect(fetches.map((f) => f.symbols)).toEqual([["005930", "000660", "IDX:001"], ["000660"]]);
   });
 
+  test("닫았다 다시 연 목록은 닫기 전 REST가 늦게 와도 새로 부른 값을 쓴다", async () => {
+    const { book, fetches, emit } = setup();
+    const close = book.lease(["005930"]);
+    await settle();
+    emit({ type: "watch_limited", symbols: ["005930"] });
+    close();
+    await settle();
+    book.lease(["005930"]);
+    await settle();
+
+    fetches[0]!.resolve([quote("005930", 50_000, "polled")]);
+    await settle();
+    fetches[1]!.resolve([quote("005930", 51_500, "polled")]);
+    await settle();
+    expect(book.get("005930")).toEqual({ quote: quote("005930", 51_500, "polled"), limited: true });
+  });
+
+  test("함께 부른 종목 중 빠졌다 돌아온 종목만 옛 응답을 버린다", async () => {
+    const { book, fetches, price } = setup();
+    const both = book.lease(["005930", "000660"]);
+    await settle();
+    both();
+    const one = book.lease(["005930"]);
+    await settle();
+    one();
+    book.lease(["005930", "000660"]);
+    await settle();
+    expect(fetches.map((f) => f.symbols)).toEqual([["005930", "000660"], ["000660"]]);
+
+    fetches[0]!.resolve([quote("005930", 71_000, "polled"), quote("000660", 179_000, "polled")]);
+    await settle();
+    expect(price("005930")).toBe(71_000);
+    expect(price("000660")).toBeUndefined();
+    fetches[1]!.resolve([quote("000660", 180_000, "polled")]);
+    await settle();
+    expect(price("000660")).toBe(180_000);
+  });
+
+  test("닫힌 목록의 재시도는 다시 연 목록에서 REST를 더 부르지 않고, 새 진입의 재시도는 그대로 간다", async () => {
+    const { book, fetches } = setup();
+    const network = new ApiRequestError("network", "서버에 연결하지 못했습니다");
+    const close = book.lease(["005930"]);
+    await settle();
+    fetches[0]!.reject(network);
+    await settle();
+    close();
+    await settle();
+    book.lease(["005930"]);
+    await settle();
+
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(fetches).toHaveLength(2);
+    fetches[1]!.reject(network);
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(fetches.map((f) => f.symbols)).toEqual([["005930"], ["005930"], ["005930"]]);
+  });
+
   test("사람이 고쳐야 하는 실패는 다시 부르지 않는다", async () => {
     const { book, fetches } = setup();
     book.lease(["005930"]);
