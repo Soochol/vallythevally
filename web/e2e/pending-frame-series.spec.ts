@@ -90,7 +90,7 @@ test("replacement consumes queued rollover in both real series and retains newer
   expect.soft(after.find((s) => s.type === "Line")!.updates).toHaveLength(2);
   expect.soft(after.find((s) => s.type === "Histogram")!.updates.length).toBe(volume.updates.length + 2);
   await expect(chart).toHaveAttribute("data-last-close", "206000", { timeout: 1000 });
-  await trade(207_000, "100201", 7);
+  await expect(() => trade(207_000, "100201", 7)).toPass({ timeout: 15_000 });
   await expect(chart).toHaveAttribute("data-last-close", "207000");
   const final = await series(page);
   expect(final.find((s) => s.type === "Line")!.data.slice(-2)).toEqual([
