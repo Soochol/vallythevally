@@ -74,7 +74,7 @@ retire_terminal() {
 }
 
 # A lead is the hc terminal that runs these scripts. Its owner id is <address>@<since>, since being the
-# terminal's creation time in UTC milliseconds: hc keeps its address counter in its state folder, and a lost
+# terminal's creation time: hc keeps its address counter in its state folder, and a lost
 # state folder starts the counter over, so an address alone could name a newer terminal.
 
 since_of() { jq -r '.labels["vally.lead.since"] // (.created_ms | tostring)'; }
@@ -165,11 +165,11 @@ lock_worktree() { git worktree lock --reason "vally owner $ME${2:+ issue $2}" "$
 
 has_issue() { [[ ",$1," == *",$2,"* ]]; }
 
-lock_issue_too() { # <worktree> <issue>
-  local owner issues
-  IFS=$'\t' read -r owner issues < <(worktree_lock "$1") || return 0
-  [ "$owner" = "$ME" ] && ! has_issue "$issues" "$2" || return 0
-  git worktree unlock "$1" && lock_worktree "$1" "${issues:+$issues,}$2"
+lock_issue_too() {
+  local worktree=$1 issue=$2 owner issues
+  IFS=$'\t' read -r owner issues < <(worktree_lock "$worktree") || return 0
+  [ "$owner" = "$ME" ] && ! has_issue "$issues" "$issue" || return 0
+  git worktree unlock "$worktree" && lock_worktree "$worktree" "${issues:+$issues,}$issue"
 }
 
 remove_worktree() {

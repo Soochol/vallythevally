@@ -818,9 +818,10 @@ t_take_moves_every_issue_its_gardener_holds() {
   ! as_t2 "$agent/start.sh" impl 58 --branch fix/58-next --spec "$T/spec.md" 2>"$T/err" && ok grep -q 'issue #58 belongs to the live lead main' "$T/err"
 }
 
-end_t1_on_send() { # <jq edit that ends t1>
+end_t1_on_send() {
+  local end_t1_jq=$1
   rm -f "$T/bin/hc"
-  { echo '#!/usr/bin/env bash'; printf 'end=%q real=%q\n' "$1" "$here/fake-hc"
+  { echo '#!/usr/bin/env bash'; printf 'end=%q real=%q\n' "$end_t1_jq" "$here/fake-hc"
     cat <<'SH'
 if [ "$1 $2" = "send t1" ]; then jq "$end" "$FAKE_DIR/terminals.json" > "$FAKE_DIR/end.tmp" && mv "$FAKE_DIR/end.tmp" "$FAKE_DIR/terminals.json"; fi
 exec "$real" "$@"
@@ -829,10 +830,11 @@ SH
   chmod +x "$T/bin/hc"
 }
 
-report_marks_orphan_when_t1_ends_during_the_send() { # <jq edit that ends t1>
+report_marks_orphan_when_t1_ends_during_the_send() {
+  local end_t1_jq=$1
   "$agent/start.sh" impl 58 --branch fix/58-theme --spec "$T/spec.md" >/dev/null || return 1
   w=$(jq -r '.terminals[] | select(.name == "w58-impl") | .address' "$FAKE_DIR/terminals.json")
-  end_t1_on_send "$1"
+  end_t1_on_send "$end_t1_jq"
   HC_TERMINAL_ID=$w "$agent/report.sh" "done 58 PR #61 /r/w58-impl.md" > "$T/out" 2>&1; code=$?
   cat "$T/out"
   ok test $code = 3 && ok grep -q '^리드가 없어 보고하지 못했다: done 58 PR #61 /r/w58-impl.md$' "$T/out" &&

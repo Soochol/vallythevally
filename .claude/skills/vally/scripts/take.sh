@@ -11,12 +11,12 @@ need_issue "$issue"
 as_lead
 lock_and_load_live
 
-take_worktree() { # <path> <issues for an unlocked worktree>
-  local owner locked
-  IFS=$'\t' read -r owner locked < <(worktree_lock "$1") || true
+take_worktree() {
+  local path=$1 issues_if_unlocked=$2 owner locked
+  IFS=$'\t' read -r owner locked < <(worktree_lock "$path") || true
   [ "$owner" != "$ME" ] || return 0
-  if [ -n "$owner" ]; then git worktree unlock "$1"; lock_worktree "$1" "$locked"; else lock_worktree "$1" "$2"; fi
-  echo "took $1${owner:+ from $(lead_label "$owner")}"
+  if [ -n "$owner" ]; then git worktree unlock "$path"; lock_worktree "$path" "$locked"; else lock_worktree "$path" "$issues_if_unlocked"; fi
+  echo "took $path${owner:+ from $(lead_label "$owner")}"
 }
 
 group=$(issue_group "$issue") || exit 1
