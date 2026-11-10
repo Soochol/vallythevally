@@ -293,7 +293,7 @@ export class ChartController {
     this.main = addMainSeries(this.chart, this.view?.settings.style ?? "candle", this.tokens, isIndex);
     this.extensions.forEach((ext) => ext.reattach());
     this.withDataGuard(() => {
-      setMainData(this.main, this.bars);
+      this.setBars(this.bars);
       if (range) this.chart.timeScale().setVisibleLogicalRange(range);
     });
   }
