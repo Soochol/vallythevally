@@ -155,6 +155,32 @@ describe("durable drawing completion", () => {
     expect(await journal.admit(low)).toBe(false);
   });
 
+  test.each(["delete-first", "put-first", "shared-only"])("retirement retains a migrated higher revision through %s ACK order", async (schedule) => {
+    const f = fixture({ [recordKey("a")]: JSON.stringify({ v: 1, id: "a", symbol: "005930", want: { kind: "put", body: body() }, lastRevision: 0 }) });
+    const producer = f.journal();
+    const terminal = producer.stage({ ...deletion(), observedRevision: 1 }, () => 200);
+    const publish = hideStage(f.values, terminal);
+    vi.spyOn(Date, "now").mockReturnValue(900);
+    let older: Intent | null;
+    try { older = await f.journal().recover("a"); } finally { vi.restoreAllMocks(); }
+    if (!older) throw new Error("missing migrated PUT");
+    expect(older.order).toBe(0);
+    expect(older.lastRevision).toBe(900);
+    expect(terminal.lastRevision).toBe(1);
+    publish();
+    if (schedule === "put-first") await f.journal().complete(older);
+    if (schedule === "shared-only") delete f.values[stageKey(older.uuid)];
+    await producer.complete(terminal);
+    const retained = { v: 1, id: "a", order: terminal.order, uuid: terminal.uuid, lastRevision: 900 };
+    expect(completion(f.values)).toEqual(retained);
+    expect(pendingKeys(f.values)).toEqual([]);
+    await f.journal().complete(older);
+    expect(completion(f.values)).toEqual(retained);
+    expect(pendingKeys(f.values)).toEqual([]);
+    const undo = f.journal().stage(input(), () => 1);
+    expect(undo.lastRevision).toBe(901);
+  });
+
   test("launch starts synchronous work under the lock and releases before its HTTP response", async () => {
     const f = fixture(); const journal = f.journal();
     const intent = journal.stage(input(), () => 100); await journal.admit(intent);
