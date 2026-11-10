@@ -9,13 +9,14 @@ use duckdb::{Config, Connection, OptionalExt, params};
 use crate::api::ExcludeKind;
 use crate::kiwoom::wire::{MillionWon, ScreenerListing};
 
-const SCHEMA_VERSION: i32 = 2;
+const SCHEMA_VERSION: i32 = 3;
 
 const SCHEMA: &str = "
 CREATE TABLE store_meta (schema_version INTEGER NOT NULL, last_day DATE);
 CREATE TABLE listed (code VARCHAR NOT NULL, name VARCHAR NOT NULL, listed_on DATE, excludable_as USMALLINT NOT NULL);
 CREATE TABLE history (code VARCHAR PRIMARY KEY, complete BOOLEAN NOT NULL, refetch BOOLEAN NOT NULL);
 CREATE TABLE daily (code VARCHAR NOT NULL, day DATE NOT NULL, open UBIGINT NOT NULL, high UBIGINT NOT NULL, low UBIGINT NOT NULL, close UBIGINT NOT NULL, volume UBIGINT NOT NULL, traded_million_won UBIGINT NOT NULL);
+CREATE TABLE calendar (day DATE PRIMARY KEY);
 ";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -62,7 +63,7 @@ pub enum Write {
     Replace { code: StockCode, bars: Vec<DayBar> },
 }
 
-fn exclusion_mask(kinds: &[ExcludeKind]) -> u16 {
+pub(super) fn exclusion_mask(kinds: &[ExcludeKind]) -> u16 {
     kinds.iter().fold(0, |mask, kind| mask | 1 << *kind as u16)
 }
 
@@ -97,6 +98,10 @@ impl Store {
 
     fn conn(&self) -> MutexGuard<'_, Connection> {
         self.conn.lock().expect("스크리너 저장소 잠금")
+    }
+
+    pub(super) fn reader(&self) -> Result<Connection, StoreError> {
+        Ok(self.conn().try_clone()?)
     }
 
     pub fn summary(&self) -> Result<Summary, StoreError> {
@@ -192,6 +197,24 @@ impl Store {
         Ok(())
     }
 
+    pub fn calendar_last_day(&self) -> Result<Option<KstDate>, StoreError> {
+        Ok(self.conn().query_row("SELECT max(day) FROM calendar", [], |row| row.get::<_, Option<i32>>(0))?.map(date_of))
+    }
+
+    pub fn extend_calendar(&self, days: &[KstDate]) -> Result<(), StoreError> {
+        let mut conn = self.conn();
+        let tx = conn.transaction()?;
+        {
+            let mut appender = tx.appender("calendar")?;
+            for &day in days {
+                appender.append_row(params![date_value(day)])?;
+            }
+            appender.flush()?;
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
     pub fn set_last_day(&self, day: KstDate) -> Result<(), StoreError> {
         self.conn().execute("UPDATE store_meta SET last_day = ?", params![date_value(day)])?;
         Ok(())
@@ -252,18 +275,18 @@ fn create(mut conn: Connection) -> Result<Connection, StoreError> {
     Ok(conn)
 }
 
-fn date_value(day: KstDate) -> Value {
+pub(super) fn date_value(day: KstDate) -> Value {
     Value::Date32(day.days_since_epoch() as i32)
 }
 
-fn date_of(days: i32) -> KstDate {
+pub(super) fn date_of(days: i32) -> KstDate {
     KstDate::from_days_since_epoch(i64::from(days))
 }
 
-fn price_of(centi: u64) -> Result<Price, StoreError> {
+pub(super) fn price_of(centi: u64) -> Result<Price, StoreError> {
     Price::from_centi(centi).ok_or_else(|| StoreError("저장된 가격이 0입니다".into()))
 }
 
-fn stock_code(code: &str) -> Result<StockCode, StoreError> {
+pub(super) fn stock_code(code: &str) -> Result<StockCode, StoreError> {
     StockCode::parse(code).map_err(|e| StoreError(format!("저장된 종목코드가 틀렸습니다: {e}")))
 }

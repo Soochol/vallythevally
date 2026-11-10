@@ -97,6 +97,10 @@ impl ApiFailure {
     pub(crate) fn bad_request(message: impl Into<String>) -> Self {
         ApiFailure::new(api::ApiErrorCode::BadRequest, message)
     }
+
+    pub(crate) fn screener_not_ready(reason: api::ApiErrorReason, message: impl Into<String>) -> Self {
+        ApiFailure { reason: Some(reason), ..ApiFailure::new(api::ApiErrorCode::ScreenerNotReady, message) }
+    }
 }
 
 pub fn status_of(code: api::ApiErrorCode) -> StatusCode {
@@ -140,6 +144,7 @@ pub(crate) enum Lookup {
     Quotes,
     Fundamentals,
     ScreenerUpdate,
+    ScreenerRun,
 }
 
 impl Lookup {
@@ -150,6 +155,7 @@ impl Lookup {
             Lookup::Quotes => "현재가",
             Lookup::Fundamentals => "종목 기본 정보",
             Lookup::ScreenerUpdate => "스크리너 업데이트",
+            Lookup::ScreenerRun => "스크리너 실행",
         }
     }
 

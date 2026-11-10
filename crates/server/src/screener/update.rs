@@ -1,16 +1,16 @@
 use std::collections::HashMap;
 
-use domain::{KstDate, Price, StockCode, Venue};
+use domain::{IndexCode, KstDate, Price, StockCode, Venue};
 use futures::{StreamExt, TryStreamExt, stream};
 
-use super::{CalendarUse, Screener};
+use super::{Calendar, CalendarUse, Screener};
 use super::store::{DayBar, Store, StoreError, Tail, Write};
 use crate::api::UpdatePhase;
 use crate::bars::BarError;
-use crate::kiwoom::api::{DailyChart, StockList, StockQuotes};
+use crate::kiwoom::api::{DailyChart, IndexDailyChart, StockList, StockQuotes};
 use crate::kiwoom::error::{Failure, Surface};
 use crate::kiwoom::rest::{ContKey, KiwoomError, MergeScope, Priority};
-use crate::kiwoom::wire::{KrxDayQuote, ScreenerListing, parse_krx_daily, parse_krx_quotes, screener_listing};
+use crate::kiwoom::wire::{KrxDayQuote, ScreenerListing, index_days, parse_krx_daily, parse_krx_quotes, screener_listing};
 
 const IN_FLIGHT: usize = 2;
 const MAX_LIST_PAGES: usize = 10;
@@ -67,6 +67,7 @@ impl Screener {
         }
         let calendar = self.calendar(CalendarUse::Update).await?;
         let target = calendar.target(self.clock.now()).ok_or_else(|| BarError::Internal("코스피 일봉에 관측일이 없어 목표 관측일을 정할 수 없습니다".into()))?;
+        self.store_calendar(&calendar, target).await?;
         self.recent(id, target, calendar.last_before(target)).await?;
         self.backfill(id, target).await
     }
@@ -87,6 +88,37 @@ impl Screener {
             self.report(id, UpdatePhase::Symbols, done + 1, LIST_MARKETS);
         }
         Ok(listing)
+    }
+
+    async fn store_calendar(&self, recent: &Calendar, target: KstDate) -> Result<(), UpdateError> {
+        let stored_through = self.with_store(Store::calendar_last_day).await?;
+        if stored_through.is_some_and(|last| last >= target) {
+            return Ok(());
+        }
+        let recent_reaches_stored = stored_through.is_some_and(|last| recent.days.first().is_some_and(|first| *first <= last));
+        let mut days = if recent_reaches_stored { recent.days.clone() } else { self.kospi_days_back_to(stored_through).await? };
+        days.retain(|d| *d <= target && stored_through.is_none_or(|last| *d > last));
+        tracing::info!(count = days.len(), "코스피 일봉 날짜를 관측일 달력에 덧붙입니다");
+        Ok(self.with_store(move |s| s.extend_calendar(&days)).await?)
+    }
+
+    async fn kospi_days_back_to(&self, stored_through: Option<KstDate>) -> Result<Vec<KstDate>, UpdateError> {
+        let req = IndexDailyChart::new(IndexCode::KOSPI, self.clock.now().kst_date());
+        let mut pages = Vec::new();
+        let mut cont = None;
+        for _ in 0..MAX_HISTORY_PAGES {
+            let page = self.rest.call(&req, cont.as_ref(), Priority::Background, MergeScope::default()).await?;
+            let days = index_days(page.body).map_err(|e| BarError::Internal(format!("코스피 일봉 응답을 읽지 못했습니다: {e}")))?;
+            let reaches_stored = stored_through.is_some_and(|last| days.first().is_some_and(|oldest| *oldest <= last));
+            pages.push(days);
+            cont = page.next;
+            if reaches_stored || cont.is_none() {
+                let mut days: Vec<KstDate> = pages.into_iter().rev().flatten().collect();
+                days.dedup();
+                return Ok(days);
+            }
+        }
+        Err(BarError::Internal(format!("코스피 일봉이 {MAX_HISTORY_PAGES}페이지를 넘어 관측일 달력 받기를 멈췄습니다")).into())
     }
 
     async fn recent(&self, id: u64, target: KstDate, day_before_target: Option<KstDate>) -> Result<(), UpdateError> {

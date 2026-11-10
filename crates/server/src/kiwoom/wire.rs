@@ -168,6 +168,12 @@ pub fn parse_krx_daily(body: DailyChartResponse) -> Result<Option<Vec<KrxDailyRo
     Ok(Some(out))
 }
 
+pub fn index_days(body: IndexDailyChartResponse) -> Result<Vec<KstDate>, WireError> {
+    let mut days = body.into_rows().iter().rev().map(|r| KstDate::parse_yyyymmdd(&r.dt).ok_or_else(|| WireError(format!("날짜가 아닙니다: {:?}", r.dt)))).collect::<Result<Vec<_>, _>>()?;
+    days.dedup();
+    Ok(days)
+}
+
 fn spanning(o: Price, h: Price, l: Price, c: Price, v: Volume) -> Ohlcv {
     let high = o.max(h).max(l).max(c);
     let low = o.min(h).min(l).min(c);

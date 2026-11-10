@@ -124,15 +124,18 @@ fn check_screens(all: &Screens) -> Result<(), ApiFailure> {
     }
     let mut ids = HashSet::new();
     for screen in &all.screens {
-        if screen.id.is_empty() || screen.id.len() > MAX_SCREEN_ID_BYTES || !ids.insert(screen.id.as_str()) {
-            return Err(ApiFailure::bad_request(format!("조건식 id가 비었거나 길거나 겹칩니다: {}", screen.id)));
-        }
         check_screen(screen)?;
+        if !ids.insert(screen.id.as_str()) {
+            return Err(ApiFailure::bad_request(format!("조건식 id가 겹칩니다: {}", screen.id)));
+        }
     }
     Ok(())
 }
 
-fn check_screen(screen: &Screen) -> Result<(), ApiFailure> {
+pub(crate) fn check_screen(screen: &Screen) -> Result<(), ApiFailure> {
+    if screen.id.is_empty() || screen.id.len() > MAX_SCREEN_ID_BYTES {
+        return Err(ApiFailure::bad_request(format!("조건식 id는 1~{MAX_SCREEN_ID_BYTES}바이트여야 합니다: {}", screen.id)));
+    }
     let name = &screen.name;
     if !(1..=MAX_SCREEN_NAME_CHARS).contains(&name.trim().chars().count()) {
         return Err(ApiFailure::bad_request(format!("조건식 이름은 공백을 빼고 1~{MAX_SCREEN_NAME_CHARS}자여야 합니다: {name:?}")));
