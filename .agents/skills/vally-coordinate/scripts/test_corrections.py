@@ -7,6 +7,7 @@ import unittest
 from unittest.mock import patch
 
 from contracts import Refused, digest
+from evidence import validate_decision
 from github import END, PREFIX, START, GitHub, decision_body, publish
 from journal import Journal
 import test_harness as fixture
@@ -117,6 +118,27 @@ class CorrectionTests(unittest.TestCase):
         self.assertTrue(outcome['acknowledged'])
         self.assertEqual(t.source(), payload['source'])
         self.assertEqual({x['name'] for x in t.data()['issues']['2']['labels']}, {'coord:ticket', 'coord:working', 'needs-triage'})
+
+    def test_close_noop_rechecks_relations_after_readiness_observation(self):
+        t = self.t
+        t.accepted_pair()
+        t.submit(t.decision('final_check', outcome='passed', report='final.log'), publish=True)
+        t.submit(t.decision('approval', approval_kind='merge', decision='approved'), publish=True)
+        t.submit(t.decision('close', effect={'action': 'close'}), publish=True)
+        payload = t.decision('close', effect={'action': 'close'})
+        class ChangedRelations(GitHub):
+            reads = 0
+
+            def ticket(self, number):
+                snapshot = super().ticket(number)
+                self.reads += 1
+                if self.reads >= 5:
+                    snapshot['parent'] = {'id': 900, 'node_id': 'OTHER', 'number': 9}
+                return snapshot
+        with patch.dict(os.environ, t.env), self.assertRaises(Refused):
+            publish(ChangedRelations(), Journal(t.state_dir), 'close-noop-drift', payload)
+        self.assertTrue((t.state_dir / 'operations/close-noop-drift/comment-ack.json').exists())
+        self.assertFalse((t.state_dir / 'operations/close-noop-drift/ack.json').exists())
 
     def test_reversed_or_incomplete_contract_refuses_before_worker_start(self):
         t = self.t
@@ -339,4 +361,5 @@ class CorrectionTests(unittest.TestCase):
         unknown = t.result(conditions=['literal', 'other'], record=False)
         unknown['subjects'][0]['conditions']['unknown'] = unknown['subjects'][0]['conditions'].pop('other')
         unknown['assignment']['requested']['conditions'] = ['literal', 'unknown']
-        t.submit(accept(t, unknown, ['literal']), publish=True, ok=False)
+        with patch.dict(os.environ, t.env), self.assertRaisesRegex(Refused, 'absent from source'):
+            validate_decision(accept(t, unknown, ['literal']), github=GitHub())

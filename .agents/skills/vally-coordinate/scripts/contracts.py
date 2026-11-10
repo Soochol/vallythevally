@@ -125,5 +125,3 @@ def load_request(path):
     if re.search(r"^(?:역할|배정된 역할|assigned_role)\s*:", body, re.MULTILINE):
         raise Refused("The script owns the role; remove the spec's role header")
     return value, body
-
-

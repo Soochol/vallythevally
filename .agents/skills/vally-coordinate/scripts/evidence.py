@@ -1,5 +1,6 @@
 import os
 import subprocess
+from datetime import datetime, timezone
 
 from contracts import Refused, digest, nonempty, sha, strings
 from github import REPO, configuration
@@ -19,6 +20,17 @@ def provenance(value, expected):
         raise Refused("Evidence provenance class does not match its role")
     for key in ("ref", "time", "scope", "omissions"):
         nonempty(source.get(key), f"provenance.{key}")
+
+
+def assignment_time(value):
+    nonempty(value, "execution issue time")
+    try:
+        issued = datetime.fromisoformat(value)
+        if issued.tzinfo is None:
+            raise ValueError("missing timezone")
+        return issued.astimezone(timezone.utc)
+    except (ValueError, OverflowError) as exc:
+        raise Refused("Execution issue time must be a valid timezone-aware ISO timestamp") from exc
 
 
 def validate_result(value, journal=None):
@@ -46,7 +58,7 @@ def validate_result(value, journal=None):
         nonempty(launch.get(key), key)
     if value["id"] != "result:" + launch["dispatchId"]:
         raise Refused("Result event identity must be result:<actual Dispatch ID>")
-    nonempty(assignment.get("issued_at"), "execution issue time")
+    assignment_time(assignment.get("issued_at"))
     nonempty(assignment.get("operation"), "local operation identity")
     subjects = value.get("subjects")
     if not isinstance(subjects, list) or not subjects:
@@ -167,13 +179,14 @@ def validate_decision(value, github=None, journal=None):
         if kind == "accept" and journal:
             for _, intent in journal.executions(value["source"]):
                 assigned = intent["plan"]["assignment"]
-                if (assigned["role"] == claim["role"] and intent["issued_at"] > claim["assignment"]["issued_at"]
+                if (assigned["role"] == claim["role"] and assignment_time(intent["issued_at"]) > assignment_time(claim["assignment"]["issued_at"])
                         and set(assigned["conditions"]) & set(value["conditions"])):
                     raise Refused("A newer local execution covers these conditions; an earlier attempt cannot advance it")
         for subject in subjects:
             if not set(subject["conditions"]) <= conditions:
                 raise Refused("Decision names conditions absent from source Ticket")
-            if subject["pr"] is not None and github.pr(subject["pr"])["head"]["sha"] != subject["head"]:
+            selected = kind != "accept" or set(subject["conditions"]) & set(value["conditions"])
+            if selected and subject["pr"] is not None and github.pr(subject["pr"])["head"]["sha"] != subject["head"]:
                 raise Refused("Current remote PR head differs from evidence/approval")
     return value
 
@@ -213,39 +226,40 @@ def readiness(github, ticket, journal=None):
     live = lambda s: s["pr"] is None or heads.get(s["pr"]) == s["head"]
     selected = {}
     findings = {}
-    for record in records:
+    accepted = sorted((r for r in records if r["payload"]["kind"] == "accept"),
+                      key=lambda r: assignment_time(r["payload"]["claim"]["assignment"]["issued_at"]))
+    for record in accepted:
         value = record["payload"]
-        if value["kind"] != "accept":
-            continue
         claim = value["claim"]
-        issued = claim["assignment"]["issued_at"]
+        issued = assignment_time(claim["assignment"]["issued_at"])
         for subject in claim["subjects"]:
             if claim["role"] == "reviewer":
                 for finding in subject.get("findings", []):
                     if finding["condition"] not in value["conditions"]:
                         continue
-                    key = (subject["pr"], finding["id"])
-                    if key not in findings or findings[key]["issued_at"] <= issued:
-                        findings[key] = {**finding, "pr": subject["pr"], "issued_at": issued, "resolved": False}
+                    key = (subject["pr"], finding["condition"], finding["id"])
+                    if key not in findings or assignment_time(findings[key]["issued_at"]) <= issued:
+                        findings[key] = {**finding, "pr": subject["pr"], "issued_at": claim["assignment"]["issued_at"],
+                                         "execution": claim["id"], "resolved": False}
                 if value["source"] == snapshot["source"] and live(subject):
                     for resolved in subject.get("resolves", []):
-                        key = (subject["pr"], resolved)
-                        if key in findings and findings[key]["issued_at"] < issued and findings[key]["condition"] in value["conditions"]:
-                            findings[key]["resolved"] = True
-                            findings[key]["issued_at"] = issued
+                        for condition in set(subject["conditions"]) & set(value["conditions"]):
+                            key = (subject["pr"], condition, resolved)
+                            if key in findings and assignment_time(findings[key]["issued_at"]) < issued:
+                                findings[key]["resolved"] = True
             if value["source"] != snapshot["source"] or not live(subject):
                 continue
             for condition, result in subject["conditions"].items():
                 if condition not in value["conditions"]:
                     continue
                 key = (subject["pr"], subject["head"], condition, claim["role"])
-                if key not in selected or selected[key]["issued_at"] < issued:
+                if key not in selected or (selected[key]["issued_at"], selected[key]["comment"]) < (issued, record["id"]):
                     selected[key] = {"issued_at": issued, "claim": claim, "result": result, "comment": record["id"]}
     if journal:
         for _, intent in journal.executions(snapshot["source"]):
             assigned = intent["plan"]["assignment"]
             for key, item in list(selected.items()):
-                if key[3] == assigned["role"] and key[2] in assigned["conditions"] and item["issued_at"] < intent["issued_at"]:
+                if key[3] == assigned["role"] and key[2] in assigned["conditions"] and item["issued_at"] < assignment_time(intent["issued_at"]):
                     del selected[key]
     all_conditions = {c["id"] for c in snapshot["contract"]["acceptance_conditions"]}
     subjects = {(pr, head) for pr, head, _, _ in selected}
@@ -255,7 +269,7 @@ def readiness(github, ticket, journal=None):
         conditions = {c for p, h, c, _ in selected if (p, h) == (pr, head)}
         exclusions = set()
         approved = set()
-        final = None
+        final = {}
         for record in current:
             value = record["payload"]
             for subject in value.get("subjects", []):
@@ -270,26 +284,27 @@ def readiness(github, ticket, journal=None):
                     if value["decision"] == "approved":
                         approved.update(subject["conditions"])
                 if value["kind"] == "final_check":
-                    final = (record["id"], value)
+                    for condition in subject["conditions"]:
+                        final[condition] = (record["id"], value["outcome"])
         worker_pass, review_pass = set(exclusions), set(exclusions)
         actual_review_pass = set()
-        last_accept = 0
+        last_accept = {condition: 0 for condition in conditions}
         for condition in conditions:
             worker = selected.get((pr, head, condition, "worker"))
             review = selected.get((pr, head, condition, "reviewer"))
             if worker:
-                last_accept = max(last_accept, worker["comment"])
+                last_accept[condition] = max(last_accept[condition], worker["comment"])
                 if worker["result"]["outcome"] == "passed":
                     worker_pass.add(condition)
             if review:
-                last_accept = max(last_accept, review["comment"])
+                last_accept[condition] = max(last_accept[condition], review["comment"])
                 distinct = (worker and review["issued_at"] > worker["issued_at"]
                             and all(review["claim"]["assignment"]["launch"][k] != worker["claim"]["assignment"]["launch"][k] for k in ("taskId", "dispatchId")))
                 if distinct and review["result"]["outcome"] == "passed":
                     review_pass.add(condition)
                     actual_review_pass.add(condition)
-        final_ok = bool(final and final[0] > last_accept and final[1]["outcome"] == "passed"
-                        and conditions <= set(next(s["conditions"] for s in final[1]["subjects"] if (s["pr"], s["head"]) == (pr, head))))
+        final_ok = all(condition in final and final[condition][0] > last_accept[condition]
+                       and final[condition][1] == "passed" for condition in conditions)
         worker_ok = conditions <= worker_pass
         review_ok = worker_ok and conditions <= review_pass
         approval_ok = conditions <= approved

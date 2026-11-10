@@ -52,6 +52,8 @@ Fill `requested`/`launch` from receipts, not the empty illustrative objects. Rep
 
 Review uses `role: reviewer` and provenance class `reviewer_claim`. Its exact assigned head must match each subject and its Task/Dispatch must differ from implementation. A proven finding has `id`, `condition`, `summary`, and `reproduction`. A fresh review names prior IDs in `resolves` only after reproducing the correction. A finding cannot both appear and resolve in one result. Old-head/earlier-execution evidence cannot clear current findings.
 
+Accepted reviews fold by validated timezone-aware assignment `issued_at`, normalized to UTC, independently of comment arrival. This is local coordinator assignment-time ordering, not a distributed clock or causality guarantee. Findings retain their origin execution and time and are scoped by PR, condition, and finding ID. Only a strictly later accepted review at the current source and subject head can resolve an older finding in its accepted subject conditions. Equal-time reviews cannot resolve each other. Newer findings and other PR or condition scopes remain independent.
+
 Coordinator decisions have exact `source`, `summary`, `provenance`, optional `effect`, and these fields:
 
 | Kind | Required content |
@@ -64,5 +66,7 @@ Coordinator decisions have exact `source`, `summary`, `provenance`, optional `ef
 | `close` | Explicit `effect: {"action":"close"}`; whole-Ticket readiness is checked before closure. |
 
 Decision `subjects` have `pr`, full `head`, and nonempty `conditions` ID list. Provenance has `class`, `ref`, `time`, `scope`, and `omissions`. Approval/exclusion uses class `user_instruction`; other decisions use `coordinator_verdict`. The default effect is comment-only. Publication is an explicit coordinator action; local flags and these records grant no authority.
+
+Acceptance validates the entire immutable claim. Current remote-head checks apply only to subjects intersecting the explicitly accepted conditions. Other subjects remain historical and unaccepted. Final checks compose by PR, head, and condition. Each condition requires its latest verdict to pass after its applicable worker and reviewer acceptances. A later failed or unverified verdict, or reacceptance of that scope, invalidates its prior final pass. Unrelated condition checks and acceptances leave it intact.
 
 Canonical remote comments have a stable operation marker and exact payload hash. The reader rejects malformed, duplicate, conflicting, and non-allowlisted-author markers. The repository config names permitted author database IDs; shared credentials remain indistinguishable. Raw logs stay local with honest availability, while compact decisions and reproducible summaries may be public.

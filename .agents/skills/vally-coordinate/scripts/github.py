@@ -61,15 +61,18 @@ class GitHub:
         body = row.get("body") or ""
         if body.count(START) != 1 or body.count(END) != 1:
             raise Refused("Ticket requires exactly one canonical vally-ticket:v1 contract block; coordinator must format the source")
-        block = body.split(START)[1].split(END)[0].strip()
+        start, end = body.index(START), body.index(END)
+        if start >= end:
+            raise Refused("Malformed Ticket contract delimiters")
+        block = body[start + len(START):end].strip()
         match = re.fullmatch(r"```json\s*\n(.*?)\n```", block, re.DOTALL)
         if not match:
             raise Refused("Malformed Ticket contract block")
         value = contract(json.loads(match[1], object_pairs_hook=unique_object))
         parent = self.api(f"{PREFIX}/issues/{number}/parent")
         validate_issue(parent, "feature")
-        children = self.pages(f"{PREFIX}/issues/{parent['number']}/sub_issues")
-        if not any(child.get("id") == row["id"] for child in children):
+        children = self.children(parent["number"])
+        if not any(identity(child) == identity(row) for child in children):
             raise Refused("Native parent/child relation is inconsistent")
         blockers = self.pages(f"{PREFIX}/issues/{number}/dependencies/blocked_by")
         for blocker in blockers:
@@ -79,13 +82,24 @@ class GitHub:
         return {"source": source, "contract": value, "issue": row, "parent": identity(parent),
                 "blockers": [identity(b) | {"state": b["state"]} for b in blockers], "phase": phase(row)}
 
+    def children(self, number):
+        children = self.pages(f"{PREFIX}/issues/{number}/sub_issues")
+        seen = {key: set() for key in ("id", "node_id", "number")}
+        for child in children:
+            validate_issue(child, "ticket")
+            for key in seen:
+                if child[key] in seen[key]:
+                    raise Refused("Duplicate/ambiguous native child identity")
+                seen[key].add(child[key])
+        return children
+
     def feature(self, number):
         feature = self.issue(number, "feature")
         tickets = []
-        for child in self.pages(f"{PREFIX}/issues/{number}/sub_issues"):
+        for child in self.children(number):
             ticket = self.ticket(child["number"])
-            if ticket["parent"]["id"] != feature["id"]:
-                raise Refused("Feature child points to a different native parent")
+            if identity(child) != identity(ticket["issue"]) or ticket["parent"] != identity(feature):
+                raise Refused("Native child identity or parent differs from resolved Ticket")
             tickets.append({"source": ticket["source"], "state": ticket["issue"]["state"],
                             "phase": ticket["phase"], "blockers": ticket["blockers"],
                             "frontier": feature["state"] == "open" and ticket["issue"]["state"] == "open" and ticket["phase"] == "coord:ready"
@@ -125,7 +139,8 @@ def identity(row):
 
 def validate_issue(row, kind=None):
     if (not isinstance(row, dict) or row.get("repository_url", "").lower() != f"https://api.github.com/{PREFIX}".lower()
-            or row.get("pull_request") or not all(row.get(k) for k in ("id", "node_id", "number"))):
+            or "pull_request" in row or any(type(row.get(k)) is not int or row[k] < 1 for k in ("id", "number"))
+            or not isinstance(row.get("node_id"), str) or not row["node_id"].strip()):
         raise Refused("Expected a native Issue in Soochol/vallythevally, not a PR or foreign Issue")
     labels = {label["name"] for label in row["labels"]}
     if kind and ({"coord:feature", "coord:ticket"} & labels) != {"coord:" + kind}:
@@ -192,12 +207,14 @@ def publish(github, journal, operation, payload, reconcile=False):
     write(op / "comment-ack.json", {"id": found[0]["id"], "body_hash": digest(body)})
     effect = payload.get("effect", {"action": "comment"})
     action = effect["action"]
+    if action == "close" and not readiness(github, ticket, journal)["ticket_close_ready"]:
+        raise Refused("Whole Ticket current conditions/delivery/review/approval are not ready; comment alone cannot close it")
+    current = github.ticket(ticket)
+    if any(current[key] != intent["source_observation"][key] for key in ("source", "parent", "blockers")):
+        raise Refused("Source/native relations changed after comment; effect not acknowledged")
     if action == "comment":
         write(op / "ack.json", {"comment": found[0]["id"], "effect": "comment"})
         return {"acknowledged": True, "comment": found[0]["id"], "effect": "comment"}
-    current = github.ticket(ticket)
-    if action == "close" and not readiness(github, ticket, journal)["ticket_close_ready"]:
-        raise Refused("Whole Ticket current conditions/delivery/review/approval are not ready; comment alone cannot close it")
     desired = (action == "phase" and current["phase"] == effect["phase"]) or (action == "close" and current["issue"]["state"] == "closed" and current["issue"].get("state_reason") == "completed")
     if desired:
         write(op / "ack.json", {"comment": found[0]["id"], "effect": effect})
@@ -219,7 +236,7 @@ def publish(github, journal, operation, payload, reconcile=False):
         github.api(f"{PREFIX}/issues/{ticket}", "PATCH", {"state": "closed", "state_reason": "completed"})
     observed = github.ticket(ticket)
     valid = observed["phase"] == effect.get("phase") if action == "phase" else observed["issue"]["state"] == "closed" and observed["issue"].get("state_reason") == "completed"
-    if not valid or observed["source"] != snapshot["source"]:
+    if not valid or any(observed[key] != intent["source_observation"][key] for key in ("source", "parent", "blockers")):
         raise Refused("Remote effect read-back mismatch; operation incomplete")
     write(op / "ack.json", {"comment": found[0]["id"], "effect": effect})
     return {"acknowledged": True, "comment": found[0]["id"], "effect": effect}
