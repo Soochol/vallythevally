@@ -32,13 +32,14 @@ export interface Fake {
   respondWith(reply: FakeReply): Promise<void>;
   delay(apiId: string, ms: number): Promise<void>;
   rejectToken(token: string): Promise<void>;
+  setKrxMarket(asOf: string): Promise<void>;
   reset(): Promise<void>;
 }
 
 export interface App {
   url: string;
   fake: Fake;
-  restart(): Promise<void>;
+  restart(options?: { clockStart?: string }): Promise<void>;
 }
 
 class Proc {
@@ -118,6 +119,7 @@ function fakeClient(base: string): Fake {
     respondWith: (reply) => post("respond-with", reply),
     delay: (apiId, ms) => post("delay", { apiId, ms }),
     rejectToken: (token) => post("reject-token", { token }),
+    setKrxMarket: (asOf) => post("krx-market", { asOf }),
     reset: () => post("reset"),
   };
 }
@@ -148,14 +150,15 @@ async function waitUntilSymbolListSettles(url: string): Promise<void> {
   throw new Error("서버가 종목 목록을 받지 못했습니다");
 }
 
-export const test = base.extend<{ app: App; bootReplies: FakeReply[]; clockStart: string | null; extraKospiStocks: number }>({
+export const test = base.extend<{ app: App; bootReplies: FakeReply[]; clockStart: string | null; extraKospiStocks: number; krxMarket: string | null }>({
   bootReplies: [[], { option: true }],
+  krxMarket: [null, { option: true }],
   /** 가짜 키움 ka10099 코스피 목록 끝에 붙일 합성 종목(`FAKE_KIWOOM_EXTRA_STOCKS`). 실시간 200자리를 넘길 때 쓴다. */
   extraKospiStocks: [0, { option: true }],
   /** 서버 시계가 시작할 KST 시각(`YYYYMMDDHHMMSS`, 시험용 `VALLY_CLOCK_START`). 서버는 장 시간 밖의 체결을 버린다. */
   clockStart: [null, { option: true }],
 
-  app: async ({ bootReplies, clockStart, extraKospiStocks }, use, testInfo) => {
+  app: async ({ bootReplies, clockStart, extraKospiStocks, krxMarket }, use, testInfo) => {
     if (!existsSync(path.join(STATIC_DIR, "index.html"))) throw new Error(`${STATIC_DIR}가 없습니다. 먼저 pnpm build`);
     const dir = await mkdtemp(path.join(tmpdir(), "vally-e2e-"));
     const fake = new Proc(path.join(BIN_DIR, "fake-kiwoom"), [], extraKospiStocks > 0 ? { FAKE_KIWOOM_EXTRA_STOCKS: String(extraKospiStocks) } : {});
@@ -164,22 +167,23 @@ export const test = base.extend<{ app: App; bootReplies: FakeReply[]; clockStart
       const fakeBase = `http://${await fake.waitFor(/fake-kiwoom listening addr=(\S+)/, "가짜 키움")}`;
       const client = fakeClient(fakeBase);
       for (const reply of bootReplies) await client.respondWith(reply);
+      if (krxMarket) await client.setKrxMarket(krxMarket);
 
-      const startServer = async (bind: string) => {
-        const server = new Proc(path.join(BIN_DIR, "vally-server"), [], serverEnv(dir, fakeBase, bind, clockStart));
+      const startServer = async (bind: string, clock: string | null) => {
+        const server = new Proc(path.join(BIN_DIR, "vally-server"), [], serverEnv(dir, fakeBase, bind, clock));
         servers.push(server);
         return server.waitFor(/포트를 열었습니다 addr=(\S+)/, "vally-server");
       };
-      const addr = await startServer("127.0.0.1:0");
+      const addr = await startServer("127.0.0.1:0", clockStart);
       const url = `http://${addr}`;
       await waitUntilSymbolListSettles(url);
 
       await use({
         url,
         fake: client,
-        restart: async () => {
+        restart: async (options) => {
           await servers[servers.length - 1]!.kill();
-          await startServer(addr);
+          await startServer(addr, options?.clockStart ?? clockStart);
           await waitUntilSymbolListSettles(url);
         },
       });

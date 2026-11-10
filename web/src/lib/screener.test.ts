@@ -15,7 +15,7 @@ import {
   showsUpdateBand,
   sortRows,
   statusFooter,
-  todayNotStored,
+  todayConfirmed,
 } from "./screener";
 
 test("조건 문장은 봉 주기의 단위와 M이 1인지에 따라 바뀐다", () => {
@@ -132,11 +132,12 @@ test("위쪽 띠는 업데이트가 돌거나 멈췄을 때와 실행이 막혔�
   expect(showsUpdateBand({ ...ready, lastDay: "2026-11-06" })).toBe(true);
 });
 
-test("오늘 자료 안내는 받을 수 있고 아직 저장소에 없을 때만 나온다", () => {
-  expect(todayNotStored({ ...ready, todayAvailable: true })).toBe(true);
-  expect(todayNotStored({ ...ready, todayAvailable: true, lastDay: "2026-11-11" })).toBe(false);
-  expect(todayNotStored({ ...ready, todayAvailable: true, lastDay: null })).toBe(true);
-  expect(todayNotStored(ready)).toBe(false);
+test("오늘 봉은 오늘 자료를 받을 수 있거나 이미 받았을 때 확정이다", () => {
+  expect(todayConfirmed({ ...ready, todayAvailable: true })).toBe(true);
+  expect(todayConfirmed({ ...ready, todayAvailable: true, lastDay: null })).toBe(true);
+  expect(todayConfirmed({ ...ready, lastDay: "2026-11-11" })).toBe(true);
+  expect(todayConfirmed({ ...ready, lastDay: "2026-11-11", needDay: null })).toBe(false);
+  expect(todayConfirmed(ready)).toBe(false);
 });
 
 test("대기 중 다음 상태 조회는 KST 20:00이나 자정에서 5초 뒤다", () => {

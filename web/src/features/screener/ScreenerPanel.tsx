@@ -33,7 +33,7 @@ import {
   sortRows,
   type StatusFooter,
   statusFooter,
-  todayNotStored,
+  todayConfirmed,
 } from "../../lib/screener";
 import { addSymbols, listNameFrom, MAX_WATCHLISTS } from "../../lib/watchlist";
 import { useCell, useLayoutStore } from "../../stores/layout";
@@ -574,7 +574,7 @@ const PHASE_NOTE: Record<UpdatePhase, string> = {
 const progressText = ({ phase, done, total }: ScreenerUpdate) =>
   phase === "symbols" ? `${total > 0 ? Math.floor((done * 100) / total) : 0}%` : `${count(done)}/${count(total)}종목`;
 
-const todayNote = (status: ScreenerStatus) => (status.todayAvailable ? "오늘 자료까지 받습니다." : "당일 봉은 20:00 뒤에 받습니다.");
+const todayNote = (status: ScreenerStatus) => (todayConfirmed(status) ? "오늘 자료까지 받습니다." : "당일 봉은 20:00 뒤에 받습니다.");
 
 function UpdateBand({ status }: { status: ScreenerStatus }) {
   const { start, cancel } = useUpdateCommands();
@@ -620,20 +620,26 @@ function UpdateBand({ status }: { status: ScreenerStatus }) {
   }
 
   if (update?.error) {
+    const retryable = !update.error.manualActionRequired;
     return (
       <section aria-label="업데이트" role="alert" className={frame}>
         <div className="flex items-center gap-2">
           <span className="conn-dot" data-tone="red" />
           <span className="text-s font-[650]">업데이트가 멈췄습니다</span>
           <span className="flex-1" />
-          <button type="button" className="btn-primary h-7 flex-none px-3 text-s" onClick={() => run(update.full)}>
-            다시 시도
-          </button>
+          {retryable && (
+            <button type="button" className="btn-primary h-7 flex-none px-3 text-s" onClick={() => run(update.full)}>
+              다시 시도
+            </button>
+          )}
         </div>
         <p className="mt-1.5 text-xs leading-[1.45] text-up">
           {PHASE_LABEL[update.phase]} {progressText(update)}에서 멈춤: {update.error.message}
         </p>
-        <p className="mt-0.5 text-xs leading-[1.45] text-text-2">{stored} 다시 시도하면 남은 것만 받습니다.</p>
+        <p className="mt-0.5 text-xs leading-[1.45] text-text-2">
+          {stored}
+          {retryable && " 다시 시도하면 남은 것만 받습니다."}
+        </p>
       </section>
     );
   }
@@ -694,9 +700,9 @@ function StatusFooterLine({ footer, status, onRetry }: { footer: StatusFooter; s
 
 function StoreLine({ status, lastDay }: { status: ScreenerStatus; lastDay: KstDate }) {
   const { start } = useUpdateCommands();
-  const today = todayNotStored(status);
+  const today = status.todayAvailable;
   const history = status.fullHistory.done < status.fullHistory.total ? `과거 이력 ${count(status.fullHistory.done)}/${count(status.fullHistory.total)}종목` : null;
-  const notes = [today ? "오늘 자료를 받을 수 있습니다" : status.todayAvailable ? "빠진 관측일 없음" : "당일 봉은 20:00 뒤에 받습니다", history].filter((n) => n !== null);
+  const notes = [today ? "오늘 자료를 받을 수 있습니다" : todayConfirmed(status) ? "빠진 관측일 없음" : "당일 봉은 20:00 뒤에 받습니다", history].filter((n) => n !== null);
   return (
     <footer aria-label="KRX 일봉 저장소" className="flex flex-none items-center gap-2 border-t border-line px-3 py-2">
       <span className="conn-dot" data-tone={today ? "amber" : "mint"} />
