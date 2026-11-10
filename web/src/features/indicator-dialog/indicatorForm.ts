@@ -7,14 +7,14 @@ import {
   KINDS,
   type Placement,
   primaryLine,
+  type Validate,
   shownColor,
   specName,
 } from "../../chart/indicators/kinds";
 import { type IndicatorConfig, type LineWidth, type Panel, readSpec } from "../../chart/settings";
-import type { SpecValidation } from "../../wasm/indicators/indicators.js";
 import { highlight, normalizeQuery } from "../search/highlight";
 
-export type Validate = (spec: IndicatorSpec) => SpecValidation;
+export type { Validate };
 export interface FieldError {
   field: string;
   message: string;

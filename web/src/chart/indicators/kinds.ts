@@ -1,9 +1,11 @@
 import type { IndicatorSpec } from "../../api/generated/IndicatorSpec";
 import type { LineId } from "../../api/generated/LineId";
+import type { SpecValidation } from "../../wasm/indicators/indicators.js";
 
 export type IndicatorKind = IndicatorSpec["kind"];
 export type SpecOf<K extends IndicatorKind> = Extract<IndicatorSpec, { kind: K }>;
 export type Placement = "price" | "panel";
+export type Validate = (spec: IndicatorSpec) => SpecValidation;
 
 export const INDICATOR_COLORS = ["ind-1", "ind-2", "ind-3", "ind-4", "ind-5"] as const;
 export type IndicatorColor = (typeof INDICATOR_COLORS)[number];

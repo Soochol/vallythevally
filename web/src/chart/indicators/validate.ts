@@ -1,8 +1,7 @@
 import type { IndicatorSpec } from "../../api/generated/IndicatorSpec";
-import init, { type SpecValidation, validateSpec } from "../../wasm/indicators/indicators.js";
+import init, { validateSpec } from "../../wasm/indicators/indicators.js";
 import wasmUrl from "../../wasm/indicators/indicators_bg.wasm?url";
-
-export type Validate = (spec: IndicatorSpec) => SpecValidation;
+import type { Validate } from "./kinds";
 
 let ready: Promise<Validate> | null = null;
 
