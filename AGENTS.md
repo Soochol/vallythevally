@@ -16,7 +16,7 @@ Single-context: one `GLOSSARY.md` and `docs/adr/` at the repo root. See `docs/ag
 
 ## Document map
 
-To find a doc, start at [docs/README.md](docs/README.md): it maps each question to the doc that answers it. To write a new doc, copy its template from `docs/templates/`. A PR that adds, moves, or deletes a doc also updates `docs/README.md`.
+To find a doc, start at [docs/README.md](docs/README.md). It maps each question to the doc that answers it. To write a new doc, copy its template from `docs/templates/`. A PR that adds, moves, or deletes a doc also updates `docs/README.md`.
 
 ## Document policy
 
