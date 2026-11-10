@@ -1,0 +1,7 @@
+interface:
+  display_name: "Vally Coordinate"
+  short_description: "Coordinate Vally workers, reviews, fixes, and merges"
+  default_prompt: "Use $vally-coordinate to coordinate the Vally task through implementation, independent review, fixes, and approved merge."
+
+policy:
+  allow_implicit_invocation: false
