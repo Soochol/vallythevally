@@ -55,7 +55,7 @@ Write the spec to `reports/<issue>/spec-impl.md`:
 <"실제 호출 없음" unless the user approved a live call and its method>
 ```
 
-Then `vally/start.sh impl <issue> --branch <fix|feat|…>/<issue>-<slug> --spec <spec>`. For an issue that only writes or reorganizes documents (no code, no scripts), add `--writer`: the agent runs the `writer` role, which uses `pstack:technical-writing` instead of `pstack:poteto-mode`. Its fix rounds take `--writer` too. Moving or splitting files counts as documents; a docs check script does not. The script makes and locks the worktree, starts the agent as your child, labels it, and shows it as a tab. It stops, naming the lead, when another live lead holds the issue; tell the user, and leave the issue to that lead. Which agent and model each role runs comes from `vally/../models.conf` (`.claude/skills/vally/models.conf`), which `start.sh` reads at every launch; when the user wants a different model for a role, edit that file. Tell the user it started, then **end your turn**: reports arrive as your next input, and the user can talk to you meanwhile.
+Then `vally/start.sh impl <issue> --branch <fix|feat|…>/<issue>-<slug> --spec <spec>`. For an issue that only writes or reorganizes documents (no code, no scripts), add `--writer`: the agent runs the `writer` role, which uses `pstack:technical-writing` instead of `pstack:poteto-mode`. Its fix rounds take `--writer` too. Moving or splitting files counts as documents; a docs check script does not. The script makes and locks the worktree, starts the agent as your child, labels it, and shows it as a tab. It stops, naming the lead, when another live lead holds the issue; tell the user, and leave the issue to that lead. It also stops when the issue still has agents or worktrees without a live lead (주인 없음); `check-pr.sh` does the same. Ask the user, and only on a yes run `vally/take.sh <issue>` before starting again. Which agent and model each role runs comes from `vally/../models.conf` (`.claude/skills/vally/models.conf`), which `start.sh` reads at every launch; when the user wants a different model for a role, edit that file. Tell the user it started, then **end your turn**: reports arrive as your next input, and the user can talk to you meanwhile.
 
 ## 4. Handle reports
 
@@ -92,7 +92,7 @@ PR #61 <what the user gets, one line>
 - 할 일: 병합할까요? (추천: 예)
 ```
 
-5. After the merge: `vally/finish.sh <issue> --pr <n>`. It retires your agents of the issue, removes your clean worktrees and the branch (keeping anything a live agent uses, that holds unpushed commits, or that has no live lead), starts your own docs gardener after code PRs or hands the PR to it (the gardener then holds that issue for you), and prints status. For the gardener's own PR, run the same `finish.sh`, then `vally/retire.sh docs-garden-$HC_TERMINAL_ID --worktree` once it has nothing left.
+5. After the merge: `vally/finish.sh <issue> --pr <n>`. It retires your agents of the issue, removes your clean worktrees and the branch (keeping anything a live agent uses, that holds unpushed commits, or that has no live lead), starts your own docs gardener after code PRs or hands the PR to it (the gardener then holds that issue for you), and prints status. While the issue still has things without a live lead, it starts no gardener and says so; after the user's yes, `vally/take.sh <issue>`, then `vally/start.sh garden <issue> --pr <n>`. For the gardener's own PR, run the same `finish.sh`, then `vally/retire.sh docs-garden-$HC_TERMINAL_ID --worktree` once it has nothing left.
 
 ## Kiwoom
 

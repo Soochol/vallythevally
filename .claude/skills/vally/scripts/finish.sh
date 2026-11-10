@@ -2,7 +2,7 @@
 # After a PR merges: retire this lead's agents of the issue, remove its clean worktrees and its branch,
 # start (or hand work to) this lead's docs gardener for code PRs, then print status.
 # Stops when another live lead holds the issue. Worktrees a live terminal still uses, and anything
-# without a live lead (take.sh first), stay.
+# without a live lead (take.sh first), stay; while such things stay, no gardener starts.
 #   finish.sh <issue> --pr 61
 source "$(dirname "$0")/lib.sh"
 
@@ -18,7 +18,7 @@ nfiles=$(jq '.files | length' <<<"$view")
 git fetch -q origin
 
 lock_and_load_live
-need_issue_open "$issue"
+orphans=$(issue_orphans "$issue") || exit 1
 agents=$(terminals_with vally.issue="$issue")
 for t in $agents; do
   info=$(terminal_json "$t")
@@ -49,6 +49,8 @@ if [[ $branch == docs/garden-* ]]; then
   echo "gardener PR: no gardener"
 elif [ "$nfiles" -lt 100 ] && docs_only "$files"; then
   echo "docs-only PR: no gardener"
+elif [ -n "$orphans" ]; then
+  echo "no gardener: $(orphans_note "$issue" "$orphans"), then start.sh garden $issue --pr $pr"
 else
   "$(dirname "$0")/start.sh" garden "$issue" --pr "$pr"
 fi

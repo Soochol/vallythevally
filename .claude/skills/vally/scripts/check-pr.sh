@@ -2,7 +2,7 @@
 # Run scripts/check.sh at a PR's exact head in a clean detached worktree, in the background.
 # Refuses a PR that is behind main, so the checked tree equals the merge result.
 # hc tells the calling terminal when check-<pr>-<lead address> exits; merge with the printed head pinned.
-# Stops when another live lead holds the issue or the checked worktree.
+# Stops when another live lead holds the issue or the checked worktree, or the issue has things without a live lead.
 #   check-pr.sh <issue> --pr 61
 source "$(dirname "$0")/lib.sh"
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Start one vally agent in its own locked worktree as a child of the calling terminal (the lead).
-# Stops when another live lead holds the issue, the worktree, or the name.
+# Stops when another live lead holds the issue, the worktree, or the name, or the issue has things without a live lead.
 #   start.sh impl   <issue> --branch feat/58-x --spec FILE [--writer]
 #   start.sh fix    <issue> --pr 61 --round 1 --spec FILE [--writer]
 #   start.sh review <issue> --pr 61 --round 0 [--spec FILE]

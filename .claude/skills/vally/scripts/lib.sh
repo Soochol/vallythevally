@@ -184,7 +184,7 @@ issue_holders() {
   worktree_locks | awk -F'\t' -v i="$1" '$3 == i { print $1 "\t" $2 }'
 }
 
-need_issue_open() {
+issue_orphans() {
   local holders owner what lead='' live='' gone=''
   holders=$(issue_holders "$1") || exit 1
   while IFS=$'\t' read -r what owner; do
@@ -195,5 +195,13 @@ need_issue_open() {
     esac
   done <<<"$holders"
   [ -z "$live" ] || die "issue #$1 belongs to the live lead $lead (holds:$live); leave it to that lead"
-  [ -z "$gone" ] || warn "issue #$1 has things without a live lead (주인 없음):$gone. Ask the user; only on a yes: take.sh $1"
+  echo "${gone# }"
+}
+
+orphans_note() { echo "issue #$1 has things without a live lead (주인 없음): $2. Ask the user; only on a yes: take.sh $1"; }
+
+need_issue_open() {
+  local gone
+  gone=$(issue_orphans "$1") || exit 1
+  [ -z "$gone" ] || die "$(orphans_note "$1" "$gone")"
 }
