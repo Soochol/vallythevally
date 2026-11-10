@@ -630,7 +630,16 @@ t_agent_without_any_record_is_shown_without_lead() {
   HC_TERMINAL_ID=t5 "$agent/report.sh" 'done 58 /r.md' >/dev/null
   "$agent/status.sh" > "$T/out" 2>&1 || { cat "$T/out"; return 1; }
   ok grep -q '^- w58-impl \[worker\] 이슈 #58: 보고 완료 (리드 기록 없음)$' "$T/out" && ! grep -q 'bad array' "$T/out" &&
+  ! "$agent/start.sh" impl 58 --branch fix/58-x --spec "$T/spec.md" 2>"$T/err" && ok grep -q '(주인 없음): w58-impl\.' "$T/err" &&
   "$agent/take.sh" 58 >/dev/null && ok test "$(labels_of t5 | jq -r '.["vally.owner"]')" = t1@1000
+}
+
+t_take_locks_the_unlocked_worktree_of_its_agent() {
+  git worktree add -q --no-track -b fix/58-old "$VALLY_WORKTREES/fix-58-old" origin/main
+  add_terminal t5 w58-impl "$VALLY_WORKTREES/fix-58-old" '{"vally.issue":"58","vally.role":"worker","vally.owner":"t9@5"}'
+  "$agent/take.sh" 58 > "$T/out" || { cat "$T/out"; return 1; }
+  ok grep -qx "took $VALLY_WORKTREES/fix-58-old" "$T/out" &&
+  ok test "$(lock_of "$VALLY_WORKTREES/fix-58-old")" = "vally owner t1@1000 issue 58"
 }
 
 t_status_lists_my_pr_while_checking_and_after_a_push() {
