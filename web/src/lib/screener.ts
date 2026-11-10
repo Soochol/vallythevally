@@ -10,7 +10,7 @@ import type { ScreenPeriod } from "../api/generated/ScreenPeriod";
 import type { UpdatePhase } from "../api/generated/UpdatePhase";
 
 export const PERIOD_NAME: Record<ScreenPeriod, string> = { D: "일봉", W: "주봉", M: "월봉" };
-const UNIT: Record<ScreenPeriod, string> = { D: "일", W: "주", M: "개월" };
+export const UNIT: Record<ScreenPeriod, string> = { D: "일", W: "주", M: "개월" };
 const CURRENT_BAR: Record<ScreenPeriod, string> = { D: "당일", W: "이번 주", M: "이번 달" };
 export const FIELD_LABEL: Record<BarField, string> = { open: "시가", high: "고가", low: "저가", close: "종가", volume: "거래량" };
 
