@@ -14,7 +14,6 @@ import { priceFormat } from "./series";
 import type { ThemeTokens } from "./theme";
 import { toChartTime } from "./time";
 
-/** 덮기 시도 한 번에 비교 종목 하나가 잇는 과거 페이지 상한. 키움 조회 비용 때문이다(#76). */
 export const MAX_COVER_PAGES = 20;
 
 export const COMPARE_NOTE = { missing: "찾을 수 없음", failed: "받지 못함", limited: "실시간 아님", base: "% 기준: 첫 받은 봉" } as const;
@@ -23,7 +22,6 @@ export type CompareSlot = 1 | 2 | 3;
 
 export interface CompareEntry {
   code: SymbolCode;
-  /** 저장 목록의 자리. 색(`--cmp-n`)을 정한다. */
   slot: CompareSlot;
   name: string;
 }
@@ -40,7 +38,6 @@ export interface CompareRow {
   value: string;
   dir: Direction;
   notes: string[];
-  /** 최신 페이지를 받지 못해 선이 없다. 범례 줄을 흐리게 한다. */
   failed: boolean;
   last: Bar | null;
 }
@@ -48,19 +45,18 @@ export interface CompareRow {
 export interface CompareHost {
   chart: IChartApi;
   tokens(): ThemeTokens;
-  /** 주 시리즈의 봉(t 오름차순). 비교 시리즈는 이 시각에만 점을 둔다. */
-  mainBars(): readonly Bar[];
   requestFrame(): void;
   guard(draw: () => void): void;
 }
 
-/** 지수는 거래소가 없다. 주식은 주 종목과 시간대가 맞는 거래소를 쓴다. */
+const onKrxSession = (main: { symbol: SymbolCode; venue: ShownVenue | null }) => main.venue === "krx" || isIndexCode(main.symbol);
+
 export function compareVenue(code: SymbolCode, main: { symbol: SymbolCode; venue: ShownVenue | null }): Venue | null {
   if (isIndexCode(code)) return null;
-  return main.venue === "krx" || isIndexCode(main.symbol) ? "krx" : "combined";
+  return onKrxSession(main) ? "krx" : "combined";
 }
 
-/** 주 봉에 있는 시각의 비교 봉만 남긴다. 시간축은 모든 시리즈 시각의 합집합이라, 남은 봉이 주 봉의 번호를 바꾸면 안 된다. */
+/** Lightweight Charts의 시간축은 모든 시리즈 시각의 합집합이라, 주 봉에 없는 시각을 넣으면 주 봉의 논리 번호가 밀린다. */
 export function alignToMain(bars: readonly Bar[], main: readonly Bar[]): Bar[] {
   const out: Bar[] = [];
   let j = 0;
@@ -100,9 +96,7 @@ class CompareLine {
   history: History | null = null;
   status: "loading" | "ok" | "failed" | "missing" = "loading";
   limited = false;
-  /** 시리즈에 그린 봉. 주 봉에 맞춘 것이다. */
   points: Bar[] = [];
-  /** 다음 그리기에서 맞추기부터 다시 한다. */
   stale = false;
   older: "idle" | "loading" | "failed" = "idle";
   pages = 0;
@@ -179,11 +173,6 @@ class CompareLine {
   }
 }
 
-/**
- * 칸의 비교 종목(최대 3개, frontend.md §3.4). 종목마다 구독과 봉 받기를 따로 하고, 가격 패널에 선 하나를 그린다.
- * 주 봉의 주인은 컨트롤러다. 이 층은 읽기만 하고, 비교 시리즈에는 주 봉에 있는 시각만 둔다.
- * 그리기는 주 시리즈가 `this.bars`와 같아지는 두 때에만 한다: `realign`(주 시리즈 setData 직후)과 `flush`(대기 봉을 그린 뒤).
- */
 export class CompareLayer {
   private readonly lines = new Map<SymbolCode, CompareLine>();
   private leftT: UnixSeconds | null = null;
@@ -210,36 +199,32 @@ export class CompareLayer {
         if (recolor) line.series.applyOptions({ color: this.color(entry.slot) });
         if (!sameKey(line.key, want)) {
           line.reopen(want);
-          this.redraw(line);
+          this.redraw(line, []);
         }
       }
     });
     this.host.requestFrame();
   }
 
-  /** 주 시리즈의 데이터를 통째로 바꿨다(비우기 포함). 같은 가드 안에서 부른다. */
-  realign(): void {
+  realign(drawnMain: readonly Bar[]): void {
     if (this.lines.size === 0) return;
     this.host.guard(() => {
-      for (const line of this.lines.values()) this.redraw(line);
+      for (const line of this.lines.values()) this.redraw(line, drawnMain);
     });
   }
 
-  /** 주 시리즈의 대기 봉을 그린 뒤 같은 프레임에서 부른다. */
-  flush(): void {
+  flush(drawnMain: readonly Bar[]): void {
     if (this.lines.size === 0) return;
     this.host.guard(() => {
-      for (const line of this.lines.values()) this.drawTail(line);
+      for (const line of this.lines.values()) this.drawTail(line, drawnMain);
     });
   }
 
-  /** 보이는 왼쪽 끝 봉의 시각. 비교 종목의 첫 봉이 그보다 늦으면 과거 페이지를 잇는다. */
   coverFrom(leftT: UnixSeconds | null): void {
     this.leftT = leftT;
     for (const line of this.lines.values()) this.cover(line);
   }
 
-  /** 칸의 `다시 시도`. 최신 페이지를 받지 못한 비교 종목만 다시 받는다. */
   reload(): void {
     for (const line of this.lines.values()) if (line.status === "failed" || line.status === "missing") line.feed.reload();
   }
@@ -336,17 +321,16 @@ export class CompareLayer {
     line.feed.needOlder();
   }
 
-  private redraw(line: CompareLine): void {
+  private redraw(line: CompareLine, main: readonly Bar[]): void {
     line.stale = false;
-    line.points = line.history ? alignToMain(displayBars(line.history), this.host.mainBars()) : [];
+    line.points = line.history ? alignToMain(displayBars(line.history), main) : [];
     line.series.setData(line.points.map(point));
   }
 
-  private drawTail(line: CompareLine): void {
+  private drawTail(line: CompareLine, main: readonly Bar[]): void {
     const last = line.points[line.points.length - 1];
-    if (line.stale || (!last && line.history)) return this.redraw(line);
+    if (line.stale || (!last && line.history)) return this.redraw(line, main);
     if (!last || !line.history) return;
-    const main = this.host.mainBars();
     const bars = displayBars(line.history);
     for (let i = atOrAfter(bars, last.t); i < bars.length; i++) {
       const b = bars[i]!;
@@ -356,7 +340,7 @@ export class CompareLayer {
         line.series.update(point(b));
       } catch (e) {
         console.error(`비교 종목 선(${line.entry.code})을 다시 그림: ${e instanceof Error ? e.message : String(e)}`);
-        return this.redraw(line);
+        return this.redraw(line, main);
       }
       if (b.t === end.t) line.points[line.points.length - 1] = b;
       else line.points.push(b);

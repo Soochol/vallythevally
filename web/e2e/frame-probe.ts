@@ -7,7 +7,6 @@ declare global {
   interface Window {
     frameProbe: {
       snapshot(): { type: SeriesType; data: ReturnType<Series["data"]>; updates: Update[]; scaleMode: PriceScaleMode }[];
-      /** 주 봉 시리즈(Candlestick)가 이 가격을 그리는 y. */
       candleY(price: number): number | null;
       hold(): void;
       release(): void;

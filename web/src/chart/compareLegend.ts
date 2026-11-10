@@ -21,7 +21,6 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, className: string): H
   return e;
 }
 
-/** 가격 범례의 비교 종목 줄. 값은 화면 왼쪽 끝 봉 기준 %다. */
 export class CompareLegend {
   readonly box = el("div", "flex flex-col gap-px");
   private readonly rows = new Map<string, RowEls>();

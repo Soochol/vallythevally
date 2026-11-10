@@ -51,7 +51,7 @@ function fixture(pages: (q: BarsQuery) => BarsPage | Promise<BarsPage>) {
   };
   const tokens = { cmp: { 1: "c1", 2: "c2", 3: "c3" } } as unknown as ThemeTokens;
   const layer = new CompareLayer(
-    { chart: chart as unknown as IChartApi, tokens: () => tokens, mainBars: () => main, requestFrame: () => {}, guard: (f) => f() },
+    { chart: chart as unknown as IChartApi, tokens: () => tokens, requestFrame: () => {}, guard: (f) => f() },
     async (q) => {
       fetched.push(q);
       return pages(q);
@@ -74,9 +74,10 @@ function fixture(pages: (q: BarsQuery) => BarsPage | Promise<BarsPage>) {
     subscribed: () => [...subs.values()].map((s) => `${s.key.symbol}/${s.key.venue}/${s.key.period}`),
     push: (symbol: string, m: SubEvent) => [...subs.values()].filter((s) => s.key.symbol === symbol).forEach((s) => s.handler(m)),
     mainTimes: () => new Set(ts(main)),
+    flush: () => layer.flush(main),
     setMain(next: Bar[]) {
       main = next;
-      layer.realign();
+      layer.realign(main);
     },
     appendMain(b: Bar) {
       main = main[main.length - 1]?.t === b.t ? [...main.slice(0, -1), b] : [...main, b];
@@ -134,7 +135,7 @@ test("봉 주기가 바뀌면 옛 구독을 풀고 새 키로 다시 받으며, 
   await f.settle();
   release(page("000660", bars(1, 5).map((b) => ({ ...b, c: 999 })), null));
   await f.settle();
-  f.layer.flush();
+  f.flush();
   expect(f.series[0]!.times).toEqual([1, 2, 3]);
   expect(f.series[0]!.values).not.toContain(999);
 });
@@ -144,7 +145,7 @@ test("주 시리즈를 비우면 비교 시리즈도 비운다", async () => {
   f.setMain(bars(1, 5));
   f.layer.setCodes([entry("000660")], key);
   await f.settle();
-  f.layer.flush();
+  f.flush();
   expect(f.series[0]!.times).toEqual([1, 2, 3, 4, 5]);
   f.setMain([]);
   expect(f.series[0]!.times).toEqual([]);
@@ -155,10 +156,10 @@ test("비교 시리즈는 어떤 순서로 체결이 와도 주 시리즈에 없
   f.setMain(bars(1, 6));
   f.layer.setCodes([entry("000660")], key);
   await f.settle();
-  f.layer.flush();
+  f.flush();
   const s = f.series[0]!;
   const check = () => {
-    f.layer.flush();
+    f.flush();
     const mainTimes = f.mainTimes();
     expect(s.times.every((t) => mainTimes.has(t))).toBe(true);
   };
@@ -197,7 +198,7 @@ test("보이는 왼쪽 끝까지 과거 페이지를 하나씩 잇는다", async
   await f.settle();
   f.layer.coverFrom(70);
   for (let i = 0; i < 5; i++) await f.settle();
-  f.layer.flush();
+  f.flush();
   expect(f.fetched.map((q) => q.before ?? null)).toEqual([null, 91, 81, 71]);
   expect(f.series[0]!.times[0]).toBe(61);
   expect(f.layer.rows(70, 100)[0]!.notes).toEqual([]);
@@ -214,7 +215,7 @@ test(`덮기 시도 한 번에 ${MAX_COVER_PAGES}페이지까지만 잇고, 못 
   f.layer.coverFrom(100);
   for (let i = 0; i < MAX_COVER_PAGES + 5; i++) await f.settle();
   expect(f.fetched).toHaveLength(1 + MAX_COVER_PAGES);
-  f.layer.flush();
+  f.flush();
   expect(f.layer.rows(100, 10_000)[0]!.notes).toEqual([COMPARE_NOTE.base]);
   f.layer.coverFrom(100);
   await f.settle();
@@ -229,7 +230,7 @@ test("범례 값은 왼쪽 끝 봉 이후 첫 점을 0%로 잡고, 그 시각에
   f.setMain(bars(1, 6));
   f.layer.setCodes([entry("000660")], key);
   await f.settle();
-  f.layer.flush();
+  f.flush();
   expect(f.layer.rows(1, 3)[0]!.value).toBe("+10.00%");
   expect(f.layer.rows(3, 5)[0]!.value).toBe("+9.09%");
   expect(f.layer.rows(3, 6)[0]!.value).toBe("+9.09%");
@@ -249,7 +250,7 @@ test("최신 페이지를 받지 못하면 그 줄에 남기고, 다시 시도�
   fail = false;
   f.layer.reload();
   await f.settle();
-  f.layer.flush();
+  f.flush();
   expect(f.fetched.map((q) => q.symbol)).toEqual(["000660", "035420", "000660"]);
   expect(f.layer.rows(1, 3).map((r) => r.notes)).toEqual([[], []]);
   expect(f.series[0]!.times).toEqual([1, 2, 3]);
@@ -272,7 +273,7 @@ test("목록에 없는 비교 종목은 찾을 수 없음으로 남긴다", asyn
   f.setMain(bars(1, 3));
   f.layer.setCodes([entry("999999")], key);
   await f.settle();
-  f.layer.flush();
+  f.flush();
   expect(f.layer.rows(1, 3)[0]).toMatchObject({ notes: [COMPARE_NOTE.missing], failed: true, value: "—" });
   expect(f.series[0]!.times).toEqual([]);
 });

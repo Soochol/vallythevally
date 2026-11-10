@@ -197,7 +197,6 @@ export function setPanelStretches(s: ChartSettings, stretches: readonly Panel["s
   return { ...s, panels: s.panels.map((p, i) => ({ ...p, stretch: Math.round(stretches[i]! * 1000) / 1000 })) };
 }
 
-/** 가격 패널에 그리는 축. 비교 종목이 있으면 저장된 축과 상관없이 %다(frontend.md §3.4). */
 export function shownScale(s: Pick<ChartSettings, "scale" | "compare">): PriceScale {
   return s.compare.length > 0 ? "percent" : s.scale;
 }

@@ -62,7 +62,6 @@ export interface CellView {
   period: Period;
   settings: ChartSettings;
   info: SymbolInfo | undefined;
-  /** 비교 종목 이름. 아직 못 받은 종목은 코드로 보인다. */
   compareNames?: Readonly<Partial<Record<SymbolCode, string>>>;
 }
 
@@ -177,7 +176,6 @@ export class ChartController {
       {
         chart: this.chart,
         tokens: () => this.tokens,
-        mainBars: () => this.bars,
         requestFrame: () => this.scheduleFrame(),
         guard: (draw) => this.withDataGuard(draw),
       },
@@ -288,7 +286,7 @@ export class ChartController {
 
   setTheme(tokens: ThemeTokens): void {
     this.flushPendingDraw();
-    this.compare.flush();
+    this.compare.flush(this.bars);
     this.indicators.flush();
     this.tokens = tokens;
     this.chart.applyOptions(this.chartOptions());
@@ -370,7 +368,7 @@ export class ChartController {
     this.bars = bars;
     this.pendingDraw.clear();
     setMainData(this.main, bars);
-    this.compare.realign();
+    this.compare.realign(bars);
     this.exposeBarsToE2e();
   }
 
@@ -418,7 +416,7 @@ export class ChartController {
 
   private drawFrame(): void {
     this.flushPendingDraw();
-    this.compare.flush();
+    this.compare.flush(this.bars);
     this.indicators.flush();
     this.renderLegend();
   }
@@ -541,7 +539,7 @@ export class ChartController {
     return this.chart.panes().map((p) => (p.getHTMLElement()?.getBoundingClientRect().top ?? top) - top);
   }
 
-  /** 화면 왼쪽 끝 봉의 시각. % 축은 이 봉을 0%로 잡는다(라이브러리의 `floor(논리 범위 왼쪽)`). */
+  /** Lightweight Charts는 % 축의 0%를 `floor(보이는 논리 범위 왼쪽)` 자리의 봉으로 잡는다. */
   private leftT(): UnixSeconds | null {
     const r = this.chart.timeScale().getVisibleLogicalRange();
     const n = this.bars.length;
