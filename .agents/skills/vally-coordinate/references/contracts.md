@@ -13,6 +13,7 @@ An executable `coord:ticket` Issue has exactly one block. The coordinator owns s
   "constraints": ["Preserve repository and external applications"],
   "verification_plan": [{"condition": "C1", "method": "Recalculate the stated total and compare the corrected note", "evidence": "report.md"}],
   "evidence_outputs": ["corrected-note.md", "report.md", "result.json"],
+  "delivery": {"kind": "no_repository_change", "reason": "Scratch-only note correction"},
   "capabilities": {"skills": [], "tools": ["python3"], "account_data_scope": ["assigned scratch files only"]}
 }
 ```
@@ -29,7 +30,7 @@ Execution request JSON contains only these fields. `brief` resolves relative to 
 {"ticket": 56, "conditions": ["C3"], "revision": "ACTUAL_SEMANTIC_SHA256", "brief": "smoke.md"}
 ```
 
-A compact result has `kind: result`, stable `id`, exact `source`, `role`, `assignment`, `subjects`, `report`, `capability_observations`, `procedure`, `provider_execution`, and `provenance`. Use the `assignment` request/launch from the actual local `launched.json`, plus its operation ID and intent `issued_at`. The coordinator can supply this immutable receipt to the worker; label it supplied evidence. Never invent runtime identities. Exactly one immutable result belongs to an execution. Local ingestion validates against its actual launch receipt.
+A compact result has `kind: result`, stable `id: result:<actual Dispatch ID>`, exact `source`, `role`, `assignment`, `subjects`, `report`, `capability_observations`, `procedure`, `provider_execution`, and `provenance`. Use the `assignment` request/launch from the actual local `launched.json`, plus its operation ID and intent `issued_at`. The coordinator can supply this immutable receipt to the worker; label it supplied evidence. Never invent runtime identities. Exactly one immutable result belongs to an execution. Ingestion validates its actual receipt, publication matches the recorded claim, and remote conflicting reuse is refused.
 
 ```json
 {

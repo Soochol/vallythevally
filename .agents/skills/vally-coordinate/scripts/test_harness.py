@@ -54,7 +54,7 @@ class HarnessTests(unittest.TestCase):
         self.assertEqual(result.returncode == 0, ok, result.stderr)
         return result
 
-    def result(self, role='worker', conditions=None, pr=10, outcome='passed', findings=None, resolves=None, extra_pr=None):
+    def result(self, role='worker', conditions=None, pr=10, outcome='passed', findings=None, resolves=None, extra_pr=None, record=True):
         self.release_reservations()
         self.settings = {'receipt': {'taskId': 'task_' + str(time.time_ns()), 'dispatchId': 'ctx_' + str(time.time_ns())}}
         started = self.run_script('start', role=role)
@@ -63,7 +63,7 @@ class HarnessTests(unittest.TestCase):
         launch = read(op / 'launched.json')
         manifest = self.envelope['capabilities']
         keys = ['tool:' + t for t in manifest['tools']] + ['scope:' + s for s in manifest['account_data_scope']]
-        claim = {'kind': 'result', 'id': 'result-' + op.name, 'source': launch['assignment']['source'], 'role': role,
+        claim = {'kind': 'result', 'id': 'result:' + launch['launch']['dispatchId'], 'source': launch['assignment']['source'], 'role': role,
             'assignment': {'operation': op.name, 'issued_at': read(op / 'intent.json')['issued_at'],
                            'requested': launch['assignment'], 'launch': launch['launch']},
             'report': 'local report.md; available only on execution host',
@@ -76,7 +76,8 @@ class HarnessTests(unittest.TestCase):
         if extra_pr:
             claim['subjects'].append(copy.deepcopy(claim['subjects'][0]))
             claim['subjects'][-1]['pr'] = extra_pr
-        self.submit(claim)
+        if record:
+            self.submit(claim)
         return claim
 
     def provenance(self, kind='coordinator_verdict'):
@@ -173,15 +174,17 @@ class HarnessTests(unittest.TestCase):
         self.assertFalse(list(self.state_dir.rglob('*.sqlite')))
 
     def test_wrong_assignment_head_condition_and_capability_refuse(self):
-        claim = self.result('reviewer')
         for change in ('head', 'task', 'condition', 'capability'):
+            claim = self.result('reviewer', record=False)
             bad = copy.deepcopy(claim)
-            bad['id'] += change
             if change == 'head': bad['subjects'][0]['head'] = '1' * 40
             if change == 'task': bad['assignment']['launch']['taskId'] = 'wrong'
             if change == 'condition': bad['subjects'][0]['conditions'] = {'other': {'outcome': 'passed', 'evidence': 'x'}}
             if change == 'capability': bad['capability_observations'] = {}
-            self.submit(bad, ok=False)
+            result = self.submit(bad, ok=False)
+            reason = {'head': 'exact assigned head', 'task': 'does not match',
+                      'condition': 'selected task conditions', 'capability': 'every required source capability'}[change]
+            self.assertIn(reason, result.stderr)
 
     def test_lost_comment_response_reconciles_without_repost(self):
         self.add_pr()
@@ -386,6 +389,19 @@ class HarnessTests(unittest.TestCase):
         self.env['ORCA_ENVIRONMENT'] = 'synthetic-remote'
         self.assertNotEqual(self.new_start().returncode, 0)
         self.assertFalse(self.recorded())
+
+    def test_publication_cannot_replace_a_recorded_completion_or_hide_remote_conflict(self):
+        self.add_pr()
+        claim = self.result()
+        self.submit(self.acceptance(claim), publish=True)
+        altered = copy.deepcopy(claim); altered['report'] = 'different completion contents'
+        self.submit(self.acceptance(altered), publish=True, ok=False)
+        data = self.data()
+        data['comments']['2'].append({'id': 999, 'body': decision_body('conflicting-completion', self.acceptance(altered)), 'user': {'id': 150162001}})
+        self.save(data)
+        result = self.cli('ready', '--ticket', '2')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('completion event identity', result.stderr)
 
     def test_process_duplicate_dispatch_and_visibility_gap_no_second_launch(self):
         self.settings = {'delay_start': 0.3}

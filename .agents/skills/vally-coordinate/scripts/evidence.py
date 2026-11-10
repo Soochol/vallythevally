@@ -44,6 +44,8 @@ def validate_result(value, journal=None):
         raise Refused("Assignment Run differs from receipt")
     for key in ("taskId", "dispatchId", "canonical_workspace"):
         nonempty(launch.get(key), key)
+    if value["id"] != "result:" + launch["dispatchId"]:
+        raise Refused("Result event identity must be result:<actual Dispatch ID>")
     nonempty(assignment.get("issued_at"), "execution issue time")
     nonempty(assignment.get("operation"), "local operation identity")
     subjects = value.get("subjects")
@@ -130,6 +132,8 @@ def validate_decision(value, github=None, journal=None):
         raise Refused("Ticket closure requires its own explicit coordinator decision")
     if kind == "accept":
         claim = validate_result(value.get("claim"), journal)
+        if journal and read(journal.operation(claim["assignment"]["operation"]) / "result.json") != claim:
+            raise Refused("Acceptance must match this execution's immutable recorded result")
         if claim["source"] != value["source"] or value.get("claim_hash") != digest(claim):
             raise Refused("Acceptance must identify its exact immutable claim hash/source")
         strings(value.get("conditions"), "accepted condition IDs")
@@ -186,10 +190,17 @@ def record_result(journal, value):
 def readiness(github, ticket, journal=None):
     snapshot = github.ticket(ticket)
     records = github.records(ticket, configuration()["decision_author_ids"])
+    result_hashes = {}
     for record in records:
         validate_decision(record["payload"])
         if any(record["payload"]["source"][key] != snapshot["source"][key] for key in ("repository", "number", "id", "node_id")):
             raise Refused("Decision marker is attached to the wrong source Issue identity")
+        if record["payload"]["kind"] == "accept":
+            claim = record["payload"]["claim"]
+            fingerprint = digest(claim)
+            if claim["id"] in result_hashes and result_hashes[claim["id"]] != fingerprint:
+                raise Refused("Conflicting remote reuse of completion event identity")
+            result_hashes[claim["id"]] = fingerprint
     current = [r for r in records if r["payload"]["source"] == snapshot["source"]]
     heads, prs = {}, {}
     for record in current:
