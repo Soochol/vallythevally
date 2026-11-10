@@ -93,6 +93,17 @@ export default async function (page, { expect, api, fake, screenshot }) {
   await page.getByRole("button", { name: "RSI 14 숨기기" }).click();
   await expect.poll(async () => (await api(LAYOUT)).cells[0].chartSettings.indicators.find((i) => i.spec.kind === "rsi")?.visible).toBe(false);
 
+  const panelOf = async (kind) => {
+    const s = (await api(LAYOUT)).cells[0].chartSettings;
+    return s.panels.findIndex((p) => p.id === s.indicators.find((i) => i.spec.kind === kind).panel);
+  };
+  const macdBefore = await panelOf("macd");
+  await row("MACD 12 26 9").hover();
+  await page.getByRole("button", { name: "MACD 12 26 9 패널 위로" }).click();
+  await expect.poll(() => panelOf("macd")).toBe(macdBefore - 1);
+  await expect.poll(async () => (await row("MACD 12 26 9").boundingBox()).y < (await row("RSI 14").boundingBox()).y).toBe(true);
+  await screenshot("macd-panel-moved-up");
+
   await page.reload();
   await expect(cell).toHaveAttribute("aria-busy", "false");
   await expect(rows).toHaveCount(10);
@@ -106,9 +117,25 @@ export default async function (page, { expect, api, fake, screenshot }) {
   await expect.poll(futureAfterReload).toBe(2);
   await screenshot("after-reload");
 
+  await row("RSI 14").hover();
+  await page.getByRole("button", { name: "RSI 14 보이기" }).click();
+  await expect(row("RSI 14")).not.toHaveClass(/opacity-60/);
+  await expect(row("RSI 14")).toContainText(/\d/);
+  await expect.poll(async () => (await api(LAYOUT)).cells[0].chartSettings.indicators.find((i) => i.spec.kind === "rsi")?.visible).toBe(true);
+
+  await cell.focus();
+  await page.keyboard.press("i");
+  await expect(page.getByRole("dialog", { name: "지표 추가" })).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("dialog", { name: "지표 추가" })).toBeHidden();
+
   await page.setViewportSize({ width: 390, height: 844 });
   await page.waitForTimeout(400);
   await screenshot("phone-390");
+  await page.getByRole("button", { name: "지표", exact: true }).click();
+  await expect(page.getByRole("dialog", { name: "지표 추가" })).toBeVisible();
+  await screenshot("phone-390-dialog");
+  await page.keyboard.press("Escape");
 
   return {
     savedKinds,

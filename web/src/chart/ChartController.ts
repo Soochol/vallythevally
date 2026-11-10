@@ -129,6 +129,7 @@ export class ChartController {
         isIndex: () => this.view !== null && isIndexCode(this.view.symbol),
         period: () => this.period(),
         requestFrame: () => this.scheduleFrame(),
+        guard: (draw) => this.withDataGuard(draw),
       },
       deps.indicators ?? openIndicatorPort,
     );
@@ -423,11 +424,12 @@ export class ChartController {
 
   /** setData가 보이는 범위 변경을 일으켜 과거 페이지를 연달아 받지 않게 막는다. */
   private withDataGuard(f: () => void): void {
+    const outer = this.settingData;
     this.settingData = true;
     try {
       f();
     } finally {
-      this.settingData = false;
+      this.settingData = outer;
     }
   }
 

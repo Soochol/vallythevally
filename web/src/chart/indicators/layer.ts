@@ -62,6 +62,8 @@ export interface LayerHost {
   isIndex(): boolean;
   period(): Period;
   requestFrame(): void;
+  /** 시리즈에 그리는 동안 보이는 범위 변경으로 과거 페이지를 받지 않게 한다(주 시리즈의 setData와 같은 가드). */
+  guard(draw: () => void): void;
 }
 
 const GUIDES: Partial<Record<Kind, number[]>> = { rsi: [70, 30], stochSlow: [80, 20] };
@@ -98,6 +100,10 @@ export class IndicatorLayer {
   }
 
   setConfigs(configs: IndicatorConfig[], panels: Panel[]): void {
+    this.host.guard(() => this.applyConfigs(configs, panels));
+  }
+
+  private applyConfigs(configs: IndicatorConfig[], panels: Panel[]): void {
     const prevConfigs = this.configs;
     const prevPanels = this.panels;
     this.configs = configs;
@@ -139,6 +145,10 @@ export class IndicatorLayer {
   }
 
   reset(h: History): void {
+    this.host.guard(() => this.resetNow(h));
+  }
+
+  private resetNow(h: History): void {
     this.history = h;
     this.display = displayBars(h);
     this.committedT = h.bars[h.bars.length - 1]?.t ?? null;
@@ -151,6 +161,10 @@ export class IndicatorLayer {
   }
 
   clear(): void {
+    this.host.guard(() => this.clearNow());
+  }
+
+  private clearNow(): void {
     this.history = null;
     this.display = [];
     this.committedT = null;
@@ -166,7 +180,7 @@ export class IndicatorLayer {
     const prev = this.display;
     const next = displayBars(h);
     const op = syncOp(prev, next, bar, kind, this.committedT);
-    if (op === "create" || !this.history) return this.reset(h);
+    if (op === "create" || !this.history) return this.host.guard(() => this.resetNow(h));
     this.history = h;
     this.display = next;
     if (op === "confirm") this.committedT = bar.t;
@@ -176,6 +190,10 @@ export class IndicatorLayer {
   }
 
   flush(): void {
+    if (this.queue.size > 0) this.host.guard(() => this.drain());
+  }
+
+  private drain(): void {
     for (const [line, p] of this.queue.drain()) {
       if (p.set) this.draw(line, p.set);
       for (const pt of p.updates) line.series.update(this.toChart(line, pt) as never);
@@ -183,7 +201,11 @@ export class IndicatorLayer {
   }
 
   setTheme(): void {
-    this.flush();
+    this.host.guard(() => this.recolor());
+  }
+
+  private recolor(): void {
+    this.drain();
     for (const s of this.shown.values()) {
       this.styleLines(s);
       for (const line of s.lines) if (isBarLine(line.id)) this.draw(line, line.points);
@@ -262,8 +284,10 @@ export class IndicatorLayer {
   }
 
   private onMessage(m: Exclude<FromWorker, { type: "fatal" }>): void {
-    if (m.type === "created") for (const r of m.results) this.accept(r, r.ok ? r.lines : null);
-    else for (const r of m.results) this.accept(r, null);
+    this.host.guard(() => {
+      if (m.type === "created") for (const r of m.results) this.accept(r, r.ok ? r.lines : null);
+      else for (const r of m.results) this.accept(r, null);
+    });
     this.host.requestFrame();
   }
 
@@ -295,12 +319,14 @@ export class IndicatorLayer {
 
   private onBroken(): void {
     this.broken = true;
-    for (const s of this.shown.values()) {
-      if (s.status.kind === "hidden") continue;
-      s.status = { kind: "error", error: "calc", message: "" };
-      s.gen = 0;
-      this.clearLines(s);
-    }
+    this.host.guard(() => {
+      for (const s of this.shown.values()) {
+        if (s.status.kind === "hidden") continue;
+        s.status = { kind: "error", error: "calc", message: "" };
+        s.gen = 0;
+        this.clearLines(s);
+      }
+    });
     this.host.requestFrame();
   }
 
@@ -310,7 +336,7 @@ export class IndicatorLayer {
 
   /** 빈 pane은 라이브러리가 지우므로 앞 pane부터 붙인다. */
   private rebuildSeries(): void {
-    this.flush();
+    this.drain();
     const old = new Map<string, Line[]>();
     for (const [id, s] of this.shown) {
       old.set(id, s.lines);

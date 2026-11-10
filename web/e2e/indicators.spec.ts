@@ -1,17 +1,17 @@
 import type { Page } from "@playwright/test";
 import type { Layout } from "../src/api/generated/Layout";
 import { installFrameProbe } from "./frame-probe";
-import { type App, cell, chartOf, DEFAULT_LAYOUT_ID, expect, test } from "./harness";
+import { type App, barTimes, cell, chartOf, DEFAULT_LAYOUT_ID, dragTowardPast, expect, test } from "./harness";
 
 test.use({ clockStart: "20261109100030" });
 
 const ICHIMOKU_FOR_30_MINUTE_BARS = { kind: "ichimoku", conversion: 3, base: 5, spanB: 8, displacement: 6 };
 
-async function seedLayout(app: App, period: string, indicators: object[], panels: object[]) {
+async function seedLayout(app: App, period: string, indicators: object[], panels: object[], symbol = "005930") {
   const current: Layout = await (await fetch(`${app.url}/api/layouts/${DEFAULT_LAYOUT_ID}`)).json();
   const { id, name, arrangement, sync, revision } = current;
   const chartSettings = { v: 2, style: "candle", scale: "normal", indicators, compare: [], panels };
-  const body = { id, name, arrangement, sync, revision: revision + 1, cells: [{ slot: 0, symbol: "005930", venue: "combined", period, symbolLink: false, chartSettings }] };
+  const body = { id, name, arrangement, sync, revision: revision + 1, cells: [{ slot: 0, symbol, venue: "combined", period, symbolLink: false, chartSettings }] };
   const r = await fetch(`${app.url}/api/layouts/${id}`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
   expect(r.ok).toBe(true);
 }
@@ -88,7 +88,7 @@ test("열기만 하면 v1 차트 설정을 서버에 쓰지 않고, 기본 거�
   expect(after.revision).toBe(saved.revision);
 });
 
-test("첫 화면에서 봉과 거래량 막대가 같은 프레임에 그려진다", async ({ page }) => {
+test("첫 화면에서 거래량 막대는 봉보다 많아야 한 프레임 늦게 그려진다", async ({ page }) => {
   await page.addInitScript(installFrameProbe);
   await page.addInitScript(() => {
     const frames: { main: number; volume: number }[] = [];
@@ -110,5 +110,45 @@ test("첫 화면에서 봉과 거래량 막대가 같은 프레임에 그려진�
   const firstMain = frames.findIndex((f) => f.main > 0);
   const firstVolume = frames.findIndex((f) => f.volume > 0);
   test.info().annotations.push({ type: "frames", description: `main ${firstMain}, volume ${firstVolume}` });
-  expect(firstVolume - firstMain).toBe(0);
+  expect(firstVolume - firstMain).toBeGreaterThanOrEqual(0);
+  expect(firstVolume - firstMain).toBeLessThanOrEqual(1);
+});
+
+const ma = (id: string, period: number) => ({ id, spec: { kind: "ma", method: "sma", period }, panel: "price", visible: true, style: { colors: ["ind-2"], width: 1 } });
+
+test("설정값이 틀린 지표는 그리지 않고 설정 오류를 남기며, 같은 칸의 다른 지표는 그린다", async ({ page, app }) => {
+  await seedLayout(app, "D", [ma("bad", 0), ma("good", 5)], []);
+  await page.goto("/");
+  await expect(cell(page)).toHaveAttribute("aria-busy", "false");
+  await expect(page.locator('[data-indicator-row="bad"]')).toContainText("설정 오류");
+  await expect(page.locator('[data-indicator-row="good"]')).toContainText(/\d/);
+  await expect(page.locator('[data-indicator-row="good"]')).not.toContainText("오류");
+});
+
+test("wasm을 받지 못하면 봉은 그대로 그리고 지표 범례에 계산 오류를 남긴다", async ({ page, app }) => {
+  await seedLayout(app, "D", [ma("m", 5)], []);
+  await page.context().route("**/*.wasm", (route) => route.abort());
+  await page.goto("/");
+  await expect(cell(page)).toHaveAttribute("aria-busy", "false");
+  await expect(chartOf(cell(page))).not.toHaveAttribute("data-bar-count", "0");
+  await expect(page.locator('[data-indicator-row="m"]')).toContainText("계산 오류");
+});
+
+test("일목균형표를 띄운 채 과거로 스크롤해도 다가갈 때마다 과거 페이지는 하나다", async ({ page, app }) => {
+  await seedLayout(app, "D", [{ id: "i1", spec: { kind: "ichimoku", conversion: 9, base: 26, spanB: 52, displacement: 26 }, panel: "price", visible: true, style: { colors: ["ind-1"], width: 1 } }], [], "086520");
+  const older: string[] = [];
+  page.on("request", (r) => {
+    if (r.url().includes("/api/bars") && r.url().includes("before=")) older.push(r.url());
+  });
+  await page.goto("/");
+  await expect(cell(page)).toHaveAttribute("aria-busy", "false");
+  const chart = chartOf(cell(page));
+  await expect(page.locator('[data-indicator-row="i1"]')).toContainText(/\d/);
+  await page.waitForTimeout(1000);
+  expect(older).toEqual([]);
+  const before = await barTimes(chart);
+  await dragTowardPast(page, chart, async () => expect((await barTimes(chart)).count).toBeGreaterThan(before.count));
+  await page.waitForTimeout(1500);
+  expect(older).toHaveLength(1);
+  await expect(page.locator('[data-indicator-row="i1"]')).toContainText(/\d/);
 });

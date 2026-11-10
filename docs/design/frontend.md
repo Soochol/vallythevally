@@ -393,7 +393,7 @@ D3의 표를 그대로 옮긴다. 단계 번호는 이슈 번호다. 이 문서�
 
 **구성**(`desktop-indicator-dialog-dark.png`)
 
-- **머리**: 제목, `지표 / 비교 종목` 탭, 대상 칸(`칸 1: 삼성전자 일`).
+- **머리**: 제목, `지표 / 비교 종목` 탭, 대상 칸(`칸 1: 삼성전자 일`). `비교 종목` 탭은 #76까지 보이되 꺼 둔다(#75).
 - **왼쪽 목록**
   - 지표 종류 일곱 가지를 둘로 묶는다.
     - "가격 패널에 겹쳐 그림": 이동평균, 볼린저 밴드, 일목균형표
@@ -417,20 +417,20 @@ D3의 표를 그대로 옮긴다. 단계 번호는 이슈 번호다. 이 문서�
   type SpecValidation = { ok: true } | { ok: false; errors: { field: string; message: string }[] }
   ```
 - `ok: false`이면 `errors[].field`에 해당하는 입력칸 아래에 `message`를 그대로 적고 주 버튼을 끈다. 예: `빠른 기간은 느린 기간보다 짧아야 합니다`. `field`가 입력칸과 맞지 않으면 설정 묶음 맨 아래에 적는다.
-- 서버에서 불러온 `chartSettings`의 지표도 칸을 열 때 같은 함수로 검사한다. 틀린 지표는 그리지 않고 범례에 흐린 글자와 `설정 오류`를 남긴다.
+- 서버에서 불러온 `chartSettings`의 지표는 칸을 열 때 워커가 엔진을 만들며 같은 검사를 한다(메인 스레드의 wasm을 칸 열기 전에 기다리지 않는다, §5.5·§5.6). 틀린 지표는 그리지 않고 범례에 흐린 글자와 `설정 오류`를 남긴다.
 
 **같은 지표 종류 여러 개**
 - 지표마다 브라우저가 UUID를 붙인다(§5.5 `chartSettings`).
 - 이동평균 5와 이동평균 20은 서로 다른 지표다. 같은 설정의 지표를 또 추가하면 색만 다르게 하나 더 생긴다. 막지 않는다.
 
 **설정 편집**
-- 범례 지표 줄의 설정 버튼을 누르거나 선을 더블클릭하면 같은 대화상자가 그 지표의 편집 상태로 열린다.
-- 이때 주 버튼은 `변경 적용`이다.
+- 범례 지표 줄이나 "이 칸에 띄운 지표" 목록의 설정 버튼을 누르면 같은 대화상자가 그 지표의 편집 상태로 열린다. 선을 더블클릭해 여는 것은 후속이다(#75에서 미룸).
+- 이때 주 버튼은 `변경 적용`이다. 적용하면 대화상자는 닫히지 않고 그 종류의 추가 상태로 돌아간다.
 
 **지표 패널 관리**
 - **기본**: 지표 패널 쪽 지표는 추가할 때마다 새 패널을 아래에 붙인다. Lightweight Charts의 pane 하나가 패널 하나다.
 - **높이**: 패널 경계를 끌어 바꾼다(`layout.panes.enableResize`). 바꾼 비율은 `chartSettings.panels[].stretch`에 저장한다.
-- **순서**: 지표 패널 범례의 메뉴에 `위로`, `아래로`, `패널 닫기`가 있다. `패널 닫기`는 그 패널의 지표를 지운다.
+- **순서**: 지표 패널 범례 줄에 마우스나 초점이 오면 `위로`, `아래로`, `패널 닫기` 버튼이 보인다(메뉴 대신 줄 안의 버튼, #75). `패널 닫기`는 그 패널의 지표를 지운다.
 - **패널 하나에 지표 하나**(D11): v1은 지표 패널 하나에 지표 하나만 둔다. RSI와 스토캐스틱을 한 패널에 겹치는 기능은 넣지 않는다. `IndicatorConfig.panel`이 패널 id를 가리키므로 나중에 저장 모양을 바꾸지 않고 넣을 수 있다.
 - **한 칸의 지표 패널 수**: 최대 4개를 권하고 막지는 않는다. 4칸 화면에서는 2개를 넘으면 가격 패널이 너무 낮아진다.
 - **숨긴 지표**: 계산을 멈추고 시리즈를 `visible: false`로 둔다. 범례에는 흐린 글자로 남긴다.
@@ -723,7 +723,7 @@ web/
       indicators/           # (#5) worker.ts, engines.ts, client.ts, layer.ts, kinds.ts(§5.6)
       drawings/             # (#6) DrawingLayer.ts, DrawingSurface.ts, interaction.ts, gestures.ts, anchor.ts, magnet.ts, sync.ts, tools/index.ts
       extensions.ts         # ChartController.attach가 넘기는 ChartHost 계약
-      CloudPrimitive.ts     # (#5) 일목 구름 채우기
+      CloudPrimitive.ts     # (#5, #75 뒤 후속) 일목 구름 채우기
       sync.ts               # (#7) 칸 사이 십자선·스크롤 동기화 버스
     stores/
       layout.ts             # useLayoutStore(§5.3). #2는 메모리의 기본 1칸
@@ -1097,7 +1097,7 @@ live·confirmed:
   | 선 | `shift` | 현재 봉이 바뀔 때 갱신할 점 | 새 현재 봉이 생길 때 |
   |---|---|---|---|
   | 이동 없는 선(이동평균, 전환선, 기준선 등) | 0 | 현재 봉 시각의 점 | 새 시각의 점을 덧붙인다 |
-  | 선행스팬 A·B | 양수 | 현재 봉에서 `shift`만큼 앞 미래 시각의 점 | `futureStarts`로 미래 시각을 하나 더 만들고 그 점을 덧붙인다 |
+  | 선행스팬 A·B | 양수 | 현재 봉에서 `shift`만큼 앞 미래 시각의 점 | `futureBarStarts`로 미래 시각을 다시 만들고 그 점을 덧붙인다 |
   | 후행스팬 | 음수 | 현재 봉에서 `|shift|`만큼 뒤 과거 시각의 점. 시간축으로는 과거지만 이 시리즈의 마지막 점이다 | 다음 과거 시각의 점을 덧붙인다 |
 
   - 그래서 모든 선을 보통의 `series.update(point)`로 갱신한다. v5.2의 `update(point, historicalUpdate = true)`는 쓰지 않는다. 쓰게 되는 것은 시리즈 끝에 빈 시각을 붙였을 때뿐인데, 그 방식은 위에서 버렸다.
@@ -1116,7 +1116,7 @@ live·confirmed:
 | 패널 높이 저장 | `layout.panes.enableResize`, `pane.getStretchFactor()` | v5.2에는 pane 크기가 바뀌었다는 이벤트가 없다. 차트의 `pointerup` 뒤에 비율을 읽어 바뀌었으면 `panels[].stretch`에 저장한다(#75) |
 | 가격 pane 지키기 | `pane.setPreserveEmptyPane(true)` | 주 시리즈를 바꿔 붙이는 동안 가격 pane이 비면 라이브러리가 pane을 지우고 지표 패널이 0번이 된다(#75) |
 | 가격 패널 지표 | 같은 pane 0에 `LineSeries` | `priceLineVisible: false`, `lastValueVisible: false` |
-| 볼린저·일목 구름 채우기 | series primitive(`CloudPrimitive`, `zOrder: "bottom"`) | 두 선 사이 채우기 기능이 없어서다 |
+| 볼린저·일목 구름 채우기 | series primitive(`CloudPrimitive`, `zOrder: "bottom"`) | 두 선 사이 채우기 기능이 없어서다. #75는 선만 그리고 채우기는 후속이다 |
 | 일목 미래 구간 | 선행스팬 시리즈가 미래 시각의 점을 갖는다 | 주 시리즈에 빈 시각(whitespace)을 붙이지 않는다(§5.6, W4-28) |
 | 드로잉 | 칸마다 series primitive 하나(`DrawingLayer`, `zOrder: "normal"`) | `"top"`은 십자선을 가린다(drawing-proposal §6). `paneViews()`가 그리기, 클릭 판정은 엔진이 `Shape`마다 한다. 좌표는 §3.5 |
 | 고른 드로잉의 가격 라벨 | primitive `priceAxisViews()` | 수평선은 축에 가격 라벨을 낸다 |
