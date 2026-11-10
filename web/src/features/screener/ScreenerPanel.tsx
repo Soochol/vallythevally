@@ -620,20 +620,26 @@ function UpdateBand({ status }: { status: ScreenerStatus }) {
   }
 
   if (update?.error) {
+    const retryable = !update.error.manualActionRequired;
     return (
       <section aria-label="업데이트" role="alert" className={frame}>
         <div className="flex items-center gap-2">
           <span className="conn-dot" data-tone="red" />
           <span className="text-s font-[650]">업데이트가 멈췄습니다</span>
           <span className="flex-1" />
-          <button type="button" className="btn-primary h-7 flex-none px-3 text-s" onClick={() => run(update.full)}>
-            다시 시도
-          </button>
+          {retryable && (
+            <button type="button" className="btn-primary h-7 flex-none px-3 text-s" onClick={() => run(update.full)}>
+              다시 시도
+            </button>
+          )}
         </div>
         <p className="mt-1.5 text-xs leading-[1.45] text-up">
           {PHASE_LABEL[update.phase]} {progressText(update)}에서 멈춤: {update.error.message}
         </p>
-        <p className="mt-0.5 text-xs leading-[1.45] text-text-2">{stored} 다시 시도하면 남은 것만 받습니다.</p>
+        <p className="mt-0.5 text-xs leading-[1.45] text-text-2">
+          {stored}
+          {retryable && " 다시 시도하면 남은 것만 받습니다."}
+        </p>
       </section>
     );
   }
