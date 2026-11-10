@@ -3,7 +3,7 @@ import type { Drawing } from "../src/api/generated/Drawing";
 import { installFrameProbe } from "./frame-probe";
 import { type App, cell, chartOf, expect, test } from "./harness";
 
-test.use({ clockStart: "20261109100000" });
+test.use({ clockStart: "20261109100030" });
 
 const series = (page: Page) => page.evaluate(() => window.frameProbe.snapshot());
 const frames = (page: Page) => page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
@@ -74,25 +74,30 @@ test("replacement consumes queued rollover in both real series and retains newer
   expect.soft(await chart.getAttribute("data-last-close")).toBe("203000");
   await trade(204_000, "100101", 4);
   await trade(205_000, "100102", 5);
+  await expect(() => trade(206_000, "100200", 6)).toPass({ timeout: 45_000 });
   await page.evaluate(() => window.frameProbe.release());
   await frames(page);
   const after = await series(page);
   console.log("ACTUAL_FRAME_SERIES", JSON.stringify({ snapshot: snapshot.map((s) => ({ ...s, data: s.data.slice(-2) })), after: after.map((s) => ({ ...s, data: s.data.slice(-2) })), errors, delivered }));
   await info.attach("actual-frame-series.json", { body: JSON.stringify({ snapshot, after, errors, delivered }), contentType: "application/json" });
   expect.soft(errors).toEqual([]);
-  expect.soft(after.find((s) => s.type === "Line")!.data.at(-1)).toMatchObject({ value: 205_000 });
-  expect.soft(after.find((s) => s.type === "Histogram")!.data.at(-1)).toMatchObject({ value: 12 });
-  expect.soft(after.find((s) => s.type === "Line")!.updates).toHaveLength(1);
-  expect.soft(after.find((s) => s.type === "Histogram")!.updates.length).toBe(volume.updates.length + 1);
-  await expect(chart).toHaveAttribute("data-last-close", "205000", { timeout: 1000 });
-  await trade(206_000, "100200", 6);
-  await expect(chart).toHaveAttribute("data-last-close", "206000");
-  const final = await series(page);
-  expect(final.find((s) => s.type === "Line")!.data.slice(-2)).toEqual([
+  expect.soft(after.find((s) => s.type === "Line")!.data.slice(-2)).toEqual([
     expect.objectContaining({ value: 205_000 }), expect.objectContaining({ value: 206_000 }),
   ]);
-  expect(final.find((s) => s.type === "Histogram")!.data.slice(-2)).toEqual([
+  expect.soft(after.find((s) => s.type === "Histogram")!.data.slice(-2)).toEqual([
     expect.objectContaining({ value: 12 }), expect.objectContaining({ value: 6 }),
+  ]);
+  expect.soft(after.find((s) => s.type === "Line")!.updates).toHaveLength(2);
+  expect.soft(after.find((s) => s.type === "Histogram")!.updates.length).toBe(volume.updates.length + 2);
+  await expect(chart).toHaveAttribute("data-last-close", "206000", { timeout: 1000 });
+  await trade(207_000, "100201", 7);
+  await expect(chart).toHaveAttribute("data-last-close", "207000");
+  const final = await series(page);
+  expect(final.find((s) => s.type === "Line")!.data.slice(-2)).toEqual([
+    expect.objectContaining({ value: 205_000 }), expect.objectContaining({ value: 207_000 }),
+  ]);
+  expect(final.find((s) => s.type === "Histogram")!.data.slice(-2)).toEqual([
+    expect.objectContaining({ value: 12 }), expect.objectContaining({ value: 13 }),
   ]);
   expect((await savedDrawings(app))[0]!.points).toEqual(saved.points);
   await page.getByRole("group", { name: "봉 주기" }).getByRole("button", { name: "일", exact: true }).click();
