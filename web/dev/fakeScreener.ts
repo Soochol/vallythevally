@@ -95,7 +95,7 @@ function resultOf(screen: Screen, asOf: KstDate, historyDone: number): ScreenerR
   const universe = STOCKS.filter((s) => !excludedKinds.has(s.kind));
   const longest = Math.max(...screen.conditions.map((c) => c.n));
   const neededDays = Math.max(...screen.conditions.map((c) => c.n + c.m - 1)) * DAYS_PER_BAR[screen.period];
-  const excluded = { listedTooShort: 0, historyShort: 0 };
+  const excluded = { listedTooShort: 0, historyShort: 0, unconfirmed: 0 };
   const rows: ScreenerRow[] = [];
   for (const s of universe) {
     if (s.years * BARS_PER_YEAR[screen.period] < longest) {
@@ -159,7 +159,7 @@ export function createScreener(scenario: FakeScreenerScenario, clock: () => numb
     const now = clock();
     const update = advance(now);
     const todayAvailable = todayConfirmedAt(now) && (lastDay === null || lastDay < kstToday(now));
-    return { lastDay, needDay: needDayAt(now), todayAvailable, fullHistory: { done: historyDone, total }, update };
+    return { lastDay, needDay: needDayAt(now), todayAvailable, fullHistory: { done: historyDone, total }, unconfirmed: 0, update };
   }
 
   return {

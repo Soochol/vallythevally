@@ -43,7 +43,7 @@ test("빠진 종목 수는 조건 가운데 가장 큰 N을 상장 기준으로 
       { field: "volume", n: 104, m: 4 },
     ],
   };
-  expect(excludedText(screen, { listedTooShort: 14, historyShort: 1120 })).toBe("상장 104주 미만 14 · 이력 덜 참 1,120");
+  expect(excludedText(screen, { listedTooShort: 14, historyShort: 1120, unconfirmed: 0 })).toBe("상장 104주 미만 14 · 이력 덜 참 1,120");
 });
 
 test("날짜는 기준과 같은 해면 연도를 빼고 요일을 붙인다", () => {
@@ -105,6 +105,7 @@ const ready: ScreenerStatus = {
   needDay: "2026-11-10",
   todayAvailable: false,
   fullHistory: { done: 3960, total: 3960 },
+  unconfirmed: 0,
   update: null,
 };
 const running = (phase: "symbols" | "recent" | "backfill") => ({ phase, done: 12, total: 3960, error: null, full: false });

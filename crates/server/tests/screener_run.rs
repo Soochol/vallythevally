@@ -85,7 +85,7 @@ fn price_and_change(result: &Value, code: &str) -> (Value, Value) {
 }
 
 fn excluded(listed_too_short: u32, history_short: u32) -> Value {
-    json!({"listedTooShort": listed_too_short, "historyShort": history_short})
+    json!({"listedTooShort": listed_too_short, "historyShort": history_short, "unconfirmed": 0})
 }
 
 struct Api {
@@ -575,7 +575,11 @@ async fn runs_racing_into_recent_read_the_store_from_before_recent_or_are_refuse
                 "refused"
             }
             (200, Some(d)) if d == yesterday.to_string() => {
-                assert_eq!((body["universe"].clone(), body["excluded"].clone(), hits(body)), (json!(2), excluded(0, 1), vec![]), "최근 채우기 전의 저장소라 200010은 목록에만 있고 봉이 없다");
+                assert_eq!(
+                    (body["universe"].clone(), body["excluded"].clone(), hits(body)),
+                    (json!(2), json!({"listedTooShort": 0, "historyShort": 0, "unconfirmed": 2}), vec![]),
+                    "최근 채우기 전의 저장소라 200010은 목록에만 있고 봉이 없다. 거래를 멈춘 200020은 어제 봉이 없다"
+                );
                 "before recent"
             }
             (200, Some(d)) if d == today.to_string() => {

@@ -3,4 +3,4 @@ import type { FullHistory } from "./FullHistory";
 import type { KstDate } from "./KstDate";
 import type { ScreenerUpdate } from "./ScreenerUpdate";
 
-export type ScreenerStatus = { lastDay: KstDate | null, needDay: KstDate | null, todayAvailable: boolean, fullHistory: FullHistory, update: ScreenerUpdate | null, };
+export type ScreenerStatus = { lastDay: KstDate | null, needDay: KstDate | null, todayAvailable: boolean, fullHistory: FullHistory, unconfirmed: number, update: ScreenerUpdate | null, };

@@ -21,7 +21,6 @@ use crate::symbols::SymbolDirectory;
 use crate::user_routes::{JSON_LIMIT, check_screen, read_json};
 use engine::Snapshot;
 use store::{Store, StoreError};
-use update::UpdateError;
 
 const CALENDAR_DAYS: usize = 10;
 const CALENDAR_FRESH_SECS: i64 = 5 * 60;
@@ -138,7 +137,7 @@ impl Screener {
         }
     }
 
-    fn finish(&self, id: u64, outcome: Result<(), UpdateError>) {
+    fn finish(&self, id: u64, outcome: Result<(), BarError>) {
         let mut run = self.run();
         let Run::Running { id: running, progress, .. } = &*run else {
             return;
@@ -152,12 +151,7 @@ impl Screener {
                 tracing::info!(full = progress.full, "스크리너 업데이트를 마쳤습니다");
                 Run::Idle
             }
-            Err(UpdateError::Failed(e)) => Run::Failed { progress, error: Lookup::ScreenerUpdate.failure(e, self.clock.now()).into_body() },
-            Err(UpdateError::NoDailyBars(code)) => {
-                tracing::warn!(code = code.as_str(), "목록에 있는 종목의 일봉을 키움이 주지 않아 업데이트를 멈췄습니다");
-                let message = format!("키움이 종목 목록에 있는 {}의 일봉을 주지 않아 업데이트를 멈췄습니다. 마지막 관측일은 그대로이고, 다음 업데이트에서 다시 받습니다", code.as_str());
-                Run::Failed { progress, error: ApiFailure::new(api::ApiErrorCode::UnknownSymbol, message).into_body() }
-            }
+            Err(e) => Run::Failed { progress, error: Lookup::ScreenerUpdate.failure(e, self.clock.now()).into_body() },
         };
     }
 
@@ -199,6 +193,7 @@ impl Screener {
             need_day: calendar.as_ref().and_then(|c| c.need_day(now)).map(api::KstDate),
             today_available: calendar.as_ref().and_then(|c| c.target(now)) == Some(today) && summary.last_day < Some(today),
             full_history: FullHistory { done: summary.complete, total: summary.listed },
+            unconfirmed: summary.unconfirmed,
             update,
         })
     }

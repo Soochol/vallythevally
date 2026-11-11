@@ -5,12 +5,13 @@ import type { ScreenerStatus } from "../api/generated/ScreenerStatus";
 import { rerunReason, useScreenerStore } from "./screener";
 
 const screen: Screen = { id: "s1", name: "고가 1,000일 신고가", period: "D", exclude: [], conditions: [{ field: "high", n: 1000, m: 20 }] };
-const result: ScreenerResult = { asOf: "2026-11-10", universe: 28, excluded: { listedTooShort: 0, historyShort: 28 }, rows: [] };
+const result: ScreenerResult = { asOf: "2026-11-10", universe: 28, excluded: { listedTooShort: 0, historyShort: 28, unconfirmed: 0 }, rows: [] };
 const store = (done: number, update: ScreenerStatus["update"] = null, lastDay = "2026-11-10"): ScreenerStatus => ({
   lastDay,
   needDay: "2026-11-10",
   todayAvailable: false,
   fullHistory: { done, total: 28 },
+  unconfirmed: 0,
   update,
 });
 const backfilling = (full = false): ScreenerStatus["update"] => ({ phase: "backfill", done: 3, total: 28, error: null, full });

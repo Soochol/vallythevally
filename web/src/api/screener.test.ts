@@ -6,7 +6,7 @@ import type { ScreenerStatus } from "./generated/ScreenerStatus";
 import type { Screens } from "./generated/Screens";
 import { saveScreens, screenerCommands, screenerStatusQuery, screensQuery } from "./screener";
 
-const idle: ScreenerStatus = { lastDay: "2026-11-10", needDay: "2026-11-10", todayAvailable: false, fullHistory: { done: 28, total: 28 }, update: null };
+const idle: ScreenerStatus = { lastDay: "2026-11-10", needDay: "2026-11-10", todayAvailable: false, fullHistory: { done: 28, total: 28 }, unconfirmed: 0, update: null };
 const running: ScreenerStatus = { ...idle, update: { phase: "recent", done: 0, total: 28, error: null, full: false } };
 const reply = (body: unknown) => new Response(JSON.stringify(body), { status: 200 });
 
