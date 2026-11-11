@@ -77,6 +77,7 @@ export interface FeedListener {
   failed(error: ApiRequestError): void;
   /** 과거 페이지를 받지 못했다. 가진 봉은 그대로다. `retryOlder`나 다시 열기 전까지 과거 페이지를 받지 않는다. */
   olderFailed(error: ApiRequestError): void;
+  olderLoading?(): void;
   /** 실시간으로 현재 봉이 바뀌었다. bar의 t는 가진 봉의 마지막 t보다 이르지 않다. */
   live(history: History, bar: Bar): void;
   confirmed(history: History, bar: Bar): void;
@@ -155,6 +156,7 @@ export class BarFeed {
     if (!key || !history || history.nextBefore === null || this.olderInFlight || this.olderFailed) return;
     const gen = this.generation;
     this.olderInFlight = true;
+    this.listener.olderLoading?.();
     this.fetchPage({ ...key, before: history.nextBefore }, this.abort.signal).then(
       (page) => {
         if (gen !== this.generation || !this.history) return;

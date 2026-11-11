@@ -60,7 +60,7 @@ test.describe("데스크톱", () => {
     const periods = toolbar.getByRole("group", { name: "봉 주기" });
     const venues = toolbar.getByRole("group", { name: "거래소" });
     await expect(cell(page)).toHaveAttribute("aria-label", "칸 1: 삼성전자 통합 일");
-    await expect(periods.getByRole("button")).toHaveText(["1분", "3분", "5분", "10분", "15분", "30분", "60분", "일", "주", "월"]);
+    await expect(periods.getByRole("button")).toHaveText(["1분", "3분", "5분", "10분", "15분", "30분", "60분", "일", "주", "월", "분기", "연"]);
 
     await choose(periods, "10분");
     await expectTenMinuteBars(page, requested, "삼성전자 통합 10분", { symbol: "005930", venue: "combined", period: "10m" });
@@ -143,7 +143,7 @@ test.describe("휴대폰 390px", () => {
     await page.goto("/?symbol=005930");
     const chips = page.getByRole("navigation", { name: "봉 주기" });
     await expect(cell(page)).toHaveAttribute("aria-label", "칸 1: 삼성전자 통합 일");
-    await expect(chips.getByRole("button")).toHaveText(["5분", "10분", "15분", "60분", "일", "주", "월"]);
+    await expect(chips.getByRole("button")).toHaveText(["5분", "10분", "15분", "60분", "일", "주", "월", "분기", "연"]);
 
     await choose(chips, "10분");
     await expectTenMinuteBars(page, requested, "삼성전자 통합 10분", { symbol: "005930", venue: "combined", period: "10m" });
