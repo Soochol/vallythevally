@@ -1,6 +1,7 @@
 use std::collections::VecDeque;
 
 use super::exact::{Decimal, Exact};
+use super::indicator::Indicator;
 use crate::api::{BarField, Extreme, ScreenPeriod};
 
 pub(super) type Cell = i64;
@@ -8,39 +9,42 @@ pub(super) type Cell = i64;
 const CENTI_EXPONENT: i32 = -2;
 const MILLION_EXPONENT: i32 = 6;
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub(super) enum Kind {
     NewExtreme { extreme: Extreme, field: BarField, n: u32 },
     ValueRange { field: BarField, min: Option<Decimal>, max: Option<Decimal> },
     Change { back: u32, min_pct: Option<Decimal>, max_pct: Option<Decimal> },
     NearExtreme { extreme: Extreme, n: u32, within_pct: Decimal },
     Surge { field: BarField, n: u32, times: Decimal },
+    Indicator(Indicator),
 }
 
 impl Kind {
-    fn needed_bars(self) -> i64 {
-        match self {
+    fn needed_bars(&self) -> i64 {
+        match *self {
             Kind::NewExtreme { n, .. } | Kind::NearExtreme { n, .. } => i64::from(n),
             Kind::ValueRange { .. } => 1,
             Kind::Change { back, .. } => i64::from(back) + 1,
             Kind::Surge { n, .. } => i64::from(n) + 1,
+            Kind::Indicator(ref indicator) => indicator.needed_bars(),
         }
     }
 
-    fn looks_back_along_bars(self) -> bool {
-        matches!(self, Kind::Change { .. } | Kind::Surge { .. })
+    fn looks_back_along_bars(&self) -> bool {
+        matches!(self, Kind::Change { .. } | Kind::Surge { .. } | Kind::Indicator(_))
     }
 
-    pub(super) fn columns(self) -> Vec<BarField> {
-        match self {
+    pub(super) fn columns(&self) -> Vec<BarField> {
+        match *self {
             Kind::NewExtreme { field, .. } | Kind::ValueRange { field, .. } | Kind::Surge { field, .. } => vec![field],
             Kind::Change { .. } => vec![BarField::Close],
             Kind::NearExtreme { extreme, .. } => vec![extreme_field(extreme), BarField::Close],
+            Kind::Indicator(ref indicator) => indicator.columns(),
         }
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub(super) struct Line {
     pub(super) period: ScreenPeriod,
     pub(super) m: u32,
@@ -92,6 +96,7 @@ impl Line {
                 (recent..cells.len()).zip(best).filter(|&(i, best)| near(extreme, close[i], best, within_pct) && full_window(i, n)).map(|(i, _)| i).next_back()
             }
             Kind::Surge { field, n, times } => last_surge(series.column(field), n as usize, recent, times),
+            Kind::Indicator(ref indicator) => indicator.last_candidate(series, recent),
         };
         last.map(|i| cells[i])
     }
@@ -107,6 +112,22 @@ impl Series {
     pub(super) fn clear(&mut self) {
         self.cells.clear();
         self.columns.iter_mut().for_each(Vec::clear);
+    }
+
+    pub(super) fn len(&self) -> usize {
+        self.cells.len()
+    }
+
+    pub(super) fn cells_from(&self, from: usize) -> &[Cell] {
+        &self.cells[from..]
+    }
+
+    pub(super) fn natural_at(&self, field: BarField, bar: usize) -> f64 {
+        natural_value(field, self.column(field)[bar])
+    }
+
+    pub(super) fn natural_from(&self, field: BarField, from: usize) -> Vec<f64> {
+        self.column(field)[from..].iter().map(|&stored| natural_value(field, stored)).collect()
     }
 
     pub(super) fn push_cells(&mut self, cells: &[Cell]) {
@@ -171,6 +192,14 @@ fn last_surge(values: &[u128], n: usize, recent: usize, times: Decimal) -> Optio
         }
     }
     last
+}
+
+fn natural_value(field: BarField, stored: u128) -> f64 {
+    match field {
+        BarField::Open | BarField::High | BarField::Low | BarField::Close => stored as f64 / 100.0,
+        BarField::Volume => stored as f64,
+        BarField::TradedValue => stored as f64 * 1e6,
+    }
 }
 
 fn stored_exponent(field: BarField) -> i32 {
