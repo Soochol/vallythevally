@@ -165,7 +165,7 @@ pub struct KrxDaily {
 
 pub fn parse_krx_daily(body: DailyChartResponse) -> Option<KrxDaily> {
     let rows = body.into_rows();
-    if rows.first().is_some_and(|r| r.dt.is_empty() && r.cntr_tm.is_empty()) {
+    if !rows.is_empty() && rows.iter().all(|r| KstDate::parse_yyyymmdd(&r.dt).is_none()) {
         return None;
     }
     let (mut readable, mut unreadable) = (Vec::new(), Vec::new());
@@ -926,12 +926,20 @@ mod tests {
         rows[1]["cur_prc"] = "0".into();
         rows[2]["dt"] = "2026-11".into();
         rows[3]["trde_qty"] = "N/A".into();
-        let daily = parse_krx_daily(serde_json::from_value(body).unwrap()).unwrap();
-        assert_eq!(daily.rows.len(), count - 3);
+        rows[0]["dt"] = "".into();
+        let daily = parse_krx_daily(serde_json::from_value(body.clone()).unwrap()).unwrap();
+        assert_eq!(daily.rows.len(), count - 4, "첫 행의 dt가 비어도 다른 행은 읽는다");
         assert!(!daily.rows.iter().any(|r| r.day.yyyymmdd() == zero_dt));
-        assert_eq!(daily.unreadable.len(), 3, "{:?}", daily.unreadable);
+        assert_eq!(daily.unreadable.len(), 4, "{:?}", daily.unreadable);
         assert!(daily.unreadable.iter().any(|u| u.dt == zero_dt && u.reason.0.contains("가격이 0")), "{:?}", daily.unreadable);
         assert!(daily.unreadable.iter().any(|u| u.dt == "2026-11"), "dt가 날짜가 아니어도 그 값을 남긴다");
+
+        for row in body["stk_dt_pole_chart_qry"].as_array_mut().unwrap() {
+            row["dt"] = "".into();
+        }
+        assert_eq!(parse_krx_daily(serde_json::from_value(body).unwrap()), None, "날짜를 읽을 수 있는 행이 하나도 없으면 없는 종목이다");
+        let no_rows: DailyChartResponse = serde_json::from_value(json!({"stk_dt_pole_chart_qry": []})).unwrap();
+        assert_eq!(parse_krx_daily(no_rows), Some(KrxDaily { rows: vec![], unreadable: vec![] }), "행이 없는 페이지는 빈 페이지다");
     }
 
     fn listing(name: &str) -> Vec<(String, Listing)> {

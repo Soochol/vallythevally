@@ -966,3 +966,26 @@ async fn a_kiwoom_failure_midway_through_the_backfill_stops_the_update_and_logs_
 fn market_code_in(line: &str) -> bool {
     KrxMarket::sample(day(2026, 11, 6)).codes().iter().any(|c| line.contains(&format!("code={c}")) || line.contains(&format!("code=\"{c}\"")))
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_empty_dt_on_the_newest_daily_row_leaves_out_only_that_row_and_keeps_the_others() {
+    let fake = FakeKiwoom::start().await;
+    let tmp = tempfile::tempdir().unwrap();
+    let today = day(2026, 11, 6);
+    let mut market = KrxMarket::sample(today);
+    market.stocks.retain(|s| s.code == krx::NEW_LISTING);
+    let krx::KrxPage::Page { mut body, .. } = krx::respond(&market, "ka10081", &json!({"stk_cd": krx::NEW_LISTING}), None).unwrap() else {
+        panic!("가짜 KRX가 일봉 한 페이지로 답한다");
+    };
+    assert_eq!(body["stk_dt_pole_chart_qry"][0]["dt"], today.yyyymmdd());
+    body["stk_dt_pole_chart_qry"][0]["dt"] = json!("");
+    fake.set_krx_market(market.clone());
+    fake.respond_with("ka10081", 200, body);
+    let (server, api) = boot(&fake, tmp.path(), &at(today, "2030")).await;
+    api.update(false).await;
+    let status = api.settled().await;
+    assert_eq!((status["update"].clone(), status["unconfirmed"].clone()), (Value::Null, json!(1)), "목표일 행이 빠져 확인 안 됨이지만 업데이트는 끝까지 간다: {status}");
+    let logs = server.stop().await;
+    assert_eq!(stored_days(tmp.path(), krx::NEW_LISTING), days_without(&market, krx::NEW_LISTING, today), "빈 dt 행만 빠지고 다른 행은 저장된다");
+    assert!(logs.lines().any(|l| l.contains("WARN") && l.contains(krx::NEW_LISTING) && l.contains("dt가 날짜가 아닙니다")), "종목과 이유를 남긴다: {logs}");
+}
