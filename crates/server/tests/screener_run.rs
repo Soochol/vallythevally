@@ -1426,7 +1426,7 @@ fn fill_large_store(path: &Path, days: &[KstDate]) {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn a_screen_over_4000_stocks_with_thousands_of_bars_answers_within_2_seconds() {
+async fn a_screen_over_4000_stocks_with_thousands_of_bars_answers_within_2_seconds_or_3_with_indicator_lines() {
     let days = last_open_days(LARGE_BARS, day(2026, 11, 6));
     let today = *days.last().unwrap();
     let dir = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
@@ -1442,11 +1442,12 @@ async fn a_screen_over_4000_stocks_with_thousands_of_bars_answers_within_2_secon
     let server = boot(&fake, dir.path(), &at(today, "2030"));
     let api = Api::of(&server).await;
     assert_eq!(api.status().await["lastDay"], json!(today.to_string()));
+    let bar_lines = Duration::from_secs(2);
     let screens = [
-        ("일봉 고가 200일 신고가가 최근 5일 안", screen("D", &[("high", 200, 5)], &[])),
-        ("일봉 거래량 2,900일 신고거래량이 최근 20일 안", screen("D", &[("volume", 2_900, 20)], &[])),
-        ("주봉 종가 52주 신고가가 최근 4주 안", screen("W", &[("close", 52, 4)], &[])),
-        ("월봉 고가 120개월 신고가가 이번 달", screen("M", &[("high", 120, 1)], &[])),
+        ("일봉 고가 200일 신고가가 최근 5일 안", screen("D", &[("high", 200, 5)], &[]), bar_lines),
+        ("일봉 거래량 2,900일 신고거래량이 최근 20일 안", screen("D", &[("volume", 2_900, 20)], &[]), bar_lines),
+        ("주봉 종가 52주 신고가가 최근 4주 안", screen("W", &[("close", 52, 4)], &[]), bar_lines),
+        ("월봉 고가 120개월 신고가가 이번 달", screen("M", &[("high", 120, 1)], &[]), bar_lines),
         (
             "일봉 20일 전 대비 +10% 이상이면서 주봉 거래량 급증, 일봉 고점 거리, 월봉 거래대금 범위",
             every(vec![
@@ -1455,9 +1456,26 @@ async fn a_screen_over_4000_stocks_with_thousands_of_bars_answers_within_2_secon
                 near_extreme("D", 1, "high", 250, 30.0),
                 value_range("M", 1, "traded_value", Some(1_000_000.0), None),
             ]),
+            bar_lines,
+        ),
+        (
+            "지표 여덟 종류와 봉 조건 둘의 일·주·월봉 10줄",
+            every(vec![
+                indicator("ma_position", "D", 1, json!({"field": "close", "method": "sma", "length": 20, "side": "above"})),
+                indicator("ma_alignment", "D", 20, json!({"method": "sma", "lengths": [5, 20, 60, 120], "order": "bullish"})),
+                indicator("ma_cross", "D", 60, json!({"method": "ema", "fast": null, "slow": 20, "direction": "up"})),
+                indicator("rsi", "D", 1, json!({"length": 14, "test": {"kind": "range", "min": 30.0, "max": null}})),
+                indicator("macd", "W", 26, json!({"fast": 12, "slow": 26, "signal": 9, "test": {"kind": "signal_cross", "direction": "up"}})),
+                indicator("stochastic", "D", 5, json!({"k": 5, "d": 3, "smooth": 3, "test": {"kind": "range", "min": 20.0, "max": null}})),
+                indicator("bollinger", "M", 24, json!({"length": 20, "k": 1.0, "test": {"kind": "outside", "side": "above"}})),
+                indicator("ichimoku", "W", 1, json!({"conversion": 9, "base": 26, "spanB": 52, "displacement": 26, "test": {"kind": "cloud", "side": "above"}})),
+                near_extreme("D", 1, "high", 250, 30.0),
+                change("D", 5, 20, Some(-50.0), None),
+            ]),
+            Duration::from_secs(3),
         ),
     ];
-    for (label, screen) in &screens {
+    for (label, screen, limit) in &screens {
         let mut took = Vec::new();
         let mut result = Value::Null;
         for _ in 0..3 {
@@ -1469,7 +1487,7 @@ async fn a_screen_over_4000_stocks_with_thousands_of_bars_answers_within_2_secon
         eprintln!("{label}: {took:?}, 결과 {rows}종목");
         assert_eq!((result["universe"].clone(), result["excluded"].clone()), (json!(LARGE_STOCKS), excluded(0, 0)), "{label}");
         assert!(rows > 0, "{label}: 판정이 실제로 돌았다면 맞는 종목이 있다");
-        assert!(took.iter().all(|t| *t < Duration::from_secs(2)), "{label}: {took:?}");
+        assert!(took.iter().all(|t| t < limit), "{label}: {took:?}");
     }
     server.stop().await;
 }
