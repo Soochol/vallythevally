@@ -4,6 +4,9 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 import { expect, test } from "../playwright-tools.ts";
+import { dartPatternFixture, ORIGINAL } from "../fixtures/dart-patterns.ts";
+import { day } from "../source-utils.ts";
+import { calendar } from "../fixtures/sources.ts";
 import { syntheticInputs } from "../fixtures/report.ts";
 import { browserBundle } from "../generate-report.ts";
 import { parseManuscript } from "../manuscript.ts";
@@ -13,6 +16,7 @@ import type {} from "../report-browser.ts";
 const scratch = path.resolve(import.meta.dirname, "../../../target/leader-cases-142/browser");
 let reportUrl: string;
 let escapedUrl: string;
+let patternsUrl: string;
 test.beforeAll(async () => {
   await mkdir(scratch, { recursive: true });
   const inputs = await syntheticInputs(scratch);
@@ -26,6 +30,11 @@ test.beforeAll(async () => {
   const escapedPath = path.join(scratch, "escaped.html");
   await writeFile(escapedPath, reportPage(inputs.bundle, manuscript, await browserBundle()));
   escapedUrl = pathToFileURL(escapedPath).href;
+  const { dart } = await dartPatternFixture();
+  const patternBundle = { ...inputs.bundle, range: { ...inputs.bundle.range, to: day("2022-03-31") }, calendar: [...inputs.bundle.calendar, ...calendar("2021-03-19", "2022-03-31")], dart };
+  const patternsPath = path.join(scratch, "dart-patterns.html");
+  await writeFile(patternsPath, reportPage(patternBundle, inputs.manuscript, await browserBundle()));
+  patternsUrl = pathToFileURL(patternsPath).href;
 });
 test("offline report uses real charts, shared dates/ranges and late-mounted panels", async ({ page }) => {
   const errors: string[] = [];
@@ -136,4 +145,26 @@ test("hostile prose remains text and the desktop screenshot is synthetic", async
   await page.setViewportSize({ width: 1440, height: 1400 });
   await page.locator("#section-6").evaluate((el) => el.scrollIntoView({ block: "start" }));
   await page.screenshot({ path: path.resolve(import.meta.dirname, "../fixtures/synthetic-report-desktop.png") });
+});
+
+test("original DART receipt controls accounting dates and offline publication chart", async ({ page }) => {
+  const errors: string[] = [];
+  page.on("pageerror", (e) => errors.push(e.message));
+  await page.context().setOffline(true);
+  await page.goto(patternsUrl);
+  await expect(page.locator("html")).toHaveAttribute("data-report-ready", "true");
+  await page.locator("#accounting-mode").selectOption("annual");
+  const annual = page.locator("#accounting-ledger").getByRole("row").filter({ has: page.getByRole("cell", { name: "2021", exact: true }) });
+  await expect(annual.getByRole("cell").nth(1)).toHaveText("2022-03-21");
+  await expect(annual.getByRole("cell").nth(2)).toHaveText("2022-03-22");
+  await expect(annual.getByRole("cell").nth(3)).toHaveText("80일");
+  await page.getByText("공시일 축 재무 근거 · 충돌·누락·미공개 후보", { exact: true }).click();
+  await page.getByText("2022-03-22 · 2021-Q4", { exact: true }).click();
+  await expect(page.getByRole("link", { name: `${ORIGINAL} · 2022-03-21`, exact: true }).first()).toBeVisible();
+  await page.getByRole("checkbox", { name: "재무", exact: true }).check();
+  const data = await page.evaluate(() => window.leaderReport.inspect().find((p) => p.id === "financial-operating-profit")!.series.flatMap((s) => s.data));
+  const points = data.filter((p): p is { time: string; value: number } => typeof p === "object" && p !== null && "time" in p && "value" in p && typeof p.time === "string" && typeof p.value === "number");
+  expect(points.find((p) => p.time === "2022-03-21")).toBeUndefined();
+  expect(points.find((p) => p.time === "2022-03-22")?.value).toBe(200);
+  expect(errors).toEqual([]);
 });
