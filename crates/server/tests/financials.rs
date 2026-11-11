@@ -33,6 +33,11 @@ struct FakeState {
     directory: Option<String>,
     company_code: Option<String>,
     preferred_dividend: bool,
+    discovery_search: Option<String>,
+    discovery_contents: Option<String>,
+    discovery_failure: Option<(String, StatusCode)>,
+    discovery_network: Option<String>,
+    discovery_paused: Option<String>,
 }
 
 struct Fake { state: Arc<Mutex<FakeState>>, url: String, task: tokio::task::JoinHandle<()> }
@@ -42,7 +47,7 @@ impl Drop for Fake { fn drop(&mut self) { self.task.abort(); } }
 impl Fake {
     async fn start() -> Self {
         let state = Arc::new(Mutex::new(FakeState::default()));
-        let app = Router::new().route("/api/{endpoint}", get(respond)).route("/common/searchcorpname.do", get(kind)).route("/external/{*path}", get(notice)).with_state(state.clone());
+        let app = Router::new().route("/api/{endpoint}", get(respond)).route("/common/searchcorpname.do", get(kind)).route("/external/{*path}", get(notice)).route("/disclosure/searchtotalinfo.do", get(discovery)).route("/common/disclsviewer.do", get(discovery)).with_state(state.clone());
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let url = format!("http://{}", listener.local_addr().unwrap());
         let task = tokio::spawn(async move { axum::serve(listener, app).await.unwrap(); });
@@ -65,6 +70,27 @@ async fn kind(State(state): State<Arc<Mutex<FakeState>>>, Query(params): Query<B
     state.calls.push(("kind".into(), params.clone()));
     if let Some(rows) = state.kind_responses.get(&params["searchCorpName"]) { return axum::Json(rows.clone()); }
     axum::Json(if state.kind_other_code { json!([{ "repisusrtcd2":"005930", "secugrpId":"ST", "fssunqno":CORP }]) } else if state.preferred && params["searchCorpName"] == "005935" { json!([{"repisusrtcd2":"005935","secugrpId":"ST","fssunqno":CORP}]) } else { json!([]) })
+}
+
+async fn discovery(State(state): State<Arc<Mutex<FakeState>>>, Query(params): Query<BTreeMap<String, String>>) -> Response {
+    let stage = if params["method"] == "searchContents" { "contents" } else { "search" };
+    let paused = {
+        let mut state = state.lock().unwrap();
+        state.calls.push((stage.into(), params));
+        state.discovery_paused.as_deref() == Some(stage)
+    };
+    if paused { std::future::pending::<()>().await; }
+    let state = state.lock().unwrap();
+    if state.discovery_network.as_deref() == Some(stage) {
+        let stream = futures::stream::once(async { Err::<String, _>(std::io::Error::other("synthetic discovery body failure")) });
+        return Response::new(axum::body::Body::from_stream(stream));
+    }
+    if let Some((failed, status)) = &state.discovery_failure && failed == stage { return (*status,"synthetic source failure").into_response(); }
+    if stage == "search" {
+        state.discovery_search.clone().unwrap_or_else(|| "<section class=\"paging-group\"><div class=\"info\"><em>0</em></div></section>검색결과가 없습니다.".into()).into_response()
+    } else {
+        state.discovery_contents.clone().unwrap_or_default().into_response()
+    }
 }
 
 async fn notice(State(state): State<Arc<Mutex<FakeState>>>) -> Response {
@@ -143,6 +169,9 @@ fn fake_directory(state: &Mutex<FakeState>) -> String {
 
 #[path = "financials/mapping.rs"]
 mod mapping;
+
+#[path = "financials/discovery.rs"]
+mod discovery;
 
 fn account(section: &str, id: &str, amount: &str) -> BTreeMap<String, String> {
     [("corp_code",CORP),("bsns_year","2015"),("reprt_code","11014"),("rcept_no",RECEIPT),("sj_div",section),("account_id",id),("account_nm","원래 계정"),("currency","KRW"),("thstrm_nm","제 1기"),("thstrm_amount",amount),("thstrm_add_amount","300")].into_iter().map(|(k,v)|(k.into(),v.into())).collect()

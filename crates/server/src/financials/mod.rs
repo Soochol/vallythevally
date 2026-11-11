@@ -20,7 +20,7 @@ pub struct Financials {
     client: Option<Client>,
     store: Result<Store, Failure>,
     clock: Clock,
-    resolving: tokio::sync::Mutex<HashMap<String, ResolutionFailure>>,
+    resolving: Mutex<HashMap<String, ResolutionAttempt>>,
     runs: Mutex<HashMap<String, Run>>,
 }
 
@@ -30,6 +30,8 @@ struct Run {
     failure: Option<Failure>,
     unpersisted_refresh: bool,
 }
+
+type ResolutionAttempt = Arc<tokio::sync::Mutex<Option<ResolutionFailure>>>;
 
 struct ResolutionFailure {
     attempted_at: i64,
@@ -43,7 +45,7 @@ impl Financials {
     }
 
     pub fn with_store(client: Option<Client>, store: Result<Store, Failure>, clock: Clock) -> Arc<Self> {
-        Arc::new(Self { client, store, clock, resolving: tokio::sync::Mutex::new(HashMap::new()), runs: Mutex::new(HashMap::new()) })
+        Arc::new(Self { client, store, clock, resolving: Mutex::new(HashMap::new()), runs: Mutex::new(HashMap::new()) })
     }
 
     fn store(&self) -> Result<&Store, Failure> {
@@ -104,25 +106,26 @@ impl Financials {
     }
 
     async fn security(&self, stock: &str, preferred: bool, force: bool) -> Result<(Option<Security>, bool), Failure> {
-        let mut attempts = self.resolving.lock().await;
-        let refresh_requested = force || attempts.get(stock).is_some_and(|attempt| attempt.refresh_requested);
+        let attempt = self.resolving.lock().unwrap().entry(stock.into()).or_default().clone();
+        let mut attempt = attempt.lock().await;
+        let refresh_requested = force || attempt.as_ref().is_some_and(|attempt| attempt.refresh_requested);
         let store = self.store()?;
         if let Some(security) = store.security(stock).await? {
-            attempts.remove(stock);
+            *attempt = None;
             return Ok((Some(security), refresh_requested));
         }
         let Some(client) = &self.client else { return Ok((None, refresh_requested)); };
         let now = self.clock.now().unix();
-        if !force && let Some(attempt) = attempts.get(stock) && now - attempt.attempted_at < 60 { return Err(attempt.failure); }
+        if !force && let Some(attempt) = attempt.as_ref() && now - attempt.attempted_at < 60 { return Err(attempt.failure); }
         let result = async {
             let security = client.resolve(stock, preferred).await?;
             if let Some(security) = &security { store.save_security(security).await?; }
             Ok(security)
         }.await;
         match result {
-            Ok(security) => { attempts.remove(stock); Ok((security, refresh_requested)) }
+            Ok(security) => { *attempt = None; Ok((security, refresh_requested)) }
             Err(failure) => {
-                attempts.insert(stock.into(), ResolutionFailure { attempted_at: now, failure, refresh_requested });
+                *attempt = Some(ResolutionFailure { attempted_at: now, failure, refresh_requested });
                 Err(failure)
             }
         }

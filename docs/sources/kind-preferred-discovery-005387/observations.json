@@ -1,0 +1,46 @@
+[
+  {
+    "url": "https://kind.krx.co.kr/disclosure/searchtotalinfo.do?method=searchTotalInfoSub&forward=searchtotalinfo_detail&kwd=005387%20%EB%B3%80%EA%B2%BD%EC%83%81%EC%9E%A5&fdName=all_mktact_idx&scn=mktact&pageIndex=1&currentPageSize=15&srchFd=2&fromData=2015-01-01&toData=2026-11-12",
+    "observed_at": "2026-11-11T15:18:06.807653+00:00",
+    "status": 200,
+    "file": "search.html",
+    "http_date": "Wed, 11 Nov 2026 15:18:07 GMT",
+    "response_bytes": 7680,
+    "response_sha256": "02ca7ca346da1e2d405c8e300912cd46e4ad2ed7e3c88f1a738991d7e592ea0c",
+    "archive_bytes": 7559,
+    "archive_sha256": "42f6a51ba29fb2ebb4d5f036f8a10407616a5dfc20ba60e185640f40cbe903e1"
+  },
+  {
+    "url": "https://kind.krx.co.kr/common/disclsviewer.do?method=searchContents&docNo=20260917000264",
+    "observed_at": "2026-11-11T15:17:30.858702+00:00",
+    "status": 200,
+    "file": "contents.html",
+    "http_date": "Wed, 11 Nov 2026 15:17:30 GMT",
+    "response_bytes": 968,
+    "response_sha256": "5746e9ffe9156b4de3e777d6787946b35b26b1633a2823d67a9e53e0ae935f98",
+    "archive_bytes": 937,
+    "archive_sha256": "832fc1dbebd5769431c675782958095fdc19d6930ca5525be64080141f4467d8"
+  },
+  {
+    "url": "https://kind.krx.co.kr/external/2026/09/17/000117/20260917000264/68155.htm",
+    "observed_at": "2026-11-11T15:18:06.807253+00:00",
+    "status": 200,
+    "file": "notice.html",
+    "http_date": "Wed, 11 Nov 2026 15:18:06 GMT",
+    "response_bytes": 1422,
+    "response_sha256": "33ac1dd4133063575dc2794fc7a2211fad91b36b59f2850e664e56e901aedc2a",
+    "archive_bytes": 1403,
+    "archive_sha256": "9c7154926707ec2b929c724b67ad9ea9eb392f58616bee735b545c93a568d537"
+  },
+  {
+    "url": "https://kind.krx.co.kr/common/searchcorpname.do?method=searchCorpNameJson&searchCodeType=number&searchCorpName=005380",
+    "observed_at": "2026-11-11T15:12:22.344148+00:00",
+    "status": 200,
+    "file": "common.json",
+    "http_date": "Wed, 11 Nov 2026 15:12:22 GMT",
+    "response_bytes": 272,
+    "response_sha256": "9c9edc91b46fe73e8e52cf05ebd2164bf0d69d0791931113e282b360c042920a",
+    "archive_bytes": 273,
+    "archive_sha256": "5cf0e5ec72ed6734e19ce14a41fc8c2ef01e87e541a84c34c54ffcbece32320d"
+  }
+]
