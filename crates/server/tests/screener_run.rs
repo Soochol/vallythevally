@@ -825,6 +825,85 @@ async fn a_surge_compares_with_the_average_of_the_n_bars_before_skipping_halted_
     assert_eq!(hits(&api.result(&surging("traded_value", 9.01)).await), Vec::<String>::new());
 }
 
+fn picks(result: &Value, code: &str) -> bool {
+    result["rows"].as_array().unwrap().iter().any(|r| r["symbol"] == code)
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn decimal_parameters_meet_their_exact_boundary_and_the_floats_beside_it_fall_either_side() {
+    let days = fortnight();
+    let (before_huge, huge) = (48_650_645_685_924_000, 49_185_802_788_469_164);
+    let traded = |i: usize, today: u64, before: u64| KrxBar { traded_million_won: if i == 14 { today } else { before }, ..bar(days[i], 100, 100) };
+    let stocks = vec![
+        stock("200010", days.iter().enumerate().map(|(i, &d)| bar(d, 100, if i == 14 { 55 } else { 50 })).collect()),
+        stock("200020", days.iter().enumerate().map(|(i, &d)| if i == 14 { candle(d, [112_500, 112_500, 106_200, 106_200], 100) } else { bar(d, 112_500, 100) }).collect()),
+        stock("200030", days.iter().enumerate().map(|(i, &d)| if i == 14 { candle(d, [1_000, 1_282, 1_000, 1_282], 100) } else { bar(d, 1_000, 100) }).collect()),
+        stock("200040", days.iter().enumerate().map(|(i, &d)| bar(d, if i == 14 { huge } else { before_huge }, 1)).collect()),
+        stock("200050", (0..days.len()).map(|i| traded(i, 9_007_199_254_740_993, 1)).collect()),
+        stock("200060", (0..days.len()).map(|i| traded(i, 18_000_000_000_000_000_000, 10_000_000_000_000_000_000)).collect()),
+    ];
+    let session = loaded(KrxMarket { days: days.clone(), stocks }).await;
+    let api = &session.api;
+    let traded_at_least = |won: f64| value_range("D", 1, "traded_value", Some(won), None);
+    let traded_at_most = |won: f64| value_range("D", 1, "traded_value", None, Some(won));
+    let precise = 9.007199254740993e21;
+    let cases = [
+        ("거래량 50 → 55는 직전 1봉의 정확히 1.1배다", surge("D", 1, "volume", 1, 1.1), "200010", true),
+        ("1.1 바로 위의 배수", surge("D", 1, "volume", 1, 1.1f64.next_up()), "200010", false),
+        ("1.1 바로 아래의 배수", surge("D", 1, "volume", 1, 1.1f64.next_down()), "200010", true),
+        ("종가 106,200은 고가 112,500에서 정확히 5.6% 안이다", near_extreme("D", 1, "high", 1, 5.6), "200020", true),
+        ("5.6% 바로 아래", near_extreme("D", 1, "high", 1, 5.6f64.next_down()), "200020", false),
+        ("5.6% 바로 위", near_extreme("D", 1, "high", 1, 5.6f64.next_up()), "200020", true),
+        ("종가 1,282는 저가 1,000에서 정확히 28.2% 안이다", near_extreme("D", 1, "low", 1, 28.2), "200030", true),
+        ("28.2% 바로 아래", near_extreme("D", 1, "low", 1, 28.2f64.next_down()), "200030", false),
+        ("28.2% 바로 위", near_extreme("D", 1, "low", 1, 28.2f64.next_up()), "200030", true),
+        ("4.9경 원대 가격의 등락률은 정확히 +1.1%다", change("D", 1, 1, Some(1.1), None), "200040", true),
+        ("minPct가 1.1 바로 위", change("D", 1, 1, Some(1.1f64.next_up()), None), "200040", false),
+        ("maxPct가 1.1", change("D", 1, 1, None, Some(1.1)), "200040", true),
+        ("maxPct가 1.1 바로 아래", change("D", 1, 1, None, Some(1.1f64.next_down())), "200040", false),
+        ("거래대금 (2^53 + 1)백만 원은 f64로 바꾸면 2^53백만 원이 되지만 그대로 견준다", traded_at_least(precise), "200050", true),
+        ("최소가 그 값 바로 위", traded_at_least(precise.next_up()), "200050", false),
+        ("최대가 그 값", traded_at_most(precise), "200050", true),
+        ("최대가 그 값 바로 아래", traded_at_most(precise.next_down()), "200050", false),
+        ("직전 5봉 합 5천경 백만 원은 u64를 넘어도 넘치지 않고, 오늘 1.8천경은 평균의 정확히 1.8배다", surge("D", 1, "traded_value", 5, 1.8), "200060", true),
+        ("1.8 바로 위의 배수", surge("D", 1, "traded_value", 5, 1.8f64.next_up()), "200060", false),
+    ];
+    for (case, condition, code, want) in cases {
+        let result = api.result(&every(vec![condition])).await;
+        assert_eq!(picks(&result, code), want, "{case}: {result}");
+    }
+    let huge_row = api.result(&every(vec![change("D", 1, 1, Some(1.1), None)])).await;
+    assert_eq!(price_and_change(&huge_row, "200040"), (json!(huge as f64), json!(1.1)), "결과 행의 종가와 등락률도 그 가격 그대로다");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_huge_traded_value_sum_in_some_stocks_leaves_every_stocks_weekly_and_monthly_result() {
+    let days = fortnight();
+    let traded = |code: &str, million_won: u64| stock(code, days.iter().map(|&d| KrxBar { traded_million_won: million_won, ..bar(d, 100, 100) }).collect());
+    let huge = 10_000_000_000_000_000_000;
+    let stocks = vec![traded("200010", huge), traded("200020", 10), traded("200030", huge), traded("200040", 10)];
+    let session = loaded(KrxMarket { days: days.clone(), stocks }).await;
+    let api = &session.api;
+    let this_week_sum = 5e25;
+    for (period, start, last_cell_ratio) in [("W", day(2026, 11, 2), 1.0), ("M", day(2026, 11, 1), 0.5)] {
+        let at = |codes: &[&str]| codes.iter().map(|c| hit(c, start)).collect::<Vec<_>>();
+        let traded_at_least = |won: f64| every(vec![value_range(period, 1, "traded_value", Some(won), None)]);
+        let any = api.result(&traded_at_least(1.0)).await;
+        assert_eq!(
+            (any["excluded"].clone(), hits(&any)),
+            (excluded(0, 0), at(&["200010", "200020", "200030", "200040"])),
+            "{period}: 한 칸 합이 u64를 넘는 종목이 앞에 있든 뒤에 있든 다른 종목의 결과가 남는다"
+        );
+        assert_eq!(hits(&api.result(&traded_at_least(this_week_sum)).await), at(&["200010", "200030"]), "{period}: 이번 칸 합은 5 × 1천경 백만 원 = 5 × 10^25원이다");
+        assert_eq!(hits(&api.result(&traded_at_least(this_week_sum.next_up())).await), Vec::<String>::new(), "{period}");
+        assert_eq!(
+            hits(&api.result(&every(vec![surge(period, 1, "traded_value", 1, last_cell_ratio)])).await),
+            at(&["200010", "200020", "200030", "200040"]),
+            "{period}: 지난 칸 합(주 5일, 10월 10일)과 견준 배수도 넘치지 않는다"
+        );
+    }
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn needed_bars_of_each_line_decide_listed_too_short_once_even_across_periods() {
     let days = fortnight();

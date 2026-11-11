@@ -1,4 +1,5 @@
 mod engine;
+mod exact;
 mod line;
 pub mod store;
 mod update;

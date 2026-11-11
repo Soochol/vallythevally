@@ -2,12 +2,13 @@ use std::collections::HashMap;
 
 use domain::{Bucket, KstDate, KstTime, Period, Price, StockCode, TimeOfDay};
 use duckdb::arrow::array::{AsArray, RecordBatch};
-use duckdb::arrow::datatypes::{ArrowPrimitiveType, Int64Type, UInt32Type, UInt64Type};
+use duckdb::arrow::datatypes::{ArrowPrimitiveType, DataType, Decimal128Type, Int64Type, UInt32Type, UInt64Type};
 use duckdb::{Connection, Transaction, params};
 
+use super::exact::Decimal;
 use super::line::{Cell, Kind, Line, Series};
 use super::store::{StoreError, date_of, date_value, exclusion_mask, price_of, stock_code, unconfirmed_on};
-use crate::api::{self, BarField, Condition, ExcludeKind, Extreme, Screen, ScreenPeriod, ScreenerExcluded, ScreenerResult, ScreenerRow, SurgeField, SymbolCode};
+use crate::api::{self, BarField, Bound, Condition, ExcludeKind, Extreme, Screen, ScreenPeriod, ScreenerExcluded, ScreenerResult, ScreenerRow, SurgeField, SymbolCode};
 
 const PERIODS: [ScreenPeriod; 3] = [ScreenPeriod::Day, ScreenPeriod::Week, ScreenPeriod::Month];
 
@@ -36,10 +37,10 @@ fn line_of(condition: &Condition) -> Result<Line, &'static str> {
     match *condition {
         Condition::NewHigh { period, m, field, n } => line(period, m, Kind::NewExtreme { extreme: Extreme::High, field, n }),
         Condition::NewLow { period, m, field, n } => line(period, m, Kind::NewExtreme { extreme: Extreme::Low, field, n }),
-        Condition::ValueRange { period, m, field, min, max } => line(period, m, Kind::ValueRange { field, min, max }),
-        Condition::Change { period, m, back, min_pct, max_pct } => line(period, m, Kind::Change { back, min_pct, max_pct }),
-        Condition::NearExtreme { period, m, extreme, n, within_pct } => line(period, m, Kind::NearExtreme { extreme, n, within_pct }),
-        Condition::Surge { period, m, field, n, times } => line(period, m, Kind::Surge { field: surged(field), n, times }),
+        Condition::ValueRange { period, m, field, min, max } => line(period, m, Kind::ValueRange { field, min: bound(min)?, max: bound(max)? }),
+        Condition::Change { period, m, back, min_pct, max_pct } => line(period, m, Kind::Change { back, min_pct: bound(min_pct)?, max_pct: bound(max_pct)? }),
+        Condition::NearExtreme { period, m, extreme, n, within_pct } => line(period, m, Kind::NearExtreme { extreme, n, within_pct: decimal(within_pct)? }),
+        Condition::Surge { period, m, field, n, times } => line(period, m, Kind::Surge { field: surged(field), n, times: decimal(times)? }),
         Condition::MaPosition { .. }
         | Condition::MaAlignment { .. }
         | Condition::MaCross { .. }
@@ -50,6 +51,14 @@ fn line_of(condition: &Condition) -> Result<Line, &'static str> {
         | Condition::Ichimoku { .. } => Err("지표 조건은 아직 실행할 수 없습니다"),
         Condition::MarketCap { .. } => Err("시가총액 조건은 아직 실행할 수 없습니다"),
     }
+}
+
+fn decimal(value: f64) -> Result<Decimal, &'static str> {
+    Decimal::of(value).ok_or("수는 유한해야 합니다")
+}
+
+fn bound(value: Bound) -> Result<Option<Decimal>, &'static str> {
+    value.0.map(decimal).transpose()
 }
 
 fn surged(field: SurgeField) -> BarField {
@@ -281,7 +290,7 @@ fn aggregate(field: BarField) -> String {
         BarField::High => format!("max(d.{value})"),
         BarField::Low => format!("min(d.{value})"),
         BarField::Close => format!("arg_max(d.{value}, d.day)"),
-        BarField::Volume | BarField::TradedValue => format!("sum(d.{value})::UBIGINT"),
+        BarField::Volume | BarField::TradedValue => format!("sum(d.{value})"),
     }
 }
 
@@ -305,6 +314,29 @@ fn primitive<T: ArrowPrimitiveType>(batch: &RecordBatch, k: usize) -> Result<&[T
     array.as_primitive_opt::<T>().map(|values| values.values().as_ref()).ok_or_else(|| StoreError(format!("봉 열의 {k}번째 열이 {}입니다", array.data_type())))
 }
 
+enum Values<'a> {
+    Stored(&'a [u64]),
+    Summed(&'a [i128]),
+}
+
+impl<'a> Values<'a> {
+    fn of(batch: &'a RecordBatch, k: usize) -> Result<Values<'a>, StoreError> {
+        let array = batch.column(k);
+        match array.data_type() {
+            DataType::UInt64 => Ok(Values::Stored(primitive::<UInt64Type>(batch, k)?)),
+            DataType::Decimal128(_, 0) => Ok(Values::Summed(primitive::<Decimal128Type>(batch, k)?)),
+            other => Err(StoreError(format!("봉 열의 {k}번째 열이 {other}입니다"))),
+        }
+    }
+
+    fn append(&self, into: &mut Vec<u128>, rows: std::ops::Range<usize>) {
+        match self {
+            Values::Stored(values) => into.extend(values[rows].iter().map(|&v| u128::from(v))),
+            Values::Summed(values) => into.extend(values[rows].iter().map(|v| v.unsigned_abs())),
+        }
+    }
+}
+
 fn for_each_series(tx: &Transaction, sql: &str, columns: &[BarField], mut judge: impl FnMut(usize, &Series)) -> Result<(), StoreError> {
     let mut stmt = tx.prepare(sql)?;
     let mut series = Series::default();
@@ -312,7 +344,7 @@ fn for_each_series(tx: &Transaction, sql: &str, columns: &[BarField], mut judge:
     for batch in stmt.query_arrow([])? {
         let stocks = primitive::<UInt32Type>(&batch, 0)?;
         let cells = primitive::<Int64Type>(&batch, 1)?;
-        let values = columns.iter().enumerate().map(|(k, &field)| Ok((field, primitive::<UInt64Type>(&batch, k + 2)?))).collect::<Result<Vec<_>, StoreError>>()?;
+        let values = columns.iter().enumerate().map(|(k, &field)| Ok((field, Values::of(&batch, k + 2)?))).collect::<Result<Vec<_>, StoreError>>()?;
         let mut from = 0;
         while from < stocks.len() {
             let stock = stocks[from];
@@ -324,8 +356,10 @@ fn for_each_series(tx: &Transaction, sql: &str, columns: &[BarField], mut judge:
                 series.clear();
                 current = Some(stock);
             }
-            let run: Vec<(BarField, &[u64])> = values.iter().map(|&(field, column)| (field, &column[from..to])).collect();
-            series.extend(&cells[from..to], &run);
+            series.push_cells(&cells[from..to]);
+            for (field, column) in &values {
+                column.append(series.column_mut(*field), from..to);
+            }
             from = to;
         }
     }

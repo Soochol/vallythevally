@@ -1,20 +1,20 @@
 use std::collections::VecDeque;
 
-use domain::Price;
-
-use crate::api::{BarField, Bound, Extreme, ScreenPeriod};
+use super::exact::{Decimal, Exact};
+use crate::api::{BarField, Extreme, ScreenPeriod};
 
 pub(super) type Cell = i64;
 
-const WON_PER_MILLION: f64 = 1_000_000.0;
+const CENTI_EXPONENT: i32 = -2;
+const MILLION_EXPONENT: i32 = 6;
 
 #[derive(Debug, Clone, Copy)]
 pub(super) enum Kind {
     NewExtreme { extreme: Extreme, field: BarField, n: u32 },
-    ValueRange { field: BarField, min: Bound, max: Bound },
-    Change { back: u32, min_pct: Bound, max_pct: Bound },
-    NearExtreme { extreme: Extreme, n: u32, within_pct: f64 },
-    Surge { field: BarField, n: u32, times: f64 },
+    ValueRange { field: BarField, min: Option<Decimal>, max: Option<Decimal> },
+    Change { back: u32, min_pct: Option<Decimal>, max_pct: Option<Decimal> },
+    NearExtreme { extreme: Extreme, n: u32, within_pct: Decimal },
+    Surge { field: BarField, n: u32, times: Decimal },
 }
 
 impl Kind {
@@ -76,12 +76,15 @@ impl Line {
             }
             Kind::ValueRange { field, min, max } => {
                 let values = series.column(field);
-                (recent..cells.len()).rev().find(|&i| within(amount(field, values[i]), min, max))
+                (recent..cells.len()).rev().find(|&i| within(Exact::new(false, values[i], stored_exponent(field)), min, max, 1))
             }
             Kind::Change { back, min_pct, max_pct } => {
                 let close = series.column(BarField::Close);
                 let back = back as usize;
-                (recent.max(back)..cells.len()).rev().find(|&i| within(percent_change(close[i - back], close[i]), min_pct, max_pct))
+                (recent.max(back)..cells.len()).rev().find(|&i| {
+                    let (from, to) = (close[i - back], close[i]);
+                    within(Exact::new(to < from, to.abs_diff(from) * 100, 0), min_pct, max_pct, from)
+                })
             }
             Kind::NearExtreme { extreme, n, within_pct } => {
                 let close = series.column(BarField::Close);
@@ -97,7 +100,7 @@ impl Line {
 #[derive(Debug, Default)]
 pub(super) struct Series {
     cells: Vec<Cell>,
-    columns: [Vec<u64>; 6],
+    columns: [Vec<u128>; 6],
 }
 
 impl Series {
@@ -106,14 +109,15 @@ impl Series {
         self.columns.iter_mut().for_each(Vec::clear);
     }
 
-    pub(super) fn extend(&mut self, cells: &[Cell], columns: &[(BarField, &[u64])]) {
+    pub(super) fn push_cells(&mut self, cells: &[Cell]) {
         self.cells.extend_from_slice(cells);
-        for &(field, values) in columns {
-            self.columns[field as usize].extend_from_slice(values);
-        }
     }
 
-    fn column(&self, field: BarField) -> &[u64] {
+    pub(super) fn column_mut(&mut self, field: BarField) -> &mut Vec<u128> {
+        &mut self.columns[field as usize]
+    }
+
+    fn column(&self, field: BarField) -> &[u128] {
         &self.columns[field as usize]
     }
 }
@@ -125,12 +129,12 @@ fn extreme_field(extreme: Extreme) -> BarField {
     }
 }
 
-fn window_extremes(cells: &[Cell], values: &[u64], n: u32, recent: usize, extreme: Extreme) -> Vec<u64> {
+fn window_extremes(cells: &[Cell], values: &[u128], n: u32, recent: usize, extreme: Extreme) -> Vec<u128> {
     let Some(&first_recent) = cells.get(recent) else {
         return Vec::new();
     };
     let span = i64::from(n);
-    let outlasts = |older: u64, newer: u64| match extreme {
+    let outlasts = |older: u128, newer: u128| match extreme {
         Extreme::High => older > newer,
         Extreme::Low => older < newer,
     };
@@ -151,44 +155,40 @@ fn window_extremes(cells: &[Cell], values: &[u64], n: u32, recent: usize, extrem
     best
 }
 
-fn last_surge(values: &[u64], n: usize, recent: usize, times: f64) -> Option<usize> {
+fn last_surge(values: &[u128], n: usize, recent: usize, times: Decimal) -> Option<usize> {
     let first = recent.max(n);
     if first >= values.len() {
         return None;
     }
-    let mut before: u128 = values[first - n..first].iter().map(|&v| u128::from(v)).sum();
+    let mut before: u128 = values[first - n..first].iter().sum();
     let mut last = None;
     for i in first..values.len() {
         if i > first {
-            before = before + u128::from(values[i - 1]) - u128::from(values[i - 1 - n]);
+            before = before + values[i - 1] - values[i - 1 - n];
         }
-        if values[i] as f64 * n as f64 >= times * before as f64 {
+        if Exact::new(false, values[i] * n as u128, 0) >= times.times(before) {
             last = Some(i);
         }
     }
     last
 }
 
-fn amount(field: BarField, stored: u64) -> f64 {
+fn stored_exponent(field: BarField) -> i32 {
     match field {
-        BarField::Open | BarField::High | BarField::Low | BarField::Close => Price::from_centi(stored).map_or(0.0, Price::to_f64),
-        BarField::Volume => stored as f64,
-        BarField::TradedValue => stored as f64 * WON_PER_MILLION,
+        BarField::Open | BarField::High | BarField::Low | BarField::Close => CENTI_EXPONENT,
+        BarField::Volume => 0,
+        BarField::TradedValue => MILLION_EXPONENT,
     }
 }
 
-fn percent_change(from: u64, to: u64) -> f64 {
-    (i128::from(to) - i128::from(from)) as f64 * 100.0 / from as f64
+fn near(extreme: Extreme, close: u128, extreme_value: u128, within_pct: Decimal) -> bool {
+    let gap = match extreme {
+        Extreme::High => extreme_value.saturating_sub(close),
+        Extreme::Low => close.saturating_sub(extreme_value),
+    };
+    Exact::new(false, gap * 100, 0) <= within_pct.times(extreme_value)
 }
 
-fn near(extreme: Extreme, close: u64, extreme_value: u64, within_pct: f64) -> bool {
-    let close = close as f64 * 100.0;
-    match extreme {
-        Extreme::High => close >= extreme_value as f64 * (100.0 - within_pct),
-        Extreme::Low => close <= extreme_value as f64 * (100.0 + within_pct),
-    }
-}
-
-fn within(value: f64, min: Bound, max: Bound) -> bool {
-    min.0.is_none_or(|lo| value >= lo) && max.0.is_none_or(|hi| value <= hi)
+fn within(value: Exact, min: Option<Decimal>, max: Option<Decimal>, per: u128) -> bool {
+    min.is_none_or(|lo| value >= lo.times(per)) && max.is_none_or(|hi| value <= hi.times(per))
 }
