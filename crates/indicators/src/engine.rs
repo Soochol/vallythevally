@@ -1,7 +1,7 @@
 use std::fmt;
 
 use crate::spec::{LineId, ValidSpec};
-use crate::state::State;
+use crate::state::{State, Values};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BarError {
@@ -131,7 +131,7 @@ impl Engine {
             .collect();
         let mut engine = Engine { state: State::new(spec), output: Output { lines }, last_t: None };
         for i in 0..confirmed.len() {
-            engine.confirm(&confirmed.bar(i));
+            engine.record(&confirmed.bar(i));
         }
         engine
     }
@@ -155,12 +155,17 @@ impl Engine {
     }
 
     fn confirm(&mut self, bar: &BarInput) -> Tail {
+        let values = self.record(bar);
+        self.tail(&values)
+    }
+
+    fn record(&mut self, bar: &BarInput) -> Values {
         let values = self.state.step(bar);
         for (line, v) in self.output.lines.iter_mut().zip(values) {
             line.values.push(v);
         }
         self.last_t = Some(bar.t);
-        self.tail(&values)
+        values
     }
 
     fn tail(&self, values: &[f64]) -> Tail {

@@ -1,5 +1,6 @@
 mod engine;
 mod exact;
+mod indicator;
 mod line;
 pub mod store;
 mod update;
