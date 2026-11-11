@@ -91,6 +91,7 @@ fn generated_typescript_matches_the_committed_files() {
         generated::<Screens>(),
         generated::<ServerMessage>(),
         generated::<Side>(),
+        generated::<SkippedDay>(),
         generated::<StochasticTest>(),
         generated::<SubErrorCode>(),
         generated::<SurgeField>(),

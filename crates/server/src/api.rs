@@ -557,6 +557,16 @@ pub struct DayHistory<T> {
     pub to: KstDate,
     pub coverage: RangeCoverage,
     pub days: Vec<T>,
+    pub skipped_days: Vec<SkippedDay>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct SkippedDay {
+    pub day: KstDate,
+    pub field: String,
+    pub reason: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, TS)]

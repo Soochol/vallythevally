@@ -86,6 +86,32 @@ impl Api {
     async fn logs(self) -> String {
         self.server.stop().await
     }
+
+    async fn kiwoom_first_page(&self, endpoint: &str, code: &str) -> Value {
+        let (path, body) = if endpoint == FOREIGN {
+            ("frgnistt", json!({"stk_cd": code}))
+        } else {
+            ("stkinfo", json!({"dt": today().yyyymmdd(), "stk_cd": code, "amt_qty_tp": "2", "trde_tp": "0", "unit_tp": "1"}))
+        };
+        let resp = self
+            .client
+            .post(format!("{}/api/dostk/{path}", self.fake.base_url()))
+            .header("api-id", api_id(endpoint))
+            .header("authorization", format!("Bearer {}", common::TOKEN))
+            .body(body.to_string())
+            .send()
+            .await
+            .unwrap();
+        serde_json::from_str(&resp.text().await.unwrap()).unwrap()
+    }
+}
+
+fn newest_first(code: &str) -> Vec<KstDate> {
+    stock(code).bars.iter().rev().map(|b| b.day).collect()
+}
+
+fn skipped(days: &Value) -> Vec<(String, String)> {
+    days.as_array().unwrap().iter().map(|d| (d["day"].as_str().unwrap().to_owned(), d["field"].as_str().unwrap().to_owned())).collect()
 }
 
 fn expected_days(endpoint: &str, code: &str, from: KstDate, to: KstDate) -> Vec<Value> {
@@ -145,6 +171,7 @@ async fn a_range_over_several_pages_comes_back_whole_in_day_order_and_the_walk_s
         assert_eq!(body["coverage"], json!({"kind": "whole_range"}), "{endpoint}");
         let days = body["days"].as_array().unwrap();
         assert_eq!(days, &expected_days(endpoint, krx::PRE_1985, from, to), "{endpoint}: 기간 안의 날만, 빠짐·겹침 없이, 오래된 날부터");
+        assert_eq!(body["skippedDays"], json!([]), "{endpoint}");
         assert_eq!(api.chain(endpoint), chain_through(krx::PRE_1985, pages), "{endpoint}: from에 닿은 페이지에서 멈춘다");
     }
     let bodies: Vec<Value> = api.fake.calls().into_iter().filter(|c| c.api_id == "ka10059").map(|c| c.body).collect();
@@ -169,6 +196,7 @@ async fn a_range_longer_than_kiwooms_history_gives_what_kiwoom_has_and_says_wher
     let (status, before_listing) = api.history(NET_SHARES, krx::COMMON, day(2019, 1, 1), day(2019, 12, 31)).await;
     assert_eq!(status, 200, "{before_listing}");
     assert_eq!((&before_listing["coverage"]["firstDay"], &before_listing["days"]), (&json!(first.to_string()), &json!([])), "기간 전체가 키움 자료보다 이르면 빈 날과 시작일");
+    assert_eq!(before_listing["skippedDays"], json!([]), "자료가 없는 기간은 빠진 날도 없다");
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -240,28 +268,56 @@ async fn a_success_without_the_list_is_a_protocol_failure_that_stops_the_path_no
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn an_unreadable_row_is_left_out_and_logged_while_the_other_days_come_back() {
+async fn when_every_row_in_the_range_is_unreadable_the_days_are_empty_and_each_row_is_a_skipped_day() {
     let api = Api::boot().await;
-    let newest_first: Vec<KstDate> = stock(krx::COMMON).bars.iter().rev().map(|b| b.day).collect();
-    let (from, broken_day) = (newest_first[PAGE_ROWS - 1], newest_first[2]);
-    let page = reqwest::Client::new()
-        .post(format!("{}/api/dostk/frgnistt", api.fake.base_url()))
-        .header("api-id", "ka10008")
-        .header("authorization", format!("Bearer {}", common::TOKEN))
-        .body(json!({"stk_cd": krx::COMMON}).to_string())
-        .send()
-        .await
-        .unwrap();
-    let mut only_page: Value = serde_json::from_str(&page.text().await.unwrap()).unwrap();
-    assert_eq!(only_page["stk_frgnr"][2]["dt"], broken_day.yyyymmdd());
-    only_page["stk_frgnr"][2]["poss_stkcnt"] = json!("N/A");
-    api.fake.respond_with("ka10008", 200, only_page);
-    let (status, body) = api.history(FOREIGN, krx::COMMON, from, today()).await;
-    assert_eq!((status, &body["coverage"]["kind"]), (200, &json!("whole_range")), "{body}");
-    let want: Vec<Value> = expected_days(FOREIGN, krx::COMMON, from, today()).into_iter().filter(|d| d["day"] != json!(broken_day.to_string())).collect();
-    assert_eq!(body["days"].as_array().unwrap(), &want, "그 행만 빠진다");
+    let newest_first = newest_first(krx::COMMON);
+    let (from, to) = (newest_first[50], newest_first[10]);
+    for (endpoint, kiwoom_field, field) in [(FOREIGN, "poss_stkcnt", "shares"), (NET_SHARES, "natn", "government")] {
+        let mut page = api.kiwoom_first_page(endpoint, krx::COMMON).await;
+        for row in page[list(endpoint)].as_array_mut().unwrap() {
+            row[kiwoom_field] = json!("");
+        }
+        api.fake.respond_with(api_id(endpoint), 200, page);
+
+        let (status, body) = api.history(endpoint, krx::COMMON, from, to).await;
+        assert_eq!((status, &body["coverage"]["kind"], &body["days"]), (200, &json!("whole_range"), &json!([])), "{endpoint}: {body}");
+        let want: Vec<(String, String)> = newest_first[10..=50].iter().rev().map(|d| (d.to_string(), field.to_owned())).collect();
+        assert_eq!(skipped(&body["skippedDays"]), want, "{endpoint}: 기간 안에서 뺀 행은 빠짐없이, 기간 밖의 행은 넣지 않는다");
+        assert!(body["skippedDays"].as_array().unwrap().iter().all(|d| d["reason"].as_str().unwrap().starts_with(&format!("{kiwoom_field}: "))), "{endpoint}: {body}");
+
+        let (status, one_day) = api.history(endpoint, krx::COMMON, today(), today()).await;
+        assert_eq!((status, &one_day["days"]), (200, &json!([])), "{endpoint}: {one_day}");
+        assert_eq!(skipped(&one_day["skippedDays"]), [(today().to_string(), field.to_owned())], "{endpoint}: 하루짜리 기간도 빈 기간과 구별된다");
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn some_unreadable_rows_stay_out_of_days_and_only_those_come_back_as_skipped_days() {
+    let api = Api::boot().await;
+    let newest_first = newest_first(krx::COMMON);
+    let from = newest_first[PAGE_ROWS - 1];
+    let mut broken_days = Vec::new();
+    for (endpoint, broken) in [(FOREIGN, [(2, "poss_stkcnt", "N/A", "shares"), (5, "wght", "", "weightPct")]), (NET_SHARES, [(2, "natn", "", "government"), (5, "orgn", "x", "institution")])] {
+        let mut page = api.kiwoom_first_page(endpoint, krx::COMMON).await;
+        for (row, kiwoom_field, text, _) in broken {
+            assert_eq!(page[list(endpoint)][row]["dt"], newest_first[row].yyyymmdd());
+            page[list(endpoint)][row][kiwoom_field] = json!(text);
+        }
+        api.fake.respond_with(api_id(endpoint), 200, page);
+
+        let (status, body) = api.history(endpoint, krx::COMMON, from, today()).await;
+        assert_eq!((status, &body["coverage"]["kind"]), (200, &json!("whole_range")), "{endpoint}: {body}");
+        let left_out: Vec<String> = broken.iter().map(|(row, ..)| newest_first[*row].to_string()).collect();
+        let want: Vec<Value> = expected_days(endpoint, krx::COMMON, from, today()).into_iter().filter(|d| !left_out.contains(&d["day"].as_str().unwrap().to_owned())).collect();
+        assert_eq!(body["days"].as_array().unwrap(), &want, "{endpoint}: 그 행만 빠진다");
+        let want_skipped: Vec<(String, String)> = broken.iter().rev().map(|(row, _, _, field)| (newest_first[*row].to_string(), field.to_string())).collect();
+        assert_eq!(skipped(&body["skippedDays"]), want_skipped, "{endpoint}: 빠진 행만, 오래된 날부터");
+        broken_days.extend(broken.iter().map(|(row, ..)| newest_first[*row].yyyymmdd()));
+    }
     let logs = api.logs().await;
-    assert!(logs.lines().any(|l| l.contains("WARN") && l.contains("행을 읽지 못해") && l.contains(&broken_day.yyyymmdd()) && l.contains(krx::COMMON)), "종목과 날을 남긴다: {logs}");
+    for dt in broken_days {
+        assert!(logs.lines().any(|l| l.contains("WARN") && l.contains("행을 읽지 못해") && l.contains(&dt) && l.contains(krx::COMMON)), "{dt}: 종목과 날을 남긴다: {logs}");
+    }
 }
 
 #[tokio::test(flavor = "multi_thread")]

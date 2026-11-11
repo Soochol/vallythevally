@@ -69,7 +69,7 @@ where
     R: MarketRequest,
     R::Response: DayPage,
 {
-    let mut days = Vec::new();
+    let (mut days, mut skipped) = (Vec::new(), Vec::new());
     let mut reached: Option<KstDate> = None;
     let mut cont: Option<ContKey> = None;
     let first_day = loop {
@@ -82,12 +82,23 @@ where
             tracing::warn!(api_id = R::API_ID.as_str(), code = code.as_str(), %reached, "키움 연속조회가 더 오래된 날을 주지 않아 여기서 멈춥니다");
             break reached;
         };
-        for row in &rows.unreadable {
+        for row in &rows.undated {
             tracing::warn!(api_id = R::API_ID.as_str(), code = code.as_str(), dt = %row.dt, reason = %row.reason, "키움 행을 읽지 못해 그 행만 빼고 받습니다");
         }
         reached = Some(rows.oldest);
         let oldest = rows.oldest;
-        days.extend(rows.rows.into_iter().filter(|(day, _)| range.contains(*day)));
+        for (day, row) in rows.rows {
+            match row {
+                Ok(row) if range.contains(day) => days.push((day, row)),
+                Ok(_) => {}
+                Err(e) => {
+                    tracing::warn!(api_id = R::API_ID.as_str(), code = code.as_str(), dt = %day.yyyymmdd(), field = e.field, reason = %e.reason, "키움 행을 읽지 못해 그 행만 빼고 받습니다");
+                    if range.contains(day) {
+                        skipped.push(api::SkippedDay { day: api::KstDate(day), field: e.field.to_owned(), reason: e.reason.to_string() });
+                    }
+                }
+            }
+        }
         match page.next {
             Some(next) if oldest > range.from => cont = Some(next),
             _ => break oldest,
@@ -95,6 +106,9 @@ where
     };
     days.sort_by_key(|(day, _)| *day);
     days.dedup_by_key(|(day, _)| *day);
+    skipped.sort_by_key(|s| s.day);
+    skipped.dedup_by_key(|s| s.day);
+    skipped.retain(|s| days.binary_search_by_key(&s.day.0, |(day, _)| *day).is_err());
     let coverage = if first_day <= range.from { api::RangeCoverage::WholeRange } else { api::RangeCoverage::KiwoomStartsLater { first_day: api::KstDate(first_day) } };
     Ok(api::DayHistory {
         symbol: api::SymbolCode(Symbol::Stock(code).as_wire()),
@@ -102,5 +116,6 @@ where
         to: api::KstDate(range.to),
         coverage,
         days: days.into_iter().map(|(_, day)| day).collect(),
+        skipped_days: skipped,
     })
 }
