@@ -46,3 +46,11 @@ test("일·주·월봉 눈금은 라이브러리 기본을 쓴다", () => {
   expect(formatTickMark(toChartTime(nov6Kst), TickMarkType.DayOfMonth, "D")).toBeNull();
   expect(formatTickMark(toChartTime(nov6Kst), TickMarkType.Month, "M")).toBeNull();
 });
+
+
+test("분기봉·연봉은 분봉 날짜 표시와 눈금을 쓰지 않는다", () => {
+  for (const period of ["Q", "Y"] as const) {
+    expect(formatBarTime(nov6Kst, period)).toBe("2026-11-06");
+    expect(formatTickMark(toChartTime(nov6Kst), TickMarkType.Month, period)).toBeNull();
+  }
+});

@@ -49,6 +49,11 @@ describe("규칙 1: 봉 구간 안", () => {
 
   test("분봉은 n분이다", () => {
     expect(barLength("5m", 0)).toBe(300);
+    expect(barLength("10m", 0)).toBe(600);
+    const ten = tl("10m", [kst(2026, 11, 6, 9), kst(2026, 11, 6, 9, 10)]);
+    expect(tToLogical(ten, kst(2026, 11, 6, 9, 5))).toBe(0.5);
+    expect(logicalToT(ten, 1.5)).toBe(kst(2026, 11, 6, 9, 15));
+    expect(startAt(ten, 2)).toBe(kst(2026, 11, 6, 9, 20));
     expect(tToLogical(tl("5m", [kst(2026, 11, 6, 9), kst(2026, 11, 6, 9, 5)]), kst(2026, 11, 6, 9, 1))).toBeCloseTo(0.2, 12);
   });
 });
@@ -245,4 +250,36 @@ describe("frontend.md §3.5 보이는 모습", () => {
 test("timelineOf는 봉 시작을 그대로 쓴다", () => {
   expect(timelineOf([barAt(5), barAt(10)], "1m")).toEqual({ period: "1m", starts: [5, 10] });
   expect(nextBarStart("60m", kst(2026, 11, 6, 19))).toBe(kst(2026, 11, 6, 19) + HOUR);
+});
+
+
+describe("분기봉·연봉의 KST 달력과 미래 드로잉", () => {
+  test("분기마다 실제 일수를 쓰고 윤년과 연도 경계를 넘긴다", () => {
+    expect(barLength("Q", kst(2027, 1, 1))).toBe(90 * DAY);
+    expect(barLength("Q", kst(2028, 1, 1))).toBe(91 * DAY);
+    expect(barLength("Q", kst(2028, 4, 1))).toBe(91 * DAY);
+    expect(barLength("Q", kst(2028, 7, 1))).toBe(92 * DAY);
+    expect(nextBarStart("Q", kst(2027, 12, 31, 23))).toBe(kst(2028, 1, 1));
+    expect(nextBarStart("Q", kst(2028, 3, 31))).toBe(kst(2028, 4, 1));
+    expect(barLength("Y", kst(2027, 1, 1))).toBe(365 * DAY);
+    expect(barLength("Y", kst(2028, 1, 1))).toBe(366 * DAY);
+    expect(nextBarStart("Y", kst(2028, 12, 31, 23))).toBe(kst(2029, 1, 1));
+  });
+
+  test.each<Period>(["Q", "Y"])("%s 미래 시각과 드로잉 화면 좌표를 왕복한다", (period) => {
+    const first = period === "Q" ? kst(2027, 10, 1) : kst(2027, 1, 1);
+    const timeline = tl(period, [first]);
+    expect(startAt(timeline, 1)).toBe(kst(2028, 1, 1));
+    expect(startAt(timeline, 2)).toBe(period === "Q" ? kst(2028, 4, 1) : kst(2029, 1, 1));
+    const t = kst(2028, 2, 29, 12);
+    const logical = tToLogical(timeline, t);
+    expect(logical).toBeCloseTo(1 + 59.5 / (period === "Q" ? 91 : 366), 12);
+    expect(logical === null ? null : logicalToT(timeline, logical)).toBe(t);
+    const frame = frameOf([barAt(first)], period);
+    const point = { t, price: 2500 };
+    const screen = toScreen(frame, point);
+    expect(Number.isFinite(screen?.x)).toBe(true);
+    expect(screen === null ? null : fromScreen(frame, screen)).toEqual(point);
+    expect(shiftBars(timeline, first, 2)).toBe(startAt(timeline, 2));
+  });
 });
