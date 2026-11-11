@@ -9,7 +9,8 @@ import {
   PriceScaleMode,
 } from "lightweight-charts";
 import type { Bar } from "../../api/generated/Bar";
-import type { LineId } from "../../api/generated/LineId";
+import type { FinancialsPage } from "../../api/generated/FinancialsPage";
+import { adjacentBucket, financialBuckets, financialDetail, financialFailure, financialReason, checkedTime, financialSummary, financialValue, reportingPeriod } from "../financials";
 import type { Period } from "../../api/generated/Period";
 import type { UnixSeconds } from "../../api/generated/UnixSeconds";
 import { formatPrice, formatVolume } from "../../lib/format";
@@ -19,7 +20,7 @@ import type { ThemeTokens } from "../theme";
 import { toChartTime } from "../time";
 import type { IndicatorPort, OpenPort } from "./client";
 import { applyToPoints, DrawQueue, pointAtTime } from "./drawQueue";
-import { isBarLine, lineColor, specLines, specName } from "./kinds";
+import { isFinancial, isFinancialBar, type PlotLineId as LineId, isBarLine, lineColor, specLines, specName } from "./kinds";
 import { addOverlayLine, type OverlayPoint, type OverlaySeries } from "./overlayLine";
 import type { BarTuple, Columns, EngineErrorKind, EngineResult, FromWorker, LineInfo, Point } from "./protocol";
 import { syncOp } from "./sync";
@@ -56,6 +57,7 @@ export interface IndicatorRow {
   color: string;
   values: LegendValue[];
   state: "ok" | "pending" | "hidden" | EngineErrorKind;
+  detail?: { summary: string; text: string; reports: { label: string; text: string }[] };
   panel: { index: number; count: number } | null;
 }
 
@@ -107,6 +109,26 @@ export class IndicatorLayer {
   private display: Bar[] = [];
   private committedT: UnixSeconds | null = null;
   private broken = false;
+  private financials: FinancialsPage | null = null;
+  private financialReports = new Map<string, { label: string; text: string }[]>();
+  private financialSummaryText = "";
+  private financialMessage = "재무자료를 불러오는 중입니다";
+  private financialNotice: string | undefined;
+
+  setFinancials(page: FinancialsPage | null, message?: string): void {
+    this.financials = page;
+    this.financialNotice = message;
+    this.financialSummaryText = page ? financialSummary(page) : "";
+    this.financialReports = new Map(page?.series.map((series) => [series.metric, series.points.map((point) => ({ label: `${point.businessYear} / ${point.reportCode} · ${reportingPeriod(point.period)}`, text: financialDetail(point, series.metric) }))]) ?? []);
+    this.financialMessage = message ?? "재무자료를 불러오는 중입니다";
+    this.host.guard(() => {
+      for (const s of this.shown.values()) if (isFinancial(s.config.spec)) {
+        s.status = { kind: s.config.visible ? "ready" : "hidden" };
+        this.drawFinancial(s);
+      }
+    });
+    this.host.requestFrame();
+  }
 
   constructor(
     private readonly host: LayerHost,
@@ -158,6 +180,7 @@ export class IndicatorLayer {
     if (panelOrderChanged || orderChanged || [...this.shown.values()].some((s) => s.lines.length === 0)) this.rebuildSeries();
     this.applyStretch();
     this.create(fresh);
+    for (const s of this.shown.values()) if (isFinancial(s.config.spec)) this.drawFinancial(s);
   }
 
   reset(h: History): void {
@@ -174,6 +197,7 @@ export class IndicatorLayer {
       if (s.config.visible) s.status = { kind: "pending" };
     }
     this.create(visible);
+    for (const s of this.shown.values()) if (isFinancial(s.config.spec)) this.drawFinancial(s);
   }
 
   clear(): void {
@@ -230,6 +254,7 @@ export class IndicatorLayer {
     this.drain();
     for (const s of this.shown.values()) {
       this.styleLines(s);
+      if (isFinancial(s.config.spec)) this.drawFinancial(s);
       for (const line of s.lines) if (isBarLine(line.id)) this.draw(line, line.points);
     }
   }
@@ -246,6 +271,18 @@ export class IndicatorLayer {
       const state = status.kind === "error" ? status.error : status.kind === "ready" ? "ok" : status.kind;
       const lines = specLines(config.spec);
       const panelIndex = config.panel === "price" ? -1 : this.panels.findIndex((p) => p.id === config.panel);
+      if (isFinancial(config.spec)) {
+        const metric = config.spec.kind;
+        const points = this.financials?.series.find((series) => series.metric === metric)?.points ?? [];
+        const at = points.filter((p) => p.priceBucket === t);
+        const summary = this.financials ? [this.financialSummaryText, this.financialNotice].filter(Boolean).join(" · ") : this.financialMessage;
+        const unitNote = metric === "dps" && this.host.period() === "Q" ? " · 연간 전용" : "";
+        return { id: config.id, name: `${specName(config.spec)}${this.financials?.fiscalMonth ? ` · ${this.financials.fiscalMonth}월 결산` : ""}${unitNote}`, color: tokens.ind[config.style.colors[0] ?? "ind-1"],
+          values: at.map((p) => ({ text: p.value === null ? financialReason(p.reason) || "—" : financialValue(p.value, metric, p.currency), color: tokens.text2 })),
+          state: config.visible ? "ok" : "hidden", panel: { index: panelIndex, count: this.panels.length },
+          detail: { summary, text: [summary, financialFailure(this.financials?.failure ?? null), financialFailure(this.financials?.disclosureFailure ?? null), this.financials ? `최근 시도 ${checkedTime(this.financials.lastAttemptAt)}` : "", this.financials?.shareClassReason ? "배당 주식 종류 미확인 · 회사 재무와 별도로 확인합니다" : "", this.financials?.latestCorrections ? "정정된 최신 공시 기준" : "", ...at.map((p) => financialDetail(p, metric))].join("\n\n"),
+            reports: this.financialReports.get(metric) ?? [] } };
+      }
       const values: LegendValue[] =
         state !== "ok" || t === null || !s
           ? []
@@ -278,6 +315,7 @@ export class IndicatorLayer {
   }
 
   private create(configs: IndicatorConfig[]): void {
+    configs = configs.filter((c) => !isFinancial(c.spec));
     const h = this.history;
     if (!h || configs.length === 0) return;
     const gen = ++this.gen;
@@ -344,7 +382,7 @@ export class IndicatorLayer {
     this.broken = true;
     this.host.guard(() => {
       for (const s of this.shown.values()) {
-        if (s.status.kind === "hidden") continue;
+        if (s.status.kind === "hidden" || isFinancial(s.config.spec)) continue;
         s.status = { kind: "error", error: "calc", message: "" };
         s.gen = 0;
         this.clearLines(s);
@@ -371,7 +409,10 @@ export class IndicatorLayer {
       const s = this.shown.get(config.id);
       if (s) s.lines = this.addLines(config, old.get(config.id) ?? []);
     }
-    for (const s of this.shown.values()) for (const line of s.lines) if (line.points.length) this.draw(line, line.points);
+    for (const s of this.shown.values()) {
+      if (isFinancial(s.config.spec)) this.drawFinancial(s);
+      else for (const line of s.lines) if (line.points.length) this.draw(line, line.points);
+    }
   }
 
   private addLines(config: IndicatorConfig, kept: readonly Line[]): Line[] {
@@ -389,8 +430,9 @@ export class IndicatorLayer {
 
   private addPlot(config: IndicatorConfig, id: LineId, i: number, pane: number): Plot {
     const options = { ...this.lineOptions(config, id, i), priceFormat: this.priceFormat(config) };
+    if (isFinancial(config.spec) && !isFinancialBar(config.spec.kind)) return { overlay: true, series: addOverlayLine(this.host.chart, options, pane) };
     if (isOverlay(config, id)) return { overlay: true, series: addOverlayLine(this.host.chart, options, pane) };
-    const series = isBarLine(id)
+    const series = (isFinancial(config.spec) ? isFinancialBar(config.spec.kind) : isBarLine(id))
       ? this.host.chart.addSeries(HistogramSeries, options, pane)
       : this.host.chart.addSeries(LineSeries, options, pane);
     return { overlay: false, series };
@@ -403,7 +445,7 @@ export class IndicatorLayer {
   private lineOptions(config: IndicatorConfig, id: LineId, i: number) {
     const color = this.host.tokens().ind[lineColor(config.spec, config.style.colors, i)];
     const common = { visible: config.visible, priceLineVisible: false, lastValueVisible: config.panel !== "price", title: "" };
-    if (isBarLine(id)) return common;
+    if (isBarLine(id) || (isFinancial(config.spec) && isFinancialBar(config.spec.kind))) return common;
     const line = { ...common, color, lineWidth: config.style.width };
     return isOverlay(config, id) ? line : { ...line, crosshairMarkerVisible: false };
   }
@@ -416,6 +458,12 @@ export class IndicatorLayer {
   }
 
   private priceFormat(config: IndicatorConfig): PriceFormat {
+    if (isFinancial(config.spec)) {
+      const metric = config.spec.kind;
+      const currencies = new Set(this.financials?.series.find((series) => series.metric === metric)?.points.flatMap((p) => p.currency ? [p.currency] : []));
+      const currency = currencies.size === 1 ? [...currencies][0] ?? null : "원문 통화";
+      return { type: "custom", minMove: 0.01, formatter: (v: number) => financialValue(v, metric, currency) };
+    }
     if (config.spec.kind === "rsi" || config.spec.kind === "stochSlow") return { type: "price", precision: 2, minMove: 0.01 };
     return { type: "custom", minMove: 0.01, formatter: (v: number) => this.format(config, v) };
   }
@@ -430,6 +478,23 @@ export class IndicatorLayer {
         return formatPrice(v, true);
       default:
         return formatPrice(v, this.host.isIndex());
+    }
+  }
+
+  private drawFinancial(s: Shown): void {
+    if (!isFinancial(s.config.spec)) return;
+    const period = this.host.period();
+    const metric = s.config.spec.kind;
+    const buckets = financialBuckets(this.financials?.series.find((series) => series.metric === metric)?.points ?? []);
+    for (const line of s.lines) {
+      const points = [...buckets].sort(([a], [b]) => a - b).flatMap(([t, ps]) => {
+        const p = ps[0];
+        return ps.length === 1 && p?.status === "available" && p.value !== null ? [{ t, v: p.value }] : [];
+      });
+      line.points = points;
+      if (line.overlay) line.series.setData(points.map((p, i) => ({ time: toChartTime(p.t), value: p.v, base: p.v, connect: period === "Q" || period === "Y" ? i > 0 && adjacentBucket(points[i - 1]!.t, p.t, period) : false })));
+      else line.series.setData(points.map((p) => ({ time: toChartTime(p.t), value: p.v, color: p.v >= 0 ? this.host.tokens().upVol : this.host.tokens().downVol })));
+      line.series.applyOptions({ priceFormat: this.priceFormat(s.config) });
     }
   }
 

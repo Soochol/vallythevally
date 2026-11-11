@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { beforeAll, expect, test } from "vitest";
-import { KIND_ORDER, KINDS } from "../../chart/indicators/kinds";
+import { isFinancial, KIND_ORDER, KINDS } from "../../chart/indicators/kinds";
 import init, { validateSpec } from "../../wasm/indicators/indicators.js";
 import { checkForm, formFromSpec, placeErrors, type SpecForm, type Validate } from "./indicatorForm";
 
@@ -13,7 +13,7 @@ beforeAll(async () => {
 });
 
 test("기본값은 실제 wasm 검사를 통과한다", () => {
-  for (const kind of KIND_ORDER) expect(checkForm(formFromSpec(KINDS[kind].defaults), validate).ok).toBe(true);
+  for (const kind of KIND_ORDER.filter((k) => !isFinancial(KINDS[k].defaults))) expect(checkForm(formFromSpec(KINDS[kind].defaults), validate).ok).toBe(true);
 });
 
 test("wasm 오류는 그 입력칸 아래로 간다", () => {
