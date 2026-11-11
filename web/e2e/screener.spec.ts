@@ -1,5 +1,6 @@
 import type { Locator, Page } from "@playwright/test";
 import { type App, cell, chartOf, expect, SEARCH_BUTTON_TITLE, test } from "./harness";
+import { editor, excludedLine, expectCellOn, expectRows, openScreener, panel, pickPeriod, pickVenue, rail, results, rows, runButton, savedTo, storeLine, updateBand, waitForUpdateToFinish } from "./screener-page";
 
 test.use({ krxMarket: "20261106", clockStart: "20261109100000" });
 
@@ -7,47 +8,7 @@ const NEXT_MORNING = { market: "20261109", clockStart: "20261110100000" };
 const SCREEN_NAME = "고가 60일 신고가";
 const EDITED_NAME = "고가 60일 신고가 정지 제외";
 
-const rail = (page: Page) => page.getByRole("navigation", { name: "오른쪽 패널" });
-const panel = (page: Page) => page.getByRole("complementary", { name: "스크리너" });
 const watchPanel = (page: Page) => page.getByRole("complementary", { name: "관심종목" });
-const updateBand = (page: Page) => panel(page).getByLabel("업데이트", { exact: true });
-const storeLine = (page: Page) => panel(page).getByLabel("KRX 일봉 저장소");
-const runButton = (page: Page) => panel(page).getByRole("button", { name: /^(실행|실행 중)$/ });
-const results = (page: Page) => panel(page).getByRole("region", { name: "결과" });
-const excludedLine = (page: Page) => results(page).getByText(/^대상 \d+종목 · 빠짐: /);
-const rows = (page: Page) => results(page).locator("li[data-code]");
-const editor = (page: Page, title: string) => page.getByRole("dialog", { name: title });
-const toolbar = (page: Page) => page.getByRole("toolbar", { name: "차트 도구 막대" });
-const pickVenue = (page: Page, venue: string) => toolbar(page).getByRole("group", { name: "거래소" }).getByRole("button", { name: venue, exact: true }).click();
-const pickPeriod = (page: Page, period: string) => toolbar(page).getByRole("group", { name: "봉 주기" }).getByRole("button", { name: period, exact: true }).click();
-
-async function openScreener(page: Page) {
-  await rail(page).getByRole("button", { name: /^스크리너/ }).click();
-  await expect(panel(page)).toBeVisible();
-}
-
-async function waitForUpdateToFinish(page: Page, lastDay: string) {
-  await expect(panel(page).getByRole("status")).toBeVisible();
-  await expect(updateBand(page)).toBeHidden({ timeout: 60_000 });
-  await expect(storeLine(page)).toContainText(`KRX 일봉 · ${lastDay}까지`);
-}
-
-async function expectRows(page: Page, expected: readonly (readonly [code: string, name: string, highDate: string])[]) {
-  await expect(rows(page)).toHaveCount(expected.length);
-  await expect.poll(() => rows(page).evaluateAll((li) => li.map((e) => e.getAttribute("data-code")))).toEqual(expected.map(([code]) => code));
-  for (const [i, [, name, highDate]] of expected.entries()) {
-    const row = rows(page).nth(i);
-    await expect(row.locator("b")).toHaveText(name);
-    await expect(row.getByRole("button").locator("span").last()).toHaveText(highDate);
-  }
-}
-
-async function expectCellOn(page: Page, row: Locator, label: string) {
-  await expect(cell(page)).toHaveAttribute("aria-label", `칸 1: ${label}`);
-  await expect(row.getByRole("button")).toHaveAttribute("aria-current", "true");
-  await expect(cell(page)).toHaveAttribute("aria-busy", "false");
-  await expect(chartOf(cell(page))).not.toHaveAttribute("data-bar-count", "0");
-}
 
 async function expectWatchlistOfResults(page: Page) {
   await expect(watchPanel(page).getByRole("button", { name: /^관심종목 목록: / })).toHaveAccessibleName(`관심종목 목록: ${SCREEN_NAME}`);
@@ -89,8 +50,6 @@ async function holdSymbolInfo(page: Page, code: string) {
     },
   };
 }
-
-const savedTo = (page: Page, path: string) => page.waitForResponse((r) => r.request().method() === "PUT" && new URL(r.url()).pathname === path && r.ok());
 
 test("빈 저장소를 채우고 만든 조건식으로 찾은 종목을 칸의 거래소와 봉 주기 그대로 훑고, 다음 날 자료 부족을 채운 뒤 고치고 지운다", async ({ app, page }) => {
   test.setTimeout(180_000);
