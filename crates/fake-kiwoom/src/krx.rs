@@ -59,6 +59,19 @@ pub const SPAC: &str = "110080";
 pub const NEW_LISTING: &str = "110090";
 const NXT_LISTED: [&str; 2] = [SPLIT, MANAGED];
 
+pub const CROSS_SURGE_KOSPI: &str = "120010";
+pub const CROSS_SURGE_KOSDAQ: &str = "120020";
+pub const NO_CROSS: &str = "120030";
+pub const NO_SURGE: &str = "120040";
+pub const BELOW_EARLIER_HIGH: &str = "120050";
+pub const UNDER_CAP: &str = "120060";
+
+pub const FLAT_PRICE: u64 = 10_000;
+pub const STEPPED_PRICE: u64 = 11_000;
+pub const EARLIER_HIGH_PRICE: u64 = 12_000;
+pub const CALM_VOLUME: u64 = 100_000;
+pub const SURGED_VOLUME: u64 = 500_000;
+
 const SPLIT_RATIO: u64 = 5;
 
 fn day(y: i32, m: u8, d: u8) -> KstDate {
@@ -117,6 +130,61 @@ fn daily_withheld() -> Profile {
     Profile { code: DAILY_WITHHELD, name: "가상화학우B", market_code: "0", company_class_name: "", reg_day: day(2003, 6, 16), audit_info: "거래정지", listed_shares: Some(1_154_000), level: 9_000 }
 }
 
+struct ConditionProfile {
+    code: &'static str,
+    name: &'static str,
+    market_code: &'static str,
+    listed_shares: u64,
+    steps_up_on: Option<KstDate>,
+    surges_on: Option<KstDate>,
+    earlier_high: Option<(KstDate, KstDate)>,
+}
+
+fn condition_profiles() -> Vec<ConditionProfile> {
+    let p = |code, name, market_code, listed_shares, steps_up_on, surges_on, earlier_high| ConditionProfile { code, name, market_code, listed_shares, steps_up_on, surges_on, earlier_high };
+    let november = |d| Some(day(2026, 11, d));
+    let may = Some((day(2026, 5, 4), day(2026, 5, 29)));
+    vec![
+        p(CROSS_SURGE_KOSPI, "가상교차급증", "0", 27_300_000, november(5), november(2), None),
+        p(CROSS_SURGE_KOSDAQ, "가상코스닥교차", "10", 50_000_000, november(4), november(3), None),
+        p(NO_CROSS, "가상횡보", "0", 50_000_000, None, november(3), None),
+        p(NO_SURGE, "가상거래한산", "0", 50_000_000, november(3), None, None),
+        p(BELOW_EARLIER_HIGH, "가상전고점", "10", 50_000_000, november(4), november(3), may),
+        p(UNDER_CAP, "가상시총미달", "10", 27_200_000, november(4), november(3), None),
+    ]
+}
+
+fn condition_stock(p: &ConditionProfile, days: &[KstDate]) -> KrxStock {
+    let price = |d: KstDate| {
+        if p.earlier_high.is_some_and(|(from, through)| (from..=through).contains(&d)) {
+            EARLIER_HIGH_PRICE
+        } else if p.steps_up_on.is_some_and(|from| d >= from) {
+            STEPPED_PRICE
+        } else {
+            FLAT_PRICE
+        }
+    };
+    let mut bars: Vec<KrxBar> = Vec::with_capacity(days.len());
+    for &d in days {
+        let close = price(d);
+        let base = bars.last().map_or(close, |b| b.close);
+        let volume = if p.surges_on == Some(d) { SURGED_VOLUME } else { CALM_VOLUME };
+        bars.push(KrxBar { day: d, open: close, high: close, low: close, close, volume, traded_million_won: close * volume / 1_000_000, base, adjustment_rate: None });
+    }
+    KrxStock {
+        code: p.code.into(),
+        name: p.name.into(),
+        market_code: p.market_code.into(),
+        company_class_name: String::new(),
+        reg_day: sample_first_day(),
+        audit_info: "정상".into(),
+        listed_shares: Some(p.listed_shares),
+        quoted: true,
+        daily: DailyAnswer::Bars,
+        bars,
+    }
+}
+
 impl KrxMarket {
     pub fn sample(as_of: KstDate) -> KrxMarket {
         let days = sample_calendar(as_of);
@@ -129,6 +197,12 @@ impl KrxMarket {
         let mut stock = sample_stock(&daily_withheld(), self.stocks.len(), &self.days, as_of);
         stock.daily = DailyAnswer::EmptyRow;
         self.stocks.push(stock);
+        self
+    }
+
+    pub fn with_condition_stocks(mut self) -> KrxMarket {
+        let added: Vec<KrxStock> = condition_profiles().iter().map(|p| condition_stock(p, &self.days)).collect();
+        self.stocks.extend(added);
         self
     }
 

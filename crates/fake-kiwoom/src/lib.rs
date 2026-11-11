@@ -234,6 +234,8 @@ struct RejectToken {
 #[serde(rename_all = "camelCase")]
 struct SampleKrxMarket {
     as_of: String,
+    #[serde(default)]
+    condition_stocks: bool,
 }
 
 async fn admin_respond_with(State(seen): State<Arc<Seen>>, Json(r): Json<RespondWith>) -> Response {
@@ -264,7 +266,9 @@ async fn admin_reset(State(seen): State<Arc<Seen>>) -> StatusCode {
 async fn admin_krx_market(State(seen): State<Arc<Seen>>, Json(m): Json<SampleKrxMarket>) -> Response {
     match KstDate::parse_yyyymmdd(&m.as_of) {
         Some(as_of) => {
-            *seen.krx_market.lock().unwrap() = Some(Arc::new(KrxMarket::sample(as_of)));
+            let sample = KrxMarket::sample(as_of);
+            let market = if m.condition_stocks { sample.with_condition_stocks() } else { sample };
+            *seen.krx_market.lock().unwrap() = Some(Arc::new(market));
             StatusCode::NO_CONTENT.into_response()
         }
         None => (StatusCode::BAD_REQUEST, format!("asOf는 YYYYMMDD입니다: {}", m.as_of)).into_response(),

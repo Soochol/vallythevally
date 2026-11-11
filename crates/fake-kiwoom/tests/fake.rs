@@ -229,6 +229,46 @@ async fn krx_stock_lists_give_each_stock_its_own_zero_padded_list_count_and_leav
 }
 
 #[tokio::test]
+async fn condition_stocks_join_the_krx_sample_only_when_asked_and_leave_the_sample_stocks_as_they_were() {
+    let as_of = domain::KstDate::new(2026, 11, 6).unwrap();
+    let sample = KrxMarket::sample(as_of);
+    let joined = KrxMarket::sample(as_of).with_condition_stocks();
+    assert_eq!(joined.stocks[..sample.stocks.len()], sample.stocks[..], "표본 종목과 봉은 그대로다");
+
+    let fake = FakeKiwoom::start().await;
+    let base = fake.base_url();
+    let markets = || async {
+        let mut listed = std::collections::BTreeMap::new();
+        for market in ["0", "10"] {
+            for row in kiwoom(&base, "ka10099", json!({"mrkt_tp": market}), None).await.body["list"].as_array().unwrap() {
+                listed.insert(row["code"].as_str().unwrap().to_owned(), (market, row["listCount"].as_str().unwrap().to_owned()));
+            }
+        }
+        listed
+    };
+    assert_eq!(admin(&base, "krx-market", json!({"asOf": "20261106"})).await, 204);
+    assert!(!markets().await.contains_key(krx::CROSS_SURGE_KOSPI), "부르지 않으면 표본 종목만 있다");
+
+    assert_eq!(admin(&base, "krx-market", json!({"asOf": "20261106", "conditionStocks": true})).await, 204);
+    let listed = markets().await;
+    assert_eq!(listed.len(), sample.stocks.len() + 6);
+    assert_eq!(listed[krx::CROSS_SURGE_KOSPI], ("0", "0000000027300000".to_owned()));
+    assert_eq!(listed[krx::CROSS_SURGE_KOSDAQ], ("10", "0000000050000000".to_owned()));
+    assert_eq!(listed[krx::UNDER_CAP], ("10", "0000000027200000".to_owned()));
+
+    let rows = kiwoom(&base, "ka10081", daily(krx::CROSS_SURGE_KOSPI), None).await.body["stk_dt_pole_chart_qry"].as_array().unwrap().clone();
+    let on = |dt: &str| rows.iter().find(|r| r["dt"] == dt).map(|r| (r["cur_prc"].as_str().unwrap().to_owned(), r["trde_qty"].as_str().unwrap().to_owned())).unwrap_or_else(|| panic!("{dt} 행이 있다"));
+    let price_and_volume = |price: u64, volume: u64| (price.to_string(), volume.to_string());
+    assert_eq!(on("20261030"), price_and_volume(krx::FLAT_PRICE, krx::CALM_VOLUME));
+    assert_eq!(on("20261102"), price_and_volume(krx::FLAT_PRICE, krx::SURGED_VOLUME), "거래가 하루 몰린다");
+    assert_eq!(on("20261104"), price_and_volume(krx::FLAT_PRICE, krx::CALM_VOLUME));
+    assert_eq!(on("20261105"), price_and_volume(krx::STEPPED_PRICE, krx::CALM_VOLUME), "종가가 한 번 뛰고 그대로 간다");
+    assert_eq!(on("20261106"), price_and_volume(krx::STEPPED_PRICE, krx::CALM_VOLUME));
+    let earlier_high = joined.stocks.iter().find(|s| s.code == krx::BELOW_EARLIER_HIGH).unwrap();
+    assert_eq!(earlier_high.bars.iter().map(|b| b.close).max(), Some(krx::EARLIER_HIGH_PRICE), "지난 5월에 지금보다 높았다");
+}
+
+#[tokio::test]
 async fn a_listed_krx_stock_can_withhold_its_daily_bars_and_still_answer_monthly_ones() {
     let fake = FakeKiwoom::start().await;
     let as_of = domain::KstDate::new(2026, 11, 6).unwrap();
