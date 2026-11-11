@@ -100,17 +100,14 @@ async fn explicit_listing_notice_shares_company_collection_and_preserves_separat
 async fn listing_notice_requires_one_issuer_and_exact_class_code_pairs_in_the_code_section() {
     let fake = verified_source().await;
     for text in [
-        "<HTML><PRE></PRE></HTML>".into(),
         NOTICE.replace("삼성전자(주)","다른회사(주)"),
         NOTICE.replace("- 삼성전자1우선주","- 다른회사1우선주"),
         NOTICE.replace("A005935","A005939"),
         NOTICE.replace("KR7005931001","KR7005932009"),
         NOTICE.replace("▶ 1우선주 표준코드","▶ 2우선주 표준코드"),
         NOTICE.replace("▶ 보통주 표준코드","▶ 우선주 표준코드"),
-        NOTICE.replace("⑨ 코드","⑨ 다른회사 코드"),
-        NOTICE.replace("</PRE>","◎ 다른회사(주) 변경상장(주식소각)</PRE>"),
-        NOTICE.replace("</HTML>","<PRE>005935 005930</PRE></HTML>"),
-        NOTICE.replace("</HTML>","<BODY>◎ 다른회사(주) 변경상장(주식소각)</BODY></HTML>"),
+        NOTICE.replace("</HTML>",&NOTICE[NOTICE.find("<PRE").unwrap()..]),
+        NOTICE.replace("</HTML>",&NOTICE[NOTICE.find("<PRE").unwrap()..].replace("삼성전자(주)","다른회사(주)")),
         NOTICE.replace("⑨ 코드","⑨ 코드\n⑨ 코드"),
         NOTICE.replace("(단축코드:A005935)","(단축코드:A005935)\n▶ 1우선주 표준코드 : KR7005931001 (단축코드:A005935)"),
         NOTICE.replace("▶ 1우선주 표준코드 : KR7005931001 (단축코드:A005935)","▶ 1우선주 표준코드 : KR7005932009 (단축코드:A005939)").replace("③ 1주의 금액", "참고: KR7005931001 (단축코드:A005935)\n③ 1주의 금액"),
@@ -168,13 +165,95 @@ async fn exact_input_and_product_kind_are_required_and_direct_duplicates_cannot_
 #[tokio::test]
 async fn broken_or_error_page_source_and_invalid_company_response_are_retryable_failures() {
     let fake = verified_source().await;
-    for text in ["", "<HTML><PRE>broken", "<HTML><title>페이지 오류</title></HTML>"] {
-        fake.state.lock().unwrap().notice = Some(text.into());
+    for text in [
+        "".into(), "<HTML><PRE>broken".into(), "<HTML><title>페이지 오류</title></HTML>".into(),
+        "<HTML><PRE></PRE></HTML>".into(),
+        "<HTML><PRE>페이지 오류: 일시적으로 서비스를 이용할 수 없습니다.</PRE></HTML>".into(),
+        NOTICE.replace("<PRE","<BODY><PRE").replace("</PRE>","</PRE></BODY>"),
+        NOTICE.replace("⑨ 코드","⑨ 다른회사 코드"),
+        NOTICE.replace("① 상장종목","상장종목"),
+        NOTICE.replace("   - 삼성전자1우선주\n",""),
+        NOTICE.replace("   ▶ 1우선주 표준코드 : KR7005931001 (단축코드:A005935)\n",""),
+        NOTICE.replace("</HTML>","<PRE>005935 005930</PRE></HTML>"),
+        NOTICE.replace("</HTML>","<BODY>◎ 다른회사(주) 변경상장(주식소각)</BODY></HTML>"),
+        NOTICE.replace("</PRE>","◎ 다른회사(주) 변경상장(주식소각)</PRE>"),
+        NOTICE.replace("KR7005931001","알 수 없는 코드 형식"),
+    ] {
+        fake.state.lock().unwrap().notice = Some(text);
         assert_eq!(fake.client().resolve("005935",true).await.unwrap_err(),Failure::InvalidResponse);
     }
     fake.state.lock().unwrap().notice = Some(NOTICE.into());
     fake.state.lock().unwrap().kind_responses.insert("005930".into(),json!({"error":"synthetic"}));
     assert_eq!(fake.client().resolve("005935",true).await.unwrap_err(),Failure::InvalidResponse);
+}
+
+async fn unrecognized_notice_retries_after_sixty_seconds(body: String) {
+    for already_collected in [false,true] {
+        let fake = verified_source().await;
+        let dir = tempdir();
+        let store = Store::open(&dir.path().join("financials.db")).await.unwrap();
+        let clock = clock();
+        let service = Financials::new(Some(fake.client()),store.clone(),clock.clone());
+        let previous = if already_collected { Some(settled(&service).await.collection) } else { None };
+        fake.state.lock().unwrap().notice = Some(body.clone());
+        let failed = service.open("005935",true,false).await;
+        assert_eq!(failed.status,"failed");
+        assert_eq!(failed.failure,Some(Failure::InvalidResponse));
+        assert!(failed.reason.is_none());
+        assert!(store.security("005935").await.unwrap().is_none());
+        assert_eq!(fake.count("notice"),1);
+        fake.state.lock().unwrap().notice = Some(NOTICE.into());
+        for elapsed in [0,59] {
+            clock.jump(elapsed);
+            let waiting = service.open("005935",true,false).await;
+            assert_eq!(waiting.status,"failed");
+            assert_eq!(waiting.failure,Some(Failure::InvalidResponse));
+            assert_eq!(fake.count("notice"),1);
+            if let Some(previous) = &previous {
+                assert_eq!(serde_json::to_value(store.collection(CORP).await.unwrap()).unwrap(),serde_json::to_value(previous).unwrap());
+                assert_eq!(settled(&service).await.status,"ready");
+            }
+        }
+        assert_eq!(settled_stock(&service,"000001",false).await.status,"ready");
+        assert_eq!(store.collection("00000002").await.unwrap().reports.len(),4);
+        clock.jump(2);
+        let recovered = settled_stock(&service,"005935",true).await;
+        assert_eq!(recovered.status,"ready");
+        assert_eq!(fake.count("notice"),2);
+        assert_eq!(recovered.security.as_ref().unwrap().company.corp_code,CORP);
+        assert!(recovered.security.unwrap().share_class.is_none());
+        assert!(store.security("005935").await.unwrap().is_some());
+        if let Some(previous) = previous {
+            assert_eq!(serde_json::to_value(recovered.collection).unwrap(),serde_json::to_value(previous).unwrap());
+        }
+    }
+}
+
+#[tokio::test]
+async fn pre_error_notice_is_retryable_and_preserves_companies_through_the_retry_window() {
+    unrecognized_notice_retries_after_sixty_seconds("<HTML><PRE>페이지 오류: 일시적으로 서비스를 이용할 수 없습니다.</PRE></HTML>".into()).await;
+}
+
+#[tokio::test]
+async fn unsupported_notice_layout_is_retryable_and_preserves_companies_through_the_retry_window() {
+    unrecognized_notice_retries_after_sixty_seconds(NOTICE.replace("<PRE","<BODY><PRE").replace("</PRE>","</PRE></BODY>")).await;
+}
+
+#[tokio::test]
+async fn valid_conflicting_notices_remain_mapping_absence_rather_than_source_failure() {
+    for body in [NOTICE.replace("삼성전자(주)","다른회사(주)"),NOTICE.replace("A005935","A005939")] {
+        let fake = verified_source().await;
+        fake.state.lock().unwrap().notice = Some(body);
+        let dir = tempdir();
+        let store = Store::open(&dir.path().join("financials.db")).await.unwrap();
+        let service = Financials::new(Some(fake.client()),store.clone(),clock());
+        let snapshot = service.open("005935",true,false).await;
+        assert_eq!(snapshot.status,"unsupported");
+        assert_eq!(snapshot.reason,Some("company_mapping_unverified"));
+        assert!(snapshot.failure.is_none());
+        assert!(store.security("005935").await.unwrap().is_none());
+        assert_eq!(fake.count("company.json"),0);
+    }
 }
 
 #[tokio::test]
@@ -229,21 +308,31 @@ async fn first_and_mid_notice_failures_retry_without_discarding_saved_company_or
 async fn first_and_mid_preferred_source_failures_leave_real_price_api_usable() {
     let kiwoom = common::FakeKiwoom::start().await;
     let client = reqwest::Client::new();
-    for already_collected in [false,true] {
-        let fake = verified_source().await;
-        let dir = tempdir();
-        let server = process(&fake,&kiwoom,dir.path(),"20151231120000");
-        let base = format!("http://{}",server.addr().await);
-        let price = format!("{base}/api/bars?symbol=005930&period=D&limit=5");
-        assert_eq!(client.get(&price).send().await.unwrap().status(),StatusCode::OK);
-        let previous = if already_collected { Some(http_settled(&client,&base).await["collection"].clone()) } else { None };
-        fake.state.lock().unwrap().notice_status = Some(StatusCode::NOT_FOUND);
-        let response = client.get(format!("{base}/api/symbols/005935/financial-source")).send().await.unwrap();
-        let snapshot: Value = serde_json::from_slice(&response.bytes().await.unwrap()).unwrap();
-        assert_eq!(snapshot["status"],"failed");
-        assert_eq!(snapshot["failure"],"remote");
-        assert_eq!(tokio::time::timeout(Duration::from_secs(1),client.get(&price).send()).await.unwrap().unwrap().status(),StatusCode::OK);
-        if let Some(previous) = previous { assert_eq!(http_snapshot(&client,&base).await["collection"],previous); }
-        assert!(!server.stop().await.contains(KEY));
+    for (notice_status, body, expected_failure) in [
+        (Some(StatusCode::NOT_FOUND),NOTICE.into(),"remote"),
+        (None,"<HTML><PRE>페이지 오류: 일시적으로 서비스를 이용할 수 없습니다.</PRE></HTML>".into(),"invalid_response"),
+        (None,NOTICE.replace("<PRE","<BODY><PRE").replace("</PRE>","</PRE></BODY>"),"invalid_response"),
+    ] {
+        for already_collected in [false,true] {
+            let fake = verified_source().await;
+            let dir = tempdir();
+            let server = process(&fake,&kiwoom,dir.path(),"20151231120000");
+            let base = format!("http://{}",server.addr().await);
+            let price = format!("{base}/api/bars?symbol=005930&period=D&limit=5");
+            assert_eq!(client.get(&price).send().await.unwrap().status(),StatusCode::OK);
+            let previous = if already_collected { Some(http_settled(&client,&base).await["collection"].clone()) } else { None };
+            {
+                let mut state = fake.state.lock().unwrap();
+                state.notice_status = notice_status;
+                state.notice = Some(body.clone());
+            }
+            let response = client.get(format!("{base}/api/symbols/005935/financial-source")).send().await.unwrap();
+            let snapshot: Value = serde_json::from_slice(&response.bytes().await.unwrap()).unwrap();
+            assert_eq!(snapshot["status"],"failed");
+            assert_eq!(snapshot["failure"],expected_failure);
+            assert_eq!(tokio::time::timeout(Duration::from_secs(1),client.get(&price).send()).await.unwrap().unwrap().status(),StatusCode::OK);
+            if let Some(previous) = previous { assert_eq!(http_snapshot(&client,&base).await["collection"],previous); }
+            assert!(!server.stop().await.contains(KEY));
+        }
     }
 }

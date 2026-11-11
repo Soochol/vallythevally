@@ -290,7 +290,7 @@ async fn daily_and_manual_refresh_replace_historical_corrections_and_preserve_go
 #[tokio::test]
 async fn absence_can_fall_back_but_bad_cfs_cannot_and_missing_mapping_has_a_reason() {
     let fake = Fake::start().await;
-    assert!(fake.client().resolve("005935",true).await.unwrap().is_none());
+    assert_eq!(fake.client().resolve("005935",true).await.unwrap_err(),Failure::InvalidResponse);
     fake.state.lock().unwrap().kind_other_code = true;
     assert!(fake.client().resolve("005935",true).await.unwrap().is_none(),"대표 보통주 응답을 우선주에 붙이지 않는다");
     fake.state.lock().unwrap().no_cfs = true;

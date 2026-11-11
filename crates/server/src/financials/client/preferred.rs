@@ -39,29 +39,40 @@ impl ListingNotice {
         if !root.has_tag_name("HTML") { return Err(Failure::InvalidResponse); }
         let blocks: Vec<_> = doc.descendants().filter(|node| node.has_tag_name("PRE")).collect();
         if blocks.is_empty() { return Err(Failure::InvalidResponse); }
-        if blocks.len() != 1 { return Ok(false); }
-        if blocks[0].parent() != Some(root) || root.children().any(|node| {
+        if blocks.iter().any(|block| block.parent() != Some(root)) || root.children().any(|node| {
             (node.is_element() && !node.has_tag_name("HEAD") && !node.has_tag_name("PRE")) || (node.is_text() && node.text().is_some_and(|text| !text.trim().is_empty()))
-        }) { return Ok(false); }
-        if blocks[0].children().any(|node| !node.is_text()) { return Ok(false); }
-        let body: String = blocks[0].children().filter_map(|node| node.text()).collect();
+        }) { return Err(Failure::InvalidResponse); }
+        let mut verified = blocks.len() == 1;
+        for block in blocks {
+            if block.children().any(|node| !node.is_text()) { return Err(Failure::InvalidResponse); }
+            let body: String = block.children().filter_map(|node| node.text()).collect();
+            verified &= self.verify_body(&body)?;
+        }
+        Ok(verified)
+    }
+
+    fn verify_body(&self, body: &str) -> Result<bool, Failure> {
         let lines: Vec<_> = body.lines().map(|line| line.split_whitespace().collect::<Vec<_>>().join(" ")).filter(|line| !line.is_empty()).collect();
+        let heading = lines.first().ok_or(Failure::InvalidResponse)?;
+        if heading.strip_prefix("◎ ").and_then(|value| value.strip_suffix(" 변경상장(주식소각)")).is_none_or(str::is_empty) { return Err(Failure::InvalidResponse); }
         let title = format!("◎ {} 변경상장(주식소각)", self.issuer);
-        if lines.first() != Some(&title) || lines.iter().filter(|line| line.contains('◎')).count() != 1 { return Ok(false); }
+        let mut unambiguous = lines.iter().filter(|line| line.contains('◎')).count() == 1;
         let mut sections = Vec::new();
         for (index, marker) in ['①','②','③','④','⑤','⑥','⑦','⑧','⑨'].into_iter().enumerate() {
             let positions: Vec<_> = lines.iter().enumerate().filter(|(_, line)| line.starts_with(marker)).map(|(position, _)| position).collect();
-            if positions.len() != 1 || (index > 0 && positions[0] <= sections[index - 1]) { return Ok(false); }
-            sections.push(positions[0]);
+            if positions.is_empty() || (index > 0 && positions[0] <= sections[index - 1]) { return Err(Failure::InvalidResponse); }
+            unambiguous &= positions.len() == 1;
+            sections.push(*positions.last().unwrap());
         }
-        if sections[0] != 1 || lines[sections[0]] != "① 상장종목" || lines[sections[8]] != "⑨ 코드" { return Ok(false); }
+        if sections[0] != 1 || lines[sections[0]] != "① 상장종목" || lines[sections[8]] != "⑨ 코드" { return Err(Failure::InvalidResponse); }
+        let listed = &lines[sections[0] + 1..sections[1]];
+        if listed.len() < 2 || listed.iter().any(|line| line.strip_prefix("- ").is_none_or(str::is_empty)) { return Err(Failure::InvalidResponse); }
         let names = [format!("- {}", self.common_name), format!("- {}", self.preferred_name)];
-        if lines[sections[0] + 1..sections[1]] != names { return Ok(false); }
         let codes = &lines[sections[8] + 1..];
-        if codes.len() != 3 || !codes[0].starts_with("▶ 업종코드 : ") { return Ok(false); }
+        if codes.len() < 3 || codes[0].strip_prefix("▶ 업종코드 : ").is_none_or(str::is_empty) || codes[1..].iter().any(|line| !code_line(line)) { return Err(Failure::InvalidResponse); }
         let common = format!("▶ 보통주 표준코드 : {} (단축코드:A{})", self.common_isin, self.common_code);
         let preferred = format!("▶ {} 표준코드 : {} (단축코드:A{})", self.issue_class, self.preferred_isin, self.stock_code);
-        Ok(codes[1] == common && codes[2] == preferred)
+        Ok(unambiguous && heading == &title && listed == names && codes.len() == 3 && codes[1] == common && codes[2] == preferred)
     }
 
     pub fn verify_company(&self, candidates: &[Row], directory: &[Row]) -> bool {
@@ -83,4 +94,11 @@ impl ListingNotice {
             "dart_directory": "OpenDART/corpCode.xml",
         }).to_string()
     }
+}
+
+fn code_line(line: &str) -> bool {
+    let Some((kind, codes)) = line.strip_prefix("▶ ").and_then(|line| line.split_once(" 표준코드 : ")) else { return false; };
+    let Some((isin, stock)) = codes.split_once(" (단축코드:A") else { return false; };
+    let Some(stock) = stock.strip_suffix(')') else { return false; };
+    !kind.is_empty() && isin.len() == 12 && isin.bytes().all(|byte| byte.is_ascii_alphanumeric()) && stock.len() == 6 && stock.bytes().all(|byte| byte.is_ascii_alphanumeric())
 }
