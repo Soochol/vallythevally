@@ -20,7 +20,7 @@ pub struct Financials {
     client: Option<Client>,
     store: Result<Store, Failure>,
     clock: Clock,
-    resolving: tokio::sync::Mutex<()>,
+    resolving: tokio::sync::Mutex<HashMap<String, ResolutionFailure>>,
     runs: Mutex<HashMap<String, Run>>,
 }
 
@@ -28,6 +28,13 @@ struct Run {
     running: bool,
     attempted_at: i64,
     failure: Option<Failure>,
+    unpersisted_refresh: bool,
+}
+
+struct ResolutionFailure {
+    attempted_at: i64,
+    failure: Failure,
+    refresh_requested: bool,
 }
 
 impl Financials {
@@ -36,7 +43,7 @@ impl Financials {
     }
 
     pub fn with_store(client: Option<Client>, store: Result<Store, Failure>, clock: Clock) -> Arc<Self> {
-        Arc::new(Self { client, store, clock, resolving: tokio::sync::Mutex::new(()), runs: Mutex::new(HashMap::new()) })
+        Arc::new(Self { client, store, clock, resolving: tokio::sync::Mutex::new(HashMap::new()), runs: Mutex::new(HashMap::new()) })
     }
 
     fn store(&self) -> Result<&Store, Failure> {
@@ -49,16 +56,16 @@ impl Financials {
             Ok(store) => store,
             Err(failure) => { snapshot.status = "failed"; snapshot.failure = Some(failure); return snapshot; }
         };
-        let result = self.security(stock, preferred).await;
-        match result {
-            Ok(Some(security)) => snapshot.security = Some(security),
-            Ok(None) => {
+        let result = self.security(stock, preferred, force).await;
+        let force = match result {
+            Ok((Some(security), refresh_requested)) => { snapshot.security = Some(security); force || refresh_requested }
+            Ok((None, _)) => {
                 snapshot.status = if self.client.is_some() { "unsupported" } else { "not_configured" };
                 snapshot.reason = Some("company_mapping_unverified");
                 return snapshot;
             }
             Err(failure) => { snapshot.status = "failed"; snapshot.failure = Some(failure); return snapshot; }
-        }
+        };
         let corp = &snapshot.security.as_ref().unwrap().company.corp_code;
         snapshot.collection = match store.collection(corp).await {
             Ok(collection) => collection,
@@ -75,11 +82,12 @@ impl Financials {
         let last_attempt = snapshot.collection.last_attempt_at.into_iter().chain(run.map(|run| run.attempted_at)).max();
         let retry_due = last_attempt.is_none_or(|t| now.unix() - t >= 60);
         if (force || ((daily || failed || incomplete || pending) && retry_due)) && !run.is_some_and(|run| run.running) {
-            runs.insert(corp.clone(), Run { running: true, attempted_at: now.unix(), failure: None });
+            let unpersisted_refresh = force || run.is_some_and(|run| run.unpersisted_refresh);
+            runs.insert(corp.clone(), Run { running: true, attempted_at: now.unix(), failure: None, unpersisted_refresh });
             let service = self.clone();
             let security = snapshot.security.as_ref().unwrap().clone();
             tokio::spawn(async move {
-                let failure = service.collect(&security, force).await.err();
+                let failure = service.collect(&security, unpersisted_refresh).await.err();
                 if let Some(failure) = failure {
                     tracing::warn!(?failure, "재무 자료 수집을 저장하지 못했습니다");
                 }
@@ -95,37 +103,55 @@ impl Financials {
         snapshot
     }
 
-    async fn security(&self, stock: &str, preferred: bool) -> Result<Option<Security>, Failure> {
-        let _guard = self.resolving.lock().await;
+    async fn security(&self, stock: &str, preferred: bool, force: bool) -> Result<(Option<Security>, bool), Failure> {
+        let mut attempts = self.resolving.lock().await;
+        let refresh_requested = force || attempts.get(stock).is_some_and(|attempt| attempt.refresh_requested);
         let store = self.store()?;
-        if let Some(security) = store.security(stock).await? { return Ok(Some(security)); }
-        let Some(client) = &self.client else { return Ok(None); };
-        let security = client.resolve(stock, preferred).await?;
-        if let Some(security) = &security { store.save_security(security).await?; }
-        Ok(security)
+        if let Some(security) = store.security(stock).await? {
+            attempts.remove(stock);
+            return Ok((Some(security), refresh_requested));
+        }
+        let Some(client) = &self.client else { return Ok((None, refresh_requested)); };
+        let now = self.clock.now().unix();
+        if !force && let Some(attempt) = attempts.get(stock) && now - attempt.attempted_at < 60 { return Err(attempt.failure); }
+        let result = async {
+            let security = client.resolve(stock, preferred).await?;
+            if let Some(security) = &security { store.save_security(security).await?; }
+            Ok(security)
+        }.await;
+        match result {
+            Ok(security) => { attempts.remove(stock); Ok((security, refresh_requested)) }
+            Err(failure) => {
+                attempts.insert(stock.into(), ResolutionFailure { attempted_at: now, failure, refresh_requested });
+                Err(failure)
+            }
+        }
     }
 
-    async fn collect(&self, security: &Security, force: bool) -> Result<(), Failure> {
+    async fn collect(&self, security: &Security, register_refresh: bool) -> Result<(), Failure> {
         let client = self.client.as_ref().unwrap();
         let corp = &security.company.corp_code;
         let store = self.store()?;
         let mut collection = store.collection(corp).await?;
         let now = self.clock.now();
         collection.last_attempt_at = Some(now.unix());
-        if force { collection.refresh_version += 1; }
+        if register_refresh { collection.refresh_version += 1; }
         store.save(corp, &collection).await?;
+        self.runs.lock().unwrap().get_mut(corp).unwrap().unpersisted_refresh = false;
         let daily = collection.last_checked_at.is_none_or(|t| KstTime::from_unix(t).kst_date() != now.kst_date());
-        if daily || force || collection.disclosure_failure.is_some() {
+        if daily || collection.disclosure_version < collection.refresh_version || collection.disclosure_failure.is_some() {
             match client.disclosures(corp, &now.kst_date().yyyymmdd()).await {
                 Ok(disclosures) => {
-                    if collection.disclosures != disclosures && !force { collection.refresh_version += 1; }
+                    if collection.disclosures != disclosures && collection.disclosure_version == collection.refresh_version { collection.refresh_version += 1; }
                     collection.disclosures = disclosures;
                     collection.disclosure_failure = None;
                     collection.last_checked_at = Some(self.clock.now().unix());
+                    collection.disclosure_version = collection.refresh_version;
                 }
                 Err(failure) => collection.disclosure_failure = Some(failure),
             }
             store.save(corp, &collection).await?;
+            if collection.disclosure_failure.is_some() { return Ok(()); }
         }
         for year in 2015..=now.kst_date().year() {
             for code in REPORT_CODES {
@@ -232,7 +258,7 @@ fn dividends_outdated(report: &Report, disclosures: &[Row]) -> bool {
 }
 
 fn has_pending(collection: &Collection) -> bool {
-    collection.reports.values().any(|report| {
+    collection.disclosure_version < collection.refresh_version || collection.reports.values().any(|report| {
         report.statement.refresh_version < collection.refresh_version || statement_outdated(report, &collection.disclosures)
             || (report.report_code == "11011" && (report.dividends.refresh_version < collection.refresh_version || dividends_outdated(report, &collection.disclosures)))
     })

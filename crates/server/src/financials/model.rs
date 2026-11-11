@@ -113,6 +113,8 @@ pub struct Collection {
     pub disclosure_failure: Option<Failure>,
     #[serde(default)]
     pub refresh_version: u64,
+    #[serde(default)]
+    pub disclosure_version: u64,
 }
 
 #[derive(Clone, Debug, Serialize)]

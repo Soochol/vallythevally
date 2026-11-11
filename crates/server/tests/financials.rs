@@ -659,6 +659,7 @@ async fn review_legacy_snapshots_without_versions_resume_already_saved_correctio
     fake.state.lock().unwrap().correction = true;
     body["disclosures"] = serde_json::to_value(fake.client().disclosures(CORP,"20151231").await.unwrap()).unwrap();
     body.as_object_mut().unwrap().remove("refresh_version");
+    body.as_object_mut().unwrap().remove("disclosure_version");
     for report in body["reports"].as_object_mut().unwrap().values_mut() {
         report["statement"].as_object_mut().unwrap().remove("refresh_version");
         report["dividends"].as_object_mut().unwrap().remove("refresh_version");
@@ -675,4 +676,171 @@ async fn review_legacy_snapshots_without_versions_resume_already_saved_correctio
     assert_eq!(recovered.status,"ready");
     assert_eq!(recovered.collection.reports["2015/11011"].statement.data.as_ref().unwrap().accounts[0].fields["thstrm_amount"],"120");
     assert_eq!(fake.count("list.json"),before,"saved correction should be sufficient to resume the old snapshot");
+}
+
+fn assert_corrected_report(collection: &server::financials::model::Collection) {
+    let report = &collection.reports["2015/11011"].statement;
+    let account = &report.data.as_ref().unwrap().accounts[0];
+    assert_eq!(account.fields["rcept_no"],"20160401000002");
+    assert_eq!(account.fields["thstrm_amount"],"120");
+    assert!(matches!(&account.current_period,Verification::Verified { period:FactPeriod::Duration { start,end },receipt,.. } if start == "2015-01-01" && end == "2015-12-31" && receipt == "20160401000002"));
+    assert_eq!(report.refresh_version,collection.refresh_version);
+    assert_eq!(collection.disclosure_version,collection.refresh_version);
+    assert!(report.last_success_at.is_some());
+}
+
+async fn other_company_settled(service: &Arc<Financials>) {
+    let mut snapshot = service.open("000001",false,false).await;
+    for _ in 0..300 {
+        if snapshot.status != "collecting" { break; }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        snapshot = service.open("000001",false,false).await;
+    }
+    assert_eq!(snapshot.status,"ready");
+    assert!(matches!(snapshot.collection.reports["2015/11011"].statement.data.as_ref().unwrap().accounts[0].current_period,Verification::Verified {..}));
+}
+
+#[tokio::test]
+async fn review2_pending_list_intent_recovers_first_and_commit_writes_and_reopened_service() {
+    use sqlx::Connection;
+    for (initially,at_commit,reopen) in [(false,false,false),(false,true,false),(false,true,true),(true,false,false),(true,true,true)] {
+        let fake = Fake::start().await;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("f.db");
+        let clock = clock();
+        let store = Store::open(&path).await.unwrap();
+        let mut service = Financials::new(Some(fake.client()),store,clock.clone());
+        let original = if initially { None } else {
+            service.open("005930",false,false).await;
+            Some(settled(&service).await.collection)
+        };
+        let mut connection = sqlx::SqliteConnection::connect_with(&sqlx::sqlite::SqliteConnectOptions::new().filename(&path)).await.unwrap();
+        let trigger = if at_commit {
+            "CREATE TRIGGER fail_pending_list BEFORE INSERT ON companies WHEN NEW.corp_code = '00126380' AND json_array_length(NEW.body, '$.disclosures') = 2 BEGIN SELECT RAISE(FAIL,'synthetic list commit failure'); END"
+        } else {
+            "CREATE TRIGGER fail_pending_list BEFORE INSERT ON companies WHEN NEW.corp_code = '00126380' BEGIN SELECT RAISE(FAIL,'synthetic first write failure'); END"
+        };
+        sqlx::query(trigger).execute(&mut connection).await.unwrap();
+        fake.state.lock().unwrap().correction = true;
+        clock.jump(1);
+        service.open("005930",false,true).await;
+        let failed = settled(&service).await;
+        assert_eq!(failed.failure,Some(Failure::Storage));
+        if let Some(original) = &original {
+            assert_eq!(serde_json::to_value(&failed.collection.reports).unwrap(),serde_json::to_value(&original.reports).unwrap());
+        }
+        if at_commit { assert!(failed.collection.disclosure_version < failed.collection.refresh_version); }
+        for _ in 0..3 { assert_eq!(service.open("005930",false,false).await.failure,Some(Failure::Storage)); }
+        other_company_settled(&service).await;
+        sqlx::query("DROP TRIGGER fail_pending_list").execute(&mut connection).await.unwrap();
+        if reopen {
+            drop(service);
+            service = Financials::new(Some(fake.client()),Store::open(&path).await.unwrap(),clock.clone());
+            let pending = service.open("005930",false,false).await;
+            assert_eq!(pending.status,"stale");
+            if let Some(original) = &original { assert_eq!(serde_json::to_value(&pending.collection.reports).unwrap(),serde_json::to_value(&original.reports).unwrap()); }
+        }
+        let before = fake.count("list.json");
+        clock.jump(61);
+        let recovered = settled(&service).await;
+        assert_eq!(fake.count("list.json"),before+1,"failed list snapshot must be fetched again");
+        assert_corrected_report(&recovered.collection);
+        if let Some(original) = original { assert!(recovered.collection.reports["2015/11011"].statement.last_success_at > original.reports["2015/11011"].statement.last_success_at); }
+        let stored = Store::open(&path).await.unwrap().collection(CORP).await.unwrap();
+        assert_corrected_report(&stored);
+        let requests = fake.count("fnlttSinglAcntAll.json");
+        assert_eq!(service.open("005930",false,false).await.status,"ready");
+        assert_eq!(fake.count("fnlttSinglAcntAll.json"),requests);
+    }
+}
+
+fn company_calls(fake: &Fake) -> usize {
+    fake.state.lock().unwrap().calls.iter().filter(|(endpoint,params)| endpoint == "company.json" && params.get("corp_code").is_some_and(|corp|corp == CORP)).count()
+}
+
+#[tokio::test]
+async fn review2_security_save_retry_is_bounded_and_preserves_pending_manual_refresh() {
+    use sqlx::Connection;
+    for existing in [false,true] {
+        let fake = Fake::start().await;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("f.db");
+        let clock = clock();
+        let service = Financials::new(Some(fake.client()),Store::open(&path).await.unwrap(),clock.clone());
+        let mut connection = sqlx::SqliteConnection::connect_with(&sqlx::sqlite::SqliteConnectOptions::new().filename(&path)).await.unwrap();
+        let original = if existing {
+            service.open("005930",false,false).await;
+            let collection = settled(&service).await.collection;
+            sqlx::query("DELETE FROM securities WHERE stock_code = '005930'").execute(&mut connection).await.unwrap();
+            Some(collection)
+        } else { None };
+        sqlx::query("CREATE TRIGGER fail_mapping BEFORE INSERT ON securities WHEN NEW.stock_code = '005930' BEGIN SELECT RAISE(FAIL,'synthetic mapping write failure'); END").execute(&mut connection).await.unwrap();
+        fake.state.lock().unwrap().correction = true;
+        let attempted = clock.now().unix();
+        assert_eq!(service.open("005930",false,existing).await.failure,Some(Failure::Storage));
+        let before = company_calls(&fake);
+        for _ in 0..3 { assert_eq!(service.open("005930",false,false).await.failure,Some(Failure::Storage)); }
+        assert_eq!(company_calls(&fake),before);
+        other_company_settled(&service).await;
+        if let Some(original) = &original {
+            let retained = Store::open(&path).await.unwrap().collection(CORP).await.unwrap();
+            assert_eq!(serde_json::to_value(&retained.reports).unwrap(),serde_json::to_value(&original.reports).unwrap());
+        }
+        sqlx::query("DROP TRIGGER fail_mapping").execute(&mut connection).await.unwrap();
+        clock.jump(attempted + 59 - clock.now().unix());
+        assert_eq!(service.open("005930",false,false).await.failure,Some(Failure::Storage));
+        assert_eq!(company_calls(&fake),before);
+        clock.jump(2);
+        let recovered = settled(&service).await;
+        assert_eq!(company_calls(&fake),before+1);
+        assert_corrected_report(&recovered.collection);
+        assert_eq!(service.open("000001",false,false).await.status,"ready");
+    }
+}
+
+#[tokio::test]
+async fn review2_failed_list_storage_keeps_real_price_usable_and_preserves_verified_data() {
+    use sqlx::Connection;
+    use std::os::unix::fs::PermissionsExt;
+    let fake = Fake::start().await;
+    let kiwoom = common::FakeKiwoom::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("run/financials.db");
+    let service = Financials::new(Some(fake.client()),Store::open(&path).await.unwrap(),clock());
+    service.open("005930",false,false).await;
+    let original = settled(&service).await.collection;
+    std::fs::set_permissions(dir.path().join("run"),std::fs::Permissions::from_mode(0o700)).unwrap();
+    let mut connection = sqlx::SqliteConnection::connect_with(&sqlx::sqlite::SqliteConnectOptions::new().filename(&path)).await.unwrap();
+    sqlx::query("CREATE TRIGGER fail_list_storage BEFORE INSERT ON companies WHEN NEW.corp_code = '00126380' BEGIN SELECT RAISE(FAIL,'synthetic list storage failure'); END").execute(&mut connection).await.unwrap();
+    let server = common::Server::spawn_with(&kiwoom,&dir.path().join("run/server.lock"),dir.path(),&[
+        ("OPENDART_API_KEY",std::ffi::OsStr::new(KEY)),
+        ("VALLY_DART_BASE_URL",std::ffi::OsStr::new(&fake.url)),
+        ("VALLY_KIND_BASE_URL",std::ffi::OsStr::new(&fake.url)),
+    ]);
+    let base = format!("http://{}",server.addr().await);
+    let client = reqwest::Client::new();
+    let price_url = format!("{base}/api/bars?symbol=005930&period=D&limit=5");
+    assert_eq!(client.get(&price_url).send().await.unwrap().status(),StatusCode::OK);
+    fake.state.lock().unwrap().correction = true;
+    client.post(format!("{base}/api/symbols/005930/financial-source")).send().await.unwrap();
+    let failed = http_settled(&client,&base).await;
+    assert_eq!(failed["failure"],"storage");
+    assert_eq!(failed["collection"]["reports"],serde_json::to_value(&original.reports).unwrap());
+    assert_eq!(tokio::time::timeout(Duration::from_secs(1),client.get(&price_url).send()).await.unwrap().unwrap().status(),StatusCode::OK);
+    sqlx::query("DROP TRIGGER fail_list_storage").execute(&mut connection).await.unwrap();
+    client.post(format!("{base}/api/symbols/005930/financial-source")).send().await.unwrap();
+    let mut repaired = false;
+    for _ in 0..300 {
+        let snapshot = http_snapshot(&client,&base).await;
+        let collection: server::financials::model::Collection = serde_json::from_value(snapshot["collection"].clone()).unwrap();
+        if collection.reports["2015/11011"].statement.data.as_ref().unwrap().accounts[0].fields["thstrm_amount"] == "120" {
+            assert_corrected_report(&collection);
+            repaired = true;
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    assert!(repaired);
+    assert_eq!(tokio::time::timeout(Duration::from_secs(1),client.get(&price_url).send()).await.unwrap().unwrap().status(),StatusCode::OK);
+    server.stop().await;
 }
