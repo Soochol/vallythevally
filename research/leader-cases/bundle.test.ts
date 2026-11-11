@@ -326,9 +326,9 @@ test("quarterly growth, acceleration, ROE and annual metrics use their own flow 
   const annual = [financialPeriod(2015, 4), financialPeriod(2016, 4)];
   annual[1]!.single.operatingProfit = measure(300);
   const data = financialData(quarters, annual);
-  assert.equal(data.annualMetrics[1]!.values.operatingProfitYoyPct.value, 50);
-  assert.equal(data.annualMetrics[1]!.values.parentRoePct.value, 10);
-  assert.equal(data.annualMetrics[1]!.values.periodEps.value, 10);
+  assert.equal(data.latestAnnualMetrics[1]!.values.operatingProfitYoyPct.value, 50);
+  assert.equal(data.latestAnnualMetrics[1]!.values.parentRoePct.value, 10);
+  assert.equal(data.latestAnnualMetrics[1]!.values.periodEps.value, 10);
 });
 test("sector ranks compare the same 13-week interval and breadth exposes its complete denominator", () => {
   const dates = calendar("2014-01-02", "2016-12-30");
@@ -359,7 +359,7 @@ test("missing observation weeks interrupt technical windows instead of compressi
 });
 test("split/share-basis mismatch with adjusted prices leaves valuation null while retaining the accounting ledger", () => {
   const data = financialData(([1, 2, 3, 4] satisfies Quarter[]).map((q) => financialPeriod(2015, q)), [financialPeriod(2015, 4)]);
-  assert.equal(data.metrics[3]!.values.epsTtm.value, 10);
+  assert.equal(data.latestMetrics[3]!.values.epsTtm.value, 10);
   const value = valuations([{ day: day("2016-03-16"), c: 100 }], data, 20)[0]!;
   assert.equal(value.per.value, null);
   assert.equal(value.pbr.value, null);

@@ -51,8 +51,12 @@ export function accounts(year: number, q: Quarter, revised = false) {
   ];
 }
 function json(res: ServerResponse, body: unknown, status = 200) { res.writeHead(status, { "content-type": "application/json" }); res.end(JSON.stringify(body)); }
-export async function fixtureServer(options: { badBars?: "first" | "middle" | "cursor" | "format"; badInvestors?: boolean; unreadableInvestors?: boolean; failDart?: boolean; revised?: boolean; dartStockCode?: string | null; missingStatement?: { year: number; quarter: Quarter }; treasury?: boolean; targetCode?: string } = {}) {
+export async function fixtureServer(options: { badBars?: "first" | "middle" | "cursor" | "format"; badInvestors?: boolean; unreadableInvestors?: boolean; failDart?: boolean; revised?: boolean; dartStockCode?: string | null; missingStatement?: { year: number; quarter: Quarter }; treasury?: boolean; priorHalfCorrection?: "same" | "changed"; targetCode?: string } = {}) {
   const targetCode = options.targetCode ?? CODE;
+  const reportFiling = (year: number, q: Quarter) => {
+    const f = filing(year, q, options.revised && year === 2015 && q === 3);
+    return options.priorHalfCorrection && year === 2015 && q === 2 ? { ...f, rcept_no: "20161014201520", rcept_dt: "20161014", report_nm: "[기재정정]반기보고서 (2015.06)" } : f;
+  };
   const calls: URL[] = [];
   const days = calendar();
   const bars = days.map((d, i) => bar(d, 100 + i));
@@ -91,15 +95,22 @@ export async function fixtureServer(options: { badBars?: "first" | "middle" | "c
       const year = Number(url.searchParams.get("bsns_year"));
       const reportCode = url.searchParams.get("reprt_code");
       const q: Quarter = reportCode === "11013" ? 1 : reportCode === "11012" ? 2 : reportCode === "11014" ? 3 : 4;
-      const f = filing(year, q, options.revised && year === 2015 && q === 3);
+      const f = reportFiling(year, q);
       if (url.pathname === "/api/list.json") {
-        const filings = [2015, 2016, 2017].flatMap((year) => ([1, 2, 3, 4] satisfies Quarter[]).map((q) => filing(year, q, options.revised && year === 2015 && q === 3)));
+        const filings = [2015, 2016, 2017].flatMap((year) => ([1, 2, 3, 4] satisfies Quarter[]).map((q) => reportFiling(year, q)));
         filings.push({ corp_code: CORP, stock_code: targetCode, corp_name: "시험 법인", rcept_no: "20160616000001", rcept_dt: "20160616", report_nm: "주요사항보고서(유상증자결정)" });
         const page = Number(url.searchParams.get("page_no"));
         return json(res, { status: "000", page_no: page, total_page: 2, list: (page === 1 ? filings.slice(0, 6) : filings.slice(6)).map((row) => ({ ...row, stock_code: options.dartStockCode === undefined ? targetCode : options.dartStockCode })) });
       }
       if (url.pathname === "/api/fnlttSinglAcntAll.json" && options.missingStatement?.year === year && options.missingStatement.quarter === q) return json(res, { status: "013", message: "no statement" });
-      if (url.pathname === "/api/fnlttSinglAcntAll.json") return json(res, { status: "000", list: accounts(year, q, options.revised && year === 2015 && q === 3) });
+      if (url.pathname === "/api/fnlttSinglAcntAll.json") return json(res, { status: "000", list: accounts(year, q, options.revised && year === 2015 && q === 3).map((row) => {
+        const updated = { ...row, rcept_no: f.rcept_no };
+        if (options.priorHalfCorrection === "changed" && year === 2015 && q === 2) {
+          if (row.account_id === "dart_OperatingIncomeLoss") return { ...updated, thstrm_amount: "60", thstrm_add_amount: "80" };
+          if (row.account_id === "ifrs-full_ProfitLossAttributableToOwnersOfParent") return { ...updated, thstrm_amount: "30", thstrm_add_amount: "40" };
+        }
+        return updated;
+      }) });
       if (url.pathname === "/api/stockTotqySttus.json") return json(res, { status: "000", list: ["보통주", "합계"].map((se) => ({ corp_code: CORP, rcept_no: f.rcept_no, se, istc_totqy: "10", tesstk_co: options.treasury && year === 2016 && q === 1 ? "1" : "0", distb_stock_co: options.treasury && year === 2016 && q === 1 ? "9" : "10" })) });
       if (url.pathname === "/api/alotMatter.json") return json(res, { status: "000", list: [{ corp_code: CORP, rcept_no: f.rcept_no, se: "주당 현금배당금(원)", stock_knd: "보통주", thstrm: "1,200" }] });
       if (url.pathname === "/api/piicDecsn.json") return json(res, { status: "000", list: [{ corp_code: CORP, rcept_no: "20160616000001", nstk_ostk_cnt: "100", fdpp_fclt: "1,000,000" }] });

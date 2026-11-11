@@ -84,7 +84,7 @@ OpenDART 키는 `VALLY_ENV_FILE`이 가리키는 파일의 `OPENDART_API_KEY` �
 | 매출·영업이익·지배주주순이익 | 중간 손익계산서 `thstrm_amount`는 3개월, `thstrm_add_amount`는 누적이다. 4분기만 연간−3분기 누적이다. |
 | 영업CF·투자CF·CAPEX | 현금흐름표 `thstrm_amount`는 누적이다. 2·3·4분기는 이전 분기 누적을 뺀다. CAPEX는 유형자산 취득의 현금 지급액이며 무형자산은 포함하지 않는다. 음수 취득액은 확인 필요 null이다. |
 | 자본·부채·재고·채권 | 재무상태표 시점 잔액이다. 차감하거나 최근 4분기를 합하지 않는다. 채권 표준 계정이 매출채권 및 기타유동채권이면 그 넓은 범위와 출처를 유지한다. |
-| 최근 4분기 합 | 연말은 알려진 연간 흐름을 직접 쓴다. 중간 분기는 전년 연간+당기 누적−전년 동기 누적 또는 네 분기 단일 흐름 합으로 구한다. 두 경로가 모두 있으면 사용 가능일이 더 이른 경로를 고르고, 같은 날이면 누적 경로를 고른다. 선택한 실제 입력의 출처·접수번호·사용 가능일만 잇는다. 어느 경로도 완전하지 않으면 null이며 없는 단일 분기를 추정하지 않는다. |
+| 최근 4분기 합 | 연말의 공시 연간 흐름, 중간 분기의 전년 연간+당기 누적−전년 동기 누적, 네 분기 단일 흐름 합을 가능한 경로로 보존한다. 관측일에 사용 가능한 경로들의 금액이 모두 같으면 정상값을 제공하고, 사용 가능한 경로가 없으면 null이다. 금액이 다르면 `ttm_path_conflict`와 null을 제공한다. 단일 분기 누락을 추정하지 않는다. 같은 금액의 경로끼리는 먼저 알려진 출처를 쓰며 동률은 연간·누적 경로를 먼저 쓴다. |
 | 전년동기 증가율 | 분기 단일 값/전년 같은 분기−1. 이전 값이 양수일 때만 %를 계산한다. 0·음수에서의 흑자 전환은 숫자 증가율로 포장하지 않는다. |
 | 영업이익 가속 | 이번 분기 증가율−직전 분기 증가율. 연간 화면은 연간 전년비와 직전 연간 전년비 차이다. |
 | 분기·연간 EPS | 공시된 기본 EPS를 우선한다. 4분기 EPS는 연간 EPS에서 누적 EPS를 무조건 빼지 않는다. 보고된 보통주 분모가 같은 구간에서는 해당 순이익/보통주 유통주식수로 계산한다. |
@@ -101,7 +101,13 @@ OpenDART 키는 `VALLY_ENV_FILE`이 가리키는 파일의 `OPENDART_API_KEY` �
 
 Q3 단일값·누적값을 못 받거나 늦게 정정해 Q4 단일값을 못 복원해도, 이미 공시된 연간 영업이익·순이익 TTM은 연간 원천의 날짜부터 안다. 다만 EPS에 필요한 분기별 주식수까지 알려졌다는 뜻은 아니므로 분모의 출처와 날짜 조건은 따로 검사한다.
 
-`metrics`와 `annualMetrics`는 회계기간별 계산값이다. 원장이 사후에 보유한 숫자와 그날 알 수 있던 숫자를 혼동하지 않도록 각 수치의 `availableFrom`을 확인한다. `valuation`은 관측일마다 이를 검사해 아직 알려지지 않은 입력을 null로 바꾼다.
+`latestMetrics`와 `latestAnnualMetrics`는 최신 다운로드 원천을 모두 평가한 회계기간별 요약이다. 과거의 어느 날 알 수 있었던 값이라는 뜻이 아니다. 기존 `metrics`·`annualMetrics` 이름은 제거했다.
+
+`timeline`은 원천의 사용 가능일마다 다시 평가한 공시일 축의 계단선이다. 각 점의 `day`, `financialPeriod`, `values`를 읽고 다음 점 전까지 유지한다. 새 회계기간이 없더라도 이전 보고서의 늦은 정정일에는 재평가한다. `valuation`의 EPS·PER·밴드는 이 날짜별 평가를 사용한다. 최신 요약 하나에 `knownAt`만 적용해 과거 값을 만들지 않는다.
+
+각 흐름 TTM은 `TtmMeasure`이며 `paths`에 가능한 경로의 종류·금액·입력 출처·접수번호·사용 가능일을 전부 보존한다. `evaluatedOn`은 공시일 축에서 평가한 관측일이며, 최신 요약에서는 null이다. `activePaths`는 그 평가 시점에 이용할 수 있는 경로 이름이다. `paths`의 미공개 후보는 자료 점검용이며 당시 알려진 값으로 표시하지 않는다. 정상 TTM의 `sources`는 먼저 알려진 유효 경로의 근거이고, 충돌이면 서로 다른 경로 양쪽의 근거를 담는다. `availableFrom`은 정상값이 처음 알려진 날 또는 충돌이 알려진 날이다.
+
+예를 들어 2016 반기 TTM의 네 분기 합이 영업이익 200·순이익 100이고, 2015 반기 누적의 2016-10-14 정정으로 누적 경로가 180·90이 되면, 공시 당일까지 200·100을 유지한다. 다음 관측일인 2016-10-17부터 해당 TTM·EPS TTM·PER·PER 밴드와 종속 계산은 `ttm_path_conflict`인 null이다. 양쪽 숫자와 정정 접수번호는 경로에 남는다. 독립된 BPS·PBR·다른 재무 원장과 다른 자료 원천은 그대로 제공한다.
 
 자본 사건은 유상·무상·유무상증자, 감자, CB·BW·교환사채 발행, 자사주 취득·처분과 신탁 체결·해지를 주요사항보고 API에서 읽는다. 필드는 공시의 원래 단위 문자열과 접수번호·공시일·링크를 보존한다. `effect: "announcement-only"`이므로 계획 수량을 실제 주식수에 더하지 않는다. 전환 청구·실행, 대주주 매도·블록딜은 전체 공시 목록에서 원문을 확인해야 한다. 기준금리 결정, 지수 편출입, 이전상장과 산업 사건의 해석은 #143 원고에서 원문을 연결한다.
 
@@ -119,13 +125,13 @@ FRED CSV는 키 없이 `fredgraph.csv?id=…`를 읽는다. `observation_date,<i
 
 ```sh
 npm --prefix research/leader-cases run typecheck
-node --test research/leader-cases/bundle.test.ts research/leader-cases/review-regressions.test.ts
+node --test research/leader-cases/bundle.test.ts research/leader-cases/review-regressions.test.ts research/leader-cases/ttm-conflicts.test.ts
 VALLY_E2E_BIN_DIR=target/leader-cases-141/bin node --test research/leader-cases/check-sector-symbols.test.ts
 ```
 
 마지막 명령은 별도로 준비한 server·fake-kiwoom 바이너리를 쓴다. 기존 바이너리를 복사해 재사용할 수 있고 큰 Cargo 빌드가 필요하지 않다. 새로 빌드한다면 저장소 규칙에 따라 `cargo build -p server -p fake-kiwoom`을 worktree에서 먼저 한다.
 
-새 시험은 로컬 HTTP 서버에서 페이지·재무·수급·FRED 응답을 흉내 낸다. CLI도 실제 자식 프로세스로 실행하고 `data/leader-cases/990001/bundle.json`과 회사 불일치 사례의 `990002/bundle.json`을 읽어 계약·계산·누락·키 비노출을 확인한다. `--dart-base`와 `--fred-base`의 대체 주소는 로컬 HTTP 주소만 허용한다. 실제 `.env`, 실제 OpenDART 키와 키움, 사용자 서버를 시험에 쓰지 않는다. 시세·수급·재무·FRED 성공 경로와 누락은 로컬 HTTP fixture에서 검증한다. 기존 sector-map 시험의 Rust server·fake-kiwoom 검증은 종목 목록 경로이며, 별도 fake CLI에서 404인 수급 경로를 Rust 수급 성공 검증으로 세지 않는다.
+새 시험은 로컬 HTTP 서버에서 페이지·재무·수급·FRED 응답을 흉내 낸다. CLI도 실제 자식 프로세스로 실행하고 `data/leader-cases/990001/bundle.json`과 회사 불일치 사례의 `990002/bundle.json`, 정정 충돌 사례의 `990003/bundle.json`을 읽어 계약·계산·누락·키 비노출을 확인한다. `--dart-base`와 `--fred-base`의 대체 주소는 로컬 HTTP 주소만 허용한다. 실제 `.env`, 실제 OpenDART 키와 키움, 사용자 서버를 시험에 쓰지 않는다. 시세·수급·재무·FRED 성공 경로와 누락은 로컬 HTTP fixture에서 검증한다. 기존 sector-map 시험의 Rust server·fake-kiwoom 검증은 종목 목록 경로이며, 별도 fake CLI에서 404인 수급 경로를 Rust 수급 성공 검증으로 세지 않는다.
 
 247540 실제 묶음, 종가 하나와 영업이익 한 분기의 원천 대조는 **아직 수행하지 않았다**. 사용자 승인을 받아 새 코드로 서버를 재시작한 뒤 별도 확인해야 한다. 로컬 fixture의 성공을 그 실제 검증의 성공으로 쓰지 않는다.
 

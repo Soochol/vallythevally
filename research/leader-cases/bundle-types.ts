@@ -63,18 +63,26 @@ export interface FinancialPeriod {
   otherShares: Measure;
   dps: Measure;
 }
+export type TtmPathKind = "annual" | "annual-ytd" | "four-quarters";
+export interface TtmPath { kind: TtmPathKind; result: Measure }
+export type TtmMeasure = Measure & { evaluatedOn: Day | null; paths: TtmPath[]; activePaths: TtmPathKind[] };
+export interface FinancialTimelinePoint {
+  day: Day;
+  financialPeriod: string | null;
+  values: FinancialMetrics | null;
+}
 export interface FinancialMetrics {
   periodEps: Measure;
   operatingMarginPct: Measure;
   revenueYoyPct: Measure;
   operatingProfitYoyPct: Measure;
   operatingProfitAccelerationPp: Measure;
-  parentNetIncomeTtm: Measure;
-  operatingProfitTtm: Measure;
-  revenueTtm: Measure;
-  operatingCashFlowTtm: Measure;
-  investingCashFlowTtm: Measure;
-  capexTtm: Measure;
+  parentNetIncomeTtm: TtmMeasure;
+  operatingProfitTtm: TtmMeasure;
+  revenueTtm: TtmMeasure;
+  operatingCashFlowTtm: TtmMeasure;
+  investingCashFlowTtm: TtmMeasure;
+  capexTtm: TtmMeasure;
   freeCashFlowTtm: Measure;
   epsTtm: Measure;
   bps: Measure;
@@ -87,8 +95,9 @@ export interface FinancialMetrics {
 export interface FinancialData {
   quarters: FinancialPeriod[];
   annual: FinancialPeriod[];
-  metrics: Array<{ year: number; quarter: Quarter; values: FinancialMetrics }>;
-  annualMetrics: Array<{ year: number; values: FinancialMetrics }>;
+  latestMetrics: Array<{ year: number; quarter: Quarter; values: FinancialMetrics }>;
+  latestAnnualMetrics: Array<{ year: number; values: FinancialMetrics }>;
+  timeline: FinancialTimelinePoint[];
   limitations: string[];
 }
 export interface Disclosure {
