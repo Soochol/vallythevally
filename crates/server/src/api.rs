@@ -1176,3 +1176,130 @@ mod tests {
         }
     }
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub enum FinancialPeriod { Q, Y }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum FinancialMetric { Revenue, OperatingIncome, OwnerRoe, InvestingCashFlow, Dps, DebtRatio }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum FinancialValueStatus { Available, Unpublished, MissingItem, NotCalculable, Failed, Pending, Unsupported }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum FinancialReason {
+    AnnualOnly, ShareClassUnverified, AccountMappingUnverified, AmbiguousAccount,
+    AmountMissing, PeriodUnverified, PeriodMismatch, ShortPeriod, PeriodOverlap,
+    MissingComparison, BasisChanged, CurrencyMismatch, NonPositiveEquity,
+    NonPositiveAverageEquity, NonFiniteResult, ReceiptMismatch, RefreshIncomplete,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+#[ts(export)]
+pub enum FinancialReportingPeriod { Instant { date: String }, Duration { start: String, end: String } }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub enum FinancialBasis { CFS, OFS }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum FinancialInputStatus { Available, MissingReport, Unpublished, MissingItem, NotCalculable, Failed, Pending }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum FinancialInputUsage { Value, Comparison, ReportingPeriod }
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct FinancialInput {
+    pub business_year: i32,
+    pub report_code: String,
+    pub usage: FinancialInputUsage,
+    pub status: FinancialInputStatus,
+    pub reason: Option<FinancialReason>,
+    pub role: String,
+    pub amount: Option<String>,
+    pub period: Option<FinancialReportingPeriod>,
+    pub verification_reason: Option<String>,
+    pub basis: Option<FinancialBasis>,
+    pub currency: Option<String>,
+    pub receipt: Option<String>,
+    pub disclosed_at: Option<String>,
+    pub context_id: Option<String>,
+    pub source_file: Option<String>,
+    pub fields: std::collections::BTreeMap<String, String>,
+    pub checked_at: Option<UnixSeconds>,
+    pub last_success_at: Option<UnixSeconds>,
+    pub failure: Option<String>,
+    #[ts(type = "number")]
+    pub refresh_version: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct FinancialPoint {
+    pub business_year: i32,
+    pub report_code: String,
+    pub status: FinancialValueStatus,
+    pub reason: Option<FinancialReason>,
+    pub value: Option<f64>,
+    pub reported_value: Option<f64>,
+    pub period: Option<FinancialReportingPeriod>,
+    pub price_bucket: Option<UnixSeconds>,
+    pub basis: Option<FinancialBasis>,
+    pub currency: Option<String>,
+    pub inputs: Vec<FinancialInput>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct FinancialSeries { pub metric: FinancialMetric, pub points: Vec<FinancialPoint> }
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct FinancialProgress {
+    pub total: usize,
+    pub completed: usize,
+    pub failed: usize,
+    pub pending: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct FinancialsPage {
+    pub symbol: SymbolCode,
+    pub period: FinancialPeriod,
+    pub status: String,
+    pub reason: Option<String>,
+    pub failure: Option<String>,
+    pub corp_code: Option<String>,
+    pub fiscal_month: Option<u8>,
+    pub share_class: Option<String>,
+    pub share_class_reason: Option<String>,
+    pub last_checked_at: Option<UnixSeconds>,
+    pub last_attempt_at: Option<UnixSeconds>,
+    pub disclosure_failure: Option<String>,
+    #[ts(type = "number")]
+    pub refresh_version: u64,
+    #[ts(type = "number")]
+    pub disclosure_version: u64,
+    pub latest_corrections: bool,
+    pub progress: FinancialProgress,
+    pub series: Vec<FinancialSeries>,
+}
