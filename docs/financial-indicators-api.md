@@ -35,3 +35,36 @@
 짧은 기간은 임의로 연장하지 않는다. 같은 가격봉에 보고기간이 겹치면 `period_overlap`과 `value=null`로 표시하며, 각각 계산한 값이 있으면 `reportedValue`와 원래 입력을 보존해 툴팁에서 확인할 수 있다. `reportedValue`를 차트에 합산하지 않는다. 자본총계가 0 이하인 부채비율은 비우지만 부채·자본 원금액을 모두 반환한다. DPS는 확인된 주식 종류와 실제 연간 결산일이 맞는 현금배당금만 사용하며, 분기는 `annual_only`다.
 
 시험은 `financial_calculations.rs`의 합성 저장 자료 및 `financials.rs`의 가짜 DART/XBRL과 fake-kiwoom을 사용한다. 실제 인증 API나 사용자 서버를 사용하지 않는다.
+
+## 계산 입력의 상태와 사용 목적
+
+`inputs`의 각 항목에는 `businessYear`, `reportCode`, `usage`, `status`, `reason`이 있다. `usage`는 원금액 `value`, 차감에 필요한 비교자료 `comparison`, DPS 결산기간 판정에 사용한 `reporting_period`다. `role`은 원금액 필드명(`thstrm_amount`, `thstrm_add_amount`, `thstrm`)을 유지하며, 값이 없는 요청 요약은 `statement`다. 입력 상태는 point의 표시 상태와 별도로 읽는다.
+
+| 입력 status | 의미 |
+|---|---|
+| available | 저장 자료가 있음. 실패가 함께 있으면 마지막 성공 자료이며, 개별 검증 한계는 verificationReason으로 확인 |
+| missing_report | 필요한 사업연도·보고서 구분의 요청 엔트리 자체가 없음 |
+| unpublished | 비교 요청이 원자료 부재를 확인함 |
+| missing_item | 비교 보고서는 있으나 필요한 계정이 없음 |
+| not_calculable | 비교 계정의 기간·접수번호 등이 검증되지 않음 |
+| failed | 필요한 비교 자료가 원천 실패로 사용 불가 |
+| pending | 필요한 비교 요청이 아직 완료되지 않음 |
+
+현재 연간 보고서는 공시됐지만 Q3가 없거나 미공시·항목 없음·실패·대기이면, Q4 point는 `not_calculable / missing_comparison`이다. 현재 보고서 자체의 `unpublished`, `failed`, `pending`과 구분한다. 비교 입력의 원래 상태와 세부 `reason`, 원금액·검증 사유·조회/성공 시각·실패·성공 세대는 그대로 제공한다. 비교 저장 값이 유효하면 갱신 실패가 있어도 계산값을 유지하며 해당 comparison 입력의 failure를 함께 표시한다.
+
+예를 들어 공시된 연간 매출 1000에서 Q3 미공시로 Q4를 만들지 못하면 다음 핵심 필드가 반환된다. 나머지 원자료·출처 필드는 생략했다.
+
+```json
+{
+  "businessYear": 2024, "reportCode": "11011",
+  "status": "not_calculable", "reason": "missing_comparison", "value": null,
+  "inputs": [
+    {"businessYear": 2024, "reportCode": "11011", "usage": "value", "status": "available", "amount": "1000"},
+    {"businessYear": 2024, "reportCode": "11014", "usage": "comparison", "status": "unpublished", "role": "statement", "amount": null}
+  ]
+}
+```
+
+부채비율은 부채·자본 자체의 검증된 동일 instant로 계산하고 그 실제 날짜가 속한 가격봉에 배치한다. 손익·CF duration의 부재·미확인·짧은 기간은 기말 비율을 막지 않는다. 두 입력의 기간·통화·기준·성공 세대와 접수번호를 확인하며, 자본이 0 이하이면 `not_calculable / non_positive_equity`, `period={"kind":"instant","date":"2024-12-31"}`와 두 원금액을 반환한다. 서로 다른 시점은 합치거나 기간을 추측하지 않는다.
+
+DPS의 `reporting_period` 입력은 실제 선택한 verified duration의 계정·기준·원금액·XBRL context/파일·접수번호·checkedAt/lastSuccessAt·성공 세대·갱신 실패를 보존한다. 유효한 저장 기간 근거의 갱신이 실패했더라도 저장 배당값은 유지한다. 예를 들어 DPS 100은 available이고 배당 입력은 정상인 동시에, 기간 근거 입력에는 `failure=network`, `checkedAt=200`, `lastSuccessAt=100`이 함께 올 수 있다.

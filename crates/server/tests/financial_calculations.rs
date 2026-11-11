@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
 use domain::{KstDate, KstTime, TimeOfDay};
-use server::api::{FinancialMetric as Metric, FinancialPeriod as Frequency, FinancialPoint, FinancialReason as Reason, FinancialReportingPeriod as Period, FinancialValueStatus as Status, FinancialsPage};
+use server::api::{FinancialBasis, FinancialInputStatus as InputStatus, FinancialInputUsage as Usage, FinancialMetric as Metric, FinancialPeriod as Frequency, FinancialPoint, FinancialReason as Reason, FinancialReportingPeriod as Period, FinancialValueStatus as Status, FinancialsPage};
 use server::financials::{calculate::page, model::{Account, Basis, Collection, Company, Dividend, FactPeriod, Failure, Fetch, Report, Security, Snapshot, Statement, Verification}};
 
 fn duration(start: &str, end: &str) -> FactPeriod { FactPeriod::Duration { start: start.into(), end: end.into() } }
@@ -255,4 +255,167 @@ fn oversized_period_is_not_mislabeled_as_a_shortened_year() {
     let data=snapshot(vec![report(2024,"11011","2023-12-01","2024-12-31","2024-10-01",50.0,50.0)]);
     let response=page("005930",Frequency::Y,data);
     assert_eq!(point(&response,Metric::Revenue,2024,"11011").reason,Some(Reason::PeriodMismatch));
+}
+
+fn verify_report_xbrl(mut r: Report) -> Report {
+    let member=if r.statement.data.as_ref().unwrap().basis == Basis::CFS { "ConsolidatedMember" } else { "SeparateMember" };
+    let mut contexts=String::new();
+    let mut facts=String::new();
+    for (index,a) in r.statement.data.as_ref().unwrap().accounts.iter().enumerate() {
+        for (suffix, verification, role) in [("current",&a.current_period,"thstrm_amount"),("cumulative",&a.cumulative_period,"thstrm_add_amount")] {
+            let Verification::Verified {period,..}=verification else {continue};
+            let period_xml=match period {FactPeriod::Instant {date}=>format!("<instant>{date}</instant>"),FactPeriod::Duration {start,end}=>format!("<startDate>{start}</startDate><endDate>{end}</endDate>")};
+            let context_id=format!("c{index}_{suffix}");
+            contexts.push_str(&format!(r#"<context id="{context_id}"><entity><identifier scheme="http://dart.fss.or.kr/ifrs/CIK">00126380</identifier></entity><period>{period_xml}</period><scenario><xbrldi:explicitMember dimension="ifrs-full:ConsolidatedAndSeparateFinancialStatementsAxis">ifrs-full:{member}</xbrldi:explicitMember></scenario></context>"#));
+            let concept=a.fields["account_id"].replacen('_',":",1);
+            facts.push_str(&format!(r#"<{concept} contextRef="{context_id}" unitRef="{}">{}</{concept}>"#,a.fields["currency"],a.fields[role]));
+        }
+    }
+    let xml=format!(r#"<xbrl xmlns="http://www.xbrl.org/2003/instance" xmlns:ifrs-full="http://xbrl.ifrs.org/taxonomy/2024-03-27/ifrs-full" xmlns:dart="http://dart.fss.or.kr/ifrs/2024" xmlns:xbrldi="http://xbrl.org/2006/xbrldi" xmlns:iso4217="http://www.xbrl.org/2003/iso4217"><unit id="KRW"><measure>iso4217:KRW</measure></unit><unit id="USD"><measure>iso4217:USD</measure></unit>{contexts}{facts}</xbrl>"#);
+    let rows=r.statement.data.as_ref().unwrap().accounts.iter().map(|a| {let mut row=a.fields.clone();row.insert("reprt_code".into(),r.report_code.clone());row}).collect();
+    let end=match &r.statement.data.as_ref().unwrap().accounts[0].current_period {Verification::Verified {period:FactPeriod::Duration {end,..},..}=>end,Verification::Verified {period:FactPeriod::Instant {date},..}=>date,_=>panic!()};
+    let verified=server::financials::xbrl::accounts(rows,r.statement.data.as_ref().unwrap().basis,"00126380","20250331000001",&[("synthetic.xbrl".into(),xml)],Some(&end[..7])).unwrap();
+    r.statement.data.as_mut().unwrap().accounts=verified;
+    r
+}
+
+fn balance_report(capital: &str, income_unverified: bool) -> Report {
+    let mut r=report(2024,"11011","2024-07-01","2024-12-31","2024-10-01",100.0,100.0);
+    r.statement.data.as_mut().unwrap().accounts.retain(|a|a.fields["sj_div"]=="BS");
+    r.statement.data.as_mut().unwrap().accounts[1].fields.insert("thstrm_amount".into(),capital.into());
+    if income_unverified {
+        let mut income=account("ifrs-full_Revenue","IS",1000.0,duration("2024-01-01","2024-12-31"),None);
+        income.current_period=Verification::Unverified("matching_context_missing".into());
+        r.statement.data.as_mut().unwrap().accounts.push(income);
+    }
+    verify_report_xbrl(r)
+}
+
+#[test]
+fn verified_balance_instants_work_without_income_and_ignore_short_income_duration() {
+    for unverified in [false,true] {
+        for frequency in [Frequency::Q,Frequency::Y] {
+            let r=balance_report("400",unverified);
+            assert!(r.statement.data.as_ref().unwrap().accounts.iter().filter(|a|a.fields["sj_div"]=="BS").all(|a|matches!(a.current_period,Verification::Verified {..})));
+            let response=page("005930",frequency,snapshot(vec![r]));
+            let p=point(&response,Metric::DebtRatio,2024,"11011");
+            assert_eq!(p.value,Some(50.0));assert_eq!(p.status,Status::Available);
+            assert_eq!(p.period,Some(Period::Instant {date:"2024-12-31".into()}));
+            let month=if frequency == Frequency::Q {10} else {1};
+            assert_eq!(p.price_bucket.unwrap().0,KstTime::from_kst_civil(KstDate::new(2024,month,1).unwrap(),TimeOfDay::MIDNIGHT).unix());
+            assert_eq!(p.inputs.len(),2);
+            for (input,amount) in p.inputs.iter().zip(["200","400"]) {
+                assert_eq!(input.amount.as_deref(),Some(amount));assert_eq!(input.period,p.period);
+                assert_eq!(input.source_file.as_deref(),Some("synthetic.xbrl"));assert!(input.context_id.is_some());
+                assert_eq!(input.receipt.as_deref(),Some("20250331000001"));assert_eq!(input.basis,Some(FinancialBasis::CFS));assert_eq!(input.currency.as_deref(),Some("KRW"));
+                assert_eq!(input.business_year,2024);assert_eq!(input.report_code,"11011");assert_eq!(input.status,InputStatus::Available);assert_eq!(input.usage,Usage::Value);
+                assert_eq!(input.checked_at.unwrap().0,100);assert_eq!(input.last_success_at.unwrap().0,100);
+            }
+        }
+    }
+    let r=verify_report_xbrl(report(2024,"11011","2024-07-01","2024-12-31","2024-10-01",50.0,50.0));
+    let response=page("005930",Frequency::Y,snapshot(vec![r]));
+    assert_eq!(point(&response,Metric::Revenue,2024,"11011").reason,Some(Reason::ShortPeriod));
+    assert_eq!(point(&response,Metric::DebtRatio,2024,"11011").value,Some(50.0));
+}
+
+#[test]
+fn nonpositive_balance_equity_preserves_both_amounts_and_actual_instant() {
+    for capital in ["0","-50"] {
+        let response=page("005930",Frequency::Y,snapshot(vec![balance_report(capital,false)]));
+        let p=point(&response,Metric::DebtRatio,2024,"11011");
+        assert_eq!(p.status,Status::NotCalculable);assert_eq!(p.reason,Some(Reason::NonPositiveEquity));assert_eq!(p.value,None);
+        assert_eq!(p.period,Some(Period::Instant {date:"2024-12-31".into()}));assert!(p.price_bucket.is_some());
+        assert_eq!(p.inputs.len(),2);assert_eq!(p.inputs[0].amount.as_deref(),Some("200"));assert_eq!(p.inputs[1].amount.as_deref(),Some(capital));
+        assert!(p.inputs.iter().all(|i|i.period == p.period && i.source_file.as_deref() == Some("synthetic.xbrl")));
+    }
+}
+
+#[test]
+fn balance_inputs_require_matching_instants_currency_and_receipts() {
+    for (change,reason) in [(0,Reason::PeriodMismatch),(1,Reason::CurrencyMismatch),(2,Reason::ReceiptMismatch),(3,Reason::PeriodUnverified)] {
+        let mut r=balance_report("400",false);
+        let equity=&mut r.statement.data.as_mut().unwrap().accounts[1];
+        match change {
+            0=>{equity.current_period=verified(instant("2024-12-30"));r=verify_report_xbrl(r);},
+            1=>{equity.fields.insert("currency".into(),"USD".into());r=verify_report_xbrl(r);},
+            2=>{equity.fields.insert("rcept_no".into(),"20250331000002".into());if let Verification::Verified {receipt,..}=&mut equity.current_period {*receipt="20250331000002".into();}},
+            _=>equity.current_period=Verification::Unverified("matching_context_missing".into()),
+        }
+        let response=page("005930",Frequency::Y,snapshot(vec![r]));let p=point(&response,Metric::DebtRatio,2024,"11011");
+        assert_eq!(p.status,Status::NotCalculable);assert_eq!(p.reason,Some(reason));assert_eq!(p.value,None);assert_eq!(p.inputs.len(),2);
+        assert_eq!(p.inputs[0].amount.as_deref(),Some("200"));assert_eq!(p.inputs[1].amount.as_deref(),Some("400"));
+        if change==0 {assert_eq!(p.inputs[1].period,Some(Period::Instant {date:"2024-12-30".into()}));assert_eq!(p.period,None);}
+    }
+    let mut r=balance_report("400",true);r.statement.data.as_mut().unwrap().basis=Basis::OFS;r=verify_report_xbrl(r);
+    let response=page("005930",Frequency::Y,snapshot(vec![r]));let p=point(&response,Metric::DebtRatio,2024,"11011");
+    assert_eq!(p.value,Some(50.0));assert_eq!(p.basis,Some(FinancialBasis::OFS));
+}
+
+#[test]
+fn q4_missing_comparison_preserves_request_identity_state_and_history() {
+    for (case,status) in [(0,InputStatus::MissingReport),(1,InputStatus::Unpublished),(2,InputStatus::MissingItem),(3,InputStatus::Failed),(4,InputStatus::Pending),(5,InputStatus::Failed)] {
+        let mut data=year();
+        match case {
+            0=>{data.collection.reports.remove("2024/11014");},
+            1=>data.collection.reports.get_mut("2024/11014").unwrap().statement=Fetch {absent:true,checked_at:Some(200),last_success_at:Some(100),refresh_version:7,..Default::default()},
+            2=>{let r=data.collection.reports.get_mut("2024/11014").unwrap();r.statement.checked_at=Some(200);r.statement.data.as_mut().unwrap().accounts.retain(|a|a.fields["account_id"]!="ifrs-full_Revenue");},
+            3=>data.collection.reports.get_mut("2024/11014").unwrap().statement=Fetch {failure:Some(Failure::Network),checked_at:Some(200),last_success_at:Some(100),refresh_version:7,..Default::default()},
+            4=>data.collection.reports.get_mut("2024/11014").unwrap().statement=Fetch::default(),
+            _=>{let r=data.collection.reports.get_mut("2024/11014").unwrap();r.statement.checked_at=Some(200);let statement=r.statement.data.as_mut().unwrap();statement.source_failure=Some(Failure::Remote);statement.accounts[0].cumulative_period=Verification::Unverified("matching_context_missing".into());},
+        }
+        if case==3 || case==5 {data.status="partial_failure";}
+        let response=page("005930",Frequency::Q,data);
+        let p=point(&response,Metric::Revenue,2024,"11011");
+        assert_eq!(p.status,Status::NotCalculable);assert_eq!(p.reason,Some(Reason::MissingComparison));assert_eq!(p.value,None);
+        assert_eq!(p.inputs[0].amount.as_deref(),Some("1000"));assert_eq!(p.inputs[0].usage,Usage::Value);assert_eq!(p.inputs[0].report_code,"11011");
+        let comparison=p.inputs.iter().find(|i|i.usage==Usage::Comparison).unwrap();
+        assert_eq!(comparison.business_year,2024);assert_eq!(comparison.report_code,"11014");assert_eq!(comparison.status,status);
+        assert_eq!(comparison.checked_at.map(|t|t.0),if case==0 || case==4 {None} else {Some(200)});
+        assert_eq!(comparison.last_success_at.map(|t|t.0),if case==0 || case==4 {None} else {Some(100)});
+        assert_eq!(comparison.failure.as_deref(),if case==3 {Some("network")} else if case==5 {Some("remote")} else {None});
+        if case==5 {assert_eq!(comparison.reason,Some(Reason::PeriodUnverified));assert_eq!(comparison.amount.as_deref(),Some("300"));assert_eq!(comparison.verification_reason.as_deref(),Some("matching_context_missing"));}
+        assert_eq!(comparison.refresh_version,if case==1 || case==3 {7} else {0});
+        assert_eq!(point(&response,Metric::DebtRatio,2024,"11011").value,Some(50.0));
+        assert_eq!(point(&response,Metric::Revenue,2024,"11013").value,Some(100.0));
+    }
+}
+
+#[test]
+fn comparison_failure_with_stored_values_keeps_q4_and_dependency_warning() {
+    let mut data=year();let fetch=&mut data.collection.reports.get_mut("2024/11014").unwrap().statement;
+    fetch.failure=Some(Failure::Network);fetch.checked_at=Some(200);data.status="partial_failure";
+    let p=value(data,Metric::Revenue,"11011");assert_eq!(p.value,Some(700.0));assert_eq!(p.status,Status::Available);
+    let comparison=p.inputs.iter().find(|i|i.usage==Usage::Comparison).unwrap();
+    assert_eq!(comparison.status,InputStatus::Available);assert_eq!(comparison.failure.as_deref(),Some("network"));
+    assert_eq!(comparison.checked_at.unwrap().0,200);assert_eq!(comparison.last_success_at.unwrap().0,100);
+    assert_eq!(comparison.amount.as_deref(),Some("300"));assert_eq!(comparison.period,Some(Period::Duration {start:"2024-01-01".into(),end:"2024-09-30".into()}));
+    let mut data=year();data.collection.reports.get_mut("2024/11011").unwrap().statement=Fetch {absent:true,checked_at:Some(200),last_success_at:Some(200),..Default::default()};
+    let p=value(data,Metric::Revenue,"11011");assert_eq!(p.status,Status::Unpublished);assert_eq!(p.reason,None);
+    assert_eq!(p.inputs[0].status,InputStatus::Unpublished);assert_eq!(p.inputs[0].report_code,"11011");assert_eq!(p.inputs[0].usage,Usage::Value);
+}
+
+#[test]
+fn dps_preserves_verified_reporting_period_source_and_refresh_failure() {
+    let mut r=verify_report_xbrl(report(2024,"11011","2024-01-01","2024-12-31","2024-10-01",100.0,100.0));
+    r.dividends=fetch(vec![dividends("보통주","100")]);r.statement.failure=Some(Failure::Network);r.statement.checked_at=Some(200);
+    let mut data=snapshot(vec![r]);data.status="partial_failure";
+    let response=page("005930",Frequency::Y,data);let p=point(&response,Metric::Dps,2024,"11011");
+    assert_eq!(p.value,Some(100.0));assert_eq!(p.status,Status::Available);assert_eq!(p.basis,Some(FinancialBasis::CFS));
+    let anchor=p.inputs.iter().find(|i|i.usage==Usage::ReportingPeriod).unwrap();
+    assert_eq!(anchor.period,p.period);assert_eq!(anchor.status,InputStatus::Available);assert_eq!(anchor.basis,p.basis);
+    assert_eq!(anchor.failure.as_deref(),Some("network"));assert_eq!(anchor.checked_at.unwrap().0,200);assert_eq!(anchor.last_success_at.unwrap().0,100);
+    assert_eq!(anchor.receipt.as_deref(),Some("20250331000001"));assert_eq!(anchor.source_file.as_deref(),Some("synthetic.xbrl"));assert!(anchor.context_id.is_some());
+    assert_eq!(anchor.disclosed_at.as_deref(),Some("2025-03-31"));assert_eq!(anchor.business_year,2024);assert_eq!(anchor.report_code,"11011");
+    let dividend=p.inputs.iter().find(|i|i.role=="thstrm").unwrap();assert_eq!(dividend.amount.as_deref(),Some("100"));assert_eq!(dividend.failure,None);assert_eq!(dividend.checked_at.unwrap().0,100);
+}
+
+#[test]
+fn invalid_comparison_keeps_receipt_failure_and_current_annual_evidence() {
+    let mut data=year();mutate(&mut data,2024,"11014",|s|{s.accounts[0].fields.insert("rcept_no".into(),"20250331000002".into());});
+    let p=value(data,Metric::Revenue,"11011");assert_eq!(p.status,Status::NotCalculable);assert_eq!(p.reason,Some(Reason::MissingComparison));
+    assert_eq!(p.inputs[0].amount.as_deref(),Some("1000"));
+    let comparison=p.inputs.iter().find(|i|i.usage==Usage::Comparison).unwrap();
+    assert_eq!(comparison.status,InputStatus::NotCalculable);assert_eq!(comparison.reason,Some(Reason::ReceiptMismatch));
+    assert_eq!(comparison.receipt.as_deref(),Some("20250331000002"));assert_eq!(comparison.amount.as_deref(),Some("300"));
 }

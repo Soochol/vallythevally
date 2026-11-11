@@ -1210,10 +1210,25 @@ pub enum FinancialReportingPeriod { Instant { date: String }, Duration { start: 
 #[ts(export)]
 pub enum FinancialBasis { CFS, OFS }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum FinancialInputStatus { Available, MissingReport, Unpublished, MissingItem, NotCalculable, Failed, Pending }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum FinancialInputUsage { Value, Comparison, ReportingPeriod }
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export)]
 pub struct FinancialInput {
+    pub business_year: i32,
+    pub report_code: String,
+    pub usage: FinancialInputUsage,
+    pub status: FinancialInputStatus,
+    pub reason: Option<FinancialReason>,
     pub role: String,
     pub amount: Option<String>,
     pub period: Option<FinancialReportingPeriod>,

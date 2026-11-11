@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use domain::{KstDate, KstTime, TimeOfDay};
 
-use crate::api::{FinancialBasis, FinancialInput, FinancialMetric, FinancialPeriod, FinancialPoint, FinancialProgress, FinancialReason, FinancialReportingPeriod, FinancialSeries, FinancialValueStatus, FinancialsPage, SymbolCode, UnixSeconds};
+use crate::api::{FinancialBasis, FinancialInput, FinancialInputStatus, FinancialInputUsage, FinancialMetric, FinancialPeriod, FinancialPoint, FinancialProgress, FinancialReason, FinancialReportingPeriod, FinancialSeries, FinancialValueStatus, FinancialsPage, SymbolCode, UnixSeconds};
 use super::{client::field, model::{Account, Basis, Collection, FactPeriod, Failure, Fetch, Report, Security, Snapshot, Statement, Verification}};
 
 use FinancialReason as Reason;
@@ -40,11 +40,11 @@ struct Amount {
 }
 
 #[derive(Clone)]
-struct Gap { status: Status, reason: Option<Reason>, inputs: Vec<FinancialInput> }
+struct Gap { status: Status, reason: Option<Reason>, period: Option<FactPeriod>, inputs: Vec<FinancialInput> }
 
 type Calculation = Result<Amount, Gap>;
 
-fn gap(reason: Reason, inputs: Vec<FinancialInput>) -> Gap { Gap { status: Status::NotCalculable, reason: Some(reason), inputs } }
+fn gap(reason: Reason, inputs: Vec<FinancialInput>) -> Gap { Gap { status: Status::NotCalculable, reason: Some(reason), period: None, inputs } }
 fn failure(value: Option<Failure>) -> Option<String> { value.map(|v| serde_json::to_value(v).unwrap().as_str().unwrap().to_owned()) }
 fn basis(value: Basis) -> FinancialBasis { match value { Basis::CFS => FinancialBasis::CFS, Basis::OFS => FinancialBasis::OFS } }
 fn period(value: &FactPeriod) -> FinancialReportingPeriod {
@@ -71,12 +71,13 @@ fn disclosed(collection: &Collection, receipt: &str) -> Option<String> {
     collection.disclosures.iter().find(|row| field(row, "rcept_no") == receipt).and_then(|row| KstDate::parse_yyyymmdd(field(row, "rcept_dt"))).map(|d| d.to_string())
 }
 
-fn source<T>(fetch: &Fetch<T>, role: &str) -> FinancialInput {
-    FinancialInput { role: role.into(), amount: None, period: None, verification_reason: None, basis: None, currency: None, receipt: None, disclosed_at: None, context_id: None, source_file: None, fields: BTreeMap::new(), checked_at: fetch.checked_at.map(UnixSeconds), last_success_at: fetch.last_success_at.map(UnixSeconds), failure: failure(fetch.failure), refresh_version: fetch.refresh_version }
+fn source<T>(report: &Report, fetch: &Fetch<T>, role: &str) -> FinancialInput {
+    let status = if fetch.data.is_some() { FinancialInputStatus::Available } else if fetch.failure.is_some() { FinancialInputStatus::Failed } else if fetch.absent { FinancialInputStatus::Unpublished } else { FinancialInputStatus::Pending };
+    FinancialInput { business_year: report.business_year, report_code: report.report_code.clone(), usage: FinancialInputUsage::Value, status, reason: None, role: role.into(), amount: None, period: None, verification_reason: None, basis: None, currency: None, receipt: None, disclosed_at: None, context_id: None, source_file: None, fields: BTreeMap::new(), checked_at: fetch.checked_at.map(UnixSeconds), last_success_at: fetch.last_success_at.map(UnixSeconds), failure: failure(fetch.failure), refresh_version: fetch.refresh_version }
 }
 
 fn account_source(report: &Report, collection: &Collection, account: &Account, cumulative: bool) -> FinancialInput {
-    let mut input = source(&report.statement, if cumulative { "thstrm_add_amount" } else { "thstrm_amount" });
+    let mut input = source(report, &report.statement, if cumulative { "thstrm_add_amount" } else { "thstrm_amount" });
     input.fields = account.fields.clone();
     input.amount = account.fields.get(&input.role).cloned();
     input.basis = report.statement.data.as_ref().map(|s| basis(s.basis));
@@ -93,7 +94,7 @@ fn account_source(report: &Report, collection: &Collection, account: &Account, c
 }
 
 fn statement(report: &Report) -> Result<&Statement, Gap> {
-    report.statement.data.as_ref().ok_or_else(|| Gap { status: if report.statement.failure.is_some() { Status::Failed } else if report.statement.absent { Status::Unpublished } else { Status::Pending }, reason: None, inputs: vec![source(&report.statement, "statement")] })
+    report.statement.data.as_ref().ok_or_else(|| Gap { status: if report.statement.failure.is_some() { Status::Failed } else if report.statement.absent { Status::Unpublished } else { Status::Pending }, reason: None, period: None, inputs: vec![source(report, &report.statement, "statement")] })
 }
 
 fn amount(report: &Report, collection: &Collection, concept: Concept, cumulative: bool) -> Calculation {
@@ -101,7 +102,7 @@ fn amount(report: &Report, collection: &Collection, concept: Concept, cumulative
     let accounts: Vec<_> = statement.accounts.iter().filter(|a| concept.matches(a)).collect();
     if accounts.is_empty() {
         let inputs = statement.accounts.iter().filter(|a| !field(&a.fields, "account_id").starts_with("ifrs_") && !field(&a.fields, "account_id").starts_with("ifrs-full_") && !field(&a.fields, "account_id").starts_with("dart_")).map(|a| account_source(report, collection, a, cumulative)).collect::<Vec<_>>();
-        return Err(Gap { status: Status::MissingItem, reason: (!inputs.is_empty()).then_some(Reason::AccountMappingUnverified), inputs });
+        return Err(Gap { status: Status::MissingItem, reason: (!inputs.is_empty()).then_some(Reason::AccountMappingUnverified), period: None, inputs });
     }
     let inputs: Vec<_> = accounts.iter().map(|a| account_source(report, collection, a, cumulative)).collect();
     let mut values = Vec::new();
@@ -129,6 +130,24 @@ fn compatible(a: &Amount, b: &Amount) -> Option<Reason> {
 
 fn with_inputs(mut error: Gap, mut inputs: Vec<FinancialInput>) -> Gap { inputs.append(&mut error.inputs); error.inputs = inputs; error }
 
+fn comparison_gap(current: &Amount, previous: &Report, mut error: Gap) -> Gap {
+    if error.inputs.is_empty() { error.inputs.push(source(previous, &previous.statement, "statement")); }
+    let status = match error.status {
+        Status::Available => FinancialInputStatus::Available,
+        Status::Unpublished => FinancialInputStatus::Unpublished,
+        Status::MissingItem => FinancialInputStatus::MissingItem,
+        Status::Failed => FinancialInputStatus::Failed,
+        Status::Pending => FinancialInputStatus::Pending,
+        Status::NotCalculable | Status::Unsupported => FinancialInputStatus::NotCalculable,
+    };
+    for input in &mut error.inputs {
+        input.usage = FinancialInputUsage::Comparison;
+        input.status = status;
+        input.reason = error.reason;
+    }
+    gap(Reason::MissingComparison, [current.inputs.clone(), error.inputs].concat())
+}
+
 fn quarter(report: &Report, collection: &Collection, concept: Concept) -> Calculation {
     let current = amount(report, collection, concept, false)?;
     let FactPeriod::Duration { start, end } = &current.period else { return Err(gap(Reason::PeriodMismatch, current.inputs)); };
@@ -136,10 +155,17 @@ fn quarter(report: &Report, collection: &Collection, concept: Concept) -> Calcul
     if expected != 12 && months(start, end, 3) { return Ok(current); }
     if !months(start, end, expected) { return Err(gap(duration_reason(start, end, expected), current.inputs)); }
     let previous_code = match report.report_code.as_str() { "11012" => "11013", "11014" => "11012", "11011" => "11014", _ => return Ok(current) };
-    let Some(previous) = collection.reports.values().find(|r| r.business_year == report.business_year && r.report_code == previous_code) else { return Err(gap(Reason::MissingComparison, current.inputs)); };
-    let prior = amount(previous, collection, concept, true).or_else(|error| {
+    let Some(previous) = collection.reports.values().find(|r| r.business_year == report.business_year && r.report_code == previous_code) else {
+        let missing = Report { business_year: report.business_year, report_code: previous_code.into(), statement: Fetch::<Statement>::default(), dividends: Fetch::default() };
+        let mut input = source(&missing, &missing.statement, "statement");
+        input.usage = FinancialInputUsage::Comparison;
+        input.status = FinancialInputStatus::MissingReport;
+        return Err(gap(Reason::MissingComparison, [current.inputs, vec![input]].concat()));
+    };
+    let mut prior = amount(previous, collection, concept, true).or_else(|error| {
         if matches!(concept, Concept::InvestingCashFlow) { amount(previous, collection, concept, false) } else { Err(error) }
-    }).map_err(|e| with_inputs(e, current.inputs.clone()))?;
+    }).map_err(|e| comparison_gap(&current, previous, e))?;
+    for input in &mut prior.inputs { input.usage = FinancialInputUsage::Comparison; }
     let mut inputs = current.inputs.clone();
     inputs.extend(prior.inputs.clone());
     if let Some(reason) = compatible(&current, &prior) { return Err(gap(reason, inputs)); }
@@ -159,22 +185,28 @@ fn annual(report: &Report, collection: &Collection, concept: Concept) -> Calcula
     }
 }
 
-fn report_period(report: &Report) -> Result<FactPeriod, Gap> {
+struct ReportingPeriod { period: FactPeriod, inputs: Vec<FinancialInput> }
+
+fn report_period(report: &Report, collection: &Collection) -> Result<ReportingPeriod, Gap> {
     let statement = statement(report)?;
     let concepts = [Concept::Revenue, Concept::OperatingIncome, Concept::OwnerProfit, Concept::InvestingCashFlow];
-    let mut periods = BTreeSet::new();
+    let mut periods = BTreeMap::new();
     for account in statement.accounts.iter().filter(|a| concepts.into_iter().any(|c| c.matches(a))) {
-        for verification in [&account.current_period, &account.cumulative_period] {
+        for (cumulative, verification) in [(false, &account.current_period), (true, &account.cumulative_period)] {
             if let Verification::Verified { period: FactPeriod::Duration { start, end }, receipt, .. } = verification
                 && receipt == field(&account.fields, "rcept_no") {
-                periods.insert((start.clone(), end.clone()));
+                periods.entry((start.clone(), end.clone())).or_insert_with(|| {
+                    let mut input = account_source(report, collection, account, cumulative);
+                    input.usage = FinancialInputUsage::ReportingPeriod;
+                    input
+                });
             }
         }
     }
-    let ends: BTreeSet<_> = periods.iter().map(|(_, end)| end).collect();
-    if ends.len() != 1 { return Err(gap(Reason::PeriodUnverified, Vec::new())); }
-    let (start, end) = periods.first().unwrap();
-    Ok(FactPeriod::Duration { start: start.clone(), end: end.clone() })
+    let ends: BTreeSet<_> = periods.keys().map(|(_, end)| end).collect();
+    if ends.len() != 1 { return Err(gap(Reason::PeriodUnverified, periods.into_values().collect())); }
+    let ((start, end), input) = periods.into_iter().next().unwrap();
+    Ok(ReportingPeriod { period: FactPeriod::Duration { start, end }, inputs: vec![input] })
 }
 
 fn instant(report: &Report, collection: &Collection, concept: Concept, at: &str) -> Calculation {
@@ -222,29 +254,27 @@ fn roe(report: &Report, collection: &Collection, frequency: FinancialPeriod) -> 
     Ok(Amount { value: profit.value / average * 100.0, inputs, ..profit })
 }
 
-fn debt(report: &Report, collection: &Collection, frequency: FinancialPeriod) -> Calculation {
-    let reporting = report_period(report)?;
-    let liabilities = instant(report, collection, Concept::Liabilities, end(&reporting))?;
-    let equity = instant(report, collection, Concept::Equity, end(&reporting)).map_err(|e| with_inputs(e, liabilities.inputs.clone()))?;
+fn debt(report: &Report, collection: &Collection) -> Calculation {
+    let liabilities = amount(report, collection, Concept::Liabilities, false)?;
+    let equity = amount(report, collection, Concept::Equity, false).map_err(|e| with_inputs(e, liabilities.inputs.clone()))?;
     let inputs = [liabilities.inputs.clone(), equity.inputs.clone()].concat();
-    let expected = match report.report_code.as_str() { "11013" => 3, "11012" => 6, "11014" => 9, _ => 12 };
-    if let FactPeriod::Duration { start, end } = &reporting
-        && !(months(start, end, expected) || (frequency == FinancialPeriod::Q && expected != 12 && months(start, end, 3))) {
-        return Err(gap(duration_reason(start, end, expected), inputs));
-    }
-    if let Some(reason) = compatible(&liabilities, &equity) { return Err(gap(reason, inputs)); }
-    if equity.value <= 0.0 { return Err(gap(Reason::NonPositiveEquity, inputs)); }
+    if !matches!(&liabilities.period, FactPeriod::Instant { .. }) || liabilities.period != equity.period { return Err(gap(Reason::PeriodMismatch, inputs)); }
+    let receipt = liabilities.inputs.first().and_then(|i| i.receipt.as_ref());
+    let reason = compatible(&liabilities, &equity)
+        .or_else(|| inputs.iter().any(|i| i.receipt.as_ref() != receipt).then_some(Reason::ReceiptMismatch))
+        .or_else(|| (equity.value <= 0.0).then_some(Reason::NonPositiveEquity));
+    if let Some(reason) = reason { return Err(Gap { period: Some(liabilities.period.clone()), ..gap(reason, inputs) }); }
     Ok(Amount { value: liabilities.value / equity.value * 100.0, inputs, ..liabilities })
 }
 
 fn dps(report: &Report, collection: &Collection, security: &Security, frequency: FinancialPeriod) -> Calculation {
-    if frequency == FinancialPeriod::Q { return Err(Gap { status: Status::Unsupported, reason: Some(Reason::AnnualOnly), inputs: Vec::new() }); }
+    if frequency == FinancialPeriod::Q { return Err(Gap { status: Status::Unsupported, reason: Some(Reason::AnnualOnly), period: None, inputs: Vec::new() }); }
     let Some(rows) = &report.dividends.data else {
-        return Err(Gap { status: if report.dividends.failure.is_some() { Status::Failed } else if report.dividends.absent { Status::Unpublished } else { Status::Pending }, reason: None, inputs: vec![source(&report.dividends, "dividends")] });
+        return Err(Gap { status: if report.dividends.failure.is_some() { Status::Failed } else if report.dividends.absent { Status::Unpublished } else { Status::Pending }, reason: None, period: None, inputs: vec![source(report, &report.dividends, "dividends")] });
     };
     let mut inputs = Vec::new();
     for row in rows.iter().filter(|r| field(&r.fields, "se") == "주당 현금배당금(원)") {
-        let mut input = source(&report.dividends, "thstrm");
+        let mut input = source(report, &report.dividends, "thstrm");
         input.amount = row.fields.get("thstrm").cloned();
         input.fields = row.fields.clone();
         input.currency = Some("KRW".into());
@@ -256,8 +286,10 @@ fn dps(report: &Report, collection: &Collection, security: &Security, frequency:
     }
     if security.share_class.is_none() || security.share_class_reason.is_some() { return Err(gap(Reason::ShareClassUnverified, inputs)); }
     let matched: Vec<_> = rows.iter().filter(|r| field(&r.fields, "se") == "주당 현금배당금(원)" && r.share_class == security.share_class && r.share_class_reason.is_none()).collect();
-    if matched.is_empty() { return Err(Gap { status: Status::MissingItem, reason: Some(Reason::ShareClassUnverified), inputs }); }
-    let reporting = report_period(report).map_err(|e| with_inputs(e, inputs.clone()))?;
+    if matched.is_empty() { return Err(Gap { status: Status::MissingItem, reason: Some(Reason::ShareClassUnverified), period: None, inputs }); }
+    let reporting = report_period(report, collection).map_err(|e| with_inputs(e, inputs.clone()))?;
+    inputs.extend(reporting.inputs);
+    let reporting = reporting.period;
     if !matches!(&reporting, FactPeriod::Duration { start, end } if months(start, end, 12)) { return Err(gap(Reason::ShortPeriod, inputs)); }
     let mut values = Vec::new();
     for row in matched {
@@ -276,7 +308,7 @@ fn bucket(value: &FactPeriod, frequency: FinancialPeriod) -> Option<UnixSeconds>
     Some(UnixSeconds(KstTime::from_kst_civil(first, TimeOfDay::MIDNIGHT).unix()))
 }
 
-fn point(report: &Report, frequency: FinancialPeriod, result: Calculation) -> FinancialPoint {
+fn point(report: &Report, collection: &Collection, frequency: FinancialPeriod, metric: FinancialMetric, result: Calculation) -> FinancialPoint {
     let mut point = FinancialPoint { business_year: report.business_year, report_code: report.report_code.clone(), status: Status::Available, reason: None, value: None, reported_value: None, period: None, price_bucket: None, basis: report.statement.data.as_ref().map(|s| basis(s.basis)), currency: None, inputs: Vec::new() };
     match result {
         Ok(value) => {
@@ -288,11 +320,14 @@ fn point(report: &Report, frequency: FinancialPeriod, result: Calculation) -> Fi
             if value.value.is_finite() { point.value = Some(value.value); point.reported_value = Some(value.value); }
             else { point.status = Status::NotCalculable; point.reason = Some(Reason::NonFiniteResult); }
         }
-        Err(error) => { point.status = error.status; point.reason = error.reason; point.inputs = error.inputs; }
+        Err(error) => {
+            point.status = error.status; point.reason = error.reason; point.inputs = error.inputs;
+            if let Some(reporting) = error.period { point.period = Some(period(&reporting)); point.price_bucket = bucket(&reporting, frequency); }
+        }
     }
-    if point.period.is_none() && let Ok(reporting) = report_period(report) {
-        point.period = Some(period(&reporting));
-        point.price_bucket = bucket(&reporting, frequency);
+    if metric != FinancialMetric::DebtRatio && point.period.is_none() && let Ok(reporting) = report_period(report, collection) {
+        point.period = Some(period(&reporting.period));
+        point.price_bucket = bucket(&reporting.period, frequency);
     }
     point
 }
@@ -317,10 +352,10 @@ pub fn page(symbol: &str, frequency: FinancialPeriod, snapshot: Snapshot) -> Fin
                     if frequency == FinancialPeriod::Q { quarter(report, collection, concept) } else { annual(report, collection, concept) }
                 }
                 FinancialMetric::OwnerRoe => roe(report, collection, frequency),
-                FinancialMetric::DebtRatio => debt(report, collection, frequency),
+                FinancialMetric::DebtRatio => debt(report, collection),
                 FinancialMetric::Dps => snapshot.security.as_ref().map_or_else(|| Err(gap(Reason::ShareClassUnverified, Vec::new())), |s| dps(report, collection, s, frequency)),
             };
-            point(report, frequency, result)
+            point(report, collection, frequency, metric, result)
         }).collect();
         let mut counts = BTreeMap::new();
         for p in &points { if let Some(bucket) = p.price_bucket { *counts.entry(bucket).or_insert(0) += 1; } }
