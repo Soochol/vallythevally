@@ -402,7 +402,7 @@ test.describe("휴대폰 390px", () => {
   test.use({ viewport: { width: 390, height: 844 } });
 
   test("스크리너 탭에서 찾은 행을 누르면 차트 탭으로 가서 그 종목을 KRX로 연다", async ({ app, page }) => {
-    const screen = { id: "phone-screen", name: SCREEN_NAME, period: "D", exclude: ["etf"], conditions: [{ field: "high", n: 60, m: 20 }] };
+    const screen = { id: "phone-screen", name: SCREEN_NAME, markets: [], exclude: ["etf"], conditions: [{ kind: "new_high", period: "D", m: 20, field: "high", n: 60 }] };
     const seeded = await fetch(`${app.url}/api/screens`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ screens: [screen], revision: 1 }) });
     expect(seeded.status).toBe(200);
     await page.goto("/");

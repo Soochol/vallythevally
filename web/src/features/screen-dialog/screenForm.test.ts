@@ -5,11 +5,11 @@ import { addCondition, type ConditionErrors, checkCondition, checkDraft, draftOf
 const weekly: Screen = {
   id: "s1",
   name: "52주 신고가와 신고거래량",
-  period: "W",
+  markets: [],
   exclude: ["etf", "trading_halted"],
   conditions: [
-    { field: "high", n: 52, m: 1 },
-    { field: "volume", n: 52, m: 4 },
+    { kind: "new_high", period: "W", m: 1, field: "high", n: 52 },
+    { kind: "new_high", period: "W", m: 4, field: "volume", n: 52 },
   ],
 };
 const many = (count: number): Screen[] => Array.from({ length: count }, (_, i) => ({ ...weekly, id: `s${i + 1}` }));
@@ -55,7 +55,7 @@ test("N과 M은 1 이상의 정수여야 하고, N은 u32 끝까지 받는다", 
   }
   expect(rowErrors("4294967296", "1")).toEqual({ n: "4,294,967,295 이하로 넣으세요", m: null });
   const longest = checkDraft(withCounts(" 4294967295 ", "1,000"), "new", []);
-  expect(longest.ok && longest.screen.conditions).toEqual([{ field: "high", n: 4_294_967_295, m: 1000 }]);
+  expect(longest.ok && longest.screen.conditions).toEqual([{ kind: "new_high", period: "D", m: 1000, field: "high", n: 4_294_967_295 }]);
 });
 
 test("검사를 통과하면 서버가 돌려주는 필드 순서의 조건식이 된다", () => {
@@ -65,9 +65,18 @@ test("검사를 통과하면 서버가 돌려주는 필드 순서의 조건식�
   draft = editCondition(draft, draft.conditions[1]!.key, { field: "volume", m: "4" });
   const check = checkDraft(draft, "id-1", []);
   expect(check.ok && JSON.stringify(check.screen)).toBe(
-    '{"id":"id-1","name":"고가와 거래량","period":"W","exclude":["etf","trading_halted"],' +
-      '"conditions":[{"field":"high","n":200,"m":1},{"field":"volume","n":200,"m":4}]}',
+    '{"id":"id-1","name":"고가와 거래량","markets":[],"exclude":["etf","trading_halted"],' +
+      '"conditions":[{"kind":"new_high","period":"W","m":1,"field":"high","n":200},{"kind":"new_high","period":"W","m":4,"field":"volume","n":200}]}',
   );
+});
+
+test("대화상자에서 고른 봉 주기 하나를 모든 줄의 봉 주기로 쓰고, 저장된 시장은 그대로 둔다", () => {
+  const kosdaq: Screen = { ...weekly, markets: ["kosdaq"] };
+  const draft = draftOf(kosdaq);
+  expect(draft.period).toBe("W");
+  const check = checkDraft({ ...draft, period: "M" }, kosdaq.id, [kosdaq]);
+  expect(check.ok && check.screen.markets).toEqual(["kosdaq"]);
+  expect(check.ok && check.screen.conditions.map((c) => c.kind !== "market_cap" && c.period)).toEqual(["M", "M"]);
 });
 
 test("저장한 조건식을 고치지 않고 다시 저장하면 같은 조건식이다", () => {

@@ -1,9 +1,9 @@
 import type { ApiErrorBody } from "../src/api/generated/ApiErrorBody.ts";
 import type { ApiErrorCode } from "../src/api/generated/ApiErrorCode.ts";
 import type { ApiErrorReason } from "../src/api/generated/ApiErrorReason.ts";
+import type { Condition } from "../src/api/generated/Condition.ts";
 import type { ExcludeKind } from "../src/api/generated/ExcludeKind.ts";
 import type { KstDate } from "../src/api/generated/KstDate.ts";
-import type { NewHigh } from "../src/api/generated/NewHigh.ts";
 import type { Screen } from "../src/api/generated/Screen.ts";
 import type { ScreenerResult } from "../src/api/generated/ScreenerResult.ts";
 import type { ScreenerRow } from "../src/api/generated/ScreenerRow.ts";
@@ -77,12 +77,15 @@ const fail = (status: number, code: ApiErrorCode, message: string, reason: ApiEr
 });
 
 const isObject = (x: unknown): x is Record<string, unknown> => typeof x === "object" && x !== null && !Array.isArray(x);
-const isNewHigh = (x: unknown): x is NewHigh => isObject(x) && typeof x.field === "string" && Number.isInteger(x.n) && Number.isInteger(x.m);
-const isScreen = (x: unknown): x is Screen =>
+type NewHigh = Extract<Condition, { kind: "new_high" }>;
+type NewHighScreen = Omit<Screen, "conditions"> & { conditions: NewHigh[] };
+const isNewHigh = (x: unknown): x is NewHigh =>
+  isObject(x) && x.kind === "new_high" && (x.period === "D" || x.period === "W" || x.period === "M") && typeof x.field === "string" && Number.isInteger(x.n) && Number.isInteger(x.m);
+const isScreen = (x: unknown): x is NewHighScreen =>
   isObject(x) &&
   typeof x.id === "string" &&
   typeof x.name === "string" &&
-  (x.period === "D" || x.period === "W" || x.period === "M") &&
+  Array.isArray(x.markets) &&
   Array.isArray(x.exclude) &&
   Array.isArray(x.conditions) &&
   x.conditions.length > 0 &&
@@ -90,15 +93,16 @@ const isScreen = (x: unknown): x is Screen =>
 
 const matchChance = ({ n, m }: NewHigh) => Math.min(0.9, 0.3 + (4 * m) / n);
 
-function resultOf(screen: Screen, asOf: KstDate, historyDone: number): ScreenerResult {
+function resultOf(screen: NewHighScreen, asOf: KstDate, historyDone: number): ScreenerResult {
+  const period: ScreenPeriod = screen.conditions[0]?.period ?? "D";
   const excludedKinds = new Set(screen.exclude.flatMap((k) => EXCLUDED_KIND[k] ?? []));
   const universe = STOCKS.filter((s) => !excludedKinds.has(s.kind));
   const longest = Math.max(...screen.conditions.map((c) => c.n));
-  const neededDays = Math.max(...screen.conditions.map((c) => c.n + c.m - 1)) * DAYS_PER_BAR[screen.period];
+  const neededDays = Math.max(...screen.conditions.map((c) => c.n + c.m - 1)) * DAYS_PER_BAR[period];
   const excluded = { listedTooShort: 0, historyShort: 0, unconfirmed: 0 };
   const rows: ScreenerRow[] = [];
   for (const s of universe) {
-    if (s.years * BARS_PER_YEAR[screen.period] < longest) {
+    if (s.years * BARS_PER_YEAR[period] < longest) {
       excluded.listedTooShort++;
       continue;
     }
@@ -106,14 +110,14 @@ function resultOf(screen: Screen, asOf: KstDate, historyDone: number): ScreenerR
       excluded.historyShort++;
       continue;
     }
-    const random = mulberry32(seedOf(`${s.code}:${asOf}:${screen.period}:${JSON.stringify(screen.conditions)}`));
+    const random = mulberry32(seedOf(`${s.code}:${asOf}:${period}:${JSON.stringify(screen.conditions)}`));
     const hits = screen.conditions.map((c) => (random() < matchChance(c) ? Math.floor(random() * c.m) : null));
     const first = hits[0];
     if (first === undefined || first === null || hits.includes(null)) continue;
     const changeRate = Math.round((random() - 0.35) * 1600) / 100;
-    rows.push({ symbol: s.code, name: s.name, close: s.close, changeRate, highDate: barStart(screen.period, asOf, first) });
+    rows.push({ symbol: s.code, name: s.name, close: s.close, changeRate, matchedDate: barStart(period, asOf, first) });
   }
-  rows.sort((a, b) => (a.highDate === b.highDate ? (a.symbol < b.symbol ? -1 : 1) : a.highDate < b.highDate ? 1 : -1));
+  rows.sort((a, b) => (a.matchedDate === b.matchedDate ? (a.symbol < b.symbol ? -1 : 1) : a.matchedDate < b.matchedDate ? 1 : -1));
   return { asOf, universe: universe.length, excluded, rows };
 }
 

@@ -27,7 +27,7 @@ import {
 } from "./screenForm";
 
 const PERIODS = (["D", "W", "M"] as const satisfies readonly ScreenPeriod[]).map((p) => [p, PERIOD_NAME[p]] as const);
-const FIELDS = Object.keys(FIELD_LABEL) as BarField[];
+const FIELDS = ["open", "high", "low", "close", "volume"] as const satisfies readonly BarField[];
 const EXCLUDE_ROWS: readonly { group: ExcludeGroup; label: string }[] = [
   { group: "kind", label: "종류 제외" },
   { group: "status", label: "상태 제외" },
@@ -286,7 +286,7 @@ function ConditionLine({ ids, index, condition, period, removable, onChange, onR
       </div>
       <Errors id={`${base}-n-error`} messages={errors.n ? [`신고가 기간: ${errors.n}`] : []} />
       <Errors id={`${base}-m-error`} messages={errors.m ? [`최근 봉 수: ${errors.m}`] : []} />
-      {row.ok && <p className="text-xs text-text-3">{conditionSentence(period, row.condition)}</p>}
+      {row.ok && <p className="text-xs text-text-3">{conditionSentence(row.condition)}</p>}
     </li>
   );
 }
