@@ -2,6 +2,7 @@ mod common;
 
 use std::collections::BTreeMap;
 use std::ffi::OsStr;
+use std::os::unix::fs::DirBuilderExt;
 use std::path::Path;
 use std::time::Duration;
 
@@ -46,10 +47,14 @@ impl Api {
         reply(self.client.post(format!("{}/update/cancel", self.base)).send().await.unwrap()).await
     }
 
+    async fn run(&self, screen: &Value) -> Value {
+        let resp = self.client.post(format!("{}/run", self.base)).header("content-type", "application/json").body(screen.to_string()).send().await.unwrap();
+        reply(resp).await
+    }
+
     async fn excluded(&self) -> Value {
         let screen = json!({"id": "S1", "name": "고가 1일 신고가", "markets": [], "exclude": [], "conditions": [{"kind": "new_high", "period": "D", "field": "high", "n": 1, "m": 1}]});
-        let resp = self.client.post(format!("{}/run", self.base)).header("content-type", "application/json").body(screen.to_string()).send().await.unwrap();
-        reply(resp).await["excluded"].clone()
+        self.run(&screen).await["excluded"].clone()
     }
 
     async fn settled(&self) -> Value {
@@ -349,29 +354,115 @@ async fn a_history_cut_off_midway_is_fetched_again_from_its_first_page_and_only_
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn a_store_left_by_schema_version_1_starts_empty() {
+async fn a_store_left_by_a_schema_version_with_no_upgrade_path_starts_empty() {
     let fake = FakeKiwoom::start().await;
-    let tmp = tempfile::tempdir().unwrap();
     let today = day(2026, 11, 6);
     let market = KrxMarket::sample(today);
-    update_once(&fake, tmp.path(), &market, &at(today, "2030"), false).await;
+    for version in [3, 6] {
+        let tmp = tempfile::tempdir().unwrap();
+        update_once(&fake, tmp.path(), &market, &at(today, "2030"), false).await;
 
-    let path = tmp.path().join("run/screener.duckdb");
-    let other = duckdb::Connection::open(&path).unwrap();
-    other.execute("UPDATE store_meta SET schema_version = 1", []).unwrap();
-    drop(other);
+        let path = tmp.path().join("run/screener.duckdb");
+        let other = duckdb::Connection::open(&path).unwrap();
+        other.execute("UPDATE store_meta SET schema_version = ?", [version]).unwrap();
+        drop(other);
 
-    fake.set_krx_market(market.clone());
-    let (server, api) = boot(&fake, tmp.path(), &at(today, "2040")).await;
-    assert_eq!(
-        api.status().await,
-        json!({"lastDay": null, "needDay": wire(day(2026, 11, 5)), "todayAvailable": true, "fullHistory": {"done": 0, "total": 0}, "unconfirmed": 0, "update": null})
-    );
+        fake.set_krx_market(market.clone());
+        let (server, api) = boot(&fake, tmp.path(), &at(today, "2040")).await;
+        assert_eq!(
+            api.status().await,
+            json!({"lastDay": null, "needDay": wire(day(2026, 11, 5)), "todayAvailable": true, "fullHistory": {"done": 0, "total": 0}, "unconfirmed": 0, "update": null}),
+            "스키마 {version}"
+        );
+        let seen = fake.calls().len();
+        api.update(false).await;
+        assert_eq!(api.settled().await["fullHistory"], json!({"done": 10, "total": 10}));
+        assert_eq!(daily_chains(&fake.calls()[seen..]), first_load(&market), "스키마 {version}: 빈 저장소의 첫 적재를 다시 한다");
+        server.stop().await;
+    }
+}
+
+const SCHEMA_4_STORE: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/screener/schema-4.duckdb");
+
+fn screens_across_the_upgrade() -> Vec<Value> {
+    let screen = |markets: &[&str], exclude: &[&str], conditions: Vec<Value>| json!({"id": "S1", "name": "업그레이드 확인", "markets": markets, "exclude": exclude, "conditions": conditions});
+    let new_high = |period: &str, field: &str, n: u32, m: u32| json!({"kind": "new_high", "period": period, "field": field, "n": n, "m": m});
+    vec![
+        screen(&[], &[], vec![new_high("D", "high", 20, 5)]),
+        screen(&[], &["etf", "managed"], vec![new_high("W", "close", 4, 4), new_high("D", "volume", 20, 20)]),
+    ]
+}
+
+fn stored_listing(dir: &Path) -> (i32, Vec<(String, String, Option<u64>)>) {
+    let conn = duckdb::Connection::open(dir.join("run/screener.duckdb")).unwrap();
+    let version = conn.query_row("SELECT schema_version FROM store_meta", [], |row| row.get(0)).unwrap();
+    let mut stmt = conn.prepare("SELECT code, market, listed_shares FROM listed ORDER BY code").unwrap();
+    let listed = stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?))).unwrap().map(Result::unwrap).collect();
+    (version, listed)
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_schema_4_store_keeps_its_daily_bars_and_history_and_is_listed_with_shares_and_markets_by_the_first_start_that_gets_the_stock_list() {
+    let fake = FakeKiwoom::start().await;
+    let today = day(2026, 11, 6);
+    let market = KrxMarket::sample(today);
+    let screens = screens_across_the_upgrade();
+
+    let fresh = tempfile::tempdir().unwrap();
+    update_once(&fake, fresh.path(), &market, &at(today, "2030"), false).await;
+    let (server, api) = boot(&fake, fresh.path(), &at(today, "2040")).await;
+    let mut want = Vec::new();
+    for screen in &screens {
+        want.push(api.run(screen).await);
+    }
+    server.stop().await;
+    for (screen, result) in screens.iter().zip(&want) {
+        assert!(!result["rows"].as_array().unwrap().is_empty(), "견줄 결과에 맞은 종목이 있다: {screen} → {result}");
+    }
+
+    let upgraded = tempfile::tempdir().unwrap();
+    std::fs::DirBuilder::new().mode(0o700).create(upgraded.path().join("run")).unwrap();
+    std::fs::copy(SCHEMA_4_STORE, upgraded.path().join("run/screener.duckdb")).unwrap();
+    let boot_updating = || {
+        let clock = at(today, "2040");
+        Server::spawn_with(&fake, &upgraded.path().join("run/server.lock"), upgraded.path(), &[("VALLY_CLOCK_START", OsStr::new(&clock)), ("VALLY_SCREENER_UPDATE_ON_START", OsStr::new("on"))])
+    };
     let seen = fake.calls().len();
+
+    fake.delay("ka10099", Duration::from_secs(60));
+    let server = boot_updating();
+    server.addr().await;
+    let logs = server.stop().await;
+    assert!(logs.contains("스크리너 저장소를 올립니다"), "종목 목록을 받기 전에 꺼진 시작도 저장소를 스키마 5로 올렸다");
+    fake.reset();
+
+    let server = boot_updating();
+    let api = Api::of(&server).await;
+    let listed = api.wait_for("켤 때 채운 종목 목록", |s| s["fullHistory"]["total"] == 10).await;
+    assert_eq!(
+        listed,
+        json!({"lastDay": wire(today), "needDay": wire(day(2026, 11, 5)), "todayAvailable": false, "fullHistory": {"done": 10, "total": 10}, "unconfirmed": 0, "update": null}),
+        "앞 시작이 목록을 받기 전에 꺼졌어도 다음 시작이 목록을 채우고, 다 받은 이력이 그대로다"
+    );
+    for (screen, want) in screens.iter().zip(&want) {
+        assert_eq!(api.run(screen).await, *want, "새로 채운 저장소와 같은 결과다: {screen}");
+    }
+    for _ in 0..400 {
+        if server.logs().contains("목표 관측일까지 차 있어") {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    assert!(server.logs().contains("목표 관측일까지 차 있어"), "켤 때 저장소가 뒤처졌는지 봤다");
     api.update(false).await;
     assert_eq!(api.settled().await["fullHistory"], json!({"done": 10, "total": 10}));
-    assert_eq!(daily_chains(&fake.calls()[seen..]), first_load(&market), "빈 저장소의 첫 적재를 다시 한다");
+    let calls = &fake.calls()[seen..];
+    assert_eq!((count(calls, "ka10095"), count(calls, "ka10081")), (0, 0), "켤 때도 업데이트할 때도 일봉을 다시 받지 않는다");
     server.stop().await;
+
+    let kept: Vec<(String, String, Option<u64>)> =
+        market.stocks.iter().map(|s| (s.code.clone(), if s.market_code == "10" { "kosdaq" } else { "kospi" }.to_owned(), s.listed_shares)).collect();
+    assert_eq!(stored_listing(upgraded.path()), (5, kept), "listed에 상장주식수와 시장이 찬다. 상장주식수가 없는 종목은 비워 둔다");
 }
 
 #[tokio::test(flavor = "multi_thread")]

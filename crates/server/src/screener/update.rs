@@ -56,6 +56,22 @@ fn stopped_on(code: StockCode, e: &BarError) {
 }
 
 impl Screener {
+    pub async fn fill_lost_listing(&self) {
+        let directory = match self.symbols.ready(&self.rest).await {
+            Ok(directory) => directory,
+            Err(e) => {
+                tracing::warn!(error = %BarError::from(e), "종목 목록이 없어 스크리너 종목 목록이 비었는지 보지 못했습니다");
+                return;
+            }
+        };
+        let count = directory.screener_listing().len();
+        match self.with_store(move |s| s.fill_lost_listing(directory.screener_listing())).await {
+            Ok(true) => tracing::info!(count, "스크리너 저장소에 일봉은 있는데 종목 목록이 비어 있어, 서버가 받은 종목 목록으로 채웠습니다"),
+            Ok(false) => {}
+            Err(e) => tracing::error!(error = %e, "스크리너 종목 목록을 채우지 못했습니다"),
+        }
+    }
+
     pub(super) async fn update(&self, id: u64, full: bool) -> Result<(), BarError> {
         tracing::info!(full, "스크리너 업데이트를 시작합니다");
         self.report(id, UpdatePhase::Symbols, 0, 1);

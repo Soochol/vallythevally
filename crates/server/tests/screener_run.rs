@@ -1,6 +1,7 @@
 mod common;
 
 use std::ffi::OsStr;
+use std::num::NonZeroU64;
 use std::os::unix::fs::DirBuilderExt;
 use std::path::Path;
 use std::time::{Duration, Instant};
@@ -9,6 +10,7 @@ use common::{FakeKiwoom, Server};
 use domain::{KstDate, Ohlcv, Price, StockCode, Volume, Weekday};
 use fake_kiwoom::krx::{DailyAnswer, KrxBar, KrxMarket, KrxStock};
 use serde_json::{Value, json};
+use server::api::Market;
 use server::kiwoom::wire::{MillionWon, ScreenerListing};
 use server::screener::store::{DayBar, Store, Write};
 
@@ -1043,7 +1045,18 @@ fn random_walk(seed: u64, days: &[KstDate]) -> Vec<DayBar> {
 fn fill_large_store(path: &Path, days: &[KstDate]) {
     let store = Store::open(path).unwrap();
     let codes: Vec<StockCode> = (0..LARGE_STOCKS).map(|i| StockCode::parse(&format!("{:05}0", 10_000 + i)).unwrap()).collect();
-    let listing: Vec<ScreenerListing> = codes.iter().map(|&code| ScreenerListing { code, name: format!("가상{}", code.as_str()), listed_on: Some(days[0]), excludable_as: vec![] }).collect();
+    let listing: Vec<ScreenerListing> = codes
+        .iter()
+        .enumerate()
+        .map(|(i, &code)| ScreenerListing {
+            code,
+            name: format!("가상{}", code.as_str()),
+            listed_on: Some(days[0]),
+            excludable_as: vec![],
+            market: if i % 2 == 0 { Market::Kospi } else { Market::Kosdaq },
+            listed_shares: NonZeroU64::new(10_000_000 + i as u64),
+        })
+        .collect();
     store.replace_listing(&listing).unwrap();
     store.extend_calendar(days).unwrap();
     for (k, chunk) in codes.chunks(100).enumerate() {
