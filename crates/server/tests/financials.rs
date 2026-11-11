@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use axum::{Router, extract::{Path, Query, State}, http::StatusCode, response::{IntoResponse, Response}, routing::get};
 use serde_json::{Value, json};
-use server::{clock::{Clock, kst}, config::Secret, financials::{Financials, client::Client, model::{Basis, Failure, FactPeriod, Verification}, store::Store, xbrl}};
+use server::{clock::{Clock, kst}, config::Secret, financials::{Financials, client::Client, model::{Basis, Failure, FactPeriod, Verification, REPORT_CODES}, store::Store, xbrl}};
 use domain::KstDate;
 
 const KEY: &str = "synthetic-dart-secret-for-test-159";
@@ -33,6 +33,7 @@ struct FakeState {
     directory: Option<String>,
     company_code: Option<String>,
     preferred_dividend: bool,
+    integrated_financials: bool,
 }
 
 struct Fake { state: Arc<Mutex<FakeState>>, url: String, task: tokio::task::JoinHandle<()> }
@@ -89,6 +90,9 @@ async fn respond(State(state): State<Arc<Mutex<FakeState>>>, Path(endpoint): Pat
     if delayed { tokio::time::sleep(Duration::from_millis(30)).await; }
     if let Some(status) = failure {
         return axum::Json(json!({"status":status,"message":format!("remote echoed {KEY}")})).into_response();
+    }
+    if state.lock().unwrap().integrated_financials && matches!(endpoint.as_str(), "list.json" | "fnlttSinglAcntAll.json" | "fnlttXbrl.xml" | "alotMatter.json") {
+        return mapping::integrated_response(&endpoint, &params);
     }
     let corp = params.get("corp_code").map(String::as_str).unwrap_or_else(|| if params.get("rcept_no").is_some_and(|receipt| ["20150331000011","20160401000012"].contains(&receipt.as_str())) { "00000002" } else { CORP });
     let original_receipt = if corp == CORP { RECEIPT } else { "20150331000011" };
