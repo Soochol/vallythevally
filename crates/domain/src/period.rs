@@ -25,10 +25,12 @@ pub enum Period {
     Day,
     Week,
     Month,
+    Quarter,
+    Year,
 }
 
 impl Period {
-    pub const ALL: [Period; 9] = [
+    pub const ALL: [Period; 11] = [
         Period::M1,
         Period::M3,
         Period::M5,
@@ -38,6 +40,8 @@ impl Period {
         Period::Day,
         Period::Week,
         Period::Month,
+        Period::Quarter,
+        Period::Year,
     ];
 
     pub fn as_wire(self) -> &'static str {
@@ -51,6 +55,8 @@ impl Period {
             Period::Day => "D",
             Period::Week => "W",
             Period::Month => "M",
+            Period::Quarter => "Q",
+            Period::Year => "Y",
         }
     }
 
@@ -74,7 +80,7 @@ impl Period {
             Period::M15 => Some(15),
             Period::M30 => Some(30),
             Period::M60 => Some(60),
-            Period::Day | Period::Week | Period::Month => None,
+            Period::Day | Period::Week | Period::Month | Period::Quarter | Period::Year => None,
         }
     }
 
@@ -99,6 +105,8 @@ impl Period {
                 let first = match self {
                     Period::Week => date.add_days(-date.weekday().days_from_monday()),
                     Period::Month => date.first_of_month(),
+                    Period::Quarter => KstDate::new(date.year(), (date.month() - 1) / 3 * 3 + 1, 1).unwrap(),
+                    Period::Year => KstDate::new(date.year(), 1, 1).unwrap(),
                     _ => date,
                 };
                 KstTime::from_kst_civil(first, TimeOfDay::MIDNIGHT)
@@ -153,6 +161,8 @@ impl Bucket {
                 let next = match self.period {
                     Period::Week => date.add_days(7),
                     Period::Month => date.first_of_next_month(),
+                    Period::Quarter => date.first_of_next_month().first_of_next_month().first_of_next_month(),
+                    Period::Year => KstDate::new(date.year() + 1, 1, 1).unwrap(),
                     _ => date.add_days(1),
                 };
                 KstTime::from_kst_civil(next, TimeOfDay::MIDNIGHT)
@@ -167,8 +177,8 @@ impl Bucket {
         match self.period {
             Period::Day => close_of(date),
             Period::Week => close_of(date.add_days(4)),
-            Period::Month => {
-                let mut last = date.last_of_month();
+            Period::Month | Period::Quarter | Period::Year => {
+                let mut last = self.end().kst_date().add_days(-1);
                 while matches!(last.weekday(), Weekday::Sat | Weekday::Sun) {
                     last = last.add_days(-1);
                 }
@@ -201,6 +211,8 @@ impl Bucket {
                 let prev = match self.period {
                     Period::Week => date.add_days(-7),
                     Period::Month => date.first_of_prev_month(),
+                    Period::Quarter => date.first_of_prev_month().first_of_prev_month().first_of_prev_month(),
+                    Period::Year => KstDate::new(date.year() - 1, 1, 1).unwrap(),
                     _ => date.add_days(-1),
                 };
                 KstTime::from_kst_civil(prev, TimeOfDay::MIDNIGHT)
@@ -294,6 +306,27 @@ mod tests {
                 assert_eq!(b.start(), midnight(start), "{p:?} {kiwoom_dt} {tod:?}");
                 assert!(b.contains(at(kiwoom_dt, tod.0, tod.1, tod.2)));
             }
+        }
+    }
+
+    #[test]
+    fn quarters_and_years_follow_calendar_boundaries_and_close_grace() {
+        for (p, input, start, next, prev, close) in [
+            (Period::Quarter, "20260331", "20260101", "20260401", "20251001", "20260331"),
+            (Period::Quarter, "20260402", "20260401", "20260701", "20260101", "20260630"),
+            (Period::Quarter, "20261231", "20261001", "20270101", "20260701", "20261231"),
+            (Period::Year, "20260102", "20260101", "20270101", "20250101", "20261231"),
+            (Period::Year, "20281231", "20280101", "20290101", "20270101", "20281229"),
+        ] {
+            let b = p.bucket(at(input, 12, 0, 0));
+            assert_eq!(b.start(), midnight(start));
+            assert_eq!(b.next().start(), midnight(next));
+            assert_eq!(b.prev().start(), midnight(prev));
+            assert_eq!(b.next().prev(), b);
+            assert_eq!(b.prev().next(), b);
+            assert_eq!(b.future_starts(1), vec![midnight(next)]);
+            assert!(!b.is_confirmed_at(at(close, 20, 0, 9)));
+            assert!(b.is_confirmed_at(at(close, 20, 0, 10)));
         }
     }
 

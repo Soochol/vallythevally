@@ -51,8 +51,8 @@ fn api_ids(text: &str) -> Vec<String> {
 }
 
 /// 토큰 발급과 시세 조회(종목 정보, 분·일·주·월봉, 외국인 보유·투자자별 매매)만 서버 소스에 있어야 한다(ADR 0004).
-const MARKET_API_IDS: [&str; 15] =
-    ["au10001", "ka10099", "ka10100", "ka10095", "ka10001", "ka10080", "ka10081", "ka10082", "ka10083", "ka20005", "ka20006", "ka20007", "ka20008", "ka10008", "ka10059"];
+const MARKET_API_IDS: [&str; 17] =
+    ["au10001", "ka10099", "ka10100", "ka10095", "ka10001", "ka10080", "ka10081", "ka10082", "ka10083", "ka10094", "ka20005", "ka20006", "ka20007", "ka20008", "ka20019", "ka10008", "ka10059"];
 
 #[test]
 fn only_market_api_ids_in_server_source() {

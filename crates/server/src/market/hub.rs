@@ -909,6 +909,8 @@ mod tests {
     struct Chart {
         rows: Vec<(KstTime, [u64; 5])>,
         answer_503_times: usize,
+        page_size: Option<usize>,
+        fail_at: Option<usize>,
     }
 
     impl Chart {
@@ -939,14 +941,27 @@ mod tests {
     }
 
     fn harness(start: KstTime, chart: Chart, latency: Duration) -> Harness {
+        period_harness(start, chart, latency, Period::M1)
+    }
+
+    fn period_harness(start: KstTime, chart: Chart, latency: Duration, period: Period) -> Harness {
         let chart = Arc::new(Mutex::new(chart));
         let script = chart.clone();
         let fake = Arc::new(FakeTransport::new(latency, move |s| {
             if s.api_id == ApiId::Au10001 {
                 return token(1);
             }
-            assert_eq!(s.api_id, ApiId::Ka10080, "허브 시험은 주식 분봉만 받는다");
+            let (api, field) = match period {
+                Period::Quarter => (ApiId::Ka10083, "stk_mth_pole_chart_qry"),
+                Period::Year => (ApiId::Ka10094, "stk_yr_pole_chart_qry"),
+                _ => (ApiId::Ka10080, "stk_min_pole_chart_qry"),
+            };
+            assert_eq!(s.api_id, api);
+            let offset: usize = s.cont.as_deref().unwrap_or("0").parse().unwrap();
             let mut c = script.lock().unwrap();
+            if c.fail_at == Some(offset) {
+                return status(503, json!({}));
+            }
             if c.answer_503_times > 0 {
                 c.answer_503_times -= 1;
                 return status(503, json!({}));
@@ -955,13 +970,20 @@ mod tests {
                 .rows
                 .iter()
                 .rev()
+                .skip(offset)
+                .take(c.page_size.unwrap_or(usize::MAX))
                 .map(|(t, [o, h, l, cl, v])| {
                     let tod = t.kst_time_of_day().secs();
-                    json!({"cntr_tm": format!("{}{:02}{:02}00", t.kst_date().yyyymmdd(), tod / 3600, tod / 60 % 60),
-                           "open_pric": o.to_string(), "high_pric": h.to_string(), "low_pric": l.to_string(), "cur_prc": cl.to_string(), "trde_qty": v.to_string()})
+                    let mut row = json!({"cntr_tm": format!("{}{:02}{:02}00", t.kst_date().yyyymmdd(), tod / 3600, tod / 60 % 60),
+                           "open_pric": o.to_string(), "high_pric": h.to_string(), "low_pric": l.to_string(), "cur_prc": cl.to_string(), "trde_qty": v.to_string()});
+                    if !period.is_intraday() {
+                        row["dt"] = t.kst_date().yyyymmdd().into();
+                    }
+                    row
                 })
                 .collect();
-            ok(json!({"stk_min_pole_chart_qry": rows, "return_code": 0}), None)
+            let next = (offset + rows.len() < c.rows.len()).then(|| (offset + rows.len()).to_string());
+            ok(json!({field: rows, "return_code": 0}), next.as_deref())
         }));
         let clock = Clock::fake(start);
         let rest = KiwoomRest::new(Arc::new(fake.clone()), KiwoomAuth::new(Secret::new("k".into()), Secret::new("s".into()), None), clock.clone());
@@ -2136,6 +2158,67 @@ mod tests {
     #[tokio::test(start_paused = true)]
     async fn n3_n4_equal_previous_repairs_partial_confirmed_after_reseed() {
         n3_n4_equal_previous_after_omitted_seed(true).await;
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn quarterly_and_yearly_current_bars_publish_ticks_and_roll_at_calendar_boundaries() {
+        for (period, last, next) in [(Period::Quarter, "20260331", "20260401"), (Period::Year, "20261231", "20270101")] {
+            let date = |s| KstDate::parse_yyyymmdd(s).unwrap();
+            let start = kst(date(last), 19, 58, 0);
+            let mut chart = Chart::default();
+            chart.set(kst(date("20260102"), 0, 0, 0), [100, 150, 80, 120, 10]);
+            if period == Period::Quarter {
+                chart.set(kst(date("20260202"), 0, 0, 0), [120, 140, 90, 130, 20]);
+                chart.set(kst(date("20260303"), 0, 0, 0), [130, 150, 100, 140, 30]);
+            }
+            let h = period_harness(start, chart, Duration::ZERO, period);
+            live(&h).await;
+            let (conn, out) = connect(&h).await;
+            let k = SeriesKey { period, ..samsung() };
+            h.hub.subscribe(conn, sub("a"), k);
+            take(&out).await;
+            let original = h.hub.snapshot(k).await.unwrap().current.unwrap();
+            h.clock.jump(kst(date(last), 19, 59, 0).unix() - h.clock.now().unix());
+            h.events.send(trade(&h, (19, 59, 0), 160, 7, Some(Exchange::Krx))).await.unwrap();
+            take(&out).await;
+            let current = h.hub.snapshot(k).await.unwrap().current.unwrap();
+            assert_eq!(current.ohlcv().volume().0, original.ohlcv().volume().0 + 7);
+            assert_eq!(current.ohlcv().open(), original.ohlcv().open());
+            assert_eq!(current.ohlcv().close().centi(), 16000);
+            h.clock.jump(kst(date(next), 9, 0, 0).unix() - h.clock.now().unix());
+            h.events.send(trade(&h, (9, 0, 0), 170, 3, Some(Exchange::Krx))).await.unwrap();
+            let messages = take(&out).await;
+            assert!(messages.iter().any(|m| matches!(m, ServerMessage::Confirmed { bar, .. } if bar.v == original.ohlcv().volume().0 + 7)), "{messages:?}");
+            let new = h.hub.snapshot(k).await.unwrap().current.unwrap();
+            assert_eq!(new.bucket(), original.bucket().next());
+            assert_eq!(new.ohlcv().volume().0, 3);
+            assert_eq!(new.ohlcv().open().centi(), 17000);
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn quarterly_seed_failure_on_first_or_required_earlier_month_stays_retryable() {
+        for fail_at in [0, 1] {
+            let mut chart = Chart { page_size: Some(1), fail_at: Some(fail_at), ..Chart::default() };
+            let date = |s| KstDate::parse_yyyymmdd(s).unwrap();
+            chart.set(kst(date("20260401"), 0, 0, 0), [100, 150, 80, 120, 10]);
+            chart.set(kst(date("20260504"), 0, 0, 0), [120, 160, 100, 150, 20]);
+            let h = period_harness(kst(date("20260520"), 12, 0, 0), chart, Duration::ZERO, Period::Quarter);
+            live(&h).await;
+            let (conn, out) = connect(&h).await;
+            let k = SeriesKey { period: Period::Quarter, ..samsung() };
+            h.hub.subscribe(conn, sub("a"), k);
+            tokio::time::sleep(Duration::from_secs(3)).await;
+            let messages = out.take(true).messages;
+            assert!(messages.iter().any(|m| matches!(m, ServerMessage::SubError { code: SubErrorCode::KiwoomUnavailable, .. })), "{messages:?}");
+            assert!(!messages.iter().any(|m| matches!(m, ServerMessage::Bar { .. } | ServerMessage::Confirmed { .. })));
+            assert!(h.hub.snapshot(k).await.unwrap().current.is_none());
+            h.chart.lock().unwrap().fail_at = None;
+            tokio::time::sleep(Duration::from_secs(70)).await;
+            let messages = out.take(true).messages;
+            assert!(messages.iter().any(|m| matches!(m, ServerMessage::Bar { bar, .. } if bar.v == 30)), "{messages:?}");
+            assert_eq!(h.hub.snapshot(k).await.unwrap().current.unwrap().ohlcv().volume().0, 30);
+        }
     }
 
 }

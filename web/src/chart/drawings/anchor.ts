@@ -17,7 +17,7 @@ export function timelineOf(bars: readonly Bar[], period: Period): Timeline {
 const DAY = 86_400;
 export const MAX_FUTURE_BARS = 5_000;
 
-const MINUTES: Record<Exclude<Period, "D" | "W" | "M">, number> = {
+const MINUTES: Record<Exclude<Period, "D" | "W" | "M" | "Q" | "Y">, number> = {
   "1m": 1,
   "3m": 3,
   "5m": 5,
@@ -38,6 +38,17 @@ function kstCalendar(t: UnixSeconds) {
   };
 }
 
+function calendarBounds(period: "Q" | "Y", t: UnixSeconds) {
+  const wall = toChartTime(t);
+  const d = new Date(wall * 1000);
+  const months = period === "Q" ? 3 : 12;
+  const month = Math.floor(d.getUTCMonth() / months) * months;
+  const offset = wall - t;
+  const start = Date.UTC(d.getUTCFullYear(), month, 1) / 1000 - offset;
+  const next = Date.UTC(d.getUTCFullYear(), month + months, 1) / 1000 - offset;
+  return { start, next };
+}
+
 export function barLength(period: Period, start: UnixSeconds): number {
   switch (period) {
     case "D":
@@ -46,6 +57,11 @@ export function barLength(period: Period, start: UnixSeconds): number {
       return 7 * DAY;
     case "M":
       return kstCalendar(start).daysInMonth * DAY;
+    case "Q":
+    case "Y": {
+      const { start: first, next } = calendarBounds(period, start);
+      return next - first;
+    }
     default:
       return MINUTES[period] * 60;
   }
@@ -67,6 +83,9 @@ export function nextBarStart(period: Period, start: UnixSeconds): UnixSeconds {
       const c = kstCalendar(start);
       return c.midnight + (c.daysInMonth - c.dayOfMonth + 1) * DAY;
     }
+    case "Q":
+    case "Y":
+      return calendarBounds(period, start).next;
     default:
       return start + MINUTES[period] * 60;
   }
@@ -77,7 +96,7 @@ const futureCache = new WeakMap<Timeline, UnixSeconds[]>();
 function futureStart(tl: Timeline, n: number): UnixSeconds | null {
   const last = tl.starts.at(-1);
   if (last === undefined || n > MAX_FUTURE_BARS) return null;
-  if (tl.period !== "D" && tl.period !== "W" && tl.period !== "M") return last + n * MINUTES[tl.period] * 60;
+  if (tl.period !== "D" && tl.period !== "W" && tl.period !== "M" && tl.period !== "Q" && tl.period !== "Y") return last + n * MINUTES[tl.period] * 60;
   let future = futureCache.get(tl);
   if (future === undefined) {
     future = [];

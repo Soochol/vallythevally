@@ -1,0 +1,31 @@
+{
+  "stk_cd": "005930_AL",
+  "stk_yr_pole_chart_qry": [
+    {
+      "dt": "20260102",
+      "open_pric": "1200",
+      "high_pric": "1700",
+      "low_pric": "1000",
+      "cur_prc": "1500",
+      "trde_qty": "57"
+    },
+    {
+      "dt": "20250102",
+      "open_pric": "800",
+      "high_pric": "1400",
+      "low_pric": "700",
+      "cur_prc": "1200",
+      "trde_qty": "91"
+    },
+    {
+      "dt": "20240102",
+      "open_pric": "600",
+      "high_pric": "1100",
+      "low_pric": "400",
+      "cur_prc": "800",
+      "trde_qty": "83"
+    }
+  ],
+  "return_code": 0,
+  "return_msg": "synthetic yearly chart"
+}

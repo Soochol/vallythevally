@@ -373,6 +373,23 @@ mod tests {
     }
 
     #[test]
+    fn quarterly_and_yearly_seeds_update_and_roll_into_the_next_calendar_bucket() {
+        let time = |ymd, hour| KstTime::from_kst_civil(KstDate::parse_yyyymmdd(ymd).unwrap(), TimeOfDay::hms(hour, 0, 0).unwrap());
+        for (period, last, next) in [(Period::Quarter, "20260331", "20260401"), (Period::Year, "20261231", "20270104")] {
+            let bucket = period.bucket(time(last, 12));
+            let initial = ohlcv(100, 150, 80, 120, 50);
+            let mut agg = Aggregator::new(period, Some(CurrentBar::seed(bucket, initial)), None);
+            agg.apply(&tr(time(last, 13), 160, 7));
+            assert_eq!(*agg.current().unwrap().ohlcv(), ohlcv(100, 160, 80, 160, 57));
+            assert_eq!(agg.apply(&tr(time(next, 9), 170, 3)), Applied::Rolled { confirmed: realtime(bucket, ohlcv(100, 160, 80, 160, 57), true) });
+            let cur = agg.current().unwrap();
+            assert_eq!(cur.bucket(), bucket.next());
+            assert_eq!(*cur.ohlcv(), ohlcv(170, 170, 170, 170, 3));
+            assert!(cur.is_complete());
+        }
+    }
+
+    #[test]
     fn late_trade_after_timer_close_changes_nothing() {
         let mut agg = fresh(Period::M1);
         assert_eq!(agg.apply(&tr(at(9, 0, 1), 100, 1)), Applied::Updated);

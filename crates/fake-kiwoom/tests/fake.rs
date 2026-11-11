@@ -313,3 +313,19 @@ async fn a_krx_stock_can_answer_one_daily_row_with_zero_prices_or_daily_pages_th
     assert_eq!((far.status, far.cont.as_str(), far.next.as_str()), (200, "Y", "110070-10"), "봉이 다 떨어진 뒤에도 다음 페이지가 있다고 답한다");
     assert!(far.body["stk_dt_pole_chart_qry"].as_array().unwrap().is_empty(), "{}", far.body);
 }
+
+#[tokio::test]
+async fn dedicated_yearly_charts_have_the_official_arrays_and_end_their_history() {
+    let fake = FakeKiwoom::start().await;
+    for (api, body, array) in [
+        ("ka10094", daily("005930_AL"), "stk_yr_pole_chart_qry"),
+        ("ka20019", json!({"inds_cd": "001", "base_dt": "20261109"}), "inds_yr_pole_qry"),
+    ] {
+        let first = kiwoom(&fake.base_url(), api, body.clone(), None).await;
+        assert_eq!(first.status, 200);
+        assert_eq!(first.body[array].as_array().unwrap().len(), 3);
+        let last = kiwoom(&fake.base_url(), api, body, Some(&first.next)).await;
+        assert_eq!(last.cont, "N");
+        assert!(last.body[array].as_array().unwrap().is_empty());
+    }
+}

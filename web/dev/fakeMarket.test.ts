@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { barsPage, findSymbol, publicInfo, resolveVenue, search } from "./fakeMarket.ts";
+import { barsPage, findSymbol, publicInfo, resolveVenue, search, seriesOf } from "./fakeMarket.ts";
 
 const now = Date.UTC(2026, 10, 9, 3, 0); // 2026-11-09(월) 12:00 KST
 
@@ -120,4 +120,23 @@ test("분봉은 최근 1년에서 끝난다. 그 끝에서 nextBefore가 null이
   expect(now / 1000 - oldest).toBeLessThanOrEqual(365 * 86400);
   expect(now / 1000 - oldest).toBeGreaterThan(360 * 86400);
   expect(pages).toBeGreaterThan(100);
+});
+
+
+test("분기·연간 개발 차트도 달력 경계와 OHLCV를 보존한다", () => {
+  for (const period of ["Q", "Y"] as const) {
+    const bars = seriesOf(samsung, "combined", period, now);
+    const current = bars.at(-1)!;
+    const first = Date.UTC(2026, period === "Q" ? 9 : 0, 1) / 1000 - KST;
+    const daily = seriesOf(samsung, "combined", "D", now).filter((b) => b.t >= first);
+    expect(current).toEqual({
+      t: first,
+      o: daily[0]!.o,
+      h: Math.max(...daily.map((b) => b.h)),
+      l: Math.min(...daily.map((b) => b.l)),
+      c: daily.at(-1)!.c,
+      v: daily.reduce((sum, b) => sum + b.v, 0),
+    });
+    expect(bars.every((b) => Number.isFinite(b.t) && Number.isFinite(b.c))).toBe(true);
+  }
 });

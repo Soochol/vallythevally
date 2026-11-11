@@ -20,7 +20,7 @@ export function symbolSub(code: SymbolCode, info: SymbolInfo | undefined): strin
   return info?.kind === "index" || isIndexCode(code) ? KIND_LABEL.index : code;
 }
 
-export const PERIODS = ["1m", "3m", "5m", "15m", "30m", "60m", "D", "W", "M"] as const satisfies readonly Period[];
+export const PERIODS = ["1m", "3m", "5m", "15m", "30m", "60m", "D", "W", "M", "Q", "Y"] as const satisfies readonly Period[];
 // 계약에 봉 주기가 늘면 여기서 타입 오류가 난다.
 const _allPeriodsListed: Exclude<Period, (typeof PERIODS)[number]> extends never ? true : never = true;
 void _allPeriodsListed;
@@ -36,4 +36,6 @@ export const PERIOD_LABEL: Record<Period, string> = {
   D: "일",
   W: "주",
   M: "월",
+  Q: "분기",
+  Y: "연",
 };
