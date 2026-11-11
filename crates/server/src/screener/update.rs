@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::fmt;
 
 use domain::{IndexCode, KstDate, Price, StockCode, Venue};
 use futures::{StreamExt, TryFutureExt, TryStreamExt, stream};
@@ -26,6 +27,21 @@ struct DailyPage {
     next: Option<ContKey>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Skip {
+    NoDailyBars,
+    PastPageLimit,
+}
+
+impl fmt::Display for Skip {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Skip::NoDailyBars => f.write_str("키움이 일봉을 주지 않았습니다"),
+            Skip::PastPageLimit => write!(f, "일봉이 {MAX_HISTORY_PAGES}페이지를 넘습니다"),
+        }
+    }
+}
+
 fn base_moved(base: Price, stored_close: Price) -> bool {
     let (base, close) = (base.centi(), stored_close.centi());
     10 * base.abs_diff(close) > 3 * close
@@ -33,6 +49,10 @@ fn base_moved(base: Price, stored_close: Price) -> bool {
 
 fn unconfirmed(code: StockCode, target: KstDate, reason: &str) {
     tracing::warn!(code = code.as_str(), %target, reason, "확인 안 된 종목이라 최근 채우기에서 건너뜁니다. 다음 업데이트에서 다시 확인합니다");
+}
+
+fn stopped_on(code: StockCode, e: &BarError) {
+    tracing::error!(code = code.as_str(), reason = %e, "이 종목의 일봉을 받다가 업데이트를 멈춥니다");
 }
 
 impl Screener {
@@ -125,14 +145,14 @@ impl Screener {
             self.with_store(move |s| s.write(&writes)).await?;
             self.report(id, UpdatePhase::Recent, done, total);
         }
-        let mut written = stream::iter(catchups).map(|(code, how)| self.catch_up(code, how, target).map_ok(move |write| (code, write))).buffered(IN_FLIGHT);
+        let mut written = stream::iter(catchups).map(|(code, how)| self.catch_up(code, how, target).inspect_err(move |e| stopped_on(code, e)).map_ok(move |write| (code, write))).buffered(IN_FLIGHT);
         while let Some((code, write)) = written.try_next().await? {
             match write {
-                None => {
-                    unconfirmed(code, target, "키움이 일봉을 주지 않았습니다");
+                Err(skip) => {
+                    unconfirmed(code, target, &skip.to_string());
                     skipped += 1;
                 }
-                Some(write) => {
+                Ok(write) => {
                     let short = match write.last_day() {
                         Some(last) if last >= target => None,
                         Some(last) => Some(format!("키움 일봉이 {last}에서 끝납니다")),
@@ -157,12 +177,12 @@ impl Screener {
         let queue = self.with_store(move |s| s.backfill_queue(target)).await?;
         let total = queue.len();
         self.report(id, UpdatePhase::Backfill, 0, total);
-        let mut written = stream::iter(queue).map(|code| self.catch_up(code, Catchup::WholeHistory, target).map_ok(move |write| (code, write))).buffered(IN_FLIGHT);
+        let mut written = stream::iter(queue).map(|code| self.catch_up(code, Catchup::WholeHistory, target).inspect_err(move |e| stopped_on(code, e)).map_ok(move |write| (code, write))).buffered(IN_FLIGHT);
         let mut done = 0;
         while let Some((code, write)) = written.try_next().await? {
             match write {
-                Some(write) => self.with_store(move |s| s.write(&[write])).await?,
-                None => tracing::warn!(code = code.as_str(), "키움이 과거 일봉을 주지 않아 과거 이어 받기에서 건너뜁니다. 다음 업데이트에서 다시 받습니다"),
+                Ok(write) => self.with_store(move |s| s.write(&[write])).await?,
+                Err(skip) => tracing::warn!(code = code.as_str(), reason = %skip, "과거 이어 받기에서 이 종목을 건너뜁니다. 다음 업데이트에서 다시 받습니다"),
             }
             done += 1;
             self.report(id, UpdatePhase::Backfill, done, total);
@@ -170,17 +190,17 @@ impl Screener {
         Ok(self.with_store(Store::end_full_refetch).await?)
     }
 
-    async fn catch_up(&self, code: StockCode, how: Catchup, target: KstDate) -> Result<Option<Write>, BarError> {
+    async fn catch_up(&self, code: StockCode, how: Catchup, target: KstDate) -> Result<Result<Write, Skip>, BarError> {
         let Catchup::FirstPage { stored_through } = how else {
             return Ok(self.whole_history(code, target).await?.map(|bars| Write::Replace { code, bars }));
         };
         let req = DailyChart::new(code, Venue::Krx, self.clock.now().kst_date());
-        let Some(page) = self.daily_page(&req, None, target).await?.filter(|p| !p.bars.is_empty()) else {
-            return Ok(None);
+        let Some(page) = self.daily_page(code, &req, None, target).await?.filter(|p| !p.bars.is_empty()) else {
+            return Ok(Err(Skip::NoDailyBars));
         };
         let reached_origin = page.next.is_none();
         let Some(stored_through) = stored_through else {
-            return Ok(Some(Write::Extend { code, bars: page.bars, reached_origin }));
+            return Ok(Ok(Write::Extend { code, bars: page.bars, reached_origin }));
         };
         let reaches_stored = page.bars.first().is_some_and(|b| b.day <= stored_through);
         let (overlap, fresh): (Vec<DayBar>, Vec<DayBar>) = page.bars.into_iter().partition(|b| b.day <= stored_through);
@@ -189,45 +209,45 @@ impl Screener {
             self.with_store(move |s| s.bars_from(code, from)).await? == overlap
         };
         if matches_stored {
-            return Ok(Some(Write::Extend { code, bars: fresh, reached_origin }));
+            return Ok(Ok(Write::Extend { code, bars: fresh, reached_origin }));
         }
         tracing::info!(code = code.as_str(), reaches_stored, "최근 일봉이 저장된 봉과 달라 전체 이력을 다시 받습니다");
         Ok(self.whole_history(code, target).await?.map(|bars| Write::Replace { code, bars }))
     }
 
-    async fn whole_history(&self, code: StockCode, target: KstDate) -> Result<Option<Vec<DayBar>>, BarError> {
+    async fn whole_history(&self, code: StockCode, target: KstDate) -> Result<Result<Vec<DayBar>, Skip>, BarError> {
         let req = DailyChart::new(code, Venue::Krx, self.clock.now().kst_date());
         let mut pages = Vec::new();
         let mut cont = None;
         for _ in 0..MAX_HISTORY_PAGES {
-            let Some(page) = self.daily_page(&req, cont.as_ref(), target).await? else {
-                return Ok(None);
+            let Some(page) = self.daily_page(code, &req, cont.as_ref(), target).await? else {
+                return Ok(Err(Skip::NoDailyBars));
             };
             pages.push(page.bars);
             cont = page.next;
             if cont.is_none() {
                 let mut bars: Vec<DayBar> = pages.into_iter().rev().flatten().collect();
                 bars.dedup_by_key(|b| b.day);
-                return Ok(Some(bars).filter(|bars| !bars.is_empty()));
+                return Ok(Some(bars).filter(|bars| !bars.is_empty()).ok_or(Skip::NoDailyBars));
             }
         }
-        Err(BarError::Internal(format!("{} 일봉이 {MAX_HISTORY_PAGES}페이지를 넘어 받기를 멈췄습니다", code.as_str())))
+        Ok(Err(Skip::PastPageLimit))
     }
 
-    async fn daily_page(&self, req: &DailyChart, cont: Option<&ContKey>, target: KstDate) -> Result<Option<DailyPage>, BarError> {
+    async fn daily_page(&self, code: StockCode, req: &DailyChart, cont: Option<&ContKey>, target: KstDate) -> Result<Option<DailyPage>, BarError> {
         let page = match self.rest.call(req, cont, Priority::Background, MergeScope::default()).await {
             Ok(page) => page,
             Err(e) if unknown_symbol(&e) => return Ok(None),
             Err(e) => return Err(e.into()),
         };
-        match parse_krx_daily(page.body) {
-            Ok(Some(rows)) => {
-                let bars = rows.into_iter().map(|r| DayBar { day: r.day, ohlcv: r.ohlcv, traded: r.traded }).filter(|b| b.day <= target).collect();
-                Ok(Some(DailyPage { bars, next: page.next }))
-            }
-            Ok(None) => Ok(None),
-            Err(e) => Err(BarError::Internal(format!("키움 일봉 응답을 읽지 못했습니다: {e}"))),
+        let Some(daily) = parse_krx_daily(page.body) else {
+            return Ok(None);
+        };
+        for row in &daily.unreadable {
+            tracing::warn!(code = code.as_str(), dt = %row.dt, reason = %row.reason, "키움 일봉 행을 읽지 못해 그 행만 빼고 받습니다");
         }
+        let bars = daily.rows.into_iter().map(|r| DayBar { day: r.day, ohlcv: r.ohlcv, traded: r.traded }).filter(|b| b.day <= target).collect();
+        Ok(Some(DailyPage { bars, next: page.next }))
     }
 }
 
