@@ -164,6 +164,11 @@ impl Indicator {
         ahead + usize::from(self.test.reads_the_bar_before())
     }
 
+    fn bars_checked_before(&self) -> usize {
+        let ahead = self.specs.iter().flat_map(|spec| spec.lines().into_iter().filter_map(|id| spec.shift_of(id))).filter_map(|shift| usize::try_from(shift).ok()).max().unwrap_or(0);
+        ahead + usize::from(self.test.reads_the_bar_before())
+    }
+
     pub(super) fn columns(&self) -> Vec<BarField> {
         let read_by_specs = self.specs.iter().flat_map(|spec| spec.inputs().iter().map(|&input| input_field(input)));
         let compared_prices = self.test.operands().into_iter().filter_map(|operand| match operand {
@@ -185,14 +190,16 @@ impl Indicator {
         if recent >= series.len() {
             return None;
         }
-        let first_read = recent.saturating_sub(self.bars_read_before());
+        let first_read = recent.saturating_sub(self.bars_checked_before());
         let computed = self.specs.iter().map(|spec| Computed::of(spec, series, first_read)).collect::<Option<Vec<_>>>()?;
         let at = |operand: Operand, i: usize| match operand {
             Operand::Price(field) => series.natural_at(price_field(field), i),
             Operand::Line(k, id) => computed[k].value(id, i),
             Operand::Level(level) => level,
         };
-        (recent..series.len()).rev().find(|&i| self.test.holds(i, at))
+        let every_line_computed = |i: usize| computed.iter().all(|c| c.every_line_computed_at(i));
+        let bar_before_computed = |i: usize| !self.test.reads_the_bar_before() || i.checked_sub(1).is_some_and(every_line_computed);
+        (recent..series.len()).rev().find(|&i| every_line_computed(i) && bar_before_computed(i) && self.test.holds(i, at))
     }
 }
 
@@ -217,6 +224,13 @@ impl Computed {
                 None
             }
         }
+    }
+
+    fn every_line_computed_at(&self, bar: usize) -> bool {
+        self.output.lines.iter().all(|line| {
+            let drawn_from_bars_before = usize::try_from(line.shift).unwrap_or(0);
+            bar.checked_sub(drawn_from_bars_before).and_then(|at| at.checked_sub(self.from)).and_then(|at| line.values.get(at)).is_some_and(|value| !value.is_nan())
+        })
     }
 
     fn value(&self, id: LineId, bar: usize) -> f64 {

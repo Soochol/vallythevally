@@ -1389,6 +1389,68 @@ async fn an_indicator_value_meets_a_bound_equal_to_it_and_the_floats_beside_it_f
     }
 }
 
+#[tokio::test(flavor = "multi_thread")]
+async fn a_candidate_bar_and_the_bar_before_a_cross_need_every_line_of_the_indicator_computed() {
+    let days = fortnight();
+    let jumping_at = |first: usize| priced(&days, move |i| if i >= first { 130 } else { 100 });
+    let halted_most_days: Vec<KrxBar> = days.iter().enumerate().map(|(i, &d)| bar(d, if i == 14 { 130 } else { 100 }, if i == 0 || i >= 12 { 1_000 } else { 0 })).collect();
+    let stocks = vec![
+        stock("200010", halted_most_days.clone()),
+        stock("200020", jumping_at(14)),
+        stock("200030", jumping_at(3)),
+        stock("200040", jumping_at(5)),
+        stock("200050", jumping_at(6)),
+    ];
+    let session = loaded(KrxMarket { days: days.clone(), stocks }).await;
+    let api = &session.api;
+    let few_bars = Chart::of(&halted_most_days, "D");
+    let stochastic_spec = Spec::StochSlow { k: 2, d: 9, smooth: 1 };
+    let macd_spec = Spec::Macd { fast: 1, slow: 2, signal: 5 };
+    let ichimoku_spec = Spec::Ichimoku { conversion: 1, base: 2, span_b: 10, displacement: 1 };
+    assert_eq!(
+        (few_bars.len(), stochastic_spec.warmup(), macd_spec.warmup(), ichimoku_spec.warmup()),
+        (4, 10, 6, 10),
+        "200010은 15칸에 봉이 4개라 상장 기간은 되지만 %D·시그널·선행스팬 B가 계산되지 않는다"
+    );
+    for (spec, unready) in [(stochastic_spec, LineId::D), (macd_spec, LineId::Signal), (ichimoku_spec, LineId::SpanB)] {
+        assert!(few_bars.line(spec, unready)[3].is_nan());
+    }
+    let today = || vec![hit("200020", days[14])];
+    let cases = [
+        (
+            "스토캐스틱 범위는 %K만 맞아도 %D가 계산되기 전이면 후보가 아니다",
+            json!({"kind": "stochastic", "k": 2, "d": 9, "smooth": 1, "test": {"kind": "range", "min": 90.0, "max": 100.0}}),
+            today(),
+            today(),
+        ),
+        (
+            "MACD 0선 돌파는 시그널이 계산되기 전이면 후보가 아니고, 직전 봉에서도 시그널이 있어야 한다: 200040은 시그널이 처음 생긴 봉에서 돌파했다",
+            json!({"kind": "macd", "fast": 1, "slow": 2, "signal": 5, "test": {"kind": "zero_breakout", "direction": "up"}}),
+            today(),
+            vec![hit("200020", days[14]), hit("200050", days[6])],
+        ),
+        (
+            "일목 전환선·기준선 교차는 선행스팬 B가 계산되기 전이면 후보가 아니다",
+            json!({"kind": "ichimoku", "conversion": 1, "base": 2, "spanB": 10, "displacement": 1, "test": {"kind": "cross", "direction": "up"}}),
+            today(),
+            today(),
+        ),
+        (
+            "일목 교차의 선행스팬은 displacement−1봉 앞에서 계산한 값이라, 그 봉과 직전 봉에서 4봉 앞의 선행스팬 B가 있어야 한다",
+            json!({"kind": "ichimoku", "conversion": 1, "base": 2, "spanB": 2, "displacement": 5, "test": {"kind": "cross", "direction": "up"}}),
+            today(),
+            vec![hit("200020", days[14]), hit("200050", days[6])],
+        ),
+    ];
+    for (case, settings, today_only, fortnight_long) in cases {
+        let kind = settings["kind"].as_str().unwrap().to_owned();
+        for (m, want) in [(1, today_only), (15, fortnight_long)] {
+            let result = api.result(&every(vec![indicator(&kind, "D", m, settings.clone())])).await;
+            assert_eq!((result["excluded"].clone(), hits(&result)), (excluded(0, 0), want), "{case}, 최근 {m}일: 200010은 봉이 모자라고 200030은 준비 기간에 맞았다");
+        }
+    }
+}
+
 const LARGE_STOCKS: usize = 4_000;
 const LARGE_BARS: usize = 3_000;
 
