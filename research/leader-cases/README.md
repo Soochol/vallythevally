@@ -1,0 +1,134 @@
+# 주도 사례 자료 묶음
+
+#141 도구는 #137의 자료를 JSON 하나로 만든다. #142는 `bundle-types.ts`의 `Bundle`을 읽어 HTML을 만들 수 있다. 원고의 탄생일·정점·소멸일은 이 도구가 정하지 않는다.
+
+## 실행
+
+Node 22.18 이상을 쓴다. TypeScript는 Node의 타입 제거로 실행한다. 원천 HTTP 외에는 실행 의존성이 없다. 명시적인 타입 검사는 기존 웹 개발 도구를 쓴다.
+
+```sh
+pnpm --dir web install --frozen-lockfile
+npm --prefix research/leader-cases run typecheck
+node research/leader-cases/collect-bundle.ts --help
+```
+
+실제 수집은 서버 조회를 승인받은 뒤 실행한다. 서버 주소와 DART 고유번호는 직접 지정한다. 고유번호는 6자리 종목코드와 다른 8자리 값이다.
+
+```sh
+VALLY_ENV_FILE=/approved/path/.env node research/leader-cases/collect-bundle.ts \
+  --server "$VALLY_SERVER_URL" --code 247540 --corp-code "$DART_CORP_CODE" \
+  --from 2016-01-01 --to 2026-11-10
+```
+
+OpenDART 키는 `VALLY_ENV_FILE`이 가리키는 파일의 `OPENDART_API_KEY` 한 줄에서만 읽는다. 환경변수 `OPENDART_API_KEY`, 현재 디렉터리의 `.env`와 기본 경로는 읽지 않는다. 파일을 지정하지 않으면 DART 누락을 기록한 묶음을 만든다. 지정한 파일을 못 읽거나 키가 유효하지 않으면 종료 코드 2로 끝난다. 파일의 다른 설정은 실행하지 않는다.
+
+`--from` 기본값은 `2015-01-01`, `--to` 기본값은 한국 날짜의 전날이다. 경계 날짜를 포함한다. 일봉은 시작일부터 자르지 않고 최신 페이지부터 커서 끝까지 받는다. 지표 준비 구간, 첫 관측일과 상장 이후 흐름을 보존하기 위해서다. `prices`, `sectors`, 재무 원장은 전체 준비 구간을 포함하고, `calendar`, `technical`, `markets`, `valuation`, 누적 수급은 요청 범위를 따른다.
+
+출력은 스크립트가 있는 **이 worktree**의 `data/leader-cases/<code>/bundle.json`이다. 다른 디렉터리로 출력하는 옵션은 없다. 임시 파일을 같은 디렉터리에 쓴 뒤 원자적으로 이름을 바꾼다. `data/`는 기존 `.gitignore`에서 제외한다. 실제 자료와 생성 HTML은 커밋하지 않는다. 이 도구는 HTML을 만들지 않는다.
+
+종목 하나가 실패하면 그 종목의 자료 전체를 `kind: "missing"`으로 기록하고 다음 종목을 받는다. 대상 종목의 일봉도 실패했다면 누락을 담은 JSON을 만든 뒤 종료 코드 1을 준다. 다른 일부 원천의 누락은 종료 코드 0인 묶음에도 있을 수 있다. 표준 출력의 `missingSources`와 묶음의 `missing`을 함께 확인한다.
+
+## 자료 계약
+
+| 필드 | 내용과 읽는 규칙 |
+| --- | --- |
+| `schemaVersion` | 현재 `1`. 변경 시 소비자는 버전을 확인한다. |
+| `range`, `calendar` | 한국 날짜와 KRX 지수의 확정 일봉 날짜 합집합. 두 지수를 모두 못 받으면 달력을 추측하지 않는다. |
+| `prices` | 대상·섹터 지도 모든 종목·`IDX:001`·`IDX:101`의 성공 또는 실패. 성공에는 페이지 수, 일봉·주봉, 첫 관측일, 현재 봉 제외 여부가 있다. |
+| `symbol` | 생성 타입 `SymbolInfo`를 검증한 대상 종목의 시장·종류. 상대강도 지수는 코스피 종목이면 코스피, 코스닥이면 코스닥이다. |
+| `currentFundamentals` | 생성 타입 `Fundamentals`의 현재 스냅숏과 수집 시각. `historical: false`. 과거 시총을 만들지 않는다. 현재 상장주식수는 밸류에이션의 주식수 기준 대조에만 쓴다. |
+| `sectors` | 일별 섹터 지수, 구성 종목과 수익률 기여 종목, 주별 지수·수익률·순위·확산도·종목별 순위. |
+| `technical`, `markets` | 주별 기술적 수치와 일별 지수 장세. 준비 구간 부족은 null이다. |
+| `foreignHoldings`, `investorNetShares` | 생성 타입 `DayHistory`의 `days`, `coverage`, `skippedDays`, `undatedRows`를 모두 보존한다. 요청 실패는 별도 `kind: "missing"`이다. |
+| `institutionCumulative` | 기관계·금융투자·보험·투신·기타금융·은행·연기금·사모·국가별 관측 시작 누적 변화와 연속 구간별 변화. |
+| `dart` | 회계기간 원장·계산값, 최신 공시 목록, 주요사항보고의 자본 사건, 요청 실패 목록. |
+| `fred` | 원래 관측일·값과 한국 관측일에 맞춘 값. 사용한 `sourceDay`를 함께 남긴다. |
+| `valuation` | 대상 일봉 관측일의 사용 가능한 EPS TTM·BPS·PER·PBR와 가격 밴드. |
+| `returnDecomposition` | 요청 범위 안에서 양의 PER를 처음·마지막으로 구할 수 있는 두 관측일의 가격·EPS·PER 배수. 원고의 탄생일과 소멸일 분해로 간주하지 않는다. |
+| `corrections` | 종가 고점에서 밀렸다가 같은 고점을 회복할 때까지의 모든 조정. 정점·저점·회복일, 낙폭·관측일 수·거래량을 담는다. 미회복은 회복일 null이다. |
+| `missing`, `limitations` | 원천별 실패·수급 coverage 누락과 전체 자료 한계. 개별 재무 null 이유는 해당 `Measure`에도 있다. |
+
+`SourceResult<T>`는 `{kind:"ok", source, data}` 또는 `{kind:"missing", source, reason}`이다. 실패를 성공한 빈 배열로 바꾸지 않는다. OpenDART의 공식 `013`은 조회 자료 없음이다. 공시와 자본 사건 목록에서는 정상 빈 목록으로 보존하고, 회계 항목은 `dart_no_data`로 구별한다.
+
+재무 수치 `Measure`는 `value`, `reason`, `unit`, `sources`, `availableFrom`을 갖는다. 값이 null이면 이유가 반드시 있고, 숫자이면 이유는 null이다. `sources`는 접수번호·공시일·원문 링크·계정 ID/이름·선택 방법·원천 필드를 보존한다. 파생값은 모든 입력의 출처를 잇는다. 사용 가능일은 모든 입력이 사용 가능해지는 날짜 중 가장 늦은 날이다. `availableFrom: null`은 달력 안에서 사용 가능한 날이 없다는 뜻이다. 숫자가 있다는 이유만으로 과거 차트에 표시하면 안 된다.
+
+가격은 주식 원, 지수 포인트다. 서버가 이미 자연 단위로 준 가격을 재환산하지 않는다. 주식 거래량·보유량·순매수는 주다. 지수 거래량은 서버 원 단위를 보존하며 주식 수급과 섞어 계산하지 않는다. 회계 금액은 OpenDART가 `currency: "KRW"`로 확인해 준 원 단위만 쓴다. 주당 수치는 원/주, 비율은 %, 배수는 배다. `percent` 단위인 가속과 운전자본 경고의 차이는 퍼센트포인트다.
+
+## 시세와 파생 계산
+
+- 주식은 `/api/bars?symbol=<code>&period=D&venue=krx&limit=1000`을 쓴다. 지수는 거래소 인자를 보내지 않는다. `nextBefore`가 null일 때까지 읽고, 커서가 첫 봉과 일치하며 계속 과거로 가는지 검사한다. 형식·종목·봉 주기·순서 오류와 도중 실패는 해당 시리즈 실패다. 진행 중인 `current`는 쓰지 않는다.
+- 일봉 날짜는 Unix 초를 한국 시간으로 바꾼다. 주봉은 월요일부터 일요일까지 시가 첫 값, 고가 최대, 저가 최소, 종가 마지막 값, 거래량 합이다. `weekStart`와 `observedOn`을 구별한다. 마지막 주는 부분 주봉일 수 있고, `observedOn` 뒤 자료를 미리 쓰지 않는다.
+- 서버는 키움 수정주가를 요청한다. 묶음은 수집 시점의 수정 가격이다. 과거에 화면에서 보였던 가격 버전을 재현하지 않는다. 다시 만들 때 전체 이력을 새로 받는다.
+- 섹터 지수는 첫 구성 종목 관측일에 100에서 시작해, 날마다 구성 종목의 일별 수익률 산술평균을 연결한다. 동일 비중으로 매일 재조정하며 배당을 더하지 않는 가격 지수다. 전체 페이지를 다 받은 첫 관측일을 상장일의 대용으로 쓴다. 신규 상장 종목은 첫 가격만으로 수익률을 만들지 않고 두 번째 관측일부터 기여한다. 기존 구성 종목의 하루 자료가 빠지면 지수 연결을 끊고 이후 값을 null로 유지한다. 원천 자체가 실패한 구성 종목이 있으면 상장 시점을 알 수 없어 해당 섹터 지수 전체를 null로 둔다.
+- 섹터·섹터 안 순위는 같은 KRX 관측 주의 마지막 날짜끼리 13주 간격의 종가 수익률로 구한다. 준비 자료가 있는 대상만 순위를 매긴다. 동률은 공동 순위이며 다음 순위는 건너뛴다. `rankedSectors`, `rankedMembers`와 null 종목을 함께 읽는다.
+- 52주 신고가는 현재 주를 포함한 52주 종가의 최댓값이며 같은 값도 신고가다. 52주가 부족하거나 주간 자료가 빠지면 null이다. 섹터 확산도는 그날 상장된 종목 가운데 이 조건에 맞는 비율이다. `eligibleCount`, `newHighCount`, `unknownCount`를 남기고, 하나라도 알 수 없으면 비율은 null이다.
+- 상대강도는 종목/시장 지수, 종목/섹터 지수, 섹터 지수/시장 지수의 원래 비율이다. 같은 관측일의 값만 나눈다. 세 선 모두 52주 신고가를 계산한다.
+- 10·30·40주선은 종가 단순평균이다. 이격도는 `(종가/40주선-1)×100`, 낙폭은 지금까지 종가 고점 대비 %, 주간 변동폭은 `(고가-저가)/직전 주 종가×100`이다.
+- RSI 14주는 처음 14개 변화의 평균으로 시작하는 Wilder 평활이다. 상승·하락 변화가 모두 0이면 50이다. MACD는 SMA로 초기화한 EMA 12주−26주, 신호선 EMA 9주, 히스토그램은 그 차이다. 누락 주 뒤 평활은 다시 준비한다.
+- 장세는 코스피와 코스닥을 각각 계산한다. 종가가 관측 이후 고점의 80% 이하이면 먼저 하락장이다. 그 밖에 종가가 200일선 아래이고 200일선이 전 관측일보다 내리면 하락장, 종가가 200일선 위이고 200일선이 오르면 상승장, 나머지는 횡보장이다. 선의 기울기는 직전 200일선과의 차이다. 201관측일을 못 채우면 20% 낙폭 조건 외에는 null이다.
+
+서버 `Bar`에는 거래대금이 없다. 종가×거래량은 실제 거래대금이 아니므로 거래대금·10주 평균·시장 비중은 null이다. 과거 시장 전체 상장주식수도 없으므로 시가총액 순위는 null이다. 지금 상장주식수를 과거 가격에 곱하거나 섹터 종목만으로 시장 전체 순위를 만들지 않는다.
+
+## 재무와 공시
+
+`fnlttSinglAcntAll`에 `fs_div=CFS`, 사업연도와 보고서 코드를 지정한다. 2015년부터 종료일의 사업연도까지 받는다. 표준 계정 ID를 우선하고, 없으면 문서화한 정확한 계정명으로 받친다. 손익계산서 IS를 CIS보다 먼저 쓴다. 같은 우선순위에서 후보가 여럿이면 임의로 고르지 않는다. 숫자 공백·잘못된 단위·모호한 계정은 null이다.
+
+`list`는 `last_reprt_at=Y`와 전체 페이지를 읽는다. **최신 정정본을 원래 공시일로 소급하지 않는다.** 각 금액의 `rcept_no`가 목록의 정확한 보고서·회계기간 접수번호와 맞아야 한다. 맞지 않으면 null이다. 정정본 이전 원본 수치를 이 API에서 재현할 수 없으므로 그 기간은 비어 있을 수 있다. 12월 결산만 지원하며 보고서 제목의 `(YYYY.MM)`이 요청 회계기간과 맞지 않으면 값을 사용하지 않는다.
+
+회계기간과 공시일 축을 분리한다. `quarters`는 분기 단일 값과 누적 값, `annual`은 사업보고서 원래 값을 담는다. 공시일과 회계기간 말의 차이가 `filingLagDays`다. 공시 당일에는 새 재무를 쓰지 않는다. 다음 KRX 관측일부터 쓰며, 금요일 공시 뒤 다음 관측일이 월요일이면 월요일부터 보인다.
+
+| 수치 | 계산과 분모 |
+| --- | --- |
+| 매출·영업이익·지배주주순이익 | 중간 손익계산서 `thstrm_amount`는 3개월, `thstrm_add_amount`는 누적이다. 4분기만 연간−3분기 누적이다. |
+| 영업CF·투자CF·CAPEX | 현금흐름표 `thstrm_amount`는 누적이다. 2·3·4분기는 이전 분기 누적을 뺀다. CAPEX는 유형자산 취득의 현금 지급액이며 무형자산은 포함하지 않는다. 음수 취득액은 확인 필요 null이다. |
+| 자본·부채·재고·채권 | 재무상태표 시점 잔액이다. 차감하거나 최근 4분기를 합하지 않는다. 채권 표준 계정이 매출채권 및 기타유동채권이면 그 넓은 범위와 출처를 유지한다. |
+| 최근 4분기 합 | 연속된 네 분기의 흐름만 합한다. 한 분기라도 없으면 null이다. |
+| 전년동기 증가율 | 분기 단일 값/전년 같은 분기−1. 이전 값이 양수일 때만 %를 계산한다. 0·음수에서의 흑자 전환은 숫자 증가율로 포장하지 않는다. |
+| 영업이익 가속 | 이번 분기 증가율−직전 분기 증가율. 연간 화면은 연간 전년비와 직전 연간 전년비 차이다. |
+| 분기·연간 EPS | 공시된 기본 EPS를 우선한다. 4분기 EPS는 연간 EPS에서 누적 EPS를 무조건 빼지 않는다. 보고된 보통주 분모가 같은 구간에서는 해당 순이익/보통주 유통주식수로 계산한다. |
+| EPS TTM | 최근 4분기 지배주주순이익/자사주 제외 보통주 수. 네 분기의 공시 주식수가 같고 다른 종류 주식이 0으로 확인될 때만 계산한다. 분기말 스냅숏이므로 기간 내 변동까지 증명하는 가중평균 EPS는 아니다. |
+| BPS | 최근 지배주주 자본 잔액/공시 보통주 유통주식수. 기타 종류 주식이 있거나 분모를 못 받으면 null이다. |
+| 지배주주 ROE | 최근 4분기 지배주주순이익/최근 및 전년 동기 말 지배주주 자본의 평균×100. 양의 자본 두 값이 필요하다. |
+| 부채비율·영업이익률 | 부채/전체 자본×100, 영업이익/매출×100. |
+| FCF | 분기 영업CF−분기 유형자산 현금 취득액. |
+| 운전자본 경고 | 재고 전년비−매출 전년비, 채권 전년비−매출 전년비. |
+| DPS | 사업보고서 `alotMatter`의 보통주 주당현금배당금 당기 값. 다른 종류 주식·전기 값을 섞지 않는다. |
+| 주식수 | `stockTotqySttus`의 보통주 발행수·유통수·합계. 공시된 분기말 스냅숏이며 매일의 상장주식수나 증자 효력일이 아니다. |
+| PER·PBR | 그날 수정 종가/사용 가능한 EPS TTM·BPS. 분모가 양수여야 한다. 현재 상장주식수 대조가 안 되거나 이후 주식수 스냅숏이 달라 수정 가격과 주당 기준이 불일치하면 null이다. |
+| 가격 밴드 | EPS TTM×10·20·40·80, BPS×1·2·4·8. PBR 배수는 이 도구의 시작 선택이다. |
+
+`metrics`와 `annualMetrics`는 회계기간별 계산값이다. 원장이 사후에 보유한 숫자와 그날 알 수 있던 숫자를 혼동하지 않도록 각 수치의 `availableFrom`을 확인한다. `valuation`은 관측일마다 이를 검사해 아직 알려지지 않은 입력을 null로 바꾼다.
+
+자본 사건은 유상·무상·유무상증자, 감자, CB·BW·교환사채 발행, 자사주 취득·처분과 신탁 체결·해지를 주요사항보고 API에서 읽는다. 필드는 공시의 원래 단위 문자열과 접수번호·공시일·링크를 보존한다. `effect: "announcement-only"`이므로 계획 수량을 실제 주식수에 더하지 않는다. 전환 청구·실행, 대주주 매도·블록딜은 전체 공시 목록에서 원문을 확인해야 한다. 기준금리 결정, 지수 편출입, 이전상장과 산업 사건의 해석은 #143 원고에서 원문을 연결한다.
+
+## 수급과 FRED
+
+외국인 보유수량은 주, `weightPct`는 보유비율 %다. 현재 종목 기본 정보의 외국인 한도 소진율과 다르다. 기관 누적은 첫 유효 관측일부터 당일을 포함한 순매수 합이다. **그 전에 보유량이 0이었다고 가정하지 않는다.**
+
+숫자 오류·없는 관측일에서는 누적 선을 끊는다. 다시 자료가 생기면 `segmentStart`와 구간 누적 `segmentNet`을 새로 시작한다. `knownNetSinceStart`는 누락일을 제외한 알려진 값의 부분합이다. `completeSinceObservationStart: false`이면 연속된 전체 누적으로 그리지 않는다. 날짜 없는 행은 어디가 빠졌는지 알 수 없어 모든 행에 불확실성을 남긴다. `no_readable_dates`와 HTTP 실패는 각각 이유를 가진 null 시계열이다. 원래 coverage와 실패 행도 그대로 남는다.
+
+FRED CSV는 키 없이 `fredgraph.csv?id=…`를 읽는다. `observation_date,<id>`와 예전 `DATE,<id>` 머리글을 확인한다. 공백과 `.`은 결측이며 숫자 0으로 바꾸지 않는다. DEXKOUS, 한국 10년 월별 IRLTLT01KRM156N, 미국 DGS10·DGS2·DFF를 받는다. DGS2와 DFF는 미국 금리의 시작 선택이다.
+
+한국 날짜보다 **엄격히 이전**의 마지막 유효 관측값만 붙인다. 월별 평균은 월초 날짜가 붙지만 그 달 안에 알 수 없으므로 월말보다 뒤의 한국 관측일에만 붙인다. CSV는 최신 수정값이며 실제 발표일·수정 이력이 없다. 월말 뒤에도 발표 지연이 있을 수 있다. 따라서 이 정렬을 실제 당시 공개 시점의 증명으로 인용하지 않는다. 원 관측값과 사용한 원 날짜를 보존한다.
+
+## 검증
+
+```sh
+npm --prefix research/leader-cases run typecheck
+node --test research/leader-cases/bundle.test.ts
+VALLY_E2E_BIN_DIR=target/leader-cases-141/bin node --test research/leader-cases/check-sector-symbols.test.ts
+```
+
+마지막 명령은 별도로 준비한 server·fake-kiwoom 바이너리를 쓴다. 기존 바이너리를 복사해 재사용할 수 있고 큰 Cargo 빌드가 필요하지 않다. 새로 빌드한다면 저장소 규칙에 따라 `cargo build -p server -p fake-kiwoom`을 worktree에서 먼저 한다.
+
+새 시험은 로컬 HTTP 서버에서 페이지·재무·수급·FRED 응답을 흉내 낸다. CLI도 실제 자식 프로세스로 실행하고 `data/leader-cases/990001/bundle.json`을 읽어 계약·계산·누락·키 비노출을 확인한다. `--dart-base`와 `--fred-base`의 대체 주소는 로컬 HTTP 주소만 허용한다. 실제 `.env`, 실제 OpenDART 키와 키움, 사용자 서버를 시험에 쓰지 않는다.
+
+247540 실제 묶음, 종가 하나와 영업이익 한 분기의 원천 대조는 **아직 수행하지 않았다**. 사용자 승인을 받아 새 코드로 서버를 재시작한 뒤 별도 확인해야 한다. 로컬 fixture의 성공을 그 실제 검증의 성공으로 쓰지 않는다.
+
+## 확인한 공식 자료
+
+- [OpenDART 전체 재무제표](https://opendart.fss.or.kr/guide/detail.do?apiGrpCd=DS003&apiId=2019020). 보고서 코드, CFS, 표준 계정 ID, 3개월 손익과 누적 필드, 통화 단위.
+- [공시검색](https://opendart.fss.or.kr/guide/detail.do?apiGrpCd=DS001&apiId=2019001). 최종보고서 선택, 공시일과 접수번호, 페이지.
+- [배당](https://opendart.fss.or.kr/guide/detail.do?apiGrpCd=DS002&apiId=2019005), [주식의 총수](https://opendart.fss.or.kr/guide/detail.do?apiGrpCd=DS002&apiId=2020002).
+- [주요사항보고 목록](https://opendart.fss.or.kr/guide/main.do?apiGrpCd=DS005), [유상증자](https://opendart.fss.or.kr/guide/detail.do?apiGrpCd=DS005&apiId=2020023), [CB 발행](https://opendart.fss.or.kr/guide/detail.do?apiGrpCd=DS005&apiId=2020033), [자사주 신탁](https://opendart.fss.or.kr/guide/detail.do?apiGrpCd=DS005&apiId=2020040).
+- [FRED 내려받기 안내](https://fred.stlouisfed.org/help/data/downloading/using-the-download-data-link/), [공식 CSV 형식](https://fred.stlouisfed.org/graph/fredgraph.csv?id=DEXKOUS), [DEXKOUS 단위](https://fred.stlouisfed.org/series/DEXKOUS), [한국 10년 금리의 월별 주기](https://fred.stlouisfed.org/series/IRLTLT01KRM156N), [수정 시점과 빈티지 설명](https://fred.stlouisfed.org/docs/api/fred/series_observations.html).
