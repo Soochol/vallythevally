@@ -10,7 +10,7 @@ test('minute rollover and style replacement keep subsequent live updates working
   await page.mouse.move(box.x+box.width*.76,box.y+box.height*.4);await page.mouse.down();
   await page.mouse.move(box.x+box.width*.86,box.y+box.height*.3,{steps:10});await page.mouse.up();
   await expect.poll(async()=> (await(await fetch(`${app.url}/api/drawings?symbol=005930`)).json()).length).toBe(1);
-  await page.getByRole('group',{name:'봉 주기'}).getByRole('button',{name:'1분',exact:true}).click();
+  await page.getByRole('combobox',{name:'분봉',exact:true}).selectOption('1m');
   await expect(cell(page)).toHaveAttribute('aria-busy','false');
   const trade=async(price:number,time:string)=>{
     await expect(async()=>{expect(await app.fake.pushReal('0B','005930_AL',{'20':time,'10':`+${price}`,'15':'+1','13':'1000','9081':'KRX','11':'+0','12':'+0.00','25':'2'})).toBeGreaterThan(0);await expect.poll(()=>delivered.includes(price),{timeout:1000}).toBe(true);}).toPass({timeout:15000});
