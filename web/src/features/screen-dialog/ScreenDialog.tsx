@@ -28,6 +28,7 @@ import {
   MARKET_LABEL,
   NEW_HIGH_NAME,
   NEW_LOW_NAME,
+  NO_CONDITIONS_SENTENCE,
   PERIOD_NAME,
   SIDE_LABEL,
   UNIT,
@@ -298,22 +299,25 @@ export function ScreenFields({ ids, draft, nameError, nameRef, locked, onChange 
         </Row>
 
         <Row label="조건">
-          <ol aria-label="조건" className="flex flex-col gap-2.5">
-            {draft.conditions.map((c, i) => (
-              <ConditionLine
-                key={c.key}
-                ids={ids}
-                index={i}
-                last={i === lines - 1}
-                condition={c}
-                removable={lines > 1}
-                onChange={(line) => onChange((d) => editCondition(d, line))}
-                onKind={(kind) => onChange((d) => changeKind(d, c.key, kind))}
-                onMove={(by) => onChange((d) => moveCondition(d, c.key, by))}
-                onRemove={() => onChange((d) => removeCondition(d, c.key))}
-              />
-            ))}
-          </ol>
+          {lines === 0 ? (
+            <p className="pt-1.5 text-s text-text-2">{NO_CONDITIONS_SENTENCE}</p>
+          ) : (
+            <ol aria-label="조건" className="flex flex-col gap-2.5">
+              {draft.conditions.map((c, i) => (
+                <ConditionLine
+                  key={c.key}
+                  ids={ids}
+                  index={i}
+                  last={i === lines - 1}
+                  condition={c}
+                  onChange={(line) => onChange((d) => editCondition(d, line))}
+                  onKind={(kind) => onChange((d) => changeKind(d, c.key, kind))}
+                  onMove={(by) => onChange((d) => moveCondition(d, c.key, by))}
+                  onRemove={() => onChange((d) => removeCondition(d, c.key))}
+                />
+              ))}
+            </ol>
+          )}
           <span className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1">
             <button type="button" className="tb-btn h-8 border border-line px-2.5 text-s disabled:opacity-40" disabled={lines >= MAX_CONDITIONS} onClick={() => onChange(addCondition)}>
               <PlusIcon size={14} />
@@ -358,7 +362,6 @@ interface LineProps {
   index: number;
   last: boolean;
   condition: ConditionDraft;
-  removable: boolean;
   onChange(line: ConditionDraft): void;
   onKind(kind: ConditionKind): void;
   onMove(by: -1 | 1): void;
@@ -372,7 +375,7 @@ interface LineUi {
   errors: ConditionErrors;
 }
 
-function ConditionLine({ ids, index, last, condition, removable, onChange, onKind, onMove, onRemove }: LineProps) {
+function ConditionLine({ ids, index, last, condition, onChange, onKind, onMove, onRemove }: LineProps) {
   const label = `조건 ${index + 1}`;
   const row = checkCondition(condition);
   const ui: LineUi = { label, base: `${ids}-condition-${condition.key}`, kind: condition.kind, errors: row.ok ? {} : row.errors };
@@ -409,7 +412,7 @@ function ConditionLine({ ids, index, last, condition, removable, onChange, onKin
           <button type="button" className="icon-btn h-7 w-7 max-md:h-10 max-md:w-10" aria-label={`${label} 아래로 옮기기`} title="아래로 옮기기" disabled={last} onClick={() => onMove(1)}>
             <ArrowIcon dir="down" size={14} />
           </button>
-          <button type="button" className="icon-btn h-7 w-7 max-md:h-10 max-md:w-10" aria-label={`${label} 빼기`} title="조건 빼기" disabled={!removable} onClick={onRemove}>
+          <button type="button" className="icon-btn h-7 w-7 max-md:h-10 max-md:w-10" aria-label={`${label} 빼기`} title="조건 빼기" onClick={onRemove}>
             <CloseIcon />
           </button>
         </span>

@@ -175,6 +175,8 @@ test("맞은 날짜는 봉으로 따지는 첫 줄의 봉 주기로 보이고, �
   const capOnly = screenOf([marketCap]);
   expect(matchedDateText(capOnly, "2026-11-10", "2026-11-10")).toEqual({ text: "당일", current: true });
   expect(matchedDateText(capOnly, "2026-11-09", "2026-11-10")).toEqual({ text: "11-09", current: false });
+
+  expect(matchedDateText(screenOf([]), "2026-11-10", "2026-11-10")).toEqual({ text: "당일", current: true });
 });
 
 const row = (symbol: string, name: string, close: number, changeRate: number | null, matchedDate: string): ScreenerRow => ({

@@ -3,9 +3,9 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { expect, test } from "vitest";
 import type { Screen } from "../../api/generated/Screen";
 import { ScreenFields } from "./ScreenDialog";
-import { addCondition, draftOf, editCondition, type ScreenDraft } from "./screenForm";
+import { addCondition, draftOf, editCondition, removeCondition, type ScreenDraft } from "./screenForm";
 
-const twoLines = addCondition({ ...draftOf(null), name: "고가와 거래량" });
+const twoLines = addCondition(addCondition({ ...draftOf(null), name: "고가와 거래량" }));
 const NAME = 1;
 const PER_NEW_HIGH_LINE = 8;
 const ADD_LINE = 1;
@@ -40,6 +40,20 @@ test("저장 중이 아니면 첫 줄 ▲와 끝 줄 ▼만 빼고 모두 쓸 �
   const controls = controlsOf(false);
   expect(controls).toHaveLength(NAME + 2 * PER_NEW_HIGH_LINE + ADD_LINE + MARKETS + CHIPS);
   expect(controls.filter((c) => c.disabled).map((c) => c.tag.match(/aria-label="([^"]+)"/)?.[1])).toEqual(["조건 1 위로 옮기기", "조건 2 아래로 옮기기"]);
+});
+
+test("새 조건식은 조건 줄 없이 '조건 없음 · 대상 종목 전체'로 열리고, 한 줄만 남아도 그 줄을 뺄 수 있다", () => {
+  const empty = markupOf(draftOf(null));
+  expect(empty).toContain("조건 없음 · 대상 종목 전체");
+  expect(empty).toContain("0/10줄");
+  expect(labelsIn(empty).filter((l) => l.startsWith("조건 "))).toEqual([]);
+  expect(empty.match(/<button[^>]*>(?:(?!<button).)*조건 더하기/)?.[0]).not.toContain('disabled=""');
+
+  const one = addCondition(draftOf(null));
+  const markup = markupOf(one);
+  expect(markup).not.toContain("조건 없음 · 대상 종목 전체");
+  expect(markup).toMatch(/<button(?![^>]*disabled="")[^>]*aria-label="조건 1 빼기"[^>]*>/);
+  expect(markupOf(removeCondition(one, one.conditions[0]!.key))).toContain("조건 없음 · 대상 종목 전체");
 });
 
 test("조건 줄은 종류, 봉 주기, 그 종류의 칸, ▲▼, 빼기 순이고, 시가총액 줄에는 봉 주기와 M이 없다", () => {
@@ -97,7 +111,7 @@ test("잘못된 칸은 그 칸에 표시되고 줄 아래에 칸 이름과 이�
 });
 
 test("종류 메뉴는 묶음별로 15가지를 보이고, 지금 종류가 골라져 있다", () => {
-  const markup = markupOf(draftOf(null));
+  const markup = markupOf(addCondition(draftOf(null)));
   const groups = [...markup.matchAll(/<optgroup label="([^"]+)">(.*?)<\/optgroup>/g)].map(([, label, options]) => [label, [...options!.matchAll(/>([^<]+)<\/option>/g)].map(([, text]) => text)]);
   expect(groups).toEqual([
     ["가격", ["신고가", "신저가", "값 범위", "등락률", "고점·저점 거리"]],

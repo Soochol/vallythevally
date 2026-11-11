@@ -41,6 +41,7 @@ const errorsOf = (draft: ScreenDraft, id = "new", saved: readonly Screen[] = [])
 };
 const named = (draft: ScreenDraft): ScreenDraft => ({ ...draft, name: "시험" });
 const firstLine = (draft: ScreenDraft): ConditionDraft => draft.conditions[0]!;
+const oneLine = (): ScreenDraft => addCondition(draftOf(null));
 const lineOf = (condition: Condition): ConditionDraft => firstLine(draftOf({ ...weekly, conditions: [condition] }));
 const conditionOf = (line: ConditionDraft): Condition => {
   const row = checkCondition(line);
@@ -54,7 +55,7 @@ const errorsIn = (line: ConditionDraft): ConditionErrors => {
   return row.errors;
 };
 const asKind = <K extends ConditionKind>(kind: K, period: ConditionDraft["period"] = "D", m = "1") => {
-  const line = firstLine(changeKind(draftOf(null), 0, kind));
+  const line = firstLine(changeKind(oneLine(), 0, kind));
   if (line.kind !== kind) throw new Error("종류가 바뀌어야 한다");
   return { ...line, period, m } as Extract<ConditionDraft, { kind: K }>;
 };
@@ -70,9 +71,17 @@ test("이름은 앞뒤 공백을 빼고 40자까지다", () => {
   expect(check.ok && check.screen.name).toBe("가".repeat(40));
 });
 
-test("새 조건식의 첫 줄은 일봉 고가 200일 신고가, 최근 1일이다", () => {
-  const check = checkDraft(named(draftOf(null)), "id-1", []);
+test("새 조건식은 조건 0줄로 시작해 그대로 저장할 수 있고, 처음 더한 줄은 일봉 고가 200일 신고가, 최근 1일이다", () => {
+  expect(draftOf(null).conditions).toEqual([]);
+  expect(checkDraft(named(draftOf(null)), "id-1", [])).toEqual({ ok: true, screen: { id: "id-1", name: "시험", markets: [], exclude: [], conditions: [] } });
+  const check = checkDraft(named(oneLine()), "id-1", []);
   expect(check.ok && check.screen.conditions).toEqual([{ kind: "new_high", period: "D", m: 1, field: "high", n: 200 }]);
+});
+
+test("조건 0줄로 저장한 조건식을 다시 열면 0줄이고, 이름만 바꿔 저장해도 0줄이다", () => {
+  const saved: Screen = { id: "s0", name: "코스닥 전체", markets: ["kosdaq"], exclude: ["managed"], conditions: [] };
+  expect(draftOf(saved)).toEqual({ name: "코스닥 전체", conditions: [], markets: ["kosdaq"], exclude: ["managed"] });
+  expect(checkDraft({ ...draftOf(saved), name: "코스닥 관리 제외" }, "s0", [saved])).toEqual({ ok: true, screen: { ...saved, name: "코스닥 관리 제외" } });
 });
 
 test("더한 줄은 윗줄의 봉 주기만 따르고 나머지는 신고가 기본값이다", () => {
@@ -89,7 +98,7 @@ test("시가총액 줄 아래에 더한 줄은 시가총액 줄이 이어 받은
 });
 
 test("종류를 바꾸면 봉 주기와 M은 남고 나머지는 그 종류의 기본값이며, 지표 기본값은 차트와 같다", () => {
-  const start = editCondition(draftOf(null), { ...firstLine(draftOf(null)), period: "W", m: "3" });
+  const start = editCondition(oneLine(), { ...firstLine(oneLine()), period: "W", m: "3" });
   const expected: Record<ConditionKind, Condition> = {
     new_high: { kind: "new_high", period: "W", m: 3, field: "high", n: 200 },
     new_low: { kind: "new_low", period: "W", m: 3, field: "low", n: 200 },
@@ -115,7 +124,7 @@ test("종류를 바꾸면 봉 주기와 M은 남고 나머지는 그 종류의 �
 });
 
 test("같은 종류를 다시 고르면 입력한 값이 그대로다", () => {
-  const draft = editCondition(draftOf(null), { ...asKind("new_high"), n: "60" });
+  const draft = editCondition(oneLine(), { ...asKind("new_high"), n: "60" });
   expect(changeKind(draft, 0, "new_high")).toEqual(draft);
 });
 
@@ -301,7 +310,7 @@ test("15가지 종류와 줄마다 다른 봉 주기가 섞인 조건식도 이�
 });
 
 test("검사를 통과하면 서버가 돌려주는 필드 순서의 조건식이 된다", () => {
-  let draft: ScreenDraft = { ...draftOf(null), name: " 고가와 거래량 " };
+  let draft: ScreenDraft = { ...oneLine(), name: " 고가와 거래량 " };
   draft = toggleExclude(toggleExclude(draft, "trading_halted"), "etf");
   draft = toggleMarket(draft, "kosdaq");
   draft = addCondition(editCondition(draft, { ...firstLine(draft), period: "W" }));
@@ -331,10 +340,12 @@ test("조건식이 50개면 새로 만들 수 없지만 있던 것은 고칠 수
   expect(checkDraft({ ...draftOf(null), name: "마흔아홉 번째 뒤" }, "new", many(49)).ok).toBe(true);
 });
 
-test("조건 줄은 1줄 밑으로 빼거나 10줄 넘게 더할 수 없다", () => {
-  const one = draftOf(null);
-  expect(removeCondition(one, firstLine(one).key).conditions).toHaveLength(1);
-  let draft = one;
+test("조건 줄은 마지막 줄까지 뺄 수 있고, 빈 조건식에 다시 더할 수 있으며, 10줄 넘게 더할 수는 없다", () => {
+  const one = oneLine();
+  const none = removeCondition(one, firstLine(one).key);
+  expect(none.conditions).toEqual([]);
+  expect(conditionOf(firstLine(addCondition(none)))).toEqual({ kind: "new_high", period: "D", m: 1, field: "high", n: 200 });
+  let draft = none;
   for (let i = 0; i < 12; i++) draft = addCondition(draft);
   expect(draft.conditions).toHaveLength(10);
   expect(new Set(draft.conditions.map((c) => c.key)).size).toBe(10);

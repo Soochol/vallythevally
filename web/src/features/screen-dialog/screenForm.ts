@@ -247,7 +247,7 @@ function fieldsOf(condition: Condition): KindFields {
 const newCondition = (key: number, period: ScreenPeriod): ConditionDraft => ({ key, period, m: "1", ...DEFAULTS.new_high });
 
 export function draftOf(screen: Screen | null): ScreenDraft {
-  if (!screen) return { name: "", conditions: [newCondition(0, "D")], markets: [], exclude: [] };
+  if (!screen) return { name: "", conditions: [], markets: [], exclude: [] };
   const conditions: ConditionDraft[] = [];
   for (const condition of screen.conditions) {
     const line = condition.kind === "market_cap" ? { period: conditions.at(-1)?.period ?? "D", m: "1" } : { period: condition.period, m: text(condition.m) };
@@ -263,7 +263,6 @@ export function addCondition(draft: ScreenDraft): ScreenDraft {
 }
 
 export function removeCondition(draft: ScreenDraft, key: number): ScreenDraft {
-  if (draft.conditions.length <= 1) return draft;
   return { ...draft, conditions: draft.conditions.filter((c) => c.key !== key) };
 }
 

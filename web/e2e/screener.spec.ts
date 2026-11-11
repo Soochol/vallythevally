@@ -73,6 +73,7 @@ test("빈 저장소를 채우고 만든 조건식으로 찾은 종목을 칸의 
     await panel(page).getByRole("button", { name: "새 조건식" }).click();
     const dialog = editor(page, "새 조건식");
     await dialog.getByLabel("이름").fill(SCREEN_NAME);
+    await dialog.getByRole("button", { name: "조건 더하기" }).click();
     await dialog.getByRole("textbox", { name: "조건 1 신고가 기간" }).fill("60");
     await dialog.getByRole("textbox", { name: "조건 1 최근 봉 수" }).fill("20");
     await dialog.getByRole("group", { name: "종류 제외" }).getByRole("button", { name: "ETF" }).click();
@@ -337,6 +338,7 @@ test("최근 관측일을 채우는 동안에는 실행이 막히고, 과거를 
   await panel(page).getByRole("button", { name: "새 조건식" }).click();
   const dialog = editor(page, "새 조건식");
   await dialog.getByLabel("이름").fill("고가 1000일 신고가");
+  await dialog.getByRole("button", { name: "조건 더하기" }).click();
   await dialog.getByRole("textbox", { name: "조건 1 신고가 기간" }).fill("1000");
   await dialog.getByRole("textbox", { name: "조건 1 최근 봉 수" }).fill("300");
   await dialog.getByRole("button", { name: "저장" }).click();
@@ -558,6 +560,7 @@ for (const width of [320, 360]) {
       await panel(page).getByRole("button", { name: "새 조건식" }).first().click();
       const dialog = editor(page, "새 조건식");
       const pick = (name: string, value: string) => dialog.getByRole("combobox", { name: `조건 1 ${name}` }).selectOption(value);
+      await dialog.getByRole("button", { name: "조건 더하기" }).click();
       const variants: readonly (readonly [kind: string, choices?: readonly (readonly [name: string, value: string])[], more?: number])[] = [
         ["new_high"],
         ["new_low"],
