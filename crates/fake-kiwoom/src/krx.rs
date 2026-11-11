@@ -17,6 +17,7 @@ pub struct KrxStock {
     pub company_class_name: String,
     pub reg_day: KstDate,
     pub audit_info: String,
+    pub listed_shares: Option<u64>,
     pub quoted: bool,
     pub daily: DailyAnswer,
     pub bars: Vec<KrxBar>,
@@ -92,27 +93,28 @@ struct Profile {
     company_class_name: &'static str,
     reg_day: KstDate,
     audit_info: &'static str,
+    listed_shares: Option<u64>,
     level: u64,
 }
 
 fn profiles() -> Vec<Profile> {
-    let p = |code, name, market_code, company_class_name, reg_day, audit_info, level| Profile { code, name, market_code, company_class_name, reg_day, audit_info, level };
+    let p = |code, name, market_code, company_class_name, reg_day, audit_info, listed_shares, level| Profile { code, name, market_code, company_class_name, reg_day, audit_info, listed_shares, level };
     vec![
-        p(PRE_1985, "가상전자", "0", "", day(1976, 3, 24), "정상", 60_000),
-        p(COMMON, "가상화학", "0", "", day(2022, 3, 2), "정상", 30_000),
-        p(SPLIT, "가상분할", "10", "", day(2023, 6, 1), "정상", 50_000),
-        p(PREFERRED, "가상전자우", "0", "", day(2024, 1, 2), "정상", 40_000),
-        p(HALTED, "가상정지", "10", "", day(2022, 9, 1), "거래정지", 8_000),
-        p(MANAGED, "가상관리", "10", "", day(2024, 5, 2), "관리종목", 3_000),
-        p(ETF, "가상200", "8", "", day(2021, 6, 1), "정상", 35_000),
-        p(REIT, "가상리츠", "6", "", day(2023, 1, 2), "정상", 5_000),
-        p(SPAC, "가상기업인수목적1호", "10", "스팩", day(2026, 3, 3), "정상", 2_000),
-        p(NEW_LISTING, "가상신규", "0", "", day(2026, 10, 1), "정상", 20_000),
+        p(PRE_1985, "가상전자", "0", "", day(1976, 3, 24), "정상", Some(5_919_637_922), 60_000),
+        p(COMMON, "가상화학", "0", "", day(2022, 3, 2), "정상", Some(70_592_343), 30_000),
+        p(SPLIT, "가상분할", "10", "", day(2023, 6, 1), "정상", Some(12_000_000), 50_000),
+        p(PREFERRED, "가상전자우", "0", "", day(2024, 1, 2), "정상", Some(822_886_700), 40_000),
+        p(HALTED, "가상정지", "10", "", day(2022, 9, 1), "거래정지", Some(31_250_000), 8_000),
+        p(MANAGED, "가상관리", "10", "", day(2024, 5, 2), "관리종목", Some(8_421_052), 3_000),
+        p(ETF, "가상200", "8", "", day(2021, 6, 1), "정상", Some(150_350_000), 35_000),
+        p(REIT, "가상리츠", "6", "", day(2023, 1, 2), "정상", Some(203_400_000), 5_000),
+        p(SPAC, "가상기업인수목적1호", "10", "스팩", day(2026, 3, 3), "정상", Some(6_250_000), 2_000),
+        p(NEW_LISTING, "가상신규", "0", "", day(2026, 10, 1), "정상", None, 20_000),
     ]
 }
 
 fn daily_withheld() -> Profile {
-    Profile { code: DAILY_WITHHELD, name: "가상화학우B", market_code: "0", company_class_name: "", reg_day: day(2003, 6, 16), audit_info: "거래정지", level: 9_000 }
+    Profile { code: DAILY_WITHHELD, name: "가상화학우B", market_code: "0", company_class_name: "", reg_day: day(2003, 6, 16), audit_info: "거래정지", listed_shares: Some(1_154_000), level: 9_000 }
 }
 
 impl KrxMarket {
@@ -172,6 +174,7 @@ fn sample_stock(p: &Profile, k: usize, days: &[KstDate], as_of: KstDate) -> KrxS
         company_class_name: p.company_class_name.into(),
         reg_day: p.reg_day,
         audit_info: p.audit_info.into(),
+        listed_shares: p.listed_shares,
         quoted: true,
         daily: DailyAnswer::Bars,
         bars,
@@ -360,7 +363,7 @@ fn stock_list(market: &KrxMarket, kosdaq: bool) -> Value {
                 "companyClassName": s.company_class_name,
                 "kind": "A",
                 "lastPrice": format!("{:08}", s.bars.last().map_or(0, |b| b.close)),
-                "listCount": "0000000010000000",
+                "listCount": s.listed_shares.map_or(String::new(), |shares| format!("{shares:016}")),
                 "marketCode": s.market_code,
                 "marketName": if kosdaq { "코스닥" } else { "거래소" },
                 "name": s.name,

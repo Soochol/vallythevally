@@ -1,6 +1,7 @@
 mod common;
 
 use std::ffi::OsStr;
+use std::num::NonZeroU64;
 use std::os::unix::fs::DirBuilderExt;
 use std::path::Path;
 use std::time::{Duration, Instant};
@@ -10,6 +11,7 @@ use domain::{KstDate, Ohlcv, Price, StockCode, Volume, Weekday};
 use fake_kiwoom::krx::{DailyAnswer, KrxBar, KrxMarket, KrxStock};
 use indicators::{Columns, LineId, MaMethod, Spec, ValidSpec};
 use serde_json::{Value, json};
+use server::api::Market;
 use server::kiwoom::wire::{MillionWon, ScreenerListing};
 use server::screener::store::{DayBar, Store, Write};
 
@@ -53,6 +55,7 @@ fn stock(code: &str, bars: Vec<KrxBar>) -> KrxStock {
         company_class_name: String::new(),
         reg_day: bars[0].day,
         audit_info: "정상".into(),
+        listed_shares: Some(1_000_000),
         quoted: true,
         daily: DailyAnswer::Bars,
         bars,
@@ -81,6 +84,10 @@ fn near_extreme(period: &str, m: u32, extreme: &str, n: u32, within_pct: f64) ->
 
 fn surge(period: &str, m: u32, field: &str, n: u32, times: f64) -> Value {
     json!({"kind": "surge", "period": period, "m": m, "field": field, "n": n, "times": times})
+}
+
+fn market_cap(min: Option<f64>, max: Option<f64>) -> Value {
+    json!({"kind": "market_cap", "min": min, "max": max})
 }
 
 fn every(conditions: Vec<Value>) -> Value {
@@ -280,6 +287,8 @@ async fn an_unfilled_history_is_history_short_until_backfill_and_a_pre_1985_list
         let result = api.result(&daily(&[("high", n, m)])).await;
         assert_eq!((result["excluded"].clone(), hits(&result)), (want_excluded, want_hits), "n={n}, m={m}: 필요한 첫 칸은 T−(m−1)−(n−1)이다");
     }
+    let capped = api.result(&every(vec![market_cap(Some(0.0), None)])).await;
+    assert_eq!((capped["excluded"].clone(), hits(&capped)), (excluded(0, 0), vec![hit("200010", today), hit("200020", today)]), "시가총액만 있는 조건식은 과거가 덜 찬 종목도 따진다");
 
     fake.reset();
     api.update().await;
@@ -377,7 +386,7 @@ async fn conditions_combine_with_and_and_rows_carry_the_first_conditions_last_ne
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn a_traded_value_new_high_runs_while_market_cap_and_market_screens_are_refused_for_now() {
+async fn a_traded_value_new_high_runs_and_no_condition_kind_or_market_is_refused_any_more() {
     let days = fortnight();
     let traded = |code: &str, million_won: fn(usize) -> u64| {
         stock(code, days.iter().enumerate().map(|(i, &d)| KrxBar { traded_million_won: million_won(i), ..bar(d, 100, 1_000) }).collect())
@@ -397,15 +406,24 @@ async fn a_traded_value_new_high_runs_while_market_cap_and_market_screens_are_re
         "주봉 거래대금은 일봉 거래대금의 합이다: 200010은 이번 주 1,300 > 지난주 500, 200020은 이번 주 1,300 < 지난주 1,750"
     );
 
-    let market_cap = json!({"kind": "market_cap", "min": 300_000_000_000.0, "max": null});
-    let refused = [
-        ("시가총액", lines(vec![new_high("D", "high", 5, 1), market_cap], &[]), "2번째 조건: 시가총액 조건은 아직"),
-        ("시장", lines(vec![new_high("D", "high", 5, 1)], &["kospi"]), "시장으로 고르는 조건식은 아직"),
+    let other_kinds = [
+        json!({"kind": "ma_position", "period": "D", "m": 1, "field": "close", "method": "sma", "length": 20, "side": "above"}),
+        json!({"kind": "ma_alignment", "period": "D", "m": 1, "method": "ema", "lengths": [5, 20], "order": "bullish"}),
+        json!({"kind": "ma_cross", "period": "D", "m": 5, "method": "sma", "fast": null, "slow": 20, "direction": "up"}),
+        json!({"kind": "rsi", "period": "D", "m": 1, "length": 14, "test": {"kind": "range", "min": null, "max": 30.0}}),
+        json!({"kind": "macd", "period": "W", "m": 1, "fast": 12, "slow": 26, "signal": 9, "test": {"kind": "signal_cross", "direction": "up"}}),
+        json!({"kind": "stochastic", "period": "D", "m": 1, "k": 5, "d": 3, "smooth": 3, "test": {"kind": "cross", "direction": "down"}}),
+        json!({"kind": "bollinger", "period": "M", "m": 1, "length": 20, "k": 2.0, "test": {"kind": "outside", "side": "above"}}),
+        json!({"kind": "ichimoku", "period": "D", "m": 1, "conversion": 9, "base": 26, "spanB": 52, "displacement": 26, "test": {"kind": "cloud", "side": "above"}}),
+        market_cap(Some(300_000_000_000.0), None),
     ];
-    for (case, screen, why) in refused {
+    let screens = other_kinds
+        .into_iter()
+        .map(|line| (line["kind"].to_string(), lines(vec![new_high("D", "high", 5, 1), line], &[])))
+        .chain([("시장".to_owned(), lines(vec![new_high("D", "high", 5, 1)], &["kospi"]))]);
+    for (case, screen) in screens {
         let (status, body) = api.run(&screen).await;
-        assert_eq!((status, body["error"]["code"].clone()), (400, json!("bad_request")), "{case}: {body}");
-        assert!(body["error"]["message"].as_str().unwrap().contains(why), "{case}: 무엇이 아직 안 되는지 알린다: {body}");
+        assert_eq!(status, 200, "{case}: 실행을 막는 조건 종류나 시장이 없다: {body}");
     }
     let bad_rsi = json!({"kind": "rsi", "period": "D", "m": 1, "length": 14, "test": {"kind": "range", "min": 70.0, "max": 30.0}});
     let (status, body) = api.run(&lines(vec![bad_rsi], &[])).await;
@@ -1451,6 +1469,121 @@ async fn a_candidate_bar_and_the_bar_before_a_cross_need_every_line_of_the_indic
     }
 }
 
+fn with_shares(listed_shares: Option<u64>, stock: KrxStock) -> KrxStock {
+    KrxStock { listed_shares, ..stock }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_market_cap_is_the_last_daily_close_up_to_the_as_of_day_times_the_listed_shares_with_both_bounds_included() {
+    let days = fortnight();
+    let today = days[14];
+    let cap = 12_345.0 * 24_300_001.0;
+    let halted_at_another_price = |i: usize, d: KstDate| if i <= 12 { bar(d, 12_345, 1_000) } else { bar(d, 99_999, 0) };
+    let stocks = vec![
+        with_shares(Some(24_300_001), stock("200010", priced(&days, |_| 12_345))),
+        with_shares(Some(24_300_001), stock("200020", days.iter().enumerate().map(|(i, &d)| halted_at_another_price(i, d)).collect())),
+        with_shares(None, stock("200030", priced(&days, |_| 12_345))),
+        with_shares(Some(0), stock("200040", priced(&days, |_| 12_345))),
+    ];
+    let fake = FakeKiwoom::start().await;
+    fake.set_krx_market(KrxMarket { days: days.clone(), stocks });
+    let dir = tempfile::tempdir().unwrap();
+    let server = boot(&fake, dir.path(), &at(today, "2030"));
+    let api = Api::of(&server).await;
+    api.update().await;
+    api.settled().await;
+
+    let capped = |min: Option<f64>, max: Option<f64>| every(vec![market_cap(min, max)]);
+    let both = vec![hit("200010", today), hit("200020", today)];
+    let cases = [
+        ("하한과 같다", capped(Some(cap), None), both.clone()),
+        ("상한과 같다", capped(None, Some(cap)), both.clone()),
+        ("하한이 1원 크다", capped(Some(cap + 1.0), None), vec![]),
+        ("상한이 1원 작다", capped(None, Some(cap - 1.0)), vec![]),
+        ("하한이 0원", capped(Some(0.0), None), both.clone()),
+    ];
+    for (case, screen, want) in cases {
+        let result = api.result(&screen).await;
+        assert_eq!((result["universe"].clone(), hits(&result)), (json!(4), want), "{case}: 시가총액은 12,345원 × 24,300,001주다. 상장주식수가 없는 200030과 0인 200040은 맞지 않는다");
+    }
+    let exact = api.result(&capped(Some(cap), Some(cap))).await;
+    assert_eq!(price_and_change(&exact, "200020"), (json!(12_345.0), json!(0.0)), "거래량 0인 날은 봉이 아니라서, 시가총액도 결과 행처럼 마지막으로 거래한 날의 종가로 센다");
+    server.stop().await;
+
+    let after_as_of = today.add_days(3);
+    let store = Store::open(&dir.path().join("run/screener.duckdb")).unwrap();
+    let price = Price::from_centi(99_999 * 100).unwrap();
+    let left_by_cancelled_recent = DayBar { day: after_as_of, ohlcv: Ohlcv::try_new(price, price, price, price, Volume(1_000)).unwrap(), traded: MillionWon(99) };
+    store.write(&[Write::Extend { code: StockCode::parse("200010").unwrap(), bars: vec![left_by_cancelled_recent], reached_origin: true }]).unwrap();
+    drop(store);
+    let server = boot(&fake, dir.path(), &at(after_as_of, "2040"));
+    let api = Api::of(&server).await;
+    let result = api.result(&capped(Some(cap), Some(cap))).await;
+    assert_eq!((result["asOf"].clone(), hits(&result)), (json!(today.to_string()), both), "기준 관측일 뒤의 봉은 시가총액에 쓰지 않는다");
+    server.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn markets_keep_only_their_own_stocks_with_kospi_holding_etfs_and_reits_and_leave_the_others_uncounted() {
+    let days = fortnight();
+    let today = days[14];
+    let listed_in = |market_code: &str, stock: KrxStock| KrxStock { market_code: market_code.into(), ..stock };
+    let stocks = vec![
+        listed_in("0", stock("200010", priced(&days, |_| 100))),
+        listed_in("8", stock("200020", priced(&days, |_| 100))),
+        listed_in("6", stock("200030", priced(&days, |_| 100))),
+        listed_in("10", stock("200040", priced(&days, |_| 100))),
+        listed_in("10", stock("200050", priced(&days[12..], |_| 100))),
+        listed_in("10", stock("200060", priced(&days[..9], |_| 100))),
+    ];
+    let session = loaded(KrxMarket { days, stocks }).await;
+    let api = &session.api;
+    let picked = |markets: &[&str], exclude: &[&str]| json!({"id": "S1", "name": "시험 조건식", "markets": markets, "exclude": exclude, "conditions": [new_high("D", "high", 5, 1)]});
+    let counted = |listed_too_short: u32, unconfirmed: u32| json!({"listedTooShort": listed_too_short, "historyShort": 0, "unconfirmed": unconfirmed});
+    let every_market = ["200010", "200020", "200030", "200040"];
+    let cases = [
+        ("시장을 고르지 않음", picked(&[], &[]), 6, counted(1, 1), every_market.to_vec()),
+        ("두 시장을 다 고름", picked(&["kospi", "kosdaq"], &[]), 6, counted(1, 1), every_market.to_vec()),
+        ("코스피만", picked(&["kospi"], &[]), 3, counted(0, 0), vec!["200010", "200020", "200030"]),
+        ("코스닥만", picked(&["kosdaq"], &[]), 3, counted(1, 1), vec!["200040"]),
+        ("코스피에서 ETF를 뺌", picked(&["kospi"], &["etf"]), 2, counted(0, 0), vec!["200010", "200030"]),
+    ];
+    for (case, screen, universe, want_excluded, want) in cases {
+        let result = api.result(&screen).await;
+        let want: Vec<String> = want.into_iter().map(|code| hit(code, today)).collect();
+        assert_eq!(
+            (result["universe"].clone(), result["excluded"].clone(), hits(&result)),
+            (json!(universe), want_excluded, want),
+            "{case}: 고르지 않은 시장의 종목은 대상 종목 수에도 제외 수에도 들지 않는다. 코스닥의 200050은 상장 기간 부족, 200060은 확인 안 됨이다"
+        );
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_market_cap_first_line_leaves_the_matched_date_to_the_next_bar_line_and_to_the_as_of_day_without_one() {
+    let days = fortnight();
+    let (monday, today) = (day(2026, 11, 2), days[14]);
+    let peaked = stock("200010", priced(&days, |i| if i == 11 { 300 } else { 100 }));
+    let upcoming = KrxStock { reg_day: day(2026, 11, 9), bars: vec![], ..stock("200020", priced(&days, |_| 100)) };
+    let session = loaded(KrxMarket { days: days.clone(), stocks: vec![peaked, upcoming] }).await;
+    let api = &session.api;
+    let at_least = |won: f64| market_cap(Some(won), None);
+    let cases = [
+        ("다음 줄이 일봉", every(vec![at_least(1e8), new_high("D", "high", 5, 5)]), vec![hit("200010", days[11])]),
+        ("다음 줄이 주봉", every(vec![at_least(1e8), new_high("W", "high", 2, 1)]), vec![hit("200010", monday)]),
+        ("봉으로 따지는 줄이 없음", every(vec![at_least(1e8)]), vec![hit("200010", today)]),
+        ("시가총액이 1원 모자람", every(vec![at_least(1e8 + 1.0), new_high("D", "high", 5, 5)]), vec![]),
+    ];
+    for (case, screen, want) in cases {
+        let result = api.result(&screen).await;
+        assert_eq!(
+            (result["excluded"].clone(), hits(&result)),
+            (excluded(1, 0), want),
+            "{case}: 200010의 시가총액은 100원 × 1,000,000주다. 기준 관측일 뒤에 상장하는 200020은 봉으로 따지는 줄이 없어도 상장 기간 부족이다"
+        );
+    }
+}
+
 const LARGE_STOCKS: usize = 4_000;
 const LARGE_BARS: usize = 3_000;
 
@@ -1477,7 +1610,18 @@ fn random_walk(seed: u64, days: &[KstDate]) -> Vec<DayBar> {
 fn fill_large_store(path: &Path, days: &[KstDate]) {
     let store = Store::open(path).unwrap();
     let codes: Vec<StockCode> = (0..LARGE_STOCKS).map(|i| StockCode::parse(&format!("{:05}0", 10_000 + i)).unwrap()).collect();
-    let listing: Vec<ScreenerListing> = codes.iter().map(|&code| ScreenerListing { code, name: format!("가상{}", code.as_str()), listed_on: Some(days[0]), excludable_as: vec![] }).collect();
+    let listing: Vec<ScreenerListing> = codes
+        .iter()
+        .enumerate()
+        .map(|(i, &code)| ScreenerListing {
+            code,
+            name: format!("가상{}", code.as_str()),
+            listed_on: Some(days[0]),
+            excludable_as: vec![],
+            market: if i % 2 == 0 { Market::Kospi } else { Market::Kosdaq },
+            listed_shares: NonZeroU64::new(10_000_000 + i as u64),
+        })
+        .collect();
     store.replace_listing(&listing).unwrap();
     store.extend_calendar(days).unwrap();
     for (k, chunk) in codes.chunks(100).enumerate() {
@@ -1520,6 +1664,7 @@ async fn a_screen_over_4000_stocks_with_thousands_of_bars_answers_within_2_secon
             ]),
             bar_lines,
         ),
+        ("시가총액 1,000억 원 이상", every(vec![market_cap(Some(100_000_000_000.0), None)]), bar_lines),
         (
             "지표 여덟 종류와 봉 조건 둘의 일·주·월봉 10줄",
             every(vec![

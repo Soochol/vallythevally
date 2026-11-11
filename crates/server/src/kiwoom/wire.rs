@@ -2,13 +2,14 @@
 
 use std::collections::BTreeSet;
 use std::fmt;
+use std::num::NonZeroU64;
 
 use domain::{Bucket, IndexCode, KstDate, KstTime, Market, Ohlcv, Period, Price, StockCode, Symbol, SymbolInfo, SymbolKind, TimeOfDay, Venue, Volume};
 use serde::Deserialize;
 use serde_json::{Value, json};
 
 use super::api::kiwoom_stock_code;
-use crate::api::ExcludeKind;
+use crate::api::{self, ExcludeKind};
 use super::error::{WsRejection, judge_ws_ack};
 use super::stream::{DayTotals, Exchange, RealTick};
 use crate::config::Secret;
@@ -225,6 +226,7 @@ pub struct ListRow {
     pub nxt_enable: String,
     pub reg_day: String,
     pub audit_info: String,
+    pub list_count: String,
 }
 
 /// ka10099 한 행을 가른 결과(§6.6 표).
@@ -265,6 +267,8 @@ pub struct ScreenerListing {
     pub name: String,
     pub listed_on: Option<KstDate>,
     pub excludable_as: Vec<ExcludeKind>,
+    pub market: api::Market,
+    pub listed_shares: Option<NonZeroU64>,
 }
 
 pub fn screener_listing(row: &ListRow, info: &SymbolInfo) -> Option<ScreenerListing> {
@@ -285,7 +289,25 @@ pub fn screener_listing(row: &ListRow, info: &SymbolInfo) -> Option<ScreenerList
             None
         }
     });
-    Some(ScreenerListing { code, name: info.name.clone(), listed_on: KstDate::parse_yyyymmdd(&row.reg_day), excludable_as: kind.into_iter().chain(states).collect() })
+    Some(ScreenerListing {
+        code,
+        name: info.name.clone(),
+        listed_on: KstDate::parse_yyyymmdd(&row.reg_day),
+        excludable_as: kind.into_iter().chain(states).collect(),
+        market: info.market.into(),
+        listed_shares: listed_shares(row),
+    })
+}
+
+fn listed_shares(row: &ListRow) -> Option<NonZeroU64> {
+    match row.list_count.parse() {
+        Ok(shares) => NonZeroU64::new(shares),
+        Err(_) if row.list_count.is_empty() => None,
+        Err(_) => {
+            tracing::warn!(code = %row.code, list_count = row.list_count, "listCount가 수가 아니어서 상장주식수를 모르는 종목으로 둡니다");
+            None
+        }
+    }
 }
 
 fn audit_state(label: &str) -> Result<Option<ExcludeKind>, ()> {
@@ -990,6 +1012,27 @@ mod tests {
         assert!(matches!(classify(&odd), Listing::Unknown(_)));
         let info: ListRow = serde_json::from_str(&fixture("ka10100_005930")).unwrap();
         assert!(matches!(classify(&info), Listing::Include(SymbolInfo { kind: SymbolKind::Common, .. })));
+    }
+
+    #[test]
+    fn a_screener_listing_takes_the_market_of_the_list_and_reads_the_zero_padded_list_count_as_listed_shares() {
+        let rows = |name: &str| serde_json::from_str::<StockListResponse>(&fixture(name)).unwrap().list;
+        let (kospi, kosdaq) = (rows("ka10099_0"), rows("ka10099_10"));
+        let listing = |row: &ListRow| match classify(row) {
+            Listing::Include(info) => screener_listing(row, &info).unwrap(),
+            other => panic!("{other:?}"),
+        };
+        let of = |rows: &[ListRow], code: &str| {
+            let l = listing(rows.iter().find(|r| r.code == code).unwrap());
+            (l.market, l.listed_shares.map(NonZeroU64::get))
+        };
+        assert_eq!(of(&kospi, "000020"), (api::Market::Kospi, Some(27_931_470)));
+        assert_eq!(of(&kospi, "0000D0"), (api::Market::Kospi, Some(6_350_000)), "ETF는 코스피다");
+        assert_eq!(of(&kosdaq, "03481K"), (api::Market::Kosdaq, Some(1_377_453)));
+
+        let dongwha = kospi.iter().find(|r| r.code == "000020").unwrap();
+        let shares = |list_count: &str| listing(&ListRow { list_count: list_count.into(), ..dongwha.clone() }).listed_shares;
+        assert_eq!([shares(""), shares("0000000000000000"), shares("27,931,470"), shares("-1")], [None; 4], "없거나 0이거나 수가 아니면 상장주식수를 모른다");
     }
 
     #[test]

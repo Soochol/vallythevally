@@ -1,24 +1,29 @@
 use std::collections::HashSet;
 use std::fmt;
+use std::num::NonZeroU64;
 use std::path::Path;
 use std::sync::{Mutex, MutexGuard};
 
 use domain::{KstDate, Ohlcv, Price, StockCode, Volume};
 use duckdb::types::Value;
-use duckdb::{Config, Connection, OptionalExt, params};
+use duckdb::{Config, Connection, OptionalExt, Transaction, params};
 
-use crate::api::ExcludeKind;
+use crate::api::{ExcludeKind, Market};
 use crate::kiwoom::wire::{MillionWon, ScreenerListing};
 
-const SCHEMA_VERSION: i32 = 4;
+const SCHEMA_VERSION: i32 = 5;
+const BEFORE_LISTED_MARKET_AND_SHARES: i32 = 4;
+
+const LISTED: &str = "CREATE TABLE listed (code VARCHAR NOT NULL, name VARCHAR NOT NULL, listed_on DATE, excludable_as USMALLINT NOT NULL, market VARCHAR NOT NULL, listed_shares UBIGINT);";
 
 const SCHEMA: &str = "
 CREATE TABLE store_meta (schema_version INTEGER NOT NULL, last_day DATE, full_refetch BOOLEAN NOT NULL);
-CREATE TABLE listed (code VARCHAR NOT NULL, name VARCHAR NOT NULL, listed_on DATE, excludable_as USMALLINT NOT NULL);
 CREATE TABLE history (code VARCHAR PRIMARY KEY, complete BOOLEAN NOT NULL, refetch BOOLEAN NOT NULL);
 CREATE TABLE daily (code VARCHAR NOT NULL, day DATE NOT NULL, open UBIGINT NOT NULL, high UBIGINT NOT NULL, low UBIGINT NOT NULL, close UBIGINT NOT NULL, volume UBIGINT NOT NULL, traded_million_won UBIGINT NOT NULL);
 CREATE TABLE calendar (day DATE PRIMARY KEY);
 ";
+
+pub(super) const LISTING_LOST: &str = "NOT EXISTS (SELECT 1 FROM listed) AND EXISTS (SELECT 1 FROM daily)";
 
 const UNCONFIRMED_ON: &str = "SELECT code FROM listed WHERE NOT coalesce(listed_on > $1, false) AND code NOT IN (SELECT code FROM daily WHERE day = $1)";
 
@@ -59,6 +64,14 @@ pub struct Summary {
     pub listed: u32,
     pub complete: u32,
     pub unconfirmed: u32,
+    pub listing_lost: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Listed {
+    Present,
+    Filled,
+    Lost,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -97,6 +110,10 @@ impl Store {
         let conn = connect(path)?;
         let conn = match stored_version(&conn)? {
             Some(SCHEMA_VERSION) => conn,
+            Some(BEFORE_LISTED_MARKET_AND_SHARES) => {
+                tracing::info!(path = %path.display(), from = BEFORE_LISTED_MARKET_AND_SHARES, to = SCHEMA_VERSION, "스크리너 저장소를 올립니다. 종목 목록 표만 다시 만들고 일봉·이력 상태·관측일 달력·저장소 상태는 그대로 둡니다");
+                rebuild_listed(conn)?
+            }
             Some(other) => {
                 tracing::warn!(path = %path.display(), stored = other, expected = SCHEMA_VERSION, "스크리너 저장소의 스키마 버전이 달라 지우고 빈 저장소로 시작합니다");
                 drop(conn);
@@ -134,24 +151,37 @@ impl Store {
             params![last_day.map_or(Value::Null, date_value)],
             |row| Ok((row.get::<_, u32>(0)?, row.get::<_, u32>(1)?, row.get::<_, u32>(2)?)),
         )?;
-        Ok(Summary { last_day, listed, complete, unconfirmed })
+        let listing_lost = conn.query_row(&format!("SELECT {LISTING_LOST}"), [], |row| row.get(0))?;
+        Ok(Summary { last_day, listed, complete, unconfirmed, listing_lost })
     }
 
     pub fn replace_listing(&self, listing: &[ScreenerListing]) -> Result<(), StoreError> {
         let mut conn = self.conn();
         let tx = conn.transaction()?;
         tx.execute("DELETE FROM listed", [])?;
-        {
-            let mut seen = std::collections::HashSet::new();
-            let mut appender = tx.appender("listed")?;
-            for stock in listing.iter().filter(|s| seen.insert(s.code)) {
-                let listed_on = stock.listed_on.map_or(Value::Null, date_value);
-                appender.append_row(params![stock.code.as_str(), stock.name, listed_on, exclusion_mask(&stock.excludable_as)])?;
-            }
-            appender.flush()?;
-        }
+        append_listing(&tx, listing)?;
         tx.commit()?;
         Ok(())
+    }
+
+    pub fn listing_lost(&self) -> Result<bool, StoreError> {
+        Ok(self.conn().query_row(&format!("SELECT {LISTING_LOST}"), [], |row| row.get(0))?)
+    }
+
+    pub fn fill_lost_listing(&self, listing: &[ScreenerListing]) -> Result<Listed, StoreError> {
+        let mut conn = self.conn();
+        let tx = conn.transaction()?;
+        let lost: bool = tx.query_row(&format!("SELECT {LISTING_LOST}"), [], |row| row.get(0))?;
+        let listed = match (lost, listing.is_empty()) {
+            (false, _) => Listed::Present,
+            (true, true) => Listed::Lost,
+            (true, false) => {
+                append_listing(&tx, listing)?;
+                Listed::Filled
+            }
+        };
+        tx.commit()?;
+        Ok(listed)
     }
 
     pub fn tails(&self) -> Result<Vec<Tail>, StoreError> {
@@ -298,9 +328,46 @@ fn stored_version(conn: &Connection) -> Result<Option<i32>, StoreError> {
 fn create(mut conn: Connection) -> Result<Connection, StoreError> {
     let tx = conn.transaction()?;
     tx.execute_batch(SCHEMA)?;
+    tx.execute_batch(LISTED)?;
     tx.execute("INSERT INTO store_meta VALUES (?, NULL, false)", params![SCHEMA_VERSION])?;
     tx.commit()?;
     Ok(conn)
+}
+
+fn rebuild_listed(mut conn: Connection) -> Result<Connection, StoreError> {
+    let tx = conn.transaction()?;
+    tx.execute_batch("DROP TABLE listed")?;
+    tx.execute_batch(LISTED)?;
+    tx.execute("UPDATE store_meta SET schema_version = ?", params![SCHEMA_VERSION])?;
+    tx.commit()?;
+    Ok(conn)
+}
+
+fn append_listing(tx: &Transaction, listing: &[ScreenerListing]) -> Result<(), StoreError> {
+    let mut seen = HashSet::new();
+    let mut appender = tx.appender("listed")?;
+    for stock in listing.iter().filter(|s| seen.insert(s.code)) {
+        let listed_on = stock.listed_on.map_or(Value::Null, date_value);
+        let listed_shares = stock.listed_shares.map(NonZeroU64::get);
+        appender.append_row(params![stock.code.as_str(), stock.name, listed_on, exclusion_mask(&stock.excludable_as), market_name(stock.market), listed_shares])?;
+    }
+    appender.flush()?;
+    Ok(())
+}
+
+fn market_name(market: Market) -> &'static str {
+    match market {
+        Market::Kospi => "kospi",
+        Market::Kosdaq => "kosdaq",
+    }
+}
+
+pub(super) fn market_of(name: &str) -> Result<Market, StoreError> {
+    match name {
+        "kospi" => Ok(Market::Kospi),
+        "kosdaq" => Ok(Market::Kosdaq),
+        other => Err(StoreError(format!("저장된 시장이 틀렸습니다: {other:?}"))),
+    }
 }
 
 pub(super) fn date_value(day: KstDate) -> Value {

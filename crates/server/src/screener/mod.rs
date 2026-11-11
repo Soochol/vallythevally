@@ -2,6 +2,7 @@ mod engine;
 mod exact;
 mod indicator;
 mod line;
+mod market_cap;
 pub mod store;
 mod update;
 
@@ -23,7 +24,7 @@ use crate::kiwoom::rest::{KiwoomRest, Priority};
 use crate::symbols::SymbolDirectory;
 use crate::user_routes::{JSON_LIMIT, check_screen, read_json};
 use engine::{RunnableScreen, Snapshot};
-use store::{Store, StoreError};
+use store::{Listed, Store, StoreError};
 
 const CALENDAR_DAYS: usize = 10;
 const CALENDAR_FRESH_SECS: i64 = 5 * 60;
@@ -202,7 +203,15 @@ impl Screener {
     }
 
     pub async fn status(&self) -> Result<ScreenerStatus, StoreError> {
-        let summary = self.with_store(Store::summary).await?;
+        let mut summary = self.with_store(Store::summary).await?;
+        if summary.listing_lost {
+            let current = self.symbols.updates().borrow().clone();
+            if let Some(directory) = current
+                && self.with_store(move |s| s.fill_lost_listing(directory.screener_listing())).await? == Listed::Filled
+            {
+                summary = self.with_store(Store::summary).await?;
+            }
+        }
         let calendar = match self.calendar(CalendarUse::Status).await {
             Ok(c) => Some(c),
             Err(e) => {
@@ -227,19 +236,32 @@ impl Screener {
         })
     }
 
+    async fn refill_listing(&self) -> Result<Listed, BarError> {
+        if !self.with_store(Store::listing_lost).await? {
+            return Ok(Listed::Present);
+        }
+        let directory = self.symbols.ready(&self.rest).await?;
+        Ok(self.with_store(move |s| s.fill_lost_listing(directory.screener_listing())).await?)
+    }
+
     async fn run_screen(self: &Arc<Self>, screen: RunnableScreen) -> Result<ScreenerResult, ApiFailure> {
         let now = self.clock.now();
         let need_day = self.calendar(CalendarUse::Status).await.map_err(|e| Lookup::ScreenerRun.failure(e, now))?.need_day(now);
+        self.refill_listing().await.map_err(|e| Lookup::ScreenerRun.failure(e, now))?;
         let me = self.clone();
-        tokio::task::spawn_blocking(move || me.judge(&screen, need_day)).await.map_err(|e| StoreError(format!("실행 작업이 끝나지 못했습니다: {e}")))?
+        tokio::task::spawn_blocking(move || me.judge(&screen, need_day, now)).await.map_err(|e| StoreError(format!("실행 작업이 끝나지 못했습니다: {e}")))?
     }
 
-    fn judge(&self, screen: &RunnableScreen, need_day: Option<KstDate>) -> Result<ScreenerResult, ApiFailure> {
+    fn judge(&self, screen: &RunnableScreen, need_day: Option<KstDate>, now: KstTime) -> Result<ScreenerResult, ApiFailure> {
         let mut conn = self.store.reader()?;
         let recents_before = self.recents_started_outside_recent()?;
         let snapshot = Snapshot::begin(&mut conn)?;
         if self.recents_started_outside_recent()? != recents_before {
             return Err(updating());
+        }
+        if snapshot.listing_lost {
+            tracing::warn!("스크리너 저장소에 일봉은 있는데 종목 목록이 비어 있어 실행을 막습니다. 비지 않은 종목 목록을 받으면 채웁니다");
+            return Err(Lookup::ScreenerRun.failure(BarError::ListNotReady, now));
         }
         let Some(as_of) = snapshot.last_day.filter(|last| need_day.is_none_or(|need| *last >= need)) else {
             let message = match need_day {
