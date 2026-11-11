@@ -1,28 +1,23 @@
 use std::collections::HashMap;
 
 use domain::{Bucket, KstDate, KstTime, Period, Price, StockCode, TimeOfDay};
+use duckdb::arrow::array::{AsArray, RecordBatch};
+use duckdb::arrow::datatypes::{ArrowPrimitiveType, Int64Type, UInt32Type, UInt64Type};
 use duckdb::{Connection, Transaction, params};
 
+use super::line::{Cell, Kind, Line, Series};
 use super::store::{StoreError, date_of, date_value, exclusion_mask, price_of, stock_code, unconfirmed_on};
-use crate::api::{self, BarField, Condition, ExcludeKind, Screen, ScreenPeriod, ScreenerExcluded, ScreenerResult, ScreenerRow, SymbolCode};
+use crate::api::{self, BarField, Condition, ExcludeKind, Extreme, Screen, ScreenPeriod, ScreenerExcluded, ScreenerResult, ScreenerRow, SurgeField, SymbolCode};
 
-type Cell = i64;
+const PERIODS: [ScreenPeriod; 3] = [ScreenPeriod::Day, ScreenPeriod::Week, ScreenPeriod::Month];
 
-#[derive(Debug, Clone, Copy)]
-struct NewHigh {
-    field: BarField,
-    n: u32,
-    m: u32,
-}
-
-pub(super) struct NewHighScreen {
-    period: Period,
-    conditions: Vec<NewHigh>,
+pub(super) struct RunnableScreen {
+    lines: Vec<Line>,
     exclude: Vec<ExcludeKind>,
 }
 
-impl NewHighScreen {
-    pub(super) fn of(screen: &Screen) -> Result<NewHighScreen, String> {
+impl RunnableScreen {
+    pub(super) fn of(screen: &Screen) -> Result<RunnableScreen, String> {
         if !screen.markets.is_empty() {
             return Err("시장으로 고르는 조건식은 아직 실행할 수 없습니다".to_owned());
         }
@@ -30,25 +25,44 @@ impl NewHighScreen {
             .conditions
             .iter()
             .enumerate()
-            .map(|(line, c)| match *c {
-                Condition::NewHigh { period, m, field, n } => Ok((period, NewHigh { field, n, m })),
-                _ => Err(format!("{}번째 조건: 아직 신고가 조건만 실행할 수 있습니다", line + 1)),
-            })
+            .map(|(k, condition)| line_of(condition).map_err(|why| format!("{}번째 조건: {why}", k + 1)))
             .collect::<Result<Vec<_>, _>>()?;
-        let [(period, _), ..] = lines[..] else {
-            return Err("조건이 없습니다".to_owned());
-        };
-        if lines.iter().any(|(p, _)| *p != period) {
-            return Err("줄마다 봉 주기가 다른 조건식은 아직 실행할 수 없습니다".to_owned());
-        }
-        Ok(NewHighScreen { period: period_of(period), conditions: lines.into_iter().map(|(_, c)| c).collect(), exclude: screen.exclude.clone() })
+        Ok(RunnableScreen { lines, exclude: screen.exclude.clone() })
+    }
+}
+
+fn line_of(condition: &Condition) -> Result<Line, &'static str> {
+    let line = |period, m, kind| Ok(Line { period, m, kind });
+    match *condition {
+        Condition::NewHigh { period, m, field, n } => line(period, m, Kind::NewExtreme { extreme: Extreme::High, field, n }),
+        Condition::NewLow { period, m, field, n } => line(period, m, Kind::NewExtreme { extreme: Extreme::Low, field, n }),
+        Condition::ValueRange { period, m, field, min, max } => line(period, m, Kind::ValueRange { field, min, max }),
+        Condition::Change { period, m, back, min_pct, max_pct } => line(period, m, Kind::Change { back, min_pct, max_pct }),
+        Condition::NearExtreme { period, m, extreme, n, within_pct } => line(period, m, Kind::NearExtreme { extreme, n, within_pct }),
+        Condition::Surge { period, m, field, n, times } => line(period, m, Kind::Surge { field: surged(field), n, times }),
+        Condition::MaPosition { .. }
+        | Condition::MaAlignment { .. }
+        | Condition::MaCross { .. }
+        | Condition::Rsi { .. }
+        | Condition::Macd { .. }
+        | Condition::Stochastic { .. }
+        | Condition::Bollinger { .. }
+        | Condition::Ichimoku { .. } => Err("지표 조건은 아직 실행할 수 없습니다"),
+        Condition::MarketCap { .. } => Err("시가총액 조건은 아직 실행할 수 없습니다"),
+    }
+}
+
+fn surged(field: SurgeField) -> BarField {
+    match field {
+        SurgeField::Volume => BarField::Volume,
+        SurgeField::TradedValue => BarField::TradedValue,
     }
 }
 
 struct Cells {
     buckets: Vec<Bucket>,
     first_observation_days: Vec<KstDate>,
-    of_day: Vec<(KstDate, Cell)>,
+    of_day: Vec<Cell>,
 }
 
 fn midnight(day: KstDate) -> KstTime {
@@ -66,7 +80,7 @@ impl Cells {
                 buckets.push(bucket);
                 first_observation_days.push(day);
             }
-            of_day.push((day, buckets.len() as Cell - 1));
+            of_day.push(buckets.len() as Cell - 1);
         }
         Cells { buckets, first_observation_days, of_day }
     }
@@ -83,12 +97,40 @@ impl Cells {
         self.buckets.first().filter(|first| first.start() <= midnight(day)).map(|_| self.at_or_after(day))
     }
 
+    fn start_of(&self, stock: &Stock) -> Option<Cell> {
+        let first_stored_cell = stock.first_stored_day.map(|d| self.at_or_after(d));
+        let listed = stock.listed_on.and_then(|d| self.of_listing(d));
+        if stock.complete { listed.max(first_stored_cell) } else { listed }
+    }
+
     fn start_day(&self, cell: Cell) -> KstDate {
         self.buckets[cell as usize].start().kst_date()
     }
 
     fn first_observation_day(&self, cell: Cell) -> Option<KstDate> {
         usize::try_from(cell).ok().and_then(|c| self.first_observation_days.get(c)).copied()
+    }
+}
+
+struct Calendars {
+    days: Vec<KstDate>,
+    day: Cells,
+    week: Cells,
+    month: Cells,
+}
+
+impl Calendars {
+    fn new(days: Vec<KstDate>) -> Calendars {
+        let (day, week, month) = (Cells::new(Period::Day, &days), Cells::new(Period::Week, &days), Cells::new(Period::Month, &days));
+        Calendars { days, day, week, month }
+    }
+
+    fn of(&self, period: ScreenPeriod) -> &Cells {
+        match period {
+            ScreenPeriod::Day => &self.day,
+            ScreenPeriod::Week => &self.week,
+            ScreenPeriod::Month => &self.month,
+        }
     }
 }
 
@@ -104,51 +146,31 @@ struct Stock {
 enum Standing {
     ListedTooShort,
     HistoryShort,
-    Judged { start: Option<Cell> },
+    Judged,
 }
 
-struct Reach {
-    as_of: Cell,
-    longest_n: i64,
-    earliest_needed: Cell,
-}
-
-fn first_recent_cell(c: &NewHigh, as_of: Cell) -> Cell {
-    as_of - i64::from(c.m - 1)
-}
-
-fn first_needed_cell(c: &NewHigh, as_of: Cell) -> Cell {
-    first_recent_cell(c, as_of) - i64::from(c.n - 1)
-}
-
-impl Reach {
-    fn of(conditions: &[NewHigh], as_of: Cell) -> Reach {
-        let longest_n = conditions.iter().map(|c| i64::from(c.n)).max().unwrap_or(1);
-        let earliest_needed = conditions.iter().map(|c| first_needed_cell(c, as_of)).min().unwrap_or(as_of);
-        Reach { as_of, longest_n, earliest_needed }
-    }
-
-    fn standing(&self, stock: &Stock, cells: &Cells) -> Standing {
-        let first_stored_cell = stock.first_stored_day.map(|d| cells.at_or_after(d));
-        let listed = stock.listed_on.and_then(|d| cells.of_listing(d));
-        let start = if stock.complete { listed.max(first_stored_cell) } else { listed };
-        if start.is_some_and(|s| self.as_of - s + 1 < self.longest_n) {
+fn standing(lines: &[Line], stock: &Stock, calendars: &Calendars) -> Standing {
+    let mut needed_days = Vec::with_capacity(lines.len());
+    for line in lines {
+        let cells = calendars.of(line.period);
+        let start = cells.start_of(stock);
+        if start.is_some_and(|s| cells.as_of() - s + 1 < line.needed_bars()) {
             return Standing::ListedTooShort;
         }
-        let needed = start.map_or(self.earliest_needed, |s| self.earliest_needed.max(s));
-        let stored_from_needed = stock.first_stored_day.zip(cells.first_observation_day(needed)).is_some_and(|(stored, observed)| stored <= observed);
-        if !stock.complete && !stored_from_needed {
-            return Standing::HistoryShort;
-        }
-        Standing::Judged { start }
+        let needed = line.first_needed_cell(cells.as_of());
+        needed_days.push(cells.first_observation_day(start.map_or(needed, |s| needed.max(s))));
     }
+    let earliest_needed = needed_days.into_iter().collect::<Option<Vec<_>>>().and_then(|days| days.into_iter().min());
+    let stored_from_needed = stock.first_stored_day.zip(earliest_needed).is_some_and(|(stored, needed)| stored <= needed);
+    if !stock.complete && !stored_from_needed {
+        return Standing::HistoryShort;
+    }
+    Standing::Judged
 }
 
-struct Hit {
-    code: StockCode,
-    high_cell: Cell,
+struct DailyClose {
     close: Price,
-    previous_close: Option<Price>,
+    previous: Option<Price>,
 }
 
 pub(super) struct Snapshot<'a> {
@@ -163,11 +185,9 @@ impl<'a> Snapshot<'a> {
         Ok(Snapshot { tx, last_day })
     }
 
-    pub(super) fn screen(&self, screen: &NewHighScreen, as_of: KstDate) -> Result<ScreenerResult, StoreError> {
+    pub(super) fn screen(&self, screen: &RunnableScreen, as_of: KstDate) -> Result<ScreenerResult, StoreError> {
         let tx = &self.tx;
-        let period = screen.period;
-        let cells = Cells::new(period, &observation_days(tx, as_of)?);
-        let reach = Reach::of(&screen.conditions, cells.as_of());
+        let calendars = Calendars::new(observation_days(tx, as_of)?);
         let unwanted = exclusion_mask(&screen.exclude);
         let universe: Vec<Stock> = stocks(tx, as_of)?.into_iter().filter(|s| s.excludable_as & unwanted == 0).collect();
         let unconfirmed = unconfirmed_on(tx, as_of)?;
@@ -178,21 +198,30 @@ impl<'a> Snapshot<'a> {
                 excluded.unconfirmed += 1;
                 continue;
             }
-            match reach.standing(stock, &cells) {
+            match standing(&screen.lines, stock, &calendars) {
                 Standing::ListedTooShort => excluded.listed_too_short += 1,
                 Standing::HistoryShort => excluded.history_short += 1,
-                Standing::Judged { start } => judged.push((stock.code, start)),
+                Standing::Judged => judged.push(stock),
             }
         }
-        let names: HashMap<StockCode, &str> = universe.iter().map(|s| (s.code, s.name.as_str())).collect();
-        let mut rows: Vec<ScreenerRow> = new_highs(tx, &cells, &reach, period, &screen.conditions, &judged)?
+        fill_screen_tables(tx, &calendars, &judged)?;
+        let hits = matched(tx, &calendars, &screen.lines, &judged, as_of)?;
+        let mut closes = daily_closes(tx, hits.iter().map(|(idx, _)| *idx))?;
+        let mut rows: Vec<ScreenerRow> = hits
             .into_iter()
-            .map(|hit| ScreenerRow {
-                symbol: SymbolCode(hit.code.as_str().to_owned()),
-                name: names[&hit.code].to_owned(),
-                close: hit.close.to_f64(),
-                change_rate: hit.previous_close.map(|previous| change_rate(hit.close, previous)),
-                matched_date: api::KstDate(cells.start_day(hit.high_cell)),
+            .filter_map(|(idx, matched_on)| {
+                let stock = judged[idx];
+                let Some(daily) = closes.remove(&idx) else {
+                    tracing::warn!(code = stock.code.as_str(), "맞은 종목의 일봉 종가가 없어 결과에서 뺍니다");
+                    return None;
+                };
+                Some(ScreenerRow {
+                    symbol: SymbolCode(stock.code.as_str().to_owned()),
+                    name: stock.name.clone(),
+                    close: daily.close.to_f64(),
+                    change_rate: daily.previous.map(|previous| change_rate(daily.close, previous)),
+                    matched_date: api::KstDate(matched_on),
+                })
             })
             .collect();
         rows.sort_by(|a, b| b.matched_date.cmp(&a.matched_date).then_with(|| a.symbol.0.cmp(&b.symbol.0)));
@@ -200,12 +229,30 @@ impl<'a> Snapshot<'a> {
     }
 }
 
-fn period_of(period: ScreenPeriod) -> Period {
-    match period {
-        ScreenPeriod::Day => Period::Day,
-        ScreenPeriod::Week => Period::Week,
-        ScreenPeriod::Month => Period::Month,
+fn matched(tx: &Transaction, calendars: &Calendars, lines: &[Line], judged: &[&Stock], as_of: KstDate) -> Result<Vec<(usize, KstDate)>, StoreError> {
+    let mut last_candidates: Vec<Vec<Option<Cell>>> = vec![vec![None; lines.len()]; judged.len()];
+    for period in PERIODS {
+        let of_period: Vec<(usize, &Line)> = lines.iter().enumerate().filter(|(_, line)| line.period == period).collect();
+        if of_period.is_empty() {
+            continue;
+        }
+        let cells = calendars.of(period);
+        let mut columns: Vec<BarField> = of_period.iter().flat_map(|(_, line)| line.kind.columns()).collect();
+        columns.sort_by_key(|field| *field as usize);
+        columns.dedup();
+        let lower = of_period.iter().map(|(_, line)| line.first_loaded_cell(cells.as_of())).min().unwrap_or(0);
+        for_each_series(tx, &bar_query(period, &columns, lower), &columns, |idx, series| {
+            let start = cells.start_of(judged[idx]);
+            for &(k, line) in &of_period {
+                last_candidates[idx][k] = line.last_candidate(series, start, cells.as_of());
+            }
+        })?;
     }
+    let matched_on = |candidates: &[Option<Cell>]| match (lines.first(), candidates.first()) {
+        (Some(line), Some(Some(cell))) => calendars.of(line.period).start_day(*cell),
+        _ => as_of,
+    };
+    Ok(last_candidates.iter().enumerate().filter(|(_, candidates)| candidates.iter().all(Option::is_some)).map(|(idx, candidates)| (idx, matched_on(candidates))).collect())
 }
 
 fn column(field: BarField) -> &'static str {
@@ -217,6 +264,75 @@ fn column(field: BarField) -> &'static str {
         BarField::Volume => "volume",
         BarField::TradedValue => "traded_million_won",
     }
+}
+
+fn cell_column(period: ScreenPeriod) -> &'static str {
+    match period {
+        ScreenPeriod::Day => "day_cell",
+        ScreenPeriod::Week => "week_cell",
+        ScreenPeriod::Month => "month_cell",
+    }
+}
+
+fn aggregate(field: BarField) -> String {
+    let value = column(field);
+    match field {
+        BarField::Open => format!("arg_min(d.{value}, d.day)"),
+        BarField::High => format!("max(d.{value})"),
+        BarField::Low => format!("min(d.{value})"),
+        BarField::Close => format!("arg_max(d.{value}, d.day)"),
+        BarField::Volume | BarField::TradedValue => format!("sum(d.{value})::UBIGINT"),
+    }
+}
+
+fn bar_query(period: ScreenPeriod, columns: &[BarField], lower: Cell) -> String {
+    let cell = format!("c.{}", cell_column(period));
+    let from = format!("FROM daily AS d JOIN screen_cells AS c ON c.day = d.day JOIN screen_stocks AS s ON s.code = d.code WHERE d.volume > 0 AND {cell} >= {lower}");
+    match period {
+        ScreenPeriod::Day => {
+            let values: Vec<String> = columns.iter().map(|&field| format!("d.{}", column(field))).collect();
+            format!("SELECT s.idx, {cell}, {} {from} ORDER BY s.idx, {cell}", values.join(", "))
+        }
+        ScreenPeriod::Week | ScreenPeriod::Month => {
+            let values: Vec<String> = columns.iter().map(|&field| aggregate(field)).collect();
+            format!("SELECT s.idx, {cell}, {} {from} GROUP BY s.idx, {cell} ORDER BY s.idx, {cell}", values.join(", "))
+        }
+    }
+}
+
+fn primitive<T: ArrowPrimitiveType>(batch: &RecordBatch, k: usize) -> Result<&[T::Native], StoreError> {
+    let array = batch.column(k);
+    array.as_primitive_opt::<T>().map(|values| values.values().as_ref()).ok_or_else(|| StoreError(format!("봉 열의 {k}번째 열이 {}입니다", array.data_type())))
+}
+
+fn for_each_series(tx: &Transaction, sql: &str, columns: &[BarField], mut judge: impl FnMut(usize, &Series)) -> Result<(), StoreError> {
+    let mut stmt = tx.prepare(sql)?;
+    let mut series = Series::default();
+    let mut current: Option<u32> = None;
+    for batch in stmt.query_arrow([])? {
+        let stocks = primitive::<UInt32Type>(&batch, 0)?;
+        let cells = primitive::<Int64Type>(&batch, 1)?;
+        let values = columns.iter().enumerate().map(|(k, &field)| Ok((field, primitive::<UInt64Type>(&batch, k + 2)?))).collect::<Result<Vec<_>, StoreError>>()?;
+        let mut from = 0;
+        while from < stocks.len() {
+            let stock = stocks[from];
+            let to = from + stocks[from..].partition_point(|&s| s == stock);
+            if current != Some(stock) {
+                if let Some(done) = current {
+                    judge(done as usize, &series);
+                }
+                series.clear();
+                current = Some(stock);
+            }
+            let run: Vec<(BarField, &[u64])> = values.iter().map(|&(field, column)| (field, &column[from..to])).collect();
+            series.extend(&cells[from..to], &run);
+            from = to;
+        }
+    }
+    if let Some(done) = current {
+        judge(done as usize, &series);
+    }
+    Ok(())
 }
 
 fn change_rate(close: Price, previous: Price) -> f64 {
@@ -249,61 +365,44 @@ fn stocks(tx: &Transaction, as_of: KstDate) -> Result<Vec<Stock>, StoreError> {
     .collect()
 }
 
-fn new_highs(tx: &Transaction, cells: &Cells, reach: &Reach, period: Period, conditions: &[NewHigh], judged: &[(StockCode, Option<Cell>)]) -> Result<Vec<Hit>, StoreError> {
-    tx.execute_batch("CREATE TEMP TABLE screen_cells (day DATE NOT NULL, cell BIGINT NOT NULL); CREATE TEMP TABLE screen_stocks (code VARCHAR NOT NULL, start_cell BIGINT);")?;
+fn fill_screen_tables(tx: &Transaction, calendars: &Calendars, judged: &[&Stock]) -> Result<(), StoreError> {
+    tx.execute_batch(
+        "CREATE TEMP TABLE screen_cells (day DATE NOT NULL, day_cell BIGINT NOT NULL, week_cell BIGINT NOT NULL, month_cell BIGINT NOT NULL);
+         CREATE TEMP TABLE screen_stocks (code VARCHAR NOT NULL, idx UINTEGER NOT NULL);",
+    )?;
+    let mut appender = tx.appender("screen_cells")?;
+    for (k, &day) in calendars.days.iter().enumerate() {
+        appender.append_row(params![date_value(day), calendars.day.of_day[k], calendars.week.of_day[k], calendars.month.of_day[k]])?;
+    }
+    appender.flush()?;
+    let mut appender = tx.appender("screen_stocks")?;
+    for (idx, stock) in judged.iter().enumerate() {
+        appender.append_row(params![stock.code.as_str(), idx as u32])?;
+    }
+    appender.flush()?;
+    Ok(())
+}
+
+fn daily_closes(tx: &Transaction, hits: impl Iterator<Item = usize>) -> Result<HashMap<usize, DailyClose>, StoreError> {
+    tx.execute_batch("CREATE TEMP TABLE screen_hits (idx UINTEGER NOT NULL)")?;
     {
-        let mut appender = tx.appender("screen_cells")?;
-        for &(day, cell) in &cells.of_day {
-            appender.append_row(params![date_value(day), cell])?;
-        }
-        appender.flush()?;
-        let mut appender = tx.appender("screen_stocks")?;
-        for (code, start) in judged {
-            appender.append_row(params![code.as_str(), start])?;
+        let mut appender = tx.appender("screen_hits")?;
+        for idx in hits {
+            appender.append_row(params![idx as u32])?;
         }
         appender.flush()?;
     }
-    let mut stmt = tx.prepare(&new_high_query(period, conditions, reach))?;
-    let rows = stmt.query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?, row.get::<_, u64>(2)?, row.get::<_, Option<u64>>(3)?)))?;
+    let mut stmt = tx.prepare(
+        "WITH traded AS (SELECT s.idx, d.day, d.close FROM daily AS d JOIN screen_cells AS c ON c.day = d.day JOIN screen_stocks AS s ON s.code = d.code
+                         JOIN screen_hits AS h ON h.idx = s.idx WHERE d.volume > 0),
+         latest AS (SELECT idx, max(day) AS day, arg_max(close, day) AS close FROM traded GROUP BY idx),
+         previous AS (SELECT t.idx, arg_max(t.close, t.day) AS close FROM traded AS t JOIN latest AS l ON l.idx = t.idx WHERE t.day < l.day GROUP BY t.idx)
+         SELECT l.idx, l.close, p.close FROM latest AS l LEFT JOIN previous AS p ON p.idx = l.idx",
+    )?;
+    let rows = stmt.query_map([], |row| Ok((row.get::<_, u32>(0)?, row.get::<_, u64>(1)?, row.get::<_, Option<u64>>(2)?)))?;
     rows.map(|row| {
-        let (code, high_cell, close, previous) = row?;
-        Ok(Hit { code: stock_code(&code)?, high_cell, close: price_of(close)?, previous_close: previous.map(price_of).transpose()? })
+        let (idx, close, previous) = row?;
+        Ok((idx as usize, DailyClose { close: price_of(close)?, previous: previous.map(price_of).transpose()? }))
     })
     .collect()
-}
-
-fn new_high_query(period: Period, conditions: &[NewHigh], reach: &Reach) -> String {
-    let lower = reach.earliest_needed.max(0);
-    let from = "FROM daily AS d JOIN screen_cells AS c ON c.day = d.day JOIN screen_stocks AS s ON s.code = d.code";
-    let bars = match period {
-        Period::Day => format!("SELECT d.code, c.cell, s.start_cell, d.open, d.high, d.low, d.close, d.volume, d.traded_million_won {from} WHERE d.volume > 0 AND c.cell >= {lower}"),
-        _ => format!(
-            "SELECT d.code, c.cell, any_value(s.start_cell) AS start_cell, arg_min(d.open, d.day) AS open, max(d.high) AS high, min(d.low) AS low,
-                    arg_max(d.close, d.day) AS close, sum(d.volume) AS volume, sum(d.traded_million_won) AS traded_million_won
-             {from} WHERE d.volume > 0 AND c.cell >= {lower} GROUP BY d.code, c.cell"
-        ),
-    };
-    let hits: Vec<String> = conditions
-        .iter()
-        .enumerate()
-        .map(|(i, c)| {
-            let (value, span, recent) = (column(c.field), i64::from(c.n) - 1, first_recent_cell(c, reach.as_of));
-            format!(
-                "cell >= {recent} AND (start_cell IS NULL OR cell >= start_cell + {span})
-                 AND {value} = max({value}) OVER (PARTITION BY code ORDER BY cell RANGE BETWEEN {span} PRECEDING AND CURRENT ROW) AS hit_{i}"
-            )
-        })
-        .collect();
-    let every_hit: Vec<String> = (0..conditions.len()).map(|i| format!("bool_or(hit_{i})")).collect();
-    format!(
-        "WITH bars AS ({bars}),
-         judged AS (SELECT code, cell, {hits} FROM bars),
-         matched AS (SELECT code, max(cell) FILTER (WHERE hit_0) AS high_cell FROM judged GROUP BY code HAVING {every_hit}),
-         traded AS (SELECT d.code, c.cell, d.day, d.close FROM daily AS d JOIN screen_cells AS c ON c.day = d.day JOIN matched AS m ON m.code = d.code WHERE d.volume > 0),
-         latest AS (SELECT code, max(cell) AS cell, arg_max(close, day) AS close FROM traded GROUP BY code),
-         previous AS (SELECT t.code, arg_max(t.close, t.day) AS close FROM traded AS t JOIN latest AS l ON l.code = t.code WHERE t.cell < l.cell GROUP BY t.code)
-         SELECT m.code, m.high_cell, l.close, p.close FROM matched AS m JOIN latest AS l ON l.code = m.code LEFT JOIN previous AS p ON p.code = m.code",
-        hits = hits.join(", "),
-        every_hit = every_hit.join(" AND "),
-    )
 }

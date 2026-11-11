@@ -1,4 +1,5 @@
 mod engine;
+mod line;
 pub mod store;
 mod update;
 
@@ -19,7 +20,7 @@ use crate::http::{ApiFailure, AppState, Lookup};
 use crate::kiwoom::rest::{KiwoomRest, Priority};
 use crate::symbols::SymbolDirectory;
 use crate::user_routes::{JSON_LIMIT, check_screen, read_json};
-use engine::{NewHighScreen, Snapshot};
+use engine::{RunnableScreen, Snapshot};
 use store::{Store, StoreError};
 
 const CALENDAR_DAYS: usize = 10;
@@ -224,14 +225,14 @@ impl Screener {
         })
     }
 
-    async fn run_screen(self: &Arc<Self>, screen: NewHighScreen) -> Result<ScreenerResult, ApiFailure> {
+    async fn run_screen(self: &Arc<Self>, screen: RunnableScreen) -> Result<ScreenerResult, ApiFailure> {
         let now = self.clock.now();
         let need_day = self.calendar(CalendarUse::Status).await.map_err(|e| Lookup::ScreenerRun.failure(e, now))?.need_day(now);
         let me = self.clone();
         tokio::task::spawn_blocking(move || me.judge(&screen, need_day)).await.map_err(|e| StoreError(format!("실행 작업이 끝나지 못했습니다: {e}")))?
     }
 
-    fn judge(&self, screen: &NewHighScreen, need_day: Option<KstDate>) -> Result<ScreenerResult, ApiFailure> {
+    fn judge(&self, screen: &RunnableScreen, need_day: Option<KstDate>) -> Result<ScreenerResult, ApiFailure> {
         let mut conn = self.store.reader()?;
         let recents_before = self.recents_started_outside_recent()?;
         let snapshot = Snapshot::begin(&mut conn)?;
@@ -304,6 +305,6 @@ async fn status(State(st): State<Arc<AppState>>) -> Result<Json<ScreenerStatus>,
 async fn run_screen(State(st): State<Arc<AppState>>, body: Body) -> Result<Json<ScreenerResult>, ApiFailure> {
     let screen: Screen = read_json(body, JSON_LIMIT, "조건식 본문").await?;
     check_screen(&screen)?;
-    let screen = NewHighScreen::of(&screen).map_err(ApiFailure::bad_request)?;
+    let screen = RunnableScreen::of(&screen).map_err(ApiFailure::bad_request)?;
     Ok(Json(st.screener.run_screen(screen).await?))
 }
