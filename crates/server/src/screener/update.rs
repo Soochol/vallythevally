@@ -133,8 +133,13 @@ impl Screener {
                     skipped += 1;
                 }
                 Some(write) => {
-                    if let Some(last) = write.last_day().filter(|last| *last < target) {
-                        unconfirmed(code, target, &format!("키움 일봉이 {last}에서 끝납니다"));
+                    let short = match write.last_day() {
+                        Some(last) if last >= target => None,
+                        Some(last) => Some(format!("키움 일봉이 {last}에서 끝납니다")),
+                        None => Some("키움 일봉에 저장된 봉 뒤의 새 봉이 없습니다".to_owned()),
+                    };
+                    if let Some(reason) = short {
+                        unconfirmed(code, target, &reason);
                         skipped += 1;
                     }
                     self.with_store(move |s| s.write(&[write])).await?;

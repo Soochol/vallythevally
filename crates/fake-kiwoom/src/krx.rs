@@ -25,6 +25,7 @@ pub struct KrxStock {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DailyAnswer {
     Bars,
+    BarsThrough(KstDate),
     EmptyRow,
     UnknownCode,
 }
@@ -200,7 +201,11 @@ pub fn respond(market: &KrxMarket, api_id: &str, body: &Value, next_key: Option<
         "ka10081" => {
             let stock = market.stock(body["stk_cd"].as_str()?)?;
             Some(match stock.daily {
-                DailyAnswer::Bars => paged(stock.bars.len(), next_key, &stock.code, |range, headers| stock_daily(stock, range, headers)),
+                DailyAnswer::Bars => paged(stock.bars.len(), next_key, &stock.code, |range, headers| stock_daily(&stock.code, &stock.bars, range, headers)),
+                DailyAnswer::BarsThrough(last) => {
+                    let bars: Vec<KrxBar> = stock.bars.iter().filter(|b| b.day <= last).copied().collect();
+                    paged(bars.len(), next_key, &stock.code, |range, headers| stock_daily(&stock.code, &bars, range, headers))
+                }
                 DailyAnswer::EmptyRow => KrxPage::Page { body: empty_daily_row(stock), last: true },
                 DailyAnswer::UnknownCode => KrxPage::Page { body: json!({"return_code": 2, "return_msg": "입력 값 오류입니다[1902:종목 정보가 없습니다]"}), last: true },
             })
@@ -263,9 +268,9 @@ fn chart_row(b: &KrxBar, traded: u64) -> Value {
     })
 }
 
-fn stock_daily(stock: &KrxStock, range: std::ops::Range<usize>, headers: Value) -> Value {
-    let rows: Vec<Value> = newest_first(&stock.bars, range).map(|b| chart_row(b, b.traded_million_won)).collect();
-    json!({"_headers": headers, "return_code": 0, "return_msg": "정상적으로 처리되었습니다", "stk_cd": stock.code, "stk_dt_pole_chart_qry": rows})
+fn stock_daily(code: &str, bars: &[KrxBar], range: std::ops::Range<usize>, headers: Value) -> Value {
+    let rows: Vec<Value> = newest_first(bars, range).map(|b| chart_row(b, b.traded_million_won)).collect();
+    json!({"_headers": headers, "return_code": 0, "return_msg": "정상적으로 처리되었습니다", "stk_cd": code, "stk_dt_pole_chart_qry": rows})
 }
 
 fn monthly(bars: &[KrxBar]) -> Vec<KrxBar> {
