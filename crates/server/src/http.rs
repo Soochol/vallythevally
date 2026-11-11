@@ -44,6 +44,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .merge(crate::user_routes::routes())
         .merge(crate::drawings::routes())
         .merge(crate::screener::routes())
+        .merge(crate::investors::routes())
         .route("/api", any(api_not_found))
         .route("/api/{*rest}", any(api_not_found))
         .method_not_allowed_fallback(method_not_allowed)
@@ -143,6 +144,8 @@ pub(crate) enum Lookup {
     Bars,
     Quotes,
     Fundamentals,
+    ForeignHoldings,
+    InvestorNetShares,
     ScreenerUpdate,
     ScreenerRun,
 }
@@ -154,6 +157,8 @@ impl Lookup {
             Lookup::Bars => "봉",
             Lookup::Quotes => "현재가",
             Lookup::Fundamentals => "종목 기본 정보",
+            Lookup::ForeignHoldings => "외국인 보유",
+            Lookup::InvestorNetShares => "투자자별 순매수",
             Lookup::ScreenerUpdate => "스크리너 업데이트",
             Lookup::ScreenerRun => "스크리너 실행",
         }

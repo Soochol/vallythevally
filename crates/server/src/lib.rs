@@ -11,6 +11,7 @@ pub mod drawings;
 pub mod fundamentals;
 pub mod http;
 pub mod instance;
+pub mod investors;
 pub mod kiwoom;
 pub mod market;
 pub mod quotes;
