@@ -32,6 +32,19 @@ async function choose(group: Locator, name: string) {
   await expect(button).toHaveAttribute("aria-pressed", "true");
 }
 
+function toolbarLayout(page: Page) {
+  return page.getByRole("toolbar", { name: "차트 도구 막대" }).evaluate((bar) => {
+    const wrapped: string[] = [];
+    const walker = document.createTreeWalker(bar, NodeFilter.SHOW_TEXT);
+    for (let text = walker.nextNode(); text; text = walker.nextNode()) {
+      const range = document.createRange();
+      range.selectNodeContents(text);
+      if (text.textContent?.trim() && range.getClientRects().length > 1) wrapped.push(text.textContent.trim());
+    }
+    return { wrapped, pageOverflow: document.documentElement.scrollWidth - window.innerWidth, toolbarOverflow: bar.scrollWidth - bar.clientWidth };
+  });
+}
+
 const layoutSaved = (page: Page, want: { venue: string; period: string }) =>
   page.waitForResponse((r) => {
     if (r.request().method() !== "PUT" || !r.url().includes("/api/layouts/") || !r.ok()) return false;
@@ -64,6 +77,28 @@ test.describe("데스크톱", () => {
     await expect(cell(page)).toHaveAttribute("aria-label", "칸 1: 삼성전자 NXT 15분");
     await expect(periods.getByRole("button", { name: "15분", exact: true })).toHaveAttribute("aria-pressed", "true");
   });
+
+  for (const width of [1024, 1440]) {
+    test(`${width}px 창에서 10분을 골라도 막대 글자가 한 줄이고 페이지가 가로로 넘치지 않으며, 거래소와 다른 도구를 쓴다`, async ({ page }) => {
+      await page.setViewportSize({ width, height: 800 });
+      const requested = recordBarRequests(page);
+      await page.goto("/?symbol=005930");
+      const toolbar = page.getByRole("toolbar", { name: "차트 도구 막대" });
+      await expect(cell(page)).toHaveAttribute("aria-label", "칸 1: 삼성전자 통합 일");
+
+      await choose(toolbar.getByRole("group", { name: "봉 주기" }), "10분");
+      await expectTenMinuteBars(page, requested, "삼성전자 통합 10분", { symbol: "005930", venue: "combined", period: "10m" });
+      expect(await toolbarLayout(page)).toEqual({ wrapped: [], pageOverflow: 0, toolbarOverflow: 0 });
+
+      await choose(toolbar.getByRole("group", { name: "거래소" }), "KRX");
+      await expectTenMinuteBars(page, requested, "삼성전자 KRX 10분", { symbol: "005930", venue: "krx", period: "10m" });
+      await toolbar.getByRole("button", { name: "봉 모양" }).click();
+      await expect(page.getByRole("menu", { name: "봉 모양" })).toBeVisible();
+      await page.keyboard.press("Escape");
+      await expect(toolbar.getByRole("button", { name: "테마 바꾸기" })).toBeInViewport();
+      expect(await toolbarLayout(page)).toEqual({ wrapped: [], pageOverflow: 0, toolbarOverflow: 0 });
+    });
+  }
 
   test("지수도 10분봉으로 그린다", async ({ page }) => {
     const requested = recordBarRequests(page);
