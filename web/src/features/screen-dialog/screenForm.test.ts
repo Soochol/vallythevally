@@ -1,6 +1,19 @@
 import { expect, test } from "vitest";
 import type { Screen } from "../../api/generated/Screen";
-import { addCondition, type ConditionErrors, checkCondition, checkDraft, draftOf, editCondition, excludesIn, removeCondition, type ScreenDraft, toggleExclude, withScreen } from "./screenForm";
+import {
+  addCondition,
+  type ConditionErrors,
+  checkCondition,
+  checkDraft,
+  draftOf,
+  editCondition,
+  excludesIn,
+  NOT_EDITABLE_HERE,
+  removeCondition,
+  type ScreenDraft,
+  toggleExclude,
+  withScreen,
+} from "./screenForm";
 
 const weekly: Screen = {
   id: "s1",
@@ -77,6 +90,24 @@ test("대화상자에서 고른 봉 주기 하나를 모든 줄의 봉 주기로
   const check = checkDraft({ ...draft, period: "M" }, kosdaq.id, [kosdaq]);
   expect(check.ok && check.screen.markets).toEqual(["kosdaq"]);
   expect(check.ok && check.screen.conditions.map((c) => c.kind !== "market_cap" && c.period)).toEqual(["M", "M"]);
+});
+
+test("이 화면이 그대로 나타내지 못하는 조건식은 이름만 바꿔도 이유를 달고 저장을 막지만, 다른 조건식과 새 조건식은 막지 않는다", () => {
+  const withMarketCap: Screen = { ...weekly, id: "cap", conditions: [weekly.conditions[0]!, { kind: "market_cap", min: 300_000_000_000, max: null }] };
+  const mixedPeriods: Screen = { ...weekly, id: "mixed", conditions: [weekly.conditions[0]!, { kind: "new_high", period: "D", m: 1, field: "close", n: 20 }] };
+  const saved = [weekly, withMarketCap, mixedPeriods];
+  for (const screen of [withMarketCap, mixedPeriods]) {
+    expect(checkDraft(draftOf(screen), screen.id, saved)).toEqual({ ok: false, errors: { name: null, list: NOT_EDITABLE_HERE } });
+    expect(checkDraft({ ...draftOf(screen), name: "이름만 바꿈" }, screen.id, saved)).toEqual({ ok: false, errors: { name: null, list: NOT_EDITABLE_HERE } });
+  }
+  expect(checkDraft(draftOf(weekly), weekly.id, saved)).toEqual({ ok: true, screen: weekly });
+  expect(checkDraft({ ...draftOf(null), name: "새 조건식" }, "new", saved).ok).toBe(true);
+});
+
+test("거래대금 신고가 줄은 값을 거래대금으로 읽고 그대로 다시 저장한다", () => {
+  const traded: Screen = { ...weekly, conditions: [{ kind: "new_high", period: "W", m: 1, field: "traded_value", n: 52 }] };
+  expect(draftOf(traded).conditions.map((c) => c.field)).toEqual(["traded_value"]);
+  expect(checkDraft(draftOf(traded), traded.id, [traded])).toEqual({ ok: true, screen: traded });
 });
 
 test("저장한 조건식을 고치지 않고 다시 저장하면 같은 조건식이다", () => {

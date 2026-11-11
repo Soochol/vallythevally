@@ -5,7 +5,7 @@ import type { Screen } from "../../api/generated/Screen";
 import type { Screens } from "../../api/generated/Screens";
 import type { ScreenPeriod } from "../../api/generated/ScreenPeriod";
 import { saveScreens, useScreens } from "../../api/screener";
-import { conditionSentence, EXCLUDE_LABEL, FIELD_LABEL, PERIOD_NAME, UNIT } from "../../lib/screener";
+import { conditionSentence, EXCLUDE_LABEL, FIELD_LABEL, NEW_HIGH_NAME, PERIOD_NAME, UNIT } from "../../lib/screener";
 import { useScreenerStore } from "../../stores/screener";
 import { useSelectionStore } from "../../stores/selection";
 import { DialogFrame, Errors, Row, Segment } from "../dialog/DialogParts";
@@ -27,7 +27,7 @@ import {
 } from "./screenForm";
 
 const PERIODS = (["D", "W", "M"] as const satisfies readonly ScreenPeriod[]).map((p) => [p, PERIOD_NAME[p]] as const);
-const FIELDS = ["open", "high", "low", "close", "volume"] as const satisfies readonly BarField[];
+const FIELDS = Object.keys(FIELD_LABEL) as BarField[];
 const EXCLUDE_ROWS: readonly { group: ExcludeGroup; label: string }[] = [
   { group: "kind", label: "종류 제외" },
   { group: "status", label: "상태 제외" },
@@ -274,7 +274,7 @@ function ConditionLine({ ids, index, condition, period, removable, onChange, onR
         </select>
         {count("n", "신고가 기간")}
         <span>
-          {unit} {condition.field === "volume" ? "신고거래량" : "신고가"},
+          {unit} {NEW_HIGH_NAME[condition.field]},
         </span>
         <span>최근</span>
         {count("m", "최근 봉 수")}

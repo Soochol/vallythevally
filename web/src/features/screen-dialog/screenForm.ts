@@ -116,9 +116,22 @@ export function checkCondition({ field, n: nText, m: mText }: ConditionDraft, pe
   return { ok: false, errors: { n: n.ok ? null : n.error, m: mError } };
 }
 
+export const NOT_EDITABLE_HERE = "이 조건식에는 아직 이 화면에서 고칠 수 없는 조건(신고가가 아닌 조건이나 줄마다 다른 봉 주기)이 있어 저장할 수 없습니다. 삭제는 할 수 있습니다.";
+
+const editableHere = (screen: Screen): boolean => {
+  const period = screenPeriod(screen);
+  return screen.conditions.every((c) => c.kind === "new_high" && c.period === period);
+};
+
+function listProblem(id: string, saved: readonly Screen[]): string | null {
+  const stored = saved.find((s) => s.id === id);
+  if (stored) return editableHere(stored) ? null : NOT_EDITABLE_HERE;
+  return saved.length >= MAX_SCREENS ? `조건식은 ${MAX_SCREENS}개까지 저장할 수 있습니다. 하나를 지운 뒤 만드세요.` : null;
+}
+
 export function checkDraft(draft: ScreenDraft, id: string, saved: readonly Screen[]): DraftCheck {
   const name = checkName(draft.name);
-  const list = !saved.some((s) => s.id === id) && saved.length >= MAX_SCREENS ? `조건식은 ${MAX_SCREENS}개까지 저장할 수 있습니다. 하나를 지운 뒤 만드세요.` : null;
+  const list = listProblem(id, saved);
   const conditions = draft.conditions.flatMap((c) => {
     const row = checkCondition(c, draft.period);
     return row.ok ? [row.condition] : [];

@@ -16,7 +16,7 @@ export const PERIOD_NAME: Record<ScreenPeriod, string> = { D: "일봉", W: "주�
 export const UNIT: Record<ScreenPeriod, string> = { D: "일", W: "주", M: "개월" };
 const CURRENT_BAR: Record<ScreenPeriod, string> = { D: "당일", W: "이번 주", M: "이번 달" };
 export const FIELD_LABEL: Record<BarField, string> = { open: "시가", high: "고가", low: "저가", close: "종가", volume: "거래량", traded_value: "거래대금" };
-const NEW_HIGH_NAME: Record<BarField, string> = { open: "신고가", high: "신고가", low: "신고가", close: "신고가", volume: "신고거래량", traded_value: "신고거래대금" };
+export const NEW_HIGH_NAME: Record<BarField, string> = { open: "신고가", high: "신고가", low: "신고가", close: "신고가", volume: "신고거래량", traded_value: "신고거래대금" };
 
 export type NewHighCondition = Extract<Condition, { kind: "new_high" }>;
 
