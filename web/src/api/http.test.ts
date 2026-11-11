@@ -1,10 +1,13 @@
 import { afterEach, expect, test, vi } from "vitest";
 import { useKiwoomStore } from "../stores/kiwoom";
+import { serverNow, useServerClock } from "../stores/serverClock";
 import { ApiRequestError, getJson } from "./http";
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.useRealTimers();
   useKiwoomStore.setState({ stopped: null, notice: null });
+  useServerClock.setState({ serverTimeOrigin: null });
 });
 
 const reply = (status: number, body: unknown) =>
@@ -38,4 +41,62 @@ test("오류 본문의 사유, 다시 보낼 시각, 사람 조치 여부를 그
   reply(503, { error: { code: "kiwoom_unavailable", message: "m", reason: "rate_limited", retryAt: 1_794_182_430, manualActionRequired: false } });
   const e = await getJson("/api/quotes?symbols=005930").catch((x: unknown) => x);
   expect(e).toMatchObject({ code: "kiwoom_unavailable", reason: "rate_limited", retryAt: 1_794_182_430, manualActionRequired: false });
+});
+
+const sentAt = Date.parse("2026-11-11T10:42:00+09:00");
+const serverNowSeen = () => serverNow(useServerClock.getState().serverTimeOrigin);
+const dated = (date: number, status = 200, body: unknown = {}) =>
+  vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify(body), { status, headers: { Date: new Date(date).toUTCString() } })));
+
+test("응답의 Date 헤더로 브라우저 시계가 앞서든 뒤처지든 서버의 지금을 안다", async () => {
+  vi.useFakeTimers({ toFake: ["Date", "performance"] });
+  for (const browserAheadMs of [60_000, -60_000]) {
+    useServerClock.setState({ serverTimeOrigin: null });
+    vi.setSystemTime(sentAt + browserAheadMs);
+    dated(sentAt);
+    await getJson("/api/screener/status");
+    expect(serverNowSeen()).toBe(sentAt);
+  }
+  useServerClock.setState({ serverTimeOrigin: null });
+  dated(sentAt, 503, { error: { code: "kiwoom_unavailable", message: "m", reason: "rate_limited", retryAt: 1, manualActionRequired: false } });
+  await expect(getJson("/api/screener/status")).rejects.toBeInstanceOf(ApiRequestError);
+  expect(serverNowSeen()).toBe(sentAt);
+});
+
+test("늦게 온 옛 응답은 서버의 지금을 뒤로 돌리지 않고, 서버의 지금은 흐른 시간만큼 나아간다", async () => {
+  vi.useFakeTimers({ toFake: ["Date", "performance"] });
+  dated(sentAt);
+  await getJson("/api/screener/status");
+  vi.advanceTimersByTime(30_000);
+  dated(sentAt - 20_000);
+  await getJson("/api/bars");
+  expect(serverNowSeen()).toBe(sentAt + 30_000);
+  dated(sentAt + 31_000);
+  await getJson("/api/symbols?q=a");
+  expect(serverNowSeen()).toBe(sentAt + 31_000);
+});
+
+test("브라우저 벽시계를 바꿔도 서버의 지금은 그대로 흐른다", async () => {
+  vi.useFakeTimers({ toFake: ["Date", "performance"] });
+  vi.setSystemTime(sentAt);
+  dated(sentAt);
+  await getJson("/api/screener/status");
+  vi.setSystemTime(sentAt - 3_600_000);
+  vi.advanceTimersByTime(1_000);
+  expect(serverNowSeen()).toBe(sentAt + 1_000);
+  vi.setSystemTime(sentAt + 3_600_000);
+  expect(serverNowSeen()).toBe(sentAt + 1_000);
+});
+
+test("Date 헤더가 없는 응답은 서버의 지금을 바꾸지 않고, 표본이 하나도 없으면 브라우저 시계를 쓴다", async () => {
+  vi.useFakeTimers({ toFake: ["Date", "performance"] });
+  vi.setSystemTime(sentAt);
+  reply(200, {});
+  await getJson("/api/screener/status");
+  expect(serverNowSeen()).toBe(sentAt);
+  dated(sentAt - 60_000);
+  await getJson("/api/screener/status");
+  reply(200, {});
+  await getJson("/api/screener/status");
+  expect(serverNowSeen()).toBe(sentAt - 60_000);
 });

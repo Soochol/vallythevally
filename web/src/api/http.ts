@@ -1,4 +1,5 @@
 import { useKiwoomStore } from "../stores/kiwoom";
+import { useServerClock } from "../stores/serverClock";
 import type { ApiErrorCode } from "./generated/ApiErrorCode";
 import type { ApiErrorReason } from "./generated/ApiErrorReason";
 import type { UnixSeconds } from "./generated/UnixSeconds";
@@ -139,6 +140,7 @@ async function request(path: string, init: RequestInit): Promise<Response> {
     if (init.signal?.aborted) throw e;
     throw new ApiRequestError("network", "서버에 연결하지 못했습니다");
   }
+  useServerClock.getState().observe(res.headers.get("Date"), performance.now());
   const kiwoom = useKiwoomStore.getState();
   if (!res.ok) {
     const error = await parseError(res);
