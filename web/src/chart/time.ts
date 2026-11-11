@@ -21,7 +21,7 @@ function kstParts(t: UnixSeconds) {
   const year = String(d.getUTCFullYear());
   const month = `${year}-${pad(d.getUTCMonth() + 1)}`;
   const day = `${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}`;
-  return { year, month, day, date: `${year}-${day}`, clock: `${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}` };
+  return { year, month, day, date: `${year}-${day}`, clock: `${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}`, second: pad(d.getUTCSeconds()) };
 }
 
 /** 평일 08:00~20:00(KST). 공휴일은 모른다(frontend.md §2.2). */
@@ -49,6 +49,11 @@ export function formatKstMinute(t: UnixSeconds): string {
 /** 한국 시각 `HH:MM`. */
 export function formatKstClock(t: UnixSeconds): string {
   return kstParts(t).clock;
+}
+
+export function formatKstClockSeconds(t: UnixSeconds): string {
+  const { clock, second } = kstParts(t);
+  return `${clock}:${second}`;
 }
 
 /**

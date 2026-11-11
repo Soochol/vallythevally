@@ -16,6 +16,7 @@ import {
   sortRows,
   statusFooter,
   todayConfirmed,
+  updateRetry,
 } from "./screener";
 
 test("조건 문장은 봉 주기의 단위와 M이 1인지에 따라 바뀐다", () => {
@@ -130,6 +131,27 @@ test("위쪽 띠는 업데이트가 돌거나 멈췄을 때와 실행이 막혔�
   expect(showsUpdateBand({ ...ready, update: stopped })).toBe(true);
   expect(showsUpdateBand({ ...ready, lastDay: null })).toBe(true);
   expect(showsUpdateBand({ ...ready, lastDay: "2026-11-06" })).toBe(true);
+});
+
+test("멈춘 업데이트의 다시 시도는 서버가 준 시각의 그 초가 다 지나야 열린다", () => {
+  const kst = (clock: string) => Date.parse(`2026-11-11T${clock}+09:00`);
+  const gated = { ...stopped.error, retryAt: kst("10:42:30") / 1000 };
+  const ready = { kind: "ready", note: "다시 시도하면 남은 것만 받습니다." };
+  expect(updateRetry(gated, kst("10:42:00"))).toEqual({ kind: "waiting", opensAt: kst("10:42:31") / 1000, note: "10:42:31부터 다시 시도할 수 있습니다." });
+  expect(updateRetry(gated, kst("10:42:30.999"))).toMatchObject({ kind: "waiting" });
+  expect(updateRetry(gated, kst("10:42:31"))).toEqual(ready);
+  expect(updateRetry(gated, kst("10:45:00"))).toEqual(ready);
+});
+
+test("서버가 다시 시도할 시각을 주지 않았으면 바로 다시 시도할 수 있다", () => {
+  expect(updateRetry(stopped.error, Date.parse("2026-11-11T10:42:00+09:00"))).toEqual({ kind: "ready", note: "다시 시도하면 남은 것만 받습니다." });
+});
+
+test("운영자가 확인해야 하는 오류는 시각과 상관없이 다시 시도를 내밀지 않는다", () => {
+  const now = Date.parse("2026-11-11T10:42:00+09:00");
+  const operator = { ...stopped.error, manualActionRequired: true };
+  expect(updateRetry(operator, now)).toEqual({ kind: "operator" });
+  expect(updateRetry({ ...operator, retryAt: now / 1000 + 30 }, now)).toEqual({ kind: "operator" });
 });
 
 test("오늘 봉은 오늘 자료를 받을 수 있거나 이미 받았을 때 확정이다", () => {

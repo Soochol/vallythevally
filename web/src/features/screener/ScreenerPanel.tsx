@@ -1,5 +1,6 @@
 import type { UseQueryResult } from "@tanstack/react-query";
 import { type ReactNode, type RefObject, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { ApiErrorBody } from "../../api/generated/ApiErrorBody";
 import type { KstDate } from "../../api/generated/KstDate";
 import type { Screen } from "../../api/generated/Screen";
 import type { ScreenerResult } from "../../api/generated/ScreenerResult";
@@ -34,6 +35,8 @@ import {
   type StatusFooter,
   statusFooter,
   todayConfirmed,
+  type UpdateRetry,
+  updateRetry,
 } from "../../lib/screener";
 import { addSymbols, listNameFrom, MAX_WATCHLISTS } from "../../lib/watchlist";
 import { useCell, useLayoutStore } from "../../stores/layout";
@@ -576,10 +579,23 @@ const progressText = ({ phase, done, total }: ScreenerUpdate) =>
 
 const todayNote = (status: ScreenerStatus) => (todayConfirmed(status) ? "오늘 자료까지 받습니다." : "당일 봉은 20:00 뒤에 받습니다.");
 
+function useUpdateRetry(error: ApiErrorBody | null): UpdateRetry | null {
+  const [now, setNow] = useState(Date.now);
+  const retry = error && updateRetry(error, now);
+  const opensAt = retry?.kind === "waiting" ? retry.opensAt : null;
+  useEffect(() => {
+    if (opensAt === null) return;
+    const id = setTimeout(() => setNow(Date.now()), opensAt * 1000 - Date.now());
+    return () => clearTimeout(id);
+  }, [opensAt, now]);
+  return retry;
+}
+
 function UpdateBand({ status }: { status: ScreenerStatus }) {
   const { start, cancel } = useUpdateCommands();
   const run = (full: boolean) => void start(full).catch(showCommandError);
   const update = status.update;
+  const retry = useUpdateRetry(update?.error ?? null);
   const reference = status.needDay ?? status.lastDay;
   const stored = status.lastDay && reference ? `${dayLabel(status.lastDay, reference)}까지 있습니다.` : "받은 자료가 없습니다.";
   const frame = "flex-none border-b border-line bg-surface px-3 py-2.5";
@@ -619,16 +635,20 @@ function UpdateBand({ status }: { status: ScreenerStatus }) {
     );
   }
 
-  if (update?.error) {
-    const retryable = !update.error.manualActionRequired;
+  if (update?.error && retry) {
     return (
       <section aria-label="업데이트" role="alert" className={frame}>
         <div className="flex items-center gap-2">
           <span className="conn-dot" data-tone="red" />
           <span className="text-s font-[650]">업데이트가 멈췄습니다</span>
           <span className="flex-1" />
-          {retryable && (
-            <button type="button" className="btn-primary h-7 flex-none px-3 text-s" onClick={() => run(update.full)}>
+          {retry.kind !== "operator" && (
+            <button
+              type="button"
+              className="btn-primary h-7 flex-none px-3 text-s disabled:cursor-not-allowed disabled:opacity-40"
+              disabled={retry.kind === "waiting"}
+              onClick={() => run(update.full)}
+            >
               다시 시도
             </button>
           )}
@@ -638,7 +658,7 @@ function UpdateBand({ status }: { status: ScreenerStatus }) {
         </p>
         <p className="mt-0.5 text-xs leading-[1.45] text-text-2">
           {stored}
-          {retryable && " 다시 시도하면 남은 것만 받습니다."}
+          {retry.kind !== "operator" && ` ${retry.note}`}
         </p>
       </section>
     );
