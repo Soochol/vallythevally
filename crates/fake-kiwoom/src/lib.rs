@@ -14,6 +14,7 @@ use domain::{KstDate, Weekday};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
+pub mod investors;
 pub mod krx;
 mod ws;
 pub use krx::{KrxBar, KrxMarket, KrxStock};
@@ -30,6 +31,7 @@ pub struct Seen {
     pub authorizations: Mutex<Vec<String>>,
     pub token_bodies: Mutex<Vec<Value>>,
     pub overrides: Mutex<HashMap<String, (StatusCode, Value)>>,
+    pub key_overrides: Mutex<HashMap<(String, String), (StatusCode, Value)>>,
     pub rejected_tokens: Mutex<Vec<String>>,
     pub delays: Mutex<HashMap<String, Duration>>,
     pub extra_kospi_stocks: AtomicUsize,
@@ -58,6 +60,10 @@ impl Seen {
         self.overrides.lock().unwrap().insert(api_id.to_owned(), (status, body));
     }
 
+    pub fn respond_with_for_key(&self, api_id: &str, next_key: &str, status: StatusCode, body: Value) {
+        self.key_overrides.lock().unwrap().insert((api_id.to_owned(), next_key.to_owned()), (status, body));
+    }
+
     pub fn delay(&self, api_id: &str, by: Duration) {
         self.delays.lock().unwrap().insert(api_id.to_owned(), by);
     }
@@ -73,6 +79,7 @@ impl Seen {
     pub fn reset(&self) {
         self.ws.reset();
         self.overrides.lock().unwrap().clear();
+        self.key_overrides.lock().unwrap().clear();
         self.delays.lock().unwrap().clear();
         self.rejected_tokens.lock().unwrap().clear();
     }
@@ -102,6 +109,7 @@ impl FakeKiwoom {
             .route("/oauth2/token", post(handle))
             .route("/api/dostk/chart", post(handle))
             .route("/api/dostk/stkinfo", post(handle))
+            .route("/api/dostk/frgnistt", post(handle))
             .route("/_fake/respond-with", post(admin_respond_with))
             .route("/_fake/delay", post(admin_delay))
             .route("/_fake/reject-token", post(admin_reject_token))
@@ -162,6 +170,10 @@ impl FakeKiwoom {
 
     pub fn respond_with(&self, api_id: &str, status: u16, body: Value) {
         self.seen.respond_with(api_id, StatusCode::from_u16(status).expect("HTTP 상태 코드"), body);
+    }
+
+    pub fn respond_with_for_key(&self, api_id: &str, next_key: &str, status: u16, body: Value) {
+        self.seen.respond_with_for_key(api_id, next_key, StatusCode::from_u16(status).expect("HTTP 상태 코드"), body);
     }
 
     pub fn delay(&self, api_id: &str, by: Duration) {
@@ -281,8 +293,10 @@ async fn handle(State(seen): State<Arc<Seen>>, headers: HeaderMap, body: String)
     if let Some(by) = delay {
         tokio::time::sleep(by).await;
     }
-    if let Some((status, body)) = seen.overrides.lock().unwrap().get(&api_id).cloned() {
-        let mut resp = (status, body.to_string()).into_response();
+    let keyed = next_key.clone().and_then(|k| seen.key_overrides.lock().unwrap().get(&(api_id.clone(), k)).cloned());
+    if let Some((status, body)) = keyed.or_else(|| seen.overrides.lock().unwrap().get(&api_id).cloned()) {
+        let mut resp = if body.get("_headers").is_some() { respond(body, false) } else { (status, body.to_string()).into_response() };
+        *resp.status_mut() = status;
         resp.headers_mut().insert("content-type", "application/json;charset=UTF-8".parse().unwrap());
         return resp;
     }
@@ -290,6 +304,9 @@ async fn handle(State(seen): State<Arc<Seen>>, headers: HeaderMap, body: String)
         return respond(json!({"return_code": 3, "return_msg": "인증에 실패했습니다[8005:Token이 유효하지 않습니다]"}), true);
     }
     let market = seen.krx_market.lock().unwrap().clone();
+    if let Some(resp) = market.as_deref().and_then(|m| investors::answer(m, &api_id, &request, next_key.as_deref())) {
+        return resp;
+    }
     if let Some(page) = market.and_then(|m| krx::respond(&m, &api_id, &request, next_key.as_deref())) {
         return match page {
             krx::KrxPage::Page { body, last } => respond(body, last),

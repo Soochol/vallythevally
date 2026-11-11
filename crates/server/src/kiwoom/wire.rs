@@ -514,6 +514,122 @@ fn decimal(s: &str) -> Result<f64, WireError> {
     s.parse::<f64>().ok().filter(|x| x.is_finite()).ok_or_else(|| WireError(format!("소수가 아닙니다: {s:?}")))
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct PageDays<T> {
+    pub rows: Vec<(KstDate, Result<T, FieldError>)>,
+    pub undated: Vec<UnreadableRow>,
+}
+
+impl<T> PageDays<T> {
+    pub fn oldest(&self) -> Option<KstDate> {
+        self.rows.iter().map(|(day, _)| *day).min()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FieldError {
+    pub field: &'static str,
+    pub reason: WireError,
+}
+
+fn field<T>(field: &'static str, kiwoom_field: &str, text: &str, parse: fn(&str) -> Result<T, WireError>) -> Result<T, FieldError> {
+    parse(text).map_err(|e| FieldError { field, reason: WireError(format!("{kiwoom_field}: {e}")) })
+}
+
+pub trait DayPage: PartialEq {
+    type Day;
+    fn days(&self) -> PageDays<Self::Day>;
+}
+
+fn page_days<R, T>(rows: &[R], dt: impl Fn(&R) -> &str, read: impl Fn(KstDate, &R) -> Result<T, FieldError>) -> PageDays<T> {
+    let (mut dated, mut undated) = (Vec::new(), Vec::new());
+    for r in rows {
+        match KstDate::parse_yyyymmdd(dt(r)) {
+            Some(day) => dated.push((day, read(day, r))),
+            None => undated.push(UnreadableRow { dt: dt(r).to_owned(), reason: WireError(format!("dt가 날짜가 아닙니다: {:?}", dt(r))) }),
+        }
+    }
+    PageDays { rows: dated, undated }
+}
+
+fn shares(s: &str) -> Result<u64, WireError> {
+    s.strip_prefix('+').unwrap_or(s).parse().map_err(|_| WireError(format!("주식 수가 아닙니다: {s:?}")))
+}
+
+#[derive(Debug, PartialEq, Deserialize)]
+pub struct StockForeignHoldingsResponse {
+    stk_frgnr: Vec<ForeignHoldingRow>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
+#[serde(default)]
+pub struct ForeignHoldingRow {
+    dt: String,
+    poss_stkcnt: String,
+    wght: String,
+}
+
+impl DayPage for StockForeignHoldingsResponse {
+    type Day = api::ForeignHoldingDay;
+
+    fn days(&self) -> PageDays<api::ForeignHoldingDay> {
+        page_days(&self.stk_frgnr, |r| r.dt.as_str(), |day, r| {
+            Ok(api::ForeignHoldingDay {
+                day: api::KstDate(day),
+                shares: field("shares", "poss_stkcnt", &r.poss_stkcnt, shares)?,
+                weight_pct: field("weightPct", "wght", &r.wght, decimal)?,
+            })
+        })
+    }
+}
+
+#[derive(Debug, PartialEq, Deserialize)]
+pub struct StockInvestorNetSharesResponse {
+    stk_invsr_orgn: Vec<InvestorNetSharesRow>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
+#[serde(default)]
+pub struct InvestorNetSharesRow {
+    dt: String,
+    ind_invsr: String,
+    frgnr_invsr: String,
+    orgn: String,
+    fnnc_invt: String,
+    insrnc: String,
+    invtrt: String,
+    etc_fnnc: String,
+    bank: String,
+    penfnd_etc: String,
+    samo_fund: String,
+    natn: String,
+    etc_corp: String,
+}
+
+impl DayPage for StockInvestorNetSharesResponse {
+    type Day = api::InvestorNetSharesDay;
+
+    fn days(&self) -> PageDays<api::InvestorNetSharesDay> {
+        page_days(&self.stk_invsr_orgn, |r| r.dt.as_str(), |day, r| {
+            Ok(api::InvestorNetSharesDay {
+                day: api::KstDate(day),
+                individual: field("individual", "ind_invsr", &r.ind_invsr, signed)?,
+                foreign: field("foreign", "frgnr_invsr", &r.frgnr_invsr, signed)?,
+                institution: field("institution", "orgn", &r.orgn, signed)?,
+                financial_investment: field("financialInvestment", "fnnc_invt", &r.fnnc_invt, signed)?,
+                insurance: field("insurance", "insrnc", &r.insrnc, signed)?,
+                investment_trust: field("investmentTrust", "invtrt", &r.invtrt, signed)?,
+                other_financial: field("otherFinancial", "etc_fnnc", &r.etc_fnnc, signed)?,
+                bank: field("bank", "bank", &r.bank, signed)?,
+                pension_fund: field("pensionFund", "penfnd_etc", &r.penfnd_etc, signed)?,
+                private_fund: field("privateFund", "samo_fund", &r.samo_fund, signed)?,
+                government: field("government", "natn", &r.natn, signed)?,
+                other_corporation: field("otherCorporation", "etc_corp", &r.etc_corp, signed)?,
+            })
+        })
+    }
+}
+
 /// au10001 응답. 토큰은 받자마자 `Secret`으로 감싼다(호출자 몫).
 #[derive(Deserialize)]
 pub struct TokenResponse {
@@ -962,6 +1078,134 @@ mod tests {
         assert_eq!(parse_krx_daily(serde_json::from_value(body).unwrap()), None, "날짜를 읽을 수 있는 행이 하나도 없으면 없는 종목이다");
         let no_rows: DailyChartResponse = serde_json::from_value(json!({"stk_dt_pole_chart_qry": []})).unwrap();
         assert_eq!(parse_krx_daily(no_rows), Some(KrxDaily { rows: vec![], unreadable: vec![] }), "행이 없는 페이지는 빈 페이지다");
+    }
+
+    fn spec_foreign_rows() -> serde_json::Value {
+        json!({"stk_frgnr": [
+            {"dt": "20241105", "close_pric": "135300", "pred_pre": "0", "trde_qty": "0", "chg_qty": "0", "poss_stkcnt": "6663509", "wght": "+26.10", "gain_pos_stkcnt": "18863197", "frgnr_limit": "25526706", "frgnr_limit_irds": "0", "limit_exh_rt": "+26.10"},
+            {"dt": "20241101", "close_pric": "65100", "pred_pre": "0", "trde_qty": "0", "chg_qty": "-3441", "poss_stkcnt": "6642402", "wght": "+26.02", "gain_pos_stkcnt": "18884304", "frgnr_limit": "25526706", "frgnr_limit_irds": "0", "limit_exh_rt": "+26.02"},
+            {"dt": "20241029", "close_pric": "-65000", "pred_pre": "-27300", "trde_qty": "4", "chg_qty": "249", "poss_stkcnt": "6651461", "wght": "+26.06", "gain_pos_stkcnt": "18875245", "frgnr_limit": "25526706", "frgnr_limit_irds": "0", "limit_exh_rt": "+26.06"}
+        ], "return_code": 0, "return_msg": "정상적으로 처리되었습니다"})
+    }
+
+    fn foreign_days(body: serde_json::Value) -> PageDays<api::ForeignHoldingDay> {
+        serde_json::from_value::<StockForeignHoldingsResponse>(body).unwrap().days()
+    }
+
+    #[test]
+    fn foreign_holdings_read_shares_and_weight_of_each_day_in_kiwooms_order() {
+        let days = foreign_days(spec_foreign_rows());
+        let day = |s: &str| api::KstDate(KstDate::parse_yyyymmdd(s).unwrap());
+        assert_eq!(
+            days.rows.iter().map(|(_, d)| d.clone().unwrap()).collect::<Vec<_>>(),
+            [
+                api::ForeignHoldingDay { day: day("20241105"), shares: 6_663_509, weight_pct: 26.10 },
+                api::ForeignHoldingDay { day: day("20241101"), shares: 6_642_402, weight_pct: 26.02 },
+                api::ForeignHoldingDay { day: day("20241029"), shares: 6_651_461, weight_pct: 26.06 },
+            ]
+        );
+        assert!(days.rows.iter().all(|(d, row)| row.as_ref().is_ok_and(|row| *d == row.day.0)));
+        assert_eq!((days.oldest(), days.undated.len()), (Some(KstDate::new(2024, 10, 29).unwrap()), 0));
+    }
+
+    #[test]
+    fn a_day_page_leaves_out_only_the_rows_it_cannot_read_and_still_knows_how_far_back_it_went() {
+        let mut body = spec_foreign_rows();
+        body["stk_frgnr"][0]["poss_stkcnt"] = "".into();
+        body["stk_frgnr"][1]["dt"] = "2024-11".into();
+        body["stk_frgnr"][2]["wght"] = "N/A".into();
+        let days = foreign_days(body);
+        let failed: Vec<_> = days.rows.iter().map(|(d, row)| (d.yyyymmdd(), row.as_ref().err().map(|e| e.field))).collect();
+        assert_eq!(failed, [("20241105".to_owned(), Some("shares")), ("20241029".to_owned(), Some("weightPct"))], "날짜를 읽은 행은 어느 필드 때문에 못 읽었는지 남긴다");
+        assert!(days.rows[0].1.as_ref().unwrap_err().reason.0.starts_with("poss_stkcnt: "), "{:?}", days.rows[0]);
+        assert_eq!(days.undated.iter().map(|u| u.dt.as_str()).collect::<Vec<_>>(), ["2024-11"]);
+        assert_eq!(days.oldest(), Some(KstDate::new(2024, 10, 29).unwrap()), "값을 못 읽은 행도 날짜는 연속조회가 얼마나 거슬러 갔는지 알려 준다");
+
+        let mut negative = spec_foreign_rows();
+        negative["stk_frgnr"][0]["poss_stkcnt"] = "-5".into();
+        assert!(foreign_days(negative).rows[0].1.is_err(), "보유주식수는 음수가 될 수 없다");
+    }
+
+    #[test]
+    fn an_undated_page_preserves_its_failures_while_an_empty_page_has_no_rows() {
+        let undated = foreign_days(json!({"stk_frgnr": [{"dt": ""}, {"dt": "2026110X"}]}));
+        assert_eq!(undated.oldest(), None);
+        assert!(undated.rows.is_empty());
+        assert_eq!(undated.undated.iter().map(|row| row.dt.as_str()).collect::<Vec<_>>(), ["", "2026110X"]);
+        assert!(undated.undated.iter().all(|row| row.reason.0.contains("dt")));
+        let empty = foreign_days(json!({"stk_frgnr": []}));
+        assert_eq!(empty.oldest(), None);
+        assert!(empty.rows.is_empty() && empty.undated.is_empty());
+        assert!(serde_json::from_value::<StockForeignHoldingsResponse>(json!({"return_code": 0, "return_msg": "정상적으로 처리되었습니다"})).is_err(), "목록이 없는 성공 응답은 빈 답이 아니라 형식 오류다");
+        assert!(serde_json::from_value::<StockInvestorNetSharesResponse>(json!({"return_code": 0, "return_msg": "정상적으로 처리되었습니다"})).is_err());
+    }
+
+    #[test]
+    fn investor_net_shares_map_each_kiwoom_investor_field_and_keep_signs() {
+        let body = json!({"stk_invsr_orgn": [
+            {"dt": "20241107", "cur_prc": "+61300", "pre_sig": "2", "pred_pre": "+4000", "flu_rt": "+698", "acc_trde_qty": "1105968", "acc_trde_prica": "64215",
+             "ind_invsr": "1584", "frgnr_invsr": "-61779", "orgn": "+60195", "fnnc_invt": "25514", "insrnc": "-3", "invtrt": "7", "etc_fnnc": "34619", "bank": "4",
+             "penfnd_etc": "-1", "samo_fund": "58", "natn": "11", "etc_corp": "-12", "natfor": "1"},
+            {"dt": "20241106", "ind_invsr": "x", "frgnr_invsr": "0", "orgn": "0", "fnnc_invt": "0", "insrnc": "0", "invtrt": "0", "etc_fnnc": "0", "bank": "0",
+             "penfnd_etc": "0", "samo_fund": "0", "natn": "0", "etc_corp": "0"}
+        ], "return_code": 0, "return_msg": "정상적으로 처리되었습니다"});
+        let days = serde_json::from_value::<StockInvestorNetSharesResponse>(body).unwrap().days();
+        let day = api::KstDate(KstDate::new(2024, 11, 7).unwrap());
+        assert_eq!(
+            days.rows.iter().filter_map(|(_, d)| d.clone().ok()).collect::<Vec<_>>(),
+            [api::InvestorNetSharesDay {
+                day,
+                individual: 1584,
+                foreign: -61779,
+                institution: 60195,
+                financial_investment: 25514,
+                insurance: -3,
+                investment_trust: 7,
+                other_financial: 34619,
+                bank: 4,
+                pension_fund: -1,
+                private_fund: 58,
+                government: 11,
+                other_corporation: -12,
+            }]
+        );
+        assert_eq!(days.rows[1].1.as_ref().unwrap_err().field, "individual");
+        assert_eq!((days.rows.len(), days.oldest()), (2, Some(KstDate::new(2024, 11, 6).unwrap())));
+    }
+
+    #[test]
+    fn a_failed_field_names_the_key_the_answer_would_have_carried() {
+        let foreign = spec_foreign_rows()["stk_frgnr"][0].clone();
+        let investor = json!({"dt": "20241107", "ind_invsr": "1", "frgnr_invsr": "2", "orgn": "3", "fnnc_invt": "4", "insrnc": "5", "invtrt": "6", "etc_fnnc": "7", "bank": "8", "penfnd_etc": "9", "samo_fund": "10", "natn": "11", "etc_corp": "12"});
+        let fields = |row: &Value| row.as_object().unwrap().keys().filter(|k| *k != "dt").cloned().collect::<Vec<_>>();
+        let failed_field = |list: &str, row: &Value, blank: &str| -> (&'static str, Value) {
+            let mut broken = row.clone();
+            broken[blank] = "".into();
+            let mut whole = json!({"return_code": 0, "return_msg": "정상적으로 처리되었습니다"});
+            whole[list] = json!([row]);
+            let mut body = whole.clone();
+            body[list] = json!([broken]);
+            if list == "stk_frgnr" {
+                let read = |b: Value| serde_json::from_value::<StockForeignHoldingsResponse>(b).unwrap().days().rows.remove(0).1;
+                (read(body).unwrap_err().field, serde_json::to_value(read(whole).unwrap()).unwrap())
+            } else {
+                let read = |b: Value| serde_json::from_value::<StockInvestorNetSharesResponse>(b).unwrap().days().rows.remove(0).1;
+                (read(body).unwrap_err().field, serde_json::to_value(read(whole).unwrap()).unwrap())
+            }
+        };
+        let mut named = Vec::new();
+        for kiwoom in fields(&foreign).into_iter().filter(|k| ["poss_stkcnt", "wght"].contains(&k.as_str())) {
+            named.push(failed_field("stk_frgnr", &foreign, &kiwoom));
+        }
+        for kiwoom in fields(&investor) {
+            named.push(failed_field("stk_invsr_orgn", &investor, &kiwoom));
+        }
+        assert_eq!(named.len(), 14);
+        for (field, day) in &named {
+            assert!(day.get(*field).is_some(), "{field}는 응답 JSON의 키여야 한다: {day}");
+        }
+        let distinct: BTreeSet<&str> = named.iter().map(|(f, _)| *f).collect();
+        assert_eq!(distinct.len(), 14, "필드마다 다른 이름이다");
     }
 
     fn listing(name: &str) -> Vec<(String, Listing)> {

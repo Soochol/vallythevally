@@ -523,14 +523,101 @@ impl Serialize for KstDate {
     }
 }
 
-impl<'de> Deserialize<'de> for KstDate {
-    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        let text = String::deserialize(d)?;
+impl std::str::FromStr for KstDate {
+    type Err = String;
+
+    fn from_str(text: &str) -> Result<Self, String> {
         domain::KstDate::parse_yyyymmdd(&text.replace('-', ""))
             .filter(|date| date.to_string() == text)
             .map(KstDate)
-            .ok_or_else(|| serde::de::Error::custom(format!("날짜는 YYYY-MM-DD여야 합니다: {text}")))
+            .ok_or_else(|| format!("날짜는 YYYY-MM-DD여야 합니다: {text}"))
     }
+}
+
+impl<'de> Deserialize<'de> for KstDate {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        String::deserialize(d)?.parse().map_err(serde::de::Error::custom)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(tag = "kind", rename_all = "snake_case", rename_all_fields = "camelCase")]
+#[ts(export)]
+pub enum RangeCoverage {
+    WholeRange,
+    KiwoomStartsLater { first_day: KstDate },
+    NoReadableDates,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct DayHistory<T> {
+    pub symbol: SymbolCode,
+    pub from: KstDate,
+    pub to: KstDate,
+    pub coverage: RangeCoverage,
+    pub days: Vec<T>,
+    pub skipped_days: Vec<SkippedDay>,
+    pub undated_rows: Vec<UndatedRow>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct UndatedRow {
+    pub dt: String,
+    pub reason: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct SkippedDay {
+    pub day: KstDate,
+    pub field: String,
+    pub reason: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct ForeignHoldingDay {
+    pub day: KstDate,
+    #[ts(type = "number")]
+    pub shares: u64,
+    pub weight_pct: f64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct InvestorNetSharesDay {
+    pub day: KstDate,
+    #[ts(type = "number")]
+    pub individual: i64,
+    #[ts(type = "number")]
+    pub foreign: i64,
+    #[ts(type = "number")]
+    pub institution: i64,
+    #[ts(type = "number")]
+    pub financial_investment: i64,
+    #[ts(type = "number")]
+    pub insurance: i64,
+    #[ts(type = "number")]
+    pub investment_trust: i64,
+    #[ts(type = "number")]
+    pub other_financial: i64,
+    #[ts(type = "number")]
+    pub bank: i64,
+    #[ts(type = "number")]
+    pub pension_fund: i64,
+    #[ts(type = "number")]
+    pub private_fund: i64,
+    #[ts(type = "number")]
+    pub government: i64,
+    #[ts(type = "number")]
+    pub other_corporation: i64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]

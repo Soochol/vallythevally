@@ -33,13 +33,16 @@ pub enum ApiId {
     Ka20007,
     /// 업종 월봉
     Ka20008,
+    Ka10008,
+    Ka10059,
 }
 
 impl ApiId {
     pub const fn path(self) -> &'static str {
         match self {
             ApiId::Au10001 => "/oauth2/token",
-            ApiId::Ka10099 | ApiId::Ka10100 | ApiId::Ka10095 | ApiId::Ka10001 => "/api/dostk/stkinfo",
+            ApiId::Ka10099 | ApiId::Ka10100 | ApiId::Ka10095 | ApiId::Ka10001 | ApiId::Ka10059 => "/api/dostk/stkinfo",
+            ApiId::Ka10008 => "/api/dostk/frgnistt",
             ApiId::Ka10080
             | ApiId::Ka10081
             | ApiId::Ka10082
@@ -66,6 +69,8 @@ impl ApiId {
             ApiId::Ka20006 => "ka20006",
             ApiId::Ka20007 => "ka20007",
             ApiId::Ka20008 => "ka20008",
+            ApiId::Ka10008 => "ka10008",
+            ApiId::Ka10059 => "ka10059",
         }
     }
 }
@@ -264,6 +269,48 @@ impl MarketRequest for StockBasicInfo {
     }
 }
 
+#[derive(Serialize)]
+pub struct StockForeignHoldings {
+    stk_cd: String,
+}
+
+impl StockForeignHoldings {
+    pub fn new(code: StockCode) -> Self {
+        StockForeignHoldings { stk_cd: kiwoom_stock_code(code, Venue::Krx) }
+    }
+}
+
+impl sealed::Sealed for StockForeignHoldings {}
+impl MarketRequest for StockForeignHoldings {
+    const API_ID: ApiId = ApiId::Ka10008;
+    type Response = wire::StockForeignHoldingsResponse;
+}
+
+const QUANTITY: &str = "2";
+const NET_BUYING: &str = "0";
+const SINGLE_SHARES: &str = "1";
+
+#[derive(Serialize)]
+pub struct StockInvestorNetShares {
+    dt: String,
+    stk_cd: String,
+    amt_qty_tp: &'static str,
+    trde_tp: &'static str,
+    unit_tp: &'static str,
+}
+
+impl StockInvestorNetShares {
+    pub fn new(code: StockCode, today: KstDate) -> Self {
+        StockInvestorNetShares { dt: today.yyyymmdd(), stk_cd: kiwoom_stock_code(code, Venue::Krx), amt_qty_tp: QUANTITY, trde_tp: NET_BUYING, unit_tp: SINGLE_SHARES }
+    }
+}
+
+impl sealed::Sealed for StockInvestorNetShares {}
+impl MarketRequest for StockInvestorNetShares {
+    const API_ID: ApiId = ApiId::Ka10059;
+    type Response = wire::StockInvestorNetSharesResponse;
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -329,6 +376,18 @@ mod tests {
         assert_eq!(serde_json::to_value(StockBasicInfo::new(c)).unwrap(), json!({"stk_cd": "005930_AL"}));
         assert_eq!(<StockBasicInfo as MarketRequest>::API_ID.as_str(), "ka10001");
         assert_eq!(<StockBasicInfo as MarketRequest>::API_ID.path(), "/api/dostk/stkinfo");
+    }
+
+    #[test]
+    fn investor_bodies_ask_for_krx_net_buying_in_single_shares_from_today() {
+        let c = StockCode::parse("247540").unwrap();
+        assert_eq!(serde_json::to_value(StockForeignHoldings::new(c)).unwrap(), json!({"stk_cd": "247540"}));
+        assert_eq!(
+            serde_json::to_value(StockInvestorNetShares::new(c, today())).unwrap(),
+            json!({"dt": "20261109", "stk_cd": "247540", "amt_qty_tp": "2", "trde_tp": "0", "unit_tp": "1"})
+        );
+        assert_eq!((<StockForeignHoldings as MarketRequest>::API_ID.as_str(), ApiId::Ka10008.path()), ("ka10008", "/api/dostk/frgnistt"));
+        assert_eq!((<StockInvestorNetShares as MarketRequest>::API_ID.as_str(), ApiId::Ka10059.path()), ("ka10059", "/api/dostk/stkinfo"));
     }
 
     #[test]
