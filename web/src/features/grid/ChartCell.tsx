@@ -125,6 +125,11 @@ export function ChartCell({ slot, status, onStatus }: Props) {
           )}
         </div>
       )}
+      {status.kind === "ready" && status.olderLoading && (
+        <div className="pointer-events-none absolute left-2 top-1/2 z-[5] rounded-m bg-surface px-3 py-2 text-s text-text-2 shadow-dialog" role="status">
+          과거 봉을 불러오는 중입니다
+        </div>
+      )}
       {status.kind === "ready" && status.intradayEnd && (
         <div
           role="status"
