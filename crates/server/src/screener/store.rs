@@ -342,6 +342,14 @@ fn market_name(market: Market) -> &'static str {
     }
 }
 
+pub(super) fn market_of(name: &str) -> Result<Market, StoreError> {
+    match name {
+        "kospi" => Ok(Market::Kospi),
+        "kosdaq" => Ok(Market::Kosdaq),
+        other => Err(StoreError(format!("저장된 시장이 틀렸습니다: {other:?}"))),
+    }
+}
+
 pub(super) fn date_value(day: KstDate) -> Value {
     Value::Date32(day.days_since_epoch() as i32)
 }

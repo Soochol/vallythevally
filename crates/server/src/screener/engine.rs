@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::num::NonZeroU64;
 
 use domain::{Bucket, KstDate, KstTime, Period, Price, StockCode, TimeOfDay};
 use duckdb::arrow::array::{AsArray, RecordBatch};
@@ -7,33 +8,43 @@ use duckdb::{Connection, Transaction, params};
 
 use super::exact::Decimal;
 use super::line::{Cell, Kind, Line, Series};
-use super::store::{StoreError, date_of, date_value, exclusion_mask, price_of, stock_code, unconfirmed_on};
-use crate::api::{self, BarField, Bound, Condition, ExcludeKind, Extreme, Screen, ScreenPeriod, ScreenerExcluded, ScreenerResult, ScreenerRow, SurgeField, SymbolCode};
+use super::market_cap::MarketCapRange;
+use super::store::{StoreError, date_of, date_value, exclusion_mask, market_of, price_of, stock_code, unconfirmed_on};
+use crate::api::{self, BarField, Bound, Condition, ExcludeKind, Extreme, Market, Screen, ScreenPeriod, ScreenerExcluded, ScreenerResult, ScreenerRow, SurgeField, SymbolCode};
 
 const PERIODS: [ScreenPeriod; 3] = [ScreenPeriod::Day, ScreenPeriod::Week, ScreenPeriod::Month];
 
 pub(super) struct RunnableScreen {
     lines: Vec<Line>,
+    market_caps: Vec<MarketCapRange>,
+    markets: Vec<Market>,
     exclude: Vec<ExcludeKind>,
 }
 
 impl RunnableScreen {
     pub(super) fn of(screen: &Screen) -> Result<RunnableScreen, String> {
-        if !screen.markets.is_empty() {
-            return Err("시장으로 고르는 조건식은 아직 실행할 수 없습니다".to_owned());
+        let (mut lines, mut market_caps) = (Vec::new(), Vec::new());
+        for (k, condition) in screen.conditions.iter().enumerate() {
+            match rule_of(condition).map_err(|why| format!("{}번째 조건: {why}", k + 1))? {
+                Rule::Bars(line) => lines.push(line),
+                Rule::MarketCap(range) => market_caps.push(range),
+            }
         }
-        let lines = screen
-            .conditions
-            .iter()
-            .enumerate()
-            .map(|(k, condition)| line_of(condition).map_err(|why| format!("{}번째 조건: {why}", k + 1)))
-            .collect::<Result<Vec<_>, _>>()?;
-        Ok(RunnableScreen { lines, exclude: screen.exclude.clone() })
+        Ok(RunnableScreen { lines, market_caps, markets: screen.markets.clone(), exclude: screen.exclude.clone() })
+    }
+
+    fn covers(&self, market: Market) -> bool {
+        self.markets.is_empty() || self.markets.contains(&market)
     }
 }
 
-fn line_of(condition: &Condition) -> Result<Line, &'static str> {
-    let line = |period, m, kind| Ok(Line { period, m, kind });
+enum Rule {
+    Bars(Line),
+    MarketCap(MarketCapRange),
+}
+
+fn rule_of(condition: &Condition) -> Result<Rule, &'static str> {
+    let line = |period, m, kind| Ok(Rule::Bars(Line { period, m, kind }));
     match *condition {
         Condition::NewHigh { period, m, field, n } => line(period, m, Kind::NewExtreme { extreme: Extreme::High, field, n }),
         Condition::NewLow { period, m, field, n } => line(period, m, Kind::NewExtreme { extreme: Extreme::Low, field, n }),
@@ -49,7 +60,7 @@ fn line_of(condition: &Condition) -> Result<Line, &'static str> {
         | Condition::Stochastic { .. }
         | Condition::Bollinger { .. }
         | Condition::Ichimoku { .. } => Err("지표 조건은 아직 실행할 수 없습니다"),
-        Condition::MarketCap { .. } => Err("시가총액 조건은 아직 실행할 수 없습니다"),
+        Condition::MarketCap { min, max } => Ok(Rule::MarketCap(MarketCapRange { min: bound(min)?, max: bound(max)? })),
     }
 }
 
@@ -148,6 +159,8 @@ struct Stock {
     name: String,
     listed_on: Option<KstDate>,
     excludable_as: u16,
+    market: Market,
+    listed_shares: Option<NonZeroU64>,
     complete: bool,
     first_stored_day: Option<KstDate>,
 }
@@ -159,6 +172,9 @@ enum Standing {
 }
 
 fn standing(lines: &[Line], stock: &Stock, calendars: &Calendars) -> Standing {
+    if lines.is_empty() {
+        return if stock.first_stored_day.is_some() { Standing::Judged } else { Standing::ListedTooShort };
+    }
     let mut needed_days = Vec::with_capacity(lines.len());
     for line in lines {
         let cells = calendars.of(line.period);
@@ -198,7 +214,7 @@ impl<'a> Snapshot<'a> {
         let tx = &self.tx;
         let calendars = Calendars::new(observation_days(tx, as_of)?);
         let unwanted = exclusion_mask(&screen.exclude);
-        let universe: Vec<Stock> = stocks(tx, as_of)?.into_iter().filter(|s| s.excludable_as & unwanted == 0).collect();
+        let universe: Vec<Stock> = stocks(tx, as_of)?.into_iter().filter(|s| s.excludable_as & unwanted == 0 && screen.covers(s.market)).collect();
         let unconfirmed = unconfirmed_on(tx, as_of)?;
         let mut excluded = ScreenerExcluded { listed_too_short: 0, history_short: 0, unconfirmed: 0 };
         let mut judged = Vec::new();
@@ -224,6 +240,9 @@ impl<'a> Snapshot<'a> {
                     tracing::warn!(code = stock.code.as_str(), "맞은 종목의 일봉 종가가 없어 결과에서 뺍니다");
                     return None;
                 };
+                if !screen.market_caps.iter().all(|range| range.admits(daily.close, stock.listed_shares)) {
+                    return None;
+                }
                 Some(ScreenerRow {
                     symbol: SymbolCode(stock.code.as_str().to_owned()),
                     name: stock.name.clone(),
@@ -385,16 +404,34 @@ fn observation_days(tx: &Transaction, as_of: KstDate) -> Result<Vec<KstDate>, St
 
 fn stocks(tx: &Transaction, as_of: KstDate) -> Result<Vec<Stock>, StoreError> {
     let mut stmt = tx.prepare(
-        "SELECT listed.code, listed.name, listed.listed_on, listed.excludable_as, coalesce(history.complete, false), earliest.day
+        "SELECT listed.code, listed.name, listed.listed_on, listed.excludable_as, listed.market, listed.listed_shares, coalesce(history.complete, false), earliest.day
          FROM listed LEFT JOIN history USING (code)
          LEFT JOIN (SELECT code, min(day) AS day FROM daily WHERE day <= ? GROUP BY code) AS earliest USING (code)",
     )?;
     let rows = stmt.query_map(params![date_value(as_of)], |row| {
-        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, Option<i32>>(2)?, row.get::<_, u16>(3)?, row.get::<_, bool>(4)?, row.get::<_, Option<i32>>(5)?))
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, Option<i32>>(2)?,
+            row.get::<_, u16>(3)?,
+            row.get::<_, String>(4)?,
+            row.get::<_, Option<u64>>(5)?,
+            row.get::<_, bool>(6)?,
+            row.get::<_, Option<i32>>(7)?,
+        ))
     })?;
     rows.map(|row| {
-        let (code, name, listed_on, excludable_as, complete, first_stored_day) = row?;
-        Ok(Stock { code: stock_code(&code)?, name, listed_on: listed_on.map(date_of), excludable_as, complete, first_stored_day: first_stored_day.map(date_of) })
+        let (code, name, listed_on, excludable_as, market, listed_shares, complete, first_stored_day) = row?;
+        Ok(Stock {
+            code: stock_code(&code)?,
+            name,
+            listed_on: listed_on.map(date_of),
+            excludable_as,
+            market: market_of(&market)?,
+            listed_shares: listed_shares.and_then(NonZeroU64::new),
+            complete,
+            first_stored_day: first_stored_day.map(date_of),
+        })
     })
     .collect()
 }

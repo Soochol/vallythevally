@@ -390,6 +390,8 @@ fn screens_across_the_upgrade() -> Vec<Value> {
     vec![
         screen(&[], &[], vec![new_high("D", "high", 20, 5)]),
         screen(&[], &["etf", "managed"], vec![new_high("W", "close", 4, 4), new_high("D", "volume", 20, 20)]),
+        screen(&["kosdaq"], &[], vec![new_high("M", "high", 12, 6)]),
+        screen(&["kospi"], &[], vec![json!({"kind": "market_cap", "min": 3_000_000_000_000.0, "max": null})]),
     ]
 }
 
