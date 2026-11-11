@@ -7,6 +7,8 @@
   },
   "scripts": {
     "check-symbols": "node check-sector-symbols.ts",
-    "test": "node --test"
+    "test": "node --test",
+    "collect": "node collect-bundle.ts",
+    "typecheck": "../../web/node_modules/.bin/tsc -p tsconfig.json"
   }
 }
