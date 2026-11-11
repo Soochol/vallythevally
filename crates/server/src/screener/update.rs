@@ -7,15 +7,13 @@ use super::{Calendar, CalendarUse, Screener};
 use super::store::{DayBar, Store, StoreError, Tail, Write};
 use crate::api::UpdatePhase;
 use crate::bars::BarError;
-use crate::kiwoom::api::{DailyChart, IndexDailyChart, StockList, StockQuotes};
+use crate::kiwoom::api::{DailyChart, IndexDailyChart, StockQuotes};
 use crate::kiwoom::error::{Failure, Surface};
 use crate::kiwoom::rest::{ContKey, KiwoomError, MergeScope, Priority};
-use crate::kiwoom::wire::{KrxDayQuote, ScreenerListing, index_days, parse_krx_daily, parse_krx_quotes, screener_listing};
+use crate::kiwoom::wire::{KrxDayQuote, index_days, parse_krx_daily, parse_krx_quotes};
 
 const IN_FLIGHT: usize = 2;
-const MAX_LIST_PAGES: usize = 10;
 const MAX_HISTORY_PAGES: usize = 100;
-const LIST_MARKETS: usize = 2;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Catchup {
@@ -59,9 +57,11 @@ fn base_moved(base: Price, stored_close: Price) -> bool {
 impl Screener {
     pub(super) async fn update(&self, id: u64, full: bool) -> Result<(), UpdateError> {
         tracing::info!(full, "스크리너 업데이트를 시작합니다");
-        let listing = self.fetch_listing(id).await?;
-        tracing::info!(count = listing.len(), "스크리너 종목 목록을 받았습니다");
-        self.with_store(move |s| s.replace_listing(&listing)).await?;
+        self.report(id, UpdatePhase::Symbols, 0, 1);
+        let directory = self.symbols.ready(&self.rest).await.map_err(BarError::from)?;
+        tracing::info!(count = directory.screener_listing().len(), "서버가 받아 둔 종목 목록으로 스크리너 종목 목록을 바꿉니다");
+        self.with_store(move |s| s.replace_listing(directory.screener_listing())).await?;
+        self.report(id, UpdatePhase::Symbols, 1, 1);
         if full {
             self.with_store(Store::mark_refetch).await?;
         }
@@ -70,24 +70,6 @@ impl Screener {
         self.store_calendar(&calendar, target).await?;
         self.recent(id, target, calendar.last_before(target)).await?;
         self.backfill(id, target).await
-    }
-
-    async fn fetch_listing(&self, id: u64) -> Result<Vec<ScreenerListing>, UpdateError> {
-        let mut listing = Vec::new();
-        self.report(id, UpdatePhase::Symbols, 0, LIST_MARKETS);
-        for (done, req) in [StockList::EXCHANGE, StockList::KOSDAQ].into_iter().enumerate() {
-            let mut cont = None;
-            for _ in 0..MAX_LIST_PAGES {
-                let page = self.rest.call(&req, cont.as_ref(), Priority::Background, MergeScope::default()).await?;
-                listing.extend(page.body.list.iter().filter_map(screener_listing));
-                cont = page.next;
-                if cont.is_none() {
-                    break;
-                }
-            }
-            self.report(id, UpdatePhase::Symbols, done + 1, LIST_MARKETS);
-        }
-        Ok(listing)
     }
 
     async fn store_calendar(&self, recent: &Calendar, target: KstDate) -> Result<(), UpdateError> {

@@ -163,7 +163,7 @@ async fn serve(config: Config, token_file: TokenFile) -> ExitCode {
     let hub = MarketHub::spawn(bars.clone(), stream, events, clock.clone());
     tokio::spawn(daily_reset(clock.clone(), rest.clone(), symbols.clone(), bars.clone(), hub.clone()));
     tokio::spawn(daily_token(clock.clone(), rest.clone()));
-    let screener = Arc::new(Screener::new(screener_store, rest.clone(), bars.clone(), clock.clone()));
+    let screener = Arc::new(Screener::new(screener_store, rest.clone(), bars.clone(), symbols.clone(), clock.clone()));
 
     let app = router(Arc::new(AppState { symbols, bars, rest, db, clock, static_dir: config.static_dir.clone(), hub, screener }));
     tracing::info!(static_dir = %config.static_dir.display(), "요청을 받기 시작합니다");

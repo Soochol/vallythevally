@@ -17,6 +17,7 @@ use crate::bars::{BarError, BarService};
 use crate::clock::Clock;
 use crate::http::{ApiFailure, AppState, Lookup};
 use crate::kiwoom::rest::{KiwoomRest, Priority};
+use crate::symbols::SymbolDirectory;
 use crate::user_routes::{JSON_LIMIT, check_screen, read_json};
 use engine::Snapshot;
 use store::{Store, StoreError};
@@ -70,6 +71,7 @@ pub struct Screener {
     store: Arc<Store>,
     rest: KiwoomRest,
     bars: Arc<BarService>,
+    symbols: Arc<SymbolDirectory>,
     clock: Clock,
     run: Mutex<Run>,
     next_run: AtomicU64,
@@ -78,9 +80,20 @@ pub struct Screener {
 }
 
 impl Screener {
-    pub fn new(store: Store, rest: KiwoomRest, bars: Arc<BarService>, clock: Clock) -> Self {
-        Screener { store: Arc::new(store), rest, bars, clock, run: Mutex::new(Run::Idle), next_run: AtomicU64::new(1), recents_started: AtomicU64::new(0), calendar: tokio::sync::Mutex::new(None) }
+    pub fn new(store: Store, rest: KiwoomRest, bars: Arc<BarService>, symbols: Arc<SymbolDirectory>, clock: Clock) -> Self {
+        Screener {
+            store: Arc::new(store),
+            rest,
+            bars,
+            symbols,
+            clock,
+            run: Mutex::new(Run::Idle),
+            next_run: AtomicU64::new(1),
+            recents_started: AtomicU64::new(0),
+            calendar: tokio::sync::Mutex::new(None),
+        }
     }
+
 
     fn run(&self) -> MutexGuard<'_, Run> {
         self.run.lock().expect("업데이트 상태 잠금")
