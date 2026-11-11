@@ -243,7 +243,9 @@ async function buildFixture(t: { after: (fn: () => void | Promise<void>) => void
   const dir = await scratch(); t.after(() => rm(dir, { recursive: true, force: true }));
   const mapPath = path.join(dir, "sectors.json"); await writeFile(mapPath, JSON.stringify(MAP));
   const bundle = await buildBundle({ server: fixture.base, code: CODE, corp: CORP, from: day("2016-01-01"), to: day("2017-12-29"), mapPath, dartBase: fixture.base, fredBase: fixture.base, dartKey: FAKE_KEY });
-  assert.ok(fixture.calls.filter((u) => u.pathname === "/api/list.json").every((u) => u.searchParams.get("last_reprt_at") === "Y"));
+  const searches = fixture.calls.filter((u) => u.pathname === "/api/list.json");
+  assert.deepEqual([...new Set(searches.map((u) => u.searchParams.get("last_reprt_at")))], failDart ? ["Y"] : ["Y", "N"]);
+  if (!failDart) for (const mode of ["Y", "N"]) assert.deepEqual(searches.filter((u) => u.searchParams.get("last_reprt_at") === mode).map((u) => u.searchParams.get("page_no")), ["1", "2"]);
   return bundle;
 }
 test("all bundle sources and calculations run against local HTTP with a failed stock isolated", async (t) => {

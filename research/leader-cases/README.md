@@ -75,9 +75,11 @@ OpenDART 키는 `VALLY_ENV_FILE`이 가리키는 파일의 `OPENDART_API_KEY` �
 
 `fnlttSinglAcntAll`에 `fs_div=CFS`, 사업연도와 보고서 코드를 지정한다. 2015년부터 종료일의 사업연도까지 받는다. 표준 계정 ID를 우선하고, 없으면 문서화한 정확한 계정명으로 받친다. 손익계산서 IS를 CIS보다 먼저 쓴다. 같은 우선순위에서 후보가 여럿이면 임의로 고르지 않는다. 숫자 공백·잘못된 단위·모호한 계정은 null이다.
 
-`list`는 `last_reprt_at=Y`와 전체 페이지를 읽는다. 대상 종목코드를 DART 경계까지 전달하고 공시의 `corp_code`·`stock_code`로 요청 법인과 대상 종목의 대응을 확인한 뒤 재무·주식수·배당·자본 사건을 받는다. 하나라도 다른 종목코드가 있으면 `dart_stock_code_mismatch`, 대응 종목코드가 없으면 `dart_stock_code_unavailable`로 결합을 막는다. 이름만 같다는 이유로 대응을 추측하지 않는다. `dart.identity`에는 대상 코드·요청 법인·응답 법인코드/종목코드/법인명과 verified/mismatch/unverified를 남긴다. 공시 각 행에도 식별 정보를 보존한다. 검증 실패 시 재무 원장은 비우고 이유를 `missing`에 남기며 정상 시세·수급·FRED 수집과 CLI 출력을 계속한다.
+`dart.disclosures`는 `list`의 `last_reprt_at=Y` 전체 페이지를 읽은 최종 공시 목록이다. 수치의 정확한 접수번호를 확인하기 위해 `last_reprt_at=N`의 전체 페이지도 별도로 읽는다. 이 근거 집합을 최종 공시 목록에 합치지 않는다. 대상 종목코드를 DART 경계까지 전달하고 공시의 `corp_code`·`stock_code`로 요청 법인과 대상 종목의 대응을 확인한 뒤 재무·주식수·배당·자본 사건을 받는다. 하나라도 다른 종목코드가 있으면 `dart_stock_code_mismatch`, 대응 종목코드가 없으면 `dart_stock_code_unavailable`로 결합을 막는다. 이름만 같다는 이유로 대응을 추측하지 않는다. `dart.identity`에는 대상 코드·요청 법인·응답 법인코드/종목코드/법인명과 verified/mismatch/unverified를 남긴다. 공시 각 행에도 식별 정보를 보존한다. 검증 실패 시 재무 원장은 비우고 이유를 `missing`에 남기며 정상 시세·수급·FRED 수집과 CLI 출력을 계속한다.
 
-**최신 정정본을 원래 공시일로 소급하지 않는다.** 각 금액의 `rcept_no`가 목록의 정확한 보고서·회계기간 접수번호와 맞아야 한다. 맞지 않으면 null이다. 정정본 이전 원본 수치를 이 API에서 재현할 수 없으므로 그 기간은 비어 있을 수 있다. 12월 결산만 지원하며 보고서 제목의 `(YYYY.MM)`이 요청 회계기간과 맞지 않으면 값을 사용하지 않는다.
+**최신 정정본을 원래 공시일로 소급하지 않는다.** 각 금액의 `rcept_no`가 같은 법인·종목의 정확한 보고서 종류·회계기간 접수번호와 맞아야 한다. API가 원본 번호를 주고 최종 목록에는 첨부정정본만 있어도, 전체 공시에서 원본 번호를 확인하면 원본 공시일을 쓴다. API가 정정본 번호를 주면 그 정정본의 공시일을 쓴다. 연도나 비슷한 제목의 다른 접수번호로 대체하지 않는다. 전체 공시 조회가 처음이나 도중에 실패하면 부분 목록을 버리고 `OpenDART/list/receipts` 실패를 기록한다. 최종 목록에서 검증 가능한 다른 기간·원천은 계속 처리한다. 정정본 이전 원본 수치 버전을 재현하는 기능은 없으므로 그 기간은 비어 있을 수 있다. 12월 결산만 지원하며 보고서 제목의 `(YYYY.MM)`이 요청 회계기간과 맞지 않으면 값을 사용하지 않는다.
+
+`FinancialPeriod`의 `filedOn`, `availableFrom`, `filingLagDays`는 검증된 재무 API 접수번호의 공시일을 따른다. 재무 API에서 검증된 접수번호를 얻지 못하면 최종 공시의 기간 메타데이터를 남기되 해당 재무 금액은 null이다. 주식수·배당은 각 API의 정확한 접수번호와 공개일을 따로 보존한다. 이 때문에 `FactSource.receipt`가 최종 공시 목록에 없을 수 있다. 소비자는 최종 목록의 날짜로 출처 날짜를 덮어쓰지 않는다.
 
 회계기간과 공시일 축을 분리한다. `quarters`는 분기 단일 값과 누적 값, `annual`은 사업보고서 원래 값을 담는다. 공시일과 회계기간 말의 차이가 `filingLagDays`다. 공시 당일에는 새 재무를 쓰지 않는다. 다음 KRX 관측일부터 쓰며, 금요일 공시 뒤 다음 관측일이 월요일이면 월요일부터 보인다.
 
@@ -97,7 +99,7 @@ OpenDART 키는 `VALLY_ENV_FILE`이 가리키는 파일의 `OPENDART_API_KEY` �
 | FCF | 분기 영업CF−분기 유형자산 현금 취득액. |
 | 운전자본 경고 | 재고 전년비−매출 전년비, 채권 전년비−매출 전년비. |
 | DPS | 사업보고서 `alotMatter`의 보통주 주당현금배당금 당기 값. 다른 종류 주식·전기 값을 섞지 않는다. |
-| 주식수 | `stockTotqySttus`의 보통주 발행수·유통수·합계. 공시된 분기말 스냅숏이며 매일의 상장주식수나 증자 효력일이 아니다. |
+| 주식수 | `stockTotqySttus`의 보통주 발행수·유통수·합계. `보통주`와 `의결권 있는 주식\n(보통주)`를 공백 정규화 후 정확히 구별하고 원문 종류를 출처에 보존한다. 공시된 분기말 스냅숏이며 매일의 상장주식수나 증자 효력일이 아니다. |
 | PER·PBR | 그날 수정 종가/사용 가능한 EPS TTM·BPS. 분모가 양수여야 한다. 현재 상장주식수 대조가 안 되거나 이후 보통주 발행수 스냅숏이 달라 수정 가격과 주당 기준을 확인할 수 없으면 null이다. 자사주 취득·처분에 따른 유통수 변화만으로 그 이전 값을 지우지 않는다. EPS의 네 분기 유통수 확인 조건은 별도이며, 해당 구간 분모를 확인하지 못하면 그 EPS/PER만 null이다. |
 | 가격 밴드 | EPS TTM×10·20·40·80, BPS×1·2·4·8. PBR 배수는 이 도구의 시작 선택이다. |
 
@@ -127,7 +129,7 @@ FRED CSV는 키 없이 `fredgraph.csv?id=…`를 읽는다. `observation_date,<i
 
 ```sh
 npm --prefix research/leader-cases run typecheck
-node --test research/leader-cases/bundle.test.ts research/leader-cases/review-regressions.test.ts research/leader-cases/ttm-conflicts.test.ts
+node --test research/leader-cases/bundle.test.ts research/leader-cases/review-regressions.test.ts research/leader-cases/ttm-conflicts.test.ts research/leader-cases/dart-patterns.test.ts
 VALLY_E2E_BIN_DIR=target/leader-cases-141/bin node --test research/leader-cases/check-sector-symbols.test.ts
 ```
 
@@ -137,7 +139,7 @@ VALLY_E2E_BIN_DIR=target/leader-cases-141/bin node --test research/leader-cases/
 
 247540 실제 묶음, 종가 하나와 영업이익 한 분기의 원천 대조는 **아직 수행하지 않았다**. 사용자 승인을 받아 새 코드로 서버를 재시작한 뒤 별도 확인해야 한다. 로컬 fixture의 성공을 그 실제 검증의 성공으로 쓰지 않는다.
 
-실제 확인에서는 `stockTotqySttus.se`의 원문 종류를 확인해야 한다. 현재 `보통주`와 `합계`를 읽으며, `보통주식` 같은 다른 정상 문자열이 실제로 오는지는 아직 확인하지 않았다. 추측으로 별칭을 추가하지 않는다. 주요사항보고에 `last_reprt_at=Y` 공시 목록과 접수번호가 맞지 않는 행이 있으면 해당 endpoint를 누락 처리한다. 실제 정상 원천에서 두 집합이 어긋나는지는 미확인 의심이며 실제 접수번호를 대조해야 한다.
+실제 확인에서는 `stockTotqySttus.se`의 원문 종류를 확인해야 한다. `보통주`와 실제 확인된 `의결권 있는 주식\n(보통주)`, `합계`를 읽는다. 합계·비고·우선주를 보통주로 읽지 않으며 보통주 후보가 여럿이면 확인불가다. 기타 종류 주식수는 같은 접수번호의 합계에서 보통주 발행수를 빼며 서로 다른 스냅숏을 섞지 않는다. `보통주식` 같은 다른 문자열이 실제로 오는지는 아직 확인하지 않았다. 추측으로 별칭을 추가하지 않는다. 주요사항보고에 `last_reprt_at=Y` 공시 목록과 접수번호가 맞지 않는 행이 있으면 해당 endpoint를 누락 처리한다. 실제 정상 원천에서 두 집합이 어긋나는지는 미확인 의심이며 실제 접수번호를 대조해야 한다.
 
 ## 확인한 공식 자료
 

@@ -3,6 +3,8 @@ import { spawn } from "node:child_process";
 import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { test } from "node:test";
+import { dartPatternFixture, ORIGINAL, COMMON } from "./fixtures/dart-patterns.ts";
+import { calendar } from "./fixtures/sources.ts";
 import { syntheticInputs, syntheticManuscript } from "./fixtures/report.ts";
 import { parseManuscript } from "./manuscript.ts";
 import { parseBundle } from "./report-input.ts";
@@ -94,4 +96,20 @@ test("daily holes, weekly samples and explicit nulls break lines without inserti
   const weekly: Plot = { ...p, sampling: "weekly", samples: [sample(day("2016-01-08"), 10), sample(day("2016-01-15"), null, "missing"), sample(day("2016-01-22"), 30)] };
   assert.deepEqual(plotRuns(weekly, dates, dates).map((r) => r.map((v) => v.value)), [[10], [30]]);
   assert.deepEqual(plotRuns({ ...weekly, samples: weekly.samples.filter((s) => s.value !== null) }, dates, dates).map((r) => r.map((v) => v.value)), [[10], [30]]);
+});
+
+test("HTML consumer retains original-receipt evidence outside the final disclosure list", async () => {
+  const inputs = await syntheticInputs(await scratch());
+  const { dart } = await dartPatternFixture();
+  const bundle = parseBundle({ ...inputs.bundle, range: { ...inputs.bundle.range, to: "2022-03-31" }, calendar: [...inputs.bundle.calendar, ...calendar("2021-03-19", "2022-03-31")], dart });
+  await writeFile(inputs.bundlePath, JSON.stringify(bundle));
+  const result = await runCli(["--bundle", inputs.bundlePath, "--manuscript", inputs.manuscriptPath]);
+  assert.equal(result.code, 0, result.stderr);
+  const html = await readFile(JSON.parse(result.stdout).output, "utf8");
+  assert.ok(html.includes(`${ORIGINAL} · 2022-03-21`));
+  assert.ok(html.includes(`주식의 총수 ${COMMON}`));
+  const op = reportPanels(bundle).find((p) => p.id === "financial-operating-profit")!.plots[0]!;
+  assert.equal(op.samples.findLast((s) => s.day <= "2022-03-21")?.value ?? null, null);
+  assert.equal(op.samples.find((s) => s.day === "2022-03-22")?.value, 200);
+  assert.equal(bundle.dart.financials.annual[1]!.filedOn, "2022-03-21");
 });
