@@ -137,7 +137,7 @@ test("멈춘 업데이트의 다시 시도는 서버가 준 시각의 그 초가
   const kst = (clock: string) => Date.parse(`2026-11-11T${clock}+09:00`);
   const gated = { ...stopped.error, retryAt: kst("10:42:30") / 1000 };
   const ready = { kind: "ready", note: "다시 시도하면 남은 것만 받습니다." };
-  expect(updateRetry(gated, kst("10:42:00"))).toEqual({ kind: "waiting", opensAt: kst("10:42:31") / 1000, note: "10:42:31부터 다시 시도할 수 있습니다." });
+  expect(updateRetry(gated, kst("10:42:00"))).toEqual({ kind: "waiting", opensAt: kst("10:42:31") / 1000, from: "10:42:31부터", note: "10:42:31부터 다시 시도할 수 있습니다." });
   expect(updateRetry(gated, kst("10:42:30.999"))).toMatchObject({ kind: "waiting" });
   expect(updateRetry(gated, kst("10:42:31"))).toEqual(ready);
   expect(updateRetry(gated, kst("10:45:00"))).toEqual(ready);

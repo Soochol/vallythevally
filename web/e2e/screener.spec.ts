@@ -1,5 +1,5 @@
 import type { Locator, Page } from "@playwright/test";
-import { cell, chartOf, expect, test } from "./harness";
+import { cell, chartOf, expect, SEARCH_BUTTON_TITLE, test } from "./harness";
 
 test.use({ krxMarket: "20261106", clockStart: "20261109100000" });
 
@@ -266,6 +266,82 @@ test("키움이 운영자 확인이 필요한 오류를 내면 멈춘 이유를 
   await openScreener(page);
   await updateBand(page).getByRole("button", { name: "처음 받기" }).click();
   await waitForUpdateToFinish(page, "11-06(금)");
+});
+
+test.describe("서버와 시계가 어긋난 브라우저", () => {
+  test.use({ clockStart: null });
+
+  const kstClock = (unixSeconds: number) => new Date(unixSeconds * 1000).toLocaleTimeString("en-GB", { timeZone: "Asia/Seoul", hourCycle: "h23" });
+  const sleepUntil = (ms: number) => new Promise((resolve) => setTimeout(resolve, Math.max(0, ms - Date.now())));
+  const retryButton = (page: Page) => panel(page).getByRole("alert").getByRole("button", { name: "다시 시도" });
+
+  async function expectFullReload(page: Page, check: (item: Locator) => Promise<void>) {
+    const toggle = panel(page).getByRole("button", { name: "스크리너 메뉴" });
+    const menu = page.getByRole("menu", { name: "스크리너 메뉴" });
+    await toggle.click();
+    await check(menu.getByRole("menuitem", { name: /^전체 다시 받기/ }));
+    await toggle.click();
+    await expect(menu).toBeHidden();
+  }
+
+  test("키움 관문이 닫혀 업데이트가 멈추면 브라우저 시계가 앞서든 뒤처지든, 기다리는 사이 바로잡혀도 관문이 열릴 때까지 다시 시도와 전체 다시 받기를 막고, 열리면 저절로 켠다", async ({ app, page, browser }) => {
+    test.setTimeout(120_000);
+    const ahead = page;
+    const behindContext = await browser.newContext({ baseURL: app.url });
+    const behind = await behindContext.newPage();
+    await ahead.clock.install({ time: Date.now() + 60_000 });
+    await behind.clock.install({ time: Date.now() - 60_000 });
+    const retries: string[] = [];
+    ahead.on("request", (req) => {
+      if (req.method() === "POST" && new URL(req.url()).pathname === "/api/screener/update") retries.push(req.postData() ?? "");
+    });
+
+    await app.fake.respondWith({ apiId: "ka10081", status: 503, body: {} });
+    await ahead.goto("/");
+    await openScreener(ahead);
+    await updateBand(ahead).getByRole("button", { name: "처음 받기" }).click();
+    await expect(panel(ahead).getByRole("alert")).toContainText("업데이트가 멈췄습니다");
+    const status = (await (await fetch(`${app.url}/api/screener/status`)).json()) as { update: { error: { retryAt: number } } };
+    const retryAt = status.update.error.retryAt;
+    const opensFrom = `${kstClock(retryAt + 1)}부터`;
+    await app.fake.reset();
+    await behind.goto("/");
+    await openScreener(behind);
+
+    for (const p of [ahead, behind]) {
+      await expect(retryButton(p)).toBeDisabled();
+      await expect(panel(p).getByRole("alert")).toContainText(`${opensFrom} 다시 시도할 수 있습니다.`);
+      await expectFullReload(p, async (item) => {
+        await expect(item).toBeDisabled();
+        await expect(item).toContainText(opensFrom);
+      });
+    }
+    await ahead.clock.setSystemTime(Date.now());
+    const answered = ahead.waitForResponse((r) => new URL(r.url()).pathname === "/api/symbols");
+    await ahead.getByTitle(SEARCH_BUTTON_TITLE).click();
+    await ahead.getByRole("dialog", { name: "종목 검색" }).getByRole("combobox", { name: "종목 검색" }).fill("삼성");
+    await answered;
+    await ahead.keyboard.press("Escape");
+    await sleepUntil(retryAt * 1000 - 1_000);
+    for (const p of [ahead, behind]) await expect(retryButton(p)).toBeDisabled({ timeout: 100 });
+    expect(Date.now()).toBeLessThan(retryAt * 1000);
+
+    for (const p of [ahead, behind]) {
+      await expect(retryButton(p)).toBeEnabled({ timeout: 5_000 });
+      expect(Date.now()).toBeGreaterThanOrEqual(retryAt * 1000);
+      await expect(panel(p).getByRole("alert")).toContainText("다시 시도하면 남은 것만 받습니다.");
+      await expectFullReload(p, async (item) => {
+        await expect(item).toBeEnabled();
+        await expect(item).toHaveText("전체 다시 받기…");
+      });
+    }
+
+    retries.length = 0;
+    await retryButton(ahead).click();
+    await waitForUpdateToFinish(ahead, "11-06(금)");
+    expect(retries).toEqual([JSON.stringify({ full: false })]);
+    await behindContext.close();
+  });
 });
 
 test.describe("휴대폰 390px", () => {

@@ -1,10 +1,13 @@
 import { afterEach, expect, test, vi } from "vitest";
 import { useKiwoomStore } from "../stores/kiwoom";
+import { useServerClock } from "../stores/serverClock";
 import { ApiRequestError, getJson } from "./http";
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.useRealTimers();
   useKiwoomStore.setState({ stopped: null, notice: null });
+  useServerClock.setState({ serverAheadMs: 0 });
 });
 
 const reply = (status: number, body: unknown) =>
@@ -38,4 +41,28 @@ test("오류 본문의 사유, 다시 보낼 시각, 사람 조치 여부를 그
   reply(503, { error: { code: "kiwoom_unavailable", message: "m", reason: "rate_limited", retryAt: 1_794_182_430, manualActionRequired: false } });
   const e = await getJson("/api/quotes?symbols=005930").catch((x: unknown) => x);
   expect(e).toMatchObject({ code: "kiwoom_unavailable", reason: "rate_limited", retryAt: 1_794_182_430, manualActionRequired: false });
+});
+
+test("응답의 Date 헤더로 브라우저 시계가 앞서든 뒤처지든 서버의 지금을 안다", async () => {
+  const sentAt = Date.parse("2026-11-11T10:42:00+09:00");
+  const dated = (status: number, body: unknown) =>
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify(body), { status, headers: { Date: new Date(sentAt).toUTCString() } })));
+  vi.useFakeTimers({ toFake: ["Date"] });
+  for (const browserAheadMs of [60_000, -60_000]) {
+    vi.setSystemTime(sentAt + browserAheadMs);
+    dated(200, {});
+    await getJson("/api/screener/status");
+    expect(Date.now() + useServerClock.getState().serverAheadMs).toBe(sentAt);
+  }
+  vi.setSystemTime(sentAt + 5_000);
+  dated(503, { error: { code: "kiwoom_unavailable", message: "m", reason: "rate_limited", retryAt: 1, manualActionRequired: false } });
+  await expect(getJson("/api/screener/status")).rejects.toBeInstanceOf(ApiRequestError);
+  expect(Date.now() + useServerClock.getState().serverAheadMs).toBe(sentAt);
+});
+
+test("Date 헤더가 없는 응답은 앞서 잰 서버 시계를 그대로 둔다", async () => {
+  useServerClock.setState({ serverAheadMs: -60_000 });
+  reply(200, {});
+  await getJson("/api/screener/status");
+  expect(useServerClock.getState().serverAheadMs).toBe(-60_000);
 });

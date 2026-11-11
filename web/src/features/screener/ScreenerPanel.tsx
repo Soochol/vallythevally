@@ -42,6 +42,7 @@ import { addSymbols, listNameFrom, MAX_WATCHLISTS } from "../../lib/watchlist";
 import { useCell, useLayoutStore } from "../../stores/layout";
 import { type Rerun, rerunReason, runOf, type ScreenRun, shownResult, useScreenerStore } from "../../stores/screener";
 import { useSelectionStore } from "../../stores/selection";
+import { useServerClock } from "../../stores/serverClock";
 import { useUiStore } from "../../stores/ui";
 import { useWatchlistStore } from "../../stores/watchlist";
 import { ChevronIcon, MoreIcon, PenIcon, PlayIcon, PlusIcon, SpinnerIcon } from "../icons";
@@ -339,6 +340,8 @@ function PanelMenu({ screen, rows, status }: { screen: Screen | null; rows: read
   const menu = useMenuToggle();
   const lists = useWatchlistStore((s) => s.lists);
   const { start } = useUpdateCommands();
+  const retry = useUpdateRetry(status?.update?.error ?? null);
+  const waiting = retry?.kind === "waiting" ? retry : null;
   const codes = rows.map((r) => r.symbol);
   const nothing = codes.length === 0;
   const fresh = screen ? listNameFrom(lists, screen.name) : null;
@@ -354,7 +357,7 @@ function PanelMenu({ screen, rows, status }: { screen: Screen | null; rows: read
     ...lists.map((l): MenuItem => ({ kind: "action", label: l.name, disabled: nothing, onSelect: () => sendToWatchlist(l.id, codes) })),
     ...newList,
     { kind: "separator" },
-    { kind: "action", label: "전체 다시 받기…", disabled: isUpdating(status), onSelect: reload },
+    { kind: "action", label: "전체 다시 받기…", hint: waiting?.from, disabled: isUpdating(status) || waiting !== null, onSelect: reload },
   ];
   return (
     <div ref={menu.root} className="relative">
@@ -580,14 +583,15 @@ const progressText = ({ phase, done, total }: ScreenerUpdate) =>
 const todayNote = (status: ScreenerStatus) => (todayConfirmed(status) ? "오늘 자료까지 받습니다." : "당일 봉은 20:00 뒤에 받습니다.");
 
 function useUpdateRetry(error: ApiErrorBody | null): UpdateRetry | null {
-  const [now, setNow] = useState(Date.now);
-  const retry = error && updateRetry(error, now);
+  const serverAheadMs = useServerClock((s) => s.serverAheadMs);
+  const [serverNow, setServerNow] = useState(() => Date.now() + serverAheadMs);
+  const retry = error && updateRetry(error, serverNow);
   const opensAt = retry?.kind === "waiting" ? retry.opensAt : null;
   useEffect(() => {
     if (opensAt === null) return;
-    const id = setTimeout(() => setNow(Date.now()), opensAt * 1000 - Date.now());
+    const id = setTimeout(() => setServerNow(Date.now() + serverAheadMs), opensAt * 1000 - (Date.now() + serverAheadMs));
     return () => clearTimeout(id);
-  }, [opensAt, now]);
+  }, [opensAt, serverAheadMs, serverNow]);
   return retry;
 }
 

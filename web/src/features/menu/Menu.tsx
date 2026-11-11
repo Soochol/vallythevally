@@ -4,7 +4,7 @@ import { CheckIcon } from "../icons";
 export type MenuItem =
   | { kind: "radio"; label: string; checked: boolean; onSelect(): void }
   | { kind: "check"; label: string; checked: boolean; onSelect(): void }
-  | { kind: "action"; label: string; disabled?: boolean; onSelect(): void }
+  | { kind: "action"; label: string; hint?: string; disabled?: boolean; onSelect(): void }
   | { kind: "heading"; label: string }
   | { kind: "separator" };
 
@@ -88,14 +88,15 @@ function MenuButton({ item, onClose, register }: { item: Focusable; onClose: Pro
       role={ROLE[item.kind]}
       aria-checked={checkable ? item.checked : undefined}
       disabled={item.kind === "action" ? item.disabled : undefined}
-      className="flex h-[28px] items-center gap-2 rounded-s px-2 text-left hover:bg-raised focus-visible:bg-raised disabled:opacity-40 disabled:hover:bg-transparent aria-checked:text-accent max-md:h-[40px]"
+      className="group flex h-[28px] items-center gap-2 rounded-s px-2 text-left hover:bg-raised focus-visible:bg-raised disabled:hover:bg-transparent aria-checked:text-accent max-md:h-[40px]"
       onClick={() => {
         item.onSelect();
         if (item.kind !== "check") onClose(true);
       }}
     >
       <span className="w-[14px]">{checkable && item.checked && <CheckIcon />}</span>
-      {item.label}
+      <span className="group-disabled:opacity-40">{item.label}</span>
+      {item.kind === "action" && item.hint && <span className="ml-auto pl-4 text-xs text-text-2">{item.hint}</span>}
     </button>
   );
 }

@@ -148,13 +148,16 @@ export function statusFooter(status: ScreenerStatus | undefined, error: Error | 
 export const todayConfirmed = ({ todayAvailable, lastDay, needDay }: ScreenerStatus): boolean =>
   todayAvailable || (lastDay !== null && needDay !== null && lastDay > needDay);
 
-export type UpdateRetry = { kind: "operator" } | { kind: "ready"; note: string } | { kind: "waiting"; opensAt: UnixSeconds; note: string };
+export type UpdateRetry = { kind: "operator" } | { kind: "ready"; note: string } | { kind: "waiting"; opensAt: UnixSeconds; from: string; note: string };
 
 const endOfSecond = (retryAt: UnixSeconds): UnixSeconds => retryAt + 1;
 
-export function updateRetry({ retryAt, manualActionRequired }: ApiErrorBody, now: number): UpdateRetry {
+export function updateRetry({ retryAt, manualActionRequired }: ApiErrorBody, serverNow: number): UpdateRetry {
   if (manualActionRequired) return { kind: "operator" };
   const opensAt = retryAt === null ? null : endOfSecond(retryAt);
-  if (opensAt !== null && opensAt * 1000 > now) return { kind: "waiting", opensAt, note: `${formatKstClockSeconds(opensAt)}부터 다시 시도할 수 있습니다.` };
+  if (opensAt !== null && opensAt * 1000 > serverNow) {
+    const from = `${formatKstClockSeconds(opensAt)}부터`;
+    return { kind: "waiting", opensAt, from, note: `${from} 다시 시도할 수 있습니다.` };
+  }
   return { kind: "ready", note: "다시 시도하면 남은 것만 받습니다." };
 }
