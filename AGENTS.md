@@ -13,6 +13,7 @@
 - 로컬 서버 준비: `python3 scripts/dev.py build`. 새 worktree·UI 전용 변경·Rust 변경에서의 재사용 조건과 캐시 복구는 [`docs/development-builds.md`](docs/development-builds.md)를 따른다.
 - 서버: `python3 scripts/dev.py cargo clippy -p server --all-targets -- -D warnings`, `python3 scripts/dev.py cargo test -p server`(특정 파일만이면 `--test <이름>`)
 - fake-kiwoom: `python3 scripts/dev.py cargo test -p fake-kiwoom`
+- 개발 빌드 도구 변경 시: `python3 scripts/test-dev.py`.
 - 웹: `cd web && pnpm install --frozen-lockfile && pnpm typecheck && pnpm test`
 - e2e: `python3 scripts/dev.py build --with-fake`를 먼저 하고, `cd web && VALLY_E2E_BIN_DIR=../target/dev/bin ./node_modules/.bin/playwright test [e2e/<파일>]`. 가짜 키움은 자동 시험에서 사용한다.
 - 키움은 fake-kiwoom으로만 시험한다. 시험에서 실제 키움을 부르지 않는다(ADR 0004).
