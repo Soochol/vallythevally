@@ -959,7 +959,7 @@ fn fill_large_store(path: &Path, days: &[KstDate]) {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn one_condition_over_4000_stocks_with_thousands_of_bars_answers_within_2_seconds() {
+async fn a_screen_over_4000_stocks_with_thousands_of_bars_answers_within_2_seconds() {
     let days = last_open_days(LARGE_BARS, day(2026, 11, 6));
     let today = *days.last().unwrap();
     let dir = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
@@ -980,6 +980,15 @@ async fn one_condition_over_4000_stocks_with_thousands_of_bars_answers_within_2_
         ("일봉 거래량 2,900일 신고거래량이 최근 20일 안", screen("D", &[("volume", 2_900, 20)], &[])),
         ("주봉 종가 52주 신고가가 최근 4주 안", screen("W", &[("close", 52, 4)], &[])),
         ("월봉 고가 120개월 신고가가 이번 달", screen("M", &[("high", 120, 1)], &[])),
+        (
+            "일봉 20일 전 대비 +10% 이상이면서 주봉 거래량 급증, 일봉 고점 거리, 월봉 거래대금 범위",
+            every(vec![
+                change("D", 5, 20, Some(10.0), None),
+                surge("W", 2, "volume", 10, 1.2),
+                near_extreme("D", 1, "high", 250, 30.0),
+                value_range("M", 1, "traded_value", Some(1_000_000.0), None),
+            ]),
+        ),
     ];
     for (label, screen) in &screens {
         let mut took = Vec::new();
