@@ -162,7 +162,7 @@ impl Screener {
             done += 1;
             self.report(id, UpdatePhase::Backfill, done, total);
         }
-        Ok(())
+        Ok(self.with_store(Store::end_full_refetch).await?)
     }
 
     async fn catch_up(&self, code: StockCode, how: Catchup, target: KstDate) -> Result<Option<Write>, BarError> {

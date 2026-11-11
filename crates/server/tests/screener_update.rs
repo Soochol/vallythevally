@@ -786,3 +786,29 @@ async fn an_update_lists_the_stocks_the_server_got_at_start_or_at_07_45_without_
     assert_eq!(daily_chains(calls), BTreeMap::from([(relisted.to_owned(), vec![None])]));
     server.stop().await;
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_new_full_update_refetches_every_confirmed_history_even_after_kiwoom_kept_withholding_one_history() {
+    let fake = FakeKiwoom::start().await;
+    let tmp = tempfile::tempdir().unwrap();
+    let today = day(2026, 11, 6);
+    let market = KrxMarket::sample(today);
+    update_once(&fake, tmp.path(), &market, &at(today, "2030"), false).await;
+    let mut withheld = market.clone();
+    withheld.stock_mut(krx::COMMON).daily = DailyAnswer::EmptyRow;
+    let every: BTreeMap<String, Vec<Option<String>>> =
+        market.stocks.iter().map(|s| (s.code.clone(), if s.code == krx::COMMON { vec![None] } else { whole_history(&s.code, s.bars.len()) })).collect();
+    for (round, clock) in [(1, "2040"), (2, "2050")] {
+        let (status, calls) = update_once(&fake, tmp.path(), &withheld, &at(today, clock), true).await;
+        assert_eq!((status["fullHistory"].clone(), status["unconfirmed"].clone()), (json!({"done": 10, "total": 10}), json!(0)), "{round}번째");
+        assert_eq!(daily_chains(&calls), every, "{round}번째 전체 다시 받기도 확인된 모든 종목의 전체 이력을 받는다");
+    }
+
+    let (_, calls) = update_once(&fake, tmp.path(), &withheld, &at(today, "2100"), false).await;
+    assert_eq!(daily_chains(&calls), BTreeMap::from([(krx::COMMON.to_owned(), vec![None])]), "일반 업데이트는 다시 받지 못한 그 종목만 다시 묻는다");
+    let (_, calls) = update_once(&fake, tmp.path(), &market, &at(today, "2110"), false).await;
+    assert_eq!(daily_chains(&calls), BTreeMap::from([(krx::COMMON.to_owned(), whole_history_of(&market, krx::COMMON))]), "키움이 다시 주면 그 종목의 전체 이력을 받는다");
+    let (_, calls) = update_once(&fake, tmp.path(), &market, &at(today, "2120"), false).await;
+    assert_eq!(count(&calls, "ka10081"), 0, "다시 받을 표시가 남지 않는다");
+}
+

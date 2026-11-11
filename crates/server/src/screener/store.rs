@@ -10,10 +10,10 @@ use duckdb::{Config, Connection, OptionalExt, params};
 use crate::api::ExcludeKind;
 use crate::kiwoom::wire::{MillionWon, ScreenerListing};
 
-const SCHEMA_VERSION: i32 = 3;
+const SCHEMA_VERSION: i32 = 4;
 
 const SCHEMA: &str = "
-CREATE TABLE store_meta (schema_version INTEGER NOT NULL, last_day DATE);
+CREATE TABLE store_meta (schema_version INTEGER NOT NULL, last_day DATE, full_refetch BOOLEAN NOT NULL);
 CREATE TABLE listed (code VARCHAR NOT NULL, name VARCHAR NOT NULL, listed_on DATE, excludable_as USMALLINT NOT NULL);
 CREATE TABLE history (code VARCHAR PRIMARY KEY, complete BOOLEAN NOT NULL, refetch BOOLEAN NOT NULL);
 CREATE TABLE daily (code VARCHAR NOT NULL, day DATE NOT NULL, open UBIGINT NOT NULL, high UBIGINT NOT NULL, low UBIGINT NOT NULL, close UBIGINT NOT NULL, volume UBIGINT NOT NULL, traded_million_won UBIGINT NOT NULL);
@@ -246,16 +246,17 @@ impl Store {
     pub fn mark_refetch(&self) -> Result<(), StoreError> {
         let mut conn = self.conn();
         let tx = conn.transaction()?;
-        let pending: u32 = tx.query_row(
-            "SELECT count(*) FROM listed JOIN history USING (code)
-             WHERE history.refetch AND code IN (SELECT code FROM daily WHERE day = (SELECT last_day FROM store_meta))",
-            [],
-            |row| row.get(0),
-        )?;
-        if pending == 0 {
+        let running: bool = tx.query_row("SELECT full_refetch FROM store_meta", [], |row| row.get(0))?;
+        if !running {
             tx.execute("INSERT INTO history SELECT DISTINCT code, false, true FROM listed ON CONFLICT (code) DO UPDATE SET refetch = true", [])?;
+            tx.execute("UPDATE store_meta SET full_refetch = true", [])?;
         }
         tx.commit()?;
+        Ok(())
+    }
+
+    pub fn end_full_refetch(&self) -> Result<(), StoreError> {
+        self.conn().execute("UPDATE store_meta SET full_refetch = false", [])?;
         Ok(())
     }
 
@@ -298,7 +299,7 @@ fn stored_version(conn: &Connection) -> Result<Option<i32>, StoreError> {
 fn create(mut conn: Connection) -> Result<Connection, StoreError> {
     let tx = conn.transaction()?;
     tx.execute_batch(SCHEMA)?;
-    tx.execute("INSERT INTO store_meta VALUES (?, NULL)", params![SCHEMA_VERSION])?;
+    tx.execute("INSERT INTO store_meta VALUES (?, NULL, false)", params![SCHEMA_VERSION])?;
     tx.commit()?;
     Ok(conn)
 }
