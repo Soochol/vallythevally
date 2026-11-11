@@ -206,7 +206,7 @@ test("빈 저장소를 채우고 만든 조건식으로 찾은 종목을 칸의 
   });
 });
 
-test("시가총액 줄이나 줄마다 다른 봉 주기가 든 조건식도 편집에서 그대로 열리고, 이름만 바꿔 저장해도 줄과 시장이 그대로 남으며, 거래대금 신고가 줄은 값 칸에 거래대금으로 보인다", async ({ app, page }) => {
+test("시가총액 줄이나 줄마다 다른 봉 주기가 든 조건식도 편집에서 그대로 열리고, 이름만 바꿔 저장해도 줄과 시장이 그대로 남으며, 거래대금 신고가 줄은 신고거래대금 항목으로 보인다", async ({ app, page }) => {
   const newHigh = (period: string, field: string, n: number, m: number) => ({ kind: "new_high", period, m, field, n });
   const capped = { id: "capped", name: "시가총액 섞임", markets: [], exclude: [], conditions: [newHigh("D", "high", 60, 1), { kind: "market_cap", min: 300_000_000_000, max: null }] };
   const mixed = { id: "mixed", name: "주봉 섞임", markets: ["kosdaq"], exclude: [], conditions: [newHigh("D", "high", 60, 1), newHigh("W", "close", 52, 1)] };
@@ -252,11 +252,13 @@ test("시가총액 줄이나 줄마다 다른 봉 주기가 든 조건식도 편
     await renameAndSave(dialog, "주봉 섞임 바꿈");
   });
 
-  await test.step("거래대금 신고가 줄은 값 칸에 거래대금이 골라져 있고, 이름을 바꿔 저장해도 거래대금이다", async () => {
+  await test.step("거래대금 신고가 줄은 종류 칸에 신고거래대금이 골라져 있고 기간이 그대로이며, 이름을 바꿔 저장해도 거래대금이다", async () => {
     const dialog = await edit(traded.name);
-    const value = dialog.getByRole("combobox", { name: "조건 1 값" });
-    await expect(value).toHaveValue("traded_value");
-    await expect(value.locator("option:checked")).toHaveText("거래대금");
+    const kind = dialog.getByRole("combobox", { name: "조건 1 종류" });
+    await expect(kind).toHaveValue("traded_value_high");
+    await expect(kind.locator("option:checked")).toHaveText("신고거래대금");
+    await expect(dialog.getByRole("textbox", { name: "조건 1 신고거래대금 기간" })).toHaveValue("60");
+    await expect(dialog.getByRole("textbox", { name: "조건 1 최근 봉 수" })).toHaveValue("1");
     await expect(dialog.getByText("당일 거래대금이 60일 신고거래대금이다")).toBeVisible();
     await renameAndSave(dialog, "신고거래대금 바꿈");
   });
@@ -567,6 +569,8 @@ for (const width of [320, 360]) {
         ["value_range"],
         ["change"],
         ["near_extreme"],
+        ["volume_high"],
+        ["traded_value_high"],
         ["surge"],
         ["ma_position"],
         ["ma_alignment", [], 1],

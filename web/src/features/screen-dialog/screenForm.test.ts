@@ -14,6 +14,7 @@ import {
   editCondition,
   excludesIn,
   KIND_GROUPS,
+  kindChoiceOf,
   moveCondition,
   removeCondition,
   removeMaLine,
@@ -128,10 +129,33 @@ test("같은 종류를 다시 고르면 입력한 값이 그대로다", () => {
   expect(changeKind(draft, 0, "new_high")).toEqual(draft);
 });
 
-test("종류 메뉴는 가격, 거래, 이동평균, 보조지표, 종목 묶음에 15가지를 한 번씩 담는다", () => {
+test("신고거래량·신고거래대금을 새로 고르면 일봉·최근 100·200으로 시작하고, 고친 뒤 같은 항목을 다시 골라도 고친 값이 그대로다", () => {
+  const start = editCondition(oneLine(), { ...firstLine(oneLine()), period: "W", m: "3" });
+  const volume = changeKind(start, 0, "volume_high");
+  expect(conditionOf(firstLine(volume))).toEqual({ kind: "new_high", period: "D", m: 100, field: "volume", n: 200 });
+  expect(conditionOf(firstLine(changeKind(start, 0, "traded_value_high")))).toEqual({ kind: "new_high", period: "D", m: 100, field: "traded_value", n: 200 });
+
+  const picked = firstLine(volume);
+  if (picked.kind !== "new_high") throw new Error("신고가 계산을 쓰는 줄이어야 한다");
+  const edited = editCondition(volume, { ...picked, period: "M", n: "24", m: "6" });
+  expect(changeKind(edited, 0, "volume_high")).toEqual(edited);
+  expect(kindChoiceOf(firstLine(edited))).toBe("volume_high");
+  expect(conditionOf(firstLine(changeKind(edited, 0, "traded_value_high")))).toEqual({ kind: "new_high", period: "D", m: 100, field: "traded_value", n: 200 });
+  expect(conditionOf(firstLine(changeKind(edited, 0, "new_high")))).toEqual({ kind: "new_high", period: "M", m: 6, field: "high", n: 200 });
+});
+
+test("신고가 값으로 거래량·거래대금을 골라 저장한 줄은 신고거래량·신고거래대금 항목으로 열리고 봉 주기와 N·M이 그대로다", () => {
+  const draft = draftOf({ ...weekly, conditions: [weekly.conditions[0]!, weekly.conditions[1]!, { kind: "new_high", period: "M", m: 2, field: "traded_value", n: 12 }] });
+  expect(draft.conditions.map(kindChoiceOf)).toEqual(["new_high", "volume_high", "traded_value_high"]);
+  expect(draft.conditions.map(conditionOf)).toEqual([weekly.conditions[0], weekly.conditions[1], { kind: "new_high", period: "M", m: 2, field: "traded_value", n: 12 }]);
+  expect(errorsIn({ ...draft.conditions[1]!, m: "53" })).toEqual({ m: "신고거래량 기간 52주보다 길 수 없습니다" });
+  expect(errorsIn({ ...draft.conditions[2]!, m: "13" })).toEqual({ m: "신고거래대금 기간 12개월보다 길 수 없습니다" });
+});
+
+test("종류 메뉴는 가격, 거래, 이동평균, 보조지표, 종목 묶음에 15가지와 신고거래량·신고거래대금을 한 번씩 담는다", () => {
   expect(KIND_GROUPS.map((g) => [g.label, g.kinds])).toEqual([
     ["가격", ["new_high", "new_low", "value_range", "change", "near_extreme"]],
-    ["거래", ["surge"]],
+    ["거래", ["volume_high", "traded_value_high", "surge"]],
     ["이동평균", ["ma_position", "ma_alignment", "ma_cross"]],
     ["보조지표", ["rsi", "macd", "stochastic", "bollinger", "ichimoku"]],
     ["종목", ["market_cap"]],

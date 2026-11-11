@@ -432,6 +432,52 @@ async fn a_traded_value_new_high_runs_and_no_condition_kind_or_market_is_refused
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn a_volume_or_traded_value_high_in_the_last_100_of_200_cells_follows_the_price_new_high_rules() {
+    let days = last_open_days(300, day(2026, 11, 6));
+    let flat_but = |code: &str, peaks: &[(usize, u64)]| {
+        stock(code, days.iter().enumerate().map(|(i, &d)| bar(d, 10_000, peaks.iter().find(|(at, _)| *at == i).map_or(1_000, |&(_, volume)| volume))).collect())
+    };
+    let gapped = days.iter().enumerate().filter(|(i, _)| !(150..=159).contains(i)).map(|(i, &d)| bar(d, 10_000, if i == 99 { 9_000 } else { 1_000 })).collect();
+    let halted = days.iter().enumerate().map(|(i, &d)| bar(d, 10_000, match i { 99 => 9_000, 150..=159 => 0, _ => 1_000 })).collect();
+    let pricier = days.iter().enumerate().map(|(i, &d)| bar(d, if i == 230 { 90_000 } else { 10_000 }, 1_000)).collect();
+    let stocks = vec![
+        flat_but("200010", &[(200, 9_000)]),
+        flat_but("200020", &[(199, 9_000)]),
+        flat_but("200030", &[(99, 9_000)]),
+        flat_but("200040", &[(150, 7_000), (260, 7_000)]),
+        stock("200050", gapped),
+        stock("200060", halted),
+        stock("200070", pricier),
+        stock("200080", priced(&days[101..], |_| 10_000)),
+        stock("200090", priced(&days[100..], |_| 10_000)),
+    ];
+    let session = loaded(KrxMarket { days: days.clone(), stocks }).await;
+    let api = &session.api;
+
+    let volume = api.result(&daily(&[("volume", 200, 100)])).await;
+    assert_eq!((volume["universe"].clone(), volume["excluded"].clone()), (json!(9), excluded(1, 0)), "상장한 날부터 199칸인 200080만 상장 기간 부족이다");
+    assert_eq!(
+        hits(&volume),
+        [hit("200030", days[299]), hit("200050", days[299]), hit("200060", days[299]), hit("200070", days[299]), hit("200090", days[299]), hit("200040", days[260]), hit("200010", days[200])],
+        "최근 100칸의 첫 칸에 난 200칸 최고 거래량은 맞고 그 앞 칸이면 빠진다. 200칸 밖으로 나간 최고값, 빠진 날과 거래정지 날도 칸으로 세며, 앞선 같은 값도 최고값이다"
+    );
+
+    let traded_value = api.result(&daily(&[("traded_value", 200, 100)])).await;
+    assert_eq!(traded_value["excluded"], excluded(1, 0));
+    assert_eq!(
+        hits(&traded_value),
+        [hit("200030", days[299]), hit("200050", days[299]), hit("200060", days[299]), hit("200090", days[299]), hit("200040", days[260]), hit("200070", days[230]), hit("200010", days[200])],
+        "신고거래대금도 같은 칸 규칙이고, 거래량이 같아도 가격이 높은 날의 거래대금이 최고값이다"
+    );
+
+    for field in ["volume", "traded_value"] {
+        let (status, body) = api.run(&daily(&[(field, 200, 201)])).await;
+        assert_eq!((status, body["error"]["code"].clone()), (400, json!("bad_request")), "{field}: 최근 봉 수는 비교 기간보다 길 수 없다: {body}");
+        assert_eq!(api.run(&daily(&[(field, 200, 200)])).await.0, 200, "{field}: 최근 봉 수와 비교 기간이 같을 수 있다");
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn excluded_kinds_and_states_leave_the_universe_uncounted_even_when_audit_info_lists_several() {
     let days = fortnight();
     let flat = |code: &str| stock(code, priced(&days, |_| 100));
