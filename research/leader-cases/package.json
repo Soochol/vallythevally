@@ -1,0 +1,12 @@
+{
+  "name": "leader-cases",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.18"
+  },
+  "scripts": {
+    "check-symbols": "node check-sector-symbols.ts",
+    "test": "node --test"
+  }
+}
