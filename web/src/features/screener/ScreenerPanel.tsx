@@ -1,5 +1,6 @@
 import type { UseQueryResult } from "@tanstack/react-query";
-import { type ReactNode, type RefObject, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { type ReactNode, type RefObject, useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
+import type { ApiErrorBody } from "../../api/generated/ApiErrorBody";
 import type { KstDate } from "../../api/generated/KstDate";
 import type { Screen } from "../../api/generated/Screen";
 import type { ScreenerResult } from "../../api/generated/ScreenerResult";
@@ -34,11 +35,14 @@ import {
   type StatusFooter,
   statusFooter,
   todayConfirmed,
+  type UpdateRetry,
+  updateRetry,
 } from "../../lib/screener";
 import { addSymbols, listNameFrom, MAX_WATCHLISTS } from "../../lib/watchlist";
 import { useCell, useLayoutStore } from "../../stores/layout";
 import { type Rerun, rerunReason, runOf, type ScreenRun, shownResult, useScreenerStore } from "../../stores/screener";
 import { useSelectionStore } from "../../stores/selection";
+import { serverNow, useServerClock } from "../../stores/serverClock";
 import { useUiStore } from "../../stores/ui";
 import { useWatchlistStore } from "../../stores/watchlist";
 import { ChevronIcon, MoreIcon, PenIcon, PlayIcon, PlusIcon, SpinnerIcon } from "../icons";
@@ -336,6 +340,8 @@ function PanelMenu({ screen, rows, status }: { screen: Screen | null; rows: read
   const menu = useMenuToggle();
   const lists = useWatchlistStore((s) => s.lists);
   const { start } = useUpdateCommands();
+  const retry = useUpdateRetry(status?.update?.error ?? null);
+  const waiting = retry?.kind === "waiting" ? retry : null;
   const codes = rows.map((r) => r.symbol);
   const nothing = codes.length === 0;
   const fresh = screen ? listNameFrom(lists, screen.name) : null;
@@ -351,7 +357,7 @@ function PanelMenu({ screen, rows, status }: { screen: Screen | null; rows: read
     ...lists.map((l): MenuItem => ({ kind: "action", label: l.name, disabled: nothing, onSelect: () => sendToWatchlist(l.id, codes) })),
     ...newList,
     { kind: "separator" },
-    { kind: "action", label: "전체 다시 받기…", disabled: isUpdating(status), onSelect: reload },
+    { kind: "action", label: "전체 다시 받기…", hint: waiting?.from, disabled: isUpdating(status) || waiting !== null, onSelect: reload },
   ];
   return (
     <div ref={menu.root} className="relative">
@@ -576,10 +582,24 @@ const progressText = ({ phase, done, total }: ScreenerUpdate) =>
 
 const todayNote = (status: ScreenerStatus) => (todayConfirmed(status) ? "오늘 자료까지 받습니다." : "당일 봉은 20:00 뒤에 받습니다.");
 
+function useUpdateRetry(error: ApiErrorBody | null): UpdateRetry | null {
+  const origin = useServerClock((s) => s.serverTimeOrigin);
+  const [wakes, wake] = useReducer((n: number) => n + 1, 0);
+  const retry = error && updateRetry(error, serverNow(origin));
+  const opensAt = retry?.kind === "waiting" ? retry.opensAt : null;
+  useEffect(() => {
+    if (opensAt === null) return;
+    const id = setTimeout(wake, opensAt * 1000 - serverNow(origin));
+    return () => clearTimeout(id);
+  }, [opensAt, origin, wakes]);
+  return retry;
+}
+
 function UpdateBand({ status }: { status: ScreenerStatus }) {
   const { start, cancel } = useUpdateCommands();
   const run = (full: boolean) => void start(full).catch(showCommandError);
   const update = status.update;
+  const retry = useUpdateRetry(update?.error ?? null);
   const reference = status.needDay ?? status.lastDay;
   const stored = status.lastDay && reference ? `${dayLabel(status.lastDay, reference)}까지 있습니다.` : "받은 자료가 없습니다.";
   const frame = "flex-none border-b border-line bg-surface px-3 py-2.5";
@@ -619,16 +639,20 @@ function UpdateBand({ status }: { status: ScreenerStatus }) {
     );
   }
 
-  if (update?.error) {
-    const retryable = !update.error.manualActionRequired;
+  if (update?.error && retry) {
     return (
       <section aria-label="업데이트" role="alert" className={frame}>
         <div className="flex items-center gap-2">
           <span className="conn-dot" data-tone="red" />
           <span className="text-s font-[650]">업데이트가 멈췄습니다</span>
           <span className="flex-1" />
-          {retryable && (
-            <button type="button" className="btn-primary h-7 flex-none px-3 text-s" onClick={() => run(update.full)}>
+          {retry.kind !== "operator" && (
+            <button
+              type="button"
+              className="btn-primary h-7 flex-none px-3 text-s disabled:cursor-not-allowed disabled:opacity-40"
+              disabled={retry.kind === "waiting"}
+              onClick={() => run(update.full)}
+            >
               다시 시도
             </button>
           )}
@@ -638,7 +662,7 @@ function UpdateBand({ status }: { status: ScreenerStatus }) {
         </p>
         <p className="mt-0.5 text-xs leading-[1.45] text-text-2">
           {stored}
-          {retryable && " 다시 시도하면 남은 것만 받습니다."}
+          {retry.kind !== "operator" && ` ${retry.note}`}
         </p>
       </section>
     );

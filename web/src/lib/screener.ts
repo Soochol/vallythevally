@@ -1,3 +1,4 @@
+import type { ApiErrorBody } from "../api/generated/ApiErrorBody";
 import type { BarField } from "../api/generated/BarField";
 import type { ExcludeKind } from "../api/generated/ExcludeKind";
 import type { KstDate } from "../api/generated/KstDate";
@@ -7,7 +8,9 @@ import type { ScreenerExcluded } from "../api/generated/ScreenerExcluded";
 import type { ScreenerRow } from "../api/generated/ScreenerRow";
 import type { ScreenerStatus } from "../api/generated/ScreenerStatus";
 import type { ScreenPeriod } from "../api/generated/ScreenPeriod";
+import type { UnixSeconds } from "../api/generated/UnixSeconds";
 import type { UpdatePhase } from "../api/generated/UpdatePhase";
+import { formatKstClockSeconds } from "../chart/time";
 
 export const PERIOD_NAME: Record<ScreenPeriod, string> = { D: "일봉", W: "주봉", M: "월봉" };
 export const UNIT: Record<ScreenPeriod, string> = { D: "일", W: "주", M: "개월" };
@@ -144,3 +147,17 @@ export function statusFooter(status: ScreenerStatus | undefined, error: Error | 
 
 export const todayConfirmed = ({ todayAvailable, lastDay, needDay }: ScreenerStatus): boolean =>
   todayAvailable || (lastDay !== null && needDay !== null && lastDay > needDay);
+
+export type UpdateRetry = { kind: "operator" } | { kind: "ready"; note: string } | { kind: "waiting"; opensAt: UnixSeconds; from: string; note: string };
+
+const endOfSecond = (retryAt: UnixSeconds): UnixSeconds => retryAt + 1;
+
+export function updateRetry({ retryAt, manualActionRequired }: ApiErrorBody, serverNow: number): UpdateRetry {
+  if (manualActionRequired) return { kind: "operator" };
+  const opensAt = retryAt === null ? null : endOfSecond(retryAt);
+  if (opensAt !== null && opensAt * 1000 > serverNow) {
+    const from = `${formatKstClockSeconds(opensAt)}부터`;
+    return { kind: "waiting", opensAt, from, note: `${from} 다시 시도할 수 있습니다.` };
+  }
+  return { kind: "ready", note: "다시 시도하면 남은 것만 받습니다." };
+}
