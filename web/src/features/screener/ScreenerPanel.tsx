@@ -702,7 +702,8 @@ function StoreLine({ status, lastDay }: { status: ScreenerStatus; lastDay: KstDa
   const { start } = useUpdateCommands();
   const today = status.todayAvailable;
   const history = status.fullHistory.done < status.fullHistory.total ? `과거 이력 ${count(status.fullHistory.done)}/${count(status.fullHistory.total)}종목` : null;
-  const notes = [today ? "오늘 자료를 받을 수 있습니다" : todayConfirmed(status) ? "빠진 관측일 없음" : "당일 봉은 20:00 뒤에 받습니다", history].filter((n) => n !== null);
+  const unconfirmed = status.unconfirmed > 0 ? `확인 안 됨 ${count(status.unconfirmed)}종목` : null;
+  const notes = [today ? "오늘 자료를 받을 수 있습니다" : todayConfirmed(status) ? "빠진 관측일 없음" : "당일 봉은 20:00 뒤에 받습니다", history, unconfirmed].filter((n) => n !== null);
   return (
     <footer aria-label="KRX 일봉 저장소" className="flex flex-none items-center gap-2 border-t border-line px-3 py-2">
       <span className="conn-dot" data-tone={today ? "amber" : "mint"} />
