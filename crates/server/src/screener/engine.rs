@@ -6,6 +6,7 @@ use duckdb::arrow::datatypes::{ArrowPrimitiveType, DataType, Decimal128Type, Int
 use duckdb::{Connection, Transaction, params};
 
 use super::exact::Decimal;
+use super::indicator::Indicator;
 use super::line::{Cell, Kind, Line, Series};
 use super::store::{StoreError, date_of, date_value, exclusion_mask, price_of, stock_code, unconfirmed_on};
 use crate::api::{self, BarField, Bound, Condition, ExcludeKind, Extreme, Screen, ScreenPeriod, ScreenerExcluded, ScreenerResult, ScreenerRow, SurgeField, SymbolCode};
@@ -41,14 +42,14 @@ fn line_of(condition: &Condition) -> Result<Line, &'static str> {
         Condition::Change { period, m, back, min_pct, max_pct } => line(period, m, Kind::Change { back, min_pct: bound(min_pct)?, max_pct: bound(max_pct)? }),
         Condition::NearExtreme { period, m, extreme, n, within_pct } => line(period, m, Kind::NearExtreme { extreme, n, within_pct: decimal(within_pct)? }),
         Condition::Surge { period, m, field, n, times } => line(period, m, Kind::Surge { field: surged(field), n, times: decimal(times)? }),
-        Condition::MaPosition { .. }
-        | Condition::MaAlignment { .. }
-        | Condition::MaCross { .. }
-        | Condition::Rsi { .. }
-        | Condition::Macd { .. }
-        | Condition::Stochastic { .. }
-        | Condition::Bollinger { .. }
-        | Condition::Ichimoku { .. } => Err("지표 조건은 아직 실행할 수 없습니다"),
+        Condition::MaPosition { period, m, field, method, length, side } => line(period, m, Kind::Indicator(Indicator::ma_position(field, method, length, side)?)),
+        Condition::MaAlignment { period, m, method, ref lengths, order } => line(period, m, Kind::Indicator(Indicator::ma_alignment(method, lengths, order)?)),
+        Condition::MaCross { period, m, method, fast, slow, direction } => line(period, m, Kind::Indicator(Indicator::ma_cross(method, fast, slow, direction)?)),
+        Condition::Rsi { period, m, length, test } => line(period, m, Kind::Indicator(Indicator::rsi(length, test)?)),
+        Condition::Macd { period, m, fast, slow, signal, test } => line(period, m, Kind::Indicator(Indicator::macd(fast, slow, signal, test)?)),
+        Condition::Stochastic { period, m, k, d, smooth, test } => line(period, m, Kind::Indicator(Indicator::stochastic(k, d, smooth, test)?)),
+        Condition::Bollinger { period, m, length, k, test } => line(period, m, Kind::Indicator(Indicator::bollinger(length, k, test)?)),
+        Condition::Ichimoku { period, m, conversion, base, span_b, displacement, test } => line(period, m, Kind::Indicator(Indicator::ichimoku(conversion, base, span_b, displacement, test)?)),
         Condition::MarketCap { .. } => Err("시가총액 조건은 아직 실행할 수 없습니다"),
     }
 }
