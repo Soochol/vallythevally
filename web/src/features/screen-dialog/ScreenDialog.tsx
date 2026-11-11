@@ -160,9 +160,9 @@ const EXCLUDE_ROWS: readonly { group: ExcludeGroup; label: string }[] = [
   { group: "kind", label: "종류 제외" },
   { group: "status", label: "상태 제외" },
 ];
-const FIELD_BOX = "h-[30px] rounded-m border border-line bg-chart-bg text-text outline-none focus:border-accent aria-invalid:border-up aria-invalid:focus:border-up";
+const FIELD_BOX = "ui-field";
 const CHIP =
-  "h-7 rounded-full border border-line px-2.5 text-s text-text-2 hover:text-text " +
+  "h-9 rounded-m border border-line px-3 text-s text-text-2 hover:text-text " +
   "aria-pressed:border-accent aria-pressed:bg-accent-soft aria-pressed:font-[600] aria-pressed:text-accent max-md:h-9";
 const STALE_SAVE = "이 대화상자를 연 뒤 다른 탭이나 기기에서 조건식 목록이 바뀌어 덮어쓰지 않았습니다. 바뀐 목록을 불러왔습니다. 다시 저장하면 이 조건식을 지금 보이는 내용으로 바꿉니다.";
 const STALE_DELETE = "이 대화상자를 연 뒤 다른 탭이나 기기에서 조건식 목록이 바뀌어 삭제하지 않았습니다. 바뀐 목록을 불러왔으니 다시 삭제하세요.";
@@ -234,8 +234,8 @@ function ScreenDialogBody({ editId, opened }: { editId: string | null; opened: S
   };
 
   return (
-    <DialogFrame labelledBy={`${ids}-title`} width="w-[min(760px,calc(100vw-32px))]" onClose={dismiss}>
-      <div className="flex flex-none items-center gap-3 border-b border-line px-4 py-3">
+    <DialogFrame labelledBy={`${ids}-title`} width="w-[min(980px,calc(100vw-32px))]" onClose={dismiss}>
+      <div className="ui-dialog-head">
         <h2 id={`${ids}-title`} className="min-w-0 flex-1 truncate text-l font-[650]">
           {editing ? "조건식 편집" : "새 조건식"}
         </h2>
@@ -248,13 +248,13 @@ function ScreenDialogBody({ editId, opened }: { editId: string | null; opened: S
         <ScreenFields ids={ids} draft={draft} nameError={nameError} nameRef={nameRef} locked={busy} onChange={setDraft} />
 
         {notice && (
-          <p role="alert" className="flex-none border-t border-line px-4 py-2 text-s leading-[1.45] text-up">
+          <p role="alert" className="flex-none border-t border-line px-4 py-2 text-s leading-[1.45] text-danger">
             {notice}
           </p>
         )}
-        <div className="flex flex-none items-center gap-2 border-t border-line px-4 py-2">
+        <div className="ui-dialog-foot">
           {editing && (
-            <button type="button" className="h-8 flex-none rounded-m px-3 text-up hover:bg-raised disabled:opacity-50" disabled={busy} onClick={remove}>
+            <button type="button" className="h-8 flex-none rounded-m px-3 text-danger hover:bg-raised disabled:opacity-50" disabled={busy} onClick={remove}>
               삭제
             </button>
           )}
@@ -286,8 +286,9 @@ interface FieldsProps {
 export function ScreenFields({ ids, draft, nameError, nameRef, locked, onChange }: FieldsProps) {
   const lines = draft.conditions.length;
   return (
-    <div className={`flex min-h-0 flex-1 flex-col gap-4 overflow-auto p-4 ${locked ? "opacity-60" : ""}`}>
+    <div className={`screen-fields flex min-h-0 flex-1 flex-col overflow-auto ${locked ? "opacity-60" : ""}`}>
       <fieldset disabled={locked} className="contents">
+        <section className="screen-section"><h3>조건식 이름</h3>
         <Row label="이름" labelFor={`${ids}-name`}>
           <input
             ref={nameRef}
@@ -304,6 +305,33 @@ export function ScreenFields({ ids, draft, nameError, nameRef, locked, onChange 
           <Errors id={`${ids}-name-error`} messages={nameError ? [nameError] : []} />
         </Row>
 
+        </section>
+        <section className="screen-section"><h3>대상 종목</h3><div className="flex flex-col gap-5">
+        <Row label="시장">
+          <div role="group" aria-label="시장" className="flex flex-wrap gap-1.5 pt-px">
+            {MARKETS.map((m) => (
+              <button key={m} type="button" aria-pressed={draft.markets.includes(m)} onClick={() => onChange((d) => toggleMarket(d, m))} className={CHIP}>
+                {MARKET_LABEL[m]}
+              </button>
+            ))}
+          </div>
+          <p className="text-xs leading-[1.5] text-text-3">고른 시장의 종목만 남깁니다. 아무것도 고르지 않으면 두 시장 모두입니다.</p>
+        </Row>
+
+        {EXCLUDE_ROWS.map(({ group, label }) => (
+          <Row key={group} label={label}>
+            <div role="group" aria-label={label} className="flex flex-wrap gap-1.5 pt-px">
+              {excludesIn(group).map((k) => (
+                <button key={k} type="button" aria-pressed={draft.exclude.includes(k)} onClick={() => onChange((d) => toggleExclude(d, k))} className={CHIP}>
+                  {EXCLUDE_LABEL[k]}
+                </button>
+              ))}
+            </div>
+            {group === "status" && <p className="text-xs leading-[1.5] text-text-3">고른 종류와 상태의 종목은 결과에서 뺍니다. 아무것도 고르지 않으면 전 종목이 대상입니다.</p>}
+          </Row>
+        ))}
+        </div></section>
+        <section className="screen-section"><h3>조건 <span className="ml-2 text-s font-normal text-text-3">모든 조건 충족</span></h3>
         <Row label="조건">
           {lines === 0 ? (
             <p className="pt-1.5 text-s text-text-2">{NO_CONDITIONS_SENTENCE}</p>
@@ -335,29 +363,7 @@ export function ScreenFields({ ids, draft, nameError, nameRef, locked, onChange 
           </span>
         </Row>
 
-        <Row label="시장">
-          <div role="group" aria-label="시장" className="flex flex-wrap gap-1.5 pt-px">
-            {MARKETS.map((m) => (
-              <button key={m} type="button" aria-pressed={draft.markets.includes(m)} onClick={() => onChange((d) => toggleMarket(d, m))} className={CHIP}>
-                {MARKET_LABEL[m]}
-              </button>
-            ))}
-          </div>
-          <p className="text-xs leading-[1.5] text-text-3">고른 시장의 종목만 남깁니다. 아무것도 고르지 않으면 두 시장 모두입니다.</p>
-        </Row>
-
-        {EXCLUDE_ROWS.map(({ group, label }) => (
-          <Row key={group} label={label}>
-            <div role="group" aria-label={label} className="flex flex-wrap gap-1.5 pt-px">
-              {excludesIn(group).map((k) => (
-                <button key={k} type="button" aria-pressed={draft.exclude.includes(k)} onClick={() => onChange((d) => toggleExclude(d, k))} className={CHIP}>
-                  {EXCLUDE_LABEL[k]}
-                </button>
-              ))}
-            </div>
-            {group === "status" && <p className="text-xs leading-[1.5] text-text-3">고른 종류와 상태의 종목은 결과에서 뺍니다. 아무것도 고르지 않으면 전 종목이 대상입니다.</p>}
-          </Row>
-        ))}
+        </section>
       </fieldset>
     </div>
   );
@@ -388,8 +394,8 @@ function ConditionLine({ ids, index, last, condition, onChange, onKind, onMove, 
   const ui: LineUi = { label, base: `${ids}-condition-${condition.key}`, kind, errors: row.ok ? {} : row.errors };
   const barLine = condition.kind !== "market_cap";
   return (
-    <li className="flex flex-col gap-1">
-      {index > 0 && <span className="text-xs font-[600] text-accent">그리고</span>}
+    <li className="condition-card flex flex-col gap-3">
+      <header><strong className="font-semibold">{label}</strong><span className="text-xs text-text-3">{index > 0 ? "그리고" : "첫 번째 조건"}</span></header>
       <div className="flex flex-wrap items-center gap-x-1.5 gap-y-1.5 text-s text-text-2">
         <select aria-label={`${label} 종류`} value={kind} onChange={(e) => onKind(kindOf(e.target.value) ?? kind)} className={`${FIELD_BOX} px-1.5`}>
           {KIND_GROUPS.map((group) => (
