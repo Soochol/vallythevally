@@ -93,13 +93,16 @@ test("replacement consumes queued rollover in both real series and retains newer
   await expect(chart).toHaveAttribute("data-last-close", "206000", { timeout: 1000 });
   await expect(() => trade(207_000, "100201", 7)).toPass({ timeout: 15_000 });
   await expect(chart).toHaveAttribute("data-last-close", "207000");
-  const final = await series(page);
-  expect(final.find((s) => s.type === "Line")!.data.slice(-2)).toEqual([
-    expect.objectContaining({ value: 205_000 }), expect.objectContaining({ value: 207_000 }),
-  ]);
-  expect(final.find((s) => s.type === "Histogram")!.data.slice(-2)).toEqual([
-    expect.objectContaining({ value: 12 }), expect.objectContaining({ value: 13 }),
-  ]);
+  await expect.poll(async () => {
+    const final = await series(page);
+    return {
+      main: final.find((s) => s.type === "Line")!.data.slice(-2),
+      volume: final.find((s) => s.type === "Histogram")!.data.slice(-2),
+    };
+  }).toEqual({
+    main: [expect.objectContaining({ value: 205_000 }), expect.objectContaining({ value: 207_000 })],
+    volume: [expect.objectContaining({ value: 12 }), expect.objectContaining({ value: 13 })],
+  });
   expect((await savedDrawings(app))[0]!.points).toEqual(saved.points);
   await page.getByRole("group", { name: "봉 주기" }).getByRole("button", { name: "일", exact: true }).click();
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
