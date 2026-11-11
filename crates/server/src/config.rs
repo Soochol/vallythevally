@@ -81,6 +81,7 @@ const KNOWN_KEYS: &[&str] = &[
     "VALLY_CLOCK_START",
     "VALLY_DB_PATH",
     "VALLY_SCREENER_DB_PATH",
+    "VALLY_SCREENER_UPDATE_ON_START",
     "VALLY_LOCK_PATH",
     "VALLY_TOKEN_PATH",
     "VALLY_BIND",
@@ -105,6 +106,7 @@ pub struct Config {
     /// 사용자 자료 SQLite 파일(§7.1). 상대 경로면 서버 작업 디렉터리 기준.
     pub db_path: PathBuf,
     pub screener_db_path: PathBuf,
+    pub screener_update_on_start: bool,
     pub log_filter: String,
 }
 
@@ -176,6 +178,11 @@ impl Config {
             static_dir: PathBuf::from(vars.get("VALLY_STATIC_DIR").map_or("web/dist", String::as_str)),
             db_path: PathBuf::from(vars.get("VALLY_DB_PATH").map_or("data/vally.db", String::as_str)),
             screener_db_path: PathBuf::from(vars.get("VALLY_SCREENER_DB_PATH").map_or("data/screener.duckdb", String::as_str)),
+            screener_update_on_start: match vars.get("VALLY_SCREENER_UPDATE_ON_START").map(String::as_str) {
+                None | Some("on") => true,
+                Some("off") => false,
+                Some(other) => return Err(ConfigError(format!("VALLY_SCREENER_UPDATE_ON_START는 on이나 off입니다: {other}"))),
+            },
             log_filter: vars.get("VALLY_LOG").cloned().unwrap_or_else(|| "info".to_owned()),
         };
         Ok((config, warnings))
@@ -317,6 +324,7 @@ mod tests {
         assert_eq!(c.static_dir, PathBuf::from("web/dist"));
         assert_eq!(c.db_path, PathBuf::from("data/vally.db"));
         assert_eq!(c.screener_db_path, PathBuf::from("data/screener.duckdb"));
+        assert!(c.screener_update_on_start, "서버를 켤 때 뒤처진 스크리너 저장소를 채우는 것이 기본이다");
         assert_eq!(c.log_filter, "info");
         assert_eq!(c.lock_path, PathBuf::from("/nonexistent/test.lock"));
         assert_eq!(c.token_path, PathBuf::from("/nonexistent/token.json"));
@@ -375,6 +383,14 @@ mod tests {
 
         let (c, _) = Config::from_vars(vars(&keys[..2]), vars(&REAL), lock, token).unwrap();
         assert_eq!(c.clock_start, None);
+    }
+
+    #[test]
+    fn screener_update_on_start_is_on_or_off() {
+        let start = |value: &str| Config::from_vars(vars(&[("VALLY_KIWOOM_APP_KEY", KEY), ("VALLY_KIWOOM_APP_SECRET", SECRET), ("VALLY_SCREENER_UPDATE_ON_START", value)]), vars(&REAL), lock, token);
+        assert!(start("on").unwrap().0.screener_update_on_start);
+        assert!(!start("off").unwrap().0.screener_update_on_start);
+        assert!(start("no").is_err());
     }
 
     #[test]

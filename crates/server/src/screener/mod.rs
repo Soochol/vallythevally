@@ -93,7 +93,6 @@ impl Screener {
         }
     }
 
-
     fn run(&self) -> MutexGuard<'_, Run> {
         self.run.lock().expect("업데이트 상태 잠금")
     }
@@ -135,6 +134,33 @@ impl Screener {
             }
             *progress = Progress { phase, done: done as u32, total: total as u32, full: progress.full };
         }
+    }
+
+    pub async fn update_if_behind(self: &Arc<Self>) {
+        let calendar = match self.calendar(CalendarUse::Update).await {
+            Ok(c) => c,
+            Err(e) => {
+                tracing::warn!(error = %e, "코스피 일봉을 받지 못해 서버를 켤 때의 스크리너 업데이트를 건너뜁니다");
+                return;
+            }
+        };
+        let Some(target) = calendar.target(self.clock.now()) else {
+            tracing::warn!("코스피 일봉에 관측일이 없어 서버를 켤 때의 스크리너 업데이트를 건너뜁니다");
+            return;
+        };
+        let last_day = match self.with_store(Store::summary).await {
+            Ok(summary) => summary.last_day,
+            Err(e) => {
+                tracing::error!(error = %e, "스크리너 저장소를 읽지 못해 서버를 켤 때의 업데이트를 건너뜁니다");
+                return;
+            }
+        };
+        if last_day.is_some_and(|last| last >= target) {
+            tracing::info!(%target, "스크리너 저장소가 목표 관측일까지 차 있어 업데이트를 시작하지 않습니다");
+            return;
+        }
+        tracing::info!(last_day = ?last_day, %target, "스크리너 저장소가 목표 관측일보다 뒤처져 업데이트를 시작합니다");
+        self.start(false);
     }
 
     fn finish(&self, id: u64, outcome: Result<(), BarError>) {

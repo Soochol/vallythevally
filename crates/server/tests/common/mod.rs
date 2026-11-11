@@ -37,6 +37,7 @@ impl Server {
             .env("VALLY_LOCK_PATH", lock)
             .env("VALLY_DB_PATH", dir.join("vally.db"))
             .env("VALLY_SCREENER_DB_PATH", dir.join("screener.duckdb"))
+            .env("VALLY_SCREENER_UPDATE_ON_START", "off")
             .env("VALLY_TOKEN_PATH", token_path(lock))
             .env("VALLY_BIND", "127.0.0.1:0")
             .env("VALLY_STATIC_DIR", static_dir)

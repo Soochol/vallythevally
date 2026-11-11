@@ -707,6 +707,45 @@ async fn a_stock_listed_after_the_target_day_is_skipped_without_asking_kiwoom() 
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn the_server_starts_an_update_when_its_store_is_behind_the_target_day_and_not_when_it_is_up_to_date() {
+    let fake = FakeKiwoom::start().await;
+    let tmp = tempfile::tempdir().unwrap();
+    let (yesterday, today) = (day(2026, 11, 5), day(2026, 11, 6));
+    update_once(&fake, tmp.path(), &KrxMarket::sample(yesterday).with_daily_withheld(), &at(yesterday, "2030"), false).await;
+    let boot_updating = |clock: String| {
+        let lock = tmp.path().join("run/server.lock");
+        let dir = tmp.path().to_owned();
+        let fake = &fake;
+        move || Server::spawn_with(fake, &lock, &dir, &[("VALLY_CLOCK_START", OsStr::new(&clock)), ("VALLY_SCREENER_UPDATE_ON_START", OsStr::new("on"))])
+    };
+
+    fake.set_krx_market(KrxMarket::sample(today).with_daily_withheld());
+    let seen = fake.calls().len();
+    let server = boot_updating(at(today, "2030"))();
+    let api = Api::of(&server).await;
+    let caught_up = api.wait_for("켜자마자 시작한 업데이트의 끝", |s| s["lastDay"] == wire(today) && s["update"].is_null()).await;
+    assert_eq!(caught_up["unconfirmed"], json!(1), "{caught_up}");
+    assert_eq!(count(&fake.calls()[seen..], "ka10095"), 1, "버튼을 누르지 않아도 뒤처진 하루를 채운다");
+    server.stop().await;
+
+    let seen = fake.calls().len();
+    let server = boot_updating(at(today, "2040"))();
+    let api = Api::of(&server).await;
+    for _ in 0..400 {
+        if count(&fake.calls()[seen..], "ka20006") > 0 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    assert_eq!(count(&fake.calls()[seen..], "ka20006"), 1, "켤 때 코스피 일봉으로 목표 관측일을 본다");
+    tokio::time::sleep(Duration::from_millis(1_500)).await;
+    let calls = &fake.calls()[seen..];
+    assert_eq!((count(calls, "ka10095"), count(calls, "ka10081")), (0, 0), "목표 관측일까지 찬 저장소는 업데이트하지 않는다. 업데이트했다면 확인 안 된 종목을 다시 확인했다");
+    assert_eq!(api.status().await["update"], Value::Null);
+    server.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn an_update_lists_the_stocks_the_server_got_at_start_or_at_07_45_without_asking_kiwoom_again() {
     let fake = FakeKiwoom::start().await;
     let tmp = tempfile::tempdir().unwrap();

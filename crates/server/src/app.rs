@@ -23,7 +23,7 @@ use crate::http::{AppState, router};
 use crate::instance::InstanceLock;
 use crate::market::hub::{HubHandle, MarketHub};
 use crate::kiwoom::auth::{DAILY_REISSUE_AT, KiwoomAuth};
-use crate::kiwoom::rest::{KiwoomRest, Priority};
+use crate::kiwoom::rest::{KiwoomError, KiwoomRest, Priority};
 use crate::kiwoom::stream::KiwoomStream;
 use crate::kiwoom::token_file::TokenFile;
 use crate::kiwoom::transport::ReqwestTransport;
@@ -157,13 +157,21 @@ async fn serve(config: Config, token_file: TokenFile) -> ExitCode {
         }
     }
     let symbols = Arc::new(SymbolDirectory::default());
-    tokio::spawn(load_symbols_at_startup(clock.clone(), rest.clone(), symbols.clone()));
     let bars = Arc::new(BarService::new(rest.clone(), symbols.clone(), clock.clone()));
+    let screener = Arc::new(Screener::new(screener_store, rest.clone(), bars.clone(), symbols.clone(), clock.clone()));
+    tokio::spawn({
+        let (clock, rest, symbols, screener) = (clock.clone(), rest.clone(), symbols.clone(), screener.clone());
+        let update_on_start = config.screener_update_on_start;
+        async move {
+            if load_symbols_at_startup(clock, rest, symbols).await.is_ok() && update_on_start {
+                screener.update_if_behind().await;
+            }
+        }
+    });
     let (stream, events) = KiwoomStream::spawn(config.kiwoom_ws_url.clone(), rest.clone(), clock.clone());
     let hub = MarketHub::spawn(bars.clone(), stream, events, clock.clone());
     tokio::spawn(daily_reset(clock.clone(), rest.clone(), symbols.clone(), bars.clone(), hub.clone()));
     tokio::spawn(daily_token(clock.clone(), rest.clone()));
-    let screener = Arc::new(Screener::new(screener_store, rest.clone(), bars.clone(), symbols.clone(), clock.clone()));
 
     let app = router(Arc::new(AppState { symbols, bars, rest, db, clock, static_dir: config.static_dir.clone(), hub, screener }));
     tracing::info!(static_dir = %config.static_dir.display(), "요청을 받기 시작합니다");
@@ -194,15 +202,15 @@ fn next_try(clock: &Clock, retry_at: KstTime, at_least: Duration) -> KstTime {
     retry_at.max(clock.now().plus_secs(at_least.as_secs() as i64))
 }
 
-async fn load_symbols_at_startup(clock: Clock, rest: KiwoomRest, symbols: Arc<SymbolDirectory>) {
+async fn load_symbols_at_startup(clock: Clock, rest: KiwoomRest, symbols: Arc<SymbolDirectory>) -> Result<(), KiwoomError> {
     loop {
         let e = match symbols.refresh(&rest, Priority::Screen).await {
-            Ok(()) => return,
+            Ok(()) => return Ok(()),
             Err(e) => e,
         };
         let Some(retry_at) = e.retry_at() else {
             tracing::error!(error = %e, "종목 목록을 받지 못했습니다. 다시 받지 않습니다");
-            return;
+            return Err(e);
         };
         let at = next_try(&clock, retry_at, STARTUP_LIST_RETRY);
         tracing::warn!(error = %e, %at, "종목 목록을 받지 못했습니다. 그 시각에 다시 받습니다");
