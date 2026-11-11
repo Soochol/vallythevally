@@ -160,3 +160,17 @@ async fn a_next_key_answer_replaces_only_that_page_until_reset() {
     assert_eq!(first.body["stk_frgnr"][PAGE_ROWS - 1]["dt"], newest_first[PAGE_ROWS - 1].day.yyyymmdd());
     assert_eq!(healed.body["stk_frgnr"][0]["dt"], newest_first[PAGE_ROWS].day.yyyymmdd(), "둘째 페이지는 첫 페이지 바로 다음 날부터다");
 }
+
+#[tokio::test]
+async fn an_overridden_page_can_keep_its_continuation_headers_and_http_status() {
+    let fake = FakeKiwoom::start().await;
+    fake.set_krx_market(market());
+    let key = format!("{}-1", krx::COMMON);
+    for api_id in ["ka10008", "ka10059"] {
+        let body = json!({"return_code": 0, "_headers": {"cont-yn": "Y", "next-key": "older"}});
+        fake.respond_with_for_key(api_id, &key, 206, body);
+        let request = if api_id == "ka10008" { json!({"stk_cd": krx::COMMON}) } else { net_shares(as_of()) };
+        let reply = kiwoom(&fake, api_id, request, Some(&key)).await;
+        assert_eq!((reply.status, reply.cont.as_str(), reply.next.as_str(), reply.body), (206, "Y", "older", json!({"return_code": 0})), "{api_id}");
+    }
+}

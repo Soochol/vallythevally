@@ -546,6 +546,7 @@ impl<'de> Deserialize<'de> for KstDate {
 pub enum RangeCoverage {
     WholeRange,
     KiwoomStartsLater { first_day: KstDate },
+    NoReadableDates,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
@@ -558,6 +559,15 @@ pub struct DayHistory<T> {
     pub coverage: RangeCoverage,
     pub days: Vec<T>,
     pub skipped_days: Vec<SkippedDay>,
+    pub undated_rows: Vec<UndatedRow>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct UndatedRow {
+    pub dt: String,
+    pub reason: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]

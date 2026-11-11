@@ -128,154 +128,6 @@ fn break_dates(page: &mut Value, endpoint: &str, next: Option<String>) -> Vec<St
     raw
 }
 
-#[tokio::test(flavor = "multi_thread")]
-async fn unreadable_dates_on_the_first_page_are_distinct_from_a_normal_empty_range() {
-    let api = Api::boot().await;
-    for endpoint in [FOREIGN, NET_SHARES] {
-        let original = api.kiwoom_first_page(endpoint, krx::COMMON).await;
-        let mut absent = original.clone();
-        absent[list(endpoint)].as_array_mut().unwrap().remove(0);
-        api.fake.respond_with(api_id(endpoint), 200, absent);
-        let (status, normal_empty) = api.history(endpoint, krx::COMMON, today(), today()).await;
-        assert_eq!((status, &normal_empty["days"], &normal_empty["skippedDays"]), (200, &json!([]), &json!([])), "{endpoint}: {normal_empty}");
-        for raw in ["", "2026110X"] {
-            let mut broken = original.clone();
-            broken[list(endpoint)][0]["dt"] = json!(raw);
-            api.fake.respond_with(api_id(endpoint), 200, broken);
-            let (status, body) = api.history(endpoint, krx::COMMON, today(), today()).await;
-            assert_eq!((status, &body["coverage"], &body["days"], &body["skippedDays"]), (200, &normal_empty["coverage"], &json!([]), &json!([])), "{endpoint}: {body}");
-            assert_ne!(body, normal_empty, "{endpoint}: 날짜 오류가 정상 빈 기간으로 숨지 않는다");
-            assert_eq!(undated_rows(&body), [raw], "{endpoint}: 날짜를 추측하지 않고 원문을 남긴다");
-        }
-        assert_eq!(undated_rows(&normal_empty), Vec::<String>::new());
-    }
-    let logs = api.logs().await;
-    assert!(logs.lines().any(|l| l.contains("WARN") && l.contains("2026110X") && l.contains(krx::COMMON)), "{logs}");
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn a_wholly_undated_first_page_keeps_its_failures_and_walks_to_older_pages() {
-    let api = Api::boot().await;
-    let newest = newest_first(krx::COMMON);
-    let from = newest[PAGE_ROWS * 2 - 1];
-    for endpoint in [FOREIGN, NET_SHARES] {
-        let key = format!("{}-1", krx::COMMON);
-        let mut broken = api.kiwoom_first_page(endpoint, krx::COMMON).await;
-        let second = api.kiwoom_page(endpoint, krx::COMMON, Some(&key)).await;
-        let raw = break_dates(&mut broken, endpoint, Some(key.clone()));
-        api.fake.reset();
-        api.fake.respond_with(api_id(endpoint), 200, broken);
-        api.fake.respond_with_for_key(api_id(endpoint), &key, 200, second);
-        let (status, body) = api.history(endpoint, krx::COMMON, from, today()).await;
-        assert_eq!((status, &body["coverage"]["kind"]), (200, &json!("whole_range")), "{endpoint}: {body}");
-        assert_eq!(body["days"].as_array().unwrap(), &expected_days(endpoint, krx::COMMON, from, newest[PAGE_ROWS]), "{endpoint}: 날짜가 깨진 첫 페이지 뒤의 정상 자료도 받는다");
-        assert_eq!(undated_rows(&body), raw, "{endpoint}");
-        assert_eq!(body["skippedDays"], json!([]), "{endpoint}");
-        assert_eq!(api.chain(endpoint), chain_through(krx::COMMON, 2), "{endpoint}");
-    }
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn a_wholly_undated_middle_page_does_not_hide_older_history() {
-    let api = Api::boot().await;
-    let newest = newest_first(krx::COMMON);
-    let from = newest[PAGE_ROWS * 2 + 10];
-    for endpoint in [FOREIGN, NET_SHARES] {
-        let key = format!("{}-1", krx::COMMON);
-        let mut broken = api.kiwoom_page(endpoint, krx::COMMON, Some(&key)).await;
-        let raw = break_dates(&mut broken, endpoint, Some(format!("{}-2", krx::COMMON)));
-        api.fake.reset();
-        api.fake.respond_with_for_key(api_id(endpoint), &key, 200, broken);
-        let (status, body) = api.history(endpoint, krx::COMMON, from, today()).await;
-        assert_eq!((status, &body["coverage"]["kind"]), (200, &json!("whole_range")), "{endpoint}: {body}");
-        let expected: Vec<Value> = expected_days(endpoint, krx::COMMON, from, today()).into_iter().filter(|d| {
-            let dt = d["day"].as_str().unwrap();
-            dt < newest[PAGE_ROWS * 2 - 1].to_string().as_str() || dt > newest[PAGE_ROWS].to_string().as_str()
-        }).collect();
-        assert_eq!(body["days"].as_array().unwrap(), &expected, "{endpoint}: 날짜가 깨진 중간 페이지를 지나 과거 자료를 받는다");
-        assert_eq!(undated_rows(&body), raw, "{endpoint}");
-        assert_eq!(body["skippedDays"], json!([]), "{endpoint}");
-        assert_eq!(api.chain(endpoint), chain_through(krx::COMMON, 3), "{endpoint}");
-    }
-    let logs = api.logs().await;
-    assert!(logs.lines().any(|l| l.contains("WARN") && l.contains("2026110X") && l.contains(krx::COMMON)), "{logs}");
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn wholly_undated_history_has_no_invented_start_date_or_unknown_symbol_error() {
-    let api = Api::boot().await;
-    for endpoint in [FOREIGN, NET_SHARES] {
-        let mut page = api.kiwoom_first_page(endpoint, krx::COMMON).await;
-        page[list(endpoint)].as_array_mut().unwrap().truncate(2);
-        let raw = break_dates(&mut page, endpoint, None);
-        api.fake.reset();
-        api.fake.respond_with(api_id(endpoint), 200, page);
-        let (status, body) = api.history(endpoint, krx::COMMON, today(), today()).await;
-        assert_eq!((status, &body["coverage"], &body["days"], &body["skippedDays"]), (200, &json!({"kind": "no_readable_dates"}), &json!([]), &json!([])), "{endpoint}: {body}");
-        assert_eq!(undated_rows(&body), raw, "{endpoint}");
-        assert_eq!(api.chain(endpoint), [None], "{endpoint}");
-
-        let mut blank = json!({"return_code": 0});
-        blank[list(endpoint)] = json!([{"dt": ""}]);
-        api.fake.respond_with(api_id(endpoint), 200, blank);
-        let (status, body) = api.history(endpoint, krx::COMMON, today(), today()).await;
-        assert_eq!((status, &body["coverage"]["kind"]), (200, &json!("no_readable_dates")), "{endpoint}: 빈 문자열 행도 날짜 오류를 보존한다: {body}");
-        assert_eq!(undated_rows(&body), [""], "{endpoint}");
-    }
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn distinct_undated_pages_with_the_same_date_errors_still_reach_dated_history() {
-    let api = Api::boot().await;
-    let newest = newest_first(krx::COMMON);
-    let from = newest[PAGE_ROWS * 3 - 1];
-    for endpoint in [FOREIGN, NET_SHARES] {
-        let second_key = format!("{}-1", krx::COMMON);
-        let third_key = format!("{}-2", krx::COMMON);
-        let mut first = api.kiwoom_first_page(endpoint, krx::COMMON).await;
-        let mut second = api.kiwoom_page(endpoint, krx::COMMON, Some(&second_key)).await;
-        let third = api.kiwoom_page(endpoint, krx::COMMON, Some(&third_key)).await;
-        let mut raw = break_dates(&mut first, endpoint, Some(second_key.clone()));
-        raw.extend(break_dates(&mut second, endpoint, Some(third_key.clone())));
-        api.fake.reset();
-        api.fake.respond_with(api_id(endpoint), 200, first);
-        api.fake.respond_with_for_key(api_id(endpoint), &second_key, 200, second);
-        api.fake.respond_with_for_key(api_id(endpoint), &third_key, 200, third);
-        let (status, body) = api.history(endpoint, krx::COMMON, from, today()).await;
-        assert_eq!((status, &body["coverage"]["kind"]), (200, &json!("whole_range")), "{endpoint}: {body}");
-        assert_eq!(body["days"].as_array().unwrap(), &expected_days(endpoint, krx::COMMON, from, newest[PAGE_ROWS * 2]), "{endpoint}");
-        assert_eq!(undated_rows(&body), raw, "{endpoint}: 같은 날짜 오류여도 서로 다른 원본 행을 합치지 않는다");
-        assert_eq!(api.chain(endpoint), chain_through(krx::COMMON, 3), "{endpoint}");
-    }
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn repeated_continuation_keys_or_undated_pages_stop_without_looping() {
-    let api = Api::boot().await;
-    for endpoint in [FOREIGN, NET_SHARES] {
-        for repeat_key in [true, false] {
-            api.fake.reset();
-            let key = format!("{}-1", krx::COMMON);
-            let third_key = format!("{}-2", krx::COMMON);
-            let mut first = api.kiwoom_first_page(endpoint, krx::COMMON).await;
-            let mut second = api.kiwoom_page(endpoint, krx::COMMON, Some(&key)).await;
-            let mut raw = break_dates(&mut first, endpoint, Some(key.clone()));
-            raw.extend(break_dates(&mut second, endpoint, Some(if repeat_key { key.clone() } else { third_key.clone() })));
-            api.fake.reset();
-            api.fake.respond_with(api_id(endpoint), 200, first);
-            api.fake.respond_with_for_key(api_id(endpoint), &key, 200, second.clone());
-            if !repeat_key {
-                second["_headers"] = json!({"cont-yn": "Y", "next-key": format!("{}-3", krx::COMMON)});
-                api.fake.respond_with_for_key(api_id(endpoint), &third_key, 200, second);
-            }
-            let (status, body) = tokio::time::timeout(std::time::Duration::from_secs(10), api.history(endpoint, krx::COMMON, day(2020, 1, 1), today())).await.expect("반복 페이지를 유한한 요청으로 멈춘다");
-            assert_eq!((status, &body["coverage"]["kind"]), (200, &json!("no_readable_dates")), "{endpoint}: {body}");
-            assert_eq!(undated_rows(&body), raw, "{endpoint}: 반복된 페이지의 실패는 다시 넣지 않는다");
-            assert_eq!(api.chain(endpoint), chain_through(krx::COMMON, if repeat_key { 2 } else { 3 }), "{endpoint}");
-        }
-    }
-}
-
 fn newest_first(code: &str) -> Vec<KstDate> {
     stock(code).bars.iter().rev().map(|b| b.day).collect()
 }
@@ -326,6 +178,177 @@ fn empty_answer(endpoint: &str) -> Value {
 
 fn invalid_request() -> Value {
     json!({"return_code": 2, "return_msg": "입력 값 오류입니다[1511:필수 입력 값에 값이 존재하지 않습니다]"})
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn unreadable_dates_on_the_first_page_are_distinct_from_a_normal_empty_range() {
+    let api = Api::boot().await;
+    for endpoint in [FOREIGN, NET_SHARES] {
+        let original = api.kiwoom_first_page(endpoint, krx::COMMON).await;
+        let mut absent = original.clone();
+        absent[list(endpoint)].as_array_mut().unwrap().remove(0);
+        api.fake.respond_with(api_id(endpoint), 200, absent);
+        let (status, normal_empty) = api.history(endpoint, krx::COMMON, today(), today()).await;
+        assert_eq!((status, &normal_empty["days"], &normal_empty["skippedDays"]), (200, &json!([]), &json!([])), "{endpoint}: {normal_empty}");
+        for raw in ["", "2026110X"] {
+            let mut broken = original.clone();
+            broken[list(endpoint)][0]["dt"] = json!(raw);
+            api.fake.respond_with(api_id(endpoint), 200, broken);
+            let (status, body) = api.history(endpoint, krx::COMMON, today(), today()).await;
+            assert_eq!((status, &body["coverage"], &body["days"], &body["skippedDays"]), (200, &normal_empty["coverage"], &json!([]), &json!([])), "{endpoint}: {body}");
+            assert_ne!(body, normal_empty, "{endpoint}: 날짜 오류가 정상 빈 기간으로 숨지 않는다");
+            assert_eq!(undated_rows(&body), [raw], "{endpoint}: 날짜를 추측하지 않고 원문을 남긴다");
+        }
+        assert_eq!(undated_rows(&normal_empty), Vec::<String>::new());
+    }
+    let logs = api.logs().await;
+    assert!(logs.lines().any(|l| l.contains("WARN") && l.contains("2026110X") && l.contains(krx::COMMON)), "{logs}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_wholly_undated_first_page_keeps_its_failures_and_walks_to_older_pages() {
+    let api = Api::boot().await;
+    let newest = newest_first(krx::COMMON);
+    let from = newest[PAGE_ROWS * 2 - 1];
+    for endpoint in [FOREIGN, NET_SHARES] {
+        let key = format!("{}-1", krx::COMMON);
+        let mut broken = api.kiwoom_first_page(endpoint, krx::COMMON).await;
+        let second = api.kiwoom_page(endpoint, krx::COMMON, Some(&key)).await;
+        let raw = break_dates(&mut broken, endpoint, Some(key.clone()));
+        api.fake.reset();
+        api.fake.respond_with(api_id(endpoint), 200, broken);
+        api.fake.respond_with_for_key(api_id(endpoint), &key, 200, second);
+        let seen = api.chain(endpoint).len();
+        let (status, body) = api.history(endpoint, krx::COMMON, from, today()).await;
+        assert_eq!((status, &body["coverage"]["kind"]), (200, &json!("whole_range")), "{endpoint}: {body}");
+        assert_eq!(body["days"].as_array().unwrap(), &expected_days(endpoint, krx::COMMON, from, newest[PAGE_ROWS]), "{endpoint}: 날짜가 깨진 첫 페이지 뒤의 정상 자료도 받는다");
+        assert_eq!(undated_rows(&body), raw, "{endpoint}");
+        assert_eq!(body["skippedDays"], json!([]), "{endpoint}");
+        assert_eq!(api.chain(endpoint)[seen..], chain_through(krx::COMMON, 2), "{endpoint}");
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_wholly_undated_middle_page_does_not_hide_older_history() {
+    let api = Api::boot().await;
+    let newest = newest_first(krx::COMMON);
+    let from = newest[PAGE_ROWS * 2 + 10];
+    for endpoint in [FOREIGN, NET_SHARES] {
+        let key = format!("{}-1", krx::COMMON);
+        let mut broken = api.kiwoom_page(endpoint, krx::COMMON, Some(&key)).await;
+        let raw = break_dates(&mut broken, endpoint, Some(format!("{}-2", krx::COMMON)));
+        api.fake.reset();
+        api.fake.respond_with_for_key(api_id(endpoint), &key, 200, broken);
+        let seen = api.chain(endpoint).len();
+        let (status, body) = api.history(endpoint, krx::COMMON, from, today()).await;
+        assert_eq!((status, &body["coverage"]["kind"]), (200, &json!("whole_range")), "{endpoint}: {body}");
+        let mut expected = expected_days(endpoint, krx::COMMON, from, newest[PAGE_ROWS * 2]);
+        expected.extend(expected_days(endpoint, krx::COMMON, newest[PAGE_ROWS - 1], today()));
+        assert_eq!(body["days"].as_array().unwrap(), &expected, "{endpoint}: 날짜가 깨진 중간 페이지를 지나 과거 자료를 받는다");
+        assert_eq!(undated_rows(&body), raw, "{endpoint}");
+        assert_eq!(body["skippedDays"], json!([]), "{endpoint}");
+        assert_eq!(api.chain(endpoint)[seen..], chain_through(krx::COMMON, 3), "{endpoint}");
+    }
+    let logs = api.logs().await;
+    assert!(logs.lines().any(|l| l.contains("WARN") && l.contains("2026110X") && l.contains(krx::COMMON)), "{logs}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn wholly_undated_history_has_no_invented_start_date_or_unknown_symbol_error() {
+    let api = Api::boot().await;
+    for endpoint in [FOREIGN, NET_SHARES] {
+        let mut page = api.kiwoom_first_page(endpoint, krx::COMMON).await;
+        page[list(endpoint)].as_array_mut().unwrap().truncate(2);
+        let raw = break_dates(&mut page, endpoint, None);
+        api.fake.reset();
+        api.fake.respond_with(api_id(endpoint), 200, page);
+        let seen = api.chain(endpoint).len();
+        let (status, body) = api.history(endpoint, krx::COMMON, today(), today()).await;
+        assert_eq!((status, &body["coverage"], &body["days"], &body["skippedDays"]), (200, &json!({"kind": "no_readable_dates"}), &json!([]), &json!([])), "{endpoint}: {body}");
+        assert_eq!(undated_rows(&body), raw, "{endpoint}");
+        assert_eq!(api.chain(endpoint)[seen..], [None], "{endpoint}");
+
+        let mut blank = json!({"return_code": 0});
+        blank[list(endpoint)] = json!([{"dt": ""}]);
+        api.fake.respond_with(api_id(endpoint), 200, blank);
+        let (status, body) = api.history(endpoint, krx::COMMON, today(), today()).await;
+        assert_eq!((status, &body["coverage"]["kind"]), (200, &json!("no_readable_dates")), "{endpoint}: 빈 문자열 행도 날짜 오류를 보존한다: {body}");
+        assert_eq!(undated_rows(&body), [""], "{endpoint}");
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn distinct_undated_pages_with_the_same_date_errors_still_reach_dated_history() {
+    let api = Api::boot().await;
+    let newest = newest_first(krx::COMMON);
+    let from = newest[PAGE_ROWS * 3 - 1];
+    for endpoint in [FOREIGN, NET_SHARES] {
+        let second_key = format!("{}-1", krx::COMMON);
+        let third_key = format!("{}-2", krx::COMMON);
+        let mut first = api.kiwoom_first_page(endpoint, krx::COMMON).await;
+        let mut second = api.kiwoom_page(endpoint, krx::COMMON, Some(&second_key)).await;
+        let third = api.kiwoom_page(endpoint, krx::COMMON, Some(&third_key)).await;
+        let mut raw = break_dates(&mut first, endpoint, Some(second_key.clone()));
+        raw.extend(break_dates(&mut second, endpoint, Some(third_key.clone())));
+        api.fake.reset();
+        api.fake.respond_with(api_id(endpoint), 200, first);
+        api.fake.respond_with_for_key(api_id(endpoint), &second_key, 200, second);
+        api.fake.respond_with_for_key(api_id(endpoint), &third_key, 200, third);
+        let seen = api.chain(endpoint).len();
+        let (status, body) = api.history(endpoint, krx::COMMON, from, today()).await;
+        assert_eq!((status, &body["coverage"]["kind"]), (200, &json!("whole_range")), "{endpoint}: {body}");
+        assert_eq!(body["days"].as_array().unwrap(), &expected_days(endpoint, krx::COMMON, from, newest[PAGE_ROWS * 2]), "{endpoint}");
+        assert_eq!(undated_rows(&body), raw, "{endpoint}: 같은 날짜 오류여도 서로 다른 원본 행을 합치지 않는다");
+        assert_eq!(api.chain(endpoint)[seen..], chain_through(krx::COMMON, 3), "{endpoint}");
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn repeated_continuation_keys_or_undated_pages_stop_without_looping() {
+    let api = Api::boot().await;
+    for endpoint in [FOREIGN, NET_SHARES] {
+        for repeat_key in [true, false] {
+            api.fake.reset();
+            let key = format!("{}-1", krx::COMMON);
+            let third_key = format!("{}-2", krx::COMMON);
+            let mut first = api.kiwoom_first_page(endpoint, krx::COMMON).await;
+            let mut second = api.kiwoom_page(endpoint, krx::COMMON, Some(&key)).await;
+            let mut raw = break_dates(&mut first, endpoint, Some(key.clone()));
+            raw.extend(break_dates(&mut second, endpoint, Some(if repeat_key { key.clone() } else { third_key.clone() })));
+            api.fake.reset();
+            api.fake.respond_with(api_id(endpoint), 200, first);
+            api.fake.respond_with_for_key(api_id(endpoint), &key, 200, second.clone());
+            if !repeat_key {
+                second["_headers"] = json!({"cont-yn": "Y", "next-key": format!("{}-3", krx::COMMON)});
+                api.fake.respond_with_for_key(api_id(endpoint), &third_key, 200, second);
+            }
+            let seen = api.chain(endpoint).len();
+            let (status, body) = tokio::time::timeout(std::time::Duration::from_secs(10), api.history(endpoint, krx::COMMON, day(2020, 1, 1), today())).await.expect("반복 페이지를 유한한 요청으로 멈춘다");
+            assert_eq!((status, &body["coverage"]["kind"]), (200, &json!("no_readable_dates")), "{endpoint}: {body}");
+            assert_eq!(undated_rows(&body), raw, "{endpoint}: 반복된 페이지의 실패는 다시 넣지 않는다");
+            assert_eq!(api.chain(endpoint)[seen..], chain_through(krx::COMMON, if repeat_key { 2 } else { 3 }), "{endpoint}");
+        }
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_empty_or_repeated_dated_page_still_ends_the_walk_even_with_a_next_key() {
+    let api = Api::boot().await;
+    let newest = newest_first(krx::COMMON);
+    for endpoint in [FOREIGN, NET_SHARES] {
+        for repeat in [false, true] {
+            api.fake.reset();
+            let mut page = if repeat { api.kiwoom_first_page(endpoint, krx::COMMON).await } else { empty_answer(endpoint) };
+            page["_headers"] = json!({"cont-yn": "Y", "next-key": format!("{}-2", krx::COMMON)});
+            api.fake.respond_with_for_key(api_id(endpoint), &format!("{}-1", krx::COMMON), 200, page);
+            let seen = api.chain(endpoint).len();
+            let (status, body) = api.history(endpoint, krx::COMMON, day(2020, 1, 1), today()).await;
+            assert_eq!((status, &body["coverage"]), (200, &json!({"kind": "kiwoom_starts_later", "firstDay": newest[PAGE_ROWS - 1].to_string()})), "{endpoint}: {body}");
+            assert_eq!(body["days"].as_array().unwrap(), &expected_days(endpoint, krx::COMMON, newest[PAGE_ROWS - 1], today()), "{endpoint}");
+            assert_eq!(undated_rows(&body), Vec::<String>::new(), "{endpoint}");
+            assert_eq!(api.chain(endpoint)[seen..], chain_through(krx::COMMON, 2), "{endpoint}");
+        }
+    }
 }
 
 #[tokio::test(flavor = "multi_thread")]

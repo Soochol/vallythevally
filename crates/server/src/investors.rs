@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use axum::Router;
@@ -69,24 +69,39 @@ where
     R: MarketRequest,
     R::Response: DayPage,
 {
-    let (mut days, mut skipped) = (Vec::new(), Vec::new());
+    let (mut days, mut skipped, mut undated) = (Vec::new(), Vec::new(), Vec::new());
+    let mut undated_pages = Vec::new();
+    let mut seen_keys = HashSet::new();
     let mut reached: Option<KstDate> = None;
     let mut cont: Option<ContKey> = None;
-    let first_day = loop {
+    loop {
         let page = rest.call(req, cont.as_ref(), Priority::Background, MergeScope::default()).await?;
-        let older = page.body.into_days().filter(|rows| reached.is_none_or(|r| rows.oldest < r));
-        let Some(rows) = older else {
-            let Some(reached) = reached else {
-                return Err(BarError::UnknownSymbol);
-            };
-            tracing::warn!(api_id = R::API_ID.as_str(), code = code.as_str(), %reached, "키움 연속조회가 더 오래된 날을 주지 않아 여기서 멈춥니다");
-            break reached;
-        };
-        for row in &rows.undated {
-            tracing::warn!(api_id = R::API_ID.as_str(), code = code.as_str(), dt = %row.dt, reason = %row.reason, "키움 행을 읽지 못해 그 행만 빼고 받습니다");
+        if undated_pages.contains(&page.body) {
+            tracing::warn!(api_id = R::API_ID.as_str(), code = code.as_str(), "키움 연속조회가 날짜 없는 페이지를 반복해 여기서 멈춥니다");
+            break;
         }
-        reached = Some(rows.oldest);
-        let oldest = rows.oldest;
+        let rows = page.body.days();
+        let oldest = rows.oldest();
+        if rows.rows.is_empty() && rows.undated.is_empty() {
+            if reached.is_none() && undated.is_empty() {
+                return Err(BarError::UnknownSymbol);
+            }
+            break;
+        }
+        if oldest.is_none() {
+            undated_pages.push(page.body);
+        }
+        for row in rows.undated {
+            tracing::warn!(api_id = R::API_ID.as_str(), code = code.as_str(), dt = %row.dt, reason = %row.reason, "키움 행을 읽지 못해 그 행만 빼고 받습니다");
+            undated.push(api::UndatedRow { dt: row.dt, reason: row.reason.to_string() });
+        }
+        if let Some(oldest) = oldest {
+            if reached.is_some_and(|r| oldest >= r) {
+                tracing::warn!(api_id = R::API_ID.as_str(), code = code.as_str(), %oldest, "키움 연속조회가 더 오래된 날을 주지 않아 여기서 멈춥니다");
+                break;
+            }
+            reached = Some(oldest);
+        }
         for (day, row) in rows.rows {
             match row {
                 Ok(row) if range.contains(day) => days.push((day, row)),
@@ -99,17 +114,28 @@ where
                 }
             }
         }
-        match page.next {
-            Some(next) if oldest > range.from => cont = Some(next),
-            _ => break oldest,
+        if oldest.is_some_and(|d| d <= range.from) {
+            break;
         }
-    };
+        match page.next {
+            Some(next) if seen_keys.insert(next.clone()) => cont = Some(next),
+            Some(_) => {
+                tracing::warn!(api_id = R::API_ID.as_str(), code = code.as_str(), "키움 연속조회가 next-key를 반복해 여기서 멈춥니다");
+                break;
+            }
+            None => break,
+        }
+    }
     days.sort_by_key(|(day, _)| *day);
     days.dedup_by_key(|(day, _)| *day);
     skipped.sort_by_key(|s| s.day);
     skipped.dedup_by_key(|s| s.day);
     skipped.retain(|s| days.binary_search_by_key(&s.day.0, |(day, _)| *day).is_err());
-    let coverage = if first_day <= range.from { api::RangeCoverage::WholeRange } else { api::RangeCoverage::KiwoomStartsLater { first_day: api::KstDate(first_day) } };
+    let coverage = match reached {
+        Some(first_day) if first_day <= range.from => api::RangeCoverage::WholeRange,
+        Some(first_day) => api::RangeCoverage::KiwoomStartsLater { first_day: api::KstDate(first_day) },
+        None => api::RangeCoverage::NoReadableDates,
+    };
     Ok(api::DayHistory {
         symbol: api::SymbolCode(Symbol::Stock(code).as_wire()),
         from: api::KstDate(range.from),
@@ -117,5 +143,6 @@ where
         coverage,
         days: days.into_iter().map(|(_, day)| day).collect(),
         skipped_days: skipped,
+        undated_rows: undated,
     })
 }

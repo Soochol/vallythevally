@@ -99,6 +99,7 @@ fn generated_typescript_matches_the_committed_files() {
         generated::<SymbolInfo>(),
         generated::<SymbolKind>(),
         generated::<UiState>(),
+        generated::<UndatedRow>(),
         generated::<UnixSeconds>(),
         generated::<UpdatePhase>(),
         generated::<Venue>(),

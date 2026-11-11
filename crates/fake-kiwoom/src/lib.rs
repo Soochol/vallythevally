@@ -291,7 +291,8 @@ async fn handle(State(seen): State<Arc<Seen>>, headers: HeaderMap, body: String)
     }
     let keyed = next_key.clone().and_then(|k| seen.key_overrides.lock().unwrap().get(&(api_id.clone(), k)).cloned());
     if let Some((status, body)) = keyed.or_else(|| seen.overrides.lock().unwrap().get(&api_id).cloned()) {
-        let mut resp = (status, body.to_string()).into_response();
+        let mut resp = if body.get("_headers").is_some() { respond(body, false) } else { (status, body.to_string()).into_response() };
+        *resp.status_mut() = status;
         resp.headers_mut().insert("content-type", "application/json;charset=UTF-8".parse().unwrap());
         return resp;
     }

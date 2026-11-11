@@ -516,9 +516,14 @@ fn decimal(s: &str) -> Result<f64, WireError> {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct PageDays<T> {
-    pub oldest: KstDate,
     pub rows: Vec<(KstDate, Result<T, FieldError>)>,
     pub undated: Vec<UnreadableRow>,
+}
+
+impl<T> PageDays<T> {
+    pub fn oldest(&self) -> Option<KstDate> {
+        self.rows.iter().map(|(day, _)| *day).min()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -531,13 +536,12 @@ fn field<T>(field: &'static str, kiwoom_field: &str, text: &str, parse: fn(&str)
     parse(text).map_err(|e| FieldError { field, reason: WireError(format!("{kiwoom_field}: {e}")) })
 }
 
-pub trait DayPage {
+pub trait DayPage: PartialEq {
     type Day;
-    fn into_days(self) -> Option<PageDays<Self::Day>>;
+    fn days(&self) -> PageDays<Self::Day>;
 }
 
-fn page_days<R, T>(rows: &[R], dt: impl Fn(&R) -> &str, read: impl Fn(KstDate, &R) -> Result<T, FieldError>) -> Option<PageDays<T>> {
-    let oldest = rows.iter().filter_map(|r| KstDate::parse_yyyymmdd(dt(r))).min()?;
+fn page_days<R, T>(rows: &[R], dt: impl Fn(&R) -> &str, read: impl Fn(KstDate, &R) -> Result<T, FieldError>) -> PageDays<T> {
     let (mut dated, mut undated) = (Vec::new(), Vec::new());
     for r in rows {
         match KstDate::parse_yyyymmdd(dt(r)) {
@@ -545,19 +549,19 @@ fn page_days<R, T>(rows: &[R], dt: impl Fn(&R) -> &str, read: impl Fn(KstDate, &
             None => undated.push(UnreadableRow { dt: dt(r).to_owned(), reason: WireError(format!("dt가 날짜가 아닙니다: {:?}", dt(r))) }),
         }
     }
-    Some(PageDays { oldest, rows: dated, undated })
+    PageDays { rows: dated, undated }
 }
 
 fn shares(s: &str) -> Result<u64, WireError> {
     s.strip_prefix('+').unwrap_or(s).parse().map_err(|_| WireError(format!("주식 수가 아닙니다: {s:?}")))
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, PartialEq, Deserialize)]
 pub struct StockForeignHoldingsResponse {
     stk_frgnr: Vec<ForeignHoldingRow>,
 }
 
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
 #[serde(default)]
 pub struct ForeignHoldingRow {
     dt: String,
@@ -568,7 +572,7 @@ pub struct ForeignHoldingRow {
 impl DayPage for StockForeignHoldingsResponse {
     type Day = api::ForeignHoldingDay;
 
-    fn into_days(self) -> Option<PageDays<api::ForeignHoldingDay>> {
+    fn days(&self) -> PageDays<api::ForeignHoldingDay> {
         page_days(&self.stk_frgnr, |r| r.dt.as_str(), |day, r| {
             Ok(api::ForeignHoldingDay {
                 day: api::KstDate(day),
@@ -579,12 +583,12 @@ impl DayPage for StockForeignHoldingsResponse {
     }
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, PartialEq, Deserialize)]
 pub struct StockInvestorNetSharesResponse {
     stk_invsr_orgn: Vec<InvestorNetSharesRow>,
 }
 
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
 #[serde(default)]
 pub struct InvestorNetSharesRow {
     dt: String,
@@ -605,7 +609,7 @@ pub struct InvestorNetSharesRow {
 impl DayPage for StockInvestorNetSharesResponse {
     type Day = api::InvestorNetSharesDay;
 
-    fn into_days(self) -> Option<PageDays<api::InvestorNetSharesDay>> {
+    fn days(&self) -> PageDays<api::InvestorNetSharesDay> {
         page_days(&self.stk_invsr_orgn, |r| r.dt.as_str(), |day, r| {
             Ok(api::InvestorNetSharesDay {
                 day: api::KstDate(day),
@@ -1084,13 +1088,13 @@ mod tests {
         ], "return_code": 0, "return_msg": "정상적으로 처리되었습니다"})
     }
 
-    fn foreign_days(body: serde_json::Value) -> Option<PageDays<api::ForeignHoldingDay>> {
-        serde_json::from_value::<StockForeignHoldingsResponse>(body).unwrap().into_days()
+    fn foreign_days(body: serde_json::Value) -> PageDays<api::ForeignHoldingDay> {
+        serde_json::from_value::<StockForeignHoldingsResponse>(body).unwrap().days()
     }
 
     #[test]
     fn foreign_holdings_read_shares_and_weight_of_each_day_in_kiwooms_order() {
-        let days = foreign_days(spec_foreign_rows()).unwrap();
+        let days = foreign_days(spec_foreign_rows());
         let day = |s: &str| api::KstDate(KstDate::parse_yyyymmdd(s).unwrap());
         assert_eq!(
             days.rows.iter().map(|(_, d)| d.clone().unwrap()).collect::<Vec<_>>(),
@@ -1101,7 +1105,7 @@ mod tests {
             ]
         );
         assert!(days.rows.iter().all(|(d, row)| row.as_ref().is_ok_and(|row| *d == row.day.0)));
-        assert_eq!((days.oldest, days.undated.len()), (KstDate::new(2024, 10, 29).unwrap(), 0));
+        assert_eq!((days.oldest(), days.undated.len()), (Some(KstDate::new(2024, 10, 29).unwrap()), 0));
     }
 
     #[test]
@@ -1110,23 +1114,28 @@ mod tests {
         body["stk_frgnr"][0]["poss_stkcnt"] = "".into();
         body["stk_frgnr"][1]["dt"] = "2024-11".into();
         body["stk_frgnr"][2]["wght"] = "N/A".into();
-        let days = foreign_days(body).unwrap();
+        let days = foreign_days(body);
         let failed: Vec<_> = days.rows.iter().map(|(d, row)| (d.yyyymmdd(), row.as_ref().err().map(|e| e.field))).collect();
         assert_eq!(failed, [("20241105".to_owned(), Some("shares")), ("20241029".to_owned(), Some("weightPct"))], "날짜를 읽은 행은 어느 필드 때문에 못 읽었는지 남긴다");
         assert!(days.rows[0].1.as_ref().unwrap_err().reason.0.starts_with("poss_stkcnt: "), "{:?}", days.rows[0]);
         assert_eq!(days.undated.iter().map(|u| u.dt.as_str()).collect::<Vec<_>>(), ["2024-11"]);
-        assert_eq!(days.oldest, KstDate::new(2024, 10, 29).unwrap(), "값을 못 읽은 행도 날짜는 연속조회가 얼마나 거슬러 갔는지 알려 준다");
+        assert_eq!(days.oldest(), Some(KstDate::new(2024, 10, 29).unwrap()), "값을 못 읽은 행도 날짜는 연속조회가 얼마나 거슬러 갔는지 알려 준다");
 
         let mut negative = spec_foreign_rows();
         negative["stk_frgnr"][0]["poss_stkcnt"] = "-5".into();
-        assert!(foreign_days(negative).unwrap().rows[0].1.is_err(), "보유주식수는 음수가 될 수 없다");
+        assert!(foreign_days(negative).rows[0].1.is_err(), "보유주식수는 음수가 될 수 없다");
     }
 
     #[test]
-    fn a_day_page_without_a_readable_date_is_kiwooms_empty_answer() {
-        let empty_row: serde_json::Map<String, Value> = ["dt", "close_pric", "pred_pre", "trde_qty", "chg_qty", "poss_stkcnt", "wght", "gain_pos_stkcnt", "frgnr_limit", "frgnr_limit_irds", "limit_exh_rt"].iter().map(|f| (f.to_string(), json!(""))).collect();
-        assert_eq!(foreign_days(json!({"stk_frgnr": [empty_row], "return_code": 0, "return_msg": "정상적으로 처리되었습니다"})), None);
-        assert_eq!(foreign_days(json!({"stk_frgnr": [], "return_code": 0, "return_msg": "정상적으로 처리되었습니다"})), None);
+    fn an_undated_page_preserves_its_failures_while_an_empty_page_has_no_rows() {
+        let undated = foreign_days(json!({"stk_frgnr": [{"dt": ""}, {"dt": "2026110X"}]}));
+        assert_eq!(undated.oldest(), None);
+        assert!(undated.rows.is_empty());
+        assert_eq!(undated.undated.iter().map(|row| row.dt.as_str()).collect::<Vec<_>>(), ["", "2026110X"]);
+        assert!(undated.undated.iter().all(|row| row.reason.0.contains("dt")));
+        let empty = foreign_days(json!({"stk_frgnr": []}));
+        assert_eq!(empty.oldest(), None);
+        assert!(empty.rows.is_empty() && empty.undated.is_empty());
         assert!(serde_json::from_value::<StockForeignHoldingsResponse>(json!({"return_code": 0, "return_msg": "정상적으로 처리되었습니다"})).is_err(), "목록이 없는 성공 응답은 빈 답이 아니라 형식 오류다");
         assert!(serde_json::from_value::<StockInvestorNetSharesResponse>(json!({"return_code": 0, "return_msg": "정상적으로 처리되었습니다"})).is_err());
     }
@@ -1140,7 +1149,7 @@ mod tests {
             {"dt": "20241106", "ind_invsr": "x", "frgnr_invsr": "0", "orgn": "0", "fnnc_invt": "0", "insrnc": "0", "invtrt": "0", "etc_fnnc": "0", "bank": "0",
              "penfnd_etc": "0", "samo_fund": "0", "natn": "0", "etc_corp": "0"}
         ], "return_code": 0, "return_msg": "정상적으로 처리되었습니다"});
-        let days = serde_json::from_value::<StockInvestorNetSharesResponse>(body).unwrap().into_days().unwrap();
+        let days = serde_json::from_value::<StockInvestorNetSharesResponse>(body).unwrap().days();
         let day = api::KstDate(KstDate::new(2024, 11, 7).unwrap());
         assert_eq!(
             days.rows.iter().filter_map(|(_, d)| d.clone().ok()).collect::<Vec<_>>(),
@@ -1161,7 +1170,7 @@ mod tests {
             }]
         );
         assert_eq!(days.rows[1].1.as_ref().unwrap_err().field, "individual");
-        assert_eq!((days.rows.len(), days.oldest), (2, KstDate::new(2024, 11, 6).unwrap()));
+        assert_eq!((days.rows.len(), days.oldest()), (2, Some(KstDate::new(2024, 11, 6).unwrap())));
     }
 
     #[test]
@@ -1177,10 +1186,10 @@ mod tests {
             let mut body = whole.clone();
             body[list] = json!([broken]);
             if list == "stk_frgnr" {
-                let read = |b: Value| serde_json::from_value::<StockForeignHoldingsResponse>(b).unwrap().into_days().unwrap().rows.remove(0).1;
+                let read = |b: Value| serde_json::from_value::<StockForeignHoldingsResponse>(b).unwrap().days().rows.remove(0).1;
                 (read(body).unwrap_err().field, serde_json::to_value(read(whole).unwrap()).unwrap())
             } else {
-                let read = |b: Value| serde_json::from_value::<StockInvestorNetSharesResponse>(b).unwrap().into_days().unwrap().rows.remove(0).1;
+                let read = |b: Value| serde_json::from_value::<StockInvestorNetSharesResponse>(b).unwrap().days().rows.remove(0).1;
                 (read(body).unwrap_err().field, serde_json::to_value(read(whole).unwrap()).unwrap())
             }
         };
