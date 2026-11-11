@@ -1,4 +1,5 @@
 pub mod client;
+pub mod calculate;
 pub mod model;
 mod routes;
 pub mod store;

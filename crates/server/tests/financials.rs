@@ -579,6 +579,8 @@ async fn review_unavailable_financial_store_keeps_real_price_and_user_data_route
         assert_eq!(failed["status"],"failed");
         assert_eq!(failed["failure"],"storage");
         assert_eq!(http_snapshot(&client,&base).await["failure"],"storage");
+        let calculated:Value = serde_json::from_slice(&client.get(format!("{base}/api/symbols/005930/financials?period=Y")).send().await.unwrap().bytes().await.unwrap()).unwrap();
+        assert_eq!(calculated["status"],"failed");assert_eq!(calculated["failure"],"storage");
         assert_eq!(fake.count("corpCode.xml"),0);
         server.stop().await;
     }
@@ -843,4 +845,88 @@ async fn review2_failed_list_storage_keeps_real_price_usable_and_preserves_verif
     assert!(repaired);
     assert_eq!(tokio::time::timeout(Duration::from_secs(1),client.get(&price_url).send()).await.unwrap().unwrap().status(),StatusCode::OK);
     server.stop().await;
+}
+
+#[tokio::test]
+async fn calculated_http_contract_validates_period_and_preserves_price_during_collection() {
+    let fake = Fake::start().await;
+    fake.state.lock().unwrap().delayed = true;
+    let kiwoom = common::FakeKiwoom::start().await;
+    let client = reqwest::Client::new();
+    for configured in [false,true] {
+        let dir = tempfile::tempdir().unwrap();
+        let key = if configured { KEY } else { "" };
+        let server = common::Server::spawn_with(&kiwoom,&dir.path().join("run/server.lock"),dir.path(),&[
+            ("OPENDART_API_KEY",std::ffi::OsStr::new(key)),
+            ("VALLY_DART_BASE_URL",std::ffi::OsStr::new(&fake.url)),
+            ("VALLY_KIND_BASE_URL",std::ffi::OsStr::new(&fake.url)),
+        ]);
+        let base = format!("http://{}",server.addr().await);
+        let price = format!("{base}/api/bars?symbol=005930&period=Q&limit=5");
+        assert_eq!(client.get(&price).send().await.unwrap().status(),StatusCode::OK);
+        let url = format!("{base}/api/symbols/005930/financials");
+        for query in ["","?period=D","?period=Q&venue=krx"] {
+            assert_eq!(client.get(format!("{url}{query}")).send().await.unwrap().status(),StatusCode::BAD_REQUEST);
+        }
+        let response:Value = client.get(format!("{url}?period=Q")).send().await.unwrap().bytes().await.map(|bytes| serde_json::from_slice(&bytes).unwrap()).unwrap();
+        assert_eq!(response["status"],if configured { "collecting" } else { "not_configured" });
+        assert_eq!(response["series"].as_array().unwrap().len(),6);
+        assert_eq!(response["period"],"Q");
+        for code in ["IDX:001","102780"] {
+            let unsupported:Value = serde_json::from_slice(&client.get(format!("{base}/api/symbols/{code}/financials?period=Y")).send().await.unwrap().bytes().await.unwrap()).unwrap();
+            assert_eq!(unsupported["status"],"unsupported");assert_eq!(unsupported["reason"],"unsupported_product");
+        }
+        assert_eq!(tokio::time::timeout(Duration::from_secs(1),client.get(&price).send()).await.unwrap().unwrap().status(),StatusCode::OK);
+        let refresh:Value = client.post(format!("{url}?period=Y")).send().await.unwrap().bytes().await.map(|bytes| serde_json::from_slice(&bytes).unwrap()).unwrap();
+        assert_eq!(refresh["status"],if configured { "collecting" } else { "not_configured" });
+        assert!(!server.stop().await.contains(KEY));
+    }
+}
+
+#[tokio::test]
+async fn calculated_http_reads_saved_values_without_key_and_applies_correction_with_metadata() {
+    use std::os::unix::fs::PermissionsExt;
+    let fake = Fake::start().await;
+    let kiwoom = common::FakeKiwoom::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("run/financials.db");
+    let service = Financials::new(Some(fake.client()),Store::open(&path).await.unwrap(),clock());
+    service.open("005930",false,false).await;
+    settled(&service).await;
+    std::fs::set_permissions(dir.path().join("run"),std::fs::Permissions::from_mode(0o700)).unwrap();
+    let client = reqwest::Client::new();
+    for configured in [false,true] {
+        let key = if configured { KEY } else { "" };
+        let server = common::Server::spawn_with(&kiwoom,&dir.path().join("run/server.lock"),dir.path(),&[
+            ("OPENDART_API_KEY",std::ffi::OsStr::new(key)),
+            ("VALLY_DART_BASE_URL",std::ffi::OsStr::new(&fake.url)),
+            ("VALLY_KIND_BASE_URL",std::ffi::OsStr::new(&fake.url)),
+        ]);
+        let base = format!("http://{}",server.addr().await);
+        let price = format!("{base}/api/bars?symbol=005930&period=D&limit=5");
+        assert_eq!(client.get(&price).send().await.unwrap().status(),StatusCode::OK);
+        let url = format!("{base}/api/symbols/005930/financials?period=Y");
+        if configured {fake.state.lock().unwrap().correction=true;}
+        let first:Value = client.get(&url).send().await.unwrap().bytes().await.map(|bytes| serde_json::from_slice(&bytes).unwrap()).unwrap();
+        assert_eq!(first["status"],if configured {"collecting"} else {"not_configured"});
+        let p = &first["series"][0]["points"][0];
+        assert_eq!(p["value"],100.0);assert_eq!(p["inputs"][0]["receipt"],RECEIPT);
+        if configured {
+            client.post(&url).send().await.unwrap();
+            let mut corrected=None;
+            for _ in 0..500 {
+                let response:Value=client.get(&url).send().await.unwrap().bytes().await.map(|bytes| serde_json::from_slice(&bytes).unwrap()).unwrap();
+                if response["series"][0]["points"][0]["value"]==120.0 {corrected=Some(response);break;}
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+            let corrected=corrected.expect("latest verified correction must be returned before entire history completes");
+            let p=&corrected["series"][0]["points"][0];
+            assert_eq!(p["inputs"][0]["receipt"],"20160401000002");assert_eq!(p["inputs"][0]["disclosedAt"],"2016-04-01");
+            assert_eq!(p["period"]["start"],"2015-01-01");assert_eq!(p["basis"],"CFS");assert!(p["priceBucket"].is_number());
+            assert_eq!(corrected["fiscalMonth"],12);assert_eq!(corrected["latestCorrections"],true);
+            assert!(p["inputs"][0]["lastSuccessAt"].is_number());
+        }
+        assert_eq!(tokio::time::timeout(Duration::from_secs(1),client.get(&price).send()).await.unwrap().unwrap().status(),StatusCode::OK);
+        server.stop().await;
+    }
 }
