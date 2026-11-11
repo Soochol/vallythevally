@@ -1,5 +1,6 @@
 use std::collections::BTreeMap;
 use std::io::{Cursor, Read};
+use std::sync::Arc;
 use std::time::Duration;
 
 use serde_json::Value;
@@ -9,6 +10,7 @@ use crate::config::Secret;
 use super::model::{Basis, Company, Failure, Security};
 
 mod preferred;
+mod discovery;
 
 pub type Row = BTreeMap<String, String>;
 
@@ -17,7 +19,7 @@ pub struct Client {
     base: String,
     kind_base: String,
     key: Secret<String>,
-    directory: Mutex<Option<Vec<Row>>>,
+    directory: Mutex<Option<Arc<Vec<Row>>>>,
     pace: Mutex<Option<tokio::time::Instant>>,
 }
 
@@ -77,8 +79,8 @@ impl Client {
     }
 
     pub async fn resolve(&self, stock: &str, preferred: bool) -> Result<Option<Security>, Failure> {
-        let mut directory = self.directory.lock().await;
-        if directory.is_none() {
+        let mut cached_directory = self.directory.lock().await;
+        if cached_directory.is_none() {
             let files = self.archive("corpCode.xml", &[]).await?;
             let mut companies = Vec::new();
             for (_, xml) in files {
@@ -89,22 +91,28 @@ impl Client {
                 }
             }
             if companies.is_empty() { return Err(Failure::InvalidResponse); }
-            *directory = Some(companies);
+            *cached_directory = Some(Arc::new(companies));
         }
-        let direct: Vec<_> = directory.as_ref().unwrap().iter().filter(|r| field(r, "stock_code") == stock).collect();
+        let directory = cached_directory.as_ref().unwrap().clone();
+        drop(cached_directory);
+        let direct: Vec<_> = directory.iter().filter(|r| field(r, "stock_code") == stock).collect();
         if direct.len() > 1 { return Ok(None); }
         let (corp, evidence) = if direct.len() == 1 {
             (field(direct[0], "corp_code").to_owned(), "OpenDART/corpCode.xml".to_owned())
         } else {
             let candidates = self.kind_companies(stock).await?;
             if candidates.is_empty() && preferred {
-                let Some(link) = preferred::for_stock(stock) else { return Ok(None); };
-                let body = self.kind_bytes(link.path, &[]).await?;
-                let text = std::str::from_utf8(&body).map_err(|_| Failure::InvalidResponse)?;
-                if !link.verify_notice(text)? { return Ok(None); }
-                let candidates = self.kind_companies(link.common_code).await?;
-                if !link.verify_company(&candidates, directory.as_ref().unwrap()) { return Ok(None); }
-                (link.corp_code.to_owned(), link.evidence())
+                if let Some(link) = preferred::for_stock(stock) {
+                    let body = self.kind_bytes(link.path, &[]).await?;
+                    let text = std::str::from_utf8(&body).map_err(|_| Failure::InvalidResponse)?;
+                    if !link.verify_notice(text)? { return Ok(None); }
+                    let candidates = self.kind_companies(link.common_code).await?;
+                    if !link.verify_company(&candidates, &directory) { return Ok(None); }
+                    (link.corp_code.to_owned(), link.evidence())
+                } else {
+                    let Some(mapping) = self.discover_preferred(stock, &directory).await? else { return Ok(None); };
+                    mapping
+                }
             } else {
                 if candidates.len() != 1 { return Ok(None); }
                 let row = &candidates[0];
@@ -112,7 +120,6 @@ impl Client {
                 (field(row, "fssunqno").to_owned(), "KRX KIND/common/searchcorpname.do/repisusrtcd2+fssunqno".to_owned())
             }
         };
-        drop(directory);
         if preferred && let Some(link) = preferred::for_stock(stock) && corp != link.corp_code { return Ok(None); }
         let company = self.response("company.json", &[("corp_code", corp.clone())]).await?;
         if company.get("corp_code").is_some_and(|value| value != &corp) { return Err(Failure::InvalidResponse); }
