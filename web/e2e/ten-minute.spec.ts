@@ -168,8 +168,13 @@ test.describe("분석 도구", () => {
     await seedLayout(app, { v: 2, style: "candle", scale: "normal", indicators: [ma], compare: ["IDX:001"], panels: [] });
     const requested = recordBarRequests(page);
     await page.goto("/");
-    await expectTenMinuteBars(page, requested, "삼성전자 통합 10분", { symbol: "005930", venue: "combined", period: "10m" });
-    await expect.poll(() => requested).toContainEqual({ symbol: "IDX:001", venue: null, period: "10m" });
+    await expect(cell(page)).toHaveAttribute("aria-label", "칸 1: 삼성전자 통합 10분");
+    await expect(cell(page)).toHaveAttribute("aria-busy", "false");
+    await expect.poll(() => requested).toEqual(expect.arrayContaining([
+      { symbol: "005930", venue: "combined", period: "10m" },
+      { symbol: "IDX:001", venue: null, period: "10m" },
+    ]));
+    expect(Number(await chartOf(cell(page)).getAttribute("data-last-bar-t")) % TEN_MINUTES).toBe(0);
     await expect(page.locator('[data-indicator-row="m"]')).toContainText(/\d/);
     await expect(page.locator('[data-indicator-row="m"]')).not.toContainText("오류");
     const compareRow = cell(page).locator('[data-compare-row="IDX:001"]');
