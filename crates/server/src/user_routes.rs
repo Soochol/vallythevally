@@ -141,8 +141,8 @@ pub(crate) fn check_screen(screen: &Screen) -> Result<(), ApiFailure> {
     if !(1..=MAX_SCREEN_NAME_CHARS).contains(&name.trim().chars().count()) {
         return Err(ApiFailure::bad_request(format!("조건식 이름은 공백을 빼고 1~{MAX_SCREEN_NAME_CHARS}자여야 합니다: {name:?}")));
     }
-    if !(1..=MAX_SCREEN_CONDITIONS).contains(&screen.conditions.len()) {
-        return Err(ApiFailure::bad_request(format!("조건식 {name}의 조건은 1~{MAX_SCREEN_CONDITIONS}줄이어야 합니다: {}줄", screen.conditions.len())));
+    if screen.conditions.len() > MAX_SCREEN_CONDITIONS {
+        return Err(ApiFailure::bad_request(format!("조건식 {name}의 조건은 0~{MAX_SCREEN_CONDITIONS}줄이어야 합니다: {}줄", screen.conditions.len())));
     }
     for (line, condition) in screen.conditions.iter().enumerate() {
         check_condition(condition).map_err(|why| ApiFailure::bad_request(format!("조건식 {name}의 {}번째 조건: {why}", line + 1)))?;

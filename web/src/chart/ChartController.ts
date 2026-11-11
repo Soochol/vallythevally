@@ -74,6 +74,7 @@ export type CellStatus =
       prev: Bar | null;
       isCurrent: boolean;
       olderError: ApiRequestError | null;
+      olderLoading: boolean;
       /** 분봉의 가장 이른 봉이 보이고 더 받을 과거가 없다(U1: 분봉은 최근 1년까지). */
       intradayEnd: boolean;
     }
@@ -165,7 +166,8 @@ export class ChartController {
         reset: (h) => this.onReset(h),
         prepended: (h, added) => this.onPrepended(h, added),
         failed: (e) => this.onFailed(e),
-        olderFailed: (e) => this.patchReady({ olderError: e }),
+        olderFailed: (e) => this.patchReady({ olderError: e, olderLoading: false }),
+        olderLoading: () => this.patchReady({ olderError: null, olderLoading: true }),
         live: (h, bar) => this.onRealtime(h, bar, "live"),
         confirmed: (h, bar) => this.onRealtime(h, bar, "confirmed"),
         subError: (code) => this.legend.setNotice(code === null ? null : SUB_ERROR_TEXT[code]),
@@ -439,6 +441,7 @@ export class ChartController {
       prev: this.bars[this.bars.length - 2] ?? null,
       isCurrent: this.history?.current?.t === latest.t,
       olderError: this.ready?.olderError ?? null,
+      olderLoading: this.ready?.olderLoading ?? false,
       intradayEnd: this.ready?.intradayEnd ?? false,
     };
     if (this.statusTimer !== null) return;
@@ -488,6 +491,7 @@ export class ChartController {
         prev: bars[bars.length - 2] ?? null,
         isCurrent: h.current !== null && latest.t === h.current.t,
         olderError: null,
+        olderLoading: false,
         intradayEnd: false,
       };
       this.onStatus(this.ready);
@@ -498,6 +502,7 @@ export class ChartController {
   }
 
   private onPrepended(h: History, added: number): void {
+    this.patchReady({ olderLoading: false });
     this.history = h;
     if (added === 0) return this.updateIntradayEnd();
     const range = this.chart.timeScale().getVisibleLogicalRange();
@@ -512,7 +517,7 @@ export class ChartController {
     this.updateIntradayEnd();
   }
 
-  private patchReady(patch: Partial<Pick<ReadyStatus, "olderError" | "intradayEnd">>): void {
+  private patchReady(patch: Partial<Pick<ReadyStatus, "olderError" | "olderLoading" | "intradayEnd">>): void {
     if (!this.ready) return;
     this.ready = { ...this.ready, ...patch };
     this.onStatus(this.ready);

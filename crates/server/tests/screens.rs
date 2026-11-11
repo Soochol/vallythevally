@@ -183,7 +183,7 @@ async fn each_screen_rule_and_a_stale_revision_rejects_the_save() {
         ("빈 이름", edit(&|s| s["name"] = json!("")), 400, "bad_request"),
         ("공백뿐인 이름", edit(&|s| s["name"] = json!(" \t\u{3000} ")), 400, "bad_request"),
         ("41자 이름", edit(&|s| s["name"] = json!("가".repeat(41))), 400, "bad_request"),
-        ("조건 0줄", edit(&|s| s["conditions"] = json!([])), 400, "bad_request"),
+        ("조건 0줄에 빈 이름", edit(&|s| *s = json!({"id": "S1", "name": " ", "markets": [], "exclude": [], "conditions": []})), 400, "bad_request"),
         ("조건 11줄", edit(&|s| s["conditions"] = json!(vec![new_high("D", "high", 2, 1); 11])), 400, "bad_request"),
         ("m = 0", condition(json!(5), json!(0)), 400, "bad_request"),
         ("m > n", condition(json!(5), json!(6)), 400, "bad_request"),

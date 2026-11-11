@@ -259,3 +259,101 @@ async fn scrolling_back_through_086520_daily_follows_the_kiwoom_chain_to_its_ori
     assert_eq!(chain.len(), 4, "키움 네 페이지를 한 번씩 받는다");
     server.stop().await;
 }
+
+async fn get_after_symbol_list(client: &reqwest::Client, base: &str, path: &str) -> (u16, Value) {
+    for _ in 0..100 {
+        let (status, body) = get(client, base, path).await;
+        if body["error"]["reason"] != "symbol_list_loading" {
+            return (status, body);
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    panic!("종목 목록을 받지 못했습니다: {path}");
+}
+
+fn ten_minute_starts(page: &Value) -> Vec<i64> {
+    let ts: Vec<i64> = page["bars"].as_array().unwrap().iter().map(|b| b["t"].as_i64().unwrap()).collect();
+    assert!(!ts.is_empty(), "{page}");
+    assert!(ts.windows(2).all(|w| w[0] < w[1]), "봉은 오름차순이다: {ts:?}");
+    assert!(ts.iter().all(|t| t % 600 == 0), "봉 시작은 10분 경계다: {ts:?}");
+    ts
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn ten_minute_bars_follow_each_venue_and_a_saved_layout_keeps_them() {
+    let fake = FakeKiwoom::start().await;
+    let tmp = tempfile::tempdir().unwrap();
+    let lock = tmp.path().join("run/server.lock");
+    let dist = static_dir(tmp.path());
+    let server = Server::spawn(&fake, &lock, &dist);
+    let base = format!("http://{}", server.addr().await);
+    let client = reqwest::Client::new();
+
+    let cases = [
+        ("symbol=005930", Value::from("combined"), "ka10080", ("stk_cd", "005930_AL")),
+        ("symbol=005930&venue=krx", Value::from("krx"), "ka10080", ("stk_cd", "005930")),
+        ("symbol=005930&venue=nxt", Value::from("nxt"), "ka10080", ("stk_cd", "005930_NX")),
+        ("symbol=IDX:001", Value::Null, "ka20005", ("inds_cd", "001")),
+    ];
+    for (query, venue, api_id, (code_field, code)) in cases {
+        let sent_before = fake.calls().len();
+        let (status, page) = get_after_symbol_list(&client, &base, &format!("/api/bars?{query}&period=10m")).await;
+        assert_eq!((status, &page["period"], &page["venue"]), (200, &Value::from("10m"), &venue), "{query}: {page}");
+        ten_minute_starts(&page);
+        let sent: Vec<_> = fake.calls().into_iter().skip(sent_before).filter(|c| c.api_id == api_id).collect();
+        assert!(!sent.is_empty(), "{query}: 키움 {api_id}를 부르지 않았다");
+        assert!(sent.iter().all(|c| c.body["tic_scope"] == "10" && c.body[code_field] == code), "{query}: {sent:?}");
+    }
+
+    let (status, err) = get(&client, &base, "/api/bars?symbol=005935&period=10m&venue=nxt").await;
+    assert_eq!((status, err["error"]["code"].as_str()), (400, Some("bad_request")), "NXT 불가 종목");
+
+    let (status, newest) = get(&client, &base, "/api/bars?symbol=005930&period=10m&venue=krx&limit=3").await;
+    assert_eq!(status, 200, "{newest}");
+    let newest_starts = ten_minute_starts(&newest);
+    let before = newest["nextBefore"].as_i64().expect("앞 구간이 더 있다");
+    assert_eq!(before, newest_starts[0]);
+    let (status, older) = get(&client, &base, &format!("/api/bars?symbol=005930&period=10m&venue=krx&before={before}")).await;
+    assert_eq!(status, 200, "{older}");
+    assert!(ten_minute_starts(&older).iter().all(|t| *t < before), "{older}");
+
+    let layout = serde_json::json!({"id": "0193aaaa-0000-7000-8000-000000000010", "name": "10분", "arrangement": "2v", "revision": 1_794_152_040_010_i64,
+        "sync": {"crosshair": true, "scroll": true}, "cells": [
+            {"slot": 0, "symbol": "005930", "venue": "nxt", "period": "10m", "symbolLink": true, "chartSettings": {"v": 1, "indicators": ["ma"]}},
+            {"slot": 1, "symbol": "IDX:001", "venue": null, "period": "10m", "symbolLink": false, "chartSettings": {"v": 1}}]});
+    let path = format!("/api/layouts/{}", layout["id"].as_str().unwrap());
+    let (status, saved) = put(&client, &base, &path, &layout).await;
+    assert_eq!(status, 200, "{saved}");
+    assert_eq!(saved["cells"], layout["cells"]);
+    server.stop().await;
+
+    let server = Server::spawn(&fake, &lock, &dist);
+    let base = format!("http://{}", server.addr().await);
+    assert_eq!(get(&client, &base, &path).await, (200, saved));
+    server.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_ten_minute_failure_at_the_first_page_or_a_later_page_stops_only_that_request() {
+    let fake = FakeKiwoom::start().await;
+    let invalid = serde_json::json!({"return_code": 2, "return_msg": "입력 값 오류입니다[1511:필수 입력 값에 값이 존재하지 않습니다]"});
+    fake.respond_with("ka20005", 200, invalid.clone());
+    fake.respond_with_for_key("ka10080", "A0059302026110216180000010000", 200, invalid);
+    let tmp = tempfile::tempdir().unwrap();
+    let server = Server::spawn(&fake, &tmp.path().join("run/server.lock"), &static_dir(tmp.path()));
+    let base = format!("http://{}", server.addr().await);
+    let client = reqwest::Client::new();
+
+    let (status, first_page) = get_after_symbol_list(&client, &base, "/api/bars?symbol=IDX:001&period=10m").await;
+    assert_eq!((status, &first_page["error"]["reason"]), (500, &Value::from("invalid_request")), "{first_page}");
+
+    let newest_path = "/api/bars?symbol=005930&period=10m&venue=krx&limit=3";
+    let (status, newest) = get(&client, &base, newest_path).await;
+    assert_eq!(status, 200, "다른 시리즈는 지수 실패와 상관없이 받는다: {newest}");
+    let before = newest["nextBefore"].as_i64().expect("앞 구간이 더 있다");
+    let (status, later_page) = get(&client, &base, &format!("/api/bars?symbol=005930&period=10m&venue=krx&before={before}")).await;
+    assert_eq!((status, &later_page["error"]["reason"]), (500, &Value::from("invalid_request")), "{later_page}");
+    let (status, again) = get(&client, &base, newest_path).await;
+    assert_eq!((status, &again["bars"]), (200, &newest["bars"]), "이어 받기 실패 뒤에도 최신 봉은 그대로 받는다: {again}");
+    server.stop().await;
+}

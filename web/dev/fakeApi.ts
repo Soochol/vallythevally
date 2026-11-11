@@ -18,7 +18,7 @@ import { createUserData, type Reply } from "./fakeUserData.ts";
 const LATEST_PAGE_DELAY_MS = 800;
 const PAST_PAGE_DELAY_MS = 400;
 const SCREENER_RUN_DELAY_MS = 600;
-const PERIODS: Period[] = ["1m", "3m", "5m", "15m", "30m", "60m", "D", "W", "M"];
+const PERIODS: Period[] = ["1m", "3m", "5m", "10m", "15m", "30m", "60m", "D", "W", "M"];
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const SEED_WATCHLIST = ["005930", "000660", "373220", "035420", "005935", "069500", "IDX:001", "IDX:101"];

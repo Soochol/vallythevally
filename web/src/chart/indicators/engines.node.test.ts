@@ -166,3 +166,29 @@ test("kinds.ts의 선 순서는 wasm 엔진의 선 순서와 같다", () => {
     e.free();
   }
 });
+
+for (const period of ["Q", "Y"] as const) {
+  test(`${period}의 모든 기술지표는 해당 봉으로 계산하고 일목 선행스팬은 달력 봉만큼 이동한다`, () => {
+    const specs = KIND_ORDER.map((kind) => KINDS[kind].defaults);
+    const calendarBars: BarTuple[] = bars.slice(0, 100).map(([, o, h, l, c, v], i) => [Date.UTC(1900, i * (period === "Q" ? 3 : 12), 1) / 1000 - 32400, o, h, l, c, v]);
+    const results = create(new Engines(real), specs, calendarBars.slice(0, -1), calendarBars.at(-1)!, period);
+    for (const result of results) {
+      const draws = okDraws(result);
+      expect(draws.length).toBeGreaterThan(0);
+      for (const draw of draws) {
+        const points = applyDraw([], draw);
+        expect(points.length).toBeGreaterThan(0);
+        expect(points.every((p) => Number.isFinite(p.v))).toBe(true);
+      }
+    }
+    const ichimoku = results[specs.findIndex((s) => s.kind === "ichimoku")]!;
+    if (!ichimoku.ok) throw new Error("일목균형표 계산 실패");
+    const last = calendarBars.at(-1)![0];
+    const d = new Date((last + 32400) * 1000);
+    for (const [i, line] of ichimoku.lines.entries()) {
+      if (line.shift <= 0) continue;
+      const expected = Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + line.shift * (period === "Q" ? 3 : 12), 1) / 1000 - 32400;
+      expect(applyDraw([], ichimoku.draws[i]!).at(-1)!.t).toBe(expected);
+    }
+  });
+}

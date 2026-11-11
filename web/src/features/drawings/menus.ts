@@ -32,7 +32,7 @@ export function drawingMenu(surface: DrawingSurface, empty = false): MenuItem[] 
     { kind: "heading", label: "순서" },
     ...([ ["맨 앞으로", "front"], ["앞으로", "forward"], ["뒤로", "backward"], ["맨 뒤로", "back"] ] as const).map(([label, direction]) => action(label, () => surface.reorder(first.id, direction))),
     { kind: "heading", label: "보이는 봉 주기" }, action("모든 봉 주기", () => periods(null)),
-    action("분봉만", () => periods(["1m", "3m", "5m", "15m", "30m", "60m"])), action("일·주·월만", () => periods(["D", "W", "M"])),
+    action("분봉만", () => periods(["1m", "3m", "5m", "10m", "15m", "30m", "60m"])), action("일·주·월만", () => periods(["D", "W", "M"])),
     action("지금 봉 주기만", () => periods([surface.host.view()?.period ?? "D"])),
     { kind: "separator" }, action("기본 스타일로", () => surface.updateSelected((d) => ({ ...d, style: toolOf(d.tool)?.defaultStyle() ?? d.style }))),
     action("지우기", () => surface.remove(true)),

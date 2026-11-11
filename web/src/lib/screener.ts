@@ -32,6 +32,8 @@ export const VALUE_UNIT: Record<BarField, string> = { open: "원", high: "원", 
 
 export type ConditionKind = Condition["kind"];
 
+export const NO_CONDITIONS_SENTENCE = "조건 없음 · 대상 종목 전체";
+
 export const KIND_LABEL: Record<ConditionKind, string> = {
   new_high: "신고가",
   new_low: "신저가",

@@ -74,13 +74,13 @@ function disclosure(row: DartRow, client: DartClient): Disclosure {
   if (stockCode !== null && !/^[0-9A-Z]{6}$/.test(stockCode)) throw new Error("invalid_dart_stock_code");
   return { corpCode: text(row.corp_code), stockCode, corpName: row.corp_name == null ? null : client.redact(text(row.corp_name)), receipt: r, filedOn: compactDay(row.rcept_dt), title: client.redact(text(row.report_nm)), url: `https://dart.fss.or.kr/dsaf001/main.do?rcpNo=${r}` };
 }
-async function readDisclosures(client: DartClient, corp: string, to: Day): Promise<Disclosure[]> {
+async function readDisclosures(client: DartClient, corp: string, to: Day, lastReport: "Y" | "N"): Promise<Disclosure[]> {
   const result: Disclosure[] = [];
   const receipts = new Set<string>();
   let page = 1;
   let total = 1;
   do {
-    const r = await client.response("list", { corp_code: corp, bgn_de: "20150101", end_de: to.replaceAll("-", ""), last_reprt_at: "Y", sort: "date", sort_mth: "asc", page_no: String(page), page_count: "100" });
+    const r = await client.response("list", { corp_code: corp, bgn_de: "20150101", end_de: to.replaceAll("-", ""), last_reprt_at: lastReport, sort: "date", sort_mth: "asc", page_no: String(page), page_count: "100" });
     if (r.status === "013") { if (page > 1) throw new Error("dart_paging_disappeared"); return []; }
     const totalPages = numeric(typeof r.total_page === "number" ? String(r.total_page) : r.total_page);
     if (totalPages === null || !Number.isSafeInteger(totalPages) || totalPages < 1 || totalPages > 10000 || Number(r.page_no) !== page || (page > 1 && total !== totalPages)) throw new Error("dart_invalid_paging");
@@ -123,7 +123,7 @@ function fact(args: { row: DartRow; field: string; endpoint: string; unit: Unit;
   }
   return value === null ? { ...base, value: null, reason: "account_value_missing_or_invalid" } : { ...base, value, reason: null };
 }
-export function parseAccounts(rawRows: DartRow[], args: { year: number; quarter: Quarter; corp: string; reportCode: string; filings: Disclosure[]; calendar: Day[] }): { single: Accounts; cumulative: Accounts; eps: Measure } {
+export function parseAccounts(rawRows: DartRow[], args: { year: number; quarter: Quarter; corp: string; reportCode: string; filings: Disclosure[]; calendar: Day[] }): { single: Accounts; cumulative: Accounts; eps: Measure; filing: Disclosure | null } {
   const rows: DartRow[] = rawRows.map((row) => {
     if (row.account_id != null && typeof row.account_id !== "string") throw new Error("invalid_account_id");
     return { ...row, account_id: row.account_id ?? "" };
@@ -133,8 +133,8 @@ export function parseAccounts(rawRows: DartRow[], args: { year: number; quarter:
     if (row.fs_div !== undefined && row.fs_div !== "CFS") throw new Error("dart_non_consolidated_statement");
     text(row.sj_div); text(row.account_id); text(row.account_nm); receipt(row.rcept_no);
   }
-  const expected = expectedFiling(args.filings, args.year, args.quarter);
-  if (rows.length > 0 && (!expected || rows.some((r) => r.rcept_no !== expected.receipt))) return { single: emptyAccounts("matching_period_receipt_unavailable"), cumulative: emptyAccounts("matching_period_receipt_unavailable"), eps: absent("matching_period_receipt_unavailable", "KRW/share") };
+  const filing = rows.length > 0 ? matchingFiling(args.filings, rows[0]!.rcept_no, args.year, args.quarter, args.corp) : null;
+  if (rows.length > 0 && (!filing || rows.some((r) => r.rcept_no !== filing.receipt))) return { single: emptyAccounts("matching_period_receipt_unavailable"), cumulative: emptyAccounts("matching_period_receipt_unavailable"), eps: absent("matching_period_receipt_unavailable", "KRW/share"), filing: null };
   const single = emptyAccounts(rows.length === 0 ? "dart_no_data" : "account_not_found_or_ambiguous");
   const cumulative = emptyAccounts(rows.length === 0 ? "dart_no_data" : "account_not_found_or_ambiguous");
   for (const definition of ACCOUNTS) {
@@ -152,13 +152,19 @@ export function parseAccounts(rawRows: DartRow[], args: { year: number; quarter:
   }
   const selected = pick(rows, { ids: ["ifrs-full_BasicEarningsLossPerShare", "ifrs_BasicEarningsLossPerShare"], names: ["기본주당이익(손실)", "기본주당순이익(손실)", "기본주당이익"], sections: ["IS", "CIS"] });
   const eps = selected ? fact({ row: selected.row, field: "thstrm_amount", endpoint: "fnlttSinglAcntAll", unit: "KRW/share", filings: args.filings, calendar: args.calendar, match: selected.match, name: text(selected.row.account_nm) }) : absent("reported_basic_eps_missing", "KRW/share");
-  return { single, cumulative, eps };
+  return { single, cumulative, eps, filing };
 }
-function expectedFiling(filings: Disclosure[], year: number, quarter: Quarter): Disclosure | null {
+function matchesPeriod(d: Disclosure, year: number, quarter: Quarter): boolean {
   const end = periodEnd(year, quarter);
   const period = `${year}.${end.slice(5, 7)}`;
   const title = quarter === 4 ? "사업보고서" : quarter === 2 ? "반기보고서" : "분기보고서";
-  return filings.filter((d) => d.title.includes(title) && d.title.includes(`(${period})`)).at(-1) ?? null;
+  return normalize(d.title).replace(/^(?:\[[^\]]+\])+/, "") === `${title}(${period})`;
+}
+function matchingFiling(filings: Disclosure[], id: unknown, year: number, quarter: Quarter, corp: string): Disclosure | null {
+  return filings.find((d) => d.receipt === id && d.corpCode === corp && matchesPeriod(d, year, quarter)) ?? null;
+}
+function expectedFiling(filings: Disclosure[], year: number, quarter: Quarter): Disclosure | null {
+  return filings.filter((d) => matchesPeriod(d, year, quarter)).at(-1) ?? null;
 }
 function identifyCompany(code: string, corp: string, disclosures: SourceResult<Disclosure[]>): DartIdentity {
   const companies = disclosures.kind === "ok" ? [...new Map(disclosures.data.map(({ corpCode, stockCode, corpName }) => {
@@ -182,10 +188,12 @@ export async function readDart(args: { base: URL; code: string; corp: string; ke
     return unavailableDart(identifyCompany(args.code, corp, disclosures), disclosures, "opendart_key_not_configured");
   }
   const client = new DartClient(base, key, args.client);
-  const disclosures = await capture("OpenDART/list", () => readDisclosures(client, corp, filingTo));
+  const disclosures = await capture("OpenDART/list", () => readDisclosures(client, corp, filingTo, "Y"));
   const identity = identifyCompany(args.code, corp, disclosures);
   if (identity.verification.kind !== "verified") return unavailableDart(identity, disclosures, identity.verification.reason);
-  const filings = disclosures.kind === "ok" ? disclosures.data : [];
+  const finalFilings = disclosures.kind === "ok" ? disclosures.data : [];
+  const receiptDisclosures = await capture("OpenDART/list/receipts", () => readDisclosures(client, corp, filingTo, "N"));
+  const filings = [...new Map([...finalFilings, ...(receiptDisclosures.kind === "ok" ? receiptDisclosures.data : [])].filter((d) => d.corpCode === corp && d.stockCode === args.code).map((d) => [d.receipt, d])).values()];
   const reports: FinancialPeriod[] = [];
   const annual: FinancialPeriod[] = [];
   const requests: Array<SourceResult<CapitalEvent[]>> = [];
@@ -196,16 +204,17 @@ export async function readDart(args: { base: URL; code: string; corp: string; ke
       const result = await capture(source, async () => parseAccounts(await client.rows("fnlttSinglAcntAll", { ...params, fs_div: "CFS" }), { year, quarter, corp, reportCode: code, filings, calendar }));
       const reported = result.kind === "ok" ? result.data : { single: emptyAccounts(result.reason), cumulative: emptyAccounts(result.reason), eps: absent(result.reason, "KRW/share") };
       if (result.kind === "missing") requests.push(result);
-      const filing = expectedFiling(filings, year, quarter);
+      const filing = result.kind === "ok" && result.data.filing ? result.data.filing : expectedFiling(finalFilings, year, quarter);
       const end = periodEnd(year, quarter);
       const availableFrom = filing ? nextObservation(filing.filedOn, calendar) : null;
       const sharesResult = await capture(`OpenDART/stockTotqySttus/${year}/${code}`, async () => {
         const rows = await client.rows("stockTotqySttus", params);
         if (rows.some((r) => r.corp_code !== corp)) throw new Error("dart_corp_mismatch");
-        const common = rows.filter((r) => normalize(r.se) === "보통주");
+        const common = rows.filter((r) => ["보통주", "의결권있는주식(보통주)"].includes(normalize(r.se)));
         const totalRows = rows.filter((r) => normalize(r.se) === "합계");
+        const shareFiling = common.length === 1 ? matchingFiling(filings, common[0]!.rcept_no, year, quarter, corp) : null;
         const getShare = (selected: DartRow[], field: string): Measure => {
-          if (selected.length !== 1 || filing?.receipt !== selected[0]!.rcept_no) return absent("common_share_snapshot_missing_or_ambiguous", "shares");
+          if (selected.length !== 1 || !shareFiling || selected[0]!.rcept_no !== shareFiling.receipt) return absent("common_share_snapshot_missing_or_ambiguous", "shares");
           const value = fact({ row: selected[0]!, field, endpoint: "stockTotqySttus", unit: "shares", filings, calendar, match: "reported", name: `주식의 총수 ${text(selected[0]!.se)}` });
           return value.value !== null && (!Number.isSafeInteger(value.value) || value.value < 0) ? { ...value, value: null, reason: "invalid_share_count" } : value;
         };
@@ -223,7 +232,7 @@ export async function readDart(args: { base: URL; code: string; corp: string; ke
           const raw = await client.rows("alotMatter", params);
           if (raw.some((r) => r.corp_code !== corp)) throw new Error("dart_corp_mismatch");
           const rows = raw.filter((r) => normalize(r.se) === "주당현금배당금(원)" && normalize(r.stock_knd) === "보통주");
-          return rows.length === 1 && filing?.receipt === rows[0]!.rcept_no ? fact({ row: rows[0]!, field: "thstrm", endpoint: "alotMatter", unit: "KRW/share", filings, calendar, match: "reported", name: "보통주 주당현금배당금" }) : absent("common_dps_missing_or_ambiguous", "KRW/share");
+          return rows.length === 1 && matchingFiling(filings, rows[0]!.rcept_no, year, quarter, corp) ? fact({ row: rows[0]!, field: "thstrm", endpoint: "alotMatter", unit: "KRW/share", filings, calendar, match: "reported", name: "보통주 주당현금배당금" }) : absent("common_dps_missing_or_ambiguous", "KRW/share");
         });
         if (dividends.kind === "missing") requests.push(dividends);
         dps = dividends.kind === "ok" ? dividends.data : absent(dividends.reason, "KRW/share");
@@ -240,7 +249,7 @@ export async function readDart(args: { base: URL; code: string; corp: string; ke
       return rows.map((r) => {
         if (r.corp_code !== corp) throw new Error("dart_corp_mismatch");
         const id = receipt(r.rcept_no);
-        const filing = filings.find((d) => d.receipt === id);
+        const filing = finalFilings.find((d) => d.receipt === id);
         if (!filing) throw new Error("capital_event_receipt_date_unavailable");
         const rawFields = Object.fromEntries(Object.entries(r).filter(([k, v]) => !/key|token|secret/i.test(k) && typeof v === "string").map(([k, v]) => [k, client.redact(text(v))]));
         return { endpoint: api, disclosure: filing, fields: rawFields, effect: "announcement-only" as const };
@@ -248,5 +257,5 @@ export async function readDart(args: { base: URL; code: string; corp: string; ke
     }));
   }
   const data = financialData(reports, annual);
-  return { identity, financials: data, sourceFailures: requests.flatMap((r) => r.kind === "missing" ? [{ source: r.source, reason: r.reason }] : []), disclosures, capitalEvents };
+  return { identity, financials: data, sourceFailures: [receiptDisclosures, ...requests].flatMap((r) => r.kind === "missing" ? [{ source: r.source, reason: r.reason }] : []), disclosures, capitalEvents };
 }

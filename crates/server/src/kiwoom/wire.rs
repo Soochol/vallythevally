@@ -84,10 +84,12 @@ chart_body!(MinuteChartResponse, stk_min_pole_chart_qry, StockWon, DateTime);
 chart_body!(DailyChartResponse, stk_dt_pole_chart_qry, StockWon, Date);
 chart_body!(WeeklyChartResponse, stk_stk_pole_chart_qry, StockWon, Date);
 chart_body!(MonthlyChartResponse, stk_mth_pole_chart_qry, StockWon, Date);
+chart_body!(YearlyChartResponse, stk_yr_pole_chart_qry, StockWon, Date);
 chart_body!(IndexMinuteChartResponse, inds_min_pole_qry, IndexCenti, DateTime);
 chart_body!(IndexDailyChartResponse, inds_dt_pole_qry, IndexCenti, Date);
 chart_body!(IndexWeeklyChartResponse, inds_stk_pole_qry, IndexCenti, Date);
 chart_body!(IndexMonthlyChartResponse, inds_mth_pole_qry, IndexCenti, Date);
+chart_body!(IndexYearlyChartResponse, inds_yr_pole_qry, IndexCenti, Date);
 
 /// 키움에서 받은 봉. 가장 늦은 봉은 진행 중인 구간일 수 있다.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

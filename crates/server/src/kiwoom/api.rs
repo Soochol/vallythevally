@@ -25,6 +25,7 @@ pub enum ApiId {
     Ka10082,
     /// 주식 월봉
     Ka10083,
+    Ka10094,
     /// 업종 분봉
     Ka20005,
     /// 업종 일봉
@@ -33,6 +34,7 @@ pub enum ApiId {
     Ka20007,
     /// 업종 월봉
     Ka20008,
+    Ka20019,
     Ka10008,
     Ka10059,
 }
@@ -47,10 +49,12 @@ impl ApiId {
             | ApiId::Ka10081
             | ApiId::Ka10082
             | ApiId::Ka10083
+            | ApiId::Ka10094
             | ApiId::Ka20005
             | ApiId::Ka20006
             | ApiId::Ka20007
-            | ApiId::Ka20008 => "/api/dostk/chart",
+            | ApiId::Ka20008
+            | ApiId::Ka20019 => "/api/dostk/chart",
         }
     }
 
@@ -65,10 +69,12 @@ impl ApiId {
             ApiId::Ka10081 => "ka10081",
             ApiId::Ka10082 => "ka10082",
             ApiId::Ka10083 => "ka10083",
+            ApiId::Ka10094 => "ka10094",
             ApiId::Ka20005 => "ka20005",
             ApiId::Ka20006 => "ka20006",
             ApiId::Ka20007 => "ka20007",
             ApiId::Ka20008 => "ka20008",
+            ApiId::Ka20019 => "ka20019",
             ApiId::Ka10008 => "ka10008",
             ApiId::Ka10059 => "ka10059",
         }
@@ -146,9 +152,11 @@ macro_rules! index_chart {
 stock_chart!(DailyChart, Ka10081, wire::DailyChartResponse);
 stock_chart!(WeeklyChart, Ka10082, wire::WeeklyChartResponse);
 stock_chart!(MonthlyChart, Ka10083, wire::MonthlyChartResponse);
+stock_chart!(YearlyChart, Ka10094, wire::YearlyChartResponse);
 index_chart!(IndexDailyChart, Ka20006, wire::IndexDailyChartResponse);
 index_chart!(IndexWeeklyChart, Ka20007, wire::IndexWeeklyChartResponse);
 index_chart!(IndexMonthlyChart, Ka20008, wire::IndexMonthlyChartResponse);
+index_chart!(IndexYearlyChart, Ka20019, wire::IndexYearlyChartResponse);
 
 /// ka10080 주식 분봉. `base_dt`는 일·주·월봉처럼 언제나 시리즈의 오늘이다. 과거 날짜를 주면 그날 뒤의
 /// 권리발생이 빠진 가격이 온다(kiwoom.md §4.1, backend.md §6.3).
@@ -200,7 +208,7 @@ impl MarketRequest for IndexMinuteChart {
     type Response = wire::IndexMinuteChartResponse;
 }
 
-/// "1", "3", "5", "15", "30", "60".
+/// "1", "3", "5", "10", "15", "30", "60".
 fn tic_scope(period: Period) -> Option<String> {
     period.minutes().map(|n| n.to_string())
 }
@@ -349,7 +357,7 @@ mod tests {
             .filter_map(|p| MinuteChart::new(c, Venue::Krx, p, today()))
             .map(|r| serde_json::to_value(r).unwrap()["tic_scope"].as_str().unwrap().to_owned())
             .collect();
-        assert_eq!(scopes, ["1", "3", "5", "15", "30", "60"]);
+        assert_eq!(scopes, ["1", "3", "5", "10", "15", "30", "60"]);
         assert_eq!(
             serde_json::to_value(IndexMinuteChart::new(IndexCode::KOSPI, Period::M1, today()).unwrap()).unwrap(),
             json!({"inds_cd": "001", "tic_scope": "1", "base_dt": "20261109"})

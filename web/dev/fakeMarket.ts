@@ -106,14 +106,15 @@ function dailyBars(s: FakeSymbol, nowMs: number): Bar[] {
 }
 
 /** 봉 시작 KST 날짜: 주봉은 그 주 월요일, 월봉은 그 달 1일(주말이어도). */
-function bucketStart(t: number, period: "W" | "M"): number {
+function bucketStart(t: number, period: "W" | "M" | "Q" | "Y"): number {
   const day = t + KST;
   const d = new Date(day * 1000);
   if (period === "W") return kstMidnight(day - ((d.getUTCDay() + 6) % 7) * DAY);
-  return kstMidnight(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1) / 1000);
+  const months = period === "Y" ? 12 : period === "Q" ? 3 : 1;
+  return kstMidnight(Date.UTC(d.getUTCFullYear(), Math.floor(d.getUTCMonth() / months) * months, 1) / 1000);
 }
 
-function aggregate(daily: Bar[], period: "W" | "M"): Bar[] {
+function aggregate(daily: Bar[], period: "W" | "M" | "Q" | "Y"): Bar[] {
   const out: Bar[] = [];
   for (const b of daily) {
     const t = bucketStart(b.t, period);
@@ -160,7 +161,7 @@ const INTRADAY_DAYS = 365;
 function session(venue: Venue | null): { open: number; close: number } {
   return venue === "nxt" || venue === "combined" ? { open: 8 * 60, close: 20 * 60 } : { open: 9 * 60, close: 15 * 60 + 30 };
 }
-const PERIOD_MINUTES: Record<Exclude<Period, "D" | "W" | "M">, number> = { "1m": 1, "3m": 3, "5m": 5, "15m": 15, "30m": 30, "60m": 60 };
+const PERIOD_MINUTES: Record<Exclude<Period, "D" | "W" | "M" | "Q" | "Y">, number> = { "1m": 1, "3m": 3, "5m": 5, "10m": 10, "15m": 15, "30m": 30, "60m": 60 };
 
 /** 1분봉: 그날 일봉의 시가에서 종가로 가는 브라운 다리. 오늘은 지금까지만. */
 function minuteBars(daily: Bar[], s: FakeSymbol, venue: Venue | null, nowMs: number): Bar[] {
@@ -237,7 +238,7 @@ export function seriesOf(s: FakeSymbol, venue: Venue | null, period: Period, now
       const base = cached(`${s.code}/base`, nowMs, () => dailyBars(s, nowMs));
       return venue === null || venue === "combined" ? base : venueDaily(base, s, venue);
     }
-    if (period === "W" || period === "M") return aggregate(seriesOf(s, venue, "D", nowMs), period);
+    if (period === "W" || period === "M" || period === "Q" || period === "Y") return aggregate(seriesOf(s, venue, "D", nowMs), period);
     if (period === "1m") return minuteBars(seriesOf(s, venue, "D", nowMs), s, venue, nowMs);
     return aggregateMinutes(seriesOf(s, venue, "1m", nowMs), PERIOD_MINUTES[period]);
   });

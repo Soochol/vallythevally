@@ -23,6 +23,8 @@ pub enum Period {
     M3,
     #[serde(rename = "5m")]
     M5,
+    #[serde(rename = "10m")]
+    M10,
     #[serde(rename = "15m")]
     M15,
     #[serde(rename = "30m")]
@@ -35,6 +37,10 @@ pub enum Period {
     Week,
     #[serde(rename = "M")]
     Month,
+    #[serde(rename = "Q")]
+    Quarter,
+    #[serde(rename = "Y")]
+    Year,
 }
 
 impl From<domain::Period> for Period {
@@ -43,12 +49,15 @@ impl From<domain::Period> for Period {
             domain::Period::M1 => Period::M1,
             domain::Period::M3 => Period::M3,
             domain::Period::M5 => Period::M5,
+            domain::Period::M10 => Period::M10,
             domain::Period::M15 => Period::M15,
             domain::Period::M30 => Period::M30,
             domain::Period::M60 => Period::M60,
             domain::Period::Day => Period::Day,
             domain::Period::Week => Period::Week,
             domain::Period::Month => Period::Month,
+            domain::Period::Quarter => Period::Quarter,
+            domain::Period::Year => Period::Year,
         }
     }
 }
@@ -59,12 +68,15 @@ impl From<Period> for domain::Period {
             Period::M1 => domain::Period::M1,
             Period::M3 => domain::Period::M3,
             Period::M5 => domain::Period::M5,
+            Period::M10 => domain::Period::M10,
             Period::M15 => domain::Period::M15,
             Period::M30 => domain::Period::M30,
             Period::M60 => domain::Period::M60,
             Period::Day => domain::Period::Day,
             Period::Week => domain::Period::Week,
             Period::Month => domain::Period::Month,
+            Period::Quarter => domain::Period::Quarter,
+            Period::Year => domain::Period::Year,
         }
     }
 }
@@ -1144,6 +1156,14 @@ mod tests {
         assert_eq!(serde_json::from_value::<ScreenerUpdateRequest>(json!({"full": true})).unwrap(), ScreenerUpdateRequest { full: true });
         for bad in ["20261110", "2026-1-10", "2026-02-30", "2026-11-10T00:00"] {
             assert!(serde_json::from_value::<KstDate>(json!(bad)).is_err(), "{bad}");
+        }
+    }
+
+    #[test]
+    fn quarterly_and_yearly_bars_do_not_expand_screener_periods() {
+        for period in ["Q", "Y"] {
+            assert!(serde_json::from_value::<Period>(json!(period)).is_ok());
+            assert!(serde_json::from_value::<ScreenPeriod>(json!(period)).is_err());
         }
     }
 

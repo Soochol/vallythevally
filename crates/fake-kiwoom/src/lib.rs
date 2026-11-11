@@ -345,9 +345,11 @@ async fn handle(State(seen): State<Arc<Seen>>, headers: HeaderMap, body: String)
         "ka10001" => "ka10001_005930_AL",
         "ka10082" => "ka10082_005930_AL",
         "ka10083" => "ka10083_005930_AL",
+        "ka10094" => "ka10094_synthetic",
         "ka20006" => "ka20006_001",
         "ka20007" => "ka20007_001",
         "ka20008" => "ka20008_001",
+        "ka20019" => "ka20019_synthetic",
         _ => return (StatusCode::INTERNAL_SERVER_ERROR, "가짜 키움이 모르는 api-id").into_response(),
     };
     let v = if continuation { without_rows(fixture(name)) } else { fixture(name) };

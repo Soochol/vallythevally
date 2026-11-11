@@ -3,9 +3,9 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { expect, test } from "vitest";
 import type { Screen } from "../../api/generated/Screen";
 import { ScreenFields } from "./ScreenDialog";
-import { addCondition, draftOf, editCondition, type ScreenDraft } from "./screenForm";
+import { addCondition, draftOf, editCondition, removeCondition, type ScreenDraft } from "./screenForm";
 
-const twoLines = addCondition({ ...draftOf(null), name: "고가와 거래량" });
+const twoLines = addCondition(addCondition({ ...draftOf(null), name: "고가와 거래량" }));
 const NAME = 1;
 const PER_NEW_HIGH_LINE = 8;
 const ADD_LINE = 1;
@@ -40,6 +40,20 @@ test("저장 중이 아니면 첫 줄 ▲와 끝 줄 ▼만 빼고 모두 쓸 �
   const controls = controlsOf(false);
   expect(controls).toHaveLength(NAME + 2 * PER_NEW_HIGH_LINE + ADD_LINE + MARKETS + CHIPS);
   expect(controls.filter((c) => c.disabled).map((c) => c.tag.match(/aria-label="([^"]+)"/)?.[1])).toEqual(["조건 1 위로 옮기기", "조건 2 아래로 옮기기"]);
+});
+
+test("새 조건식은 조건 줄 없이 '조건 없음 · 대상 종목 전체'로 열리고, 한 줄만 남아도 그 줄을 뺄 수 있다", () => {
+  const empty = markupOf(draftOf(null));
+  expect(empty).toContain("조건 없음 · 대상 종목 전체");
+  expect(empty).toContain("0/10줄");
+  expect(labelsIn(empty).filter((l) => l.startsWith("조건 "))).toEqual([]);
+  expect(empty.match(/<button[^>]*>(?:(?!<button).)*조건 더하기/)?.[0]).not.toContain('disabled=""');
+
+  const one = addCondition(draftOf(null));
+  const markup = markupOf(one);
+  expect(markup).not.toContain("조건 없음 · 대상 종목 전체");
+  expect(markup).toMatch(/<button(?![^>]*disabled="")[^>]*aria-label="조건 1 빼기"[^>]*>/);
+  expect(markupOf(removeCondition(one, one.conditions[0]!.key))).toContain("조건 없음 · 대상 종목 전체");
 });
 
 test("조건 줄은 종류, 봉 주기, 그 종류의 칸, ▲▼, 빼기 순이고, 시가총액 줄에는 봉 주기와 M이 없다", () => {
@@ -96,23 +110,27 @@ test("잘못된 칸은 그 칸에 표시되고 줄 아래에 칸 이름과 이�
   expect(markup).not.toContain("MACD(30·26·9)");
 });
 
-test("종류 메뉴는 묶음별로 15가지를 보이고, 지금 종류가 골라져 있다", () => {
-  const markup = markupOf(draftOf(null));
+test("종류 메뉴는 묶음별로 15가지와 신고거래량·신고거래대금을 보이고, 지금 종류가 골라져 있다", () => {
+  const markup = markupOf(addCondition(draftOf(null)));
   const groups = [...markup.matchAll(/<optgroup label="([^"]+)">(.*?)<\/optgroup>/g)].map(([, label, options]) => [label, [...options!.matchAll(/>([^<]+)<\/option>/g)].map(([, text]) => text)]);
   expect(groups).toEqual([
     ["가격", ["신고가", "신저가", "값 범위", "등락률", "고점·저점 거리"]],
-    ["거래", ["거래 급증"]],
+    ["거래", ["신고거래량", "신고거래대금", "거래 급증"]],
     ["이동평균", ["이평 위치", "이평 배열", "이평 교차"]],
     ["보조지표", ["RSI", "MACD", "스토캐스틱", "볼린저 밴드", "일목균형표"]],
     ["종목", ["시가총액"]],
   ]);
   expect(markup).toContain('<option value="new_high" selected="">신고가</option>');
+  const values = markup.match(/<select aria-label="조건 1 값"[^>]*>(.*?)<\/select>/)?.[1] ?? "";
+  expect([...values.matchAll(/>([^<]+)<\/option>/g)].map(([, text]) => text)).toEqual(["시가", "고가", "저가", "종가"]);
 });
 
-test("거래대금 신고가 줄은 값 칸에 거래대금을 고른 채로 보이고 신고거래대금으로 읽힌다", () => {
+test("거래대금 신고가 줄은 종류 메뉴에 신고거래대금이 골라진 채 값 칸 없이 보이고 신고거래대금으로 읽힌다", () => {
   const traded = draftOf({ id: "s", name: "신고거래대금", markets: [], exclude: [], conditions: [{ kind: "new_high", period: "D", m: 1, field: "traded_value", n: 60 }] });
   const markup = markupOf(traded);
-  expect(markup).toContain('<option value="traded_value" selected="">거래대금</option>');
+  expect(markup).toContain('<option value="traded_value_high" selected="">신고거래대금</option>');
+  expect(labelsIn(markup).filter((l) => l.startsWith("조건 1 "))).toEqual(["조건 1 종류", "조건 1 봉 주기", "조건 1 신고거래대금 기간", "조건 1 최근 봉 수", "조건 1 위로 옮기기", "조건 1 아래로 옮기기", "조건 1 빼기"]);
+  expect(inputOf(markup, "조건 1 신고거래대금 기간")).toContain('value="60"');
   expect(markup).toContain("일 신고거래대금");
   expect(markup).toContain("당일 거래대금이 60일 신고거래대금이다");
 });

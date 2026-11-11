@@ -19,25 +19,31 @@ pub enum Period {
     M1,
     M3,
     M5,
+    M10,
     M15,
     M30,
     M60,
     Day,
     Week,
     Month,
+    Quarter,
+    Year,
 }
 
 impl Period {
-    pub const ALL: [Period; 9] = [
+    pub const ALL: [Period; 12] = [
         Period::M1,
         Period::M3,
         Period::M5,
+        Period::M10,
         Period::M15,
         Period::M30,
         Period::M60,
         Period::Day,
         Period::Week,
         Period::Month,
+        Period::Quarter,
+        Period::Year,
     ];
 
     pub fn as_wire(self) -> &'static str {
@@ -45,12 +51,15 @@ impl Period {
             Period::M1 => "1m",
             Period::M3 => "3m",
             Period::M5 => "5m",
+            Period::M10 => "10m",
             Period::M15 => "15m",
             Period::M30 => "30m",
             Period::M60 => "60m",
             Period::Day => "D",
             Period::Week => "W",
             Period::Month => "M",
+            Period::Quarter => "Q",
+            Period::Year => "Y",
         }
     }
 
@@ -71,10 +80,11 @@ impl Period {
             Period::M1 => Some(1),
             Period::M3 => Some(3),
             Period::M5 => Some(5),
+            Period::M10 => Some(10),
             Period::M15 => Some(15),
             Period::M30 => Some(30),
             Period::M60 => Some(60),
-            Period::Day | Period::Week | Period::Month => None,
+            Period::Day | Period::Week | Period::Month | Period::Quarter | Period::Year => None,
         }
     }
 
@@ -99,6 +109,8 @@ impl Period {
                 let first = match self {
                     Period::Week => date.add_days(-date.weekday().days_from_monday()),
                     Period::Month => date.first_of_month(),
+                    Period::Quarter => KstDate::new(date.year(), (date.month() - 1) / 3 * 3 + 1, 1).unwrap(),
+                    Period::Year => KstDate::new(date.year(), 1, 1).unwrap(),
                     _ => date,
                 };
                 KstTime::from_kst_civil(first, TimeOfDay::MIDNIGHT)
@@ -153,6 +165,8 @@ impl Bucket {
                 let next = match self.period {
                     Period::Week => date.add_days(7),
                     Period::Month => date.first_of_next_month(),
+                    Period::Quarter => date.first_of_next_month().first_of_next_month().first_of_next_month(),
+                    Period::Year => KstDate::new(date.year() + 1, 1, 1).unwrap(),
                     _ => date.add_days(1),
                 };
                 KstTime::from_kst_civil(next, TimeOfDay::MIDNIGHT)
@@ -167,8 +181,8 @@ impl Bucket {
         match self.period {
             Period::Day => close_of(date),
             Period::Week => close_of(date.add_days(4)),
-            Period::Month => {
-                let mut last = date.last_of_month();
+            Period::Month | Period::Quarter | Period::Year => {
+                let mut last = self.end().kst_date().add_days(-1);
                 while matches!(last.weekday(), Weekday::Sat | Weekday::Sun) {
                     last = last.add_days(-1);
                 }
@@ -201,6 +215,8 @@ impl Bucket {
                 let prev = match self.period {
                     Period::Week => date.add_days(-7),
                     Period::Month => date.first_of_prev_month(),
+                    Period::Quarter => date.first_of_prev_month().first_of_prev_month().first_of_prev_month(),
+                    Period::Year => KstDate::new(date.year() - 1, 1, 1).unwrap(),
                     _ => date.add_days(-1),
                 };
                 KstTime::from_kst_civil(prev, TimeOfDay::MIDNIGHT)
@@ -298,12 +314,36 @@ mod tests {
     }
 
     #[test]
+    fn quarters_and_years_follow_calendar_boundaries_and_close_grace() {
+        for (p, input, start, next, prev, close) in [
+            (Period::Quarter, "20260331", "20260101", "20260401", "20251001", "20260331"),
+            (Period::Quarter, "20260402", "20260401", "20260701", "20260101", "20260630"),
+            (Period::Quarter, "20261231", "20261001", "20270101", "20260701", "20261231"),
+            (Period::Year, "20260102", "20260101", "20270101", "20250101", "20261231"),
+            (Period::Year, "20281231", "20280101", "20290101", "20270101", "20281229"),
+        ] {
+            let b = p.bucket(at(input, 12, 0, 0));
+            assert_eq!(b.start(), midnight(start));
+            assert_eq!(b.next().start(), midnight(next));
+            assert_eq!(b.prev().start(), midnight(prev));
+            assert_eq!(b.next().prev(), b);
+            assert_eq!(b.prev().next(), b);
+            assert_eq!(b.future_starts(1), vec![midnight(next)]);
+            assert!(!b.is_confirmed_at(at(close, 20, 0, 9)));
+            assert!(b.is_confirmed_at(at(close, 20, 0, 10)));
+        }
+    }
+
+    #[test]
     fn minute_buckets_cut_on_n_minute_boundaries() {
         let t = at("20261106", 9, 7, 30);
         assert_eq!(Period::M1.bucket(t).start(), at("20261106", 9, 7, 0));
         assert_eq!(Period::M5.bucket(t).start(), at("20261106", 9, 5, 0));
         assert_eq!(Period::M60.bucket(t).start(), at("20261106", 9, 0, 0));
         assert_eq!(Period::M15.bucket(at("20261106", 8, 0, 0)).start(), at("20261106", 8, 0, 0));
+        assert_eq!(Period::M10.bucket(at("20261106", 9, 10, 0)).start(), at("20261106", 9, 10, 0));
+        assert_eq!(Period::M10.bucket(at("20261106", 9, 19, 59)).start(), at("20261106", 9, 10, 0));
+        assert_eq!(Period::M10.bucket(at("20261106", 9, 20, 0)).start(), at("20261106", 9, 20, 0));
         assert_eq!(Period::M1.bucket(at("20261106", 19, 59, 59)).start(), at("20261106", 19, 59, 0));
     }
 
@@ -369,6 +409,11 @@ mod tests {
         assert_eq!(mid.confirm_at(), at("20261106", 9, 1, 2));
         let last = Period::M1.bucket(at("20261106", 19, 59, 0));
         assert_eq!(last.confirm_at(), at("20261106", 20, 0, 0).plus_secs(grace));
+        let mid10 = Period::M10.bucket(at("20261106", 9, 10, 0));
+        assert_eq!(mid10.confirm_at(), at("20261106", 9, 20, 2));
+        assert_eq!(Period::M10.trade_bucket(at("20261106", 20, 0, 3)).start(), at("20261106", 19, 50, 0));
+        let last10 = Period::M10.bucket(at("20261106", 19, 50, 0));
+        assert_eq!(last10.confirm_at(), at("20261106", 20, 0, 0).plus_secs(grace));
         let last60 = Period::M60.bucket(at("20261106", 19, 0, 0));
         assert_eq!(last60.confirm_at(), at("20261106", 20, 0, 0).plus_secs(grace));
     }

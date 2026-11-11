@@ -68,6 +68,7 @@ function fakeSocket() {
 function harness(socket?: ReturnType<typeof fakeSocket>["socket"]) {
   const calls: { q: BarsQuery; resolve: (p: BarsPage) => void; reject: (e: unknown) => void }[] = [];
   const events: string[] = [];
+  let olderLoads = 0;
   let last: History | null = null;
   const feed = new BarFeed(
     (q) => new Promise((resolve, reject) => calls.push({ q, resolve, reject })),
@@ -76,6 +77,7 @@ function harness(socket?: ReturnType<typeof fakeSocket>["socket"]) {
       prepended: (h, added) => { last = h; events.push(`prepend ${added}`); },
       failed: (e) => events.push(`failed ${e.code}`),
       olderFailed: (e) => events.push(`olderFailed ${e.code}`),
+      olderLoading: () => { olderLoads++; },
       live: (h, b) => { last = h; events.push(`live ${b.t}:${b.c}`); },
       confirmed: (h, b) => { last = h; events.push(`confirmed ${b.t}:${b.c}`); },
       subError: (code) => events.push(`subError ${code}`),
@@ -83,7 +85,7 @@ function harness(socket?: ReturnType<typeof fakeSocket>["socket"]) {
     socket,
   );
   const flush = () => new Promise((r) => setTimeout(r, 0));
-  return { feed, calls, events, flush, history: () => last };
+  return { feed, calls, events, flush, history: () => last, olderLoads: () => olderLoads };
 }
 
 function realtime() {
@@ -319,14 +321,20 @@ describe("BarFeed", () => {
   });
 
   test("retryOlder는 실패한 과거 페이지를 다시 받는다", async () => {
-    const { feed, calls, events, flush } = harness();
+    const { feed, calls, events, flush, olderLoads } = harness();
     feed.open(key("005930", "D"));
     calls[0]!.resolve(page([bar(10)], 10));
     await flush();
     feed.needOlder();
+    expect(olderLoads()).toBe(1);
+    feed.needOlder();
+    expect(olderLoads()).toBe(1);
     calls[1]!.reject(new ApiRequestError("kiwoom_unavailable", "잠시 뒤 다시 시도하세요"));
     await flush();
+    feed.needOlder();
+    expect(olderLoads()).toBe(1);
     feed.retryOlder();
+    expect(olderLoads()).toBe(2);
     expect(calls).toHaveLength(3);
     expect(calls[2]!.q.before).toBe(10);
     calls[2]!.resolve(page([bar(9)], null));

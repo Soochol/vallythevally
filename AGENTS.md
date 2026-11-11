@@ -18,6 +18,14 @@
 - 로컬 시험은 unshare 없이 돌린다. `scripts/check.sh`는 지금 쓰지 않는다(나중에 CI로 옮긴다).
 - 큰 빌드 출력과 임시 파일은 작업 폴더 안에 둔다.
 
+## 병렬 검증
+
+- 같은 저장소의 worktree들은 Rust·WASM 컴파일을 한 번에 하나씩 실행한다. 컴파일 작업 수는 `CARGO_BUILD_JOBS=4`로 제한한다.
+- 공통 잠금은 `$(git rev-parse --path-format=absolute --git-common-dir)/compile.lock`이다. `flock "$(git rev-parse --path-format=absolute --git-common-dir)/compile.lock" env CARGO_BUILD_JOBS=4 cargo build -p server -p fake-kiwoom`처럼 컴파일 명령 하나에만 건다. `cargo check`, `cargo clippy`, `cargo test --no-run`, `pnpm wasm`도 같은 잠금을 쓴다.
+- TypeScript 검사·Vite 빌드·Vitest·Playwright와 컴파일이 끝난 Rust 시험 실행은 잠금 밖에서 진행한다. Rust 시험은 필요한 대상을 `cargo test --no-run`으로 먼저 컴파일한 뒤 같은 옵션으로 실행한다.
+- `pnpm typecheck`, `pnpm build`, `pnpm test`는 WASM 컴파일을 먼저 실행한다. 필요한 WASM을 잠금 안에서 한 번 준비한 뒤, 나머지는 web의 `./node_modules/.bin/tsc -b`, `./node_modules/.bin/vite build`, `./node_modules/.bin/vitest run`으로 나눠 실행할 수 있다. Rust·WASM 소스와 빌드 설정이 이전 검증 때와 같으면 기존 산출물을 재사용한다. 나눠 실행한 명령은 검증 보고에 적는다.
+- worktree마다 `target`, 임시 DB, 로그, Playwright 결과 경로를 분리한다. 한 worktree에서 여러 Playwright를 실행하면 `--output`도 나눈다. 대기 중에는 잠금 소유자와 실행 단계를 확인하고, 다른 세션의 프로세스는 그대로 둔다.
+
 ## 커밋과 PR
 
 - 커밋 메시지는 영어, PR 본문은 한국어로 쓴다.

@@ -327,6 +327,20 @@ mod tests {
     }
 
     #[sqlx::test(migrations = "./migrations")]
+    async fn quarterly_and_yearly_cell_periods_survive_storage(_: SqlitePoolOptions, opts: SqliteConnectOptions) {
+        let db = db(opts).await;
+        let mut quarter = cell(0, "005930", Some(Venue::Combined));
+        quarter.period = Period::Quarter;
+        let mut year = cell(1, "IDX:001", None);
+        year.period = Period::Year;
+        let input = layout("QY", "분기·연간", Arrangement::TwoH, vec![quarter, year]);
+        let saved = put_layout(&db, &input, UnixSeconds(100)).await.unwrap();
+        assert_eq!(get_layout(&db, "QY").await.unwrap(), saved);
+        assert_eq!(saved.cells[0].period, Period::Quarter);
+        assert_eq!(saved.cells[1].period, Period::Year);
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
     async fn layout_upsert_replaces_cells_and_lists_in_position_order(_: SqlitePoolOptions, opts: SqliteConnectOptions) {
         let db = db(opts).await;
         let seeded = get_layout(&db, DEFAULT_ID).await.unwrap();

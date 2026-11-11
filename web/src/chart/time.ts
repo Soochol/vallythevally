@@ -33,7 +33,7 @@ export function isMarketOpen(t: UnixSeconds): boolean {
 }
 
 export function isIntraday(period: Period): boolean {
-  return period !== "D" && period !== "W" && period !== "M";
+  return period !== "D" && period !== "W" && period !== "M" && period !== "Q" && period !== "Y";
 }
 
 /** 봉 시각. 일·주·월봉은 날짜만, 분봉은 `2026-11-06 19:55`. */
