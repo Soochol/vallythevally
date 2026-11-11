@@ -877,6 +877,21 @@ async fn decimal_parameters_meet_their_exact_boundary_and_the_floats_beside_it_f
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn a_surge_needs_a_value_above_zero_even_when_the_bars_before_average_zero() {
+    let days = fortnight();
+    let traded = |code: &str, today: u64| stock(code, days.iter().enumerate().map(|(i, &d)| KrxBar { traded_million_won: if i == 14 { today } else { 0 }, ..bar(d, 100, 100) }).collect());
+    let session = loaded(KrxMarket { days: days.clone(), stocks: vec![traded("200010", 0), traded("200020", 1)] }).await;
+    let api = &session.api;
+    for n in [1, 5] {
+        assert_eq!(
+            hits(&api.result(&every(vec![surge("D", 1, "traded_value", n, 3.0)])).await),
+            [hit("200020", days[14])],
+            "n={n}: 거래대금 0백만 원이 이어진 200010은 오늘도 0이라 급증이 아니고, 0에서 1백만 원이 된 200020은 급증이다"
+        );
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn a_huge_traded_value_sum_in_some_stocks_leaves_every_stocks_weekly_and_monthly_result() {
     let days = fortnight();
     let traded = |code: &str, million_won: u64| stock(code, days.iter().map(|&d| KrxBar { traded_million_won: million_won, ..bar(d, 100, 100) }).collect());

@@ -166,7 +166,7 @@ fn last_surge(values: &[u128], n: usize, recent: usize, times: Decimal) -> Optio
         if i > first {
             before = before + values[i - 1] - values[i - 1 - n];
         }
-        if Exact::new(false, values[i] * n as u128, 0) >= times.times(before) {
+        if values[i] > 0 && Exact::new(false, values[i] * n as u128, 0) >= times.times(before) {
             last = Some(i);
         }
     }
