@@ -16,7 +16,6 @@ import type { SurgeField } from "../../api/generated/SurgeField";
 import { saveScreens, useScreens } from "../../api/screener";
 import {
   BAND_LABEL,
-  type ConditionKind,
   conditionSentence,
   DIRECTION_LABEL,
   EXCLUDE_LABEL,
@@ -52,6 +51,8 @@ import {
   excludesIn,
   type FieldKey,
   KIND_GROUPS,
+  type KindChoice,
+  kindChoiceOf,
   MARKETS,
   MAX_CONDITIONS,
   MAX_MA_LINES,
@@ -108,6 +109,9 @@ const ICHIMOKU_TESTS: Options<"cloud" | "cross"> = [
   ["cross", "전환선·기준선 교차"],
 ];
 
+const CHOICE_LABEL: Record<KindChoice, string> = { ...KIND_LABEL, volume_high: NEW_HIGH_NAME.volume, traded_value_high: NEW_HIGH_NAME.traded_value };
+const VALUE_FIELDS: Partial<Record<KindChoice, Options<BarField>>> = { new_high: PRICE_FIELDS, new_low: BAR_FIELDS };
+
 const FIELD_NAME: Record<Exclude<FieldKey, `lengths.${number}`>, string> = {
   m: "최근 봉 수",
   n: "기간",
@@ -131,9 +135,11 @@ const FIELD_NAME: Record<Exclude<FieldKey, `lengths.${number}`>, string> = {
   spanB: "선행스팬 B 기간",
   displacement: "이동 봉 수",
 };
-const KIND_FIELD_NAME: { [K in ConditionKind]?: Partial<Record<FieldKey, string>> } = {
+const KIND_FIELD_NAME: { [K in KindChoice]?: Partial<Record<FieldKey, string>> } = {
   new_high: { n: "신고가 기간" },
   new_low: { n: "신저가 기간" },
+  volume_high: { n: `${NEW_HIGH_NAME.volume} 기간` },
+  traded_value_high: { n: `${NEW_HIGH_NAME.traded_value} 기간` },
   surge: { n: "평균 기간" },
   ma_position: { length: "이평 기간" },
   ma_cross: { fast: "짧은 이평", slow: "긴 이평" },
@@ -144,7 +150,7 @@ const KIND_FIELD_NAME: { [K in ConditionKind]?: Partial<Record<FieldKey, string>
 const LENGTHS = "lengths.";
 const isLengthKey = (key: FieldKey): key is `lengths.${number}` => key.startsWith(LENGTHS);
 
-function fieldName(kind: ConditionKind, key: FieldKey): string {
+function fieldName(kind: KindChoice, key: FieldKey): string {
   if (isLengthKey(key)) return `이평 ${Number(key.slice(LENGTHS.length)) + 1}`;
   return KIND_FIELD_NAME[kind]?.[key] ?? FIELD_NAME[key];
 }
@@ -360,7 +366,7 @@ interface LineProps {
   condition: ConditionDraft;
   removable: boolean;
   onChange(line: ConditionDraft): void;
-  onKind(kind: ConditionKind): void;
+  onKind(kind: KindChoice): void;
   onMove(by: -1 | 1): void;
   onRemove(): void;
 }
@@ -368,25 +374,26 @@ interface LineProps {
 interface LineUi {
   label: string;
   base: string;
-  kind: ConditionKind;
+  kind: KindChoice;
   errors: ConditionErrors;
 }
 
 function ConditionLine({ ids, index, last, condition, removable, onChange, onKind, onMove, onRemove }: LineProps) {
   const label = `조건 ${index + 1}`;
   const row = checkCondition(condition);
-  const ui: LineUi = { label, base: `${ids}-condition-${condition.key}`, kind: condition.kind, errors: row.ok ? {} : row.errors };
+  const kind = kindChoiceOf(condition);
+  const ui: LineUi = { label, base: `${ids}-condition-${condition.key}`, kind, errors: row.ok ? {} : row.errors };
   const barLine = condition.kind !== "market_cap";
   return (
     <li className="flex flex-col gap-1">
       {index > 0 && <span className="text-xs font-[600] text-accent">그리고</span>}
       <div className="flex flex-wrap items-center gap-x-1.5 gap-y-1.5 text-s text-text-2">
-        <select aria-label={`${label} 종류`} value={condition.kind} onChange={(e) => onKind(kindOf(e.target.value) ?? condition.kind)} className={`${FIELD_BOX} px-1.5`}>
+        <select aria-label={`${label} 종류`} value={kind} onChange={(e) => onKind(kindOf(e.target.value) ?? kind)} className={`${FIELD_BOX} px-1.5`}>
           {KIND_GROUPS.map((group) => (
             <optgroup key={group.label} label={group.label}>
-              {group.kinds.map((kind) => (
-                <option key={kind} value={kind}>
-                  {KIND_LABEL[kind]}
+              {group.kinds.map((choice) => (
+                <option key={choice} value={choice}>
+                  {CHOICE_LABEL[choice]}
                 </option>
               ))}
             </optgroup>
@@ -415,15 +422,15 @@ function ConditionLine({ ids, index, last, condition, removable, onChange, onKin
         </span>
       </div>
       {(Object.entries(ui.errors) as [FieldKey, string][]).map(([key, message]) => (
-        <Errors key={key} id={`${ui.base}-${key}-error`} messages={[`${fieldName(condition.kind, key)}: ${message}`]} />
+        <Errors key={key} id={`${ui.base}-${key}-error`} messages={[`${fieldName(kind, key)}: ${message}`]} />
       ))}
       {row.ok && <p className="text-xs text-text-3">{conditionSentence(row.condition)}</p>}
     </li>
   );
 }
 
-const ALL_KINDS: readonly ConditionKind[] = KIND_GROUPS.flatMap((g) => g.kinds);
-const kindOf = (value: string): ConditionKind | undefined => ALL_KINDS.find((k) => k === value);
+const ALL_KINDS: readonly KindChoice[] = KIND_GROUPS.flatMap((g) => g.kinds);
+const kindOf = (value: string): KindChoice | undefined => ALL_KINDS.find((k) => k === value);
 
 type Width = "count" | "length" | "amount" | "percent";
 const WIDTH: Record<Width, string> = { count: "w-[72px]", length: "w-[52px]", amount: "w-[88px]", percent: "w-[60px]" };
@@ -523,10 +530,11 @@ function KindFields({ ui, line, onChange }: KindProps) {
   );
   switch (line.kind) {
     case "new_high":
-    case "new_low":
+    case "new_low": {
+      const fields = VALUE_FIELDS[ui.kind];
       return (
         <>
-          <Choice label={choice("값")} value={line.field} options={BAR_FIELDS} onChange={(field) => onChange({ ...line, field })} />
+          {fields && <Choice label={choice("값")} value={line.field} options={fields} onChange={(field) => onChange({ ...line, field })} />}
           <Together>
             <NumberBox ui={ui} field="n" value={line.n} onChange={(n) => onChange({ ...line, n })} />
             <span>
@@ -535,6 +543,7 @@ function KindFields({ ui, line, onChange }: KindProps) {
           </Together>
         </>
       );
+    }
     case "value_range":
       return (
         <>
