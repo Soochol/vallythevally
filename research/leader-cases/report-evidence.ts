@@ -57,7 +57,7 @@ export function mountEvidence(bundle: Bundle) {
     disclosures: () => bundle.dart.disclosures,
   };
   for (const host of document.querySelectorAll<HTMLDetailsElement>("details[data-evidence]")) {
-    host.addEventListener("toggle", () => {
+    const render = () => {
       if (!host.open || host.dataset.loaded) return;
       if (host.dataset.evidence === "publication") {
         host.append(element("p", "paths는 점검용 후보입니다. activePaths만 evaluatedOn에 이용 가능합니다. 미공개 후보는 당시 알려진 수치가 아닙니다."));
@@ -69,6 +69,8 @@ export function mountEvidence(bundle: Bundle) {
         }));
       } else tree(host, values[host.dataset.evidence!]!());
       host.dataset.loaded = "true";
-    });
+    };
+    host.addEventListener("toggle", render);
+    render();
   }
 }

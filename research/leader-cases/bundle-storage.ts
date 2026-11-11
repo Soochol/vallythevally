@@ -3,12 +3,13 @@ import { mkdir, open, rename, rm } from "node:fs/promises";
 import path from "node:path";
 import { createInterface } from "node:readline";
 import { promisify } from "node:util";
-import { gzip, gunzip } from "node:zlib";
+import { crc32, gzip, inflateRaw } from "node:zlib";
 import type { Bundle } from "./bundle-types.ts";
 import { BUNDLE_FIELDS, PAGE_BYTES, parseManifest, parsePage, validateDocument, type BundleDocument, type BundlePage, type DocumentField } from "./bundle-document.ts";
 import { parseDocumentBundle } from "./report-input.ts";
+import { fields, integer } from "./source-utils.ts";
 
-const compress = promisify(gzip), decompress = promisify(gunzip);
+const compress = promisify(gzip), decompress = promisify(inflateRaw);
 export async function encodeBundle(bundle: Bundle): Promise<BundleDocument> {
   const pages: BundlePage[] = [], descriptors: DocumentField[] = [];
   for (const key of BUNDLE_FIELDS) {
@@ -29,9 +30,38 @@ export async function encodeBundle(bundle: Bundle): Promise<BundleDocument> {
   return { manifest: { kind: "manifest", format: "leader-cases/paged-bundle", schemaVersion: 2, encoding: "gzip-base64", fields: descriptors }, pages };
 }
 export async function inflateNodePage(data: string, bytes: number): Promise<string> {
-  const result = await decompress(Buffer.from(data, "base64"), { maxOutputLength: PAGE_BYTES });
+  const gzip = Buffer.from(data, "base64");
+  const offset = gzipPayloadOffset(gzip);
+  const inflated: unknown = await decompress(gzip.subarray(offset), { maxOutputLength: PAGE_BYTES, info: true });
+  const response = fields(inflated), result = response.buffer;
+  if (!Buffer.isBuffer(result)) throw new Error("invalid_inflate_result");
+  const consumed = integer(fields(response.engine).bytesWritten);
+  const trailer = offset + consumed;
+  if (trailer + 8 !== gzip.length) throw new Error("gzip_residual_bytes_or_multiple_members");
+  if (crc32(result) !== gzip.readUInt32LE(trailer) || result.length !== gzip.readUInt32LE(trailer + 4)) throw new Error("gzip_checksum_or_size_mismatch");
   if (result.length !== bytes) throw new Error("bundle_page_size_mismatch");
   return new TextDecoder("utf-8", { fatal: true }).decode(result);
+}
+function gzipPayloadOffset(gzip: Buffer): number {
+  if (gzip.length < 18 || gzip[0] !== 31 || gzip[1] !== 139 || gzip[2] !== 8 || (gzip[3]! & 224) !== 0) throw new Error("invalid_gzip_header");
+  const flags = gzip[3]!, end = gzip.length - 8;
+  let offset = 10;
+  if (flags & 4) {
+    if (offset + 2 > end) throw new Error("truncated_gzip_header");
+    offset += 2 + gzip.readUInt16LE(offset);
+    if (offset > end) throw new Error("truncated_gzip_header");
+  }
+  for (const flag of [8, 16]) if (flags & flag) {
+    const nul = gzip.indexOf(0, offset);
+    if (nul === -1 || nul >= end) throw new Error("truncated_gzip_header");
+    offset = nul + 1;
+  }
+  if (flags & 2) {
+    if (offset + 2 > end || (crc32(gzip.subarray(0, offset)) & 65535) !== gzip.readUInt16LE(offset)) throw new Error("invalid_gzip_header_checksum");
+    offset += 2;
+  }
+  if (offset >= end) throw new Error("truncated_gzip_payload");
+  return offset;
 }
 export async function documentBundle(document: BundleDocument): Promise<Bundle> {
   return parseDocumentBundle(document, inflateNodePage);

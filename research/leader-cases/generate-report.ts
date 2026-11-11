@@ -37,7 +37,7 @@ export async function main(args: string[]): Promise<number> {
     return 0;
   } catch {
     process.stderr.write(`HTML을 만들지 못했습니다: ${stage}\n${USAGE}`);
-    return 2;
+    return stage === "bundle_input" ? 1 : 2;
   }
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) process.exitCode = await main(process.argv.slice(2));

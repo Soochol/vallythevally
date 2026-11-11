@@ -56,7 +56,7 @@ test("single HTML CLI embeds the real bundle contract, escapes executable text a
   const badBundle = path.join(path.dirname(badPath), "bad-bundle.json");
   await writeFile(badBundle, '{"secret":"SYNTHETIC-DO-NOT-ECHO",');
   const invalidBundle = await runCli(["--bundle", badBundle, "--manuscript", fixture.manuscriptPath]);
-  assert.equal(invalidBundle.code, 2);
+  assert.equal(invalidBundle.code, 1);
   assert.match(invalidBundle.stderr, /bundle_input/);
   assert.ok(!invalidBundle.stderr.includes("SYNTHETIC-DO-NOT-ECHO"));
   assert.equal(await readFile(output, "utf8"), html);
