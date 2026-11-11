@@ -31,7 +31,7 @@
 | [KIND 우선주 전체 검색](https://kind.krx.co.kr/common/searchcorpnameall.do?method=searchCorpNameAllJson&searchCodeType=number&searchCorpName=005935) | 빈 목록 |
 | [KIND 우선주 자동완성](https://kind.krx.co.kr/common/akc.jsp?q=005935&s=1) | 빈 목록 |
 
-실제 `005935` 연결은 검증하지 못했다. KIND가 요청과 다른 대표 보통주를 반환해도 연결하지 않는다. 회사 매핑 미확인은 해당 종목에만 적용하며, 이미 검증된 회사·기간의 저장 자료를 비우지 않는다. 합성 fixture의 연결 성공은 응답 형식과 분기 처리를 검증하며 실제 우선주 지원을 실증하지 않는다. 추가 자격증명을 요구하는 KRX 서비스는 사용하지 않는다. 일반 우선주의 공식 실연결은 [후속 작업 #167](https://github.com/Soochol/vallythevally/issues/167)에서 검증한다.
+이 코드 검색만으로는 `005935` 연결을 검증하지 못했다. KIND가 요청과 다른 대표 보통주를 반환해도 연결하지 않는다. 회사 매핑 미확인은 해당 종목에만 적용하며, 이미 검증된 회사·기간의 저장 자료를 비우지 않는다. 합성 fixture의 연결 성공은 응답 형식과 분기 처리를 검증하며 실제 우선주 지원을 실증하지 않는다. 추가 자격증명을 요구하는 KRX 서비스는 사용하지 않는다. 이후 #167에서 삼성전자 변경상장 공시에 명시된 `005935`·`005930`의 같은 발행인 연결과 KIND의 정확 `005930` 회사번호를 확인했다. resolver는 이 공시 한 건을 제한된 근거 목록으로 두고 발행인·종류별 단축/표준코드·회사번호를 실제 대조한다. [관측·재현 방법과 실패 계약](dart-preferred-company-mapping.md)을 따른다. 전체 우선주의 자동 발견과 적용 범위 확대는 [후속 작업 #179](https://github.com/Soochol/vallythevally/issues/179)이며, 목록 밖 종목은 계속 미확인이다.
 
 회사 재무는 회사코드로 공유한다. 배당 원문의 `stock_knd`와 종목의 주식 종류는 별도로 보존한다. 회사 연결만 확인된 우선주는 세부 배당 종류가 확인된 것으로 간주하지 않고 `preferred_issue_class_unverified`를 남긴다. 종류를 확인하지 못한 DPS를 보통주 값으로 채우면 안 된다.
 
