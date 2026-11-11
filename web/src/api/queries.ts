@@ -46,7 +46,7 @@ export function fetchSymbolInfo(code: SymbolCode, signal?: AbortSignal): Promise
   return getJson<SymbolInfo>(`/api/symbols/${encodeURIComponent(code)}`, signal);
 }
 
-const symbolInfoQuery = (code: SymbolCode) => ({
+export const symbolInfoQuery = (code: SymbolCode) => ({
   queryKey: ["symbol", code],
   queryFn: ({ signal }: { signal: AbortSignal }) => fetchSymbolInfo(code, signal),
   staleTime: Infinity,

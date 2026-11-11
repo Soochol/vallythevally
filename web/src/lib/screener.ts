@@ -82,6 +82,9 @@ export const EXCLUDE_LABEL: Record<ExcludeKind, string> = {
 const EXCLUDE_ORDER = Object.keys(EXCLUDE_LABEL) as ExcludeKind[];
 export const excludedInOrder = (exclude: readonly ExcludeKind[]): ExcludeKind[] => EXCLUDE_ORDER.filter((k) => exclude.includes(k));
 
+const MARKET_ORDER = Object.keys(MARKET_LABEL) as Market[];
+export const marketsInOrder = (markets: readonly Market[]): Market[] => MARKET_ORDER.filter((m) => markets.includes(m));
+
 export const PHASE_LABEL: Record<UpdatePhase, string> = { symbols: "종목 목록 받기", recent: "최근 관측일 채우기", backfill: "과거 이력 이어 받기" };
 
 const count = (n: number) => n.toLocaleString("ko-KR");
@@ -197,9 +200,8 @@ export function conditionSentence(condition: Condition): string {
   return `최근 ${count(m)}${UNIT[period]} 안에 ${"state" in claim ? `${claim.state}인` : `${claim.event}한`} 봉이 있다`;
 }
 
-export function excludedText(screen: Screen, { listedTooShort, historyShort, unconfirmed }: ScreenerExcluded): string {
-  const longest = Math.max(...newHighLines(screen).map((c) => c.n));
-  const counted = `상장 ${count(longest)}${UNIT[screenPeriod(screen)]} 미만 ${count(listedTooShort)} · 이력 덜 참 ${count(historyShort)}`;
+export function excludedText({ listedTooShort, historyShort, unconfirmed }: ScreenerExcluded): string {
+  const counted = `상장 기간 부족 ${count(listedTooShort)} · 이력 덜 참 ${count(historyShort)}`;
   return unconfirmed > 0 ? `${counted} · 확인 안 됨 ${count(unconfirmed)}` : counted;
 }
 
@@ -220,18 +222,19 @@ function bucketStart(period: ScreenPeriod, day: KstDate): KstDate {
   return isoOf(new Date(date.getTime() - ((date.getUTCDay() + 6) % 7) * DAY_MS));
 }
 
-export interface HighDateText {
+export interface MatchedDateText {
   text: string;
   current: boolean;
 }
 
-export function highDateText(period: ScreenPeriod, highDate: KstDate, asOf: KstDate): HighDateText {
-  if (bucketStart(period, highDate) === bucketStart(period, asOf)) return { text: CURRENT_BAR[period], current: true };
-  const shown = sameYear(highDate, asOf) ? highDate.slice(5) : highDate;
+export function matchedDateText(screen: Screen, matchedDate: KstDate, asOf: KstDate): MatchedDateText {
+  const period = screenPeriod(screen);
+  if (bucketStart(period, matchedDate) === bucketStart(period, asOf)) return { text: CURRENT_BAR[period], current: true };
+  const shown = sameYear(matchedDate, asOf) ? matchedDate.slice(5) : matchedDate;
   if (period === "D") return { text: shown, current: false };
   if (period === "W") return { text: `${shown} 주`, current: false };
-  const month = `${Number(highDate.slice(5, 7))}월`;
-  return { text: sameYear(highDate, asOf) ? month : `${highDate.slice(0, 4)}년 ${month}`, current: false };
+  const month = `${Number(matchedDate.slice(5, 7))}월`;
+  return { text: sameYear(matchedDate, asOf) ? month : `${matchedDate.slice(0, 4)}년 ${month}`, current: false };
 }
 
 export type ResultSortKey = "name" | "close" | "changeRate" | "matchedDate";

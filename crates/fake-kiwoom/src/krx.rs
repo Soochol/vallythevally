@@ -54,6 +54,7 @@ pub const ETF: &str = "110060";
 pub const REIT: &str = "110070";
 pub const SPAC: &str = "110080";
 pub const NEW_LISTING: &str = "110090";
+const NXT_LISTED: [&str; 2] = [SPLIT, MANAGED];
 
 const SPLIT_RATIO: u64 = 5;
 
@@ -345,7 +346,7 @@ fn stock_list(market: &KrxMarket, kosdaq: bool) -> Value {
                 "marketCode": s.market_code,
                 "marketName": if kosdaq { "코스닥" } else { "거래소" },
                 "name": s.name,
-                "nxtEnable": "N",
+                "nxtEnable": if NXT_LISTED.contains(&s.code.as_str()) { "Y" } else { "N" },
                 "orderWarning": "0",
                 "regDay": s.reg_day.yyyymmdd(),
                 "state": "증거금40%|신용가능",
