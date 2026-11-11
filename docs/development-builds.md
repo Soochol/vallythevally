@@ -37,6 +37,16 @@ python3 scripts/test-dev.py
 python3 scripts/dev.py --bundled cargo check -p server
 ```
 
+## 배포용 빌드
+
+배포용 서버는 일반 Cargo의 기본 `bundled-duckdb` 기능으로 빌드한 `target/release/vally-server`를 사용한다. 개발 명령의 `target/dev/bin`과 공유 캐시는 개발·시험용이다. release 컴파일도 저장소 공통 잠금과 작업 수 4를 따른다.
+
+```sh
+cargo build --locked --release -p server
+```
+
+DuckDB는 release 바이너리에 포함되므로 개발 캐시나 별도 `libduckdb.so`를 배포할 필요가 없다. 실제 배포 직전에 release 바이너리의 가짜 키움 환경 기동·주요 동작을 검증한다. 이 개발 도구의 검증에서는 release 산출물의 실제 빌드·기동까지 수행하지 않았다.
+
 ## 공유 범위와 무효화
 
 캐시는 `git worktree list`의 첫 번째 주 worktree 안에 있는 `target/dev-cache`를 사용한다. 같은 Git 저장소의 worktree들은 이 위치를 찾는다. 주 worktree를 지울 때 캐시도 지워질 수 있으므로 독립된 작업 폴더의 절대 경로를 `VALLY_DEV_CACHE_DIR`로 지정할 수 있다. worktree별 Cargo `target`은 계속 분리한다.

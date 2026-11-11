@@ -29,6 +29,12 @@
 - `pnpm typecheck`, `pnpm build`, `pnpm test`는 WASM 컴파일을 먼저 실행한다. 필요한 WASM을 잠금 안에서 한 번 준비한 뒤, 나머지는 web의 `./node_modules/.bin/tsc -b`, `./node_modules/.bin/vite build`, `./node_modules/.bin/vitest run`으로 나눠 실행할 수 있다. Rust·WASM 소스와 빌드 설정이 이전 검증 때와 같으면 기존 산출물을 재사용한다. 나눠 실행한 명령은 검증 보고에 적는다.
 - worktree마다 `target`, 임시 DB, 로그, Playwright 결과 경로를 분리한다. 한 worktree에서 여러 Playwright를 실행하면 `--output`도 나눈다. 대기 중에는 잠금 소유자와 실행 단계를 확인하고, 다른 세션의 프로세스는 그대로 둔다.
 
+## 배포
+
+- 배포용 서버는 `cargo build --locked --release -p server`로 만든 `target/release/vally-server`를 사용한다. 기본 `bundled-duckdb` 기능을 유지한다.
+- `target/dev/bin`, 공유 빌드 캐시와 가짜 키움은 개발·시험 전용이다. 개발용 동적 DuckDB 연결과 배포용 빌드를 구분한다.
+- 실제 배포 직전에 release 빌드와 가짜 키움 환경의 기동·주요 동작을 검증한다. 개발 빌드 시험만으로 배포 검증을 갈음하지 않는다.
+
 ## 커밋과 PR
 
 - 커밋 메시지는 영어, PR 본문은 한국어로 쓴다.
