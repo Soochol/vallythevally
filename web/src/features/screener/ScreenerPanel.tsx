@@ -30,6 +30,7 @@ import {
   type ResultSortKey,
   type RunBlock,
   runBlock,
+  screenPeriod,
   showsUpdateBand,
   sortRows,
   type StatusFooter,
@@ -261,7 +262,7 @@ function ScreenPicker({ screens, screen }: { screens: readonly Screen[]; screen:
   const menu = useMenuToggle();
   const choose = useScreenerStore((s) => s.choose);
   const items: MenuItem[] = [
-    ...screens.map((s): MenuItem => ({ kind: "radio", label: `${s.name} · ${PERIOD_NAME[s.period]}`, checked: s.id === screen.id, onSelect: () => choose(s.id) })),
+    ...screens.map((s): MenuItem => ({ kind: "radio", label: `${s.name} · ${PERIOD_NAME[screenPeriod(s)]}`, checked: s.id === screen.id, onSelect: () => choose(s.id) })),
     { kind: "separator" },
     { kind: "action", label: "새 조건식…", onSelect: () => editScreen(null) },
   ];
@@ -292,7 +293,7 @@ function ScreenSummary({ screen }: { screen: Screen }) {
   return (
     <div className="mt-1.5 rounded-m border border-line bg-surface px-2.5 py-2">
       <p className="flex flex-wrap items-center gap-1 text-xs text-text-3">
-        <span className="rounded-s bg-raised px-1.5 py-px font-[600] text-text-2">{PERIOD_NAME[screen.period]}</span>
+        <span className="rounded-s bg-raised px-1.5 py-px font-[600] text-text-2">{PERIOD_NAME[screenPeriod(screen)]}</span>
         {excluded.length === 0 ? (
           <span>전 종목 대상</span>
         ) : (
@@ -310,7 +311,7 @@ function ScreenSummary({ screen }: { screen: Screen }) {
         {screen.conditions.map((c, i) => (
           <li key={i}>
             {i > 0 && <span className="mr-1 text-xs font-[600] text-accent">그리고</span>}
-            {conditionSentence(screen.period, c)}
+            {conditionSentence(c)}
           </li>
         ))}
       </ol>
@@ -505,7 +506,7 @@ function ResultList({ screen, result, rows, running, rerun, onRun }: ResultListP
           <SortHeader sort={sort} />
           <ul ref={list} aria-label={`${screen.name} 결과`} className="min-h-0 flex-1 overflow-auto">
             {rows.map((r) => (
-              <ResultRow key={r.symbol} row={r} period={screen.period} asOf={result.asOf} active={r.symbol === active} />
+              <ResultRow key={r.symbol} row={r} period={screenPeriod(screen)} asOf={result.asOf} active={r.symbol === active} />
             ))}
           </ul>
         </>
@@ -518,7 +519,7 @@ const COLUMNS: readonly { key: ResultSortKey; label: string }[] = [
   { key: "name", label: "종목" },
   { key: "close", label: "종가" },
   { key: "changeRate", label: "등락률" },
-  { key: "highDate", label: "신고가" },
+  { key: "matchedDate", label: "신고가" },
 ];
 
 function SortHeader({ sort }: { sort: ResultSort }) {
@@ -546,7 +547,7 @@ function SortHeader({ sort }: { sort: ResultSort }) {
 }
 
 function ResultRow({ row, period, asOf, active }: { row: ScreenerRow; period: ScreenPeriod; asOf: KstDate; active: boolean }) {
-  const high = highDateText(period, row.highDate, asOf);
+  const high = highDateText(period, row.matchedDate, asOf);
   return (
     <li data-code={row.symbol} className={`border-l-2 ${active ? "border-l-accent bg-surface" : "border-l-transparent"}`}>
       <button

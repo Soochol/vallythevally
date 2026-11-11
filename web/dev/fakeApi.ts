@@ -6,8 +6,10 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import type { Plugin } from "vite";
 import type { ApiError } from "../src/api/generated/ApiError.ts";
 import type { ApiErrorCode } from "../src/api/generated/ApiErrorCode.ts";
+import type { BarField } from "../src/api/generated/BarField.ts";
 import type { Period } from "../src/api/generated/Period.ts";
 import type { Screen } from "../src/api/generated/Screen.ts";
+import type { ScreenPeriod } from "../src/api/generated/ScreenPeriod.ts";
 import type { Resume } from "../src/api/http.ts";
 import { barsPage, findSymbol, publicInfo, quoteOf, resolveVenue, search } from "./fakeMarket.ts";
 import { createScreener, parseScenario } from "./fakeScreener.ts";
@@ -20,21 +22,19 @@ const PERIODS: Period[] = ["1m", "3m", "5m", "15m", "30m", "60m", "D", "W", "M"]
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const SEED_WATCHLIST = ["005930", "000660", "373220", "035420", "005935", "069500", "IDX:001", "IDX:101"];
+const newHigh = (period: ScreenPeriod, field: BarField, n: number, m: number) => ({ kind: "new_high", period, m, field, n }) as const;
 const SEED_SCREENS: Screen[] = [
-  { id: "01900000-0000-7000-8000-0000000000a1", name: "고가 200일 신고가", period: "D", exclude: [], conditions: [{ field: "high", n: 200, m: 5 }] },
+  { id: "01900000-0000-7000-8000-0000000000a1", name: "고가 200일 신고가", markets: [], exclude: [], conditions: [newHigh("D", "high", 200, 5)] },
   {
     id: "01900000-0000-7000-8000-0000000000a2",
     name: "52주 신고가와 신고거래량",
-    period: "W",
+    markets: [],
     exclude: ["etf", "spac", "managed", "trading_halted"],
-    conditions: [
-      { field: "high", n: 52, m: 1 },
-      { field: "volume", n: 52, m: 4 },
-    ],
+    conditions: [newHigh("W", "high", 52, 1), newHigh("W", "volume", 52, 4)],
   },
-  { id: "01900000-0000-7000-8000-0000000000a3", name: "종가 12개월 신고가", period: "M", exclude: ["etf", "preferred", "reit", "spac"], conditions: [{ field: "close", n: 12, m: 3 }] },
-  { id: "01900000-0000-7000-8000-0000000000a4", name: "종가 10년 신고가", period: "D", exclude: ["etf"], conditions: [{ field: "close", n: 2500, m: 1 }] },
-  { id: "01900000-0000-7000-8000-0000000000a5", name: "고가 1,000일 신고가", period: "D", exclude: [], conditions: [{ field: "high", n: 1000, m: 20 }] },
+  { id: "01900000-0000-7000-8000-0000000000a3", name: "종가 12개월 신고가", markets: [], exclude: ["etf", "preferred", "reit", "spac"], conditions: [newHigh("M", "close", 12, 3)] },
+  { id: "01900000-0000-7000-8000-0000000000a4", name: "종가 10년 신고가", markets: [], exclude: ["etf"], conditions: [newHigh("D", "close", 2500, 1)] },
+  { id: "01900000-0000-7000-8000-0000000000a5", name: "고가 1,000일 신고가", markets: [], exclude: [], conditions: [newHigh("D", "high", 1000, 20)] },
 ];
 
 async function readJson(req: IncomingMessage): Promise<unknown> {

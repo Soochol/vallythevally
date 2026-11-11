@@ -1,5 +1,7 @@
 import { expect, test } from "vitest";
+import type { BarField } from "../api/generated/BarField";
 import type { Screen } from "../api/generated/Screen";
+import type { ScreenPeriod } from "../api/generated/ScreenPeriod";
 import type { ScreenerRow } from "../api/generated/ScreenerRow";
 import type { ScreenerStatus } from "../api/generated/ScreenerStatus";
 import {
@@ -12,6 +14,7 @@ import {
   msUntilStatusTurns,
   nextSort,
   runBlock,
+  screenPeriod,
   showsUpdateBand,
   sortRows,
   statusFooter,
@@ -19,13 +22,23 @@ import {
   updateRetry,
 } from "./screener";
 
-test("조건 문장은 봉 주기의 단위와 M이 1인지에 따라 바뀐다", () => {
-  expect(conditionSentence("D", { field: "high", n: 200, m: 5 })).toBe("최근 5일 안에 고가가 200일 신고가인 봉이 있다");
-  expect(conditionSentence("D", { field: "volume", n: 60, m: 1 })).toBe("당일 거래량이 60일 신고거래량이다");
-  expect(conditionSentence("W", { field: "close", n: 52, m: 1 })).toBe("이번 주 종가가 52주 신고가다");
-  expect(conditionSentence("M", { field: "low", n: 12, m: 3 })).toBe("최근 3개월 안에 저가가 12개월 신고가인 봉이 있다");
-  expect(conditionSentence("W", { field: "volume", n: 104, m: 8 })).toBe("최근 8주 안에 거래량이 104주 신고거래량인 봉이 있다");
-  expect(conditionSentence("D", { field: "open", n: 1200, m: 20 })).toBe("최근 20일 안에 시가가 1,200일 신고가인 봉이 있다");
+const newHigh = (period: ScreenPeriod, field: BarField, n: number, m: number) => ({ kind: "new_high", period, m, field, n }) as const;
+
+test("조건 문장은 그 줄의 봉 주기 단위와 M이 1인지에 따라 바뀐다", () => {
+  expect(conditionSentence(newHigh("D", "high", 200, 5))).toBe("최근 5일 안에 고가가 200일 신고가인 봉이 있다");
+  expect(conditionSentence(newHigh("D", "volume", 60, 1))).toBe("당일 거래량이 60일 신고거래량이다");
+  expect(conditionSentence(newHigh("W", "close", 52, 1))).toBe("이번 주 종가가 52주 신고가다");
+  expect(conditionSentence(newHigh("M", "low", 12, 3))).toBe("최근 3개월 안에 저가가 12개월 신고가인 봉이 있다");
+  expect(conditionSentence(newHigh("W", "volume", 104, 8))).toBe("최근 8주 안에 거래량이 104주 신고거래량인 봉이 있다");
+  expect(conditionSentence(newHigh("D", "open", 1200, 20))).toBe("최근 20일 안에 시가가 1,200일 신고가인 봉이 있다");
+  expect(conditionSentence(newHigh("D", "traded_value", 250, 1))).toBe("당일 거래대금이 250일 신고거래대금이다");
+});
+
+test("조건식의 봉 주기는 봉으로 따지는 첫 줄의 것이다", () => {
+  const screen = (conditions: Screen["conditions"]): Screen => ({ id: "s", name: "s", markets: [], exclude: [], conditions });
+  expect(screenPeriod(screen([newHigh("W", "high", 52, 1), newHigh("D", "close", 20, 1)]))).toBe("W");
+  expect(screenPeriod(screen([{ kind: "market_cap", min: 300_000_000_000, max: null }, newHigh("M", "high", 12, 1)]))).toBe("M");
+  expect(screenPeriod(screen([{ kind: "market_cap", min: null, max: 100_000_000_000 }]))).toBe("D");
 });
 
 test("제외 목록은 저장 순서와 상관없이 종류, 상태 순으로 보인다", () => {
@@ -37,12 +50,9 @@ test("빠진 종목 수는 조건 가운데 가장 큰 N을 상장 기준으로 
   const screen: Screen = {
     id: "s",
     name: "주봉",
-    period: "W",
+    markets: [],
     exclude: [],
-    conditions: [
-      { field: "high", n: 52, m: 1 },
-      { field: "volume", n: 104, m: 4 },
-    ],
+    conditions: [newHigh("W", "high", 52, 1), newHigh("W", "volume", 104, 4)],
   };
   expect(excludedText(screen, { listedTooShort: 14, historyShort: 1120, unconfirmed: 0 })).toBe("상장 104주 미만 14 · 이력 덜 참 1,120");
   expect(excludedText(screen, { listedTooShort: 14, historyShort: 1120, unconfirmed: 1203 })).toBe("상장 104주 미만 14 · 이력 덜 참 1,120 · 확인 안 됨 1,203");
@@ -67,12 +77,12 @@ test("신고가 날짜가 기준 관측일의 봉이면 당일·이번 주·이�
   expect(highDateText("M", "2025-12-01", "2026-01-05")).toEqual({ text: "2025년 12월", current: false });
 });
 
-const row = (symbol: string, name: string, close: number, changeRate: number | null, highDate: string): ScreenerRow => ({
+const row = (symbol: string, name: string, close: number, changeRate: number | null, matchedDate: string): ScreenerRow => ({
   symbol,
   name,
   close,
   changeRate,
-  highDate,
+  matchedDate,
 });
 const rows: readonly ScreenerRow[] = [
   row("000100", "나", 5000, 1.5, "2026-11-10"),
@@ -99,7 +109,7 @@ test("같은 열 머리를 다시 누르면 방향이 뒤집히고, 새 열은 �
   expect(byClose).toEqual({ key: "close", descending: true });
   expect(nextSort(byClose, "close")).toEqual({ key: "close", descending: false });
   expect(nextSort(byClose, "name")).toEqual({ key: "name", descending: false });
-  expect(nextSort(DEFAULT_SORT, "highDate")).toEqual({ key: "highDate", descending: false });
+  expect(nextSort(DEFAULT_SORT, "matchedDate")).toEqual({ key: "matchedDate", descending: false });
 });
 
 const ready: ScreenerStatus = {

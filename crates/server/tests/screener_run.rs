@@ -58,9 +58,17 @@ fn stock(code: &str, bars: Vec<KrxBar>) -> KrxStock {
     }
 }
 
+fn new_high(period: &str, field: &str, n: u32, m: u32) -> Value {
+    json!({"kind": "new_high", "period": period, "field": field, "n": n, "m": m})
+}
+
+fn lines(conditions: Vec<Value>, markets: &[&str]) -> Value {
+    json!({"id": "S1", "name": "시험 조건식", "markets": markets, "exclude": [], "conditions": conditions})
+}
+
 fn screen(period: &str, conditions: &[(&str, u32, u32)], exclude: &[&str]) -> Value {
-    let conditions: Vec<Value> = conditions.iter().map(|(field, n, m)| json!({"field": field, "n": n, "m": m})).collect();
-    json!({"id": "S1", "name": "시험 조건식", "period": period, "exclude": exclude, "conditions": conditions})
+    let conditions: Vec<Value> = conditions.iter().map(|&(field, n, m)| new_high(period, field, n, m)).collect();
+    json!({"id": "S1", "name": "시험 조건식", "markets": [], "exclude": exclude, "conditions": conditions})
 }
 
 fn daily(conditions: &[(&str, u32, u32)]) -> Value {
@@ -72,7 +80,7 @@ fn hit(code: &str, day: KstDate) -> String {
 }
 
 fn hits(result: &Value) -> Vec<String> {
-    result["rows"].as_array().unwrap().iter().map(|r| format!("{} {}", r["symbol"].as_str().unwrap(), r["highDate"].as_str().unwrap())).collect()
+    result["rows"].as_array().unwrap().iter().map(|r| format!("{} {}", r["symbol"].as_str().unwrap(), r["matchedDate"].as_str().unwrap())).collect()
 }
 
 fn row<'a>(result: &'a Value, code: &str) -> &'a Value {
@@ -337,6 +345,46 @@ async fn conditions_combine_with_and_and_rows_carry_the_first_conditions_last_ne
     assert_eq!(hits(&every_bar), ["200010", "200020", "200030", "200040", "200050"].map(|c| hit(c, days[14])));
     assert_eq!(price_and_change(&every_bar, "200050"), (json!(100.0), Value::Null), "직전 봉이 없으면 등락률이 없다");
     assert_eq!(row(&every_bar, "200050")["name"], "가상200050");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_traded_value_new_high_runs_while_other_kinds_mixed_periods_and_markets_are_refused_for_now() {
+    let days = fortnight();
+    let traded = |code: &str, million_won: fn(usize) -> u64| {
+        stock(code, days.iter().enumerate().map(|(i, &d)| KrxBar { traded_million_won: million_won(i), ..bar(d, 100, 1_000) }).collect())
+    };
+    let stocks = vec![
+        traded("200010", |i| if i == 14 { 900 } else { 100 }),
+        traded("200020", |i| match i { 5..=9 => 350, 12 => 900, _ => 100 }),
+    ];
+    let session = loaded(KrxMarket { days: days.clone(), stocks }).await;
+    let api = &session.api;
+
+    assert_eq!(hits(&api.result(&daily(&[("traded_value", 5, 1)])).await), [hit("200010", days[14])], "가격과 거래량이 같아도 거래대금이 가장 큰 봉만 신고거래대금이다");
+    assert_eq!(hits(&api.result(&daily(&[("volume", 5, 1)])).await), [hit("200010", days[14]), hit("200020", days[14])]);
+    assert_eq!(
+        hits(&api.result(&screen("W", &[("traded_value", 2, 1)], &[])).await),
+        [hit("200010", day(2026, 11, 2))],
+        "주봉 거래대금은 일봉 거래대금의 합이다: 200010은 이번 주 1,300 > 지난주 500, 200020은 이번 주 1,300 < 지난주 1,750"
+    );
+
+    let rsi = json!({"kind": "rsi", "period": "D", "m": 1, "length": 14, "test": {"kind": "range", "min": null, "max": 30.0}});
+    let market_cap = json!({"kind": "market_cap", "min": 300_000_000_000.0, "max": null});
+    for (case, screen) in [
+        ("신저가", lines(vec![new_high("D", "high", 5, 1), json!({"kind": "new_low", "period": "D", "m": 1, "field": "low", "n": 5})], &[])),
+        ("지표", lines(vec![rsi], &[])),
+        ("시가총액", lines(vec![new_high("D", "high", 5, 1), market_cap], &[])),
+        ("줄마다 다른 봉 주기", lines(vec![new_high("D", "high", 5, 1), new_high("W", "high", 2, 1)], &[])),
+        ("시장", lines(vec![new_high("D", "high", 5, 1)], &["kospi"])),
+    ] {
+        let (status, body) = api.run(&screen).await;
+        assert_eq!((status, body["error"]["code"].clone()), (400, json!("bad_request")), "{case}: {body}");
+        assert!(body["error"]["message"].as_str().unwrap().contains("아직"), "{case}: 무엇이 아직 안 되는지 알린다: {body}");
+    }
+    let bad_rsi = json!({"kind": "rsi", "period": "D", "m": 1, "length": 14, "test": {"kind": "range", "min": 70.0, "max": 30.0}});
+    let (status, body) = api.run(&lines(vec![bad_rsi], &[])).await;
+    assert_eq!((status, body["error"]["code"].clone()), (400, json!("bad_request")), "저장과 같은 검사를 실행에도 한다: {body}");
+    assert!(!body["error"]["message"].as_str().unwrap().contains("아직"), "{body}");
 }
 
 #[tokio::test(flavor = "multi_thread")]

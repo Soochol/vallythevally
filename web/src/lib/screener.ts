@@ -1,8 +1,8 @@
 import type { ApiErrorBody } from "../api/generated/ApiErrorBody";
 import type { BarField } from "../api/generated/BarField";
+import type { Condition } from "../api/generated/Condition";
 import type { ExcludeKind } from "../api/generated/ExcludeKind";
 import type { KstDate } from "../api/generated/KstDate";
-import type { NewHigh } from "../api/generated/NewHigh";
 import type { Screen } from "../api/generated/Screen";
 import type { ScreenerExcluded } from "../api/generated/ScreenerExcluded";
 import type { ScreenerRow } from "../api/generated/ScreenerRow";
@@ -15,7 +15,16 @@ import { formatKstClockSeconds } from "../chart/time";
 export const PERIOD_NAME: Record<ScreenPeriod, string> = { D: "일봉", W: "주봉", M: "월봉" };
 export const UNIT: Record<ScreenPeriod, string> = { D: "일", W: "주", M: "개월" };
 const CURRENT_BAR: Record<ScreenPeriod, string> = { D: "당일", W: "이번 주", M: "이번 달" };
-export const FIELD_LABEL: Record<BarField, string> = { open: "시가", high: "고가", low: "저가", close: "종가", volume: "거래량" };
+export const FIELD_LABEL: Record<BarField, string> = { open: "시가", high: "고가", low: "저가", close: "종가", volume: "거래량", traded_value: "거래대금" };
+export const NEW_HIGH_NAME: Record<BarField, string> = { open: "신고가", high: "신고가", low: "신고가", close: "신고가", volume: "신고거래량", traded_value: "신고거래대금" };
+
+export type NewHighCondition = Extract<Condition, { kind: "new_high" }>;
+
+export const newHighLines = (screen: Screen): NewHighCondition[] => screen.conditions.filter((c): c is NewHighCondition => c.kind === "new_high");
+
+type BarCondition = Exclude<Condition, { kind: "market_cap" }>;
+
+export const screenPeriod = (screen: Screen): ScreenPeriod => screen.conditions.find((c): c is BarCondition => c.kind !== "market_cap")?.period ?? "D";
 
 export const EXCLUDE_LABEL: Record<ExcludeKind, string> = {
   etf: "ETF",
@@ -37,17 +46,22 @@ export const PHASE_LABEL: Record<UpdatePhase, string> = { symbols: "종목 목�
 
 const count = (n: number) => n.toLocaleString("ko-KR");
 
-export function conditionSentence(period: ScreenPeriod, { field, n, m }: NewHigh): string {
-  const volume = field === "volume";
-  const subject = `${FIELD_LABEL[field]}${volume ? "이" : "가"}`;
-  const record = `${count(n)}${UNIT[period]} ${volume ? "신고거래량" : "신고가"}`;
-  if (m === 1) return `${CURRENT_BAR[period]} ${subject} ${record}${volume ? "이다" : "다"}`;
+function newHighSentence({ period, field, n, m }: NewHighCondition): string {
+  const trade = field === "volume" || field === "traded_value";
+  const subject = `${FIELD_LABEL[field]}${trade ? "이" : "가"}`;
+  const record = `${count(n)}${UNIT[period]} ${NEW_HIGH_NAME[field]}`;
+  if (m === 1) return `${CURRENT_BAR[period]} ${subject} ${record}${trade ? "이다" : "다"}`;
   return `최근 ${count(m)}${UNIT[period]} 안에 ${subject} ${record}인 봉이 있다`;
 }
 
+export function conditionSentence(condition: Condition): string {
+  if (condition.kind === "new_high") return newHighSentence(condition);
+  return "이 화면이 아직 풀어 쓰지 못하는 조건이다";
+}
+
 export function excludedText(screen: Screen, { listedTooShort, historyShort, unconfirmed }: ScreenerExcluded): string {
-  const longest = Math.max(...screen.conditions.map((c) => c.n));
-  const counted = `상장 ${count(longest)}${UNIT[screen.period]} 미만 ${count(listedTooShort)} · 이력 덜 참 ${count(historyShort)}`;
+  const longest = Math.max(...newHighLines(screen).map((c) => c.n));
+  const counted = `상장 ${count(longest)}${UNIT[screenPeriod(screen)]} 미만 ${count(listedTooShort)} · 이력 덜 참 ${count(historyShort)}`;
   return unconfirmed > 0 ? `${counted} · 확인 안 됨 ${count(unconfirmed)}` : counted;
 }
 
@@ -82,16 +96,16 @@ export function highDateText(period: ScreenPeriod, highDate: KstDate, asOf: KstD
   return { text: sameYear(highDate, asOf) ? month : `${highDate.slice(0, 4)}년 ${month}`, current: false };
 }
 
-export type ResultSortKey = "name" | "close" | "changeRate" | "highDate";
+export type ResultSortKey = "name" | "close" | "changeRate" | "matchedDate";
 
 export interface ResultSort {
   key: ResultSortKey;
   descending: boolean;
 }
 
-export const DEFAULT_SORT: ResultSort = { key: "highDate", descending: true };
+export const DEFAULT_SORT: ResultSort = { key: "matchedDate", descending: true };
 
-const FIRST_DESCENDING: Record<ResultSortKey, boolean> = { name: false, close: true, changeRate: true, highDate: true };
+const FIRST_DESCENDING: Record<ResultSortKey, boolean> = { name: false, close: true, changeRate: true, matchedDate: true };
 
 export const nextSort = (sort: ResultSort, key: ResultSortKey): ResultSort =>
   sort.key === key ? { key, descending: !sort.descending } : { key, descending: FIRST_DESCENDING[key] };
@@ -102,7 +116,7 @@ const COMPARE: Record<ResultSortKey, (a: ScreenerRow, b: ScreenerRow) => number>
   name: (a, b) => a.name.localeCompare(b.name, "ko"),
   close: (a, b) => a.close - b.close,
   changeRate: (a, b) => (a.changeRate ?? 0) - (b.changeRate ?? 0),
-  highDate: (a, b) => byText(a.highDate, b.highDate),
+  matchedDate: (a, b) => byText(a.matchedDate, b.matchedDate),
 };
 
 export function sortRows(rows: readonly ScreenerRow[], { key, descending }: ResultSort): ScreenerRow[] {

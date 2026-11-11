@@ -2,7 +2,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { expect, test } from "vitest";
 import { ScreenFields } from "./ScreenDialog";
-import { addCondition, draftOf } from "./screenForm";
+import { addCondition, draftOf, editCondition } from "./screenForm";
 
 const twoLines = addCondition({ ...draftOf(null), name: "고가와 거래량" });
 const NAME = 1;
@@ -35,4 +35,12 @@ test("저장 중이 아니면 같은 칸을 모두 쓸 수 있다", () => {
   const controls = controlsOf(false);
   expect(controls).toHaveLength(NAME + PERIODS + 2 * PER_LINE + ADD_LINE + CHIPS);
   expect(controls.filter((c) => c.disabled).map((c) => c.tag)).toEqual([]);
+});
+
+test("거래대금 신고가 줄은 값 칸에 거래대금을 고른 채로 보이고 신고거래대금으로 읽힌다", () => {
+  const traded = editCondition({ ...draftOf(null), name: "신고거래대금" }, 0, { field: "traded_value", n: "60" });
+  const markup = renderToStaticMarkup(createElement(ScreenFields, { ids: "t", draft: traded, nameError: null, locked: false, onChange: () => {} }));
+  expect(markup).toContain('<option value="traded_value" selected="">거래대금</option>');
+  expect(markup).toContain("일 신고거래대금,");
+  expect(markup).toContain("당일 거래대금이 60일 신고거래대금이다");
 });

@@ -5,7 +5,7 @@ import type { Screen } from "../../api/generated/Screen";
 import type { Screens } from "../../api/generated/Screens";
 import type { ScreenPeriod } from "../../api/generated/ScreenPeriod";
 import { saveScreens, useScreens } from "../../api/screener";
-import { conditionSentence, EXCLUDE_LABEL, FIELD_LABEL, PERIOD_NAME, UNIT } from "../../lib/screener";
+import { conditionSentence, EXCLUDE_LABEL, FIELD_LABEL, NEW_HIGH_NAME, PERIOD_NAME, UNIT } from "../../lib/screener";
 import { useScreenerStore } from "../../stores/screener";
 import { useSelectionStore } from "../../stores/selection";
 import { DialogFrame, Errors, Row, Segment } from "../dialog/DialogParts";
@@ -274,7 +274,7 @@ function ConditionLine({ ids, index, condition, period, removable, onChange, onR
         </select>
         {count("n", "신고가 기간")}
         <span>
-          {unit} {condition.field === "volume" ? "신고거래량" : "신고가"},
+          {unit} {NEW_HIGH_NAME[condition.field]},
         </span>
         <span>최근</span>
         {count("m", "최근 봉 수")}
@@ -286,7 +286,7 @@ function ConditionLine({ ids, index, condition, period, removable, onChange, onR
       </div>
       <Errors id={`${base}-n-error`} messages={errors.n ? [`신고가 기간: ${errors.n}`] : []} />
       <Errors id={`${base}-m-error`} messages={errors.m ? [`최근 봉 수: ${errors.m}`] : []} />
-      {row.ok && <p className="text-xs text-text-3">{conditionSentence(period, row.condition)}</p>}
+      {row.ok && <p className="text-xs text-text-3">{conditionSentence(row.condition)}</p>}
     </li>
   );
 }

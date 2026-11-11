@@ -1,9 +1,9 @@
 import type { BarField } from "../../api/generated/BarField";
 import type { ExcludeKind } from "../../api/generated/ExcludeKind";
-import type { NewHigh } from "../../api/generated/NewHigh";
+import type { Market } from "../../api/generated/Market";
 import type { Screen } from "../../api/generated/Screen";
 import type { ScreenPeriod } from "../../api/generated/ScreenPeriod";
-import { excludedInOrder, UNIT } from "../../lib/screener";
+import { excludedInOrder, type NewHighCondition, newHighLines, screenPeriod, UNIT } from "../../lib/screener";
 
 const MAX_SCREENS = 50;
 const MAX_SCREEN_NAME = 40;
@@ -21,6 +21,7 @@ export interface ScreenDraft {
   name: string;
   period: ScreenPeriod;
   conditions: readonly ConditionDraft[];
+  markets: readonly Market[];
   exclude: readonly ExcludeKind[];
 }
 
@@ -29,7 +30,7 @@ export interface ConditionErrors {
   m: string | null;
 }
 
-export type ConditionCheck = { ok: true; condition: NewHigh } | { ok: false; errors: ConditionErrors };
+export type ConditionCheck = { ok: true; condition: NewHighCondition } | { ok: false; errors: ConditionErrors };
 
 export interface DraftErrors {
   name: string | null;
@@ -57,11 +58,12 @@ export const excludesIn = (group: ExcludeGroup): ExcludeKind[] => excludedInOrde
 const NEW_CONDITION: Omit<ConditionDraft, "key"> = { field: "high", n: "200", m: "1" };
 
 export function draftOf(screen: Screen | null): ScreenDraft {
-  if (!screen) return { name: "", period: "D", conditions: [{ key: 0, ...NEW_CONDITION }], exclude: [] };
+  if (!screen) return { name: "", period: "D", conditions: [{ key: 0, ...NEW_CONDITION }], markets: [], exclude: [] };
   return {
     name: screen.name,
-    period: screen.period,
-    conditions: screen.conditions.map((c, key) => ({ key, field: c.field, n: String(c.n), m: String(c.m) })),
+    period: screenPeriod(screen),
+    conditions: newHighLines(screen).map((c, key) => ({ key, field: c.field, n: String(c.n), m: String(c.m) })),
+    markets: screen.markets,
     exclude: screen.exclude,
   };
 }
@@ -110,19 +112,32 @@ export function checkCondition({ field, n: nText, m: mText }: ConditionDraft, pe
   const n = readCount(nText);
   const m = readCount(mText);
   const mError = !m.ok ? m.error : n.ok && m.value > n.value ? `신고가 기간 ${count(n.value)}${UNIT[period]}보다 길 수 없습니다` : null;
-  if (n.ok && m.ok && mError === null) return { ok: true, condition: { field, n: n.value, m: m.value } };
+  if (n.ok && m.ok && mError === null) return { ok: true, condition: { kind: "new_high", period, m: m.value, field, n: n.value } };
   return { ok: false, errors: { n: n.ok ? null : n.error, m: mError } };
+}
+
+export const NOT_EDITABLE_HERE = "이 조건식에는 아직 이 화면에서 고칠 수 없는 조건(신고가가 아닌 조건이나 줄마다 다른 봉 주기)이 있어 저장할 수 없습니다. 삭제는 할 수 있습니다.";
+
+const editableHere = (screen: Screen): boolean => {
+  const period = screenPeriod(screen);
+  return screen.conditions.every((c) => c.kind === "new_high" && c.period === period);
+};
+
+function listProblem(id: string, saved: readonly Screen[]): string | null {
+  const stored = saved.find((s) => s.id === id);
+  if (stored) return editableHere(stored) ? null : NOT_EDITABLE_HERE;
+  return saved.length >= MAX_SCREENS ? `조건식은 ${MAX_SCREENS}개까지 저장할 수 있습니다. 하나를 지운 뒤 만드세요.` : null;
 }
 
 export function checkDraft(draft: ScreenDraft, id: string, saved: readonly Screen[]): DraftCheck {
   const name = checkName(draft.name);
-  const list = !saved.some((s) => s.id === id) && saved.length >= MAX_SCREENS ? `조건식은 ${MAX_SCREENS}개까지 저장할 수 있습니다. 하나를 지운 뒤 만드세요.` : null;
+  const list = listProblem(id, saved);
   const conditions = draft.conditions.flatMap((c) => {
     const row = checkCondition(c, draft.period);
     return row.ok ? [row.condition] : [];
   });
   if (name === null && list === null && conditions.length === draft.conditions.length) {
-    return { ok: true, screen: { id, name: draft.name.trim(), period: draft.period, exclude: [...draft.exclude], conditions } };
+    return { ok: true, screen: { id, name: draft.name.trim(), markets: [...draft.markets], exclude: [...draft.exclude], conditions } };
   }
   return { ok: false, errors: { name, list } };
 }
