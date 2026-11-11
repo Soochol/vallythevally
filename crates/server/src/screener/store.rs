@@ -23,6 +23,8 @@ CREATE TABLE daily (code VARCHAR NOT NULL, day DATE NOT NULL, open UBIGINT NOT N
 CREATE TABLE calendar (day DATE PRIMARY KEY);
 ";
 
+pub(super) const LISTING_LOST: &str = "NOT EXISTS (SELECT 1 FROM listed) AND EXISTS (SELECT 1 FROM daily)";
+
 const UNCONFIRMED_ON: &str = "SELECT code FROM listed WHERE NOT coalesce(listed_on > $1, false) AND code NOT IN (SELECT code FROM daily WHERE day = $1)";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -62,6 +64,14 @@ pub struct Summary {
     pub listed: u32,
     pub complete: u32,
     pub unconfirmed: u32,
+    pub listing_lost: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Listed {
+    Present,
+    Filled,
+    Lost,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -141,7 +151,8 @@ impl Store {
             params![last_day.map_or(Value::Null, date_value)],
             |row| Ok((row.get::<_, u32>(0)?, row.get::<_, u32>(1)?, row.get::<_, u32>(2)?)),
         )?;
-        Ok(Summary { last_day, listed, complete, unconfirmed })
+        let listing_lost = conn.query_row(&format!("SELECT {LISTING_LOST}"), [], |row| row.get(0))?;
+        Ok(Summary { last_day, listed, complete, unconfirmed, listing_lost })
     }
 
     pub fn replace_listing(&self, listing: &[ScreenerListing]) -> Result<(), StoreError> {
@@ -153,15 +164,24 @@ impl Store {
         Ok(())
     }
 
-    pub fn fill_lost_listing(&self, listing: &[ScreenerListing]) -> Result<bool, StoreError> {
+    pub fn listing_lost(&self) -> Result<bool, StoreError> {
+        Ok(self.conn().query_row(&format!("SELECT {LISTING_LOST}"), [], |row| row.get(0))?)
+    }
+
+    pub fn fill_lost_listing(&self, listing: &[ScreenerListing]) -> Result<Listed, StoreError> {
         let mut conn = self.conn();
         let tx = conn.transaction()?;
-        let lost: bool = tx.query_row("SELECT NOT EXISTS (SELECT 1 FROM listed) AND EXISTS (SELECT 1 FROM daily)", [], |row| row.get(0))?;
-        if lost {
-            append_listing(&tx, listing)?;
-        }
+        let lost: bool = tx.query_row(&format!("SELECT {LISTING_LOST}"), [], |row| row.get(0))?;
+        let listed = match (lost, listing.is_empty()) {
+            (false, _) => Listed::Present,
+            (true, true) => Listed::Lost,
+            (true, false) => {
+                append_listing(&tx, listing)?;
+                Listed::Filled
+            }
+        };
         tx.commit()?;
-        Ok(lost)
+        Ok(listed)
     }
 
     pub fn tails(&self) -> Result<Vec<Tail>, StoreError> {

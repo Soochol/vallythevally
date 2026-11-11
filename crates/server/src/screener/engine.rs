@@ -9,7 +9,7 @@ use duckdb::{Connection, Transaction, params};
 use super::exact::Decimal;
 use super::line::{Cell, Kind, Line, Series};
 use super::market_cap::MarketCapRange;
-use super::store::{StoreError, date_of, date_value, exclusion_mask, market_of, price_of, stock_code, unconfirmed_on};
+use super::store::{LISTING_LOST, StoreError, date_of, date_value, exclusion_mask, market_of, price_of, stock_code, unconfirmed_on};
 use crate::api::{self, BarField, Bound, Condition, ExcludeKind, Extreme, Market, Screen, ScreenPeriod, ScreenerExcluded, ScreenerResult, ScreenerRow, SurgeField, SymbolCode};
 
 const PERIODS: [ScreenPeriod; 3] = [ScreenPeriod::Day, ScreenPeriod::Week, ScreenPeriod::Month];
@@ -201,13 +201,14 @@ struct DailyClose {
 pub(super) struct Snapshot<'a> {
     tx: Transaction<'a>,
     pub(super) last_day: Option<KstDate>,
+    pub(super) listing_lost: bool,
 }
 
 impl<'a> Snapshot<'a> {
     pub(super) fn begin(conn: &'a mut Connection) -> Result<Snapshot<'a>, StoreError> {
         let tx = conn.transaction()?;
-        let last_day = tx.query_row("SELECT last_day FROM store_meta", [], |row| row.get::<_, Option<i32>>(0))?.map(date_of);
-        Ok(Snapshot { tx, last_day })
+        let (last_day, listing_lost) = tx.query_row(&format!("SELECT last_day, {LISTING_LOST} FROM store_meta"), [], |row| Ok((row.get::<_, Option<i32>>(0)?, row.get::<_, bool>(1)?)))?;
+        Ok(Snapshot { tx, last_day: last_day.map(date_of), listing_lost })
     }
 
     pub(super) fn screen(&self, screen: &RunnableScreen, as_of: KstDate) -> Result<ScreenerResult, StoreError> {

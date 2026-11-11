@@ -47,9 +47,16 @@ impl Api {
         reply(self.client.post(format!("{}/update/cancel", self.base)).send().await.unwrap()).await
     }
 
-    async fn run(&self, screen: &Value) -> Value {
+    async fn try_run(&self, screen: &Value) -> (u16, Value) {
         let resp = self.client.post(format!("{}/run", self.base)).header("content-type", "application/json").body(screen.to_string()).send().await.unwrap();
-        reply(resp).await
+        let status = resp.status().as_u16();
+        (status, serde_json::from_str(&resp.text().await.unwrap()).unwrap())
+    }
+
+    async fn run(&self, screen: &Value) -> Value {
+        let (status, body) = self.try_run(screen).await;
+        assert_eq!(status, 200, "{body}");
+        body
     }
 
     async fn excluded(&self) -> Value {
@@ -395,6 +402,13 @@ fn screens_across_the_upgrade() -> Vec<Value> {
     ]
 }
 
+fn schema_4_copy() -> tempfile::TempDir {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::DirBuilder::new().mode(0o700).create(dir.path().join("run")).unwrap();
+    std::fs::copy(SCHEMA_4_STORE, dir.path().join("run/screener.duckdb")).unwrap();
+    dir
+}
+
 fn stored_listing(dir: &Path) -> (i32, Vec<(String, String, Option<u64>)>) {
     let conn = duckdb::Connection::open(dir.join("run/screener.duckdb")).unwrap();
     let version = conn.query_row("SELECT schema_version FROM store_meta", [], |row| row.get(0)).unwrap();
@@ -422,9 +436,7 @@ async fn a_schema_4_store_keeps_its_daily_bars_and_history_and_is_listed_with_sh
         assert!(!result["rows"].as_array().unwrap().is_empty(), "견줄 결과에 맞은 종목이 있다: {screen} → {result}");
     }
 
-    let upgraded = tempfile::tempdir().unwrap();
-    std::fs::DirBuilder::new().mode(0o700).create(upgraded.path().join("run")).unwrap();
-    std::fs::copy(SCHEMA_4_STORE, upgraded.path().join("run/screener.duckdb")).unwrap();
+    let upgraded = schema_4_copy();
     let boot_updating = || {
         let clock = at(today, "2040");
         Server::spawn_with(&fake, &upgraded.path().join("run/server.lock"), upgraded.path(), &[("VALLY_CLOCK_START", OsStr::new(&clock)), ("VALLY_SCREENER_UPDATE_ON_START", OsStr::new("on"))])
@@ -1081,4 +1093,114 @@ async fn an_empty_dt_on_the_newest_daily_row_leaves_out_only_that_row_and_keeps_
     let logs = server.stop().await;
     assert_eq!(stored_days(tmp.path(), krx::NEW_LISTING), days_without(&market, krx::NEW_LISTING, today), "빈 dt 행만 빠지고 다른 행은 저장된다");
     assert!(logs.lines().any(|l| l.contains("WARN") && l.contains(krx::NEW_LISTING) && l.contains("dt가 날짜가 아닙니다")), "종목과 이유를 남긴다: {logs}");
+}
+
+fn list_loading(status: u16, body: &Value) -> bool {
+    status == 503 && body["error"]["reason"] == "symbol_list_loading"
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_upgraded_store_whose_first_stock_list_comes_back_empty_refuses_runs_and_updates_until_a_normal_list_arrives() {
+    for update_on_start in ["on", "off"] {
+        let fake = FakeKiwoom::start().await;
+        fake.set_krx_market(KrxMarket::sample(day(2026, 11, 6)));
+        fake.respond_with("ka10099", 200, json!({"return_code": 0, "return_msg": "정상적으로 처리되었습니다", "list": []}));
+        let upgraded = schema_4_copy();
+        let monday_before_07_45 = format!("{}074455", day(2026, 11, 9).yyyymmdd());
+        let server = Server::spawn_with(
+            &fake,
+            &upgraded.path().join("run/server.lock"),
+            upgraded.path(),
+            &[("VALLY_CLOCK_START", OsStr::new(&monday_before_07_45)), ("VALLY_SCREENER_UPDATE_ON_START", OsStr::new(update_on_start))],
+        );
+        let api = Api::of(&server).await;
+        let screen = &screens_across_the_upgrade()[0];
+        let (status, body) = api.try_run(screen).await;
+        assert!(list_loading(status, &body), "켤 때 {update_on_start}: 빈 종목 목록으로는 저장소 목록을 채우지 못하니 빈 결과 대신 목록을 받는 중이라고 답한다: {status} {body}");
+        api.update(false).await;
+        let refused = api.settled().await;
+        assert_eq!(refused["update"]["error"]["reason"], "symbol_list_loading", "켤 때 {update_on_start}: 빈 목록으로는 업데이트도 멈춘다: {refused}");
+        let (status, body) = api.try_run(screen).await;
+        assert!(list_loading(status, &body), "켤 때 {update_on_start}: 멈춘 업데이트 뒤에도 빈 결과를 내지 않는다: {status} {body}");
+
+        fake.reset();
+        let search = format!("http://{}/api/symbols?q={}", server.addr().await, krx::COMMON);
+        for _ in 0..1_200 {
+            if reply(api.client.get(&search).send().await.unwrap()).await.as_array().is_some_and(|found| !found.is_empty()) {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+        assert_eq!(reply(api.client.get(&search).send().await.unwrap()).await.as_array().map(Vec::len), Some(1), "07:45에 비지 않은 목록을 받았다");
+        let result = api.run(screen).await;
+        assert_eq!(result["universe"], 10, "켤 때 {update_on_start}: 다음 실행이 받은 목록으로 저장소 목록을 채우고 판정한다: {result}");
+        assert!(!result["rows"].as_array().unwrap().is_empty(), "{result}");
+        assert_eq!(api.status().await["fullHistory"], json!({"done": 10, "total": 10}));
+        if update_on_start == "on" {
+            assert!(server.logs().contains("목표 관측일까지 차 있어"), "자동 업데이트가 아니라 실행 관문이 목록을 채웠다");
+        }
+        assert_eq!((count(&fake.calls(), "ka10095"), count(&fake.calls(), "ka10081")), (0, 0), "켤 때 {update_on_start}: 일봉을 다시 받지 않는다");
+        server.stop().await;
+        assert_eq!(stored_listing(upgraded.path()).1.len(), 10);
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_run_after_the_stock_list_arrives_but_before_the_start_fills_the_store_listing_fills_it_first_instead_of_answering_empty() {
+    use std::sync::Arc;
+
+    use axum::body::Body;
+    use axum::http::Request;
+    use http_body_util::BodyExt;
+    use server::bars::BarService;
+    use server::clock::{Clock, kst};
+    use server::config::Secret;
+    use server::db::AppDb;
+    use server::http::{AppState, router};
+    use server::kiwoom::auth::KiwoomAuth;
+    use server::kiwoom::rest::{KiwoomRest, Priority};
+    use server::kiwoom::stream::KiwoomStream;
+    use server::kiwoom::transport::ReqwestTransport;
+    use server::market::hub::MarketHub;
+    use server::screener::Screener;
+    use server::screener::store::Store;
+    use server::symbols::SymbolDirectory;
+    use tower::ServiceExt;
+
+    let fake = FakeKiwoom::start().await;
+    fake.set_krx_market(KrxMarket::sample(day(2026, 11, 6)));
+    let upgraded = schema_4_copy();
+    let clock = Clock::fake(kst(day(2026, 11, 6), 20, 40, 0));
+    let auth = KiwoomAuth::new(Secret::new(common::APP_KEY.into()), Secret::new(common::APP_SECRET.into()), None);
+    let rest = KiwoomRest::new(Arc::new(ReqwestTransport::new(fake.base_url()).unwrap()), auth, clock.clone());
+    let symbols = Arc::new(SymbolDirectory::default());
+    let bars = Arc::new(BarService::new(rest.clone(), symbols.clone(), clock.clone()));
+    let store = Store::open(&upgraded.path().join("run/screener.duckdb")).unwrap();
+    let screener = Arc::new(Screener::new(store, rest.clone(), bars.clone(), symbols.clone(), clock.clone()));
+    let db = AppDb::open(&upgraded.path().join("run/vally.db")).await.unwrap();
+    let (stream, _desired) = KiwoomStream::detached();
+    let (_events, events) = tokio::sync::mpsc::channel(1);
+    let hub = MarketHub::spawn(bars.clone(), stream, events, clock.clone());
+    let app = router(Arc::new(AppState { symbols: symbols.clone(), bars, rest: rest.clone(), db, clock, static_dir: upgraded.path().to_owned(), hub, screener }));
+    let call = |request: Request<Body>| {
+        let app = app.clone();
+        async move {
+            let response = app.oneshot(request).await.unwrap();
+            let status = response.status().as_u16();
+            (status, serde_json::from_slice::<Value>(&response.into_body().collect().await.unwrap().to_bytes()).unwrap())
+        }
+    };
+    let screen = screens_across_the_upgrade()[0].to_string();
+    let run = || Request::post("/api/screener/run").header("content-type", "application/json").body(Body::from(screen.clone())).unwrap();
+
+    let (status, body) = call(run()).await;
+    assert!(list_loading(status, &body), "목록을 받기 전의 실행은 목록을 받는 중이라고 답한다: {status} {body}");
+
+    symbols.refresh(&rest, Priority::Screen).await.unwrap();
+    let (status, result) = call(run()).await;
+    assert_eq!((status, result["universe"].clone()), (200, json!(10)), "목록이 메모리에 들고 저장소 목록은 아직 비어 있을 때의 실행이 먼저 채운다: {result}");
+    assert!(!result["rows"].as_array().unwrap().is_empty(), "{result}");
+    let (status, summary) = call(Request::get("/api/screener/status").body(Body::empty()).unwrap()).await;
+    assert_eq!((status, summary["fullHistory"].clone()), (200, json!({"done": 10, "total": 10})));
+    assert_eq!(count(&fake.calls(), "ka10081"), 0);
 }
