@@ -33,6 +33,13 @@ struct FakeState {
     directory: Option<String>,
     company_code: Option<String>,
     preferred_dividend: bool,
+    discovery_search: Option<String>,
+    discovery_contents: Option<String>,
+    discovery_failure: Option<(String, StatusCode)>,
+    discovery_network: Option<String>,
+    discovery_paused: Option<String>,
+    stream_paused_report: Option<String>,
+    statement_amounts: HashMap<String, String>,
     integrated_financials: bool,
 }
 
@@ -43,7 +50,7 @@ impl Drop for Fake { fn drop(&mut self) { self.task.abort(); } }
 impl Fake {
     async fn start() -> Self {
         let state = Arc::new(Mutex::new(FakeState::default()));
-        let app = Router::new().route("/api/{endpoint}", get(respond)).route("/common/searchcorpname.do", get(kind)).route("/external/{*path}", get(notice)).with_state(state.clone());
+        let app = Router::new().route("/api/{endpoint}", get(respond)).route("/common/searchcorpname.do", get(kind)).route("/external/{*path}", get(notice)).route("/disclosure/searchtotalinfo.do", get(discovery)).route("/common/disclsviewer.do", get(discovery)).with_state(state.clone());
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let url = format!("http://{}", listener.local_addr().unwrap());
         let task = tokio::spawn(async move { axum::serve(listener, app).await.unwrap(); });
@@ -68,6 +75,26 @@ async fn kind(State(state): State<Arc<Mutex<FakeState>>>, Query(params): Query<B
     axum::Json(if state.kind_other_code { json!([{ "repisusrtcd2":"005930", "secugrpId":"ST", "fssunqno":CORP }]) } else if state.preferred && params["searchCorpName"] == "005935" { json!([{"repisusrtcd2":"005935","secugrpId":"ST","fssunqno":CORP}]) } else { json!([]) })
 }
 
+async fn discovery(State(state): State<Arc<Mutex<FakeState>>>, Query(params): Query<BTreeMap<String, String>>) -> Response {
+    let stage = if params["method"] == "searchContents" { "contents" } else { "search" };
+    state.lock().unwrap().calls.push((stage.into(), params));
+    loop {
+        if state.lock().unwrap().discovery_paused.as_deref() != Some(stage) { break; }
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+    let state = state.lock().unwrap();
+    if state.discovery_network.as_deref() == Some(stage) {
+        let stream = futures::stream::once(async { Err::<String, _>(std::io::Error::other("synthetic discovery body failure")) });
+        return Response::new(axum::body::Body::from_stream(stream));
+    }
+    if let Some((failed, status)) = &state.discovery_failure && failed == stage { return (*status,"synthetic source failure").into_response(); }
+    if stage == "search" {
+        state.discovery_search.clone().unwrap_or_else(|| "<section class=\"paging-group\"><div class=\"info\"><em>0</em></div></section>검색결과가 없습니다.".into()).into_response()
+    } else {
+        state.discovery_contents.clone().unwrap_or_default().into_response()
+    }
+}
+
 async fn notice(State(state): State<Arc<Mutex<FakeState>>>) -> Response {
     let mut state = state.lock().unwrap();
     state.calls.push(("notice".into(), BTreeMap::new()));
@@ -79,6 +106,27 @@ async fn notice(State(state): State<Arc<Mutex<FakeState>>>) -> Response {
 }
 
 async fn respond(State(state): State<Arc<Mutex<FakeState>>>, Path(endpoint): Path<String>, Query(params): Query<BTreeMap<String, String>>) -> Response {
+    let paused = {
+        let mut state = state.lock().unwrap();
+        let paused = endpoint == "fnlttSinglAcntAll.json" && state.stream_paused_report.as_ref() == params.get("reprt_code");
+        if paused { state.calls.push(("statement_stream".into(),params.clone())); }
+        paused
+    };
+    if paused {
+        let stream = futures::stream::once(async move {
+            loop {
+                if state.lock().unwrap().stream_paused_report.is_none() { break; }
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+            let response = respond_data(State(state),Path(endpoint),Query(params)).await;
+            axum::body::to_bytes(response.into_body(),1024*1024).await
+        });
+        return Response::new(axum::body::Body::from_stream(stream));
+    }
+    respond_data(State(state),Path(endpoint),Query(params)).await
+}
+
+async fn respond_data(State(state): State<Arc<Mutex<FakeState>>>, Path(endpoint): Path<String>, Query(params): Query<BTreeMap<String, String>>) -> Response {
     assert_eq!(params["crtfc_key"], KEY);
     let (failure, correction, delayed, no_cfs, xbrl_failure, stale_statement, mismatched_xbrl, paused, nonstandard_account) = {
         let mut state = state.lock().unwrap();
@@ -98,6 +146,7 @@ async fn respond(State(state): State<Arc<Mutex<FakeState>>>, Path(endpoint): Pat
     let original_receipt = if corp == CORP { RECEIPT } else { "20150331000011" };
     let corrected_receipt = if corp == CORP { "20160401000002" } else { "20160401000012" };
     let receipt = if correction { corrected_receipt } else { original_receipt };
+    let amount = state.lock().unwrap().statement_amounts.get(corp).cloned().unwrap_or_else(|| if correction { "120" } else { "100" }.into());
     match endpoint.as_str() {
         "echo.json" => {
             let escaped:String = KEY.bytes().map(|b|format!("\\u{b:04x}")).collect();
@@ -115,7 +164,7 @@ async fn respond(State(state): State<Arc<Mutex<FakeState>>>, Path(endpoint): Pat
         }
         "fnlttSinglAcntAll.json" => {
             if params["bsns_year"] != "2015" || (no_cfs && params["fs_div"] == "CFS") { return axum::Json(json!({"status":"013"})).into_response(); }
-            let mut row = account("IS", "ifrs-full_Revenue", if correction { "120" } else { "100" });
+            let mut row = account("IS", "ifrs-full_Revenue", &amount);
             row.insert("corp_code".into(), corp.into());
             if nonstandard_account { row.insert("account_id".into(), "-표준계정코드 미사용-".into()); }
             row.insert("account_detail".into(), format!("echoed {KEY}"));
@@ -128,7 +177,7 @@ async fn respond(State(state): State<Arc<Mutex<FakeState>>>, Path(endpoint): Pat
             let basis = if no_cfs { "SeparateMember" } else { "ConsolidatedMember" };
             let start = if params["reprt_code"] == "11011" { "2015-01-01" } else { "2015-10-01" };
             let stamp = if mismatched_xbrl { RECEIPT } else { receipt };
-            let xml = instance(&context("quarter", start, "2015-12-31", basis), &format!("<g:DocumentReceiptNumber>{stamp}</g:DocumentReceiptNumber><ifrs:Revenue contextRef=\"quarter\" unitRef=\"krw\">{}</ifrs:Revenue>", if correction { "120" } else { "100" }));
+            let xml = instance(&context("quarter", start, "2015-12-31", basis), &format!("<g:DocumentReceiptNumber>{stamp}</g:DocumentReceiptNumber><ifrs:Revenue contextRef=\"quarter\" unitRef=\"krw\">{}</ifrs:Revenue>", amount));
             zipped("statement.xbrl", &xml.replace(CORP,corp)).into_response()
         }
         "alotMatter.json" => {
@@ -147,6 +196,12 @@ fn fake_directory(state: &Mutex<FakeState>) -> String {
 
 #[path = "financials/mapping.rs"]
 mod mapping;
+
+#[path = "financials/discovery.rs"]
+mod discovery;
+
+#[path = "financials/review_fix.rs"]
+mod discovery_review_fix;
 
 fn account(section: &str, id: &str, amount: &str) -> BTreeMap<String, String> {
     [("corp_code",CORP),("bsns_year","2015"),("reprt_code","11014"),("rcept_no",RECEIPT),("sj_div",section),("account_id",id),("account_nm","원래 계정"),("currency","KRW"),("thstrm_nm","제 1기"),("thstrm_amount",amount),("thstrm_add_amount","300")].into_iter().map(|(k,v)|(k.into(),v.into())).collect()

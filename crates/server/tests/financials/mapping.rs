@@ -1,6 +1,6 @@
 use super::*;
 
-const NOTICE: &str = r#"<HTML><HEAD><meta charset="UTF-8"/></HEAD><PRE CLASS="fontA">
+pub(super) const NOTICE: &str = r#"<HTML><HEAD><meta charset="UTF-8"/></HEAD><PRE CLASS="fontA">
 ◎ 삼성전자(주) 변경상장(주식소각)
 ① 상장종목
    - 삼성전자보통주
@@ -35,13 +35,13 @@ async fn verified_source() -> Fake {
     fake
 }
 
-fn tempdir() -> tempfile::TempDir {
+pub(super) fn tempdir() -> tempfile::TempDir {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/tmp");
     std::fs::create_dir_all(&root).unwrap();
     tempfile::tempdir_in(root).unwrap()
 }
 
-async fn settled_stock(service: &Arc<Financials>, stock: &str, preferred: bool) -> server::financials::model::Snapshot {
+pub(super) async fn settled_stock(service: &Arc<Financials>, stock: &str, preferred: bool) -> server::financials::model::Snapshot {
     for _ in 0..300 {
         let snapshot = service.open(stock,preferred,false).await;
         if snapshot.status != "collecting" { return snapshot; }
