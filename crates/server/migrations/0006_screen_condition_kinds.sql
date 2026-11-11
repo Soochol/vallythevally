@@ -10,5 +10,5 @@ SET list = (
              )) ORDER BY screen.key)
       FROM json_each(screens.list) AS screen
     ),
-    revision = revision + 1
+    revision = CASE WHEN revision < 9223372036854775807 THEN revision + 1 ELSE revision END
 WHERE singleton = 1 AND json_array_length(list) > 0;

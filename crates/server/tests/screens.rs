@@ -311,23 +311,30 @@ async fn fifty_screens_of_ten_of_the_widest_conditions_are_saved() {
     server.stop().await;
 }
 
+async fn saved_before_condition_kinds(tmp: &tempfile::TempDir, list: &Value, revision: i64) -> std::path::PathBuf {
+    let run = tmp.path().join("run");
+    std::fs::DirBuilder::new().mode(0o700).create(&run).unwrap();
+    let pool = SqlitePoolOptions::new().connect_with(SqliteConnectOptions::new().filename(run.join("vally.db")).create_if_missing(true)).await.unwrap();
+    sqlx::migrate!("./migrations").run_to(5, &pool).await.unwrap();
+    sqlx::query("UPDATE screens SET list = ?, revision = ?").bind(list.to_string()).bind(revision).execute(&pool).await.unwrap();
+    pool.close().await;
+    run.join("server.lock")
+}
+
+fn old_new_high(id: &str) -> Value {
+    json!({"name": "신고가", "period": "D", "conditions": [{"field": "high", "n": 200, "m": 1}], "exclude": [], "id": id})
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn a_list_saved_in_the_old_format_comes_back_in_the_new_format_with_the_revision_raised() {
     let fake = FakeKiwoom::start().await;
     let tmp = tempfile::tempdir().unwrap();
-    let run = tmp.path().join("run");
-    std::fs::DirBuilder::new().mode(0o700).create(&run).unwrap();
     let old = json!([
-        {"name": "신고가", "period": "D", "conditions": [{"field": "high", "n": 200, "m": 1}], "exclude": [], "id": "01900000-0000-7000-8000-0000000000a1"},
+        old_new_high("01900000-0000-7000-8000-0000000000a1"),
         {"id": "S2", "name": "주봉 둘", "period": "W", "exclude": ["etf", "trading_halted"], "conditions": [{"field": "close", "n": 52, "m": 4}, {"field": "volume", "n": 26, "m": 1}]},
     ]);
-    {
-        let pool = SqlitePoolOptions::new().connect_with(SqliteConnectOptions::new().filename(run.join("vally.db")).create_if_missing(true)).await.unwrap();
-        sqlx::migrate!("./migrations").run_to(5, &pool).await.unwrap();
-        sqlx::query("UPDATE screens SET list = ?, revision = 1794222949877").bind(old.to_string()).execute(&pool).await.unwrap();
-        pool.close().await;
-    }
-    let server = Server::spawn(&fake, &run.join("server.lock"), tmp.path());
+    let lock = saved_before_condition_kinds(&tmp, &old, 1_794_222_949_877).await;
+    let server = Server::spawn(&fake, &lock, tmp.path());
     let api = ScreensApi::of(&server).await;
     let migrated = screens(vec![
         json!({"id": "01900000-0000-7000-8000-0000000000a1", "name": "신고가", "markets": [], "exclude": [], "conditions": [new_high("D", "high", 200, 1)]}),
@@ -340,7 +347,21 @@ async fn a_list_saved_in_the_old_format_comes_back_in_the_new_format_with_the_re
     assert_eq!(api.get().await, (200, migrated));
     server.stop().await;
 
-    let server = Server::spawn(&fake, &run.join("server.lock"), tmp.path());
+    let server = Server::spawn(&fake, &lock, tmp.path());
     assert_eq!(ScreensApi::of(&server).await.get().await.1["revision"], json!(1_794_222_949_878_i64), "다시 켜도 한 번만 옮긴다");
+    server.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_list_saved_at_the_largest_revision_is_moved_and_keeps_that_revision() {
+    let fake = FakeKiwoom::start().await;
+    let tmp = tempfile::tempdir().unwrap();
+    let lock = saved_before_condition_kinds(&tmp, &json!([old_new_high("S1")]), i64::MAX).await;
+    let server = Server::spawn(&fake, &lock, tmp.path());
+    let api = ScreensApi::of(&server).await;
+    let migrated = screens(vec![json!({"id": "S1", "name": "신고가", "markets": [], "exclude": [], "conditions": [new_high("D", "high", 200, 1)]})], i64::MAX);
+    assert_eq!(api.get().await, (200, migrated.clone()), "revision이 i64 최댓값이면 올리지 않고 서버가 켜진다");
+    assert_eq!(api.put(screens(vec![screen("S9", "덮어쓰기")], i64::MAX).to_string()).await.1["error"]["code"], json!("stale_revision"), "그 뒤의 저장도 덮어쓰지 못한다");
+    assert_eq!(api.get().await, (200, migrated));
     server.stop().await;
 }
