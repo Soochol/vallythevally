@@ -14,6 +14,10 @@ Issues and specs for this repo live as GitHub issues. Use the `gh` CLI for all o
 - **Apply / remove labels**: `gh issue edit <number> --add-label "..."` / `--remove-label "..."`
 - **Close**: post the explanation with `gh issue comment <number> --body "..."`, then `gh issue close <number>`. On an already-closed issue, `gh issue close --comment` drops the comment and still exits 0.
 
+- **Find a ticket's spec**: `gh api repos/<owner>/<repo>/issues/<n>/parent` returns the parent issue (a spec carries the `spec` label). **List a spec's tickets**: `gh api repos/<owner>/<repo>/issues/<n>/sub_issues --jq '[.[] | {number, title, state}]'`. How specs and tickets fit together is in [`AGENTS.md`](../../AGENTS.md#이슈와-새-기능).
+- **Edit an issue body safely**: write the current body to a file outside `/tmp` (`gh issue view <n> --json body --jq .body > ~/.cache/<n>.md`), check it is not empty, edit the file, save with `gh issue edit <n> --body-file <file>`, then read it back. A full `/tmp` once saved an empty body over a map issue. To recover a lost body, read the edit history: `gh api graphql -f query='query{repository(owner:"<owner>",name:"<repo>"){issue(number:<n>){userContentEdits(first:10){nodes{editedAt diff}}}}}'`; each `diff` holds the full body of that revision.
+- **Close as out of scope**: post the reason with `gh issue comment`, then `gh issue close <n> --reason "not planned"`.
+
 Infer the repo from `git remote -v`; `gh` does this automatically when run inside a clone.
 
 File issues only into the user's own repo. Never file into `mattpocock/skills` (the repo these skills come from) unless the user owns it. In a fork, `gh` can default to the upstream parent, so before the first `gh issue create` of a session, check the target with `gh repo view --json nameWithOwner` and confirm it with the user if it is not their repo.
@@ -48,3 +52,5 @@ Used by `/wayfinder`. The **map** is a single issue with **child** issues as tic
 - **Frontier query**: list the map's open children (`gh issue list --state open`, scoped to the map's sub-issues / task list), drop any with an open blocker (see **Count open blockers**, or an open issue in the `Blocked by` line) or an assignee; first in map order wins.
 - **Claim**: `gh issue edit <n> --add-assignee @me`, the session's first write.
 - **Resolve**: `gh issue comment <n> --body "<answer>"`, then `gh issue close <n>`, then append a context pointer (gist + link) to the map's Decisions-so-far.
+- **Resolution comment**: start it with `## 결정 (<YYYY-MM-DD>)` and number the decisions, so the map line and later readers can quote them.
+- **Arrival**: when every ticket is closed, put a line at the top of the map saying it has arrived and linking the spec issue it produced. Keep the map open while that spec is being implemented; close it with a comment once the implementation is merged.
