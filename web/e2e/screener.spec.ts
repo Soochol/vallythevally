@@ -484,3 +484,58 @@ test.describe("휴대폰 390px", () => {
     await expect(chartOf(cell(page))).not.toHaveAttribute("data-bar-count", "0");
   });
 });
+
+for (const width of [320, 360]) {
+  test.describe(`좁은 휴대폰 ${width}px`, () => {
+    test.use({ viewport: { width, height: 844 } });
+
+    test("편집 대화상자는 모든 종류와 판정에서 모든 칸이 가로 스크롤 없이 화면 안에 보인다", async ({ page }) => {
+      await page.goto("/");
+      await page.getByRole("navigation", { name: "휴대폰 탭" }).getByRole("button", { name: "스크리너" }).click();
+      await panel(page).getByRole("button", { name: "새 조건식" }).first().click();
+      const dialog = editor(page, "새 조건식");
+      const pick = (name: string, value: string) => dialog.getByRole("combobox", { name: `조건 1 ${name}` }).selectOption(value);
+      const variants: readonly (readonly [kind: string, choices?: readonly (readonly [name: string, value: string])[], more?: number])[] = [
+        ["new_high"],
+        ["new_low"],
+        ["value_range"],
+        ["change"],
+        ["near_extreme"],
+        ["surge"],
+        ["ma_position"],
+        ["ma_alignment", [], 1],
+        ["ma_cross", [["짧은 선", "ma"]]],
+        ["ma_cross", [["짧은 선", "close"]]],
+        ["rsi", [["판정", "range"]]],
+        ["rsi", [["판정", "breakout"]]],
+        ["macd", [["판정", "signal_cross"]]],
+        ["macd", [["판정", "zero_breakout"]]],
+        ["macd", [["판정", "vs_signal"]]],
+        ["stochastic", [["판정", "cross"]]],
+        ["stochastic", [["판정", "range"]]],
+        ["bollinger", [["판정", "outside"]]],
+        ["bollinger", [["판정", "cross"]]],
+        ["ichimoku", [["판정", "cloud"]]],
+        ["ichimoku", [["판정", "cross"]]],
+        ["market_cap"],
+      ];
+      await pick("봉 주기", "M");
+      for (const [kind, choices = [], more = 0] of variants) {
+        await pick("종류", kind);
+        for (const [name, value] of choices) await pick(name, value);
+        for (let i = 0; i < more; i++) await dialog.getByRole("button", { name: "조건 1 이평 더하기" }).click();
+        const layout = await dialog.evaluate((d) => ({
+          cut: [...d.querySelectorAll("input, select, button")]
+            .filter((c) => {
+              const box = c.getBoundingClientRect();
+              return box.left < 0 || box.right > window.innerWidth;
+            })
+            .map((c) => c.getAttribute("aria-label") ?? c.textContent),
+          scrolling: [d, ...d.querySelectorAll("*")].filter((e) => e.scrollWidth > e.clientWidth && ["auto", "scroll"].includes(getComputedStyle(e).overflowX)).length,
+        }));
+        expect({ kind, choices, ...layout }).toEqual({ kind, choices, cut: [], scrolling: 0 });
+      }
+      await expect(dialog.getByRole("textbox", { name: "조건 1 최대" })).toBeVisible();
+    });
+  });
+}

@@ -677,9 +677,9 @@ function KindFields({ ui, line, onChange }: KindProps) {
           <Together>
             <span>MACD</span>
             <NumberBox ui={ui} field="fast" value={line.fast} width="length" onChange={(fast) => onChange({ ...line, fast })} />
-            <NumberBox ui={ui} field="slow" value={line.slow} width="length" onChange={(slow) => onChange({ ...line, slow })} />
-            <NumberBox ui={ui} field="signal" value={line.signal} width="length" onChange={(signal) => onChange({ ...line, signal })} />
           </Together>
+          <NumberBox ui={ui} field="slow" value={line.slow} width="length" onChange={(slow) => onChange({ ...line, slow })} />
+          <NumberBox ui={ui} field="signal" value={line.signal} width="length" onChange={(signal) => onChange({ ...line, signal })} />
           <Choice label={choice("판정")} value={line.test} options={MACD_TESTS} onChange={(test) => onChange({ ...line, test })} />
           {line.test === "vs_signal" ? <Choice label={choice("위치")} value={line.side} options={SIDES} onChange={(side) => onChange({ ...line, side })} /> : direction(line)}
         </>
@@ -690,9 +690,9 @@ function KindFields({ ui, line, onChange }: KindProps) {
           <Together>
             <span>스토캐스틱</span>
             <NumberBox ui={ui} field="k" value={line.k} width="length" onChange={(k) => onChange({ ...line, k })} />
-            <NumberBox ui={ui} field="d" value={line.d} width="length" onChange={(d) => onChange({ ...line, d })} />
-            <NumberBox ui={ui} field="smooth" value={line.smooth} width="length" onChange={(smooth) => onChange({ ...line, smooth })} />
           </Together>
+          <NumberBox ui={ui} field="d" value={line.d} width="length" onChange={(d) => onChange({ ...line, d })} />
+          <NumberBox ui={ui} field="smooth" value={line.smooth} width="length" onChange={(smooth) => onChange({ ...line, smooth })} />
           <Choice label={choice("판정")} value={line.test} options={STOCHASTIC_TESTS} onChange={(test) => onChange({ ...line, test })} />
           {line.test === "cross" ? (
             direction(line)
@@ -707,8 +707,8 @@ function KindFields({ ui, line, onChange }: KindProps) {
           <Together>
             <span>볼린저</span>
             <NumberBox ui={ui} field="length" value={line.length} width="length" onChange={(length) => onChange({ ...line, length })} />
-            <NumberBox ui={ui} field="k" value={line.k} width="length" onChange={(k) => onChange({ ...line, k })} />
           </Together>
+          <NumberBox ui={ui} field="k" value={line.k} width="length" onChange={(k) => onChange({ ...line, k })} />
           <Choice label={choice("판정")} value={line.test} options={BOLLINGER_TESTS} onChange={(test) => onChange({ ...line, test })} />
           {line.test === "outside" ? (
             <Choice label={choice("위치")} value={line.side} options={BOLLINGER_SIDES} onChange={(side) => onChange({ ...line, side })} />
@@ -726,10 +726,10 @@ function KindFields({ ui, line, onChange }: KindProps) {
           <Together>
             <span>일목</span>
             <NumberBox ui={ui} field="conversion" value={line.conversion} width="length" onChange={(conversion) => onChange({ ...line, conversion })} />
-            <NumberBox ui={ui} field="base" value={line.base} width="length" onChange={(base) => onChange({ ...line, base })} />
-            <NumberBox ui={ui} field="spanB" value={line.spanB} width="length" onChange={(spanB) => onChange({ ...line, spanB })} />
-            <NumberBox ui={ui} field="displacement" value={line.displacement} width="length" onChange={(displacement) => onChange({ ...line, displacement })} />
           </Together>
+          <NumberBox ui={ui} field="base" value={line.base} width="length" onChange={(base) => onChange({ ...line, base })} />
+          <NumberBox ui={ui} field="spanB" value={line.spanB} width="length" onChange={(spanB) => onChange({ ...line, spanB })} />
+          <NumberBox ui={ui} field="displacement" value={line.displacement} width="length" onChange={(displacement) => onChange({ ...line, displacement })} />
           <Choice label={choice("판정")} value={line.test} options={ICHIMOKU_TESTS} onChange={(test) => onChange({ ...line, test })} />
           {line.test === "cloud" ? <Choice label={choice("위치")} value={line.side} options={SIDES} onChange={(side) => onChange({ ...line, side })} /> : direction(line)}
         </>
