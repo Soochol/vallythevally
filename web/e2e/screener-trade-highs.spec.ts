@@ -14,6 +14,8 @@ const OLD_VOLUME_TEXT = "최근 4주 안에 거래량이 52주 신고거래량�
 const TRADED_START_TEXT = "최근 100일 안에 거래대금이 200일 신고거래대금인 봉이 있다";
 const VOLUME_START_TEXT = "최근 100일 안에 거래량이 200일 신고거래량인 봉이 있다";
 const WEEKLY_VOLUME_TEXT = "최근 8주 안에 거래량이 52주 신고거래량인 봉이 있다";
+const MONTHLY_TRADED_TEXT = "최근 6개월 안에 거래대금이 24개월 신고거래대금인 봉이 있다";
+const MONTHLY_VOLUME_TEXT = "최근 3개월 안에 거래량이 12개월 신고거래량인 봉이 있다";
 const EXCLUDED = "대상 16종목 · 빠짐: 상장 기간 부족 2 · 이력 덜 참 0";
 
 const choice = (dialog: Locator, line: number, name: string) => dialog.getByRole("combobox", { name: `조건 ${line} ${name}` });
@@ -169,7 +171,32 @@ test("거래 분류의 신고거래량·신고거래대금은 새로 고르면 �
     await expectTradeHighLine(dialog, 1, TRADED_VALUE, "D", "200", "100");
     await expectTradeHighLine(dialog, 2, VOLUME, "W", "52", "8");
     await expect(lineTexts(dialog)).toHaveText([TRADED_START_TEXT, WEEKLY_VOLUME_TEXT]);
-    await dialog.getByRole("button", { name: "취소" }).click();
     expect(screenSaves).toHaveLength(2);
+  });
+
+  await test.step("두 줄을 월봉으로 바꾸고 N·M을 고쳐 저장하면, 새로 고침 뒤 다시 열어도 월봉과 고친 기간이 그대로다", async () => {
+    let dialog = editor(page, "조건식 편집");
+    await choice(dialog, 1, "봉 주기").selectOption("M");
+    await box(dialog, 1, "신고거래대금 기간").fill("24");
+    await box(dialog, 1, "최근 봉 수").fill("6");
+    await choice(dialog, 2, "봉 주기").selectOption("M");
+    await box(dialog, 2, "신고거래량 기간").fill("12");
+    await box(dialog, 2, "최근 봉 수").fill("3");
+    await expect(lineTexts(dialog)).toHaveText([MONTHLY_TRADED_TEXT, MONTHLY_VOLUME_TEXT]);
+    await save(page, dialog);
+    expect(screenSaves).toHaveLength(3);
+    const stored = await (await fetch(screensUrl)).json();
+    expect(stored.screens[0]).toEqual({ ...WEEKLY_HIGH, name: PICKED, conditions: [newHigh("M", "traded_value", 24, 6), newHigh("M", "volume", 12, 3)] });
+
+    await page.reload();
+    await openScreener(page);
+    dialog = await editScreen(page, PICKED);
+    await expectTradeHighLine(dialog, 1, TRADED_VALUE, "M", "24", "6");
+    await expectTradeHighLine(dialog, 2, VOLUME, "M", "12", "3");
+    await expect(lineTexts(dialog)).toHaveText([MONTHLY_TRADED_TEXT, MONTHLY_VOLUME_TEXT]);
+    await dialog.getByRole("button", { name: "취소" }).click();
+    await expect(dialog).toBeHidden();
+    await expect(panelLines(page)).toHaveText([MONTHLY_TRADED_TEXT, `그리고${MONTHLY_VOLUME_TEXT}`]);
+    expect(screenSaves).toHaveLength(3);
   });
 });
