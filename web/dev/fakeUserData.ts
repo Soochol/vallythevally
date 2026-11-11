@@ -94,7 +94,7 @@ function screensProblem(screens: readonly Screen[]): string | null {
     ids.add(s.id);
     const nameChars = [...s.name.trim()].length;
     if (nameChars < 1 || nameChars > MAX_SCREEN_NAME) return `조건식 이름은 공백을 빼고 1~${MAX_SCREEN_NAME}자여야 합니다: ${JSON.stringify(s.name)}`;
-    if (s.conditions.length < 1 || s.conditions.length > MAX_SCREEN_CONDITIONS) return `조건식 ${s.name}의 조건은 1~${MAX_SCREEN_CONDITIONS}줄이어야 합니다: ${s.conditions.length}줄`;
+    if (s.conditions.length > MAX_SCREEN_CONDITIONS) return `조건식 ${s.name}의 조건은 0~${MAX_SCREEN_CONDITIONS}줄이어야 합니다: ${s.conditions.length}줄`;
     for (const c of s.conditions) {
       if (c.kind === "market_cap") continue;
       if (c.m < 1) return `조건식 ${s.name}의 조건은 m ≥ 1이어야 합니다: m=${c.m}`;

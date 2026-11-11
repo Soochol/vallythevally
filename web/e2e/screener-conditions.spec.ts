@@ -58,6 +58,7 @@ test("봉·지표·시가총액 줄을 일봉과 주봉으로 섞어 만들고 �
     await panel(page).getByRole("button", { name: "새 조건식" }).click();
     const dialog = editor(page, "새 조건식");
     await dialog.getByLabel("이름").fill(SCREEN_NAME);
+    await dialog.getByRole("button", { name: "조건 더하기" }).click();
     await choice(dialog, 1, "봉 주기").selectOption("W");
     await choice(dialog, 1, "값").selectOption("close");
     await box(dialog, 1, "신고가 기간").fill("52");

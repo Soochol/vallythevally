@@ -25,6 +25,7 @@ import {
   MARKET_LABEL,
   marketsInOrder,
   matchedDateText,
+  NO_CONDITIONS_SENTENCE,
   nextSort,
   PHASE_LABEL,
   type ResultSort,
@@ -363,14 +364,18 @@ function ScreenSummary({ screen }: { screen: Screen }) {
           </>
         )}
       </p>
-      <ol aria-label="조건" className="mt-1.5 text-s leading-[1.5]">
-        {screen.conditions.map((c, i) => (
-          <li key={i}>
-            {i > 0 && <span className="mr-1 text-xs font-[600] text-accent">그리고</span>}
-            {conditionSentence(c)}
-          </li>
-        ))}
-      </ol>
+      {screen.conditions.length === 0 ? (
+        <p className="mt-1.5 text-s leading-[1.5]">{NO_CONDITIONS_SENTENCE}</p>
+      ) : (
+        <ol aria-label="조건" className="mt-1.5 text-s leading-[1.5]">
+          {screen.conditions.map((c, i) => (
+            <li key={i}>
+              {i > 0 && <span className="mr-1 text-xs font-[600] text-accent">그리고</span>}
+              {conditionSentence(c)}
+            </li>
+          ))}
+        </ol>
+      )}
     </div>
   );
 }
