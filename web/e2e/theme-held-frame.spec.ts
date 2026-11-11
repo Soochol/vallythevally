@@ -7,7 +7,7 @@ test.use({ clockStart: "20261109100030" });
 const tail = (page: Page) => page.evaluate(() => window.frameProbe.snapshot().map((s) => ({ ...s, data: s.data.slice(-2) })));
 const frames = (page: Page) => page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
 
-test("theme change while a rollover frame is held keeps main and volume coherent and live", async ({ page, app }, info) => {
+test("lime dark keeps main and volume coherent when a held rollover frame resumes", async ({ page, app }, info) => {
   const errors: string[] = [];
   const delivered: number[] = [];
   page.on("pageerror", (error) => errors.push(error.message));
@@ -19,7 +19,7 @@ test("theme change while a rollover frame is held keeps main and volume coherent
   await page.goto("/?symbol=005930");
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
   const chart = chartOf(cell(page));
-  await page.getByRole("group", { name: "봉 주기" }).getByRole("button", { name: "1분", exact: true }).click();
+  await page.getByRole("combobox", { name: "분봉" }).selectOption("1m");
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
   const trade = async (price: number, time: string, quantity: number, timeout = 15_000) => {
     await expect(async () => {
@@ -38,18 +38,15 @@ test("theme change while a rollover frame is held keeps main and volume coherent
   await trade(201_000, "100001", 1);
   await expect(chart).toHaveAttribute("data-last-close", "201000");
   await frames(page);
-  const initialTheme = await page.locator("html").getAttribute("data-theme");
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
   await page.evaluate(() => window.frameProbe.hold());
   await trade(202_000, "100059", 2);
   await trade(203_000, "100100", 3);
-  await page.getByRole("button", { name: "테마 바꾸기", exact: true }).evaluate((element) => {
-    if (element instanceof HTMLElement) element.click();
-  });
-  await expect(page.locator("html")).not.toHaveAttribute("data-theme", initialTheme ?? "dark");
-  await expect.poll(async () => (await lastBars()).volume.at(-1)).toMatchObject({ value: 3 });
-  const themed = await lastBars();
+  await expect(page.getByRole("button", { name: "테마 바꾸기", exact: true })).toHaveCount(0);
   await page.evaluate(() => window.frameProbe.release());
   await frames(page);
+  await expect.poll(async () => (await lastBars()).volume.at(-1)).toMatchObject({ value: 3 });
+  const themed = await lastBars();
   const released = await lastBars();
 
   await trade(204_000, "100101", 4);

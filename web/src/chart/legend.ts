@@ -55,8 +55,8 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, className: string, te
  * 휴대폰에서는 머리줄과 가격줄을 휴대폰 머리가 대신하므로 숨긴다(§4).
  */
 export class Legend {
-  readonly root = el("div", "pointer-events-none absolute left-2 top-1 z-[4] flex max-w-[calc(100%-90px)] flex-col gap-px");
-  private readonly name = el("span", "text-m font-[650]");
+  readonly root = el("div", "pointer-events-none absolute left-5 top-4 z-[4] flex max-w-[calc(100%-90px)] flex-col gap-2");
+  private readonly name = el("span", "text-l font-[650]");
   private readonly sub = el("span", "text-s text-text-3");
   private readonly venue = el("span", "text-s text-text-2");
   private readonly period = el("span", "text-s text-text-3");

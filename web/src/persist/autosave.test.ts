@@ -60,8 +60,8 @@ test("칸을 바꾸면 1초 뒤 레이아웃을 통째로 보내고 저장됨이
   expect(usePersistStore.getState().saves.layout.kind).toBe("saved");
 });
 
-test("테마를 바꾸면 모르는 키와 함께 UiState를 보낸다", async () => {
-  useUiStore.getState().toggleTheme();
+test("관심종목 패널을 접으면 모르는 키와 함께 UiState를 보낸다", async () => {
+  useUiStore.getState().toggleWatch();
   await vi.advanceTimersByTimeAsync(1000);
   expect(puts).toEqual([
     {
@@ -69,8 +69,8 @@ test("테마를 바꾸면 모르는 키와 함께 UiState를 보낸다", async (
       body: {
         phone: 1,
         lastLayoutId: DEFAULT_LAYOUT.id,
-        theme: "light",
-        watchCollapsed: false,
+        theme: "dark",
+        watchCollapsed: true,
         recentSymbols: ["IDX:001"],
         activeWatchlistId: null,
         watchColumns: ["price", "changeRate"],
@@ -138,7 +138,7 @@ test("UiState가 64KB를 넘으면 최근 본 종목을 지우고 한 번 다시
 
 test("줄여도 64KB를 넘으면 보내지 않고 실패로 남는다", async () => {
   useUiStore.getState().load({ ...DEFAULT_UI_PREFS, recentSymbols: ["005930"] }, { blob: "x".repeat(PAYLOAD_LIMIT_BYTES) });
-  useUiStore.getState().toggleTheme();
+  useUiStore.getState().toggleWatch();
   await vi.advanceTimersByTimeAsync(10 * 60_000);
   expect(puts).toEqual([]);
   expect(usePersistStore.getState().saves.ui).toEqual({ kind: "failed", reason: "too_large" });

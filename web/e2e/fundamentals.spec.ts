@@ -1,61 +1,14 @@
-import type { Page } from "@playwright/test";
-import { cell, chartOf, expect, SEARCH_BUTTON_TITLE, test } from "./harness";
+import { cell, chartOf, expect, test } from "./harness";
 
-const RETRYABLE_WITHOUT_CLOSING_GATE = { return_code: 2, return_msg: "입력값 오류[1501:입력값을 확인하세요]" };
-
-const panel = (page: Page) => page.getByRole("region", { name: "종목 정보" });
-const value = (page: Page, label: string) =>
-  panel(page).locator("div").filter({ has: page.getByRole("term").filter({ hasText: label }) }).getByRole("definition");
-
-test("종목을 바꾸면 종목 정보가 그 종목의 값으로 바뀐다", async ({ page }) => {
-  await page.goto("/?symbol=005930");
-  await expect(panel(page)).toContainText("삼성전자");
-  await expect(value(page, "시가총액")).toHaveText("1,093.84조");
-  await expect(value(page, "PER")).toHaveText("28.51배");
-  await expect(value(page, "52주 최고")).toHaveText("380,000");
-
-  await page.getByTitle(SEARCH_BUTTON_TITLE).click();
-  const dialog = page.getByRole("dialog", { name: "종목 검색" });
-  await dialog.getByRole("combobox", { name: "종목 검색" }).fill("086520");
-  await dialog.getByRole("option").filter({ hasText: "086520" }).click();
-
-  await expect(panel(page)).toContainText("에코프로");
-  await expect(value(page, "시가총액")).toHaveText("8.17조");
-  await expect(value(page, "EPS")).toHaveText("−1,103원")
-  await expect(value(page, "PER")).toHaveText("—");
-});
-
-test("지수를 열면 종목 정보를 숨긴다", async ({ page }) => {
-  await page.goto("/?symbol=IDX:001");
-  await expect(cell(page)).toHaveAttribute("aria-label", /코스피/);
-  await expect(panel(page)).toHaveCount(0);
-});
-
-test("키움이 실패하면 종목 정보만 오류를 보이고 차트는 그대로 그린다", async ({ app, page }) => {
-  await app.fake.respondWith({ apiId: "ka10001", status: 200, body: RETRYABLE_WITHOUT_CLOSING_GATE });
-  await page.goto("/?symbol=005930");
-  const alert = panel(page).getByRole("alert");
-  await expect(alert).toContainText("종목 정보를 받지 못했습니다.");
-  await expect(chartOf(cell(page))).not.toHaveAttribute("data-bar-count", "0");
-  await expect(cell(page).getByRole("alert")).toHaveCount(0);
-
-  await app.fake.reset();
-  await alert.getByRole("button", { name: "다시 시도" }).click();
-  await expect(value(page, "PER")).toHaveText("28.51배");
-});
-
-test("휴대폰에서는 종목 정보를 묻지 않고, 데스크톱 폭이 되면 묻는다", async ({ page }) => {
-  await page.setViewportSize({ width: 390, height: 844 });
-  const asked: string[] = [];
-  page.on("request", (r) => {
-    if (r.url().endsWith("/fundamentals")) asked.push(r.url());
-  });
-  await page.goto("/?symbol=005930");
-  await expect(chartOf(cell(page))).not.toHaveAttribute("data-bar-count", "0");
-  await page.waitForLoadState("networkidle");
-  expect(asked).toEqual([]);
-
-  await page.setViewportSize({ width: 1440, height: 900 });
-  await expect(value(page, "PER")).toHaveText("28.51배");
-  expect(asked).toHaveLength(1);
+test("종목 기본 정보 블록과 조회를 제거해도 종목·지수 차트와 관심종목은 유지한다", async ({ page }) => {
+  const requests: string[] = [];
+  page.on("request", (r) => { if (r.url().endsWith("/fundamentals")) requests.push(r.url()); });
+  for (const symbol of ["005930", "IDX:001"]) {
+    await page.goto(`/?symbol=${symbol}`);
+    await expect(cell(page)).toHaveAttribute("aria-busy", "false");
+    await expect(chartOf(cell(page))).not.toHaveAttribute("data-bar-count", "0");
+    await expect(page.getByRole("region", { name: "종목 정보" })).toHaveCount(0);
+    await expect(page.getByRole("complementary", { name: "관심종목" })).toBeVisible();
+  }
+  expect(requests).toEqual([]);
 });

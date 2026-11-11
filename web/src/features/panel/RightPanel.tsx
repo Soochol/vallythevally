@@ -37,7 +37,8 @@ export function RightPanel() {
   const desktop = useMediaQuery(DESKTOP_QUERY);
   const collapsed = useUiStore((s) => s.prefs.watchCollapsed);
   const view = useSelectionStore((s) => s.rightPanel);
-  if (!desktop) return null;
+  const desktopView = useSelectionStore((s) => s.desktopView);
+  if (!desktop || desktopView !== "chart") return null;
   const { Content } = VIEWS[view];
   return (
     <div className="flex min-h-0 min-w-0 border-l border-line bg-bg [grid-area:watch]">

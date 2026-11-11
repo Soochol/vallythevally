@@ -1,5 +1,6 @@
-.drawing-toolbar { position:relative; z-index:10; display:flex; flex-direction:column; align-items:center; gap:3px; padding:8px 3px; border-right:1px solid var(--line); background:var(--bg); color:var(--text-2); }
-.draw-tool { display:grid; place-items:center; width:36px; height:34px; border-radius:var(--r-s); color:var(--text-2); cursor:pointer; }
+.drawing-toolbar { position:relative; z-index:10; display:flex; min-height:0; flex-direction:column; align-items:center; gap:5px; padding:12px 5px; border-right:1px solid var(--line); background:var(--bg); color:var(--text-2); overflow-y:auto; scrollbar-width:thin; scrollbar-color:var(--line) transparent; }
+.drawing-toolbar>* { flex-shrink:0; }
+.draw-tool { display:grid; place-items:center; width:38px; height:36px; border-radius:var(--r-m); color:var(--text-2); cursor:pointer; }
 .draw-tool:hover { background:var(--raised); color:var(--text); }
 .draw-tool[aria-pressed=true] { color:var(--accent); background:var(--accent-soft); }
 .draw-group { display:flex; position:relative; align-items:center; }
@@ -8,7 +9,7 @@
 .draw-group details summary:hover { background:var(--raised); }
 .draw-group summary::marker { content:""; }
 .draw-group summary span { font-size:12px; margin-left:1px; }
-.draw-tool-menu { position:absolute; left:14px; top:0; z-index:30; min-width:210px; padding:5px; border:1px solid var(--line); background:var(--surface); box-shadow:var(--shadow); border-radius:var(--r-m); }
+.draw-tool-menu { position:fixed; inset:auto; margin:0; z-index:30; min-width:230px; max-height:calc(100dvh - 16px); overflow:auto; padding:7px; border:1px solid var(--line); color:var(--text); background:var(--surface); box-shadow:var(--shadow); border-radius:var(--r-m); }
 .draw-tool-menu button { display:flex; align-items:center; gap:12px; width:100%; padding:9px 10px; border-radius:var(--r-s); font-size:var(--fs-s); }
 .draw-tool-menu button:hover { background:var(--raised); }
 .draw-tool-menu kbd { margin-left:auto; }
@@ -40,7 +41,7 @@
 .draw-empty { display:flex; flex-direction:column; align-items:center; margin:60px 12px; gap:10px; color:var(--text-3); font-size:var(--fs-s); }
 .draw-empty svg { width:32px; height:32px; margin-bottom:10px; }
 .draw-empty span { font-size:var(--fs-xs); }
-.draw-modal-backdrop { position:fixed; inset:0; z-index:70; display:grid; place-items:center; padding:24px; background:#0006; pointer-events:auto; }
+.draw-modal-backdrop { position:fixed; inset:0; z-index:70; display:grid; place-items:center; padding:24px; background:var(--scrim); backdrop-filter:blur(5px); pointer-events:auto; }
 .draw-settings { display:flex; flex-direction:column; width:460px; max-width:100%; max-height:min(720px,90dvh); background:var(--surface); border:1px solid var(--line); border-radius:var(--r-l); box-shadow:var(--shadow); font-size:var(--fs-s); }
 .draw-dialog-head { display:flex; align-items:center; justify-content:space-between; padding:18px 20px 14px; }
 .draw-dialog-head h2 { font-size:var(--fs-l); font-weight:650; }

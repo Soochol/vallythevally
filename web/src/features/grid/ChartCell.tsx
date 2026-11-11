@@ -115,7 +115,7 @@ export function ChartCell({ slot, status, onStatus }: Props) {
       {olderError && (
         <div
           role="alert"
-          className="absolute left-2 top-1/2 z-[5] flex max-w-[min(44ch,calc(100%-96px))] -translate-y-1/2 flex-col items-start gap-2 rounded-m border border-[color-mix(in_srgb,var(--accent)_50%,transparent)] bg-accent-soft px-3 py-2 text-s text-text shadow-dialog"
+          className="absolute left-2 top-1/2 z-[5] flex max-w-[min(44ch,calc(100%-96px))] -translate-y-1/2 flex-col items-start gap-2 rounded-m border border-warning bg-[color-mix(in_srgb,var(--warning)_10%,var(--surface))] px-3 py-2 text-s text-text shadow-dialog"
         >
           <p>{olderError.text}</p>
           {olderError.retry && (

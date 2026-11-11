@@ -142,11 +142,11 @@ test("휴대폰에서 목록이 20개여도 옮기기·복사 메뉴의 모든 �
   }
 });
 
-test("값 열을 모두 꺼도 패널이 기본 폭보다 좁아지지 않아 종목 정보가 읽힌다", async ({ app, page }) => {
+test("값 열을 모두 꺼도 패널의 기본 폭을 유지하고 종목 이름이 보인다", async ({ app, page }) => {
   await seed(app.url, [{ id: "L0", name: "기본", symbols: ["005930"] }]);
   await page.goto("/?symbol=005930");
-  const info = panel(page).getByRole("region", { name: "종목 정보" });
-  await expect(info.locator("dd").first()).not.toHaveText("—");
+  const stock = panel(page).locator('li[data-code="005930"]');
+  await expect(stock).toContainText("삼성전자");
   const before = (await panel(page).boundingBox())!.width;
 
   await openListMenu(page);
@@ -156,14 +156,7 @@ test("값 열을 모두 꺼도 패널이 기본 폭보다 좁아지지 않아 �
   await page.keyboard.press("Escape");
 
   await expect.poll(async () => (await panel(page).boundingBox())!.width).toBe(before);
-  const rows = await info.locator("dl > div").evaluateAll((divs) =>
-    divs.map((d) => {
-      const label = d.querySelector("dt")!.getBoundingClientRect();
-      const value = d.querySelector("dd")!.getBoundingClientRect();
-      return { label: d.querySelector("dt")!.textContent, labelWidth: label.width, overlap: label.right > value.left };
-    }),
-  );
-  expect(rows.length).toBeGreaterThan(0);
-  for (const r of rows) expect(r, r.label ?? "").toMatchObject({ overlap: false });
-  for (const r of rows) expect(r.labelWidth, r.label ?? "").toBeGreaterThan(0);
+  await expect(stock).toBeVisible();
+  await expect(stock).toContainText("삼성전자");
+  await expect(panel(page).getByRole("region", { name: "종목 정보" })).toHaveCount(0);
 });

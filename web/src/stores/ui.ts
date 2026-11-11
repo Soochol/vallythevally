@@ -9,7 +9,6 @@ interface UiStore {
   extra: UiExtra;
   revision: number;
   load(prefs: UiPrefs, extra: UiExtra): void;
-  toggleTheme(): void;
   toggleWatch(): void;
   pushRecent(code: SymbolCode): void;
   clearRecent(): void;
@@ -30,7 +29,6 @@ export const useUiStore = create<UiStore>()((set) => {
     extra: {},
     revision: 0,
     load: (prefs, extra) => set({ prefs, extra }),
-    toggleTheme: () => edit((p) => ({ ...p, theme: p.theme === "dark" ? "light" : "dark" })),
     toggleWatch: () => edit((p) => ({ ...p, watchCollapsed: !p.watchCollapsed })),
     pushRecent: (code) =>
       edit((p) =>

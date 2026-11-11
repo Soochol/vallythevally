@@ -77,7 +77,7 @@ test("drawings survive realtime updates, series replacement, resync and controll
   await pushPrice(app, page, 202_000, "100002");
   await expectDrawing();
 
-  await page.getByRole("group", { name: "봉 주기" }).getByRole("button", { name: "1분", exact: true }).click();
+  await page.getByRole("combobox", { name: "분봉" }).selectOption("1m");
   await expect(cell(page)).toHaveAttribute("aria-label", "칸 1: 삼성전자 통합 1분");
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
   await pushPrice(app, page, 203_000, "100003");

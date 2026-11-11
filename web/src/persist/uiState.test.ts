@@ -3,7 +3,7 @@ import { DEFAULT_UI_PREFS, parseUiState, toUiState } from "./uiState";
 
 afterEach(() => vi.restoreAllMocks());
 
-test("아는 키는 읽고 모르는 키는 extra에 남겨 그대로 돌려보낸다", () => {
+test("옛 라이트 설정은 다크로 옮기고 다른 설정과 모르는 키는 보존한다", () => {
   const raw = {
     lastLayoutId: "L1",
     theme: "light",
@@ -17,7 +17,7 @@ test("아는 키는 읽고 모르는 키는 extra에 남겨 그대로 돌려보�
   const { prefs, extra } = parseUiState(raw);
   expect(prefs).toEqual({
     lastLayoutId: "L1",
-    theme: "light",
+    theme: "dark",
     watchCollapsed: true,
     recentSymbols: ["005930"],
     activeWatchlistId: "W2",
@@ -25,7 +25,7 @@ test("아는 키는 읽고 모르는 키는 extra에 남겨 그대로 돌려보�
     drawing: DEFAULT_UI_PREFS.drawing,
   });
   expect(extra).toEqual({ phone: { symbol: "000660" } });
-  expect(toUiState(prefs, extra)).toEqual(raw);
+  expect(toUiState(prefs, extra)).toEqual({ ...raw, theme: "dark" });
 });
 
 test("마이그레이션이 넣은 처음 값(접힘·최근 종목 없음)은 경고 없이 기본값을 채운다", () => {

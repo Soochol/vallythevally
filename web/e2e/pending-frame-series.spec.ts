@@ -40,7 +40,7 @@ test("replacement consumes queued rollover in both real series and retains newer
   await page.mouse.up();
   await expect.poll(() => savedDrawings(app)).toHaveLength(1);
   const saved = (await savedDrawings(app))[0]!;
-  await page.getByRole("group", { name: "봉 주기" }).getByRole("button", { name: "1분", exact: true }).click();
+  await page.getByRole("combobox", { name: "분봉" }).selectOption("1m");
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
   const trade = async (price: number, time: string, quantity: number) => {
     expect(await app.fake.pushReal("0B", "005930_AL", {

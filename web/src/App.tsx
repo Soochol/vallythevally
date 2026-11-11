@@ -7,7 +7,7 @@ import { PhoneHeader } from "./features/phone/PhoneHeader";
 import { PhoneTabs } from "./features/phone/PhoneTabs";
 import { IndicatorDialog } from "./features/indicator-dialog/IndicatorDialog";
 import { ScreenDialog } from "./features/screen-dialog/ScreenDialog";
-import { PhoneScreener } from "./features/screener/ScreenerPanel";
+import { DesktopScreener, PhoneScreener } from "./features/screener/ScreenerPanel";
 import { SearchDialog } from "./features/search/SearchDialog";
 import { StatusBar } from "./features/status/StatusBar";
 import { Toast } from "./features/toast/Toast";
@@ -34,6 +34,7 @@ function ChartScreen() {
   const info = useSymbolInfo(cell.symbol).data;
   const pushRecent = useUiStore((s) => s.pushRecent);
   const panelWidth = useRightPanelWidth();
+  const desktopView = useSelectionStore((s) => s.desktopView);
   const [status, setStatus] = useState<CellStatus>({ kind: "loading" });
 
   useHotkeys();
@@ -44,9 +45,10 @@ function ChartScreen() {
 
   return (
     <div
+      data-desktop-view={desktopView}
       style={{ "--watch-w": `${panelWidth}px` } as React.CSSProperties}
       className={
-        "grid h-dvh grid-cols-[minmax(0,1fr)_var(--watch-w)] " +
+        "relative grid h-dvh min-h-0 min-w-0 overflow-hidden grid-cols-[minmax(0,1fr)_var(--watch-w)] " +
         "grid-rows-[var(--topbar-h)_minmax(0,1fr)_var(--status-h)] [grid-template-areas:'top_top'_'grid_watch'_'status_status'] " +
         "max-md:grid-cols-[minmax(0,1fr)] max-md:grid-rows-[auto_auto_minmax(0,1fr)_56px] max-md:[grid-template-areas:'mhead'_'mper'_'grid'_'mtabs']"
       }
@@ -54,11 +56,12 @@ function ChartScreen() {
       <Topbar />
       <PhoneHeader cell={cell} info={info} status={status} />
       <PeriodChips cell={cell} />
-      <main aria-label="칸" className="grid min-h-0 min-w-0 grid-cols-[44px_minmax(0,1fr)] grid-rows-1 bg-line [grid-area:grid] max-md:grid-cols-1">
+      <main aria-label="칸" className="grid min-h-0 min-w-0 grid-cols-[var(--tools-w)_minmax(0,1fr)] grid-rows-1 bg-line [grid-area:grid] max-md:grid-cols-1">
         <DrawingToolbar />
         <ChartCell slot={slot} status={status} onStatus={setStatus} />
       </main>
       <RightPanel />
+      <DesktopScreener />
       <StatusBar />
       <PhoneTabs />
       <PhoneWatch />

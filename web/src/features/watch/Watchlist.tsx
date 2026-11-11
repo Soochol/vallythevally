@@ -27,7 +27,6 @@ import { useActiveWatchlist, useWatchlistStore } from "../../stores/watchlist";
 import { ArrowIcon, ChevronIcon, CloseIcon, MoreIcon, PlusIcon } from "../icons";
 import { Menu, type MenuItem } from "../menu/Menu";
 import { columnTemplate, type WatchVariant } from "./columns";
-import { FundamentalsPanel } from "./FundamentalsPanel";
 
 const DIR_CLASS = { up: "text-up", down: "text-down", flat: "text-text-2" } as const;
 const ROW_GRID = "grid gap-1";
@@ -38,7 +37,6 @@ export function WatchPanel() {
       <WatchHead />
       <WatchList variant="desktop" editing={false} />
       <p className="flex-none border-t border-line px-3 py-2 text-s text-text-3">끌거나 Alt+↑↓로 순서를 바꿉니다</p>
-      <FundamentalsPanel />
     </aside>
   );
 }
@@ -191,7 +189,7 @@ function NameInput({ naming, onDone }: { naming: Naming; onDone(): void }) {
         <CloseIcon />
       </button>
       {problem && (
-        <p id="watch-name-problem" role="alert" className="absolute left-0 top-[calc(100%+6px)] z-40 rounded-s border border-line bg-surface px-2 py-1 text-s text-up shadow-dialog">
+        <p id="watch-name-problem" role="alert" className="absolute left-0 top-[calc(100%+6px)] z-40 rounded-s border border-line bg-surface px-2 py-1 text-s text-danger shadow-dialog">
           {problem}
         </p>
       )}
@@ -372,7 +370,7 @@ function WatchRow({ list, code, index, last, columns, template, variant, editing
           move(e.key === "ArrowUp" ? -1 : 1);
         }}
         style={template}
-        className={`${ROW_GRID} w-full items-center px-3 py-[5px] text-left hover:bg-surface max-md:min-h-[56px] max-md:py-2 ${
+        className={`${ROW_GRID} min-h-[62px] w-full items-center px-4 py-3 text-left hover:bg-surface max-md:min-h-[56px] max-md:py-2 ${
           editing ? "max-md:pr-[176px]" : ""
         }`}
       >
@@ -407,7 +405,7 @@ function WatchRow({ list, code, index, last, columns, template, variant, editing
             <button type="button" className="icon-btn h-10 w-10" aria-label={`${name} 아래로`} disabled={last} onClick={() => move(1)}>
               <ArrowIcon dir="down" />
             </button>
-            <button type="button" className="icon-btn h-10 w-10 text-up" aria-label={`${name} 지우기`} onClick={() => remove(list.id, code)}>
+            <button type="button" className="icon-btn h-10 w-10 text-danger" aria-label={`${name} 지우기`} onClick={() => remove(list.id, code)}>
               <CloseIcon size={18} />
             </button>
           </div>

@@ -4,8 +4,7 @@ import { direction, formatChange, formatPercent, formatPrice } from "../../lib/f
 import { isIndexCode, symbolSub } from "../../lib/symbol";
 import type { CellState } from "../../stores/layout";
 import { useSelectionStore } from "../../stores/selection";
-import { useTheme, useUiStore } from "../../stores/ui";
-import { CameraIcon, MoonIcon, SunIcon } from "../icons";
+import { CameraIcon } from "../icons";
 import { saveSnapshot } from "../snapshot/saveSnapshot";
 import { VenuePicker } from "../venue/VenuePicker";
 import { Attribution } from "../status/attribution";
@@ -19,8 +18,6 @@ const DIR_CLASS = { up: "text-up", down: "text-down", flat: "text-text-2" } as c
  */
 export function PhoneHeader({ cell, info, status }: { cell: CellState; info: SymbolInfo | undefined; status: CellStatus }) {
   const openSearch = useSelectionStore((s) => s.openSearch);
-  const theme = useTheme();
-  const toggle = useUiStore((s) => s.toggleTheme);
   const isIndex = isIndexCode(cell.symbol);
   const connection = useConnectionView();
   const ready = status.kind === "ready" ? status : null;
@@ -64,9 +61,6 @@ export function PhoneHeader({ cell, info, status }: { cell: CellState; info: Sym
         onClick={() => saveSnapshot(cell.slot, "download")}
       >
         <CameraIcon size={20} />
-      </button>
-      <button type="button" className="icon-btn h-9 w-9" title="테마 바꾸기" aria-label="테마 바꾸기" onClick={toggle}>
-        {theme === "dark" ? <SunIcon size={20} /> : <MoonIcon size={20} />}
       </button>
     </header>
   );

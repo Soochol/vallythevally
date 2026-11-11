@@ -12,15 +12,15 @@ export function StatusBar() {
   return (
     <footer
       className={`flex min-w-0 items-center gap-4 border-t border-line px-3 text-xs text-text-2 [grid-area:status] max-md:hidden ${
-        halted ? "bg-[color-mix(in_srgb,var(--up)_14%,var(--bg))]" : "bg-bg"
+        halted ? "bg-[color-mix(in_srgb,var(--danger)_14%,var(--bg))]" : "bg-bg"
       }`}
     >
       {stopped ? (
-        <span role="alert" className="min-w-0 truncate font-[650] text-accent" title={stopped}>
+        <span role="alert" className="min-w-0 truncate font-[650] text-danger" title={stopped}>
           키움 조회 멈춤: {stopped}
         </span>
       ) : notice ? (
-        <span role="status" className="min-w-0 truncate font-[650] text-accent" title={notice}>
+        <span role="status" className="min-w-0 truncate font-[650] text-warning" title={notice}>
           {notice}
         </span>
       ) : (

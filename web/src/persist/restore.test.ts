@@ -60,7 +60,7 @@ test("저장된 값을 그대로 열면 아무것도 저장하지 않는다", as
   expect(r.layout.cells[0]).toMatchObject({ symbol: "005930", venue: "nxt", chartSettings: DEFAULT_CHART_SETTINGS });
   expect(r.layoutDirty).toBe(false);
   expect(r.uiDirty).toBe(false);
-  expect(r.ui.prefs.theme).toBe("light");
+  expect(r.ui.prefs.theme).toBe("dark");
   expect(r.ui.extra).toEqual({ extraKey: 1 });
   expect(r.watchlists).toEqual(SERVER_LISTS);
   expect(r.notices).toEqual([]);
@@ -109,7 +109,7 @@ test("R2: 서버가 이미 가진 것(같거나 큰 revision)이나 다른 레�
       },
     }),
   );
-  expect(r.ui.prefs.theme).toBe("light");
+  expect(r.ui.prefs.theme).toBe("dark");
   expect(r.watchlists).toEqual(SERVER_LISTS);
   expect([r.layoutDirty, r.uiDirty, r.watchlistDirty]).toEqual([false, false, false]);
   expect(r.revisions).toEqual({ layout: 10, ui: 20, watchlist: 30 });

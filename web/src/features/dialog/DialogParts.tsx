@@ -11,7 +11,7 @@ function onDialogKeyDown(e: React.KeyboardEvent<HTMLElement>, close: () => void)
     e.preventDefault();
     close();
   } else if (e.key === "Tab") {
-    const nodes = [...e.currentTarget.querySelectorAll<HTMLElement>(FOCUSABLE)].filter((n) => n.tabIndex >= 0);
+    const nodes = [...e.currentTarget.querySelectorAll<HTMLElement>(FOCUSABLE)].filter((n) => n.tabIndex >= 0 && n.getClientRects().length > 0);
     const first = nodes[0];
     const last = nodes.at(-1);
     if (e.shiftKey && document.activeElement === first) {
@@ -42,7 +42,7 @@ export function DialogFrame({ labelledBy, width, onClose, panelRef, children }: 
   }, []);
   return (
     <div
-      className="fixed inset-0 z-50 flex items-start justify-center bg-[var(--scrim)] pt-[72px] max-md:items-end max-md:pt-0"
+      className="ui-dialog-backdrop fixed inset-0 z-50 flex justify-center bg-[var(--scrim)]"
       onPointerDown={(e) => e.target === e.currentTarget && onClose()}
     >
       <div
@@ -53,7 +53,7 @@ export function DialogFrame({ labelledBy, width, onClose, panelRef, children }: 
         tabIndex={-1}
         onKeyDown={(e) => onDialogKeyDown(e, onClose)}
         className={
-          `flex max-h-[calc(100vh-110px)] ${width} flex-col overflow-hidden rounded-l border border-line bg-surface shadow-dialog outline-none ` +
+          `ui-dialog flex ${width} flex-col overflow-hidden rounded-l border border-line bg-surface shadow-dialog outline-none ` +
           "max-md:max-h-[85dvh] max-md:w-screen max-md:rounded-b-none"
         }
       >
@@ -98,7 +98,7 @@ export function Segment<T extends string | number>({
           type="button"
           aria-pressed={v === value}
           onClick={() => onChange(v)}
-          className="h-7 border-r border-line px-3 text-text-2 last:border-r-0 hover:text-text aria-pressed:bg-raised aria-pressed:font-semibold aria-pressed:text-text"
+          className="h-9 border-r border-line px-3 text-text-2 last:border-r-0 hover:text-text aria-pressed:bg-accent-soft aria-pressed:font-semibold aria-pressed:text-accent"
         >
           {text}
         </button>
@@ -110,7 +110,7 @@ export function Segment<T extends string | number>({
 export function Errors({ id, messages }: { id: string; messages: readonly string[] }) {
   if (messages.length === 0) return null;
   return (
-    <p id={id} className="text-s text-up">
+    <p id={id} className="text-s text-danger">
       {messages.join(" ")}
     </p>
   );

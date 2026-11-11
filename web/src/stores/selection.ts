@@ -16,6 +16,8 @@ interface SelectionState {
   dialog: null | Dialog;
   phoneTab: PhoneTab;
   rightPanel: RightPanel;
+  desktopView: "chart" | "screener";
+  setDesktopView(view: "chart" | "screener"): void;
   toast: null | { id: number; text: string };
   openSearch(purpose?: SearchPurpose): void;
   openIndicators(slot: Slot, editId?: string | null): void;
@@ -34,6 +36,8 @@ export const useSelectionStore = create<SelectionState>()((set) => ({
   dialog: null,
   phoneTab: "chart",
   rightPanel: "watch",
+  desktopView: "chart",
+  setDesktopView: (desktopView) => set({ desktopView }),
   toast: null,
   openSearch: (purpose = "open") => set({ dialog: { kind: "search", purpose } }),
   openIndicators: (slot, editId = null) => set({ dialog: { kind: "indicator", slot, editId } }),
