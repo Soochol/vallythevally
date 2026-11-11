@@ -13,3 +13,6 @@ unsafe_code = "forbid"
 [profile.dev.package.libduckdb-sys]
 opt-level = 3
 debug = false
+
+[profile.dev.package.indicators]
+opt-level = 3

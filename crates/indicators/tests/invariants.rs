@@ -1,4 +1,4 @@
-use indicators::{BarInput, Columns, Engine, LineId, MaMethod, Output, Spec, Tail, ValidSpec, compute};
+use indicators::{BarInput, Columns, Engine, Input, LineId, MaMethod, Memory, Output, Spec, Tail, ValidSpec, compute};
 use proptest::prelude::*;
 
 struct Bars {
@@ -127,6 +127,41 @@ proptest! {
         } else {
             prop_assert_eq!(first, None);
         }
+    }
+
+    #[test]
+    fn a_value_of_bounded_memory_comes_out_the_same_from_only_its_last_bars(spec in spec(), bars in bars(200), from in 0usize..200) {
+        let from = from.min(bars.len() - 1);
+        let whole = compute_bars(&spec, &bars);
+        let tail = compute_bars(&spec, &bars[from..]);
+        if let Memory::LastBars(n) = spec.memory() {
+            for (all, part) in whole.lines.iter().zip(&tail.lines) {
+                for i in from + n - 1..bars.len() {
+                    prop_assert_eq!(all.values[i].to_bits(), part.values[i - from].to_bits(), "{:?} {}번째 봉", all.id, i);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn inputs_a_spec_does_not_read_change_no_value(spec in spec(), bars in bars(120), others in proptest::collection::vec(bar(), 120)) {
+        let read = spec.inputs();
+        let unread_replaced: Vec<BarInput> = bars
+            .iter()
+            .zip(&others)
+            .map(|(bar, &(open, high, low, close, volume))| {
+                let keep = |input: Input, own: f64, other: f64| if read.contains(&input) { own } else { other };
+                BarInput {
+                    t: bar.t,
+                    open: keep(Input::Open, bar.open, open),
+                    high: keep(Input::High, bar.high, high),
+                    low: keep(Input::Low, bar.low, low),
+                    close: keep(Input::Close, bar.close, close),
+                    volume: keep(Input::Volume, bar.volume, volume),
+                }
+            })
+            .collect();
+        assert_same_output(&compute_bars(&spec, &bars), &compute_bars(&spec, &unread_replaced));
     }
 
     #[test]

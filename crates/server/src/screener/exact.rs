@@ -146,6 +146,25 @@ mod tests {
     }
 
     #[test]
+    fn shortest_decimals_order_like_the_floats_they_come_from() {
+        let mut state = 0x9E37_79B9_7F4A_7C15u64;
+        let mut next = move || {
+            state = state.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1_442_695_040_888_963_407);
+            state
+        };
+        let exact = |value: f64| decimal(value).times(1);
+        for _ in 0..20_000 {
+            let percent = 100.0 * (next() >> 11) as f64 / (1u64 << 53) as f64;
+            let any = f64::from_bits(next());
+            for a in [percent, any].into_iter().filter(|v| v.is_finite()) {
+                for b in [a.next_up(), a.next_down(), percent, 30.0, 0.0, -0.0].into_iter().filter(|v| v.is_finite()) {
+                    assert_eq!(exact(a).cmp(&exact(b)), a.partial_cmp(&b).unwrap(), "{a:e} vs {b:e}");
+                }
+            }
+        }
+    }
+
+    #[test]
     fn signs_order_before_magnitudes_and_negative_zero_is_zero() {
         assert_eq!(decimal(-5.0).times(3), Exact::new(true, 15, 0));
         assert!(decimal(-5.0).times(3) < Exact::new(false, 0, 0));

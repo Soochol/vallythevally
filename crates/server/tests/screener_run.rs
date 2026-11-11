@@ -9,6 +9,7 @@ use std::time::{Duration, Instant};
 use common::{FakeKiwoom, Server};
 use domain::{KstDate, Ohlcv, Price, StockCode, Volume, Weekday};
 use fake_kiwoom::krx::{DailyAnswer, KrxBar, KrxMarket, KrxStock};
+use indicators::{Columns, LineId, MaMethod, Spec, ValidSpec};
 use serde_json::{Value, json};
 use server::api::Market;
 use server::kiwoom::wire::{MillionWon, ScreenerListing};
@@ -385,7 +386,7 @@ async fn conditions_combine_with_and_and_rows_carry_the_first_conditions_last_ne
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn a_traded_value_new_high_runs_while_indicator_screens_are_refused_for_now() {
+async fn a_traded_value_new_high_runs_and_no_condition_kind_or_market_is_refused_any_more() {
     let days = fortnight();
     let traded = |code: &str, million_won: fn(usize) -> u64| {
         stock(code, days.iter().enumerate().map(|(i, &d)| KrxBar { traded_million_won: million_won(i), ..bar(d, 100, 1_000) }).collect())
@@ -405,7 +406,7 @@ async fn a_traded_value_new_high_runs_while_indicator_screens_are_refused_for_no
         "주봉 거래대금은 일봉 거래대금의 합이다: 200010은 이번 주 1,300 > 지난주 500, 200020은 이번 주 1,300 < 지난주 1,750"
     );
 
-    let indicators = [
+    let other_kinds = [
         json!({"kind": "ma_position", "period": "D", "m": 1, "field": "close", "method": "sma", "length": 20, "side": "above"}),
         json!({"kind": "ma_alignment", "period": "D", "m": 1, "method": "ema", "lengths": [5, 20], "order": "bullish"}),
         json!({"kind": "ma_cross", "period": "D", "m": 5, "method": "sma", "fast": null, "slow": 20, "direction": "up"}),
@@ -414,12 +415,15 @@ async fn a_traded_value_new_high_runs_while_indicator_screens_are_refused_for_no
         json!({"kind": "stochastic", "period": "D", "m": 1, "k": 5, "d": 3, "smooth": 3, "test": {"kind": "cross", "direction": "down"}}),
         json!({"kind": "bollinger", "period": "M", "m": 1, "length": 20, "k": 2.0, "test": {"kind": "outside", "side": "above"}}),
         json!({"kind": "ichimoku", "period": "D", "m": 1, "conversion": 9, "base": 26, "spanB": 52, "displacement": 26, "test": {"kind": "cloud", "side": "above"}}),
+        market_cap(Some(300_000_000_000.0), None),
     ];
-    let refused = indicators.into_iter().map(|indicator| (format!("지표 {}", indicator["kind"]), lines(vec![new_high("D", "high", 5, 1), indicator], &[]), "2번째 조건: 지표 조건은 아직"));
-    for (case, screen, why) in refused {
+    let screens = other_kinds
+        .into_iter()
+        .map(|line| (line["kind"].to_string(), lines(vec![new_high("D", "high", 5, 1), line], &[])))
+        .chain([("시장".to_owned(), lines(vec![new_high("D", "high", 5, 1)], &["kospi"]))]);
+    for (case, screen) in screens {
         let (status, body) = api.run(&screen).await;
-        assert_eq!((status, body["error"]["code"].clone()), (400, json!("bad_request")), "{case}: {body}");
-        assert!(body["error"]["message"].as_str().unwrap().contains(why), "{case}: 무엇이 아직 안 되는지 알린다: {body}");
+        assert_eq!(status, 200, "{case}: 실행을 막는 조건 종류나 시장이 없다: {body}");
     }
     let bad_rsi = json!({"kind": "rsi", "period": "D", "m": 1, "length": 14, "test": {"kind": "range", "min": 70.0, "max": 30.0}});
     let (status, body) = api.run(&lines(vec![bad_rsi], &[])).await;
@@ -1018,6 +1022,453 @@ async fn daily_and_weekly_lines_combine_with_and_and_the_first_line_sets_the_mat
     );
 }
 
+fn indicator(kind: &str, period: &str, m: u32, settings: Value) -> Value {
+    let mut condition = json!({"kind": kind, "period": period, "m": m});
+    condition.as_object_mut().unwrap().extend(settings.as_object().unwrap().clone());
+    condition
+}
+
+fn walk(seed: u64, days: &[KstDate]) -> Vec<KrxBar> {
+    let mut state = seed.wrapping_mul(0x9E37_79B9_7F4A_7C15) | 1;
+    let mut next = move |below: u64| {
+        state = state.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1_442_695_040_888_963_407);
+        (state >> 33) % below
+    };
+    let mut close = 10_000 + next(40_000);
+    days.iter()
+        .enumerate()
+        .map(|(i, &day)| {
+            let open = close;
+            close = (close * (9_400 + next(1_201)) / 10_000).max(100);
+            let high = open.max(close) + next(open.max(close) / 50 + 1);
+            let low = open.min(close) - next(open.min(close) / 50 + 1);
+            let volume = if next(15) == 0 && i + 2 < days.len() { 0 } else { 1_000 + next(100_000) };
+            KrxBar { day, open, high, low, close, volume, traded_million_won: close * volume / 1_000_000, base: close, adjustment_rate: None }
+        })
+        .collect()
+}
+
+fn cell_start(period: &str, day: KstDate) -> KstDate {
+    match period {
+        "D" => day,
+        "W" => day.add_days(-day.weekday().days_from_monday()),
+        "M" => KstDate::new(day.year(), day.month(), 1).unwrap(),
+        other => panic!("봉 주기 {other}"),
+    }
+}
+
+#[derive(Default)]
+struct Chart {
+    starts: Vec<KstDate>,
+    t: Vec<i64>,
+    open: Vec<f64>,
+    high: Vec<f64>,
+    low: Vec<f64>,
+    close: Vec<f64>,
+    volume: Vec<f64>,
+}
+
+impl Chart {
+    fn of(bars: &[KrxBar], period: &str) -> Chart {
+        let mut chart = Chart::default();
+        for bar in bars.iter().filter(|b| b.volume > 0) {
+            let start = cell_start(period, bar.day);
+            if chart.starts.last() == Some(&start) {
+                let k = chart.starts.len() - 1;
+                chart.high[k] = chart.high[k].max(bar.high as f64);
+                chart.low[k] = chart.low[k].min(bar.low as f64);
+                chart.close[k] = bar.close as f64;
+                chart.volume[k] += bar.volume as f64;
+            } else {
+                chart.starts.push(start);
+                chart.t.push(start.days_since_epoch());
+                chart.open.push(bar.open as f64);
+                chart.high.push(bar.high as f64);
+                chart.low.push(bar.low as f64);
+                chart.close.push(bar.close as f64);
+                chart.volume.push(bar.volume as f64);
+            }
+        }
+        chart
+    }
+
+    fn len(&self) -> usize {
+        self.starts.len()
+    }
+
+    fn line(&self, spec: Spec, id: LineId) -> Vec<f64> {
+        let columns = Columns::new(&self.t, &self.open, &self.high, &self.low, &self.close, &self.volume).unwrap();
+        let output = indicators::compute(&ValidSpec::new(spec).unwrap(), &columns);
+        let line = output.lines.into_iter().find(|l| l.id == id).unwrap();
+        let ahead = usize::try_from(line.shift).unwrap();
+        (0..self.len()).map(|i| if i >= ahead { line.values[i - ahead] } else { f64::NAN }).collect()
+    }
+
+    fn ma(&self, method: MaMethod, period: u16) -> Vec<f64> {
+        self.line(Spec::Ma { method, period }, LineId::Ma)
+    }
+
+    fn each(&self, holds: impl Fn(usize) -> bool) -> Vec<bool> {
+        (0..self.len()).map(holds).collect()
+    }
+
+    fn crossing(&self, direction: &str, line: &[f64], of: &[f64]) -> Vec<bool> {
+        self.each(|i| {
+            i > 0 && match direction {
+                "up" => line[i - 1] <= of[i - 1] && line[i] > of[i],
+                "down" => line[i - 1] >= of[i - 1] && line[i] < of[i],
+                other => panic!("방향 {other}"),
+            }
+        })
+    }
+
+    fn level(&self, value: f64) -> Vec<f64> {
+        vec![value; self.len()]
+    }
+}
+
+fn rsi(chart: &Chart, period: u16) -> Vec<f64> {
+    chart.line(Spec::Rsi { period, signal: None }, LineId::Rsi)
+}
+
+fn macd(chart: &Chart, fast: u16, slow: u16, signal: u16) -> (Vec<f64>, Vec<f64>) {
+    let spec = Spec::Macd { fast, slow, signal };
+    (chart.line(spec.clone(), LineId::Macd), chart.line(spec, LineId::Signal))
+}
+
+fn stochastic(chart: &Chart, k: u16, d: u16, smooth: u16) -> (Vec<f64>, Vec<f64>) {
+    let spec = Spec::StochSlow { k, d, smooth };
+    (chart.line(spec.clone(), LineId::K), chart.line(spec, LineId::D))
+}
+
+fn bollinger(chart: &Chart, period: u16, k: f64) -> (Vec<f64>, Vec<f64>) {
+    let spec = Spec::Bollinger { period, k };
+    (chart.line(spec.clone(), LineId::Upper), chart.line(spec, LineId::Lower))
+}
+
+fn ichimoku(chart: &Chart, id: LineId) -> Vec<f64> {
+    chart.line(Spec::Ichimoku { conversion: 9, base: 26, span_b: 52, displacement: 26 }, id)
+}
+
+type Candidates = fn(&Chart) -> Vec<bool>;
+
+fn found(days: &[KstDate], stocks: &[KrxStock], condition: &Value, candidates: Candidates) -> Vec<String> {
+    let period = condition["period"].as_str().unwrap();
+    let m = condition["m"].as_u64().unwrap() as usize;
+    let mut cells: Vec<KstDate> = days.iter().map(|&d| cell_start(period, d)).collect();
+    cells.dedup();
+    let first_recent = cells[cells.len() - m];
+    let mut found: Vec<(KstDate, &str)> = stocks
+        .iter()
+        .filter_map(|stock| {
+            let chart = Chart::of(&stock.bars, period);
+            let flags = candidates(&chart);
+            (0..chart.len()).rev().find(|&i| chart.starts[i] >= first_recent && flags[i]).map(|i| (chart.starts[i], stock.code.as_str()))
+        })
+        .collect();
+    found.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(b.1)));
+    found.into_iter().map(|(day, code)| hit(code, day)).collect()
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn each_indicator_kind_and_test_picks_the_stocks_the_indicators_crate_finds_on_the_same_bars() {
+    let days = last_open_days(200, day(2026, 11, 6));
+    let stocks: Vec<KrxStock> = (0..24).map(|k| stock(&format!("2000{:02}", k + 10), walk(k as u64, if k % 4 == 3 { &days[40..] } else { &days }))).collect();
+    let session = loaded(KrxMarket { days: days.clone(), stocks: stocks.clone() }).await;
+    let api = &session.api;
+    let cases: Vec<(Value, Candidates)> = vec![
+        (indicator("ma_position", "D", 1, json!({"field": "close", "method": "sma", "length": 20, "side": "above"})), |c| {
+            let ma = c.ma(MaMethod::Sma, 20);
+            c.each(|i| c.close[i] > ma[i])
+        }),
+        (indicator("ma_position", "D", 2, json!({"field": "low", "method": "ema", "length": 10, "side": "below"})), |c| {
+            let ma = c.ma(MaMethod::Ema, 10);
+            c.each(|i| c.low[i] < ma[i])
+        }),
+        (indicator("ma_alignment", "D", 3, json!({"method": "sma", "lengths": [5, 20, 60], "order": "bullish"})), |c| {
+            let (short, middle, long) = (c.ma(MaMethod::Sma, 5), c.ma(MaMethod::Sma, 20), c.ma(MaMethod::Sma, 60));
+            c.each(|i| short[i] > middle[i] && middle[i] > long[i])
+        }),
+        (indicator("ma_alignment", "D", 1, json!({"method": "ema", "lengths": [5, 20], "order": "bearish"})), |c| {
+            let (short, long) = (c.ma(MaMethod::Ema, 5), c.ma(MaMethod::Ema, 20));
+            c.each(|i| short[i] < long[i])
+        }),
+        (indicator("ma_cross", "D", 10, json!({"method": "sma", "fast": 5, "slow": 20, "direction": "up"})), |c| c.crossing("up", &c.ma(MaMethod::Sma, 5), &c.ma(MaMethod::Sma, 20))),
+        (indicator("ma_cross", "D", 10, json!({"method": "ema", "fast": null, "slow": 10, "direction": "down"})), |c| c.crossing("down", &c.close, &c.ma(MaMethod::Ema, 10))),
+        (indicator("rsi", "D", 1, json!({"length": 14, "test": {"kind": "range", "min": 55.0, "max": null}})), |c| {
+            let rsi = rsi(c, 14);
+            c.each(|i| rsi[i] >= 55.0)
+        }),
+        (indicator("rsi", "D", 10, json!({"length": 14, "test": {"kind": "breakout", "value": 50.0, "direction": "up"}})), |c| c.crossing("up", &rsi(c, 14), &c.level(50.0))),
+        (indicator("rsi", "D", 10, json!({"length": 14, "test": {"kind": "breakout", "value": 50.0, "direction": "down"}})), |c| c.crossing("down", &rsi(c, 14), &c.level(50.0))),
+        (indicator("macd", "D", 10, json!({"fast": 12, "slow": 26, "signal": 9, "test": {"kind": "signal_cross", "direction": "up"}})), |c| {
+            let (macd, signal) = macd(c, 12, 26, 9);
+            c.crossing("up", &macd, &signal)
+        }),
+        (indicator("macd", "D", 10, json!({"fast": 12, "slow": 26, "signal": 9, "test": {"kind": "zero_breakout", "direction": "down"}})), |c| c.crossing("down", &macd(c, 12, 26, 9).0, &c.level(0.0))),
+        (indicator("macd", "D", 1, json!({"fast": 12, "slow": 26, "signal": 9, "test": {"kind": "vs_signal", "side": "above"}})), |c| {
+            let (macd, signal) = macd(c, 12, 26, 9);
+            c.each(|i| macd[i] > signal[i])
+        }),
+        (indicator("stochastic", "D", 5, json!({"k": 5, "d": 3, "smooth": 3, "test": {"kind": "cross", "direction": "up"}})), |c| {
+            let (k, d) = stochastic(c, 5, 3, 3);
+            c.crossing("up", &k, &d)
+        }),
+        (indicator("stochastic", "D", 1, json!({"k": 5, "d": 3, "smooth": 3, "test": {"kind": "range", "min": null, "max": 30.0}})), |c| {
+            let k = stochastic(c, 5, 3, 3).0;
+            c.each(|i| k[i] <= 30.0)
+        }),
+        (indicator("bollinger", "D", 20, json!({"length": 20, "k": 2.0, "test": {"kind": "outside", "side": "above"}})), |c| {
+            let upper = bollinger(c, 20, 2.0).0;
+            c.each(|i| c.close[i] > upper[i])
+        }),
+        (indicator("bollinger", "D", 20, json!({"length": 20, "k": 2.0, "test": {"kind": "outside", "side": "below"}})), |c| {
+            let lower = bollinger(c, 20, 2.0).1;
+            c.each(|i| c.close[i] < lower[i])
+        }),
+        (indicator("bollinger", "D", 20, json!({"length": 20, "k": 1.5, "test": {"kind": "cross", "band": "upper", "direction": "down"}})), |c| c.crossing("down", &c.close, &bollinger(c, 20, 1.5).0)),
+        (indicator("bollinger", "D", 20, json!({"length": 20, "k": 1.5, "test": {"kind": "cross", "band": "lower", "direction": "up"}})), |c| c.crossing("up", &c.close, &bollinger(c, 20, 1.5).1)),
+        (indicator("ichimoku", "D", 1, json!({"conversion": 9, "base": 26, "spanB": 52, "displacement": 26, "test": {"kind": "cloud", "side": "above"}})), |c| {
+            let (a, b) = (ichimoku(c, LineId::SpanA), ichimoku(c, LineId::SpanB));
+            c.each(|i| c.close[i] > a[i] && c.close[i] > b[i])
+        }),
+        (indicator("ichimoku", "D", 1, json!({"conversion": 9, "base": 26, "spanB": 52, "displacement": 26, "test": {"kind": "cloud", "side": "below"}})), |c| {
+            let (a, b) = (ichimoku(c, LineId::SpanA), ichimoku(c, LineId::SpanB));
+            c.each(|i| c.close[i] < a[i] && c.close[i] < b[i])
+        }),
+        (indicator("ichimoku", "D", 10, json!({"conversion": 9, "base": 26, "spanB": 52, "displacement": 26, "test": {"kind": "cross", "direction": "up"}})), |c| {
+            c.crossing("up", &ichimoku(c, LineId::Conversion), &ichimoku(c, LineId::Base))
+        }),
+        (indicator("macd", "W", 4, json!({"fast": 3, "slow": 6, "signal": 4, "test": {"kind": "signal_cross", "direction": "down"}})), |c| {
+            let (macd, signal) = macd(c, 3, 6, 4);
+            c.crossing("down", &macd, &signal)
+        }),
+        (indicator("ma_position", "W", 1, json!({"field": "high", "method": "sma", "length": 10, "side": "above"})), |c| {
+            let ma = c.ma(MaMethod::Sma, 10);
+            c.each(|i| c.high[i] > ma[i])
+        }),
+        (indicator("stochastic", "M", 2, json!({"k": 3, "d": 2, "smooth": 2, "test": {"kind": "range", "min": 50.0, "max": null}})), |c| {
+            let k = stochastic(c, 3, 2, 2).0;
+            c.each(|i| k[i] >= 50.0)
+        }),
+    ];
+    for (condition, candidates) in &cases {
+        let want = found(&days, &stocks, condition, *candidates);
+        let result = api.result(&every(vec![condition.clone()])).await;
+        assert_eq!((result["excluded"].clone(), hits(&result)), (excluded(0, 0), want.clone()), "{condition}");
+        assert!(!want.is_empty() && want.len() < stocks.len(), "{condition}: 맞는 종목과 안 맞는 종목이 다 있다: {want:?}");
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_cross_takes_lines_equal_on_the_bar_before_and_that_bar_skips_halted_days() {
+    let days = fortnight();
+    let ending = |code: &str, last_two: [(u64, u64); 2]| {
+        stock(code, days.iter().enumerate().map(|(i, &d)| if i < 13 { bar(d, 100, 1_000) } else { bar(d, last_two[i - 13].0, last_two[i - 13].1) }).collect())
+    };
+    let stocks = vec![
+        ending("200010", [(100, 1_000), (130, 1_000)]),
+        ending("200020", [(110, 1_000), (130, 1_000)]),
+        ending("200030", [(80, 1_000), (90, 1_000)]),
+        ending("200040", [(150, 0), (130, 1_000)]),
+        ending("200050", [(100, 1_000), (70, 1_000)]),
+    ];
+    let session = loaded(KrxMarket { days: days.clone(), stocks }).await;
+    let api = &session.api;
+    let close_crossing = |m: u32, direction: &str| every(vec![indicator("ma_cross", "D", m, json!({"method": "sma", "fast": null, "slow": 3, "direction": direction}))]);
+
+    assert_eq!(
+        hits(&api.result(&close_crossing(1, "up")).await),
+        [hit("200010", days[14]), hit("200040", days[14])],
+        "200010은 어제 종가 100이 3일선 100과 같았고 오늘 130이 3일선 110 위다. 200040은 정지한 어제를 건너뛴 그제가 직전 봉이다"
+    );
+    assert_eq!(hits(&api.result(&close_crossing(1, "down")).await), [hit("200050", days[14])], "200030은 오늘 종가 90이 3일선 90과 같아 아래로 교차하지 않았다");
+    assert_eq!(
+        hits(&api.result(&close_crossing(2, "up")).await),
+        [hit("200010", days[14]), hit("200040", days[14]), hit("200020", days[13])],
+        "200020은 어제 이미 3일선 위로 올라섰다"
+    );
+    assert_eq!(hits(&api.result(&close_crossing(2, "down")).await), [hit("200050", days[14]), hit("200030", days[13])]);
+    assert_eq!(
+        hits(&api.result(&every(vec![indicator("ma_position", "D", 1, json!({"field": "close", "method": "sma", "length": 3, "side": "below"}))])).await),
+        [hit("200050", days[14])],
+        "이평과 같은 종가는 이평 아래가 아니다"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_ichimoku_cloud_of_a_bar_is_the_leading_spans_computed_displacement_minus_one_bars_before() {
+    let days = fortnight();
+    let ranged = |d: KstDate, high: u64, low: u64, close: u64| candle(d, [close, high, low, close], 1_000);
+    let halted = |d: KstDate| candle(d, [999; 4], 0);
+    let stocks = vec![
+        stock("200010", vec![ranged(days[11], 310, 290, 300), ranged(days[12], 110, 90, 100), ranged(days[13], 210, 190, 200), ranged(days[14], 250, 150, 150)]),
+        stock("200020", vec![ranged(days[11], 110, 90, 100), ranged(days[12], 310, 290, 300), ranged(days[13], 110, 90, 100), ranged(days[14], 250, 150, 200)]),
+        stock("200030", vec![ranged(days[10], 310, 290, 300), ranged(days[11], 110, 90, 100), halted(days[12]), ranged(days[13], 210, 190, 200), ranged(days[14], 250, 150, 150)]),
+        stock("200040", vec![ranged(days[13], 110, 90, 100), ranged(days[14], 250, 150, 150)]),
+    ];
+    let session = loaded(KrxMarket { days: days.clone(), stocks }).await;
+    let api = &session.api;
+    let spec = Spec::Ichimoku { conversion: 1, base: 1, span_b: 1, displacement: 3 };
+    assert_eq!((spec.shift_of(LineId::SpanA), spec.shift_of(LineId::SpanB), spec.warmup()), (Some(2), Some(2), 1), "선행스팬은 2봉 앞으로 옮겨 그리고, 한 봉의 고가·저가 가운데가 그 봉의 선이다");
+    let cloud = |side: &str| every(vec![indicator("ichimoku", "D", 1, json!({"conversion": 1, "base": 1, "spanB": 1, "displacement": 3, "test": {"kind": "cloud", "side": side}}))]);
+
+    let above = api.result(&cloud("above")).await;
+    assert_eq!(
+        (above["excluded"].clone(), hits(&above)),
+        (excluded(1, 0), vec![hit("200010", days[14]), hit("200030", days[14])]),
+        "오늘 구름은 2봉 전 가운데 100이라 종가 150이 위다. 1봉 전(200)이나 3봉 전(300)이면 위가 아니다. 200030은 정지한 날을 건너뛰어 센다. 200040은 구름에 3칸이 필요해 상장 기간 부족이다"
+    );
+    assert_eq!(hits(&api.result(&cloud("below")).await), [hit("200020", days[14])], "오늘 구름은 2봉 전 가운데 300이라 종가 200이 아래다");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn needed_bars_of_indicator_lines_follow_the_indicator_warmup_and_count_listed_too_short() {
+    let days = fortnight();
+    let listed_cells = [9, 10, 11, 12];
+    let stocks = listed_cells.iter().enumerate().map(|(k, &cells)| stock(&format!("2000{}0", k + 1), priced(&days[days.len() - cells..], |i| 100 + (i as u64 * 7) % 5))).collect();
+    let session = loaded(KrxMarket { days: days.clone(), stocks }).await;
+    let api = &session.api;
+    let warmup = |spec: Spec| spec.warmup();
+    let cross = |spec: Spec| spec.warmup() + 1;
+    let rsi = |test: Value| indicator("rsi", "D", 1, json!({"length": 9, "test": test}));
+    let macd = |test: Value| indicator("macd", "D", 1, json!({"fast": 3, "slow": 6, "signal": 5, "test": test}));
+    let stochastic = |test: Value| indicator("stochastic", "D", 1, json!({"k": 6, "d": 3, "smooth": 3, "test": test}));
+    let bollinger = |test: Value| indicator("bollinger", "D", 1, json!({"length": 10, "k": 2.0, "test": test}));
+    let ichimoku = |test: Value| indicator("ichimoku", "D", 1, json!({"conversion": 3, "base": 5, "spanB": 10, "displacement": 3, "test": test}));
+    let (rsi_spec, macd_spec, stochastic_spec) = (Spec::Rsi { period: 9, signal: None }, Spec::Macd { fast: 3, slow: 6, signal: 5 }, Spec::StochSlow { k: 6, d: 3, smooth: 3 });
+    let (bollinger_spec, ichimoku_spec) = (Spec::Bollinger { period: 10, k: 2.0 }, Spec::Ichimoku { conversion: 3, base: 5, span_b: 10, displacement: 3 });
+    let up = json!({"direction": "up"});
+    let with = |kind: &str, extra: &Value| {
+        let mut test = json!({"kind": kind});
+        test.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+        test
+    };
+    let cases = [
+        ("이평 위치는 length", indicator("ma_position", "D", 1, json!({"field": "close", "method": "sma", "length": 10, "side": "above"})), 10),
+        ("이평 배열은 가장 긴 length", indicator("ma_alignment", "D", 1, json!({"method": "ema", "lengths": [3, 10], "order": "bullish"})), 10),
+        ("이평 교차는 slow + 1", indicator("ma_cross", "D", 1, json!({"method": "sma", "fast": 3, "slow": 10, "direction": "up"})), 11),
+        ("종가와 이평의 교차도 slow + 1", indicator("ma_cross", "D", 1, json!({"method": "ema", "fast": null, "slow": 10, "direction": "down"})), 11),
+        ("RSI 범위는 warmup", rsi(json!({"kind": "range", "min": 0.0, "max": null})), warmup(rsi_spec.clone())),
+        ("RSI 돌파는 warmup + 1", rsi(json!({"kind": "breakout", "value": 50.0, "direction": "up"})), cross(rsi_spec)),
+        ("MACD 시그널 위는 warmup", macd(json!({"kind": "vs_signal", "side": "above"})), warmup(macd_spec.clone())),
+        ("MACD 시그널 교차는 warmup + 1", macd(with("signal_cross", &up)), cross(macd_spec.clone())),
+        ("MACD 0선 돌파는 warmup + 1", macd(with("zero_breakout", &up)), cross(macd_spec)),
+        ("스토캐스틱 범위는 warmup", stochastic(json!({"kind": "range", "min": 0.0, "max": null})), warmup(stochastic_spec.clone())),
+        ("스토캐스틱 교차는 warmup + 1", stochastic(with("cross", &up)), cross(stochastic_spec)),
+        ("볼린저 밴드 밖은 warmup", bollinger(json!({"kind": "outside", "side": "below"})), warmup(bollinger_spec.clone())),
+        ("볼린저 밴드 교차는 warmup + 1", bollinger(json!({"kind": "cross", "band": "upper", "direction": "up"})), cross(bollinger_spec)),
+        ("일목 구름은 warmup + displacement − 1", ichimoku(json!({"kind": "cloud", "side": "above"})), warmup(ichimoku_spec.clone()) + 2),
+        ("일목 전환선·기준선 교차는 warmup + 1", ichimoku(with("cross", &up)), cross(ichimoku_spec)),
+        (
+            "M은 필요한 봉 수를 바꾸지 않는다",
+            indicator("rsi", "D", 5, json!({"length": 9, "test": {"kind": "breakout", "value": 50.0, "direction": "up"}})),
+            cross(Spec::Rsi { period: 9, signal: None }),
+        ),
+    ];
+    assert_eq!(cases.iter().map(|(_, _, needed)| *needed).collect::<Vec<_>>(), [10, 10, 11, 11, 10, 11, 10, 11, 11, 10, 11, 10, 11, 12, 11, 11], "상장 칸 9~12인 종목들이 경계를 가른다");
+    for (case, condition, needed) in cases {
+        let too_short = listed_cells.iter().filter(|&&cells| cells < needed).count() as u32;
+        let result = api.result(&every(vec![condition])).await;
+        assert_eq!((result["universe"].clone(), result["excluded"].clone()), (json!(4), excluded(too_short, 0)), "{case}: 필요한 봉 {needed}칸");
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_indicator_value_meets_a_bound_equal_to_it_and_the_floats_beside_it_fall_either_side() {
+    let days = last_open_days(200, day(2026, 11, 6));
+    let bars = walk(7, &days);
+    let chart = Chart::of(&bars, "D");
+    let session = loaded(KrxMarket { days: days.clone(), stocks: vec![stock("200010", bars)] }).await;
+    let api = &session.api;
+    let today = chart.len() - 1;
+    let rsi_line = rsi(&chart, 14);
+    let k_line = stochastic(&chart, 5, 3, 3).0;
+    let (rsi_before, rsi_today, k_today) = (rsi_line[today - 1], rsi_line[today], k_line[today]);
+    assert_ne!(rsi_before, rsi_today);
+    let (rising, beyond_before) = if rsi_today > rsi_before { ("up", rsi_before.next_down()) } else { ("down", rsi_before.next_up()) };
+    let rsi_range = |min: Option<f64>, max: Option<f64>| indicator("rsi", "D", 1, json!({"length": 14, "test": {"kind": "range", "min": min, "max": max}}));
+    let k_range = |min: Option<f64>, max: Option<f64>| indicator("stochastic", "D", 1, json!({"k": 5, "d": 3, "smooth": 3, "test": {"kind": "range", "min": min, "max": max}}));
+    let breakout = |value: f64| indicator("rsi", "D", 1, json!({"length": 14, "test": {"kind": "breakout", "value": value, "direction": rising}}));
+    let cases = [
+        ("RSI가 최소이자 최대다", rsi_range(Some(rsi_today), Some(rsi_today)), true),
+        ("최소가 RSI 바로 위의 f64", rsi_range(Some(rsi_today.next_up()), None), false),
+        ("최대가 RSI 바로 아래의 f64", rsi_range(None, Some(rsi_today.next_down())), false),
+        ("%K가 최소이자 최대다. 200봉 가운데 끝 봉만 넣어 셈해도 크레이트가 처음부터 셈한 값과 같다", k_range(Some(k_today), Some(k_today)), true),
+        ("최소가 %K 바로 위의 f64", k_range(Some(k_today.next_up()), None), false),
+        ("최대가 %K 바로 아래의 f64", k_range(None, Some(k_today.next_down())), false),
+        ("직전 봉 RSI와 같은 값을 넘으면 돌파다", breakout(rsi_before), true),
+        ("직전 봉 RSI가 이미 넘어 있던 값은 돌파가 아니다", breakout(beyond_before), false),
+        ("오늘 RSI와 같은 값은 넘지 않았다", breakout(rsi_today), false),
+    ];
+    for (case, condition, want) in cases {
+        let result = api.result(&every(vec![condition])).await;
+        assert_eq!(picks(&result, "200010"), want, "{case}: RSI {rsi_before} → {rsi_today}, %K {k_today}: {result}");
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_candidate_bar_and_the_bar_before_a_cross_need_every_line_of_the_indicator_computed() {
+    let days = fortnight();
+    let jumping_at = |first: usize| priced(&days, move |i| if i >= first { 130 } else { 100 });
+    let halted_most_days: Vec<KrxBar> = days.iter().enumerate().map(|(i, &d)| bar(d, if i == 14 { 130 } else { 100 }, if i == 0 || i >= 12 { 1_000 } else { 0 })).collect();
+    let stocks = vec![
+        stock("200010", halted_most_days.clone()),
+        stock("200020", jumping_at(14)),
+        stock("200030", jumping_at(3)),
+        stock("200040", jumping_at(5)),
+        stock("200050", jumping_at(6)),
+    ];
+    let session = loaded(KrxMarket { days: days.clone(), stocks }).await;
+    let api = &session.api;
+    let few_bars = Chart::of(&halted_most_days, "D");
+    let stochastic_spec = Spec::StochSlow { k: 2, d: 9, smooth: 1 };
+    let macd_spec = Spec::Macd { fast: 1, slow: 2, signal: 5 };
+    let ichimoku_spec = Spec::Ichimoku { conversion: 1, base: 2, span_b: 10, displacement: 1 };
+    assert_eq!(
+        (few_bars.len(), stochastic_spec.warmup(), macd_spec.warmup(), ichimoku_spec.warmup()),
+        (4, 10, 6, 10),
+        "200010은 15칸에 봉이 4개라 상장 기간은 되지만 %D·시그널·선행스팬 B가 계산되지 않는다"
+    );
+    for (spec, unready) in [(stochastic_spec, LineId::D), (macd_spec, LineId::Signal), (ichimoku_spec, LineId::SpanB)] {
+        assert!(few_bars.line(spec, unready)[3].is_nan());
+    }
+    let today = || vec![hit("200020", days[14])];
+    let cases = [
+        (
+            "스토캐스틱 범위는 %K만 맞아도 %D가 계산되기 전이면 후보가 아니다",
+            json!({"kind": "stochastic", "k": 2, "d": 9, "smooth": 1, "test": {"kind": "range", "min": 90.0, "max": 100.0}}),
+            today(),
+            today(),
+        ),
+        (
+            "MACD 0선 돌파는 시그널이 계산되기 전이면 후보가 아니고, 직전 봉에서도 시그널이 있어야 한다: 200040은 시그널이 처음 생긴 봉에서 돌파했다",
+            json!({"kind": "macd", "fast": 1, "slow": 2, "signal": 5, "test": {"kind": "zero_breakout", "direction": "up"}}),
+            today(),
+            vec![hit("200020", days[14]), hit("200050", days[6])],
+        ),
+        (
+            "일목 전환선·기준선 교차는 선행스팬 B가 계산되기 전이면 후보가 아니다",
+            json!({"kind": "ichimoku", "conversion": 1, "base": 2, "spanB": 10, "displacement": 1, "test": {"kind": "cross", "direction": "up"}}),
+            today(),
+            today(),
+        ),
+        (
+            "일목 교차의 선행스팬은 displacement−1봉 앞에서 계산한 값이라, 그 봉과 직전 봉에서 4봉 앞의 선행스팬 B가 있어야 한다",
+            json!({"kind": "ichimoku", "conversion": 1, "base": 2, "spanB": 2, "displacement": 5, "test": {"kind": "cross", "direction": "up"}}),
+            today(),
+            vec![hit("200020", days[14]), hit("200050", days[6])],
+        ),
+    ];
+    for (case, settings, today_only, fortnight_long) in cases {
+        let kind = settings["kind"].as_str().unwrap().to_owned();
+        for (m, want) in [(1, today_only), (15, fortnight_long)] {
+            let result = api.result(&every(vec![indicator(&kind, "D", m, settings.clone())])).await;
+            assert_eq!((result["excluded"].clone(), hits(&result)), (excluded(0, 0), want), "{case}, 최근 {m}일: 200010은 봉이 모자라고 200030은 준비 기간에 맞았다");
+        }
+    }
+}
+
 fn with_shares(listed_shares: Option<u64>, stock: KrxStock) -> KrxStock {
     KrxStock { listed_shares, ..stock }
 }
@@ -1181,7 +1632,7 @@ fn fill_large_store(path: &Path, days: &[KstDate]) {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn a_screen_over_4000_stocks_with_thousands_of_bars_answers_within_2_seconds() {
+async fn a_screen_over_4000_stocks_with_thousands_of_bars_answers_within_2_seconds_or_3_with_indicator_lines() {
     let days = last_open_days(LARGE_BARS, day(2026, 11, 6));
     let today = *days.last().unwrap();
     let dir = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
@@ -1197,11 +1648,12 @@ async fn a_screen_over_4000_stocks_with_thousands_of_bars_answers_within_2_secon
     let server = boot(&fake, dir.path(), &at(today, "2030"));
     let api = Api::of(&server).await;
     assert_eq!(api.status().await["lastDay"], json!(today.to_string()));
+    let bar_lines = Duration::from_secs(2);
     let screens = [
-        ("일봉 고가 200일 신고가가 최근 5일 안", screen("D", &[("high", 200, 5)], &[])),
-        ("일봉 거래량 2,900일 신고거래량이 최근 20일 안", screen("D", &[("volume", 2_900, 20)], &[])),
-        ("주봉 종가 52주 신고가가 최근 4주 안", screen("W", &[("close", 52, 4)], &[])),
-        ("월봉 고가 120개월 신고가가 이번 달", screen("M", &[("high", 120, 1)], &[])),
+        ("일봉 고가 200일 신고가가 최근 5일 안", screen("D", &[("high", 200, 5)], &[]), bar_lines),
+        ("일봉 거래량 2,900일 신고거래량이 최근 20일 안", screen("D", &[("volume", 2_900, 20)], &[]), bar_lines),
+        ("주봉 종가 52주 신고가가 최근 4주 안", screen("W", &[("close", 52, 4)], &[]), bar_lines),
+        ("월봉 고가 120개월 신고가가 이번 달", screen("M", &[("high", 120, 1)], &[]), bar_lines),
         (
             "일봉 20일 전 대비 +10% 이상이면서 주봉 거래량 급증, 일봉 고점 거리, 월봉 거래대금 범위",
             every(vec![
@@ -1210,10 +1662,27 @@ async fn a_screen_over_4000_stocks_with_thousands_of_bars_answers_within_2_secon
                 near_extreme("D", 1, "high", 250, 30.0),
                 value_range("M", 1, "traded_value", Some(1_000_000.0), None),
             ]),
+            bar_lines,
         ),
-        ("시가총액 1,000억 원 이상", every(vec![market_cap(Some(100_000_000_000.0), None)])),
+        ("시가총액 1,000억 원 이상", every(vec![market_cap(Some(100_000_000_000.0), None)]), bar_lines),
+        (
+            "지표 여덟 종류와 봉 조건 둘의 일·주·월봉 10줄",
+            every(vec![
+                indicator("ma_position", "D", 1, json!({"field": "close", "method": "sma", "length": 20, "side": "above"})),
+                indicator("ma_alignment", "D", 20, json!({"method": "sma", "lengths": [5, 20, 60, 120], "order": "bullish"})),
+                indicator("ma_cross", "D", 60, json!({"method": "ema", "fast": null, "slow": 20, "direction": "up"})),
+                indicator("rsi", "D", 1, json!({"length": 14, "test": {"kind": "range", "min": 30.0, "max": null}})),
+                indicator("macd", "W", 26, json!({"fast": 12, "slow": 26, "signal": 9, "test": {"kind": "signal_cross", "direction": "up"}})),
+                indicator("stochastic", "D", 5, json!({"k": 5, "d": 3, "smooth": 3, "test": {"kind": "range", "min": 20.0, "max": null}})),
+                indicator("bollinger", "M", 24, json!({"length": 20, "k": 1.0, "test": {"kind": "outside", "side": "above"}})),
+                indicator("ichimoku", "W", 1, json!({"conversion": 9, "base": 26, "spanB": 52, "displacement": 26, "test": {"kind": "cloud", "side": "above"}})),
+                near_extreme("D", 1, "high", 250, 30.0),
+                change("D", 5, 20, Some(-50.0), None),
+            ]),
+            Duration::from_secs(3),
+        ),
     ];
-    for (label, screen) in &screens {
+    for (label, screen, limit) in &screens {
         let mut took = Vec::new();
         let mut result = Value::Null;
         for _ in 0..3 {
@@ -1225,7 +1694,7 @@ async fn a_screen_over_4000_stocks_with_thousands_of_bars_answers_within_2_secon
         eprintln!("{label}: {took:?}, 결과 {rows}종목");
         assert_eq!((result["universe"].clone(), result["excluded"].clone()), (json!(LARGE_STOCKS), excluded(0, 0)), "{label}");
         assert!(rows > 0, "{label}: 판정이 실제로 돌았다면 맞는 종목이 있다");
-        assert!(took.iter().all(|t| *t < Duration::from_secs(2)), "{label}: {took:?}");
+        assert!(took.iter().all(|t| t < limit), "{label}: {took:?}");
     }
     server.stop().await;
 }

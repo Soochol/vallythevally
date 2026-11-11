@@ -1,5 +1,6 @@
 mod engine;
 mod exact;
+mod indicator;
 mod line;
 mod market_cap;
 pub mod store;
