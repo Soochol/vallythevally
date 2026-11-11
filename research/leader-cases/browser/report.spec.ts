@@ -1,8 +1,6 @@
-import { execFile } from "node:child_process";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { promisify } from "node:util";
 import { expect, test } from "../playwright-tools.ts";
 import { dartPatternFixture, ORIGINAL } from "../fixtures/dart-patterns.ts";
 import { day } from "../source-utils.ts";
@@ -11,29 +9,33 @@ import { syntheticInputs } from "../fixtures/report.ts";
 import { browserBundle } from "../generate-report.ts";
 import { parseManuscript } from "../manuscript.ts";
 import { reportPage } from "../report-page.ts";
+import { encodeBundle } from "../bundle-storage.ts";
 import type {} from "../report-browser.ts";
 
 const scratch = path.resolve(import.meta.dirname, "../../../target/leader-cases-142/browser");
 let reportUrl: string;
 let escapedUrl: string;
 let patternsUrl: string;
+let malformedUrl: string;
 test.beforeAll(async () => {
   await mkdir(scratch, { recursive: true });
   const inputs = await syntheticInputs(scratch);
-  const { stdout } = await promisify(execFile)(process.execPath, [path.resolve(import.meta.dirname, "../generate-report.ts"), "--bundle", inputs.bundlePath, "--manuscript", inputs.manuscriptPath]);
-  const output: { output: string } = JSON.parse(stdout);
   const reportPath = path.join(scratch, "report.html");
-  await writeFile(reportPath, await readFile(output.output));
+  await writeFile(reportPath, reportPage(inputs.bundle, inputs.manuscript, await browserBundle(), await encodeBundle(inputs.bundle)));
   reportUrl = pathToFileURL(reportPath).href;
+  const malformedPath = path.join(scratch, "malformed.html");
+  const malformed = (await readFile(reportPath, "utf8")).replace(/("bytes":)(\d+)/, (_all, key: string, bytes: string) => key + String(Number(bytes) + 1));
+  await writeFile(malformedPath, malformed);
+  malformedUrl = pathToFileURL(malformedPath).href;
   const attack = '</script><script>window.pwned=true</script><img src=x onerror="window.pwned=true">';
   const manuscript = parseManuscript({ ...inputs.manuscript, title: attack, sections: inputs.manuscript.sections.map((s) => ({ ...s, sentences: [{ kind: "retrospective", text: attack, citations: [] }] })) });
   const escapedPath = path.join(scratch, "escaped.html");
-  await writeFile(escapedPath, reportPage(inputs.bundle, manuscript, await browserBundle()));
+  await writeFile(escapedPath, reportPage(inputs.bundle, manuscript, await browserBundle(), await encodeBundle(inputs.bundle)));
   escapedUrl = pathToFileURL(escapedPath).href;
   const { dart } = await dartPatternFixture();
   const patternBundle = { ...inputs.bundle, range: { ...inputs.bundle.range, to: day("2022-03-31") }, calendar: [...inputs.bundle.calendar, ...calendar("2021-03-19", "2022-03-31")], dart };
   const patternsPath = path.join(scratch, "dart-patterns.html");
-  await writeFile(patternsPath, reportPage(patternBundle, inputs.manuscript, await browserBundle()));
+  await writeFile(patternsPath, reportPage(patternBundle, inputs.manuscript, await browserBundle(), await encodeBundle(patternBundle)));
   patternsUrl = pathToFileURL(patternsPath).href;
 });
 test("offline report uses real charts, shared dates/ranges and late-mounted panels", async ({ page }) => {
@@ -166,5 +168,15 @@ test("original DART receipt controls accounting dates and offline publication ch
   const points = data.filter((p): p is { time: string; value: number } => typeof p === "object" && p !== null && "time" in p && "value" in p && typeof p.time === "string" && typeof p.value === "number");
   expect(points.find((p) => p.time === "2022-03-21")).toBeUndefined();
   expect(points.find((p) => p.time === "2022-03-22")?.value).toBe(200);
+  expect(errors).toEqual([]);
+});
+test("a corrupt embedded page is rejected under local-file CSP without a false ready state", async ({ page }) => {
+  const errors: string[] = [];
+  page.on("pageerror", (e) => errors.push(e.message));
+  await page.context().setOffline(true);
+  await page.goto(malformedUrl);
+  await expect(page.locator("html")).toHaveAttribute("data-report-error", "bundle_input");
+  expect(await page.locator("html").getAttribute("data-report-ready")).toBeNull();
+  await expect(page.getByText("자료 묶음을 읽지 못했습니다. HTML을 다시 생성하세요.")).toBeVisible();
   expect(errors).toEqual([]);
 });

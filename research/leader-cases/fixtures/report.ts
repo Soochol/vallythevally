@@ -4,6 +4,7 @@ import { buildBundle } from "../build-bundle.ts";
 import { parseManuscript, SECTION_TITLES, type Manuscript } from "../manuscript.ts";
 import { day } from "../source-utils.ts";
 import { CODE, CORP, FAKE_KEY, fixtureServer, MAP } from "./sources.ts";
+import { writeBundle } from "../bundle-storage.ts";
 
 export function syntheticManuscript(): Manuscript {
   const evidence = [{ kind: "retrospective", text: "합성 자료의 날짜를 입력한 시험 근거이며 실제 투자 해석이 아니다.", citations: [] }] as const;
@@ -32,7 +33,7 @@ export async function syntheticInputs(directory: string) {
     bundle.limitations.unshift("SYNTHETIC FIXTURE ONLY: every price, account and narrative is fabricated for testing.");
     const manuscript = syntheticManuscript();
     const bundlePath = path.join(directory, "bundle.json"), manuscriptPath = path.join(directory, "manuscript.json");
-    await writeFile(bundlePath, JSON.stringify(bundle));
+    await writeBundle(bundlePath, bundle);
     await writeFile(manuscriptPath, JSON.stringify(manuscript, null, 2));
     return { bundle, manuscript, bundlePath, manuscriptPath };
   } finally { await server.close(); }

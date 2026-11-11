@@ -1,11 +1,11 @@
 #!/usr/bin/env node
-import { mkdir, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
 import { buildBundle, type BundleOptions } from "./build-bundle.ts";
 import { DART_BASE, readDartKey } from "./dart-source.ts";
 import { day, kstDay, publicBase } from "./source-utils.ts";
+import { documentChunks, encodeBundle, writeAtomic } from "./bundle-storage.ts";
 
 const USAGE = `node collect-bundle.ts --server <http(s)://host:port> --code <6자리 종목코드> --corp-code <DART 8자리 고유번호> [--from YYYY-MM-DD] [--to YYYY-MM-DD] [--sector-map path]
 OpenDART 키는 VALLY_ENV_FILE 파일의 OPENDART_API_KEY만 읽습니다. 키가 없으면 자료 한계를 기록합니다.
@@ -31,19 +31,20 @@ export async function main(args: string[], env: NodeJS.ProcessEnv = process.env)
     process.stderr.write(`설정이 올바르지 않거나 키 파일을 읽지 못했습니다.\n${USAGE}`);
     return 2;
   }
+  let stage = "collection";
   try {
     const bundle = await buildBundle(options);
     const directory = path.resolve(import.meta.dirname, "../../data/leader-cases", options.code);
-    await mkdir(directory, { recursive: true });
     const output = path.join(directory, "bundle.json");
-    const temporary = path.join(directory, `bundle.${process.pid}.tmp`);
-    await writeFile(temporary, JSON.stringify(bundle, null, 2) + "\n");
-    await rename(temporary, output);
+    stage = "bundle_serialization";
+    const document = await encodeBundle(bundle);
+    stage = "bundle_output";
+    await writeAtomic(output, documentChunks(document));
     const targetOk = bundle.prices.some((p) => p.kind === "ok" && p.data.symbol === options.code);
     process.stdout.write(JSON.stringify({ output, missingSources: bundle.missing.length, targetPricesAvailable: targetOk }) + "\n");
     return targetOk ? 0 : 1;
   } catch {
-    process.stderr.write("자료 묶음을 만들지 못했습니다. 원천 형식·섹터 지도·출력 권한을 확인하세요.\n");
+    process.stderr.write(`자료 묶음을 만들지 못했습니다: ${stage}\n`);
     return 1;
   }
 }

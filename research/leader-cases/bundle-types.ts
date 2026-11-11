@@ -216,7 +216,7 @@ export interface ValuationDay {
   pbrBands: Array<{ multiple: number; price: Measure }>;
 }
 export interface Bundle {
-  schemaVersion: 1;
+  schemaVersion: 2;
   generatedAt: string;
   code: string;
   range: { from: Day; to: Day };

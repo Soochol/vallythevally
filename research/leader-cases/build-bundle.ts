@@ -58,7 +58,7 @@ export async function buildBundle(options: BundleOptions, client: HttpClient = h
   }
   const rangeCalendar = calendar.filter((d) => d >= from && d <= to);
   return {
-    schemaVersion: 1, generatedAt, code, range: { from, to }, calendar: rangeCalendar, sectorMap: map, symbol, currentFundamentals, prices, sectors,
+    schemaVersion: 2, generatedAt, code, range: { from, to }, calendar: rangeCalendar, sectorMap: map, symbol, currentFundamentals, prices, sectors,
     technical: target ? technicalWeeks(target, market, sector).filter((w) => w.day >= from) : [],
     markets: [kospi, kosdaq].flatMap((p) => p ? [{ symbol: p.symbol, days: marketRegimes(p.daily).filter((d) => d.day >= from) }] : []),
     foreignHoldings, investorNetShares, institutionCumulative: accumulateInstitutions(investorNetShares, rangeCalendar), dart, fred, valuation: valuation.filter((v) => v.day >= from),
