@@ -1,6 +1,6 @@
 # 주도 사례 자료 묶음
 
-#141 도구는 #137의 자료를 JSON 하나로 만든다. #142는 `bundle-types.ts`의 `Bundle`을 읽어 HTML을 만들 수 있다. 원고의 탄생일·정점·소멸일은 이 도구가 정하지 않는다.
+#141 도구는 #137의 자료를 JSON 하나로 만든다. #173부터 파일은 압축 페이지 문서인 `BundleDocument`이고, `readBundle`이 이를 검증해 `bundle-types.ts`의 논리 `Bundle`로 복원한다. #142는 이 자료로 HTML을 만든다. 원고의 탄생일·정점·소멸일은 이 도구가 정하지 않는다.
 
 #142의 단일 HTML 생성기와 원고·차트 계약은 [REPORT.md](REPORT.md)에 있다. 합성 입력으로 실행하는 명령과 브라우저 행동 시험도 그 문서를 따른다.
 
@@ -32,9 +32,13 @@ OpenDART 키는 `VALLY_ENV_FILE`이 가리키는 파일의 `OPENDART_API_KEY` �
 
 ## 자료 계약
 
+논리 `Bundle`과 저장용 `BundleDocument`는 모두 버전 2이며 서로 다른 타입이다. 파일의 JSON 루트는 manifest와 페이지를 순서대로 담은 배열이다. `bundle-storage.ts`의 `readBundle(path)`를 사용한다. 파일 전체를 읽어 `JSON.parse`한 값은 논리 Bundle이 아니다. 버전 1 파일은 새 수집기로 다시 만든다. 재무·TTM·시점·원천 계약은 그대로다. 압축은 원문 근거의 중복 순서까지 손실 없이 보존하며, 최종 공시 목록에서 근거를 재구성하지 않는다.
+
+페이지 형식·경계 검증·크기 재현은 [SIZE.md](SIZE.md)를 따른다. `collect-bundle` 오류는 `collection`, `bundle_serialization`, `bundle_output` 단계를 구별한다. 오류에 원천 URL·응답·키를 넣지 않는다. 직렬화나 쓰기에 실패하면 기존 정상 파일은 유지하고 이 실행이 만든 임시 파일을 지운다.
+
 | 필드 | 내용과 읽는 규칙 |
 | --- | --- |
-| `schemaVersion` | 현재 `1`. 변경 시 소비자는 버전을 확인한다. |
+| `schemaVersion` | 논리 Bundle은 현재 `2`. 원고의 버전 1과 별개다. |
 | `range`, `calendar` | 한국 날짜와 KRX 지수의 확정 일봉 날짜 합집합. 두 지수를 모두 못 받으면 달력을 추측하지 않는다. |
 | `prices` | 대상·섹터 지도 모든 종목·`IDX:001`·`IDX:101`의 성공 또는 실패. 성공에는 페이지 수, 일봉·주봉, 첫 관측일, 현재 봉 제외 여부가 있다. |
 | `symbol` | 생성 타입 `SymbolInfo`를 검증한 대상 종목의 시장·종류. 상대강도 지수는 코스피 종목이면 코스피, 코스닥이면 코스닥이다. |

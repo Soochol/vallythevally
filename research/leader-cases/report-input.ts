@@ -1,6 +1,7 @@
 import { BALANCE_KEYS, FLOW_KEYS, type Bundle, type FinancialMetrics, type Measure, type SourceResult, type TtmMeasure } from "./bundle-types.ts";
 import { array, boolean, choice, code, date, finite, link, literal, nullable, object, ordered, record, string, union, type Parser } from "./input-schema.ts";
 import { parseSectorMap } from "./sector-map.ts";
+import { decodeDocument, type BundleDocument, type InflatePage } from "./bundle-document.ts";
 
 const reason: Parser<string> = (input) => { const value = string(input); if (!value.trim()) throw new Error("missing_reason"); return value; };
 const nullValue = union(object({ value: finite, reason: literal(null) }), object({ value: literal(null), reason }));
@@ -22,8 +23,8 @@ function history<T>(row: Parser<T>) {
 }
 const n = nullable(finite);
 const bar = { o: finite, h: finite, l: finite, c: finite, v: finite };
-const bundle: Parser<Bundle> = object({
-  schemaVersion: literal(1), generatedAt: string, code, range: object({ from: date, to: date }), calendar: array(date), sectorMap: parseSectorMap,
+const bundleShape = {
+  schemaVersion: literal(2), generatedAt: string, code, range: object({ from: date, to: date }), calendar: array(date), sectorMap: parseSectorMap,
   symbol: source(object({ code: string, name: string, kind: choice(["index", "common", "preferred", "etf", "reit"]), market: choice(["kospi", "kosdaq"]), nxtEnabled: boolean })),
   currentFundamentals: source(object({ fetchedAt: string, historical: literal(false), values: object({ symbol: string, marketCap: n, listedShares: n, per: n, pbr: n, roe: n, eps: n, bps: n, foreignExhaustionRate: n, high52w: n, low52w: n }) })),
   prices: array(source(object({ symbol: string, daily: array(object({ ...bar, t: finite, day: date })), weekly: array(object({ ...bar, weekStart: date, observedOn: date, turnoverWon: nullValue })), firstObservedOn: nullable(date), source: string, pages: finite, currentExcluded: boolean }))),
@@ -39,10 +40,17 @@ const bundle: Parser<Bundle> = object({
   returnDecomposition: object({ from: nullable(date), to: nullable(date), priceFactor: n, earningsFactor: nullValue, perFactor: nullValue }),
   corrections: array(object({ from: date, trough: date, recoveredOn: nullable(date), depthPct: finite, observations: finite, volume: finite })),
   missing: array(object({ source: string, reason: string })), limitations: array(string),
-});
+} satisfies { [K in keyof Bundle]: Parser<Bundle[K]> };
+const bundle: Parser<Bundle> = object(bundleShape);
 
 export function parseBundle(input: unknown): Bundle {
-  const result = bundle(input);
+  return checkedBundle(bundle(input));
+}
+export async function parseDocumentBundle(document: BundleDocument, inflate: InflatePage): Promise<Bundle> {
+  const result = await decodeDocument(document, inflate, (key, value) => bundleShape[key](value));
+  return checkedBundle(result as Bundle);
+}
+function checkedBundle(result: Bundle): Bundle {
   if (result.range.from > result.range.to) throw new Error("invalid_bundle_range");
   ordered(result.calendar, (d) => d);
   for (const p of result.prices) if (p.kind === "ok") { ordered(p.data.daily, (b) => b.day); ordered(p.data.weekly, (b) => b.weekStart); }

@@ -11,6 +11,8 @@
     "collect": "node collect-bundle.ts",
     "report": "node generate-report.ts",
     "fixture:report": "node fixtures/write-report-inputs.ts",
+    "diagnose:size": "node --max-old-space-size=1536 diagnose-size.ts",
+    "verify:size": "node verify-size.ts",
     "test:report": "node --test report.test.ts",
     "test:browser": "../../web/node_modules/.bin/playwright test -c playwright.config.ts",
     "typecheck": "../../web/node_modules/.bin/tsc -p tsconfig.json"

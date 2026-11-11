@@ -16,6 +16,12 @@ node research/leader-cases/generate-report.ts \
 
 출력은 스크립트가 있는 worktree의 `data/leader-cases/<code>/report.html`이다. 종목코드를 검증하고 원고와 묶음의 코드가 같을 때만 쓴다. 임시 파일을 같은 디렉터리에 쓴 뒤 이름을 바꾼다. 잘못된 입력은 종료 코드 2이며 기존 HTML을 덮어쓰지 않는다. 자료와 생성 HTML은 기존 `data/` 제외 규칙을 따른다.
 
+#173부터 자료 입력은 버전 2 `BundleDocument`다. Node는 파일을 한 행씩 읽고 페이지별로 압축을 풀어 계약을 검증한다. HTML은 동일한 manifest와 독립 페이지들을 여러 비실행 JSON script 요소에 내장한다. 생성기와 브라우저 모두 전체 논리 Bundle을 JSON 문자열 하나로 합치지 않는다. Chromium의 `DecompressionStream("gzip")`는 `file://`와 이 CSP에서 검증했다. 외부 조회나 `fetch`는 필요 없다. 페이지 계약과 대표 크기 검증은 [SIZE.md](SIZE.md)에 있다.
+
+자료 근거는 펼칠 때만 DOM으로 만든다. 객체는 필드별로, 큰 배열은 128행 묶음으로 펼친다. 공시일 축의 각 날짜를 펼치면 수치와 출처 링크가 나타나며 TTM 후보는 다시 펼쳐 볼 수 있다. 같은 접수번호가 필요한 여러 수치에서도 원래 근거를 표시한다. 압축 페이지는 표시용 DOM과 별개로 HTML 안에 모두 남는다.
+
+입력 오류는 `manuscript_input`, `bundle_input`, 생성·출력 오류는 `html_generation`, `html_output`으로 구별한다. 원천 문자열이나 입력의 오류 내용을 표준 오류에 되풀이하지 않는다.
+
 합성 예제는 기존 자료 수집기의 로컬 HTTP fixture를 통과한 `Bundle`이다. 실제 시세나 원고는 없다.
 
 ```sh
