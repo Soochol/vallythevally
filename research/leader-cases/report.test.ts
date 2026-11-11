@@ -12,6 +12,9 @@ import { accountingPlots, calendarFor, publishedSample, reportPanels, sample, ty
 import { plotRuns } from "./chart-data.ts";
 import { day } from "./source-utils.ts";
 import { jsonForHtml, reportPage } from "./report-page.ts";
+import { encodeBundle, inflateNodePage, writeBundle } from "./bundle-storage.ts";
+import { parseDocumentBundle } from "./report-input.ts";
+import { parseManifest, parsePage } from "./bundle-document.ts";
 
 const root = path.resolve(import.meta.dirname, "../../target/leader-cases-142/node");
 async function scratch() { await mkdir(root, { recursive: true }); return mkdtemp(path.join(root, "run-")); }
@@ -48,15 +51,23 @@ test("single HTML CLI embeds the real bundle contract, escapes executable text a
   await writeFile(badPath, JSON.stringify({ ...fixture.manuscript, schemaVersion: 2 }));
   const invalid = await runCli(["--bundle", fixture.bundlePath, "--manuscript", badPath]);
   assert.equal(invalid.code, 2);
+  assert.match(invalid.stderr, /manuscript_input/);
   assert.equal(await readFile(output, "utf8"), html);
-  assert.throws(() => parseBundle({ ...fixture.bundle, schemaVersion: 2 }), /schemaVersion/);
+  const badBundle = path.join(path.dirname(badPath), "bad-bundle.json");
+  await writeFile(badBundle, '{"secret":"SYNTHETIC-DO-NOT-ECHO",');
+  const invalidBundle = await runCli(["--bundle", badBundle, "--manuscript", fixture.manuscriptPath]);
+  assert.equal(invalidBundle.code, 1);
+  assert.match(invalidBundle.stderr, /bundle_input/);
+  assert.ok(!invalidBundle.stderr.includes("SYNTHETIC-DO-NOT-ECHO"));
+  assert.equal(await readFile(output, "utf8"), html);
+  assert.throws(() => parseBundle({ ...fixture.bundle, schemaVersion: 1 }), /schemaVersion/);
   assert.throws(() => parseBundle({ ...fixture.bundle, calendar: [...fixture.bundle.calendar].reverse() }), /ascending/);
   assert.throws(() => parseBundle({ ...fixture.bundle, valuation: [{ ...fixture.bundle.valuation[0], per: { value: 3, reason: null } }] }), /valuation/);
   const firstDisclosure = fixture.bundle.dart.disclosures.kind === "ok" ? fixture.bundle.dart.disclosures.data[0] : {};
   assert.throws(() => parseBundle({ ...fixture.bundle, dart: { ...fixture.bundle.dart, disclosures: { kind: "ok", source: "fixture", data: [{ ...firstDisclosure, url: "javascript:alert(1)" }] } } }), /dart/);
   const script = '</script><script>window.pwned=true</script><img src=x onerror="window.pwned=true">';
   const manuscript = parseManuscript({ ...fixture.manuscript, title: script });
-  const escaped = reportPage(fixture.bundle, manuscript, "");
+  const escaped = [...reportPage(fixture.bundle, manuscript, "", await encodeBundle(fixture.bundle))].join("");
   assert.ok(!escaped.includes(script));
   assert.ok(jsonForHtml({ text: script }).includes("\\u003c/script"));
   assert.equal(JSON.parse(jsonForHtml({ text: script })).text, script);
@@ -102,12 +113,17 @@ test("HTML consumer retains original-receipt evidence outside the final disclosu
   const inputs = await syntheticInputs(await scratch());
   const { dart } = await dartPatternFixture();
   const bundle = parseBundle({ ...inputs.bundle, range: { ...inputs.bundle.range, to: "2022-03-31" }, calendar: [...inputs.bundle.calendar, ...calendar("2021-03-19", "2022-03-31")], dart });
-  await writeFile(inputs.bundlePath, JSON.stringify(bundle));
+  await writeBundle(inputs.bundlePath, bundle);
   const result = await runCli(["--bundle", inputs.bundlePath, "--manuscript", inputs.manuscriptPath]);
   assert.equal(result.code, 0, result.stderr);
   const html = await readFile(JSON.parse(result.stdout).output, "utf8");
-  assert.ok(html.includes(`${ORIGINAL} · 2022-03-21`));
-  assert.ok(html.includes(`주식의 총수 ${COMMON}`));
+  const metadata = JSON.parse(/<script id="report-data" type="application\/json">(.*?)<\/script>/.exec(html)![1]!);
+  const pages = [...html.matchAll(/<script class="bundle-page" type="application\/json">(.*?)<\/script>/g)].map((m) => parsePage(JSON.parse(m[1]!)));
+  const decoded = await parseDocumentBundle({ manifest: parseManifest(metadata.manifest), pages }, inflateNodePage);
+  assert.deepEqual(decoded.dart, bundle.dart);
+  assert.ok(decoded.dart.disclosures.kind === "ok" && !decoded.dart.disclosures.data.some((d) => d.receipt === ORIGINAL));
+  assert.equal(decoded.dart.financials.annual[1]!.single.operatingProfit.sources[0]!.receipt, ORIGINAL);
+  assert.equal(decoded.dart.financials.annual[0]!.commonShares.sources[0]!.accountName, `주식의 총수 ${COMMON}`);
   const op = reportPanels(bundle).find((p) => p.id === "financial-operating-profit")!.plots[0]!;
   assert.equal(op.samples.findLast((s) => s.day <= "2022-03-21")?.value ?? null, null);
   assert.equal(op.samples.find((s) => s.day === "2022-03-22")?.value, 200);

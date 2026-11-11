@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readBundle } from "./bundle-storage.ts";
 import { spawn } from "node:child_process";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -299,8 +300,8 @@ test("entire executable CLI produces the typed bundle under ignored worktree dat
   const output = path.resolve(import.meta.dirname, `../../data/leader-cases/${CODE}/bundle.json`);
   assert.equal(fields(JSON.parse(stdout)).output, output);
   const serialized = await readFile(output, "utf8");
-  const bundle = fields(JSON.parse(serialized));
-  assert.equal(bundle.schemaVersion, 1);
+  const bundle = fields(await readBundle(output));
+  assert.equal(bundle.schemaVersion, 2);
   assert.equal(bundle.code, CODE);
   assert.equal(fields(bundle.range).from, "2016-01-01");
   assert.ok(list(bundle.technical).length > 50);

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readBundle } from "./bundle-storage.ts";
 import { spawn } from "node:child_process";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -150,7 +151,7 @@ test("review regression: child CLI still writes other source results when the DA
   const output = path.resolve(import.meta.dirname, `../../data/leader-cases/${code}/bundle.json`);
   assert.equal(fields(JSON.parse(stdout)).output, output);
   const serialized = await readFile(output, "utf8");
-  const bundle = fields(JSON.parse(serialized));
+  const bundle = fields(await readBundle(output));
   const dart = fields(bundle.dart);
   assert.equal(fields(fields(dart.identity).verification).kind, "mismatch");
   assert.deepEqual(fields(dart.financials).quarters, []);

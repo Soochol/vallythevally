@@ -1,8 +1,11 @@
 import { CandlestickSeries, createChart, CrosshairMode, HistogramSeries, LineSeries, LineType, type IChartApi, type ISeriesApi, type SeriesType, type Time, type IRange, type LogicalRange } from "lightweight-charts";
-import type { Bundle } from "./bundle-types.ts";
-import type { Manuscript } from "./manuscript.ts";
 import { accountingPlots, calendarFor, FINANCIAL_FIELDS, reportPanels, type Panel } from "./report-model.ts";
 import { plotRuns } from "./chart-data.ts";
+import { inflateBrowserPage, parseManifest, parsePage } from "./bundle-document.ts";
+import { fields } from "./source-utils.ts";
+import { parseDocumentBundle } from "./report-input.ts";
+import { parseManuscript } from "./manuscript.ts";
+import { mountEvidence } from "./report-evidence.ts";
 
 interface LiveChart {
   chart: IChartApi;
@@ -24,8 +27,12 @@ interface Inspection {
 }
 declare global { interface Window { leaderReport: { inspect: () => Inspection[] } } }
 
-const payload: { bundle: Bundle; manuscript: Manuscript } = JSON.parse(document.getElementById("report-data")!.textContent!);
-const { bundle, manuscript } = payload;
+async function main() {
+const payload = fields(JSON.parse(document.getElementById("report-data")!.textContent!));
+const pages = [...document.querySelectorAll("script.bundle-page")].map((node) => parsePage(JSON.parse(node.textContent!)));
+const bundle = await parseDocumentBundle({ manifest: parseManifest(payload.manifest), pages }, inflateBrowserPage);
+const manuscript = parseManuscript(payload.manuscript);
+mountEvidence(bundle);
 const panels = reportPanels(bundle);
 const calendar = calendarFor(panels, bundle, manuscript);
 const observationDays = [...new Set([...bundle.calendar, ...bundle.prices.flatMap((p) => p.kind === "ok" ? p.data.daily.map((d) => d.day) : [])])].sort();
@@ -217,3 +224,8 @@ function accounting() {
 accountingSelect?.addEventListener("change", accounting); fieldSelect.addEventListener("change", accounting); accounting();
 window.leaderReport = { inspect: () => [...charts].map(([id, live]) => ({ id, range: live.chart.timeScale().getVisibleRange(), cursor: live.linked ? cursor : null, cursorX: cursor ? live.chart.timeScale().timeToCoordinate(cursor) : null, milestones: milestones.map((m) => ({ day: m.day, x: live.chart.timeScale().timeToCoordinate(m.day) })), series: live.series.map((s) => ({ title: s.title, data: s.api.data() })) })) };
 document.documentElement.dataset.reportReady = "true";
+}
+void main().catch(() => {
+  document.documentElement.dataset.reportError = "bundle_input";
+  const message = document.createElement("p"); message.textContent = "자료 묶음을 읽지 못했습니다. HTML을 다시 생성하세요."; document.querySelector("main")!.prepend(message);
+});
