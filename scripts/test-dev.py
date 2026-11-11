@@ -69,6 +69,15 @@ class DevCacheTest(unittest.TestCase):
         self.assertNotEqual(key, dev.fingerprint(second, {"rustc": "different"}, False, {}))
         self.assertNotEqual(key, dev.fingerprint(second, {"rustc": "same"}, False, {"RUSTFLAGS": "-C opt-level=1"}))
         self.assertNotEqual(key, dev.fingerprint(second, {"rustc": "same"}, False, {}, ("vally-server",)))
+        self.assertEqual(key, dev.fingerprint(second, {"rustc": "same"}, False, {"CARGO_TARGET_DIR": str(second / "target"), "CARGO_BUILD_JOBS": "8"}))
+
+    def test_custom_target_layout_is_rejected_before_reusing_binaries(self):
+        with self.assertRaisesRegex(ValueError, "CARGO_BUILD_TARGET"):
+            dev.require_default_target(self.root, {"CARGO_BUILD_TARGET": "x86_64-unknown-linux-gnu"})
+        (self.root / ".cargo").mkdir()
+        (self.root / ".cargo/config.toml").write_text('[build]\ntarget = "x86_64-unknown-linux-gnu"\n')
+        with self.assertRaisesRegex(ValueError, "target 설정"):
+            dev.require_default_target(self.root, {})
 
     def test_binaries_restore_to_new_worktree_and_corruption_rebuilds(self):
         calls = []

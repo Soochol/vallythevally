@@ -20,6 +20,7 @@ import urllib.request
 
 BINARIES = ("vally-server", "fake-kiwoom")
 BUILD_ENV_PREFIXES = ("CARGO_", "RUST", "CC", "CXX", "AR", "CFLAGS", "CPPFLAGS", "LDFLAGS", "SDKROOT", "MACOSX_")
+LOCAL_BUILD_ENV = {"CARGO_TARGET_DIR", "CARGO_BUILD_JOBS", "CCACHE_DIR", "CCACHE_BASEDIR"}
 
 
 def output(args, root):
@@ -101,6 +102,22 @@ def source_files(directory):
                 yield path
 
 
+def cargo_configs(root, environment):
+    cargo_home = Path(environment.get("CARGO_HOME", Path.home() / ".cargo")).expanduser().resolve()
+    paths = {parent / ".cargo" / name for parent in (root, *root.parents) for name in ("config", "config.toml")}
+    paths.update(cargo_home / name for name in ("config", "config.toml"))
+    return sorted(path for path in paths if path.is_file())
+
+
+def require_default_target(root, environment):
+    if environment.get("CARGO_BUILD_TARGET"):
+        raise ValueError("개발 캐시는 기본 호스트 출력 경로를 사용합니다. CARGO_BUILD_TARGET을 해제하세요")
+    for path in cargo_configs(root, environment):
+        config = tomllib.loads(path.read_text())
+        if "target" in config.get("build", {}) or "CARGO_BUILD_TARGET" in config.get("env", {}):
+            raise ValueError(f"개발 캐시는 사용자 target 설정을 지원하지 않습니다: {path}")
+
+
 def fingerprint(root, tools, bundled, environment, binaries=BINARIES):
     inputs = [root / "Cargo.toml", root / "Cargo.lock", root / "scripts/dev.py", root / "scripts/duckdb-prebuilt.json"]
     inputs.extend(path for name in ("rust-toolchain", "rust-toolchain.toml") if (path := root / name).is_file())
@@ -109,13 +126,10 @@ def fingerprint(root, tools, bundled, environment, binaries=BINARIES):
     for path in sorted(inputs):
         key.update(path.relative_to(root).as_posix().encode() + b"\0")
         key.update(bytes.fromhex(digest(path)))
-    cargo_home = Path(environment.get("CARGO_HOME", Path.home() / ".cargo")).expanduser().resolve()
-    configurations = {parent / ".cargo" / name for parent in root.parents for name in ("config", "config.toml")}
-    configurations.update(cargo_home / name for name in ("config", "config.toml"))
-    for path in sorted(configurations):
-        if path.is_file():
+    for path in cargo_configs(root, environment):
+        if path.parent != root / ".cargo":
             key.update(str(path).encode() + b"\0" + bytes.fromhex(digest(path)))
-    build_env = {name: value for name, value in environment.items() if name.startswith(BUILD_ENV_PREFIXES)}
+    build_env = {name: value for name, value in environment.items() if name.startswith(BUILD_ENV_PREFIXES) and name not in LOCAL_BUILD_ENV}
     key.update(json.dumps({"format": 1, "tools": tools, "bundled": bundled, "binaries": binaries, "environment": build_env}, sort_keys=True).encode())
     return key.hexdigest()
 
@@ -296,10 +310,8 @@ def main():
     cargo.add_argument("arguments", nargs=argparse.REMAINDER)
     args = parser.parse_args()
     root = Path(__file__).resolve().parent.parent
+    require_default_target(root, os.environ)
     tools = toolchain(root)
-    target = os.environ.get("CARGO_BUILD_TARGET")
-    if target and target != tools["host"]:
-        raise ValueError("개발 캐시는 호스트 빌드만 지원합니다. CARGO_BUILD_TARGET을 확인하세요")
     pin = load_pin(root)
     cache = cache_root(root)
     binaries = BINARIES if getattr(args, "with_fake", False) else BINARIES[:1]

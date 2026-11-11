@@ -48,6 +48,8 @@ python3 scripts/dev.py status --with-fake
 
 실행 파일 캐시 키는 workspace의 `crates/` 소스·시험 자료, `Cargo.toml`, `Cargo.lock`, `.cargo/` 및 상위·사용자 Cargo 설정, 개발 도구·DuckDB 고정값, Rust·Cargo·C/C++ 도구 체인과 빌드 환경을 포함한다. 각 크레이트의 `target` 안에 생긴 SQLx 시험 DB 등 빌드 출력, UI 파일과 Git 커밋 ID는 포함하지 않는다. 같은 소스가 다른 커밋·worktree에 있어도 재사용한다. 앱 서버 단독 준비와 가짜 키움을 포함한 준비는 별도 키다. 테스트 실행 파일은 worktree 사이에서 공유하지 않는다.
 
+도구가 정하는 `CARGO_TARGET_DIR`, 작업 수와 C/C++ 캐시 경로는 키에서 제외한다. 개발 명령은 각 worktree의 `target`과 작업 수 4를 사용한다. `CARGO_BUILD_TARGET`, Cargo 설정의 `build.target` 등 출력 경로를 바꾸는 사용자 target 설정은 실행 파일을 복원하기 전에 거절한다. 사용자 target 빌드는 일반 Cargo 명령을 사용한다.
+
 각 캐시 항목은 잠금 아래에서 임시 디렉터리에 준비한 뒤 완성된 상태로 게시한다. 내려받기·컴파일·복사 실패나 빌드 도중 입력 변경은 새 실행 파일 캐시를 게시하지 않는다. 기존 항목이 손상되면 체크섬을 확인해 다시 준비한다. 빌드가 실패하면 명령은 실패로 끝나며 다른 버전의 서버를 대신 실행하지 않는다.
 
 ## DuckDB 버전 갱신
