@@ -13,7 +13,7 @@ import type { ScreenPeriod } from "../src/api/generated/ScreenPeriod.ts";
 import type { SymbolKind } from "../src/api/generated/SymbolKind.ts";
 import type { UpdatePhase } from "../src/api/generated/UpdatePhase.ts";
 import { mulberry32, seedOf, SYMBOLS } from "./fakeMarket.ts";
-import type { Reply } from "./fakeUserData.ts";
+import { isScreen, type Reply } from "./fakeUserData.ts";
 
 export const FAKE_SCREENER_SCENARIOS = ["ready", "empty", "behind", "failing"] as const;
 export type FakeScreenerScenario = (typeof FAKE_SCREENER_SCENARIOS)[number];
@@ -77,32 +77,24 @@ const fail = (status: number, code: ApiErrorCode, message: string, reason: ApiEr
 });
 
 const isObject = (x: unknown): x is Record<string, unknown> => typeof x === "object" && x !== null && !Array.isArray(x);
-type NewHigh = Extract<Condition, { kind: "new_high" }>;
-type NewHighScreen = Omit<Screen, "conditions"> & { conditions: NewHigh[] };
-const isNewHigh = (x: unknown): x is NewHigh =>
-  isObject(x) && x.kind === "new_high" && (x.period === "D" || x.period === "W" || x.period === "M") && typeof x.field === "string" && Number.isInteger(x.n) && Number.isInteger(x.m);
-const isScreen = (x: unknown): x is NewHighScreen =>
-  isObject(x) &&
-  typeof x.id === "string" &&
-  typeof x.name === "string" &&
-  Array.isArray(x.markets) &&
-  Array.isArray(x.exclude) &&
-  Array.isArray(x.conditions) &&
-  x.conditions.length > 0 &&
-  x.conditions.every(isNewHigh);
+type BarCondition = Exclude<Condition, { kind: "market_cap" }>;
+const isBarCondition = (c: Condition): c is BarCondition => c.kind !== "market_cap";
 
-const matchChance = ({ n, m }: NewHigh) => Math.min(0.9, 0.3 + (4 * m) / n);
+const matchChance = (c: Condition) => {
+  if (c.kind === "new_high" || c.kind === "new_low") return Math.min(0.9, 0.3 + (4 * c.m) / c.n);
+  return isBarCondition(c) ? Math.min(0.9, 0.3 + 0.05 * c.m) : 0.5;
+};
 
-function resultOf(screen: NewHighScreen, asOf: KstDate, historyDone: number): ScreenerResult {
-  const period: ScreenPeriod = screen.conditions[0]?.period ?? "D";
+function resultOf(screen: Screen, asOf: KstDate, historyDone: number): ScreenerResult {
   const excludedKinds = new Set(screen.exclude.flatMap((k) => EXCLUDED_KIND[k] ?? []));
-  const universe = STOCKS.filter((s) => !excludedKinds.has(s.kind));
-  const longest = Math.max(...screen.conditions.map((c) => c.n));
-  const neededDays = Math.max(...screen.conditions.map((c) => c.n + c.m - 1)) * DAYS_PER_BAR[period];
+  const universe = STOCKS.filter((s) => !excludedKinds.has(s.kind) && (screen.markets.length === 0 || screen.markets.includes(s.market)));
+  const bars = screen.conditions.filter(isBarCondition);
+  const records = bars.flatMap((c) => (c.kind === "new_high" || c.kind === "new_low" ? [c] : []));
+  const neededDays = Math.max(0, ...records.map((c) => (c.n + c.m - 1) * DAYS_PER_BAR[c.period]));
   const excluded = { listedTooShort: 0, historyShort: 0, unconfirmed: 0 };
   const rows: ScreenerRow[] = [];
   for (const s of universe) {
-    if (s.years * BARS_PER_YEAR[period] < longest) {
+    if (records.some((c) => s.years * BARS_PER_YEAR[c.period] < c.n)) {
       excluded.listedTooShort++;
       continue;
     }
@@ -110,12 +102,13 @@ function resultOf(screen: NewHighScreen, asOf: KstDate, historyDone: number): Sc
       excluded.historyShort++;
       continue;
     }
-    const random = mulberry32(seedOf(`${s.code}:${asOf}:${period}:${JSON.stringify(screen.conditions)}`));
-    const hits = screen.conditions.map((c) => (random() < matchChance(c) ? Math.floor(random() * c.m) : null));
-    const first = hits[0];
-    if (first === undefined || first === null || hits.includes(null)) continue;
+    const random = mulberry32(seedOf(`${s.code}:${asOf}:${JSON.stringify(screen.conditions)}`));
+    const hits = screen.conditions.map((c) => (random() < matchChance(c) ? Math.floor(random() * (isBarCondition(c) ? c.m : 1)) : null));
+    if (hits.includes(null)) continue;
+    const first = bars[0];
+    const matchedDate = first ? barStart(first.period, asOf, hits[screen.conditions.indexOf(first)] ?? 0) : asOf;
     const changeRate = Math.round((random() - 0.35) * 1600) / 100;
-    rows.push({ symbol: s.code, name: s.name, close: s.close, changeRate, matchedDate: barStart(period, asOf, first) });
+    rows.push({ symbol: s.code, name: s.name, close: s.close, changeRate, matchedDate });
   }
   rows.sort((a, b) => (a.matchedDate === b.matchedDate ? (a.symbol < b.symbol ? -1 : 1) : a.matchedDate < b.matchedDate ? 1 : -1));
   return { asOf, universe: universe.length, excluded, rows };
