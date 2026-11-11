@@ -41,7 +41,7 @@ import {
 } from "../../lib/screener";
 import type { VenueTarget } from "../../lib/venue";
 import { addSymbols, listNameFrom, MAX_WATCHLISTS } from "../../lib/watchlist";
-import { useCell, useLayoutStore } from "../../stores/layout";
+import { type Slot, useCell, useLayoutStore } from "../../stores/layout";
 import { type Rerun, rerunReason, runOf, type ScreenRun, shownResult, useScreenerStore } from "../../stores/screener";
 import { useSelectionStore } from "../../stores/selection";
 import { serverNow, useServerClock } from "../../stores/serverClock";
@@ -64,7 +64,28 @@ const showCommandError = (e: unknown) => toast(`업데이트 명령을 보내지
 const editScreen = (id: string | null) => useSelectionStore.getState().openScreenEditor(id);
 const count = (n: number) => n.toLocaleString("ko-KR");
 
-let openingResult: SymbolCode | null = null;
+interface ResultOpen {
+  code: SymbolCode;
+  layoutId: string;
+  slot: Slot;
+  shown: SymbolCode | undefined;
+}
+
+let pendingOpen: ResultOpen | null = null;
+
+const shownIn = (slot: Slot): SymbolCode | undefined => useLayoutStore.getState().layout.cells.find((c) => c.slot === slot)?.symbol;
+
+function livePendingOpen(): ResultOpen | null {
+  const open = pendingOpen;
+  if (open === null) return null;
+  const unchanged =
+    useLayoutStore.getState().layout.id === open.layoutId && useSelectionStore.getState().activeSlot === open.slot && shownIn(open.slot) === open.shown;
+  return unchanged ? open : null;
+}
+
+const dropPendingOpen = () => {
+  pendingOpen = null;
+};
 
 async function venueTargetOf(queryClient: QueryClient, code: SymbolCode): Promise<VenueTarget> {
   try {
@@ -79,10 +100,11 @@ function useOpenResult() {
   return useCallback(
     async (code: SymbolCode) => {
       const slot = useSelectionStore.getState().activeSlot;
-      openingResult = code;
+      const open: ResultOpen = { code, layoutId: useLayoutStore.getState().layout.id, slot, shown: shownIn(slot) };
+      pendingOpen = open;
       const target = await venueTargetOf(queryClient, code);
-      if (openingResult !== code) return;
-      openingResult = null;
+      if (livePendingOpen() !== open) return;
+      pendingOpen = null;
       useLayoutStore.getState().setSymbol(slot, target);
       useSelectionStore.getState().setPhoneTab("chart");
     },
@@ -168,6 +190,7 @@ export function ScreenerPanel() {
     if (screen) void useScreenerStore.getState().run(screen).then(refresh);
   };
   useResultKeys(rows);
+  useEffect(() => dropPendingOpen, []);
   const band = status !== undefined && showsUpdateBand(status);
   return (
     <aside aria-label="스크리너" className="flex min-h-0 flex-1 flex-col">
@@ -202,7 +225,7 @@ function useResultKeys(rows: readonly ScreenerRow[]) {
       if (useSelectionStore.getState().dialog || isTypingTarget(e.target)) return;
       e.preventDefault();
       const step = e.key === "ArrowDown" ? 1 : -1;
-      const from = openingResult ?? active;
+      const from = livePendingOpen()?.code ?? active;
       const at = rows.findIndex((r) => r.symbol === from);
       const next = at < 0 ? (step === 1 ? 0 : rows.length - 1) : Math.min(rows.length - 1, Math.max(0, at + step));
       if (next !== at) void openResult(rows[next]!.symbol);

@@ -1,5 +1,5 @@
 import type { Locator, Page } from "@playwright/test";
-import { cell, chartOf, expect, SEARCH_BUTTON_TITLE, test } from "./harness";
+import { type App, cell, chartOf, expect, SEARCH_BUTTON_TITLE, test } from "./harness";
 
 test.use({ krxMarket: "20261106", clockStart: "20261109100000" });
 
@@ -52,6 +52,42 @@ async function expectCellOn(page: Page, row: Locator, label: string) {
 async function expectWatchlistOfResults(page: Page) {
   await expect(watchPanel(page).getByRole("button", { name: /^관심종목 목록: / })).toHaveAccessibleName(`관심종목 목록: ${SCREEN_NAME}`);
   await expect.poll(() => watchPanel(page).locator("li[data-code]").evaluateAll((li) => li.map((e) => e.getAttribute("data-code")))).toEqual(["110030", "110035", "110040", "110050"]);
+}
+
+const SEEDED_SCREEN = { id: "seeded", name: SCREEN_NAME, markets: [], exclude: ["etf"], conditions: [{ kind: "new_high", period: "D", m: 20, field: "high", n: 60 }] };
+const LATE_ANSWER_SETTLE_MS = 300;
+const phoneTabs = (page: Page) => page.getByRole("navigation", { name: "휴대폰 탭" });
+const openPhoneScreener = (page: Page) => phoneTabs(page).getByRole("button", { name: "스크리너" }).click();
+
+async function runSeededScreen(app: App, page: Page, openPanel: (page: Page) => Promise<void>) {
+  const seeded = await fetch(`${app.url}/api/screens`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ screens: [SEEDED_SCREEN], revision: 1 }) });
+  expect(seeded.status).toBe(200);
+  await page.goto("/");
+  await openPanel(page);
+  await expect(panel(page).getByRole("button", { name: `조건식: ${SCREEN_NAME}` })).toBeVisible();
+  await updateBand(page).getByRole("button", { name: "처음 받기" }).click();
+  await waitForUpdateToFinish(page, "11-06(금)");
+  await runButton(page).click();
+  await expect(rows(page)).toHaveCount(4);
+}
+
+async function holdSymbolInfo(page: Page, code: string) {
+  const path = `/api/symbols/${code}`;
+  let letGo = () => {};
+  const released = new Promise<void>((resolve) => (letGo = resolve));
+  await page.route(`**${path}`, async (route) => {
+    await released;
+    await route.continue();
+  });
+  return {
+    requested: page.waitForRequest((r) => new URL(r.url()).pathname === path),
+    release: async () => {
+      const finished = page.waitForEvent("requestfinished", (r) => new URL(r.url()).pathname === path);
+      letGo();
+      await finished;
+      await page.waitForTimeout(LATE_ANSWER_SETTLE_MS);
+    },
+  };
 }
 
 const savedTo = (page: Page, path: string) => page.waitForResponse((r) => r.request().method() === "PUT" && new URL(r.url()).pathname === path && r.ok());
@@ -294,6 +330,24 @@ test("패널 머리는 줄마다 그 줄의 봉 주기로 조건을 풀고, 시�
   await expect(scope).toHaveText("전 종목 대상");
 });
 
+test("결과를 연 뒤 종목 정보를 기다리는 사이 검색으로 다른 종목을 열면, 늦게 온 정보는 그 선택을 덮지 않고 다음 열기는 그대로 된다", async ({ app, page }) => {
+  await runSeededScreen(app, page, openScreener);
+  const held = await holdSymbolInfo(page, "110030");
+  await rows(page).nth(0).getByRole("button").click();
+  await held.requested;
+
+  await page.getByTitle(SEARCH_BUTTON_TITLE).click();
+  const search = page.getByRole("dialog", { name: "종목 검색" });
+  await search.getByRole("combobox", { name: "종목 검색" }).fill("110050");
+  await search.getByRole("option").filter({ hasText: "110050" }).click();
+  await expectCellOn(page, rows(page).nth(3), "가상관리 통합 일");
+
+  await held.release();
+  await expectCellOn(page, rows(page).nth(3), "가상관리 통합 일");
+  await rows(page).nth(1).getByRole("button").click();
+  await expectCellOn(page, rows(page).nth(1), "가상전자우 통합 일");
+});
+
 test.describe("20:00 뒤", () => {
   test.use({ krxMarket: "20261105", clockStart: "20261105203000" });
 
@@ -507,22 +561,29 @@ test.describe("휴대폰 390px", () => {
   test.use({ viewport: { width: 390, height: 844 } });
 
   test("스크리너 탭에서 찾은 행을 누르면 차트 탭으로 가서 칸의 종목만 바꾼다", async ({ app, page }) => {
-    const screen = { id: "phone-screen", name: SCREEN_NAME, markets: [], exclude: ["etf"], conditions: [{ kind: "new_high", period: "D", m: 20, field: "high", n: 60 }] };
-    const seeded = await fetch(`${app.url}/api/screens`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ screens: [screen], revision: 1 }) });
-    expect(seeded.status).toBe(200);
-    await page.goto("/");
-    const tabs = page.getByRole("navigation", { name: "휴대폰 탭" });
-    await tabs.getByRole("button", { name: "스크리너" }).click();
-    await expect(panel(page).getByRole("button", { name: `조건식: ${SCREEN_NAME}` })).toBeVisible();
-    await updateBand(page).getByRole("button", { name: "처음 받기" }).click();
-    await waitForUpdateToFinish(page, "11-06(금)");
-    await runButton(page).click();
-    await expect(rows(page)).toHaveCount(4);
-
+    await runSeededScreen(app, page, openPhoneScreener);
     await rows(page).nth(1).getByRole("button").click();
-    await expect(tabs.getByRole("button", { name: "차트" })).toHaveAttribute("aria-pressed", "true");
+    await expect(phoneTabs(page).getByRole("button", { name: "차트" })).toHaveAttribute("aria-pressed", "true");
     await expect(panel(page)).toBeHidden();
     await expect(cell(page)).toHaveAttribute("aria-label", "칸 1: 가상전자우 통합 일");
     await expect(chartOf(cell(page))).not.toHaveAttribute("data-bar-count", "0");
+  });
+
+  test("행을 누른 뒤 종목 정보를 기다리는 사이 다른 탭으로 가면, 늦게 온 정보는 차트 탭으로 끌고 가지 않고 칸도 바꾸지 않는다", async ({ app, page }) => {
+    await runSeededScreen(app, page, openPhoneScreener);
+    const held = await holdSymbolInfo(page, "110030");
+    await rows(page).nth(0).getByRole("button").click();
+    await held.requested;
+    await phoneTabs(page).getByRole("button", { name: "관심종목" }).click();
+    await expect(phoneTabs(page).getByRole("button", { name: "관심종목" })).toHaveAttribute("aria-pressed", "true");
+
+    await held.release();
+    await expect(phoneTabs(page).getByRole("button", { name: "관심종목" })).toHaveAttribute("aria-pressed", "true");
+    await expect(cell(page)).toHaveAttribute("aria-label", "칸 1: 코스피 일");
+
+    await openPhoneScreener(page);
+    await rows(page).nth(1).getByRole("button").click();
+    await expect(phoneTabs(page).getByRole("button", { name: "차트" })).toHaveAttribute("aria-pressed", "true");
+    await expect(cell(page)).toHaveAttribute("aria-label", "칸 1: 가상전자우 통합 일");
   });
 });
