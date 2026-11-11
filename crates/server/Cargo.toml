@@ -16,7 +16,7 @@ domain = { path = "../domain" }
 indicators = { path = "../indicators" }
 axum = { version = "0.8", features = ["ws"] }
 futures = "0.3"
-reqwest = { version = "0.13", default-features = false, features = ["rustls"] }
+reqwest = { version = "0.13", default-features = false, features = ["rustls", "query"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["float_roundtrip"] }
 sha2 = "0.10"
@@ -29,6 +29,8 @@ ts-rs = "11"
 sqlx = { version = "0.9.0", default-features = false, features = ["runtime-tokio", "sqlite", "migrate", "macros"] }
 tokio-tungstenite = { version = "0.29", features = ["rustls-tls-webpki-roots"] }
 duckdb = { version = "~1.20000.1", default-features = false, features = ["bundled"] }
+roxmltree = { version = "0.20", default-features = false }
+zip = { version = "2.4.2", default-features = false, features = ["deflate"] }
 
 [dev-dependencies]
 fake-kiwoom = { path = "../fake-kiwoom" }

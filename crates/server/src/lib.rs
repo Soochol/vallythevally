@@ -9,6 +9,7 @@ pub mod db;
 pub mod drawing_api;
 pub mod drawings;
 pub mod fundamentals;
+pub mod financials;
 pub mod http;
 pub mod instance;
 pub mod investors;
