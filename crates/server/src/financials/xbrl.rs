@@ -4,18 +4,21 @@ use domain::KstDate;
 use roxmltree::{Document, Node};
 
 use super::client::{Row, field};
-use super::model::{Account, Basis, FactPeriod, Verification};
+use super::model::{Account, Basis, FactPeriod, Failure, Verification};
 
 const INSTANCE: &str = "http://www.xbrl.org/2003/instance";
 const DIMENSIONS: &str = "http://xbrl.org/2006/xbrldi";
 
-pub fn accounts(rows: Vec<Row>, basis: Basis, corp: &str, receipt: &str, files: &[(String, String)], reporting_month: Option<&str>) -> Vec<Account> {
+pub fn accounts(rows: Vec<Row>, basis: Basis, corp: &str, receipt: &str, files: &[(String, String)], reporting_month: Option<&str>) -> Result<Vec<Account>, Failure> {
     let documents: Vec<_> = files.iter().filter_map(|(name, xml)| Document::parse(xml).ok().map(|doc| (name.as_str(), doc))).collect();
-    rows.into_iter().map(|fields| {
+    if documents.iter().any(|(_, doc)| doc.root_element().has_tag_name((INSTANCE, "xbrl")) && doc.descendants().any(|n| is_dart(n) && n.tag_name().name() == "DocumentReceiptNumber" && n.text() != Some(receipt))) {
+        return Err(Failure::ReceiptMismatch);
+    }
+    Ok(rows.into_iter().map(|fields| {
         let current_period = verify(&fields, "thstrm_amount", basis, corp, receipt, &documents, reporting_month);
         let cumulative_period = verify(&fields, "thstrm_add_amount", basis, corp, receipt, &documents, reporting_month);
         Account { fields, current_period, cumulative_period }
-    }).collect()
+    }).collect())
 }
 
 fn unverified(reason: &str) -> Verification { Verification::Unverified(reason.into()) }
@@ -27,7 +30,6 @@ fn verify(row: &Row, amount_field: &str, basis: Basis, corp: &str, receipt: &str
     let mut candidates = Vec::new();
     for (name, doc) in files {
         if !doc.root_element().has_tag_name((INSTANCE, "xbrl")) { continue; }
-        if doc.descendants().any(|n| is_dart(n) && n.tag_name().name() == "DocumentReceiptNumber" && n.text() != Some(receipt)) { return unverified("receipt_mismatch"); }
         let Some(month) = reporting_month else { return unverified("report_period_anchor_missing"); };
         let contexts: BTreeMap<_, _> = doc.descendants().filter(|n| n.has_tag_name((INSTANCE, "context"))).filter_map(|n| n.attribute("id").map(|id| (id, n))).collect();
         for fact in doc.descendants().filter(|n| n.is_element() && n.tag_name().name() == concept && concept_namespace(*n, prefix)) {

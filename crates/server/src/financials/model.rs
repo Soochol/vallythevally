@@ -62,17 +62,19 @@ pub struct Fetch<T> {
     pub checked_at: Option<i64>,
     pub last_success_at: Option<i64>,
     pub failure: Option<Failure>,
+    #[serde(default)]
+    pub refresh_version: u64,
 }
 
 impl<T> Default for Fetch<T> {
-    fn default() -> Self { Self { data: None, absent: false, checked_at: None, last_success_at: None, failure: None } }
+    fn default() -> Self { Self { data: None, absent: false, checked_at: None, last_success_at: None, failure: None, refresh_version: 0 } }
 }
 
 impl<T> Fetch<T> {
-    pub fn apply(&mut self, result: Result<Option<T>, Failure>, now: i64) {
+    pub fn apply(&mut self, result: Result<Option<T>, Failure>, now: i64, refresh_version: u64) {
         self.checked_at = Some(now);
         match result {
-            Ok(value) => { self.absent = value.is_none(); self.data = value; self.failure = None; self.last_success_at = Some(now); }
+            Ok(value) => { self.absent = value.is_none(); self.data = value; self.failure = None; self.last_success_at = Some(now); self.refresh_version = refresh_version; }
             Err(e) => self.failure = Some(e),
         }
     }
@@ -109,6 +111,8 @@ pub struct Collection {
     pub last_checked_at: Option<i64>,
     pub last_attempt_at: Option<i64>,
     pub disclosure_failure: Option<Failure>,
+    #[serde(default)]
+    pub refresh_version: u64,
 }
 
 #[derive(Clone, Debug, Serialize)]
