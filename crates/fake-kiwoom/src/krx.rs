@@ -26,6 +26,8 @@ pub struct KrxStock {
 pub enum DailyAnswer {
     Bars,
     BarsThrough(KstDate),
+    ZeroPricesOn(KstDate),
+    EndlessPages,
     EmptyRow,
     UnknownCode,
 }
@@ -206,6 +208,8 @@ pub fn respond(market: &KrxMarket, api_id: &str, body: &Value, next_key: Option<
                     let bars: Vec<KrxBar> = stock.bars.iter().filter(|b| b.day <= last).copied().collect();
                     paged(bars.len(), next_key, &stock.code, |range, headers| stock_daily(&stock.code, &bars, range, headers))
                 }
+                DailyAnswer::ZeroPricesOn(zero) => paged(stock.bars.len(), next_key, &stock.code, |range, headers| zero_prices_on(stock_daily(&stock.code, &stock.bars, range, headers), zero)),
+                DailyAnswer::EndlessPages => paged_until(stock.bars.len(), next_key, &stock.code, |_| false, |range, headers| stock_daily(&stock.code, &stock.bars, range, headers)),
                 DailyAnswer::EmptyRow => KrxPage::Page { body: empty_daily_row(stock), last: true },
                 DailyAnswer::UnknownCode => KrxPage::Page { body: json!({"return_code": 2, "return_msg": "입력 값 오류입니다[1902:종목 정보가 없습니다]"}), last: true },
             })
@@ -224,6 +228,10 @@ pub fn respond(market: &KrxMarket, api_id: &str, body: &Value, next_key: Option<
 }
 
 fn paged(rows: usize, next_key: Option<&str>, chain: &str, page: impl Fn(std::ops::Range<usize>, Value) -> Value) -> KrxPage {
+    paged_until(rows, next_key, chain, |end| end >= rows, page)
+}
+
+fn paged_until(rows: usize, next_key: Option<&str>, chain: &str, is_last: impl Fn(usize) -> bool, page: impl Fn(std::ops::Range<usize>, Value) -> Value) -> KrxPage {
     let index = match next_key {
         None => 0,
         Some(key) => match key.strip_prefix(chain).and_then(|rest| rest.strip_prefix('-')).and_then(|n| n.parse::<usize>().ok()) {
@@ -233,7 +241,7 @@ fn paged(rows: usize, next_key: Option<&str>, chain: &str, page: impl Fn(std::op
     };
     let start = index * PAGE_ROWS;
     let end = (start + PAGE_ROWS).min(rows);
-    let last = end >= rows;
+    let last = is_last(end);
     let headers = json!({"cont-yn": if last { "N" } else { "Y" }, "next-key": if last { String::new() } else { format!("{chain}-{}", index + 1) }});
     KrxPage::Page { body: page(start.min(end)..end, headers), last }
 }
@@ -271,6 +279,16 @@ fn chart_row(b: &KrxBar, traded: u64) -> Value {
 fn stock_daily(code: &str, bars: &[KrxBar], range: std::ops::Range<usize>, headers: Value) -> Value {
     let rows: Vec<Value> = newest_first(bars, range).map(|b| chart_row(b, b.traded_million_won)).collect();
     json!({"_headers": headers, "return_code": 0, "return_msg": "정상적으로 처리되었습니다", "stk_cd": code, "stk_dt_pole_chart_qry": rows})
+}
+
+fn zero_prices_on(mut body: Value, day: KstDate) -> Value {
+    let dt = day.yyyymmdd();
+    for row in body["stk_dt_pole_chart_qry"].as_array_mut().into_iter().flatten().filter(|r| r["dt"] == dt.as_str()) {
+        for field in ["open_pric", "high_pric", "low_pric", "cur_prc"] {
+            row[field] = json!("0");
+        }
+    }
+    body
 }
 
 fn monthly(bars: &[KrxBar]) -> Vec<KrxBar> {
