@@ -80,6 +80,9 @@ async fn foreign_holdings_page_back_from_the_newest_day_to_the_first_listed_day(
         assert_eq!(row["poss_stkcnt"], day.shares.to_string());
         assert_eq!(row["wght"], format!("+{}.{:02}", day.weight_basis_points / 100, day.weight_basis_points % 100));
     }
+    let listed = investors::listed_shares(common);
+    assert!(want.iter().all(|d| d.listed_shares == listed && d.shares < listed), "보유주식수는 그 종목 상장주식수({listed}) 안이다");
+    assert_eq!(rows[0]["frgnr_limit"], listed.to_string());
     assert_eq!(rows[0]["dt"], as_of().yyyymmdd());
     assert_eq!(rows.last().unwrap()["dt"], common.bars[0].day.yyyymmdd());
     let changed = |i: usize| want[i].shares as i64 - want[i + 1].shares as i64;

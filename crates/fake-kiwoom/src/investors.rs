@@ -6,7 +6,7 @@ use serde_json::{Map, Value, json};
 use crate::krx::{KrxBar, KrxMarket, KrxStock};
 
 pub const PAGE_ROWS: usize = 100;
-pub const LISTED_SHARES: u64 = 10_000_000;
+pub const LISTED_SHARES_WHEN_UNKNOWN: u64 = 10_000_000;
 
 pub const INVESTOR_FIELDS: [&str; 13] = ["ind_invsr", "frgnr_invsr", "orgn", "fnnc_invt", "insrnc", "invtrt", "etc_fnnc", "bank", "penfnd_etc", "samo_fund", "natn", "etc_corp", "natfor"];
 
@@ -18,12 +18,17 @@ pub struct ForeignDay {
     pub day: KstDate,
     pub shares: u64,
     pub weight_basis_points: u64,
+    pub listed_shares: u64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct InvestorDay {
     pub day: KstDate,
     pub net_shares: [i64; INVESTOR_FIELDS.len()],
+}
+
+pub fn listed_shares(stock: &KrxStock) -> u64 {
+    stock.listed_shares.unwrap_or(LISTED_SHARES_WHEN_UNKNOWN)
 }
 
 fn seed(stock: &KrxStock) -> u64 {
@@ -36,8 +41,9 @@ pub fn foreign_days(stock: &KrxStock) -> Vec<ForeignDay> {
         .iter()
         .enumerate()
         .map(|(i, b)| {
-            let shares = 2_000_000 + (i as u64 * 7_919 + seed(stock)) % 500_000;
-            ForeignDay { day: b.day, shares, weight_basis_points: shares * 10_000 / LISTED_SHARES }
+            let listed = listed_shares(stock);
+            let shares = listed / 5 + (i as u64 * 7_919 + seed(stock)) % (listed / 20);
+            ForeignDay { day: b.day, shares, weight_basis_points: shares * 10_000 / listed, listed_shares: listed }
         })
         .collect()
 }
@@ -134,8 +140,8 @@ fn foreign_row(f: &ForeignDay, b: &KrxBar, older_shares: Option<u64>) -> Value {
         "chg_qty": signed(f.shares as i64 - older_shares.unwrap_or(f.shares) as i64),
         "poss_stkcnt": f.shares.to_string(),
         "wght": percent(f.weight_basis_points),
-        "gain_pos_stkcnt": (LISTED_SHARES - f.shares).to_string(),
-        "frgnr_limit": LISTED_SHARES.to_string(),
+        "gain_pos_stkcnt": (f.listed_shares - f.shares).to_string(),
+        "frgnr_limit": f.listed_shares.to_string(),
         "frgnr_limit_irds": "0",
         "limit_exh_rt": percent(f.weight_basis_points),
     })
