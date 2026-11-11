@@ -157,7 +157,8 @@ for (const { period, label } of PERIODS) {
     await app.fake.respondWith({ ...response, body: FAILURE });
     await app.fake.delay(response.apiId, 700);
     await page.goto(`/?symbol=005930&period=${period}`);
-    await expect(cell(page).getByRole("status")).toContainText("봉을 불러오는 중입니다");
+    await expect(cell(page)).toHaveAttribute("aria-busy", "true");
+    await expect(cell(page).getByRole("status")).toBeHidden();
     const alert = cell(page).getByRole("alert");
     await expect(alert).toContainText("1501");
     await expect(chartOf(cell(page))).toHaveAttribute("data-bar-count", "0");
@@ -168,7 +169,8 @@ for (const { period, label } of PERIODS) {
     await expect(alert).toBeVisible();
     await app.fake.respondWith(response);
     await alert.getByRole("button", { name: "다시 시도" }).click();
-    await expect(cell(page).getByRole("status")).toContainText("봉을 불러오는 중입니다");
+    await expect(cell(page)).toHaveAttribute("aria-busy", "true");
+    await expect(cell(page).getByRole("status")).toBeHidden();
     await ready(page, `삼성전자 통합 ${label}`);
     await expect(alert).toBeHidden();
   });
