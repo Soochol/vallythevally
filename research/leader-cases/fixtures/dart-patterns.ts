@@ -46,4 +46,3 @@ export async function dartPatternFixture(options: { kinds?: string[]; evidence?:
     return { dart, calls };
   } finally { await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve())); }
 }
-
