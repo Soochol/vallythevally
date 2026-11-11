@@ -151,21 +151,37 @@ pub struct KrxDailyRow {
     pub traded: MillionWon,
 }
 
-pub fn parse_krx_daily(body: DailyChartResponse) -> Result<Option<Vec<KrxDailyRow>>, WireError> {
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UnreadableRow {
+    pub dt: String,
+    pub reason: WireError,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct KrxDaily {
+    pub rows: Vec<KrxDailyRow>,
+    pub unreadable: Vec<UnreadableRow>,
+}
+
+pub fn parse_krx_daily(body: DailyChartResponse) -> Option<KrxDaily> {
     let rows = body.into_rows();
-    if rows.first().is_some_and(|r| r.dt.is_empty() && r.cntr_tm.is_empty()) {
-        return Ok(None);
+    if !rows.is_empty() && rows.iter().all(|r| KstDate::parse_yyyymmdd(&r.dt).is_none()) {
+        return None;
     }
-    let mut out = rows
-        .iter()
-        .rev()
-        .map(|r| {
-            let bar = parse_row(r, RowTime::Date, Period::Day, stock_price)?;
-            Ok(KrxDailyRow { day: bar.bucket.start().kst_date(), ohlcv: bar.ohlcv, traded: MillionWon(unsigned(&r.trde_prica)?) })
-        })
-        .collect::<Result<Vec<_>, WireError>>()?;
-    out.dedup_by_key(|r| r.day);
-    Ok(Some(out))
+    let (mut readable, mut unreadable) = (Vec::new(), Vec::new());
+    for r in rows.iter().rev() {
+        match parse_krx_daily_row(r) {
+            Ok(row) => readable.push(row),
+            Err(reason) => unreadable.push(UnreadableRow { dt: r.dt.clone(), reason }),
+        }
+    }
+    readable.dedup_by_key(|r| r.day);
+    Some(KrxDaily { rows: readable, unreadable })
+}
+
+fn parse_krx_daily_row(r: &ChartRow) -> Result<KrxDailyRow, WireError> {
+    let bar = parse_row(r, RowTime::Date, Period::Day, stock_price)?;
+    Ok(KrxDailyRow { day: bar.bucket.start().kst_date(), ohlcv: bar.ohlcv, traded: MillionWon(unsigned(&r.trde_prica)?) })
 }
 
 pub fn index_days(body: IndexDailyChartResponse) -> Result<Vec<KstDate>, WireError> {
@@ -895,11 +911,35 @@ mod tests {
         let quote: StockQuotesResponse = serde_json::from_str(&fixture("ka10095_005930_krx")).unwrap();
         let quote = parse_krx_quotes(quote)[0];
         let daily: DailyChartResponse = serde_json::from_str(&fixture("ka10081_005930")).unwrap();
-        let daily = parse_krx_daily(daily).unwrap().unwrap();
+        let daily = parse_krx_daily(daily).unwrap().rows;
         let same_day = daily.iter().find(|r| r.day == quote.day).unwrap();
         assert_eq!((quote.day, quote.ohlcv, quote.traded), (same_day.day, same_day.ohlcv, same_day.traded), "마감 뒤 ka10095 KRX 행은 그날 KRX 일봉 행과 같다");
         let average_won = quote.traded.0 * 1_000_000 / quote.ohlcv.volume().0;
         assert!((quote.ohlcv.low().centi() / 100..=quote.ohlcv.high().centi() / 100).contains(&average_won), "백만원 단위면 평균 체결가 {average_won}원이 그날 저가·고가 사이다");
+    }
+
+    #[test]
+    fn krx_daily_leaves_out_only_the_rows_it_cannot_read_and_names_their_dt_and_reason() {
+        let mut body: serde_json::Value = serde_json::from_str(&fixture("ka10081_005930")).unwrap();
+        let rows = body["stk_dt_pole_chart_qry"].as_array_mut().unwrap();
+        let (count, zero_dt) = (rows.len(), rows[1]["dt"].as_str().unwrap().to_owned());
+        rows[1]["cur_prc"] = "0".into();
+        rows[2]["dt"] = "2026-11".into();
+        rows[3]["trde_qty"] = "N/A".into();
+        rows[0]["dt"] = "".into();
+        let daily = parse_krx_daily(serde_json::from_value(body.clone()).unwrap()).unwrap();
+        assert_eq!(daily.rows.len(), count - 4, "첫 행의 dt가 비어도 다른 행은 읽는다");
+        assert!(!daily.rows.iter().any(|r| r.day.yyyymmdd() == zero_dt));
+        assert_eq!(daily.unreadable.len(), 4, "{:?}", daily.unreadable);
+        assert!(daily.unreadable.iter().any(|u| u.dt == zero_dt && u.reason.0.contains("가격이 0")), "{:?}", daily.unreadable);
+        assert!(daily.unreadable.iter().any(|u| u.dt == "2026-11"), "dt가 날짜가 아니어도 그 값을 남긴다");
+
+        for row in body["stk_dt_pole_chart_qry"].as_array_mut().unwrap() {
+            row["dt"] = "".into();
+        }
+        assert_eq!(parse_krx_daily(serde_json::from_value(body).unwrap()), None, "날짜를 읽을 수 있는 행이 하나도 없으면 없는 종목이다");
+        let no_rows: DailyChartResponse = serde_json::from_value(json!({"stk_dt_pole_chart_qry": []})).unwrap();
+        assert_eq!(parse_krx_daily(no_rows), Some(KrxDaily { rows: vec![], unreadable: vec![] }), "행이 없는 페이지는 빈 페이지다");
     }
 
     fn listing(name: &str) -> Vec<(String, Listing)> {

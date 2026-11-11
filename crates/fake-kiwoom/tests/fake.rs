@@ -228,3 +228,29 @@ async fn a_listed_krx_stock_can_withhold_its_daily_bars_and_still_answer_monthly
     assert!(months.iter().all(|m| m["trde_qty"].as_str().unwrap().parse::<u64>().unwrap() > 0), "월봉에는 거래량이 있다");
     assert_eq!(kiwoom(&base, "ka10083", json!({"stk_cd": krx::COMMON, "base_dt": "20261106", "upd_stkpc_tp": "1"}), None).await.body["stk_cd"], krx::COMMON, "다른 KRX 종목도 월봉을 준다");
 }
+
+#[tokio::test]
+async fn a_krx_stock_can_answer_one_daily_row_with_zero_prices_or_daily_pages_that_never_end() {
+    let fake = FakeKiwoom::start().await;
+    let as_of = domain::KstDate::new(2026, 11, 6).unwrap();
+    let zero = domain::KstDate::new(2026, 11, 4).unwrap();
+    let mut market = KrxMarket::sample(as_of);
+    market.stock_mut(krx::COMMON).daily = krx::DailyAnswer::ZeroPricesOn(zero);
+    market.stock_mut(krx::REIT).daily = krx::DailyAnswer::EndlessPages;
+    fake.set_krx_market(market);
+    let base = fake.base_url();
+    let prices = |r: &Reply, dt: &str| {
+        let row = r.body["stk_dt_pole_chart_qry"].as_array().unwrap().iter().find(|row| row["dt"] == dt).cloned().unwrap_or_else(|| panic!("{dt} 행이 있다: {}", r.body));
+        ["open_pric", "high_pric", "low_pric", "cur_prc"].map(|f| row[f].as_str().unwrap().to_owned())
+    };
+
+    let common = kiwoom(&base, "ka10081", daily(krx::COMMON), None).await;
+    assert_eq!(prices(&common, "20261104"), ["0", "0", "0", "0"].map(String::from), "그날 행은 네 가격이 \"0\"이다");
+    assert!(prices(&common, "20261105").iter().all(|p| p != "0"), "다른 날 행은 그대로다");
+
+    let first = kiwoom(&base, "ka10081", daily(krx::REIT), None).await;
+    let far = kiwoom(&base, "ka10081", daily(krx::REIT), Some("110070-9")).await;
+    assert_eq!((first.cont.as_str(), first.next.as_str()), ("Y", "110070-1"));
+    assert_eq!((far.status, far.cont.as_str(), far.next.as_str()), (200, "Y", "110070-10"), "봉이 다 떨어진 뒤에도 다음 페이지가 있다고 답한다");
+    assert!(far.body["stk_dt_pole_chart_qry"].as_array().unwrap().is_empty(), "{}", far.body);
+}
