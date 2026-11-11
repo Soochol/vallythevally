@@ -35,6 +35,18 @@ const SEED_SCREENS: Screen[] = [
   { id: "01900000-0000-7000-8000-0000000000a3", name: "종가 12개월 신고가", markets: [], exclude: ["etf", "preferred", "reit", "spac"], conditions: [newHigh("M", "close", 12, 3)] },
   { id: "01900000-0000-7000-8000-0000000000a4", name: "종가 10년 신고가", markets: [], exclude: ["etf"], conditions: [newHigh("D", "close", 2500, 1)] },
   { id: "01900000-0000-7000-8000-0000000000a5", name: "고가 1,000일 신고가", markets: [], exclude: [], conditions: [newHigh("D", "high", 1000, 20)] },
+  {
+    id: "01900000-0000-7000-8000-0000000000a6",
+    name: "코스피 주봉 신고가와 일봉 거래 급증",
+    markets: ["kospi"],
+    exclude: ["etf"],
+    conditions: [
+      newHigh("W", "high", 52, 1),
+      { kind: "surge", period: "D", m: 3, field: "volume", n: 20, times: 3 },
+      { kind: "ma_cross", period: "D", m: 5, method: "sma", fast: 5, slow: 20, direction: "up" },
+      { kind: "market_cap", min: 300_000_000_000, max: null },
+    ],
+  },
 ];
 
 async function readJson(req: IncomingMessage): Promise<unknown> {

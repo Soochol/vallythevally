@@ -1,22 +1,62 @@
 import type { ApiErrorBody } from "../api/generated/ApiErrorBody";
 import type { BarField } from "../api/generated/BarField";
+import type { BollingerBand } from "../api/generated/BollingerBand";
+import type { Bound } from "../api/generated/Bound";
 import type { Condition } from "../api/generated/Condition";
+import type { Direction } from "../api/generated/Direction";
 import type { ExcludeKind } from "../api/generated/ExcludeKind";
+import type { Extreme } from "../api/generated/Extreme";
 import type { KstDate } from "../api/generated/KstDate";
+import type { MaMethod } from "../api/generated/MaMethod";
+import type { MaOrder } from "../api/generated/MaOrder";
+import type { Market } from "../api/generated/Market";
 import type { Screen } from "../api/generated/Screen";
 import type { ScreenerExcluded } from "../api/generated/ScreenerExcluded";
 import type { ScreenerRow } from "../api/generated/ScreenerRow";
 import type { ScreenerStatus } from "../api/generated/ScreenerStatus";
 import type { ScreenPeriod } from "../api/generated/ScreenPeriod";
+import type { Side } from "../api/generated/Side";
 import type { UnixSeconds } from "../api/generated/UnixSeconds";
 import type { UpdatePhase } from "../api/generated/UpdatePhase";
+import { KINDS } from "../chart/indicators/kinds";
 import { formatKstClockSeconds } from "../chart/time";
+import { MINUS } from "./format";
 
 export const PERIOD_NAME: Record<ScreenPeriod, string> = { D: "일봉", W: "주봉", M: "월봉" };
 export const UNIT: Record<ScreenPeriod, string> = { D: "일", W: "주", M: "개월" };
 const CURRENT_BAR: Record<ScreenPeriod, string> = { D: "당일", W: "이번 주", M: "이번 달" };
 export const FIELD_LABEL: Record<BarField, string> = { open: "시가", high: "고가", low: "저가", close: "종가", volume: "거래량", traded_value: "거래대금" };
 export const NEW_HIGH_NAME: Record<BarField, string> = { open: "신고가", high: "신고가", low: "신고가", close: "신고가", volume: "신고거래량", traded_value: "신고거래대금" };
+export const NEW_LOW_NAME: Record<BarField, string> = { open: "신저가", high: "신저가", low: "신저가", close: "신저가", volume: "신저거래량", traded_value: "신저거래대금" };
+export const VALUE_UNIT: Record<BarField, string> = { open: "원", high: "원", low: "원", close: "원", volume: "주", traded_value: "억 원" };
+
+export type ConditionKind = Condition["kind"];
+
+export const KIND_LABEL: Record<ConditionKind, string> = {
+  new_high: "신고가",
+  new_low: "신저가",
+  value_range: "값 범위",
+  change: "등락률",
+  near_extreme: "고점·저점 거리",
+  surge: "거래 급증",
+  ma_position: "이평 위치",
+  ma_alignment: "이평 배열",
+  ma_cross: "이평 교차",
+  rsi: "RSI",
+  macd: "MACD",
+  stochastic: "스토캐스틱",
+  bollinger: "볼린저 밴드",
+  ichimoku: "일목균형표",
+  market_cap: "시가총액",
+};
+export const MARKET_LABEL: Record<Market, string> = { kospi: "코스피", kosdaq: "코스닥" };
+export const MA_METHOD_LABEL: Record<MaMethod, string> = { sma: "단순", ema: "지수" };
+export const MA_ORDER_LABEL: Record<MaOrder, string> = { bullish: "정배열", bearish: "역배열" };
+export const SIDE_LABEL: Record<Side, string> = { above: "위", below: "아래" };
+export const DIRECTION_LABEL: Record<Direction, string> = { up: "위로", down: "아래로" };
+export const EXTREME_LABEL: Record<Extreme, string> = { high: "최고가", low: "최저가" };
+export const BAND_LABEL: Record<BollingerBand, string> = { upper: "상단", lower: "하단" };
+export const EOK = 100_000_000;
 
 export type NewHighCondition = Extract<Condition, { kind: "new_high" }>;
 
@@ -45,18 +85,116 @@ export const excludedInOrder = (exclude: readonly ExcludeKind[]): ExcludeKind[] 
 export const PHASE_LABEL: Record<UpdatePhase, string> = { symbols: "종목 목록 받기", recent: "최근 관측일 채우기", backfill: "과거 이력 이어 받기" };
 
 const count = (n: number) => n.toLocaleString("ko-KR");
+const decimal = (n: number) => n.toLocaleString("ko-KR", { maximumFractionDigits: 8 });
+const signedPercent = (n: number) => `${n > 0 ? "+" : n < 0 ? MINUS : ""}${decimal(Math.abs(n))}%`;
+const won = (n: number) => `${decimal(n)}원`;
+const eokWon = (n: number) => `${decimal(n / EOK)}억 원`;
+const VALUE_TEXT: Record<BarField, (n: number) => string> = {
+  open: won,
+  high: won,
+  low: won,
+  close: won,
+  volume: (n) => `${decimal(n)}주`,
+  traded_value: eokWon,
+};
 
-function newHighSentence({ period, field, n, m }: NewHighCondition): string {
-  const trade = field === "volume" || field === "traded_value";
-  const subject = `${FIELD_LABEL[field]}${trade ? "이" : "가"}`;
-  const record = `${count(n)}${UNIT[period]} ${NEW_HIGH_NAME[field]}`;
-  if (m === 1) return `${CURRENT_BAR[period]} ${subject} ${record}${trade ? "이다" : "다"}`;
-  return `최근 ${count(m)}${UNIT[period]} 안에 ${subject} ${record}인 봉이 있다`;
+const HANGUL_FIRST = 0xac00;
+const HANGUL_LAST = 0xd7a3;
+const DIGIT_HAS_FINAL = "1011001110";
+const LETTERS_WITH_FINAL = "LMNR";
+
+function endsWithFinalConsonant(word: string): boolean {
+  const bare = word.endsWith(")") ? word.slice(0, word.lastIndexOf("(")) : word;
+  const last = bare.at(-1) ?? "";
+  const code = last.charCodeAt(0);
+  if (code >= HANGUL_FIRST && code <= HANGUL_LAST) return (code - HANGUL_FIRST) % 28 !== 0;
+  if (last >= "0" && last <= "9") return DIGIT_HAS_FINAL[Number(last)] === "1";
+  return LETTERS_WITH_FINAL.includes(last.toUpperCase());
+}
+
+const subject = (word: string) => `${word}${endsWithFinalConsonant(word) ? "이" : "가"}`;
+const object = (word: string) => `${word}${endsWithFinalConsonant(word) ? "을" : "를"}`;
+const copula = (word: string) => `${word}${endsWithFinalConsonant(word) ? "이다" : "다"}`;
+
+function range(min: Bound, max: Bound, text: (n: number) => string): string {
+  const ends = [min === null ? null : `${text(min)} 이상`, max === null ? null : `${text(max)} 이하`];
+  return ends.filter((end) => end !== null).join(" ");
+}
+
+type Claim = { state: string } | { event: string };
+
+const maName = (method: MaMethod) => (method === "sma" ? "이동평균" : "지수 이동평균");
+const settings = (...values: number[]) => `(${values.map(decimal).join("·")})`;
+const ICHIMOKU_DEFAULT = KINDS.ichimoku.defaults;
+
+function claimOf(condition: BarCondition): Claim {
+  const bars = (n: number) => `${count(n)}${UNIT[condition.period]}`;
+  switch (condition.kind) {
+    case "new_high":
+      return { state: `${subject(FIELD_LABEL[condition.field])} ${bars(condition.n)} ${NEW_HIGH_NAME[condition.field]}` };
+    case "new_low":
+      return { state: `${subject(FIELD_LABEL[condition.field])} ${bars(condition.n)} ${NEW_LOW_NAME[condition.field]}` };
+    case "value_range":
+      return { state: `${subject(FIELD_LABEL[condition.field])} ${range(condition.min, condition.max, VALUE_TEXT[condition.field])}` };
+    case "change":
+      return { state: `${subject("종가")} ${bars(condition.back)} 전보다 ${range(condition.minPct, condition.maxPct, signedPercent)}` };
+    case "near_extreme":
+      return { state: `${subject("종가")} ${bars(condition.n)} ${EXTREME_LABEL[condition.extreme]}에서 ${decimal(condition.withinPct)}% 안` };
+    case "surge":
+      return { state: `${subject(FIELD_LABEL[condition.field])} 직전 ${bars(condition.n)} 평균의 ${decimal(condition.times)}배 이상` };
+    case "ma_position":
+      return { state: `${subject(FIELD_LABEL[condition.field])} ${bars(condition.length)} ${maName(condition.method)} ${SIDE_LABEL[condition.side]}` };
+    case "ma_alignment": {
+      const lines = `${condition.lengths.map(count).join("·")}${UNIT[condition.period]} ${maName(condition.method)}`;
+      return { state: `${subject(lines)} ${MA_ORDER_LABEL[condition.order]}` };
+    }
+    case "ma_cross": {
+      const line = (length: number) => (condition.method === "sma" ? `${bars(length)}선` : `${bars(length)} ${maName(condition.method)}`);
+      const fast = condition.fast === null ? "종가" : line(condition.fast);
+      return { event: `${subject(fast)} ${object(line(condition.slow))} ${DIRECTION_LABEL[condition.direction]} 교차` };
+    }
+    case "rsi": {
+      const rsi = `RSI${settings(condition.length)}`;
+      const { test } = condition;
+      if (test.kind === "range") return { state: `${subject(rsi)} ${range(test.min, test.max, decimal)}` };
+      return { event: `${subject(rsi)} ${object(decimal(test.value))} ${DIRECTION_LABEL[test.direction]} 돌파` };
+    }
+    case "macd": {
+      const macd = subject(`MACD${settings(condition.fast, condition.slow, condition.signal)}`);
+      const { test } = condition;
+      if (test.kind === "signal_cross") return { event: `${macd} 시그널을 ${DIRECTION_LABEL[test.direction]} 교차` };
+      if (test.kind === "zero_breakout") return { event: `${macd} 0선을 ${DIRECTION_LABEL[test.direction]} 돌파` };
+      return { state: `${macd} 시그널 ${SIDE_LABEL[test.side]}` };
+    }
+    case "stochastic": {
+      const k = subject(`스토캐스틱${settings(condition.k, condition.d, condition.smooth)} %K`);
+      const { test } = condition;
+      if (test.kind === "cross") return { event: `${k} %D를 ${DIRECTION_LABEL[test.direction]} 교차` };
+      return { state: `${k} ${range(test.min, test.max, decimal)}` };
+    }
+    case "bollinger": {
+      const band = `볼린저 밴드${settings(condition.length, condition.k)}`;
+      const { test } = condition;
+      if (test.kind === "outside") return { state: `${subject("종가")} ${band} ${test.side === "above" ? "상단 위" : "하단 아래"}` };
+      return { event: `${subject("종가")} ${object(`${band} ${BAND_LABEL[test.band]}`)} ${DIRECTION_LABEL[test.direction]} 교차` };
+    }
+    case "ichimoku": {
+      const { conversion, base, spanB, displacement, test } = condition;
+      const chartDefault =
+        conversion === ICHIMOKU_DEFAULT.conversion && base === ICHIMOKU_DEFAULT.base && spanB === ICHIMOKU_DEFAULT.spanB && displacement === ICHIMOKU_DEFAULT.displacement;
+      const ichimoku = chartDefault ? "일목" : `일목${settings(conversion, base, spanB, displacement)}`;
+      if (test.kind === "cloud") return { state: `${subject("종가")} ${ichimoku} 구름 ${SIDE_LABEL[test.side]}` };
+      return { event: `${ichimoku} ${subject("전환선")} 기준선을 ${DIRECTION_LABEL[test.direction]} 교차` };
+    }
+  }
 }
 
 export function conditionSentence(condition: Condition): string {
-  if (condition.kind === "new_high") return newHighSentence(condition);
-  return "이 화면이 아직 풀어 쓰지 못하는 조건이다";
+  if (condition.kind === "market_cap") return `시가총액이 ${copula(range(condition.min, condition.max, eokWon))}`;
+  const claim = claimOf(condition);
+  const { period, m } = condition;
+  if (m === 1) return `${CURRENT_BAR[period]} ${"state" in claim ? copula(claim.state) : `${claim.event}했다`}`;
+  return `최근 ${count(m)}${UNIT[period]} 안에 ${"state" in claim ? `${claim.state}인` : `${claim.event}한`} 봉이 있다`;
 }
 
 export function excludedText(screen: Screen, { listedTooShort, historyShort, unconfirmed }: ScreenerExcluded): string {

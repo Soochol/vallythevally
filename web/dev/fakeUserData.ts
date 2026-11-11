@@ -7,6 +7,7 @@ import type { LayoutInput } from "../src/api/generated/LayoutInput.ts";
 import type { LayoutSummary } from "../src/api/generated/LayoutSummary.ts";
 import type { Screen } from "../src/api/generated/Screen.ts";
 import type { Screens } from "../src/api/generated/Screens.ts";
+import type { ScreenPeriod } from "../src/api/generated/ScreenPeriod.ts";
 import type { Watchlist } from "../src/api/generated/Watchlist.ts";
 import type { Watchlists } from "../src/api/generated/Watchlists.ts";
 
@@ -48,17 +49,32 @@ const isWatchlist = (x: unknown): x is Watchlist =>
   isObject(x) && typeof x.id === "string" && typeof x.name === "string" && Array.isArray(x.symbols) && x.symbols.every((s) => typeof s === "string");
 const stale = (stored: number) => fail(409, "stale_revision", `더 새 편집(revision ${stored})이 이미 저장돼 있습니다`);
 const isU32 = (x: unknown): x is number => Number.isInteger(x) && (x as number) >= 0 && (x as number) <= MAX_U32;
-type NewHigh = Extract<Condition, { kind: "new_high" }>;
-const isNewHigh = (x: unknown): x is NewHigh =>
+const CONDITION_KINDS: readonly string[] = [
+  "new_high",
+  "new_low",
+  "value_range",
+  "change",
+  "near_extreme",
+  "surge",
+  "ma_position",
+  "ma_alignment",
+  "ma_cross",
+  "rsi",
+  "macd",
+  "stochastic",
+  "bollinger",
+  "ichimoku",
+  "market_cap",
+] satisfies Condition["kind"][];
+const SCREEN_PERIODS: readonly string[] = ["D", "W", "M"] satisfies ScreenPeriod[];
+const isRecordKind = (kind: unknown) => kind === "new_high" || kind === "new_low";
+const isCondition = (x: unknown): x is Condition =>
   isObject(x) &&
-  x.kind === "new_high" &&
-  (x.period === "D" || x.period === "W" || x.period === "M") &&
-  typeof x.field === "string" &&
-  BAR_FIELDS.includes(x.field) &&
-  isU32(x.n) &&
-  isU32(x.m);
-type NewHighScreen = Omit<Screen, "conditions"> & { conditions: NewHigh[] };
-const isScreen = (x: unknown): x is NewHighScreen =>
+  typeof x.kind === "string" &&
+  CONDITION_KINDS.includes(x.kind) &&
+  (x.kind === "market_cap" || (typeof x.period === "string" && SCREEN_PERIODS.includes(x.period) && isU32(x.m))) &&
+  (!isRecordKind(x.kind) || (typeof x.field === "string" && BAR_FIELDS.includes(x.field) && isU32(x.n)));
+export const isScreen = (x: unknown): x is Screen =>
   isObject(x) &&
   typeof x.id === "string" &&
   typeof x.name === "string" &&
@@ -67,9 +83,9 @@ const isScreen = (x: unknown): x is NewHighScreen =>
   Array.isArray(x.exclude) &&
   x.exclude.every((k) => typeof k === "string" && EXCLUDE_KINDS.includes(k)) &&
   Array.isArray(x.conditions) &&
-  x.conditions.every(isNewHigh);
+  x.conditions.every(isCondition);
 
-function screensProblem(screens: readonly NewHighScreen[]): string | null {
+function screensProblem(screens: readonly Screen[]): string | null {
   if (screens.length > MAX_SCREENS) return `조건식은 ${MAX_SCREENS}개까지 저장할 수 있습니다: ${screens.length}개`;
   const ids = new Set<string>();
   for (const s of screens) {
@@ -79,8 +95,11 @@ function screensProblem(screens: readonly NewHighScreen[]): string | null {
     const nameChars = [...s.name.trim()].length;
     if (nameChars < 1 || nameChars > MAX_SCREEN_NAME) return `조건식 이름은 공백을 빼고 1~${MAX_SCREEN_NAME}자여야 합니다: ${JSON.stringify(s.name)}`;
     if (s.conditions.length < 1 || s.conditions.length > MAX_SCREEN_CONDITIONS) return `조건식 ${s.name}의 조건은 1~${MAX_SCREEN_CONDITIONS}줄이어야 합니다: ${s.conditions.length}줄`;
-    const bad = s.conditions.find((c) => c.m < 1 || c.m > c.n);
-    if (bad) return `조건식 ${s.name}의 조건은 1 ≤ m ≤ n이어야 합니다: n=${bad.n}, m=${bad.m}`;
+    for (const c of s.conditions) {
+      if (c.kind === "market_cap") continue;
+      if (c.m < 1) return `조건식 ${s.name}의 조건은 m ≥ 1이어야 합니다: m=${c.m}`;
+      if ((c.kind === "new_high" || c.kind === "new_low") && c.m > c.n) return `조건식 ${s.name}의 조건은 m ≤ n이어야 합니다: n=${c.n}, m=${c.m}`;
+    }
     if (new Set(s.markets).size !== s.markets.length) return `조건식 ${s.name}의 시장 목록에 같은 것이 두 번 있습니다`;
     if (new Set(s.exclude).size !== s.exclude.length) return `조건식 ${s.name}의 제외 목록에 같은 것이 두 번 있습니다`;
   }
