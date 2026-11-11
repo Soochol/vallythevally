@@ -189,7 +189,7 @@ test("빈 저장소를 채우고 만든 조건식으로 찾은 종목을 KRX 칸
   });
 });
 
-test("이 화면이 그대로 나타내지 못하는 조건식은 편집에서 이유를 보이며 저장을 막되 지울 수 있고, 거래대금 신고가 줄은 값 칸에 거래대금으로 보인다", async ({ app, page }) => {
+test("시가총액 줄이나 줄마다 다른 봉 주기가 든 조건식도 편집에서 그대로 열리고, 이름만 바꿔 저장해도 줄과 시장이 그대로 남으며, 거래대금 신고가 줄은 값 칸에 거래대금으로 보인다", async ({ app, page }) => {
   const newHigh = (period: string, field: string, n: number, m: number) => ({ kind: "new_high", period, m, field, n });
   const capped = { id: "capped", name: "시가총액 섞임", markets: [], exclude: [], conditions: [newHigh("D", "high", 60, 1), { kind: "market_cap", min: 300_000_000_000, max: null }] };
   const mixed = { id: "mixed", name: "주봉 섞임", markets: ["kosdaq"], exclude: [], conditions: [newHigh("D", "high", 60, 1), newHigh("W", "close", 52, 1)] };
@@ -199,56 +199,57 @@ test("이 화면이 그대로 나타내지 못하는 조건식은 편집에서 �
   expect(seeded.status).toBe(200);
   await page.goto("/");
   await openScreener(page);
-  const pick = async (name: string) => {
+  const edit = async (name: string) => {
     await panel(page).getByRole("button", { name: /^조건식: / }).click();
     await page.getByRole("menuitemradio", { name: `${name} · 일봉` }).click();
     await expect(panel(page).getByRole("button", { name: `조건식: ${name}` })).toBeVisible();
-  };
-  const blocked = async (name: string) => {
-    await pick(name);
     await panel(page).getByRole("button", { name: "편집" }).click();
     const dialog = editor(page, "조건식 편집");
-    await expect(dialog.getByRole("alert")).toHaveText("이 조건식에는 아직 이 화면에서 고칠 수 없는 조건(신고가가 아닌 조건이나 줄마다 다른 봉 주기)이 있어 저장할 수 없습니다. 삭제는 할 수 있습니다.");
-    await dialog.getByLabel("이름").fill(`${name} 바꿈`);
-    await dialog.getByRole("button", { name: "저장" }).click();
-    await expect(dialog.getByRole("button", { name: "저장" })).toBeEnabled();
-    await expect(dialog).toBeVisible();
+    await expect(dialog.getByRole("alert")).toHaveCount(0);
     return dialog;
   };
-
-  await test.step("시가총액 줄이 든 조건식은 저장이 막히고, 확인받아 지울 수 있다", async () => {
-    const dialog = await blocked(capped.name);
-    const confirmed = page.waitForEvent("dialog").then((d) => d.accept());
+  const renameAndSave = async (dialog: Locator, name: string) => {
+    await dialog.getByLabel("이름").fill(name);
     const saved = savedTo(page, "/api/screens");
-    await dialog.getByRole("button", { name: "삭제" }).click();
-    await confirmed;
+    await dialog.getByRole("button", { name: "저장" }).click();
     await saved;
     await expect(dialog).toBeHidden();
+  };
+
+  await test.step("시가총액 줄은 봉 주기 없이 억 원으로 보이고, 이름만 바꿔 저장된다", async () => {
+    const dialog = await edit(capped.name);
+    await expect(dialog.getByRole("combobox", { name: "조건 2 종류" })).toHaveValue("market_cap");
+    await expect(dialog.getByRole("combobox", { name: "조건 2 봉 주기" })).toHaveCount(0);
+    await expect(dialog.getByRole("textbox", { name: "조건 2 최소" })).toHaveValue("3000");
+    await expect(dialog.getByText("시가총액이 3,000억 원 이상이다")).toBeVisible();
+    await renameAndSave(dialog, "시가총액 섞임 바꿈");
   });
 
-  await test.step("줄마다 봉 주기가 다른 조건식도 저장이 막히고, 취소하면 그대로 남는다", async () => {
-    const dialog = await blocked(mixed.name);
-    await dialog.getByRole("button", { name: "취소" }).click();
-    await expect(dialog).toBeHidden();
+  await test.step("줄마다 다른 봉 주기와 고른 시장이 보이고, 이름만 바꿔 저장된다", async () => {
+    const dialog = await edit(mixed.name);
+    await expect(dialog.getByRole("combobox", { name: "조건 1 봉 주기" })).toHaveValue("D");
+    await expect(dialog.getByRole("combobox", { name: "조건 2 봉 주기" })).toHaveValue("W");
+    await expect(dialog.getByText("이번 주 종가가 52주 신고가다")).toBeVisible();
+    await expect(dialog.getByRole("group", { name: "시장" }).getByRole("button", { name: "코스닥" })).toHaveAttribute("aria-pressed", "true");
+    await expect(dialog.getByRole("group", { name: "시장" }).getByRole("button", { name: "코스피" })).toHaveAttribute("aria-pressed", "false");
+    await renameAndSave(dialog, "주봉 섞임 바꿈");
   });
 
   await test.step("거래대금 신고가 줄은 값 칸에 거래대금이 골라져 있고, 이름을 바꿔 저장해도 거래대금이다", async () => {
-    await pick(traded.name);
-    await panel(page).getByRole("button", { name: "편집" }).click();
-    const dialog = editor(page, "조건식 편집");
+    const dialog = await edit(traded.name);
     const value = dialog.getByRole("combobox", { name: "조건 1 값" });
     await expect(value).toHaveValue("traded_value");
     await expect(value.locator("option:checked")).toHaveText("거래대금");
     await expect(dialog.getByText("당일 거래대금이 60일 신고거래대금이다")).toBeVisible();
-    await dialog.getByLabel("이름").fill("신고거래대금 바꿈");
-    const saved = savedTo(page, "/api/screens");
-    await dialog.getByRole("button", { name: "저장" }).click();
-    await saved;
-    await expect(dialog).toBeHidden();
+    await renameAndSave(dialog, "신고거래대금 바꿈");
   });
 
   const stored = await (await fetch(screensUrl)).json();
-  expect(stored.screens).toEqual([mixed, { ...traded, name: "신고거래대금 바꿈" }]);
+  expect(stored.screens).toEqual([
+    { ...capped, name: "시가총액 섞임 바꿈" },
+    { ...mixed, name: "주봉 섞임 바꿈" },
+    { ...traded, name: "신고거래대금 바꿈" },
+  ]);
 });
 
 test.describe("20:00 뒤", () => {
