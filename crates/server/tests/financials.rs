@@ -26,6 +26,13 @@ struct FakeState {
     mismatched_xbrl: bool,
     paused_report: Option<String>,
     nonstandard_account: bool,
+    notice: Option<String>,
+    notice_status: Option<StatusCode>,
+    notice_network_failure: bool,
+    kind_responses: HashMap<String, Value>,
+    directory: Option<String>,
+    company_code: Option<String>,
+    preferred_dividend: bool,
 }
 
 struct Fake { state: Arc<Mutex<FakeState>>, url: String, task: tokio::task::JoinHandle<()> }
@@ -35,7 +42,7 @@ impl Drop for Fake { fn drop(&mut self) { self.task.abort(); } }
 impl Fake {
     async fn start() -> Self {
         let state = Arc::new(Mutex::new(FakeState::default()));
-        let app = Router::new().route("/api/{endpoint}", get(respond)).route("/common/searchcorpname.do", get(kind)).with_state(state.clone());
+        let app = Router::new().route("/api/{endpoint}", get(respond)).route("/common/searchcorpname.do", get(kind)).route("/external/{*path}", get(notice)).with_state(state.clone());
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let url = format!("http://{}", listener.local_addr().unwrap());
         let task = tokio::spawn(async move { axum::serve(listener, app).await.unwrap(); });
@@ -56,7 +63,18 @@ fn zipped(name: &str, xml: &str) -> Vec<u8> {
 async fn kind(State(state): State<Arc<Mutex<FakeState>>>, Query(params): Query<BTreeMap<String, String>>) -> axum::Json<Value> {
     let mut state = state.lock().unwrap();
     state.calls.push(("kind".into(), params.clone()));
+    if let Some(rows) = state.kind_responses.get(&params["searchCorpName"]) { return axum::Json(rows.clone()); }
     axum::Json(if state.kind_other_code { json!([{ "repisusrtcd2":"005930", "secugrpId":"ST", "fssunqno":CORP }]) } else if state.preferred && params["searchCorpName"] == "005935" { json!([{"repisusrtcd2":"005935","secugrpId":"ST","fssunqno":CORP}]) } else { json!([]) })
+}
+
+async fn notice(State(state): State<Arc<Mutex<FakeState>>>) -> Response {
+    let mut state = state.lock().unwrap();
+    state.calls.push(("notice".into(), BTreeMap::new()));
+    if state.notice_network_failure {
+        let stream = futures::stream::once(async { Err::<String, _>(std::io::Error::other("synthetic body failure")) });
+        return Response::new(axum::body::Body::from_stream(stream));
+    }
+    (state.notice_status.unwrap_or(StatusCode::OK), state.notice.clone().unwrap_or_else(|| "<HTML><PRE></PRE></HTML>".into())).into_response()
 }
 
 async fn respond(State(state): State<Arc<Mutex<FakeState>>>, Path(endpoint): Path<String>, Query(params): Query<BTreeMap<String, String>>) -> Response {
@@ -81,8 +99,11 @@ async fn respond(State(state): State<Arc<Mutex<FakeState>>>, Path(endpoint): Pat
             let escaped:String = KEY.bytes().map(|b|format!("\\u{b:04x}")).collect();
             format!(r#"{{"status":"000","list":[{{"value":"{escaped}"}}]}}"#).into_response()
         }
-        "corpCode.xml" => zipped("CORPCODE.xml", &format!("<result><list><corp_code>{CORP}</corp_code><corp_name>회사</corp_name><stock_code>005930</stock_code></list><list><corp_code>00000002</corp_code><corp_name>다른 회사</corp_name><stock_code>000001</stock_code></list></result>")).into_response(),
-        "company.json" => axum::Json(json!({"status":"000","corp_name":"회사","acc_mt":"12"})).into_response(),
+        "corpCode.xml" => zipped("CORPCODE.xml", &fake_directory(&state)).into_response(),
+        "company.json" => {
+            let code = state.lock().unwrap().company_code.clone().unwrap_or_else(|| corp.into());
+            axum::Json(json!({"status":"000","corp_code":code,"corp_name":"회사","acc_mt":"12"})).into_response()
+        }
         "list.json" => {
             let mut rows = vec![json!({"corp_code":corp,"rcept_no":original_receipt,"rcept_dt":"20150331","report_nm":"사업보고서 (2015.12)"})];
             if correction { rows.push(json!({"corp_code":corp,"rcept_no":receipt,"rcept_dt":"20160401","report_nm":"[기재정정]사업보고서 (2015.12)"})); }
@@ -108,11 +129,20 @@ async fn respond(State(state): State<Arc<Mutex<FakeState>>>, Path(endpoint): Pat
         }
         "alotMatter.json" => {
             if params["bsns_year"] != "2015" { return axum::Json(json!({"status":"013"})).into_response(); }
-            axum::Json(json!({"status":"000","list":[{"corp_code":corp,"stlm_dt":"2015-12-31","rcept_no":receipt,"se":"주당 현금배당금(원)","stock_knd":"보통주","thstrm":"0"},{"corp_code":corp,"stlm_dt":"2015-12-31","rcept_no":receipt,"se":"주당 현금배당금(원)","stock_knd":"종류불명","thstrm":"100"}]})).into_response()
+            let mut rows = vec![json!({"corp_code":corp,"stlm_dt":"2015-12-31","rcept_no":receipt,"se":"주당 현금배당금(원)","stock_knd":"보통주","thstrm":"0"}),json!({"corp_code":corp,"stlm_dt":"2015-12-31","rcept_no":receipt,"se":"주당 현금배당금(원)","stock_knd":"종류불명","thstrm":"100"})];
+            if state.lock().unwrap().preferred_dividend { rows.push(json!({"corp_code":corp,"stlm_dt":"2015-12-31","rcept_no":receipt,"se":"주당 현금배당금(원)","stock_knd":"우선주","thstrm":"7"})); }
+            axum::Json(json!({"status":"000","list":rows})).into_response()
         }
         _ => StatusCode::NOT_FOUND.into_response(),
     }
 }
+
+fn fake_directory(state: &Mutex<FakeState>) -> String {
+    state.lock().unwrap().directory.clone().unwrap_or_else(|| format!("<result><list><corp_code>{CORP}</corp_code><corp_name>회사</corp_name><stock_code>005930</stock_code></list><list><corp_code>00000002</corp_code><corp_name>다른 회사</corp_name><stock_code>000001</stock_code></list></result>"))
+}
+
+#[path = "financials/mapping.rs"]
+mod mapping;
 
 fn account(section: &str, id: &str, amount: &str) -> BTreeMap<String, String> {
     [("corp_code",CORP),("bsns_year","2015"),("reprt_code","11014"),("rcept_no",RECEIPT),("sj_div",section),("account_id",id),("account_nm","원래 계정"),("currency","KRW"),("thstrm_nm","제 1기"),("thstrm_amount",amount),("thstrm_add_amount","300")].into_iter().map(|(k,v)|(k.into(),v.into())).collect()

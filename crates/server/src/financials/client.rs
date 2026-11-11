@@ -8,6 +8,8 @@ use tokio::sync::Mutex;
 use crate::config::Secret;
 use super::model::{Basis, Company, Failure, Security};
 
+mod preferred;
+
 pub type Row = BTreeMap<String, String>;
 
 pub struct Client {
@@ -90,18 +92,28 @@ impl Client {
             *directory = Some(companies);
         }
         let direct: Vec<_> = directory.as_ref().unwrap().iter().filter(|r| field(r, "stock_code") == stock).collect();
+        if direct.len() > 1 { return Ok(None); }
         let (corp, evidence) = if direct.len() == 1 {
             (field(direct[0], "corp_code").to_owned(), "OpenDART/corpCode.xml".to_owned())
         } else {
-            let response = self.http.get(format!("{}/common/searchcorpname.do", self.kind_base)).query(&[("method", "searchCorpNameJson"), ("searchCodeType", "number"), ("searchCorpName", stock)]).send().await.map_err(|_| Failure::Network)?;
-            if !response.status().is_success() { return Err(Failure::Remote); }
-            let bytes = response.bytes().await.map_err(|_| Failure::Network)?;
-            let candidates: Vec<Row> = serde_json::from_slice(&bytes).map_err(|_| Failure::InvalidResponse)?;
-            let exact: Vec<_> = candidates.iter().filter(|r| field(r, "repisusrtcd2") == stock && field(r, "secugrpId") == "ST" && digits(field(r, "fssunqno"), 8)).collect();
-            if exact.len() != 1 { return Ok(None); }
-            (field(exact[0], "fssunqno").to_owned(), "KRX KIND/common/searchcorpname.do/repisusrtcd2+fssunqno".to_owned())
+            let candidates = self.kind_companies(stock).await?;
+            if candidates.is_empty() && preferred {
+                let Some(link) = preferred::for_stock(stock) else { return Ok(None); };
+                let body = self.kind_bytes(link.path, &[]).await?;
+                let text = std::str::from_utf8(&body).map_err(|_| Failure::InvalidResponse)?;
+                if !link.verify_notice(text)? { return Ok(None); }
+                let candidates = self.kind_companies(link.common_code).await?;
+                if !link.verify_company(&candidates, directory.as_ref().unwrap()) { return Ok(None); }
+                (link.corp_code.to_owned(), link.evidence())
+            } else {
+                if candidates.len() != 1 { return Ok(None); }
+                let row = &candidates[0];
+                if field(row, "repisusrtcd2") != stock || field(row, "secugrpId") != "ST" || !digits(field(row, "fssunqno"), 8) { return Ok(None); }
+                (field(row, "fssunqno").to_owned(), "KRX KIND/common/searchcorpname.do/repisusrtcd2+fssunqno".to_owned())
+            }
         };
         drop(directory);
+        if preferred && let Some(link) = preferred::for_stock(stock) && corp != link.corp_code { return Ok(None); }
         let company = self.response("company.json", &[("corp_code", corp.clone())]).await?;
         if company.get("corp_code").is_some_and(|value| value != &corp) { return Err(Failure::InvalidResponse); }
         let name = company["corp_name"].as_str().ok_or(Failure::InvalidResponse)?.to_owned();
@@ -111,6 +123,19 @@ impl Client {
             share_class: (!preferred).then(|| "보통주".into()),
             share_class_reason: preferred.then(|| "preferred_issue_class_unverified".into()), evidence,
         }))
+    }
+
+    async fn kind_bytes(&self, path: &str, params: &[(&str, &str)]) -> Result<Vec<u8>, Failure> {
+        let response = self.http.get(format!("{}{path}", self.kind_base)).query(params).send().await.map_err(|_| Failure::Network)?;
+        if !response.status().is_success() { return Err(Failure::Remote); }
+        let bytes = response.bytes().await.map_err(|_| Failure::Network)?;
+        if bytes.len() > 1024 * 1024 { return Err(Failure::InvalidResponse); }
+        Ok(bytes.to_vec())
+    }
+
+    async fn kind_companies(&self, stock: &str) -> Result<Vec<Row>, Failure> {
+        let bytes = self.kind_bytes("/common/searchcorpname.do", &[("method", "searchCorpNameJson"), ("searchCodeType", "number"), ("searchCorpName", stock)]).await?;
+        serde_json::from_slice(&bytes).map_err(|_| Failure::InvalidResponse)
     }
 
     pub async fn disclosures(&self, corp: &str, today: &str) -> Result<Vec<Row>, Failure> {
