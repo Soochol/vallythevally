@@ -20,6 +20,8 @@ mod ws;
 pub use krx::{KrxBar, KrxMarket, KrxStock};
 pub use ws::{DEFAULT_PING_EVERY, WsHub, WsStats, tick_0j, trade_0b};
 
+include!(concat!(env!("OUT_DIR"), "/fixtures.rs"));
+
 pub const APP_KEY: &str = "FAKE-APPKEY-e2e-7f3a91c2";
 pub const APP_SECRET: &str = "FAKE-SECRET-e2e-c0ffee42";
 pub const TOKEN: &str = "FAKE-TOKEN-e2e-5eed1234";
@@ -202,8 +204,9 @@ impl FakeKiwoom {
 }
 
 pub fn fixture(name: &str) -> Value {
-    let path = format!("{}/{name}.json", concat!(env!("CARGO_MANIFEST_DIR"), "/../server/tests/fixtures/kiwoom"));
-    serde_json::from_str(&std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{path}: {e}"))).unwrap()
+    let source = FIXTURES.iter().find(|(key, _)| *key == name)
+        .unwrap_or_else(|| panic!("알 수 없는 가짜 키움 fixture: {name}"));
+    serde_json::from_str(source.1).expect("fixture JSON")
 }
 
 pub fn token_for(app_key: &str) -> String {
