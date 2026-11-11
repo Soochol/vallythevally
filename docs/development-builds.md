@@ -45,7 +45,7 @@ python3 scripts/dev.py --bundled cargo check -p server
 cargo build --locked --release -p server
 ```
 
-DuckDB는 release 바이너리에 포함되므로 개발 캐시나 별도 `libduckdb.so`를 배포할 필요가 없다. 실제 배포 직전에 release 바이너리의 가짜 키움 환경 기동·주요 동작을 검증한다. 이 개발 도구의 검증에서는 release 산출물의 실제 빌드·기동까지 수행하지 않았다.
+DuckDB는 release 바이너리에 포함되므로 개발 캐시나 별도 `libduckdb.so`를 배포할 필요가 없다. 실제 배포 직전에 release 바이너리의 가짜 키움 환경 기동·주요 동작을 검증한다.
 
 ## 공유 범위와 무효화
 
