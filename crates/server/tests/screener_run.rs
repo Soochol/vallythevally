@@ -52,6 +52,7 @@ fn stock(code: &str, bars: Vec<KrxBar>) -> KrxStock {
         company_class_name: String::new(),
         reg_day: bars[0].day,
         audit_info: "정상".into(),
+        listed_shares: Some(1_000_000),
         quoted: true,
         daily: DailyAnswer::Bars,
         bars,
