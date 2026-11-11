@@ -1,4 +1,4 @@
-import type { UseQueryResult } from "@tanstack/react-query";
+import { type QueryClient, useQueryClient, type UseQueryResult } from "@tanstack/react-query";
 import { type ReactNode, type RefObject, useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import type { ApiErrorBody } from "../../api/generated/ApiErrorBody";
 import type { KstDate } from "../../api/generated/KstDate";
@@ -7,10 +7,10 @@ import type { ScreenerResult } from "../../api/generated/ScreenerResult";
 import type { ScreenerRow } from "../../api/generated/ScreenerRow";
 import type { ScreenerStatus } from "../../api/generated/ScreenerStatus";
 import type { ScreenerUpdate } from "../../api/generated/ScreenerUpdate";
-import type { ScreenPeriod } from "../../api/generated/ScreenPeriod";
 import type { Screens } from "../../api/generated/Screens";
 import type { SymbolCode } from "../../api/generated/SymbolCode";
 import type { UpdatePhase } from "../../api/generated/UpdatePhase";
+import { symbolInfoQuery } from "../../api/queries";
 import { useScreenerStatus, useScreens, useUpdateCommands } from "../../api/screener";
 import { direction, formatPercent, formatPrice } from "../../lib/format";
 import { isTypingTarget } from "../../lib/hotkeys";
@@ -21,16 +21,16 @@ import {
   EXCLUDE_LABEL,
   excludedInOrder,
   excludedText,
-  highDateText,
   isUpdating,
+  MARKET_LABEL,
+  marketsInOrder,
+  matchedDateText,
   nextSort,
-  PERIOD_NAME,
   PHASE_LABEL,
   type ResultSort,
   type ResultSortKey,
   type RunBlock,
   runBlock,
-  screenPeriod,
   showsUpdateBand,
   sortRows,
   type StatusFooter,
@@ -39,6 +39,7 @@ import {
   type UpdateRetry,
   updateRetry,
 } from "../../lib/screener";
+import type { VenueTarget } from "../../lib/venue";
 import { addSymbols, listNameFrom, MAX_WATCHLISTS } from "../../lib/watchlist";
 import { useCell, useLayoutStore } from "../../stores/layout";
 import { type Rerun, rerunReason, runOf, type ScreenRun, shownResult, useScreenerStore } from "../../stores/screener";
@@ -63,10 +64,30 @@ const showCommandError = (e: unknown) => toast(`업데이트 명령을 보내지
 const editScreen = (id: string | null) => useSelectionStore.getState().openScreenEditor(id);
 const count = (n: number) => n.toLocaleString("ko-KR");
 
-function openResult(code: SymbolCode) {
-  const selection = useSelectionStore.getState();
-  useLayoutStore.getState().setSymbol(selection.activeSlot, { code, nxtEnabled: false }, "krx");
-  selection.setPhoneTab("chart");
+let openingResult: SymbolCode | null = null;
+
+async function venueTargetOf(queryClient: QueryClient, code: SymbolCode): Promise<VenueTarget> {
+  try {
+    return await queryClient.fetchQuery(symbolInfoQuery(code));
+  } catch {
+    return { code, nxtEnabled: false };
+  }
+}
+
+function useOpenResult() {
+  const queryClient = useQueryClient();
+  return useCallback(
+    async (code: SymbolCode) => {
+      const slot = useSelectionStore.getState().activeSlot;
+      openingResult = code;
+      const target = await venueTargetOf(queryClient, code);
+      if (openingResult !== code) return;
+      openingResult = null;
+      useLayoutStore.getState().setSymbol(slot, target);
+      useSelectionStore.getState().setPhoneTab("chart");
+    },
+    [queryClient],
+  );
 }
 
 function useChosenScreen() {
@@ -172,6 +193,7 @@ export function ScreenerPanel() {
 
 function useResultKeys(rows: readonly ScreenerRow[]) {
   const active = useActiveSymbol();
+  const openResult = useOpenResult();
   useEffect(() => {
     if (rows.length === 0) return;
     const onKey = (e: KeyboardEvent) => {
@@ -180,13 +202,14 @@ function useResultKeys(rows: readonly ScreenerRow[]) {
       if (useSelectionStore.getState().dialog || isTypingTarget(e.target)) return;
       e.preventDefault();
       const step = e.key === "ArrowDown" ? 1 : -1;
-      const at = rows.findIndex((r) => r.symbol === active);
+      const from = openingResult ?? active;
+      const at = rows.findIndex((r) => r.symbol === from);
       const next = at < 0 ? (step === 1 ? 0 : rows.length - 1) : Math.min(rows.length - 1, Math.max(0, at + step));
-      if (next !== at) openResult(rows[next]!.symbol);
+      if (next !== at) void openResult(rows[next]!.symbol);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [rows, active]);
+  }, [rows, active, openResult]);
 }
 
 function useFollowActive(list: RefObject<HTMLUListElement | null>, active: SymbolCode, rows: readonly ScreenerRow[]) {
@@ -262,7 +285,7 @@ function ScreenPicker({ screens, screen }: { screens: readonly Screen[]; screen:
   const menu = useMenuToggle();
   const choose = useScreenerStore((s) => s.choose);
   const items: MenuItem[] = [
-    ...screens.map((s): MenuItem => ({ kind: "radio", label: `${s.name} · ${PERIOD_NAME[screenPeriod(s)]}`, checked: s.id === screen.id, onSelect: () => choose(s.id) })),
+    ...screens.map((s): MenuItem => ({ kind: "radio", label: s.name, checked: s.id === screen.id, onSelect: () => choose(s.id) })),
     { kind: "separator" },
     { kind: "action", label: "새 조건식…", onSelect: () => editScreen(null) },
   ];
@@ -289,14 +312,24 @@ function ScreenPicker({ screens, screen }: { screens: readonly Screen[]; screen:
 }
 
 function ScreenSummary({ screen }: { screen: Screen }) {
+  const markets = marketsInOrder(screen.markets);
   const excluded = excludedInOrder(screen.exclude);
   return (
     <div className="mt-1.5 rounded-m border border-line bg-surface px-2.5 py-2">
       <p className="flex flex-wrap items-center gap-1 text-xs text-text-3">
-        <span className="rounded-s bg-raised px-1.5 py-px font-[600] text-text-2">{PERIOD_NAME[screenPeriod(screen)]}</span>
-        {excluded.length === 0 ? (
-          <span>전 종목 대상</span>
-        ) : (
+        {markets.length === 0 && excluded.length === 0 && <span>전 종목 대상</span>}
+        {markets.length > 0 && (
+          <>
+            <span>대상</span>
+            {markets.map((m) => (
+              <span key={m} className="rounded-s bg-raised px-1.5 py-px font-[600] text-text-2">
+                {MARKET_LABEL[m]}
+              </span>
+            ))}
+          </>
+        )}
+        {markets.length > 0 && excluded.length > 0 && <span aria-hidden="true">·</span>}
+        {excluded.length > 0 && (
           <>
             <span>제외</span>
             {excluded.map((k) => (
@@ -409,7 +442,7 @@ function NoScreen({ query }: { query: UseQueryResult<Screens> }) {
         </button>
       }
     >
-      조건식에 이름, 봉 주기, 신고가 조건을 정해 저장하면 여기서 골라 실행합니다.
+      조건식에 이름과 조건을 정해 저장하면 여기서 골라 실행합니다.
     </Notice>
   );
 }
@@ -423,7 +456,7 @@ function RetryButton({ onClick, label = "다시 시도", disabled = false }: { o
 }
 
 const NOT_RUN: Record<RunBlock | "ready", { title: string; body: string }> = {
-  ready: { title: "실행하면 결과가 여기에 나옵니다", body: "행을 누르거나 ↑↓로 결과를 차례로 칸에 엽니다. 칸의 거래소는 KRX로 바뀝니다." },
+  ready: { title: "실행하면 결과가 여기에 나옵니다", body: "행을 누르거나 ↑↓로 결과를 차례로 칸에 엽니다." },
   updating: { title: "최근 관측일을 채우고 있습니다", body: "끝나면 실행할 수 있습니다." },
   missing_day: { title: "새 자료가 필요합니다", body: "위에서 업데이트하면 빠진 관측일을 채웁니다." },
   empty: { title: "저장소가 비어 있습니다", body: "위에서 처음 받기를 누르면 KRX 일봉을 받습니다." },
@@ -472,13 +505,9 @@ function ResultList({ screen, result, rows, running, rerun, onRun }: ResultListP
       <div className="flex flex-none items-baseline gap-1.5 px-3 pt-2.5">
         <span className="text-xl font-[700] leading-none">{count(rows.length)}</span>
         <span className="text-s text-text-2">종목 · {dayLabel(result.asOf, result.asOf)} 기준</span>
-        <span className="flex-1" />
-        <span className="text-xs text-text-3" title="스크리너는 KRX 일봉으로 찾으므로, 결과를 열면 칸의 거래소를 KRX로 바꿉니다">
-          KRX로 엶
-        </span>
       </div>
       <p className="flex-none px-3 pb-2 pt-1 text-xs text-text-3">
-        대상 {count(result.universe)}종목 · 빠짐: {excludedText(screen, result.excluded)}
+        대상 {count(result.universe)}종목 · 빠짐: {excludedText(result.excluded)}
       </p>
       {rerun && (
         <p className="mx-3 mb-2 flex flex-none items-center gap-2 rounded-s bg-accent-soft px-2 py-1.5 text-xs text-accent">
@@ -506,7 +535,7 @@ function ResultList({ screen, result, rows, running, rerun, onRun }: ResultListP
           <SortHeader sort={sort} />
           <ul ref={list} aria-label={`${screen.name} 결과`} className="min-h-0 flex-1 overflow-auto">
             {rows.map((r) => (
-              <ResultRow key={r.symbol} row={r} period={screenPeriod(screen)} asOf={result.asOf} active={r.symbol === active} />
+              <ResultRow key={r.symbol} row={r} screen={screen} asOf={result.asOf} active={r.symbol === active} />
             ))}
           </ul>
         </>
@@ -519,7 +548,7 @@ const COLUMNS: readonly { key: ResultSortKey; label: string }[] = [
   { key: "name", label: "종목" },
   { key: "close", label: "종가" },
   { key: "changeRate", label: "등락률" },
-  { key: "matchedDate", label: "신고가" },
+  { key: "matchedDate", label: "맞은 날짜" },
 ];
 
 function SortHeader({ sort }: { sort: ResultSort }) {
@@ -546,15 +575,16 @@ function SortHeader({ sort }: { sort: ResultSort }) {
   );
 }
 
-function ResultRow({ row, period, asOf, active }: { row: ScreenerRow; period: ScreenPeriod; asOf: KstDate; active: boolean }) {
-  const high = highDateText(period, row.matchedDate, asOf);
+function ResultRow({ row, screen, asOf, active }: { row: ScreenerRow; screen: Screen; asOf: KstDate; active: boolean }) {
+  const matched = matchedDateText(screen, row.matchedDate, asOf);
+  const openResult = useOpenResult();
   return (
     <li data-code={row.symbol} className={`border-l-2 ${active ? "border-l-accent bg-surface" : "border-l-transparent"}`}>
       <button
         type="button"
         data-main
         aria-current={active || undefined}
-        onClick={() => openResult(row.symbol)}
+        onClick={() => void openResult(row.symbol)}
         style={ROW_GRID}
         className="grid w-full items-center gap-1 py-[5px] pl-[10px] pr-3 text-left hover:bg-surface"
       >
@@ -566,7 +596,7 @@ function ResultRow({ row, period, asOf, active }: { row: ScreenerRow; period: Sc
         <span className={`text-right text-s font-[550] ${row.changeRate === null ? "text-text-3" : DIR_CLASS[direction(row.changeRate)]}`}>
           {row.changeRate === null ? "—" : formatPercent(row.changeRate)}
         </span>
-        <span className={`text-right text-s ${high.current ? "font-[650] text-accent" : "text-text-2"}`}>{high.text}</span>
+        <span className={`text-right text-s ${matched.current ? "font-[650] text-accent" : "text-text-2"}`}>{matched.text}</span>
       </button>
     </li>
   );

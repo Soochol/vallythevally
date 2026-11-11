@@ -10,7 +10,8 @@ import {
   DEFAULT_SORT,
   excludedInOrder,
   excludedText,
-  highDateText,
+  marketsInOrder,
+  matchedDateText,
   msUntilStatusTurns,
   nextSort,
   runBlock,
@@ -23,6 +24,8 @@ import {
 } from "./screener";
 
 const newHigh = (period: ScreenPeriod, field: BarField, n: number, m: number) => ({ kind: "new_high", period, m, field, n }) as const;
+const screenOf = (conditions: Screen["conditions"]): Screen => ({ id: "s", name: "s", markets: [], exclude: [], conditions });
+const marketCap = { kind: "market_cap", min: 300_000_000_000, max: null } as const;
 
 test("조건 문장은 그 줄의 봉 주기 단위와 M이 1인지에 따라 바뀐다", () => {
   expect(conditionSentence(newHigh("D", "high", 200, 5))).toBe("최근 5일 안에 고가가 200일 신고가인 봉이 있다");
@@ -35,10 +38,9 @@ test("조건 문장은 그 줄의 봉 주기 단위와 M이 1인지에 따라 �
 });
 
 test("조건식의 봉 주기는 봉으로 따지는 첫 줄의 것이다", () => {
-  const screen = (conditions: Screen["conditions"]): Screen => ({ id: "s", name: "s", markets: [], exclude: [], conditions });
-  expect(screenPeriod(screen([newHigh("W", "high", 52, 1), newHigh("D", "close", 20, 1)]))).toBe("W");
-  expect(screenPeriod(screen([{ kind: "market_cap", min: 300_000_000_000, max: null }, newHigh("M", "high", 12, 1)]))).toBe("M");
-  expect(screenPeriod(screen([{ kind: "market_cap", min: null, max: 100_000_000_000 }]))).toBe("D");
+  expect(screenPeriod(screenOf([newHigh("W", "high", 52, 1), newHigh("D", "close", 20, 1)]))).toBe("W");
+  expect(screenPeriod(screenOf([marketCap, newHigh("M", "high", 12, 1)]))).toBe("M");
+  expect(screenPeriod(screenOf([{ kind: "market_cap", min: null, max: 100_000_000_000 }]))).toBe("D");
 });
 
 test("제외 목록은 저장 순서와 상관없이 종류, 상태 순으로 보인다", () => {
@@ -46,16 +48,16 @@ test("제외 목록은 저장 순서와 상관없이 종류, 상태 순으로 �
   expect(excludedInOrder([])).toEqual([]);
 });
 
-test("빠진 종목 수는 조건 가운데 가장 큰 N을 상장 기준으로 적는다", () => {
-  const screen: Screen = {
-    id: "s",
-    name: "주봉",
-    markets: [],
-    exclude: [],
-    conditions: [newHigh("W", "high", 52, 1), newHigh("W", "volume", 104, 4)],
-  };
-  expect(excludedText(screen, { listedTooShort: 14, historyShort: 1120, unconfirmed: 0 })).toBe("상장 104주 미만 14 · 이력 덜 참 1,120");
-  expect(excludedText(screen, { listedTooShort: 14, historyShort: 1120, unconfirmed: 1203 })).toBe("상장 104주 미만 14 · 이력 덜 참 1,120 · 확인 안 됨 1,203");
+test("시장 칩은 저장 순서와 상관없이 코스피, 코스닥 순으로 보인다", () => {
+  expect(marketsInOrder(["kosdaq", "kospi"])).toEqual(["kospi", "kosdaq"]);
+  expect(marketsInOrder(["kosdaq"])).toEqual(["kosdaq"]);
+  expect(marketsInOrder([])).toEqual([]);
+});
+
+test("빠진 종목 수는 상장 기간 부족, 이력 덜 참 순이고, 확인 안 됨은 있을 때만 붙는다", () => {
+  expect(excludedText({ listedTooShort: 14, historyShort: 1120, unconfirmed: 0 })).toBe("상장 기간 부족 14 · 이력 덜 참 1,120");
+  expect(excludedText({ listedTooShort: 0, historyShort: 0, unconfirmed: 0 })).toBe("상장 기간 부족 0 · 이력 덜 참 0");
+  expect(excludedText({ listedTooShort: 14, historyShort: 1120, unconfirmed: 1203 })).toBe("상장 기간 부족 14 · 이력 덜 참 1,120 · 확인 안 됨 1,203");
 });
 
 test("날짜는 기준과 같은 해면 연도를 빼고 요일을 붙인다", () => {
@@ -63,18 +65,37 @@ test("날짜는 기준과 같은 해면 연도를 빼고 요일을 붙인다", (
   expect(dayLabel("2025-12-30", "2026-01-02")).toBe("2025-12-30(화)");
 });
 
-test("신고가 날짜가 기준 관측일의 봉이면 당일·이번 주·이번 달로 보인다", () => {
-  expect(highDateText("D", "2026-11-10", "2026-11-10")).toEqual({ text: "당일", current: true });
-  expect(highDateText("D", "2026-11-06", "2026-11-10")).toEqual({ text: "11-06", current: false });
-  expect(highDateText("D", "2025-12-30", "2026-01-02")).toEqual({ text: "2025-12-30", current: false });
+test("맞은 날짜가 기준 관측일의 봉이면 당일·이번 주·이번 달로 보인다", () => {
+  const daily = screenOf([newHigh("D", "high", 200, 1)]);
+  expect(matchedDateText(daily, "2026-11-10", "2026-11-10")).toEqual({ text: "당일", current: true });
+  expect(matchedDateText(daily, "2026-11-06", "2026-11-10")).toEqual({ text: "11-06", current: false });
+  expect(matchedDateText(daily, "2025-12-30", "2026-01-02")).toEqual({ text: "2025-12-30", current: false });
 
-  expect(highDateText("W", "2026-11-09", "2026-11-11")).toEqual({ text: "이번 주", current: true });
-  expect(highDateText("W", "2025-12-29", "2026-01-02")).toEqual({ text: "이번 주", current: true });
-  expect(highDateText("W", "2026-11-02", "2026-11-11")).toEqual({ text: "11-02 주", current: false });
+  const weekly = screenOf([newHigh("W", "close", 52, 1)]);
+  expect(matchedDateText(weekly, "2026-11-09", "2026-11-11")).toEqual({ text: "이번 주", current: true });
+  expect(matchedDateText(weekly, "2025-12-29", "2026-01-02")).toEqual({ text: "이번 주", current: true });
+  expect(matchedDateText(weekly, "2026-11-02", "2026-11-11")).toEqual({ text: "11-02 주", current: false });
 
-  expect(highDateText("M", "2026-11-02", "2026-11-10")).toEqual({ text: "이번 달", current: true });
-  expect(highDateText("M", "2026-10-01", "2026-11-10")).toEqual({ text: "10월", current: false });
-  expect(highDateText("M", "2025-12-01", "2026-01-05")).toEqual({ text: "2025년 12월", current: false });
+  const monthly = screenOf([newHigh("M", "low", 12, 1)]);
+  expect(matchedDateText(monthly, "2026-11-02", "2026-11-10")).toEqual({ text: "이번 달", current: true });
+  expect(matchedDateText(monthly, "2026-10-01", "2026-11-10")).toEqual({ text: "10월", current: false });
+  expect(matchedDateText(monthly, "2025-12-01", "2026-01-05")).toEqual({ text: "2025년 12월", current: false });
+});
+
+test("맞은 날짜는 봉으로 따지는 첫 줄의 봉 주기로 보이고, 그런 줄이 없으면 일봉으로 보인다", () => {
+  const weeklyFirst = screenOf([newHigh("W", "close", 52, 1), newHigh("D", "volume", 20, 1)]);
+  expect(matchedDateText(weeklyFirst, "2026-11-09", "2026-11-11")).toEqual({ text: "이번 주", current: true });
+  expect(matchedDateText(weeklyFirst, "2026-11-02", "2026-11-11")).toEqual({ text: "11-02 주", current: false });
+
+  const dailyFirst = screenOf([newHigh("D", "volume", 20, 1), newHigh("W", "close", 52, 1)]);
+  expect(matchedDateText(dailyFirst, "2026-11-09", "2026-11-11")).toEqual({ text: "11-09", current: false });
+
+  const capFirst = screenOf([marketCap, newHigh("M", "high", 12, 1)]);
+  expect(matchedDateText(capFirst, "2026-11-02", "2026-11-10")).toEqual({ text: "이번 달", current: true });
+
+  const capOnly = screenOf([marketCap]);
+  expect(matchedDateText(capOnly, "2026-11-10", "2026-11-10")).toEqual({ text: "당일", current: true });
+  expect(matchedDateText(capOnly, "2026-11-09", "2026-11-10")).toEqual({ text: "11-09", current: false });
 });
 
 const row = (symbol: string, name: string, close: number, changeRate: number | null, matchedDate: string): ScreenerRow => ({
@@ -92,7 +113,7 @@ const rows: readonly ScreenerRow[] = [
 ];
 const order = (sorted: readonly ScreenerRow[]) => sorted.map((r) => r.symbol);
 
-test("결과는 기본으로 신고가 날짜 최신순이고, 같으면 종목코드 순이다", () => {
+test("결과는 기본으로 맞은 날짜 최신순이고, 같으면 종목코드 순이다", () => {
   expect(order(sortRows(rows, DEFAULT_SORT))).toEqual(["000100", "000300", "000050", "000200"]);
 });
 
