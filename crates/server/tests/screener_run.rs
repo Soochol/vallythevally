@@ -432,6 +432,52 @@ async fn a_traded_value_new_high_runs_and_no_condition_kind_or_market_is_refused
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn a_volume_or_traded_value_high_in_the_last_100_of_200_cells_follows_the_price_new_high_rules() {
+    let days = last_open_days(300, day(2026, 11, 6));
+    let flat_but = |code: &str, peaks: &[(usize, u64)]| {
+        stock(code, days.iter().enumerate().map(|(i, &d)| bar(d, 10_000, peaks.iter().find(|(at, _)| *at == i).map_or(1_000, |&(_, volume)| volume))).collect())
+    };
+    let gapped = days.iter().enumerate().filter(|(i, _)| !(150..=159).contains(i)).map(|(i, &d)| bar(d, 10_000, if i == 99 { 9_000 } else { 1_000 })).collect();
+    let halted = days.iter().enumerate().map(|(i, &d)| bar(d, 10_000, match i { 99 => 9_000, 150..=159 => 0, _ => 1_000 })).collect();
+    let pricier = days.iter().enumerate().map(|(i, &d)| bar(d, if i == 230 { 90_000 } else { 10_000 }, 1_000)).collect();
+    let stocks = vec![
+        flat_but("200010", &[(200, 9_000)]),
+        flat_but("200020", &[(199, 9_000)]),
+        flat_but("200030", &[(99, 9_000)]),
+        flat_but("200040", &[(150, 7_000), (260, 7_000)]),
+        stock("200050", gapped),
+        stock("200060", halted),
+        stock("200070", pricier),
+        stock("200080", priced(&days[101..], |_| 10_000)),
+        stock("200090", priced(&days[100..], |_| 10_000)),
+    ];
+    let session = loaded(KrxMarket { days: days.clone(), stocks }).await;
+    let api = &session.api;
+
+    let volume = api.result(&daily(&[("volume", 200, 100)])).await;
+    assert_eq!((volume["universe"].clone(), volume["excluded"].clone()), (json!(9), excluded(1, 0)), "상장한 날부터 199칸인 200080만 상장 기간 부족이다");
+    assert_eq!(
+        hits(&volume),
+        [hit("200030", days[299]), hit("200050", days[299]), hit("200060", days[299]), hit("200070", days[299]), hit("200090", days[299]), hit("200040", days[260]), hit("200010", days[200])],
+        "최근 100칸의 첫 칸에 난 200칸 최고 거래량은 맞고 그 앞 칸이면 빠진다. 200칸 밖으로 나간 최고값, 빠진 날과 거래정지 날도 칸으로 세며, 앞선 같은 값도 최고값이다"
+    );
+
+    let traded_value = api.result(&daily(&[("traded_value", 200, 100)])).await;
+    assert_eq!(traded_value["excluded"], excluded(1, 0));
+    assert_eq!(
+        hits(&traded_value),
+        [hit("200030", days[299]), hit("200050", days[299]), hit("200060", days[299]), hit("200090", days[299]), hit("200040", days[260]), hit("200070", days[230]), hit("200010", days[200])],
+        "신고거래대금도 같은 칸 규칙이고, 거래량이 같아도 가격이 높은 날의 거래대금이 최고값이다"
+    );
+
+    for field in ["volume", "traded_value"] {
+        let (status, body) = api.run(&daily(&[(field, 200, 201)])).await;
+        assert_eq!((status, body["error"]["code"].clone()), (400, json!("bad_request")), "{field}: 최근 봉 수는 비교 기간보다 길 수 없다: {body}");
+        assert_eq!(api.run(&daily(&[(field, 200, 200)])).await.0, 200, "{field}: 최근 봉 수와 비교 기간이 같을 수 있다");
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn excluded_kinds_and_states_leave_the_universe_uncounted_even_when_audit_info_lists_several() {
     let days = fortnight();
     let flat = |code: &str| stock(code, priced(&days, |_| 100));
@@ -478,17 +524,26 @@ async fn a_run_is_refused_while_recent_days_fill_and_when_the_store_lacks_the_ne
     let api = Api::of(&server).await;
     let refusal = |(status, body): (u16, Value)| (status, body["error"]["code"].clone(), body["error"]["reason"].clone());
     let new_high = daily(&[("high", 5, 1)]);
+    let unconditioned = every(vec![]);
 
     assert_eq!(refusal(api.run(&new_high).await), (409, json!("screener_not_ready"), json!("missing_day")), "빈 저장소");
+    assert_eq!(refusal(api.run(&unconditioned).await), (409, json!("screener_not_ready"), json!("missing_day")), "조건 0줄이어도 빈 저장소에서는 막힌다");
     assert_eq!(refusal(api.run(&daily(&[("high", 5, 6)])).await), (400, json!("bad_request"), Value::Null), "m이 n보다 크다");
 
     fake.delay("ka10081", Duration::from_millis(500));
     api.update().await;
     api.wait_for("최근 채우기", |s| s["update"]["phase"] == "recent").await;
     assert_eq!(refusal(api.run(&new_high).await), (409, json!("screener_not_ready"), json!("updating")));
+    assert_eq!(refusal(api.run(&unconditioned).await), (409, json!("screener_not_ready"), json!("updating")), "조건 0줄이어도 최근 채우기 중에는 막힌다");
     api.wait_for("과거 이어 받기", |s| s["update"]["phase"] == "backfill").await;
     let during_backfill = api.result(&new_high).await;
     assert_eq!((during_backfill["asOf"].clone(), hits(&during_backfill)), (json!(today.to_string()), vec![hit("200010", today), hit("200020", today)]), "과거 이어 받기 중에는 실행된다");
+    let unconditioned_during_backfill = api.result(&unconditioned).await;
+    assert_eq!(
+        (unconditioned_during_backfill["excluded"].clone(), hits(&unconditioned_during_backfill)),
+        (excluded(0, 0), vec![hit("200010", today), hit("200020", today)]),
+        "조건 0줄은 과거 봉을 요구하지 않아 과거가 덜 찬 종목도 이력 덜 참이 아니다"
+    );
     fake.reset();
     api.settled().await;
     server.stop().await;
@@ -499,6 +554,7 @@ async fn a_run_is_refused_while_recent_days_fill_and_when_the_store_lacks_the_ne
     let api = Api::of(&server).await;
     assert_eq!(api.status().await["needDay"], json!("2026-11-09"));
     assert_eq!(refusal(api.run(&new_high).await), (409, json!("screener_not_ready"), json!("missing_day")), "저장소의 마지막 관측일 11-06이 필요 관측일 11-09보다 이르다");
+    assert_eq!(refusal(api.run(&unconditioned).await), (409, json!("screener_not_ready"), json!("missing_day")), "조건 0줄이어도 필요 관측일이 없으면 막힌다");
     server.stop().await;
 }
 
@@ -1557,6 +1613,62 @@ async fn markets_keep_only_their_own_stocks_with_kospi_holding_etfs_and_reits_an
             "{case}: 고르지 않은 시장의 종목은 대상 종목 수에도 제외 수에도 들지 않는다. 코스닥의 200050은 상장 기간 부족, 200060은 확인 안 됨이다"
         );
     }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_screen_without_conditions_is_saved_read_back_after_a_restart_and_finds_every_target_stock_on_the_as_of_day() {
+    let days = fortnight();
+    let today = days[14];
+    let listed_in = |market_code: &str, stock: KrxStock| KrxStock { market_code: market_code.into(), ..stock };
+    let halted_after = |code: &str| stock(code, days.iter().enumerate().map(|(i, &d)| bar(d, if i >= 12 { 120 } else { 100 }, if i >= 13 { 0 } else { 1_000 })).collect());
+    let stocks = vec![
+        stock("200010", priced(&days, |i| if i == 14 { 110 } else { 100 })),
+        listed_in("8", stock("200020", priced(&days, |_| 100))),
+        listed_in("10", stock("200030", priced(&days[14..], |_| 100))),
+        KrxStock { audit_info: "관리종목".into(), ..listed_in("10", halted_after("200040")) },
+        listed_in("10", stock("200050", priced(&days[..9], |_| 100))),
+        KrxStock { reg_day: day(2026, 11, 9), bars: vec![], ..stock("200060", priced(&days, |_| 100)) },
+    ];
+    let fake = FakeKiwoom::start().await;
+    fake.set_krx_market(KrxMarket { days, stocks });
+    let dir = tempfile::tempdir().unwrap();
+    let server = boot(&fake, dir.path(), &at(today, "2030"));
+    let api = Api::of(&server).await;
+    api.update().await;
+    api.settled().await;
+
+    let unconditioned = |id: &str, markets: &[&str], exclude: &[&str]| json!({"id": id, "name": format!("조건 없음 {id}"), "markets": markets, "exclude": exclude, "conditions": []});
+    let saved = json!({"screens": [unconditioned("all", &[], &[]), unconditioned("kosdaq", &["kosdaq"], &["managed"]), unconditioned("kospi", &["kospi"], &["etf"])], "revision": 1});
+    let screens_url = format!("http://{}/api/screens", server.addr().await);
+    let put = reqwest::Client::new().put(&screens_url).header("content-type", "application/json").body(saved.to_string()).send().await.unwrap();
+    assert_eq!(put.status().as_u16(), 200, "조건 0줄 조건식도 저장한다");
+    server.stop().await;
+
+    let server = boot(&fake, dir.path(), &at(today, "2030"));
+    let api = Api::of(&server).await;
+    let read_back: Value = serde_json::from_str(&reqwest::get(format!("http://{}/api/screens", server.addr().await)).await.unwrap().text().await.unwrap()).unwrap();
+    assert_eq!(read_back, saved, "서버를 다시 켜도 조건 0줄 조건식이 그대로 남는다");
+
+    let counted = |listed_too_short: u32, unconfirmed: u32| json!({"listedTooShort": listed_too_short, "historyShort": 0, "unconfirmed": unconfirmed});
+    let cases = [
+        ("시장도 제외도 고르지 않음", 6, counted(1, 1), vec!["200010", "200020", "200030", "200040"]),
+        ("코스닥만 고르고 관리종목을 뺌", 2, counted(0, 1), vec!["200030"]),
+        ("코스피만 고르고 ETF를 뺌", 2, counted(1, 0), vec!["200010"]),
+    ];
+    for (screen, (case, universe, want_excluded, want)) in read_back["screens"].as_array().unwrap().iter().zip(cases) {
+        let result = api.result(screen).await;
+        let want: Vec<String> = want.into_iter().map(|code| hit(code, today)).collect();
+        assert_eq!(
+            (result["asOf"].clone(), result["universe"].clone(), result["excluded"].clone(), hits(&result)),
+            (json!(today.to_string()), json!(universe), want_excluded, want),
+            "{case}: 맞은 날짜는 기준 관측일이다. 기준 관측일 뒤에 상장하는 200060은 상장 기간 부족, 거래를 멈춘 200050은 확인 안 됨이다"
+        );
+    }
+    let everything = api.result(&read_back["screens"][0]).await;
+    assert_eq!(price_and_change(&everything, "200010"), (json!(110.0), json!(10.0)));
+    assert_eq!(price_and_change(&everything, "200030"), (json!(100.0), Value::Null), "직전 일봉이 없으면 등락률이 없다");
+    assert_eq!(price_and_change(&everything, "200040"), (json!(120.0), json!(20.0)), "거래량 0인 날은 봉이 아니라 마지막 거래일 종가와 그 직전 일봉 대비다");
+    server.stop().await;
 }
 
 #[tokio::test(flavor = "multi_thread")]

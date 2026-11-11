@@ -15,7 +15,7 @@ import type { ScreenPeriod } from "../../api/generated/ScreenPeriod";
 import type { Side } from "../../api/generated/Side";
 import type { SurgeField } from "../../api/generated/SurgeField";
 import { KINDS } from "../../chart/indicators/kinds";
-import { type ConditionKind, excludedInOrder, UNIT } from "../../lib/screener";
+import { type ConditionKind, excludedInOrder, NEW_HIGH_NAME, UNIT } from "../../lib/screener";
 
 const MAX_SCREENS = 50;
 const MAX_SCREEN_NAME = 40;
@@ -109,9 +109,14 @@ export const excludesIn = (group: ExcludeGroup): ExcludeKind[] => excludedInOrde
 
 export const MARKETS: readonly Market[] = ["kospi", "kosdaq"];
 
-export const KIND_GROUPS: readonly { label: string; kinds: readonly ConditionKind[] }[] = [
+const TRADE_HIGHS = { volume_high: "volume", traded_value_high: "traded_value" } as const satisfies Record<string, BarField>;
+type TradeHigh = keyof typeof TRADE_HIGHS;
+export type KindChoice = ConditionKind | TradeHigh;
+const TRADE_HIGH_START = { period: "D", m: "100", n: "200" } as const;
+
+export const KIND_GROUPS: readonly { label: string; kinds: readonly KindChoice[] }[] = [
   { label: "가격", kinds: ["new_high", "new_low", "value_range", "change", "near_extreme"] },
-  { label: "거래", kinds: ["surge"] },
+  { label: "거래", kinds: ["volume_high", "traded_value_high", "surge"] },
   { label: "이동평균", kinds: ["ma_position", "ma_alignment", "ma_cross"] },
   { label: "보조지표", kinds: ["rsi", "macd", "stochastic", "bollinger", "ichimoku"] },
   { label: "종목", kinds: ["market_cap"] },
@@ -247,7 +252,7 @@ function fieldsOf(condition: Condition): KindFields {
 const newCondition = (key: number, period: ScreenPeriod): ConditionDraft => ({ key, period, m: "1", ...DEFAULTS.new_high });
 
 export function draftOf(screen: Screen | null): ScreenDraft {
-  if (!screen) return { name: "", conditions: [newCondition(0, "D")], markets: [], exclude: [] };
+  if (!screen) return { name: "", conditions: [], markets: [], exclude: [] };
   const conditions: ConditionDraft[] = [];
   for (const condition of screen.conditions) {
     const line = condition.kind === "market_cap" ? { period: conditions.at(-1)?.period ?? "D", m: "1" } : { period: condition.period, m: text(condition.m) };
@@ -263,7 +268,6 @@ export function addCondition(draft: ScreenDraft): ScreenDraft {
 }
 
 export function removeCondition(draft: ScreenDraft, key: number): ScreenDraft {
-  if (draft.conditions.length <= 1) return draft;
   return { ...draft, conditions: draft.conditions.filter((c) => c.key !== key) };
 }
 
@@ -271,8 +275,20 @@ export function editCondition(draft: ScreenDraft, line: ConditionDraft): ScreenD
   return { ...draft, conditions: draft.conditions.map((c) => (c.key === line.key ? line : c)) };
 }
 
-export function changeKind(draft: ScreenDraft, key: number, kind: ConditionKind): ScreenDraft {
-  return { ...draft, conditions: draft.conditions.map((c) => (c.key === key && c.kind !== kind ? { key, period: c.period, m: c.m, ...DEFAULTS[kind] } : c)) };
+const isTradeHigh = (choice: KindChoice): choice is TradeHigh => Object.hasOwn(TRADE_HIGHS, choice);
+
+export function kindChoiceOf(line: KindFields): KindChoice {
+  if (line.kind !== "new_high") return line.kind;
+  return (Object.keys(TRADE_HIGHS) as TradeHigh[]).find((choice) => TRADE_HIGHS[choice] === line.field) ?? "new_high";
+}
+
+function chosenLine({ key, period, m }: ConditionDraft, choice: KindChoice): ConditionDraft {
+  if (isTradeHigh(choice)) return { key, ...TRADE_HIGH_START, kind: "new_high", field: TRADE_HIGHS[choice] };
+  return { key, period, m, ...DEFAULTS[choice] };
+}
+
+export function changeKind(draft: ScreenDraft, key: number, choice: KindChoice): ScreenDraft {
+  return { ...draft, conditions: draft.conditions.map((c) => (c.key === key && kindChoiceOf(c) !== choice ? chosenLine(c, choice) : c)) };
 }
 
 export function moveCondition(draft: ScreenDraft, key: number, by: -1 | 1): ScreenDraft {
@@ -374,7 +390,7 @@ export function checkCondition(line: ConditionDraft): ConditionCheck {
     case "new_low": {
       const n = r.count("n", line.n);
       const recent = m();
-      if (r.fine("n", "m") && recent > n) r.fail("m", `${line.kind === "new_high" ? "신고가" : "신저가"} 기간 ${bars(n)}보다 길 수 없습니다`);
+      if (r.fine("n", "m") && recent > n) r.fail("m", `${line.kind === "new_high" ? NEW_HIGH_NAME[line.field] : "신저가"} 기간 ${bars(n)}보다 길 수 없습니다`);
       return r.result({ kind: line.kind, period, m: recent, field: line.field, n });
     }
     case "value_range": {

@@ -140,3 +140,18 @@ test("분기·연간 개발 차트도 달력 경계와 OHLCV를 보존한다", (
     expect(bars.every((b) => Number.isFinite(b.t) && Number.isFinite(b.c))).toBe(true);
   }
 });
+
+
+test("10분봉 개발 차트는 1분봉 열 개의 OHLCV를 보존한다", () => {
+  const ten = seriesOf(samsung, "combined", "10m", now)[0]!;
+  const minutes = seriesOf(samsung, "combined", "1m", now).filter((b) => ten.t <= b.t && b.t < ten.t + 600);
+  expect(minutes).toHaveLength(10);
+  expect(ten).toEqual({
+    t: minutes[0]!.t,
+    o: minutes[0]!.o,
+    h: Math.max(...minutes.map((b) => b.h)),
+    l: Math.min(...minutes.map((b) => b.l)),
+    c: minutes.at(-1)!.c,
+    v: minutes.reduce((sum, b) => sum + b.v, 0),
+  });
+});

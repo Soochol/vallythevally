@@ -6,7 +6,7 @@ import { useSelectionStore } from "../../stores/selection";
 import { IndicatorIcon } from "../icons";
 import { RadioMenu } from "../menu/RadioMenu";
 
-const CHIPS = ["5m", "15m", "60m", "D", "W", "M"] as const satisfies readonly Period[];
+const CHIPS = ["5m", "10m", "15m", "60m", "D", "W", "M"] as const satisfies readonly Period[];
 const MENU = ["1m", "3m", "30m"] as const satisfies readonly Period[];
 const MENU_OPTIONS = MENU.map((p) => ({ value: p, label: PERIOD_LABEL[p] }));
 const LONG_PRESS_MS = 450;

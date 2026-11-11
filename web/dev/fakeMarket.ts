@@ -161,7 +161,7 @@ const INTRADAY_DAYS = 365;
 function session(venue: Venue | null): { open: number; close: number } {
   return venue === "nxt" || venue === "combined" ? { open: 8 * 60, close: 20 * 60 } : { open: 9 * 60, close: 15 * 60 + 30 };
 }
-const PERIOD_MINUTES: Record<Exclude<Period, "D" | "W" | "M" | "Q" | "Y">, number> = { "1m": 1, "3m": 3, "5m": 5, "15m": 15, "30m": 30, "60m": 60 };
+const PERIOD_MINUTES: Record<Exclude<Period, "D" | "W" | "M" | "Q" | "Y">, number> = { "1m": 1, "3m": 3, "5m": 5, "10m": 10, "15m": 15, "30m": 30, "60m": 60 };
 
 /** 1분봉: 그날 일봉의 시가에서 종가로 가는 브라운 다리. 오늘은 지금까지만. */
 function minuteBars(daily: Bar[], s: FakeSymbol, venue: Venue | null, nowMs: number): Bar[] {

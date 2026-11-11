@@ -49,6 +49,11 @@ describe("규칙 1: 봉 구간 안", () => {
 
   test("분봉은 n분이다", () => {
     expect(barLength("5m", 0)).toBe(300);
+    expect(barLength("10m", 0)).toBe(600);
+    const ten = tl("10m", [kst(2026, 11, 6, 9), kst(2026, 11, 6, 9, 10)]);
+    expect(tToLogical(ten, kst(2026, 11, 6, 9, 5))).toBe(0.5);
+    expect(logicalToT(ten, 1.5)).toBe(kst(2026, 11, 6, 9, 15));
+    expect(startAt(ten, 2)).toBe(kst(2026, 11, 6, 9, 20));
     expect(tToLogical(tl("5m", [kst(2026, 11, 6, 9), kst(2026, 11, 6, 9, 5)]), kst(2026, 11, 6, 9, 1))).toBeCloseTo(0.2, 12);
   });
 });

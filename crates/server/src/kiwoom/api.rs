@@ -208,7 +208,7 @@ impl MarketRequest for IndexMinuteChart {
     type Response = wire::IndexMinuteChartResponse;
 }
 
-/// "1", "3", "5", "15", "30", "60".
+/// "1", "3", "5", "10", "15", "30", "60".
 fn tic_scope(period: Period) -> Option<String> {
     period.minutes().map(|n| n.to_string())
 }
@@ -357,7 +357,7 @@ mod tests {
             .filter_map(|p| MinuteChart::new(c, Venue::Krx, p, today()))
             .map(|r| serde_json::to_value(r).unwrap()["tic_scope"].as_str().unwrap().to_owned())
             .collect();
-        assert_eq!(scopes, ["1", "3", "5", "15", "30", "60"]);
+        assert_eq!(scopes, ["1", "3", "5", "10", "15", "30", "60"]);
         assert_eq!(
             serde_json::to_value(IndexMinuteChart::new(IndexCode::KOSPI, Period::M1, today()).unwrap()).unwrap(),
             json!({"inds_cd": "001", "tic_scope": "1", "base_dt": "20261109"})

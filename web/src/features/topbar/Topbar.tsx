@@ -59,15 +59,15 @@ export function Topbar() {
         </>
       )}
       <span className="tb-sep" />
-      <div role="group" aria-label="봉 주기" className="inline-flex items-center gap-px">
+      <div role="group" aria-label="봉 주기" className="-m-[3px] inline-flex min-w-0 items-center gap-px overflow-x-auto p-[3px] [scrollbar-width:none]">
         {PERIODS.map((p) => (
           <Fragment key={p}>
-            {p === "D" && <span className="w-1.5" />}
+            {p === "D" && <span className="w-1.5 flex-none" />}
             <button
               type="button"
-              className="seg-btn"
+              className="seg-btn flex-none"
               aria-pressed={cell.period === p}
-              title={`${PERIOD_LABEL[p]} (${periodKey(p)})`}
+              title={periodKey(p) ? `${PERIOD_LABEL[p]} (${periodKey(p)})` : PERIOD_LABEL[p]}
               onClick={() => setPeriod(slot, p)}
             >
               {PERIOD_LABEL[p]}

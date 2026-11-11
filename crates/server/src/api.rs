@@ -23,6 +23,8 @@ pub enum Period {
     M3,
     #[serde(rename = "5m")]
     M5,
+    #[serde(rename = "10m")]
+    M10,
     #[serde(rename = "15m")]
     M15,
     #[serde(rename = "30m")]
@@ -47,6 +49,7 @@ impl From<domain::Period> for Period {
             domain::Period::M1 => Period::M1,
             domain::Period::M3 => Period::M3,
             domain::Period::M5 => Period::M5,
+            domain::Period::M10 => Period::M10,
             domain::Period::M15 => Period::M15,
             domain::Period::M30 => Period::M30,
             domain::Period::M60 => Period::M60,
@@ -65,6 +68,7 @@ impl From<Period> for domain::Period {
             Period::M1 => domain::Period::M1,
             Period::M3 => domain::Period::M3,
             Period::M5 => domain::Period::M5,
+            Period::M10 => domain::Period::M10,
             Period::M15 => domain::Period::M15,
             Period::M30 => domain::Period::M30,
             Period::M60 => domain::Period::M60,
