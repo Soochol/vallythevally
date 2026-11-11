@@ -49,3 +49,14 @@ If the concept you need isn't in the glossary yet, that's a signal: either you'r
 If your output contradicts an existing ADR, surface it explicitly rather than silently overriding:
 
 > _Contradicts ADR-0007 (event-sourced orders), but worth reopening because…_
+
+When a new feature needs to break an existing ADR, write a new ADR that narrows the old one's scope instead of editing the old one in place, and add one line to the old ADR pointing at the new one. ADR 0010 (the screener's disk store) did this for ADR 0003.
+
+## Feature specs live in issues
+
+A feature's rules are in its spec issue (label `spec`), not in a file. Rules that changed during implementation are in the spec's "후속 변경" section, which wins over the text above it. Read the spec before working on any of its tickets, even when the spec is closed.
+
+## Who edits these files
+
+The user decides terms and decisions. The coordinator writes them into `GLOSSARY.md` and `docs/adr/` through a PR. A worker that finds a term or decision worth recording proposes it in its PR body instead of editing these files.
+
