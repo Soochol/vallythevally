@@ -58,6 +58,9 @@ class DevCacheTest(unittest.TestCase):
         (second / "web").mkdir()
         (second / "web/App.tsx").write_text("new UI")
         self.assertEqual(key, dev.fingerprint(second, {"rustc": "same"}, False, {}))
+        (second / "crates/server/target/sqlx").mkdir(parents=True)
+        (second / "crates/server/target/sqlx/test.sqlite").write_bytes(b"test output")
+        self.assertEqual(key, dev.fingerprint(second, {"rustc": "same"}, False, {}))
         for name in ("crates/server/src/main.rs", "Cargo.lock", ".cargo/config.toml"):
             before = (second / name).read_text()
             (second / name).write_text("changed")

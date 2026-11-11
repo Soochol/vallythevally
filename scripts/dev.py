@@ -91,10 +91,20 @@ def load_pin(root):
     return pin
 
 
+def source_files(directory):
+    for base, directories, files in os.walk(directory):
+        if Path(base).parent == directory:
+            directories[:] = [name for name in directories if name != "target"]
+        for name in files:
+            path = Path(base) / name
+            if path.is_file():
+                yield path
+
+
 def fingerprint(root, tools, bundled, environment, binaries=BINARIES):
     inputs = [root / "Cargo.toml", root / "Cargo.lock", root / "scripts/dev.py", root / "scripts/duckdb-prebuilt.json"]
     inputs.extend(path for name in ("rust-toolchain", "rust-toolchain.toml") if (path := root / name).is_file())
-    inputs.extend(path for directory in (root / "crates", root / ".cargo") for path in directory.rglob("*") if path.is_file())
+    inputs.extend(path for directory in (root / "crates", root / ".cargo") for path in source_files(directory))
     key = hashlib.sha256()
     for path in sorted(inputs):
         key.update(path.relative_to(root).as_posix().encode() + b"\0")
