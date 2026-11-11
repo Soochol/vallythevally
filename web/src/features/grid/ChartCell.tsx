@@ -105,13 +105,6 @@ export function ChartCell({ slot, status, onStatus }: Props) {
     >
       <div ref={chartEl} className="absolute inset-0" />
       <DrawingOverlay slot={slot} />
-      {status.kind === "loading" && (
-        <div className="pointer-events-none absolute inset-0 z-[5] grid place-items-center">
-          <p className="rounded-m bg-surface px-3 py-2 text-s text-text-2 shadow-dialog" role="status">
-            봉을 불러오는 중입니다
-          </p>
-        </div>
-      )}
       {olderError && (
         <div
           role="alert"
