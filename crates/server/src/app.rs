@@ -82,7 +82,8 @@ const WS_LIBRARIES: [&str; 2] = ["tungstenite", "tokio_tungstenite"];
 fn below_ws_library_trace(meta: &Metadata<'_>) -> bool {
     let target = meta.target();
     let from_ws_library = WS_LIBRARIES.iter().any(|lib| target.strip_prefix(lib).is_some_and(|rest| rest.is_empty() || rest.starts_with("::")));
-    !from_ws_library || *meta.level() <= Level::DEBUG
+    let from_http_library = target == "reqwest" || target.starts_with("reqwest::");
+    (!from_ws_library || *meta.level() <= Level::DEBUG) && (!from_http_library || *meta.level() <= Level::INFO)
 }
 
 fn log_filter(spec: &str) -> impl Filter<Registry> + Send + Sync + 'static {
@@ -177,7 +178,14 @@ async fn serve(config: Config, token_file: TokenFile) -> ExitCode {
     tokio::spawn(daily_reset(clock.clone(), rest.clone(), symbols.clone(), bars.clone(), hub.clone()));
     tokio::spawn(daily_token(clock.clone(), rest.clone()));
 
-    let app = router(Arc::new(AppState { symbols, bars, rest, db, clock, static_dir: config.static_dir.clone(), hub, screener }));
+    let financial_store = match crate::financials::store::Store::open(&config.financial_db_path).await {
+        Ok(store) => store,
+        Err(failure) => { tracing::error!(?failure, "재무 저장소를 열 수 없습니다"); return ExitCode::from(1); }
+    };
+    let dart = config.opendart_api_key.clone().and_then(|key| crate::financials::client::Client::new(key, config.dart_base_url.clone(), config.kind_base_url.clone()).ok());
+    let financials = crate::financials::Financials::new(dart, financial_store, clock.clone());
+    let financial_routes = crate::financials::routes(financials, symbols.clone());
+    let app = router(Arc::new(AppState { symbols, bars, rest, db, clock, static_dir: config.static_dir.clone(), hub, screener })).merge(financial_routes);
     tracing::info!(static_dir = %config.static_dir.display(), "요청을 받기 시작합니다");
     if let Err(e) = axum::serve(listener, app).with_graceful_shutdown(shutdown_signal()).await {
         tracing::error!(error = %e, "서버가 멈췄습니다");

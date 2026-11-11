@@ -89,6 +89,10 @@ const KNOWN_KEYS: &[&str] = &[
     "VALLY_TELEGRAM_CHAT_ID",
     "VALLY_STATIC_DIR",
     "VALLY_LOG",
+    "OPENDART_API_KEY",
+    "VALLY_DART_BASE_URL",
+    "VALLY_KIND_BASE_URL",
+    "VALLY_FINANCIAL_DB_PATH",
 ];
 
 #[derive(Debug, Clone)]
@@ -108,6 +112,10 @@ pub struct Config {
     pub screener_db_path: PathBuf,
     pub screener_update_on_start: bool,
     pub log_filter: String,
+    pub opendart_api_key: Option<Secret<String>>,
+    pub dart_base_url: String,
+    pub kind_base_url: String,
+    pub financial_db_path: PathBuf,
 }
 
 /// 설정을 읽으며 모은 경고. 로그를 켜기 전에 읽으므로 호출자가 나중에 남긴다.
@@ -115,7 +123,7 @@ pub type ConfigWarnings = Vec<String>;
 
 impl Config {
     pub fn from_env() -> Result<(Config, ConfigWarnings), ConfigError> {
-        let process: BTreeMap<String, String> = std::env::vars().filter(|(k, _)| k.starts_with("VALLY_")).collect();
+        let process: BTreeMap<String, String> = std::env::vars().filter(|(k, _)| k.starts_with("VALLY_") || k == "OPENDART_API_KEY").collect();
         let file = match process.get("VALLY_ENV_FILE") {
             Some(path) => read_env_file(Path::new(path))?,
             None => BTreeMap::new(),
@@ -160,6 +168,8 @@ impl Config {
         if clock_start.is_some() && rest_endpoint == Endpoint::Kiwoom {
             return Err(ConfigError("VALLY_CLOCK_START는 가짜 키움(VALLY_KIWOOM_BASE_URL, VALLY_KIWOOM_WS_URL)과만 쓸 수 있습니다".into()));
         }
+        let dart_base_url = public_or_loopback(url("VALLY_DART_BASE_URL"), "https://opendart.fss.or.kr")?;
+        let kind_base_url = public_or_loopback(url("VALLY_KIND_BASE_URL"), "https://kind.krx.co.kr")?;
         let config = Config {
             kiwoom_app_key: Secret::new(required("VALLY_KIWOOM_APP_KEY")?),
             kiwoom_app_secret: Secret::new(required("VALLY_KIWOOM_APP_SECRET")?),
@@ -183,10 +193,24 @@ impl Config {
                 Some("off") => false,
                 Some(other) => return Err(ConfigError(format!("VALLY_SCREENER_UPDATE_ON_START는 on이나 off입니다: {other}"))),
             },
+            opendart_api_key: vars.get("OPENDART_API_KEY").filter(|s| !s.is_empty()).cloned().map(Secret::new),
+            dart_base_url,
+            kind_base_url,
+            financial_db_path: vars.get("VALLY_FINANCIAL_DB_PATH").map(PathBuf::from).unwrap_or_else(|| PathBuf::from(vars.get("VALLY_DB_PATH").map_or("data/vally.db", String::as_str)).with_file_name("financials.db")),
             log_filter: vars.get("VALLY_LOG").cloned().unwrap_or_else(|| "info".to_owned()),
         };
         Ok((config, warnings))
     }
+}
+
+fn public_or_loopback(value: Option<String>, official: &str) -> Result<String, ConfigError> {
+    let value = value.unwrap_or_else(|| official.into());
+    if value == official { return Ok(value); }
+    let parsed = reqwest::Url::parse(&value).map_err(|_| ConfigError("DART/KIND 주소가 올바르지 않습니다".into()))?;
+    let loopback = parsed.host_str().is_some_and(|h| h == "localhost" || h.trim_matches(['[', ']']).parse::<IpAddr>().is_ok_and(|ip| ip.is_loopback()));
+    if loopback && parsed.scheme() == "http" && parsed.username().is_empty() && parsed.password().is_none() && parsed.query().is_none() && parsed.fragment().is_none() {
+        Ok(value)
+    } else { Err(ConfigError("DART/KIND 주소는 공식 HTTPS 주소나 가짜 응답용 HTTP 루프백만 됩니다".into())) }
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -284,6 +308,23 @@ mod tests {
 
     fn token() -> Result<PathBuf, ConfigError> {
         Ok(PathBuf::from("/nonexistent/token.json"))
+    }
+
+    #[test]
+    fn dart_is_optional_redacted_and_uses_separate_rebuildable_storage() {
+        let file = vars(&[("VALLY_KIWOOM_APP_KEY", KEY), ("VALLY_KIWOOM_APP_SECRET", SECRET), ("VALLY_DB_PATH", "isolated/user.db"), ("OPENDART_API_KEY", "file-dart-secret")]);
+        let mut process = vars(&REAL);
+        process.insert("OPENDART_API_KEY".into(), "process-dart-secret".into());
+        let (config, warnings) = Config::from_vars(file.clone(),process,lock,token).unwrap();
+        assert!(warnings.is_empty());
+        assert_eq!(config.opendart_api_key.as_ref().unwrap().expose(), "process-dart-secret");
+        assert_eq!(config.financial_db_path, PathBuf::from("isolated/financials.db"));
+        assert!(!format!("{config:?}").contains("dart-secret"));
+        for endpoint in ["https://example.com", "https://opendart.fss.or.kr.evil.test", "http://user:pass@localhost:19", "http://localhost:19/?key=value"] {
+            let mut process = vars(&REAL);
+            process.insert("VALLY_DART_BASE_URL".into(),endpoint.into());
+            assert!(Config::from_vars(file.clone(),process,lock,token).is_err());
+        }
     }
 
     #[test]
