@@ -1,5 +1,5 @@
 import { readFile } from "node:fs/promises";
-import { BALANCE_KEYS, FLOW_KEYS, type AccountKey, type Accounts, type CapitalEvent, type DartData, type Day, type Disclosure, type FactSource, type FinancialPeriod, type Measure, type Quarter, type SourceResult, type Unit } from "./bundle-types.ts";
+import { BALANCE_KEYS, FLOW_KEYS, type AccountKey, type Accounts, type CapitalEvent, type DartData, type DartIdentity, type Day, type Disclosure, type FactSource, type FinancialPeriod, type Measure, type Quarter, type SourceResult, type Unit } from "./bundle-types.ts";
 import { absent, calculate, emptyAccounts, financialData, periodEnd } from "./financial-calculations.ts";
 import { capture, compactDay, endpoint, fields, getJson, list, nextObservation, text, type HttpClient } from "./source-utils.ts";
 
@@ -70,7 +70,9 @@ function receipt(value: unknown): string {
 }
 function disclosure(row: DartRow, client: DartClient): Disclosure {
   const r = receipt(row.rcept_no);
-  return { receipt: r, filedOn: compactDay(row.rcept_dt), title: client.redact(text(row.report_nm)), url: `https://dart.fss.or.kr/dsaf001/main.do?rcpNo=${r}` };
+  const stockCode = row.stock_code == null || row.stock_code === "" ? null : text(row.stock_code);
+  if (stockCode !== null && !/^[0-9A-Z]{6}$/.test(stockCode)) throw new Error("invalid_dart_stock_code");
+  return { corpCode: text(row.corp_code), stockCode, corpName: row.corp_name == null ? null : client.redact(text(row.corp_name)), receipt: r, filedOn: compactDay(row.rcept_dt), title: client.redact(text(row.report_nm)), url: `https://dart.fss.or.kr/dsaf001/main.do?rcpNo=${r}` };
 }
 async function readDisclosures(client: DartClient, corp: string, to: Day): Promise<Disclosure[]> {
   const result: Disclosure[] = [];
@@ -158,11 +160,31 @@ function expectedFiling(filings: Disclosure[], year: number, quarter: Quarter): 
   const title = quarter === 4 ? "사업보고서" : quarter === 2 ? "반기보고서" : "분기보고서";
   return filings.filter((d) => d.title.includes(title) && d.title.includes(`(${period})`)).at(-1) ?? null;
 }
-export async function readDart(args: { base: URL; corp: string; key: string | null; fromYear: number; toYear: number; filingTo: Day; calendar: Day[]; client: HttpClient }): Promise<DartData> {
+function identifyCompany(code: string, corp: string, disclosures: SourceResult<Disclosure[]>): DartIdentity {
+  const companies = disclosures.kind === "ok" ? [...new Map(disclosures.data.map(({ corpCode, stockCode, corpName }) => {
+    const company = { corpCode, stockCode, corpName };
+    return [JSON.stringify(company), company];
+  })).values()] : [];
+  const verification: DartIdentity["verification"] = companies.some((c) => c.stockCode !== null && c.stockCode !== code)
+    ? { kind: "mismatch", reason: "dart_stock_code_mismatch" }
+    : companies.some((c) => c.stockCode === code)
+      ? { kind: "verified" }
+      : { kind: "unverified", reason: disclosures.kind === "missing" ? disclosures.reason : "dart_stock_code_unavailable" };
+  return { targetCode: code, requestedCorpCode: corp, companies, verification };
+}
+function unavailableDart(identity: DartIdentity, disclosures: SourceResult<Disclosure[]>, reason: string): DartData {
+  return { identity, financials: financialData([], []), sourceFailures: [{ source: "OpenDART/identity", reason }], disclosures, capitalEvents: CAPITAL_ENDPOINTS.map((api) => ({ kind: "missing", source: `OpenDART/${api}`, reason })) };
+}
+export async function readDart(args: { base: URL; code: string; corp: string; key: string | null; fromYear: number; toYear: number; filingTo: Day; calendar: Day[]; client: HttpClient }): Promise<DartData> {
   const { base, corp, key, fromYear, toYear, filingTo, calendar } = args;
-  if (!key) return { financials: financialData([], []), sourceFailures: [{ source: "OpenDART", reason: "opendart_key_not_configured" }], disclosures: { kind: "missing", source: "OpenDART/list", reason: "opendart_key_not_configured" }, capitalEvents: CAPITAL_ENDPOINTS.map((api) => ({ kind: "missing", source: `OpenDART/${api}`, reason: "opendart_key_not_configured" })) };
+  if (!key) {
+    const disclosures: SourceResult<Disclosure[]> = { kind: "missing", source: "OpenDART/list", reason: "opendart_key_not_configured" };
+    return unavailableDart(identifyCompany(args.code, corp, disclosures), disclosures, "opendart_key_not_configured");
+  }
   const client = new DartClient(base, key, args.client);
   const disclosures = await capture("OpenDART/list", () => readDisclosures(client, corp, filingTo));
+  const identity = identifyCompany(args.code, corp, disclosures);
+  if (identity.verification.kind !== "verified") return unavailableDart(identity, disclosures, identity.verification.reason);
   const filings = disclosures.kind === "ok" ? disclosures.data : [];
   const reports: FinancialPeriod[] = [];
   const annual: FinancialPeriod[] = [];
@@ -226,5 +248,5 @@ export async function readDart(args: { base: URL; corp: string; key: string | nu
     }));
   }
   const data = financialData(reports, annual);
-  return { financials: data, sourceFailures: requests.flatMap((r) => r.kind === "missing" ? [{ source: r.source, reason: r.reason }] : []), disclosures, capitalEvents };
+  return { identity, financials: data, sourceFailures: requests.flatMap((r) => r.kind === "missing" ? [{ source: r.source, reason: r.reason }] : []), disclosures, capitalEvents };
 }

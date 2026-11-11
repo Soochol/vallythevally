@@ -19,7 +19,7 @@ async function scratch() { await mkdir(SCRATCH, { recursive: true }); return mkd
 function measure(value: number, date = "2016-03-16"): Measure { return { value, reason: null, unit: "KRW", sources: [], availableFrom: day(date) }; }
 function financialPeriod(year: number, q: Quarter, observations = calendar()): FinancialPeriod {
   const f = filing(year, q);
-  const disclosures = [{ receipt: f.rcept_no, filedOn: compactDay(f.rcept_dt), title: f.report_nm, url: "https://dart.fss.or.kr/dsaf001/main.do?rcpNo=" + f.rcept_no }];
+  const disclosures = [{ corpCode: CORP, stockCode: CODE, corpName: "시험 법인", receipt: f.rcept_no, filedOn: compactDay(f.rcept_dt), title: f.report_nm, url: "https://dart.fss.or.kr/dsaf001/main.do?rcpNo=" + f.rcept_no }];
   const parsed = parseAccounts(accounts(year, q), { year, quarter: q, corp: CORP, reportCode: q === 1 ? "11013" : q === 2 ? "11012" : q === 3 ? "11014" : "11011", filings: disclosures, calendar: observations });
   return { year, quarter: q, periodEnd: periodEnd(year, q), filedOn: compactDay(f.rcept_dt), availableFrom: nextObservation(compactDay(f.rcept_dt), observations), filingLagDays: 75, single: parsed.single, cumulative: parsed.cumulative, reportedEps: parsed.eps, commonShares: { ...measure(10), unit: "shares" }, outstandingCommonShares: { ...measure(10), unit: "shares" }, otherShares: { ...measure(0), unit: "shares" }, dps: absent("annual_only", "KRW/share") };
 }
@@ -69,7 +69,7 @@ test("a missing Q3 is not subtracted as zero", () => {
 });
 test("standard account ID wins over name fallback, ambiguity and non-KRW do not become zero", () => {
   const f = filing(2015, 1);
-  const args: Parameters<typeof parseAccounts>[1] = { year: 2015, quarter: 1, corp: CORP, reportCode: "11013", filings: [{ receipt: f.rcept_no, filedOn: compactDay(f.rcept_dt), title: f.report_nm, url: "https://dart.fss.or.kr/" }], calendar: calendar() };
+  const args: Parameters<typeof parseAccounts>[1] = { year: 2015, quarter: 1, corp: CORP, reportCode: "11013", filings: [{ corpCode: CORP, stockCode: CODE, corpName: "시험 법인", receipt: f.rcept_no, filedOn: compactDay(f.rcept_dt), title: f.report_nm, url: "https://dart.fss.or.kr/" }], calendar: calendar() };
   const rows = accounts(2015, 1);
   const op = rows.find((r) => r.account_id === "dart_OperatingIncomeLoss")!;
   const chosen = parseAccounts([...rows, { ...op, account_id: "-표준계정코드 미사용-", thstrm_amount: "999" }], args);
@@ -264,18 +264,20 @@ test("all bundle sources and calculations run against local HTTP with a failed s
   verifyMeasures(bundle);
   assert.ok(!JSON.stringify(bundle).includes(FAKE_KEY));
 });
-test("a late corrected Q3 is not used to infer Q4/TTM at the original filing date", async (t) => {
+test("a late corrected Q3 delays the Q4 single value and share-dependent EPS but preserves known annual TTM", async (t) => {
   const bundle = await buildFixture(t, true);
   const q3 = bundle.dart.financials.quarters.find((p) => p.year === 2015 && p.quarter === 3)!;
   assert.equal(q3.single.operatingProfit.sources[0]!.filedOn, "2017-06-15");
   const q4 = bundle.dart.financials.quarters.find((p) => p.year === 2015 && p.quarter === 4)!;
   assert.equal(q4.single.operatingProfit.availableFrom, "2017-06-16");
+  assert.equal(financialMetrics(q4, bundle.dart.financials.quarters).operatingProfitTtm.availableFrom, "2016-03-16");
   assert.equal(bundle.valuation.find((v) => v.day === "2016-03-16")!.epsTtm.value, null);
 });
 test("upstream errors containing a key cannot leak into JSON or become zeros", async (t) => {
   const bundle = await buildFixture(t, false, true);
   assert.equal(bundle.dart.disclosures.kind, "missing");
-  assert.equal(bundle.dart.financials.quarters[0]!.single.operatingProfit.value, null);
+  assert.equal(bundle.dart.financials.quarters.length, 0);
+  assert.deepEqual(bundle.dart.identity.verification, { kind: "unverified", reason: "dart_status_020" });
   const output = JSON.stringify(bundle);
   assert.ok(!output.includes(FAKE_KEY));
   assert.ok(!output.includes("crtfc_key"));

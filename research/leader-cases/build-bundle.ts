@@ -39,7 +39,7 @@ export async function buildBundle(options: BundleOptions, client: HttpClient = h
   const sectors = buildSectors(map, successful, calendar);
   const sector = sectors.find((s) => map.sectors.find((m) => m.id === s.id)?.stocks.some((stock) => stock.code === code));
   const market = symbol.kind === "ok" ? symbol.data.market === "kosdaq" ? kosdaq : kospi : undefined;
-  const dart = await readDart({ base: options.dartBase, corp: options.corp, key: options.dartKey, fromYear: 2015, toYear: Number(to.slice(0, 4)), filingTo: kstDay(Date.parse(generatedAt) / 1000), calendar, client });
+  const dart = await readDart({ base: options.dartBase, code, corp: options.corp, key: options.dartKey, fromYear: 2015, toYear: Number(to.slice(0, 4)), filingTo: kstDay(Date.parse(generatedAt) / 1000), calendar, client });
   const fred = [];
   for (const definition of FRED_SERIES) fred.push(await capture(`FRED/${definition.id}`, () => readFred({ base: options.fredBase, definition, to, calendar, client })));
   const valuation = valuations(target?.daily ?? [], dart.financials, currentFundamentals.kind === "ok" ? currentFundamentals.data.values.listedShares : null);
@@ -75,7 +75,7 @@ export async function buildBundle(options: BundleOptions, client: HttpClient = h
       "Institution net shares are changes since the first readable observation, not holdings. Missing days start new segments and partial known sums never represent unknown past holdings.",
       "FRED CSV is a latest revised download, not a historical publication vintage. Daily values are used only on strictly later Korean dates; monthly averages only after month end, with unknown release lag.",
       "Capital-event detail fields are announcements in original units, not proof of execution. Conversion exercise, block trades, major shareholder sales and policy/index changes require linked manual disclosure review.",
-      "Original filing vintages and split-adjusted historical per-share denominators are not reconstructed. Valuation is null where a later share snapshot changes the price/share basis.",
+      "Original filing vintages and split-adjusted historical per-share denominators are not reconstructed. Valuation is null where a later issued-common-share snapshot prevents reconciling the price/share basis; treasury-only outstanding-share changes do not erase prior values.",
       ...(calendar.length === 0 ? ["Both index calendars unavailable; no observation dates or aligned financial values inferred."] : []),
     ],
   };

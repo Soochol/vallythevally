@@ -1,4 +1,4 @@
-import { BALANCE_KEYS, FLOW_KEYS, type AccountKey, type Accounts, type Day, type FinancialData, type FinancialMetrics, type FinancialPeriod, type Measure, type Quarter, type Unit, type ValuationDay } from "./bundle-types.ts";
+import { BALANCE_KEYS, FLOW_KEYS, type FlowKey, type Accounts, type Day, type FinancialData, type FinancialMetrics, type FinancialPeriod, type Measure, type Quarter, type Unit, type ValuationDay } from "./bundle-types.ts";
 import { day } from "./source-utils.ts";
 
 export function absent(reason: string, unit: Unit = "KRW"): Measure {
@@ -34,10 +34,17 @@ export function completeQuarters(reports: FinancialPeriod[]): FinancialPeriod[] 
   });
 }
 function ordinal(p: Pick<FinancialPeriod, "year" | "quarter">): number { return p.year * 4 + p.quarter; }
-function sumTtm(period: FinancialPeriod, quarters: FinancialPeriod[], key: AccountKey): Measure {
+function sumTtm(period: FinancialPeriod, quarters: FinancialPeriod[], key: FlowKey): Measure {
   const window = quarters.filter((p) => ordinal(p) <= ordinal(period) && ordinal(p) > ordinal(period) - 4);
-  if (window.length !== 4) return absent("need_four_consecutive_quarters");
-  return calculate(window.map((p) => p.single[key]), "KRW", (v) => v.reduce((a, b) => a + b, 0), "ttm_quarter_missing");
+  const summed = window.length === 4 ? calculate(window.map((p) => p.single[key]), "KRW", (v) => v.reduce((a, b) => a + b, 0), "ttm_quarter_missing") : absent("need_four_consecutive_quarters");
+  if (period.quarter === 4 && period.cumulative[key].value !== null) return period.cumulative[key];
+  const priorAnnual = quarters.find((p) => p.year === period.year - 1 && p.quarter === 4);
+  const priorYtd = quarters.find((p) => p.year === period.year - 1 && p.quarter === period.quarter);
+  const bridged = period.quarter !== 4 && priorAnnual && priorYtd
+    ? calculate([priorAnnual.cumulative[key], period.cumulative[key], priorYtd.cumulative[key]], "KRW", ([annual, current, prior]) => annual! + current! - prior!, "ttm_cumulative_input_missing")
+    : absent("ttm_annual_cumulative_path_unavailable");
+  const usable = [bridged, summed].filter((m) => m.value !== null);
+  return usable.sort((a, b) => (a.availableFrom ?? "9999").localeCompare(b.availableFrom ?? "9999"))[0] ?? summed;
 }
 function yoy(now: Measure, prior: Measure | undefined): Measure {
   if (!prior) return absent("prior_year_period_missing", "percent");
@@ -91,6 +98,7 @@ export function financialData(reports: FinancialPeriod[], annual: FinancialPerio
   const quarters = completeQuarters(reports).sort((a, b) => ordinal(a) - ordinal(b));
   return { quarters, annual, metrics: quarters.map((p) => ({ year: p.year, quarter: p.quarter, values: financialMetrics(p, quarters) })), annualMetrics: annual.map((p) => ({ year: p.year, values: financialMetrics(p, quarters, annual, "annual") })), limitations: [
     "Latest OpenDART snapshots only; corrected values are withheld until their own matching receipt date, and original vintages are not reconstructed.",
+    "Year-end TTM uses the reported annual flow; interim TTM uses the earliest available complete annual-plus-YTD-minus-prior-YTD or four-quarter path, preferring YTD on ties. Denominator availability remains independent.",
     "December fiscal year only; report titles must identify the expected period. Non-December fiscal years are unavailable.",
     "EPS TTM = controlling net income TTM / common shares excluding treasury only when all four reported quarter-end denominators match and other share classes are zero; intraperiod changes and preferred allocation require manual verification.",
     "BPS is the latest controlling equity balance / reported outstanding common shares; balances are never summed across four quarters.",
@@ -106,10 +114,10 @@ export function valuations(daily: Array<{ day: Day; c: number }>, data: Financia
     const latest = eligible.at(-1);
     let eps = latest ? knownAt(financialMetrics(latest, data.quarters).epsTtm, b.day) : absent("no_published_financial_period", "KRW/share");
     let bps = latest ? knownAt(financialMetrics(latest, data.quarters).bps, b.day) : absent("no_published_financial_period", "KRW/share");
-    const shareSnapshots = data.quarters.filter((p) => p.outstandingCommonShares.value !== null);
-    if (latest && (currentListedShares === null || latest.commonShares.value !== currentListedShares || shareSnapshots.some((p) => p.periodEnd > latest.periodEnd && p.outstandingCommonShares.value !== latest.outstandingCommonShares.value))) {
-      eps = absent("adjusted_price_and_historical_eps_share_basis_not_reconciled", "KRW/share");
-      bps = absent("adjusted_price_and_historical_bps_share_basis_not_reconciled", "KRW/share");
+    const shareSnapshots = data.quarters.filter((p) => p.commonShares.value !== null);
+    if (latest && (currentListedShares === null || latest.commonShares.value !== currentListedShares || shareSnapshots.some((p) => p.periodEnd > latest.periodEnd && p.commonShares.value !== latest.commonShares.value))) {
+      eps = { ...eps, value: null, reason: "adjusted_price_and_historical_eps_share_basis_not_reconciled" };
+      bps = { ...bps, value: null, reason: "adjusted_price_and_historical_bps_share_basis_not_reconciled" };
     }
     const per = calculate([eps], "multiple", ([v]) => v! > 0 ? b.c / v! : null);
     const pbr = calculate([bps], "multiple", ([v]) => v! > 0 ? b.c / v! : null);

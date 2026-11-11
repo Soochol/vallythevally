@@ -92,6 +92,9 @@ export interface FinancialData {
   limitations: string[];
 }
 export interface Disclosure {
+  corpCode: string;
+  stockCode: string | null;
+  corpName: string | null;
   receipt: string;
   filedOn: Day;
   title: string;
@@ -103,7 +106,14 @@ export interface CapitalEvent {
   fields: Record<string, string>;
   effect: "announcement-only";
 }
+export interface DartIdentity {
+  targetCode: string;
+  requestedCorpCode: string;
+  companies: Array<Pick<Disclosure, "corpCode" | "stockCode" | "corpName">>;
+  verification: { kind: "verified" } | { kind: "mismatch"; reason: "dart_stock_code_mismatch" } | { kind: "unverified"; reason: string };
+}
 export interface DartData {
+  identity: DartIdentity;
   financials: FinancialData;
   sourceFailures: Array<{ source: string; reason: string }>;
   disclosures: SourceResult<Disclosure[]>;

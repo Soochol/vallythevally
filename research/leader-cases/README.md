@@ -41,7 +41,7 @@ OpenDART 키는 `VALLY_ENV_FILE`이 가리키는 파일의 `OPENDART_API_KEY` �
 | `technical`, `markets` | 주별 기술적 수치와 일별 지수 장세. 준비 구간 부족은 null이다. |
 | `foreignHoldings`, `investorNetShares` | 생성 타입 `DayHistory`의 `days`, `coverage`, `skippedDays`, `undatedRows`를 모두 보존한다. 요청 실패는 별도 `kind: "missing"`이다. |
 | `institutionCumulative` | 기관계·금융투자·보험·투신·기타금융·은행·연기금·사모·국가별 관측 시작 누적 변화와 연속 구간별 변화. |
-| `dart` | 회계기간 원장·계산값, 최신 공시 목록, 주요사항보고의 자본 사건, 요청 실패 목록. |
+| `dart` | 대상 종목과 법인 대응의 검증 결과·식별 근거, 회계기간 원장·계산값, 최신 공시 목록, 주요사항보고의 자본 사건, 요청 실패 목록. |
 | `fred` | 원래 관측일·값과 한국 관측일에 맞춘 값. 사용한 `sourceDay`를 함께 남긴다. |
 | `valuation` | 대상 일봉 관측일의 사용 가능한 EPS TTM·BPS·PER·PBR와 가격 밴드. |
 | `returnDecomposition` | 요청 범위 안에서 양의 PER를 처음·마지막으로 구할 수 있는 두 관측일의 가격·EPS·PER 배수. 원고의 탄생일과 소멸일 분해로 간주하지 않는다. |
@@ -73,7 +73,9 @@ OpenDART 키는 `VALLY_ENV_FILE`이 가리키는 파일의 `OPENDART_API_KEY` �
 
 `fnlttSinglAcntAll`에 `fs_div=CFS`, 사업연도와 보고서 코드를 지정한다. 2015년부터 종료일의 사업연도까지 받는다. 표준 계정 ID를 우선하고, 없으면 문서화한 정확한 계정명으로 받친다. 손익계산서 IS를 CIS보다 먼저 쓴다. 같은 우선순위에서 후보가 여럿이면 임의로 고르지 않는다. 숫자 공백·잘못된 단위·모호한 계정은 null이다.
 
-`list`는 `last_reprt_at=Y`와 전체 페이지를 읽는다. **최신 정정본을 원래 공시일로 소급하지 않는다.** 각 금액의 `rcept_no`가 목록의 정확한 보고서·회계기간 접수번호와 맞아야 한다. 맞지 않으면 null이다. 정정본 이전 원본 수치를 이 API에서 재현할 수 없으므로 그 기간은 비어 있을 수 있다. 12월 결산만 지원하며 보고서 제목의 `(YYYY.MM)`이 요청 회계기간과 맞지 않으면 값을 사용하지 않는다.
+`list`는 `last_reprt_at=Y`와 전체 페이지를 읽는다. 대상 종목코드를 DART 경계까지 전달하고 공시의 `corp_code`·`stock_code`로 요청 법인과 대상 종목의 대응을 확인한 뒤 재무·주식수·배당·자본 사건을 받는다. 하나라도 다른 종목코드가 있으면 `dart_stock_code_mismatch`, 대응 종목코드가 없으면 `dart_stock_code_unavailable`로 결합을 막는다. 이름만 같다는 이유로 대응을 추측하지 않는다. `dart.identity`에는 대상 코드·요청 법인·응답 법인코드/종목코드/법인명과 verified/mismatch/unverified를 남긴다. 공시 각 행에도 식별 정보를 보존한다. 검증 실패 시 재무 원장은 비우고 이유를 `missing`에 남기며 정상 시세·수급·FRED 수집과 CLI 출력을 계속한다.
+
+**최신 정정본을 원래 공시일로 소급하지 않는다.** 각 금액의 `rcept_no`가 목록의 정확한 보고서·회계기간 접수번호와 맞아야 한다. 맞지 않으면 null이다. 정정본 이전 원본 수치를 이 API에서 재현할 수 없으므로 그 기간은 비어 있을 수 있다. 12월 결산만 지원하며 보고서 제목의 `(YYYY.MM)`이 요청 회계기간과 맞지 않으면 값을 사용하지 않는다.
 
 회계기간과 공시일 축을 분리한다. `quarters`는 분기 단일 값과 누적 값, `annual`은 사업보고서 원래 값을 담는다. 공시일과 회계기간 말의 차이가 `filingLagDays`다. 공시 당일에는 새 재무를 쓰지 않는다. 다음 KRX 관측일부터 쓰며, 금요일 공시 뒤 다음 관측일이 월요일이면 월요일부터 보인다.
 
@@ -82,7 +84,7 @@ OpenDART 키는 `VALLY_ENV_FILE`이 가리키는 파일의 `OPENDART_API_KEY` �
 | 매출·영업이익·지배주주순이익 | 중간 손익계산서 `thstrm_amount`는 3개월, `thstrm_add_amount`는 누적이다. 4분기만 연간−3분기 누적이다. |
 | 영업CF·투자CF·CAPEX | 현금흐름표 `thstrm_amount`는 누적이다. 2·3·4분기는 이전 분기 누적을 뺀다. CAPEX는 유형자산 취득의 현금 지급액이며 무형자산은 포함하지 않는다. 음수 취득액은 확인 필요 null이다. |
 | 자본·부채·재고·채권 | 재무상태표 시점 잔액이다. 차감하거나 최근 4분기를 합하지 않는다. 채권 표준 계정이 매출채권 및 기타유동채권이면 그 넓은 범위와 출처를 유지한다. |
-| 최근 4분기 합 | 연속된 네 분기의 흐름만 합한다. 한 분기라도 없으면 null이다. |
+| 최근 4분기 합 | 연말은 알려진 연간 흐름을 직접 쓴다. 중간 분기는 전년 연간+당기 누적−전년 동기 누적 또는 네 분기 단일 흐름 합으로 구한다. 두 경로가 모두 있으면 사용 가능일이 더 이른 경로를 고르고, 같은 날이면 누적 경로를 고른다. 선택한 실제 입력의 출처·접수번호·사용 가능일만 잇는다. 어느 경로도 완전하지 않으면 null이며 없는 단일 분기를 추정하지 않는다. |
 | 전년동기 증가율 | 분기 단일 값/전년 같은 분기−1. 이전 값이 양수일 때만 %를 계산한다. 0·음수에서의 흑자 전환은 숫자 증가율로 포장하지 않는다. |
 | 영업이익 가속 | 이번 분기 증가율−직전 분기 증가율. 연간 화면은 연간 전년비와 직전 연간 전년비 차이다. |
 | 분기·연간 EPS | 공시된 기본 EPS를 우선한다. 4분기 EPS는 연간 EPS에서 누적 EPS를 무조건 빼지 않는다. 보고된 보통주 분모가 같은 구간에서는 해당 순이익/보통주 유통주식수로 계산한다. |
@@ -94,8 +96,10 @@ OpenDART 키는 `VALLY_ENV_FILE`이 가리키는 파일의 `OPENDART_API_KEY` �
 | 운전자본 경고 | 재고 전년비−매출 전년비, 채권 전년비−매출 전년비. |
 | DPS | 사업보고서 `alotMatter`의 보통주 주당현금배당금 당기 값. 다른 종류 주식·전기 값을 섞지 않는다. |
 | 주식수 | `stockTotqySttus`의 보통주 발행수·유통수·합계. 공시된 분기말 스냅숏이며 매일의 상장주식수나 증자 효력일이 아니다. |
-| PER·PBR | 그날 수정 종가/사용 가능한 EPS TTM·BPS. 분모가 양수여야 한다. 현재 상장주식수 대조가 안 되거나 이후 주식수 스냅숏이 달라 수정 가격과 주당 기준이 불일치하면 null이다. |
+| PER·PBR | 그날 수정 종가/사용 가능한 EPS TTM·BPS. 분모가 양수여야 한다. 현재 상장주식수 대조가 안 되거나 이후 보통주 발행수 스냅숏이 달라 수정 가격과 주당 기준을 확인할 수 없으면 null이다. 자사주 취득·처분에 따른 유통수 변화만으로 그 이전 값을 지우지 않는다. EPS의 네 분기 유통수 확인 조건은 별도이며, 해당 구간 분모를 확인하지 못하면 그 EPS/PER만 null이다. |
 | 가격 밴드 | EPS TTM×10·20·40·80, BPS×1·2·4·8. PBR 배수는 이 도구의 시작 선택이다. |
+
+Q3 단일값·누적값을 못 받거나 늦게 정정해 Q4 단일값을 못 복원해도, 이미 공시된 연간 영업이익·순이익 TTM은 연간 원천의 날짜부터 안다. 다만 EPS에 필요한 분기별 주식수까지 알려졌다는 뜻은 아니므로 분모의 출처와 날짜 조건은 따로 검사한다.
 
 `metrics`와 `annualMetrics`는 회계기간별 계산값이다. 원장이 사후에 보유한 숫자와 그날 알 수 있던 숫자를 혼동하지 않도록 각 수치의 `availableFrom`을 확인한다. `valuation`은 관측일마다 이를 검사해 아직 알려지지 않은 입력을 null로 바꾼다.
 
@@ -115,15 +119,17 @@ FRED CSV는 키 없이 `fredgraph.csv?id=…`를 읽는다. `observation_date,<i
 
 ```sh
 npm --prefix research/leader-cases run typecheck
-node --test research/leader-cases/bundle.test.ts
+node --test research/leader-cases/bundle.test.ts research/leader-cases/review-regressions.test.ts
 VALLY_E2E_BIN_DIR=target/leader-cases-141/bin node --test research/leader-cases/check-sector-symbols.test.ts
 ```
 
 마지막 명령은 별도로 준비한 server·fake-kiwoom 바이너리를 쓴다. 기존 바이너리를 복사해 재사용할 수 있고 큰 Cargo 빌드가 필요하지 않다. 새로 빌드한다면 저장소 규칙에 따라 `cargo build -p server -p fake-kiwoom`을 worktree에서 먼저 한다.
 
-새 시험은 로컬 HTTP 서버에서 페이지·재무·수급·FRED 응답을 흉내 낸다. CLI도 실제 자식 프로세스로 실행하고 `data/leader-cases/990001/bundle.json`을 읽어 계약·계산·누락·키 비노출을 확인한다. `--dart-base`와 `--fred-base`의 대체 주소는 로컬 HTTP 주소만 허용한다. 실제 `.env`, 실제 OpenDART 키와 키움, 사용자 서버를 시험에 쓰지 않는다.
+새 시험은 로컬 HTTP 서버에서 페이지·재무·수급·FRED 응답을 흉내 낸다. CLI도 실제 자식 프로세스로 실행하고 `data/leader-cases/990001/bundle.json`과 회사 불일치 사례의 `990002/bundle.json`을 읽어 계약·계산·누락·키 비노출을 확인한다. `--dart-base`와 `--fred-base`의 대체 주소는 로컬 HTTP 주소만 허용한다. 실제 `.env`, 실제 OpenDART 키와 키움, 사용자 서버를 시험에 쓰지 않는다. 시세·수급·재무·FRED 성공 경로와 누락은 로컬 HTTP fixture에서 검증한다. 기존 sector-map 시험의 Rust server·fake-kiwoom 검증은 종목 목록 경로이며, 별도 fake CLI에서 404인 수급 경로를 Rust 수급 성공 검증으로 세지 않는다.
 
 247540 실제 묶음, 종가 하나와 영업이익 한 분기의 원천 대조는 **아직 수행하지 않았다**. 사용자 승인을 받아 새 코드로 서버를 재시작한 뒤 별도 확인해야 한다. 로컬 fixture의 성공을 그 실제 검증의 성공으로 쓰지 않는다.
+
+실제 확인에서는 `stockTotqySttus.se`의 원문 종류를 확인해야 한다. 현재 `보통주`와 `합계`를 읽으며, `보통주식` 같은 다른 정상 문자열이 실제로 오는지는 아직 확인하지 않았다. 추측으로 별칭을 추가하지 않는다. 주요사항보고에 `last_reprt_at=Y` 공시 목록과 접수번호가 맞지 않는 행이 있으면 해당 endpoint를 누락 처리한다. 실제 정상 원천에서 두 집합이 어긋나는지는 미확인 의심이며 실제 접수번호를 대조해야 한다.
 
 ## 확인한 공식 자료
 
