@@ -65,11 +65,15 @@ fn latest_notice(text: &str) -> Result<Option<NoticeRef>, Failure> {
     let totals: Vec<_> = html.select(&selector("section.paging-group div.info em")).collect();
     if totals.len() != 1 { return Err(Failure::InvalidResponse); }
     let total: usize = totals[0].text().collect::<String>().trim().parse().map_err(|_| Failure::InvalidResponse)?;
+    let rows: Vec<_> = html.select(&selector("section.total-search dl > :not(dd)")).collect();
     let entries: Vec<_> = html.select(&selector("section.total-search dl > dt.img")).collect();
-    if total == 0 && entries.is_empty() && text.contains("검색결과가 없습니다.") { return Ok(None); }
-    if entries.is_empty() || entries.len() > 15 || entries.len() > total { return Err(Failure::InvalidResponse); }
+    if rows.len() != total.min(15) || entries.len() != rows.len() { return Err(Failure::InvalidResponse); }
+    if total == 0 {
+        return if text.contains("검색결과가 없습니다.") { Ok(None) } else { Err(Failure::InvalidResponse) };
+    }
     let mut candidates = Vec::new();
-    let mut identities = BTreeSet::new();
+    let mut receipts = BTreeSet::new();
+    let mut documents = BTreeSet::new();
     for entry in entries {
         let subjects: Vec<_> = entry.select(&selector("span.subject > a")).collect();
         if subjects.len() != 1 { return Err(Failure::InvalidResponse); }
@@ -78,7 +82,7 @@ fn latest_notice(text: &str) -> Result<Option<NoticeRef>, Failure> {
         let Some(arguments) = call.strip_prefix("openDisclsViewer('").and_then(|s| s.strip_suffix("');return false;")) else { return Err(Failure::InvalidResponse); };
         let Some((receipt, document)) = arguments.split_once("', '") else { return Err(Failure::InvalidResponse); };
         if !digits(receipt, 14) || !digits(document, 14) { return Err(Failure::InvalidResponse); }
-        if !identities.insert((receipt.to_owned(), document.to_owned())) { return Ok(None); }
+        if !receipts.insert(receipt.to_owned()) || !documents.insert(document.to_owned()) { return Ok(None); }
         let names: Vec<_> = entry.select(&selector("strong.name > a")).collect();
         let dates: Vec<_> = entry.select(&selector("em.date")).collect();
         if names.len() != 1 || dates.len() != 1 { return Err(Failure::InvalidResponse); }

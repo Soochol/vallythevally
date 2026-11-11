@@ -29,6 +29,7 @@ struct Run {
     attempted_at: i64,
     failure: Option<Failure>,
     unpersisted_refresh: bool,
+    pending_refresh: bool,
 }
 
 type ResolutionAttempt = Arc<tokio::sync::Mutex<Option<ResolutionFailure>>>;
@@ -79,24 +80,37 @@ impl Financials {
         let incomplete = snapshot.collection.reports.len() < ((now.kst_date().year() - 2015 + 1) * 4) as usize;
         let pending = has_pending(&snapshot.collection);
         let mut runs = self.runs.lock().unwrap();
+        if force && let Some(run) = runs.get_mut(corp) && run.running { run.pending_refresh = true; }
         let run = runs.get(corp);
         let failed = has_failures(&snapshot.collection) || run.is_some_and(|run| run.failure.is_some());
         let last_attempt = snapshot.collection.last_attempt_at.into_iter().chain(run.map(|run| run.attempted_at)).max();
         let retry_due = last_attempt.is_none_or(|t| now.unix() - t >= 60);
         if (force || ((daily || failed || incomplete || pending) && retry_due)) && !run.is_some_and(|run| run.running) {
             let unpersisted_refresh = force || run.is_some_and(|run| run.unpersisted_refresh);
-            runs.insert(corp.clone(), Run { running: true, attempted_at: now.unix(), failure: None, unpersisted_refresh });
+            runs.insert(corp.clone(), Run { running: true, attempted_at: now.unix(), failure: None, unpersisted_refresh, pending_refresh: false });
             let service = self.clone();
             let security = snapshot.security.as_ref().unwrap().clone();
             tokio::spawn(async move {
-                let failure = service.collect(&security, unpersisted_refresh).await.err();
-                if let Some(failure) = failure {
-                    tracing::warn!(?failure, "재무 자료 수집을 저장하지 못했습니다");
+                let mut register_refresh = unpersisted_refresh;
+                loop {
+                    let failure = service.collect(&security, register_refresh).await.err();
+                    if let Some(failure) = failure {
+                        tracing::warn!(?failure, "재무 자료 수집을 저장하지 못했습니다");
+                    }
+                    let mut runs = service.runs.lock().unwrap();
+                    let run = runs.get_mut(&security.company.corp_code).unwrap();
+                    run.failure = failure;
+                    run.unpersisted_refresh |= run.pending_refresh;
+                    if failure.is_none() && run.pending_refresh {
+                        run.pending_refresh = false;
+                        run.attempted_at = service.clock.now().unix();
+                        register_refresh = true;
+                    } else {
+                        run.pending_refresh = false;
+                        run.running = false;
+                        break;
+                    }
                 }
-                let mut runs = service.runs.lock().unwrap();
-                let run = runs.get_mut(&security.company.corp_code).unwrap();
-                run.running = false;
-                run.failure = failure;
             });
         }
         let run = runs.get(corp);

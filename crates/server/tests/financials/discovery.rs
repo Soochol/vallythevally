@@ -1,13 +1,13 @@
 use super::*;
 use super::mapping::{tempdir, settled_stock};
 
-const STOCK: &str = "005387";
-const COMMON: &str = "005380";
-const COMPANY: &str = "00164742";
-const ENTRY: &str = r#"<dt class="img"><strong class="name"><a>현대자동차</a></strong><span class="subject"><a onclick="openDisclsViewer('20260917000117', '20260917000264');return false;"><b>변경</b><b>상장</b> 주식소각</a></span><em class="date">2026-09-17  16:42</em></dt>"#;
+pub(super) const STOCK: &str = "005387";
+pub(super) const COMMON: &str = "005380";
+pub(super) const COMPANY: &str = "00164742";
+pub(super) const ENTRY: &str = r#"<dt class="img"><strong class="name"><a>현대자동차</a></strong><span class="subject"><a onclick="openDisclsViewer('20260917000117', '20260917000264');return false;"><b>변경</b><b>상장</b> 주식소각</a></span><em class="date">2026-09-17  16:42</em></dt>"#;
 const CONTENTS: &str = r#"<html><head><script>parent.setPath('','https://kind.krx.co.kr/external/2026/09/17/000117/20260917000264/68155.htm','/external/2026/09/17/000117/20260917000264/68155','03','11');</script></head></html>"#;
 
-fn search(entries: &str, total: usize) -> String {
+pub(super) fn search(entries: &str, total: usize) -> String {
     format!("<section class=\"total-search\"><dl>{entries}</dl></section><section class=\"paging-group\"><div class=\"info\"><em>{total}</em></div></section>")
 }
 
@@ -16,7 +16,7 @@ fn notice_body() -> String {
         .replace("A005930","A005380").replace("A005935","A005387").replace("1우선주","2우선주")
 }
 
-async fn source() -> Fake {
+pub(super) async fn source() -> Fake {
     let fake = Fake::start().await;
     let directory = fake_directory(&fake.state).replace("</result>",&format!("<list><corp_code>{COMPANY}</corp_code><corp_name>현대자동차</corp_name><stock_code>{COMMON}</stock_code></list></result>"));
     {
