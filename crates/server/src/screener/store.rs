@@ -124,17 +124,16 @@ impl Store {
 
     pub fn summary(&self) -> Result<Summary, StoreError> {
         let conn = self.conn();
-        let (last_day, listed, complete) = conn.query_row(
-            "SELECT (SELECT last_day FROM store_meta), (SELECT count(*) FROM listed),
-                    (SELECT count(*) FROM listed JOIN history USING (code) WHERE history.complete)",
-            [],
-            |row| Ok((row.get::<_, Option<i32>>(0)?, row.get::<_, u32>(1)?, row.get::<_, u32>(2)?)),
+        let last_day = conn.query_row("SELECT last_day FROM store_meta", [], |row| row.get::<_, Option<i32>>(0))?.map(date_of);
+        let (listed, complete, unconfirmed) = conn.query_row(
+            &format!(
+                "SELECT count(*) FILTER (WHERE NOT unconfirmed), count(*) FILTER (WHERE complete AND NOT unconfirmed), count(*) FILTER (WHERE unconfirmed)
+                 FROM (SELECT coalesce(history.complete, false) AS complete, $1 IS NOT NULL AND listed.code IN ({UNCONFIRMED_ON}) AS unconfirmed
+                       FROM listed LEFT JOIN history USING (code))"
+            ),
+            params![last_day.map_or(Value::Null, date_value)],
+            |row| Ok((row.get::<_, u32>(0)?, row.get::<_, u32>(1)?, row.get::<_, u32>(2)?)),
         )?;
-        let last_day = last_day.map(date_of);
-        let unconfirmed = match last_day {
-            Some(day) => conn.query_row(&format!("SELECT count(*) FROM ({UNCONFIRMED_ON})"), params![date_value(day)], |row| row.get(0))?,
-            None => 0,
-        };
         Ok(Summary { last_day, listed, complete, unconfirmed })
     }
 

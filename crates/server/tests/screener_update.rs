@@ -612,8 +612,8 @@ async fn a_listed_stock_kiwoom_gives_no_daily_bars_is_left_unconfirmed_and_fille
     let status = api.settled().await;
     assert_eq!(
         (status["lastDay"].clone(), status["fullHistory"].clone(), status["unconfirmed"].clone(), status["update"].clone()),
-        (wire(today), json!({"done": 10, "total": 11}), json!(1), Value::Null),
-        "일봉을 주지 않는 종목이 있어도 업데이트가 끝까지 간다"
+        (wire(today), json!({"done": 10, "total": 10}), json!(1), Value::Null),
+        "일봉을 주지 않는 종목이 있어도 업데이트가 끝까지 간다. 확인 안 된 종목은 과거 이력 수에 넣지 않는다"
     );
     let chains = daily_chains(&fake.calls());
     assert_eq!(chains.get(krx::DAILY_WITHHELD), Some(&vec![None]), "그 종목은 1페이지를 한 번 묻고 과거 이어 받기에서는 묻지 않는다");
@@ -672,7 +672,7 @@ async fn a_full_update_again_refetches_every_confirmed_history_while_a_stock_sta
     update_once(&fake, tmp.path(), &market, &at(today, "2030"), false).await;
     for (round, clock) in [(1, "2040"), (2, "2050")] {
         let (status, calls) = update_once(&fake, tmp.path(), &market, &at(today, clock), true).await;
-        assert_eq!((status["fullHistory"].clone(), status["unconfirmed"].clone()), (json!({"done": 10, "total": 11}), json!(1)), "{round}번째");
+        assert_eq!((status["fullHistory"].clone(), status["unconfirmed"].clone()), (json!({"done": 10, "total": 10}), json!(1)), "{round}번째");
         let mut want = every_confirmed.clone();
         want.extend(withheld_first_page.clone());
         assert_eq!(daily_chains(&calls), want, "{round}번째 전체 다시 받기도 확인된 모든 종목의 전체 이력을 받는다");
@@ -810,5 +810,28 @@ async fn a_new_full_update_refetches_every_confirmed_history_even_after_kiwoom_k
     assert_eq!(daily_chains(&calls), BTreeMap::from([(krx::COMMON.to_owned(), whole_history_of(&market, krx::COMMON))]), "키움이 다시 주면 그 종목의 전체 이력을 받는다");
     let (_, calls) = update_once(&fake, tmp.path(), &market, &at(today, "2120"), false).await;
     assert_eq!(count(&calls, "ka10081"), 0, "다시 받을 표시가 남지 않는다");
+}
+
+
+#[tokio::test(flavor = "multi_thread")]
+async fn full_history_counts_only_confirmed_stocks_so_a_stock_whose_history_was_complete_does_not_push_done_past_total() {
+    let fake = FakeKiwoom::start().await;
+    let tmp = tempfile::tempdir().unwrap();
+    let (yesterday, today) = (day(2026, 11, 5), day(2026, 11, 6));
+    update_once(&fake, tmp.path(), &KrxMarket::sample(yesterday), &at(yesterday, "2030"), false).await;
+
+    let mut market = KrxMarket::sample(today).with_daily_withheld();
+    market.stock_mut(krx::COMMON).quoted = false;
+    let (status, _) = update_once(&fake, tmp.path(), &market, &at(today, "2030"), false).await;
+    assert_eq!(
+        (status["fullHistory"].clone(), status["unconfirmed"].clone()),
+        (json!({"done": 9, "total": 9}), json!(2)),
+        "이력을 다 받아 둔 종목도, 한 번도 받지 못한 종목도 확인 안 됨이면 과거 이력 수에서 뺀다"
+    );
+
+    let mut answered = KrxMarket::sample(today).with_daily_withheld();
+    answered.stock_mut(krx::DAILY_WITHHELD).daily = DailyAnswer::Bars;
+    let (status, _) = update_once(&fake, tmp.path(), &answered, &at(today, "2040"), false).await;
+    assert_eq!((status["fullHistory"].clone(), status["unconfirmed"].clone()), (json!({"done": 11, "total": 11}), json!(0)));
 }
 
