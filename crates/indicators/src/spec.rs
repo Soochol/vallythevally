@@ -24,6 +24,21 @@ pub enum Spec {
     StochSlow { k: u16, d: u16, smooth: u16 },
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Input {
+    Open,
+    High,
+    Low,
+    Close,
+    Volume,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Memory {
+    LastBars(usize),
+    EveryBar,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export)]
@@ -184,6 +199,25 @@ impl Spec {
             Spec::Rsi { period, signal } => n(period) + signal.map_or(1, n),
             Spec::Macd { fast, slow, signal } => (n(fast).max(n(slow)) + n(signal)).saturating_sub(1),
             Spec::StochSlow { k, d, smooth } => (n(k) + n(smooth) + n(d)).saturating_sub(2),
+        }
+    }
+
+    pub fn inputs(&self) -> &'static [Input] {
+        match self {
+            Spec::Ma { .. } | Spec::Bollinger { .. } | Spec::Rsi { .. } | Spec::Macd { .. } => &[Input::Close],
+            Spec::Ichimoku { .. } | Spec::StochSlow { .. } => &[Input::High, Input::Low, Input::Close],
+            Spec::Volume { .. } => &[Input::Volume],
+        }
+    }
+
+    pub fn memory(&self) -> Memory {
+        match *self {
+            Spec::Ma { method: MaMethod::Ema, .. } | Spec::Rsi { .. } | Spec::Macd { .. } => Memory::EveryBar,
+            Spec::Ma { method: MaMethod::Sma, .. }
+            | Spec::Bollinger { .. }
+            | Spec::Ichimoku { .. }
+            | Spec::Volume { .. }
+            | Spec::StochSlow { .. } => Memory::LastBars(self.warmup()),
         }
     }
 
