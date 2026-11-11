@@ -19,6 +19,7 @@ pub enum Period {
     M1,
     M3,
     M5,
+    M10,
     M15,
     M30,
     M60,
@@ -28,10 +29,11 @@ pub enum Period {
 }
 
 impl Period {
-    pub const ALL: [Period; 9] = [
+    pub const ALL: [Period; 10] = [
         Period::M1,
         Period::M3,
         Period::M5,
+        Period::M10,
         Period::M15,
         Period::M30,
         Period::M60,
@@ -45,6 +47,7 @@ impl Period {
             Period::M1 => "1m",
             Period::M3 => "3m",
             Period::M5 => "5m",
+            Period::M10 => "10m",
             Period::M15 => "15m",
             Period::M30 => "30m",
             Period::M60 => "60m",
@@ -71,6 +74,7 @@ impl Period {
             Period::M1 => Some(1),
             Period::M3 => Some(3),
             Period::M5 => Some(5),
+            Period::M10 => Some(10),
             Period::M15 => Some(15),
             Period::M30 => Some(30),
             Period::M60 => Some(60),
@@ -304,6 +308,9 @@ mod tests {
         assert_eq!(Period::M5.bucket(t).start(), at("20261106", 9, 5, 0));
         assert_eq!(Period::M60.bucket(t).start(), at("20261106", 9, 0, 0));
         assert_eq!(Period::M15.bucket(at("20261106", 8, 0, 0)).start(), at("20261106", 8, 0, 0));
+        assert_eq!(Period::M10.bucket(at("20261106", 9, 10, 0)).start(), at("20261106", 9, 10, 0));
+        assert_eq!(Period::M10.bucket(at("20261106", 9, 19, 59)).start(), at("20261106", 9, 10, 0));
+        assert_eq!(Period::M10.bucket(at("20261106", 9, 20, 0)).start(), at("20261106", 9, 20, 0));
         assert_eq!(Period::M1.bucket(at("20261106", 19, 59, 59)).start(), at("20261106", 19, 59, 0));
     }
 
@@ -369,6 +376,11 @@ mod tests {
         assert_eq!(mid.confirm_at(), at("20261106", 9, 1, 2));
         let last = Period::M1.bucket(at("20261106", 19, 59, 0));
         assert_eq!(last.confirm_at(), at("20261106", 20, 0, 0).plus_secs(grace));
+        let mid10 = Period::M10.bucket(at("20261106", 9, 10, 0));
+        assert_eq!(mid10.confirm_at(), at("20261106", 9, 20, 2));
+        assert_eq!(Period::M10.trade_bucket(at("20261106", 20, 0, 3)).start(), at("20261106", 19, 50, 0));
+        let last10 = Period::M10.bucket(at("20261106", 19, 50, 0));
+        assert_eq!(last10.confirm_at(), at("20261106", 20, 0, 0).plus_secs(grace));
         let last60 = Period::M60.bucket(at("20261106", 19, 0, 0));
         assert_eq!(last60.confirm_at(), at("20261106", 20, 0, 0).plus_secs(grace));
     }

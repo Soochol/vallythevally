@@ -67,7 +67,7 @@ export function Topbar() {
               type="button"
               className="seg-btn"
               aria-pressed={cell.period === p}
-              title={`${PERIOD_LABEL[p]} (${periodKey(p)})`}
+              title={periodKey(p) ? `${PERIOD_LABEL[p]} (${periodKey(p)})` : PERIOD_LABEL[p]}
               onClick={() => setPeriod(slot, p)}
             >
               {PERIOD_LABEL[p]}
