@@ -131,6 +131,7 @@ export class ChartController {
     this.tokens = deps.tokens;
     this.onStatus = deps.onStatus;
     this.chart = createChart(el, { ...this.chartOptions(), autoSize: true });
+    this.chart.chartElement().addEventListener("wheel", this.onWheel, { capture: true, passive: false });
     // 주 시리즈를 바꿔 붙이는 동안 가격 pane이 비어도 라이브러리가 지우지 않게 한다. 지우면 지표 패널이 0번이 된다.
     this.chart.panes()[0]?.setPreserveEmptyPane(true);
     this.main = addMainSeries(this.chart, "candle", this.tokens, false);
@@ -300,6 +301,7 @@ export class ChartController {
 
   dispose(): void {
     this.disposed = true;
+    this.chart.chartElement().removeEventListener("wheel", this.onWheel, true);
     this.extensions.forEach((ext) => ext.dispose());
     this.extensions.clear();
     if (this.frame !== null) cancelAnimationFrame(this.frame);
@@ -320,6 +322,30 @@ export class ChartController {
     this.extensions.add(ext);
     return () => { if (this.extensions.delete(ext)) ext.dispose(); };
   }
+
+  private readonly onWheel = (event: WheelEvent): void => {
+    if (event.defaultPrevented || event.deltaY === 0) return;
+    const { handleScroll, handleScale } = this.chart.options();
+    const wheelScroll = typeof handleScroll === "boolean" ? handleScroll : handleScroll.mouseWheel;
+    const wheelScale = typeof handleScale === "boolean" ? handleScale : handleScale.mouseWheel;
+    const timeScale = this.chart.timeScale();
+    const focused = event.ctrlKey || event.metaKey;
+    if (event.shiftKey && !focused) {
+      if (!wheelScroll) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      const unit = event.deltaMode === WheelEvent.DOM_DELTA_LINE ? 32 : event.deltaMode === WheelEvent.DOM_DELTA_PAGE ? 120 : 1;
+      const shift = event.deltaY * unit * 0.8 / timeScale.options().barSpacing;
+      timeScale.scrollToPosition(timeScale.scrollPosition() + shift, false);
+      return;
+    }
+    if (!wheelScale) {
+      if (focused) event.preventDefault();
+      return;
+    }
+    const rightBarStaysOnScroll = !focused;
+    if (timeScale.options().rightBarStaysOnScroll !== rightBarStaysOnScroll) timeScale.applyOptions({ rightBarStaysOnScroll });
+  };
 
   private chartOptions(): DeepPartial<ChartOptions> {
     const t = this.tokens;
