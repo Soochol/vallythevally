@@ -30,9 +30,9 @@ curl --fail --silent --show-error 'https://kind.krx.co.kr/common/searchcorpname.
 curl --fail --silent --show-error 'https://kind.krx.co.kr/common/searchcorpname.do?method=searchCorpNameJson&searchCodeType=number&searchCorpName=005935'
 ```
 
-## resolver 적용 범위
+## #167의 목록 기반 resolver 적용 범위
 
-[#167](https://github.com/Soochol/vallythevally/issues/167)의 구체화에 따라 검증한 삼성전자 공시 한 건을 제한된 근거 목록으로 사용한다. `client/preferred.rs`의 목록은 발행인·두 종목명·단축/표준코드·종류·회사번호·출처 경로·관측 시각을 가진다. 전체 우선주의 자동 발견·적용 범위 확대는 [#179](https://github.com/Soochol/vallythevally/issues/179)이며 이번 변경에 포함하지 않는다. spec #155의 전체 우선주 목표는 아직 완료가 아니다.
+[#167](https://github.com/Soochol/vallythevally/issues/167)의 구체화에 따라 검증한 삼성전자 공시 한 건을 제한된 근거 목록으로 사용한다. `client/preferred.rs`의 목록은 발행인·두 종목명·단축/표준코드·종류·회사번호·출처 경로·관측 시각을 가진다. 전체 우선주의 자동 발견·적용 범위 확대는 [#179](https://github.com/Soochol/vallythevally/issues/179)이며 #167의 범위에 포함하지 않았다. spec #155의 전체 우선주 목표는 아직 완료가 아니다.
 
 DART 고유번호의 정확 코드 일치와 KIND의 요청 코드 정확 일치가 없고, 우선주 입력이 근거 목록에 있을 때만 공시를 조회한다. KIND가 다른 코드를 반환하거나 중복 후보를 주면 해당 응답으로 연결하거나 공시 경로로 우회하지 않는다. 공시는 다음을 모두 만족해야 한다.
 
@@ -65,3 +65,7 @@ DART 고유번호의 정확 코드 일치와 KIND의 요청 코드 정확 일치
 - PRE 오류 안내·지원하지 않는 BODY 구조 각각의 `failed/invalid_response`, 같은 시각·59초의 재호출 억제와 61초 복구, 실제 시험 서버 가격 API 이용
 
 검증 명령과 결과는 PR에 기록한다. 공개 원천의 실제 우선주 지원 근거는 위 관측이고, 합성 fixture 성공으로 대체하지 않는다.
+
+## #179의 자동 발견 경로
+
+목록 밖 우선주는 [공식 공시 자동 발견 조사와 적용 범위](dart-preferred-company-discovery.md)를 따른다. 기존 삼성전자 목록의 원문 검증과 직접 연결 순서는 유지한다. #179는 현대차2우B의 공개 공시 검색·문서 경로·정확 코드 회사 조회를 실증했으며, 모든 우선주의 공식 근거 존재를 보장하지 않는다.
