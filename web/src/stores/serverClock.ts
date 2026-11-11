@@ -1,16 +1,18 @@
 import { create } from "zustand";
 
 interface ServerClockState {
-  serverAheadMs: number;
+  serverTimeOrigin: number | null;
   observe(date: string | null, receivedAt: number): void;
 }
 
 export const useServerClock = create<ServerClockState>()((set) => ({
-  serverAheadMs: 0,
+  serverTimeOrigin: null,
   observe: (date, receivedAt) => {
     const sentAt = date === null ? Number.NaN : Date.parse(date);
     if (Number.isNaN(sentAt)) return;
-    const serverAheadMs = sentAt - receivedAt;
-    set((s) => (s.serverAheadMs === serverAheadMs ? s : { serverAheadMs }));
+    const origin = sentAt - receivedAt;
+    set((s) => (s.serverTimeOrigin !== null && s.serverTimeOrigin >= origin ? s : { serverTimeOrigin: origin }));
   },
 }));
+
+export const serverNow = (serverTimeOrigin: number | null): number => (serverTimeOrigin === null ? Date.now() : serverTimeOrigin + performance.now());

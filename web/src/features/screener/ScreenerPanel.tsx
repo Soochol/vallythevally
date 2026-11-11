@@ -1,5 +1,5 @@
 import type { UseQueryResult } from "@tanstack/react-query";
-import { type ReactNode, type RefObject, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { type ReactNode, type RefObject, useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import type { ApiErrorBody } from "../../api/generated/ApiErrorBody";
 import type { KstDate } from "../../api/generated/KstDate";
 import type { Screen } from "../../api/generated/Screen";
@@ -42,7 +42,7 @@ import { addSymbols, listNameFrom, MAX_WATCHLISTS } from "../../lib/watchlist";
 import { useCell, useLayoutStore } from "../../stores/layout";
 import { type Rerun, rerunReason, runOf, type ScreenRun, shownResult, useScreenerStore } from "../../stores/screener";
 import { useSelectionStore } from "../../stores/selection";
-import { useServerClock } from "../../stores/serverClock";
+import { serverNow, useServerClock } from "../../stores/serverClock";
 import { useUiStore } from "../../stores/ui";
 import { useWatchlistStore } from "../../stores/watchlist";
 import { ChevronIcon, MoreIcon, PenIcon, PlayIcon, PlusIcon, SpinnerIcon } from "../icons";
@@ -583,15 +583,15 @@ const progressText = ({ phase, done, total }: ScreenerUpdate) =>
 const todayNote = (status: ScreenerStatus) => (todayConfirmed(status) ? "오늘 자료까지 받습니다." : "당일 봉은 20:00 뒤에 받습니다.");
 
 function useUpdateRetry(error: ApiErrorBody | null): UpdateRetry | null {
-  const serverAheadMs = useServerClock((s) => s.serverAheadMs);
-  const [serverNow, setServerNow] = useState(() => Date.now() + serverAheadMs);
-  const retry = error && updateRetry(error, serverNow);
+  const origin = useServerClock((s) => s.serverTimeOrigin);
+  const [wakes, wake] = useReducer((n: number) => n + 1, 0);
+  const retry = error && updateRetry(error, serverNow(origin));
   const opensAt = retry?.kind === "waiting" ? retry.opensAt : null;
   useEffect(() => {
     if (opensAt === null) return;
-    const id = setTimeout(() => setServerNow(Date.now() + serverAheadMs), opensAt * 1000 - (Date.now() + serverAheadMs));
+    const id = setTimeout(wake, opensAt * 1000 - serverNow(origin));
     return () => clearTimeout(id);
-  }, [opensAt, serverAheadMs, serverNow]);
+  }, [opensAt, origin, wakes]);
   return retry;
 }
 

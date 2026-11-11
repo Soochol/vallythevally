@@ -275,6 +275,11 @@ test.describe("서버와 시계가 어긋난 브라우저", () => {
   const sleepUntil = (ms: number) => new Promise((resolve) => setTimeout(resolve, Math.max(0, ms - Date.now())));
   const retryButton = (page: Page) => panel(page).getByRole("alert").getByRole("button", { name: "다시 시도" });
 
+  async function stoppedRetryAt(url: string): Promise<number> {
+    const status = (await (await fetch(`${url}/api/screener/status`)).json()) as { update: { error: { retryAt: number } } };
+    return status.update.error.retryAt;
+  }
+
   async function expectFullReload(page: Page, check: (item: Locator) => Promise<void>) {
     const toggle = panel(page).getByRole("button", { name: "스크리너 메뉴" });
     const menu = page.getByRole("menu", { name: "스크리너 메뉴" });
@@ -301,8 +306,7 @@ test.describe("서버와 시계가 어긋난 브라우저", () => {
     await openScreener(ahead);
     await updateBand(ahead).getByRole("button", { name: "처음 받기" }).click();
     await expect(panel(ahead).getByRole("alert")).toContainText("업데이트가 멈췄습니다");
-    const status = (await (await fetch(`${app.url}/api/screener/status`)).json()) as { update: { error: { retryAt: number } } };
-    const retryAt = status.update.error.retryAt;
+    const retryAt = await stoppedRetryAt(app.url);
     const opensFrom = `${kstClock(retryAt + 1)}부터`;
     await app.fake.reset();
     await behind.goto("/");
@@ -341,6 +345,56 @@ test.describe("서버와 시계가 어긋난 브라우저", () => {
     await waitForUpdateToFinish(ahead, "11-06(금)");
     expect(retries).toEqual([JSON.stringify({ full: false })]);
     await behindContext.close();
+  });
+
+  test("기다리는 사이 오래된 응답이 늦게 와도 다시 시도와 전체 다시 받기는 안내한 시각에 저절로 켜진다", async ({ app, page }) => {
+    test.setTimeout(120_000);
+    let markFetched = () => {};
+    let release = () => {};
+    const fetched = new Promise<void>((resolve) => (markFetched = resolve));
+    const held = new Promise<void>((resolve) => (release = resolve));
+    let holding = true;
+    await page.route("**/api/bars?*", async (route) => {
+      if (!holding) return route.continue();
+      holding = false;
+      const response = await route.fetch();
+      markFetched();
+      await held;
+      await route.fulfill({ response });
+    });
+
+    await page.goto("/");
+    await fetched;
+    await app.fake.respondWith({ apiId: "ka10081", status: 503, body: {} });
+    await openScreener(page);
+    await updateBand(page).getByRole("button", { name: "처음 받기" }).click();
+    await expect(retryButton(page)).toBeDisabled();
+    const retryAt = await stoppedRetryAt(app.url);
+    const opensAt = (retryAt + 1) * 1000;
+    await app.fake.reset();
+    await expectFullReload(page, async (item) => {
+      await expect(item).toBeDisabled();
+      await expect(item).toContainText(`${kstClock(retryAt + 1)}부터`);
+    });
+
+    await sleepUntil(opensAt - 10_000);
+    const answered: string[] = [];
+    page.on("response", (r) => {
+      const { pathname } = new URL(r.url());
+      if (pathname.startsWith("/api/")) answered.push(pathname);
+    });
+    const delivered = page.waitForResponse((r) => new URL(r.url()).pathname === "/api/bars");
+    release();
+    await delivered;
+    await expect(retryButton(page)).toBeDisabled();
+
+    await sleepUntil(opensAt);
+    await expect(retryButton(page)).toBeEnabled({ timeout: 2_000 });
+    expect(answered).toEqual(["/api/bars"]);
+    await expectFullReload(page, async (item) => {
+      await expect(item).toBeEnabled();
+      await expect(item).toHaveText("전체 다시 받기…");
+    });
   });
 });
 
