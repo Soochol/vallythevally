@@ -35,7 +35,8 @@ import { addMainSeries, applyMainColors, type MainSeries, priceFormat, setMainDa
 import { type ChartSettings, type Panel, type PriceScale, shownScale } from "./settings";
 import { composeSnapshot, snapshotFileName } from "./snapshot";
 import type { ThemeTokens } from "./theme";
-import { formatBarTime, formatTickMark, fromChartTime, isIntraday } from "./time";
+import { chartTimeProjection, preserveTimeRange } from "./timeAxis";
+import { formatBarTime, formatTickMark, fromChartTime, isIntraday, toChartTime } from "./time";
 import type { ChartExtension, ExtensionFactory } from "./extensions";
 
 /** 왼쪽 끝이 이 봉 수 안으로 들어오면 과거 페이지를 받는다(frontend.md §5.7). */
@@ -203,7 +204,9 @@ export class ChartController {
     this.chart.timeScale().subscribeVisibleLogicalRangeChange(() => {
       if (this.settingData) return;
       const r = this.chart.timeScale().getVisibleLogicalRange();
-      if (r && r.from < LOAD_OLDER_WITHIN) this.feed.needOlder();
+      const left = this.leftT();
+      const before = left === null ? -1 : this.bars.findIndex((bar) => bar.t >= left);
+      if (r && before >= 0 && before < LOAD_OLDER_WITHIN) this.feed.needOlder();
       this.updateIntradayEnd();
       this.compare.coverFrom(this.leftT());
       if (this.view?.settings.compare.length) this.renderLegend();
@@ -249,14 +252,14 @@ export class ChartController {
     if (prev?.period !== next.period || prev?.settings.indicators !== next.settings.indicators || prev?.settings.panels !== next.settings.panels) {
       const configs = next.settings.indicators.filter((c) => !isFinancial(c.spec) || next.period === "Q" || next.period === "Y");
       const panels = next.settings.panels.filter((p) => configs.some((c) => c.panel === p.id));
-      this.indicators.setConfigs(configs, panels);
+      this.withDataGuard(() => preserveTimeRange(this.chart.timeScale(), next.period, () => this.indicators.setConfigs(configs, panels)));
     }
     this.compare.setCodes(compareEntries(next), { period: next.period, venueFor: (code) => compareVenue(code, next) });
     this.renderLegend();
   }
 
   setFinancials(page: FinancialsPage | null, message?: string): void {
-    this.indicators.setFinancials(page, message);
+    this.withDataGuard(() => preserveTimeRange(this.chart.timeScale(), this.period(), () => this.indicators.setFinancials(page, message)));
     this.renderLegend();
   }
 
@@ -396,14 +399,12 @@ export class ChartController {
 
   private recreateMain(isIndex: boolean): void {
     this.indicators.flush();
-    const range = this.chart.timeScale().getVisibleLogicalRange();
-    this.chart.removeSeries(this.main.api);
-    this.main = addMainSeries(this.chart, this.view?.settings.style ?? "candle", this.tokens, isIndex);
-    this.extensions.forEach((ext) => ext.reattach());
-    this.withDataGuard(() => {
+    this.withDataGuard(() => preserveTimeRange(this.chart.timeScale(), this.period(), () => {
+      this.chart.removeSeries(this.main.api);
+      this.main = addMainSeries(this.chart, this.view?.settings.style ?? "candle", this.tokens, isIndex);
+      this.extensions.forEach((ext) => ext.reattach());
       this.setBars(this.bars);
-      if (range) this.chart.timeScale().setVisibleLogicalRange(range);
-    });
+    }));
   }
 
   private setBars(bars: Bar[]): void {
@@ -519,7 +520,9 @@ export class ChartController {
     const show = matchMedia("(max-width: 767px)").matches ? 90 : 130;
     this.withDataGuard(() => {
       this.setBars(bars);
-      this.chart.timeScale().setVisibleLogicalRange({ from: bars.length - show, to: bars.length - 1 + RIGHT_OFFSET });
+      const last = bars.at(-1);
+      const end = last ? this.chart.timeScale().timeToIndex(toChartTime(last.t), false) : null;
+      if (end !== null) this.chart.timeScale().setVisibleLogicalRange({ from: end + 1 - show, to: end + RIGHT_OFFSET });
     });
     this.indicators.reset(h);
     this.compare.coverFrom(this.leftT());
@@ -546,12 +549,10 @@ export class ChartController {
     this.patchReady({ olderLoading: false });
     this.history = h;
     if (added === 0) return this.updateIntradayEnd();
-    const range = this.chart.timeScale().getVisibleLogicalRange();
-    this.withDataGuard(() => {
+    this.withDataGuard(() => preserveTimeRange(this.chart.timeScale(), this.period(), () => {
       this.setBars(displayBars(h));
       this.indicators.reset(h);
-      if (range) this.chart.timeScale().setVisibleLogicalRange({ from: range.from + added, to: range.to + added });
-    });
+    }));
     if (this.financialHoverTime !== null) this.hoverIndex = this.bars.findIndex((bar) => bar.t === this.financialHoverTime);
     this.compare.coverFrom(this.leftT());
     this.renderLegend();
@@ -590,7 +591,7 @@ export class ChartController {
     const r = this.chart.timeScale().getVisibleLogicalRange();
     const n = this.bars.length;
     if (!r || n === 0) return null;
-    return this.bars[Math.min(n - 1, Math.max(0, Math.floor(r.from)))]!.t;
+    return chartTimeProjection(this.chart.timeScale(), this.period()).toTime(Math.max(0, Math.floor(r.from)));
   }
 
   private renderLegend(): void {
