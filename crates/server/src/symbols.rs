@@ -9,7 +9,7 @@ use tokio::sync::watch;
 
 use crate::kiwoom::api::{ApiId, StockList};
 use crate::kiwoom::rest::{KiwoomError, KiwoomRest, MergeScope, Priority};
-use crate::kiwoom::wire::{Listing, classify};
+use crate::kiwoom::wire::{self, Listing, ScreenerListing, classify};
 
 pub const READY_WAIT: Duration = Duration::from_secs(10);
 const MAX_RESULTS: usize = 20;
@@ -27,6 +27,7 @@ struct Entry {
 pub struct Directory {
     entries: Vec<Entry>,
     by_symbol: HashMap<Symbol, usize>,
+    screener_listing: Vec<ScreenerListing>,
 }
 
 impl Directory {
@@ -36,7 +37,7 @@ impl Directory {
             SymbolInfo { symbol: Symbol::Index(IndexCode::KOSPI), name: "코스피".into(), kind: SymbolKind::Index, market: Market::Kospi, nxt_enabled: false },
             SymbolInfo { symbol: Symbol::Index(IndexCode::KOSDAQ), name: "코스닥".into(), kind: SymbolKind::Index, market: Market::Kosdaq, nxt_enabled: false },
         ];
-        let mut dir = Directory { entries: Vec::new(), by_symbol: HashMap::new() };
+        let mut dir = Directory { entries: Vec::new(), by_symbol: HashMap::new(), screener_listing: Vec::new() };
         for info in fixed.into_iter().chain(stocks) {
             if dir.by_symbol.contains_key(&info.symbol) {
                 continue;
@@ -64,6 +65,10 @@ impl Directory {
 
     pub fn get(&self, symbol: Symbol) -> Option<&SymbolInfo> {
         self.by_symbol.get(&symbol).map(|&i| &self.entries[i].info)
+    }
+
+    pub fn screener_listing(&self) -> &[ScreenerListing] {
+        &self.screener_listing
     }
 
     pub fn search(&self, query: &str) -> Vec<SymbolInfo> {
@@ -186,6 +191,7 @@ impl SymbolDirectory {
 /// ka10099를 `mrkt_tp=0`, `10`으로 불러 목록을 만든다.
 pub async fn fetch_directory(rest: &KiwoomRest, priority: Priority) -> Result<Directory, KiwoomError> {
     let mut stocks = Vec::new();
+    let mut screener_listing = Vec::new();
     let mut unknown = Vec::new();
     for req in [StockList::EXCHANGE, StockList::KOSDAQ] {
         let mut cont = None;
@@ -193,7 +199,10 @@ pub async fn fetch_directory(rest: &KiwoomRest, priority: Priority) -> Result<Di
             let page = rest.call(&req, cont.as_ref(), priority, MergeScope::default()).await?;
             for row in &page.body.list {
                 match classify(row) {
-                    Listing::Include(info) => stocks.push(info),
+                    Listing::Include(info) => {
+                        screener_listing.extend(wire::screener_listing(row, &info));
+                        stocks.push(info);
+                    }
                     Listing::Exclude => {}
                     Listing::Unknown(why) => unknown.push(why),
                 }
@@ -207,7 +216,7 @@ pub async fn fetch_directory(rest: &KiwoomRest, priority: Priority) -> Result<Di
     if !unknown.is_empty() {
         tracing::warn!(count = unknown.len(), first = %unknown[0], "종목 목록에 표에 없는 행이 있어 넣지 않았습니다");
     }
-    let dir = Directory::build(stocks);
+    let dir = Directory { screener_listing, ..Directory::build(stocks) };
     tracing::info!(count = dir.len(), "종목 목록을 받았습니다");
     Ok(dir)
 }
@@ -336,6 +345,9 @@ mod tests {
         assert_eq!(d.len(), 2 + 15 + 11, "ETN·인프라·뮤추얼펀드 다섯 행은 빠진다");
         assert_eq!(d.search("03481K")[0].kind, SymbolKind::Preferred);
         assert_eq!(d.search("삼성전자")[0].symbol.as_wire(), "005930");
+        let preferred = d.screener_listing().iter().find(|l| l.code.as_str() == "03481K").expect("스크리너 목록도 함께 받는다");
+        assert_eq!((preferred.listed_on, preferred.excludable_as.clone()), (domain::KstDate::new(2021, 12, 2), vec![crate::api::ExcludeKind::Preferred]));
+        assert_eq!(d.screener_listing().len(), 15 + 11, "검색 목록에 든 주식이 모두 스크리너 목록에 든다");
         down.store(true, Ordering::SeqCst);
         assert!(symbols.refresh(&rest, Priority::Background).await.is_err());
         assert_eq!(symbols.ready(&rest).await.unwrap().len(), 28, "실패하면 이전 목록을 쓴다");

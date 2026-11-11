@@ -613,6 +613,7 @@ pub struct ScreenerResult {
 pub struct ScreenerExcluded {
     pub listed_too_short: u32,
     pub history_short: u32,
+    pub unconfirmed: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
@@ -666,6 +667,7 @@ pub struct ScreenerStatus {
     pub need_day: Option<KstDate>,
     pub today_available: bool,
     pub full_history: FullHistory,
+    pub unconfirmed: u32,
     pub update: Option<ScreenerUpdate>,
 }
 
@@ -881,10 +883,10 @@ mod tests {
         let result = ScreenerResult {
             as_of: day(2026, 11, 10),
             universe: 3957,
-            excluded: ScreenerExcluded { listed_too_short: 14, history_short: 120 },
+            excluded: ScreenerExcluded { listed_too_short: 14, history_short: 120, unconfirmed: 2 },
             rows: vec![ScreenerRow { symbol: SymbolCode("005930".into()), name: "삼성전자".into(), close: 193_400.0, change_rate: None, high_date: day(2026, 11, 9) }],
         };
-        let result_json = json!({"asOf": "2026-11-10", "universe": 3957, "excluded": {"listedTooShort": 14, "historyShort": 120},
+        let result_json = json!({"asOf": "2026-11-10", "universe": 3957, "excluded": {"listedTooShort": 14, "historyShort": 120, "unconfirmed": 2},
                                  "rows": [{"symbol": "005930", "name": "삼성전자", "close": 193_400.0, "changeRate": null, "highDate": "2026-11-09"}]});
         assert_eq!(serde_json::to_value(&result).unwrap(), result_json);
         assert_eq!(serde_json::from_value::<ScreenerResult>(result_json).unwrap(), result);
@@ -894,11 +896,12 @@ mod tests {
             need_day: Some(day(2026, 11, 10)),
             today_available: false,
             full_history: FullHistory { done: 0, total: 3960 },
+            unconfirmed: 3,
             update: Some(ScreenerUpdate { phase: UpdatePhase::Recent, done: 12, total: 3960, error: None, full: false }),
         };
         assert_eq!(
             serde_json::to_value(&status).unwrap(),
-            json!({"lastDay": null, "needDay": "2026-11-10", "todayAvailable": false, "fullHistory": {"done": 0, "total": 3960},
+            json!({"lastDay": null, "needDay": "2026-11-10", "todayAvailable": false, "fullHistory": {"done": 0, "total": 3960}, "unconfirmed": 3,
                    "update": {"phase": "recent", "done": 12, "total": 3960, "error": null, "full": false}})
         );
         assert_eq!(serde_json::from_value::<ScreenerUpdateRequest>(json!({"full": true})).unwrap(), ScreenerUpdateRequest { full: true });

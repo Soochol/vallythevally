@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use domain::{Bucket, KstDate, KstTime, Period, Price, StockCode, TimeOfDay};
 use duckdb::{Connection, Transaction, params};
 
-use super::store::{StoreError, date_of, date_value, exclusion_mask, price_of, stock_code};
+use super::store::{StoreError, date_of, date_value, exclusion_mask, price_of, stock_code, unconfirmed_on};
 use crate::api::{self, BarField, NewHigh, Screen, ScreenPeriod, ScreenerExcluded, ScreenerResult, ScreenerRow, SymbolCode};
 
 type Cell = i64;
@@ -133,9 +133,14 @@ impl<'a> Snapshot<'a> {
         let reach = Reach::of(&screen.conditions, cells.as_of());
         let unwanted = exclusion_mask(&screen.exclude);
         let universe: Vec<Stock> = stocks(tx, as_of)?.into_iter().filter(|s| s.excludable_as & unwanted == 0).collect();
-        let mut excluded = ScreenerExcluded { listed_too_short: 0, history_short: 0 };
+        let unconfirmed = unconfirmed_on(tx, as_of)?;
+        let mut excluded = ScreenerExcluded { listed_too_short: 0, history_short: 0, unconfirmed: 0 };
         let mut judged = Vec::new();
         for stock in &universe {
+            if unconfirmed.contains(&stock.code) {
+                excluded.unconfirmed += 1;
+                continue;
+            }
             match reach.standing(stock, &cells) {
                 Standing::ListedTooShort => excluded.listed_too_short += 1,
                 Standing::HistoryShort => excluded.history_short += 1,

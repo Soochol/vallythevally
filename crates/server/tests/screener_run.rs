@@ -85,7 +85,7 @@ fn price_and_change(result: &Value, code: &str) -> (Value, Value) {
 }
 
 fn excluded(listed_too_short: u32, history_short: u32) -> Value {
-    json!({"listedTooShort": listed_too_short, "historyShort": history_short})
+    json!({"listedTooShort": listed_too_short, "historyShort": history_short, "unconfirmed": 0})
 }
 
 struct Api {
@@ -490,21 +490,26 @@ async fn the_update_stores_the_kospi_calendar_back_to_its_first_day_once_then_ap
 async fn a_delisted_stocks_old_bars_do_not_fill_in_the_unstored_start_of_a_new_listings_first_week() {
     let today = day(2026, 11, 4);
     let days = last_open_days(1_300, today);
-    let delisted = stock("200030", priced(&days.iter().copied().filter(|d| (d.year(), d.month()) == (2024, 5)).collect::<Vec<_>>(), |_| 100));
+    let may: Vec<KstDate> = days.iter().copied().filter(|d| (d.year(), d.month()) == (2024, 5)).collect();
+    let delisted = stock("200030", priced(&may, |_| 100));
+    let last_traded = *may.last().unwrap();
     let listed_from = days.iter().position(|&d| d == day(2024, 7, 1)).unwrap();
     let listed_days = &days[listed_from..];
     let new_listing = stock("200020", priced(listed_days, |i| if listed_days[i] == day(2024, 7, 15) { 300 } else if listed_days[i] == today { 200 } else { 100 }));
     assert_eq!(new_listing.bars[new_listing.bars.len() - 600].day, day(2024, 7, 18), "최근 600관측일은 7-18(목)부터라 7-15·16·17이 빠진다");
     let fake = FakeKiwoom::start().await;
-    fake.set_krx_market(KrxMarket { days: days.clone(), stocks: vec![delisted] });
+    fake.set_krx_market(KrxMarket { days: days.iter().copied().filter(|d| *d <= last_traded).collect(), stocks: vec![delisted] });
     let dir = tempfile::tempdir().unwrap();
-    let server = boot(&fake, dir.path(), &at(today, "2030"));
+    let server = boot(&fake, dir.path(), &at(last_traded, "2030"));
     let api = Api::of(&server).await;
     api.update().await;
     api.settled().await;
+    server.stop().await;
 
     fake.set_krx_market(KrxMarket { days, stocks: vec![new_listing] });
     fake.delay("ka10081", Duration::from_secs(1));
+    let server = boot(&fake, dir.path(), &at(today, "2030"));
+    let api = Api::of(&server).await;
     api.update().await;
     api.wait_for("과거 이어 받기", |s| s["update"]["phase"] == "backfill").await;
     api.cancel().await;
@@ -570,7 +575,11 @@ async fn runs_racing_into_recent_read_the_store_from_before_recent_or_are_refuse
                 "refused"
             }
             (200, Some(d)) if d == yesterday.to_string() => {
-                assert_eq!((body["universe"].clone(), body["excluded"].clone(), hits(body)), (json!(2), excluded(0, 1), vec![]), "최근 채우기 전의 저장소라 200010은 목록에만 있고 봉이 없다");
+                assert_eq!(
+                    (body["universe"].clone(), body["excluded"].clone(), hits(body)),
+                    (json!(2), json!({"listedTooShort": 0, "historyShort": 0, "unconfirmed": 2}), vec![]),
+                    "최근 채우기 전의 저장소라 200010은 목록에만 있고 봉이 없다. 거래를 멈춘 200020은 어제 봉이 없다"
+                );
                 "before recent"
             }
             (200, Some(d)) if d == today.to_string() => {

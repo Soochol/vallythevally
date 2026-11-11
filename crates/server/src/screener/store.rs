@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::fmt;
 use std::path::Path;
 use std::sync::{Mutex, MutexGuard};
@@ -9,15 +10,17 @@ use duckdb::{Config, Connection, OptionalExt, params};
 use crate::api::ExcludeKind;
 use crate::kiwoom::wire::{MillionWon, ScreenerListing};
 
-const SCHEMA_VERSION: i32 = 3;
+const SCHEMA_VERSION: i32 = 4;
 
 const SCHEMA: &str = "
-CREATE TABLE store_meta (schema_version INTEGER NOT NULL, last_day DATE);
+CREATE TABLE store_meta (schema_version INTEGER NOT NULL, last_day DATE, full_refetch BOOLEAN NOT NULL);
 CREATE TABLE listed (code VARCHAR NOT NULL, name VARCHAR NOT NULL, listed_on DATE, excludable_as USMALLINT NOT NULL);
 CREATE TABLE history (code VARCHAR PRIMARY KEY, complete BOOLEAN NOT NULL, refetch BOOLEAN NOT NULL);
 CREATE TABLE daily (code VARCHAR NOT NULL, day DATE NOT NULL, open UBIGINT NOT NULL, high UBIGINT NOT NULL, low UBIGINT NOT NULL, close UBIGINT NOT NULL, volume UBIGINT NOT NULL, traded_million_won UBIGINT NOT NULL);
 CREATE TABLE calendar (day DATE PRIMARY KEY);
 ";
+
+const UNCONFIRMED_ON: &str = "SELECT code FROM listed WHERE NOT coalesce(listed_on > $1, false) AND code NOT IN (SELECT code FROM daily WHERE day = $1)";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StoreError(pub String);
@@ -55,12 +58,27 @@ pub struct Summary {
     pub last_day: Option<KstDate>,
     pub listed: u32,
     pub complete: u32,
+    pub unconfirmed: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Write {
     Extend { code: StockCode, bars: Vec<DayBar>, reached_origin: bool },
     Replace { code: StockCode, bars: Vec<DayBar> },
+}
+
+impl Write {
+    pub fn last_day(&self) -> Option<KstDate> {
+        match self {
+            Write::Extend { bars, .. } | Write::Replace { bars, .. } => bars.last().map(|b| b.day),
+        }
+    }
+}
+
+pub(super) fn unconfirmed_on(conn: &Connection, day: KstDate) -> Result<HashSet<StockCode>, StoreError> {
+    let mut stmt = conn.prepare(UNCONFIRMED_ON)?;
+    let rows = stmt.query_map(params![date_value(day)], |row| row.get::<_, String>(0))?;
+    rows.map(|code| stock_code(&code?)).collect()
 }
 
 pub(super) fn exclusion_mask(kinds: &[ExcludeKind]) -> u16 {
@@ -106,13 +124,17 @@ impl Store {
 
     pub fn summary(&self) -> Result<Summary, StoreError> {
         let conn = self.conn();
-        let (last_day, listed, complete) = conn.query_row(
-            "SELECT (SELECT last_day FROM store_meta), (SELECT count(*) FROM listed),
-                    (SELECT count(*) FROM listed JOIN history USING (code) WHERE history.complete)",
-            [],
-            |row| Ok((row.get::<_, Option<i32>>(0)?, row.get::<_, u32>(1)?, row.get::<_, u32>(2)?)),
+        let last_day = conn.query_row("SELECT last_day FROM store_meta", [], |row| row.get::<_, Option<i32>>(0))?.map(date_of);
+        let (listed, complete, unconfirmed) = conn.query_row(
+            &format!(
+                "SELECT count(*) FILTER (WHERE NOT unconfirmed), count(*) FILTER (WHERE complete AND NOT unconfirmed), count(*) FILTER (WHERE unconfirmed)
+                 FROM (SELECT coalesce(history.complete, false) AS complete, $1 IS NOT NULL AND listed.code IN ({UNCONFIRMED_ON}) AS unconfirmed
+                       FROM listed LEFT JOIN history USING (code))"
+            ),
+            params![last_day.map_or(Value::Null, date_value)],
+            |row| Ok((row.get::<_, u32>(0)?, row.get::<_, u32>(1)?, row.get::<_, u32>(2)?)),
         )?;
-        Ok(Summary { last_day: last_day.map(date_of), listed, complete })
+        Ok(Summary { last_day, listed, complete, unconfirmed })
     }
 
     pub fn replace_listing(&self, listing: &[ScreenerListing]) -> Result<(), StoreError> {
@@ -223,11 +245,17 @@ impl Store {
     pub fn mark_refetch(&self) -> Result<(), StoreError> {
         let mut conn = self.conn();
         let tx = conn.transaction()?;
-        let pending: u32 = tx.query_row("SELECT count(*) FROM listed JOIN history USING (code) WHERE history.refetch", [], |row| row.get(0))?;
-        if pending == 0 {
+        let running: bool = tx.query_row("SELECT full_refetch FROM store_meta", [], |row| row.get(0))?;
+        if !running {
             tx.execute("INSERT INTO history SELECT DISTINCT code, false, true FROM listed ON CONFLICT (code) DO UPDATE SET refetch = true", [])?;
+            tx.execute("UPDATE store_meta SET full_refetch = true", [])?;
         }
         tx.commit()?;
+        Ok(())
+    }
+
+    pub fn end_full_refetch(&self) -> Result<(), StoreError> {
+        self.conn().execute("UPDATE store_meta SET full_refetch = false", [])?;
         Ok(())
     }
 
@@ -235,7 +263,7 @@ impl Store {
         let conn = self.conn();
         let mut stmt = conn.prepare(
             "SELECT listed.code FROM listed LEFT JOIN history USING (code)
-             WHERE (NOT coalesce(history.complete, false) OR coalesce(history.refetch, false)) AND NOT coalesce(listed.listed_on > ?, false)
+             WHERE (NOT coalesce(history.complete, false) OR coalesce(history.refetch, false)) AND listed.code IN (SELECT code FROM daily WHERE day = ?)
              ORDER BY listed.code",
         )?;
         let rows = stmt.query_map(params![date_value(target)], |row| row.get::<_, String>(0))?;
@@ -270,7 +298,7 @@ fn stored_version(conn: &Connection) -> Result<Option<i32>, StoreError> {
 fn create(mut conn: Connection) -> Result<Connection, StoreError> {
     let tx = conn.transaction()?;
     tx.execute_batch(SCHEMA)?;
-    tx.execute("INSERT INTO store_meta VALUES (?, NULL)", params![SCHEMA_VERSION])?;
+    tx.execute("INSERT INTO store_meta VALUES (?, NULL, false)", params![SCHEMA_VERSION])?;
     tx.commit()?;
     Ok(conn)
 }

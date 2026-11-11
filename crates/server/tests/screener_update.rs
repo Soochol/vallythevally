@@ -46,6 +46,12 @@ impl Api {
         reply(self.client.post(format!("{}/update/cancel", self.base)).send().await.unwrap()).await
     }
 
+    async fn excluded(&self) -> Value {
+        let screen = json!({"id": "S1", "name": "고가 1일 신고가", "period": "D", "exclude": [], "conditions": [{"field": "high", "n": 1, "m": 1}]});
+        let resp = self.client.post(format!("{}/run", self.base)).header("content-type", "application/json").body(screen.to_string()).send().await.unwrap();
+        reply(resp).await["excluded"].clone()
+    }
+
     async fn settled(&self) -> Value {
         for _ in 0..1_200 {
             let status = self.status().await;
@@ -139,18 +145,19 @@ async fn first_load_fills_every_recent_page_then_follows_each_history_to_cont_yn
 
     assert_eq!(
         api.status().await,
-        json!({"lastDay": null, "needDay": wire(day(2026, 11, 5)), "todayAvailable": true, "fullHistory": {"done": 0, "total": 0}, "update": null})
+        json!({"lastDay": null, "needDay": wire(day(2026, 11, 5)), "todayAvailable": true, "fullHistory": {"done": 0, "total": 0}, "unconfirmed": 0, "update": null})
     );
     let started = api.update(false).await;
     assert_eq!(started["update"]["phase"], "symbols", "{started}");
     let finished = api.settled().await;
     assert_eq!(
         finished,
-        json!({"lastDay": wire(today), "needDay": wire(day(2026, 11, 5)), "todayAvailable": false, "fullHistory": {"done": 10, "total": 10}, "update": null})
+        json!({"lastDay": wire(today), "needDay": wire(day(2026, 11, 5)), "todayAvailable": false, "fullHistory": {"done": 10, "total": 10}, "unconfirmed": 0, "update": null})
     );
     let calls = fake.calls();
     assert_eq!(daily_chains(&calls), first_load(&market), "최근 1페이지 다음에 과거가 덜 찬 종목마다 cont-yn: N까지 따라간다");
-    assert_eq!(count(&calls, "ka10095"), 0, "빈 저장소에는 하루치 덧붙일 종목이 없다");
+    assert_eq!(count(&calls, "ka10095"), 1, "일봉을 받기 전에 10종목을 ka10095 한 번으로 확인한다");
+    assert_eq!(count(&calls, "ka10099"), 2, "업데이트는 서버가 켤 때 받은 두 시장의 종목 목록을 쓰고 다시 받지 않는다");
     assert!(market.stocks.iter().any(|s| s.bars.len() > 2 * PAGE_ROWS), "세 페이지에 걸친 이력이 있어야 연속조회를 시험한다");
     server.stop().await;
 }
@@ -182,7 +189,7 @@ async fn two_or_more_missing_days_take_one_daily_page_that_agrees_with_the_ka100
     let market = KrxMarket::sample(day(2026, 11, 6));
     let (status, calls) = update_once(&fake, tmp.path(), &market, &at(day(2026, 11, 6), "2030"), false).await;
     assert_eq!(status["lastDay"], wire(day(2026, 11, 6)));
-    assert_eq!(count(&calls, "ka10095"), 0, "이틀 빠지면 하루치 덧붙이기를 쓰지 않는다");
+    assert_eq!(count(&calls, "ka10095"), 1, "이틀 빠져도 ka10095로 확인만 하고 하루치 덧붙이기는 쓰지 않는다");
     let codes = market.codes();
     assert_eq!(
         daily_chains(&calls),
@@ -192,7 +199,7 @@ async fn two_or_more_missing_days_take_one_daily_page_that_agrees_with_the_ka100
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn a_stock_ka10095_does_not_answer_for_the_target_day_falls_back_to_its_first_daily_page() {
+async fn a_stock_ka10095_skips_or_dates_before_the_target_day_is_unconfirmed_without_asking_for_its_daily_bars() {
     let fake = FakeKiwoom::start().await;
     let tmp = tempfile::tempdir().unwrap();
     let (yesterday, today) = (day(2026, 11, 4), day(2026, 11, 5));
@@ -201,10 +208,26 @@ async fn a_stock_ka10095_does_not_answer_for_the_target_day_falls_back_to_its_fi
     let mut market = KrxMarket::sample(today);
     market.stock_mut(krx::COMMON).quoted = false;
     market.stock_mut(krx::REIT).bars.pop();
-    let (status, calls) = update_once(&fake, tmp.path(), &market, &at(today, "2030"), false).await;
-    assert_eq!(status["lastDay"], wire(today));
-    assert_eq!(count(&calls, "ka10095"), 1);
-    assert_eq!(daily_chains(&calls), first_pages(&[krx::COMMON, krx::REIT]), "행이 없는 종목과 dt가 목표가 아닌 종목만 1페이지를 받는다");
+    fake.set_krx_market(market);
+    let (server, api) = boot(&fake, tmp.path(), &at(today, "2030")).await;
+    let seen = fake.calls().len();
+    api.update(false).await;
+    let status = api.settled().await;
+    assert_eq!((status["lastDay"].clone(), status["unconfirmed"].clone(), status["update"].clone()), (wire(today), json!(2), Value::Null), "확인된 8종목을 채우고 마지막 관측일을 앞당긴다");
+    let calls = &fake.calls()[seen..];
+    assert_eq!((count(calls, "ka10095"), count(calls, "ka10081")), (1, 0), "행이 없는 종목과 dt가 목표보다 이른 종목은 일봉을 받지 않는다");
+    assert_eq!(api.excluded().await, json!({"listedTooShort": 0, "historyShort": 0, "unconfirmed": 2}), "실행 결과의 확인 안 됨이 상태의 수와 같다");
+
+    fake.set_krx_market(KrxMarket::sample(today));
+    let seen = fake.calls().len();
+    api.update(false).await;
+    let status = api.settled().await;
+    assert_eq!((status["lastDay"].clone(), status["unconfirmed"].clone()), (wire(today), json!(0)));
+    let calls = &fake.calls()[seen..];
+    let quotes: Vec<&str> = calls.iter().filter(|c| c.api_id == "ka10095").map(|c| c.body["stk_cd"].as_str().unwrap()).collect();
+    assert_eq!((quotes, count(calls, "ka10081")), (vec!["110020|110070"], 0), "다음 업데이트는 확인 안 된 두 종목만 다시 확인하고 하루치를 덧붙인다");
+    assert_eq!(api.excluded().await["unconfirmed"], json!(0));
+    server.stop().await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -342,7 +365,7 @@ async fn a_store_left_by_schema_version_1_starts_empty() {
     let (server, api) = boot(&fake, tmp.path(), &at(today, "2040")).await;
     assert_eq!(
         api.status().await,
-        json!({"lastDay": null, "needDay": wire(day(2026, 11, 5)), "todayAvailable": true, "fullHistory": {"done": 0, "total": 0}, "update": null})
+        json!({"lastDay": null, "needDay": wire(day(2026, 11, 5)), "todayAvailable": true, "fullHistory": {"done": 0, "total": 0}, "unconfirmed": 0, "update": null})
     );
     let seen = fake.calls().len();
     api.update(false).await;
@@ -551,17 +574,18 @@ async fn the_update_asks_for_the_kospi_calendar_behind_chart_requests_that_came_
         urls.iter().map(|url| tokio::spawn(client.get(url).send())).collect::<Vec<_>>()
     };
 
-    fake.delay("ka10099", Duration::from_millis(1_500));
+    let is_chart = |c: &Call| matches!(c.api_id.as_str(), "ka10082" | "ka10083") || (c.api_id == "ka10081" && c.body["stk_cd"].as_str().unwrap().ends_with("_AL"));
     let seen = fake.calls().len();
-    api.update(false).await;
+    let earlier = flood(&charts[..20]);
     for _ in 0..400 {
-        if fake.calls()[seen..].iter().any(|c| c.api_id == "ka10099" && c.body["mrkt_tp"] == "10") {
+        if fake.calls()[seen..].iter().any(is_chart) {
             break;
         }
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
-    let earlier = flood(&charts[..20]);
-    tokio::time::sleep(Duration::from_millis(2_500)).await;
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    api.update(false).await;
+    tokio::time::sleep(Duration::from_millis(500)).await;
     let later = flood(&charts[20..40]);
     for chart in earlier.into_iter().chain(later) {
         assert_eq!(chart.await.unwrap().unwrap().status(), 200);
@@ -569,34 +593,56 @@ async fn the_update_asks_for_the_kospi_calendar_behind_chart_requests_that_came_
     api.settled().await;
 
     let calls = &fake.calls()[seen..];
-    let is_chart = |c: &Call| matches!(c.api_id.as_str(), "ka10082" | "ka10083") || (c.api_id == "ka10081" && c.body["stk_cd"].as_str().unwrap().ends_with("_AL"));
     let calendar = calls.iter().position(|c| c.api_id == "ka20006").expect("업데이트가 코스피 일봉을 받았다");
     let last_chart = calls.iter().rposition(is_chart).unwrap();
     assert_eq!(calls.iter().filter(|c| is_chart(c)).count(), 40);
-    assert!(calendar > last_chart, "목록을 받은 뒤 들어온 차트 요청 40개가 먼저 나가고 코스피 일봉은 그 뒤에 나간다(Background): 코스피 {calendar}번째, 마지막 차트 {last_chart}번째");
+    assert!(calendar > last_chart, "업데이트를 시작한 뒤 들어온 차트 요청 20개도 먼저 나가고 코스피 일봉은 그 뒤에 나간다(Background): 코스피 {calendar}번째, 마지막 차트 {last_chart}번째");
     server.stop().await;
-}
-
-async fn fails_on_then_retries(fake: &FakeKiwoom, dir: &Path, broken: KrxMarket, healed: KrxMarket, today: KstDate, missing: &str, stored_through: KstDate) -> Vec<Call> {
-    fake.set_krx_market(broken);
-    let (server, api) = boot(fake, dir, &at(today, "2030")).await;
-    api.update(false).await;
-    let failed = api.settled().await;
-    let error = &failed["update"]["error"];
-    assert_eq!((failed["lastDay"].clone(), failed["update"]["phase"].as_str(), error["code"].as_str()), (wire(stored_through), Some("recent"), Some("unknown_symbol")), "{failed}");
-    assert!(error["message"].as_str().unwrap().contains(missing), "오류 문장에 종목코드가 있다: {error}");
-
-    fake.set_krx_market(healed.clone());
-    let seen = fake.calls().len();
-    api.update(false).await;
-    let finished = api.settled().await;
-    assert_eq!((finished["lastDay"].clone(), finished["fullHistory"].clone(), finished["update"].clone()), (wire(today), json!({"done": 10, "total": 10}), Value::Null));
-    server.stop().await;
-    fake.calls()[seen..].to_vec()
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn a_listed_stock_answered_with_an_empty_daily_row_stops_the_update_until_kiwoom_answers_again() {
+async fn a_listed_stock_kiwoom_gives_no_daily_bars_is_left_unconfirmed_and_filled_by_the_update_after_kiwoom_gives_them() {
+    let fake = FakeKiwoom::start().await;
+    let tmp = tempfile::tempdir().unwrap();
+    let today = day(2026, 11, 6);
+    let market = KrxMarket::sample(today).with_daily_withheld();
+    fake.set_krx_market(market.clone());
+    let (server, api) = boot(&fake, tmp.path(), &at(today, "2030")).await;
+    api.update(false).await;
+    let status = api.settled().await;
+    assert_eq!(
+        (status["lastDay"].clone(), status["fullHistory"].clone(), status["unconfirmed"].clone(), status["update"].clone()),
+        (wire(today), json!({"done": 10, "total": 10}), json!(1), Value::Null),
+        "일봉을 주지 않는 종목이 있어도 업데이트가 끝까지 간다. 확인 안 된 종목은 과거 이력 수에 넣지 않는다"
+    );
+    let chains = daily_chains(&fake.calls());
+    assert_eq!(chains.get(krx::DAILY_WITHHELD), Some(&vec![None]), "그 종목은 1페이지를 한 번 묻고 과거 이어 받기에서는 묻지 않는다");
+    assert_eq!(api.excluded().await, json!({"listedTooShort": 0, "historyShort": 0, "unconfirmed": 1}));
+    server.stop().await;
+
+    let next_day = day(2026, 11, 9);
+    let mut answered = KrxMarket::sample(next_day).with_daily_withheld();
+    answered.stock_mut(krx::DAILY_WITHHELD).daily = DailyAnswer::Bars;
+    fake.set_krx_market(answered.clone());
+    let (server, api) = boot(&fake, tmp.path(), &at(next_day, "2030")).await;
+    let seen = fake.calls().len();
+    api.update(false).await;
+    let status = api.settled().await;
+    assert_eq!(
+        (status["lastDay"].clone(), status["fullHistory"].clone(), status["unconfirmed"].clone()),
+        (wire(next_day), json!({"done": 11, "total": 11}), json!(0)),
+        "다음 업데이트가 다시 확인하고 이번에는 채운다"
+    );
+    let calls = &fake.calls()[seen..];
+    assert_eq!(count(calls, "ka10095"), 1);
+    let first_page_then_history: Vec<Option<String>> = std::iter::once(None).chain(whole_history_of(&answered, krx::DAILY_WITHHELD)).collect();
+    assert_eq!(daily_chains(calls), BTreeMap::from([(krx::DAILY_WITHHELD.to_owned(), first_page_then_history)]), "다른 종목은 하루치를 덧붙이고 그 종목만 일봉을 받는다");
+    assert_eq!(api.excluded().await["unconfirmed"], json!(0));
+    server.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_stored_stock_answered_with_an_empty_daily_row_or_an_unknown_code_stays_unconfirmed_until_kiwoom_answers_again() {
     let fake = FakeKiwoom::start().await;
     let tmp = tempfile::tempdir().unwrap();
     let stored_through = day(2026, 11, 4);
@@ -604,26 +650,33 @@ async fn a_listed_stock_answered_with_an_empty_daily_row_stops_the_update_until_
     let today = day(2026, 11, 6);
     let mut broken = KrxMarket::sample(today);
     broken.stock_mut(krx::COMMON).daily = DailyAnswer::EmptyRow;
-    let retry = fails_on_then_retries(&fake, tmp.path(), broken, KrxMarket::sample(today), today, krx::COMMON, stored_through).await;
-    let chains = daily_chains(&retry);
-    assert!(!chains.contains_key(krx::PRE_1985), "멈추기 전에 저장한 종목은 다시 받지 않는다: {chains:?}");
-    assert_eq!(chains.get(krx::COMMON), Some(&vec![None]), "그 종목은 1페이지를 다시 받는다");
-    assert!(chains.values().flatten().all(Option::is_none), "전체를 다시 받는 종목은 없다: {chains:?}");
+    broken.stock_mut(krx::REIT).daily = DailyAnswer::UnknownCode;
+    let (status, _) = update_once(&fake, tmp.path(), &broken, &at(today, "2030"), false).await;
+    assert_eq!((status["lastDay"].clone(), status["unconfirmed"].clone()), (wire(today), json!(2)), "키움 오류가 아니라 봉이 없는 답이라 멈추지 않는다");
+
+    let (status, calls) = update_once(&fake, tmp.path(), &KrxMarket::sample(today), &at(today, "2040"), false).await;
+    assert_eq!((status["lastDay"].clone(), status["unconfirmed"].clone()), (wire(today), json!(0)));
+    let quotes: Vec<&str> = calls.iter().filter(|c| c.api_id == "ka10095").map(|c| c.body["stk_cd"].as_str().unwrap()).collect();
+    assert_eq!(quotes, ["110020|110070"], "확인 안 된 두 종목만 다시 확인한다");
+    assert_eq!(daily_chains(&calls), first_pages(&[krx::COMMON, krx::REIT]), "두 종목은 1페이지를 다시 받고, 겹친 봉이 같아 전체를 다시 받지 않는다");
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn a_stock_ka10095_skips_and_ka10081_calls_unknown_stops_the_update_until_kiwoom_answers_again() {
+async fn a_full_update_again_refetches_every_confirmed_history_while_a_stock_stays_unconfirmed() {
     let fake = FakeKiwoom::start().await;
     let tmp = tempfile::tempdir().unwrap();
-    let stored_through = day(2026, 11, 4);
-    update_once(&fake, tmp.path(), &KrxMarket::sample(stored_through), &at(stored_through, "2030"), false).await;
-    let today = day(2026, 11, 5);
-    let mut broken = KrxMarket::sample(today);
-    broken.stock_mut(krx::REIT).quoted = false;
-    broken.stock_mut(krx::REIT).daily = DailyAnswer::UnknownCode;
-    let retry = fails_on_then_retries(&fake, tmp.path(), broken, KrxMarket::sample(today), today, krx::REIT, stored_through).await;
-    let quotes: Vec<&str> = retry.iter().filter(|c| c.api_id == "ka10095").map(|c| c.body["stk_cd"].as_str().unwrap()).collect();
-    assert_eq!((quotes, count(&retry, "ka10081")), (vec![krx::REIT], 0), "다른 종목의 하루치는 멈추기 전에 저장됐고, 그 종목만 하루치를 다시 덧붙인다");
+    let today = day(2026, 11, 6);
+    let market = KrxMarket::sample(today).with_daily_withheld();
+    let every_confirmed: BTreeMap<String, Vec<Option<String>>> = KrxMarket::sample(today).stocks.iter().map(|s| (s.code.clone(), whole_history(&s.code, s.bars.len()))).collect();
+    let withheld_first_page = BTreeMap::from([(krx::DAILY_WITHHELD.to_owned(), vec![None])]);
+    update_once(&fake, tmp.path(), &market, &at(today, "2030"), false).await;
+    for (round, clock) in [(1, "2040"), (2, "2050")] {
+        let (status, calls) = update_once(&fake, tmp.path(), &market, &at(today, clock), true).await;
+        assert_eq!((status["fullHistory"].clone(), status["unconfirmed"].clone()), (json!({"done": 10, "total": 10}), json!(1)), "{round}번째");
+        let mut want = every_confirmed.clone();
+        want.extend(withheld_first_page.clone());
+        assert_eq!(daily_chains(&calls), want, "{round}번째 전체 다시 받기도 확인된 모든 종목의 전체 이력을 받는다");
+    }
 }
 
 fn listed_from(market: &KrxMarket, code: &str, reg_day: KstDate) -> KrxStock {
@@ -651,4 +704,153 @@ async fn a_stock_listed_after_the_target_day_is_skipped_without_asking_kiwoom() 
     let (status, calls) = update_once(&fake, tmp.path(), &listed, &at(listing_day, "2030"), false).await;
     assert_eq!((status["lastDay"].clone(), status["fullHistory"].clone()), (wire(listing_day), json!({"done": 11, "total": 11})));
     assert_eq!(daily_chains(&calls).get(upcoming), Some(&vec![None]), "상장일에는 1페이지를 받는다");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_server_starts_an_update_when_its_store_is_behind_the_target_day_and_not_when_it_is_up_to_date() {
+    let fake = FakeKiwoom::start().await;
+    let tmp = tempfile::tempdir().unwrap();
+    let (yesterday, today) = (day(2026, 11, 5), day(2026, 11, 6));
+    update_once(&fake, tmp.path(), &KrxMarket::sample(yesterday).with_daily_withheld(), &at(yesterday, "2030"), false).await;
+    let boot_updating = |clock: String| {
+        let lock = tmp.path().join("run/server.lock");
+        let dir = tmp.path().to_owned();
+        let fake = &fake;
+        move || Server::spawn_with(fake, &lock, &dir, &[("VALLY_CLOCK_START", OsStr::new(&clock)), ("VALLY_SCREENER_UPDATE_ON_START", OsStr::new("on"))])
+    };
+
+    fake.set_krx_market(KrxMarket::sample(today).with_daily_withheld());
+    let seen = fake.calls().len();
+    let server = boot_updating(at(today, "2030"))();
+    let api = Api::of(&server).await;
+    let caught_up = api.wait_for("켜자마자 시작한 업데이트의 끝", |s| s["lastDay"] == wire(today) && s["update"].is_null()).await;
+    assert_eq!(caught_up["unconfirmed"], json!(1), "{caught_up}");
+    assert_eq!(count(&fake.calls()[seen..], "ka10095"), 1, "버튼을 누르지 않아도 뒤처진 하루를 채운다");
+    server.stop().await;
+
+    let seen = fake.calls().len();
+    let server = boot_updating(at(today, "2040"))();
+    let api = Api::of(&server).await;
+    for _ in 0..400 {
+        if count(&fake.calls()[seen..], "ka20006") > 0 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    assert_eq!(count(&fake.calls()[seen..], "ka20006"), 1, "켤 때 코스피 일봉으로 목표 관측일을 본다");
+    tokio::time::sleep(Duration::from_millis(1_500)).await;
+    let calls = &fake.calls()[seen..];
+    assert_eq!((count(calls, "ka10095"), count(calls, "ka10081")), (0, 0), "목표 관측일까지 찬 저장소는 업데이트하지 않는다. 업데이트했다면 확인 안 된 종목을 다시 확인했다");
+    assert_eq!(api.status().await["update"], Value::Null);
+    server.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_update_lists_the_stocks_the_server_got_at_start_or_at_07_45_without_asking_kiwoom_again() {
+    let fake = FakeKiwoom::start().await;
+    let tmp = tempfile::tempdir().unwrap();
+    let friday = day(2026, 11, 6);
+    let market = KrxMarket::sample(friday);
+    update_once(&fake, tmp.path(), &market, &at(friday, "2030"), false).await;
+    let list_calls = |since: usize| count(&fake.calls()[since..], "ka10099");
+
+    let monday = day(2026, 11, 9);
+    let seen = fake.calls().len();
+    let (server, api) = boot(&fake, tmp.path(), &format!("{}074455", monday.yyyymmdd())).await;
+    for _ in 0..400 {
+        if list_calls(seen) == 2 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    assert_eq!(list_calls(seen), 2, "서버를 켤 때 두 시장의 목록을 받는다");
+    let relisted = "110100";
+    let mut listed = market.clone();
+    listed.stocks.push(listed_from(&market, relisted, day(2026, 10, 1)));
+    fake.set_krx_market(listed);
+    let refreshed = fake.calls().len();
+    for _ in 0..1_000 {
+        if list_calls(refreshed) == 2 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    assert_eq!(list_calls(refreshed), 2, "07:45에 목록을 다시 받는다");
+
+    let seen = fake.calls().len();
+    api.update(false).await;
+    let status = api.settled().await;
+    assert_eq!((status["lastDay"].clone(), status["fullHistory"].clone()), (wire(friday), json!({"done": 11, "total": 11})), "07:45에 받은 목록에 새로 든 종목도 채운다");
+    let calls = &fake.calls()[seen..];
+    assert_eq!(list_calls(seen), 0, "업데이트는 종목 목록을 다시 받지 않는다");
+    assert_eq!(daily_chains(calls), BTreeMap::from([(relisted.to_owned(), vec![None])]));
+    server.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_new_full_update_refetches_every_confirmed_history_even_after_kiwoom_kept_withholding_one_history() {
+    let fake = FakeKiwoom::start().await;
+    let tmp = tempfile::tempdir().unwrap();
+    let today = day(2026, 11, 6);
+    let market = KrxMarket::sample(today);
+    update_once(&fake, tmp.path(), &market, &at(today, "2030"), false).await;
+    let mut withheld = market.clone();
+    withheld.stock_mut(krx::COMMON).daily = DailyAnswer::EmptyRow;
+    let every: BTreeMap<String, Vec<Option<String>>> =
+        market.stocks.iter().map(|s| (s.code.clone(), if s.code == krx::COMMON { vec![None] } else { whole_history(&s.code, s.bars.len()) })).collect();
+    for (round, clock) in [(1, "2040"), (2, "2050")] {
+        let (status, calls) = update_once(&fake, tmp.path(), &withheld, &at(today, clock), true).await;
+        assert_eq!((status["fullHistory"].clone(), status["unconfirmed"].clone()), (json!({"done": 10, "total": 10}), json!(0)), "{round}번째");
+        assert_eq!(daily_chains(&calls), every, "{round}번째 전체 다시 받기도 확인된 모든 종목의 전체 이력을 받는다");
+    }
+
+    let (_, calls) = update_once(&fake, tmp.path(), &withheld, &at(today, "2100"), false).await;
+    assert_eq!(daily_chains(&calls), BTreeMap::from([(krx::COMMON.to_owned(), vec![None])]), "일반 업데이트는 다시 받지 못한 그 종목만 다시 묻는다");
+    let (_, calls) = update_once(&fake, tmp.path(), &market, &at(today, "2110"), false).await;
+    assert_eq!(daily_chains(&calls), BTreeMap::from([(krx::COMMON.to_owned(), whole_history_of(&market, krx::COMMON))]), "키움이 다시 주면 그 종목의 전체 이력을 받는다");
+    let (_, calls) = update_once(&fake, tmp.path(), &market, &at(today, "2120"), false).await;
+    assert_eq!(count(&calls, "ka10081"), 0, "다시 받을 표시가 남지 않는다");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn full_history_counts_only_confirmed_stocks_so_a_stock_whose_history_was_complete_does_not_push_done_past_total() {
+    let fake = FakeKiwoom::start().await;
+    let tmp = tempfile::tempdir().unwrap();
+    let (yesterday, today) = (day(2026, 11, 5), day(2026, 11, 6));
+    update_once(&fake, tmp.path(), &KrxMarket::sample(yesterday), &at(yesterday, "2030"), false).await;
+
+    let mut market = KrxMarket::sample(today).with_daily_withheld();
+    market.stock_mut(krx::COMMON).quoted = false;
+    let (status, _) = update_once(&fake, tmp.path(), &market, &at(today, "2030"), false).await;
+    assert_eq!(
+        (status["fullHistory"].clone(), status["unconfirmed"].clone()),
+        (json!({"done": 9, "total": 9}), json!(2)),
+        "이력을 다 받아 둔 종목도, 한 번도 받지 못한 종목도 확인 안 됨이면 과거 이력 수에서 뺀다"
+    );
+
+    let mut answered = KrxMarket::sample(today).with_daily_withheld();
+    answered.stock_mut(krx::DAILY_WITHHELD).daily = DailyAnswer::Bars;
+    let (status, _) = update_once(&fake, tmp.path(), &answered, &at(today, "2040"), false).await;
+    assert_eq!((status["fullHistory"].clone(), status["unconfirmed"].clone()), (json!({"done": 11, "total": 11}), json!(0)));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_stock_whose_daily_bars_stop_before_the_target_day_is_logged_and_counted_as_unconfirmed() {
+    let fake = FakeKiwoom::start().await;
+    let tmp = tempfile::tempdir().unwrap();
+    let (stored_through, target) = (day(2026, 11, 6), day(2026, 11, 10));
+    update_once(&fake, tmp.path(), &KrxMarket::sample(stored_through), &at(stored_through, "2030"), false).await;
+
+    let mut market = KrxMarket::sample(target);
+    market.stock_mut(krx::COMMON).daily = DailyAnswer::BarsThrough(stored_through);
+    fake.set_krx_market(market);
+    let (server, api) = boot(&fake, tmp.path(), &at(target, "2030")).await;
+    api.update(false).await;
+    let status = api.settled().await;
+    assert_eq!((status["lastDay"].clone(), status["unconfirmed"].clone()), (wire(target), json!(1)), "ka10095는 목표일로 답했지만 일봉은 저장된 날까지만 온다");
+    let logs = server.stop().await;
+    let warned: Vec<&str> = logs.lines().filter(|l| l.contains("확인 안 된 종목이라")).collect();
+    assert_eq!(warned.len(), 1, "{logs}");
+    assert!(warned[0].contains(krx::COMMON) && warned[0].contains(&target.to_string()), "종목과 목표 관측일을 남긴다: {}", warned[0]);
+    assert!(logs.lines().any(|l| l.contains("최근 채우기를 마쳤습니다") && l.contains("unconfirmed=1")), "요약 수에 센다: {logs}");
 }

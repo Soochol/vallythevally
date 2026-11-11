@@ -17,10 +17,10 @@ use crate::bars::{BarError, BarService};
 use crate::clock::Clock;
 use crate::http::{ApiFailure, AppState, Lookup};
 use crate::kiwoom::rest::{KiwoomRest, Priority};
+use crate::symbols::SymbolDirectory;
 use crate::user_routes::{JSON_LIMIT, check_screen, read_json};
 use engine::Snapshot;
 use store::{Store, StoreError};
-use update::UpdateError;
 
 const CALENDAR_DAYS: usize = 10;
 const CALENDAR_FRESH_SECS: i64 = 5 * 60;
@@ -70,6 +70,7 @@ pub struct Screener {
     store: Arc<Store>,
     rest: KiwoomRest,
     bars: Arc<BarService>,
+    symbols: Arc<SymbolDirectory>,
     clock: Clock,
     run: Mutex<Run>,
     next_run: AtomicU64,
@@ -78,8 +79,18 @@ pub struct Screener {
 }
 
 impl Screener {
-    pub fn new(store: Store, rest: KiwoomRest, bars: Arc<BarService>, clock: Clock) -> Self {
-        Screener { store: Arc::new(store), rest, bars, clock, run: Mutex::new(Run::Idle), next_run: AtomicU64::new(1), recents_started: AtomicU64::new(0), calendar: tokio::sync::Mutex::new(None) }
+    pub fn new(store: Store, rest: KiwoomRest, bars: Arc<BarService>, symbols: Arc<SymbolDirectory>, clock: Clock) -> Self {
+        Screener {
+            store: Arc::new(store),
+            rest,
+            bars,
+            symbols,
+            clock,
+            run: Mutex::new(Run::Idle),
+            next_run: AtomicU64::new(1),
+            recents_started: AtomicU64::new(0),
+            calendar: tokio::sync::Mutex::new(None),
+        }
     }
 
     fn run(&self) -> MutexGuard<'_, Run> {
@@ -125,7 +136,34 @@ impl Screener {
         }
     }
 
-    fn finish(&self, id: u64, outcome: Result<(), UpdateError>) {
+    pub async fn update_if_behind(self: &Arc<Self>) {
+        let calendar = match self.calendar(CalendarUse::Update).await {
+            Ok(c) => c,
+            Err(e) => {
+                tracing::warn!(error = %e, "코스피 일봉을 받지 못해 서버를 켤 때의 스크리너 업데이트를 건너뜁니다");
+                return;
+            }
+        };
+        let Some(target) = calendar.target(self.clock.now()) else {
+            tracing::warn!("코스피 일봉에 관측일이 없어 서버를 켤 때의 스크리너 업데이트를 건너뜁니다");
+            return;
+        };
+        let last_day = match self.with_store(Store::summary).await {
+            Ok(summary) => summary.last_day,
+            Err(e) => {
+                tracing::error!(error = %e, "스크리너 저장소를 읽지 못해 서버를 켤 때의 업데이트를 건너뜁니다");
+                return;
+            }
+        };
+        if last_day.is_some_and(|last| last >= target) {
+            tracing::info!(%target, "스크리너 저장소가 목표 관측일까지 차 있어 업데이트를 시작하지 않습니다");
+            return;
+        }
+        tracing::info!(last_day = ?last_day, %target, "스크리너 저장소가 목표 관측일보다 뒤처져 업데이트를 시작합니다");
+        self.start(false);
+    }
+
+    fn finish(&self, id: u64, outcome: Result<(), BarError>) {
         let mut run = self.run();
         let Run::Running { id: running, progress, .. } = &*run else {
             return;
@@ -139,12 +177,7 @@ impl Screener {
                 tracing::info!(full = progress.full, "스크리너 업데이트를 마쳤습니다");
                 Run::Idle
             }
-            Err(UpdateError::Failed(e)) => Run::Failed { progress, error: Lookup::ScreenerUpdate.failure(e, self.clock.now()).into_body() },
-            Err(UpdateError::NoDailyBars(code)) => {
-                tracing::warn!(code = code.as_str(), "목록에 있는 종목의 일봉을 키움이 주지 않아 업데이트를 멈췄습니다");
-                let message = format!("키움이 종목 목록에 있는 {}의 일봉을 주지 않아 업데이트를 멈췄습니다. 마지막 관측일은 그대로이고, 다음 업데이트에서 다시 받습니다", code.as_str());
-                Run::Failed { progress, error: ApiFailure::new(api::ApiErrorCode::UnknownSymbol, message).into_body() }
-            }
+            Err(e) => Run::Failed { progress, error: Lookup::ScreenerUpdate.failure(e, self.clock.now()).into_body() },
         };
     }
 
@@ -186,6 +219,7 @@ impl Screener {
             need_day: calendar.as_ref().and_then(|c| c.need_day(now)).map(api::KstDate),
             today_available: calendar.as_ref().and_then(|c| c.target(now)) == Some(today) && summary.last_day < Some(today),
             full_history: FullHistory { done: summary.complete, total: summary.listed },
+            unconfirmed: summary.unconfirmed,
             update,
         })
     }

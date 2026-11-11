@@ -60,6 +60,15 @@ impl From<KiwoomError> for BarError {
     }
 }
 
+impl From<NotReady> for BarError {
+    fn from(e: NotReady) -> Self {
+        match e {
+            NotReady::Kiwoom(e) => e.into(),
+            NotReady::Timeout => BarError::ListNotReady,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BarPage {
     /// 오름차순. `before`가 있으면 그보다 이른 것만.
@@ -212,10 +221,7 @@ impl BarService {
     }
 
     async fn check(&self, key: SeriesKey) -> Result<(), BarError> {
-        let dir = self.symbols.ready(&self.rest).await.map_err(|e| match e {
-            NotReady::Kiwoom(e) => e.into(),
-            NotReady::Timeout => BarError::ListNotReady,
-        })?;
+        let dir = self.symbols.ready(&self.rest).await?;
         let Some(info) = dir.get(key.feed.symbol()) else {
             return Err(BarError::UnknownSymbol);
         };

@@ -500,7 +500,7 @@ mod tests {
         }
         let bars = Arc::new(BarService::new(rest.clone(), symbols.clone(), clock.clone()));
         let (hub, _events) = crate::market::hub::MarketHub::detached(bars.clone(), clock.clone());
-        let screener = Arc::new(Screener::new(crate::screener::store::Store::open(&dir.path().join("screener.duckdb")).unwrap(), rest.clone(), bars.clone(), clock.clone()));
+        let screener = Arc::new(Screener::new(crate::screener::store::Store::open(&dir.path().join("screener.duckdb")).unwrap(), rest.clone(), bars.clone(), symbols.clone(), clock.clone()));
         let app = router(Arc::new(AppState { symbols, bars, rest, db, clock, static_dir: dir.path().to_owned(), hub: hub.clone(), screener }));
         Fixture { app, fake, hub, _dir: dir }
     }
@@ -1046,7 +1046,7 @@ mod tests {
         let symbols = Arc::new(SymbolDirectory::default());
         let bars = Arc::new(BarService::new(rest.clone(), symbols.clone(), clock.clone()));
         let (hub, _events) = crate::market::hub::MarketHub::detached(bars.clone(), clock.clone());
-        let screener = Arc::new(Screener::new(crate::screener::store::Store::open(&dir.path().join("screener.duckdb")).unwrap(), rest.clone(), bars.clone(), clock.clone()));
+        let screener = Arc::new(Screener::new(crate::screener::store::Store::open(&dir.path().join("screener.duckdb")).unwrap(), rest.clone(), bars.clone(), symbols.clone(), clock.clone()));
         let app = router(Arc::new(AppState { symbols: symbols.clone(), bars, rest: rest.clone(), db, clock, static_dir: dir.path().to_owned(), hub, screener }));
 
         let nxt_layout = two_cells("005930");

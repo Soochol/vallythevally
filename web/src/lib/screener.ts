@@ -45,9 +45,10 @@ export function conditionSentence(period: ScreenPeriod, { field, n, m }: NewHigh
   return `최근 ${count(m)}${UNIT[period]} 안에 ${subject} ${record}인 봉이 있다`;
 }
 
-export function excludedText(screen: Screen, { listedTooShort, historyShort }: ScreenerExcluded): string {
+export function excludedText(screen: Screen, { listedTooShort, historyShort, unconfirmed }: ScreenerExcluded): string {
   const longest = Math.max(...screen.conditions.map((c) => c.n));
-  return `상장 ${count(longest)}${UNIT[screen.period]} 미만 ${count(listedTooShort)} · 이력 덜 참 ${count(historyShort)}`;
+  const counted = `상장 ${count(longest)}${UNIT[screen.period]} 미만 ${count(listedTooShort)} · 이력 덜 참 ${count(historyShort)}`;
+  return unconfirmed > 0 ? `${counted} · 확인 안 됨 ${count(unconfirmed)}` : counted;
 }
 
 const WEEKDAY = ["일", "월", "화", "수", "목", "금", "토"] as const;

@@ -25,6 +25,7 @@ pub struct KrxStock {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DailyAnswer {
     Bars,
+    BarsThrough(KstDate),
     EmptyRow,
     UnknownCode,
 }
@@ -44,6 +45,7 @@ pub struct KrxBar {
 
 pub const PRE_1985: &str = "110010";
 pub const COMMON: &str = "110020";
+pub const DAILY_WITHHELD: &str = "110025";
 pub const SPLIT: &str = "110030";
 pub const PREFERRED: &str = "110035";
 pub const HALTED: &str = "110040";
@@ -106,11 +108,23 @@ fn profiles() -> Vec<Profile> {
     ]
 }
 
+fn daily_withheld() -> Profile {
+    Profile { code: DAILY_WITHHELD, name: "가상화학우B", market_code: "0", company_class_name: "", reg_day: day(2003, 6, 16), audit_info: "거래정지", level: 9_000 }
+}
+
 impl KrxMarket {
     pub fn sample(as_of: KstDate) -> KrxMarket {
         let days = sample_calendar(as_of);
         let stocks = profiles().into_iter().enumerate().map(|(k, p)| sample_stock(&p, k, &days, as_of)).collect();
         KrxMarket { days, stocks }
+    }
+
+    pub fn with_daily_withheld(mut self) -> KrxMarket {
+        let as_of = *self.days.last().expect("가짜 KRX 시장에 관측일이 있다");
+        let mut stock = sample_stock(&daily_withheld(), self.stocks.len(), &self.days, as_of);
+        stock.daily = DailyAnswer::EmptyRow;
+        self.stocks.push(stock);
+        self
     }
 
     pub fn stock_mut(&mut self, code: &str) -> &mut KrxStock {
@@ -187,10 +201,19 @@ pub fn respond(market: &KrxMarket, api_id: &str, body: &Value, next_key: Option<
         "ka10081" => {
             let stock = market.stock(body["stk_cd"].as_str()?)?;
             Some(match stock.daily {
-                DailyAnswer::Bars => paged(stock.bars.len(), next_key, &stock.code, |range, headers| stock_daily(stock, range, headers)),
+                DailyAnswer::Bars => paged(stock.bars.len(), next_key, &stock.code, |range, headers| stock_daily(&stock.code, &stock.bars, range, headers)),
+                DailyAnswer::BarsThrough(last) => {
+                    let bars: Vec<KrxBar> = stock.bars.iter().filter(|b| b.day <= last).copied().collect();
+                    paged(bars.len(), next_key, &stock.code, |range, headers| stock_daily(&stock.code, &bars, range, headers))
+                }
                 DailyAnswer::EmptyRow => KrxPage::Page { body: empty_daily_row(stock), last: true },
                 DailyAnswer::UnknownCode => KrxPage::Page { body: json!({"return_code": 2, "return_msg": "입력 값 오류입니다[1902:종목 정보가 없습니다]"}), last: true },
             })
+        }
+        "ka10083" => {
+            let stock = market.stock(body["stk_cd"].as_str()?)?;
+            let months = monthly(&stock.bars);
+            Some(paged(months.len(), next_key, &stock.code, |range, headers| stock_monthly(stock, &months, range, headers)))
         }
         "ka10095" => {
             let codes: Vec<&str> = body["stk_cd"].as_str()?.split('|').collect();
@@ -227,27 +250,53 @@ fn signed_change(close: u64, base: u64) -> (String, &'static str) {
     }
 }
 
-fn stock_daily(stock: &KrxStock, range: std::ops::Range<usize>, headers: Value) -> Value {
-    let rows: Vec<Value> = newest_first(&stock.bars, range)
-        .map(|b| {
-            let (pred_pre, sig) = signed_change(b.close, b.base);
-            json!({
-                "cur_prc": b.close.to_string(),
-                "dt": b.day.yyyymmdd(),
-                "high_pric": b.high.to_string(),
-                "low_pric": b.low.to_string(),
-                "open_pric": b.open.to_string(),
-                "pred_pre": pred_pre,
-                "pred_pre_sig": sig,
-                "trde_prica": b.traded_million_won.to_string(),
-                "trde_qty": b.volume.to_string(),
-                "trde_tern_rt": "+0.10",
-                "upd_rt": b.adjustment_rate.unwrap_or(""),
-                "upd_stkpc_tp": if b.adjustment_rate.is_some() { "256" } else { "" },
-            })
-        })
-        .collect();
-    json!({"_headers": headers, "return_code": 0, "return_msg": "정상적으로 처리되었습니다", "stk_cd": stock.code, "stk_dt_pole_chart_qry": rows})
+fn chart_row(b: &KrxBar, traded: u64) -> Value {
+    let (pred_pre, sig) = signed_change(b.close, b.base);
+    json!({
+        "cur_prc": b.close.to_string(),
+        "dt": b.day.yyyymmdd(),
+        "high_pric": b.high.to_string(),
+        "low_pric": b.low.to_string(),
+        "open_pric": b.open.to_string(),
+        "pred_pre": pred_pre,
+        "pred_pre_sig": sig,
+        "trde_prica": traded.to_string(),
+        "trde_qty": b.volume.to_string(),
+        "trde_tern_rt": "+0.10",
+        "upd_rt": b.adjustment_rate.unwrap_or(""),
+        "upd_stkpc_tp": if b.adjustment_rate.is_some() { "256" } else { "" },
+    })
+}
+
+fn stock_daily(code: &str, bars: &[KrxBar], range: std::ops::Range<usize>, headers: Value) -> Value {
+    let rows: Vec<Value> = newest_first(bars, range).map(|b| chart_row(b, b.traded_million_won)).collect();
+    json!({"_headers": headers, "return_code": 0, "return_msg": "정상적으로 처리되었습니다", "stk_cd": code, "stk_dt_pole_chart_qry": rows})
+}
+
+fn monthly(bars: &[KrxBar]) -> Vec<KrxBar> {
+    let mut months: Vec<KrxBar> = Vec::new();
+    for b in bars {
+        match months.last_mut().filter(|m| (m.day.year(), m.day.month()) == (b.day.year(), b.day.month())) {
+            Some(m) => {
+                m.high = m.high.max(b.high);
+                m.low = m.low.min(b.low);
+                m.close = b.close;
+                m.volume += b.volume;
+                m.traded_million_won += b.traded_million_won;
+                m.adjustment_rate = m.adjustment_rate.or(b.adjustment_rate);
+            }
+            None => {
+                let base = months.last().map_or(b.base, |m| m.close);
+                months.push(KrxBar { base, ..*b });
+            }
+        }
+    }
+    months
+}
+
+fn stock_monthly(stock: &KrxStock, months: &[KrxBar], range: std::ops::Range<usize>, headers: Value) -> Value {
+    let rows: Vec<Value> = newest_first(months, range).map(|m| chart_row(m, m.traded_million_won * 1_000_000)).collect();
+    json!({"_headers": headers, "return_code": 0, "return_msg": "정상적으로 처리되었습니다", "stk_cd": stock.code, "stk_mth_pole_chart_qry": rows})
 }
 
 fn empty_daily_row(stock: &KrxStock) -> Value {

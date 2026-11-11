@@ -251,15 +251,15 @@ pub struct ScreenerListing {
     pub excludable_as: Vec<ExcludeKind>,
 }
 
-pub fn screener_listing(row: &ListRow) -> Option<ScreenerListing> {
-    let Listing::Include(SymbolInfo { symbol: Symbol::Stock(code), name, kind, market, .. }) = classify(row) else {
+pub fn screener_listing(row: &ListRow, info: &SymbolInfo) -> Option<ScreenerListing> {
+    let Symbol::Stock(code) = info.symbol else {
         return None;
     };
-    let kind = match kind {
+    let kind = match info.kind {
         SymbolKind::Etf => Some(ExcludeKind::Etf),
         SymbolKind::Reit => Some(ExcludeKind::Reit),
         SymbolKind::Preferred => Some(ExcludeKind::Preferred),
-        SymbolKind::Common if market == Market::Kosdaq && is_spac(row) => Some(ExcludeKind::Spac),
+        SymbolKind::Common if info.market == Market::Kosdaq && is_spac(row) => Some(ExcludeKind::Spac),
         SymbolKind::Common | SymbolKind::Index => None,
     };
     let states = row.audit_info.split('|').map(str::trim).filter_map(|label| match audit_state(label) {
@@ -269,7 +269,7 @@ pub fn screener_listing(row: &ListRow) -> Option<ScreenerListing> {
             None
         }
     });
-    Some(ScreenerListing { code, name, listed_on: KstDate::parse_yyyymmdd(&row.reg_day), excludable_as: kind.into_iter().chain(states).collect() })
+    Some(ScreenerListing { code, name: info.name.clone(), listed_on: KstDate::parse_yyyymmdd(&row.reg_day), excludable_as: kind.into_iter().chain(states).collect() })
 }
 
 fn audit_state(label: &str) -> Result<Option<ExcludeKind>, ()> {

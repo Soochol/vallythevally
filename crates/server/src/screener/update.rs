@@ -1,21 +1,19 @@
 use std::collections::HashMap;
 
 use domain::{IndexCode, KstDate, Price, StockCode, Venue};
-use futures::{StreamExt, TryStreamExt, stream};
+use futures::{StreamExt, TryFutureExt, TryStreamExt, stream};
 
 use super::{Calendar, CalendarUse, Screener};
-use super::store::{DayBar, Store, StoreError, Tail, Write};
+use super::store::{DayBar, Store, Tail, Write};
 use crate::api::UpdatePhase;
 use crate::bars::BarError;
-use crate::kiwoom::api::{DailyChart, IndexDailyChart, StockList, StockQuotes};
+use crate::kiwoom::api::{DailyChart, IndexDailyChart, StockQuotes};
 use crate::kiwoom::error::{Failure, Surface};
 use crate::kiwoom::rest::{ContKey, KiwoomError, MergeScope, Priority};
-use crate::kiwoom::wire::{KrxDayQuote, ScreenerListing, index_days, parse_krx_daily, parse_krx_quotes, screener_listing};
+use crate::kiwoom::wire::{KrxDayQuote, index_days, parse_krx_daily, parse_krx_quotes};
 
 const IN_FLIGHT: usize = 2;
-const MAX_LIST_PAGES: usize = 10;
 const MAX_HISTORY_PAGES: usize = 100;
-const LIST_MARKETS: usize = 2;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Catchup {
@@ -28,40 +26,23 @@ struct DailyPage {
     next: Option<ContKey>,
 }
 
-pub(super) enum UpdateError {
-    Failed(BarError),
-    NoDailyBars(StockCode),
-}
-
-impl From<BarError> for UpdateError {
-    fn from(e: BarError) -> Self {
-        UpdateError::Failed(e)
-    }
-}
-
-impl From<KiwoomError> for UpdateError {
-    fn from(e: KiwoomError) -> Self {
-        UpdateError::Failed(e.into())
-    }
-}
-
-impl From<StoreError> for UpdateError {
-    fn from(e: StoreError) -> Self {
-        UpdateError::Failed(e.into())
-    }
-}
-
 fn base_moved(base: Price, stored_close: Price) -> bool {
     let (base, close) = (base.centi(), stored_close.centi());
     10 * base.abs_diff(close) > 3 * close
 }
 
+fn unconfirmed(code: StockCode, target: KstDate, reason: &str) {
+    tracing::warn!(code = code.as_str(), %target, reason, "확인 안 된 종목이라 최근 채우기에서 건너뜁니다. 다음 업데이트에서 다시 확인합니다");
+}
+
 impl Screener {
-    pub(super) async fn update(&self, id: u64, full: bool) -> Result<(), UpdateError> {
+    pub(super) async fn update(&self, id: u64, full: bool) -> Result<(), BarError> {
         tracing::info!(full, "스크리너 업데이트를 시작합니다");
-        let listing = self.fetch_listing(id).await?;
-        tracing::info!(count = listing.len(), "스크리너 종목 목록을 받았습니다");
-        self.with_store(move |s| s.replace_listing(&listing)).await?;
+        self.report(id, UpdatePhase::Symbols, 0, 1);
+        let directory = self.symbols.ready(&self.rest).await?;
+        tracing::info!(count = directory.screener_listing().len(), "서버가 받아 둔 종목 목록으로 스크리너 종목 목록을 바꿉니다");
+        self.with_store(move |s| s.replace_listing(directory.screener_listing())).await?;
+        self.report(id, UpdatePhase::Symbols, 1, 1);
         if full {
             self.with_store(Store::mark_refetch).await?;
         }
@@ -72,25 +53,7 @@ impl Screener {
         self.backfill(id, target).await
     }
 
-    async fn fetch_listing(&self, id: u64) -> Result<Vec<ScreenerListing>, UpdateError> {
-        let mut listing = Vec::new();
-        self.report(id, UpdatePhase::Symbols, 0, LIST_MARKETS);
-        for (done, req) in [StockList::EXCHANGE, StockList::KOSDAQ].into_iter().enumerate() {
-            let mut cont = None;
-            for _ in 0..MAX_LIST_PAGES {
-                let page = self.rest.call(&req, cont.as_ref(), Priority::Background, MergeScope::default()).await?;
-                listing.extend(page.body.list.iter().filter_map(screener_listing));
-                cont = page.next;
-                if cont.is_none() {
-                    break;
-                }
-            }
-            self.report(id, UpdatePhase::Symbols, done + 1, LIST_MARKETS);
-        }
-        Ok(listing)
-    }
-
-    async fn store_calendar(&self, recent: &Calendar, target: KstDate) -> Result<(), UpdateError> {
+    async fn store_calendar(&self, recent: &Calendar, target: KstDate) -> Result<(), BarError> {
         let stored_through = self.with_store(Store::calendar_last_day).await?;
         if stored_through.is_some_and(|last| last >= target) {
             return Ok(());
@@ -102,7 +65,7 @@ impl Screener {
         Ok(self.with_store(move |s| s.extend_calendar(&days)).await?)
     }
 
-    async fn kospi_days_back_to(&self, stored_through: Option<KstDate>) -> Result<Vec<KstDate>, UpdateError> {
+    async fn kospi_days_back_to(&self, stored_through: Option<KstDate>) -> Result<Vec<KstDate>, BarError> {
         let req = IndexDailyChart::new(IndexCode::KOSPI, self.clock.now().kst_date());
         let mut pages = Vec::new();
         let mut cont = None;
@@ -118,79 +81,106 @@ impl Screener {
                 return Ok(days);
             }
         }
-        Err(BarError::Internal(format!("코스피 일봉이 {MAX_HISTORY_PAGES}페이지를 넘어 관측일 달력 받기를 멈췄습니다")).into())
+        Err(BarError::Internal(format!("코스피 일봉이 {MAX_HISTORY_PAGES}페이지를 넘어 관측일 달력 받기를 멈췄습니다")))
     }
 
-    async fn recent(&self, id: u64, target: KstDate, day_before_target: Option<KstDate>) -> Result<(), UpdateError> {
+    async fn recent(&self, id: u64, target: KstDate, day_before_target: Option<KstDate>) -> Result<(), BarError> {
         let tails = self.with_store(Store::tails).await?;
-        let mut one_day = Vec::new();
+        let unfilled: Vec<Tail> = tails.into_iter().filter(|t| t.listed_on.is_none_or(|listed| listed <= target) && t.last.is_none_or(|(day, _)| day < target)).collect();
+        let total = unfilled.len();
+        let (mut done, mut skipped) = (0, 0);
         let mut catchups = Vec::new();
-        for Tail { code, listed_on, last } in tails {
-            if listed_on.is_some_and(|listed| listed > target) {
-                continue;
-            }
-            match last {
-                Some((day, _)) if day >= target => {}
-                Some((day, close)) if Some(day) == day_before_target => one_day.push((code, day, close)),
-                last => catchups.push((code, Catchup::FirstPage { stored_through: last.map(|(day, _)| day) })),
-            }
-        }
-        let total = one_day.len() + catchups.len();
-        let mut done = 0;
         self.report(id, UpdatePhase::Recent, done, total);
-        for chunk in one_day.chunks(StockQuotes::MAX) {
-            let codes: Vec<StockCode> = chunk.iter().map(|(code, _, _)| *code).collect();
+        for chunk in unfilled.chunks(StockQuotes::MAX) {
+            let codes: Vec<StockCode> = chunk.iter().map(|t| t.code).collect();
             let req = StockQuotes::new(&codes, Venue::Krx).expect("chunks는 1~MAX개다");
             let page = self.rest.call(&req, None, Priority::Background, MergeScope::default()).await?;
             let quotes: HashMap<StockCode, KrxDayQuote> = parse_krx_quotes(page.body).into_iter().map(|q| (q.code, q)).collect();
+            let waiting = catchups.len();
             let mut writes = Vec::new();
-            for &(code, stored_through, stored_close) in chunk {
-                match quotes.get(&code).filter(|q| q.day == target) {
-                    None => catchups.push((code, Catchup::FirstPage { stored_through: Some(stored_through) })),
-                    Some(q) if base_moved(q.base, stored_close) => {
-                        tracing::info!(code = code.as_str(), base = q.base.centi() / 100, stored_close = stored_close.centi() / 100, "기준가가 저장된 종가와 30% 넘게 달라 전체 이력을 다시 받습니다");
-                        catchups.push((code, Catchup::WholeHistory));
+            for &Tail { code, last, .. } in chunk {
+                let Some(q) = quotes.get(&code) else {
+                    unconfirmed(code, target, "ka10095에 행이 없습니다");
+                    skipped += 1;
+                    continue;
+                };
+                if q.day < target {
+                    unconfirmed(code, target, &format!("ka10095의 dt가 {}입니다", q.day));
+                    skipped += 1;
+                    continue;
+                }
+                match last {
+                    Some((day, close)) if q.day == target && Some(day) == day_before_target => {
+                        if base_moved(q.base, close) {
+                            tracing::info!(code = code.as_str(), base = q.base.centi() / 100, stored_close = close.centi() / 100, "기준가가 저장된 종가와 30% 넘게 달라 전체 이력을 다시 받습니다");
+                            catchups.push((code, Catchup::WholeHistory));
+                        } else {
+                            writes.push(Write::Extend { code, bars: vec![DayBar { day: q.day, ohlcv: q.ohlcv, traded: q.traded }], reached_origin: false });
+                        }
                     }
-                    Some(q) => writes.push(Write::Extend { code, bars: vec![DayBar { day: q.day, ohlcv: q.ohlcv, traded: q.traded }], reached_origin: false }),
+                    last => catchups.push((code, Catchup::FirstPage { stored_through: last.map(|(day, _)| day) })),
                 }
             }
-            done += writes.len();
+            done += chunk.len() - (catchups.len() - waiting);
             self.with_store(move |s| s.write(&writes)).await?;
             self.report(id, UpdatePhase::Recent, done, total);
         }
-        let mut written = stream::iter(catchups).map(|(code, how)| self.catch_up(code, how, target)).buffered(IN_FLIGHT);
-        while let Some(write) = written.try_next().await? {
-            self.with_store(move |s| s.write(&[write])).await?;
+        let mut written = stream::iter(catchups).map(|(code, how)| self.catch_up(code, how, target).map_ok(move |write| (code, write))).buffered(IN_FLIGHT);
+        while let Some((code, write)) = written.try_next().await? {
+            match write {
+                None => {
+                    unconfirmed(code, target, "키움이 일봉을 주지 않았습니다");
+                    skipped += 1;
+                }
+                Some(write) => {
+                    let short = match write.last_day() {
+                        Some(last) if last >= target => None,
+                        Some(last) => Some(format!("키움 일봉이 {last}에서 끝납니다")),
+                        None => Some("키움 일봉에 저장된 봉 뒤의 새 봉이 없습니다".to_owned()),
+                    };
+                    if let Some(reason) = short {
+                        unconfirmed(code, target, &reason);
+                        skipped += 1;
+                    }
+                    self.with_store(move |s| s.write(&[write])).await?;
+                }
+            }
             done += 1;
             self.report(id, UpdatePhase::Recent, done, total);
         }
         self.with_store(move |s| s.set_last_day(target)).await?;
+        tracing::info!(%target, filled = total - skipped, unconfirmed = skipped, "최근 채우기를 마쳤습니다");
         Ok(())
     }
 
-    async fn backfill(&self, id: u64, target: KstDate) -> Result<(), UpdateError> {
+    async fn backfill(&self, id: u64, target: KstDate) -> Result<(), BarError> {
         let queue = self.with_store(move |s| s.backfill_queue(target)).await?;
         let total = queue.len();
         self.report(id, UpdatePhase::Backfill, 0, total);
-        let mut written = stream::iter(queue).map(|code| self.catch_up(code, Catchup::WholeHistory, target)).buffered(IN_FLIGHT);
+        let mut written = stream::iter(queue).map(|code| self.catch_up(code, Catchup::WholeHistory, target).map_ok(move |write| (code, write))).buffered(IN_FLIGHT);
         let mut done = 0;
-        while let Some(write) = written.try_next().await? {
-            self.with_store(move |s| s.write(&[write])).await?;
+        while let Some((code, write)) = written.try_next().await? {
+            match write {
+                Some(write) => self.with_store(move |s| s.write(&[write])).await?,
+                None => tracing::warn!(code = code.as_str(), "키움이 과거 일봉을 주지 않아 과거 이어 받기에서 건너뜁니다. 다음 업데이트에서 다시 받습니다"),
+            }
             done += 1;
             self.report(id, UpdatePhase::Backfill, done, total);
         }
-        Ok(())
+        Ok(self.with_store(Store::end_full_refetch).await?)
     }
 
-    async fn catch_up(&self, code: StockCode, how: Catchup, target: KstDate) -> Result<Write, UpdateError> {
+    async fn catch_up(&self, code: StockCode, how: Catchup, target: KstDate) -> Result<Option<Write>, BarError> {
         let Catchup::FirstPage { stored_through } = how else {
-            return Ok(Write::Replace { code, bars: self.whole_history(code, target).await? });
+            return Ok(self.whole_history(code, target).await?.map(|bars| Write::Replace { code, bars }));
         };
         let req = DailyChart::new(code, Venue::Krx, self.clock.now().kst_date());
-        let page = self.daily_page(code, &req, None, target).await?;
+        let Some(page) = self.daily_page(&req, None, target).await?.filter(|p| !p.bars.is_empty()) else {
+            return Ok(None);
+        };
         let reached_origin = page.next.is_none();
         let Some(stored_through) = stored_through else {
-            return if page.bars.is_empty() { Err(UpdateError::NoDailyBars(code)) } else { Ok(Write::Extend { code, bars: page.bars, reached_origin }) };
+            return Ok(Some(Write::Extend { code, bars: page.bars, reached_origin }));
         };
         let reaches_stored = page.bars.first().is_some_and(|b| b.day <= stored_through);
         let (overlap, fresh): (Vec<DayBar>, Vec<DayBar>) = page.bars.into_iter().partition(|b| b.day <= stored_through);
@@ -199,42 +189,44 @@ impl Screener {
             self.with_store(move |s| s.bars_from(code, from)).await? == overlap
         };
         if matches_stored {
-            return Ok(Write::Extend { code, bars: fresh, reached_origin });
+            return Ok(Some(Write::Extend { code, bars: fresh, reached_origin }));
         }
         tracing::info!(code = code.as_str(), reaches_stored, "최근 일봉이 저장된 봉과 달라 전체 이력을 다시 받습니다");
-        Ok(Write::Replace { code, bars: self.whole_history(code, target).await? })
+        Ok(self.whole_history(code, target).await?.map(|bars| Write::Replace { code, bars }))
     }
 
-    async fn whole_history(&self, code: StockCode, target: KstDate) -> Result<Vec<DayBar>, UpdateError> {
+    async fn whole_history(&self, code: StockCode, target: KstDate) -> Result<Option<Vec<DayBar>>, BarError> {
         let req = DailyChart::new(code, Venue::Krx, self.clock.now().kst_date());
         let mut pages = Vec::new();
         let mut cont = None;
         for _ in 0..MAX_HISTORY_PAGES {
-            let page = self.daily_page(code, &req, cont.as_ref(), target).await?;
+            let Some(page) = self.daily_page(&req, cont.as_ref(), target).await? else {
+                return Ok(None);
+            };
             pages.push(page.bars);
             cont = page.next;
             if cont.is_none() {
                 let mut bars: Vec<DayBar> = pages.into_iter().rev().flatten().collect();
                 bars.dedup_by_key(|b| b.day);
-                return if bars.is_empty() { Err(UpdateError::NoDailyBars(code)) } else { Ok(bars) };
+                return Ok(Some(bars).filter(|bars| !bars.is_empty()));
             }
         }
-        Err(BarError::Internal(format!("{} 일봉이 {MAX_HISTORY_PAGES}페이지를 넘어 받기를 멈췄습니다", code.as_str())).into())
+        Err(BarError::Internal(format!("{} 일봉이 {MAX_HISTORY_PAGES}페이지를 넘어 받기를 멈췄습니다", code.as_str())))
     }
 
-    async fn daily_page(&self, code: StockCode, req: &DailyChart, cont: Option<&ContKey>, target: KstDate) -> Result<DailyPage, UpdateError> {
+    async fn daily_page(&self, req: &DailyChart, cont: Option<&ContKey>, target: KstDate) -> Result<Option<DailyPage>, BarError> {
         let page = match self.rest.call(req, cont, Priority::Background, MergeScope::default()).await {
             Ok(page) => page,
-            Err(e) if unknown_symbol(&e) => return Err(UpdateError::NoDailyBars(code)),
+            Err(e) if unknown_symbol(&e) => return Ok(None),
             Err(e) => return Err(e.into()),
         };
         match parse_krx_daily(page.body) {
             Ok(Some(rows)) => {
                 let bars = rows.into_iter().map(|r| DayBar { day: r.day, ohlcv: r.ohlcv, traded: r.traded }).filter(|b| b.day <= target).collect();
-                Ok(DailyPage { bars, next: page.next })
+                Ok(Some(DailyPage { bars, next: page.next }))
             }
-            Ok(None) => Err(UpdateError::NoDailyBars(code)),
-            Err(e) => Err(BarError::Internal(format!("키움 일봉 응답을 읽지 못했습니다: {e}")).into()),
+            Ok(None) => Ok(None),
+            Err(e) => Err(BarError::Internal(format!("키움 일봉 응답을 읽지 못했습니다: {e}"))),
         }
     }
 }

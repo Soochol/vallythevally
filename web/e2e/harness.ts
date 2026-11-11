@@ -134,6 +134,7 @@ function serverEnv(dir: string, fakeBase: string, bind: string, clockStart: stri
     VALLY_LOCK_PATH: path.join(dir, "server.lock"),
     VALLY_DB_PATH: path.join(dir, "vally.db"),
     VALLY_SCREENER_DB_PATH: path.join(dir, "screener.duckdb"),
+    VALLY_SCREENER_UPDATE_ON_START: "off",
     VALLY_TOKEN_PATH: path.join(dir, "token.json"),
     VALLY_BIND: bind,
     VALLY_STATIC_DIR: STATIC_DIR,

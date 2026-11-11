@@ -2,6 +2,7 @@ use std::net::SocketAddr;
 use std::process::Stdio;
 use std::time::{Duration, Instant};
 
+use fake_kiwoom::krx::{self, KrxMarket};
 use fake_kiwoom::{APP_KEY, FakeKiwoom, TOKEN, extra_stock_code};
 use serde_json::{Value, json};
 use tokio::io::{AsyncBufReadExt, BufReader};
@@ -206,4 +207,24 @@ async fn extra_stocks_are_appended_to_the_kospi_list_only_when_asked() {
     assert_eq!(more[plain.len()..], [extra_stock_code(0), extra_stock_code(1), extra_stock_code(2)]);
     let kosdaq = codes(kiwoom(&base, "ka10099", json!({"mrkt_tp": "10"}), None).await);
     assert!(!kosdaq.contains(&extra_stock_code(0)), "코스닥 목록에는 붙이지 않는다");
+}
+
+#[tokio::test]
+async fn a_listed_krx_stock_can_withhold_its_daily_bars_and_still_answer_monthly_ones() {
+    let fake = FakeKiwoom::start().await;
+    let as_of = domain::KstDate::new(2026, 11, 6).unwrap();
+    fake.set_krx_market(KrxMarket::sample(as_of).with_daily_withheld());
+    let base = fake.base_url();
+    let listed = kiwoom(&base, "ka10099", json!({"mrkt_tp": "0"}), None).await;
+    let row = listed.body["list"].as_array().unwrap().iter().find(|r| r["code"] == krx::DAILY_WITHHELD).cloned().expect("종목 목록에 있다");
+    assert_eq!((row["auditInfo"].as_str(), row["regDay"].as_str()), (Some("거래정지"), Some("20030616")));
+
+    let daily = kiwoom(&base, "ka10081", daily(krx::DAILY_WITHHELD), None).await;
+    assert_eq!((daily.status, daily.body["stk_dt_pole_chart_qry"][0]["dt"].as_str()), (200, Some("")), "일봉은 봉 없이 빈 행 하나로 답한다: {}", daily.body);
+
+    let monthly = kiwoom(&base, "ka10083", json!({"stk_cd": krx::DAILY_WITHHELD, "base_dt": "20261106", "upd_stkpc_tp": "1"}), None).await;
+    let months = monthly.body["stk_mth_pole_chart_qry"].as_array().unwrap();
+    assert_eq!((months[0]["dt"].as_str(), months[1]["dt"].as_str(), monthly.cont.as_str()), (Some("20261102"), Some("20261001"), "N"), "최신 달부터, 그달 첫 관측일로 준다");
+    assert!(months.iter().all(|m| m["trde_qty"].as_str().unwrap().parse::<u64>().unwrap() > 0), "월봉에는 거래량이 있다");
+    assert_eq!(kiwoom(&base, "ka10083", json!({"stk_cd": krx::COMMON, "base_dt": "20261106", "upd_stkpc_tp": "1"}), None).await.body["stk_cd"], krx::COMMON, "다른 KRX 종목도 월봉을 준다");
 }

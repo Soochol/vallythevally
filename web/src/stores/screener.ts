@@ -49,8 +49,8 @@ export function rerunReason(run: ScreenRun | null, storeVersion: number, status:
   return run.storeVersion === storeVersion ? null : { kind: "store_changed" };
 }
 
-const seenOf = ({ lastDay, fullHistory }: ScreenerStatus, updating: boolean): SeenStore => ({
-  contents: `${lastDay}|${fullHistory.done}|${fullHistory.total}`,
+const seenOf = ({ lastDay, fullHistory, unconfirmed }: ScreenerStatus, updating: boolean): SeenStore => ({
+  contents: `${lastDay}|${fullHistory.done}|${fullHistory.total}|${unconfirmed}`,
   updating,
 });
 
