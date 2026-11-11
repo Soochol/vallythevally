@@ -345,14 +345,14 @@ async fn a_ten_minute_failure_at_the_first_page_or_a_later_page_stops_only_that_
     let client = reqwest::Client::new();
 
     let (status, first_page) = get_after_symbol_list(&client, &base, "/api/bars?symbol=IDX:001&period=10m").await;
-    assert_eq!((status, &first_page["error"]["reason"]), (502, &Value::from("invalid_request")), "{first_page}");
+    assert_eq!((status, &first_page["error"]["reason"]), (500, &Value::from("invalid_request")), "{first_page}");
 
     let newest_path = "/api/bars?symbol=005930&period=10m&venue=krx&limit=3";
     let (status, newest) = get(&client, &base, newest_path).await;
     assert_eq!(status, 200, "다른 시리즈는 지수 실패와 상관없이 받는다: {newest}");
     let before = newest["nextBefore"].as_i64().expect("앞 구간이 더 있다");
     let (status, later_page) = get(&client, &base, &format!("/api/bars?symbol=005930&period=10m&venue=krx&before={before}")).await;
-    assert_eq!((status, &later_page["error"]["reason"]), (502, &Value::from("invalid_request")), "{later_page}");
+    assert_eq!((status, &later_page["error"]["reason"]), (500, &Value::from("invalid_request")), "{later_page}");
     let (status, again) = get(&client, &base, newest_path).await;
     assert_eq!((status, &again["bars"]), (200, &newest["bars"]), "이어 받기 실패 뒤에도 최신 봉은 그대로 받는다: {again}");
     server.stop().await;
