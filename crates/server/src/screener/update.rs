@@ -5,7 +5,7 @@ use domain::{IndexCode, KstDate, Price, StockCode, Venue};
 use futures::{StreamExt, TryFutureExt, TryStreamExt, stream};
 
 use super::{Calendar, CalendarUse, Screener};
-use super::store::{DayBar, Store, Tail, Write};
+use super::store::{DayBar, Listed, Store, Tail, Write};
 use crate::api::UpdatePhase;
 use crate::bars::BarError;
 use crate::kiwoom::api::{DailyChart, IndexDailyChart, StockQuotes};
@@ -56,10 +56,23 @@ fn stopped_on(code: StockCode, e: &BarError) {
 }
 
 impl Screener {
+    pub async fn fill_lost_listing(&self) {
+        match self.refill_listing().await {
+            Ok(Listed::Present) => {}
+            Ok(Listed::Filled) => tracing::info!("스크리너 저장소에 일봉은 있는데 종목 목록이 비어 있어, 서버가 받은 종목 목록으로 채웠습니다"),
+            Ok(Listed::Lost) => tracing::warn!("서버가 받은 종목 목록이 비어 스크리너 종목 목록을 채우지 못했습니다. 비지 않은 목록을 받을 때까지 실행을 막습니다"),
+            Err(e) => tracing::warn!(error = %e, "스크리너 종목 목록을 채우지 못했습니다. 실행이나 업데이트 때 다시 채웁니다"),
+        }
+    }
+
     pub(super) async fn update(&self, id: u64, full: bool) -> Result<(), BarError> {
         tracing::info!(full, "스크리너 업데이트를 시작합니다");
         self.report(id, UpdatePhase::Symbols, 0, 1);
         let directory = self.symbols.ready(&self.rest).await?;
+        if directory.screener_listing().is_empty() {
+            tracing::warn!("서버가 받아 둔 종목 목록이 비어 있어, 스크리너 종목 목록을 바꾸지 않고 업데이트를 멈춥니다");
+            return Err(BarError::ListNotReady);
+        }
         tracing::info!(count = directory.screener_listing().len(), "서버가 받아 둔 종목 목록으로 스크리너 종목 목록을 바꿉니다");
         self.with_store(move |s| s.replace_listing(directory.screener_listing())).await?;
         self.report(id, UpdatePhase::Symbols, 1, 1);

@@ -210,6 +210,25 @@ async fn extra_stocks_are_appended_to_the_kospi_list_only_when_asked() {
 }
 
 #[tokio::test]
+async fn krx_stock_lists_give_each_stock_its_own_zero_padded_list_count_and_leave_it_empty_for_one() {
+    let fake = FakeKiwoom::start().await;
+    fake.set_krx_market(KrxMarket::sample(domain::KstDate::new(2026, 11, 6).unwrap()));
+    let base = fake.base_url();
+    let mut counts = std::collections::BTreeMap::new();
+    for market in ["0", "10"] {
+        for row in kiwoom(&base, "ka10099", json!({"mrkt_tp": market}), None).await.body["list"].as_array().unwrap() {
+            counts.insert(row["code"].as_str().unwrap().to_owned(), (market, row["listCount"].as_str().unwrap().to_owned()));
+        }
+    }
+    assert_eq!(counts[krx::PRE_1985], ("0", "0000005919637922".to_owned()));
+    assert_eq!(counts[krx::SPLIT], ("10", "0000000012000000".to_owned()));
+    assert_eq!(counts[krx::NEW_LISTING], ("0", String::new()), "상장주식수가 없는 종목이 하나 있다");
+    let given: std::collections::BTreeSet<&str> = counts.values().map(|(_, count)| count.as_str()).filter(|c| !c.is_empty()).collect();
+    assert_eq!(given.len(), counts.len() - 1, "상장주식수는 종목마다 다르다: {counts:?}");
+    assert!(given.iter().all(|c| c.len() == 16 && c.bytes().all(|b| b.is_ascii_digit())));
+}
+
+#[tokio::test]
 async fn a_listed_krx_stock_can_withhold_its_daily_bars_and_still_answer_monthly_ones() {
     let fake = FakeKiwoom::start().await;
     let as_of = domain::KstDate::new(2026, 11, 6).unwrap();

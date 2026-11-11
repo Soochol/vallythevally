@@ -163,7 +163,11 @@ async fn serve(config: Config, token_file: TokenFile) -> ExitCode {
         let (clock, rest, symbols, screener) = (clock.clone(), rest.clone(), symbols.clone(), screener.clone());
         let update_on_start = config.screener_update_on_start;
         async move {
-            if load_symbols_at_startup(clock, rest, symbols).await.is_ok() && update_on_start {
+            if load_symbols_at_startup(clock, rest, symbols).await.is_err() {
+                return;
+            }
+            screener.fill_lost_listing().await;
+            if update_on_start {
                 screener.update_if_behind().await;
             }
         }
