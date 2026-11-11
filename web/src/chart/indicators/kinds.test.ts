@@ -31,7 +31,7 @@ test("거래량은 막대 말고 이동평균 선이 색을 고른다", () => {
 
 test("안 쓴 첫 색, 선이 늘어나면 대표 색에서 이어 칠한다", () => {
   expect(firstUnusedColor(["ind-1", "ind-3"])).toBe("ind-2");
-  expect(firstUnusedColor(["ind-1", "ind-2", "ind-3", "ind-4", "ind-5"])).toBe("ind-1");
+  expect(firstUnusedColor(["ind-1", "ind-2", "ind-3", "ind-4", "ind-5"])).toBe("#FF747E");
   const rsi = { kind: "rsi", period: 14, signal: 9 } as const;
   expect(lineColor(rsi, ["ind-5"], 1)).toBe("ind-1");
   expect(colorsFrom({ kind: "ichimoku", conversion: 9, base: 26, spanB: 52, displacement: 26 }, "ind-4")).toEqual(["ind-4", "ind-5", "ind-1", "ind-2", "ind-3"]);

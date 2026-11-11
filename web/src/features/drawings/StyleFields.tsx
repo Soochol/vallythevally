@@ -1,16 +1,16 @@
 import type { StyleField } from "../../chart/drawings/toolSpec";
 import { drawingColor } from "../../chart/drawings/DrawingLayer";
 import type { Dash, TextStyle, Width } from "../../chart/drawings/types";
+import { ColorPicker } from "../color/ColorPicker";
 
 export const INPUT = "draw-input";
 export function ColorInput({ label, value, onChange }: { label: string; value: string; onChange(v: string): void }) {
   const color = drawingColor(value);
-  return <span className="draw-color"><input aria-label={`${label} 색 고르기`} type="color" value={/^#[0-9a-f]{6}$/i.test(color) ? color : "#12b5a5"} onChange={(e) => onChange(e.target.value)} />
-    <input className={INPUT} aria-label={label} value={color} onChange={(e) => onChange(e.target.value)} placeholder="#26a69a" /></span>;
+  return <ColorPicker label={label} value={color} onChange={onChange} />;
 }
 export function WidthInput({ label, value, onChange }: { label: string; value: Width; onChange(v: Width): void }) {
-  return <select className={INPUT} aria-label={label} value={value} onChange={(e) => { const n = Number(e.target.value); if (n === 1 || n === 2 || n === 3 || n === 4) onChange(n); }}>
-    {[1, 2, 3, 4].map((n) => <option key={n} value={n}>{n}px</option>)}</select>;
+  return <select className={INPUT} aria-label={label} value={value} onChange={(e) => { const n = Number(e.target.value); if (n === 1 || n === 2 || n === 3 || n === 4 || n === 5) onChange(n); }}>
+    {[1, 2, 3, 4, 5].map((n) => <option key={n} value={n}>{n}px</option>)}</select>;
 }
 export function DashInput({ label, value, onChange }: { label: string; value: Dash; onChange(v: Dash): void }) {
   return <select className={INPUT} aria-label={label} value={value} onChange={(e) => { const v = e.target.value; if (v === "solid" || v === "dashed" || v === "dotted") onChange(v); }}>

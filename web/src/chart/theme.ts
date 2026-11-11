@@ -1,4 +1,5 @@
-import { INDICATOR_COLORS, type IndicatorColor } from "./indicators/kinds";
+import { type IndicatorColor, type IndicatorToken } from "./indicators/kinds";
+import { isHexColor } from "../lib/colors";
 
 /** 차트가 쓰는 토큰 값. CSS 변수에서 읽는다(테마를 바꾸면 다시 읽어 setTheme). */
 export interface ThemeTokens {
@@ -17,7 +18,8 @@ export interface ThemeTokens {
   seriesLine: string;
   seriesFill: string;
   fontFamily: string;
-  ind: Record<IndicatorColor, string>;
+  fontSize: number;
+  ind: Record<IndicatorToken, string>;
   cmp: Record<1 | 2 | 3, string>;
 }
 
@@ -40,7 +42,10 @@ export function readThemeTokens(root: HTMLElement = document.documentElement): T
     seriesLine: v("--series-line"),
     seriesFill: v("--series-fill"),
     fontFamily: v("--font-sans"),
-    ind: Object.fromEntries(INDICATOR_COLORS.map((c) => [c, v(`--${c}`)])) as Record<IndicatorColor, string>,
+    fontSize: Number.parseFloat(v("--fs-s")) || 12,
+    ind: { "ind-1": v("--ind-1"), "ind-2": v("--ind-2"), "ind-3": v("--ind-3"), "ind-4": v("--ind-4"), "ind-5": v("--ind-5") },
     cmp: { 1: v("--cmp-1"), 2: v("--cmp-2"), 3: v("--cmp-3") },
   };
 }
+
+export const indicatorColorValue = (tokens: ThemeTokens, color: IndicatorColor): string => isHexColor(color) ? color : tokens.ind[color];

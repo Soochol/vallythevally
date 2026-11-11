@@ -3,7 +3,6 @@ import {
   type IChartApi,
   type IPriceLine,
   type ISeriesApi,
-  LineSeries,
   LineStyle,
   type PriceFormat,
   PriceScaleMode,
@@ -15,7 +14,7 @@ import type { UnixSeconds } from "../../api/generated/UnixSeconds";
 import { formatPrice, formatVolume } from "../../lib/format";
 import { displayBars, type History } from "../barFeed";
 import type { IndicatorConfig, Panel } from "../settings";
-import type { ThemeTokens } from "../theme";
+import { indicatorColorValue, type ThemeTokens } from "../theme";
 import { toChartTime } from "../time";
 import type { IndicatorPort, OpenPort } from "./client";
 import { applyToPoints, DrawQueue, pointAtTime } from "./drawQueue";
@@ -28,9 +27,10 @@ type Status = { kind: "pending" } | { kind: "ready" } | { kind: "hidden" } | { k
 
 type Kind = IndicatorConfig["spec"]["kind"];
 
-type Plot = { overlay: true; series: OverlaySeries } | { overlay: false; series: ISeriesApi<"Line"> | ISeriesApi<"Histogram"> };
+type Plot = { overlay: true; series: OverlaySeries } | { overlay: false; series: ISeriesApi<"Histogram"> };
 
 type Line = Plot & {
+  priceOverlay: boolean;
   id: LineId;
   kind: Kind;
   shift: number;
@@ -251,14 +251,14 @@ export class IndicatorLayer {
           ? []
           : s.lines.map((line, i) => {
               const pt = pointAtTime(line.points, t);
-              const color = isBarLine(line.id) ? tokens.text2 : tokens.ind[lineColor(config.spec, config.style.colors, i)];
+              const color = isBarLine(line.id) ? tokens.text2 : indicatorColorValue(tokens, lineColor(config.spec, config.style.colors, i));
               return { text: pt ? this.format(config, pt.v) : "—", color };
             });
       const primary = lines.findIndex((l) => !isBarLine(l));
       return {
         id: config.id,
         name: specName(config.spec),
-        color: primary < 0 ? tokens.text2 : tokens.ind[lineColor(config.spec, config.style.colors, primary)],
+        color: primary < 0 ? tokens.text2 : indicatorColorValue(tokens, lineColor(config.spec, config.style.colors, primary)),
         values,
         state,
         panel: panelIndex < 0 ? null : { index: panelIndex, count: this.panels.length },
@@ -383,17 +383,14 @@ export class IndicatorLayer {
       if (pane > 0) series.priceScale().applyOptions({ mode: PriceScaleMode.Normal, scaleMargins: id === "volume" ? { top: 0.12, bottom: 0 } : { top: 0.14, bottom: 0.08 } });
       const guides = i === 0 ? (GUIDES[config.spec.kind] ?? []).map((price) => series.createPriceLine(this.guide(price))) : [];
       const same = kept[i]?.id === id ? kept[i] : undefined;
-      return { ...plot, id, kind: config.spec.kind, shift: same?.shift ?? 0, points: same?.points ?? [], guides };
+      return { ...plot, priceOverlay: isOverlay(config, id), id, kind: config.spec.kind, shift: same?.shift ?? 0, points: same?.points ?? [], guides };
     });
   }
 
   private addPlot(config: IndicatorConfig, id: LineId, i: number, pane: number): Plot {
     const options = { ...this.lineOptions(config, id, i), priceFormat: this.priceFormat(config) };
-    if (isOverlay(config, id)) return { overlay: true, series: addOverlayLine(this.host.chart, options, pane) };
-    const series = isBarLine(id)
-      ? this.host.chart.addSeries(HistogramSeries, options, pane)
-      : this.host.chart.addSeries(LineSeries, options, pane);
-    return { overlay: false, series };
+    if (!isBarLine(id)) return { overlay: true, series: addOverlayLine(this.host.chart, options, pane, isOverlay(config, id)) };
+    return { overlay: false, series: this.host.chart.addSeries(HistogramSeries, options, pane) };
   }
 
   private guide(price: number) {
@@ -401,7 +398,7 @@ export class IndicatorLayer {
   }
 
   private lineOptions(config: IndicatorConfig, id: LineId, i: number) {
-    const color = this.host.tokens().ind[lineColor(config.spec, config.style.colors, i)];
+    const color = indicatorColorValue(this.host.tokens(), lineColor(config.spec, config.style.colors, i));
     const common = { visible: config.visible, priceLineVisible: false, lastValueVisible: config.panel !== "price", title: "" };
     if (isBarLine(id)) return common;
     const line = { ...common, color, lineWidth: config.style.width };
@@ -434,12 +431,12 @@ export class IndicatorLayer {
   }
 
   private draw(line: Line, points: readonly Point[]): void {
-    if (line.overlay) line.series.setData(this.overlayRows(points));
+    if (line.overlay) line.series.setData(line.priceOverlay ? this.overlayRows(points) : points.map((pt) => ({ time: toChartTime(pt.t), value: pt.v, base: pt.v })));
     else line.series.setData(points.map((pt) => this.toChart(line, pt)));
   }
 
   private put(line: Line, pt: Point): void {
-    if (line.overlay) line.series.update(this.overlayPoint(pt));
+    if (line.overlay) line.series.update(line.priceOverlay ? this.overlayPoint(pt) : { time: toChartTime(pt.t), value: pt.v, base: pt.v });
     else line.series.update(this.toChart(line, pt));
   }
 

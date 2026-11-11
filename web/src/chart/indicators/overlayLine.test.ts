@@ -11,3 +11,8 @@ test("선의 값과 주 시리즈 종가를 함께 들면 종가가 마지막 �
   expect(view.isWhitespace({ time, base: 209.13 })).toBe(false);
   expect(view.isWhitespace({ time })).toBe(true);
 });
+
+test("아래 지표 패널의 선은 가격 패널의 기준가를 축 범위에 넣지 않는다", () => {
+  const view = new OverlayLineView(false);
+  expect(view.priceValueBuilder({ time, value: 45, base: 200000 })).toEqual([45]);
+});

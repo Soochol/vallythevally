@@ -101,7 +101,7 @@ test("drawing engine: daily anchors keep their time and price on 60-minute bars"
   await open(page); await cell(page).focus(); await page.keyboard.press("G"); await draw(page);
   await expect.poll(async () => (await drawings(app)).length).toBe(1);
   const saved = (await drawings(app))[0]!; const before = (await mirror(page))[0]!.points;
-  await page.getByRole("group", { name: "봉 주기" }).getByRole("button", { name: "60분", exact: true }).click();
+  await page.getByRole("combobox", { name: "분봉" }).selectOption("60m");
   await expect(cell(page)).toHaveAttribute("aria-label", "칸 1: 코스피 60분");
   await expect(chartOf(cell(page))).toHaveAttribute("data-bar-count", "3600");
   await expect.poll(async () => (await mirror(page))[0]?.points.every((p) => p !== null)).toBe(true);
@@ -148,9 +148,13 @@ test("drawing engine: settings preview, cancellation, coordinates and text", asy
   await page.getByRole("button", { name: "드로잉 설정" }).click();
   const dialog = page.getByRole("dialog", { name: "추세선 설정" });
   const defaultColor = await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue("--draw").trim());
-  await expect(dialog.getByRole("textbox", { name: "선 색", exact: true })).toHaveValue(defaultColor);
+  await expect(dialog.getByRole("button", { name: "선 색 선택", exact: true })).toContainText(defaultColor.toUpperCase());
   await dialog.getByLabel("선 굵기").selectOption("4");
-  await dialog.getByRole("textbox", { name: "선 색", exact: true }).fill("#224466");
+  await dialog.getByRole("button", { name: "선 색 선택", exact: true }).click();
+  const picker = page.getByRole("dialog", { name: "선 색", exact: true });
+  await picker.getByRole("tab", { name: "사용자 지정", exact: true }).click();
+  await picker.getByRole("textbox", { name: "HEX", exact: true }).fill("#224466");
+  await picker.getByRole("button", { name: "선택", exact: true }).click();
   expect((await drawings(app))[0]!.style).toEqual(original.style);
   await dialog.getByRole("button", { name: "취소", exact: true }).click();
   expect((await drawings(app))[0]!.style).toEqual(original.style);
@@ -158,7 +162,7 @@ test("drawing engine: settings preview, cancellation, coordinates and text", asy
   await dialog.getByRole("tab", { name: "좌표", exact: true }).click();
   await dialog.getByLabel("점 1 가격").fill(String(original.points[0]!.price + 10));
   await dialog.getByRole("tab", { name: "글자", exact: true }).click();
-  await expect(dialog.getByRole("textbox", { name: "글자 색", exact: true })).toHaveValue(defaultColor);
+  await expect(dialog.getByRole("button", { name: "글자 색 선택", exact: true })).toContainText(defaultColor.toUpperCase());
   await dialog.getByRole("textbox", { name: "글자", exact: true }).fill("지지 구간");
   await page.screenshot({ path: testInfo.outputPath("settings.png") });
   await dialog.getByRole("button", { name: "확인", exact: true }).click();

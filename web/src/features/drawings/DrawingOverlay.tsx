@@ -2,6 +2,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { drawingColor } from "../../chart/drawings/DrawingLayer";
+import { ColorPicker } from "../color/ColorPicker";
 import { surfaceFor } from "../../chart/drawings/DrawingSurface";
 import { drawingSync, useDrawingVersion } from "../../chart/drawings/sync";
 import { toolOf } from "../../chart/drawings/tools";
@@ -62,9 +63,9 @@ function FloatingBar({ slot }: { slot: number }) {
   return <div ref={root} role="toolbar" aria-label="드로잉 스타일" className="drawing-floating" style={{ left: position.x, top: position.y }} onPointerDown={(e) => { if (e.target instanceof HTMLButtonElement) e.preventDefault(); }}>
     <button type="button" className="draw-grip" aria-label="스타일 막대 옮기기" title="끌어서 막대 옮기기" onPointerDown={(e) => { e.preventDefault(); e.currentTarget.setPointerCapture(e.pointerId); drag.current = { x: e.clientX, y: e.clientY, baseX: position.x, baseY: position.y }; }}
       onPointerMove={(e) => { const d = drag.current; if (d) useDrawingSession.setState({ toolbarAt: { x: d.baseX + e.clientX - d.x, y: d.baseY + e.clientY - d.y } }); }} onPointerUp={() => { drag.current = null; }}>⠿</button>
-    {common("lineColor") && tool.bar.lineColor && <input title="선 색" aria-label="선 색" type="color" value={drawingColor(tool.bar.lineColor.get(first.style)).slice(0, 7)} onChange={(e) => change((d) => ({ ...d, style: toolOf(d.tool)?.bar.lineColor?.set(d.style, e.target.value) ?? d.style }))} />}
-    {common("fill") && tool.bar.fill && <input title="채움 색" aria-label="채움 색" type="color" value={drawingColor(tool.bar.fill.get(first.style).color).slice(0, 7)} onChange={(e) => change((d) => { const lens = toolOf(d.tool)?.bar.fill; return lens ? { ...d, style: lens.set(d.style, { ...lens.get(d.style), color: e.target.value }) } : d; })} />}
-    {common("textColor") && tool.bar.textColor && <input title="글자 색" aria-label="글자 색" type="color" value={drawingColor(tool.bar.textColor.get(first.style)).slice(0, 7)} onChange={(e) => change((d) => ({ ...d, style: toolOf(d.tool)?.bar.textColor?.set(d.style, e.target.value) ?? d.style }))} />}
+    {common("lineColor") && tool.bar.lineColor && <ColorPicker compact label="선 색" value={drawingColor(tool.bar.lineColor.get(first.style))} width={tool.bar.width?.get(first.style)} onChange={(color) => change((d) => ({ ...d, style: toolOf(d.tool)?.bar.lineColor?.set(d.style, color) ?? d.style }))} />}
+    {common("fill") && tool.bar.fill && <ColorPicker compact label="채움 색" value={drawingColor(tool.bar.fill.get(first.style).color)} onChange={(color) => change((d) => { const lens = toolOf(d.tool)?.bar.fill; return lens ? { ...d, style: lens.set(d.style, { ...lens.get(d.style), color }) } : d; })} />}
+    {common("textColor") && tool.bar.textColor && <ColorPicker compact label="글자 색" value={drawingColor(tool.bar.textColor.get(first.style))} onChange={(color) => change((d) => ({ ...d, style: toolOf(d.tool)?.bar.textColor?.set(d.style, color) ?? d.style }))} />}
     {common("width") && tool.bar.width && <WidthInput label="선 굵기" value={tool.bar.width.get(first.style)} onChange={(v) => change((d) => ({ ...d, style: toolOf(d.tool)?.bar.width?.set(d.style, v) ?? d.style }))} />}
     {common("dash") && tool.bar.dash && <DashInput label="선 모양" value={tool.bar.dash.get(first.style)} onChange={(v) => change((d) => ({ ...d, style: toolOf(d.tool)?.bar.dash?.set(d.style, v) ?? d.style }))} />}
     <span className="draw-bar-sep" />

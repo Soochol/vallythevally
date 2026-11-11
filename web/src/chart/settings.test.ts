@@ -73,7 +73,7 @@ test.each([
   ["모르는 지표 종류", ind({ spec: { kind: "wma", period: 5 } })],
   ["지표 설정 필드가 빠짐", ind({ spec: { kind: "ma", period: 5 } })],
   ["모르는 색", ind({ style: { colors: ["#fff"], width: 1 } })],
-  ["굵기 4", ind({ style: { colors: ["ind-1"], width: 4 } })],
+  ["굵기 6", ind({ style: { colors: ["ind-1"], width: 6 } })],
   ["가격 지표가 지표 패널에", ind({ panel: "p1" })],
   ["지표 패널 지표가 가격 패널에", { ...rsi, indicators: [rsi.indicators[0], { ...rsi.indicators[1]!, panel: "price" }] }],
   ["지표 없는 패널", { ...rsi, panels: [...rsi.panels, { id: "p2", stretch: 1 }] }],
@@ -155,4 +155,9 @@ test("비교 종목을 빼면 나머지 순서를 지키고, 없는 종목이면
   const s = { ...rsi, compare: ["000660", "035420", "IDX:001"] };
   expect(removeCompare(s, "035420").compare).toEqual(["000660", "IDX:001"]);
   expect(removeCompare(s, "051910")).toBe(s);
+});
+
+test("사용자 지정 선 색과 굵기 5는 저장한 차트 설정에서 손실 없이 복원한다", () => {
+  const raw = { ...DEFAULT_CHART_SETTINGS, panels: [], indicators: [{ id: "custom", spec: { kind: "ma", method: "sma", period: 20 }, panel: "price", visible: true, style: { colors: ["#8B5CF6"], width: 5 } }] };
+  expect(parseChartSettings(JSON.parse(JSON.stringify(raw)))).toEqual(raw);
 });

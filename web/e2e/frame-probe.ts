@@ -1,12 +1,12 @@
 import type { ISeriesApi, PriceScaleMode, SeriesType } from "lightweight-charts";
 
-type Series = Pick<ISeriesApi<SeriesType>, "data" | "seriesType" | "update" | "priceToCoordinate" | "priceScale">;
+type Series = Pick<ISeriesApi<SeriesType>, "data" | "seriesType" | "update" | "priceToCoordinate" | "priceScale" | "options">;
 type Update = Parameters<Series["update"]>[0];
 
 declare global {
   interface Window {
     frameProbe: {
-      snapshot(): { type: SeriesType; data: ReturnType<Series["data"]>; updates: Update[]; scaleMode: PriceScaleMode }[];
+      snapshot(): { type: SeriesType; data: ReturnType<Series["data"]>; updates: Update[]; scaleMode: PriceScaleMode; style: { color: string | null; width: number | null } }[];
       candleY(price: number): number | null;
       hold(): void;
       release(): void;
@@ -45,7 +45,10 @@ export function installFrameProbe(): void {
     return remove.call(this, key);
   };
   window.frameProbe = {
-    snapshot: () => [...series].map(([api, updates]) => ({ type: api.seriesType(), data: api.data(), updates, scaleMode: api.priceScale().options().mode })),
+    snapshot: () => [...series].map(([api, updates]) => {
+      const options = api.options();
+      return { type: api.seriesType(), data: api.data(), updates, scaleMode: api.priceScale().options().mode, style: { color: "color" in options && typeof options.color === "string" ? options.color : null, width: "lineWidth" in options && typeof options.lineWidth === "number" ? options.lineWidth : null } };
+    }),
     candleY: (price) => [...series.keys()].find((api) => api.seriesType() === "Candlestick")?.priceToCoordinate(price) ?? null,
     hold() {
       window.requestAnimationFrame = (callback) => { pending.set(++id, callback); return id; };

@@ -1,7 +1,7 @@
 import { useEffect, useId, useRef, useState } from "react";
 import type { MaMethod } from "../../api/generated/MaMethod";
 import { useSymbolInfo } from "../../api/queries";
-import { colorsFrom, INDICATOR_COLORS, type IndicatorKind, KIND_ORDER, KINDS, shownColor, specName } from "../../chart/indicators/kinds";
+import { colorsFrom, indicatorCssColor, type IndicatorKind, KIND_ORDER, KINDS, shownColor, specName } from "../../chart/indicators/kinds";
 import { loadValidator } from "../../chart/indicators/validate";
 import type { LineWidth } from "../../chart/settings";
 import { PERIOD_LABEL } from "../../lib/symbol";
@@ -9,6 +9,7 @@ import { type Slot, useCell, useLayoutStore } from "../../stores/layout";
 import { useSelectionStore } from "../../stores/selection";
 import { DialogFrame, Errors, Row, Segment } from "../dialog/DialogParts";
 import { CloseIcon, EyeIcon, GearIcon, SearchIcon } from "../icons";
+import { ColorPicker } from "../color/ColorPicker";
 import { ComparePanel } from "./ComparePanel";
 import { stepIndex } from "./compareForm";
 import {
@@ -32,14 +33,16 @@ const WIDTHS = [
   [1, "1"],
   [2, "2"],
   [3, "3"],
+  [4, "4"],
+  [5, "5"],
 ] as const satisfies readonly (readonly [LineWidth, string])[];
 
 const NUMBER_INPUT =
-  "h-[30px] w-24 rounded-m border border-line bg-chart-bg px-2 text-text outline-none focus:border-accent aria-invalid:border-up aria-invalid:focus:border-up disabled:opacity-50";
+  "ui-field w-24 disabled:opacity-50";
 
-type DialogTab = "indicator" | "compare";
-const TABS = ["indicator", "compare"] as const satisfies readonly DialogTab[];
-const TAB_LABEL: Record<DialogTab, string> = { indicator: "지표", compare: "비교 종목" };
+type DialogTab = "indicator" | "current" | "compare";
+const TABS = ["indicator", "current", "compare"] as const satisfies readonly DialogTab[];
+const TAB_LABEL: Record<DialogTab, string> = { indicator: "지표", current: "이 칸에 띄운 지표", compare: "비교 종목" };
 
 export function IndicatorDialog() {
   const dialog = useSelectionStore((s) => s.dialog);
@@ -145,28 +148,12 @@ function IndicatorDialogBody({ slot, editId }: { slot: Slot; editId: string | nu
   };
 
   return (
-    <DialogFrame labelledBy={`${ids}-title`} width="w-[min(760px,calc(100vw-32px))]" onClose={close} panelRef={dialogRef}>
-      <div className="flex flex-none items-center gap-3 border-b border-line px-4 py-3">
+    <DialogFrame labelledBy={`${ids}-title`} width="w-[min(880px,calc(100vw-32px))]" onClose={close} panelRef={dialogRef}>
+      <div className="ui-dialog-head">
         <h2 id={`${ids}-title`} className="flex-none text-l font-[650]">
-          {tab === "compare" ? "비교 종목" : editing ? "지표 편집" : "지표 추가"}
+          {tab === "compare" ? "비교 종목" : tab === "current" ? "이 칸에 띄운 지표" : editing ? "지표 편집" : "지표 추가"}
         </h2>
-        <div role="tablist" aria-label="추가할 것" onKeyDown={onTabKey} className="ml-1 inline-flex flex-none gap-1">
-          {TABS.map((t) => (
-            <button
-              key={t}
-              type="button"
-              role="tab"
-              id={tabId(t)}
-              aria-selected={tab === t}
-              aria-controls={tab === t ? panelId(t) : undefined}
-              tabIndex={tab === t ? 0 : -1}
-              onClick={() => setTab(t)}
-              className="h-7 rounded-m px-3 text-text-2 hover:text-text aria-selected:bg-raised aria-selected:font-semibold aria-selected:text-text"
-            >
-              {TAB_LABEL[t]}
-            </button>
-          ))}
-        </div>
+
         <span className="min-w-0 truncate text-s text-text-3">
           칸 {slot + 1}: {symbolName} {PERIOD_LABEL[cell.period]}
         </span>
@@ -176,8 +163,87 @@ function IndicatorDialogBody({ slot, editId }: { slot: Slot; editId: string | nu
         </button>
       </div>
 
+      <div role="tablist" aria-label="추가할 것" onKeyDown={onTabKey} className="ui-tabs">
+        {TABS.map((t) => (
+          <button
+            key={t}
+            type="button"
+            role="tab"
+            id={tabId(t)}
+            aria-selected={tab === t}
+            aria-controls={tab === t ? panelId(t) : undefined}
+            tabIndex={tab === t ? 0 : -1}
+            onClick={() => setTab(t)}
+            className="hover:text-text"
+          >
+            {TAB_LABEL[t]}{t === "current" && <span>{indicators.length}</span>}
+          </button>
+        ))}
+      </div>
+
       {tab === "compare" ? (
         <ComparePanel slot={slot} id={panelId("compare")} labelledBy={tabId("compare")} onRemoved={() => dialogRef.current?.focus()} />
+      ) : tab === "current" ? (
+        <>
+          <div role="tabpanel" id={panelId("current")} aria-labelledby={tabId("current")} className="min-h-0 flex-1 overflow-auto">
+            <section aria-labelledby={`${ids}-current`} className="p-6">
+              <h3 id={`${ids}-current`} className="text-m font-[650]">
+                이 칸에 띄운 지표
+              </h3>
+              <ul className="mt-4 flex flex-col gap-3">
+                {indicators.map((ind) => {
+                  const name = specName(ind.spec);
+                  return (
+                    <li
+                      key={ind.id}
+                      aria-current={ind.id === editingId ? "true" : undefined}
+                      className="indicator-current-row text-s"
+                    >
+                      <span className={`flex min-w-0 flex-1 items-center gap-2 ${ind.visible ? "" : "opacity-50"}`}>
+                        <span
+                          aria-hidden="true"
+                          className="h-[3px] w-3 flex-none rounded-s"
+                          style={{ background: indicatorCssColor(shownColor(ind.spec, ind.style.colors)) }}
+                        />
+                        <span className="min-w-0 flex-1 truncate">{name}</span>
+                        <span className="flex-none text-text-3">{panelLabel(panels, ind.panel)}</span>
+                      </span>
+                      <button
+                        type="button"
+                        className="icon-btn h-8 w-8 max-md:h-10 max-md:w-10"
+                        aria-label={`${name} 설정`}
+                        title="설정"
+                        onClick={() => { setTab("indicator"); openIndicators(slot, ind.id); }}
+                      >
+                        <GearIcon />
+                      </button>
+                      <button
+                        type="button"
+                        className="icon-btn h-8 w-8 max-md:h-10 max-md:w-10"
+                        aria-label={`${name} ${ind.visible ? "숨기기" : "보이기"}`}
+                        title={ind.visible ? "숨기기" : "보이기"}
+                        onClick={() => updateIndicator(slot, ind.id, { visible: !ind.visible })}
+                      >
+                        <EyeIcon off={!ind.visible} />
+                      </button>
+                      <button
+                        type="button"
+                        className="icon-btn h-8 w-8 max-md:h-10 max-md:w-10"
+                        aria-label={`${name} 지우기`}
+                        title="지우기"
+                        onClick={() => remove(ind.id)}
+                      >
+                        <CloseIcon />
+                      </button>
+                    </li>
+                  );
+                })}
+                {indicators.length === 0 && <li className="px-2 py-1 text-s text-text-3">아직 없습니다. 종류를 고르고 추가하세요.</li>}
+              </ul>
+            </section>
+          </div>
+          <div className="ui-dialog-foot justify-end"><button type="button" className="tb-btn border border-line" onClick={close}>닫기</button><button type="button" className="btn-primary" onClick={() => { setTab("indicator"); openIndicators(slot, null); }}>지표 추가</button></div>
+        </>
       ) : (
         <form onSubmit={submit} noValidate className="flex min-h-0 flex-1 flex-col">
           <div
@@ -186,8 +252,8 @@ function IndicatorDialogBody({ slot, editId }: { slot: Slot; editId: string | nu
             aria-labelledby={tabId("indicator")}
             className="grid min-h-0 flex-1 grid-cols-[236px_minmax(0,1fr)] max-md:auto-rows-max max-md:grid-cols-1 max-md:overflow-auto"
           >
-            <div className="min-h-0 overflow-auto border-r border-line p-2 max-md:overflow-visible max-md:border-b max-md:border-r-0">
-              <label className="mb-1 flex h-8 items-center gap-1.5 rounded-m border border-line bg-chart-bg px-2 text-text-3">
+            <div className="indicator-catalog min-h-0 overflow-auto border-r border-line p-4 max-md:overflow-visible max-md:border-b max-md:border-r-0">
+              <label className="mb-3 flex h-10 items-center gap-2 rounded-m border border-line bg-chart-bg px-3 text-text-3">
                 <SearchIcon size={16} />
                 <input
                   ref={searchRef}
@@ -248,7 +314,7 @@ function IndicatorDialogBody({ slot, editId }: { slot: Slot; editId: string | nu
               {kinds.length === 0 && <p className="px-2 py-3 text-s text-text-2">맞는 지표가 없습니다</p>}
             </div>
 
-            <div ref={settingsRef} className="flex min-h-0 flex-col gap-4 overflow-auto p-4 max-md:overflow-visible">
+            <div ref={settingsRef} className="flex min-h-[390px] flex-col gap-6 overflow-auto p-6 max-md:min-h-0 max-md:overflow-visible">
               <div>
                 <h3 className="text-m font-[650]">{KINDS[kind].label}</h3>
                 <p className="mt-1 max-w-[56ch] text-s text-text-2">
@@ -303,92 +369,23 @@ function IndicatorDialogBody({ slot, editId }: { slot: Slot; editId: string | nu
                 })}
                 {hasColor(draft.form) && (
                   <>
-                    <Row label="색">
-                      <div role="group" aria-label="색" className="flex h-[30px] items-center gap-1.5">
-                        {INDICATOR_COLORS.map((c, i) => (
-                          <button
-                            key={c}
-                            type="button"
-                            aria-pressed={c === color}
-                            aria-label={`색 ${i + 1}`}
-                            onClick={() => setDraft((d) => ({ ...d, color: c }))}
-                            style={{ background: `var(--${c})` }}
-                            className="h-5 w-5 rounded-full border-2 border-transparent aria-pressed:border-text"
-                          />
-                        ))}
-                      </div>
-                    </Row>
-                    <Row label="굵기">
+                    <Row label="선 색상"><ColorPicker label="선 색상" value={indicatorCssColor(color)} width={draft.width} onChange={(color) => setDraft((d) => ({ ...d, color }))} /></Row>
+                    <Row label="선 굵기">
                       <Segment label="굵기" options={WIDTHS} value={draft.width} onChange={(width) => setDraft((d) => ({ ...d, width }))} />
                     </Row>
                   </>
                 )}
                 {rest.map((m, i) => (
-                  <p key={i} className="text-s text-up">
+                  <p key={i} className="text-s text-danger">
                     {m}
                   </p>
                 ))}
               </div>
 
-              <section aria-labelledby={`${ids}-current`} className="border-t border-line pt-4">
-                <h3 id={`${ids}-current`} className="text-m font-[650]">
-                  이 칸에 띄운 지표
-                </h3>
-                <ul className="mt-2 flex flex-col gap-0.5">
-                  {indicators.map((ind) => {
-                    const name = specName(ind.spec);
-                    return (
-                      <li
-                        key={ind.id}
-                        aria-current={ind.id === editingId ? "true" : undefined}
-                        className="flex items-center gap-2 rounded-m px-2 py-1 text-s hover:bg-raised aria-[current=true]:bg-accent-soft"
-                      >
-                        <span className={`flex min-w-0 flex-1 items-center gap-2 ${ind.visible ? "" : "opacity-50"}`}>
-                          <span
-                            aria-hidden="true"
-                            className="h-[3px] w-3 flex-none rounded-s"
-                            style={{ background: `var(--${shownColor(ind.spec, ind.style.colors)})` }}
-                          />
-                          <span className="min-w-0 flex-1 truncate">{name}</span>
-                          <span className="flex-none text-text-3">{panelLabel(panels, ind.panel)}</span>
-                        </span>
-                        <button
-                          type="button"
-                          className="icon-btn h-[22px] w-[22px] max-md:h-10 max-md:w-10"
-                          aria-label={`${name} 설정`}
-                          title="설정"
-                          onClick={() => openIndicators(slot, ind.id)}
-                        >
-                          <GearIcon />
-                        </button>
-                        <button
-                          type="button"
-                          className="icon-btn h-[22px] w-[22px] max-md:h-10 max-md:w-10"
-                          aria-label={`${name} ${ind.visible ? "숨기기" : "보이기"}`}
-                          title={ind.visible ? "숨기기" : "보이기"}
-                          onClick={() => updateIndicator(slot, ind.id, { visible: !ind.visible })}
-                        >
-                          <EyeIcon off={!ind.visible} />
-                        </button>
-                        <button
-                          type="button"
-                          className="icon-btn h-[22px] w-[22px] max-md:h-10 max-md:w-10"
-                          aria-label={`${name} 지우기`}
-                          title="지우기"
-                          onClick={() => remove(ind.id)}
-                        >
-                          <CloseIcon />
-                        </button>
-                      </li>
-                    );
-                  })}
-                  {indicators.length === 0 && <li className="px-2 py-1 text-s text-text-3">아직 없습니다. 종류를 고르고 추가하세요.</li>}
-                </ul>
-              </section>
             </div>
           </div>
 
-          <div className="flex flex-none items-center gap-2 border-t border-line px-4 py-2">
+          <div className="ui-dialog-foot">
             <span className="flex items-center gap-2 text-s text-text-3 max-md:hidden">
               {!editing && (
                 <>

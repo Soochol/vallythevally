@@ -7,12 +7,12 @@ import {
   type ICustomSeriesPaneRenderer,
   type ICustomSeriesPaneView,
   type ISeriesApi,
-  type LineWidth,
   type PaneRendererCustomData,
   type SeriesPartialOptions,
   type Time,
   type WhitespaceData,
 } from "lightweight-charts";
+import type { LineWidth } from "../settings";
 
 export interface OverlayPoint extends CustomData<Time> {
   value?: number;
@@ -26,6 +26,7 @@ export interface OverlayOptions extends CustomSeriesOptions {
 export type OverlaySeries = ISeriesApi<"Custom", Time, OverlayPoint | WhitespaceData<Time>, OverlayOptions>;
 
 export class OverlayLineView implements ICustomSeriesPaneView<Time, OverlayPoint, OverlayOptions> {
+  constructor(private readonly priceOverlay = true) {}
   private data: PaneRendererCustomData<Time, OverlayPoint> | null = null;
   private options: OverlayOptions | null = null;
 
@@ -63,6 +64,7 @@ export class OverlayLineView implements ICustomSeriesPaneView<Time, OverlayPoint
 
   /** Lightweight Charts는 마지막 값을 종가로 보고 % 기준으로 쓴다. */
   priceValueBuilder(p: OverlayPoint): number[] {
+    if (!this.priceOverlay) return [p.value ?? p.base];
     return p.value === undefined ? [p.base] : [p.value, p.base];
   }
 
@@ -75,6 +77,6 @@ export class OverlayLineView implements ICustomSeriesPaneView<Time, OverlayPoint
   }
 }
 
-export function addOverlayLine(chart: IChartApi, options: SeriesPartialOptions<OverlayOptions>, pane: number): OverlaySeries {
-  return chart.addCustomSeries(new OverlayLineView(), options, pane);
+export function addOverlayLine(chart: IChartApi, options: SeriesPartialOptions<OverlayOptions>, pane: number, priceOverlay = true): OverlaySeries {
+  return chart.addCustomSeries(new OverlayLineView(priceOverlay), options, pane);
 }
