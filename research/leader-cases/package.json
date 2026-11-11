@@ -9,6 +9,10 @@
     "check-symbols": "node check-sector-symbols.ts",
     "test": "node --test",
     "collect": "node collect-bundle.ts",
+    "report": "node generate-report.ts",
+    "fixture:report": "node fixtures/write-report-inputs.ts",
+    "test:report": "node --test report.test.ts",
+    "test:browser": "../../web/node_modules/.bin/playwright test -c playwright.config.ts",
     "typecheck": "../../web/node_modules/.bin/tsc -p tsconfig.json"
   }
 }

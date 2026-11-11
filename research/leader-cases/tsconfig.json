@@ -12,7 +12,8 @@
     "skipLibCheck": true,
     "types": ["node"],
     "typeRoots": ["../../web/node_modules/@types"],
-    "lib": ["ES2023", "DOM"]
+    "lib": ["ES2023", "DOM"],
+    "paths": { "lightweight-charts": ["../../web/node_modules/lightweight-charts"], "@playwright/test": ["../../web/node_modules/@playwright/test"] }
   },
-  "include": ["*.ts", "fixtures/*.ts"]
+  "include": ["*.ts", "fixtures/*.ts", "browser/*.ts"]
 }

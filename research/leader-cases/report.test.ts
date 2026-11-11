@@ -1,0 +1,97 @@
+import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
+import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import path from "node:path";
+import { test } from "node:test";
+import { syntheticInputs, syntheticManuscript } from "./fixtures/report.ts";
+import { parseManuscript } from "./manuscript.ts";
+import { parseBundle } from "./report-input.ts";
+import { accountingPlots, calendarFor, publishedSample, reportPanels, sample, type Plot } from "./report-model.ts";
+import { plotRuns } from "./chart-data.ts";
+import { day } from "./source-utils.ts";
+import { jsonForHtml, reportPage } from "./report-page.ts";
+
+const root = path.resolve(import.meta.dirname, "../../target/leader-cases-142/node");
+async function scratch() { await mkdir(root, { recursive: true }); return mkdtemp(path.join(root, "run-")); }
+export async function runCli(args: string[]) {
+  const child = spawn(process.execPath, [path.join(import.meta.dirname, "generate-report.ts"), ...args], { stdio: ["ignore", "pipe", "pipe"] });
+  let stdout = "", stderr = "";
+  child.stdout.setEncoding("utf8").on("data", (s: string) => stdout += s);
+  child.stderr.setEncoding("utf8").on("data", (s: string) => stderr += s);
+  return { code: await new Promise<number | null>((resolve) => child.on("close", resolve)), stdout, stderr };
+}
+test("manuscript boundary requires all sections, dated visible evidence, safe links and justified milestones", () => {
+  const raw = syntheticManuscript();
+  assert.equal(parseManuscript(raw).sections.length, 13);
+  assert.throws(() => parseManuscript({ ...raw, sections: raw.sections.slice(1) }), /sections/);
+  assert.throws(() => parseManuscript({ ...raw, milestones: { ...raw.milestones, birth: { day: "2016-02-30", evidence: [] } } }), /date/);
+  assert.throws(() => parseManuscript({ ...raw, milestones: { ...raw.milestones, peak: { ...raw.milestones.peak, evidence: [] } } }), /evidence/);
+  const events = [{ ...raw.events[0]!, url: "javascript:alert(1)" }];
+  assert.throws(() => parseManuscript({ ...raw, events }), /link/);
+  assert.throws(() => parseManuscript({ ...raw, events: [{ ...events[0]!, url: "https://name:secret@example.invalid/" }] }), /link/);
+  assert.throws(() => parseManuscript({ ...raw, sections: raw.sections.map((s) => ({ ...s, sentences: [{ kind: "then-visible", text: "too early", asOf: "2016-10-13", citations: [{ publishedOn: "2016-10-14", url: "https://example.invalid/", quote: "future" }] }] })) }), /already_published/);
+});
+test("single HTML CLI embeds the real bundle contract, escapes executable text and rejects malformed bundles", async () => {
+  const fixture = await syntheticInputs(await scratch());
+  assert.deepEqual(parseBundle(fixture.bundle), fixture.bundle);
+  const result = await runCli(["--bundle", fixture.bundlePath, "--manuscript", fixture.manuscriptPath]);
+  assert.equal(result.code, 0, result.stderr);
+  const output = JSON.parse(result.stdout).output;
+  assert.equal(output, path.resolve(import.meta.dirname, "../../data/leader-cases/990001/report.html"));
+  const html = await readFile(output, "utf8");
+  assert.match(html, /Candlestick|candlestick/);
+  assert.ok(!html.includes('<script src=') && !html.includes('<link rel="stylesheet"'));
+  assert.match(html, /SYNTHETIC FIXTURE ONLY/);
+  const badPath = path.join(path.dirname(fixture.manuscriptPath), "bad.json");
+  await writeFile(badPath, JSON.stringify({ ...fixture.manuscript, schemaVersion: 2 }));
+  const invalid = await runCli(["--bundle", fixture.bundlePath, "--manuscript", badPath]);
+  assert.equal(invalid.code, 2);
+  assert.equal(await readFile(output, "utf8"), html);
+  assert.throws(() => parseBundle({ ...fixture.bundle, schemaVersion: 2 }), /schemaVersion/);
+  assert.throws(() => parseBundle({ ...fixture.bundle, calendar: [...fixture.bundle.calendar].reverse() }), /ascending/);
+  assert.throws(() => parseBundle({ ...fixture.bundle, valuation: [{ ...fixture.bundle.valuation[0], per: { value: 3, reason: null } }] }), /valuation/);
+  const firstDisclosure = fixture.bundle.dart.disclosures.kind === "ok" ? fixture.bundle.dart.disclosures.data[0] : {};
+  assert.throws(() => parseBundle({ ...fixture.bundle, dart: { ...fixture.bundle.dart, disclosures: { kind: "ok", source: "fixture", data: [{ ...firstDisclosure, url: "javascript:alert(1)" }] } } }), /dart/);
+  const script = '</script><script>window.pwned=true</script><img src=x onerror="window.pwned=true">';
+  const manuscript = parseManuscript({ ...fixture.manuscript, title: script });
+  const escaped = reportPage(fixture.bundle, manuscript, "");
+  assert.ok(!escaped.includes(script));
+  assert.ok(jsonForHtml({ text: script }).includes("\\u003c/script"));
+  assert.equal(JSON.parse(jsonForHtml({ text: script })).text, script);
+});
+test("publication charts retain pre-correction TTM, conflict gaps and independent BPS while accounting uses latest summaries", async () => {
+  const { bundle, manuscript } = await syntheticInputs(await scratch());
+  const panels = reportPanels(bundle);
+  const operating = panels.find((p) => p.id === "financial-operating-profit")!.plots[0]!;
+  assert.equal(operating.samples.findLast((s) => s.day <= "2016-10-14")!.value, 200);
+  const conflict = operating.samples.find((s) => s.day === "2016-10-17")!;
+  assert.equal(conflict.value, null);
+  assert.equal(conflict.reason, "ttm_path_conflict");
+  assert.equal(panels.find((p) => p.id === "financial-bps")!.plots[0]!.samples.find((s) => s.day === "2016-10-17")!.value, 70);
+  assert.equal(panels.find((p) => p.id === "financial-eps")!.plots[0]!.samples.find((s) => s.day === "2016-08-16")!.value, 10);
+  assert.equal(panels.find((p) => p.id === "financial-dps")!.plots[0]!.samples.find((s) => s.day === "2016-05-16")!.value, 1200);
+  const before = operating.samples.find((s) => s.day === "2016-08-16")!.evidence!;
+  assert.ok("paths" in before && "activePaths" in before && "evaluatedOn" in before);
+  assert.deepEqual(before.activePaths, ["four-quarters"]);
+  assert.equal(before.evaluatedOn, "2016-08-16");
+  assert.ok(!before.sources.some((s) => s.receipt === "20161014201520"));
+  const chart = plotRuns(operating, calendarFor(panels, bundle, manuscript), bundle.calendar).flat();
+  assert.equal(chart.find((s) => s.time === "2016-10-14")!.value, 200);
+  assert.equal(chart.find((s) => s.time === "2016-10-17"), undefined);
+  assert.equal(accountingPlots(bundle, "annual").plots[1]!.samples[0]!.value, 200);
+  assert.ok(accountingPlots(bundle, "quarterly").periods.length > accountingPlots(bundle, "annual").periods.length);
+  const institution = panels.find((p) => p.id === "institution")!.plots[0]!;
+  const restart = bundle.institutionCumulative.find((p, i) => i > 0 && bundle.institutionCumulative[i - 1]!.segmentNet === null && p.segmentStart === p.day && p.segmentNet !== null)!;
+  assert.equal(institution.samples.find((p) => p.day === restart.day)!.value, restart.segmentNet!.institution);
+  assert.notEqual(restart.segmentNet!.institution, restart.knownNetSinceStart!.institution);
+  const notYet = publishedSample(day("2016-01-01"), { value: 7, reason: null, unit: "KRW", sources: [], availableFrom: day("2016-01-04") });
+  assert.equal(notYet.value, null);
+});
+test("daily holes, weekly samples and explicit nulls break lines without inserting fake values", () => {
+  const dates = ["2016-01-04", "2016-01-05", "2016-01-06", "2016-01-07", "2016-01-08", "2016-01-15", "2016-01-22"];
+  const p: Plot = { title: "gap", unit: "shares", style: "line", sampling: "daily", emptyReason: null, samples: [sample(day(dates[0]!), 10), sample(day(dates[2]!), 20)] };
+  assert.equal(plotRuns(p, dates, dates).length, 2);
+  const weekly: Plot = { ...p, sampling: "weekly", samples: [sample(day("2016-01-08"), 10), sample(day("2016-01-15"), null, "missing"), sample(day("2016-01-22"), 30)] };
+  assert.deepEqual(plotRuns(weekly, dates, dates).map((r) => r.map((v) => v.value)), [[10], [30]]);
+  assert.deepEqual(plotRuns({ ...weekly, samples: weekly.samples.filter((s) => s.value !== null) }, dates, dates).map((r) => r.map((v) => v.value)), [[10], [30]]);
+});
