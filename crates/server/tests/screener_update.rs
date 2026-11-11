@@ -47,7 +47,7 @@ impl Api {
     }
 
     async fn excluded(&self) -> Value {
-        let screen = json!({"id": "S1", "name": "고가 1일 신고가", "period": "D", "exclude": [], "conditions": [{"field": "high", "n": 1, "m": 1}]});
+        let screen = json!({"id": "S1", "name": "고가 1일 신고가", "markets": [], "exclude": [], "conditions": [{"kind": "new_high", "period": "D", "field": "high", "n": 1, "m": 1}]});
         let resp = self.client.post(format!("{}/run", self.base)).header("content-type", "application/json").body(screen.to_string()).send().await.unwrap();
         reply(resp).await["excluded"].clone()
     }

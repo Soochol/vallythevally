@@ -278,7 +278,7 @@ impl From<domain::SymbolKind> for SymbolKind {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export)]
 pub enum Market {
@@ -553,6 +553,110 @@ pub enum BarField {
     Low,
     Close,
     Volume,
+    TradedValue,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum PriceField {
+    Open,
+    High,
+    Low,
+    Close,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum SurgeField {
+    Volume,
+    TradedValue,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum Extreme {
+    High,
+    Low,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum MaOrder {
+    Bullish,
+    Bearish,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum Direction {
+    Up,
+    Down,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum Side {
+    Above,
+    Below,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum BollingerBand {
+    Upper,
+    Lower,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct Bound(pub Option<f64>);
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, TS)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+#[ts(export)]
+pub enum RsiTest {
+    Range { min: Bound, max: Bound },
+    Breakout { value: f64, direction: Direction },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+#[ts(export)]
+pub enum MacdTest {
+    SignalCross { direction: Direction },
+    ZeroBreakout { direction: Direction },
+    VsSignal { side: Side },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, TS)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+#[ts(export)]
+pub enum StochasticTest {
+    Cross { direction: Direction },
+    Range { min: Bound, max: Bound },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+#[ts(export)]
+pub enum BollingerTest {
+    Outside { side: Side },
+    Cross { band: BollingerBand, direction: Direction },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+#[ts(export)]
+pub enum IchimokuTest {
+    Cloud { side: Side },
+    Cross { direction: Direction },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
@@ -572,25 +676,60 @@ pub enum ExcludeKind {
     TradingHalted,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(tag = "kind", rename_all = "snake_case", rename_all_fields = "camelCase")]
 #[ts(export)]
-pub struct NewHigh {
-    pub field: BarField,
-    pub n: u32,
-    pub m: u32,
+pub enum Condition {
+    NewHigh { period: ScreenPeriod, m: u32, field: BarField, n: u32 },
+    NewLow { period: ScreenPeriod, m: u32, field: BarField, n: u32 },
+    ValueRange { period: ScreenPeriod, m: u32, field: BarField, min: Bound, max: Bound },
+    Change { period: ScreenPeriod, m: u32, back: u32, min_pct: Bound, max_pct: Bound },
+    NearExtreme { period: ScreenPeriod, m: u32, extreme: Extreme, n: u32, within_pct: f64 },
+    Surge { period: ScreenPeriod, m: u32, field: SurgeField, n: u32, times: f64 },
+    MaPosition { period: ScreenPeriod, m: u32, field: PriceField, method: indicators::MaMethod, length: u16, side: Side },
+    MaAlignment { period: ScreenPeriod, m: u32, method: indicators::MaMethod, lengths: Vec<u16>, order: MaOrder },
+    MaCross { period: ScreenPeriod, m: u32, method: indicators::MaMethod, fast: Option<u16>, slow: u16, direction: Direction },
+    Rsi { period: ScreenPeriod, m: u32, length: u16, test: RsiTest },
+    Macd { period: ScreenPeriod, m: u32, fast: u16, slow: u16, signal: u16, test: MacdTest },
+    Stochastic { period: ScreenPeriod, m: u32, k: u16, d: u16, smooth: u16, test: StochasticTest },
+    Bollinger { period: ScreenPeriod, m: u32, length: u16, k: f64, test: BollingerTest },
+    Ichimoku { period: ScreenPeriod, m: u32, conversion: u16, base: u16, span_b: u16, displacement: u16, test: IchimokuTest },
+    MarketCap { min: Bound, max: Bound },
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+impl Condition {
+    pub fn period_and_m(&self) -> Option<(ScreenPeriod, u32)> {
+        match *self {
+            Condition::NewHigh { period, m, .. }
+            | Condition::NewLow { period, m, .. }
+            | Condition::ValueRange { period, m, .. }
+            | Condition::Change { period, m, .. }
+            | Condition::NearExtreme { period, m, .. }
+            | Condition::Surge { period, m, .. }
+            | Condition::MaPosition { period, m, .. }
+            | Condition::MaAlignment { period, m, .. }
+            | Condition::MaCross { period, m, .. }
+            | Condition::Rsi { period, m, .. }
+            | Condition::Macd { period, m, .. }
+            | Condition::Stochastic { period, m, .. }
+            | Condition::Bollinger { period, m, .. }
+            | Condition::Ichimoku { period, m, .. } => Some((period, m)),
+            Condition::MarketCap { .. } => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[ts(export)]
 pub struct Screen {
     pub id: String,
     pub name: String,
-    pub period: ScreenPeriod,
+    pub markets: Vec<Market>,
     pub exclude: Vec<ExcludeKind>,
-    pub conditions: Vec<NewHigh>,
+    pub conditions: Vec<Condition>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[ts(export)]
 pub struct Screens {
     pub screens: Vec<Screen>,
@@ -624,7 +763,7 @@ pub struct ScreenerRow {
     pub name: String,
     pub close: f64,
     pub change_rate: Option<f64>,
-    pub high_date: KstDate,
+    pub matched_date: KstDate,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -871,12 +1010,23 @@ mod tests {
     fn screener_json_shape() {
         let every_kind = json!(["etf", "preferred", "reit", "spac", "managed", "investment_caution_alert", "investment_warning",
                                 "investment_danger", "investment_caution", "short_term_overheated", "trading_halted"]);
-        let sent = json!({"screens": [{"id": "S1", "name": "고가 200주", "period": "W", "exclude": every_kind,
-                                       "conditions": [{"field": "high", "n": 200, "m": 5}, {"field": "volume", "n": 60, "m": 1}]}],
+        let sent = json!({"screens": [{"id": "S1", "name": "고가 200주", "markets": ["kosdaq"], "exclude": every_kind,
+                                       "conditions": [{"kind": "new_high", "period": "W", "m": 5, "field": "traded_value", "n": 200},
+                                                      {"kind": "change", "period": "D", "m": 1, "back": 20, "minPct": 30.0, "maxPct": null},
+                                                      {"kind": "ichimoku", "period": "M", "m": 1, "conversion": 9, "base": 26, "spanB": 52, "displacement": 26,
+                                                       "test": {"kind": "cloud", "side": "above"}},
+                                                      {"kind": "macd", "period": "D", "m": 3, "fast": 12, "slow": 26, "signal": 9,
+                                                       "test": {"kind": "zero_breakout", "direction": "down"}},
+                                                      {"kind": "market_cap", "min": 300_000_000_000.0, "max": null}]}],
                           "revision": 1_794_152_040_123_i64});
         let screens: Screens = serde_json::from_value(sent.clone()).unwrap();
-        assert_eq!((screens.screens[0].period, screens.screens[0].exclude.len()), (ScreenPeriod::Week, 11));
-        assert_eq!(screens.screens[0].conditions[1], NewHigh { field: BarField::Volume, n: 60, m: 1 });
+        let screen = &screens.screens[0];
+        assert_eq!((screen.markets.as_slice(), screen.exclude.len()), ([Market::Kosdaq].as_slice(), 11));
+        assert_eq!(screen.conditions[0], Condition::NewHigh { period: ScreenPeriod::Week, m: 5, field: BarField::TradedValue, n: 200 });
+        assert_eq!(screen.conditions[1], Condition::Change { period: ScreenPeriod::Day, m: 1, back: 20, min_pct: Bound(Some(30.0)), max_pct: Bound(None) });
+        assert_eq!(screen.conditions[3].period_and_m(), Some((ScreenPeriod::Day, 3)));
+        assert_eq!(screen.conditions[4], Condition::MarketCap { min: Bound(Some(300_000_000_000.0)), max: Bound(None) });
+        assert_eq!(screen.conditions[4].period_and_m(), None);
         assert_eq!(serde_json::to_value(&screens).unwrap(), sent);
 
         let day = |y, m, d| KstDate(domain::KstDate::new(y, m, d).unwrap());
@@ -884,10 +1034,10 @@ mod tests {
             as_of: day(2026, 11, 10),
             universe: 3957,
             excluded: ScreenerExcluded { listed_too_short: 14, history_short: 120, unconfirmed: 2 },
-            rows: vec![ScreenerRow { symbol: SymbolCode("005930".into()), name: "삼성전자".into(), close: 193_400.0, change_rate: None, high_date: day(2026, 11, 9) }],
+            rows: vec![ScreenerRow { symbol: SymbolCode("005930".into()), name: "삼성전자".into(), close: 193_400.0, change_rate: None, matched_date: day(2026, 11, 9) }],
         };
         let result_json = json!({"asOf": "2026-11-10", "universe": 3957, "excluded": {"listedTooShort": 14, "historyShort": 120, "unconfirmed": 2},
-                                 "rows": [{"symbol": "005930", "name": "삼성전자", "close": 193_400.0, "changeRate": null, "highDate": "2026-11-09"}]});
+                                 "rows": [{"symbol": "005930", "name": "삼성전자", "close": 193_400.0, "changeRate": null, "matchedDate": "2026-11-09"}]});
         assert_eq!(serde_json::to_value(&result).unwrap(), result_json);
         assert_eq!(serde_json::from_value::<ScreenerResult>(result_json).unwrap(), result);
 

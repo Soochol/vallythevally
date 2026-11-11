@@ -4,9 +4,46 @@ use domain::{Bucket, KstDate, KstTime, Period, Price, StockCode, TimeOfDay};
 use duckdb::{Connection, Transaction, params};
 
 use super::store::{StoreError, date_of, date_value, exclusion_mask, price_of, stock_code, unconfirmed_on};
-use crate::api::{self, BarField, NewHigh, Screen, ScreenPeriod, ScreenerExcluded, ScreenerResult, ScreenerRow, SymbolCode};
+use crate::api::{self, BarField, Condition, ExcludeKind, Screen, ScreenPeriod, ScreenerExcluded, ScreenerResult, ScreenerRow, SymbolCode};
 
 type Cell = i64;
+
+#[derive(Debug, Clone, Copy)]
+struct NewHigh {
+    field: BarField,
+    n: u32,
+    m: u32,
+}
+
+pub(super) struct NewHighScreen {
+    period: Period,
+    conditions: Vec<NewHigh>,
+    exclude: Vec<ExcludeKind>,
+}
+
+impl NewHighScreen {
+    pub(super) fn of(screen: &Screen) -> Result<NewHighScreen, String> {
+        if !screen.markets.is_empty() {
+            return Err("시장으로 고르는 조건식은 아직 실행할 수 없습니다".to_owned());
+        }
+        let lines = screen
+            .conditions
+            .iter()
+            .enumerate()
+            .map(|(line, c)| match *c {
+                Condition::NewHigh { period, m, field, n } => Ok((period, NewHigh { field, n, m })),
+                _ => Err(format!("{}번째 조건: 아직 신고가 조건만 실행할 수 있습니다", line + 1)),
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let [(period, _), ..] = lines[..] else {
+            return Err("조건이 없습니다".to_owned());
+        };
+        if lines.iter().any(|(p, _)| *p != period) {
+            return Err("줄마다 봉 주기가 다른 조건식은 아직 실행할 수 없습니다".to_owned());
+        }
+        Ok(NewHighScreen { period: period_of(period), conditions: lines.into_iter().map(|(_, c)| c).collect(), exclude: screen.exclude.clone() })
+    }
+}
 
 struct Cells {
     buckets: Vec<Bucket>,
@@ -126,9 +163,9 @@ impl<'a> Snapshot<'a> {
         Ok(Snapshot { tx, last_day })
     }
 
-    pub(super) fn screen(&self, screen: &Screen, as_of: KstDate) -> Result<ScreenerResult, StoreError> {
+    pub(super) fn screen(&self, screen: &NewHighScreen, as_of: KstDate) -> Result<ScreenerResult, StoreError> {
         let tx = &self.tx;
-        let period = period_of(screen.period);
+        let period = screen.period;
         let cells = Cells::new(period, &observation_days(tx, as_of)?);
         let reach = Reach::of(&screen.conditions, cells.as_of());
         let unwanted = exclusion_mask(&screen.exclude);
@@ -155,10 +192,10 @@ impl<'a> Snapshot<'a> {
                 name: names[&hit.code].to_owned(),
                 close: hit.close.to_f64(),
                 change_rate: hit.previous_close.map(|previous| change_rate(hit.close, previous)),
-                high_date: api::KstDate(cells.start_day(hit.high_cell)),
+                matched_date: api::KstDate(cells.start_day(hit.high_cell)),
             })
             .collect();
-        rows.sort_by(|a, b| b.high_date.cmp(&a.high_date).then_with(|| a.symbol.0.cmp(&b.symbol.0)));
+        rows.sort_by(|a, b| b.matched_date.cmp(&a.matched_date).then_with(|| a.symbol.0.cmp(&b.symbol.0)));
         Ok(ScreenerResult { as_of: api::KstDate(as_of), universe: universe.len() as u32, excluded, rows })
     }
 }
@@ -178,6 +215,7 @@ fn column(field: BarField) -> &'static str {
         BarField::Low => "low",
         BarField::Close => "close",
         BarField::Volume => "volume",
+        BarField::TradedValue => "traded_million_won",
     }
 }
 
@@ -238,10 +276,10 @@ fn new_high_query(period: Period, conditions: &[NewHigh], reach: &Reach) -> Stri
     let lower = reach.earliest_needed.max(0);
     let from = "FROM daily AS d JOIN screen_cells AS c ON c.day = d.day JOIN screen_stocks AS s ON s.code = d.code";
     let bars = match period {
-        Period::Day => format!("SELECT d.code, c.cell, s.start_cell, d.open, d.high, d.low, d.close, d.volume {from} WHERE d.volume > 0 AND c.cell >= {lower}"),
+        Period::Day => format!("SELECT d.code, c.cell, s.start_cell, d.open, d.high, d.low, d.close, d.volume, d.traded_million_won {from} WHERE d.volume > 0 AND c.cell >= {lower}"),
         _ => format!(
             "SELECT d.code, c.cell, any_value(s.start_cell) AS start_cell, arg_min(d.open, d.day) AS open, max(d.high) AS high, min(d.low) AS low,
-                    arg_max(d.close, d.day) AS close, sum(d.volume) AS volume
+                    arg_max(d.close, d.day) AS close, sum(d.volume) AS volume, sum(d.traded_million_won) AS traded_million_won
              {from} WHERE d.volume > 0 AND c.cell >= {lower} GROUP BY d.code, c.cell"
         ),
     };
