@@ -419,3 +419,32 @@ fn invalid_comparison_keeps_receipt_failure_and_current_annual_evidence() {
     assert_eq!(comparison.status,InputStatus::NotCalculable);assert_eq!(comparison.reason,Some(Reason::ReceiptMismatch));
     assert_eq!(comparison.receipt.as_deref(),Some("20250331000002"));assert_eq!(comparison.amount.as_deref(),Some("300"));
 }
+
+#[test]
+fn missing_comparison_item_keeps_initial_xbrl_failure_and_fetch_failure_priority() {
+    for fetch_failure in [None,Some(Failure::Network)] {
+        let mut data=year();data.status="partial_failure";
+        let report=data.collection.reports.get_mut("2024/11014").unwrap();
+        let mut statement=report.statement.data.take().unwrap();
+        statement.accounts.retain(|a|a.fields["account_id"]!="ifrs-full_Revenue");
+        statement.source_failure=Some(Failure::Remote);
+        let rows=statement.accounts.iter().map(|a|a.fields.clone()).collect();
+        statement.accounts=server::financials::xbrl::accounts(rows,Basis::CFS,"00126380","20250331000001",&[],Some("2024-09")).unwrap();
+        assert!(statement.accounts.iter().all(|a|matches!(a.current_period,Verification::Unverified(_))));
+        report.statement=Fetch::default();report.statement.apply(Ok(Some(statement)),200,0);
+        report.statement.failure=fetch_failure;
+        if fetch_failure.is_some() {report.statement.checked_at=Some(210);}
+        let response=page("005930",Frequency::Q,data);
+        assert_eq!(response.status,"partial_failure");assert!(response.progress.failed>0);
+        let p=point(&response,Metric::Revenue,2024,"11011");
+        assert_eq!(p.status,Status::NotCalculable);assert_eq!(p.reason,Some(Reason::MissingComparison));assert_eq!(p.value,None);
+        let prior=p.inputs.iter().find(|i|i.usage==Usage::Comparison).unwrap();
+        assert_eq!(prior.status,InputStatus::MissingItem);assert_eq!(prior.business_year,2024);assert_eq!(prior.report_code,"11014");assert_eq!(prior.role,"statement");
+        assert_eq!(prior.failure.as_deref(),Some(if fetch_failure.is_some() {"network"} else {"remote"}));
+        assert_eq!(prior.checked_at.unwrap().0,if fetch_failure.is_some() {210} else {200});assert_eq!(prior.last_success_at.unwrap().0,200);assert_eq!(prior.refresh_version,0);
+        let current=&p.inputs[0];assert_eq!(current.usage,Usage::Value);assert_eq!(current.status,InputStatus::Available);
+        assert_eq!(current.amount.as_deref(),Some("1000"));assert_eq!(current.failure,None);
+        assert_eq!(current.period,Some(Period::Duration {start:"2024-01-01".into(),end:"2024-12-31".into()}));
+        assert_eq!(point(&response,Metric::DebtRatio,2024,"11011").value,Some(50.0));
+    }
+}

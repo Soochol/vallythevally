@@ -76,15 +76,20 @@ fn source<T>(report: &Report, fetch: &Fetch<T>, role: &str) -> FinancialInput {
     FinancialInput { business_year: report.business_year, report_code: report.report_code.clone(), usage: FinancialInputUsage::Value, status, reason: None, role: role.into(), amount: None, period: None, verification_reason: None, basis: None, currency: None, receipt: None, disclosed_at: None, context_id: None, source_file: None, fields: BTreeMap::new(), checked_at: fetch.checked_at.map(UnixSeconds), last_success_at: fetch.last_success_at.map(UnixSeconds), failure: failure(fetch.failure), refresh_version: fetch.refresh_version }
 }
 
+fn statement_source(report: &Report, role: &str) -> FinancialInput {
+    let mut input = source(report, &report.statement, role);
+    input.failure = input.failure.or_else(|| report.statement.data.as_ref().and_then(|s| failure(s.source_failure)));
+    input
+}
+
 fn account_source(report: &Report, collection: &Collection, account: &Account, cumulative: bool) -> FinancialInput {
-    let mut input = source(report, &report.statement, if cumulative { "thstrm_add_amount" } else { "thstrm_amount" });
+    let mut input = statement_source(report, if cumulative { "thstrm_add_amount" } else { "thstrm_amount" });
     input.fields = account.fields.clone();
     input.amount = account.fields.get(&input.role).cloned();
     input.basis = report.statement.data.as_ref().map(|s| basis(s.basis));
     input.currency = account.fields.get("currency").cloned();
     input.receipt = account.fields.get("rcept_no").cloned();
     input.disclosed_at = input.receipt.as_deref().and_then(|r| disclosed(collection, r));
-    if let Some(statement) = &report.statement.data { input.failure = input.failure.or_else(|| failure(statement.source_failure)); }
     let verification = if cumulative { &account.cumulative_period } else { &account.current_period };
     match verification {
         Verification::Verified { period: p, context_id, source_file, .. } => { input.period = Some(period(p)); input.context_id = Some(context_id.clone()); input.source_file = Some(source_file.clone()); }
@@ -94,7 +99,7 @@ fn account_source(report: &Report, collection: &Collection, account: &Account, c
 }
 
 fn statement(report: &Report) -> Result<&Statement, Gap> {
-    report.statement.data.as_ref().ok_or_else(|| Gap { status: if report.statement.failure.is_some() { Status::Failed } else if report.statement.absent { Status::Unpublished } else { Status::Pending }, reason: None, period: None, inputs: vec![source(report, &report.statement, "statement")] })
+    report.statement.data.as_ref().ok_or_else(|| Gap { status: if report.statement.failure.is_some() { Status::Failed } else if report.statement.absent { Status::Unpublished } else { Status::Pending }, reason: None, period: None, inputs: vec![statement_source(report, "statement")] })
 }
 
 fn amount(report: &Report, collection: &Collection, concept: Concept, cumulative: bool) -> Calculation {
@@ -131,7 +136,7 @@ fn compatible(a: &Amount, b: &Amount) -> Option<Reason> {
 fn with_inputs(mut error: Gap, mut inputs: Vec<FinancialInput>) -> Gap { inputs.append(&mut error.inputs); error.inputs = inputs; error }
 
 fn comparison_gap(current: &Amount, previous: &Report, mut error: Gap) -> Gap {
-    if error.inputs.is_empty() { error.inputs.push(source(previous, &previous.statement, "statement")); }
+    if error.inputs.is_empty() { error.inputs.push(statement_source(previous, "statement")); }
     let status = match error.status {
         Status::Available => FinancialInputStatus::Available,
         Status::Unpublished => FinancialInputStatus::Unpublished,
@@ -157,7 +162,7 @@ fn quarter(report: &Report, collection: &Collection, concept: Concept) -> Calcul
     let previous_code = match report.report_code.as_str() { "11012" => "11013", "11014" => "11012", "11011" => "11014", _ => return Ok(current) };
     let Some(previous) = collection.reports.values().find(|r| r.business_year == report.business_year && r.report_code == previous_code) else {
         let missing = Report { business_year: report.business_year, report_code: previous_code.into(), statement: Fetch::<Statement>::default(), dividends: Fetch::default() };
-        let mut input = source(&missing, &missing.statement, "statement");
+        let mut input = statement_source(&missing, "statement");
         input.usage = FinancialInputUsage::Comparison;
         input.status = FinancialInputStatus::MissingReport;
         return Err(gap(Reason::MissingComparison, [current.inputs, vec![input]].concat()));
