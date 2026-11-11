@@ -23,6 +23,7 @@ export async function refreshFinancials(client: QueryClient, request: FinancialR
   try {
     await sendJson<FinancialsPage>("POST", urlOf(request), "{}");
   } finally {
+    await client.cancelQueries({ queryKey: keyOf(request) });
     await client.invalidateQueries({ queryKey: keyOf(request) });
   }
 }

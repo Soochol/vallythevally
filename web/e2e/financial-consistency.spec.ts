@@ -259,4 +259,35 @@ test.describe("같은 재무 키의 응답 순서", () => {
     await writeFile(info.outputPath("late-get.json"), JSON.stringify({ old, current: await data(app), quarter, requests }, null, 2));
   });
 
+ test("cold Y 조회를 수동 갱신 중 재활성화해도 최신 정정의 빈 값으로 확인한다",async({page,app},info)=>{
+  await seed(app); await expect.poll(async()=>(await data(app)).status).toBe("ready");
+  const deferred=()=>{let release:()=>void=()=>{};const promise=new Promise<void>(resolve=>{release=resolve;});return {promise,release};};
+  const first=deferred(),second=deferred(),postStart=deferred(),postDelivery=deferred();
+  let reads=0,postSeen=false,postFetched=false; const oldResponses:FinancialsPage[]=[]; let postResponse:FinancialsPage|null=null; const events:string[]=[];
+  await page.route("**/api/symbols/005930/financials?period=Y",async route=>{
+    if(route.request().method()==="POST") {
+      postSeen=true; events.push("POST requested and held before server"); await postStart.promise; const response=await route.fetch(); postResponse=await response.json(); postFetched=true; events.push("POST server response captured"); await postDelivery.promise; await route.fulfill({response}); events.push("POST delivered");
+    } else {
+      const n=++reads; const response=await route.fetch(); oldResponses.push(await response.json()); events.push(`GET ${n} server snapshot captured`);
+      if(n===1) await first.promise; if(n===2) await second.promise;
+      await route.fulfill({response}); events.push(`GET ${n} delivered`);
+    }
+  });
+  await page.addInitScript(installFrameProbe); await page.goto("/"); await expect.poll(()=>oldResponses.length).toBe(1);
+  await row(page).locator("summary").click(); app.dart!.edge=true;
+  await row(page).getByRole("button",{name:"재무자료 새로고침·재시도"}).click(); await expect.poll(()=>postSeen).toBe(true);
+  const periods=page.getByRole("toolbar").getByRole("group",{name:"봉 주기"});
+  await periods.getByRole("button",{name:"일",exact:true}).click(); await expect(row(page)).toHaveCount(0);
+  await periods.getByRole("button",{name:"연",exact:true}).click(); await expect.poll(()=>oldResponses.length).toBe(2);
+  postStart.release(); await expect.poll(()=>postFetched).toBe(true); await expect.poll(async()=>(await data(app)).status).toBe("ready");
+  const delivered=page.waitForResponse(r=>r.request().method()==="POST"&&r.url().includes("/financials?period=Y"));
+  postDelivery.release(); await delivered; await frames(page);
+  second.release(); await expect(row(page)).toContainText("확인 완료"); await frames(page);
+  await page.waitForTimeout(2200);
+  const actual=await series(page),server=await data(app);
+  await writeFile(info.outputPath("cold-race.json"),JSON.stringify({events,oldResponses,postResponse,actual,server,reads},null,2));
+  first.release();
+  expect(server.series.find(s=>s.metric==="revenue")!.points.some(p=>p.value===null&&p.reason==="period_overlap")).toBe(true);
+  expect(actual).toEqual([]);
+ });
 });
