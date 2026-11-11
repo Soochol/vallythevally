@@ -10,7 +10,8 @@ import {
   DEFAULT_SORT,
   excludedInOrder,
   excludedText,
-  highDateText,
+  marketsInOrder,
+  matchedDateText,
   msUntilStatusTurns,
   nextSort,
   runBlock,
@@ -23,6 +24,8 @@ import {
 } from "./screener";
 
 const newHigh = (period: ScreenPeriod, field: BarField, n: number, m: number) => ({ kind: "new_high", period, m, field, n }) as const;
+const screenOf = (conditions: Screen["conditions"]): Screen => ({ id: "s", name: "s", markets: [], exclude: [], conditions });
+const marketCap = { kind: "market_cap", min: 300_000_000_000, max: null } as const;
 
 test("조건 문장은 그 줄의 봉 주기 단위와 M이 1인지에 따라 바뀐다", () => {
   expect(conditionSentence(newHigh("D", "high", 200, 5))).toBe("최근 5일 안에 고가가 200일 신고가인 봉이 있다");
@@ -34,11 +37,89 @@ test("조건 문장은 그 줄의 봉 주기 단위와 M이 1인지에 따라 �
   expect(conditionSentence(newHigh("D", "traded_value", 250, 1))).toBe("당일 거래대금이 250일 신고거래대금이다");
 });
 
+test("스펙의 문장 예는 그대로 나온다", () => {
+  expect(conditionSentence({ kind: "value_range", period: "D", m: 1, field: "traded_value", min: 10_000_000_000, max: null })).toBe("당일 거래대금이 100억 원 이상이다");
+  expect(conditionSentence({ kind: "change", period: "D", m: 1, back: 20, minPct: 30, maxPct: null })).toBe("당일 종가가 20일 전보다 +30% 이상이다");
+  expect(conditionSentence({ kind: "near_extreme", period: "D", m: 1, extreme: "high", n: 200, withinPct: 5 })).toBe("당일 종가가 200일 최고가에서 5% 안이다");
+  expect(conditionSentence({ kind: "surge", period: "D", m: 1, field: "volume", n: 20, times: 3 })).toBe("당일 거래량이 직전 20일 평균의 3배 이상이다");
+  expect(conditionSentence({ kind: "ma_position", period: "D", m: 1, field: "close", method: "sma", length: 20, side: "above" })).toBe("당일 종가가 20일 이동평균 위다");
+  expect(conditionSentence({ kind: "ma_alignment", period: "D", m: 1, method: "sma", lengths: [5, 20, 60, 120], order: "bullish" })).toBe("당일 5·20·60·120일 이동평균이 정배열이다");
+  expect(conditionSentence({ kind: "ma_cross", period: "D", m: 5, method: "sma", fast: 5, slow: 20, direction: "up" })).toBe("최근 5일 안에 5일선이 20일선을 위로 교차한 봉이 있다");
+  expect(conditionSentence({ kind: "rsi", period: "D", m: 3, length: 14, test: { kind: "breakout", value: 30, direction: "up" } })).toBe("최근 3일 안에 RSI(14)가 30을 위로 돌파한 봉이 있다");
+  const ichimoku = { conversion: 9, base: 26, spanB: 52, displacement: 26 };
+  expect(conditionSentence({ kind: "ichimoku", period: "D", m: 1, ...ichimoku, test: { kind: "cloud", side: "above" } })).toBe("당일 종가가 일목 구름 위다");
+  expect(conditionSentence({ kind: "market_cap", min: 300_000_000_000, max: null })).toBe("시가총액이 3,000억 원 이상이다");
+});
+
+test("신저가 문장은 값에 따라 신저가·신저거래량·신저거래대금이다", () => {
+  expect(conditionSentence({ kind: "new_low", period: "W", m: 1, field: "close", n: 52 })).toBe("이번 주 종가가 52주 신저가다");
+  expect(conditionSentence({ kind: "new_low", period: "D", m: 5, field: "volume", n: 60 })).toBe("최근 5일 안에 거래량이 60일 신저거래량인 봉이 있다");
+  expect(conditionSentence({ kind: "new_low", period: "M", m: 1, field: "traded_value", n: 12 })).toBe("이번 달 거래대금이 12개월 신저거래대금이다");
+});
+
+test("값 범위 문장은 값의 단위로 한쪽이나 두 끝을 적는다", () => {
+  expect(conditionSentence({ kind: "value_range", period: "M", m: 2, field: "close", min: 1000, max: 5000 })).toBe("최근 2개월 안에 종가가 1,000원 이상 5,000원 이하인 봉이 있다");
+  expect(conditionSentence({ kind: "value_range", period: "D", m: 1, field: "volume", min: null, max: 10_000 })).toBe("당일 거래량이 10,000주 이하다");
+  expect(conditionSentence({ kind: "value_range", period: "W", m: 3, field: "traded_value", min: 50_000_000, max: 25_000_000_000 })).toBe("최근 3주 안에 거래대금이 0.5억 원 이상 250억 원 이하인 봉이 있다");
+});
+
+test("등락률 문장은 부호를 붙이고 비교 봉을 그 줄의 단위로 센다", () => {
+  expect(conditionSentence({ kind: "change", period: "W", m: 1, back: 1, minPct: -10, maxPct: -3 })).toBe("이번 주 종가가 1주 전보다 −10% 이상 −3% 이하다");
+  expect(conditionSentence({ kind: "change", period: "M", m: 4, back: 6, minPct: null, maxPct: 0 })).toBe("최근 4개월 안에 종가가 6개월 전보다 0% 이하인 봉이 있다");
+});
+
+test("고점·저점 거리와 거래 급증 문장", () => {
+  expect(conditionSentence({ kind: "near_extreme", period: "M", m: 3, extreme: "low", n: 12, withinPct: 2.5 })).toBe("최근 3개월 안에 종가가 12개월 최저가에서 2.5% 안인 봉이 있다");
+  expect(conditionSentence({ kind: "surge", period: "W", m: 2, field: "traded_value", n: 4, times: 1.5 })).toBe("최근 2주 안에 거래대금이 직전 4주 평균의 1.5배 이상인 봉이 있다");
+});
+
+test("이동평균 문장은 단순과 지수를 가르고, 종가와의 교차도 쓴다", () => {
+  expect(conditionSentence({ kind: "ma_position", period: "W", m: 1, field: "low", method: "ema", length: 60, side: "below" })).toBe("이번 주 저가가 60주 지수 이동평균 아래다");
+  expect(conditionSentence({ kind: "ma_alignment", period: "M", m: 3, method: "ema", lengths: [20, 60], order: "bearish" })).toBe("최근 3개월 안에 20·60개월 지수 이동평균이 역배열인 봉이 있다");
+  expect(conditionSentence({ kind: "ma_cross", period: "D", m: 1, method: "sma", fast: null, slow: 20, direction: "down" })).toBe("당일 종가가 20일선을 아래로 교차했다");
+  expect(conditionSentence({ kind: "ma_cross", period: "W", m: 2, method: "ema", fast: 12, slow: 26, direction: "up" })).toBe("최근 2주 안에 12주 지수 이동평균이 26주 지수 이동평균을 위로 교차한 봉이 있다");
+});
+
+test("RSI 문장은 범위와 돌파를 가르고 조사를 값에 맞춘다", () => {
+  expect(conditionSentence({ kind: "rsi", period: "D", m: 1, length: 14, test: { kind: "range", min: null, max: 30 } })).toBe("당일 RSI(14)가 30 이하다");
+  expect(conditionSentence({ kind: "rsi", period: "W", m: 4, length: 9, test: { kind: "range", min: 30, max: 70 } })).toBe("최근 4주 안에 RSI(9)가 30 이상 70 이하인 봉이 있다");
+  expect(conditionSentence({ kind: "rsi", period: "M", m: 1, length: 14, test: { kind: "breakout", value: 25, direction: "down" } })).toBe("이번 달 RSI(14)가 25를 아래로 돌파했다");
+});
+
+test("MACD 문장은 시그널 교차, 0선 돌파, 시그널 대비를 가른다", () => {
+  const macd = { fast: 12, slow: 26, signal: 9 };
+  expect(conditionSentence({ kind: "macd", period: "D", m: 1, ...macd, test: { kind: "signal_cross", direction: "up" } })).toBe("당일 MACD(12·26·9)가 시그널을 위로 교차했다");
+  expect(conditionSentence({ kind: "macd", period: "M", m: 2, ...macd, test: { kind: "zero_breakout", direction: "down" } })).toBe("최근 2개월 안에 MACD(12·26·9)가 0선을 아래로 돌파한 봉이 있다");
+  expect(conditionSentence({ kind: "macd", period: "W", m: 1, fast: 5, slow: 35, signal: 5, test: { kind: "vs_signal", side: "above" } })).toBe("이번 주 MACD(5·35·5)가 시그널 위다");
+});
+
+test("스토캐스틱과 볼린저 밴드 문장", () => {
+  const stochastic = { k: 5, d: 3, smooth: 3 };
+  expect(conditionSentence({ kind: "stochastic", period: "D", m: 3, ...stochastic, test: { kind: "cross", direction: "up" } })).toBe("최근 3일 안에 스토캐스틱(5·3·3) %K가 %D를 위로 교차한 봉이 있다");
+  expect(conditionSentence({ kind: "stochastic", period: "W", m: 1, ...stochastic, test: { kind: "range", min: null, max: 20 } })).toBe("이번 주 스토캐스틱(5·3·3) %K가 20 이하다");
+  expect(conditionSentence({ kind: "bollinger", period: "D", m: 1, length: 20, k: 2, test: { kind: "outside", side: "above" } })).toBe("당일 종가가 볼린저 밴드(20·2) 상단 위다");
+  expect(conditionSentence({ kind: "bollinger", period: "W", m: 2, length: 20, k: 2.5, test: { kind: "outside", side: "below" } })).toBe("최근 2주 안에 종가가 볼린저 밴드(20·2.5) 하단 아래인 봉이 있다");
+  expect(conditionSentence({ kind: "bollinger", period: "M", m: 1, length: 20, k: 2, test: { kind: "cross", band: "lower", direction: "up" } })).toBe("이번 달 종가가 볼린저 밴드(20·2) 하단을 위로 교차했다");
+});
+
+test("일목 문장은 차트 기본 설정이면 설정값을 빼고, 다르면 적는다", () => {
+  const chartDefault = { conversion: 9, base: 26, spanB: 52, displacement: 26 };
+  expect(conditionSentence({ kind: "ichimoku", period: "D", m: 5, ...chartDefault, test: { kind: "cross", direction: "up" } })).toBe("최근 5일 안에 일목 전환선이 기준선을 위로 교차한 봉이 있다");
+  expect(conditionSentence({ kind: "ichimoku", period: "M", m: 1, conversion: 10, base: 30, spanB: 60, displacement: 30, test: { kind: "cloud", side: "below" } })).toBe(
+    "이번 달 종가가 일목(10·30·60·30) 구름 아래다",
+  );
+  expect(conditionSentence({ kind: "ichimoku", period: "W", m: 2, ...chartDefault, test: { kind: "cloud", side: "above" } })).toBe("최근 2주 안에 종가가 일목 구름 위인 봉이 있다");
+});
+
+test("시가총액 문장은 봉 주기와 M 없이 억 원으로 적는다", () => {
+  expect(conditionSentence({ kind: "market_cap", min: null, max: 100_000_000_000 })).toBe("시가총액이 1,000억 원 이하다");
+  expect(conditionSentence({ kind: "market_cap", min: 50_000_000_000, max: 3_000_000_000_000 })).toBe("시가총액이 500억 원 이상 30,000억 원 이하다");
+});
+
 test("조건식의 봉 주기는 봉으로 따지는 첫 줄의 것이다", () => {
-  const screen = (conditions: Screen["conditions"]): Screen => ({ id: "s", name: "s", markets: [], exclude: [], conditions });
-  expect(screenPeriod(screen([newHigh("W", "high", 52, 1), newHigh("D", "close", 20, 1)]))).toBe("W");
-  expect(screenPeriod(screen([{ kind: "market_cap", min: 300_000_000_000, max: null }, newHigh("M", "high", 12, 1)]))).toBe("M");
-  expect(screenPeriod(screen([{ kind: "market_cap", min: null, max: 100_000_000_000 }]))).toBe("D");
+  expect(screenPeriod(screenOf([newHigh("W", "high", 52, 1), newHigh("D", "close", 20, 1)]))).toBe("W");
+  expect(screenPeriod(screenOf([marketCap, newHigh("M", "high", 12, 1)]))).toBe("M");
+  expect(screenPeriod(screenOf([{ kind: "market_cap", min: null, max: 100_000_000_000 }]))).toBe("D");
 });
 
 test("제외 목록은 저장 순서와 상관없이 종류, 상태 순으로 보인다", () => {
@@ -46,16 +127,16 @@ test("제외 목록은 저장 순서와 상관없이 종류, 상태 순으로 �
   expect(excludedInOrder([])).toEqual([]);
 });
 
-test("빠진 종목 수는 조건 가운데 가장 큰 N을 상장 기준으로 적는다", () => {
-  const screen: Screen = {
-    id: "s",
-    name: "주봉",
-    markets: [],
-    exclude: [],
-    conditions: [newHigh("W", "high", 52, 1), newHigh("W", "volume", 104, 4)],
-  };
-  expect(excludedText(screen, { listedTooShort: 14, historyShort: 1120, unconfirmed: 0 })).toBe("상장 104주 미만 14 · 이력 덜 참 1,120");
-  expect(excludedText(screen, { listedTooShort: 14, historyShort: 1120, unconfirmed: 1203 })).toBe("상장 104주 미만 14 · 이력 덜 참 1,120 · 확인 안 됨 1,203");
+test("시장 칩은 저장 순서와 상관없이 코스피, 코스닥 순으로 보인다", () => {
+  expect(marketsInOrder(["kosdaq", "kospi"])).toEqual(["kospi", "kosdaq"]);
+  expect(marketsInOrder(["kosdaq"])).toEqual(["kosdaq"]);
+  expect(marketsInOrder([])).toEqual([]);
+});
+
+test("빠진 종목 수는 상장 기간 부족, 이력 덜 참 순이고, 확인 안 됨은 있을 때만 붙는다", () => {
+  expect(excludedText({ listedTooShort: 14, historyShort: 1120, unconfirmed: 0 })).toBe("상장 기간 부족 14 · 이력 덜 참 1,120");
+  expect(excludedText({ listedTooShort: 0, historyShort: 0, unconfirmed: 0 })).toBe("상장 기간 부족 0 · 이력 덜 참 0");
+  expect(excludedText({ listedTooShort: 14, historyShort: 1120, unconfirmed: 1203 })).toBe("상장 기간 부족 14 · 이력 덜 참 1,120 · 확인 안 됨 1,203");
 });
 
 test("날짜는 기준과 같은 해면 연도를 빼고 요일을 붙인다", () => {
@@ -63,18 +144,37 @@ test("날짜는 기준과 같은 해면 연도를 빼고 요일을 붙인다", (
   expect(dayLabel("2025-12-30", "2026-01-02")).toBe("2025-12-30(화)");
 });
 
-test("신고가 날짜가 기준 관측일의 봉이면 당일·이번 주·이번 달로 보인다", () => {
-  expect(highDateText("D", "2026-11-10", "2026-11-10")).toEqual({ text: "당일", current: true });
-  expect(highDateText("D", "2026-11-06", "2026-11-10")).toEqual({ text: "11-06", current: false });
-  expect(highDateText("D", "2025-12-30", "2026-01-02")).toEqual({ text: "2025-12-30", current: false });
+test("맞은 날짜가 기준 관측일의 봉이면 당일·이번 주·이번 달로 보인다", () => {
+  const daily = screenOf([newHigh("D", "high", 200, 1)]);
+  expect(matchedDateText(daily, "2026-11-10", "2026-11-10")).toEqual({ text: "당일", current: true });
+  expect(matchedDateText(daily, "2026-11-06", "2026-11-10")).toEqual({ text: "11-06", current: false });
+  expect(matchedDateText(daily, "2025-12-30", "2026-01-02")).toEqual({ text: "2025-12-30", current: false });
 
-  expect(highDateText("W", "2026-11-09", "2026-11-11")).toEqual({ text: "이번 주", current: true });
-  expect(highDateText("W", "2025-12-29", "2026-01-02")).toEqual({ text: "이번 주", current: true });
-  expect(highDateText("W", "2026-11-02", "2026-11-11")).toEqual({ text: "11-02 주", current: false });
+  const weekly = screenOf([newHigh("W", "close", 52, 1)]);
+  expect(matchedDateText(weekly, "2026-11-09", "2026-11-11")).toEqual({ text: "이번 주", current: true });
+  expect(matchedDateText(weekly, "2025-12-29", "2026-01-02")).toEqual({ text: "이번 주", current: true });
+  expect(matchedDateText(weekly, "2026-11-02", "2026-11-11")).toEqual({ text: "11-02 주", current: false });
 
-  expect(highDateText("M", "2026-11-02", "2026-11-10")).toEqual({ text: "이번 달", current: true });
-  expect(highDateText("M", "2026-10-01", "2026-11-10")).toEqual({ text: "10월", current: false });
-  expect(highDateText("M", "2025-12-01", "2026-01-05")).toEqual({ text: "2025년 12월", current: false });
+  const monthly = screenOf([newHigh("M", "low", 12, 1)]);
+  expect(matchedDateText(monthly, "2026-11-02", "2026-11-10")).toEqual({ text: "이번 달", current: true });
+  expect(matchedDateText(monthly, "2026-10-01", "2026-11-10")).toEqual({ text: "10월", current: false });
+  expect(matchedDateText(monthly, "2025-12-01", "2026-01-05")).toEqual({ text: "2025년 12월", current: false });
+});
+
+test("맞은 날짜는 봉으로 따지는 첫 줄의 봉 주기로 보이고, 그런 줄이 없으면 일봉으로 보인다", () => {
+  const weeklyFirst = screenOf([newHigh("W", "close", 52, 1), newHigh("D", "volume", 20, 1)]);
+  expect(matchedDateText(weeklyFirst, "2026-11-09", "2026-11-11")).toEqual({ text: "이번 주", current: true });
+  expect(matchedDateText(weeklyFirst, "2026-11-02", "2026-11-11")).toEqual({ text: "11-02 주", current: false });
+
+  const dailyFirst = screenOf([newHigh("D", "volume", 20, 1), newHigh("W", "close", 52, 1)]);
+  expect(matchedDateText(dailyFirst, "2026-11-09", "2026-11-11")).toEqual({ text: "11-09", current: false });
+
+  const capFirst = screenOf([marketCap, newHigh("M", "high", 12, 1)]);
+  expect(matchedDateText(capFirst, "2026-11-02", "2026-11-10")).toEqual({ text: "이번 달", current: true });
+
+  const capOnly = screenOf([marketCap]);
+  expect(matchedDateText(capOnly, "2026-11-10", "2026-11-10")).toEqual({ text: "당일", current: true });
+  expect(matchedDateText(capOnly, "2026-11-09", "2026-11-10")).toEqual({ text: "11-09", current: false });
 });
 
 const row = (symbol: string, name: string, close: number, changeRate: number | null, matchedDate: string): ScreenerRow => ({
@@ -92,7 +192,7 @@ const rows: readonly ScreenerRow[] = [
 ];
 const order = (sorted: readonly ScreenerRow[]) => sorted.map((r) => r.symbol);
 
-test("결과는 기본으로 신고가 날짜 최신순이고, 같으면 종목코드 순이다", () => {
+test("결과는 기본으로 맞은 날짜 최신순이고, 같으면 종목코드 순이다", () => {
   expect(order(sortRows(rows, DEFAULT_SORT))).toEqual(["000100", "000300", "000050", "000200"]);
 });
 
