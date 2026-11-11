@@ -911,6 +911,7 @@ mod tests {
         answer_503_times: usize,
         page_size: Option<usize>,
         fail_at: Option<usize>,
+        repeat_page: bool,
     }
 
     impl Chart {
@@ -957,8 +958,8 @@ mod tests {
                 _ => (ApiId::Ka10080, "stk_min_pole_chart_qry"),
             };
             assert_eq!(s.api_id, api);
-            let offset: usize = s.cont.as_deref().unwrap_or("0").parse().unwrap();
             let mut c = script.lock().unwrap();
+            let offset: usize = if c.repeat_page { 0 } else { s.cont.as_deref().unwrap_or("0").parse().unwrap() };
             if c.fail_at == Some(offset) {
                 return status(503, json!({}));
             }
@@ -982,7 +983,7 @@ mod tests {
                     row
                 })
                 .collect();
-            let next = (offset + rows.len() < c.rows.len()).then(|| (offset + rows.len()).to_string());
+            let next = if c.repeat_page { Some("1".to_owned()) } else { (offset + rows.len() < c.rows.len()).then(|| (offset + rows.len()).to_string()) };
             ok(json!({field: rows, "return_code": 0}), next.as_deref())
         }));
         let clock = Clock::fake(start);
@@ -2219,6 +2220,69 @@ mod tests {
             assert!(messages.iter().any(|m| matches!(m, ServerMessage::Bar { bar, .. } if bar.v == 30)), "{messages:?}");
             assert_eq!(h.hub.snapshot(k).await.unwrap().current.unwrap().ohlcv().volume().0, 30);
         }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn quarterly_repeated_monthly_cursor_reports_unavailable_and_automatically_reseeds() {
+        let date = |s| KstDate::parse_yyyymmdd(s).unwrap();
+        let mut chart = Chart { page_size: Some(1), repeat_page: true, ..Chart::default() };
+        chart.set(kst(date("20260504"), 0, 0, 0), [120, 160, 100, 150, 20]);
+        let h = period_harness(kst(date("20260520"), 12, 0, 0), chart, Duration::ZERO, Period::Quarter);
+        live(&h).await;
+        let (conn, out) = connect(&h).await;
+        let k = SeriesKey { period: Period::Quarter, ..samsung() };
+        h.hub.subscribe(conn, sub("a"), k);
+        tokio::time::sleep(Duration::from_secs(2)).await;
+        let messages = out.take(true).messages;
+        assert!(messages.iter().any(|m| matches!(m, ServerMessage::SubError { code: SubErrorCode::KiwoomUnavailable, .. })), "{messages:?}");
+        assert!(!messages.iter().any(|m| matches!(m, ServerMessage::Bar { .. } | ServerMessage::Confirmed { .. })));
+        assert!(h.hub.snapshot(k).await.unwrap().current.is_none());
+        {
+            let mut chart = h.chart.lock().unwrap();
+            chart.repeat_page = false;
+            chart.set(kst(date("20260401"), 0, 0, 0), [100, 150, 80, 120, 10]);
+        }
+        tokio::time::sleep(Duration::from_secs(5)).await;
+        let messages = out.take(true).messages;
+        assert!(messages.iter().any(|m| matches!(m, ServerMessage::Bar { bar, .. } if bar.v == 30)), "{messages:?}");
+        assert_eq!(h.hub.snapshot(k).await.unwrap().current.unwrap().ohlcv().volume().0, 30);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn quarterly_confirmation_verifies_before_next_quarter_and_daily_reset_clears_the_ledger() {
+        let date = |s| KstDate::parse_yyyymmdd(s).unwrap();
+        let mut chart = Chart { page_size: Some(1), ..Chart::default() };
+        for (dt, v) in [("20260102", 10), ("20260202", 20), ("20260303", 30)] {
+            chart.set(kst(date(dt), 0, 0, 0), [100, 150, 80, 120, v]);
+        }
+        let h = period_harness(kst(date("20260331"), 19, 59, 55), chart, Duration::ZERO, Period::Quarter);
+        live(&h).await;
+        let (conn, out) = connect(&h).await;
+        let k = SeriesKey { period: Period::Quarter, ..samsung() };
+        h.hub.subscribe(conn, sub("a"), k);
+        take(&out).await;
+        h.clock.sleep_until(kst(date("20260331"), 19, 59, 59)).await;
+        h.events.send(trade(&h, (19, 59, 59), 130, 1, Some(Exchange::Krx))).await.unwrap();
+        h.chart.lock().unwrap().set(kst(date("20260303"), 0, 0, 0), [100, 150, 80, 130, 31]);
+        h.clock.sleep_until(kst(date("20260331"), 20, 0, 20)).await;
+        let snapshot = h.hub.snapshot(k).await.unwrap();
+        assert!(snapshot.current.is_none());
+        let confirmed = snapshot.recent_confirmed.last().unwrap();
+        assert_eq!((confirmed.source, confirmed.ohlcv.volume().0, confirmed.needs_verify), (BarSource::Kiwoom, 61, false));
+        let q1 = confirmed.bucket;
+        out.take(true);
+        h.clock.jump(kst(date("20260401"), 7, 45, 0).unix() - h.clock.now().unix());
+        h.chart.lock().unwrap().set(kst(date("20260401"), 0, 0, 0), [130, 150, 120, 140, 4]);
+        h.bars.clear_all();
+        h.hub.daily_reset();
+        let messages = take(&out).await;
+        assert!(messages.iter().any(|m| matches!(m, ServerMessage::Reload { reason: ReloadReason::DailyReset, .. })), "{messages:?}");
+        let requests = h.fake.market_sent().len();
+        tokio::time::sleep(Duration::from_secs(20)).await;
+        assert_eq!(h.fake.market_sent().len(), requests, "the reset ledger does not verify a previous-quarter bucket");
+        let page = h.bars.page(k, None, 10).await.unwrap();
+        assert_eq!((page.bars[0].bucket, page.bars[0].ohlcv.volume().0), (q1, 61));
+        assert_eq!(page.current.unwrap().ohlcv.volume().0, 4);
     }
 
 }

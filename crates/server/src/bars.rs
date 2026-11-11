@@ -36,6 +36,7 @@ pub enum BarError {
     BadRequest(String),
     UnknownSymbol,
     ListNotReady,
+    IncompleteHistory,
     Kiwoom(KiwoomError),
     Internal(String),
 }
@@ -46,6 +47,7 @@ impl fmt::Display for BarError {
             BarError::BadRequest(m) | BarError::Internal(m) => f.write_str(m),
             BarError::UnknownSymbol => f.write_str("없는 종목입니다"),
             BarError::ListNotReady => f.write_str("종목 목록을 아직 받지 못했습니다"),
+            BarError::IncompleteHistory => f.write_str("키움 월봉 연속조회가 과거로 진행하지 않습니다. 다시 시도하세요"),
             BarError::Kiwoom(e) => e.fmt(f),
         }
     }
@@ -117,6 +119,44 @@ struct Cont {
     received_at: KstTime,
     pending_months: Vec<KiwoomBar>,
     months_before: Option<KstTime>,
+}
+
+const MAX_STAGNANT_MONTHLY_PAGES: usize = 8;
+const MAX_REPEATED_MONTHLY_CURSOR: usize = 3;
+
+struct MonthlyProgress {
+    oldest: Option<KstTime>,
+    cursor: Option<ContKey>,
+    stagnant: usize,
+    repeated: usize,
+}
+
+impl MonthlyProgress {
+    fn new(cont: Option<&Cont>) -> Self {
+        MonthlyProgress {
+            oldest: cont.and_then(|c| c.pending_months.first().map(|m| m.bucket.start()).or(c.months_before)),
+            cursor: cont.map(|c| c.key.clone()),
+            stagnant: 0,
+            repeated: 0,
+        }
+    }
+
+    fn advance(&mut self, oldest: Option<KstTime>, cursor: &ContKey) -> Result<(), BarError> {
+        if oldest.is_some_and(|t| self.oldest.is_none_or(|old| t < old)) {
+            self.oldest = oldest;
+            self.stagnant = 0;
+            self.repeated = 0;
+        } else {
+            self.stagnant += 1;
+            self.repeated = if self.cursor.as_ref() == Some(cursor) { self.repeated + 1 } else { 0 };
+        }
+        self.cursor = Some(cursor.clone());
+        if self.stagnant >= MAX_STAGNANT_MONTHLY_PAGES || self.repeated >= MAX_REPEATED_MONTHLY_CURSOR {
+            Err(BarError::IncompleteHistory)
+        } else {
+            Ok(())
+        }
+    }
 }
 
 struct Slot {
@@ -373,6 +413,7 @@ impl BarService {
         let monthly = SeriesKey { period: Period::Month, ..key };
         let before = cont.and_then(|c| c.months_before);
         let mut cursor = cont.cloned();
+        let mut progress = MonthlyProgress::new(cont);
         let mut months = cursor.as_ref().map(|c| c.pending_months.clone()).unwrap_or_default();
         loop {
             let page = self.fetch_direct(monthly, base, cursor.as_ref().map(|c| &c.key), prio).await?;
@@ -392,6 +433,7 @@ impl BarService {
                 }
                 return Ok(Fetched { rows: quarters, next: cursor });
             }
+            progress.advance(months.first().map(|m| m.bucket.start()), &cursor.as_ref().expect("원점 전의 연속조회").key)?;
         }
     }
 
@@ -1033,20 +1075,25 @@ mod tests {
         assert_contiguous_asc(&merged);
     }
     fn quarterly_harness(pages: Vec<Vec<(&str, [u64; 5])>>, failure: Arc<Mutex<Option<usize>>>) -> Harness {
+        quarterly_cursor_harness(pages, failure, false)
+    }
+
+    fn quarterly_cursor_harness(pages: Vec<Vec<(&str, [u64; 5])>>, failure: Arc<Mutex<Option<usize>>>, same_key: bool) -> Harness {
         let pages: Vec<Vec<_>> = pages.into_iter().map(|p| p.into_iter().map(|(dt, values)| (dt.to_owned(), values)).collect()).collect();
+        let sent_pages = AtomicUsize::new(0);
         let fake = Arc::new(FakeTransport::new(Duration::ZERO, move |s| {
             if s.api_id == ApiId::Au10001 {
                 return token(1);
             }
             assert!(matches!(s.api_id, ApiId::Ka10083 | ApiId::Ka20008));
-            let offset: usize = s.cont.as_deref().unwrap_or("0").parse().unwrap();
+            let offset: usize = if same_key { sent_pages.fetch_add(1, Ordering::SeqCst) } else { s.cont.as_deref().unwrap_or("0").parse().unwrap() };
             if *failure.lock().unwrap() == Some(offset) {
                 return crate::kiwoom::rest::testing::status(503, json!({}));
             }
             let rows: Vec<_> = pages[offset].iter().map(|(dt, [o, h, l, c, v])| json!({
                 "dt": dt, "open_pric": o.to_string(), "high_pric": h.to_string(), "low_pric": l.to_string(), "cur_prc": c.to_string(), "trde_qty": v.to_string()
             })).collect();
-            let next = (offset + 1 < pages.len()).then(|| (offset + 1).to_string());
+            let next = (offset + 1 < pages.len()).then(|| if same_key { "1".to_owned() } else { (offset + 1).to_string() });
             ok(json!({array_of(s.api_id): rows, "return_code": 0}), next.as_deref())
         }));
         let clock = Clock::fake(kst(date(2026, 5, 20), 12, 0, 0));
@@ -1179,6 +1226,122 @@ mod tests {
         assert_eq!(page.bars[0].ohlcv.volume().0, 60);
         assert_eq!(page.current.unwrap().ohlcv.volume().0, 90);
         assert_eq!(h.chart_calls().len(), 2);
+    }
+
+    struct MonthlyLoop {
+        older: bool,
+        empty: bool,
+        changing_keys: bool,
+        healthy: bool,
+        calls: usize,
+    }
+
+    fn monthly_loop_harness(script: Arc<Mutex<MonthlyLoop>>) -> Harness {
+        let reply = script.clone();
+        let fake = Arc::new(FakeTransport::new(Duration::ZERO, move |s| {
+            if s.api_id == ApiId::Au10001 {
+                return token(1);
+            }
+            assert_eq!(s.api_id, ApiId::Ka10083);
+            let other = s.body.contains("000660");
+            let mut script = reply.lock().unwrap();
+            let (months, next) = if script.healthy || other {
+                (vec![("20260504", 50), ("20260401", 40), ("20260303", 30), ("20260202", 20), ("20260102", 10), ("20251201", 3), ("20251103", 2), ("20251001", 1)], None)
+            } else {
+                script.calls += 1;
+                if script.older && s.cont.is_none() {
+                    (vec![("20260504", 50), ("20260401", 40), ("20260303", 30), ("20260202", 20), ("20260102", 10)], Some("1".to_owned()))
+                } else if script.calls >= 20 {
+                    (vec![], None)
+                } else {
+                    let months = if script.empty { vec![] } else if script.older { vec![("20251201", 3)] } else { vec![("20260504", 50)] };
+                    (months, Some(if script.changing_keys { script.calls.to_string() } else { "1".to_owned() }))
+                }
+            };
+            let rows: Vec<_> = months.into_iter().map(|(dt, volume)| json!({"dt": dt, "open_pric": "100", "high_pric": "150", "low_pric": "80", "cur_prc": "120", "trde_qty": volume.to_string()})).collect();
+            ok(json!({"stk_mth_pole_chart_qry": rows, "return_code": 0}), next.as_deref())
+        }));
+        let clock = Clock::fake(kst(date(2026, 5, 20), 12, 0, 0));
+        let rest = KiwoomRest::new(Arc::new(fake.clone()), KiwoomAuth::new(Secret::new("k".into()), Secret::new("s".into()), None), clock.clone());
+        let symbols = Arc::new(SymbolDirectory::default());
+        symbols.replace(Directory::build([SAMSUNG, "000660"].into_iter().map(|code| SymbolInfo { symbol: Symbol::parse(code).unwrap(), name: code.into(), kind: SymbolKind::Common, market: Market::Kospi, nxt_enabled: true }).collect()));
+        Harness { fake, bars: Arc::new(BarService::new(rest, symbols, clock.clone())), clock }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn quarterly_stalled_chains_fail_locally_release_the_series_and_recover() {
+        for older in [false, true] {
+            for empty in [false, true] {
+                for changing_keys in [false, true] {
+                    let script = Arc::new(Mutex::new(MonthlyLoop { older, empty, changing_keys, healthy: false, calls: 0 }));
+                    let h = monthly_loop_harness(script.clone());
+                    let k = key(SAMSUNG, Period::Quarter);
+                    let first = if older { Some(h.bars.page(k, None, 1).await.unwrap()) } else { None };
+                    let cached = first.as_ref().map(|p| p.bars.clone()).unwrap_or_default();
+                    let result = if let Some(first) = &first { h.bars.page(k, first.next_before, 1).await.map(|_| ()) } else { h.bars.seed(k, Priority::Screen).await.map(|_| ()) };
+                    assert!(result.is_err(), "stalled continuation must fail before the test's 20th-call end marker: older={older} empty={empty} changing_keys={changing_keys}, result={result:?}");
+                    let body = crate::http::Lookup::Bars.failure(result.unwrap_err(), h.clock.now()).into_body();
+                    assert_eq!(body.code, crate::api::ApiErrorCode::KiwoomUnavailable);
+                    assert!(!body.manual_action_required);
+                    assert!(script.lock().unwrap().calls <= 10, "a successful HTTP loop must have a finite request budget");
+                    let slot = h.bars.slot(k);
+                    let s = slot.series.try_lock().expect("failed request releases the series lock");
+                    assert_eq!(s.bars, cached);
+                    assert!(!s.reached_origin);
+                    if !older {
+                        assert!(s.current.is_none());
+                    }
+                    drop(s);
+                    let other = h.bars.page(key("000660", Period::Quarter), None, 10).await.unwrap();
+                    assert_eq!(other.bars.len(), 2);
+                    assert_eq!(other.current.unwrap().ohlcv.volume().0, 90);
+                    script.lock().unwrap().healthy = true;
+                    let recovered = h.bars.page(k, first.and_then(|p| p.next_before), 10).await.unwrap();
+                    assert_eq!(recovered.bars[0].ohlcv.volume().0, 6);
+                    let s = slot.series.lock().await;
+                    assert_eq!(s.bars.last().unwrap().ohlcv.volume().0, 60);
+                    assert!(s.reached_origin);
+                }
+            }
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn quarterly_finite_overlap_empty_pages_and_reused_keys_keep_moving_older() {
+        for same_key in [false, true] {
+            let pages = vec![
+                vec![("20260504", [210, 240, 200, 230, 50])],
+                vec![("20260504", [210, 240, 200, 230, 50])],
+                vec![],
+                vec![("20260401", [190, 220, 180, 210, 40]), ("20260303", [140, 200, 130, 190, 30])],
+                vec![],
+                vec![("20260303", [140, 200, 130, 190, 30]), ("20260202", [120, 170, 90, 140, 20])],
+                vec![("20260102", [100, 150, 80, 120, 10])],
+                vec![],
+            ];
+            let h = quarterly_cursor_harness(pages, Arc::new(Mutex::new(None)), same_key);
+            let page = h.bars.page(key(SAMSUNG, Period::Quarter), None, 10).await.unwrap();
+            assert_eq!(page.bars.len(), 1);
+            assert_eq!(page.bars[0].ohlcv.volume().0, 60);
+            assert_eq!(page.current.unwrap().ohlcv.volume().0, 90);
+            assert!(page.next_before.is_none());
+            assert_eq!(h.chart_calls().len(), 8);
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn quarterly_failed_reseed_preserves_previously_confirmed_history() {
+        let script = Arc::new(Mutex::new(MonthlyLoop { older: false, empty: false, changing_keys: false, healthy: true, calls: 0 }));
+        let h = monthly_loop_harness(script.clone());
+        let k = key(SAMSUNG, Period::Quarter);
+        let previous = h.bars.page(k, None, 10).await.unwrap();
+        script.lock().unwrap().healthy = false;
+        assert!(matches!(h.bars.seed(k, Priority::Screen).await, Err(BarError::IncompleteHistory)));
+        let slot = h.bars.slot(k);
+        let s = slot.series.try_lock().expect("failed reseed releases the series lock");
+        assert_eq!(s.bars, previous.bars);
+        assert_eq!(s.current, previous.current);
+        assert!(s.reached_origin);
     }
 
 }

@@ -171,6 +171,7 @@ impl Lookup {
             BarError::BadRequest(m) => ApiFailure::new(BadRequest, m),
             BarError::UnknownSymbol => ApiFailure::new(UnknownSymbol, "없는 종목입니다"),
             BarError::ListNotReady => ApiFailure::list_not_ready(now),
+            BarError::IncompleteHistory => ApiFailure::new(KiwoomUnavailable, BarError::IncompleteHistory.to_string()),
             BarError::Kiwoom(e) => {
                 let failure = ApiFailure::kiwoom(&e);
                 if failure.code == Internal {
