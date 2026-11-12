@@ -66,3 +66,10 @@ DOM 범례는 `iconMarkup("gear" | "eye" | "eyeOff" | "close" | "up" | "down")`�
 `tokens.css`의 반경은 5/7/10/12, 최소 글자는 11px이며 숫자는 전역 `tabular-nums`를 상속한다. `ui.css`와 `colors.css`의 치수는 `--size-*` 토큰을 참조하고 간격은 4px 배수를 사용한다. 색 토큰 값은 #181 그대로 유지한다. 분봉 별표는 `UiPrefs.pinnedMinutes`로 저장하고 잘못된 주기·중복을 읽기 경계에서 제거한다. 서버 API는 바꾸지 않는다.
 
 시안 원본 9장은 [docs/mockups/ux-overhaul](mockups/ux-overhaul/)에 보관한다. 기능 규칙은 시안보다 #200과 #181이 우선이며 색상 선택기의 48색·최근 8색·HEX·선 샘플과 굵기 1~5를 유지한다.
+
+
+## 차트 안 조작 요소의 입력 경계
+
+범례·머리에 만드는 실제 조작 요소에는 `data-chart-control`을 붙인다. React 밖에서 만드는 버튼·summary와 조작 팝오버도 같은 표식을 쓴다. `DrawingSurface`는 부모 capture 단계에서 이벤트 경로의 표식을 검사해 드로잉 입력에서 제외한다. 버튼의 bubble 단계에서 전파만 막는 방식으로 대체하지 않는다.
+
+차트 위의 종목명은 `pointer-events: none`으로 십자선·휠·끌기를 통과시킨다. 이름은 말줄임하되 heading의 `aria-label`에 전체 이름을 제공한다. 입력을 소유하는 것은 거래소 같은 실제 조작 요소이며 이 요소에만 `pointer-events: auto`를 준다.

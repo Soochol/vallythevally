@@ -71,6 +71,7 @@ export class CompareLegend {
     const note = el("span", "rounded-[9px] border border-line px-1.5 text-xs text-text-3");
     const remove = el("button", `${BTN} opacity-0 group-hover:opacity-100 focus-visible:opacity-100`);
     remove.type = "button";
+    remove.dataset.chartControl = "";
     remove.title = "지우기";
     remove.innerHTML = iconMarkup("close");
     remove.addEventListener("click", () => this.onRemove(code));

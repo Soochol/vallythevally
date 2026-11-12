@@ -6,7 +6,7 @@ const LOOKING_UP = "종목 정보를 받는 중";
 
 const CLASS = {
   desktop: "seg-btn",
-  legend: "seg-btn !h-6 !min-w-0 !px-1.5 !text-xs",
+  legend: "pointer-events-auto seg-btn !h-6 !min-w-0 !px-1.5 !text-xs",
   phone:
     "h-[36px] min-w-[48px] px-2 text-s text-text-2 border-r border-line last:border-r-0 aria-pressed:bg-accent-soft aria-pressed:font-[650] aria-pressed:text-accent aria-disabled:text-text-3 aria-disabled:opacity-60",
 } as const;
@@ -37,6 +37,7 @@ export function VenuePicker({ cell, info, variant }: { cell: CellState; info: Sy
           <button
             key={v}
             type="button"
+            data-chart-control=""
             className={CLASS[variant]}
             aria-pressed={current === v}
             aria-disabled={reason !== null || undefined}

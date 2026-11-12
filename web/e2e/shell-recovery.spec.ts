@@ -46,7 +46,7 @@ test("긴 ETF 이름과 넓은 오른쪽 패널에서도 거래소가 차트 안
     expect(box.x + box.width).toBeLessThanOrEqual(chartBox.x + chartBox.width);
   }
   const name = cell(page).getByText("TIGER 엔비디아미국채커버드콜밸런스(합성)", { exact: true });
-  await expect(name).toHaveAttribute("title", "TIGER 엔비디아미국채커버드콜밸런스(합성)");
+  await expect(name).toHaveAttribute("aria-label", "TIGER 엔비디아미국채커버드콜밸런스(합성)");
   expect(await name.evaluate((el) => el.scrollWidth > el.clientWidth)).toBe(true);
   await page.screenshot({ path: info.outputPath("long-etf-wide.png") });
 });
