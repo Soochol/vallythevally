@@ -4,7 +4,7 @@ import type { ScreenerResult } from "../api/generated/ScreenerResult";
 import type { ScreenerStatus } from "../api/generated/ScreenerStatus";
 import { rerunReason, runOf, shownResult, useScreenerStore } from "./screener";
 
-const screen: Screen = { id: "s1", name: "고가 1,000일 신고가", markets: [], exclude: [], conditions: [{ kind: "new_high", period: "D", barRange: { start: 0, end: 19 }, field: "high", n: 1000 }] };
+const screen: Screen = { id: "s1", name: "고가 1,000일 신고가", markets: [], exclude: [], conditions: [{ kind: "new_high", period: "D", recentBars: 20, field: "high", n: 1000 }] };
 const result: ScreenerResult = { asOf: "2026-11-10", collectionStartedAt: 1, collectionCompletedAt: 2, missingSummary: 0, universe: 28, excluded: { listedTooShort: 0, historyShort: 28, unconfirmed: 0 }, rows: [] };
 const store = (done: number, update: ScreenerStatus["update"] = null, lastDay = "2026-11-10"): ScreenerStatus => ({
   lastDay,
@@ -109,7 +109,7 @@ for (const olderFails of [false, true]) {
       const first = deferredResponse();
       const second = deferredResponse();
       vi.stubGlobal("fetch", vi.fn().mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise));
-      const changed: Screen = { ...screen, conditions: [{ kind: "new_high", period: "W", field: "high", n: 60, barRange: { start: 1, end: 1 } }] };
+      const changed: Screen = { ...screen, conditions: [{ kind: "new_high", period: "W", field: "high", n: 60, recentBars: 2 }] };
       const older = useScreenerStore.getState().run(screen);
       const newer = useScreenerStore.getState().run(changed);
       useScreenerStore.getState().choose("other");

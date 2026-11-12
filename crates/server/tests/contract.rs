@@ -38,7 +38,7 @@ fn generated_typescript_matches_the_committed_files() {
         generated::<Arrangement>(),
         generated::<Bar>(),
         generated::<BarField>(),
-        generated::<BarRange>(),
+        generated::<RecentBars>(),
         generated::<BarsPage>(),
         generated::<BollingerBand>(),
         generated::<BollingerTest>(),

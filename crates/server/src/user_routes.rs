@@ -205,11 +205,6 @@ fn fast_below_slow(fast: u16, slow: u16) -> Result<(), String> {
 }
 
 fn check_condition(condition: &Condition) -> Result<(), String> {
-    if let Some((_, range)) = condition.period_and_range()
-        && range.start > range.end
-    {
-        return Err("봉 범위 시작은 끝 이하여야 합니다".to_owned());
-    }
     match *condition {
         Condition::NewHigh { n, .. } | Condition::NewLow { n, .. } => {
             at_least_one("n", n)?;
