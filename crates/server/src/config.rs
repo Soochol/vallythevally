@@ -93,6 +93,7 @@ const KNOWN_KEYS: &[&str] = &[
     "VALLY_DART_BASE_URL",
     "VALLY_KIND_BASE_URL",
     "VALLY_FINANCIAL_DB_PATH",
+    "VALLY_FINANCIAL_AUTOMATIC",
 ];
 
 #[derive(Debug, Clone)]
@@ -116,6 +117,7 @@ pub struct Config {
     pub dart_base_url: String,
     pub kind_base_url: String,
     pub financial_db_path: PathBuf,
+    pub financial_automatic: bool,
 }
 
 /// 설정을 읽으며 모은 경고. 로그를 켜기 전에 읽으므로 호출자가 나중에 남긴다.
@@ -192,6 +194,11 @@ impl Config {
                 None | Some("on") => true,
                 Some("off") => false,
                 Some(other) => return Err(ConfigError(format!("VALLY_SCREENER_UPDATE_ON_START는 on이나 off입니다: {other}"))),
+            },
+            financial_automatic: match vars.get("VALLY_FINANCIAL_AUTOMATIC").map(String::as_str) {
+                None | Some("on") => true,
+                Some("off") => false,
+                Some(other) => return Err(ConfigError(format!("VALLY_FINANCIAL_AUTOMATIC는 on이나 off입니다: {other}"))),
             },
             opendart_api_key: vars.get("OPENDART_API_KEY").filter(|s| !s.is_empty()).cloned().map(Secret::new),
             dart_base_url,

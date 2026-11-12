@@ -12,7 +12,7 @@ const STATUS: Record<FinancialUpdateStatus, string> = {
   idle: "업데이트 전", planning: "대상 회사 확인 중", collecting: "최근 자료 수집 중", pausing: "일시정지 처리 중", paused: "일시정지됨",
   stopped: "재무자료 수집 정지", checking: "재개 확인 중", ready: "업데이트 완료", partial_failure: "일부 자료 확인 실패", interrupted: "중단된 작업 있음", failed: "업데이트 실패", not_configured: "DART 연동 미설정",
 };
-const PHASE: Record<FinancialUpdatePhase, string> = { planning: "대상 회사 확인", recent: "최근 자료", history: "과거 이력", complete: "처리 종료" };
+const PHASE: Record<FinancialUpdatePhase, string> = { planning: "대상 회사 확인", recent: "최근 자료", changes: "정정·실패 자료", history: "과거 이력", complete: "처리 종료" };
 const STOP: Record<FinancialUpdateStopReason, string> = { user: "사용자 요청", storage: "자료 저장 실패", interrupted: "서버 중단", not_configured: "DART 설정 필요", authentication: "인증 오류", rate_limited: "호출 한도" };
 
 const STOP_MESSAGE: Record<FinancialUpdateStopReason, string> = {
@@ -35,7 +35,7 @@ function UpdateDialog() {
   const job = query.data;
   const active = updateActive(job?.status);
   const resume = job?.canResume;
-  const title = job?.status === "ready" ? job.historyComplete ? "전체 이력 확인 완료" : "최근 자료 확인 완료 · 과거 이력 미수집" : job?.status === "collecting" && job.phase === "history" ? "과거 이력 수집 중" : job ? STATUS[job.status] : "";
+  const title = job?.latestCheckPending ? "최신 공시 확인 대기" : job?.status === "ready" ? job.historyComplete ? "전체 이력 확인 완료" : "최근 자료 확인 완료 · 과거 이력 미수집" : job?.status === "collecting" && job.phase === "history" ? "과거 이력 수집 중" : job?.status === "collecting" && job.phase === "changes" ? "정정·실패 자료 수집 중" : job ? STATUS[job.status] : "";
   return (
     <DialogFrame labelledBy="financial-update-title" width="w-[560px] max-h-[80dvh]" onClose={close}>
       <header className="flex flex-none items-center gap-3 border-b border-line px-5 py-3">
@@ -50,7 +50,8 @@ function UpdateDialog() {
           <section className="rounded-m border border-line p-4" aria-label="업데이트 현황">
             <p role="status" className="font-semibold">{title}</p>
             {job.stopReason && <p className="mt-2 text-s text-text-2">정지 사유: {STOP[job.stopReason]}. {job.status === "pausing" ? "진행 중인 응답을 저장한 뒤 멈춥니다." : STOP_MESSAGE[job.stopReason]}</p>}
-            {job.nextCheckAt !== null && <p className="mt-2 text-s text-text-2">다음 확인 기준 (한국 시각): {checkedTime(job.nextCheckAt)}. 필요하면 재개를 눌러 지금 확인할 수 있습니다.</p>}
+            {job.nextCheckAt !== null && <p className="mt-2 text-s text-text-2">{job.automatic ? "다음 자동 확인" : "다음 확인 기준"} (한국 시각): {checkedTime(job.nextCheckAt)}{job.stopReason === "rate_limited" ? ". 요청 하나가 성공하면 이어 받습니다." : ""}</p>}
+            {job.latestCheckPending && <p className="mt-2 text-s text-text-2">진행 중인 응답을 저장한 뒤 최신 공시와 영향 자료부터 확인합니다.</p>}
             <p className="mt-1 text-s text-text-2">최근 {job.fromYear}~{job.throughYear} 사업연도 · 계산에 필요한 비교기간 포함</p>
             <dl className="mt-4 grid grid-cols-[1fr_auto] gap-x-3 gap-y-2 text-s">
               <dt>현재 단계</dt><dd>{PHASE[job.phase]}</dd>

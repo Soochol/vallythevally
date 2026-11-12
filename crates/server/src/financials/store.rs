@@ -48,18 +48,18 @@ impl Store {
         Ok(())
     }
 
-    pub(super) async fn begin_requests(&self, job: u64) -> Result<(), Failure> {
-        sqlx::query("DELETE FROM financial_requests WHERE job != ?").bind(job.to_string()).execute(&self.0).await.map_err(|_| Failure::Storage)?;
+    pub(super) async fn begin_requests(&self, job: &str) -> Result<(), Failure> {
+        sqlx::query("DELETE FROM financial_requests WHERE job != ?").bind(job).execute(&self.0).await.map_err(|_| Failure::Storage)?;
         Ok(())
     }
 
-    pub(super) async fn response(&self, job: u64, request: &str) -> Result<Option<String>, Failure> {
-        let row = sqlx::query("SELECT body FROM financial_requests WHERE job = ? AND request = ?").bind(job.to_string()).bind(request).fetch_optional(&self.0).await.map_err(|_| Failure::Storage)?;
+    pub(super) async fn response(&self, job: &str, request: &str) -> Result<Option<String>, Failure> {
+        let row = sqlx::query("SELECT body FROM financial_requests WHERE job = ? AND request = ?").bind(job).bind(request).fetch_optional(&self.0).await.map_err(|_| Failure::Storage)?;
         Ok(row.map(|r| r.get("body")))
     }
 
-    pub(super) async fn save_response(&self, job: u64, request: &str, body: String) -> Result<(), Failure> {
-        sqlx::query("INSERT INTO financial_requests VALUES (?, ?, ?) ON CONFLICT(job, request) DO UPDATE SET body = excluded.body").bind(job.to_string()).bind(request).bind(body).execute(&self.0).await.map_err(|_| Failure::Storage)?;
+    pub(super) async fn save_response(&self, job: &str, request: &str, body: String) -> Result<(), Failure> {
+        sqlx::query("INSERT INTO financial_requests VALUES (?, ?, ?) ON CONFLICT(job, request) DO UPDATE SET body = excluded.body").bind(job).bind(request).bind(body).execute(&self.0).await.map_err(|_| Failure::Storage)?;
         Ok(())
     }
 
@@ -71,6 +71,17 @@ impl Store {
     pub(crate) async fn set_paused(&self, paused: bool) -> Result<(), Failure> {
         sqlx::query("INSERT INTO financial_update_control VALUES (1, ?) ON CONFLICT(id) DO UPDATE SET paused = excluded.paused").bind(paused).execute(&self.0).await.map_err(|_| Failure::Storage)?;
         Ok(())
+    }
+
+    pub(super) async fn confirmed_since(&self, corps: &[&str], since: i64) -> Result<bool, Failure> {
+        if corps.is_empty() { return Ok(false); }
+        let mut query = sqlx::QueryBuilder::<sqlx::Sqlite>::new("SELECT COUNT(*) FROM companies WHERE json_type(body, '$.last_checked_at') = 'integer' AND json_extract(body, '$.last_checked_at') >= ");
+        query.push_bind(since).push(" AND corp_code IN (");
+        let mut list = query.separated(",");
+        for corp in corps { list.push_bind(*corp); }
+        list.push_unseparated(")");
+        let row = query.build().fetch_one(&self.0).await.map_err(|_| Failure::Storage)?;
+        Ok(row.get::<i64, _>(0) == corps.len() as i64)
     }
 
     pub(crate) async fn update(&self) -> Result<Option<super::updates::Update>, Failure> {
