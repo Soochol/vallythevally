@@ -3,6 +3,7 @@ import { mountLayer } from "./topLayer";
 import type { Placement, Rect } from "./position";
 interface Props extends HTMLAttributes<HTMLDivElement> {
   anchor?: RefObject<HTMLElement | null>;
+  focusTarget?: RefObject<HTMLElement | null>;
   point?: { x: number; y: number };
   anchorRect?: () => Rect | undefined;
   placement?: Placement;
@@ -14,11 +15,11 @@ interface Props extends HTMLAttributes<HTMLDivElement> {
   blockChartKeys?: boolean;
   onClose(): void;
 }
-export function Popover({ anchor, point, anchorRect, placement, focus, restoreFocus, dismiss, follow, backdrop, blockChartKeys, onClose, className = "", ...props }: Props) {
+export function Popover({ anchor, focusTarget, point, anchorRect, placement, focus, restoreFocus, dismiss, follow, backdrop, blockChartKeys, onClose, className = "", ...props }: Props) {
   const panel = useRef<HTMLDivElement>(null);
   const opener = useRef(typeof document !== "undefined" && document.activeElement instanceof HTMLElement ? document.activeElement : null);
   const close = useRef(onClose); close.current = onClose;
-  const initial = useRef({ anchor, point, anchorRect, placement, focus, restoreFocus, dismiss, follow, backdrop, blockChartKeys });
+  const initial = useRef({ anchor, focusTarget, point, anchorRect, placement, focus, restoreFocus, dismiss, follow, backdrop, blockChartKeys });
   useLayoutEffect(() => {
     const node = panel.current;
     if (!node) return;
@@ -26,7 +27,8 @@ export function Popover({ anchor, point, anchorRect, placement, focus, restoreFo
     const point = config.point;
     return mountLayer(node, {
       ...config,
-      trigger: config.anchor?.current ?? opener.current,
+      trigger: config.anchor?.current,
+      focusTarget: config.focusTarget?.current ?? config.anchor?.current ?? opener.current,
       anchor: config.anchorRect ?? (point ? () => ({ left: point.x, right: point.x, top: point.y, bottom: point.y }) : () => config.anchor?.current?.getBoundingClientRect()),
       onClose: () => close.current(),
     });

@@ -42,6 +42,7 @@ const onDown = (event: PointerEvent) => {
 export interface LayerOptions {
   anchor?: () => Rect | undefined;
   trigger?: HTMLElement | null;
+  focusTarget?: HTMLElement | null;
   placement?: Placement;
   restoreFocus?: boolean;
   focus?: boolean;
@@ -52,10 +53,10 @@ export interface LayerOptions {
   onClose(): void;
 }
 export function mountLayer(panel: HTMLElement, options: LayerOptions) {
-  const trigger = options.trigger ?? (document.activeElement instanceof HTMLElement ? document.activeElement : null);
+  const focusTarget = options.focusTarget ?? options.trigger ?? (document.activeElement instanceof HTMLElement ? document.activeElement : null);
   panel.setAttribute("popover", "manual");
   panel.showPopover();
-  const layer = { panel, options: { ...options, trigger } };
+  const layer = { panel, options };
   if (options.dismiss !== false) {
     if (!layers.length) {
       window.addEventListener("keydown", onKey, true);
@@ -94,6 +95,6 @@ export function mountLayer(panel: HTMLElement, options: LayerOptions) {
       document.removeEventListener("pointerdown", onDown, true);
     }
     if (panel.matches(":popover-open")) panel.hidePopover();
-    if (options.restoreFocus !== false && trigger?.isConnected) trigger.focus({ preventScroll: true });
+    if (options.restoreFocus !== false && focusTarget?.isConnected) focusTarget.focus({ preventScroll: true });
   };
 }

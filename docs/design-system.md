@@ -41,7 +41,7 @@
 
 ## 겹침 화면 추가하기 (#200·#202)
 
-`features/overlay/Popover.tsx`를 사용한다. `anchor`에 연 버튼의 ref, `onClose`에 닫기 동작을 전달한다. 컨텍스트 메뉴에는 `point`, 이동하는 도구 막대에는 `follow`를 전달할 수 있다. 위치를 직접 지정하는 absolute 메뉴나 별도 portal을 만들지 않는다.
+`features/overlay/Popover.tsx`를 사용한다. `anchor`에 연 버튼의 ref, `onClose`에 닫기 동작을 전달한다. 컨텍스트 메뉴에는 `point`, 이동하는 도구 막대에는 `follow`를 전달할 수 있다. `anchor`는 위치 기준과 실제 여는 버튼이며, 닫은 뒤 돌아갈 대상이 다르면 `focusTarget`을 별도로 전달한다. 좌표로 연 메뉴는 여는 버튼 없이 메뉴 표면만 내부로 보고, 차트는 포커스 복귀 대상으로만 사용한다. 위치를 직접 지정하는 absolute 메뉴나 별도 portal을 만들지 않는다.
 
 - HTML Popover API의 맨 위 층에 렌더링한다. `position.ts`가 가장자리에서 반대쪽을 선택하고 화면 안으로 맞춘다. 내용 크기·창 크기·스크롤이 바뀌면 다시 계산한다.
 - Esc와 바깥 누르기는 맨 위의 조작 가능한 화면만 닫고 연 버튼으로 포커스를 돌린다. 배경이 있는 창은 `backdrop`을 전달하며 직접 배경 닫기 핸들러를 달지 않는다. 바깥 pointerdown과 뒤따르는 click은 하나의 입력으로 소비해 부모의 버튼을 함께 실행하지 않는다. 중첩 색상 선택기에서 Esc를 누르면 부모 설정창은 남는다.

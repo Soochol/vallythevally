@@ -24,7 +24,11 @@ interface Props {
 }
 
 export function Menu({ label, items, onClose, root, className, style }: Props) {
-  const trigger = useRef<HTMLElement | null>(typeof style?.left === "number" ? (document.activeElement instanceof HTMLElement ? document.activeElement : null) : root.current?.querySelector<HTMLElement>("[aria-expanded=true]") ?? root.current?.querySelector<HTMLElement>("button") ?? null);
+  const point = typeof style?.left === "number" && typeof style?.top === "number" ? { x: style.left, y: style.top } : undefined;
+  const trigger = useRef<HTMLElement | null>(point ? null : root.current?.querySelector<HTMLElement>("[aria-expanded=true]") ?? root.current?.querySelector<HTMLElement>("button") ?? null);
+  const focusTarget = useRef<HTMLElement | null>(point
+    ? (typeof document !== "undefined" && document.activeElement instanceof HTMLElement ? document.activeElement : null)
+    : trigger.current);
   const buttons = useRef<(HTMLButtonElement | null)[]>([]);
   const typed = useRef({ text: "", at: 0 });
   const focusable = () => buttons.current.filter((b): b is HTMLButtonElement => b !== null && !b.disabled);
@@ -51,7 +55,8 @@ export function Menu({ label, items, onClose, root, className, style }: Props) {
   return (
     <Popover
       anchor={trigger}
-      point={typeof style?.left === "number" && typeof style?.top === "number" ? { x: style.left, y: style.top } : undefined}
+      point={point}
+      focusTarget={focusTarget}
       onClose={() => onClose(true)}
       role="menu"
       aria-label={label}
