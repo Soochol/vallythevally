@@ -1,18 +1,26 @@
-import { Popover } from "../overlay/Popover";
 import { useQueryClient } from "@tanstack/react-query";
-import { Fragment, useEffect, useId, useState } from "react";
+import { Fragment, useEffect, useId, useRef, useState, useSyncExternalStore } from "react";
 import type { SymbolInfo } from "../../api/generated/SymbolInfo";
 import { useSymbolInfos, useSymbolSearch } from "../../api/queries";
+import { compareRefusal } from "../../chart/settings";
 import { KIND_LABEL, MARKET_LABEL } from "../../lib/symbol";
 import { useLayoutStore } from "../../stores/layout";
 import { type SearchPurpose, useSelectionStore } from "../../stores/selection";
 import { useUiStore } from "../../stores/ui";
 import { useActiveWatchlist, useWatchlistStore } from "../../stores/watchlist";
-import { SearchIcon } from "../icons";
-import { highlight, normalizeQuery } from "./highlight";
-import { GROUP_LABEL, searchList } from "./searchList";
+import { type SearchCommand, searchCommandsSnapshot, subscribeSearchCommands } from "../commands/registry";
+import { CloseIcon, Icon, ICON_PATHS, SearchIcon } from "../icons";
+import { DialogFrame } from "../dialog/DialogParts";
+import { EmptyState, ErrorState, Skeleton } from "../overlay/State";
+import { DEFAULT_SEARCH_COMMANDS } from "./commands";
+import { highlight } from "./highlight";
+import { GROUP_LABEL, searchList, type SearchGroup } from "./searchList";
+import { MARKET_FILTERS, matchesMarket, matchingCommands, type MarketFilter, searchMode } from "./searchMode";
+import { QuoteValue, SearchPreview } from "./SearchPreview";
+import { useSearchQuotes } from "./useSearchQuotes";
 
-/** 종목 검색(frontend.md §3.1). 데스크톱은 가운데 대화상자, 휴대폰은 아래에서 올라오는 시트. */
+type ResultRow = { kind: "symbol"; info: SymbolInfo; group: SearchGroup } | { kind: "command"; command: SearchCommand; group: "commands" };
+
 export function SearchDialog() {
   const dialog = useSelectionStore((s) => s.dialog);
   return dialog?.kind === "search" ? <SearchDialogBody purpose={dialog.purpose} /> : null;
@@ -24,172 +32,135 @@ function SearchDialogBody({ purpose }: { purpose: SearchPurpose }) {
   const watchlist = useActiveWatchlist();
   const watch = useSymbolInfos(watchlist.symbols);
   const recent = useSymbolInfos(useUiStore((s) => s.prefs.recentSymbols));
+  const registered = useSyncExternalStore(subscribeSearchCommands, searchCommandsSnapshot);
+  const commands = [...DEFAULT_SEARCH_COMMANDS.filter((c) => !registered.some((r) => r.id === c.id)), ...registered];
   const queryClient = useQueryClient();
   const [input, setInput] = useState("");
+  const [market, setMarket] = useState<MarketFilter>("all");
   const [active, setActive] = useState(0);
-  const query = normalizeQuery(input);
-  const search = useSymbolSearch(query);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const mode = searchMode(input);
+  const query = mode.query;
+  const search = useSymbolSearch(mode.kind === "symbols" ? query : "");
   const ids = useId();
-
-
-  const { rows, selectable, empty: showingRecent } = searchList(query, { watch, recent }, search.data);
+  const symbolList = searchList(query, { watch, recent }, search.data);
+  const rows: ResultRow[] = [
+    ...(mode.kind === "symbols" ? symbolList.rows.filter((row) => matchesMarket(row.info, market)).map((row): ResultRow => ({ kind: "symbol", ...row })) : []),
+    ...(query === "" || mode.kind === "commands" ? matchingCommands(commands, query).map((command): ResultRow => ({ kind: "command", command, group: "commands" })) : []),
+  ];
+  const selectable = mode.kind === "commands" || symbolList.selectable;
   const activeIndex = selectable ? Math.min(active, rows.length - 1) : -1;
+  const selected = rows[activeIndex];
+  const contents = rows.map((row) => row.kind === "symbol" ? `${row.group}-${row.info.code}` : row.command.id).join("|");
+  const { list, quotes, bySymbol } = useSearchQuotes(selectable ? contents : "");
   const optionId = (i: number) => `${ids}-opt-${i}`;
 
-  useEffect(() => setActive(0), [query, search.data]);
+  useEffect(() => setActive(0), [input, market, search.data]);
   useEffect(() => {
-    document.getElementById(optionId(activeIndex))?.scrollIntoView({ block: "nearest" });
-  });
+    document.getElementById(`${ids}-opt-${activeIndex}`)?.scrollIntoView({ block: "nearest" });
+  }, [activeIndex, ids, contents]);
 
-
-  const open = (info: SymbolInfo) => {
+  const chooseSymbol = (info: SymbolInfo, action: "open" | "watch" | "toggleWatch" | "compare") => {
     queryClient.setQueryData(["symbol", info.code], info);
-    useLayoutStore.getState().setSymbol(slot, info);
-    useSelectionStore.getState().setPhoneTab("chart");
-    close();
-  };
-  const addToWatch = (info: SymbolInfo) => {
-    queryClient.setQueryData(["symbol", info.code], info);
-    const { showToast } = useSelectionStore.getState();
-    if (watchlist.symbols.includes(info.code)) showToast(`${info.name}은 이미 ${watchlist.name}에 있습니다`);
-    else {
-      useWatchlistStore.getState().add(watchlist.id, info.code);
-      showToast(`${watchlist.name}에 넣었습니다: ${info.name}`);
-    }
-    close();
-  };
-  const choose = purpose === "watch" ? addToWatch : open;
-
-  const onKeyDown = (e: React.KeyboardEvent) => {
-    if (e.nativeEvent.isComposing) return;
-    switch (e.key) {
-      case "ArrowDown":
-      case "ArrowUp":
-        e.preventDefault();
-        if (selectable && rows.length) setActive((activeIndex + (e.key === "ArrowDown" ? 1 : -1) + rows.length) % rows.length);
-        return;
-      case "Enter": {
-        e.preventDefault();
-        const row = selectable ? rows[activeIndex] : undefined;
-        if (row) (e.ctrlKey || e.metaKey ? addToWatch : choose)(row.info);
+    const selection = useSelectionStore.getState();
+    const lists = useWatchlistStore.getState();
+    const included = watchlist.symbols.includes(info.code);
+    if (action === "compare") {
+      const layout = useLayoutStore.getState();
+      const cell = layout.layout.cells.find((c) => c.slot === slot);
+      const refusal = cell && compareRefusal(cell.chartSettings, info.code, cell.symbol);
+      if (refusal) {
+        selection.showToast(refusal === "full" ? "비교 종목은 3개까지입니다" : refusal === "main" ? "현재 종목은 비교에 추가할 수 없습니다" : "이미 비교에 있습니다");
         return;
       }
-      case "Escape":
-        e.preventDefault();
-        close();
-        return;
-      case "Tab":
-        e.preventDefault();
-        return;
+      layout.addCompare(slot, info.code);
+      selection.showToast(`비교에 추가했습니다: ${info.name}`);
+    } else if (action === "watch" || action === "toggleWatch") {
+      if (included && action === "toggleWatch") {
+        lists.remove(watchlist.id, info.code);
+        selection.showToast(`${watchlist.name}에서 뺐습니다: ${info.name}`);
+      } else if (included) selection.showToast(`${info.name}은 이미 ${watchlist.name}에 있습니다`);
+      else {
+        lists.add(watchlist.id, info.code);
+        selection.showToast(`${watchlist.name}에 넣었습니다: ${info.name}`);
+      }
+    } else {
+      useLayoutStore.getState().setSymbol(slot, info);
+      selection.setPhoneTab("chart");
+      selection.setDesktopView("chart");
+    }
+    close();
+  };
+  const choose = (row: ResultRow, modifiers = { ctrlKey: false, metaKey: false, shiftKey: false }) => {
+    if (!selectable) return;
+    if (row.kind === "symbol") return chooseSymbol(row.info, modifiers.ctrlKey || modifiers.metaKey ? "toggleWatch" : modifiers.shiftKey ? "compare" : purpose);
+    close();
+    try {
+      void Promise.resolve(row.command.run({ slot, queryClient })).catch((error: unknown) => useSelectionStore.getState().showToast(error instanceof Error ? error.message : "명령을 실행하지 못했습니다"));
+    } catch (error) {
+      useSelectionStore.getState().showToast(error instanceof Error ? error.message : "명령을 실행하지 못했습니다");
     }
   };
+  const onKeyDown = (e: React.KeyboardEvent) => {
+    if (e.nativeEvent.isComposing) return;
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      e.preventDefault();
+      if (selectable && rows.length) setActive((activeIndex + (e.key === "ArrowDown" ? 1 : -1) + rows.length) % rows.length);
+    } else if (e.key === "Enter") {
+      e.preventDefault();
+      if (selected) choose(selected, e);
+    }
+  };
+  const resetInput = () => { setInput(""); inputRef.current?.focus(); };
 
-  let message: string | null = null;
-  if (showingRecent && rows.length === 0) message = "종목 이름, 코드, 초성을 입력하세요";
-  else if (!showingRecent && search.isError) message = search.error.message;
-  else if (!showingRecent && selectable && rows.length === 0) {
-    message = "맞는 종목이 없습니다. 코드 6자리로도 찾을 수 있습니다";
-  }
-
-  return (
-    <Popover backdrop onClose={close}
-      className="ui-dialog-backdrop fixed inset-0 z-50 flex justify-center bg-[var(--scrim)]"
-    >
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby={`${ids}-title`}
-        className={
-          "ui-dialog flex w-[min(620px,calc(100vw-24px))] flex-col overflow-hidden rounded-l border border-line bg-surface shadow-dialog " +
-          "max-md:max-h-[85dvh] max-md:w-screen max-md:rounded-b-none"
-        }
-      >
-        <h2 id={`${ids}-title`} className="sr-only">
-          {purpose === "watch" ? "관심종목에 넣을 종목 검색" : "종목 검색"}
-        </h2>
-        <label className="flex h-[64px] flex-none items-center gap-1.5 border-b border-line px-4 text-l text-text-3">
-          <SearchIcon />
-          <input
-            autoFocus
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={onKeyDown}
-            placeholder="종목 이름, 코드, 초성(ㅅㅅㅈㅈ)"
-            aria-label="종목 검색"
-            role="combobox"
-            aria-expanded={rows.length > 0}
-            aria-controls={`${ids}-list`}
-            aria-autocomplete="list"
+  return <DialogFrame labelledBy={`${ids}-title`} onClose={close} width="h-[500px] w-[min(840px,calc(100vw-32px))] max-md:h-[80dvh]">
+    <div className="flex min-h-0 flex-1 flex-col">
+      <h2 id={`${ids}-title`} className="sr-only">{purpose === "watch" ? "관심종목에 넣을 종목 검색" : "종목 검색"}</h2>
+      <div className="flex flex-none flex-wrap items-center gap-2 border-b border-line px-4 py-3">
+        <label className="flex min-w-[180px] flex-1 items-center gap-2 text-l text-text-3">
+          <SearchIcon size={20} />
+          <input ref={inputRef} onKeyDown={onKeyDown} autoFocus value={input} onChange={(e) => setInput(e.target.value)}
+            placeholder="종목 이름, 코드, 초성 · >로 명령" aria-label="종목 검색" role="combobox"
+            aria-expanded={rows.length > 0} aria-controls={`${ids}-list`} aria-autocomplete="list"
             aria-activedescendant={activeIndex >= 0 ? optionId(activeIndex) : undefined}
-            autoComplete="off"
-            spellCheck={false}
-            className="min-w-0 flex-1 bg-transparent text-text outline-none placeholder:text-text-3"
-          />
+            autoComplete="off" spellCheck={false} className="min-w-0 flex-1 bg-transparent text-text outline-none placeholder:text-text-3" />
         </label>
-        <ul
-          id={`${ids}-list`}
-          role="listbox"
-          aria-label={purpose === "watch" ? "관심종목에 넣을 종목" : showingRecent ? "관심종목과 최근 본 종목" : "검색 결과"}
-          aria-busy={!selectable && !search.isError}
-          className="max-h-[380px] overflow-auto p-1 max-md:max-h-none max-md:flex-1"
-        >
-          {rows.map(({ info: s, group }, i) => (
-            <Fragment key={`${group}-${s.code}`}>
-            {showingRecent && group !== rows[i - 1]?.group && (
-              <li role="presentation" className="px-3 pb-1 pt-2 text-xs text-text-3">
-                {GROUP_LABEL[group]}
-              </li>
-            )}
-            <li
-              id={optionId(i)}
-              role="option"
-              aria-selected={i === activeIndex}
-              aria-disabled={!selectable}
-              onPointerMove={() => selectable && i !== activeIndex && setActive(i)}
-              onClick={() => selectable && choose(s)}
-              className="grid cursor-pointer grid-cols-[1fr_auto_auto] items-center gap-3 rounded-m px-3 py-2 aria-selected:bg-accent-soft aria-disabled:cursor-default aria-disabled:opacity-70 max-md:min-h-[44px]"
-            >
-              <span className="min-w-0 truncate font-semibold">
-                <Marked text={s.name} query={query} />
-              </span>
-              <span className="text-s text-text-3">
-                <Marked text={s.code} query={query} />
-              </span>
-              <span className="text-s text-text-3">
-                {MARKET_LABEL[s.market]} {KIND_LABEL[s.kind]}
-              </span>
-            </li>
-            </Fragment>
-          ))}
-          {message && (
-            <li role="presentation" className="px-3 py-3 text-m text-text-2">
-              {message}
-            </li>
-          )}
-        </ul>
-        <div className="flex flex-none items-center gap-2 border-t border-line px-4 py-2 text-s text-text-3 max-md:hidden">
-          <kbd>↑</kbd>
-          <kbd>↓</kbd> 고르기 <kbd>Enter</kbd> {purpose === "watch" ? "관심종목에 넣기" : "이 칸에 열기"}
-          {purpose === "open" && (
-            <>
-              <kbd>Ctrl+Enter</kbd> 관심종목에 넣기
-            </>
-          )}
-          <kbd>Esc</kbd> 닫기
-        </div>
+        <button type="button" aria-label="검색 닫기" title="검색 닫기 (Esc)" className="icon-btn md:order-last" onClick={close}><CloseIcon /></button>
+        {mode.kind === "symbols" && <div role="group" aria-label="시장 필터" className="flex gap-1 max-md:w-full">
+          {MARKET_FILTERS.map(({ value, label }) => <button key={value} type="button" aria-pressed={market === value} onClick={() => setMarket(value)} className={`seg-btn px-2 text-xs ${market === value ? "bg-accent-soft text-accent" : "text-text-3"}`}>{label}</button>)}
+        </div>}
       </div>
-    </Popover>
-  );
+      <div className="flex min-h-0 flex-1">
+        <ul ref={list} id={`${ids}-list`} role="listbox" aria-label={purpose === "watch" ? "관심종목에 넣을 종목" : query === "" ? "관심종목과 최근 본 종목" : "검색 결과"}
+          aria-busy={!selectable && !search.isError} className="min-w-0 flex-1 overflow-auto p-1">
+          {rows.map((row, i) => <Fragment key={row.kind === "symbol" ? `${row.group}-${row.info.code}` : row.command.id}>
+            {row.group !== rows[i - 1]?.group && <li role="presentation" className="px-3 pb-1 pt-3 text-xs text-text-3">{row.kind === "command" ? query === "" ? "자주 쓰는 명령" : "명령" : GROUP_LABEL[row.group]}</li>}
+            <li id={optionId(i)} role="option" aria-selected={i === activeIndex} aria-disabled={!selectable}
+              data-symbol={row.kind === "symbol" && selectable ? row.info.code : undefined}
+              onPointerMove={() => selectable && i !== activeIndex && setActive(i)} onClick={(e) => choose(row, e)}
+              className="flex min-h-[36px] cursor-pointer items-center gap-2 rounded-m px-3 py-1 text-s aria-selected:bg-accent-soft aria-disabled:cursor-default aria-disabled:opacity-70 max-md:min-h-[44px]">
+              {row.kind === "symbol" ? <>
+                <span className={`w-4 flex-none ${watchlist.symbols.includes(row.info.code) ? "text-warning" : "text-text-3"}`} aria-label={watchlist.symbols.includes(row.info.code) ? "관심종목" : undefined}>
+                  {watchlist.symbols.includes(row.info.code) && <Icon size={14} path={ICON_PATHS.star} fill="currentColor" />}
+                </span>
+                <span className="min-w-0 flex-1"><span className="font-semibold"><Marked text={row.info.name} query={query} /></span> <span className="whitespace-nowrap text-xs text-text-3"><Marked text={row.info.code} query={query} /></span></span>
+                <span className="rounded-s bg-raised px-1 text-xs text-text-3 max-md:hidden">{row.info.kind === "etf" ? KIND_LABEL.etf : MARKET_LABEL[row.info.market]}</span>
+                <QuoteValue quote={bySymbol.get(row.info.code)} />
+              </> : <><Icon size={16} path="M4 17l5-6 4 3 7-9" /><span className="flex-1"><Marked text={row.command.label} query={query} /></span>{row.command.shortcut && <kbd>{row.command.shortcut}</kbd>}</>}
+            </li>
+          </Fragment>)}
+          {mode.kind === "symbols" && search.isError && query !== "" ? <li role="presentation"><ErrorState message={search.error.message} retry={() => void search.refetch()} /></li> : !selectable && rows.length === 0 ? <li role="presentation"><Skeleton label="종목 찾는 중" /></li> : selectable && rows.length === 0 ? <li role="presentation"><EmptyState title="맞는 항목이 없습니다" action="입력 지우기" onAction={resetInput}>종목 이름·코드·초성이나 &gt; 명령을 입력하세요.</EmptyState></li> : null}
+          {quotes.isError && <li role="presentation"><ErrorState message="시세를 받지 못했습니다. 종목은 계속 열 수 있습니다." retry={() => void quotes.refetch()} /></li>}
+        </ul>
+        {selected?.kind === "symbol" ? <SearchPreview key={selected.info.code} info={selected.info} quote={bySymbol.get(selected.info.code)} /> : <aside className="w-[280px] flex-none space-y-3 border-l border-line p-4 text-text-2 max-md:hidden"><h3 className="font-semibold text-text">{selected?.kind === "command" ? selected.command.label : "종목·명령 찾기"}</h3><p className="text-s">{selected?.kind === "command" ? "Enter를 눌러 실행합니다" : "종목을 고르면 현재가와 60일 추세를 볼 수 있습니다"}</p><p className="text-xs text-text-3">&gt;로 시작하면 명령만 찾습니다</p></aside>}
+      </div>
+      <div className="flex flex-none flex-wrap items-center gap-2 border-t border-line px-4 py-2 text-xs text-text-3">
+        <span><kbd>↑↓</kbd> 고르기</span><span><kbd>↵</kbd> {purpose === "watch" ? "관심종목에 넣기" : "열기"}</span><span><kbd>Ctrl+↵</kbd> 관심종목</span><span><kbd>Shift+↵</kbd> 비교</span><span><kbd>Esc</kbd> 닫기</span>
+      </div>
+    </div>
+  </DialogFrame>;
 }
 
 function Marked({ text, query }: { text: string; query: string }) {
-  return highlight(text, query).map((seg, i) =>
-    seg.match ? (
-      <mark key={i} className="bg-transparent font-bold text-accent">
-        {seg.text}
-      </mark>
-    ) : (
-      seg.text
-    ),
-  );
+  return highlight(text, query).map((seg, i) => seg.match ? <mark key={i} className="bg-transparent font-bold text-accent">{seg.text}</mark> : seg.text);
 }
