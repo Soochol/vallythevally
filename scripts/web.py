@@ -178,7 +178,7 @@ def prepare_server(root, environment, record):
                 dev.install(origin / filename if origin.is_dir() else origin, target)
                 if dev.digest(target) != expected:
                     raise ValueError("서버 실행별 사본이 검증한 산출물과 다릅니다")
-            record.artifact(name, destination if origin.is_dir() else destination / origin.name, artifact["execution"], artifact["key"])
+            record.artifact(name, destination if origin.is_dir() else destination / origin.name, artifact["execution"], artifact["key"], files=artifact.get("files"))
             record.data["artifacts"][name]["origin"] = str(origin)
         for filename in dev.BINARIES:
             if not (record.directory / "bin" / filename).is_file():

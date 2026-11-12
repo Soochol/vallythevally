@@ -41,6 +41,21 @@ def signal_fixture(mode, root):
             time.sleep(120)
         with patch.object(web, "run", prepare), patch.object(live, "collect", collect):
             live.run_live(root, argparse.Namespace(mode="connect", timeout=10, headed=False, key_file=None), web)
+    elif mode == "spawn_gap":
+        popen = subprocess.Popen
+        def create(*args, **kwargs):
+            process = popen(*args, **kwargs)
+            (root / "ready.json").write_text(json.dumps([process.pid]))
+            while not (root / "release").exists():
+                time.sleep(.01)
+            return process
+        try:
+            with evidence.Run(root, "signal-test", [mode]) as record:
+                record.plan("child")
+                with record.step("child"), patch.object(evidence.subprocess, "Popen", create):
+                    evidence.command([sys.executable, "-c", "import time; time.sleep(120)"], root, {})
+        finally:
+            (root / "cleanup.json").write_text(json.dumps({"stdout_closed": all(child.stdout.closed for child in record.children), "children_reaped": all(child.returncode is not None for child in record.children)}))
     elif mode == "finalize":
         with evidence.Run(root, "signal-test", [mode]) as record:
             def verify():
@@ -218,7 +233,13 @@ class LiveToolsTest(unittest.TestCase):
             self.assertNotIn("https://source.test", text)
 
     def test_parent_pid_signals_cleanup_live_command_and_bounded(self):
-        for mode in ("live", "command", "bounded", "finalize"):
+        self.assert_parent_pid_signals(("live", "command", "bounded", "finalize"))
+
+    def test_command_spawn_gap_records_actual_child_exit_code(self):
+        self.assert_parent_pid_signals(("spawn_gap",))
+
+    def assert_parent_pid_signals(self, modes):
+        for mode in modes:
             for number in (signal.SIGTERM, signal.SIGINT):
                 with self.subTest(mode=mode, signal=number.name):
                     root = self.root / f"{mode}-{number.name}"
@@ -236,6 +257,9 @@ class LiveToolsTest(unittest.TestCase):
                             self.assertTrue(ready.exists(), (root / "parent.log").read_text())
                             pids = json.loads(ready.read_text())
                             process.send_signal(number)
+                            if mode == "spawn_gap":
+                                time.sleep(.05)
+                                (root / "release").touch()
                             self.assertEqual(process.wait(timeout=12), 128 + number)
                             self.assertTrue(all(not Path(f"/proc/{pid}").exists() for pid in pids))
                             path = next((root / "target/web-runs").glob("*/manifest.json"))
@@ -250,7 +274,9 @@ class LiveToolsTest(unittest.TestCase):
                                 self.assertEqual(result["exit_code"], process.returncode)
                             elif mode != "finalize":
                                 self.assertEqual(manifest["steps"]["child"]["exit_code"], process.returncode)
-                                if mode == "command":
+                                if mode == "spawn_gap":
+                                    self.assertTrue(all(json.loads((root / "cleanup.json").read_text()).values()))
+                                if mode in ("command", "spawn_gap"):
                                     self.assertEqual(manifest["commands"][0]["termination_reason"], "signal")
                                     self.assertIsNotNone(manifest["commands"][0]["process_exit_code"])
                                 else:

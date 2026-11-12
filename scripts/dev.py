@@ -290,7 +290,7 @@ def cached_build(root, cache, key, current_key, build, binaries=BINARIES):
             if current_key() != key:
                 raise ValueError("복원 중 빌드 입력이 바뀌었습니다. 다시 실행하세요")
             say(f"실행 파일 재사용 (Cargo 빌드 생략): {', '.join(binaries)} / {key[:16]}")
-            evidence.artifact("server", destination, "reused", key)
+            evidence.artifact("server", destination, "reused", key, files=binaries)
             return
         say(f"새 빌드 입력: {key[:16]}")
         build()
@@ -299,7 +299,7 @@ def cached_build(root, cache, key, current_key, build, binaries=BINARIES):
         publish_binaries(root / "target/debug", entry, key, binaries)
         restore_binaries(entry, destination, binaries)
         say(f"실행 파일 캐시 저장: {key[:16]}")
-        evidence.artifact("server", destination, "direct", key)
+        evidence.artifact("server", destination, "direct", key, files=binaries)
 
 
 def main():

@@ -116,6 +116,12 @@ def hashes(directory):
     return {str(path.relative_to(directory)): file_hash(path) for path in sorted(directory.rglob("*")) if path.is_file()}
 
 
+def artifact_hashes(path, files=None):
+    if files is not None:
+        return {name: file_hash(path / name) for name in files}
+    return hashes(path) if path.is_dir() else ({path.name: file_hash(path)} if path.is_file() else {})
+
+
 def source(root):
     def git(*args):
         return subprocess.check_output(["git", *args], cwd=root, stderr=subprocess.DEVNULL)
@@ -208,7 +214,7 @@ class Run:
             raise ValueError("준비 시작 이후 source가 바뀌었습니다. 이 실행을 다시 준비하세요")
         for name, artifact in self.data["artifacts"].items():
             path = Path(artifact["path"])
-            actual = hashes(path) if path.is_dir() else ({path.name: file_hash(path)} if path.is_file() else {})
+            actual = artifact_hashes(path, artifact.get("files"))
             if not actual or actual != artifact["sha256"]:
                 raise ValueError(f"기록한 {name} 산출물과 실제 파일이 다릅니다. 이 실행을 다시 준비하세요")
 
@@ -235,16 +241,18 @@ class Run:
             entry["elapsed_seconds"] = round(time.monotonic() - start, 3)
             self.save()
 
-    def artifact(self, name, path, execution, key=None):
+    def artifact(self, name, path, execution, key=None, files=None):
         path = Path(path)
-        outputs = hashes(path) if path.is_dir() else ({path.name: hashlib.sha256(path.read_bytes()).hexdigest()} if path.is_file() else {})
+        outputs = artifact_hashes(path, files)
         self.data["artifacts"][name] = {"path": str(path), "execution": execution, "key": key, "sha256": outputs}
+        if files is not None:
+            self.data["artifacts"][name]["files"] = list(files)
         self.save()
 
 
-def artifact(name, path, execution, key=None):
+def artifact(name, path, execution, key=None, files=None):
     if ACTIVE:
-        ACTIVE.artifact(name, path, execution, key)
+        ACTIVE.artifact(name, path, execution, key, files)
 
 
 def command(arguments, cwd, env):
@@ -260,18 +268,21 @@ def command(arguments, cwd, env):
     process = None
     try:
         with log.open("w") as stream:
-            process = spawn(arguments, cwd=cwd, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
             try:
+                with defer_interrupts():
+                    process = spawn(arguments, cwd=cwd, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
                 for line in process.stdout:
                     line = clean(line)
                     stream.write(line)
                     print(line, end="", flush=True)
                 code = process.wait()
             except BaseException:
-                stop_process(process)
+                if process is not None:
+                    stop_process(process)
                 raise
             finally:
-                process.stdout.close()
+                if process is not None:
+                    process.stdout.close()
         entry["exit_code"] = code
         if code:
             raise subprocess.CalledProcessError(code, entry["command"])
