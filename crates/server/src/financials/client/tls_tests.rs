@@ -135,7 +135,7 @@ async fn dart_connects_to_verified_tls12_rsa_source() {
 async fn dart_rejects_untrusted_certificate_and_wrong_hostname() {
     let fixture = TlsFixture::start("AES128-GCM-SHA256");
     for client in [fixture.client("localhost", false), fixture.client("127.0.0.1", true)] {
-        assert_eq!(client.response("company.json", &[]).await, Err(Fault::Failure(Failure::Network)));
+        assert_eq!(client.response("company.json", &[]).await, Err(Interrupt::Failure(Failure::Network)));
     }
     assert!(fixture.negotiated.lock().unwrap().is_empty());
     assert!(fixture.client("localhost", true).response("company.json", &[]).await.is_ok());

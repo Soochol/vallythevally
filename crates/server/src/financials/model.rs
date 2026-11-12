@@ -19,14 +19,14 @@ pub enum Failure {
 pub enum Halt { Paused, Yielded }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Interrupt { Halt(Halt), Abort(Failure) }
+pub enum Interrupt { Halt(Halt), Failure(Failure) }
 
 impl From<Halt> for Interrupt {
     fn from(halt: Halt) -> Self { Self::Halt(halt) }
 }
 
 impl From<Failure> for Interrupt {
-    fn from(failure: Failure) -> Self { Self::Abort(failure) }
+    fn from(failure: Failure) -> Self { Self::Failure(failure) }
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]

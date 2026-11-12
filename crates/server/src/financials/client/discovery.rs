@@ -3,15 +3,15 @@ use std::collections::BTreeSet;
 use scraper::{Html, Selector};
 use sha2::{Digest, Sha256};
 
-use super::{Client, Fault, Row, digits, field};
-use crate::{clock::Clock, financials::model::Failure};
+use super::{Client, Row, digits, field};
+use crate::{clock::Clock, financials::model::{Failure, Interrupt}};
 
 struct NoticeRef { receipt: String, document: String, issuer: String, published_at: String, supported: bool }
 struct Issue { stock: String, isin: String, class: String }
 struct Notice { issuer: String, common: Issue, preferred: Issue }
 
 impl Client {
-    pub(super) async fn discover_preferred(&self, stock: &str, directory: &[Row]) -> Result<Option<(String, String)>, Fault> {
+    pub(super) async fn discover_preferred(&self, stock: &str, directory: &[Row]) -> Result<Option<(String, String)>, Interrupt> {
         if stock.len() != 6 || !stock.bytes().all(|b| b.is_ascii_alphanumeric()) { return Ok(None); }
         let observed = Clock::system().now();
         let keyword = format!("{stock} 변경상장");

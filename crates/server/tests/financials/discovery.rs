@@ -115,7 +115,7 @@ async fn exact_common_company_chain_is_required_and_direct_results_keep_preceden
     }
     fake.state.lock().unwrap().directory = Some(directory);
     fake.state.lock().unwrap().company_code = Some("00000002".into());
-    assert_eq!(fake.client().resolve(STOCK,true).await.unwrap_err(),Fault::Failure(Failure::InvalidResponse));
+    assert_eq!(fake.client().resolve(STOCK,true).await.unwrap_err(),Interrupt::Failure(Failure::InvalidResponse));
     let count = fake.count("search");
     for (code, preferred) in [(STOCK,false),("A005387",true)] {
         assert!(fake.client().resolve(code,preferred).await.unwrap().is_none());
@@ -137,7 +137,7 @@ async fn search_and_document_identity_are_unambiguous_and_source_errors_are_retr
     }
     for body in ["".into(),"<html>페이지 오류</html>".into(),search("",1),search(ENTRY,0),search(&ENTRY.replace("20260917000117","bad"),1)] {
         fake.state.lock().unwrap().discovery_search = Some(body);
-        assert_eq!(fake.client().resolve(STOCK,true).await.unwrap_err(),Fault::Failure(Failure::InvalidResponse));
+        assert_eq!(fake.client().resolve(STOCK,true).await.unwrap_err(),Interrupt::Failure(Failure::InvalidResponse));
     }
     fake.state.lock().unwrap().discovery_search = Some(search(ENTRY,1));
     for body in [CONTENTS.replace("20260917000264/68155","20260917000265/68155"),CONTENTS.replace("/000117/","/000118/"),CONTENTS.repeat(2)] {
@@ -146,7 +146,7 @@ async fn search_and_document_identity_are_unambiguous_and_source_errors_are_retr
     }
     for body in [String::new(),CONTENTS.replace("https://kind.krx.co.kr","https://untrusted.invalid")] {
         fake.state.lock().unwrap().discovery_contents = Some(body);
-        assert_eq!(fake.client().resolve(STOCK,true).await.unwrap_err(),Fault::Failure(Failure::InvalidResponse));
+        assert_eq!(fake.client().resolve(STOCK,true).await.unwrap_err(),Interrupt::Failure(Failure::InvalidResponse));
     }
     assert_eq!(fake.count("company.json"),0);
 }

@@ -63,15 +63,16 @@ impl Store {
         Ok(())
     }
 
-    pub(super) fn pool(&self) -> &SqlitePool { &self.0 }
+    pub(super) fn pool(&self, _: &super::control::ControlTables) -> &SqlitePool { &self.0 }
 
-    pub(super) async fn confirmed_at(&self, corps: &[&str]) -> Result<Option<i64>, Failure> {
-        if corps.is_empty() { return Ok(None); }
-        let mut query = sqlx::QueryBuilder::<sqlx::Sqlite>::new("SELECT COUNT(*), MIN(json_extract(body, '$.last_checked_at')) FROM companies WHERE json_type(body, '$.last_checked_at') = 'integer' AND corp_code IN (");
+    pub(super) async fn confirmed_since(&self, corps: &[&str], since: i64) -> Result<bool, Failure> {
+        if corps.is_empty() { return Ok(false); }
+        let mut query = sqlx::QueryBuilder::<sqlx::Sqlite>::new("SELECT COUNT(*) FROM companies WHERE json_type(body, '$.last_checked_at') = 'integer' AND json_extract(body, '$.last_checked_at') >= ");
+        query.push_bind(since).push(" AND corp_code IN (");
         let mut list = query.separated(",");
         for corp in corps { list.push_bind(*corp); }
         list.push_unseparated(")");
         let row = query.build().fetch_one(&self.0).await.map_err(|_| Failure::Storage)?;
-        Ok((row.get::<i64, _>(0) == corps.len() as i64).then(|| row.get::<i64, _>(1)))
+        Ok(row.get::<i64, _>(0) == corps.len() as i64)
     }
 }

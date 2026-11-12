@@ -5,7 +5,7 @@ use domain::{KstTime, SymbolInfo, SymbolKind};
 use serde::{Deserialize, Serialize};
 
 use crate::api::{FinancialUpdateFailure, FinancialUpdatePage, FinancialUpdateStatus as Status, FinancialUpdatePhase as Phase, UnixSeconds};
-use super::{Financials, CollectionScope, model::{Failure, Interrupt, Security, Snapshot}, schedule::due_check};
+use super::{Financials, CollectionScope, control::JobContext, model::{Failure, Interrupt, Security, Snapshot}, schedule::due_check};
 
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(tag = "status", content = "value", rename_all = "snake_case")]
@@ -46,6 +46,9 @@ pub(crate) struct Update {
     #[serde(default)]
     check_started_at: Option<i64>,
 }
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum Coverage { Covered, Uncovered, Companies }
 
 pub(super) fn failure_name(value: Failure) -> String { serde_json::to_value(value).unwrap().as_str().unwrap().to_owned() }
 
@@ -103,17 +106,16 @@ impl Update {
 
     fn has_unresolved_targets(&self) -> bool { self.targets.iter().any(|target| matches!(target.resolution, Resolution::Pending | Resolution::Unverified | Resolution::Failed(_))) }
 
-    pub(super) fn legacy_companies(&self) -> Option<Vec<&str>> {
-        (self.requested_for.is_none() && !self.has_unresolved_targets()).then(|| self.companies.keys().map(String::as_str).collect())
-    }
+    pub(super) fn company_codes(&self) -> Vec<&str> { self.companies.keys().map(String::as_str).collect() }
 
-    pub(super) fn covers(&self, year: i32, due: i64, legacy_confirmed_at: Option<i64>) -> bool {
-        if self.through_year < year { return false; }
-        match self.requested_for {
+    pub(super) fn coverage(&self, year: i32, due: i64) -> Coverage {
+        let covered = match self.requested_for {
+            _ if self.through_year < year => false,
             Some(at) => at >= due,
             None if self.has_unresolved_targets() => self.started_at.is_some_and(|at| at >= due),
-            None => legacy_confirmed_at.is_some_and(|at| at >= due),
-        }
+            None => return Coverage::Companies,
+        };
+        if covered { Coverage::Covered } else { Coverage::Uncovered }
     }
 
     pub(super) fn plan(previous: Option<Update>, symbols: Vec<SymbolInfo>, automatic: bool, now: KstTime) -> Self {
@@ -159,10 +161,9 @@ impl Update {
 }
 
 impl Financials {
-    pub(super) async fn perform_update(self: &Arc<Self>, mut update: Update) -> Result<Update, Interrupt> {
-        let store = self.store()?;
+    pub(super) async fn perform_update(self: &Arc<Self>, mut update: Update, job: &JobContext) -> Result<Update, Interrupt> {
         for index in 0..update.targets.len() {
-            self.control.check()?;
+            job.check()?;
             if !matches!(update.targets[index].resolution, Resolution::Pending) { continue; }
             let target = &update.targets[index];
             let resolved = self.security(&target.code, target.preferred).await;
@@ -174,20 +175,20 @@ impl Financials {
                 Ok(None) => Resolution::Unverified,
                 Err(fault) => Resolution::Failed(fault.recorded()?),
             };
-            self.control.save(store, &update).await?;
+            job.save(&update).await?;
         }
         if update.phase == Phase::Planning { update.phase = Phase::Recent; }
         update.status = Status::Collecting;
-        self.control.save(store, &update).await?;
+        job.save(&update).await?;
         for phase in [Phase::Recent, Phase::Changes, Phase::History] {
-            self.control.check()?;
+            job.check()?;
             if phase == Phase::Recent && matches!(update.phase, Phase::Changes | Phase::History) { continue; }
             if phase == Phase::Changes && update.phase == Phase::History { continue; }
             update.phase = phase;
-            self.control.save(store, &update).await?;
+            job.save(&update).await?;
             let companies: Vec<_> = update.companies.keys().cloned().collect();
             for corp in companies {
-                self.control.check()?;
+                job.check()?;
                 let company = update.companies.get_mut(&corp).unwrap();
                 if matches!(company.progress(phase), Outcome::Complete | Outcome::Failed(_)) { continue; }
                 let security = company.security.clone();
@@ -197,26 +198,26 @@ impl Financials {
                 let outcome = if scope.years().is_empty() { Outcome::Complete } else {
                     let company = update.companies.get_mut(&corp).unwrap();
                     *company.progress(phase) = Outcome::Running;
-                    self.control.save(store, &update).await?;
+                    job.save(&update).await?;
                     self.control.begin_company(&corp).await;
-                    let result = self.collect(&security, scope).await;
+                    let result = self.collect(&security, scope, job).await;
                     self.control.finish_company(&corp, &result).await;
                     let collection = result?;
-                    self.control.check()?;
+                    job.check()?;
                     let reports = collection.working_reports();
                     let error = collection.disclosure_failure.or_else(|| reports.values().filter(|report| scope.years().contains(&report.business_year)).find_map(|report| report.statement.failure.or(report.dividends.failure).or_else(|| report.statement.data.as_ref().and_then(|statement| statement.source_failure))));
-                    if let Some(error) = error { Outcome::Failed(error.recorded()?) }
+                    if let Some(error) = error { Outcome::Failed(Interrupt::Failure(error).recorded()?) }
                     else if matches!(scope, CollectionScope::Changes(_)) || scope.years().all(|year| super::model::REPORT_CODES.iter().all(|code| reports.get(&format!("{year}/{code}")).is_some_and(|report| report.statement.checked_at.is_some() && (*code != "11011" || report.dividends.checked_at.is_some())))) { Outcome::Complete }
                     else { Outcome::Failed(Failure::InvalidResponse) }
                 };
                 let company = update.companies.get_mut(&corp).unwrap();
                 *company.progress(phase) = outcome;
                 if phase == Phase::History && matches!(company.history, Outcome::Complete) { company.changes = Outcome::Complete; }
-                self.control.save(store, &update).await?;
+                job.save(&update).await?;
             }
-            if phase == Phase::Recent { update.checked_at = Some(self.clock.now().unix()); self.control.save(store, &update).await?; }
+            if phase == Phase::Recent { update.checked_at = Some(self.clock.now().unix()); job.save(&update).await?; }
         }
-        self.control.check()?;
+        job.check()?;
         update.phase = Phase::Complete;
         update.status = if update.page().failures.iter().any(|entry| entry.failure.is_some()) { Status::PartialFailure } else { Status::Ready };
         Ok(update)
@@ -224,7 +225,7 @@ impl Financials {
 
 
     pub(super) async fn read_resolution(&self, stock: &str, snapshot: &mut Snapshot) {
-        let update = match self.store() { Ok(store) => store.control_state().await.map(|control| control.job), Err(error) => Err(error) };
+        let update = match self.store() { Ok(store) => store.job().await, Err(error) => Err(error) };
         match update {
             Ok(Some(update)) => if let Some(target) = update.targets.iter().find(|target| target.code == stock) {
                 match target.resolution {

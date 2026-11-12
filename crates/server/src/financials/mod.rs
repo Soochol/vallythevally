@@ -13,12 +13,12 @@ use std::sync::Arc;
 use domain::{KstDate, KstTime};
 
 use crate::clock::Clock;
-use client::{Client, Fault, Row, digits, field};
+use client::{Client, Row, digits, field};
 use model::{Collection, Dividend, Failure, Interrupt, Report, Security, Snapshot, Statement, StatementRequest, REPORT_CODES};
 use store::Store;
 
 pub use routes::routes;
-use control::{CollectionState, UpdateControl};
+use control::{CollectionState, JobContext, UpdateControl};
 
 pub struct Financials {
     client: Option<Client>,
@@ -73,7 +73,7 @@ impl Financials {
         snapshot
     }
 
-    async fn security(&self, stock: &str, preferred: bool) -> Result<Option<Security>, Fault> {
+    async fn security(&self, stock: &str, preferred: bool) -> Result<Option<Security>, Interrupt> {
         let store = self.store()?;
         if let Some(security) = store.security(stock).await? { return Ok(Some(security)); }
         let Some(client) = &self.client else { return Ok(None); };
@@ -82,7 +82,7 @@ impl Financials {
         Ok(security)
     }
 
-    async fn collect(&self, security: &Security, scope: CollectionScope) -> Result<Collection, Interrupt> {
+    async fn collect(&self, security: &Security, scope: CollectionScope, job: &JobContext) -> Result<Collection, Interrupt> {
         let client = self.client.as_ref().unwrap();
         let corp = &security.company.corp_code;
         let store = self.store()?;
@@ -119,7 +119,7 @@ impl Financials {
         for year in scope.years().rev() { for index in 0..REPORT_CODES.len() { requests.insert((year, index)); } }
         let requests: Vec<_> = if matches!(scope, CollectionScope::History(_)) { requests.into_iter().rev().collect() } else { requests.into_iter().collect() };
         for (year, index) in requests {
-            self.control.check()?;
+            job.check()?;
             let code = REPORT_CODES[index];
             let key = format!("{year}/{code}");
             if matches!(scope, CollectionScope::Changes(_)) && collection.working_reports().get(&key).is_none_or(|report| {
@@ -165,7 +165,7 @@ impl Financials {
         Ok(collection)
     }
 
-    async fn statement_step(&self, client: &Client, corp: &str, year: i32, code: &str, disclosures: &[Row], pending: Option<&StatementRequest>) -> Result<StatementStep, Fault> {
+    async fn statement_step(&self, client: &Client, corp: &str, year: i32, code: &str, disclosures: &[Row], pending: Option<&StatementRequest>) -> Result<StatementStep, Interrupt> {
         let (basis, rows) = match pending {
             Some(StatementRequest::Xbrl { basis, rows }) => (*basis, rows.clone()),
             pending => {

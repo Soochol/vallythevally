@@ -9,7 +9,7 @@ use tokio::sync::Mutex;
 
 use crate::config::Secret;
 use super::control::JobContext;
-use super::model::{Basis, Company, Failure, Halt, Security};
+use super::model::{Basis, Company, Failure, Halt, Interrupt, Security};
 
 mod preferred;
 mod discovery;
@@ -19,16 +19,6 @@ mod tls_tests;
 
 pub type Row = BTreeMap<String, String>;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Fault { Halt(Halt), Failure(Failure) }
-
-impl From<Halt> for Fault {
-    fn from(halt: Halt) -> Self { Self::Halt(halt) }
-}
-
-impl From<Failure> for Fault {
-    fn from(failure: Failure) -> Self { Self::Failure(failure) }
-}
 
 const ATTEMPTS: u64 = 3;
 
@@ -54,7 +44,7 @@ impl Client {
     }
 
     pub(super) async fn begin_job(&self, job: JobContext) -> Result<(), Failure> {
-        job.store.begin_requests(&job.journal).await?;
+        job.store().begin_requests(job.journal()).await?;
         *self.directory.lock().await = None;
         *self.job.lock().unwrap() = Some(job);
         Ok(())
@@ -64,37 +54,37 @@ impl Client {
 
     fn check_halt(&self) -> Result<(), Halt> { self.job.lock().unwrap().as_ref().map_or(Ok(()), JobContext::check) }
 
-    async fn cached<T: DeserializeOwned>(&self, request: &str) -> Result<Option<T>, Fault> {
+    async fn cached<T: DeserializeOwned>(&self, request: &str) -> Result<Option<T>, Interrupt> {
         self.check_halt()?;
         let Some(job) = self.job() else { return Ok(None); };
-        Ok(job.store.response(&job.journal, request).await?.map(|body| serde_json::from_str(&body).map_err(|_| Failure::Storage)).transpose()?)
+        Ok(job.store().response(job.journal(), request).await?.map(|body| serde_json::from_str(&body).map_err(|_| Failure::Storage)).transpose()?)
     }
 
     async fn checkpoint<T: Serialize>(&self, request: &str, value: &T) -> Result<(), Failure> {
         if let Some(job) = self.job() {
             let body = serde_json::to_string(value).map_err(|_| Failure::Storage)?;
-            job.store.save_response(&job.journal, request, body).await?;
+            job.store().save_response(job.journal(), request, body).await?;
         }
         Ok(())
     }
 
-    async fn retry<T, F, Fut>(&self, mut send: F) -> Result<T, Fault>
-    where F: FnMut() -> Fut, Fut: std::future::Future<Output = Result<T, Fault>> {
+    async fn retry<T, F, Fut>(&self, mut send: F) -> Result<T, Interrupt>
+    where F: FnMut() -> Fut, Fut: std::future::Future<Output = Result<T, Interrupt>> {
         for attempt in 0..ATTEMPTS {
             self.check_halt()?;
             let result = send().await;
-            if !matches!(result, Err(Fault::Failure(Failure::Network | Failure::Remote))) || attempt + 1 == ATTEMPTS { return result; }
+            if !matches!(result, Err(Interrupt::Failure(Failure::Network | Failure::Remote))) || attempt + 1 == ATTEMPTS { return result; }
             tokio::time::sleep(Duration::from_millis(250 * (attempt + 1))).await;
         }
         unreachable!()
     }
 
-    async fn settle<T>(&self, result: Result<T, Fault>, request: Request) -> Result<T, Fault> {
-        if let Err(Fault::Failure(failure)) = &result && let Some(job) = self.job() { job.stop_on(*failure, request).await?; }
+    async fn settle<T>(&self, result: Result<T, Interrupt>, request: Request) -> Result<T, Interrupt> {
+        if let Err(Interrupt::Failure(failure)) = &result && let Some(job) = self.job() { job.stop_on(*failure, request).await?; }
         result
     }
 
-    pub(super) async fn replay(&self, request: &Request) -> Result<(), Fault> {
+    pub(super) async fn replay(&self, request: &Request) -> Result<(), Interrupt> {
         match request {
             Request::Json { endpoint, params } => {
                 let params: Vec<_> = params.iter().map(|(key, value)| (key.as_str(), value.clone())).collect();
@@ -110,7 +100,7 @@ impl Client {
         Ok(())
     }
 
-    async fn bytes(&self, endpoint: &str, params: &[(&str, String)]) -> Result<Vec<u8>, Fault> {
+    async fn bytes(&self, endpoint: &str, params: &[(&str, String)]) -> Result<Vec<u8>, Interrupt> {
         let mut pace = self.pace.lock().await;
         if let Some(last) = *pace { tokio::time::sleep_until(last + Duration::from_millis(250)).await; }
         self.check_halt()?;
@@ -137,7 +127,7 @@ impl Client {
 
     pub(crate) fn redact(&self, value: &str) -> String { value.replace(self.key.expose(), "[redacted]") }
 
-    pub async fn response(&self, endpoint: &str, params: &[(&str, String)]) -> Result<Value, Fault> {
+    pub async fn response(&self, endpoint: &str, params: &[(&str, String)]) -> Result<Value, Interrupt> {
         let request = format!("json/{endpoint}/{}", serde_json::to_string(params).map_err(|_| Failure::InvalidResponse)?);
         if let Some(value) = self.cached(&request).await? { return Ok(value); }
         let result = self.retry(|| async { Ok(self.json(&self.bytes(endpoint, params).await?)?) }).await;
@@ -146,12 +136,12 @@ impl Client {
         Ok(value)
     }
 
-    pub async fn rows(&self, endpoint: &str, params: &[(&str, String)]) -> Result<Vec<Row>, Fault> {
+    pub async fn rows(&self, endpoint: &str, params: &[(&str, String)]) -> Result<Vec<Row>, Interrupt> {
         let value = self.response(endpoint, params).await?;
         Ok(rows(&value)?)
     }
 
-    pub async fn archive(&self, endpoint: &str, params: &[(&str, String)]) -> Result<Vec<(String, String)>, Fault> {
+    pub async fn archive(&self, endpoint: &str, params: &[(&str, String)]) -> Result<Vec<(String, String)>, Interrupt> {
         let request = format!("archive/{endpoint}/{}", serde_json::to_string(params).map_err(|_| Failure::InvalidResponse)?);
         if let Some(value) = self.cached(&request).await? { return Ok(value); }
         let result = self.retry(|| self.archive_response(endpoint, params)).await;
@@ -160,7 +150,7 @@ impl Client {
         Ok(files)
     }
 
-    async fn archive_response(&self, endpoint: &str, params: &[(&str, String)]) -> Result<Vec<(String, String)>, Fault> {
+    async fn archive_response(&self, endpoint: &str, params: &[(&str, String)]) -> Result<Vec<(String, String)>, Interrupt> {
         let bytes = self.bytes(endpoint, params).await?;
         if !bytes.starts_with(b"PK") {
             if bytes.iter().find(|b| !b.is_ascii_whitespace()) == Some(&b'{') {
@@ -180,7 +170,7 @@ impl Client {
         Ok(files)
     }
 
-    pub async fn resolve(&self, stock: &str, preferred: bool) -> Result<Option<Security>, Fault> {
+    pub async fn resolve(&self, stock: &str, preferred: bool) -> Result<Option<Security>, Interrupt> {
         let mut cached_directory = self.directory.lock().await;
         if cached_directory.is_none() {
             let files = self.archive("corpCode.xml", &[]).await?;
@@ -234,7 +224,7 @@ impl Client {
         }))
     }
 
-    async fn kind_bytes(&self, path: &str, params: &[(&str, &str)]) -> Result<Vec<u8>, Fault> {
+    async fn kind_bytes(&self, path: &str, params: &[(&str, &str)]) -> Result<Vec<u8>, Interrupt> {
         let request = format!("kind/{path}/{}", serde_json::to_string(params).map_err(|_| Failure::InvalidResponse)?);
         if let Some(value) = self.cached(&request).await? { return Ok(value); }
         self.check_halt()?;
@@ -256,13 +246,13 @@ impl Client {
         Ok(redacted)
     }
 
-    async fn kind_companies(&self, stock: &str) -> Result<Vec<Row>, Fault> {
+    async fn kind_companies(&self, stock: &str) -> Result<Vec<Row>, Interrupt> {
         let bytes = self.kind_bytes("/common/searchcorpname.do", &[("method", "searchCorpNameJson"), ("searchCodeType", "number"), ("searchCorpName", stock)]).await?;
         Ok(serde_json::from_slice(&bytes).map_err(|_| Failure::InvalidResponse)?)
     }
 
-    pub async fn disclosures(&self, corp: &str, today: &str) -> Result<Vec<Row>, Fault> {
-        let through_date = self.job().map_or_else(|| today.into(), |job| job.through_date);
+    pub async fn disclosures(&self, corp: &str, today: &str) -> Result<Vec<Row>, Interrupt> {
+        let through_date = self.job().map_or_else(|| today.into(), |job| job.through_date().to_owned());
         let mut result = BTreeMap::new();
         let mut total = None;
         for page in 1..=10000 {
@@ -286,14 +276,14 @@ impl Client {
         Err(Failure::InvalidResponse.into())
     }
 
-    pub async fn statement(&self, corp: &str, year: i32, report: &str) -> Result<Option<(Basis, Vec<Row>)>, Fault> {
+    pub async fn statement(&self, corp: &str, year: i32, report: &str) -> Result<Option<(Basis, Vec<Row>)>, Interrupt> {
         for basis in [Basis::CFS, Basis::OFS] {
             if let Some(rows) = self.statement_basis(corp, year, report, basis).await? { return Ok(Some((basis, rows))); }
         }
         Ok(None)
     }
 
-    pub(super) async fn statement_basis(&self, corp: &str, year: i32, report: &str, basis: Basis) -> Result<Option<Vec<Row>>, Fault> {
+    pub(super) async fn statement_basis(&self, corp: &str, year: i32, report: &str, basis: Basis) -> Result<Option<Vec<Row>>, Interrupt> {
         let params = [("corp_code", corp.into()), ("bsns_year", year.to_string()), ("reprt_code", report.into()), ("fs_div", format!("{basis:?}"))];
         let value = self.response("fnlttSinglAcntAll.json", &params).await?;
         if value["status"] == "013" { return Ok(None); }
