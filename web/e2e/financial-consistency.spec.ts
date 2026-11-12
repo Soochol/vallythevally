@@ -54,7 +54,8 @@ test.describe("재무 시각과 가격 시각", () => {
     const before = await coordinates(page); expect(before.drawX).toBeCloseTo(before.candleX!, 3);
     expect(app.dart!.calls).toHaveLength(0);
     await row(page).getByTitle("보이기", { exact: true }).click({ force: true });
-    await expect(row(page)).toContainText("확인 완료", { timeout: 45000 });
+    await expect.poll(async () => (await data(app)).status, { timeout: 60000 }).toBe("ready");
+    await expect(row(page)).toContainText("확인 완료");
     expect((await data(app)).series[0]!.points.some((p) => p.priceBucket === kst("2015-01-01") && p.value !== null)).toBe(true);
     await page.evaluate(() => window.chartProbe.chart.timeScale().setVisibleLogicalRange({ from: 4, to: 10 }));
     const box = (await chartOf(cell(page)).boundingBox())!;

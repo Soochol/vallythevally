@@ -78,7 +78,7 @@ impl Financials {
         if self.client.is_none() { return snapshot; }
         let now = self.clock.now();
         let daily = snapshot.collection.last_checked_at.is_none_or(|t| KstTime::from_unix(t).kst_date() != now.kst_date());
-        let incomplete = snapshot.collection.reports.len() < ((now.kst_date().year() - 2015 + 1) * 4) as usize;
+        let incomplete = snapshot.collection.working_reports().len() < ((now.kst_date().year() - 2015 + 1) * 4) as usize;
         let pending = has_pending(&snapshot.collection);
         let mut runs = self.runs.lock().unwrap();
         if force && let Some(run) = runs.get_mut(corp) && run.running { run.pending_refresh = true; }
@@ -160,7 +160,9 @@ impl Financials {
         if daily || collection.disclosure_version < collection.refresh_version || collection.disclosure_failure.is_some() {
             match client.disclosures(corp, &now.kst_date().yyyymmdd()).await {
                 Ok(disclosures) => {
-                    if collection.disclosures != disclosures && collection.disclosure_version == collection.refresh_version { collection.refresh_version += 1; }
+                    let unpublished = unmatched_disclosures(&collection, &disclosures);
+                    if (collection.disclosures != disclosures || unpublished) && collection.disclosure_version == collection.refresh_version { collection.refresh_version += 1; }
+                    if unpublished { collection.unpublished_check_version = collection.refresh_version; }
                     collection.disclosures = disclosures;
                     collection.disclosure_failure = None;
                     collection.last_checked_at = Some(self.clock.now().unix());
@@ -171,27 +173,32 @@ impl Financials {
             store.save(corp, &collection).await?;
             if collection.disclosure_failure.is_some() { return Ok(()); }
         }
+        if collection.staged_reports.is_none() && collection.reports.values().any(|report| statement_outdated(report, &collection.disclosures) || dividends_outdated(report, &collection.disclosures)) {
+            collection.staged_reports = Some(collection.reports.clone());
+        }
+        validate_reused_reports(&mut collection);
         for year in 2015..=now.kst_date().year() {
             for code in REPORT_CODES {
                 let key = format!("{year}/{code}");
-                let mut report = collection.reports.remove(&key).unwrap_or_else(|| Report { business_year: year, report_code: code.into(), statement: Default::default(), dividends: Default::default() });
+                let mut report = collection.working_reports_mut().remove(&key).unwrap_or_else(|| Report { business_year: year, report_code: code.into(), statement: Default::default(), dividends: Default::default() });
+                let report_outdated = statement_outdated(&report, &collection.disclosures) || dividends_outdated(&report, &collection.disclosures);
                 let retry_source = report.statement.data.as_ref().is_some_and(|s| s.source_failure.is_some());
-                if report.statement.refresh_version < collection.refresh_version || statement_outdated(&report, &collection.disclosures) || report.statement.checked_at.is_none() || report.statement.failure.is_some() || retry_source || (daily && report.statement.absent) {
+                if statement_outdated(&report, &collection.disclosures) || report.statement.checked_at.is_none() || report.statement.failure.is_some() || retry_source || (report.statement.absent && (report_outdated || report.statement.snapshot_version() < collection.unpublished_check_version)) {
                     let result = self.statement(client, corp, year, code, &collection.disclosures).await;
                     let result = match result {
                         Ok(Some(statement)) if report.statement.data.is_some() && statement.source_failure.is_some() => Err(statement.source_failure.unwrap()),
                         other => other,
                     };
                     report.statement.apply(result, self.clock.now().unix(), collection.refresh_version);
-                }
-                if code == "11011" && (report.dividends.refresh_version < collection.refresh_version || dividends_outdated(&report, &collection.disclosures) || report.dividends.checked_at.is_none() || report.dividends.failure.is_some() || (daily && report.dividends.absent)) {
+                } else { report.statement.validated_version = Some(collection.disclosure_version); }
+                if code == "11011" && (dividends_outdated(&report, &collection.disclosures) || report.dividends.checked_at.is_none() || report.dividends.failure.is_some() || (report.dividends.absent && (report_outdated || report.dividends.snapshot_version() < collection.unpublished_check_version))) {
                     let result = client.rows("alotMatter.json", &[("corp_code", corp.clone()), ("bsns_year", year.to_string()), ("reprt_code", code.into())]).await.and_then(|rows| {
                         if rows.iter().any(|row| !receipt_is_current(&collection.disclosures, field(row, "rcept_no"))) { return Err(Failure::ReceiptMismatch); }
                         dividends(rows, corp)
                     });
                     report.dividends.apply(result, self.clock.now().unix(), collection.refresh_version);
-                }
-                collection.reports.insert(key, report);
+                } else if code == "11011" { report.dividends.validated_version = Some(collection.disclosure_version); }
+                record_report(&mut collection, key, report);
                 store.save(corp, &collection).await?;
             }
         }
@@ -242,8 +249,44 @@ fn receipt_is_current(disclosures: &[Row], receipt: &str) -> bool {
     !disclosures.iter().any(|r| filing_title(field(r, "report_nm")) == title && field(r, "rcept_no") > receipt)
 }
 
+fn unmatched_disclosures(collection: &Collection, disclosures: &[Row]) -> bool {
+    let receipts: std::collections::BTreeSet<_> = collection.working_reports().values().flat_map(|report| {
+        report.statement.data.iter().flat_map(|s| s.accounts.iter().map(|a| field(&a.fields, "rcept_no")))
+            .chain(report.dividends.data.iter().flatten().map(|d| field(&d.fields, "rcept_no")))
+    }).collect();
+    disclosures.iter().any(|row| {
+        !collection.disclosures.iter().chain(disclosures).any(|known| {
+            receipts.contains(field(known, "rcept_no")) && filing_title(field(known, "report_nm")) == filing_title(field(row, "report_nm"))
+        })
+    })
+}
+
 fn has_failures(collection: &Collection) -> bool {
-    collection.disclosure_failure.is_some() || collection.reports.values().any(|r| r.statement.failure.is_some() || r.dividends.failure.is_some() || r.statement.data.as_ref().is_some_and(|s| s.source_failure.is_some()))
+    collection.disclosure_failure.is_some() || collection.working_reports().values().any(|r| r.statement.failure.is_some() || r.dividends.failure.is_some() || r.statement.data.as_ref().is_some_and(|s| s.source_failure.is_some()))
+}
+
+fn validate_reused_reports(collection: &mut Collection) {
+    let Collection { reports, staged_reports, disclosures, disclosure_version, .. } = collection;
+    for report in staged_reports.as_mut().unwrap_or(reports).values_mut() {
+        if report.statement.data.is_some() && !statement_outdated(report, disclosures) { report.statement.validated_version = Some(*disclosure_version); }
+        if report.dividends.data.is_some() && !dividends_outdated(report, disclosures) { report.dividends.validated_version = Some(*disclosure_version); }
+    }
+}
+
+fn record_report(collection: &mut Collection, key: String, report: Report) {
+    if collection.staged_reports.is_some() && let Some(published) = collection.reports.get_mut(&key) {
+        published.statement.checked_at = report.statement.checked_at;
+        published.statement.failure = report.statement.failure;
+        published.dividends.checked_at = report.dividends.checked_at;
+        published.dividends.failure = report.dividends.failure;
+    }
+    collection.working_reports_mut().insert(key, report);
+    let coherent = collection.staged_reports.as_ref().is_some_and(|reports| reports.values().all(|report| {
+        !statement_outdated(report, &collection.disclosures) && !dividends_outdated(report, &collection.disclosures)
+            && (report.statement.data.is_none() || report.statement.snapshot_version() == collection.disclosure_version)
+            && (report.dividends.data.is_none() || report.dividends.snapshot_version() == collection.disclosure_version)
+    }));
+    if coherent { collection.reports = collection.staged_reports.take().unwrap(); }
 }
 
 fn dividends(rows: Vec<Row>, corp: &str) -> Result<Option<Vec<Dividend>>, Failure> {
@@ -276,8 +319,8 @@ fn dividends_outdated(report: &Report, disclosures: &[Row]) -> bool {
 }
 
 fn has_pending(collection: &Collection) -> bool {
-    collection.disclosure_version < collection.refresh_version || collection.reports.values().any(|report| {
-        report.statement.refresh_version < collection.refresh_version || statement_outdated(report, &collection.disclosures)
-            || (report.report_code == "11011" && (report.dividends.refresh_version < collection.refresh_version || dividends_outdated(report, &collection.disclosures)))
+    collection.disclosure_version < collection.refresh_version || collection.working_reports().values().any(|report| {
+        report.statement.snapshot_version() < collection.disclosure_version || statement_outdated(report, &collection.disclosures)
+            || (report.report_code == "11011" && (report.dividends.snapshot_version() < collection.disclosure_version || dividends_outdated(report, &collection.disclosures)))
     })
 }
