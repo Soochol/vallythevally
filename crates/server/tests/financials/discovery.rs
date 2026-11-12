@@ -61,7 +61,7 @@ async fn discovers_unlisted_preferred_preserves_provenance_and_shares_company_bu
     assert_eq!(dividends[2].share_class.as_deref(),Some("우선주"));
     fake.state.lock().unwrap().discovery_failure = Some(("search".into(),StatusCode::BAD_GATEWAY));
     let restarted = Financials::new(Some(fake.client()),store,clock());
-    assert_eq!(restarted.open(STOCK,true,false).await.security.unwrap().evidence,security.evidence);
+    assert_eq!(restarted.update_company(STOCK,true,false).await.security.unwrap().evidence,security.evidence);
     assert_eq!(fake.count("search"),1);
     let state = fake.state.lock().unwrap();
     let params = &state.calls.iter().find(|(name,_)| name == "search").unwrap().1;
@@ -178,14 +178,14 @@ async fn first_and_mid_discovery_failures_retry_after_sixty_seconds_and_preserve
                         }
                     }
                 }
-                let snapshot = service.open(STOCK,true,false).await;
+                let snapshot = service.update_company(STOCK,true,false).await;
                 assert_eq!(snapshot.status,"failed");
                 assert_eq!(snapshot.failure,Some(failure));
                 assert!(store.security(STOCK).await.unwrap().is_none());
                 let before = fake.count(stage);
                 for jump in [0,59] {
                     clock.jump(jump);
-                    assert_eq!(service.open(STOCK,true,false).await.failure,Some(failure));
+                    assert_eq!(service.update_company(STOCK,true,false).await.failure,Some(failure));
                     assert_eq!(fake.count(stage),before);
                 }
                 assert_eq!(settled_stock(&service,"000001",false).await.status,"ready");
@@ -231,14 +231,20 @@ async fn first_and_mid_discovery_failures_leave_price_requests_usable() {
             let base = format!("http://{}",server.addr().await);
             let price = format!("{base}/api/bars?symbol=005930&period=D&limit=5");
             assert_eq!(client.get(&price).send().await.unwrap().status(),StatusCode::OK);
-            let previous = if collected { Some(http_settled(&client,&base).await["collection"].clone()) } else { None };
+            let previous = if collected {
+                let store = Store::open(&dir.path().join("run/financials.db")).await.unwrap();
+                let service = Financials::new(Some(fake.client()), store, clock());
+                Some(serde_json::to_value(settled(&service).await.collection).unwrap())
+            } else { None };
             fake.state.lock().unwrap().discovery_failure = Some((stage.into(),StatusCode::BAD_GATEWAY));
+            http_start(&client, &base).await;
+            http_settled(&client, &base).await;
             let response = client.get(format!("{base}/api/symbols/{STOCK}/financial-source")).send().await.unwrap();
             let snapshot: Value = serde_json::from_slice(&response.bytes().await.unwrap()).unwrap();
             assert_eq!(snapshot["status"],"failed");
             assert_eq!(snapshot["failure"],"remote");
             assert_eq!(tokio::time::timeout(Duration::from_secs(1),client.get(&price).send()).await.unwrap().unwrap().status(),StatusCode::OK);
-            if let Some(previous) = previous { assert_eq!(http_snapshot(&client,&base).await["collection"],previous); }
+            if let Some(previous) = previous { assert_saved_report_fetches(&http_snapshot(&client,&base).await["collection"], &previous); }
             assert!(!server.stop().await.contains(KEY));
         }
     }
@@ -254,14 +260,14 @@ async fn stalled_discovery_does_not_hold_other_stock_resolutions_or_saved_compan
     fake.state.lock().unwrap().discovery_paused = Some("search".into());
     let pending = {
         let service = service.clone();
-        tokio::spawn(async move { service.open(STOCK,true,false).await })
+        tokio::spawn(async move { service.update_company(STOCK,true,false).await })
     };
     tokio::time::timeout(Duration::from_secs(2),async {
         while fake.count("search") == 0 { tokio::time::sleep(Duration::from_millis(10)).await; }
     }).await.unwrap();
-    let saved = tokio::time::timeout(Duration::from_secs(1),service.open(COMMON,false,false)).await.unwrap();
+    let saved = tokio::time::timeout(Duration::from_secs(1),service.update_company(COMMON,false,false)).await.unwrap();
     assert_eq!(serde_json::to_value(saved.collection).unwrap(),serde_json::to_value(previous).unwrap());
-    let other = tokio::time::timeout(Duration::from_secs(1),service.open("000001",false,false)).await.unwrap();
+    let other = tokio::time::timeout(Duration::from_secs(1),service.update_company("000001",false,false)).await.unwrap();
     assert_eq!(other.security.unwrap().company.corp_code,"00000002");
     assert!(!pending.is_finished());
     pending.abort();

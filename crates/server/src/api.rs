@@ -1190,6 +1190,57 @@ pub enum FinancialPeriod { Q, Y }
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "snake_case")]
 #[ts(export)]
+pub enum FinancialUpdateStatus { Idle, Planning, Collecting, Pausing, Paused, Stopped, Checking, Ready, PartialFailure, Interrupted, Failed, NotConfigured }
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum FinancialUpdatePhase { Planning, #[default] Recent, History, Complete }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum FinancialUpdateStopReason { User, Storage, Interrupted, NotConfigured, Authentication, RateLimited }
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct FinancialUpdateFailure { pub code: String, pub name: String, pub reason: Option<String>, pub failure: Option<String> }
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct FinancialUpdatePage {
+    #[ts(type = "number")]
+    pub id: u64,
+    pub status: FinancialUpdateStatus,
+    pub phase: FinancialUpdatePhase,
+    pub stop_reason: Option<FinancialUpdateStopReason>,
+    pub next_check_at: Option<UnixSeconds>,
+    pub can_resume: bool,
+    pub history_completed_companies: usize,
+    pub history_failed_companies: usize,
+    pub recent_failed_companies: usize,
+    pub history_complete: bool,
+    pub from_year: i32,
+    pub through_year: i32,
+    pub total_symbols: usize,
+    pub processed_symbols: usize,
+    pub unsupported_symbols: usize,
+    pub unverified_symbols: usize,
+    pub unverified_dividends: usize,
+    pub total_companies: usize,
+    pub completed_companies: usize,
+    pub failed_companies: usize,
+    pub started_at: Option<UnixSeconds>,
+    pub last_checked_at: Option<UnixSeconds>,
+    pub failure: Option<String>,
+    pub failures: Vec<FinancialUpdateFailure>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
 pub enum FinancialMetric { Revenue, OperatingIncome, OwnerRoe, InvestingCashFlow, Dps, DebtRatio }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]

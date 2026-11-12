@@ -1,6 +1,6 @@
 # 보고기간별 재무지표 API
 
-`GET /api/symbols/{code}/financials?period=Q` 또는 `period=Y`는 저장 자료를 계산하고 첫 접근·일일 확인의 백그라운드 수집을 시작한다. 같은 URL의 `POST`는 수동 갱신을 요청한다. 진행 조회도 같은 `GET`을 사용한다. 거래소 인자는 없으며 알 수 없는 쿼리나 Q/Y 이외 주기는 400이다. 기존 `financial-source` 원자료 API와 수집기를 공유한다.
+`GET /api/symbols/{code}/financials?period=Q` 또는 `period=Y`는 SQLite의 저장 자료만 계산한다. 회사 연결 확인·원천 호출·수집을 시작하지 않으며 업데이트 전 상태는 `not_collected`다. 같은 URL의 `POST`는 `POST /api/financial-update`와 같은 전체 최근 자료 업데이트를 시작한다. 전체 진행은 `GET /api/financial-update`, 종목의 계산 결과는 기존 `GET`으로 읽는다. 거래소 인자는 없으며 알 수 없는 쿼리나 Q/Y 이외 주기는 400이다. 기존 `financial-source` 원자료 API와 수집기를 공유한다.
 
 응답 타입은 `api.rs`에서 `FinancialsPage`와 관련 웹 타입으로 생성한다. 여섯 `series`의 `metric`은 `revenue`, `operating_income`, `owner_roe`, `investing_cash_flow`, `dps`, `debt_ratio`다. 금액은 원천 통화의 자연 단위, DPS는 원, 두 비율은 %다. 그림에 쓸 숫자는 `value`이며 없으면 `null`이다. 원금액 문자열은 `inputs[].amount`와 `fields`에 보존한다. 차트 숫자는 유한한 f64이며 원금액의 정밀도를 대신하지 않는다.
 
@@ -8,9 +8,9 @@
 
 최상위 `status`는 원자료 수집 상태(`not_configured`, `unsupported`, `collecting`, `ready`, `stale`, `partial_failure`, `failed`)를 그대로 따른다. `reason`은 상품 미지원 또는 회사 매핑 미확인 사유다. ETF·업종지수 등 미지원 상품은 DART를 호출하지 않는다. 현재 종목 목록에서 제외되는 ETN은 기존 API와 같이 없는 종목으로 응답한다. 우선주 회사 연결과 주식 종류는 기존 `Security` 계약을 소비하며 추측하지 않는다.
 
-`lastCheckedAt`은 공시 목록을 끝까지 확인한 시각이다. `lastAttemptAt`, `disclosureFailure`, `failure`, `refreshVersion`, `disclosureVersion`은 수집 계약의 동명 필드를 보존한다. `progress`는 현재 저장된 요청들에 대한 `total`, `completed`, `failed`, `pending` 개수다. 사업보고서는 재무제표와 배당을 각각 한 요청으로 센다. 아직 저장하지 않은 미래 요청을 전체 개수에 넣지 않으므로 최초 수집 중 total은 늘어날 수 있다. 전체 수집 완료 여부는 최상위 status로 판단한다.
+`lastCheckedAt`은 공시 목록을 끝까지 확인한 시각이다. `lastAttemptAt`, `disclosureFailure`, `failure`, `refreshVersion`, `disclosureVersion`은 수집 계약의 동명 필드를 보존한다. `progress`는 현재 저장된 요청들에 대한 `total`, `completed`, `failed`, `pending` 개수다. 정정 중에는 갱신 중 자료의 진행을 세고 차트 값은 마지막 일관된 표시 자료를 사용한다. 사업보고서는 재무제표와 배당을 각각 한 요청으로 센다. 아직 저장하지 않은 미래 요청을 전체 개수에 넣지 않으므로 최초 수집 중 total은 늘어날 수 있다. 재사용한 보고서는 최신 목록에서 검증되면 실제 수집 시각을 바꾸지 않고 완료로 센다. 전체 수집 완료 여부는 최상위 status로 판단한다.
 
-저장 자료가 있는 갱신 실패는 `value`를 유지하고 `inputs[].failure`, `checkedAt`, `lastSuccessAt`과 최상위 상태를 함께 제공한다. 자료가 전혀 없는 실패는 point의 `failed`다. 서로 다른 성공 세대를 섞어 차감·ROE를 만들지 않으며 이때 `refresh_incomplete`를 반환한다. 수집·재시도·저장 세대 규칙은 [원자료 계약](dart-financial-source.md)을 바꾸지 않는다.
+저장 자료가 있는 갱신 실패는 `value`를 유지하고 `inputs[].failure`, `checkedAt`, `lastSuccessAt`과 최상위 상태를 함께 제공한다. 자료가 전혀 없는 실패는 point의 `failed`다. 함께 검증된 공시 목록 세대가 다른 입력으로 차감·ROE를 만들지 않으며 이때 `refresh_incomplete`를 반환한다. 각 입력의 `refreshVersion`은 실제 수집 성공 세대로 보존하므로, 변경 없는 비교기간을 재사용한 정상 계산에서도 입력끼리 다를 수 있다. 정정 중에는 마지막 일관된 표시 자료를 유지하고 갱신 중 자료가 준비되면 확정한다. 수집·재시도·저장 세대 규칙은 [원자료 계약](dart-financial-source.md)을 따른다.
 
 ## 점과 공백
 
@@ -28,7 +28,7 @@
 
 `reason`은 생성된 `FinancialReason`의 닫힌 목록이다. `period_unverified`일 때 원천 검증의 구체적인 이유는 `inputs[].verificationReason`에 있다. 계정명 유사도로 비표준 계정을 매핑하지 않는다. 인식하는 계정은 `ifrs-full`/과거 `ifrs`의 Revenue, ProfitLossAttributableToOwnersOfParent, CashFlowsFromUsedInInvestingActivities, Liabilities, Equity, EquityAttributableToOwnersOfParent이며 영업이익은 dart_OperatingIncomeLoss 또는 IFRS ProfitLossFromOperatingActivities다. IS/CIS에 같은 사실이 반복된 경우에만 허용하고 서로 다른 값·기간·통화가 있으면 ambiguous_account다. 일반 당기순이익이나 자본총계를 지배주주 계정으로 대체하지 않는다.
 
-원자료의 `current_period`/`cumulative_period`가 verified이고 접수번호가 일치하는 금액만 사용한다. 분기 손익은 확인된 3개월 당기금액을 사용한다. 누적 CF 및 Q4는 같은 사업연도·기준·통화·성공 세대, 같은 시작일의 누적기간을 차감하며 3/6/9/12개월과 차감 후 실제 3개월을 확인한다. 서로 떨어진 네 보고서를 ROE의 4분기로 취급하지 않는다. Q ROE는 이어지는 네 실제 3개월 이익과 정확한 12개월 기간, 그 기간 직전일과 기말의 지배주주 지분을 요구한다. Y ROE는 해당 실제 12개월 이익을 사용한다.
+원자료의 `current_period`/`cumulative_period`가 verified이고 접수번호가 일치하는 금액만 사용한다. 분기 손익은 확인된 3개월 당기금액을 사용한다. 누적 CF 및 Q4는 같은 사업연도·기준·통화와 함께 검증된 공시 목록 세대, 같은 시작일의 누적기간을 차감하며 3/6/9/12개월과 차감 후 실제 3개월을 확인한다. 서로 떨어진 네 보고서를 ROE의 4분기로 취급하지 않는다. Q ROE는 이어지는 네 실제 3개월 이익과 정확한 12개월 기간, 그 기간 직전일과 기말의 지배주주 지분을 요구한다. Y ROE는 해당 실제 12개월 이익을 사용한다.
 
 `priceBucket`은 실제 종료일이 속한 달력 분기/연도의 첫날 KST 00:00의 Unix 초다. 결산월은 최상위 `fiscalMonth`, 실제 기간은 각 point와 입력에 제공한다. `inputs`는 계정 ID·원래 필드·금액·통화·접수번호·공시일·XBRL context·원본 파일명·성공 시각을 담는다. `latestCorrections=true`는 당시 공개값이 아닌 정정된 최신 공시 기준임을 뜻한다.
 

@@ -1,3 +1,4 @@
+import { FinancialUpdateButton } from "../financial-update/FinancialUpdateButton";
 import { SentenceEditor } from "./SentenceEditor";
 import { availableSources, checkedSession, currentSession, selectedSource, useScreenEditor } from "./editorState";
 import { confirmAction } from "../overlay/Confirm";
@@ -188,6 +189,7 @@ export function ScreenerPanel({ wide = false, onReturn = () => {} }: { wide?: bo
               <header className="flex h-11 flex-none items-center gap-1 border-b border-line pl-3 pr-1.5">
                 <h2 className="text-l font-[700]">스크리너</h2>
                 <span className="flex-1" />
+                <FinancialUpdateButton className="md:hidden" />
                 <PanelMenu screen={null} rows={rows} status={status} />
               </header>
             )}
@@ -294,6 +296,7 @@ function ScreenHeader({ screen, screens, run, block, status, rows, onRun, wide }
   return (
     <header className="flex-none border-b border-line px-3 pb-3 pt-2">
       <div className="flex items-center gap-1">
+        <FinancialUpdateButton className="md:hidden" />
         {wide ? <h2 className="min-w-0 truncate text-l font-bold">{screen.name}</h2> : <ScreenPicker screens={screens} screen={screen} />}
         <span className="flex-1" />
         <button type="button" className="tb-btn h-7 gap-1 px-2 text-s text-text-2" title="조건식 편집" onClick={() => editScreen(screen.id)}>

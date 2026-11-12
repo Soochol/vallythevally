@@ -16,7 +16,10 @@ const CORP: &str = "00126380";
 struct FakeState {
     calls: Vec<(String, BTreeMap<String, String>)>,
     failures: HashMap<String, String>,
+    http_failure: Option<StatusCode>,
+    request_times: Vec<std::time::Instant>,
     correction: bool,
+    later_correction: bool,
     delayed: bool,
     preferred: bool,
     kind_other_code: bool,
@@ -39,8 +42,12 @@ struct FakeState {
     discovery_network: Option<String>,
     discovery_paused: Option<String>,
     stream_paused_report: Option<String>,
+    stream_paused_company: Option<String>,
+    paused_list: bool,
+    list_pages: bool,
     statement_amounts: HashMap<String, String>,
     integrated_financials: bool,
+    report_corrections: std::collections::BTreeSet<(i32, String)>,
 }
 
 struct Fake { state: Arc<Mutex<FakeState>>, url: String, task: tokio::task::JoinHandle<()> }
@@ -108,14 +115,15 @@ async fn notice(State(state): State<Arc<Mutex<FakeState>>>) -> Response {
 async fn respond(State(state): State<Arc<Mutex<FakeState>>>, Path(endpoint): Path<String>, Query(params): Query<BTreeMap<String, String>>) -> Response {
     let paused = {
         let mut state = state.lock().unwrap();
-        let paused = endpoint == "fnlttSinglAcntAll.json" && state.stream_paused_report.as_ref() == params.get("reprt_code");
-        if paused { state.calls.push(("statement_stream".into(),params.clone())); }
+        let paused = (endpoint == "list.json" && state.paused_list) || (endpoint == "fnlttSinglAcntAll.json" && state.stream_paused_report.as_ref() == params.get("reprt_code") && state.stream_paused_company.as_ref().is_none_or(|company| Some(company) == params.get("corp_code")));
+        if paused { state.calls.push((if endpoint == "list.json" { "listing_stream" } else { "statement_stream" }.into(),params.clone())); }
         paused
     };
     if paused {
         let stream = futures::stream::once(async move {
             loop {
-                if state.lock().unwrap().stream_paused_report.is_none() { break; }
+                let paused = { let state = state.lock().unwrap(); if endpoint == "list.json" { state.paused_list } else { state.stream_paused_report.is_some() } };
+                if !paused { break; }
                 tokio::time::sleep(Duration::from_millis(5)).await;
             }
             let response = respond_data(State(state),Path(endpoint),Query(params)).await;
@@ -128,11 +136,17 @@ async fn respond(State(state): State<Arc<Mutex<FakeState>>>, Path(endpoint): Pat
 
 async fn respond_data(State(state): State<Arc<Mutex<FakeState>>>, Path(endpoint): Path<String>, Query(params): Query<BTreeMap<String, String>>) -> Response {
     assert_eq!(params["crtfc_key"], KEY);
+    {
+        let mut state = state.lock().unwrap();
+        state.request_times.push(std::time::Instant::now());
+        if let Some(status) = state.http_failure { state.calls.push((endpoint, params)); return (status, "synthetic transport failure").into_response(); }
+    }
     let (failure, correction, delayed, no_cfs, xbrl_failure, stale_statement, mismatched_xbrl, paused, nonstandard_account) = {
         let mut state = state.lock().unwrap();
         state.calls.push((endpoint.clone(), params.clone()));
         let scope = format!("{endpoint}/{}/{}", params.get("bsns_year").map_or("", String::as_str), params.get("reprt_code").map_or("", String::as_str));
-        (state.failures.get(&scope).or_else(|| state.failures.get(&endpoint)).cloned(), state.correction, state.delayed, state.no_cfs, state.xbrl_failure, state.stale_statement, state.mismatched_xbrl, endpoint == "fnlttSinglAcntAll.json" && state.paused_report.as_ref() == params.get("reprt_code"), state.nonstandard_account)
+        let company_scope = format!("{scope}/{}", params.get("corp_code").map_or("", String::as_str));
+        (state.failures.get(&company_scope).or_else(|| state.failures.get(&scope)).or_else(|| state.failures.get(&endpoint)).cloned(), state.correction, state.delayed, state.no_cfs, state.xbrl_failure, state.stale_statement, state.mismatched_xbrl, endpoint == "fnlttSinglAcntAll.json" && state.paused_report.as_ref() == params.get("reprt_code"), state.nonstandard_account)
     };
     if paused { std::future::pending::<()>().await; }
     if delayed { tokio::time::sleep(Duration::from_millis(30)).await; }
@@ -140,12 +154,14 @@ async fn respond_data(State(state): State<Arc<Mutex<FakeState>>>, Path(endpoint)
         return axum::Json(json!({"status":status,"message":format!("remote echoed {KEY}")})).into_response();
     }
     if state.lock().unwrap().integrated_financials && matches!(endpoint.as_str(), "list.json" | "fnlttSinglAcntAll.json" | "fnlttXbrl.xml" | "alotMatter.json") {
-        return mapping::integrated_response(&endpoint, &params);
+        return mapping::integrated_response(&endpoint, &params, &state.lock().unwrap().report_corrections);
     }
     let corp = params.get("corp_code").map(String::as_str).unwrap_or_else(|| if params.get("rcept_no").is_some_and(|receipt| ["20150331000011","20160401000012"].contains(&receipt.as_str())) { "00000002" } else { CORP });
     let original_receipt = if corp == CORP { RECEIPT } else { "20150331000011" };
     let corrected_receipt = if corp == CORP { "20160401000002" } else { "20160401000012" };
-    let receipt = if correction { corrected_receipt } else { original_receipt };
+    let later_correction = state.lock().unwrap().later_correction;
+    let later_receipt = if corp == CORP { "20160402000003" } else { "20160402000013" };
+    let receipt = if correction && later_correction { later_receipt } else if correction { corrected_receipt } else { original_receipt };
     let amount = state.lock().unwrap().statement_amounts.get(corp).cloned().unwrap_or_else(|| if correction { "120" } else { "100" }.into());
     match endpoint.as_str() {
         "echo.json" => {
@@ -159,7 +175,13 @@ async fn respond_data(State(state): State<Arc<Mutex<FakeState>>>, Path(endpoint)
         }
         "list.json" => {
             let mut rows = vec![json!({"corp_code":corp,"rcept_no":original_receipt,"rcept_dt":"20150331","report_nm":"사업보고서 (2015.12)"})];
-            if correction { rows.push(json!({"corp_code":corp,"rcept_no":receipt,"rcept_dt":"20160401","report_nm":"[기재정정]사업보고서 (2015.12)"})); }
+            if correction { rows.push(json!({"corp_code":corp,"rcept_no":corrected_receipt,"rcept_dt":"20160401","report_nm":"[기재정정]사업보고서 (2015.12)"})); }
+            if correction && later_correction { rows.push(json!({"corp_code":corp,"rcept_no":later_receipt,"rcept_dt":"20160402","report_nm":"[기재정정]사업보고서 (2015.12)"})); }
+            if state.lock().unwrap().list_pages {
+                let page = params["page_no"].parse::<u32>().unwrap();
+                if page == 2 { rows = vec![json!({"corp_code":corp,"rcept_no":"20150331000009","rcept_dt":"20150331","report_nm":"분기보고서 (2015.03)"})]; }
+                return axum::Json(json!({"status":"000","page_no":page,"total_page":2,"list":rows})).into_response();
+            }
             axum::Json(json!({"status":"000","page_no":1,"total_page":1,"list":rows})).into_response()
         }
         "fnlttSinglAcntAll.json" => {
@@ -202,6 +224,12 @@ mod discovery;
 
 #[path = "financials/review_fix.rs"]
 mod discovery_review_fix;
+
+#[path = "financials/incremental.rs"]
+mod incremental;
+
+#[path = "financials/updates.rs"]
+mod updates;
 
 fn account(section: &str, id: &str, amount: &str) -> BTreeMap<String, String> {
     [("corp_code",CORP),("bsns_year","2015"),("reprt_code","11014"),("rcept_no",RECEIPT),("sj_div",section),("account_id",id),("account_nm","원래 계정"),("currency","KRW"),("thstrm_nm","제 1기"),("thstrm_amount",amount),("thstrm_add_amount","300")].into_iter().map(|(k,v)|(k.into(),v.into())).collect()
@@ -252,7 +280,7 @@ fn clock() -> Clock { Clock::fake(kst(KstDate::new(2015,12,31).unwrap(),12,0,0))
 
 async fn settled(service: &Arc<Financials>) -> server::financials::model::Snapshot {
     for _ in 0..300 {
-        let result = service.open("005930",false,false).await;
+        let result = service.update_company("005930",false,false).await;
         if result.status != "collecting" { return result; }
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
@@ -267,11 +295,11 @@ async fn collects_only_requested_company_coalesces_and_reuses_disk_after_restart
     let store = Store::open(&dir.path().join("financials.db")).await.unwrap();
     let clock = clock();
     let service = Financials::new(Some(fake.client()),store.clone(),clock.clone());
-    let unknown = service.open("005939",true,false).await;
+    let unknown = service.update_company("005939",true,false).await;
     assert_eq!(unknown.status,"unsupported");
     assert_eq!(unknown.reason,Some("company_mapping_unverified"));
     assert_eq!(fake.count("fnlttSinglAcntAll.json"),0);
-    let (common,preferred) = tokio::join!(service.open("005930",false,false), service.open("005935",true,false));
+    let (common,preferred) = tokio::join!(service.update_company("005930",false,false), service.update_company("005935",true,false));
     assert_eq!(common.security.unwrap().company.corp_code, preferred.security.as_ref().unwrap().company.corp_code);
     assert_eq!(preferred.security.unwrap().share_class_reason.as_deref(),Some("preferred_issue_class_unverified"));
     let result = settled(&service).await;
@@ -281,14 +309,14 @@ async fn collects_only_requested_company_coalesces_and_reuses_disk_after_restart
     assert_eq!(report.dividends.data.as_ref().unwrap()[0].fields["thstrm"],"0");
     assert!(report.dividends.data.as_ref().unwrap()[1].share_class_reason.is_some());
     fake.state.lock().unwrap().preferred = false;
-    assert!(service.open("005935",true,false).await.security.is_some());
+    assert!(service.update_company("005935",true,false).await.security.is_some());
     let before = fake.count("list.json");
     let reopened = Store::open(&dir.path().join("financials.db")).await.unwrap();
     let restarted = Financials::new(Some(fake.client()),reopened,clock.clone());
-    assert_eq!(restarted.open("005930",false,false).await.status,"ready");
+    assert_eq!(restarted.update_company("005930",false,false).await.status,"ready");
     assert_eq!(fake.count("list.json"),before);
     let disabled = Financials::new(None,store,clock);
-    let saved = disabled.open("005930",false,false).await;
+    let saved = disabled.update_company("005930",false,false).await;
     assert_eq!(saved.status,"not_configured");
     assert_eq!(saved.collection.reports.len(),4);
     let bytes = serde_json::to_string(&result).unwrap();
@@ -306,7 +334,7 @@ async fn first_and_mid_collection_failures_keep_successes_and_retry_only_failed_
         let store = Store::open(&dir.path().join("f.db")).await.unwrap();
         let clock = clock();
         let service = Financials::new(Some(fake.client()),store,clock.clone());
-        service.open("005930",false,false).await;
+        service.update_company("005930",false,false).await;
         let result = settled(&service).await;
         assert_eq!(result.status,"partial_failure");
         assert_eq!(result.collection.reports[&format!("2015/{code}")].statement.failure,Some(Failure::Authentication));
@@ -327,9 +355,9 @@ async fn daily_and_manual_refresh_replace_historical_corrections_and_preserve_go
     let store = Store::open(&dir.path().join("f.db")).await.unwrap();
     let clock = clock();
     let service = Financials::new(Some(fake.client()),store,clock.clone());
-    service.open("005930",false,false).await;
+    service.update_company("005930",false,false).await;
     let original = settled(&service).await;
-    service.open("005930",false,false).await;
+    service.update_company("005930",false,false).await;
     assert_eq!(fake.count("list.json"),1);
     fake.state.lock().unwrap().correction = true;
     clock.jump(86400);
@@ -338,7 +366,8 @@ async fn daily_and_manual_refresh_replace_historical_corrections_and_preserve_go
     assert_eq!(account.fields["thstrm_amount"],"120");
     assert_ne!(revised.collection.last_checked_at,original.collection.last_checked_at);
     fake.state.lock().unwrap().xbrl_failure = true;
-    service.open("005930",false,true).await;
+    fake.state.lock().unwrap().later_correction = true;
+    service.update_company("005930",false,true).await;
     let failed = settled(&service).await;
     assert_eq!(failed.status,"partial_failure");
     let report = &failed.collection.reports["2015/11011"];
@@ -366,7 +395,7 @@ async fn incomplete_run_resumes_and_disclosure_failures_do_not_discard_saved_dat
     let store = Store::open(&dir.path().join("f.db")).await.unwrap();
     let clock = clock();
     let service = Financials::new(Some(fake.client()),store.clone(),clock.clone());
-    service.open("005930",false,false).await;
+    service.update_company("005930",false,false).await;
     let original = settled(&service).await;
     let mut partial = original.collection.clone();
     partial.reports.remove("2015/11014");
@@ -376,7 +405,7 @@ async fn incomplete_run_resumes_and_disclosure_failures_do_not_discard_saved_dat
     assert_eq!(settled(&restarted).await.collection.reports.len(),4);
     assert_eq!(fake.count("fnlttSinglAcntAll.json"),5);
     fake.state.lock().unwrap().failures.insert("list.json".into(),"010".into());
-    restarted.open("005930",false,true).await;
+    restarted.update_company("005930",false,true).await;
     let failed = settled(&restarted).await;
     assert_eq!(failed.collection.last_checked_at,original.collection.last_checked_at);
     assert_eq!(failed.collection.disclosure_failure,Some(Failure::Authentication));
@@ -408,7 +437,8 @@ async fn real_price_api_remains_available_without_key_and_during_collection_and_
         let response = client.get(format!("http://{addr}/api/symbols/005930/financial-source")).send().await.unwrap();
         assert_eq!(response.status(),StatusCode::OK);
         let value:Value = serde_json::from_slice(&response.bytes().await.unwrap()).unwrap();
-        assert_eq!(value["status"],if configured {"collecting"} else {"not_configured"});
+        assert_eq!(value["status"],if configured {"not_collected"} else {"not_configured"});
+        http_start(&client, &format!("http://{addr}")).await;
         let price = tokio::time::timeout(Duration::from_secs(1),client.get(&price_url).send()).await.unwrap().unwrap();
         assert_eq!(price.status(),StatusCode::OK);
         let logs = server.stop().await;
@@ -423,7 +453,7 @@ async fn source_failures_retain_raw_accounts_and_resume_without_switching_basis(
     let dir = tempfile::tempdir().unwrap();
     let clock = clock();
     let service = Financials::new(Some(fake.client()),Store::open(&dir.path().join("f.db")).await.unwrap(),clock.clone());
-    service.open("005930",false,false).await;
+    service.update_company("005930",false,false).await;
     let first = settled(&service).await;
     assert_eq!(first.status,"partial_failure");
     let statement = first.collection.reports["2015/11013"].statement.data.as_ref().unwrap();
@@ -443,14 +473,14 @@ async fn stale_receipt_after_correction_cannot_overwrite_saved_statement() {
     let fake = Fake::start().await;
     let dir = tempfile::tempdir().unwrap();
     let service = Financials::new(Some(fake.client()),Store::open(&dir.path().join("f.db")).await.unwrap(),clock());
-    service.open("005930",false,false).await;
+    service.update_company("005930",false,false).await;
     settled(&service).await;
     {
         let mut state = fake.state.lock().unwrap();
         state.correction = true;
         state.stale_statement = true;
     }
-    service.open("005930",false,true).await;
+    service.update_company("005930",false,true).await;
     let result = settled(&service).await;
     let report = &result.collection.reports["2015/11011"];
     assert_eq!(report.statement.failure,Some(Failure::ReceiptMismatch));
@@ -502,10 +532,25 @@ async fn http_snapshot(client: &reqwest::Client, base: &str) -> Value {
     serde_json::from_slice(&response.bytes().await.unwrap()).unwrap()
 }
 
+fn assert_saved_report_fetches(current: &Value, previous: &Value) {
+    for (key, report) in previous["reports"].as_object().unwrap() {
+        for fetch in ["statement", "dividends"] {
+            for field in ["data", "checked_at", "last_success_at", "refresh_version", "failure"] {
+                assert_eq!(current["reports"][key][fetch][field], report[fetch][field], "{key}/{fetch}/{field}");
+            }
+        }
+    }
+}
+
+async fn http_start(client: &reqwest::Client, base: &str) {
+    client.post(format!("{base}/api/financial-update")).send().await.unwrap().error_for_status().unwrap();
+}
+
 async fn http_settled(client: &reqwest::Client, base: &str) -> Value {
     for _ in 0..300 {
         let snapshot = http_snapshot(client,base).await;
-        if snapshot["status"] != "collecting" { return snapshot; }
+        let job: Value = serde_json::from_slice(&client.get(format!("{base}/api/financial-update")).send().await.unwrap().bytes().await.unwrap()).unwrap();
+        if !["planning", "collecting"].contains(&job["status"].as_str().unwrap()) && snapshot["status"] != "collecting" { return snapshot; }
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
     panic!("HTTP collection did not settle");
@@ -534,6 +579,7 @@ async fn review_restart_resumes_corrections_after_list_commit_and_partial_report
         let server = process(&fake,&kiwoom,dir.path(),"20151231120000");
         let base = format!("http://{}",server.addr().await);
         assert_eq!(client.get(format!("{base}/api/symbols/005930")).send().await.unwrap().status(),StatusCode::OK);
+        http_start(&client, &base).await;
         let original = http_settled(&client,&base).await;
         assert_eq!(original["status"],"ready");
         let before = report_calls(&fake,paused);
@@ -547,11 +593,12 @@ async fn review_restart_resumes_corrections_after_list_commit_and_partial_report
             if report_calls(&fake,paused) > before { break; }
             tokio::time::sleep(Duration::from_millis(20)).await;
         }
-        assert!(report_calls(&fake,paused) > before);
+        let update: Value = serde_json::from_slice(&client.get(format!("{base}/api/financial-update")).send().await.unwrap().bytes().await.unwrap()).unwrap();
+        assert!(report_calls(&fake,paused) > before, "manual update did not request {paused}: {update}");
         let interrupted = http_snapshot(&client,&base).await;
         assert_eq!(interrupted["collection"]["disclosures"][1]["rcept_no"],"20160401000002");
         if paused == "11014" {
-            assert_eq!(interrupted["collection"]["reports"]["2015/11013"]["statement"]["data"]["accounts"][0]["fields"]["thstrm_amount"],"120");
+            assert_eq!(interrupted["collection"]["reports"]["2015/11013"]["statement"]["data"]["accounts"][0]["fields"]["thstrm_amount"],"100","displayed reports retain the last coherent snapshot until all changed inputs are ready");
         }
         server.stop().await;
         fake.state.lock().unwrap().paused_report = None;
@@ -559,6 +606,7 @@ async fn review_restart_resumes_corrections_after_list_commit_and_partial_report
         let restarted = process(&fake,&kiwoom,dir.path(),"20160101120000");
         let base = format!("http://{}",restarted.addr().await);
         assert_eq!(client.get(format!("{base}/api/symbols/005930")).send().await.unwrap().status(),StatusCode::OK);
+        http_start(&client, &base).await;
         let recovered = http_settled(&client,&base).await;
         assert_eq!(recovered["status"],"ready");
         for code in ["11013","11012","11014","11011"] {
@@ -580,7 +628,7 @@ async fn review_mismatched_xbrl_preserves_verified_data_and_recovers_on_retry() 
         let clock = clock();
         let service = Financials::new(Some(fake.client()),Store::open(&dir.path().join("f.db")).await.unwrap(),clock.clone());
         if initial_failure { fake.state.lock().unwrap().mismatched_xbrl = true; fake.state.lock().unwrap().correction = true; }
-        service.open("005930",false,false).await;
+        service.update_company("005930",false,false).await;
         let original = settled(&service).await;
         if !initial_failure {
             {
@@ -589,7 +637,7 @@ async fn review_mismatched_xbrl_preserves_verified_data_and_recovers_on_retry() 
                 state.mismatched_xbrl = true;
             }
             clock.jump(61);
-            service.open("005930",false,true).await;
+            service.update_company("005930",false,true).await;
         }
         let bad = settled(&service).await;
         let report = &bad.collection.reports["2015/11011"];
@@ -625,11 +673,11 @@ async fn review_same_day_disclosure_failure_retries_failed_endpoint_and_finds_co
     let dir = tempfile::tempdir().unwrap();
     let clock = clock();
     let service = Financials::new(Some(fake.client()),Store::open(&dir.path().join("f.db")).await.unwrap(),clock.clone());
-    service.open("005930",false,false).await;
+    service.update_company("005930",false,false).await;
     let original = settled(&service).await;
     fake.state.lock().unwrap().failures.insert("list.json".into(),"010".into());
     clock.jump(61);
-    service.open("005930",false,true).await;
+    service.update_company("005930",false,true).await;
     let failed = settled(&service).await;
     assert_eq!(failed.collection.disclosure_failure,Some(Failure::Authentication));
     assert_eq!(failed.collection.last_checked_at,original.collection.last_checked_at);
@@ -686,28 +734,28 @@ async fn review_write_failure_retains_saved_data_rate_limits_retry_and_isolates_
         let clock = clock();
         let service = Financials::new(Some(fake.client()),store.clone(),clock.clone());
         let original = if initially { None } else {
-            service.open("005930",false,false).await;
+            service.update_company("005930",false,false).await;
             Some(settled(&service).await)
         };
         let mut connection = sqlx::SqliteConnection::connect_with(&sqlx::sqlite::SqliteConnectOptions::new().filename(&path)).await.unwrap();
         sqlx::query("CREATE TRIGGER fail_financial_company BEFORE INSERT ON companies WHEN NEW.corp_code = '00126380' BEGIN SELECT RAISE(FAIL,'synthetic storage failure'); END").execute(&mut connection).await.unwrap();
-        service.open("005930",false,true).await;
+        service.update_company("005930",false,true).await;
         let failed = settled(&service).await;
         assert_eq!(failed.status,"partial_failure");
         assert_eq!(failed.failure,Some(Failure::Storage));
         if let Some(original) = &original {
             assert_eq!(serde_json::to_value(&failed.collection).unwrap(),serde_json::to_value(&original.collection).unwrap());
             let disabled = Financials::new(None,store.clone(),clock.clone());
-            let readable = disabled.open("005930",false,false).await;
+            let readable = disabled.update_company("005930",false,false).await;
             assert_eq!(readable.status,"not_configured");
             assert!(readable.collection.reports["2015/11011"].statement.data.is_some());
         }
-        for _ in 0..3 { assert_eq!(service.open("005930",false,false).await.status,"partial_failure"); }
-        let mut other = service.open("000001",false,false).await;
+        for _ in 0..3 { assert_eq!(service.update_company("005930",false,false).await.status,"partial_failure"); }
+        let mut other = service.update_company("000001",false,false).await;
         for _ in 0..300 {
             if other.status != "collecting" { break; }
             tokio::time::sleep(Duration::from_millis(20)).await;
-            other = service.open("000001",false,false).await;
+            other = service.update_company("000001",false,false).await;
         }
         assert_eq!(other.status,"ready");
         assert_eq!(other.security.as_ref().unwrap().company.corp_code,"00000002");
@@ -715,7 +763,7 @@ async fn review_write_failure_retains_saved_data_rate_limits_retry_and_isolates_
         sqlx::query("DROP TRIGGER fail_financial_company").execute(&mut connection).await.unwrap();
         clock.jump(61);
         assert_eq!(settled(&service).await.status,"ready");
-        assert_eq!(service.open("000001",false,false).await.status,"ready");
+        assert_eq!(service.update_company("000001",false,false).await.status,"ready");
     }
 }
 
@@ -726,13 +774,13 @@ async fn review_permanently_unverified_accounts_do_not_trigger_automatic_source_
     let dir = tempfile::tempdir().unwrap();
     let clock = clock();
     let service = Financials::new(Some(fake.client()),Store::open(&dir.path().join("f.db")).await.unwrap(),clock.clone());
-    service.open("005930",false,false).await;
+    service.update_company("005930",false,false).await;
     let result = settled(&service).await;
     assert_eq!(result.status,"ready");
     assert_eq!(result.collection.reports["2015/11011"].statement.data.as_ref().unwrap().accounts[0].current_period,Verification::Unverified("nonstandard_account".into()));
     let before = fake.count("fnlttXbrl.xml");
     clock.jump(61);
-    assert_eq!(service.open("005930",false,false).await.status,"ready");
+    assert_eq!(service.update_company("005930",false,false).await.status,"ready");
     assert_eq!(fake.count("fnlttXbrl.xml"),before);
 }
 
@@ -745,21 +793,25 @@ async fn review_legacy_snapshots_without_versions_resume_already_saved_correctio
     let store = Store::open(&path).await.unwrap();
     let clock = clock();
     let service = Financials::new(Some(fake.client()),store,clock.clone());
-    service.open("005930",false,false).await;
+    service.update_company("005930",false,false).await;
     let mut body = serde_json::to_value(settled(&service).await.collection).unwrap();
     fake.state.lock().unwrap().correction = true;
     body["disclosures"] = serde_json::to_value(fake.client().disclosures(CORP,"20151231").await.unwrap()).unwrap();
     body.as_object_mut().unwrap().remove("refresh_version");
     body.as_object_mut().unwrap().remove("disclosure_version");
+    body.as_object_mut().unwrap().remove("unpublished_check_version");
+    body.as_object_mut().unwrap().remove("staged_reports");
     for report in body["reports"].as_object_mut().unwrap().values_mut() {
         report["statement"].as_object_mut().unwrap().remove("refresh_version");
         report["dividends"].as_object_mut().unwrap().remove("refresh_version");
+        report["statement"].as_object_mut().unwrap().remove("validated_version");
+        report["dividends"].as_object_mut().unwrap().remove("validated_version");
     }
     let mut connection = sqlx::SqliteConnection::connect_with(&sqlx::sqlite::SqliteConnectOptions::new().filename(&path)).await.unwrap();
     sqlx::query("UPDATE companies SET body = ? WHERE corp_code = ?").bind(body.to_string()).bind(CORP).execute(&mut connection).await.unwrap();
     let reopened = Financials::new(Some(fake.client()),Store::open(&path).await.unwrap(),clock.clone());
     let before = fake.count("list.json");
-    let waiting = reopened.open("005930",false,false).await;
+    let waiting = reopened.update_company("005930",false,false).await;
     assert_eq!(waiting.status,"stale");
     assert_eq!(waiting.collection.reports["2015/11011"].statement.data.as_ref().unwrap().accounts[0].fields["thstrm_amount"],"100");
     clock.jump(61);
@@ -781,11 +833,11 @@ fn assert_corrected_report(collection: &server::financials::model::Collection) {
 }
 
 async fn other_company_settled(service: &Arc<Financials>) {
-    let mut snapshot = service.open("000001",false,false).await;
+    let mut snapshot = service.update_company("000001",false,false).await;
     for _ in 0..300 {
         if snapshot.status != "collecting" { break; }
         tokio::time::sleep(Duration::from_millis(20)).await;
-        snapshot = service.open("000001",false,false).await;
+        snapshot = service.update_company("000001",false,false).await;
     }
     assert_eq!(snapshot.status,"ready");
     assert!(matches!(snapshot.collection.reports["2015/11011"].statement.data.as_ref().unwrap().accounts[0].current_period,Verification::Verified {..}));
@@ -802,7 +854,7 @@ async fn review2_pending_list_intent_recovers_first_and_commit_writes_and_reopen
         let store = Store::open(&path).await.unwrap();
         let mut service = Financials::new(Some(fake.client()),store,clock.clone());
         let original = if initially { None } else {
-            service.open("005930",false,false).await;
+            service.update_company("005930",false,false).await;
             Some(settled(&service).await.collection)
         };
         let mut connection = sqlx::SqliteConnection::connect_with(&sqlx::sqlite::SqliteConnectOptions::new().filename(&path)).await.unwrap();
@@ -814,20 +866,20 @@ async fn review2_pending_list_intent_recovers_first_and_commit_writes_and_reopen
         sqlx::query(trigger).execute(&mut connection).await.unwrap();
         fake.state.lock().unwrap().correction = true;
         clock.jump(1);
-        service.open("005930",false,true).await;
+        service.update_company("005930",false,true).await;
         let failed = settled(&service).await;
         assert_eq!(failed.failure,Some(Failure::Storage));
         if let Some(original) = &original {
             assert_eq!(serde_json::to_value(&failed.collection.reports).unwrap(),serde_json::to_value(&original.reports).unwrap());
         }
         if at_commit { assert!(failed.collection.disclosure_version < failed.collection.refresh_version); }
-        for _ in 0..3 { assert_eq!(service.open("005930",false,false).await.failure,Some(Failure::Storage)); }
+        for _ in 0..3 { assert_eq!(service.update_company("005930",false,false).await.failure,Some(Failure::Storage)); }
         other_company_settled(&service).await;
         sqlx::query("DROP TRIGGER fail_pending_list").execute(&mut connection).await.unwrap();
         if reopen {
             drop(service);
             service = Financials::new(Some(fake.client()),Store::open(&path).await.unwrap(),clock.clone());
-            let pending = service.open("005930",false,false).await;
+            let pending = service.update_company("005930",false,false).await;
             assert_eq!(pending.status,"stale");
             if let Some(original) = &original { assert_eq!(serde_json::to_value(&pending.collection.reports).unwrap(),serde_json::to_value(&original.reports).unwrap()); }
         }
@@ -840,7 +892,7 @@ async fn review2_pending_list_intent_recovers_first_and_commit_writes_and_reopen
         let stored = Store::open(&path).await.unwrap().collection(CORP).await.unwrap();
         assert_corrected_report(&stored);
         let requests = fake.count("fnlttSinglAcntAll.json");
-        assert_eq!(service.open("005930",false,false).await.status,"ready");
+        assert_eq!(service.update_company("005930",false,false).await.status,"ready");
         assert_eq!(fake.count("fnlttSinglAcntAll.json"),requests);
     }
 }
@@ -860,7 +912,7 @@ async fn review2_security_save_retry_is_bounded_and_preserves_pending_manual_ref
         let service = Financials::new(Some(fake.client()),Store::open(&path).await.unwrap(),clock.clone());
         let mut connection = sqlx::SqliteConnection::connect_with(&sqlx::sqlite::SqliteConnectOptions::new().filename(&path)).await.unwrap();
         let original = if existing {
-            service.open("005930",false,false).await;
+            service.update_company("005930",false,false).await;
             let collection = settled(&service).await.collection;
             sqlx::query("DELETE FROM securities WHERE stock_code = '005930'").execute(&mut connection).await.unwrap();
             Some(collection)
@@ -868,9 +920,9 @@ async fn review2_security_save_retry_is_bounded_and_preserves_pending_manual_ref
         sqlx::query("CREATE TRIGGER fail_mapping BEFORE INSERT ON securities WHEN NEW.stock_code = '005930' BEGIN SELECT RAISE(FAIL,'synthetic mapping write failure'); END").execute(&mut connection).await.unwrap();
         fake.state.lock().unwrap().correction = true;
         let attempted = clock.now().unix();
-        assert_eq!(service.open("005930",false,existing).await.failure,Some(Failure::Storage));
+        assert_eq!(service.update_company("005930",false,existing).await.failure,Some(Failure::Storage));
         let before = company_calls(&fake);
-        for _ in 0..3 { assert_eq!(service.open("005930",false,false).await.failure,Some(Failure::Storage)); }
+        for _ in 0..3 { assert_eq!(service.update_company("005930",false,false).await.failure,Some(Failure::Storage)); }
         assert_eq!(company_calls(&fake),before);
         other_company_settled(&service).await;
         if let Some(original) = &original {
@@ -879,13 +931,13 @@ async fn review2_security_save_retry_is_bounded_and_preserves_pending_manual_ref
         }
         sqlx::query("DROP TRIGGER fail_mapping").execute(&mut connection).await.unwrap();
         clock.jump(attempted + 59 - clock.now().unix());
-        assert_eq!(service.open("005930",false,false).await.failure,Some(Failure::Storage));
+        assert_eq!(service.update_company("005930",false,false).await.failure,Some(Failure::Storage));
         assert_eq!(company_calls(&fake),before);
         clock.jump(2);
         let recovered = settled(&service).await;
         assert_eq!(company_calls(&fake),before+1);
         assert_corrected_report(&recovered.collection);
-        assert_eq!(service.open("000001",false,false).await.status,"ready");
+        assert_eq!(service.update_company("000001",false,false).await.status,"ready");
     }
 }
 
@@ -898,7 +950,7 @@ async fn review2_failed_list_storage_keeps_real_price_usable_and_preserves_verif
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("run/financials.db");
     let service = Financials::new(Some(fake.client()),Store::open(&path).await.unwrap(),clock());
-    service.open("005930",false,false).await;
+    service.update_company("005930",false,false).await;
     let original = settled(&service).await.collection;
     std::fs::set_permissions(dir.path().join("run"),std::fs::Permissions::from_mode(0o700)).unwrap();
     let mut connection = sqlx::SqliteConnection::connect_with(&sqlx::sqlite::SqliteConnectOptions::new().filename(&path)).await.unwrap();
@@ -907,6 +959,7 @@ async fn review2_failed_list_storage_keeps_real_price_usable_and_preserves_verif
         ("OPENDART_API_KEY",std::ffi::OsStr::new(KEY)),
         ("VALLY_DART_BASE_URL",std::ffi::OsStr::new(&fake.url)),
         ("VALLY_KIND_BASE_URL",std::ffi::OsStr::new(&fake.url)),
+        ("VALLY_CLOCK_START",std::ffi::OsStr::new("20171231120000")),
     ]);
     let base = format!("http://{}",server.addr().await);
     let client = reqwest::Client::new();
@@ -958,7 +1011,7 @@ async fn calculated_http_contract_validates_period_and_preserves_price_during_co
             assert_eq!(client.get(format!("{url}{query}")).send().await.unwrap().status(),StatusCode::BAD_REQUEST);
         }
         let response:Value = client.get(format!("{url}?period=Q")).send().await.unwrap().bytes().await.map(|bytes| serde_json::from_slice(&bytes).unwrap()).unwrap();
-        assert_eq!(response["status"],if configured { "collecting" } else { "not_configured" });
+        assert_eq!(response["status"],if configured { "not_collected" } else { "not_configured" });
         assert_eq!(response["series"].as_array().unwrap().len(),6);
         assert_eq!(response["period"],"Q");
         for code in ["IDX:001","102780"] {
@@ -967,7 +1020,8 @@ async fn calculated_http_contract_validates_period_and_preserves_price_during_co
         }
         assert_eq!(tokio::time::timeout(Duration::from_secs(1),client.get(&price).send()).await.unwrap().unwrap().status(),StatusCode::OK);
         let refresh:Value = client.post(format!("{url}?period=Y")).send().await.unwrap().bytes().await.map(|bytes| serde_json::from_slice(&bytes).unwrap()).unwrap();
-        assert_eq!(refresh["status"],if configured { "collecting" } else { "not_configured" });
+        assert!(["not_collected", "collecting", "not_configured"].contains(&refresh["status"].as_str().unwrap()));
+        if configured { assert!(["planning", "collecting"].contains(&serde_json::from_slice::<Value>(&client.get(format!("{base}/api/financial-update")).send().await.unwrap().bytes().await.unwrap()).unwrap()["status"].as_str().unwrap())); }
         assert!(!server.stop().await.contains(KEY));
     }
 }
@@ -980,7 +1034,7 @@ async fn calculated_http_reads_saved_values_without_key_and_applies_correction_w
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("run/financials.db");
     let service = Financials::new(Some(fake.client()),Store::open(&path).await.unwrap(),clock());
-    service.open("005930",false,false).await;
+    service.update_company("005930",false,false).await;
     settled(&service).await;
     std::fs::set_permissions(dir.path().join("run"),std::fs::Permissions::from_mode(0o700)).unwrap();
     let client = reqwest::Client::new();
@@ -990,6 +1044,7 @@ async fn calculated_http_reads_saved_values_without_key_and_applies_correction_w
             ("OPENDART_API_KEY",std::ffi::OsStr::new(key)),
             ("VALLY_DART_BASE_URL",std::ffi::OsStr::new(&fake.url)),
             ("VALLY_KIND_BASE_URL",std::ffi::OsStr::new(&fake.url)),
+            ("VALLY_CLOCK_START",std::ffi::OsStr::new("20171231120000")),
         ]);
         let base = format!("http://{}",server.addr().await);
         let price = format!("{base}/api/bars?symbol=005930&period=D&limit=5");
@@ -997,7 +1052,7 @@ async fn calculated_http_reads_saved_values_without_key_and_applies_correction_w
         let url = format!("{base}/api/symbols/005930/financials?period=Y");
         if configured {fake.state.lock().unwrap().correction=true;}
         let first:Value = client.get(&url).send().await.unwrap().bytes().await.map(|bytes| serde_json::from_slice(&bytes).unwrap()).unwrap();
-        assert_eq!(first["status"],if configured {"collecting"} else {"not_configured"});
+        assert_eq!(first["status"],if configured {"ready"} else {"not_configured"});
         let p = &first["series"][0]["points"][0];
         assert_eq!(p["value"],100.0);assert_eq!(p["inputs"][0]["receipt"],RECEIPT);
         if configured {

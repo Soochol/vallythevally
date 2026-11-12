@@ -17,6 +17,7 @@ const REASON: Record<FinancialReason, string> = {
 const STATUS: Record<string, string> = {
   available: "확인", unpublished: "미공시", missing_item: "항목 없음", not_calculable: "산출 불가", failed: "조회 실패", pending: "수집 대기",
   unsupported: "재무지표 미지원", missing_report: "비교 보고서 없음", not_configured: "DART 연동 미설정 · 서버의 OPENDART_API_KEY 설정이 필요합니다",
+  not_collected: "미수집 · 재무자료 창에서 전체 업데이트를 시작하세요",
   collecting: "재무자료 수집 중", ready: "확인 완료", stale: "저장 자료 · 갱신 대기", partial_failure: "일부 조회 실패",
 };
 const FAILURE: Record<string, string> = {

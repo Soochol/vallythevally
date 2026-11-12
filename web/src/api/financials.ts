@@ -1,7 +1,9 @@
-import { queryOptions, type QueryClient, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useEffect } from "react";
+import { queryOptions, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { FinancialPeriod } from "./generated/FinancialPeriod";
 import type { FinancialsPage } from "./generated/FinancialsPage";
-import { getJson, sendJson } from "./http";
+import { updateActive, useFinancialUpdate } from "./financialUpdate";
+import { getJson } from "./http";
 
 interface FinancialRequest {
   symbol: string;
@@ -18,27 +20,18 @@ export const financialsQuery = (request: FinancialRequest) => queryOptions({
   retry: false,
 });
 
-export async function refreshFinancials(client: QueryClient, request: FinancialRequest): Promise<void> {
-  await client.cancelQueries({ queryKey: keyOf(request) });
-  try {
-    await sendJson<FinancialsPage>("POST", urlOf(request), "{}");
-  } finally {
-    await client.cancelQueries({ queryKey: keyOf(request) });
-    await client.invalidateQueries({ queryKey: keyOf(request) });
-  }
-}
-
 export function useFinancials(symbol: string, period: FinancialPeriod, enabled: boolean) {
   const client = useQueryClient();
+  const update = useFinancialUpdate(enabled).data;
+  const active = updateActive(update?.status);
+  useEffect(() => {
+    if (enabled) void client.invalidateQueries({ queryKey: ["financials"] });
+  }, [client, enabled, update?.id, update?.status, update?.completedCompanies, update?.failedCompanies, update?.phase, update?.historyCompletedCompanies, update?.historyFailedCompanies]);
   const request = { symbol, period };
   const query = useQuery({
     ...financialsQuery(request),
     enabled,
-    refetchInterval: (q) => enabled && (q.state.data?.status === "collecting" || q.state.data?.status === "stale") ? 1000 : false,
+    refetchInterval: () => enabled && active ? 1000 : false,
   });
-  const refresh = useMutation({
-    mutationFn: (request: FinancialRequest) => refreshFinancials(client, request),
-  });
-  const current = refresh.variables?.symbol === symbol && refresh.variables.period === period;
-  return { ...query, refresh: () => refresh.mutate(request), refreshError: current ? refresh.error : null, refreshing: current && refresh.isPending };
+  return query;
 }

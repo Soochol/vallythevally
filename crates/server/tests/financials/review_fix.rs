@@ -16,7 +16,7 @@ fn annual_calls(fake: &Fake, endpoint: &str) -> usize {
 async fn finished(service: &Arc<Financials>, stock: &str, preferred: bool) -> server::financials::model::Snapshot {
     tokio::time::timeout(Duration::from_secs(20),async {
         loop {
-            let snapshot = service.open(stock,preferred,false).await;
+            let snapshot = service.update_company(stock,preferred,false).await;
             if snapshot.status != "collecting" { break snapshot; }
             tokio::time::sleep(Duration::from_millis(20)).await;
         }
@@ -38,7 +38,7 @@ async fn partial_first_page_is_a_retryable_source_failure_and_preserves_existing
             let service = Financials::new(Some(fake.client()),store.clone(),clock.clone());
             let previous = if collected { Some(settled_stock(&service,COMMON,false).await.collection) } else { None };
             fake.state.lock().unwrap().discovery_search = Some(broken);
-            let failed = service.open(STOCK,true,false).await;
+            let failed = service.update_company(STOCK,true,false).await;
             assert_eq!(failed.status,"failed");
             assert_eq!(failed.failure,Some(Failure::InvalidResponse));
             assert!(failed.reason.is_none());
@@ -49,7 +49,7 @@ async fn partial_first_page_is_a_retryable_source_failure_and_preserves_existing
             fake.state.lock().unwrap().discovery_search = Some(search(ENTRY,1));
             for elapsed in [0,59] {
                 clock.jump(attempted + elapsed - clock.now().unix());
-                assert_eq!(service.open(STOCK,true,false).await.failure,Some(Failure::InvalidResponse));
+                assert_eq!(service.update_company(STOCK,true,false).await.failure,Some(Failure::InvalidResponse));
                 assert_eq!(fake.count("search"),1);
             }
             assert_eq!(settled_stock(&service,"000001",false).await.status,"ready");
@@ -97,7 +97,7 @@ async fn conflicting_document_or_receipt_identity_never_persists_provenance() {
         let dir = tempdir();
         let store = Store::open(&dir.path().join("financials.db")).await.unwrap();
         let service = Financials::new(Some(fake.client()),store.clone(),clock());
-        let snapshot = service.open(STOCK,true,false).await;
+        let snapshot = service.update_company(STOCK,true,false).await;
         assert_eq!(snapshot.status,"unsupported");
         assert_eq!(snapshot.reason,Some("company_mapping_unverified"));
         assert!(snapshot.failure.is_none());
@@ -124,7 +124,7 @@ async fn http_finished(client: &reqwest::Client, base: &str) -> Value {
 }
 
 #[tokio::test]
-async fn delayed_manual_connection_follows_running_automatic_collection_and_preserves_price_and_other_company() {
+async fn repeated_manual_start_during_mapping_coalesces_and_preserves_price_and_other_company() {
     use std::os::unix::fs::PermissionsExt;
     for source_failure in [false,true] {
         let fake = source().await;
@@ -165,33 +165,37 @@ async fn delayed_manual_connection_follows_running_automatic_collection_and_pres
             tokio::spawn(async move { client.post(format!("{base}/api/symbols/{STOCK}/financial-source")).send().await.unwrap() })
         };
         until_call(&fake,"search",1).await;
-        assert_eq!(tokio::time::timeout(Duration::from_secs(1),http_stock(&client,&base,COMMON)).await.unwrap()["status"],"collecting");
-        until_call(&fake,"statement_stream",1).await;
+        assert_eq!(tokio::time::timeout(Duration::from_secs(1),http_stock(&client,&base,COMMON)).await.unwrap()["status"],"ready");
+        http_start(&client, &base).await;
         {
             let mut state = fake.state.lock().unwrap();
             state.statement_amounts.insert(COMPANY.into(),"175".into());
+            state.correction = true;
             state.discovery_paused = None;
-            if source_failure { state.failures.insert("fnlttSinglAcntAll.json/2015/11011".into(),"020".into()); }
+            if source_failure { state.failures.insert("fnlttSinglAcntAll.json/2015/11011".into(),"900".into()); }
         }
         let response = tokio::time::timeout(Duration::from_secs(3),manual).await.unwrap().unwrap();
         let accepted: Value = serde_json::from_slice(&response.bytes().await.unwrap()).unwrap();
-        assert_eq!(accepted["status"],"collecting");
-        assert_eq!(accepted["collection"]["refresh_version"],before.refresh_version);
+        assert_eq!(accepted["status"],"not_collected");
+        assert_eq!(accepted["collection"]["refresh_version"],0);
+        assert!(accepted["security"].is_null());
         assert_eq!(tokio::time::timeout(Duration::from_secs(1),client.get(&price).send()).await.unwrap().unwrap().status(),StatusCode::OK);
         let saved_other = tokio::time::timeout(Duration::from_secs(1),http_stock(&client,&base,"005930")).await.unwrap();
         assert_eq!(saved_other["collection"]["reports"],serde_json::to_value(&other.reports).unwrap());
         assert_eq!(store.collection(COMPANY).await.unwrap().reports["2015/11011"].statement.refresh_version,before.refresh_version);
+        until_call(&fake,"statement_stream",1).await;
         fake.state.lock().unwrap().stream_paused_report = None;
+        http_settled(&client, &base).await;
         let result = http_finished(&client,&base).await;
         let collection = store.collection(COMPANY).await.unwrap();
         assert_eq!(collection.refresh_version,before.refresh_version + 1);
         assert_eq!(collection.disclosure_version,collection.refresh_version);
-        assert_eq!(annual_calls(&fake,"fnlttSinglAcntAll.json"),2);
+        assert_eq!(annual_calls(&fake,"fnlttSinglAcntAll.json"),if source_failure { 4 } else { 2 });
         assert_eq!(annual_calls(&fake,"alotMatter.json"),2);
         let annual = &collection.reports["2015/11011"].statement;
         if source_failure {
             assert_eq!(result["status"],"partial_failure");
-            assert_eq!(annual.failure,Some(Failure::RateLimited));
+            assert_eq!(annual.failure,Some(Failure::Remote));
             assert_eq!(annual.refresh_version,before.refresh_version);
             assert_eq!(annual.data.as_ref().unwrap().accounts[0].fields["thstrm_amount"],"100");
         } else {
@@ -222,9 +226,9 @@ async fn pending_manual_refresh_survives_active_collection_storage_failure_and_r
         state.discovery_paused = Some("search".into());
         state.stream_paused_report = Some("11013".into());
     }
-    let manual = { let service = service.clone(); tokio::spawn(async move { service.open(STOCK,true,true).await }) };
+    let manual = { let service = service.clone(); tokio::spawn(async move { service.update_company(STOCK,true,true).await }) };
     until_call(&fake,"search",1).await;
-    assert_eq!(service.open(COMMON,false,false).await.status,"collecting");
+    assert_eq!(service.update_company(COMMON,false,false).await.status,"collecting");
     until_call(&fake,"statement_stream",1).await;
     fake.state.lock().unwrap().discovery_paused = None;
     assert_eq!(tokio::time::timeout(Duration::from_secs(3),manual).await.unwrap().unwrap().status,"collecting");
@@ -239,9 +243,10 @@ async fn pending_manual_refresh_survives_active_collection_storage_failure_and_r
     assert_eq!(settled_stock(&service,"000001",false).await.status,"ready");
     sqlx::query("DROP TRIGGER fail_pending_refresh").execute(&mut connection).await.unwrap();
     fake.state.lock().unwrap().statement_amounts.insert(COMPANY.into(),"175".into());
+    fake.state.lock().unwrap().correction = true;
     for elapsed in [0,59] {
         clock.jump(attempted + elapsed - clock.now().unix());
-        assert_eq!(service.open(STOCK,true,false).await.failure,Some(Failure::Storage));
+        assert_eq!(service.update_company(STOCK,true,false).await.failure,Some(Failure::Storage));
         assert_eq!(annual_calls(&fake,"fnlttSinglAcntAll.json"),1);
     }
     clock.jump(2);

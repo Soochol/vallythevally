@@ -4,14 +4,26 @@ use axum::{Json, Router, extract::{Path, Query, State}, routing::get};
 use domain::{Symbol, SymbolKind};
 use serde::Deserialize;
 
-use crate::{api::{ApiErrorCode, FinancialPeriod, FinancialsPage}, http::ApiFailure, symbols::SymbolDirectory};
+use crate::{api::{ApiErrorCode, FinancialPeriod, FinancialsPage, FinancialUpdatePage}, http::ApiFailure, symbols::SymbolDirectory};
 use super::{Financials, model::{Collection, Snapshot}};
 
 #[derive(Clone)]
 struct RouteState { service: Arc<Financials>, symbols: Arc<SymbolDirectory> }
 
 pub fn routes(service: Arc<Financials>, symbols: Arc<SymbolDirectory>) -> Router {
-    Router::new().route("/api/symbols/{code}/financial-source", get(open).post(refresh)).route("/api/symbols/{code}/financials", get(indicators).post(refresh_indicators)).method_not_allowed_fallback(|| async { ApiFailure::new(ApiErrorCode::MethodNotAllowed, "지원하지 않는 요청 방식입니다") }).with_state(RouteState { service, symbols })
+    Router::new().route("/api/financial-update", get(update_status).post(start_update)).route("/api/financial-update/pause", axum::routing::post(pause_update)).route("/api/financial-update/resume", axum::routing::post(resume_update)).route("/api/symbols/{code}/financial-source", get(open).post(refresh)).route("/api/symbols/{code}/financials", get(indicators).post(refresh_indicators)).method_not_allowed_fallback(|| async { ApiFailure::new(ApiErrorCode::MethodNotAllowed, "지원하지 않는 요청 방식입니다") }).with_state(RouteState { service, symbols })
+}
+
+async fn update_status(State(state): State<RouteState>) -> Json<FinancialUpdatePage> { Json(state.service.update_status().await) }
+
+async fn pause_update(State(state): State<RouteState>) -> Json<FinancialUpdatePage> { Json(state.service.pause_update().await) }
+async fn resume_update(State(state): State<RouteState>) -> Json<FinancialUpdatePage> { Json(state.service.resume_update().await) }
+
+async fn start_update(State(state): State<RouteState>) -> Result<Json<FinancialUpdatePage>, ApiFailure> { start(&state).await.map(Json) }
+
+async fn start(state: &RouteState) -> Result<FinancialUpdatePage, ApiFailure> {
+    let directory = state.symbols.updates().borrow().clone().ok_or_else(|| ApiFailure::new(ApiErrorCode::KiwoomUnavailable, "종목 목록을 아직 받지 못했습니다"))?;
+    Ok(state.service.start_update(directory.all().cloned().collect()).await)
 }
 
 async fn open(State(state): State<RouteState>, Path(code): Path<String>) -> Result<Json<Snapshot>, ApiFailure> {
@@ -29,7 +41,8 @@ async fn snapshot(state: RouteState, code: String, force: bool) -> Result<Snapsh
     if !matches!(info.kind, SymbolKind::Common | SymbolKind::Preferred) {
         return Ok(Snapshot { status: "unsupported", security: None, collection: Collection::default(), failure: None, reason: Some("unsupported_product") });
     }
-    Ok(state.service.open(&code, info.kind == SymbolKind::Preferred, force).await)
+    if force { start(&state).await?; }
+    Ok(state.service.read(&code).await)
 }
 
 #[derive(Deserialize)]

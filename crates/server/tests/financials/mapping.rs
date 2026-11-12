@@ -43,7 +43,7 @@ pub(super) fn tempdir() -> tempfile::TempDir {
 
 pub(super) async fn settled_stock(service: &Arc<Financials>, stock: &str, preferred: bool) -> server::financials::model::Snapshot {
     for _ in 0..300 {
-        let snapshot = service.open(stock,preferred,false).await;
+        let snapshot = service.update_company(stock,preferred,false).await;
         if snapshot.status != "collecting" { return snapshot; }
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
@@ -56,7 +56,7 @@ async fn explicit_listing_notice_shares_company_collection_and_preserves_separat
     let dir = tempdir();
     let store = Store::open(&dir.path().join("financials.db")).await.unwrap();
     let service = Financials::new(Some(fake.client()),store.clone(),clock());
-    let (common, preferred) = tokio::join!(service.open("005930",false,false),service.open("005935",true,false));
+    let (common, preferred) = tokio::join!(service.update_company("005930",false,false),service.update_company("005935",true,false));
     let common = common.security.unwrap();
     let preferred = preferred.security.unwrap();
     assert_eq!(common.company.corp_code,preferred.company.corp_code);
@@ -90,7 +90,7 @@ async fn explicit_listing_notice_shares_company_collection_and_preserves_separat
     fake.state.lock().unwrap().notice_status = Some(StatusCode::NOT_FOUND);
     let before = fake.count("notice");
     let restarted = Financials::new(Some(fake.client()),store,clock());
-    let saved = restarted.open("005935",true,false).await;
+    let saved = restarted.update_company("005935",true,false).await;
     assert_eq!(saved.status,"ready");
     assert_eq!(saved.security.unwrap().evidence,preferred.security.unwrap().evidence);
     assert_eq!(fake.count("notice"),before);
@@ -196,7 +196,7 @@ async fn unrecognized_notice_retries_after_sixty_seconds(body: String) {
         let service = Financials::new(Some(fake.client()),store.clone(),clock.clone());
         let previous = if already_collected { Some(settled(&service).await.collection) } else { None };
         fake.state.lock().unwrap().notice = Some(body.clone());
-        let failed = service.open("005935",true,false).await;
+        let failed = service.update_company("005935",true,false).await;
         assert_eq!(failed.status,"failed");
         assert_eq!(failed.failure,Some(Failure::InvalidResponse));
         assert!(failed.reason.is_none());
@@ -205,7 +205,7 @@ async fn unrecognized_notice_retries_after_sixty_seconds(body: String) {
         fake.state.lock().unwrap().notice = Some(NOTICE.into());
         for elapsed in [0,59] {
             clock.jump(elapsed);
-            let waiting = service.open("005935",true,false).await;
+            let waiting = service.update_company("005935",true,false).await;
             assert_eq!(waiting.status,"failed");
             assert_eq!(waiting.failure,Some(Failure::InvalidResponse));
             assert_eq!(fake.count("notice"),1);
@@ -247,7 +247,7 @@ async fn valid_conflicting_notices_remain_mapping_absence_rather_than_source_fai
         let dir = tempdir();
         let store = Store::open(&dir.path().join("financials.db")).await.unwrap();
         let service = Financials::new(Some(fake.client()),store.clone(),clock());
-        let snapshot = service.open("005935",true,false).await;
+        let snapshot = service.update_company("005935",true,false).await;
         assert_eq!(snapshot.status,"unsupported");
         assert_eq!(snapshot.reason,Some("company_mapping_unverified"));
         assert!(snapshot.failure.is_none());
@@ -275,12 +275,12 @@ async fn first_and_mid_notice_failures_retry_without_discarding_saved_company_or
                     _ => unreachable!(),
                 }
             }
-            let failed = service.open("005935",true,true).await;
+            let failed = service.update_company("005935",true,true).await;
             assert_eq!(failed.status,"failed");
             assert_eq!(failed.failure,Some(failure));
             assert!(store.security("005935").await.unwrap().is_none());
             let before = fake.count("notice");
-            assert_eq!(service.open("005935",true,false).await.failure,Some(failure));
+            assert_eq!(service.update_company("005935",true,false).await.failure,Some(failure));
             assert_eq!(fake.count("notice"),before);
             if let Some(previous) = &previous {
                 assert_eq!(serde_json::to_value(store.collection(CORP).await.unwrap()).unwrap(),serde_json::to_value(previous).unwrap());
@@ -320,39 +320,46 @@ async fn first_and_mid_preferred_source_failures_leave_real_price_api_usable() {
             let base = format!("http://{}",server.addr().await);
             let price = format!("{base}/api/bars?symbol=005930&period=D&limit=5");
             assert_eq!(client.get(&price).send().await.unwrap().status(),StatusCode::OK);
-            let previous = if already_collected { Some(http_settled(&client,&base).await["collection"].clone()) } else { None };
+            let previous = if already_collected {
+                let store = Store::open(&dir.path().join("run/financials.db")).await.unwrap();
+                let service = Financials::new(Some(fake.client()), store, clock());
+                Some(serde_json::to_value(settled(&service).await.collection).unwrap())
+            } else { None };
             {
                 let mut state = fake.state.lock().unwrap();
                 state.notice_status = notice_status;
                 state.notice = Some(body.clone());
             }
+            http_start(&client, &base).await;
+            http_settled(&client, &base).await;
             let response = client.get(format!("{base}/api/symbols/005935/financial-source")).send().await.unwrap();
             let snapshot: Value = serde_json::from_slice(&response.bytes().await.unwrap()).unwrap();
             assert_eq!(snapshot["status"],"failed");
             assert_eq!(snapshot["failure"],expected_failure);
             assert_eq!(tokio::time::timeout(Duration::from_secs(1),client.get(&price).send()).await.unwrap().unwrap().status(),StatusCode::OK);
-            if let Some(previous) = previous { assert_eq!(http_snapshot(&client,&base).await["collection"],previous); }
+            if let Some(previous) = previous { assert_saved_report_fetches(&http_snapshot(&client,&base).await["collection"], &previous); }
             assert!(!server.stop().await.contains(KEY));
         }
     }
 }
 
-fn integrated_receipt(year: i32, code: &str) -> String {
-    match code {
+fn integrated_receipt(year: i32, code: &str, corrected: bool) -> String {
+    let original = match code {
         "11013"=>format!("{year}0515000001"), "11012"=>format!("{year}0815000001"),
         "11014"=>format!("{year}1115000001"), _=>format!("{}0331000001",year+1),
-    }
+    };
+    if corrected { format!("{}2", &original[..13]) } else { original }
 }
 
-fn integrated_statement(year: i32, code: &str) -> (Vec<BTreeMap<String,String>>, String) {
+fn integrated_statement(year: i32, code: &str, corrected: bool) -> (Vec<BTreeMap<String,String>>, String) {
     let index=REPORT_CODES.iter().position(|c|*c==code).unwrap();
     let end=KstDate::new(year,(index as u8+1)*3,1).unwrap().last_of_month().to_string();
     let start=format!("{year}-01-01");
     let quarter=if code=="11011" {start.clone()} else {format!("{year}-{:02}-01",index*3+1)};
-    let receipt=integrated_receipt(year,code);
+    let receipt=integrated_receipt(year,code,corrected);
     let mut rows=Vec::new();
     for (section,id,current,cumulative) in [
-        ("IS","ifrs-full_Revenue",["100","100","100","1000"][index],Some(["100","200","300","1000"][index])),
+        ("IS","ifrs-full_Revenue",if corrected { ["150","150","150","1200"][index] } else { ["100","100","100","1000"][index] },Some(if corrected { ["150","250","350","1200"][index] } else { ["100","200","300","1000"][index] })),
         ("IS","dart_OperatingIncomeLoss",["-10","-10","-10","-100"][index],Some(["-10","-20","-30","-100"][index])),
         ("IS","ifrs-full_ProfitLossAttributableToOwnersOfParent",["10","20","30","100"][index],Some(["10","30","60","100"][index])),
         ("CF","ifrs-full_CashFlowsFromUsedInInvestingActivities",["-100","-200","-300","-400"][index],Some(["-100","-200","-300","-400"][index])),
@@ -377,29 +384,36 @@ fn integrated_statement(year: i32, code: &str) -> (Vec<BTreeMap<String,String>>,
     (rows,xml)
 }
 
-pub(super) fn integrated_response(endpoint: &str, params: &BTreeMap<String,String>) -> Response {
+pub(super) fn integrated_response(endpoint: &str, params: &BTreeMap<String,String>, corrections: &std::collections::BTreeSet<(i32, String)>) -> Response {
     match endpoint {
         "list.json"=>{
-            let rows:Vec<_>=(2015..=2016).flat_map(|year|REPORT_CODES.map(move |code| {
-                let receipt=integrated_receipt(year,code);
-                let (name,month)=match code {"11013"=>("분기보고서",3),"11012"=>("반기보고서",6),"11014"=>("분기보고서",9),_=>("사업보고서",12)};
-                json!({"corp_code":CORP,"rcept_no":receipt,"rcept_dt":&receipt[..8],"report_nm":format!("{name} ({year}.{month:02})")})
-            })).collect();
+            let mut rows = Vec::new();
+            for year in 2015..=2017 {
+                for code in REPORT_CODES {
+                    if year > 2016 && !corrections.contains(&(year, code.into())) { continue; }
+                    for corrected in [false, true] {
+                        if corrected && !corrections.contains(&(year, code.into())) { continue; }
+                        let receipt = integrated_receipt(year, code, corrected);
+                        let (name, month) = match code { "11013" => ("분기보고서", 3), "11012" => ("반기보고서", 6), "11014" => ("분기보고서", 9), _ => ("사업보고서", 12) };
+                        rows.push(json!({"corp_code":CORP,"rcept_no":receipt,"rcept_dt":&receipt[..8],"report_nm":format!("{}{name} ({year}.{month:02})", if corrected { "[기재정정]" } else { "" })}));
+                    }
+                }
+            }
             axum::Json(json!({"status":"000","page_no":1,"total_page":1,"list":rows})).into_response()
         }
         "fnlttSinglAcntAll.json"=>{
             let year=params["bsns_year"].parse::<i32>().unwrap();
-            if !(2015..=2016).contains(&year) {return axum::Json(json!({"status":"013"})).into_response();}
-            axum::Json(json!({"status":"000","list":integrated_statement(year,&params["reprt_code"]).0})).into_response()
+            if !(2015..=2017).contains(&year) || (year > 2016 && !corrections.contains(&(year, params["reprt_code"].clone()))) {return axum::Json(json!({"status":"013"})).into_response();}
+            axum::Json(json!({"status":"000","list":integrated_statement(year,&params["reprt_code"],corrections.contains(&(year, params["reprt_code"].clone()))).0})).into_response()
         }
         "fnlttXbrl.xml"=>{
-            let (year,code)=(2015..=2016).flat_map(|year|REPORT_CODES.map(move |code|(year,code))).find(|(year,code)|integrated_receipt(*year,code)==params["rcept_no"]).unwrap();
-            zipped("integrated.xbrl",&integrated_statement(year,code).1).into_response()
+            let (year,code,corrected)=(2015..=2017).flat_map(|year|REPORT_CODES.into_iter().flat_map(move |code|[false,true].map(move |corrected|(year,code,corrected)))).find(|(year,code,corrected)|integrated_receipt(*year,code,*corrected)==params["rcept_no"]).unwrap();
+            zipped("integrated.xbrl",&integrated_statement(year,code,corrected).1).into_response()
         }
         "alotMatter.json"=>{
             let year=params["bsns_year"].parse::<i32>().unwrap();
-            if !(2015..=2016).contains(&year) {return axum::Json(json!({"status":"013"})).into_response();}
-            let rows:Vec<_>=[("보통주","10"),("우선주","7")].map(|(class,value)|json!({"corp_code":CORP,"stlm_dt":format!("{year}-12-31"),"rcept_no":integrated_receipt(year,"11011"),"se":"주당 현금배당금(원)","stock_knd":class,"thstrm":value})).into_iter().collect();
+            if !(2015..=2017).contains(&year) || (year > 2016 && !corrections.contains(&(year, "11011".into()))) {return axum::Json(json!({"status":"013"})).into_response();}
+            let rows:Vec<_>=[("보통주","10"),("우선주","7")].map(|(class,value)|json!({"corp_code":CORP,"stlm_dt":format!("{year}-12-31"),"rcept_no":integrated_receipt(year,"11011",corrections.contains(&(year, "11011".into()))),"se":"주당 현금배당금(원)","stock_knd":class,"thstrm":value})).into_iter().collect();
             axum::Json(json!({"status":"000","list":rows})).into_response()
         }
         _=>unreachable!(),
@@ -427,9 +441,11 @@ async fn preferred_mapping_calculations_and_quarter_year_prices_work_together() 
     let client=reqwest::Client::new();
     let prices:Vec<_>=["005930","005935"].into_iter().flat_map(|stock|["Q","Y"].map(|period|format!("{base}/api/bars?symbol={stock}&period={period}&limit=5"))).collect();
     for url in &prices {assert_eq!(client.get(url).send().await.unwrap().status(),StatusCode::OK);}
-    assert_eq!(integrated_page(&client,&base,"005930","Y").await["status"],"collecting");
+    assert_eq!(integrated_page(&client,&base,"005930","Y").await["status"],"not_collected");
+    http_start(&client, &base).await;
+    http_settled(&client, &base).await;
     let preferred=integrated_page(&client,&base,"005935","Y").await;
-    assert_eq!(preferred["corpCode"],CORP);assert_eq!(preferred["status"],"collecting");
+    assert_eq!(preferred["corpCode"],CORP);assert_eq!(preferred["status"],"ready");
     assert_eq!(preferred["shareClassReason"],"preferred_issue_class_unverified");
     for url in &prices {assert_eq!(tokio::time::timeout(Duration::from_secs(1),client.get(url).send()).await.unwrap().unwrap().status(),StatusCode::OK);}
     let mut ready=None;
