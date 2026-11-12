@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use axum::{Router, extract::{Path, Query, State}, http::StatusCode, response::{IntoResponse, Response}, routing::get};
 use serde_json::{Value, json};
-use server::{api::{FinancialUpdatePage, FinancialUpdateStatus}, clock::{Clock, kst}, config::Secret, financials::{Financials, client::Client, model::{Basis, Failure, FactPeriod, Snapshot, Verification, REPORT_CODES}, store::Store, xbrl}};
+use server::{api::{FinancialUpdatePage, FinancialUpdateStatus}, clock::{Clock, kst}, config::Secret, financials::{Financials, client::{Client, Fault}, model::{Basis, Failure, FactPeriod, Snapshot, Verification, REPORT_CODES}, store::Store, xbrl}};
 use domain::KstDate;
 
 const KEY: &str = "synthetic-dart-secret-for-test-159";
@@ -386,14 +386,14 @@ async fn daily_and_manual_refresh_replace_historical_corrections_and_preserve_go
 #[tokio::test]
 async fn absence_can_fall_back_but_bad_cfs_cannot_and_missing_mapping_has_a_reason() {
     let fake = Fake::start().await;
-    assert_eq!(fake.client().resolve("005935",true).await.unwrap_err(),Failure::InvalidResponse);
+    assert_eq!(fake.client().resolve("005935",true).await.unwrap_err(),Fault::Failure(Failure::InvalidResponse));
     fake.state.lock().unwrap().kind_other_code = true;
     assert!(fake.client().resolve("005935",true).await.unwrap().is_none(),"대표 보통주 응답을 우선주에 붙이지 않는다");
     fake.state.lock().unwrap().no_cfs = true;
     let result = fake.client().statement(CORP,2015,"11013").await.unwrap().unwrap();
     assert_eq!(result.0,Basis::OFS);
     fake.state.lock().unwrap().failures.insert("fnlttSinglAcntAll.json".into(),"020".into());
-    assert_eq!(fake.client().statement(CORP,2015,"11013").await.unwrap_err(),Failure::RateLimited);
+    assert_eq!(fake.client().statement(CORP,2015,"11013").await.unwrap_err(),Fault::Failure(Failure::RateLimited));
 }
 
 #[tokio::test]
@@ -516,7 +516,7 @@ async fn one_company_mapping_failure_does_not_poison_the_directory_retry() {
     let fake = Fake::start().await;
     let client = fake.client();
     fake.state.lock().unwrap().failures.insert("corpCode.xml".into(),"010".into());
-    assert_eq!(client.resolve("005930",false).await.unwrap_err(),Failure::Authentication);
+    assert_eq!(client.resolve("005930",false).await.unwrap_err(),Fault::Failure(Failure::Authentication));
     fake.state.lock().unwrap().failures.clear();
     assert!(client.resolve("005930",false).await.unwrap().is_some());
 }

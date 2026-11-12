@@ -1,5 +1,6 @@
 pub mod client;
 pub mod calculate;
+mod control;
 pub mod model;
 mod routes;
 mod updates;
@@ -12,8 +13,8 @@ use std::sync::Arc;
 use domain::{KstDate, KstTime};
 
 use crate::clock::Clock;
-use client::{Client, Row, digits, field};
-use model::{Collection, Dividend, Failure, Report, Security, Snapshot, Statement, StatementRequest, REPORT_CODES};
+use client::{Client, Fault, Row, digits, field};
+use model::{Collection, Dividend, Failure, Interrupt, Report, Security, Snapshot, Statement, StatementRequest, REPORT_CODES};
 use store::Store;
 
 pub use routes::routes;
@@ -73,7 +74,7 @@ impl Financials {
         snapshot
     }
 
-    async fn security(&self, stock: &str, preferred: bool) -> Result<Option<Security>, Failure> {
+    async fn security(&self, stock: &str, preferred: bool) -> Result<Option<Security>, Fault> {
         let store = self.store()?;
         if let Some(security) = store.security(stock).await? { return Ok(Some(security)); }
         let Some(client) = &self.client else { return Ok(None); };
@@ -82,7 +83,7 @@ impl Financials {
         Ok(security)
     }
 
-    async fn collect(&self, security: &Security, scope: CollectionScope) -> Result<Collection, Failure> {
+    async fn collect(&self, security: &Security, scope: CollectionScope) -> Result<Collection, Interrupt> {
         let client = self.client.as_ref().unwrap();
         let corp = &security.company.corp_code;
         let store = self.store()?;
@@ -106,8 +107,7 @@ impl Financials {
                     collection.last_checked_at = Some(self.clock.now().unix());
                     collection.disclosure_version = collection.refresh_version;
                 }
-                Err(error @ (Failure::Paused | Failure::Yielded | Failure::Storage | Failure::Authentication | Failure::RateLimited)) => return Err(error),
-                Err(failure) => collection.disclosure_failure = Some(failure),
+                Err(fault) => collection.disclosure_failure = Some(fault.recorded()?),
             }
             store.save(corp, &collection).await?;
             if collection.disclosure_failure.is_some() { return Ok(collection); }
@@ -135,10 +135,9 @@ impl Financials {
                 loop {
                     let step = self.statement_step(client, corp, year, code, &collection.disclosures, report.statement_request.as_ref()).await;
                     let complete = match step {
-                        Err(error @ (Failure::Paused | Failure::Yielded | Failure::Storage | Failure::Authentication | Failure::RateLimited)) => return Err(error),
                         Ok(StatementStep::Continue(next)) => { report.statement_request = Some(next); false }
                         result => {
-                            let result = result.map(|step| match step { StatementStep::Done(value) => value, StatementStep::Continue(_) => unreachable!() });
+                            let result = match result { Ok(StatementStep::Done(value)) => Ok(value), Ok(StatementStep::Continue(_)) => unreachable!(), Err(fault) => Err(fault.recorded()?) };
                             let result = match result {
                                 Ok(Some(statement)) if report.statement.data.is_some() && statement.source_failure.is_some() => Err(statement.source_failure.unwrap()),
                                 other => other,
@@ -154,11 +153,11 @@ impl Financials {
                 }
             } else { report.statement.validated_version = Some(collection.disclosure_version); }
             if code == "11011" && (dividends_outdated(&report, &collection.disclosures) || report.dividends.checked_at.is_none() || report.dividends.failure.is_some() || (report.dividends.absent && (report_outdated || report.dividends.snapshot_version() < collection.unpublished_check_version))) {
-                let result = client.rows("alotMatter.json", &[("corp_code", corp.clone()), ("bsns_year", year.to_string()), ("reprt_code", code.into())]).await.and_then(|rows| {
-                    if rows.iter().any(|row| !receipt_is_current(&collection.disclosures, field(row, "rcept_no"))) { return Err(Failure::ReceiptMismatch); }
-                    dividends(rows, corp)
-                });
-                if let Err(error @ (Failure::Paused | Failure::Yielded | Failure::Storage | Failure::Authentication | Failure::RateLimited)) = result { return Err(error); }
+                let result = match client.rows("alotMatter.json", &[("corp_code", corp.clone()), ("bsns_year", year.to_string()), ("reprt_code", code.into())]).await {
+                    Ok(rows) if rows.iter().any(|row| !receipt_is_current(&collection.disclosures, field(row, "rcept_no"))) => Err(Failure::ReceiptMismatch),
+                    Ok(rows) => dividends(rows, corp),
+                    Err(fault) => Err(fault.recorded()?),
+                };
                 report.dividends.apply(result, self.clock.now().unix(), collection.refresh_version);
             } else if code == "11011" { report.dividends.validated_version = Some(collection.disclosure_version); }
             record_report(&mut collection, key, report);
@@ -167,7 +166,7 @@ impl Financials {
         Ok(collection)
     }
 
-    async fn statement_step(&self, client: &Client, corp: &str, year: i32, code: &str, disclosures: &[Row], pending: Option<&StatementRequest>) -> Result<StatementStep, Failure> {
+    async fn statement_step(&self, client: &Client, corp: &str, year: i32, code: &str, disclosures: &[Row], pending: Option<&StatementRequest>) -> Result<StatementStep, Fault> {
         let (basis, rows) = match pending {
             Some(StatementRequest::Xbrl { basis, rows }) => (*basis, rows.clone()),
             pending => {
@@ -182,13 +181,12 @@ impl Financials {
         let mut receipts: Vec<_> = rows.iter().map(|r| field(r, "rcept_no").to_owned()).collect();
         receipts.sort();
         receipts.dedup();
-        if receipts.len() != 1 { return Err(Failure::ReceiptMismatch); }
+        if receipts.len() != 1 { return Err(Failure::ReceiptMismatch.into()); }
         let receipt = &receipts[0];
-        if !receipt_is_current(disclosures, receipt) { return Err(Failure::ReceiptMismatch); }
+        if !receipt_is_current(disclosures, receipt) { return Err(Failure::ReceiptMismatch.into()); }
         let (files, source_failure) = match client.archive("fnlttXbrl.xml", &[("rcept_no", receipt.clone()), ("reprt_code", code.into())]).await {
             Ok(files) => (files, None),
-            Err(error @ (Failure::Paused | Failure::Yielded | Failure::Storage | Failure::Authentication | Failure::RateLimited)) => return Err(error),
-            Err(failure) => (Vec::new(), Some(failure)),
+            Err(fault) => match fault.recorded() { Ok(failure) => (Vec::new(), Some(failure)), Err(_) => return Err(fault) },
         };
         let reporting_month = disclosures.iter().find(|r| field(r, "rcept_no") == receipt).and_then(|r| reporting_month(field(r, "report_nm")));
         let corp = corp.to_owned();

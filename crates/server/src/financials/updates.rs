@@ -5,7 +5,7 @@ use domain::{SymbolInfo, SymbolKind};
 use serde::{Deserialize, Serialize};
 
 use crate::api::{FinancialUpdateFailure, FinancialUpdatePage, FinancialUpdateStatus as Status, FinancialUpdatePhase as Phase, FinancialUpdateStopReason as StopReason, UnixSeconds};
-use super::{Financials, CollectionScope, model::{Failure, Security, Snapshot}};
+use super::{Financials, CollectionScope, control::{Disposition, disposition}, model::{Collection, Failure, Interrupt, Security, Snapshot}};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum Launch { Start, Resume, Automatic }
@@ -22,9 +22,9 @@ impl UpdateRun {
         self.company_failures.remove(corp);
     }
 
-    fn finish_company(&mut self, corp: &str, failure: Option<Failure>) {
+    fn finish_company(&mut self, corp: &str, result: &Result<Collection, Interrupt>) {
         self.collecting = None;
-        if let Some(failure) = failure.filter(|failure| !matches!(failure, Failure::Paused | Failure::Yielded)) {
+        if let Err(Interrupt::Abort(failure)) = *result {
             tracing::warn!(?failure, "재무 자료를 수집하지 못했습니다");
             self.company_failures.insert(corp.into(), failure);
         }
@@ -281,15 +281,16 @@ impl Financials {
 
     async fn execute_update(self: &Arc<Self>, mut update: Update, mut stop: Option<super::client::Stop>) {
         loop {
-            let mut result = async {
+            let result = async {
                 if let Some(stop) = stop.take() {
-                    let confirmed = match self.client.as_ref().unwrap().confirm(stop).await { Err(Failure::Paused | Failure::Yielded) => return Ok(None), other => other? };
+                    let confirmed = self.client.as_ref().unwrap().confirm(stop).await.map_err(|fault| match fault.recorded() { Ok(failure) => Interrupt::Abort(failure), Err(interrupt) => interrupt })?;
                     self.update.lock().await.probing = false;
                     self.update_finished.notify_one();
                     if !confirmed { return Ok(None); }
                 }
-                self.perform_update(update).await
+                self.perform_update(update).await.map(Some)
             }.await;
+            let mut result = match result { Err(Interrupt::Halt(_)) => Ok(None), Err(Interrupt::Abort(failure)) => Err(failure), Ok(update) => Ok(update) };
             let mut run = self.update.lock().await;
             if result.is_ok() && !self.client.as_ref().unwrap().is_paused() && let Some(symbols) = run.pending_symbols.take() {
                 let next = async {
@@ -315,15 +316,15 @@ impl Financials {
             run.probing = false;
             run.pending_symbols = None;
             self.update_finished.notify_one();
-            if let Err(error) = result && !matches!(error, Failure::Authentication | Failure::RateLimited | Failure::Paused | Failure::Yielded) { run.failure = Some(error); }
+            if let Err(error) = result && disposition(error) != Disposition::StopJob { run.failure = Some(error); }
             break;
         }
     }
 
-    async fn perform_update(self: &Arc<Self>, mut update: Update) -> Result<Option<Update>, Failure> {
+    async fn perform_update(self: &Arc<Self>, mut update: Update) -> Result<Update, Interrupt> {
         let store = self.store()?;
         for index in 0..update.targets.len() {
-            if self.client.as_ref().unwrap().is_paused() || self.client.as_ref().unwrap().is_yielding() { return Ok(None); }
+            self.client.as_ref().unwrap().check_control()?;
             if !matches!(update.targets[index].resolution, Resolution::Pending) { continue; }
             let target = &update.targets[index];
             let resolved = self.security(&target.code, target.preferred).await;
@@ -333,9 +334,7 @@ impl Financials {
                     Resolution::Resolved(security)
                 }
                 Ok(None) => Resolution::Unverified,
-                Err(Failure::Paused | Failure::Yielded) => return Ok(None),
-                Err(error @ (Failure::Storage | Failure::Authentication | Failure::RateLimited)) => return Err(error),
-                Err(error) => Resolution::Failed(error),
+                Err(fault) => Resolution::Failed(fault.recorded()?),
             };
             store.save_update(&update).await?;
         }
@@ -343,14 +342,14 @@ impl Financials {
         update.status = Status::Collecting;
         store.save_update(&update).await?;
         for phase in [Phase::Recent, Phase::Changes, Phase::History] {
-            if self.client.as_ref().unwrap().is_paused() || self.client.as_ref().unwrap().is_yielding() { return Ok(None); }
+            self.client.as_ref().unwrap().check_control()?;
             if phase == Phase::Recent && matches!(update.phase, Phase::Changes | Phase::History) { continue; }
             if phase == Phase::Changes && update.phase == Phase::History { continue; }
             update.phase = phase;
             store.save_update(&update).await?;
             let companies: Vec<_> = update.companies.keys().cloned().collect();
             for corp in companies {
-                if self.client.as_ref().unwrap().is_paused() || self.client.as_ref().unwrap().is_yielding() { return Ok(None); }
+                self.client.as_ref().unwrap().check_control()?;
                 let company = update.companies.get_mut(&corp).unwrap();
                 if matches!(company.progress(phase), Outcome::Complete | Outcome::Failed(_)) { continue; }
                 let security = company.security.clone();
@@ -363,17 +362,12 @@ impl Financials {
                     store.save_update(&update).await?;
                     self.update.lock().await.begin_company(&corp);
                     let result = self.collect(&security, scope).await;
-                    self.update.lock().await.finish_company(&corp, result.as_ref().err().copied());
-                    let collection = match result {
-                        Ok(collection) => collection,
-                        Err(Failure::Paused | Failure::Yielded) => return Ok(None),
-                        Err(error) => return Err(error),
-                    };
-                    if self.client.as_ref().unwrap().is_paused() || self.client.as_ref().unwrap().is_yielding() { return Ok(None); }
+                    self.update.lock().await.finish_company(&corp, &result);
+                    let collection = result?;
+                    self.client.as_ref().unwrap().check_control()?;
                     let reports = collection.working_reports();
                     let error = collection.disclosure_failure.or_else(|| reports.values().filter(|report| scope.years().contains(&report.business_year)).find_map(|report| report.statement.failure.or(report.dividends.failure).or_else(|| report.statement.data.as_ref().and_then(|statement| statement.source_failure))));
-                    if let Some(error @ (Failure::Storage | Failure::Authentication | Failure::RateLimited)) = error { return Err(error); }
-                    if let Some(error) = error { Outcome::Failed(error) }
+                    if let Some(error) = error { Outcome::Failed(error.recorded()?) }
                     else if matches!(scope, CollectionScope::Changes(_)) || scope.years().all(|year| super::model::REPORT_CODES.iter().all(|code| reports.get(&format!("{year}/{code}")).is_some_and(|report| report.statement.checked_at.is_some() && (*code != "11011" || report.dividends.checked_at.is_some())))) { Outcome::Complete }
                     else { Outcome::Failed(Failure::InvalidResponse) }
                 };
@@ -384,10 +378,10 @@ impl Financials {
             }
             if phase == Phase::Recent { update.checked_at = Some(self.clock.now().unix()); store.save_update(&update).await?; }
         }
-        if self.client.as_ref().unwrap().is_paused() || self.client.as_ref().unwrap().is_yielding() { return Ok(None); }
+        self.client.as_ref().unwrap().check_control()?;
         update.phase = Phase::Complete;
         update.status = if update.page().failures.iter().any(|entry| entry.failure.is_some()) { Status::PartialFailure } else { Status::Ready };
-        Ok(Some(update))
+        Ok(update)
     }
 
     pub(super) async fn collection_state(&self, corp: &str) -> CollectionState { self.update.lock().await.collection_state(corp) }

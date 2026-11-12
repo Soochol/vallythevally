@@ -5,10 +5,6 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum Failure {
-    #[serde(skip)]
-    Paused,
-    #[serde(skip)]
-    Yielded,
     Authentication,
     Network,
     RateLimited,
@@ -17,6 +13,20 @@ pub enum Failure {
     Storage,
     SourceUnavailable,
     ReceiptMismatch,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Halt { Paused, Yielded }
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Interrupt { Halt(Halt), Abort(Failure) }
+
+impl From<Halt> for Interrupt {
+    fn from(halt: Halt) -> Self { Self::Halt(halt) }
+}
+
+impl From<Failure> for Interrupt {
+    fn from(failure: Failure) -> Self { Self::Abort(failure) }
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]

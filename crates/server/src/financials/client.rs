@@ -8,7 +8,7 @@ use serde_json::Value;
 use tokio::sync::Mutex;
 
 use crate::config::Secret;
-use super::model::{Basis, Company, Failure, Security};
+use super::model::{Basis, Company, Failure, Halt, Security};
 
 mod preferred;
 mod discovery;
@@ -17,6 +17,17 @@ mod discovery;
 mod tls_tests;
 
 pub type Row = BTreeMap<String, String>;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Fault { Halt(Halt), Failure(Failure) }
+
+impl From<Halt> for Fault {
+    fn from(halt: Halt) -> Self { Self::Halt(halt) }
+}
+
+impl From<Failure> for Fault {
+    fn from(failure: Failure) -> Self { Self::Failure(failure) }
+}
 
 const ATTEMPTS: u64 = 3;
 
@@ -61,12 +72,12 @@ impl Client {
         Ok(())
     }
 
-    async fn cached<T: DeserializeOwned>(&self, request: &str) -> Result<Option<T>, Failure> {
+    async fn cached<T: DeserializeOwned>(&self, request: &str) -> Result<Option<T>, Fault> {
         self.check_control()?;
         let journal = self.journal.lock().unwrap().clone();
         let Some(journal) = journal else { return Ok(None); };
-        if let Some(stop) = journal.store.stop().await? { return Err(stop.failure); }
-        journal.store.response(&journal.job, request).await?.map(|body| serde_json::from_str(&body).map_err(|_| Failure::Storage)).transpose()
+        if let Some(stop) = journal.store.stop().await? { return Err(stop.failure.into()); }
+        Ok(journal.store.response(&journal.job, request).await?.map(|body| serde_json::from_str(&body).map_err(|_| Failure::Storage)).transpose()?)
     }
 
     async fn checkpoint<T: Serialize>(&self, request: &str, value: &T) -> Result<(), Failure> {
@@ -80,40 +91,40 @@ impl Client {
 
     pub(super) fn pause(&self, paused: bool) { self.paused.store(paused, Ordering::SeqCst); }
     pub(super) fn is_paused(&self) -> bool { self.paused.load(Ordering::SeqCst) }
-    pub(super) fn check_control(&self) -> Result<(), Failure> {
-        if self.is_paused() { Err(Failure::Paused) } else if self.is_yielding() { Err(Failure::Yielded) } else { Ok(()) }
+    pub(super) fn check_control(&self) -> Result<(), Halt> {
+        if self.is_paused() { Err(Halt::Paused) } else if self.is_yielding() { Err(Halt::Yielded) } else { Ok(()) }
     }
     pub(super) fn yield_to_latest(&self, yielding: bool) { self.yielding.store(yielding, Ordering::SeqCst); }
     pub(super) fn is_yielding(&self) -> bool { self.yielding.load(Ordering::SeqCst) }
 
-    async fn retry<T, F, Fut>(&self, mut send: F) -> Result<T, Failure>
-    where F: FnMut() -> Fut, Fut: std::future::Future<Output = Result<T, Failure>> {
+    async fn retry<T, F, Fut>(&self, mut send: F) -> Result<T, Fault>
+    where F: FnMut() -> Fut, Fut: std::future::Future<Output = Result<T, Fault>> {
         for attempt in 0..ATTEMPTS {
             self.check_control()?;
             let result = send().await;
-            if !matches!(result, Err(Failure::Network | Failure::Remote)) || attempt + 1 == ATTEMPTS { return result; }
+            if !matches!(result, Err(Fault::Failure(Failure::Network | Failure::Remote))) || attempt + 1 == ATTEMPTS { return result; }
             tokio::time::sleep(Duration::from_millis(250 * (attempt + 1))).await;
         }
         unreachable!()
     }
 
-    async fn stop_after<T>(&self, result: Result<T, Failure>, request: Request) -> Result<T, Failure> {
+    async fn stop_after<T>(&self, result: Result<T, Fault>, request: Request) -> Result<T, Fault> {
         let journal = self.journal.lock().unwrap().clone();
-        if let Err(error @ (Failure::Authentication | Failure::RateLimited)) = &result && let Some(journal) = journal {
+        if let Err(Fault::Failure(error @ (Failure::Authentication | Failure::RateLimited))) = &result && let Some(journal) = journal {
             let next_check_at = (*error == Failure::RateLimited).then(|| crate::clock::next_daily(journal.clock.now(), domain::TimeOfDay::hms(7, 0, 0).unwrap()).unix());
             journal.store.save_stop(Some(&Stop { failure: *error, next_check_at, request })).await?;
         }
         result
     }
 
-    pub(super) async fn confirm(&self, mut stop: Stop) -> Result<bool, Failure> {
+    pub(super) async fn confirm(&self, mut stop: Stop) -> Result<bool, Fault> {
         let result = match &stop.request {
             Request::Json { endpoint, params } => {
                 let params: Vec<_> = params.iter().map(|(key, value)| (key.as_str(), value.clone())).collect();
                 match self.bytes(endpoint, &params).await {
                     Ok(bytes) => match self.json(&bytes) {
-                        Ok(value) => self.checkpoint(&format!("json/{endpoint}/{}", serde_json::to_string(&params).unwrap()), &value).await,
-                        Err(error) => Err(error),
+                        Ok(value) => self.checkpoint(&format!("json/{endpoint}/{}", serde_json::to_string(&params).unwrap()), &value).await.map_err(Fault::from),
+                        Err(error) => Err(error.into()),
                     },
                     Err(error) => Err(error),
                 }
@@ -121,7 +132,7 @@ impl Client {
             Request::Archive { endpoint, params } => {
                 let params: Vec<_> = params.iter().map(|(key, value)| (key.as_str(), value.clone())).collect();
                 match self.archive_response(endpoint, &params).await {
-                    Ok(files) => self.checkpoint(&format!("archive/{endpoint}/{}", serde_json::to_string(&params).unwrap()), &files).await,
+                    Ok(files) => self.checkpoint(&format!("archive/{endpoint}/{}", serde_json::to_string(&params).unwrap()), &files).await.map_err(Fault::from),
                     Err(error) => Err(error),
                 }
             }
@@ -129,8 +140,8 @@ impl Client {
         let journal = self.journal.lock().unwrap().clone().unwrap();
         match result {
             Ok(()) => { journal.store.save_stop(None).await?; Ok(true) }
-            Err(error @ (Failure::Storage | Failure::Paused | Failure::Yielded)) => Err(error),
-            Err(error) => {
+            Err(error @ (Fault::Halt(_) | Fault::Failure(Failure::Storage))) => Err(error),
+            Err(Fault::Failure(error)) => {
                 if matches!(error, Failure::Authentication | Failure::RateLimited) { stop.failure = error; }
                 stop.next_check_at = (stop.failure == Failure::RateLimited).then(|| crate::clock::next_daily(journal.clock.now(), domain::TimeOfDay::hms(7, 0, 0).unwrap()).unix());
                 journal.store.save_stop(Some(&stop)).await?;
@@ -139,7 +150,7 @@ impl Client {
         }
     }
 
-    async fn bytes(&self, endpoint: &str, params: &[(&str, String)]) -> Result<Vec<u8>, Failure> {
+    async fn bytes(&self, endpoint: &str, params: &[(&str, String)]) -> Result<Vec<u8>, Fault> {
         let mut pace = self.pace.lock().await;
         if let Some(last) = *pace { tokio::time::sleep_until(last + Duration::from_millis(250)).await; }
         self.check_control()?;
@@ -147,13 +158,13 @@ impl Client {
         let response = self.http.get(format!("{}/api/{endpoint}", self.base)).query(&[("crtfc_key", self.key.expose())]).query(params).send().await.map_err(|_| Failure::Network)?;
         drop(pace);
         match response.status().as_u16() {
-            401 | 403 => return Err(Failure::Authentication),
-            429 => return Err(Failure::RateLimited),
-            _ if !response.status().is_success() => return Err(Failure::Remote),
+            401 | 403 => return Err(Failure::Authentication.into()),
+            429 => return Err(Failure::RateLimited.into()),
+            _ if !response.status().is_success() => return Err(Failure::Remote.into()),
             _ => {}
         }
         let bytes = response.bytes().await.map_err(|_| Failure::Network)?;
-        if bytes.len() > 64 * 1024 * 1024 { return Err(Failure::InvalidResponse); }
+        if bytes.len() > 64 * 1024 * 1024 { return Err(Failure::InvalidResponse.into()); }
         Ok(bytes.to_vec())
     }
 
@@ -166,21 +177,21 @@ impl Client {
 
     pub(crate) fn redact(&self, value: &str) -> String { value.replace(self.key.expose(), "[redacted]") }
 
-    pub async fn response(&self, endpoint: &str, params: &[(&str, String)]) -> Result<Value, Failure> {
+    pub async fn response(&self, endpoint: &str, params: &[(&str, String)]) -> Result<Value, Fault> {
         let request = format!("json/{endpoint}/{}", serde_json::to_string(params).map_err(|_| Failure::InvalidResponse)?);
         if let Some(value) = self.cached(&request).await? { return Ok(value); }
-        let result = self.retry(|| async { self.json(&self.bytes(endpoint, params).await?) }).await;
+        let result = self.retry(|| async { Ok(self.json(&self.bytes(endpoint, params).await?)?) }).await;
         let value = self.stop_after(result, Request::Json { endpoint: endpoint.into(), params: params.iter().map(|(key, value)| ((*key).into(), value.clone())).collect() }).await?;
         self.checkpoint(&request, &value).await?;
         Ok(value)
     }
 
-    pub async fn rows(&self, endpoint: &str, params: &[(&str, String)]) -> Result<Vec<Row>, Failure> {
+    pub async fn rows(&self, endpoint: &str, params: &[(&str, String)]) -> Result<Vec<Row>, Fault> {
         let value = self.response(endpoint, params).await?;
-        rows(&value)
+        Ok(rows(&value)?)
     }
 
-    pub async fn archive(&self, endpoint: &str, params: &[(&str, String)]) -> Result<Vec<(String, String)>, Failure> {
+    pub async fn archive(&self, endpoint: &str, params: &[(&str, String)]) -> Result<Vec<(String, String)>, Fault> {
         let request = format!("archive/{endpoint}/{}", serde_json::to_string(params).map_err(|_| Failure::InvalidResponse)?);
         if let Some(value) = self.cached(&request).await? { return Ok(value); }
         let result = self.retry(|| self.archive_response(endpoint, params)).await;
@@ -189,27 +200,27 @@ impl Client {
         Ok(files)
     }
 
-    async fn archive_response(&self, endpoint: &str, params: &[(&str, String)]) -> Result<Vec<(String, String)>, Failure> {
+    async fn archive_response(&self, endpoint: &str, params: &[(&str, String)]) -> Result<Vec<(String, String)>, Fault> {
         let bytes = self.bytes(endpoint, params).await?;
         if !bytes.starts_with(b"PK") {
             if bytes.iter().find(|b| !b.is_ascii_whitespace()) == Some(&b'{') {
                 self.json(&bytes)?;
-                return Err(Failure::SourceUnavailable);
+                return Err(Failure::SourceUnavailable.into());
             }
             if let Ok(text) = std::str::from_utf8(&bytes)
                 && let Ok(xml) = roxmltree::Document::parse(text)
                 && let Some(status) = xml.descendants().find(|n| n.has_tag_name("status")).and_then(|n| n.text()) {
                 check_status(status)?;
-                return Err(Failure::SourceUnavailable);
+                return Err(Failure::SourceUnavailable.into());
             }
-            return Err(Failure::InvalidResponse);
+            return Err(Failure::InvalidResponse.into());
         }
         let key = self.key.expose().clone();
         let files = tokio::task::spawn_blocking(move || unzip(&bytes, &key)).await.map_err(|_| Failure::InvalidResponse)??;
         Ok(files)
     }
 
-    pub async fn resolve(&self, stock: &str, preferred: bool) -> Result<Option<Security>, Failure> {
+    pub async fn resolve(&self, stock: &str, preferred: bool) -> Result<Option<Security>, Fault> {
         let mut cached_directory = self.directory.lock().await;
         if cached_directory.is_none() {
             let files = self.archive("corpCode.xml", &[]).await?;
@@ -221,7 +232,7 @@ impl Client {
                     if row.get("corp_code").is_some_and(|s| digits(s, 8)) { companies.push(row); }
                 }
             }
-            if companies.is_empty() { return Err(Failure::InvalidResponse); }
+            if companies.is_empty() { return Err(Failure::InvalidResponse.into()); }
             *cached_directory = Some(Arc::new(companies));
         }
         let directory = cached_directory.as_ref().unwrap().clone();
@@ -253,7 +264,7 @@ impl Client {
         };
         if preferred && let Some(link) = preferred::for_stock(stock) && corp != link.corp_code { return Ok(None); }
         let company = self.response("company.json", &[("corp_code", corp.clone())]).await?;
-        if company.get("corp_code").is_some_and(|value| value != &corp) { return Err(Failure::InvalidResponse); }
+        if company.get("corp_code").is_some_and(|value| value != &corp) { return Err(Failure::InvalidResponse.into()); }
         let name = company["corp_name"].as_str().ok_or(Failure::InvalidResponse)?.to_owned();
         let fiscal_month = company["acc_mt"].as_str().and_then(|s| s.parse().ok()).filter(|m| (1..=12).contains(m));
         Ok(Some(Security {
@@ -263,17 +274,17 @@ impl Client {
         }))
     }
 
-    async fn kind_bytes(&self, path: &str, params: &[(&str, &str)]) -> Result<Vec<u8>, Failure> {
+    async fn kind_bytes(&self, path: &str, params: &[(&str, &str)]) -> Result<Vec<u8>, Fault> {
         let request = format!("kind/{path}/{}", serde_json::to_string(params).map_err(|_| Failure::InvalidResponse)?);
         if let Some(value) = self.cached(&request).await? { return Ok(value); }
         self.check_control()?;
         let bytes = self.retry(|| async {
             self.check_control()?;
             let response = self.kind_http.get(format!("{}{path}", self.kind_base)).query(params).send().await.map_err(|_| Failure::Network)?;
-            if !response.status().is_success() { return Err(Failure::Remote); }
-            response.bytes().await.map_err(|_| Failure::Network)
+            if !response.status().is_success() { return Err(Failure::Remote.into()); }
+            Ok(response.bytes().await.map_err(|_| Failure::Network)?)
         }).await?;
-        if bytes.len() > 1024 * 1024 { return Err(Failure::InvalidResponse); }
+        if bytes.len() > 1024 * 1024 { return Err(Failure::InvalidResponse.into()); }
         let mut redacted = Vec::with_capacity(bytes.len());
         let mut remaining = bytes.as_ref();
         let key = self.key.expose().as_bytes();
@@ -285,49 +296,49 @@ impl Client {
         Ok(redacted)
     }
 
-    async fn kind_companies(&self, stock: &str) -> Result<Vec<Row>, Failure> {
+    async fn kind_companies(&self, stock: &str) -> Result<Vec<Row>, Fault> {
         let bytes = self.kind_bytes("/common/searchcorpname.do", &[("method", "searchCorpNameJson"), ("searchCodeType", "number"), ("searchCorpName", stock)]).await?;
-        serde_json::from_slice(&bytes).map_err(|_| Failure::InvalidResponse)
+        Ok(serde_json::from_slice(&bytes).map_err(|_| Failure::InvalidResponse)?)
     }
 
-    pub async fn disclosures(&self, corp: &str, today: &str) -> Result<Vec<Row>, Failure> {
+    pub async fn disclosures(&self, corp: &str, today: &str) -> Result<Vec<Row>, Fault> {
         let through_date = self.journal.lock().unwrap().as_ref().map(|journal| journal.through_date.clone()).unwrap_or_else(|| today.into());
         let mut result = BTreeMap::new();
         let mut total = None;
         for page in 1..=10000 {
             let value = self.response("list.json", &[("corp_code", corp.into()), ("bgn_de", "20150101".into()), ("end_de", through_date.clone()), ("last_reprt_at", "N".into()), ("pblntf_ty", "A".into()), ("page_no", page.to_string()), ("page_count", "100".into())]).await?;
             if value["status"] == "013" {
-                return if page == 1 { Ok(Vec::new()) } else { Err(Failure::InvalidResponse) };
+                return if page == 1 { Ok(Vec::new()) } else { Err(Failure::InvalidResponse.into()) };
             }
             let number = |key: &str| value[key].as_u64().or_else(|| value[key].as_str()?.parse().ok()).ok_or(Failure::InvalidResponse);
             let pages = number("total_page")?;
-            if number("page_no")? != page || pages == 0 || pages > 10000 || total.is_some_and(|t| t != pages) { return Err(Failure::InvalidResponse); }
+            if number("page_no")? != page || pages == 0 || pages > 10000 || total.is_some_and(|t| t != pages) { return Err(Failure::InvalidResponse.into()); }
             total = Some(pages);
             let rows = rows(&value)?;
-            if rows.is_empty() { return Err(Failure::InvalidResponse); }
+            if rows.is_empty() { return Err(Failure::InvalidResponse.into()); }
             for row in rows {
                 let receipt = field(&row, "rcept_no");
-                if field(&row, "corp_code") != corp || !digits(receipt, 14) || result.contains_key(receipt) { return Err(Failure::InvalidResponse); }
+                if field(&row, "corp_code") != corp || !digits(receipt, 14) || result.contains_key(receipt) { return Err(Failure::InvalidResponse.into()); }
                 result.insert(receipt.to_owned(), row);
             }
             if page == pages { return Ok(result.into_values().collect()); }
         }
-        Err(Failure::InvalidResponse)
+        Err(Failure::InvalidResponse.into())
     }
 
-    pub async fn statement(&self, corp: &str, year: i32, report: &str) -> Result<Option<(Basis, Vec<Row>)>, Failure> {
+    pub async fn statement(&self, corp: &str, year: i32, report: &str) -> Result<Option<(Basis, Vec<Row>)>, Fault> {
         for basis in [Basis::CFS, Basis::OFS] {
             if let Some(rows) = self.statement_basis(corp, year, report, basis).await? { return Ok(Some((basis, rows))); }
         }
         Ok(None)
     }
 
-    pub(super) async fn statement_basis(&self, corp: &str, year: i32, report: &str, basis: Basis) -> Result<Option<Vec<Row>>, Failure> {
+    pub(super) async fn statement_basis(&self, corp: &str, year: i32, report: &str, basis: Basis) -> Result<Option<Vec<Row>>, Fault> {
         let params = [("corp_code", corp.into()), ("bsns_year", year.to_string()), ("reprt_code", report.into()), ("fs_div", format!("{basis:?}"))];
         let value = self.response("fnlttSinglAcntAll.json", &params).await?;
         if value["status"] == "013" { return Ok(None); }
         let rows = rows(&value)?;
-        if rows.is_empty() || rows.iter().any(|r| field(r, "corp_code") != corp || field(r, "bsns_year") != year.to_string() || field(r, "reprt_code") != report || !digits(field(r, "rcept_no"), 14)) { return Err(Failure::InvalidResponse); }
+        if rows.is_empty() || rows.iter().any(|r| field(r, "corp_code") != corp || field(r, "bsns_year") != year.to_string() || field(r, "reprt_code") != report || !digits(field(r, "rcept_no"), 14)) { return Err(Failure::InvalidResponse.into()); }
         Ok(Some(rows))
     }
 }

@@ -131,7 +131,7 @@ async fn notice_link_rejects_empty_duplicate_different_company_code_isin_and_unk
     }
     fake.state.lock().unwrap().directory = None;
     fake.state.lock().unwrap().company_code = Some("00000002".into());
-    assert_eq!(fake.client().resolve("005935",true).await.unwrap_err(),Failure::InvalidResponse);
+    assert_eq!(fake.client().resolve("005935",true).await.unwrap_err(),Fault::Failure(Failure::InvalidResponse));
 }
 
 #[tokio::test]
@@ -171,11 +171,11 @@ async fn broken_or_error_page_source_and_invalid_company_response_are_retryable_
         NOTICE.replace("KR7005931001","알 수 없는 코드 형식"),
     ] {
         fake.state.lock().unwrap().notice = Some(text);
-        assert_eq!(fake.client().resolve("005935",true).await.unwrap_err(),Failure::InvalidResponse);
+        assert_eq!(fake.client().resolve("005935",true).await.unwrap_err(),Fault::Failure(Failure::InvalidResponse));
     }
     fake.state.lock().unwrap().notice = Some(NOTICE.into());
     fake.state.lock().unwrap().kind_responses.insert("005930".into(),json!({"error":"synthetic"}));
-    assert_eq!(fake.client().resolve("005935",true).await.unwrap_err(),Failure::InvalidResponse);
+    assert_eq!(fake.client().resolve("005935",true).await.unwrap_err(),Fault::Failure(Failure::InvalidResponse));
 }
 
 async fn unrecognized_notice_retries_in_the_next_update(body: String) {
