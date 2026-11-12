@@ -16,6 +16,8 @@ const CORP: &str = "00126380";
 struct FakeState {
     calls: Vec<(String, BTreeMap<String, String>)>,
     failures: HashMap<String, String>,
+    http_failure: Option<StatusCode>,
+    request_times: Vec<std::time::Instant>,
     correction: bool,
     later_correction: bool,
     delayed: bool,
@@ -134,6 +136,11 @@ async fn respond(State(state): State<Arc<Mutex<FakeState>>>, Path(endpoint): Pat
 
 async fn respond_data(State(state): State<Arc<Mutex<FakeState>>>, Path(endpoint): Path<String>, Query(params): Query<BTreeMap<String, String>>) -> Response {
     assert_eq!(params["crtfc_key"], KEY);
+    {
+        let mut state = state.lock().unwrap();
+        state.request_times.push(std::time::Instant::now());
+        if let Some(status) = state.http_failure { state.calls.push((endpoint, params)); return (status, "synthetic transport failure").into_response(); }
+    }
     let (failure, correction, delayed, no_cfs, xbrl_failure, stale_statement, mismatched_xbrl, paused, nonstandard_account) = {
         let mut state = state.lock().unwrap();
         state.calls.push((endpoint.clone(), params.clone()));

@@ -3,7 +3,7 @@ import type { FinancialUpdateStatus } from "./generated/FinancialUpdateStatus";
 import type { FinancialUpdatePage } from "./generated/FinancialUpdatePage";
 import { getJson, sendJson } from "./http";
 
-export const updateActive = (status: FinancialUpdateStatus | undefined) => status === "planning" || status === "collecting" || status === "pausing";
+export const updateActive = (status: FinancialUpdateStatus | undefined) => status === "planning" || status === "collecting" || status === "pausing" || status === "checking";
 export const financialUpdateQuery = queryOptions({
   queryKey: ["financial-update"],
   queryFn: ({ signal }) => getJson<FinancialUpdatePage>("/api/financial-update", signal),

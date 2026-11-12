@@ -9,7 +9,7 @@ use crate::api::{FinancialUpdateFailure, FinancialUpdatePage, FinancialUpdateSta
 use super::{Financials, CollectionScope, model::{Failure, Security, Snapshot}};
 
 #[derive(Default)]
-pub(super) struct UpdateRun { running: bool, failure: Option<Failure> }
+pub(super) struct UpdateRun { running: bool, probing: bool, failure: Option<Failure> }
 
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(tag = "status", content = "value", rename_all = "snake_case")]
@@ -53,7 +53,7 @@ impl Update {
     }
 
     fn page(&self) -> FinancialUpdatePage {
-        let mut page = FinancialUpdatePage { id: self.id, status: self.status, phase: self.phase, stop_reason: None, history_completed_companies: 0, history_failed_companies: 0, recent_failed_companies: 0, history_complete: false, from_year: self.from_year, through_year: self.through_year, total_symbols: self.targets.len(), processed_symbols: 0, unsupported_symbols: 0, unverified_symbols: 0, unverified_dividends: 0, total_companies: self.companies.len(), completed_companies: 0, failed_companies: 0, started_at: self.started_at.map(UnixSeconds), last_checked_at: self.checked_at.map(UnixSeconds), failure: None, failures: Vec::new() };
+        let mut page = FinancialUpdatePage { id: self.id, status: self.status, phase: self.phase, stop_reason: None, next_check_at: None, can_resume: false, history_completed_companies: 0, history_failed_companies: 0, recent_failed_companies: 0, history_complete: false, from_year: self.from_year, through_year: self.through_year, total_symbols: self.targets.len(), processed_symbols: 0, unsupported_symbols: 0, unverified_symbols: 0, unverified_dividends: 0, total_companies: self.companies.len(), completed_companies: 0, failed_companies: 0, started_at: self.started_at.map(UnixSeconds), last_checked_at: self.checked_at.map(UnixSeconds), failure: None, failures: Vec::new() };
         for target in &self.targets {
             if !matches!(target.resolution, Resolution::Pending) { page.processed_symbols += 1; }
             let (reason, error) = match &target.resolution {
@@ -98,11 +98,14 @@ impl Financials {
             Err(error) => Err(error),
         };
         let paused = match self.store() { Ok(store) => store.paused().await, Err(error) => Err(error) };
+        let stopped = match self.store() { Ok(store) => store.stop().await, Err(error) => Err(error) };
         let mut page = stored.as_ref().ok().and_then(|job| job.as_ref()).cloned().unwrap_or_else(|| Update::empty(self.clock.now().kst_date().year())).page();
-        if let Some(error) = stored.err().or(paused.as_ref().err().copied()).or(run.failure) { page.status = Status::Failed; page.failure = Some(failure(error)); page.stop_reason = Some(StopReason::Storage); }
-        else if self.client.is_none() { page.status = Status::NotConfigured; if paused.unwrap_or(false) { page.stop_reason = Some(StopReason::User); } }
+        if let Some(error) = stored.err().or(paused.as_ref().err().copied()).or(stopped.as_ref().err().copied()).or(run.failure) { page.status = Status::Failed; page.failure = Some(failure(error)); page.stop_reason = Some(StopReason::Storage); }
+        else if self.client.is_none() { page.status = Status::NotConfigured; page.stop_reason = Some(StopReason::NotConfigured); }
+        else if let Some(stop) = stopped.unwrap_or(None) { page.status = if run.probing { Status::Checking } else if run.running { Status::Pausing } else { Status::Stopped }; page.failure = Some(failure(stop.failure)); page.stop_reason = Some(if stop.failure == Failure::Authentication { StopReason::Authentication } else { StopReason::RateLimited }); page.next_check_at = stop.next_check_at.map(UnixSeconds); page.can_resume = !run.running; }
         else if paused.unwrap_or(false) { page.status = if run.running { Status::Pausing } else { Status::Paused }; page.stop_reason = Some(StopReason::User); }
         else if !run.running && matches!(page.status, Status::Planning | Status::Collecting) { page.status = Status::Interrupted; page.stop_reason = Some(StopReason::Interrupted); }
+        if matches!(page.status, Status::Paused | Status::Interrupted) || (page.status == Status::Failed && page.id > 0 && page.phase != Phase::Complete) { page.can_resume = true; }
         page
     }
 
@@ -134,6 +137,8 @@ impl Financials {
         let result = async {
             let store = self.store()?;
             let previous = store.update().await?;
+            let stop = store.stop().await?;
+            if stop.is_some() && !resume { return Ok(None); }
             if store.paused().await? && !resume { return Ok(None); }
             if resume && !previous.as_ref().is_some_and(|job| matches!(job.status, Status::Planning | Status::Collecting)) {
                 store.set_paused(false).await?;
@@ -154,18 +159,26 @@ impl Financials {
             update.status = if update.phase == Phase::Planning { Status::Planning } else { Status::Collecting };
             store.save_update(&update).await?;
             let through_date = domain::KstTime::from_unix(update.started_at.unwrap_or_else(|| self.clock.now().unix())).kst_date().yyyymmdd();
-            self.client.as_ref().unwrap().begin_job(store.clone(), update.id, through_date).await?;
+            self.client.as_ref().unwrap().begin_job(store.clone(), update.id, through_date, self.clock.clone()).await?;
             if resume { store.set_paused(false).await?; }
             self.client.as_ref().unwrap().pause(false);
-            Ok::<_, Failure>(Some(update))
+            Ok::<_, Failure>(Some((update, stop)))
         }.await;
         match result {
-            Ok(Some(update)) => {
+            Ok(Some((update, stop))) => {
                 run.running = true;
+                run.probing = stop.is_some();
                 run.failure = None;
                 let service = self.clone();
                 tokio::spawn(async move {
-                    let result = service.perform_update(update).await;
+                    let result = async {
+                        if let Some(stop) = stop {
+                            let confirmed = match service.client.as_ref().unwrap().confirm(stop).await { Err(Failure::Paused) => return Ok(None), other => other? };
+                            service.update.lock().await.probing = false;
+                            if !confirmed { return Ok(None); }
+                        }
+                        service.perform_update(update).await
+                    }.await;
                     let mut run = service.update.lock().await;
                     let result = match result {
                         Ok(Some(update)) if !service.client.as_ref().unwrap().is_paused() => match service.store() {
@@ -176,7 +189,8 @@ impl Financials {
                         Err(error) => Err(error),
                     };
                     run.running = false;
-                    if let Err(error) = result { run.failure = Some(error); }
+                    run.probing = false;
+                    if let Err(error) = result && !matches!(error, Failure::Authentication | Failure::RateLimited) { run.failure = Some(error); }
                 });
             }
             Ok(None) => { if resume { run.failure = None; } }
@@ -200,7 +214,7 @@ impl Financials {
                 }
                 Ok((None, _)) => Resolution::Unverified,
                 Err(Failure::Paused) => return Ok(None),
-                Err(Failure::Storage) => return Err(Failure::Storage),
+                Err(error @ (Failure::Storage | Failure::Authentication | Failure::RateLimited)) => return Err(error),
                 Err(error) => Resolution::Failed(error),
             };
             store.save_update(&update).await?;
@@ -231,11 +245,11 @@ impl Financials {
                         tokio::time::sleep(Duration::from_millis(20)).await;
                         result = self.read(&security.stock_code).await;
                     }
-                    if result.failure == Some(Failure::Storage) { return Err(Failure::Storage); }
+                    if let Some(error @ (Failure::Storage | Failure::Authentication | Failure::RateLimited)) = result.failure { return Err(error); }
                     if self.client.as_ref().unwrap().is_paused() { return Ok(None); }
                     let reports = result.collection.working_reports();
                     let error = result.failure.or(result.collection.disclosure_failure).or_else(|| reports.values().filter(|report| scope.years().contains(&report.business_year)).find_map(|report| report.statement.failure.or(report.dividends.failure).or_else(|| report.statement.data.as_ref().and_then(|statement| statement.source_failure))));
-                    if error == Some(Failure::Storage) { return Err(Failure::Storage); }
+                    if let Some(error @ (Failure::Storage | Failure::Authentication | Failure::RateLimited)) = error { return Err(error); }
                     if let Some(error) = error { Outcome::Failed(error) }
                     else if scope.years().all(|year| super::model::REPORT_CODES.iter().all(|code| reports.get(&format!("{year}/{code}")).is_some_and(|report| report.statement.checked_at.is_some() && (*code != "11011" || report.dividends.checked_at.is_some())))) { Outcome::Complete }
                     else { Outcome::Failed(Failure::InvalidResponse) }
