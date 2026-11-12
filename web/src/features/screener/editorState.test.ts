@@ -15,6 +15,29 @@ const editor = () => useScreenEditor.getState();
 const current = () => editor().sessions[source.id]!;
 const reply = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status });
 
+function screensServer(initial: Screens) {
+  let stored = structuredClone(initial);
+  const puts: Screens[] = [];
+  const statuses: number[] = [];
+  vi.stubGlobal("fetch", vi.fn(async (_url: string, init: RequestInit) => {
+    if (init.method !== "PUT") return reply(stored);
+    const sent: Screens = JSON.parse(String(init.body));
+    puts.push(sent);
+    if (sent.screens.length > 50) {
+      statuses.push(400);
+      return reply({ error: { code: "bad_request", message: `조건식은 50개까지 저장할 수 있습니다: ${sent.screens.length}개` } }, 400);
+    }
+    if (sent.revision <= stored.revision) {
+      statuses.push(409);
+      return reply({ error: { code: "stale_revision", message: "목록 바뀜" } }, 409);
+    }
+    statuses.push(200);
+    stored = sent;
+    return reply(stored);
+  }));
+  return { puts, statuses, stored: () => stored };
+}
+
 beforeEach(() => {
   client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: Infinity } } });
   useScreenEditor.setState({ sessions: {} });
@@ -159,19 +182,24 @@ test("saved clean session uses latest remotely saved values when running", async
   expect(requests).toEqual([remote]);
 });
 
-test("new draft recovers after freeing a slot from a full saved list", async () => {
+test("freeing a slot sends at most 50 screens and can recover with server validation", async () => {
   const full: Screens = { revision: 1, screens: Array.from({ length: 50 }, (_, index) => ({ ...source, id: String(index) })) };
   const id = editor().create(full);
   const added = editor().sessions[id]!.source;
   expect(checkedSession(editor().sessions[id]!, full).ok).toBe(false);
-  const fetch = vi.fn(async (_url: string, init: RequestInit) => reply(JSON.parse(String(init.body))));
-  vi.stubGlobal("fetch", fetch);
+  const server = screensServer(full);
   expect(await editor().remove(client, full, full.screens[0]!)).toBe(true);
   const latest = client.getQueryData(screensQuery.queryKey)!;
   expect(latest.screens).toHaveLength(49);
   expect(checkedSession(editor().sessions[id]!, latest).ok).toBe(true);
   await editor().save(client, latest, added);
-  expect(fetch).toHaveBeenCalledTimes(2);
+  await editor().save(client, client.getQueryData(screensQuery.queryKey)!, added);
+  expect(server.puts.map((sent) => sent.screens.length)).toEqual([49, 50, 50]);
+  expect(server.puts.map((sent) => sent.revision)).toEqual([2, 2, 3]);
+  expect(server.statuses).toEqual([200, 409, 200]);
+  expect(server.stored().screens).toHaveLength(50);
+  expect(server.stored().screens.some((screen) => screen.id === full.screens[0]!.id)).toBe(false);
+  expect(server.stored().screens.some((screen) => screen.id === id)).toBe(true);
   expect(isDirty(editor().sessions[id]!)).toBe(false);
 });
 
@@ -239,3 +267,33 @@ test("개수 제한은 최신 목록을 검사하되 새 draft의 충돌 기준�
   expect(fetch).not.toHaveBeenCalled();
   expect(editor().sessions[id]?.base.revision).toBe(1);
 });
+
+test("현재 인수보다 최신인 query 목록이 50개이면 새 draft 요청을 보내지 않는다", async () => {
+  const older: Screens = { revision: 1, screens: Array.from({ length: 49 }, (_, index) => ({ ...source, id: String(index) })) };
+  const id = editor().create(older);
+  const latest: Screens = { revision: 2, screens: [...older.screens, { ...source, id: "49" }] };
+  client.setQueryData(screensQuery.queryKey, latest);
+  const server = screensServer(latest);
+  await editor().save(client, older, editor().sessions[id]!.source);
+  expect(server.puts).toHaveLength(0);
+  expect(editor().sessions[id]?.tried).toBe(true);
+  expect(editor().sessions[id]?.base.revision).toBe(1);
+});
+
+for (const operation of ["save", "remove"] as const) {
+  test(`${operation} 요청은 최신 목록의 다른 식을 보존하고 원래 revision 충돌 뒤 재시도한다`, async () => {
+    editor().change(base, source, (draft) => ({ ...draft, name: "내 변경" }));
+    const other: Screen = { ...source, id: "b", name: "다른 탭의 식", markets: ["kosdaq"] };
+    const latest: Screens = { revision: 3, screens: [source, other] };
+    client.setQueryData(screensQuery.queryKey, latest);
+    const server = screensServer(latest);
+    await editor()[operation](client, base, source);
+    expect(server.puts[0]?.revision).toBe(2);
+    expect(server.puts[0]?.screens.find((screen) => screen.id === "b")).toEqual(other);
+    expect(server.statuses).toEqual([409]);
+    await editor()[operation](client, client.getQueryData(screensQuery.queryKey)!, source);
+    expect(server.statuses).toEqual([409, 200]);
+    expect(server.stored().screens.find((screen) => screen.id === "b")).toEqual(other);
+    expect(server.stored().screens.find((screen) => screen.id === source.id)?.name).toBe(operation === "save" ? "내 변경" : undefined);
+  });
+}
