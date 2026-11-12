@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fmt;
 
 use domain::{IndexCode, KstDate, Price, StockCode, Venue};
@@ -82,8 +82,8 @@ impl Screener {
         let calendar = self.calendar(CalendarUse::Update).await?;
         let target = calendar.target(self.clock.now()).ok_or_else(|| BarError::Internal("코스피 일봉에 관측일이 없어 목표 관측일을 정할 수 없습니다".into()))?;
         self.store_calendar(&calendar, target).await?;
-        self.recent(id, target, calendar.last_before(target)).await?;
-        self.backfill(id, target).await
+        let unavailable = self.recent(id, target, calendar.last_before(target)).await?;
+        self.backfill(id, target, &unavailable).await
     }
 
     async fn store_calendar(&self, recent: &Calendar, target: KstDate) -> Result<(), BarError> {
@@ -117,12 +117,13 @@ impl Screener {
         Err(BarError::Internal(format!("코스피 일봉이 {MAX_HISTORY_PAGES}페이지를 넘어 관측일 달력 받기를 멈췄습니다")))
     }
 
-    async fn recent(&self, id: u64, target: KstDate, day_before_target: Option<KstDate>) -> Result<(), BarError> {
+    async fn recent(&self, id: u64, target: KstDate, day_before_target: Option<KstDate>) -> Result<HashSet<StockCode>, BarError> {
         let tails = self.with_store(Store::tails).await?;
         let unfilled: Vec<Tail> = tails.into_iter().filter(|t| t.listed_on.is_none_or(|listed| listed <= target) && t.last.is_none_or(|(day, _)| day < target)).collect();
         let total = unfilled.len();
         let (mut done, mut skipped) = (0, 0);
         let mut catchups = Vec::new();
+        let mut unavailable = HashSet::new();
         self.report(id, UpdatePhase::Recent, done, total);
         for chunk in unfilled.chunks(StockQuotes::MAX) {
             let codes: Vec<StockCode> = chunk.iter().map(|t| t.code).collect();
@@ -146,6 +147,7 @@ impl Screener {
                     Some((day, close)) if q.day == target && Some(day) == day_before_target => {
                         if base_moved(q.base, close) {
                             tracing::info!(code = code.as_str(), base = q.base.centi() / 100, stored_close = close.centi() / 100, "기준가가 저장된 종가와 30% 넘게 달라 전체 이력을 다시 받습니다");
+                            self.with_store(move |s| s.require_refetch(&[code], None)).await?;
                             catchups.push((code, Catchup::WholeHistory));
                         } else {
                             writes.push(Write::Extend { code, bars: vec![DayBar { day: q.day, ohlcv: q.ohlcv, traded: q.traded }], reached_origin: false });
@@ -162,6 +164,8 @@ impl Screener {
         while let Some((code, write)) = written.try_next().await? {
             match write {
                 Err(skip) => {
+                    unavailable.insert(code);
+                    self.with_store(move |s| s.finish_refetch_attempt(code)).await?;
                     unconfirmed(code, target, &skip.to_string());
                     skipped += 1;
                 }
@@ -183,11 +187,12 @@ impl Screener {
         }
         self.with_store(move |s| s.set_last_day(target)).await?;
         tracing::info!(%target, filled = total - skipped, unconfirmed = skipped, "최근 채우기를 마쳤습니다");
-        Ok(())
+        Ok(unavailable)
     }
 
-    async fn backfill(&self, id: u64, target: KstDate) -> Result<(), BarError> {
-        let queue = self.with_store(move |s| s.backfill_queue(target)).await?;
+    async fn backfill(&self, id: u64, target: KstDate, unavailable: &HashSet<StockCode>) -> Result<(), BarError> {
+        let mut queue = self.with_store(move |s| s.backfill_queue(target)).await?;
+        queue.retain(|code| !unavailable.contains(code));
         let total = queue.len();
         self.report(id, UpdatePhase::Backfill, 0, total);
         let mut written = stream::iter(queue).map(|code| self.catch_up(code, Catchup::WholeHistory, target).inspect_err(move |e| stopped_on(code, e)).map_ok(move |write| (code, write))).buffered(IN_FLIGHT);
@@ -195,7 +200,10 @@ impl Screener {
         while let Some((code, write)) = written.try_next().await? {
             match write {
                 Ok(write) => self.with_store(move |s| s.write(&[write])).await?,
-                Err(skip) => tracing::warn!(code = code.as_str(), reason = %skip, "과거 이어 받기에서 이 종목을 건너뜁니다. 다음 업데이트에서 다시 받습니다"),
+                Err(skip) => {
+                    self.with_store(move |s| s.finish_refetch_attempt(code)).await?;
+                    tracing::warn!(code = code.as_str(), reason = %skip, "과거 이어 받기에서 이 종목을 건너뜁니다. 다음 업데이트에서 다시 받습니다");
+                }
             }
             done += 1;
             self.report(id, UpdatePhase::Backfill, done, total);
@@ -225,6 +233,7 @@ impl Screener {
             return Ok(Ok(Write::Extend { code, bars: fresh, reached_origin }));
         }
         tracing::info!(code = code.as_str(), reaches_stored, "최근 일봉이 저장된 봉과 달라 전체 이력을 다시 받습니다");
+        self.with_store(move |s| s.require_refetch(&[code], None)).await?;
         Ok(self.whole_history(code, target).await?.map(|bars| Write::Replace { code, bars }))
     }
 

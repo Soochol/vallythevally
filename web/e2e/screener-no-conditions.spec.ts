@@ -2,7 +2,7 @@ import type { Locator, Page } from "@playwright/test";
 import { expect, test } from "./harness";
 import { editor, excludedLine, expectRows, openScreener, panel, results, runButton, savedTo, updateBand, waitForUpdateToFinish } from "./screener-page";
 
-test.use({ krxMarket: "20261106", clockStart: "20261109100000" });
+test.use({ krxMarket: "20261106", clockStart: "20261106203000" });
 
 const NO_CONDITIONS = "조건 없음 · 대상 종목 전체";
 const SCREEN_NAME = "조건 없는 대상 종목";

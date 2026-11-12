@@ -16,6 +16,12 @@ static NEXT_COLLECTION: AtomicU64 = AtomicU64::new(1);
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CollectionId(u64);
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct CollectionBasis {
+    pub generation: u64,
+    pub update_epoch: u64,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MissingSummary {
     MissingRow,
@@ -33,6 +39,7 @@ pub struct StockSummary {
 #[derive(Debug)]
 pub struct SummaryBatch {
     pub id: CollectionId,
+    pub basis: CollectionBasis,
     pub target: KstDate,
     pub venue: Venue,
     pub started_at: KstTime,
@@ -52,6 +59,7 @@ pub enum CollectionError {
     DateChanged,
     Cancelled,
     TargetsChanged,
+    BasisChanged,
     UnexpectedContinuation,
 }
 
@@ -61,6 +69,7 @@ impl fmt::Display for CollectionError {
             Self::Kiwoom(e) => e.fmt(f),
             Self::DateChanged => f.write_str("수집 중 날짜가 바뀌었습니다"),
             Self::Cancelled => f.write_str("당일 요약 수집을 취소했습니다"),
+            Self::BasisChanged => f.write_str("수집을 시작한 확정 이력 세대가 다릅니다. 다시 실행하세요"),
             Self::TargetsChanged => f.write_str("수집 중 대상 종목이 바뀌었습니다"),
             Self::UnexpectedContinuation => f.write_str("당일 요약이 한 응답으로 끝나지 않았습니다"),
         }
@@ -73,6 +82,7 @@ type Outcome = Result<Arc<SummaryBatch>, CollectionError>;
 
 struct Flight {
     id: CollectionId,
+    basis: CollectionBasis,
     target: KstDate,
     codes: Vec<StockCode>,
     outcome: watch::Sender<Option<Outcome>>,
@@ -105,7 +115,7 @@ impl SummaryCollector {
         stop(&mut state, CollectionError::Cancelled);
     }
 
-    pub async fn collect(self: &Arc<Self>, mut codes: Vec<StockCode>) -> Outcome {
+    pub async fn collect(self: &Arc<Self>, mut codes: Vec<StockCode>, basis: CollectionBasis) -> Outcome {
         codes.sort_unstable();
         codes.dedup();
         let mut receiver = {
@@ -115,6 +125,9 @@ impl SummaryCollector {
                 stop(&mut state, CollectionError::DateChanged);
             }
             if let Some(flight) = &state.flight {
+                if flight.basis != basis {
+                    return Err(CollectionError::BasisChanged);
+                }
                 if flight.codes != codes {
                     return Err(CollectionError::TargetsChanged);
                 }
@@ -126,10 +139,10 @@ impl SummaryCollector {
                 let me = self.clone();
                 let targets = codes.clone();
                 let task = tokio::spawn(async move {
-                    let result = me.receive(id, target, started_at, &targets).await;
+                    let result = me.receive(id, basis, target, started_at, &targets).await;
                     me.finish(id, result);
                 });
-                state.flight = Some(Flight { id, target, codes, outcome, task: task.abort_handle() });
+                state.flight = Some(Flight { id, basis, target, codes, outcome, task: task.abort_handle() });
                 receiver
             }
         };
@@ -143,7 +156,7 @@ impl SummaryCollector {
         }
     }
 
-    async fn receive(&self, id: CollectionId, target: KstDate, started_at: KstTime, codes: &[StockCode]) -> Outcome {
+    async fn receive(&self, id: CollectionId, basis: CollectionBasis, target: KstDate, started_at: KstTime, codes: &[StockCode]) -> Outcome {
         let mut stocks = BTreeMap::new();
         for chunk in codes.chunks(StockQuotes::MAX) {
             self.check_date(target)?;
@@ -157,7 +170,7 @@ impl SummaryCollector {
             stocks.extend(read_stocks(chunk, page.body, target, received_at));
         }
         self.check_date(target)?;
-        Ok(Arc::new(SummaryBatch { id, target, venue: Venue::Krx, started_at, completed_at: self.clock.now(), stocks }))
+        Ok(Arc::new(SummaryBatch { id, basis, target, venue: Venue::Krx, started_at, completed_at: self.clock.now(), stocks }))
     }
 
     fn check_date(&self, target: KstDate) -> Result<(), CollectionError> {
