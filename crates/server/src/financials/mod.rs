@@ -18,15 +18,13 @@ use model::{Collection, Dividend, Failure, Interrupt, Report, Security, Snapshot
 use store::Store;
 
 pub use routes::routes;
-use updates::CollectionState;
+use control::{CollectionState, UpdateControl};
 
 pub struct Financials {
     client: Option<Client>,
     store: Result<Store, Failure>,
     clock: Clock,
-    update: tokio::sync::Mutex<updates::UpdateRun>,
-    automatic: std::sync::atomic::AtomicBool,
-    update_finished: tokio::sync::Notify,
+    control: UpdateControl,
 }
 
 enum StatementStep { Continue(StatementRequest), Done(Option<Statement>) }
@@ -46,7 +44,8 @@ impl Financials {
     }
 
     pub fn with_store(client: Option<Client>, store: Result<Store, Failure>, clock: Clock) -> Arc<Self> {
-        Arc::new(Self { client, store, clock, update: Default::default(), automatic: Default::default(), update_finished: Default::default() })
+        let control = UpdateControl::new(client.is_some(), clock.clone());
+        Arc::new(Self { client, store, clock, control })
     }
 
     fn store(&self) -> Result<&Store, Failure> {
@@ -63,7 +62,7 @@ impl Financials {
         }.await;
         if let Err(failure) = result { snapshot.status = "failed"; snapshot.failure = Some(failure); return snapshot; }
         if self.client.is_none() { return snapshot; }
-        let collection = match &snapshot.security { Some(security) => self.collection_state(&security.company.corp_code).await, None => CollectionState::default() };
+        let collection = match &snapshot.security { Some(security) => self.control.collection_state(&security.company.corp_code).await, None => CollectionState::default() };
         snapshot.failure = collection.failure;
         snapshot.status = if collection.collecting { "collecting" }
             else if has_failures(&snapshot.collection) || snapshot.failure.is_some() { "partial_failure" }
@@ -120,7 +119,7 @@ impl Financials {
         for year in scope.years().rev() { for index in 0..REPORT_CODES.len() { requests.insert((year, index)); } }
         let requests: Vec<_> = if matches!(scope, CollectionScope::History(_)) { requests.into_iter().rev().collect() } else { requests.into_iter().collect() };
         for (year, index) in requests {
-            client.check_control()?;
+            self.control.check()?;
             let code = REPORT_CODES[index];
             let key = format!("{year}/{code}");
             if matches!(scope, CollectionScope::Changes(_)) && collection.working_reports().get(&key).is_none_or(|report| {

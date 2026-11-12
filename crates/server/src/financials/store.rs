@@ -63,48 +63,15 @@ impl Store {
         Ok(())
     }
 
-    pub(crate) async fn paused(&self) -> Result<bool, Failure> {
-        let row = sqlx::query("SELECT paused FROM financial_update_control WHERE id = 1").fetch_optional(&self.0).await.map_err(|_| Failure::Storage)?;
-        Ok(row.is_some_and(|r| r.get::<bool, _>("paused")))
-    }
+    pub(super) fn pool(&self) -> &SqlitePool { &self.0 }
 
-    pub(crate) async fn set_paused(&self, paused: bool) -> Result<(), Failure> {
-        sqlx::query("INSERT INTO financial_update_control VALUES (1, ?) ON CONFLICT(id) DO UPDATE SET paused = excluded.paused").bind(paused).execute(&self.0).await.map_err(|_| Failure::Storage)?;
-        Ok(())
-    }
-
-    pub(super) async fn confirmed_since(&self, corps: &[&str], since: i64) -> Result<bool, Failure> {
-        if corps.is_empty() { return Ok(false); }
-        let mut query = sqlx::QueryBuilder::<sqlx::Sqlite>::new("SELECT COUNT(*) FROM companies WHERE json_type(body, '$.last_checked_at') = 'integer' AND json_extract(body, '$.last_checked_at') >= ");
-        query.push_bind(since).push(" AND corp_code IN (");
+    pub(super) async fn confirmed_at(&self, corps: &[&str]) -> Result<Option<i64>, Failure> {
+        if corps.is_empty() { return Ok(None); }
+        let mut query = sqlx::QueryBuilder::<sqlx::Sqlite>::new("SELECT COUNT(*), MIN(json_extract(body, '$.last_checked_at')) FROM companies WHERE json_type(body, '$.last_checked_at') = 'integer' AND corp_code IN (");
         let mut list = query.separated(",");
         for corp in corps { list.push_bind(*corp); }
         list.push_unseparated(")");
         let row = query.build().fetch_one(&self.0).await.map_err(|_| Failure::Storage)?;
-        Ok(row.get::<i64, _>(0) == corps.len() as i64)
-    }
-
-    pub(crate) async fn update(&self) -> Result<Option<super::updates::Update>, Failure> {
-        let row = sqlx::query("SELECT body FROM financial_update WHERE id = 1").fetch_optional(&self.0).await.map_err(|_| Failure::Storage)?;
-        row.map(|r| serde_json::from_str(r.get::<&str, _>("body")).map_err(|_| Failure::Storage)).transpose()
-    }
-
-    pub(super) async fn stop(&self) -> Result<Option<super::client::Stop>, Failure> {
-        let row = sqlx::query("SELECT body FROM financial_stop WHERE id = 1").fetch_optional(&self.0).await.map_err(|_| Failure::Storage)?;
-        row.map(|r| serde_json::from_str(r.get::<&str, _>("body")).map_err(|_| Failure::Storage)).transpose()
-    }
-
-    pub(super) async fn save_stop(&self, stop: Option<&super::client::Stop>) -> Result<(), Failure> {
-        if let Some(stop) = stop {
-            let body = serde_json::to_string(stop).map_err(|_| Failure::Storage)?;
-            sqlx::query("INSERT INTO financial_stop VALUES (1, ?) ON CONFLICT(id) DO UPDATE SET body = excluded.body").bind(body).execute(&self.0).await.map_err(|_| Failure::Storage)?;
-        } else { sqlx::query("DELETE FROM financial_stop").execute(&self.0).await.map_err(|_| Failure::Storage)?; }
-        Ok(())
-    }
-
-    pub(crate) async fn save_update(&self, update: &super::updates::Update) -> Result<(), Failure> {
-        let body = serde_json::to_string(update).map_err(|_| Failure::Storage)?;
-        sqlx::query("INSERT INTO financial_update VALUES (1, ?) ON CONFLICT(id) DO UPDATE SET body = excluded.body").bind(body).execute(&self.0).await.map_err(|_| Failure::Storage)?;
-        Ok(())
+        Ok((row.get::<i64, _>(0) == corps.len() as i64).then(|| row.get::<i64, _>(1)))
     }
 }
