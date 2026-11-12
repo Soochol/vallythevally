@@ -15,6 +15,12 @@ pub const READY_WAIT: Duration = Duration::from_secs(10);
 const MAX_RESULTS: usize = 20;
 const MAX_LIST_PAGES: usize = 10;
 
+#[derive(Debug, Default, Clone, Copy)]
+pub struct SearchFilter {
+    pub market: Option<Market>,
+    pub kind: Option<SymbolKind>,
+}
+
 struct Entry {
     info: SymbolInfo,
     code: String,
@@ -71,13 +77,15 @@ impl Directory {
         &self.screener_listing
     }
 
-    pub fn search(&self, query: &str) -> Vec<SymbolInfo> {
+    pub fn search(&self, query: &str, filter: SearchFilter) -> Vec<SymbolInfo> {
         let q = normalize(query);
         if q.is_empty() {
             return Vec::new();
         }
         let initials = q.chars().all(is_initial_consonant);
-        let mut hits: Vec<(u8, &Entry)> = self.entries.iter().filter_map(|e| rank(e, &q, initials).map(|r| (r, e))).collect();
+        let mut hits: Vec<(u8, &Entry)> = self.entries.iter()
+            .filter(|e| filter.market.is_none_or(|m| e.info.market == m) && filter.kind.is_none_or(|k| e.info.kind == k))
+            .filter_map(|e| rank(e, &q, initials).map(|r| (r, e))).collect();
         hits.sort_by(|(ra, a), (rb, b)| (ra, a.info.kind, &a.name_key, &a.code).cmp(&(rb, b.info.kind, &b.name_key, &b.code)));
         hits.into_iter().take(MAX_RESULTS).map(|(_, e)| e.info.clone()).collect()
     }
@@ -253,7 +261,7 @@ mod tests {
     }
 
     fn codes(q: &str) -> Vec<String> {
-        dir().search(q).iter().map(|i| i.symbol.as_wire()).collect()
+        dir().search(q, SearchFilter::default()).iter().map(|i| i.symbol.as_wire()).collect()
     }
 
     #[test]
@@ -293,17 +301,44 @@ mod tests {
     #[test]
     fn exact_name_beats_prefix_and_kind_breaks_ties() {
         let d = Directory::build(vec![stock("111110", "가나", SymbolKind::Etf), stock("222220", "가나다", SymbolKind::Common)]);
-        let r: Vec<_> = d.search("가나").into_iter().map(|i| i.name).collect();
+        let r: Vec<_> = d.search("가나", SearchFilter::default()).into_iter().map(|i| i.name).collect();
         assert_eq!(r, ["가나", "가나다"]);
         let d = Directory::build(vec![stock("111110", "가다", SymbolKind::Etf), stock("222220", "가라", SymbolKind::Common)]);
-        let r: Vec<_> = d.search("가").into_iter().map(|i| i.name).collect();
+        let r: Vec<_> = d.search("가", SearchFilter::default()).into_iter().map(|i| i.name).collect();
         assert_eq!(r, ["가라", "가다"], "같은 순위면 보통주가 ETF보다 앞");
     }
 
     #[test]
     fn at_most_twenty() {
         let many = (0..30).map(|i| stock(&format!("{:05}0", 10000 + i), &format!("테스트{i:02}"), SymbolKind::Common)).collect();
-        assert_eq!(Directory::build(many).search("테스트").len(), 20);
+        assert_eq!(Directory::build(many).search("테스트", SearchFilter::default()).len(), 20);
+    }
+
+    #[test]
+    fn filters_apply_before_ranking_and_the_twenty_result_limit() {
+        let mut stocks = Vec::new();
+        for (base, prefix, market, kind) in [
+            (100000, "삼가", Market::Kospi, SymbolKind::Common),
+            (200000, "삼나", Market::Kosdaq, SymbolKind::Common),
+            (300000, "삼다", Market::Kospi, SymbolKind::Etf),
+        ] {
+            for i in (0..30).rev() {
+                stocks.push(SymbolInfo { market, ..stock(&format!("{}", base + i * 10), &format!("{prefix}{i:02}"), kind) });
+            }
+        }
+        stocks.push(stock("400000", "삼", SymbolKind::Etf));
+        let dir = Directory::build(stocks);
+        let codes = |query, filter| dir.search(query, filter).into_iter().map(|i| i.symbol.as_wire()).collect::<Vec<_>>();
+        let expected = |base| (0..20).map(|i| format!("{}", base + i * 10)).collect::<Vec<_>>();
+        let unfiltered: Vec<_> = ["400000".to_owned()].into_iter().chain(expected(100000).into_iter().take(19)).collect();
+        assert_eq!(codes("삼", SearchFilter::default()), unfiltered);
+        assert_eq!(codes("삼", SearchFilter { market: Some(Market::Kosdaq), kind: None }), expected(200000));
+        assert_eq!(codes("ㅅ", SearchFilter { market: Some(Market::Kosdaq), kind: Some(SymbolKind::Common) }), expected(200000));
+        let etfs: Vec<_> = ["400000".to_owned()].into_iter().chain(expected(300000).into_iter().take(19)).collect();
+        assert_eq!(codes("삼", SearchFilter { market: None, kind: Some(SymbolKind::Etf) }), etfs);
+        assert_eq!(codes("삼", SearchFilter { market: Some(Market::Kospi), kind: Some(SymbolKind::Etf) }), etfs);
+        assert!(codes("삼", SearchFilter { market: Some(Market::Kosdaq), kind: Some(SymbolKind::Etf) }).is_empty());
+        assert!(codes(" ", SearchFilter { market: None, kind: Some(SymbolKind::Etf) }).is_empty());
     }
 
     #[test]
@@ -343,8 +378,8 @@ mod tests {
         symbols.refresh(&rest, Priority::Screen).await.unwrap();
         let d = symbols.ready(&rest).await.unwrap();
         assert_eq!(d.len(), 2 + 15 + 11, "ETN·인프라·뮤추얼펀드 다섯 행은 빠진다");
-        assert_eq!(d.search("03481K")[0].kind, SymbolKind::Preferred);
-        assert_eq!(d.search("삼성전자")[0].symbol.as_wire(), "005930");
+        assert_eq!(d.search("03481K", SearchFilter::default())[0].kind, SymbolKind::Preferred);
+        assert_eq!(d.search("삼성전자", SearchFilter::default())[0].symbol.as_wire(), "005930");
         let preferred = d.screener_listing().iter().find(|l| l.code.as_str() == "03481K").expect("스크리너 목록도 함께 받는다");
         assert_eq!((preferred.listed_on, preferred.excludable_as.clone()), (domain::KstDate::new(2021, 12, 2), vec![crate::api::ExcludeKind::Preferred]));
         assert_eq!(d.screener_listing().len(), 15 + 11, "검색 목록에 든 주식이 모두 스크리너 목록에 든다");

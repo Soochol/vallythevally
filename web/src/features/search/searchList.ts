@@ -1,5 +1,5 @@
 import type { SymbolInfo } from "../../api/generated/SymbolInfo";
-import type { SearchResult } from "../../api/queries";
+import type { SearchResult, SymbolSearchFilters } from "../../api/queries";
 
 export type SearchGroup = "watch" | "recent" | "result";
 
@@ -21,6 +21,7 @@ export function searchList(
   query: string,
   empty: { watch: SymbolInfo[]; recent: SymbolInfo[] },
   result: SearchResult | undefined,
+  filters: SymbolSearchFilters = {},
 ): SearchList {
   if (query === "") {
     const rows = [
@@ -31,7 +32,7 @@ export function searchList(
   }
   return {
     rows: (result?.rows ?? []).map((info) => ({ info, group: "result" })),
-    selectable: result?.q === query,
+    selectable: result?.q === query && result.filters.market === filters.market && result.filters.kind === filters.kind,
     empty: false,
   };
 }

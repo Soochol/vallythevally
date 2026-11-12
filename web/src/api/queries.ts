@@ -16,20 +16,26 @@ function useDebounced<T>(value: T, ms: number): T {
   return debounced;
 }
 
+export type SymbolSearchFilters = Partial<Pick<SymbolInfo, "market" | "kind">>;
+
 /** 검색 결과와 그 결과를 낸 검색어. 이전 결과가 남아 보이는 동안에도 어느 입력의 답인지 알 수 있다. */
 export interface SearchResult {
   q: string;
+  filters: SymbolSearchFilters;
   rows: SymbolInfo[];
 }
 
 /** `GET /api/symbols?q=`. 정규화한 입력을 받는다. 빈 입력이면 서버를 부르지 않는다(D5). */
-export function useSymbolSearch(normalized: string) {
+export function useSymbolSearch(normalized: string, filters: SymbolSearchFilters = {}) {
   const q = useDebounced(normalized, SEARCH_DEBOUNCE_MS);
+  const params = new URLSearchParams(filters);
+  const suffix = params.size ? `&${params}` : "";
   return useQuery({
-    queryKey: ["symbols", q],
+    queryKey: ["symbols", q, filters.market, filters.kind],
     queryFn: async ({ signal }): Promise<SearchResult> => ({
       q,
-      rows: await getJson<SymbolInfo[]>(`/api/symbols?q=${encodeURIComponent(q)}`, signal),
+      filters,
+      rows: await getJson<SymbolInfo[]>(`/api/symbols?q=${encodeURIComponent(q)}${suffix}`, signal),
     }),
     enabled: q !== "",
     placeholderData: keepPreviousData,
