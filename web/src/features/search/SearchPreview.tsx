@@ -3,6 +3,7 @@ import type { BarsPage } from "../../api/generated/BarsPage";
 import type { Quote } from "../../api/generated/Quote";
 import type { SymbolInfo } from "../../api/generated/SymbolInfo";
 import { getJson } from "../../api/http";
+import type { SearchPurpose } from "../../stores/selection";
 import { KIND_LABEL, MARKET_LABEL } from "../../lib/symbol";
 import { EmptyState, ErrorState, Skeleton } from "../overlay/State";
 
@@ -14,7 +15,7 @@ export function QuoteValue({ quote, large = false }: { quote: Quote | undefined;
   </span>;
 }
 
-export function SearchPreview({ info, quote }: { info: SymbolInfo; quote: Quote | undefined }) {
+export function SearchPreview({ info, quote, purpose }: { info: SymbolInfo; quote: Quote | undefined; purpose: SearchPurpose }) {
   const trend = useQuery({
     queryKey: ["search-trend", info.code],
     queryFn: ({ signal }) => getJson<BarsPage>(`/api/bars?${new URLSearchParams({ symbol: info.code, period: "D", limit: "60", ...(info.kind === "index" ? {} : { venue: "combined" }) })}`, signal),
@@ -32,6 +33,6 @@ export function SearchPreview({ info, quote }: { info: SymbolInfo; quote: Quote 
     <div className="rounded-m border border-line bg-chart-bg p-2"><p className="mb-2 text-xs text-text-3">60일 추세</p>
       {trend.isPending ? <Skeleton label="추세 불러오는 중" /> : trend.isError ? <ErrorState message="추세를 받지 못했습니다" retry={() => void trend.refetch()} /> : values.length === 0 ? <EmptyState title="일봉이 없습니다">다른 종목을 골라 보세요.</EmptyState> : <svg role="img" aria-label={`${info.name} 60일 추세`} viewBox="0 0 260 100" className={`w-full ${values.at(-1)! >= values[0]! ? "text-up" : "text-down"}`}><polyline points={points} fill="none" stroke="currentColor" strokeWidth="1.5" /></svg>}
     </div>
-    <div className="space-y-2 border-t border-line pt-4 text-xs text-text-2"><p><kbd>↵</kbd> 이 칸에 열기</p><p><kbd>Ctrl+↵</kbd> 관심종목 넣기·빼기</p><p><kbd>Shift+↵</kbd> 비교에 추가</p></div>
+    <div className="space-y-2 border-t border-line pt-4 text-xs text-text-2"><p><kbd>↵</kbd> {purpose === "watch" ? "관심종목에 넣기" : "이 칸에 열기"}</p><p><kbd>Ctrl+↵</kbd> 관심종목 넣기·빼기</p><p><kbd>Shift+↵</kbd> 비교에 추가</p></div>
   </aside>;
 }
