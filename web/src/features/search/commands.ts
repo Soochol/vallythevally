@@ -1,4 +1,4 @@
-import { checkedSession, selectedSource, useScreenEditor } from "../screener/editorState";
+import { checkedSession, currentSession, selectedSource, useScreenEditor } from "../screener/editorState";
 import { DESKTOP_QUERY } from "../../lib/media";
 import { screensQuery, screenerStatusQuery } from "../../api/screener";
 import { HOTKEYS } from "../../lib/hotkeys";
@@ -37,8 +37,8 @@ export const DEFAULT_SEARCH_COMMANDS: readonly SearchCommand[] = [
     const store = useScreenerStore.getState();
     const sessions = typeof matchMedia !== "undefined" && matchMedia(DESKTOP_QUERY).matches ? useScreenEditor.getState().sessions : {};
     const source = selectedSource(screens, store.chosenId, sessions);
-    const session = source ? sessions[source.id] : null;
-    const checked = session ? checkedSession(session) : null;
+    const session = source ? currentSession(screens, source, sessions) : null;
+    const checked = session ? checkedSession(session, screens) : null;
     if (checked && !checked.ok) {
       if (source) useScreenEditor.getState().trySubmit(screens, source);
       return selection.showToast("조건식의 잘못된 값을 고쳐 주세요");

@@ -25,16 +25,28 @@ interface EditorState {
 
 export const sessionOf = (base: Screens, source: Screen): EditorSession => ({ source, base, initial: draftOf(source), draft: draftOf(source), saving: { kind: "idle" }, tried: false });
 export const isDirty = (session: EditorSession) => JSON.stringify(session.draft) !== JSON.stringify(session.initial);
-export const checkedSession = (session: EditorSession) => checkDraft(session.draft, session.source.id, session.base.screens);
+export const checkedSession = (session: EditorSession, latest: Screens) => checkDraft(session.draft, session.source.id, latest.screens);
 const reason = (e: unknown) => e instanceof Error ? e.message : String(e);
 
+export function currentSession(base: Screens, source: Screen, sessions: EditorState["sessions"]): EditorSession {
+  const session = sessions[source.id];
+  if (!session) return sessionOf(base, source);
+  if (isDirty(session) || session.saving.kind === "saving") return session;
+  return { ...sessionOf(base, source), saving: session.saving, tried: session.tried };
+}
+
+export function availableSources(base: Screens, sessions: EditorState["sessions"]): Screen[] {
+  return [...base.screens, ...Object.values(sessions).filter((session) => isDirty(session) && !base.screens.some((screen) => screen.id === session.source.id)).map((session) => session.source)];
+}
+
 export function selectedSource(base: Screens, id: string | null, sessions: EditorState["sessions"]): Screen | null {
-  return base.screens.find((screen) => screen.id === id) ?? (id ? sessions[id]?.source : null) ?? base.screens[0] ?? null;
+  const sources = availableSources(base, sessions);
+  return sources.find((screen) => screen.id === id) ?? sources[0] ?? null;
 }
 
 export const useScreenEditor = create<EditorState>()((set, get) => {
   const put = (session: EditorSession) => set((s) => ({ sessions: { ...s.sessions, [session.source.id]: session } }));
-  const read = (base: Screens, source: Screen) => get().sessions[source.id] ?? sessionOf(base, source);
+  const read = (base: Screens, source: Screen) => currentSession(base, source, get().sessions);
   return {
     sessions: {},
     change: (base, source, update) => {
@@ -52,7 +64,7 @@ export const useScreenEditor = create<EditorState>()((set, get) => {
     save: async (client, base, source) => {
       const session = read(base, source);
       if (session.saving.kind === "saving") return;
-      const checked = checkedSession(session);
+      const checked = checkedSession(session, base);
       if (!checked.ok) return put({ ...session, tried: true });
       put({ ...session, saving: { kind: "saving" } });
       try {

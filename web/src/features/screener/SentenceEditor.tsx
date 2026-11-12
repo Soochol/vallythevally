@@ -2,11 +2,12 @@ import { useQueryClient } from "@tanstack/react-query";
 import { type ReactNode, useRef, useState } from "react";
 import type { Screen } from "../../api/generated/Screen";
 import type { Screens } from "../../api/generated/Screens";
+import { screensQuery } from "../../api/screener";
 import { useScreenerStore } from "../../stores/screener";
 import { confirmAction } from "../overlay/Confirm";
 import { Popover } from "../overlay/Popover";
 import { ChevronIcon, MoreIcon, PlayIcon, SpinnerIcon } from "../icons";
-import { checkedSession, isDirty, useScreenEditor, type EditorSession } from "./editorState";
+import { availableSources, checkedSession, currentSession, isDirty, selectedSource, useScreenEditor, type EditorSession } from "./editorState";
 import { ScreenerMenu } from "./ScreenerMenu";
 import { SentenceFields } from "./SentenceFields";
 
@@ -17,19 +18,23 @@ export function SentenceEditor({ session, base, source, running, blocked, result
   const [rename, setRename] = useState<string | null>(null);
   const sessions = useScreenEditor((s) => s.sessions);
   const editor = useScreenEditor.getState();
-  const checked = checkedSession(session);
+  const checked = checkedSession(session, base);
   const busy = session.saving.kind === "saving";
   const nameError = !checked.ok && (session.tried || session.draft.name !== session.initial?.name) ? checked.errors.name : null;
   const create = (copy = false) => useScreenerStore.getState().choose(editor.create(base, copy ? session.draft : undefined));
-  const screens = [...base.screens, ...Object.values(sessions).filter((s) => s.initial === null && !base.screens.some((screen) => screen.id === s.source.id)).map((s) => ({ ...s.source, name: s.draft.name }))];
+  const screens = availableSources(base, sessions);
   const remove = async () => {
     if (!await confirmAction(`"${session.draft.name}" 조건식을 삭제할까요? 되돌릴 수 없습니다.`)) return;
-    if (await editor.remove(client, base, source)) useScreenerStore.getState().choose(base.screens.find((s) => s.id !== source.id)?.id ?? "");
+    if (await editor.remove(client, base, source)) {
+      const latest = client.getQueryData(screensQuery.queryKey) ?? base;
+      const next = selectedSource(latest, null, useScreenEditor.getState().sessions);
+      useScreenerStore.getState().choose(next?.id ?? "");
+    }
   };
   return <section aria-label="조건식 편집" className="flex-none border-b border-line">
     <div ref={anchor} data-chart-control className="flex flex-wrap items-center gap-1 px-3 py-2">
       <fieldset disabled={busy} className="contents">
-        <ScreenerMenu label="조건식 고르기" items={screens.map((screen) => ({ kind: "radio", label: screen.name || "이름 없음", checked: screen.id === source.id, onSelect: () => useScreenerStore.getState().choose(screen.id) }))}><span className="truncate text-l font-semibold">{session.draft.name || "이름 없음"}</span><ChevronIcon /></ScreenerMenu>
+        <ScreenerMenu label="조건식 고르기" items={screens.map((screen) => ({ kind: "radio", label: currentSession(base, screen, sessions).draft.name || "이름 없음", checked: screen.id === source.id, onSelect: () => useScreenerStore.getState().choose(screen.id) }))}><span className="truncate text-l font-semibold">{session.draft.name || "이름 없음"}</span><ChevronIcon /></ScreenerMenu>
         {isDirty(session) && <span className="rounded-s border border-warning px-1 text-xs text-warning">변경됨</span>}
         <span className="flex-1" />
         <button type="button" className="tb-btn h-7 px-2 text-s disabled:opacity-40" disabled={!isDirty(session)} onClick={() => void editor.save(client, base, source)}>{busy ? "저장 중" : "저장"}</button>

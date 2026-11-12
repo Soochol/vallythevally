@@ -1,5 +1,5 @@
 import { SentenceEditor } from "./SentenceEditor";
-import { checkedSession, selectedSource, sessionOf, useScreenEditor } from "./editorState";
+import { checkedSession, currentSession, selectedSource, useScreenEditor } from "./editorState";
 import { confirmAction } from "../overlay/Confirm";
 import { ownsChartKeyboard } from "../overlay/topLayer";
 import { SortIcon } from "../icons";
@@ -130,8 +130,8 @@ function useChosenScreen() {
   const desktop = useMediaQuery(DESKTOP_QUERY);
   const base = screens.data;
   const source = base ? selectedSource(base, chosenId, desktop ? sessions : {}) : null;
-  const session = desktop && base && source ? sessions[source.id] ?? sessionOf(base, source) : null;
-  const check = session ? checkedSession(session) : null;
+  const session = desktop && base && source ? currentSession(base, source, sessions) : null;
+  const check = session && base ? checkedSession(session, base) : null;
   const screen = check?.ok ? check.screen : source;
   const run = useScreenerStore((s) => (screen && (!check || check.ok) ? runOf(s.runs, screen) : null));
   return { screens, screen, run, session, source };
@@ -203,7 +203,7 @@ export function ScreenerPanel() {
   const rows = useMemo(() => (result ? sortRows(result.rows, sort) : []), [result, sort]);
   const { refresh } = useUpdateCommands();
   const execute = () => {
-    if (session && !checkedSession(session).ok) return;
+    if (session && screens.data && !checkedSession(session, screens.data).ok) return;
     if (screen) void useScreenerStore.getState().run(screen).then(refresh);
   };
   useResultKeys(rows);

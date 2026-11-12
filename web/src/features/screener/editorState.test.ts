@@ -6,7 +6,7 @@ import { screensQuery } from "../../api/screener";
 import { useScreenerStore } from "../../stores/screener";
 import { DEFAULT_SEARCH_COMMANDS } from "../search/commands";
 import { addCondition, changeKind, editCondition, placeCondition, removeCondition, toggleExclude, toggleMarket } from "../screen-dialog/screenForm";
-import { checkedSession, isDirty, selectedSource, useScreenEditor } from "./editorState";
+import { availableSources, checkedSession, currentSession, isDirty, selectedSource, useScreenEditor } from "./editorState";
 
 const source: Screen = { id: "a", name: "신고가", markets: [], exclude: [], conditions: [{ kind: "new_high", period: "D", barRange: { start: 0, end: 4 }, field: "high", n: 200 }] };
 const base: Screens = { revision: 1, screens: [source] };
@@ -30,7 +30,7 @@ test("문장 변경은 저장본을 바꾸지 않고 시장·제외·순서·삭
   editor().change(base, source, (d) => placeCondition(d, second.key, d.conditions[0]!.key));
   expect(current().draft.conditions.map((line) => line.kind)).toEqual(["rsi", "new_high"]);
   editor().change(base, source, (d) => removeCondition(d, second.key));
-  const checked = checkedSession(current());
+  const checked = checkedSession(current(), base);
   expect(checked.ok && checked.screen).toEqual({ ...source, markets: ["kospi"], exclude: ["etf"] });
   expect(isDirty(current())).toBe(true);
   expect(base.screens).toEqual([source]);
@@ -63,7 +63,7 @@ test("잘못된 봉 범위는 저장하지 않고 draft와 검증 메시지를 �
   const fetch = vi.fn(); vi.stubGlobal("fetch", fetch);
   editor().change(base, source, (d) => editCondition(d, { ...d.conditions[0]!, rangeStart: "5", rangeEnd: "2" }));
   await editor().save(client, base, source);
-  expect(checkedSession(current()).ok).toBe(false);
+  expect(checkedSession(current(), base).ok).toBe(false);
   expect(current().tried).toBe(true);
   expect(fetch).not.toHaveBeenCalled();
 });
@@ -163,12 +163,13 @@ test("new draft recovers after freeing a slot from a full saved list", async () 
   const full: Screens = { revision: 1, screens: Array.from({ length: 50 }, (_, index) => ({ ...source, id: String(index) })) };
   const id = editor().create(full);
   const added = editor().sessions[id]!.source;
-  expect(checkedSession(editor().sessions[id]!).ok).toBe(false);
+  expect(checkedSession(editor().sessions[id]!, full).ok).toBe(false);
   const fetch = vi.fn(async (_url: string, init: RequestInit) => reply(JSON.parse(String(init.body))));
   vi.stubGlobal("fetch", fetch);
   expect(await editor().remove(client, full, full.screens[0]!)).toBe(true);
   const latest = client.getQueryData(screensQuery.queryKey)!;
   expect(latest.screens).toHaveLength(49);
+  expect(checkedSession(editor().sessions[id]!, latest).ok).toBe(true);
   await editor().save(client, latest, added);
   expect(fetch).toHaveBeenCalledTimes(2);
   expect(isDirty(editor().sessions[id]!)).toBe(false);
@@ -181,6 +182,8 @@ test("미저장 식 B를 지워도 남은 A가 기본 선택에 포함된다", a
   const added = editor().sessions[b]!.source;
   editor().change(empty, editor().sessions[a]!.source, (draft) => ({ ...draft, name: "남겨 둘 A" }));
   expect(await editor().remove(client, empty, added)).toBe(true);
+  expect(availableSources(empty, editor().sessions).map((screen) => screen.id)).toEqual([a]);
+  expect(selectedSource(empty, null, editor().sessions)?.id).toBe(a);
   useScreenerStore.getState().choose("");
   expect(selectedSource(empty, useScreenerStore.getState().chosenId, editor().sessions)?.id).toBe(a);
   expect(editor().sessions[a]?.draft.name).toBe("남겨 둘 A");
@@ -194,4 +197,45 @@ test("다른 탭에서 목록이 바뀌어도 편집 중 draft와 충돌 기준 
   expect(current().draft.markets).toEqual(["kosdaq"]);
   expect(current().base.revision).toBe(1);
   expect(current().source).toEqual(source);
+});
+
+test("깨끗한 세션은 최신 저장본을 표시하고 다음 편집도 그 값과 revision에서 시작한다", async () => {
+  vi.stubGlobal("fetch", vi.fn(async (_url: string, init: RequestInit) => reply(JSON.parse(String(init.body)))));
+  editor().change(base, source, (draft) => ({ ...draft, name: "로컬 저장" }));
+  await editor().save(client, base, source);
+  const remote: Screen = { ...source, name: "다른 탭 저장", markets: ["kospi"] };
+  const latest: Screens = { revision: 3, screens: [remote] };
+  const shown = currentSession(latest, remote, editor().sessions);
+  expect(shown.draft.name).toBe(remote.name);
+  expect(shown.draft.markets).toEqual(remote.markets);
+  expect(shown.base.revision).toBe(3);
+  expect(isDirty(shown)).toBe(false);
+  editor().change(latest, remote, (draft) => toggleExclude(draft, "etf"));
+  expect(current().draft.markets).toEqual(["kospi"]);
+  expect(current().draft.name).toBe(remote.name);
+  expect(current().draft.exclude).toEqual(["etf"]);
+  expect(current().base.revision).toBe(3);
+});
+
+test("최신 목록에서 지운 식은 깨끗하면 사라지고 편집 중이면 draft로 남는다", () => {
+  editor().change(base, source, (draft) => draft);
+  const empty: Screens = { revision: 2, screens: [] };
+  expect(selectedSource(empty, source.id, editor().sessions)).toBeNull();
+  editor().change(base, source, (draft) => ({ ...draft, name: "보존할 편집" }));
+  expect(selectedSource(empty, null, editor().sessions)?.id).toBe(source.id);
+  expect(currentSession(empty, source, editor().sessions).draft.name).toBe("보존할 편집");
+  expect(current().base.revision).toBe(1);
+});
+
+test("개수 제한은 최신 목록을 검사하되 새 draft의 충돌 기준은 바꾸지 않는다", async () => {
+  const older: Screens = { revision: 1, screens: Array.from({ length: 49 }, (_, index) => ({ ...source, id: String(index) })) };
+  const id = editor().create(older);
+  const session = editor().sessions[id]!;
+  const latest: Screens = { revision: 2, screens: [...older.screens, { ...source, id: "49" }] };
+  const fetch = vi.fn(); vi.stubGlobal("fetch", fetch);
+  const checked = checkedSession(session, latest);
+  expect(!checked.ok && checked.errors.list).toContain("조건식은 50개까지");
+  await editor().save(client, latest, session.source);
+  expect(fetch).not.toHaveBeenCalled();
+  expect(editor().sessions[id]?.base.revision).toBe(1);
 });
