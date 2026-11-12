@@ -6,7 +6,6 @@ import {
   checkForm,
   formFromSpec,
   hasColor,
-  matchKinds,
   nextColor,
   panelLabel,
   placeErrors,
@@ -101,18 +100,6 @@ test("색 견본은 색을 고를 선이 있을 때만 보인다", () => {
   expect(hasColor(edit(volume, {}, { maPeriod: false }))).toBe(false);
   expect(hasColor(edit(volume, { maPeriod: "" }))).toBe(true);
   for (const kind of KIND_ORDER.filter((k) => { const spec = KINDS[k].defaults; return k !== "volume" && !(isFinancial(spec) && isFinancialBar(spec.kind)); })) expect(hasColor(formFromSpec(KINDS[kind].defaults))).toBe(true);
-});
-
-test("이름과 초성으로 지표 종류를 찾는다", () => {
-  expect(matchKinds("")).toEqual(KIND_ORDER);
-  expect(matchKinds("ㅇㄷ")).toEqual(["ma"]);
-  expect(matchKinds("ㅇ")).toEqual(["ma", "ichimoku", "stochSlow", "revenue", "operating_income", "debt_ratio"]);
-  expect(matchKinds("ㅇㅁ")).toEqual(["ichimoku"]);
-  expect(matchKinds("ㅅㅌ")).toEqual(["stochSlow"]);
-  expect(matchKinds(" 볼린저밴드 ")).toEqual(["bollinger"]);
-  expect(matchKinds("macd")).toEqual(["macd"]);
-  expect(matchKinds("평균")).toEqual(["ma"]);
-  expect(matchKinds("없는 지표")).toEqual([]);
 });
 
 test("주 버튼은 무엇이 추가될지를 말하고, 편집이면 변경 적용이다", () => {

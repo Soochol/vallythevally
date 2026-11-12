@@ -18,7 +18,7 @@ const CHIP =
 
 export function PeriodChips({ cell }: { cell: CellState }) {
   const setPeriod = useLayoutStore((s) => s.setPeriod);
-  const openIndicators = useSelectionStore((s) => s.openIndicators);
+  const openIndicatorCommand = useSelectionStore((s) => s.openIndicatorCommand);
   const [menuOpen, setMenuOpen] = useState(false);
   const root = useRef<HTMLDivElement>(null);
   const navigation = useRef<HTMLElement>(null);
@@ -105,7 +105,7 @@ export function PeriodChips({ cell }: { cell: CellState }) {
         aria-label="지표"
         title="지표 (I)"
         className="mb-2 mr-3 grid h-[36px] w-[44px] flex-none place-items-center rounded-full border border-line text-text"
-        onClick={() => openIndicators(cell.slot)}
+        onClick={() => openIndicatorCommand(cell.slot)}
       >
         <IndicatorIcon />
       </button>

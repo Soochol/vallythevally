@@ -7,7 +7,7 @@ import { ChartCell } from "./features/grid/ChartCell";
 import { PeriodChips } from "./features/phone/PeriodChips";
 import { PhoneHeader } from "./features/phone/PhoneHeader";
 import { PhoneTabs } from "./features/phone/PhoneTabs";
-import { IndicatorDialog } from "./features/indicator-dialog/IndicatorDialog";
+import { IndicatorCommand } from "./features/indicator-command/IndicatorCommand";
 import { ScreenDialog } from "./features/screen-dialog/ScreenDialog";
 import { PhoneScreener } from "./features/screener/ScreenerPanel";
 import { SearchDialog } from "./features/search/SearchDialog";
@@ -67,7 +67,7 @@ function ChartScreen() {
       <PhoneScreener />
       <PhoneSaveBand />
       <SearchDialog />
-      <IndicatorDialog />
+      <IndicatorCommand />
       <ScreenDialog />
       <Toast />
       <ConfirmHost />
