@@ -775,44 +775,52 @@ pub enum ExcludeKind {
     TradingHalted,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(deny_unknown_fields)]
+#[ts(export)]
+pub struct BarRange {
+    pub start: u32,
+    pub end: u32,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
-#[serde(tag = "kind", rename_all = "snake_case", rename_all_fields = "camelCase")]
+#[serde(tag = "kind", rename_all = "snake_case", rename_all_fields = "camelCase", deny_unknown_fields)]
 #[ts(export)]
 pub enum Condition {
-    NewHigh { period: ScreenPeriod, m: u32, field: BarField, n: u32 },
-    NewLow { period: ScreenPeriod, m: u32, field: BarField, n: u32 },
-    ValueRange { period: ScreenPeriod, m: u32, field: BarField, min: Bound, max: Bound },
-    Change { period: ScreenPeriod, m: u32, back: u32, min_pct: Bound, max_pct: Bound },
-    NearExtreme { period: ScreenPeriod, m: u32, extreme: Extreme, n: u32, within_pct: f64 },
-    Surge { period: ScreenPeriod, m: u32, field: SurgeField, n: u32, times: f64 },
-    MaPosition { period: ScreenPeriod, m: u32, field: PriceField, method: indicators::MaMethod, length: u16, side: Side },
-    MaAlignment { period: ScreenPeriod, m: u32, method: indicators::MaMethod, lengths: Vec<u16>, order: MaOrder },
-    MaCross { period: ScreenPeriod, m: u32, method: indicators::MaMethod, fast: Option<u16>, slow: u16, direction: Direction },
-    Rsi { period: ScreenPeriod, m: u32, length: u16, test: RsiTest },
-    Macd { period: ScreenPeriod, m: u32, fast: u16, slow: u16, signal: u16, test: MacdTest },
-    Stochastic { period: ScreenPeriod, m: u32, k: u16, d: u16, smooth: u16, test: StochasticTest },
-    Bollinger { period: ScreenPeriod, m: u32, length: u16, k: f64, test: BollingerTest },
-    Ichimoku { period: ScreenPeriod, m: u32, conversion: u16, base: u16, span_b: u16, displacement: u16, test: IchimokuTest },
+    NewHigh { period: ScreenPeriod, bar_range: BarRange, field: BarField, n: u32 },
+    NewLow { period: ScreenPeriod, bar_range: BarRange, field: BarField, n: u32 },
+    ValueRange { period: ScreenPeriod, bar_range: BarRange, field: BarField, min: Bound, max: Bound },
+    Change { period: ScreenPeriod, bar_range: BarRange, back: u32, min_pct: Bound, max_pct: Bound },
+    NearExtreme { period: ScreenPeriod, bar_range: BarRange, extreme: Extreme, n: u32, within_pct: f64 },
+    Surge { period: ScreenPeriod, bar_range: BarRange, field: SurgeField, n: u32, times: f64 },
+    MaPosition { period: ScreenPeriod, bar_range: BarRange, field: PriceField, method: indicators::MaMethod, length: u16, side: Side },
+    MaAlignment { period: ScreenPeriod, bar_range: BarRange, method: indicators::MaMethod, lengths: Vec<u16>, order: MaOrder },
+    MaCross { period: ScreenPeriod, bar_range: BarRange, method: indicators::MaMethod, fast: Option<u16>, slow: u16, direction: Direction },
+    Rsi { period: ScreenPeriod, bar_range: BarRange, length: u16, test: RsiTest },
+    Macd { period: ScreenPeriod, bar_range: BarRange, fast: u16, slow: u16, signal: u16, test: MacdTest },
+    Stochastic { period: ScreenPeriod, bar_range: BarRange, k: u16, d: u16, smooth: u16, test: StochasticTest },
+    Bollinger { period: ScreenPeriod, bar_range: BarRange, length: u16, k: f64, test: BollingerTest },
+    Ichimoku { period: ScreenPeriod, bar_range: BarRange, conversion: u16, base: u16, span_b: u16, displacement: u16, test: IchimokuTest },
     MarketCap { min: Bound, max: Bound },
 }
 
 impl Condition {
-    pub fn period_and_m(&self) -> Option<(ScreenPeriod, u32)> {
+    pub fn period_and_range(&self) -> Option<(ScreenPeriod, BarRange)> {
         match *self {
-            Condition::NewHigh { period, m, .. }
-            | Condition::NewLow { period, m, .. }
-            | Condition::ValueRange { period, m, .. }
-            | Condition::Change { period, m, .. }
-            | Condition::NearExtreme { period, m, .. }
-            | Condition::Surge { period, m, .. }
-            | Condition::MaPosition { period, m, .. }
-            | Condition::MaAlignment { period, m, .. }
-            | Condition::MaCross { period, m, .. }
-            | Condition::Rsi { period, m, .. }
-            | Condition::Macd { period, m, .. }
-            | Condition::Stochastic { period, m, .. }
-            | Condition::Bollinger { period, m, .. }
-            | Condition::Ichimoku { period, m, .. } => Some((period, m)),
+            Condition::NewHigh { period, bar_range, .. }
+            | Condition::NewLow { period, bar_range, .. }
+            | Condition::ValueRange { period, bar_range, .. }
+            | Condition::Change { period, bar_range, .. }
+            | Condition::NearExtreme { period, bar_range, .. }
+            | Condition::Surge { period, bar_range, .. }
+            | Condition::MaPosition { period, bar_range, .. }
+            | Condition::MaAlignment { period, bar_range, .. }
+            | Condition::MaCross { period, bar_range, .. }
+            | Condition::Rsi { period, bar_range, .. }
+            | Condition::Macd { period, bar_range, .. }
+            | Condition::Stochastic { period, bar_range, .. }
+            | Condition::Bollinger { period, bar_range, .. }
+            | Condition::Ichimoku { period, bar_range, .. } => Some((period, bar_range)),
             Condition::MarketCap { .. } => None,
         }
     }
@@ -1110,22 +1118,22 @@ mod tests {
         let every_kind = json!(["etf", "preferred", "reit", "spac", "managed", "investment_caution_alert", "investment_warning",
                                 "investment_danger", "investment_caution", "short_term_overheated", "trading_halted"]);
         let sent = json!({"screens": [{"id": "S1", "name": "고가 200주", "markets": ["kosdaq"], "exclude": every_kind,
-                                       "conditions": [{"kind": "new_high", "period": "W", "m": 5, "field": "traded_value", "n": 200},
-                                                      {"kind": "change", "period": "D", "m": 1, "back": 20, "minPct": 30.0, "maxPct": null},
-                                                      {"kind": "ichimoku", "period": "M", "m": 1, "conversion": 9, "base": 26, "spanB": 52, "displacement": 26,
+                                       "conditions": [{"kind": "new_high", "period": "W", "barRange": {"start": 0, "end": 4}, "field": "traded_value", "n": 200},
+                                                      {"kind": "change", "period": "D", "barRange": {"start": 0, "end": 0}, "back": 20, "minPct": 30.0, "maxPct": null},
+                                                      {"kind": "ichimoku", "period": "M", "barRange": {"start": 0, "end": 0}, "conversion": 9, "base": 26, "spanB": 52, "displacement": 26,
                                                        "test": {"kind": "cloud", "side": "above"}},
-                                                      {"kind": "macd", "period": "D", "m": 3, "fast": 12, "slow": 26, "signal": 9,
+                                                      {"kind": "macd", "period": "D", "barRange": {"start": 0, "end": 2}, "fast": 12, "slow": 26, "signal": 9,
                                                        "test": {"kind": "zero_breakout", "direction": "down"}},
                                                       {"kind": "market_cap", "min": 300_000_000_000.0, "max": null}]}],
                           "revision": 1_794_152_040_123_i64});
         let screens: Screens = serde_json::from_value(sent.clone()).unwrap();
         let screen = &screens.screens[0];
         assert_eq!((screen.markets.as_slice(), screen.exclude.len()), ([Market::Kosdaq].as_slice(), 11));
-        assert_eq!(screen.conditions[0], Condition::NewHigh { period: ScreenPeriod::Week, m: 5, field: BarField::TradedValue, n: 200 });
-        assert_eq!(screen.conditions[1], Condition::Change { period: ScreenPeriod::Day, m: 1, back: 20, min_pct: Bound(Some(30.0)), max_pct: Bound(None) });
-        assert_eq!(screen.conditions[3].period_and_m(), Some((ScreenPeriod::Day, 3)));
+        assert_eq!(screen.conditions[0], Condition::NewHigh { period: ScreenPeriod::Week, bar_range: BarRange { start: 0, end: 4 }, field: BarField::TradedValue, n: 200 });
+        assert_eq!(screen.conditions[1], Condition::Change { period: ScreenPeriod::Day, bar_range: BarRange { start: 0, end: 0 }, back: 20, min_pct: Bound(Some(30.0)), max_pct: Bound(None) });
+        assert_eq!(screen.conditions[3].period_and_range(), Some((ScreenPeriod::Day, BarRange { start: 0, end: 2 })));
         assert_eq!(screen.conditions[4], Condition::MarketCap { min: Bound(Some(300_000_000_000.0)), max: Bound(None) });
-        assert_eq!(screen.conditions[4].period_and_m(), None);
+        assert_eq!(screen.conditions[4].period_and_range(), None);
         assert_eq!(serde_json::to_value(&screens).unwrap(), sent);
 
         let day = |y, m, d| KstDate(domain::KstDate::new(y, m, d).unwrap());

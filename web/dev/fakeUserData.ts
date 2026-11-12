@@ -72,7 +72,7 @@ const isCondition = (x: unknown): x is Condition =>
   isObject(x) &&
   typeof x.kind === "string" &&
   CONDITION_KINDS.includes(x.kind) &&
-  (x.kind === "market_cap" || (typeof x.period === "string" && SCREEN_PERIODS.includes(x.period) && isU32(x.m))) &&
+  (x.kind === "market_cap" || (typeof x.period === "string" && SCREEN_PERIODS.includes(x.period) && isObject(x.barRange) && isU32(x.barRange.start) && isU32(x.barRange.end))) &&
   (!isRecordKind(x.kind) || (typeof x.field === "string" && BAR_FIELDS.includes(x.field) && isU32(x.n)));
 export const isScreen = (x: unknown): x is Screen =>
   isObject(x) &&
@@ -97,8 +97,7 @@ function screensProblem(screens: readonly Screen[]): string | null {
     if (s.conditions.length > MAX_SCREEN_CONDITIONS) return `조건식 ${s.name}의 조건은 0~${MAX_SCREEN_CONDITIONS}줄이어야 합니다: ${s.conditions.length}줄`;
     for (const c of s.conditions) {
       if (c.kind === "market_cap") continue;
-      if (c.m < 1) return `조건식 ${s.name}의 조건은 m ≥ 1이어야 합니다: m=${c.m}`;
-      if ((c.kind === "new_high" || c.kind === "new_low") && c.m > c.n) return `조건식 ${s.name}의 조건은 m ≤ n이어야 합니다: n=${c.n}, m=${c.m}`;
+      if (c.barRange.start > c.barRange.end) return `조건식 ${s.name}의 봉 범위 시작은 끝 이하여야 합니다`;
     }
     if (new Set(s.markets).size !== s.markets.length) return `조건식 ${s.name}의 시장 목록에 같은 것이 두 번 있습니다`;
     if (new Set(s.exclude).size !== s.exclude.length) return `조건식 ${s.name}의 제외 목록에 같은 것이 두 번 있습니다`;

@@ -22,7 +22,7 @@ const PERIODS: Period[] = ["1m", "3m", "5m", "10m", "15m", "30m", "60m", "D", "W
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const SEED_WATCHLIST = ["005930", "000660", "373220", "035420", "005935", "069500", "IDX:001", "IDX:101"];
-const newHigh = (period: ScreenPeriod, field: BarField, n: number, m: number) => ({ kind: "new_high", period, m, field, n }) as const;
+const newHigh = (period: ScreenPeriod, field: BarField, n: number, m: number) => ({ kind: "new_high", period, barRange: { start: 0, end: m - 1 }, field, n }) as const;
 const SEED_SCREENS: Screen[] = [
   { id: "01900000-0000-7000-8000-0000000000a1", name: "고가 200일 신고가", markets: [], exclude: [], conditions: [newHigh("D", "high", 200, 5)] },
   {
@@ -42,8 +42,8 @@ const SEED_SCREENS: Screen[] = [
     exclude: ["etf"],
     conditions: [
       newHigh("W", "high", 52, 1),
-      { kind: "surge", period: "D", m: 3, field: "volume", n: 20, times: 3 },
-      { kind: "ma_cross", period: "D", m: 5, method: "sma", fast: 5, slow: 20, direction: "up" },
+      { kind: "surge", period: "D", barRange: { start: 0, end: 2 }, field: "volume", n: 20, times: 3 },
+      { kind: "ma_cross", period: "D", barRange: { start: 0, end: 4 }, method: "sma", fast: 5, slow: 20, direction: "up" },
       { kind: "market_cap", min: 300_000_000_000, max: null },
     ],
   },

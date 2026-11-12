@@ -111,9 +111,9 @@ test("상태를 한 번 읽은 뒤 탭 복귀 조회가 실패하면 아래 줄�
   stop();
 });
 
-const high: Screen = { id: "a", name: "고가 200일 신고가", markets: [], exclude: [], conditions: [{ kind: "new_high", period: "D", m: 5, field: "high", n: 200 }] };
-const close: Screen = { ...high, id: "b", name: "종가 60일 신고가", conditions: [{ kind: "new_high", period: "D", m: 1, field: "close", n: 60 }] };
-const volume: Screen = { ...high, id: "c", name: "신고거래량", conditions: [{ kind: "new_high", period: "D", m: 1, field: "volume", n: 60 }] };
+const high: Screen = { id: "a", name: "고가 200일 신고가", markets: [], exclude: [], conditions: [{ kind: "new_high", period: "D", barRange: { start: 0, end: 4 }, field: "high", n: 200 }] };
+const close: Screen = { ...high, id: "b", name: "종가 60일 신고가", conditions: [{ kind: "new_high", period: "D", barRange: { start: 0, end: 0 }, field: "close", n: 60 }] };
+const volume: Screen = { ...high, id: "c", name: "신고거래량", conditions: [{ kind: "new_high", period: "D", barRange: { start: 0, end: 0 }, field: "volume", n: 60 }] };
 
 function screensServer(initial: Screens) {
   let stored = initial;

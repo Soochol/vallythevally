@@ -30,8 +30,8 @@ const weekly: Screen = {
   markets: [],
   exclude: ["etf", "trading_halted"],
   conditions: [
-    { kind: "new_high", period: "W", m: 1, field: "high", n: 52 },
-    { kind: "new_high", period: "W", m: 4, field: "volume", n: 52 },
+    { kind: "new_high", period: "W", barRange: { start: 0, end: 0 }, field: "high", n: 52 },
+    { kind: "new_high", period: "W", barRange: { start: 0, end: 3 }, field: "volume", n: 52 },
   ],
 };
 const many = (count: number): Screen[] => Array.from({ length: count }, (_, i) => ({ ...weekly, id: `s${i + 1}` }));
@@ -58,7 +58,7 @@ const errorsIn = (line: ConditionDraft): ConditionErrors => {
 const asKind = <K extends ConditionKind>(kind: K, period: ConditionDraft["period"] = "D", m = "1") => {
   const line = firstLine(changeKind(oneLine(), 0, kind));
   if (line.kind !== kind) throw new Error("종류가 바뀌어야 한다");
-  return { ...line, period, m } as Extract<ConditionDraft, { kind: K }>;
+  return { ...line, period, rangeStart: "0", rangeEnd: String(Number(m) - 1) } as Extract<ConditionDraft, { kind: K }>;
 };
 
 test("새 조건식은 이름이 비면 이름 칸에 이유를 달고 막는다", () => {
@@ -76,7 +76,7 @@ test("새 조건식은 조건 0줄로 시작해 그대로 저장할 수 있고, 
   expect(draftOf(null).conditions).toEqual([]);
   expect(checkDraft(named(draftOf(null)), "id-1", [])).toEqual({ ok: true, screen: { id: "id-1", name: "시험", markets: [], exclude: [], conditions: [] } });
   const check = checkDraft(named(oneLine()), "id-1", []);
-  expect(check.ok && check.screen.conditions).toEqual([{ kind: "new_high", period: "D", m: 1, field: "high", n: 200 }]);
+  expect(check.ok && check.screen.conditions).toEqual([{ kind: "new_high", period: "D", barRange: { start: 0, end: 0 }, field: "high", n: 200 }]);
 });
 
 test("조건 0줄로 저장한 조건식을 다시 열면 0줄이고, 이름만 바꿔 저장해도 0줄이다", () => {
@@ -86,35 +86,35 @@ test("조건 0줄로 저장한 조건식을 다시 열면 0줄이고, 이름만 
 });
 
 test("더한 줄은 윗줄의 봉 주기만 따르고 나머지는 신고가 기본값이다", () => {
-  let draft = draftOf({ ...weekly, conditions: [{ kind: "rsi", period: "M", m: 3, length: 9, test: { kind: "range", min: 10, max: 20 } }] });
+  let draft = draftOf({ ...weekly, conditions: [{ kind: "rsi", period: "M", barRange: { start: 0, end: 2 }, length: 9, test: { kind: "range", min: 10, max: 20 } }] });
   draft = addCondition(draft);
-  expect(conditionOf(draft.conditions[1]!)).toEqual({ kind: "new_high", period: "M", m: 1, field: "high", n: 200 });
+  expect(conditionOf(draft.conditions[1]!)).toEqual({ kind: "new_high", period: "M", barRange: { start: 0, end: 0 }, field: "high", n: 200 });
   draft = addCondition(editCondition(draft, { ...draft.conditions[1]!, period: "W" }));
-  expect(conditionOf(draft.conditions[2]!)).toEqual({ kind: "new_high", period: "W", m: 1, field: "high", n: 200 });
+  expect(conditionOf(draft.conditions[2]!)).toEqual({ kind: "new_high", period: "W", barRange: { start: 0, end: 0 }, field: "high", n: 200 });
 });
 
 test("시가총액 줄 아래에 더한 줄은 시가총액 줄이 이어 받은 봉 주기를 따른다", () => {
   const draft = addCondition(draftOf({ ...weekly, conditions: [weekly.conditions[0]!, { kind: "market_cap", min: 300_000_000_000, max: null }] }));
-  expect(conditionOf(draft.conditions[2]!)).toEqual({ kind: "new_high", period: "W", m: 1, field: "high", n: 200 });
+  expect(conditionOf(draft.conditions[2]!)).toEqual({ kind: "new_high", period: "W", barRange: { start: 0, end: 0 }, field: "high", n: 200 });
 });
 
-test("종류를 바꾸면 봉 주기와 M은 남고 나머지는 그 종류의 기본값이며, 지표 기본값은 차트와 같다", () => {
-  const start = editCondition(oneLine(), { ...firstLine(oneLine()), period: "W", m: "3" });
+test("종류를 바꾸면 봉 주기와 봉 범위는 남고 나머지는 그 종류의 기본값이며, 지표 기본값은 차트와 같다", () => {
+  const start = editCondition(oneLine(), { ...firstLine(oneLine()), period: "W", rangeStart: "0", rangeEnd: "2" });
   const expected: Record<ConditionKind, Condition> = {
-    new_high: { kind: "new_high", period: "W", m: 3, field: "high", n: 200 },
-    new_low: { kind: "new_low", period: "W", m: 3, field: "low", n: 200 },
-    value_range: { kind: "value_range", period: "W", m: 3, field: "traded_value", min: 10_000_000_000, max: null },
-    change: { kind: "change", period: "W", m: 3, back: 1, minPct: 5, maxPct: null },
-    near_extreme: { kind: "near_extreme", period: "W", m: 3, extreme: "high", n: 200, withinPct: 5 },
-    surge: { kind: "surge", period: "W", m: 3, field: "volume", n: 20, times: 3 },
-    ma_position: { kind: "ma_position", period: "W", m: 3, field: "close", method: "sma", length: 20, side: "above" },
-    ma_alignment: { kind: "ma_alignment", period: "W", m: 3, method: "sma", lengths: [5, 20, 60, 120], order: "bullish" },
-    ma_cross: { kind: "ma_cross", period: "W", m: 3, method: "sma", fast: 5, slow: 20, direction: "up" },
-    rsi: { kind: "rsi", period: "W", m: 3, length: 14, test: { kind: "range", min: null, max: 30 } },
-    macd: { kind: "macd", period: "W", m: 3, fast: 12, slow: 26, signal: 9, test: { kind: "signal_cross", direction: "up" } },
-    stochastic: { kind: "stochastic", period: "W", m: 3, k: 5, d: 3, smooth: 3, test: { kind: "cross", direction: "up" } },
-    bollinger: { kind: "bollinger", period: "W", m: 3, length: 20, k: 2, test: { kind: "outside", side: "above" } },
-    ichimoku: { kind: "ichimoku", period: "W", m: 3, conversion: 9, base: 26, spanB: 52, displacement: 26, test: { kind: "cloud", side: "above" } },
+    new_high: { kind: "new_high", period: "W", barRange: { start: 0, end: 2 }, field: "high", n: 200 },
+    new_low: { kind: "new_low", period: "W", barRange: { start: 0, end: 2 }, field: "low", n: 200 },
+    value_range: { kind: "value_range", period: "W", barRange: { start: 0, end: 2 }, field: "traded_value", min: 10_000_000_000, max: null },
+    change: { kind: "change", period: "W", barRange: { start: 0, end: 2 }, back: 1, minPct: 5, maxPct: null },
+    near_extreme: { kind: "near_extreme", period: "W", barRange: { start: 0, end: 2 }, extreme: "high", n: 200, withinPct: 5 },
+    surge: { kind: "surge", period: "W", barRange: { start: 0, end: 2 }, field: "volume", n: 20, times: 3 },
+    ma_position: { kind: "ma_position", period: "W", barRange: { start: 0, end: 2 }, field: "close", method: "sma", length: 20, side: "above" },
+    ma_alignment: { kind: "ma_alignment", period: "W", barRange: { start: 0, end: 2 }, method: "sma", lengths: [5, 20, 60, 120], order: "bullish" },
+    ma_cross: { kind: "ma_cross", period: "W", barRange: { start: 0, end: 2 }, method: "sma", fast: 5, slow: 20, direction: "up" },
+    rsi: { kind: "rsi", period: "W", barRange: { start: 0, end: 2 }, length: 14, test: { kind: "range", min: null, max: 30 } },
+    macd: { kind: "macd", period: "W", barRange: { start: 0, end: 2 }, fast: 12, slow: 26, signal: 9, test: { kind: "signal_cross", direction: "up" } },
+    stochastic: { kind: "stochastic", period: "W", barRange: { start: 0, end: 2 }, k: 5, d: 3, smooth: 3, test: { kind: "cross", direction: "up" } },
+    bollinger: { kind: "bollinger", period: "W", barRange: { start: 0, end: 2 }, length: 20, k: 2, test: { kind: "outside", side: "above" } },
+    ichimoku: { kind: "ichimoku", period: "W", barRange: { start: 0, end: 2 }, conversion: 9, base: 26, spanB: 52, displacement: 26, test: { kind: "cloud", side: "above" } },
     market_cap: { kind: "market_cap", min: 300_000_000_000, max: null },
   };
   for (const kind of Object.keys(expected) as ConditionKind[]) {
@@ -129,27 +129,27 @@ test("같은 종류를 다시 고르면 입력한 값이 그대로다", () => {
   expect(changeKind(draft, 0, "new_high")).toEqual(draft);
 });
 
-test("신고거래량·신고거래대금을 새로 고르면 일봉·최근 100·200으로 시작하고, 고친 뒤 같은 항목을 다시 골라도 고친 값이 그대로다", () => {
-  const start = editCondition(oneLine(), { ...firstLine(oneLine()), period: "W", m: "3" });
+test("신고거래량·신고거래대금을 고르면 일봉·200으로 시작하고 봉 범위는 유지하며, 고친 뒤 같은 항목을 다시 골라도 고친 값이 그대로다", () => {
+  const start = editCondition(oneLine(), { ...firstLine(oneLine()), period: "W", rangeStart: "0", rangeEnd: "2" });
   const volume = changeKind(start, 0, "volume_high");
-  expect(conditionOf(firstLine(volume))).toEqual({ kind: "new_high", period: "D", m: 100, field: "volume", n: 200 });
-  expect(conditionOf(firstLine(changeKind(start, 0, "traded_value_high")))).toEqual({ kind: "new_high", period: "D", m: 100, field: "traded_value", n: 200 });
+  expect(conditionOf(firstLine(volume))).toEqual({ kind: "new_high", period: "D", barRange: { start: 0, end: 2 }, field: "volume", n: 200 });
+  expect(conditionOf(firstLine(changeKind(start, 0, "traded_value_high")))).toEqual({ kind: "new_high", period: "D", barRange: { start: 0, end: 2 }, field: "traded_value", n: 200 });
 
   const picked = firstLine(volume);
   if (picked.kind !== "new_high") throw new Error("신고가 계산을 쓰는 줄이어야 한다");
-  const edited = editCondition(volume, { ...picked, period: "M", n: "24", m: "6" });
+  const edited = editCondition(volume, { ...picked, period: "M", n: "24", rangeStart: "0", rangeEnd: "5" });
   expect(changeKind(edited, 0, "volume_high")).toEqual(edited);
   expect(kindChoiceOf(firstLine(edited))).toBe("volume_high");
-  expect(conditionOf(firstLine(changeKind(edited, 0, "traded_value_high")))).toEqual({ kind: "new_high", period: "D", m: 100, field: "traded_value", n: 200 });
-  expect(conditionOf(firstLine(changeKind(edited, 0, "new_high")))).toEqual({ kind: "new_high", period: "M", m: 6, field: "high", n: 200 });
+  expect(conditionOf(firstLine(changeKind(edited, 0, "traded_value_high")))).toEqual({ kind: "new_high", period: "D", barRange: { start: 0, end: 5 }, field: "traded_value", n: 200 });
+  expect(conditionOf(firstLine(changeKind(edited, 0, "new_high")))).toEqual({ kind: "new_high", period: "M", barRange: { start: 0, end: 5 }, field: "high", n: 200 });
 });
 
 test("신고가 값으로 거래량·거래대금을 골라 저장한 줄은 신고거래량·신고거래대금 항목으로 열리고 봉 주기와 N·M이 그대로다", () => {
-  const draft = draftOf({ ...weekly, conditions: [weekly.conditions[0]!, weekly.conditions[1]!, { kind: "new_high", period: "M", m: 2, field: "traded_value", n: 12 }] });
+  const draft = draftOf({ ...weekly, conditions: [weekly.conditions[0]!, weekly.conditions[1]!, { kind: "new_high", period: "M", barRange: { start: 0, end: 1 }, field: "traded_value", n: 12 }] });
   expect(draft.conditions.map(kindChoiceOf)).toEqual(["new_high", "volume_high", "traded_value_high"]);
-  expect(draft.conditions.map(conditionOf)).toEqual([weekly.conditions[0], weekly.conditions[1], { kind: "new_high", period: "M", m: 2, field: "traded_value", n: 12 }]);
-  expect(errorsIn({ ...draft.conditions[1]!, m: "53" })).toEqual({ m: "신고거래량 기간 52주보다 길 수 없습니다" });
-  expect(errorsIn({ ...draft.conditions[2]!, m: "13" })).toEqual({ m: "신고거래대금 기간 12개월보다 길 수 없습니다" });
+  expect(draft.conditions.map(conditionOf)).toEqual([weekly.conditions[0], weekly.conditions[1], { kind: "new_high", period: "M", barRange: { start: 0, end: 1 }, field: "traded_value", n: 12 }]);
+  expect(checkCondition({ ...draft.conditions[1]!, rangeStart: "0", rangeEnd: "52" }).ok).toBe(true);
+  expect(checkCondition({ ...draft.conditions[2]!, rangeStart: "0", rangeEnd: "12" }).ok).toBe(true);
 });
 
 test("종류 메뉴는 가격, 거래, 이동평균, 보조지표, 종목 묶음에 15가지와 신고거래량·신고거래대금을 한 번씩 담는다", () => {
@@ -176,21 +176,21 @@ test("▲▼는 이웃한 줄과 자리를 바꾸고, 첫 줄 위와 끝 줄 아
   expect(check.ok && check.screen.conditions).toEqual([weekly.conditions[1], weekly.conditions[0], { kind: "market_cap", min: 1, max: null }]);
 });
 
-test("M이 N보다 크면 M 칸에 그 줄의 봉 주기 단위로 이유를 단다", () => {
-  expect(errorsIn({ ...asKind("new_high"), n: "200", m: "201" })).toEqual({ m: "신고가 기간 200일보다 길 수 없습니다" });
-  expect(errorsIn({ ...asKind("new_high", "W"), n: "52", m: "53" })).toEqual({ m: "신고가 기간 52주보다 길 수 없습니다" });
-  expect(errorsIn({ ...asKind("new_low", "M"), n: "12", m: "13" })).toEqual({ m: "신저가 기간 12개월보다 길 수 없습니다" });
-  expect(conditionOf({ ...asKind("new_low"), n: "200", m: "200" })).toMatchObject({ n: 200, m: 200 });
+test("범위 끝은 N보다 커도 유효하다", () => {
+  expect(checkCondition({ ...asKind("new_high"), n: "200", rangeStart: "0", rangeEnd: "200" }).ok).toBe(true);
+  expect(checkCondition({ ...asKind("new_high", "W"), n: "52", rangeStart: "0", rangeEnd: "52" }).ok).toBe(true);
+  expect(checkCondition({ ...asKind("new_low", "M"), n: "12", rangeStart: "0", rangeEnd: "12" }).ok).toBe(true);
+  expect(conditionOf({ ...asKind("new_low"), n: "200", rangeStart: "0", rangeEnd: "199" })).toMatchObject({ n: 200, barRange: { start: 0, end: 199 } });
 });
 
 test("N, M, 비교 봉 수는 1 이상의 정수여야 하고, u32 끝까지 받는다", () => {
   for (const bad of ["", "0", "1.5", "-3", "abc", "2e3", "1,00"]) {
     expect(errorsIn({ ...asKind("new_high"), n: bad })).toEqual({ n: "1 이상의 정수를 넣으세요" });
-    expect(errorsIn({ ...asKind("near_extreme"), m: bad })).toEqual({ m: "1 이상의 정수를 넣으세요" });
+    if (bad !== "0") expect(errorsIn({ ...asKind("near_extreme"), rangeEnd: bad })).toEqual({ rangeEnd: "0 이상의 정수를 넣으세요" });
     expect(errorsIn({ ...asKind("change"), back: bad })).toEqual({ back: "1 이상의 정수를 넣으세요" });
   }
   expect(errorsIn({ ...asKind("surge"), n: "4294967296" })).toEqual({ n: "4,294,967,295 이하로 넣으세요" });
-  expect(conditionOf({ ...asKind("new_high"), n: " 4294967295 ", m: "1,000" })).toEqual({ kind: "new_high", period: "D", m: 1000, field: "high", n: 4_294_967_295 });
+  expect(conditionOf({ ...asKind("new_high"), n: " 4294967295 ", rangeStart: "0", rangeEnd: "999" })).toEqual({ kind: "new_high", period: "D", barRange: { start: 0, end: 999 }, field: "high", n: 4_294_967_295 });
 });
 
 test("지표 기간은 차트 지표처럼 1~65,535의 정수다", () => {
@@ -211,7 +211,7 @@ test("MACD와 이평 교차는 짧은 쪽이 긴 쪽보다 짧아야 하고, 종
   expect(errorsIn({ ...asKind("macd"), fast: "26", slow: "26" })).toEqual({ fast: "느린 기간 26일보다 짧아야 합니다" });
   expect(errorsIn({ ...asKind("ma_cross", "W"), fast: "60", slow: "20" })).toEqual({ fast: "긴 이평 20주보다 짧아야 합니다" });
   const close = { ...asKind("ma_cross"), fastLine: "close", fast: "60", slow: "20" } as const;
-  expect(conditionOf(close)).toEqual({ kind: "ma_cross", period: "D", m: 1, method: "sma", fast: null, slow: 20, direction: "up" });
+  expect(conditionOf(close)).toEqual({ kind: "ma_cross", period: "D", barRange: { start: 0, end: 0 }, method: "sma", fast: null, slow: 20, direction: "up" });
   expect(conditionOf({ ...close, fastLine: "ma", fast: "5" })).toMatchObject({ fast: 5, slow: 20 });
 });
 
@@ -260,8 +260,8 @@ test("거리, RSI·%K 범위, 돌파 값은 0~100이고, 배수와 볼린저 표
 
 test("판정을 고르면 그 판정의 값만 보내고, 다른 판정의 칸에 넣던 값은 남는다", () => {
   const rsi = { ...asKind("rsi", "W", "2"), min: "10", max: "20", value: "50", direction: "down" } as const;
-  expect(conditionOf({ ...rsi, test: "breakout" })).toEqual({ kind: "rsi", period: "W", m: 2, length: 14, test: { kind: "breakout", value: 50, direction: "down" } });
-  expect(conditionOf({ ...rsi, test: "range", value: "abc" })).toEqual({ kind: "rsi", period: "W", m: 2, length: 14, test: { kind: "range", min: 10, max: 20 } });
+  expect(conditionOf({ ...rsi, test: "breakout" })).toEqual({ kind: "rsi", period: "W", barRange: { start: 0, end: 1 }, length: 14, test: { kind: "breakout", value: 50, direction: "down" } });
+  expect(conditionOf({ ...rsi, test: "range", value: "abc" })).toEqual({ kind: "rsi", period: "W", barRange: { start: 0, end: 1 }, length: 14, test: { kind: "range", min: 10, max: 20 } });
   const macd = { ...asKind("macd"), side: "below", direction: "down" } as const;
   expect(conditionOf({ ...macd, test: "vs_signal" })).toMatchObject({ test: { kind: "vs_signal", side: "below" } });
   expect(conditionOf({ ...macd, test: "zero_breakout" })).toMatchObject({ test: { kind: "zero_breakout", direction: "down" } });
@@ -271,7 +271,7 @@ test("판정을 고르면 그 판정의 값만 보내고, 다른 판정의 칸�
 });
 
 test("거래대금과 시가총액은 억 원으로 보이고 원으로 보낸다", () => {
-  const traded = lineOf({ kind: "value_range", period: "D", m: 1, field: "traded_value", min: 10_000_000_000, max: 12_345_678_901 });
+  const traded = lineOf({ kind: "value_range", period: "D", barRange: { start: 0, end: 0 }, field: "traded_value", min: 10_000_000_000, max: 12_345_678_901 });
   expect(traded).toMatchObject({ min: "100", max: "123.45678901" });
   const cap = lineOf({ kind: "market_cap", min: 50_000_000, max: 3_000_000_000_000 });
   expect(cap).toMatchObject({ min: "0.5", max: "30000" });
@@ -287,15 +287,15 @@ const everyKind: Screen = {
   exclude: ["spac"],
   conditions: [
     { kind: "market_cap", min: 123_456_789, max: null },
-    { kind: "new_low", period: "M", m: 2, field: "traded_value", n: 36 },
-    { kind: "value_range", period: "W", m: 1, field: "traded_value", min: 1.5, max: 98_765_432_101.25 },
-    { kind: "change", period: "D", m: 3, back: 20, minPct: -12.75, maxPct: 0.001 },
-    { kind: "near_extreme", period: "M", m: 1, extreme: "low", n: 120, withinPct: 7.5 },
-    { kind: "surge", period: "D", m: 1, field: "traded_value", n: 60, times: 2.25 },
-    { kind: "ma_position", period: "W", m: 4, field: "open", method: "ema", length: 33, side: "below" },
-    { kind: "ma_alignment", period: "D", m: 1, method: "ema", lengths: [3, 8, 21, 55, 144], order: "bearish" },
-    { kind: "ma_cross", period: "M", m: 2, method: "sma", fast: null, slow: 10, direction: "down" },
-    { kind: "rsi", period: "D", m: 5, length: 21, test: { kind: "breakout", value: 72.5, direction: "down" } },
+    { kind: "new_low", period: "M", barRange: { start: 0, end: 1 }, field: "traded_value", n: 36 },
+    { kind: "value_range", period: "W", barRange: { start: 0, end: 0 }, field: "traded_value", min: 1.5, max: 98_765_432_101.25 },
+    { kind: "change", period: "D", barRange: { start: 0, end: 2 }, back: 20, minPct: -12.75, maxPct: 0.001 },
+    { kind: "near_extreme", period: "M", barRange: { start: 0, end: 0 }, extreme: "low", n: 120, withinPct: 7.5 },
+    { kind: "surge", period: "D", barRange: { start: 0, end: 0 }, field: "traded_value", n: 60, times: 2.25 },
+    { kind: "ma_position", period: "W", barRange: { start: 0, end: 3 }, field: "open", method: "ema", length: 33, side: "below" },
+    { kind: "ma_alignment", period: "D", barRange: { start: 0, end: 0 }, method: "ema", lengths: [3, 8, 21, 55, 144], order: "bearish" },
+    { kind: "ma_cross", period: "M", barRange: { start: 0, end: 1 }, method: "sma", fast: null, slow: 10, direction: "down" },
+    { kind: "rsi", period: "D", barRange: { start: 0, end: 4 }, length: 21, test: { kind: "breakout", value: 72.5, direction: "down" } },
   ],
 };
 const everyIndicator: Screen = {
@@ -304,16 +304,16 @@ const everyIndicator: Screen = {
   markets: ["kosdaq", "kospi"],
   exclude: [],
   conditions: [
-    { kind: "macd", period: "W", m: 1, fast: 8, slow: 17, signal: 5, test: { kind: "vs_signal", side: "below" } },
-    { kind: "stochastic", period: "D", m: 2, k: 14, d: 5, smooth: 5, test: { kind: "range", min: 80, max: null } },
-    { kind: "bollinger", period: "M", m: 1, length: 30, k: 2.5, test: { kind: "cross", band: "lower", direction: "up" } },
-    { kind: "ichimoku", period: "W", m: 3, conversion: 7, base: 22, spanB: 44, displacement: 22, test: { kind: "cross", direction: "down" } },
-    { kind: "rsi", period: "M", m: 1, length: 14, test: { kind: "range", min: null, max: 30 } },
-    { kind: "macd", period: "D", m: 1, fast: 12, slow: 26, signal: 9, test: { kind: "zero_breakout", direction: "up" } },
-    { kind: "stochastic", period: "W", m: 1, k: 5, d: 3, smooth: 3, test: { kind: "cross", direction: "down" } },
-    { kind: "bollinger", period: "D", m: 1, length: 20, k: 2, test: { kind: "outside", side: "above" } },
-    { kind: "ichimoku", period: "D", m: 1, conversion: 9, base: 26, spanB: 52, displacement: 26, test: { kind: "cloud", side: "below" } },
-    { kind: "new_high", period: "W", m: 1, field: "close", n: 520 },
+    { kind: "macd", period: "W", barRange: { start: 0, end: 0 }, fast: 8, slow: 17, signal: 5, test: { kind: "vs_signal", side: "below" } },
+    { kind: "stochastic", period: "D", barRange: { start: 0, end: 1 }, k: 14, d: 5, smooth: 5, test: { kind: "range", min: 80, max: null } },
+    { kind: "bollinger", period: "M", barRange: { start: 0, end: 0 }, length: 30, k: 2.5, test: { kind: "cross", band: "lower", direction: "up" } },
+    { kind: "ichimoku", period: "W", barRange: { start: 0, end: 2 }, conversion: 7, base: 22, spanB: 44, displacement: 22, test: { kind: "cross", direction: "down" } },
+    { kind: "rsi", period: "M", barRange: { start: 0, end: 0 }, length: 14, test: { kind: "range", min: null, max: 30 } },
+    { kind: "macd", period: "D", barRange: { start: 0, end: 0 }, fast: 12, slow: 26, signal: 9, test: { kind: "zero_breakout", direction: "up" } },
+    { kind: "stochastic", period: "W", barRange: { start: 0, end: 0 }, k: 5, d: 3, smooth: 3, test: { kind: "cross", direction: "down" } },
+    { kind: "bollinger", period: "D", barRange: { start: 0, end: 0 }, length: 20, k: 2, test: { kind: "outside", side: "above" } },
+    { kind: "ichimoku", period: "D", barRange: { start: 0, end: 0 }, conversion: 9, base: 26, spanB: 52, displacement: 26, test: { kind: "cloud", side: "below" } },
+    { kind: "new_high", period: "W", barRange: { start: 0, end: 0 }, field: "close", n: 520 },
   ],
 };
 
@@ -342,7 +342,7 @@ test("검사를 통과하면 서버가 돌려주는 필드 순서의 조건식�
   const check = checkDraft(draft, "id-1", []);
   expect(check.ok && JSON.stringify(check.screen)).toBe(
     '{"id":"id-1","name":"고가와 거래량","markets":["kosdaq"],"exclude":["etf","trading_halted"],' +
-      '"conditions":[{"kind":"new_high","period":"W","m":1,"field":"high","n":200},{"kind":"new_high","period":"W","m":4,"field":"volume","n":200}]}',
+      '"conditions":[{"kind":"new_high","period":"W","barRange":{"start":0,"end":0},"field":"high","n":200},{"kind":"new_high","period":"W","barRange":{"start":0,"end":3},"field":"volume","n":200}]}',
   );
 });
 
@@ -368,7 +368,7 @@ test("조건 줄은 마지막 줄까지 뺄 수 있고, 빈 조건식에 다시 
   const one = oneLine();
   const none = removeCondition(one, firstLine(one).key);
   expect(none.conditions).toEqual([]);
-  expect(conditionOf(firstLine(addCondition(none)))).toEqual({ kind: "new_high", period: "D", m: 1, field: "high", n: 200 });
+  expect(conditionOf(firstLine(addCondition(none)))).toEqual({ kind: "new_high", period: "D", barRange: { start: 0, end: 0 }, field: "high", n: 200 });
   let draft = none;
   for (let i = 0; i < 12; i++) draft = addCondition(draft);
   expect(draft.conditions).toHaveLength(10);
@@ -398,4 +398,21 @@ test("저장할 목록에서 고친 조건식은 제자리에서 바뀌고 새 �
   expect(withScreen([a, b, c], renamed)).toEqual([a, renamed, c]);
   const fresh = { ...a, id: "s9" };
   expect(withScreen([a, b], fresh)).toEqual([a, b, fresh]);
+});
+
+test("봉 범위는 양 끝 포함 0 이상의 정수이며 누락·음수·소수·역순을 막고 종류 변경으로 유지된다", () => {
+  for (const kind of ["new_high", "new_low", "value_range", "change", "near_extreme", "surge", "ma_position", "ma_alignment", "ma_cross", "rsi", "macd", "stochastic", "bollinger", "ichimoku"] as const) {
+    for (const [start, end] of [[0, 0], [1, 1], [0, 2], [1, 3], [300, 400]]) {
+      expect(conditionOf({ ...asKind(kind), rangeStart: String(start), rangeEnd: String(end) })).toMatchObject({ barRange: { start, end } });
+    }
+    for (const field of ["rangeStart", "rangeEnd"] as const) {
+      for (const bad of ["", "-1", "0.5", "4294967296"]) expect(checkCondition({ ...asKind(kind), [field]: bad }).ok).toBe(false);
+    }
+    expect(errorsIn({ ...asKind(kind), rangeStart: "3", rangeEnd: "2" })).toEqual({ rangeEnd: "시작보다 작을 수 없습니다" });
+  }
+  const start = editCondition(oneLine(), { ...firstLine(oneLine()), rangeStart: "1", rangeEnd: "3" });
+  for (const choice of ["volume_high", "traded_value_high", "rsi", "market_cap"] as const) {
+    const changed = changeKind(start, 0, choice);
+    expect(conditionOf(firstLine(changeKind(changed, 0, "new_low")))).toMatchObject({ barRange: { start: 1, end: 3 } });
+  }
 });

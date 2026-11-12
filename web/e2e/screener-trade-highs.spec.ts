@@ -5,18 +5,18 @@ import { editor, excludedLine, expectRows, openScreener, panel, results, runButt
 
 test.use({ krxMarket: "20261106", krxConditionStocks: true, clockStart: "20261109100000" });
 
-const newHigh = (period: string, field: string, n: number, m: number) => ({ kind: "new_high", period, m, field, n });
+const newHigh = (period: string, field: string, n: number, m: number) => ({ kind: "new_high", period, barRange: { start: 0, end: m - 1 }, field, n });
 const WEEKLY_HIGH = { id: "plain", name: "주봉 신고가", markets: [], exclude: [], conditions: [newHigh("W", "high", 52, 4)] };
 const OLD_VOLUME = { id: "old-volume", name: "신고가 값으로 고른 신고거래량", markets: [], exclude: [], conditions: [newHigh("W", "volume", 52, 4)] };
 const RENAMED_OLD = "옛 신고거래량 이름만 바꿈";
 const PICKED = "신고거래대금과 주봉 신고거래량";
 
-const OLD_VOLUME_TEXT = "최근 4주 안에 거래량이 52주 신고거래량인 봉이 있다";
-const TRADED_START_TEXT = "최근 100일 안에 거래대금이 200일 신고거래대금인 봉이 있다";
-const VOLUME_START_TEXT = "최근 100일 안에 거래량이 200일 신고거래량인 봉이 있다";
-const WEEKLY_VOLUME_TEXT = "최근 8주 안에 거래량이 52주 신고거래량인 봉이 있다";
-const MONTHLY_TRADED_TEXT = "최근 6개월 안에 거래대금이 24개월 신고거래대금인 봉이 있다";
-const MONTHLY_VOLUME_TEXT = "최근 3개월 안에 거래량이 12개월 신고거래량인 봉이 있다";
+const OLD_VOLUME_TEXT = "주봉 0~3봉 전 안에 거래량이 52주 신고거래량인 봉이 있다";
+const TRADED_START_TEXT = "일봉 0~99봉 전 안에 거래대금이 200일 신고거래대금인 봉이 있다";
+const VOLUME_START_TEXT = "일봉 0~99봉 전 안에 거래량이 200일 신고거래량인 봉이 있다";
+const WEEKLY_VOLUME_TEXT = "주봉 0~7봉 전 안에 거래량이 52주 신고거래량인 봉이 있다";
+const MONTHLY_TRADED_TEXT = "월봉 0~5봉 전 안에 거래대금이 24개월 신고거래대금인 봉이 있다";
+const MONTHLY_VOLUME_TEXT = "월봉 0~2봉 전 안에 거래량이 12개월 신고거래량인 봉이 있다";
 const EXCLUDED = "대상 16종목 · 빠짐: 상장 기간 부족 2 · 이력 덜 참 0";
 
 const choice = (dialog: Locator, line: number, name: string) => dialog.getByRole("combobox", { name: `조건 ${line} ${name}` });
@@ -52,7 +52,7 @@ async function expectTradeHighLine(dialog: Locator, line: number, kind: { value:
   await expect(choice(dialog, line, "봉 주기")).toHaveAttribute("data-value", period);
   await expect(choice(dialog, line, "값")).toHaveCount(0);
   await expect(box(dialog, line, `${kind.label} 기간`)).toHaveValue(n);
-  await expect(box(dialog, line, "최근 봉 수")).toHaveValue(m);
+  await expect(box(dialog, line, "봉 범위 끝")).toHaveValue(String(Number(m) - 1));
 }
 
 async function save(page: Page, dialog: Locator) {
@@ -70,7 +70,7 @@ async function run(page: Page) {
 const VOLUME = { value: "volume_high", label: "신고거래량" };
 const TRADED_VALUE = { value: "traded_value_high", label: "신고거래대금" };
 
-test("거래 분류의 신고거래량·신고거래대금은 새로 고르면 일봉·최근 100일·200일로 시작하고, 바꾼 봉 주기와 기간은 저장하고 다시 열어도 남으며, 신고가 값으로 고른 옛 조건식도 그 항목으로 그대로 열리고 실행된다", async ({ app, page }) => {
+test("거래 분류의 신고거래량·신고거래대금은 종류 변경 시 봉 범위를 유지하고, 바꾼 봉 주기와 기간은 저장하고 다시 열어도 남으며, 신고가 값으로 고른 옛 조건식도 그 항목으로 그대로 열리고 실행된다", async ({ app, page }) => {
   test.setTimeout(180_000);
   const screenSaves: string[] = [];
   page.on("request", (req) => {
@@ -134,24 +134,30 @@ test("거래 분류의 신고거래량·신고거래대금은 새로 고르면 �
   await test.step("주봉 신고가 줄에서 신고거래대금을, 더한 줄에서 신고거래량을 고르면 둘 다 일봉·최근 100일·200일로 시작한다", async () => {
     const dialog = editor(page, "조건식 편집");
     await selectOption(choice(dialog, 1, "종류"), { label: "신고거래대금" });
+    await expect(box(dialog, 1, "봉 범위 끝")).toHaveValue("3");
+    await box(dialog, 1, "봉 범위 끝").fill("99");
     await expectTradeHighLine(dialog, 1, TRADED_VALUE, "D", "200", "100");
     await dialog.getByRole("button", { name: "조건 더하기" }).click();
     await selectOption(choice(dialog, 2, "종류"), { label: "신고거래량" });
+    await expect(box(dialog, 2, "봉 범위 끝")).toHaveValue("0");
+    await box(dialog, 2, "봉 범위 끝").fill("99");
     await expectTradeHighLine(dialog, 2, VOLUME, "D", "200", "100");
     await expect(lineTexts(dialog)).toHaveText([TRADED_START_TEXT, VOLUME_START_TEXT]);
   });
 
-  await test.step("봉 주기와 N·M을 바꾸면 그 단위로 읽히고, 최근 봉 수가 비교 기간보다 길면 그 칸에서 저장이 막힌다", async () => {
+  await test.step("봉 주기와 N·봉 범위를 바꾸면 그 단위로 읽히고, 범위가 역순이면 저장이 막힌다", async () => {
     const dialog = editor(page, "조건식 편집");
     await dialog.getByLabel("이름").fill(PICKED);
     await selectOption(choice(dialog, 2, "봉 주기"), "W");
     await box(dialog, 2, "신고거래량 기간").fill("52");
-    await box(dialog, 2, "최근 봉 수").fill("53");
-    await expect(lineTexts(dialog)).toHaveText([TRADED_START_TEXT, "최근 봉 수: 신고거래량 기간 52주보다 길 수 없습니다"]);
+    await box(dialog, 2, "봉 범위 시작").fill("53");
+    await box(dialog, 2, "봉 범위 끝").fill("52");
+    await expect(lineTexts(dialog)).toHaveText([TRADED_START_TEXT, "봉 범위 끝: 시작보다 작을 수 없습니다"]);
     await dialog.getByRole("button", { name: "저장" }).click();
-    await expect(box(dialog, 2, "최근 봉 수")).toBeFocused();
-    await expect(box(dialog, 2, "최근 봉 수")).toHaveAttribute("aria-invalid", "true");
-    await box(dialog, 2, "최근 봉 수").fill("8");
+    await expect(box(dialog, 2, "봉 범위 끝")).toBeFocused();
+    await expect(box(dialog, 2, "봉 범위 끝")).toHaveAttribute("aria-invalid", "true");
+    await box(dialog, 2, "봉 범위 시작").fill("0");
+    await box(dialog, 2, "봉 범위 끝").fill("7");
     await expectTradeHighLine(dialog, 2, VOLUME, "W", "52", "8");
     await expect(lineTexts(dialog)).toHaveText([TRADED_START_TEXT, WEEKLY_VOLUME_TEXT]);
     await save(page, dialog);
@@ -163,7 +169,7 @@ test("거래 분류의 신고거래량·신고거래대금은 새로 고르면 �
     ]);
   });
 
-  await test.step("실행하면 첫 줄 신고거래대금이 최근 100일 안에 마지막으로 맞은 날이 맞은 날짜로 나온다", async () => {
+  await test.step("실행하면 첫 줄 신고거래대금이 일봉 0~99봉 전 안에 마지막으로 맞은 날이 맞은 날짜로 나온다", async () => {
     await run(page);
     await expect(results(page)).toContainText("9종목 · 11-06(금) 기준");
     await expect(excludedLine(page)).toHaveText(EXCLUDED);
@@ -194,10 +200,10 @@ test("거래 분류의 신고거래량·신고거래대금은 새로 고르면 �
     let dialog = editor(page, "조건식 편집");
     await selectOption(choice(dialog, 1, "봉 주기"), "M");
     await box(dialog, 1, "신고거래대금 기간").fill("24");
-    await box(dialog, 1, "최근 봉 수").fill("6");
+    await box(dialog, 1, "봉 범위 끝").fill("5");
     await selectOption(choice(dialog, 2, "봉 주기"), "M");
     await box(dialog, 2, "신고거래량 기간").fill("12");
-    await box(dialog, 2, "최근 봉 수").fill("3");
+    await box(dialog, 2, "봉 범위 끝").fill("2");
     await expect(lineTexts(dialog)).toHaveText([MONTHLY_TRADED_TEXT, MONTHLY_VOLUME_TEXT]);
     await save(page, dialog);
     expect(screenSaves).toHaveLength(3);
