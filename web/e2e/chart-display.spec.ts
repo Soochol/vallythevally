@@ -151,7 +151,13 @@ test("가격보다 오래된 재무자료를 먼저 받아도 첫 가격 봉부�
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
   await expect(chartOf(cell(page))).toHaveAttribute("data-bar-count", "2");
   await expect.poll(() => page.evaluate(() => window.axisTexts().flatMap((axis) => axis.texts).map((label) => label.text))).toContain("−48.1조");
-  await expect.poll(() => page.evaluate(() => window.chartProbe.chart.timeScale().getVisibleRange()?.from)).toBe(Date.UTC(2016, 0, 1) / 1000);
+  await expect.poll(() => page.evaluate(() => {
+    const scale = window.chartProbe.chart.timeScale();
+    const first = window.chartProbe.main.dataByIndex(-100000, 1);
+    const index = first && scale.timeToIndex(first.time, false);
+    const range = scale.getVisibleLogicalRange();
+    return index !== null && index !== undefined && range ? range.from - index : null;
+  })).toBeCloseTo(-0.5, 3);
   const bounds = await page.evaluate(() => {
     const scale = window.chartProbe.chart.timeScale();
     const first = window.chartProbe.main.dataByIndex(-100000, 1);
