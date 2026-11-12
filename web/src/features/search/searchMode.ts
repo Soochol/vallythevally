@@ -1,8 +1,13 @@
 import type { SymbolInfo } from "../../api/generated/SymbolInfo";
+import type { SymbolSearchFilters } from "../../api/queries";
 import type { SearchCommand } from "../commands/registry";
 import { highlight, normalizeQuery } from "./highlight";
 
 export type MarketFilter = "all" | "kospi" | "kosdaq" | "etf";
+export const SEARCH_FILTERS = {
+  all: {}, kospi: { market: "kospi" }, kosdaq: { market: "kosdaq" }, etf: { kind: "etf" },
+} satisfies Record<MarketFilter, SymbolSearchFilters>;
+
 export const MARKET_FILTERS = [
   { value: "all", label: "전체" }, { value: "kospi", label: "코스피" },
   { value: "kosdaq", label: "코스닥" }, { value: "etf", label: "ETF" },

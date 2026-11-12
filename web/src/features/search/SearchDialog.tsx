@@ -15,7 +15,7 @@ import { EmptyState, ErrorState, Skeleton } from "../overlay/State";
 import { DEFAULT_SEARCH_COMMANDS } from "./commands";
 import { highlight } from "./highlight";
 import { GROUP_LABEL, searchList, type SearchGroup } from "./searchList";
-import { MARKET_FILTERS, matchesMarket, matchingCommands, type MarketFilter, searchMode } from "./searchMode";
+import { MARKET_FILTERS, SEARCH_FILTERS, matchesMarket, matchingCommands, type MarketFilter, searchMode } from "./searchMode";
 import { QuoteValue, SearchPreview } from "./SearchPreview";
 import { useSearchQuotes } from "./useSearchQuotes";
 
@@ -41,11 +41,12 @@ function SearchDialogBody({ purpose }: { purpose: SearchPurpose }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const mode = searchMode(input);
   const query = mode.query;
-  const search = useSymbolSearch(mode.kind === "symbols" ? query : "");
+  const filters = SEARCH_FILTERS[market];
+  const search = useSymbolSearch(mode.kind === "symbols" ? query : "", filters);
   const ids = useId();
-  const symbolList = searchList(query, { watch, recent }, search.data);
+  const symbolList = searchList(query, { watch, recent }, search.data, filters);
   const rows: ResultRow[] = [
-    ...(mode.kind === "symbols" ? symbolList.rows.filter((row) => matchesMarket(row.info, market)).map((row): ResultRow => ({ kind: "symbol", ...row })) : []),
+    ...(mode.kind === "symbols" ? symbolList.rows.filter((row) => query !== "" || matchesMarket(row.info, market)).map((row): ResultRow => ({ kind: "symbol", ...row })) : []),
     ...(query === "" || mode.kind === "commands" ? matchingCommands(commands, query).map((command): ResultRow => ({ kind: "command", command, group: "commands" })) : []),
   ];
   const selectable = mode.kind === "commands" || symbolList.selectable;
@@ -148,7 +149,7 @@ function SearchDialogBody({ purpose }: { purpose: SearchPurpose }) {
               </> : <><Icon size={16} path="M4 17l5-6 4 3 7-9" /><span className="flex-1"><Marked text={row.command.label} query={query} /></span>{row.command.shortcut && <kbd>{row.command.shortcut}</kbd>}</>}
             </li>
           </Fragment>)}
-          {mode.kind === "symbols" && search.isError && query !== "" ? <li role="presentation"><ErrorState message={search.error.message} retry={() => void search.refetch()} /></li> : !selectable && rows.length === 0 ? <li role="presentation"><Skeleton label="종목 찾는 중" /></li> : selectable && rows.length === 0 ? <li role="presentation"><EmptyState title="맞는 항목이 없습니다" action="입력 지우기" onAction={resetInput}>종목 이름·코드·초성이나 &gt; 명령을 입력하세요.</EmptyState></li> : null}
+          {mode.kind === "symbols" && search.isError && query !== "" ? <li role="presentation"><ErrorState message={search.error.message} retry={() => void search.refetch()} /></li> : !selectable && rows.length === 0 ? <li role="presentation"><Skeleton label="종목 찾는 중" /></li> : selectable && rows.length === 0 ? <li role="presentation"><EmptyState title={mode.kind === "symbols" && market !== "all" ? "조건에 맞는 종목이 없습니다" : "맞는 항목이 없습니다"} action="입력 지우기" onAction={resetInput}>종목 이름·코드·초성이나 &gt; 명령을 입력하세요.</EmptyState></li> : null}
           {quotes.isError && <li role="presentation"><ErrorState message="시세를 받지 못했습니다. 종목은 계속 열 수 있습니다." retry={() => void quotes.refetch()} /></li>}
         </ul>
         {selected?.kind === "symbol" ? <SearchPreview key={selected.info.code} purpose={purpose} info={selected.info} quote={bySymbol.get(selected.info.code)} /> : <aside className="w-[280px] flex-none space-y-3 border-l border-line p-4 text-text-2 max-md:hidden"><h3 className="font-semibold text-text">{selected?.kind === "command" ? selected.command.label : "종목·명령 찾기"}</h3><p className="text-s">{selected?.kind === "command" ? "Enter를 눌러 실행합니다" : "종목을 고르면 현재가와 60일 추세를 볼 수 있습니다"}</p><p className="text-xs text-text-3">&gt;로 시작하면 명령만 찾습니다</p></aside>}

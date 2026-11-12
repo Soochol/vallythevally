@@ -20,7 +20,7 @@ use crate::kiwoom::error::{Category, Failure, Note, Surface};
 use crate::kiwoom::rest::{KiwoomError, KiwoomRest};
 use crate::market::hub::{HubHandle, HubSnapshot};
 use crate::screener::Screener;
-use crate::symbols::{NotReady, SymbolDirectory};
+use crate::symbols::{NotReady, SearchFilter, SymbolDirectory};
 
 pub struct AppState {
     pub symbols: Arc<SymbolDirectory>,
@@ -220,12 +220,29 @@ pub(crate) async fn symbol_list(st: &AppState) -> Result<Arc<crate::symbols::Dir
 }
 
 async fn search(State(st): State<Arc<AppState>>, Query(q): Query<HashMap<String, String>>) -> Result<Json<Vec<api::SymbolInfo>>, ApiFailure> {
+    let filter = SearchFilter {
+        market: match q.get("market").map(String::as_str) {
+            None => None,
+            Some("kospi") => Some(domain::Market::Kospi),
+            Some("kosdaq") => Some(domain::Market::Kosdaq),
+            Some(_) => return Err(ApiFailure::bad_request("market은 kospi 또는 kosdaq이어야 합니다")),
+        },
+        kind: match q.get("kind").map(String::as_str) {
+            None => None,
+            Some("index") => Some(domain::SymbolKind::Index),
+            Some("common") => Some(domain::SymbolKind::Common),
+            Some("preferred") => Some(domain::SymbolKind::Preferred),
+            Some("etf") => Some(domain::SymbolKind::Etf),
+            Some("reit") => Some(domain::SymbolKind::Reit),
+            Some(_) => return Err(ApiFailure::bad_request("kind는 index, common, preferred, etf 또는 reit이어야 합니다")),
+        },
+    };
     let query = q.get("q").map_or("", String::as_str);
     if crate::symbols::normalize(query).is_empty() {
         return Ok(Json(Vec::new()));
     }
     let dir = symbol_list(&st).await?;
-    Ok(Json(dir.search(query).iter().map(api::SymbolInfo::from).collect()))
+    Ok(Json(dir.search(query, filter).iter().map(api::SymbolInfo::from).collect()))
 }
 
 async fn symbol(State(st): State<Arc<AppState>>, Path(code): Path<String>) -> Result<Json<api::SymbolInfo>, ApiFailure> {
@@ -807,14 +824,49 @@ mod tests {
         let f = fixture(false, true).await;
         let (s, v) = json(&f.app, "/api/symbols?q=%EC%82%BC%EC%84%B1").await;
         assert_eq!(s, StatusCode::OK);
-        assert_eq!(v[0], json!({"code": "005930", "name": "삼성전자", "kind": "common", "market": "kospi", "nxtEnabled": true}));
-        assert_eq!(v[1]["nxtEnabled"], false);
+        assert_eq!(v, json!([
+            {"code": "005930", "name": "삼성전자", "kind": "common", "market": "kospi", "nxtEnabled": true},
+            {"code": "005935", "name": "삼성전자우", "kind": "preferred", "market": "kospi", "nxtEnabled": false},
+        ]));
         assert_eq!(json(&f.app, "/api/symbols?q=").await, (StatusCode::OK, json!([])));
         assert_eq!(json(&f.app, "/api/symbols").await, (StatusCode::OK, json!([])));
         assert_eq!(json(&f.app, "/api/symbols/IDX:101").await.1["name"], "코스닥");
         let (s, v) = json(&f.app, "/api/symbols/000660").await;
         assert_eq!((s, v["error"]["code"].as_str()), (StatusCode::NOT_FOUND, Some("unknown_symbol")));
         assert_eq!(json(&f.app, "/api/symbols/bad").await.0, StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn symbol_search_conditions_and_bad_values() {
+        let f = fixture(false, true).await;
+        for (query, expected) in [
+            ("q=00593", vec!["005930", "005935"]),
+            ("q=00593&market=kospi", vec!["005930", "005935"]),
+            ("q=00593&market=kosdaq", vec![]),
+            ("q=00593&kind=common", vec!["005930"]),
+            ("q=00593&kind=preferred", vec!["005935"]),
+            ("q=00593&market=kospi&kind=preferred", vec!["005935"]),
+            ("q=00593&market=kosdaq&kind=preferred", vec![]),
+            ("q=IDX:&kind=index", vec!["IDX:101", "IDX:001"]),
+            ("q=IDX:&market=kosdaq&kind=index", vec!["IDX:101"]),
+            ("q=00593&kind=etf", vec![]),
+            ("q=00593&kind=reit", vec![]),
+            ("q=&market=kospi&kind=common", vec![]),
+        ] {
+            let (status, rows) = json(&f.app, &format!("/api/symbols?{query}")).await;
+            assert_eq!(status, StatusCode::OK, "{query}: {rows}");
+            let codes: Vec<_> = rows.as_array().unwrap().iter().map(|r| r["code"].as_str().unwrap()).collect();
+            assert_eq!(codes, expected, "{query}");
+        }
+        let f = fixture(true, false).await;
+        for condition in ["market=etf", "market=KOSPI", "market=", "kind=stock", "kind=ETF", "kind="] {
+            for query in ["q=00593&", "q=&", ""] {
+                let (status, error) = json(&f.app, &format!("/api/symbols?{query}{condition}")).await;
+                assert_eq!((status, code(&error)), (StatusCode::BAD_REQUEST, "bad_request"), "{query}{condition}: {error}");
+                assert!(!error["error"]["message"].as_str().unwrap().is_empty());
+            }
+        }
+        assert!(f.fake.market_sent().is_empty());
     }
 
     #[tokio::test(start_paused = true)]
