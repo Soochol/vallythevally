@@ -162,7 +162,7 @@ export class ChartController {
     );
     this.indicatorLegend = new IndicatorLegend(el, (id, command) => deps.onIndicatorCommand?.(id, command));
     this.compareLegend = new CompareLegend((code) => deps.onCompareRemove?.(code));
-    this.legend.root.append(this.indicatorLegend.priceBox, this.compareLegend.box);
+    this.legend.body.append(this.indicatorLegend.priceBox, this.compareLegend.box);
     this.resize = new ResizeObserver(() => {
       const width = this.axisWidth();
       if (this.chart.options().rightPriceScale.minimumWidth !== width) this.chart.priceScale("right").applyOptions({ minimumWidth: width });

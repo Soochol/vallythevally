@@ -55,11 +55,12 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, className: string, te
  * 휴대폰에서는 머리줄과 가격줄을 휴대폰 머리가 대신하므로 숨긴다(§4).
  */
 export class Legend {
-  readonly root = el("div", "pointer-events-none absolute left-5 top-4 z-[4] flex max-w-[calc(100%-90px)] flex-col gap-2");
-  private readonly name = el("span", "text-l font-[650]");
-  private readonly sub = el("span", "text-s text-text-3");
-  readonly venueAnchor = el("span", "pointer-events-auto inline-flex");
-  private readonly period = el("span", "text-s text-text-3");
+  readonly root = el("div", "pointer-events-none absolute left-5 top-4 flex max-w-[calc(100%-90px)] flex-col gap-2");
+  readonly body = el("div", "relative z-[4] flex min-w-0 flex-col gap-2");
+  private readonly name = el("span", "pointer-events-auto min-w-0 truncate text-l font-[650]");
+  private readonly sub = el("span", "flex-none text-s text-text-3");
+  readonly venueAnchor = el("span", "pointer-events-auto inline-flex flex-none");
+  private readonly period = el("span", "flex-none text-s text-text-3");
   private readonly priceRow = el("div", `${ROW} flex items-baseline gap-2 whitespace-nowrap max-md:hidden`);
   private readonly close = el("span", "text-xl font-semibold tracking-[-0.02em]");
   private readonly change = el("span", "text-s");
@@ -74,18 +75,20 @@ export class Legend {
   private readonly ohlc = el("div", `${ROW} flex flex-wrap gap-x-2 whitespace-nowrap text-s max-md:w-auto max-md:gap-x-1.5`);
 
   constructor(parent: HTMLElement) {
-    const head = el("div", `${ROW} flex items-baseline gap-1.5 whitespace-nowrap max-md:hidden`);
+    const head = el("div", "relative z-[6] flex min-w-0 max-w-full items-center gap-1.5 overflow-hidden whitespace-nowrap rounded-s bg-[color-mix(in_srgb,var(--chart-bg)_78%,transparent)] pr-1 max-md:hidden");
     head.append(this.name, this.sub, this.venueAnchor, this.period, this.notice);
     this.notice.hidden = true;
     this.fetched.title = "키움에서 조회한 값입니다. 체결마다 바뀌지 않습니다.";
     this.stalled.title = "실시간 시세가 멈췄습니다. 마지막으로 받은 값입니다.";
     this.priceRow.append(this.close, this.change, this.time, this.fetched, this.stalled);
-    this.root.append(head, this.priceRow, this.ohlc);
+    this.body.append(this.priceRow, this.ohlc);
+    this.root.append(head, this.body);
     parent.append(this.root);
   }
 
   setHead(h: { name: string; sub: string; period: string }): void {
     this.name.textContent = h.name;
+    this.name.title = h.name;
     this.sub.textContent = h.sub;
     this.period.textContent = h.period;
   }
