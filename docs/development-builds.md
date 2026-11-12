@@ -74,3 +74,13 @@ python3 scripts/dev.py status --with-fake
 DuckDB를 올릴 때는 `Cargo.lock`의 `duckdb`·`libduckdb-sys` 버전과 고정 파일을 함께 갱신한다. 해당 버전의 `libduckdb-sys/.duckdb-release`가 가리키는 공식 라이브러리를 받아 원본 커밋·엔진 버전을 맞추고 체크섬을 기록한다. 다른 호스트 지원도 확인한 공식 아카이브를 고정 파일에 추가한 뒤 시험한다. 등록되지 않은 호스트는 `--bundled`로 소스 빌드를 사용한다.
 
 공식 동작: [duckdb-rs 빌드 방식](https://github.com/duckdb/duckdb-rs#notes-on-building-duckdb-and-libduckdb-sys), [ccache의 디렉터리 간 재사용](https://ccache.dev/manual/latest.html#_compiling_in_different_directories).
+
+## OpenDART TLS 의존성
+
+OpenDART는 TLS 1.2의 RSA 키 교환 암호군만 수락하는 서버와도 연결해야 하므로 전용 reqwest 클라이언트에 `native-tls`를 명시한다(#198). DART 요청은 앱 이름과 패키지 버전의 User-Agent(`vallythevally/<version>`)를 보낸다. TLS 연결 뒤에도 User-Agent가 없으면 공식 서버가 오류 페이지로 302 응답하므로 필요한 원천 호환 조건이다. 오류 페이지 redirect는 추적하지 않는다. 인증서와 호스트명은 시스템 신뢰 저장소로 검증하며, TLS 버전을 전역 제한하지 않는다. KIND와 키움 REST는 `rustls`를 명시하고, 키움 WebSocket은 기존 `rustls-tls-webpki-roots` 기능을 유지한다. reqwest 0.13.5는 `native-tls` 기능을 추가하면 기본 backend도 native로 바뀌므로 새 클라이언트를 추가할 때도 원천별 선택을 명시한다.
+
+Linux 빌드에는 OpenSSL 개발 파일과 `pkg-config`가 필요하다(Debian/Ubuntu: `libssl-dev`, `pkg-config`). 실행 환경에도 빌드 시 연결한 OpenSSL 공유 라이브러리가 필요하다. 개발용 동적 DuckDB와 별개의 의존성이며, bundled DuckDB 배포 빌드에서도 OpenSSL 의존성은 남는다. 다른 플랫폼의 native TLS는 해당 플랫폼 구현을 사용한다. TLS 회귀 시험은 `openssl` 개발 의존성으로 로컬 CA·서버 인증서를 메모리에서 생성하고 TLS 1.2 RSA 전용 loopback 서버를 띄운다. 시험 CA는 해당 시험 클라이언트에만 추가하며 시스템 인증서나 사용자 설정은 바꾸지 않는다.
+
+```sh
+python3 scripts/dev.py cargo test -p server financials::client::tls_tests
+```

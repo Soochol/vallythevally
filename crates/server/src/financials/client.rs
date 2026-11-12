@@ -12,10 +12,14 @@ use super::model::{Basis, Company, Failure, Security};
 mod preferred;
 mod discovery;
 
+#[cfg(test)]
+mod tls_tests;
+
 pub type Row = BTreeMap<String, String>;
 
 pub struct Client {
     http: reqwest::Client,
+    kind_http: reqwest::Client,
     base: String,
     kind_base: String,
     key: Secret<String>,
@@ -25,8 +29,9 @@ pub struct Client {
 
 impl Client {
     pub fn new(key: Secret<String>, base: String, kind_base: String) -> Result<Self, Failure> {
-        let http = reqwest::Client::builder().timeout(Duration::from_secs(30)).redirect(reqwest::redirect::Policy::none()).build().map_err(|_| Failure::Network)?;
-        Ok(Self { http, base, kind_base, key, directory: Mutex::new(None), pace: Mutex::new(None) })
+        let http = dart_http_builder().build().map_err(|_| Failure::Network)?;
+        let kind_http = kind_http_builder().build().map_err(|_| Failure::Network)?;
+        Ok(Self { http, kind_http, base, kind_base, key, directory: Mutex::new(None), pace: Mutex::new(None) })
     }
 
     async fn bytes(&self, endpoint: &str, params: &[(&str, String)]) -> Result<Vec<u8>, Failure> {
@@ -133,7 +138,7 @@ impl Client {
     }
 
     async fn kind_bytes(&self, path: &str, params: &[(&str, &str)]) -> Result<Vec<u8>, Failure> {
-        let response = self.http.get(format!("{}{path}", self.kind_base)).query(params).send().await.map_err(|_| Failure::Network)?;
+        let response = self.kind_http.get(format!("{}{path}", self.kind_base)).query(params).send().await.map_err(|_| Failure::Network)?;
         if !response.status().is_success() { return Err(Failure::Remote); }
         let bytes = response.bytes().await.map_err(|_| Failure::Network)?;
         if bytes.len() > 1024 * 1024 { return Err(Failure::InvalidResponse); }
@@ -234,4 +239,12 @@ fn redact(value: &mut Value, key: &str) {
         }
         _ => {}
     }
+}
+
+fn dart_http_builder() -> reqwest::ClientBuilder {
+    reqwest::Client::builder().tls_backend_native().user_agent(concat!("vallythevally/", env!("CARGO_PKG_VERSION"))).timeout(Duration::from_secs(30)).redirect(reqwest::redirect::Policy::none())
+}
+
+fn kind_http_builder() -> reqwest::ClientBuilder {
+    reqwest::Client::builder().tls_backend_rustls().timeout(Duration::from_secs(30)).redirect(reqwest::redirect::Policy::none())
 }
