@@ -43,11 +43,15 @@ test("같은 가격의 체결·worker 프레임은 거래량 축만 무효화하
   await expect.poll(() => page.evaluate(() => window.frameProbe.snapshot().filter((series) => series.data.length > 0).length >= 5)).toBe(true);
   const volume = () => page.evaluate(() => {
     const last = window.frameProbe.snapshot().find((series) => series.type === "Histogram")?.data.at(-1);
-    return last && "value" in last ? last.value : null;
+    const current = window.frameProbe.snapshot().find((series) => series.type === "Candlestick")?.data.at(-1);
+    return last && current && last.time === current.time && "value" in last && typeof last.value === "number" ? last.value : null;
   });
   const settle = () => page.evaluate(async () => { for (let i = 0; i < 5; i++) await new Promise<void>((resolve) => requestAnimationFrame(() => resolve())); });
-  expect(await app.fake.pushReal("0B", "005930_AL", { "20": "100031", "10": "+195000", "15": "+1", "13": "1000", "9081": "KRX", "11": "+0", "12": "+0.00", "25": "2" })).toBeGreaterThan(0);
-  await expect(chartOf(cell(page))).toHaveAttribute("data-last-close", "195000");
+  await expect(async () => {
+    expect(await app.fake.pushReal("0B", "005930_AL", { "20": "100031", "10": "+195000", "15": "+1", "13": "1000", "9081": "KRX", "11": "+0", "12": "+0.00", "25": "2" })).toBeGreaterThan(0);
+    await expect(chartOf(cell(page))).toHaveAttribute("data-last-close", "195000", { timeout: 500 });
+  }).toPass({ timeout: 15000 });
+  await expect.poll(volume).not.toBeNull();
   await settle();
   await page.evaluate(installInvalidationProbe);
   for (let i = 0; i < 3; i++) {

@@ -112,11 +112,25 @@ test.describe("실시간 눈금 캐시", () => {
     await expect(cell(page)).toHaveAttribute("aria-busy", "false");
     await expect.poll(async () => (await app.fake.registered())["0B"] ?? []).toContain("005930_AL");
     await assertRendered(page);
+    const volume = () => page.evaluate(() => {
+      const last = window.chartProbe.chart.panes()[1]!.getSeries()[0]!.data().at(-1);
+      const current = window.chartProbe.main.dataByIndex(100000, -1);
+      return last && current && last.time === current.time && "value" in last && typeof last.value === "number" ? last.value : null;
+    });
+    await expect(async () => {
+      expect(await app.fake.pushReal("0B", "005930_AL", { "20": "100031", "10": "+1297000", "15": "+1", "13": "1000", "9081": "KRX", "11": "+0", "12": "+0.00", "25": "2" })).toBeGreaterThan(0);
+      await expect(chartOf(cell(page))).toHaveAttribute("data-last-close", "1297000", { timeout: 500 });
+    }).toPass({ timeout: 15000 });
+    await expect.poll(volume).not.toBeNull();
+    await page.evaluate(async () => { for (let i = 0; i < 5; i++) await new Promise<void>((resolve) => requestAnimationFrame(() => resolve())); });
+    const baseline = await volume();
+    expect(baseline).not.toBeNull();
     const before = await page.evaluate(() => window.chartProbe.chart.panes()[1]!.priceScale("right").getVisibleRange());
-    for (const [i, quantity] of [16_000_000, 2_000_000].entries()) {
-      const cumulative = i === 0 ? 16_000_000 : 18_000_000;
-      expect(await app.fake.pushReal("0B", "005930_AL", { "20": `10003${i + 1}`, "10": "+1297000", "15": `+${quantity}`, "13": String(cumulative), "9081": "KRX", "11": "+0", "12": "+0.00", "25": "2" })).toBeGreaterThan(0);
-      await expect(chartOf(cell(page))).toHaveAttribute("data-last-close", "1297000");
+    for (const [i, cumulative] of [16_000_000, 18_000_000].entries()) {
+      const previous = i === 0 ? baseline! : 16_000_000;
+      const quantity = cumulative - previous;
+      expect(await app.fake.pushReal("0B", "005930_AL", { "20": `10003${i + 2}`, "10": "+1297000", "15": `+${quantity}`, "13": String(cumulative), "9081": "KRX", "11": "+0", "12": "+0.00", "25": "2" })).toBeGreaterThan(0);
+      await expect.poll(volume).toBe(cumulative);
       await expect.poll(() => page.evaluate(() => window.axisTexts().flatMap((axis) => axis.texts).map((label) => label.text))).toContain(`${cumulative / 10000}만`);
       expect(await page.evaluate(() => window.chartProbe.chart.panes()[1]!.priceScale("right").getVisibleRange())).toEqual(before);
       await assertRendered(page);
