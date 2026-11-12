@@ -1,4 +1,4 @@
-import { mkdir } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { FinancialsPage } from "../src/api/generated/FinancialsPage";
 import { chartDisplayOptions, seedChartDisplay } from "./chart-display-fixture";
@@ -9,6 +9,53 @@ import { cell, chartOf, expect, test } from "./harness";
 const SCREENS = path.resolve(import.meta.dirname, "../../target/ux-screens");
 
 test.use(chartDisplayOptions);
+
+test("휴대폰 주기 칩은 늦은 글꼴·앞 칩·선택 칩·줄 크기 변경 뒤에도 완전히 보인다", async ({ page, app }, testInfo) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await seedChartDisplay(app, "Y");
+  let releaseFonts!: () => void;
+  const fonts = new Promise<void>((resolve) => { releaseFonts = resolve; });
+  let fontRequests = 0;
+  await page.route("**/*.woff2", async (route) => { fontRequests++; await fonts; await route.continue(); });
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  const nav = page.getByRole("navigation", { name: "봉 주기" });
+  const selected = nav.getByRole("button", { name: "연", exact: true });
+  const snapshots: object[] = [];
+  const visible = async (phase: string) => {
+    snapshots.push(await nav.evaluate((node, phase) => ({ phase, scrollLeft: node.scrollLeft, nav: node.getBoundingClientRect().toJSON(), chips: [...node.querySelectorAll("button")].map((button) => ({ text: button.textContent, selected: button.getAttribute("aria-pressed"), bounds: button.getBoundingClientRect().toJSON() })) }), phase));
+    await expect(selected).toBeInViewport({ ratio: 1, timeout: 3000 });
+    const bounds = await selected.boundingBox();
+    expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(page.viewportSize()!.width - 56);
+    const viewport = await nav.boundingBox();
+    expect(bounds!.x).toBeGreaterThanOrEqual(viewport!.x);
+    expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(viewport!.x + viewport!.width);
+  };
+  try {
+    await page.goto("/", { waitUntil: "domcontentloaded" });
+    await expect(cell(page)).toHaveAttribute("aria-busy", "false");
+    await expect(selected).toHaveAttribute("aria-pressed", "true");
+    await expect.poll(() => fontRequests).toBeGreaterThan(0);
+    await visible("fallback font");
+    releaseFonts();
+    await page.evaluate(() => document.fonts.ready);
+    await visible("loaded font");
+    await nav.getByRole("button").first().evaluate((button) => { button.style.paddingInline = "32px"; });
+    await visible("preceding chip widened");
+    await selected.evaluate((button) => { button.style.paddingInline = "26px"; });
+    await visible("selected chip widened");
+    await page.getByRole("button", { name: "지표", exact: true }).evaluate((button) => { button.style.width = "68px"; });
+    await visible("scroll viewport narrowed");
+    await page.setViewportSize({ width: 360, height: 844 });
+    await visible("phone narrowed");
+    expect(errors).toEqual([]);
+  } finally {
+    releaseFonts();
+    const evidence = testInfo.outputPath("period-chip-layouts.json");
+    await writeFile(evidence, JSON.stringify(snapshots, null, 2));
+    await testInfo.attach("period-chip-layouts", { path: evidence, contentType: "application/json" });
+  }
+});
 
 for (const viewport of [{ width: 1440, height: 900 }, { width: 1024, height: 768 }, { width: 390, height: 844 }]) {
   test(`큰 재무 축·첫 시간 범위·주기 칩 ${viewport.width}×${viewport.height}`, async ({ page, app }) => {
@@ -69,13 +116,15 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 1024, height: 768
     }
     await expect(cell(page)).toHaveAttribute("aria-busy", "false");
     if (viewport.width < 768) await expect.poll(() => page.evaluate(() => window.chartProbe.chart.priceScale("right").width())).toBeLessThanOrEqual(72);
-    const axes = await page.evaluate(() => window.axisTexts());
-    expect(axes).toHaveLength(5);
-    for (const axis of axes) {
-      for (const label of axis.texts) expect(label.x + label.width).toBeLessThanOrEqual(axis.width);
-      const sorted = axis.texts.toSorted((a, b) => a.y - b.y);
-      for (let i = 1; i < sorted.length; i++) expect(sorted[i]!.y - sorted[i - 1]!.y, JSON.stringify(axis)).toBeGreaterThanOrEqual((sorted[i]!.height + sorted[i - 1]!.height) / 2);
-    }
+    await expect(async () => {
+      const axes = await page.evaluate(() => window.axisTexts());
+      expect(axes).toHaveLength(5);
+      for (const axis of axes) {
+        for (const label of axis.texts) expect(label.x + label.width).toBeLessThanOrEqual(axis.width);
+        const sorted = axis.texts.toSorted((a, b) => a.y - b.y);
+        for (let i = 1; i < sorted.length; i++) expect(sorted[i]!.y - sorted[i - 1]!.y, JSON.stringify(axis)).toBeGreaterThanOrEqual((sorted[i]!.height + sorted[i - 1]!.height) / 2);
+      }
+    }).toPass({ timeout: 3000 });
     await mkdir(SCREENS, { recursive: true });
     await page.screenshot({ path: path.join(SCREENS, `chart-display-${viewport.width}x${viewport.height}.png`) });
     if (viewport.width === 1440) {
