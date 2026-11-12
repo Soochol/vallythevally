@@ -1,5 +1,5 @@
 import { useId, useRef, useState } from "react";
-import { EXCLUDE_LABEL, MARKET_LABEL, NO_CONDITIONS_SENTENCE } from "../../lib/screener";
+import { EXCLUDE_LABEL, MARKET_LABEL, NO_CONDITIONS_SENTENCE, UNIT } from "../../lib/screener";
 import { Choice, CHOICE_LABEL, fieldName, KindFields, NumberBox, PERIODS, type LineUi } from "../screen-dialog/ConditionFields";
 import { addCondition, changeKind, checkCondition, editCondition, editNumber, excludesIn, KIND_GROUPS, MARKETS, MAX_CONDITIONS, moveCondition, placeCondition, removeCondition, toggleExclude, toggleMarket, kindChoiceOf, type ConditionDraft, type FieldKey, type KindChoice, type ScreenDraft } from "../screen-dialog/screenForm";
 import { CloseIcon, GripIcon, MoreIcon, PlusIcon } from "../icons";
@@ -41,7 +41,7 @@ export function SentenceFields({ draft, locked, onChange }: Props) {
       </li>)}
     </ol>}
     <ConditionSearch disabled={draft.conditions.length >= MAX_CONDITIONS} onAdd={(kind) => onChange((d) => { const added = addCondition(d); const line = added.conditions.at(-1); return line ? changeKind(added, line.key, kind) : added; })} />
-    <p className="text-xs text-text-3">모든 조건 충족 · {draft.conditions.length}/{MAX_CONDITIONS}줄 · 0봉은 마지막 실제 봉</p>
+    <p className="text-xs text-text-3">모든 조건 충족 · {draft.conditions.length}/{MAX_CONDITIONS}줄 · 최근 기간은 마지막 봉을 포함한 실제 봉 개수입니다. 봉이 없는 기간은 세지 않습니다.</p>
   </fieldset>;
 }
 
@@ -53,10 +53,9 @@ export function SentenceCondition({ ids, line, index, onChange }: { ids: string;
       {index > 0 && <span className="text-text-3">그리고</span>}
       {line.kind !== "market_cap" && <>
         <Choice label={`${ui.label} 봉 주기`} value={line.period} options={PERIODS} onChange={(period) => onChange({ ...line, period })} />
-        <NumberBox ui={ui} field="rangeStart" value={line.rangeStart} onChange={(rangeStart) => onChange({ ...line, rangeStart })} />
-        <span>~</span>
-        <NumberBox ui={ui} field="rangeEnd" value={line.rangeEnd} onChange={(rangeEnd) => onChange({ ...line, rangeEnd })} />
-        <span>봉 전 안에</span>
+        <span>최근</span>
+        <NumberBox ui={ui} field="recentBars" value={line.recentBars} onChange={(recentBars) => onChange({ ...line, recentBars })} />
+        <span>{UNIT[line.period]} 이내에</span>
       </>}
       {line.kind === "market_cap" && <span>시가총액이</span>}
       <KindFields ui={ui} line={line} onChange={onChange} />

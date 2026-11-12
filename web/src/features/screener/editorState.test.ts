@@ -8,7 +8,7 @@ import { DEFAULT_SEARCH_COMMANDS } from "../search/commands";
 import { addCondition, changeKind, editCondition, placeCondition, removeCondition, toggleExclude, toggleMarket } from "../screen-dialog/screenForm";
 import { availableSources, checkedSession, currentSession, isDirty, selectedSource, useScreenEditor } from "./editorState";
 
-const source: Screen = { id: "a", name: "신고가", markets: [], exclude: [], conditions: [{ kind: "new_high", period: "D", barRange: { start: 0, end: 4 }, field: "high", n: 200 }] };
+const source: Screen = { id: "a", name: "신고가", markets: [], exclude: [], conditions: [{ kind: "new_high", period: "D", recentBars: 5, field: "high", n: 200 }] };
 const base: Screens = { revision: 1, screens: [source] };
 let client: QueryClient;
 const editor = () => useScreenEditor.getState();
@@ -59,9 +59,9 @@ test("드래그 순서 변경은 양방향·자기 자신·없는 행을 안전�
   expect(placeCondition(draft, 9, 0)).toBe(draft);
 });
 
-test("잘못된 봉 범위는 저장하지 않고 draft와 검증 메시지를 보존한다", async () => {
+test("잘못된 최근 기간는 저장하지 않고 draft와 검증 메시지를 보존한다", async () => {
   const fetch = vi.fn(); vi.stubGlobal("fetch", fetch);
-  editor().change(base, source, (d) => editCondition(d, { ...d.conditions[0]!, rangeStart: "5", rangeEnd: "2" }));
+  editor().change(base, source, (d) => editCondition(d, { ...d.conditions[0]!, recentBars: "0" }));
   await editor().save(client, base, source);
   expect(checkedSession(current(), base).ok).toBe(false);
   expect(current().tried).toBe(true);

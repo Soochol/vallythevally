@@ -80,7 +80,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
 function editorMarkup(wide: boolean, expanded: boolean, invalid = false) {
-  const source: Screen = { id: "s", name: "신고가", markets: [], exclude: [], conditions: [{ kind: "new_high", period: "W", field: "high", n: 52, barRange: { start: 0, end: 4 } }] };
+  const source: Screen = { id: "s", name: "신고가", markets: [], exclude: [], conditions: [{ kind: "new_high", period: "W", field: "high", n: 52, recentBars: 5 }] };
   const base: Screens = { revision: 1, screens: [source] };
   const session = sessionOf(base, source);
   const client = new QueryClient();

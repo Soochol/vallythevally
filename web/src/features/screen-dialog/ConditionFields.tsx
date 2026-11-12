@@ -72,8 +72,7 @@ export const CHOICE_LABEL: Record<KindChoice, string> = { ...KIND_LABEL, volume_
 const VALUE_FIELDS: Partial<Record<KindChoice, Options<BarField>>> = { new_high: PRICE_FIELDS, new_low: BAR_FIELDS };
 
 const FIELD_NAME: Record<Exclude<FieldKey, `lengths.${number}`>, string> = {
-  rangeStart: "봉 범위 시작",
-  rangeEnd: "봉 범위 끝",
+  recentBars: "최근 기간",
   n: "기간",
   min: "최소",
   max: "최대",
