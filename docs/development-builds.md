@@ -84,3 +84,7 @@ Linux 빌드에는 OpenSSL 개발 파일과 `pkg-config`가 필요하다(Debian/
 ```sh
 python3 scripts/dev.py cargo test -p server financials::client::tls_tests
 ```
+
+## 실행별 근거
+
+`build`와 `cargo`는 `target/dev-runs/<종류>-<고유값>/manifest.json`에 HEAD·dirty source 지문, 명령·종료 코드·시간·정제된 로그와 실제 실행 파일의 SHA-256을 기록한다. 빌드는 `direct`, 체크섬과 기존 키를 검증한 캐시 복원은 `reused`다. 준비 실패도 manifest를 남기며 이전 실행 파일을 이번 실행의 성공 산출물로 기록하지 않는다. `status`는 읽기 전용 조회다. 웹 도구가 서버를 준비하면 해당 웹 실행의 `server-build/manifest.json`으로 연결한다. 환경 전체와 키·인증 URL은 수집하지 않는다. [Chromium 진단·실원천 smoke·실행 근거](web-checks.md)를 함께 확인한다.

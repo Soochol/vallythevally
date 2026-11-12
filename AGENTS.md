@@ -13,6 +13,7 @@
 - 로컬 서버 준비: `python3 scripts/dev.py build`. 새 worktree·UI 전용 변경·Rust 변경에서의 재사용 조건과 캐시 복구는 [`docs/development-builds.md`](docs/development-builds.md)를 따른다.
 - 서버: `python3 scripts/dev.py cargo clippy -p server --all-targets -- -D warnings`, `python3 scripts/dev.py cargo test -p server`(특정 파일만이면 `--test <이름>`)
 - fake-kiwoom: `python3 scripts/dev.py cargo test -p fake-kiwoom`
+- Chromium 환경 진단은 `python3 scripts/web.py doctor --headed --json`, 명시적 실제 DART 확인과 실행 manifest는 [`docs/web-checks.md`](docs/web-checks.md)를 따른다. 실원천 도구 시험은 `python3 scripts/test-live.py`로 loopback에서만 실행한다.
 - 개발 빌드 도구 변경 시: `python3 scripts/test-dev.py`, 웹 검증 도구 변경 시: `python3 scripts/test-web.py`.
 - 웹: `python3 scripts/web.py check [Vitest 인수]`. 의존성·WASM 준비 후 타입 검사와 단위 시험을 실행한다.
 - e2e: `python3 scripts/web.py e2e [e2e/<파일>] [Playwright 인수]`. 서버·가짜 키움·현재 웹 빌드와 실행별 임시·결과 경로를 자동 준비한다. 준비 실패 시 시험을 중단한다.

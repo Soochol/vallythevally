@@ -210,6 +210,22 @@ class DevCacheTest(unittest.TestCase):
         self.assertTrue(dev.needs_duckdb(["cargo", "build", "-p", "server", "-p", "fake-kiwoom"]))
 
 
+    def test_manifest_records_direct_reuse_and_failure_without_claiming_old_binary(self):
+        with dev.evidence.Run(self.root, "dev-build", ["dev.py", "build"]) as record:
+            dev.cached_build(self.root, self.cache, "key", lambda: "key", lambda: write_binaries(self.root))
+            self.assertEqual(record.data["artifacts"]["server"]["execution"], "direct")
+            dev.cached_build(self.root, self.cache, "key", lambda: "key", lambda: self.fail("unexpected build"))
+            self.assertEqual(record.data["artifacts"]["server"]["execution"], "reused")
+            directory = record.directory
+        self.assertEqual(json.loads((directory / "manifest.json").read_text())["status"], "passed")
+        with self.assertRaises(ValueError), dev.evidence.Run(self.root, "dev-build", ["dev.py", "build"]) as record:
+            directory = record.directory
+            dev.cached_build(self.root, self.cache, "changed", lambda: "changed", lambda: (_ for _ in ()).throw(ValueError("failed compile")))
+        failed = json.loads((directory / "manifest.json").read_text())
+        self.assertEqual(failed["status"], "failed")
+        self.assertEqual(failed["artifacts"], {})
+
+
 if __name__ == "__main__":
     with contextlib.redirect_stdout(io.StringIO()):
         unittest.main()

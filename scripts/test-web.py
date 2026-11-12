@@ -2,6 +2,7 @@ import contextlib
 import fcntl
 import importlib.util
 import io
+import json
 import multiprocessing
 from pathlib import Path
 import subprocess
@@ -180,6 +181,58 @@ class WebWorkflowTest(unittest.TestCase):
         with patch.object(web, "run", command), self.assertRaises(subprocess.CalledProcessError):
             web.run_e2e(self.root, [])
         self.assertFalse(any("playwright" in command for command in called))
+
+
+    def latest_manifest(self):
+        path = next((self.root / "target/web-runs").glob("e2e-*/manifest.json"))
+        return json.loads(path.read_text())
+
+    def test_dependency_failure_preserves_manifest_and_never_runs_browser(self):
+        calls = []
+        def fail(arguments, cwd, environment):
+            calls.append(arguments[0])
+            if arguments[0] == "pnpm":
+                raise subprocess.CalledProcessError(9, arguments)
+        with patch.object(web, "run", fail), self.assertRaises(subprocess.CalledProcessError):
+            web.run_e2e(self.root, [])
+        manifest = self.latest_manifest()
+        self.assertEqual(manifest["status"], "failed")
+        self.assertEqual(manifest["exit_code"], 1)
+        self.assertEqual(manifest["steps"]["dependencies"]["status"], "failed")
+        self.assertEqual(manifest["steps"]["playwright"]["status"], "not_run")
+        self.assertFalse(any("playwright" in call for call in calls))
+
+    def test_empty_ui_build_rejects_previous_dist_and_records_failure(self):
+        stale = self.root / "web/dist/index.html"
+        stale.parent.mkdir(parents=True)
+        stale.write_text("old UI")
+        with patch.object(web, "run"), self.assertRaisesRegex(ValueError, "index.html"):
+            web.run_e2e(self.root, [])
+        manifest = self.latest_manifest()
+        self.assertEqual(manifest["steps"]["ui"]["status"], "failed")
+        self.assertEqual(manifest["steps"]["playwright"]["status"], "not_run")
+        self.assertNotIn("ui", manifest["artifacts"])
+
+    def test_source_or_ui_tampering_is_rejected_before_playwright(self):
+        directory = self.root / "dist"
+        directory.mkdir()
+        index = directory / "index.html"
+        index.write_text("fresh")
+        with web.evidence.Run(self.root, "probe", ["test"]) as record:
+            record.artifact("ui", directory, "direct", "source")
+            with patch.object(web.evidence, "source", return_value={"sha256": "new source"}), self.assertRaises(ValueError):
+                web.verify_ui(self.root, record)
+            index.write_text("stale")
+            with patch.object(web.evidence, "source", return_value={"sha256": "source"}), self.assertRaises(ValueError):
+                web.verify_ui(self.root, record)
+
+    def test_wasm_manifest_distinguishes_direct_and_reuse(self):
+        with web.evidence.Run(self.root, "wasm", ["test"]) as record:
+            web.ensure_wasm(self.root, self.environment)
+            self.assertEqual(record.data["artifacts"]["wasm"]["execution"], "direct")
+            web.ensure_wasm(self.root, self.environment)
+            self.assertEqual(record.data["artifacts"]["wasm"]["execution"], "reused")
+            self.assertTrue(record.data["artifacts"]["wasm"]["sha256"])
 
 
 if __name__ == "__main__":
