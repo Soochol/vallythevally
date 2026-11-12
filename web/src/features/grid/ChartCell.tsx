@@ -1,5 +1,7 @@
 import { ErrorState, EmptyState, Skeleton } from "../overlay/State";
-import { useEffect, useMemo, useRef } from "react";
+import { createPortal } from "react-dom";
+import { VenuePicker } from "../venue/VenuePicker";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useFinancials } from "../../api/financials";
 import { isFinancial } from "../../chart/indicators/kinds";
 import { useSymbolInfo, useSymbolInfos } from "../../api/queries";
@@ -58,6 +60,7 @@ export function ChartCell({ slot, status, onStatus }: Props) {
   const openSearch = useSelectionStore((s) => s.openSearch);
   const chartEl = useRef<HTMLDivElement>(null);
   const ctl = useRef<ChartController | null>(null);
+  const [venueAnchor, setVenueAnchor] = useState<HTMLElement | null>(null);
   const onStatusRef = useRef(onStatus);
   onStatusRef.current = onStatus;
   const slotRef = useRef(slot);
@@ -73,6 +76,7 @@ export function ChartCell({ slot, status, onStatus }: Props) {
       onCompareRemove: (code) => useLayoutStore.getState().removeCompare(slotRef.current, code),
     });
     ctl.current = c;
+    setVenueAnchor(c.venueAnchor);
     return () => {
       c.dispose();
       ctl.current = null;
@@ -116,6 +120,7 @@ export function ChartCell({ slot, status, onStatus }: Props) {
       className="relative min-h-0 min-w-0 bg-chart-bg focus-visible:outline-offset-[-2px]"
     >
       <div ref={chartEl} className="absolute inset-0" />
+      {venueAnchor && createPortal(<VenuePicker cell={cell} info={info} variant="legend" />, venueAnchor)}
       <DrawingOverlay slot={slot} />
       {status.kind === "loading" && <div className="pointer-events-none absolute inset-0 z-[5] bg-chart-bg"><Skeleton label="차트 불러오는 중" /></div>}
       {olderError && (

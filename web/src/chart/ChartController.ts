@@ -112,6 +112,7 @@ export class ChartController {
   private readonly compare: CompareLayer;
   private readonly compareLegend: CompareLegend;
   private readonly legend: Legend;
+  get venueAnchor(): HTMLElement { return this.legend.venueAnchor; }
   private readonly feed: BarFeed;
   private readonly onStatus: (s: CellStatus) => void;
   private tokens: ThemeTokens;
@@ -238,7 +239,6 @@ export class ChartController {
     this.legend.setHead({
       name: next.info?.name ?? next.symbol,
       sub: symbolSub(next.symbol, next.info),
-      venue: venueLabel(next.symbol, next.venue),
       period: PERIOD_LABEL[next.period],
     });
 

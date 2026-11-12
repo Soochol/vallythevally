@@ -1,91 +1,61 @@
-import type { ComponentType, ReactNode } from "react";
+import type { ComponentType, KeyboardEvent } from "react";
 import { DESKTOP_QUERY, useMediaQuery } from "../../lib/media";
 import { type RightPanel as View, useSelectionStore } from "../../stores/selection";
 import { useUiStore } from "../../stores/ui";
 import { ObjectList } from "../drawings/ObjectList";
-import { ChevronRightIcon, DrawingsIcon, FunnelIcon, ListIcon } from "../icons";
+import { ExpandIcon, PanelIcon } from "../icons";
 import { ScreenerBadge, ScreenerPanel } from "../screener/ScreenerPanel";
 import { desktopPanelWidth } from "../watch/columns";
 import { WatchPanel } from "../watch/Watchlist";
 
-const RAIL_WIDTH = 44;
-const SCREENER_WIDTH = 392;
-
-interface ViewSpec {
-  label: string;
-  icon: ReactNode;
-  Content: ComponentType;
-  Badge?: ComponentType;
-}
-
-const VIEWS: Record<View, ViewSpec> = {
-  watch: { label: "관심종목", icon: <ListIcon size={19} />, Content: WatchPanel },
-  screener: { label: "스크리너", icon: <FunnelIcon size={19} />, Content: ScreenerPanel, Badge: ScreenerBadge },
-  objects: { label: "개체", icon: <DrawingsIcon size={19} />, Content: ObjectList },
+const VIEWS: Record<View, { label: string; Content: ComponentType }> = {
+  watch: { label: "관심종목", Content: WatchPanel },
+  screener: { label: "스크리너", Content: ScreenerPanel },
+  objects: { label: "개체", Content: ObjectList },
 };
-const VIEW_ORDER = Object.keys(VIEWS) as View[];
+const VIEW_ORDER = ["watch", "screener", "objects"] as const;
 
 export function useRightPanelWidth(): number {
   const collapsed = useUiStore((s) => s.prefs.watchCollapsed);
   const columns = useUiStore((s) => s.prefs.watchColumns);
-  const view = useSelectionStore((s) => s.rightPanel);
-  if (collapsed) return RAIL_WIDTH;
-  return RAIL_WIDTH + (view === "screener" ? SCREENER_WIDTH : desktopPanelWidth(columns));
+  const view = useUiStore((s) => s.prefs.rightPanel);
+  const width = useUiStore((s) => s.prefs.rightPanelWidth);
+  if (collapsed) return 0;
+  if (width === "wide") return 640;
+  return Math.max(view === "screener" ? 392 : 336, desktopPanelWidth(columns));
 }
 
 export function RightPanel() {
   const desktop = useMediaQuery(DESKTOP_QUERY);
   const collapsed = useUiStore((s) => s.prefs.watchCollapsed);
-  const view = useSelectionStore((s) => s.rightPanel);
-  const desktopView = useSelectionStore((s) => s.desktopView);
-  if (!desktop || desktopView !== "chart") return null;
+  const view = useUiStore((s) => s.prefs.rightPanel);
+  const wide = useUiStore((s) => s.prefs.rightPanelWidth === "wide");
+  if (!desktop || collapsed) return null;
   const { Content } = VIEWS[view];
+  const show = useSelectionStore.getState().showRightPanel;
+  const move = (event: KeyboardEvent<HTMLButtonElement>, from: View) => {
+    const index = VIEW_ORDER.indexOf(from);
+    const next = event.key === "Home" ? 0 : event.key === "End" ? 2 : event.key === "ArrowRight" ? (index + 1) % 3 : event.key === "ArrowLeft" ? (index + 2) % 3 : null;
+    if (next === null) return;
+    event.preventDefault();
+    const to = VIEW_ORDER[next]!;
+    show(to);
+    document.getElementById(`right-tab-${to}`)?.focus();
+  };
   return (
-    <div className="flex min-h-0 min-w-0 border-l border-line bg-bg [grid-area:watch]">
-      {!collapsed && (
-        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-          <Content />
-        </div>
-      )}
-      <Rail view={view} collapsed={collapsed} />
+    <div className="right-panel flex min-h-0 min-w-0 flex-col overflow-hidden border-l border-line bg-bg [grid-area:watch]">
+      <header className="flex h-10 flex-none items-center gap-1 border-b border-line px-1">
+        <nav role="tablist" aria-label="오른쪽 패널" className="flex min-w-0 flex-1 items-center gap-1">
+          {VIEW_ORDER.map((to) => <button key={to} id={`right-tab-${to}`} type="button" role="tab" aria-selected={to === view} aria-controls="right-tab-content" tabIndex={to === view ? 0 : -1}
+            title={VIEWS[to].label} onClick={() => show(to)} onKeyDown={(event) => move(event, to)}
+            className={`relative h-7 whitespace-nowrap rounded-m px-2 text-s ${to === view ? "bg-accent-soft font-semibold text-accent" : "text-text-2 hover:bg-raised"} ${to === "screener" ? "pr-5" : ""}`}>
+            {VIEWS[to].label}{to === "screener" && <ScreenerBadge />}
+          </button>)}
+        </nav>
+        <button type="button" className="icon-btn !h-7 !w-7 flex-none" title={wide ? "기본 너비로" : "넓게 보기"} aria-label="넓게 보기" aria-pressed={wide} onClick={() => useUiStore.getState().togglePanelWidth()}><ExpandIcon /></button>
+        <button type="button" className="icon-btn !h-7 !w-7 flex-none" title="탭 숨기기 (Alt+W)" aria-label="탭 숨기기" aria-expanded={true} onClick={() => useUiStore.getState().toggleWatch()}><PanelIcon /></button>
+      </header>
+      <div id="right-tab-content" role="tabpanel" aria-labelledby={`right-tab-${view}`} className="flex min-h-0 min-w-0 flex-1 flex-col overflow-auto"><Content /></div>
     </div>
-  );
-}
-
-function Rail({ view, collapsed }: { view: View; collapsed: boolean }) {
-  const toggle = useUiStore((s) => s.toggleWatch);
-  const show = useSelectionStore((s) => s.showRightPanel);
-  return (
-    <nav aria-label="오른쪽 패널" className="flex w-11 flex-none flex-col items-center gap-1 border-l border-line py-1.5">
-      {VIEW_ORDER.map((to) => {
-        const { label, icon, Badge } = VIEWS[to];
-        const open = !collapsed && to === view;
-        return (
-          <button
-            key={to}
-            type="button"
-            title={open ? `${label} 접기` : label}
-            aria-pressed={open}
-            onClick={() => (open ? toggle() : show(to))}
-            className={`relative grid h-10 w-10 place-items-center rounded-m ${open ? "bg-accent-soft text-accent" : "text-text-2 hover:bg-raised hover:text-text"}`}
-          >
-            <span className="sr-only">{label}</span>
-            {icon}
-            {Badge && <Badge />}
-          </button>
-        );
-      })}
-      <span className="flex-1" />
-      <button
-        type="button"
-        className="icon-btn h-8 w-8"
-        title={collapsed ? "패널 펴기 (Alt+W)" : "패널 접기 (Alt+W)"}
-        aria-label={collapsed ? "패널 펴기" : "패널 접기"}
-        aria-expanded={!collapsed}
-        onClick={toggle}
-      >
-        <ChevronRightIcon flip={collapsed} />
-      </button>
-    </nav>
   );
 }

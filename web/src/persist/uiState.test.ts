@@ -5,6 +5,8 @@ afterEach(() => vi.restoreAllMocks());
 
 test("옛 라이트 설정은 다크로 옮기고 다른 설정과 모르는 키는 보존한다", () => {
   const raw = {
+    rightPanel: "watch",
+    rightPanelWidth: "normal",
     lastLayoutId: "L1",
     theme: "light",
     watchCollapsed: true,
@@ -17,6 +19,8 @@ test("옛 라이트 설정은 다크로 옮기고 다른 설정과 모르는 키
   };
   const { prefs, extra } = parseUiState(raw);
   expect(prefs).toEqual({
+    rightPanel: "watch",
+    rightPanelWidth: "normal",
     lastLayoutId: "L1",
     theme: "dark",
     watchCollapsed: true,
@@ -64,4 +68,11 @@ test("고정 분봉은 중복과 잘못된 주기를 빼고 저장·복원한다
   const { prefs, extra } = parseUiState({ lastLayoutId: null, theme: "dark", pinnedMinutes: ["5m", "60m", "D", "5m", "bad", 3], future: true });
   expect(prefs.pinnedMinutes).toEqual(["5m", "60m"]);
   expect(parseUiState(toUiState(prefs, extra))).toEqual({ prefs, extra });
+});
+
+test("오른쪽 탭과 너비를 왕복하고 잘못된 값은 기본으로 연다", () => {
+  const { prefs, extra } = parseUiState({ ...DEFAULT_UI_PREFS, rightPanel: "screener", rightPanelWidth: "wide", watchCollapsed: true });
+  expect(parseUiState(toUiState(prefs, extra)).prefs).toMatchObject({ rightPanel: "screener", rightPanelWidth: "wide", watchCollapsed: true });
+  vi.spyOn(console, "warn").mockImplementation(() => {});
+  expect(parseUiState({ ...DEFAULT_UI_PREFS, rightPanel: "bad", rightPanelWidth: 800 }).prefs).toEqual(DEFAULT_UI_PREFS);
 });
