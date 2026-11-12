@@ -12,6 +12,10 @@ const LABELS = ["매출액", "영업이익", "지배주주 ROE", "투자활동 �
 const row = (page: Page, id: string) => page.locator(`[data-indicator-row="${id}"]`);
 const data = async (app: App, symbol = "005930", period = "Y"): Promise<FinancialsPage> => (await fetch(`${app.url}/api/symbols/${symbol}/financials?period=${period}`)).json();
 
+async function waitForReady(app: App, symbol = "005930") {
+  await expect.poll(async () => (await data(app, symbol)).status, { timeout: 30_000 }).toBe("ready");
+}
+
 async function seed(app: App, period = "Y") {
   const layout: Layout = await (await fetch(`${app.url}/api/layouts/${DEFAULT_LAYOUT_ID}`)).json();
   const chartSettings: ChartSettings = { v: 2, style: "candle", scale: "normal", compare: [], indicators: [
@@ -128,7 +132,7 @@ for (const phone of [false, true]) test.describe(phone ? "휴대폰 재무지표
     app.dart!.fail = null;
     await refresh(page, app);
     await settleUpdate(app);
-    await expect.poll(async () => (await data(app)).status).toBe("ready");
+    await waitForReady(app);
     await expect(row(page, "revenue")).toContainText("확인 완료");
     const confirmed = await data(app);
     app.dart!.fail = "list.json";
@@ -141,6 +145,7 @@ for (const phone of [false, true]) test.describe(phone ? "휴대폰 재무지표
     await choosePeriod(page, phone, "연");
     app.dart!.fail = null;
     await refresh(page, app);
+    await waitForReady(app);
     await expect(row(page, "revenue")).toContainText("확인 완료");
     await row(page, "revenue").locator("summary").click();
     await expect(row(page, "revenue").locator("details")).toContainText("마지막 확인");
@@ -216,6 +221,7 @@ test.describe("재무지원 경계", () => {
     await search.getByRole("combobox").fill("000020");
     await search.getByRole("option").filter({ hasText: "000020" }).click();
     await expect(row(page, "revenue")).toContainText("3월 결산");
+    await waitForReady(app, "000020");
     await expect(row(page, "revenue")).toContainText("확인 완료");
     release();
     await expect(cell(page)).toHaveAttribute("aria-label", "칸 1: 동화약품 통합 연");
