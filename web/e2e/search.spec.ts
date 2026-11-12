@@ -150,25 +150,37 @@ test("일부 시세 누락·추세 실패에도 다른 종목과 명령을 계�
 
 test.describe("검색에서 스크리너 실행", () => {
   test.use({ krxMarket: "20261106", clockStart: "20261109100000" });
-  test("저장된 조건식을 실행하고 현재 화면 구조에서 결과를 보인다", async ({ page, app }) => {
+  test("숨긴 오른쪽 스크리너 탭을 펼쳐 저장된 조건식을 실행하고 차트를 유지한다", async ({ page, app }) => {
     test.setTimeout(180_000);
     const seeded = await fetch(`${app.url}/api/screens`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ revision: 1, screens: [{ id: "search-run", name: "검색에서 실행", markets: [], exclude: ["etf"], conditions: [{ kind: "new_high", period: "D", barRange: { start: 0, end: 19 }, field: "high", n: 60 }] }] }) });
     expect(seeded.ok).toBe(true);
     await page.goto("/");
-  await expect(cell(page)).toHaveAttribute("aria-busy", "false");
+    await expect(cell(page)).toHaveAttribute("aria-busy", "false");
+    const chartLabel = await cell(page).getAttribute("aria-label");
+    const tabs = page.getByRole("tablist", { name: "오른쪽 패널" });
+    await page.getByRole("button", { name: "탭 숨기기", exact: true }).click();
+    await expect(tabs).toBeHidden();
     await page.keyboard.press("/");
     const dialog = page.getByRole("dialog", { name: "종목 검색" });
     await dialog.getByRole("combobox").fill("> 스크리너");
     await dialog.getByRole("combobox").press("Enter");
     await expect(panel(page)).toBeVisible();
+    await expect(tabs.getByRole("tab", { name: /^스크리너/ })).toHaveAttribute("aria-selected", "true");
+    await expect(cell(page)).toBeVisible();
+    await expect(cell(page)).toHaveAttribute("aria-label", chartLabel!);
     await updateBand(page).getByRole("button", { name: "처음 받기" }).click();
     await waitForUpdateToFinish(page, "11-06(금)");
+    await page.getByRole("button", { name: "탭 숨기기", exact: true }).click();
+    await expect(tabs).toBeHidden();
     await page.keyboard.press("/");
     await dialog.getByRole("combobox").fill("> 스크리너");
     const run = page.waitForResponse((r) => r.url().endsWith("/api/screener/run") && r.ok());
     await dialog.getByRole("combobox").press("Enter");
     await run;
     await expect(rows(page)).toHaveCount(4);
+    await expect(tabs.getByRole("tab", { name: /^스크리너/ })).toHaveAttribute("aria-selected", "true");
+    await expect(cell(page)).toBeVisible();
+    await expect(cell(page)).toHaveAttribute("aria-label", chartLabel!);
   });
 });
 

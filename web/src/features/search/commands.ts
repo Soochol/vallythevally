@@ -26,7 +26,6 @@ export const DEFAULT_SEARCH_COMMANDS: readonly SearchCommand[] = [
   }),
   { id: "screener-run", label: "스크리너 실행", keywords: "조건식 검색 screener", shortcut: "Ctrl+Enter", run: async ({ queryClient }) => {
     const selection = useSelectionStore.getState();
-    selection.setDesktopView("screener");
     selection.setPhoneTab("screener");
     selection.showRightPanel("screener");
     const [screens, status] = await Promise.all([
