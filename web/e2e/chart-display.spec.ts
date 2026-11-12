@@ -137,3 +137,28 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 1024, height: 768
     expect(errors).toEqual([]);
   });
 }
+
+test("가격보다 오래된 재무자료를 먼저 받아도 첫 가격 봉부터 마지막 봉의 여백까지 보인다", async ({ page, app }) => {
+  await seedChartDisplay(app, "Y");
+  await app.fake.respondWith({ apiId: "ka10094", status: 200, body: {
+    return_code: 0, return_msg: "synthetic", stk_cd: "000660_AL",
+    stk_yr_pole_chart_qry: [2017, 2016].map((year) => ({ dt: `${year}0101`, open_pric: "1277000", high_pric: "1302000", low_pric: "1271000", cur_prc: "1296000", trde_qty: "3120000" })),
+    _headers: { "cont-yn": "N", "next-key": "" },
+  } });
+  await page.addInitScript(installChartProbe);
+  await page.addInitScript(installAxisProbe);
+  await page.goto("/");
+  await expect(cell(page)).toHaveAttribute("aria-busy", "false");
+  await expect(chartOf(cell(page))).toHaveAttribute("data-bar-count", "2");
+  await expect.poll(() => page.evaluate(() => window.axisTexts().flatMap((axis) => axis.texts).map((label) => label.text))).toContain("−48.1조");
+  await expect.poll(() => page.evaluate(() => window.chartProbe.chart.timeScale().getVisibleRange()?.from)).toBe(Date.UTC(2016, 0, 1) / 1000);
+  const bounds = await page.evaluate(() => {
+    const scale = window.chartProbe.chart.timeScale();
+    const first = window.chartProbe.main.dataByIndex(-100000, 1);
+    const last = window.chartProbe.main.dataByIndex(100000, -1);
+    if (!first || !last) throw new Error("가격 봉 없음");
+    return { range: scale.getVisibleLogicalRange(), first: scale.timeToIndex(first.time, false), last: scale.timeToIndex(last.time, false) };
+  });
+  expect(bounds.range!.from).toBeCloseTo(bounds.first! - 0.5, 3);
+  expect(bounds.range!.to).toBeCloseTo(bounds.last! + 0.6, 3);
+});
