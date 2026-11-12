@@ -23,7 +23,20 @@ const choice = (dialog: Locator, line: number, name: string) => dialog.getByRole
 const box = (dialog: Locator, line: number, name: string) => dialog.getByRole("textbox", { name: `조건 ${line} ${name}` });
 const lineTexts = (dialog: Locator) => dialog.getByRole("list", { name: "조건" }).getByRole("listitem").locator(":scope > p");
 const panelLines = (page: Page) => panel(page).getByRole("list", { name: "조건" }).getByRole("listitem");
-const optionsIn = (select: Locator, group: string) => select.locator(`optgroup[label="${group}"] > option`);
+async function optionsIn(select: Locator, group: string) {
+  const label = await select.getAttribute("aria-label");
+  await select.click();
+  const menu = select.page().getByRole("menu", { name: label ?? "", exact: true });
+  await expect(menu).toBeVisible();
+  const heading = menu.locator("[role=presentation]").filter({ hasText: new RegExp(`^${group}$`) });
+  const labels = await heading.evaluate((node) => {
+    const labels: string[] = [];
+    for (let option = node.nextElementSibling; option && option.getAttribute("role") === "menuitemradio"; option = option.nextElementSibling) labels.push(option.textContent?.trim() ?? "");
+    return labels;
+  });
+  await menu.press("Escape");
+  return labels;
+}
 
 async function editScreen(page: Page, name: string) {
   await panel(page).getByRole("button", { name: /^조건식: / }).click();
@@ -38,7 +51,7 @@ async function expectTradeHighLine(dialog: Locator, line: number, kind: { value:
   await expect(choice(dialog, line, "종류")).toHaveText(kind.label);
   await expect(choice(dialog, line, "봉 주기")).toHaveAttribute("data-value", period);
   await expect(choice(dialog, line, "값")).toHaveCount(0);
-  await expect(box(dialog, line, `${kind.label} 기간`)).toHaveAttribute("data-value", n);
+  await expect(box(dialog, line, `${kind.label} 기간`)).toHaveValue(n);
   await expect(box(dialog, line, "최근 봉 수")).toHaveValue(m);
 }
 
@@ -112,7 +125,7 @@ test("거래 분류의 신고거래량·신고거래대금은 새로 고르면 �
 
   await test.step("거래 분류에 신고거래량·신고거래대금·거래 급증이 있고, 신고가의 값은 가격만이다", async () => {
     const dialog = await editScreen(page, WEEKLY_HIGH.name);
-    await expect(optionsIn(choice(dialog, 1, "종류"), "거래")).toHaveText(["신고거래량", "신고거래대금", "거래 급증"]);
+    expect(await optionsIn(choice(dialog, 1, "종류"), "거래")).toEqual(["신고거래량", "신고거래대금", "거래 급증"]);
     await choice(dialog, 1, "값").click();
     await expect(page.getByRole("menu", { name: "조건 1 값", exact: true }).getByRole("menuitemradio")).toHaveText(["시가", "고가", "저가", "종가"]);
     await page.keyboard.press("Escape");
