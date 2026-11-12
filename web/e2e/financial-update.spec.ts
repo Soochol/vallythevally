@@ -27,7 +27,7 @@ for (const size of [{ width: 1440, height: 900 }, { width: 1024, height: 768 }, 
     await dialog.getByRole("button", { name: "전체 업데이트", exact: true }).click();
     await expect.poll(() => app.dart!.calls.some((call) => call.includes("fnlttSinglAcntAll.json/2015/11013/00126380"))).toBe(true);
     await expect(dialog).toContainText("1 / 2회사");
-    await expect(dialog.getByRole("button", { name: "업데이트 중", exact: true })).toBeDisabled();
+    await expect(dialog.getByRole("button", { name: "일시정지", exact: true })).toBeEnabled();
     const count = app.dart!.calls.length;
     for (const suffix of ["financial-source", "financials?period=Q", "financials?period=Y"]) expect((await fetch(`${app.url}/api/symbols/005930/${suffix}`)).ok).toBe(true);
     expect(app.dart!.calls).toHaveLength(count);
@@ -43,7 +43,7 @@ for (const size of [{ width: 1440, height: 900 }, { width: 1024, height: 768 }, 
     await expect(dialog).toContainText("2015~2017");
     expect(app.dart!.calls).toHaveLength(savedCalls);
     await dialog.getByRole("button", { name: "이어서 업데이트", exact: true }).click();
-    await expect(dialog).toContainText("최근 자료 확인 완료", { timeout: 45000 });
+    await expect(dialog).toContainText("전체 이력 확인 완료", { timeout: 45000 });
     await expect(dialog).toContainText("2 / 2회사");
     await expect(dialog).toContainText("배당 주식 종류 미확인");
     const job: FinancialUpdatePage = await (await fetch(`${app.url}/api/financial-update`)).json();

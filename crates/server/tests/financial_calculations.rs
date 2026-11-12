@@ -27,7 +27,7 @@ fn report(year: i32, code: &str, start: &str, end: &str, quarter_start: &str, pr
         account("ifrs-full_Equity","BS",400.0,instant(end),None),
         account("ifrs-full_EquityAttributableToOwnersOfParent","BS",500.0,instant(end),None),
     ];
-    Report { business_year: year, report_code: code.into(), statement: fetch(Statement { basis: Basis::CFS, accounts, source_failure: None }), dividends: Fetch::default() }
+    Report { statement_request: None, business_year: year, report_code: code.into(), statement: fetch(Statement { basis: Basis::CFS, accounts, source_failure: None }), dividends: Fetch::default() }
 }
 fn snapshot(reports: Vec<Report>) -> Snapshot {
     let mut collection = Collection { last_checked_at: Some(110), last_attempt_at: Some(90), ..Default::default() };

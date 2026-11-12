@@ -16,6 +16,8 @@ impl Store {
         for query in [
             "CREATE TABLE IF NOT EXISTS securities (stock_code TEXT PRIMARY KEY, body TEXT NOT NULL)",
             "CREATE TABLE IF NOT EXISTS companies (corp_code TEXT PRIMARY KEY, body TEXT NOT NULL)",
+            "CREATE TABLE IF NOT EXISTS financial_requests (job TEXT NOT NULL, request TEXT NOT NULL, body TEXT NOT NULL, PRIMARY KEY(job, request))",
+            "CREATE TABLE IF NOT EXISTS financial_update_control (id INTEGER PRIMARY KEY CHECK(id = 1), paused INTEGER NOT NULL)",
             "CREATE TABLE IF NOT EXISTS financial_update (id INTEGER PRIMARY KEY CHECK(id = 1), body TEXT NOT NULL)",
         ] {
             sqlx::query(query).execute(&pool).await.map_err(|_| Failure::Storage)?;
@@ -42,6 +44,31 @@ impl Store {
     pub async fn save(&self, corp: &str, collection: &Collection) -> Result<(), Failure> {
         let body = serde_json::to_string(collection).map_err(|_| Failure::Storage)?;
         sqlx::query("INSERT INTO companies VALUES (?, ?) ON CONFLICT(corp_code) DO UPDATE SET body = excluded.body").bind(corp).bind(body).execute(&self.0).await.map_err(|_| Failure::Storage)?;
+        Ok(())
+    }
+
+    pub(super) async fn begin_requests(&self, job: u64) -> Result<(), Failure> {
+        sqlx::query("DELETE FROM financial_requests WHERE job != ?").bind(job.to_string()).execute(&self.0).await.map_err(|_| Failure::Storage)?;
+        Ok(())
+    }
+
+    pub(super) async fn response(&self, job: u64, request: &str) -> Result<Option<String>, Failure> {
+        let row = sqlx::query("SELECT body FROM financial_requests WHERE job = ? AND request = ?").bind(job.to_string()).bind(request).fetch_optional(&self.0).await.map_err(|_| Failure::Storage)?;
+        Ok(row.map(|r| r.get("body")))
+    }
+
+    pub(super) async fn save_response(&self, job: u64, request: &str, body: String) -> Result<(), Failure> {
+        sqlx::query("INSERT INTO financial_requests VALUES (?, ?, ?) ON CONFLICT(job, request) DO UPDATE SET body = excluded.body").bind(job.to_string()).bind(request).bind(body).execute(&self.0).await.map_err(|_| Failure::Storage)?;
+        Ok(())
+    }
+
+    pub(crate) async fn paused(&self) -> Result<bool, Failure> {
+        let row = sqlx::query("SELECT paused FROM financial_update_control WHERE id = 1").fetch_optional(&self.0).await.map_err(|_| Failure::Storage)?;
+        Ok(row.is_some_and(|r| r.get::<bool, _>("paused")))
+    }
+
+    pub(crate) async fn set_paused(&self, paused: bool) -> Result<(), Failure> {
+        sqlx::query("INSERT INTO financial_update_control VALUES (1, ?) ON CONFLICT(id) DO UPDATE SET paused = excluded.paused").bind(paused).execute(&self.0).await.map_err(|_| Failure::Storage)?;
         Ok(())
     }
 

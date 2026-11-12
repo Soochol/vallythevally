@@ -26,7 +26,7 @@ export function useFinancials(symbol: string, period: FinancialPeriod, enabled: 
   const active = updateActive(update?.status);
   useEffect(() => {
     if (enabled) void client.invalidateQueries({ queryKey: ["financials"] });
-  }, [client, enabled, update?.id, update?.status, update?.completedCompanies, update?.failedCompanies]);
+  }, [client, enabled, update?.id, update?.status, update?.completedCompanies, update?.failedCompanies, update?.phase, update?.historyCompletedCompanies, update?.historyFailedCompanies]);
   const request = { symbol, period };
   const query = useQuery({
     ...financialsQuery(request),

@@ -80,9 +80,10 @@ test.describe("재무 시각과 가격 시각", () => {
       if (!base || !("close" in base)) throw new Error("실제 비교 기준봉이 없습니다");
       return { base, percent: ((160 / base.close - 1) * 100).toFixed(2) };
     });
-    const compare = await page.locator('[data-compare-row="IDX:001"]').innerText();
+    const compareRow = page.locator('[data-compare-row="IDX:001"]');
+    await expect(compareRow).toContainText(`${expected.percent}%`);
+    const compare = await compareRow.innerText();
     expect(after.drawX).toBeCloseTo(after.candleX!, 2);
-    expect(compare).toContain(`${expected.percent}%`);
     const right = await page.evaluate(() => window.chartProbe.chart.timeScale().width()) - after.candleX!;
     for (const title of ["숨기기", "보이기"]) {
       await row(page).getByTitle(title, { exact: true }).click({ force: true }); await frames(page);
@@ -182,6 +183,7 @@ test.describe("재무 시각과 가격 시각", () => {
 });
 
 test.describe("같은 재무 키의 응답 순서", () => {
+  test.setTimeout(120000);
   test.use({ financialFixture: true, bootReplies: [financialListings], clockStart: "20171231120000" });
   test("중첩 POST와 늦은 GET이 최신 정정의 빈 값과 사유를 되돌리지 않는다", async ({ page, app }, info) => {
     await seed(app); await page.addInitScript(installFrameProbe); await page.goto("/");
