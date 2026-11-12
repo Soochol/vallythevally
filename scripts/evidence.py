@@ -170,29 +170,38 @@ class Run:
         global ACTIVE
         mismatch = None
         try:
-            for process in reversed(self.children):
-                stop_process(process)
-            if error is None:
-                try:
-                    self.verify()
-                except (OSError, ValueError) as changed:
-                    mismatch = error = changed
-            self.data.update(status="failed" if error else "passed", exit_code=0, elapsed_seconds=round(time.monotonic() - self.started, 3), source_after=source(self.root))
-            if error:
-                self.data.update(failure(error))
-                if not isinstance(error, Interrupted | KeyboardInterrupt):
-                    self.data["exit_code"] = 1
-            if error and self.result is not None:
-                self.result.update(status="not_configured" if self.result["status"] == "not_configured" else "failed", **failure(error))
-                (self.directory / "result.json").write_text(clean(json.dumps(self.result, ensure_ascii=False, indent=2)) + "\n")
-                self.data["results"]["source_status"] = self.result["status"]
-            self.save()
-            print(json.dumps({"status": self.data["status"], "manifest": str(self.directory / "manifest.json"), "exit_code": self.data["exit_code"]}), flush=True)
+            try:
+                mismatch = self.finish(error)
+            except (Interrupted, KeyboardInterrupt) as interrupted:
+                self.finish(interrupted)
+                mismatch = interrupted
         finally:
             ACTIVE = self.previous
             self.signals.__exit__(kind, error, traceback)
         if mismatch:
             raise mismatch
+
+    def finish(self, error):
+        mismatch = None
+        for process in reversed(self.children):
+            stop_process(process)
+        if error is None:
+            try:
+                self.verify()
+            except (OSError, ValueError) as changed:
+                mismatch = error = changed
+        self.data.update(status="failed" if error else "passed", exit_code=0, elapsed_seconds=round(time.monotonic() - self.started, 3), source_after=source(self.root))
+        if error:
+            self.data.update(failure(error))
+            if not isinstance(error, Interrupted | KeyboardInterrupt):
+                self.data["exit_code"] = 1
+        if error and self.result is not None:
+            self.result.update(status="not_configured" if self.result["status"] == "not_configured" else "failed", **failure(error))
+            (self.directory / "result.json").write_text(clean(json.dumps(self.result, ensure_ascii=False, indent=2)) + "\n")
+            self.data["results"]["source_status"] = self.result["status"]
+        self.save()
+        print(json.dumps({"status": self.data["status"], "manifest": str(self.directory / "manifest.json"), "exit_code": self.data["exit_code"]}), flush=True)
+        return mismatch
 
     def verify(self):
         if source(self.root) != self.data["source"]:

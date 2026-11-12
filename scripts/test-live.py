@@ -41,6 +41,12 @@ def signal_fixture(mode, root):
             time.sleep(120)
         with patch.object(web, "run", prepare), patch.object(live, "collect", collect):
             live.run_live(root, argparse.Namespace(mode="connect", timeout=10, headed=False, key_file=None), web)
+    elif mode == "finalize":
+        with evidence.Run(root, "signal-test", [mode]) as record:
+            def verify():
+                (root / "ready.json").write_text("[]")
+                time.sleep(120)
+            record.verify = verify
     else:
         script = "\n".join([
             "import json,os,signal,subprocess,sys,time",
@@ -212,7 +218,7 @@ class LiveToolsTest(unittest.TestCase):
             self.assertNotIn("https://source.test", text)
 
     def test_parent_pid_signals_cleanup_live_command_and_bounded(self):
-        for mode in ("live", "command", "bounded"):
+        for mode in ("live", "command", "bounded", "finalize"):
             for number in (signal.SIGTERM, signal.SIGINT):
                 with self.subTest(mode=mode, signal=number.name):
                     root = self.root / f"{mode}-{number.name}"
@@ -242,7 +248,7 @@ class LiveToolsTest(unittest.TestCase):
                                 self.assertEqual(result["status"], "failed")
                                 self.assertEqual(result["signal"], number.name)
                                 self.assertEqual(result["exit_code"], process.returncode)
-                            else:
+                            elif mode != "finalize":
                                 self.assertEqual(manifest["steps"]["child"]["exit_code"], process.returncode)
                                 if mode == "command":
                                     self.assertEqual(manifest["commands"][0]["termination_reason"], "signal")
