@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { type Current, EMPTY_HISTORY, HISTORY_LIMIT, planRedo, planUndo, record, sameContent } from "./history";
+import { type Current, EMPTY_HISTORY, HISTORY_LIMIT, historyUndo, planRedo, planUndo, record, sameContent } from "./history";
 import type { DrawingBody } from "./types";
 
 const body = (id: string, price: number, revision = 1): DrawingBody => ({
@@ -136,4 +136,38 @@ describe("다른 곳에서 바뀐 드로잉(충돌)", () => {
   test("revision만 다른 것은 충돌이 아니다", () => {
     expect(planUndo(moved, viewOf(body("a", 120, 55), body("b", 220, 66))).kind).toBe("apply");
   });
+});
+
+
+test("삭제 알림은 묶인 기록 하나만 한 번 되돌린다", () => {
+  const original = record(EMPTY_HISTORY, [{ kind: "delete", before: body("a", 100) }]);
+  let current = original;
+  let called = 0;
+  const action = historyUndo(() => current, () => { called++; });
+  expect(action.available()).toBe(true);
+  action.run(); action.run();
+  expect(called).toBe(1);
+  expect(action.available()).toBe(false);
+  const stale = historyUndo(() => current, () => { called++; });
+  const plan = planUndo(current, () => null);
+  if (plan.kind !== "apply") throw new Error("삭제를 되돌릴 기록이 필요합니다");
+  current = plan.history;
+  expect(stale.available()).toBe(false); stale.run();
+  const redo = planRedo(current, viewOf(body("a", 100)));
+  if (redo.kind !== "apply") throw new Error("다시 지울 기록이 필요합니다");
+  current = redo.history;
+  expect(stale.available()).toBe(false); stale.run();
+  expect(called).toBe(1);
+});
+
+test("다른 작업이 위에 놓이면 삭제 알림은 이전 작업을 취소할 수 없다", () => {
+  let current = record(EMPTY_HISTORY, [{ kind: "delete", before: body("a", 100) }]);
+  let called = false;
+  const action = historyUndo(() => current, () => { called = true; });
+  current = record(current, [{ kind: "create", after: body("b", 200) }]);
+  expect(action.available()).toBe(false); action.run();
+  expect(called).toBe(false);
+  const empty = historyUndo(() => EMPTY_HISTORY, () => { called = true; });
+  expect(empty.available()).toBe(false); empty.run();
+  expect(called).toBe(false);
 });

@@ -1,3 +1,5 @@
+import { confirmAction } from "../overlay/Confirm";
+import { SortIcon } from "../icons";
 import { type QueryClient, useQueryClient, type UseQueryResult } from "@tanstack/react-query";
 import { type ReactNode, type RefObject, useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import type { ApiErrorBody } from "../../api/generated/ApiErrorBody";
@@ -160,7 +162,7 @@ export function ScreenerBadge() {
   }
   if (shown === undefined) return null;
   return (
-    <span className="absolute -right-0.5 top-0 min-w-[16px] rounded-full bg-raised px-1 text-center text-[10px] font-[650] leading-[15px] text-text">
+    <span className="absolute -right-0.5 top-0 min-w-[16px] rounded-full bg-raised px-1 text-center text-xs font-[650] leading-[15px] text-text">
       <span className="sr-only">결과 </span>
       {shown > BADGE_MAX ? `${BADGE_MAX}+` : shown}
       <span className="sr-only">종목</span>
@@ -430,8 +432,8 @@ function PanelMenu({ screen, rows, status }: { screen: Screen | null; rows: read
     fresh === null
       ? []
       : [{ kind: "action", label: `새 목록 "${fresh}"`, disabled: nothing || lists.length >= MAX_WATCHLISTS, onSelect: () => sendToNewWatchlist(fresh, codes) }];
-  const reload = () => {
-    if (window.confirm(FULL_RELOAD_CONFIRM)) void start(true).catch(showCommandError);
+  const reload = async () => {
+    if (await confirmAction(FULL_RELOAD_CONFIRM)) void start(true).catch(showCommandError);
   };
   const items: MenuItem[] = [
     { kind: "heading", label: nothing ? "관심종목으로 보내기" : `결과 ${count(codes.length)}종목을 관심종목으로 보내기` },
@@ -614,7 +616,7 @@ function SortHeader({ sort }: { sort: ResultSort }) {
             className={`flex items-center gap-0.5 hover:text-text ${key === "name" ? "" : "justify-end"} ${on ? "font-[650] text-text-2" : ""}`}
           >
             {label}
-            {on && <span aria-hidden="true">{sort.descending ? "↓" : "↑"}</span>}
+            {on && <SortIcon dir={sort.descending ? "down" : "up"} />}
           </button>
         );
       })}

@@ -1,5 +1,6 @@
+import { Popover } from "../overlay/Popover";
 import { useQueryClient } from "@tanstack/react-query";
-import { Fragment, useEffect, useId, useRef, useState } from "react";
+import { Fragment, useEffect, useId, useState } from "react";
 import type { SymbolInfo } from "../../api/generated/SymbolInfo";
 import { useSymbolInfos, useSymbolSearch } from "../../api/queries";
 import { KIND_LABEL, MARKET_LABEL } from "../../lib/symbol";
@@ -29,7 +30,7 @@ function SearchDialogBody({ purpose }: { purpose: SearchPurpose }) {
   const query = normalizeQuery(input);
   const search = useSymbolSearch(query);
   const ids = useId();
-  const opener = useRef<Element | null>(document.activeElement);
+
 
   const { rows, selectable, empty: showingRecent } = searchList(query, { watch, recent }, search.data);
   const activeIndex = selectable ? Math.min(active, rows.length - 1) : -1;
@@ -39,12 +40,7 @@ function SearchDialogBody({ purpose }: { purpose: SearchPurpose }) {
   useEffect(() => {
     document.getElementById(optionId(activeIndex))?.scrollIntoView({ block: "nearest" });
   });
-  useEffect(() => {
-    const back = opener.current;
-    return () => {
-      if (back instanceof HTMLElement) back.focus();
-    };
-  }, []);
+
 
   const open = (info: SymbolInfo) => {
     queryClient.setQueryData(["symbol", info.code], info);
@@ -96,9 +92,8 @@ function SearchDialogBody({ purpose }: { purpose: SearchPurpose }) {
   }
 
   return (
-    <div
+    <Popover backdrop onClose={close}
       className="ui-dialog-backdrop fixed inset-0 z-50 flex justify-center bg-[var(--scrim)]"
-      onPointerDown={(e) => e.target === e.currentTarget && close()}
     >
       <div
         role="dialog"
@@ -183,7 +178,7 @@ function SearchDialogBody({ purpose }: { purpose: SearchPurpose }) {
           <kbd>Esc</kbd> 닫기
         </div>
       </div>
-    </div>
+    </Popover>
   );
 }
 

@@ -12,6 +12,7 @@ test("옛 라이트 설정은 다크로 옮기고 다른 설정과 모르는 키
     activeWatchlistId: "W2",
     watchColumns: ["price", "volume"],
     drawing: DEFAULT_UI_PREFS.drawing,
+    pinnedMinutes: [],
     phone: { symbol: "000660" },
   };
   const { prefs, extra } = parseUiState(raw);
@@ -23,6 +24,7 @@ test("옛 라이트 설정은 다크로 옮기고 다른 설정과 모르는 키
     activeWatchlistId: "W2",
     watchColumns: ["price", "volume"],
     drawing: DEFAULT_UI_PREFS.drawing,
+    pinnedMinutes: [],
   });
   expect(extra).toEqual({ phone: { symbol: "000660" } });
   expect(toUiState(prefs, extra)).toEqual({ ...raw, theme: "dark" });
@@ -56,4 +58,10 @@ test("고른 열은 정해진 차례로 읽고, 겹치면 틀린 값으로 본�
   expect(parseUiState({ lastLayoutId: null, theme: "dark", watchColumns: ["volume", "price"] }).prefs.watchColumns).toEqual(["price", "volume"]);
   expect(parseUiState({ lastLayoutId: null, theme: "dark", watchColumns: [] }).prefs.watchColumns).toEqual([]);
   expect(parseUiState({ lastLayoutId: null, theme: "dark", watchColumns: ["price", "price"] }).prefs.watchColumns).toEqual(DEFAULT_UI_PREFS.watchColumns);
+});
+
+test("고정 분봉은 중복과 잘못된 주기를 빼고 저장·복원한다", () => {
+  const { prefs, extra } = parseUiState({ lastLayoutId: null, theme: "dark", pinnedMinutes: ["5m", "60m", "D", "5m", "bad", 3], future: true });
+  expect(prefs.pinnedMinutes).toEqual(["5m", "60m"]);
+  expect(parseUiState(toUiState(prefs, extra))).toEqual({ prefs, extra });
 });

@@ -1,3 +1,4 @@
+import { selectOption } from "./select-option";
 import type { Locator, Page } from "@playwright/test";
 import { type App, cell, chartOf, expect, SEARCH_BUTTON_TITLE, test } from "./harness";
 import { editor, excludedLine, expectCellOn, expectRows, openScreener, panel, pickPeriod, pickVenue, rail, results, rows, runButton, savedTo, storeLine, updateBand, waitForUpdateToFinish } from "./screener-page";
@@ -190,13 +191,11 @@ test("빈 저장소를 채우고 만든 조건식으로 찾은 종목을 칸의 
     await expect(panel(page).getByRole("button", { name: `조건식: ${EDITED_NAME}` })).toBeVisible();
     await panel(page).getByRole("button", { name: "편집" }).click();
     const dialog = editor(page, "조건식 편집");
-    const confirmed = page.waitForEvent("dialog").then(async (d) => {
-      expect(d.message()).toBe(`"${EDITED_NAME}" 조건식을 삭제할까요? 되돌릴 수 없습니다.`);
-      await d.accept();
-    });
     const saved = savedTo(page, "/api/screens");
     await dialog.getByRole("button", { name: "삭제" }).click();
-    await confirmed;
+    const confirmation = page.getByRole("dialog", { name: `"${EDITED_NAME}" 조건식을 삭제할까요? 되돌릴 수 없습니다.` });
+    await expect(confirmation).toBeVisible();
+    await confirmation.getByRole("button", { name: "확인", exact: true }).click();
     await saved;
     await expect(dialog).toBeHidden();
     await expect(panel(page).getByText("저장한 조건식이 없습니다")).toBeVisible();
@@ -235,7 +234,7 @@ test("시가총액 줄이나 줄마다 다른 봉 주기가 든 조건식도 편
 
   await test.step("시가총액 줄은 봉 주기 없이 억 원으로 보이고, 이름만 바꿔 저장된다", async () => {
     const dialog = await edit(capped.name);
-    await expect(dialog.getByRole("combobox", { name: "조건 2 종류" })).toHaveValue("market_cap");
+    await expect(dialog.getByRole("combobox", { name: "조건 2 종류" })).toHaveAttribute("data-value", "market_cap");
     await expect(dialog.getByRole("combobox", { name: "조건 2 봉 주기" })).toHaveCount(0);
     await expect(dialog.getByRole("textbox", { name: "조건 2 최소" })).toHaveValue("3000");
     await expect(dialog.getByText("시가총액이 3,000억 원 이상이다")).toBeVisible();
@@ -244,8 +243,8 @@ test("시가총액 줄이나 줄마다 다른 봉 주기가 든 조건식도 편
 
   await test.step("줄마다 다른 봉 주기와 고른 시장이 보이고, 이름만 바꿔 저장된다", async () => {
     const dialog = await edit(mixed.name);
-    await expect(dialog.getByRole("combobox", { name: "조건 1 봉 주기" })).toHaveValue("D");
-    await expect(dialog.getByRole("combobox", { name: "조건 2 봉 주기" })).toHaveValue("W");
+    await expect(dialog.getByRole("combobox", { name: "조건 1 봉 주기" })).toHaveAttribute("data-value", "D");
+    await expect(dialog.getByRole("combobox", { name: "조건 2 봉 주기" })).toHaveAttribute("data-value", "W");
     await expect(dialog.getByText("이번 주 종가가 52주 신고가다")).toBeVisible();
     await expect(dialog.getByRole("group", { name: "시장" }).getByRole("button", { name: "코스닥" })).toHaveAttribute("aria-pressed", "true");
     await expect(dialog.getByRole("group", { name: "시장" }).getByRole("button", { name: "코스피" })).toHaveAttribute("aria-pressed", "false");
@@ -255,8 +254,8 @@ test("시가총액 줄이나 줄마다 다른 봉 주기가 든 조건식도 편
   await test.step("거래대금 신고가 줄은 종류 칸에 신고거래대금이 골라져 있고 기간이 그대로이며, 이름을 바꿔 저장해도 거래대금이다", async () => {
     const dialog = await edit(traded.name);
     const kind = dialog.getByRole("combobox", { name: "조건 1 종류" });
-    await expect(kind).toHaveValue("traded_value_high");
-    await expect(kind.locator("option:checked")).toHaveText("신고거래대금");
+    await expect(kind).toHaveAttribute("data-value", "traded_value_high");
+    await expect(kind).toHaveText("신고거래대금");
     await expect(dialog.getByRole("textbox", { name: "조건 1 신고거래대금 기간" })).toHaveValue("60");
     await expect(dialog.getByRole("textbox", { name: "조건 1 최근 봉 수" })).toHaveValue("1");
     await expect(dialog.getByText("당일 거래대금이 60일 신고거래대금이다")).toBeVisible();
@@ -561,7 +560,7 @@ for (const width of [320, 360]) {
       await page.getByRole("navigation", { name: "휴대폰 탭" }).getByRole("button", { name: "스크리너" }).click();
       await panel(page).getByRole("button", { name: "새 조건식" }).first().click();
       const dialog = editor(page, "새 조건식");
-      const pick = (name: string, value: string) => dialog.getByRole("combobox", { name: `조건 1 ${name}` }).selectOption(value);
+      const pick = (name: string, value: string) => selectOption(dialog.getByRole("combobox", { name: `조건 1 ${name}` }), value);
       await dialog.getByRole("button", { name: "조건 더하기" }).click();
       const variants: readonly (readonly [kind: string, choices?: readonly (readonly [name: string, value: string])[], more?: number])[] = [
         ["new_high"],

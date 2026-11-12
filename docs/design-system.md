@@ -1,6 +1,6 @@
 # UI 테마와 공통 컴포넌트 바꾸기
 
-[라임 다크 UI 스펙 #181](https://github.com/Soochol/vallythevally/issues/181)의 적용 방법을 설명한다. 설계 배경은 [설계 맵 #178](https://github.com/Soochol/vallythevally/issues/178)에 있다.
+[라임 다크 UI 스펙 #181](https://github.com/Soochol/vallythevally/issues/181)과 [차트 중심 UX 스펙 #200](https://github.com/Soochol/vallythevally/issues/200)의 적용 방법을 설명한다. 설계 배경은 [설계 맵 #178](https://github.com/Soochol/vallythevally/issues/178)에 있다.
 
 ## 테마 바꾸기
 
@@ -35,19 +35,32 @@
 
 ## 변경 확인하기
 
-Rust 지표 소스와 WASM 빌드 설정이 그대로라면 준비된 WASM을 재사용해 `web`에서 다음 명령을 실행한다.
+저장소 루트에서 `python3 scripts/web.py check`와 관련 `python3 scripts/web.py e2e e2e/<파일>`을 실행한다. 도구가 WASM과 개발용 서버·가짜 키움을 준비하고 컴파일 잠금을 관리한다. 변경 없는 WASM은 재사용한다. E2E는 이번 실행의 웹 산출물과 임시 DB를 사용하며 결과는 `target/web-runs/` 아래에 분리한다. 자세한 절차는 [웹 검사](web-checks.md)를 따른다.
 
-```sh
-./node_modules/.bin/tsc -b
-./node_modules/.bin/vitest run
-./node_modules/.bin/vite build
-```
+1024×768, 1280×720, 1440×900과 높이 300px 창에서 문서가 넘치지 않는지 확인한다. 낮은 창에서는 드로잉 도구를 내부 스크롤로 끝까지 열 수 있어야 한다. 화면 변경 시에는 390×844도 확인한다.
 
-실제 키움 대신 가짜 키움으로 E2E를 실행한다. 먼저 공통 컴파일 잠금과 `CARGO_BUILD_JOBS=4`로 서버와 가짜 키움을 빌드한다. 임시 경로는 작업 폴더 안의 정규화된 절대 경로로 지정한다. `TMPDIR`에 `..`가 남으면 Chromium 내려받기가 취소될 수 있다.
+## 겹침 화면 추가하기 (#200·#202)
 
-```sh
-mkdir -p ../target/ui-implementation/tmp
-TMPDIR="$(realpath ../target/ui-implementation/tmp)" ./node_modules/.bin/playwright test e2e/lime-layout.spec.ts e2e/lime-ui.spec.ts e2e/lime-screener.spec.ts e2e/snapshot.spec.ts --output=test-results/lime-ui
-```
+`features/overlay/Popover.tsx`를 사용한다. `anchor`에 연 버튼의 ref, `onClose`에 닫기 동작을 전달한다. 컨텍스트 메뉴에는 `point`, 이동하는 도구 막대에는 `follow`를 전달할 수 있다. `anchor`는 위치 기준과 실제 여는 버튼이며, 닫은 뒤 돌아갈 대상이 다르면 `focusTarget`을 별도로 전달한다. 좌표로 연 메뉴는 여는 버튼 없이 메뉴 표면만 내부로 보고, 차트는 포커스 복귀 대상으로만 사용한다. 위치를 직접 지정하는 absolute 메뉴나 별도 portal을 만들지 않는다.
 
-1024×768, 1280×720, 1440×900과 높이 300px 창에서 문서가 넘치지 않는지 확인한다. 낮은 창에서는 드로잉 도구를 내부 스크롤로 끝까지 열 수 있어야 한다.
+- HTML Popover API의 맨 위 층에 렌더링한다. `position.ts`가 가장자리에서 반대쪽을 선택하고 화면 안으로 맞춘다. 내용 크기·창 크기·스크롤이 바뀌면 다시 계산한다.
+- Esc와 바깥 누르기는 맨 위의 조작 가능한 화면만 닫고 연 버튼으로 포커스를 돌린다. 배경이 있는 창은 `backdrop`을 전달하며 직접 배경 닫기 핸들러를 달지 않는다. 바깥 pointerdown과 뒤따르는 click은 하나의 입력으로 소비해 부모의 버튼을 함께 실행하지 않는다. 중첩 색상 선택기에서 Esc를 누르면 부모 설정창은 남는다.
+- 공통 표면은 `.ui-popover`다. 색·테두리·반경 10과 그림자를 여기서 한 번 정한다. 화면마다 이 네 값을 재정의하지 않는다.
+- 일반 메뉴는 `features/menu/Menu.tsx`의 `MenuItem`으로 만든다. `radio`·`check`·`action`·`heading`·`separator`를 지원한다. ↑↓·Home·End·Enter·Space·글자 입력으로 이동/선택한다. 메뉴 키보드는 차트 단축키로 전파하지 않는다.
+- 폼의 선택 항목은 `Select`에 `label`, 현재 값, `options`, `onChange`를 전달한다. 브라우저 기본 select를 새로 만들지 않는다. 분봉은 `MinuteMenu`, 자석 세기는 버튼의 우클릭·길게 누르기 메뉴를 쓴다.
+- 일반 대화상자는 `DialogFrame`을 사용한다. 되돌릴 수 없는 작업은 `confirmAction(문구)`의 결과를 기다린다. 일반 알림은 `showToast(문구)`를 사용한다. 드로잉 삭제는 `DrawingSync.commitWithUndo(칸, 변경, 문구)`를 사용해 삭제 당시의 history 객체를 작업 식별자로 묶는다. 기록이 바뀌거나 취소된 알림의 되돌리기는 비활성화되고, 실행 시에도 같은 식별자인지 다시 검사한다. 알림은 6초 동안 보인다.
+- `TooltipHost`는 기존 `title`을 공통 툴팁으로 표시한다. 단축키가 있는 버튼의 title에는 키도 적는다. 기존 aria-label과 title은 바꾸지 않는다.
+- 차트 키 처리에는 `ownsChartKeyboard`를 먼저 검사한다. 열린 조작 표면이나 그 안의 이벤트를 차트 단축키가 가로채지 않는다. 알림만 `blockChartKeys={false}`를 사용해 차트의 Ctrl+Z를 유지한다.
+- React 밖에서 만드는 화면은 `topLayer.ts`의 `mountLayer`를 사용하고 반환한 정리 함수를 화면 제거 시 호출한다. 재무 보고기간의 `domSelect`도 같은 위치·닫기·포커스 처리를 쓴다.
+
+상태 화면은 `Skeleton`, `EmptyState`, `ErrorState`를 사용한다. 빈 상태에는 다음 행동, 오류에는 회복 동작을 함께 전달한다. 목록과 차트, 드로잉 패널의 상태를 이 부품으로 표시한다.
+
+## 공통 아이콘과 치수
+
+`features/icons.tsx`의 `Icon`이 24×24·1.5px·currentColor 규칙을 소유한다. 드로잉도 `Icon`에 `path`를 전달한다. 공통 드로잉 그림은 `DRAWING_ICONS`에 두며 도구가 제공하는 기존 `tool.icon` 문자열도 그대로 전달할 수 있다. 새 도구나 아직 쓰지 않는 아이콘은 미리 추가하지 않는다.
+
+DOM 범례는 `iconMarkup("gear" | "eye" | "eyeOff" | "close" | "up" | "down")`으로 같은 그림을 문자열로 얻는다. 이 결과에는 고정된 아이콘 데이터만 들어가며 사용자 문자열을 HTML에 넣지 않는다. 버튼의 title·aria-label은 버튼에 둔다.
+
+`tokens.css`의 반경은 5/7/10/12, 최소 글자는 11px이며 숫자는 전역 `tabular-nums`를 상속한다. `ui.css`와 `colors.css`의 치수는 `--size-*` 토큰을 참조하고 간격은 4px 배수를 사용한다. 색 토큰 값은 #181 그대로 유지한다. 분봉 별표는 `UiPrefs.pinnedMinutes`로 저장하고 잘못된 주기·중복을 읽기 경계에서 제거한다. 서버 API는 바꾸지 않는다.
+
+시안 원본 9장은 [docs/mockups/ux-overhaul](mockups/ux-overhaul/)에 보관한다. 기능 규칙은 시안보다 #200과 #181이 우선이며 색상 선택기의 48색·최근 8색·HEX·선 샘플과 굵기 1~5를 유지한다.

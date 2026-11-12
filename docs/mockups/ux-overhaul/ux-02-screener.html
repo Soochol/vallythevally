@@ -1,0 +1,278 @@
+<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>② 스크리너</title><style>
+@import url('https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable.min.css');
+body{margin:0;background:var(--background,#0b0c0b);color:var(--foreground,#e8e8e8);font-family:var(--font-sans,system-ui,sans-serif)}
+.doc{padding:16px 16px 28px;max-width:1600px}
+.doc h1{font-size:18px;margin:4px 0 4px}
+.doc .lead{font-size:13px;color:var(--muted-foreground,#999);margin:0 0 14px;line-height:1.6}
+.doc h2{font-size:14px;margin:22px 0 8px}
+.notes{display:grid;grid-template-columns:repeat(auto-fill,minmax(330px,1fr));gap:8px 18px;margin:14px 0 0;padding:0;list-style:none;font-size:12.5px;line-height:1.55}
+.notes li{display:flex;gap:8px}
+.notes b.n{flex:none;display:grid;place-items:center;width:18px;height:18px;border-radius:50%;background:#C7F36B;color:#182209;font-size:10.5px;font-weight:800;margin-top:1px}
+.notes .was{color:var(--muted-foreground,#999)}
+.stage-wrap{position:relative;overflow:hidden;border-radius:10px;border:1px solid var(--border,#333)}
+.stage{position:absolute;left:0;top:0;transform-origin:0 0}
+
+.mk{--bg:#101211;--cbg:#101411;--surf:#191E18;--raised:#242C21;--hover:#1F261D;--line:#2C3529;--line2:#232A20;--grid:#1A2019;
+ --t1:#EDF1E9;--t2:#ABB5A5;--t3:#8C9985;--ac:#C7F36B;--acink:#182209;--acsoft:rgba(199,243,107,.10);
+ --up:#FF747E;--down:#73A8FF;--upbg:rgba(255,116,126,.13);--downbg:rgba(115,168,255,.13);--warn:#E8BC72;--ok:#80C995;--danger:#FF8990;
+ --i1:#D4B575;--i2:#B5A2F5;--i3:#7DB9AB;--i4:#F49C73;
+ --shadow:0 16px 48px rgba(0,0,0,.55),0 0 0 1px rgba(255,255,255,.02);
+ font-family:"Pretendard Variable",Pretendard,system-ui,sans-serif;font-size:12px;color:var(--t1);background:var(--bg);
+ font-variant-numeric:tabular-nums;letter-spacing:-.005em;line-height:1.35}
+.mk *{box-sizing:border-box}
+.mk svg.i{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round;flex:none}
+.mk .sm svg.i,.mk svg.i.sm{width:13px;height:13px}
+.mk .num{font-variant-numeric:tabular-nums}
+.mk .up{color:var(--up)} .mk .down{color:var(--down)} .mk .t2{color:var(--t2)} .mk .t3{color:var(--t3)}
+.mk .row{display:flex;align-items:center}
+.mk .sp{flex:1}
+.mk .kbd{display:inline-grid;place-items:center;min-width:18px;height:18px;padding:0 5px;border:1px solid var(--line);border-bottom-width:2px;border-radius:4px;font-size:10.5px;color:var(--t2);background:var(--surf)}
+
+/* shell */
+.app{display:grid;grid-template-rows:44px minmax(0,1fr) 26px;height:100%}
+.top{display:flex;align-items:center;gap:6px;padding:0 10px 0 12px;border-bottom:1px solid var(--line2);background:var(--bg)}
+.logo{display:flex;align-items:center;gap:6px;font-weight:800;font-size:15px;margin-right:8px;letter-spacing:-.03em}
+.logo i{width:18px;height:18px;border-radius:5px;background:var(--ac);display:grid;place-items:center;color:var(--acink);font-style:normal;font-size:11px;font-weight:900}
+.omni{display:flex;align-items:center;gap:8px;height:30px;width:250px;padding:0 8px 0 10px;border:1px solid var(--line);border-radius:8px;background:var(--surf);color:var(--t3);font-size:12px}
+.vr{width:1px;height:20px;background:var(--line);margin:0 4px}
+.seg{display:flex;align-items:center;gap:2px;padding:2px;border-radius:8px;background:var(--surf);border:1px solid var(--line2)}
+.seg b{font-weight:500;display:flex;align-items:center;gap:3px;height:24px;padding:0 9px;border-radius:6px;color:var(--t2);font-size:12px}
+.seg b.on{background:var(--raised);color:var(--ac);font-weight:650;box-shadow:inset 0 0 0 1px rgba(199,243,107,.18)}
+.tb{display:flex;align-items:center;gap:5px;height:30px;padding:0 8px;border-radius:7px;color:var(--t2);font-size:12px;white-space:nowrap}
+.tb.on{color:var(--ac);background:var(--acsoft)}
+.tb.ic{width:30px;padding:0;justify-content:center}
+.tb.hov{background:var(--hover);color:var(--t1)}
+.body{display:grid;min-height:0;grid-template-columns:40px minmax(0,1fr) var(--dock,300px)}
+.rail{display:flex;flex-direction:column;align-items:center;gap:2px;padding:8px 0;border-right:1px solid var(--line2);background:var(--bg);position:relative}
+.rail .tb{width:30px;height:30px;padding:0;justify-content:center}
+.rail .tb.on{background:var(--acsoft)}
+.rail .hr{width:20px;height:1px;background:var(--line);margin:5px 0}
+.rail .dot{position:relative}
+.rail .dot::after{content:"";position:absolute;right:5px;bottom:5px;width:5px;height:5px;border-radius:50%;background:var(--ac)}
+.status{display:flex;align-items:center;gap:14px;padding:0 12px;border-top:1px solid var(--line2);font-size:11px;color:var(--t2);background:var(--bg)}
+.status .led{width:7px;height:7px;border-radius:50%;background:var(--ok);box-shadow:0 0 0 3px rgba(128,201,149,.15)}
+.status .bar{width:70px;height:4px;border-radius:2px;background:var(--line);overflow:hidden}
+.status .bar i{display:block;height:100%;background:var(--warn)}
+.status a{color:var(--t3);text-decoration:none}
+
+/* chart cell */
+.cell{display:flex;flex-direction:column;min-width:0;min-height:0;background:var(--cbg);position:relative}
+.pane{display:flex;position:relative;min-height:0;border-bottom:1px solid var(--line2)}
+.pane .plot{flex:1;position:relative;min-width:0}
+.pane .plot svg{position:absolute;inset:0;width:100%;height:100%}
+.pane .axis{width:72px;flex:none;position:relative;border-left:1px solid var(--line2);font-size:10.5px;color:var(--t3)}
+.pane .axis span{position:absolute;left:7px;transform:translateY(-50%)}
+.pane .axis em{position:absolute;left:3px;right:3px;transform:translateY(-50%);font-style:normal;padding:2px 4px;border-radius:3px;color:#101211;font-weight:650;font-size:10.5px}
+.ptitle{position:absolute;left:10px;top:6px;display:flex;align-items:center;gap:7px;font-size:11.5px;color:var(--t2);z-index:2}
+.ptitle .sw{width:10px;height:2px;border-radius:2px}
+.ptitle .v{color:var(--t1)}
+.sdot{width:7px;height:7px;border-radius:50%;background:var(--warn);box-shadow:0 0 0 3px rgba(232,188,114,.14)}
+.handle{height:5px;margin-top:-3px;margin-bottom:-2px;position:relative;z-index:3;display:flex;justify-content:center}
+.handle i{width:36px;height:3px;border-radius:2px;background:var(--ac);opacity:.9;margin-top:1px}
+.handle::before{content:"";position:absolute;left:0;right:0;top:2px;height:1px;background:rgba(199,243,107,.6)}
+.collapsed{display:flex;align-items:center;gap:8px;height:26px;padding:0 10px;font-size:11.5px;color:var(--t2);border-bottom:1px solid var(--line2);background:#0E120F}
+.collapsed .pill{display:flex;align-items:center;gap:5px;height:18px;padding:0 7px;border-radius:9px;background:var(--surf);border:1px solid var(--line2)}
+.xaxis{height:24px;display:flex;align-items:center;position:relative;font-size:10.5px;color:var(--t3)}
+.xaxis span{position:absolute}
+.legend{position:absolute;left:10px;top:8px;z-index:4;display:flex;flex-direction:column;gap:3px}
+.lg1{display:flex;align-items:center;gap:7px}
+.lg1 .nm{font-size:15px;font-weight:700;letter-spacing:-.02em}
+.chip{display:inline-flex;align-items:center;gap:3px;height:20px;padding:0 7px;border-radius:5px;background:var(--surf);border:1px solid var(--line);color:var(--t2);font-size:11px}
+.chip.ac{color:var(--ac);border-color:rgba(199,243,107,.3);background:var(--acsoft)}
+.lg2{display:flex;align-items:baseline;gap:8px}
+.lg2 .px{font-size:22px;font-weight:750;letter-spacing:-.03em}
+.ohlc{display:flex;gap:9px;font-size:11px;color:var(--t3)}
+.ohlc b{font-weight:500;color:var(--t2);margin-left:3px}
+.ind{display:flex;align-items:center;gap:7px;height:20px;padding:0 6px 0 4px;margin-left:-4px;border-radius:5px;font-size:11.5px;color:var(--t2)}
+.ind .sw{width:10px;height:2px;border-radius:2px}
+.ind .v{color:var(--t1)}
+.ind.hov{background:rgba(25,30,24,.92);box-shadow:inset 0 0 0 1px var(--line)}
+.ind .acts{display:none;gap:1px;margin-left:4px}
+.ind.hov .acts{display:flex}
+.ind .acts span{display:grid;place-items:center;width:20px;height:18px;border-radius:4px;color:var(--t2)}
+
+/* dock */
+.dock{display:flex;flex-direction:column;min-height:0;border-left:1px solid var(--line2);background:var(--bg)}
+.dtabs{display:flex;align-items:center;gap:2px;height:38px;padding:0 6px;border-bottom:1px solid var(--line2)}
+.dtabs b{display:flex;align-items:center;gap:6px;height:28px;padding:0 10px;border-radius:7px;font-weight:550;color:var(--t2);font-size:12px}
+.dtabs b.on{color:var(--t1);background:var(--surf);box-shadow:inset 0 0 0 1px var(--line)}
+.dtabs b small{font-size:10.5px;color:var(--t3);font-weight:500}
+.dhead{display:flex;align-items:center;gap:4px;height:36px;padding:0 6px 0 12px}
+.dhead .ttl{display:flex;align-items:center;gap:4px;font-weight:700;font-size:13px}
+.colh{display:grid;grid-template-columns:1fr 36px 70px 58px;gap:6px;height:22px;align-items:center;padding:0 12px;font-size:10.5px;color:var(--t3);border-bottom:1px solid var(--line2)}
+.colh span:nth-child(n+3){text-align:right}
+.wl{overflow:hidden}
+.wr{display:grid;grid-template-columns:1fr 36px 70px 58px;gap:6px;align-items:center;height:34px;padding:0 12px;border-left:2px solid transparent}
+.wr .n{display:flex;align-items:baseline;gap:6px;min-width:0;white-space:nowrap}
+.wr .n b{font-weight:600;font-size:12.5px;flex:none}
+.wr .n small{color:var(--t3);font-size:10.5px;overflow:hidden;min-width:0;text-overflow:clip}
+.wr .p{text-align:right;font-size:12.5px}
+.wr .c{justify-self:end;min-width:56px;text-align:right;padding:2px 5px;border-radius:4px;font-size:11.5px;font-weight:600}
+.wr .c.up{background:var(--upbg)} .wr .c.down{background:var(--downbg)}
+.wr.on{background:var(--surf);border-left-color:var(--ac)}
+.wr.hov{background:var(--hover)}
+.wr svg{width:36px;height:16px}
+
+/* surfaces */
+.pop{position:absolute;z-index:20;background:var(--surf);border:1px solid var(--line);border-radius:10px;box-shadow:var(--shadow);padding:5px}
+.mi{display:flex;align-items:center;gap:9px;height:30px;padding:0 9px;border-radius:6px;color:var(--t1);font-size:12.5px;white-space:nowrap}
+.mi .ck{width:14px;color:var(--ac);display:grid;place-items:center}
+.mi.on{background:var(--raised)}
+.mi .k{margin-left:auto;padding-left:18px;color:var(--t3);font-size:11px}
+.mi.danger{color:var(--danger)}
+.msep{height:1px;background:var(--line);margin:4px 2px}
+.mlab{padding:7px 9px 4px;font-size:10.5px;color:var(--t3);font-weight:600;letter-spacing:.02em}
+.scrim{position:absolute;inset:0;background:rgba(5,8,5,.62);z-index:15}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;height:30px;padding:0 12px;border-radius:7px;border:1px solid var(--line);background:var(--surf);color:var(--t1);font-size:12.5px;font-weight:550;white-space:nowrap}
+.btn.pri{background:var(--ac);border-color:var(--ac);color:var(--acink);font-weight:700}
+.btn.ghost{border-color:transparent;background:transparent;color:var(--t2)}
+.btn.sm{height:26px;padding:0 9px;font-size:12px}
+.btn.danger{color:var(--danger)}
+.inp{display:flex;align-items:center;gap:8px;height:32px;padding:0 10px;border:1px solid var(--line);border-radius:7px;background:var(--cbg);color:var(--t1);font-size:12.5px}
+.inp.focus{border-color:var(--ac);box-shadow:0 0 0 3px rgba(199,243,107,.12)}
+.caret{display:inline-block;width:1.5px;height:15px;background:var(--ac);margin-left:-5px}
+.pin{position:absolute;z-index:50;display:grid;place-items:center;width:20px;height:20px;border-radius:50%;background:var(--ac);color:var(--acink);font-size:11px;font-weight:850;box-shadow:0 0 0 3px rgba(16,18,17,.9),0 2px 8px rgba(0,0,0,.5);font-family:"Pretendard Variable",system-ui}
+.tip{position:absolute;z-index:30;background:#2B3427;color:var(--t1);border:1px solid #3A4535;border-radius:7px;padding:6px 9px;font-size:11.5px;box-shadow:0 8px 24px rgba(0,0,0,.5);white-space:nowrap}
+</style></head>
+<body><div class="doc"><h1>② 스크리너</h1><p class="lead">기본은 오른쪽 탭(보기 A)이고, 결과를 자세히 볼 때만 넓게 보기(보기 B)로 바꿉니다. 조건식 편집 대화상자는 없애고 문장 안에서 바로 고칩니다.</p><h2>보기 A: 오른쪽 탭(기본) — 결과를 고르면 바로 옆 차트가 바뀝니다</h2><div class="stage-wrap"><div class="stage mk" data-w="1280" data-h="800"><div class="app" style="--dock:440px"><div class="top">
+ <div class="logo"><i>v</i>vally</div>
+ <div class="omni"><i data-i="search" class="sm"></i><span>종목·지표·명령 찾기</span><span class="sp"></span><span class="kbd">/</span></div>
+ <span class="vr"></span>
+ <div class="seg"><b>5분<i data-i="chev" class="sm"></i></b><b class="on">일</b><b class="">주</b><b class="">월</b><b class="">분기</b><b class="">연</b></div>
+ <span class="vr"></span>
+ <span class="tb "><i data-i="candle"></i><i data-i="chev" class="sm"></i></span>
+ <span class="tb "><i data-i="ind"></i>지표</span>
+ <span class="tb"><i data-i="compare"></i>비교</span>
+ <span class="vr"></span>
+ <span class="tb ic"><i data-i="log"></i></span><span class="tb ic"><i data-i="pct"></i></span>
+ <span class="sp"></span>
+ <span class="tb ic"><i data-i="layout"></i></span><span class="tb ic"><i data-i="camera"></i></span><span class="tb ic"><i data-i="gear"></i></span>
+</div><div class="body"><nav class="rail"><span class="tb on "><i data-i="cursor"></i></span><span class="tb  dot"><i data-i="line"></i></span><span class="tb  dot"><i data-i="fib"></i></span><span class="tb  dot"><i data-i="rect"></i></span><span class="tb  dot"><i data-i="text"></i></span><span class="tb  dot"><i data-i="long"></i></span><span class="tb  "><i data-i="brush"></i></span>
+ <span class="hr"></span><span class="tb on "><i data-i="magnet"></i></span><span class="tb  "><i data-i="lock"></i></span><span class="tb  "><i data-i="eye"></i></span><span class="sp"></span><span class="tb  "><i data-i="help"></i></span></nav><section class="cell">
+ <div class="pane" style="flex:1"><div class="plot"><div class="legend">
+ <div class="lg1"><span class="nm">에스엠</span><span class="t3">041510</span><span class="chip">통합<i data-i="chev" class="sm"></i></span><span class="chip">일</span></div>
+ <div class="lg2"><span class="px num up">78,100</span><span class="num up" style="font-weight:600">+5,200 +7.13%</span></div>
+ <div class="ohlc num"><span>시<b>1,277,000</b></span><span>고<b>1,302,000</b></span><span>저<b>1,271,000</b></span><span>거래량<b>312만</b></span></div>
+ <div style="height:3px"></div><div class="ind "><span class="sw" style="background:var(--i1)"></span>MA 20<span class="v num">1,248,350</span><span class="acts"><span><i data-i="eye" class="sm"></i></span><span><i data-i="gear" class="sm"></i></span><span><i data-i="x" class="sm"></i></span></span></div><div class="ind "><span class="sw" style="background:var(--i2)"></span>MA 60<span class="v num">1,102,900</span><span class="acts"><span><i data-i="eye" class="sm"></i></span><span><i data-i="gear" class="sm"></i></span><span><i data-i="x" class="sm"></i></span></span></div><div class="ind "><span class="sw" style="background:var(--i3)"></span>MA 120<span class="v num">968,440</span><span class="acts"><span><i data-i="eye" class="sm"></i></span><span><i data-i="gear" class="sm"></i></span><span><i data-i="x" class="sm"></i></span></span></div></div><svg data-kind="price" data-n="96" data-seed="97" data-top="120" data-right="10" data-drift="0.004"></svg></div><div class="axis"><span style="top:8%">82,000</span><span style="top:24%">78,000</span><span style="top:40%">74,000</span><span style="top:56%">70,000</span><span style="top:72%">66,000</span><span style="top:88%">62,000</span><em data-at-last="1" style="top:18%;background:var(--up)">78,100</em></div></div>
+ <div class="handle"><i></i></div>
+ <div class="pane" style="height:92px"><div class="ptitle">거래량<span class="v num">312만</span></div><div class="plot"><svg data-kind="volume" data-n="96" data-seed="97" data-right="10" data-grid="0"></svg></div><div class="axis"><span style="top:30%">800만</span><span style="top:65%">400만</span><em style="top:72%;background:rgba(255,116,126,.85)">312만</em></div></div>
+
+ <div class="xaxis"><span style="left:6%">7월</span><span style="left:22%">8월</span><span style="left:38%">9월</span><span style="left:54%">10월</span><span style="left:70%">11월</span></div>
+</section><aside class="dock" style="position:relative"><div class="dtabs"><b class="">관심종목<small>13</small></b><b class="on">스크리너<small>23</small></b><b class="">개체<small>3</small></b><span class="sp"></span><span class="tb ic"><i data-i="expand" class="sm"></i></span><span class="tb ic"><i data-i="dock" class="sm"></i></span></div>
+ <div class="scr">
+ <div class="dhead"><span class="ttl">신고가<i data-i="chev" class="sm"></i></span><span class="chip" style="height:18px;margin-left:6px;color:var(--warn);border-color:rgba(232,188,114,.3)">변경됨</span><span class="sp"></span><span class="btn sm ghost">저장</span><span class="tb ic"><i data-i="more" class="sm"></i></span></div>
+ <div class="sent">
+  <div class="ln"><span class="t3">대상</span><span class="tok">코스피·코스닥<i data-i="chev" class="sm"></i></span><span class="t3" style="margin-left:6px">제외</span><span class="xchip">ETF<i data-i="x" class="sm"></i></span><span class="xchip">우선주<i data-i="x" class="sm"></i></span><span class="xchip">리츠<i data-i="x" class="sm"></i></span><span class="xchip">스팩<i data-i="x" class="sm"></i></span><span class="xchip" style="padding:0 6px"><i data-i="plus" class="sm"></i></span></div>
+  <div class="cn"><i data-i="grip" class="sm"></i><div>최근 <span class="tok open">260주</span> 안에 거래량이 <span class="tok">260주 신고거래량</span>인 봉이 있다</div><i data-i="more" class="sm"></i></div>
+  <div class="cn"><i data-i="grip" class="sm"></i><div><span class="and">그리고</span>시가총액이 <span class="tok">3,000억 원</span> <span class="tok">이상</span>이다</div><i data-i="more" class="sm"></i></div>
+  <div class="add"><i data-i="plus" class="sm"></i>조건 추가<span class="sp"></span><span class="t3" style="font-size:11px">신고가 · 이동평균 · RSI · 재무 …</span></div>
+ </div>
+ <div class="pop" style="left:70px;top:150px;width:250px;padding:10px">
+ <div class="mlab" style="padding:0 2px 7px">기간</div>
+ <div class="row" style="gap:6px"><span class="inp focus num" style="width:78px;height:30px">260<span class="caret" style="margin-left:2px"></span></span><div class="seg"><b>일</b><b class="on">주</b><b>월</b></div></div>
+ <div class="row" style="gap:5px;margin-top:9px"><span class="chip">52주</span><span class="chip">104주</span><span class="chip ac">260주</span><span class="sp"></span><span class="t3" style="font-size:10.5px">↵ 적용</span></div></div>
+ <div class="row" style="gap:8px;padding:10px 10px 8px"><span class="btn pri"><i data-i="play" class="sm"></i>실행</span><span class="kbd">Ctrl</span><span class="kbd">↵</span><span class="sp"></span><span class="t3" style="font-size:11px">11-11(수) 장 마감 기준</span></div>
+ <div class="row" style="gap:6px;padding:6px 6px 6px 12px;border-top:1px solid var(--line2)"><b style="font-size:12.5px">결과 23종목</b><span class="t3" style="font-size:11px">10:41 실행</span><span class="sp"></span><span class="btn sm ghost"><i data-i="star" class="sm"></i>관심종목으로</span><span class="tb ic"><i data-i="expand" class="sm"></i></span></div>
+ <div class="rt h"><span>종목</span><span class="sorted">등락률 ↓</span><span>시가총액</span><span>충족일</span></div>
+ <div style="overflow:hidden;flex:1"><div class="rt on"><span class="n"><b>에스엠</b><small>041510</small></span><span class="num up" style="font-weight:600">+7.13%</span><span class="num t2">1.86조</span><span class="num t3">11-11</span></div><div class="rt "><span class="n"><b>JYP Ent.</b><small>035900</small></span><span class="num up" style="font-weight:600">+19.25%</span><span class="num t2">1.64조</span><span class="num t3">11-11</span></div><div class="rt "><span class="n"><b>한화솔루션</b><small>009830</small></span><span class="num down" style="font-weight:600">−4.18%</span><span class="num t2">4.13조</span><span class="num t3">11-10</span></div><div class="rt "><span class="n"><b>두산에너빌리티</b><small>034020</small></span><span class="num up" style="font-weight:600">+3.41%</span><span class="num t2">52.8조</span><span class="num t3">11-11</span></div><div class="rt "><span class="n"><b>HD현대일렉트릭</b><small>267260</small></span><span class="num up" style="font-weight:600">+1.92%</span><span class="num t2">21.3조</span><span class="num t3">11-07</span></div><div class="rt "><span class="n"><b>한미반도체</b><small>042700</small></span><span class="num up" style="font-weight:600">+5.66%</span><span class="num t2">12.1조</span><span class="num t3">11-11</span></div><div class="rt "><span class="n"><b>효성중공업</b><small>298040</small></span><span class="num down" style="font-weight:600">−0.84%</span><span class="num t2">9.47조</span><span class="num t3">11-06</span></div><div class="rt "><span class="n"><b>LS ELECTRIC</b><small>010120</small></span><span class="num up" style="font-weight:600">+2.30%</span><span class="num t2">10.2조</span><span class="num t3">11-10</span></div><div class="rt "><span class="n"><b>산일전기</b><small>062040</small></span><span class="num up" style="font-weight:600">+8.91%</span><span class="num t2">3.32조</span><span class="num t3">11-11</span></div><div class="rt "><span class="n"><b>일진전기</b><small>103590</small></span><span class="num down" style="font-weight:600">−1.15%</span><span class="num t2">1.41조</span><span class="num t3">11-05</span></div><div class="rt "><span class="n"><b>HD현대중공업</b><small>329180</small></span><span class="num up" style="font-weight:600">+0.77%</span><span class="num t2">38.6조</span><span class="num t3">11-04</span></div><div class="rt "><span class="n"><b>이수페타시스</b><small>007660</small></span><span class="num up" style="font-weight:600">+4.02%</span><span class="num t2">4.95조</span><span class="num t3">11-11</span></div></div>
+ <div class="row" style="gap:7px;height:30px;padding:0 12px;border-top:1px solid var(--line2);font-size:11px;color:var(--t2)"><span class="led" style="width:6px;height:6px;border-radius:50%;background:var(--ok)"></span>KRX 일봉 11-11(수)까지<span class="t3">· 확인 안 됨 2</span><span class="sp"></span><span class="btn sm ghost" style="height:22px">업데이트</span></div>
+ </div></aside></div><footer class="status"><span class="row" style="gap:6px"><span class="led"></span>실시간 연결됨</span>
+ <span class="row" style="gap:5px"><i data-i="clock" class="sm"></i>장중 · 10:42:13</span>
+ <span class="row" style="gap:5px;color:var(--ok)"><i data-i="check" class="sm"></i>저장됨</span>
+ <span class="row" style="gap:6px">재무 수집 <span class="bar"><i style="width:94%"></i></span><span class="num">59/62</span><span style="color:var(--danger)">실패 1</span></span>
+ <span class="sp"></span><a>Charts by TradingView Lightweight Charts™</a></footer></div><style>
+.scr{display:flex;flex-direction:column;min-height:0;flex:1}
+.sent{margin:0 10px;padding:10px 11px;border:1px solid var(--line);border-radius:10px;background:var(--surf);font-size:12.5px;line-height:1.9;position:relative}
+.sent .ln{display:flex;flex-wrap:wrap;align-items:center;gap:4px 5px;padding:2px 0}
+.sent .cn{display:grid;grid-template-columns:16px 1fr 20px;gap:6px;align-items:start;padding:4px 0;border-top:1px dashed var(--line2)}
+.sent .cn>i,.sent .cn>svg{margin-top:4px;color:var(--t3)}
+.tok{display:inline-flex;align-items:center;gap:2px;padding:0 6px;height:21px;border-radius:5px;background:var(--acsoft);color:var(--ac);font-weight:650;box-shadow:inset 0 -1px 0 rgba(199,243,107,.4)}
+.tok.open{background:var(--ac);color:var(--acink)}
+.and{font-size:10.5px;font-weight:750;color:var(--t3);background:var(--raised);padding:1px 5px;border-radius:4px;margin-right:2px}
+.xchip{display:inline-flex;align-items:center;gap:3px;height:21px;padding:0 4px 0 7px;border-radius:11px;background:var(--raised);color:var(--t2);font-size:11.5px}
+.add{display:flex;align-items:center;gap:6px;height:28px;margin-top:4px;padding:0 8px;border:1px dashed var(--line);border-radius:7px;color:var(--t2);font-size:12px}
+.rt{display:grid;grid-template-columns:1fr 62px 58px 46px;gap:6px;align-items:center;height:30px;padding:0 12px;font-size:12px;border-left:2px solid transparent}
+.rt.h{height:24px;font-size:10.5px;color:var(--t3);border-bottom:1px solid var(--line2)}
+.rt span:nth-child(n+2){text-align:right}
+.rt.on{background:var(--surf);border-left-color:var(--ac)}
+.rt .n{display:flex;gap:6px;align-items:baseline;white-space:nowrap;overflow:hidden}.rt .n b{font-weight:600}.rt .n small{color:var(--t3);font-size:10.5px}
+.sorted{color:var(--t1)!important}
+</style><b class="pin" style="left:846px;top:72px">1</b><b class="pin" style="left:846px;top:152px">2</b><b class="pin" style="left:1160px;top:214px">3</b><b class="pin" style="left:1256px;top:126px">4</b><b class="pin" style="left:1010px;top:76px">5</b><b class="pin" style="left:846px;top:512px">6</b><b class="pin" style="left:1256px;top:400px">7</b><b class="pin" style="left:300px;top:58px">8</b></div></div><h2>보기 B: 넓게 보기(⤢) — 열이 많은 표와 오른쪽 미리보기</h2><div class="stage-wrap"><div class="stage mk" data-w="1280" data-h="760"><div class="app"><div class="top">
+ <div class="logo"><i>v</i>vally</div>
+ <div class="omni"><i data-i="search" class="sm"></i><span>종목·지표·명령 찾기</span><span class="sp"></span><span class="kbd">/</span></div>
+ <span class="vr"></span>
+ <div class="seg"><b>5분<i data-i="chev" class="sm"></i></b><b class="on">일</b><b class="">주</b><b class="">월</b><b class="">분기</b><b class="">연</b></div>
+ <span class="vr"></span>
+ <span class="tb "><i data-i="candle"></i><i data-i="chev" class="sm"></i></span>
+ <span class="tb "><i data-i="ind"></i>지표</span>
+ <span class="tb"><i data-i="compare"></i>비교</span>
+ <span class="vr"></span>
+ <span class="tb ic"><i data-i="log"></i></span><span class="tb ic"><i data-i="pct"></i></span>
+ <span class="sp"></span>
+ <span class="tb ic"><i data-i="layout"></i></span><span class="tb ic"><i data-i="camera"></i></span><span class="tb ic"><i data-i="gear"></i></span>
+</div><div style="display:grid;grid-template-columns:220px minmax(0,1fr) 340px;min-height:0"><nav style="border-right:1px solid var(--line2);padding:10px 8px;display:flex;flex-direction:column;gap:3px">
+ <div class="row" style="padding:0 4px 6px"><b style="font-size:11px;color:var(--t3)">내 조건식</b><span class="sp"></span><span class="tb ic" style="height:24px;width:24px"><i data-i="plus" class="sm"></i></span></div>
+ <div style="padding:8px 10px;border-radius:8px;background:var(--surf);box-shadow:inset 2px 0 0 var(--ac)"><b>신고가</b><div class="t3" style="font-size:11px;margin-top:2px">조건 2 · 결과 23</div></div>
+ <div style="padding:8px 10px;border-radius:8px"><b class="t2" style="font-weight:600">눌림목 20일선</b><div class="t3" style="font-size:11px;margin-top:2px">조건 3 · 결과 41</div></div>
+ <div style="padding:8px 10px;border-radius:8px"><b class="t2" style="font-weight:600">ROE 15% 이상 저PBR</b><div class="t3" style="font-size:11px;margin-top:2px">조건 4 · 아직 실행 안 함</div></div></nav><main style="display:flex;flex-direction:column;min-width:0">
+ <div class="row" style="gap:10px;padding:12px 14px;border-bottom:1px solid var(--line2)"><b style="font-size:15px;white-space:nowrap">신고가</b>
+ <span class="t2" style="font-size:12px">최근 <span class="tok">260주</span> 안에 260주 신고거래량 <span class="and" style="margin:0 4px">그리고</span> 시총 <span class="tok">3,000억 원</span> 이상 · ETF·우선주·리츠·스팩 제외</span>
+ <span class="sp"></span><span class="btn sm"><i data-i="edit" class="sm"></i>조건 펼치기</span><span class="btn pri sm"><i data-i="play" class="sm"></i>실행</span></div>
+ <div class="row" style="gap:8px;padding:8px 14px"><b>결과 23종목</b><span class="t3" style="font-size:11px">11-11(수) 장 마감 · 10:41 실행 · 지난 실행보다 <span style="color:var(--ac)">+3 새 종목</span></span><span class="sp"></span><span class="btn sm ghost"><i data-i="filter" class="sm"></i>열</span><span class="btn sm ghost"><i data-i="star" class="sm"></i>관심종목으로</span><span class="btn sm ghost"><i data-i="dock" class="sm"></i>오른쪽 탭으로</span></div>
+ <div class="rw h"><span>종목</span><span>현재가</span><span class="sorted">등락률 ↓</span><span>거래대금</span><span>시가총액</span><span>충족일</span><span>52주 고가 대비</span><span style="text-align:center">60일</span></div><div style="overflow:hidden"><div class="rw on"><span class="n"><b>에스엠</b><small>041510</small></span><span class="num">78,100</span><span class="num up" style="font-weight:600">+7.13%</span><span class="num t2">1,412억</span><span class="num t2">1.86조</span><span class="num t3">11-11</span><span class="num t2">−2.1%</span><svg data-kind="spark" data-n="50" data-grid="0" data-seed="5" data-drift="0.004" style="width:70px;height:18px;justify-self:center"></svg></div><div class="rw "><span class="n"><b>JYP Ent.</b><small>035900</small></span><span class="num">46,150</span><span class="num up" style="font-weight:600">+19.25%</span><span class="num t2">2,031억</span><span class="num t2">1.64조</span><span class="num t3">11-11</span><span class="num t2">−0.4%</span><svg data-kind="spark" data-n="50" data-grid="0" data-seed="18" data-drift="0.004" style="width:70px;height:18px;justify-self:center"></svg></div><div class="rw "><span class="n"><b>한화솔루션</b><small>009830</small></span><span class="num">24,050</span><span class="num down" style="font-weight:600">−4.18%</span><span class="num t2">833억</span><span class="num t2">4.13조</span><span class="num t3">11-10</span><span class="num t2">−9.8%</span><svg data-kind="spark" data-n="50" data-grid="0" data-seed="31" data-drift="-0.002" style="width:70px;height:18px;justify-self:center"></svg></div><div class="rw "><span class="n"><b>두산에너빌리티</b><small>034020</small></span><span class="num">71,300</span><span class="num up" style="font-weight:600">+3.41%</span><span class="num t2">9,870억</span><span class="num t2">52.8조</span><span class="num t3">11-11</span><span class="num t2">−1.2%</span><svg data-kind="spark" data-n="50" data-grid="0" data-seed="44" data-drift="0.004" style="width:70px;height:18px;justify-self:center"></svg></div><div class="rw "><span class="n"><b>HD현대일렉트릭</b><small>267260</small></span><span class="num">512,000</span><span class="num up" style="font-weight:600">+1.92%</span><span class="num t2">3,120억</span><span class="num t2">21.3조</span><span class="num t3">11-07</span><span class="num t2">−3.5%</span><svg data-kind="spark" data-n="50" data-grid="0" data-seed="57" data-drift="0.004" style="width:70px;height:18px;justify-self:center"></svg></div><div class="rw "><span class="n"><b>한미반도체</b><small>042700</small></span><span class="num">128,700</span><span class="num up" style="font-weight:600">+5.66%</span><span class="num t2">4,410억</span><span class="num t2">12.1조</span><span class="num t3">11-11</span><span class="num t2">−0.9%</span><svg data-kind="spark" data-n="50" data-grid="0" data-seed="70" data-drift="0.004" style="width:70px;height:18px;justify-self:center"></svg></div><div class="rw "><span class="n"><b>효성중공업</b><small>298040</small></span><span class="num">1,384,000</span><span class="num down" style="font-weight:600">−0.84%</span><span class="num t2">1,220억</span><span class="num t2">9.47조</span><span class="num t3">11-06</span><span class="num t2">−6.1%</span><svg data-kind="spark" data-n="50" data-grid="0" data-seed="83" data-drift="-0.002" style="width:70px;height:18px;justify-self:center"></svg></div><div class="rw "><span class="n"><b>LS ELECTRIC</b><small>010120</small></span><span class="num">348,500</span><span class="num up" style="font-weight:600">+2.30%</span><span class="num t2">2,280억</span><span class="num t2">10.2조</span><span class="num t3">11-10</span><span class="num t2">−2.7%</span><svg data-kind="spark" data-n="50" data-grid="0" data-seed="96" data-drift="0.004" style="width:70px;height:18px;justify-self:center"></svg></div><div class="rw "><span class="n"><b>산일전기</b><small>062040</small></span><span class="num">108,900</span><span class="num up" style="font-weight:600">+8.91%</span><span class="num t2">1,960억</span><span class="num t2">3.32조</span><span class="num t3">11-11</span><span class="num t2">−0.3%</span><svg data-kind="spark" data-n="50" data-grid="0" data-seed="109" data-drift="0.004" style="width:70px;height:18px;justify-self:center"></svg></div><div class="rw "><span class="n"><b>일진전기</b><small>103590</small></span><span class="num">29,450</span><span class="num down" style="font-weight:600">−1.15%</span><span class="num t2">404억</span><span class="num t2">1.41조</span><span class="num t3">11-05</span><span class="num t2">−8.2%</span><svg data-kind="spark" data-n="50" data-grid="0" data-seed="122" data-drift="-0.002" style="width:70px;height:18px;justify-self:center"></svg></div><div class="rw "><span class="n"><b>HD현대중공업</b><small>329180</small></span><span class="num">434,000</span><span class="num up" style="font-weight:600">+0.77%</span><span class="num t2">1,750억</span><span class="num t2">38.6조</span><span class="num t3">11-04</span><span class="num t2">−4.4%</span><svg data-kind="spark" data-n="50" data-grid="0" data-seed="135" data-drift="0.004" style="width:70px;height:18px;justify-self:center"></svg></div><div class="rw "><span class="n"><b>이수페타시스</b><small>007660</small></span><span class="num">80,300</span><span class="num up" style="font-weight:600">+4.02%</span><span class="num t2">1,630억</span><span class="num t2">4.95조</span><span class="num t3">11-11</span><span class="num t2">−1.0%</span><svg data-kind="spark" data-n="50" data-grid="0" data-seed="148" data-drift="0.004" style="width:70px;height:18px;justify-self:center"></svg></div><div class="rw "><span class="n"><b>제룡전기</b><small>033100</small></span><span class="num">40,150</span><span class="num down" style="font-weight:600">−2.36%</span><span class="num t2">212억</span><span class="num t2">0.62조</span><span class="num t3">11-03</span><span class="num t2">−12.5%</span><svg data-kind="spark" data-n="50" data-grid="0" data-seed="161" data-drift="-0.002" style="width:70px;height:18px;justify-self:center"></svg></div><div class="rw "><span class="n"><b>파마리서치</b><small>214450</small></span><span class="num">488,000</span><span class="num up" style="font-weight:600">+1.05%</span><span class="num t2">690억</span><span class="num t2">5.08조</span><span class="num t3">11-07</span><span class="num t2">−5.3%</span><svg data-kind="spark" data-n="50" data-grid="0" data-seed="174" data-drift="0.004" style="width:70px;height:18px;justify-self:center"></svg></div></div></main><aside style="border-left:1px solid var(--line2);display:flex;flex-direction:column;padding:12px;gap:10px">
+ <div class="row" style="gap:7px"><b style="font-size:15px">에스엠</b><span class="t3">041510 · 코스닥</span><span class="sp"></span><span class="tb ic"><i data-i="star" class="sm"></i></span></div>
+ <div class="row" style="gap:8px;align-items:baseline"><b class="up num" style="font-size:22px">78,100</b><span class="up num" style="font-weight:600">+5,200 +7.13%</span></div>
+ <div style="position:relative;height:250px;border:1px solid var(--line2);border-radius:8px;background:var(--cbg);overflow:hidden"><svg data-kind="candle-only" data-n="70" data-seed="97" data-drift="0.004" style="position:absolute;inset:0;width:100%;height:100%"></svg><span class="chip" style="position:absolute;left:8px;top:8px">일</span><span style="position:absolute;right:8px;bottom:6px;font-size:10.5px;color:var(--ac)">▲ 11-11 신고거래량</span></div>
+ <div class="st"><div><span>시가총액</span><b class="num">1.86조</b></div><div><span>거래대금</span><b class="num">1,412억</b></div><div><span>거래량 / 260주 최대</span><b class="num">181만 / 181만</b></div><div><span>52주 고가 대비</span><b class="num">−2.1%</b></div></div>
+ <span class="sp"></span>
+ <div class="row" style="gap:6px"><span class="btn pri" style="flex:1">칸에 열기<span class="kbd" style="background:transparent;border-color:rgba(24,34,9,.3);color:var(--acink)">↵</span></span><span class="btn">비교에 추가</span></div></aside></div><footer class="status"><span class="row" style="gap:6px"><span class="led"></span>실시간 연결됨</span>
+ <span class="row" style="gap:5px"><i data-i="clock" class="sm"></i>장중 · 10:42:13</span>
+ <span class="row" style="gap:5px;color:var(--ok)"><i data-i="check" class="sm"></i>저장됨</span>
+ <span class="row" style="gap:6px">재무 수집 <span class="bar"><i style="width:94%"></i></span><span class="num">59/62</span><span style="color:var(--danger)">실패 1</span></span>
+ <span class="sp"></span><a>Charts by TradingView Lightweight Charts™</a></footer></div><style>
+.scr{display:flex;flex-direction:column;min-height:0;flex:1}
+.sent{margin:0 10px;padding:10px 11px;border:1px solid var(--line);border-radius:10px;background:var(--surf);font-size:12.5px;line-height:1.9;position:relative}
+.sent .ln{display:flex;flex-wrap:wrap;align-items:center;gap:4px 5px;padding:2px 0}
+.sent .cn{display:grid;grid-template-columns:16px 1fr 20px;gap:6px;align-items:start;padding:4px 0;border-top:1px dashed var(--line2)}
+.sent .cn>i,.sent .cn>svg{margin-top:4px;color:var(--t3)}
+.tok{display:inline-flex;align-items:center;gap:2px;padding:0 6px;height:21px;border-radius:5px;background:var(--acsoft);color:var(--ac);font-weight:650;box-shadow:inset 0 -1px 0 rgba(199,243,107,.4)}
+.tok.open{background:var(--ac);color:var(--acink)}
+.and{font-size:10.5px;font-weight:750;color:var(--t3);background:var(--raised);padding:1px 5px;border-radius:4px;margin-right:2px}
+.xchip{display:inline-flex;align-items:center;gap:3px;height:21px;padding:0 4px 0 7px;border-radius:11px;background:var(--raised);color:var(--t2);font-size:11.5px}
+.add{display:flex;align-items:center;gap:6px;height:28px;margin-top:4px;padding:0 8px;border:1px dashed var(--line);border-radius:7px;color:var(--t2);font-size:12px}
+.rt{display:grid;grid-template-columns:1fr 62px 58px 46px;gap:6px;align-items:center;height:30px;padding:0 12px;font-size:12px;border-left:2px solid transparent}
+.rt.h{height:24px;font-size:10.5px;color:var(--t3);border-bottom:1px solid var(--line2)}
+.rt span:nth-child(n+2){text-align:right}
+.rt.on{background:var(--surf);border-left-color:var(--ac)}
+.rt .n{display:flex;gap:6px;align-items:baseline;white-space:nowrap;overflow:hidden}.rt .n b{font-weight:600}.rt .n small{color:var(--t3);font-size:10.5px}
+.sorted{color:var(--t1)!important}
+</style><style>.rw{display:grid;grid-template-columns:1.6fr .9fr .8fr .9fr .9fr .6fr 1fr 90px;gap:8px;align-items:center;height:32px;padding:0 14px;font-size:12px;border-left:2px solid transparent;border-bottom:1px solid #161b15}
+.rw span:nth-child(n+2):not(:last-child){text-align:right}.rw.h{height:28px;font-size:10.5px;color:var(--t3)}
+.rw.on{background:var(--surf);border-left-color:var(--ac)}.rw .n{display:flex;gap:6px;align-items:baseline;white-space:nowrap}.rw .n b{font-weight:600}.rw .n small{color:var(--t3);font-size:10.5px}
+.st{display:grid;grid-template-columns:1fr 1fr;gap:10px 12px;font-size:11.5px}.st span{color:var(--t3)}.st b{display:block;font-weight:600;color:var(--t1);margin-top:2px;font-size:12.5px}</style><b class="pin" style="left:560px;top:98px">9</b><b class="pin" style="left:1256px;top:56px">10</b></div></div><ul class="notes"><li><b class="n">1</b><span><b>스크리너를 오른쪽 탭으로 옮김</b>. 차트를 가리지 않습니다. <span class='was'>지금: 스크리너가 화면 전체를 차지해 열린 차트를 볼 수 없음</span></span></li><li><b class="n">2</b><span><b>조건식을 문장 그대로 편집</b>. 밑줄 친 값을 누르면 바로 아래 작은 팝오버에서 고칩니다. <span class='was'>지금: 1000px 대화상자 + 선택 상자와 숫자 입력 줄</span></span></li><li><b class="n">3</b><span><b>값 편집 팝오버</b>. 숫자, 일·주·월, 자주 쓰는 값(52·104·260주)을 고르고 <span class='kbd'>↵</span>로 적용합니다.</span></li><li><b class="n">4</b><span><b>제외 항목은 지울 수 있는 칩</b>, 조건은 끌어서 순서를 바꿉니다. 조건 추가는 종류를 검색해서 고릅니다.</span></li><li><b class="n">5</b><span><b>저장 안 한 변경 표시</b>(변경됨). 저장하지 않아도 바로 실행해 볼 수 있습니다.</span></li><li><b class="n">6</b><span><b>결과는 정렬할 수 있는 표</b>. ↑↓로 차례로 보면 왼쪽 차트가 바로 바뀝니다.</span></li><li><b class="n">7</b><span><b>결과를 관심종목으로 저장</b>하고, ⤢로 넓게 보기로 바꿉니다.</span></li><li><b class="n">8</b><span><b>차트 범례가 고른 결과 종목으로 바뀜</b>. 결과와 차트를 한 화면에서 비교합니다.</span></li><li><b class="n">9</b><span><b>넓게 보기</b>: 거래대금·52주 고가 대비·60일 추세 열을 추가하고, 지난 실행보다 새로 들어온 종목 수를 표시합니다.</span></li><li><b class="n">10</b><span><b>오른쪽 미리보기</b>: 고른 종목의 미니 차트와 조건 충족 근거(신고거래량 날짜)를 보여 주고, <span class='kbd'>↵</span>로 칸에 엽니다.</span></li></ul></div><script>
+const P={cursor:"M5 3l13 6.5-5.5 1.8L10.7 17z",line:"M4 20L20 4",hline:"M3 12h18M7 12h.01",ray:"M5 19L19 5M5 19h.01",vline:"M12 3v18",channel:"M3 15L15 3M9 21L21 9",fib:"M3 5h18M3 10h18M3 14h18M3 19h18",rect:"M4 6h16v12H4z",text:"M5 5h14M12 5v14M9 19h6",arrow:"M5 19L19 5M10 5h9v9",brush:"M4 18c3 0 3-3 6-3s3 3 6 0 3-6 4-8",range:"M4 4v16M20 4v16M4 12h16M8 9l-4 3 4 3M16 9l4 3-4 3",long:"M4 14h16M4 6h16v14H4z",magnet:"M6 4v7a6 6 0 0012 0V4M6 8h4M14 8h4",pen:"M4 20l4-1L19 8l-3-3L5 16z",lock:"M6 11h12v9H6zM8 11V8a4 4 0 018 0v3",unlock:"M6 11h12v9H6zM8 11V8a4 4 0 017.5-2",eye:"M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12zM12 9.5a2.5 2.5 0 100 5 2.5 2.5 0 000-5z",eyeoff:"M3 3l18 18M10.6 5.1A10 10 0 0112 5c6 0 10 7 10 7a17 17 0 01-3 3.7M6.2 6.6C3.7 8.4 2 12 2 12s4 7 10 7c1.6 0 3-.4 4.3-1",trash:"M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13",list:"M9 6h12M9 12h12M9 18h12M4 6h.01M4 12h.01M4 18h.01",help:"M9.2 9a3 3 0 115 2.2c-1 .8-2.2 1.3-2.2 2.8M12 18h.01",search:"M11 4a7 7 0 100 14 7 7 0 000-14zM20 20l-4-4",camera:"M4 8h3l2-3h6l2 3h3v11H4zM12 10a3 3 0 100 6 3 3 0 000-6z",more:"M5 12h.01M12 12h.01M19 12h.01",plus:"M12 5v14M5 12h14",chev:"M7 10l5 5 5-5",chevr:"M10 7l5 5-5 5",chevl:"M14 7l-5 5 5 5",filter:"M3 5h18l-7 8v6l-4-2v-4z",star:"M12 3.5l2.6 5.3 5.8.8-4.2 4.1 1 5.8L12 16.8l-5.2 2.7 1-5.8-4.2-4.1 5.8-.8z",gear:"M12 9a3 3 0 100 6 3 3 0 000-6zM12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.3 5.3l2.1 2.1M16.6 16.6l2.1 2.1M5.3 18.7l2.1-2.1M16.6 7.4l2.1-2.1",x:"M6 6l12 12M18 6L6 18",up:"M12 19V5M6 11l6-6 6 6",down:"M12 5v14M6 13l6 6 6-6",ind:"M3 17l5-6 4 3 8-9",compare:"M3 17l6-6 4 4 8-8M15 7h6v6",candle:"M8 3v4M8 17v4M6 7h4v10H6zM16 5v3M16 15v4M14 8h4v7h-4z",bar:"M8 4v16M5 8h3M8 15h3M16 4v16M13 7h3M16 13h3",linec:"M3 17l5-5 4 3 8-9",area:"M3 17l5-5 4 3 8-9v15H3z",grip:"M9 6h.01M15 6h.01M9 12h.01M15 12h.01M9 18h.01M15 18h.01",check:"M5 12.5l4.5 4.5L19 7.5",play:"M7 5l12 7-12 7z",copy:"M9 9h11v11H9zM5 15V4h11",edit:"M4 20h4L19 9l-4-4L4 16z",expand:"M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5",dock:"M3 4h18v16H3zM15 4v16",layout:"M3 4h18v16H3zM12 4v16",kbd:"M3 6h18v12H3zM7 10h.01M11 10h.01M15 10h.01M7 14h10",save:"M5 4h11l3 3v13H5zM8 4v5h7",sort:"M7 4v16M3 16l4 4 4-4M17 20V4M13 8l4-4 4 4",clock:"M12 3a9 9 0 100 18 9 9 0 000-18zM12 7v5l3 2",alert:"M12 3l10 18H2zM12 10v4M12 17h.01",refresh:"M20 11a8 8 0 10-2 6M20 4v7h-7",bolt:"M13 2L4 14h7l-1 8 9-12h-7z",home:"M3 11l9-7 9 7v9H3z",undo:"M9 14L4 9l5-5M4 9h11a5 5 0 010 10h-3",log:"M4 20V4M4 20h16M7 16c4 0 6-3 7-6s3-5 6-5",pct:"M19 5L5 19M7 5a2 2 0 100 4 2 2 0 000-4zM17 15a2 2 0 100 4 2 2 0 000-4z",drop:"M12 3c3 4 6 7 6 11a6 6 0 01-12 0c0-4 3-7 6-11z",width:"M4 7h16M4 12h16M4 17h16",dash:"M3 12h3M9 12h3M15 12h3M21 12h0",ext:"M14 4h6v6M20 4l-9 9M18 14v6H4V6h6"};
+function icons(root){root.querySelectorAll('i[data-i]').forEach(e=>{const n=e.dataset.i;const fill=n==='play'||n==='star-f';const d=P[n.replace('-f','')]||'';const s=document.createElementNS('http://www.w3.org/2000/svg','svg');s.setAttribute('viewBox','0 0 24 24');s.setAttribute('class','i'+(e.classList.contains('sm')?' sm':''));if(e.getAttribute('style'))s.setAttribute('style',e.getAttribute('style'));s.innerHTML=`<path d="${d}" ${fill?'fill="currentColor" stroke="none"':''}/>`;if(n==='more'||n==='grip')s.style.strokeWidth='3';e.replaceWith(s)})}
+function rng(s){return()=>{s=(s*16807)%2147483647;return(s-1)/2147483646}}
+function ser(n,seed,start,drift=0.0015,volat=0.022){const r=rng(seed);let p=start;const o=[];for(let i=0;i<n;i++){const op=p;const c=op*(1+(r()-0.5+drift*10)*volat*2);const h=Math.max(op,c)*(1+r()*volat*.6);const l=Math.min(op,c)*(1-r()*volat*.6);o.push({o:op,h,l,c,v:.25+r()*r()*1.6});p=c}return o}
+function ma(a,k){return a.map((_,i)=>{if(i<k-1)return null;let s=0;for(let j=i-k+1;j<=i;j++)s+=a[j].c;return s/k})}
+function css(n){return getComputedStyle(document.querySelector('.mk')).getPropertyValue(n).trim()}
+function draw(svg){const W=svg.clientWidth||svg.parentElement.clientWidth,H=svg.clientHeight||svg.parentElement.clientHeight;const t=svg.dataset.kind,n=+svg.dataset.n||90,seed=+svg.dataset.seed||7,pad=+(svg.dataset.pad||14),drift=+(svg.dataset.drift||0.0015),vol=+(svg.dataset.vol||0.022);const d=ser(n,seed,100,drift,vol);const up=css('--up'),dn=css('--down');svg.setAttribute('viewBox',`0 0 ${W} ${H}`);let g='';
+ const grid=svg.dataset.grid!=='0';if(grid){for(let k=1;k<5;k++)g+=`<line x1="0" x2="${W}" y1="${H*k/5}" y2="${H*k/5}" stroke="${css('--grid')}" />`;for(let k=1;k<6;k++)g+=`<line y1="0" y2="${H}" x1="${W*k/6}" x2="${W*k/6}" stroke="${css('--grid')}" />`}
+ const right=+(svg.dataset.right||16);const step=(W-right)/n,bw=Math.max(1,step*.62);
+ if(t==='price'||t==='candle-only'){const lo=Math.min(...d.map(x=>x.l)),hi=Math.max(...d.map(x=>x.h));const top=+(svg.dataset.top||pad);const y=v=>top+(hi-v)/(hi-lo)*(H-top-pad);
+  d.forEach((b,i)=>{const x=i*step+step/2;const c=b.c>=b.o?up:dn;g+=`<line x1="${x}" x2="${x}" y1="${y(b.h)}" y2="${y(b.l)}" stroke="${c}"/>`;const y1=y(Math.max(b.o,b.c)),y2=y(Math.min(b.o,b.c));g+=`<rect x="${x-bw/2}" y="${y1}" width="${bw}" height="${Math.max(1,y2-y1)}" fill="${c}"/>`});
+  if(t==='price'){[[20,css('--i1')],[60,css('--i2')]].forEach(([k,col])=>{const m=ma(d,k);let p='';m.forEach((v,i)=>{if(v!=null)p+=(p?'L':'M')+(i*step+step/2).toFixed(1)+','+y(v).toFixed(1)});g+=`<path d="${p}" fill="none" stroke="${col}" stroke-width="1.4"/>`});
+   if(svg.dataset.preview){const m=ma(d,20).map((v,i)=>v==null?null:v*1.012);let p='';m.forEach((v,i)=>{if(v!=null)p+=(p?'L':'M')+(i*step+step/2).toFixed(1)+','+y(v).toFixed(1)});g+=`<path d="${p}" fill="none" stroke="${css('--i4')}" stroke-width="1.6" stroke-dasharray="4 3"/>`}
+   const last=d[n-1].c;g+=`<line x1="0" x2="${W}" y1="${y(last)}" y2="${y(last)}" stroke="${up}" stroke-dasharray="2 3" opacity=".7"/>`;svg.dataset.lasty=y(last)}
+  if(svg.dataset.trend){const [a,b]=svg.dataset.trend.split(',').map(Number);const xa=a*step+step/2,xb=b*step+step/2;const ya=y(d[a].l)+4,yb=y(d[b].l)+4;const ext=(W-right)-xb;const yx=yb+(yb-ya)/(xb-xa)*ext;g+=`<line x1="${xa}" y1="${ya}" x2="${W-right}" y2="${yx}" stroke="${css('--ac')}" stroke-width="2"/>`;[[xa,ya],[xb,yb]].forEach(([px,py])=>g+=`<circle cx="${px}" cy="${py}" r="4.5" fill="${css('--cbg')}" stroke="${css('--ac')}" stroke-width="2"/>`);svg.dataset.tx=xb;svg.dataset.ty=yb}
+  if(svg.dataset.hline){const v=lo+(hi-lo)*(+svg.dataset.hline);g+=`<line x1="0" x2="${W-right}" y1="${y(v)}" y2="${y(v)}" stroke="${css('--i2')}" stroke-width="1.5"/>`}
+ }
+ if(t==='volume'){const mx=Math.max(...d.map(x=>x.v));d.forEach((b,i)=>{const x=i*step+step/2;const h=(b.v/mx)*(H-pad-4);g+=`<rect x="${x-bw/2}" y="${H-h}" width="${bw}" height="${h}" fill="${b.c>=b.o?'rgba(255,116,126,.42)':'rgba(115,168,255,.42)'}"/>`})}
+ if(t==='fline'){const r=rng(seed);const k=+svg.dataset.q||9;const pts=[];let v=.5;for(let i=0;i<k;i++){v=Math.min(.95,Math.max(.08,v+(r()-.45)*.35));pts.push(v)}const sx=(W-right-30)/(k-1);let p='';pts.forEach((v,i)=>{const x=30+i*sx,yy=pad+(1-v)*(H-2*pad);p+=(i?'L':'M')+x+','+yy;g+=`<circle cx="${x}" cy="${yy}" r="2.6" fill="${css('--cbg')}" stroke="${css('--i1')}" stroke-width="1.4"/>`});g=g.replace(/^/,`<path d="${p}" fill="none" stroke="${css('--i1')}" stroke-width="1.5"/>`)}
+ if(t==='fbar'){const r=rng(seed);const k=+svg.dataset.q||9;const sx=(W-right-30)/k;const z=H*.25;for(let i=0;i<k;i++){const v=(r()*.8+.2)*(H-z-pad);g+=`<rect x="${30+i*sx+sx*.2}" y="${z}" width="${sx*.6}" height="${v}" fill="rgba(115,168,255,.5)"/>`}g+=`<line x1="0" x2="${W}" y1="${z}" y2="${z}" stroke="${css('--line')}"/>`}
+ if(t==='spark'){const ys=d.map(x=>x.c);const lo=Math.min(...ys),hi=Math.max(...ys);const col=ys[n-1]>=ys[0]?up:dn;let p='';ys.forEach((v,i)=>p+=(i?'L':'M')+(i*(W-2)/(n-1)+1).toFixed(1)+','+(2+(hi-v)/(hi-lo)*(H-4)).toFixed(1));g+=`<path d="${p}" fill="none" stroke="${col}" stroke-width="1.3"/>`;if(svg.dataset.fill){g+=`<path d="${p}L${W-1},${H}L1,${H}Z" fill="${col}" opacity=".12"/>`}}
+ svg.innerHTML=g}
+function fit(){document.querySelectorAll('.stage-wrap').forEach(w=>{const s=w.firstElementChild;const W=+s.dataset.w,H=+s.dataset.h;s.style.width=W+'px';s.style.height=H+'px';const k=Math.min(1,w.clientWidth/W);s.style.transform=`scale(${k})`;w.style.height=(H*k)+'px';w.style.maxWidth=(W+2)+'px'})}
+function boot(){icons(document);fit();document.querySelectorAll('svg[data-kind]').forEach(draw);document.querySelectorAll('[data-at-trend]').forEach(e=>{const s=document.querySelector(e.dataset.atTrend);if(s&&s.dataset.tx){e.style.left=(+s.dataset.tx+ +(e.dataset.dx||0))+'px';e.style.top=(+s.dataset.ty+ +(e.dataset.dy||0))+'px'}});document.querySelectorAll('[data-at-last]').forEach(e=>{const s=e.closest('.pane').querySelector('svg[data-lasty]');if(s)e.style.top=s.dataset.lasty+'px'});new ResizeObserver(fit).observe(document.body)}
+document.readyState==='loading'?document.addEventListener('DOMContentLoaded',boot):boot();
+</script></body></html>

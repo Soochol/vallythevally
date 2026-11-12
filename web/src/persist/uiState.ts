@@ -1,3 +1,5 @@
+import { isPeriod } from "../lib/symbol";
+import type { Period } from "../api/generated/Period";
 import type { SymbolCode } from "../api/generated/SymbolCode";
 import type { UiState } from "../api/generated/UiState";
 import { DEFAULT_WATCH_COLUMNS, WATCH_COLUMNS, type WatchColumn } from "../lib/watchlist";
@@ -15,6 +17,7 @@ export interface UiPrefs {
   activeWatchlistId: string | null;
   watchColumns: readonly WatchColumn[];
   drawing: DrawingPrefs;
+  pinnedMinutes: Period[];
 }
 
 export type UiExtra = Record<string, unknown>;
@@ -27,6 +30,7 @@ export const DEFAULT_UI_PREFS: UiPrefs = {
   activeWatchlistId: null,
   watchColumns: DEFAULT_WATCH_COLUMNS,
   drawing: DEFAULT_DRAWING_PREFS,
+  pinnedMinutes: [],
 };
 
 const isStringArray = (x: unknown): x is string[] => Array.isArray(x) && x.every((s) => typeof s === "string");
@@ -38,7 +42,7 @@ export function parseUiState(raw: unknown): { prefs: UiPrefs; extra: UiExtra } {
     console.warn("UiState가 객체가 아니어서 기본값으로 엽니다", raw);
     return { prefs: DEFAULT_UI_PREFS, extra: {} };
   }
-  const { lastLayoutId, theme, watchCollapsed, recentSymbols, activeWatchlistId, watchColumns, drawing, revision: _revision, ...extra } = raw as Record<string, unknown>;
+  const { lastLayoutId, theme, watchCollapsed, recentSymbols, activeWatchlistId, watchColumns, drawing, pinnedMinutes, revision: _revision, ...extra } = raw as Record<string, unknown>;
   const bad: string[] = [];
   const pick = <T>(key: string, value: unknown, ok: (x: unknown) => x is T, fallback: T, missingOk = false): T => {
     if (ok(value)) return value;
@@ -54,6 +58,7 @@ export function parseUiState(raw: unknown): { prefs: UiPrefs; extra: UiExtra } {
     activeWatchlistId: pick("activeWatchlistId", activeWatchlistId, (x): x is string | null => x === null || typeof x === "string", null, true),
     watchColumns: sortColumns(pick("watchColumns", watchColumns, isColumns, DEFAULT_WATCH_COLUMNS, true)),
     drawing: parseDrawingPrefs(drawing),
+    pinnedMinutes: Array.isArray(pinnedMinutes) ? [...new Set(pinnedMinutes.filter((p): p is Period => typeof p === "string" && isPeriod(p) && p.endsWith("m")))] : [],
   };
   if (bad.length) console.warn(`UiState의 ${bad.join(", ")} 값이 틀려 기본값으로 엽니다`, raw);
   return { prefs, extra };

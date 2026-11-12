@@ -1,3 +1,6 @@
+import { domSelect } from "../../features/menu/domSelect";
+import { mountLayer } from "../../features/overlay/topLayer";
+import { iconMarkup, type MarkupIcon } from "../../features/icons";
 import { indicatorErrorText, type IndicatorRow } from "./layer";
 
 export type IndicatorCommand = "edit" | "toggle" | "remove" | "up" | "down" | "refresh";
@@ -20,7 +23,9 @@ interface RowEls {
   detail: HTMLDetailsElement;
   summary: HTMLElement;
   text: HTMLElement;
-  select: HTMLSelectElement;
+  select: HTMLButtonElement;
+  reportOptions: { label: string; text: string }[];
+  dispose(): void;
   refresh: HTMLButtonElement;
   reports: NonNullable<IndicatorRow["detail"]>["reports"] | null;
 }
@@ -48,6 +53,7 @@ export class IndicatorLegend {
       const key = row.panel ? "panel" : "price";
       let r = this.rows.get(row.id);
       if (r && r.key !== key) {
+        r.dispose();
         r.root.remove();
         r = undefined;
       }
@@ -67,13 +73,14 @@ export class IndicatorLegend {
     }
     for (const [id, r] of this.rows) {
       if (seen.has(id)) continue;
+      r.dispose();
       r.root.remove();
       this.rows.delete(id);
     }
   }
 
   dispose(): void {
-    for (const r of this.rows.values()) r.root.remove();
+    for (const r of this.rows.values()) { r.dispose(); r.root.remove(); }
     this.rows.clear();
     this.priceBox.remove();
   }
@@ -86,28 +93,36 @@ export class IndicatorLegend {
     const values = el("span", "flex gap-1.5 font-medium");
     const badge = el("span", "rounded-[9px] border border-line px-1.5 text-xs text-text-3");
     const tools = el("span", "flex gap-px opacity-0 group-hover:opacity-100 group-focus-within:opacity-100");
-    const button = (text: string, label: string, command: IndicatorCommand) => {
-      const b = el("button", BTN, text);
+    const button = (icon: MarkupIcon, label: string, command: IndicatorCommand) => {
+      const b = el("button", BTN);
+      b.innerHTML = iconMarkup(icon);
       b.type = "button";
       b.title = label;
+      b.dataset.indicatorCommand = command;
       b.addEventListener("click", () => this.onCommand(id, command));
       tools.append(b);
       return b;
     };
-    const up = key === "panel" ? button("↑", "패널 위로", "up") : null;
-    const down = key === "panel" ? button("↓", "패널 아래로", "down") : null;
-    button("⚙", "설정", "edit");
-    const toggle = button("◉", "숨기기", "toggle");
-    button("✕", key === "panel" ? "패널 닫기" : "지우기", "remove");
+    const up = key === "panel" ? button("up", "패널 위로", "up") : null;
+    const down = key === "panel" ? button("down", "패널 아래로", "down") : null;
+    button("gear", "설정", "edit");
+    const toggle = button("eye", "숨기기", "toggle");
+    button("close", key === "panel" ? "패널 닫기" : "지우기", "remove");
     const detail = el("details", "relative min-w-0 text-text-2");
-    detail.addEventListener("toggle", () => { root.style.zIndex = detail.open ? "20" : "4"; });
     const summary = el("summary", "max-w-[18ch] cursor-pointer truncate text-xs max-md:max-w-[10ch]", "자료·갱신");
     summary.setAttribute("aria-label", "재무자료와 갱신 상태");
-    const box = el("div", "absolute right-0 top-6 z-20 max-h-[45vh] w-[min(440px,65vw)] overflow-auto whitespace-normal rounded-m border border-line bg-surface p-3 shadow-dialog");
-    const select = el("select", "mb-2 w-full bg-surface text-s");
+    const box = el("div", "ui-popover w-[min(440px,85vw)] whitespace-normal p-3");
+    let cleanup: (() => void) | null = null;
+    const syncDetail = () => {
+      if (detail.open && detail.isConnected) {
+        cleanup ??= mountLayer(box, { anchor: () => summary.getBoundingClientRect(), trigger: summary, onClose: () => { detail.open = false; syncDetail(); } });
+      } else { cleanup?.(); cleanup = null; }
+    };
+    summary.addEventListener("click", (event) => { event.preventDefault(); detail.open = !detail.open; syncDetail(); });
+    detail.addEventListener("toggle", syncDetail);
+    const select = el("button", "mb-2 w-full bg-surface text-s");
     select.setAttribute("aria-label", "보고기간 자료");
     const text = el("p", "whitespace-pre-wrap text-xs");
-    select.addEventListener("change", () => { text.textContent = select.selectedOptions[0]?.dataset.detail ?? ""; });
     const refresh = el("button", "btn-primary mt-2", "재무자료 새로고침·재시도");
     refresh.type = "button";
     refresh.title = "재무자료 새로고침·재시도";
@@ -115,7 +130,14 @@ export class IndicatorLegend {
     box.append(select, text, refresh);
     detail.append(summary, box);
     root.append(swatch, name, values, badge, tools, detail);
-    return { root, swatch, name, values, badge, toggle, up, down, key, detail, summary, text, select, refresh, reports: null };
+    const row: RowEls = { root, swatch, name, values, badge, toggle, up, down, key, detail, summary, text, select, refresh, reports: null, reportOptions: [], dispose: () => {} };
+    const disposeSelect = domSelect(select, () => row.reportOptions.map((option, i) => ({ label: option.label, value: String(i) })), (value) => {
+      select.dataset.value = value;
+      const option = row.reportOptions[Number(value)];
+      select.textContent = option?.label ?? ""; text.textContent = option?.text ?? "";
+    });
+    row.dispose = () => { cleanup?.(); disposeSelect(); };
+    return row;
   }
 
   private fill(r: RowEls, row: IndicatorRow): void {
@@ -128,19 +150,14 @@ export class IndicatorLegend {
       r.root.title = row.detail.text;
       if (r.reports !== row.detail.reports) {
         r.reports = row.detail.reports;
-        const selected = r.select.value;
-        r.select.replaceChildren(...[{ label: "차트에서 가리킨 보고기간", text: row.detail.text }, ...row.detail.reports].map((report, i) => {
-          const option = el("option", "", report.label);
-          option.value = String(i);
-          option.dataset.detail = report.text;
-          return option;
-        }));
-        r.select.value = selected || "0";
-        r.text.textContent = r.select.selectedOptions[0]?.dataset.detail ?? row.detail.text;
+        r.reportOptions = [{ label: "차트에서 가리킨 보고기간", text: row.detail.text }, ...row.detail.reports];
+        if (!r.select.dataset.value) r.select.dataset.value = "0";
       }
-      const current = r.select.options[0];
-      if (current) current.dataset.detail = row.detail.text;
-      if (r.select.value === "0") r.text.textContent = row.detail.text;
+      const current = r.reportOptions[0];
+      if (current) current.text = row.detail.text;
+      const selected = r.reportOptions[Number(r.select.dataset.value)] ?? current;
+      r.select.textContent = selected?.label ?? "";
+      r.text.textContent = selected?.text ?? row.detail.text;
     }
     const dim = row.state !== "ok" && row.state !== "pending";
     r.root.classList.toggle("opacity-60", dim);
@@ -158,8 +175,9 @@ export class IndicatorLegend {
     r.badge.textContent = badge;
     r.badge.hidden = badge === "";
     const hidden = row.state === "hidden";
-    r.toggle.textContent = hidden ? "◎" : "◉";
+    const icon = hidden ? "eyeOff" : "eye";
+    if (r.toggle.dataset.icon !== icon) { r.toggle.innerHTML = iconMarkup(icon); r.toggle.dataset.icon = icon; }
     r.toggle.title = hidden ? "보이기" : "숨기기";
-    r.root.querySelectorAll("button").forEach((b) => b.setAttribute("aria-label", `${row.name} ${b.title}`));
+    r.root.querySelectorAll<HTMLButtonElement>("button[data-indicator-command]").forEach((b) => b.setAttribute("aria-label", `${row.name} ${b.title}`));
   }
 }

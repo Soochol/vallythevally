@@ -5,7 +5,7 @@ import { ApiRequestError, deleteJson, getJson, putJson } from "../../api/http";
 import type { SaveState } from "../../persist/saver";
 import { usePersistStore } from "../../stores/persist";
 import { useSelectionStore } from "../../stores/selection";
-import { EMPTY_HISTORY, planRedo, planUndo, record, sameContent, type History } from "./history";
+import { EMPTY_HISTORY, historyUndo, planRedo, planUndo, record, sameContent, type History } from "./history";
 import * as queue from "./outbox";
 import { compareIntent, DrawingJournal } from "./journal";
 import { opId, type Drawing, type DrawingBody, type DrawingOp } from "./types";
@@ -104,6 +104,12 @@ export class DrawingSync {
     this.saveFailure = null;
     this.updateSave(); this.pump();
     return staged.length > 0;
+  }
+
+  commitWithUndo(slot: number, ops: readonly DrawingOp[], message: string) {
+    if (!this.commit(slot, ops)) return;
+    const action = historyUndo(() => this.history(slot), () => this.undo(slot));
+    useSelectionStore.getState().showToast(message, { ...action, subscribe: this.subscribe });
   }
 
   undo(slot: number, redo = false) {
