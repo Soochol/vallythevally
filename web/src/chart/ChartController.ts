@@ -5,11 +5,13 @@ import {
   type DeepPartial,
   type IChartApi,
   LineStyle,
+  MismatchDirection,
   PriceScaleMode,
   type TickMarkType,
   type Time,
   type UTCTimestamp,
 } from "lightweight-charts";
+import { axisPriceFormat, type AxisGeometry } from "./axisFormat";
 import { fetchBarsPage } from "../api/bars";
 import type { Bar } from "../api/generated/Bar";
 import type { FinancialsPage } from "../api/generated/FinancialsPage";
@@ -138,7 +140,7 @@ export class ChartController {
     this.chart.chartElement().addEventListener("wheel", this.onWheel, { capture: true, passive: false });
     // 주 시리즈를 바꿔 붙이는 동안 가격 pane이 비어도 라이브러리가 지우지 않게 한다. 지우면 지표 패널이 0번이 된다.
     this.chart.panes()[0]?.setPreserveEmptyPane(true);
-    this.main = addMainSeries(this.chart, "candle", this.tokens, false, () => this.lastPriceValues());
+    this.main = addMainSeries(this.chart, "candle", this.tokens, false, this.priceAxisGeometry());
     this.legend = new Legend(el);
     this.indicators = new IndicatorLayer(
       {
@@ -214,6 +216,7 @@ export class ChartController {
       this.updateIntradayEnd();
       this.compare.coverFrom(this.leftT());
       if (this.view?.settings.compare.length) this.renderLegend();
+      this.scheduleFrame();
     });
     // 캔버스 글자는 글꼴을 다 받은 뒤 다시 그려야 Pretendard로 보인다.
     void document.fonts?.ready.then(() => {
@@ -242,7 +245,7 @@ export class ChartController {
     if (prev?.period !== next.period) this.chart.applyOptions({ timeScale: { timeVisible: isIntraday(next.period) } });
     if (prev?.symbol !== next.symbol || prev.venue !== next.venue || prev.period !== next.period) {
       if (prev && isIndexCode(prev.symbol) !== isIndex) {
-        this.main.api.applyOptions({ priceFormat: priceFormat(isIndex, () => this.lastPriceValues()) });
+        this.main.api.applyOptions({ priceFormat: priceFormat(isIndex, this.priceAxisGeometry()) });
         this.indicators.refreshPriceFormat();
       }
       this.history = null;
@@ -368,9 +371,21 @@ export class ChartController {
     if (timeScale.options().rightBarStaysOnScroll !== rightBarStaysOnScroll) timeScale.applyOptions({ rightBarStaysOnScroll });
   };
 
-  private lastPriceValues(): number[] {
-    const last = this.main.api.lastValueData(false);
-    return last.noData ? [] : [last.price];
+  private priceAxisGeometry(percent = false): AxisGeometry {
+    return {
+      toCoordinate: (value) => {
+        if (!percent) return this.main.api.priceToCoordinate(value);
+        const range = this.chart.timeScale().getVisibleLogicalRange();
+        const first = range ? this.main.api.dataByIndex(Math.floor(range.from), MismatchDirection.NearestRight) : null;
+        const base = first && "close" in first ? first.close : first && "value" in first ? first.value : null;
+        return typeof base !== "number" ? null : this.main.api.priceToCoordinate(base + value / 100 * Math.abs(base));
+      },
+      lastCoordinates: () => {
+        const last = this.main.api.lastValueData(false);
+        const y = last.noData ? null : this.main.api.priceToCoordinate(last.price);
+        return y === null ? [] : [y];
+      },
+    };
   }
 
   private axisWidth(): number {
@@ -379,6 +394,7 @@ export class ChartController {
 
   private chartOptions(): DeepPartial<ChartOptions> {
     const t = this.tokens;
+    const percentage = axisPriceFormat("%", 0.01, this.priceAxisGeometry(true));
     const crossLine = { color: t.crosshair, style: LineStyle.Dashed, width: 1 as const, labelBackgroundColor: t.raised };
     return {
       layout: {
@@ -401,6 +417,8 @@ export class ChartController {
       },
       localization: {
         locale: "ko-KR",
+        percentageFormatter: percentage.formatter,
+        tickmarksPercentageFormatter: percentage.tickmarksFormatter,
         timeFormatter: (time: Time) => formatBarTime(fromChartTime(time as UTCTimestamp), this.period()),
       },
     };
@@ -414,7 +432,7 @@ export class ChartController {
     this.indicators.flush();
     this.withDataGuard(() => preserveTimeRange(this.chart.timeScale(), this.period(), () => {
       this.chart.removeSeries(this.main.api);
-      this.main = addMainSeries(this.chart, this.view?.settings.style ?? "candle", this.tokens, isIndex, () => this.lastPriceValues());
+      this.main = addMainSeries(this.chart, this.view?.settings.style ?? "candle", this.tokens, isIndex, this.priceAxisGeometry());
       this.extensions.forEach((ext) => ext.reattach());
       this.setBars(this.bars);
     }));
@@ -474,6 +492,7 @@ export class ChartController {
     this.flushPendingDraw();
     this.compare.flush(this.bars);
     this.indicators.flush();
+    for (const pane of this.chart.panes()) pane.priceScale("right").applyOptions({});
     this.renderLegend();
   }
 

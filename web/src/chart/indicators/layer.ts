@@ -7,7 +7,7 @@ import {
   type PriceFormat,
   PriceScaleMode,
 } from "lightweight-charts";
-import { axisPriceFormat, financialAxisUnit } from "../axisFormat";
+import { axisPriceFormat, financialAxisUnit, type AxisGeometry } from "../axisFormat";
 import type { Bar } from "../../api/generated/Bar";
 import type { FinancialsPage } from "../../api/generated/FinancialsPage";
 import { adjacentBucket, financialBuckets, financialDetail, financialFailure, financialReason, checkedTime, financialSummary, financialValue, reportingPeriod } from "../financials";
@@ -460,15 +460,22 @@ export class IndicatorLayer {
       const metric = config.spec.kind;
       const currencies = new Set(this.financials?.series.find((series) => series.metric === metric)?.points.flatMap((p) => p.currency ? [p.currency] : []));
       const currency = currencies.size === 1 ? [...currencies][0] ?? null : "원문 통화";
-      return axisPriceFormat(financialAxisUnit(metric, currency), 0.01, () => this.lastAxisValues(config));
+      return axisPriceFormat(financialAxisUnit(metric, currency), 0.01, this.axisGeometry(config));
     }
     const unit = config.spec.kind === "volume" ? "volume" : config.spec.kind === "macd" || config.spec.kind === "rsi" || config.spec.kind === "stochSlow" || this.host.isIndex() ? "index" : "price";
-    return axisPriceFormat(unit, 0.01, () => this.lastAxisValues(config));
+    return axisPriceFormat(unit, 0.01, this.axisGeometry(config));
   }
 
-  private lastAxisValues(config: IndicatorConfig): number[] {
-    return [...this.shown.values()].filter((s) => s.config.visible && s.config.panel === config.panel && s.config.panel !== "price")
-      .flatMap((s) => s.lines.flatMap((line) => { const last = line.series.lastValueData(false); return last.noData ? [] : [last.price]; }));
+  private axisGeometry(config: IndicatorConfig): AxisGeometry {
+    return {
+      toCoordinate: (value) => this.shown.get(config.id)?.lines[0]?.series.priceToCoordinate(value) ?? null,
+      lastCoordinates: () => [...this.shown.values()].filter((s) => s.config.visible && s.config.panel === config.panel && s.config.panel !== "price")
+        .flatMap((s) => s.lines.flatMap((line) => {
+          const last = line.series.lastValueData(false);
+          const y = last.noData ? null : line.series.priceToCoordinate(last.price);
+          return y === null ? [] : [y];
+        })),
+    };
   }
 
   private format(config: IndicatorConfig, v: number): string {

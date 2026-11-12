@@ -8,7 +8,7 @@ import {
   type PriceFormat,
 } from "lightweight-charts";
 import type { Bar } from "../api/generated/Bar";
-import { axisPriceFormat } from "./axisFormat";
+import { axisPriceFormat, type AxisGeometry } from "./axisFormat";
 import type { ChartStyle } from "./settings";
 import type { ThemeTokens } from "./theme";
 import { toChartTime } from "./time";
@@ -20,8 +20,8 @@ export type MainSeries =
   | { style: "line"; api: ISeriesApi<"Line"> }
   | { style: "area"; api: ISeriesApi<"Area"> };
 
-export function priceFormat(isIndex: boolean, lastValues: () => number[] = () => []): PriceFormat {
-  return axisPriceFormat(isIndex ? "index" : "price", isIndex ? 0.01 : 1, lastValues);
+export function priceFormat(isIndex: boolean, geometry?: AxisGeometry): PriceFormat {
+  return axisPriceFormat(isIndex ? "index" : "price", isIndex ? 0.01 : 1, geometry);
 }
 
 function colors(style: ChartStyle, t: ThemeTokens) {
@@ -37,8 +37,8 @@ function colors(style: ChartStyle, t: ThemeTokens) {
   }
 }
 
-export function addMainSeries(chart: IChartApi, style: ChartStyle, t: ThemeTokens, isIndex: boolean, lastValues: () => number[] = () => []): MainSeries {
-  const common = { priceFormat: priceFormat(isIndex, lastValues) };
+export function addMainSeries(chart: IChartApi, style: ChartStyle, t: ThemeTokens, isIndex: boolean, geometry?: AxisGeometry): MainSeries {
+  const common = { priceFormat: priceFormat(isIndex, geometry) };
   switch (style) {
     case "candle":
       return { style, api: chart.addSeries(CandlestickSeries, { ...common, ...colors(style, t) }) };
