@@ -1951,7 +1951,7 @@ async fn intraday_no_trades_missing_other_dates_and_unreadable_rows_remain_disti
         let mut no_trades = summary_row("300000", today, 0, 0, 0, 0);
         for key in ["open_pric", "high_pric", "low_pric", "cntr_tm"] { no_trades[key] = "".into(); }
         for key in ["open_pric", "high_pric", "low_pric"] { no_trades[key] = "0".into(); }
-        let mut old = no_trades.clone(); old["stk_cd"] = "300001".into(); old["dt"] = today.add_days(-1).yyyymmdd().into();
+        let mut old = no_trades.clone(); old["stk_cd"] = "300001".into(); old["dt"] = today.add_days(-2).yyyymmdd().into();
         let mut unreadable = no_trades.clone(); unreadable["stk_cd"] = "300002".into(); unreadable["dt"] = "bad".into();
         let mut halted = no_trades.clone(); halted["stk_cd"] = "300004".into(); halted["cur_prc"] = "100".into();
         session._fake.set_quote_rows(vec![no_trades, old, unreadable, halted]);
@@ -2000,13 +2000,15 @@ async fn intraday_adjustment_and_same_day_history_updates_abort_the_whole_result
     session._fake.set_quote_rows(vec![adjusted]);
     let (status, body) = session.api.run(&every(vec![])).await;
     assert_eq!((status, body["error"]["reason"].clone()), (409, json!("data_changed")));
+    drop(session);
+    let session = intraday_session(today, 1, "1200").await;
     session._fake.set_quote_rows(vec![summary_row("300000", today, 120, 150, 3000, 17)]);
     session._fake.delay("ka10095", Duration::from_millis(500));
-    let seen = session._fake.calls().len();
+    let seen = session._fake.calls().iter().filter(|call| call.api_id == "ka10095").count();
     let request = every(vec![]);
     let running = session.api.run(&request);
     let update = async {
-        while session._fake.calls().len() == seen { tokio::time::sleep(Duration::from_millis(5)).await; }
+        while session._fake.calls().iter().filter(|call| call.api_id == "ka10095").count() == seen { tokio::time::sleep(Duration::from_millis(5)).await; }
         session.api.update().await;
     };
     let ((status, body), _) = tokio::join!(running, update);
@@ -2046,5 +2048,264 @@ async fn intraday_backfill_committing_during_collection_invalidates_the_same_upd
     assert_eq!((status, body["error"]["reason"].clone()), (409, json!("data_changed")));
     assert!(body["rows"].is_null());
     assert_eq!(api.settled().await["fullHistory"], json!({"done": 1, "total": 1}));
+    server.stop().await;
+}
+
+fn review_evidence(name: &str, value: &Value) {
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/review-fix-223");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join(format!("{name}.json")), serde_json::to_vec_pretty(value).unwrap()).unwrap();
+    eprintln!("{name}: {value}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn regression_223_previous_date_on_closed_and_preopen_days() {
+    let mut outcomes = Vec::new();
+    for (today, hhmm) in [(day(2026, 11, 9), "0800"), (day(2026, 11, 14), "1200"), (day(2026, 11, 9), "1200"), (day(2026, 11, 9), "0830")] {
+        let session = intraday_session(today, 1, hhmm).await;
+        let previous = *last_open_days(1, today.add_days(-1)).last().unwrap();
+        session._fake.set_quote_rows(vec![summary_row("300000", previous, 100, 100, 1000, 1)]);
+        let result = session.api.result(&every(vec![])).await;
+        if hhmm == "0800" || today.weekday() == Weekday::Sat {
+            assert_eq!(result["missingSummary"], 0);
+            assert_eq!(row(&result, "300000")["latestBarDate"], previous.to_string());
+            assert_eq!(row(&result, "300000")["provisional"], false);
+        } else {
+            assert_eq!(result["missingSummary"], 1);
+            assert_eq!(result["rows"], json!([]));
+        }
+        outcomes.push(json!({"today": today.to_string(), "hhmm": hhmm, "quoteDate": previous.to_string(), "result": result}));
+    }
+    review_evidence("previous-date", &json!(outcomes));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn regression_223_adjustment_normal_update_recovers() {
+    let today = day(2026, 11, 9);
+    let days = last_open_days(20, today.add_days(-1));
+    let initial = KrxMarket { days: days.clone(), stocks: vec![stock("300000", priced(&days, |_| 100)), stock("300001", priced(&days, |_| 100))] };
+    let Loaded { _fake: fake, _dir: dir, _server: server, .. } = loaded(initial).await;
+    server.stop().await;
+    let mut split = stock("300001", priced(&[days.clone(), vec![today]].concat(), |_| 50));
+    split.market_code = "10".into();
+    fake.set_krx_market(KrxMarket { days: [days.clone(), vec![today]].concat(), stocks: vec![stock("300000", priced(&[days.clone(), vec![today]].concat(), |_| 100)), split] });
+    let mut adjusted = summary_row("300001", today, 50, 50, 1000, 1);
+    adjusted["open_pric"] = "50".into(); adjusted["low_pric"] = "50".into(); adjusted["base_pric"] = "50".into();
+    fake.set_quote_rows(vec![summary_row("300000", today, 100, 100, 1000, 1), adjusted]);
+    let server = boot(&fake, dir.path(), &at(today, "1200"));
+    let api = Api::of(&server).await;
+    let screen = lines(vec![], &["kospi"]);
+    let before = api.run(&screen).await;
+    api.update().await; let updated = api.settled().await;
+    let after = api.run(&screen).await;
+    assert_eq!((before.0, after.0), (409, 200));
+    assert_eq!(after.1["rows"].as_array().unwrap().len(), 1);
+    assert_eq!(api.post("update", json!({"full": true})).await.0, 200);
+    let full = api.settled().await;
+    let recovered = api.run(&screen).await;
+    assert_eq!(recovered.0, 200, "{recovered:?}");
+    assert_eq!(recovered.1["rows"].as_array().unwrap().len(), 1);
+    review_evidence("adjustment-update", &json!({"before": before, "normalUpdate": updated, "afterNormalUpdate": after, "fullUpdate": full, "afterFullUpdate": recovered}));
+    server.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn regression_223_withheld_stock_does_not_block_full_refetch() {
+    let today = day(2026, 11, 6);
+    let days = last_open_days(20, today);
+    let mut withheld = stock("300001", priced(&days, |_| 100));
+    withheld.daily = DailyAnswer::EmptyRow;
+    withheld.market_code = "10".into();
+    let session = loaded(KrxMarket { days: days.clone(), stocks: vec![stock("300000", priced(&days, |_| 100)), withheld] }).await;
+    let screen = lines(vec![], &["kospi"]);
+    let before = session.api.result(&screen).await;
+    assert_eq!(before["rows"].as_array().unwrap().len(), 1);
+    assert_eq!(session.api.post("update", json!({"full": true})).await.0, 200);
+    let full = session.api.settled().await;
+    let after = session.api.run(&screen).await;
+    session.api.update().await; let normal = session.api.settled().await;
+    let repeated = session.api.run(&screen).await;
+    assert_eq!((after.0, repeated.0), (200, 200));
+    assert_eq!(after.1["rows"].as_array().unwrap().len(), 1);
+    review_evidence("withheld-refetch", &json!({"before": before, "fullUpdate": full, "afterFullUpdate": after, "normalUpdate": normal, "afterNormalUpdate": repeated}));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn regression_223_first_listing_day_uses_overlay_for_history_readiness() {
+    let today = day(2026, 11, 9);
+    let days = last_open_days(20, today.add_days(-1));
+    let Loaded { _fake: fake, _dir: dir, _server: server, .. } = loaded(KrxMarket { days: days.clone(), stocks: vec![stock("300000", priced(&days, |_| 100))] }).await;
+    server.stop().await;
+    fake.set_krx_market(KrxMarket { days: [days, vec![today]].concat(), stocks: vec![stock("300000", vec![bar(today, 100, 1000)]), stock("300001", vec![bar(today, 100, 1000)])] });
+    fake.set_quote_rows(vec![summary_row("300000", today, 100, 100, 1000, 1), summary_row("300001", today, 100, 100, 1000, 1)]);
+    let server = boot(&fake, dir.path(), &at(today, "1200"));
+    let api = Api::of(&server).await;
+    api.update().await; api.settled().await;
+    let all = api.result(&every(vec![])).await;
+    let one_bar = api.result(&every(vec![value_range("D", 1, "close", Some(100.0), Some(100.0))])).await;
+    assert_eq!(all["universe"], 2);
+    assert_eq!(all["excluded"]["listedTooShort"], 0);
+    assert_eq!(one_bar["excluded"]["historyShort"], 0);
+    assert_eq!(row(&all, "300001")["changeRate"], Value::Null);
+    assert_eq!(row(&one_bar, "300001")["latestBarDate"], today.to_string());
+    review_evidence("new-listing", &json!({"noConditions": all, "oneBarCondition": one_bar}));
+    server.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn regression_223_new_generation_cannot_join_old_collection() {
+    let today = day(2026, 11, 9);
+    let days = last_open_days(20, today.add_days(-1));
+    let Loaded { _fake: fake, _dir: dir, _server: server, .. } = loaded(KrxMarket { days: days.clone(), stocks: vec![stock("300000", priced(&days, |_| 100))] }).await;
+    server.stop().await;
+    fake.set_krx_market(KrxMarket { days: [days.clone(), vec![today]].concat(), stocks: vec![stock("300000", priced(&[days.clone(), vec![today]].concat(), |_| 100))] });
+    let server = boot(&fake, dir.path(), &at(today, "1200"));
+    let api = Api::of(&server).await;
+    let old_quote = summary_row("300000", today, 100, 100, 1000, 1);
+    fake.script("ka10095", vec![fake_kiwoom::ScriptedReply { status: 200, body: json!({"return_code": 0, "atn_stk_infr": [old_quote]}), delay: Duration::from_secs(5) }]);
+    let seen = fake.calls().iter().filter(|c| c.api_id == "ka10095").count();
+    let screen = every(vec![]);
+    let during = async {
+        for _ in 0..1000 {
+            if fake.calls().iter().filter(|c| c.api_id == "ka10095").count() > seen { break }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+        fake.set_krx_market(KrxMarket { days: [days.clone(), vec![today]].concat(), stocks: vec![stock("300000", priced(&[days.clone(), vec![today]].concat(), |_| 90))] });
+        assert_eq!(api.post("update", json!({"full": true})).await.0, 200);
+        let updated = api.settled().await;
+        let second = api.run(&screen).await;
+        (updated, second)
+    };
+    let (first, (updated, second)) = tokio::join!(api.run(&screen), during);
+    let fresh = api.run(&screen).await;
+    review_evidence("generation-join", &json!({"originalRun": first, "fullUpdate": updated, "joinedAfterUpdate": second, "freshAfterCompletion": fresh, "summaryRequests": fake.calls().iter().filter(|c| c.api_id == "ka10095").count() - seen}));
+    assert_eq!(first.0, 409);
+    assert_eq!(second.0, 409);
+    assert_eq!(second.1["error"]["reason"], "data_changed");
+    assert_eq!(price_and_change(&fresh.1, "300000"), (json!(90.0), json!(0.0)));
+    server.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn regression_223_closed_day_evidence_never_hides_missing_rows_or_conflicting_today_trades() {
+    for (today, hhmm) in [(day(2026, 11, 9), "0800"), (day(2026, 11, 14), "1200")] {
+        let session = intraday_session(today, 3, hhmm).await;
+        let previous = last_open_days(1, today.add_days(-1))[0];
+        let mut unreadable = summary_row("300001", previous, 100, 100, 1000, 1);
+        unreadable["cur_prc"] = "bad".into();
+        session._fake.set_quote_rows(vec![summary_row("300000", previous, 100, 100, 1000, 1), unreadable]);
+        let result = session.api.result(&every(vec![])).await;
+        assert_eq!(result["missingSummary"], 2);
+        assert_eq!(hits(&result), [hit("300000", previous)]);
+        session._fake.set_quote_rows(vec![summary_row("300000", previous, 100, 100, 1000, 1), summary_row("300001", today, 100, 100, 1000, 1)]);
+        let (status, body) = session.api.run(&every(vec![])).await;
+        assert_eq!((status, body["error"]["reason"].clone()), (409, json!("data_changed")));
+        assert!(body["rows"].is_null());
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn regression_223_new_listing_week_month_boundaries_require_only_existing_past_bars() {
+    for today in [day(2026, 11, 9), day(2026, 12, 1)] {
+        let days = last_open_days(20, today.add_days(-1));
+        let Loaded { _fake: fake, _dir: dir, _server: server, .. } = loaded(KrxMarket { days: days.clone(), stocks: vec![stock("300000", priced(&days, |_| 100))] }).await;
+        server.stop().await;
+        let listing = stock("300001", vec![bar(today, 100, 1000)]);
+        fake.set_krx_market(KrxMarket { days: [days.clone(), vec![today]].concat(), stocks: vec![stock("300000", priced(&[days, vec![today]].concat(), |_| 100)), listing] });
+        fake.set_quote_rows(vec![summary_row("300000", today, 100, 100, 1000, 1), summary_row("300001", today, 100, 100, 1000, 1)]);
+        let server = boot(&fake, dir.path(), &at(today, "1200"));
+        let api = Api::of(&server).await;
+        api.update().await; api.settled().await;
+        for period in ["D", "W", "M"] {
+            let one = api.result(&every(vec![value_range(period, 1, "close", Some(100.0), Some(100.0))])).await;
+            assert_eq!(row(&one, "300001")["changeRate"], Value::Null);
+            assert_eq!(row(&one, "300001")["latestBarDate"], today.to_string());
+            let two = api.result(&every(vec![new_high(period, "close", 2, 1)])).await;
+            assert_eq!(two["excluded"]["listedTooShort"], 1, "{period}: {two}");
+            assert!(!hits(&two).iter().any(|hit| hit.starts_with("300001")));
+        }
+        server.stop().await;
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn regression_223_adjustment_refetch_missing_midway_recovers_or_excludes_after_restart_and_delisting() {
+    let today = day(2026, 11, 9);
+    let days = last_open_days(20, today.add_days(-1));
+    let Loaded { _fake: fake, _dir: dir, _server: server, .. } = loaded(KrxMarket { days: days.clone(), stocks: vec![stock("300000", priced(&days, |_| 100)), stock("300001", priced(&days, |_| 100))] }).await;
+    server.stop().await;
+    let mut market = KrxMarket { days: [days.clone(), vec![today]].concat(), stocks: vec![stock("300000", priced(&days, |_| 100)), stock("300001", priced(&days, |_| 50))] };
+    market.stocks[1].bars.push(bar(today, 50, 1000));
+    fake.set_krx_market(market.clone());
+    let mut adjusted = summary_row("300001", today, 50, 50, 1000, 1);
+    adjusted["open_pric"] = "50".into(); adjusted["low_pric"] = "50".into(); adjusted["base_pric"] = "50".into();
+    fake.set_quote_rows(vec![summary_row("300000", today, 100, 100, 1000, 1), adjusted.clone()]);
+    let server = boot(&fake, dir.path(), &at(today, "1200"));
+    let api = Api::of(&server).await;
+    assert_eq!(api.run(&every(vec![])).await.0, 409);
+    fake.delay("ka10081", Duration::from_secs(5));
+    api.update().await;
+    api.wait_for("수정 이력 재수집", |s| s["update"]["phase"] == "backfill").await;
+    api.cancel().await;
+    assert_eq!(api.run(&every(vec![])).await.0, 409, "취소로 수정 확인 필요를 해제하지 않는다");
+    server.stop().await;
+    fake.delay("ka10081", Duration::ZERO);
+    let server = boot(&fake, dir.path(), &at(today, "1200"));
+    let api = Api::of(&server).await;
+    fake.script("ka10081", vec![fake_kiwoom::ScriptedReply { status: 200, body: json!({"return_code": 2, "return_msg": "[1501:입력 오류]"}), delay: Duration::ZERO }]);
+    api.update().await;
+    let failed = api.wait_for("재수집 오류", |s| !s["update"]["error"].is_null()).await;
+    assert!(!failed["update"]["error"].is_null());
+    server.stop().await;
+    let server = boot(&fake, dir.path(), &at(today, "1200"));
+    let api = Api::of(&server).await;
+    assert_eq!(api.run(&every(vec![])).await.0, 409, "수정 확인 필요는 재시작해도 남는다");
+    let fake_kiwoom::krx::KrxPage::Page { mut body, .. } = fake_kiwoom::krx::respond(&market, "ka10081", &json!({"stk_cd": "300001"}), None).unwrap() else { panic!("일봉 페이지") };
+    body["_headers"] = json!({"cont-yn": "Y", "next-key": "middle"});
+    let mut missing = market.clone(); missing.stocks[1].daily = DailyAnswer::EmptyRow;
+    let fake_kiwoom::krx::KrxPage::Page { body: empty, .. } = fake_kiwoom::krx::respond(&missing, "ka10081", &json!({"stk_cd": "300001"}), None).unwrap() else { panic!("빈 일봉") };
+    fake.script("ka10081", vec![body, empty].into_iter().map(|body| fake_kiwoom::ScriptedReply { status: 200, body, delay: Duration::ZERO }).collect());
+    fake.set_krx_market(missing.clone());
+    api.update().await;
+    assert_eq!(api.settled().await["unconfirmed"], 1);
+    let result = api.result(&every(vec![])).await;
+    assert_eq!(result["excluded"]["unconfirmed"], 1);
+    assert_eq!(hits(&result), [hit("300000", today)]);
+    api.update().await;
+    assert_eq!(api.settled().await["unconfirmed"], 1, "계속 일봉이 없어도 업데이트가 끝나며 재확인한다");
+    server.stop().await;
+    let server = boot(&fake, dir.path(), &at(today, "1200"));
+    let api = Api::of(&server).await;
+    assert_eq!(api.result(&every(vec![])).await["excluded"]["unconfirmed"], 1);
+    fake.set_krx_market(market);
+    api.update().await; api.settled().await;
+    let recovered = api.result(&every(vec![])).await;
+    assert_eq!(recovered["rows"].as_array().unwrap().len(), 2);
+    assert_eq!(row(&recovered, "300001")["close"], 50.0);
+    adjusted["base_pric"] = "25".into();
+    fake.set_quote_rows(vec![summary_row("300000", today, 100, 100, 1000, 1), adjusted]);
+    assert_eq!(api.run(&every(vec![])).await.0, 409);
+    server.stop().await;
+    missing.stocks.pop();
+    fake.set_krx_market(missing);
+    let server = boot(&fake, dir.path(), &at(today, "1200"));
+    let api = Api::of(&server).await;
+    api.update().await; api.settled().await;
+    assert_eq!(api.result(&every(vec![])).await["universe"], 1, "목록에서 빠진 수정 확인 이력이 전역 관문에 남지 않는다");
+    server.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn regression_223_preopen_evidence_expires_when_collection_crosses_krx_open() {
+    let today = day(2026, 11, 9);
+    let Loaded { _fake: fake, _dir: dir, _server: server, .. } = intraday_session(today, 1, "0800").await;
+    server.stop().await;
+    fake.set_quote_rows(vec![summary_row("300000", day(2026, 11, 6), 100, 100, 1000, 1)]);
+    fake.delay("ka10095", Duration::from_millis(1500));
+    let server = Server::spawn_with(&fake, &dir.path().join("run/server.lock"), dir.path(), &[("VALLY_CLOCK_START", OsStr::new("20261109082959"))]);
+    let api = Api::of(&server).await;
+    let result = api.result(&every(vec![])).await;
+    assert_eq!(result["missingSummary"], 1);
+    assert!(hits(&result).is_empty());
     server.stop().await;
 }

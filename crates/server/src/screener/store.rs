@@ -12,13 +12,16 @@ use duckdb::{Config, Connection, OptionalExt, Transaction, params};
 use crate::api::{ExcludeKind, Market};
 use crate::kiwoom::wire::{MillionWon, ScreenerListing};
 
-const SCHEMA_VERSION: i32 = 5;
+const SCHEMA_VERSION: i32 = 6;
+const BEFORE_REFETCH_CHECKS: i32 = 5;
+const REFETCH_CHECKS: &str = "CREATE TABLE refetch_checks (code VARCHAR PRIMARY KEY);";
 const BEFORE_LISTED_MARKET_AND_SHARES: i32 = 4;
 
 const LISTED: &str = "CREATE TABLE listed (code VARCHAR NOT NULL, name VARCHAR NOT NULL, listed_on DATE, excludable_as USMALLINT NOT NULL, market VARCHAR NOT NULL, listed_shares UBIGINT);";
 
 const SCHEMA: &str = "
 CREATE TABLE store_meta (schema_version INTEGER NOT NULL, last_day DATE, full_refetch BOOLEAN NOT NULL);
+CREATE TABLE refetch_checks (code VARCHAR PRIMARY KEY);
 CREATE TABLE history (code VARCHAR PRIMARY KEY, complete BOOLEAN NOT NULL, refetch BOOLEAN NOT NULL);
 CREATE TABLE daily (code VARCHAR NOT NULL, day DATE NOT NULL, open UBIGINT NOT NULL, high UBIGINT NOT NULL, low UBIGINT NOT NULL, close UBIGINT NOT NULL, volume UBIGINT NOT NULL, traded_million_won UBIGINT NOT NULL);
 CREATE TABLE calendar (day DATE PRIMARY KEY);
@@ -26,7 +29,7 @@ CREATE TABLE calendar (day DATE PRIMARY KEY);
 
 pub(super) const LISTING_LOST: &str = "NOT EXISTS (SELECT 1 FROM listed) AND EXISTS (SELECT 1 FROM daily)";
 
-const UNCONFIRMED_ON: &str = "SELECT code FROM listed WHERE NOT coalesce(listed_on > $1, false) AND code NOT IN (SELECT code FROM daily WHERE day = $1)";
+const UNCONFIRMED_ON: &str = "SELECT code FROM listed WHERE NOT coalesce(listed_on > $1, false) AND (code NOT IN (SELECT code FROM daily WHERE day = $1) OR code IN (SELECT code FROM history WHERE refetch))";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StoreError(pub String);
@@ -112,6 +115,7 @@ impl Store {
         let conn = connect(path)?;
         let conn = match stored_version(&conn)? {
             Some(SCHEMA_VERSION) => conn,
+            Some(BEFORE_REFETCH_CHECKS) => add_refetch_checks(conn)?,
             Some(BEFORE_LISTED_MARKET_AND_SHARES) => {
                 tracing::info!(path = %path.display(), from = BEFORE_LISTED_MARKET_AND_SHARES, to = SCHEMA_VERSION, "스크리너 저장소를 올립니다. 종목 목록 표만 다시 만들고 일봉·이력 상태·관측일 달력·저장소 상태는 그대로 둡니다");
                 rebuild_listed(conn)?
@@ -174,6 +178,7 @@ impl Store {
         let tx = conn.transaction()?;
         tx.execute("DELETE FROM listed", [])?;
         append_listing(&tx, listing)?;
+        tx.execute("DELETE FROM refetch_checks WHERE code NOT IN (SELECT code FROM listed)", [])?;
         tx.commit()?;
         self.generation.fetch_add(1, Ordering::SeqCst);
         Ok(())
@@ -252,6 +257,7 @@ impl Store {
                 }
                 Write::Replace { code, bars } => {
                     tx.execute("DELETE FROM daily WHERE code = ?", params![code.as_str()])?;
+                    tx.execute("DELETE FROM refetch_checks WHERE code = ?", params![code.as_str()])?;
                     tx.execute("INSERT INTO history VALUES (?, true, false) ON CONFLICT (code) DO UPDATE SET complete = true, refetch = false", params![code.as_str()])?;
                     (code, bars)
                 }
@@ -307,6 +313,28 @@ impl Store {
         Ok(())
     }
 
+    pub(super) fn require_refetch(&self, codes: &[StockCode], expected_generation: Option<u64>) -> Result<bool, StoreError> {
+        let mut conn = self.conn();
+        if expected_generation.is_some_and(|expected| expected != self.generation.load(Ordering::SeqCst)) {
+            return Ok(false);
+        }
+        let tx = conn.transaction()?;
+        for code in codes {
+            tx.execute("INSERT INTO history VALUES (?, false, true) ON CONFLICT (code) DO UPDATE SET refetch = true", params![code.as_str()])?;
+            tx.execute("INSERT INTO refetch_checks VALUES (?) ON CONFLICT DO NOTHING", params![code.as_str()])?;
+        }
+        tx.commit()?;
+        self.generation.fetch_add(1, Ordering::SeqCst);
+        Ok(true)
+    }
+
+    pub(super) fn finish_refetch_attempt(&self, code: StockCode) -> Result<(), StoreError> {
+        let conn = self.conn();
+        conn.execute("DELETE FROM refetch_checks WHERE code = ?", params![code.as_str()])?;
+        self.generation.fetch_add(1, Ordering::SeqCst);
+        Ok(())
+    }
+
     pub fn end_full_refetch(&self) -> Result<(), StoreError> {
         let conn = self.conn();
         conn.execute("UPDATE store_meta SET full_refetch = false", [])?;
@@ -318,10 +346,10 @@ impl Store {
         let conn = self.conn();
         let mut stmt = conn.prepare(
             "SELECT listed.code FROM listed LEFT JOIN history USING (code)
-             WHERE (NOT coalesce(history.complete, false) OR coalesce(history.refetch, false)) AND listed.code IN (SELECT code FROM daily WHERE day = ?)
+             WHERE NOT coalesce(listed.listed_on > ?, false) AND (coalesce(history.refetch, false) OR (NOT coalesce(history.complete, false) AND listed.code IN (SELECT code FROM daily WHERE day = ?)))
              ORDER BY listed.code",
         )?;
-        let rows = stmt.query_map(params![date_value(target)], |row| row.get::<_, String>(0))?;
+        let rows = stmt.query_map(params![date_value(target), date_value(target)], |row| row.get::<_, String>(0))?;
         rows.map(|code| stock_code(&code?)).collect()
     }
 }
@@ -361,8 +389,17 @@ fn create(mut conn: Connection) -> Result<Connection, StoreError> {
 
 fn rebuild_listed(mut conn: Connection) -> Result<Connection, StoreError> {
     let tx = conn.transaction()?;
+    tx.execute_batch(REFETCH_CHECKS)?;
     tx.execute_batch("DROP TABLE listed")?;
     tx.execute_batch(LISTED)?;
+    tx.execute("UPDATE store_meta SET schema_version = ?", params![SCHEMA_VERSION])?;
+    tx.commit()?;
+    Ok(conn)
+}
+
+fn add_refetch_checks(mut conn: Connection) -> Result<Connection, StoreError> {
+    let tx = conn.transaction()?;
+    tx.execute_batch(REFETCH_CHECKS)?;
     tx.execute("UPDATE store_meta SET schema_version = ?", params![SCHEMA_VERSION])?;
     tx.commit()?;
     Ok(conn)
@@ -443,5 +480,36 @@ mod generation_tests {
         let (captured, codes) = store.collection_targets().unwrap();
         assert_eq!(captured, store.generation());
         assert_eq!(codes, [code]);
+    }
+}
+
+#[cfg(test)]
+mod refetch_migration_tests {
+    use super::*;
+
+    #[test]
+    fn schema_five_upgrade_preserves_daily_calendar_and_unusable_history() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("screener.duckdb");
+        let store = Store::open(&path).unwrap();
+        let day = KstDate::new(2026, 11, 6).unwrap();
+        let code = StockCode::parse("300000").unwrap();
+        store.replace_listing(&[ScreenerListing { code, name: "가상".into(), listed_on: Some(day), excludable_as: vec![], market: Market::Kospi, listed_shares: NonZeroU64::new(1) }]).unwrap();
+        let price = Price::from_centi(10000).unwrap();
+        let bar = DayBar { day, ohlcv: Ohlcv::try_new(price, price, price, price, Volume(1000)).unwrap(), traded: MillionWon(1) };
+        store.write(&[Write::Replace { code, bars: vec![bar] }]).unwrap();
+        store.extend_calendar(&[day]).unwrap();
+        store.set_last_day(day).unwrap();
+        store.mark_refetch().unwrap();
+        store.end_full_refetch().unwrap();
+        store.conn().execute_batch("DROP TABLE refetch_checks; UPDATE store_meta SET schema_version = 5").unwrap();
+        drop(store);
+        let upgraded = Store::open(&path).unwrap();
+        assert_eq!(upgraded.bars_from(code, day).unwrap(), [bar]);
+        assert_eq!(upgraded.calendar_last_day().unwrap(), Some(day));
+        assert_eq!(upgraded.summary().unwrap().unconfirmed, 1);
+        assert_eq!(upgraded.backfill_queue(day).unwrap(), [code]);
+        let version: i32 = upgraded.conn().query_row("SELECT schema_version FROM store_meta", [], |row| row.get(0)).unwrap();
+        assert_eq!(version, 6);
     }
 }

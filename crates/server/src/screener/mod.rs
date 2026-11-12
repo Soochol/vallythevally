@@ -15,7 +15,7 @@ use axum::body::Body;
 use axum::extract::State;
 use axum::response::Json;
 use axum::routing::{get, post};
-use domain::{Feed, IndexCode, KstDate, KstTime, Period, SeriesKey, TimeOfDay};
+use domain::{Feed, IndexCode, KstDate, KstTime, Period, SeriesKey, TimeOfDay, Weekday};
 
 use crate::api::{self, ApiErrorBody, ApiErrorReason, FullHistory, Screen, ScreenerResult, ScreenerStatus, ScreenerUpdate, ScreenerUpdateRequest, UpdatePhase};
 use crate::bars::{BarError, BarService};
@@ -25,7 +25,7 @@ use crate::kiwoom::rest::{KiwoomRest, Priority};
 use crate::symbols::SymbolDirectory;
 use crate::user_routes::{JSON_LIMIT, check_screen, read_json};
 use engine::{RunnableScreen, Snapshot};
-use summary::{CollectionError, SummaryCollector};
+use summary::{CollectionBasis, CollectionError, SummaryCollector};
 use store::{Listed, Store, StoreError};
 
 const CALENDAR_DAYS: usize = 10;
@@ -51,6 +51,13 @@ enum CalendarUse {
     Update,
 }
 
+#[derive(Debug, Clone, Copy)]
+enum Observation {
+    Current,
+    PreviousOnly(KstDate),
+    Unresolved,
+}
+
 struct Calendar {
     fetched_at: KstTime,
     days: Vec<KstDate>,
@@ -59,6 +66,20 @@ struct Calendar {
 impl Calendar {
     fn last_before(&self, day: KstDate) -> Option<KstDate> {
         self.days.iter().rev().find(|d| **d < day).copied()
+    }
+
+    fn observation(&self, now: KstTime) -> Observation {
+        let today = now.kst_date();
+        if self.days.contains(&today) {
+            return Observation::Current;
+        }
+        let before_krx_trading = now.kst_time_of_day() < TimeOfDay::hms(8, 30, 0).expect("KRX 장전 시간");
+        let after_krx_trading = now.kst_time_of_day() >= TimeOfDay::hms(20, 0, 0).expect("KRX 종료 시간");
+        if before_krx_trading || (after_krx_trading && self.fetched_at.kst_time_of_day() >= TimeOfDay::hms(20, 0, 0).expect("KRX 종료 시간")) || matches!(today.weekday(), Weekday::Sat | Weekday::Sun) {
+            self.last_before(today).map_or(Observation::Unresolved, Observation::PreviousOnly)
+        } else {
+            Observation::Unresolved
+        }
     }
 
     fn need_day(&self, now: KstTime) -> Option<KstDate> {
@@ -258,7 +279,8 @@ impl Screener {
         let (generation, codes) = self.with_store(Store::collection_targets).await?;
         let me = self.clone();
         tokio::task::spawn_blocking(move || me.ready_snapshot(need_day, now)).await.map_err(|e| StoreError(e.to_string()))??;
-        let batch = self.summaries.collect(codes).await.map_err(|error| match error {
+        let basis = CollectionBasis { generation, update_epoch };
+        let batch = self.summaries.collect(codes, basis).await.map_err(|error| match error {
             CollectionError::Kiwoom(error) => Lookup::ScreenerRun.failure(error.into(), self.clock.now()),
             error => data_changed(error.to_string()),
         })?;
@@ -267,13 +289,19 @@ impl Screener {
             if me.clock.now().kst_date() != batch.target || batch.target != now.kst_date() {
                 return Err(data_changed("실행 중 날짜가 바뀌었습니다. 다시 실행하세요"));
             }
-            if me.store.generation() != generation || me.next_run.load(Ordering::SeqCst) != update_epoch {
+            if batch.basis != basis || me.store.generation() != generation || me.next_run.load(Ordering::SeqCst) != update_epoch {
                 return Err(data_changed("수집 중 확정 이력이 바뀌었습니다. 업데이트가 끝난 뒤 다시 실행하세요"));
             }
             let mut conn = me.store.reader()?;
             let snapshot = Snapshot::begin(&mut conn)?;
             me.check_ready(&snapshot, need_day, now)?;
-            let result = snapshot.screen(&screen, &batch, calendar.days.contains(&batch.target))?;
+            let adjustments = snapshot.adjustments(&batch)?;
+            if !adjustments.is_empty() {
+                drop(snapshot);
+                me.store.require_refetch(&adjustments, Some(generation))?;
+                return Err(data_changed("기준가와 확정 이력의 차이가 커 수정 이력을 확인해야 합니다. 업데이트 후 다시 실행하세요"));
+            }
+            let result = snapshot.screen(&screen, &batch, calendar.observation(me.clock.now()))?;
             if me.store.generation() != generation || me.next_run.load(Ordering::SeqCst) != update_epoch || me.clock.now().kst_date() != batch.target {
                 return Err(data_changed("판정 중 날짜나 확정 이력이 바뀌었습니다. 다시 실행하세요"));
             }

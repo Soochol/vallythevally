@@ -7,7 +7,8 @@ use duckdb::arrow::datatypes::{ArrowPrimitiveType, DataType, Decimal128Type, Int
 use duckdb::{Connection, Transaction, params};
 
 use super::exact::Decimal;
-use super::summary::SummaryBatch;
+use super::summary::{MissingSummary, SummaryBatch};
+use super::Observation;
 use crate::http::ApiFailure;
 use crate::kiwoom::wire::KrxSummaryValues;
 use super::indicator::Indicator;
@@ -210,16 +211,19 @@ pub(super) struct Snapshot<'a> {
 impl<'a> Snapshot<'a> {
     pub(super) fn begin(conn: &'a mut Connection) -> Result<Snapshot<'a>, StoreError> {
         let tx = conn.transaction()?;
-        let (last_day, listing_lost, refetching) = tx.query_row(&format!("SELECT last_day, {LISTING_LOST}, full_refetch OR EXISTS (SELECT 1 FROM history WHERE refetch) FROM store_meta"), [], |row| Ok((row.get::<_, Option<i32>>(0)?, row.get::<_, bool>(1)?, row.get::<_, bool>(2)?)))?;
+        let (last_day, listing_lost, refetching) = tx.query_row(&format!("SELECT last_day, {LISTING_LOST}, full_refetch OR EXISTS (SELECT 1 FROM refetch_checks JOIN listed USING (code)) FROM store_meta"), [], |row| Ok((row.get::<_, Option<i32>>(0)?, row.get::<_, bool>(1)?, row.get::<_, bool>(2)?)))?;
         Ok(Snapshot { tx, last_day: last_day.map(date_of), listing_lost, refetching })
     }
 
-    pub(super) fn screen(&self, screen: &RunnableScreen, batch: &SummaryBatch, today_observed: bool) -> Result<ScreenerResult, ApiFailure> {
+    pub(super) fn screen(&self, screen: &RunnableScreen, batch: &SummaryBatch, observation: Observation) -> Result<ScreenerResult, ApiFailure> {
         let tx = &self.tx;
         let stored_day = self.last_day.expect("확인한 저장소");
         let provisional = stored_day < batch.target;
         let today_traded = batch.stocks.values().any(|s| s.result.as_ref().is_ok_and(|q| matches!(q.values, KrxSummaryValues::Traded { .. })));
-        let as_of = if provisional && (today_observed || today_traded) { batch.target } else { stored_day };
+        if matches!(observation, Observation::PreviousOnly(_)) && today_traded {
+            return Err(super::data_changed("오늘 거래 요약과 새 봉 부재의 근거가 다릅니다. 다시 실행하세요"));
+        }
+        let as_of = if provisional && (matches!(observation, Observation::Current) || today_traded) { batch.target } else { stored_day };
         let mut days = observation_days(tx, stored_day)?;
         if as_of > stored_day { days.push(as_of); }
         let calendars = Calendars::new(days);
@@ -239,7 +243,12 @@ impl<'a> Snapshot<'a> {
                 excluded.unconfirmed += 1;
                 continue;
             }
-            if batch.stocks.get(&stock.code).is_none_or(|s| s.result.is_err()) {
+            let available = batch.stocks.get(&stock.code).is_some_and(|s| match &s.result {
+                Ok(_) => true,
+                Err(MissingSummary::OtherDate(day)) => matches!(observation, Observation::PreviousOnly(previous) if previous == *day && previous == stored_day),
+                Err(_) => false,
+            });
+            if !available {
                 missing_summary += 1;
                 continue;
             }
@@ -281,19 +290,24 @@ impl<'a> Snapshot<'a> {
         Ok(ScreenerResult { as_of: api::KstDate(as_of), collection_started_at: api::UnixSeconds(batch.started_at.unix()), collection_completed_at: api::UnixSeconds(batch.completed_at.unix()), missing_summary, universe: universe.len() as u32, excluded, rows })
     }
 
+    pub(super) fn adjustments(&self, batch: &SummaryBatch) -> Result<Vec<StockCode>, StoreError> {
+        if self.last_day >= Some(batch.target) { return Ok(Vec::new()); }
+        let mut stmt = self.tx.prepare("SELECT code, arg_max(close, day) FROM daily WHERE day < ? AND day <= (SELECT last_day FROM store_meta) AND volume > 0 AND code NOT IN (SELECT code FROM history WHERE refetch) GROUP BY code")?;
+        let previous = stmt.query_map(params![date_value(batch.target)], |row| Ok((row.get::<_, String>(0)?, row.get::<_, u64>(1)?)))?.collect::<Result<HashMap<_, _>, _>>()?;
+        Ok(batch.stocks.iter().filter_map(|(code, stock)| {
+            let quote = stock.result.as_ref().ok()?;
+            let close = *previous.get(code.as_str())?;
+            (10 * u128::from(quote.base.centi().abs_diff(close)) > 3 * u128::from(close)).then_some(*code)
+        }).collect())
+    }
+
     fn combine_summary(&self, batch: &SummaryBatch) -> Result<(), ApiFailure> {
         let tx = &self.tx;
         tx.execute_batch("CREATE TEMP TABLE screen_summary AS SELECT * FROM daily LIMIT 0").map_err(StoreError::from)?;
         if self.last_day < Some(batch.target) {
-            let mut stmt = tx.prepare("SELECT code, arg_max(close, day) FROM daily WHERE day < ? AND day <= (SELECT last_day FROM store_meta) AND volume > 0 GROUP BY code").map_err(StoreError::from)?;
-            let previous = stmt.query_map(params![date_value(batch.target)], |row| Ok((row.get::<_, String>(0)?, row.get::<_, u64>(1)?))).map_err(StoreError::from)?.collect::<Result<HashMap<_, _>, _>>().map_err(StoreError::from)?;
             let mut appender = tx.appender("screen_summary").map_err(StoreError::from)?;
             for (code, stock) in &batch.stocks {
                 let Ok(quote) = &stock.result else { continue };
-                let previous = previous.get(code.as_str()).copied();
-                if previous.is_some_and(|close| 10 * u128::from(quote.base.centi().abs_diff(close)) > 3 * u128::from(close)) {
-                    return Err(super::data_changed("기준가와 확정 이력의 차이가 커 수정 이력을 확인해야 합니다. 업데이트 후 다시 실행하세요"));
-                }
                 let KrxSummaryValues::Traded { ohlcv: o, traded } = quote.values else { continue };
                 appender.append_row(params![code.as_str(), date_value(batch.target), o.open().centi(), o.high().centi(), o.low().centi(), o.close().centi(), o.volume().0, traded.0]).map_err(StoreError::from)?;
             }
@@ -473,7 +487,7 @@ fn stocks(tx: &Transaction, as_of: KstDate) -> Result<Vec<Stock>, StoreError> {
     let mut stmt = tx.prepare(
         "SELECT listed.code, listed.name, listed.listed_on, listed.excludable_as, listed.market, listed.listed_shares, coalesce(history.complete, false), earliest.day
          FROM listed LEFT JOIN history USING (code)
-         LEFT JOIN (SELECT code, min(day) AS day FROM daily WHERE day <= ? GROUP BY code) AS earliest USING (code)",
+         LEFT JOIN (SELECT code, min(day) AS day FROM screen_daily WHERE day <= ? GROUP BY code) AS earliest USING (code)",
     )?;
     let rows = stmt.query_map(params![date_value(as_of)], |row| {
         Ok((

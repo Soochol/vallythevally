@@ -365,7 +365,7 @@ async fn a_store_left_by_a_schema_version_with_no_upgrade_path_starts_empty() {
     let fake = FakeKiwoom::start().await;
     let today = day(2026, 11, 6);
     let market = KrxMarket::sample(today);
-    for version in [3, 6] {
+    for version in [3, 7] {
         let tmp = tempfile::tempdir().unwrap();
         update_once(&fake, tmp.path(), &market, &at(today, "2030"), false).await;
 
@@ -447,7 +447,7 @@ async fn a_schema_4_store_keeps_its_daily_bars_and_history_and_is_listed_with_sh
     let server = boot_updating();
     server.addr().await;
     let logs = server.stop().await;
-    assert!(logs.contains("스크리너 저장소를 올립니다"), "종목 목록을 받기 전에 꺼진 시작도 저장소를 스키마 5로 올렸다");
+    assert!(logs.contains("스크리너 저장소를 올립니다"), "종목 목록을 받기 전에 꺼진 시작도 저장소를 스키마 6으로 올렸다");
     fake.reset();
 
     let server = boot_updating();
@@ -482,7 +482,7 @@ async fn a_schema_4_store_keeps_its_daily_bars_and_history_and_is_listed_with_sh
 
     let kept: Vec<(String, String, Option<u64>)> =
         market.stocks.iter().map(|s| (s.code.clone(), if s.market_code == "10" { "kosdaq" } else { "kospi" }.to_owned(), s.listed_shares)).collect();
-    assert_eq!(stored_listing(upgraded.path()), (5, kept), "listed에 상장주식수와 시장이 찬다. 상장주식수가 없는 종목은 비워 둔다");
+    assert_eq!(stored_listing(upgraded.path()), (6, kept), "listed에 상장주식수와 시장이 찬다. 상장주식수가 없는 종목은 비워 둔다");
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -911,7 +911,7 @@ async fn a_new_full_update_refetches_every_confirmed_history_even_after_kiwoom_k
         market.stocks.iter().map(|s| (s.code.clone(), if s.code == krx::COMMON { vec![None] } else { whole_history(&s.code, s.bars.len()) })).collect();
     for (round, clock) in [(1, "2040"), (2, "2050")] {
         let (status, calls) = update_once(&fake, tmp.path(), &withheld, &at(today, clock), true).await;
-        assert_eq!((status["fullHistory"].clone(), status["unconfirmed"].clone()), (json!({"done": 10, "total": 10}), json!(0)), "{round}번째");
+        assert_eq!((status["fullHistory"].clone(), status["unconfirmed"].clone()), (json!({"done": 9, "total": 9}), json!(1)), "{round}번째");
         assert_eq!(daily_chains(&calls), every, "{round}번째 전체 다시 받기도 확인된 모든 종목의 전체 이력을 받는다");
     }
 
