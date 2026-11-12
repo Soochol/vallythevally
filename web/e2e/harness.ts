@@ -1,5 +1,5 @@
 import { startDart, type Dart } from "./dart";
-import { type ChildProcess, spawn } from "node:child_process";
+import { type ChildProcess, execFileSync, spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -24,6 +24,7 @@ export interface FakeReply {
 
 export interface KrxMarketOptions {
   conditionStocks?: boolean;
+  extraStocks?: number;
 }
 
 export interface Fake {
@@ -39,13 +40,15 @@ export interface Fake {
   rejectToken(token: string): Promise<void>;
   setKrxMarket(asOf: string, options?: KrxMarketOptions): Promise<void>;
   reset(): Promise<void>;
+  script(apiId: string, replies: FakeReply[]): Promise<void>;
+  stats(): Promise<{ apiIds: string[] }>;
 }
 
 export interface App {
   url: string;
   fake: Fake;
   dart: Dart | null;
-  restart(options?: { clockStart?: string }): Promise<void>;
+  restart(options?: { clockStart?: string; legacyScreens?: unknown[] }): Promise<void>;
 }
 
 class Proc {
@@ -127,6 +130,8 @@ function fakeClient(base: string): Fake {
     rejectToken: (token) => post("reject-token", { token }),
     setKrxMarket: (asOf, options) => post("krx-market", { asOf, ...options }),
     reset: () => post("reset"),
+    script: (apiId, replies) => post("script", { apiId, replies }),
+    stats: async () => (await fetch(`${base}/_fake/stats`)).json(),
   };
 }
 
@@ -194,6 +199,7 @@ export const test = base.extend<{ app: App; bootReplies: FakeReply[]; clockStart
         dart,
         restart: async (options) => {
           await servers[servers.length - 1]!.kill();
+          if (options?.legacyScreens) execFileSync("python3", ["-c", "import json,sqlite3,sys; c=sqlite3.connect(sys.argv[1]); c.execute('UPDATE screens SET list=?, revision=10', (sys.argv[2],)); c.execute('DELETE FROM _sqlx_migrations WHERE version=7'); c.commit()", path.join(dir, "vally.db"), JSON.stringify(options.legacyScreens)]);
           await startServer(addr, options?.clockStart ?? clockStart);
           await waitUntilSymbolListSettles(url);
         },

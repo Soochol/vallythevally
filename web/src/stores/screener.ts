@@ -7,10 +7,15 @@ import { ApiRequestError } from "../api/http";
 import { runScreen } from "../api/screener";
 import { DEFAULT_SORT, isUpdating, type ResultSort } from "../lib/screener";
 
+interface CompletedRun {
+  result: ScreenerResult;
+  storeVersion: number;
+}
+
 export type ScreenRun =
-  | { kind: "running"; screen: Screen; shown: ScreenerResult | null }
-  | { kind: "done"; screen: Screen; result: ScreenerResult; storeVersion: number }
-  | { kind: "failed"; screen: Screen; error: ApiRequestError };
+  | { kind: "running"; screen: Screen; shown: CompletedRun | null }
+  | ({ kind: "done"; screen: Screen } & CompletedRun)
+  | { kind: "failed"; screen: Screen; shown: CompletedRun | null; error: ApiRequestError };
 
 export type Rerun = { kind: "new_day"; day: KstDate } | { kind: "store_changed" };
 
@@ -38,15 +43,20 @@ export function runOf(runs: ScreenerState["runs"], screen: Screen): ScreenRun | 
   return run && sameScreen(run.screen, screen) ? run : null;
 }
 
+function completedRun(run: ScreenRun | null): CompletedRun | null {
+  if (run?.kind === "done") return run;
+  return run?.shown ?? null;
+}
+
 export function shownResult(run: ScreenRun | null): ScreenerResult | null {
-  if (run?.kind === "done") return run.result;
-  return run?.kind === "running" ? run.shown : null;
+  return completedRun(run)?.result ?? null;
 }
 
 export function rerunReason(run: ScreenRun | null, storeVersion: number, status: ScreenerStatus | undefined): Rerun | null {
-  if (run?.kind !== "done" || status === undefined) return null;
-  if (status.lastDay !== null && status.lastDay > run.result.asOf) return { kind: "new_day", day: status.lastDay };
-  return run.storeVersion === storeVersion ? null : { kind: "store_changed" };
+  const completed = completedRun(run);
+  if (completed === null || status === undefined) return null;
+  if (status.lastDay !== null && status.lastDay > completed.result.asOf) return { kind: "new_day", day: status.lastDay };
+  return completed.storeVersion === storeVersion ? null : { kind: "store_changed" };
 }
 
 const seenOf = ({ lastDay, fullHistory, unconfirmed }: ScreenerStatus, updating: boolean): SeenStore => ({
@@ -67,12 +77,15 @@ export const useScreenerStore = create<ScreenerState>()((set, get) => {
     choose: (chosenId) => set({ chosenId }),
     setSort: (sort) => set({ sort }),
     run: async (screen) => {
+      const snapshot = structuredClone(screen);
       const storeVersion = get().storeVersion;
-      record({ kind: "running", screen, shown: shownResult(runOf(get().runs, screen)) });
+      const pending: ScreenRun = { kind: "running", screen: snapshot, shown: completedRun(runOf(get().runs, snapshot)) };
+      record(pending);
       try {
-        record({ kind: "done", screen, result: await runScreen(screen), storeVersion });
+        const result = await runScreen(snapshot);
+        if (get().runs[snapshot.id] === pending) record({ kind: "done", screen: snapshot, result, storeVersion });
       } catch (e) {
-        record({ kind: "failed", screen, error: asApiError(e) });
+        if (get().runs[snapshot.id] === pending) record({ kind: "failed", screen: snapshot, shown: pending.shown, error: asApiError(e) });
       }
     },
     seeStatus: (status) =>

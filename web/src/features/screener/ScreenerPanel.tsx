@@ -197,21 +197,23 @@ export function ScreenerPanel() {
   const band = status !== undefined && showsUpdateBand(status);
   return (
     <aside aria-label="스크리너" className="flex min-h-0 flex-1 flex-col">
-      {band && <UpdateBand status={status} />}
-      {screen ? (
-        <ScreenHeader screen={screen} screens={screens.data?.screens ?? []} run={run} block={block} status={status} rows={rows} onRun={execute} />
-      ) : (
-        <header className="flex h-11 flex-none items-center gap-1 border-b border-line pl-3 pr-1.5">
-          <h2 className="text-l font-[700]">스크리너</h2>
-          <span className="flex-1" />
-          <PanelMenu screen={null} rows={rows} status={status} />
-        </header>
-      )}
-      {screen ? (
-        <Results screen={screen} run={run} rows={rows} status={status} block={block} onRun={execute} />
-      ) : (
-        <NoScreen query={screens} />
-      )}
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        {band && <UpdateBand status={status} />}
+        {screen ? (
+          <ScreenHeader screen={screen} screens={screens.data?.screens ?? []} run={run} block={block} status={status} rows={rows} onRun={execute} />
+        ) : (
+          <header className="flex h-11 flex-none items-center gap-1 border-b border-line pl-3 pr-1.5">
+            <h2 className="text-l font-[700]">스크리너</h2>
+            <span className="flex-1" />
+            <PanelMenu screen={null} rows={rows} status={status} />
+          </header>
+        )}
+        {screen ? (
+          <Results screen={screen} run={run} rows={rows} status={status} block={block} onRun={execute} />
+        ) : (
+          <NoScreen query={screens} />
+        )}
+      </div>
       <StatusFooterLine footer={statusFooter(status, statusQuery.error)} status={status} onRetry={() => void statusQuery.refetch()} />
     </aside>
   );
@@ -267,11 +269,7 @@ const BLOCK_HINT: Record<RunBlock, string> = {
 function runHint(block: RunBlock | null, status: ScreenerStatus | undefined): ReactNode {
   if (block) return <span className="text-warning">{BLOCK_HINT[block]}</span>;
   if (!status?.lastDay) return null;
-  return (
-    <>
-      <b className="font-[600] text-text">{dayLabel(status.lastDay, status.needDay ?? status.lastDay)}</b> 장 마감 자료로 찾습니다
-    </>
-  );
+  return "실행할 때 KRX 최신 자료를 수집합니다";
 }
 
 function ScreenHeader({ screen, screens, run, block, status, rows, onRun }: HeaderProps) {
@@ -505,14 +503,21 @@ function Results({ screen, run, rows, status, block, onRun }: ResultsProps) {
   const result = shownResult(run);
   const storeVersion = useScreenerStore((s) => s.storeVersion);
   const rerun = block === null ? rerunReason(run, storeVersion, status) : null;
-  if (run?.kind === "failed") {
-    return (
-      <Notice title="실행하지 못했습니다" tone="alert" action={<RetryButton label="다시 실행" disabled={block !== null} onClick={onRun} />}>
-        {run.error.message}
-      </Notice>
-    );
-  }
-  if (result) return <ResultList screen={screen} result={result} rows={rows} running={run?.kind === "running"} rerun={rerun} onRun={onRun} />;
+  const failure = run?.kind === "failed" ? run : null;
+  const message = failure?.error.reason === "data_changed"
+    ? `수집 중 자료가 바뀌었습니다. ${failure.error.message}`
+    : failure?.error.message;
+  if (result) return (
+    <>
+      {failure && <p role="alert" className="flex-none border-b border-line px-3 py-2 text-s text-danger">실행하지 못했습니다. {message} 이전 결과와 수집 시각을 유지합니다.</p>}
+      <ResultList screen={screen} result={result} rows={rows} running={run?.kind === "running"} rerun={rerun} onRun={onRun} />
+    </>
+  );
+  if (failure) return (
+    <Notice title="실행하지 못했습니다" tone="alert" action={<RetryButton label="다시 실행" disabled={block !== null} onClick={onRun} />}>
+      결과 없음. {message}
+    </Notice>
+  );
   if (run?.kind === "running") return <Notice title="찾는 중입니다" />;
   const { title, body } = NOT_RUN[block ?? "ready"];
   return <Notice title={title}>{body}</Notice>;
@@ -524,6 +529,10 @@ interface ResultListProps extends Omit<ResultsProps, "run" | "status" | "block">
   rerun: Rerun | null;
 }
 
+const collectionTime = (seconds: number) => new Intl.DateTimeFormat("sv-SE", {
+  timeZone: "Asia/Seoul", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23",
+}).format(new Date(seconds * 1000));
+
 function ResultList({ screen, result, rows, running, rerun, onRun }: ResultListProps) {
   const active = useActiveSymbol();
   const list = useRef<HTMLUListElement>(null);
@@ -531,10 +540,18 @@ function ResultList({ screen, result, rows, running, rerun, onRun }: ResultListP
   const sort = useScreenerStore((s) => s.sort);
   const left = result.excluded.listedTooShort + result.excluded.historyShort;
   return (
-    <section aria-label="결과" aria-busy={running} className={`flex min-h-0 flex-1 flex-col ${running ? "opacity-50" : ""}`}>
+    <section aria-label="결과" aria-busy={running} className={`flex flex-col ${running ? "opacity-50" : ""}`}>
       <div className="flex flex-none items-baseline gap-1.5 px-3 pt-2.5">
         <span className="text-xl font-[700] leading-none">{count(rows.length)}</span>
         <span className="text-s text-text-2">종목 · {dayLabel(result.asOf, result.asOf)} 기준</span>
+      </div>
+      <div aria-label="결과 자료" className="flex-none space-y-1 px-3 pt-1 text-xs leading-relaxed text-text-2">
+        <p>기준 관측일 {result.asOf} · KRX</p>
+        <p>수집 범위 (KST) <time>{collectionTime(result.collectionStartedAt)}</time> ~ <time>{collectionTime(result.collectionCompletedAt)}</time></p>
+        <p>최신가는 일봉 0봉 가격 · 등락률은 직전 거래 일봉 대비</p>
+        <p>{screen.conditions.some((condition) => "period" in condition) ? "맞은 날짜는 첫 봉 조건의 최근 일치일 · 주·월봉은 시작일" : "맞은 날짜는 기준 관측일입니다"}</p>
+        <p>잠정은 이번 수집의 당일 요약입니다</p>
+        <p>자료 누락 {count(result.missingSummary)}종목{result.missingSummary > 0 && " · 자료를 확인하지 못해 판정에서 빠졌습니다"}</p>
       </div>
       <p className="flex-none px-3 pb-2 pt-1 text-xs text-text-3">
         대상 {count(result.universe)}종목 · 빠짐: {excludedText(result.excluded)}
@@ -552,7 +569,9 @@ function ResultList({ screen, result, rows, running, rerun, onRun }: ResultListP
         <div className="border-t border-line px-6 py-8">
           <p className="text-m font-[650]">결과 없음</p>
           <p className="mt-1.5 text-s leading-[1.5] text-text-2">
-            대상 {count(result.universe)}종목 가운데 조건을 모두 만족하는 종목이 없습니다.
+            {result.missingSummary > 0
+              ? `확인한 자료에서는 조건을 모두 만족하는 종목이 없습니다. 자료 누락 ${count(result.missingSummary)}종목은 판정할 수 없습니다.`
+              : `대상 ${count(result.universe)}종목 가운데 조건을 모두 만족하는 종목이 없습니다.`}
             {left > 0 && ` 상장 기간이나 이력이 짧아 ${count(left)}종목이 빠졌습니다.`}
           </p>
           <button type="button" className="tb-btn mt-3 h-8 border border-line text-s" onClick={() => editScreen(screen.id)}>
@@ -563,7 +582,7 @@ function ResultList({ screen, result, rows, running, rerun, onRun }: ResultListP
       ) : (
         <>
           <SortHeader sort={sort} />
-          <ul ref={list} aria-label={`${screen.name} 결과`} className="min-h-0 flex-1 overflow-auto">
+          <ul ref={list} aria-label={`${screen.name} 결과`}>
             {rows.map((r) => (
               <ResultRow key={r.symbol} row={r} screen={screen} asOf={result.asOf} active={r.symbol === active} />
             ))}
@@ -576,7 +595,7 @@ function ResultList({ screen, result, rows, running, rerun, onRun }: ResultListP
 
 const COLUMNS: readonly { key: ResultSortKey; label: string }[] = [
   { key: "name", label: "종목" },
-  { key: "close", label: "종가" },
+  { key: "close", label: "최신가" },
   { key: "changeRate", label: "등락률" },
   { key: "matchedDate", label: "맞은 날짜" },
 ];
@@ -596,7 +615,7 @@ function SortHeader({ sort }: { sort: ResultSort }) {
             onClick={() => setSort(nextSort(sort, key))}
             className={`flex items-center gap-0.5 hover:text-text ${key === "name" ? "" : "justify-end"} ${on ? "font-[650] text-text-2" : ""}`}
           >
-            {label}
+            <span>{label}{key === "close" && <small className="block font-normal">일봉 날짜</small>}</span>
             {on && <SortIcon dir={sort.descending ? "down" : "up"} />}
           </button>
         );
@@ -620,13 +639,16 @@ function ResultRow({ row, screen, asOf, active }: { row: ScreenerRow; screen: Sc
       >
         <span className="min-w-0">
           <b className="block truncate font-[550]">{row.name}</b>
-          <small className="text-xs text-text-3">{row.symbol}</small>
+          <small className="text-xs text-text-3">{row.symbol}{row.provisional && <em className="ml-1 not-italic text-warning">잠정</em>}</small>
         </span>
-        <span className="text-right">{formatPrice(row.close, false)}</span>
+        <span className="text-right" aria-label={`최신가 ${formatPrice(row.close, false)}, 최신 일봉 ${row.latestBarDate}${row.provisional ? ", 당일 요약 잠정" : ""}`}>
+          {formatPrice(row.close, false)}
+          <small className="block text-[10px] text-text-3">{row.latestBarDate}</small>
+        </span>
         <span className={`text-right text-s font-[550] ${row.changeRate === null ? "text-text-3" : DIR_CLASS[direction(row.changeRate)]}`}>
           {row.changeRate === null ? "—" : formatPercent(row.changeRate)}
         </span>
-        <span className={`text-right text-s ${matched.current ? "font-[650] text-accent" : "text-text-2"}`}>{matched.text}</span>
+        <span title={`첫 봉 조건 일치 ${row.matchedDate}`} className={`text-right text-s ${matched.current ? "font-[650] text-accent" : "text-text-2"}`}>{matched.text}</span>
       </button>
     </li>
   );

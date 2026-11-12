@@ -45,10 +45,11 @@ pub struct Seen {
     pub ws: WsHub,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct ScriptedReply {
     pub status: u16,
     pub body: Value,
+    #[serde(skip)]
     pub delay: Duration,
 }
 
@@ -125,6 +126,7 @@ impl FakeKiwoom {
             .route("/api/dostk/stkinfo", post(handle))
             .route("/api/dostk/frgnistt", post(handle))
             .route("/_fake/respond-with", post(admin_respond_with))
+            .route("/_fake/script", post(admin_script))
             .route("/_fake/delay", post(admin_delay))
             .route("/_fake/reject-token", post(admin_reject_token))
             .route("/_fake/reset", post(admin_reset))
@@ -259,6 +261,8 @@ struct SampleKrxMarket {
     as_of: String,
     #[serde(default)]
     condition_stocks: bool,
+    #[serde(default)]
+    extra_stocks: usize,
 }
 
 async fn admin_respond_with(State(seen): State<Arc<Seen>>, Json(r): Json<RespondWith>) -> Response {
@@ -269,6 +273,21 @@ async fn admin_respond_with(State(seen): State<Arc<Seen>>, Json(r): Json<Respond
         }
         Err(_) => (StatusCode::BAD_REQUEST, format!("HTTP 상태 코드가 아닙니다: {}", r.status)).into_response(),
     }
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ReplyScript {
+    api_id: String,
+    replies: Vec<ScriptedReply>,
+}
+
+async fn admin_script(State(seen): State<Arc<Seen>>, Json(script): Json<ReplyScript>) -> Response {
+    if script.replies.iter().any(|reply| StatusCode::from_u16(reply.status).is_err()) {
+        return (StatusCode::BAD_REQUEST, "HTTP 상태 코드가 아닙니다").into_response();
+    }
+    seen.scripts.lock().unwrap().insert(script.api_id, script.replies.into());
+    StatusCode::NO_CONTENT.into_response()
 }
 
 async fn admin_delay(State(seen): State<Arc<Seen>>, Json(d): Json<Delay>) -> StatusCode {
@@ -290,7 +309,15 @@ async fn admin_krx_market(State(seen): State<Arc<Seen>>, Json(m): Json<SampleKrx
     match KstDate::parse_yyyymmdd(&m.as_of) {
         Some(as_of) => {
             let sample = KrxMarket::sample(as_of);
-            let market = if m.condition_stocks { sample.with_condition_stocks() } else { sample };
+            let mut market = if m.condition_stocks { sample.with_condition_stocks() } else { sample };
+            if m.extra_stocks > 5000 { return (StatusCode::BAD_REQUEST, "합성 종목은 5000개 이하입니다").into_response(); }
+            let template = market.stocks[0].clone();
+            market.stocks.extend((0..m.extra_stocks).map(|i| {
+                let mut stock = template.clone();
+                stock.code = extra_stock_code(i);
+                stock.name = format!("합성종목{i:03}");
+                stock
+            }));
             *seen.krx_market.lock().unwrap() = Some(Arc::new(market));
             StatusCode::NO_CONTENT.into_response()
         }
