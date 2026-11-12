@@ -463,7 +463,7 @@ impl BarService {
         R: MarketRequest,
         R::Response: ChartBody,
     {
-        let scope = MergeScope(self.resets.load(Ordering::SeqCst));
+        let scope = MergeScope::Bars(self.resets.load(Ordering::SeqCst));
         let page = self.rest.call(req, cont, prio, scope).await?;
         match parse_chart(page.body, period) {
             Ok(ChartRows::Rows(rows)) => Ok(Fetched { rows, next: page.next.map(|key| Cont { key, base, received_at: self.clock.now(), pending_months: Vec::new(), months_before: None }) }),

@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::io;
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -16,6 +16,7 @@ use serde_json::{Value, json};
 
 pub mod investors;
 pub mod krx;
+pub mod summary;
 mod ws;
 pub use krx::{KrxBar, KrxMarket, KrxStock};
 pub use ws::{DEFAULT_PING_EVERY, WsHub, WsStats, tick_0j, trade_0b};
@@ -39,7 +40,16 @@ pub struct Seen {
     pub extra_kospi_stocks: AtomicUsize,
     pub krx_market: Mutex<Option<Arc<KrxMarket>>>,
     pub calls: Mutex<Vec<Call>>,
+    pub quote_rows: Mutex<Option<Vec<Value>>>,
+    pub scripts: Mutex<HashMap<String, VecDeque<ScriptedReply>>>,
     pub ws: WsHub,
+}
+
+#[derive(Debug, Clone)]
+pub struct ScriptedReply {
+    pub status: u16,
+    pub body: Value,
+    pub delay: Duration,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -83,6 +93,8 @@ impl Seen {
         self.overrides.lock().unwrap().clear();
         self.key_overrides.lock().unwrap().clear();
         self.delays.lock().unwrap().clear();
+        self.scripts.lock().unwrap().clear();
+        *self.quote_rows.lock().unwrap() = None;
         self.rejected_tokens.lock().unwrap().clear();
     }
 
@@ -160,6 +172,14 @@ impl FakeKiwoom {
 
     pub fn set_krx_market(&self, market: KrxMarket) {
         *self.seen.krx_market.lock().unwrap() = Some(Arc::new(market));
+    }
+
+    pub fn set_quote_rows(&self, rows: Vec<Value>) {
+        *self.seen.quote_rows.lock().unwrap() = Some(rows);
+    }
+
+    pub fn script(&self, api_id: &str, replies: Vec<ScriptedReply>) {
+        self.seen.scripts.lock().unwrap().insert(api_id.to_owned(), replies.into());
     }
 
     pub fn calls(&self) -> Vec<Call> {
@@ -292,6 +312,13 @@ async fn handle(State(seen): State<Arc<Seen>>, headers: HeaderMap, body: String)
     let next_key = continuation.then(|| h("next-key"));
     let request: Value = serde_json::from_str(&body).unwrap_or(Value::Null);
     seen.calls.lock().unwrap().push(Call { api_id: api_id.clone(), body: request.clone(), next_key: next_key.clone() });
+    let scripted = seen.scripts.lock().unwrap().get_mut(&api_id).and_then(VecDeque::pop_front);
+    if let Some(reply) = scripted {
+        tokio::time::sleep(reply.delay).await;
+        let mut response = respond(reply.body, false);
+        *response.status_mut() = StatusCode::from_u16(reply.status).expect("합성 응답 HTTP 상태");
+        return response;
+    }
     let delay = seen.delays.lock().unwrap().get(&api_id).copied();
     if let Some(by) = delay {
         tokio::time::sleep(by).await;
@@ -305,6 +332,12 @@ async fn handle(State(seen): State<Arc<Seen>>, headers: HeaderMap, body: String)
     }
     if seen.rejected_tokens.lock().unwrap().contains(&h("authorization")) {
         return respond(json!({"return_code": 3, "return_msg": "인증에 실패했습니다[8005:Token이 유효하지 않습니다]"}), true);
+    }
+    if api_id == "ka10095" {
+        let rows = seen.quote_rows.lock().unwrap().clone();
+        if let Some(rows) = rows {
+            return respond(summary::response(&rows, &request), true);
+        }
     }
     let market = seen.krx_market.lock().unwrap().clone();
     if let Some(resp) = market.as_deref().and_then(|m| investors::answer(m, &api_id, &request, next_key.as_deref())) {
