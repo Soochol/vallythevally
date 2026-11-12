@@ -2,7 +2,7 @@ use super::*;
 
 fn tempdir() -> tempfile::TempDir { tempfile::tempdir_in(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target")).unwrap() }
 
-async fn json(client: &reqwest::Client, url: &str) -> Value {
+pub(super) async fn json(client: &reqwest::Client, url: &str) -> Value {
     let response = client.get(url).send().await.unwrap().error_for_status().unwrap();
     serde_json::from_slice(&response.bytes().await.unwrap()).unwrap()
 }
@@ -18,12 +18,12 @@ fn listings(kiwoom: &common::FakeKiwoom) {
     kiwoom.seen.respond_with("ka10099", StatusCode::OK, body);
 }
 
-async fn start(client: &reqwest::Client, base: &str) -> Value {
+pub(super) async fn start(client: &reqwest::Client, base: &str) -> Value {
     let response = client.post(format!("{base}/api/financial-update")).send().await.unwrap().error_for_status().unwrap();
     serde_json::from_slice(&response.bytes().await.unwrap()).unwrap()
 }
 
-async fn finished(client: &reqwest::Client, base: &str) -> Value {
+pub(super) async fn finished(client: &reqwest::Client, base: &str) -> Value {
     tokio::time::timeout(Duration::from_secs(60), async {
         loop {
             let result = json(client, &format!("{base}/api/financial-update")).await;
@@ -258,7 +258,7 @@ async fn all_companies_recent_reports_precede_history_and_completed_history_is_r
     server.stop().await;
 }
 
-async fn command(client: &reqwest::Client, base: &str, action: &str) -> Value {
+pub(super) async fn command(client: &reqwest::Client, base: &str, action: &str) -> Value {
     let response = client.post(format!("{base}/api/financial-update/{action}")).send().await.unwrap().error_for_status().unwrap();
     serde_json::from_slice(&response.bytes().await.unwrap()).unwrap()
 }
@@ -690,4 +690,52 @@ async fn missing_dart_configuration_never_dispatches_on_repeated_start_or_resume
     }
     assert!(fake.state.lock().unwrap().calls.is_empty());
     server.stop().await;
+}
+
+
+pub(super) fn automatic_process(fake: &Fake, kiwoom: &common::FakeKiwoom, dir: &std::path::Path, start: &str) -> common::Server {
+    common::Server::spawn_with(kiwoom, &dir.join("run/server.lock"), dir, &[
+        ("OPENDART_API_KEY", std::ffi::OsStr::new(KEY)),
+        ("VALLY_DART_BASE_URL", std::ffi::OsStr::new(&fake.url)),
+        ("VALLY_KIND_BASE_URL", std::ffi::OsStr::new(&fake.url)),
+        ("VALLY_CLOCK_START", std::ffi::OsStr::new(start)),
+        ("VALLY_FINANCIAL_AUTOMATIC", std::ffi::OsStr::new("on")),
+    ])
+}
+
+#[tokio::test]
+async fn automatic_start_catches_up_once_and_same_day_restart_does_not_create_another_job() {
+    let fake = Fake::start().await;
+    let kiwoom = common::FakeKiwoom::start().await;
+    let mut body = fake_kiwoom::fixture("ka10099_0");
+    body["list"].as_array_mut().unwrap().retain(|row| row["code"] == "005930");
+    kiwoom.seen.respond_with("ka10099", StatusCode::OK, body);
+    let dir = tempdir();
+    let server = automatic_process(&fake, &kiwoom, dir.path(), "20151231070001");
+    let base = format!("http://{}", server.addr().await);
+    let client = reqwest::Client::new();
+    tokio::time::timeout(Duration::from_secs(8), async {
+        while fake.count("list.json") == 0 { tokio::time::sleep(Duration::from_millis(20)).await; }
+    }).await.expect("startup catch-up must run independently of chart and status reads");
+    let done = finished(&client, &base).await;
+    assert_eq!(done["historyComplete"], true, "{done}");
+    assert_eq!(done["nextCheckAt"], kst(KstDate::new(2016, 1, 1).unwrap(), 7, 0, 0).unix());
+    let calls = fake.state.lock().unwrap().calls.len();
+    server.stop().await;
+    let restarted = automatic_process(&fake, &kiwoom, dir.path(), "20151231220000");
+    let base = format!("http://{}", restarted.addr().await);
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert_eq!(json(&client, &format!("{base}/api/financial-update")).await["id"], done["id"]);
+    assert_eq!(fake.state.lock().unwrap().calls.len(), calls);
+    restarted.stop().await;
+    let later = automatic_process(&fake, &kiwoom, dir.path(), "20160104120000");
+    let base = format!("http://{}", later.addr().await);
+    tokio::time::timeout(Duration::from_secs(8), async {
+        while fake.count("list.json") == 1 { tokio::time::sleep(Duration::from_millis(20)).await; }
+    }).await.unwrap();
+    let caught_up = finished(&client, &base).await;
+    assert_eq!(caught_up["id"].as_u64().unwrap(), done["id"].as_u64().unwrap() + 1, "several missed dates require one current check");
+    assert_eq!(fake.count("list.json"), 2);
+    assert_eq!(report_calls(&fake, "11013"), 1, "unchanged confirmed reports are reused");
+    later.stop().await;
 }

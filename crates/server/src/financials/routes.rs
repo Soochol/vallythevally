@@ -17,7 +17,10 @@ pub fn routes(service: Arc<Financials>, symbols: Arc<SymbolDirectory>) -> Router
 async fn update_status(State(state): State<RouteState>) -> Json<FinancialUpdatePage> { Json(state.service.update_status().await) }
 
 async fn pause_update(State(state): State<RouteState>) -> Json<FinancialUpdatePage> { Json(state.service.pause_update().await) }
-async fn resume_update(State(state): State<RouteState>) -> Json<FinancialUpdatePage> { Json(state.service.resume_update().await) }
+async fn resume_update(State(state): State<RouteState>) -> Json<FinancialUpdatePage> {
+    let symbols = state.symbols.updates().borrow().clone().map(|directory| directory.all().cloned().collect()).unwrap_or_default();
+    Json(state.service.resume_update(symbols).await)
+}
 
 async fn start_update(State(state): State<RouteState>) -> Result<Json<FinancialUpdatePage>, ApiFailure> { start(&state).await.map(Json) }
 

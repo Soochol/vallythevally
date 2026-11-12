@@ -443,9 +443,13 @@ async fn a_schema_4_store_keeps_its_daily_bars_and_history_and_is_listed_with_sh
     };
     let seen = fake.calls().len();
 
+    let listing_requests = count(&fake.calls(), "ka10099");
     fake.delay("ka10099", Duration::from_secs(60));
     let server = boot_updating();
     server.addr().await;
+    tokio::time::timeout(Duration::from_secs(10), async {
+        while count(&fake.calls(), "ka10099") == listing_requests { tokio::time::sleep(Duration::from_millis(10)).await; }
+    }).await.expect("토큰 발급을 마치고 지연된 종목 목록 요청이 시작된 뒤 응답 전에 종료한다");
     let logs = server.stop().await;
     assert!(logs.contains("스크리너 저장소를 올립니다"), "종목 목록을 받기 전에 꺼진 시작도 저장소를 스키마 6으로 올렸다");
     fake.reset();

@@ -3,6 +3,7 @@ pub mod calculate;
 pub mod model;
 mod routes;
 mod updates;
+mod schedule;
 pub mod store;
 pub mod xbrl;
 
@@ -25,6 +26,8 @@ pub struct Financials {
     resolving: Mutex<HashMap<String, ResolutionAttempt>>,
     runs: Mutex<HashMap<String, Run>>,
     update: tokio::sync::Mutex<updates::UpdateRun>,
+    automatic: std::sync::atomic::AtomicBool,
+    update_finished: tokio::sync::Notify,
 }
 
 struct Run {
@@ -46,11 +49,11 @@ struct ResolutionFailure {
 enum StatementStep { Continue(StatementRequest), Done(Option<Statement>) }
 
 #[derive(Clone, Copy)]
-enum CollectionScope { Recent(i32), ResumedRecent(i32), History(i32) }
+enum CollectionScope { Recent(i32), ResumedRecent(i32), History(i32), Changes(i32) }
 
 impl CollectionScope {
     fn years(self) -> std::ops::RangeInclusive<i32> {
-        match self { Self::Recent(year) | Self::ResumedRecent(year) => (year - 3).max(2015)..=year, Self::History(year) => 2015..=year - 4 }
+        match self { Self::Recent(year) | Self::ResumedRecent(year) => (year - 3).max(2015)..=year, Self::History(year) | Self::Changes(year) => 2015..=year - 4 }
     }
 }
 
@@ -60,7 +63,7 @@ impl Financials {
     }
 
     pub fn with_store(client: Option<Client>, store: Result<Store, Failure>, clock: Clock) -> Arc<Self> {
-        Arc::new(Self { client, store, clock, resolving: Mutex::new(HashMap::new()), runs: Mutex::new(HashMap::new()), update: Default::default() })
+        Arc::new(Self { client, store, clock, resolving: Mutex::new(HashMap::new()), runs: Mutex::new(HashMap::new()), update: Default::default(), automatic: Default::default(), update_finished: Default::default() })
     }
 
     fn store(&self) -> Result<&Store, Failure> {
@@ -132,7 +135,7 @@ impl Financials {
             tokio::spawn(async move {
                 let mut register_refresh = unpersisted_refresh;
                 loop {
-                    let failure = service.collect(&security, register_refresh, scope).await.err().filter(|failure| *failure != Failure::Paused);
+                    let failure = service.collect(&security, register_refresh, scope).await.err().filter(|failure| !matches!(failure, Failure::Paused | Failure::Yielded));
                     if let Some(failure) = failure {
                         tracing::warn!(?failure, "재무 자료 수집을 저장하지 못했습니다");
                     }
@@ -209,7 +212,7 @@ impl Financials {
                     collection.last_checked_at = Some(self.clock.now().unix());
                     collection.disclosure_version = collection.refresh_version;
                 }
-                Err(error @ (Failure::Paused | Failure::Storage)) => return Err(error),
+                Err(error @ (Failure::Paused | Failure::Yielded | Failure::Storage)) => return Err(error),
                 Err(error @ (Failure::Authentication | Failure::RateLimited)) if client.has_journal() => return Err(error),
                 Err(failure) => collection.disclosure_failure = Some(failure),
             }
@@ -224,8 +227,14 @@ impl Financials {
         for year in scope.years().rev() { for index in 0..REPORT_CODES.len() { requests.insert((year, index)); } }
         let requests: Vec<_> = if matches!(scope, CollectionScope::History(_)) { requests.into_iter().rev().collect() } else { requests.into_iter().collect() };
         for (year, index) in requests {
+            client.check_control()?;
             let code = REPORT_CODES[index];
             let key = format!("{year}/{code}");
+            if matches!(scope, CollectionScope::Changes(_)) && collection.working_reports().get(&key).is_none_or(|report| {
+                !statement_outdated(report, &collection.disclosures) && !dividends_outdated(report, &collection.disclosures)
+                    && report.statement.failure.is_none() && report.dividends.failure.is_none()
+                    && report.statement.data.as_ref().is_none_or(|statement| statement.source_failure.is_none())
+            }) { continue; }
             let mut report = collection.working_reports_mut().remove(&key).unwrap_or_else(|| Report { statement_request: None, business_year: year, report_code: code.into(), statement: Default::default(), dividends: Default::default() });
             let report_outdated = statement_outdated(&report, &collection.disclosures) || dividends_outdated(&report, &collection.disclosures);
             let retry_source = report.statement.data.as_ref().is_some_and(|s| s.source_failure.is_some());
@@ -233,7 +242,7 @@ impl Financials {
                 loop {
                     let step = self.statement_step(client, corp, year, code, &collection.disclosures, report.statement_request.as_ref()).await;
                     let complete = match step {
-                        Err(error @ (Failure::Paused | Failure::Storage)) => return Err(error),
+                        Err(error @ (Failure::Paused | Failure::Yielded | Failure::Storage)) => return Err(error),
                         Err(error @ (Failure::Authentication | Failure::RateLimited)) if client.has_journal() => return Err(error),
                         Ok(StatementStep::Continue(next)) => { report.statement_request = Some(next); false }
                         result => {
@@ -257,7 +266,7 @@ impl Financials {
                     if rows.iter().any(|row| !receipt_is_current(&collection.disclosures, field(row, "rcept_no"))) { return Err(Failure::ReceiptMismatch); }
                     dividends(rows, corp)
                 });
-                if let Err(error @ (Failure::Paused | Failure::Storage)) = result { return Err(error); }
+                if let Err(error @ (Failure::Paused | Failure::Yielded | Failure::Storage)) = result { return Err(error); }
                 if let Err(error @ (Failure::Authentication | Failure::RateLimited)) = result && client.has_journal() { return Err(error); }
                 report.dividends.apply(result, self.clock.now().unix(), collection.refresh_version);
             } else if code == "11011" { report.dividends.validated_version = Some(collection.disclosure_version); }
@@ -287,7 +296,7 @@ impl Financials {
         if !receipt_is_current(disclosures, receipt) { return Err(Failure::ReceiptMismatch); }
         let (files, source_failure) = match client.archive("fnlttXbrl.xml", &[("rcept_no", receipt.clone()), ("reprt_code", code.into())]).await {
             Ok(files) => (files, None),
-            Err(error @ (Failure::Paused | Failure::Storage)) => return Err(error),
+            Err(error @ (Failure::Paused | Failure::Yielded | Failure::Storage)) => return Err(error),
             Err(error @ (Failure::Authentication | Failure::RateLimited)) if client.has_journal() => return Err(error),
             Err(failure) => (Vec::new(), Some(failure)),
         };

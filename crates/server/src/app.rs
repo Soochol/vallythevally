@@ -182,6 +182,7 @@ async fn serve(config: Config, token_file: TokenFile) -> ExitCode {
     if let Err(failure) = financial_store { tracing::warn!(?failure, "재무 저장소를 열 수 없습니다"); }
     let dart = config.opendart_api_key.clone().and_then(|key| crate::financials::client::Client::new(key, config.dart_base_url.clone(), config.kind_base_url.clone()).ok());
     let financials = crate::financials::Financials::with_store(dart, financial_store, clock.clone());
+    if config.financial_automatic { financials.start_automatic(symbols.clone()); }
     let financial_routes = crate::financials::routes(financials, symbols.clone());
     let app = router(Arc::new(AppState { symbols, bars, rest, db, clock, static_dir: config.static_dir.clone(), hub, screener })).merge(financial_routes);
     tracing::info!(static_dir = %config.static_dir.display(), "요청을 받기 시작합니다");
