@@ -1,3 +1,4 @@
+import { financialListings, startUpdate } from "./financial-update-helpers";
 import type { Page } from "@playwright/test";
 import type { Drawing } from "../src/api/generated/Drawing";
 import type { Layout } from "../src/api/generated/Layout";
@@ -130,10 +131,11 @@ for (const source of ["전체 막대", "선택 막대", "개체 메뉴", "차트
 }
 
 test.describe("재무 자료의 중첩 DOM 메뉴", () => {
-  test.use({ financialFixture: true, clockStart: "20171231120000" });
+  test.use({ financialFixture: true, bootReplies: [financialListings], clockStart: "20171231120000" });
   test("보고기간 이름·방향키·Space·Enter·글자 이동과 단계별 Esc를 지킨다", async ({ page, app }) => {
     const layout: Layout = await (await fetch(`${app.url}/api/layouts/${DEFAULT_LAYOUT_ID}`)).json();
     expect((await fetch(`${app.url}/api/layouts/${DEFAULT_LAYOUT_ID}`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...layout, revision: layout.revision + 1, cells: [{ ...layout.cells[0], symbol: "005930", venue: "combined", period: "Y", chartSettings: { v: 2, style: "candle", scale: "normal", compare: [], indicators: [{ id: "revenue", spec: { kind: "revenue" }, panel: "revenue", visible: true, style: { colors: ["ind-2"], width: 1 } }], panels: [{ id: "revenue", stretch: 0.3 }] } }] }) })).ok).toBe(true);
+    await startUpdate(app, true);
     await page.goto("/");
     const row = page.locator('[data-indicator-row="revenue"]');
     await expect(row).toContainText("확인 완료");

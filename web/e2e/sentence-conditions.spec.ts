@@ -88,3 +88,21 @@ test("모든 조건 종류의 문장 숫자 편집을 저장하고 마지막 줄
     });
   }
 });
+
+test("넓게 보기에서 접힌 잘못된 조건을 저장하면 펼쳐진 첫 오류 값에 포커스를 준다", async ({ page }) => {
+  await page.goto("/");
+  await openScreener(page);
+  await panel(page).getByRole("button", { name: "새 조건식", exact: true }).click();
+  const editor = sentenceEditor(page);
+  await renameScreen(editor, "접힌 오류 값");
+  await addCondition(editor);
+  await setNumber(editor, "조건 1 최근 기간", "0");
+  await page.getByRole("button", { name: "넓게 보기", exact: true }).click();
+  await expect(editor.getByRole("button", { name: "조건 펼치기", exact: true })).toBeVisible();
+  await editor.getByRole("button", { name: "저장", exact: true }).click();
+  const invalid = numberToken(editor, "조건 1 최근 기간");
+  await expect(invalid).toBeVisible();
+  await expect(invalid).toHaveAttribute("aria-invalid", "true");
+  await expect(invalid).toBeFocused();
+  expect((await (await page.request.get("/api/screens")).json()).screens).toEqual([]);
+});

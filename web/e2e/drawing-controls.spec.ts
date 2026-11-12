@@ -30,6 +30,13 @@ test("추세선 작은 막대의 색·굵기·잠금·복제·삭제 되돌리�
   await selectOption(bar.getByLabel("선 굵기", { exact: true }), "4");
   await selectOption(bar.getByLabel("선 모양", { exact: true }), "dashed");
   await expect.poll(async () => (await drawings(app))[0]?.style).toMatchObject({ line: { color: "#224466", width: 4, dash: "dashed" } });
+  await mkdir(resolve("../target/ux-screens"), { recursive: true });
+  for (const size of [{ width: 1440, height: 900 }, { width: 1024, height: 768 }]) {
+    await page.setViewportSize(size);
+    await expect(bar).toBeInViewport();
+    await page.screenshot({ path: resolve(`../target/ux-screens/drawing-toolbar-${size.width}x${size.height}.png`) });
+  }
+  await page.setViewportSize({ width: 1440, height: 900 });
   await bar.getByRole("button", { name: "잠금", exact: true }).click();
   await expect.poll(async () => (await drawings(app))[0]?.locked).toBe(true);
   await bar.getByRole("button", { name: "잠금 풀기", exact: true }).click();

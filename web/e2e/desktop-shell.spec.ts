@@ -68,6 +68,9 @@ test("상태 막대는 연결·저장·서버 시계와 공유 재무 조회의 
   const financial = await (await fetch(`${app.url}/api/symbols/005930/financials?period=Y`)).json();
   financial.status = "collecting";
   financial.progress = { completed: 3, total: 10, failed: 1, pending: 6 };
+  const update = await (await fetch(`${app.url}/api/financial-update`)).json();
+  update.status = "collecting";
+  await page.route("**/api/financial-update", (route) => route.fulfill({ json: update }));
   await page.route("**/financials?period=Y", (route) => route.fulfill({ json: financial }));
   const settings = { v: 2, style: "candle", scale: "normal", compare: [], indicators: [{ id: "revenue", spec: { kind: "revenue" }, panel: "revenue", visible: true, style: { colors: ["ind-1"], width: 1 } }], panels: [{ id: "revenue", stretch: 0.3 }] };
   expect((await fetch(`${app.url}/api/layouts/${layout.id}`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...layout, revision: layout.revision + 1, cells: [{ ...layout.cells[0], symbol: "005930", venue: "combined", period: "Y", chartSettings: settings }] }) })).ok).toBe(true);
@@ -81,6 +84,7 @@ test("상태 막대는 연결·저장·서버 시계와 공유 재무 조회의 
   await tabs(page).getByRole("tab", { name: "개체", exact: true }).click();
   await expect(footer).toContainText("자동 저장됨");
   financial.status = "partial_failure";
+  update.status = "partial_failure";
   await expect(footer.getByLabel("재무 수집 상태")).toContainText("일부 조회 실패");
   await page.reload();
   await expect(footer.getByLabel("재무 수집 상태")).toContainText("일부 조회 실패");

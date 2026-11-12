@@ -1,3 +1,4 @@
+import { financialListings, startUpdate } from "./financial-update-helpers";
 import type { Page } from "@playwright/test";
 import { installAxisProbe } from "./axis-probe";
 import { installChartProbe } from "./chart-probe";
@@ -26,6 +27,10 @@ async function open(page: Page, app: App, period = "D") {
     stk_dt_pole_chart_qry: Array.from({ length: 130 }, (_, i) => ({ dt: new Date(Date.UTC(2026, 10, 6 - i)).toISOString().slice(0, 10).replaceAll("-", ""), open_pric: String(190000 - i * 100), high_pric: String(191000 - i * 100), low_pric: String(189000 - i * 100), cur_prc: String(190500 - i * 100), trde_qty: "1000000" })),
     _headers: { "cont-yn": "N", "next-key": "" },
   } });
+  if (period === "Y") {
+    await app.fake.respondWith(financialListings);
+    await startUpdate(app, true);
+  }
   await page.goto(`/?symbol=005930&period=${period}`);
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
   await expect.poll(() => plotted(page)).toBe(2);
