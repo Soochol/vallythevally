@@ -80,3 +80,13 @@ test("기간 글자", () => {
   expect(formatDuration(0)).toBe("0분");
   expect(formatDuration(-(2 * 86_400 + 3 * 3_600 + 5 * 60))).toBe("2일 3시간 5분");
 });
+
+
+test("고른 추세선은 저장된 통계 설정과 무관하게 변화율·실제 봉 수를 보인다", () => {
+  const selected = trendline.shapes({ points, style, text: null, selected: true }, fakeContext({ barsBetween: () => ({ count: 21, volume: 0 }) }));
+  expect(selected.find((s) => s.kind === "text")).toMatchObject({ text: "+100.00%\n21봉", box: { padding: 4 } });
+  const zero = trendline.shapes({ points: [{ t: 1, price: 0 }, { t: 2, price: 10 }], style, text: null, selected: true }, fakeContext({ barsBetween: () => null }));
+  expect(zero).toHaveLength(1);
+  const falling = trendline.shapes({ points: [...points].reverse(), style, text: null, selected: true }, fakeContext());
+  expect(falling.find((s) => s.kind === "text")).toMatchObject({ text: "-50.00%\n17봉" });
+});

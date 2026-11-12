@@ -43,7 +43,7 @@ export function RightPanel() {
     document.getElementById(`right-tab-${to}`)?.focus();
   };
   return (
-    <div className="right-panel flex min-h-0 min-w-0 flex-col overflow-hidden border-l border-line bg-bg [grid-area:watch]">
+    <div data-chart-control className="right-panel flex min-h-0 min-w-0 flex-col overflow-hidden border-l border-line bg-bg [grid-area:watch]">
       <header className="flex h-10 flex-none items-center gap-1 border-b border-line px-1">
         <nav role="tablist" aria-label="오른쪽 패널" className="flex min-w-0 flex-1 items-center gap-1">
           {VIEW_ORDER.map((to) => <button key={to} id={`right-tab-${to}`} type="button" role="tab" aria-selected={to === view} aria-controls="right-tab-content" tabIndex={to === view ? 0 : -1}
