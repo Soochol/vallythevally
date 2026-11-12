@@ -28,4 +28,3 @@ export const chartDisplayOptions = { financialFixture: true, clockStart: "201712
     { code: "000660", name: "SK하이닉스", marketCode: "0", marketName: "거래소", kind: "A", state: "증거금20%", nxtEnable: "Y", regDay: "19961226", lastPrice: "1296000", listCount: "100000" },
   ], _headers: { "cont-yn": "N", "next-key": "" },
 } }] };
-
