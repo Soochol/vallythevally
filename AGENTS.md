@@ -13,9 +13,10 @@
 - 로컬 서버 준비: `python3 scripts/dev.py build`. 새 worktree·UI 전용 변경·Rust 변경에서의 재사용 조건과 캐시 복구는 [`docs/development-builds.md`](docs/development-builds.md)를 따른다.
 - 서버: `python3 scripts/dev.py cargo clippy -p server --all-targets -- -D warnings`, `python3 scripts/dev.py cargo test -p server`(특정 파일만이면 `--test <이름>`)
 - fake-kiwoom: `python3 scripts/dev.py cargo test -p fake-kiwoom`
-- 개발 빌드 도구 변경 시: `python3 scripts/test-dev.py`.
-- 웹: `cd web && pnpm install --frozen-lockfile && pnpm typecheck && pnpm test`
-- e2e: `python3 scripts/dev.py build --with-fake`를 먼저 하고, `cd web && VALLY_E2E_BIN_DIR=../target/dev/bin ./node_modules/.bin/playwright test [e2e/<파일>]`. 가짜 키움은 자동 시험에서 사용한다.
+- 개발 빌드 도구 변경 시: `python3 scripts/test-dev.py`, 웹 검증 도구 변경 시: `python3 scripts/test-web.py`.
+- 웹: `python3 scripts/web.py check [Vitest 인수]`. 의존성·WASM 준비 후 타입 검사와 단위 시험을 실행한다.
+- e2e: `python3 scripts/web.py e2e [e2e/<파일>] [Playwright 인수]`. 서버·가짜 키움·현재 웹 빌드와 실행별 임시·결과 경로를 자동 준비한다. 준비 실패 시 시험을 중단한다.
+- 새 worktree, 직접 pnpm 명령, WASM 재사용과 E2E 결과 확인은 [`docs/web-checks.md`](docs/web-checks.md)를 따른다.
 - 키움은 fake-kiwoom으로만 시험한다. 시험에서 실제 키움을 부르지 않는다(ADR 0004).
 - 로컬 시험은 unshare 없이 돌린다. `scripts/check.sh`는 지금 쓰지 않는다(나중에 CI로 옮긴다).
 - 큰 빌드 출력과 임시 파일은 작업 폴더 안에 둔다.
@@ -23,11 +24,10 @@
 ## 병렬 검증
 
 - 같은 저장소의 worktree들은 Rust·WASM 컴파일을 한 번에 하나씩 실행한다. 컴파일 작업 수는 `CARGO_BUILD_JOBS=4`로 제한한다.
-- `scripts/dev.py`는 컴파일 명령마다 공통 잠금을 잡고 작업 수를 4로 제한한다. 이 명령 자체에는 바깥 `flock`을 덧씌우지 않는다. 일반 Cargo·CI·배포 빌드는 기본 bundled DuckDB를 유지한다.
-- 공통 잠금은 `$(git rev-parse --path-format=absolute --git-common-dir)/compile.lock`이다. `flock "$(git rev-parse --path-format=absolute --git-common-dir)/compile.lock" env CARGO_BUILD_JOBS=4 cargo build -p server -p fake-kiwoom`처럼 컴파일 명령 하나에만 건다. `cargo check`, `cargo clippy`, `cargo test --no-run`, `pnpm wasm`도 같은 잠금을 쓴다.
-- TypeScript 검사·Vite 빌드·Vitest·Playwright와 컴파일이 끝난 Rust 시험 실행은 잠금 밖에서 진행한다. Rust 시험은 필요한 대상을 `cargo test --no-run`으로 먼저 컴파일한 뒤 같은 옵션으로 실행한다.
-- `pnpm typecheck`, `pnpm build`, `pnpm test`는 WASM 컴파일을 먼저 실행한다. 필요한 WASM을 잠금 안에서 한 번 준비한 뒤, 나머지는 web의 `./node_modules/.bin/tsc -b`, `./node_modules/.bin/vite build`, `./node_modules/.bin/vitest run`으로 나눠 실행할 수 있다. Rust·WASM 소스와 빌드 설정이 이전 검증 때와 같으면 기존 산출물을 재사용한다. 나눠 실행한 명령은 검증 보고에 적는다.
-- worktree마다 `target`, 임시 DB, 로그, Playwright 결과 경로를 분리한다. 한 worktree에서 여러 Playwright를 실행하면 `--output`도 나눈다. 대기 중에는 잠금 소유자와 실행 단계를 확인하고, 다른 세션의 프로세스는 그대로 둔다.
+- `scripts/dev.py`, `scripts/web.py`와 `pnpm wasm/typecheck/test/build`는 필요한 컴파일 잠금을 관리한다. 이 명령들에는 바깥 `flock`을 덧씌우지 않는다. 일치하는 서버·WASM 산출물을 재사용할 때는 공통 컴파일 잠금을 건너뛴다.
+- TypeScript·Vite·Vitest·Playwright와 Rust 시험 실행은 공통 컴파일 잠금 밖에서 진행한다. `dev.py cargo test`가 시험 컴파일과 실행을 자동 분리한다.
+- 관리 명령을 우회해 직접 Rust를 컴파일할 때만 공통 잠금 `$(git rev-parse --path-format=absolute --git-common-dir)/compile.lock`과 작업 수 4를 명령 하나에 적용한다. 직접 시험 컴파일·배포 예시는 [`docs/development-builds.md`](docs/development-builds.md)를 따른다.
+- worktree마다 `target`, 임시 DB와 로그를 분리한다. E2E 도구는 실행별 웹 산출물·임시 파일·결과·보고서를 분리한다. 출력 경로를 직접 지정할 때도 동시 시험끼리 구분한다. 대기 중에는 잠금 소유자와 실행 단계를 확인하고 다른 세션의 프로세스는 그대로 둔다.
 
 ## 배포
 

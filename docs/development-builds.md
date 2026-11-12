@@ -10,12 +10,10 @@ python3 scripts/dev.py build
 
 ## 자동 시험
 
-E2E에 필요한 앱 서버와 가짜 키움을 함께 준비한다.
+E2E 전체 준비와 실행은 [웹 검사와 E2E 도구](web-checks.md)를 사용한다. 서버만 미리 준비하려면 다음 명령으로 가짜 키움도 포함한다.
 
 ```sh
 python3 scripts/dev.py build --with-fake
-cd web
-VALLY_E2E_BIN_DIR=../target/dev/bin ./node_modules/.bin/playwright test
 ```
 
 가짜 키움의 JSON 시험 자료는 실행 파일에 포함한다. 빌드한 worktree를 제거해도 캐시에서 복원한 실행 파일이 그 경로를 읽지 않는다. SQLite·DuckDB 데이터 파일, 로그와 웹 빌드는 각 worktree에서 따로 준비한다.
@@ -37,12 +35,19 @@ python3 scripts/test-dev.py
 python3 scripts/dev.py --bundled cargo check -p server
 ```
 
+관리 명령을 우회해 직접 Cargo 시험을 실행한다면 컴파일만 공통 잠금 아래에서 준비하고 같은 옵션으로 잠금 밖에서 실행한다. 이 수동 절차는 `dev.py cargo test`가 자동 처리하는 단계다.
+
+```sh
+flock "$(git rev-parse --path-format=absolute --git-common-dir)/compile.lock" env CARGO_BUILD_JOBS=4 cargo test --locked -p server --test contract --no-run
+cargo test --locked -p server --test contract
+```
+
 ## 배포용 빌드
 
 배포용 서버는 일반 Cargo의 기본 `bundled-duckdb` 기능으로 빌드한 `target/release/vally-server`를 사용한다. 개발 명령의 `target/dev/bin`과 공유 캐시는 개발·시험용이다. release 컴파일도 저장소 공통 잠금과 작업 수 4를 따른다.
 
 ```sh
-cargo build --locked --release -p server
+flock "$(git rev-parse --path-format=absolute --git-common-dir)/compile.lock" env CARGO_BUILD_JOBS=4 cargo build --locked --release -p server
 ```
 
 DuckDB는 release 바이너리에 포함되므로 개발 캐시나 별도 `libduckdb.so`를 배포할 필요가 없다. 실제 배포 직전에 release 바이너리의 가짜 키움 환경 기동·주요 동작을 검증한다.
