@@ -162,8 +162,9 @@ async function waitUntilSymbolListSettles(url: string): Promise<void> {
   throw new Error("서버가 종목 목록을 받지 못했습니다");
 }
 
-export const test = base.extend<{ app: App; bootReplies: FakeReply[]; clockStart: string | null; extraKospiStocks: number; krxMarket: string | null; krxConditionStocks: boolean; financialFixture: boolean }>({
+export const test = base.extend<{ app: App; bootReplies: FakeReply[]; clockStart: string | null; extraKospiStocks: number; krxMarket: string | null; krxConditionStocks: boolean; financialFixture: boolean; financialAutomatic: boolean }>({
   financialFixture: [false, { option: true }],
+  financialAutomatic: [false, { option: true }],
   bootReplies: [[], { option: true }],
   krxMarket: [null, { option: true }],
   krxConditionStocks: [false, { option: true }],
@@ -172,7 +173,7 @@ export const test = base.extend<{ app: App; bootReplies: FakeReply[]; clockStart
   /** 서버 시계가 시작할 KST 시각(`YYYYMMDDHHMMSS`, 시험용 `VALLY_CLOCK_START`). 서버는 장 시간 밖의 체결을 버린다. */
   clockStart: [null, { option: true }],
 
-  app: async ({ bootReplies, clockStart, extraKospiStocks, krxMarket, krxConditionStocks, financialFixture }, use, testInfo) => {
+  app: async ({ bootReplies, clockStart, extraKospiStocks, krxMarket, krxConditionStocks, financialFixture, financialAutomatic }, use, testInfo) => {
     if (!existsSync(path.join(STATIC_DIR, "index.html"))) throw new Error(`${STATIC_DIR}가 없습니다. 먼저 pnpm build`);
     const dir = await mkdtemp(path.join(tmpdir(), "vally-e2e-"));
     const fake = new Proc(path.join(BIN_DIR, "fake-kiwoom"), [], extraKospiStocks > 0 ? { FAKE_KIWOOM_EXTRA_STOCKS: String(extraKospiStocks) } : {});
@@ -185,7 +186,7 @@ export const test = base.extend<{ app: App; bootReplies: FakeReply[]; clockStart
       if (krxMarket) await client.setKrxMarket(krxMarket, { conditionStocks: krxConditionStocks });
 
       const startServer = async (bind: string, clock: string | null) => {
-        const server = new Proc(path.join(BIN_DIR, "vally-server"), [], { ...serverEnv(dir, fakeBase, bind, clock), ...(dart ? { OPENDART_API_KEY: "SYNTHETIC-DART-E2E", VALLY_DART_BASE_URL: dart.url, VALLY_KIND_BASE_URL: dart.url } : {}) });
+        const server = new Proc(path.join(BIN_DIR, "vally-server"), [], { ...serverEnv(dir, fakeBase, bind, clock), VALLY_FINANCIAL_AUTOMATIC: financialAutomatic ? "on" : "off", ...(dart ? { OPENDART_API_KEY: "SYNTHETIC-DART-E2E", VALLY_DART_BASE_URL: dart.url, VALLY_KIND_BASE_URL: dart.url } : {}) });
         servers.push(server);
         return server.waitFor(/포트를 열었습니다 addr=(\S+)/, "vally-server");
       };

@@ -34,13 +34,14 @@ export interface Dart {
   delay: number;
   edge: boolean;
   largeValues: boolean;
+  corrected: boolean;
   block: { scope: string; wait: Promise<void> } | null;
   close(): Promise<void>;
 }
 
 export async function startDart(): Promise<Dart> {
   const send = (res: ServerResponse, body: unknown) => { res.setHeader("content-type", "application/json"); res.end(JSON.stringify(body)); };
-  const dart: Dart = { url: "", calls: [], fail: null, failStatus: "900", delay: 0, edge: false, largeValues: false, block: null, close: async () => { server.closeAllConnections(); await new Promise<void>((resolve) => server.close(() => resolve())); } };
+  const dart: Dart = { url: "", calls: [], fail: null, failStatus: "900", delay: 0, edge: false, largeValues: false, corrected: false, block: null, close: async () => { server.closeAllConnections(); await new Promise<void>((resolve) => server.close(() => resolve())); } };
   const server = createServer(async (req, res) => {
     const url = new URL(req.url ?? "/", "http://localhost");
     const endpoint = url.pathname.split("/").at(-1) ?? "";
@@ -54,21 +55,21 @@ export async function startDart(): Promise<Dart> {
       res.end(zip("CORPCODE.xml", `<result><list><corp_code>${CORP}</corp_code><corp_name>합성회사</corp_name><stock_code>005930</stock_code></list><list><corp_code>${CORP}</corp_code><corp_name>합성회사</corp_name><stock_code>000660</stock_code></list><list><corp_code>00000002</corp_code><corp_name>합성회사2</corp_name><stock_code>000020</stock_code></list></result>`));
     } else if (endpoint === "company.json") send(res, { status: "000", corp_code: q.get("corp_code"), corp_name: "합성회사", acc_mt: dart.edge || q.get("corp_code") === "00000002" ? "03" : "12" });
     else if (endpoint === "searchcorpname.do") send(res, [{ repisusrtcd2: q.get("searchCorpName"), secugrpId: "ST", fssunqno: CORP }]);
-    else if (endpoint === "list.json") send(res, { status: "000", page_no: 1, total_page: 1, list: [2015, 2016].flatMap((year) => CODES.flatMap((code, i) => (dart.edge ? [false, true] : [false]).map((corrected) => ({ corp_code: q.get("corp_code"), rcept_no: receipt(year, code, q.get("corp_code") ?? CORP, corrected), rcept_dt: `${year}1231`, report_nm: `${corrected ? "[기재정정]" : ""}${i === 3 ? "사업" : "분기"}보고서 (${dart.edge && year === 2015 && i === 3 ? "2016.03" : `${year}.${dart.edge && i === 0 ? "04" : String((i + 1) * 3).padStart(2, "0")}`})` })))) });
+    else if (endpoint === "list.json") send(res, { status: "000", page_no: 1, total_page: 1, list: [2015, 2016].flatMap((year) => CODES.flatMap((code, i) => (dart.edge || dart.corrected ? [false, true] : [false]).map((corrected) => ({ corp_code: q.get("corp_code"), rcept_no: receipt(year, code, q.get("corp_code") ?? CORP, corrected), rcept_dt: `${year}1231`, report_nm: `${corrected ? "[기재정정]" : ""}${i === 3 ? "사업" : "분기"}보고서 (${dart.edge && year === 2015 && i === 3 ? "2016.03" : `${year}.${dart.edge && i === 0 ? "04" : String((i + 1) * 3).padStart(2, "0")}`})` })))) });
     else if (endpoint === "fnlttSinglAcntAll.json") {
       const year = Number(q.get("bsns_year"));
       if (year < 2015 || year > 2016) { send(res, { status: "013" }); return; }
       const code = q.get("reprt_code") ?? "11011";
       if (dart.edge && year === 2016 && code === "11014" && q.get("fs_div") === "CFS") { send(res, { status: "013" }); return; }
-      send(res, { status: "000", list: statement(year, code, q.get("corp_code") ?? CORP, dart.edge, dart.largeValues).rows });
+      send(res, { status: "000", list: statement(year, code, q.get("corp_code") ?? CORP, dart.edge, dart.largeValues, dart.corrected).rows });
     } else if (endpoint === "fnlttXbrl.xml") {
       const stamp = q.get("rcept_no") ?? "";
       const year = Number(stamp.slice(0, 4));
       const code = CODES[Number(stamp.slice(4, 6)) - 1] ?? "11011";
-      res.end(zip("synthetic.xbrl", statement(year, code, stamp.endsWith("000002") ? "00000002" : CORP, dart.edge, dart.largeValues).xml));
+      res.end(zip("synthetic.xbrl", statement(year, code, stamp.endsWith("000002") ? "00000002" : CORP, dart.edge, dart.largeValues, dart.corrected).xml));
     } else if (endpoint === "alotMatter.json") {
       const year = Number(q.get("bsns_year"));
-      send(res, year < 2015 || year > 2016 ? { status: "013" } : { status: "000", list: ["보통주", "우선주"].map((stock_knd) => ({ corp_code: q.get("corp_code"), stlm_dt: `${year}-12-31`, rcept_no: receipt(year, "11011", q.get("corp_code") ?? CORP, dart.edge), se: "주당 현금배당금(원)", stock_knd, thstrm: dart.largeValues ? "2000" : "0" })) });
+      send(res, year < 2015 || year > 2016 ? { status: "013" } : { status: "000", list: ["보통주", "우선주"].map((stock_knd) => ({ corp_code: q.get("corp_code"), stlm_dt: `${year}-12-31`, rcept_no: receipt(year, "11011", q.get("corp_code") ?? CORP, dart.edge || dart.corrected), se: "주당 현금배당금(원)", stock_knd, thstrm: dart.largeValues ? "2000" : "0" })) });
     } else { res.statusCode = 404; res.end(); }
   });
   server.listen(0, "127.0.0.1");
@@ -79,22 +80,22 @@ export async function startDart(): Promise<Dart> {
   return dart;
 }
 
-function statement(year: number, code: string, corp: string, edge: boolean, largeValues: boolean) {
+function statement(year: number, code: string, corp: string, edge: boolean, largeValues: boolean, corrected: boolean) {
   const i = CODES.indexOf(code);
   const end = edge && year === 2015 && i === 3 ? "2016-03-31" : `${year}-${edge && i === 0 ? "04-30" : ["03-31", "06-30", "09-30", "12-31"][i]}`;
   const quarter = `${year}-${edge && i === 0 ? "02" : String(i * 3 + 1).padStart(2, "0")}-01`;
   const basis = edge && year === 2016 && code === "11014" ? "OFS" : "CFS";
   const rows = [
-    ["IS", "ifrs-full_Revenue", i === 3 ? "1000" : "100", String((i + 1) * 100)],
+    ["IS", "ifrs-full_Revenue", i === 3 ? corrected ? "1200" : "1000" : corrected ? "120" : "100", String((i + 1) * (corrected ? 120 : 100))],
     ["IS", "dart_OperatingIncomeLoss", i === 3 ? "-100" : "-10", String((i + 1) * -10)],
     ["IS", "ifrs-full_ProfitLossAttributableToOwnersOfParent", i === 3 ? "100" : "10", String((i + 1) * 10)],
     ["CF", "ifrs-full_CashFlowsFromUsedInInvestingActivities", String((i + 1) * -100), String((i + 1) * -100)],
     ["BS", "ifrs-full_Liabilities", "200", null], ["BS", "ifrs-full_Equity", edge && year === 2016 ? "0" : "400", null], ["BS", "ifrs-full_EquityAttributableToOwnersOfParent", "500", null],
-  ].map(([sj_div, account_id, amount, cumulative]) => ({ corp_code: corp, bsns_year: String(year), reprt_code: code, rcept_no: receipt(year, code, corp, edge), fs_div: basis, sj_div, account_id, account_nm: account_id === "ifrs-full_Liabilities" ? "부채총계" : account_id === "ifrs-full_Equity" ? "자본총계" : account_id, currency: "KRW", thstrm_nm: "합성기간", thstrm_amount: largeValues && sj_div === "CF" ? String(year === 2016 ? -48_054_251_000_000 : -1_648_000_000) : amount, ...(cumulative === null ? {} : { thstrm_add_amount: largeValues && sj_div === "CF" ? String(year === 2016 ? -48_054_251_000_000 : -1_648_000_000) : cumulative }) }));
+  ].map(([sj_div, account_id, amount, cumulative]) => ({ corp_code: corp, bsns_year: String(year), reprt_code: code, rcept_no: receipt(year, code, corp, edge || corrected), fs_div: basis, sj_div, account_id, account_nm: account_id === "ifrs-full_Liabilities" ? "부채총계" : account_id === "ifrs-full_Equity" ? "자본총계" : account_id, currency: "KRW", thstrm_nm: "합성기간", thstrm_amount: largeValues && sj_div === "CF" ? String(year === 2016 ? -48_054_251_000_000 : -1_648_000_000) : amount, ...(cumulative === null ? {} : { thstrm_add_amount: largeValues && sj_div === "CF" ? String(year === 2016 ? -48_054_251_000_000 : -1_648_000_000) : cumulative }) }));
   const context = (id: string, start: string | null) => `<x:context id="${id}"><x:entity><x:identifier scheme="http://dart.fss.or.kr/ifrs/CIK">${corp}</x:identifier></x:entity><x:period>${start === null ? `<x:instant>${end}</x:instant>` : `<x:startDate>${start}</x:startDate><x:endDate>${end}</x:endDate>`}</x:period><x:scenario><d:explicitMember dimension="ifrs:ConsolidatedAndSeparateFinancialStatementsAxis">ifrs:${basis === "CFS" ? "ConsolidatedMember" : "SeparateMember"}</d:explicitMember></x:scenario></x:context>`;
   const facts = rows.map((r) => {
     const concept = r.account_id?.replace("ifrs-full_", "ifrs:").replace("dart_", "dart:");
     return `<${concept} contextRef="${r.sj_div === "BS" ? "bs" : r.sj_div === "CF" || i === 3 ? "cum" : "q"}" unitRef="krw">${r.thstrm_amount}</${concept}>` + (r.thstrm_add_amount === undefined ? "" : `<${concept} contextRef="cum" unitRef="krw">${r.thstrm_add_amount}</${concept}>`);
   }).join("");
-  return { rows, xml: `<x:xbrl xmlns:x="http://www.xbrl.org/2003/instance" xmlns:d="http://xbrl.org/2006/xbrldi" xmlns:g="http://dart.fss.or.kr/taxonomy/2025/dart-gcd" xmlns:dart="http://dart.fss.or.kr/ifrs/2025" xmlns:ifrs="http://xbrl.ifrs.org/taxonomy/2025/ifrs-full" xmlns:iso="http://www.xbrl.org/2003/iso4217"><x:unit id="krw"><x:measure>iso:KRW</x:measure></x:unit>${context("q", quarter)}${context("cum", edge && year === 2015 && i === 3 ? "2015-04-01" : `${year}-01-01`)}${context("bs", null)}<g:DocumentReceiptNumber>${receipt(year, code, corp, edge)}</g:DocumentReceiptNumber>${facts}</x:xbrl>` };
+  return { rows, xml: `<x:xbrl xmlns:x="http://www.xbrl.org/2003/instance" xmlns:d="http://xbrl.org/2006/xbrldi" xmlns:g="http://dart.fss.or.kr/taxonomy/2025/dart-gcd" xmlns:dart="http://dart.fss.or.kr/ifrs/2025" xmlns:ifrs="http://xbrl.ifrs.org/taxonomy/2025/ifrs-full" xmlns:iso="http://www.xbrl.org/2003/iso4217"><x:unit id="krw"><x:measure>iso:KRW</x:measure></x:unit>${context("q", quarter)}${context("cum", edge && year === 2015 && i === 3 ? "2015-04-01" : `${year}-01-01`)}${context("bs", null)}<g:DocumentReceiptNumber>${receipt(year, code, corp, edge || corrected)}</g:DocumentReceiptNumber>${facts}</x:xbrl>` };
 }

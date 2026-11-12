@@ -1195,7 +1195,7 @@ pub enum FinancialUpdateStatus { Idle, Planning, Collecting, Pausing, Paused, St
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "snake_case")]
 #[ts(export)]
-pub enum FinancialUpdatePhase { Planning, #[default] Recent, History, Complete }
+pub enum FinancialUpdatePhase { Planning, #[default] Recent, Changes, History, Complete }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "snake_case")]
@@ -1218,6 +1218,8 @@ pub struct FinancialUpdatePage {
     pub stop_reason: Option<FinancialUpdateStopReason>,
     pub next_check_at: Option<UnixSeconds>,
     pub can_resume: bool,
+    pub automatic: bool,
+    pub latest_check_pending: bool,
     pub history_completed_companies: usize,
     pub history_failed_companies: usize,
     pub recent_failed_companies: usize,

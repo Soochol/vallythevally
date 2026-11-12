@@ -12,7 +12,7 @@ pub struct Clock(Arc<Source>);
 #[derive(Debug)]
 enum Source {
     System,
-    Fake { base: KstTime, start: tokio::time::Instant, jump: AtomicI64 },
+    Fake { base: KstTime, start: tokio::time::Instant, jump: AtomicI64, changed: tokio::sync::Notify },
 }
 
 impl Clock {
@@ -22,7 +22,7 @@ impl Clock {
 
     /// tokio 런타임 안에서 만든다. tokio 시간이 흐른 만큼 함께 흐른다.
     pub fn fake(start: KstTime) -> Self {
-        Clock(Arc::new(Source::Fake { base: start, start: tokio::time::Instant::now(), jump: AtomicI64::new(0) }))
+        Clock(Arc::new(Source::Fake { base: start, start: tokio::time::Instant::now(), jump: AtomicI64::new(0), changed: tokio::sync::Notify::new() }))
     }
 
     pub fn now(&self) -> KstTime {
@@ -33,7 +33,7 @@ impl Clock {
                     .map_or(0, |d| d.as_secs() as i64);
                 KstTime::from_unix(secs)
             }
-            Source::Fake { base, start, jump } => {
+            Source::Fake { base, start, jump, .. } => {
                 base.plus_secs(start.elapsed().as_secs() as i64 + jump.load(Ordering::SeqCst))
             }
         }
@@ -43,8 +43,9 @@ impl Clock {
     pub fn jump(&self, secs: i64) {
         match &*self.0 {
             Source::System => panic!("시스템 시계는 옮길 수 없습니다"),
-            Source::Fake { jump, .. } => {
+            Source::Fake { jump, changed, .. } => {
                 jump.fetch_add(secs, Ordering::SeqCst);
+                changed.notify_waiters();
             }
         }
     }
@@ -52,11 +53,24 @@ impl Clock {
     /// 돌아올 때 `now() >= t`이다. 초 단위로 버린 시각 때문에 일찍 깨면 다시 잔다.
     pub async fn sleep_until(&self, t: KstTime) {
         loop {
-            let secs = t.unix() - self.now().unix();
-            if secs <= 0 {
-                return;
+            match &*self.0 {
+                Source::Fake { changed, .. } => {
+                    let notified = changed.notified();
+                    tokio::pin!(notified);
+                    notified.as_mut().enable();
+                    let secs = t.unix() - self.now().unix();
+                    if secs <= 0 { return; }
+                    tokio::select! {
+                        _ = tokio::time::sleep(Duration::from_secs(secs as u64)) => {}
+                        _ = notified => {}
+                    }
+                }
+                Source::System => {
+                    let secs = t.unix() - self.now().unix();
+                    if secs <= 0 { return; }
+                    tokio::time::sleep(Duration::from_secs(secs as u64)).await;
+                }
             }
-            tokio::time::sleep(Duration::from_secs(secs as u64)).await;
         }
     }
 }

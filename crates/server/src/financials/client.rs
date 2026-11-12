@@ -27,11 +27,12 @@ pub struct Client {
     directory: Mutex<Option<Arc<Vec<Row>>>>,
     pace: Mutex<Option<tokio::time::Instant>>,
     paused: AtomicBool,
+    yielding: AtomicBool,
     journal: std::sync::Mutex<Option<Journal>>,
 }
 
 #[derive(Clone)]
-struct Journal { store: super::store::Store, job: u64, through_date: String, clock: crate::clock::Clock }
+struct Journal { store: super::store::Store, job: String, through_date: String, clock: crate::clock::Clock }
 
 #[derive(Clone, Serialize, Deserialize)]
 pub(super) struct Stop {
@@ -47,35 +48,41 @@ impl Client {
     pub fn new(key: Secret<String>, base: String, kind_base: String) -> Result<Self, Failure> {
         let http = dart_http_builder().build().map_err(|_| Failure::Network)?;
         let kind_http = kind_http_builder().build().map_err(|_| Failure::Network)?;
-        Ok(Self { http, kind_http, base, kind_base, key, directory: Mutex::new(None), pace: Mutex::new(None), paused: AtomicBool::new(false), journal: std::sync::Mutex::new(None) })
+        Ok(Self { http, kind_http, base, kind_base, key, directory: Mutex::new(None), pace: Mutex::new(None), paused: AtomicBool::new(false), yielding: AtomicBool::new(false), journal: std::sync::Mutex::new(None) })
     }
 
-    pub(super) async fn begin_job(&self, store: super::store::Store, job: u64, through_date: String, clock: crate::clock::Clock) -> Result<(), Failure> {
-        store.begin_requests(job).await?;
+    pub(super) async fn begin_job(&self, store: super::store::Store, job: u64, generation: u64, through_date: String, clock: crate::clock::Clock) -> Result<(), Failure> {
+        let job = if generation == 0 { job.to_string() } else { format!("{job}/{generation}") };
+        store.begin_requests(&job).await?;
+        *self.directory.lock().await = None;
         *self.journal.lock().unwrap() = Some(Journal { store, job, through_date, clock });
         Ok(())
     }
 
     async fn cached<T: DeserializeOwned>(&self, request: &str) -> Result<Option<T>, Failure> {
-        self.check_pause()?;
+        self.check_control()?;
         let journal = self.journal.lock().unwrap().clone();
         let Some(journal) = journal else { return Ok(None); };
         if let Some(stop) = journal.store.stop().await? { return Err(stop.failure); }
-        journal.store.response(journal.job, request).await?.map(|body| serde_json::from_str(&body).map_err(|_| Failure::Storage)).transpose()
+        journal.store.response(&journal.job, request).await?.map(|body| serde_json::from_str(&body).map_err(|_| Failure::Storage)).transpose()
     }
 
     async fn checkpoint<T: Serialize>(&self, request: &str, value: &T) -> Result<(), Failure> {
         let journal = self.journal.lock().unwrap().clone();
         if let Some(journal) = journal {
             let body = serde_json::to_string(value).map_err(|_| Failure::Storage)?;
-            journal.store.save_response(journal.job, request, body).await?;
+            journal.store.save_response(&journal.job, request, body).await?;
         }
         Ok(())
     }
 
     pub(super) fn pause(&self, paused: bool) { self.paused.store(paused, Ordering::SeqCst); }
     pub(super) fn is_paused(&self) -> bool { self.paused.load(Ordering::SeqCst) }
-    fn check_pause(&self) -> Result<(), Failure> { if self.is_paused() { Err(Failure::Paused) } else { Ok(()) } }
+    pub(super) fn check_control(&self) -> Result<(), Failure> {
+        if self.is_paused() { Err(Failure::Paused) } else if self.is_yielding() { Err(Failure::Yielded) } else { Ok(()) }
+    }
+    pub(super) fn yield_to_latest(&self, yielding: bool) { self.yielding.store(yielding, Ordering::SeqCst); }
+    pub(super) fn is_yielding(&self) -> bool { self.yielding.load(Ordering::SeqCst) }
 
     pub(super) fn has_journal(&self) -> bool { self.journal.lock().unwrap().is_some() }
 
@@ -83,7 +90,7 @@ impl Client {
     where F: FnMut() -> Fut, Fut: std::future::Future<Output = Result<T, Failure>> {
         let attempts = if self.has_journal() { 3 } else { 1 };
         for attempt in 0..attempts {
-            self.check_pause()?;
+            self.check_control()?;
             let result = send().await;
             if !matches!(result, Err(Failure::Network | Failure::Remote)) || attempt + 1 == attempts { return result; }
             tokio::time::sleep(Duration::from_millis(250 * (attempt + 1))).await;
@@ -123,7 +130,7 @@ impl Client {
         let journal = self.journal.lock().unwrap().clone().unwrap();
         match result {
             Ok(()) => { journal.store.save_stop(None).await?; Ok(true) }
-            Err(error @ (Failure::Storage | Failure::Paused)) => Err(error),
+            Err(error @ (Failure::Storage | Failure::Paused | Failure::Yielded)) => Err(error),
             Err(error) => {
                 if matches!(error, Failure::Authentication | Failure::RateLimited) { stop.failure = error; }
                 stop.next_check_at = (stop.failure == Failure::RateLimited).then(|| crate::clock::next_daily(journal.clock.now(), domain::TimeOfDay::hms(7, 0, 0).unwrap()).unix());
@@ -136,7 +143,7 @@ impl Client {
     async fn bytes(&self, endpoint: &str, params: &[(&str, String)]) -> Result<Vec<u8>, Failure> {
         let mut pace = self.pace.lock().await;
         if let Some(last) = *pace { tokio::time::sleep_until(last + Duration::from_millis(250)).await; }
-        self.check_pause()?;
+        self.check_control()?;
         *pace = Some(tokio::time::Instant::now());
         let response = self.http.get(format!("{}/api/{endpoint}", self.base)).query(&[("crtfc_key", self.key.expose())]).query(params).send().await.map_err(|_| Failure::Network)?;
         drop(pace);
@@ -260,9 +267,9 @@ impl Client {
     async fn kind_bytes(&self, path: &str, params: &[(&str, &str)]) -> Result<Vec<u8>, Failure> {
         let request = format!("kind/{path}/{}", serde_json::to_string(params).map_err(|_| Failure::InvalidResponse)?);
         if let Some(value) = self.cached(&request).await? { return Ok(value); }
-        self.check_pause()?;
+        self.check_control()?;
         let bytes = self.retry(|| async {
-            self.check_pause()?;
+            self.check_control()?;
             let response = self.kind_http.get(format!("{}{path}", self.kind_base)).query(params).send().await.map_err(|_| Failure::Network)?;
             if !response.status().is_success() { return Err(Failure::Remote); }
             response.bytes().await.map_err(|_| Failure::Network)

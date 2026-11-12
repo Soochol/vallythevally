@@ -7,6 +7,8 @@ use serde::{Deserialize, Serialize};
 pub enum Failure {
     #[serde(skip)]
     Paused,
+    #[serde(skip)]
+    Yielded,
     Authentication,
     Network,
     RateLimited,

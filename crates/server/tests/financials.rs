@@ -43,6 +43,7 @@ struct FakeState {
     discovery_paused: Option<String>,
     stream_paused_report: Option<String>,
     stream_paused_company: Option<String>,
+    stream_paused_year: Option<String>,
     paused_list: bool,
     list_pages: bool,
     statement_amounts: HashMap<String, String>,
@@ -115,7 +116,7 @@ async fn notice(State(state): State<Arc<Mutex<FakeState>>>) -> Response {
 async fn respond(State(state): State<Arc<Mutex<FakeState>>>, Path(endpoint): Path<String>, Query(params): Query<BTreeMap<String, String>>) -> Response {
     let paused = {
         let mut state = state.lock().unwrap();
-        let paused = (endpoint == "list.json" && state.paused_list) || (endpoint == "fnlttSinglAcntAll.json" && state.stream_paused_report.as_ref() == params.get("reprt_code") && state.stream_paused_company.as_ref().is_none_or(|company| Some(company) == params.get("corp_code")));
+        let paused = (endpoint == "list.json" && state.paused_list) || (endpoint == "fnlttSinglAcntAll.json" && state.stream_paused_report.as_ref() == params.get("reprt_code") && state.stream_paused_company.as_ref().is_none_or(|company| Some(company) == params.get("corp_code")) && state.stream_paused_year.as_ref().is_none_or(|year| Some(year) == params.get("bsns_year")));
         if paused { state.calls.push((if endpoint == "list.json" { "listing_stream" } else { "statement_stream" }.into(),params.clone())); }
         paused
     };
@@ -1074,3 +1075,6 @@ async fn calculated_http_reads_saved_values_without_key_and_applies_correction_w
         server.stop().await;
     }
 }
+
+#[path = "financials/schedule.rs"]
+mod schedule;
