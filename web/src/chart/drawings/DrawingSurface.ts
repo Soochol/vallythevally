@@ -12,6 +12,7 @@ import type { ChartExtension, ChartHost } from "../extensions";
 import { chartTimeProjection } from "../timeAxis";
 import { formatBarTime } from "../time";
 import { barLength, fromScreen, logicalToT, startAt, tToLogical, timelineOf, toolContext, xToLogical, type Frame } from "./anchor";
+import { reusableStyle } from "./objects";
 import * as clipboard from "./clipboard";
 import { DrawingLayer, VLinePaneLayer } from "./DrawingLayer";
 import { frameHit, renderItem, visible, type RenderFrame } from "./frame";
@@ -149,7 +150,7 @@ export class DrawingSurface implements ChartExtension {
     if (this.state.kind === "placing" || this.state.kind === "drawing") {
       const s = this.state;
       const points = s.kind === "placing" ? [...s.fixed, s.cursor] : s.points.length === 1 ? [s.points[0]!, s.points[0]!] : s.points;
-      preview.push(...s.tool.shapes({ points, style: prefs.lastStyle[s.tool.tool] ?? s.tool.defaultStyle(), text: null, selected: false }, c.ctx));
+      preview.push(...s.tool.shapes({ points, style: prefs.lastStyle[s.tool.tool] ?? s.tool.defaultStyle(), text: null, selected: s.tool.tool === "trendline" }, c.ctx));
       for (const p of s.kind === "placing" ? s.fixed : s.points) {
         const screen = c.ctx.toScreen(p); if (screen) preview.push({ kind: "circle", c: screen, r: 4, stroke: { color: "$draw", width: 1, dash: "solid" }, fill: { on: true, color: "$chart-bg", opacity: 1 } });
       }
@@ -248,7 +249,7 @@ export class DrawingSurface implements ChartExtension {
     const changed = ops.filter((op) => op.after.style !== op.before.style);
     if (changed.length) {
       const ui = useUiStore.getState(); const lastStyle = { ...ui.prefs.drawing.lastStyle };
-      for (const op of changed) lastStyle[op.after.tool] = op.after.style;
+      for (const op of changed) lastStyle[op.after.tool] = reusableStyle(op.after.style);
       ui.setDrawingPrefs({ lastStyle });
     }
   }
@@ -280,6 +281,7 @@ export class DrawingSurface implements ChartExtension {
     const symbol = this.host.view()?.symbol; const d = symbol ? this.sync.drawings(symbol).find((item) => item.id === id) : undefined;
     if (!d) return;
     const tool = toolOf(d.tool); const nextKind = kind === "text" || tool?.text?.editOnPlace ? "text" : "settings";
+    useDrawingSession.getState().select([d.id]);
     useDrawingSession.setState({ editor: { kind: nextKind, original: d, draft: d }, popup: null });
   }
   reorder(id: string, direction: "front" | "forward" | "backward" | "back", targetId?: string, dropPosition: "above" | "below" = "below") {

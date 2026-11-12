@@ -1,4 +1,5 @@
 import type { DrawingSurface } from "../../chart/drawings/DrawingSurface";
+import { defaultObjectStyle } from "../../chart/drawings/objects";
 import { toolOf } from "../../chart/drawings/tools";
 import type { Period } from "../../api/generated/Period";
 import { useDrawingSession } from "../../stores/drawingSession";
@@ -24,7 +25,7 @@ export function drawingMenu(surface: DrawingSurface, empty = false): MenuItem[] 
   const locked = selected.every((d) => d.locked);
   const periods = (p: Period[] | null) => surface.updateSelected((d) => ({ ...d, periods: p }));
   return [
-    action("설정…", () => surface.openEditor(first.id)), action("복사", () => surface.copy()), action("복제", () => surface.clone()),
+    action("세부 설정…", () => surface.openEditor(first.id)), action("복사", () => surface.copy()), action("복제", () => surface.clone()),
     ...(toolOf(first.tool)?.text ? [action("글자 고치기…", () => surface.openEditor(first.id, "text"))] : []),
     ...DRAWING_COMMANDS.filter((c) => c.available(selected)).map((c) => action(c.label, () => c.run(surface))),
     { kind: "separator" }, action(locked ? "잠금 풀기" : "잠금", () => surface.updateSelected((d) => ({ ...d, locked: !locked }))),
@@ -34,7 +35,7 @@ export function drawingMenu(surface: DrawingSurface, empty = false): MenuItem[] 
     { kind: "heading", label: "보이는 봉 주기" }, action("모든 봉 주기", () => periods(null)),
     action("분봉만", () => periods(["1m", "3m", "5m", "10m", "15m", "30m", "60m"])), action("일·주·월만", () => periods(["D", "W", "M"])),
     action("지금 봉 주기만", () => periods([surface.host.view()?.period ?? "D"])),
-    { kind: "separator" }, action("기본 스타일로", () => surface.updateSelected((d) => ({ ...d, style: toolOf(d.tool)?.defaultStyle() ?? d.style }))),
+    { kind: "separator" }, action("기본 스타일로", () => surface.updateSelected((d) => ({ ...d, style: defaultObjectStyle(d) }))),
     action("지우기", () => surface.remove(true)),
   ];
 }

@@ -1,6 +1,10 @@
 import { QueryClient } from "@tanstack/react-query";
 import { afterEach, expect, test, vi } from "vitest";
 import { usePersistStore } from "../../stores/persist";
+import { useSelectionStore } from "../../stores/selection";
+import { renameObject } from "./objects";
+import { hline } from "./tools/hline";
+import { copy, paste } from "./clipboard";
 import { DrawingSync } from "./sync";
 import { completionKey } from "./journal";
 import type { Drawing, DrawingBody } from "./types";
@@ -103,4 +107,47 @@ test("a rejected synchronous recovery write does not consume Undo history", asyn
   expect(sync.drawings(body.symbol)).toHaveLength(1);
   expect(sync.save.kind).toBe("failed");
   expect(sync.history(0)).toEqual(history);
+});
+
+
+test("drawing edits, clone, object visibility and delete-toast Undo keep persisted names and styles", async () => {
+  const remote = new Map<string, Drawing>([[body.id, saved(body, 1)]]);
+  const { sync } = setup(async (input, options) => {
+    if (options?.method === "PUT") {
+      const next: DrawingBody = JSON.parse(String(options.body));
+      const value = saved(next, next.revision);
+      remote.set(next.id, value); return Response.json(value);
+    }
+    if (options?.method === "DELETE") { remote.delete(String(input).split("/").at(-1) ?? ""); return new Response(null, { status: 204 }); }
+    return Response.json([...remote.values()]);
+  });
+  await sync.load(body.symbol);
+  const current = () => { const d = sync.drawings(body.symbol).find((d) => d.id === body.id); if (!d) throw new Error("드로잉이 필요합니다"); return d; };
+  const edit = async (change: (before: DrawingBody) => DrawingBody) => {
+    const before = current(); sync.commit(0, [{ kind: "update", before, after: change(before) }]);
+    await vi.waitFor(() => expect(sync.save.kind).toBe("saved"));
+  };
+  await edit((d) => renameObject(d, "지지선"));
+  await edit((d) => ({ ...d, style: hline.bar.lineColor?.set(d.style, "#123456") }));
+  await edit((d) => ({ ...d, style: hline.bar.width?.set(d.style, 5) }));
+  await edit((d) => ({ ...d, style: hline.bar.dash?.set(d.style, "dotted"), locked: true }));
+  const clip = copy([current()], body.symbol); if (!clip) throw new Error("복사할 드로잉이 필요합니다");
+  const clone = paste(clip, { symbol: body.symbol, scope: body.scope, topZ: 1, newId: () => "clone", shiftBars: (t, n) => t + n });
+  sync.commit(0, clone.bodies.map((after) => ({ kind: "create", after })));
+  await vi.waitFor(() => expect(sync.save.kind).toBe("saved"));
+  expect(remote.get("clone")).toMatchObject({ locked: false, z: 2, style: { objectName: "지지선", line: { color: "#123456", width: 5, dash: "dotted" } } });
+  await edit((d) => ({ ...d, hidden: true, locked: false, z: 3 }));
+  expect(remote.get(body.id)).toMatchObject({ hidden: true, locked: false, z: 3 });
+  const before = current();
+  sync.commitWithUndo(0, [{ kind: "delete", before }], "드로잉을 지웠습니다");
+  await vi.waitFor(() => expect(sync.save.kind).toBe("saved"));
+  expect(remote.has(body.id)).toBe(false);
+  const undo = useSelectionStore.getState().toast?.undo;
+  expect(undo?.available()).toBe(true);
+  undo?.run();
+  await vi.waitFor(() => expect(sync.save.kind).toBe("saved"));
+  expect(remote.get(body.id)).toMatchObject({ hidden: true, z: 3, style: { objectName: "지지선", line: { color: "#123456", width: 5, dash: "dotted" } } });
+  expect(undo?.available()).toBe(false);
+  await sync.load(body.symbol);
+  expect(sync.drawings(body.symbol).map((d) => d.id)).toEqual(["clone", body.id]);
 });
