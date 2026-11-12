@@ -30,6 +30,7 @@ export interface Dart {
   url: string;
   calls: string[];
   fail: string | null;
+  failStatus: string;
   delay: number;
   edge: boolean;
   largeValues: boolean;
@@ -39,7 +40,7 @@ export interface Dart {
 
 export async function startDart(): Promise<Dart> {
   const send = (res: ServerResponse, body: unknown) => { res.setHeader("content-type", "application/json"); res.end(JSON.stringify(body)); };
-  const dart: Dart = { url: "", calls: [], fail: null, delay: 0, edge: false, largeValues: false, block: null, close: async () => { server.closeAllConnections(); await new Promise<void>((resolve) => server.close(() => resolve())); } };
+  const dart: Dart = { url: "", calls: [], fail: null, failStatus: "900", delay: 0, edge: false, largeValues: false, block: null, close: async () => { server.closeAllConnections(); await new Promise<void>((resolve) => server.close(() => resolve())); } };
   const server = createServer(async (req, res) => {
     const url = new URL(req.url ?? "/", "http://localhost");
     const endpoint = url.pathname.split("/").at(-1) ?? "";
@@ -48,7 +49,7 @@ export async function startDart(): Promise<Dart> {
     dart.calls.push(scope);
     if (dart.block && scope.includes(dart.block.scope)) await dart.block.wait;
     if (dart.delay) await new Promise((resolve) => setTimeout(resolve, dart.delay));
-    if (dart.fail && scope.includes(dart.fail)) { send(res, { status: "020" }); return; }
+    if (dart.fail && scope.includes(dart.fail)) { send(res, { status: dart.failStatus, message: `synthetic source error ${q.get("crtfc_key") ?? ""}` }); return; }
     if (endpoint === "corpCode.xml") {
       res.end(zip("CORPCODE.xml", `<result><list><corp_code>${CORP}</corp_code><corp_name>합성회사</corp_name><stock_code>005930</stock_code></list><list><corp_code>${CORP}</corp_code><corp_name>합성회사</corp_name><stock_code>000660</stock_code></list><list><corp_code>00000002</corp_code><corp_name>합성회사2</corp_name><stock_code>000020</stock_code></list></result>`));
     } else if (endpoint === "company.json") send(res, { status: "000", corp_code: q.get("corp_code"), corp_name: "합성회사", acc_mt: dart.edge || q.get("corp_code") === "00000002" ? "03" : "12" });

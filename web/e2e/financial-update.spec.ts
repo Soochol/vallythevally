@@ -71,7 +71,7 @@ for (const size of [{ width: 1440, height: 900 }, { width: 1024, height: 768 }, 
     await expect(dialog).toContainText("1 / 2회사");
     const failures = dialog.getByRole("region", { name: "실패·미확인 목록" });
     await expect(failures).toContainText("00126380");
-    await expect(failures).toContainText("자료원 조회 한도 초과");
+    await expect(failures).toContainText("자료원 응답 오류");
     await page.screenshot({ path: info.outputPath("financial-update-failure.png") });
     expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBe(0);
     const bounds = await dialog.boundingBox();

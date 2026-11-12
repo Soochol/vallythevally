@@ -172,7 +172,7 @@ async fn repeated_manual_start_during_mapping_coalesces_and_preserves_price_and_
             state.statement_amounts.insert(COMPANY.into(),"175".into());
             state.correction = true;
             state.discovery_paused = None;
-            if source_failure { state.failures.insert("fnlttSinglAcntAll.json/2015/11011".into(),"020".into()); }
+            if source_failure { state.failures.insert("fnlttSinglAcntAll.json/2015/11011".into(),"900".into()); }
         }
         let response = tokio::time::timeout(Duration::from_secs(3),manual).await.unwrap().unwrap();
         let accepted: Value = serde_json::from_slice(&response.bytes().await.unwrap()).unwrap();
@@ -190,12 +190,12 @@ async fn repeated_manual_start_during_mapping_coalesces_and_preserves_price_and_
         let collection = store.collection(COMPANY).await.unwrap();
         assert_eq!(collection.refresh_version,before.refresh_version + 1);
         assert_eq!(collection.disclosure_version,collection.refresh_version);
-        assert_eq!(annual_calls(&fake,"fnlttSinglAcntAll.json"),2);
+        assert_eq!(annual_calls(&fake,"fnlttSinglAcntAll.json"),if source_failure { 4 } else { 2 });
         assert_eq!(annual_calls(&fake,"alotMatter.json"),2);
         let annual = &collection.reports["2015/11011"].statement;
         if source_failure {
             assert_eq!(result["status"],"partial_failure");
-            assert_eq!(annual.failure,Some(Failure::RateLimited));
+            assert_eq!(annual.failure,Some(Failure::Remote));
             assert_eq!(annual.refresh_version,before.refresh_version);
             assert_eq!(annual.data.as_ref().unwrap().accounts[0].fields["thstrm_amount"],"100");
         } else {

@@ -19,7 +19,7 @@ export async function startUpdate(app: App, settle = false) {
 export async function settleUpdate(app: App) {
   await expect.poll(async () => {
     const job: FinancialUpdatePage = await (await fetch(`${app.url}/api/financial-update`)).json();
-    return job.status === "planning" || job.status === "collecting" || job.status === "pausing";
+    return job.status === "planning" || job.status === "collecting" || job.status === "pausing" || job.status === "checking";
   }, { timeout: 60000 }).toBe(false);
 }
 

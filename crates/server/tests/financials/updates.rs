@@ -27,7 +27,7 @@ async fn finished(client: &reqwest::Client, base: &str) -> Value {
     tokio::time::timeout(Duration::from_secs(60), async {
         loop {
             let result = json(client, &format!("{base}/api/financial-update")).await;
-            if result["status"] != "planning" && result["status"] != "collecting" && result["status"] != "pausing" { return result; }
+            if result["status"] != "planning" && result["status"] != "collecting" && result["status"] != "pausing" && result["status"] != "checking" { return result; }
             tokio::time::sleep(Duration::from_millis(30)).await;
         }
     }).await.unwrap()
@@ -486,5 +486,208 @@ async fn a_terminal_update_allows_the_next_start_to_create_a_new_job() {
         assert_eq!(job["id"].as_u64().unwrap(), terminal["id"].as_u64().unwrap() + 1, "a published terminal status cannot coalesce a subsequent update into the finished job");
     }
     finished(&client, &base).await;
+    server.stop().await;
+}
+
+#[tokio::test]
+async fn authentication_stops_the_whole_job_and_requires_successful_explicit_confirmation_after_restart() {
+    let fake = Fake::start().await;
+    fake.state.lock().unwrap().preferred = true;
+    fake.state.lock().unwrap().failures.insert("corpCode.xml".into(), "010".into());
+    let kiwoom = common::FakeKiwoom::start().await;
+    listings(&kiwoom);
+    let dir = tempdir();
+    let server = process(&fake, &kiwoom, dir.path(), "20151231120000");
+    let base = format!("http://{}", server.addr().await);
+    let client = reqwest::Client::new();
+    client.get(format!("{base}/api/bars?symbol=005930&period=D&limit=5")).send().await.unwrap().error_for_status().unwrap();
+    let initial = start(&client, &base).await;
+    let stopped = finished(&client, &base).await;
+    assert_eq!(stopped["status"], "stopped", "{stopped}");
+    assert_eq!(stopped["stopReason"], "authentication");
+    assert_eq!(stopped["failure"], "authentication");
+    assert_eq!(stopped["processedSymbols"], stopped["unsupportedSymbols"], "authentication must not consume a pending company target");
+    assert_eq!(fake.count("corpCode.xml"), 1);
+    assert!(!stopped.to_string().contains(KEY));
+    server.stop().await;
+    let reopened = process(&fake, &kiwoom, dir.path(), "20160101120000");
+    let base = format!("http://{}", reopened.addr().await);
+    assert_eq!(json(&client, &format!("{base}/api/financial-update")).await["stopReason"], "authentication");
+    command(&client, &base, "resume").await;
+    let still_stopped = finished(&client, &base).await;
+    assert_eq!(still_stopped["status"], "stopped");
+    assert_eq!(fake.count("corpCode.xml"), 2, "explicit confirmation may send one request, never the pending company requests");
+    fake.state.lock().unwrap().failures.clear();
+    command(&client, &base, "resume").await;
+    let done = finished(&client, &base).await;
+    assert_eq!(done["historyComplete"], true, "a repaired source configuration may retain the same API key: {done}");
+    assert_eq!(json(&client, &format!("{base}/api/financial-update")).await["id"], initial["id"]);
+    reopened.stop().await;
+}
+
+#[tokio::test]
+async fn rate_limit_at_first_or_middle_request_persists_and_only_one_confirmation_can_open_it() {
+    for endpoint in ["corpCode.xml", "fnlttSinglAcntAll.json/2015/11014"] {
+        let fake = Fake::start().await;
+        fake.state.lock().unwrap().failures.insert(endpoint.into(), "020".into());
+        let kiwoom = common::FakeKiwoom::start().await;
+        let mut body = fake_kiwoom::fixture("ka10099_0");
+        body["list"].as_array_mut().unwrap().retain(|row| row["code"] == "005930");
+        kiwoom.seen.respond_with("ka10099", StatusCode::OK, body);
+        let dir = tempdir();
+        let server = process(&fake, &kiwoom, dir.path(), "20151231120000");
+        let base = format!("http://{}", server.addr().await);
+        let client = reqwest::Client::new();
+        client.get(format!("{base}/api/bars?symbol=005930&period=D&limit=5")).send().await.unwrap().error_for_status().unwrap();
+        let initial = start(&client, &base).await;
+        let stopped = finished(&client, &base).await;
+        assert_eq!(stopped["status"], "stopped", "{stopped}");
+        assert_eq!(stopped["stopReason"], "rate_limited");
+        assert_eq!(stopped["nextCheckAt"], kst(KstDate::new(2016, 1, 1).unwrap(), 7, 0, 0).unix());
+        let count = fake.state.lock().unwrap().calls.len();
+        assert_eq!(start(&client, &base).await["status"], "stopped");
+        assert_eq!(fake.state.lock().unwrap().calls.len(), count);
+        server.stop().await;
+        let reopened = process(&fake, &kiwoom, dir.path(), "20160101070000");
+        let base = format!("http://{}", reopened.addr().await);
+        assert_eq!(json(&client, &format!("{base}/api/financial-update")).await["nextCheckAt"], stopped["nextCheckAt"]);
+        assert_eq!(fake.state.lock().unwrap().calls.len(), count);
+        command(&client, &base, "resume").await;
+        let limited = finished(&client, &base).await;
+        assert_eq!(limited["status"], "stopped");
+        assert_eq!(limited["nextCheckAt"], kst(KstDate::new(2016, 1, 2).unwrap(), 7, 0, 0).unix());
+        assert_eq!(fake.state.lock().unwrap().calls.len(), count + 1, "a still-limited confirmation must not release any other request");
+        let first_report_calls = report_calls(&fake, "11013");
+        fake.state.lock().unwrap().failures.insert(endpoint.into(), "900".into());
+        command(&client, &base, "resume").await;
+        let unconfirmed = finished(&client, &base).await;
+        assert_eq!(unconfirmed["stopReason"], "rate_limited", "an unsuccessful confirmation must keep the global stop");
+        assert_eq!(fake.state.lock().unwrap().calls.len(), count + 2, "a confirmation with a remote error has a one-request budget too");
+        fake.state.lock().unwrap().failures.clear();
+        command(&client, &base, "resume").await;
+        let done = finished(&client, &base).await;
+        assert_eq!(done["id"], initial["id"]);
+        assert_eq!(done["historyComplete"], true, "{done}");
+        assert!(done["nextCheckAt"].is_null());
+        if endpoint != "corpCode.xml" { assert_eq!(report_calls(&fake, "11013"), first_report_calls, "saved successful reports must survive a global stop"); }
+        let failed_endpoint_calls = fake.state.lock().unwrap().calls.iter().filter(|(name, params)| if endpoint == "corpCode.xml" { name == endpoint } else { name == "fnlttSinglAcntAll.json" && params["reprt_code"] == "11014" }).count();
+        assert_eq!(failed_endpoint_calls, 4, "initial failure, two failed confirmations, one successful confirmation; reuse its response");
+        reopened.stop().await;
+    }
+}
+
+#[tokio::test]
+async fn a_company_remote_failure_has_a_bounded_retry_budget_and_preserves_previous_values() {
+    let fake = Fake::start().await;
+    fake.state.lock().unwrap().directory = Some(format!("<result><list><corp_code>{CORP}</corp_code><stock_code>005930</stock_code></list><list><corp_code>00000002</corp_code><stock_code>000020</stock_code></list></result>"));
+    let kiwoom = common::FakeKiwoom::start().await;
+    let mut body = fake_kiwoom::fixture("ka10099_0");
+    body["list"].as_array_mut().unwrap().retain(|row| ["005930", "000020"].contains(&row["code"].as_str().unwrap()));
+    kiwoom.seen.respond_with("ka10099", StatusCode::OK, body);
+    let dir = tempdir();
+    let server = process(&fake, &kiwoom, dir.path(), "20151231120000");
+    let base = format!("http://{}", server.addr().await);
+    let client = reqwest::Client::new();
+    client.get(format!("{base}/api/bars?symbol=005930&period=D&limit=5")).send().await.unwrap().error_for_status().unwrap();
+    start(&client, &base).await;
+    assert_eq!(finished(&client, &base).await["historyComplete"], true);
+    let before = json(&client, &format!("{base}/api/symbols/005930/financial-source")).await;
+    let offset = fake.state.lock().unwrap().calls.len();
+    {
+        let mut state = fake.state.lock().unwrap();
+        state.correction = true;
+        state.failures.insert(format!("fnlttSinglAcntAll.json/2015/11014/{CORP}"), "900".into());
+    }
+    start(&client, &base).await;
+    let job = finished(&client, &base).await;
+    assert_eq!(job["status"], "partial_failure");
+    assert_eq!(job["failedCompanies"], 1);
+    assert_eq!(job["completedCompanies"], 1);
+    let calls = fake.state.lock().unwrap().calls[offset..].to_vec();
+    assert!(fake.state.lock().unwrap().request_times.windows(2).all(|times| times[1].duration_since(times[0]) >= Duration::from_millis(200)), "all companies and retries share the DART transmission interval");
+    assert_eq!(calls.iter().filter(|(name, params)| name == "fnlttSinglAcntAll.json" && params["corp_code"] == CORP && params["reprt_code"] == "11014").count(), 3, "one initial attempt and two bounded retries");
+    let after = json(&client, &format!("{base}/api/symbols/005930/financial-source")).await;
+    assert_eq!(after["collection"]["reports"]["2015/11014"]["statement"]["last_success_at"], before["collection"]["reports"]["2015/11014"]["statement"]["last_success_at"]);
+    assert_eq!(json(&client, &format!("{base}/api/symbols/005930/financials?period=Y")).await["series"][0]["points"][0]["value"], 100.0);
+    assert_eq!(json(&client, &format!("{base}/api/symbols/000020/financials?period=Y")).await["series"][0]["points"][0]["value"], 120.0);
+    let count = fake.state.lock().unwrap().calls.len();
+    for _ in 0..3 { json(&client, &format!("{base}/api/financial-update")).await; }
+    assert_eq!(fake.state.lock().unwrap().calls.len(), count);
+    server.stop().await;
+}
+
+#[tokio::test]
+async fn http_authentication_and_limit_responses_stop_without_retrying_other_targets() {
+    for (status, reason) in [(StatusCode::UNAUTHORIZED, "authentication"), (StatusCode::FORBIDDEN, "authentication"), (StatusCode::TOO_MANY_REQUESTS, "rate_limited")] {
+        let fake = Fake::start().await;
+        fake.state.lock().unwrap().http_failure = Some(status);
+        let kiwoom = common::FakeKiwoom::start().await;
+        listings(&kiwoom);
+        let dir = tempdir();
+        let server = process(&fake, &kiwoom, dir.path(), "20151231065959");
+        let base = format!("http://{}", server.addr().await);
+        let client = reqwest::Client::new();
+        client.get(format!("{base}/api/bars?symbol=005930&period=D&limit=5")).send().await.unwrap().error_for_status().unwrap();
+        start(&client, &base).await;
+        let stopped = finished(&client, &base).await;
+        assert_eq!(stopped["status"], "stopped", "{stopped}");
+        assert_eq!(stopped["stopReason"], reason);
+        assert_eq!(fake.count("corpCode.xml"), 1);
+        server.stop().await;
+    }
+}
+
+#[tokio::test]
+async fn authentication_during_listing_or_xbrl_keeps_checkpoints_and_resumes_after_configuration_repair() {
+    for endpoint in ["list.json", "fnlttXbrl.xml"] {
+        let fake = Fake::start().await;
+        fake.state.lock().unwrap().failures.insert(endpoint.into(), "012".into());
+        let kiwoom = common::FakeKiwoom::start().await;
+        let mut body = fake_kiwoom::fixture("ka10099_0");
+        body["list"].as_array_mut().unwrap().retain(|row| row["code"] == "005930");
+        kiwoom.seen.respond_with("ka10099", StatusCode::OK, body);
+        let dir = tempdir();
+        let server = process(&fake, &kiwoom, dir.path(), "20151231120000");
+        let base = format!("http://{}", server.addr().await);
+        let client = reqwest::Client::new();
+        client.get(format!("{base}/api/bars?symbol=005930&period=D&limit=5")).send().await.unwrap().error_for_status().unwrap();
+        let initial = start(&client, &base).await;
+        assert_eq!(finished(&client, &base).await["stopReason"], "authentication");
+        assert_eq!(fake.count(endpoint), 1);
+        let calls = fake.state.lock().unwrap().calls.len();
+        let statements = report_calls(&fake, "11013");
+        server.stop().await;
+        let reopened = process(&fake, &kiwoom, dir.path(), "20160101120000");
+        let base = format!("http://{}", reopened.addr().await);
+        assert_eq!(json(&client, &format!("{base}/api/financial-update")).await["stopReason"], "authentication");
+        assert_eq!(fake.state.lock().unwrap().calls.len(), calls);
+        fake.state.lock().unwrap().failures.clear();
+        command(&client, &base, "resume").await;
+        let done = finished(&client, &base).await;
+        assert_eq!(done["id"], initial["id"]);
+        assert_eq!(done["historyComplete"], true, "{done}");
+        if endpoint == "fnlttXbrl.xml" { assert_eq!(report_calls(&fake, "11013"), statements, "saved CFS rows must resume at XBRL"); }
+        reopened.stop().await;
+        let bytes = std::fs::read(dir.path().join("run/financials.db")).unwrap();
+        assert!(!bytes.windows(KEY.len()).any(|window| window == KEY.as_bytes()));
+    }
+}
+
+#[tokio::test]
+async fn missing_dart_configuration_never_dispatches_on_repeated_start_or_resume() {
+    let fake = Fake::start().await;
+    let kiwoom = common::FakeKiwoom::start().await;
+    let dir = tempdir();
+    let server = common::Server::spawn_with(&kiwoom, &dir.path().join("run/server.lock"), dir.path(), &[("VALLY_CLOCK_START", std::ffi::OsStr::new("20151231120000"))]);
+    let base = format!("http://{}", server.addr().await);
+    let client = reqwest::Client::new();
+    client.get(format!("{base}/api/bars?symbol=005930&period=D&limit=5")).send().await.unwrap().error_for_status().unwrap();
+    for _ in 0..3 {
+        let page = start(&client, &base).await;
+        assert_eq!(page["status"], "not_configured");
+        assert_eq!(page["stopReason"], "not_configured");
+        assert_eq!(command(&client, &base, "resume").await["canResume"], false);
+    }
+    assert!(fake.state.lock().unwrap().calls.is_empty());
     server.stop().await;
 }

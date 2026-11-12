@@ -210,6 +210,7 @@ impl Financials {
                     collection.disclosure_version = collection.refresh_version;
                 }
                 Err(error @ (Failure::Paused | Failure::Storage)) => return Err(error),
+                Err(error @ (Failure::Authentication | Failure::RateLimited)) if client.has_journal() => return Err(error),
                 Err(failure) => collection.disclosure_failure = Some(failure),
             }
             store.save(corp, &collection).await?;
@@ -233,6 +234,7 @@ impl Financials {
                     let step = self.statement_step(client, corp, year, code, &collection.disclosures, report.statement_request.as_ref()).await;
                     let complete = match step {
                         Err(error @ (Failure::Paused | Failure::Storage)) => return Err(error),
+                        Err(error @ (Failure::Authentication | Failure::RateLimited)) if client.has_journal() => return Err(error),
                         Ok(StatementStep::Continue(next)) => { report.statement_request = Some(next); false }
                         result => {
                             let result = result.map(|step| match step { StatementStep::Done(value) => value, StatementStep::Continue(_) => unreachable!() });
@@ -256,6 +258,7 @@ impl Financials {
                     dividends(rows, corp)
                 });
                 if let Err(error @ (Failure::Paused | Failure::Storage)) = result { return Err(error); }
+                if let Err(error @ (Failure::Authentication | Failure::RateLimited)) = result && client.has_journal() { return Err(error); }
                 report.dividends.apply(result, self.clock.now().unix(), collection.refresh_version);
             } else if code == "11011" { report.dividends.validated_version = Some(collection.disclosure_version); }
             record_report(&mut collection, key, report);
@@ -285,6 +288,7 @@ impl Financials {
         let (files, source_failure) = match client.archive("fnlttXbrl.xml", &[("rcept_no", receipt.clone()), ("reprt_code", code.into())]).await {
             Ok(files) => (files, None),
             Err(error @ (Failure::Paused | Failure::Storage)) => return Err(error),
+            Err(error @ (Failure::Authentication | Failure::RateLimited)) if client.has_journal() => return Err(error),
             Err(failure) => (Vec::new(), Some(failure)),
         };
         let reporting_month = disclosures.iter().find(|r| field(r, "rcept_no") == receipt).and_then(|r| reporting_month(field(r, "report_nm")));

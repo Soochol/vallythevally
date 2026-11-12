@@ -1190,7 +1190,7 @@ pub enum FinancialPeriod { Q, Y }
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "snake_case")]
 #[ts(export)]
-pub enum FinancialUpdateStatus { Idle, Planning, Collecting, Pausing, Paused, Ready, PartialFailure, Interrupted, Failed, NotConfigured }
+pub enum FinancialUpdateStatus { Idle, Planning, Collecting, Pausing, Paused, Stopped, Checking, Ready, PartialFailure, Interrupted, Failed, NotConfigured }
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "snake_case")]
@@ -1200,7 +1200,7 @@ pub enum FinancialUpdatePhase { Planning, #[default] Recent, History, Complete }
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "snake_case")]
 #[ts(export)]
-pub enum FinancialUpdateStopReason { User, Storage, Interrupted }
+pub enum FinancialUpdateStopReason { User, Storage, Interrupted, NotConfigured, Authentication, RateLimited }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
@@ -1216,6 +1216,8 @@ pub struct FinancialUpdatePage {
     pub status: FinancialUpdateStatus,
     pub phase: FinancialUpdatePhase,
     pub stop_reason: Option<FinancialUpdateStopReason>,
+    pub next_check_at: Option<UnixSeconds>,
+    pub can_resume: bool,
     pub history_completed_companies: usize,
     pub history_failed_companies: usize,
     pub recent_failed_companies: usize,

@@ -3,7 +3,7 @@ use std::io::{Cursor, Read};
 use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
 use std::time::Duration;
 
-use serde::{Serialize, de::DeserializeOwned};
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_json::Value;
 use tokio::sync::Mutex;
 
@@ -31,7 +31,17 @@ pub struct Client {
 }
 
 #[derive(Clone)]
-struct Journal { store: super::store::Store, job: u64, through_date: String }
+struct Journal { store: super::store::Store, job: u64, through_date: String, clock: crate::clock::Clock }
+
+#[derive(Clone, Serialize, Deserialize)]
+pub(super) struct Stop {
+    pub failure: Failure,
+    pub next_check_at: Option<i64>,
+    request: Request,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+enum Request { Json { endpoint: String, params: Vec<(String, String)> }, Archive { endpoint: String, params: Vec<(String, String)> } }
 
 impl Client {
     pub fn new(key: Secret<String>, base: String, kind_base: String) -> Result<Self, Failure> {
@@ -40,9 +50,9 @@ impl Client {
         Ok(Self { http, kind_http, base, kind_base, key, directory: Mutex::new(None), pace: Mutex::new(None), paused: AtomicBool::new(false), journal: std::sync::Mutex::new(None) })
     }
 
-    pub(super) async fn begin_job(&self, store: super::store::Store, job: u64, through_date: String) -> Result<(), Failure> {
+    pub(super) async fn begin_job(&self, store: super::store::Store, job: u64, through_date: String, clock: crate::clock::Clock) -> Result<(), Failure> {
         store.begin_requests(job).await?;
-        *self.journal.lock().unwrap() = Some(Journal { store, job, through_date });
+        *self.journal.lock().unwrap() = Some(Journal { store, job, through_date, clock });
         Ok(())
     }
 
@@ -50,6 +60,7 @@ impl Client {
         self.check_pause()?;
         let journal = self.journal.lock().unwrap().clone();
         let Some(journal) = journal else { return Ok(None); };
+        if let Some(stop) = journal.store.stop().await? { return Err(stop.failure); }
         journal.store.response(journal.job, request).await?.map(|body| serde_json::from_str(&body).map_err(|_| Failure::Storage)).transpose()
     }
 
@@ -66,6 +77,62 @@ impl Client {
     pub(super) fn is_paused(&self) -> bool { self.paused.load(Ordering::SeqCst) }
     fn check_pause(&self) -> Result<(), Failure> { if self.is_paused() { Err(Failure::Paused) } else { Ok(()) } }
 
+    pub(super) fn has_journal(&self) -> bool { self.journal.lock().unwrap().is_some() }
+
+    async fn retry<T, F, Fut>(&self, mut send: F) -> Result<T, Failure>
+    where F: FnMut() -> Fut, Fut: std::future::Future<Output = Result<T, Failure>> {
+        let attempts = if self.has_journal() { 3 } else { 1 };
+        for attempt in 0..attempts {
+            self.check_pause()?;
+            let result = send().await;
+            if !matches!(result, Err(Failure::Network | Failure::Remote)) || attempt + 1 == attempts { return result; }
+            tokio::time::sleep(Duration::from_millis(250 * (attempt + 1))).await;
+        }
+        unreachable!()
+    }
+
+    async fn stop_after<T>(&self, result: Result<T, Failure>, request: Request) -> Result<T, Failure> {
+        let journal = self.journal.lock().unwrap().clone();
+        if let Err(error @ (Failure::Authentication | Failure::RateLimited)) = &result && let Some(journal) = journal {
+            let next_check_at = (*error == Failure::RateLimited).then(|| crate::clock::next_daily(journal.clock.now(), domain::TimeOfDay::hms(7, 0, 0).unwrap()).unix());
+            journal.store.save_stop(Some(&Stop { failure: *error, next_check_at, request })).await?;
+        }
+        result
+    }
+
+    pub(super) async fn confirm(&self, mut stop: Stop) -> Result<bool, Failure> {
+        let result = match &stop.request {
+            Request::Json { endpoint, params } => {
+                let params: Vec<_> = params.iter().map(|(key, value)| (key.as_str(), value.clone())).collect();
+                match self.bytes(endpoint, &params).await {
+                    Ok(bytes) => match self.json(&bytes) {
+                        Ok(value) => self.checkpoint(&format!("json/{endpoint}/{}", serde_json::to_string(&params).unwrap()), &value).await,
+                        Err(error) => Err(error),
+                    },
+                    Err(error) => Err(error),
+                }
+            }
+            Request::Archive { endpoint, params } => {
+                let params: Vec<_> = params.iter().map(|(key, value)| (key.as_str(), value.clone())).collect();
+                match self.archive_response(endpoint, &params).await {
+                    Ok(files) => self.checkpoint(&format!("archive/{endpoint}/{}", serde_json::to_string(&params).unwrap()), &files).await,
+                    Err(error) => Err(error),
+                }
+            }
+        };
+        let journal = self.journal.lock().unwrap().clone().unwrap();
+        match result {
+            Ok(()) => { journal.store.save_stop(None).await?; Ok(true) }
+            Err(error @ (Failure::Storage | Failure::Paused)) => Err(error),
+            Err(error) => {
+                if matches!(error, Failure::Authentication | Failure::RateLimited) { stop.failure = error; }
+                stop.next_check_at = (stop.failure == Failure::RateLimited).then(|| crate::clock::next_daily(journal.clock.now(), domain::TimeOfDay::hms(7, 0, 0).unwrap()).unix());
+                journal.store.save_stop(Some(&stop)).await?;
+                Ok(false)
+            }
+        }
+    }
+
     async fn bytes(&self, endpoint: &str, params: &[(&str, String)]) -> Result<Vec<u8>, Failure> {
         let mut pace = self.pace.lock().await;
         if let Some(last) = *pace { tokio::time::sleep_until(last + Duration::from_millis(250)).await; }
@@ -73,7 +140,12 @@ impl Client {
         *pace = Some(tokio::time::Instant::now());
         let response = self.http.get(format!("{}/api/{endpoint}", self.base)).query(&[("crtfc_key", self.key.expose())]).query(params).send().await.map_err(|_| Failure::Network)?;
         drop(pace);
-        if !response.status().is_success() { return Err(Failure::Remote); }
+        match response.status().as_u16() {
+            401 | 403 => return Err(Failure::Authentication),
+            429 => return Err(Failure::RateLimited),
+            _ if !response.status().is_success() => return Err(Failure::Remote),
+            _ => {}
+        }
         let bytes = response.bytes().await.map_err(|_| Failure::Network)?;
         if bytes.len() > 64 * 1024 * 1024 { return Err(Failure::InvalidResponse); }
         Ok(bytes.to_vec())
@@ -91,7 +163,8 @@ impl Client {
     pub async fn response(&self, endpoint: &str, params: &[(&str, String)]) -> Result<Value, Failure> {
         let request = format!("json/{endpoint}/{}", serde_json::to_string(params).map_err(|_| Failure::InvalidResponse)?);
         if let Some(value) = self.cached(&request).await? { return Ok(value); }
-        let value = self.json(&self.bytes(endpoint, params).await?)?;
+        let result = self.retry(|| async { self.json(&self.bytes(endpoint, params).await?) }).await;
+        let value = self.stop_after(result, Request::Json { endpoint: endpoint.into(), params: params.iter().map(|(key, value)| ((*key).into(), value.clone())).collect() }).await?;
         self.checkpoint(&request, &value).await?;
         Ok(value)
     }
@@ -104,6 +177,13 @@ impl Client {
     pub async fn archive(&self, endpoint: &str, params: &[(&str, String)]) -> Result<Vec<(String, String)>, Failure> {
         let request = format!("archive/{endpoint}/{}", serde_json::to_string(params).map_err(|_| Failure::InvalidResponse)?);
         if let Some(value) = self.cached(&request).await? { return Ok(value); }
+        let result = self.retry(|| self.archive_response(endpoint, params)).await;
+        let files = self.stop_after(result, Request::Archive { endpoint: endpoint.into(), params: params.iter().map(|(key, value)| ((*key).into(), value.clone())).collect() }).await?;
+        self.checkpoint(&request, &files).await?;
+        Ok(files)
+    }
+
+    async fn archive_response(&self, endpoint: &str, params: &[(&str, String)]) -> Result<Vec<(String, String)>, Failure> {
         let bytes = self.bytes(endpoint, params).await?;
         if !bytes.starts_with(b"PK") {
             if bytes.iter().find(|b| !b.is_ascii_whitespace()) == Some(&b'{') {
@@ -120,7 +200,6 @@ impl Client {
         }
         let key = self.key.expose().clone();
         let files = tokio::task::spawn_blocking(move || unzip(&bytes, &key)).await.map_err(|_| Failure::InvalidResponse)??;
-        self.checkpoint(&request, &files).await?;
         Ok(files)
     }
 
@@ -182,9 +261,12 @@ impl Client {
         let request = format!("kind/{path}/{}", serde_json::to_string(params).map_err(|_| Failure::InvalidResponse)?);
         if let Some(value) = self.cached(&request).await? { return Ok(value); }
         self.check_pause()?;
-        let response = self.kind_http.get(format!("{}{path}", self.kind_base)).query(params).send().await.map_err(|_| Failure::Network)?;
-        if !response.status().is_success() { return Err(Failure::Remote); }
-        let bytes = response.bytes().await.map_err(|_| Failure::Network)?;
+        let bytes = self.retry(|| async {
+            self.check_pause()?;
+            let response = self.kind_http.get(format!("{}{path}", self.kind_base)).query(params).send().await.map_err(|_| Failure::Network)?;
+            if !response.status().is_success() { return Err(Failure::Remote); }
+            response.bytes().await.map_err(|_| Failure::Network)
+        }).await?;
         if bytes.len() > 1024 * 1024 { return Err(Failure::InvalidResponse); }
         let mut redacted = Vec::with_capacity(bytes.len());
         let mut remaining = bytes.as_ref();
