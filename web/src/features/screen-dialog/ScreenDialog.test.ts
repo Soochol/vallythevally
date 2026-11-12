@@ -3,7 +3,8 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { expect, test } from "vitest";
 import type { Screen } from "../../api/generated/Screen";
 import { Select } from "../menu/Select";
-import { CHOICE_LABEL, ScreenFields } from "./ScreenDialog";
+import { ScreenFields } from "./ScreenDialog";
+import { CHOICE_LABEL } from "./ConditionFields";
 import { addCondition, changeKind, draftOf, editCondition, removeCondition, KIND_GROUPS, type ScreenDraft } from "./screenForm";
 
 const twoLines = addCondition(addCondition({ ...draftOf(null), name: "고가와 거래량" }));
