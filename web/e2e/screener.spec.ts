@@ -99,7 +99,7 @@ test("빈 저장소를 채우고 만든 조건식으로 찾은 종목을 칸의 
       ["110040", "가상정지", "10-23"],
       ["110050", "가상관리", "10-19"],
     ]);
-    await expect(rail(page).getByRole("button", { name: /^스크리너/ })).toContainText("결과 4종목");
+    await expect(rail(page).getByRole("tab", { name: /^스크리너/ })).toContainText("결과 4종목");
   });
 
   await test.step("지수 칸에서 행을 누르면 그 종목을 통합으로 연다", async () => {
@@ -142,7 +142,7 @@ test("빈 저장소를 채우고 만든 조건식으로 찾은 종목을 칸의 
     await menu.getByRole("menuitem", { name: `새 목록 "${SCREEN_NAME}"` }).click();
     await expect(page.getByText(`${SCREEN_NAME}에 4종목을 넣었습니다`)).toBeVisible();
     await saved;
-    await rail(page).getByRole("button", { name: "관심종목" }).click();
+    await rail(page).getByRole("tab", { name: "관심종목" }).click();
     await expectWatchlistOfResults(page);
   });
 
