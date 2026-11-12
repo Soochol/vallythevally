@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useRef, useState } from "react";
+import { useCallback, useLayoutEffect, useId, useRef, useState } from "react";
 import type { Period } from "../../api/generated/Period";
 import { PERIOD_LABEL } from "../../lib/symbol";
 import { type CellState, useLayoutStore } from "../../stores/layout";
@@ -26,8 +26,12 @@ export function PeriodChips({ cell }: { cell: CellState }) {
   const longPressed = useRef(false);
   const hintId = useId();
 
-  useEffect(() => {
-    root.current?.querySelector('[aria-pressed="true"]')?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  useLayoutEffect(() => {
+    const keepSelectedVisible = () => root.current?.querySelector('[aria-pressed="true"]')?.scrollIntoView({ block: "nearest", inline: "nearest" });
+    keepSelectedVisible();
+    const resize = new ResizeObserver(keepSelectedVisible);
+    if (root.current) resize.observe(root.current);
+    return () => resize.disconnect();
   }, [cell.period]);
 
   const cancelPress = () => {

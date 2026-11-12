@@ -42,7 +42,7 @@ export function readThemeTokens(root: HTMLElement = document.documentElement): T
     seriesLine: v("--series-line"),
     seriesFill: v("--series-fill"),
     fontFamily: v("--font-sans"),
-    fontSize: Number.parseFloat(v("--fs-s")) || 12,
+    fontSize: Number.parseFloat(v("--fs-xs")) || 11,
     ind: { "ind-1": v("--ind-1"), "ind-2": v("--ind-2"), "ind-3": v("--ind-3"), "ind-4": v("--ind-4"), "ind-5": v("--ind-5") },
     cmp: { 1: v("--cmp-1"), 2: v("--cmp-2"), 3: v("--cmp-3") },
   };

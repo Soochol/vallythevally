@@ -41,7 +41,7 @@ export class IndicatorLegend {
     private readonly onCommand: (id: string, command: IndicatorCommand) => void,
   ) {}
 
-  render(rows: IndicatorRow[], paneTops: readonly number[]): void {
+  render(rows: IndicatorRow[], paneTops: readonly number[], axisWidth = 72): void {
     const seen = new Set<string>();
     for (const row of rows) {
       seen.add(row.id);
@@ -56,6 +56,7 @@ export class IndicatorLegend {
       this.fill(r, row);
       if (row.panel) {
         if (r.root.parentElement !== this.overlay) this.overlay.append(r.root);
+        r.root.style.maxWidth = `calc(100% - ${axisWidth + 16}px)`;
         r.root.style.top = `${(paneTops[row.panel.index + 1] ?? 0) + 4}px`;
         r.up!.disabled = row.panel.index === 0;
         r.down!.disabled = row.panel.index === row.panel.count - 1;

@@ -7,6 +7,7 @@ import {
   type PriceFormat,
   PriceScaleMode,
 } from "lightweight-charts";
+import { axisPriceFormat, financialAxisUnit } from "../axisFormat";
 import type { Bar } from "../../api/generated/Bar";
 import type { FinancialsPage } from "../../api/generated/FinancialsPage";
 import { adjacentBucket, financialBuckets, financialDetail, financialFailure, financialReason, checkedTime, financialSummary, financialValue, reportingPeriod } from "../financials";
@@ -459,10 +460,15 @@ export class IndicatorLayer {
       const metric = config.spec.kind;
       const currencies = new Set(this.financials?.series.find((series) => series.metric === metric)?.points.flatMap((p) => p.currency ? [p.currency] : []));
       const currency = currencies.size === 1 ? [...currencies][0] ?? null : "원문 통화";
-      return { type: "custom", minMove: 0.01, formatter: (v: number) => financialValue(v, metric, currency) };
+      return axisPriceFormat(financialAxisUnit(metric, currency), 0.01, () => this.lastAxisValues(config));
     }
-    if (config.spec.kind === "rsi" || config.spec.kind === "stochSlow") return { type: "price", precision: 2, minMove: 0.01 };
-    return { type: "custom", minMove: 0.01, formatter: (v: number) => this.format(config, v) };
+    const unit = config.spec.kind === "volume" ? "volume" : config.spec.kind === "macd" || config.spec.kind === "rsi" || config.spec.kind === "stochSlow" || this.host.isIndex() ? "index" : "price";
+    return axisPriceFormat(unit, 0.01, () => this.lastAxisValues(config));
+  }
+
+  private lastAxisValues(config: IndicatorConfig): number[] {
+    return [...this.shown.values()].filter((s) => s.config.visible && s.config.panel === config.panel && s.config.panel !== "price")
+      .flatMap((s) => s.lines.flatMap((line) => { const last = line.series.lastValueData(false); return last.noData ? [] : [last.price]; }));
   }
 
   private format(config: IndicatorConfig, v: number): string {

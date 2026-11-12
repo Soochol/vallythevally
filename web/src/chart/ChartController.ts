@@ -138,7 +138,7 @@ export class ChartController {
     this.chart.chartElement().addEventListener("wheel", this.onWheel, { capture: true, passive: false });
     // 주 시리즈를 바꿔 붙이는 동안 가격 pane이 비어도 라이브러리가 지우지 않게 한다. 지우면 지표 패널이 0번이 된다.
     this.chart.panes()[0]?.setPreserveEmptyPane(true);
-    this.main = addMainSeries(this.chart, "candle", this.tokens, false);
+    this.main = addMainSeries(this.chart, "candle", this.tokens, false, () => this.lastPriceValues());
     this.legend = new Legend(el);
     this.indicators = new IndicatorLayer(
       {
@@ -154,7 +154,11 @@ export class ChartController {
     this.indicatorLegend = new IndicatorLegend(el, (id, command) => deps.onIndicatorCommand?.(id, command));
     this.compareLegend = new CompareLegend((code) => deps.onCompareRemove?.(code));
     this.legend.root.append(this.indicatorLegend.priceBox, this.compareLegend.box);
-    this.resize = new ResizeObserver(() => this.scheduleFrame());
+    this.resize = new ResizeObserver(() => {
+      const width = this.axisWidth();
+      if (this.chart.options().rightPriceScale.minimumWidth !== width) this.chart.priceScale("right").applyOptions({ minimumWidth: width });
+      this.scheduleFrame();
+    });
     this.resize.observe(el);
     const onPanelStretch = deps.onPanelStretch;
     if (onPanelStretch) {
@@ -238,7 +242,7 @@ export class ChartController {
     if (prev?.period !== next.period) this.chart.applyOptions({ timeScale: { timeVisible: isIntraday(next.period) } });
     if (prev?.symbol !== next.symbol || prev.venue !== next.venue || prev.period !== next.period) {
       if (prev && isIndexCode(prev.symbol) !== isIndex) {
-        this.main.api.applyOptions({ priceFormat: priceFormat(isIndex) });
+        this.main.api.applyOptions({ priceFormat: priceFormat(isIndex, () => this.lastPriceValues()) });
         this.indicators.refreshPriceFormat();
       }
       this.history = null;
@@ -364,6 +368,15 @@ export class ChartController {
     if (timeScale.options().rightBarStaysOnScroll !== rightBarStaysOnScroll) timeScale.applyOptions({ rightBarStaysOnScroll });
   };
 
+  private lastPriceValues(): number[] {
+    const last = this.main.api.lastValueData(false);
+    return last.noData ? [] : [last.price];
+  }
+
+  private axisWidth(): number {
+    return matchMedia("(max-width: 767px)").matches ? 52 : 72;
+  }
+
   private chartOptions(): DeepPartial<ChartOptions> {
     const t = this.tokens;
     const crossLine = { color: t.crosshair, style: LineStyle.Dashed, width: 1 as const, labelBackgroundColor: t.raised };
@@ -378,7 +391,7 @@ export class ChartController {
       },
       grid: { vertLines: { color: t.grid }, horzLines: { color: t.grid } },
       crosshair: { mode: CrosshairMode.Normal, vertLine: crossLine, horzLine: crossLine },
-      rightPriceScale: { borderColor: t.line, scaleMargins: { top: 0.14, bottom: 0.08 } },
+      rightPriceScale: { minimumWidth: this.axisWidth(), alignLabels: true, entireTextOnly: true, borderColor: t.line, scaleMargins: { top: 0.14, bottom: 0.08 } },
       timeScale: {
         borderColor: t.line,
         rightOffset: RIGHT_OFFSET,
@@ -401,7 +414,7 @@ export class ChartController {
     this.indicators.flush();
     this.withDataGuard(() => preserveTimeRange(this.chart.timeScale(), this.period(), () => {
       this.chart.removeSeries(this.main.api);
-      this.main = addMainSeries(this.chart, this.view?.settings.style ?? "candle", this.tokens, isIndex);
+      this.main = addMainSeries(this.chart, this.view?.settings.style ?? "candle", this.tokens, isIndex, () => this.lastPriceValues());
       this.extensions.forEach((ext) => ext.reattach());
       this.setBars(this.bars);
     }));
@@ -517,12 +530,13 @@ export class ChartController {
     this.realtimeSeen = false;
     if (this.realtimeLive) this.stalledAt = null;
     const bars = displayBars(h);
-    const show = matchMedia("(max-width: 767px)").matches ? 90 : 130;
+    const coarse = this.period() === "Y" || this.period() === "Q";
+    const show = coarse ? bars.length : matchMedia("(max-width: 767px)").matches ? 90 : 130;
     this.withDataGuard(() => {
       this.setBars(bars);
       const last = bars.at(-1);
       const end = last ? this.chart.timeScale().timeToIndex(toChartTime(last.t), false) : null;
-      if (end !== null) this.chart.timeScale().setVisibleLogicalRange({ from: end + 1 - show, to: end + RIGHT_OFFSET });
+      if (end !== null) this.chart.timeScale().setVisibleLogicalRange({ from: end + (coarse ? 0.5 : 1) - show, to: end + (coarse ? 0.5 + Math.min(2, bars.length * 0.05) : RIGHT_OFFSET) });
     });
     this.indicators.reset(h);
     this.compare.coverFrom(this.leftT());
@@ -598,7 +612,7 @@ export class ChartController {
     const view = this.view;
     const i = this.hoverIndex ?? this.bars.length - 1;
     const bar = this.bars[i];
-    this.indicatorLegend.render(this.indicators.rows(this.financialHoverTime ?? bar?.t ?? null), this.paneTops());
+    this.indicatorLegend.render(this.indicators.rows(this.financialHoverTime ?? bar?.t ?? null), this.paneTops(), this.chart.priceScale("right").width());
     this.compareLegend.render(this.compare.rows(this.leftT(), bar?.t ?? null));
     if (!view || !bar) return this.legend.show(null);
     this.legend.show({
