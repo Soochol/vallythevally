@@ -18,6 +18,7 @@ export interface Panel {
   id: string;
   /** 가격 패널(1) 대비 높이 비율. */
   stretch: number;
+  collapsed?: boolean;
 }
 
 /** 칸의 차트 설정(frontend.md §5.5). */
@@ -98,7 +99,8 @@ function migrateV1(v1: Pick<ChartSettings, "style" | "scale" | "compare"> & { in
 
 function readPanel(raw: unknown): Panel | null {
   if (!isRecord(raw) || typeof raw.id !== "string" || !isNum(raw.stretch) || raw.stretch <= 0) return null;
-  return { id: raw.id, stretch: raw.stretch };
+  if (raw.collapsed !== undefined && typeof raw.collapsed !== "boolean") return null;
+  return { id: raw.id, stretch: raw.stretch, ...(raw.collapsed === undefined ? {} : { collapsed: raw.collapsed }) };
 }
 
 function readIndicator(raw: unknown): IndicatorConfig | null {
@@ -198,6 +200,10 @@ export function movePanel(s: ChartSettings, panelId: string, step: -1 | 1): Char
   const panels = [...s.panels];
   [panels[from], panels[to]] = [panels[to]!, panels[from]!];
   return { ...s, panels };
+}
+
+export function togglePanel(s: ChartSettings, panelId: string): ChartSettings {
+  return { ...s, panels: s.panels.map((p) => p.id === panelId ? { ...p, collapsed: !p.collapsed } : p) };
 }
 
 export function setPanelStretches(s: ChartSettings, stretches: readonly Panel["stretch"][]): ChartSettings {

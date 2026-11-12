@@ -54,3 +54,23 @@
 .desktop-topbar .shell-search { flex:0 1 248px; min-width:160px; border:var(--size-1) solid var(--line); background:var(--surface); }
 .shell-search kbd { padding-inline:var(--size-4); }
 @media (width < 48rem) { .desktop-topbar { display:none; } }
+
+.financial-status-dot {
+  display: block;
+  width: var(--size-8);
+  height: var(--size-8);
+  border-radius: 50%;
+  background: var(--text-3);
+  cursor: pointer;
+  list-style: none;
+}
+.financial-status-dot::-webkit-details-marker { display: none; }
+.financial-status-dot[data-status="ready"] { background: var(--success); }
+.financial-status-dot[data-status="collecting"], .financial-status-dot[data-status="pending"] { background: var(--warning); }
+.financial-status-dot[data-status="failed"], .financial-status-dot[data-status="partial_failure"] { background: var(--danger); }
+.indicator-collapsed {
+  height: var(--size-30);
+  margin-top: calc(-1 * var(--size-4));
+  background: var(--chart-bg);
+  cursor: pointer;
+}

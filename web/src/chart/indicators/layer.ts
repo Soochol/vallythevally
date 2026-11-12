@@ -58,8 +58,8 @@ export interface IndicatorRow {
   color: string;
   values: LegendValue[];
   state: "ok" | "pending" | "hidden" | EngineErrorKind;
-  detail?: { summary: string; text: string; reports: { label: string; text: string }[] };
-  panel: { index: number; count: number } | null;
+  detail?: { status: string; summary: string; text: string; reports: { label: string; text: string }[] };
+  panel: { index: number; count: number; collapsed?: boolean } | null;
 }
 
 export interface LayerHost {
@@ -269,29 +269,34 @@ export class IndicatorLayer {
 
   rows(t: UnixSeconds | null): IndicatorRow[] {
     const tokens = this.host.tokens();
+    let fiscalMonthShown = false;
     return this.configs.map((config) => {
       const s = this.shown.get(config.id);
       const status = s?.status ?? { kind: "pending" };
       const state = status.kind === "error" ? status.error : status.kind === "ready" ? "ok" : status.kind;
       const lines = specLines(config.spec);
       const panelIndex = config.panel === "price" ? -1 : this.panels.findIndex((p) => p.id === config.panel);
+      const collapsed = this.panels[panelIndex]?.collapsed;
+      const time = collapsed ? this.display.at(-1)?.t ?? t : t;
       if (isFinancial(config.spec)) {
         const metric = config.spec.kind;
         const points = this.financials?.series.find((series) => series.metric === metric)?.points ?? [];
-        const at = points.filter((p) => p.priceBucket === t);
+        const at = points.filter((p) => p.priceBucket === (collapsed ? points.at(-1)?.priceBucket : time));
+        const fiscalMonth = !fiscalMonthShown && this.financials?.fiscalMonth ? ` · ${this.financials.fiscalMonth}월 결산` : "";
+        fiscalMonthShown = true;
         const summary = this.financials ? [this.financialSummaryText, this.financialNotice].filter(Boolean).join(" · ") : this.financialMessage;
         const unitNote = metric === "dps" && this.host.period() === "Q" ? " · 연간 전용" : "";
-        return { id: config.id, name: `${specName(config.spec)}${this.financials?.fiscalMonth ? ` · ${this.financials.fiscalMonth}월 결산` : ""}${unitNote}`, color: indicatorColorValue(tokens, config.style.colors[0] ?? "ind-1"),
+        return { id: config.id, name: `${specName(config.spec)}${fiscalMonth}${unitNote}`, color: indicatorColorValue(tokens, config.style.colors[0] ?? "ind-1"),
           values: at.map((p) => ({ text: p.value === null ? financialReason(p.reason) || "—" : financialValue(p.value, metric, p.currency), color: tokens.text2 })),
-          state: config.visible ? "ok" : "hidden", panel: { index: panelIndex, count: this.panels.length },
-          detail: { summary, text: [summary, financialFailure(this.financials?.failure ?? null), financialFailure(this.financials?.disclosureFailure ?? null), this.financials ? `최근 시도 ${checkedTime(this.financials.lastAttemptAt)}` : "", this.financials?.shareClassReason ? "배당 주식 종류 미확인 · 회사 재무와 별도로 확인합니다" : "", this.financials?.latestCorrections ? "정정된 최신 공시 기준" : "", ...at.map((p) => financialDetail(p, metric))].join("\n\n"),
+          state: config.visible ? "ok" : "hidden", panel: { index: panelIndex, count: this.panels.length, collapsed },
+          detail: { status: this.financialNotice ? "failed" : this.financials?.status ?? "pending", summary, text: [summary, financialFailure(this.financials?.failure ?? null), financialFailure(this.financials?.disclosureFailure ?? null), this.financials ? `최근 시도 ${checkedTime(this.financials.lastAttemptAt)}` : "", this.financials?.shareClassReason ? "배당 주식 종류 미확인 · 회사 재무와 별도로 확인합니다" : "", this.financials?.latestCorrections ? "정정된 최신 공시 기준" : "", ...at.map((p) => financialDetail(p, metric))].join("\n\n"),
             reports: this.financialReports.get(metric) ?? [] } };
       }
       const values: LegendValue[] =
-        state !== "ok" || t === null || !s
+        state !== "ok" || time === null || !s
           ? []
           : s.lines.map((line, i) => {
-              const pt = pointAtTime(line.points, t);
+              const pt = pointAtTime(line.points, time);
               const color = isBarLine(line.id) ? tokens.text2 : indicatorColorValue(tokens, lineColor(config.spec, config.style.colors, i));
               return { text: pt ? this.format(config, pt.v) : "—", color };
             });
@@ -302,7 +307,7 @@ export class IndicatorLayer {
         color: primary < 0 ? tokens.text2 : indicatorColorValue(tokens, lineColor(config.spec, config.style.colors, primary)),
         values,
         state,
-        panel: panelIndex < 0 ? null : { index: panelIndex, count: this.panels.length },
+        panel: panelIndex < 0 ? null : { index: panelIndex, count: this.panels.length, collapsed },
       };
     });
   }
@@ -310,7 +315,7 @@ export class IndicatorLayer {
   stretches(): Panel["stretch"][] {
     const panes = this.host.chart.panes();
     const base = panes[0]?.getStretchFactor() ?? 1;
-    return this.panels.map((_, i) => (panes[i + 1]?.getStretchFactor() ?? base) / base);
+    return this.panels.map((p, i) => p.collapsed ? p.stretch : (panes[i + 1]?.getStretchFactor() ?? base) / base);
   }
 
   dispose(): void {
@@ -573,10 +578,18 @@ export class IndicatorLayer {
     this.shown.delete(id);
   }
 
-  private applyStretch(): void {
+  applyStretch(): void {
     const panes = this.host.chart.panes();
+    const height = panes.reduce((sum, pane) => sum + pane.getHeight(), 0);
+    const collapsedHeight = this.panels.filter((p) => p.collapsed).length * 30;
+    const expandedStretch = 1 + this.panels.reduce((sum, p) => sum + (p.collapsed ? 0 : p.stretch), 0);
+    const priceHeight = Math.max(30, (height - collapsedHeight) / expandedStretch);
     panes[0]?.setStretchFactor(1);
-    this.panels.forEach((p, i) => panes[i + 1]?.setStretchFactor(p.stretch));
+    this.panels.forEach((p, i) => {
+      panes[i + 1]?.setStretchFactor(p.collapsed ? 30 / priceHeight : p.stretch);
+      const element = panes[i + 1]?.getHTMLElement();
+      if (element) element.style.visibility = p.collapsed ? "hidden" : "";
+    });
   }
 }
 

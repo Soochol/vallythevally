@@ -13,7 +13,7 @@ interface Props extends HTMLAttributes<HTMLDivElement> {
   follow?: boolean;
   backdrop?: boolean;
   blockChartKeys?: boolean;
-  onClose(): void;
+  onClose(reason: "escape" | "outside"): void;
 }
 export function Popover({ anchor, focusTarget, point, anchorRect, placement, focus, restoreFocus, dismiss, follow, backdrop, blockChartKeys, onClose, className = "", ...props }: Props) {
   const panel = useRef<HTMLDivElement>(null);
@@ -30,7 +30,7 @@ export function Popover({ anchor, focusTarget, point, anchorRect, placement, foc
       trigger: config.anchor?.current,
       focusTarget: config.focusTarget?.current ?? config.anchor?.current ?? opener.current,
       anchor: config.anchorRect ?? (point ? () => ({ left: point.x, right: point.x, top: point.y, bottom: point.y }) : () => config.anchor?.current?.getBoundingClientRect()),
-      onClose: () => close.current(),
+      onClose: (reason) => close.current(reason),
     });
   }, []);
   return <div ref={panel} popover="manual" tabIndex={-1} className={`ui-popover ${className}`} {...props} />;

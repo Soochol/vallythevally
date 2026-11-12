@@ -5,6 +5,7 @@ export function domSelect(button: HTMLButtonElement, options: () => readonly { l
   const open = () => {
     if (close) { close(); return; }
     const panel = document.createElement("div");
+    if (button.closest("[data-chart-control]")) panel.dataset.chartControl = "";
     panel.className = "ui-popover flex flex-col p-1";
     panel.setAttribute("role", "menu");
     panel.setAttribute("aria-label", button.getAttribute("aria-label") ?? "선택");

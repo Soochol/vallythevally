@@ -17,6 +17,8 @@ import { useSelectionStore } from "../../stores/selection";
 import { useTheme } from "../../stores/ui";
 import { cellErrorView, olderErrorView } from "./cellError";
 import { useDrawingSurface } from "../../chart/drawings/useDrawingSurface";
+import { IndicatorPopover } from "../indicator-dialog/IndicatorPopover";
+import type { IndicatorConfig } from "../../chart/settings";
 import { DrawingOverlay } from "../drawings/DrawingOverlay";
 import { attachController } from "./controllers";
 
@@ -28,7 +30,9 @@ function runIndicatorCommand(slot: Slot, id: string, command: IndicatorCommand):
     case "refresh":
       return;
     case "edit":
-      return useSelectionStore.getState().openIndicators(slot, id);
+      return;
+    case "collapse":
+      return store.togglePanel(slot, config.panel);
     case "toggle":
       return store.updateIndicator(slot, id, { visible: !config.visible });
     case "remove":
@@ -60,6 +64,7 @@ export function ChartCell({ slot, status, onStatus }: Props) {
   const openSearch = useSelectionStore((s) => s.openSearch);
   const chartEl = useRef<HTMLDivElement>(null);
   const ctl = useRef<ChartController | null>(null);
+  const [editing, setEditing] = useState<{ initial: IndicatorConfig; anchor: HTMLElement } | null>(null);
   const [venueAnchor, setVenueAnchor] = useState<HTMLElement | null>(null);
   const onStatusRef = useRef(onStatus);
   onStatusRef.current = onStatus;
@@ -71,7 +76,12 @@ export function ChartCell({ slot, status, onStatus }: Props) {
       tokens: readThemeTokens(),
       onStatus: (s) => onStatusRef.current(s),
       socket: marketSocket,
-      onIndicatorCommand: (id, command) => command === "refresh" ? refreshFinancial.current() : runIndicatorCommand(slotRef.current, id, command),
+      onIndicatorCommand: (id, command, anchor) => {
+        if (command === "refresh") return refreshFinancial.current();
+        if (command !== "edit") return runIndicatorCommand(slotRef.current, id, command);
+        const initial = useLayoutStore.getState().layout.cells.find((c) => c.slot === slotRef.current)?.chartSettings.indicators.find((i) => i.id === id);
+        if (initial) setEditing({ initial, anchor });
+      },
       onPanelStretch: (stretches) => useLayoutStore.getState().setPanelStretches(slotRef.current, stretches),
       onCompareRemove: (code) => useLayoutStore.getState().removeCompare(slotRef.current, code),
     });
@@ -122,6 +132,7 @@ export function ChartCell({ slot, status, onStatus }: Props) {
       <div ref={chartEl} className="absolute inset-0" />
       {venueAnchor && createPortal(<VenuePicker cell={cell} info={info} variant="legend" />, venueAnchor)}
       <DrawingOverlay slot={slot} />
+      {editing && cell.chartSettings.indicators.some((i) => i.id === editing.initial.id) && <IndicatorPopover key={editing.initial.id} slot={slot} {...editing} onClose={() => setEditing(null)} />}
       {status.kind === "loading" && <div className="pointer-events-none absolute inset-0 z-[5] bg-chart-bg"><Skeleton label="차트 불러오는 중" /></div>}
       {olderError && (
         <div

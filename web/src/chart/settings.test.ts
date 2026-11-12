@@ -10,6 +10,7 @@ import {
   removeCompare,
   removeIndicator,
   setPanelStretches,
+  togglePanel,
   shownScale,
   updateIndicator,
 } from "./settings";
@@ -160,4 +161,15 @@ test("비교 종목을 빼면 나머지 순서를 지키고, 없는 종목이면
 test("사용자 지정 선 색과 굵기 5는 저장한 차트 설정에서 손실 없이 복원한다", () => {
   const raw = { ...DEFAULT_CHART_SETTINGS, panels: [], indicators: [{ id: "custom", spec: { kind: "ma", method: "sma", period: 20 }, panel: "price", visible: true, style: { colors: ["#8B5CF6"], width: 5 } }] };
   expect(parseChartSettings(JSON.parse(JSON.stringify(raw)))).toEqual(raw);
+});
+
+test("패널 접힘은 저장한 높이와 지표 표시를 보존하고 과거 설정도 읽는다", () => {
+  const original = { ...DEFAULT_CHART_SETTINGS, panels: [{ ...DEFAULT_CHART_SETTINGS.panels[0]!, stretch: 0.4 }] };
+  const panel = original.panels[0]!;
+  const collapsed = togglePanel(original, panel.id);
+  expect(collapsed.panels[0]).toEqual({ ...panel, collapsed: true });
+  expect(collapsed.indicators).toBe(original.indicators);
+  expect(parseChartSettings(JSON.parse(JSON.stringify(collapsed)))).toEqual(collapsed);
+  expect(togglePanel(collapsed, panel.id).panels[0]).toEqual({ ...panel, collapsed: false });
+  expect(parseChartSettings(original)).toEqual(original);
 });

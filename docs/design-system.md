@@ -73,3 +73,9 @@ DOM 범례는 `iconMarkup("gear" | "eye" | "eyeOff" | "close" | "up" | "down")`�
 범례·머리에 만드는 실제 조작 요소에는 `data-chart-control`을 붙인다. React 밖에서 만드는 버튼·summary와 조작 팝오버도 같은 표식을 쓴다. `DrawingSurface`는 부모 capture 단계에서 이벤트 경로의 표식을 검사해 드로잉 입력에서 제외한다. 버튼의 bubble 단계에서 전파만 막는 방식으로 대체하지 않는다.
 
 차트 위의 종목명은 `pointer-events: none`으로 십자선·휠·끌기를 통과시킨다. 이름은 말줄임하되 heading의 `aria-label`에 전체 이름을 제공한다. 입력을 소유하는 것은 거래소 같은 실제 조작 요소이며 이 요소에만 `pointer-events: auto`를 준다.
+
+## 범례 설정과 패널
+
+`IndicatorSettingsForm`은 지표 종류별 입력과 색상·굵기를 그린다. `Draft`, 현재 색, 검사 오류와 `onChange`를 받아 범례 팝오버와 지표 추가 창에서 함께 쓴다. `IndicatorPopover`는 열 때의 설정을 보관하고 유효한 변경을 즉시 적용한다. Esc는 처음 설정으로 되돌리고, 바깥 클릭과 닫기는 변경을 유지한다. 중첩 색상 선택기의 Esc는 색상 선택기만 닫는다. 공통 Popover의 닫기 사유는 `escape`와 `outside`다.
+
+패널의 높이 비율과 접힘은 `ChartSettings.panels`의 `stretch`와 `collapsed`에 저장한다. 과거 설정에서 `collapsed`가 없으면 펼친다. 접힌 패널은 최신 값과 이름만 한 줄에 표시하고 이름이나 행을 누르면 펼친다. 펼칠 때 저장한 높이 비율을 복원한다. `PanelControls`의 경계 손잡이는 포인터 끌기와 위·아래 화살표를 지원하며 `data-chart-control`로 드로잉 입력에서 제외한다. 재무 패널의 상태 점은 제목 옆에 두고 자세한 상태와 보고기간 선택은 팝오버에 모은다. 결산월은 첫 재무 범례에 한 번 표시한다.
