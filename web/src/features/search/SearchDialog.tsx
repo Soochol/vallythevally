@@ -87,7 +87,6 @@ function SearchDialogBody({ purpose }: { purpose: SearchPurpose }) {
     } else {
       useLayoutStore.getState().setSymbol(slot, info);
       selection.setPhoneTab("chart");
-      selection.setDesktopView("chart");
     }
     close();
   };
