@@ -419,7 +419,6 @@ async fn recent_period_accepts_the_old_end_plus_one_boundary_and_rejects_old_api
     let mut revision = 1;
     for kind in KINDS.into_iter().filter(|k| *k != "market_cap") {
         let mut condition = example(kind);
-        condition.as_object_mut().unwrap().remove("barRange");
         for count in [1_u64, 100, 260, 4_294_967_296] {
             condition["recentBars"] = json!(count);
             let sent = screens(vec![screen_of("S1", "최근 기간", vec![condition.clone()])], revision);

@@ -1912,7 +1912,7 @@ async fn intraday_values_indicators_caps_and_results_share_one_overlay_and_rever
     fake.set_quote_rows(vec![summary_row("300000", today, 95, 110, 500, 2)]);
     assert!(hits(&api.result(&cross).await).is_empty());
     assert!(hits(&api.result(&combined).await).is_empty());
-    let past = every(vec![with_recent(new_high("D", "high", 3, 1), 2)]);
+    let past = every(vec![value_range("D", 2, "close", Some(100.0), Some(100.0))]);
     assert_eq!(hits(&api.result(&past).await), [hit("300000", day(2026, 11, 6))]);
     assert_eq!(api.status().await["lastDay"], "2026-11-06");
     let Loaded { _server: server, _dir: dir, .. } = session;

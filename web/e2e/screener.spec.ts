@@ -76,7 +76,7 @@ test("빈 저장소를 채우고 만든 조건식으로 찾은 종목을 칸의 
     await dialog.getByLabel("이름").fill(SCREEN_NAME);
     await dialog.getByRole("button", { name: "조건 더하기" }).click();
     await dialog.getByRole("textbox", { name: "조건 1 신고가 기간" }).fill("60");
-    await dialog.getByRole("textbox", { name: "조건 1 최근 기간" }).fill("19");
+    await dialog.getByRole("textbox", { name: "조건 1 최근 기간" }).fill("20");
     await dialog.getByRole("group", { name: "종류 제외" }).getByRole("button", { name: "ETF" }).click();
     const saved = savedTo(page, "/api/screens");
     await dialog.getByRole("button", { name: "저장" }).click();
@@ -260,7 +260,7 @@ test("시가총액 줄이나 줄마다 다른 봉 주기가 든 조건식도 편
     await expect(kind).toHaveAttribute("data-value", "traded_value_high");
     await expect(kind).toHaveText("신고거래대금");
     await expect(dialog.getByRole("textbox", { name: "조건 1 신고거래대금 기간" })).toHaveValue("60");
-    await expect(dialog.getByRole("textbox", { name: "조건 1 최근 기간" })).toHaveValue("0");
+    await expect(dialog.getByRole("textbox", { name: "조건 1 최근 기간" })).toHaveValue("1");
     await expect(dialog.getByText("일봉 최근 1일 이내 거래대금이 60일 신고거래대금인 봉이 있다")).toBeVisible();
     await renameAndSave(dialog, "신고거래대금 바꿈");
   });
@@ -344,7 +344,7 @@ test("최근 관측일을 채우는 동안에는 실행이 막히고, 과거 이
   await dialog.getByLabel("이름").fill("고가 1000일 신고가");
   await dialog.getByRole("button", { name: "조건 더하기" }).click();
   await dialog.getByRole("textbox", { name: "조건 1 신고가 기간" }).fill("1000");
-  await dialog.getByRole("textbox", { name: "조건 1 최근 기간" }).fill("299");
+  await dialog.getByRole("textbox", { name: "조건 1 최근 기간" }).fill("300");
   await dialog.getByRole("button", { name: "저장" }).click();
   await expect(dialog).toBeHidden();
 

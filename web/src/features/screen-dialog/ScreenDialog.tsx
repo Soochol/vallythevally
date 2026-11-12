@@ -425,7 +425,7 @@ function ConditionLine({ ids, index, last, condition, onChange, onKind, onMove, 
       {(Object.entries(ui.errors) as [FieldKey, string][]).map(([key, message]) => (
         <Errors key={key} id={`${ui.base}-${key}-error`} messages={[`${fieldName(kind, key)}: ${message}`]} />
       ))}
-      {barLine && <p className="text-xs text-text-3">마지막 봉을 포함한 실제 봉 개수입니다. 거래가 없어 봉이 없는 기간은 세지 않습니다.</p>}
+      {barLine && <small className="text-xs text-text-3">마지막 봉을 포함한 실제 봉 개수입니다. 거래가 없어 봉이 없는 기간은 세지 않습니다.</small>}
       {row.ok && <p className="text-xs text-text-3">{conditionSentence(row.condition)}</p>}
     </li>
   );
