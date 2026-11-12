@@ -1,5 +1,5 @@
 import { SentenceEditor } from "./SentenceEditor";
-import { checkedSession, currentSession, selectedSource, useScreenEditor } from "./editorState";
+import { availableSources, checkedSession, currentSession, selectedSource, useScreenEditor } from "./editorState";
 import { confirmAction } from "../overlay/Confirm";
 import { useQueryClient, type UseQueryResult } from "@tanstack/react-query";
 import { type ReactNode, useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
@@ -151,6 +151,7 @@ export function ScreenerPanel({ wide = false, onReturn = () => {} }: { wide?: bo
   const queryClient = useQueryClient();
   const active = useActiveSymbol();
   const [preview, setPreview] = useState<{ screenId: string; code: SymbolCode } | null>(null);
+  const [expandedConditions, setExpandedConditions] = useState(false);
   const selected = previewRow(rows, preview?.screenId === screen?.id ? preview?.code ?? null : null, active);
   const select = (code: SymbolCode) => {
     if (wide && screen) setPreview({ screenId: screen.id, code });
@@ -162,7 +163,10 @@ export function ScreenerPanel({ wide = false, onReturn = () => {} }: { wide?: bo
     onReturn();
   };
   const execute = () => {
-    if (session && screens.data && !checkedSession(session, screens.data).ok) return;
+    if (session && source && screens.data && !checkedSession(session, screens.data).ok) {
+      useScreenEditor.getState().trySubmit(screens.data, source);
+      return;
+    }
     if (screen && status && block === null && run?.kind !== "running") void useScreenerStore.getState().run(screen).then(refresh);
   };
   useResultKeys({ rows, active: wide ? selected?.symbol ?? null : active, wide, onSelect: select, onOpen: openPreview, onRun: execute });
@@ -172,12 +176,12 @@ export function ScreenerPanel({ wide = false, onReturn = () => {} }: { wide?: bo
   return (
     <aside aria-label="스크리너" data-chart-control className="flex min-h-0 min-w-0 flex-1 flex-col">
       <div className={wide ? "grid min-h-0 flex-1 grid-cols-[160px_minmax(0,1fr)_240px] min-[1280px]:grid-cols-[200px_minmax(0,1fr)_300px]" : "flex min-h-0 flex-1 flex-col"}>
-        {wide && <ScreenList screens={screens.data?.screens ?? []} chosen={screen?.id ?? null} />}
+        {wide && <ScreenList base={screens.data} chosen={screen?.id ?? null} />}
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
           <div className="max-h-[50%] flex-none overflow-y-auto">
             {band && <UpdateBand status={status} />}
             {session && source && screens.data ? (
-              <SentenceEditor session={session} base={screens.data} source={source} running={run?.kind === "running"} blocked={!status || block !== null} resultActions={<PanelMenu screen={screen} rows={rows} status={status} />} onRun={execute} />
+              <SentenceEditor session={session} base={screens.data} source={source} running={run?.kind === "running"} blocked={!status || block !== null} resultActions={<PanelMenu screen={screen} rows={rows} status={status} />} wide={wide} expanded={expandedConditions} onExpandedChange={setExpandedConditions} onRun={execute} />
             ) : screen ? (
               <ScreenHeader screen={screen} screens={screens.data?.screens ?? []} run={run} block={block} status={status} rows={rows} onRun={execute} wide={wide} />
             ) : (
@@ -190,7 +194,7 @@ export function ScreenerPanel({ wide = false, onReturn = () => {} }: { wide?: bo
           </div>
           <div className="min-h-0 flex-1 overflow-y-auto">
             {screen ? (
-              <Results screen={screen} run={run} rows={rows} status={status} block={block} onRun={execute} selected={wide ? selected?.symbol ?? null : active} onSelect={select} />
+              <Results screen={screen} run={run} rows={rows} status={status} block={block} onRun={execute} onEdit={() => session ? setExpandedConditions(true) : editScreen(screen.id)} selected={wide ? selected?.symbol ?? null : active} onSelect={select} />
             ) : (
               <NoScreen query={screens} />
             )}
@@ -212,40 +216,48 @@ interface ResultKeys {
   onRun(): void;
 }
 
+export type ScreenerKeyEvent = Pick<KeyboardEvent, "key" | "ctrlKey" | "metaKey" | "altKey" | "shiftKey" | "isComposing" | "defaultPrevented" | "target" | "preventDefault">;
+
+export function handleResultKey(event: ScreenerKeyEvent, { rows, active, wide, onSelect, onOpen, onRun }: ResultKeys) {
+  if (useSelectionStore.getState().dialog || ownsChartKeyboard(event) || isTypingTarget(event.target)) return;
+  const action = resultKeyAction(event, wide);
+  if (!action) return;
+  if (action.kind !== "run" && event.target instanceof Element && event.target.closest("[data-screen-list]")) return;
+  if (action.kind === "run") {
+    event.preventDefault();
+    onRun();
+  } else if (action.kind === "move") {
+    const code = nextResult(rows, wide ? active : pendingResultCode() ?? active, action.step);
+    if (rows.length) event.preventDefault();
+    if (code) onSelect(code);
+  } else if (!(event.target instanceof Element) || !event.target.closest("button, a, summary, [role=button]")) {
+    event.preventDefault();
+    onOpen();
+  } else if (event.target.closest("[data-result-row]")) {
+    event.preventDefault();
+    onOpen(event.target.closest<HTMLTableRowElement>("tr")?.dataset.code);
+  }
+}
+
 function useResultKeys({ rows, active, wide, onSelect, onOpen, onRun }: ResultKeys) {
   useEffect(() => {
-    const onKey = (event: KeyboardEvent) => {
-      if (useSelectionStore.getState().dialog || ownsChartKeyboard(event) || isTypingTarget(event.target)) return;
-      const action = resultKeyAction(event, wide);
-      if (!action) return;
-      if (action.kind !== "run" && event.target instanceof Element && event.target.closest("[data-screen-list]")) return;
-      if (action.kind === "run") {
-        event.preventDefault();
-        onRun();
-      } else if (action.kind === "move") {
-        const code = nextResult(rows, wide ? active : pendingResultCode() ?? active, action.step);
-        if (rows.length) event.preventDefault();
-        if (code) onSelect(code);
-      } else if (!(event.target instanceof Element) || !event.target.closest("button, a, summary, [role=button]")) {
-        event.preventDefault();
-        onOpen();
-      } else if (event.target.closest("[data-result-row]")) {
-        event.preventDefault();
-        onOpen(event.target.closest<HTMLTableRowElement>("tr")?.dataset.code);
-      }
-    };
+    const onKey = (event: KeyboardEvent) => handleResultKey(event, { rows, active, wide, onSelect, onOpen, onRun });
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [rows, active, wide, onSelect, onOpen, onRun]);
 }
 
-function ScreenList({ screens, chosen }: { screens: readonly Screen[]; chosen: string | null }) {
+function ScreenList({ base, chosen }: { base: Screens | undefined; chosen: string | null }) {
+  const sessions = useScreenEditor((s) => s.sessions);
+  const screens = base ? availableSources(base, sessions) : [];
   return <nav aria-label="저장한 조건식" data-screen-list className="flex min-h-0 flex-col border-r border-line bg-surface">
-    <div className="flex flex-none items-center justify-between border-b border-line p-2"><h2 className="text-s font-semibold">조건식</h2><button type="button" className="icon-btn" aria-label="새 조건식" onClick={() => editScreen(null)}><PlusIcon /></button></div>
-    <div className="min-h-0 flex-1 overflow-y-auto p-1">{screens.map((screen) => <button key={screen.id} type="button" aria-current={screen.id === chosen || undefined}
+    <div className="flex flex-none items-center justify-between border-b border-line p-2"><h2 className="text-s font-semibold">조건식</h2><button type="button" className="icon-btn" aria-label="새 조건식" disabled={!base} onClick={() => editScreen(null, base)}><PlusIcon /></button></div>
+    <div className="min-h-0 flex-1 overflow-y-auto p-1">{screens.map((screen) => {
+      const draft = base ? currentSession(base, screen, sessions).draft : null;
+      return <button key={screen.id} type="button" aria-current={screen.id === chosen || undefined}
       className={`mb-1 w-full rounded-m p-2 text-left text-s ${screen.id === chosen ? "bg-accent-soft text-accent" : "hover:bg-raised"}`} onClick={() => { dropPendingOpen(); useScreenerStore.getState().choose(screen.id); }}>
-      <b className="block break-words font-semibold">{screen.name}</b><small className="text-xs text-text-3">조건 {screen.conditions.length}개</small>
-    </button>)}</div>
+      <b className="block break-words font-semibold">{draft?.name || screen.name}</b><small className="text-xs text-text-3">조건 {draft?.conditions.length ?? screen.conditions.length}개</small>
+    </button>; })}</div>
   </nav>;
 }
 
@@ -489,11 +501,12 @@ interface ResultsProps {
   status: ScreenerStatus | undefined;
   block: RunBlock | null;
   onRun(): void;
+  onEdit(): void;
   selected: SymbolCode | null;
   onSelect(code: SymbolCode): void;
 }
 
-function Results({ screen, run, rows, status, block, onRun, selected, onSelect }: ResultsProps) {
+function Results({ screen, run, rows, status, block, onRun, onEdit, selected, onSelect }: ResultsProps) {
   const result = shownResult(run);
   const storeVersion = useScreenerStore((s) => s.storeVersion);
   const rerun = block === null ? rerunReason(run, storeVersion, status) : null;
@@ -504,7 +517,7 @@ function Results({ screen, run, rows, status, block, onRun, selected, onSelect }
   if (result) return (
     <>
       {failure && <p role="alert" className="flex-none border-b border-line px-3 py-2 text-s text-danger">실행하지 못했습니다. {message} 이전 결과와 수집 시각을 유지합니다.</p>}
-      <ResultList screen={screen} result={result} rows={rows} running={run?.kind === "running"} rerun={rerun} onRun={onRun} selected={selected} onSelect={onSelect} />
+      <ResultList screen={screen} result={result} rows={rows} running={run?.kind === "running"} rerun={rerun} onRun={onRun} onEdit={onEdit} selected={selected} onSelect={onSelect} />
     </>
   );
   if (failure) return (
@@ -527,7 +540,7 @@ const collectionTime = (seconds: number) => new Intl.DateTimeFormat("sv-SE", {
   timeZone: "Asia/Seoul", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23",
 }).format(new Date(seconds * 1000));
 
-function ResultList({ screen, result, rows, running, rerun, onRun, selected, onSelect }: ResultListProps) {
+function ResultList({ screen, result, rows, running, rerun, onRun, onEdit, selected, onSelect }: ResultListProps) {
   const sort = useScreenerStore((s) => s.sort);
   const left = result.excluded.listedTooShort + result.excluded.historyShort;
   return (
@@ -568,7 +581,7 @@ function ResultList({ screen, result, rows, running, rerun, onRun, selected, onS
               : `대상 ${count(result.universe)}종목 가운데 조건을 모두 만족하는 종목이 없습니다.`}
             {left > 0 && ` 상장 기간이나 이력이 짧아 ${count(left)}종목이 빠졌습니다.`}
           </p>
-          <button type="button" className="tb-btn mt-3 h-8 border border-line text-s" onClick={() => editScreen(screen.id)}>
+          <button type="button" className="tb-btn mt-3 h-8 border border-line text-s" onClick={onEdit}>
             <PenIcon size={14} />
             조건식 고치기
           </button>

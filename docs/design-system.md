@@ -96,7 +96,7 @@ DOM 범례는 `iconMarkup("gear" | "eye" | "eyeOff" | "close" | "up" | "down")`�
 
 데스크톱 조건식은 `SentenceEditor`와 `SentenceFields`에서 문장으로 편집한다. `ConditionFields`는 휴대폰 편집창과 문장 편집이 함께 사용하는 조건별 입력이다. 숫자는 `NumberToken`의 팝오버에서 입력하고 Enter로 적용한다. 봉 수에는 일·주·월과 자주 쓰는 값을 함께 제공하며 Escape는 적용 전 입력을 취소한다.
 
-`editorState`는 조건식별 draft와 저장 기준 revision을 보관한다. 탭이나 조건식을 바꿔도 draft는 유지한다. 실행 버튼과 Ctrl+Enter 명령은 기존 `checkDraft`로 검증한 draft를 실행한다. 저장 충돌에서는 최신 목록을 저장 기준으로 삼고 편집 내용은 남겨 다시 저장할 수 있다.
+`editorState`는 조건식별 draft와 저장 기준 revision을 메모리에 보관한다. 탭이나 조건식을 바꿔도 draft는 유지한다. 변경이 없는 세션은 최신 저장본을 따르고, 편집 중인 세션은 draft와 충돌 기준 revision을 보존한다. 개수 제한은 최신 목록으로 검사한다. 넓게 보기는 한 줄 요약에서 조건 펼치기로 문장 편집을 열며, 왼쪽 목록에도 미저장 식을 표시한다. 실행 버튼과 Ctrl+Enter 명령은 기존 `checkDraft`로 검증한 draft를 실행한다. 저장 충돌에서는 최신 목록을 저장 기준으로 삼고 편집 내용은 남겨 다시 저장할 수 있다.
 
 ## 지표·비교 입력창
 
