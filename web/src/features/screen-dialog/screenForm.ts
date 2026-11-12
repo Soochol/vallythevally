@@ -276,6 +276,14 @@ export function editCondition(draft: ScreenDraft, line: ConditionDraft): ScreenD
   return { ...draft, conditions: draft.conditions.map((c) => (c.key === line.key ? line : c)) };
 }
 
+export function editNumber(line: ConditionDraft, field: FieldKey, value: string, period: ScreenPeriod): ConditionDraft {
+  if (line.kind === "ma_alignment" && field.startsWith("lengths.")) {
+    const index = Number(field.slice("lengths.".length));
+    return { ...line, period, lengths: line.lengths.map((length, i) => i === index ? value : length) };
+  }
+  return { ...line, period, [field]: value };
+}
+
 const isTradeHigh = (choice: KindChoice): choice is TradeHigh => Object.hasOwn(TRADE_HIGHS, choice);
 
 export function kindChoiceOf(line: KindFields): KindChoice {
@@ -298,6 +306,16 @@ export function moveCondition(draft: ScreenDraft, key: number, by: -1 | 1): Scre
   if (from < 0 || to < 0 || to >= draft.conditions.length) return draft;
   const conditions = [...draft.conditions];
   [conditions[from], conditions[to]] = [conditions[to]!, conditions[from]!];
+  return { ...draft, conditions };
+}
+
+export function placeCondition(draft: ScreenDraft, key: number, target: number): ScreenDraft {
+  const from = draft.conditions.findIndex((c) => c.key === key);
+  const to = draft.conditions.findIndex((c) => c.key === target);
+  const line = draft.conditions[from];
+  if (!line || to < 0 || from === to) return draft;
+  const conditions = draft.conditions.filter((c) => c.key !== key);
+  conditions.splice(to, 0, line);
   return { ...draft, conditions };
 }
 

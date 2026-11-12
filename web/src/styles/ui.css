@@ -74,3 +74,21 @@
   background: var(--chart-bg);
   cursor: pointer;
 }
+
+.sentence-token,
+.sentence-condition [role="combobox"] {
+  min-height: var(--size-24);
+  height: auto;
+  padding: 0 var(--size-2);
+  border: 0;
+  border-bottom: 1px dashed var(--text-3);
+  border-radius: 0;
+  background: transparent;
+  color: var(--text);
+  font-size: inherit;
+  font-variant-numeric: tabular-nums;
+}
+.sentence-token:hover,
+.sentence-condition [role="combobox"]:hover { color: var(--accent); border-color: var(--accent); }
+.sentence-token[aria-invalid="true"] { color: var(--danger); border-color: var(--danger); }
+.sentence-condition [role="combobox"] > svg { display: none; }

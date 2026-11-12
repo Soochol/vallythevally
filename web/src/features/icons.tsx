@@ -23,6 +23,8 @@ export function Icon({ children, path, size = 18, ...rest }: SVGProps<SVGSVGElem
 
 type P = { size?: number };
 
+export const GripIcon = ({ size = 14 }: P) => <Icon size={size} path="M9 5h.01M15 5h.01M9 12h.01M15 12h.01M9 19h.01M15 19h.01" />;
+
 export const BrandIcon = ({ size = 22 }: P) => (
   <Icon size={size}>
     <path d="M2.5 6.5 8 17l4-6.5 4 6.5 5.5-10.5" strokeWidth={2.2} />

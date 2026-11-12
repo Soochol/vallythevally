@@ -1,4 +1,7 @@
+import { SentenceEditor } from "./SentenceEditor";
+import { checkedSession, selectedSource, sessionOf, useScreenEditor } from "./editorState";
 import { confirmAction } from "../overlay/Confirm";
+import { ownsChartKeyboard } from "../overlay/topLayer";
 import { SortIcon } from "../icons";
 import { type QueryClient, useQueryClient, type UseQueryResult } from "@tanstack/react-query";
 import { type ReactNode, type RefObject, useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
@@ -64,7 +67,12 @@ const FULL_RELOAD_CONFIRM =
 const toast = (text: string) => useSelectionStore.getState().showToast(text);
 const reasonOf = (e: unknown) => (e instanceof Error ? e.message : String(e));
 const showCommandError = (e: unknown) => toast(`업데이트 명령을 보내지 못했습니다: ${reasonOf(e)}`);
-const editScreen = (id: string | null) => useSelectionStore.getState().openScreenEditor(id);
+const editScreen = (id: string | null, base?: Screens) => {
+  if (!matchMedia(DESKTOP_QUERY).matches) return useSelectionStore.getState().openScreenEditor(id);
+  useSelectionStore.getState().showRightPanel("screener");
+  if (id !== null) useScreenerStore.getState().choose(id);
+  else if (base) useScreenerStore.getState().choose(useScreenEditor.getState().create(base));
+};
 const count = (n: number) => n.toLocaleString("ko-KR");
 
 interface ResultOpen {
@@ -118,10 +126,15 @@ function useOpenResult() {
 function useChosenScreen() {
   const screens = useScreens();
   const chosenId = useScreenerStore((s) => s.chosenId);
-  const list = screens.data?.screens;
-  const screen = list?.find((s) => s.id === chosenId) ?? list?.[0] ?? null;
-  const run = useScreenerStore((s) => (screen ? runOf(s.runs, screen) : null));
-  return { screens, screen, run };
+  const sessions = useScreenEditor((s) => s.sessions);
+  const desktop = useMediaQuery(DESKTOP_QUERY);
+  const base = screens.data;
+  const source = base ? selectedSource(base, chosenId, desktop ? sessions : {}) : null;
+  const session = desktop && base && source ? sessions[source.id] ?? sessionOf(base, source) : null;
+  const check = session ? checkedSession(session) : null;
+  const screen = check?.ok ? check.screen : source;
+  const run = useScreenerStore((s) => (screen && (!check || check.ok) ? runOf(s.runs, screen) : null));
+  return { screens, screen, run, session, source };
 }
 
 function useStoreStatus(pollWhileUpdatingMs: number) {
@@ -181,7 +194,7 @@ export function PhoneScreener() {
 }
 
 export function ScreenerPanel() {
-  const { screens, screen, run } = useChosenScreen();
+  const { screens, screen, run, session, source } = useChosenScreen();
   const statusQuery = useStoreStatus(PANEL_POLL_MS);
   const status = statusQuery.data;
   const block = status ? runBlock(status) : null;
@@ -190,6 +203,7 @@ export function ScreenerPanel() {
   const rows = useMemo(() => (result ? sortRows(result.rows, sort) : []), [result, sort]);
   const { refresh } = useUpdateCommands();
   const execute = () => {
+    if (session && !checkedSession(session).ok) return;
     if (screen) void useScreenerStore.getState().run(screen).then(refresh);
   };
   useResultKeys(rows);
@@ -199,7 +213,9 @@ export function ScreenerPanel() {
     <aside aria-label="스크리너" className="flex min-h-0 flex-1 flex-col">
       <div className="min-h-0 flex-1 overflow-y-auto">
         {band && <UpdateBand status={status} />}
-        {screen ? (
+        {session && source && screens.data ? (
+          <SentenceEditor session={session} base={screens.data} source={source} running={run?.kind === "running"} blocked={block !== null} resultActions={<PanelMenu screen={screen} rows={rows} status={status} />} onRun={execute} />
+        ) : screen ? (
           <ScreenHeader screen={screen} screens={screens.data?.screens ?? []} run={run} block={block} status={status} rows={rows} onRun={execute} />
         ) : (
           <header className="flex h-11 flex-none items-center gap-1 border-b border-line pl-3 pr-1.5">
@@ -226,6 +242,7 @@ function useResultKeys(rows: readonly ScreenerRow[]) {
     if (rows.length === 0) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "ArrowUp" && e.key !== "ArrowDown") return;
+      if (ownsChartKeyboard(e)) return;
       if (e.defaultPrevented || e.isComposing || e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
       if (useSelectionStore.getState().dialog || isTypingTarget(e.target)) return;
       e.preventDefault();
@@ -465,7 +482,7 @@ function NoScreen({ query }: { query: UseQueryResult<Screens> }) {
     <Notice
       title="저장한 조건식이 없습니다"
       action={
-        <button type="button" className="btn-primary mt-1 flex h-8 items-center gap-1.5 px-3 text-s" onClick={() => editScreen(null)}>
+        <button type="button" className="btn-primary mt-1 flex h-8 items-center gap-1.5 px-3 text-s" onClick={() => editScreen(null, query.data)}>
           <PlusIcon size={14} />새 조건식
         </button>
       }
