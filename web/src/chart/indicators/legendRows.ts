@@ -134,10 +134,10 @@ export class IndicatorLegend {
     select.dataset.chartControl = "";
     select.setAttribute("aria-label", "보고기간 자료");
     const text = el("p", "whitespace-pre-wrap text-xs");
-    const refresh = el("button", "btn-primary mt-2", "재무자료 새로고침·재시도");
+    const refresh = el("button", "btn-primary mt-2", "전체 재무자료 업데이트");
     refresh.type = "button";
     refresh.dataset.chartControl = "";
-    refresh.title = "재무자료 새로고침·재시도";
+    refresh.title = "전체 재무자료 업데이트";
     refresh.addEventListener("click", () => this.onCommand(id, "refresh", refresh));
     box.append(select, text, refresh);
     detail.append(summary, box);

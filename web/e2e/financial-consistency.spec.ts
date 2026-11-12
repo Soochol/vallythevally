@@ -1,8 +1,10 @@
+import { financialListings, startUpdate, settleUpdate, updateFromChart } from "./financial-update-helpers";
 import { selectOption } from "./select-option";
 import { writeFile } from "node:fs/promises";
 import type { Page } from "@playwright/test";
 import type { Drawing } from "../src/api/generated/Drawing";
 import type { DrawingInput } from "../src/api/generated/DrawingInput";
+import type { FinancialUpdatePage } from "../src/api/generated/FinancialUpdatePage";
 import type { FinancialsPage } from "../src/api/generated/FinancialsPage";
 import type { Layout } from "../src/api/generated/Layout";
 import { toChartTime } from "../src/chart/time";
@@ -28,6 +30,8 @@ async function seed(app: App, compare = false, hidden = false) {
     { id: "revenue", spec: { kind: "revenue" }, panel: "revenue", visible: !hidden, style: { colors: ["ind-2"], width: 1 } },
   ], panels: [{ id: "revenue", stretch: 0.4 }] };
   expect((await fetch(`${app.url}/api/layouts/${layout.id}`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...layout, revision: layout.revision + 1, cells: [{ ...layout.cells[0], symbol: "005930", venue: "combined", period: "Y", chartSettings: settings }] }) })).ok).toBe(true);
+  await startUpdate(app, true);
+  await app.restart({ clockStart: "20261109100030" });
 }
 
 async function years(app: App, count = 9, offset = 0, more = false) {
@@ -48,12 +52,15 @@ async function open(page: Page) {
 }
 
 test.describe("재무 시각과 가격 시각", () => {
-  test.use({ financialFixture: true, clockStart: "20261109100030" });
+  test.use({ financialFixture: true, bootReplies: [financialListings], clockStart: "20171231120000" });
   test("가격 밖 재무 시각을 추가·숨김·복원해도 드로잉과 비교 기준 및 가격·기술 툴팁이 일치한다", async ({ page, app }, info) => {
-    await seed(app, true, true); await years(app); await marker(app); await open(page);
+    await seed(app, true, true); await years(app); await marker(app);
+    const calls = app.dart!.calls.length;
+    await open(page);
     const before = await coordinates(page); expect(before.drawX).toBeCloseTo(before.candleX!, 3);
-    expect(app.dart!.calls).toHaveLength(0);
+    expect(app.dart!.calls).toHaveLength(calls);
     await row(page).getByTitle("보이기", { exact: true }).click({ force: true });
+    await startUpdate(app);
     await expect.poll(async () => (await data(app)).status, { timeout: 60000 }).toBe("ready");
     await expect(row(page)).toContainText("확인 완료");
     expect((await data(app)).series[0]!.points.some((p) => p.priceBucket === kst("2015-01-01") && p.value !== null)).toBe(true);
@@ -175,7 +182,7 @@ test.describe("재무 시각과 가격 시각", () => {
 });
 
 test.describe("같은 재무 키의 응답 순서", () => {
-  test.use({ financialFixture: true, clockStart: "20171231120000" });
+  test.use({ financialFixture: true, bootReplies: [financialListings], clockStart: "20171231120000" });
   test("중첩 POST와 늦은 GET이 최신 정정의 빈 값과 사유를 되돌리지 않는다", async ({ page, app }, info) => {
     await seed(app); await page.addInitScript(installFrameProbe); await page.goto("/");
     await expect(row(page)).toContainText("확인 완료", { timeout: 45000 });
@@ -184,25 +191,26 @@ test.describe("같은 재무 키의 응답 순서", () => {
     let receivedFirst: () => void = () => {}; const firstReceived = new Promise<void>((resolve) => { receivedFirst = resolve; });
     let releaseGets: () => void = () => {}; const getHeld = new Promise<void>((resolve) => { releaseGets = resolve; });
     let blockGets = false; let posts = 0;
-    const responses: FinancialsPage[] = [];
-    await page.route("**/api/symbols/005930/financials?period=Y", async (route) => {
+    const responses: FinancialUpdatePage[] = [];
+    await page.route("**/api/financial-update", async (route) => {
       if (route.request().method() === "POST") {
         const n = ++posts; const response = await route.fetch(); responses.push(await response.json());
         if (n === 1) { receivedFirst(); await firstHeld; }
         await route.fulfill({ response });
-      } else { if (blockGets) await getHeld; await route.continue(); }
+      } else await route.continue();
     });
+    await page.route("**/api/symbols/005930/financials?period=Y", async (route) => { if (blockGets) await getHeld; await route.continue(); });
     await row(page).locator("summary").click();
-    const refresh = row(page).getByRole("button", { name: "재무자료 새로고침·재시도" });
+    const refresh = () => updateFromChart(page);
     app.dart!.edge = true;
-    await refresh.click(); await firstReceived;
+    await refresh(); await firstReceived; await settleUpdate(app);
     await expect.poll(async () => (await data(app)).status).toBe("ready");
-    await refresh.click(); await expect.poll(() => posts).toBe(2);
+    await refresh(); await expect.poll(() => posts).toBe(2); await settleUpdate(app);
     await expect.poll(async () => (await data(app)).status).toBe("ready");
     await expect(row(page)).toContainText("확인 완료");
     await expect.poll(() => series(page)).toEqual([]);
     const corrected = await series(page);
-    const delivered = page.waitForResponse((r) => r.request().method() === "POST" && r.url().includes("/financials?period=Y"));
+    const delivered = page.waitForResponse((r) => r.request().method() === "POST" && r.url().includes("/financial-update"));
     blockGets = true; releaseFirst(); await delivered; await frames(page);
     const after = await series(page); const server = await data(app);
     expect(after).toEqual(corrected);
@@ -236,7 +244,8 @@ test.describe("같은 재무 키의 응답 순서", () => {
     await page.addInitScript(installFrameProbe); await page.goto("/"); await receivedGet;
     app.dart!.edge = true;
     await row(page).locator("summary").click();
-    await row(page).getByRole("button", { name: "재무자료 새로고침·재시도" }).click();
+    await updateFromChart(page);
+    await settleUpdate(app);
     await expect(row(page)).toContainText("확인 완료");
     await expect.poll(() => series(page)).toEqual([]);
     release(); await deliveredGet; await frames(page);
@@ -266,26 +275,27 @@ test.describe("같은 재무 키의 응답 순서", () => {
   await seed(app); await expect.poll(async()=>(await data(app)).status).toBe("ready");
   const deferred=()=>{let release:()=>void=()=>{};const promise=new Promise<void>(resolve=>{release=resolve;});return {promise,release};};
   const first=deferred(),second=deferred(),postStart=deferred(),postDelivery=deferred();
-  let reads=0,postSeen=false,postFetched=false; const oldResponses:FinancialsPage[]=[]; let postResponse:FinancialsPage|null=null; const events:string[]=[];
-  await page.route("**/api/symbols/005930/financials?period=Y",async route=>{
+  let reads=0,postSeen=false,postFetched=false; const oldResponses:FinancialsPage[]=[]; let postResponse:FinancialUpdatePage|null=null; const events:string[]=[];
+  await page.route("**/api/financial-update",async route=>{
     if(route.request().method()==="POST") {
       postSeen=true; events.push("POST requested and held before server"); await postStart.promise; const response=await route.fetch(); postResponse=await response.json(); postFetched=true; events.push("POST server response captured"); await postDelivery.promise; await route.fulfill({response}); events.push("POST delivered");
-    } else {
+    } else await route.continue();
+  });
+  await page.route("**/api/symbols/005930/financials?period=Y",async route=>{
       const n=++reads; const response=await route.fetch(); oldResponses.push(await response.json()); events.push(`GET ${n} server snapshot captured`);
       if(n===1) await first.promise; if(n===2) await second.promise;
       await route.fulfill({response}); events.push(`GET ${n} delivered`);
-    }
   });
   await page.addInitScript(installFrameProbe); await page.goto("/"); await expect.poll(()=>oldResponses.length).toBe(1);
   await row(page).locator("summary").click(); app.dart!.edge=true;
-  await row(page).getByRole("button",{name:"재무자료 새로고침·재시도"}).click(); await expect.poll(()=>postSeen).toBe(true);
+  await updateFromChart(page); await expect.poll(()=>postSeen).toBe(true);
   await page.keyboard.press("Escape");
   await expect(row(page).locator("details")).not.toHaveAttribute("open", "");
   const periods=page.getByRole("toolbar").getByRole("group",{name:"봉 주기"});
   await periods.getByRole("button",{name:"일",exact:true}).click(); await expect(row(page)).toHaveCount(0);
   await periods.getByRole("button",{name:"연",exact:true}).click(); await expect.poll(()=>oldResponses.length).toBe(2);
-  postStart.release(); await expect.poll(()=>postFetched).toBe(true); await expect.poll(async()=>(await data(app)).status).toBe("ready");
-  const delivered=page.waitForResponse(r=>r.request().method()==="POST"&&r.url().includes("/financials?period=Y"));
+  postStart.release(); await expect.poll(()=>postFetched).toBe(true); await settleUpdate(app); await expect.poll(async()=>(await data(app)).status).toBe("ready");
+  const delivered=page.waitForResponse(r=>r.request().method()==="POST"&&r.url().includes("/financial-update"));
   postDelivery.release(); await delivered; await frames(page);
   second.release(); await expect(row(page)).toContainText("확인 완료"); await frames(page);
   await page.waitForTimeout(2200);

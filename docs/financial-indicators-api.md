@@ -1,6 +1,6 @@
 # 보고기간별 재무지표 API
 
-`GET /api/symbols/{code}/financials?period=Q` 또는 `period=Y`는 저장 자료를 계산하고 첫 접근·일일 확인의 백그라운드 수집을 시작한다. 같은 URL의 `POST`는 수동 갱신을 요청한다. 진행 조회도 같은 `GET`을 사용한다. 거래소 인자는 없으며 알 수 없는 쿼리나 Q/Y 이외 주기는 400이다. 기존 `financial-source` 원자료 API와 수집기를 공유한다.
+`GET /api/symbols/{code}/financials?period=Q` 또는 `period=Y`는 SQLite의 저장 자료만 계산한다. 회사 연결 확인·원천 호출·수집을 시작하지 않으며 업데이트 전 상태는 `not_collected`다. 같은 URL의 `POST`는 `POST /api/financial-update`와 같은 전체 최근 자료 업데이트를 시작한다. 전체 진행은 `GET /api/financial-update`, 종목의 계산 결과는 기존 `GET`으로 읽는다. 거래소 인자는 없으며 알 수 없는 쿼리나 Q/Y 이외 주기는 400이다. 기존 `financial-source` 원자료 API와 수집기를 공유한다.
 
 응답 타입은 `api.rs`에서 `FinancialsPage`와 관련 웹 타입으로 생성한다. 여섯 `series`의 `metric`은 `revenue`, `operating_income`, `owner_roe`, `investing_cash_flow`, `dps`, `debt_ratio`다. 금액은 원천 통화의 자연 단위, DPS는 원, 두 비율은 %다. 그림에 쓸 숫자는 `value`이며 없으면 `null`이다. 원금액 문자열은 `inputs[].amount`와 `fields`에 보존한다. 차트 숫자는 유한한 f64이며 원금액의 정밀도를 대신하지 않는다.
 

@@ -1,3 +1,4 @@
+import { FinancialUpdateButton } from "../financial-update/FinancialUpdateButton";
 import { MinuteMenu } from "./MinuteMenu";
 import { shownScale } from "../../chart/settings";
 import { periodKey } from "../../lib/hotkeys";
@@ -50,6 +51,7 @@ export function Topbar() {
       <button type="button" className={AXIS_BTN} aria-pressed={shown === "log"} disabled={locked} title={locked ? LOG_LOCKED : "로그 축 (L)"} onClick={() => press("log")}>로그</button>
       <button type="button" className={AXIS_BTN} aria-pressed={shown === "percent"} disabled={locked} title={locked ? AXIS_LOCKED : "가격축을 화면 왼쪽 끝 봉 기준 % 변화로"} onClick={() => press("percent")}>%</button>
       <span className="min-w-0 flex-1" />
+      <FinancialUpdateButton />
       <button type="button" className="icon-btn" title="차트 이미지 내려받기 (Alt+S)" aria-label="차트 이미지 내려받기" onClick={() => saveSnapshot(slot, "download")}><CameraIcon /></button>
       {canCopyImage() && <button type="button" className="icon-btn" title="차트 이미지 복사 (Alt+Shift+S)" aria-label="차트 이미지 복사" onClick={() => saveSnapshot(slot, "copy")}><CopyIcon /></button>}
       <button type="button" className="icon-btn" title="차트 설정" aria-label="차트 설정" aria-haspopup="dialog" onClick={() => openIndicatorCommand(slot)}><GearIcon /></button>

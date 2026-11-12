@@ -1,3 +1,4 @@
+import { FinancialUpdateDialog } from "./features/financial-update/FinancialUpdateDialog";
 import { ConfirmHost } from "./features/overlay/Confirm";
 import { TooltipHost } from "./features/overlay/Tooltip";
 import { useEffect, useState } from "react";
@@ -69,6 +70,7 @@ function ChartScreen() {
       <SearchDialog />
       <IndicatorCommand />
       <ScreenDialog />
+      <FinancialUpdateDialog />
       <Toast />
       <ConfirmHost />
       <TooltipHost />

@@ -2,6 +2,7 @@ pub mod client;
 pub mod calculate;
 pub mod model;
 mod routes;
+mod updates;
 pub mod store;
 pub mod xbrl;
 
@@ -23,6 +24,7 @@ pub struct Financials {
     clock: Clock,
     resolving: Mutex<HashMap<String, ResolutionAttempt>>,
     runs: Mutex<HashMap<String, Run>>,
+    update: tokio::sync::Mutex<updates::UpdateRun>,
 }
 
 struct Run {
@@ -47,14 +49,39 @@ impl Financials {
     }
 
     pub fn with_store(client: Option<Client>, store: Result<Store, Failure>, clock: Clock) -> Arc<Self> {
-        Arc::new(Self { client, store, clock, resolving: Mutex::new(HashMap::new()), runs: Mutex::new(HashMap::new()) })
+        Arc::new(Self { client, store, clock, resolving: Mutex::new(HashMap::new()), runs: Mutex::new(HashMap::new()), update: Default::default() })
     }
 
     fn store(&self) -> Result<&Store, Failure> {
         self.store.as_ref().map_err(|failure| *failure)
     }
 
-    pub async fn open(self: &Arc<Self>, stock: &str, preferred: bool, force: bool) -> Snapshot {
+    pub async fn read(&self, stock: &str) -> Snapshot {
+        let mut snapshot = Snapshot { status: "not_configured", security: None, collection: Collection::default(), failure: None, reason: None };
+        let result = async {
+            let store = self.store()?;
+            snapshot.security = store.security(stock).await?;
+            if let Some(security) = &snapshot.security { snapshot.collection = store.collection(&security.company.corp_code).await?; }
+            Ok::<_, Failure>(())
+        }.await;
+        if let Err(failure) = result { snapshot.status = "failed"; snapshot.failure = Some(failure); return snapshot; }
+        if self.client.is_none() { return snapshot; }
+        let run = snapshot.security.as_ref().and_then(|s| self.runs.lock().unwrap().get(&s.company.corp_code).map(|r| (r.running, r.failure)));
+        snapshot.failure = run.and_then(|r| r.1);
+        snapshot.status = if run.is_some_and(|r| r.0) { "collecting" }
+            else if has_failures(&snapshot.collection) || snapshot.failure.is_some() { "partial_failure" }
+            else if snapshot.collection.reports.is_empty() { "not_collected" }
+            else if has_pending(&snapshot.collection) { "stale" }
+            else { "ready" };
+        if snapshot.security.is_none() { self.read_resolution(stock, &mut snapshot).await; }
+        snapshot
+    }
+
+    pub async fn update_company(self: &Arc<Self>, stock: &str, preferred: bool, force: bool) -> Snapshot {
+        self.update_company_until(stock, preferred, force, self.clock.now().kst_date().year()).await
+    }
+
+    async fn update_company_until(self: &Arc<Self>, stock: &str, preferred: bool, force: bool, through_year: i32) -> Snapshot {
         let mut snapshot = Snapshot { status: "not_configured", security: None, collection: Collection::default(), failure: None, reason: None };
         let store = match self.store() {
             Ok(store) => store,
@@ -78,7 +105,7 @@ impl Financials {
         if self.client.is_none() { return snapshot; }
         let now = self.clock.now();
         let daily = snapshot.collection.last_checked_at.is_none_or(|t| KstTime::from_unix(t).kst_date() != now.kst_date());
-        let incomplete = snapshot.collection.working_reports().len() < ((now.kst_date().year() - 2015 + 1) * 4) as usize;
+        let incomplete = ((through_year - 3).max(2015)..=through_year).any(|year| REPORT_CODES.iter().any(|code| !snapshot.collection.working_reports().contains_key(&format!("{year}/{code}"))));
         let pending = has_pending(&snapshot.collection);
         let mut runs = self.runs.lock().unwrap();
         if force && let Some(run) = runs.get_mut(corp) && run.running { run.pending_refresh = true; }
@@ -94,7 +121,7 @@ impl Financials {
             tokio::spawn(async move {
                 let mut register_refresh = unpersisted_refresh;
                 loop {
-                    let failure = service.collect(&security, register_refresh).await.err();
+                    let failure = service.collect(&security, register_refresh, through_year).await.err();
                     if let Some(failure) = failure {
                         tracing::warn!(?failure, "재무 자료 수집을 저장하지 못했습니다");
                     }
@@ -146,7 +173,7 @@ impl Financials {
         }
     }
 
-    async fn collect(&self, security: &Security, register_refresh: bool) -> Result<(), Failure> {
+    async fn collect(&self, security: &Security, register_refresh: bool, through_year: i32) -> Result<(), Failure> {
         let client = self.client.as_ref().unwrap();
         let corp = &security.company.corp_code;
         let store = self.store()?;
@@ -177,30 +204,34 @@ impl Financials {
             collection.staged_reports = Some(collection.reports.clone());
         }
         validate_reused_reports(&mut collection);
-        for year in 2015..=now.kst_date().year() {
-            for code in REPORT_CODES {
-                let key = format!("{year}/{code}");
-                let mut report = collection.working_reports_mut().remove(&key).unwrap_or_else(|| Report { business_year: year, report_code: code.into(), statement: Default::default(), dividends: Default::default() });
-                let report_outdated = statement_outdated(&report, &collection.disclosures) || dividends_outdated(&report, &collection.disclosures);
-                let retry_source = report.statement.data.as_ref().is_some_and(|s| s.source_failure.is_some());
-                if statement_outdated(&report, &collection.disclosures) || report.statement.checked_at.is_none() || report.statement.failure.is_some() || retry_source || (report.statement.absent && (report_outdated || report.statement.snapshot_version() < collection.unpublished_check_version)) {
-                    let result = self.statement(client, corp, year, code, &collection.disclosures).await;
-                    let result = match result {
-                        Ok(Some(statement)) if report.statement.data.is_some() && statement.source_failure.is_some() => Err(statement.source_failure.unwrap()),
-                        other => other,
-                    };
-                    report.statement.apply(result, self.clock.now().unix(), collection.refresh_version);
-                } else { report.statement.validated_version = Some(collection.disclosure_version); }
-                if code == "11011" && (dividends_outdated(&report, &collection.disclosures) || report.dividends.checked_at.is_none() || report.dividends.failure.is_some() || (report.dividends.absent && (report_outdated || report.dividends.snapshot_version() < collection.unpublished_check_version))) {
-                    let result = client.rows("alotMatter.json", &[("corp_code", corp.clone()), ("bsns_year", year.to_string()), ("reprt_code", code.into())]).await.and_then(|rows| {
-                        if rows.iter().any(|row| !receipt_is_current(&collection.disclosures, field(row, "rcept_no"))) { return Err(Failure::ReceiptMismatch); }
-                        dividends(rows, corp)
-                    });
-                    report.dividends.apply(result, self.clock.now().unix(), collection.refresh_version);
-                } else if code == "11011" { report.dividends.validated_version = Some(collection.disclosure_version); }
-                record_report(&mut collection, key, report);
-                store.save(corp, &collection).await?;
-            }
+        let mut requests = std::collections::BTreeSet::new();
+        for year in (through_year - 3).max(2015)..=through_year { for index in 0..REPORT_CODES.len() { requests.insert((year, index)); } }
+        for report in collection.working_reports().values() {
+            if let Some(index) = REPORT_CODES.iter().position(|code| *code == report.report_code) { requests.insert((report.business_year, index)); }
+        }
+        for (year, index) in requests {
+            let code = REPORT_CODES[index];
+            let key = format!("{year}/{code}");
+            let mut report = collection.working_reports_mut().remove(&key).unwrap_or_else(|| Report { business_year: year, report_code: code.into(), statement: Default::default(), dividends: Default::default() });
+            let report_outdated = statement_outdated(&report, &collection.disclosures) || dividends_outdated(&report, &collection.disclosures);
+            let retry_source = report.statement.data.as_ref().is_some_and(|s| s.source_failure.is_some());
+            if statement_outdated(&report, &collection.disclosures) || report.statement.checked_at.is_none() || report.statement.failure.is_some() || retry_source || (report.statement.absent && (report_outdated || report.statement.snapshot_version() < collection.unpublished_check_version)) {
+                let result = self.statement(client, corp, year, code, &collection.disclosures).await;
+                let result = match result {
+                    Ok(Some(statement)) if report.statement.data.is_some() && statement.source_failure.is_some() => Err(statement.source_failure.unwrap()),
+                    other => other,
+                };
+                report.statement.apply(result, self.clock.now().unix(), collection.refresh_version);
+            } else { report.statement.validated_version = Some(collection.disclosure_version); }
+            if code == "11011" && (dividends_outdated(&report, &collection.disclosures) || report.dividends.checked_at.is_none() || report.dividends.failure.is_some() || (report.dividends.absent && (report_outdated || report.dividends.snapshot_version() < collection.unpublished_check_version))) {
+                let result = client.rows("alotMatter.json", &[("corp_code", corp.clone()), ("bsns_year", year.to_string()), ("reprt_code", code.into())]).await.and_then(|rows| {
+                    if rows.iter().any(|row| !receipt_is_current(&collection.disclosures, field(row, "rcept_no"))) { return Err(Failure::ReceiptMismatch); }
+                    dividends(rows, corp)
+                });
+                report.dividends.apply(result, self.clock.now().unix(), collection.refresh_version);
+            } else if code == "11011" { report.dividends.validated_version = Some(collection.disclosure_version); }
+            record_report(&mut collection, key, report);
+            store.save(corp, &collection).await?;
         }
         Ok(())
     }

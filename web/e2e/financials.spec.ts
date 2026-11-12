@@ -1,3 +1,4 @@
+import { financialListings, startUpdate, settleUpdate, updateFromChart } from "./financial-update-helpers";
 import { selectOption } from "./select-option";
 import type { Page } from "@playwright/test";
 import type { FinancialsPage } from "../src/api/generated/FinancialsPage";
@@ -23,6 +24,7 @@ async function seed(app: App, period = "Y") {
   ], panels: METRICS.map((id) => ({ id, stretch: 0.3 })) };
   const result = await fetch(`${app.url}/api/layouts/${layout.id}`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...layout, revision: layout.revision + 1, cells: [{ ...layout.cells[0], symbol: "005930", venue: "combined", period, chartSettings }] }) });
   expect(result.ok).toBe(true);
+  await startUpdate(app);
   return chartSettings;
 }
 
@@ -34,15 +36,16 @@ async function choosePeriod(page: Page, phone: boolean, label: string) {
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
 }
 
-async function refresh(page: Page) {
+async function refresh(page: Page, app: App) {
   const detail = row(page, "revenue").locator("details");
   if (await detail.getAttribute("open") === null) await detail.locator("summary").click();
-  await detail.getByRole("button", { name: /재무자료 새로고침/ }).click();
+  await updateFromChart(page);
+  await settleUpdate(app);
   await detail.locator("summary").click();
 }
 
 for (const phone of [false, true]) test.describe(phone ? "휴대폰 재무지표" : "데스크톱 재무지표", () => {
-  test.use({ financialFixture: true, clockStart: "20171231120000", ...(phone ? { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true } : {}) });
+  test.use({ financialFixture: true, bootReplies: [financialListings], clockStart: "20171231120000", ...(phone ? { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true } : {}) });
 
   test("메뉴 6종 추가·Q/D/Y 숨김 복원·음수와 0·설정 재열기", async ({ page, app }, testInfo) => {
     const errors: string[] = [];
@@ -59,6 +62,8 @@ for (const phone of [false, true]) test.describe(phone ? "휴대폰 재무지표
     }
     await dialog.getByRole("button", { name: "입력창 닫기", exact: true }).click();
     await expect(page.locator("[data-indicator-row]")).toHaveCount(7);
+    await startUpdate(app);
+    await settleUpdate(app);
     await expect.poll(async () => (await data(app)).status).toBe("ready");
     await expect(page.locator("[data-indicator-row]").filter({ hasText: "DPS" })).toContainText("연간 전용");
     await choosePeriod(page, phone, "일");
@@ -105,8 +110,8 @@ for (const phone of [false, true]) test.describe(phone ? "휴대폰 재무지표
   test("수집과 최초·도중·갱신 실패가 가격·다른 지표를 막지 않고 재시도로 복구", async ({ page, app }) => {
     app.dart!.delay = 25;
     let release: () => void = () => {};
-    app.dart!.block = { scope: "fnlttSinglAcntAll.json/2016/11011", wait: new Promise<void>((resolve) => { release = resolve; }) };
-    app.dart!.fail = "fnlttSinglAcntAll.json/2015/11013";
+    app.dart!.block = { scope: "fnlttSinglAcntAll.json/2016/11011/00126380", wait: new Promise<void>((resolve) => { release = resolve; }) };
+    app.dart!.fail = "fnlttSinglAcntAll.json/2015/11013/00126380";
     await seed(app);
     await page.addInitScript(installFrameProbe);
     await page.goto("/");
@@ -125,12 +130,13 @@ for (const phone of [false, true]) test.describe(phone ? "휴대폰 재무지표
     expect(partial.series.find((s) => s.metric === "revenue")!.points.some((p) => p.status === "failed")).toBe(true);
     expect(partial.series.find((s) => s.metric === "debt_ratio")!.points.some((p) => p.value === 50)).toBe(true);
     app.dart!.fail = null;
-    await refresh(page);
+    await refresh(page, app);
+    await settleUpdate(app);
     await waitForReady(app);
     await expect(row(page, "revenue")).toContainText("확인 완료");
     const confirmed = await data(app);
     app.dart!.fail = "list.json";
-    await refresh(page);
+    await refresh(page, app);
     await expect(row(page, "revenue")).toContainText("갱신 실패");
     const stale = await data(app);
     expect(stale.series.map((s) => s.points.map((p) => p.value))).toEqual(confirmed.series.map((s) => s.points.map((p) => p.value)));
@@ -138,7 +144,7 @@ for (const phone of [false, true]) test.describe(phone ? "휴대폰 재무지표
     await expect(row(page, "ma")).toBeVisible();
     await choosePeriod(page, phone, "연");
     app.dart!.fail = null;
-    await refresh(page);
+    await refresh(page, app);
     await waitForReady(app);
     await expect(row(page, "revenue")).toContainText("확인 완료");
     await row(page, "revenue").locator("summary").click();
@@ -150,10 +156,11 @@ for (const phone of [false, true]) test.describe(phone ? "휴대폰 재무지표
 });
 
 test.describe("재무지원 경계", () => {
-  test.use({ financialFixture: true, clockStart: "20171231120000" });
+  test.use({ financialFixture: true, bootReplies: [financialListings], clockStart: "20171231120000" });
   test("종목·종류·거래소 전환은 설정을 유지하고 우선주 DPS와 ETF·지수를 안내", async ({ page, app }) => {
     const settings = await seed(app);
     await page.goto("/");
+    await settleUpdate(app);
     await expect.poll(async () => (await data(app)).status).toBe("ready");
     for (const symbol of ["005935", "0000D0", "IDX:001", "000020", "005930"]) {
       await page.goto(`/?symbol=${symbol}`);
@@ -190,7 +197,7 @@ test.describe("재무지원 경계", () => {
     await expect(row(page, "revenue")).toContainText("3월 결산");
     app.dart!.fail = null;
     await page.goto("/?symbol=005930");
-    await refresh(page);
+    await refresh(page, app);
     await expect(row(page, "revenue")).toContainText("확인 완료");
   });
 
@@ -227,6 +234,7 @@ test.describe("재무지원 경계", () => {
     await seed(app, "Q");
     await page.addInitScript(installFrameProbe);
     await page.goto("/");
+    await settleUpdate(app);
     await expect.poll(async () => (await data(app, "005930", "Q")).status).toBe("ready");
     await expect(row(page, "revenue")).toContainText("3월 결산");
     await expect(page.locator("[data-indicator-row]").filter({ hasText: "3월 결산" })).toHaveCount(1);
