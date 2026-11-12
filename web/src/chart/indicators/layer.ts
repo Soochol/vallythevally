@@ -68,6 +68,7 @@ export interface LayerHost {
   isIndex(): boolean;
   period(): Period;
   requestFrame(): void;
+  axisFormatted(pane: ReturnType<IChartApi["panes"]>[number]): void;
   /** 시리즈에 그리는 동안 보이는 범위 변경으로 과거 페이지를 받지 않게 한다(주 시리즈의 setData와 같은 가드). */
   guard(draw: () => void): void;
 }
@@ -468,6 +469,10 @@ export class IndicatorLayer {
 
   private axisGeometry(config: IndicatorConfig): AxisGeometry {
     return {
+      formatted: () => {
+        const series = this.shown.get(config.id)?.lines[0]?.series;
+        if (series) this.host.axisFormatted(series.getPane());
+      },
       toCoordinate: (value) => this.shown.get(config.id)?.lines[0]?.series.priceToCoordinate(value) ?? null,
       lastCoordinates: () => [...this.shown.values()].filter((s) => s.config.visible && s.config.panel === config.panel && s.config.panel !== "price")
         .flatMap((s) => s.lines.flatMap((line) => {

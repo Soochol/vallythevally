@@ -6,11 +6,23 @@ export type AxisUnit = "price" | "index" | "volume" | "KRW" | "%" | "원/주" | 
 export interface AxisGeometry {
   toCoordinate(value: number): number | null;
   lastCoordinates(): number[];
+  formatted?(): void;
 }
 
 const KOREAN = [[1e12, "조"], [1e8, "억"], [1e4, "만"]] as const;
 const INTERNATIONAL = [[1e12, "T"], [1e9, "B"], [1e6, "M"], [1e3, "K"]] as const;
-const decimal = (v: number, digits: number) => v.toLocaleString("en-US", { useGrouping: false, maximumFractionDigits: digits });
+const numberFormats = new Map<number, Intl.NumberFormat>();
+function numberText(value: number, digits: number, grouped: boolean): string {
+  const key = digits + (grouped ? 100 : 0);
+  let format = numberFormats.get(key);
+  if (!format) {
+    format = new Intl.NumberFormat("en-US", { useGrouping: grouped, maximumFractionDigits: digits });
+    numberFormats.set(key, format);
+  }
+  return format.format(value);
+}
+const decimal = (v: number, digits: number) => numberText(v, digits, false);
+const PRECISIONS = [undefined, ...Array.from({ length: 13 }, (_, i) => i)];
 const suffix = (unit: AxisUnit) => typeof unit === "object" ? unit.currency : unit === "%" || unit === "원/주" ? unit : "";
 const signed = (value: number, text: string) => `${value < 0 ? MINUS : ""}${text}`;
 const scientific = (value: number, digits: number) => signed(value, Math.abs(value).toExponential(digits).replace("e+", "e"));
@@ -33,7 +45,7 @@ export function formatAxisValue(value: number, unit: AxisUnit, precision?: numbe
     return signed(value, `${number}${label}${suffix(unit)}`);
   }
   const digits = precision ?? (unit === "price" || unit === "volume" ? 0 : 2);
-  return signed(value, v.toLocaleString("en-US", { maximumFractionDigits: digits }) + suffix(unit));
+  return signed(value, numberText(v, digits, true) + suffix(unit));
 }
 
 type TickNotation = "compact" | "international" | "plain" | "scientific";
@@ -46,22 +58,29 @@ function tickValue(value: number, unit: AxisUnit, precision: number | undefined,
   return compact ? signed(value, `${decimal(Math.abs(value) / compact[0], precision ?? 2)}${compact[1]}${suffix(unit)}`) : tickValue(value, unit, precision, "plain");
 }
 
-export function fitAxisValue(value: number, unit: AxisUnit, fits: (text: string) => boolean): string {
-  const candidates = [formatAxisValue(value, unit)];
+function* axisCandidates(value: number, unit: AxisUnit): Generator<string> {
+  yield formatAxisValue(value, unit);
   for (const notation of ["compact", "plain", "international", "scientific"] as const) {
-    for (let precision = 2; precision >= 0; precision--) candidates.push(tickValue(value, unit, precision, notation));
+    for (let precision = 2; precision >= 0; precision--) yield tickValue(value, unit, precision, notation);
   }
   if (unit === "원/주" && Math.abs(value) >= 100 && Math.abs(value) < 1000) {
-    candidates.push(signed(value, `${decimal(Math.abs(value) / 100, 0)}백원/주`));
+    yield signed(value, `${decimal(Math.abs(value) / 100, 0)}백원/주`);
   }
-  return candidates.find(fits) ?? scientific(value, 0);
+}
+
+export function fitAxisValue(value: number, unit: AxisUnit, fits: (text: string) => boolean): string {
+  for (const candidate of axisCandidates(value, unit)) if (fits(candidate)) return candidate;
+  return scientific(value, 0);
 }
 
 export function distinctAxisTicks(values: number[], unit: AxisUnit, fits: (text: string) => boolean): string[] {
-  let best = values.map((value) => fitAxisValue(value, unit, fits));
-  let distinct = new Set(best).size;
+  const defaults = values.map((value) => formatAxisValue(value, unit));
+  let best = defaults.every(fits) ? defaults : null;
+  let distinct = best ? new Set(best).size : 0;
+  if (distinct === values.length) return defaults;
   for (const notation of ["compact", "international", "plain", "scientific"] as const) {
-    for (const precision of [undefined, ...Array.from({ length: 13 }, (_, i) => i)]) {
+    for (const precision of PRECISIONS) {
+      if (notation === "compact" && precision === undefined) continue;
       const labels = values.map((value) => tickValue(value, unit, precision, notation));
       if (!labels.every(fits)) continue;
       const count = new Set(labels).size;
@@ -69,6 +88,8 @@ export function distinctAxisTicks(values: number[], unit: AxisUnit, fits: (text:
       if (count > distinct) { best = labels; distinct = count; }
     }
   }
+  const fallback = values.map((value) => fitAxisValue(value, unit, fits));
+  if (!best || new Set(fallback).size > distinct) best = fallback;
   const seen = new Set<string>();
   return best.map((label) => { if (seen.has(label)) return ""; seen.add(label); return label; });
 }
@@ -98,6 +119,10 @@ export function axisPriceFormat(unit: AxisUnit, minMove: number, geometry?: Axis
   return {
     type: "custom", minMove,
     formatter: (value: number) => fitAxisValue(value, unit, fits),
-    tickmarksFormatter: (values: number[]) => formatAxisTicks(values, distinctAxisTicks(values, unit, fits), geometry, fontSize),
+    tickmarksFormatter: (values: number[]) => {
+      const labels = formatAxisTicks(values, distinctAxisTicks(values, unit, fits), geometry, fontSize);
+      geometry?.formatted?.();
+      return labels;
+    },
   } satisfies PriceFormatCustom;
 }

@@ -11,6 +11,7 @@ import {
   type Time,
   type UTCTimestamp,
 } from "lightweight-charts";
+import { AxisLabelCache } from "./axisLabelCache";
 import { axisPriceFormat, type AxisGeometry } from "./axisFormat";
 import { fetchBarsPage } from "../api/bars";
 import type { Bar } from "../api/generated/Bar";
@@ -103,6 +104,7 @@ export interface ControllerDeps {
 export class ChartController {
   private readonly el: HTMLElement;
   private readonly chart: IChartApi;
+  private readonly axisLabels: AxisLabelCache;
   private main: MainSeries;
   private financialHoverTime: number | null = null;
   private readonly indicators: IndicatorLayer;
@@ -137,6 +139,7 @@ export class ChartController {
     this.tokens = deps.tokens;
     this.onStatus = deps.onStatus;
     this.chart = createChart(el, { ...this.chartOptions(), autoSize: true });
+    this.axisLabels = new AxisLabelCache(this.chart);
     this.chart.chartElement().addEventListener("wheel", this.onWheel, { capture: true, passive: false });
     // 주 시리즈를 바꿔 붙이는 동안 가격 pane이 비어도 라이브러리가 지우지 않게 한다. 지우면 지표 패널이 0번이 된다.
     this.chart.panes()[0]?.setPreserveEmptyPane(true);
@@ -150,6 +153,7 @@ export class ChartController {
         period: () => this.period(),
         requestFrame: () => this.scheduleFrame(),
         guard: (draw) => this.withDataGuard(draw),
+        axisFormatted: (pane) => this.axisLabels.record(pane),
       },
       deps.indicators ?? openIndicatorPort,
     );
@@ -373,6 +377,7 @@ export class ChartController {
 
   private priceAxisGeometry(percent = false): AxisGeometry {
     return {
+      formatted: () => this.axisLabels.record(this.main.api.getPane()),
       toCoordinate: (value) => {
         if (!percent) return this.main.api.priceToCoordinate(value);
         const range = this.chart.timeScale().getVisibleLogicalRange();
@@ -482,17 +487,17 @@ export class ChartController {
 
   private scheduleFrame(): void {
     if (this.frame !== null || this.disposed) return;
-    this.frame = requestAnimationFrame(() => {
+    this.frame = requestAnimationFrame((time) => {
       this.frame = null;
-      this.drawFrame();
+      this.drawFrame(time);
     });
   }
 
-  private drawFrame(): void {
+  private drawFrame(time: number): void {
     this.flushPendingDraw();
     this.compare.flush(this.bars);
     this.indicators.flush();
-    for (const pane of this.chart.panes()) pane.priceScale("right").applyOptions({});
+    if (this.axisLabels.refresh(time)) this.scheduleFrame();
     this.renderLegend();
   }
 

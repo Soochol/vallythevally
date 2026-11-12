@@ -1,4 +1,4 @@
-import { expect, test } from "vitest";
+import { expect, test, vi } from "vitest";
 import { axisPriceFormat, distinctAxisTicks, financialAxisUnit, fitAxisValue, formatAxisTicks, formatAxisValue } from "./axisFormat";
 
 test.each([
@@ -75,4 +75,24 @@ test("극단 값이나 긴 통화 단위도 지수 표기로 남기고 다음 �
     expect(fitAxisValue(value, { currency: "확인하지 못한 아주 긴 통화 단위" }, fits).length).toBeLessThanOrEqual(8);
   }
   expect(fitAxisValue(1_648_000_000, "KRW", fits)).toBe("16.48억");
+});
+
+test("맞는 첫 포맷 후보 뒤의 숫자 변환은 계산하지 않는다", () => {
+  const locale = vi.spyOn(Number.prototype, "toLocaleString");
+  const descriptor = Object.getOwnPropertyDescriptor(Intl.NumberFormat.prototype, "format");
+  if (!descriptor?.get) throw new Error("Intl 숫자 포맷터 getter 없음");
+  const get = descriptor.get;
+  let formatCalls = 0;
+  Object.defineProperty(Intl.NumberFormat.prototype, "format", { ...descriptor, get(this: Intl.NumberFormat) { formatCalls++; return get.call(this); } });
+  try {
+    expect(fitAxisValue(193400, "price", () => true)).toBe("193,400");
+    expect(locale.mock.calls.length + formatCalls).toBe(1);
+    locale.mockClear();
+    formatCalls = 0;
+    expect(distinctAxisTicks([190000, 200000, 210000], "price", () => true)).toEqual(["190,000", "200,000", "210,000"]);
+    expect(locale.mock.calls.length + formatCalls).toBe(3);
+  } finally {
+    locale.mockRestore();
+    Object.defineProperty(Intl.NumberFormat.prototype, "format", descriptor);
+  }
 });
