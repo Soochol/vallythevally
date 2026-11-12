@@ -18,13 +18,13 @@ export function useSaveView(): { indicator: SaveIndicator; offline: string | nul
   return { indicator: saveIndicator(saves, drawing), offline: phase.kind === "offline" ? phase.message : null };
 }
 
-const RETRY_BUTTON = "rounded-s px-1 font-[650] text-accent underline underline-offset-2 hover:bg-accent-soft";
+const RETRY_BUTTON = "rounded-s px-1 font-[650] text-warning underline underline-offset-2 hover:bg-accent-soft";
 
 export function SaveStatus() {
   const { indicator, offline } = useSaveView();
   if (offline) {
     return (
-      <span className="flex min-w-0 items-center gap-1 text-accent" title={offline}>
+      <span className="flex min-w-0 items-center gap-1 text-warning" title={offline}>
         <span className="truncate">{offline}</span>
         <button type="button" className={RETRY_BUTTON} onClick={() => location.reload()}>
           다시 불러오기
@@ -46,7 +46,7 @@ export function SaveStatus() {
       );
     case "failed":
       return (
-        <span className="flex items-center gap-1 text-accent" role="alert">
+        <span className="flex items-center gap-1 text-warning" role="alert">
           저장하지 못했습니다:
           <button type="button" className={RETRY_BUTTON} onClick={retryAll}>
             다시 시도
@@ -55,7 +55,7 @@ export function SaveStatus() {
       );
     case "tooLarge":
       return (
-        <span className="text-accent" role="alert">
+        <span className="text-warning" role="alert">
           저장하지 못했습니다: 설정이 64KB를 넘습니다{indicator.hint ? `. ${indicator.hint}` : ""}
         </span>
       );

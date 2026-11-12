@@ -27,6 +27,12 @@ async function expectTenMinuteBars(page: Page, requested: SeriesKey[], label: st
 }
 
 async function choose(group: Locator, name: string) {
+  const minutes = group.getByRole("combobox", { name: "분봉", exact: true });
+  if (/^\d+분$/.test(name) && await minutes.count()) {
+    await minutes.selectOption({ label: name });
+    await expect(minutes).toHaveValue(name.replace("분", "m"));
+    return;
+  }
   const button = group.getByRole("button", { name, exact: true });
   await button.click();
   await expect(button).toHaveAttribute("aria-pressed", "true");
@@ -53,14 +59,14 @@ const layoutSaved = (page: Page, want: { venue: string; period: string }) =>
   });
 
 test.describe("데스크톱", () => {
-  test("봉 주기 막대의 5분과 15분 사이에서 10분을 골라 거래소마다 10분봉을 그리고, [ ]로 이웃 봉 주기로 옮긴다", async ({ page }) => {
+  test("분봉 메뉴에서 10분을 골라 거래소마다 10분봉을 그리고, [ ]로 이웃 봉 주기로 옮긴다", async ({ page }) => {
     const requested = recordBarRequests(page);
     await page.goto("/?symbol=005930");
     const toolbar = page.getByRole("toolbar", { name: "차트 도구 막대" });
     const periods = toolbar.getByRole("group", { name: "봉 주기" });
     const venues = toolbar.getByRole("group", { name: "거래소" });
     await expect(cell(page)).toHaveAttribute("aria-label", "칸 1: 삼성전자 통합 일");
-    await expect(periods.getByRole("button")).toHaveText(["1분", "3분", "5분", "10분", "15분", "30분", "60분", "일", "주", "월", "분기", "연"]);
+    await expect(periods.getByRole("button")).toHaveText(["일", "주", "월", "분기", "연"]);
 
     await choose(periods, "10분");
     await expectTenMinuteBars(page, requested, "삼성전자 통합 10분", { symbol: "005930", venue: "combined", period: "10m" });
@@ -75,7 +81,7 @@ test.describe("데스크톱", () => {
     await expectTenMinuteBars(page, requested, "삼성전자 NXT 10분", { symbol: "005930", venue: "nxt", period: "10m" });
     await page.keyboard.press("BracketRight");
     await expect(cell(page)).toHaveAttribute("aria-label", "칸 1: 삼성전자 NXT 15분");
-    await expect(periods.getByRole("button", { name: "15분", exact: true })).toHaveAttribute("aria-pressed", "true");
+    await expect(periods.getByRole("combobox", { name: "분봉", exact: true })).toHaveValue("15m");
   });
 
   for (const width of [1024, 1440]) {
@@ -95,7 +101,8 @@ test.describe("데스크톱", () => {
       await toolbar.getByRole("button", { name: "봉 모양" }).click();
       await expect(page.getByRole("menu", { name: "봉 모양" })).toBeVisible();
       await page.keyboard.press("Escape");
-      await expect(toolbar.getByRole("button", { name: "테마 바꾸기" })).toBeInViewport();
+      await expect(toolbar.getByRole("button", { name: "차트 이미지 내려받기" })).toBeInViewport();
+      await expect(toolbar.getByRole("button", { name: "테마 바꾸기" })).toHaveCount(0);
       expect(await toolbarLayout(page)).toEqual({ wrapped: [], pageOverflow: 0, toolbarOverflow: 0 });
     });
   }
@@ -105,7 +112,7 @@ test.describe("데스크톱", () => {
     await page.goto("/?symbol=IDX:001&period=10m");
     await expectTenMinuteBars(page, requested, "코스피 10분", { symbol: "IDX:001", venue: null, period: "10m" });
     const periods = page.getByRole("toolbar", { name: "차트 도구 막대" }).getByRole("group", { name: "봉 주기" });
-    await expect(periods.getByRole("button", { name: "10분", exact: true })).toHaveAttribute("aria-pressed", "true");
+    await expect(periods.getByRole("combobox", { name: "분봉", exact: true })).toHaveValue("10m");
   });
 
   test("10분봉을 고른 레이아웃은 새로고침과 서버 재시작 뒤에도 10분봉을 다시 받는다", async ({ app, page }) => {
@@ -120,7 +127,7 @@ test.describe("데스크톱", () => {
 
     const expectRestored = async () => {
       await expectTenMinuteBars(page, requested, "삼성전자 통합 10분", { symbol: "005930", venue: "combined", period: "10m" });
-      await expect(periods.getByRole("button", { name: "10분", exact: true })).toHaveAttribute("aria-pressed", "true");
+      await expect(periods.getByRole("combobox", { name: "분봉", exact: true })).toHaveValue("10m");
     };
     requested.length = 0;
     await page.reload();

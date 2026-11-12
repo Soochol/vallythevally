@@ -65,7 +65,7 @@ export async function boot(queryClient: QueryClient) {
     setPhase({ kind: "ready" });
   } catch (e) {
     console.warn("마지막 화면을 되살리지 못했습니다", e);
-    const theme: Theme = document.documentElement.dataset.theme === "light" ? "light" : "dark";
+    const theme: Theme = "dark";
     useUiStore.getState().load({ ...DEFAULT_UI_PREFS, theme }, {});
     followTheme();
     const reason = e instanceof ApiRequestError ? e.message : String(e);

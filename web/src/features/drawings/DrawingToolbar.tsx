@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { surfaceFor } from "../../chart/drawings/DrawingSurface";
 import { gestureHelp } from "../../chart/drawings/gestures";
@@ -20,6 +20,16 @@ export function DrawingToolbar() {
   const prefs = useUiStore((s) => s.prefs.drawing); const slot = useSelectionStore((s) => s.activeSlot);
   const sync = drawingSync(useQueryClient()); useDrawingVersion(sync);
   const [help, setHelp] = useState(false);
+  const root = useRef<HTMLElement>(null);
+  const helpPanel = useRef<HTMLDivElement>(null);
+  useEffect(() => { if (help) helpPanel.current?.showPopover(); }, [help]);
+  useEffect(() => {
+    const closeMenus = (e: PointerEvent) => {
+      if (e.target instanceof Node && !root.current?.contains(e.target)) root.current?.querySelectorAll("details[open]").forEach((node) => node.removeAttribute("open"));
+    };
+    document.addEventListener("pointerdown", closeMenus);
+    return () => document.removeEventListener("pointerdown", closeMenus);
+  }, []);
   const [lastTools, setLastTools] = useState<Partial<Record<Tool["group"], Tool>>>({});
   useEffect(() => {
     const key = (e: KeyboardEvent) => {
@@ -30,14 +40,32 @@ export function DrawingToolbar() {
   const setTool = (tool: Tool) => { setLastTools((s) => ({ ...s, [tool.group]: tool })); useDrawingSession.getState().setTool(tool.tool); surfaceFor(slot)?.focus(); };
   const setPrefs = useUiStore.getState().setDrawingPrefs;
   const action = (f: () => void) => { f(); surfaceFor(slot)?.focus(); };
-  return <nav aria-label="드로잉 도구" className="drawing-toolbar max-md:hidden" onPointerDown={(e) => { if (!(e.target instanceof HTMLSelectElement)) e.preventDefault(); }}>
+  return <nav ref={root} aria-label="드로잉 도구" className="drawing-toolbar max-md:hidden" onScroll={() => root.current?.querySelectorAll("details[open]").forEach((node) => node.removeAttribute("open"))} onPointerDown={(e) => { if (!(e.target instanceof HTMLSelectElement)) e.preventDefault(); }}>
     <button className="draw-tool" aria-label="선택 도구" title="선택 (V)" aria-pressed={active === null} onClick={() => action(() => useDrawingSession.getState().setTool(null))}><ToolIcon path="M5 3 L5 20 L10 15 L14 22 L17 20 L13 13 L21 13 Z" /></button>
     {[...toolsByGroup()].map(([group, tools]) => {
       const t = tools.find((tool) => tool.tool === active) ?? lastTools[group] ?? tools[0]!;
       return <div className="draw-group" key={group}>
       <button className="draw-tool" title={`${t.label} (${TOOL_HOTKEYS.filter((h) => h.tool === t.tool).map((h) => h.keys).join(" / ")})${pinned === t.tool ? " · 연속" : ""}`} aria-label={t.label} aria-pressed={active === t.tool} onClick={() => setTool(t)} onDoubleClick={() => action(() => useDrawingSession.getState().setTool(t.tool, true))}><ToolIcon path={t.icon} /></button>
-      <details><summary aria-label={`${GROUP_LABEL[group]} 도구 펼치기`} title={`${GROUP_LABEL[group]} 도구`}><span>›</span></summary>
-        <div className="draw-tool-menu" role="menu" aria-label={`${GROUP_LABEL[group]} 도구`}>{tools.map((t) => <button role="menuitem" key={t.tool} onClick={(e) => { setTool(t); e.currentTarget.closest("details")?.removeAttribute("open"); }} onDoubleClick={() => useDrawingSession.getState().setTool(t.tool, true)}>
+      <details onToggle={(e) => {
+        const menu = e.currentTarget.querySelector<HTMLDivElement>("[popover]");
+        if (!menu) return;
+        if (e.currentTarget.open) {
+          menu.showPopover();
+          const at = e.currentTarget.getBoundingClientRect();
+          menu.style.left = `${Math.min(at.right + 8, innerWidth - menu.offsetWidth - 8)}px`;
+          menu.style.top = `${Math.max(8, Math.min(at.top, innerHeight - menu.offsetHeight - 8))}px`;
+          menu.querySelector<HTMLButtonElement>("button")?.focus();
+        } else if (menu.matches(":popover-open")) menu.hidePopover();
+      }}><summary aria-label={`${GROUP_LABEL[group]} 도구 펼치기`} title={`${GROUP_LABEL[group]} 도구`}><span>›</span></summary>
+        <div popover="manual" className="draw-tool-menu" role="menu" aria-label={`${GROUP_LABEL[group]} 도구`} onKeyDown={(e) => {
+          if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); e.currentTarget.closest("details")?.removeAttribute("open"); }
+          if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+            e.preventDefault(); e.stopPropagation();
+            const buttons = [...e.currentTarget.querySelectorAll<HTMLButtonElement>("button")];
+            const at = buttons.findIndex((b) => b === document.activeElement);
+            buttons[(at + (e.key === "ArrowDown" ? 1 : -1) + buttons.length) % buttons.length]?.focus();
+          }
+        }}>{tools.map((t) => <button role="menuitem" key={t.tool} onClick={(e) => { setTool(t); e.currentTarget.closest("details")?.removeAttribute("open"); }} onDoubleClick={() => useDrawingSession.getState().setTool(t.tool, true)}>
           <ToolIcon path={t.icon} /><span>{t.label}</span><kbd>{TOOL_HOTKEYS.find((h) => h.tool === t.tool)?.keys}</kbd></button>)}</div>
       </details>
     </div>; })}
@@ -55,6 +83,6 @@ export function DrawingToolbar() {
     })}><ToolIcon path="M4 6 H20 M9 6 V3 H15 V6 M6 6 L7 21 H17 L18 6 M10 10 V17 M14 10 V17" /></button>
     <div className="draw-toolbar-bottom"><button className="draw-tool" aria-label="개체 목록 열기" title="개체 목록" onClick={() => useSelectionStore.getState().showRightPanel("objects")}><ToolIcon path="M9 5 H21 M9 12 H21 M9 19 H21 M3 4 H5 V6 H3 Z M3 11 H5 V13 H3 Z M3 18 H5 V20 H3 Z" /></button>
       <button className="draw-tool" aria-label="드로잉 단축키 도움말" title="드로잉 단축키" onClick={() => setHelp(!help)}>?</button></div>
-    {help && <div className="drawing-help" role="dialog" aria-label="드로잉 단축키"><div className="draw-dialog-head"><strong>드로잉 단축키</strong><button className="icon-btn" aria-label="도움말 닫기" onClick={() => setHelp(false)}>×</button></div>{gestureHelp(registeredModes()).map((h) => <p key={h.keys}><kbd>{h.keys}</kbd><span>{h.label}</span></p>)}</div>}
+    {help && <div ref={helpPanel} popover="manual" className="drawing-help" role="dialog" aria-label="드로잉 단축키" onKeyDown={(e) => { if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); setHelp(false); } }}><div className="draw-dialog-head"><strong>드로잉 단축키</strong><button className="icon-btn" aria-label="도움말 닫기" onClick={() => setHelp(false)}>×</button></div>{gestureHelp(registeredModes()).map((h) => <p key={h.keys}><kbd>{h.keys}</kbd><span>{h.label}</span></p>)}</div>}
   </nav>;
 }

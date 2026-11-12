@@ -108,6 +108,7 @@ function useOpenResult() {
       pendingOpen = null;
       useLayoutStore.getState().setSymbol(slot, target);
       useSelectionStore.getState().setPhoneTab("chart");
+      useSelectionStore.getState().setDesktopView("chart");
     },
     [queryClient],
   );
@@ -174,6 +175,24 @@ export function PhoneScreener() {
   return (
     <div className="fixed inset-x-0 bottom-[56px] top-0 z-30 flex flex-col bg-bg">
       <ScreenerPanel />
+    </div>
+  );
+}
+
+export function DesktopScreener() {
+  const shown = useSelectionStore((s) => s.desktopView === "screener");
+  const desktop = useMediaQuery(DESKTOP_QUERY);
+  const screens = useScreens();
+  const chosen = useScreenerStore((s) => s.chosenId);
+  const choose = useScreenerStore((s) => s.choose);
+  if (!shown || !desktop) return null;
+  return (
+    <div className="desktop-screener">
+      <nav aria-label="내 조건식">
+        <div className="mb-2 flex items-center justify-between px-3 text-xs text-text-3"><span>내 조건식</span><button type="button" className="icon-btn" aria-label="새 조건식" onClick={() => editScreen(null)}><PlusIcon /></button></div>
+        {(screens.data?.screens ?? []).map((screen, i) => <button key={screen.id} type="button" aria-pressed={screen.id === (chosen ?? screens.data?.screens[0]?.id)} onClick={() => choose(screen.id)}><strong className="block text-m font-semibold">{screen.name}</strong><span className="mt-1 block text-xs text-text-3">조건 {screen.conditions.length}개 · {i + 1}</span></button>)}
+      </nav>
+      <section><ScreenerPanel /></section>
     </div>
   );
 }
@@ -263,7 +282,7 @@ const BLOCK_HINT: Record<RunBlock, string> = {
 };
 
 function runHint(block: RunBlock | null, status: ScreenerStatus | undefined): ReactNode {
-  if (block) return <span className="text-up">{BLOCK_HINT[block]}</span>;
+  if (block) return <span className="text-warning">{BLOCK_HINT[block]}</span>;
   if (!status?.lastDay) return null;
   return (
     <>
@@ -446,7 +465,7 @@ function Notice({ title, children, action, tone = "plain" }: { title: string; ch
   return (
     <div role={tone === "alert" ? "alert" : undefined} className="flex min-h-0 flex-1 flex-col items-start gap-2 px-6 pt-10">
       <p className="text-m font-[650]">{title}</p>
-      {children && <p className={`text-s leading-[1.5] ${tone === "alert" ? "text-up" : "text-text-2"}`}>{children}</p>}
+      {children && <p className={`text-s leading-[1.5] ${tone === "alert" ? "text-danger" : "text-text-2"}`}>{children}</p>}
       {action}
     </div>
   );
@@ -716,7 +735,7 @@ function UpdateBand({ status }: { status: ScreenerStatus }) {
             </button>
           )}
         </div>
-        <p className="mt-1.5 text-xs leading-[1.45] text-up">
+        <p className="mt-1.5 text-xs leading-[1.45] text-danger">
           {PHASE_LABEL[update.phase]} {progressText(update)}에서 멈춤: {update.error.message}
         </p>
         <p className="mt-0.5 text-xs leading-[1.45] text-text-2">
@@ -773,7 +792,7 @@ function StatusFooterLine({ footer, status, onRetry }: { footer: StatusFooter; s
   const failed = footer.kind === "unreadable";
   return (
     <footer role={failed ? "alert" : undefined} className="flex flex-none items-center gap-2 border-t border-line px-3 py-2">
-      <span className={`min-w-0 flex-1 truncate text-xs ${failed ? "text-up" : "text-text-3"}`} title={failed ? footer.message : undefined}>
+      <span className={`min-w-0 flex-1 truncate text-xs ${failed ? "text-danger" : "text-text-3"}`} title={failed ? footer.message : undefined}>
         {failed ? `저장소 상태를 ${footer.stale ? "다시 " : ""}읽지 못했습니다: ${footer.message}` : "저장소 상태를 읽는 중"}
       </span>
       {failed && <RetryButton onClick={onRetry} />}

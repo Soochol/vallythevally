@@ -27,6 +27,12 @@ async function expectCellShows(page: Page, requested: SeriesKey[], label: string
 }
 
 async function choose(group: Locator, name: string) {
+  const minutes = group.getByRole("combobox", { name: "분봉", exact: true });
+  if (/^\d+분$/.test(name) && await minutes.count()) {
+    await minutes.selectOption({ label: name });
+    await expect(minutes).toHaveValue(name.replace("분", "m"));
+    return;
+  }
   const button = group.getByRole("button", { name, exact: true });
   await button.click();
   await expect(button).toHaveAttribute("aria-pressed", "true");

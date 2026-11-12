@@ -97,7 +97,7 @@ function SearchDialogBody({ purpose }: { purpose: SearchPurpose }) {
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-start justify-center bg-[var(--scrim)] pt-[72px] max-md:items-end max-md:pt-0"
+      className="ui-dialog-backdrop fixed inset-0 z-50 flex justify-center bg-[var(--scrim)]"
       onPointerDown={(e) => e.target === e.currentTarget && close()}
     >
       <div
@@ -105,14 +105,14 @@ function SearchDialogBody({ purpose }: { purpose: SearchPurpose }) {
         aria-modal="true"
         aria-labelledby={`${ids}-title`}
         className={
-          "flex max-h-[calc(100vh-110px)] w-[min(560px,calc(100vw-24px))] flex-col overflow-hidden rounded-l border border-line bg-surface shadow-dialog " +
+          "ui-dialog flex w-[min(620px,calc(100vw-24px))] flex-col overflow-hidden rounded-l border border-line bg-surface shadow-dialog " +
           "max-md:max-h-[85dvh] max-md:w-screen max-md:rounded-b-none"
         }
       >
         <h2 id={`${ids}-title`} className="sr-only">
           {purpose === "watch" ? "관심종목에 넣을 종목 검색" : "종목 검색"}
         </h2>
-        <label className="flex h-[46px] flex-none items-center gap-1.5 border-b border-line px-4 text-l text-text-3">
+        <label className="flex h-[64px] flex-none items-center gap-1.5 border-b border-line px-4 text-l text-text-3">
           <SearchIcon />
           <input
             autoFocus
