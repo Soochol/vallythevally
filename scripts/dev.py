@@ -17,6 +17,8 @@ import tempfile
 import tomllib
 import urllib.request
 
+import evidence
+
 
 BINARIES = ("vally-server", "fake-kiwoom")
 BUILD_ENV_PREFIXES = ("CARGO_", "RUST", "CC", "CXX", "AR", "CFLAGS", "CPPFLAGS", "LDFLAGS", "SDKROOT", "MACOSX_")
@@ -239,14 +241,14 @@ def needs_duckdb(command):
 def compile_command(root, command, environment):
     common = output(["git", "rev-parse", "--path-format=absolute", "--git-common-dir"], root)
     say("공통 컴파일 잠금 대기 / Cargo 실행")
-    subprocess.run(["flock", str(Path(common) / "compile.lock"), *command], cwd=root, env=environment, check=True)
+    evidence.command(["flock", str(Path(common) / "compile.lock"), *command], root, environment)
 
 
 def run_cargo(root, command, environment):
     if command[1] == "test" and "--no-run" not in command:
         at = command.index("--") if "--" in command else len(command)
         compile_command(root, [*command[:at], "--no-run", *command[at:]], environment)
-        subprocess.run(command, cwd=root, env=environment, check=True)
+        evidence.command(command, root, environment)
     else:
         compile_command(root, command, environment)
 
@@ -288,6 +290,7 @@ def cached_build(root, cache, key, current_key, build, binaries=BINARIES):
             if current_key() != key:
                 raise ValueError("복원 중 빌드 입력이 바뀌었습니다. 다시 실행하세요")
             say(f"실행 파일 재사용 (Cargo 빌드 생략): {', '.join(binaries)} / {key[:16]}")
+            evidence.artifact("server", destination, "reused", key, files=binaries)
             return
         say(f"새 빌드 입력: {key[:16]}")
         build()
@@ -296,6 +299,7 @@ def cached_build(root, cache, key, current_key, build, binaries=BINARIES):
         publish_binaries(root / "target/debug", entry, key, binaries)
         restore_binaries(entry, destination, binaries)
         say(f"실행 파일 캐시 저장: {key[:16]}")
+        evidence.artifact("server", destination, "direct", key, files=binaries)
 
 
 def main():
@@ -310,6 +314,14 @@ def main():
     cargo.add_argument("arguments", nargs=argparse.REMAINDER)
     args = parser.parse_args()
     root = Path(__file__).resolve().parent.parent
+    if args.action == "status":
+        execute(root, args)
+    else:
+        with evidence.Run(root, f"dev-{args.action}", sys.argv, os.environ.get("VALLY_EVIDENCE_DIR")):
+            execute(root, args)
+
+
+def execute(root, args):
     require_default_target(root, os.environ)
     tools = toolchain(root)
     pin = load_pin(root)
@@ -331,11 +343,12 @@ def main():
         cached_build(root, cache, key, current_key, lambda: run_cargo(root, command, environment), binaries)
         if library is not None:
             install(library / "libduckdb.so", root / "target/dev/bin/libduckdb.so")
+            evidence.artifact("duckdb", root / "target/dev/bin/libduckdb.so", "reused")
 
 
 if __name__ == "__main__":
     try:
         main()
     except (OSError, ValueError, KeyError, tarfile.TarError, subprocess.CalledProcessError) as error:
-        print(f"dev-build: 실패: {error}", file=sys.stderr)
+        print(f"dev-build: 실패: {evidence.clean(str(error))}", file=sys.stderr)
         sys.exit(1)

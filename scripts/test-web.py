@@ -2,9 +2,11 @@ import contextlib
 import fcntl
 import importlib.util
 import io
+import json
 import multiprocessing
 from pathlib import Path
 import subprocess
+import os
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -67,6 +69,20 @@ class WebWorkflowTest(unittest.TestCase):
         patch.object(web, "wasm_tools", return_value=TOOLS).start()
         patch.object(web.dev, "output", return_value=str(self.root / ".git")).start()
         patch.object(web, "run_wasm_pack", write_package).start()
+
+    def commands(self, command):
+        def run(arguments, cwd, environment):
+            if "dev.py" in " ".join(arguments):
+                directory = self.root / "target/dev/bin"
+                directory.mkdir(parents=True, exist_ok=True)
+                for name in web.dev.BINARIES:
+                    path = directory / name
+                    path.write_text('#!/bin/sh\nprintf "server-A\\n"\n')
+                    path.chmod(0o755)
+                with web.evidence.Run(self.root, "dev-build", arguments, environment["VALLY_EVIDENCE_DIR"]) as record:
+                    record.artifact("server", directory, "direct", "fixture-build")
+            return command(arguments, cwd, environment)
+        return patch.object(web, "run", run)
 
     def build_count(self):
         path = self.root / "build-count"
@@ -137,7 +153,7 @@ class WebWorkflowTest(unittest.TestCase):
             if "tsc" in arguments[0] or "vitest" in arguments[0]:
                 self.assert_compile_unlocked()
             calls.append(arguments)
-        with patch.object(web, "run", command):
+        with self.commands(command):
             web.check_web(self.root, ["specific.test.ts"])
         self.assertEqual(calls[0], ["pnpm", "install", "--frozen-lockfile"])
         self.assertEqual(self.build_count(), 1)
@@ -164,7 +180,7 @@ class WebWorkflowTest(unittest.TestCase):
                 self.assertIn("--workers=3", arguments)
                 self.assertEqual(sum(arg.startswith("--workers=") for arg in arguments), 1)
                 observations.append((environment["VALLY_E2E_STATIC_DIR"], environment["PLAYWRIGHT_HTML_OUTPUT_DIR"], next(arg for arg in arguments if arg.startswith("--output="))))
-        with patch.object(web, "run", command):
+        with self.commands(command):
             for _ in range(2):
                 web.run_e2e(self.root, ["e2e/example.spec.ts", "--workers=3"])
         self.assertNotEqual(observations[0], observations[1])
@@ -177,9 +193,115 @@ class WebWorkflowTest(unittest.TestCase):
             called.append(arguments[0])
             if "vite" in arguments[0]:
                 raise subprocess.CalledProcessError(1, arguments)
-        with patch.object(web, "run", command), self.assertRaises(subprocess.CalledProcessError):
+        with self.commands(command), self.assertRaises(subprocess.CalledProcessError):
             web.run_e2e(self.root, [])
         self.assertFalse(any("playwright" in command for command in called))
+
+
+    def latest_manifest(self):
+        path = next((self.root / "target/web-runs").glob("e2e-*/manifest.json"))
+        return json.loads(path.read_text())
+
+    def test_dependency_failure_preserves_manifest_and_never_runs_browser(self):
+        calls = []
+        def fail(arguments, cwd, environment):
+            calls.append(arguments[0])
+            if arguments[0] == "pnpm":
+                raise subprocess.CalledProcessError(9, arguments)
+        with self.commands(fail), self.assertRaises(subprocess.CalledProcessError):
+            web.run_e2e(self.root, [])
+        manifest = self.latest_manifest()
+        self.assertEqual(manifest["status"], "failed")
+        self.assertEqual(manifest["exit_code"], 1)
+        self.assertEqual(manifest["steps"]["dependencies"]["status"], "failed")
+        self.assertEqual(manifest["steps"]["playwright"]["status"], "not_run")
+        self.assertFalse(any("playwright" in call for call in calls))
+
+    def test_empty_ui_build_rejects_previous_dist_and_records_failure(self):
+        stale = self.root / "web/dist/index.html"
+        stale.parent.mkdir(parents=True)
+        stale.write_text("old UI")
+        with self.commands(lambda *args: None), self.assertRaisesRegex(ValueError, "index.html"):
+            web.run_e2e(self.root, [])
+        manifest = self.latest_manifest()
+        self.assertEqual(manifest["steps"]["ui"]["status"], "failed")
+        self.assertEqual(manifest["steps"]["playwright"]["status"], "not_run")
+        self.assertNotIn("ui", manifest["artifacts"])
+
+    def test_source_or_ui_tampering_is_rejected_before_playwright(self):
+        directory = self.root / "dist"
+        directory.mkdir()
+        index = directory / "index.html"
+        index.write_text("fresh")
+        with self.assertRaisesRegex(ValueError, "산출물"), web.evidence.Run(self.root, "probe", ["test"]) as record:
+            record.artifact("ui", directory, "direct", "source")
+            with patch.object(web.evidence, "source", return_value={"sha256": "new source"}), self.assertRaises(ValueError):
+                web.verify_ui(self.root, record)
+            index.write_text("stale")
+            with patch.object(web.evidence, "source", return_value={"sha256": "source"}), self.assertRaises(ValueError):
+                web.verify_ui(self.root, record)
+
+    def test_wasm_manifest_distinguishes_direct_and_reuse(self):
+        with web.evidence.Run(self.root, "wasm", ["test"]) as record:
+            web.ensure_wasm(self.root, self.environment)
+            self.assertEqual(record.data["artifacts"]["wasm"]["execution"], "direct")
+            web.ensure_wasm(self.root, self.environment)
+            self.assertEqual(record.data["artifacts"]["wasm"]["execution"], "reused")
+            self.assertTrue(record.data["artifacts"]["wasm"]["sha256"])
+
+    def test_source_edit_after_server_fails_before_browser(self):
+        source = self.root / "crates/engine/src/lib.rs"
+        original = source.read_text()
+        def fingerprint(root):
+            return {"head": "fixture", "dirty": False, "sha256": web.hashlib.sha256(source.read_bytes()).hexdigest()}
+        called = []
+        def command(arguments, cwd, environment):
+            called.append(arguments[0])
+            if arguments[0] == "pnpm":
+                source.write_text(original + "changed")
+        with patch.object(web.evidence, "source", fingerprint), self.commands(command), self.assertRaisesRegex(ValueError, "준비 시작"):
+            web.run_e2e(self.root, [])
+        manifest = self.latest_manifest()
+        self.assertEqual(manifest["status"], "failed")
+        self.assertEqual(manifest["steps"]["playwright"]["status"], "not_run")
+        self.assertFalse(any("playwright" in call for call in called))
+
+    def test_shared_binary_replacement_runs_verified_private_copy(self):
+        executed = []
+        def command(arguments, cwd, environment):
+            if "vite" in arguments[0]:
+                directory = Path(arguments[arguments.index("--outDir") + 1])
+                directory.mkdir()
+                (directory / "index.html").write_text("new UI")
+                (self.root / "target/dev/bin/vally-server").write_text('#!/bin/sh\nprintf "server-B\\n"\n')
+            if "playwright" in arguments[0]:
+                binary = Path(environment["VALLY_E2E_BIN_DIR"]) / "vally-server"
+                executed.append((binary, subprocess.check_output([str(binary)], text=True).strip()))
+        with self.commands(command):
+            web.run_e2e(self.root, [])
+        self.assertEqual([value for _, value in executed], ["server-A"])
+        manifest = self.latest_manifest()
+        self.assertEqual(manifest["status"], "passed")
+        self.assertEqual(manifest["artifacts"]["server"]["sha256"]["vally-server"], web.dev.digest(executed[0][0]))
+        self.assertNotEqual(executed[0][0].parent, self.root / "target/dev/bin")
+
+    def test_private_binary_wasm_and_ui_replacement_fail_current_run(self):
+        for name in ("server", "wasm", "ui"):
+            with self.subTest(name=name):
+                def command(arguments, cwd, environment):
+                    if "vite" in arguments[0]:
+                        directory = Path(arguments[arguments.index("--outDir") + 1])
+                        directory.mkdir()
+                        (directory / "index.html").write_text("new UI")
+                    if "playwright" in arguments[0]:
+                        record = web.evidence.ACTIVE
+                        artifact = record.data["artifacts"][name]
+                        path = Path(artifact["path"]) / next(iter(artifact["sha256"]))
+                        path.write_text("replaced during browser")
+                with self.commands(command), self.assertRaisesRegex(ValueError, "산출물"):
+                    web.run_e2e(self.root, [])
+                manifests = [json.loads(path.read_text()) for path in (self.root / "target/web-runs").glob("e2e-*/manifest.json")]
+                self.assertTrue(all(manifest["status"] == "failed" for manifest in manifests))
 
 
 if __name__ == "__main__":
