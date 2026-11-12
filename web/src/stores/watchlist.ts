@@ -16,10 +16,15 @@ import {
 import { useUiStore } from "./ui";
 import type { ToastUndo } from "./selection";
 
+export interface WatchlistRemoval extends Omit<ToastUndo, "run"> {
+  restore(lists: readonly Watchlist[], allowRestored?: boolean): Watchlist[] | null;
+}
+
 interface WatchlistState {
   lists: readonly Watchlist[];
   revision: number;
-  load(lists: readonly Watchlist[]): void;
+  loadedRevision: number | null;
+  load(lists: readonly Watchlist[], revision?: number): void;
   create(id: string, name: string): void;
   duplicate(source: string, id: string): void;
   rename(id: string, name: string): void;
@@ -27,7 +32,7 @@ interface WatchlistState {
   add(list: string, code: SymbolCode): void;
   addAll(list: string, codes: readonly SymbolCode[]): void;
   remove(list: string, code: SymbolCode): void;
-  removeWithUndo(list: string, code: SymbolCode): ToastUndo | null;
+  removeWithUndo(list: string, code: SymbolCode): WatchlistRemoval | null;
   move(list: string, code: SymbolCode, to: number): void;
   moveBy(list: string, code: SymbolCode, step: -1 | 1): void;
   transfer(from: string, to: string, code: SymbolCode, how: Transfer): void;
@@ -49,12 +54,14 @@ export const useWatchlistStore = create<WatchlistState>()((set, get) => {
   return {
     lists: DEFAULT_WATCHLISTS,
     revision: 0,
-    load: (lists) => set((s) => {
+    loadedRevision: null,
+    load: (lists, revision) => set((s) => {
       const next = lists.map((incoming) => {
         const current = s.lists.find((l) => l.id === incoming.id);
         return current && current.name === incoming.name && current.symbols.length === incoming.symbols.length && current.symbols.every((code, i) => code === incoming.symbols[i]) ? current : incoming;
       });
-      return next.length === s.lists.length && next.every((l, i) => l === s.lists[i]) ? s : { lists: next };
+      return next.length === s.lists.length && next.every((l, i) => l === s.lists[i]) && (revision === undefined || (revision === s.revision && revision === s.loadedRevision))
+        ? s : { lists: next, ...(revision === undefined ? {} : { revision, loadedRevision: revision }) };
     }),
     create: (id, name) => edit((lists) => (lists.length >= MAX_WATCHLISTS ? lists : [...lists, { id, name, symbols: [] }])),
     duplicate: (source, id) => edit((lists) => {
@@ -67,25 +74,25 @@ export const useWatchlistStore = create<WatchlistState>()((set, get) => {
     add: (list, code) => editSymbols(list, (l) => addSymbol(l, code)),
     addAll: (list, codes) => editSymbols(list, (l) => addSymbols(l, codes)),
     remove: (list, code) => editSymbols(list, (l) => removeSymbol(l, code)),
-    removeWithUndo: (list, code): ToastUndo | null => {
+    removeWithUndo: (list, code): WatchlistRemoval | null => {
       const source = get().lists.find((l) => l.id === list);
       const index = source?.symbols.indexOf(code) ?? -1;
       if (!source || index < 0) return null;
       const after = { ...source, symbols: source.symbols.filter((s) => s !== code) };
       edit((lists) => lists.map((l) => l.id === list ? after : l));
       const revision = get().revision;
-      let used = false;
-      const available = () => !used && get().revision === revision && get().lists.includes(after);
+      const available = () => get().revision === revision && get().lists.includes(after);
       return {
         available,
-        run: () => {
-          if (!available()) return;
-          used = true;
-          editSymbols(list, (symbols) => {
-            const next = [...symbols];
-            next.splice(Math.min(index, next.length), 0, code);
-            return next;
-          });
+        restore: (lists, allowRestored = false) => {
+          if (!available()) return null;
+          const target = lists.find((l) => l.id === list);
+          if (!target || target.name !== source.name) return null;
+          if (allowRestored && target.symbols.length === source.symbols.length && target.symbols.every((s, i) => s === source.symbols[i])) return [...lists];
+          if (target.symbols.length !== after.symbols.length || !target.symbols.every((s, i) => s === after.symbols[i])) return null;
+          const symbols = [...target.symbols];
+          symbols.splice(Math.min(index, symbols.length), 0, code);
+          return lists.map((l) => l.id === list ? { ...l, symbols } : l);
         },
         subscribe: (listener) => useWatchlistStore.subscribe(listener),
       };
