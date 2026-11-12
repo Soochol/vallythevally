@@ -11,7 +11,7 @@ const PADDING_X = 24;
 const NAME_MIN = 96;
 
 export const columnTemplate = (variant: WatchVariant, columns: readonly WatchColumn[]) =>
-  ["minmax(0,1fr)", ...columns.map((c) => `${WIDTH[variant][c]}px`)].join(" ");
+  [variant === "desktop" ? "minmax(min-content,1fr)" : "minmax(0,1fr)", ...columns.map((c) => `${WIDTH[variant][c]}px`)].join(" ");
 
 const fittedWidth = (columns: readonly WatchColumn[]) => PADDING_X + NAME_MIN + columns.reduce((w, c) => w + GAP + WIDTH.desktop[c], 0);
 

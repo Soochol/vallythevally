@@ -49,3 +49,49 @@ test("가리키는 목록이 없으면 첫 목록을 본다", () => {
   expect(activeWatchlist(two, "gone").id).toBe(FIRST_WATCHLIST_ID);
   expect(activeWatchlist(two, null).id).toBe(FIRST_WATCHLIST_ID);
 });
+
+test("복제는 이름을 겹치지 않게 만들고 종목 순서를 독립적으로 보존한다", () => {
+  const s = useWatchlistStore.getState();
+  s.addAll(FIRST_WATCHLIST_ID, ["000660", "005930"]);
+  s.duplicate(FIRST_WATCHLIST_ID, "copy1");
+  s.duplicate(FIRST_WATCHLIST_ID, "copy2");
+  s.move("copy1", "005930", 0);
+  expect(useWatchlistStore.getState().lists).toMatchObject([
+    { name: "기본", symbols: ["000660", "005930"] },
+    { name: "기본 복사", symbols: ["005930", "000660"] },
+    { name: "기본 복사 2", symbols: ["000660", "005930"] },
+  ]);
+});
+
+test("빼기 되돌리기는 원래 순서를 한 번만 복원하고 없는 종목은 작업을 만들지 않는다", () => {
+  const s = useWatchlistStore.getState();
+  s.addAll(FIRST_WATCHLIST_ID, ["000660", "005930", "035420"]);
+  expect(s.removeWithUndo(FIRST_WATCHLIST_ID, "999999")).toBeNull();
+  const undo = s.removeWithUndo(FIRST_WATCHLIST_ID, "005930")!;
+  expect(undo.available()).toBe(true);
+  undo.run();
+  expect(useWatchlistStore.getState().lists[0]!.symbols).toEqual(["000660", "005930", "035420"]);
+  expect(undo.available()).toBe(false);
+  const revision = useWatchlistStore.getState().revision;
+  undo.run();
+  expect(useWatchlistStore.getState().revision).toBe(revision);
+});
+
+test("다른 목록 편집과 서버 재적재 뒤 오래된 빼기 되돌리기는 실행되지 않는다", () => {
+  const s = useWatchlistStore.getState();
+  s.addAll(FIRST_WATCHLIST_ID, ["000660", "005930"]);
+  const undo = s.removeWithUndo(FIRST_WATCHLIST_ID, "005930")!;
+  const notified = { count: 0 };
+  const unsubscribe = undo.subscribe(() => notified.count++);
+  s.create("next", "새 목록");
+  expect(notified.count).toBeGreaterThan(0);
+  expect(undo.available()).toBe(false);
+  undo.run();
+  expect(useWatchlistStore.getState().lists[0]!.symbols).toEqual(["000660"]);
+  const next = s.removeWithUndo(FIRST_WATCHLIST_ID, "000660")!;
+  s.load([{ id: FIRST_WATCHLIST_ID, name: "서버", symbols: ["035420"] }]);
+  next.run();
+  expect(next.available()).toBe(false);
+  expect(useWatchlistStore.getState().lists[0]!.symbols).toEqual(["035420"]);
+  unsubscribe();
+});
