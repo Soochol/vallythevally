@@ -23,92 +23,92 @@ import {
   updateRetry,
 } from "./screener";
 
-const newHigh = (period: ScreenPeriod, field: BarField, n: number, m: number) => ({ kind: "new_high", period, barRange: { start: 0, end: m - 1 }, field, n }) as const;
+const newHigh = (period: ScreenPeriod, field: BarField, n: number, m: number) => ({ kind: "new_high", period, recentBars: m, field, n }) as const;
 const screenOf = (conditions: Screen["conditions"]): Screen => ({ id: "s", name: "s", markets: [], exclude: [], conditions });
 const marketCap = { kind: "market_cap", min: 300_000_000_000, max: null } as const;
 
 test("조건 문장은 그 줄의 봉 주기 단위와 M이 1인지에 따라 바뀐다", () => {
-  expect(conditionSentence(newHigh("D", "high", 200, 5))).toBe("일봉 0~4봉 전 안에 고가가 200일 신고가인 봉이 있다");
-  expect(conditionSentence(newHigh("D", "volume", 60, 1))).toBe("일봉 0봉 전 거래량이 60일 신고거래량이다");
-  expect(conditionSentence(newHigh("W", "close", 52, 1))).toBe("주봉 0봉 전 종가가 52주 신고가다");
-  expect(conditionSentence(newHigh("M", "low", 12, 3))).toBe("월봉 0~2봉 전 안에 저가가 12개월 신고가인 봉이 있다");
-  expect(conditionSentence(newHigh("W", "volume", 104, 8))).toBe("주봉 0~7봉 전 안에 거래량이 104주 신고거래량인 봉이 있다");
-  expect(conditionSentence(newHigh("D", "open", 1200, 20))).toBe("일봉 0~19봉 전 안에 시가가 1,200일 신고가인 봉이 있다");
-  expect(conditionSentence(newHigh("D", "traded_value", 250, 1))).toBe("일봉 0봉 전 거래대금이 250일 신고거래대금이다");
+  expect(conditionSentence(newHigh("D", "high", 200, 5))).toBe("일봉 최근 5일 이내 고가가 200일 신고가인 봉이 있다");
+  expect(conditionSentence(newHigh("D", "volume", 60, 1))).toBe("일봉 최근 1일 이내 거래량이 60일 신고거래량인 봉이 있다");
+  expect(conditionSentence(newHigh("W", "close", 52, 1))).toBe("주봉 최근 1주 이내 종가가 52주 신고가인 봉이 있다");
+  expect(conditionSentence(newHigh("M", "low", 12, 3))).toBe("월봉 최근 3개월 이내 저가가 12개월 신고가인 봉이 있다");
+  expect(conditionSentence(newHigh("W", "volume", 104, 8))).toBe("주봉 최근 8주 이내 거래량이 104주 신고거래량인 봉이 있다");
+  expect(conditionSentence(newHigh("D", "open", 1200, 20))).toBe("일봉 최근 20일 이내 시가가 1,200일 신고가인 봉이 있다");
+  expect(conditionSentence(newHigh("D", "traded_value", 250, 1))).toBe("일봉 최근 1일 이내 거래대금이 250일 신고거래대금인 봉이 있다");
 });
 
 test("스펙의 문장 예는 그대로 나온다", () => {
-  expect(conditionSentence({ kind: "value_range", period: "D", barRange: { start: 0, end: 0 }, field: "traded_value", min: 10_000_000_000, max: null })).toBe("일봉 0봉 전 거래대금이 100억 원 이상이다");
-  expect(conditionSentence({ kind: "change", period: "D", barRange: { start: 0, end: 0 }, back: 20, minPct: 30, maxPct: null })).toBe("일봉 0봉 전 종가가 20일 전보다 +30% 이상이다");
-  expect(conditionSentence({ kind: "near_extreme", period: "D", barRange: { start: 0, end: 0 }, extreme: "high", n: 200, withinPct: 5 })).toBe("일봉 0봉 전 종가가 200일 최고가에서 5% 안이다");
-  expect(conditionSentence({ kind: "surge", period: "D", barRange: { start: 0, end: 0 }, field: "volume", n: 20, times: 3 })).toBe("일봉 0봉 전 거래량이 직전 20일 평균의 3배 이상이다");
-  expect(conditionSentence({ kind: "ma_position", period: "D", barRange: { start: 0, end: 0 }, field: "close", method: "sma", length: 20, side: "above" })).toBe("일봉 0봉 전 종가가 20일 이동평균 위다");
-  expect(conditionSentence({ kind: "ma_alignment", period: "D", barRange: { start: 0, end: 0 }, method: "sma", lengths: [5, 20, 60, 120], order: "bullish" })).toBe("일봉 0봉 전 5·20·60·120일 이동평균이 정배열이다");
-  expect(conditionSentence({ kind: "ma_cross", period: "D", barRange: { start: 0, end: 4 }, method: "sma", fast: 5, slow: 20, direction: "up" })).toBe("일봉 0~4봉 전 안에 5일선이 20일선을 위로 교차한 봉이 있다");
-  expect(conditionSentence({ kind: "rsi", period: "D", barRange: { start: 0, end: 2 }, length: 14, test: { kind: "breakout", value: 30, direction: "up" } })).toBe("일봉 0~2봉 전 안에 RSI(14)가 30을 위로 돌파한 봉이 있다");
+  expect(conditionSentence({ kind: "value_range", period: "D", recentBars: 1, field: "traded_value", min: 10_000_000_000, max: null })).toBe("일봉 최근 1일 이내 거래대금이 100억 원 이상인 봉이 있다");
+  expect(conditionSentence({ kind: "change", period: "D", recentBars: 1, back: 20, minPct: 30, maxPct: null })).toBe("일봉 최근 1일 이내 종가가 20일 전보다 +30% 이상인 봉이 있다");
+  expect(conditionSentence({ kind: "near_extreme", period: "D", recentBars: 1, extreme: "high", n: 200, withinPct: 5 })).toBe("일봉 최근 1일 이내 종가가 200일 최고가에서 5% 안인 봉이 있다");
+  expect(conditionSentence({ kind: "surge", period: "D", recentBars: 1, field: "volume", n: 20, times: 3 })).toBe("일봉 최근 1일 이내 거래량이 직전 20일 평균의 3배 이상인 봉이 있다");
+  expect(conditionSentence({ kind: "ma_position", period: "D", recentBars: 1, field: "close", method: "sma", length: 20, side: "above" })).toBe("일봉 최근 1일 이내 종가가 20일 이동평균 위인 봉이 있다");
+  expect(conditionSentence({ kind: "ma_alignment", period: "D", recentBars: 1, method: "sma", lengths: [5, 20, 60, 120], order: "bullish" })).toBe("일봉 최근 1일 이내 5·20·60·120일 이동평균이 정배열인 봉이 있다");
+  expect(conditionSentence({ kind: "ma_cross", period: "D", recentBars: 5, method: "sma", fast: 5, slow: 20, direction: "up" })).toBe("일봉 최근 5일 이내 5일선이 20일선을 위로 교차한 봉이 있다");
+  expect(conditionSentence({ kind: "rsi", period: "D", recentBars: 3, length: 14, test: { kind: "breakout", value: 30, direction: "up" } })).toBe("일봉 최근 3일 이내 RSI(14)가 30을 위로 돌파한 봉이 있다");
   const ichimoku = { conversion: 9, base: 26, spanB: 52, displacement: 26 };
-  expect(conditionSentence({ kind: "ichimoku", period: "D", barRange: { start: 0, end: 0 }, ...ichimoku, test: { kind: "cloud", side: "above" } })).toBe("일봉 0봉 전 종가가 일목 구름 위다");
+  expect(conditionSentence({ kind: "ichimoku", period: "D", recentBars: 1, ...ichimoku, test: { kind: "cloud", side: "above" } })).toBe("일봉 최근 1일 이내 종가가 일목 구름 위인 봉이 있다");
   expect(conditionSentence({ kind: "market_cap", min: 300_000_000_000, max: null })).toBe("시가총액이 3,000억 원 이상이다");
 });
 
 test("신저가 문장은 값에 따라 신저가·신저거래량·신저거래대금이다", () => {
-  expect(conditionSentence({ kind: "new_low", period: "W", barRange: { start: 0, end: 0 }, field: "close", n: 52 })).toBe("주봉 0봉 전 종가가 52주 신저가다");
-  expect(conditionSentence({ kind: "new_low", period: "D", barRange: { start: 0, end: 4 }, field: "volume", n: 60 })).toBe("일봉 0~4봉 전 안에 거래량이 60일 신저거래량인 봉이 있다");
-  expect(conditionSentence({ kind: "new_low", period: "M", barRange: { start: 0, end: 0 }, field: "traded_value", n: 12 })).toBe("월봉 0봉 전 거래대금이 12개월 신저거래대금이다");
+  expect(conditionSentence({ kind: "new_low", period: "W", recentBars: 1, field: "close", n: 52 })).toBe("주봉 최근 1주 이내 종가가 52주 신저가인 봉이 있다");
+  expect(conditionSentence({ kind: "new_low", period: "D", recentBars: 5, field: "volume", n: 60 })).toBe("일봉 최근 5일 이내 거래량이 60일 신저거래량인 봉이 있다");
+  expect(conditionSentence({ kind: "new_low", period: "M", recentBars: 1, field: "traded_value", n: 12 })).toBe("월봉 최근 1개월 이내 거래대금이 12개월 신저거래대금인 봉이 있다");
 });
 
 test("값 범위 문장은 값의 단위로 한쪽이나 두 끝을 적는다", () => {
-  expect(conditionSentence({ kind: "value_range", period: "M", barRange: { start: 0, end: 1 }, field: "close", min: 1000, max: 5000 })).toBe("월봉 0~1봉 전 안에 종가가 1,000원 이상 5,000원 이하인 봉이 있다");
-  expect(conditionSentence({ kind: "value_range", period: "D", barRange: { start: 0, end: 0 }, field: "volume", min: null, max: 10_000 })).toBe("일봉 0봉 전 거래량이 10,000주 이하다");
-  expect(conditionSentence({ kind: "value_range", period: "W", barRange: { start: 0, end: 2 }, field: "traded_value", min: 50_000_000, max: 25_000_000_000 })).toBe("주봉 0~2봉 전 안에 거래대금이 0.5억 원 이상 250억 원 이하인 봉이 있다");
+  expect(conditionSentence({ kind: "value_range", period: "M", recentBars: 2, field: "close", min: 1000, max: 5000 })).toBe("월봉 최근 2개월 이내 종가가 1,000원 이상 5,000원 이하인 봉이 있다");
+  expect(conditionSentence({ kind: "value_range", period: "D", recentBars: 1, field: "volume", min: null, max: 10_000 })).toBe("일봉 최근 1일 이내 거래량이 10,000주 이하인 봉이 있다");
+  expect(conditionSentence({ kind: "value_range", period: "W", recentBars: 3, field: "traded_value", min: 50_000_000, max: 25_000_000_000 })).toBe("주봉 최근 3주 이내 거래대금이 0.5억 원 이상 250억 원 이하인 봉이 있다");
 });
 
 test("등락률 문장은 부호를 붙이고 비교 봉을 그 줄의 단위로 센다", () => {
-  expect(conditionSentence({ kind: "change", period: "W", barRange: { start: 0, end: 0 }, back: 1, minPct: -10, maxPct: -3 })).toBe("주봉 0봉 전 종가가 1주 전보다 −10% 이상 −3% 이하다");
-  expect(conditionSentence({ kind: "change", period: "M", barRange: { start: 0, end: 3 }, back: 6, minPct: null, maxPct: 0 })).toBe("월봉 0~3봉 전 안에 종가가 6개월 전보다 0% 이하인 봉이 있다");
+  expect(conditionSentence({ kind: "change", period: "W", recentBars: 1, back: 1, minPct: -10, maxPct: -3 })).toBe("주봉 최근 1주 이내 종가가 1주 전보다 −10% 이상 −3% 이하인 봉이 있다");
+  expect(conditionSentence({ kind: "change", period: "M", recentBars: 4, back: 6, minPct: null, maxPct: 0 })).toBe("월봉 최근 4개월 이내 종가가 6개월 전보다 0% 이하인 봉이 있다");
 });
 
 test("고점·저점 거리와 거래 급증 문장", () => {
-  expect(conditionSentence({ kind: "near_extreme", period: "M", barRange: { start: 0, end: 2 }, extreme: "low", n: 12, withinPct: 2.5 })).toBe("월봉 0~2봉 전 안에 종가가 12개월 최저가에서 2.5% 안인 봉이 있다");
-  expect(conditionSentence({ kind: "surge", period: "W", barRange: { start: 0, end: 1 }, field: "traded_value", n: 4, times: 1.5 })).toBe("주봉 0~1봉 전 안에 거래대금이 직전 4주 평균의 1.5배 이상인 봉이 있다");
+  expect(conditionSentence({ kind: "near_extreme", period: "M", recentBars: 3, extreme: "low", n: 12, withinPct: 2.5 })).toBe("월봉 최근 3개월 이내 종가가 12개월 최저가에서 2.5% 안인 봉이 있다");
+  expect(conditionSentence({ kind: "surge", period: "W", recentBars: 2, field: "traded_value", n: 4, times: 1.5 })).toBe("주봉 최근 2주 이내 거래대금이 직전 4주 평균의 1.5배 이상인 봉이 있다");
 });
 
 test("이동평균 문장은 단순과 지수를 가르고, 종가와의 교차도 쓴다", () => {
-  expect(conditionSentence({ kind: "ma_position", period: "W", barRange: { start: 0, end: 0 }, field: "low", method: "ema", length: 60, side: "below" })).toBe("주봉 0봉 전 저가가 60주 지수 이동평균 아래다");
-  expect(conditionSentence({ kind: "ma_alignment", period: "M", barRange: { start: 0, end: 2 }, method: "ema", lengths: [20, 60], order: "bearish" })).toBe("월봉 0~2봉 전 안에 20·60개월 지수 이동평균이 역배열인 봉이 있다");
-  expect(conditionSentence({ kind: "ma_cross", period: "D", barRange: { start: 0, end: 0 }, method: "sma", fast: null, slow: 20, direction: "down" })).toBe("일봉 0봉 전 종가가 20일선을 아래로 교차했다");
-  expect(conditionSentence({ kind: "ma_cross", period: "W", barRange: { start: 0, end: 1 }, method: "ema", fast: 12, slow: 26, direction: "up" })).toBe("주봉 0~1봉 전 안에 12주 지수 이동평균이 26주 지수 이동평균을 위로 교차한 봉이 있다");
+  expect(conditionSentence({ kind: "ma_position", period: "W", recentBars: 1, field: "low", method: "ema", length: 60, side: "below" })).toBe("주봉 최근 1주 이내 저가가 60주 지수 이동평균 아래인 봉이 있다");
+  expect(conditionSentence({ kind: "ma_alignment", period: "M", recentBars: 3, method: "ema", lengths: [20, 60], order: "bearish" })).toBe("월봉 최근 3개월 이내 20·60개월 지수 이동평균이 역배열인 봉이 있다");
+  expect(conditionSentence({ kind: "ma_cross", period: "D", recentBars: 1, method: "sma", fast: null, slow: 20, direction: "down" })).toBe("일봉 최근 1일 이내 종가가 20일선을 아래로 교차한 봉이 있다");
+  expect(conditionSentence({ kind: "ma_cross", period: "W", recentBars: 2, method: "ema", fast: 12, slow: 26, direction: "up" })).toBe("주봉 최근 2주 이내 12주 지수 이동평균이 26주 지수 이동평균을 위로 교차한 봉이 있다");
 });
 
 test("RSI 문장은 범위와 돌파를 가르고 조사를 값에 맞춘다", () => {
-  expect(conditionSentence({ kind: "rsi", period: "D", barRange: { start: 0, end: 0 }, length: 14, test: { kind: "range", min: null, max: 30 } })).toBe("일봉 0봉 전 RSI(14)가 30 이하다");
-  expect(conditionSentence({ kind: "rsi", period: "W", barRange: { start: 0, end: 3 }, length: 9, test: { kind: "range", min: 30, max: 70 } })).toBe("주봉 0~3봉 전 안에 RSI(9)가 30 이상 70 이하인 봉이 있다");
-  expect(conditionSentence({ kind: "rsi", period: "M", barRange: { start: 0, end: 0 }, length: 14, test: { kind: "breakout", value: 25, direction: "down" } })).toBe("월봉 0봉 전 RSI(14)가 25를 아래로 돌파했다");
+  expect(conditionSentence({ kind: "rsi", period: "D", recentBars: 1, length: 14, test: { kind: "range", min: null, max: 30 } })).toBe("일봉 최근 1일 이내 RSI(14)가 30 이하인 봉이 있다");
+  expect(conditionSentence({ kind: "rsi", period: "W", recentBars: 4, length: 9, test: { kind: "range", min: 30, max: 70 } })).toBe("주봉 최근 4주 이내 RSI(9)가 30 이상 70 이하인 봉이 있다");
+  expect(conditionSentence({ kind: "rsi", period: "M", recentBars: 1, length: 14, test: { kind: "breakout", value: 25, direction: "down" } })).toBe("월봉 최근 1개월 이내 RSI(14)가 25를 아래로 돌파한 봉이 있다");
 });
 
 test("MACD 문장은 시그널 교차, 0선 돌파, 시그널 대비를 가른다", () => {
   const macd = { fast: 12, slow: 26, signal: 9 };
-  expect(conditionSentence({ kind: "macd", period: "D", barRange: { start: 0, end: 0 }, ...macd, test: { kind: "signal_cross", direction: "up" } })).toBe("일봉 0봉 전 MACD(12·26·9)가 시그널을 위로 교차했다");
-  expect(conditionSentence({ kind: "macd", period: "M", barRange: { start: 0, end: 1 }, ...macd, test: { kind: "zero_breakout", direction: "down" } })).toBe("월봉 0~1봉 전 안에 MACD(12·26·9)가 0선을 아래로 돌파한 봉이 있다");
-  expect(conditionSentence({ kind: "macd", period: "W", barRange: { start: 0, end: 0 }, fast: 5, slow: 35, signal: 5, test: { kind: "vs_signal", side: "above" } })).toBe("주봉 0봉 전 MACD(5·35·5)가 시그널 위다");
+  expect(conditionSentence({ kind: "macd", period: "D", recentBars: 1, ...macd, test: { kind: "signal_cross", direction: "up" } })).toBe("일봉 최근 1일 이내 MACD(12·26·9)가 시그널을 위로 교차한 봉이 있다");
+  expect(conditionSentence({ kind: "macd", period: "M", recentBars: 2, ...macd, test: { kind: "zero_breakout", direction: "down" } })).toBe("월봉 최근 2개월 이내 MACD(12·26·9)가 0선을 아래로 돌파한 봉이 있다");
+  expect(conditionSentence({ kind: "macd", period: "W", recentBars: 1, fast: 5, slow: 35, signal: 5, test: { kind: "vs_signal", side: "above" } })).toBe("주봉 최근 1주 이내 MACD(5·35·5)가 시그널 위인 봉이 있다");
 });
 
 test("스토캐스틱과 볼린저 밴드 문장", () => {
   const stochastic = { k: 5, d: 3, smooth: 3 };
-  expect(conditionSentence({ kind: "stochastic", period: "D", barRange: { start: 0, end: 2 }, ...stochastic, test: { kind: "cross", direction: "up" } })).toBe("일봉 0~2봉 전 안에 스토캐스틱(5·3·3) %K가 %D를 위로 교차한 봉이 있다");
-  expect(conditionSentence({ kind: "stochastic", period: "W", barRange: { start: 0, end: 0 }, ...stochastic, test: { kind: "range", min: null, max: 20 } })).toBe("주봉 0봉 전 스토캐스틱(5·3·3) %K가 20 이하다");
-  expect(conditionSentence({ kind: "bollinger", period: "D", barRange: { start: 0, end: 0 }, length: 20, k: 2, test: { kind: "outside", side: "above" } })).toBe("일봉 0봉 전 종가가 볼린저 밴드(20·2) 상단 위다");
-  expect(conditionSentence({ kind: "bollinger", period: "W", barRange: { start: 0, end: 1 }, length: 20, k: 2.5, test: { kind: "outside", side: "below" } })).toBe("주봉 0~1봉 전 안에 종가가 볼린저 밴드(20·2.5) 하단 아래인 봉이 있다");
-  expect(conditionSentence({ kind: "bollinger", period: "M", barRange: { start: 0, end: 0 }, length: 20, k: 2, test: { kind: "cross", band: "lower", direction: "up" } })).toBe("월봉 0봉 전 종가가 볼린저 밴드(20·2) 하단을 위로 교차했다");
+  expect(conditionSentence({ kind: "stochastic", period: "D", recentBars: 3, ...stochastic, test: { kind: "cross", direction: "up" } })).toBe("일봉 최근 3일 이내 스토캐스틱(5·3·3) %K가 %D를 위로 교차한 봉이 있다");
+  expect(conditionSentence({ kind: "stochastic", period: "W", recentBars: 1, ...stochastic, test: { kind: "range", min: null, max: 20 } })).toBe("주봉 최근 1주 이내 스토캐스틱(5·3·3) %K가 20 이하인 봉이 있다");
+  expect(conditionSentence({ kind: "bollinger", period: "D", recentBars: 1, length: 20, k: 2, test: { kind: "outside", side: "above" } })).toBe("일봉 최근 1일 이내 종가가 볼린저 밴드(20·2) 상단 위인 봉이 있다");
+  expect(conditionSentence({ kind: "bollinger", period: "W", recentBars: 2, length: 20, k: 2.5, test: { kind: "outside", side: "below" } })).toBe("주봉 최근 2주 이내 종가가 볼린저 밴드(20·2.5) 하단 아래인 봉이 있다");
+  expect(conditionSentence({ kind: "bollinger", period: "M", recentBars: 1, length: 20, k: 2, test: { kind: "cross", band: "lower", direction: "up" } })).toBe("월봉 최근 1개월 이내 종가가 볼린저 밴드(20·2) 하단을 위로 교차한 봉이 있다");
 });
 
 test("일목 문장은 차트 기본 설정이면 설정값을 빼고, 다르면 적는다", () => {
   const chartDefault = { conversion: 9, base: 26, spanB: 52, displacement: 26 };
-  expect(conditionSentence({ kind: "ichimoku", period: "D", barRange: { start: 0, end: 4 }, ...chartDefault, test: { kind: "cross", direction: "up" } })).toBe("일봉 0~4봉 전 안에 일목 전환선이 기준선을 위로 교차한 봉이 있다");
-  expect(conditionSentence({ kind: "ichimoku", period: "M", barRange: { start: 0, end: 0 }, conversion: 10, base: 30, spanB: 60, displacement: 30, test: { kind: "cloud", side: "below" } })).toBe(
-    "월봉 0봉 전 종가가 일목(10·30·60·30) 구름 아래다",
+  expect(conditionSentence({ kind: "ichimoku", period: "D", recentBars: 5, ...chartDefault, test: { kind: "cross", direction: "up" } })).toBe("일봉 최근 5일 이내 일목 전환선이 기준선을 위로 교차한 봉이 있다");
+  expect(conditionSentence({ kind: "ichimoku", period: "M", recentBars: 1, conversion: 10, base: 30, spanB: 60, displacement: 30, test: { kind: "cloud", side: "below" } })).toBe(
+    "월봉 최근 1개월 이내 종가가 일목(10·30·60·30) 구름 아래인 봉이 있다",
   );
-  expect(conditionSentence({ kind: "ichimoku", period: "W", barRange: { start: 0, end: 1 }, ...chartDefault, test: { kind: "cloud", side: "above" } })).toBe("주봉 0~1봉 전 안에 종가가 일목 구름 위인 봉이 있다");
+  expect(conditionSentence({ kind: "ichimoku", period: "W", recentBars: 2, ...chartDefault, test: { kind: "cloud", side: "above" } })).toBe("주봉 최근 2주 이내 종가가 일목 구름 위인 봉이 있다");
 });
 
 test("시가총액 문장은 봉 주기와 M 없이 억 원으로 적는다", () => {
@@ -296,9 +296,8 @@ test("아래 줄은 상태 조회가 실패하면 읽어 둔 상태가 있어도
   expect(statusFooter({ ...ready, update: running("backfill") }, failed)).toMatchObject({ kind: "unreadable", stale: true });
 });
 
-test("0봉 문장은 오늘이라고 가정하지 않으며 양 끝과 각 봉 주기를 그대로 읽는다", () => {
-  for (const [period, label] of [["D", "일봉"], ["W", "주봉"], ["M", "월봉"]] as const) {
-    expect(conditionSentence({ ...newHigh(period, "high", 2, 1), barRange: { start: 1, end: 1 } })).toBe(`${label} 1봉 전 고가가 2${period === "D" ? "일" : period === "W" ? "주" : "개월"} 신고가다`);
-    expect(conditionSentence({ ...newHigh(period, "high", 2, 1), barRange: { start: 1, end: 3 } })).toContain(`${label} 1~3봉 전 안에`);
+test("최근 기간 문장은 마지막 봉을 포함하고 D/W/M 단위를 사용한다", () => {
+  for (const [period, label, unit] of [["D", "일봉", "일"], ["W", "주봉", "주"], ["M", "월봉", "개월"]] as const) {
+    for (const recentBars of [1, 100, 260]) expect(conditionSentence({ ...newHigh(period, "high", 2, 1), recentBars })).toBe(`${label} 최근 ${recentBars}${unit} 이내 고가가 2${unit} 신고가인 봉이 있다`);
   }
 });

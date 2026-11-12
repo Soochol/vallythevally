@@ -60,7 +60,7 @@ impl Api {
     }
 
     async fn excluded(&self) -> Value {
-        let screen = json!({"id": "S1", "name": "고가 1일 신고가", "markets": [], "exclude": [], "conditions": [{"kind": "new_high", "period": "D", "field": "high", "n": 1, "barRange": {"start": 0, "end": 0}}]});
+        let screen = json!({"id": "S1", "name": "고가 1일 신고가", "markets": [], "exclude": [], "conditions": [{"kind": "new_high", "period": "D", "field": "high", "n": 1, "recentBars": 1}]});
         self.run(&screen).await["excluded"].clone()
     }
 
@@ -393,7 +393,7 @@ const SCHEMA_4_STORE: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixture
 
 fn screens_across_the_upgrade() -> Vec<Value> {
     let screen = |markets: &[&str], exclude: &[&str], conditions: Vec<Value>| json!({"id": "S1", "name": "업그레이드 확인", "markets": markets, "exclude": exclude, "conditions": conditions});
-    let new_high = |period: &str, field: &str, n: u32, m: u32| json!({"kind": "new_high", "period": period, "field": field, "n": n, "barRange": {"start": 0, "end": m - 1}});
+    let new_high = |period: &str, field: &str, n: u32, m: u32| json!({"kind": "new_high", "period": period, "field": field, "n": n, "recentBars": m});
     vec![
         screen(&[], &[], vec![new_high("D", "high", 20, 5)]),
         screen(&[], &["etf", "managed"], vec![new_high("W", "close", 4, 4), new_high("D", "volume", 20, 20)]),

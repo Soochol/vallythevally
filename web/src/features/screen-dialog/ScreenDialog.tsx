@@ -116,8 +116,7 @@ export const CHOICE_LABEL: Record<KindChoice, string> = { ...KIND_LABEL, volume_
 const VALUE_FIELDS: Partial<Record<KindChoice, Options<BarField>>> = { new_high: PRICE_FIELDS, new_low: BAR_FIELDS };
 
 const FIELD_NAME: Record<Exclude<FieldKey, `lengths.${number}`>, string> = {
-  rangeStart: "봉 범위 시작",
-  rangeEnd: "봉 범위 끝",
+  recentBars: "최근 기간",
   n: "기간",
   min: "최소",
   max: "최대",
@@ -402,20 +401,14 @@ function ConditionLine({ ids, index, last, condition, onChange, onKind, onMove, 
       <div className="flex flex-wrap items-center gap-x-1.5 gap-y-1.5 text-s text-text-2">
         <Select label={`${label} 종류`} value={kind} onChange={onKind} className={`${FIELD_BOX} px-1.5`} options={KIND_GROUPS.flatMap((group) => group.kinds.map((choice) => ({ value: choice, label: CHOICE_LABEL[choice], group: group.label })))} />
         {barLine && <Choice label={`${label} 봉 주기`} value={condition.period} options={PERIODS} onChange={(period) => onChange({ ...condition, period })} />}
-        <KindFields ui={ui} line={condition} onChange={onChange} />
         {barLine && (
-          <>
-            <Together>
-              <span>봉 범위</span>
-              <NumberBox ui={ui} field="rangeStart" value={condition.rangeStart} onChange={(rangeStart) => onChange({ ...condition, rangeStart })} />
-              <span>~</span>
-            </Together>
-            <Together>
-              <NumberBox ui={ui} field="rangeEnd" value={condition.rangeEnd} onChange={(rangeEnd) => onChange({ ...condition, rangeEnd })} />
-              <span>봉 전</span>
-            </Together>
-          </>
+          <Together>
+            <span>최근</span>
+            <NumberBox ui={ui} field="recentBars" value={condition.recentBars} onChange={(recentBars) => onChange({ ...condition, recentBars })} />
+            <span>{UNIT[condition.period]} 이내</span>
+          </Together>
         )}
+        <KindFields ui={ui} line={condition} onChange={onChange} />
         <span className="flex-1" />
         <span className="flex flex-none items-center">
           <button type="button" className="icon-btn h-7 w-7 max-md:h-10 max-md:w-10" aria-label={`${label} 위로 옮기기`} title="위로 옮기기" disabled={index === 0} onClick={() => onMove(-1)}>
@@ -432,6 +425,7 @@ function ConditionLine({ ids, index, last, condition, onChange, onKind, onMove, 
       {(Object.entries(ui.errors) as [FieldKey, string][]).map(([key, message]) => (
         <Errors key={key} id={`${ui.base}-${key}-error`} messages={[`${fieldName(kind, key)}: ${message}`]} />
       ))}
+      {barLine && <small className="text-xs text-text-3">마지막 봉을 포함한 실제 봉 개수입니다. 거래가 없어 봉이 없는 기간은 세지 않습니다.</small>}
       {row.ok && <p className="text-xs text-text-3">{conditionSentence(row.condition)}</p>}
     </li>
   );

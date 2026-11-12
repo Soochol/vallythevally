@@ -63,27 +63,27 @@ fn stock(code: &str, bars: Vec<KrxBar>) -> KrxStock {
 }
 
 fn new_high(period: &str, field: &str, n: u32, m: u32) -> Value {
-    json!({"kind": "new_high", "period": period, "field": field, "n": n, "barRange": {"start": 0, "end": m - 1}})
+    json!({"kind": "new_high", "period": period, "field": field, "n": n, "recentBars": m})
 }
 
 fn new_low(period: &str, field: &str, n: u32, m: u32) -> Value {
-    json!({"kind": "new_low", "period": period, "field": field, "n": n, "barRange": {"start": 0, "end": m - 1}})
+    json!({"kind": "new_low", "period": period, "field": field, "n": n, "recentBars": m})
 }
 
 fn value_range(period: &str, m: u32, field: &str, min: Option<f64>, max: Option<f64>) -> Value {
-    json!({"kind": "value_range", "period": period, "barRange": {"start": 0, "end": m - 1}, "field": field, "min": min, "max": max})
+    json!({"kind": "value_range", "period": period, "recentBars": m, "field": field, "min": min, "max": max})
 }
 
 fn change(period: &str, m: u32, back: u32, min_pct: Option<f64>, max_pct: Option<f64>) -> Value {
-    json!({"kind": "change", "period": period, "barRange": {"start": 0, "end": m - 1}, "back": back, "minPct": min_pct, "maxPct": max_pct})
+    json!({"kind": "change", "period": period, "recentBars": m, "back": back, "minPct": min_pct, "maxPct": max_pct})
 }
 
 fn near_extreme(period: &str, m: u32, extreme: &str, n: u32, within_pct: f64) -> Value {
-    json!({"kind": "near_extreme", "period": period, "barRange": {"start": 0, "end": m - 1}, "extreme": extreme, "n": n, "withinPct": within_pct})
+    json!({"kind": "near_extreme", "period": period, "recentBars": m, "extreme": extreme, "n": n, "withinPct": within_pct})
 }
 
 fn surge(period: &str, m: u32, field: &str, n: u32, times: f64) -> Value {
-    json!({"kind": "surge", "period": period, "barRange": {"start": 0, "end": m - 1}, "field": field, "n": n, "times": times})
+    json!({"kind": "surge", "period": period, "recentBars": m, "field": field, "n": n, "times": times})
 }
 
 fn market_cap(min: Option<f64>, max: Option<f64>) -> Value {
@@ -407,14 +407,14 @@ async fn a_traded_value_new_high_runs_and_no_condition_kind_or_market_is_refused
     );
 
     let other_kinds = [
-        json!({"kind": "ma_position", "period": "D", "barRange": {"start": 0, "end": 0}, "field": "close", "method": "sma", "length": 20, "side": "above"}),
-        json!({"kind": "ma_alignment", "period": "D", "barRange": {"start": 0, "end": 0}, "method": "ema", "lengths": [5, 20], "order": "bullish"}),
-        json!({"kind": "ma_cross", "period": "D", "barRange": {"start": 0, "end": 4}, "method": "sma", "fast": null, "slow": 20, "direction": "up"}),
-        json!({"kind": "rsi", "period": "D", "barRange": {"start": 0, "end": 0}, "length": 14, "test": {"kind": "range", "min": null, "max": 30.0}}),
-        json!({"kind": "macd", "period": "W", "barRange": {"start": 0, "end": 0}, "fast": 12, "slow": 26, "signal": 9, "test": {"kind": "signal_cross", "direction": "up"}}),
-        json!({"kind": "stochastic", "period": "D", "barRange": {"start": 0, "end": 0}, "k": 5, "d": 3, "smooth": 3, "test": {"kind": "cross", "direction": "down"}}),
-        json!({"kind": "bollinger", "period": "M", "barRange": {"start": 0, "end": 0}, "length": 20, "k": 2.0, "test": {"kind": "outside", "side": "above"}}),
-        json!({"kind": "ichimoku", "period": "D", "barRange": {"start": 0, "end": 0}, "conversion": 9, "base": 26, "spanB": 52, "displacement": 26, "test": {"kind": "cloud", "side": "above"}}),
+        json!({"kind": "ma_position", "period": "D", "recentBars": 1, "field": "close", "method": "sma", "length": 20, "side": "above"}),
+        json!({"kind": "ma_alignment", "period": "D", "recentBars": 1, "method": "ema", "lengths": [5, 20], "order": "bullish"}),
+        json!({"kind": "ma_cross", "period": "D", "recentBars": 5, "method": "sma", "fast": null, "slow": 20, "direction": "up"}),
+        json!({"kind": "rsi", "period": "D", "recentBars": 1, "length": 14, "test": {"kind": "range", "min": null, "max": 30.0}}),
+        json!({"kind": "macd", "period": "W", "recentBars": 1, "fast": 12, "slow": 26, "signal": 9, "test": {"kind": "signal_cross", "direction": "up"}}),
+        json!({"kind": "stochastic", "period": "D", "recentBars": 1, "k": 5, "d": 3, "smooth": 3, "test": {"kind": "cross", "direction": "down"}}),
+        json!({"kind": "bollinger", "period": "M", "recentBars": 1, "length": 20, "k": 2.0, "test": {"kind": "outside", "side": "above"}}),
+        json!({"kind": "ichimoku", "period": "D", "recentBars": 1, "conversion": 9, "base": 26, "spanB": 52, "displacement": 26, "test": {"kind": "cloud", "side": "above"}}),
         market_cap(Some(300_000_000_000.0), None),
     ];
     let screens = other_kinds
@@ -425,7 +425,7 @@ async fn a_traded_value_new_high_runs_and_no_condition_kind_or_market_is_refused
         let (status, body) = api.run(&screen).await;
         assert_eq!(status, 200, "{case}: 실행을 막는 조건 종류나 시장이 없다: {body}");
     }
-    let bad_rsi = json!({"kind": "rsi", "period": "D", "barRange": {"start": 0, "end": 0}, "length": 14, "test": {"kind": "range", "min": 70.0, "max": 30.0}});
+    let bad_rsi = json!({"kind": "rsi", "period": "D", "recentBars": 1, "length": 14, "test": {"kind": "range", "min": 70.0, "max": 30.0}});
     let (status, body) = api.run(&lines(vec![bad_rsi], &[])).await;
     assert_eq!((status, body["error"]["code"].clone()), (400, json!("bad_request")), "저장과 같은 검사를 실행에도 한다: {body}");
     assert!(!body["error"]["message"].as_str().unwrap().contains("아직"), "{body}");
@@ -527,7 +527,7 @@ async fn a_run_is_refused_while_recent_days_fill_and_when_the_store_lacks_the_ne
 
     assert_eq!(refusal(api.run(&new_high).await), (409, json!("screener_not_ready"), json!("missing_day")), "빈 저장소");
     assert_eq!(refusal(api.run(&unconditioned).await), (409, json!("screener_not_ready"), json!("missing_day")), "조건 0줄이어도 빈 저장소에서는 막힌다");
-    assert_eq!(refusal(api.run(&every(vec![at_range(new_high["conditions"][0].clone(), 6, 5)])).await), (400, json!("bad_request"), Value::Null), "범위 시작이 끝보다 크다");
+    assert_eq!(refusal(api.run(&every(vec![with_recent(new_high["conditions"][0].clone(), 0)])).await), (400, json!("bad_request"), Value::Null), "최근 기간은 1 이상이다");
 
     fake.delay("ka10081", Duration::from_millis(500));
     api.update().await;
@@ -1078,7 +1078,7 @@ async fn daily_and_weekly_lines_combine_with_and_and_the_first_line_sets_the_mat
 }
 
 fn indicator(kind: &str, period: &str, m: u32, settings: Value) -> Value {
-    let mut condition = json!({"kind": kind, "period": period, "barRange": {"start": 0, "end": m - 1}});
+    let mut condition = json!({"kind": kind, "period": period, "recentBars": m});
     condition.as_object_mut().unwrap().extend(settings.as_object().unwrap().clone());
     condition
 }
@@ -1209,14 +1209,13 @@ type Candidates = fn(&Chart) -> Vec<bool>;
 
 fn found(_days: &[KstDate], stocks: &[KrxStock], condition: &Value, candidates: Candidates) -> Vec<String> {
     let period = condition["period"].as_str().unwrap();
-    let start = condition["barRange"]["start"].as_u64().unwrap() as usize;
-    let end = condition["barRange"]["end"].as_u64().unwrap() as usize;
+    let count = condition["recentBars"].as_u64().unwrap() as usize;
     let mut found: Vec<(KstDate, &str)> = stocks
         .iter()
         .filter_map(|stock| {
             let chart = Chart::of(&stock.bars, period);
             let flags = candidates(&chart);
-            (chart.len().saturating_sub(end + 1)..chart.len().saturating_sub(start)).rev().find(|&i| flags[i]).map(|i| (chart.starts[i], stock.code.as_str()))
+            (chart.len().saturating_sub(count)..chart.len()).rev().find(|&i| flags[i]).map(|i| (chart.starts[i], stock.code.as_str()))
         })
         .collect();
     found.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(b.1)));
@@ -1825,13 +1824,13 @@ async fn a_screen_over_4000_stocks_collects_all_summaries_and_judges_thousands_o
     server.stop().await;
 }
 
-fn at_range(mut condition: Value, start: u32, end: u32) -> Value {
-    condition["barRange"] = json!({"start": start, "end": end});
+fn with_recent(mut condition: Value, count: u64) -> Value {
+    condition["recentBars"] = json!(count);
     condition
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn actual_bar_ranges_skip_empty_days_weeks_and_months_and_conditions_match_independently() {
+async fn recent_periods_skip_empty_days_weeks_and_months_and_conditions_match_independently() {
     let days = open_days(day(2026, 1, 1), day(2026, 11, 6), &[]);
     let mut traded: Vec<KstDate> = days.iter().copied().filter(|d| d.day() == 5).take(10).collect();
     for month in 1..=10 {
@@ -1840,32 +1839,32 @@ async fn actual_bar_ranges_skip_empty_days_weeks_and_months_and_conditions_match
     }
     traded.sort();
     traded.truncate(10);
-    let prices = [100, 200, 150, 400, 350, 600, 550, 800, 750, 1_000];
-    let mut bars: Vec<KrxBar> = traded.iter().enumerate().map(|(i, &d)| bar(d, prices[i], i as u64 + 1)).collect();
+    let prices = [100, 200, 150, 400, 350, 600, 550, 800, 750, 700];
+    let mut bars: Vec<KrxBar> = traded.iter().enumerate().map(|(i, &d)| bar(d, prices[i], if i == 7 { 100 } else { i as u64 + 1 })).collect();
     bars.push(bar(*days.last().unwrap(), 99_999, 0));
     let session = loaded(KrxMarket { days, stocks: vec![stock("200010", bars)] }).await;
     for period in ["D", "W", "M"] {
         let matched = |i: usize| vec![hit("200010", cell_start(period, traded[i]))];
-        let value = |start, end, price: f64| every(vec![at_range(value_range(period, 1, "close", Some(price), Some(price)), start, end)]);
-        for (start, end, price, index) in [(0, 0, 1_000.0, 9), (1, 1, 750.0, 8), (0, 2, 800.0, 7), (1, 3, 550.0, 6)] {
-            assert_eq!(hits(&session.api.result(&value(start, end, price)).await), matched(index), "{period} {start}~{end}");
+        let value = |count, price: f64| every(vec![with_recent(value_range(period, 1, "close", Some(price), Some(price)), count)]);
+        for (count, price, index) in [(1, 700.0, 9), (2, 750.0, 8), (3, 800.0, 7), (4, 550.0, 6)] {
+            assert_eq!(hits(&session.api.result(&value(count, price)).await), matched(index), "{period} {count}");
         }
-        assert!(hits(&session.api.result(&value(0, 0, 750.0)).await).is_empty());
-        assert!(hits(&session.api.result(&value(10, 20, 100.0)).await).is_empty(), "없는 봉은 후보가 아니다");
-        let first = at_range(value_range(period, 1, "close", Some(800.0), Some(800.0)), 1, 3);
-        let last = at_range(value_range(period, 1, "close", Some(1_000.0), None), 0, 0);
+        assert!(hits(&session.api.result(&value(1, 750.0)).await).is_empty());
+        assert!(hits(&session.api.result(&value(20, 99_999.0)).await).is_empty(), "없는 봉은 후보가 아니다");
+        let first = with_recent(value_range(period, 1, "close", Some(800.0), Some(800.0)), 4);
+        let last = value_range(period, 1, "close", Some(700.0), None);
         assert_eq!(hits(&session.api.result(&every(vec![first, last])).await), matched(7), "각 조건은 서로 다른 봉에서 맞고 첫 줄의 최근 일치가 날짜다");
         let past = [
             new_high(period, "high", 3, 1),
             near_extreme(period, 1, "high", 3, 0.0),
-            change(period, 1, 2, Some(30.0), None),
-            surge(period, 1, "volume", 2, 1.2),
-            indicator("ma_position", period, 1, json!({"field": "close", "method": "sma", "length": 3, "side": "above"})),
+            change(period, 1, 1, Some(40.0), None),
+            surge(period, 1, "volume", 2, 2.0),
+            indicator("ma_position", period, 1, json!({"field": "close", "method": "sma", "length": 2, "side": "above"})),
         ];
         for condition in past {
-            assert_eq!(hits(&session.api.result(&every(vec![at_range(condition.clone(), 2, 2)])).await), matched(7), "{condition}: 과거 후보는 미래 봉을 읽지 않고 실제 봉으로 계산한다");
+            assert_eq!(hits(&session.api.result(&every(vec![with_recent(condition.clone(), 3)])).await), matched(7), "{condition}: 과거 후보는 미래 봉을 읽지 않고 실제 봉으로 계산한다");
         }
-        assert_eq!(hits(&session.api.result(&every(vec![new_high(period, "high", 10, 1)])).await), matched(9));
+        assert_eq!(hits(&session.api.result(&every(vec![new_high(period, "high", 8, 3)])).await), matched(7));
         assert_eq!(session.api.result(&every(vec![new_low(period, "low", 11, 1)])).await["excluded"], excluded(1, 0), "달력에 충분한 칸이 있어도 실제 봉은 열 개다");
     }
 }
@@ -1913,7 +1912,7 @@ async fn intraday_values_indicators_caps_and_results_share_one_overlay_and_rever
     fake.set_quote_rows(vec![summary_row("300000", today, 95, 110, 500, 2)]);
     assert!(hits(&api.result(&cross).await).is_empty());
     assert!(hits(&api.result(&combined).await).is_empty());
-    let past = every(vec![at_range(new_high("D", "high", 3, 1), 1, 1)]);
+    let past = every(vec![value_range("D", 2, "close", Some(100.0), Some(100.0))]);
     assert_eq!(hits(&api.result(&past).await), [hit("300000", day(2026, 11, 6))]);
     assert_eq!(api.status().await["lastDay"], "2026-11-06");
     let Loaded { _server: server, _dir: dir, .. } = session;

@@ -9,7 +9,7 @@ test.use({ krxMarket: "20261106", clockStart: "20261106203000" });
 
 const screen: Screen = {
   id: "height", name: "세 조건 결과 보존", markets: [], exclude: [],
-  conditions: (["close", "high", "volume"] as const).map((field) => ({ kind: "new_high", period: "D", field, n: 1, barRange: { start: 0, end: 0 } })),
+  conditions: (["close", "high", "volume"] as const).map((field) => ({ kind: "new_high", period: "D", field, n: 1, recentBars: 1 })),
 };
 const failure = { apiId: "ka10095", status: 200, body: { return_code: 2, return_msg: "입력 값 오류입니다[1501:시험용 수집 실패]" } };
 const metadata = (page: Page) => results(page).getByLabel("결과 자료");

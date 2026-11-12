@@ -199,7 +199,7 @@ export const test = base.extend<{ app: App; bootReplies: FakeReply[]; clockStart
         dart,
         restart: async (options) => {
           await servers[servers.length - 1]!.kill();
-          if (options?.legacyScreens) execFileSync("python3", ["-c", "import json,sqlite3,sys; c=sqlite3.connect(sys.argv[1]); c.execute('UPDATE screens SET list=?, revision=10', (sys.argv[2],)); c.execute('DELETE FROM _sqlx_migrations WHERE version=7'); c.commit()", path.join(dir, "vally.db"), JSON.stringify(options.legacyScreens)]);
+          if (options?.legacyScreens) execFileSync("python3", ["-c", "import json,sqlite3,sys; c=sqlite3.connect(sys.argv[1]); c.execute('UPDATE screens SET list=?, revision=10', (sys.argv[2],)); c.execute('DELETE FROM _sqlx_migrations WHERE version >= 7'); c.commit()", path.join(dir, "vally.db"), JSON.stringify(options.legacyScreens)]);
           await startServer(addr, options?.clockStart ?? clockStart);
           await waitUntilSymbolListSettles(url);
         },

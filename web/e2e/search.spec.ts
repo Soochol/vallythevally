@@ -153,7 +153,7 @@ test.describe("검색에서 스크리너 실행", () => {
   test.use({ krxMarket: "20261106", clockStart: "20261106203000" });
   test("숨긴 오른쪽 스크리너 탭을 펼쳐 저장된 조건식을 실행하고 차트를 유지한다", async ({ page, app }) => {
     test.setTimeout(180_000);
-    const seeded = await fetch(`${app.url}/api/screens`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ revision: 1, screens: [{ id: "search-run", name: "검색에서 실행", markets: [], exclude: ["etf"], conditions: [{ kind: "new_high", period: "D", barRange: { start: 0, end: 19 }, field: "high", n: 60 }] }] }) });
+    const seeded = await fetch(`${app.url}/api/screens`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ revision: 1, screens: [{ id: "search-run", name: "검색에서 실행", markets: [], exclude: ["etf"], conditions: [{ kind: "new_high", period: "D", recentBars: 20, field: "high", n: 60 }] }] }) });
     expect(seeded.ok).toBe(true);
     await page.goto("/");
     await expect(cell(page)).toHaveAttribute("aria-busy", "false");
