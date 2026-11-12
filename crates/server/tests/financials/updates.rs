@@ -673,6 +673,26 @@ async fn authentication_during_listing_or_xbrl_keeps_checkpoints_and_resumes_aft
     }
 }
 
+#[tokio::test]
+async fn missing_dart_configuration_never_dispatches_on_repeated_start_or_resume() {
+    let fake = Fake::start().await;
+    let kiwoom = common::FakeKiwoom::start().await;
+    let dir = tempdir();
+    let server = common::Server::spawn_with(&kiwoom, &dir.path().join("run/server.lock"), dir.path(), &[("VALLY_CLOCK_START", std::ffi::OsStr::new("20151231120000"))]);
+    let base = format!("http://{}", server.addr().await);
+    let client = reqwest::Client::new();
+    client.get(format!("{base}/api/bars?symbol=005930&period=D&limit=5")).send().await.unwrap().error_for_status().unwrap();
+    for _ in 0..3 {
+        let page = start(&client, &base).await;
+        assert_eq!(page["status"], "not_configured");
+        assert_eq!(page["stopReason"], "not_configured");
+        assert_eq!(command(&client, &base, "resume").await["canResume"], false);
+    }
+    assert!(fake.state.lock().unwrap().calls.is_empty());
+    server.stop().await;
+}
+
+
 pub(super) fn automatic_process(fake: &Fake, kiwoom: &common::FakeKiwoom, dir: &std::path::Path, start: &str) -> common::Server {
     common::Server::spawn_with(kiwoom, &dir.join("run/server.lock"), dir, &[
         ("OPENDART_API_KEY", std::ffi::OsStr::new(KEY)),
