@@ -20,6 +20,7 @@ async fn unchanged_manual_http_update_reuses_reports_and_actual_success_times() 
     let base = format!("http://{}", server.addr().await);
     let client = reqwest::Client::new();
     client.get(format!("{base}/api/bars?symbol=005930&period=D&limit=5")).send().await.unwrap().error_for_status().unwrap();
+    http_start(&client, &base).await;
     let before = http_settled(&client, &base).await;
     assert_eq!(before["status"], "ready");
     let endpoints = ["fnlttSinglAcntAll.json", "fnlttXbrl.xml", "alotMatter.json"];
@@ -56,6 +57,7 @@ async fn corrected_report_http_update_reuses_comparison_periods_without_losing_q
     let base = format!("http://{}", server.addr().await);
     let client = reqwest::Client::new();
     client.get(format!("{base}/api/bars?symbol=005930&period=D&limit=5")).send().await.unwrap().error_for_status().unwrap();
+    http_start(&client, &base).await;
     let before = http_settled(&client, &base).await;
     assert_eq!(before["status"], "ready");
     assert_eq!(point(&page(&client, &base, "Q").await, "revenue")["value"], 700.0);
@@ -91,7 +93,8 @@ async fn partial_correction_http_keeps_coherent_values_and_resumes_only_failed_r
         let base = format!("http://{}", server.addr().await);
         let client = reqwest::Client::new();
         client.get(format!("{base}/api/bars?symbol=005930&period=D&limit=5")).send().await.unwrap().error_for_status().unwrap();
-        let before = http_settled(&client, &base).await;
+        http_start(&client, &base).await;
+    let before = http_settled(&client, &base).await;
         assert_eq!(before["status"], "ready");
         let failure = format!("fnlttSinglAcntAll.json/2016/{failed_code}");
         {
@@ -147,6 +150,7 @@ async fn newly_disclosed_http_report_replaces_unpublished_without_refetching_sav
     let base = format!("http://{}", server.addr().await);
     let client = reqwest::Client::new();
     client.get(format!("{base}/api/bars?symbol=005930&period=D&limit=5")).send().await.unwrap().error_for_status().unwrap();
+    http_start(&client, &base).await;
     let before = http_settled(&client, &base).await;
     assert_eq!(before["status"], "ready");
     assert_eq!(before["collection"]["reports"]["2017/11013"]["statement"]["absent"], true);
@@ -188,7 +192,8 @@ async fn annual_correction_http_fills_absent_statement_or_dividends_when_the_oth
         let base = format!("http://{}", server.addr().await);
         let client = reqwest::Client::new();
         client.get(format!("{base}/api/bars?symbol=005930&period=D&limit=5")).send().await.unwrap().error_for_status().unwrap();
-        let before = http_settled(&client, &base).await;
+        http_start(&client, &base).await;
+    let before = http_settled(&client, &base).await;
         assert_eq!(before["status"], "ready");
         let fetch = if missing == "alotMatter.json" { "dividends" } else { "statement" };
         assert_eq!(before["collection"]["reports"]["2016/11011"][fetch]["absent"], true);
@@ -220,6 +225,7 @@ async fn legacy_http_snapshot_without_versions_keeps_coherent_values_during_part
     let base = format!("http://{}", server.addr().await);
     let client = reqwest::Client::new();
     client.get(format!("{base}/api/bars?symbol=005930&period=D&limit=5")).send().await.unwrap().error_for_status().unwrap();
+    http_start(&client, &base).await;
     let before = http_settled(&client, &base).await;
     assert_eq!(before["status"], "ready");
     server.stop().await;
@@ -245,6 +251,7 @@ async fn legacy_http_snapshot_without_versions_keeps_coherent_values_during_part
     let restarted = process(&fake, &kiwoom, dir.path(), "20171231120000");
     let base = format!("http://{}", restarted.addr().await);
     client.get(format!("{base}/api/bars?symbol=005930&period=D&limit=5")).send().await.unwrap().error_for_status().unwrap();
+    http_start(&client, &base).await;
     assert_eq!(http_settled(&client, &base).await["status"], "partial_failure");
     let quarter = page(&client, &base, "Q").await;
     assert_eq!(point(&quarter, "revenue")["value"], 700.0, "legacy zero versions must not make old and corrected receipts compatible");
@@ -264,6 +271,7 @@ async fn unchanged_http_inputs_remain_coherent_while_one_saved_report_is_retryin
     let base = format!("http://{}", server.addr().await);
     let client = reqwest::Client::new();
     client.get(format!("{base}/api/bars?symbol=005930&period=D&limit=5")).send().await.unwrap().error_for_status().unwrap();
+    http_start(&client, &base).await;
     let before = http_settled(&client, &base).await;
     assert_eq!(before["status"], "ready");
     server.stop().await;

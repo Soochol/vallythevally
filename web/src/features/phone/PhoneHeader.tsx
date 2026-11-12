@@ -1,3 +1,4 @@
+import { FinancialUpdateButton } from "../financial-update/FinancialUpdateButton";
 import type { SymbolInfo } from "../../api/generated/SymbolInfo";
 import type { CellStatus } from "../../chart/ChartController";
 import { direction, formatChange, formatPercent, formatPrice } from "../../lib/format";
@@ -32,6 +33,7 @@ export function PhoneHeader({ cell, info, status }: { cell: CellState; info: Sym
             <b className="text-l font-[650]">{info?.name ?? cell.symbol}</b>
             <small className="ml-1 text-s text-text-3">{symbolSub(cell.symbol, info)}</small>
           </button>
+          <FinancialUpdateButton />
           <VenuePicker cell={cell} info={info} variant="phone" />
         </div>
         <div className="flex h-[32px] items-baseline gap-2">

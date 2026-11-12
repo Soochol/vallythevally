@@ -61,8 +61,6 @@ export function ChartCell({ slot, status, onStatus }: Props) {
   const compareKey = compareInfos.map((i) => `${i.code}:${i.name}`).join("|");
   const compareNames = useMemo(() => Object.fromEntries(compareInfos.map((i) => [i.code, i.name])), [compareKey]);
   const financial = useFinancials(cell.symbol, cell.period === "Y" ? "Y" : "Q", (cell.period === "Q" || cell.period === "Y") && chartSettings.indicators.some((i) => isFinancial(i.spec) && i.visible));
-  const refreshFinancial = useRef(financial.refresh);
-  refreshFinancial.current = financial.refresh;
   const theme = useTheme();
   const openSearch = useSelectionStore((s) => s.openSearch);
   const chartEl = useRef<HTMLDivElement>(null);
@@ -80,7 +78,7 @@ export function ChartCell({ slot, status, onStatus }: Props) {
       onStatus: (s) => onStatusRef.current(s),
       socket: marketSocket,
       onIndicatorCommand: (id, command, anchor) => {
-        if (command === "refresh") return refreshFinancial.current();
+        if (command === "refresh") return useSelectionStore.getState().openFinancialUpdate();
         if (command !== "edit") return runIndicatorCommand(slotRef.current, id, command);
         const initial = useLayoutStore.getState().layout.cells.find((c) => c.slot === slotRef.current)?.chartSettings.indicators.find((i) => i.id === id);
         if (initial) setEditing((current) => current?.initial.id === id ? current : { initial, anchor });
@@ -103,8 +101,8 @@ export function ChartCell({ slot, status, onStatus }: Props) {
   }, [cell, chartSettings, venue, info, compareNames]);
 
   useEffect(() => {
-    ctl.current?.setFinancials(financial.data ?? null, financial.error || financial.refreshError ? "재무자료 조회·갱신 실패 · 새로고침으로 다시 시도하세요" : financial.refreshing ? "재무자료 갱신 요청 중" : undefined);
-  }, [cell.symbol, cell.period, financial.data, financial.error, financial.refreshError, financial.refreshing]);
+    ctl.current?.setFinancials(financial.data ?? null, financial.error ? "재무자료 조회 실패 · 재무자료 창에서 다시 확인하세요" : undefined);
+  }, [cell.symbol, cell.period, financial.data, financial.error]);
 
   // 복원 때 종목 정보를 못 받아 확인하지 못한 NXT가 나중에 NXT 불가로 확인되면, 그때 저장 원본을 고친다.
   // 그대로 두면 다음 저장을 서버가 400으로 거절한다.

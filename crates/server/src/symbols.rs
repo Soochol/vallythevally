@@ -73,6 +73,8 @@ impl Directory {
         self.by_symbol.get(&symbol).map(|&i| &self.entries[i].info)
     }
 
+    pub fn all(&self) -> impl Iterator<Item = &SymbolInfo> { self.entries.iter().map(|entry| &entry.info) }
+
     pub fn screener_listing(&self) -> &[ScreenerListing] {
         &self.screener_listing
     }
