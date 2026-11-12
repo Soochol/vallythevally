@@ -5,13 +5,7 @@ export const sentenceEditor = (page: Page) => page.getByRole("region", { name: "
 export const numberToken = (scope: Locator, name: string) => scope.getByRole("button", { name, exact: true });
 
 export async function setNumber(scope: Locator, name: string, value: string) {
-  const page = scope.page();
-  await numberToken(scope, name).click();
-  const popup = page.getByRole("dialog", { name: `${name} 편집`, exact: true });
-  const input = popup.getByRole("textbox", { name, exact: true });
-  await input.fill(value);
-  await input.press("Enter");
-  await expect(popup).toBeHidden();
+  await fillNumber(numberToken(scope, name), value);
 }
 
 export async function renameScreen(scope: Locator, name: string) {
