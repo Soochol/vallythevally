@@ -2,6 +2,8 @@ import { CHART_CREDIT } from "../../chart/snapshot";
 import { useKiwoomStore } from "../../stores/kiwoom";
 import { Attribution } from "./attribution";
 import { ConnectionIndicator, useConnectionView } from "./ConnectionIndicator";
+import { FinancialStatus } from "./FinancialStatus";
+import { MarketClock } from "./MarketClock";
 import { SaveStatus } from "./SaveStatus";
 
 export function StatusBar() {
@@ -11,7 +13,7 @@ export function StatusBar() {
   const halted = !stopped && !notice && connection.tone === "red";
   return (
     <footer
-      className={`flex min-w-0 items-center gap-4 border-t border-line px-3 text-xs text-text-2 [grid-area:status] max-md:hidden ${
+      className={`flex min-w-0 items-center gap-3 overflow-hidden whitespace-nowrap border-t border-line px-3 text-xs text-text-2 [grid-area:status] max-md:hidden ${
         halted ? "bg-[color-mix(in_srgb,var(--danger)_14%,var(--bg))]" : "bg-bg"
       }`}
     >
@@ -26,9 +28,11 @@ export function StatusBar() {
       ) : (
         <ConnectionIndicator view={connection} />
       )}
+      <MarketClock />
       <SaveStatus />
+      <FinancialStatus />
       <span className="flex-1" />
-      <Attribution text={CHART_CREDIT} className="text-text-2 underline underline-offset-2" />
+      <Attribution text={CHART_CREDIT} className="flex-none text-text-2 underline underline-offset-2" />
     </footer>
   );
 }
