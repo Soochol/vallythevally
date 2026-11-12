@@ -18,6 +18,8 @@ mod tls_tests;
 
 pub type Row = BTreeMap<String, String>;
 
+const ATTEMPTS: u64 = 3;
+
 pub struct Client {
     http: reqwest::Client,
     kind_http: reqwest::Client,
@@ -84,15 +86,12 @@ impl Client {
     pub(super) fn yield_to_latest(&self, yielding: bool) { self.yielding.store(yielding, Ordering::SeqCst); }
     pub(super) fn is_yielding(&self) -> bool { self.yielding.load(Ordering::SeqCst) }
 
-    pub(super) fn has_journal(&self) -> bool { self.journal.lock().unwrap().is_some() }
-
     async fn retry<T, F, Fut>(&self, mut send: F) -> Result<T, Failure>
     where F: FnMut() -> Fut, Fut: std::future::Future<Output = Result<T, Failure>> {
-        let attempts = if self.has_journal() { 3 } else { 1 };
-        for attempt in 0..attempts {
+        for attempt in 0..ATTEMPTS {
             self.check_control()?;
             let result = send().await;
-            if !matches!(result, Err(Failure::Network | Failure::Remote)) || attempt + 1 == attempts { return result; }
+            if !matches!(result, Err(Failure::Network | Failure::Remote)) || attempt + 1 == ATTEMPTS { return result; }
             tokio::time::sleep(Duration::from_millis(250 * (attempt + 1))).await;
         }
         unreachable!()

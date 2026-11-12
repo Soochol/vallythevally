@@ -1,6 +1,5 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
-use std::time::Duration;
 
 use domain::{SymbolInfo, SymbolKind};
 use serde::{Deserialize, Serialize};
@@ -12,7 +11,29 @@ use super::{Financials, CollectionScope, model::{Failure, Security, Snapshot}};
 pub(super) enum Launch { Start, Resume, Automatic }
 
 #[derive(Default)]
-pub(super) struct UpdateRun { running: bool, probing: bool, failure: Option<Failure>, pending_symbols: Option<Vec<SymbolInfo>> }
+pub(super) struct UpdateRun { running: bool, probing: bool, failure: Option<Failure>, pending_symbols: Option<Vec<SymbolInfo>>, collecting: Option<String>, company_failures: BTreeMap<String, Failure> }
+
+#[derive(Default)]
+pub(super) struct CollectionState { pub collecting: bool, pub failure: Option<Failure> }
+
+impl UpdateRun {
+    fn begin_company(&mut self, corp: &str) {
+        self.collecting = Some(corp.into());
+        self.company_failures.remove(corp);
+    }
+
+    fn finish_company(&mut self, corp: &str, failure: Option<Failure>) {
+        self.collecting = None;
+        if let Some(failure) = failure.filter(|failure| !matches!(failure, Failure::Paused | Failure::Yielded)) {
+            tracing::warn!(?failure, "재무 자료를 수집하지 못했습니다");
+            self.company_failures.insert(corp.into(), failure);
+        }
+    }
+
+    fn collection_state(&self, corp: &str) -> CollectionState {
+        CollectionState { collecting: self.running && self.collecting.as_deref() == Some(corp), failure: self.company_failures.get(corp).copied() }
+    }
+}
 
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(tag = "status", content = "value", rename_all = "snake_case")]
@@ -305,13 +326,13 @@ impl Financials {
             if self.client.as_ref().unwrap().is_paused() || self.client.as_ref().unwrap().is_yielding() { return Ok(None); }
             if !matches!(update.targets[index].resolution, Resolution::Pending) { continue; }
             let target = &update.targets[index];
-            let resolved = self.security(&target.code, target.preferred, true).await;
+            let resolved = self.security(&target.code, target.preferred).await;
             update.targets[index].resolution = match resolved {
-                Ok((Some(security), _)) => {
+                Ok(Some(security)) => {
                     update.companies.entry(security.company.corp_code.clone()).or_insert_with(|| Company { security: security.clone(), outcome: Outcome::Pending, changes: Outcome::Pending, history: Outcome::Pending });
                     Resolution::Resolved(security)
                 }
-                Ok((None, _)) => Resolution::Unverified,
+                Ok(None) => Resolution::Unverified,
                 Err(Failure::Paused | Failure::Yielded) => return Ok(None),
                 Err(error @ (Failure::Storage | Failure::Authentication | Failure::RateLimited)) => return Err(error),
                 Err(error) => Resolution::Failed(error),
@@ -340,15 +361,17 @@ impl Financials {
                     let company = update.companies.get_mut(&corp).unwrap();
                     *company.progress(phase) = Outcome::Running;
                     store.save_update(&update).await?;
-                    let mut result = self.update_company_scope(&security.stock_code, security.share_class.as_deref() != Some("보통주"), true, scope).await;
-                    while result.status == "collecting" {
-                        tokio::time::sleep(Duration::from_millis(20)).await;
-                        result = self.read(&security.stock_code).await;
-                    }
-                    if let Some(error @ (Failure::Storage | Failure::Authentication | Failure::RateLimited)) = result.failure { return Err(error); }
+                    self.update.lock().await.begin_company(&corp);
+                    let result = self.collect(&security, scope).await;
+                    self.update.lock().await.finish_company(&corp, result.as_ref().err().copied());
+                    let collection = match result {
+                        Ok(collection) => collection,
+                        Err(Failure::Paused | Failure::Yielded) => return Ok(None),
+                        Err(error) => return Err(error),
+                    };
                     if self.client.as_ref().unwrap().is_paused() || self.client.as_ref().unwrap().is_yielding() { return Ok(None); }
-                    let reports = result.collection.working_reports();
-                    let error = result.failure.or(result.collection.disclosure_failure).or_else(|| reports.values().filter(|report| scope.years().contains(&report.business_year)).find_map(|report| report.statement.failure.or(report.dividends.failure).or_else(|| report.statement.data.as_ref().and_then(|statement| statement.source_failure))));
+                    let reports = collection.working_reports();
+                    let error = collection.disclosure_failure.or_else(|| reports.values().filter(|report| scope.years().contains(&report.business_year)).find_map(|report| report.statement.failure.or(report.dividends.failure).or_else(|| report.statement.data.as_ref().and_then(|statement| statement.source_failure))));
                     if let Some(error @ (Failure::Storage | Failure::Authentication | Failure::RateLimited)) = error { return Err(error); }
                     if let Some(error) = error { Outcome::Failed(error) }
                     else if matches!(scope, CollectionScope::Changes(_)) || scope.years().all(|year| super::model::REPORT_CODES.iter().all(|code| reports.get(&format!("{year}/{code}")).is_some_and(|report| report.statement.checked_at.is_some() && (*code != "11011" || report.dividends.checked_at.is_some())))) { Outcome::Complete }
@@ -366,6 +389,8 @@ impl Financials {
         update.status = if update.page().failures.iter().any(|entry| entry.failure.is_some()) { Status::PartialFailure } else { Status::Ready };
         Ok(Some(update))
     }
+
+    pub(super) async fn collection_state(&self, corp: &str) -> CollectionState { self.update.lock().await.collection_state(corp) }
 
     pub(super) async fn read_resolution(&self, stock: &str, snapshot: &mut Snapshot) {
         let update = match self.store() { Ok(store) => store.update().await, Err(error) => Err(error) };
