@@ -92,9 +92,8 @@ function SearchDialogBody({ purpose }: { purpose: SearchPurpose }) {
   }
 
   return (
-    <Popover onClose={close}
+    <Popover backdrop onClose={close}
       className="ui-dialog-backdrop fixed inset-0 z-50 flex justify-center bg-[var(--scrim)]"
-      onPointerDown={(e) => e.target === e.currentTarget && close()}
     >
       <div
         role="dialog"

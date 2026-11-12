@@ -238,7 +238,10 @@ test.describe("재무지원 경계", () => {
     const shifted = result.series.find((s) => s.metric === "revenue")!.points.find((p) => p.businessYear === 2015 && p.reportCode === "11011")!;
     expect(shifted.period).toEqual({ kind: "duration", start: "2015-04-01", end: "2016-03-31" });
     expect(shifted.priceBucket).toBe(Date.parse("2016-01-01T00:00:00+09:00") / 1000);
+    await page.keyboard.press("Escape");
+    await expect(row(page, "debt_ratio").locator("details")).not.toHaveAttribute("open", "");
     await choosePeriod(page, false, "연");
+    await expect(cell(page)).toHaveAttribute("aria-label", /연$/);
     const annual = (await data(app)).series.find((s) => s.metric === "revenue")!.points;
     const overlap = annual.findIndex((p) => p.reason === "period_overlap");
     expect(overlap).toBeGreaterThanOrEqual(0);

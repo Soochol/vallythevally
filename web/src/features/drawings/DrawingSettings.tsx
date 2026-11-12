@@ -33,7 +33,7 @@ export function DrawingSettings({ slot, editor }: { slot: number; editor: Drawin
   if (!tool) return null;
   const tabs: Tab[] = [...(tool.settings.inputs ? ["inputs" as const] : []), "style", ...(tool.settings.text ? ["text" as const] : []), "coordinates", "visibility"];
   const fields = tab === "inputs" || tab === "style" || tab === "text" ? tool.settings[tab] ?? [] : [];
-  return <Popover onClose={() => close(slot)} className="draw-modal-backdrop" onPointerDown={(e) => { if (e.target === e.currentTarget) close(slot); }}>
+  return <Popover backdrop onClose={() => close(slot)} className="draw-modal-backdrop">
     <div ref={dialog} role="dialog" aria-modal="true" aria-label={`${tool.label} 설정`} className="draw-settings" onKeyDown={(e) => {
       if (e.nativeEvent.isComposing) return;
       if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); close(slot); }

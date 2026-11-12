@@ -51,7 +51,7 @@ export function DrawingToolbar() {
     <button className="draw-tool" aria-label="이 종목 드로잉 모두 지우기" title="이 종목 드로잉 모두 지우기" onClick={async () => {
       const surface = surfaceFor(slot); const symbol = surface?.host.view()?.symbol; if (!surface || !symbol) return;
       const all = sync.drawings(symbol).filter((d) => !d.locked && !prefs.lockAll);
-      if (all.length) { sync.commit(slot, all.map((before) => ({ kind: "delete", before }))); useSelectionStore.getState().showToast(`드로잉 ${all.length}개를 지웠습니다`, () => sync.undo(slot, false)); }
+      if (all.length) sync.commitWithUndo(slot, all.map((before) => ({ kind: "delete", before })), `드로잉 ${all.length}개를 지웠습니다`);
     }}><Icon path={DRAWING_ICONS.trash} /></button>
     <div className="draw-toolbar-bottom"><button className="draw-tool" aria-label="개체 목록 열기" title="개체 목록" onClick={() => useSelectionStore.getState().showRightPanel("objects")}><Icon path={DRAWING_ICONS.objects} /></button>
       <button ref={helpButton} className="draw-tool" aria-label="드로잉 단축키 도움말" title="드로잉 단축키" onClick={() => setHelp(!help)}>?</button></div>

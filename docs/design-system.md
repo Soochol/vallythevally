@@ -44,12 +44,13 @@
 `features/overlay/Popover.tsx`를 사용한다. `anchor`에 연 버튼의 ref, `onClose`에 닫기 동작을 전달한다. 컨텍스트 메뉴에는 `point`, 이동하는 도구 막대에는 `follow`를 전달할 수 있다. 위치를 직접 지정하는 absolute 메뉴나 별도 portal을 만들지 않는다.
 
 - HTML Popover API의 맨 위 층에 렌더링한다. `position.ts`가 가장자리에서 반대쪽을 선택하고 화면 안으로 맞춘다. 내용 크기·창 크기·스크롤이 바뀌면 다시 계산한다.
-- Esc와 바깥 누르기는 맨 위의 조작 가능한 화면만 닫고 연 버튼으로 포커스를 돌린다. 중첩 색상 선택기에서 Esc를 누르면 부모 설정창은 남는다.
+- Esc와 바깥 누르기는 맨 위의 조작 가능한 화면만 닫고 연 버튼으로 포커스를 돌린다. 배경이 있는 창은 `backdrop`을 전달하며 직접 배경 닫기 핸들러를 달지 않는다. 바깥 pointerdown과 뒤따르는 click은 하나의 입력으로 소비해 부모의 버튼을 함께 실행하지 않는다. 중첩 색상 선택기에서 Esc를 누르면 부모 설정창은 남는다.
 - 공통 표면은 `.ui-popover`다. 색·테두리·반경 10과 그림자를 여기서 한 번 정한다. 화면마다 이 네 값을 재정의하지 않는다.
 - 일반 메뉴는 `features/menu/Menu.tsx`의 `MenuItem`으로 만든다. `radio`·`check`·`action`·`heading`·`separator`를 지원한다. ↑↓·Home·End·Enter·Space·글자 입력으로 이동/선택한다. 메뉴 키보드는 차트 단축키로 전파하지 않는다.
 - 폼의 선택 항목은 `Select`에 `label`, 현재 값, `options`, `onChange`를 전달한다. 브라우저 기본 select를 새로 만들지 않는다. 분봉은 `MinuteMenu`, 자석 세기는 버튼의 우클릭·길게 누르기 메뉴를 쓴다.
-- 일반 대화상자는 `DialogFrame`을 사용한다. 되돌릴 수 없는 작업은 `confirmAction(문구)`의 결과를 기다린다. 되돌릴 수 있는 작업은 `showToast(문구, 되돌리기)`를 사용한다. 알림은 6초 동안 보인다.
+- 일반 대화상자는 `DialogFrame`을 사용한다. 되돌릴 수 없는 작업은 `confirmAction(문구)`의 결과를 기다린다. 일반 알림은 `showToast(문구)`를 사용한다. 드로잉 삭제는 `DrawingSync.commitWithUndo(칸, 변경, 문구)`를 사용해 삭제 당시의 history 객체를 작업 식별자로 묶는다. 기록이 바뀌거나 취소된 알림의 되돌리기는 비활성화되고, 실행 시에도 같은 식별자인지 다시 검사한다. 알림은 6초 동안 보인다.
 - `TooltipHost`는 기존 `title`을 공통 툴팁으로 표시한다. 단축키가 있는 버튼의 title에는 키도 적는다. 기존 aria-label과 title은 바꾸지 않는다.
+- 차트 키 처리에는 `ownsChartKeyboard`를 먼저 검사한다. 열린 조작 표면이나 그 안의 이벤트를 차트 단축키가 가로채지 않는다. 알림만 `blockChartKeys={false}`를 사용해 차트의 Ctrl+Z를 유지한다.
 - React 밖에서 만드는 화면은 `topLayer.ts`의 `mountLayer`를 사용하고 반환한 정리 함수를 화면 제거 시 호출한다. 재무 보고기간의 `domSelect`도 같은 위치·닫기·포커스 처리를 쓴다.
 
 상태 화면은 `Skeleton`, `EmptyState`, `ErrorState`를 사용한다. 빈 상태에는 다음 행동, 오류에는 회복 동작을 함께 전달한다. 목록과 차트, 드로잉 패널의 상태를 이 부품으로 표시한다.

@@ -36,9 +36,8 @@ interface FrameProps {
 
 export function DialogFrame({ labelledBy, width, onClose, panelRef, children }: FrameProps) {
   return (
-    <Popover onClose={onClose}
+    <Popover backdrop onClose={onClose}
       className="ui-dialog-backdrop fixed inset-0 z-50 flex justify-center bg-[var(--scrim)]"
-      onPointerDown={(e) => e.target === e.currentTarget && onClose()}
     >
       <div
         ref={panelRef}

@@ -1,3 +1,4 @@
+import { ownsChartKeyboard } from "../../features/overlay/topLayer";
 import type { Logical } from "lightweight-charts";
 import { formatPrice } from "../../lib/format";
 import { isTypingTarget } from "../../lib/hotkeys";
@@ -268,9 +269,8 @@ export class DrawingSurface implements ChartExtension {
   }
   remove(force = false) {
     const prefs = useUiStore.getState().prefs.drawing; const selected = this.selected();
-    this.sync.commit(this.slot, selected.filter((d) => force || (!d.locked && !prefs.lockAll)).map((before) => ({ kind: "delete", before })));
+    this.sync.commitWithUndo(this.slot, selected.filter((d) => force || (!d.locked && !prefs.lockAll)).map((before) => ({ kind: "delete", before })), "드로잉을 지웠습니다");
     useDrawingSession.getState().select([]);
-    if (selected.length) useSelectionStore.getState().showToast("드로잉을 지웠습니다", () => this.sync.undo(this.slot, false));
   }
   openEditor(id: string, kind: "settings" | "text" = "settings") {
     const symbol = this.host.view()?.symbol; const d = symbol ? this.sync.drawings(symbol).find((item) => item.id === id) : undefined;
@@ -312,7 +312,7 @@ export class DrawingSurface implements ChartExtension {
     useDrawingSession.setState({ popup: { slot: this.slot, x: e.clientX, y: e.clientY, id } });
   }
   private onKey(e: KeyboardEvent) {
-    if (!matchMedia(DESKTOP_QUERY).matches || isTypingTarget(e.target) || e.isComposing || useDrawingSession.getState().editor || useSelectionStore.getState().dialog) return;
+    if (ownsChartKeyboard(e) || !matchMedia(DESKTOP_QUERY).matches || isTypingTarget(e.target) || e.isComposing || useDrawingSession.getState().editor || useSelectionStore.getState().dialog) return;
     if (!this.host.el.parentElement?.contains(document.activeElement)) return;
     const session = useDrawingSession.getState(); const ui = useUiStore.getState(); const prefs = ui.prefs.drawing;
     const ctrl = e.ctrlKey || e.metaKey;

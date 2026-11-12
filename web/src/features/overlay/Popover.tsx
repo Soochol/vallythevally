@@ -10,13 +10,15 @@ interface Props extends HTMLAttributes<HTMLDivElement> {
   restoreFocus?: boolean;
   dismiss?: boolean;
   follow?: boolean;
+  backdrop?: boolean;
+  blockChartKeys?: boolean;
   onClose(): void;
 }
-export function Popover({ anchor, point, anchorRect, placement, focus, restoreFocus, dismiss, follow, onClose, className = "", ...props }: Props) {
+export function Popover({ anchor, point, anchorRect, placement, focus, restoreFocus, dismiss, follow, backdrop, blockChartKeys, onClose, className = "", ...props }: Props) {
   const panel = useRef<HTMLDivElement>(null);
   const opener = useRef(typeof document !== "undefined" && document.activeElement instanceof HTMLElement ? document.activeElement : null);
   const close = useRef(onClose); close.current = onClose;
-  const initial = useRef({ anchor, point, anchorRect, placement, focus, restoreFocus, dismiss, follow });
+  const initial = useRef({ anchor, point, anchorRect, placement, focus, restoreFocus, dismiss, follow, backdrop, blockChartKeys });
   useLayoutEffect(() => {
     const node = panel.current;
     if (!node) return;

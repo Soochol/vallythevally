@@ -25,7 +25,7 @@ export function domSelect(button: HTMLButtonElement, options: () => readonly { l
       e.stopPropagation();
       const current = buttons.findIndex((b) => b === document.activeElement);
       if (e.key === "Tab") { close?.(); return; }
-      if (e.key.length === 1 && !e.ctrlKey && !e.metaKey) { query = Date.now() - typedAt < 600 ? query + e.key : e.key; typedAt = Date.now(); }
+      if (e.key.length === 1 && e.key !== " " && !e.ctrlKey && !e.metaKey) { query = Date.now() - typedAt < 600 ? query + e.key : e.key; typedAt = Date.now(); }
       else query = "";
       if (["ArrowDown", "ArrowUp", "Home", "End"].includes(e.key) || query) {
         e.preventDefault();

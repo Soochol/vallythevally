@@ -278,6 +278,8 @@ test.describe("같은 재무 키의 응답 순서", () => {
   await page.addInitScript(installFrameProbe); await page.goto("/"); await expect.poll(()=>oldResponses.length).toBe(1);
   await row(page).locator("summary").click(); app.dart!.edge=true;
   await row(page).getByRole("button",{name:"재무자료 새로고침·재시도"}).click(); await expect.poll(()=>postSeen).toBe(true);
+  await page.keyboard.press("Escape");
+  await expect(row(page).locator("details")).not.toHaveAttribute("open", "");
   const periods=page.getByRole("toolbar").getByRole("group",{name:"봉 주기"});
   await periods.getByRole("button",{name:"일",exact:true}).click(); await expect(row(page)).toHaveCount(0);
   await periods.getByRole("button",{name:"연",exact:true}).click(); await expect.poll(()=>oldResponses.length).toBe(2);

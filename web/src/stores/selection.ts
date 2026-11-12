@@ -2,6 +2,12 @@ import { create } from "zustand";
 import type { Slot } from "./layout";
 import { useUiStore } from "./ui";
 
+export interface ToastUndo {
+  available(): boolean;
+  run(): void;
+  subscribe(listener: () => void): () => void;
+}
+
 export type SearchPurpose = "open" | "watch";
 export type Dialog =
   | { kind: "search"; purpose: SearchPurpose }
@@ -18,14 +24,14 @@ interface SelectionState {
   rightPanel: RightPanel;
   desktopView: "chart" | "screener";
   setDesktopView(view: "chart" | "screener"): void;
-  toast: null | { id: number; text: string; undo?: () => void };
+  toast: null | { id: number; text: string; undo?: ToastUndo };
   openSearch(purpose?: SearchPurpose): void;
   openIndicators(slot: Slot, editId?: string | null): void;
   openScreenEditor(editId: string | null): void;
   closeDialog(): void;
   setPhoneTab(tab: PhoneTab): void;
   showRightPanel(panel: RightPanel): void;
-  showToast(text: string, undo?: () => void): void;
+  showToast(text: string, undo?: ToastUndo): void;
   clearToast(id: number): void;
 }
 

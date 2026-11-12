@@ -94,3 +94,10 @@ export function planRedo(h: History, current: Current): Plan {
   if (ids.length > 0) return { kind: "conflict", ids, history: { past: h.past, future } };
   return { kind: "apply", ops: entry, history: { past: [...h.past, entry], future } };
 }
+
+export function historyUndo(current: () => History, undo: () => void) {
+  const operation = current();
+  let used = false;
+  const available = () => !used && operation.past.length > 0 && current() === operation;
+  return { available, run: () => { if (available()) { used = true; undo(); } } };
+}

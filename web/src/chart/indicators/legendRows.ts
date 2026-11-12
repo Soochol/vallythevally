@@ -98,6 +98,7 @@ export class IndicatorLegend {
       b.innerHTML = iconMarkup(icon);
       b.type = "button";
       b.title = label;
+      b.dataset.indicatorCommand = command;
       b.addEventListener("click", () => this.onCommand(id, command));
       tools.append(b);
       return b;
@@ -112,10 +113,13 @@ export class IndicatorLegend {
     summary.setAttribute("aria-label", "재무자료와 갱신 상태");
     const box = el("div", "ui-popover w-[min(440px,85vw)] whitespace-normal p-3");
     let cleanup: (() => void) | null = null;
-    detail.addEventListener("toggle", () => {
-      cleanup?.(); cleanup = null;
-      if (detail.open && detail.isConnected) cleanup = mountLayer(box, { anchor: () => summary.getBoundingClientRect(), trigger: summary, onClose: () => { detail.open = false; } });
-    });
+    const syncDetail = () => {
+      if (detail.open && detail.isConnected) {
+        cleanup ??= mountLayer(box, { anchor: () => summary.getBoundingClientRect(), trigger: summary, onClose: () => { detail.open = false; syncDetail(); } });
+      } else { cleanup?.(); cleanup = null; }
+    };
+    summary.addEventListener("click", (event) => { event.preventDefault(); detail.open = !detail.open; syncDetail(); });
+    detail.addEventListener("toggle", syncDetail);
     const select = el("button", "mb-2 w-full bg-surface text-s");
     select.setAttribute("aria-label", "보고기간 자료");
     const text = el("p", "whitespace-pre-wrap text-xs");
@@ -174,6 +178,6 @@ export class IndicatorLegend {
     const icon = hidden ? "eyeOff" : "eye";
     if (r.toggle.dataset.icon !== icon) { r.toggle.innerHTML = iconMarkup(icon); r.toggle.dataset.icon = icon; }
     r.toggle.title = hidden ? "보이기" : "숨기기";
-    r.root.querySelectorAll("button").forEach((b) => b.setAttribute("aria-label", `${row.name} ${b.title}`));
+    r.root.querySelectorAll<HTMLButtonElement>("button[data-indicator-command]").forEach((b) => b.setAttribute("aria-label", `${row.name} ${b.title}`));
   }
 }

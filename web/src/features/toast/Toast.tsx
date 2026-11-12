@@ -1,6 +1,6 @@
 import { Popover } from "../overlay/Popover";
-import { useEffect } from "react";
-import { useSelectionStore } from "../../stores/selection";
+import { useEffect, useSyncExternalStore } from "react";
+import { useSelectionStore, type ToastUndo } from "../../stores/selection";
 
 const TOAST_MS = 6000;
 
@@ -15,8 +15,13 @@ export function Toast() {
   }, [toast, clearToast]);
 
   if (!toast) return null;
-  return <Popover key={toast.id} focus={false} restoreFocus={false} onClose={() => clearToast(toast.id)} role="status" className="ui-toast">
+  return <Popover key={toast.id} focus={false} blockChartKeys={false} restoreFocus={false} onClose={() => clearToast(toast.id)} role="status" className="ui-toast">
     <span>{toast.text}</span>
-    {toast.undo && <button className="tb-btn" onClick={() => { toast.undo?.(); clearToast(toast.id); }}>되돌리기</button>}
+    {toast.undo && <UndoButton action={toast.undo} close={() => clearToast(toast.id)} />}
   </Popover>;
+}
+
+function UndoButton({ action, close }: { action: ToastUndo; close(): void }) {
+  const enabled = useSyncExternalStore(action.subscribe, action.available);
+  return <button className="tb-btn disabled:cursor-not-allowed disabled:opacity-40" disabled={!enabled} onClick={() => { action.run(); close(); }}>되돌리기</button>;
 }
