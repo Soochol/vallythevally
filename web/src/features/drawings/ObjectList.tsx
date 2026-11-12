@@ -11,6 +11,7 @@ import { useSelectionStore } from "../../stores/selection";
 import { useUiStore } from "../../stores/ui";
 import { Icon, EyeIcon, PenIcon, DRAWING_ICONS } from "../icons";
 import { EmptyState, ErrorState } from "../overlay/State";
+import { moveObject } from "./objectOrder";
 
 export function ObjectList() {
   const slot = useSelectionStore((s) => s.activeSlot); const cell = useCell(slot);
@@ -47,7 +48,7 @@ export function ObjectList() {
         remove={() => { sync.commitWithUndo(slot, [{ kind: "delete", before: d }], "드로잉을 지웠습니다"); useDrawingSession.getState().select(selected.filter((id) => id !== d.id)); }}
         dragStart={() => setDragged(d.id)} dragEnd={() => setDragged(null)}
         drop={(above) => { if (dragged && dragged !== d.id) surfaceFor(slot)?.reorder(dragged, "front", d.id, above ? "above" : "below"); setDragged(null); }}
-        move={(direction) => surfaceFor(slot)?.reorder(d.id, direction)} />)}
+        move={(direction) => moveObject(group.drawings, d.id, direction, surfaceFor(slot))} />)}
     </section>)}</div>
     <p className="draw-objects-foot">Ctrl+클릭으로 여러 개 선택 · 끌어서 순서 변경 · F2 이름 바꾸기 · Alt+↑↓ 순서</p>
   </section>;
