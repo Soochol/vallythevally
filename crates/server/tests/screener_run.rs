@@ -1946,7 +1946,7 @@ async fn intraday_week_month_ohlcv_and_boundary_values_are_added_once_and_finali
 
 #[tokio::test(flavor = "multi_thread")]
 async fn intraday_no_trades_missing_other_dates_and_unreadable_rows_remain_distinct() {
-    for (today, hhmm) in [(day(2026, 11, 9), "0800"), (day(2026, 11, 14), "1200")] {
+    for (today, hhmm) in [(day(2026, 11, 9), "0755"), (day(2026, 11, 14), "1200")] {
         let session = intraday_session(today, 5, hhmm).await;
         let mut no_trades = summary_row("300000", today, 0, 0, 0, 0);
         for key in ["open_pric", "high_pric", "low_pric", "cntr_tm"] { no_trades[key] = "".into(); }
@@ -2061,12 +2061,12 @@ fn review_evidence(name: &str, value: &Value) {
 #[tokio::test(flavor = "multi_thread")]
 async fn regression_223_previous_date_on_closed_and_preopen_days() {
     let mut outcomes = Vec::new();
-    for (today, hhmm) in [(day(2026, 11, 9), "0800"), (day(2026, 11, 14), "1200"), (day(2026, 11, 9), "1200"), (day(2026, 11, 9), "0830")] {
+    for (today, hhmm) in [(day(2026, 11, 9), "0755"), (day(2026, 11, 14), "1200"), (day(2026, 11, 9), "1200"), (day(2026, 11, 9), "0830")] {
         let session = intraday_session(today, 1, hhmm).await;
         let previous = *last_open_days(1, today.add_days(-1)).last().unwrap();
         session._fake.set_quote_rows(vec![summary_row("300000", previous, 100, 100, 1000, 1)]);
         let result = session.api.result(&every(vec![])).await;
-        if hhmm == "0800" || today.weekday() == Weekday::Sat {
+        if hhmm == "0755" || today.weekday() == Weekday::Sat {
             assert_eq!(result["missingSummary"], 0);
             assert_eq!(row(&result, "300000")["latestBarDate"], previous.to_string());
             assert_eq!(row(&result, "300000")["provisional"], false);
@@ -2188,7 +2188,7 @@ async fn regression_223_new_generation_cannot_join_old_collection() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn regression_223_closed_day_evidence_never_hides_missing_rows_or_conflicting_today_trades() {
-    for (today, hhmm) in [(day(2026, 11, 9), "0800"), (day(2026, 11, 14), "1200")] {
+    for (today, hhmm) in [(day(2026, 11, 9), "0755"), (day(2026, 11, 14), "1200")] {
         let session = intraday_session(today, 3, hhmm).await;
         let previous = last_open_days(1, today.add_days(-1))[0];
         let mut unreadable = summary_row("300001", previous, 100, 100, 1000, 1);
@@ -2296,16 +2296,97 @@ async fn regression_223_adjustment_refetch_missing_midway_recovers_or_excludes_a
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn regression_223_preopen_evidence_expires_when_collection_crosses_krx_open() {
+async fn regression_223_pre0800_evidence_expires_when_collection_crosses_0800() {
     let today = day(2026, 11, 9);
-    let Loaded { _fake: fake, _dir: dir, _server: server, .. } = intraday_session(today, 1, "0800").await;
+    let Loaded { _fake: fake, _dir: dir, _server: server, .. } = intraday_session(today, 1, "0755").await;
     server.stop().await;
     fake.set_quote_rows(vec![summary_row("300000", day(2026, 11, 6), 100, 100, 1000, 1)]);
     fake.delay("ka10095", Duration::from_millis(1500));
-    let server = Server::spawn_with(&fake, &dir.path().join("run/server.lock"), dir.path(), &[("VALLY_CLOCK_START", OsStr::new("20261109082959"))]);
+    let server = Server::spawn_with(&fake, &dir.path().join("run/server.lock"), dir.path(), &[("VALLY_CLOCK_START", OsStr::new("20261109075959"))]);
     let api = Api::of(&server).await;
     let result = api.result(&every(vec![])).await;
     assert_eq!(result["missingSummary"], 1);
     assert!(hits(&result).is_empty());
     server.stop().await;
+}
+
+async fn early_krx_session(hhmmss: &str) -> Loaded {
+    let today = day(2026, 11, 9);
+    let Loaded { _fake: fake, _dir: dir, _server: server, .. } = intraday_session(today, 1, "0815").await;
+    server.stop().await;
+    let clock = format!("20261109{hhmmss}");
+    let server = Server::spawn_with(&fake, &dir.path().join("run/server.lock"), dir.path(), &[("VALLY_CLOCK_START", OsStr::new(&clock))]);
+    let api = Api::of(&server).await;
+    Loaded { _fake: fake, _dir: dir, _server: server, api }
+}
+
+fn early_krx_evidence(name: &str, responses: &Value) {
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/review-fix-223-2");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join(format!("{name}.json")), serde_json::to_vec_pretty(responses).unwrap()).unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn regression_223_early_krx_previous_date_remains_missing_after_0800() {
+    let mut responses = Vec::new();
+    for time in ["080000", "081500", "082959"] {
+        let session = early_krx_session(time).await;
+        let mut quote = summary_row("300000", day(2026, 11, 6), 100, 100, 1000, 1);
+        quote["cntr_tm"] = "153000".into();
+        session._fake.set_quote_rows(vec![quote]);
+        let (status, result) = session.api.run(&every(vec![])).await;
+        responses.push(json!({"time": time, "status": status, "result": result}));
+    }
+    early_krx_evidence("early-previous", &json!(responses));
+    for response in responses {
+        assert_eq!(response["status"], 200, "{response}");
+        assert_eq!(response["result"]["missingSummary"], 1, "{response}");
+        assert_eq!(response["result"]["rows"], json!([]), "{response}");
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn regression_223_early_krx_today_trade_is_used_after_0800() {
+    let today = day(2026, 11, 9);
+    let mut responses = Vec::new();
+    for time in ["080000", "081500", "082959"] {
+        let session = early_krx_session(time).await;
+        let mut quote = summary_row("300000", today, 110, 110, 1000, 1);
+        quote["cntr_tm"] = if time == "080000" { "080000" } else { "081000" }.into();
+        session._fake.set_quote_rows(vec![quote]);
+        let (status, result) = session.api.run(&every(vec![])).await;
+        responses.push(json!({"time": time, "status": status, "result": result}));
+    }
+    early_krx_evidence("early-today", &json!(responses));
+    for response in responses {
+        assert_eq!(response["status"], 200, "{response}");
+        let result = &response["result"];
+        assert_eq!(result["missingSummary"], 0);
+        assert_eq!(row(result, "300000")["latestBarDate"], today.to_string());
+        assert_eq!(row(result, "300000")["provisional"], true);
+        assert_eq!(price_and_change(result, "300000"), (json!(110.0), json!(10.0)));
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn regression_223_early_krx_before_0800_distinguishes_current_from_absence() {
+    let today = day(2026, 11, 9);
+    let mut responses = Vec::new();
+    for observed_today in [false, true] {
+        let session = early_krx_session("075500").await;
+        if observed_today {
+            session._fake.set_krx_market(KrxMarket { days: [last_open_days(20, today.add_days(-1)), vec![today]].concat(), stocks: vec![] });
+        }
+        let mut quote = summary_row("300000", today, 110, 110, 1000, 1);
+        quote["cntr_tm"] = "075000".into();
+        session._fake.set_quote_rows(vec![quote]);
+        let (status, result) = session.api.run(&every(vec![])).await;
+        responses.push(json!({"observedToday": observed_today, "status": status, "result": result}));
+    }
+    early_krx_evidence("before-0800-current", &json!(responses));
+    assert_eq!(responses[0]["status"], 409);
+    assert_eq!(responses[0]["result"]["error"]["reason"], "data_changed");
+    assert_eq!(responses[1]["status"], 200);
+    assert_eq!(row(&responses[1]["result"], "300000")["latestBarDate"], today.to_string());
+    assert_eq!(row(&responses[1]["result"], "300000")["provisional"], true);
 }

@@ -73,9 +73,9 @@ impl Calendar {
         if self.days.contains(&today) {
             return Observation::Current;
         }
-        let before_krx_trading = now.kst_time_of_day() < TimeOfDay::hms(8, 30, 0).expect("KRX 장전 시간");
+        let before_first_krx_trades = now.kst_time_of_day() < TimeOfDay::hms(8, 0, 0).expect("KRX 최초 거래 시작");
         let after_krx_trading = now.kst_time_of_day() >= TimeOfDay::hms(20, 0, 0).expect("KRX 종료 시간");
-        if before_krx_trading || (after_krx_trading && self.fetched_at.kst_time_of_day() >= TimeOfDay::hms(20, 0, 0).expect("KRX 종료 시간")) || matches!(today.weekday(), Weekday::Sat | Weekday::Sun) {
+        if before_first_krx_trades || (after_krx_trading && self.fetched_at.kst_time_of_day() >= TimeOfDay::hms(20, 0, 0).expect("KRX 종료 시간")) || matches!(today.weekday(), Weekday::Sat | Weekday::Sun) {
             self.last_before(today).map_or(Observation::Unresolved, Observation::PreviousOnly)
         } else {
             Observation::Unresolved
