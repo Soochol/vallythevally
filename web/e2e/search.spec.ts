@@ -1,6 +1,7 @@
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
-import { panel, rows, updateBand, waitForUpdateToFinish } from "./screener-page";
+import type { ScreenerResult } from "../src/api/generated/ScreenerResult";
+import { panel, rows, runButton, updateBand, waitForUpdateToFinish } from "./screener-page";
 import { barTimes, cell, chartOf, dragTowardPast, expect, SEARCH_BUTTON_TITLE, test } from "./harness";
 
 test("초성으로 찾은 종목을 열고 과거로 끌면 과거 봉이 앞에 붙는다", async ({ page }) => {
@@ -149,26 +150,48 @@ test("일부 시세 누락·추세 실패에도 다른 종목과 명령을 계�
 });
 
 test.describe("검색에서 스크리너 실행", () => {
-  test.use({ krxMarket: "20261106", clockStart: "20261109100000" });
-  test("저장된 조건식을 실행하고 현재 화면 구조에서 결과를 보인다", async ({ page, app }) => {
+  test.use({ krxMarket: "20261106", clockStart: "20261106203000" });
+  test("숨긴 오른쪽 스크리너 탭을 펼쳐 저장된 조건식을 실행하고 차트를 유지한다", async ({ page, app }) => {
     test.setTimeout(180_000);
     const seeded = await fetch(`${app.url}/api/screens`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ revision: 1, screens: [{ id: "search-run", name: "검색에서 실행", markets: [], exclude: ["etf"], conditions: [{ kind: "new_high", period: "D", barRange: { start: 0, end: 19 }, field: "high", n: 60 }] }] }) });
     expect(seeded.ok).toBe(true);
     await page.goto("/");
-  await expect(cell(page)).toHaveAttribute("aria-busy", "false");
+    await expect(cell(page)).toHaveAttribute("aria-busy", "false");
+    const chartLabel = await cell(page).getAttribute("aria-label");
+    const tabs = page.getByRole("tablist", { name: "오른쪽 패널" });
+    await page.getByRole("button", { name: "탭 숨기기", exact: true }).click();
+    await expect(tabs).toBeHidden();
     await page.keyboard.press("/");
     const dialog = page.getByRole("dialog", { name: "종목 검색" });
     await dialog.getByRole("combobox").fill("> 스크리너");
     await dialog.getByRole("combobox").press("Enter");
     await expect(panel(page)).toBeVisible();
+    await expect(tabs.getByRole("tab", { name: /^스크리너/ })).toHaveAttribute("aria-selected", "true");
+    await expect(cell(page)).toBeVisible();
+    await expect(cell(page)).toHaveAttribute("aria-label", chartLabel!);
     await updateBand(page).getByRole("button", { name: "처음 받기" }).click();
     await waitForUpdateToFinish(page, "11-06(금)");
+    await page.getByRole("button", { name: "탭 숨기기", exact: true }).click();
+    await expect(tabs).toBeHidden();
     await page.keyboard.press("/");
     await dialog.getByRole("combobox").fill("> 스크리너");
     const run = page.waitForResponse((r) => r.url().endsWith("/api/screener/run") && r.ok());
     await dialog.getByRole("combobox").press("Enter");
-    await run;
+    const commandResult: ScreenerResult = await (await run).json();
+    const expectedSymbols = ["110030", "110035", "110040", "110050"];
+    expect(commandResult).toMatchObject({ asOf: "2026-11-06", missingSummary: 0 });
+    expect(commandResult.rows.map((row) => row.symbol)).toEqual(expectedSymbols);
     await expect(rows(page)).toHaveCount(4);
+    await expect.poll(() => rows(page).evaluateAll((elements) => elements.map((element) => element.getAttribute("data-code")))).toEqual(expectedSymbols);
+    const directRun = page.waitForResponse((response) => response.url().endsWith("/api/screener/run") && response.ok());
+    await runButton(page).click();
+    const directResult: ScreenerResult = await (await directRun).json();
+    expect(directResult).toMatchObject({ asOf: "2026-11-06", missingSummary: 0 });
+    expect(directResult.rows).toEqual(commandResult.rows);
+    await expect(rows(page)).toHaveCount(4);
+    await expect(tabs.getByRole("tab", { name: /^스크리너/ })).toHaveAttribute("aria-selected", "true");
+    await expect(cell(page)).toBeVisible();
+    await expect(cell(page)).toHaveAttribute("aria-label", chartLabel!);
   });
 });
 

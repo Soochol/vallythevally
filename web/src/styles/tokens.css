@@ -3,7 +3,7 @@
   --fs-xs: 11px; --fs-s: 12px; --fs-m: 14px; --fs-l: 17px; --fs-xl: 28px;
   --s1: 4px; --s2: 4px; --s3: 8px; --s4: 12px; --s5: 16px; --s6: 24px;
   --r-s: 5px; --r-m: 7px; --r-l: 10px; --r-xl: 12px;
-  --topbar-h: 116px; --tools-w: 56px; --watch-w: 300px; --status-h: 30px;
+  --topbar-h: 44px; --tools-w: 40px; --watch-w: 300px; --status-h: 26px;
   --bg: #101211; --chart-bg: #101411; --surface: #191E18; --raised: #242C21; --line: #2C3529; --grid: #20271F;
   --text: #EDF1E9; --text-2: #ABB5A5; --text-3: #8C9985;
   --accent: #C7F36B; --accent-ink: #182209; --accent-soft: rgba(199, 243, 107, 0.10);
@@ -33,6 +33,7 @@
   --size-20: 20px;
   --size-24: 24px;
   --size-25: 25px;
+  --size-26: 26px;
   --size-27: 27px;
   --size-28: 28px;
   --size-29: 29px;

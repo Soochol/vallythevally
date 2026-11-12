@@ -50,8 +50,12 @@ export class DrawingSurface implements ChartExtension {
     this.attachPanes();
     surfaces.set(slot, this);
     const on = <K extends keyof HTMLElementEventMap>(name: K, handler: (e: HTMLElementEventMap[K]) => void) => {
-      host.el.addEventListener(name, handler, { capture: true });
-      this.cleanup.push(() => host.el.removeEventListener(name, handler, { capture: true }));
+      const listener = (event: HTMLElementEventMap[K]) => {
+        if (event.composedPath().some((target) => target instanceof Element && target.hasAttribute("data-chart-control"))) return;
+        handler(event);
+      };
+      host.el.addEventListener(name, listener, { capture: true });
+      this.cleanup.push(() => host.el.removeEventListener(name, listener, { capture: true }));
     };
     on("pointerdown", (e) => this.onPointer(e, "down"));
     on("pointermove", (e) => this.onPointer(e, "move"));
