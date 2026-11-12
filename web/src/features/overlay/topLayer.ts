@@ -33,13 +33,14 @@ function consumeOutsidePointer(event: PointerEvent) {
 const onDown = (event: PointerEvent) => {
   const top = layers.at(-1);
   if (!top || !(event.target instanceof Node)) return;
-  const outside = !top.panel.contains(event.target) && !top.options.trigger?.contains(event.target);
+  const outside = !top.panel.contains(event.target) && !top.options.trigger?.contains(event.target) && !top.options.isInside?.(event.target);
   if (outside || (top.options.backdrop && event.target === top.panel)) {
     if (top.options.blockChartKeys !== false) consumeOutsidePointer(event);
     top.options.onClose("outside");
   }
 };
 export interface LayerOptions {
+  isInside?(target: Node): boolean;
   anchor?: () => Rect | undefined;
   trigger?: HTMLElement | null;
   focusTarget?: HTMLElement | null;

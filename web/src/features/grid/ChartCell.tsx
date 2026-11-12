@@ -80,7 +80,7 @@ export function ChartCell({ slot, status, onStatus }: Props) {
         if (command === "refresh") return refreshFinancial.current();
         if (command !== "edit") return runIndicatorCommand(slotRef.current, id, command);
         const initial = useLayoutStore.getState().layout.cells.find((c) => c.slot === slotRef.current)?.chartSettings.indicators.find((i) => i.id === id);
-        if (initial) setEditing({ initial, anchor });
+        if (initial) setEditing((current) => current?.initial.id === id ? current : { initial, anchor });
       },
       onPanelStretch: (stretches) => useLayoutStore.getState().setPanelStretches(slotRef.current, stretches),
       onCompareRemove: (code) => useLayoutStore.getState().removeCompare(slotRef.current, code),
@@ -132,7 +132,7 @@ export function ChartCell({ slot, status, onStatus }: Props) {
       <div ref={chartEl} className="absolute inset-0" />
       {venueAnchor && createPortal(<VenuePicker cell={cell} info={info} variant="legend" />, venueAnchor)}
       <DrawingOverlay slot={slot} />
-      {editing && cell.chartSettings.indicators.some((i) => i.id === editing.initial.id) && <IndicatorPopover key={editing.initial.id} slot={slot} {...editing} onClose={() => setEditing(null)} />}
+      {editing && cell.chartSettings.indicators.some((i) => i.id === editing.initial.id) && <IndicatorPopover key={editing.initial.id} slot={slot} {...editing} editRoot={chartEl.current!} onClose={() => setEditing(null)} />}
       {status.kind === "loading" && <div className="pointer-events-none absolute inset-0 z-[5] bg-chart-bg"><Skeleton label="차트 불러오는 중" /></div>}
       {olderError && (
         <div

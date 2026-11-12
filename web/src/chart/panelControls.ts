@@ -81,10 +81,17 @@ export class PanelControls {
     if (!drag) return;
     const aboveHeight = drag.heights[drag.above] ?? 0;
     const belowHeight = drag.heights[drag.below] ?? 0;
-    const delta = Math.max((drag.above === 0 ? 80 : 48) - aboveHeight, Math.min(belowHeight - 48, y - drag.startY));
+    const minimumAbove = drag.above === 0 ? 80 : 48;
+    const minimumBelow = 48;
+    const totalHeight = aboveHeight + belowHeight;
+    if (totalHeight < minimumAbove + minimumBelow) return;
+    const delta = Math.max(minimumAbove - aboveHeight, Math.min(belowHeight - minimumBelow, y - drag.startY));
+    const totalStretch = drag.before[drag.above]! + drag.before[drag.below]!;
+    const stretchPerPixel = drag.before.reduce((sum, stretch) => sum + stretch, 0) / drag.heights.reduce((sum, height) => sum + height, 0);
+    const aboveStretch = drag.before[drag.above]! + delta * stretchPerPixel;
     const panes = this.chart.panes();
-    panes[drag.above]?.setStretchFactor((drag.before[drag.above] ?? 1) * (aboveHeight + delta) / aboveHeight);
-    panes[drag.below]?.setStretchFactor((drag.before[drag.below] ?? 1) * (belowHeight - delta) / belowHeight);
+    panes[drag.above]?.setStretchFactor(aboveStretch);
+    panes[drag.below]?.setStretchFactor(totalStretch - aboveStretch);
     this.changed();
   }
 }

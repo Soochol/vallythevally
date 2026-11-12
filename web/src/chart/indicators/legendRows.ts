@@ -94,6 +94,7 @@ export class IndicatorLegend {
     const name = el("button", "min-w-0 truncate text-text-2 hover:text-text");
     name.type = "button";
     name.dataset.chartControl = "";
+    name.dataset.indicatorEdit = id;
     const values = el("span", "flex gap-1.5 font-medium");
     const badge = el("span", "rounded-[9px] border border-line px-1.5 text-xs text-text-3");
     const tools = el("span", "flex gap-px opacity-0 group-hover:opacity-100 group-focus-within:opacity-100");
@@ -104,6 +105,7 @@ export class IndicatorLegend {
       b.dataset.chartControl = "";
       b.title = label;
       b.dataset.indicatorCommand = command;
+      if (command === "edit") b.dataset.indicatorEdit = id;
       b.addEventListener("click", () => this.onCommand(id, command, b));
       tools.append(b);
       return b;

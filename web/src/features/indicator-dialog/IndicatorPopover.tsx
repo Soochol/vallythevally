@@ -7,10 +7,11 @@ import { Popover } from "../overlay/Popover";
 import { checkForm, startDraft } from "./indicatorForm";
 import { IndicatorSettingsForm, useValidator } from "./IndicatorSettingsForm";
 
-export function IndicatorPopover({ slot, initial, anchor, onClose }: {
+export function IndicatorPopover({ slot, initial, anchor, editRoot, onClose }: {
   slot: Slot;
   initial: IndicatorConfig;
   anchor: HTMLElement;
+  editRoot: HTMLElement;
   onClose(): void;
 }) {
   const trigger = useRef(anchor);
@@ -35,7 +36,7 @@ export function IndicatorPopover({ slot, initial, anchor, onClose }: {
     onClose();
   };
 
-  return <Popover anchor={trigger} onClose={close} role="dialog" aria-label={`${specName(initial.spec)} 설정`} data-chart-control="" className="w-[min(360px,calc(100vw-24px))] max-h-[calc(100dvh-24px)] overflow-auto p-3">
+  return <Popover isInside={(target) => target instanceof Element && editRoot.contains(target.closest("[data-indicator-edit]"))} anchor={trigger} onClose={close} role="dialog" aria-label={`${specName(initial.spec)} 설정`} data-chart-control="" className="w-[min(360px,calc(100vw-24px))] max-h-[calc(100dvh-24px)] overflow-auto p-3">
     <div className="mb-3 flex items-center gap-2">
       <h3 className="flex-1 text-m font-semibold">{KINDS[initial.spec.kind].label}</h3>
       <button type="button" className="icon-btn" aria-label="설정 닫기" onClick={() => close()}><CloseIcon size={16} /></button>

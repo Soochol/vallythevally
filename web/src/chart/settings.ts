@@ -98,9 +98,9 @@ function migrateV1(v1: Pick<ChartSettings, "style" | "scale" | "compare"> & { in
 }
 
 function readPanel(raw: unknown): Panel | null {
-  if (!isRecord(raw) || typeof raw.id !== "string" || !isNum(raw.stretch) || raw.stretch <= 0) return null;
+  if (!isRecord(raw) || typeof raw.id !== "string" || !isNum(raw.stretch)) return null;
   if (raw.collapsed !== undefined && typeof raw.collapsed !== "boolean") return null;
-  return { id: raw.id, stretch: raw.stretch, ...(raw.collapsed === undefined ? {} : { collapsed: raw.collapsed }) };
+  return { id: raw.id, stretch: raw.stretch > 0 ? raw.stretch : DEFAULT_PANEL_STRETCH, ...(raw.collapsed === undefined ? {} : { collapsed: raw.collapsed }) };
 }
 
 function readIndicator(raw: unknown): IndicatorConfig | null {
@@ -209,7 +209,7 @@ export function togglePanel(s: ChartSettings, panelId: string): ChartSettings {
 export function setPanelStretches(s: ChartSettings, stretches: readonly Panel["stretch"][]): ChartSettings {
   if (stretches.length !== s.panels.length || stretches.some((x) => !(Number.isFinite(x) && x > 0))) return s;
   if (stretches.every((x, i) => Math.abs(x - s.panels[i]!.stretch) < 1e-3)) return s;
-  return { ...s, panels: s.panels.map((p, i) => ({ ...p, stretch: Math.round(stretches[i]! * 1000) / 1000 })) };
+  return { ...s, panels: s.panels.map((p, i) => ({ ...p, stretch: stretches[i]! })) };
 }
 
 export function shownScale(s: Pick<ChartSettings, "scale" | "compare">): PriceScale {
