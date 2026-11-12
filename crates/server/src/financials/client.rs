@@ -19,7 +19,6 @@ mod tls_tests;
 
 pub type Row = BTreeMap<String, String>;
 
-
 const ATTEMPTS: u64 = 3;
 
 pub struct Client {
