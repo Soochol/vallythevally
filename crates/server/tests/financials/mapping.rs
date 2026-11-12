@@ -337,22 +337,23 @@ async fn first_and_mid_preferred_source_failures_leave_real_price_api_usable() {
     }
 }
 
-fn integrated_receipt(year: i32, code: &str) -> String {
-    match code {
+fn integrated_receipt(year: i32, code: &str, corrected: bool) -> String {
+    let original = match code {
         "11013"=>format!("{year}0515000001"), "11012"=>format!("{year}0815000001"),
         "11014"=>format!("{year}1115000001"), _=>format!("{}0331000001",year+1),
-    }
+    };
+    if corrected { format!("{}2", &original[..13]) } else { original }
 }
 
-fn integrated_statement(year: i32, code: &str) -> (Vec<BTreeMap<String,String>>, String) {
+fn integrated_statement(year: i32, code: &str, corrected: bool) -> (Vec<BTreeMap<String,String>>, String) {
     let index=REPORT_CODES.iter().position(|c|*c==code).unwrap();
     let end=KstDate::new(year,(index as u8+1)*3,1).unwrap().last_of_month().to_string();
     let start=format!("{year}-01-01");
     let quarter=if code=="11011" {start.clone()} else {format!("{year}-{:02}-01",index*3+1)};
-    let receipt=integrated_receipt(year,code);
+    let receipt=integrated_receipt(year,code,corrected);
     let mut rows=Vec::new();
     for (section,id,current,cumulative) in [
-        ("IS","ifrs-full_Revenue",["100","100","100","1000"][index],Some(["100","200","300","1000"][index])),
+        ("IS","ifrs-full_Revenue",if corrected { ["150","150","150","1200"][index] } else { ["100","100","100","1000"][index] },Some(if corrected { ["150","250","350","1200"][index] } else { ["100","200","300","1000"][index] })),
         ("IS","dart_OperatingIncomeLoss",["-10","-10","-10","-100"][index],Some(["-10","-20","-30","-100"][index])),
         ("IS","ifrs-full_ProfitLossAttributableToOwnersOfParent",["10","20","30","100"][index],Some(["10","30","60","100"][index])),
         ("CF","ifrs-full_CashFlowsFromUsedInInvestingActivities",["-100","-200","-300","-400"][index],Some(["-100","-200","-300","-400"][index])),
@@ -377,29 +378,36 @@ fn integrated_statement(year: i32, code: &str) -> (Vec<BTreeMap<String,String>>,
     (rows,xml)
 }
 
-pub(super) fn integrated_response(endpoint: &str, params: &BTreeMap<String,String>) -> Response {
+pub(super) fn integrated_response(endpoint: &str, params: &BTreeMap<String,String>, corrections: &std::collections::BTreeSet<(i32, String)>) -> Response {
     match endpoint {
         "list.json"=>{
-            let rows:Vec<_>=(2015..=2016).flat_map(|year|REPORT_CODES.map(move |code| {
-                let receipt=integrated_receipt(year,code);
-                let (name,month)=match code {"11013"=>("분기보고서",3),"11012"=>("반기보고서",6),"11014"=>("분기보고서",9),_=>("사업보고서",12)};
-                json!({"corp_code":CORP,"rcept_no":receipt,"rcept_dt":&receipt[..8],"report_nm":format!("{name} ({year}.{month:02})")})
-            })).collect();
+            let mut rows = Vec::new();
+            for year in 2015..=2017 {
+                for code in REPORT_CODES {
+                    if year > 2016 && !corrections.contains(&(year, code.into())) { continue; }
+                    for corrected in [false, true] {
+                        if corrected && !corrections.contains(&(year, code.into())) { continue; }
+                        let receipt = integrated_receipt(year, code, corrected);
+                        let (name, month) = match code { "11013" => ("분기보고서", 3), "11012" => ("반기보고서", 6), "11014" => ("분기보고서", 9), _ => ("사업보고서", 12) };
+                        rows.push(json!({"corp_code":CORP,"rcept_no":receipt,"rcept_dt":&receipt[..8],"report_nm":format!("{}{name} ({year}.{month:02})", if corrected { "[기재정정]" } else { "" })}));
+                    }
+                }
+            }
             axum::Json(json!({"status":"000","page_no":1,"total_page":1,"list":rows})).into_response()
         }
         "fnlttSinglAcntAll.json"=>{
             let year=params["bsns_year"].parse::<i32>().unwrap();
-            if !(2015..=2016).contains(&year) {return axum::Json(json!({"status":"013"})).into_response();}
-            axum::Json(json!({"status":"000","list":integrated_statement(year,&params["reprt_code"]).0})).into_response()
+            if !(2015..=2017).contains(&year) || (year > 2016 && !corrections.contains(&(year, params["reprt_code"].clone()))) {return axum::Json(json!({"status":"013"})).into_response();}
+            axum::Json(json!({"status":"000","list":integrated_statement(year,&params["reprt_code"],corrections.contains(&(year, params["reprt_code"].clone()))).0})).into_response()
         }
         "fnlttXbrl.xml"=>{
-            let (year,code)=(2015..=2016).flat_map(|year|REPORT_CODES.map(move |code|(year,code))).find(|(year,code)|integrated_receipt(*year,code)==params["rcept_no"]).unwrap();
-            zipped("integrated.xbrl",&integrated_statement(year,code).1).into_response()
+            let (year,code,corrected)=(2015..=2017).flat_map(|year|REPORT_CODES.into_iter().flat_map(move |code|[false,true].map(move |corrected|(year,code,corrected)))).find(|(year,code,corrected)|integrated_receipt(*year,code,*corrected)==params["rcept_no"]).unwrap();
+            zipped("integrated.xbrl",&integrated_statement(year,code,corrected).1).into_response()
         }
         "alotMatter.json"=>{
             let year=params["bsns_year"].parse::<i32>().unwrap();
-            if !(2015..=2016).contains(&year) {return axum::Json(json!({"status":"013"})).into_response();}
-            let rows:Vec<_>=[("보통주","10"),("우선주","7")].map(|(class,value)|json!({"corp_code":CORP,"stlm_dt":format!("{year}-12-31"),"rcept_no":integrated_receipt(year,"11011"),"se":"주당 현금배당금(원)","stock_knd":class,"thstrm":value})).into_iter().collect();
+            if !(2015..=2017).contains(&year) || (year > 2016 && !corrections.contains(&(year, "11011".into()))) {return axum::Json(json!({"status":"013"})).into_response();}
+            let rows:Vec<_>=[("보통주","10"),("우선주","7")].map(|(class,value)|json!({"corp_code":CORP,"stlm_dt":format!("{year}-12-31"),"rcept_no":integrated_receipt(year,"11011",corrections.contains(&(year, "11011".into()))),"se":"주당 현금배당금(원)","stock_knd":class,"thstrm":value})).into_iter().collect();
             axum::Json(json!({"status":"000","list":rows})).into_response()
         }
         _=>unreachable!(),

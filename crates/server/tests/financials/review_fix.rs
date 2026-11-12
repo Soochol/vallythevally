@@ -170,6 +170,7 @@ async fn delayed_manual_connection_follows_running_automatic_collection_and_pres
         {
             let mut state = fake.state.lock().unwrap();
             state.statement_amounts.insert(COMPANY.into(),"175".into());
+            state.correction = true;
             state.discovery_paused = None;
             if source_failure { state.failures.insert("fnlttSinglAcntAll.json/2015/11011".into(),"020".into()); }
         }
@@ -239,6 +240,7 @@ async fn pending_manual_refresh_survives_active_collection_storage_failure_and_r
     assert_eq!(settled_stock(&service,"000001",false).await.status,"ready");
     sqlx::query("DROP TRIGGER fail_pending_refresh").execute(&mut connection).await.unwrap();
     fake.state.lock().unwrap().statement_amounts.insert(COMPANY.into(),"175".into());
+    fake.state.lock().unwrap().correction = true;
     for elapsed in [0,59] {
         clock.jump(attempted + elapsed - clock.now().unix());
         assert_eq!(service.open(STOCK,true,false).await.failure,Some(Failure::Storage));

@@ -37,6 +37,7 @@ struct Amount {
     basis: Basis,
     currency: String,
     inputs: Vec<FinancialInput>,
+    snapshot_version: u64,
 }
 
 #[derive(Clone)]
@@ -126,11 +127,11 @@ fn amount(report: &Report, collection: &Collection, concept: Concept, cumulative
     }
     if values.iter().any(|v| v != &values[0]) { return Err(gap(Reason::AmbiguousAccount, inputs)); }
     let (value, period, currency) = values.remove(0);
-    Ok(Amount { value, period, basis: statement.basis, currency, inputs })
+    Ok(Amount { value, period, basis: statement.basis, currency, inputs, snapshot_version: report.statement.snapshot_version() })
 }
 
 fn compatible(a: &Amount, b: &Amount) -> Option<Reason> {
-    if a.basis != b.basis { Some(Reason::BasisChanged) } else if a.currency != b.currency { Some(Reason::CurrencyMismatch) } else if a.inputs.first().map(|i| i.refresh_version) != b.inputs.first().map(|i| i.refresh_version) { Some(Reason::RefreshIncomplete) } else { None }
+    if a.basis != b.basis { Some(Reason::BasisChanged) } else if a.currency != b.currency { Some(Reason::CurrencyMismatch) } else if a.snapshot_version != b.snapshot_version { Some(Reason::RefreshIncomplete) } else { None }
 }
 
 fn with_inputs(mut error: Gap, mut inputs: Vec<FinancialInput>) -> Gap { inputs.append(&mut error.inputs); error.inputs = inputs; error }
@@ -303,7 +304,8 @@ fn dps(report: &Report, collection: &Collection, security: &Security, frequency:
         values.push(value);
     }
     if values.iter().any(|v| *v != values[0]) { return Err(gap(Reason::AmbiguousAccount, inputs)); }
-    Ok(Amount { value: values[0], period: reporting, basis: statement(report)?.basis, currency: "KRW".into(), inputs })
+    if report.dividends.snapshot_version() != report.statement.snapshot_version() { return Err(gap(Reason::RefreshIncomplete, inputs)); }
+    Ok(Amount { value: values[0], period: reporting, basis: statement(report)?.basis, currency: "KRW".into(), inputs, snapshot_version: report.dividends.snapshot_version() })
 }
 
 fn bucket(value: &FactPeriod, frequency: FinancialPeriod) -> Option<UnixSeconds> {
@@ -340,8 +342,8 @@ fn point(report: &Report, collection: &Collection, frequency: FinancialPeriod, m
 pub fn page(symbol: &str, frequency: FinancialPeriod, snapshot: Snapshot) -> FinancialsPage {
     let collection = &snapshot.collection;
     let mut progress = FinancialProgress { total: 0, completed: 0, failed: 0, pending: 0 };
-    for report in collection.reports.values() {
-        let fetches = std::iter::once((report.statement.checked_at, report.statement.failure.or(report.statement.data.as_ref().and_then(|s| s.source_failure)), report.statement.refresh_version)).chain((report.report_code == "11011").then_some((report.dividends.checked_at, report.dividends.failure, report.dividends.refresh_version)));
+    for report in collection.working_reports().values() {
+        let fetches = std::iter::once((report.statement.checked_at, report.statement.failure.or(report.statement.data.as_ref().and_then(|s| s.source_failure)), report.statement.snapshot_version())).chain((report.report_code == "11011").then_some((report.dividends.checked_at, report.dividends.failure, report.dividends.snapshot_version())));
         for (checked, failed, version) in fetches {
             progress.total += 1;
             if failed.is_some() { progress.failed += 1; }
