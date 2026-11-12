@@ -44,6 +44,12 @@ export function selectedSource(base: Screens, id: string | null, sessions: Edito
   return sources.find((screen) => screen.id === id) ?? sources[0] ?? null;
 }
 
+function latestKnownScreens(client: QueryClient, base: Screens, session: EditorSession): Screens {
+  const cached = client.getQueryData(screensQuery.queryKey);
+  const known = session.base.revision > base.revision ? session.base : base;
+  return cached && cached.revision > known.revision ? cached : known;
+}
+
 export const useScreenEditor = create<EditorState>()((set, get) => {
   const put = (session: EditorSession) => set((s) => ({ sessions: { ...s.sessions, [session.source.id]: session } }));
   const read = (base: Screens, source: Screen) => currentSession(base, source, get().sessions);
@@ -64,11 +70,12 @@ export const useScreenEditor = create<EditorState>()((set, get) => {
     save: async (client, base, source) => {
       const session = read(base, source);
       if (session.saving.kind === "saving") return;
-      const checked = checkedSession(session, base);
+      const latest = latestKnownScreens(client, base, session);
+      const checked = checkedSession(session, latest);
       if (!checked.ok) return put({ ...session, tried: true });
       put({ ...session, saving: { kind: "saving" } });
       try {
-        const outcome = await saveScreens(client, session.base, (list) => withScreen(list, checked.screen));
+        const outcome = await saveScreens(client, { ...latest, revision: session.base.revision }, (list) => withScreen(list, checked.screen));
         if (outcome.kind === "stale") return put({ ...session, base: outcome.latest, saving: { kind: "failed", message: "다른 탭이나 기기에서 조건식 목록이 바뀌어 덮어쓰지 않았습니다. 변경 내용은 유지했습니다. 다시 저장하면 최신 목록에 반영합니다." } });
         const saved = client.getQueryData(screensQuery.queryKey) ?? session.base;
         put({ ...session, source: checked.screen, base: saved, initial: session.draft, saving: { kind: "idle" }, tried: false });
@@ -79,11 +86,12 @@ export const useScreenEditor = create<EditorState>()((set, get) => {
     remove: async (client, base, source) => {
       const session = read(base, source);
       if (session.saving.kind === "saving") return false;
+      const latest = latestKnownScreens(client, base, session);
       const discard = () => set((s) => ({ sessions: Object.fromEntries(Object.entries(s.sessions).filter(([id]) => id !== source.id)) }));
       if (session.initial === null) { discard(); return true; }
       put({ ...session, saving: { kind: "saving" } });
       try {
-        const outcome = await saveScreens(client, session.base, (list) => list.filter((screen) => screen.id !== source.id));
+        const outcome = await saveScreens(client, { ...latest, revision: session.base.revision }, (list) => list.filter((screen) => screen.id !== source.id));
         if (outcome.kind === "stale") {
           put({ ...session, base: outcome.latest, saving: { kind: "failed", message: "다른 탭이나 기기에서 조건식 목록이 바뀌어 삭제하지 않았습니다. 바뀐 목록을 불러왔으니 다시 삭제하세요." } });
           return false;
