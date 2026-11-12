@@ -49,22 +49,22 @@ enum Rule {
 }
 
 fn rule_of(condition: &Condition) -> Result<Rule, &'static str> {
-    let line = |period, bar_range, kind| Ok(Rule::Bars(Line { period, bar_range, kind }));
+    let line = |period, recent_bars, kind| Ok(Rule::Bars(Line { period, recent_bars, kind }));
     match *condition {
-        Condition::NewHigh { period, bar_range, field, n } => line(period, bar_range, Kind::NewExtreme { extreme: Extreme::High, field, n }),
-        Condition::NewLow { period, bar_range, field, n } => line(period, bar_range, Kind::NewExtreme { extreme: Extreme::Low, field, n }),
-        Condition::ValueRange { period, bar_range, field, min, max } => line(period, bar_range, Kind::ValueRange { field, min: bound(min)?, max: bound(max)? }),
-        Condition::Change { period, bar_range, back, min_pct, max_pct } => line(period, bar_range, Kind::Change { back, min_pct: bound(min_pct)?, max_pct: bound(max_pct)? }),
-        Condition::NearExtreme { period, bar_range, extreme, n, within_pct } => line(period, bar_range, Kind::NearExtreme { extreme, n, within_pct: decimal(within_pct)? }),
-        Condition::Surge { period, bar_range, field, n, times } => line(period, bar_range, Kind::Surge { field: surged(field), n, times: decimal(times)? }),
-        Condition::MaPosition { period, bar_range, field, method, length, side } => line(period, bar_range, Kind::Indicator(Indicator::ma_position(field, method, length, side)?)),
-        Condition::MaAlignment { period, bar_range, method, ref lengths, order } => line(period, bar_range, Kind::Indicator(Indicator::ma_alignment(method, lengths, order)?)),
-        Condition::MaCross { period, bar_range, method, fast, slow, direction } => line(period, bar_range, Kind::Indicator(Indicator::ma_cross(method, fast, slow, direction)?)),
-        Condition::Rsi { period, bar_range, length, test } => line(period, bar_range, Kind::Indicator(Indicator::rsi(length, test)?)),
-        Condition::Macd { period, bar_range, fast, slow, signal, test } => line(period, bar_range, Kind::Indicator(Indicator::macd(fast, slow, signal, test)?)),
-        Condition::Stochastic { period, bar_range, k, d, smooth, test } => line(period, bar_range, Kind::Indicator(Indicator::stochastic(k, d, smooth, test)?)),
-        Condition::Bollinger { period, bar_range, length, k, test } => line(period, bar_range, Kind::Indicator(Indicator::bollinger(length, k, test)?)),
-        Condition::Ichimoku { period, bar_range, conversion, base, span_b, displacement, test } => line(period, bar_range, Kind::Indicator(Indicator::ichimoku(conversion, base, span_b, displacement, test)?)),
+        Condition::NewHigh { period, recent_bars, field, n } => line(period, recent_bars, Kind::NewExtreme { extreme: Extreme::High, field, n }),
+        Condition::NewLow { period, recent_bars, field, n } => line(period, recent_bars, Kind::NewExtreme { extreme: Extreme::Low, field, n }),
+        Condition::ValueRange { period, recent_bars, field, min, max } => line(period, recent_bars, Kind::ValueRange { field, min: bound(min)?, max: bound(max)? }),
+        Condition::Change { period, recent_bars, back, min_pct, max_pct } => line(period, recent_bars, Kind::Change { back, min_pct: bound(min_pct)?, max_pct: bound(max_pct)? }),
+        Condition::NearExtreme { period, recent_bars, extreme, n, within_pct } => line(period, recent_bars, Kind::NearExtreme { extreme, n, within_pct: decimal(within_pct)? }),
+        Condition::Surge { period, recent_bars, field, n, times } => line(period, recent_bars, Kind::Surge { field: surged(field), n, times: decimal(times)? }),
+        Condition::MaPosition { period, recent_bars, field, method, length, side } => line(period, recent_bars, Kind::Indicator(Indicator::ma_position(field, method, length, side)?)),
+        Condition::MaAlignment { period, recent_bars, method, ref lengths, order } => line(period, recent_bars, Kind::Indicator(Indicator::ma_alignment(method, lengths, order)?)),
+        Condition::MaCross { period, recent_bars, method, fast, slow, direction } => line(period, recent_bars, Kind::Indicator(Indicator::ma_cross(method, fast, slow, direction)?)),
+        Condition::Rsi { period, recent_bars, length, test } => line(period, recent_bars, Kind::Indicator(Indicator::rsi(length, test)?)),
+        Condition::Macd { period, recent_bars, fast, slow, signal, test } => line(period, recent_bars, Kind::Indicator(Indicator::macd(fast, slow, signal, test)?)),
+        Condition::Stochastic { period, recent_bars, k, d, smooth, test } => line(period, recent_bars, Kind::Indicator(Indicator::stochastic(k, d, smooth, test)?)),
+        Condition::Bollinger { period, recent_bars, length, k, test } => line(period, recent_bars, Kind::Indicator(Indicator::bollinger(length, k, test)?)),
+        Condition::Ichimoku { period, recent_bars, conversion, base, span_b, displacement, test } => line(period, recent_bars, Kind::Indicator(Indicator::ichimoku(conversion, base, span_b, displacement, test)?)),
         Condition::MarketCap { min, max } => Ok(Rule::MarketCap(MarketCapRange { min: bound(min)?, max: bound(max)? })),
     }
 }
@@ -186,7 +186,7 @@ fn standing(line: &Line, stock: &Stock, cells: &Cells, series: &Series) -> Stand
     if stock.complete || stored_from_listing {
         return if (series.len() as i64) < line.needed_bars() { Standing::ListedTooShort } else { Standing::Judged };
     }
-    let needed = u64::from(line.bar_range.end) + line.needed_bars() as u64;
+    let needed = (u64::from(line.recent_bars) - 1) + line.needed_bars() as u64;
     let Some(first) = (series.len() as u64).checked_sub(needed).and_then(|i| series.cells_from(0).get(i as usize)) else {
         return Standing::HistoryShort;
     };

@@ -7,7 +7,7 @@ import { editor, openScreener, panel, results, rows, runButton, savedTo, updateB
 
 test.use({ krxMarket: "20261106", clockStart: "20261106203000" });
 
-const screen: Screen = { id: "current", name: "최신 자료 확인", markets: [], exclude: [], conditions: [{ kind: "new_high", period: "D", field: "close", n: 1, barRange: { start: 0, end: 0 } }] };
+const screen: Screen = { id: "current", name: "최신 자료 확인", markets: [], exclude: [], conditions: [{ kind: "new_high", period: "D", field: "close", n: 1, recentBars: 1 }] };
 const meta = (page: Page) => results(page).getByLabel("결과 자료");
 const fail = { apiId: "ka10095", status: 200, body: { return_code: 2, return_msg: "입력 값 오류입니다[1501:시험용 수집 실패]" } };
 
@@ -47,12 +47,11 @@ async function intraday(app: App, page: Page, baseline: ScreenerResult, price: n
   await openScreener(page);
 }
 
-async function editRange(page: Page, period: string, start: number, end: number) {
+async function editRecent(page: Page, period: string, recent: number) {
   await panel(page).getByRole("button", { name: "편집", exact: true }).click();
   const dialog = editor(page, "조건식 편집");
   await selectOption(dialog.getByRole("combobox", { name: "조건 1 봉 주기" }), period);
-  await dialog.getByRole("textbox", { name: "조건 1 봉 범위 시작" }).fill(String(start));
-  await dialog.getByRole("textbox", { name: "조건 1 봉 범위 끝" }).fill(String(end));
+  await dialog.getByRole("textbox", { name: "조건 1 최근 기간" }).fill(String(recent));
   const saved = savedTo(page, "/api/screens");
   await dialog.getByRole("button", { name: "저장", exact: true }).click();
   await saved;
@@ -74,20 +73,24 @@ test("수동 실행만 값을 바꾸며 같은 봉 갱신과 새 봉 추가, D/W
   const updated = await execute(page);
   expect(updated.rows.find((r) => r.symbol === "110010")).toMatchObject({ close: old.close + 200, latestBarDate: "2026-11-09", matchedDate: "2026-11-09" });
   for (const period of ["D", "W", "M"]) {
-    for (const [start, end] of [[0, 0], [1, 1], [0, 2]]) {
-      await editRange(page, period, start!, end!);
-      await expect(results(page)).toHaveCount(period === "D" && start === 0 && end === 0 ? 1 : 0);
+    for (const recent of [1, 2, 3]) {
+      await editRecent(page, period, recent);
+      await expect(results(page)).toHaveCount(period === "D" && recent === 1 ? 1 : 0);
       const answer = await execute(page);
       const row = answer.rows.find((r) => r.symbol === "110010")!;
       expect(row).toMatchObject({ close: old.close + 200, latestBarDate: "2026-11-09", provisional: true });
-      const expected = period === "D" ? (start === 1 ? "2026-11-06" : "2026-11-09") : period === "W" ? (start === 1 ? "2026-11-02" : "2026-11-09") : (start === 1 ? "2026-10-01" : "2026-11-01");
+      const expected = period === "M" ? "2026-11-01" : "2026-11-09";
       expect(row.matchedDate).toBe(expected);
       await expect(rows(page).filter({ hasText: "110010" }).locator(`[title="첫 봉 조건 일치 ${expected}"]`)).toBeVisible();
     }
   }
-  await editRange(page, "D", 1, 1);
+  await editRecent(page, "D", 2);
   await panel(page).getByRole("button", { name: "편집", exact: true }).click();
   const dialog = editor(page, "조건식 편집");
+  await selectOption(dialog.getByRole("combobox", { name: "조건 1 종류" }), "value_range");
+  await selectOption(dialog.getByRole("combobox", { name: "조건 1 값" }), "close");
+  await dialog.getByRole("textbox", { name: "조건 1 최소" }).fill(String(old.close));
+  await dialog.getByRole("textbox", { name: "조건 1 최대" }).fill(String(old.close));
   await dialog.getByRole("button", { name: "조건 더하기" }).click();
   await dialog.getByRole("textbox", { name: "조건 2 신고가 기간" }).fill("1");
   const saved = savedTo(page, "/api/screens");
@@ -175,17 +178,17 @@ test("옛 SQLite 조건식은 안내 없이 이전되고 편집·저장·서버 
   await app.restart({ legacyScreens: [legacy] });
   await page.goto("/");
   await openScreener(page);
-  await expect(panel(page).getByRole("list", { name: "조건" })).toContainText("0~2봉 전");
+  await expect(panel(page).getByRole("list", { name: "조건" })).toContainText("최근 3일 이내");
   await expect(page.getByRole("alert")).toHaveCount(0);
   await expect(page.getByText(/변환|이전되었습니다|새 규칙으로/)).toHaveCount(0);
   const migrated = await (await fetch(`${app.url}/api/screens`)).json();
-  expect(migrated).toMatchObject({ revision: 11, screens: [{ ...screen, conditions: [{ kind: "new_high", period: "D", field: "close", n: 1, barRange: { start: 0, end: 2 } }] }] });
-  await editRange(page, "M", 1, 1);
+  expect(migrated).toMatchObject({ revision: 12, screens: [{ ...screen, conditions: [{ kind: "new_high", period: "D", field: "close", n: 1, recentBars: 3 }] }] });
+  await editRecent(page, "M", 2);
   await app.restart();
   await page.reload();
   await openScreener(page);
-  await expect(panel(page).getByRole("list", { name: "조건" })).toContainText("월봉 1봉 전");
-  expect((await (await fetch(`${app.url}/api/screens`)).json()).revision).toBe(12);
+  await expect(panel(page).getByRole("list", { name: "조건" })).toContainText("월봉 최근 2개월 이내");
+  expect((await (await fetch(`${app.url}/api/screens`)).json()).revision).toBe(13);
   await expect(page.getByText(/변환|이전되었습니다|새 규칙으로/)).toHaveCount(0);
 });
 
@@ -262,10 +265,10 @@ for (const olderFails of [false, true]) {
     await runButton(page).click();
     await requested;
     await app.fake.reset();
-    await editRange(page, "M", 1, 1);
+    await editRecent(page, "M", 2);
     const newest = await execute(page);
     const row = newest.rows.find((r) => r.symbol === "110010")!;
-    expect(row.matchedDate).toBe("2026-10-01");
+    expect(row.matchedDate).toBe("2026-11-01");
     const original = await meta(page).textContent();
     await page.getByRole("tablist", { name: "오른쪽 패널" }).getByRole("tab", { name: "관심종목", exact: true }).click();
     await openScreener(page);

@@ -6,7 +6,7 @@ test.use({ krxMarket: "20261106", clockStart: "20261106203000" });
 
 const NO_CONDITIONS = "조건 없음 · 대상 종목 전체";
 const SCREEN_NAME = "조건 없는 대상 종목";
-const NEW_HIGH = "일봉 0봉 전 고가가 200일 신고가다";
+const NEW_HIGH = "일봉 최근 1일 이내 고가가 200일 신고가인 봉이 있다";
 
 const EVERY_STOCK = [
   ["110010", "가상전자"],

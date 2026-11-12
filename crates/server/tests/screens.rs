@@ -31,7 +31,7 @@ async fn reply(resp: reqwest::Response) -> (u16, Value) {
 }
 
 fn new_high(period: &str, field: &str, n: u32, m: u32) -> Value {
-    json!({"kind": "new_high", "period": period, "field": field, "n": n, "barRange": {"start": 0, "end": m - 1}})
+    json!({"kind": "new_high", "period": period, "field": field, "n": n, "recentBars": m})
 }
 
 fn screen_of(id: &str, name: &str, conditions: Vec<Value>) -> Value {
@@ -54,19 +54,19 @@ fn every_kind() -> Value {
 fn example(kind: &str) -> Value {
     match kind {
         "new_high" => new_high("D", "high", 200, 1),
-        "new_low" => json!({"kind": "new_low", "period": "W", "barRange": {"start": 0, "end": 1}, "field": "traded_value", "n": 52}),
-        "value_range" => json!({"kind": "value_range", "period": "D", "barRange": {"start": 0, "end": 0}, "field": "traded_value", "min": 10_000_000_000.0, "max": null}),
-        "change" => json!({"kind": "change", "period": "D", "barRange": {"start": 0, "end": 0}, "back": 20, "minPct": 30.0, "maxPct": null}),
-        "near_extreme" => json!({"kind": "near_extreme", "period": "D", "barRange": {"start": 0, "end": 0}, "extreme": "high", "n": 200, "withinPct": 5.0}),
-        "surge" => json!({"kind": "surge", "period": "D", "barRange": {"start": 0, "end": 0}, "field": "volume", "n": 20, "times": 3.0}),
-        "ma_position" => json!({"kind": "ma_position", "period": "D", "barRange": {"start": 0, "end": 0}, "field": "close", "method": "sma", "length": 20, "side": "above"}),
-        "ma_alignment" => json!({"kind": "ma_alignment", "period": "D", "barRange": {"start": 0, "end": 0}, "method": "ema", "lengths": [5, 20, 60, 120], "order": "bullish"}),
-        "ma_cross" => json!({"kind": "ma_cross", "period": "D", "barRange": {"start": 0, "end": 4}, "method": "sma", "fast": 5, "slow": 20, "direction": "up"}),
-        "rsi" => json!({"kind": "rsi", "period": "D", "barRange": {"start": 0, "end": 2}, "length": 14, "test": {"kind": "breakout", "value": 30.0, "direction": "up"}}),
-        "macd" => json!({"kind": "macd", "period": "D", "barRange": {"start": 0, "end": 0}, "fast": 12, "slow": 26, "signal": 9, "test": {"kind": "signal_cross", "direction": "up"}}),
-        "stochastic" => json!({"kind": "stochastic", "period": "D", "barRange": {"start": 0, "end": 0}, "k": 5, "d": 3, "smooth": 3, "test": {"kind": "range", "min": null, "max": 20.0}}),
-        "bollinger" => json!({"kind": "bollinger", "period": "D", "barRange": {"start": 0, "end": 0}, "length": 20, "k": 2.0, "test": {"kind": "outside", "side": "above"}}),
-        "ichimoku" => json!({"kind": "ichimoku", "period": "D", "barRange": {"start": 0, "end": 0}, "conversion": 9, "base": 26, "spanB": 52, "displacement": 26, "test": {"kind": "cloud", "side": "above"}}),
+        "new_low" => json!({"kind": "new_low", "period": "W", "recentBars": 2, "field": "traded_value", "n": 52}),
+        "value_range" => json!({"kind": "value_range", "period": "D", "recentBars": 1, "field": "traded_value", "min": 10_000_000_000.0, "max": null}),
+        "change" => json!({"kind": "change", "period": "D", "recentBars": 1, "back": 20, "minPct": 30.0, "maxPct": null}),
+        "near_extreme" => json!({"kind": "near_extreme", "period": "D", "recentBars": 1, "extreme": "high", "n": 200, "withinPct": 5.0}),
+        "surge" => json!({"kind": "surge", "period": "D", "recentBars": 1, "field": "volume", "n": 20, "times": 3.0}),
+        "ma_position" => json!({"kind": "ma_position", "period": "D", "recentBars": 1, "field": "close", "method": "sma", "length": 20, "side": "above"}),
+        "ma_alignment" => json!({"kind": "ma_alignment", "period": "D", "recentBars": 1, "method": "ema", "lengths": [5, 20, 60, 120], "order": "bullish"}),
+        "ma_cross" => json!({"kind": "ma_cross", "period": "D", "recentBars": 5, "method": "sma", "fast": 5, "slow": 20, "direction": "up"}),
+        "rsi" => json!({"kind": "rsi", "period": "D", "recentBars": 3, "length": 14, "test": {"kind": "breakout", "value": 30.0, "direction": "up"}}),
+        "macd" => json!({"kind": "macd", "period": "D", "recentBars": 1, "fast": 12, "slow": 26, "signal": 9, "test": {"kind": "signal_cross", "direction": "up"}}),
+        "stochastic" => json!({"kind": "stochastic", "period": "D", "recentBars": 1, "k": 5, "d": 3, "smooth": 3, "test": {"kind": "range", "min": null, "max": 20.0}}),
+        "bollinger" => json!({"kind": "bollinger", "period": "D", "recentBars": 1, "length": 20, "k": 2.0, "test": {"kind": "outside", "side": "above"}}),
+        "ichimoku" => json!({"kind": "ichimoku", "period": "D", "recentBars": 1, "conversion": 9, "base": 26, "spanB": 52, "displacement": 26, "test": {"kind": "cloud", "side": "above"}}),
         "market_cap" => json!({"kind": "market_cap", "min": 300_000_000_000.0, "max": null}),
         other => panic!("모르는 조건 종류 {other}"),
     }
@@ -143,13 +143,13 @@ async fn every_condition_kind_and_test_is_saved_as_sent() {
         with(example("change"), "minPct", json!(-99.5)),
         with(with(example("value_range"), "min", json!(0.0)), "max", json!(0.0)),
         with(example("near_extreme"), "withinPct", json!(100.0)),
-        with(with(example("near_extreme"), "withinPct", json!(0.0)), "barRange", json!({"start": 299, "end": 300})),
+        with(with(example("near_extreme"), "withinPct", json!(0.0)), "recentBars", json!(301)),
         with(example("rsi"), "test", json!({"kind": "range", "min": 0.0, "max": 100.0})),
         with(example("rsi"), "test", json!({"kind": "breakout", "value": 100.0, "direction": "down"})),
         with(example("stochastic"), "test", json!({"kind": "range", "min": 0.0, "max": null})),
         with(example("ma_alignment"), "lengths", json!([65_531, 65_532, 65_533, 65_534, 65_535])),
         with(with(example("macd"), "fast", json!(65_534)), "slow", json!(65_535)),
-        with(with(example("new_low"), "barRange", json!({"start": 0, "end": 51})), "n", json!(52)),
+        with(with(example("new_low"), "recentBars", json!(52)), "n", json!(52)),
     ])], 2);
     assert_eq!(api.put(edges.to_string()).await, (200, edges.clone()), "규칙이 허락하는 끝 값은 받는다");
     assert_eq!(api.get().await, (200, edges));
@@ -173,7 +173,7 @@ async fn each_screen_rule_and_a_stale_revision_rejects_the_save() {
     let line = |condition: Value| edit(&|s| s["conditions"][0] = condition.clone());
     let changed = |kind: &str, key: &str, value: Value| line(with(example(kind), key, value));
     let tested = |kind: &str, test: Value| changed(kind, "test", test);
-    let condition = |n: Value, end: Value| line(json!({"kind": "new_high", "period": "D", "field": "high", "n": n, "barRange": {"start": 0, "end": end}}));
+    let condition = |n: Value, end: Value| line(json!({"kind": "new_high", "period": "D", "field": "high", "n": n, "recentBars": end}));
     let many = |count: usize| screens((0..count).map(|i| screen(&format!("S{i}"), &format!("조건식 {i}"))).collect(), 11).to_string();
     let mut cases = vec![
         ("조건식 51개", many(51), 400, "bad_request"),
@@ -191,15 +191,15 @@ async fn each_screen_rule_and_a_stale_revision_rejects_the_save() {
         ("정수가 아닌 m", condition(json!(5), json!(1.5)), 400, "bad_request"),
         ("정수가 아닌 n", condition(json!(5.5), json!(1)), 400, "bad_request"),
         ("음수 n", condition(json!(-5), json!(1)), 400, "bad_request"),
-        ("u32를 넘는 m", condition(json!(u32::MAX), json!(u64::from(u32::MAX) + 1)), 400, "bad_request"),
+        ("u32를 넘는 m", condition(json!(u32::MAX), json!(u64::from(u32::MAX) + 2)), 400, "bad_request"),
         ("겹친 제외", edit(&|s| s["exclude"] = json!(["etf", "spac", "etf"])), 400, "bad_request"),
         ("겹친 상태 제외", edit(&|s| s["exclude"] = json!(["trading_halted", "managed", "trading_halted"])), 400, "bad_request"),
         ("모르는 제외", edit(&|s| s["exclude"] = json!(["etn"])), 400, "bad_request"),
         ("겹친 시장", edit(&|s| s["markets"] = json!(["kosdaq", "kospi", "kosdaq"])), 400, "bad_request"),
         ("모르는 시장", edit(&|s| s["markets"] = json!(["konex"])), 400, "bad_request"),
         ("시장 목록 없음", edit(&|s| s["markets"] = Value::Null), 400, "bad_request"),
-        ("조건식의 봉 주기만 있는 옛 형식", edit(&|s| *s = json!({"id": "S1", "name": "기본", "period": "D", "exclude": [], "conditions": [{"field": "high", "n": 200, "barRange": {"start": 0, "end": 0}}]})), 400, "bad_request"),
-        ("종류 없는 조건", line(json!({"period": "D", "field": "high", "n": 200, "barRange": {"start": 0, "end": 0}})), 400, "bad_request"),
+        ("조건식의 봉 주기만 있는 옛 형식", edit(&|s| *s = json!({"id": "S1", "name": "기본", "period": "D", "exclude": [], "conditions": [{"field": "high", "n": 200, "recentBars": 1}]})), 400, "bad_request"),
+        ("종류 없는 조건", line(json!({"period": "D", "field": "high", "n": 200, "recentBars": 1})), 400, "bad_request"),
         ("모르는 종류", changed("new_high", "kind", json!("new_peak")), 400, "bad_request"),
         ("줄의 봉 주기가 null", changed("new_high", "period", Value::Null), 400, "bad_request"),
         ("모르는 봉 주기", changed("new_high", "period", json!("5m")), 400, "bad_request"),
@@ -209,7 +209,7 @@ async fn each_screen_rule_and_a_stale_revision_rejects_the_save() {
         ("값 범위의 끝이 둘 다 없음", changed("value_range", "min", Value::Null), 400, "bad_request"),
         ("값 범위의 min > max", changed("value_range", "max", json!(9_999_999_999.0)), 400, "bad_request"),
         ("값 범위의 음수 경계", changed("value_range", "min", json!(-1.0)), 400, "bad_request"),
-        ("값 범위의 max 키 없음", line(json!({"kind": "value_range", "period": "D", "barRange": {"start": 0, "end": 0}, "field": "close", "min": 1.0})), 400, "bad_request"),
+        ("값 범위의 max 키 없음", line(json!({"kind": "value_range", "period": "D", "recentBars": 1, "field": "close", "min": 1.0})), 400, "bad_request"),
         ("유한하지 않은 수", changed("value_range", "max", json!(12_345.25)).replace("12345.25", "1e999"), 400, "bad_request"),
         ("등락률 back = 0", changed("change", "back", json!(0)), 400, "bad_request"),
         ("등락률의 끝이 둘 다 없음", changed("change", "minPct", Value::Null), 400, "bad_request"),
@@ -260,7 +260,7 @@ async fn each_screen_rule_and_a_stale_revision_rejects_the_save() {
         ("옛 revision", screens(vec![screen("S9", "새")], 9).to_string(), 409, "stale_revision"),
     ];
     let bar_kinds = KINDS.iter().filter(|k| **k != "market_cap");
-    let periods_and_m: Vec<_> = bar_kinds.flat_map(|k| [(k, "barRange", json!({"start": 0})), (k, "period", json!("Y"))]).map(|(k, key, v)| ("봉 조건의 m = 0이나 모르는 봉 주기", changed(k, key, v), 400, "bad_request")).collect();
+    let periods_and_m: Vec<_> = bar_kinds.flat_map(|k| [(k, "recentBars", json!(0)), (k, "period", json!("Y"))]).map(|(k, key, v)| ("봉 조건의 m = 0이나 모르는 봉 주기", changed(k, key, v), 400, "bad_request")).collect();
     let indicator_lengths = [
         ("ma_position", "length"), ("ma_cross", "slow"), ("ma_cross", "fast"), ("rsi", "length"), ("macd", "fast"), ("macd", "slow"), ("macd", "signal"),
         ("stochastic", "k"), ("stochastic", "d"), ("stochastic", "smooth"), ("bollinger", "length"),
@@ -283,16 +283,16 @@ fn widest_conditions() -> Vec<Value> {
     let huge = json!(-1.797_693_134_862_315_7e308);
     let percent = json!(99.999_999_999_999_99);
     vec![
-        json!({"kind": "ichimoku", "period": "W", "barRange": {"start": 0, "end": m - 1}, "conversion": len, "base": len, "spanB": len, "displacement": len, "test": {"kind": "cloud", "side": "above"}}),
-        json!({"kind": "stochastic", "period": "W", "barRange": {"start": 0, "end": m - 1}, "k": len, "d": len, "smooth": len, "test": {"kind": "range", "min": 0.000_000_000_000_000_1, "max": percent}}),
-        json!({"kind": "bollinger", "period": "W", "barRange": {"start": 0, "end": m - 1}, "length": len, "k": 1.797_693_134_862_315_7e308, "test": {"kind": "cross", "band": "upper", "direction": "down"}}),
-        json!({"kind": "ma_alignment", "period": "W", "barRange": {"start": 0, "end": m - 1}, "method": "sma", "lengths": [65_531, 65_532, 65_533, 65_534, 65_535], "order": "bullish"}),
-        json!({"kind": "value_range", "period": "W", "barRange": {"start": 0, "end": m - 1}, "field": "traded_value", "min": 1.797_693_134_862_315e308, "max": 1.797_693_134_862_315_7e308}),
-        json!({"kind": "change", "period": "W", "barRange": {"start": 0, "end": m - 1}, "back": n, "minPct": huge, "maxPct": 1.797_693_134_862_315_7e308}),
-        json!({"kind": "macd", "period": "W", "barRange": {"start": 0, "end": m - 1}, "fast": 65_534, "slow": len, "signal": len, "test": {"kind": "signal_cross", "direction": "down"}}),
-        json!({"kind": "rsi", "period": "W", "barRange": {"start": 0, "end": m - 1}, "length": len, "test": {"kind": "range", "min": 0.000_000_000_000_000_1, "max": percent}}),
-        json!({"kind": "ma_cross", "period": "W", "barRange": {"start": 0, "end": m - 1}, "method": "ema", "fast": 65_534, "slow": len, "direction": "down"}),
-        json!({"kind": "near_extreme", "period": "W", "barRange": {"start": 0, "end": m - 1}, "extreme": "high", "n": n, "withinPct": percent}),
+        json!({"kind": "ichimoku", "period": "W", "recentBars": m, "conversion": len, "base": len, "spanB": len, "displacement": len, "test": {"kind": "cloud", "side": "above"}}),
+        json!({"kind": "stochastic", "period": "W", "recentBars": m, "k": len, "d": len, "smooth": len, "test": {"kind": "range", "min": 0.000_000_000_000_000_1, "max": percent}}),
+        json!({"kind": "bollinger", "period": "W", "recentBars": m, "length": len, "k": 1.797_693_134_862_315_7e308, "test": {"kind": "cross", "band": "upper", "direction": "down"}}),
+        json!({"kind": "ma_alignment", "period": "W", "recentBars": m, "method": "sma", "lengths": [65_531, 65_532, 65_533, 65_534, 65_535], "order": "bullish"}),
+        json!({"kind": "value_range", "period": "W", "recentBars": m, "field": "traded_value", "min": 1.797_693_134_862_315e308, "max": 1.797_693_134_862_315_7e308}),
+        json!({"kind": "change", "period": "W", "recentBars": m, "back": n, "minPct": huge, "maxPct": 1.797_693_134_862_315_7e308}),
+        json!({"kind": "macd", "period": "W", "recentBars": m, "fast": 65_534, "slow": len, "signal": len, "test": {"kind": "signal_cross", "direction": "down"}}),
+        json!({"kind": "rsi", "period": "W", "recentBars": m, "length": len, "test": {"kind": "range", "min": 0.000_000_000_000_000_1, "max": percent}}),
+        json!({"kind": "ma_cross", "period": "W", "recentBars": m, "method": "ema", "fast": 65_534, "slow": len, "direction": "down"}),
+        json!({"kind": "near_extreme", "period": "W", "recentBars": m, "extreme": "high", "n": n, "withinPct": percent}),
     ]
 }
 
@@ -339,16 +339,16 @@ async fn a_list_saved_in_the_old_format_comes_back_in_the_new_format_with_the_re
     let migrated = screens(vec![
         json!({"id": "01900000-0000-7000-8000-0000000000a1", "name": "신고가", "markets": [], "exclude": [], "conditions": [new_high("D", "high", 200, 1)]}),
         json!({"id": "S2", "name": "주봉 둘", "markets": [], "exclude": ["etf", "trading_halted"], "conditions": [new_high("W", "close", 52, 4), new_high("W", "volume", 26, 1)]}),
-    ], 1_794_222_949_879);
+    ], 1_794_222_949_880);
     assert_eq!(api.get().await, (200, migrated.clone()), "봉 주기는 줄마다 옮기고, 줄은 신고가 종류가 되고, 시장은 빈 목록이며, revision은 1 오른다");
 
-    let late = screens(vec![screen("S9", "옛 탭")], 1_794_222_949_879);
+    let late = screens(vec![screen("S9", "옛 탭")], 1_794_222_949_880);
     assert_eq!(api.put(late.to_string()).await.1["error"]["code"], json!("stale_revision"), "옮기기 전 revision 다음 번호로 보낸 저장은 막힌다");
     assert_eq!(api.get().await, (200, migrated));
     server.stop().await;
 
     let server = Server::spawn(&fake, &lock, tmp.path());
-    assert_eq!(ScreensApi::of(&server).await.get().await.1["revision"], json!(1_794_222_949_879_i64), "다시 켜도 한 번만 옮긴다");
+    assert_eq!(ScreensApi::of(&server).await.get().await.1["revision"], json!(1_794_222_949_880_i64), "다시 켜도 한 번만 옮긴다");
     server.stop().await;
 }
 
@@ -367,7 +367,7 @@ async fn a_list_saved_at_the_largest_revision_is_moved_and_keeps_that_revision()
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn bar_ranges_migrate_every_saved_kind_once_preserving_order_values_and_revision_protection() {
+async fn old_migrates_every_saved_kind_once_preserving_order_values_and_revision_protection() {
     let fake = FakeKiwoom::start().await;
     let tmp = tempfile::tempdir().unwrap();
     let run = tmp.path().join("run");
@@ -375,18 +375,18 @@ async fn bar_ranges_migrate_every_saved_kind_once_preserving_order_values_and_re
     let mut expected_lines = every_condition();
     for (index, condition) in expected_lines.iter_mut().enumerate() {
         if condition["kind"] != "market_cap" {
-            condition["barRange"] = json!({"start": 0, "end": index + 2});
+            condition["recentBars"] = json!(index + 3);
         }
     }
     let mut list: Vec<Value> = expected_lines.chunks(10).enumerate().map(|(i, lines)| json!({"id": format!("S{i}"), "name": format!("모든 조건 보존 {i}"), "markets": ["kosdaq", "kospi"], "exclude": ["etf", "managed"], "conditions": lines})).collect();
     list.push(screen_of("empty", "빈 조건", vec![]));
-    let expected = screens(list, 78);
+    let expected = screens(list, 79);
     let mut old = expected["screens"].clone();
     for condition in old.as_array_mut().unwrap().iter_mut().flat_map(|screen| screen["conditions"].as_array_mut().unwrap()) {
         if condition["kind"] != "market_cap" {
-            let count = condition["barRange"]["end"].as_u64().unwrap() + 1;
+            let count = condition["recentBars"].as_u64().unwrap();
             let object = condition.as_object_mut().unwrap();
-            object.remove("barRange");
+            object.remove("recentBars");
             object.insert("m".into(), json!(count));
         }
     }
@@ -399,10 +399,10 @@ async fn bar_ranges_migrate_every_saved_kind_once_preserving_order_values_and_re
     let api = ScreensApi::of(&server).await;
     assert_eq!(api.get().await, (200, expected.clone()));
     assert_eq!(api.put(expected.to_string()).await.1["error"]["code"], "stale_revision");
-    assert_eq!(api.put(screens(old.as_array().unwrap().clone(), 79).to_string()).await.0, 400, "옛 M 본문은 다시 저장할 수 없다");
+    assert_eq!(api.put(screens(old.as_array().unwrap().clone(), 80).to_string()).await.0, 400, "옛 M 본문은 다시 저장할 수 없다");
     let mut edited = expected.clone();
-    edited["revision"] = json!(79);
-    edited["screens"][0]["conditions"][0]["barRange"] = json!({"start": 4, "end": 8});
+    edited["revision"] = json!(80);
+    edited["screens"][0]["conditions"][0]["recentBars"] = json!(9);
     assert_eq!(api.put(edited.to_string()).await, (200, edited.clone()));
     server.stop().await;
     let server = Server::spawn(&fake, &lock, tmp.path());
@@ -411,24 +411,75 @@ async fn bar_ranges_migrate_every_saved_kind_once_preserving_order_values_and_re
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn every_bar_kind_requires_both_integer_nonnegative_ordered_range_ends_without_an_n_limit() {
+async fn recent_period_accepts_the_old_end_plus_one_boundary_and_rejects_old_api_shapes() {
     let fake = FakeKiwoom::start().await;
     let tmp = tempfile::tempdir().unwrap();
     let server = Server::spawn(&fake, &tmp.path().join("run/server.lock"), tmp.path());
     let api = ScreensApi::of(&server).await;
     let mut revision = 1;
     for kind in KINDS.into_iter().filter(|k| *k != "market_cap") {
-        for range in [json!({"start": 0, "end": 0}), json!({"start": 1, "end": 1}), json!({"start": 0, "end": 2}), json!({"start": 1, "end": 3}), json!({"start": 300, "end": u32::MAX})] {
-            let sent = screens(vec![screen_of("S1", "범위", vec![with(example(kind), "barRange", range)])], revision);
-            assert_eq!(api.put(sent.to_string()).await, (200, sent));
+        let mut condition = example(kind);
+        condition.as_object_mut().unwrap().remove("barRange");
+        for count in [1_u64, 100, 260, 4_294_967_296] {
+            condition["recentBars"] = json!(count);
+            let sent = screens(vec![screen_of("S1", "최근 기간", vec![condition.clone()])], revision);
+            assert_eq!(api.put(sent.to_string()).await, (200, sent), "{kind} {count}");
             revision += 1;
         }
-        for range in [Value::Null, json!({}), json!({"start": 0}), json!({"end": 0}), json!({"start": -1, "end": 0}), json!({"start": 0, "end": -1}), json!({"start": 0.5, "end": 1}), json!({"start": 0, "end": 1.5}), json!({"start": 2, "end": 1})] {
-            let sent = screens(vec![screen_of("S1", "범위", vec![with(example(kind), "barRange", range.clone())])], revision);
-            assert_eq!(api.put(sent.to_string()).await.0, 400, "{kind} {range}");
+        for count in [Value::Null, json!(0), json!(-1), json!(1.5), json!(4_294_967_297_u64)] {
+            condition["recentBars"] = count.clone();
+            let sent = screens(vec![screen_of("S1", "최근 기간", vec![condition.clone()])], revision);
+            assert_eq!(api.put(sent.to_string()).await.0, 400, "{kind} {count}");
+        }
+        condition.as_object_mut().unwrap().remove("recentBars");
+        for old in [json!({"barRange": {"start": 10, "end": 19}}), json!({"m": 20}), json!({})] {
+            let mut legacy = condition.clone();
+            legacy.as_object_mut().unwrap().extend(old.as_object().unwrap().clone());
+            assert_eq!(api.put(screens(vec![screen_of("S1", "옛 본문", vec![legacy])], revision).to_string()).await.0, 400);
         }
     }
-    let cap = with(example("market_cap"), "barRange", json!({"start": 0, "end": 0}));
-    assert_eq!(api.put(screens(vec![screen_of("S1", "시가총액", vec![cap])], revision).to_string()).await.0, 400);
+    server.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn saved_ranges_become_recent_periods_once_including_nonzero_starts_and_the_largest_end() {
+    let fake = FakeKiwoom::start().await;
+    let tmp = tempfile::tempdir().unwrap();
+    let run = tmp.path().join("run");
+    std::fs::DirBuilder::new().mode(0o700).create(&run).unwrap();
+    let mut old = Vec::new();
+    let mut expected = Vec::new();
+    for (index, kind) in KINDS.into_iter().enumerate() {
+        let mut line = example(kind);
+        if kind != "market_cap" {
+            line.as_object_mut().unwrap().remove("recentBars");
+            let range = match index % 3 { 0 => json!({"start": 0, "end": 259}), 1 => json!({"start": 10, "end": 19}), _ => json!({"start": 300, "end": u32::MAX}) };
+            let count = match index % 3 { 0 => 260_u64, 1 => 20, _ => 4_294_967_296 };
+            line["barRange"] = range;
+            let mut converted = line.clone();
+            converted.as_object_mut().unwrap().remove("barRange");
+            converted["recentBars"] = json!(count);
+            expected.push(converted);
+        } else {
+            expected.push(line.clone());
+        }
+        old.push(line);
+    }
+    let list = |lines: Vec<Value>| lines.chunks(10).enumerate().map(|(i, lines)| json!({"id": format!("S{i}"), "name": format!("보존 {i}"), "markets": ["kosdaq", "kospi"], "exclude": ["etf"], "conditions": lines})).collect::<Vec<_>>();
+    let pool = SqlitePoolOptions::new().connect_with(SqliteConnectOptions::new().filename(run.join("vally.db")).create_if_missing(true)).await.unwrap();
+    sqlx::migrate!("./migrations").run_to(7, &pool).await.unwrap();
+    sqlx::query("UPDATE screens SET list = ?, revision = 77").bind(json!(list(old)).to_string()).execute(&pool).await.unwrap();
+    pool.close().await;
+    let server = Server::spawn(&fake, &run.join("server.lock"), tmp.path());
+    let api = ScreensApi::of(&server).await;
+    let expected = screens(list(expected), 78);
+    assert_eq!(api.get().await, (200, expected.clone()));
+    assert_eq!(api.put(expected.to_string()).await.0, 409);
+    let mut edited = expected.clone();
+    edited["revision"] = json!(79);
+    assert_eq!(api.put(edited.to_string()).await, (200, edited.clone()));
+    server.stop().await;
+    let server = Server::spawn(&fake, &run.join("server.lock"), tmp.path());
+    assert_eq!(ScreensApi::of(&server).await.get().await, (200, edited));
     server.stop().await;
 }

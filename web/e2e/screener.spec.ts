@@ -16,7 +16,7 @@ async function expectWatchlistOfResults(page: Page) {
   await expect.poll(() => watchPanel(page).locator("li[data-code]").evaluateAll((li) => li.map((e) => e.getAttribute("data-code")))).toEqual(["110030", "110035", "110040", "110050"]);
 }
 
-const SEEDED_SCREEN = { id: "seeded", name: SCREEN_NAME, markets: [], exclude: ["etf"], conditions: [{ kind: "new_high", period: "D", barRange: { start: 0, end: 19 }, field: "high", n: 60 }] };
+const SEEDED_SCREEN = { id: "seeded", name: SCREEN_NAME, markets: [], exclude: ["etf"], conditions: [{ kind: "new_high", period: "D", recentBars: 20, field: "high", n: 60 }] };
 const LATE_ANSWER_SETTLE_MS = 300;
 const phoneTabs = (page: Page) => page.getByRole("navigation", { name: "휴대폰 탭" });
 const openPhoneScreener = (page: Page) => phoneTabs(page).getByRole("button", { name: "스크리너" }).click();
@@ -76,14 +76,14 @@ test("빈 저장소를 채우고 만든 조건식으로 찾은 종목을 칸의 
     await dialog.getByLabel("이름").fill(SCREEN_NAME);
     await dialog.getByRole("button", { name: "조건 더하기" }).click();
     await dialog.getByRole("textbox", { name: "조건 1 신고가 기간" }).fill("60");
-    await dialog.getByRole("textbox", { name: "조건 1 봉 범위 끝" }).fill("19");
+    await dialog.getByRole("textbox", { name: "조건 1 최근 기간" }).fill("19");
     await dialog.getByRole("group", { name: "종류 제외" }).getByRole("button", { name: "ETF" }).click();
     const saved = savedTo(page, "/api/screens");
     await dialog.getByRole("button", { name: "저장" }).click();
     await saved;
     await expect(dialog).toBeHidden();
     await expect(panel(page).getByRole("button", { name: `조건식: ${SCREEN_NAME}` })).toBeVisible();
-    await expect(panel(page).getByRole("list", { name: "조건" })).toHaveText("일봉 0~19봉 전 안에 고가가 60일 신고가인 봉이 있다");
+    await expect(panel(page).getByRole("list", { name: "조건" })).toHaveText("일봉 최근 20일 이내 고가가 60일 신고가인 봉이 있다");
     await expect(panel(page).getByText("ETF", { exact: true })).toBeVisible();
     await expect(panel(page).getByText("실행할 때 KRX 최신 자료를 수집합니다")).toBeVisible();
   });
@@ -209,7 +209,7 @@ test("빈 저장소를 채우고 만든 조건식으로 찾은 종목을 칸의 
 });
 
 test("시가총액 줄이나 줄마다 다른 봉 주기가 든 조건식도 편집에서 그대로 열리고, 이름만 바꿔 저장해도 줄과 시장이 그대로 남으며, 거래대금 신고가 줄은 신고거래대금 항목으로 보인다", async ({ app, page }) => {
-  const newHigh = (period: string, field: string, n: number, m: number) => ({ kind: "new_high", period, barRange: { start: 0, end: m - 1 }, field, n });
+  const newHigh = (period: string, field: string, n: number, m: number) => ({ kind: "new_high", period, recentBars: m, field, n });
   const capped = { id: "capped", name: "시가총액 섞임", markets: [], exclude: [], conditions: [newHigh("D", "high", 60, 1), { kind: "market_cap", min: 300_000_000_000, max: null }] };
   const mixed = { id: "mixed", name: "주봉 섞임", markets: ["kosdaq"], exclude: [], conditions: [newHigh("D", "high", 60, 1), newHigh("W", "close", 52, 1)] };
   const traded = { id: "traded", name: "신고거래대금", markets: [], exclude: [], conditions: [newHigh("D", "traded_value", 60, 1)] };
@@ -248,7 +248,7 @@ test("시가총액 줄이나 줄마다 다른 봉 주기가 든 조건식도 편
     const dialog = await edit(mixed.name);
     await expect(dialog.getByRole("combobox", { name: "조건 1 봉 주기" })).toHaveAttribute("data-value", "D");
     await expect(dialog.getByRole("combobox", { name: "조건 2 봉 주기" })).toHaveAttribute("data-value", "W");
-    await expect(dialog.getByText("주봉 0봉 전 종가가 52주 신고가다")).toBeVisible();
+    await expect(dialog.getByText("주봉 최근 1주 이내 종가가 52주 신고가인 봉이 있다")).toBeVisible();
     await expect(dialog.getByRole("group", { name: "시장" }).getByRole("button", { name: "코스닥" })).toHaveAttribute("aria-pressed", "true");
     await expect(dialog.getByRole("group", { name: "시장" }).getByRole("button", { name: "코스피" })).toHaveAttribute("aria-pressed", "false");
     await renameAndSave(dialog, "주봉 섞임 바꿈");
@@ -260,8 +260,8 @@ test("시가총액 줄이나 줄마다 다른 봉 주기가 든 조건식도 편
     await expect(kind).toHaveAttribute("data-value", "traded_value_high");
     await expect(kind).toHaveText("신고거래대금");
     await expect(dialog.getByRole("textbox", { name: "조건 1 신고거래대금 기간" })).toHaveValue("60");
-    await expect(dialog.getByRole("textbox", { name: "조건 1 봉 범위 끝" })).toHaveValue("0");
-    await expect(dialog.getByText("일봉 0봉 전 거래대금이 60일 신고거래대금이다")).toBeVisible();
+    await expect(dialog.getByRole("textbox", { name: "조건 1 최근 기간" })).toHaveValue("0");
+    await expect(dialog.getByText("일봉 최근 1일 이내 거래대금이 60일 신고거래대금인 봉이 있다")).toBeVisible();
     await renameAndSave(dialog, "신고거래대금 바꿈");
   });
 
@@ -274,7 +274,7 @@ test("시가총액 줄이나 줄마다 다른 봉 주기가 든 조건식도 편
 });
 
 test("패널 머리는 줄마다 그 줄의 봉 주기로 조건을 풀고, 시장 칩을 제외 칩과 함께 보이며, 조건식 메뉴에는 이름만 보인다", async ({ app, page }) => {
-  const newHigh = (period: string, field: string, n: number, m: number) => ({ kind: "new_high", period, barRange: { start: 0, end: m - 1 }, field, n });
+  const newHigh = (period: string, field: string, n: number, m: number) => ({ kind: "new_high", period, recentBars: m, field, n });
   const mixed = { id: "mixed", name: "주봉 신고가와 일봉 신고거래량", markets: ["kosdaq"], exclude: ["managed", "etf"], conditions: [newHigh("W", "close", 52, 1), newHigh("D", "volume", 60, 5)] };
   const plain = { id: "plain", name: "전 종목 신고가", markets: [], exclude: [], conditions: [newHigh("M", "high", 12, 1)] };
   const seeded = await fetch(`${app.url}/api/screens`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ screens: [mixed, plain], revision: 1 }) });
@@ -285,13 +285,13 @@ test("패널 머리는 줄마다 그 줄의 봉 주기로 조건을 풀고, 시�
   const conditions = panel(page).getByRole("list", { name: "조건" });
   const scope = conditions.locator("xpath=../p");
   await expect(panel(page).getByRole("button", { name: `조건식: ${mixed.name}` })).toBeVisible();
-  await expect(conditions.getByRole("listitem")).toHaveText(["주봉 0봉 전 종가가 52주 신고가다", "그리고일봉 0~4봉 전 안에 거래량이 60일 신고거래량인 봉이 있다"]);
+  await expect(conditions.getByRole("listitem")).toHaveText(["주봉 최근 1주 이내 종가가 52주 신고가인 봉이 있다", "그리고일봉 최근 5일 이내 거래량이 60일 신고거래량인 봉이 있다"]);
   await expect(scope).toHaveText("대상코스닥·제외ETF관리종목");
 
   await panel(page).getByRole("button", { name: /^조건식: / }).click();
   await expect(page.getByRole("menu", { name: "조건식 고르기" }).getByRole("menuitemradio")).toHaveText([mixed.name, plain.name]);
   await page.getByRole("menuitemradio", { name: plain.name, exact: true }).click();
-  await expect(conditions).toHaveText("월봉 0봉 전 고가가 12개월 신고가다");
+  await expect(conditions).toHaveText("월봉 최근 1개월 이내 고가가 12개월 신고가인 봉이 있다");
   await expect(scope).toHaveText("전 종목 대상");
 });
 
@@ -344,7 +344,7 @@ test("최근 관측일을 채우는 동안에는 실행이 막히고, 과거 이
   await dialog.getByLabel("이름").fill("고가 1000일 신고가");
   await dialog.getByRole("button", { name: "조건 더하기" }).click();
   await dialog.getByRole("textbox", { name: "조건 1 신고가 기간" }).fill("1000");
-  await dialog.getByRole("textbox", { name: "조건 1 봉 범위 끝" }).fill("299");
+  await dialog.getByRole("textbox", { name: "조건 1 최근 기간" }).fill("299");
   await dialog.getByRole("button", { name: "저장" }).click();
   await expect(dialog).toBeHidden();
 

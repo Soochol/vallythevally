@@ -47,7 +47,7 @@ export type KindFields =
 
 type FieldsOf<K extends ConditionKind> = Extract<KindFields, { kind: K }>;
 
-export type ConditionDraft = { key: number; period: ScreenPeriod; rangeStart: string; rangeEnd: string } & KindFields;
+export type ConditionDraft = { key: number; period: ScreenPeriod; recentBars: string } & KindFields;
 
 export interface ScreenDraft {
   name: string;
@@ -57,8 +57,7 @@ export interface ScreenDraft {
 }
 
 export type FieldKey =
-  | "rangeStart"
-  | "rangeEnd"
+  | "recentBars"
   | "n"
   | "min"
   | "max"
@@ -250,13 +249,13 @@ function fieldsOf(condition: Condition): KindFields {
   }
 }
 
-const newCondition = (key: number, period: ScreenPeriod): ConditionDraft => ({ key, period, rangeStart: "0", rangeEnd: "0", ...DEFAULTS.new_high });
+const newCondition = (key: number, period: ScreenPeriod): ConditionDraft => ({ key, period, recentBars: "1", ...DEFAULTS.new_high });
 
 export function draftOf(screen: Screen | null): ScreenDraft {
   if (!screen) return { name: "", conditions: [], markets: [], exclude: [] };
   const conditions: ConditionDraft[] = [];
   for (const condition of screen.conditions) {
-    const line = condition.kind === "market_cap" ? { period: conditions.at(-1)?.period ?? "D", rangeStart: "0", rangeEnd: "0" } : { period: condition.period, rangeStart: text(condition.barRange.start), rangeEnd: text(condition.barRange.end) };
+    const line = condition.kind === "market_cap" ? { period: conditions.at(-1)?.period ?? "D", recentBars: "1" } : { period: condition.period, recentBars: text(condition.recentBars) };
     conditions.push({ key: conditions.length, ...line, ...fieldsOf(condition) });
   }
   return { name: screen.name, conditions, markets: screen.markets, exclude: screen.exclude };
@@ -283,9 +282,9 @@ export function kindChoiceOf(line: KindFields): KindChoice {
   return (Object.keys(TRADE_HIGHS) as TradeHigh[]).find((choice) => TRADE_HIGHS[choice] === line.field) ?? "new_high";
 }
 
-function chosenLine({ key, period, rangeStart, rangeEnd }: ConditionDraft, choice: KindChoice): ConditionDraft {
-  if (isTradeHigh(choice)) return { key, rangeStart, rangeEnd, ...TRADE_HIGH_START, kind: "new_high", field: TRADE_HIGHS[choice] };
-  return { key, period, rangeStart, rangeEnd, ...DEFAULTS[choice] };
+function chosenLine({ key, period, recentBars }: ConditionDraft, choice: KindChoice): ConditionDraft {
+  if (isTradeHigh(choice)) return { key, recentBars, ...TRADE_HIGH_START, kind: "new_high", field: TRADE_HIGHS[choice] };
+  return { key, period, recentBars, ...DEFAULTS[choice] };
 }
 
 export function changeKind(draft: ScreenDraft, key: number, choice: KindChoice): ScreenDraft {
@@ -385,40 +384,35 @@ export function checkCondition(line: ConditionDraft): ConditionCheck {
   const r = new LineReader();
   const { period } = line;
   const bars = (n: number) => `${count(n)}${UNIT[period]}`;
-  const barRange = () => {
-    const start = r.count("rangeStart", line.rangeStart, MAX_BARS, 0);
-    const end = r.count("rangeEnd", line.rangeEnd, MAX_BARS, 0);
-    if (r.fine("rangeStart", "rangeEnd") && start > end) r.fail("rangeEnd", "시작보다 작을 수 없습니다");
-    return { start, end };
-  };
+  const recentBars = () => r.count("recentBars", line.recentBars, MAX_BARS + 1);
   switch (line.kind) {
     case "new_high":
     case "new_low": {
       const n = r.count("n", line.n);
-      return r.result({ kind: line.kind, period, barRange: barRange(), field: line.field, n });
+      return r.result({ kind: line.kind, period, recentBars: recentBars(), field: line.field, n });
     }
     case "value_range": {
       const [min, max] = r.bounds("min", "max", line.min, line.max, "non_negative", wonPlaces(line.field));
-      return r.result({ kind: "value_range", period, barRange: barRange(), field: line.field, min, max });
+      return r.result({ kind: "value_range", period, recentBars: recentBars(), field: line.field, min, max });
     }
     case "change": {
       const back = r.count("back", line.back);
       const [minPct, maxPct] = r.bounds("minPct", "maxPct", line.minPct, line.maxPct, "any");
-      return r.result({ kind: "change", period, barRange: barRange(), back, minPct, maxPct });
+      return r.result({ kind: "change", period, recentBars: recentBars(), back, minPct, maxPct });
     }
     case "near_extreme": {
       const n = r.count("n", line.n);
       const withinPct = r.number("withinPct", line.withinPct, "percent");
-      return r.result({ kind: "near_extreme", period, barRange: barRange(), extreme: line.extreme, n, withinPct });
+      return r.result({ kind: "near_extreme", period, recentBars: recentBars(), extreme: line.extreme, n, withinPct });
     }
     case "surge": {
       const n = r.count("n", line.n);
       const times = r.number("times", line.times, "positive");
-      return r.result({ kind: "surge", period, barRange: barRange(), field: line.field, n, times });
+      return r.result({ kind: "surge", period, recentBars: recentBars(), field: line.field, n, times });
     }
     case "ma_position": {
       const length = r.length("length", line.length);
-      return r.result({ kind: "ma_position", period, barRange: barRange(), field: line.field, method: line.method, length, side: line.side });
+      return r.result({ kind: "ma_position", period, recentBars: recentBars(), field: line.field, method: line.method, length, side: line.side });
     }
     case "ma_alignment": {
       const lengths = line.lengths.map((input, i) => r.length(`lengths.${i}`, input));
@@ -426,22 +420,22 @@ export function checkCondition(line: ConditionDraft): ConditionCheck {
         const shorter = lengths[i - 1];
         if (i > 0 && shorter !== undefined && r.fine(`lengths.${i - 1}`, `lengths.${i}`) && length <= shorter) r.fail(`lengths.${i}`, `앞 이평 ${bars(shorter)}보다 길어야 합니다`);
       });
-      return r.result({ kind: "ma_alignment", period, barRange: barRange(), method: line.method, lengths, order: line.order });
+      return r.result({ kind: "ma_alignment", period, recentBars: recentBars(), method: line.method, lengths, order: line.order });
     }
     case "ma_cross": {
       const fast = line.fastLine === "close" ? null : r.length("fast", line.fast);
       const slow = r.length("slow", line.slow);
       if (fast !== null) r.shorter("fast", fast, "slow", slow, `긴 이평 ${bars(slow)}보다 짧아야 합니다`);
-      return r.result({ kind: "ma_cross", period, barRange: barRange(), method: line.method, fast, slow, direction: line.direction });
+      return r.result({ kind: "ma_cross", period, recentBars: recentBars(), method: line.method, fast, slow, direction: line.direction });
     }
     case "rsi": {
       const length = r.length("length", line.length);
       if (line.test === "range") {
         const [min, max] = r.bounds("min", "max", line.min, line.max, "percent");
-        return r.result({ kind: "rsi", period, barRange: barRange(), length, test: { kind: "range", min, max } });
+        return r.result({ kind: "rsi", period, recentBars: recentBars(), length, test: { kind: "range", min, max } });
       }
       const value = r.number("value", line.value, "percent");
-      return r.result({ kind: "rsi", period, barRange: barRange(), length, test: { kind: "breakout", value, direction: line.direction } });
+      return r.result({ kind: "rsi", period, recentBars: recentBars(), length, test: { kind: "breakout", value, direction: line.direction } });
     }
     case "macd": {
       const fast = r.length("fast", line.fast);
@@ -449,21 +443,21 @@ export function checkCondition(line: ConditionDraft): ConditionCheck {
       const signal = r.length("signal", line.signal);
       r.shorter("fast", fast, "slow", slow, `느린 기간 ${bars(slow)}보다 짧아야 합니다`);
       const test: MacdTest = line.test === "vs_signal" ? { kind: "vs_signal", side: line.side } : { kind: line.test, direction: line.direction };
-      return r.result({ kind: "macd", period, barRange: barRange(), fast, slow, signal, test });
+      return r.result({ kind: "macd", period, recentBars: recentBars(), fast, slow, signal, test });
     }
     case "stochastic": {
       const k = r.length("k", line.k);
       const d = r.length("d", line.d);
       const smooth = r.length("smooth", line.smooth);
-      if (line.test === "cross") return r.result({ kind: "stochastic", period, barRange: barRange(), k, d, smooth, test: { kind: "cross", direction: line.direction } });
+      if (line.test === "cross") return r.result({ kind: "stochastic", period, recentBars: recentBars(), k, d, smooth, test: { kind: "cross", direction: line.direction } });
       const [min, max] = r.bounds("min", "max", line.min, line.max, "percent");
-      return r.result({ kind: "stochastic", period, barRange: barRange(), k, d, smooth, test: { kind: "range", min, max } });
+      return r.result({ kind: "stochastic", period, recentBars: recentBars(), k, d, smooth, test: { kind: "range", min, max } });
     }
     case "bollinger": {
       const length = r.length("length", line.length);
       const k = r.number("k", line.k, "positive");
       const test = line.test === "outside" ? ({ kind: "outside", side: line.side } as const) : ({ kind: "cross", band: line.band, direction: line.direction } as const);
-      return r.result({ kind: "bollinger", period, barRange: barRange(), length, k, test });
+      return r.result({ kind: "bollinger", period, recentBars: recentBars(), length, k, test });
     }
     case "ichimoku": {
       const conversion = r.length("conversion", line.conversion);
@@ -471,7 +465,7 @@ export function checkCondition(line: ConditionDraft): ConditionCheck {
       const spanB = r.length("spanB", line.spanB);
       const displacement = r.length("displacement", line.displacement);
       const test = line.test === "cloud" ? ({ kind: "cloud", side: line.side } as const) : ({ kind: "cross", direction: line.direction } as const);
-      return r.result({ kind: "ichimoku", period, barRange: barRange(), conversion, base, spanB, displacement, test });
+      return r.result({ kind: "ichimoku", period, recentBars: recentBars(), conversion, base, spanB, displacement, test });
     }
     case "market_cap": {
       const [min, max] = r.bounds("min", "max", line.min, line.max, "non_negative", EOK_PLACES);

@@ -2,7 +2,7 @@ use std::collections::VecDeque;
 
 use super::exact::{Decimal, Exact};
 use super::indicator::Indicator;
-use crate::api::{BarField, BarRange, Extreme, ScreenPeriod};
+use crate::api::{BarField, RecentBars, Extreme, ScreenPeriod};
 
 pub(super) type Cell = i64;
 
@@ -43,7 +43,7 @@ impl Kind {
 #[derive(Debug, Clone)]
 pub(super) struct Line {
     pub(super) period: ScreenPeriod,
-    pub(super) bar_range: BarRange,
+    pub(super) recent_bars: RecentBars,
     pub(super) kind: Kind,
 }
 
@@ -53,8 +53,8 @@ impl Line {
     }
 
     pub(super) fn last_candidate(&self, series: &Series) -> Option<Cell> {
-        let end = series.len().checked_sub(self.bar_range.start as usize)?;
-        let recent = series.len().saturating_sub(self.bar_range.end as usize + 1);
+        let end = series.len();
+        let recent = series.len().saturating_sub(usize::try_from(u64::from(self.recent_bars)).unwrap_or(usize::MAX));
         let cells = &series.cells[..end];
         let full_window = |i: usize, n: u32| i + 1 >= n as usize;
         let last = match self.kind {
@@ -209,7 +209,6 @@ fn within(value: Exact, min: Option<Decimal>, max: Option<Decimal>, per: u128) -
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::api::{PriceField, Side};
 
     fn series(prices: &[u128]) -> Series {
         let mut series = Series::default();
@@ -223,35 +222,14 @@ mod tests {
 
     #[test]
     fn zero_and_one_follow_new_bars_but_same_bar_updates_keep_positions() {
-        let line = Line { period: ScreenPeriod::Day, bar_range: BarRange { start: 1, end: 1 }, kind: Kind::ValueRange { field: BarField::Close, min: Decimal::of(9.0), max: Decimal::of(9.0) } };
+        let line = Line { period: ScreenPeriod::Day, recent_bars: RecentBars::try_from(2).unwrap(), kind: Kind::ValueRange { field: BarField::Close, min: Decimal::of(9.0), max: Decimal::of(9.0) } };
         let mut prices: Vec<u128> = (1..=10).collect();
         assert_eq!(line.last_candidate(&series(&prices)), Some(80));
         prices[9] = 99;
         assert_eq!(line.last_candidate(&series(&prices)), Some(80));
         prices.push(100);
         assert_eq!(line.last_candidate(&series(&prices)), None);
-        let moved = Line { bar_range: BarRange { start: 2, end: 2 }, ..line };
+        let moved = Line { recent_bars: RecentBars::try_from(3).unwrap(), ..line };
         assert_eq!(moved.last_candidate(&series(&prices)), Some(80));
-    }
-
-    #[test]
-    fn changing_future_prices_cannot_change_past_extremes_changes_surges_or_indicators() {
-        let past = [10, 20, 30, 40, 50, 60, 70, 80, 90, 100];
-        let mut changed = past;
-        changed[8..].copy_from_slice(&[1_000_000, 1]);
-        let kinds = [
-            Kind::NewExtreme { extreme: Extreme::High, field: BarField::High, n: 3 },
-            Kind::NewExtreme { extreme: Extreme::Low, field: BarField::Low, n: 1 },
-            Kind::NearExtreme { extreme: Extreme::High, n: 3, within_pct: Decimal::of(0.0).unwrap() },
-            Kind::Change { back: 2, min_pct: Decimal::of(20.0), max_pct: None },
-            Kind::Surge { field: BarField::Volume, n: 2, times: Decimal::of(1.1).unwrap() },
-            Kind::Indicator(Indicator::ma_position(PriceField::Close, indicators::MaMethod::Sma, 3, Side::Above).unwrap()),
-            Kind::Indicator(Indicator::ma_position(PriceField::Close, indicators::MaMethod::Ema, 3, Side::Above).unwrap()),
-        ];
-        for kind in kinds {
-            let line = Line { period: ScreenPeriod::Day, bar_range: BarRange { start: 2, end: 3 }, kind };
-            assert_eq!(line.last_candidate(&series(&past)), Some(70), "{line:?}");
-            assert_eq!(line.last_candidate(&series(&changed)), Some(70), "{line:?}");
-        }
     }
 }
