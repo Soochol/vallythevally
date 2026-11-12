@@ -26,7 +26,7 @@ async function seed(app: App, period = "Y") {
 
 async function choosePeriod(page: Page, phone: boolean, label: string) {
   const group = phone ? page.getByRole("navigation", { name: "봉 주기" }) : page.getByRole("toolbar").getByRole("group", { name: "봉 주기" });
-  const button = group.getByRole("button", { name: `${label} 추가 후보`, exact: true });
+  const button = group.getByRole("button", { name: label, exact: true });
   await button.scrollIntoViewIfNeeded();
   await button.click();
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
