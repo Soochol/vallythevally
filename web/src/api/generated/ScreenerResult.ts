@@ -2,5 +2,6 @@
 import type { KstDate } from "./KstDate";
 import type { ScreenerExcluded } from "./ScreenerExcluded";
 import type { ScreenerRow } from "./ScreenerRow";
+import type { UnixSeconds } from "./UnixSeconds";
 
-export type ScreenerResult = { asOf: KstDate, universe: number, excluded: ScreenerExcluded, rows: Array<ScreenerRow>, };
+export type ScreenerResult = { asOf: KstDate, collectionStartedAt: UnixSeconds, collectionCompletedAt: UnixSeconds, missingSummary: number, universe: number, excluded: ScreenerExcluded, rows: Array<ScreenerRow>, };

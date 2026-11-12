@@ -848,6 +848,9 @@ pub struct Screens {
 #[ts(export)]
 pub struct ScreenerResult {
     pub as_of: KstDate,
+    pub collection_started_at: UnixSeconds,
+    pub collection_completed_at: UnixSeconds,
+    pub missing_summary: u32,
     pub universe: u32,
     pub excluded: ScreenerExcluded,
     pub rows: Vec<ScreenerRow>,
@@ -871,6 +874,8 @@ pub struct ScreenerRow {
     pub close: f64,
     pub change_rate: Option<f64>,
     pub matched_date: KstDate,
+    pub latest_bar_date: KstDate,
+    pub provisional: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -959,6 +964,7 @@ pub enum ApiErrorReason {
     SymbolListLoading,
     MissingDay,
     Updating,
+    DataChanged,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -1139,12 +1145,15 @@ mod tests {
         let day = |y, m, d| KstDate(domain::KstDate::new(y, m, d).unwrap());
         let result = ScreenerResult {
             as_of: day(2026, 11, 10),
+            collection_started_at: UnixSeconds(1),
+            collection_completed_at: UnixSeconds(2),
+            missing_summary: 3,
             universe: 3957,
             excluded: ScreenerExcluded { listed_too_short: 14, history_short: 120, unconfirmed: 2 },
-            rows: vec![ScreenerRow { symbol: SymbolCode("005930".into()), name: "삼성전자".into(), close: 193_400.0, change_rate: None, matched_date: day(2026, 11, 9) }],
+            rows: vec![ScreenerRow { symbol: SymbolCode("005930".into()), name: "삼성전자".into(), close: 193_400.0, change_rate: None, matched_date: day(2026, 11, 9), latest_bar_date: day(2026, 11, 10), provisional: true }],
         };
-        let result_json = json!({"asOf": "2026-11-10", "universe": 3957, "excluded": {"listedTooShort": 14, "historyShort": 120, "unconfirmed": 2},
-                                 "rows": [{"symbol": "005930", "name": "삼성전자", "close": 193_400.0, "changeRate": null, "matchedDate": "2026-11-09"}]});
+        let result_json = json!({"asOf": "2026-11-10", "collectionStartedAt": 1, "collectionCompletedAt": 2, "missingSummary": 3, "universe": 3957, "excluded": {"listedTooShort": 14, "historyShort": 120, "unconfirmed": 2},
+                                 "rows": [{"symbol": "005930", "name": "삼성전자", "close": 193_400.0, "changeRate": null, "matchedDate": "2026-11-09", "latestBarDate": "2026-11-10", "provisional": true}]});
         assert_eq!(serde_json::to_value(&result).unwrap(), result_json);
         assert_eq!(serde_json::from_value::<ScreenerResult>(result_json).unwrap(), result);
 

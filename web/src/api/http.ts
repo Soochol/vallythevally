@@ -40,6 +40,7 @@ const API_ERROR_REASONS = [
   "symbol_list_loading",
   "missing_day",
   "updating",
+  "data_changed",
 ] as const satisfies readonly ApiErrorReason[];
 
 const _allReasonsListed: Exclude<ApiErrorReason, (typeof API_ERROR_REASONS)[number]> extends never ? true : never = true;

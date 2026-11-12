@@ -5,7 +5,7 @@ import type { ScreenerStatus } from "../api/generated/ScreenerStatus";
 import { rerunReason, useScreenerStore } from "./screener";
 
 const screen: Screen = { id: "s1", name: "고가 1,000일 신고가", markets: [], exclude: [], conditions: [{ kind: "new_high", period: "D", barRange: { start: 0, end: 19 }, field: "high", n: 1000 }] };
-const result: ScreenerResult = { asOf: "2026-11-10", universe: 28, excluded: { listedTooShort: 0, historyShort: 28, unconfirmed: 0 }, rows: [] };
+const result: ScreenerResult = { asOf: "2026-11-10", collectionStartedAt: 1, collectionCompletedAt: 2, missingSummary: 0, universe: 28, excluded: { listedTooShort: 0, historyShort: 28, unconfirmed: 0 }, rows: [] };
 const store = (done: number, update: ScreenerStatus["update"] = null, lastDay = "2026-11-10"): ScreenerStatus => ({
   lastDay,
   needDay: "2026-11-10",

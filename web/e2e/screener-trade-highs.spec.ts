@@ -3,7 +3,7 @@ import type { Locator, Page } from "@playwright/test";
 import { expect, test } from "./harness";
 import { editor, excludedLine, expectRows, openScreener, panel, results, runButton, savedTo, updateBand, waitForUpdateToFinish } from "./screener-page";
 
-test.use({ krxMarket: "20261106", krxConditionStocks: true, clockStart: "20261109100000" });
+test.use({ krxMarket: "20261106", krxConditionStocks: true, clockStart: "20261106203000" });
 
 const newHigh = (period: string, field: string, n: number, m: number) => ({ kind: "new_high", period, barRange: { start: 0, end: m - 1 }, field, n });
 const WEEKLY_HIGH = { id: "plain", name: "주봉 신고가", markets: [], exclude: [], conditions: [newHigh("W", "high", 52, 4)] };

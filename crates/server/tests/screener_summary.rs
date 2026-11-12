@@ -10,7 +10,7 @@ use server::kiwoom::auth::KiwoomAuth;
 use server::kiwoom::rest::{KiwoomError, KiwoomRest};
 use server::kiwoom::transport::ReqwestTransport;
 use server::kiwoom::wire::KrxSummaryValues;
-use server::screener::summary::{CollectionError, MissingSummary, SummaryCollector};
+use server::screener::summary::{CollectionBasis, CollectionError, MissingSummary, SummaryCollector};
 
 fn day(n: u8) -> KstDate {
     KstDate::new(2026, 11, n).unwrap()
@@ -72,7 +72,7 @@ async fn batches_at_100_boundary_join_by_code_and_preserve_krx_units_and_times()
     for size in [0, 1, 99, 100, 101, 200, 201] {
         let seen = calls(&fake);
         let targets = (1..=size).map(code).collect();
-        let batch = collector.collect(targets).await.unwrap();
+        let batch = collector.collect(targets, CollectionBasis::default()).await.unwrap();
         assert_eq!(batch.stocks.len(), size);
         assert_eq!(batch.missing_count(), 0);
         assert_eq!(batch.venue, Venue::Krx);
@@ -101,11 +101,11 @@ async fn concurrent_calls_share_one_collection_but_calls_after_completion_fetch_
     let (fake, collector, _) = noon().await;
     fake.set_quote_rows(vec![row(1), row(2)]);
     fake.delay("ka10095", Duration::from_millis(100));
-    let (a, b) = tokio::join!(collector.collect(vec![code(1), code(2)]), collector.collect(vec![code(2), code(1), code(1)]));
+    let (a, b) = tokio::join!(collector.collect(vec![code(1), code(2)], CollectionBasis::default()), collector.collect(vec![code(2), code(1), code(1)], CollectionBasis::default()));
     let (a, b) = (a.unwrap(), b.unwrap());
     assert!(Arc::ptr_eq(&a, &b));
     assert_eq!(calls(&fake), 1);
-    let c = collector.collect(vec![code(1), code(2)]).await.unwrap();
+    let c = collector.collect(vec![code(1), code(2)], CollectionBasis::default()).await.unwrap();
     assert_ne!(a.id, c.id);
     assert_eq!(calls(&fake), 2);
 }
@@ -114,12 +114,12 @@ async fn concurrent_calls_share_one_collection_but_calls_after_completion_fetch_
 async fn first_request_failure_never_publishes_a_batch_and_keeps_previous_completion() {
     let (fake, collector, _) = noon().await;
     fake.script("ka10095", vec![failure("[1501:입력 오류]")]);
-    assert!(matches!(collector.collect(vec![code(1)]).await, Err(CollectionError::Kiwoom(_))));
+    assert!(matches!(collector.collect(vec![code(1)], CollectionBasis::default()).await, Err(CollectionError::Kiwoom(_))));
     assert!(collector.completed().is_none());
     fake.set_quote_rows(vec![row(1)]);
-    let previous = collector.collect(vec![code(1)]).await.unwrap();
+    let previous = collector.collect(vec![code(1)], CollectionBasis::default()).await.unwrap();
     fake.script("ka10095", vec![failure("[1501:입력 오류]")]);
-    assert!(collector.collect(vec![code(1)]).await.is_err());
+    assert!(collector.collect(vec![code(1)], CollectionBasis::default()).await.is_err());
     assert!(Arc::ptr_eq(&previous, &collector.completed().unwrap()));
 }
 
@@ -128,15 +128,15 @@ async fn middle_request_failure_discards_partial_rows_without_mixing_previous_ba
     let (fake, collector, _) = noon().await;
     fake.script("ka10095", vec![reply((1..=100).map(row).collect()), failure("[1501:입력 오류]")]);
     let targets: Vec<_> = (1..=101).map(code).collect();
-    assert!(matches!(collector.collect(targets.clone()).await, Err(CollectionError::Kiwoom(_))));
+    assert!(matches!(collector.collect(targets.clone(), CollectionBasis::default()).await, Err(CollectionError::Kiwoom(_))));
     assert_eq!(calls(&fake), 2);
     assert!(collector.completed().is_none());
     fake.set_quote_rows((1..=101).map(row).collect());
-    let previous = collector.collect(targets.clone()).await.unwrap();
+    let previous = collector.collect(targets.clone(), CollectionBasis::default()).await.unwrap();
     let mut changed = row(1);
     changed["cur_prc"] = "11500".into();
     fake.script("ka10095", vec![reply(vec![changed]), failure("[1501:입력 오류]")]);
-    assert!(collector.collect(targets).await.is_err());
+    assert!(collector.collect(targets, CollectionBasis::default()).await.is_err());
     assert!(Arc::ptr_eq(&previous, &collector.completed().unwrap()));
 }
 
@@ -150,7 +150,7 @@ async fn individual_missing_unreadable_duplicate_and_other_venue_rows_preserve_g
     let mut combined = row(6);
     combined["stk_cd"] = "000006_AL".into();
     fake.script("ka10095", vec![reply(vec![row(1), bad, row(4), row(4), nxt, combined, Value::Null])]);
-    let batch = collector.collect((1..=6).map(code).collect()).await.unwrap();
+    let batch = collector.collect((1..=6).map(code).collect(), CollectionBasis::default()).await.unwrap();
     assert_eq!(batch.missing_count(), 5);
     assert!(batch.stocks[&code(1)].result.is_ok());
     assert_eq!(batch.stocks[&code(2)].result, Err(MissingSummary::MissingRow));
@@ -179,7 +179,7 @@ async fn premarket_confirmed_no_trades_is_distinct_from_old_missing_or_unreadabl
     let mut future = row(5);
     future["dt"] = "20261113".into();
     fake.set_quote_rows(vec![no_trades, yesterday, bad_date, unknown_date, future]);
-    let batch = collector.collect((1..=6).map(code).collect()).await.unwrap();
+    let batch = collector.collect((1..=6).map(code).collect(), CollectionBasis::default()).await.unwrap();
     let known = batch.stocks[&code(1)].result.as_ref().unwrap();
     assert_eq!(known.values, KrxSummaryValues::NoTrades { current_centi: 0 });
     assert_eq!(known.trade_time, None);
@@ -197,7 +197,7 @@ async fn holiday_does_not_turn_previous_trading_day_into_confirmed_no_trades() {
     let mut friday = row(1);
     friday["dt"] = "20261113".into();
     fake.set_quote_rows(vec![friday]);
-    let batch = collector.collect(vec![code(1)]).await.unwrap();
+    let batch = collector.collect(vec![code(1)], CollectionBasis::default()).await.unwrap();
     assert_eq!(batch.stocks[&code(1)].result, Err(MissingSummary::OtherDate(day(13))));
 }
 
@@ -211,7 +211,7 @@ async fn stale_trade_time_is_allowed_but_invalid_time_and_inconsistent_zero_volu
     let mut invalid_ohlc = row(4);
     invalid_ohlc["high_pric"] = "10500".into();
     fake.set_quote_rows(vec![row(1), bad_time, contradictory, invalid_ohlc]);
-    let batch = collector.collect((1..=4).map(code).collect()).await.unwrap();
+    let batch = collector.collect((1..=4).map(code).collect(), CollectionBasis::default()).await.unwrap();
     assert!(batch.stocks[&code(1)].result.is_ok());
     assert_eq!(batch.missing_count(), 3);
 }
@@ -220,11 +220,11 @@ async fn stale_trade_time_is_allowed_but_invalid_time_and_inconsistent_zero_volu
 async fn midnight_during_delayed_response_rejects_batch_then_new_date_fetches_again() {
     let (fake, collector, clock) = setup(kst(day(12), 23, 59, 0)).await;
     fake.set_quote_rows(vec![row(1)]);
-    let previous = collector.collect(vec![code(1)]).await.unwrap();
+    let previous = collector.collect(vec![code(1)], CollectionBasis::default()).await.unwrap();
     let mut delayed = reply(vec![row(1)]);
     delayed.delay = Duration::from_millis(150);
     fake.script("ka10095", vec![delayed]);
-    let task = tokio::spawn({ let collector = collector.clone(); async move { collector.collect(vec![code(1)]).await } });
+    let task = tokio::spawn({ let collector = collector.clone(); async move { collector.collect(vec![code(1)], CollectionBasis::default()).await } });
     wait_calls(&fake, 2).await;
     clock.jump(61);
     assert_eq!(task.await.unwrap().unwrap_err(), CollectionError::DateChanged);
@@ -232,7 +232,7 @@ async fn midnight_during_delayed_response_rejects_batch_then_new_date_fetches_ag
     let mut next_day = row(1);
     next_day["dt"] = "20261113".into();
     fake.set_quote_rows(vec![next_day]);
-    let next = collector.collect(vec![code(1)]).await.unwrap();
+    let next = collector.collect(vec![code(1)], CollectionBasis::default()).await.unwrap();
     assert_eq!(next.target, day(13));
     assert_ne!(next.id, previous.id);
     assert_eq!(calls(&fake), 3);
@@ -246,16 +246,16 @@ async fn cancel_notifies_all_waiters_and_late_response_cannot_replace_new_collec
     let mut changed = row(1);
     changed["cur_prc"] = "11500".into();
     fake.script("ka10095", vec![delayed, reply(vec![changed])]);
-    let a = tokio::spawn({ let collector = collector.clone(); async move { collector.collect(vec![code(1)]).await } });
+    let a = tokio::spawn({ let collector = collector.clone(); async move { collector.collect(vec![code(1)], CollectionBasis::default()).await } });
     wait_calls(&fake, 1).await;
-    let b = collector.collect(vec![code(1)]);
+    let b = collector.collect(vec![code(1)], CollectionBasis::default());
     tokio::pin!(b);
     tokio::select! { result = &mut b => panic!("아직 수집 중: {result:?}"), _ = tokio::time::sleep(Duration::from_millis(10)) => {} }
     collector.cancel();
     assert_eq!(a.await.unwrap().unwrap_err(), CollectionError::Cancelled);
     assert_eq!(b.await.unwrap_err(), CollectionError::Cancelled);
     assert!(collector.completed().is_none());
-    let next = collector.collect(vec![code(1)]).await.unwrap();
+    let next = collector.collect(vec![code(1)], CollectionBasis::default()).await.unwrap();
     assert_eq!(calls(&fake), 2);
     let KrxSummaryValues::Traded { ohlcv, .. } = next.stocks[&code(1)].result.as_ref().unwrap().values else { panic!("거래 행") };
     assert_eq!(ohlcv.close().centi(), 1_150_000);
@@ -268,11 +268,11 @@ async fn dropping_one_waiter_does_not_cancel_shared_collection_and_different_tar
     let (fake, collector, _) = noon().await;
     fake.set_quote_rows(vec![row(1)]);
     fake.delay("ka10095", Duration::from_millis(100));
-    let task = tokio::spawn({ let collector = collector.clone(); async move { collector.collect(vec![code(1)]).await } });
+    let task = tokio::spawn({ let collector = collector.clone(); async move { collector.collect(vec![code(1)], CollectionBasis::default()).await } });
     wait_calls(&fake, 1).await;
     task.abort();
-    assert_eq!(collector.collect(vec![code(2)]).await.unwrap_err(), CollectionError::TargetsChanged);
-    let batch = collector.collect(vec![code(1)]).await.unwrap();
+    assert_eq!(collector.collect(vec![code(2)], CollectionBasis::default()).await.unwrap_err(), CollectionError::TargetsChanged);
+    let batch = collector.collect(vec![code(1)], CollectionBasis::default()).await.unwrap();
     assert_eq!(batch.missing_count(), 0);
     assert_eq!(calls(&fake), 1);
 }
@@ -282,12 +282,12 @@ async fn gate_global_stop_and_path_stop_keep_existing_kiwoom_error_contract() {
     for (message, stopped, gated) in [("[8003:인증 불확실]", false, true), ("[8050:인증 차단]", true, false), ("[9998:알 수 없음]", true, false)] {
         let (fake, collector, _) = noon().await;
         fake.script("ka10095", vec![failure(message)]);
-        let error = collector.collect(vec![code(1)]).await.unwrap_err();
+        let error = collector.collect(vec![code(1)], CollectionBasis::default()).await.unwrap_err();
         let CollectionError::Kiwoom(error) = error else { panic!("키움 오류") };
         assert_eq!(matches!(error, KiwoomError::Stopped(_)), stopped);
         assert_eq!(matches!(error, KiwoomError::Gated { .. }), gated);
         assert!(collector.completed().is_none());
-        assert!(collector.collect(vec![code(1)]).await.is_err());
+        assert!(collector.collect(vec![code(1)], CollectionBasis::default()).await.is_err());
         assert_eq!(calls(&fake), 1);
     }
 }
@@ -300,10 +300,10 @@ async fn new_date_call_ends_old_flight_and_never_joins_yesterdays_response() {
     let mut next_day = row(1);
     next_day["dt"] = "20261113".into();
     fake.script("ka10095", vec![delayed, reply(vec![next_day])]);
-    let old = tokio::spawn({ let collector = collector.clone(); async move { collector.collect(vec![code(1)]).await } });
+    let old = tokio::spawn({ let collector = collector.clone(); async move { collector.collect(vec![code(1)], CollectionBasis::default()).await } });
     wait_calls(&fake, 1).await;
     clock.jump(86_400);
-    let next = collector.collect(vec![code(1)]).await.unwrap();
+    let next = collector.collect(vec![code(1)], CollectionBasis::default()).await.unwrap();
     assert_eq!(old.await.unwrap().unwrap_err(), CollectionError::DateChanged);
     assert_eq!(next.target, day(13));
     assert!(next.stocks[&code(1)].result.is_ok());
@@ -316,6 +316,22 @@ async fn unexpected_continuation_never_publishes_an_incomplete_batch() {
     let mut partial = reply(vec![row(1)]);
     partial.body["_headers"] = json!({"cont-yn": "Y", "next-key": "unread-part"});
     fake.script("ka10095", vec![partial]);
-    assert_eq!(collector.collect(vec![code(1)]).await.unwrap_err(), CollectionError::UnexpectedContinuation);
+    assert_eq!(collector.collect(vec![code(1)], CollectionBasis::default()).await.unwrap_err(), CollectionError::UnexpectedContinuation);
     assert!(collector.completed().is_none());
+}
+
+#[tokio::test]
+async fn different_store_generations_and_update_epochs_cannot_share_a_flight() {
+    let (fake, collector, _) = noon().await;
+    fake.set_quote_rows(vec![row(1)]);
+    fake.delay("ka10095", Duration::from_millis(200));
+    let basis = CollectionBasis { generation: 7, update_epoch: 3 };
+    let first = tokio::spawn({ let collector = collector.clone(); async move { collector.collect(vec![code(1)], basis).await } });
+    wait_calls(&fake, 1).await;
+    for changed in [CollectionBasis { generation: 8, ..basis }, CollectionBasis { update_epoch: 4, ..basis }] {
+        assert_eq!(collector.collect(vec![code(1)], changed).await.unwrap_err(), CollectionError::BasisChanged);
+    }
+    let batch = first.await.unwrap().unwrap();
+    assert_eq!(batch.basis, basis);
+    assert_eq!(calls(&fake), 1);
 }

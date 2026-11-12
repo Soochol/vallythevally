@@ -2,4 +2,4 @@
 import type { KstDate } from "./KstDate";
 import type { SymbolCode } from "./SymbolCode";
 
-export type ScreenerRow = { symbol: SymbolCode, name: string, close: number, changeRate: number | null, matchedDate: KstDate, };
+export type ScreenerRow = { symbol: SymbolCode, name: string, close: number, changeRate: number | null, matchedDate: KstDate, latestBarDate: KstDate, provisional: boolean, };

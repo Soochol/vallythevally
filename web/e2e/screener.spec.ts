@@ -3,7 +3,7 @@ import type { Locator, Page } from "@playwright/test";
 import { type App, cell, chartOf, expect, SEARCH_BUTTON_TITLE, test } from "./harness";
 import { editor, excludedLine, expectCellOn, expectRows, openScreener, panel, pickPeriod, pickVenue, rail, results, rows, runButton, savedTo, storeLine, updateBand, waitForUpdateToFinish } from "./screener-page";
 
-test.use({ krxMarket: "20261106", clockStart: "20261109100000" });
+test.use({ krxMarket: "20261106", clockStart: "20261106203000" });
 
 const NEXT_MORNING = { market: "20261109", clockStart: "20261110100000" };
 const SCREEN_NAME = "고가 60일 신고가";
@@ -67,7 +67,7 @@ test("빈 저장소를 채우고 만든 조건식으로 찾은 종목을 칸의 
     await expect(panel(page).getByText("저장한 조건식이 없습니다")).toBeVisible();
     await updateBand(page).getByRole("button", { name: "처음 받기" }).click();
     await waitForUpdateToFinish(page, "11-06(금)");
-    await expect(storeLine(page)).toContainText("당일 봉은 20:00 뒤에 받습니다");
+    await expect(storeLine(page)).toContainText("빠진 관측일 없음");
   });
 
   await test.step("조건식 만들기", async () => {
@@ -160,6 +160,9 @@ test("빈 저장소를 채우고 만든 조건식으로 찾은 종목을 칸의 
 
     await updateBand(page).getByRole("button", { name: "업데이트" }).click();
     await waitForUpdateToFinish(page, "11-09(월)");
+    await app.restart({ clockStart: "20261109203000" });
+    await page.reload();
+    await openScreener(page);
     await runButton(page).click();
     await expect(results(page)).toContainText("4종목 · 11-09(월) 기준");
   });
@@ -333,7 +336,7 @@ test.describe("20:00 뒤", () => {
   });
 });
 
-test("최근 관측일을 채우는 동안에는 실행이 막히고, 과거를 이어 받는 동안에는 이력이 덜 찬 종목을 빼고 실행되며, 취소해도 받은 자료는 남는다", async ({ app, page }) => {
+test("최근 관측일을 채우는 동안에는 실행이 막히고, 과거 이어 받기를 취소한 뒤에는 이력이 덜 찬 종목을 빼고 실행되며 받은 자료는 남는다", async ({ app, page }) => {
   await page.goto("/");
   await openScreener(page);
   await panel(page).getByRole("button", { name: "새 조건식" }).click();
@@ -352,9 +355,9 @@ test("최근 관측일을 채우는 동안에는 실행이 막히고, 과거를 
   await expect(panel(page).getByText("최근 관측일을 채우는 동안에는 실행할 수 없습니다")).toBeVisible();
 
   await expect(updateBand(page)).toContainText("과거 이력 이어 받기", { timeout: 60_000 });
+  await updateBand(page).getByRole("button", { name: "취소" }).click();
   await runButton(page).click();
   await expect(excludedLine(page)).toHaveText(/^대상 10종목 · 빠짐: 상장 기간 부족 6 · 이력 덜 참 [1-4]$/);
-  await updateBand(page).getByRole("button", { name: "취소" }).click();
   await expect(updateBand(page)).toBeHidden();
   await expect(storeLine(page)).toContainText(/과거 이력 \d\/10종목/);
 
