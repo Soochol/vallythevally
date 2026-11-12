@@ -283,8 +283,12 @@ test("패널 머리는 줄마다 그 줄의 봉 주기로 조건을 풀고, 시�
 
   const conditions = panel(page).getByRole("list", { name: "조건" });
   const markets = panel(page).getByRole("group", { name: "대상 시장", exact: true });
+  const selectedMarkets = markets.locator('button[aria-pressed="true"]');
+  const exclusions = panel(page).getByRole("button", { name: / 제외 해제$/ });
   await expect(screenChooser(page)).toHaveText(mixed.name);
   await expect(conditions.getByRole("listitem")).toHaveText(["주봉최근1주 이내에종가52주 신고가인 봉이 있다", "그리고일봉최근5일 이내에60일 신고거래량인 봉이 있다"]);
+  await expect(selectedMarkets).toHaveText(["코스닥"]);
+  await expect(exclusions).toHaveText(["ETF", "관리종목"]);
   await expect(markets.getByRole("button", { name: "코스닥", exact: true })).toHaveAttribute("aria-pressed", "true");
   await expect(panel(page).getByRole("button", { name: "ETF 제외 해제", exact: true })).toBeVisible();
   await expect(panel(page).getByRole("button", { name: "관리종목 제외 해제", exact: true })).toBeVisible();
@@ -294,6 +298,8 @@ test("패널 머리는 줄마다 그 줄의 봉 주기로 조건을 풀고, 시�
   await page.getByRole("menuitemradio", { name: plain.name, exact: true }).click();
   await expect(conditions).toHaveText("월봉최근1개월 이내에고가12개월 신고가인 봉이 있다");
   await expect(markets.getByText("두 시장 모두", { exact: true })).toBeVisible();
+  await expect(selectedMarkets).toHaveCount(0);
+  await expect(exclusions).toHaveCount(0);
 });
 
 test("결과를 연 뒤 종목 정보를 기다리는 사이 검색으로 다른 종목을 열면, 늦게 온 정보는 그 선택을 덮지 않고 다음 열기는 그대로 된다", async ({ app, page }) => {

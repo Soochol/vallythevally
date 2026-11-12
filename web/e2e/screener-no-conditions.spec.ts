@@ -92,6 +92,8 @@ test("새 조건식은 조건 없이 열리고 마지막 줄까지 뺐다가 다
     await expect(panel(page).getByRole("button", { name: "조건식 고르기", exact: true })).toHaveText(SCREEN_NAME);
     await expectNoConditions(panel(page));
     await expect(panel(page).getByText("두 시장 모두")).toBeVisible();
+    await expect(panel(page).getByRole("group", { name: "대상 시장", exact: true }).locator('button[aria-pressed="true"]')).toHaveCount(0);
+    await expect(panel(page).getByRole("button", { name: / 제외 해제$/ })).toHaveCount(0);
     const stored = await (await fetch(`${app.url}/api/screens`)).json();
     expect(stored.screens).toEqual([{ id: expect.any(String), name: SCREEN_NAME, markets: [], exclude: [], conditions: [] }]);
   });
