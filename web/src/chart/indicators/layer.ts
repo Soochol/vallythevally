@@ -7,6 +7,7 @@ import {
   type PriceFormat,
   PriceScaleMode,
 } from "lightweight-charts";
+import { axisPriceFormat, financialAxisUnit, type AxisGeometry } from "../axisFormat";
 import type { Bar } from "../../api/generated/Bar";
 import type { FinancialsPage } from "../../api/generated/FinancialsPage";
 import { adjacentBucket, financialBuckets, financialDetail, financialFailure, financialReason, checkedTime, financialSummary, financialValue, reportingPeriod } from "../financials";
@@ -67,6 +68,9 @@ export interface LayerHost {
   isIndex(): boolean;
   period(): Period;
   requestFrame(): void;
+  axisFormatted(pane: ReturnType<IChartApi["panes"]>[number]): void;
+  axisCoordinates(pane: ReturnType<IChartApi["panes"]>[number]): number[];
+  axisFailed(pane: ReturnType<IChartApi["panes"]>[number], error: unknown): void;
   /** 시리즈에 그리는 동안 보이는 범위 변경으로 과거 페이지를 받지 않게 한다(주 시리즈의 setData와 같은 가드). */
   guard(draw: () => void): void;
 }
@@ -459,10 +463,28 @@ export class IndicatorLayer {
       const metric = config.spec.kind;
       const currencies = new Set(this.financials?.series.find((series) => series.metric === metric)?.points.flatMap((p) => p.currency ? [p.currency] : []));
       const currency = currencies.size === 1 ? [...currencies][0] ?? null : "원문 통화";
-      return { type: "custom", minMove: 0.01, formatter: (v: number) => financialValue(v, metric, currency) };
+      return axisPriceFormat(financialAxisUnit(metric, currency), 0.01, this.axisGeometry(config));
     }
-    if (config.spec.kind === "rsi" || config.spec.kind === "stochSlow") return { type: "price", precision: 2, minMove: 0.01 };
-    return { type: "custom", minMove: 0.01, formatter: (v: number) => this.format(config, v) };
+    const unit = config.spec.kind === "volume" ? "volume" : config.spec.kind === "macd" || config.spec.kind === "rsi" || config.spec.kind === "stochSlow" || this.host.isIndex() ? "index" : "price";
+    return axisPriceFormat(unit, 0.01, this.axisGeometry(config));
+  }
+
+  private axisGeometry(config: IndicatorConfig): AxisGeometry {
+    return {
+      formatted: () => {
+        const series = this.shown.get(config.id)?.lines[0]?.series;
+        if (series) this.host.axisFormatted(series.getPane());
+      },
+      failed: (error) => {
+        const series = this.shown.get(config.id)?.lines[0]?.series;
+        if (series) this.host.axisFailed(series.getPane(), error);
+      },
+      toCoordinate: (value) => this.shown.get(config.id)?.lines[0]?.series.priceToCoordinate(value) ?? null,
+      lastCoordinates: () => {
+        const series = this.shown.get(config.id)?.lines[0]?.series;
+        return series ? this.host.axisCoordinates(series.getPane()) : [];
+      },
+    };
   }
 
   private format(config: IndicatorConfig, v: number): string {

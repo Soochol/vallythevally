@@ -5,11 +5,14 @@ import {
   type DeepPartial,
   type IChartApi,
   LineStyle,
+  MismatchDirection,
   PriceScaleMode,
   type TickMarkType,
   type Time,
   type UTCTimestamp,
 } from "lightweight-charts";
+import { AxisLabelCache } from "./axisLabelCache";
+import { axisPriceFormat, type AxisGeometry } from "./axisFormat";
 import { fetchBarsPage } from "../api/bars";
 import type { Bar } from "../api/generated/Bar";
 import type { FinancialsPage } from "../api/generated/FinancialsPage";
@@ -101,6 +104,7 @@ export interface ControllerDeps {
 export class ChartController {
   private readonly el: HTMLElement;
   private readonly chart: IChartApi;
+  private readonly axisLabels: AxisLabelCache;
   private main: MainSeries;
   private financialHoverTime: number | null = null;
   private readonly indicators: IndicatorLayer;
@@ -135,10 +139,11 @@ export class ChartController {
     this.tokens = deps.tokens;
     this.onStatus = deps.onStatus;
     this.chart = createChart(el, { ...this.chartOptions(), autoSize: true });
+    this.axisLabels = new AxisLabelCache(this.chart, () => this.scheduleFrame());
     this.chart.chartElement().addEventListener("wheel", this.onWheel, { capture: true, passive: false });
     // 주 시리즈를 바꿔 붙이는 동안 가격 pane이 비어도 라이브러리가 지우지 않게 한다. 지우면 지표 패널이 0번이 된다.
     this.chart.panes()[0]?.setPreserveEmptyPane(true);
-    this.main = addMainSeries(this.chart, "candle", this.tokens, false);
+    this.main = addMainSeries(this.chart, "candle", this.tokens, false, this.priceAxisGeometry());
     this.legend = new Legend(el);
     this.indicators = new IndicatorLayer(
       {
@@ -148,13 +153,20 @@ export class ChartController {
         period: () => this.period(),
         requestFrame: () => this.scheduleFrame(),
         guard: (draw) => this.withDataGuard(draw),
+        axisFormatted: (pane) => this.axisLabels.record(pane),
+        axisCoordinates: (pane) => this.axisLabels.lastCoordinates(pane),
+        axisFailed: (pane, error) => this.axisLabels.failed(pane, error),
       },
       deps.indicators ?? openIndicatorPort,
     );
     this.indicatorLegend = new IndicatorLegend(el, (id, command) => deps.onIndicatorCommand?.(id, command));
     this.compareLegend = new CompareLegend((code) => deps.onCompareRemove?.(code));
     this.legend.root.append(this.indicatorLegend.priceBox, this.compareLegend.box);
-    this.resize = new ResizeObserver(() => this.scheduleFrame());
+    this.resize = new ResizeObserver(() => {
+      const width = this.axisWidth();
+      if (this.chart.options().rightPriceScale.minimumWidth !== width) this.chart.priceScale("right").applyOptions({ minimumWidth: width });
+      this.scheduleFrame();
+    });
     this.resize.observe(el);
     const onPanelStretch = deps.onPanelStretch;
     if (onPanelStretch) {
@@ -210,6 +222,7 @@ export class ChartController {
       this.updateIntradayEnd();
       this.compare.coverFrom(this.leftT());
       if (this.view?.settings.compare.length) this.renderLegend();
+      this.scheduleFrame();
     });
     // 캔버스 글자는 글꼴을 다 받은 뒤 다시 그려야 Pretendard로 보인다.
     void document.fonts?.ready.then(() => {
@@ -238,7 +251,7 @@ export class ChartController {
     if (prev?.period !== next.period) this.chart.applyOptions({ timeScale: { timeVisible: isIntraday(next.period) } });
     if (prev?.symbol !== next.symbol || prev.venue !== next.venue || prev.period !== next.period) {
       if (prev && isIndexCode(prev.symbol) !== isIndex) {
-        this.main.api.applyOptions({ priceFormat: priceFormat(isIndex) });
+        this.main.api.applyOptions({ priceFormat: priceFormat(isIndex, this.priceAxisGeometry()) });
         this.indicators.refreshPriceFormat();
       }
       this.history = null;
@@ -364,8 +377,28 @@ export class ChartController {
     if (timeScale.options().rightBarStaysOnScroll !== rightBarStaysOnScroll) timeScale.applyOptions({ rightBarStaysOnScroll });
   };
 
+  private priceAxisGeometry(percent = false): AxisGeometry {
+    return {
+      formatted: () => this.axisLabels.record(this.main.api.getPane()),
+      failed: (error) => this.axisLabels.failed(this.main.api.getPane(), error),
+      toCoordinate: (value) => {
+        if (!percent) return this.main.api.priceToCoordinate(value);
+        const range = this.chart.timeScale().getVisibleLogicalRange();
+        const first = range ? this.main.api.dataByIndex(Math.floor(range.from), MismatchDirection.NearestRight) : null;
+        const base = first && "close" in first ? first.close : first && "value" in first ? first.value : null;
+        return typeof base !== "number" ? null : this.main.api.priceToCoordinate(base + value / 100 * Math.abs(base));
+      },
+      lastCoordinates: () => this.axisLabels.lastCoordinates(this.main.api.getPane()),
+    };
+  }
+
+  private axisWidth(): number {
+    return matchMedia("(max-width: 767px)").matches ? 52 : 72;
+  }
+
   private chartOptions(): DeepPartial<ChartOptions> {
     const t = this.tokens;
+    const percentage = axisPriceFormat("%", 0.01, this.priceAxisGeometry(true));
     const crossLine = { color: t.crosshair, style: LineStyle.Dashed, width: 1 as const, labelBackgroundColor: t.raised };
     return {
       layout: {
@@ -378,7 +411,7 @@ export class ChartController {
       },
       grid: { vertLines: { color: t.grid }, horzLines: { color: t.grid } },
       crosshair: { mode: CrosshairMode.Normal, vertLine: crossLine, horzLine: crossLine },
-      rightPriceScale: { borderColor: t.line, scaleMargins: { top: 0.14, bottom: 0.08 } },
+      rightPriceScale: { minimumWidth: this.axisWidth(), alignLabels: true, entireTextOnly: true, borderColor: t.line, scaleMargins: { top: 0.14, bottom: 0.08 } },
       timeScale: {
         borderColor: t.line,
         rightOffset: RIGHT_OFFSET,
@@ -388,6 +421,8 @@ export class ChartController {
       },
       localization: {
         locale: "ko-KR",
+        percentageFormatter: percentage.formatter,
+        tickmarksPercentageFormatter: percentage.tickmarksFormatter,
         timeFormatter: (time: Time) => formatBarTime(fromChartTime(time as UTCTimestamp), this.period()),
       },
     };
@@ -401,7 +436,7 @@ export class ChartController {
     this.indicators.flush();
     this.withDataGuard(() => preserveTimeRange(this.chart.timeScale(), this.period(), () => {
       this.chart.removeSeries(this.main.api);
-      this.main = addMainSeries(this.chart, this.view?.settings.style ?? "candle", this.tokens, isIndex);
+      this.main = addMainSeries(this.chart, this.view?.settings.style ?? "candle", this.tokens, isIndex, this.priceAxisGeometry());
       this.extensions.forEach((ext) => ext.reattach());
       this.setBars(this.bars);
     }));
@@ -451,16 +486,17 @@ export class ChartController {
 
   private scheduleFrame(): void {
     if (this.frame !== null || this.disposed) return;
-    this.frame = requestAnimationFrame(() => {
+    this.frame = requestAnimationFrame((time) => {
       this.frame = null;
-      this.drawFrame();
+      this.drawFrame(time);
     });
   }
 
-  private drawFrame(): void {
+  private drawFrame(time: number): void {
     this.flushPendingDraw();
     this.compare.flush(this.bars);
     this.indicators.flush();
+    if (this.axisLabels.refresh(time)) this.scheduleFrame();
     this.renderLegend();
   }
 
@@ -517,12 +553,13 @@ export class ChartController {
     this.realtimeSeen = false;
     if (this.realtimeLive) this.stalledAt = null;
     const bars = displayBars(h);
-    const show = matchMedia("(max-width: 767px)").matches ? 90 : 130;
+    const coarse = this.period() === "Y" || this.period() === "Q";
+    const show = coarse ? bars.length : matchMedia("(max-width: 767px)").matches ? 90 : 130;
     this.withDataGuard(() => {
       this.setBars(bars);
       const last = bars.at(-1);
       const end = last ? this.chart.timeScale().timeToIndex(toChartTime(last.t), false) : null;
-      if (end !== null) this.chart.timeScale().setVisibleLogicalRange({ from: end + 1 - show, to: end + RIGHT_OFFSET });
+      if (end !== null) this.chart.timeScale().setVisibleLogicalRange({ from: end + (coarse ? 0.5 : 1) - show, to: end + (coarse ? 0.5 + Math.min(2, bars.length * 0.05) : RIGHT_OFFSET) });
     });
     this.indicators.reset(h);
     this.compare.coverFrom(this.leftT());
@@ -598,7 +635,7 @@ export class ChartController {
     const view = this.view;
     const i = this.hoverIndex ?? this.bars.length - 1;
     const bar = this.bars[i];
-    this.indicatorLegend.render(this.indicators.rows(this.financialHoverTime ?? bar?.t ?? null), this.paneTops());
+    this.indicatorLegend.render(this.indicators.rows(this.financialHoverTime ?? bar?.t ?? null), this.paneTops(), this.chart.priceScale("right").width());
     this.compareLegend.render(this.compare.rows(this.leftT(), bar?.t ?? null));
     if (!view || !bar) return this.legend.show(null);
     this.legend.show({

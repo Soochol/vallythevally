@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useRef, useState } from "react";
+import { useCallback, useLayoutEffect, useId, useRef, useState } from "react";
 import type { Period } from "../../api/generated/Period";
 import { PERIOD_LABEL } from "../../lib/symbol";
 import { type CellState, useLayoutStore } from "../../stores/layout";
@@ -21,13 +21,31 @@ export function PeriodChips({ cell }: { cell: CellState }) {
   const openIndicators = useSelectionStore((s) => s.openIndicators);
   const [menuOpen, setMenuOpen] = useState(false);
   const root = useRef<HTMLDivElement>(null);
+  const navigation = useRef<HTMLElement>(null);
   const opener = useRef<HTMLButtonElement | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const longPressed = useRef(false);
   const hintId = useId();
 
-  useEffect(() => {
-    root.current?.querySelector('[aria-pressed="true"]')?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  useLayoutEffect(() => {
+    const nav = navigation.current;
+    const selected = nav?.querySelector<HTMLButtonElement>('[aria-pressed="true"]');
+    if (!nav || !selected) return;
+    let active = true;
+    const keepSelectedVisible = () => {
+      if (active && nav.clientWidth > 0) selected.scrollIntoView({ block: "nearest", inline: "nearest" });
+    };
+    keepSelectedVisible();
+    const resize = new ResizeObserver(keepSelectedVisible);
+    resize.observe(nav);
+    for (const chip of nav.children) resize.observe(chip, { box: "border-box" });
+    document.fonts.addEventListener("loadingdone", keepSelectedVisible);
+    void document.fonts.ready.then(keepSelectedVisible);
+    return () => {
+      active = false;
+      resize.disconnect();
+      document.fonts.removeEventListener("loadingdone", keepSelectedVisible);
+    };
   }, [cell.period]);
 
   const cancelPress = () => {
@@ -48,7 +66,7 @@ export function PeriodChips({ cell }: { cell: CellState }) {
 
   return (
     <div ref={root} className="relative hidden border-b border-line [grid-area:mper] max-md:flex">
-      <nav aria-label="봉 주기" className="flex min-w-0 flex-1 gap-1 overflow-x-auto px-3 pb-2 [scrollbar-width:none]">
+      <nav ref={navigation} aria-label="봉 주기" className="flex min-w-0 flex-1 gap-1 overflow-x-auto px-3 pb-2 [scrollbar-width:none]">
         {chips.map((p) => (
           <button
             key={p}
