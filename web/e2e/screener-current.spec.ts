@@ -69,7 +69,7 @@ test("수동 실행만 값을 바꾸며 같은 봉 갱신과 새 봉 추가, D/W
   await expect(rows(page).filter({ hasText: "110010" })).toContainText("잠정");
   const before = await rows(page).filter({ hasText: "110010" }).textContent();
   await quotes(app, summaries(baseline, old.close + 200));
-  await page.getByRole("navigation", { name: "주 메뉴" }).getByRole("button", { name: "스크리너", exact: true }).click();
+  await page.getByRole("button", { name: "넓게 보기", exact: true }).click();
   await expect(rows(page).filter({ hasText: "110010" })).toHaveText(before!);
   const updated = await execute(page);
   expect(updated.rows.find((r) => r.symbol === "110010")).toMatchObject({ close: old.close + 200, latestBarDate: "2026-11-09", matchedDate: "2026-11-09" });
@@ -267,7 +267,9 @@ for (const olderFails of [false, true]) {
     const row = newest.rows.find((r) => r.symbol === "110010")!;
     expect(row.matchedDate).toBe("2026-10-01");
     const original = await meta(page).textContent();
-    await page.getByRole("navigation", { name: "주 메뉴" }).getByRole("button", { name: "스크리너", exact: true }).click();
+    await page.getByRole("tablist", { name: "오른쪽 패널" }).getByRole("tab", { name: "관심종목", exact: true }).click();
+    await openScreener(page);
+    await page.getByRole("button", { name: "넓게 보기", exact: true }).click();
     const delivered = page.waitForEvent("requestfinished", (r) => new URL(r.url()).pathname === "/api/screener/run");
     release();
     await delivered;

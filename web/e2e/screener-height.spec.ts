@@ -2,7 +2,7 @@ import { writeFile } from "node:fs/promises";
 import type { Locator, Page } from "@playwright/test";
 import type { ApiError } from "../src/api/generated/ApiError";
 import type { Screen } from "../src/api/generated/Screen";
-import { cell, expect, test } from "./harness";
+import { cell, chartOf, expect, test } from "./harness";
 import { openScreener, panel, results, rows, runButton, storeLine, updateBand, waitForUpdateToFinish } from "./screener-page";
 
 test.use({ krxMarket: "20261106", clockStart: "20261106203000" });
@@ -19,38 +19,73 @@ async function openPanel(page: Page, width: number) {
   else await openScreener(page);
 }
 
+async function expectChart(page: Page, name: string) {
+  await expect(cell(page)).toHaveAttribute("aria-label", `칸 1: ${name} 통합 일`);
+  await expect(cell(page)).toHaveAttribute("aria-busy", "false");
+  await expect(chartOf(cell(page))).not.toHaveAttribute("data-bar-count", "0");
+}
+
 async function rowGeometry(row: Locator, scroll = true) {
   return row.evaluate((element, scroll) => {
     if (scroll) element.scrollIntoView({ block: "center" });
     const box = element.getBoundingClientRect();
     let top = 0;
     let bottom = window.innerHeight;
+    let left = 0;
+    let right = window.innerWidth;
+    const ancestors = [];
     for (let ancestor = element.parentElement; ancestor; ancestor = ancestor.parentElement) {
-      if (["auto", "scroll", "hidden", "clip"].includes(getComputedStyle(ancestor).overflowY)) {
-        const clip = ancestor.getBoundingClientRect();
-        top = Math.max(top, clip.top);
-        bottom = Math.min(bottom, clip.bottom);
+      const style = getComputedStyle(ancestor);
+      const clip = ancestor.getBoundingClientRect();
+      ancestors.push({ tag: ancestor.tagName, id: ancestor.id, role: ancestor.getAttribute("role"), top: clip.top, height: clip.height, scrollTop: ancestor.scrollTop, scrollHeight: ancestor.scrollHeight, clientHeight: ancestor.clientHeight, overflowY: style.overflowY });
+      if (["auto", "scroll", "hidden", "clip"].includes(style.overflowY)) {
+        top = Math.max(top, clip.top + ancestor.clientTop);
+        bottom = Math.min(bottom, clip.top + ancestor.clientTop + ancestor.clientHeight);
+      }
+      if (["auto", "scroll", "hidden", "clip"].includes(style.overflowX)) {
+        left = Math.max(left, clip.left + ancestor.clientLeft);
+        right = Math.min(right, clip.left + ancestor.clientLeft + ancestor.clientWidth);
       }
     }
     const footer = element.closest('aside[aria-label="스크리너"]')?.querySelector("footer");
     if (footer) bottom = Math.min(bottom, footer.getBoundingClientRect().top);
-    const target = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
-    return { height: box.height, top: box.top, bottom: box.bottom, clipTop: top, clipBottom: bottom, visibleHeight: Math.max(0, Math.min(box.bottom, bottom) - Math.max(box.top, top)), pointerReachesRow: target !== null && element.contains(target) };
+    const pointerChecks = [0.25, 0.5, 0.75].map((ratio) => {
+      const target = document.elementFromPoint(box.left + box.width * ratio, box.top + box.height * ratio);
+      return target !== null && element.contains(target);
+    });
+    return { ancestors, width: box.width, visibleWidth: Math.max(0, Math.min(box.right, right) - Math.max(box.left, left)), height: box.height, top: box.top, bottom: box.bottom, clipTop: top, clipBottom: bottom, visibleHeight: Math.max(0, Math.min(box.bottom, bottom) - Math.max(box.top, top)), pointerReachesRow: pointerChecks.every(Boolean) };
   }, scroll);
 }
 
 function expectWholeRow(geometry: Awaited<ReturnType<typeof rowGeometry>>) {
   expect(geometry.height).toBeGreaterThan(0);
+  expect(geometry.visibleWidth).toBeCloseTo(geometry.width, 0);
   expect(geometry.visibleHeight).toBeCloseTo(geometry.height, 0);
   expect(geometry.pointerReachesRow).toBe(true);
 }
 
-for (const [width, height] of [[320, 568], [320, 844], [360, 844], [390, 844], [1024, 768], [1280, 600], [1440, 900]]) {
-  test(`${width}×${height}에서 세 조건의 성공·실행 중·실패 뒤 결과 행 전체를 읽고 스크롤해 차트로 연다`, async ({ app, page }, info) => {
+const surfaces = [
+  { width: 320, height: 568, wide: false },
+  { width: 320, height: 844, wide: false },
+  { width: 360, height: 844, wide: false },
+  { width: 390, height: 844, wide: false },
+  { width: 1024, height: 768, wide: false },
+  { width: 1280, height: 600, wide: false },
+  { width: 1440, height: 900, wide: false },
+  { width: 1280, height: 600, wide: true },
+  { width: 1440, height: 900, wide: true },
+];
+
+for (const { width, height, wide } of surfaces) {
+  test(`${width}×${height} ${wide ? "넓은 패널" : "기본 패널"}에서 세 조건의 성공·실행 중·실패 뒤 결과 행 전체를 읽고 스크롤해 차트로 연다`, async ({ app, page }, info) => {
     await page.setViewportSize({ width: width!, height: height! });
     expect((await fetch(`${app.url}/api/screens`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ screens: [screen], revision: 1 }) })).status).toBe(200);
     await page.goto("/");
     await openPanel(page, width!);
+    if (wide) {
+      await page.getByRole("button", { name: "넓게 보기", exact: true }).click();
+      await expect(page.getByRole("button", { name: "넓게 보기", exact: true })).toHaveAttribute("aria-pressed", "true");
+    }
     await updateBand(page).getByRole("button", { name: "처음 받기" }).click();
     await waitForUpdateToFinish(page, "11-06(금)");
     await runButton(page).click();
@@ -81,26 +116,29 @@ for (const [width, height] of [[320, 568], [320, 844], [360, 844], [390, 844], [
     await expect(panel(page).getByRole("alert")).toContainText("이전 결과와 수집 시각을 유지합니다");
     await expect(metadata(page)).toHaveText(original!);
     const failed = await rowGeometry(first);
-    await writeFile(info.outputPath("geometry.json"), JSON.stringify({ width, height, success, running, failed }, null, 2));
+    await writeFile(info.outputPath("geometry.json"), JSON.stringify({ width, height, wide, success, running, failed }, null, 2));
     await page.screenshot({ path: info.outputPath("failed.png"), fullPage: true });
     await first.getByRole("button").click({ timeout: 2_500 });
-    await expect(cell(page)).toHaveAttribute("aria-label", "칸 1: 가상전자 통합 일");
+    await expectChart(page, "가상전자");
     if (width! < 768) await openPanel(page, width!);
     expectWholeRow(success);
     expectWholeRow(running);
     expectWholeRow(failed);
     expectWholeRow(await rowGeometry(last));
     await last.getByRole("button").click();
-    await expect(cell(page)).toHaveAttribute("aria-label", "칸 1: 가상정지 통합 일");
+    await expectChart(page, "가상정지");
     if (width! < 768) await openPanel(page, width!);
     await expect(metadata(page)).toHaveText(original!);
     await expect(panel(page).getByRole("alert")).toContainText("실행하지 못했습니다");
     await page.keyboard.press("ArrowUp");
-    await expect(cell(page)).toHaveAttribute("aria-label", "칸 1: 가상신규 통합 일");
+    await expectChart(page, "가상신규");
     if (width! < 768) await openPanel(page, width!);
     const selected = rows(page).filter({ hasText: "110090" });
     await expect(selected.getByRole("button")).toHaveAttribute("aria-current", "true");
-    expectWholeRow(await rowGeometry(selected, false));
+    const keyboardGeometry = await rowGeometry(selected, false);
+    expectWholeRow(keyboardGeometry);
+    await writeFile(info.outputPath("keyboard-geometry.json"), JSON.stringify(keyboardGeometry, null, 2));
+    if (width >= 768) expect((await page.getByRole("toolbar", { name: "차트 도구 막대" }).boundingBox())?.y).toBeCloseTo(0, 0);
     await page.screenshot({ path: info.outputPath("keyboard-selection.png"), fullPage: true });
     await metadata(page).scrollIntoViewIfNeeded();
     await expect(metadata(page)).toBeInViewport();
@@ -109,6 +147,11 @@ for (const [width, height] of [[320, 568], [320, 844], [360, 844], [390, 844], [
     await expect(panel(page).getByRole("alert")).toBeInViewport();
     await panel(page).getByRole("list", { name: "조건", exact: true }).scrollIntoViewIfNeeded();
     await expect(panel(page).getByRole("list", { name: "조건", exact: true }).getByRole("listitem")).toHaveCount(3);
+    const menuToggle = panel(page).getByRole("button", { name: "스크리너 메뉴", exact: true });
+    await menuToggle.click();
+    await expect(page.getByRole("menu", { name: "스크리너 메뉴" }).getByRole("menuitem", { name: /^새 목록/ })).toBeEnabled();
+    await page.keyboard.press("Escape");
+    await expect(menuToggle).toBeFocused();
     await runButton(page).scrollIntoViewIfNeeded();
     await expect(runButton(page)).toBeInViewport();
     await expect(storeLine(page)).toBeInViewport();
@@ -124,7 +167,7 @@ for (const [width, height] of [[320, 568], [320, 844], [360, 844], [390, 844], [
     await expect(panel(page).getByRole("alert")).toHaveCount(0);
     expectWholeRow(await rowGeometry(first));
     await first.getByRole("button").click();
-    await expect(cell(page)).toHaveAttribute("aria-label", "칸 1: 가상전자 통합 일");
+    await expectChart(page, "가상전자");
   });
 }
 
@@ -162,7 +205,7 @@ for (const [width, height] of [[320, 568], [1280, 600]]) {
     await writeFile(info.outputPath("long-error-geometry.json"), JSON.stringify(geometry, null, 2));
     await page.screenshot({ path: info.outputPath("long-error-row.png"), fullPage: true });
     await first.getByRole("button").click();
-    await expect(cell(page)).toHaveAttribute("aria-label", "칸 1: 가상전자 통합 일");
+    await expectChart(page, "가상전자");
     if (width! < 768) await openPanel(page, width!);
     await expect(metadata(page)).toHaveText(original!);
     expect(await page.evaluate(() => document.documentElement.scrollHeight <= window.innerHeight)).toBe(true);
