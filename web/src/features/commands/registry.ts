@@ -14,15 +14,32 @@ export interface SearchCommand {
   run(context: CommandContext): void | Promise<void>;
 }
 
+interface Registration {
+  command: SearchCommand;
+  owner: symbol;
+}
+
+let registrations: readonly Registration[] = [];
 let commands: readonly SearchCommand[] = [];
 const listeners = new Set<() => void>();
 
-export function registerSearchCommands(additions: readonly SearchCommand[]): () => void {
-  commands = [...commands.filter((c) => !additions.some((a) => a.id === c.id)), ...additions];
+function publish(next: readonly Registration[]): void {
+  registrations = next;
+  commands = next.map(({ command }) => command);
   listeners.forEach((listener) => listener());
+}
+
+export function registerSearchCommands(additions: readonly SearchCommand[]): () => void {
+  const owner = Symbol();
+  const byId = new Map(additions.map((command) => [command.id, command]));
+  publish([
+    ...registrations.filter(({ command }) => !byId.has(command.id)),
+    ...[...byId.values()].map((command) => ({ command, owner })),
+  ]);
   return () => {
-    commands = commands.filter((c) => !additions.includes(c));
-    listeners.forEach((listener) => listener());
+    const remaining = registrations.filter((entry) => entry.owner !== owner);
+    if (remaining.length === registrations.length) return;
+    publish(remaining);
   };
 }
 
