@@ -4,7 +4,7 @@ const layers: Layer[] = [];
 export function ownsChartKeyboard(event: KeyboardEvent): boolean {
   return layers.some((layer) => layer.options.blockChartKeys !== false)
     || (event.key === "Escape" && layers.length > 0)
-    || (event.target instanceof Element && event.target.closest("[popover]:popover-open, [data-chart-control]") !== null);
+    || (event.target instanceof Element && event.target.closest("[popover]:popover-open") !== null);
 }
 const onKey = (event: KeyboardEvent) => {
   const top = layers.at(-1);

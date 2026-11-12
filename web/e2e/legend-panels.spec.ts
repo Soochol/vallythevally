@@ -128,6 +128,31 @@ for (const key of ["T", "H"]) {
   });
 }
 
+test("손잡이 화살표는 고른 드로잉을 움직이지 않고 범례에서 검색 단축키도 열린다", async ({ page, app }) => {
+  await open(page, app);
+  const box = await cell(page).boundingBox();
+  if (!box) throw new Error("차트가 없습니다");
+  await cell(page).focus();
+  await page.keyboard.press("H");
+  await page.mouse.click(box.x + box.width * 0.7, box.y + 250);
+  await expect(page.getByRole("toolbar", { name: "드로잉 스타일" })).toBeVisible();
+  const url = `${app.url}/api/drawings?symbol=005930`;
+  await expect.poll(async () => (await (await fetch(url)).json()).length).toBe(1);
+  const before = await (await fetch(url)).json();
+  const mutations: string[] = [];
+  page.on("request", (request) => { if (new URL(request.url()).pathname.startsWith("/api/drawings") && request.method() !== "GET") mutations.push(request.method()); });
+  const height = (await heights(page))[1]!;
+  await cell(page).locator('[data-panel-resize="p-volume"]').focus();
+  await page.keyboard.press("ArrowUp");
+  await expect.poll(() => heights(page).then((values) => values[1]! - height)).toBeGreaterThan(10);
+  await expect.poll(async () => (await settings(app)).panels[0]?.stretch).toBeGreaterThan(0.25);
+  expect(await (await fetch(url)).json()).toEqual(before);
+  expect(mutations).toEqual([]);
+  await row(page, "ma").getByRole("button", { name: /설정 열기/ }).focus();
+  await page.keyboard.press("/");
+  await expect(page.getByRole("dialog", { name: "종목 검색", exact: true })).toBeVisible();
+});
+
 for (const size of [{ width: 1440, height: 900 }, { width: 1024, height: 768 }, { width: 390, height: 844 }]) {
   test(`범례 팝오버 화면 ${size.width}×${size.height}`, async ({ page, app }) => {
     await page.setViewportSize(size);
