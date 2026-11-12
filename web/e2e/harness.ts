@@ -8,7 +8,7 @@ import { test as base, expect, type Locator, type Page } from "@playwright/test"
 
 const WEB_DIR = path.resolve(import.meta.dirname, "..");
 const BIN_DIR = path.resolve(WEB_DIR, process.env.VALLY_E2E_BIN_DIR ?? "../target/debug");
-const STATIC_DIR = path.join(WEB_DIR, "dist");
+const STATIC_DIR = path.resolve(WEB_DIR, process.env.VALLY_E2E_STATIC_DIR ?? "dist");
 const START_TIMEOUT_MS = 15_000;
 
 const FAKE_APP_KEY = "FAKE-APPKEY-e2e-7f3a91c2";
