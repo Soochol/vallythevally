@@ -15,7 +15,7 @@ const AXIS_BTN = "tb-btn disabled:cursor-not-allowed disabled:opacity-50 disable
 export function Topbar() {
   const slot = useSelectionStore((s) => s.activeSlot);
   const openSearch = useSelectionStore((s) => s.openSearch);
-  const openIndicators = useSelectionStore((s) => s.openIndicators);
+  const openIndicatorCommand = useSelectionStore((s) => s.openIndicatorCommand);
   const collapsed = useUiStore((s) => s.prefs.watchCollapsed);
   const cell = useCell(slot);
   const { setPeriod, setStyle, setScale } = useLayoutStore.getState();
@@ -44,15 +44,15 @@ export function Topbar() {
       </div>
       <span className="tb-sep" />
       <StyleMenu value={cell.chartSettings.style} onChange={(s) => setStyle(slot, s)} />
-      <button type="button" className="tb-btn" aria-haspopup="dialog" title="지표 (I)" onClick={() => openIndicators(slot)}><IndicatorIcon />지표</button>
-      <button type="button" className="tb-btn" aria-haspopup="dialog" title="비교 종목" onClick={() => openIndicators(slot, null, "compare")}><CompareIcon />비교</button>
+      <button type="button" className="tb-btn" aria-haspopup="dialog" title="지표 (I)" onClick={() => openIndicatorCommand(slot)}><IndicatorIcon />지표</button>
+      <button type="button" className="tb-btn" aria-haspopup="dialog" title="비교 종목" onClick={() => openIndicatorCommand(slot, "compare")}><CompareIcon />비교</button>
       <span className="tb-sep" />
       <button type="button" className={AXIS_BTN} aria-pressed={shown === "log"} disabled={locked} title={locked ? LOG_LOCKED : "로그 축 (L)"} onClick={() => press("log")}>로그</button>
       <button type="button" className={AXIS_BTN} aria-pressed={shown === "percent"} disabled={locked} title={locked ? AXIS_LOCKED : "가격축을 화면 왼쪽 끝 봉 기준 % 변화로"} onClick={() => press("percent")}>%</button>
       <span className="min-w-0 flex-1" />
       <button type="button" className="icon-btn" title="차트 이미지 내려받기 (Alt+S)" aria-label="차트 이미지 내려받기" onClick={() => saveSnapshot(slot, "download")}><CameraIcon /></button>
       {canCopyImage() && <button type="button" className="icon-btn" title="차트 이미지 복사 (Alt+Shift+S)" aria-label="차트 이미지 복사" onClick={() => saveSnapshot(slot, "copy")}><CopyIcon /></button>}
-      <button type="button" className="icon-btn" title="차트 설정" aria-label="차트 설정" aria-haspopup="dialog" onClick={() => openIndicators(slot, null, "current")}><GearIcon /></button>
+      <button type="button" className="icon-btn" title="차트 설정" aria-label="차트 설정" aria-haspopup="dialog" onClick={() => openIndicatorCommand(slot)}><GearIcon /></button>
       {collapsed && <button type="button" className="icon-btn" title="패널 펴기 (Alt+W)" aria-label="패널 펴기" aria-expanded={false} onClick={() => useUiStore.getState().toggleWatch()}><PanelIcon /></button>}
     </header>
   );

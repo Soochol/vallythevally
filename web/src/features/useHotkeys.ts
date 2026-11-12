@@ -31,7 +31,7 @@ export function useHotkeys() {
         case "search":
           return sel.openSearch();
         case "indicators":
-          return sel.openIndicators(slot);
+          return sel.openIndicatorCommand(slot);
         case "toggleWatch":
           return useUiStore.getState().toggleWatch();
         case "period":

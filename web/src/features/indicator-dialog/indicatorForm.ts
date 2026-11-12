@@ -3,16 +3,13 @@ import {
   firstUnusedColor,
   type IndicatorColor,
   type IndicatorKind,
-  KIND_ORDER,
   KINDS,
-  type Placement,
   colorLine,
   type Validate,
   shownColor,
   specName,
 } from "../../chart/indicators/kinds";
 import { type IndicatorConfig, type LineWidth, type Panel, readSpecShape } from "../../chart/settings";
-import { highlight, normalizeQuery } from "../search/highlight";
 
 export type { Validate };
 export interface FieldError {
@@ -31,13 +28,6 @@ export interface Draft {
   color: IndicatorColor | "auto";
   width: LineWidth;
 }
-
-
-export const KIND_GROUPS: { place: Placement; financial: boolean; label: string }[] = [
-  { place: "price", financial: false, label: "기술지표 · 가격 패널에 겹쳐 그림" },
-  { place: "panel", financial: false, label: "기술지표 · 아래 지표 패널에 그림" },
-  { place: "panel", financial: true, label: "재무지표 · 분기봉·연봉" },
-];
 
 export function formFromSpec(spec: IndicatorSpec): SpecForm {
   const values: Record<string, unknown> = { ...spec };
@@ -116,11 +106,6 @@ export function hasColor(form: SpecForm): boolean {
 
 export function nextColor(indicators: readonly IndicatorConfig[]): IndicatorColor {
   return firstUnusedColor(indicators.map((i) => shownColor(i.spec, i.style.colors)));
-}
-
-export function matchKinds(query: string): IndicatorKind[] {
-  const q = normalizeQuery(query);
-  return KIND_ORDER.filter((k) => q === "" || highlight(KINDS[k].label, q).some((s) => s.match));
 }
 
 export function primaryLabel(editing: boolean, kind: IndicatorKind, spec: IndicatorSpec | null): string {
