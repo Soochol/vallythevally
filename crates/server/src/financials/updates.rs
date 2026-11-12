@@ -11,17 +11,27 @@ use super::{Financials, CollectionScope, model::{Failure, Security, Snapshot}};
 pub(super) enum Launch { Start, Resume, Automatic }
 
 #[derive(Default)]
-pub(super) struct UpdateRun { running: bool, probing: bool, failure: Option<Failure>, pending_symbols: Option<Vec<SymbolInfo>>, company_failures: BTreeMap<String, Failure> }
+pub(super) struct UpdateRun { running: bool, probing: bool, failure: Option<Failure>, pending_symbols: Option<Vec<SymbolInfo>>, collecting: Option<String>, company_failures: BTreeMap<String, Failure> }
+
+#[derive(Default)]
+pub(super) struct CollectionState { pub collecting: bool, pub failure: Option<Failure> }
 
 impl UpdateRun {
-    fn remember(&mut self, corp: &str, failure: Option<Failure>) {
-        match failure.filter(|failure| !matches!(failure, Failure::Paused | Failure::Yielded)) {
-            Some(failure) => {
-                tracing::warn!(?failure, "재무 자료 수집을 저장하지 못했습니다");
-                self.company_failures.insert(corp.into(), failure);
-            }
-            None => { self.company_failures.remove(corp); }
+    fn begin_company(&mut self, corp: &str) {
+        self.collecting = Some(corp.into());
+        self.company_failures.remove(corp);
+    }
+
+    fn finish_company(&mut self, corp: &str, failure: Option<Failure>) {
+        self.collecting = None;
+        if let Some(failure) = failure.filter(|failure| !matches!(failure, Failure::Paused | Failure::Yielded)) {
+            tracing::warn!(?failure, "재무 자료를 수집하지 못했습니다");
+            self.company_failures.insert(corp.into(), failure);
         }
+    }
+
+    fn collection_state(&self, corp: &str) -> CollectionState {
+        CollectionState { collecting: self.running && self.collecting.as_deref() == Some(corp), failure: self.company_failures.get(corp).copied() }
     }
 }
 
@@ -351,19 +361,17 @@ impl Financials {
                     let company = update.companies.get_mut(&corp).unwrap();
                     *company.progress(phase) = Outcome::Running;
                     store.save_update(&update).await?;
-                    self.update.lock().await.remember(&corp, None);
-                    let result = self.collect(&security, matches!(scope, CollectionScope::Recent(_)), scope).await;
-                    self.update.lock().await.remember(&corp, result.err());
-                    let failure = match result {
-                        Ok(()) => None,
+                    self.update.lock().await.begin_company(&corp);
+                    let result = self.collect(&security, scope).await;
+                    self.update.lock().await.finish_company(&corp, result.as_ref().err().copied());
+                    let collection = match result {
+                        Ok(collection) => collection,
                         Err(Failure::Paused | Failure::Yielded) => return Ok(None),
-                        Err(error @ (Failure::Storage | Failure::Authentication | Failure::RateLimited)) => return Err(error),
-                        Err(error) => Some(error),
+                        Err(error) => return Err(error),
                     };
                     if self.client.as_ref().unwrap().is_paused() || self.client.as_ref().unwrap().is_yielding() { return Ok(None); }
-                    let collection = store.collection(&corp).await?;
                     let reports = collection.working_reports();
-                    let error = failure.or(collection.disclosure_failure).or_else(|| reports.values().filter(|report| scope.years().contains(&report.business_year)).find_map(|report| report.statement.failure.or(report.dividends.failure).or_else(|| report.statement.data.as_ref().and_then(|statement| statement.source_failure))));
+                    let error = collection.disclosure_failure.or_else(|| reports.values().filter(|report| scope.years().contains(&report.business_year)).find_map(|report| report.statement.failure.or(report.dividends.failure).or_else(|| report.statement.data.as_ref().and_then(|statement| statement.source_failure))));
                     if let Some(error @ (Failure::Storage | Failure::Authentication | Failure::RateLimited)) = error { return Err(error); }
                     if let Some(error) = error { Outcome::Failed(error) }
                     else if matches!(scope, CollectionScope::Changes(_)) || scope.years().all(|year| super::model::REPORT_CODES.iter().all(|code| reports.get(&format!("{year}/{code}")).is_some_and(|report| report.statement.checked_at.is_some() && (*code != "11011" || report.dividends.checked_at.is_some())))) { Outcome::Complete }
@@ -382,13 +390,7 @@ impl Financials {
         Ok(Some(update))
     }
 
-    pub(super) async fn company_run(&self, corp: &str) -> (bool, Option<Failure>) {
-        let (running, failure) = { let run = self.update.lock().await; (run.running, run.company_failures.get(corp).copied()) };
-        if !running { return (false, failure); }
-        let Ok(store) = self.store() else { return (false, failure); };
-        let collecting = store.update().await.ok().flatten().and_then(|update| update.companies.get(corp).map(|company| [&company.outcome, &company.changes, &company.history].into_iter().any(|outcome| matches!(outcome, Outcome::Running)))).unwrap_or(false);
-        (collecting, failure)
-    }
+    pub(super) async fn collection_state(&self, corp: &str) -> CollectionState { self.update.lock().await.collection_state(corp) }
 
     pub(super) async fn read_resolution(&self, stock: &str, snapshot: &mut Snapshot) {
         let update = match self.store() { Ok(store) => store.update().await, Err(error) => Err(error) };

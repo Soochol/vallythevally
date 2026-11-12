@@ -302,7 +302,7 @@ async fn settled_stock(service: &Arc<Financials>, stock: &str, preferred: bool) 
 async fn settled(service: &Arc<Financials>) -> Snapshot { settled_stock(service,"005930",false).await }
 
 #[tokio::test]
-async fn collects_only_requested_company_coalesces_and_reuses_disk_after_restart() {
+async fn collects_only_requested_companies_and_reads_disk_after_restart() {
     let fake = Fake::start().await;
     fake.state.lock().unwrap().preferred = true;
     let dir = tempfile::tempdir().unwrap();
@@ -722,7 +722,7 @@ async fn review_unavailable_financial_store_keeps_real_price_and_user_data_route
 }
 
 #[tokio::test]
-async fn review_write_failure_retains_saved_data_and_isolates_other_company() {
+async fn review_write_failure_retains_saved_data_and_earlier_company() {
     use sqlx::Connection;
     for initially in [true,false] {
         let fake = Fake::start().await;

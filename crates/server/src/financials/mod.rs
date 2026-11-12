@@ -17,6 +17,7 @@ use model::{Collection, Dividend, Failure, Report, Security, Snapshot, Statement
 use store::Store;
 
 pub use routes::routes;
+use updates::CollectionState;
 
 pub struct Financials {
     client: Option<Client>,
@@ -61,9 +62,9 @@ impl Financials {
         }.await;
         if let Err(failure) = result { snapshot.status = "failed"; snapshot.failure = Some(failure); return snapshot; }
         if self.client.is_none() { return snapshot; }
-        let (collecting, failure) = match &snapshot.security { Some(security) => self.company_run(&security.company.corp_code).await, None => (false, None) };
-        snapshot.failure = failure;
-        snapshot.status = if collecting { "collecting" }
+        let collection = match &snapshot.security { Some(security) => self.collection_state(&security.company.corp_code).await, None => CollectionState::default() };
+        snapshot.failure = collection.failure;
+        snapshot.status = if collection.collecting { "collecting" }
             else if has_failures(&snapshot.collection) || snapshot.failure.is_some() { "partial_failure" }
             else if snapshot.collection.reports.is_empty() { "not_collected" }
             else if has_pending(&snapshot.collection) { "stale" }
@@ -81,14 +82,14 @@ impl Financials {
         Ok(security)
     }
 
-    async fn collect(&self, security: &Security, register_refresh: bool, scope: CollectionScope) -> Result<(), Failure> {
+    async fn collect(&self, security: &Security, scope: CollectionScope) -> Result<Collection, Failure> {
         let client = self.client.as_ref().unwrap();
         let corp = &security.company.corp_code;
         let store = self.store()?;
         let mut collection = store.collection(corp).await?;
         let now = self.clock.now();
         collection.last_attempt_at = Some(now.unix());
-        if register_refresh || (collection.refresh_version == 0 && collection.last_checked_at.is_none()) { collection.refresh_version += 1; }
+        if matches!(scope, CollectionScope::Recent(_)) || (collection.refresh_version == 0 && collection.last_checked_at.is_none()) { collection.refresh_version += 1; }
         store.save(corp, &collection).await?;
         let daily = matches!(scope, CollectionScope::Recent(_)) && collection.last_checked_at.is_none_or(|t| KstTime::from_unix(t).kst_date() != now.kst_date());
         if daily || matches!(scope, CollectionScope::ResumedRecent(_)) || collection.last_checked_at.is_none() || collection.disclosure_version < collection.refresh_version || collection.disclosure_failure.is_some() {
@@ -109,7 +110,7 @@ impl Financials {
                 Err(failure) => collection.disclosure_failure = Some(failure),
             }
             store.save(corp, &collection).await?;
-            if collection.disclosure_failure.is_some() { return Ok(()); }
+            if collection.disclosure_failure.is_some() { return Ok(collection); }
         }
         if collection.staged_reports.is_none() && collection.reports.values().any(|report| statement_outdated(report, &collection.disclosures) || dividends_outdated(report, &collection.disclosures)) {
             collection.staged_reports = Some(collection.reports.clone());
@@ -163,7 +164,7 @@ impl Financials {
             record_report(&mut collection, key, report);
             store.save(corp, &collection).await?;
         }
-        Ok(())
+        Ok(collection)
     }
 
     async fn statement_step(&self, client: &Client, corp: &str, year: i32, code: &str, disclosures: &[Row], pending: Option<&StatementRequest>) -> Result<StatementStep, Failure> {

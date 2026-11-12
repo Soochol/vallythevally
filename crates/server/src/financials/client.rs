@@ -18,6 +18,8 @@ mod tls_tests;
 
 pub type Row = BTreeMap<String, String>;
 
+const ATTEMPTS: u64 = 3;
+
 pub struct Client {
     http: reqwest::Client,
     kind_http: reqwest::Client,
@@ -86,10 +88,10 @@ impl Client {
 
     async fn retry<T, F, Fut>(&self, mut send: F) -> Result<T, Failure>
     where F: FnMut() -> Fut, Fut: std::future::Future<Output = Result<T, Failure>> {
-        for attempt in 0..3 {
+        for attempt in 0..ATTEMPTS {
             self.check_control()?;
             let result = send().await;
-            if !matches!(result, Err(Failure::Network | Failure::Remote)) || attempt == 2 { return result; }
+            if !matches!(result, Err(Failure::Network | Failure::Remote)) || attempt + 1 == ATTEMPTS { return result; }
             tokio::time::sleep(Duration::from_millis(250 * (attempt + 1))).await;
         }
         unreachable!()
