@@ -54,7 +54,7 @@ test("공통 메뉴는 잘리지 않고 선택·키보드·포커스와 분봉 �
   await page.mouse.up(); await page.keyboard.press("Escape");
   await expect(page.locator("select")).toHaveCount(0);
   await page.getByRole("button", { name: "지표", exact: true }).click();
-  const dialog = page.getByRole("dialog", { name: "지표 추가", exact: true });
+  const dialog = page.getByRole("dialog", { name: "지표·비교 입력창", exact: true });
   await expect(dialog).toBeVisible();
   await page.keyboard.press("Escape");
   await expect(page.getByRole("button", { name: "지표", exact: true })).toBeFocused();
@@ -64,7 +64,7 @@ test("공통 범례 SVG와 화면 크기별 메뉴·페이지 경계를 확인�
   await page.goto("/?symbol=005930");
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
   await page.getByRole("button", { name: "지표", exact: true }).click();
-  const dialog = page.getByRole("dialog", { name: "지표 추가", exact: true });
+  const dialog = page.getByRole("dialog", { name: "지표·비교 입력창", exact: true });
   await dialog.getByRole("button", { name: "이동평균 단순 20 추가", exact: true }).click();
   await page.keyboard.press("Escape");
   const row = page.locator("[data-indicator-row]").filter({ hasText: "이동평균" }).first();
@@ -102,6 +102,7 @@ test("되돌릴 수 있는 드로잉 삭제는 공통 알림에서 복원한다"
   const drawings = async () => (await (await fetch(`${app.url}/api/drawings?symbol=005930`)).json()) as { id: string }[];
   await expect.poll(async () => (await drawings()).length).toBe(1);
   const original = (await drawings())[0]!.id;
+  await page.getByRole("button", { name: "개체 목록 열기", exact: true }).click();
   await page.getByRole("button", { name: "이 종목 드로잉 모두 지우기", exact: true }).click();
   await expect.poll(async () => (await drawings()).length).toBe(0);
   const toast = page.getByRole("status").filter({ hasText: "드로잉 1개를 지웠습니다" });

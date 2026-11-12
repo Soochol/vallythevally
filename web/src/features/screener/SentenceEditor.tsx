@@ -43,7 +43,12 @@ export function SentenceEditor({ session, base, source, running, blocked, result
         {isDirty(session) && <span className="rounded-s border border-warning px-1 text-xs text-warning">변경됨</span>}
         <span className="flex-1" />
         {wide && <button type="button" className="tb-btn h-7 px-2 text-s" aria-expanded={showFields} onClick={() => onExpandedChange(!showFields)}>{showFields ? "조건 접기" : "조건 펼치기"}</button>}
-        <button type="button" className="tb-btn h-7 px-2 text-s disabled:opacity-40" disabled={!isDirty(session)} onClick={() => void editor.save(client, base, source)}>{busy ? "저장 중" : "저장"}</button>
+        <button type="button" className="tb-btn h-7 px-2 text-s disabled:opacity-40" disabled={!isDirty(session)} onClick={() => {
+          void editor.save(client, base, source);
+          if (!checked.ok) requestAnimationFrame(() => {
+            anchor.current?.parentElement?.querySelector<HTMLElement>('[aria-invalid="true"]')?.focus();
+          });
+        }}>{busy ? "저장 중" : "저장"}</button>
         <ScreenerMenu label="조건식 메뉴" items={[
           { kind: "action", label: "이름 바꾸기", onSelect: () => { renameOpener.current = anchor.current?.querySelector<HTMLElement>('[aria-label="조건식 메뉴"]') ?? null; setRename(session.draft.name); } },
           { kind: "action", label: "새 조건식", onSelect: () => create() },

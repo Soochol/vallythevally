@@ -1,3 +1,4 @@
+import { expectKind, expectSentences, fillNumber, renameScreen, expandEditor, savedEditor, addCondition, chooseKind } from "./sentence-editor";
 import { selectOption } from "./select-option";
 import type { Locator, Page } from "@playwright/test";
 import { expect, test } from "./harness";
@@ -11,55 +12,47 @@ const OLD_VOLUME = { id: "old-volume", name: "신고가 값으로 고른 신고�
 const RENAMED_OLD = "옛 신고거래량 이름만 바꿈";
 const PICKED = "신고거래대금과 주봉 신고거래량";
 
-const OLD_VOLUME_TEXT = "주봉 최근 4주 이내 거래량이 52주 신고거래량인 봉이 있다";
-const TRADED_START_TEXT = "일봉 최근 100일 이내 거래대금이 200일 신고거래대금인 봉이 있다";
-const VOLUME_START_TEXT = "일봉 최근 100일 이내 거래량이 200일 신고거래량인 봉이 있다";
-const WEEKLY_VOLUME_TEXT = "주봉 최근 8주 이내 거래량이 52주 신고거래량인 봉이 있다";
-const MONTHLY_TRADED_TEXT = "월봉 최근 6개월 이내 거래대금이 24개월 신고거래대금인 봉이 있다";
-const MONTHLY_VOLUME_TEXT = "월봉 최근 3개월 이내 거래량이 12개월 신고거래량인 봉이 있다";
+const OLD_VOLUME_TEXT = "주봉최근4주 이내에52주 신고거래량인 봉이 있다";
+const TRADED_START_TEXT = "일봉최근100일 이내에200일 신고거래대금인 봉이 있다";
+const VOLUME_START_TEXT = "일봉최근100일 이내에200일 신고거래량인 봉이 있다";
+const WEEKLY_VOLUME_TEXT = "주봉최근8주 이내에52주 신고거래량인 봉이 있다";
+const MONTHLY_TRADED_TEXT = "월봉최근6개월 이내에24개월 신고거래대금인 봉이 있다";
+const MONTHLY_VOLUME_TEXT = "월봉최근3개월 이내에12개월 신고거래량인 봉이 있다";
 const EXCLUDED = "대상 16종목 · 빠짐: 상장 기간 부족 2 · 이력 덜 참 0";
 
 const choice = (dialog: Locator, line: number, name: string) => dialog.getByRole("combobox", { name: `조건 ${line} ${name}` });
-const box = (dialog: Locator, line: number, name: string) => dialog.getByRole("textbox", { name: `조건 ${line} ${name}` });
-const lineTexts = (dialog: Locator) => dialog.getByRole("list", { name: "조건" }).getByRole("listitem").locator(":scope > p");
-const panelLines = (page: Page) => panel(page).getByRole("list", { name: "조건" }).getByRole("listitem");
-async function optionsIn(select: Locator, group: string) {
-  const label = await select.getAttribute("aria-label");
-  await select.click();
-  const menu = select.page().getByRole("menu", { name: label ?? "", exact: true });
-  await expect(menu).toBeVisible();
-  const heading = menu.locator("[role=presentation]").filter({ hasText: new RegExp(`^${group}$`) });
-  const labels = await heading.evaluate((node) => {
-    const labels: string[] = [];
-    for (let option = node.nextElementSibling; option && option.getAttribute("role") === "menuitemradio"; option = option.nextElementSibling) labels.push(option.textContent?.trim() ?? "");
-    return labels;
-  });
-  await menu.press("Escape");
+const box = (dialog: Locator, line: number, name: string) => dialog.getByRole("button", { name: `조건 ${line} ${name}`, exact: true });
+async function optionsIn(scope: Locator, group: string) {
+  await scope.getByRole("button", { name: "조건 추가", exact: true }).click();
+  const popup = scope.page().getByRole("dialog", { name: "조건 추가", exact: true });
+  await popup.getByRole("textbox", { name: "조건 종류 검색", exact: true }).fill(group);
+  const labels = await popup.getByLabel("조건 종류", { exact: true }).locator("button > span").allTextContents();
+  await popup.press("Escape");
   return labels;
 }
 
 async function editScreen(page: Page, name: string) {
-  await panel(page).getByRole("button", { name: /^조건식: / }).click();
+  await panel(page).getByRole("button", { name: "조건식 고르기", exact: true }).click();
   await page.getByRole("menuitemradio", { name, exact: true }).click();
-  await expect(panel(page).getByRole("button", { name: `조건식: ${name}` })).toBeVisible();
-  await panel(page).getByRole("button", { name: "편집" }).click();
+  await expect(panel(page).getByRole("button", { name: "조건식 고르기", exact: true })).toHaveText(name);
+  await expandEditor(page);
   return editor(page, "조건식 편집");
 }
 
 async function expectTradeHighLine(dialog: Locator, line: number, kind: { value: string; label: string }, period: string, n: string, m: string) {
-  await expect(choice(dialog, line, "종류")).toHaveAttribute("data-value", kind.value);
-  await expect(choice(dialog, line, "종류")).toHaveText(kind.label);
+  await expectKind(dialog, line, kind.value);
+
   await expect(choice(dialog, line, "봉 주기")).toHaveAttribute("data-value", period);
   await expect(choice(dialog, line, "값")).toHaveCount(0);
-  await expect(box(dialog, line, `${kind.label} 기간`)).toHaveValue(n);
-  await expect(box(dialog, line, "최근 기간")).toHaveValue(m);
+  await expect(box(dialog, line, `${kind.label} 기간`)).toHaveText(n);
+  await expect(box(dialog, line, "최근 기간")).toHaveText(m);
 }
 
 async function save(page: Page, dialog: Locator) {
   const saved = savedTo(page, "/api/screens");
   await dialog.getByRole("button", { name: "저장" }).click();
   await saved;
-  await expect(dialog).toBeHidden();
+  await savedEditor(dialog);
 }
 
 async function run(page: Page) {
@@ -87,11 +80,10 @@ test("거래 분류의 신고거래량·신고거래대금은 종류 변경 시 
   await test.step("신고가 값으로 거래량을 골라 둔 옛 조건식은 신고거래량 항목으로 열리고, 열고 닫기만 하면 저장하지 않는다", async () => {
     const dialog = await editScreen(page, OLD_VOLUME.name);
     await expectTradeHighLine(dialog, 1, VOLUME, "W", "52", "4");
-    await expect(lineTexts(dialog)).toHaveText([OLD_VOLUME_TEXT]);
-    await dialog.getByRole("button", { name: "취소" }).click();
-    await expect(dialog).toBeHidden();
+    await expectSentences(dialog, [OLD_VOLUME_TEXT]);
+    await savedEditor(dialog);
     expect(screenSaves).toEqual([]);
-    await expect(panelLines(page)).toHaveText([OLD_VOLUME_TEXT]);
+    await expectSentences(panel(page), [OLD_VOLUME_TEXT]);
   });
 
   await test.step("옛 조건식을 실행하면 이번 주가 52주 최고 거래량인 종목이 이번 주로 나온다", async () => {
@@ -117,7 +109,7 @@ test("거래 분류의 신고거래량·신고거래대금은 종류 변경 시 
 
   await test.step("옛 조건식의 이름만 바꿔 저장해도 봉 주기와 기간은 그대로다", async () => {
     const dialog = await editScreen(page, OLD_VOLUME.name);
-    await dialog.getByLabel("이름").fill(RENAMED_OLD);
+    await renameScreen(dialog, RENAMED_OLD);
     await save(page, dialog);
     const stored = await (await fetch(screensUrl)).json();
     expect(stored.screens).toEqual([WEEKLY_HIGH, { ...OLD_VOLUME, name: RENAMED_OLD }]);
@@ -125,7 +117,7 @@ test("거래 분류의 신고거래량·신고거래대금은 종류 변경 시 
 
   await test.step("거래 분류에 신고거래량·신고거래대금·거래 급증이 있고, 신고가의 값은 가격만이다", async () => {
     const dialog = await editScreen(page, WEEKLY_HIGH.name);
-    expect(await optionsIn(choice(dialog, 1, "종류"), "거래")).toEqual(["신고거래량", "신고거래대금", "거래 급증"]);
+    expect(await optionsIn(dialog, "거래")).toEqual(["신고거래량", "신고거래대금", "거래 급증"]);
     await choice(dialog, 1, "값").click();
     await expect(page.getByRole("menu", { name: "조건 1 값", exact: true }).getByRole("menuitemradio")).toHaveText(["시가", "고가", "저가", "종가"]);
     await page.keyboard.press("Escape");
@@ -133,33 +125,33 @@ test("거래 분류의 신고거래량·신고거래대금은 종류 변경 시 
 
   await test.step("주봉 신고가 줄에서 신고거래대금을, 더한 줄에서 신고거래량을 고르면 둘 다 일봉·최근 100일·200일로 시작한다", async () => {
     const dialog = editor(page, "조건식 편집");
-    await selectOption(choice(dialog, 1, "종류"), { label: "신고거래대금" });
-    await expect(box(dialog, 1, "최근 기간")).toHaveValue("4");
-    await box(dialog, 1, "최근 기간").fill("100");
+    await chooseKind(dialog, 1, { label: "신고거래대금" });
+    await expect(box(dialog, 1, "최근 기간")).toHaveText("4");
+    await fillNumber(box(dialog, 1, "최근 기간"), "100");
     await expectTradeHighLine(dialog, 1, TRADED_VALUE, "D", "200", "100");
-    await dialog.getByRole("button", { name: "조건 더하기" }).click();
-    await selectOption(choice(dialog, 2, "종류"), { label: "신고거래량" });
-    await expect(box(dialog, 2, "최근 기간")).toHaveValue("1");
-    await box(dialog, 2, "최근 기간").fill("100");
+    await addCondition(dialog);
+    await chooseKind(dialog, 2, { label: "신고거래량" });
+    await expect(box(dialog, 2, "최근 기간")).toHaveText("1");
+    await fillNumber(box(dialog, 2, "최근 기간"), "100");
     await expectTradeHighLine(dialog, 2, VOLUME, "D", "200", "100");
-    await expect(lineTexts(dialog)).toHaveText([TRADED_START_TEXT, VOLUME_START_TEXT]);
+    await expectSentences(dialog, [TRADED_START_TEXT, VOLUME_START_TEXT]);
   });
 
   await test.step("봉 주기와 계산 기간·최근 기간을 바꾸면 그 단위로 읽히고, 최근 기간이 0이면 저장이 막힌다", async () => {
     const dialog = editor(page, "조건식 편집");
-    await dialog.getByLabel("이름").fill(PICKED);
+    await renameScreen(dialog, PICKED);
     await selectOption(choice(dialog, 2, "봉 주기"), "W");
-    await box(dialog, 2, "신고거래량 기간").fill("52");
-    await box(dialog, 2, "최근 기간").fill("0");
-    await expect(lineTexts(dialog)).toHaveText([TRADED_START_TEXT, "최근 기간: 1 이상의 정수를 넣으세요"]);
+    await fillNumber(box(dialog, 2, "신고거래량 기간"), "52");
+    await fillNumber(box(dialog, 2, "최근 기간"), "0");
+    await expectSentences(dialog, [TRADED_START_TEXT, "최근 기간: 1 이상의 정수를 넣으세요"]);
     await dialog.getByRole("button", { name: "저장" }).click();
     await expect(box(dialog, 2, "최근 기간")).toBeFocused();
     await expect(box(dialog, 2, "최근 기간")).toHaveAttribute("aria-invalid", "true");
-    await box(dialog, 2, "최근 기간").fill("8");
+    await fillNumber(box(dialog, 2, "최근 기간"), "8");
     await expectTradeHighLine(dialog, 2, VOLUME, "W", "52", "8");
-    await expect(lineTexts(dialog)).toHaveText([TRADED_START_TEXT, WEEKLY_VOLUME_TEXT]);
+    await expectSentences(dialog, [TRADED_START_TEXT, WEEKLY_VOLUME_TEXT]);
     await save(page, dialog);
-    await expect(panelLines(page)).toHaveText([TRADED_START_TEXT, `그리고${WEEKLY_VOLUME_TEXT}`]);
+    await expectSentences(panel(page), [TRADED_START_TEXT, `그리고${WEEKLY_VOLUME_TEXT}`]);
     const stored = await (await fetch(screensUrl)).json();
     expect(stored.screens).toEqual([
       { ...WEEKLY_HIGH, name: PICKED, conditions: [newHigh("D", "traded_value", 200, 100), newHigh("W", "volume", 52, 8)] },
@@ -190,19 +182,19 @@ test("거래 분류의 신고거래량·신고거래대금은 종류 변경 시 
     const dialog = await editScreen(page, PICKED);
     await expectTradeHighLine(dialog, 1, TRADED_VALUE, "D", "200", "100");
     await expectTradeHighLine(dialog, 2, VOLUME, "W", "52", "8");
-    await expect(lineTexts(dialog)).toHaveText([TRADED_START_TEXT, WEEKLY_VOLUME_TEXT]);
+    await expectSentences(dialog, [TRADED_START_TEXT, WEEKLY_VOLUME_TEXT]);
     expect(screenSaves).toHaveLength(2);
   });
 
   await test.step("두 줄을 월봉으로 바꾸고 N·M을 고쳐 저장하면, 새로 고침 뒤 다시 열어도 월봉과 고친 기간이 그대로다", async () => {
     let dialog = editor(page, "조건식 편집");
     await selectOption(choice(dialog, 1, "봉 주기"), "M");
-    await box(dialog, 1, "신고거래대금 기간").fill("24");
-    await box(dialog, 1, "최근 기간").fill("6");
+    await fillNumber(box(dialog, 1, "신고거래대금 기간"), "24");
+    await fillNumber(box(dialog, 1, "최근 기간"), "6");
     await selectOption(choice(dialog, 2, "봉 주기"), "M");
-    await box(dialog, 2, "신고거래량 기간").fill("12");
-    await box(dialog, 2, "최근 기간").fill("3");
-    await expect(lineTexts(dialog)).toHaveText([MONTHLY_TRADED_TEXT, MONTHLY_VOLUME_TEXT]);
+    await fillNumber(box(dialog, 2, "신고거래량 기간"), "12");
+    await fillNumber(box(dialog, 2, "최근 기간"), "3");
+    await expectSentences(dialog, [MONTHLY_TRADED_TEXT, MONTHLY_VOLUME_TEXT]);
     await save(page, dialog);
     expect(screenSaves).toHaveLength(3);
     const stored = await (await fetch(screensUrl)).json();
@@ -213,10 +205,9 @@ test("거래 분류의 신고거래량·신고거래대금은 종류 변경 시 
     dialog = await editScreen(page, PICKED);
     await expectTradeHighLine(dialog, 1, TRADED_VALUE, "M", "24", "6");
     await expectTradeHighLine(dialog, 2, VOLUME, "M", "12", "3");
-    await expect(lineTexts(dialog)).toHaveText([MONTHLY_TRADED_TEXT, MONTHLY_VOLUME_TEXT]);
-    await dialog.getByRole("button", { name: "취소" }).click();
-    await expect(dialog).toBeHidden();
-    await expect(panelLines(page)).toHaveText([MONTHLY_TRADED_TEXT, `그리고${MONTHLY_VOLUME_TEXT}`]);
+    await expectSentences(dialog, [MONTHLY_TRADED_TEXT, MONTHLY_VOLUME_TEXT]);
+    await savedEditor(dialog);
+    await expectSentences(panel(page), [MONTHLY_TRADED_TEXT, `그리고${MONTHLY_VOLUME_TEXT}`]);
     expect(screenSaves).toHaveLength(3);
   });
 });

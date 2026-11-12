@@ -3,7 +3,7 @@ import type { Locator, Page } from "@playwright/test";
 import type { ApiError } from "../src/api/generated/ApiError";
 import type { Screen } from "../src/api/generated/Screen";
 import { cell, chartOf, expect, test } from "./harness";
-import { openScreener, panel, results, rows, runButton, storeLine, updateBand, waitForUpdateToFinish } from "./screener-page";
+import { openResultDetails, openScreener, panel, results, rows, runButton, storeLine, updateBand, waitForUpdateToFinish } from "./screener-page";
 
 test.use({ krxMarket: "20261106", clockStart: "20261106203000" });
 
@@ -84,12 +84,13 @@ for (const { width, height, wide } of surfaces) {
     await openPanel(page, width!);
     if (wide) {
       await page.getByRole("button", { name: "넓게 보기", exact: true }).click();
-      await expect(page.getByRole("button", { name: "넓게 보기", exact: true })).toHaveAttribute("aria-pressed", "true");
+      await expect(page.getByRole("button", { name: "오른쪽 탭으로", exact: true })).toHaveAttribute("aria-pressed", "true");
     }
     await updateBand(page).getByRole("button", { name: "처음 받기" }).click();
     await waitForUpdateToFinish(page, "11-06(금)");
     await runButton(page).click();
     await expect(rows(page)).toHaveCount(10);
+    await openResultDetails(page);
     const original = await metadata(page).textContent();
     const first = rows(page).filter({ hasText: "110010" });
     const last = rows(page).filter({ hasText: "110040" });
@@ -118,20 +119,22 @@ for (const { width, height, wide } of surfaces) {
     const failed = await rowGeometry(first);
     await writeFile(info.outputPath("geometry.json"), JSON.stringify({ width, height, wide, success, running, failed }, null, 2));
     await page.screenshot({ path: info.outputPath("failed.png"), fullPage: true });
-    await first.getByRole("button").click({ timeout: 2_500 });
+    await openRow(page, first, wide, 2_500);
     await expectChart(page, "가상전자");
     if (width! < 768) await openPanel(page, width!);
     expectWholeRow(success);
     expectWholeRow(running);
     expectWholeRow(failed);
     expectWholeRow(await rowGeometry(last));
-    await last.getByRole("button").click();
+    await openRow(page, last, wide);
     await expectChart(page, "가상정지");
     if (width! < 768) await openPanel(page, width!);
     await expect(metadata(page)).toHaveText(original!);
     await expect(panel(page).getByRole("alert")).toContainText("실행하지 못했습니다");
     await page.keyboard.press("ArrowUp");
+    if (wide) await page.keyboard.press("Enter");
     await expectChart(page, "가상신규");
+    if (wide) await page.getByRole("button", { name: "넓게 보기", exact: true }).click();
     if (width! < 768) await openPanel(page, width!);
     const selected = rows(page).filter({ hasText: "110090" });
     await expect(selected.getByRole("button")).toHaveAttribute("aria-current", "true");
@@ -140,11 +143,13 @@ for (const { width, height, wide } of surfaces) {
     await writeFile(info.outputPath("keyboard-geometry.json"), JSON.stringify(keyboardGeometry, null, 2));
     if (width >= 768) expect((await page.getByRole("toolbar", { name: "차트 도구 막대" }).boundingBox())?.y).toBeCloseTo(0, 0);
     await page.screenshot({ path: info.outputPath("keyboard-selection.png"), fullPage: true });
+    await openResultDetails(page);
     await metadata(page).scrollIntoViewIfNeeded();
     await expect(metadata(page)).toBeInViewport();
     await expect(metadata(page)).toHaveText(original!);
     await panel(page).getByRole("alert").scrollIntoViewIfNeeded();
     await expect(panel(page).getByRole("alert")).toBeInViewport();
+    if (wide) await panel(page).getByRole("button", { name: "조건 펼치기", exact: true }).click();
     await panel(page).getByRole("list", { name: "조건", exact: true }).scrollIntoViewIfNeeded();
     await expect(panel(page).getByRole("list", { name: "조건", exact: true }).getByRole("listitem")).toHaveCount(3);
     const menuToggle = panel(page).getByRole("button", { name: "스크리너 메뉴", exact: true });
@@ -155,10 +160,10 @@ for (const { width, height, wide } of surfaces) {
     await runButton(page).scrollIntoViewIfNeeded();
     await expect(runButton(page)).toBeInViewport();
     await expect(storeLine(page)).toBeInViewport();
-    await expect(results(page).getByRole("button", { name: /^최신가 순으로 정렬/ })).toBeEnabled();
+    await expect(results(page).getByRole("button", { name: /^종가 순으로 정렬/ })).toBeEnabled();
     await storeLine(page).getByRole("button", { name: "업데이트", exact: true }).click({ trial: true });
-    await results(page).getByRole("button", { name: /^최신가 순으로 정렬/ }).click();
-    await expect(results(page).getByRole("button", { name: /^최신가 순으로 정렬/ })).toHaveAttribute("aria-pressed", "true");
+    await results(page).getByRole("button", { name: /^종가 순으로 정렬/ }).click();
+    await expect(results(page).getByRole("columnheader", { name: "종가 순으로 정렬", exact: true })).toHaveAttribute("aria-sort", "descending");
     expect(await page.evaluate(() => document.documentElement.scrollHeight <= window.innerHeight)).toBe(true);
     await page.unroute("**/api/screener/run");
     await app.fake.reset();
@@ -166,7 +171,7 @@ for (const { width, height, wide } of surfaces) {
     await expect(results(page)).toHaveAttribute("aria-busy", "false");
     await expect(panel(page).getByRole("alert")).toHaveCount(0);
     expectWholeRow(await rowGeometry(first));
-    await first.getByRole("button").click();
+    await openRow(page, first, wide);
     await expectChart(page, "가상전자");
   });
 }
@@ -181,6 +186,7 @@ for (const [width, height] of [[320, 568], [1280, 600]]) {
     await waitForUpdateToFinish(page, "11-06(금)");
     await runButton(page).click();
     await expect(rows(page)).toHaveCount(10);
+    await openResultDetails(page);
     const original = await metadata(page).textContent();
     await app.fake.respondWith(failure);
     await page.route("**/api/screener/run", async (route) => {
@@ -210,4 +216,14 @@ for (const [width, height] of [[320, 568], [1280, 600]]) {
     await expect(metadata(page)).toHaveText(original!);
     expect(await page.evaluate(() => document.documentElement.scrollHeight <= window.innerHeight)).toBe(true);
   });
+}
+
+async function openRow(page: Page, row: Locator, wide: boolean, timeout?: number) {
+  await row.getByRole("button").click({ timeout });
+  if (!wide) return;
+  await expect(page.getByRole("complementary", { name: "결과 종목 미리보기" }).getByRole("img")).toBeVisible();
+  await row.getByRole("button").press("Enter");
+  await expect(page.getByRole("button", { name: "넓게 보기", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "넓게 보기", exact: true }).click();
+  await row.getByRole("button").focus();
 }

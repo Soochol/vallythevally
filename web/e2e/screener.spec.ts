@@ -1,7 +1,8 @@
+import { expectKind, fillNumber, renameScreen, expandEditor, savedEditor, addCondition, toggleExclude, screenAction } from "./sentence-editor";
 import { selectOption } from "./select-option";
 import type { Locator, Page } from "@playwright/test";
 import { type App, cell, chartOf, expect, SEARCH_BUTTON_TITLE, test } from "./harness";
-import { editor, excludedLine, expectCellOn, expectRows, openScreener, panel, pickPeriod, pickVenue, rail, results, rows, runButton, savedTo, storeLine, updateBand, waitForUpdateToFinish } from "./screener-page";
+import { editor, excludedLine, expectCellOn, expectRows, openScreener, panel, pickPeriod, pickVenue, rail, results, rows, runButton, savedTo, screenChooser, storeLine, updateBand, waitForUpdateToFinish } from "./screener-page";
 
 test.use({ krxMarket: "20261106", clockStart: "20261106203000" });
 
@@ -26,7 +27,7 @@ async function runSeededScreen(app: App, page: Page, openPanel: (page: Page) => 
   expect(seeded.status).toBe(200);
   await page.goto("/");
   await openPanel(page);
-  await expect(panel(page).getByRole("button", { name: `조건식: ${SCREEN_NAME}` })).toBeVisible();
+  await expect(screenChooser(page)).toHaveText(SCREEN_NAME);
   await updateBand(page).getByRole("button", { name: "처음 받기" }).click();
   await waitForUpdateToFinish(page, "11-06(금)");
   await runButton(page).click();
@@ -73,26 +74,26 @@ test("빈 저장소를 채우고 만든 조건식으로 찾은 종목을 칸의 
   await test.step("조건식 만들기", async () => {
     await panel(page).getByRole("button", { name: "새 조건식" }).click();
     const dialog = editor(page, "새 조건식");
-    await dialog.getByLabel("이름").fill(SCREEN_NAME);
-    await dialog.getByRole("button", { name: "조건 더하기" }).click();
-    await dialog.getByRole("textbox", { name: "조건 1 신고가 기간" }).fill("60");
-    await dialog.getByRole("textbox", { name: "조건 1 최근 기간" }).fill("20");
-    await dialog.getByRole("group", { name: "종류 제외" }).getByRole("button", { name: "ETF" }).click();
+    await renameScreen(dialog, SCREEN_NAME);
+    await addCondition(dialog);
+    await fillNumber(dialog.getByRole("button", { name: "조건 1 신고가 기간" }), "60");
+    await fillNumber(dialog.getByRole("button", { name: "조건 1 최근 기간" }), "20");
+    await toggleExclude(dialog, "종류", "ETF");
     const saved = savedTo(page, "/api/screens");
     await dialog.getByRole("button", { name: "저장" }).click();
     await saved;
-    await expect(dialog).toBeHidden();
-    await expect(panel(page).getByRole("button", { name: `조건식: ${SCREEN_NAME}` })).toBeVisible();
-    await expect(panel(page).getByRole("list", { name: "조건" })).toHaveText("일봉 최근 20일 이내 고가가 60일 신고가인 봉이 있다");
+    await savedEditor(dialog);
+    await expect(screenChooser(page)).toHaveText(SCREEN_NAME);
+    await expect(panel(page).getByRole("list", { name: "조건" })).toHaveText("일봉최근20일 이내에고가60일 신고가인 봉이 있다");
     await expect(panel(page).getByText("ETF", { exact: true })).toBeVisible();
-    await expect(panel(page).getByText("실행할 때 KRX 최신 자료를 수집합니다")).toBeVisible();
+    await expect(panel(page).getByText("저장 전에도 실행할 수 있습니다")).toBeVisible();
   });
 
   await test.step("실행", async () => {
     await runButton(page).click();
     await expect(results(page)).toContainText("4종목 · 11-06(금) 기준");
     await expect(results(page)).toContainText("대상 9종목 · 빠짐: 상장 기간 부족 1 · 이력 덜 참 0");
-    await expect(results(page).getByRole("button", { name: /^맞은 날짜 순으로 정렬/ })).toHaveAttribute("aria-pressed", "true");
+    await expect(results(page).getByRole("columnheader", { name: "충족일 순으로 정렬", exact: true })).toHaveAttribute("aria-sort", "descending");
     await expectRows(page, [
       ["110030", "가상분할", "당일"],
       ["110035", "가상전자우", "당일"],
@@ -155,7 +156,7 @@ test("빈 저장소를 채우고 만든 조건식으로 찾은 종목을 칸의 
     await expect(updateBand(page)).toContainText("자료가 모자랍니다");
     await expect(updateBand(page)).toContainText("11-06(금)까지 있습니다. 실행하려면 11-09(월) 자료가 있어야 합니다. 당일 봉은 20:00 뒤에 받습니다.");
     await expect(runButton(page)).toBeDisabled();
-    await expect(panel(page).getByText("자료가 모자라 실행할 수 없습니다")).toBeVisible();
+    await expect(panel(page).getByText("자료 상태를 확인한 뒤 실행하세요")).toBeVisible();
     await expect(panel(page).getByText("새 자료가 필요합니다")).toBeVisible();
 
     await updateBand(page).getByRole("button", { name: "업데이트" }).click();
@@ -168,15 +169,15 @@ test("빈 저장소를 채우고 만든 조건식으로 찾은 종목을 칸의 
   });
 
   await test.step("조건식을 고치면 고친 조건으로 실행된다", async () => {
-    await panel(page).getByRole("button", { name: "편집" }).click();
+    await expandEditor(page);
     const dialog = editor(page, "조건식 편집");
-    await dialog.getByLabel("이름").fill(EDITED_NAME);
-    await dialog.getByRole("group", { name: "상태 제외" }).getByRole("button", { name: "거래정지" }).click();
+    await renameScreen(dialog, EDITED_NAME);
+    await toggleExclude(dialog, "상태", "거래정지");
     const saved = savedTo(page, "/api/screens");
     await dialog.getByRole("button", { name: "저장" }).click();
     await saved;
-    await expect(dialog).toBeHidden();
-    await expect(panel(page).getByRole("button", { name: `조건식: ${EDITED_NAME}` })).toBeVisible();
+    await savedEditor(dialog);
+    await expect(screenChooser(page)).toHaveText(EDITED_NAME);
     await expect(panel(page).getByText("실행하면 결과가 여기에 나옵니다")).toBeVisible();
     await runButton(page).click();
     await expect(results(page)).toContainText("3종목 · 11-09(월) 기준");
@@ -191,11 +192,11 @@ test("빈 저장소를 채우고 만든 조건식으로 찾은 종목을 칸의 
   await test.step("조건식을 확인받고 지운다", async () => {
     await page.reload();
     await openScreener(page);
-    await expect(panel(page).getByRole("button", { name: `조건식: ${EDITED_NAME}` })).toBeVisible();
-    await panel(page).getByRole("button", { name: "편집" }).click();
+    await expect(screenChooser(page)).toHaveText(EDITED_NAME);
+    await expandEditor(page);
     const dialog = editor(page, "조건식 편집");
     const saved = savedTo(page, "/api/screens");
-    await dialog.getByRole("button", { name: "삭제" }).click();
+    await screenAction(dialog, "지우기");
     const confirmation = page.getByRole("dialog", { name: `"${EDITED_NAME}" 조건식을 삭제할까요? 되돌릴 수 없습니다.` });
     await expect(confirmation).toBeVisible();
     await confirmation.getByRole("button", { name: "확인", exact: true }).click();
@@ -219,28 +220,28 @@ test("시가총액 줄이나 줄마다 다른 봉 주기가 든 조건식도 편
   await page.goto("/");
   await openScreener(page);
   const edit = async (name: string) => {
-    await panel(page).getByRole("button", { name: /^조건식: / }).click();
+    await screenChooser(page).click();
     await page.getByRole("menuitemradio", { name, exact: true }).click();
-    await expect(panel(page).getByRole("button", { name: `조건식: ${name}` })).toBeVisible();
-    await panel(page).getByRole("button", { name: "편집" }).click();
+    await expect(screenChooser(page)).toHaveText(name);
+    await expandEditor(page);
     const dialog = editor(page, "조건식 편집");
     await expect(dialog.getByRole("alert")).toHaveCount(0);
     return dialog;
   };
   const renameAndSave = async (dialog: Locator, name: string) => {
-    await dialog.getByLabel("이름").fill(name);
+    await renameScreen(dialog, name);
     const saved = savedTo(page, "/api/screens");
     await dialog.getByRole("button", { name: "저장" }).click();
     await saved;
-    await expect(dialog).toBeHidden();
+    await savedEditor(dialog);
   };
 
   await test.step("시가총액 줄은 봉 주기 없이 억 원으로 보이고, 이름만 바꿔 저장된다", async () => {
     const dialog = await edit(capped.name);
-    await expect(dialog.getByRole("combobox", { name: "조건 2 종류" })).toHaveAttribute("data-value", "market_cap");
+    await expectKind(dialog, 2, "market_cap");
     await expect(dialog.getByRole("combobox", { name: "조건 2 봉 주기" })).toHaveCount(0);
-    await expect(dialog.getByRole("textbox", { name: "조건 2 최소" })).toHaveValue("3000");
-    await expect(dialog.getByText("시가총액이 3,000억 원 이상이다")).toBeVisible();
+    await expect(dialog.getByRole("button", { name: "조건 2 최소" })).toHaveText("3000");
+    await expect(dialog.getByText("시가총액이3000억 원이상이다")).toBeVisible();
     await renameAndSave(dialog, "시가총액 섞임 바꿈");
   });
 
@@ -248,20 +249,18 @@ test("시가총액 줄이나 줄마다 다른 봉 주기가 든 조건식도 편
     const dialog = await edit(mixed.name);
     await expect(dialog.getByRole("combobox", { name: "조건 1 봉 주기" })).toHaveAttribute("data-value", "D");
     await expect(dialog.getByRole("combobox", { name: "조건 2 봉 주기" })).toHaveAttribute("data-value", "W");
-    await expect(dialog.getByText("주봉 최근 1주 이내 종가가 52주 신고가인 봉이 있다")).toBeVisible();
-    await expect(dialog.getByRole("group", { name: "시장" }).getByRole("button", { name: "코스닥" })).toHaveAttribute("aria-pressed", "true");
-    await expect(dialog.getByRole("group", { name: "시장" }).getByRole("button", { name: "코스피" })).toHaveAttribute("aria-pressed", "false");
+    await expect(dialog.getByText("주봉최근1주 이내에종가52주 신고가인 봉이 있다")).toBeVisible();
+    await expect(dialog.getByRole("group", { name: "대상 시장" }).getByRole("button", { name: "코스닥" })).toHaveAttribute("aria-pressed", "true");
+    await expect(dialog.getByRole("group", { name: "대상 시장" }).getByRole("button", { name: "코스피" })).toHaveAttribute("aria-pressed", "false");
     await renameAndSave(dialog, "주봉 섞임 바꿈");
   });
 
   await test.step("거래대금 신고가 줄은 종류 칸에 신고거래대금이 골라져 있고 기간이 그대로이며, 이름을 바꿔 저장해도 거래대금이다", async () => {
     const dialog = await edit(traded.name);
-    const kind = dialog.getByRole("combobox", { name: "조건 1 종류" });
-    await expect(kind).toHaveAttribute("data-value", "traded_value_high");
-    await expect(kind).toHaveText("신고거래대금");
-    await expect(dialog.getByRole("textbox", { name: "조건 1 신고거래대금 기간" })).toHaveValue("60");
-    await expect(dialog.getByRole("textbox", { name: "조건 1 최근 기간" })).toHaveValue("1");
-    await expect(dialog.getByText("일봉 최근 1일 이내 거래대금이 60일 신고거래대금인 봉이 있다")).toBeVisible();
+    await expectKind(dialog, 1, "traded_value_high");
+    await expect(dialog.getByRole("button", { name: "조건 1 신고거래대금 기간" })).toHaveText("60");
+    await expect(dialog.getByRole("button", { name: "조건 1 최근 기간" })).toHaveText("1");
+    await expect(dialog.getByText("일봉최근1일 이내에60일 신고거래대금인 봉이 있다")).toBeVisible();
     await renameAndSave(dialog, "신고거래대금 바꿈");
   });
 
@@ -283,16 +282,24 @@ test("패널 머리는 줄마다 그 줄의 봉 주기로 조건을 풀고, 시�
   await openScreener(page);
 
   const conditions = panel(page).getByRole("list", { name: "조건" });
-  const scope = conditions.locator("xpath=../p");
-  await expect(panel(page).getByRole("button", { name: `조건식: ${mixed.name}` })).toBeVisible();
-  await expect(conditions.getByRole("listitem")).toHaveText(["주봉 최근 1주 이내 종가가 52주 신고가인 봉이 있다", "그리고일봉 최근 5일 이내 거래량이 60일 신고거래량인 봉이 있다"]);
-  await expect(scope).toHaveText("대상코스닥·제외ETF관리종목");
+  const markets = panel(page).getByRole("group", { name: "대상 시장", exact: true });
+  const selectedMarkets = markets.locator('button[aria-pressed="true"]');
+  const exclusions = panel(page).getByRole("button", { name: / 제외 해제$/ });
+  await expect(screenChooser(page)).toHaveText(mixed.name);
+  await expect(conditions.getByRole("listitem")).toHaveText(["주봉최근1주 이내에종가52주 신고가인 봉이 있다", "그리고일봉최근5일 이내에60일 신고거래량인 봉이 있다"]);
+  await expect(selectedMarkets).toHaveText(["코스닥"]);
+  await expect(exclusions).toHaveText(["ETF", "관리종목"]);
+  await expect(markets.getByRole("button", { name: "코스닥", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await expect(panel(page).getByRole("button", { name: "ETF 제외 해제", exact: true })).toBeVisible();
+  await expect(panel(page).getByRole("button", { name: "관리종목 제외 해제", exact: true })).toBeVisible();
 
-  await panel(page).getByRole("button", { name: /^조건식: / }).click();
+  await screenChooser(page).click();
   await expect(page.getByRole("menu", { name: "조건식 고르기" }).getByRole("menuitemradio")).toHaveText([mixed.name, plain.name]);
   await page.getByRole("menuitemradio", { name: plain.name, exact: true }).click();
-  await expect(conditions).toHaveText("월봉 최근 1개월 이내 고가가 12개월 신고가인 봉이 있다");
-  await expect(scope).toHaveText("전 종목 대상");
+  await expect(conditions).toHaveText("월봉최근1개월 이내에고가12개월 신고가인 봉이 있다");
+  await expect(markets.getByText("두 시장 모두", { exact: true })).toBeVisible();
+  await expect(selectedMarkets).toHaveCount(0);
+  await expect(exclusions).toHaveCount(0);
 });
 
 test("결과를 연 뒤 종목 정보를 기다리는 사이 검색으로 다른 종목을 열면, 늦게 온 정보는 그 선택을 덮지 않고 다음 열기는 그대로 된다", async ({ app, page }) => {
@@ -341,18 +348,18 @@ test("최근 관측일을 채우는 동안에는 실행이 막히고, 과거 이
   await openScreener(page);
   await panel(page).getByRole("button", { name: "새 조건식" }).click();
   const dialog = editor(page, "새 조건식");
-  await dialog.getByLabel("이름").fill("고가 1000일 신고가");
-  await dialog.getByRole("button", { name: "조건 더하기" }).click();
-  await dialog.getByRole("textbox", { name: "조건 1 신고가 기간" }).fill("1000");
-  await dialog.getByRole("textbox", { name: "조건 1 최근 기간" }).fill("300");
+  await renameScreen(dialog, "고가 1000일 신고가");
+  await addCondition(dialog);
+  await fillNumber(dialog.getByRole("button", { name: "조건 1 신고가 기간" }), "1000");
+  await fillNumber(dialog.getByRole("button", { name: "조건 1 최근 기간" }), "300");
   await dialog.getByRole("button", { name: "저장" }).click();
-  await expect(dialog).toBeHidden();
+  await savedEditor(dialog);
 
   await app.fake.delay("ka10081", 1_500);
   await updateBand(page).getByRole("button", { name: "처음 받기" }).click();
   await expect(updateBand(page)).toContainText("최근 관측일 채우기");
   await expect(runButton(page)).toBeDisabled();
-  await expect(panel(page).getByText("최근 관측일을 채우는 동안에는 실행할 수 없습니다")).toBeVisible();
+  await expect(panel(page).getByText("자료 상태를 확인한 뒤 실행하세요")).toBeVisible();
 
   await expect(updateBand(page)).toContainText("과거 이력 이어 받기", { timeout: 60_000 });
   await updateBand(page).getByRole("button", { name: "취소" }).click();
