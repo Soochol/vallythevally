@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useRef } from "react";
+import { useFinancials } from "../../api/financials";
+import { isFinancial } from "../../chart/indicators/kinds";
 import { useSymbolInfo, useSymbolInfos } from "../../api/queries";
 import { type CellStatus, ChartController } from "../../chart/ChartController";
 import type { IndicatorCommand } from "../../chart/indicators/legendRows";
@@ -20,6 +22,8 @@ function runIndicatorCommand(slot: Slot, id: string, command: IndicatorCommand):
   const config = store.layout.cells.find((c) => c.slot === slot)?.chartSettings.indicators.find((i) => i.id === id);
   if (!config) return;
   switch (command) {
+    case "refresh":
+      return;
     case "edit":
       return useSelectionStore.getState().openIndicators(slot, id);
     case "toggle":
@@ -46,6 +50,9 @@ export function ChartCell({ slot, status, onStatus }: Props) {
   const compareInfos = useSymbolInfos(cell.chartSettings.compare);
   const compareKey = compareInfos.map((i) => `${i.code}:${i.name}`).join("|");
   const compareNames = useMemo(() => Object.fromEntries(compareInfos.map((i) => [i.code, i.name])), [compareKey]);
+  const financial = useFinancials(cell.symbol, cell.period === "Y" ? "Y" : "Q", (cell.period === "Q" || cell.period === "Y") && cell.chartSettings.indicators.some((i) => isFinancial(i.spec) && i.visible));
+  const refreshFinancial = useRef(financial.refresh);
+  refreshFinancial.current = financial.refresh;
   const theme = useTheme();
   const openSearch = useSelectionStore((s) => s.openSearch);
   const chartEl = useRef<HTMLDivElement>(null);
@@ -60,7 +67,7 @@ export function ChartCell({ slot, status, onStatus }: Props) {
       tokens: readThemeTokens(),
       onStatus: (s) => onStatusRef.current(s),
       socket: marketSocket,
-      onIndicatorCommand: (id, command) => runIndicatorCommand(slotRef.current, id, command),
+      onIndicatorCommand: (id, command) => command === "refresh" ? refreshFinancial.current() : runIndicatorCommand(slotRef.current, id, command),
       onPanelStretch: (stretches) => useLayoutStore.getState().setPanelStretches(slotRef.current, stretches),
       onCompareRemove: (code) => useLayoutStore.getState().removeCompare(slotRef.current, code),
     });
@@ -76,6 +83,10 @@ export function ChartCell({ slot, status, onStatus }: Props) {
   useEffect(() => {
     ctl.current?.apply({ symbol: cell.symbol, venue, period: cell.period, settings: cell.chartSettings, info, compareNames });
   }, [cell, venue, info, compareNames]);
+
+  useEffect(() => {
+    ctl.current?.setFinancials(financial.data ?? null, financial.error || financial.refreshError ? "재무자료 조회·갱신 실패 · 새로고침으로 다시 시도하세요" : financial.refreshing ? "재무자료 갱신 요청 중" : undefined);
+  }, [cell.symbol, cell.period, financial.data, financial.error, financial.refreshError, financial.refreshing]);
 
   // 복원 때 종목 정보를 못 받아 확인하지 못한 NXT가 나중에 NXT 불가로 확인되면, 그때 저장 원본을 고친다.
   // 그대로 두면 다음 저장을 서버가 400으로 거절한다.

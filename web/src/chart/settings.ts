@@ -1,4 +1,4 @@
-import type { IndicatorSpec } from "../api/generated/IndicatorSpec";
+import type { IndicatorSpec } from "./indicators/kinds";
 import type { SymbolCode } from "../api/generated/SymbolCode";
 import { isIndicatorColor, type IndicatorColor, KINDS, placementOf } from "./indicators/kinds";
 
@@ -114,7 +114,14 @@ function readIndicator(raw: unknown): IndicatorConfig | null {
 export function readSpecShape(raw: unknown): IndicatorSpec | null {
   if (!isRecord(raw) || typeof raw.kind !== "string" || !(raw.kind in KINDS)) return null;
   const r = raw;
-  switch (raw.kind as IndicatorSpec["kind"]) {
+  switch (raw.kind) {
+    case "revenue":
+    case "operating_income":
+    case "owner_roe":
+    case "investing_cash_flow":
+    case "dps":
+    case "debt_ratio":
+      return { kind: raw.kind };
     case "ma":
       return (r.method === "sma" || r.method === "ema") && isNum(r.period) ? { kind: "ma", method: r.method, period: r.period } : null;
     case "bollinger":
@@ -131,6 +138,8 @@ export function readSpecShape(raw: unknown): IndicatorSpec | null {
       return isNum(r.fast) && isNum(r.slow) && isNum(r.signal) ? { kind: "macd", fast: r.fast, slow: r.slow, signal: r.signal } : null;
     case "stochSlow":
       return isNum(r.k) && isNum(r.d) && isNum(r.smooth) ? { kind: "stochSlow", k: r.k, d: r.d, smooth: r.smooth } : null;
+    default:
+      return null;
   }
 }
 

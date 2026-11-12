@@ -5,7 +5,7 @@ import type { Period } from "../../api/generated/Period";
 import init, * as wasm from "../../wasm/indicators/indicators.js";
 import { type Engine, Engines, type Wasm } from "./engines";
 import type { BarTuple, Columns, Created, EngineResult, FromWorker, LineDraw, Point } from "./protocol";
-import { KIND_ORDER, KINDS, specLines } from "./kinds";
+import { isFinancial, KIND_ORDER, KINDS, specLines } from "./kinds";
 import { wasmAdapter } from "./wasm";
 
 let real: Wasm;
@@ -159,7 +159,7 @@ test("엔진 하나가 panic해도 같은 칸의 다른 엔진은 계속 계산�
 });
 
 test("kinds.ts의 선 순서는 wasm 엔진의 선 순서와 같다", () => {
-  const specs: IndicatorSpec[] = [...KIND_ORDER.map((k) => KINDS[k].defaults), { kind: "volume", maPeriod: null }, { kind: "rsi", period: 14, signal: 9 }];
+  const specs: IndicatorSpec[] = [...KIND_ORDER.map((k) => KINDS[k].defaults).filter((s) => !isFinancial(s)), { kind: "volume", maPeriod: null }, { kind: "rsi", period: 14, signal: 9 }];
   for (const spec of specs) {
     const e = real.newEngine(JSON.stringify(spec), columns(bars.slice(0, 5)));
     expect(e.lines(), spec.kind).toEqual(specLines(spec));
@@ -169,7 +169,7 @@ test("kinds.ts의 선 순서는 wasm 엔진의 선 순서와 같다", () => {
 
 for (const period of ["Q", "Y"] as const) {
   test(`${period}의 모든 기술지표는 해당 봉으로 계산하고 일목 선행스팬은 달력 봉만큼 이동한다`, () => {
-    const specs = KIND_ORDER.map((kind) => KINDS[kind].defaults);
+    const specs = KIND_ORDER.map((kind) => KINDS[kind].defaults).filter((s) => !isFinancial(s));
     const calendarBars: BarTuple[] = bars.slice(0, 100).map(([, o, h, l, c, v], i) => [Date.UTC(1900, i * (period === "Q" ? 3 : 12), 1) / 1000 - 32400, o, h, l, c, v]);
     const results = create(new Engines(real), specs, calendarBars.slice(0, -1), calendarBars.at(-1)!, period);
     for (const result of results) {

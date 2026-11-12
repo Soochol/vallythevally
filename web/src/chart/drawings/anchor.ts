@@ -161,6 +161,7 @@ export interface TimeAxis {
   coordinateOf(index: number): number | null;
   indexAt(x: number): number | null;
   readonly barSpacing: number;
+  readonly projection?: { toLogical(t: UnixSeconds): number | null; toTime(logical: number): UnixSeconds | null };
 }
 
 export interface PriceAxis {
@@ -193,13 +194,13 @@ export interface Projection {
 }
 
 export function timeToX(p: Projection, t: UnixSeconds): number | null {
-  const logical = tToLogical(p.timeline, t);
+  const logical = p.axes.time.projection ? p.axes.time.projection.toLogical(t) : tToLogical(p.timeline, t);
   return logical === null ? null : logicalToX(p.axes.time, logical);
 }
 
 export function xToTime(p: Projection, x: number): UnixSeconds | null {
   const logical = xToLogical(p.axes.time, x);
-  return logical === null ? null : logicalToT(p.timeline, logical);
+  return logical === null ? null : p.axes.time.projection ? p.axes.time.projection.toTime(logical) : logicalToT(p.timeline, logical);
 }
 
 export function toScreen(p: Projection, point: DrawingPoint): ScreenPoint | null {

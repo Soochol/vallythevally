@@ -1,7 +1,15 @@
-import type { IndicatorSpec } from "../../api/generated/IndicatorSpec";
+import type { IndicatorSpec as TechnicalSpec } from "../../api/generated/IndicatorSpec";
+import type { FinancialMetric } from "../../api/generated/FinancialMetric";
 import type { LineId } from "../../api/generated/LineId";
 import type { SpecValidation } from "../../wasm/indicators/indicators.js";
 import { isHexColor, PRESET_COLORS, type HexColor } from "../../lib/colors";
+
+export type IndicatorSpec = TechnicalSpec | { [K in FinancialMetric]: { kind: K } }[FinancialMetric];
+export type FinancialSpec = Extract<IndicatorSpec, { kind: FinancialMetric }>;
+export const FINANCIAL_LABEL: Record<FinancialMetric, string> = { revenue: "매출액", operating_income: "영업이익", owner_roe: "지배주주 ROE", investing_cash_flow: "투자활동 현금흐름", dps: "DPS", debt_ratio: "부채비율" };
+export const isFinancial = (spec: IndicatorSpec): spec is FinancialSpec => spec.kind in FINANCIAL_LABEL;
+export const isFinancialBar = (kind: FinancialMetric) => kind !== "owner_roe" && kind !== "debt_ratio";
+export type PlotLineId = LineId | "financial";
 
 export type IndicatorKind = IndicatorSpec["kind"];
 export type SpecOf<K extends IndicatorKind> = Extract<IndicatorSpec, { kind: K }>;
@@ -26,14 +34,22 @@ interface KindInfo<K extends IndicatorKind> {
   defaults: SpecOf<K>;
   fields: SpecField[];
   name(spec: SpecOf<K>): string;
-  lines(spec: SpecOf<K>): LineId[];
+  lines(spec: SpecOf<K>): PlotLineId[];
 }
 
 type Registry = { [K in IndicatorKind]: KindInfo<K> };
 
 const int = (key: string, label: string, unit?: string): SpecField => ({ key, label, type: "int", unit });
 
+const financialKind = <K extends FinancialMetric>(kind: K, defaults: SpecOf<K>): KindInfo<K> => ({ label: FINANCIAL_LABEL[kind], place: "panel", defaults, fields: [], name: () => FINANCIAL_LABEL[kind], lines: () => ["financial"] });
+
 export const KINDS: Registry = {
+  revenue: financialKind("revenue", { kind: "revenue" }),
+  operating_income: financialKind("operating_income", { kind: "operating_income" }),
+  owner_roe: financialKind("owner_roe", { kind: "owner_roe" }),
+  investing_cash_flow: financialKind("investing_cash_flow", { kind: "investing_cash_flow" }),
+  dps: financialKind("dps", { kind: "dps" }),
+  debt_ratio: financialKind("debt_ratio", { kind: "debt_ratio" }),
   ma: {
     label: "이동평균",
     place: "price",
@@ -92,7 +108,7 @@ export const KINDS: Registry = {
   },
 };
 
-export const KIND_ORDER: IndicatorKind[] = ["ma", "bollinger", "ichimoku", "volume", "rsi", "macd", "stochSlow"];
+export const KIND_ORDER: IndicatorKind[] = ["ma", "bollinger", "ichimoku", "volume", "rsi", "macd", "stochSlow", "revenue", "operating_income", "owner_roe", "investing_cash_flow", "dps", "debt_ratio"];
 
 const kindInfo = <K extends IndicatorKind>(kind: K): KindInfo<K> => KINDS[kind];
 
@@ -100,17 +116,18 @@ export function specName(spec: IndicatorSpec): string {
   return (kindInfo(spec.kind).name as (s: IndicatorSpec) => string)(spec);
 }
 
-export function specLines(spec: IndicatorSpec): LineId[] {
-  return (kindInfo(spec.kind).lines as (s: IndicatorSpec) => LineId[])(spec);
+export function specLines(spec: IndicatorSpec): PlotLineId[] {
+  return (kindInfo(spec.kind).lines as (s: IndicatorSpec) => PlotLineId[])(spec);
 }
 
 export function placementOf(spec: IndicatorSpec): Placement {
   return KINDS[spec.kind].place;
 }
 
-export const isBarLine = (line: LineId): boolean => line === "volume" || line === "histogram";
+export const isBarLine = (line: PlotLineId): boolean => line === "volume" || line === "histogram";
 
-export const LINE_LABEL: Record<LineId, string> = {
+export const LINE_LABEL: Record<PlotLineId, string> = {
+  financial: "재무지표",
   ma: "이동평균",
   upper: "상단",
   middle: "중심",
@@ -130,6 +147,7 @@ export const LINE_LABEL: Record<LineId, string> = {
 };
 
 export function colorLine(spec: IndicatorSpec): number | null {
+  if (isFinancial(spec) && isFinancialBar(spec.kind)) return null;
   const i = specLines(spec).findIndex((l) => !isBarLine(l));
   return i < 0 ? null : i;
 }

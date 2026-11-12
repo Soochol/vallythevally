@@ -1,7 +1,7 @@
 import { useEffect, useId, useRef, useState } from "react";
 import type { MaMethod } from "../../api/generated/MaMethod";
 import { useSymbolInfo } from "../../api/queries";
-import { colorsFrom, indicatorCssColor, type IndicatorKind, KIND_ORDER, KINDS, shownColor, specName } from "../../chart/indicators/kinds";
+import { colorsFrom, indicatorCssColor, type IndicatorKind, KIND_ORDER, KINDS, isFinancial, shownColor, specName } from "../../chart/indicators/kinds";
 import { loadValidator } from "../../chart/indicators/validate";
 import type { LineWidth } from "../../chart/settings";
 import { PERIOD_LABEL } from "../../lib/symbol";
@@ -278,12 +278,12 @@ function IndicatorDialogBody({ slot, editId }: { slot: Slot; editId: string | nu
                 />
               </label>
               <div id={`${ids}-kinds`} role="listbox" aria-label="지표 종류">
-                {KIND_GROUPS.map((g) => {
-                  const shown = kinds.filter((k) => KINDS[k].place === g.place);
+                {KIND_GROUPS.map((g, groupIndex) => {
+                  const shown = kinds.filter((k) => KINDS[k].place === g.place && isFinancial(KINDS[k].defaults) === g.financial);
                   if (shown.length === 0) return null;
                   return (
-                    <ul key={g.place} role="group" aria-labelledby={`${ids}-${g.place}`}>
-                      <li role="presentation" id={`${ids}-${g.place}`} className="px-2 pb-1 pt-2 text-xs text-text-3">
+                    <ul key={g.label} role="group" aria-labelledby={`${ids}-group-${groupIndex}`}>
+                      <li role="presentation" id={`${ids}-group-${groupIndex}`} className="px-2 pb-1 pt-2 text-xs text-text-3">
                         {g.label}
                       </li>
                       {shown.map((k) => {
@@ -320,7 +320,7 @@ function IndicatorDialogBody({ slot, editId }: { slot: Slot; editId: string | nu
                 <p className="mt-1 max-w-[56ch] text-s text-text-2">
                   {editing
                     ? `${specName(editing.spec)}의 설정을 바꿉니다. 놓인 패널은 그대로입니다.`
-                    : "같은 종류를 여러 번 띄울 수 있습니다. 기간만 바꿔 다시 추가하세요."}
+                    : isFinancial(KINDS[kind].defaults) ? "분기봉·연봉에서 보고기간별 공시 자료를 표시합니다. DPS는 연간 전용입니다. 다른 주기에서는 설정을 보존하고 숨깁니다." : "같은 종류를 여러 번 띄울 수 있습니다. 기간만 바꿔 다시 추가하세요."}
                 </p>
               </div>
               <div role="group" aria-label="설정값" className="flex flex-col gap-3">

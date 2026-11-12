@@ -12,6 +12,7 @@ import {
 } from "lightweight-charts";
 import { fetchBarsPage } from "../api/bars";
 import type { Bar } from "../api/generated/Bar";
+import type { FinancialsPage } from "../api/generated/FinancialsPage";
 import type { Period } from "../api/generated/Period";
 import type { SubErrorCode } from "../api/generated/SubErrorCode";
 import type { SymbolCode } from "../api/generated/SymbolCode";
@@ -25,6 +26,7 @@ import { BarFeed, displayBars, type FetchPage, type History } from "./barFeed";
 import { type CompareEntry, CompareLayer, compareVenue } from "./compare";
 import { CompareLegend } from "./compareLegend";
 import { type OpenPort, openIndicatorPort } from "./indicators/client";
+import { isFinancial } from "./indicators/kinds";
 import { IndicatorLayer } from "./indicators/layer";
 import { type IndicatorCommand, IndicatorLegend } from "./indicators/legendRows";
 import { isTailChange } from "./indicators/sync";
@@ -33,7 +35,8 @@ import { addMainSeries, applyMainColors, type MainSeries, priceFormat, setMainDa
 import { type ChartSettings, type Panel, type PriceScale, shownScale } from "./settings";
 import { composeSnapshot, snapshotFileName } from "./snapshot";
 import type { ThemeTokens } from "./theme";
-import { formatBarTime, formatTickMark, fromChartTime, isIntraday } from "./time";
+import { chartTimeProjection, preserveTimeRange } from "./timeAxis";
+import { formatBarTime, formatTickMark, fromChartTime, isIntraday, toChartTime } from "./time";
 import type { ChartExtension, ExtensionFactory } from "./extensions";
 
 /** 왼쪽 끝이 이 봉 수 안으로 들어오면 과거 페이지를 받는다(frontend.md §5.7). */
@@ -99,6 +102,7 @@ export class ChartController {
   private readonly el: HTMLElement;
   private readonly chart: IChartApi;
   private main: MainSeries;
+  private financialHoverTime: number | null = null;
   private readonly indicators: IndicatorLayer;
   private readonly indicatorLegend: IndicatorLegend;
   private readonly compare: CompareLayer;
@@ -155,7 +159,10 @@ export class ChartController {
     const onPanelStretch = deps.onPanelStretch;
     if (onPanelStretch) {
       el.addEventListener("pointerup", () => {
-        const now = this.indicators.stretches();
+        const shown = this.indicators.stretches();
+        const active = this.view?.settings.indicators.filter((c) => !isFinancial(c.spec) || this.view?.period === "Q" || this.view?.period === "Y") ?? [];
+        let n = 0;
+        const now = (this.view?.settings.panels ?? []).map((p) => active.some((c) => c.panel === p.id) ? shown[n++] ?? p.stretch : p.stretch);
         const saved = this.view?.settings.panels ?? [];
         if (now.some((x, i) => Math.abs(x - (saved[i]?.stretch ?? x)) > 1e-3)) onPanelStretch(now);
         this.renderLegend();
@@ -189,14 +196,17 @@ export class ChartController {
 
     this.chart.subscribeCrosshairMove((p) => {
       const n = this.bars.length;
+      this.financialHoverTime = typeof p.time === "number" ? fromChartTime(p.time) : null;
       this.hoverIndex =
-        p.time !== undefined && p.logical !== undefined && n > 0 ? Math.min(n - 1, Math.max(0, Math.round(p.logical))) : null;
+        this.financialHoverTime !== null && n > 0 ? this.bars.findIndex((bar) => bar.t === this.financialHoverTime) : null;
       this.renderLegend();
     });
     this.chart.timeScale().subscribeVisibleLogicalRangeChange(() => {
       if (this.settingData) return;
       const r = this.chart.timeScale().getVisibleLogicalRange();
-      if (r && r.from < LOAD_OLDER_WITHIN) this.feed.needOlder();
+      const left = this.leftT();
+      const before = left === null ? -1 : this.bars.findIndex((bar) => bar.t >= left);
+      if (r && before >= 0 && before < LOAD_OLDER_WITHIN) this.feed.needOlder();
       this.updateIntradayEnd();
       this.compare.coverFrom(this.leftT());
       if (this.view?.settings.compare.length) this.renderLegend();
@@ -239,10 +249,17 @@ export class ChartController {
       this.onStatus({ kind: "loading" });
       this.feed.open({ symbol: next.symbol, venue: next.venue, period: next.period });
     }
-    if (prev?.settings.indicators !== next.settings.indicators || prev?.settings.panels !== next.settings.panels) {
-      this.indicators.setConfigs(next.settings.indicators, next.settings.panels);
+    if (prev?.period !== next.period || prev?.settings.indicators !== next.settings.indicators || prev?.settings.panels !== next.settings.panels) {
+      const configs = next.settings.indicators.filter((c) => !isFinancial(c.spec) || next.period === "Q" || next.period === "Y");
+      const panels = next.settings.panels.filter((p) => configs.some((c) => c.panel === p.id));
+      this.withDataGuard(() => preserveTimeRange(this.chart.timeScale(), next.period, () => this.indicators.setConfigs(configs, panels)));
     }
     this.compare.setCodes(compareEntries(next), { period: next.period, venueFor: (code) => compareVenue(code, next) });
+    this.renderLegend();
+  }
+
+  setFinancials(page: FinancialsPage | null, message?: string): void {
+    this.withDataGuard(() => preserveTimeRange(this.chart.timeScale(), this.period(), () => this.indicators.setFinancials(page, message)));
     this.renderLegend();
   }
 
@@ -382,14 +399,12 @@ export class ChartController {
 
   private recreateMain(isIndex: boolean): void {
     this.indicators.flush();
-    const range = this.chart.timeScale().getVisibleLogicalRange();
-    this.chart.removeSeries(this.main.api);
-    this.main = addMainSeries(this.chart, this.view?.settings.style ?? "candle", this.tokens, isIndex);
-    this.extensions.forEach((ext) => ext.reattach());
-    this.withDataGuard(() => {
+    this.withDataGuard(() => preserveTimeRange(this.chart.timeScale(), this.period(), () => {
+      this.chart.removeSeries(this.main.api);
+      this.main = addMainSeries(this.chart, this.view?.settings.style ?? "candle", this.tokens, isIndex);
+      this.extensions.forEach((ext) => ext.reattach());
       this.setBars(this.bars);
-      if (range) this.chart.timeScale().setVisibleLogicalRange(range);
-    });
+    }));
   }
 
   private setBars(bars: Bar[]): void {
@@ -498,13 +513,16 @@ export class ChartController {
   private onReset(h: History): void {
     this.history = h;
     this.hoverIndex = null;
+    this.financialHoverTime = null;
     this.realtimeSeen = false;
     if (this.realtimeLive) this.stalledAt = null;
     const bars = displayBars(h);
     const show = matchMedia("(max-width: 767px)").matches ? 90 : 130;
     this.withDataGuard(() => {
       this.setBars(bars);
-      this.chart.timeScale().setVisibleLogicalRange({ from: bars.length - show, to: bars.length - 1 + RIGHT_OFFSET });
+      const last = bars.at(-1);
+      const end = last ? this.chart.timeScale().timeToIndex(toChartTime(last.t), false) : null;
+      if (end !== null) this.chart.timeScale().setVisibleLogicalRange({ from: end + 1 - show, to: end + RIGHT_OFFSET });
     });
     this.indicators.reset(h);
     this.compare.coverFrom(this.leftT());
@@ -531,13 +549,11 @@ export class ChartController {
     this.patchReady({ olderLoading: false });
     this.history = h;
     if (added === 0) return this.updateIntradayEnd();
-    const range = this.chart.timeScale().getVisibleLogicalRange();
-    this.withDataGuard(() => {
+    this.withDataGuard(() => preserveTimeRange(this.chart.timeScale(), this.period(), () => {
       this.setBars(displayBars(h));
       this.indicators.reset(h);
-      if (range) this.chart.timeScale().setVisibleLogicalRange({ from: range.from + added, to: range.to + added });
-    });
-    if (this.hoverIndex !== null) this.hoverIndex += added;
+    }));
+    if (this.financialHoverTime !== null) this.hoverIndex = this.bars.findIndex((bar) => bar.t === this.financialHoverTime);
     this.compare.coverFrom(this.leftT());
     this.renderLegend();
     this.updateIntradayEnd();
@@ -575,14 +591,14 @@ export class ChartController {
     const r = this.chart.timeScale().getVisibleLogicalRange();
     const n = this.bars.length;
     if (!r || n === 0) return null;
-    return this.bars[Math.min(n - 1, Math.max(0, Math.floor(r.from)))]!.t;
+    return chartTimeProjection(this.chart.timeScale(), this.period()).toTime(Math.max(0, Math.floor(r.from)));
   }
 
   private renderLegend(): void {
     const view = this.view;
     const i = this.hoverIndex ?? this.bars.length - 1;
     const bar = this.bars[i];
-    this.indicatorLegend.render(this.indicators.rows(bar?.t ?? null), this.paneTops());
+    this.indicatorLegend.render(this.indicators.rows(this.financialHoverTime ?? bar?.t ?? null), this.paneTops());
     this.compareLegend.render(this.compare.rows(this.leftT(), bar?.t ?? null));
     if (!view || !bar) return this.legend.show(null);
     this.legend.show({

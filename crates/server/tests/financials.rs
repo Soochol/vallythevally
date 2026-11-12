@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use axum::{Router, extract::{Path, Query, State}, http::StatusCode, response::{IntoResponse, Response}, routing::get};
 use serde_json::{Value, json};
-use server::{clock::{Clock, kst}, config::Secret, financials::{Financials, client::Client, model::{Basis, Failure, FactPeriod, Verification}, store::Store, xbrl}};
+use server::{clock::{Clock, kst}, config::Secret, financials::{Financials, client::Client, model::{Basis, Failure, FactPeriod, Verification, REPORT_CODES}, store::Store, xbrl}};
 use domain::KstDate;
 
 const KEY: &str = "synthetic-dart-secret-for-test-159";
@@ -33,6 +33,14 @@ struct FakeState {
     directory: Option<String>,
     company_code: Option<String>,
     preferred_dividend: bool,
+    discovery_search: Option<String>,
+    discovery_contents: Option<String>,
+    discovery_failure: Option<(String, StatusCode)>,
+    discovery_network: Option<String>,
+    discovery_paused: Option<String>,
+    stream_paused_report: Option<String>,
+    statement_amounts: HashMap<String, String>,
+    integrated_financials: bool,
 }
 
 struct Fake { state: Arc<Mutex<FakeState>>, url: String, task: tokio::task::JoinHandle<()> }
@@ -42,7 +50,7 @@ impl Drop for Fake { fn drop(&mut self) { self.task.abort(); } }
 impl Fake {
     async fn start() -> Self {
         let state = Arc::new(Mutex::new(FakeState::default()));
-        let app = Router::new().route("/api/{endpoint}", get(respond)).route("/common/searchcorpname.do", get(kind)).route("/external/{*path}", get(notice)).with_state(state.clone());
+        let app = Router::new().route("/api/{endpoint}", get(respond)).route("/common/searchcorpname.do", get(kind)).route("/external/{*path}", get(notice)).route("/disclosure/searchtotalinfo.do", get(discovery)).route("/common/disclsviewer.do", get(discovery)).with_state(state.clone());
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let url = format!("http://{}", listener.local_addr().unwrap());
         let task = tokio::spawn(async move { axum::serve(listener, app).await.unwrap(); });
@@ -67,6 +75,26 @@ async fn kind(State(state): State<Arc<Mutex<FakeState>>>, Query(params): Query<B
     axum::Json(if state.kind_other_code { json!([{ "repisusrtcd2":"005930", "secugrpId":"ST", "fssunqno":CORP }]) } else if state.preferred && params["searchCorpName"] == "005935" { json!([{"repisusrtcd2":"005935","secugrpId":"ST","fssunqno":CORP}]) } else { json!([]) })
 }
 
+async fn discovery(State(state): State<Arc<Mutex<FakeState>>>, Query(params): Query<BTreeMap<String, String>>) -> Response {
+    let stage = if params["method"] == "searchContents" { "contents" } else { "search" };
+    state.lock().unwrap().calls.push((stage.into(), params));
+    loop {
+        if state.lock().unwrap().discovery_paused.as_deref() != Some(stage) { break; }
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+    let state = state.lock().unwrap();
+    if state.discovery_network.as_deref() == Some(stage) {
+        let stream = futures::stream::once(async { Err::<String, _>(std::io::Error::other("synthetic discovery body failure")) });
+        return Response::new(axum::body::Body::from_stream(stream));
+    }
+    if let Some((failed, status)) = &state.discovery_failure && failed == stage { return (*status,"synthetic source failure").into_response(); }
+    if stage == "search" {
+        state.discovery_search.clone().unwrap_or_else(|| "<section class=\"paging-group\"><div class=\"info\"><em>0</em></div></section>검색결과가 없습니다.".into()).into_response()
+    } else {
+        state.discovery_contents.clone().unwrap_or_default().into_response()
+    }
+}
+
 async fn notice(State(state): State<Arc<Mutex<FakeState>>>) -> Response {
     let mut state = state.lock().unwrap();
     state.calls.push(("notice".into(), BTreeMap::new()));
@@ -78,6 +106,27 @@ async fn notice(State(state): State<Arc<Mutex<FakeState>>>) -> Response {
 }
 
 async fn respond(State(state): State<Arc<Mutex<FakeState>>>, Path(endpoint): Path<String>, Query(params): Query<BTreeMap<String, String>>) -> Response {
+    let paused = {
+        let mut state = state.lock().unwrap();
+        let paused = endpoint == "fnlttSinglAcntAll.json" && state.stream_paused_report.as_ref() == params.get("reprt_code");
+        if paused { state.calls.push(("statement_stream".into(),params.clone())); }
+        paused
+    };
+    if paused {
+        let stream = futures::stream::once(async move {
+            loop {
+                if state.lock().unwrap().stream_paused_report.is_none() { break; }
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+            let response = respond_data(State(state),Path(endpoint),Query(params)).await;
+            axum::body::to_bytes(response.into_body(),1024*1024).await
+        });
+        return Response::new(axum::body::Body::from_stream(stream));
+    }
+    respond_data(State(state),Path(endpoint),Query(params)).await
+}
+
+async fn respond_data(State(state): State<Arc<Mutex<FakeState>>>, Path(endpoint): Path<String>, Query(params): Query<BTreeMap<String, String>>) -> Response {
     assert_eq!(params["crtfc_key"], KEY);
     let (failure, correction, delayed, no_cfs, xbrl_failure, stale_statement, mismatched_xbrl, paused, nonstandard_account) = {
         let mut state = state.lock().unwrap();
@@ -90,10 +139,14 @@ async fn respond(State(state): State<Arc<Mutex<FakeState>>>, Path(endpoint): Pat
     if let Some(status) = failure {
         return axum::Json(json!({"status":status,"message":format!("remote echoed {KEY}")})).into_response();
     }
+    if state.lock().unwrap().integrated_financials && matches!(endpoint.as_str(), "list.json" | "fnlttSinglAcntAll.json" | "fnlttXbrl.xml" | "alotMatter.json") {
+        return mapping::integrated_response(&endpoint, &params);
+    }
     let corp = params.get("corp_code").map(String::as_str).unwrap_or_else(|| if params.get("rcept_no").is_some_and(|receipt| ["20150331000011","20160401000012"].contains(&receipt.as_str())) { "00000002" } else { CORP });
     let original_receipt = if corp == CORP { RECEIPT } else { "20150331000011" };
     let corrected_receipt = if corp == CORP { "20160401000002" } else { "20160401000012" };
     let receipt = if correction { corrected_receipt } else { original_receipt };
+    let amount = state.lock().unwrap().statement_amounts.get(corp).cloned().unwrap_or_else(|| if correction { "120" } else { "100" }.into());
     match endpoint.as_str() {
         "echo.json" => {
             let escaped:String = KEY.bytes().map(|b|format!("\\u{b:04x}")).collect();
@@ -111,7 +164,7 @@ async fn respond(State(state): State<Arc<Mutex<FakeState>>>, Path(endpoint): Pat
         }
         "fnlttSinglAcntAll.json" => {
             if params["bsns_year"] != "2015" || (no_cfs && params["fs_div"] == "CFS") { return axum::Json(json!({"status":"013"})).into_response(); }
-            let mut row = account("IS", "ifrs-full_Revenue", if correction { "120" } else { "100" });
+            let mut row = account("IS", "ifrs-full_Revenue", &amount);
             row.insert("corp_code".into(), corp.into());
             if nonstandard_account { row.insert("account_id".into(), "-표준계정코드 미사용-".into()); }
             row.insert("account_detail".into(), format!("echoed {KEY}"));
@@ -124,7 +177,7 @@ async fn respond(State(state): State<Arc<Mutex<FakeState>>>, Path(endpoint): Pat
             let basis = if no_cfs { "SeparateMember" } else { "ConsolidatedMember" };
             let start = if params["reprt_code"] == "11011" { "2015-01-01" } else { "2015-10-01" };
             let stamp = if mismatched_xbrl { RECEIPT } else { receipt };
-            let xml = instance(&context("quarter", start, "2015-12-31", basis), &format!("<g:DocumentReceiptNumber>{stamp}</g:DocumentReceiptNumber><ifrs:Revenue contextRef=\"quarter\" unitRef=\"krw\">{}</ifrs:Revenue>", if correction { "120" } else { "100" }));
+            let xml = instance(&context("quarter", start, "2015-12-31", basis), &format!("<g:DocumentReceiptNumber>{stamp}</g:DocumentReceiptNumber><ifrs:Revenue contextRef=\"quarter\" unitRef=\"krw\">{}</ifrs:Revenue>", amount));
             zipped("statement.xbrl", &xml.replace(CORP,corp)).into_response()
         }
         "alotMatter.json" => {
@@ -143,6 +196,12 @@ fn fake_directory(state: &Mutex<FakeState>) -> String {
 
 #[path = "financials/mapping.rs"]
 mod mapping;
+
+#[path = "financials/discovery.rs"]
+mod discovery;
+
+#[path = "financials/review_fix.rs"]
+mod discovery_review_fix;
 
 fn account(section: &str, id: &str, amount: &str) -> BTreeMap<String, String> {
     [("corp_code",CORP),("bsns_year","2015"),("reprt_code","11014"),("rcept_no",RECEIPT),("sj_div",section),("account_id",id),("account_nm","원래 계정"),("currency","KRW"),("thstrm_nm","제 1기"),("thstrm_amount",amount),("thstrm_add_amount","300")].into_iter().map(|(k,v)|(k.into(),v.into())).collect()
@@ -609,6 +668,8 @@ async fn review_unavailable_financial_store_keeps_real_price_and_user_data_route
         assert_eq!(failed["status"],"failed");
         assert_eq!(failed["failure"],"storage");
         assert_eq!(http_snapshot(&client,&base).await["failure"],"storage");
+        let calculated:Value = serde_json::from_slice(&client.get(format!("{base}/api/symbols/005930/financials?period=Y")).send().await.unwrap().bytes().await.unwrap()).unwrap();
+        assert_eq!(calculated["status"],"failed");assert_eq!(calculated["failure"],"storage");
         assert_eq!(fake.count("corpCode.xml"),0);
         server.stop().await;
     }
@@ -873,4 +934,88 @@ async fn review2_failed_list_storage_keeps_real_price_usable_and_preserves_verif
     assert!(repaired);
     assert_eq!(tokio::time::timeout(Duration::from_secs(1),client.get(&price_url).send()).await.unwrap().unwrap().status(),StatusCode::OK);
     server.stop().await;
+}
+
+#[tokio::test]
+async fn calculated_http_contract_validates_period_and_preserves_price_during_collection() {
+    let fake = Fake::start().await;
+    fake.state.lock().unwrap().delayed = true;
+    let kiwoom = common::FakeKiwoom::start().await;
+    let client = reqwest::Client::new();
+    for configured in [false,true] {
+        let dir = tempfile::tempdir().unwrap();
+        let key = if configured { KEY } else { "" };
+        let server = common::Server::spawn_with(&kiwoom,&dir.path().join("run/server.lock"),dir.path(),&[
+            ("OPENDART_API_KEY",std::ffi::OsStr::new(key)),
+            ("VALLY_DART_BASE_URL",std::ffi::OsStr::new(&fake.url)),
+            ("VALLY_KIND_BASE_URL",std::ffi::OsStr::new(&fake.url)),
+        ]);
+        let base = format!("http://{}",server.addr().await);
+        let price = format!("{base}/api/bars?symbol=005930&period=Q&limit=5");
+        assert_eq!(client.get(&price).send().await.unwrap().status(),StatusCode::OK);
+        let url = format!("{base}/api/symbols/005930/financials");
+        for query in ["","?period=D","?period=Q&venue=krx"] {
+            assert_eq!(client.get(format!("{url}{query}")).send().await.unwrap().status(),StatusCode::BAD_REQUEST);
+        }
+        let response:Value = client.get(format!("{url}?period=Q")).send().await.unwrap().bytes().await.map(|bytes| serde_json::from_slice(&bytes).unwrap()).unwrap();
+        assert_eq!(response["status"],if configured { "collecting" } else { "not_configured" });
+        assert_eq!(response["series"].as_array().unwrap().len(),6);
+        assert_eq!(response["period"],"Q");
+        for code in ["IDX:001","102780"] {
+            let unsupported:Value = serde_json::from_slice(&client.get(format!("{base}/api/symbols/{code}/financials?period=Y")).send().await.unwrap().bytes().await.unwrap()).unwrap();
+            assert_eq!(unsupported["status"],"unsupported");assert_eq!(unsupported["reason"],"unsupported_product");
+        }
+        assert_eq!(tokio::time::timeout(Duration::from_secs(1),client.get(&price).send()).await.unwrap().unwrap().status(),StatusCode::OK);
+        let refresh:Value = client.post(format!("{url}?period=Y")).send().await.unwrap().bytes().await.map(|bytes| serde_json::from_slice(&bytes).unwrap()).unwrap();
+        assert_eq!(refresh["status"],if configured { "collecting" } else { "not_configured" });
+        assert!(!server.stop().await.contains(KEY));
+    }
+}
+
+#[tokio::test]
+async fn calculated_http_reads_saved_values_without_key_and_applies_correction_with_metadata() {
+    use std::os::unix::fs::PermissionsExt;
+    let fake = Fake::start().await;
+    let kiwoom = common::FakeKiwoom::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("run/financials.db");
+    let service = Financials::new(Some(fake.client()),Store::open(&path).await.unwrap(),clock());
+    service.open("005930",false,false).await;
+    settled(&service).await;
+    std::fs::set_permissions(dir.path().join("run"),std::fs::Permissions::from_mode(0o700)).unwrap();
+    let client = reqwest::Client::new();
+    for configured in [false,true] {
+        let key = if configured { KEY } else { "" };
+        let server = common::Server::spawn_with(&kiwoom,&dir.path().join("run/server.lock"),dir.path(),&[
+            ("OPENDART_API_KEY",std::ffi::OsStr::new(key)),
+            ("VALLY_DART_BASE_URL",std::ffi::OsStr::new(&fake.url)),
+            ("VALLY_KIND_BASE_URL",std::ffi::OsStr::new(&fake.url)),
+        ]);
+        let base = format!("http://{}",server.addr().await);
+        let price = format!("{base}/api/bars?symbol=005930&period=D&limit=5");
+        assert_eq!(client.get(&price).send().await.unwrap().status(),StatusCode::OK);
+        let url = format!("{base}/api/symbols/005930/financials?period=Y");
+        if configured {fake.state.lock().unwrap().correction=true;}
+        let first:Value = client.get(&url).send().await.unwrap().bytes().await.map(|bytes| serde_json::from_slice(&bytes).unwrap()).unwrap();
+        assert_eq!(first["status"],if configured {"collecting"} else {"not_configured"});
+        let p = &first["series"][0]["points"][0];
+        assert_eq!(p["value"],100.0);assert_eq!(p["inputs"][0]["receipt"],RECEIPT);
+        if configured {
+            client.post(&url).send().await.unwrap();
+            let mut corrected=None;
+            for _ in 0..500 {
+                let response:Value=client.get(&url).send().await.unwrap().bytes().await.map(|bytes| serde_json::from_slice(&bytes).unwrap()).unwrap();
+                if response["series"][0]["points"][0]["value"]==120.0 {corrected=Some(response);break;}
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+            let corrected=corrected.expect("latest verified correction must be returned before entire history completes");
+            let p=&corrected["series"][0]["points"][0];
+            assert_eq!(p["inputs"][0]["receipt"],"20160401000002");assert_eq!(p["inputs"][0]["disclosedAt"],"2016-04-01");
+            assert_eq!(p["period"]["start"],"2015-01-01");assert_eq!(p["basis"],"CFS");assert!(p["priceBucket"].is_number());
+            assert_eq!(corrected["fiscalMonth"],12);assert_eq!(corrected["latestCorrections"],true);
+            assert!(p["inputs"][0]["lastSuccessAt"].is_number());
+        }
+        assert_eq!(tokio::time::timeout(Duration::from_secs(1),client.get(&price).send()).await.unwrap().unwrap().status(),StatusCode::OK);
+        server.stop().await;
+    }
 }

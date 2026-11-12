@@ -1,5 +1,7 @@
 import type { IChartApi } from "lightweight-charts";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import type { FinancialsPage } from "../../api/generated/FinancialsPage";
+import type { FinancialPoint } from "../../api/generated/FinancialPoint";
 import type { Bar } from "../../api/generated/Bar";
 import type { UnixSeconds } from "../../api/generated/UnixSeconds";
 import type { History } from "../barFeed";
@@ -15,6 +17,7 @@ interface Datum {
   time: number;
   value?: number;
   base?: number;
+  connect?: boolean;
 }
 
 class FakeSeries {
@@ -95,7 +98,7 @@ const tail = (gen: number, draws: Draws): Exclude<FromWorker, { type: "fatal" }>
   results: [{ id: ICHIMOKU.id, gen, ok: true, draws: inLineOrder(draws) }],
 });
 
-function fixture() {
+function fixture(period: "1m" | "Q" | "Y" = "1m") {
   expect(specLines(ICHIMOKU.spec)).toEqual(LINES);
   const series: FakeSeries[] = [];
   const sent: ToWorker[] = [];
@@ -112,7 +115,7 @@ function fixture() {
     panes: () => [],
   };
   const layer = new IndicatorLayer(
-    { chart: chart as unknown as IChartApi, tokens: () => TOKENS, isIndex: () => false, period: () => "1m", requestFrame: () => {}, guard: (draw) => draw() },
+    { chart: chart as unknown as IChartApi, tokens: () => TOKENS, isIndex: () => false, period: () => period, requestFrame: () => {}, guard: (draw) => draw() },
     (listener) => {
       port.listener = listener;
       return { chart: 1, post: (m) => sent.push(m), close: () => {} };
@@ -333,4 +336,24 @@ test("마지막 확정 봉과 같은 시각의 봉이 오면 preview가 아니�
   expect(last?.type).toBe("create");
   f.reply(created(last?.type === "create" ? last.gen : -1));
   expect(f.layer.rows(replaced.t)[0]?.state).toBe("ok");
+});
+
+
+test("재무값은 WASM 계산 없이 API bucket에 그리고 누락·겹침·미공시를 연결하지 않는다", () => {
+  const f = fixture("Q");
+  const config: IndicatorConfig = { id: "financial", spec: { kind: "debt_ratio" }, panel: "p", visible: true, style: { colors: ["#a3e635"], width: 5 } };
+  f.layer.setConfigs([config], [{ id: "p", stretch: 0.25 }]);
+  f.layer.reset({ bars: CONFIRMED, current: null, nextBefore: null });
+  const bucket = (month: number) => Date.UTC(2024, month, 1) / 1000 - 32400;
+  const point = (month: number, value: number | null): FinancialPoint => ({ businessYear: 2024, reportCode: "11013", status: value === null ? "unpublished" : "available", reason: null, value, reportedValue: null, period: { kind: "instant", date: "2024-03-31" }, priceBucket: bucket(month), basis: "CFS", currency: "KRW", inputs: [] });
+  const page: FinancialsPage = { symbol: "005930", period: "Q", status: "partial_failure", reason: null, failure: null, corpCode: null, fiscalMonth: 3, shareClass: null, shareClassReason: null, lastCheckedAt: null, lastAttemptAt: null, disclosureFailure: null, refreshVersion: 0, disclosureVersion: 0, latestCorrections: true, progress: { total: 4, completed: 3, failed: 1, pending: 0 }, series: [{ metric: "debt_ratio", points: [point(0, -10), point(3, null), point(6, 0), point(9, 20), point(12, null)] }] };
+  f.layer.setFinancials(page);
+  const line = f.series.at(-1)!;
+  expect(line.data).toEqual([{ time: toChartTime(bucket(0)), value: -10, base: -10, connect: false }, { time: toChartTime(bucket(6)), value: 0, base: 0, connect: false }, { time: toChartTime(bucket(9)), value: 20, base: 20, connect: true }]);
+  expect(f.sent.filter((m) => m.type === "create")).toHaveLength(0);
+  expect(f.layer.rows(bucket(6))[0]).toMatchObject({ name: "부채비율 · 3월 결산", color: "#a3e635", values: [{ text: "0 %" }] });
+  f.layer.setFinancials({ ...page, series: [{ metric: "debt_ratio", points: [{ ...point(0, null), reason: "period_overlap", reportedValue: 500 }] }] });
+  expect(line.data).toEqual([]);
+  f.layer.setFinancials(null);
+  expect(line.data).toEqual([]);
 });
