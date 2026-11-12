@@ -3,7 +3,7 @@ import type { Cell } from "../api/generated/Cell";
 import type { Layout } from "../api/generated/Layout";
 import type { Period } from "../api/generated/Period";
 import type { Venue } from "../api/generated/Venue";
-import type { IndicatorSpec } from "../api/generated/IndicatorSpec";
+import type { IndicatorSpec } from "../chart/indicators/kinds";
 import type { SymbolCode } from "../api/generated/SymbolCode";
 import * as edit from "../chart/settings";
 import { type ChartSettings, type ChartStyle, DEFAULT_CHART_SETTINGS, type IndicatorConfig, type Panel, type PriceScale } from "../chart/settings";

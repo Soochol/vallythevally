@@ -10,6 +10,7 @@ test("기본값은 backend.md §9.5 표를 따른다", () => {
     { kind: "rsi", period: 14, signal: null },
     { kind: "macd", fast: 12, slow: 26, signal: 9 },
     { kind: "stochSlow", k: 5, d: 3, smooth: 3 },
+    ...["revenue", "operating_income", "owner_roe", "investing_cash_flow", "dps", "debt_ratio"].map((kind) => ({ kind })),
   ]);
   expect(KIND_ORDER.filter((k) => KINDS[k].place === "price")).toEqual(["ma", "bollinger", "ichimoku"]);
 });

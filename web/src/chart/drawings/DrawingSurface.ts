@@ -8,8 +8,9 @@ import { useLayoutStore } from "../../stores/layout";
 import { useSelectionStore } from "../../stores/selection";
 import { useUiStore } from "../../stores/ui";
 import type { ChartExtension, ChartHost } from "../extensions";
+import { chartTimeProjection } from "../timeAxis";
 import { formatBarTime } from "../time";
-import { fromScreen, logicalToT, timelineOf, toolContext, xToLogical, type Frame } from "./anchor";
+import { barLength, fromScreen, logicalToT, startAt, tToLogical, timelineOf, toolContext, xToLogical, type Frame } from "./anchor";
 import * as clipboard from "./clipboard";
 import { DrawingLayer, VLinePaneLayer } from "./DrawingLayer";
 import { frameHit, renderItem, visible, type RenderFrame } from "./frame";
@@ -101,7 +102,7 @@ export class DrawingSurface implements ChartExtension {
     const bars = h.bars();
     return { timeline: timelineOf(bars, period), bars, logScale: view?.settings.scale === "log",
       pane: { width: ts.width(), height: h.chart.panes()[0]?.getHeight() ?? h.el.clientHeight },
-      axes: { time: { coordinateOf: (i) => ts.logicalToCoordinate(i as Logical), indexAt: (x) => ts.coordinateToLogical(x), barSpacing: ts.options().barSpacing },
+      axes: { time: { coordinateOf: (i) => ts.logicalToCoordinate(i as Logical), indexAt: (x) => ts.coordinateToLogical(x), barSpacing: ts.options().barSpacing, projection: chartTimeProjection(ts, period) },
         price: { toY: (p) => h.series().priceToCoordinate(p), toPrice: (y) => h.series().coordinateToPrice(y) } } };
   }
   private context(frame = this.projection()): Context {
@@ -113,8 +114,13 @@ export class DrawingSurface implements ChartExtension {
       point: (at, action, mods) => this.point(frame, at, action, mods) };
   }
   private point(frame: Frame, at: ScreenPoint, action: DragAction, mods: Mods) {
-    const raw = fromScreen(frame, at); const logical = xToLogical(frame.axes.time, at.x);
-    if (!raw || logical === null) return null;
+    const raw = fromScreen(frame, at);
+    if (!raw) return null;
+    const logical = tToLogical(frame.timeline, raw.t);
+    if (logical === null) return raw;
+    const start = startAt(frame.timeline, Math.floor(logical));
+    if (start !== null && start > raw.t) return raw;
+    if (start !== null && raw.t >= start + barLength(frame.timeline.period, start)) return raw;
     const prefs = useUiStore.getState().prefs.drawing;
     const snapped = snap({ logical, price: raw.price, y: at.y }, effectiveMagnet({ on: prefs.magnet, strength: prefs.magnetStrength }, holds(action, mods).has("invertMagnet")), [ohlcSource(frame.bars)], frame.axes.price);
     const t = logicalToT(frame.timeline, snapped.logical);

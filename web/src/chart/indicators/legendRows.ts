@@ -1,6 +1,6 @@
 import { indicatorErrorText, type IndicatorRow } from "./layer";
 
-export type IndicatorCommand = "edit" | "toggle" | "remove" | "up" | "down";
+export type IndicatorCommand = "edit" | "toggle" | "remove" | "up" | "down" | "refresh";
 
 const ROW =
   "group pointer-events-auto flex w-max max-w-full items-center gap-1.5 whitespace-nowrap rounded-s pr-1 text-s " +
@@ -17,6 +17,12 @@ interface RowEls {
   up: HTMLButtonElement | null;
   down: HTMLButtonElement | null;
   key: string;
+  detail: HTMLDetailsElement;
+  summary: HTMLElement;
+  text: HTMLElement;
+  select: HTMLSelectElement;
+  refresh: HTMLButtonElement;
+  reports: NonNullable<IndicatorRow["detail"]>["reports"] | null;
 }
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, className: string, text = ""): HTMLElementTagNameMap[K] {
@@ -93,15 +99,54 @@ export class IndicatorLegend {
     button("⚙", "설정", "edit");
     const toggle = button("◉", "숨기기", "toggle");
     button("✕", key === "panel" ? "패널 닫기" : "지우기", "remove");
-    root.append(swatch, name, values, badge, tools);
-    return { root, swatch, name, values, badge, toggle, up, down, key };
+    const detail = el("details", "relative min-w-0 text-text-2");
+    detail.addEventListener("toggle", () => { root.style.zIndex = detail.open ? "20" : "4"; });
+    const summary = el("summary", "max-w-[18ch] cursor-pointer truncate text-xs max-md:max-w-[10ch]", "자료·갱신");
+    summary.setAttribute("aria-label", "재무자료와 갱신 상태");
+    const box = el("div", "absolute right-0 top-6 z-20 max-h-[45vh] w-[min(440px,65vw)] overflow-auto whitespace-normal rounded-m border border-line bg-surface p-3 shadow-dialog");
+    const select = el("select", "mb-2 w-full bg-surface text-s");
+    select.setAttribute("aria-label", "보고기간 자료");
+    const text = el("p", "whitespace-pre-wrap text-xs");
+    select.addEventListener("change", () => { text.textContent = select.selectedOptions[0]?.dataset.detail ?? ""; });
+    const refresh = el("button", "btn-primary mt-2", "재무자료 새로고침·재시도");
+    refresh.type = "button";
+    refresh.title = "재무자료 새로고침·재시도";
+    refresh.addEventListener("click", () => this.onCommand(id, "refresh"));
+    box.append(select, text, refresh);
+    detail.append(summary, box);
+    root.append(swatch, name, values, badge, tools, detail);
+    return { root, swatch, name, values, badge, toggle, up, down, key, detail, summary, text, select, refresh, reports: null };
   }
 
   private fill(r: RowEls, row: IndicatorRow): void {
+    r.detail.hidden = !row.detail;
+    if (row.detail) {
+      r.name.className = "min-w-0 truncate text-text-2 max-md:max-w-[15ch]";
+      r.values.className = "flex min-w-0 gap-1.5 truncate font-medium max-md:max-w-[10ch]";
+      r.summary.textContent = row.detail.summary;
+      r.summary.title = row.detail.summary;
+      r.root.title = row.detail.text;
+      if (r.reports !== row.detail.reports) {
+        r.reports = row.detail.reports;
+        const selected = r.select.value;
+        r.select.replaceChildren(...[{ label: "차트에서 가리킨 보고기간", text: row.detail.text }, ...row.detail.reports].map((report, i) => {
+          const option = el("option", "", report.label);
+          option.value = String(i);
+          option.dataset.detail = report.text;
+          return option;
+        }));
+        r.select.value = selected || "0";
+        r.text.textContent = r.select.selectedOptions[0]?.dataset.detail ?? row.detail.text;
+      }
+      const current = r.select.options[0];
+      if (current) current.dataset.detail = row.detail.text;
+      if (r.select.value === "0") r.text.textContent = row.detail.text;
+    }
     const dim = row.state !== "ok" && row.state !== "pending";
     r.root.classList.toggle("opacity-60", dim);
     r.swatch.style.background = row.color;
     r.name.textContent = row.name;
+    r.name.title = row.name;
     r.values.replaceChildren(
       ...row.values.map((v) => {
         const s = el("span", "", v.text);

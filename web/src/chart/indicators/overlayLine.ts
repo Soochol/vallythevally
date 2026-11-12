@@ -17,6 +17,7 @@ import {
 export interface OverlayPoint extends CustomData<Time> {
   value?: number;
   base: number;
+  connect?: boolean;
 }
 
 export interface OverlayOptions extends CustomSeriesOptions {
@@ -43,9 +44,15 @@ export class OverlayLineView implements ICustomSeriesPaneView<Time, OverlayPoint
             if (bar === undefined || v === undefined) continue;
             const y = toY(v);
             if (y === null) continue;
+            if (bar.originalData.connect === false) started = false;
             if (started) ctx.lineTo(bar.x, y);
             else ctx.moveTo(bar.x, y);
             started = true;
+            if (bar.originalData.connect !== undefined) {
+              ctx.moveTo(bar.x + 2, y);
+              ctx.arc(bar.x, y, 2, 0, 2 * Math.PI);
+              ctx.moveTo(bar.x, y);
+            }
           }
           ctx.lineWidth = options.lineWidth;
           ctx.strokeStyle = options.color;

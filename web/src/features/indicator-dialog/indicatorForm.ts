@@ -1,4 +1,4 @@
-import type { IndicatorSpec } from "../../api/generated/IndicatorSpec";
+import type { IndicatorSpec } from "../../chart/indicators/kinds";
 import {
   firstUnusedColor,
   type IndicatorColor,
@@ -33,9 +33,10 @@ export interface Draft {
 }
 
 
-export const KIND_GROUPS: { place: Placement; label: string }[] = [
-  { place: "price", label: "가격 패널에 겹쳐 그림" },
-  { place: "panel", label: "아래 지표 패널에 그림" },
+export const KIND_GROUPS: { place: Placement; financial: boolean; label: string }[] = [
+  { place: "price", financial: false, label: "기술지표 · 가격 패널에 겹쳐 그림" },
+  { place: "panel", financial: false, label: "기술지표 · 아래 지표 패널에 그림" },
+  { place: "panel", financial: true, label: "재무지표 · 분기봉·연봉" },
 ];
 
 export function formFromSpec(spec: IndicatorSpec): SpecForm {
