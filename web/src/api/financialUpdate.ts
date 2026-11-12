@@ -3,7 +3,7 @@ import type { FinancialUpdateStatus } from "./generated/FinancialUpdateStatus";
 import type { FinancialUpdatePage } from "./generated/FinancialUpdatePage";
 import { getJson, sendJson } from "./http";
 
-export const updateActive = (status: FinancialUpdateStatus | undefined) => status === "planning" || status === "collecting";
+export const updateActive = (status: FinancialUpdateStatus | undefined) => status === "planning" || status === "collecting" || status === "pausing";
 export const financialUpdateQuery = queryOptions({
   queryKey: ["financial-update"],
   queryFn: ({ signal }) => getJson<FinancialUpdatePage>("/api/financial-update", signal),
@@ -16,11 +16,11 @@ export function useFinancialUpdate(enabled = true) {
   return useQuery({ ...financialUpdateQuery, enabled });
 }
 
-export async function startFinancialUpdate(client: QueryClient): Promise<void> {
+export async function commandFinancialUpdate(client: QueryClient, action: "start" | "pause" | "resume"): Promise<void> {
   const keys = [["financial-update"], ["financials"]];
   await Promise.all(keys.map((queryKey) => client.cancelQueries({ queryKey })));
   try {
-    await sendJson<FinancialUpdatePage>("POST", "/api/financial-update", "{}");
+    await sendJson<FinancialUpdatePage>("POST", action === "start" ? "/api/financial-update" : `/api/financial-update/${action}`, "{}");
   } finally {
     await Promise.all(keys.map((queryKey) => client.cancelQueries({ queryKey })));
     await Promise.all(keys.map((queryKey) => client.invalidateQueries({ queryKey })));

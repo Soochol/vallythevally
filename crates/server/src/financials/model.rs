@@ -5,6 +5,8 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum Failure {
+    #[serde(skip)]
+    Paused,
     Authentication,
     Network,
     RateLimited,
@@ -85,10 +87,16 @@ impl<T> Fetch<T> {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(tag = "next", rename_all = "snake_case")]
+pub enum StatementRequest { Separate, Xbrl { basis: Basis, rows: Vec<BTreeMap<String, String>> } }
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Report {
     pub business_year: i32,
     pub report_code: String,
     pub statement: Fetch<Statement>,
+    #[serde(default)]
+    pub statement_request: Option<StatementRequest>,
     pub dividends: Fetch<Vec<Dividend>>,
 }
 

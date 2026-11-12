@@ -162,7 +162,7 @@ fn quarter(report: &Report, collection: &Collection, concept: Concept) -> Calcul
     if !months(start, end, expected) { return Err(gap(duration_reason(start, end, expected), current.inputs)); }
     let previous_code = match report.report_code.as_str() { "11012" => "11013", "11014" => "11012", "11011" => "11014", _ => return Ok(current) };
     let Some(previous) = collection.reports.values().find(|r| r.business_year == report.business_year && r.report_code == previous_code) else {
-        let missing = Report { business_year: report.business_year, report_code: previous_code.into(), statement: Fetch::<Statement>::default(), dividends: Fetch::default() };
+        let missing = Report { statement_request: None, business_year: report.business_year, report_code: previous_code.into(), statement: Fetch::<Statement>::default(), dividends: Fetch::default() };
         let mut input = statement_source(&missing, "statement");
         input.usage = FinancialInputUsage::Comparison;
         input.status = FinancialInputStatus::MissingReport;

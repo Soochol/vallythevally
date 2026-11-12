@@ -41,6 +41,8 @@ struct FakeState {
     discovery_paused: Option<String>,
     stream_paused_report: Option<String>,
     stream_paused_company: Option<String>,
+    paused_list: bool,
+    list_pages: bool,
     statement_amounts: HashMap<String, String>,
     integrated_financials: bool,
     report_corrections: std::collections::BTreeSet<(i32, String)>,
@@ -111,14 +113,15 @@ async fn notice(State(state): State<Arc<Mutex<FakeState>>>) -> Response {
 async fn respond(State(state): State<Arc<Mutex<FakeState>>>, Path(endpoint): Path<String>, Query(params): Query<BTreeMap<String, String>>) -> Response {
     let paused = {
         let mut state = state.lock().unwrap();
-        let paused = endpoint == "fnlttSinglAcntAll.json" && state.stream_paused_report.as_ref() == params.get("reprt_code") && state.stream_paused_company.as_ref().is_none_or(|company| Some(company) == params.get("corp_code"));
-        if paused { state.calls.push(("statement_stream".into(),params.clone())); }
+        let paused = (endpoint == "list.json" && state.paused_list) || (endpoint == "fnlttSinglAcntAll.json" && state.stream_paused_report.as_ref() == params.get("reprt_code") && state.stream_paused_company.as_ref().is_none_or(|company| Some(company) == params.get("corp_code")));
+        if paused { state.calls.push((if endpoint == "list.json" { "listing_stream" } else { "statement_stream" }.into(),params.clone())); }
         paused
     };
     if paused {
         let stream = futures::stream::once(async move {
             loop {
-                if state.lock().unwrap().stream_paused_report.is_none() { break; }
+                let paused = { let state = state.lock().unwrap(); if endpoint == "list.json" { state.paused_list } else { state.stream_paused_report.is_some() } };
+                if !paused { break; }
                 tokio::time::sleep(Duration::from_millis(5)).await;
             }
             let response = respond_data(State(state),Path(endpoint),Query(params)).await;
@@ -167,6 +170,11 @@ async fn respond_data(State(state): State<Arc<Mutex<FakeState>>>, Path(endpoint)
             let mut rows = vec![json!({"corp_code":corp,"rcept_no":original_receipt,"rcept_dt":"20150331","report_nm":"사업보고서 (2015.12)"})];
             if correction { rows.push(json!({"corp_code":corp,"rcept_no":corrected_receipt,"rcept_dt":"20160401","report_nm":"[기재정정]사업보고서 (2015.12)"})); }
             if correction && later_correction { rows.push(json!({"corp_code":corp,"rcept_no":later_receipt,"rcept_dt":"20160402","report_nm":"[기재정정]사업보고서 (2015.12)"})); }
+            if state.lock().unwrap().list_pages {
+                let page = params["page_no"].parse::<u32>().unwrap();
+                if page == 2 { rows = vec![json!({"corp_code":corp,"rcept_no":"20150331000009","rcept_dt":"20150331","report_nm":"분기보고서 (2015.03)"})]; }
+                return axum::Json(json!({"status":"000","page_no":page,"total_page":2,"list":rows})).into_response();
+            }
             axum::Json(json!({"status":"000","page_no":1,"total_page":1,"list":rows})).into_response()
         }
         "fnlttSinglAcntAll.json" => {
@@ -578,7 +586,8 @@ async fn review_restart_resumes_corrections_after_list_commit_and_partial_report
             if report_calls(&fake,paused) > before { break; }
             tokio::time::sleep(Duration::from_millis(20)).await;
         }
-        assert!(report_calls(&fake,paused) > before);
+        let update: Value = serde_json::from_slice(&client.get(format!("{base}/api/financial-update")).send().await.unwrap().bytes().await.unwrap()).unwrap();
+        assert!(report_calls(&fake,paused) > before, "manual update did not request {paused}: {update}");
         let interrupted = http_snapshot(&client,&base).await;
         assert_eq!(interrupted["collection"]["disclosures"][1]["rcept_no"],"20160401000002");
         if paused == "11014" {
@@ -943,6 +952,7 @@ async fn review2_failed_list_storage_keeps_real_price_usable_and_preserves_verif
         ("OPENDART_API_KEY",std::ffi::OsStr::new(KEY)),
         ("VALLY_DART_BASE_URL",std::ffi::OsStr::new(&fake.url)),
         ("VALLY_KIND_BASE_URL",std::ffi::OsStr::new(&fake.url)),
+        ("VALLY_CLOCK_START",std::ffi::OsStr::new("20171231120000")),
     ]);
     let base = format!("http://{}",server.addr().await);
     let client = reqwest::Client::new();
@@ -1027,6 +1037,7 @@ async fn calculated_http_reads_saved_values_without_key_and_applies_correction_w
             ("OPENDART_API_KEY",std::ffi::OsStr::new(key)),
             ("VALLY_DART_BASE_URL",std::ffi::OsStr::new(&fake.url)),
             ("VALLY_KIND_BASE_URL",std::ffi::OsStr::new(&fake.url)),
+            ("VALLY_CLOCK_START",std::ffi::OsStr::new("20171231120000")),
         ]);
         let base = format!("http://{}",server.addr().await);
         let price = format!("{base}/api/bars?symbol=005930&period=D&limit=5");

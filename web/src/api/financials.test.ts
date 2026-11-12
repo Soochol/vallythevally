@@ -2,7 +2,7 @@ import { environmentManager, QueryClient, QueryObserver } from "@tanstack/react-
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type { FinancialsPage } from "./generated/FinancialsPage";
 import { financialsQuery } from "./financials";
-import { startFinancialUpdate } from "./financialUpdate";
+import { commandFinancialUpdate } from "./financialUpdate";
 
 function deferred<T>() {
   let complete: (value: T) => void = () => {};
@@ -43,9 +43,9 @@ test.each(["collecting", "partial_failure"])("공유 키에서 늦은 GET과 중
   await vi.waitFor(() => expect(one.getCurrentResult().data?.status).toBe("ready"));
   void client.refetchQueries({ queryKey: financialsQuery(request).queryKey });
   await vi.waitFor(() => expect(gets).toBe(2));
-  const first = startFinancialUpdate(client);
+  const first = commandFinancialUpdate(client, "start");
   await vi.waitFor(() => expect(posts).toBe(1));
-  await startFinancialUpdate(client);
+  await commandFinancialUpdate(client, "start");
   expect(gets).toBe(3);
   oldGet.complete(response(page(status)));
   oldPost.complete(response(page(status, 1)));
@@ -67,9 +67,9 @@ test("전체 갱신의 실패·재시도는 다른 종목·주기의 저장값�
   const other = { ...request, symbol: "000020" };
   const cachedQ = await client.fetchQuery(financialsQuery(q));
   const cachedOther = await client.fetchQuery(financialsQuery(other));
-  await expect(startFinancialUpdate(client)).rejects.toThrow("가짜 실패");
+  await expect(commandFinancialUpdate(client, "start")).rejects.toThrow("가짜 실패");
   failure = false;
-  await startFinancialUpdate(client);
+  await commandFinancialUpdate(client, "start");
   expect(client.getQueryData(financialsQuery(q).queryKey)).toBe(cachedQ);
   expect(client.getQueryData(financialsQuery(other).queryKey)).toBe(cachedOther);
   expect(client.getQueryState(financialsQuery(q).queryKey)?.isInvalidated).toBe(true);
@@ -84,7 +84,7 @@ test("세 POST의 3→1→2 완료와 중간 GET 지연에도 두 구독자의 �
   const one=new QueryObserver(client,financialsQuery(request)); const two=new QueryObserver(client,financialsQuery(request));
   const stop=[one.subscribe(()=>{}),two.subscribe(()=>{})];
   await vi.waitFor(()=>expect(getCount).toBe(1)); await vi.waitFor(()=>expect(one.getCurrentResult().data).toEqual(page()));
-  const jobs=[startFinancialUpdate(client),startFinancialUpdate(client),startFinancialUpdate(client)];
+  const jobs=[commandFinancialUpdate(client, "start"),commandFinancialUpdate(client, "start"),commandFinancialUpdate(client, "start")];
   await vi.waitFor(()=>expect(postCount).toBe(3));
   for(const n of [2,0,1]) { posts[n]!.complete(response(page(n===0?"partial_failure":"collecting",n===0?1:3))); await vi.waitFor(()=>expect(getCount).toBe(n===2?2:n===0?3:4)); }
   reads[0]!.complete(response(page("partial_failure"))); reads[1]!.complete(response(page("collecting")));
@@ -96,7 +96,7 @@ test("세 POST의 3→1→2 완료와 중간 GET 지연에도 두 구독자의 �
 });
 
 
-test.each([false, true])("POST 도중 활성화한 cold query는 완료·실패 뒤에도 새 GET으로 확인한다 (실패 %s)", async (failure) => {
+test.each([false, true].flatMap((failure) => (["start", "pause", "resume"] as const).map((action) => ({ failure, action }))))("$action 도중 활성화한 cold query는 완료·실패 뒤에도 새 GET으로 확인한다 (실패 $failure)", async ({ failure, action }) => {
   const post = deferred<Response>();
   const stale = deferred<Response>();
   let posts = 0;
@@ -105,7 +105,7 @@ test.each([false, true])("POST 도중 활성화한 cold query는 완료·실패 
     if (init.method === "POST") { posts++; return post.promise; }
     return ++gets === 1 ? stale.promise : response(page());
   }));
-  const job = startFinancialUpdate(client).then(() => null, (error: unknown) => error);
+  const job = commandFinancialUpdate(client, action).then(() => null, (error: unknown) => error);
   await vi.waitFor(() => expect(posts).toBe(1));
   const one = new QueryObserver(client, financialsQuery(request));
   const two = new QueryObserver(client, financialsQuery(request));

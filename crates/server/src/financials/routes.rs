@@ -11,10 +11,13 @@ use super::{Financials, model::{Collection, Snapshot}};
 struct RouteState { service: Arc<Financials>, symbols: Arc<SymbolDirectory> }
 
 pub fn routes(service: Arc<Financials>, symbols: Arc<SymbolDirectory>) -> Router {
-    Router::new().route("/api/financial-update", get(update_status).post(start_update)).route("/api/symbols/{code}/financial-source", get(open).post(refresh)).route("/api/symbols/{code}/financials", get(indicators).post(refresh_indicators)).method_not_allowed_fallback(|| async { ApiFailure::new(ApiErrorCode::MethodNotAllowed, "지원하지 않는 요청 방식입니다") }).with_state(RouteState { service, symbols })
+    Router::new().route("/api/financial-update", get(update_status).post(start_update)).route("/api/financial-update/pause", axum::routing::post(pause_update)).route("/api/financial-update/resume", axum::routing::post(resume_update)).route("/api/symbols/{code}/financial-source", get(open).post(refresh)).route("/api/symbols/{code}/financials", get(indicators).post(refresh_indicators)).method_not_allowed_fallback(|| async { ApiFailure::new(ApiErrorCode::MethodNotAllowed, "지원하지 않는 요청 방식입니다") }).with_state(RouteState { service, symbols })
 }
 
 async fn update_status(State(state): State<RouteState>) -> Json<FinancialUpdatePage> { Json(state.service.update_status().await) }
+
+async fn pause_update(State(state): State<RouteState>) -> Json<FinancialUpdatePage> { Json(state.service.pause_update().await) }
+async fn resume_update(State(state): State<RouteState>) -> Json<FinancialUpdatePage> { Json(state.service.resume_update().await) }
 
 async fn start_update(State(state): State<RouteState>) -> Result<Json<FinancialUpdatePage>, ApiFailure> { start(&state).await.map(Json) }
 
