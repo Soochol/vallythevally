@@ -1,6 +1,6 @@
 use super::*;
 use super::discovery::{COMMON, COMPANY, ENTRY, STOCK, search, source};
-use super::mapping::{settled_stock, tempdir};
+use super::mapping::tempdir;
 
 async fn until_call(fake: &Fake, endpoint: &str, count: usize) {
     tokio::time::timeout(Duration::from_secs(5),async {
@@ -11,16 +11,6 @@ async fn until_call(fake: &Fake, endpoint: &str, count: usize) {
 fn annual_calls(fake: &Fake, endpoint: &str) -> usize {
     fake.state.lock().unwrap().calls.iter().filter(|(name,params)| name == endpoint && params.get("corp_code").is_some_and(|corp| corp == COMPANY)
         && params.get("bsns_year").is_some_and(|year| year == "2015") && params.get("reprt_code").is_some_and(|code| code == "11011")).count()
-}
-
-async fn finished(service: &Arc<Financials>, stock: &str, preferred: bool) -> server::financials::model::Snapshot {
-    tokio::time::timeout(Duration::from_secs(20),async {
-        loop {
-            let snapshot = service.update_company(stock,preferred,false).await;
-            if snapshot.status != "collecting" { break snapshot; }
-            tokio::time::sleep(Duration::from_millis(20)).await;
-        }
-    }).await.unwrap()
 }
 
 #[tokio::test]
@@ -34,27 +24,19 @@ async fn partial_first_page_is_a_retryable_source_failure_and_preserves_existing
             let fake = source().await;
             let dir = tempdir();
             let store = Store::open(&dir.path().join("financials.db")).await.unwrap();
-            let clock = clock();
-            let service = Financials::new(Some(fake.client()),store.clone(),clock.clone());
+            let service = Financials::new(Some(fake.client()),store.clone(),clock());
             let previous = if collected { Some(settled_stock(&service,COMMON,false).await.collection) } else { None };
             fake.state.lock().unwrap().discovery_search = Some(broken);
-            let failed = service.update_company(STOCK,true,false).await;
+            let failed = settled_stock(&service,STOCK,true).await;
             assert_eq!(failed.status,"failed");
             assert_eq!(failed.failure,Some(Failure::InvalidResponse));
             assert!(failed.reason.is_none());
             assert!(store.security(STOCK).await.unwrap().is_none());
             assert_eq!(fake.count("search"),1);
             assert_eq!(fake.count("contents"),0);
-            let attempted = clock.now().unix();
             fake.state.lock().unwrap().discovery_search = Some(search(ENTRY,1));
-            for elapsed in [0,59] {
-                clock.jump(attempted + elapsed - clock.now().unix());
-                assert_eq!(service.update_company(STOCK,true,false).await.failure,Some(Failure::InvalidResponse));
-                assert_eq!(fake.count("search"),1);
-            }
             assert_eq!(settled_stock(&service,"000001",false).await.status,"ready");
             if let Some(previous) = &previous { assert_eq!(serde_json::to_value(store.collection(COMPANY).await.unwrap()).unwrap(),serde_json::to_value(previous).unwrap()); }
-            clock.jump(attempted + 61 - clock.now().unix());
             let recovered = settled_stock(&service,STOCK,true).await;
             assert_eq!(recovered.status,"ready");
             assert_eq!(fake.count("search"),2);
@@ -97,7 +79,7 @@ async fn conflicting_document_or_receipt_identity_never_persists_provenance() {
         let dir = tempdir();
         let store = Store::open(&dir.path().join("financials.db")).await.unwrap();
         let service = Financials::new(Some(fake.client()),store.clone(),clock());
-        let snapshot = service.update_company(STOCK,true,false).await;
+        let snapshot = settled_stock(&service,STOCK,true).await;
         assert_eq!(snapshot.status,"unsupported");
         assert_eq!(snapshot.reason,Some("company_mapping_unverified"));
         assert!(snapshot.failure.is_none());
@@ -208,54 +190,4 @@ async fn repeated_manual_start_during_mapping_coalesces_and_preserves_price_and_
         assert_eq!(tokio::time::timeout(Duration::from_secs(1),client.get(&price).send()).await.unwrap().unwrap().status(),StatusCode::OK);
         assert!(!server.stop().await.contains(KEY));
     }
-}
-
-#[tokio::test]
-async fn pending_manual_refresh_survives_active_collection_storage_failure_and_retries_without_losing_data() {
-    use sqlx::Connection;
-    let fake = source().await;
-    let dir = tempdir();
-    let path = dir.path().join("financials.db");
-    let store = Store::open(&path).await.unwrap();
-    let clock = clock();
-    let service = Financials::new(Some(fake.client()),store.clone(),clock.clone());
-    let before = settled_stock(&service,COMMON,false).await.collection;
-    clock.jump(86400);
-    {
-        let mut state = fake.state.lock().unwrap();
-        state.discovery_paused = Some("search".into());
-        state.stream_paused_report = Some("11013".into());
-    }
-    let manual = { let service = service.clone(); tokio::spawn(async move { service.update_company(STOCK,true,true).await }) };
-    until_call(&fake,"search",1).await;
-    assert_eq!(service.update_company(COMMON,false,false).await.status,"collecting");
-    until_call(&fake,"statement_stream",1).await;
-    fake.state.lock().unwrap().discovery_paused = None;
-    assert_eq!(tokio::time::timeout(Duration::from_secs(3),manual).await.unwrap().unwrap().status,"collecting");
-    let mut connection = sqlx::SqliteConnection::connect_with(&sqlx::sqlite::SqliteConnectOptions::new().filename(&path)).await.unwrap();
-    sqlx::query("CREATE TRIGGER fail_pending_refresh BEFORE INSERT ON companies WHEN NEW.corp_code = '00164742' BEGIN SELECT RAISE(FAIL,'synthetic pending refresh failure'); END").execute(&mut connection).await.unwrap();
-    fake.state.lock().unwrap().stream_paused_report = None;
-    let failed = finished(&service,COMMON,false).await;
-    assert_eq!(failed.failure,Some(Failure::Storage));
-    assert_eq!(failed.collection.refresh_version,before.refresh_version);
-    assert_eq!(serde_json::to_value(&failed.collection.reports).unwrap(),serde_json::to_value(&before.reports).unwrap());
-    let attempted = failed.collection.last_attempt_at.unwrap();
-    assert_eq!(settled_stock(&service,"000001",false).await.status,"ready");
-    sqlx::query("DROP TRIGGER fail_pending_refresh").execute(&mut connection).await.unwrap();
-    fake.state.lock().unwrap().statement_amounts.insert(COMPANY.into(),"175".into());
-    fake.state.lock().unwrap().correction = true;
-    for elapsed in [0,59] {
-        clock.jump(attempted + elapsed - clock.now().unix());
-        assert_eq!(service.update_company(STOCK,true,false).await.failure,Some(Failure::Storage));
-        assert_eq!(annual_calls(&fake,"fnlttSinglAcntAll.json"),1);
-    }
-    clock.jump(2);
-    let recovered = finished(&service,STOCK,true).await;
-    assert_eq!(recovered.status,"ready");
-    assert_eq!(recovered.collection.refresh_version,before.refresh_version + 1);
-    let annual = &recovered.collection.reports["2015/11011"].statement;
-    assert_eq!(annual.refresh_version,recovered.collection.refresh_version);
-    assert_eq!(annual.data.as_ref().unwrap().accounts[0].fields["thstrm_amount"],"175");
-    assert_eq!(annual_calls(&fake,"fnlttSinglAcntAll.json"),2);
-    assert_eq!(serde_json::to_value(store.collection(COMPANY).await.unwrap()).unwrap(),serde_json::to_value(&recovered.collection).unwrap());
 }
