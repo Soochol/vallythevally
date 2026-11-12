@@ -197,9 +197,10 @@ function claimOf(condition: BarCondition): Claim {
 export function conditionSentence(condition: Condition): string {
   if (condition.kind === "market_cap") return `시가총액이 ${copula(range(condition.min, condition.max, eokWon))}`;
   const claim = claimOf(condition);
-  const { period, m } = condition;
-  if (m === 1) return `${CURRENT_BAR[period]} ${"state" in claim ? copula(claim.state) : `${claim.event}했다`}`;
-  return `최근 ${count(m)}${UNIT[period]} 안에 ${"state" in claim ? `${claim.state}인` : `${claim.event}한`} 봉이 있다`;
+  const { period, barRange: { start, end } } = condition;
+  const periodLabel = PERIOD_NAME[period];
+  if (start === end) return `${periodLabel} ${count(start)}봉 전 ${"state" in claim ? copula(claim.state) : `${claim.event}했다`}`;
+  return `${periodLabel} ${count(start)}~${count(end)}봉 전 안에 ${"state" in claim ? `${claim.state}인` : `${claim.event}한`} 봉이 있다`;
 }
 
 export function excludedText({ listedTooShort, historyShort, unconfirmed }: ScreenerExcluded): string {

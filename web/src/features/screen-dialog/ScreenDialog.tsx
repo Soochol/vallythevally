@@ -116,7 +116,8 @@ export const CHOICE_LABEL: Record<KindChoice, string> = { ...KIND_LABEL, volume_
 const VALUE_FIELDS: Partial<Record<KindChoice, Options<BarField>>> = { new_high: PRICE_FIELDS, new_low: BAR_FIELDS };
 
 const FIELD_NAME: Record<Exclude<FieldKey, `lengths.${number}`>, string> = {
-  m: "최근 봉 수",
+  rangeStart: "봉 범위 시작",
+  rangeEnd: "봉 범위 끝",
   n: "기간",
   min: "최소",
   max: "최대",
@@ -403,11 +404,17 @@ function ConditionLine({ ids, index, last, condition, onChange, onKind, onMove, 
         {barLine && <Choice label={`${label} 봉 주기`} value={condition.period} options={PERIODS} onChange={(period) => onChange({ ...condition, period })} />}
         <KindFields ui={ui} line={condition} onChange={onChange} />
         {barLine && (
-          <Together>
-            <span>최근</span>
-            <NumberBox ui={ui} field="m" value={condition.m} onChange={(m) => onChange({ ...condition, m })} />
-            <span>{UNIT[condition.period]} 안에</span>
-          </Together>
+          <>
+            <Together>
+              <span>봉 범위</span>
+              <NumberBox ui={ui} field="rangeStart" value={condition.rangeStart} onChange={(rangeStart) => onChange({ ...condition, rangeStart })} />
+              <span>~</span>
+            </Together>
+            <Together>
+              <NumberBox ui={ui} field="rangeEnd" value={condition.rangeEnd} onChange={(rangeEnd) => onChange({ ...condition, rangeEnd })} />
+              <span>봉 전</span>
+            </Together>
+          </>
         )}
         <span className="flex-1" />
         <span className="flex flex-none items-center">

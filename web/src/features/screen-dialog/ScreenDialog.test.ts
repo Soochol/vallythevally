@@ -8,7 +8,7 @@ import { addCondition, draftOf, editCondition, removeCondition, KIND_GROUPS, typ
 
 const twoLines = addCondition(addCondition({ ...draftOf(null), name: "고가와 거래량" }));
 const NAME = 1;
-const PER_NEW_HIGH_LINE = 8;
+const PER_NEW_HIGH_LINE = 9;
 const ADD_LINE = 1;
 const MARKETS = 2;
 const CHIPS = 11;
@@ -64,12 +64,12 @@ test("조건 줄은 종류, 봉 주기, 그 종류의 칸, ▲▼, 빼기 순이
     markets: [],
     exclude: [],
     conditions: [
-      { kind: "new_high", period: "W", m: 2, field: "high", n: 52 },
+      { kind: "new_high", period: "W", barRange: { start: 0, end: 1 }, field: "high", n: 52 },
       { kind: "market_cap", min: 300_000_000_000, max: null },
     ],
   };
   const labels = labelsIn(markupOf(draftOf(screen)));
-  expect(labels.filter((l) => l.startsWith("조건 1 "))).toEqual(["조건 1 종류", "조건 1 봉 주기", "조건 1 값", "조건 1 신고가 기간", "조건 1 최근 봉 수", "조건 1 위로 옮기기", "조건 1 아래로 옮기기", "조건 1 빼기"]);
+  expect(labels.filter((l) => l.startsWith("조건 1 "))).toEqual(["조건 1 종류", "조건 1 봉 주기", "조건 1 값", "조건 1 신고가 기간", "조건 1 봉 범위 시작", "조건 1 봉 범위 끝", "조건 1 위로 옮기기", "조건 1 아래로 옮기기", "조건 1 빼기"]);
   expect(labels.filter((l) => l.startsWith("조건 2 "))).toEqual(["조건 2 종류", "조건 2 최소", "조건 2 최대", "조건 2 위로 옮기기", "조건 2 아래로 옮기기", "조건 2 빼기"]);
 });
 
@@ -80,15 +80,15 @@ test("줄 아래에는 그 줄의 봉 주기로 쓴 문장이 붙고, 거래대�
     markets: ["kospi"],
     exclude: [],
     conditions: [
-      { kind: "value_range", period: "W", m: 1, field: "traded_value", min: 10_000_000_000, max: null },
+      { kind: "value_range", period: "W", barRange: { start: 0, end: 0 }, field: "traded_value", min: 10_000_000_000, max: null },
       { kind: "market_cap", min: 300_000_000_000, max: null },
-      { kind: "ma_cross", period: "M", m: 3, method: "sma", fast: 5, slow: 20, direction: "up" },
+      { kind: "ma_cross", period: "M", barRange: { start: 0, end: 2 }, method: "sma", fast: 5, slow: 20, direction: "up" },
     ],
   };
   const markup = markupOf(draftOf(screen));
-  expect(markup).toContain("이번 주 거래대금이 100억 원 이상이다");
+  expect(markup).toContain("주봉 0봉 전 거래대금이 100억 원 이상이다");
   expect(markup).toContain("시가총액이 3,000억 원 이상이다");
-  expect(markup).toContain("최근 3개월 안에 5개월선이 20개월선을 위로 교차한 봉이 있다");
+  expect(markup).toContain("월봉 0~2봉 전 안에 5개월선이 20개월선을 위로 교차한 봉이 있다");
   expect(inputOf(markup, "조건 1 최소")).toContain('value="100"');
   expect(inputOf(markup, "조건 2 최소")).toContain('value="3000"');
   expect(markup).toContain("<span>억 원 이상</span>");
@@ -97,7 +97,7 @@ test("줄 아래에는 그 줄의 봉 주기로 쓴 문장이 붙고, 거래대�
 });
 
 test("잘못된 칸은 그 칸에 표시되고 줄 아래에 칸 이름과 이유가 붙으며, 그 줄의 문장은 보이지 않는다", () => {
-  const draft = draftOf({ id: "s", name: "s", markets: [], exclude: [], conditions: [{ kind: "macd", period: "D", m: 1, fast: 12, slow: 26, signal: 9, test: { kind: "signal_cross", direction: "up" } }] });
+  const draft = draftOf({ id: "s", name: "s", markets: [], exclude: [], conditions: [{ kind: "macd", period: "D", barRange: { start: 0, end: 0 }, fast: 12, slow: 26, signal: 9, test: { kind: "signal_cross", direction: "up" } }] });
   const line = draft.conditions[0]!;
   if (line.kind !== "macd") throw new Error("MACD 줄이어야 한다");
   const markup = markupOf(editCondition(draft, { ...line, fast: "30" }));
@@ -131,11 +131,11 @@ test("종류 메뉴는 묶음별로 15가지와 신고거래량·신고거래대
 });
 
 test("거래대금 신고가 줄은 종류 메뉴에 신고거래대금이 골라진 채 값 칸 없이 보이고 신고거래대금으로 읽힌다", () => {
-  const traded = draftOf({ id: "s", name: "신고거래대금", markets: [], exclude: [], conditions: [{ kind: "new_high", period: "D", m: 1, field: "traded_value", n: 60 }] });
+  const traded = draftOf({ id: "s", name: "신고거래대금", markets: [], exclude: [], conditions: [{ kind: "new_high", period: "D", barRange: { start: 0, end: 0 }, field: "traded_value", n: 60 }] });
   const markup = markupOf(traded);
   expect(markup).toMatch(/aria-label="조건 1 종류"[^>]*data-value="traded_value_high"/);
-  expect(labelsIn(markup).filter((l) => l.startsWith("조건 1 "))).toEqual(["조건 1 종류", "조건 1 봉 주기", "조건 1 신고거래대금 기간", "조건 1 최근 봉 수", "조건 1 위로 옮기기", "조건 1 아래로 옮기기", "조건 1 빼기"]);
+  expect(labelsIn(markup).filter((l) => l.startsWith("조건 1 "))).toEqual(["조건 1 종류", "조건 1 봉 주기", "조건 1 신고거래대금 기간", "조건 1 봉 범위 시작", "조건 1 봉 범위 끝", "조건 1 위로 옮기기", "조건 1 아래로 옮기기", "조건 1 빼기"]);
   expect(inputOf(markup, "조건 1 신고거래대금 기간")).toContain('value="60"');
   expect(markup).toContain("일 신고거래대금");
-  expect(markup).toContain("당일 거래대금이 60일 신고거래대금이다");
+  expect(markup).toContain("일봉 0봉 전 거래대금이 60일 신고거래대금이다");
 });

@@ -81,8 +81,8 @@ type BarCondition = Exclude<Condition, { kind: "market_cap" }>;
 const isBarCondition = (c: Condition): c is BarCondition => c.kind !== "market_cap";
 
 const matchChance = (c: Condition) => {
-  if (c.kind === "new_high" || c.kind === "new_low") return Math.min(0.9, 0.3 + (4 * c.m) / c.n);
-  return isBarCondition(c) ? Math.min(0.9, 0.3 + 0.05 * c.m) : 0.5;
+  if (c.kind === "new_high" || c.kind === "new_low") return Math.min(0.9, 0.3 + (4 * (c.barRange.end - c.barRange.start + 1)) / c.n);
+  return isBarCondition(c) ? Math.min(0.9, 0.3 + 0.05 * (c.barRange.end - c.barRange.start + 1)) : 0.5;
 };
 
 function resultOf(screen: Screen, asOf: KstDate, historyDone: number): ScreenerResult {
@@ -90,7 +90,7 @@ function resultOf(screen: Screen, asOf: KstDate, historyDone: number): ScreenerR
   const universe = STOCKS.filter((s) => !excludedKinds.has(s.kind) && (screen.markets.length === 0 || screen.markets.includes(s.market)));
   const bars = screen.conditions.filter(isBarCondition);
   const records = bars.flatMap((c) => (c.kind === "new_high" || c.kind === "new_low" ? [c] : []));
-  const neededDays = Math.max(0, ...records.map((c) => (c.n + c.m - 1) * DAYS_PER_BAR[c.period]));
+  const neededDays = Math.max(0, ...records.map((c) => (c.n + c.barRange.end) * DAYS_PER_BAR[c.period]));
   const excluded = { listedTooShort: 0, historyShort: 0, unconfirmed: 0 };
   const rows: ScreenerRow[] = [];
   for (const s of universe) {
@@ -103,7 +103,7 @@ function resultOf(screen: Screen, asOf: KstDate, historyDone: number): ScreenerR
       continue;
     }
     const random = mulberry32(seedOf(`${s.code}:${asOf}:${JSON.stringify(screen.conditions)}`));
-    const hits = screen.conditions.map((c) => (random() < matchChance(c) ? Math.floor(random() * (isBarCondition(c) ? c.m : 1)) : null));
+    const hits = screen.conditions.map((c) => (random() < matchChance(c) ? (isBarCondition(c) ? c.barRange.start + Math.floor(random() * (c.barRange.end - c.barRange.start + 1)) : 0) : null));
     if (hits.includes(null)) continue;
     const first = bars[0];
     const matchedDate = first ? barStart(first.period, asOf, hits[screen.conditions.indexOf(first)] ?? 0) : asOf;

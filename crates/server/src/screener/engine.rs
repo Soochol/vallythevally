@@ -45,22 +45,22 @@ enum Rule {
 }
 
 fn rule_of(condition: &Condition) -> Result<Rule, &'static str> {
-    let line = |period, m, kind| Ok(Rule::Bars(Line { period, m, kind }));
+    let line = |period, bar_range, kind| Ok(Rule::Bars(Line { period, bar_range, kind }));
     match *condition {
-        Condition::NewHigh { period, m, field, n } => line(period, m, Kind::NewExtreme { extreme: Extreme::High, field, n }),
-        Condition::NewLow { period, m, field, n } => line(period, m, Kind::NewExtreme { extreme: Extreme::Low, field, n }),
-        Condition::ValueRange { period, m, field, min, max } => line(period, m, Kind::ValueRange { field, min: bound(min)?, max: bound(max)? }),
-        Condition::Change { period, m, back, min_pct, max_pct } => line(period, m, Kind::Change { back, min_pct: bound(min_pct)?, max_pct: bound(max_pct)? }),
-        Condition::NearExtreme { period, m, extreme, n, within_pct } => line(period, m, Kind::NearExtreme { extreme, n, within_pct: decimal(within_pct)? }),
-        Condition::Surge { period, m, field, n, times } => line(period, m, Kind::Surge { field: surged(field), n, times: decimal(times)? }),
-        Condition::MaPosition { period, m, field, method, length, side } => line(period, m, Kind::Indicator(Indicator::ma_position(field, method, length, side)?)),
-        Condition::MaAlignment { period, m, method, ref lengths, order } => line(period, m, Kind::Indicator(Indicator::ma_alignment(method, lengths, order)?)),
-        Condition::MaCross { period, m, method, fast, slow, direction } => line(period, m, Kind::Indicator(Indicator::ma_cross(method, fast, slow, direction)?)),
-        Condition::Rsi { period, m, length, test } => line(period, m, Kind::Indicator(Indicator::rsi(length, test)?)),
-        Condition::Macd { period, m, fast, slow, signal, test } => line(period, m, Kind::Indicator(Indicator::macd(fast, slow, signal, test)?)),
-        Condition::Stochastic { period, m, k, d, smooth, test } => line(period, m, Kind::Indicator(Indicator::stochastic(k, d, smooth, test)?)),
-        Condition::Bollinger { period, m, length, k, test } => line(period, m, Kind::Indicator(Indicator::bollinger(length, k, test)?)),
-        Condition::Ichimoku { period, m, conversion, base, span_b, displacement, test } => line(period, m, Kind::Indicator(Indicator::ichimoku(conversion, base, span_b, displacement, test)?)),
+        Condition::NewHigh { period, bar_range, field, n } => line(period, bar_range, Kind::NewExtreme { extreme: Extreme::High, field, n }),
+        Condition::NewLow { period, bar_range, field, n } => line(period, bar_range, Kind::NewExtreme { extreme: Extreme::Low, field, n }),
+        Condition::ValueRange { period, bar_range, field, min, max } => line(period, bar_range, Kind::ValueRange { field, min: bound(min)?, max: bound(max)? }),
+        Condition::Change { period, bar_range, back, min_pct, max_pct } => line(period, bar_range, Kind::Change { back, min_pct: bound(min_pct)?, max_pct: bound(max_pct)? }),
+        Condition::NearExtreme { period, bar_range, extreme, n, within_pct } => line(period, bar_range, Kind::NearExtreme { extreme, n, within_pct: decimal(within_pct)? }),
+        Condition::Surge { period, bar_range, field, n, times } => line(period, bar_range, Kind::Surge { field: surged(field), n, times: decimal(times)? }),
+        Condition::MaPosition { period, bar_range, field, method, length, side } => line(period, bar_range, Kind::Indicator(Indicator::ma_position(field, method, length, side)?)),
+        Condition::MaAlignment { period, bar_range, method, ref lengths, order } => line(period, bar_range, Kind::Indicator(Indicator::ma_alignment(method, lengths, order)?)),
+        Condition::MaCross { period, bar_range, method, fast, slow, direction } => line(period, bar_range, Kind::Indicator(Indicator::ma_cross(method, fast, slow, direction)?)),
+        Condition::Rsi { period, bar_range, length, test } => line(period, bar_range, Kind::Indicator(Indicator::rsi(length, test)?)),
+        Condition::Macd { period, bar_range, fast, slow, signal, test } => line(period, bar_range, Kind::Indicator(Indicator::macd(fast, slow, signal, test)?)),
+        Condition::Stochastic { period, bar_range, k, d, smooth, test } => line(period, bar_range, Kind::Indicator(Indicator::stochastic(k, d, smooth, test)?)),
+        Condition::Bollinger { period, bar_range, length, k, test } => line(period, bar_range, Kind::Indicator(Indicator::bollinger(length, k, test)?)),
+        Condition::Ichimoku { period, bar_range, conversion, base, span_b, displacement, test } => line(period, bar_range, Kind::Indicator(Indicator::ichimoku(conversion, base, span_b, displacement, test)?)),
         Condition::MarketCap { min, max } => Ok(Rule::MarketCap(MarketCapRange { min: bound(min)?, max: bound(max)? })),
     }
 }
@@ -166,32 +166,28 @@ struct Stock {
     first_stored_day: Option<KstDate>,
 }
 
+#[derive(Clone, Copy)]
 enum Standing {
     ListedTooShort,
     HistoryShort,
     Judged,
 }
 
-fn standing(lines: &[Line], stock: &Stock, calendars: &Calendars) -> Standing {
-    if lines.is_empty() {
-        return if stock.first_stored_day.is_some() { Standing::Judged } else { Standing::ListedTooShort };
+fn standing(line: &Line, stock: &Stock, cells: &Cells, series: &Series) -> Standing {
+    let start = cells.start_of(stock);
+    if start.is_some_and(|s| cells.as_of() - s + 1 < line.needed_bars()) {
+        return Standing::ListedTooShort;
     }
-    let mut needed_days = Vec::with_capacity(lines.len());
-    for line in lines {
-        let cells = calendars.of(line.period);
-        let start = cells.start_of(stock);
-        if start.is_some_and(|s| cells.as_of() - s + 1 < line.needed_bars()) {
-            return Standing::ListedTooShort;
-        }
-        let needed = line.first_needed_cell(cells.as_of());
-        needed_days.push(cells.first_observation_day(start.map_or(needed, |s| needed.max(s))));
+    let stored_from_listing = stock.first_stored_day.zip(stock.listed_on).is_some_and(|(stored, listed)| stored <= listed);
+    if stock.complete || stored_from_listing {
+        return if (series.len() as i64) < line.needed_bars() { Standing::ListedTooShort } else { Standing::Judged };
     }
-    let earliest_needed = needed_days.into_iter().collect::<Option<Vec<_>>>().and_then(|days| days.into_iter().min());
-    let stored_from_needed = stock.first_stored_day.zip(earliest_needed).is_some_and(|(stored, needed)| stored <= needed);
-    if !stock.complete && !stored_from_needed {
+    let needed = u64::from(line.bar_range.end) + line.needed_bars() as u64;
+    let Some(first) = (series.len() as u64).checked_sub(needed).and_then(|i| series.cells_from(0).get(i as usize)) else {
         return Standing::HistoryShort;
-    }
-    Standing::Judged
+    };
+    let covered = stock.first_stored_day.zip(cells.first_observation_day(*first)).is_some_and(|(stored, needed)| stored <= needed);
+    if covered { Standing::Judged } else { Standing::HistoryShort }
 }
 
 struct DailyClose {
@@ -225,14 +221,17 @@ impl<'a> Snapshot<'a> {
                 excluded.unconfirmed += 1;
                 continue;
             }
-            match standing(&screen.lines, stock, &calendars) {
-                Standing::ListedTooShort => excluded.listed_too_short += 1,
-                Standing::HistoryShort => excluded.history_short += 1,
-                Standing::Judged => judged.push(stock),
-            }
+            judged.push(stock);
         }
         fill_screen_tables(tx, &calendars, &judged)?;
-        let hits = matched(tx, &calendars, &screen.lines, &judged, as_of)?;
+        let Matches { hits, standings } = matched(tx, &calendars, &screen.lines, &judged, as_of)?;
+        for standing in standings {
+            match standing {
+                Standing::ListedTooShort => excluded.listed_too_short += 1,
+                Standing::HistoryShort => excluded.history_short += 1,
+                Standing::Judged => (),
+            }
+        }
         let mut closes = daily_closes(tx, hits.iter().map(|(idx, _)| *idx))?;
         let mut rows: Vec<ScreenerRow> = hits
             .into_iter()
@@ -259,7 +258,16 @@ impl<'a> Snapshot<'a> {
     }
 }
 
-fn matched(tx: &Transaction, calendars: &Calendars, lines: &[Line], judged: &[&Stock], as_of: KstDate) -> Result<Vec<(usize, KstDate)>, StoreError> {
+struct Matches {
+    hits: Vec<(usize, KstDate)>,
+    standings: Vec<Standing>,
+}
+
+fn matched(tx: &Transaction, calendars: &Calendars, lines: &[Line], judged: &[&Stock], as_of: KstDate) -> Result<Matches, StoreError> {
+    let mut standings: Vec<Vec<Standing>> = judged.iter().map(|stock| lines.iter().map(|line| {
+        let cells = calendars.of(line.period);
+        if stock.complete || cells.start_of(stock).is_some_and(|start| cells.as_of() - start + 1 < line.needed_bars()) { Standing::ListedTooShort } else { Standing::HistoryShort }
+    }).collect()).collect();
     let mut last_candidates: Vec<Vec<Option<Cell>>> = vec![vec![None; lines.len()]; judged.len()];
     for period in PERIODS {
         let of_period: Vec<(usize, &Line)> = lines.iter().enumerate().filter(|(_, line)| line.period == period).collect();
@@ -270,11 +278,10 @@ fn matched(tx: &Transaction, calendars: &Calendars, lines: &[Line], judged: &[&S
         let mut columns: Vec<BarField> = of_period.iter().flat_map(|(_, line)| line.kind.columns()).collect();
         columns.sort_by_key(|field| *field as usize);
         columns.dedup();
-        let lower = of_period.iter().map(|(_, line)| line.first_loaded_cell(cells.as_of())).min().unwrap_or(0);
-        for_each_series(tx, &bar_query(period, &columns, lower), &columns, |idx, series| {
-            let start = cells.start_of(judged[idx]);
+        for_each_series(tx, &bar_query(period, &columns), &columns, |idx, series| {
             for &(k, line) in &of_period {
-                last_candidates[idx][k] = line.last_candidate(series, start, cells.as_of());
+                standings[idx][k] = standing(line, judged[idx], cells, series);
+                last_candidates[idx][k] = line.last_candidate(series);
             }
         })?;
     }
@@ -282,7 +289,19 @@ fn matched(tx: &Transaction, calendars: &Calendars, lines: &[Line], judged: &[&S
         (Some(line), Some(Some(cell))) => calendars.of(line.period).start_day(*cell),
         _ => as_of,
     };
-    Ok(last_candidates.iter().enumerate().filter(|(_, candidates)| candidates.iter().all(Option::is_some)).map(|(idx, candidates)| (idx, matched_on(candidates))).collect())
+    let standings: Vec<Standing> = standings.into_iter().enumerate().map(|(idx, lines)| {
+        if lines.iter().any(|s| matches!(s, Standing::ListedTooShort)) {
+            Standing::ListedTooShort
+        } else if lines.iter().any(|s| matches!(s, Standing::HistoryShort)) {
+            Standing::HistoryShort
+        } else if judged[idx].first_stored_day.is_none() {
+            Standing::ListedTooShort
+        } else {
+            Standing::Judged
+        }
+    }).collect();
+    let hits = last_candidates.iter().enumerate().filter(|(idx, candidates)| matches!(standings[*idx], Standing::Judged) && candidates.iter().all(Option::is_some)).map(|(idx, candidates)| (idx, matched_on(candidates))).collect();
+    Ok(Matches { hits, standings })
 }
 
 fn column(field: BarField) -> &'static str {
@@ -315,9 +334,9 @@ fn aggregate(field: BarField) -> String {
     }
 }
 
-fn bar_query(period: ScreenPeriod, columns: &[BarField], lower: Cell) -> String {
+fn bar_query(period: ScreenPeriod, columns: &[BarField]) -> String {
     let cell = format!("c.{}", cell_column(period));
-    let from = format!("FROM daily AS d JOIN screen_cells AS c ON c.day = d.day JOIN screen_stocks AS s ON s.code = d.code WHERE d.volume > 0 AND {cell} >= {lower}");
+    let from = "FROM daily AS d JOIN screen_cells AS c ON c.day = d.day JOIN screen_stocks AS s ON s.code = d.code WHERE d.volume > 0";
     match period {
         ScreenPeriod::Day => {
             let values: Vec<String> = columns.iter().map(|&field| format!("d.{}", column(field))).collect();

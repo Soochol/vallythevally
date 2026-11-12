@@ -166,7 +166,7 @@ ADR의 약 3,960종목 규모를 예로 들면 현재 100개 묶음 정책으로
 
 ## 구현 범위와 검증
 
-확정 규칙과 완료 기준은 [spec #216](https://github.com/Soochol/vallythevally/issues/216)에 옮겼다. 작업은 [당일 요약 수집 #217](https://github.com/Soochol/vallythevally/issues/217), [봉 범위·자동 이전·실제 봉 판정 #218](https://github.com/Soochol/vallythevally/issues/218), [실행 결합 #219](https://github.com/Soochol/vallythevally/issues/219), [결과 화면·통합 E2E #220](https://github.com/Soochol/vallythevally/issues/220)으로 나눴다. #218은 기존 문장형 편집 #207 뒤에 진행하고, #219는 #217·#218 뒤, #220은 #219 뒤에 진행하도록 native blocked-by로 연결했다. 키움 HTS 조건검색으로 계산기를 바꾸는 대신 기존 조건 계산을 재사용한다.
+확정 규칙과 완료 기준은 [spec #216](https://github.com/Soochol/vallythevally/issues/216)에 옮겼다. 작업은 [당일 요약 수집 #217](https://github.com/Soochol/vallythevally/issues/217), [봉 범위·자동 이전·실제 봉 판정 #218](https://github.com/Soochol/vallythevally/issues/218), [실행 결합 #219](https://github.com/Soochol/vallythevally/issues/219), [결과 화면·통합 E2E #220](https://github.com/Soochol/vallythevally/issues/220)으로 나눴다. #218은 #207을 기다리지 않고 현재 편집기에 봉 범위를 최소 변경으로 반영한다. 이후 #207은 새 계약과 검증을 재사용한다. #219는 #217·#218 뒤, #220은 #219 뒤에 진행하도록 native blocked-by로 연결했다. 키움 HTS 조건검색으로 계산기를 바꾸는 대신 기존 조건 계산을 재사용한다.
 
 실제 키움 API를 부르지 않고 fake-kiwoom으로 다음 동작을 확인한다.
 

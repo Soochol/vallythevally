@@ -186,12 +186,12 @@ impl Indicator {
         i64::try_from(warmup + self.bars_read_before()).unwrap_or(i64::MAX)
     }
 
-    pub(super) fn last_candidate(&self, series: &Series, recent: usize) -> Option<usize> {
+    pub(super) fn last_candidate(&self, series: &Series, recent: usize, end: usize) -> Option<usize> {
         if recent >= series.len() {
             return None;
         }
         let first_read = recent.saturating_sub(self.bars_checked_before());
-        let computed = self.specs.iter().map(|spec| Computed::of(spec, series, first_read)).collect::<Option<Vec<_>>>()?;
+        let computed = self.specs.iter().map(|spec| Computed::of(spec, series, first_read, end)).collect::<Option<Vec<_>>>()?;
         let at = |operand: Operand, i: usize| match operand {
             Operand::Price(field) => series.natural_at(price_field(field), i),
             Operand::Line(k, id) => computed[k].value(id, i),
@@ -199,7 +199,7 @@ impl Indicator {
         };
         let every_line_computed = |i: usize| computed.iter().all(|c| c.every_line_computed_at(i));
         let bar_before_computed = |i: usize| !self.test.reads_the_bar_before() || i.checked_sub(1).is_some_and(every_line_computed);
-        (recent..series.len()).rev().find(|&i| every_line_computed(i) && bar_before_computed(i) && self.test.holds(i, at))
+        (recent..end).rev().find(|&i| every_line_computed(i) && bar_before_computed(i) && self.test.holds(i, at))
     }
 }
 
@@ -209,15 +209,15 @@ struct Computed {
 }
 
 impl Computed {
-    fn of(spec: &ValidSpec, series: &Series, first_read: usize) -> Option<Computed> {
+    fn of(spec: &ValidSpec, series: &Series, first_read: usize, end: usize) -> Option<Computed> {
         let from = match spec.memory() {
             Memory::LastBars(bars) => first_read.saturating_sub(bars - 1),
             Memory::EveryBar => 0,
         };
-        let read: Vec<(Input, Vec<f64>)> = spec.inputs().iter().map(|&input| (input, series.natural_from(input_field(input), from))).collect();
+        let read: Vec<(Input, Vec<f64>)> = spec.inputs().iter().map(|&input| (input, series.natural_range(input_field(input), from, end))).collect();
         let unread_filler = &read.first()?.1;
         let slot = |input: Input| read.iter().find(|(read_input, _)| *read_input == input).map_or(unread_filler, |(_, values)| values);
-        match Columns::new(series.cells_from(from), slot(Input::Open), slot(Input::High), slot(Input::Low), slot(Input::Close), slot(Input::Volume)) {
+        match Columns::new(&series.cells_from(from)[..end - from], slot(Input::Open), slot(Input::High), slot(Input::Low), slot(Input::Close), slot(Input::Volume)) {
             Ok(bars) => Some(Computed { from, output: indicators::compute(spec, &bars) }),
             Err(e) => {
                 tracing::warn!(error = %e, "봉 열을 지표에 넣지 못해 이 종목의 지표 조건은 맞지 않는 것으로 봅니다");
