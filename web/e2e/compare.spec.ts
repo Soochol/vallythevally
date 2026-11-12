@@ -41,7 +41,7 @@ const tradeValues = (price: number, time: string) => ({
 });
 
 async function openCompareTab(page: Page): Promise<Locator> {
-  await page.getByRole("toolbar", { name: "차트 도구 막대" }).getByRole("button", { name: "지표" }).click();
+  await page.getByRole("toolbar", { name: "차트 도구 막대" }).getByRole("button", { name: "지표", exact: true }).click();
   const dialog = page.getByRole("dialog");
   await dialog.getByRole("tab", { name: "비교 종목" }).click();
   return dialog;
