@@ -2,7 +2,7 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type { Screen } from "../api/generated/Screen";
 import type { ScreenerResult } from "../api/generated/ScreenerResult";
 import type { ScreenerStatus } from "../api/generated/ScreenerStatus";
-import { rerunReason, useScreenerStore } from "./screener";
+import { rerunReason, runOf, shownResult, useScreenerStore } from "./screener";
 
 const screen: Screen = { id: "s1", name: "고가 1,000일 신고가", markets: [], exclude: [], conditions: [{ kind: "new_high", period: "D", barRange: { start: 0, end: 19 }, field: "high", n: 1000 }] };
 const result: ScreenerResult = { asOf: "2026-11-10", collectionStartedAt: 1, collectionCompletedAt: 2, missingSummary: 0, universe: 28, excluded: { listedTooShort: 0, historyShort: 28, unconfirmed: 0 }, rows: [] };
@@ -66,4 +66,95 @@ test("실행 뒤 처음 받은 상태는 바뀐 것으로 치지 않고, 다시 
   expect(reasonAt(store(13, backfilling()))).toEqual({ kind: "store_changed" });
   await useScreenerStore.getState().run(screen);
   expect(reasonAt(store(13, backfilling()))).toBeNull();
+});
+
+function deferredResponse() {
+  let resolve!: (response: Response) => void;
+  const promise = new Promise<Response>((done) => { resolve = done; });
+  return { promise, resolve };
+}
+
+const responseOf = (value: ScreenerResult) => new Response(JSON.stringify(value), { status: 200 });
+const failedResponse = () => new Response(JSON.stringify({ error: { code: "screener_not_ready", reason: "data_changed", message: "자료 변경" } }), { status: 409 });
+const currentRun = () => useScreenerStore.getState().runs[screen.id] ?? null;
+
+test("실행 중과 반복 실패 뒤에도 이전 결과와 원래 수집 시각 및 저장소 변경 안내를 보존한다", async () => {
+  see(store(28));
+  await useScreenerStore.getState().run(screen);
+  const gate = deferredResponse();
+  vi.stubGlobal("fetch", vi.fn(() => gate.promise));
+  const pending = useScreenerStore.getState().run(screen);
+  expect(shownResult(currentRun())).toEqual(result);
+  see(store(28, recentFull));
+  see(store(28));
+  gate.resolve(failedResponse());
+  await pending;
+  expect(currentRun()?.kind).toBe("failed");
+  expect(shownResult(currentRun())).toEqual(result);
+  expect(reasonAt(store(28))).toEqual({ kind: "store_changed" });
+  await useScreenerStore.getState().run(screen);
+  expect(shownResult(currentRun())).toEqual(result);
+});
+
+test("처음 실패하면 이전 결과를 만들지 않는다", async () => {
+  vi.stubGlobal("fetch", vi.fn(async () => failedResponse()));
+  await useScreenerStore.getState().run(screen);
+  expect(currentRun()?.kind).toBe("failed");
+  expect(shownResult(currentRun())).toBeNull();
+});
+
+for (const olderFails of [false, true]) {
+  for (const newerFails of [false, true]) {
+    test(`같은 id의 범위 변경 실행은 늦은 ${olderFails ? "실패" : "성공"}이 최신 ${newerFails ? "실패" : "성공"}을 덮지 않는다`, async () => {
+      const first = deferredResponse();
+      const second = deferredResponse();
+      vi.stubGlobal("fetch", vi.fn().mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise));
+      const changed: Screen = { ...screen, conditions: [{ kind: "new_high", period: "W", field: "high", n: 60, barRange: { start: 1, end: 1 } }] };
+      const older = useScreenerStore.getState().run(screen);
+      const newer = useScreenerStore.getState().run(changed);
+      useScreenerStore.getState().choose("other");
+      const fresh = { ...result, collectionStartedAt: 100, collectionCompletedAt: 101 };
+      second.resolve(newerFails ? failedResponse() : responseOf(fresh));
+      await newer;
+      const expected = currentRun();
+      first.resolve(olderFails ? failedResponse() : responseOf(result));
+      await older;
+      expect(currentRun()).toEqual(expected);
+      expect(runOf(useScreenerStore.getState().runs, screen)).toBeNull();
+      expect(shownResult(runOf(useScreenerStore.getState().runs, changed))).toEqual(newerFails ? null : fresh);
+    });
+  }
+}
+
+for (const olderFails of [false, true]) {
+  test(`이전 ${olderFails ? "실패" : "성공"}가 먼저 끝나도 더 최신 요청이 진행 중인 상태와 이전 결과를 유지한다`, async () => {
+    await useScreenerStore.getState().run(screen);
+    const first = deferredResponse();
+    const second = deferredResponse();
+    vi.stubGlobal("fetch", vi.fn().mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise));
+    const older = useScreenerStore.getState().run(screen);
+    const newer = useScreenerStore.getState().run(screen);
+    first.resolve(olderFails ? failedResponse() : responseOf({ ...result, collectionStartedAt: 50 }));
+    await older;
+    expect(currentRun()?.kind).toBe("running");
+    expect(shownResult(currentRun())).toEqual(result);
+    second.resolve(failedResponse());
+    await newer;
+    expect(currentRun()?.kind).toBe("failed");
+    expect(shownResult(currentRun())).toEqual(result);
+  });
+}
+
+test("실행식은 호출 경계에서 복사되어 호출자의 중첩 수정과 다른 화면 실행의 영향을 받지 않는다", async () => {
+  const gate = deferredResponse();
+  vi.stubGlobal("fetch", vi.fn().mockReturnValueOnce(gate.promise).mockResolvedValue(responseOf(result)));
+  const mutable = structuredClone(screen);
+  const pending = useScreenerStore.getState().run(mutable);
+  mutable.conditions.length = 0;
+  expect(runOf(useScreenerStore.getState().runs, mutable)).toBeNull();
+  await useScreenerStore.getState().run({ ...screen, id: "other" });
+  gate.resolve(responseOf(result));
+  await pending;
+  expect(runOf(useScreenerStore.getState().runs, screen)?.kind).toBe("done");
+  expect(useScreenerStore.getState().runs.other?.kind).toBe("done");
 });

@@ -85,7 +85,7 @@ test("빈 저장소를 채우고 만든 조건식으로 찾은 종목을 칸의 
     await expect(panel(page).getByRole("button", { name: `조건식: ${SCREEN_NAME}` })).toBeVisible();
     await expect(panel(page).getByRole("list", { name: "조건" })).toHaveText("일봉 0~19봉 전 안에 고가가 60일 신고가인 봉이 있다");
     await expect(panel(page).getByText("ETF", { exact: true })).toBeVisible();
-    await expect(panel(page).getByText("11-06(금) 장 마감 자료로 찾습니다")).toBeVisible();
+    await expect(panel(page).getByText("실행할 때 KRX 최신 자료를 수집합니다")).toBeVisible();
   });
 
   await test.step("실행", async () => {

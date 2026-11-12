@@ -43,3 +43,31 @@ async fn scripted_requests_have_independent_failures_and_delays_then_resume_norm
     assert_eq!(quote(&fake).await.1["atn_stk_infr"], json!([]));
     assert_eq!(quote(&fake).await.1["atn_stk_infr"], json!([row("000001")]));
 }
+
+#[tokio::test]
+async fn http_scripts_and_expanded_market_drive_multiple_summary_batches() {
+    let fake = FakeKiwoom::start().await;
+    let client = reqwest::Client::new();
+    let market = client.post(format!("{}/_fake/krx-market", fake.base_url()))
+        .header("content-type", "application/json").body(json!({"asOf": "20261106", "extraStocks": 91}).to_string()).send().await.unwrap();
+    assert_eq!(market.status(), 204);
+    let market = fake.seen.krx_market.lock().unwrap().clone().unwrap();
+    assert_eq!(market.stocks.len(), 101);
+    let codes = market.stocks.iter().map(|s| s.code.as_str()).collect::<Vec<_>>().join("|");
+    let request = || client.post(format!("{}/api/dostk/stkinfo", fake.base_url()))
+        .header("api-id", "ka10095").header("content-type", "application/json").body(json!({"stk_cd": codes}).to_string());
+    let normal: Value = serde_json::from_str(&request().send().await.unwrap().text().await.unwrap()).unwrap();
+    assert_eq!(normal["atn_stk_infr"].as_array().unwrap().len(), 101);
+    let script = client.post(format!("{}/_fake/script", fake.base_url())).header("content-type", "application/json").body(json!({
+        "apiId": "ka10095", "replies": [{"status": 200, "body": {"atn_stk_infr": [row("000001")]}}, {"status": 503, "body": {"return_code": 2}}],
+    }).to_string()).send().await.unwrap();
+    assert_eq!(script.status(), 204);
+    let first: Value = serde_json::from_str(&request().send().await.unwrap().text().await.unwrap()).unwrap();
+    assert_eq!(first["atn_stk_infr"], json!([row("000001")]));
+    assert_eq!(request().send().await.unwrap().status(), 503);
+    let resumed: Value = serde_json::from_str(&request().send().await.unwrap().text().await.unwrap()).unwrap();
+    assert_eq!(resumed["atn_stk_infr"], normal["atn_stk_infr"]);
+    let invalid = client.post(format!("{}/_fake/script", fake.base_url()))
+        .header("content-type", "application/json").body(json!({"apiId": "ka10095", "replies": [{"status": 0, "body": {}}]}).to_string()).send().await.unwrap();
+    assert_eq!(invalid.status(), 400);
+}
