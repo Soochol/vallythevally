@@ -29,6 +29,7 @@ import { useActiveWatchlist, useWatchlistStore } from "../../stores/watchlist";
 import { ArrowIcon, ChartIcon, ChevronIcon, CloseIcon, CopyIcon, MoreIcon, PlusIcon } from "../icons";
 import { Menu, type MenuItem } from "../menu/Menu";
 import { columnTemplate, type WatchVariant } from "./columns";
+import { removeWithUndo } from "./removalUndo";
 
 const DIR_CLASS = { up: "text-up", down: "text-down", flat: "text-text-2" } as const;
 const ROW_GRID = "grid gap-1";
@@ -237,7 +238,7 @@ function WatchList({ variant, editing }: { variant: WatchVariant; editing: boole
         ))}
       </div>
       {symbols.length === 0 && <EmptyState title={`${list.name}에 종목이 없습니다. +로 종목을 넣으세요`} action="종목 넣기" onAction={() => useSelectionStore.getState().openSearch("watch")} />}
-      <ul ref={ul} aria-label={list.name} className="min-h-0 flex-1 overflow-auto" onDragLeave={(e) => e.currentTarget === e.target && setDragOver(null)}>
+      <ul ref={ul} aria-label={list.name} className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden" onDragLeave={(e) => e.currentTarget === e.target && setDragOver(null)}>
         {symbols.map((code, i) => (
           <WatchRow
             key={code}
@@ -315,7 +316,7 @@ function QuoteCell({ column, quote, limited, isIndex, variant }: { column: Watch
     );
   if (!quote) return <span className="text-right text-text-3">—</span>;
   return (
-    <span className={`whitespace-nowrap text-right ${column === "changeRate" && variant === "desktop" ? `justify-self-end rounded-s px-1 py-0.5 text-s font-[550] ${BADGE_CLASS[direction(quote.change)]}` : SIGNED.has(column) ? `text-s font-[550] ${DIR_CLASS[direction(quote.change)]}` : ""}`}>
+    <span className={`whitespace-nowrap text-right ${column === "changeRate" && variant === "desktop" ? `rounded-s px-1 py-0.5 text-s font-[550] ${BADGE_CLASS[direction(quote.change)]}` : SIGNED.has(column) ? `text-s font-[550] ${DIR_CLASS[direction(quote.change)]}` : ""}`}>
       {cellText(column, quote, isIndex)}
     </span>
   );
@@ -348,7 +349,7 @@ function WatchRow({ list, code, index, last, columns, template, variant, editing
     onMoved(code);
   };
   const remove = () => {
-    const undo = useWatchlistStore.getState().removeWithUndo(list.id, code);
+    const undo = removeWithUndo(list.id, code);
     if (undo) useSelectionStore.getState().showToast(`${list.name}에서 뺐습니다: ${name}`, undo);
   };
   const top = () => { useWatchlistStore.getState().move(list.id, code, 0); onMoved(code); };
@@ -421,12 +422,12 @@ function WatchRow({ list, code, index, last, columns, template, variant, editing
           move(e.key === "ArrowUp" ? -1 : 1);
         }}
         style={template}
-        className={`${ROW_GRID} h-[34px] w-full items-center px-2.5 text-left hover:bg-surface max-md:h-auto max-md:min-h-[56px] max-md:px-4 max-md:py-2 ${
+        className={`${ROW_GRID} h-[34px] w-full items-center pl-2.5 pr-3 text-left hover:bg-surface max-md:h-auto max-md:min-h-[56px] max-md:px-4 max-md:py-2 ${
           editing ? "max-md:pr-[176px]" : ""
         }`}
       >
-        <span className={`${variant === "desktop" ? "flex items-baseline gap-1" : "min-w-0"} ${unknown ? "opacity-50" : ""}`}>
-          <b className={variant === "desktop" ? "shrink-0 whitespace-nowrap font-[550]" : "block truncate font-[550]"}>{name}</b>
+        <span className={`min-w-0 ${variant === "desktop" ? "flex items-baseline gap-1" : ""} ${unknown ? "opacity-50" : ""}`}>
+          <b title={name} className={variant === "desktop" ? "min-w-0 shrink-0 max-w-full truncate font-[550]" : "block truncate font-[550]"}>{name}</b>
           <small className={`${variant === "desktop" ? "w-0 min-w-0 grow truncate" : ""} text-xs text-text-3`}>{symbolSub(code, info)}</small>
         </span>
         {unknown ? (

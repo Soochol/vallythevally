@@ -95,3 +95,45 @@ test("다른 목록 편집과 서버 재적재 뒤 오래된 빼기 되돌리기
   expect(useWatchlistStore.getState().lists[0]!.symbols).toEqual(["035420"]);
   unsubscribe();
 });
+
+test("바깥에서 복제한 목록을 유지하며 해당 종목만 원래 위치에 다시 넣는다", () => {
+  const s = useWatchlistStore.getState();
+  s.addAll(FIRST_WATCHLIST_ID, ["000660", "005930", "035420"]);
+  const undo = s.removeWithUndo(FIRST_WATCHLIST_ID, "005930")!;
+  s.load([
+    { id: FIRST_WATCHLIST_ID, name: "기본", symbols: ["000660", "035420"] },
+    { id: "copy", name: "기본 복사", symbols: ["000660", "035420"] },
+  ]);
+  expect(undo.available()).toBe(true);
+  undo.run();
+  expect(useWatchlistStore.getState().lists).toEqual([
+    { id: FIRST_WATCHLIST_ID, name: "기본", symbols: ["000660", "005930", "035420"] },
+    { id: "copy", name: "기본 복사", symbols: ["000660", "035420"] },
+  ]);
+});
+
+test.each([
+  { name: "목록 삭제", lists: [{ id: "other", name: "다른 목록", symbols: [] }] },
+  { name: "이름 변경", lists: [{ id: FIRST_WATCHLIST_ID, name: "새 이름", symbols: ["000660", "035420"] }] },
+  { name: "다른 종목 변경", lists: [{ id: FIRST_WATCHLIST_ID, name: "기본", symbols: ["035420", "000660"] }] },
+  { name: "종목 재추가", lists: [{ id: FIRST_WATCHLIST_ID, name: "기본", symbols: ["000660", "005930", "035420"] }] },
+])("바깥에서 $name 뒤 되돌리기는 비활성이며 눌러도 바뀌지 않는다", ({ lists }) => {
+  const s = useWatchlistStore.getState();
+  s.addAll(FIRST_WATCHLIST_ID, ["000660", "005930", "035420"]);
+  const undo = s.removeWithUndo(FIRST_WATCHLIST_ID, "005930")!;
+  s.load(lists);
+  expect(undo.available()).toBe(false);
+  const before = useWatchlistStore.getState();
+  undo.run();
+  expect(useWatchlistStore.getState()).toBe(before);
+});
+
+test("마지막 종목을 뺀 작업은 목록 끝에 한 번만 다시 넣는다", () => {
+  const s = useWatchlistStore.getState();
+  s.addAll(FIRST_WATCHLIST_ID, ["000660", "005930"]);
+  const undo = s.removeWithUndo(FIRST_WATCHLIST_ID, "005930")!;
+  s.load([{ id: FIRST_WATCHLIST_ID, name: "기본", symbols: ["000660"] }]);
+  undo.run();
+  undo.run();
+  expect(useWatchlistStore.getState().lists[0]!.symbols).toEqual(["000660", "005930"]);
+});

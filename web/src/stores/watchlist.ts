@@ -49,7 +49,13 @@ export const useWatchlistStore = create<WatchlistState>()((set, get) => {
   return {
     lists: DEFAULT_WATCHLISTS,
     revision: 0,
-    load: (lists) => set({ lists }),
+    load: (lists) => set((s) => {
+      const next = lists.map((incoming) => {
+        const current = s.lists.find((l) => l.id === incoming.id);
+        return current && current.name === incoming.name && current.symbols.length === incoming.symbols.length && current.symbols.every((code, i) => code === incoming.symbols[i]) ? current : incoming;
+      });
+      return next.length === s.lists.length && next.every((l, i) => l === s.lists[i]) ? s : { lists: next };
+    }),
     create: (id, name) => edit((lists) => (lists.length >= MAX_WATCHLISTS ? lists : [...lists, { id, name, symbols: [] }])),
     duplicate: (source, id) => edit((lists) => {
       const original = lists.find((l) => l.id === source);
@@ -62,14 +68,25 @@ export const useWatchlistStore = create<WatchlistState>()((set, get) => {
     addAll: (list, codes) => editSymbols(list, (l) => addSymbols(l, codes)),
     remove: (list, code) => editSymbols(list, (l) => removeSymbol(l, code)),
     removeWithUndo: (list, code): ToastUndo | null => {
-      const before = get().lists;
-      get().remove(list, code);
-      const after = get().lists;
-      if (before === after) return null;
-      const available = () => get().lists === after;
+      const source = get().lists.find((l) => l.id === list);
+      const index = source?.symbols.indexOf(code) ?? -1;
+      if (!source || index < 0) return null;
+      const after = { ...source, symbols: source.symbols.filter((s) => s !== code) };
+      edit((lists) => lists.map((l) => l.id === list ? after : l));
+      const revision = get().revision;
+      let used = false;
+      const available = () => !used && get().revision === revision && get().lists.includes(after);
       return {
         available,
-        run: () => { if (available()) edit(() => before); },
+        run: () => {
+          if (!available()) return;
+          used = true;
+          editSymbols(list, (symbols) => {
+            const next = [...symbols];
+            next.splice(Math.min(index, next.length), 0, code);
+            return next;
+          });
+        },
         subscribe: (listener) => useWatchlistStore.subscribe(listener),
       };
     },
