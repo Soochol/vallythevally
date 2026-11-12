@@ -11,9 +11,9 @@ test("48색과 직접 고른 색·굵기 5를 지표에 적용하고 관리 탭�
   await page.goto("/?symbol=005930");
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
   await page.getByRole("toolbar", { name: "차트 도구 막대" }).getByRole("button", { name: "지표", exact: true }).click();
-  const dialog = page.getByRole("dialog", { name: "지표 추가", exact: true });
-  await expect(dialog.getByRole("tab", { name: /이 칸에 띄운 지표/ })).toBeVisible();
-  await expect(dialog.getByRole("button", { name: "거래량 설정", exact: true })).toHaveCount(0);
+  const dialog = page.getByRole("dialog", { name: "지표·비교 입력창", exact: true });
+  await expect(dialog.getByRole("listbox").getByText("이 칸에 띄운 지표", { exact: true })).toBeVisible();
+  await expect(dialog.getByRole("button", { name: "거래량 설정", exact: true })).toBeVisible();
   await dialog.getByRole("group", { name: "굵기", exact: true }).getByRole("button", { name: "5", exact: true }).click();
   await dialog.getByRole("button", { name: "선 색상 선택", exact: true }).click();
   const picker = page.getByRole("dialog", { name: "선 색상", exact: true });
@@ -24,8 +24,7 @@ test("48색과 직접 고른 색·굵기 5를 지표에 적용하고 관리 탭�
   await picker.getByRole("textbox", { name: "HEX", exact: true }).fill("#8B5CF6");
   await picker.getByRole("button", { name: "선택", exact: true }).click();
   await dialog.getByRole("button", { name: "이동평균 단순 20 추가", exact: true }).click();
-  await dialog.getByRole("tab", { name: /이 칸에 띄운 지표/ }).click();
-  await expect(page.getByRole("tabpanel", { name: /이 칸에 띄운 지표/ }).getByRole("button", { name: "이동평균 단순 20 설정", exact: true })).toBeVisible();
+  await expect(dialog.getByRole("button", { name: "이동평균 단순 20 설정", exact: true })).toBeVisible();
   await expect.poll(async () => {
     const saved = await (await fetch(`${app.url}/api/layouts/${DEFAULT_LAYOUT_ID}`)).json();
     return saved.cells[0].chartSettings.indicators.find((i: { spec: { kind: string } }) => i.spec.kind === "ma")?.style;
@@ -56,14 +55,13 @@ test("48색과 직접 고른 색·굵기 5를 지표에 적용하고 관리 탭�
   }, { base64: png.toString("base64"), chartHeight: chartBox?.height ?? 0 });
   expect(coloredPixels).toBeGreaterThan(100);
   await page.getByRole("toolbar", { name: "차트 도구 막대" }).getByRole("button", { name: "지표", exact: true }).click();
-  await page.getByRole("tab", { name: /이 칸에 띄운 지표/ }).click();
-  await page.getByRole("tabpanel", { name: /이 칸에 띄운 지표/ }).getByRole("button", { name: "이동평균 단순 20 설정", exact: true }).click();
-  await expect(page.getByRole("dialog", { name: "지표 편집", exact: true })).toContainText("#8B5CF6");
+  await dialog.getByRole("button", { name: "이동평균 단순 20 설정", exact: true }).click();
+  await expect(page.getByRole("dialog", { name: "지표·비교 입력창", exact: true })).toContainText("#8B5CF6");
   await expect(page.getByRole("group", { name: "굵기", exact: true }).getByRole("button", { name: "5", exact: true })).toHaveAttribute("aria-pressed", "true");
   await page.getByRole("button", { name: "선 색상 선택", exact: true }).click();
   await expect(page.getByRole("button", { name: "최근 색상 #8B5CF6", exact: true })).toBeVisible();
   await page.keyboard.press("Escape");
-  await expect(page.getByRole("dialog", { name: "지표 편집", exact: true })).toBeVisible();
+  await expect(page.getByRole("dialog", { name: "지표·비교 입력창", exact: true })).toBeVisible();
   await page.screenshot({ path: info.outputPath("indicator.png"), fullPage: true });
   expect(errors).toEqual([]);
 });

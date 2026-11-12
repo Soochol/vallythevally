@@ -8,11 +8,11 @@ test("한 줄 셸과 탭은 작은 창에서도 넘치지 않고 휴대폰 경�
   await page.goto("/?symbol=005930");
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
   await page.getByRole("button", { name: "비교", exact: true }).click();
-  await expect(page.getByRole("dialog", { name: "비교 종목", exact: true })).toBeVisible();
-  await page.getByRole("dialog").getByRole("button", { name: "닫기", exact: true }).first().click();
+  await expect(page.getByRole("dialog", { name: "지표·비교 입력창", exact: true })).toBeVisible();
+  await page.getByRole("dialog").getByRole("button", { name: "입력창 닫기", exact: true }).first().click();
   await page.getByRole("button", { name: "차트 설정", exact: true }).click();
-  await expect(page.getByRole("dialog", { name: "이 칸에 띄운 지표", exact: true })).toBeVisible();
-  await page.getByRole("dialog").getByRole("button", { name: "닫기", exact: true }).first().click();
+  await expect(page.getByRole("dialog", { name: "지표·비교 입력창", exact: true })).toBeVisible();
+  await page.getByRole("dialog").getByRole("button", { name: "입력창 닫기", exact: true }).first().click();
   await mkdir(path.resolve("../target/ux-screens"), { recursive: true });
   for (const size of [{ width: 1440, height: 900 }, { width: 1280, height: 720 }, { width: 1024, height: 768 }, { width: 1280, height: 600 }]) {
     await page.setViewportSize(size);
@@ -25,7 +25,7 @@ test("한 줄 셸과 탭은 작은 창에서도 넘치지 않고 휴대폰 경�
       await expect(cell(page)).toBeVisible();
       await page.getByRole("button", { name: "넓게 보기", exact: true }).click();
       await expect.poll(() => page.evaluate(() => [document.documentElement.scrollWidth - innerWidth, document.documentElement.scrollHeight - innerHeight])).toEqual([0, 0]);
-      await page.getByRole("button", { name: "넓게 보기", exact: true }).click();
+      await page.getByRole("button", { name: name === "스크리너" ? "오른쪽 탭으로" : "넓게 보기", exact: true }).click();
     }
     await tabs(page).getByRole("tab", { name: "관심종목", exact: true }).click();
     await page.screenshot({ path: path.resolve(`../target/ux-screens/shell-${size.width}x${size.height}.png`) });
@@ -46,7 +46,7 @@ test("오른쪽 탭·숨김·너비는 저장되고 새로고침 뒤 복원된�
   await expect.poll(async () => (await (await fetch(`${app.url}/api/ui-state`)).json())).toMatchObject({ rightPanel: "screener", rightPanelWidth: "wide" });
   await page.reload();
   await expect(tabs(page).getByRole("tab", { name: /^스크리너/ })).toHaveAttribute("aria-selected", "true");
-  await expect(page.getByRole("button", { name: "넓게 보기", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByRole("button", { name: "오른쪽 탭으로", exact: true })).toHaveAttribute("aria-pressed", "true");
   await expect.poll(() => page.getByRole("tabpanel").evaluate((el) => el.getBoundingClientRect().width)).toBe(width);
   await page.getByRole("button", { name: "탭 숨기기", exact: true }).click();
   await expect(tabs(page)).toBeHidden();

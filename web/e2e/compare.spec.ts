@@ -41,14 +41,13 @@ const tradeValues = (price: number, time: string) => ({
 });
 
 async function openCompareTab(page: Page): Promise<Locator> {
-  await page.getByRole("toolbar", { name: "차트 도구 막대" }).getByRole("button", { name: "지표", exact: true }).click();
+  await page.getByRole("toolbar", { name: "차트 도구 막대" }).getByRole("button", { name: "비교", exact: true }).click();
   const dialog = page.getByRole("dialog");
-  await dialog.getByRole("tab", { name: "비교 종목" }).click();
   return dialog;
 }
 
 async function addCompare(dialog: Locator, name: string) {
-  await dialog.getByRole("combobox", { name: "비교할 종목 찾기" }).fill(name);
+  await dialog.getByRole("combobox", { name: "지표·비교 찾기" }).fill(name);
   await dialog.getByRole("option", { name: new RegExp(name) }).first().click();
   await dialog.getByRole("button", { name: new RegExp(`^${name}.*추가$`) }).click();
 }
@@ -70,7 +69,7 @@ test("비교 종목 탭에서 3개까지 넣고 4번째는 막히며, 빼면 그
   await expect(chart).toHaveAttribute("data-price-scale", "percent");
   for (const code of ["006400", "000810", "IDX:001"]) await expect(row(page, code)).not.toHaveAttribute("data-last-t", "");
 
-  await dialog.getByRole("combobox", { name: "비교할 종목 찾기" }).fill("삼성물산");
+  await dialog.getByRole("combobox", { name: "지표·비교 찾기" }).fill("삼성물산");
   await dialog.getByRole("option", { name: /삼성물산/ }).first().click();
   await expect(dialog.getByRole("button", { name: /^삼성물산.*추가$/ })).toBeDisabled();
   await expect(dialog).toContainText("비교 종목은 3개까지입니다");

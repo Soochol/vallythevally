@@ -1,9 +1,10 @@
+import { fillNumber, expandEditor, savedEditor, addCondition, chooseKind } from "./sentence-editor";
 import type { Page } from "@playwright/test";
 import type { Screen } from "../src/api/generated/Screen";
 import type { ScreenerResult } from "../src/api/generated/ScreenerResult";
 import { type App, expect, test } from "./harness";
 import { selectOption } from "./select-option";
-import { editor, openScreener, panel, results, rows, runButton, savedTo, updateBand, waitForUpdateToFinish } from "./screener-page";
+import { editor, openResultDetails, openScreener, panel, results, rows, runButton, savedTo, updateBand, waitForUpdateToFinish } from "./screener-page";
 
 test.use({ krxMarket: "20261106", clockStart: "20261106203000" });
 
@@ -29,6 +30,7 @@ async function execute(page: Page): Promise<ScreenerResult> {
   const answer = await response;
   expect(answer.status()).toBe(200);
   await expect(results(page)).toHaveAttribute("aria-busy", "false");
+  await openResultDetails(page);
   return answer.json();
 }
 
@@ -48,14 +50,17 @@ async function intraday(app: App, page: Page, baseline: ScreenerResult, price: n
 }
 
 async function editRecent(page: Page, period: string, recent: number) {
-  await panel(page).getByRole("button", { name: "편집", exact: true }).click();
+  await expandEditor(page);
   const dialog = editor(page, "조건식 편집");
   await selectOption(dialog.getByRole("combobox", { name: "조건 1 봉 주기" }), period);
-  await dialog.getByRole("textbox", { name: "조건 1 최근 기간" }).fill(String(recent));
-  const saved = savedTo(page, "/api/screens");
-  await dialog.getByRole("button", { name: "저장", exact: true }).click();
-  await saved;
-  await expect(dialog).toBeHidden();
+  await fillNumber(dialog.getByRole("button", { name: "조건 1 최근 기간" }), String(recent));
+  const save = dialog.getByRole("button", { name: "저장", exact: true });
+  if (await save.isEnabled()) {
+    const saved = savedTo(page, "/api/screens");
+    await save.click();
+    await saved;
+  }
+  await savedEditor(dialog);
 }
 
 test("수동 실행만 값을 바꾸며 같은 봉 갱신과 새 봉 추가, D/W/M 범위 편집·저장·실행의 날짜와 가격을 구분한다", async ({ app, page }) => {
@@ -65,7 +70,7 @@ test("수동 실행만 값을 바꾸며 같은 봉 갱신과 새 봉 추가, D/W
   await intraday(app, page, baseline, old.close + 100);
   const first = await execute(page);
   expect(first.rows.find((r) => r.symbol === "110010")).toMatchObject({ close: old.close + 100, latestBarDate: "2026-11-09", matchedDate: "2026-11-09", provisional: true });
-  await expect(rows(page).filter({ hasText: "110010" })).toContainText("잠정");
+  await expect(rows(page).filter({ hasText: "110010" }).getByLabel("잠정", { exact: true })).toBeVisible();
   const before = await rows(page).filter({ hasText: "110010" }).textContent();
   await quotes(app, summaries(baseline, old.close + 200));
   await page.getByRole("button", { name: "넓게 보기", exact: true }).click();
@@ -85,14 +90,15 @@ test("수동 실행만 값을 바꾸며 같은 봉 갱신과 새 봉 추가, D/W
     }
   }
   await editRecent(page, "D", 2);
-  await panel(page).getByRole("button", { name: "편집", exact: true }).click();
+  await expandEditor(page);
   const dialog = editor(page, "조건식 편집");
-  await selectOption(dialog.getByRole("combobox", { name: "조건 1 종류" }), "value_range");
+  await chooseKind(dialog, 1, "value_range");
   await selectOption(dialog.getByRole("combobox", { name: "조건 1 값" }), "close");
-  await dialog.getByRole("textbox", { name: "조건 1 최소" }).fill(String(old.close));
-  await dialog.getByRole("textbox", { name: "조건 1 최대" }).fill(String(old.close));
-  await dialog.getByRole("button", { name: "조건 더하기" }).click();
-  await dialog.getByRole("textbox", { name: "조건 2 신고가 기간" }).fill("1");
+  await fillNumber(dialog.getByRole("button", { name: "조건 1 최소" }), String(old.close));
+  await selectOption(dialog.getByRole("combobox", { name: "조건 1 비교" }), "range");
+  await fillNumber(dialog.getByRole("button", { name: "조건 1 최대" }), String(old.close));
+  await addCondition(dialog);
+  await fillNumber(dialog.getByRole("button", { name: "조건 2 신고가 기간" }), "1");
   const saved = savedTo(page, "/api/screens");
   await dialog.getByRole("button", { name: "저장", exact: true }).click();
   await saved;
@@ -165,7 +171,7 @@ for (const width of [1440, 1024, 390, 360, 320]) {
     const halted = answer.rows.find((r) => r.symbol === "110040")!;
     expect(halted.provisional).toBe(false);
     expect(halted.latestBarDate < answer.asOf).toBe(true);
-    await expect(rows(page).filter({ hasText: "110040" }).locator(`[aria-label*="최신 일봉 ${halted.latestBarDate}"]`)).toBeVisible();
+    await expect(rows(page).filter({ hasText: "110040" }).locator(`[title*="최신 일봉 ${halted.latestBarDate}"]`)).toBeVisible();
     await expect(meta(page)).toContainText("수집 범위 (KST)");
     expect(await panel(page).evaluate((e) => e.scrollWidth <= e.clientWidth)).toBe(true);
     await rows(page).filter({ hasText: "110040" }).scrollIntoViewIfNeeded();
@@ -178,7 +184,7 @@ test("옛 SQLite 조건식은 안내 없이 이전되고 편집·저장·서버 
   await app.restart({ legacyScreens: [legacy] });
   await page.goto("/");
   await openScreener(page);
-  await expect(panel(page).getByRole("list", { name: "조건" })).toContainText("최근 3일 이내");
+  await expect(panel(page).getByRole("list", { name: "조건" })).toContainText(/최근\s*3일 이내/);
   await expect(page.getByRole("alert")).toHaveCount(0);
   await expect(page.getByText(/변환|이전되었습니다|새 규칙으로/)).toHaveCount(0);
   const migrated = await (await fetch(`${app.url}/api/screens`)).json();
@@ -187,7 +193,7 @@ test("옛 SQLite 조건식은 안내 없이 이전되고 편집·저장·서버 
   await app.restart();
   await page.reload();
   await openScreener(page);
-  await expect(panel(page).getByRole("list", { name: "조건" })).toContainText("월봉 최근 2개월 이내");
+  await expect(panel(page).getByRole("list", { name: "조건" })).toContainText(/월봉\s*최근\s*2개월 이내/);
   expect((await (await fetch(`${app.url}/api/screens`)).json()).revision).toBe(13);
   await expect(page.getByText(/변환|이전되었습니다|새 규칙으로/)).toHaveCount(0);
 });
@@ -278,7 +284,7 @@ for (const olderFails of [false, true]) {
     await delivered;
     await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())));
     await expect(meta(page)).toHaveText(original!);
-    await expect(rows(page).filter({ hasText: "110010" }).locator('[title="첫 봉 조건 일치 2026-10-01"]')).toBeVisible();
+    await expect(rows(page).filter({ hasText: "110010" }).locator(`[title="첫 봉 조건 일치 ${row.matchedDate}"]`)).toBeVisible();
     await expect(panel(page).getByRole("alert")).toHaveCount(0);
   });
 }
