@@ -10,6 +10,7 @@ import {
   removeCompare,
   removeIndicator,
   setPanelStretches,
+  togglePanel,
   shownScale,
   updateIndicator,
 } from "./settings";
@@ -80,7 +81,7 @@ test.each([
   ["없는 패널을 가리킴", { ...rsi, panels: [{ id: "p9", stretch: 1 }] }],
   ["패널 하나에 지표 둘", { ...rsi, indicators: [...rsi.indicators, { ...rsi.indicators[1]!, id: "c" }], panels: [...rsi.panels, { id: "p2", stretch: 1 }] }],
   ["같은 지표 id 둘", { ...rsi, indicators: [rsi.indicators[0], { ...rsi.indicators[0]!, spec: { kind: "ma", method: "sma", period: 9 } }, rsi.indicators[1]] }],
-  ["높이 비율 0", { ...rsi, panels: [{ id: "p1", stretch: 0 }] }],
+  ["높이 비율이 문자열", { ...rsi, panels: [{ id: "p1", stretch: "0.3" }] }],
 ])("모양이 틀리면(%s) 기본 설정으로 열고 콘솔에 남긴다", (_, raw) => {
   const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
   expect(parseChartSettings(raw)).toEqual(DEFAULT_CHART_SETTINGS);
@@ -160,4 +161,30 @@ test("비교 종목을 빼면 나머지 순서를 지키고, 없는 종목이면
 test("사용자 지정 선 색과 굵기 5는 저장한 차트 설정에서 손실 없이 복원한다", () => {
   const raw = { ...DEFAULT_CHART_SETTINGS, panels: [], indicators: [{ id: "custom", spec: { kind: "ma", method: "sma", period: 20 }, panel: "price", visible: true, style: { colors: ["#8B5CF6"], width: 5 } }] };
   expect(parseChartSettings(JSON.parse(JSON.stringify(raw)))).toEqual(raw);
+});
+
+test("패널 접힘은 저장한 높이와 지표 표시를 보존하고 과거 설정도 읽는다", () => {
+  const original = { ...DEFAULT_CHART_SETTINGS, panels: [{ ...DEFAULT_CHART_SETTINGS.panels[0]!, stretch: 0.4 }] };
+  const panel = original.panels[0]!;
+  const collapsed = togglePanel(original, panel.id);
+  expect(collapsed.panels[0]).toEqual({ ...panel, collapsed: true });
+  expect(collapsed.indicators).toBe(original.indicators);
+  expect(parseChartSettings(JSON.parse(JSON.stringify(collapsed)))).toEqual(collapsed);
+  expect(togglePanel(collapsed, panel.id).panels[0]).toEqual({ ...panel, collapsed: false });
+  expect(parseChartSettings(original)).toEqual(original);
+});
+
+test("음수·0 패널 높이를 읽으면 해당 높이만 기본 비율로 복구한다", () => {
+  for (const stretch of [-0.1, 0]) {
+    const original = { ...rsi, panels: rsi.panels.map((panel, i) => i === 0 ? { ...panel, stretch, collapsed: true } : panel) };
+    const restored = parseChartSettings(original);
+    expect(restored).toEqual({ ...original, panels: original.panels.map((panel, i) => i === 0 ? { ...panel, stretch: 0.25 } : panel) });
+    expect(restored.indicators).toEqual(rsi.indicators);
+  }
+});
+
+test("작은 양수 패널 비율도 저장 과정에서 0으로 반올림하지 않는다", () => {
+  const settings = setPanelStretches(DEFAULT_CHART_SETTINGS, [0.0001]);
+  expect(settings.panels[0]?.stretch).toBe(0.0001);
+  expect(parseChartSettings(JSON.parse(JSON.stringify(settings)))).toEqual(settings);
 });

@@ -37,6 +37,7 @@ interface LayoutState {
   updateIndicator(slot: Slot, id: string, patch: Partial<Pick<IndicatorConfig, "spec" | "style" | "visible">>): void;
   removeIndicator(slot: Slot, id: string): void;
   movePanel(slot: Slot, panelId: string, step: -1 | 1): void;
+  togglePanel(slot: Slot, panelId: string): void;
   setPanelStretches(slot: Slot, stretches: readonly Panel["stretch"][]): void;
   addCompare(slot: Slot, code: SymbolCode): void;
   removeCompare(slot: Slot, code: SymbolCode): void;
@@ -73,6 +74,7 @@ export const useLayoutStore = create<LayoutState>()((set) => {
     updateIndicator: (slot, id, patch) => patchSettings(slot, (s) => edit.updateIndicator(s, id, patch)),
     removeIndicator: (slot, id) => patchSettings(slot, (s) => edit.removeIndicator(s, id)),
     movePanel: (slot, panelId, step) => patchSettings(slot, (s) => edit.movePanel(s, panelId, step)),
+    togglePanel: (slot, panelId) => patchSettings(slot, (s) => edit.togglePanel(s, panelId)),
     setPanelStretches: (slot, stretches) => patchSettings(slot, (s) => edit.setPanelStretches(s, stretches)),
     addCompare: (slot, code) => patchCell(slot, (c) => {
       const chartSettings = edit.addCompare(c.chartSettings, code, c.symbol);

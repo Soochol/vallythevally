@@ -9,7 +9,7 @@ export function ownsChartKeyboard(event: KeyboardEvent): boolean {
 const onKey = (event: KeyboardEvent) => {
   const top = layers.at(-1);
   if (top && event.key === "Escape" && !event.isComposing) {
-    event.preventDefault(); event.stopImmediatePropagation(); top.options.onClose();
+    event.preventDefault(); event.stopImmediatePropagation(); top.options.onClose("escape");
   }
 };
 let outsideClick: AbortController | null = null;
@@ -33,13 +33,14 @@ function consumeOutsidePointer(event: PointerEvent) {
 const onDown = (event: PointerEvent) => {
   const top = layers.at(-1);
   if (!top || !(event.target instanceof Node)) return;
-  const outside = !top.panel.contains(event.target) && !top.options.trigger?.contains(event.target);
+  const outside = !top.panel.contains(event.target) && !top.options.trigger?.contains(event.target) && !top.options.isInside?.(event.target);
   if (outside || (top.options.backdrop && event.target === top.panel)) {
     if (top.options.blockChartKeys !== false) consumeOutsidePointer(event);
-    top.options.onClose();
+    top.options.onClose("outside");
   }
 };
 export interface LayerOptions {
+  isInside?(target: Node): boolean;
   anchor?: () => Rect | undefined;
   trigger?: HTMLElement | null;
   focusTarget?: HTMLElement | null;
@@ -50,7 +51,7 @@ export interface LayerOptions {
   follow?: boolean;
   backdrop?: boolean;
   blockChartKeys?: boolean;
-  onClose(): void;
+  onClose(reason: "escape" | "outside"): void;
 }
 export function mountLayer(panel: HTMLElement, options: LayerOptions) {
   const focusTarget = options.focusTarget ?? options.trigger ?? (document.activeElement instanceof HTMLElement ? document.activeElement : null);

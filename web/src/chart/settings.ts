@@ -18,6 +18,7 @@ export interface Panel {
   id: string;
   /** 가격 패널(1) 대비 높이 비율. */
   stretch: number;
+  collapsed?: boolean;
 }
 
 /** 칸의 차트 설정(frontend.md §5.5). */
@@ -97,8 +98,9 @@ function migrateV1(v1: Pick<ChartSettings, "style" | "scale" | "compare"> & { in
 }
 
 function readPanel(raw: unknown): Panel | null {
-  if (!isRecord(raw) || typeof raw.id !== "string" || !isNum(raw.stretch) || raw.stretch <= 0) return null;
-  return { id: raw.id, stretch: raw.stretch };
+  if (!isRecord(raw) || typeof raw.id !== "string" || !isNum(raw.stretch)) return null;
+  if (raw.collapsed !== undefined && typeof raw.collapsed !== "boolean") return null;
+  return { id: raw.id, stretch: raw.stretch > 0 ? raw.stretch : DEFAULT_PANEL_STRETCH, ...(raw.collapsed === undefined ? {} : { collapsed: raw.collapsed }) };
 }
 
 function readIndicator(raw: unknown): IndicatorConfig | null {
@@ -200,10 +202,14 @@ export function movePanel(s: ChartSettings, panelId: string, step: -1 | 1): Char
   return { ...s, panels };
 }
 
+export function togglePanel(s: ChartSettings, panelId: string): ChartSettings {
+  return { ...s, panels: s.panels.map((p) => p.id === panelId ? { ...p, collapsed: !p.collapsed } : p) };
+}
+
 export function setPanelStretches(s: ChartSettings, stretches: readonly Panel["stretch"][]): ChartSettings {
   if (stretches.length !== s.panels.length || stretches.some((x) => !(Number.isFinite(x) && x > 0))) return s;
   if (stretches.every((x, i) => Math.abs(x - s.panels[i]!.stretch) < 1e-3)) return s;
-  return { ...s, panels: s.panels.map((p, i) => ({ ...p, stretch: Math.round(stretches[i]! * 1000) / 1000 })) };
+  return { ...s, panels: s.panels.map((p, i) => ({ ...p, stretch: stretches[i]! })) };
 }
 
 export function shownScale(s: Pick<ChartSettings, "scale" | "compare">): PriceScale {
