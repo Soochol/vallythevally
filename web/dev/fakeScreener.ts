@@ -108,10 +108,11 @@ function resultOf(screen: Screen, asOf: KstDate, historyDone: number): ScreenerR
     const first = bars[0];
     const matchedDate = first ? barStart(first.period, asOf, hits[screen.conditions.indexOf(first)] ?? 0) : asOf;
     const changeRate = Math.round((random() - 0.35) * 1600) / 100;
-    rows.push({ symbol: s.code, name: s.name, close: s.close, changeRate, matchedDate });
+    rows.push({ symbol: s.code, name: s.name, close: s.close, changeRate, matchedDate, latestBarDate: asOf, provisional: false });
   }
   rows.sort((a, b) => (a.matchedDate === b.matchedDate ? (a.symbol < b.symbol ? -1 : 1) : a.matchedDate < b.matchedDate ? 1 : -1));
-  return { asOf, universe: universe.length, excluded, rows };
+  const collectedAt = Math.floor(Date.now() / 1000);
+  return { asOf, collectionStartedAt: collectedAt, collectionCompletedAt: collectedAt, missingSummary: 0, universe: universe.length, excluded, rows };
 }
 
 interface Job {

@@ -3,7 +3,7 @@ import type { Locator, Page } from "@playwright/test";
 import { expect, test } from "./harness";
 import { editor, excludedLine, expectCellOn, expectRows, openScreener, panel, pickPeriod, pickVenue, results, rows, runButton, savedTo, updateBand, waitForUpdateToFinish } from "./screener-page";
 
-test.use({ krxMarket: "20261106", krxConditionStocks: true, clockStart: "20261109100000" });
+test.use({ krxMarket: "20261106", krxConditionStocks: true, clockStart: "20261106203000" });
 
 const SCREEN_NAME = "교차 급증 주봉 신고가";
 const CROSS = "일봉 0~4봉 전 안에 5일선이 20일선을 위로 교차한 봉이 있다";

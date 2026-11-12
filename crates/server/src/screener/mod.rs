@@ -25,6 +25,7 @@ use crate::kiwoom::rest::{KiwoomRest, Priority};
 use crate::symbols::SymbolDirectory;
 use crate::user_routes::{JSON_LIMIT, check_screen, read_json};
 use engine::{RunnableScreen, Snapshot};
+use summary::{CollectionError, SummaryCollector};
 use store::{Listed, Store, StoreError};
 
 const CALENDAR_DAYS: usize = 10;
@@ -73,6 +74,7 @@ impl Calendar {
 
 pub struct Screener {
     store: Arc<Store>,
+    summaries: Arc<SummaryCollector>,
     rest: KiwoomRest,
     bars: Arc<BarService>,
     symbols: Arc<SymbolDirectory>,
@@ -87,6 +89,7 @@ impl Screener {
     pub fn new(store: Store, rest: KiwoomRest, bars: Arc<BarService>, symbols: Arc<SymbolDirectory>, clock: Clock) -> Self {
         Screener {
             store: Arc::new(store),
+            summaries: SummaryCollector::new(rest.clone(), clock.clone()),
             rest,
             bars,
             symbols,
@@ -247,31 +250,59 @@ impl Screener {
 
     async fn run_screen(self: &Arc<Self>, screen: RunnableScreen) -> Result<ScreenerResult, ApiFailure> {
         let now = self.clock.now();
-        let need_day = self.calendar(CalendarUse::Status).await.map_err(|e| Lookup::ScreenerRun.failure(e, now))?.need_day(now);
+        let calendar = self.calendar(CalendarUse::Status).await.map_err(|e| Lookup::ScreenerRun.failure(e, now))?;
+        let need_day = calendar.need_day(now);
         self.refill_listing().await.map_err(|e| Lookup::ScreenerRun.failure(e, now))?;
+        self.recents_started_outside_recent()?;
+        let update_epoch = self.next_run.load(Ordering::SeqCst);
+        let (generation, codes) = self.with_store(Store::collection_targets).await?;
         let me = self.clone();
-        tokio::task::spawn_blocking(move || me.judge(&screen, need_day, now)).await.map_err(|e| StoreError(format!("실행 작업이 끝나지 못했습니다: {e}")))?
+        tokio::task::spawn_blocking(move || me.ready_snapshot(need_day, now)).await.map_err(|e| StoreError(e.to_string()))??;
+        let batch = self.summaries.collect(codes).await.map_err(|error| match error {
+            CollectionError::Kiwoom(error) => Lookup::ScreenerRun.failure(error.into(), self.clock.now()),
+            error => data_changed(error.to_string()),
+        })?;
+        let me = self.clone();
+        tokio::task::spawn_blocking(move || {
+            if me.clock.now().kst_date() != batch.target || batch.target != now.kst_date() {
+                return Err(data_changed("실행 중 날짜가 바뀌었습니다. 다시 실행하세요"));
+            }
+            if me.store.generation() != generation || me.next_run.load(Ordering::SeqCst) != update_epoch {
+                return Err(data_changed("수집 중 확정 이력이 바뀌었습니다. 업데이트가 끝난 뒤 다시 실행하세요"));
+            }
+            let mut conn = me.store.reader()?;
+            let snapshot = Snapshot::begin(&mut conn)?;
+            me.check_ready(&snapshot, need_day, now)?;
+            let result = snapshot.screen(&screen, &batch, calendar.days.contains(&batch.target))?;
+            if me.store.generation() != generation || me.next_run.load(Ordering::SeqCst) != update_epoch || me.clock.now().kst_date() != batch.target {
+                return Err(data_changed("판정 중 날짜나 확정 이력이 바뀌었습니다. 다시 실행하세요"));
+            }
+            Ok(result)
+        }).await.map_err(|e| StoreError(format!("실행 작업이 끝나지 못했습니다: {e}")))?
     }
 
-    fn judge(&self, screen: &RunnableScreen, need_day: Option<KstDate>, now: KstTime) -> Result<ScreenerResult, ApiFailure> {
+    fn ready_snapshot(&self, need_day: Option<KstDate>, now: KstTime) -> Result<(), ApiFailure> {
         let mut conn = self.store.reader()?;
-        let recents_before = self.recents_started_outside_recent()?;
         let snapshot = Snapshot::begin(&mut conn)?;
-        if self.recents_started_outside_recent()? != recents_before {
-            return Err(updating());
+        self.check_ready(&snapshot, need_day, now)
+    }
+
+    fn check_ready(&self, snapshot: &Snapshot<'_>, need_day: Option<KstDate>, now: KstTime) -> Result<(), ApiFailure> {
+        self.recents_started_outside_recent()?;
+        if snapshot.refetching {
+            return Err(data_changed("확정 이력을 다시 받는 중입니다. 업데이트가 끝난 뒤 다시 실행하세요"));
         }
         if snapshot.listing_lost {
-            tracing::warn!("스크리너 저장소에 일봉은 있는데 종목 목록이 비어 있어 실행을 막습니다. 비지 않은 종목 목록을 받으면 채웁니다");
             return Err(Lookup::ScreenerRun.failure(BarError::ListNotReady, now));
         }
-        let Some(as_of) = snapshot.last_day.filter(|last| need_day.is_none_or(|need| *last >= need)) else {
+        if snapshot.last_day.is_none_or(|last| need_day.is_some_and(|need| last < need)) {
             let message = match need_day {
                 Some(need) => format!("저장소에 필요 관측일 {need}의 자료가 없습니다. 업데이트하세요"),
                 None => "스크리너 저장소가 비어 있습니다. 업데이트하세요".to_owned(),
             };
             return Err(ApiFailure::screener_not_ready(ApiErrorReason::MissingDay, message));
-        };
-        Ok(snapshot.screen(screen, as_of)?)
+        }
+        Ok(())
     }
 
     fn recents_started_outside_recent(&self) -> Result<u64, ApiFailure> {
@@ -281,6 +312,10 @@ impl Screener {
         }
         Ok(self.recents_started.load(Ordering::SeqCst))
     }
+}
+
+pub(super) fn data_changed(message: impl Into<String>) -> ApiFailure {
+    ApiFailure::screener_not_ready(ApiErrorReason::DataChanged, message)
 }
 
 fn updating() -> ApiFailure {

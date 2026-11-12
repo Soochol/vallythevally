@@ -185,6 +185,8 @@ const row = (symbol: string, name: string, close: number, changeRate: number | n
   close,
   changeRate,
   matchedDate,
+  latestBarDate: "2026-11-10",
+  provisional: false,
 });
 const rows: readonly ScreenerRow[] = [
   row("000100", "나", 5000, 1.5, "2026-11-10"),

@@ -7,6 +7,9 @@ use duckdb::arrow::datatypes::{ArrowPrimitiveType, DataType, Decimal128Type, Int
 use duckdb::{Connection, Transaction, params};
 
 use super::exact::Decimal;
+use super::summary::SummaryBatch;
+use crate::http::ApiFailure;
+use crate::kiwoom::wire::KrxSummaryValues;
 use super::indicator::Indicator;
 use super::line::{Cell, Kind, Line, Series};
 use super::market_cap::MarketCapRange;
@@ -191,6 +194,8 @@ fn standing(line: &Line, stock: &Stock, cells: &Cells, series: &Series) -> Stand
 }
 
 struct DailyClose {
+    day: KstDate,
+    provisional: bool,
     close: Price,
     previous: Option<Price>,
 }
@@ -199,26 +204,43 @@ pub(super) struct Snapshot<'a> {
     tx: Transaction<'a>,
     pub(super) last_day: Option<KstDate>,
     pub(super) listing_lost: bool,
+    pub(super) refetching: bool,
 }
 
 impl<'a> Snapshot<'a> {
     pub(super) fn begin(conn: &'a mut Connection) -> Result<Snapshot<'a>, StoreError> {
         let tx = conn.transaction()?;
-        let (last_day, listing_lost) = tx.query_row(&format!("SELECT last_day, {LISTING_LOST} FROM store_meta"), [], |row| Ok((row.get::<_, Option<i32>>(0)?, row.get::<_, bool>(1)?)))?;
-        Ok(Snapshot { tx, last_day: last_day.map(date_of), listing_lost })
+        let (last_day, listing_lost, refetching) = tx.query_row(&format!("SELECT last_day, {LISTING_LOST}, full_refetch OR EXISTS (SELECT 1 FROM history WHERE refetch) FROM store_meta"), [], |row| Ok((row.get::<_, Option<i32>>(0)?, row.get::<_, bool>(1)?, row.get::<_, bool>(2)?)))?;
+        Ok(Snapshot { tx, last_day: last_day.map(date_of), listing_lost, refetching })
     }
 
-    pub(super) fn screen(&self, screen: &RunnableScreen, as_of: KstDate) -> Result<ScreenerResult, StoreError> {
+    pub(super) fn screen(&self, screen: &RunnableScreen, batch: &SummaryBatch, today_observed: bool) -> Result<ScreenerResult, ApiFailure> {
         let tx = &self.tx;
-        let calendars = Calendars::new(observation_days(tx, as_of)?);
+        let stored_day = self.last_day.expect("확인한 저장소");
+        let provisional = stored_day < batch.target;
+        let today_traded = batch.stocks.values().any(|s| s.result.as_ref().is_ok_and(|q| matches!(q.values, KrxSummaryValues::Traded { .. })));
+        let as_of = if provisional && (today_observed || today_traded) { batch.target } else { stored_day };
+        let mut days = observation_days(tx, stored_day)?;
+        if as_of > stored_day { days.push(as_of); }
+        let calendars = Calendars::new(days);
+        self.combine_summary(batch)?;
         let unwanted = exclusion_mask(&screen.exclude);
         let universe: Vec<Stock> = stocks(tx, as_of)?.into_iter().filter(|s| s.excludable_as & unwanted == 0 && screen.covers(s.market)).collect();
-        let unconfirmed = unconfirmed_on(tx, as_of)?;
+        let unconfirmed = unconfirmed_on(tx, stored_day)?;
         let mut excluded = ScreenerExcluded { listed_too_short: 0, history_short: 0, unconfirmed: 0 };
+        let mut missing_summary = 0;
         let mut judged = Vec::new();
         for stock in &universe {
+            if stock.listed_on.is_some_and(|listed| listed > as_of) {
+                excluded.listed_too_short += 1;
+                continue;
+            }
             if unconfirmed.contains(&stock.code) {
                 excluded.unconfirmed += 1;
+                continue;
+            }
+            if batch.stocks.get(&stock.code).is_none_or(|s| s.result.is_err()) {
+                missing_summary += 1;
                 continue;
             }
             judged.push(stock);
@@ -250,11 +272,35 @@ impl<'a> Snapshot<'a> {
                     close: daily.close.to_f64(),
                     change_rate: daily.previous.map(|previous| change_rate(daily.close, previous)),
                     matched_date: api::KstDate(matched_on),
+                    latest_bar_date: api::KstDate(daily.day),
+                    provisional: daily.provisional,
                 })
             })
             .collect();
         rows.sort_by(|a, b| b.matched_date.cmp(&a.matched_date).then_with(|| a.symbol.0.cmp(&b.symbol.0)));
-        Ok(ScreenerResult { as_of: api::KstDate(as_of), universe: universe.len() as u32, excluded, rows })
+        Ok(ScreenerResult { as_of: api::KstDate(as_of), collection_started_at: api::UnixSeconds(batch.started_at.unix()), collection_completed_at: api::UnixSeconds(batch.completed_at.unix()), missing_summary, universe: universe.len() as u32, excluded, rows })
+    }
+
+    fn combine_summary(&self, batch: &SummaryBatch) -> Result<(), ApiFailure> {
+        let tx = &self.tx;
+        tx.execute_batch("CREATE TEMP TABLE screen_summary AS SELECT * FROM daily LIMIT 0").map_err(StoreError::from)?;
+        if self.last_day < Some(batch.target) {
+            let mut stmt = tx.prepare("SELECT code, arg_max(close, day) FROM daily WHERE day < ? AND day <= (SELECT last_day FROM store_meta) AND volume > 0 GROUP BY code").map_err(StoreError::from)?;
+            let previous = stmt.query_map(params![date_value(batch.target)], |row| Ok((row.get::<_, String>(0)?, row.get::<_, u64>(1)?))).map_err(StoreError::from)?.collect::<Result<HashMap<_, _>, _>>().map_err(StoreError::from)?;
+            let mut appender = tx.appender("screen_summary").map_err(StoreError::from)?;
+            for (code, stock) in &batch.stocks {
+                let Ok(quote) = &stock.result else { continue };
+                let previous = previous.get(code.as_str()).copied();
+                if previous.is_some_and(|close| 10 * u128::from(quote.base.centi().abs_diff(close)) > 3 * u128::from(close)) {
+                    return Err(super::data_changed("기준가와 확정 이력의 차이가 커 수정 이력을 확인해야 합니다. 업데이트 후 다시 실행하세요"));
+                }
+                let KrxSummaryValues::Traded { ohlcv: o, traded } = quote.values else { continue };
+                appender.append_row(params![code.as_str(), date_value(batch.target), o.open().centi(), o.high().centi(), o.low().centi(), o.close().centi(), o.volume().0, traded.0]).map_err(StoreError::from)?;
+            }
+            appender.flush().map_err(StoreError::from)?;
+        }
+        tx.execute_batch("CREATE TEMP VIEW screen_daily AS SELECT d.* FROM daily d WHERE d.day <= (SELECT last_day FROM store_meta) AND NOT EXISTS (SELECT 1 FROM screen_summary s WHERE s.code = d.code AND s.day = d.day) UNION ALL SELECT * FROM screen_summary").map_err(StoreError::from)?;
+        Ok(())
     }
 }
 
@@ -336,7 +382,7 @@ fn aggregate(field: BarField) -> String {
 
 fn bar_query(period: ScreenPeriod, columns: &[BarField]) -> String {
     let cell = format!("c.{}", cell_column(period));
-    let from = "FROM daily AS d JOIN screen_cells AS c ON c.day = d.day JOIN screen_stocks AS s ON s.code = d.code WHERE d.volume > 0";
+    let from = "FROM screen_daily AS d JOIN screen_cells AS c ON c.day = d.day JOIN screen_stocks AS s ON s.code = d.code WHERE d.volume > 0";
     match period {
         ScreenPeriod::Day => {
             let values: Vec<String> = columns.iter().map(|&field| format!("d.{}", column(field))).collect();
@@ -485,16 +531,16 @@ fn daily_closes(tx: &Transaction, hits: impl Iterator<Item = usize>) -> Result<H
         appender.flush()?;
     }
     let mut stmt = tx.prepare(
-        "WITH traded AS (SELECT s.idx, d.day, d.close FROM daily AS d JOIN screen_cells AS c ON c.day = d.day JOIN screen_stocks AS s ON s.code = d.code
+        "WITH traded AS (SELECT s.idx, d.day, d.close FROM screen_daily AS d JOIN screen_cells AS c ON c.day = d.day JOIN screen_stocks AS s ON s.code = d.code
                          JOIN screen_hits AS h ON h.idx = s.idx WHERE d.volume > 0),
          latest AS (SELECT idx, max(day) AS day, arg_max(close, day) AS close FROM traded GROUP BY idx),
          previous AS (SELECT t.idx, arg_max(t.close, t.day) AS close FROM traded AS t JOIN latest AS l ON l.idx = t.idx WHERE t.day < l.day GROUP BY t.idx)
-         SELECT l.idx, l.close, p.close FROM latest AS l LEFT JOIN previous AS p ON p.idx = l.idx",
+         SELECT l.idx, l.close, p.close, l.day, EXISTS (SELECT 1 FROM screen_summary s JOIN screen_stocks stock ON stock.code = s.code WHERE stock.idx = l.idx AND s.day = l.day) FROM latest AS l LEFT JOIN previous AS p ON p.idx = l.idx",
     )?;
-    let rows = stmt.query_map([], |row| Ok((row.get::<_, u32>(0)?, row.get::<_, u64>(1)?, row.get::<_, Option<u64>>(2)?)))?;
+    let rows = stmt.query_map([], |row| Ok((row.get::<_, u32>(0)?, row.get::<_, u64>(1)?, row.get::<_, Option<u64>>(2)?, row.get::<_, i32>(3)?, row.get::<_, bool>(4)?)))?;
     rows.map(|row| {
-        let (idx, close, previous) = row?;
-        Ok((idx as usize, DailyClose { close: price_of(close)?, previous: previous.map(price_of).transpose()? }))
+        let (idx, close, previous, day, provisional) = row?;
+        Ok((idx as usize, DailyClose { day: date_of(day), provisional, close: price_of(close)?, previous: previous.map(price_of).transpose()? }))
     })
     .collect()
 }

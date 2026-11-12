@@ -3,6 +3,7 @@ use std::fmt;
 use std::num::NonZeroU64;
 use std::path::Path;
 use std::sync::{Mutex, MutexGuard};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use domain::{KstDate, Ohlcv, Price, StockCode, Volume};
 use duckdb::types::Value;
@@ -100,6 +101,7 @@ pub(super) fn exclusion_mask(kinds: &[ExcludeKind]) -> u16 {
 
 pub struct Store {
     conn: Mutex<Connection>,
+    generation: AtomicU64,
 }
 
 impl Store {
@@ -128,11 +130,23 @@ impl Store {
             None if table_count(&conn)? == 0 => create(conn)?,
             None => return Err(StoreError(format!("{}는 스크리너 저장소가 아닌 DuckDB 파일입니다. VALLY_SCREENER_DB_PATH를 다른 경로로 주세요", path.display()))),
         };
-        Ok(Store { conn: Mutex::new(conn) })
+        Ok(Store { conn: Mutex::new(conn), generation: AtomicU64::new(0) })
     }
 
     fn conn(&self) -> MutexGuard<'_, Connection> {
         self.conn.lock().expect("스크리너 저장소 잠금")
+    }
+
+    pub(super) fn generation(&self) -> u64 {
+        let _conn = self.conn();
+        self.generation.load(Ordering::SeqCst)
+    }
+
+    pub(super) fn collection_targets(&self) -> Result<(u64, Vec<StockCode>), StoreError> {
+        let conn = self.conn();
+        let mut stmt = conn.prepare("SELECT code FROM listed ORDER BY code")?;
+        let codes = stmt.query_map([], |row| row.get::<_, String>(0))?.map(|row| stock_code(&row?)).collect::<Result<Vec<_>, _>>()?;
+        Ok((self.generation.load(Ordering::SeqCst), codes))
     }
 
     pub(super) fn reader(&self) -> Result<Connection, StoreError> {
@@ -161,6 +175,7 @@ impl Store {
         tx.execute("DELETE FROM listed", [])?;
         append_listing(&tx, listing)?;
         tx.commit()?;
+        self.generation.fetch_add(1, Ordering::SeqCst);
         Ok(())
     }
 
@@ -181,6 +196,9 @@ impl Store {
             }
         };
         tx.commit()?;
+        if listed == Listed::Filled {
+            self.generation.fetch_add(1, Ordering::SeqCst);
+        }
         Ok(listed)
     }
 
@@ -246,6 +264,7 @@ impl Store {
             appender.flush()?;
         }
         tx.commit()?;
+        self.generation.fetch_add(1, Ordering::SeqCst);
         Ok(())
     }
 
@@ -264,11 +283,14 @@ impl Store {
             appender.flush()?;
         }
         tx.commit()?;
+        self.generation.fetch_add(1, Ordering::SeqCst);
         Ok(())
     }
 
     pub fn set_last_day(&self, day: KstDate) -> Result<(), StoreError> {
-        self.conn().execute("UPDATE store_meta SET last_day = ?", params![date_value(day)])?;
+        let conn = self.conn();
+        conn.execute("UPDATE store_meta SET last_day = ?", params![date_value(day)])?;
+        self.generation.fetch_add(1, Ordering::SeqCst);
         Ok(())
     }
 
@@ -281,11 +303,14 @@ impl Store {
             tx.execute("UPDATE store_meta SET full_refetch = true", [])?;
         }
         tx.commit()?;
+        self.generation.fetch_add(1, Ordering::SeqCst);
         Ok(())
     }
 
     pub fn end_full_refetch(&self) -> Result<(), StoreError> {
-        self.conn().execute("UPDATE store_meta SET full_refetch = false", [])?;
+        let conn = self.conn();
+        conn.execute("UPDATE store_meta SET full_refetch = false", [])?;
+        self.generation.fetch_add(1, Ordering::SeqCst);
         Ok(())
     }
 
@@ -384,4 +409,39 @@ pub(super) fn price_of(centi: u64) -> Result<Price, StoreError> {
 
 pub(super) fn stock_code(code: &str) -> Result<StockCode, StoreError> {
     StockCode::parse(code).map_err(|e| StoreError(format!("저장된 종목코드가 틀렸습니다: {e}")))
+}
+
+#[cfg(test)]
+mod generation_tests {
+    use super::*;
+
+    #[test]
+    fn same_day_rewrites_listing_calendar_and_refetch_changes_advance_the_generation() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::open(&dir.path().join("screener.duckdb")).unwrap();
+        let day = KstDate::new(2026, 11, 6).unwrap();
+        let code = StockCode::parse("300000").unwrap();
+        let listed = ScreenerListing { code, name: "가상".into(), listed_on: Some(day), excludable_as: vec![], market: Market::Kospi, listed_shares: NonZeroU64::new(1_000_000) };
+        let mut generation = store.generation();
+        let mut changed = || {
+            let next = store.generation();
+            assert!(next > generation);
+            generation = next;
+        };
+        store.replace_listing(std::slice::from_ref(&listed)).unwrap(); changed();
+        store.replace_listing(&[listed]).unwrap(); changed();
+        store.extend_calendar(&[day]).unwrap(); changed();
+        store.set_last_day(day).unwrap(); changed();
+        for won in [100, 110] {
+            let price = Price::from_centi(won * 100).unwrap();
+            let bar = DayBar { day, ohlcv: Ohlcv::try_new(price, price, price, price, Volume(1000)).unwrap(), traded: MillionWon(1) };
+            store.write(&[Write::Replace { code, bars: vec![bar] }]).unwrap(); changed();
+            assert_eq!(store.summary().unwrap().last_day, Some(day));
+        }
+        store.mark_refetch().unwrap(); changed();
+        store.end_full_refetch().unwrap(); changed();
+        let (captured, codes) = store.collection_targets().unwrap();
+        assert_eq!(captured, store.generation());
+        assert_eq!(codes, [code]);
+    }
 }

@@ -459,7 +459,13 @@ async fn a_schema_4_store_keeps_its_daily_bars_and_history_and_is_listed_with_sh
         "앞 시작이 목록을 받기 전에 꺼졌어도 다음 시작이 목록을 채우고, 다 받은 이력이 그대로다"
     );
     for (screen, want) in screens.iter().zip(&want) {
-        assert_eq!(api.run(screen).await, *want, "새로 채운 저장소와 같은 결과다: {screen}");
+        let mut result = api.run(screen).await;
+        let mut expected = want.clone();
+        for value in [&mut result, &mut expected] {
+            value.as_object_mut().unwrap().remove("collectionStartedAt");
+            value.as_object_mut().unwrap().remove("collectionCompletedAt");
+        }
+        assert_eq!(result, expected, "수집 시간 외에는 새로 채운 저장소와 같은 결과다: {screen}");
     }
     for _ in 0..400 {
         if server.logs().contains("목표 관측일까지 차 있어") {
@@ -471,7 +477,7 @@ async fn a_schema_4_store_keeps_its_daily_bars_and_history_and_is_listed_with_sh
     api.update(false).await;
     assert_eq!(api.settled().await["fullHistory"], json!({"done": 10, "total": 10}));
     let calls = &fake.calls()[seen..];
-    assert_eq!((count(calls, "ka10095"), count(calls, "ka10081")), (0, 0), "켤 때도 업데이트할 때도 일봉을 다시 받지 않는다");
+    assert_eq!((count(calls, "ka10095"), count(calls, "ka10081")), (screens.len(), 0), "실행은 당일 요약을 받고 켤 때도 업데이트할 때도 일봉을 다시 받지 않는다");
     server.stop().await;
 
     let kept: Vec<(String, String, Option<u64>)> =
@@ -1132,6 +1138,12 @@ async fn an_upgraded_store_whose_first_stock_list_comes_back_empty_refuses_runs_
             tokio::time::sleep(Duration::from_millis(25)).await;
         }
         assert_eq!(reply(api.client.get(&search).send().await.unwrap()).await.as_array().map(Vec::len), Some(1), "07:45에 비지 않은 목록을 받았다");
+        let today = day(2026, 11, 9);
+        fake.set_quote_rows(KrxMarket::sample(today).stocks.into_iter().map(|stock| {
+            let mut row = fake_kiwoom::summary::row(&stock.code, *stock.bars.last().unwrap(), "");
+            for key in ["open_pric", "high_pric", "low_pric", "cur_prc", "trde_qty", "trde_prica"] { row[key] = "0".into(); }
+            row
+        }).collect());
         let result = api.run(screen).await;
         assert_eq!(result["universe"], 10, "켤 때 {update_on_start}: 다음 실행이 받은 목록으로 저장소 목록을 채우고 판정한다: {result}");
         assert!(!result["rows"].as_array().unwrap().is_empty(), "{result}");
@@ -1139,7 +1151,7 @@ async fn an_upgraded_store_whose_first_stock_list_comes_back_empty_refuses_runs_
         if update_on_start == "on" {
             assert!(server.logs().contains("목표 관측일까지 차 있어"), "자동 업데이트가 아니라 실행 관문이 목록을 채웠다");
         }
-        assert_eq!((count(&fake.calls(), "ka10095"), count(&fake.calls(), "ka10081")), (0, 0), "켤 때 {update_on_start}: 일봉을 다시 받지 않는다");
+        assert_eq!((count(&fake.calls(), "ka10095"), count(&fake.calls(), "ka10081")), (1, 0), "켤 때 {update_on_start}: 당일 요약만 받고 일봉을 다시 받지 않는다");
         server.stop().await;
         assert_eq!(stored_listing(upgraded.path()).1.len(), 10);
     }
