@@ -4,6 +4,7 @@ mod indicator;
 mod line;
 mod market_cap;
 pub mod store;
+pub mod summary;
 mod update;
 
 use std::sync::atomic::{AtomicU64, Ordering};

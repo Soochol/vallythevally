@@ -71,7 +71,12 @@ impl ContKey {
 /// 같은 요청 합치기의 범위. 범위가 다르면 내용이 같아도 합치지 않고 따로 보낸다.
 /// `BarService`는 07:45 비우기마다 범위를 바꿔, 비우기 전 조회의 응답이 새 캐시에 들어가지 않게 한다.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
-pub struct MergeScope(pub u64);
+pub enum MergeScope {
+    #[default]
+    Shared,
+    Bars(u64),
+    Summary(u64),
+}
 
 #[derive(Debug)]
 pub struct Page<T> {

@@ -329,8 +329,18 @@ fn audit_state(label: &str) -> Result<Option<ExcludeKind>, ()> {
 /// ka10095 응답. 행 순서는 요청 순서였지만(kiwoom.md §10.6) 호출자는 `stk_cd`로 맞춘다.
 #[derive(Debug, Deserialize)]
 pub struct StockQuotesResponse {
-    #[serde(default)]
+    #[serde(default, deserialize_with = "quote_rows")]
     pub atn_stk_infr: Vec<QuoteRow>,
+}
+
+fn quote_rows<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<Vec<QuoteRow>, D::Error> {
+    let rows = Vec::<Value>::deserialize(deserializer)?;
+    Ok(rows.into_iter().map(|row| {
+        serde_json::from_value(row.clone()).unwrap_or_else(|_| QuoteRow {
+            stk_cd: row["stk_cd"].as_str().unwrap_or("").to_owned(),
+            ..QuoteRow::default()
+        })
+    }).collect())
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -396,6 +406,49 @@ pub fn parse_krx_quotes(body: StockQuotesResponse) -> Vec<KrxDayQuote> {
             }
         })
         .collect()
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct KrxSummary {
+    pub day: KstDate,
+    pub trade_time: Option<TimeOfDay>,
+    pub base: Price,
+    pub values: KrxSummaryValues,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum KrxSummaryValues {
+    Traded { ohlcv: Ohlcv, traded: MillionWon },
+    NoTrades { current_centi: u64 },
+}
+
+pub fn parse_krx_summary(r: &QuoteRow) -> Result<KrxSummary, WireError> {
+    StockCode::parse(&r.stk_cd).map_err(|e| WireError(e.to_string()))?;
+    let day = KstDate::parse_yyyymmdd(&r.dt).ok_or_else(|| WireError(format!("dt가 날짜가 아닙니다: {:?}", r.dt)))?;
+    let trade_time = if r.cntr_tm.is_empty() {
+        None
+    } else {
+        Some(parse_kst_datetime(&format!("{}{}", r.dt, r.cntr_tm))
+            .ok_or_else(|| WireError(format!("cntr_tm이 시각이 아닙니다: {:?}", r.cntr_tm)))?.kst_time_of_day())
+    };
+    let base = stock_price(&r.base_pric)?;
+    let volume = Volume(unsigned(&r.trde_qty)?);
+    let traded = MillionWon(unsigned(&r.trde_prica)?);
+    let values = if volume.0 == 0 {
+        if traded.0 != 0 || unsigned(&r.open_pric)? != 0 || unsigned(&r.high_pric)? != 0 || unsigned(&r.low_pric)? != 0 {
+            return Err(WireError("무거래 행의 시고저·거래대금이 0이 아닙니다".into()));
+        }
+        let current_centi = unsigned(&r.cur_prc)?.checked_mul(100).ok_or_else(|| WireError("현재가가 너무 큽니다".into()))?;
+        KrxSummaryValues::NoTrades { current_centi }
+    } else {
+        if trade_time.is_none() {
+            return Err(WireError("거래 행에 체결시각이 없습니다".into()));
+        }
+        let ohlcv = Ohlcv::try_new(stock_price(&r.open_pric)?, stock_price(&r.high_pric)?, stock_price(&r.low_pric)?, stock_price(&r.cur_prc)?, volume)
+            .map_err(|e| WireError(e.to_string()))?;
+        KrxSummaryValues::Traded { ohlcv, traded }
+    };
+    Ok(KrxSummary { day, trade_time, base, values })
 }
 
 fn parse_krx_quote_row(r: &QuoteRow) -> Result<KrxDayQuote, WireError> {
