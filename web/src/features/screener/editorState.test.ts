@@ -138,3 +138,60 @@ test("Ctrl+Enter 명령은 저장 전 draft를 실행하고 잘못된 값은 실
   expect(bodies).toHaveLength(1);
   expect(current().tried).toBe(true);
 });
+
+test("saved clean session uses latest remotely saved values when running", async () => {
+  vi.stubGlobal("fetch", vi.fn(async (_url: string, init: RequestInit) => reply(JSON.parse(String(init.body)))));
+  editor().change(base, source, (draft) => ({ ...draft, name: "로컬 저장" }));
+  await editor().save(client, base, source);
+  expect(isDirty(current())).toBe(false);
+  const remote: Screen = { ...source, name: "다른 탭 저장", markets: ["kosdaq"] };
+  const latest: Screens = { revision: 3, screens: [remote] };
+  client.setQueryData(screensQuery.queryKey, latest);
+  vi.stubGlobal("matchMedia", () => ({ matches: true }));
+  const requests: Screen[] = [];
+  vi.stubGlobal("fetch", vi.fn(async (url: string, init: RequestInit) => {
+    if (url === "/api/screens") return reply(latest);
+    if (url === "/api/screener/status") return reply({ lastDay: "2026-11-10", needDay: "2026-11-10", update: null, fullHistory: { done: 1, total: 1 } });
+    requests.push(JSON.parse(String(init.body)));
+    return reply({ rows: [] });
+  }));
+  await DEFAULT_SEARCH_COMMANDS.find((command) => command.id === "screener-run")!.run({ queryClient: client, slot: 0 });
+  expect(requests).toEqual([remote]);
+});
+
+test("new draft recovers after freeing a slot from a full saved list", async () => {
+  const full: Screens = { revision: 1, screens: Array.from({ length: 50 }, (_, index) => ({ ...source, id: String(index) })) };
+  const id = editor().create(full);
+  const added = editor().sessions[id]!.source;
+  expect(checkedSession(editor().sessions[id]!).ok).toBe(false);
+  const fetch = vi.fn(async (_url: string, init: RequestInit) => reply(JSON.parse(String(init.body))));
+  vi.stubGlobal("fetch", fetch);
+  expect(await editor().remove(client, full, full.screens[0]!)).toBe(true);
+  const latest = client.getQueryData(screensQuery.queryKey)!;
+  expect(latest.screens).toHaveLength(49);
+  await editor().save(client, latest, added);
+  expect(fetch).toHaveBeenCalledTimes(2);
+  expect(isDirty(editor().sessions[id]!)).toBe(false);
+});
+
+test("미저장 식 B를 지워도 남은 A가 기본 선택에 포함된다", async () => {
+  const empty: Screens = { revision: 0, screens: [] };
+  const a = editor().create(empty);
+  const b = editor().create(empty);
+  const added = editor().sessions[b]!.source;
+  editor().change(empty, editor().sessions[a]!.source, (draft) => ({ ...draft, name: "남겨 둘 A" }));
+  expect(await editor().remove(client, empty, added)).toBe(true);
+  useScreenerStore.getState().choose("");
+  expect(selectedSource(empty, useScreenerStore.getState().chosenId, editor().sessions)?.id).toBe(a);
+  expect(editor().sessions[a]?.draft.name).toBe("남겨 둘 A");
+});
+
+test("다른 탭에서 목록이 바뀌어도 편집 중 draft와 충돌 기준 revision은 보존한다", () => {
+  editor().change(base, source, (draft) => ({ ...draft, name: "수정 중" }));
+  const latest: Screens = { revision: 4, screens: [{ ...source, name: "다른 탭", markets: ["kospi"] }] };
+  editor().change(latest, latest.screens[0]!, (draft) => toggleMarket(draft, "kosdaq"));
+  expect(current().draft.name).toBe("수정 중");
+  expect(current().draft.markets).toEqual(["kosdaq"]);
+  expect(current().base.revision).toBe(1);
+  expect(current().source).toEqual(source);
+});
