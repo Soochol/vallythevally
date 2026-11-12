@@ -65,7 +65,7 @@ for (const phone of [false, true]) test.describe(phone ? "휴대폰 재무지표
     await expect.poll(() => page.evaluate(() => window.frameProbe.snapshot().filter((s) => s.type === "Histogram").flatMap((s) => s.data).some((p) => "value" in p && p.value === 0))).toBe(true);
     await page.screenshot({ path: testInfo.outputPath("financial-panels.png") });
     if (!phone) {
-      const separator = cell(page).locator('div[style*="cursor: row-resize"][style*="position: absolute"]').nth(1);
+      const separator = cell(page).getByRole("separator", { name: "패널 높이 조절" }).nth(1);
       const box = await separator.boundingBox();
       if (!box) throw new Error("재무 패널 높이 조절선이 없습니다");
       await page.mouse.move(box.x + box.width * 0.6, box.y + box.height / 2);
@@ -222,7 +222,8 @@ test.describe("재무지원 경계", () => {
     await page.addInitScript(installFrameProbe);
     await page.goto("/");
     await expect.poll(async () => (await data(app, "005930", "Q")).status).toBe("ready");
-    await expect(row(page, "debt_ratio")).toContainText("3월 결산");
+    await expect(row(page, "revenue")).toContainText("3월 결산");
+    await expect(page.locator("[data-indicator-row]").filter({ hasText: "3월 결산" })).toHaveCount(1);
     await row(page, "debt_ratio").locator("summary").click();
     const points = (await data(app, "005930", "Q")).series.find((s) => s.metric === "debt_ratio")!.points;
     const i = points.findIndex((p) => p.reason === "non_positive_equity");

@@ -3,7 +3,7 @@ import { mountLayer } from "../../features/overlay/topLayer";
 import { iconMarkup, type MarkupIcon } from "../../features/icons";
 import { indicatorErrorText, type IndicatorRow } from "./layer";
 
-export type IndicatorCommand = "edit" | "toggle" | "remove" | "up" | "down" | "refresh";
+export type IndicatorCommand = "edit" | "toggle" | "remove" | "up" | "down" | "refresh" | "collapse";
 
 const ROW =
   "group pointer-events-auto flex w-max max-w-full items-center gap-1.5 whitespace-nowrap rounded-s pr-1 text-s " +
@@ -13,7 +13,8 @@ const BTN = "grid size-[18px] place-items-center rounded-s text-xs text-text-2 h
 interface RowEls {
   root: HTMLDivElement;
   swatch: HTMLSpanElement;
-  name: HTMLSpanElement;
+  name: HTMLButtonElement;
+  collapse: HTMLButtonElement | null;
   values: HTMLSpanElement;
   badge: HTMLSpanElement;
   toggle: HTMLButtonElement;
@@ -43,7 +44,7 @@ export class IndicatorLegend {
 
   constructor(
     private readonly overlay: HTMLElement,
-    private readonly onCommand: (id: string, command: IndicatorCommand) => void,
+    private readonly onCommand: (id: string, command: IndicatorCommand, anchor: HTMLElement) => void,
   ) {}
 
   render(rows: IndicatorRow[], paneTops: readonly number[], axisWidth = 72): void {
@@ -90,7 +91,10 @@ export class IndicatorLegend {
     const root = el("div", key === "panel" ? `${ROW} absolute left-2 z-[4]` : ROW);
     root.dataset.indicatorRow = id;
     const swatch = el("span", "h-0.5 w-2.5 flex-none rounded-full");
-    const name = el("span", "text-text-2");
+    const name = el("button", "min-w-0 truncate text-text-2 hover:text-text");
+    name.type = "button";
+    name.dataset.chartControl = "";
+    name.dataset.indicatorEdit = id;
     const values = el("span", "flex gap-1.5 font-medium");
     const badge = el("span", "rounded-[9px] border border-line px-1.5 text-xs text-text-3");
     const tools = el("span", "flex gap-px opacity-0 group-hover:opacity-100 group-focus-within:opacity-100");
@@ -101,10 +105,12 @@ export class IndicatorLegend {
       b.dataset.chartControl = "";
       b.title = label;
       b.dataset.indicatorCommand = command;
-      b.addEventListener("click", () => this.onCommand(id, command));
+      if (command === "edit") b.dataset.indicatorEdit = id;
+      b.addEventListener("click", () => this.onCommand(id, command, b));
       tools.append(b);
       return b;
     };
+    const collapse = key === "panel" ? button("down", "패널 접기", "collapse") : null;
     const up = key === "panel" ? button("up", "패널 위로", "up") : null;
     const down = key === "panel" ? button("down", "패널 아래로", "down") : null;
     button("gear", "설정", "edit");
@@ -132,11 +138,11 @@ export class IndicatorLegend {
     refresh.type = "button";
     refresh.dataset.chartControl = "";
     refresh.title = "재무자료 새로고침·재시도";
-    refresh.addEventListener("click", () => this.onCommand(id, "refresh"));
+    refresh.addEventListener("click", () => this.onCommand(id, "refresh", refresh));
     box.append(select, text, refresh);
     detail.append(summary, box);
-    root.append(swatch, name, values, badge, tools, detail);
-    const row: RowEls = { root, swatch, name, values, badge, toggle, up, down, key, detail, summary, text, select, refresh, reports: null, reportOptions: [], dispose: () => {} };
+    root.append(swatch, name, detail, values, badge, tools);
+    const row: RowEls = { root, swatch, name, collapse, values, badge, toggle, up, down, key, detail, summary, text, select, refresh, reports: null, reportOptions: [], dispose: () => {} };
     const disposeSelect = domSelect(select, () => row.reportOptions.map((option, i) => ({ label: option.label, value: String(i) })), (value) => {
       select.dataset.value = value;
       const option = row.reportOptions[Number(value)];
@@ -151,9 +157,12 @@ export class IndicatorLegend {
     if (row.detail) {
       r.name.className = "min-w-0 truncate text-text-2 max-md:max-w-[15ch]";
       r.values.className = "flex min-w-0 gap-1.5 truncate font-medium max-md:max-w-[10ch]";
-      r.summary.textContent = row.detail.summary;
+      r.summary.textContent = "";
+      r.summary.className = "financial-status-dot";
+      r.summary.dataset.status = row.detail.status;
       r.summary.title = row.detail.summary;
-      r.root.title = row.detail.text;
+      r.summary.setAttribute("aria-label", `${row.name} 재무자료와 갱신 상태`);
+
       if (r.reports !== row.detail.reports) {
         r.reports = row.detail.reports;
         r.reportOptions = [{ label: "차트에서 가리킨 보고기간", text: row.detail.text }, ...row.detail.reports];
@@ -165,11 +174,24 @@ export class IndicatorLegend {
       r.select.textContent = selected?.label ?? "";
       r.text.textContent = selected?.text ?? row.detail.text;
     }
+    if (r.collapse) {
+      r.collapse.title = row.panel?.collapsed ? "패널 펼치기" : "패널 접기";
+      r.collapse.setAttribute("aria-expanded", String(!row.panel?.collapsed));
+      const icon = row.panel?.collapsed ? "up" : "down";
+      if (r.collapse.dataset.icon !== icon) { r.collapse.innerHTML = iconMarkup(icon); r.collapse.dataset.icon = icon; }
+    }
+    r.root.classList.toggle("indicator-collapsed", row.panel?.collapsed === true);
+    if (row.panel?.collapsed) {
+      r.root.dataset.chartControl = "";
+      r.root.onclick = (event) => { if (!event.composedPath().some((target) => target instanceof Element && target.matches("button,summary"))) this.onCommand(row.id, "collapse", r.root); };
+    } else { delete r.root.dataset.chartControl; r.root.onclick = null; }
     const dim = row.state !== "ok" && row.state !== "pending";
     r.root.classList.toggle("opacity-60", dim);
     r.swatch.style.background = row.color;
     r.name.textContent = row.name;
     r.name.title = row.name;
+    r.name.setAttribute("aria-label", `${row.name} ${row.panel?.collapsed ? "펼치기" : "설정 열기"}`);
+    r.name.onclick = () => this.onCommand(row.id, row.panel?.collapsed ? "collapse" : "edit", r.name);
     r.values.replaceChildren(
       ...row.values.map((v) => {
         const s = el("span", "", v.text);

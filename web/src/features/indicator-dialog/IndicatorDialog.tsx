@@ -1,20 +1,16 @@
 import { useEffect, useId, useRef, useState } from "react";
-import type { MaMethod } from "../../api/generated/MaMethod";
 import { useSymbolInfo } from "../../api/queries";
 import { colorsFrom, indicatorCssColor, type IndicatorKind, KIND_ORDER, KINDS, isFinancial, shownColor, specName } from "../../chart/indicators/kinds";
-import { loadValidator } from "../../chart/indicators/validate";
-import type { LineWidth } from "../../chart/settings";
 import { PERIOD_LABEL } from "../../lib/symbol";
 import { type Slot, useCell, useLayoutStore } from "../../stores/layout";
 import { type IndicatorTab as DialogTab, useSelectionStore } from "../../stores/selection";
-import { DialogFrame, Errors, Row, Segment } from "../dialog/DialogParts";
+import { DialogFrame } from "../dialog/DialogParts";
 import { CloseIcon, EyeIcon, GearIcon, SearchIcon } from "../icons";
-import { ColorPicker } from "../color/ColorPicker";
+import { IndicatorSettingsForm, useValidator } from "./IndicatorSettingsForm";
 import { ComparePanel } from "./ComparePanel";
 import { stepIndex } from "./compareForm";
 import {
   checkForm,
-  hasColor,
   KIND_GROUPS,
   matchKinds,
   nextColor,
@@ -22,23 +18,7 @@ import {
   placeErrors,
   primaryLabel,
   startDraft,
-  type Validate,
 } from "./indicatorForm";
-
-const METHODS = [
-  ["sma", "단순"],
-  ["ema", "지수"],
-] as const satisfies readonly (readonly [MaMethod, string])[];
-const WIDTHS = [
-  [1, "1"],
-  [2, "2"],
-  [3, "3"],
-  [4, "4"],
-  [5, "5"],
-] as const satisfies readonly (readonly [LineWidth, string])[];
-
-const NUMBER_INPUT =
-  "ui-field w-24 disabled:opacity-50";
 
 const TABS = ["indicator", "current", "compare"] as const satisfies readonly DialogTab[];
 const TAB_LABEL: Record<DialogTab, string> = { indicator: "지표", current: "이 칸에 띄운 지표", compare: "비교 종목" };
@@ -46,24 +26,6 @@ const TAB_LABEL: Record<DialogTab, string> = { indicator: "지표", current: "�
 export function IndicatorDialog() {
   const dialog = useSelectionStore((s) => s.dialog);
   return dialog?.kind === "indicator" ? <IndicatorDialogBody slot={dialog.slot} editId={dialog.editId} initialTab={dialog.tab} /> : null;
-}
-
-function useValidator(): Validate | "loading" | "failed" {
-  const [validate, setValidate] = useState<Validate | "loading" | "failed">("loading");
-  useEffect(() => {
-    let live = true;
-    loadValidator().then(
-      (v) => live && setValidate(() => v),
-      (e: unknown) => {
-        console.error("지표 검사기를 불러오지 못했습니다", e);
-        if (live) setValidate("failed");
-      },
-    );
-    return () => {
-      live = false;
-    };
-  }, []);
-  return validate;
 }
 
 function IndicatorDialogBody({ slot, editId, initialTab }: { slot: Slot; editId: string | null; initialTab: DialogTab }) {
@@ -104,8 +66,6 @@ function IndicatorDialogBody({ slot, editId, initialTab }: { slot: Slot; editId:
     else searchRef.current?.focus();
   }, [editingId]);
 
-  const setText = (key: string, value: string) => setDraft((d) => ({ ...d, form: { ...d.form, text: { ...d.form.text, [key]: value } } }));
-  const setEnabled = (key: string, on: boolean) => setDraft((d) => ({ ...d, form: { ...d.form, enabled: { ...d.form.enabled, [key]: on } } }));
   const chooseKind = (k: IndicatorKind) => {
     if (!editing && k !== kind) setDraft(startDraft(null, k));
   };
@@ -323,57 +283,7 @@ function IndicatorDialogBody({ slot, editId, initialTab }: { slot: Slot; editId:
                 </p>
               </div>
               <div role="group" aria-label="설정값" className="flex flex-col gap-3">
-                {KINDS[kind].fields.map((f) => {
-                  const errors = placed.byField[f.key] ?? [];
-                  const inputId = `${ids}-${f.key}`;
-                  const errorId = `${inputId}-error`;
-                  const text = draft.form.text[f.key] ?? "";
-                  if (f.type === "method") {
-                    return (
-                      <Row key={f.key} label={f.label}>
-                        <Segment label={f.label} options={METHODS} value={text} onChange={(v) => setText(f.key, v)} />
-                        <Errors id={errorId} messages={errors} />
-                      </Row>
-                    );
-                  }
-                  const on = f.type !== "optionalInt" || draft.form.enabled[f.key] === true;
-                  return (
-                    <Row key={f.key} label={f.label} labelFor={inputId}>
-                      <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
-                        {f.type === "optionalInt" && (
-                          <label className="flex items-center gap-1.5 text-s">
-                            <input type="checkbox" checked={on} onChange={(e) => setEnabled(f.key, e.target.checked)} />
-                            {f.toggle}
-                          </label>
-                        )}
-                        <span className="flex items-center gap-1.5">
-                          <input
-                            id={inputId}
-                            type="text"
-                            inputMode={f.type === "float" ? "decimal" : "numeric"}
-                            value={text}
-                            disabled={!on}
-                            onChange={(e) => setText(f.key, e.target.value)}
-                            aria-invalid={errors.length > 0}
-                            aria-describedby={errors.length > 0 ? errorId : undefined}
-                            autoComplete="off"
-                            className={NUMBER_INPUT}
-                          />
-                          {"unit" in f && f.unit && <span className="text-s text-text-3">{f.unit}</span>}
-                        </span>
-                      </span>
-                      <Errors id={errorId} messages={errors} />
-                    </Row>
-                  );
-                })}
-                {hasColor(draft.form) && (
-                  <>
-                    <Row label="선 색상"><ColorPicker label="선 색상" value={indicatorCssColor(color)} width={draft.width} onChange={(color) => setDraft((d) => ({ ...d, color }))} /></Row>
-                    <Row label="선 굵기">
-                      <Segment label="굵기" options={WIDTHS} value={draft.width} onChange={(width) => setDraft((d) => ({ ...d, width }))} />
-                    </Row>
-                  </>
-                )}
+                <IndicatorSettingsForm draft={draft} color={color} errors={check.errors} onChange={setDraft} />
                 {rest.map((m, i) => (
                   <p key={i} className="text-s text-danger">
                     {m}

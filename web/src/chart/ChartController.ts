@@ -31,6 +31,7 @@ import { CompareLegend } from "./compareLegend";
 import { type OpenPort, openIndicatorPort } from "./indicators/client";
 import { isFinancial } from "./indicators/kinds";
 import { IndicatorLayer } from "./indicators/layer";
+import { PanelControls } from "./panelControls";
 import { type IndicatorCommand, IndicatorLegend } from "./indicators/legendRows";
 import { isTailChange } from "./indicators/sync";
 import { Legend, legendParts } from "./legend";
@@ -95,7 +96,7 @@ export interface ControllerDeps {
   /** 없으면 실시간 없이 조회한 봉만 그린다. */
   socket?: MarketSocketLike;
   indicators?: OpenPort;
-  onIndicatorCommand?: (id: string, command: IndicatorCommand) => void;
+  onIndicatorCommand?: (id: string, command: IndicatorCommand, anchor: HTMLElement) => void;
   onPanelStretch?: (stretches: Panel["stretch"][]) => void;
   onCompareRemove?: (code: SymbolCode) => void;
 }
@@ -108,6 +109,7 @@ export class ChartController {
   private main: MainSeries;
   private financialHoverTime: number | null = null;
   private readonly indicators: IndicatorLayer;
+  private readonly panelControls: PanelControls;
   private readonly indicatorLegend: IndicatorLegend;
   private readonly compare: CompareLayer;
   private readonly compareLegend: CompareLegend;
@@ -160,27 +162,24 @@ export class ChartController {
       },
       deps.indicators ?? openIndicatorPort,
     );
-    this.indicatorLegend = new IndicatorLegend(el, (id, command) => deps.onIndicatorCommand?.(id, command));
+    this.indicatorLegend = new IndicatorLegend(el, (id, command, anchor) => deps.onIndicatorCommand?.(id, command, anchor));
     this.compareLegend = new CompareLegend((code) => deps.onCompareRemove?.(code));
     this.legend.body.append(this.indicatorLegend.priceBox, this.compareLegend.box);
     this.resize = new ResizeObserver(() => {
       const width = this.axisWidth();
       if (this.chart.options().rightPriceScale.minimumWidth !== width) this.chart.priceScale("right").applyOptions({ minimumWidth: width });
+      this.indicators.applyStretch();
       this.scheduleFrame();
     });
     this.resize.observe(el);
-    const onPanelStretch = deps.onPanelStretch;
-    if (onPanelStretch) {
-      el.addEventListener("pointerup", () => {
-        const shown = this.indicators.stretches();
-        const active = this.view?.settings.indicators.filter((c) => !isFinancial(c.spec) || this.view?.period === "Q" || this.view?.period === "Y") ?? [];
-        let n = 0;
-        const now = (this.view?.settings.panels ?? []).map((p) => active.some((c) => c.panel === p.id) ? shown[n++] ?? p.stretch : p.stretch);
-        const saved = this.view?.settings.panels ?? [];
-        if (now.some((x, i) => Math.abs(x - (saved[i]?.stretch ?? x)) > 1e-3)) onPanelStretch(now);
-        this.renderLegend();
-      });
-    }
+    this.panelControls = new PanelControls(el, this.chart, () => this.scheduleFrame(), () => {
+      const shown = this.indicators.stretches();
+      const active = this.view?.settings.indicators.filter((c) => !isFinancial(c.spec) || this.view?.period === "Q" || this.view?.period === "Y") ?? [];
+      let n = 0;
+      const now = (this.view?.settings.panels ?? []).map((p) => active.some((c) => c.panel === p.id) ? shown[n++] ?? p.stretch : p.stretch);
+      deps.onPanelStretch?.(now);
+      this.scheduleFrame();
+    });
     this.feed = new BarFeed(
       deps.fetchPage ?? fetchBarsPage,
       {
@@ -342,6 +341,7 @@ export class ChartController {
     this.compare.dispose();
     this.indicators.dispose();
     this.indicatorLegend.dispose();
+    this.panelControls.dispose();
     this.compareLegend.dispose();
     this.legend.dispose();
     this.chart.remove();
@@ -407,7 +407,7 @@ export class ChartController {
         fontFamily: t.fontFamily,
         fontSize: t.fontSize,
         attributionLogo: false,
-        panes: { enableResize: true, separatorColor: t.line, separatorHoverColor: t.raised },
+        panes: { enableResize: false, separatorColor: t.line, separatorHoverColor: t.raised },
       },
       grid: { vertLines: { color: t.grid }, horzLines: { color: t.grid } },
       crosshair: { mode: CrosshairMode.Normal, vertLine: crossLine, horzLine: crossLine },
@@ -635,7 +635,10 @@ export class ChartController {
     const view = this.view;
     const i = this.hoverIndex ?? this.bars.length - 1;
     const bar = this.bars[i];
-    this.indicatorLegend.render(this.indicators.rows(this.financialHoverTime ?? bar?.t ?? null), this.paneTops(), this.chart.priceScale("right").width());
+    const tops = this.paneTops();
+    const panels = this.view?.settings.panels.filter((p) => this.view?.settings.indicators.some((c) => c.panel === p.id && (!isFinancial(c.spec) || this.period() === "Q" || this.period() === "Y"))) ?? [];
+    this.panelControls.render(panels, tops);
+    this.indicatorLegend.render(this.indicators.rows(this.financialHoverTime ?? bar?.t ?? null), tops, this.chart.priceScale("right").width());
     this.compareLegend.render(this.compare.rows(this.leftT(), bar?.t ?? null));
     if (!view || !bar) return this.legend.show(null);
     this.legend.show({

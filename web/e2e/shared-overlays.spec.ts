@@ -70,7 +70,7 @@ test("공통 범례 SVG와 화면 크기별 메뉴·페이지 경계를 확인�
   const row = page.locator("[data-indicator-row]").filter({ hasText: "이동평균" }).first();
   await expect(row).toBeVisible();
   for (const name of ["설정", "숨기기", "지우기"]) {
-    const button = row.getByRole("button", { name: new RegExp(name) });
+    const button = row.getByRole("button", { name: new RegExp(`${name}$`) });
     await expect(button.locator("svg")).toHaveCount(1);
     await expect(button).toHaveAttribute("title", name);
   }

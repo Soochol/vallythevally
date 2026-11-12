@@ -74,7 +74,7 @@ function ColorDialog({ label, initial, width, trigger, onCancel, onApply }: {
   );
 
   return (
-    <Popover anchor={trigger} onClose={onCancel} role="dialog" aria-modal="false" aria-labelledby={`${id}-title`} className="color-popover"
+    <Popover data-chart-control="" anchor={trigger} onClose={onCancel} role="dialog" aria-modal="false" aria-labelledby={`${id}-title`} className="color-popover"
       onKeyDown={(e) => {
         if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); onCancel(); }
         if (e.key === "Enter" && e.target instanceof HTMLInputElement && e.target.type === "text") { e.preventDefault(); e.stopPropagation(); apply(); }

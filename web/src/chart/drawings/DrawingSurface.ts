@@ -316,6 +316,7 @@ export class DrawingSurface implements ChartExtension {
     useDrawingSession.setState({ popup: { slot: this.slot, x: e.clientX, y: e.clientY, id } });
   }
   private onKey(e: KeyboardEvent) {
+    if (e.composedPath().some((target) => target instanceof Element && target.hasAttribute("data-chart-control"))) return;
     if (ownsChartKeyboard(e) || !matchMedia(DESKTOP_QUERY).matches || isTypingTarget(e.target) || e.isComposing || useDrawingSession.getState().editor || useSelectionStore.getState().dialog) return;
     if (!this.host.el.parentElement?.contains(document.activeElement)) return;
     const session = useDrawingSession.getState(); const ui = useUiStore.getState(); const prefs = ui.prefs.drawing;
