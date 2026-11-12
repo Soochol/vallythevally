@@ -69,6 +69,8 @@ export interface LayerHost {
   period(): Period;
   requestFrame(): void;
   axisFormatted(pane: ReturnType<IChartApi["panes"]>[number]): void;
+  axisCoordinates(pane: ReturnType<IChartApi["panes"]>[number]): number[];
+  axisFailed(pane: ReturnType<IChartApi["panes"]>[number], error: unknown): void;
   /** 시리즈에 그리는 동안 보이는 범위 변경으로 과거 페이지를 받지 않게 한다(주 시리즈의 setData와 같은 가드). */
   guard(draw: () => void): void;
 }
@@ -473,13 +475,15 @@ export class IndicatorLayer {
         const series = this.shown.get(config.id)?.lines[0]?.series;
         if (series) this.host.axisFormatted(series.getPane());
       },
+      failed: (error) => {
+        const series = this.shown.get(config.id)?.lines[0]?.series;
+        if (series) this.host.axisFailed(series.getPane(), error);
+      },
       toCoordinate: (value) => this.shown.get(config.id)?.lines[0]?.series.priceToCoordinate(value) ?? null,
-      lastCoordinates: () => [...this.shown.values()].filter((s) => s.config.visible && s.config.panel === config.panel && s.config.panel !== "price")
-        .flatMap((s) => s.lines.flatMap((line) => {
-          const last = line.series.lastValueData(false);
-          const y = last.noData ? null : line.series.priceToCoordinate(last.price);
-          return y === null ? [] : [y];
-        })),
+      lastCoordinates: () => {
+        const series = this.shown.get(config.id)?.lines[0]?.series;
+        return series ? this.host.axisCoordinates(series.getPane()) : [];
+      },
     };
   }
 

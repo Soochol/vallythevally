@@ -2,6 +2,12 @@ import { create } from "zustand";
 import type { Slot } from "./layout";
 import { useUiStore } from "./ui";
 
+export interface ToastUndo {
+  available(): boolean;
+  run(): void;
+  subscribe(listener: () => void): () => void;
+}
+
 export type SearchPurpose = "open" | "watch";
 export type Dialog =
   | { kind: "search"; purpose: SearchPurpose }
@@ -18,14 +24,14 @@ interface SelectionState {
   rightPanel: RightPanel;
   desktopView: "chart" | "screener";
   setDesktopView(view: "chart" | "screener"): void;
-  toast: null | { id: number; text: string };
+  toast: null | { id: number; text: string; undo?: ToastUndo };
   openSearch(purpose?: SearchPurpose): void;
   openIndicators(slot: Slot, editId?: string | null): void;
   openScreenEditor(editId: string | null): void;
   closeDialog(): void;
   setPhoneTab(tab: PhoneTab): void;
   showRightPanel(panel: RightPanel): void;
-  showToast(text: string): void;
+  showToast(text: string, undo?: ToastUndo): void;
   clearToast(id: number): void;
 }
 
@@ -49,6 +55,6 @@ export const useSelectionStore = create<SelectionState>()((set) => ({
     const ui = useUiStore.getState();
     if (ui.prefs.watchCollapsed) ui.toggleWatch();
   },
-  showToast: (text) => set({ toast: { id: ++toastId, text } }),
+  showToast: (text, undo) => set({ toast: { id: ++toastId, text, undo } }),
   clearToast: (id) => set((s) => (s.toast?.id === id ? { toast: null } : s)),
 }));

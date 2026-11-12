@@ -1,3 +1,4 @@
+import { selectOption } from "./select-option";
 import { test, expect, cell, chartOf, type App } from "./harness";
 import type { Page } from "@playwright/test";
 import type { Drawing } from "../src/api/generated/Drawing";
@@ -46,7 +47,7 @@ test("trendline placement, handles, settings, and persistence", async ({ page, a
 
 test("drawing engine: remembered style and preferences survive reload; drawing clears hide-all", async ({ page, app }) => {
   await open(page); const r = await draw(page); await expect.poll(async () => (await drawings(app)).length).toBe(1);
-  await page.getByRole("toolbar", { name: "드로잉 스타일" }).getByLabel("선 굵기").selectOption("4");
+  await selectOption(page.getByRole("toolbar", { name: "드로잉 스타일" }).getByLabel("선 굵기"), "4");
   await page.getByRole("button", { name: "모든 드로잉 숨기기", exact: true }).click();
   await expect.poll(async () => (await mirror(page)).length).toBe(0);
   await cell(page).focus(); await page.keyboard.press("T");
@@ -56,9 +57,12 @@ test("drawing engine: remembered style and preferences survive reload; drawing c
   await expect.poll(async () => (await mirror(page)).length).toBe(2);
   const styles = (await drawings(app)).map((d) => d.style as { line: { width: number } });
   expect(styles.map((s) => s.line.width)).toEqual([4, 4]);
-  await page.getByRole("combobox", { name: "자석 세기" }).selectOption("strong");
+  await page.getByRole("button", { name: "자석", exact: true }).click({ button: "right" });
+  await page.getByRole("menuitemradio", { name: "강", exact: true }).click();
   await expect.poll(async () => (await (await fetch(`${app.url}/api/ui-state`)).json()).drawing?.magnetStrength).toBe("strong");
-  await page.reload(); await expect(page.getByRole("combobox", { name: "자석 세기" })).toHaveValue("strong");
+  await page.reload(); await page.getByRole("button", { name: "자석", exact: true }).click({ button: "right" });
+  await expect(page.getByRole("menuitemradio", { name: "강", exact: true })).toHaveAttribute("aria-checked", "true");
+  await page.keyboard.press("Escape");
   await expect.poll(async () => (await mirror(page)).length).toBe(2);
 });
 
@@ -101,7 +105,7 @@ test("drawing engine: daily anchors keep their time and price on 60-minute bars"
   await open(page); await cell(page).focus(); await page.keyboard.press("G"); await draw(page);
   await expect.poll(async () => (await drawings(app)).length).toBe(1);
   const saved = (await drawings(app))[0]!; const before = (await mirror(page))[0]!.points;
-  await page.getByRole("combobox", { name: "분봉" }).selectOption("60m");
+  await selectOption(page.getByRole("button", { name: "분봉" }), "60m");
   await expect(cell(page)).toHaveAttribute("aria-label", "칸 1: 코스피 60분");
   await expect(chartOf(cell(page))).toHaveAttribute("data-bar-count", "3600");
   await expect.poll(async () => (await mirror(page))[0]?.points.every((p) => p !== null)).toBe(true);
@@ -149,7 +153,7 @@ test("drawing engine: settings preview, cancellation, coordinates and text", asy
   const dialog = page.getByRole("dialog", { name: "추세선 설정" });
   const defaultColor = await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue("--draw").trim());
   await expect(dialog.getByRole("button", { name: "선 색 선택", exact: true })).toContainText(defaultColor.toUpperCase());
-  await dialog.getByLabel("선 굵기").selectOption("4");
+  await selectOption(dialog.getByLabel("선 굵기"), "4");
   await dialog.getByRole("button", { name: "선 색 선택", exact: true }).click();
   const picker = page.getByRole("dialog", { name: "선 색", exact: true });
   await picker.getByRole("tab", { name: "사용자 지정", exact: true }).click();

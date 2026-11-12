@@ -139,7 +139,7 @@ export class ChartController {
     this.tokens = deps.tokens;
     this.onStatus = deps.onStatus;
     this.chart = createChart(el, { ...this.chartOptions(), autoSize: true });
-    this.axisLabels = new AxisLabelCache(this.chart);
+    this.axisLabels = new AxisLabelCache(this.chart, () => this.scheduleFrame());
     this.chart.chartElement().addEventListener("wheel", this.onWheel, { capture: true, passive: false });
     // 주 시리즈를 바꿔 붙이는 동안 가격 pane이 비어도 라이브러리가 지우지 않게 한다. 지우면 지표 패널이 0번이 된다.
     this.chart.panes()[0]?.setPreserveEmptyPane(true);
@@ -154,6 +154,8 @@ export class ChartController {
         requestFrame: () => this.scheduleFrame(),
         guard: (draw) => this.withDataGuard(draw),
         axisFormatted: (pane) => this.axisLabels.record(pane),
+        axisCoordinates: (pane) => this.axisLabels.lastCoordinates(pane),
+        axisFailed: (pane, error) => this.axisLabels.failed(pane, error),
       },
       deps.indicators ?? openIndicatorPort,
     );
@@ -378,6 +380,7 @@ export class ChartController {
   private priceAxisGeometry(percent = false): AxisGeometry {
     return {
       formatted: () => this.axisLabels.record(this.main.api.getPane()),
+      failed: (error) => this.axisLabels.failed(this.main.api.getPane(), error),
       toCoordinate: (value) => {
         if (!percent) return this.main.api.priceToCoordinate(value);
         const range = this.chart.timeScale().getVisibleLogicalRange();
@@ -385,11 +388,7 @@ export class ChartController {
         const base = first && "close" in first ? first.close : first && "value" in first ? first.value : null;
         return typeof base !== "number" ? null : this.main.api.priceToCoordinate(base + value / 100 * Math.abs(base));
       },
-      lastCoordinates: () => {
-        const last = this.main.api.lastValueData(false);
-        const y = last.noData ? null : this.main.api.priceToCoordinate(last.price);
-        return y === null ? [] : [y];
-      },
+      lastCoordinates: () => this.axisLabels.lastCoordinates(this.main.api.getPane()),
     };
   }
 

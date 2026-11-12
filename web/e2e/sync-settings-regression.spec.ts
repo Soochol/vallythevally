@@ -1,3 +1,4 @@
+import { selectOption } from "./select-option";
 import { test, expect, cell, chartOf, type App } from './harness';
 import type { Page } from '@playwright/test';
 import type { Drawing } from '../src/api/generated/Drawing';
@@ -79,7 +80,7 @@ test('late PUT response must not allow undo to delete newer other-tab work', asy
   await other.goto(app.url); await expect.poll(async ()=>(await mirror(other)).length).toBe(1);
   await other.getByRole('button',{name:'개체 목록 열기'}).click();
   await other.getByRole('button',{name:'고르기: 수평선'}).click();
-  await other.getByRole('toolbar',{name:'드로잉 스타일'}).getByLabel('선 굵기').selectOption('4');
+  await selectOption(other.getByRole('toolbar',{name:'드로잉 스타일'}).getByLabel('선 굵기'), '4');
   await expect.poll(async ()=>(await drawings(app))[0]?.style).toMatchObject({line:{width:4}});
   const remote=(await drawings(app))[0]!;
   await page.bringToFront();

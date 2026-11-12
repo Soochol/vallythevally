@@ -1,3 +1,4 @@
+import { selectOption } from "./select-option";
 import type { Page } from "@playwright/test";
 import { parseDrawingBody, UNSAVED_PREFIX } from "../src/chart/drawings/outbox";
 import { parseJournalRecord, COMPLETION_PREFIX, completionKey, STAGING_PREFIX } from "../src/chart/drawings/journal";
@@ -76,7 +77,7 @@ test("actual app + HTTP/SQLite: first publication of an older never-sent PUT can
       native.call(this, key, value);
     };
   });
-  const editing = width(page).selectOption("4", {timeout: 30000});
+  const editing = selectOption(width(page), "4", {timeout: 30000});
   try {
     await expect.poll(() => held).toBe(true);
     expect(transport).toEqual([]);
@@ -157,7 +158,7 @@ test("actual app + HTTP/SQLite: native launch holds the id lock only until fetch
       };
     }, { method, gate });
   }
-  const editing = width(page).selectOption("4", { timeout: 30000 });
+  const editing = selectOption(width(page), "4", { timeout: 30000 });
   let deleting: Promise<void> | undefined;
   try {
     await expect.poll(() => putHeld).toBe(true);
@@ -240,7 +241,7 @@ test("actual app + HTTP/SQLite: a warm Storage task paused before diagnostic reg
       nativeSet.call(this, key, value);
     };
   }, STAGING_PREFIX);
-  const editing = width(page).selectOption("4", { timeout: 30000 });
+  const editing = selectOption(width(page), "4", { timeout: 30000 });
   try {
     await expect.poll(() => held).toBe(true);
     expect(transport).toEqual([]);

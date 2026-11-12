@@ -1,3 +1,4 @@
+import { Select } from "../menu/Select";
 import type { StyleField } from "../../chart/drawings/toolSpec";
 import { drawingColor } from "../../chart/drawings/DrawingLayer";
 import type { Dash, TextStyle, Width } from "../../chart/drawings/types";
@@ -9,13 +10,12 @@ export function ColorInput({ label, value, onChange }: { label: string; value: s
   return <ColorPicker label={label} value={color} onChange={onChange} />;
 }
 export function WidthInput({ label, value, onChange }: { label: string; value: Width; onChange(v: Width): void }) {
-  return <select className={INPUT} aria-label={label} value={value} onChange={(e) => { const n = Number(e.target.value); if (n === 1 || n === 2 || n === 3 || n === 4 || n === 5) onChange(n); }}>
-    {[1, 2, 3, 4, 5].map((n) => <option key={n} value={n}>{n}px</option>)}</select>;
+  return <Select label={label} className={INPUT} value={value} options={([1, 2, 3, 4, 5] as const).map((n) => ({ value: n, label: `${n}px` }))} onChange={onChange} />;
 }
 export function DashInput({ label, value, onChange }: { label: string; value: Dash; onChange(v: Dash): void }) {
-  return <select className={INPUT} aria-label={label} value={value} onChange={(e) => { const v = e.target.value; if (v === "solid" || v === "dashed" || v === "dotted") onChange(v); }}>
-    <option value="solid">실선</option><option value="dashed">파선</option><option value="dotted">점선</option></select>;
+  return <Select label={label} className={INPUT} value={value} options={[{ value: "solid", label: "실선" }, { value: "dashed", label: "파선" }, { value: "dotted", label: "점선" }]} onChange={onChange} />;
 }
+
 function TextAppearance({ value, change }: { value: TextStyle; change(v: TextStyle): void }) {
   return <div className="draw-field-stack"><ColorInput label="글자 색" value={value.color} onChange={(color) => change({ ...value, color })} />
     <label>글자 크기<input className={INPUT} type="number" min={8} max={72} value={value.size} onChange={(e) => change({ ...value, size: Math.max(8, Math.min(72, Number(e.target.value))) })} /></label>
@@ -32,7 +32,7 @@ export function StyleFields({ fields, style, text, change, setText }: { fields: 
       case "dash": input = <DashInput label={field.label} value={field.lens.get(style)} onChange={(v) => set(field.lens, v)} />; break;
       case "toggle": input = <input aria-label={field.label} type="checkbox" checked={field.lens.get(style)} onChange={(e) => set(field.lens, e.target.checked)} />; break;
       case "number": input = <input aria-label={field.label} className={INPUT} type="number" min={field.min} max={field.max} step={field.step} value={field.lens.get(style)} onChange={(e) => { const v = e.target.valueAsNumber; if (Number.isFinite(v)) set(field.lens, Math.max(field.min, Math.min(field.max, v))); }} />; break;
-      case "select": input = <select aria-label={field.label} className={INPUT} value={field.lens.get(style)} onChange={(e) => set(field.lens, e.target.value)}>{field.options.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}</select>; break;
+      case "select": input = <Select label={field.label} className={INPUT} value={field.lens.get(style)} onChange={(value) => set(field.lens, value)} options={field.options} />; break;
       case "text": input = field.multiline ? <textarea aria-label={field.label} className={INPUT} value={text ?? ""} onChange={(e) => setText(e.target.value)} rows={3} /> : <input aria-label={field.label} className={INPUT} value={text ?? ""} onChange={(e) => setText(e.target.value)} />; break;
       case "textStyle": input = <TextAppearance value={field.lens.get(style)} change={(v) => set(field.lens, v)} />; break;
       case "stroke": {

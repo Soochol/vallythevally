@@ -14,9 +14,12 @@ interface AxisInput {
   last: { series: object; price: number; y: number | null }[];
 }
 interface CachedAxis {
-  input: AxisInput;
+  input: AxisInput | null;
+  collectedAt: number | null;
   formattedAt: number | null;
   invalidatedAt: number | null;
+  pending: boolean;
+  failed: boolean;
 }
 
 function sameInput(a: AxisInput, b: AxisInput): boolean {
@@ -31,14 +34,27 @@ function sameInput(a: AxisInput, b: AxisInput): boolean {
 export class AxisLabelCache {
   private readonly axes = new WeakMap<HTMLElement, CachedAxis>();
 
-  constructor(private readonly chart: IChartApi) {}
+  constructor(private readonly chart: IChartApi, private readonly requestFrame: () => void) {}
 
   record(pane: Pane): void {
     const key = pane.getHTMLElement();
     if (!key) return;
-    const previous = this.axes.get(key);
+    const axis = this.axis(key);
     const time = document.timeline.currentTime;
-    this.axes.set(key, { input: this.input(pane), formattedAt: typeof time === "number" ? time : null, invalidatedAt: previous?.invalidatedAt ?? null });
+    axis.formattedAt = typeof time === "number" ? time : null;
+    this.requestFrame();
+  }
+
+  lastCoordinates(pane: Pane): number[] {
+    const key = pane.getHTMLElement();
+    return key ? this.axes.get(key)?.input?.last.flatMap((last) => last.y === null ? [] : [last.y]) ?? [] : [];
+  }
+
+  failed(pane: Pane, error: unknown): void {
+    const key = pane.getHTMLElement();
+    if (!key) return;
+    this.fail(this.axis(key), error);
+    this.requestFrame();
   }
 
   refresh(frame: number): boolean {
@@ -46,14 +62,47 @@ export class AxisLabelCache {
     for (const pane of this.chart.panes()) {
       const key = pane.getHTMLElement();
       if (!key) continue;
-      const previous = this.axes.get(key);
-      const input = this.input(pane);
-      if (previous && sameInput(previous.input, input)) continue;
-      if (previous?.formattedAt === frame || previous?.invalidatedAt === frame) { deferred = true; continue; }
-      this.axes.set(key, { input, formattedAt: previous?.formattedAt ?? null, invalidatedAt: frame });
-      pane.priceScale("right").applyOptions({});
+      const axis = this.axis(key);
+      if (axis.collectedAt !== frame) {
+        axis.collectedAt = frame;
+        try {
+          const input = this.input(pane);
+          axis.pending ||= !axis.input || !sameInput(axis.input, input);
+          axis.input = input;
+        } catch (error) {
+          this.fail(axis, error);
+        }
+      }
+      if (!axis.input) deferred = true;
+      if (!axis.pending) continue;
+      if (axis.formattedAt === frame || axis.invalidatedAt === frame) { deferred = true; continue; }
+      axis.pending = false;
+      axis.invalidatedAt = frame;
+      try {
+        pane.priceScale("right").applyOptions({});
+        if (axis.input) axis.failed = false;
+      } catch (error) {
+        this.fail(axis, error);
+        deferred = true;
+      }
     }
     return deferred;
+  }
+
+  private axis(key: HTMLElement): CachedAxis {
+    let axis = this.axes.get(key);
+    if (!axis) {
+      axis = { input: null, collectedAt: null, formattedAt: null, invalidatedAt: null, pending: false, failed: false };
+      this.axes.set(key, axis);
+    }
+    return axis;
+  }
+
+  private fail(axis: CachedAxis, error: unknown): void {
+    axis.input = null;
+    axis.pending = true;
+    if (!axis.failed) console.error("Axis label input unavailable; retrying next frame", error);
+    axis.failed = true;
   }
 
   private input(pane: Pane): AxisInput {

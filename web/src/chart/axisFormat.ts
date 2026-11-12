@@ -7,6 +7,7 @@ export interface AxisGeometry {
   toCoordinate(value: number): number | null;
   lastCoordinates(): number[];
   formatted?(): void;
+  failed?(error: unknown): void;
 }
 
 const KOREAN = [[1e12, "조"], [1e8, "억"], [1e4, "만"]] as const;
@@ -97,6 +98,7 @@ export function distinctAxisTicks(values: number[], unit: AxisUnit, fits: (text:
 export function formatAxisTicks(values: number[], labels: string[], geometry: AxisGeometry | undefined, fontSize: number): string[] {
   if (!geometry) return labels;
   const last = geometry.lastCoordinates().filter(Number.isFinite);
+  if (last.length === 0) return labels;
   const distances = values.map((value) => {
     const y = geometry.toCoordinate(value);
     return y === null ? Infinity : Math.min(...last.map((coordinate) => Math.abs(y - coordinate)));
@@ -120,7 +122,13 @@ export function axisPriceFormat(unit: AxisUnit, minMove: number, geometry?: Axis
     type: "custom", minMove,
     formatter: (value: number) => fitAxisValue(value, unit, fits),
     tickmarksFormatter: (values: number[]) => {
-      const labels = formatAxisTicks(values, distinctAxisTicks(values, unit, fits), geometry, fontSize);
+      let labels = distinctAxisTicks(values, unit, fits);
+      try {
+        labels = formatAxisTicks(values, labels, geometry, fontSize);
+      } catch (error) {
+        if (geometry?.failed) geometry.failed(error);
+        else console.error("Axis label collision check failed", error);
+      }
       geometry?.formatted?.();
       return labels;
     },

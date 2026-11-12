@@ -1,3 +1,4 @@
+import { selectOption } from "./select-option";
 import type { Page } from "@playwright/test";
 import { parseJournalRecord, STAGING_PREFIX } from "../src/chart/drawings/journal";
 import { parseDrawingBody } from "../src/chart/drawings/outbox";
@@ -72,12 +73,12 @@ for (const edits of ["put", "delete", "put-put", "put-delete"] as const) {
     await holdAdmission(page, original.id);
     try {
       if (edits !== "delete") {
-        await width(editing).selectOption("3");
-        await expect(width(editing)).toHaveValue("3");
+        await selectOption(width(editing), "3");
+        await expect(width(editing)).toHaveAttribute("data-value", "3");
       }
       if (edits === "put-put") {
-        await width(editing).selectOption("4");
-        await expect(width(editing)).toHaveValue("4");
+        await selectOption(width(editing), "4");
+        await expect(width(editing)).toHaveAttribute("data-value", "4");
       }
       const deleted = edits === "delete" || edits === "put-delete";
       if (deleted) {
@@ -107,7 +108,7 @@ for (const edits of ["put", "delete", "put-put", "put-delete"] as const) {
         const expectedWidth = edits === "put-put" ? 4 : 3;
         await expect.poll(async () => (await drawings(app))[0]?.style).toMatchObject({ line: { width: expectedWidth } });
         await selectLine(recovered);
-        await expect(width(recovered)).toHaveValue(String(expectedWidth));
+        await expect(width(recovered)).toHaveAttribute("data-value", String(expectedWidth));
       }
       const saved = await drawings(app);
       await app.restart();

@@ -116,7 +116,7 @@ function fixture(period: "1m" | "Q" | "Y" = "1m") {
     panes: () => [],
   };
   const layer = new IndicatorLayer(
-    { chart: chart as unknown as IChartApi, tokens: () => TOKENS, isIndex: () => false, period: () => period, requestFrame: () => {}, axisFormatted: () => {}, guard: (draw) => draw() },
+    { chart: chart as unknown as IChartApi, tokens: () => TOKENS, isIndex: () => false, period: () => period, requestFrame: () => {}, axisFormatted: () => {}, axisCoordinates: () => [], axisFailed: () => {}, guard: (draw) => draw() },
     (listener) => {
       port.listener = listener;
       return { chart: 1, post: (m) => sent.push(m), close: () => {} };

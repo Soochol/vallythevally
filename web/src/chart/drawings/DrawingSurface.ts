@@ -1,3 +1,4 @@
+import { ownsChartKeyboard } from "../../features/overlay/topLayer";
 import type { Logical } from "lightweight-charts";
 import { formatPrice } from "../../lib/format";
 import { isTypingTarget } from "../../lib/hotkeys";
@@ -268,8 +269,7 @@ export class DrawingSurface implements ChartExtension {
   }
   remove(force = false) {
     const prefs = useUiStore.getState().prefs.drawing; const selected = this.selected();
-    if (force && selected.some((d) => d.locked || prefs.lockAll) && !window.confirm("잠긴 드로잉을 지울까요?")) return;
-    this.sync.commit(this.slot, selected.filter((d) => force || (!d.locked && !prefs.lockAll)).map((before) => ({ kind: "delete", before })));
+    this.sync.commitWithUndo(this.slot, selected.filter((d) => force || (!d.locked && !prefs.lockAll)).map((before) => ({ kind: "delete", before })), "드로잉을 지웠습니다");
     useDrawingSession.getState().select([]);
   }
   openEditor(id: string, kind: "settings" | "text" = "settings") {
@@ -312,7 +312,7 @@ export class DrawingSurface implements ChartExtension {
     useDrawingSession.setState({ popup: { slot: this.slot, x: e.clientX, y: e.clientY, id } });
   }
   private onKey(e: KeyboardEvent) {
-    if (!matchMedia(DESKTOP_QUERY).matches || isTypingTarget(e.target) || e.isComposing || useDrawingSession.getState().editor || useSelectionStore.getState().dialog) return;
+    if (ownsChartKeyboard(e) || !matchMedia(DESKTOP_QUERY).matches || isTypingTarget(e.target) || e.isComposing || useDrawingSession.getState().editor || useSelectionStore.getState().dialog) return;
     if (!this.host.el.parentElement?.contains(document.activeElement)) return;
     const session = useDrawingSession.getState(); const ui = useUiStore.getState(); const prefs = ui.prefs.drawing;
     const ctrl = e.ctrlKey || e.metaKey;

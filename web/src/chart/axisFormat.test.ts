@@ -77,6 +77,15 @@ test("극단 값이나 긴 통화 단위도 지수 표기로 남기고 다음 �
   expect(fitAxisValue(1_648_000_000, "KRW", fits)).toBe("16.48억");
 });
 
+test("충돌 보조 기능이 실패하면 폭에 맞춘 기본 눈금을 남기고 복구를 요청한다", () => {
+  const failed = vi.fn();
+  const formatted = vi.fn();
+  const format = axisPriceFormat("KRW", 0.01, { lastCoordinates: () => { throw new Error("pane is changing"); }, toCoordinate: () => null, failed, formatted });
+  expect(format.tickmarksFormatter([-48_100_000_000_000, -48_000_000_000_000])).toEqual(["−48.1조", "−48조"]);
+  expect(failed).toHaveBeenCalledTimes(1);
+  expect(formatted).toHaveBeenCalledTimes(1);
+});
+
 test("맞는 첫 포맷 후보 뒤의 숫자 변환은 계산하지 않는다", () => {
   const locale = vi.spyOn(Number.prototype, "toLocaleString");
   const descriptor = Object.getOwnPropertyDescriptor(Intl.NumberFormat.prototype, "format");

@@ -17,7 +17,7 @@ export function drawingMenu(surface: DrawingSurface, empty = false): MenuItem[] 
     action("이 종목 드로잉 모두 지우기…", () => {
       const symbol = surface.host.view()?.symbol; if (!symbol) return;
       const all = surface.sync.drawings(symbol).filter((d) => !d.locked && !prefs.lockAll);
-      if (all.length && window.confirm(`이 종목의 드로잉 ${all.length}개를 지울까요?`)) surface.sync.commit(surface.slot, all.map((before) => ({ kind: "delete", before })));
+      if (all.length) surface.sync.commitWithUndo(surface.slot, all.map((before) => ({ kind: "delete", before })), `드로잉 ${all.length}개를 지웠습니다`);
     }),
   ];
   const first = selected[0]; if (!first) return [];

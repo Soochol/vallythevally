@@ -1,3 +1,4 @@
+import { ownsChartKeyboard } from "./overlay/topLayer";
 import { useEffect } from "react";
 import { isTypingTarget, matchHotkey } from "../lib/hotkeys";
 import { DESKTOP_QUERY } from "../lib/media";
@@ -12,7 +13,7 @@ import { saveSnapshot } from "./snapshot/saveSnapshot";
 export function useHotkeys() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.defaultPrevented || e.isComposing) return;
+      if (e.defaultPrevented || e.isComposing || ownsChartKeyboard(e)) return;
       const sel = useSelectionStore.getState();
       if (sel.dialog) {
         if (e.key === "Escape") sel.closeDialog();

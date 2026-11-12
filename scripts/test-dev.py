@@ -1,3 +1,4 @@
+import argparse
 import contextlib
 import hashlib
 import importlib.util
@@ -45,6 +46,55 @@ class DevCacheTest(unittest.TestCase):
         self.cache = Path(self.directory.name) / "shared"
         self.root.mkdir()
         self.cache.mkdir()
+
+    @contextlib.contextmanager
+    def execute_fixture(self, root):
+        library = root / "library"
+        library.mkdir()
+        (library / "libduckdb.so").write_bytes(b"fixture duckdb")
+        builds = []
+        def compile_fixture(*args):
+            builds.append("compiled")
+            write_binaries(root)
+        with contextlib.ExitStack() as stack:
+            for name, value in (("require_default_target", None), ("toolchain", {"host": "fixture"}), ("load_pin", {}), ("cache_root", self.cache), ("fingerprint", str(root.name)), ("prepare_duckdb", library), ("build_environment", {})):
+                stack.enter_context(patch.object(dev, name, return_value=value))
+            stack.enter_context(patch.object(dev, "run_cargo", compile_fixture))
+            stack.enter_context(patch.object(dev.evidence, "source", return_value={"head": "fixture", "dirty": False, "sha256": "fixed"}))
+            yield builds
+
+    def test_empty_bin_direct_retry_and_cache_restore_have_stable_artifact_files(self):
+        for with_fake in (False, True):
+            for bundled in (False, True):
+                with self.subTest(with_fake=with_fake, bundled=bundled):
+                    root = self.root / f"fake-{with_fake}-bundled-{bundled}"
+                    root.mkdir()
+                    args = argparse.Namespace(action="build", with_fake=with_fake, bundled=bundled)
+                    binaries = dev.BINARIES if with_fake else dev.BINARIES[:1]
+                    with self.execute_fixture(root) as builds:
+                        for attempt in ("direct", "retry", "cache_restore"):
+                            if attempt == "cache_restore":
+                                shutil.rmtree(root / "target/dev/bin")
+                            with dev.evidence.Run(root, "dev-build", ["dev.py", "build"]) as record:
+                                dev.execute(root, args)
+                            manifest = json.loads((record.directory / "manifest.json").read_text())
+                            self.assertEqual(manifest["status"], "passed")
+                            self.assertEqual(set(manifest["artifacts"]["server"]["sha256"]), set(binaries))
+                            self.assertEqual(manifest["artifacts"]["server"]["execution"], "direct" if attempt == "direct" else "reused")
+                            self.assertEqual("duckdb" in manifest["artifacts"], not bundled)
+                        self.assertEqual(builds, ["compiled"])
+
+    def test_server_and_duckdb_file_changes_still_fail_after_preparation(self):
+        for filename in ("vally-server", "libduckdb.so"):
+            with self.subTest(filename=filename):
+                root = self.root / filename
+                root.mkdir()
+                with self.execute_fixture(root), self.assertRaises(ValueError):
+                    with dev.evidence.Run(root, "dev-build", ["dev.py", "build"]) as record:
+                        dev.execute(root, argparse.Namespace(action="build", with_fake=True, bundled=False))
+                        (root / "target/dev/bin" / filename).write_bytes(b"replaced after preparation")
+                manifest = json.loads((record.directory / "manifest.json").read_text())
+                self.assertEqual(manifest["status"], "failed")
 
     def test_identical_worktrees_share_key_but_build_inputs_invalidate(self):
         for name in ("Cargo.toml", "Cargo.lock", "scripts/dev.py", "scripts/duckdb-prebuilt.json", "crates/server/src/main.rs", ".cargo/config.toml"):
@@ -208,6 +258,22 @@ class DevCacheTest(unittest.TestCase):
         self.assertFalse(dev.needs_duckdb(["cargo", "test", "-p", "fake-kiwoom"]))
         self.assertTrue(dev.needs_duckdb(["cargo", "test", "--workspace"]))
         self.assertTrue(dev.needs_duckdb(["cargo", "build", "-p", "server", "-p", "fake-kiwoom"]))
+
+
+    def test_manifest_records_direct_reuse_and_failure_without_claiming_old_binary(self):
+        with dev.evidence.Run(self.root, "dev-build", ["dev.py", "build"]) as record:
+            dev.cached_build(self.root, self.cache, "key", lambda: "key", lambda: write_binaries(self.root))
+            self.assertEqual(record.data["artifacts"]["server"]["execution"], "direct")
+            dev.cached_build(self.root, self.cache, "key", lambda: "key", lambda: self.fail("unexpected build"))
+            self.assertEqual(record.data["artifacts"]["server"]["execution"], "reused")
+            directory = record.directory
+        self.assertEqual(json.loads((directory / "manifest.json").read_text())["status"], "passed")
+        with self.assertRaises(ValueError), dev.evidence.Run(self.root, "dev-build", ["dev.py", "build"]) as record:
+            directory = record.directory
+            dev.cached_build(self.root, self.cache, "changed", lambda: "changed", lambda: (_ for _ in ()).throw(ValueError("failed compile")))
+        failed = json.loads((directory / "manifest.json").read_text())
+        self.assertEqual(failed["status"], "failed")
+        self.assertEqual(failed["artifacts"], {})
 
 
 if __name__ == "__main__":
