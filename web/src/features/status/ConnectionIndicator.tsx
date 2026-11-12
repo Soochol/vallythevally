@@ -1,16 +1,10 @@
-import { useEffect, useState } from "react";
 import { useRealtimeStore } from "../../stores/realtime";
 import { type ConnectionView, connectionView } from "./connectionView";
-
-const CLOCK_TICK_MS = 30_000;
+import { useServerTime } from "./useServerTime";
 
 export function useConnectionView(): ConnectionView {
   const connection = useRealtimeStore((s) => s.connection);
-  const [now, setNow] = useState(() => Date.now() / 1000);
-  useEffect(() => {
-    const id = setInterval(() => setNow(Date.now() / 1000), CLOCK_TICK_MS);
-    return () => clearInterval(id);
-  }, []);
+  const now = useServerTime();
   return connectionView(connection, now);
 }
 

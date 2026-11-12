@@ -6,7 +6,7 @@ import { loadValidator } from "../../chart/indicators/validate";
 import type { LineWidth } from "../../chart/settings";
 import { PERIOD_LABEL } from "../../lib/symbol";
 import { type Slot, useCell, useLayoutStore } from "../../stores/layout";
-import { useSelectionStore } from "../../stores/selection";
+import { type IndicatorTab as DialogTab, useSelectionStore } from "../../stores/selection";
 import { DialogFrame, Errors, Row, Segment } from "../dialog/DialogParts";
 import { CloseIcon, EyeIcon, GearIcon, SearchIcon } from "../icons";
 import { ColorPicker } from "../color/ColorPicker";
@@ -40,13 +40,12 @@ const WIDTHS = [
 const NUMBER_INPUT =
   "ui-field w-24 disabled:opacity-50";
 
-type DialogTab = "indicator" | "current" | "compare";
 const TABS = ["indicator", "current", "compare"] as const satisfies readonly DialogTab[];
 const TAB_LABEL: Record<DialogTab, string> = { indicator: "지표", current: "이 칸에 띄운 지표", compare: "비교 종목" };
 
 export function IndicatorDialog() {
   const dialog = useSelectionStore((s) => s.dialog);
-  return dialog?.kind === "indicator" ? <IndicatorDialogBody slot={dialog.slot} editId={dialog.editId} /> : null;
+  return dialog?.kind === "indicator" ? <IndicatorDialogBody slot={dialog.slot} editId={dialog.editId} initialTab={dialog.tab} /> : null;
 }
 
 function useValidator(): Validate | "loading" | "failed" {
@@ -67,7 +66,7 @@ function useValidator(): Validate | "loading" | "failed" {
   return validate;
 }
 
-function IndicatorDialogBody({ slot, editId }: { slot: Slot; editId: string | null }) {
+function IndicatorDialogBody({ slot, editId, initialTab }: { slot: Slot; editId: string | null; initialTab: DialogTab }) {
   const { closeDialog: close, openIndicators } = useSelectionStore.getState();
   const { addIndicator, updateIndicator, removeIndicator } = useLayoutStore.getState();
   const cell = useCell(slot);
@@ -81,7 +80,7 @@ function IndicatorDialogBody({ slot, editId }: { slot: Slot; editId: string | nu
   const searchRef = useRef<HTMLInputElement>(null);
   const settingsRef = useRef<HTMLDivElement>(null);
 
-  const [tab, setTab] = useState<DialogTab>("indicator");
+  const [tab, setTab] = useState<DialogTab>(initialTab);
   const [query, setQuery] = useState("");
   const [draft, setDraft] = useState(() => startDraft(editing, editing?.spec.kind ?? "ma"));
   const [draftOf, setDraftOf] = useState(editingId);

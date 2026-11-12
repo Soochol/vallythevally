@@ -44,7 +44,7 @@ test.describe("데스크톱", () => {
     const expectCellShows = watchCell(page, "005930");
     await page.goto("/?symbol=005930");
     const toolbar = page.getByRole("toolbar", { name: "차트 도구 막대" });
-    const venues = toolbar.getByRole("group", { name: "거래소" });
+    const venues = cell(page).getByRole("group", { name: "거래소" });
     const periods = toolbar.getByRole("group", { name: "봉 주기" });
     await expectCellShows("삼성전자 통합 일", "combined", "D");
 
@@ -64,7 +64,7 @@ test.describe("데스크톱", () => {
   test("NXT에서 거래되지 않는 종목은 NXT를 고를 수 없다", async ({ page }) => {
     const expectCellShows = watchCell(page, "005935");
     await page.goto("/?symbol=005935");
-    const venues = page.getByRole("toolbar", { name: "차트 도구 막대" }).getByRole("group", { name: "거래소" });
+    const venues = cell(page).getByRole("group", { name: "거래소" });
     await expectCellShows("삼성전자우 통합 일", "combined", "D");
     const nxt = venues.getByRole("button", { name: "NXT, NXT에서 거래되지 않는 종목" });
     await expect(nxt).toHaveAttribute("aria-disabled", "true");

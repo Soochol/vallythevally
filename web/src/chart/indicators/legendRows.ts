@@ -98,6 +98,7 @@ export class IndicatorLegend {
       const b = el("button", BTN);
       b.innerHTML = iconMarkup(icon);
       b.type = "button";
+      b.dataset.chartControl = "";
       b.title = label;
       b.dataset.indicatorCommand = command;
       b.addEventListener("click", () => this.onCommand(id, command));
@@ -111,8 +112,10 @@ export class IndicatorLegend {
     button("close", key === "panel" ? "패널 닫기" : "지우기", "remove");
     const detail = el("details", "relative min-w-0 text-text-2");
     const summary = el("summary", "max-w-[18ch] cursor-pointer truncate text-xs max-md:max-w-[10ch]", "자료·갱신");
+    summary.dataset.chartControl = "";
     summary.setAttribute("aria-label", "재무자료와 갱신 상태");
     const box = el("div", "ui-popover w-[min(440px,85vw)] whitespace-normal p-3");
+    box.dataset.chartControl = "";
     let cleanup: (() => void) | null = null;
     const syncDetail = () => {
       if (detail.open && detail.isConnected) {
@@ -122,10 +125,12 @@ export class IndicatorLegend {
     summary.addEventListener("click", (event) => { event.preventDefault(); detail.open = !detail.open; syncDetail(); });
     detail.addEventListener("toggle", syncDetail);
     const select = el("button", "mb-2 w-full bg-surface text-s");
+    select.dataset.chartControl = "";
     select.setAttribute("aria-label", "보고기간 자료");
     const text = el("p", "whitespace-pre-wrap text-xs");
     const refresh = el("button", "btn-primary mt-2", "재무자료 새로고침·재시도");
     refresh.type = "button";
+    refresh.dataset.chartControl = "";
     refresh.title = "재무자료 새로고침·재시도";
     refresh.addEventListener("click", () => this.onCommand(id, "refresh"));
     box.append(select, text, refresh);

@@ -110,7 +110,6 @@ function useOpenResult() {
       pendingOpen = null;
       useLayoutStore.getState().setSymbol(slot, target);
       useSelectionStore.getState().setPhoneTab("chart");
-      useSelectionStore.getState().setDesktopView("chart");
     },
     [queryClient],
   );
@@ -177,24 +176,6 @@ export function PhoneScreener() {
   return (
     <div className="fixed inset-x-0 bottom-[56px] top-0 z-30 flex flex-col bg-bg">
       <ScreenerPanel />
-    </div>
-  );
-}
-
-export function DesktopScreener() {
-  const shown = useSelectionStore((s) => s.desktopView === "screener");
-  const desktop = useMediaQuery(DESKTOP_QUERY);
-  const screens = useScreens();
-  const chosen = useScreenerStore((s) => s.chosenId);
-  const choose = useScreenerStore((s) => s.choose);
-  if (!shown || !desktop) return null;
-  return (
-    <div className="desktop-screener">
-      <nav aria-label="내 조건식">
-        <div className="mb-2 flex items-center justify-between px-3 text-xs text-text-3"><span>내 조건식</span><button type="button" className="icon-btn" aria-label="새 조건식" onClick={() => editScreen(null)}><PlusIcon /></button></div>
-        {(screens.data?.screens ?? []).map((screen, i) => <button key={screen.id} type="button" aria-pressed={screen.id === (chosen ?? screens.data?.screens[0]?.id)} onClick={() => choose(screen.id)}><strong className="block text-m font-semibold">{screen.name}</strong><span className="mt-1 block text-xs text-text-3">조건 {screen.conditions.length}개 · {i + 1}</span></button>)}
-      </nav>
-      <section><ScreenerPanel /></section>
     </div>
   );
 }

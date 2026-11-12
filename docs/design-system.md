@@ -18,7 +18,9 @@
 3. 탭은 `ui-tabs`와 `tablist`, `tab`, `tabpanel` 역할을 함께 사용한다. 좌우 화살표, Tab, Escape와 닫은 뒤 포커스 복귀를 확인한다.
 4. 화면 높이가 줄면 내용 영역 안에서 스크롤하게 한다. 대화상자 하단의 저장과 취소는 내용 밖에 둔다. 페이지 자체의 크기를 늘리거나 필요한 조작을 잘라 숨기지 않는다.
 
-데스크톱 차트와 스크리너 전환은 저장하지 않는 `desktopView`를 사용한다. 스크리너는 기존 `ScreenerPanel`을 재사용한다. 조건식 편집의 저장, 충돌 처리와 조건 검사는 기존 로직을 유지한다.
+데스크톱 셸은 44px 위 막대, 40px 드로잉 막대, 26px 상태 막대를 사용한다. 오른쪽의 관심종목·스크리너·개체 탭은 `RightPanel`이 소유한다. `UiPrefs.rightPanel`에 선택 탭, `watchCollapsed`에 숨김, `rightPanelWidth`에 기본/넓은 너비를 저장한다. 숨긴 탭은 위 막대 버튼이나 Alt+W로 다시 연다. 스크리너는 기존 `ScreenerPanel`을 탭 안에서 재사용하고, 결과를 골라도 왼쪽 차트를 유지한다. 조건식 편집의 저장, 충돌 처리와 조건 검사는 기존 로직을 유지한다.
+
+거래소 선택은 범례 머리의 `venueAnchor`에 기존 `VenuePicker`를 연결한다. 상태 막대의 재무 표시는 차트의 재무 조회 캐시를 구독하며 별도 수집 요청을 시작하지 않는다. 장 상태와 시계는 HTTP 응답으로 맞춘 서버 기준 한국 시각을 사용한다.
 
 ## 색상 선택 연결하기
 
@@ -64,3 +66,10 @@ DOM 범례는 `iconMarkup("gear" | "eye" | "eyeOff" | "close" | "up" | "down")`�
 `tokens.css`의 반경은 5/7/10/12, 최소 글자는 11px이며 숫자는 전역 `tabular-nums`를 상속한다. `ui.css`와 `colors.css`의 치수는 `--size-*` 토큰을 참조하고 간격은 4px 배수를 사용한다. 색 토큰 값은 #181 그대로 유지한다. 분봉 별표는 `UiPrefs.pinnedMinutes`로 저장하고 잘못된 주기·중복을 읽기 경계에서 제거한다. 서버 API는 바꾸지 않는다.
 
 시안 원본 9장은 [docs/mockups/ux-overhaul](mockups/ux-overhaul/)에 보관한다. 기능 규칙은 시안보다 #200과 #181이 우선이며 색상 선택기의 48색·최근 8색·HEX·선 샘플과 굵기 1~5를 유지한다.
+
+
+## 차트 안 조작 요소의 입력 경계
+
+범례·머리에 만드는 실제 조작 요소에는 `data-chart-control`을 붙인다. React 밖에서 만드는 버튼·summary와 조작 팝오버도 같은 표식을 쓴다. `DrawingSurface`는 부모 capture 단계에서 이벤트 경로의 표식을 검사해 드로잉 입력에서 제외한다. 버튼의 bubble 단계에서 전파만 막는 방식으로 대체하지 않는다.
+
+차트 위의 종목명은 `pointer-events: none`으로 십자선·휠·끌기를 통과시킨다. 이름은 말줄임하되 heading의 `aria-label`에 전체 이름을 제공한다. 입력을 소유하는 것은 거래소 같은 실제 조작 요소이며 이 요소에만 `pointer-events: auto`를 준다.

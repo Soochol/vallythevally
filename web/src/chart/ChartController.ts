@@ -112,6 +112,7 @@ export class ChartController {
   private readonly compare: CompareLayer;
   private readonly compareLegend: CompareLegend;
   private readonly legend: Legend;
+  get venueAnchor(): HTMLElement { return this.legend.venueAnchor; }
   private readonly feed: BarFeed;
   private readonly onStatus: (s: CellStatus) => void;
   private tokens: ThemeTokens;
@@ -161,7 +162,7 @@ export class ChartController {
     );
     this.indicatorLegend = new IndicatorLegend(el, (id, command) => deps.onIndicatorCommand?.(id, command));
     this.compareLegend = new CompareLegend((code) => deps.onCompareRemove?.(code));
-    this.legend.root.append(this.indicatorLegend.priceBox, this.compareLegend.box);
+    this.legend.body.append(this.indicatorLegend.priceBox, this.compareLegend.box);
     this.resize = new ResizeObserver(() => {
       const width = this.axisWidth();
       if (this.chart.options().rightPriceScale.minimumWidth !== width) this.chart.priceScale("right").applyOptions({ minimumWidth: width });
@@ -238,7 +239,6 @@ export class ChartController {
     this.legend.setHead({
       name: next.info?.name ?? next.symbol,
       sub: symbolSub(next.symbol, next.info),
-      venue: venueLabel(next.symbol, next.venue),
       period: PERIOD_LABEL[next.period],
     });
 
