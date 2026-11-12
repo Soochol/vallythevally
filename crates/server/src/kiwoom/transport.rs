@@ -82,7 +82,7 @@ pub struct ReqwestTransport {
 
 impl ReqwestTransport {
     pub fn new(base_url: String) -> Result<Self, reqwest::Error> {
-        let client = reqwest::Client::builder().timeout(SEND_TIMEOUT).build().map_err(reqwest::Error::without_url)?;
+        let client = reqwest::Client::builder().tls_backend_rustls().timeout(SEND_TIMEOUT).build().map_err(reqwest::Error::without_url)?;
         Ok(ReqwestTransport { client, base_url })
     }
 }
