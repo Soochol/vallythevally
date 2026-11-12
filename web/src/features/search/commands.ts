@@ -14,7 +14,7 @@ import { saveSnapshot } from "../snapshot/saveSnapshot";
 export const DEFAULT_SEARCH_COMMANDS: readonly SearchCommand[] = [
   ...HOTKEYS.flatMap(({ label, keys, action }): SearchCommand[] => {
     switch (action.kind) {
-      case "indicators": return [{ id: "indicators", label, shortcut: keys, run: ({ slot }) => useSelectionStore.getState().openIndicators(slot) }];
+      case "indicators": return [{ id: "indicators", label, shortcut: keys, run: ({ slot }) => useSelectionStore.getState().openIndicatorCommand(slot) }];
       case "toggleLog": return [{ id: "log", label, shortcut: keys, run: ({ slot }) => {
         const layout = useLayoutStore.getState();
         const cell = layout.layout.cells.find((c) => c.slot === slot);

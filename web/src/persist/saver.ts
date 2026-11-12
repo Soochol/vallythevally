@@ -32,6 +32,11 @@ export interface SaverOptions<T extends object> {
 export interface Saver {
   changed(): void;
   retry(): void;
+  settled(): Promise<void>;
+  advanceRevision(revision: number): void;
+  acceptSaved(revision: number): void;
+  pauseCurrent(): void;
+  resume(): void;
   /**
    * 탭이 숨을 때: 보내지 못한 편집이 있으면 기다리지 않고 keepalive로 보낸다.
    * 앞 요청이 아직 진행 중이어도 보낸다. 서버가 revision으로 순서를 지키므로 늦게 도착한 앞 요청이 이것을 덮지 못한다.
@@ -47,7 +52,9 @@ export function createSaver<T extends object>(o: SaverOptions<T>): Saver {
   let failures = 0;
   let revision = o.revision;
   let newest = 0;
+  let pause: { kind: "active" | "retired"; edits: number } | null = null;
   let timer: ReturnType<typeof setTimeout> | null = null;
+  const settled = new Set<() => void>();
 
   const cancel = () => {
     if (timer !== null) clearTimeout(timer);
@@ -92,6 +99,7 @@ export function createSaver<T extends object>(o: SaverOptions<T>): Saver {
       error = e;
     }
     inFlight--;
+    if (inFlight === 0) { settled.forEach((resolve) => resolve()); settled.clear(); }
     // stale_revision: 서버에 이것보다 새 편집(이 탭의 나중 요청, 또는 다른 탭)이 이미 있다. 이 본문은 할 일을 마쳤다.
     const done = error === null || (error instanceof ApiRequestError && error.code === "stale_revision");
     const tooLarge = error instanceof ApiRequestError && error.code === "payload_too_large";
@@ -127,7 +135,7 @@ export function createSaver<T extends object>(o: SaverOptions<T>): Saver {
   }
 
   function run() {
-    if (inFlight > 0 || edits === savedEdits) return;
+    if (inFlight > 0 || edits === savedEdits || edits === pause?.edits) return;
     void send(false);
   }
 
@@ -141,11 +149,28 @@ export function createSaver<T extends object>(o: SaverOptions<T>): Saver {
       schedule(o.debounceMs);
     },
     retry() {
+      if (pause?.kind === "retired") pause = null;
       failures = 0;
       run();
     },
+    settled: () => inFlight === 0 ? Promise.resolve() : new Promise((resolve) => settled.add(resolve)),
+    advanceRevision: (received) => { revision = Math.max(revision, received); },
+    acceptSaved(received) {
+      revision = Math.max(revision, received);
+      savedEdits = edits;
+      cancel();
+      failures = 0;
+      o.unsaved?.clear(revision);
+      o.onState({ kind: "saved", at: now() });
+    },
+    pauseCurrent() { cancel(); pause = { kind: "active", edits }; },
+    resume() {
+      if (pause?.edits === edits) { pause = { kind: "retired", edits }; return; }
+      pause = null;
+      run();
+    },
     flush() {
-      if (edits === savedEdits) return;
+      if (edits === savedEdits || edits === pause?.edits) return;
       void send(true);
     },
   };

@@ -3,7 +3,7 @@ import { DEFAULT_LAYOUT, useLayoutStore } from "../stores/layout";
 import { usePersistStore } from "../stores/persist";
 import { useUiStore } from "../stores/ui";
 import { useWatchlistStore } from "../stores/watchlist";
-import { type Autosave, RECENT_CLEARED, startAutosave } from "./autosave";
+import { acceptWatchlistSave, type Autosave, RECENT_CLEARED, startAutosave } from "./autosave";
 import { PAYLOAD_LIMIT_BYTES } from "./bytes";
 import { ApiRequestError } from "../api/http";
 import { restore } from "./restore";
@@ -91,6 +91,19 @@ test("관심종목은 바꾸자마자 보낸다", async () => {
   expect(puts).toEqual([
     { path: "/api/watchlists", body: { lists: [{ ...FIRST, symbols: ["005930", "000660"] }], revision: expect.any(Number) }, keepalive: false },
   ]);
+});
+
+test("조건부 저장 승인은 자동 저장을 유발하지 않고 다음 로컬 편집은 승인 revision보다 새 값으로 보낸다", async () => {
+  const revision = Date.now() + 100_000;
+  acceptWatchlistSave({ lists: [{ ...FIRST, symbols: ["005930", "086520"] }], revision });
+  await vi.advanceTimersByTimeAsync(0);
+  expect(puts).toEqual([]);
+  expect(useWatchlistStore.getState().revision).toBe(revision);
+  expect(usePersistStore.getState().saves.watchlist.kind).toBe("saved");
+  useWatchlistStore.getState().add(FIRST_WATCHLIST_ID, "000660");
+  await vi.advanceTimersByTimeAsync(0);
+  expect(puts).toHaveLength(1);
+  expect(puts[0]!.body).toMatchObject({ revision: revision + 1, lists: [{ ...FIRST, symbols: ["005930", "086520", "000660"] }] });
 });
 
 test("목록을 만들고 종목을 옮기면 목록 전체를 한 본문으로 보낸다", async () => {

@@ -1,10 +1,8 @@
 import { SentenceEditor } from "./SentenceEditor";
 import { checkedSession, currentSession, selectedSource, useScreenEditor } from "./editorState";
 import { confirmAction } from "../overlay/Confirm";
-import { ownsChartKeyboard } from "../overlay/topLayer";
-import { SortIcon } from "../icons";
-import { type QueryClient, useQueryClient, type UseQueryResult } from "@tanstack/react-query";
-import { type ReactNode, type RefObject, useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
+import { useQueryClient, type UseQueryResult } from "@tanstack/react-query";
+import { type ReactNode, useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import type { ApiErrorBody } from "../../api/generated/ApiErrorBody";
 import type { KstDate } from "../../api/generated/KstDate";
 import type { Screen } from "../../api/generated/Screen";
@@ -15,9 +13,7 @@ import type { ScreenerUpdate } from "../../api/generated/ScreenerUpdate";
 import type { Screens } from "../../api/generated/Screens";
 import type { SymbolCode } from "../../api/generated/SymbolCode";
 import type { UpdatePhase } from "../../api/generated/UpdatePhase";
-import { symbolInfoQuery } from "../../api/queries";
 import { useScreenerStatus, useScreens, useUpdateCommands } from "../../api/screener";
-import { direction, formatPercent, formatPrice } from "../../lib/format";
 import { isTypingTarget } from "../../lib/hotkeys";
 import { DESKTOP_QUERY, useMediaQuery } from "../../lib/media";
 import {
@@ -29,12 +25,8 @@ import {
   isUpdating,
   MARKET_LABEL,
   marketsInOrder,
-  matchedDateText,
   NO_CONDITIONS_SENTENCE,
-  nextSort,
   PHASE_LABEL,
-  type ResultSort,
-  type ResultSortKey,
   type RunBlock,
   runBlock,
   showsUpdateBand,
@@ -45,22 +37,24 @@ import {
   type UpdateRetry,
   updateRetry,
 } from "../../lib/screener";
-import type { VenueTarget } from "../../lib/venue";
-import { addSymbols, listNameFrom, MAX_WATCHLISTS } from "../../lib/watchlist";
-import { type Slot, useCell, useLayoutStore } from "../../stores/layout";
+import { listNameFrom, MAX_WATCHLISTS } from "../../lib/watchlist";
+import { useCell } from "../../stores/layout";
 import { type Rerun, rerunReason, runOf, type ScreenRun, shownResult, useScreenerStore } from "../../stores/screener";
 import { useSelectionStore } from "../../stores/selection";
 import { serverNow, useServerClock } from "../../stores/serverClock";
-import { useUiStore } from "../../stores/ui";
 import { useWatchlistStore } from "../../stores/watchlist";
-import { ChevronIcon, MoreIcon, PenIcon, PlayIcon, PlusIcon, SpinnerIcon } from "../icons";
+import { ChevronIcon, MoreIcon, PenIcon, PlayIcon, PlusIcon, SpinnerIcon, StarIcon } from "../icons";
 import { Menu, type MenuItem } from "../menu/Menu";
+import { ownsChartKeyboard } from "../overlay/topLayer";
+import { EmptyState } from "../overlay/State";
+import { ResultTable } from "./ResultTable";
+import { ResultPreview } from "./ResultPreview";
+import { compareResult, dropPendingOpen, openResult, pendingResultCode, sendToNewWatchlist, sendToWatchlist } from "./resultActions";
+import { nextResult, previewRow, resultKeyAction } from "./results";
 
 const PANEL_POLL_MS = 1_000;
 const RAIL_POLL_MS = 10_000;
 const BADGE_MAX = 999;
-const DIR_CLASS = { up: "text-up", down: "text-down", flat: "text-text-2" } as const;
-const ROW_GRID = { gridTemplateColumns: "minmax(0,1fr) 76px 64px 64px" };
 const FULL_RELOAD_CONFIRM =
   "모든 종목의 전체 이력을 처음부터 다시 받습니다. 2시간 가까이 걸릴 수 있고, 최근 관측일을 채우는 동안에는 실행할 수 없습니다. 받는 동안에도 차트는 그대로 쓸 수 있습니다.";
 
@@ -74,54 +68,6 @@ const editScreen = (id: string | null, base?: Screens) => {
   else if (base) useScreenerStore.getState().choose(useScreenEditor.getState().create(base));
 };
 const count = (n: number) => n.toLocaleString("ko-KR");
-
-interface ResultOpen {
-  code: SymbolCode;
-  layoutId: string;
-  slot: Slot;
-  shown: SymbolCode | undefined;
-}
-
-let pendingOpen: ResultOpen | null = null;
-
-const shownIn = (slot: Slot): SymbolCode | undefined => useLayoutStore.getState().layout.cells.find((c) => c.slot === slot)?.symbol;
-
-function livePendingOpen(): ResultOpen | null {
-  const open = pendingOpen;
-  if (open === null) return null;
-  const unchanged =
-    useLayoutStore.getState().layout.id === open.layoutId && useSelectionStore.getState().activeSlot === open.slot && shownIn(open.slot) === open.shown;
-  return unchanged ? open : null;
-}
-
-const dropPendingOpen = () => {
-  pendingOpen = null;
-};
-
-async function venueTargetOf(queryClient: QueryClient, code: SymbolCode): Promise<VenueTarget> {
-  try {
-    return await queryClient.fetchQuery(symbolInfoQuery(code));
-  } catch {
-    return { code, nxtEnabled: false };
-  }
-}
-
-function useOpenResult() {
-  const queryClient = useQueryClient();
-  return useCallback(
-    async (code: SymbolCode) => {
-      const slot = useSelectionStore.getState().activeSlot;
-      const open: ResultOpen = { code, layoutId: useLayoutStore.getState().layout.id, slot, shown: shownIn(slot) };
-      pendingOpen = open;
-      const target = await venueTargetOf(queryClient, code);
-      if (livePendingOpen() !== open) return;
-      pendingOpen = null;
-      useLayoutStore.getState().setSymbol(slot, target);
-      useSelectionStore.getState().setPhoneTab("chart");
-    },
-    [queryClient],
-  );
-}
 
 function useChosenScreen() {
   const screens = useScreens();
@@ -193,7 +139,7 @@ export function PhoneScreener() {
   );
 }
 
-export function ScreenerPanel() {
+export function ScreenerPanel({ wide = false, onReturn = () => {} }: { wide?: boolean; onReturn?: () => void }) {
   const { screens, screen, run, session, source } = useChosenScreen();
   const statusQuery = useStoreStatus(PANEL_POLL_MS);
   const status = statusQuery.data;
@@ -202,69 +148,105 @@ export function ScreenerPanel() {
   const result = shownResult(run);
   const rows = useMemo(() => (result ? sortRows(result.rows, sort) : []), [result, sort]);
   const { refresh } = useUpdateCommands();
+  const queryClient = useQueryClient();
+  const active = useActiveSymbol();
+  const [preview, setPreview] = useState<{ screenId: string; code: SymbolCode } | null>(null);
+  const selected = previewRow(rows, preview?.screenId === screen?.id ? preview?.code ?? null : null, active);
+  const select = (code: SymbolCode) => {
+    if (wide && screen) setPreview({ screenId: screen.id, code });
+    else void openResult(queryClient, code);
+  };
+  const openPreview = (code = selected?.symbol) => {
+    if (!code) return;
+    void openResult(queryClient, code);
+    onReturn();
+  };
   const execute = () => {
     if (session && screens.data && !checkedSession(session, screens.data).ok) return;
-    if (screen) void useScreenerStore.getState().run(screen).then(refresh);
+    if (screen && status && block === null && run?.kind !== "running") void useScreenerStore.getState().run(screen).then(refresh);
   };
-  useResultKeys(rows);
+  useResultKeys({ rows, active: wide ? selected?.symbol ?? null : active, wide, onSelect: select, onOpen: openPreview, onRun: execute });
   useEffect(() => dropPendingOpen, []);
+  useEffect(() => { if (wide) dropPendingOpen(); }, [wide]);
   const band = status !== undefined && showsUpdateBand(status);
   return (
-    <aside aria-label="스크리너" className="flex min-h-0 flex-1 flex-col">
-      <div className="min-h-0 flex-1 overflow-y-auto">
-        {band && <UpdateBand status={status} />}
-        {session && source && screens.data ? (
-          <SentenceEditor session={session} base={screens.data} source={source} running={run?.kind === "running"} blocked={block !== null} resultActions={<PanelMenu screen={screen} rows={rows} status={status} />} onRun={execute} />
-        ) : screen ? (
-          <ScreenHeader screen={screen} screens={screens.data?.screens ?? []} run={run} block={block} status={status} rows={rows} onRun={execute} />
-        ) : (
-          <header className="flex h-11 flex-none items-center gap-1 border-b border-line pl-3 pr-1.5">
-            <h2 className="text-l font-[700]">스크리너</h2>
-            <span className="flex-1" />
-            <PanelMenu screen={null} rows={rows} status={status} />
-          </header>
-        )}
-        {screen ? (
-          <Results screen={screen} run={run} rows={rows} status={status} block={block} onRun={execute} />
-        ) : (
-          <NoScreen query={screens} />
-        )}
+    <aside aria-label="스크리너" data-chart-control className="flex min-h-0 min-w-0 flex-1 flex-col">
+      <div className={wide ? "grid min-h-0 flex-1 grid-cols-[160px_minmax(0,1fr)_240px] min-[1280px]:grid-cols-[200px_minmax(0,1fr)_300px]" : "flex min-h-0 flex-1 flex-col"}>
+        {wide && <ScreenList screens={screens.data?.screens ?? []} chosen={screen?.id ?? null} />}
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+          <div className="max-h-[50%] flex-none overflow-y-auto">
+            {band && <UpdateBand status={status} />}
+            {session && source && screens.data ? (
+              <SentenceEditor session={session} base={screens.data} source={source} running={run?.kind === "running"} blocked={!status || block !== null} resultActions={<PanelMenu screen={screen} rows={rows} status={status} />} onRun={execute} />
+            ) : screen ? (
+              <ScreenHeader screen={screen} screens={screens.data?.screens ?? []} run={run} block={block} status={status} rows={rows} onRun={execute} wide={wide} />
+            ) : (
+              <header className="flex h-11 flex-none items-center gap-1 border-b border-line pl-3 pr-1.5">
+                <h2 className="text-l font-[700]">스크리너</h2>
+                <span className="flex-1" />
+                <PanelMenu screen={null} rows={rows} status={status} />
+              </header>
+            )}
+          </div>
+          <div className="min-h-0 flex-1 overflow-y-auto">
+            {screen ? (
+              <Results screen={screen} run={run} rows={rows} status={status} block={block} onRun={execute} selected={wide ? selected?.symbol ?? null : active} onSelect={select} />
+            ) : (
+              <NoScreen query={screens} />
+            )}
+          </div>
+        </div>
+        {wide && (selected ? <ResultPreview row={selected} onOpen={openPreview} onCompare={() => compareResult(selected.symbol, selected.name)} /> : <aside className="border-l border-line"><EmptyState title="결과 종목을 골라 보세요">실행한 뒤 결과를 고르면 일봉을 미리 봅니다.</EmptyState></aside>)}
       </div>
       <StatusFooterLine footer={statusFooter(status, statusQuery.error)} status={status} onRetry={() => void statusQuery.refetch()} />
     </aside>
   );
 }
 
-function useResultKeys(rows: readonly ScreenerRow[]) {
-  const active = useActiveSymbol();
-  const openResult = useOpenResult();
+interface ResultKeys {
+  rows: readonly ScreenerRow[];
+  active: SymbolCode | null;
+  wide: boolean;
+  onSelect(code: SymbolCode): void;
+  onOpen(code?: SymbolCode): void;
+  onRun(): void;
+}
+
+function useResultKeys({ rows, active, wide, onSelect, onOpen, onRun }: ResultKeys) {
   useEffect(() => {
-    if (rows.length === 0) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key !== "ArrowUp" && e.key !== "ArrowDown") return;
-      if (ownsChartKeyboard(e)) return;
-      if (e.defaultPrevented || e.isComposing || e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
-      if (useSelectionStore.getState().dialog || isTypingTarget(e.target)) return;
-      e.preventDefault();
-      const step = e.key === "ArrowDown" ? 1 : -1;
-      const from = livePendingOpen()?.code ?? active;
-      const at = rows.findIndex((r) => r.symbol === from);
-      const next = at < 0 ? (step === 1 ? 0 : rows.length - 1) : Math.min(rows.length - 1, Math.max(0, at + step));
-      if (next !== at) void openResult(rows[next]!.symbol);
+    const onKey = (event: KeyboardEvent) => {
+      if (useSelectionStore.getState().dialog || ownsChartKeyboard(event) || isTypingTarget(event.target)) return;
+      const action = resultKeyAction(event, wide);
+      if (!action) return;
+      if (action.kind !== "run" && event.target instanceof Element && event.target.closest("[data-screen-list]")) return;
+      if (action.kind === "run") {
+        event.preventDefault();
+        onRun();
+      } else if (action.kind === "move") {
+        const code = nextResult(rows, wide ? active : pendingResultCode() ?? active, action.step);
+        if (rows.length) event.preventDefault();
+        if (code) onSelect(code);
+      } else if (!(event.target instanceof Element) || !event.target.closest("button, a, summary, [role=button]")) {
+        event.preventDefault();
+        onOpen();
+      } else if (event.target.closest("[data-result-row]")) {
+        event.preventDefault();
+        onOpen(event.target.closest<HTMLTableRowElement>("tr")?.dataset.code);
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [rows, active, openResult]);
+  }, [rows, active, wide, onSelect, onOpen, onRun]);
 }
 
-function useFollowActive(list: RefObject<HTMLUListElement | null>, active: SymbolCode, rows: readonly ScreenerRow[]) {
-  useEffect(() => {
-    const root = list.current;
-    const row = root?.querySelector<HTMLElement>(`[data-code="${CSS.escape(active)}"]`);
-    if (!root || !row) return;
-    row.scrollIntoView({ block: "nearest" });
-    if (root.contains(document.activeElement)) row.querySelector<HTMLElement>("[data-main]")?.focus();
-  }, [list, active, rows]);
+function ScreenList({ screens, chosen }: { screens: readonly Screen[]; chosen: string | null }) {
+  return <nav aria-label="저장한 조건식" data-screen-list className="flex min-h-0 flex-col border-r border-line bg-surface">
+    <div className="flex flex-none items-center justify-between border-b border-line p-2"><h2 className="text-s font-semibold">조건식</h2><button type="button" className="icon-btn" aria-label="새 조건식" onClick={() => editScreen(null)}><PlusIcon /></button></div>
+    <div className="min-h-0 flex-1 overflow-y-auto p-1">{screens.map((screen) => <button key={screen.id} type="button" aria-current={screen.id === chosen || undefined}
+      className={`mb-1 w-full rounded-m p-2 text-left text-s ${screen.id === chosen ? "bg-accent-soft text-accent" : "hover:bg-raised"}`} onClick={() => { dropPendingOpen(); useScreenerStore.getState().choose(screen.id); }}>
+      <b className="block break-words font-semibold">{screen.name}</b><small className="text-xs text-text-3">조건 {screen.conditions.length}개</small>
+    </button>)}</div>
+  </nav>;
 }
 
 interface HeaderProps {
@@ -289,32 +271,41 @@ function runHint(block: RunBlock | null, status: ScreenerStatus | undefined): Re
   return "실행할 때 KRX 최신 자료를 수집합니다";
 }
 
-function ScreenHeader({ screen, screens, run, block, status, rows, onRun }: HeaderProps) {
+function ScreenHeader({ screen, screens, run, block, status, rows, onRun, wide }: HeaderProps & { wide: boolean }) {
   const running = run?.kind === "running";
+  const summary = [
+    marketsInOrder(screen.markets).map((market) => MARKET_LABEL[market]).join("·") || "전 종목 대상",
+    ...screen.conditions.map(conditionSentence),
+    screen.conditions.length === 0 ? NO_CONDITIONS_SENTENCE : "",
+    screen.exclude.length ? `${excludedInOrder(screen.exclude).map((kind) => EXCLUDE_LABEL[kind]).join("·")} 제외` : "",
+  ].filter(Boolean).join(" · ");
   return (
     <header className="flex-none border-b border-line px-3 pb-3 pt-2">
       <div className="flex items-center gap-1">
-        <ScreenPicker screens={screens} screen={screen} />
+        {wide ? <h2 className="min-w-0 truncate text-l font-bold">{screen.name}</h2> : <ScreenPicker screens={screens} screen={screen} />}
         <span className="flex-1" />
         <button type="button" className="tb-btn h-7 gap-1 px-2 text-s text-text-2" title="조건식 편집" onClick={() => editScreen(screen.id)}>
           <PenIcon size={14} />
           편집
         </button>
-        <button type="button" className="icon-btn" title="새 조건식" aria-label="새 조건식" onClick={() => editScreen(null)}>
+        {!wide && <button type="button" className="icon-btn" title="새 조건식" aria-label="새 조건식" onClick={() => editScreen(null)}>
           <PlusIcon />
-        </button>
+        </button>}
         <PanelMenu screen={screen} rows={rows} status={status} />
       </div>
-      <ScreenSummary screen={screen} />
+      {wide ? <p className="mt-2 truncate text-s text-text-2" title={summary}>{summary}</p> : <ScreenSummary screen={screen} />}
       <div className="mt-2.5 flex items-center gap-2.5">
         <button
           type="button"
           className="btn-primary flex h-8 flex-none items-center gap-1.5 px-4 text-s disabled:cursor-not-allowed disabled:opacity-40"
-          disabled={block !== null || running}
+          disabled={!status || block !== null || running}
+          aria-label={running ? "실행 중" : "실행"}
+          title="실행 (Ctrl+↵)"
+          aria-keyshortcuts="Control+Enter Meta+Enter"
           onClick={onRun}
         >
           {running ? <SpinnerIcon /> : <PlayIcon />}
-          {running ? "실행 중" : "실행"}
+          {running ? "실행 중" : "실행"}<kbd className="ml-1 text-xs">Ctrl+↵</kbd>
         </button>
         <span className="min-w-0 text-xs leading-[1.4] text-text-2">{runHint(block, status)}</span>
       </div>
@@ -326,7 +317,7 @@ function ScreenPicker({ screens, screen }: { screens: readonly Screen[]; screen:
   const menu = useMenuToggle();
   const choose = useScreenerStore((s) => s.choose);
   const items: MenuItem[] = [
-    ...screens.map((s): MenuItem => ({ kind: "radio", label: s.name, checked: s.id === screen.id, onSelect: () => choose(s.id) })),
+    ...screens.map((s): MenuItem => ({ kind: "radio", label: s.name, checked: s.id === screen.id, onSelect: () => { dropPendingOpen(); choose(s.id); } })),
     { kind: "separator" },
     { kind: "action", label: "새 조건식…", onSelect: () => editScreen(null) },
   ];
@@ -397,25 +388,7 @@ function ScreenSummary({ screen }: { screen: Screen }) {
   );
 }
 
-function sendToWatchlist(listId: string, codes: readonly SymbolCode[]) {
-  const store = useWatchlistStore.getState();
-  const list = store.lists.find((l) => l.id === listId);
-  if (!list) return;
-  const added = addSymbols(list.symbols, codes).length - list.symbols.length;
-  store.addAll(listId, codes);
-  const skipped = codes.length - added;
-  if (added === 0) return toast(`${list.name}에 이미 모두 있습니다`);
-  toast(`${list.name}에 ${count(added)}종목을 넣었습니다${skipped > 0 ? ` (이미 있던 ${count(skipped)}종목은 건너뜀)` : ""}`);
-}
-
-function sendToNewWatchlist(name: string, codes: readonly SymbolCode[]) {
-  const id = crypto.randomUUID();
-  useWatchlistStore.getState().create(id, name);
-  useUiStore.getState().setActiveWatchlist(id);
-  sendToWatchlist(id, codes);
-}
-
-function PanelMenu({ screen, rows, status }: { screen: Screen | null; rows: readonly ScreenerRow[]; status: ScreenerStatus | undefined }) {
+function PanelMenu({ screen, rows, status, saveOnly = false }: { screen: Screen | null; rows: readonly ScreenerRow[]; status: ScreenerStatus | undefined; saveOnly?: boolean }) {
   const menu = useMenuToggle();
   const lists = useWatchlistStore((s) => s.lists);
   const { start } = useUpdateCommands();
@@ -435,22 +408,24 @@ function PanelMenu({ screen, rows, status }: { screen: Screen | null; rows: read
     { kind: "heading", label: nothing ? "관심종목으로 보내기" : `결과 ${count(codes.length)}종목을 관심종목으로 보내기` },
     ...lists.map((l): MenuItem => ({ kind: "action", label: l.name, disabled: nothing, onSelect: () => sendToWatchlist(l.id, codes) })),
     ...newList,
-    { kind: "separator" },
-    { kind: "action", label: "전체 다시 받기…", hint: waiting?.from, disabled: isUpdating(status) || waiting !== null, onSelect: reload },
+    ...(!saveOnly ? [
+      { kind: "separator" } satisfies MenuItem,
+      { kind: "action", label: "전체 다시 받기…", hint: waiting?.from, disabled: isUpdating(status) || waiting !== null, onSelect: reload } satisfies MenuItem,
+    ] : []),
   ];
   return (
     <div ref={menu.root} className="relative">
       <button
         ref={menu.button}
         type="button"
-        className="icon-btn"
-        title="관심종목으로 보내기, 전체 다시 받기"
-        aria-label="스크리너 메뉴"
+        className={saveOnly ? "tb-btn h-[var(--size-26)] gap-1 whitespace-nowrap text-xs" : "icon-btn"}
+        title={saveOnly ? "결과를 관심종목으로 저장" : "관심종목으로 보내기, 전체 다시 받기"}
+        aria-label={saveOnly ? "결과를 관심종목으로 저장" : "스크리너 메뉴"}
         aria-haspopup="menu"
         aria-expanded={menu.open}
         onClick={menu.toggle}
       >
-        <MoreIcon />
+        {saveOnly ? <><StarIcon size={12} />관심종목으로</> : <MoreIcon />}
       </button>
       {menu.open && (
         <Menu label="스크리너 메뉴" items={items} onClose={menu.close} root={menu.root} className="absolute right-0 top-[calc(100%+4px)] max-h-[60vh] min-w-[220px] overflow-auto" />
@@ -514,9 +489,11 @@ interface ResultsProps {
   status: ScreenerStatus | undefined;
   block: RunBlock | null;
   onRun(): void;
+  selected: SymbolCode | null;
+  onSelect(code: SymbolCode): void;
 }
 
-function Results({ screen, run, rows, status, block, onRun }: ResultsProps) {
+function Results({ screen, run, rows, status, block, onRun, selected, onSelect }: ResultsProps) {
   const result = shownResult(run);
   const storeVersion = useScreenerStore((s) => s.storeVersion);
   const rerun = block === null ? rerunReason(run, storeVersion, status) : null;
@@ -527,7 +504,7 @@ function Results({ screen, run, rows, status, block, onRun }: ResultsProps) {
   if (result) return (
     <>
       {failure && <p role="alert" className="flex-none border-b border-line px-3 py-2 text-s text-danger">실행하지 못했습니다. {message} 이전 결과와 수집 시각을 유지합니다.</p>}
-      <ResultList screen={screen} result={result} rows={rows} running={run?.kind === "running"} rerun={rerun} onRun={onRun} />
+      <ResultList screen={screen} result={result} rows={rows} running={run?.kind === "running"} rerun={rerun} onRun={onRun} selected={selected} onSelect={onSelect} />
     </>
   );
   if (failure) return (
@@ -550,29 +527,29 @@ const collectionTime = (seconds: number) => new Intl.DateTimeFormat("sv-SE", {
   timeZone: "Asia/Seoul", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23",
 }).format(new Date(seconds * 1000));
 
-function ResultList({ screen, result, rows, running, rerun, onRun }: ResultListProps) {
-  const active = useActiveSymbol();
-  const list = useRef<HTMLUListElement>(null);
-  useFollowActive(list, active, rows);
+function ResultList({ screen, result, rows, running, rerun, onRun, selected, onSelect }: ResultListProps) {
   const sort = useScreenerStore((s) => s.sort);
   const left = result.excluded.listedTooShort + result.excluded.historyShort;
   return (
     <section aria-label="결과" aria-busy={running} className={`flex flex-col ${running ? "opacity-50" : ""}`}>
       <div className="flex flex-none items-baseline gap-1.5 px-3 pt-2.5">
         <span className="text-xl font-[700] leading-none">{count(rows.length)}</span>
-        <span className="text-s text-text-2">종목 · {dayLabel(result.asOf, result.asOf)} 기준</span>
+        <span className="min-w-0 flex-1 text-s text-text-2">종목 · {dayLabel(result.asOf, result.asOf)} 기준</span>
+        <PanelMenu screen={screen} rows={rows} status={undefined} saveOnly />
       </div>
+      <details className="px-3 py-1 text-xs text-text-3"><summary className="cursor-pointer">결과 자료 · 수집 시각과 제외 내역</summary>
       <div aria-label="결과 자료" className="flex-none space-y-1 px-3 pt-1 text-xs leading-relaxed text-text-2">
         <p>기준 관측일 {result.asOf} · KRX</p>
         <p>수집 범위 (KST) <time>{collectionTime(result.collectionStartedAt)}</time> ~ <time>{collectionTime(result.collectionCompletedAt)}</time></p>
-        <p>최신가는 일봉 0봉 가격 · 등락률은 직전 거래 일봉 대비</p>
-        <p>{screen.conditions.some((condition) => "period" in condition) ? "맞은 날짜는 첫 봉 조건의 최근 일치일 · 주·월봉은 시작일" : "맞은 날짜는 기준 관측일입니다"}</p>
+        <p>종가는 일봉 0봉 가격 · 등락률은 직전 거래 일봉 대비</p>
+        <p>{screen.conditions.some((condition) => "period" in condition) ? "충족일은 첫 봉 조건의 최근 일치일 · 주·월봉은 시작일" : "충족일은 기준 관측일입니다"}</p>
         <p>잠정은 이번 수집의 당일 요약입니다</p>
         <p>자료 누락 {count(result.missingSummary)}종목{result.missingSummary > 0 && " · 자료를 확인하지 못해 판정에서 빠졌습니다"}</p>
       </div>
       <p className="flex-none px-3 pb-2 pt-1 text-xs text-text-3">
         대상 {count(result.universe)}종목 · 빠짐: {excludedText(result.excluded)}
       </p>
+      </details>
       {rerun && (
         <p className="mx-3 mb-2 flex flex-none items-center gap-2 rounded-s bg-accent-soft px-2 py-1.5 text-xs text-accent">
           {rerun.kind === "new_day" ? `${dayLabel(rerun.day, result.asOf)} 자료가 들어왔습니다` : "저장소 자료가 바뀌었습니다"}
@@ -597,77 +574,10 @@ function ResultList({ screen, result, rows, running, rerun, onRun }: ResultListP
           </button>
         </div>
       ) : (
-        <>
-          <SortHeader sort={sort} />
-          <ul ref={list} aria-label={`${screen.name} 결과`}>
-            {rows.map((r) => (
-              <ResultRow key={r.symbol} row={r} screen={screen} asOf={result.asOf} active={r.symbol === active} />
-            ))}
-          </ul>
-        </>
+        <ResultTable screen={screen} asOf={result.asOf} rows={rows} selected={selected} sort={sort} onSort={useScreenerStore.getState().setSort} onSelect={onSelect} />
       )}
+      <p className="px-3 py-2 text-xs text-text-3">↑↓ 결과 이동 · ↵ 칸에 열기</p>
     </section>
-  );
-}
-
-const COLUMNS: readonly { key: ResultSortKey; label: string }[] = [
-  { key: "name", label: "종목" },
-  { key: "close", label: "최신가" },
-  { key: "changeRate", label: "등락률" },
-  { key: "matchedDate", label: "맞은 날짜" },
-];
-
-function SortHeader({ sort }: { sort: ResultSort }) {
-  const setSort = useScreenerStore((s) => s.setSort);
-  return (
-    <div style={ROW_GRID} className="grid flex-none items-center gap-1 border-y border-line px-3 py-1 text-xs text-text-3">
-      {COLUMNS.map(({ key, label }) => {
-        const on = sort.key === key;
-        return (
-          <button
-            key={key}
-            type="button"
-            aria-pressed={on}
-            aria-label={`${label} 순으로 정렬${on ? (sort.descending ? ", 지금 내림차순" : ", 지금 오름차순") : ""}`}
-            onClick={() => setSort(nextSort(sort, key))}
-            className={`flex items-center gap-0.5 hover:text-text ${key === "name" ? "" : "justify-end"} ${on ? "font-[650] text-text-2" : ""}`}
-          >
-            <span>{label}{key === "close" && <small className="block font-normal">일봉 날짜</small>}</span>
-            {on && <SortIcon dir={sort.descending ? "down" : "up"} />}
-          </button>
-        );
-      })}
-    </div>
-  );
-}
-
-function ResultRow({ row, screen, asOf, active }: { row: ScreenerRow; screen: Screen; asOf: KstDate; active: boolean }) {
-  const matched = matchedDateText(screen, row.matchedDate, asOf);
-  const openResult = useOpenResult();
-  return (
-    <li data-code={row.symbol} className={`border-l-2 ${active ? "border-l-accent bg-surface" : "border-l-transparent"}`}>
-      <button
-        type="button"
-        data-main
-        aria-current={active || undefined}
-        onClick={() => void openResult(row.symbol)}
-        style={ROW_GRID}
-        className="grid w-full items-center gap-1 py-[5px] pl-[10px] pr-3 text-left hover:bg-surface"
-      >
-        <span className="min-w-0">
-          <b className="block truncate font-[550]">{row.name}</b>
-          <small className="text-xs text-text-3">{row.symbol}{row.provisional && <em className="ml-1 not-italic text-warning">잠정</em>}</small>
-        </span>
-        <span className="text-right" aria-label={`최신가 ${formatPrice(row.close, false)}, 최신 일봉 ${row.latestBarDate}${row.provisional ? ", 당일 요약 잠정" : ""}`}>
-          {formatPrice(row.close, false)}
-          <small className="block text-[10px] text-text-3">{row.latestBarDate}</small>
-        </span>
-        <span className={`text-right text-s font-[550] ${row.changeRate === null ? "text-text-3" : DIR_CLASS[direction(row.changeRate)]}`}>
-          {row.changeRate === null ? "—" : formatPercent(row.changeRate)}
-        </span>
-        <span title={`첫 봉 조건 일치 ${row.matchedDate}`} className={`text-right text-s ${matched.current ? "font-[650] text-accent" : "text-text-2"}`}>{matched.text}</span>
-      </button>
-    </li>
   );
 }
 

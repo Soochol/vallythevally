@@ -10,7 +10,7 @@ import { useUiStore } from "../../stores/ui";
 import { useActiveWatchlist, useWatchlistStore } from "../../stores/watchlist";
 import { type SearchCommand, searchCommandsSnapshot, subscribeSearchCommands } from "../commands/registry";
 import { CloseIcon, Icon, ICON_PATHS, SearchIcon } from "../icons";
-import { DialogFrame } from "../dialog/DialogParts";
+import { CommandFrame } from "../commands/CommandFrame";
 import { EmptyState, ErrorState, Skeleton } from "../overlay/State";
 import { DEFAULT_SEARCH_COMMANDS } from "./commands";
 import { highlight } from "./highlight";
@@ -113,7 +113,7 @@ function SearchDialogBody({ purpose }: { purpose: SearchPurpose }) {
   };
   const resetInput = () => { setInput(""); inputRef.current?.focus(); };
 
-  return <DialogFrame labelledBy={`${ids}-title`} onClose={close} width="h-[500px] w-[min(840px,calc(100vw-32px))] max-md:h-[80dvh]">
+  return <CommandFrame labelledBy={`${ids}-title`} onClose={close} width="h-[500px] w-[min(840px,calc(100vw-32px))] max-md:h-[80dvh]">
     <div className="flex min-h-0 flex-1 flex-col">
       <h2 id={`${ids}-title`} className="sr-only">{purpose === "watch" ? "관심종목에 넣을 종목 검색" : "종목 검색"}</h2>
       <div className="flex flex-none flex-wrap items-center gap-2 border-b border-line px-4 py-3">
@@ -158,7 +158,7 @@ function SearchDialogBody({ purpose }: { purpose: SearchPurpose }) {
         <span><kbd>↑↓</kbd> 고르기</span><span><kbd>↵</kbd> {purpose === "watch" ? "관심종목에 넣기" : "열기"}</span><span><kbd>Ctrl+↵</kbd> 관심종목</span><span><kbd>Shift+↵</kbd> 비교</span><span><kbd>Esc</kbd> 닫기</span>
       </div>
     </div>
-  </DialogFrame>;
+  </CommandFrame>;
 }
 
 function Marked({ text, query }: { text: string; query: string }) {

@@ -68,6 +68,14 @@ DOM 범례는 `iconMarkup("gear" | "eye" | "eyeOff" | "close" | "up" | "down")`�
 시안 원본 9장은 [docs/mockups/ux-overhaul](mockups/ux-overhaul/)에 보관한다. 기능 규칙은 시안보다 #200과 #181이 우선이며 색상 선택기의 48색·최근 8색·HEX·선 샘플과 굵기 1~5를 유지한다.
 
 
+## 드로잉 조작 연결하기
+
+`DrawingToolbar`는 등록된 도구만 그룹으로 표시한다. 펼침 메뉴의 별표는 `UiPrefs.drawing.pinnedTools`에 저장하며, 읽을 때 구현되지 않은 도구와 중복을 제외한다. 고정 도구와 연속 그리기 상태는 별개다.
+
+고른 드로잉의 작은 막대는 공통 색상 선택기와 선 굵기·선 모양 선택을 사용한다. 좌표·글자·주기 등 나머지 설정은 `DrawingDetails` 팝오버에 있다. 초안은 차트에 미리 보이고 확인으로 저장하며, 취소·Esc·바깥 누르기는 초안을 버린다. 드로잉 삭제는 기존 `DrawingSync.commitWithUndo`를 사용한다.
+
+개체 탭은 현재 종목의 `DrawingScope`에 따라 이 칸·이 레이아웃 공통·이 종목 모든 칸 공통으로 나눈다. 모든 종목에 걸친 드로잉은 지원하지 않는다. 이름은 `style.objectName`, 순서는 `z`에 저장한다. 이름은 차트 글자인 `text`와 별개이며 복제할 때 함께 복사한다. 기본 스타일로 되돌릴 때 이름을 유지하고, 새 드로잉의 스타일을 기억할 때는 이름을 제외한다.
+
 ## 차트 안 조작 요소의 입력 경계
 
 범례·머리에 만드는 실제 조작 요소에는 `data-chart-control`을 붙인다. React 밖에서 만드는 버튼·summary와 조작 팝오버도 같은 표식을 쓴다. `DrawingSurface`는 부모 capture 단계에서 이벤트 경로의 표식을 검사해 드로잉 입력에서 제외한다. 버튼의 bubble 단계에서 전파만 막는 방식으로 대체하지 않는다.
@@ -89,3 +97,11 @@ DOM 범례는 `iconMarkup("gear" | "eye" | "eyeOff" | "close" | "up" | "down")`�
 데스크톱 조건식은 `SentenceEditor`와 `SentenceFields`에서 문장으로 편집한다. `ConditionFields`는 휴대폰 편집창과 문장 편집이 함께 사용하는 조건별 입력이다. 숫자는 `NumberToken`의 팝오버에서 입력하고 Enter로 적용한다. 봉 수에는 일·주·월과 자주 쓰는 값을 함께 제공하며 Escape는 적용 전 입력을 취소한다.
 
 `editorState`는 조건식별 draft와 저장 기준 revision을 보관한다. 탭이나 조건식을 바꿔도 draft는 유지한다. 실행 버튼과 Ctrl+Enter 명령은 기존 `checkDraft`로 검증한 draft를 실행한다. 저장 충돌에서는 최신 목록을 저장 기준으로 삼고 편집 내용은 남겨 다시 저장할 수 있다.
+
+## 지표·비교 입력창
+
+`I`, 위 막대의 지표·비교·차트 설정과 휴대폰 지표 버튼은 `openIndicatorCommand`를 호출한다. 종목 검색과 같은 `CommandFrame`을 쓰며 지표 입력창의 기본 너비는 700px이다. `DialogFrame`의 command 변형만 옅은 배경을 적용한다. 목록에는 현재 지표, 추가할 지표 후보, 기존 검색 API가 반환한 비교 종목 후보를 둔다. 현재 지표의 보기·지우기는 목록에서 처리하고, 비교 종목의 3개 제한·중복 방지와 % 축 규칙을 유지한다.
+
+`parseIndicatorInput`은 한글 이름·영문 약어·초성을 종류에 연결하고 뒤의 숫자를 `KINDS` 필드 순서로 읽는 순수 함수다. `이평 20`, `bb 20 2`, `rsi`, `roe`를 지원한다. 숫자가 생략되면 기본값을 쓰고 잘못된 숫자는 설정 오류로 표시한다. 오른쪽 설정은 범례와 같은 `IndicatorSettingsForm`이다. Enter는 확정 후 계속 추가하고, Shift+Enter는 확정 후 닫는다. Tab은 설정으로 이동하며 Esc와 바깥 누르기는 미확정 미리보기를 버린다.
+
+미리보기는 `useIndicatorPreview`가 소유하고 `ChartCell`이 저장된 설정과 합쳐 컨트롤러에만 전달한다. layout store와 autosave에는 미리보기를 쓰지 않는다. 추가·편집 확정 때만 `executeCommand`가 layout을 바꾼다. 입력창을 닫거나 후보가 바뀌면 이전 미리보기를 제거한다. 과거 `IndicatorDialog`·`ComparePanel`과 탭 상태·전용 스타일은 제거했다.

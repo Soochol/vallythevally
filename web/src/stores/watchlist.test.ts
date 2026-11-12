@@ -1,6 +1,12 @@
 import { beforeEach, expect, test } from "vitest";
 import { DEFAULT_WATCHLISTS, FIRST_WATCHLIST_ID, MAX_WATCHLISTS } from "../lib/watchlist";
-import { activeWatchlist, useWatchlistStore } from "./watchlist";
+import { activeWatchlist, useWatchlistStore, type WatchlistRemoval } from "./watchlist";
+
+function commit(undo: WatchlistRemoval) {
+  const state = useWatchlistStore.getState();
+  const lists = undo.restore(state.lists);
+  if (lists) state.load(lists, state.revision + 1);
+}
 
 beforeEach(() => useWatchlistStore.getState().load(DEFAULT_WATCHLISTS));
 
@@ -48,4 +54,92 @@ test("가리키는 목록이 없으면 첫 목록을 본다", () => {
   expect(activeWatchlist(two, "L2").id).toBe("L2");
   expect(activeWatchlist(two, "gone").id).toBe(FIRST_WATCHLIST_ID);
   expect(activeWatchlist(two, null).id).toBe(FIRST_WATCHLIST_ID);
+});
+
+test("복제는 이름을 겹치지 않게 만들고 종목 순서를 독립적으로 보존한다", () => {
+  const s = useWatchlistStore.getState();
+  s.addAll(FIRST_WATCHLIST_ID, ["000660", "005930"]);
+  s.duplicate(FIRST_WATCHLIST_ID, "copy1");
+  s.duplicate(FIRST_WATCHLIST_ID, "copy2");
+  s.move("copy1", "005930", 0);
+  expect(useWatchlistStore.getState().lists).toMatchObject([
+    { name: "기본", symbols: ["000660", "005930"] },
+    { name: "기본 복사", symbols: ["005930", "000660"] },
+    { name: "기본 복사 2", symbols: ["000660", "005930"] },
+  ]);
+});
+
+test("빼기 되돌리기는 원래 순서를 한 번만 복원하고 없는 종목은 작업을 만들지 않는다", () => {
+  const s = useWatchlistStore.getState();
+  s.addAll(FIRST_WATCHLIST_ID, ["000660", "005930", "035420"]);
+  expect(s.removeWithUndo(FIRST_WATCHLIST_ID, "999999")).toBeNull();
+  const undo = s.removeWithUndo(FIRST_WATCHLIST_ID, "005930")!;
+  expect(undo.available()).toBe(true);
+  commit(undo);
+  expect(useWatchlistStore.getState().lists[0]!.symbols).toEqual(["000660", "005930", "035420"]);
+  expect(undo.available()).toBe(false);
+  const revision = useWatchlistStore.getState().revision;
+  commit(undo);
+  expect(useWatchlistStore.getState().revision).toBe(revision);
+});
+
+test("다른 목록 편집과 서버 재적재 뒤 오래된 빼기 되돌리기는 실행되지 않는다", () => {
+  const s = useWatchlistStore.getState();
+  s.addAll(FIRST_WATCHLIST_ID, ["000660", "005930"]);
+  const undo = s.removeWithUndo(FIRST_WATCHLIST_ID, "005930")!;
+  const notified = { count: 0 };
+  const unsubscribe = undo.subscribe(() => notified.count++);
+  s.create("next", "새 목록");
+  expect(notified.count).toBeGreaterThan(0);
+  expect(undo.available()).toBe(false);
+  commit(undo);
+  expect(useWatchlistStore.getState().lists[0]!.symbols).toEqual(["000660"]);
+  const next = s.removeWithUndo(FIRST_WATCHLIST_ID, "000660")!;
+  s.load([{ id: FIRST_WATCHLIST_ID, name: "서버", symbols: ["035420"] }]);
+  commit(next);
+  expect(next.available()).toBe(false);
+  expect(useWatchlistStore.getState().lists[0]!.symbols).toEqual(["035420"]);
+  unsubscribe();
+});
+
+test("바깥에서 복제한 목록을 유지하며 해당 종목만 원래 위치에 다시 넣는다", () => {
+  const s = useWatchlistStore.getState();
+  s.addAll(FIRST_WATCHLIST_ID, ["000660", "005930", "035420"]);
+  const undo = s.removeWithUndo(FIRST_WATCHLIST_ID, "005930")!;
+  s.load([
+    { id: FIRST_WATCHLIST_ID, name: "기본", symbols: ["000660", "035420"] },
+    { id: "copy", name: "기본 복사", symbols: ["000660", "035420"] },
+  ]);
+  expect(undo.available()).toBe(true);
+  commit(undo);
+  expect(useWatchlistStore.getState().lists).toEqual([
+    { id: FIRST_WATCHLIST_ID, name: "기본", symbols: ["000660", "005930", "035420"] },
+    { id: "copy", name: "기본 복사", symbols: ["000660", "035420"] },
+  ]);
+});
+
+test.each([
+  { name: "목록 삭제", lists: [{ id: "other", name: "다른 목록", symbols: [] }] },
+  { name: "이름 변경", lists: [{ id: FIRST_WATCHLIST_ID, name: "새 이름", symbols: ["000660", "035420"] }] },
+  { name: "다른 종목 변경", lists: [{ id: FIRST_WATCHLIST_ID, name: "기본", symbols: ["035420", "000660"] }] },
+  { name: "종목 재추가", lists: [{ id: FIRST_WATCHLIST_ID, name: "기본", symbols: ["000660", "005930", "035420"] }] },
+])("바깥에서 $name 뒤 되돌리기는 비활성이며 눌러도 바뀌지 않는다", ({ lists }) => {
+  const s = useWatchlistStore.getState();
+  s.addAll(FIRST_WATCHLIST_ID, ["000660", "005930", "035420"]);
+  const undo = s.removeWithUndo(FIRST_WATCHLIST_ID, "005930")!;
+  s.load(lists);
+  expect(undo.available()).toBe(false);
+  const before = useWatchlistStore.getState();
+  commit(undo);
+  expect(useWatchlistStore.getState()).toBe(before);
+});
+
+test("마지막 종목을 뺀 작업은 목록 끝에 한 번만 다시 넣는다", () => {
+  const s = useWatchlistStore.getState();
+  s.addAll(FIRST_WATCHLIST_ID, ["000660", "005930"]);
+  const undo = s.removeWithUndo(FIRST_WATCHLIST_ID, "005930")!;
+  s.load([{ id: FIRST_WATCHLIST_ID, name: "기본", symbols: ["000660"] }]);
+  commit(undo);
+  commit(undo);
+  expect(useWatchlistStore.getState().lists[0]!.symbols).toEqual(["000660", "005930"]);
 });

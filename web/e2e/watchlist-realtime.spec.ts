@@ -71,8 +71,8 @@ test.describe("실시간 자리가 모자라면", () => {
     expect((await app.fake.registered())["0B"]).not.toContain("005930_AL");
 
     const first = row(page, synthetic[0]!);
-    await first.hover();
-    await first.getByRole("button", { name: /관심종목에서 지우기$/ }).click();
+    await first.click({ button: "right" });
+    await page.getByRole("menuitem", { name: "관심종목에서 빼기" }).click();
     await expect(button).toHaveAccessibleName("삼성전자 50,000 −1.96%");
     await expect(row(page, "005930")).not.toContainText("실시간 아님");
     await expect.poll(async () => (await app.fake.registered())["0B"] ?? []).toContain("005930_AL");

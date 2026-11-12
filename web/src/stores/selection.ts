@@ -9,11 +9,10 @@ export interface ToastUndo {
   subscribe(listener: () => void): () => void;
 }
 
-export type IndicatorTab = "indicator" | "current" | "compare";
 export type SearchPurpose = "open" | "watch";
 export type Dialog =
   | { kind: "search"; purpose: SearchPurpose }
-  | { kind: "indicator"; slot: Slot; editId: string | null; tab: IndicatorTab }
+  | { kind: "indicatorCommand"; slot: Slot; mode: "indicators" | "compare" }
   | { kind: "screen"; editId: string | null };
 export type PhoneTab = "chart" | "watch" | "screener";
 export type { RightPanel } from "../persist/uiState";
@@ -25,7 +24,7 @@ interface SelectionState {
   phoneTab: PhoneTab;
   toast: null | { id: number; text: string; undo?: ToastUndo };
   openSearch(purpose?: SearchPurpose): void;
-  openIndicators(slot: Slot, editId?: string | null, tab?: IndicatorTab): void;
+  openIndicatorCommand(slot: Slot, mode?: "indicators" | "compare"): void;
   openScreenEditor(editId: string | null): void;
   closeDialog(): void;
   setPhoneTab(tab: PhoneTab): void;
@@ -42,7 +41,7 @@ export const useSelectionStore = create<SelectionState>()((set) => ({
   phoneTab: "chart",
   toast: null,
   openSearch: (purpose = "open") => set({ dialog: { kind: "search", purpose } }),
-  openIndicators: (slot, editId = null, tab = "indicator") => set({ dialog: { kind: "indicator", slot, editId, tab } }),
+  openIndicatorCommand: (slot, mode = "indicators") => set({ dialog: { kind: "indicatorCommand", slot, mode } }),
   openScreenEditor: (editId) => set({ dialog: { kind: "screen", editId } }),
   closeDialog: () => set({ dialog: null }),
   setPhoneTab: (phoneTab) => set({ phoneTab }),

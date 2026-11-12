@@ -33,6 +33,26 @@ export function retryFailedSaves() {
   active?.retry();
 }
 
+export async function settleWatchlistSaves() {
+  const saver = active?.savers.watchlist;
+  saver?.flush();
+  await saver?.settled();
+  saver?.pauseCurrent();
+}
+
+export function resumeWatchlistSaves() {
+  active?.savers.watchlist.resume();
+}
+
+export function acceptWatchlistSave(value: Watchlists) {
+  useWatchlistStore.getState().load(value.lists, value.revision);
+  active?.savers.watchlist.acceptSaved(value.revision);
+}
+
+export function advanceWatchlistRevision(revision: number) {
+  active?.savers.watchlist.advanceRevision(revision);
+}
+
 export function startAutosave(deps: AutosaveDeps): Autosave {
   const setSave = usePersistStore.getState().setSave;
   const unsaved =
@@ -89,7 +109,7 @@ export function startAutosave(deps: AutosaveDeps): Autosave {
   const unsubscribe = [
     useLayoutStore.subscribe((s, prev) => s.revision !== prev.revision && layout.changed()),
     useUiStore.subscribe((s, prev) => s.revision !== prev.revision && ui.changed()),
-    useWatchlistStore.subscribe((s, prev) => s.revision !== prev.revision && watchlist.changed()),
+    useWatchlistStore.subscribe((s, prev) => s.revision !== prev.revision && s.revision !== s.loadedRevision && watchlist.changed()),
   ];
   const savers = { layout, ui, watchlist };
   const all = Object.values(savers);

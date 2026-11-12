@@ -17,6 +17,7 @@ import { useSelectionStore } from "../../stores/selection";
 import { useTheme } from "../../stores/ui";
 import { cellErrorView, olderErrorView } from "./cellError";
 import { useDrawingSurface } from "../../chart/drawings/useDrawingSurface";
+import { previewSettings, useIndicatorPreview } from "../indicator-command/preview";
 import { IndicatorPopover } from "../indicator-dialog/IndicatorPopover";
 import type { IndicatorConfig } from "../../chart/settings";
 import { DrawingOverlay } from "../drawings/DrawingOverlay";
@@ -52,12 +53,14 @@ interface Props {
 /** 컨트롤러를 붙였다 떼는 얇은 컴포넌트. 봉 데이터는 props로 받지 않는다(frontend.md §5.4). */
 export function ChartCell({ slot, status, onStatus }: Props) {
   const cell = useCell(slot);
+  const preview = useIndicatorPreview((s) => s.current?.slot === slot ? s.current.preview : null);
+  const chartSettings = useMemo(() => previewSettings(cell.chartSettings, preview), [cell.chartSettings, preview]);
   const info = useSymbolInfo(cell.symbol).data;
   const venue = shownVenue(cell.venue, info);
   const compareInfos = useSymbolInfos(cell.chartSettings.compare);
   const compareKey = compareInfos.map((i) => `${i.code}:${i.name}`).join("|");
   const compareNames = useMemo(() => Object.fromEntries(compareInfos.map((i) => [i.code, i.name])), [compareKey]);
-  const financial = useFinancials(cell.symbol, cell.period === "Y" ? "Y" : "Q", (cell.period === "Q" || cell.period === "Y") && cell.chartSettings.indicators.some((i) => isFinancial(i.spec) && i.visible));
+  const financial = useFinancials(cell.symbol, cell.period === "Y" ? "Y" : "Q", (cell.period === "Q" || cell.period === "Y") && chartSettings.indicators.some((i) => isFinancial(i.spec) && i.visible));
   const refreshFinancial = useRef(financial.refresh);
   refreshFinancial.current = financial.refresh;
   const theme = useTheme();
@@ -96,8 +99,8 @@ export function ChartCell({ slot, status, onStatus }: Props) {
   useEffect(() => attachController(slot, ctl.current!), [slot]);
 
   useEffect(() => {
-    ctl.current?.apply({ symbol: cell.symbol, venue, period: cell.period, settings: cell.chartSettings, info, compareNames });
-  }, [cell, venue, info, compareNames]);
+    ctl.current?.apply({ symbol: cell.symbol, venue, period: cell.period, settings: chartSettings, info, compareNames });
+  }, [cell, chartSettings, venue, info, compareNames]);
 
   useEffect(() => {
     ctl.current?.setFinancials(financial.data ?? null, financial.error || financial.refreshError ? "재무자료 조회·갱신 실패 · 새로고침으로 다시 시도하세요" : financial.refreshing ? "재무자료 갱신 요청 중" : undefined);

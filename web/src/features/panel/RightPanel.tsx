@@ -32,6 +32,7 @@ export function RightPanel() {
   const wide = useUiStore((s) => s.prefs.rightPanelWidth === "wide");
   if (!desktop || collapsed) return null;
   const { Content } = VIEWS[view];
+  const wideScreener = view === "screener" && wide;
   const show = useSelectionStore.getState().showRightPanel;
   const move = (event: KeyboardEvent<HTMLButtonElement>, from: View) => {
     const index = VIEW_ORDER.indexOf(from);
@@ -43,8 +44,8 @@ export function RightPanel() {
     document.getElementById(`right-tab-${to}`)?.focus();
   };
   return (
-    <div className="right-panel flex min-h-0 min-w-0 flex-col overflow-hidden border-l border-line bg-bg [grid-area:watch]">
-      <header className="flex h-10 flex-none items-center gap-1 border-b border-line px-1">
+    <div data-chart-control className={`right-panel flex min-h-0 min-w-0 flex-col overflow-hidden border-l border-line bg-bg ${wideScreener ? "z-20 [grid-area:2/1/3/3]" : "[grid-area:watch]"}`}>
+      <header data-chart-control className="flex h-10 flex-none items-center gap-1 border-b border-line px-1">
         <nav role="tablist" aria-label="오른쪽 패널" className="flex min-w-0 flex-1 items-center gap-1">
           {VIEW_ORDER.map((to) => <button key={to} id={`right-tab-${to}`} type="button" role="tab" aria-selected={to === view} aria-controls="right-tab-content" tabIndex={to === view ? 0 : -1}
             title={VIEWS[to].label} onClick={() => show(to)} onKeyDown={(event) => move(event, to)}
@@ -52,10 +53,10 @@ export function RightPanel() {
             {VIEWS[to].label}{to === "screener" && <ScreenerBadge />}
           </button>)}
         </nav>
-        <button type="button" className="icon-btn !h-7 !w-7 flex-none" title={wide ? "기본 너비로" : "넓게 보기"} aria-label="넓게 보기" aria-pressed={wide} onClick={() => useUiStore.getState().togglePanelWidth()}><ExpandIcon /></button>
+        <button type="button" className="icon-btn !h-7 !w-7 flex-none" data-chart-control title={wideScreener ? "오른쪽 탭으로" : wide ? "기본 너비로" : "넓게 보기"} aria-label={wideScreener ? "오른쪽 탭으로" : "넓게 보기"} aria-pressed={wide} onClick={() => useUiStore.getState().togglePanelWidth()}><ExpandIcon /></button>
         <button type="button" className="icon-btn !h-7 !w-7 flex-none" title="탭 숨기기 (Alt+W)" aria-label="탭 숨기기" aria-expanded={true} onClick={() => useUiStore.getState().toggleWatch()}><PanelIcon /></button>
       </header>
-      <div id="right-tab-content" role="tabpanel" aria-labelledby={`right-tab-${view}`} className="flex min-h-0 min-w-0 flex-1 flex-col overflow-auto"><Content /></div>
+      <div id="right-tab-content" role="tabpanel" aria-labelledby={`right-tab-${view}`} className={`flex min-h-0 min-w-0 flex-1 flex-col ${view === "screener" ? "overflow-hidden" : "overflow-auto"}`}>{view === "screener" ? <ScreenerPanel wide={wide} onReturn={() => useUiStore.getState().togglePanelWidth()} /> : <Content />}</div>
     </div>
   );
 }
