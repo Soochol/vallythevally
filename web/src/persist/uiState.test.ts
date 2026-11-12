@@ -76,3 +76,11 @@ test("오른쪽 탭과 너비를 왕복하고 잘못된 값은 기본으로 연�
   vi.spyOn(console, "warn").mockImplementation(() => {});
   expect(parseUiState({ ...DEFAULT_UI_PREFS, rightPanel: "bad", rightPanelWidth: 800 }).prefs).toEqual(DEFAULT_UI_PREFS);
 });
+
+
+test("고정 드로잉 도구는 구현된 도구만 읽고 새로고침용 UI 상태에 왕복한다", () => {
+  const { prefs, extra } = parseUiState({ ...DEFAULT_UI_PREFS, drawing: { pinnedTools: ["hline", "trendline", "hline", "fib", "wrong", null], future: 9 } });
+  expect(prefs.drawing.pinnedTools).toEqual(["hline", "trendline"]);
+  expect(parseUiState(toUiState(prefs, extra)).prefs.drawing).toEqual(prefs.drawing);
+  expect(parseUiState({ ...DEFAULT_UI_PREFS, drawing: { pinnedTools: "hline" } }).prefs.drawing.pinnedTools).toEqual([]);
+});

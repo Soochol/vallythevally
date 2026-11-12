@@ -166,6 +166,7 @@ export const SpinnerIcon = ({ size = 12 }: P) => (
 );
 
 export const DRAWING_ICONS = {
+  grip: "M9 6h.01M15 6h.01M9 12h.01M15 12h.01M9 18h.01M15 18h.01",
   empty: "M4 20 L20 4 M4 4 H9 M4 4 V9 M20 20 H15 M20 20 V15",
   locked: "M7 10 V7 A5 5 0 0 1 17 7 V10 M5 10 H19 V21 H5 Z",
   unlocked: "M7 10 V7 A5 5 0 0 1 17 7 M5 10 H19 V21 H5 Z",

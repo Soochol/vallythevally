@@ -149,7 +149,7 @@ export const trendline = defineTool<TrendStyle>({
     const shapes: Shape[] = [{ kind: "segment", a, b, stroke: style.line, extend: style.extend, ends: style.ends }];
     if (style.middlePoint) shapes.push({ kind: "circle", c: mid, r: 3, stroke: style.line, fill: { on: true, color: style.line.color, opacity: 1 } });
     if (text !== null && text !== "") shapes.push({ kind: "text", at: mid, text, style: style.label, align: "center", baseline: "bottom" });
-    const lines = selected || style.stats.always ? statsLines(p0, p1, a, b, style.stats, ctx) : [];
+    const lines = selected || style.stats.always ? statsLines(p0, p1, a, b, selected ? { ...style.stats, percent: true, bars: true } : style.stats, ctx) : [];
     if (lines.length > 0)
       shapes.push({
         kind: "text",
