@@ -4,6 +4,7 @@ import type { FinancialsPage } from "../../api/generated/FinancialsPage";
 import type { FinancialPoint } from "../../api/generated/FinancialPoint";
 import type { Bar } from "../../api/generated/Bar";
 import type { UnixSeconds } from "../../api/generated/UnixSeconds";
+import { normalizeHex } from "../../lib/colors";
 import type { History } from "../barFeed";
 import type { IndicatorConfig } from "../settings";
 import type { ThemeTokens } from "../theme";
@@ -341,7 +342,9 @@ test("마지막 확정 봉과 같은 시각의 봉이 오면 preview가 아니�
 
 test("재무값은 WASM 계산 없이 API bucket에 그리고 누락·겹침·미공시를 연결하지 않는다", () => {
   const f = fixture("Q");
-  const config: IndicatorConfig = { id: "financial", spec: { kind: "debt_ratio" }, panel: "p", visible: true, style: { colors: ["ind-2"], width: 1 } };
+  const color = normalizeHex("#a3e635");
+  if (!color) throw new Error("시험 색상이 올바르지 않습니다");
+  const config: IndicatorConfig = { id: "financial", spec: { kind: "debt_ratio" }, panel: "p", visible: true, style: { colors: [color], width: 5 } };
   f.layer.setConfigs([config], [{ id: "p", stretch: 0.25 }]);
   f.layer.reset({ bars: CONFIRMED, current: null, nextBefore: null });
   const bucket = (month: number) => Date.UTC(2024, month, 1) / 1000 - 32400;
@@ -351,7 +354,7 @@ test("재무값은 WASM 계산 없이 API bucket에 그리고 누락·겹침·�
   const line = f.series.at(-1)!;
   expect(line.data).toEqual([{ time: toChartTime(bucket(0)), value: -10, base: -10, connect: false }, { time: toChartTime(bucket(6)), value: 0, base: 0, connect: false }, { time: toChartTime(bucket(9)), value: 20, base: 20, connect: true }]);
   expect(f.sent.filter((m) => m.type === "create")).toHaveLength(0);
-  expect(f.layer.rows(bucket(6))[0]).toMatchObject({ name: "부채비율 · 3월 결산", values: [{ text: "0 %" }] });
+  expect(f.layer.rows(bucket(6))[0]).toMatchObject({ name: "부채비율 · 3월 결산", color: "#A3E635", values: [{ text: "0 %" }] });
   f.layer.setFinancials({ ...page, series: [{ metric: "debt_ratio", points: [{ ...point(0, null), reason: "period_overlap", reportedValue: 500 }] }] });
   expect(line.data).toEqual([]);
   f.layer.setFinancials(null);

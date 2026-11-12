@@ -70,8 +70,8 @@ export function ComparePanel({ slot, id, labelledBy, onRemoved }: { slot: Slot; 
         aria-labelledby={labelledBy}
         className="grid min-h-0 flex-1 grid-cols-[236px_minmax(0,1fr)] max-md:auto-rows-max max-md:grid-cols-1 max-md:overflow-auto"
       >
-        <div className="min-h-0 overflow-auto border-r border-line p-2 max-md:overflow-visible max-md:border-b max-md:border-r-0">
-          <label className="mb-1 flex h-8 items-center gap-1.5 rounded-m border border-line bg-chart-bg px-2 text-text-3">
+        <div className="indicator-catalog min-h-0 overflow-auto border-r border-line p-4 max-md:overflow-visible max-md:border-b max-md:border-r-0">
+          <label className="mb-3 flex h-10 items-center gap-2 rounded-m border border-line bg-chart-bg px-3 text-text-3">
             <SearchIcon size={16} />
             <input
               ref={searchRef}
@@ -128,7 +128,7 @@ export function ComparePanel({ slot, id, labelledBy, onRemoved }: { slot: Slot; 
           {message && <p className="px-2 py-3 text-s text-text-2">{message}</p>}
         </div>
 
-        <div className="flex min-h-0 flex-col gap-4 overflow-auto p-4 max-md:overflow-visible">
+        <div className="flex min-h-[390px] flex-col gap-5 overflow-auto p-6 max-md:min-h-0 max-md:overflow-visible">
           <div>
             <h3 id={`${ids}-current`} className="text-m font-[650]">
               비교 종목{" "}
@@ -175,7 +175,7 @@ export function ComparePanel({ slot, id, labelledBy, onRemoved }: { slot: Slot; 
                   <span className="flex-none text-text-3">{symbolSub(code, info)}</span>
                   <button
                     type="button"
-                    className="icon-btn h-[22px] w-[22px] max-md:h-10 max-md:w-10"
+                    className="icon-btn h-8 w-8 max-md:h-10 max-md:w-10"
                     aria-label={`${name} 지우기`}
                     title="지우기"
                     onClick={() => remove(code)}
@@ -190,7 +190,7 @@ export function ComparePanel({ slot, id, labelledBy, onRemoved }: { slot: Slot; 
         </div>
       </div>
 
-      <div className="flex flex-none flex-wrap items-center gap-2 border-t border-line px-4 py-2">
+      <div className="ui-dialog-foot flex-wrap">
         <span className="flex items-center gap-2 text-s text-text-3 max-md:hidden">
           <kbd>↑</kbd>
           <kbd>↓</kbd> 종목 고르기 <kbd>Enter</kbd> 추가 <kbd>Esc</kbd> 닫기

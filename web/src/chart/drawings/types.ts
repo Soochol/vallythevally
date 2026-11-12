@@ -61,7 +61,7 @@ export interface ScreenPoint {
 
 export type Color = string;
 export type Dash = "solid" | "dashed" | "dotted";
-export type Width = 1 | 2 | 3 | 4;
+export type Width = 1 | 2 | 3 | 4 | 5;
 
 export interface Stroke {
   color: Color;

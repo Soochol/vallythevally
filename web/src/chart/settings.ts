@@ -1,10 +1,10 @@
 import type { IndicatorSpec } from "./indicators/kinds";
 import type { SymbolCode } from "../api/generated/SymbolCode";
-import { INDICATOR_COLORS, type IndicatorColor, KINDS, placementOf } from "./indicators/kinds";
+import { isIndicatorColor, type IndicatorColor, KINDS, placementOf } from "./indicators/kinds";
 
 export type ChartStyle = "candle" | "bar" | "line" | "area";
 export type PriceScale = "normal" | "log" | "percent";
-export type LineWidth = 1 | 2 | 3;
+export type LineWidth = 1 | 2 | 3 | 4 | 5;
 
 export interface IndicatorConfig {
   id: string;
@@ -62,7 +62,7 @@ export const CHART_STYLE_LABEL: Record<ChartStyle, string> = {
 
 const CHART_STYLES = ["candle", "bar", "line", "area"] as const satisfies readonly ChartStyle[];
 const PRICE_SCALES = ["normal", "log", "percent"] as const satisfies readonly PriceScale[];
-const WIDTHS = [1, 2, 3] as const satisfies readonly LineWidth[];
+const WIDTHS = [1, 2, 3, 4, 5] as const satisfies readonly LineWidth[];
 
 const isOneOf = <T extends string | number>(xs: readonly T[], x: unknown): x is T => (xs as readonly unknown[]).includes(x);
 const isEmptyArray = (x: unknown): x is never[] => Array.isArray(x) && x.length === 0;
@@ -107,8 +107,8 @@ function readIndicator(raw: unknown): IndicatorConfig | null {
   const style = raw.style;
   if (!spec || !isRecord(style) || !isOneOf(WIDTHS, style.width)) return null;
   const colors = style.colors;
-  if (!Array.isArray(colors) || !colors.every((c) => isOneOf(INDICATOR_COLORS, c))) return null;
-  return { id: raw.id, spec, panel: raw.panel, visible: raw.visible, style: { colors: colors as IndicatorColor[], width: style.width } };
+  if (!Array.isArray(colors) || !colors.every(isIndicatorColor)) return null;
+  return { id: raw.id, spec, panel: raw.panel, visible: raw.visible, style: { colors, width: style.width } };
 }
 
 export function readSpecShape(raw: unknown): IndicatorSpec | null {

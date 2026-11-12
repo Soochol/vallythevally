@@ -372,7 +372,7 @@ export class ChartController {
         background: { color: t.chartBg },
         textColor: t.text2,
         fontFamily: t.fontFamily,
-        fontSize: 11,
+        fontSize: t.fontSize,
         attributionLogo: false,
         panes: { enableResize: true, separatorColor: t.line, separatorHoverColor: t.raised },
       },

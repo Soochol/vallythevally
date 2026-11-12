@@ -45,7 +45,7 @@ export function readOneOf<V extends string | number>(raw: unknown, options: read
   return options.find((o) => o === raw) ?? fallback;
 }
 
-const WIDTHS: readonly Width[] = [1, 2, 3, 4];
+const WIDTHS: readonly Width[] = [1, 2, 3, 4, 5];
 const DASHES: readonly Dash[] = ["solid", "dashed", "dotted"];
 export const EXTENDS: readonly Extend[] = ["none", "left", "right", "both"];
 export const LINE_ENDS: readonly LineEnd[] = ["plain", "arrow"];

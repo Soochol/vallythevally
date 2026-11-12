@@ -2,6 +2,7 @@ import type { IndicatorSpec as TechnicalSpec } from "../../api/generated/Indicat
 import type { FinancialMetric } from "../../api/generated/FinancialMetric";
 import type { LineId } from "../../api/generated/LineId";
 import type { SpecValidation } from "../../wasm/indicators/indicators.js";
+import { isHexColor, PRESET_COLORS, type HexColor } from "../../lib/colors";
 
 export type IndicatorSpec = TechnicalSpec | { [K in FinancialMetric]: { kind: K } }[FinancialMetric];
 export type FinancialSpec = Extract<IndicatorSpec, { kind: FinancialMetric }>;
@@ -16,7 +17,10 @@ export type Placement = "price" | "panel";
 export type Validate = (spec: IndicatorSpec) => SpecValidation;
 
 export const INDICATOR_COLORS = ["ind-1", "ind-2", "ind-3", "ind-4", "ind-5"] as const;
-export type IndicatorColor = (typeof INDICATOR_COLORS)[number];
+export type IndicatorToken = (typeof INDICATOR_COLORS)[number];
+export type IndicatorColor = IndicatorToken | HexColor;
+export const isIndicatorColor = (value: unknown): value is IndicatorColor => isHexColor(value) || INDICATOR_COLORS.some((c) => c === value);
+export const indicatorCssColor = (color: IndicatorColor): string => isHexColor(color) ? color : `var(--${color})`;
 
 export type SpecField =
   | { key: string; label: string; type: "int"; unit?: string }
@@ -152,12 +156,16 @@ const wrap = (i: number) => INDICATOR_COLORS[((i % INDICATOR_COLORS.length) + IN
 
 export function colorsFrom(spec: IndicatorSpec, base: IndicatorColor): IndicatorColor[] {
   const p = colorLine(spec) ?? 0;
+  if (isHexColor(base)) {
+    const b = PRESET_COLORS.indexOf(base);
+    return specLines(spec).map((_, i) => i === p ? base : PRESET_COLORS[((Math.max(0, b) + i - p) % PRESET_COLORS.length + PRESET_COLORS.length) % PRESET_COLORS.length] ?? base);
+  }
   const b = INDICATOR_COLORS.indexOf(base);
   return specLines(spec).map((_, i) => wrap(b + i - p));
 }
 
 export function firstUnusedColor(used: readonly IndicatorColor[]): IndicatorColor {
-  return INDICATOR_COLORS.find((c) => !used.includes(c)) ?? INDICATOR_COLORS[0];
+  return INDICATOR_COLORS.find((c) => !used.includes(c)) ?? PRESET_COLORS.find((c) => !used.includes(c)) ?? INDICATOR_COLORS[0];
 }
 
 export function shownColor(spec: IndicatorSpec, colors: readonly IndicatorColor[]): IndicatorColor {
@@ -169,5 +177,6 @@ export function lineColor(spec: IndicatorSpec, colors: readonly IndicatorColor[]
   if (own) return own;
   const p = colorLine(spec) ?? 0;
   const base = colors[p] ?? colors[0] ?? INDICATOR_COLORS[0];
+  if (isHexColor(base)) return colorsFrom(spec, base)[i] ?? base;
   return wrap(INDICATOR_COLORS.indexOf(base) + i - p);
 }
