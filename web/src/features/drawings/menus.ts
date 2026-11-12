@@ -1,3 +1,4 @@
+import { useSelectionStore } from "../../stores/selection";
 import type { DrawingSurface } from "../../chart/drawings/DrawingSurface";
 import { toolOf } from "../../chart/drawings/tools";
 import type { Period } from "../../api/generated/Period";
@@ -17,7 +18,7 @@ export function drawingMenu(surface: DrawingSurface, empty = false): MenuItem[] 
     action("이 종목 드로잉 모두 지우기…", () => {
       const symbol = surface.host.view()?.symbol; if (!symbol) return;
       const all = surface.sync.drawings(symbol).filter((d) => !d.locked && !prefs.lockAll);
-      if (all.length && window.confirm(`이 종목의 드로잉 ${all.length}개를 지울까요?`)) surface.sync.commit(surface.slot, all.map((before) => ({ kind: "delete", before })));
+      if (all.length) { surface.sync.commit(surface.slot, all.map((before) => ({ kind: "delete", before }))); useSelectionStore.getState().showToast(`드로잉 ${all.length}개를 지웠습니다`, () => surface.sync.undo(surface.slot, false)); }
     }),
   ];
   const first = selected[0]; if (!first) return [];

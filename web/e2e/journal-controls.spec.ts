@@ -1,3 +1,4 @@
+import { selectOption } from "./select-option";
 import { test as browserTest, type Page } from "@playwright/test";
 import path from "node:path";
 import { createServer } from "vite";
@@ -60,8 +61,8 @@ test("actual app + HTTP/SQLite: delayed older admission cannot replace the same 
   try {
     await page.getByRole("button", { name: "개체 목록 열기" }).click();
     await page.getByRole("button", { name: "고르기: 수평선" }).click();
-    await width(page).selectOption("3");
-    await expect(width(page)).toHaveValue("3");
+    await selectOption(width(page), "3");
+    await expect(width(page)).toHaveAttribute("data-value", "3");
     await page.getByRole("button", { name: "드로잉 지우기", exact: true }).click();
     await expect(mirror(page)).toHaveAttribute("data-drawings", "[]");
     expect(await pendingRecords(page)).toHaveLength(2);
@@ -138,7 +139,7 @@ test("actual app + HTTP/SQLite: reload transmits the staged PUT's fixed revision
   });
   await page.getByRole("button", { name: "개체 목록 열기" }).click();
   await page.getByRole("button", { name: "고르기: 수평선" }).click();
-  await width(page).selectOption("3");
+  await selectOption(width(page), "3");
   await expect(page.locator("html")).toHaveAttribute("data-held-drawing-put", "true");
   const raw = await page.evaluate((id) => localStorage.getItem(`vv.unsaved.drawing.${id}`), original.id);
   const staged = raw === null ? null : parseJournalRecord(JSON.parse(raw));

@@ -1,4 +1,4 @@
-.drawing-toolbar { position:relative; z-index:10; display:flex; min-height:0; flex-direction:column; align-items:center; gap:5px; padding:12px 5px; border-right:1px solid var(--line); background:var(--bg); color:var(--text-2); overflow-y:auto; scrollbar-width:thin; scrollbar-color:var(--line) transparent; }
+.drawing-toolbar { position:relative; z-index:10; display:flex; min-height:0; flex-direction:column; align-items:center; gap:5px; padding:12px 5px; border-right:1px solid var(--line); background:var(--bg); color:var(--text-2); overflow-y:auto; scrollbar-width:none; scrollbar-color:var(--line) transparent; }
 .drawing-toolbar>* { flex-shrink:0; }
 .draw-tool { display:grid; place-items:center; width:38px; height:36px; border-radius:var(--r-m); color:var(--text-2); cursor:pointer; }
 .draw-tool:hover { background:var(--raised); color:var(--text); }
@@ -71,10 +71,12 @@
 .draw-periods label { display:flex; align-items:center; gap:8px; }
 .draw-text-editor { position:absolute; width:300px; z-index:20; padding:10px; border:1px solid var(--accent); border-radius:var(--r-m); background:var(--surface); box-shadow:var(--shadow); pointer-events:auto; }
 .draw-text-editor>div { display:flex; align-items:center; gap:5px; padding-top:8px; }
-.draw-text-editor span { flex:1; font-size:10px; color:var(--text-3); }
+.draw-text-editor span { flex:1; font-size:var(--fs-xs); color:var(--text-3); }
 .drawing-help { position:absolute; left:45px; bottom:10px; width:420px; max-height:80vh; overflow-y:auto; border:1px solid var(--line); border-radius:var(--r-m); background:var(--surface); box-shadow:var(--shadow); }
 .drawing-help p { display:flex; align-items:center; justify-content:space-between; padding:7px 16px; gap:15px; font-size:var(--fs-xs); }
 .drawing-help p:last-child { padding-bottom:16px; }
 .draw-load-error { position:absolute; top:60px; left:12px; background:var(--surface); border:1px solid var(--line); padding:8px; border-radius:var(--r-m); pointer-events:auto; font-size:var(--fs-s); color:var(--accent); }
 input[type=checkbox], input[type=range] { accent-color:var(--accent); }
 @media (width < 48rem) { .drawing-toolbar { display:none; } }
+
+.drawing-toolbar::-webkit-scrollbar { display:none; }

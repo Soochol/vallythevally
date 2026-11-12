@@ -1,3 +1,4 @@
+import { selectOption } from "./select-option";
 import type { Page } from "@playwright/test";
 import type { FinancialsPage } from "../src/api/generated/FinancialsPage";
 import type { Layout } from "../src/api/generated/Layout";
@@ -137,7 +138,7 @@ for (const phone of [false, true]) test.describe(phone ? "휴대폰 재무지표
     await expect(row(page, "revenue")).toContainText("확인 완료");
     await row(page, "revenue").locator("summary").click();
     await expect(row(page, "revenue").locator("details")).toContainText("마지막 확인");
-    await row(page, "revenue").getByRole("combobox").selectOption({ index: 1 });
+    await selectOption(row(page, "revenue").getByRole("combobox"), { index: 1 });
     await expect(row(page, "revenue").locator("details")).toContainText("접수번호");
     await expect(row(page, "revenue").locator("details")).toContainText("KRW");
   });
@@ -155,7 +156,7 @@ test.describe("재무지원 경계", () => {
       if (symbol === "005935") {
         await expect(row(page, "dps")).toContainText("확인 완료");
         await row(page, "dps").locator("summary").click();
-        await row(page, "dps").getByRole("combobox").selectOption({ index: 2 });
+        await selectOption(row(page, "dps").getByRole("combobox"), { index: 2 });
         await expect(row(page, "dps").locator("details")).toContainText("주식 종류 미확인");
       } else if (symbol === "0000D0" || symbol === "IDX:001") await expect(row(page, "revenue")).toContainText("미지원");
       else await expect(row(page, "revenue")).toContainText("확인 완료");
@@ -226,7 +227,7 @@ test.describe("재무지원 경계", () => {
     const points = (await data(app, "005930", "Q")).series.find((s) => s.metric === "debt_ratio")!.points;
     const i = points.findIndex((p) => p.reason === "non_positive_equity");
     expect(i).toBeGreaterThanOrEqual(0);
-    await row(page, "debt_ratio").getByRole("combobox").selectOption({ index: i + 1 });
+    await selectOption(row(page, "debt_ratio").getByRole("combobox"), { index: i + 1 });
     await expect(row(page, "debt_ratio").locator("details")).toContainText("자본총계가 0 이하");
     await expect(row(page, "debt_ratio").locator("details")).toContainText("부채총계: 200 KRW");
     await expect(row(page, "debt_ratio").locator("details")).toContainText("자본총계: 0 KRW");
@@ -242,7 +243,7 @@ test.describe("재무지원 경계", () => {
     const overlap = annual.findIndex((p) => p.reason === "period_overlap");
     expect(overlap).toBeGreaterThanOrEqual(0);
     await row(page, "revenue").locator("summary").click();
-    await row(page, "revenue").getByRole("combobox").selectOption({ index: overlap + 1 });
+    await selectOption(row(page, "revenue").getByRole("combobox"), { index: overlap + 1 });
     await expect(row(page, "revenue").locator("details")).toContainText("원래 보고값 1,000 KRW · 합산하지 않음");
   });
 });

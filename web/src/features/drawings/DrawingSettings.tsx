@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import { createPortal } from "react-dom";
+import { Popover } from "../overlay/Popover";
+import { CloseIcon } from "../icons";
 import type { Period } from "../../api/generated/Period";
 import { surfaceFor } from "../../chart/drawings/DrawingSurface";
 import { sameContent } from "../../chart/drawings/history";
@@ -32,7 +33,7 @@ export function DrawingSettings({ slot, editor }: { slot: number; editor: Drawin
   if (!tool) return null;
   const tabs: Tab[] = [...(tool.settings.inputs ? ["inputs" as const] : []), "style", ...(tool.settings.text ? ["text" as const] : []), "coordinates", "visibility"];
   const fields = tab === "inputs" || tab === "style" || tab === "text" ? tool.settings[tab] ?? [] : [];
-  return createPortal(<div className="draw-modal-backdrop" onPointerDown={(e) => { if (e.target === e.currentTarget) close(slot); }}>
+  return <Popover onClose={() => close(slot)} className="draw-modal-backdrop" onPointerDown={(e) => { if (e.target === e.currentTarget) close(slot); }}>
     <div ref={dialog} role="dialog" aria-modal="true" aria-label={`${tool.label} 설정`} className="draw-settings" onKeyDown={(e) => {
       if (e.nativeEvent.isComposing) return;
       if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); close(slot); }
@@ -43,7 +44,7 @@ export function DrawingSettings({ slot, editor }: { slot: number; editor: Drawin
         else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first?.focus(); }
       }
     }}>
-      <div className="draw-dialog-head"><h2>{tool.label}</h2><button type="button" className="icon-btn" aria-label="설정 닫기" onClick={() => close(slot)}>×</button></div>
+      <div className="draw-dialog-head"><h2>{tool.label}</h2><button type="button" className="icon-btn" aria-label="설정 닫기" onClick={() => close(slot)}><CloseIcon /></button></div>
       <div className="draw-settings-tabs" role="tablist" aria-label="드로잉 설정 탭">{tabs.map((t) => <button key={t} role="tab" aria-selected={tab === t} onClick={() => setTab(t)}>{TAB_LABEL[t]}</button>)}</div>
       <div role="tabpanel" aria-label={TAB_LABEL[tab]} className="draw-settings-body">
         {fields.length > 0 && <StyleFields fields={fields} style={editor.draft.style} text={editor.draft.text} change={(style) => draft({ style })} setText={(text) => draft({ text: text || null })} />}
@@ -67,18 +68,19 @@ export function DrawingSettings({ slot, editor }: { slot: number; editor: Drawin
       <div className="draw-settings-foot"><button className="tb-btn" type="button" onClick={() => draft({ style: tool.defaultStyle() })}>기본 스타일로</button><span />
         <button className="tb-btn" type="button" onClick={() => close(slot)}>취소</button><button className="btn-primary" type="button" onClick={() => confirm(slot, editor)}>확인</button></div>
     </div>
-  </div>, document.body);
+  </Popover>;
 }
 
 export function DrawingTextEditor({ slot, editor }: { slot: number; editor: DrawingEditor }) {
   const ref = useRef<HTMLTextAreaElement>(null);
+  const anchor = useRef<HTMLDivElement>(null);
   const surface = surfaceFor(slot); const p = editor.draft.points.at(-1); const at = p ? surface?.frame().ctx.toScreen(p) : null;
   useEffect(() => { ref.current?.focus(); ref.current?.select(); }, []);
-  return <div className="draw-text-editor" style={{ left: Math.max(8, Math.min(at?.x ?? 80, (surface?.frame().pane.width ?? 500) - 300)), top: Math.max(8, Math.min(at?.y ?? 80, (surface?.frame().pane.height ?? 400) - 160)) }}>
+  return <div ref={anchor} style={{ position: "absolute", left: Math.max(8, Math.min(at?.x ?? 80, (surface?.frame().pane.width ?? 500) - 300)), top: Math.max(8, Math.min(at?.y ?? 80, (surface?.frame().pane.height ?? 400) - 160)) }}><Popover anchor={anchor} onClose={() => close(slot)} className="draw-text-editor" style={{ width: 300 }}>
     <textarea ref={ref} className={INPUT} aria-label="드로잉 글자" rows={3} value={editor.draft.text ?? ""} onChange={(e) => draft({ text: e.target.value })} onKeyDown={(e) => {
       if (e.nativeEvent.isComposing || e.keyCode === 229) return;
       if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); confirm(slot, editor); }
       if (e.key === "Escape") { e.preventDefault(); close(slot); }
     }} /><div><span>Enter 확인 · Shift+Enter 줄바꿈</span><button className="tb-btn" onClick={() => close(slot)}>취소</button><button className="btn-primary" onClick={() => confirm(slot, editor)}>확인</button></div>
-  </div>;
+  </Popover></div>;
 }

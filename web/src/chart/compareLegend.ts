@@ -1,3 +1,4 @@
+import { iconMarkup } from "../features/icons";
 import type { CompareRow } from "./compare";
 
 const ROW =
@@ -71,7 +72,7 @@ export class CompareLegend {
     const remove = el("button", `${BTN} opacity-0 group-hover:opacity-100 focus-visible:opacity-100`);
     remove.type = "button";
     remove.title = "지우기";
-    remove.textContent = "✕";
+    remove.innerHTML = iconMarkup("close");
     remove.addEventListener("click", () => this.onRemove(code));
     root.append(swatch, name, value, note, remove);
     return { root, swatch, name, value, note, remove };

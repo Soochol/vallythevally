@@ -1,3 +1,4 @@
+import { selectOption } from "./select-option";
 import type { Locator, Page } from "@playwright/test";
 import { expect, test } from "./harness";
 import { editor, excludedLine, expectRows, openScreener, panel, results, runButton, savedTo, updateBand, waitForUpdateToFinish } from "./screener-page";
@@ -33,11 +34,11 @@ async function editScreen(page: Page, name: string) {
 }
 
 async function expectTradeHighLine(dialog: Locator, line: number, kind: { value: string; label: string }, period: string, n: string, m: string) {
-  await expect(choice(dialog, line, "종류")).toHaveValue(kind.value);
-  await expect(choice(dialog, line, "종류").locator("option:checked")).toHaveText(kind.label);
-  await expect(choice(dialog, line, "봉 주기")).toHaveValue(period);
+  await expect(choice(dialog, line, "종류")).toHaveAttribute("data-value", kind.value);
+  await expect(choice(dialog, line, "종류")).toHaveText(kind.label);
+  await expect(choice(dialog, line, "봉 주기")).toHaveAttribute("data-value", period);
   await expect(choice(dialog, line, "값")).toHaveCount(0);
-  await expect(box(dialog, line, `${kind.label} 기간`)).toHaveValue(n);
+  await expect(box(dialog, line, `${kind.label} 기간`)).toHaveAttribute("data-value", n);
   await expect(box(dialog, line, "최근 봉 수")).toHaveValue(m);
 }
 
@@ -112,15 +113,17 @@ test("거래 분류의 신고거래량·신고거래대금은 새로 고르면 �
   await test.step("거래 분류에 신고거래량·신고거래대금·거래 급증이 있고, 신고가의 값은 가격만이다", async () => {
     const dialog = await editScreen(page, WEEKLY_HIGH.name);
     await expect(optionsIn(choice(dialog, 1, "종류"), "거래")).toHaveText(["신고거래량", "신고거래대금", "거래 급증"]);
-    await expect(choice(dialog, 1, "값").locator("option")).toHaveText(["시가", "고가", "저가", "종가"]);
+    await choice(dialog, 1, "값").click();
+    await expect(page.getByRole("menu", { name: "조건 1 값", exact: true }).getByRole("menuitemradio")).toHaveText(["시가", "고가", "저가", "종가"]);
+    await page.keyboard.press("Escape");
   });
 
   await test.step("주봉 신고가 줄에서 신고거래대금을, 더한 줄에서 신고거래량을 고르면 둘 다 일봉·최근 100일·200일로 시작한다", async () => {
     const dialog = editor(page, "조건식 편집");
-    await choice(dialog, 1, "종류").selectOption({ label: "신고거래대금" });
+    await selectOption(choice(dialog, 1, "종류"), { label: "신고거래대금" });
     await expectTradeHighLine(dialog, 1, TRADED_VALUE, "D", "200", "100");
     await dialog.getByRole("button", { name: "조건 더하기" }).click();
-    await choice(dialog, 2, "종류").selectOption({ label: "신고거래량" });
+    await selectOption(choice(dialog, 2, "종류"), { label: "신고거래량" });
     await expectTradeHighLine(dialog, 2, VOLUME, "D", "200", "100");
     await expect(lineTexts(dialog)).toHaveText([TRADED_START_TEXT, VOLUME_START_TEXT]);
   });
@@ -128,7 +131,7 @@ test("거래 분류의 신고거래량·신고거래대금은 새로 고르면 �
   await test.step("봉 주기와 N·M을 바꾸면 그 단위로 읽히고, 최근 봉 수가 비교 기간보다 길면 그 칸에서 저장이 막힌다", async () => {
     const dialog = editor(page, "조건식 편집");
     await dialog.getByLabel("이름").fill(PICKED);
-    await choice(dialog, 2, "봉 주기").selectOption("W");
+    await selectOption(choice(dialog, 2, "봉 주기"), "W");
     await box(dialog, 2, "신고거래량 기간").fill("52");
     await box(dialog, 2, "최근 봉 수").fill("53");
     await expect(lineTexts(dialog)).toHaveText([TRADED_START_TEXT, "최근 봉 수: 신고거래량 기간 52주보다 길 수 없습니다"]);
@@ -176,10 +179,10 @@ test("거래 분류의 신고거래량·신고거래대금은 새로 고르면 �
 
   await test.step("두 줄을 월봉으로 바꾸고 N·M을 고쳐 저장하면, 새로 고침 뒤 다시 열어도 월봉과 고친 기간이 그대로다", async () => {
     let dialog = editor(page, "조건식 편집");
-    await choice(dialog, 1, "봉 주기").selectOption("M");
+    await selectOption(choice(dialog, 1, "봉 주기"), "M");
     await box(dialog, 1, "신고거래대금 기간").fill("24");
     await box(dialog, 1, "최근 봉 수").fill("6");
-    await choice(dialog, 2, "봉 주기").selectOption("M");
+    await selectOption(choice(dialog, 2, "봉 주기"), "M");
     await box(dialog, 2, "신고거래량 기간").fill("12");
     await box(dialog, 2, "최근 봉 수").fill("3");
     await expect(lineTexts(dialog)).toHaveText([MONTHLY_TRADED_TEXT, MONTHLY_VOLUME_TEXT]);

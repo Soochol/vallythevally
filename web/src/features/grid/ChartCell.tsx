@@ -1,3 +1,4 @@
+import { ErrorState, EmptyState, Skeleton } from "../overlay/State";
 import { useEffect, useMemo, useRef } from "react";
 import { useFinancials } from "../../api/financials";
 import { isFinancial } from "../../chart/indicators/kinds";
@@ -116,6 +117,7 @@ export function ChartCell({ slot, status, onStatus }: Props) {
     >
       <div ref={chartEl} className="absolute inset-0" />
       <DrawingOverlay slot={slot} />
+      {status.kind === "loading" && <div className="pointer-events-none absolute inset-0 z-[5] bg-chart-bg"><Skeleton label="차트 불러오는 중" /></div>}
       {olderError && (
         <div
           role="alert"
@@ -147,19 +149,7 @@ export function ChartCell({ slot, status, onStatus }: Props) {
       )}
       {error && (
         <div className="absolute inset-0 z-[5] grid place-items-center bg-chart-bg p-6">
-          <div className="flex max-w-[44ch] flex-col items-center gap-4 text-center" role="alert">
-            <p className="text-m text-text">{error.text}</p>
-            {error.action === "search" && (
-              <button type="button" className="btn-primary" onClick={() => openSearch()}>
-                종목 검색
-              </button>
-            )}
-            {error.action === "retry" && (
-              <button type="button" className="btn-primary" onClick={() => ctl.current?.reload()}>
-                다시 시도
-              </button>
-            )}
-          </div>
+          {error.action === "retry" ? <ErrorState message={error.text} retry={() => ctl.current?.reload()} /> : <div role="alert"><EmptyState title={error.text} action={error.action === "search" ? "종목 검색" : undefined} onAction={openSearch} /></div>}
         </div>
       )}
     </section>

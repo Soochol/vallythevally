@@ -1,3 +1,4 @@
+import type { Period } from "../api/generated/Period";
 import { create } from "zustand";
 import type { SymbolCode } from "../api/generated/SymbolCode";
 import type { WatchColumn } from "../lib/watchlist";
@@ -10,6 +11,7 @@ interface UiStore {
   revision: number;
   load(prefs: UiPrefs, extra: UiExtra): void;
   toggleWatch(): void;
+  togglePinnedMinute(period: Period): void;
   pushRecent(code: SymbolCode): void;
   clearRecent(): void;
   setLastLayoutId(id: string): void;
@@ -29,6 +31,7 @@ export const useUiStore = create<UiStore>()((set) => {
     extra: {},
     revision: 0,
     load: (prefs, extra) => set({ prefs, extra }),
+    togglePinnedMinute: (period) => edit((p) => ({ ...p, pinnedMinutes: p.pinnedMinutes.includes(period) ? p.pinnedMinutes.filter((v) => v !== period) : [...p.pinnedMinutes, period] })),
     toggleWatch: () => edit((p) => ({ ...p, watchCollapsed: !p.watchCollapsed })),
     pushRecent: (code) =>
       edit((p) =>

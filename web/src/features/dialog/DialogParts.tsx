@@ -1,6 +1,7 @@
-import { type ReactNode, type Ref, useEffect, useRef } from "react";
+import { Popover } from "../overlay/Popover";
+import { type ReactNode, type Ref } from "react";
 
-const FOCUSABLE = "button:not(:disabled), input:not(:disabled), select:not(:disabled)";
+const FOCUSABLE = "button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea, [tabindex='0']";
 
 function onDialogKeyDown(e: React.KeyboardEvent<HTMLElement>, close: () => void) {
   if (e.nativeEvent.isComposing || e.keyCode === 229) {
@@ -9,6 +10,7 @@ function onDialogKeyDown(e: React.KeyboardEvent<HTMLElement>, close: () => void)
   }
   if (e.key === "Escape") {
     e.preventDefault();
+    e.stopPropagation();
     close();
   } else if (e.key === "Tab") {
     const nodes = [...e.currentTarget.querySelectorAll<HTMLElement>(FOCUSABLE)].filter((n) => n.tabIndex >= 0 && n.getClientRects().length > 0);
@@ -33,15 +35,8 @@ interface FrameProps {
 }
 
 export function DialogFrame({ labelledBy, width, onClose, panelRef, children }: FrameProps) {
-  const opener = useRef<Element | null>(document.activeElement);
-  useEffect(() => {
-    const back = opener.current;
-    return () => {
-      if (back instanceof HTMLElement) back.focus();
-    };
-  }, []);
   return (
-    <div
+    <Popover onClose={onClose}
       className="ui-dialog-backdrop fixed inset-0 z-50 flex justify-center bg-[var(--scrim)]"
       onPointerDown={(e) => e.target === e.currentTarget && onClose()}
     >
@@ -59,7 +54,7 @@ export function DialogFrame({ labelledBy, width, onClose, panelRef, children }: 
       >
         {children}
       </div>
-    </div>
+    </Popover>
   );
 }
 

@@ -1,3 +1,4 @@
+import { selectOption } from "./select-option";
 import { writeFile } from "node:fs/promises";
 import type { Page } from "@playwright/test";
 import type { Drawing } from "../src/api/generated/Drawing";
@@ -129,7 +130,8 @@ test.describe("재무 시각과 가격 시각", () => {
       if (point.x === null || point.y === null) throw new Error("실제 시각의 좌표가 없습니다");
       return { x: box.x + point.x, y: box.y + point.y };
     };
-    await page.getByRole("combobox", { name: "자석 세기" }).selectOption("strong");
+    await page.getByRole("button", { name: "자석", exact: true }).click({ button: "right" });
+    await page.getByRole("menuitemradio", { name: "강", exact: true }).click();
     const start = await move(2021, 132); const end = await move(2023, 152);
     await cell(page).focus(); await page.keyboard.press("T");
     await page.mouse.move(start.x, start.y); await page.mouse.down(); await page.mouse.move(end.x, end.y, { steps: 8 }); await page.mouse.up();
@@ -207,7 +209,7 @@ test.describe("같은 재무 키의 응답 순서", () => {
     await expect(row(page)).toContainText("확인 완료");
     const points = server.series.find((s) => s.metric === "revenue")!.points;
     expect(points.some((p) => p.reason === "period_overlap" && p.value === null)).toBe(true);
-    await row(page).getByRole("combobox").selectOption({ index: 1 });
+    await selectOption(row(page).getByRole("combobox"), { index: 1 });
     await expect(row(page).locator("details")).toContainText("보고기간이 겹쳐 표시 불가");
     await writeFile(info.outputPath("mutation-order.json"), JSON.stringify({ original, responses, corrected, after, server }, null, 2));
     releaseGets();

@@ -1,3 +1,4 @@
+import { selectOption } from "./select-option";
 import type { Locator, Page } from "@playwright/test";
 import { expect, test } from "./harness";
 import { editor, excludedLine, expectCellOn, expectRows, openScreener, panel, pickPeriod, pickVenue, results, rows, runButton, savedTo, updateBand, waitForUpdateToFinish } from "./screener-page";
@@ -59,23 +60,23 @@ test("봉·지표·시가총액 줄을 일봉과 주봉으로 섞어 만들고 �
     const dialog = editor(page, "새 조건식");
     await dialog.getByLabel("이름").fill(SCREEN_NAME);
     await dialog.getByRole("button", { name: "조건 더하기" }).click();
-    await choice(dialog, 1, "봉 주기").selectOption("W");
-    await choice(dialog, 1, "값").selectOption("close");
+    await selectOption(choice(dialog, 1, "봉 주기"), "W");
+    await selectOption(choice(dialog, 1, "값"), "close");
     await box(dialog, 1, "신고가 기간").fill("52");
 
     await dialog.getByRole("button", { name: "조건 더하기" }).click();
-    await expect(choice(dialog, 2, "봉 주기")).toHaveValue("W");
-    await choice(dialog, 2, "종류").selectOption("surge");
-    await choice(dialog, 2, "봉 주기").selectOption("D");
+    await expect(choice(dialog, 2, "봉 주기")).toHaveAttribute("data-value", "W");
+    await selectOption(choice(dialog, 2, "종류"), "surge");
+    await selectOption(choice(dialog, 2, "봉 주기"), "D");
     await box(dialog, 2, "최근 봉 수").fill("10");
 
     await dialog.getByRole("button", { name: "조건 더하기" }).click();
-    await expect(choice(dialog, 3, "봉 주기")).toHaveValue("D");
-    await choice(dialog, 3, "종류").selectOption("ma_cross");
+    await expect(choice(dialog, 3, "봉 주기")).toHaveAttribute("data-value", "D");
+    await selectOption(choice(dialog, 3, "종류"), "ma_cross");
     await box(dialog, 3, "최근 봉 수").fill("5");
 
     await dialog.getByRole("button", { name: "조건 더하기" }).click();
-    await choice(dialog, 4, "종류").selectOption("market_cap");
+    await selectOption(choice(dialog, 4, "종류"), "market_cap");
     await expect(choice(dialog, 4, "봉 주기")).toHaveCount(0);
     await expect(lineTexts(dialog)).toHaveText([WEEKLY_HIGH, SURGE, CROSS, MARKET_CAP]);
   });
@@ -126,8 +127,8 @@ test("봉·지표·시가총액 줄을 일봉과 주봉으로 섞어 만들고 �
 
   await test.step("거래 급증 줄을 등락률로 바꾸면 봉 주기와 M은 남고, 짧은 이평이 긴 이평보다 길거나 최대가 최소보다 작으면 그 칸에서 이유와 함께 저장이 막힌다", async () => {
     const dialog = await editScreen(page);
-    await choice(dialog, 3, "종류").selectOption("change");
-    await expect(choice(dialog, 3, "봉 주기")).toHaveValue("D");
+    await selectOption(choice(dialog, 3, "종류"), "change");
+    await expect(choice(dialog, 3, "봉 주기")).toHaveAttribute("data-value", "D");
     await expect(box(dialog, 3, "최근 봉 수")).toHaveValue("10");
     await expect(box(dialog, 3, "비교 봉 수")).toHaveValue("1");
     await expect(box(dialog, 3, "최소 등락률")).toHaveValue("5");

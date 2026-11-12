@@ -1,7 +1,8 @@
+import { MinuteMenu } from "./MinuteMenu";
 import { useSymbolInfo } from "../../api/queries";
 import { shownScale } from "../../chart/settings";
 import { periodKey } from "../../lib/hotkeys";
-import { isPeriod, PERIOD_LABEL, PERIODS, symbolSub } from "../../lib/symbol";
+import { PERIOD_LABEL, PERIODS, symbolSub } from "../../lib/symbol";
 import { useCell, useLayoutStore } from "../../stores/layout";
 import { useSelectionStore } from "../../stores/selection";
 import { AXIS_LOCKED, LOG_LOCKED, pressScale } from "../indicator-dialog/compareForm";
@@ -54,7 +55,7 @@ export function Topbar() {
         </button>
       </div>
       {desktopView === "chart" && (
-        <div className="app-tools w-full overflow-x-auto">
+        <div className="app-tools w-full overflow-x-auto overflow-y-hidden">
           {cell.venue !== null && (
             <>
               <span className="tb-sep" />
@@ -63,10 +64,7 @@ export function Topbar() {
           )}
           <span className="tb-sep" />
           <div role="group" aria-label="봉 주기" className="-m-[3px] inline-flex min-w-0 items-center gap-px overflow-x-auto p-[3px] [scrollbar-width:none]">
-            <select aria-label="분봉" data-active={cell.period.endsWith("m")} value={cell.period.endsWith("m") ? cell.period : ""} onChange={(e) => { if (isPeriod(e.target.value)) setPeriod(slot, e.target.value); }}>
-              <option value="" disabled>분봉</option>
-              {PERIODS.filter((p) => p.endsWith("m")).map((p) => <option key={p} value={p}>{PERIOD_LABEL[p]}</option>)}
-            </select>
+            <MinuteMenu value={cell.period} onChange={(period) => setPeriod(slot, period)} />
             {PERIODS.filter((p) => !p.endsWith("m")).map((p) => (
               <button
                 key={p}

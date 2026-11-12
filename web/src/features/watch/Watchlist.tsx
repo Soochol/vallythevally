@@ -1,5 +1,6 @@
+import { EmptyState } from "../overlay/State";
+import { confirmAction } from "../overlay/Confirm";
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
-import { createPortal } from "react-dom";
 import type { Quote } from "../../api/generated/Quote";
 import type { SymbolCode } from "../../api/generated/SymbolCode";
 import type { Watchlist } from "../../api/generated/Watchlist";
@@ -101,8 +102,8 @@ function ListMenu({ list, onName }: { list: Watchlist; onName(n: Naming): void }
     if (restoreFocus) button.current?.focus();
   }, []);
 
-  const removeActive = () => {
-    if (list.symbols.length > 0 && !window.confirm(`${list.name} 목록과 그 안의 ${list.symbols.length}종목을 지웁니다`)) return;
+  const removeActive = async () => {
+    if (list.symbols.length > 0 && !await confirmAction(`${list.name} 목록과 그 안의 ${list.symbols.length}종목을 지웁니다`)) return;
     const i = lists.findIndex((l) => l.id === list.id);
     const next = lists[i - 1] ?? lists[i + 1];
     useWatchlistStore.getState().removeList(list.id);
@@ -228,7 +229,7 @@ function WatchList({ variant, editing }: { variant: WatchVariant; editing: boole
           </span>
         ))}
       </div>
-      {symbols.length === 0 && <p className="px-3 py-4 text-m text-text-2">{list.name}에 종목이 없습니다. +로 종목을 넣으세요</p>}
+      {symbols.length === 0 && <EmptyState title={`${list.name}에 종목이 없습니다. +로 종목을 넣으세요`} action="종목 넣기" onAction={() => useSelectionStore.getState().openSearch("watch")} />}
       <ul ref={ul} aria-label={list.name} className="min-h-0 flex-1 overflow-auto" onDragLeave={(e) => e.currentTarget === e.target && setDragOver(null)}>
         {symbols.map((code, i) => (
           <WatchRow
@@ -415,25 +416,13 @@ function WatchRow({ list, code, index, last, columns, template, variant, editing
   );
 }
 
-const MENU_GAP = 4;
-const MENU_MIN_BELOW = 240;
-
-function menuPlacement({ top, bottom }: { top: number; bottom: number }): React.CSSProperties {
-  const below = window.innerHeight - bottom - 2 * MENU_GAP;
-  const above = top - 2 * MENU_GAP;
-  const cap = window.innerHeight * 0.6;
-  return below >= MENU_MIN_BELOW || below >= above
-    ? { top: bottom + MENU_GAP, maxHeight: Math.min(cap, below) }
-    : { bottom: window.innerHeight - top + MENU_GAP, maxHeight: Math.min(cap, above) };
-}
-
 function TransferMenu({ list, code, name, buttonClass }: { list: Watchlist; code: SymbolCode; name: string; buttonClass: string }) {
   const others = useWatchlistStore((s) => s.lists).filter((l) => l.id !== list.id);
-  const [at, setAt] = useState<{ right: number; top: number; bottom: number } | null>(null);
+  const [open, setOpen] = useState(false);
   const root = useRef<HTMLDivElement>(null);
   const button = useRef<HTMLButtonElement>(null);
   const close = useCallback((restoreFocus: boolean) => {
-    setAt(null);
+    setOpen(false);
     if (restoreFocus) button.current?.focus();
   }, []);
   if (others.length === 0) return null;
@@ -460,27 +449,18 @@ function TransferMenu({ list, code, name, buttonClass }: { list: Watchlist; code
         title="다른 목록으로 옮기거나 복사"
         aria-label={`${name} 다른 목록으로`}
         aria-haspopup="menu"
-        aria-expanded={at !== null}
-        onClick={() => {
-          if (at) return setAt(null);
-          const r = button.current!.getBoundingClientRect();
-          setAt({ right: window.innerWidth - r.right, top: r.top, bottom: r.bottom });
-        }}
+        aria-expanded={open}
+        onClick={() => setOpen(!open)}
       >
         <MoreIcon />
       </button>
-      {at &&
-        createPortal(
-          <Menu
+      {open && <Menu
             label={`${name} 다른 목록으로`}
             items={items}
             onClose={close}
             root={root}
             className="fixed overflow-auto"
-            style={{ right: at.right, ...menuPlacement(at) }}
-          />,
-          document.body,
-        )}
+          />}
     </div>
   );
 }

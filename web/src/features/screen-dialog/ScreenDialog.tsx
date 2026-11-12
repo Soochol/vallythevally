@@ -1,3 +1,5 @@
+import { Select } from "../menu/Select";
+import { confirmAction } from "../overlay/Confirm";
 import { useQueryClient } from "@tanstack/react-query";
 import { type ReactNode, type Ref, useEffect, useId, useRef, useState } from "react";
 import type { BarField } from "../../api/generated/BarField";
@@ -110,7 +112,7 @@ const ICHIMOKU_TESTS: Options<"cloud" | "cross"> = [
   ["cross", "전환선·기준선 교차"],
 ];
 
-const CHOICE_LABEL: Record<KindChoice, string> = { ...KIND_LABEL, volume_high: NEW_HIGH_NAME.volume, traded_value_high: NEW_HIGH_NAME.traded_value };
+export const CHOICE_LABEL: Record<KindChoice, string> = { ...KIND_LABEL, volume_high: NEW_HIGH_NAME.volume, traded_value_high: NEW_HIGH_NAME.traded_value };
 const VALUE_FIELDS: Partial<Record<KindChoice, Options<BarField>>> = { new_high: PRICE_FIELDS, new_low: BAR_FIELDS };
 
 const FIELD_NAME: Record<Exclude<FieldKey, `lengths.${number}`>, string> = {
@@ -227,9 +229,9 @@ function ScreenDialogBody({ editId, opened }: { editId: string | null; opened: S
     });
   };
 
-  const remove = () => {
+  const remove = async () => {
     const name = base.screens.find((s) => s.id === id)?.name ?? initial.name;
-    if (busy || !window.confirm(`"${name}" 조건식을 삭제할까요? 되돌릴 수 없습니다.`)) return;
+    if (busy || !await confirmAction(`"${name}" 조건식을 삭제할까요? 되돌릴 수 없습니다.`)) return;
     void store((list) => list.filter((s) => s.id !== id), STALE_DELETE, closeDialog);
   };
 
@@ -397,17 +399,7 @@ function ConditionLine({ ids, index, last, condition, onChange, onKind, onMove, 
     <li className="condition-card flex flex-col gap-3">
       <header><strong className="font-semibold">{label}</strong><span className="text-xs text-text-3">{index > 0 ? "그리고" : "첫 번째 조건"}</span></header>
       <div className="flex flex-wrap items-center gap-x-1.5 gap-y-1.5 text-s text-text-2">
-        <select aria-label={`${label} 종류`} value={kind} onChange={(e) => onKind(kindOf(e.target.value) ?? kind)} className={`${FIELD_BOX} px-1.5`}>
-          {KIND_GROUPS.map((group) => (
-            <optgroup key={group.label} label={group.label}>
-              {group.kinds.map((choice) => (
-                <option key={choice} value={choice}>
-                  {CHOICE_LABEL[choice]}
-                </option>
-              ))}
-            </optgroup>
-          ))}
-        </select>
+        <Select label={`${label} 종류`} value={kind} onChange={onKind} className={`${FIELD_BOX} px-1.5`} options={KIND_GROUPS.flatMap((group) => group.kinds.map((choice) => ({ value: choice, label: CHOICE_LABEL[choice], group: group.label })))} />
         {barLine && <Choice label={`${label} 봉 주기`} value={condition.period} options={PERIODS} onChange={(period) => onChange({ ...condition, period })} />}
         <KindFields ui={ui} line={condition} onChange={onChange} />
         {barLine && (
@@ -438,8 +430,6 @@ function ConditionLine({ ids, index, last, condition, onChange, onKind, onMove, 
   );
 }
 
-const ALL_KINDS: readonly KindChoice[] = KIND_GROUPS.flatMap((g) => g.kinds);
-const kindOf = (value: string): KindChoice | undefined => ALL_KINDS.find((k) => k === value);
 
 type Width = "count" | "length" | "amount" | "percent";
 const WIDTH: Record<Width, string> = { count: "w-[72px]", length: "w-[52px]", amount: "w-[88px]", percent: "w-[60px]" };
@@ -477,23 +467,7 @@ interface ChoiceProps<T extends string> {
 }
 
 function Choice<T extends string>({ label, value, options, onChange }: ChoiceProps<T>) {
-  return (
-    <select
-      aria-label={label}
-      value={value}
-      onChange={(e) => {
-        const picked = options.find(([v]) => v === e.target.value);
-        if (picked) onChange(picked[0]);
-      }}
-      className={`${FIELD_BOX} px-1.5`}
-    >
-      {options.map(([v, text]) => (
-        <option key={v} value={v}>
-          {text}
-        </option>
-      ))}
-    </select>
-  );
+  return <Select label={label} value={value} options={options.map(([value, label]) => ({ value, label }))} onChange={onChange} className={`${FIELD_BOX} px-1.5`} />;
 }
 
 const Together = ({ children }: { children: ReactNode }) => <span className="flex flex-none items-center gap-1.5">{children}</span>;

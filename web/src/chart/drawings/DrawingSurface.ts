@@ -268,9 +268,9 @@ export class DrawingSurface implements ChartExtension {
   }
   remove(force = false) {
     const prefs = useUiStore.getState().prefs.drawing; const selected = this.selected();
-    if (force && selected.some((d) => d.locked || prefs.lockAll) && !window.confirm("잠긴 드로잉을 지울까요?")) return;
     this.sync.commit(this.slot, selected.filter((d) => force || (!d.locked && !prefs.lockAll)).map((before) => ({ kind: "delete", before })));
     useDrawingSession.getState().select([]);
+    if (selected.length) useSelectionStore.getState().showToast("드로잉을 지웠습니다", () => this.sync.undo(this.slot, false));
   }
   openEditor(id: string, kind: "settings" | "text" = "settings") {
     const symbol = this.host.view()?.symbol; const d = symbol ? this.sync.drawings(symbol).find((item) => item.id === id) : undefined;

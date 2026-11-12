@@ -1,4 +1,5 @@
-import { useEffect, useId, useRef, useState } from "react";
+import { Popover } from "../overlay/Popover";
+import { useId, useRef, useState } from "react";
 import { hexToHsv, hsvToHex, isHexColor, normalizeHex, PRESET_COLORS, type HexColor, type HsvColor } from "../../lib/colors";
 import { CheckIcon, ChevronIcon, CloseIcon } from "../icons";
 
@@ -48,46 +49,14 @@ function ColorDialog({ label, initial, width, trigger, onCancel, onApply }: {
   onApply(color: HexColor): void;
 }) {
   const id = useId();
-  const panel = useRef<HTMLDivElement>(null);
   const [custom, setCustom] = useState(false);
   const [hsv, setHsv] = useState(() => hexToHsv(initial));
   const [text, setText] = useState<string>(initial);
   const [recent] = useState(readRecent);
-  const [position, setPosition] = useState({ left: 12, top: 12 });
   const color = hsvToHex(hsv);
   const valid = normalizeHex(text) !== null;
   const choose = (next: HexColor) => { setHsv(hexToHsv(next)); setText(next); };
   const changeHsv = (next: HsvColor) => { setHsv(next); setText(hsvToHex(next)); };
-
-  useEffect(() => {
-    const root = panel.current;
-    if (!root) return;
-    root.showPopover();
-    root.querySelector<HTMLElement>("[role=tab]")?.focus();
-    const button = trigger.current;
-    return () => button?.focus();
-  }, [trigger]);
-
-  useEffect(() => {
-    const place = () => {
-      const anchor = trigger.current?.getBoundingClientRect();
-      const box = panel.current?.getBoundingClientRect();
-      if (anchor && box) setPosition({ left: Math.max(12, Math.min(anchor.left, innerWidth - box.width - 12)), top: Math.max(12, Math.min(anchor.bottom + 8, innerHeight - box.height - 12)) });
-    };
-    place();
-    window.addEventListener("resize", place);
-    const observer = new ResizeObserver(place);
-    if (panel.current) observer.observe(panel.current);
-    return () => { window.removeEventListener("resize", place); observer.disconnect(); };
-  }, [custom, trigger]);
-
-  useEffect(() => {
-    const down = (e: PointerEvent) => {
-      if (e.target instanceof Node && !panel.current?.contains(e.target) && !trigger.current?.contains(e.target)) onCancel();
-    };
-    document.addEventListener("pointerdown", down);
-    return () => document.removeEventListener("pointerdown", down);
-  }, [onCancel, trigger]);
 
   const apply = () => {
     if (!valid) return;
@@ -105,7 +74,7 @@ function ColorDialog({ label, initial, width, trigger, onCancel, onApply }: {
   );
 
   return (
-    <div ref={panel} popover="manual" role="dialog" aria-modal="false" aria-labelledby={`${id}-title`} className="color-popover" style={position}
+    <Popover anchor={trigger} onClose={onCancel} role="dialog" aria-modal="false" aria-labelledby={`${id}-title`} className="color-popover"
       onKeyDown={(e) => {
         if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); onCancel(); }
         if (e.key === "Enter" && e.target instanceof HTMLInputElement && e.target.type === "text") { e.preventDefault(); e.stopPropagation(); apply(); }
@@ -141,6 +110,6 @@ function ColorDialog({ label, initial, width, trigger, onCancel, onApply }: {
       <div className="color-recent"><span>최근 사용</span><div className="color-grid" aria-label="최근 사용 색상">{recent.length ? recent.map((c) => swatch(c, "최근 색상")) : <p>색상을 선택하면 여기에 모입니다.</p>}</div></div>
       <div className="color-picker-sample"><span>선 샘플</span><div><i style={{ background: color, height: width }} /></div><span>{width} px</span></div>
       <div className="color-picker-foot"><button type="button" className="tb-btn border border-line" onClick={onCancel}>취소</button><button type="button" className="btn-primary" disabled={!valid} onClick={apply}>선택</button></div>
-    </div>
+    </Popover>
   );
 }

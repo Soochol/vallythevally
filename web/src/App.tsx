@@ -1,3 +1,5 @@
+import { ConfirmHost } from "./features/overlay/Confirm";
+import { TooltipHost } from "./features/overlay/Tooltip";
 import { useEffect, useState } from "react";
 import { useSymbolInfo } from "./api/queries";
 import type { CellStatus } from "./chart/ChartController";
@@ -71,6 +73,8 @@ function ChartScreen() {
       <IndicatorDialog />
       <ScreenDialog />
       <Toast />
+      <ConfirmHost />
+      <TooltipHost />
     </div>
   );
 }
