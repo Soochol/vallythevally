@@ -61,6 +61,68 @@ test("마지막 편집 1초 뒤 최신 값을 한 번 보낸다", async () => {
   expect(t.states).toEqual(["pending", "pending", "saving", "saved"]);
 });
 
+test("외부 저장 승인 뒤에는 재시도와 미저장 본문을 지우고 다음 편집에 새 revision을 쓴다", async () => {
+  const t = setup({ send: async () => { throw new ApiRequestError("network", "실패"); } });
+  t.edit({ n: 1 });
+  await vi.advanceTimersByTimeAsync(1000);
+  expect(t.state().kind).toBe("failed");
+  expect(t.unsaved()).not.toBeNull();
+  t.saver.acceptSaved(500);
+  expect(t.unsaved()).toBeNull();
+  expect(t.state().kind).toBe("saved");
+  await vi.advanceTimersByTimeAsync(60_000);
+  expect(t.send).toHaveBeenCalledTimes(1);
+  t.edit({ n: 2 });
+  await vi.advanceTimersByTimeAsync(1000);
+  expect(t.revisions()).toEqual([102, 502]);
+});
+
+test("진행 중인 모든 전송이 끝날 때까지 기다리고 현재 편집의 재시도와 숨김 전송을 멈춘다", async () => {
+  const releases: (() => void)[] = [];
+  const t = setup({ send: () => new Promise<void>((resolve) => releases.push(resolve)) });
+  t.edit({ n: 1 });
+  await vi.advanceTimersByTimeAsync(1000);
+  t.saver.flush();
+  let settled = false;
+  void t.saver.settled().then(() => { settled = true; });
+  releases[1]!();
+  await vi.advanceTimersByTimeAsync(0);
+  expect(settled).toBe(false);
+  releases[0]!();
+  await vi.advanceTimersByTimeAsync(0);
+  expect(settled).toBe(true);
+  t.edit({ n: 2 });
+  t.saver.pauseCurrent();
+  await vi.advanceTimersByTimeAsync(10_000);
+  expect(t.send).toHaveBeenCalledTimes(2);
+  t.saver.flush();
+  t.saver.retry();
+  expect(t.send).toHaveBeenCalledTimes(2);
+  t.saver.resume();
+  t.saver.flush();
+  expect(t.send).toHaveBeenCalledTimes(2);
+  t.saver.retry();
+  expect(t.send).toHaveBeenCalledTimes(3);
+});
+
+test("조건부 저장이 현재 편집을 멈춰도 더 나중의 로컬 편집은 저장한다", async () => {
+  const t = setup();
+  t.edit({ n: 1 });
+  t.saver.pauseCurrent();
+  t.edit({ n: 2 });
+  await vi.advanceTimersByTimeAsync(1000);
+  expect(t.ns()).toEqual([2]);
+});
+
+test("새 revision만 관찰하면 아직 남은 로컬 편집을 저장 완료로 처리하지 않는다", async () => {
+  const t = setup();
+  t.edit({ n: 1 });
+  t.saver.advanceRevision(600);
+  await vi.advanceTimersByTimeAsync(1000);
+  expect(t.revisions()).toEqual([601]);
+  expect(t.ns()).toEqual([1]);
+});
+
 test("보내는 동안 들어온 편집은 응답 뒤 디바운스를 거쳐 다음 요청에 실린다", async () => {
   let resolve!: () => void;
   const t = setup({ send: () => new Promise<void>((r) => (resolve = r)) });

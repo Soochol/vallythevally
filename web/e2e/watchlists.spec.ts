@@ -28,7 +28,7 @@ async function createList(page: Page, name: string) {
 
 async function switchTo(page: Page, name: string) {
   await openListMenu(page);
-  await menu(page).getByRole("menuitemradio", { name }).click();
+  await menu(page).getByRole("menuitemradio", { name: new RegExp(`^${name}\\s*\\d+$`) }).click();
   await expect(listButton(page)).toHaveAccessibleName(`관심종목 목록: ${name}`);
 }
 
@@ -44,8 +44,8 @@ test("목록 셋, 목록마다의 순서, 고른 열이 새로고침과 서버 �
   await addToActiveList(page, "005930", "005930");
 
   await switchTo(page, "기본");
-  await panel(page).locator('li[data-code="086520"]').hover();
-  await panel(page).getByRole("button", { name: /다른 목록으로$/ }).first().click();
+  await panel(page).locator('li[data-code="086520"]').click({ button: "right" });
+  await page.getByRole("menuitem", { name: "다른 목록에 복사", exact: true }).click();
   await page.getByRole("menu", { name: /다른 목록으로$/ }).getByRole("menuitem", { name: "반도체" }).nth(1).click();
   await expect(page.getByText("복사했습니다: 에코프로 → 반도체")).toBeVisible();
 
@@ -64,7 +64,7 @@ test("목록 셋, 목록마다의 순서, 고른 열이 새로고침과 서버 �
     await expect(listButton(page)).toHaveAccessibleName("관심종목 목록: 빈 목록");
     await expect(panel(page).getByText("빈 목록에 종목이 없습니다")).toBeVisible();
     await openListMenu(page);
-    await expect(menu(page).getByRole("menuitemradio")).toHaveText(["기본", "반도체", "빈 목록"]);
+    await expect(menu(page).getByRole("menuitemradio")).toHaveText(["기본2", "반도체2", "빈 목록0"]);
     await expect(menu(page).getByRole("menuitemcheckbox", { checked: true })).toHaveText(["현재가", "거래량"]);
     await page.keyboard.press("Escape");
     await expect(panel(page).locator('div[aria-hidden="true"]').filter({ hasText: /^종목/ }).locator("span")).toHaveText(["종목", "현재가", "거래량"]);
@@ -94,9 +94,10 @@ test("마지막 목록은 지울 수 없고, 지운 목록 대신 이웃 목록�
   await createList(page, "지울 목록");
   await openListMenu(page);
   await menu(page).getByRole("menuitem", { name: "목록 지우기" }).click();
+  await page.getByRole("dialog").getByRole("button", { name: "확인", exact: true }).click();
   await expect(listButton(page)).toHaveAccessibleName("관심종목 목록: 기본");
   await openListMenu(page);
-  await expect(menu(page).getByRole("menuitemradio")).toHaveText(["기본"]);
+  await expect(menu(page).getByRole("menuitemradio")).toHaveText(["기본0"]);
 });
 
 test("이름이 겹치면 만들지 않고 까닭을 보인다", async ({ page }) => {
