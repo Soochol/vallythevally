@@ -216,21 +216,23 @@ export function ScreenerPanel() {
   const band = status !== undefined && showsUpdateBand(status);
   return (
     <aside aria-label="스크리너" className="flex min-h-0 flex-1 flex-col">
-      {band && <UpdateBand status={status} />}
-      {screen ? (
-        <ScreenHeader screen={screen} screens={screens.data?.screens ?? []} run={run} block={block} status={status} rows={rows} onRun={execute} />
-      ) : (
-        <header className="flex h-11 flex-none items-center gap-1 border-b border-line pl-3 pr-1.5">
-          <h2 className="text-l font-[700]">스크리너</h2>
-          <span className="flex-1" />
-          <PanelMenu screen={null} rows={rows} status={status} />
-        </header>
-      )}
-      {screen ? (
-        <Results screen={screen} run={run} rows={rows} status={status} block={block} onRun={execute} />
-      ) : (
-        <NoScreen query={screens} />
-      )}
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        {band && <UpdateBand status={status} />}
+        {screen ? (
+          <ScreenHeader screen={screen} screens={screens.data?.screens ?? []} run={run} block={block} status={status} rows={rows} onRun={execute} />
+        ) : (
+          <header className="flex h-11 flex-none items-center gap-1 border-b border-line pl-3 pr-1.5">
+            <h2 className="text-l font-[700]">스크리너</h2>
+            <span className="flex-1" />
+            <PanelMenu screen={null} rows={rows} status={status} />
+          </header>
+        )}
+        {screen ? (
+          <Results screen={screen} run={run} rows={rows} status={status} block={block} onRun={execute} />
+        ) : (
+          <NoScreen query={screens} />
+        )}
+      </div>
       <StatusFooterLine footer={statusFooter(status, statusQuery.error)} status={status} onRetry={() => void statusQuery.refetch()} />
     </aside>
   );
@@ -557,7 +559,7 @@ function ResultList({ screen, result, rows, running, rerun, onRun }: ResultListP
   const sort = useScreenerStore((s) => s.sort);
   const left = result.excluded.listedTooShort + result.excluded.historyShort;
   return (
-    <section aria-label="결과" aria-busy={running} className={`flex min-h-0 flex-1 flex-col ${running ? "opacity-50" : ""}`}>
+    <section aria-label="결과" aria-busy={running} className={`flex flex-col ${running ? "opacity-50" : ""}`}>
       <div className="flex flex-none items-baseline gap-1.5 px-3 pt-2.5">
         <span className="text-xl font-[700] leading-none">{count(rows.length)}</span>
         <span className="text-s text-text-2">종목 · {dayLabel(result.asOf, result.asOf)} 기준</span>
@@ -599,7 +601,7 @@ function ResultList({ screen, result, rows, running, rerun, onRun }: ResultListP
       ) : (
         <>
           <SortHeader sort={sort} />
-          <ul ref={list} aria-label={`${screen.name} 결과`} className="min-h-0 flex-1 overflow-auto">
+          <ul ref={list} aria-label={`${screen.name} 결과`}>
             {rows.map((r) => (
               <ResultRow key={r.symbol} row={r} screen={screen} asOf={result.asOf} active={r.symbol === active} />
             ))}

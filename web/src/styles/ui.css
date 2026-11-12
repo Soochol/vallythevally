@@ -35,7 +35,7 @@
 .desktop-screener>nav>button:hover { background:var(--raised); }
 .desktop-screener>nav>button[aria-pressed=true] { border-color:color-mix(in srgb,var(--accent) 30%,transparent); background:var(--accent-soft); color:var(--accent); }
 .desktop-screener>section { display:flex; min-width:0; min-height:0; padding:var(--size-20) var(--size-24); }
-.desktop-screener [aria-label="스크리너"]>header { padding:var(--size-8) 0 var(--size-20); }
+.desktop-screener [aria-label="스크리너"] header { padding:var(--size-8) 0 var(--size-20); }
 .desktop-screener [aria-label="스크리너"] li { min-height:var(--size-54); }
 [data-desktop-view=screener] { --topbar-h:var(--size-64); }
 @media (width < 64rem) { .app-header { gap:var(--size-16); padding:0 var(--size-16); } .app-tools { gap:var(--size-4); padding-inline:var(--size-8); } .app-tools .tb-btn { padding-inline:var(--size-8); } .app-tools .seg-btn { padding-inline:var(--size-8); } }
