@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -21,6 +22,45 @@ import web
 
 
 ROOT = Path(__file__).resolve().parent.parent
+
+
+def signal_fixture(mode, root):
+    if mode == "live":
+        binaries = root / "target/dev/bin"
+        binaries.mkdir(parents=True)
+        for name in ("vally-server", "fake-kiwoom"):
+            path = binaries / name
+            path.write_text("#!" + sys.executable + '\nimport time\nprint("addr=127.0.0.1:54321",flush=True)\ntime.sleep(120)\n')
+            path.chmod(0o755)
+        def prepare(arguments, cwd, environment):
+            with evidence.Run(root, "dev-build", arguments, environment["VALLY_EVIDENCE_DIR"]) as record:
+                record.artifact("server", binaries, "direct", "fixture")
+        def collect(*args):
+            record = evidence.ACTIVE
+            (root / "ready.json").write_text(json.dumps([process["pid"] for process in record.data["processes"]]))
+            time.sleep(120)
+        with patch.object(web, "run", prepare), patch.object(live, "collect", collect):
+            live.run_live(root, argparse.Namespace(mode="connect", timeout=10, headed=False, key_file=None), web)
+    else:
+        script = "\n".join([
+            "import json,os,signal,subprocess,sys,time",
+            "from pathlib import Path",
+            "child=subprocess.Popen([sys.executable,'-c','import time; time.sleep(120)'])",
+            "def stop(number, frame):",
+            " child.terminate(); child.wait(); sys.exit(0)",
+            "signal.signal(signal.SIGTERM,stop)",
+            "Path(sys.argv[1]).write_text(json.dumps([os.getpid(),child.pid]))",
+            "time.sleep(120)",
+        ])
+        arguments = [sys.executable, "-u", "-c", script, str(root / "ready.json")]
+        with evidence.Run(root, "signal-test", [mode]) as record:
+            record.plan("child")
+            with record.step("child"):
+                if mode == "command":
+                    evidence.command(arguments, root, os.environ.copy())
+                else:
+                    evidence.bounded(arguments, os.environ.copy(), 120)
+
 
 
 class LiveToolsTest(unittest.TestCase):
@@ -171,7 +211,81 @@ class LiveToolsTest(unittest.TestCase):
             self.assertNotIn("fixture-secret", text)
             self.assertNotIn("https://source.test", text)
 
+    def test_parent_pid_signals_cleanup_live_command_and_bounded(self):
+        for mode in ("live", "command", "bounded"):
+            for number in (signal.SIGTERM, signal.SIGINT):
+                with self.subTest(mode=mode, signal=number.name):
+                    root = self.root / f"{mode}-{number.name}"
+                    root.mkdir()
+                    environment = {name: os.environ[name] for name in ("PATH", "HOME", "LANG") if name in os.environ}
+                    environment["OPENDART_API_KEY"] = "fixture-only"
+                    pids = []
+                    with (root / "parent.log").open("w") as stream:
+                        process = subprocess.Popen([sys.executable, __file__, "--signal-fixture", mode, str(root)], env=environment, stdout=stream, stderr=subprocess.STDOUT, start_new_session=True)
+                        try:
+                            deadline = time.monotonic() + 10
+                            ready = root / "ready.json"
+                            while not ready.exists() and process.poll() is None and time.monotonic() < deadline:
+                                time.sleep(.02)
+                            self.assertTrue(ready.exists(), (root / "parent.log").read_text())
+                            pids = json.loads(ready.read_text())
+                            process.send_signal(number)
+                            self.assertEqual(process.wait(timeout=12), 128 + number)
+                            self.assertTrue(all(not Path(f"/proc/{pid}").exists() for pid in pids))
+                            path = next((root / "target/web-runs").glob("*/manifest.json"))
+                            manifest = json.loads(path.read_text())
+                            self.assertEqual(manifest["status"], "failed")
+                            self.assertEqual(manifest["exit_code"], 128 + number)
+                            self.assertEqual(manifest["signal"], number.name)
+                            if mode == "live":
+                                result = json.loads(path.with_name("result.json").read_text())
+                                self.assertEqual(result["status"], "failed")
+                                self.assertEqual(result["signal"], number.name)
+                                self.assertEqual(result["exit_code"], process.returncode)
+                            else:
+                                self.assertEqual(manifest["steps"]["child"]["exit_code"], process.returncode)
+                                if mode == "command":
+                                    self.assertEqual(manifest["commands"][0]["termination_reason"], "signal")
+                                    self.assertIsNotNone(manifest["commands"][0]["process_exit_code"])
+                                else:
+                                    self.assertEqual(manifest["bounded_commands"][0]["exit_code"], process.returncode)
+                                    self.assertIsNotNone(manifest["bounded_commands"][0]["process_exit_code"])
+                        finally:
+                            if process.poll() is None:
+                                os.killpg(process.pid, signal.SIGKILL)
+                                process.wait()
+                            for pid in pids:
+                                if Path(f"/proc/{pid}").exists():
+                                    with contextlib.suppress(ProcessLookupError):
+                                        os.kill(pid, signal.SIGKILL)
+
+    def test_signal_handlers_are_scoped_and_import_has_no_signal_side_effect(self):
+        previous = signal.getsignal(signal.SIGTERM)
+        def existing(number, frame):
+            pass
+        signal.signal(signal.SIGTERM, existing)
+        try:
+            with evidence.Run(self.root, "probe", ["test"]):
+                self.assertIsNot(signal.getsignal(signal.SIGTERM), existing)
+            self.assertIs(signal.getsignal(signal.SIGTERM), existing)
+        finally:
+            signal.signal(signal.SIGTERM, previous)
+        subprocess.run([sys.executable, "-c", "import signal; before=signal.getsignal(signal.SIGTERM); import evidence; assert signal.getsignal(signal.SIGTERM)==before"], cwd=ROOT / "scripts", check=True)
+
+    def test_bounded_timeout_cleans_actual_child_and_records_timeout(self):
+        with self.assertRaises(subprocess.TimeoutExpired), evidence.Run(self.root, "timeout", ["test"]) as record:
+            directory = record.directory
+            with record.step("child"):
+                evidence.bounded([sys.executable, "-c", "import time; time.sleep(30)"], {}, .1)
+        manifest = json.loads((directory / "manifest.json").read_text())
+        self.assertEqual(manifest["status"], "failed")
+        self.assertEqual(manifest["steps"]["child"]["termination_reason"], "timeout")
+        self.assertTrue(all(child.poll() is not None for child in record.children))
+
 
 if __name__ == "__main__":
-    with contextlib.redirect_stdout(io.StringIO()):
-        unittest.main()
+    if len(sys.argv) > 1 and sys.argv[1] == "--signal-fixture":
+        signal_fixture(sys.argv[2], Path(sys.argv[3]))
+    else:
+        with contextlib.redirect_stdout(io.StringIO()):
+            unittest.main()

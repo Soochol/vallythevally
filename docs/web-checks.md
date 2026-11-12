@@ -24,6 +24,7 @@ python3 scripts/web.py e2e --grep '조건식' --workers=3
 
 | 경로 | 용도 |
 |---|---|
+| `bin/` | 체크섬을 검증해 복사한 이번 실행 전용 서버·가짜 키움·DuckDB |
 | `dist/` | 이번 실행에서 빌드한 UI |
 | `tmp/` | 실행별 준비 경로 (브라우저 임시는 짧은 `target/t` 아래 고유 경로) |
 | `results/` | Playwright 결과·실패 추적 |
@@ -84,6 +85,8 @@ python3 scripts/test-live.py
 
 ## 실행 근거 확인
 
-`web.py wasm/check/e2e/doctor/live`는 실행별 `target/web-runs/<종류>-<고유값>/manifest.json`을 남긴다. `e2e`와 `live --mode full`은 현재 실행의 `dist`를 다시 빌드하고, 브라우저 전후 source·UI 해시를 확인한다. 이전 `web/dist`로 대체하지 않는다. 준비 실패 시 이후 단계는 `not_run`이며 Playwright를 실행하지 않는다.
+`web.py wasm/check/e2e/doctor/live`는 실행별 `target/web-runs/<종류>-<고유값>/manifest.json`을 남긴다. `e2e`와 `live`는 준비 시작 source를 고정하고 단계 진입·종료와 최종 종료에서 다시 대조한다. 서버·DuckDB는 자식 빌드 manifest의 source와 해시를 확인해 실행별 `bin`에 복사하고 그 사본을 실행한다. 이후 공유 `target/dev/bin`이 바뀌어도 실행 사본은 유지한다. `e2e`와 `live --mode full`은 현재 실행의 `dist`를 다시 빌드하며, 서버·DuckDB·WASM·UI의 기록과 실제 파일도 단계 경계와 브라우저 전후에 대조한다. source나 실행 산출물이 다르면 해당 실행은 실패하며 다른 실행을 막지 않는다. 이전 `web/dist`로 대체하지 않는다. 준비 실패 시 이후 단계는 `not_run`이며 Playwright를 실행하지 않는다.
 
 manifest는 HEAD, dirty 여부, 비밀 파일을 제외한 source 지문, 서버·DuckDB·WASM·UI의 SHA-256과 기존 빌드 키, 명령·종료 코드·시간·로그 경로를 기록한다. `execution`의 `direct`와 `reused`는 이번 빌드와 기존 지문 검증 후 재사용을 구분한다. 전체 종료 상태와 각 명령의 종료 코드는 별개다. 환경 전체와 diff 원문은 저장하지 않는다. 마지막 JSON 한 줄의 `manifest` 경로로 성공·실패 모두 확인한다. 로그는 키·토큰·인증 URL·헤더를 정제한다.
+
+검증 실행 범위에서는 SIGTERM·SIGINT를 정리 가능한 중단으로 처리한다. 소유 자식과 명령별 별도 세션의 자식 프로세스를 정리하고 실패 manifest를 남긴다. `live`는 실패 `result.json`도 남긴다. 부모 종료 코드는 SIGTERM 143, SIGINT 130이며 manifest의 `signal`·`termination_reason`과 일치한다. 명령의 `process_exit_code`는 정리 후 실제 자식 종료 코드여서 부모 코드와 다를 수 있다. 중첩 실행은 기존 처리를 유지하고 범위를 나갈 때 이전 신호 처리기를 복원한다. 모듈 import는 신호 처리를 바꾸지 않는다. SIGKILL처럼 처리할 수 없는 중단은 이 정리를 보장하지 않는다.

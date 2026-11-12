@@ -164,21 +164,36 @@ def check_web(root, arguments):
             run([str(root / "web/node_modules/.bin/vitest"), "run", *arguments], root / "web", environment)
 
 
-def prepare_e2e(root, environment, record):
+def prepare_server(root, environment, record):
     with record.step("server"):
         run([sys.executable, str(root / "scripts/dev.py"), "build", "--with-fake"], root, {**environment, "VALLY_EVIDENCE_DIR": str(record.directory / "server-build")})
-        state = record.directory / "server-build/manifest.json"
-        if state.is_file():
-            record.data["artifacts"].update(json.loads(state.read_text())["artifacts"])
+        state = json.loads((record.directory / "server-build/manifest.json").read_text())
+        if state["status"] != "passed" or state["source"] != record.data["source"] or state["source_after"] != record.data["source"]:
+            raise ValueError("서버 준비 입력이 이번 실행의 시작 source와 다릅니다")
+        for name, artifact in state["artifacts"].items():
+            origin = Path(artifact["path"])
+            destination = record.directory / "bin"
+            for filename, expected in artifact["sha256"].items():
+                target = destination / filename
+                dev.install(origin / filename if origin.is_dir() else origin, target)
+                if dev.digest(target) != expected:
+                    raise ValueError("서버 실행별 사본이 검증한 산출물과 다릅니다")
+            record.artifact(name, destination if origin.is_dir() else destination / origin.name, artifact["execution"], artifact["key"])
+            record.data["artifacts"][name]["origin"] = str(origin)
+        for filename in dev.BINARIES:
+            if not (record.directory / "bin" / filename).is_file():
+                raise ValueError("검증한 서버 실행 파일이 빠졌습니다")
+        environment["VALLY_E2E_BIN_DIR"] = str(record.directory / "bin")
+
+
+def prepare_e2e(root, environment, record):
+    prepare_server(root, environment, record)
     prepare_web(root, environment)
-    before = evidence.source(root)
     with record.step("ui"):
         run([str(root / "web/node_modules/.bin/vite"), "build", "--outDir", str(record.directory / "dist"), "--emptyOutDir"], root / "web", environment)
         if not (record.directory / "dist/index.html").is_file():
             raise ValueError("현재 UI 빌드가 index.html을 만들지 않았습니다")
-        if evidence.source(root) != before:
-            raise ValueError("UI 빌드 중 source가 바뀌었습니다. 다시 실행하세요")
-        record.artifact("ui", record.directory / "dist", "direct", before["sha256"])
+        record.artifact("ui", record.directory / "dist", "direct", record.data["source"]["sha256"])
 
 
 def run_e2e(root, arguments):
@@ -202,6 +217,7 @@ def run_e2e(root, arguments):
 
 
 def verify_ui(root, record):
+    record.verify()
     ui = record.data["artifacts"]["ui"]
     if ui["key"] != evidence.source(root)["sha256"] or ui["sha256"] != evidence.hashes(Path(ui["path"])):
         raise ValueError("현재 source와 UI 산출물이 다릅니다. 다시 준비하세요")

@@ -88,3 +88,5 @@ python3 scripts/dev.py cargo test -p server financials::client::tls_tests
 ## 실행별 근거
 
 `build`와 `cargo`는 `target/dev-runs/<종류>-<고유값>/manifest.json`에 HEAD·dirty source 지문, 명령·종료 코드·시간·정제된 로그와 실제 실행 파일의 SHA-256을 기록한다. 빌드는 `direct`, 체크섬과 기존 키를 검증한 캐시 복원은 `reused`다. 준비 실패도 manifest를 남기며 이전 실행 파일을 이번 실행의 성공 산출물로 기록하지 않는다. `status`는 읽기 전용 조회다. 웹 도구가 서버를 준비하면 해당 웹 실행의 `server-build/manifest.json`으로 연결한다. 환경 전체와 키·인증 URL은 수집하지 않는다. [Chromium 진단·실원천 smoke·실행 근거](web-checks.md)를 함께 확인한다.
+
+실행 시작과 종료의 source나 기록한 산출물 실물이 다르면 실패로 기록한다. SIGTERM·SIGINT 처리 범위와 명령별 자식 종료 코드 구분은 [실행 근거 확인](web-checks.md#실행-근거-확인)을 따른다. E2E와 실제 DART smoke는 공유 `target/dev/bin`을 직접 실행하지 않고 검증한 실행별 사본을 사용한다.
