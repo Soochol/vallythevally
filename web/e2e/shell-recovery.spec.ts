@@ -50,4 +50,3 @@ test("긴 ETF 이름과 넓은 오른쪽 패널에서도 거래소가 차트 안
   expect(await name.evaluate((el) => el.scrollWidth > el.clientWidth)).toBe(true);
   await page.screenshot({ path: info.outputPath("long-etf-wide.png") });
 });
-
