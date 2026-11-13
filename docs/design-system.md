@@ -50,8 +50,10 @@
 - 공통 표면은 `.ui-popover`와 `.ui-dialog`다. 유리 바탕(`--glass`), 흐림(`--glass-blur`), 반경 16, 테두리를 겸한 그림자(`--shadow`)를 여기서 한 번 정한다. 화면마다 이 값을 재정의하지 않고, Popover의 `className`에는 크기와 안쪽 여백만 준다. `backdrop-filter`를 못 쓰거나 `prefers-reduced-transparency`이면 `--glass-solid`로 불투명하게 그린다.
 - 명령 입력창(종목 검색·지표)의 배경은 투명하다. 어두운 배경(`--scrim`)은 일반 대화상자와 확인 창만 쓰고, 배경을 흐리게 하지 않는다.
 - 묶음 버튼(`seg-btn`)의 선택은 `--accent` 채움과 `--accent-ink` 글자다. 가리킴은 `--hover`를 쓴다.
+- 메뉴 행은 높이 32px이고 왼쪽 14px 아이콘·체크 칸, 오른쪽 단축키 칸(`hint`)을 쓴다. 지우기는 맨 아래에 `danger`로 둔다. 실제로 동작하는 단축키만 `hint`에 적는다.
+- 차트 빈 곳의 우클릭 메뉴(`drawingMenu`)는 머리에 누른 가격과 날짜(봉이 없는 곳이면 가격만)를 두고, 이 가격에 수평선·관심종목에 넣기·축 자동 맞춤·차트 이미지 복사를 먼저, 드로잉 일괄 동작을 아래 묶음에 둔다. 붙일 것이 없으면 붙여넣기를 보이지 않는다.
 - 일반 메뉴는 `features/menu/Menu.tsx`의 `MenuItem`으로 만든다. `radio`·`check`·`action`·`heading`·`separator`를 지원한다. ↑↓·Home·End·Enter·Space·글자 입력으로 이동/선택한다. 메뉴 키보드는 차트 단축키로 전파하지 않는다.
-- 폼의 선택 항목은 `Select`에 `label`, 현재 값, `options`, `onChange`를 전달한다. 브라우저 기본 select를 새로 만들지 않는다. 분봉은 `MinuteMenu`, 자석 세기는 버튼의 우클릭·길게 누르기 메뉴를 쓴다.
+- 폼의 선택 항목은 `Select`에 `label`, 현재 값, `options`, `onChange`를 전달한다. 브라우저 기본 select를 새로 만들지 않는다. 분봉은 `MinuteMenu`(위 막대에 꺼내 둔 주기는 강조 면, 칩 모서리의 별이나 우클릭으로 넣고 뺀다), 자석 세기는 버튼의 우클릭·길게 누르기 메뉴를 쓴다.
 - 일반 대화상자는 `DialogFrame`을 사용한다. 되돌릴 수 없는 작업은 `confirmAction(문구)`의 결과를 기다린다. 일반 알림은 `showToast(문구)`를 사용한다. 드로잉 삭제는 `DrawingSync.commitWithUndo(칸, 변경, 문구)`를 사용해 삭제 당시의 history 객체를 작업 식별자로 묶는다. 기록이 바뀌거나 취소된 알림의 되돌리기는 비활성화되고, 실행 시에도 같은 식별자인지 다시 검사한다. 알림은 6초 동안 보인다.
 - `TooltipHost`는 기존 `title`을 공통 툴팁으로 표시한다. 단축키가 있는 버튼의 title에는 키도 적는다. 기존 aria-label과 title은 바꾸지 않는다.
 - 차트 키 처리에는 `ownsChartKeyboard`를 먼저 검사한다. 열린 조작 표면이나 그 안의 이벤트를 차트 단축키가 가로채지 않는다. 알림만 `blockChartKeys={false}`를 사용해 차트의 Ctrl+Z를 유지한다.
@@ -86,7 +88,7 @@ DOM 범례는 `iconMarkup("gear" | "eye" | "eyeOff" | "close" | "up" | "down")`�
 
 ## 범례 설정과 패널
 
-`IndicatorSettingsForm`은 지표 종류별 입력과 색상·굵기를 그린다. `Draft`, 현재 색, 검사 오류와 `onChange`를 받아 범례 팝오버와 지표 추가 창에서 함께 쓴다. `IndicatorPopover`는 열 때의 설정을 보관하고 유효한 변경을 즉시 적용한다. Esc는 처음 설정으로 되돌리고, 바깥 클릭과 닫기는 변경을 유지한다. 중첩 색상 선택기의 Esc는 색상 선택기만 닫는다. 공통 Popover의 닫기 사유는 `escape`와 `outside`다.
+`IndicatorSettingsForm`은 지표 종류별 입력과 색상·굵기를 그린다. 색은 48색 프리셋 격자와 최근 색을 폼 안에 펼쳐 한 번 눌러 바로 고르고, HEX와 사용자 지정은 기존 색상 선택기를 연다. 굵기는 선 견본 1~5로 고른다. 이동평균 기간에는 자주 쓰는 값(5·20·60·120)을 둔다. `IndicatorPopover` 머리에서 숨기고 지운다. `Draft`, 현재 색, 검사 오류와 `onChange`를 받아 범례 팝오버와 지표 추가 창에서 함께 쓴다. `IndicatorPopover`는 열 때의 설정을 보관하고 유효한 변경을 즉시 적용한다. Esc는 처음 설정으로 되돌리고, 바깥 클릭과 닫기는 변경을 유지한다. 중첩 색상 선택기의 Esc는 색상 선택기만 닫는다. 공통 Popover의 닫기 사유는 `escape`와 `outside`다.
 
 패널의 높이 비율과 접힘은 `ChartSettings.panels`의 `stretch`와 `collapsed`에 저장한다. 과거 설정에서 `collapsed`가 없으면 펼친다. 접힌 패널은 최신 값과 이름만 한 줄에 표시하고 이름이나 행을 누르면 펼친다. 펼칠 때 저장한 높이 비율을 복원한다. `PanelControls`의 경계 손잡이는 포인터 끌기와 위·아래 화살표를 지원하며 `data-chart-control`로 드로잉 입력에서 제외한다. 재무 패널의 상태 점은 제목 옆에 두고 자세한 상태와 보고기간 선택은 팝오버에 모은다. 결산월은 첫 재무 범례에 한 번 표시한다.
 

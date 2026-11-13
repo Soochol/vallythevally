@@ -29,7 +29,7 @@ export function DrawingOverlay({ slot }: { slot: Slot }) {
   return <div data-chart-control ref={root} className="drawing-overlay" onPointerDown={(e) => e.stopPropagation()}>
     {error && <div className="draw-load-error"><ErrorState message={error} retry={() => sync.refresh()} /></div>}
     {session.selected.length > 0 && session.editor?.kind !== "text" && <FloatingBar slot={slot} />}
-    {session.popup?.slot === slot && <Menu label="드로잉 메뉴" root={root} items={drawingMenu(surface, session.popup.id === null)}
+    {session.popup?.slot === slot && <Menu label="드로잉 메뉴" root={root} items={drawingMenu(surface, session.popup.id === null, session.popup.fromChart ? { x: session.popup.x, y: session.popup.y } : null)}
       className="fixed max-h-[min(600px,85vh)] overflow-y-auto text-s" style={{ left: session.popup.x, top: session.popup.y, minWidth: 220 }}
       onClose={(restore) => { useDrawingSession.setState({ popup: null }); if (restore) surface.focus(); }} />}
     {session.editor?.kind === "text" && <DrawingTextEditor slot={slot} editor={session.editor} />}

@@ -3,7 +3,7 @@ import type { Screen } from "../../api/generated/Screen";
 import { isTypingTarget } from "../../lib/hotkeys";
 import { conditionSentence, EXCLUDE_LABEL, excludedInOrder, MARKET_LABEL, marketsInOrder, NO_CONDITIONS_SENTENCE } from "../../lib/screener";
 import { Popover } from "../overlay/Popover";
-import { ChevronIcon, CloseIcon, MoreIcon, PenIcon, PlayIcon, SpinnerIcon } from "../icons";
+import { ChevronIcon, CloseIcon, MoreIcon, PenIcon, PlayIcon, SpinnerIcon, Icon, DRAWING_ICONS, PlusIcon, CopyIcon } from "../icons";
 import { ChangedBadge } from "./ChangedBadge";
 import { ScreenerMenu } from "./ScreenerMenu";
 import { SentenceFields } from "./SentenceFields";
@@ -65,10 +65,10 @@ export function SentenceEditor({ screenEditing, chosen, entries, blocked, result
         {!floating && <button type="button" className="tb-btn h-7 px-2 text-s disabled:opacity-40" disabled={!canSave} onClick={save}>{busy ? "저장 중" : "저장"}</button>}
         <ScreenerMenu label="조건식 메뉴" items={[
           { kind: "action", label: "이름 바꾸기", onSelect: () => { renameOpener.current = head.current?.querySelector<HTMLElement>('[aria-label="조건식 메뉴"]') ?? null; setRename(draft.name); } },
-          { kind: "action", label: "새 조건식", onSelect: () => create() },
-          { kind: "action", label: "복제", onSelect: () => create(true) },
+          { kind: "action", label: "새 조건식", icon: <PlusIcon />, onSelect: () => create() },
+          { kind: "action", label: "복제", icon: <CopyIcon size={14} />, onSelect: () => create(true) },
           { kind: "separator" },
-          { kind: "action", label: "지우기", onSelect: () => void removeChosen(screenEditing, chosen) },
+          { kind: "action", label: "지우기", icon: <Icon path={DRAWING_ICONS.trash} size={14} />, danger: true, onSelect: () => void removeChosen(screenEditing, chosen) },
         ]}><MoreIcon size={16} /></ScreenerMenu>
       </fieldset>
     </div>

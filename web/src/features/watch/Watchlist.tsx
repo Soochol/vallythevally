@@ -118,7 +118,7 @@ function ListMenu({ list, onName }: { list: Watchlist; onName(n: Naming): void }
     { kind: "heading", label: "목록" },
     ...lists.map((l): MenuItem => ({ kind: "radio", label: l.name, hint: `${l.symbols.length}`, checked: l.id === list.id, onSelect: () => ui.setActiveWatchlist(l.id) })),
     { kind: "separator" },
-    { kind: "action", label: "새 목록", disabled: lists.length >= MAX_WATCHLISTS, onSelect: () => onName({ kind: "create" }) },
+    { kind: "action", label: "새 목록", icon: <PlusIcon />, disabled: lists.length >= MAX_WATCHLISTS, onSelect: () => onName({ kind: "create" }) },
     { kind: "action", label: "이름 바꾸기", onSelect: () => onName({ kind: "rename", id: list.id }) },
     { kind: "action", label: "복제", icon: <CopyIcon />, disabled: lists.length >= MAX_WATCHLISTS, onSelect: () => {
       const id = crypto.randomUUID();

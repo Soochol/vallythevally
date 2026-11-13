@@ -27,10 +27,10 @@ export function MinuteMenu({ value, onChange }: { value: Period; onChange(value:
         }
       }
     }}>
-      <strong>분봉</strong><div className="minute-grid">{MINUTES.map((p) => <div key={p}>
+      <strong>분봉</strong><div className="minute-grid">{MINUTES.map((p) => <div key={p} data-pinned={pinned.includes(p) ? "" : undefined} onContextMenu={(e) => { e.preventDefault(); useUiStore.getState().togglePinnedMinute(p); }}>
         <button role="menuitemradio" data-option-value={p} aria-checked={value === p} onClick={() => { onChange(p); setOpen(false); }}>{PERIOD_LABEL[p]}</button>
         <button role="menuitemcheckbox" aria-label={`${PERIOD_LABEL[p]} 고정`} aria-checked={pinned.includes(p)} onClick={() => useUiStore.getState().togglePinnedMinute(p)}><StarIcon /></button>
-      </div>)}</div><p>별표한 분봉은 위 막대에 고정됩니다.</p>
+      </div>)}</div><p>라임색은 위 막대에 꺼내 둔 주기입니다. 별이나 우클릭으로 넣고 뺍니다.</p>
     </Popover>}
   </>;
 }

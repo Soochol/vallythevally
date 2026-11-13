@@ -33,7 +33,7 @@ export function SentenceFields({ draft, locked, onChange }: Props) {
         <ScreenerMenu label={`조건 ${index + 1} 메뉴`} items={[
           { kind: "action", label: "위로 옮기기", disabled: index === 0, onSelect: () => onChange((d) => moveCondition(d, line.key, -1)) },
           { kind: "action", label: "아래로 옮기기", disabled: index === draft.conditions.length - 1, onSelect: () => onChange((d) => moveCondition(d, line.key, 1)) },
-          { kind: "action", label: "조건 지우기", onSelect: () => onChange((d) => removeCondition(d, line.key)) },
+          { kind: "action", label: "조건 지우기", danger: true, onSelect: () => onChange((d) => removeCondition(d, line.key)) },
           { kind: "separator" },
           { kind: "heading", label: "종류 바꾸기" },
           ...conditionChoices("").map((choice) => ({ kind: "radio" as const, label: choice.label, checked: kindChoiceOf(line) === choice.kind, onSelect: () => onChange((d) => changeKind(d, line.key, choice.kind)) })),

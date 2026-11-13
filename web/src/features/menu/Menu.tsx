@@ -89,7 +89,7 @@ function MenuButton({ item, onClose, register }: { item: Focusable; onClose: Pro
       aria-checked={checkable ? item.checked : undefined}
       data-option-value={checkable ? item.value : undefined}
       disabled={item.kind === "action" ? item.disabled : undefined}
-      className={`group flex h-[30px] shrink-0 items-center gap-2 rounded-s px-2 text-left hover:bg-raised focus-visible:bg-raised disabled:hover:bg-transparent aria-checked:text-accent max-md:h-[40px] ${item.kind === "action" && item.danger ? "text-danger" : ""}`}
+      className={`group flex h-8 shrink-0 items-center gap-2 rounded-m px-2 text-left hover:bg-[var(--hover)] focus-visible:bg-[var(--hover)] disabled:hover:bg-transparent aria-checked:text-accent max-md:h-[40px] ${item.kind === "action" && item.danger ? "text-danger" : ""}`}
       onClick={() => {
         item.onSelect();
         if (item.kind !== "check") onClose(true);
