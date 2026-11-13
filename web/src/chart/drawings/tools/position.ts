@@ -36,7 +36,8 @@ const atLeast = (direction: number, price: number, bound: number) => direction *
 export function placePosition(side: PositionSide, entry: DrawingPoint, ctx: ToolContext): DrawingPoint[] {
   const direction = DIRECTION[side];
   const right = ctx.shiftBars(entry.t, WIDTH_BARS) ?? entry.t;
-  return [entry, { t: right, price: entry.price * (1 + direction * TARGET_RATIO) }, { t: entry.t, price: entry.price * (1 - direction * STOP_RATIO) }];
+  const scale = Math.abs(entry.price);
+  return [entry, { t: right, price: entry.price + direction * scale * TARGET_RATIO }, { t: entry.t, price: entry.price - direction * scale * STOP_RATIO }];
 }
 
 export function riskReward(entry: number, target: number, stop: number): number | null {
@@ -52,17 +53,17 @@ const trio = (points: readonly DrawingPoint[]): Trio | null => {
 
 function positionMoves(side: PositionSide) {
   const direction = DIRECTION[side];
-  const edit = (change: (points: Trio, to: DrawingPoint) => Trio) => (points: readonly DrawingPoint[], to: DrawingPoint) => {
+  const edit = (change: (points: Trio, to: DrawingPoint, ctx: ToolContext) => Trio) => (points: readonly DrawingPoint[], to: DrawingPoint, ctx: ToolContext) => {
     const all = trio(points);
-    return all === null ? [...points] : [...change(all, to)];
+    return all === null ? [...points] : [...change(all, to, ctx)];
   };
   return {
     target: edit(([entry, target, stop], to) => [entry, { ...target, price: atLeast(direction, to.price, entry.price) }, stop]),
     stop: edit(([entry, target, stop], to) => [entry, target, { ...stop, price: atLeast(-direction, to.price, entry.price) }]),
-    right: edit(([entry, target, stop], to) => [entry, { ...target, t: Math.max(to.t, entry.t) }, stop]),
-    entry: edit(([, target, stop], to) => {
+    right: edit(([entry, target, stop], to, ctx) => [entry, { ...target, t: Math.max(to.t, ctx.shiftBars(entry.t, 1) ?? entry.t) }, stop]),
+    entry: edit(([, target, stop], to, ctx) => {
       const price = Math.min(Math.max(to.price, Math.min(target.price, stop.price)), Math.max(target.price, stop.price));
-      return [{ t: Math.min(to.t, target.t), price }, target, stop];
+      return [{ t: Math.min(to.t, ctx.shiftBars(target.t, -1) ?? target.t), price }, target, stop];
     }),
   };
 }
@@ -103,20 +104,22 @@ function positionTool(side: PositionSide): Tool {
       const a = entry === undefined ? null : ctx.toScreen(entry);
       const right = target === undefined ? null : ctx.xOf(target.t);
       if (entry === undefined || a === null || right === null) return [];
-      const x = (a.x + right) / 2;
+      const outside = right > ctx.paneWidth && Math.min(right, ctx.paneWidth) - a.x < a.x;
+      const x = outside ? a.x - MEASURE_GAP : a.x + MEASURE_GAP;
+      const align = outside ? "right" : "left";
       const shapes: Shape[] = [];
       const level = (point: DrawingPoint | undefined, name: string, fill: Fill) => {
         const y = point === undefined ? null : ctx.yOf(point.price);
         if (point === undefined || y === null) return;
         const { dy, baseline } = awayFrom(y, a.y);
         shapes.push({ kind: "rect", a, b: { x: right, y }, fill });
-        shapes.push(measureLabel({ x, y: y + dy }, levelText(name, entry.price, point.price, ctx), style.label, fill.color, baseline));
+        shapes.push(measureLabel({ x, y: y + dy }, levelText(name, entry.price, point.price, ctx), style.label, fill.color, baseline, align));
       };
       level(target, "목표", style.profit);
       level(stop, "손절", style.stop);
       shapes.push({ kind: "segment", a, b: { x: right, y: a.y }, stroke: thinStroke(DRAW) });
       const ratio = target === undefined || stop === undefined ? null : riskReward(entry.price, target.price, stop.price);
-      if (ratio !== null) shapes.push(measureLabel({ x: Math.max(a.x, right) + MEASURE_GAP, y: a.y }, `손익비 ${ratio.toFixed(2)}`, style.label, DRAW, "middle", "left"));
+      if (ratio !== null) shapes.push(measureLabel({ x, y: a.y }, `손익비 ${ratio.toFixed(2)}`, style.label, DRAW, "middle", align));
       return shapes;
     },
     handles({ points }, ctx) {

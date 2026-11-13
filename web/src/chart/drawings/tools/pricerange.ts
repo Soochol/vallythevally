@@ -25,7 +25,7 @@ export function parsePriceRangeStyle(raw: unknown): PriceRangeStyle {
 
 export const MEASURE_GAP = 6;
 
-export const signedPercent = (from: number, to: number): string | null => (from === 0 ? null : formatPercent(((to - from) / from) * 100));
+export const signedPercent = (from: number, to: number): string | null => (from === 0 ? null : formatPercent(((to - from) / Math.abs(from)) * 100));
 
 export function screenPair(points: readonly DrawingPoint[], ctx: ToolContext) {
   const [p0, p1] = points;
@@ -35,7 +35,7 @@ export function screenPair(points: readonly DrawingPoint[], ctx: ToolContext) {
   return a === null || b === null ? null : { p0, p1, a, b };
 }
 
-export const measureLabel = (at: ScreenPoint, text: string, style: TextStyle, color: string, baseline: "top" | "middle" | "bottom", align: "left" | "center" = "center"): Shape => ({
+export const measureLabel = (at: ScreenPoint, text: string, style: TextStyle, color: string, baseline: "top" | "middle" | "bottom", align: "left" | "center" | "right" = "center"): Shape => ({
   kind: "text",
   at,
   text,

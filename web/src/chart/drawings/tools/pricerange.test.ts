@@ -45,6 +45,10 @@ describe("가격 범위", () => {
     expect(draw([{ t: -1, price: 200 }, { t: 1000, price: 250 }])).toEqual([]);
   });
 
+  test("첫 점 가격이 음수여도 변화율 부호는 가격 차를 따른다", () => {
+    expect(draw([{ t: 1000, price: -10 }, { t: 2000, price: -5 }]).find((s) => s.kind === "text")).toMatchObject({ text: "+5 (+50.00%)" });
+  });
+
   test("첫 점 가격이 0이면 변화율 없이 가격 차만 적는다", () => {
     expect(draw([{ t: 1000, price: 0 }, { t: 2000, price: 10 }]).find((s) => s.kind === "text")).toMatchObject({ text: "+10" });
   });

@@ -37,7 +37,7 @@ describe("매수 포지션", () => {
 
   test("한 번 누르면 진입, +10% 목표와 20봉 뒤 오른쪽 끝, −5% 손절의 세 점이 된다", () => {
     expect(long.placement).toMatchObject({ kind: "points", count: 3 });
-    expect(points).toEqual([entry, { t: 1000 + 20 * 60, price: 220.00000000000003 }, { t: 1000, price: 190 }]);
+    expect(points).toEqual([entry, { t: 1000 + 20 * 60, price: 220 }, { t: 1000, price: 190 }]);
   });
 
   test("목표 띠는 $up, 손절 띠는 $down이고, 변화율과 손익비를 늘 적는다", () => {
@@ -72,7 +72,18 @@ describe("매수 포지션", () => {
   test("오른쪽 끝은 시각만, 진입 점은 손절가와 목표가 사이에서 움직인다", () => {
     expect(handleMove(long, points, 2, { t: 5000, price: 1 })).toEqual([entry, { t: 5000, price: points[1]!.price }, points[2]]);
     expect(handleMove(long, points, 3, { t: 1500, price: 400 })[0]).toEqual({ t: 1500, price: points[1]!.price });
-    expect(handleMove(long, points, 3, { t: 9000, price: 1 })[0]).toEqual({ t: 2200, price: 190 });
+    expect(handleMove(long, points, 3, { t: 9000, price: 1 })[0]).toEqual({ t: 2140, price: 190 });
+  });
+
+  test("오른쪽 끝과 진입 점은 상자 폭을 1봉 아래로 줄이지 못한다", () => {
+    expect(handleMove(long, points, 2, { t: 0, price: 1 })[1]).toEqual({ t: 1060, price: points[1]!.price });
+  });
+
+  test("글자는 진입 쪽 상자 안에 붙어, 오른쪽 끝이 화면 밖이어도 보인다", () => {
+    const shapes = long.shapes({ points, style, text: null, selected: false }, ctx);
+    expect(shapes.flatMap((s) => (s.kind === "text" ? [[s.at.x, s.align]] : []))).toEqual([[106, "left"], [106, "left"], [106, "left"]]);
+    const atEdge = long.shapes({ points: place(long, { t: 7800, price: 200 }), style, text: null, selected: false }, ctx);
+    expect(atEdge.flatMap((s) => (s.kind === "text" ? [[s.at.x, s.align]] : []))).toEqual([[774, "right"], [774, "right"], [774, "right"]]);
   });
 
   test("점이 모자라거나 화면에 못 놓으면 던지지 않는다", () => {
@@ -81,6 +92,13 @@ describe("매수 포지션", () => {
     expect(long.shapes({ points: points.slice(0, 2), style, text: null, selected: false }, ctx).filter((s) => s.kind === "rect")).toHaveLength(1);
     expect(long.handles({ points: points.slice(0, 2), style, text: null, selected: true }, ctx)).toEqual([]);
   });
+});
+
+test("진입가가 음수여도 매수 목표는 위, 손절은 아래다", () => {
+  const [entry, target, stop] = place(long, { t: 1000, price: -100 });
+  expect(target!.price).toBeGreaterThan(entry!.price);
+  expect(stop!.price).toBeLessThan(entry!.price);
+  expect(texts(long, [entry!, target!, stop!])).toEqual(["목표 -90 (+10.00%)", "손절 -105 (−5.00%)", "손익비 2.00"]);
 });
 
 describe("매도 포지션", () => {
