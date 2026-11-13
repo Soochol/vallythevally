@@ -1,6 +1,6 @@
 use serde_json::{Value, json};
 
-use crate::KrxBar;
+use super::krx::KrxBar;
 
 pub fn row(code: &str, bar: KrxBar, trade_time: &str) -> Value {
     json!({

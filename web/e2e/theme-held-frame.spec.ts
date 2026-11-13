@@ -1,3 +1,4 @@
+import { november9BarAt } from "./fixtures/frames";
 import { selectOption } from "./select-option";
 import type { Page } from "@playwright/test";
 import { installFrameProbe } from "./frame-probe";
@@ -8,14 +9,14 @@ test.use({ clockStart: "20261109100030" });
 const tail = (page: Page) => page.evaluate(() => window.frameProbe.snapshot().map((s) => ({ ...s, data: s.data.slice(-2) })));
 const frames = (page: Page) => page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
 
-test("lime dark keeps main and volume coherent when a held rollover frame resumes", async ({ page, app }, info) => {
+test("lime dark keeps main and volume coherent when a held rollover frame resumes", async ({ page, scenario }, info) => {
   const errors: string[] = [];
   const delivered: number[] = [];
   page.on("pageerror", (error) => errors.push(error.message));
-  page.on("websocket", (socket) => socket.on("framereceived", ({ payload }) => {
-    const message = JSON.parse(String(payload));
+  scenario.live.observe(message => {
+
     if (message.type === "bar") delivered.push(message.bar.c);
-  }));
+  });
   await page.addInitScript(installFrameProbe);
   await page.goto("/?symbol=005930");
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
@@ -24,10 +25,8 @@ test("lime dark keeps main and volume coherent when a held rollover frame resume
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
   const trade = async (price: number, time: string, quantity: number, timeout = 15_000) => {
     await expect(async () => {
-      expect(await app.fake.pushReal("0B", "005930_AL", {
-        "20": time, "10": `+${price}`, "15": `+${quantity}`, "13": "1000", "9081": "KRX",
-        "11": "+0", "12": "+0.00", "25": "2",
-      })).toBeGreaterThan(0);
+      const volume = price === 202_000 ? 3 : price === 204_000 ? 7 : quantity;
+    expect(await scenario.live.update("005930", { t: Date.parse(`2026-11-09T${time.slice(0,2)}:${time.slice(2,4)}:00+09:00`) / 1000, o: price < 203_000 ? 201_000 : price < 205_000 ? 203_000 : 205_000, h: price, l: price < 203_000 ? 201_000 : price < 205_000 ? 203_000 : 205_000, c: price, v: volume })).toBeGreaterThan(0);
       await expect.poll(() => delivered.includes(price), { timeout: 1000 }).toBe(true);
     }).toPass({ timeout });
   };
@@ -42,6 +41,7 @@ test("lime dark keeps main and volume coherent when a held rollover frame resume
   await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
   await page.evaluate(() => window.frameProbe.hold());
   await trade(202_000, "100059", 2);
+  scenario.live.bar("005930", november9BarAt("10:00", 202_000, 3), "confirmed");
   await trade(203_000, "100100", 3);
   await expect(page.getByRole("button", { name: "테마 바꾸기", exact: true })).toHaveCount(0);
   await page.evaluate(() => window.frameProbe.release());
@@ -54,6 +54,7 @@ test("lime dark keeps main and volume coherent when a held rollover frame resume
   await frames(page);
   const sameMinute = await lastBars();
   const sameMinuteClose = await chart.getAttribute("data-last-close");
+  scenario.live.bar("005930", november9BarAt("10:01", 204_000, 7), "confirmed");
   await trade(205_000, "100200", 5, 45_000);
   await frames(page);
   const nextMinute = await lastBars();

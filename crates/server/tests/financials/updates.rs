@@ -7,15 +7,15 @@ pub(super) async fn json(client: &reqwest::Client, url: &str) -> Value {
     serde_json::from_slice(&response.bytes().await.unwrap()).unwrap()
 }
 
-fn listings(kiwoom: &common::FakeKiwoom) {
-    let mut body = fake_kiwoom::fixture("ka10099_0");
+fn listings(kiwoom: &common::ScriptedTransport) {
+    let mut body = common::support::fixture("ka10099_0");
     body["list"].as_array_mut().unwrap().retain(|row| ["005930", "005935", "000020", "000810", "0000D0"].contains(&row["code"].as_str().unwrap()));
     let mut alias = body["list"].as_array().unwrap().iter().find(|row| row["code"] == "005930").unwrap().clone();
     alias["code"] = "000660".into();
     alias["name"] = "합성 코스닥 증권".into();
     alias["marketCode"] = "10".into();
     body["list"].as_array_mut().unwrap().push(alias);
-    kiwoom.seen.respond_with("ka10099", StatusCode::OK, body);
+    kiwoom.respond_with("ka10099", 200, body);
 }
 
 pub(super) async fn start(client: &reqwest::Client, base: &str) -> Value {
@@ -23,20 +23,30 @@ pub(super) async fn start(client: &reqwest::Client, base: &str) -> Value {
     serde_json::from_slice(&response.bytes().await.unwrap()).unwrap()
 }
 
-pub(super) async fn finished(client: &reqwest::Client, base: &str) -> Value {
-    tokio::time::timeout(Duration::from_secs(60), async {
+pub(super) async fn finished(fake: &Fake, client: &reqwest::Client, base: &str) -> Value {
+    let mut last = Value::Null;
+    let mut requests = 0;
+    let mut progressed = tokio::time::Instant::now();
+    tokio::time::timeout(Duration::from_secs(180), async {
         loop {
             let result = json(client, &format!("{base}/api/financial-update")).await;
             if result["status"] != "planning" && result["status"] != "collecting" && result["status"] != "pausing" && result["status"] != "checking" { return result; }
+            let observed = fake.state.lock().unwrap().calls.len();
+            if observed != requests || result != last {
+                requests = observed;
+                last = result.clone();
+                progressed = tokio::time::Instant::now();
+            }
+            assert!(progressed.elapsed() < Duration::from_secs(60), "financial job made no progress: {result}; {:?}", fake.observed());
             tokio::time::sleep(Duration::from_millis(30)).await;
         }
-    }).await.unwrap()
+    }).await.unwrap_or_else(|error| panic!("financial job did not finish: {error:?}; last {last}; {:?}", fake.observed()))
 }
 
 #[tokio::test]
 async fn financial_http_reads_never_resolve_or_collect_a_company() {
     let fake = Fake::start().await;
-    let kiwoom = common::FakeKiwoom::start().await;
+    let kiwoom = common::ScriptedTransport::new();
     let dir = tempdir();
     let server = process(&fake, &kiwoom, dir.path(), "20171231120000");
     let base = format!("http://{}", server.addr().await);
@@ -60,7 +70,7 @@ async fn recent_http_update_deduplicates_companies_coalesces_starts_and_persists
         state.preferred = true;
         state.directory = Some(format!("<result><list><corp_code>{CORP}</corp_code><stock_code>005930</stock_code></list><list><corp_code>{CORP}</corp_code><stock_code>000660</stock_code></list><list><corp_code>00000002</corp_code><stock_code>000020</stock_code></list></result>"));
     }
-    let kiwoom = common::FakeKiwoom::start().await;
+    let kiwoom = common::ScriptedTransport::new();
     listings(&kiwoom);
     let dir = tempdir();
     let server = process(&fake, &kiwoom, dir.path(), "20190101120000");
@@ -72,7 +82,7 @@ async fn recent_http_update_deduplicates_companies_coalesces_starts_and_persists
     assert!(fake.state.lock().unwrap().calls.is_empty());
     let first = start(&client, &base).await;
     assert_eq!(start(&client, &base).await["id"], first["id"]);
-    let result = finished(&client, &base).await;
+    let result = finished(&fake, &client, &base).await;
     assert_eq!(result["status"], "ready", "{result}");
     assert_eq!(result["totalCompanies"], 2);
     assert_eq!(result["completedCompanies"], 2);
@@ -107,7 +117,7 @@ async fn interrupted_recent_http_update_reads_checkpoints_and_resumes_the_origin
         state.stream_paused_report = Some("11014".into());
         state.stream_paused_company = Some(CORP.into());
     }
-    let kiwoom = common::FakeKiwoom::start().await;
+    let kiwoom = common::ScriptedTransport::new();
     listings(&kiwoom);
     let dir = tempdir();
     let server = process(&fake, &kiwoom, dir.path(), "20171231120000");
@@ -115,9 +125,7 @@ async fn interrupted_recent_http_update_reads_checkpoints_and_resumes_the_origin
     let client = reqwest::Client::new();
     client.get(format!("{base}/api/bars?symbol=005930&period=D&limit=5")).send().await.unwrap().error_for_status().unwrap();
     let initial = start(&client, &base).await;
-    tokio::time::timeout(Duration::from_secs(30), async {
-        while fake.count("statement_stream") == 0 { tokio::time::sleep(Duration::from_millis(20)).await; }
-    }).await.unwrap();
+    fake.wait_for_call("statement_stream", 1).await;
     let checkpoint = json(&client, &format!("{base}/api/financial-update")).await;
     assert_eq!(checkpoint["completedCompanies"], 1);
     server.stop().await;
@@ -132,7 +140,7 @@ async fn interrupted_recent_http_update_reads_checkpoints_and_resumes_the_origin
     assert_eq!(fake.state.lock().unwrap().calls.len(), count);
     client.get(format!("{base}/api/bars?symbol=005930&period=D&limit=5")).send().await.unwrap().error_for_status().unwrap();
     assert_eq!(start(&client, &base).await["id"], initial["id"]);
-    let result = finished(&client, &base).await;
+    let result = finished(&fake, &client, &base).await;
     assert_eq!(result["throughYear"], 2017);
     assert_eq!(result["completedCompanies"], 2);
     let calls = fake.state.lock().unwrap().calls.clone();
@@ -150,7 +158,7 @@ async fn a_company_failure_before_or_after_success_keeps_other_companies_and_pri
             state.directory = Some(format!("<result><list><corp_code>{CORP}</corp_code><stock_code>005930</stock_code></list><list><corp_code>00000002</corp_code><stock_code>000020</stock_code></list></result>"));
             state.failures.insert(format!("list.json///{failed}"), "900".into());
         }
-        let kiwoom = common::FakeKiwoom::start().await;
+        let kiwoom = common::ScriptedTransport::new();
         listings(&kiwoom);
         let dir = tempdir();
         let server = process(&fake, &kiwoom, dir.path(), "20171231120000");
@@ -159,7 +167,7 @@ async fn a_company_failure_before_or_after_success_keeps_other_companies_and_pri
         let price = format!("{base}/api/bars?symbol=005930&period=D&limit=5");
         client.get(&price).send().await.unwrap().error_for_status().unwrap();
         start(&client, &base).await;
-        let job = finished(&client, &base).await;
+        let job = finished(&fake, &client, &base).await;
         assert_eq!(job["status"], "partial_failure", "{job}");
         assert_eq!(job["completedCompanies"], 1);
         assert_eq!(job["failedCompanies"], 1);
@@ -181,7 +189,7 @@ async fn failed_checkpoint_storage_never_announces_completion_and_can_resume_aft
     use sqlx::Connection;
     use std::os::unix::fs::PermissionsExt;
     let fake = Fake::start().await;
-    let kiwoom = common::FakeKiwoom::start().await;
+    let kiwoom = common::ScriptedTransport::new();
     listings(&kiwoom);
     let dir = tempdir();
     let path = dir.path().join("run/financials.db");
@@ -194,7 +202,7 @@ async fn failed_checkpoint_storage_never_announces_completion_and_can_resume_aft
     let client = reqwest::Client::new();
     client.get(format!("{base}/api/bars?symbol=005930&period=D&limit=5")).send().await.unwrap().error_for_status().unwrap();
     let initial = start(&client, &base).await;
-    let failed = finished(&client, &base).await;
+    let failed = finished(&fake, &client, &base).await;
     assert_eq!(failed["status"], "failed");
     assert_eq!(failed["failure"], "storage");
     assert_eq!(failed["completedCompanies"], 0);
@@ -211,7 +219,7 @@ async fn failed_checkpoint_storage_never_announces_completion_and_can_resume_aft
     assert_eq!(fake.state.lock().unwrap().calls.len(), calls);
     client.get(format!("{base}/api/bars?symbol=005930&period=D&limit=5")).send().await.unwrap().error_for_status().unwrap();
     assert_eq!(start(&client, &base).await["id"], initial["id"]);
-    assert_eq!(finished(&client, &base).await["completedCompanies"], 1);
+    assert_eq!(finished(&fake, &client, &base).await["completedCompanies"], 1);
     restarted.stop().await;
 }
 
@@ -220,7 +228,7 @@ async fn all_companies_recent_reports_precede_history_and_completed_history_is_r
     let fake = Fake::start().await;
     fake.state.lock().unwrap().preferred = true;
     fake.state.lock().unwrap().directory = Some(format!("<result><list><corp_code>{CORP}</corp_code><stock_code>005930</stock_code></list><list><corp_code>00000002</corp_code><stock_code>000020</stock_code></list></result>"));
-    let kiwoom = common::FakeKiwoom::start().await;
+    let kiwoom = common::ScriptedTransport::new();
     listings(&kiwoom);
     let dir = tempdir();
     let server = process(&fake, &kiwoom, dir.path(), "20200101120000");
@@ -228,7 +236,7 @@ async fn all_companies_recent_reports_precede_history_and_completed_history_is_r
     let client = reqwest::Client::new();
     client.get(format!("{base}/api/bars?symbol=005930&period=D&limit=5")).send().await.unwrap().error_for_status().unwrap();
     start(&client, &base).await;
-    let job = finished(&client, &base).await;
+    let job = finished(&fake, &client, &base).await;
     assert_eq!(job["status"], "ready");
     assert_eq!(job["phase"], "complete");
     assert_eq!(job["completedCompanies"], 2);
@@ -245,12 +253,12 @@ async fn all_companies_recent_reports_precede_history_and_completed_history_is_r
     assert_eq!(stored["series"][0]["points"][0]["value"], 100.0);
     let reports = fake.count("fnlttSinglAcntAll.json");
     start(&client, &base).await;
-    assert_eq!(finished(&client, &base).await["historyComplete"], true);
+    assert_eq!(finished(&fake, &client, &base).await["historyComplete"], true);
     assert_eq!(fake.count("fnlttSinglAcntAll.json"), reports, "confirmed absent and successful reports are both reusable");
     let previous = fake.state.lock().unwrap().calls.len();
     fake.state.lock().unwrap().correction = true;
     start(&client, &base).await;
-    assert_eq!(finished(&client, &base).await["historyComplete"], true);
+    assert_eq!(finished(&fake, &client, &base).await["historyComplete"], true);
     let calls = fake.state.lock().unwrap().calls[previous..].to_vec();
     let last_recent_check = calls.iter().rposition(|(endpoint, _)| endpoint == "list.json").unwrap();
     let first_old_correction = calls.iter().position(|(endpoint, params)| endpoint == "fnlttSinglAcntAll.json" && params["bsns_year"] == "2015").unwrap();
@@ -267,24 +275,22 @@ pub(super) async fn command(client: &reqwest::Client, base: &str, action: &str) 
 async fn user_pause_saves_the_inflight_response_stops_the_next_request_and_survives_restart() {
     let fake = Fake::start().await;
     fake.state.lock().unwrap().stream_paused_report = Some("11013".into());
-    let kiwoom = common::FakeKiwoom::start().await;
-    let mut body = fake_kiwoom::fixture("ka10099_0");
+    let kiwoom = common::ScriptedTransport::new();
+    let mut body = common::support::fixture("ka10099_0");
     body["list"].as_array_mut().unwrap().retain(|row| row["code"] == "005930");
-    kiwoom.seen.respond_with("ka10099", StatusCode::OK, body);
+    kiwoom.respond_with("ka10099", 200, body);
     let dir = tempdir();
     let server = process(&fake, &kiwoom, dir.path(), "20171231120000");
     let base = format!("http://{}", server.addr().await);
     let client = reqwest::Client::new();
     client.get(format!("{base}/api/bars?symbol=005930&period=D&limit=5")).send().await.unwrap().error_for_status().unwrap();
     let initial = start(&client, &base).await;
-    tokio::time::timeout(Duration::from_secs(10), async {
-        while fake.count("statement_stream") == 0 { tokio::time::sleep(Duration::from_millis(10)).await; }
-    }).await.unwrap();
+    fake.wait_for_call("statement_stream", 1).await;
     let requested = command(&client, &base, "pause").await;
     assert_eq!(requested["status"], "pausing");
     assert_eq!(requested["stopReason"], "user");
     fake.state.lock().unwrap().stream_paused_report = None;
-    let paused = finished(&client, &base).await;
+    let paused = finished(&fake, &client, &base).await;
     assert_eq!(paused["status"], "paused", "{paused}");
     assert_eq!(paused["completedCompanies"], 0);
     assert_eq!(fake.count("fnlttSinglAcntAll.json"), 1);
@@ -301,7 +307,7 @@ async fn user_pause_saves_the_inflight_response_stops_the_next_request_and_survi
     assert_eq!(start(&client, &base).await["status"], "paused", "ordinary starts cannot erase durable user intent");
     assert_eq!(fake.state.lock().unwrap().calls.len(), count);
     assert_eq!(command(&client, &base, "resume").await["id"], initial["id"]);
-    assert_eq!(finished(&client, &base).await["historyComplete"], true);
+    assert_eq!(finished(&fake, &client, &base).await["historyComplete"], true);
     assert_eq!(report_calls(&fake, "11013"), 1, "saved statement rows must resume at XBRL rather than download again");
     restarted.stop().await;
 }
@@ -313,10 +319,10 @@ async fn history_checkpoint_failure_stops_before_completion_and_resumes_after_re
     for first in [true, false] {
         let fake = Fake::start().await;
         fake.state.lock().unwrap().integrated_financials = true;
-        let kiwoom = common::FakeKiwoom::start().await;
-        let mut body = fake_kiwoom::fixture("ka10099_0");
+        let kiwoom = common::ScriptedTransport::new();
+        let mut body = common::support::fixture("ka10099_0");
         body["list"].as_array_mut().unwrap().retain(|row| row["code"] == "005930");
-        kiwoom.seen.respond_with("ka10099", StatusCode::OK, body);
+        kiwoom.respond_with("ka10099", 200, body);
         let dir = tempdir();
         let path = dir.path().join("run/financials.db");
         Store::open(&path).await.unwrap();
@@ -330,7 +336,7 @@ async fn history_checkpoint_failure_stops_before_completion_and_resumes_after_re
         let price = format!("{base}/api/bars?symbol=005930&period=D&limit=5");
         client.get(&price).send().await.unwrap().error_for_status().unwrap();
         let initial = start(&client, &base).await;
-        let failed = finished(&client, &base).await;
+        let failed = finished(&fake, &client, &base).await;
         assert_eq!(failed["status"], "failed", "{failed}");
         assert_eq!(failed["stopReason"], "storage");
         assert_eq!(failed["completedCompanies"], if first { 0 } else { 1 });
@@ -351,7 +357,7 @@ async fn history_checkpoint_failure_stops_before_completion_and_resumes_after_re
         assert_eq!(json(&client, &format!("{base}/api/financial-update")).await["status"], "interrupted");
         assert_eq!(recent_calls(), before);
         assert_eq!(command(&client, &base, "resume").await["id"], initial["id"]);
-        let done = finished(&client, &base).await;
+        let done = finished(&fake, &client, &base).await;
         assert_eq!(done["historyComplete"], true, "{done}");
         if !first { assert_eq!(recent_calls(), before, "reopening a historical failure does not collect completed recent reports again"); }
         reopened.stop().await;
@@ -362,29 +368,27 @@ async fn history_checkpoint_failure_stops_before_completion_and_resumes_after_re
 async fn resuming_keeps_confirmed_absence_and_continues_the_pending_separate_request() {
     let fake = Fake::start().await;
     fake.state.lock().unwrap().stream_paused_report = Some("11014".into());
-    let kiwoom = common::FakeKiwoom::start().await;
-    let mut body = fake_kiwoom::fixture("ka10099_0");
+    let kiwoom = common::ScriptedTransport::new();
+    let mut body = common::support::fixture("ka10099_0");
     body["list"].as_array_mut().unwrap().retain(|row| row["code"] == "005930");
-    kiwoom.seen.respond_with("ka10099", StatusCode::OK, body);
+    kiwoom.respond_with("ka10099", 200, body);
     let dir = tempdir();
     let server = process(&fake, &kiwoom, dir.path(), "20190101120000");
     let base = format!("http://{}", server.addr().await);
     let client = reqwest::Client::new();
     client.get(format!("{base}/api/bars?symbol=005930&period=D&limit=5")).send().await.unwrap().error_for_status().unwrap();
     start(&client, &base).await;
-    tokio::time::timeout(Duration::from_secs(10), async {
-        while fake.count("statement_stream") == 0 { tokio::time::sleep(Duration::from_millis(10)).await; }
-    }).await.unwrap();
+    fake.wait_for_call("statement_stream", 1).await;
     command(&client, &base, "pause").await;
     fake.state.lock().unwrap().stream_paused_report = None;
-    assert_eq!(finished(&client, &base).await["status"], "paused");
+    assert_eq!(finished(&fake, &client, &base).await["status"], "paused");
     let saved = json(&client, &format!("{base}/api/symbols/005930/financial-source")).await;
     assert_eq!(saved["collection"]["reports"]["2016/11013"]["statement"]["absent"], true);
     server.stop().await;
     let reopened = process(&fake, &kiwoom, dir.path(), "20200101120000");
     let base = format!("http://{}", reopened.addr().await);
     command(&client, &base, "resume").await;
-    assert_eq!(finished(&client, &base).await["historyComplete"], true);
+    assert_eq!(finished(&fake, &client, &base).await["historyComplete"], true);
     let calls = fake.state.lock().unwrap().calls.clone();
     for report in ["11013", "11014"] {
         assert_eq!(calls.iter().filter(|(endpoint, params)| endpoint == "fnlttSinglAcntAll.json" && params["bsns_year"] == "2016" && params["reprt_code"] == report).count(), 2, "{report}: confirmed CFS absence and completed OFS absence are reusable after a new-day restart");
@@ -396,29 +400,27 @@ async fn resuming_keeps_confirmed_absence_and_continues_the_pending_separate_req
 async fn pausing_an_inflight_listing_page_keeps_it_separate_and_resumes_the_next_page() {
     let fake = Fake::start().await;
     { let mut state = fake.state.lock().unwrap(); state.paused_list = true; state.list_pages = true; }
-    let kiwoom = common::FakeKiwoom::start().await;
-    let mut body = fake_kiwoom::fixture("ka10099_0");
+    let kiwoom = common::ScriptedTransport::new();
+    let mut body = common::support::fixture("ka10099_0");
     body["list"].as_array_mut().unwrap().retain(|row| row["code"] == "005930");
-    kiwoom.seen.respond_with("ka10099", StatusCode::OK, body);
+    kiwoom.respond_with("ka10099", 200, body);
     let dir = tempdir();
     let server = process(&fake, &kiwoom, dir.path(), "20151231120000");
     let base = format!("http://{}", server.addr().await);
     let client = reqwest::Client::new();
     client.get(format!("{base}/api/bars?symbol=005930&period=D&limit=5")).send().await.unwrap().error_for_status().unwrap();
     start(&client, &base).await;
-    tokio::time::timeout(Duration::from_secs(10), async {
-        while fake.count("listing_stream") == 0 { tokio::time::sleep(Duration::from_millis(10)).await; }
-    }).await.unwrap();
+    fake.wait_for_call("listing_stream", 1).await;
     assert_eq!(command(&client, &base, "pause").await["status"], "pausing");
     fake.state.lock().unwrap().paused_list = false;
-    assert_eq!(finished(&client, &base).await["status"], "paused");
+    assert_eq!(finished(&fake, &client, &base).await["status"], "paused");
     let saved = json(&client, &format!("{base}/api/symbols/005930/financial-source")).await;
     assert!(saved["collection"]["disclosures"].as_array().unwrap().is_empty(), "an incomplete listing must not become the validated snapshot");
     server.stop().await;
     let reopened = process(&fake, &kiwoom, dir.path(), "20160101120000");
     let base = format!("http://{}", reopened.addr().await);
     command(&client, &base, "resume").await;
-    assert_eq!(finished(&client, &base).await["historyComplete"], true);
+    assert_eq!(finished(&fake, &client, &base).await["historyComplete"], true);
     let calls = fake.state.lock().unwrap().calls.clone();
     for page in ["1", "2"] {
         assert_eq!(calls.iter().filter(|(endpoint, params)| endpoint == "list.json" && params["page_no"] == page).count(), 1, "page {page} must only download once across pause and restart");
@@ -431,10 +433,10 @@ async fn response_checkpoint_failure_stops_without_completion_and_reopens_withou
     use sqlx::Connection;
     use std::os::unix::fs::PermissionsExt;
     let fake = Fake::start().await;
-    let kiwoom = common::FakeKiwoom::start().await;
-    let mut body = fake_kiwoom::fixture("ka10099_0");
+    let kiwoom = common::ScriptedTransport::new();
+    let mut body = common::support::fixture("ka10099_0");
     body["list"].as_array_mut().unwrap().retain(|row| row["code"] == "005930");
-    kiwoom.seen.respond_with("ka10099", StatusCode::OK, body);
+    kiwoom.respond_with("ka10099", 200, body);
     let dir = tempdir();
     let path = dir.path().join("run/financials.db");
     Store::open(&path).await.unwrap();
@@ -446,7 +448,7 @@ async fn response_checkpoint_failure_stops_without_completion_and_reopens_withou
     let client = reqwest::Client::new();
     client.get(format!("{base}/api/bars?symbol=005930&period=D&limit=5")).send().await.unwrap().error_for_status().unwrap();
     start(&client, &base).await;
-    let failed = finished(&client, &base).await;
+    let failed = finished(&fake, &client, &base).await;
     assert_eq!(failed["stopReason"], "storage");
     assert_eq!(failed["completedCompanies"], 0);
     assert_eq!(failed["historyComplete"], false);
@@ -457,7 +459,7 @@ async fn response_checkpoint_failure_stops_without_completion_and_reopens_withou
     let base = format!("http://{}", reopened.addr().await);
     assert_eq!(json(&client, &format!("{base}/api/financial-update")).await["status"], "interrupted");
     command(&client, &base, "resume").await;
-    assert_eq!(finished(&client, &base).await["historyComplete"], true);
+    assert_eq!(finished(&fake, &client, &base).await["historyComplete"], true);
     reopened.stop().await;
     for entry in std::fs::read_dir(dir.path().join("run")).unwrap().map(Result::unwrap).filter(|entry| entry.file_name().to_string_lossy().starts_with("financials.db")) {
         let bytes = std::fs::read(entry.path()).unwrap();
@@ -468,10 +470,10 @@ async fn response_checkpoint_failure_stops_without_completion_and_reopens_withou
 #[tokio::test]
 async fn a_terminal_update_allows_the_next_start_to_create_a_new_job() {
     let fake = Fake::start().await;
-    let kiwoom = common::FakeKiwoom::start().await;
-    let mut body = fake_kiwoom::fixture("ka10099_0");
+    let kiwoom = common::ScriptedTransport::new();
+    let mut body = common::support::fixture("ka10099_0");
     body["list"].as_array_mut().unwrap().retain(|row| row["code"] == "005930");
-    kiwoom.seen.respond_with("ka10099", StatusCode::OK, body);
+    kiwoom.respond_with("ka10099", 200, body);
     let dir = tempdir();
     let server = process(&fake, &kiwoom, dir.path(), "20151231120000");
     let base = format!("http://{}", server.addr().await);
@@ -479,13 +481,13 @@ async fn a_terminal_update_allows_the_next_start_to_create_a_new_job() {
     client.get(format!("{base}/api/bars?symbol=005930&period=D&limit=5")).send().await.unwrap().error_for_status().unwrap();
     let mut job = start(&client, &base).await;
     for _ in 0..5 {
-        let terminal = finished(&client, &base).await;
+        let terminal = finished(&fake, &client, &base).await;
         assert_eq!(terminal["historyComplete"], true);
         assert_eq!(terminal["id"], job["id"]);
         job = start(&client, &base).await;
         assert_eq!(job["id"].as_u64().unwrap(), terminal["id"].as_u64().unwrap() + 1, "a published terminal status cannot coalesce a subsequent update into the finished job");
     }
-    finished(&client, &base).await;
+    finished(&fake, &client, &base).await;
     server.stop().await;
 }
 
@@ -494,7 +496,7 @@ async fn authentication_stops_the_whole_job_and_requires_successful_explicit_con
     let fake = Fake::start().await;
     fake.state.lock().unwrap().preferred = true;
     fake.state.lock().unwrap().failures.insert("corpCode.xml".into(), "010".into());
-    let kiwoom = common::FakeKiwoom::start().await;
+    let kiwoom = common::ScriptedTransport::new();
     listings(&kiwoom);
     let dir = tempdir();
     let server = process(&fake, &kiwoom, dir.path(), "20151231120000");
@@ -502,7 +504,7 @@ async fn authentication_stops_the_whole_job_and_requires_successful_explicit_con
     let client = reqwest::Client::new();
     client.get(format!("{base}/api/bars?symbol=005930&period=D&limit=5")).send().await.unwrap().error_for_status().unwrap();
     let initial = start(&client, &base).await;
-    let stopped = finished(&client, &base).await;
+    let stopped = finished(&fake, &client, &base).await;
     assert_eq!(stopped["status"], "stopped", "{stopped}");
     assert_eq!(stopped["stopReason"], "authentication");
     assert_eq!(stopped["failure"], "authentication");
@@ -514,12 +516,12 @@ async fn authentication_stops_the_whole_job_and_requires_successful_explicit_con
     let base = format!("http://{}", reopened.addr().await);
     assert_eq!(json(&client, &format!("{base}/api/financial-update")).await["stopReason"], "authentication");
     command(&client, &base, "resume").await;
-    let still_stopped = finished(&client, &base).await;
+    let still_stopped = finished(&fake, &client, &base).await;
     assert_eq!(still_stopped["status"], "stopped");
     assert_eq!(fake.count("corpCode.xml"), 2, "explicit confirmation may send one request, never the pending company requests");
     fake.state.lock().unwrap().failures.clear();
     command(&client, &base, "resume").await;
-    let done = finished(&client, &base).await;
+    let done = finished(&fake, &client, &base).await;
     assert_eq!(done["historyComplete"], true, "a repaired source configuration may retain the same API key: {done}");
     assert_eq!(json(&client, &format!("{base}/api/financial-update")).await["id"], initial["id"]);
     reopened.stop().await;
@@ -530,17 +532,17 @@ async fn rate_limit_at_first_or_middle_request_persists_and_only_one_confirmatio
     for endpoint in ["corpCode.xml", "fnlttSinglAcntAll.json/2015/11014"] {
         let fake = Fake::start().await;
         fake.state.lock().unwrap().failures.insert(endpoint.into(), "020".into());
-        let kiwoom = common::FakeKiwoom::start().await;
-        let mut body = fake_kiwoom::fixture("ka10099_0");
+        let kiwoom = common::ScriptedTransport::new();
+        let mut body = common::support::fixture("ka10099_0");
         body["list"].as_array_mut().unwrap().retain(|row| row["code"] == "005930");
-        kiwoom.seen.respond_with("ka10099", StatusCode::OK, body);
+        kiwoom.respond_with("ka10099", 200, body);
         let dir = tempdir();
         let server = process(&fake, &kiwoom, dir.path(), "20151231120000");
         let base = format!("http://{}", server.addr().await);
         let client = reqwest::Client::new();
         client.get(format!("{base}/api/bars?symbol=005930&period=D&limit=5")).send().await.unwrap().error_for_status().unwrap();
         let initial = start(&client, &base).await;
-        let stopped = finished(&client, &base).await;
+        let stopped = finished(&fake, &client, &base).await;
         assert_eq!(stopped["status"], "stopped", "{stopped}");
         assert_eq!(stopped["stopReason"], "rate_limited");
         assert_eq!(stopped["nextCheckAt"], kst(KstDate::new(2016, 1, 1).unwrap(), 7, 0, 0).unix());
@@ -553,19 +555,19 @@ async fn rate_limit_at_first_or_middle_request_persists_and_only_one_confirmatio
         assert_eq!(json(&client, &format!("{base}/api/financial-update")).await["nextCheckAt"], stopped["nextCheckAt"]);
         assert_eq!(fake.state.lock().unwrap().calls.len(), count);
         command(&client, &base, "resume").await;
-        let limited = finished(&client, &base).await;
+        let limited = finished(&fake, &client, &base).await;
         assert_eq!(limited["status"], "stopped");
         assert_eq!(limited["nextCheckAt"], kst(KstDate::new(2016, 1, 2).unwrap(), 7, 0, 0).unix());
         assert_eq!(fake.state.lock().unwrap().calls.len(), count + 1, "a still-limited confirmation must not release any other request");
         let first_report_calls = report_calls(&fake, "11013");
         fake.state.lock().unwrap().failures.insert(endpoint.into(), "900".into());
         command(&client, &base, "resume").await;
-        let unconfirmed = finished(&client, &base).await;
+        let unconfirmed = finished(&fake, &client, &base).await;
         assert_eq!(unconfirmed["stopReason"], "rate_limited", "an unsuccessful confirmation must keep the global stop");
         assert_eq!(fake.state.lock().unwrap().calls.len(), count + 2, "a confirmation with a remote error has a one-request budget too");
         fake.state.lock().unwrap().failures.clear();
         command(&client, &base, "resume").await;
-        let done = finished(&client, &base).await;
+        let done = finished(&fake, &client, &base).await;
         assert_eq!(done["id"], initial["id"]);
         assert_eq!(done["historyComplete"], true, "{done}");
         assert!(done["nextCheckAt"].is_null());
@@ -580,17 +582,17 @@ async fn rate_limit_at_first_or_middle_request_persists_and_only_one_confirmatio
 async fn a_company_remote_failure_has_a_bounded_retry_budget_and_preserves_previous_values() {
     let fake = Fake::start().await;
     fake.state.lock().unwrap().directory = Some(format!("<result><list><corp_code>{CORP}</corp_code><stock_code>005930</stock_code></list><list><corp_code>00000002</corp_code><stock_code>000020</stock_code></list></result>"));
-    let kiwoom = common::FakeKiwoom::start().await;
-    let mut body = fake_kiwoom::fixture("ka10099_0");
+    let kiwoom = common::ScriptedTransport::new();
+    let mut body = common::support::fixture("ka10099_0");
     body["list"].as_array_mut().unwrap().retain(|row| ["005930", "000020"].contains(&row["code"].as_str().unwrap()));
-    kiwoom.seen.respond_with("ka10099", StatusCode::OK, body);
+    kiwoom.respond_with("ka10099", 200, body);
     let dir = tempdir();
     let server = process(&fake, &kiwoom, dir.path(), "20151231120000");
     let base = format!("http://{}", server.addr().await);
     let client = reqwest::Client::new();
     client.get(format!("{base}/api/bars?symbol=005930&period=D&limit=5")).send().await.unwrap().error_for_status().unwrap();
     start(&client, &base).await;
-    assert_eq!(finished(&client, &base).await["historyComplete"], true);
+    assert_eq!(finished(&fake, &client, &base).await["historyComplete"], true);
     let before = json(&client, &format!("{base}/api/symbols/005930/financial-source")).await;
     let offset = fake.state.lock().unwrap().calls.len();
     {
@@ -599,7 +601,7 @@ async fn a_company_remote_failure_has_a_bounded_retry_budget_and_preserves_previ
         state.failures.insert(format!("fnlttSinglAcntAll.json/2015/11014/{CORP}"), "900".into());
     }
     start(&client, &base).await;
-    let job = finished(&client, &base).await;
+    let job = finished(&fake, &client, &base).await;
     assert_eq!(job["status"], "partial_failure");
     assert_eq!(job["failedCompanies"], 1);
     assert_eq!(job["completedCompanies"], 1);
@@ -621,7 +623,7 @@ async fn http_authentication_and_limit_responses_stop_without_retrying_other_tar
     for (status, reason) in [(StatusCode::UNAUTHORIZED, "authentication"), (StatusCode::FORBIDDEN, "authentication"), (StatusCode::TOO_MANY_REQUESTS, "rate_limited")] {
         let fake = Fake::start().await;
         fake.state.lock().unwrap().http_failure = Some(status);
-        let kiwoom = common::FakeKiwoom::start().await;
+        let kiwoom = common::ScriptedTransport::new();
         listings(&kiwoom);
         let dir = tempdir();
         let server = process(&fake, &kiwoom, dir.path(), "20151231065959");
@@ -629,7 +631,7 @@ async fn http_authentication_and_limit_responses_stop_without_retrying_other_tar
         let client = reqwest::Client::new();
         client.get(format!("{base}/api/bars?symbol=005930&period=D&limit=5")).send().await.unwrap().error_for_status().unwrap();
         start(&client, &base).await;
-        let stopped = finished(&client, &base).await;
+        let stopped = finished(&fake, &client, &base).await;
         assert_eq!(stopped["status"], "stopped", "{stopped}");
         assert_eq!(stopped["stopReason"], reason);
         assert_eq!(fake.count("corpCode.xml"), 1);
@@ -642,17 +644,17 @@ async fn authentication_during_listing_or_xbrl_keeps_checkpoints_and_resumes_aft
     for endpoint in ["list.json", "fnlttXbrl.xml"] {
         let fake = Fake::start().await;
         fake.state.lock().unwrap().failures.insert(endpoint.into(), "012".into());
-        let kiwoom = common::FakeKiwoom::start().await;
-        let mut body = fake_kiwoom::fixture("ka10099_0");
+        let kiwoom = common::ScriptedTransport::new();
+        let mut body = common::support::fixture("ka10099_0");
         body["list"].as_array_mut().unwrap().retain(|row| row["code"] == "005930");
-        kiwoom.seen.respond_with("ka10099", StatusCode::OK, body);
+        kiwoom.respond_with("ka10099", 200, body);
         let dir = tempdir();
         let server = process(&fake, &kiwoom, dir.path(), "20151231120000");
         let base = format!("http://{}", server.addr().await);
         let client = reqwest::Client::new();
         client.get(format!("{base}/api/bars?symbol=005930&period=D&limit=5")).send().await.unwrap().error_for_status().unwrap();
         let initial = start(&client, &base).await;
-        assert_eq!(finished(&client, &base).await["stopReason"], "authentication");
+        assert_eq!(finished(&fake, &client, &base).await["stopReason"], "authentication");
         assert_eq!(fake.count(endpoint), 1);
         let calls = fake.state.lock().unwrap().calls.len();
         let statements = report_calls(&fake, "11013");
@@ -663,7 +665,7 @@ async fn authentication_during_listing_or_xbrl_keeps_checkpoints_and_resumes_aft
         assert_eq!(fake.state.lock().unwrap().calls.len(), calls);
         fake.state.lock().unwrap().failures.clear();
         command(&client, &base, "resume").await;
-        let done = finished(&client, &base).await;
+        let done = finished(&fake, &client, &base).await;
         assert_eq!(done["id"], initial["id"]);
         assert_eq!(done["historyComplete"], true, "{done}");
         if endpoint == "fnlttXbrl.xml" { assert_eq!(report_calls(&fake, "11013"), statements, "saved CFS rows must resume at XBRL"); }
@@ -676,7 +678,7 @@ async fn authentication_during_listing_or_xbrl_keeps_checkpoints_and_resumes_aft
 #[tokio::test]
 async fn missing_dart_configuration_never_dispatches_on_repeated_start_or_resume() {
     let fake = Fake::start().await;
-    let kiwoom = common::FakeKiwoom::start().await;
+    let kiwoom = common::ScriptedTransport::new();
     let dir = tempdir();
     let server = common::Server::spawn_with(&kiwoom, &dir.path().join("run/server.lock"), dir.path(), &[("VALLY_CLOCK_START", std::ffi::OsStr::new("20151231120000"))]);
     let base = format!("http://{}", server.addr().await);
@@ -693,7 +695,7 @@ async fn missing_dart_configuration_never_dispatches_on_repeated_start_or_resume
 }
 
 
-pub(super) fn automatic_process(fake: &Fake, kiwoom: &common::FakeKiwoom, dir: &std::path::Path, start: &str) -> common::Server {
+pub(super) fn automatic_process(fake: &Fake, kiwoom: &common::ScriptedTransport, dir: &std::path::Path, start: &str) -> common::Server {
     common::Server::spawn_with(kiwoom, &dir.join("run/server.lock"), dir, &[
         ("OPENDART_API_KEY", std::ffi::OsStr::new(KEY)),
         ("VALLY_DART_BASE_URL", std::ffi::OsStr::new(&fake.url)),
@@ -706,18 +708,16 @@ pub(super) fn automatic_process(fake: &Fake, kiwoom: &common::FakeKiwoom, dir: &
 #[tokio::test]
 async fn automatic_start_catches_up_once_and_same_day_restart_does_not_create_another_job() {
     let fake = Fake::start().await;
-    let kiwoom = common::FakeKiwoom::start().await;
-    let mut body = fake_kiwoom::fixture("ka10099_0");
+    let kiwoom = common::ScriptedTransport::new();
+    let mut body = common::support::fixture("ka10099_0");
     body["list"].as_array_mut().unwrap().retain(|row| row["code"] == "005930");
-    kiwoom.seen.respond_with("ka10099", StatusCode::OK, body);
+    kiwoom.respond_with("ka10099", 200, body);
     let dir = tempdir();
     let server = automatic_process(&fake, &kiwoom, dir.path(), "20151231070001");
     let base = format!("http://{}", server.addr().await);
     let client = reqwest::Client::new();
-    tokio::time::timeout(Duration::from_secs(8), async {
-        while fake.count("list.json") == 0 { tokio::time::sleep(Duration::from_millis(20)).await; }
-    }).await.expect("startup catch-up must run independently of chart and status reads");
-    let done = finished(&client, &base).await;
+    fake.wait_for_call("list.json", 1).await;
+    let done = finished(&fake, &client, &base).await;
     assert_eq!(done["historyComplete"], true, "{done}");
     assert_eq!(done["nextCheckAt"], kst(KstDate::new(2016, 1, 1).unwrap(), 7, 0, 0).unix());
     let calls = fake.state.lock().unwrap().calls.len();
@@ -730,10 +730,8 @@ async fn automatic_start_catches_up_once_and_same_day_restart_does_not_create_an
     restarted.stop().await;
     let later = automatic_process(&fake, &kiwoom, dir.path(), "20160104120000");
     let base = format!("http://{}", later.addr().await);
-    tokio::time::timeout(Duration::from_secs(8), async {
-        while fake.count("list.json") == 1 { tokio::time::sleep(Duration::from_millis(20)).await; }
-    }).await.unwrap();
-    let caught_up = finished(&client, &base).await;
+    fake.wait_for_call("list.json", 2).await;
+    let caught_up = finished(&fake, &client, &base).await;
     assert_eq!(caught_up["id"].as_u64().unwrap(), done["id"].as_u64().unwrap() + 1, "several missed dates require one current check");
     assert_eq!(fake.count("list.json"), 2);
     assert_eq!(report_calls(&fake, "11013"), 1, "unchanged confirmed reports are reused");

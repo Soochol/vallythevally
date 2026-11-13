@@ -1,6 +1,7 @@
 import { createRequire } from 'node:module';
 import fs from 'node:fs';
 import path from 'node:path';
+import { installDartDisplay } from './dart-ui.mjs';
 
 const [mode, root, destination, base, headed] = process.argv.slice(2);
 const result = { status: 'failed', checks: {} };
@@ -34,6 +35,7 @@ try {
       await expect(page.locator('p')).toHaveText('Chromium ready');
       result.checks[name] = { status: 'passed', version: browser.version() };
       if (mode === 'ui') {
+        const verifyDisplay = await installDartDisplay(context, base);
         result.phase = 'navigation';
         await page.goto(base + '/?symbol=005930&period=Y');
         result.phase = 'chart';
@@ -48,19 +50,21 @@ try {
           await dialog.getByRole('option', { name: /^매출액/ }).click();
           await dialog.getByRole('button', { name: '매출액 추가', exact: true }).click();
         }
-        await dialog.getByRole('button', { name: '닫기', exact: true }).first().click();
+        await dialog.getByRole('button', { name: '입력창 닫기', exact: true }).click();
         await expect(row).toContainText('확인 완료', { timeout: 30000 });
         result.phase = 'detail';
         const summary = row.locator('summary');
         await summary.first().click();
         const point = JSON.parse(fs.readFileSync(path.join(destination, 'api.json'), 'utf8')).series.find(s => s.metric === 'revenue').points.filter(p => p.status === 'available' && p.value !== null).at(-1);
-        const select = row.locator('select').first();
-        const option = await select.locator('option').evaluateAll((options, point) => options.find(o => o.textContent.startsWith(`${point.businessYear} /`))?.value, point);
-        if (option === undefined) throw new Error('ui_period_missing');
-        await select.selectOption(option);
+        const select = row.getByRole('combobox').first();
+        const name = await select.getAttribute('aria-label');
+        await select.click();
+        const menu = page.getByRole('menu', name ? { name, exact: true } : {});
+        await menu.getByRole('menuitemradio').filter({ hasText: new RegExp(`^${point.businessYear} /`) }).first().click();
         result.phase = 'compare';
         const value = point.value.toLocaleString('ko-KR', { maximumFractionDigits: 2 });
         await expect(row).toContainText(`표시값 ${value}`);
+        verifyDisplay();
         result.phase = 'complete';
         result.ui = { metric: 'revenue', year: point.businessYear, value: point.value, displayed: await row.innerText(), screenshot: path.join(destination, 'financials.png') };
         await page.screenshot({ path: result.ui.screenshot, fullPage: true });

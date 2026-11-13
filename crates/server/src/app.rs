@@ -94,6 +94,51 @@ fn log_filter(spec: &str) -> impl Filter<Registry> + Send + Sync + 'static {
     user.and(filter_fn(below_ws_library_trace))
 }
 
+pub struct ApplicationInputs {
+    pub rest: KiwoomRest,
+    pub clock: Clock,
+    pub symbols: Arc<SymbolDirectory>,
+    pub db: AppDb,
+    pub screener_store: Store,
+    pub stream: (KiwoomStream, tokio::sync::mpsc::Receiver<crate::kiwoom::stream::StreamEvent>),
+    pub static_dir: std::path::PathBuf,
+}
+
+pub fn application(inputs: ApplicationInputs) -> Arc<AppState> {
+    let ApplicationInputs { rest, clock, symbols, db, screener_store, stream: (stream, events), static_dir } = inputs;
+    let bars = Arc::new(BarService::new(rest.clone(), symbols.clone(), clock.clone()));
+    let screener = Arc::new(Screener::new(screener_store, rest.clone(), bars.clone(), symbols.clone(), clock.clone()));
+    let hub = MarketHub::spawn(bars.clone(), stream, events, clock.clone());
+    Arc::new(AppState { symbols, bars, rest, db, clock, static_dir, hub, screener })
+}
+
+pub async fn initialize_rest(rest: &KiwoomRest, clock: &Clock, token_path: &std::path::Path) {
+    match rest.halted() {
+        Some(_) => {}
+        None if !rest.auth().needs_issue(clock.now()) => {
+            tracing::info!(path = %token_path.display(), "파일의 토큰을 다시 씁니다. 발급하지 않습니다");
+        }
+        None => {
+            if let Err(e) = rest.issue_token().await {
+                tracing::error!(error = %e, "첫 토큰을 받지 못했습니다. 조회가 들어오면 다시 받아 봅니다");
+            }
+        }
+    }
+}
+
+pub async fn initialize_market(state: Arc<AppState>, update_on_start: bool) {
+    if load_symbols_at_startup(state.clock.clone(), state.rest.clone(), state.symbols.clone()).await.is_err() { return; }
+    state.screener.fill_lost_listing().await;
+    if update_on_start { state.screener.update_if_behind().await; }
+}
+
+pub async fn daily_maintenance(state: Arc<AppState>) {
+    tokio::join!(
+        daily_reset(state.clock.clone(), state.rest.clone(), state.symbols.clone(), state.bars.clone(), state.hub.clone()),
+        daily_token(state.clock.clone(), state.rest.clone()),
+    );
+}
+
 async fn serve(config: Config, token_file: TokenFile) -> ExitCode {
     let db = match AppDb::open(&config.db_path).await {
         Ok(db) => db,
@@ -146,37 +191,12 @@ async fn serve(config: Config, token_file: TokenFile) -> ExitCode {
         KiwoomAuth::new(config.kiwoom_app_key.clone(), config.kiwoom_app_secret.clone(), Some(token_file)),
         clock.clone(),
     );
-    match rest.halted() {
-        Some(_) => {}
-        None if !rest.auth().needs_issue(clock.now()) => {
-            tracing::info!(path = %config.token_path.display(), "파일의 토큰을 다시 씁니다. 발급하지 않습니다");
-        }
-        None => {
-            if let Err(e) = rest.issue_token().await {
-                tracing::error!(error = %e, "첫 토큰을 받지 못했습니다. 조회가 들어오면 다시 받아 봅니다");
-            }
-        }
-    }
+    initialize_rest(&rest, &clock, &config.token_path).await;
     let symbols = Arc::new(SymbolDirectory::default());
-    let bars = Arc::new(BarService::new(rest.clone(), symbols.clone(), clock.clone()));
-    let screener = Arc::new(Screener::new(screener_store, rest.clone(), bars.clone(), symbols.clone(), clock.clone()));
-    tokio::spawn({
-        let (clock, rest, symbols, screener) = (clock.clone(), rest.clone(), symbols.clone(), screener.clone());
-        let update_on_start = config.screener_update_on_start;
-        async move {
-            if load_symbols_at_startup(clock, rest, symbols).await.is_err() {
-                return;
-            }
-            screener.fill_lost_listing().await;
-            if update_on_start {
-                screener.update_if_behind().await;
-            }
-        }
-    });
-    let (stream, events) = KiwoomStream::spawn(config.kiwoom_ws_url.clone(), rest.clone(), clock.clone());
-    let hub = MarketHub::spawn(bars.clone(), stream, events, clock.clone());
-    tokio::spawn(daily_reset(clock.clone(), rest.clone(), symbols.clone(), bars.clone(), hub.clone()));
-    tokio::spawn(daily_token(clock.clone(), rest.clone()));
+    let stream = KiwoomStream::spawn(config.kiwoom_ws_url.clone(), rest.clone(), clock.clone());
+    let state = application(ApplicationInputs { rest: rest.clone(), clock: clock.clone(), symbols: symbols.clone(), db, screener_store, stream, static_dir: config.static_dir.clone() });
+    tokio::spawn(initialize_market(state.clone(), config.screener_update_on_start));
+    tokio::spawn(daily_maintenance(state.clone()));
 
     let financial_store = crate::financials::store::Store::open(&config.financial_db_path).await;
     if let Err(failure) = financial_store { tracing::warn!(?failure, "재무 저장소를 열 수 없습니다"); }
@@ -184,7 +204,7 @@ async fn serve(config: Config, token_file: TokenFile) -> ExitCode {
     let financials = crate::financials::Financials::with_store(dart, financial_store, clock.clone());
     if config.financial_automatic { financials.start_automatic(symbols.clone()); }
     let financial_routes = crate::financials::routes(financials, symbols.clone());
-    let app = router(Arc::new(AppState { symbols, bars, rest, db, clock, static_dir: config.static_dir.clone(), hub, screener })).merge(financial_routes);
+    let app = router(state).merge(financial_routes);
     tracing::info!(static_dir = %config.static_dir.display(), "요청을 받기 시작합니다");
     if let Err(e) = axum::serve(listener, app).with_graceful_shutdown(shutdown_signal()).await {
         tracing::error!(error = %e, "서버가 멈췄습니다");
@@ -279,7 +299,13 @@ mod tests {
     use std::io::Write;
     use std::sync::{Arc, Mutex};
 
-    use fake_kiwoom::{APP_KEY, APP_SECRET, FakeKiwoom, TOKEN};
+    use futures::{SinkExt, StreamExt};
+    use tokio_tungstenite::tungstenite::Message;
+
+    use crate::kiwoom::rest::testing::FakeTransport;
+    use crate::kiwoom::wire::TokenResponse;
+
+    const TOKEN: &str = "ws-log-filter-regression-token";
 
     use super::*;
     use crate::config::Secret;
@@ -304,12 +330,25 @@ mod tests {
         let writer = out.clone();
         let subscriber = tracing_subscriber::registry().with(tracing_subscriber::fmt::layer().with_writer(move || writer.clone()).with_ansi(false).with_filter(filter));
         let _guard = tracing::subscriber::set_default(subscriber);
-        let fake = FakeKiwoom::start().await;
-        let transport = ReqwestTransport::new(fake.base_url()).unwrap();
-        let rest = KiwoomRest::new(Arc::new(transport), KiwoomAuth::new(Secret::new(APP_KEY.into()), Secret::new(APP_SECRET.into()), None), Clock::system());
-        let (_stream, mut events) = KiwoomStream::spawn(fake.ws_url(), rest, Clock::system());
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("ws://{}", listener.local_addr().unwrap());
+        let peer = tokio::spawn(async move {
+            let (tcp, _) = listener.accept().await.unwrap();
+            let mut socket = tokio_tungstenite::accept_async(tcp).await.unwrap();
+            let Message::Text(login) = socket.next().await.unwrap().unwrap() else { panic!("LOGIN frame") };
+            assert_eq!(serde_json::from_str::<serde_json::Value>(login.as_str()).unwrap(), serde_json::json!({"trnm":"LOGIN", "token":TOKEN}));
+            socket.send(Message::Text(r#"{"trnm":"LOGIN","return_code":0}"#.into())).await.unwrap();
+            let _ = socket.next().await;
+        });
+        let clock = Clock::system();
+        let transport = Arc::new(FakeTransport::new(Duration::ZERO, |_| panic!("current token needs no HTTP request")));
+        let rest = KiwoomRest::new(Arc::new(transport), KiwoomAuth::new(Secret::new("key".into()), Secret::new("secret".into()), None), clock.clone());
+        rest.auth().record_issued(TokenResponse { token: TOKEN.into(), expires_dt: "20991231000000".into() }, clock.now()).unwrap();
+        let (stream, mut events) = KiwoomStream::spawn(url, rest, clock);
         let live = tokio::time::timeout(Duration::from_secs(3), events.recv()).await.unwrap();
         assert!(matches!(live, Some(StreamEvent::Live { .. })), "{live:?}");
+        drop(stream);
+        tokio::time::timeout(Duration::from_secs(3), peer).await.unwrap().unwrap();
         String::from_utf8(out.0.lock().unwrap().clone()).unwrap()
     }
 

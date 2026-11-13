@@ -1,55 +1,40 @@
-import { financialListings } from "./financial-update-helpers";
-import type { FinancialUpdatePage } from "../src/api/generated/FinancialUpdatePage";
-import type { Layout } from "../src/api/generated/Layout";
-import type { ChartSettings } from "../src/chart/settings";
-import { cell, DEFAULT_LAYOUT_ID, expect, test } from "./harness";
+import { financialTest as test, seedFinancialLayout, openFinancials, financialUpdatePage, expect } from "./financial-update-helpers";
+import { cell, chartOf } from "./harness";
 
 for (const size of [{ width: 1440, height: 900 }, { width: 1024, height: 768 }, { width: 390, height: 844 }]) test.describe(`${size.width} 재무자료 공통 창`, () => {
   const phone = size.width < 768;
-  test.use({ financialFixture: true, clockStart: "20171231120000", viewport: size, isMobile: phone, hasTouch: phone, bootReplies: [financialListings] });
-  test("저장 조회·진행·재시작 복구와 차트·스크리너 진입점", async ({ page, app }, info) => {
+  test.use({ viewport: size, isMobile: phone, hasTouch: phone });
+  test("저장 조회·진행·중단 안내와 재개·차트·스크리너 진입점", async ({ page, scenario, financial }, info) => {
     const errors: string[] = [];
-    page.on("pageerror", (error) => errors.push(error.message));
-    const layout: Layout = await (await fetch(`${app.url}/api/layouts/${DEFAULT_LAYOUT_ID}`)).json();
-    const settings: ChartSettings = { v: 2, style: "candle", scale: "normal", compare: [], indicators: [{ id: "revenue", spec: { kind: "revenue" }, panel: "revenue", visible: true, style: { colors: ["ind-2"], width: 1 } }], panels: [{ id: "revenue", stretch: 0.4 }] };
-    expect((await fetch(`${app.url}/api/layouts/${layout.id}`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...layout, revision: layout.revision + 1, cells: [{ ...layout.cells[0], symbol: "005930", venue: "combined", period: "Y", chartSettings: settings }] }) })).ok).toBe(true);
+    page.on("pageerror", error => errors.push(error.message));
+    seedFinancialLayout(scenario);
+    financial.show("ready", { status: "not_collected", series: [] });
+    let failNext = false;
+    financial.onCommand(action => {
+      if (action === "resume") { financial.show(); financial.job(financialUpdatePage({ id: 1 })); }
+      else if (failNext) financial.job(financialUpdatePage({ id: 2, status: "partial_failure", historyComplete: false, completedCompanies: 1, failedCompanies: 1, failures: [{ code: "00126380", name: "삼성전자", reason: null, failure: "remote" }] }));
+      else { financial.show("ready", { status: "collecting" }); financial.job({ id: 1, status: "collecting", phase: "recent", completedCompanies: 1, historyComplete: false }); }
+    });
     await page.goto("/");
     await expect(cell(page)).toHaveAttribute("aria-busy", "false");
     const row = page.locator('[data-indicator-row="revenue"]');
     await expect(row).toContainText("미수집");
-    expect(app.dart!.calls).toHaveLength(0);
-    await page.getByRole("button", { name: "재무자료", exact: true }).filter({ visible: true }).click();
-    let dialog = page.getByRole("dialog", { name: "재무자료", exact: true });
+    let dialog = await openFinancials(page);
     await expect(dialog).toContainText("업데이트 전");
-    expect(app.dart!.calls).toHaveLength(0);
-    let release: () => void = () => {};
-    app.dart!.block = { scope: "fnlttSinglAcntAll.json/2015/11013/00126380", wait: new Promise<void>((resolve) => { release = resolve; }) };
     await dialog.getByRole("button", { name: "전체 업데이트", exact: true }).click();
-    await expect.poll(() => app.dart!.calls.some((call) => call.includes("fnlttSinglAcntAll.json/2015/11013/00126380"))).toBe(true);
     await expect(dialog).toContainText("1 / 2회사");
     await expect(dialog.getByRole("button", { name: "일시정지", exact: true })).toBeEnabled();
-    const count = app.dart!.calls.length;
-    for (const suffix of ["financial-source", "financials?period=Q", "financials?period=Y"]) expect((await fetch(`${app.url}/api/symbols/005930/${suffix}`)).ok).toBe(true);
-    expect(app.dart!.calls).toHaveLength(count);
     await page.screenshot({ path: info.outputPath("financial-update-progress.png") });
-    await app.restart({ clockStart: "20180101120000" });
-    release(); app.dart!.block = null;
-    const savedCalls = app.dart!.calls.length;
+    financial.job({ status: "interrupted", stopReason: "interrupted", canResume: true });
     await page.reload();
     await expect(cell(page)).toHaveAttribute("aria-busy", "false");
-    await page.getByRole("button", { name: "재무자료", exact: true }).filter({ visible: true }).click();
-    dialog = page.getByRole("dialog", { name: "재무자료", exact: true });
+    dialog = await openFinancials(page);
     await expect(dialog).toContainText("중단된 작업 있음");
     await expect(dialog).toContainText("2015~2017");
-    expect(app.dart!.calls).toHaveLength(savedCalls);
     await dialog.getByRole("button", { name: "이어서 업데이트", exact: true }).click();
-    await expect(dialog).toContainText("전체 이력 확인 완료", { timeout: 45000 });
+    await expect(dialog).toContainText("전체 이력 확인 완료");
     await expect(dialog).toContainText("2 / 2회사");
     await expect(dialog).toContainText("배당 주식 종류 미확인");
-    const job: FinancialUpdatePage = await (await fetch(`${app.url}/api/financial-update`)).json();
-    expect(job.unverifiedDividends).toBe(1);
-    expect(job.unsupportedSymbols).toBe(3);
-    const doneCalls = app.dart!.calls.length;
     await page.screenshot({ path: info.outputPath("financial-update-ready.png") });
     await dialog.getByRole("button", { name: "닫기", exact: true }).first().click();
     await expect(row).toContainText("확인 완료");
@@ -60,19 +45,17 @@ for (const size of [{ width: 1440, height: 900 }, { width: 1024, height: 768 }, 
     await page.keyboard.press("Escape");
     if (phone) await page.getByRole("navigation", { name: "휴대폰 탭" }).getByRole("button", { name: "스크리너", exact: true }).click();
     else await page.getByRole("tab", { name: "스크리너", exact: true }).click();
-    const screenerEntry = phone ? page.getByRole("complementary", { name: "스크리너", exact: true }) : page.getByRole("toolbar");
-    await screenerEntry.getByRole("button", { name: "재무자료", exact: true }).click();
+    const entry = phone ? page.getByRole("complementary", { name: "스크리너", exact: true }) : page.getByRole("toolbar");
+    await entry.getByRole("button", { name: "재무자료", exact: true }).click();
     await expect(dialog).toContainText("2 / 2회사");
-    await page.screenshot({ path: info.outputPath("financial-update-screener.png") });
-    expect(app.dart!.calls).toHaveLength(doneCalls);
-    app.dart!.fail = "list.json///00126380";
+    failNext = true;
     await dialog.getByRole("button", { name: "전체 업데이트", exact: true }).click();
-    await expect(dialog).toContainText("일부 자료 확인 실패", { timeout: 45000 });
-    await expect(dialog).toContainText("1 / 2회사");
+    await expect(dialog).toContainText("일부 자료 확인 실패");
     const failures = dialog.getByRole("region", { name: "실패·미확인 목록" });
     await expect(failures).toContainText("00126380");
     await expect(failures).toContainText("자료원 응답 오류");
     await page.screenshot({ path: info.outputPath("financial-update-failure.png") });
+    expect(Number(await chartOf(cell(page)).getAttribute("data-bar-count"))).toBeGreaterThan(0);
     expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBe(0);
     const bounds = await dialog.boundingBox();
     expect(bounds).not.toBeNull();

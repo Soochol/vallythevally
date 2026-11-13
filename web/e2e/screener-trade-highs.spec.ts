@@ -1,14 +1,16 @@
+import type { Condition } from "../src/api/generated/Condition";
+import type { Screen } from "../src/api/generated/Screen";
+import { resultRows } from "./fixtures/screener";
 import { expectKind, expectSentences, fillNumber, renameScreen, expandEditor, savedEditor, addCondition, chooseKind } from "./sentence-editor";
 import { selectOption } from "./select-option";
 import type { Locator, Page } from "@playwright/test";
-import { expect, test } from "./harness";
+import { expect, test } from "./screener-harness";
 import { editor, excludedLine, expectRows, openScreener, panel, results, runButton, savedTo, updateBand, waitForUpdateToFinish } from "./screener-page";
 
-test.use({ krxMarket: "20261106", krxConditionStocks: true, clockStart: "20261106203000" });
 
-const newHigh = (period: string, field: string, n: number, m: number) => ({ kind: "new_high", period, recentBars: m, field, n });
-const WEEKLY_HIGH = { id: "plain", name: "주봉 신고가", markets: [], exclude: [], conditions: [newHigh("W", "high", 52, 4)] };
-const OLD_VOLUME = { id: "old-volume", name: "신고가 값으로 고른 신고거래량", markets: [], exclude: [], conditions: [newHigh("W", "volume", 52, 4)] };
+const newHigh = (period: "D" | "W" | "M", field: "high" | "volume" | "traded_value", n: number, m: number): Condition => ({ kind: "new_high", period, recentBars: m, field, n });
+const WEEKLY_HIGH: Screen = { id: "plain", name: "주봉 신고가", markets: [], exclude: [], conditions: [newHigh("W", "high", 52, 4)] };
+const OLD_VOLUME: Screen = { id: "old-volume", name: "신고가 값으로 고른 신고거래량", markets: [], exclude: [], conditions: [newHigh("W", "volume", 52, 4)] };
 const RENAMED_OLD = "옛 신고거래량 이름만 바꿈";
 const PICKED = "신고거래대금과 주봉 신고거래량";
 
@@ -63,15 +65,12 @@ async function run(page: Page) {
 const VOLUME = { value: "volume_high", label: "신고거래량" };
 const TRADED_VALUE = { value: "traded_value_high", label: "신고거래대금" };
 
-test("거래 분류의 신고거래량·신고거래대금은 종류 변경 시 최근 기간을 유지하고, 바꾼 봉 주기와 기간은 저장하고 다시 열어도 남으며, 신고가 값으로 고른 옛 조건식도 그 항목으로 그대로 열리고 실행된다", async ({ app, page }) => {
-  test.setTimeout(180_000);
+test("거래 분류의 신고거래량·신고거래대금은 종류 변경 시 최근 기간을 유지하고, 바꾼 봉 주기와 기간은 저장하고 다시 열어도 남으며, 신고가 값으로 고른 옛 조건식도 그 항목으로 그대로 열리고 실행된다", async ({ scenario, screener, page }) => {
   const screenSaves: string[] = [];
   page.on("request", (req) => {
     if (req.method() === "PUT" && new URL(req.url()).pathname === "/api/screens") screenSaves.push(req.postData() ?? "");
   });
-  const screensUrl = `${app.url}/api/screens`;
-  const seeded = await fetch(screensUrl, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ screens: [WEEKLY_HIGH, OLD_VOLUME], revision: 1 }) });
-  expect(seeded.status).toBe(200);
+  scenario.documents.saveScreens({ screens: [WEEKLY_HIGH, OLD_VOLUME], revision: 1 });
   await page.goto("/");
   await openScreener(page);
   await updateBand(page).getByRole("button", { name: "처음 받기" }).click();
@@ -87,6 +86,21 @@ test("거래 분류의 신고거래량·신고거래대금은 종류 변경 시 
   });
 
   await test.step("옛 조건식을 실행하면 이번 주가 52주 최고 거래량인 종목이 이번 주로 나온다", async () => {
+    screener.showResult(resultRows([
+      ["110010", "가상전자", "이번 주"],
+      ["110020", "가상화학", "이번 주"],
+      ["110030", "가상분할", "이번 주"],
+      ["110035", "가상전자우", "이번 주"],
+      ["110050", "가상관리", "이번 주"],
+      ["110060", "가상200", "이번 주"],
+      ["110070", "가상리츠", "이번 주"],
+      ["120010", "가상교차급증", "이번 주"],
+      ["120020", "가상코스닥교차", "이번 주"],
+      ["120030", "가상횡보", "이번 주"],
+      ["120040", "가상거래한산", "이번 주"],
+      ["120050", "가상전고점", "이번 주"],
+      ["120060", "가상시총미달", "이번 주"],
+    ], { universe: 16, excluded: { listedTooShort: 2, historyShort: 0, unconfirmed: 0 } }));
     await run(page);
     await expect(results(page)).toContainText("13종목 · 11-06(금) 기준");
     await expect(excludedLine(page)).toHaveText(EXCLUDED);
@@ -111,7 +125,7 @@ test("거래 분류의 신고거래량·신고거래대금은 종류 변경 시 
     const dialog = await editScreen(page, OLD_VOLUME.name);
     await renameScreen(dialog, RENAMED_OLD);
     await save(page, dialog);
-    const stored = await (await fetch(screensUrl)).json();
+    const stored = scenario.documents.screens();
     expect(stored.screens).toEqual([WEEKLY_HIGH, { ...OLD_VOLUME, name: RENAMED_OLD }]);
   });
 
@@ -152,7 +166,7 @@ test("거래 분류의 신고거래량·신고거래대금은 종류 변경 시 
     await expectSentences(dialog, [TRADED_START_TEXT, WEEKLY_VOLUME_TEXT]);
     await save(page, dialog);
     await expectSentences(panel(page), [TRADED_START_TEXT, `그리고${WEEKLY_VOLUME_TEXT}`]);
-    const stored = await (await fetch(screensUrl)).json();
+    const stored = scenario.documents.screens();
     expect(stored.screens).toEqual([
       { ...WEEKLY_HIGH, name: PICKED, conditions: [newHigh("D", "traded_value", 200, 100), newHigh("W", "volume", 52, 8)] },
       { ...OLD_VOLUME, name: RENAMED_OLD },
@@ -160,6 +174,17 @@ test("거래 분류의 신고거래량·신고거래대금은 종류 변경 시 
   });
 
   await test.step("실행하면 첫 줄 신고거래대금이 일봉 최근 100일 이내 마지막으로 맞은 날이 맞은 날짜로 나온다", async () => {
+    screener.showResult(resultRows([
+      ["120040", "가상거래한산", "당일"],
+      ["120020", "가상코스닥교차", "11-03"],
+      ["120030", "가상횡보", "11-03"],
+      ["120050", "가상전고점", "11-03"],
+      ["120060", "가상시총미달", "11-03"],
+      ["120010", "가상교차급증", "11-02"],
+      ["110050", "가상관리", "10-12"],
+      ["110060", "가상200", "10-12"],
+      ["110070", "가상리츠", "09-14"],
+    ], { universe: 16, excluded: { listedTooShort: 2, historyShort: 0, unconfirmed: 0 } }));
     await run(page);
     await expect(results(page)).toContainText("9종목 · 11-06(금) 기준");
     await expect(excludedLine(page)).toHaveText(EXCLUDED);
@@ -197,7 +222,7 @@ test("거래 분류의 신고거래량·신고거래대금은 종류 변경 시 
     await expectSentences(dialog, [MONTHLY_TRADED_TEXT, MONTHLY_VOLUME_TEXT]);
     await save(page, dialog);
     expect(screenSaves).toHaveLength(3);
-    const stored = await (await fetch(screensUrl)).json();
+    const stored = scenario.documents.screens();
     expect(stored.screens[0]).toEqual({ ...WEEKLY_HIGH, name: PICKED, conditions: [newHigh("M", "traded_value", 24, 6), newHigh("M", "volume", 12, 3)] });
 
     await page.reload();

@@ -4,7 +4,7 @@ import { cell, chartOf, DEFAULT_LAYOUT_ID, expect, test } from "./harness";
 
 test.use({ clockStart: "20261109100030" });
 
-test("48색과 직접 고른 색·굵기 5를 지표에 적용하고 관리 탭에서 편집하며 다시 열어도 실제 차트와 이미지에 남는다", async ({ app, page }, info) => {
+test("48색과 직접 고른 색·굵기 5를 지표에 적용하고 관리 탭에서 편집하며 다시 열어도 실제 차트와 이미지에 남는다", async ({ scenario, page }, info) => {
   const errors: string[] = [];
   page.on("pageerror", (e) => errors.push(e.message));
   await page.addInitScript(installFrameProbe);
@@ -26,8 +26,8 @@ test("48색과 직접 고른 색·굵기 5를 지표에 적용하고 관리 탭�
   await dialog.getByRole("button", { name: "이동평균 단순 20 추가", exact: true }).click();
   await expect(dialog.getByRole("button", { name: "이동평균 단순 20 설정", exact: true })).toBeVisible();
   await expect.poll(async () => {
-    const saved = await (await fetch(`${app.url}/api/layouts/${DEFAULT_LAYOUT_ID}`)).json();
-    return saved.cells[0].chartSettings.indicators.find((i: { spec: { kind: string } }) => i.spec.kind === "ma")?.style;
+    const saved = scenario.documents.layout(DEFAULT_LAYOUT_ID);
+    return (saved.cells[0]!.chartSettings as { indicators: { spec: { kind: string }; style: { colors: string[] } }[] }).indicators.find((i: { spec: { kind: string } }) => i.spec.kind === "ma")?.style;
   }).toMatchObject({ colors: ["#8B5CF6"], width: 5 });
   await page.reload();
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");

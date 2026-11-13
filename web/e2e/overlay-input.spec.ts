@@ -1,32 +1,32 @@
-import { financialListings, startUpdate } from "./financial-update-helpers";
+import { FinancialFixture } from "./financial-update-helpers";
 import type { Page } from "@playwright/test";
 import type { Drawing } from "../src/api/generated/Drawing";
 import type { Layout } from "../src/api/generated/Layout";
-import { cell, DEFAULT_LAYOUT_ID, expect, test, type App } from "./harness";
+import { cell, DEFAULT_LAYOUT_ID, expect, test, type Scenario } from "./harness";
 import { openScreener, panel } from "./screener-page";
 import { addCondition, renameScreen, sentenceEditor } from "./sentence-editor";
 import { selectOption } from "./select-option";
 
-const savedDrawings = async (app: App): Promise<Drawing[]> => (await fetch(`${app.url}/api/drawings?symbol=005930`)).json();
+const savedDrawings = async (scenario: Scenario): Promise<Drawing[]> => scenario.documents.drawings("005930");
 const visibleDrawings = (page: Page) => cell(page).locator("[data-drawings]").evaluate((node) => {
   const drawings: unknown = JSON.parse(node.getAttribute("data-drawings") ?? "[]");
   if (!Array.isArray(drawings)) throw new Error("드로잉 목록이 아닙니다");
   return drawings.length;
 });
 
-async function horizontalLine(page: Page, app: App) {
+async function horizontalLine(page: Page, scenario: Scenario) {
   await page.goto("/?symbol=005930");
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
   const bounds = await cell(page).boundingBox();
   if (!bounds) throw new Error("차트 영역이 없습니다");
   await cell(page).focus(); await page.keyboard.press("H");
   await page.mouse.click(bounds.x + bounds.width * 0.7, bounds.y + bounds.height * 0.3);
-  await expect.poll(async () => (await savedDrawings(app)).length).toBe(1);
+  await expect.poll(async () => (await savedDrawings(scenario)).length).toBe(1);
 }
 
-test("차트 안 굵기 메뉴의 방향키와 Esc는 드로잉 좌표·선택을 바꾸지 않는다", async ({ page, app }) => {
-  await horizontalLine(page, app);
-  const original = (await savedDrawings(app))[0]!;
+test("차트 안 굵기 메뉴의 방향키와 Esc는 드로잉 좌표·선택을 바꾸지 않는다", async ({ page, scenario }) => {
+  await horizontalLine(page, scenario);
+  const original = (await savedDrawings(scenario))[0]!;
   const width = page.getByRole("toolbar", { name: "드로잉 스타일" }).getByRole("combobox", { name: "선 굵기" });
   for (let attempt = 0; attempt < 2; attempt++) {
     await width.click();
@@ -34,7 +34,7 @@ test("차트 안 굵기 메뉴의 방향키와 Esc는 드로잉 좌표·선택�
     const current = Number(await width.getAttribute("data-value"));
     await page.keyboard.press("ArrowDown");
     await expect(menu.getByRole("menuitemradio", { name: `${current % 5 + 1}px`, exact: true })).toBeFocused();
-    await expect.poll(async () => (await savedDrawings(app))[0]?.points).toEqual(original.points);
+    await expect.poll(async () => (await savedDrawings(scenario))[0]?.points).toEqual(original.points);
     const period = await cell(page).getAttribute("aria-label");
     await page.keyboard.press("Digit5");
     await expect(menu.getByRole("menuitemradio", { name: "5px", exact: true })).toBeFocused();
@@ -71,8 +71,8 @@ test("조건식 배경 누르기는 한 표면만 닫고 중첩 메뉴 아래 �
 });
 
 for (const outside of ["배경", "부모 제목", "부모 닫기 버튼"] as const) {
-  test(`드로잉 색상 선택기 ${outside} 누르기는 설정 초안을 보존한다`, async ({ page, app }) => {
-    await horizontalLine(page, app);
+  test(`드로잉 색상 선택기 ${outside} 누르기는 설정 초안을 보존한다`, async ({ page, scenario }) => {
+    await horizontalLine(page, scenario);
     const settings = page.getByRole("dialog", { name: "수평선 세부 설정", exact: true });
     await page.getByRole("button", { name: "드로잉 세부 설정", exact: true }).click();
     await page.mouse.click(10, 10); await expect(settings).toBeHidden();
@@ -92,9 +92,9 @@ for (const outside of ["배경", "부모 제목", "부모 닫기 버튼"] as con
 }
 
 for (const source of ["전체 막대", "선택 막대", "개체 메뉴", "차트 메뉴"] as const) {
-  test(`${source}의 삭제 알림은 Ctrl+Z 후 다른 작업을 되돌리지 않는다`, async ({ page, app }) => {
-    await horizontalLine(page, app);
-    const original = (await savedDrawings(app))[0]!;
+  test(`${source}의 삭제 알림은 Ctrl+Z 후 다른 작업을 되돌리지 않는다`, async ({ page, scenario }) => {
+    await horizontalLine(page, scenario);
+    const original = (await savedDrawings(scenario))[0]!;
     if (source === "전체 막대") {
       await page.getByRole("button", { name: "개체 목록 열기", exact: true }).click();
       await page.getByRole("button", { name: "이 종목 드로잉 모두 지우기", exact: true }).click();
@@ -111,31 +111,31 @@ for (const source of ["전체 막대", "선택 막대", "개체 메뉴", "차트
       await page.getByRole("menu", { name: "드로잉 메뉴", exact: true }).getByRole("menuitem", { name: "이 종목 드로잉 모두 지우기…", exact: true }).click();
     }
     await expect.poll(() => visibleDrawings(page)).toBe(0);
-    await expect.poll(async () => (await savedDrawings(app)).length).toBe(0);
+    await expect.poll(async () => (await savedDrawings(scenario)).length).toBe(0);
     const undo = page.getByRole("status").filter({ hasText: /드로잉.*지웠습니다/ }).getByRole("button", { name: "되돌리기", exact: true });
     await expect(undo).toBeEnabled();
     await cell(page).focus(); await page.keyboard.press("Control+z");
     await expect.poll(() => visibleDrawings(page)).toBe(1);
-    await expect.poll(async () => (await savedDrawings(app)).map((d) => ({ id: d.id, points: d.points }))).toEqual([{ id: original.id, points: original.points }]);
+    await expect.poll(async () => (await savedDrawings(scenario)).map((d) => ({ id: d.id, points: d.points }))).toEqual([{ id: original.id, points: original.points }]);
     await expect(undo).toBeDisabled(); await undo.dispatchEvent("click");
     await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
     await expect.poll(() => visibleDrawings(page)).toBe(1);
-    await expect.poll(async () => (await savedDrawings(app)).map((d) => ({ id: d.id, points: d.points }))).toEqual([{ id: original.id, points: original.points }]);
+    await expect.poll(async () => (await savedDrawings(scenario)).map((d) => ({ id: d.id, points: d.points }))).toEqual([{ id: original.id, points: original.points }]);
     await cell(page).focus(); await page.keyboard.press("Control+Shift+z");
     await expect.poll(() => visibleDrawings(page)).toBe(0);
-    await expect.poll(async () => (await savedDrawings(app)).length).toBe(0);
+    await expect.poll(async () => (await savedDrawings(scenario)).length).toBe(0);
     await expect(undo).toBeDisabled(); await undo.dispatchEvent("click");
     await expect.poll(() => visibleDrawings(page)).toBe(0);
-    await expect.poll(async () => (await savedDrawings(app)).length).toBe(0);
+    await expect.poll(async () => (await savedDrawings(scenario)).length).toBe(0);
   });
 }
 
 test.describe("재무 자료의 중첩 DOM 메뉴", () => {
-  test.use({ financialFixture: true, bootReplies: [financialListings], clockStart: "20171231120000" });
-  test("보고기간 이름·방향키·Space·Enter·글자 이동과 단계별 Esc를 지킨다", async ({ page, app }) => {
-    const layout: Layout = await (await fetch(`${app.url}/api/layouts/${DEFAULT_LAYOUT_ID}`)).json();
-    expect((await fetch(`${app.url}/api/layouts/${DEFAULT_LAYOUT_ID}`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...layout, revision: layout.revision + 1, cells: [{ ...layout.cells[0], symbol: "005930", venue: "combined", period: "Y", chartSettings: { v: 2, style: "candle", scale: "normal", compare: [], indicators: [{ id: "revenue", spec: { kind: "revenue" }, panel: "revenue", visible: true, style: { colors: ["ind-2"], width: 1 } }], panels: [{ id: "revenue", stretch: 0.3 }] } }] }) })).ok).toBe(true);
-    await startUpdate(app, true);
+  test.use({ clockStart: "20171231120000" });
+  test("보고기간 이름·방향키·Space·Enter·글자 이동과 단계별 Esc를 지킨다", async ({ page, scenario }) => {
+    const layout: Layout = scenario.documents.layout(DEFAULT_LAYOUT_ID);
+    scenario.documents.saveLayout({ ...layout, revision: layout.revision + 1, cells: [{ ...layout.cells[0]!, symbol: "005930", venue: "combined", period: "Y", chartSettings: { v: 2, style: "candle", scale: "normal", compare: [], indicators: [{ id: "revenue", spec: { kind: "revenue" }, panel: "revenue", visible: true, style: { colors: ["ind-2"], width: 1 } }], panels: [{ id: "revenue", stretch: 0.3 }] } }] });
+    new FinancialFixture(scenario);
     await page.goto("/");
     const row = page.locator('[data-indicator-row="revenue"]');
     await expect(row).toContainText("확인 완료");

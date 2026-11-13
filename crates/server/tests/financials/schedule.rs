@@ -26,9 +26,7 @@ impl ScheduledApp {
 }
 
 async fn listing_count(fake: &Fake, count: usize) {
-    tokio::time::timeout(Duration::from_secs(8), async {
-        while fake.count("list.json") < count { tokio::time::sleep(Duration::from_millis(20)).await; }
-    }).await.expect("server clock must wake the daily financial check");
+    fake.wait_for_call("list.json", count).await;
 }
 
 #[tokio::test]
@@ -39,18 +37,16 @@ async fn seven_oclock_checks_run_without_reads_and_manual_overlap_joins_the_same
     let app = ScheduledApp::start(&fake, &dir.path().join("f.db"), clock.clone()).await;
     listing_count(&fake, 1).await;
     let client = reqwest::Client::new();
-    let initial = finished(&client, &app.base).await;
+    let initial = finished(&fake, &client, &app.base).await;
     assert_eq!(initial["historyComplete"], true);
     fake.state.lock().unwrap().paused_list = true;
     app.clock.jump(600);
-    tokio::time::timeout(Duration::from_secs(5), async {
-        while fake.count("listing_stream") == 0 { tokio::time::sleep(Duration::from_millis(20)).await; }
-    }).await.expect("the real server schedule must react at 07:00");
+    fake.wait_for_call("listing_stream", 1).await;
     let manual = start(&client, &app.base).await;
     assert_eq!(manual["id"].as_u64().unwrap(), initial["id"].as_u64().unwrap() + 1);
     assert_eq!(start(&client, &app.base).await["id"], manual["id"]);
     fake.state.lock().unwrap().paused_list = false;
-    let done = finished(&client, &app.base).await;
+    let done = finished(&fake, &client, &app.base).await;
     assert_eq!(done["id"], manual["id"]);
     assert_eq!(fake.count("list.json"), 2);
     assert_eq!(report_calls(&fake, "11013"), 1, "unchanged statement confirmations must not download data again");
@@ -65,7 +61,7 @@ async fn daily_confirmation_preempts_history_and_refreshes_old_corrections_befor
     let client = reqwest::Client::new();
     let seed = ScheduledApp::start(&fake, &path, Clock::fake(kst(KstDate::new(2015, 12, 31).unwrap(), 12, 0, 0))).await;
     listing_count(&fake, 1).await;
-    assert_eq!(finished(&client, &seed.base).await["historyComplete"], true);
+    assert_eq!(finished(&fake, &client, &seed.base).await["historyComplete"], true);
     drop(seed);
     {
         let mut state = fake.state.lock().unwrap();
@@ -74,9 +70,7 @@ async fn daily_confirmation_preempts_history_and_refreshes_old_corrections_befor
     }
     let clock = Clock::fake(kst(KstDate::new(2020, 1, 1).unwrap(), 6, 0, 0));
     let app = ScheduledApp::start(&fake, &path, clock.clone()).await;
-    tokio::time::timeout(Duration::from_secs(30), async {
-        while fake.count("statement_stream") == 0 { tokio::time::sleep(Duration::from_millis(20)).await; }
-    }).await.unwrap();
+    fake.wait_for_call("statement_stream", 1).await;
     let history = json(&client, &format!("{}/api/financial-update", app.base)).await;
     assert_eq!(history["phase"], "history");
     assert_eq!(history["completedCompanies"], 1);
@@ -91,7 +85,7 @@ async fn daily_confirmation_preempts_history_and_refreshes_old_corrections_befor
         }
     }).await.expect("a due latest check must wait for the inflight history response, then take priority");
     fake.state.lock().unwrap().stream_paused_report = None;
-    let done = finished(&client, &app.base).await;
+    let done = finished(&fake, &client, &app.base).await;
     assert_eq!(done["id"], history["id"], "daily and historical work share one active job");
     assert_eq!(done["historyComplete"], true, "{done}");
     let calls = fake.state.lock().unwrap().calls[offset..].to_vec();
@@ -116,13 +110,11 @@ async fn automatic_dates_and_restart_preserve_user_and_authentication_stops_unti
         let client = reqwest::Client::new();
         listing_count(&fake, 1).await;
         if user {
-            tokio::time::timeout(Duration::from_secs(8), async {
-                while fake.count("statement_stream") == 0 { tokio::time::sleep(Duration::from_millis(20)).await; }
-            }).await.unwrap();
+            fake.wait_for_call("statement_stream", 1).await;
             command(&client, &app.base, "pause").await;
             fake.state.lock().unwrap().stream_paused_report = None;
         }
-        let stopped = finished(&client, &app.base).await;
+        let stopped = finished(&fake, &client, &app.base).await;
         assert_eq!(stopped["stopReason"], if user { "user" } else { "authentication" });
         let calls = fake.state.lock().unwrap().calls.len();
         clock.jump(2 * 86400);
@@ -137,7 +129,7 @@ async fn automatic_dates_and_restart_preserve_user_and_authentication_stops_unti
         assert_eq!(fake.state.lock().unwrap().calls.len(), calls);
         fake.state.lock().unwrap().failures.clear();
         command(&client, &restarted.base, "resume").await;
-        let done = finished(&client, &restarted.base).await;
+        let done = finished(&fake, &client, &restarted.base).await;
         assert_eq!(done["id"], stopped["id"]);
         assert_eq!(done["throughYear"], 2016, "explicit resume handles current data before continuing old history");
         assert_eq!(done["historyComplete"], true, "{done}");
@@ -154,11 +146,11 @@ async fn automatic_limit_confirmation_uses_one_request_and_waits_until_the_next_
     let app = ScheduledApp::start(&fake, &path, clock.clone()).await;
     let client = reqwest::Client::new();
     listing_count(&fake, 1).await;
-    assert_eq!(finished(&client, &app.base).await["stopReason"], "rate_limited");
+    assert_eq!(finished(&fake, &client, &app.base).await["stopReason"], "rate_limited");
     let calls = fake.state.lock().unwrap().calls.len();
     clock.jump(3600);
     listing_count(&fake, 2).await;
-    let limited = finished(&client, &app.base).await;
+    let limited = finished(&fake, &client, &app.base).await;
     assert_eq!(limited["stopReason"], "rate_limited");
     assert_eq!(limited["nextCheckAt"], kst(KstDate::new(2016, 1, 1).unwrap(), 7, 0, 0).unix());
     assert_eq!(fake.state.lock().unwrap().calls.len(), calls + 1, "a limited confirmation must not release other work or retry itself");
@@ -170,7 +162,7 @@ async fn automatic_limit_confirmation_uses_one_request_and_waits_until_the_next_
     fake.state.lock().unwrap().failures.clear();
     clock.jump(86400);
     listing_count(&fake, 3).await;
-    let done = finished(&client, &restarted.base).await;
+    let done = finished(&fake, &client, &restarted.base).await;
     assert_eq!(done["historyComplete"], true, "{done}");
     assert_eq!(done["throughYear"], 2016);
     assert_eq!(fake.count("list.json"), 4, "one successful confirmation then one listing of the current date");
@@ -181,27 +173,23 @@ async fn automatic_limit_confirmation_uses_one_request_and_waits_until_the_next_
 async fn automatic_restart_resumes_an_interrupted_checkpoint_without_redownloading_successes() {
     let fake = Fake::start().await;
     fake.state.lock().unwrap().stream_paused_report = Some("11014".into());
-    let kiwoom = common::FakeKiwoom::start().await;
-    let mut body = fake_kiwoom::fixture("ka10099_0");
+    let kiwoom = common::ScriptedTransport::new();
+    let mut body = common::support::fixture("ka10099_0");
     body["list"].as_array_mut().unwrap().retain(|row| row["code"] == "005930");
-    kiwoom.seen.respond_with("ka10099", StatusCode::OK, body);
+    kiwoom.respond_with("ka10099", 200, body);
     let dir = tempfile::tempdir_in(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target")).unwrap();
     let server = automatic_process(&fake, &kiwoom, dir.path(), "20151231120000");
     let base = format!("http://{}", server.addr().await);
     let client = reqwest::Client::new();
-    tokio::time::timeout(Duration::from_secs(10), async {
-        while fake.count("statement_stream") == 0 { tokio::time::sleep(Duration::from_millis(20)).await; }
-    }).await.unwrap();
+    fake.wait_for_call("statement_stream", 1).await;
     let interrupted = json(&client, &format!("{base}/api/financial-update")).await;
     assert_eq!(report_calls(&fake, "11013"), 1);
     server.stop().await;
     fake.state.lock().unwrap().stream_paused_report = None;
     let restarted = automatic_process(&fake, &kiwoom, dir.path(), "20151231130000");
     let base = format!("http://{}", restarted.addr().await);
-    tokio::time::timeout(Duration::from_secs(10), async {
-        while report_calls(&fake, "11011") == 0 { tokio::time::sleep(Duration::from_millis(20)).await; }
-    }).await.unwrap();
-    let done = finished(&client, &base).await;
+    fake.wait_for_source("report 11011", || report_calls(&fake, "11011") > 0).await;
+    let done = finished(&fake, &client, &base).await;
     assert_eq!(done["id"], interrupted["id"]);
     assert_eq!(done["historyComplete"], true);
     assert_eq!(fake.count("list.json"), 1);
@@ -221,10 +209,8 @@ async fn automatic_storage_failure_keeps_progress_without_retry_loops_and_reopen
     let clock = Clock::fake(kst(KstDate::new(2015, 12, 31).unwrap(), 12, 0, 0));
     let app = ScheduledApp::start(&fake, &path, clock.clone()).await;
     let client = reqwest::Client::new();
-    tokio::time::timeout(Duration::from_secs(8), async {
-        while fake.count("company.json") == 0 { tokio::time::sleep(Duration::from_millis(20)).await; }
-    }).await.unwrap();
-    let failed = finished(&client, &app.base).await;
+    fake.wait_for_call("company.json", 1).await;
+    let failed = finished(&fake, &client, &app.base).await;
     assert_eq!(failed["stopReason"], "storage", "{failed}");
     assert_eq!(failed["completedCompanies"], 0);
     assert_eq!(failed["historyComplete"], false);
@@ -236,7 +222,7 @@ async fn automatic_storage_failure_keeps_progress_without_retry_loops_and_reopen
     sqlx::query("DROP TRIGGER fail_auto").execute(&mut connection).await.unwrap();
     let restarted = ScheduledApp::start(&fake, &path, Clock::fake(kst(KstDate::new(2016, 1, 1).unwrap(), 12, 0, 0))).await;
     listing_count(&fake, 1).await;
-    let done = finished(&client, &restarted.base).await;
+    let done = finished(&fake, &client, &restarted.base).await;
     assert_eq!(done["id"], failed["id"]);
     assert_eq!(done["historyComplete"], true, "{done}");
 }
@@ -254,7 +240,7 @@ async fn upgrading_an_old_completed_scope_checks_the_current_year_despite_a_rece
     sqlx::query("INSERT INTO financial_update VALUES (1, ?)").bind(legacy.to_string()).execute(&mut connection).await.unwrap();
     let app = ScheduledApp::start(&fake, &path, Clock::fake(now)).await;
     listing_count(&fake, 1).await;
-    let done = finished(&reqwest::Client::new(), &app.base).await;
+    let done = finished(&fake, &reqwest::Client::new(), &app.base).await;
     assert_eq!(done["id"], 2);
     assert_eq!(done["throughYear"], 2016);
     assert_eq!(done["historyComplete"], true);
@@ -271,7 +257,7 @@ async fn legacy_upgrade_uses_disclosure_confirmation_times_instead_of_the_end_of
         let seed = ScheduledApp::start(&fake, &path, Clock::fake(kst(date, 6, 0, 0))).await;
         let client = reqwest::Client::new();
         listing_count(&fake, 1).await;
-        let previous = finished(&client, &seed.base).await;
+        let previous = finished(&fake, &client, &seed.base).await;
         drop(seed);
         let mut connection = sqlx::SqliteConnection::connect_with(&sqlx::sqlite::SqliteConnectOptions::new().filename(&path)).await.unwrap();
         sqlx::query("UPDATE financial_update SET body = json_set(json_remove(body, '$.requested_for', '$.generation', '$.check_started_at'), '$.checked_at', ?)").bind(kst(date, 9, 0, 0).unix()).execute(&mut connection).await.unwrap();
@@ -282,7 +268,7 @@ async fn legacy_upgrade_uses_disclosure_confirmation_times_instead_of_the_end_of
             tokio::time::sleep(Duration::from_millis(600)).await;
             assert_eq!(fake.state.lock().unwrap().calls.len(), calls, "verified post-07:00 confirmations must not be repeated after upgrade");
         } else { listing_count(&fake, 2).await; }
-        let done = finished(&client, &app.base).await;
+        let done = finished(&fake, &client, &app.base).await;
         assert_eq!(done["id"].as_u64().unwrap(), previous["id"].as_u64().unwrap() + u64::from(!checked_after_seven));
         assert_eq!(done["historyComplete"], true);
     }

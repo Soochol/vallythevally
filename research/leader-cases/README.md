@@ -134,12 +134,12 @@ FRED CSV는 키 없이 `fredgraph.csv?id=…`를 읽는다. `observation_date,<i
 ```sh
 npm --prefix research/leader-cases run typecheck
 node --test research/leader-cases/bundle.test.ts research/leader-cases/review-regressions.test.ts research/leader-cases/ttm-conflicts.test.ts research/leader-cases/dart-patterns.test.ts
-VALLY_E2E_BIN_DIR=target/leader-cases-141/bin node --test research/leader-cases/check-sector-symbols.test.ts
+node --test research/leader-cases/check-sector-symbols.test.ts
 ```
 
-마지막 명령은 별도로 준비한 server·fake-kiwoom 바이너리를 쓴다. 기존 바이너리를 복사해 재사용할 수 있고 큰 Cargo 빌드가 필요하지 않다. 새로 빌드한다면 저장소 규칙에 따라 `cargo build -p server -p fake-kiwoom`을 worktree에서 먼저 한다.
+마지막 명령은 시험 안에서 루프백 HTTP 서버를 열고 합성 종목 응답을 제공한다. 실제 CLI 자식 프로세스의 종목 확인·없는 코드·이름 불일치·접속 실패 처리를 확인하며 Rust 빌드나 서버 실행 파일은 필요하지 않다. 실제 종목 목록의 파싱과 조회 계약은 Rust `symbols`·`http::tests::symbols_endpoints`·`e2e` 시험에서 확인한다.
 
-새 시험은 로컬 HTTP 서버에서 페이지·재무·수급·FRED 응답을 흉내 낸다. CLI도 실제 자식 프로세스로 실행하고 `data/leader-cases/990001/bundle.json`과 회사 불일치 사례의 `990002/bundle.json`, 정정 충돌 사례의 `990003/bundle.json`을 읽어 계약·계산·누락·키 비노출을 확인한다. `--dart-base`와 `--fred-base`의 대체 주소는 로컬 HTTP 주소만 허용한다. 실제 `.env`, 실제 OpenDART 키와 키움, 사용자 서버를 시험에 쓰지 않는다. 시세·수급·재무·FRED 성공 경로와 누락은 로컬 HTTP fixture에서 검증한다. 기존 sector-map 시험의 Rust server·fake-kiwoom 검증은 종목 목록 경로이며, 별도 fake CLI에서 404인 수급 경로를 Rust 수급 성공 검증으로 세지 않는다.
+새 시험은 로컬 HTTP 서버에서 페이지·재무·수급·FRED 응답을 흉내 낸다. CLI도 실제 자식 프로세스로 실행하고 `data/leader-cases/990001/bundle.json`과 회사 불일치 사례의 `990002/bundle.json`, 정정 충돌 사례의 `990003/bundle.json`을 읽어 계약·계산·누락·키 비노출을 확인한다. `--dart-base`와 `--fred-base`의 대체 주소는 로컬 HTTP 주소만 허용한다. 실제 `.env`, 실제 OpenDART 키와 키움, 사용자 서버를 시험에 쓰지 않는다. 시세·수급·재무·FRED 성공 경로와 누락은 로컬 HTTP fixture에서 검증한다. sector-map 시험의 합성 HTTP 응답은 CLI 계약 검증이며, 실제 종목 목록·수급 서비스의 성공 검증은 Rust 시험이 맡는다.
 
 247540 실제 묶음, 종가 하나와 영업이익 한 분기의 원천 대조는 **아직 수행하지 않았다**. 사용자 승인을 받아 새 코드로 서버를 재시작한 뒤 별도 확인해야 한다. 로컬 fixture의 성공을 그 실제 검증의 성공으로 쓰지 않는다.
 

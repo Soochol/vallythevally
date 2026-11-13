@@ -1,10 +1,11 @@
+import type { Screen } from "../src/api/generated/Screen";
+import { resultRows, type ScreenerScenario } from "./fixtures/screener";
 import { expectSentences, fillNumber, renameScreen, expandEditor, savedEditor, addCondition, conditionAction, chooseKind } from "./sentence-editor";
 import { selectOption } from "./select-option";
 import type { Locator, Page } from "@playwright/test";
-import { expect, test } from "./harness";
+import { expect, test } from "./screener-harness";
 import { editor, excludedLine, expectCellOn, expectRows, openScreener, panel, pickPeriod, pickVenue, results, rows, runButton, savedTo, updateBand, waitForUpdateToFinish } from "./screener-page";
 
-test.use({ krxMarket: "20261106", krxConditionStocks: true, clockStart: "20261106203000" });
 
 const SCREEN_NAME = "교차 급증 주봉 신고가";
 const CROSS = "일봉최근5일 이내에단순짧은 이평5일선이20일선을위로교차인 봉이 있다";
@@ -33,7 +34,8 @@ async function save(page: Page, dialog: Locator) {
   await savedEditor(dialog);
 }
 
-async function runAndExpect(page: Page, excluded: string, expected: readonly (readonly [code: string, name: string, matchedDate: string])[]) {
+async function runAndExpect(page: Page, screener: ScreenerScenario, excluded: string, expected: readonly (readonly [code: string, name: string, matchedDate: string])[], universe = 16, listedTooShort = 2) {
+  screener.showResult(resultRows(expected, { universe, excluded: { listedTooShort, historyShort: 0, unconfirmed: 0 } }));
   await expect(panel(page).getByText("실행하면 결과가 여기에 나옵니다")).toBeVisible();
   await runButton(page).click();
   await expect(results(page)).toContainText(`${expected.length}종목 · 11-06(금) 기준`);
@@ -41,8 +43,7 @@ async function runAndExpect(page: Page, excluded: string, expected: readonly (re
   await expectRows(page, expected);
 }
 
-test("봉·지표·시가총액 줄을 일봉과 주봉으로 섞어 만들고 ▲▼로 옮겨 실행하면 첫 줄이 맞은 날짜를 정하고, 행을 열어도 칸의 거래소와 봉 주기는 그대로이며, 종류를 바꾸면 잘못된 값은 막히고 시장 칩은 결과를 가른다", async ({ app, page }) => {
-  test.setTimeout(180_000);
+test("봉·지표·시가총액 줄을 일봉과 주봉으로 편집·정렬·저장하고 서버 결과의 날짜와 종목을 차트로 열며 잘못된 값과 시장 설정을 구분한다", async ({ scenario, screener, page }) => {
   const barRequests: string[] = [];
   const screenSaves: string[] = [];
   page.on("request", (req) => {
@@ -91,7 +92,7 @@ test("봉·지표·시가총액 줄을 일봉과 주봉으로 섞어 만들고 �
 
     await expect(panel(page).getByRole("button", { name: "조건식 고르기", exact: true })).toHaveText(SCREEN_NAME);
     await expectSentences(panel(page), [CROSS, WEEKLY_HIGH, SURGE, MARKET_CAP]);
-    const stored = await (await fetch(`${app.url}/api/screens`)).json();
+    const stored = scenario.documents.screens();
     expect(stored.screens).toEqual([
       {
         id: expect.any(String),
@@ -109,7 +110,7 @@ test("봉·지표·시가총액 줄을 일봉과 주봉으로 섞어 만들고 �
   });
 
   await test.step("실행하면 모든 줄을 넘은 두 종목이 교차한 날짜로 나오고, 주봉 52칸이 모자란 두 종목은 상장 기간 부족으로 빠진다", async () => {
-    await runAndExpect(page, "대상 16종목 · 빠짐: 상장 기간 부족 2 · 이력 덜 참 0", [KOSPI_HIT, KOSDAQ_HIT]);
+    await runAndExpect(page, screener, "대상 16종목 · 빠짐: 상장 기간 부족 2 · 이력 덜 참 0", [KOSPI_HIT, KOSDAQ_HIT]);
   });
 
   await test.step("행을 열면 칸의 종목만 바뀌고, 고른 거래소와 봉 주기는 그대로다", async () => {
@@ -153,25 +154,25 @@ test("봉·지표·시가총액 줄을 일봉과 주봉으로 섞어 만들고 �
   });
 
   await test.step("바꾼 등락률 줄로 실행하면 거래가 몰리지 않았던 종목도 맞는다", async () => {
-    await runAndExpect(page, "대상 16종목 · 빠짐: 상장 기간 부족 2 · 이력 덜 참 0", [KOSPI_HIT, KOSDAQ_HIT, QUIET_RISE]);
+    await runAndExpect(page, screener, "대상 16종목 · 빠짐: 상장 기간 부족 2 · 이력 덜 참 0", [KOSPI_HIT, KOSDAQ_HIT, QUIET_RISE]);
   });
 
   await test.step("시장 칩으로 코스피만 고르면 코스피 종목만, 코스닥만 고르면 코스닥 종목만 대상이 된다", async () => {
     let dialog = await editScreen(page);
     await marketChip(dialog, "코스피").click();
     await save(page, dialog);
-    await runAndExpect(page, "대상 9종목 · 빠짐: 상장 기간 부족 1 · 이력 덜 참 0", [KOSPI_HIT, QUIET_RISE]);
+    await runAndExpect(page, screener, "대상 9종목 · 빠짐: 상장 기간 부족 1 · 이력 덜 참 0", [KOSPI_HIT, QUIET_RISE], 9, 1);
 
     dialog = await editScreen(page);
     await marketChip(dialog, "코스피").click();
     await marketChip(dialog, "코스닥").click();
     await save(page, dialog);
-    await runAndExpect(page, "대상 7종목 · 빠짐: 상장 기간 부족 1 · 이력 덜 참 0", [KOSDAQ_HIT]);
+    await runAndExpect(page, screener, "대상 7종목 · 빠짐: 상장 기간 부족 1 · 이력 덜 참 0", [KOSDAQ_HIT], 7, 1);
     expect(screenSaves).toHaveLength(4);
   });
 });
 
-test("최근 기간을 검증하고 저장 전 실행 API와 저장 충돌에서도 최근 기간을 유지하며 변환 안내를 띄우지 않는다", async ({ app, page }, testInfo) => {
+test("최근 기간을 검증하고 저장 충돌에서도 초안의 최근 기간을 유지하며 변환 안내를 띄우지 않는다", async ({ scenario, page }, testInfo) => {
   await page.goto("/");
   await openScreener(page);
   await updateBand(page).getByRole("button", { name: "처음 받기" }).click();
@@ -192,21 +193,16 @@ test("최근 기간을 검증하고 저장 전 실행 API와 저장 충돌에서
   await expect(recent).toBeFocused();
   await fillNumber(recent, "4");
   await expectSentences(dialog, ["일봉최근4일 이내에고가2일 신고가인 봉이 있다"]);
-  const unsaved = { id: "unsaved-range", name: "과거 봉 범위", markets: [], exclude: [], conditions: [{ kind: "new_high", period: "D", recentBars: 4, field: "high", n: 2 }] };
-  const run = await page.request.post(`${app.url}/api/screener/run`, { data: unsaved });
-  expect(run.status()).toBe(200);
-  expect((await run.json()).rows.length).toBeGreaterThan(0);
-  const before = await (await page.request.get(`${app.url}/api/screens`)).json();
-  expect(before.screens).toEqual([]);
-  const competing = await page.request.put(`${app.url}/api/screens`, { data: { ...before, revision: before.revision + 1, screens: [{ ...unsaved, id: "other", name: "다른 탭 조건" }] } });
-  expect(competing.status()).toBe(200);
+  const unsaved: Screen = { id: "unsaved-range", name: "과거 봉 범위", markets: [], exclude: [], conditions: [{ kind: "new_high", period: "D", recentBars: 4, field: "high", n: 2 }] };
+  expect(scenario.documents.screens().screens).toEqual([]);
+  scenario.documents.saveScreens({ revision: 1, screens: [{ ...unsaved, id: "other", name: "다른 탭 조건" }] });
   await dialog.getByRole("button", { name: "저장" }).click();
   await expect(dialog.getByRole("alert")).toContainText("다른");
   await expect(recent).toHaveText("4");
   await save(page, dialog);
-  const saved = await (await page.request.get(`${app.url}/api/screens`)).json();
+  const saved = scenario.documents.screens();
   expect(saved.screens).toHaveLength(2);
-  expect(saved.screens[1].conditions).toEqual(unsaved.conditions);
+  expect(saved.screens[1]!.conditions).toEqual(unsaved.conditions);
   await expect(page.getByText(/자동 (이전|변환)|변환 안내|변경 안내/)).toHaveCount(0);
   const edited = await editScreen(page);
   await expect(box(edited, 1, "최근 기간")).toHaveText("4");

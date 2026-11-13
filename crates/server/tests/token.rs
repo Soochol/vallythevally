@@ -4,8 +4,8 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use common::{APP_KEY, APP_SECRET, FakeKiwoom, Server, TOKEN, token_path};
-use fake_kiwoom::token_for;
+use common::{APP_KEY, APP_SECRET, ScriptedTransport, Server, TOKEN, token_path};
+use common::support::token_for;
 use serde_json::{Value, json};
 use server::kiwoom::token_file::credential_id;
 
@@ -26,11 +26,11 @@ async fn get(base: &str, path: &str) -> (u16, Value) {
     (status, serde_json::from_str(&resp.text().await.unwrap()).unwrap_or(Value::Null))
 }
 
-async fn run_until_symbols_load(fake: &FakeKiwoom, lock: &Path, dist: &Path) -> String {
+async fn run_until_symbols_load(fake: &ScriptedTransport, lock: &Path, dist: &Path) -> String {
     run_until_symbols_load_with(fake, lock, dist, &[]).await
 }
 
-async fn run_until_symbols_load_with(fake: &FakeKiwoom, lock: &Path, dist: &Path, overrides: &[(&str, &std::ffi::OsStr)]) -> String {
+async fn run_until_symbols_load_with(fake: &ScriptedTransport, lock: &Path, dist: &Path, overrides: &[(&str, &std::ffi::OsStr)]) -> String {
     let server = Server::spawn_with(fake, lock, dist, overrides);
     let base = format!("http://{}", server.addr().await);
     for _ in 0..100 {
@@ -54,9 +54,9 @@ fn write_private(path: &Path, contents: &[u8]) {
     std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600)).unwrap();
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn restarting_three_times_issues_one_token_kept_in_a_private_file() {
-    let fake = FakeKiwoom::start().await;
+    let fake = ScriptedTransport::new();
     let tmp = tempfile::tempdir().unwrap();
     let lock = tmp.path().join("state/vallythevally/server.lock");
     let dist = static_dir(tmp.path());
@@ -80,9 +80,9 @@ async fn restarting_three_times_issues_one_token_kept_in_a_private_file() {
     }
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn a_valid_saved_token_is_used_without_issuing() {
-    let fake = FakeKiwoom::start().await;
+    let fake = ScriptedTransport::new();
     let tmp = tempfile::tempdir().unwrap();
     let lock = tmp.path().join("run/server.lock");
     let at = now_unix() - 3600;
@@ -93,9 +93,9 @@ async fn a_valid_saved_token_is_used_without_issuing() {
     assert!(auths.iter().all(|a| *a == format!("Bearer {TOKEN}")), "{auths:?}");
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn no_issue_within_ten_minutes_of_the_last_request_even_across_restarts() {
-    let fake = FakeKiwoom::start().await;
+    let fake = ScriptedTransport::new();
     let tmp = tempfile::tempdir().unwrap();
     let lock = tmp.path().join("run/server.lock");
     write_token_file(&lock, json!({"token": null, "last_request_at": now_unix() - 60}));
@@ -109,9 +109,9 @@ async fn no_issue_within_ten_minutes_of_the_last_request_even_across_restarts() 
     assert_eq!(fake.requests(), 0, "{:?}\n{logs}", fake.api_ids());
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn an_invalid_saved_token_is_reissued_once() {
-    let fake = FakeKiwoom::start().await;
+    let fake = ScriptedTransport::new();
     fake.reject_token("FAKE-TOKEN-old-0001");
     let tmp = tempfile::tempdir().unwrap();
     let lock = tmp.path().join("run/server.lock");
@@ -151,7 +151,7 @@ fn with_modes(dir_mode: u32, file_mode: u32) -> Setup {
     })
 }
 
-async fn assert_never_issues(fake: &FakeKiwoom, cases: Vec<(&str, Setup)>) {
+async fn assert_never_issues(fake: &ScriptedTransport, cases: Vec<(&str, Setup)>) {
     let tmp = tempfile::tempdir().unwrap();
     let dist = static_dir(tmp.path());
     for (name, setup) in cases {
@@ -176,7 +176,7 @@ async fn assert_never_issues(fake: &FakeKiwoom, cases: Vec<(&str, Setup)>) {
     }
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn an_unreadable_token_file_issues_nothing_across_restarts_and_is_left_as_is() {
     let parent_is_a_file: Setup = Box::new(|root: &Path| {
         let blocker = root.join("blocker");
@@ -184,14 +184,14 @@ async fn an_unreadable_token_file_issues_nothing_across_restarts_and_is_left_as_
         Case { token: blocker.join("token.json"), untouched: blocker }
     });
     let cases = vec![("빈 파일", with_contents("")), ("깨진 JSON", with_contents("{\"token\": ")), ("부모가 일반 파일", parent_is_a_file)];
-    assert_never_issues(&FakeKiwoom::start().await, cases).await;
+    assert_never_issues(&ScriptedTransport::new(), cases).await;
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn a_token_saved_for_another_app_key_is_never_sent_and_the_interval_still_holds() {
     const OTHER_KEY: &str = "FAKE-APPKEY-other-b2b2b2b2";
     let other: &[(&str, &std::ffi::OsStr)] = &[("VALLY_KIWOOM_APP_KEY", OTHER_KEY.as_ref())];
-    let fake = FakeKiwoom::start().await;
+    let fake = ScriptedTransport::new();
     let tmp = tempfile::tempdir().unwrap();
     let lock = tmp.path().join("run/server.lock");
     let dist = static_dir(tmp.path());
@@ -219,8 +219,8 @@ async fn a_token_saved_for_another_app_key_is_never_sent_and_the_interval_still_
     assert!(auths.contains(&format!("Bearer {}", token_for(OTHER_KEY))), "{auths:?}");
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn a_token_file_others_can_read_is_not_used() {
     let cases = vec![("파일 644", with_modes(0o700, 0o644)), ("디렉터리 755", with_modes(0o755, 0o600))];
-    assert_never_issues(&FakeKiwoom::start().await, cases).await;
+    assert_never_issues(&ScriptedTransport::new(), cases).await;
 }

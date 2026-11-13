@@ -2,7 +2,7 @@ import { selectOption } from "./select-option";
 import type { Page } from "@playwright/test";
 import { parseDrawingBody, UNSAVED_PREFIX } from "../src/chart/drawings/outbox";
 import { parseJournalRecord, COMPLETION_PREFIX, completionKey, STAGING_PREFIX } from "../src/chart/drawings/journal";
-import { test, expect, cell, chartOf, type App } from "./harness";
+import { test, expect, cell, chartOf, type Scenario } from "./harness";
 
 const width = (page: Page) => page.getByRole("toolbar", { name: "드로잉 스타일" }).getByLabel("선 굵기");
 
@@ -21,11 +21,10 @@ async function createLine(page: Page) {
   await page.mouse.click(bounds.x + bounds.width * 0.75, bounds.y + bounds.height * 0.4);
 }
 
-async function storedDrawings(app: App) {
-  const response = await fetch(`${app.url}/api/drawings?symbol=IDX%3A001`);
-  expect(response.status).toBe(200);
-  const raw: unknown = await response.json();
-  if (!Array.isArray(raw)) throw new Error("Expected the SQLite drawing list");
+async function storedDrawings(scenario: Scenario) {
+  const response = scenario.documents.drawings("IDX:001");
+  const raw: unknown = response;
+  if (!Array.isArray(raw)) throw new Error("Expected the saved drawing list");
   return raw.map((item: unknown) => {
     const drawing = parseDrawingBody(item);
     if (drawing === null) throw new Error("Expected a valid persisted drawing");
@@ -43,10 +42,10 @@ async function protocolRecords(page: Page) {
   return page.evaluate(prefix => Object.fromEntries(Object.keys(localStorage).filter(key => key.startsWith(prefix)).map(key => [key, JSON.parse(localStorage.getItem(key) ?? "null")])), COMPLETION_PREFIX);
 }
 
-test("actual app + HTTP/SQLite: first publication of an older never-sent PUT cannot revive a completed DELETE", async ({page, context, app}, info) => {
+test("frontend journal + saved documents: first publication of an older never-sent PUT cannot revive a completed DELETE", async ({page, context, scenario}, info) => {
   await open(page); await createLine(page);
   await expect(page.getByText(/^자동 저장됨 /)).toBeVisible();
-  const [original] = await storedDrawings(app);
+  const [original] = await storedDrawings(scenario);
   if (!original) throw new Error("Expected seeded line");
   const other = await context.newPage(); await open(other);
   await page.getByRole("button", {name: "개체 목록 열기"}).click();
@@ -83,7 +82,7 @@ test("actual app + HTTP/SQLite: first publication of an older never-sent PUT can
     expect(transport).toEqual([]);
     await other.getByRole("button", {name: "드로잉 지우기", exact: true}).click();
     await expect(other.getByText(/^자동 저장됨 /)).toBeVisible();
-    expect(await storedDrawings(app)).toEqual([]);
+    expect(await storedDrawings(scenario)).toEqual([]);
     expect(await pendingRecords(other)).toEqual([]);
     expect(transport).toEqual([{tab: "newer", method: "DELETE"}]);
     const newerRecord = JSON.parse(await other.locator("html").getAttribute("data-latest-staged") ?? "null");
@@ -93,10 +92,10 @@ test("actual app + HTTP/SQLite: first publication of an older never-sent PUT can
     const protocolBeforeRelease = await protocolRecords(other);
     expect(protocolBeforeRelease[completionKey(parsedOlder.id)]).toMatchObject({ order: parsedNewer.order, uuid: parsedNewer.uuid });
     expect(Object.keys(protocolBeforeRelease)).toEqual([completionKey(original.id)]);
-    console.log("R1_BEFORE_RELEASE", JSON.stringify({ olderRecord, newerRecord, transport, db: await storedDrawings(app), journal: await pendingRecords(other), protocolBeforeRelease }));
+    console.log("R1_BEFORE_RELEASE", JSON.stringify({ olderRecord, newerRecord, transport, db: await storedDrawings(scenario), journal: await pendingRecords(other), protocolBeforeRelease }));
     release(); await editing;
     await expect(page.getByText(/^자동 저장됨 /)).toBeVisible();
-    const final = await storedDrawings(app);
+    const final = await storedDrawings(scenario);
     console.log("APP_STAGE_CLEANUP_RACE", JSON.stringify({originalRevision: original.revision, olderRecord, newerRecord, transport, final, keys: await pendingRecords(other)}));
     expect(final).toEqual([]);
     expect(transport).toEqual([{tab: "newer", method: "DELETE"}]);
@@ -108,11 +107,11 @@ test("actual app + HTTP/SQLite: first publication of an older never-sent PUT can
 });
 
 
-test("actual app + HTTP/SQLite: native launch holds the id lock only until fetch starts, not until its ACK", async ({ page, context, app }, info) => {
+test("frontend journal + saved documents: native launch holds the id lock only until fetch starts, not until its ACK", async ({ page, context, scenario }, info) => {
   await open(page);
   await createLine(page);
   await expect(page.getByText(/^자동 저장됨 /)).toBeVisible();
-  const [original] = await storedDrawings(app);
+  const [original] = await storedDrawings(scenario);
   if (!original) throw new Error("Expected the saved line");
   const other = await context.newPage();
   await open(other);
@@ -140,10 +139,10 @@ test("actual app + HTTP/SQLite: native launch holds the id lock only until fetch
     deleteHeld = true; await deleteGate; await route.fulfill({ status: 200, body: "released" });
   });
   await page.route(`**/api/drawings/${original.id}`, async route => {
-    const response = await route.fetch();
+    const response = await scenario.respond(route.request());
     putStored = true;
     await ackGate;
-    await route.fulfill({ response });
+    await route.fulfill({ status: response.status ?? 200, json: response.body, headers: response.headers });
   });
   for (const [tab, method, gate] of [[page, "PUT", "/__r1-put-launch"], [other, "DELETE", "/__r1-delete-launch"]] as const) {
     await tab.evaluate(({ method, gate }) => {
@@ -166,34 +165,34 @@ test("actual app + HTTP/SQLite: native launch holds the id lock only until fetch
     deleting = other.getByRole("button", { name: "드로잉 지우기", exact: true }).click();
     await expect.poll(() => other.evaluate(async id => (await navigator.locks.query()).pending?.filter(lock => lock.name === `vv.drawing.journal.${id}`).length, original.id)).toBeGreaterThan(0);
     expect(deleteHeld).toBe(false);
-    expect(await storedDrawings(app)).toEqual([original]);
+    expect(await storedDrawings(scenario)).toEqual([original]);
     releasePut();
     await editing;
     await expect.poll(() => deleteHeld && putStored).toBe(true);
     expect(transport).toEqual(["PUT"]);
-    expect((await storedDrawings(app))[0]?.style).toMatchObject({ line: { width: 4 } });
+    expect((await storedDrawings(scenario))[0]?.style).toMatchObject({ line: { width: 4 } });
     releaseDelete();
     await deleting;
     await expect(other.getByText(/^자동 저장됨 /)).toBeVisible();
-    expect(await storedDrawings(app)).toEqual([]);
+    expect(await storedDrawings(scenario)).toEqual([]);
     releaseAck();
     await expect(page.getByText(/^자동 저장됨 /)).toBeVisible();
     expect(transport).toEqual(["PUT", "DELETE"]);
-    expect(await storedDrawings(app)).toEqual([]);
+    expect(await storedDrawings(scenario)).toEqual([]);
     await expect.poll(() => pendingRecords(other)).toEqual([]);
     await expect.poll(async () => Object.keys(await protocolRecords(other))).toEqual([completionKey(original.id)]);
-    await info.attach("native-launch-http-boundary.json", { body: JSON.stringify({ transport, putStored, deleteHeld, final: await storedDrawings(app) }), contentType: "application/json" });
+    await info.attach("native-launch-http-boundary.json", { body: JSON.stringify({ transport, putStored, deleteHeld, final: await storedDrawings(scenario) }), contentType: "application/json" });
   } finally {
     releasePut(); releaseDelete(); releaseAck();
     await Promise.allSettled([editing, ...(deleting ? [deleting] : [])]);
   }
 });
 
-test("actual app + HTTP/SQLite: a warm Storage task paused before diagnostic registration cannot publish below a completed DELETE", async ({ page, context, app }) => {
+test("frontend journal + saved documents: a warm Storage task paused before diagnostic registration cannot publish below a completed DELETE", async ({ page, context, scenario }) => {
   await open(page);
   await createLine(page);
   await expect(page.getByText(/^자동 저장됨 /)).toBeVisible();
-  const [original] = await storedDrawings(app);
+  const [original] = await storedDrawings(scenario);
   if (!original) throw new Error("Expected the seeded drawing");
   const other = await context.newPage();
   await open(other);
@@ -247,7 +246,7 @@ test("actual app + HTTP/SQLite: a warm Storage task paused before diagnostic reg
     expect(transport).toEqual([]);
     await other.getByRole("button", { name: "드로잉 지우기", exact: true }).click();
     await expect(other.getByText(/^자동 저장됨 /)).toBeVisible();
-    expect(await storedDrawings(app)).toEqual([]);
+    expect(await storedDrawings(scenario)).toEqual([]);
     expect(await pendingRecords(other)).toEqual([]);
     expect(transport).toEqual([{ tab: "newer", method: "DELETE" }]);
     const terminal = parseJournalRecord(JSON.parse(await other.locator("html").getAttribute("data-terminal-intent") ?? "null"));
@@ -255,7 +254,7 @@ test("actual app + HTTP/SQLite: a warm Storage task paused before diagnostic reg
     release(); await editing;
     await expect(page.getByText(/^자동 저장됨 /)).toBeVisible();
     const resumed = parseJournalRecord(JSON.parse(await page.locator("html").getAttribute("data-resumed-intent") ?? "null"));
-    const final = await storedDrawings(app);
+    const final = await storedDrawings(scenario);
     console.log("WARM_REGISTRATION_APP", JSON.stringify({ before, resumed, transport, final }));
     expect(final).toEqual([]);
   } finally { release(); await editing; }

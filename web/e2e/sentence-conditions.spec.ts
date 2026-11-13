@@ -1,13 +1,13 @@
 import { selectOption } from "./select-option";
 import { mkdir } from "node:fs/promises";
 import { resolve } from "node:path";
-import { expect, test } from "./harness";
+import { expect, test } from "./screener-harness";
 import { addCondition, conditionAction, numberToken, renameScreen, savedEditor, sentenceEditor, setNumber } from "./sentence-editor";
 import { openScreener, panel, runButton, updateBand, waitForUpdateToFinish } from "./screener-page";
 
-test.use({ krxMarket: "20261106", clockStart: "20261106203000" });
+test.use({ clockStart: "20261106203000" });
 
-test("문장형 숫자 팝오버를 적용한 미저장 조건식을 실행하고 줄을 끌어 재배열한다", async ({ page }) => {
+test("문장형 숫자 팝오버를 적용한 미저장 조건식을 실행하고 줄을 끌어 재배열한다", async ({ scenario, page }) => {
   await page.goto("/");
   await openScreener(page);
   await updateBand(page).getByRole("button", { name: "처음 받기", exact: true }).click();
@@ -31,7 +31,7 @@ test("문장형 숫자 팝오버를 적용한 미저장 조건식을 실행하�
   expect(run.request().postDataJSON()).toMatchObject({ name: "저장 전 문장 실행", conditions: [
     { kind: "surge", times: 1 }, { kind: "new_high", n: 2 },
   ] });
-  expect((await (await page.request.get("/api/screens")).json()).screens).toEqual([]);
+  expect(scenario.documents.screens().screens).toEqual([]);
   await expect(editor.getByText("변경됨", { exact: true })).toBeVisible();
   await mkdir(resolve("../target/ux-screens"), { recursive: true });
   for (const size of [{ width: 1440, height: 900 }, { width: 1024, height: 768 }]) {
@@ -41,12 +41,12 @@ test("문장형 숫자 팝오버를 적용한 미저장 조건식을 실행하�
   await conditionAction(editor, 1, "조건 지우기");
   await editor.getByRole("button", { name: "저장", exact: true }).click();
   await savedEditor(editor);
-  const saved = (await (await page.request.get("/api/screens")).json()).screens;
+  const saved = scenario.documents.screens().screens;
   expect(saved).toHaveLength(1);
-  expect(saved[0].conditions).toEqual([{ kind: "new_high", period: "D", recentBars: 1, field: "high", n: 2 }]);
+  expect(saved[0]!.conditions).toEqual([{ kind: "new_high", period: "D", recentBars: 1, field: "high", n: 2 }]);
 });
 
-test("모든 조건 종류의 문장 숫자 편집을 저장하고 마지막 줄까지 지운다", async ({ page }) => {
+test("모든 조건 종류의 문장 숫자 편집을 저장하고 마지막 줄까지 지운다", async ({ scenario, page }) => {
   await page.goto("/");
   await openScreener(page);
   await panel(page).getByRole("button", { name: "새 조건식", exact: true }).click();
@@ -78,18 +78,18 @@ test("모든 조건 종류의 문장 숫자 편집을 저장하고 마지막 줄
       await setNumber(editor, `조건 1 ${field}`, value);
       await editor.getByRole("button", { name: "저장", exact: true }).click();
       await savedEditor(editor);
-      const saved = (await (await page.request.get("/api/screens")).json()).screens[0];
+      const saved = scenario.documents.screens().screens[0]!;
       expect(saved.conditions).toHaveLength(1);
       expect(saved.conditions[0]).toMatchObject(expected);
       await conditionAction(editor, 1, "조건 지우기");
       await editor.getByRole("button", { name: "저장", exact: true }).click();
       await savedEditor(editor);
-      expect((await (await page.request.get("/api/screens")).json()).screens[0].conditions).toEqual([]);
+      expect(scenario.documents.screens().screens[0]!.conditions).toEqual([]);
     });
   }
 });
 
-test("넓게 보기에서 접힌 잘못된 조건을 저장하면 펼쳐진 첫 오류 값에 포커스를 준다", async ({ page }) => {
+test("넓게 보기에서 접힌 잘못된 조건을 저장하면 펼쳐진 첫 오류 값에 포커스를 준다", async ({ scenario, page }) => {
   await page.goto("/");
   await openScreener(page);
   await panel(page).getByRole("button", { name: "새 조건식", exact: true }).click();
@@ -104,5 +104,5 @@ test("넓게 보기에서 접힌 잘못된 조건을 저장하면 펼쳐진 첫 
   await expect(invalid).toBeVisible();
   await expect(invalid).toHaveAttribute("aria-invalid", "true");
   await expect(invalid).toBeFocused();
-  expect((await (await page.request.get("/api/screens")).json()).screens).toEqual([]);
+  expect(scenario.documents.screens().screens).toEqual([]);
 });

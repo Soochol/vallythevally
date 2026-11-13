@@ -73,10 +73,10 @@ node research/leader-cases/generate-report.ts \
 ```sh
 npm --prefix research/leader-cases run typecheck
 npm --prefix research/leader-cases run test:report
-VALLY_E2E_BIN_DIR=target/leader-cases-142/bin npm --prefix research/leader-cases test
+npm --prefix research/leader-cases test
 npm --prefix research/leader-cases run test:browser
 ```
 
-전체 도구 시험 전에 server·fake-kiwoom 바이너리를 worktree의 지정 디렉터리에 준비한다. 기존 [README](README.md)의 바이너리 재사용 절차를 따른다. 새 HTML 브라우저 시험은 서버나 Rust 빌드 없이 실제 파일을 오프라인 브라우저로 열며, 실제 차트의 기본 패널·묶음·십자선·범위·세 기준일·늦게 켠 차트·분기/연간·정정 전후 TTM·escape·콘솔 오류를 확인한다. 결과와 trace는 이 worktree의 `target/leader-cases-142/test-results`에 둔다.
+전체 도구 시험은 로컬 HTTP fixture와 실제 CLI 자식 프로세스로 실행하며 Rust 서버 실행 파일을 준비하지 않는다. 종목 확인 CLI는 합성 앱 API 응답을 사용하고 실제 종목 목록 계약은 Rust 시험에서 확인한다. 새 HTML 브라우저 시험은 서버나 Rust 빌드 없이 실제 파일을 오프라인 브라우저로 열며, 실제 차트의 기본 패널·묶음·십자선·범위·세 기준일·늦게 켠 차트·분기/연간·정정 전후 TTM·escape·콘솔 오류를 확인한다. 결과와 trace는 이 worktree의 `target/leader-cases-142/test-results`에 둔다.
 
 합성 데스크톱 증거는 `fixtures/synthetic-report-desktop.png`다. 스크린샷은 화면 검토 자료이며 시각 디자인의 승인본이 아니다. 실제 원고 #143은 이 작업에 포함하지 않는다.

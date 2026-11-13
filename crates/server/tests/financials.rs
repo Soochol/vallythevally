@@ -15,6 +15,7 @@ const CORP: &str = "00126380";
 #[derive(Default)]
 struct FakeState {
     calls: Vec<(String, BTreeMap<String, String>)>,
+    requests_changed: Arc<tokio::sync::Notify>,
     failures: HashMap<String, String>,
     http_failure: Option<StatusCode>,
     request_times: Vec<std::time::Instant>,
@@ -51,6 +52,13 @@ struct FakeState {
     report_corrections: std::collections::BTreeSet<(i32, String)>,
 }
 
+impl FakeState {
+    fn record(&mut self, endpoint: String, params: BTreeMap<String, String>) {
+        self.calls.push((endpoint, params));
+        self.requests_changed.notify_waiters();
+    }
+}
+
 struct Fake { state: Arc<Mutex<FakeState>>, url: String, task: tokio::task::JoinHandle<()> }
 
 impl Drop for Fake { fn drop(&mut self) { self.task.abort(); } }
@@ -65,8 +73,33 @@ impl Fake {
         Self { state, url, task }
     }
 
+    async fn wait_for_call(&self, endpoint: &str, count: usize) {
+        self.wait_for_source(endpoint, || self.count(endpoint) >= count).await;
+    }
+
+    async fn wait_for_source(&self, label: &str, ready: impl Fn() -> bool) {
+        let changed = self.state.lock().unwrap().requests_changed.clone();
+        let reached = tokio::time::timeout(Duration::from_secs(60), async {
+            loop {
+                let notified = changed.notified();
+                tokio::pin!(notified);
+                notified.as_mut().enable();
+                if ready() { return; }
+                tokio::time::timeout(Duration::from_secs(10), notified).await.unwrap_or_else(|error| panic!("{label} made no source progress: {error:?}; {:?}", self.observed()));
+            }
+        }).await;
+        reached.unwrap_or_else(|error| panic!("{label} was not reached: {error:?}; {:?}", self.observed()));
+    }
+
     fn client(&self) -> Client { Client::new(Secret::new(KEY.into()), self.url.clone(), self.url.clone()).unwrap() }
     fn count(&self, endpoint: &str) -> usize { self.state.lock().unwrap().calls.iter().filter(|(e, _)| e == endpoint).count() }
+
+    fn observed(&self) -> Vec<(String, BTreeMap<String, String>)> {
+        self.state.lock().unwrap().calls.iter().map(|(endpoint, params)| {
+            let scope = params.iter().filter(|(key, _)| matches!(key.as_str(), "corp_code" | "bsns_year" | "reprt_code")).map(|(key, value)| (key.clone(), value.clone())).collect();
+            (endpoint.clone(), scope)
+        }).collect()
+    }
 }
 
 fn zipped(name: &str, xml: &str) -> Vec<u8> {
@@ -78,14 +111,14 @@ fn zipped(name: &str, xml: &str) -> Vec<u8> {
 
 async fn kind(State(state): State<Arc<Mutex<FakeState>>>, Query(params): Query<BTreeMap<String, String>>) -> axum::Json<Value> {
     let mut state = state.lock().unwrap();
-    state.calls.push(("kind".into(), params.clone()));
+    state.record("kind".into(), params.clone());
     if let Some(rows) = state.kind_responses.get(&params["searchCorpName"]) { return axum::Json(rows.clone()); }
     axum::Json(if state.kind_other_code { json!([{ "repisusrtcd2":"005930", "secugrpId":"ST", "fssunqno":CORP }]) } else if state.preferred && params["searchCorpName"] == "005935" { json!([{"repisusrtcd2":"005935","secugrpId":"ST","fssunqno":CORP}]) } else { json!([]) })
 }
 
 async fn discovery(State(state): State<Arc<Mutex<FakeState>>>, Query(params): Query<BTreeMap<String, String>>) -> Response {
     let stage = if params["method"] == "searchContents" { "contents" } else { "search" };
-    state.lock().unwrap().calls.push((stage.into(), params));
+    state.lock().unwrap().record(stage.into(), params);
     loop {
         if state.lock().unwrap().discovery_paused.as_deref() != Some(stage) { break; }
         tokio::time::sleep(Duration::from_millis(5)).await;
@@ -105,7 +138,7 @@ async fn discovery(State(state): State<Arc<Mutex<FakeState>>>, Query(params): Qu
 
 async fn notice(State(state): State<Arc<Mutex<FakeState>>>) -> Response {
     let mut state = state.lock().unwrap();
-    state.calls.push(("notice".into(), BTreeMap::new()));
+    state.record("notice".into(), BTreeMap::new());
     if state.notice_network_failure {
         let stream = futures::stream::once(async { Err::<String, _>(std::io::Error::other("synthetic body failure")) });
         return Response::new(axum::body::Body::from_stream(stream));
@@ -117,7 +150,7 @@ async fn respond(State(state): State<Arc<Mutex<FakeState>>>, Path(endpoint): Pat
     let paused = {
         let mut state = state.lock().unwrap();
         let paused = (endpoint == "list.json" && state.paused_list) || (endpoint == "fnlttSinglAcntAll.json" && state.stream_paused_report.as_ref() == params.get("reprt_code") && state.stream_paused_company.as_ref().is_none_or(|company| Some(company) == params.get("corp_code")) && state.stream_paused_year.as_ref().is_none_or(|year| Some(year) == params.get("bsns_year")));
-        if paused { state.calls.push((if endpoint == "list.json" { "listing_stream" } else { "statement_stream" }.into(),params.clone())); }
+        if paused { state.record(if endpoint == "list.json" { "listing_stream" } else { "statement_stream" }.into(),params.clone()); }
         paused
     };
     if paused {
@@ -140,11 +173,11 @@ async fn respond_data(State(state): State<Arc<Mutex<FakeState>>>, Path(endpoint)
     {
         let mut state = state.lock().unwrap();
         state.request_times.push(std::time::Instant::now());
-        if let Some(status) = state.http_failure { state.calls.push((endpoint, params)); return (status, "synthetic transport failure").into_response(); }
+        if let Some(status) = state.http_failure { state.record(endpoint, params); return (status, "synthetic transport failure").into_response(); }
     }
     let (failure, correction, delayed, no_cfs, xbrl_failure, stale_statement, mismatched_xbrl, paused, nonstandard_account) = {
         let mut state = state.lock().unwrap();
-        state.calls.push((endpoint.clone(), params.clone()));
+        state.record(endpoint.clone(), params.clone());
         let scope = format!("{endpoint}/{}/{}", params.get("bsns_year").map_or("", String::as_str), params.get("reprt_code").map_or("", String::as_str));
         let company_scope = format!("{scope}/{}", params.get("corp_code").map_or("", String::as_str));
         (state.failures.get(&company_scope).or_else(|| state.failures.get(&scope)).or_else(|| state.failures.get(&endpoint)).cloned(), state.correction, state.delayed, state.no_cfs, state.xbrl_failure, state.stale_statement, state.mismatched_xbrl, endpoint == "fnlttSinglAcntAll.json" && state.paused_report.as_ref() == params.get("reprt_code"), state.nonstandard_account)
@@ -425,7 +458,7 @@ mod common;
 async fn real_price_api_remains_available_without_key_and_during_collection_and_logs_redact_key() {
     let fake = Fake::start().await;
     fake.state.lock().unwrap().delayed = true;
-    let kiwoom = common::FakeKiwoom::start().await;
+    let kiwoom = common::ScriptedTransport::new();
     let client = reqwest::Client::new();
     for configured in [false,true] {
         let dir = tempfile::tempdir().unwrap();
@@ -548,17 +581,14 @@ async fn http_start(client: &reqwest::Client, base: &str) {
     client.post(format!("{base}/api/financial-update")).send().await.unwrap().error_for_status().unwrap();
 }
 
-async fn http_settled(client: &reqwest::Client, base: &str) -> Value {
-    for _ in 0..300 {
-        let snapshot = http_snapshot(client,base).await;
-        let job: Value = serde_json::from_slice(&client.get(format!("{base}/api/financial-update")).send().await.unwrap().bytes().await.unwrap()).unwrap();
-        if !["planning", "collecting"].contains(&job["status"].as_str().unwrap()) && snapshot["status"] != "collecting" { return snapshot; }
-        tokio::time::sleep(Duration::from_millis(50)).await;
-    }
-    panic!("HTTP collection did not settle");
+async fn http_settled(fake: &Fake, client: &reqwest::Client, base: &str) -> Value {
+    updates::finished(fake, client, base).await;
+    let snapshot = http_snapshot(client, base).await;
+    assert_ne!(snapshot["status"], "collecting", "a terminal job must leave readable company data");
+    snapshot
 }
 
-fn process(fake: &Fake, kiwoom: &common::FakeKiwoom, dir: &std::path::Path, start: &str) -> common::Server {
+fn process(fake: &Fake, kiwoom: &common::ScriptedTransport, dir: &std::path::Path, start: &str) -> common::Server {
     common::Server::spawn_with(kiwoom,&dir.join("run/server.lock"),dir,&[
         ("OPENDART_API_KEY",std::ffi::OsStr::new(KEY)),
         ("VALLY_DART_BASE_URL",std::ffi::OsStr::new(&fake.url)),
@@ -575,14 +605,14 @@ fn report_calls(fake: &Fake, code: &str) -> usize {
 async fn review_restart_resumes_corrections_after_list_commit_and_partial_report_commit() {
     for paused in ["11013","11014"] {
         let fake = Fake::start().await;
-        let kiwoom = common::FakeKiwoom::start().await;
+        let kiwoom = common::ScriptedTransport::new();
         let dir = tempfile::tempdir().unwrap();
         let client = reqwest::Client::new();
         let server = process(&fake,&kiwoom,dir.path(),"20151231120000");
         let base = format!("http://{}",server.addr().await);
         assert_eq!(client.get(format!("{base}/api/symbols/005930")).send().await.unwrap().status(),StatusCode::OK);
         http_start(&client, &base).await;
-        let original = http_settled(&client,&base).await;
+        let original = http_settled(&fake,&client,&base).await;
         assert_eq!(original["status"],"ready");
         let before = report_calls(&fake,paused);
         {
@@ -591,10 +621,7 @@ async fn review_restart_resumes_corrections_after_list_commit_and_partial_report
             state.paused_report = Some(paused.into());
         }
         client.post(format!("{base}/api/symbols/005930/financial-source")).send().await.unwrap();
-        for _ in 0..300 {
-            if report_calls(&fake,paused) > before { break; }
-            tokio::time::sleep(Duration::from_millis(20)).await;
-        }
+        fake.wait_for_source(paused, || report_calls(&fake, paused) > before).await;
         let update: Value = serde_json::from_slice(&client.get(format!("{base}/api/financial-update")).send().await.unwrap().bytes().await.unwrap()).unwrap();
         assert!(report_calls(&fake,paused) > before, "manual update did not request {paused}: {update}");
         let interrupted = http_snapshot(&client,&base).await;
@@ -609,7 +636,7 @@ async fn review_restart_resumes_corrections_after_list_commit_and_partial_report
         let base = format!("http://{}",restarted.addr().await);
         assert_eq!(client.get(format!("{base}/api/symbols/005930")).send().await.unwrap().status(),StatusCode::OK);
         http_start(&client, &base).await;
-        let recovered = http_settled(&client,&base).await;
+        let recovered = http_settled(&fake,&client,&base).await;
         assert_eq!(recovered["status"],"ready");
         for code in ["11013","11012","11014","11011"] {
             assert_eq!(recovered["collection"]["reports"][format!("2015/{code}")]["statement"]["data"]["accounts"][0]["fields"]["thstrm_amount"],"120","restart at {paused}, report {code}");
@@ -693,7 +720,7 @@ async fn review_same_day_disclosure_failure_retries_failed_endpoint_and_finds_co
 #[tokio::test]
 async fn review_unavailable_financial_store_keeps_real_price_and_user_data_routes_running() {
     let fake = Fake::start().await;
-    let kiwoom = common::FakeKiwoom::start().await;
+    let kiwoom = common::ScriptedTransport::new();
     for configured in [false,true] {
         let dir = tempfile::tempdir().unwrap();
         let db_directory = dir.path().join("db-is-directory");
@@ -916,7 +943,7 @@ async fn review2_failed_list_storage_keeps_real_price_usable_and_preserves_verif
     use sqlx::Connection;
     use std::os::unix::fs::PermissionsExt;
     let fake = Fake::start().await;
-    let kiwoom = common::FakeKiwoom::start().await;
+    let kiwoom = common::ScriptedTransport::new();
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("run/financials.db");
     let service = Financials::new(Some(fake.client()),Store::open(&path).await.unwrap(),clock());
@@ -936,7 +963,7 @@ async fn review2_failed_list_storage_keeps_real_price_usable_and_preserves_verif
     assert_eq!(client.get(&price_url).send().await.unwrap().status(),StatusCode::OK);
     fake.state.lock().unwrap().correction = true;
     client.post(format!("{base}/api/symbols/005930/financial-source")).send().await.unwrap();
-    let failed = http_settled(&client,&base).await;
+    let failed = http_settled(&fake,&client,&base).await;
     assert_eq!(failed["failure"],"storage");
     assert_eq!(failed["collection"]["reports"],serde_json::to_value(&original.reports).unwrap());
     assert_eq!(tokio::time::timeout(Duration::from_secs(1),client.get(&price_url).send()).await.unwrap().unwrap().status(),StatusCode::OK);
@@ -962,7 +989,7 @@ async fn review2_failed_list_storage_keeps_real_price_usable_and_preserves_verif
 async fn calculated_http_contract_validates_period_and_preserves_price_during_collection() {
     let fake = Fake::start().await;
     fake.state.lock().unwrap().delayed = true;
-    let kiwoom = common::FakeKiwoom::start().await;
+    let kiwoom = common::ScriptedTransport::new();
     let client = reqwest::Client::new();
     for configured in [false,true] {
         let dir = tempfile::tempdir().unwrap();
@@ -999,7 +1026,7 @@ async fn calculated_http_contract_validates_period_and_preserves_price_during_co
 async fn calculated_http_reads_saved_values_without_key_and_applies_correction_with_metadata() {
     use std::os::unix::fs::PermissionsExt;
     let fake = Fake::start().await;
-    let kiwoom = common::FakeKiwoom::start().await;
+    let kiwoom = common::ScriptedTransport::new();
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("run/financials.db");
     let service = Financials::new(Some(fake.client()),Store::open(&path).await.unwrap(),clock());
@@ -1045,3 +1072,27 @@ async fn calculated_http_reads_saved_values_without_key_and_applies_correction_w
 
 #[path = "financials/schedule.rs"]
 mod schedule;
+
+#[tokio::test(start_paused = true)]
+async fn source_observation_waits_while_earlier_paced_requests_are_progressing() {
+    let fake = Fake::start().await;
+    let state = fake.state.clone();
+    let producer = tokio::spawn(async move {
+        for endpoint in ["corpCode.xml", "company.json", "statement_stream"] {
+            tokio::time::sleep(Duration::from_secs(9)).await;
+            state.lock().unwrap().record(endpoint.into(), BTreeMap::new());
+        }
+    });
+    fake.wait_for_call("statement_stream", 1).await;
+    producer.await.unwrap();
+    assert_eq!(fake.count("corpCode.xml"), 1);
+    assert_eq!(fake.count("company.json"), 1);
+    assert_eq!(fake.count("statement_stream"), 1);
+}
+
+#[tokio::test(start_paused = true)]
+#[should_panic(expected = "statement_stream made no source progress")]
+async fn source_observation_stops_when_no_source_request_progresses() {
+    let fake = Fake::start().await;
+    fake.wait_for_call("statement_stream", 1).await;
+}

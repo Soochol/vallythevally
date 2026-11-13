@@ -2,7 +2,7 @@ import type { Page } from "@playwright/test";
 import { installAxisProbe } from "./axis-probe";
 import { chartDisplayOptions, seedChartDisplay } from "./chart-display-fixture";
 import { installChartProbe } from "./chart-probe";
-import { type App, cell, chartOf, expect, test } from "./harness";
+import { type Scenario, cell, chartOf, expect, test } from "./harness";
 
 type Axes = ReturnType<Window["axisTexts"]>;
 
@@ -36,19 +36,17 @@ async function open(page: Page) {
   await expect.poll(() => page.evaluate(() => window.axisTexts().flatMap((axis) => axis.texts).map((label) => label.text))).toContain("−48.1조");
 }
 
-async function yearlyPrices(app: App, prices: number[]) {
-  await app.fake.respondWith({ apiId: "ka10094", status: 200, body: {
-    return_code: 0, return_msg: "synthetic", stk_cd: "000660_AL",
-    stk_yr_pole_chart_qry: prices.map((price, i) => ({ dt: `${2017 - i}0101`, open_pric: String(price), high_pric: String(price + 100), low_pric: String(price - 100), cur_prc: String(price), trde_qty: "3120000" })),
-    _headers: { "cont-yn": "N", "next-key": "" },
-  } });
+async function yearlyPrices(scenario: Scenario, prices: number[]) {
+  const bars = prices.map((price, i) => ({ t: Date.parse(`${2017 - i}-01-01T00:00:00+09:00`) / 1000, o: price, h: price + 100, l: price - 100, c: price, v: 3120000 })).reverse();
+  const current = bars.pop() ?? null;
+  scenario.reply((url) => url.pathname === "/api/bars" && url.searchParams.get("symbol") === "000660" && url.searchParams.get("period") === "Y", { body: { symbol: "000660", venue: "combined", period: "Y", bars, current, seq: null, nextBefore: null } });
 }
 
 test.describe("축 표시 회귀", () => {
   test.use(chartDisplayOptions);
-  for (const broad of [false, true]) test(`퍼센트 첫 화면·전환의 ${broad ? "큰" : "작은"} 등락도 폭과 마지막 값 간격을 유지한다`, async ({ page, app }) => {
-    await seedChartDisplay(app, "Y");
-    await yearlyPrices(app, broad ? [1297000, 100000, 10000, 1000] : [1297000, 1296000, 1296000, 1296000]);
+  for (const broad of [false, true]) test(`퍼센트 첫 화면·전환의 ${broad ? "큰" : "작은"} 등락도 폭과 마지막 값 간격을 유지한다`, async ({ page, scenario }) => {
+    await seedChartDisplay(scenario, "Y");
+    await yearlyPrices(scenario, broad ? [1297000, 100000, 10000, 1000] : [1297000, 1296000, 1296000, 1296000]);
     await open(page);
     await assertRendered(page);
     await page.getByRole("button", { name: "%", exact: true }).click();
@@ -61,9 +59,9 @@ test.describe("축 표시 회귀", () => {
     await assertRendered(page);
   });
 
-  test("선형·로그 축과 패널 높이·화면 크기 변경은 실제 y 좌표로 마지막 값과 떨어진다", async ({ page, app }) => {
-    await seedChartDisplay(app, "Y");
-    await yearlyPrices(app, [1297000, 100000, 10000, 1000]);
+  test("선형·로그 축과 패널 높이·화면 크기 변경은 실제 y 좌표로 마지막 값과 떨어진다", async ({ page, scenario }) => {
+    await seedChartDisplay(scenario, "Y");
+    await yearlyPrices(scenario, [1297000, 100000, 10000, 1000]);
     await open(page);
     const originalHeight = await page.evaluate(() => window.chartProbe.chart.panes()[0]!.getHeight());
     for (const log of [true, false, true]) {
@@ -83,8 +81,8 @@ test.describe("축 표시 회귀", () => {
     }
   });
 
-  test("확대한 원화 조 눈금은 높은 패널과 크기 변경 뒤에도 서로 다르다", async ({ page, app }) => {
-    await seedChartDisplay(app, "Y");
+  test("확대한 원화 조 눈금은 높은 패널과 크기 변경 뒤에도 서로 다르다", async ({ page, scenario }) => {
+    await seedChartDisplay(scenario, "Y");
     await open(page);
     await page.evaluate(() => {
       const pane = window.chartProbe.chart.panes()[2]!;
@@ -106,12 +104,12 @@ test.describe("축 표시 회귀", () => {
 
 test.describe("실시간 눈금 캐시", () => {
   test.use({ clockStart: "20261109100030" });
-  test("축 범위가 같은 0B 체결 뒤에도 가격·거래량 눈금 충돌을 다시 계산한다", async ({ page, app }) => {
+  test("축 범위가 같은 0B 체결 뒤에도 가격·거래량 눈금 충돌을 다시 계산한다", async ({ page, scenario }) => {
     await page.addInitScript(installChartProbe);
     await page.addInitScript(installAxisProbe);
     await page.goto("/?symbol=005930");
     await expect(cell(page)).toHaveAttribute("aria-busy", "false");
-    await expect.poll(async () => (await app.fake.registered())["0B"] ?? []).toContain("005930_AL");
+    await expect.poll(async () => scenario.live.subscriptions().map(value => value.symbol)).toContain("005930");
     await assertRendered(page);
     const volume = () => page.evaluate(() => {
       const last = window.chartProbe.chart.panes()[1]!.getSeries()[0]!.data().at(-1);
@@ -119,7 +117,7 @@ test.describe("실시간 눈금 캐시", () => {
       return last && current && last.time === current.time && "value" in last && typeof last.value === "number" ? last.value : null;
     });
     await expect(async () => {
-      expect(await app.fake.pushReal("0B", "005930_AL", { "20": "100031", "10": "+1297000", "15": "+1", "13": "1000", "9081": "KRX", "11": "+0", "12": "+0.00", "25": "2" })).toBeGreaterThan(0);
+      expect(await scenario.live.update("005930", { c: Math.abs(Number("+1297000")), v: Math.abs(Number("1000")) })).toBeGreaterThan(0);
       await expect(chartOf(cell(page))).toHaveAttribute("data-last-close", "1297000", { timeout: 500 });
     }).toPass({ timeout: 15000 });
     await expect.poll(volume).not.toBeNull();
@@ -127,10 +125,8 @@ test.describe("실시간 눈금 캐시", () => {
     const baseline = await volume();
     expect(baseline).not.toBeNull();
     const before = await page.evaluate(() => window.chartProbe.chart.panes()[1]!.priceScale("right").getVisibleRange());
-    for (const [i, cumulative] of [16_000_000, 18_000_000].entries()) {
-      const previous = i === 0 ? baseline! : 16_000_000;
-      const quantity = cumulative - previous;
-      expect(await app.fake.pushReal("0B", "005930_AL", { "20": `10003${i + 2}`, "10": "+1297000", "15": `+${quantity}`, "13": String(cumulative), "9081": "KRX", "11": "+0", "12": "+0.00", "25": "2" })).toBeGreaterThan(0);
+    for (const cumulative of [16_000_000, 18_000_000]) {
+      expect(await scenario.live.update("005930", { c: Math.abs(Number("+1297000")), v: Math.abs(Number(String(cumulative))) })).toBeGreaterThan(0);
       await expect.poll(volume).toBe(cumulative);
       await expect.poll(() => page.evaluate(() => window.axisTexts().flatMap((axis) => axis.texts).map((label) => label.text))).toContain(`${cumulative / 10000}만`);
       expect(await page.evaluate(() => window.chartProbe.chart.panes()[1]!.priceScale("right").getVisibleRange())).toEqual(before);

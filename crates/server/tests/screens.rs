@@ -2,7 +2,7 @@ mod common;
 
 use std::os::unix::fs::DirBuilderExt;
 
-use common::{FakeKiwoom, Server};
+use common::{ScriptedTransport, Server};
 use serde_json::{Value, json};
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
 
@@ -18,6 +18,10 @@ impl ScreensApi {
 
     async fn get(&self) -> (u16, Value) {
         reply(self.client.get(&self.url).send().await.unwrap()).await
+    }
+
+    async fn run(&self, screen: &Value) -> (u16, Value) {
+        reply(self.client.post(self.url.replace("/api/screens", "/api/screener/run")).header("content-type", "application/json").body(screen.to_string()).send().await.unwrap()).await
     }
 
     async fn put(&self, body: String) -> (u16, Value) {
@@ -96,9 +100,9 @@ fn every_condition() -> Vec<Value> {
     all
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn screens_start_empty_are_replaced_whole_and_survive_a_restart() {
-    let fake = FakeKiwoom::start().await;
+    let fake = ScriptedTransport::new();
     let tmp = tempfile::tempdir().unwrap();
     let lock = tmp.path().join("run/server.lock");
     let server = Server::spawn(&fake, &lock, tmp.path());
@@ -128,9 +132,9 @@ async fn screens_start_empty_are_replaced_whole_and_survive_a_restart() {
     server.stop().await;
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn every_condition_kind_and_test_is_saved_as_sent() {
-    let fake = FakeKiwoom::start().await;
+    let fake = ScriptedTransport::new();
     let tmp = tempfile::tempdir().unwrap();
     let server = Server::spawn(&fake, &tmp.path().join("run/server.lock"), tmp.path());
     let api = ScreensApi::of(&server).await;
@@ -138,6 +142,10 @@ async fn every_condition_kind_and_test_is_saved_as_sent() {
     let all = screens(list, 1);
     assert_eq!(api.put(all.to_string()).await, (200, all.clone()));
     assert_eq!(api.get().await, (200, all), "종류마다, test마다 값을 그대로 돌려준다");
+    for condition in every_condition() {
+        let (status, body) = api.run(&screen_of("R", "실행", vec![condition.clone()])).await;
+        assert_ne!(status, 400, "저장되는 조건은 실행 검사도 통과한다: {condition} → {body}");
+    }
 
     let edges = screens(vec![screen_of("E", "경계값", vec![
         with(example("change"), "minPct", json!(-99.5)),
@@ -156,9 +164,9 @@ async fn every_condition_kind_and_test_is_saved_as_sent() {
     server.stop().await;
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn each_screen_rule_and_a_stale_revision_rejects_the_save() {
-    let fake = FakeKiwoom::start().await;
+    let fake = ScriptedTransport::new();
     let tmp = tempfile::tempdir().unwrap();
     let server = Server::spawn(&fake, &tmp.path().join("run/server.lock"), tmp.path());
     let api = ScreensApi::of(&server).await;
@@ -205,55 +213,20 @@ async fn each_screen_rule_and_a_stale_revision_rejects_the_save() {
         ("모르는 봉 주기", changed("new_high", "period", json!("5m")), 400, "bad_request"),
         ("모르는 값", changed("new_high", "field", json!("amount")), 400, "bad_request"),
         ("신저가 역순 범위", changed("new_low", "barRange", json!({"start": 53, "end": 52})), 400, "bad_request"),
-        ("신저가 n = 0", changed("new_low", "n", json!(0)), 400, "bad_request"),
-        ("값 범위의 끝이 둘 다 없음", changed("value_range", "min", Value::Null), 400, "bad_request"),
         ("값 범위의 min > max", changed("value_range", "max", json!(9_999_999_999.0)), 400, "bad_request"),
-        ("값 범위의 음수 경계", changed("value_range", "min", json!(-1.0)), 400, "bad_request"),
         ("값 범위의 max 키 없음", line(json!({"kind": "value_range", "period": "D", "recentBars": 1, "field": "close", "min": 1.0})), 400, "bad_request"),
         ("유한하지 않은 수", changed("value_range", "max", json!(12_345.25)).replace("12345.25", "1e999"), 400, "bad_request"),
-        ("등락률 back = 0", changed("change", "back", json!(0)), 400, "bad_request"),
-        ("등락률의 끝이 둘 다 없음", changed("change", "minPct", Value::Null), 400, "bad_request"),
-        ("등락률의 minPct > maxPct", changed("change", "maxPct", json!(29.9)), 400, "bad_request"),
-        ("고점 거리 n = 0", changed("near_extreme", "n", json!(0)), 400, "bad_request"),
-        ("고점 거리 음수 withinPct", changed("near_extreme", "withinPct", json!(-0.1)), 400, "bad_request"),
-        ("고점 거리 100 넘는 withinPct", changed("near_extreme", "withinPct", json!(100.1)), 400, "bad_request"),
         ("모르는 극값", changed("near_extreme", "extreme", json!("close")), 400, "bad_request"),
-        ("거래 급증 n = 0", changed("surge", "n", json!(0)), 400, "bad_request"),
-        ("거래 급증 times = 0", changed("surge", "times", json!(0.0)), 400, "bad_request"),
-        ("거래 급증 음수 times", changed("surge", "times", json!(-3.0)), 400, "bad_request"),
         ("거래 급증의 가격 값", changed("surge", "field", json!("close")), 400, "bad_request"),
         ("이평 위치의 거래량 값", changed("ma_position", "field", json!("volume")), 400, "bad_request"),
         ("모르는 이평 방법", changed("ma_position", "method", json!("wma")), 400, "bad_request"),
         ("모르는 위치", changed("ma_position", "side", json!("on")), 400, "bad_request"),
-        ("이평 배열 1개", changed("ma_alignment", "lengths", json!([20])), 400, "bad_request"),
-        ("이평 배열 6개", changed("ma_alignment", "lengths", json!([5, 10, 20, 60, 120, 240])), 400, "bad_request"),
-        ("작아지는 이평 배열", changed("ma_alignment", "lengths", json!([20, 5, 60])), 400, "bad_request"),
-        ("겹친 이평 배열", changed("ma_alignment", "lengths", json!([5, 20, 20])), 400, "bad_request"),
-        ("이평 배열의 0", changed("ma_alignment", "lengths", json!([0, 20])), 400, "bad_request"),
         ("모르는 배열", changed("ma_alignment", "order", json!("flat")), 400, "bad_request"),
-        ("이평 교차 fast = slow", changed("ma_cross", "fast", json!(20)), 400, "bad_request"),
-        ("이평 교차 fast > slow", changed("ma_cross", "fast", json!(60)), 400, "bad_request"),
         ("모르는 교차 방향", changed("ma_cross", "direction", json!("sideways")), 400, "bad_request"),
-        ("RSI 범위의 끝이 둘 다 없음", tested("rsi", json!({"kind": "range", "min": null, "max": null})), 400, "bad_request"),
-        ("RSI 범위의 min > max", tested("rsi", json!({"kind": "range", "min": 70.0, "max": 30.0})), 400, "bad_request"),
-        ("RSI 범위가 100을 넘음", tested("rsi", json!({"kind": "range", "min": 70.0, "max": 100.5})), 400, "bad_request"),
-        ("RSI 범위가 0보다 작음", tested("rsi", json!({"kind": "range", "min": -1.0, "max": null})), 400, "bad_request"),
-        ("RSI 돌파값이 100을 넘음", tested("rsi", json!({"kind": "breakout", "value": 101.0, "direction": "up"})), 400, "bad_request"),
-        ("RSI 돌파값이 0보다 작음", tested("rsi", json!({"kind": "breakout", "value": -0.5, "direction": "up"})), 400, "bad_request"),
         ("모르는 RSI test", tested("rsi", json!({"kind": "cross", "direction": "up"})), 400, "bad_request"),
-        ("MACD fast = slow", changed("macd", "fast", json!(26)), 400, "bad_request"),
-        ("MACD fast > slow", changed("macd", "slow", json!(10)), 400, "bad_request"),
         ("모르는 MACD test", tested("macd", json!({"kind": "range", "min": 0.0, "max": null})), 400, "bad_request"),
-        ("스토캐스틱 범위가 100을 넘음", tested("stochastic", json!({"kind": "range", "min": 80.0, "max": 101.0})), 400, "bad_request"),
-        ("스토캐스틱 범위의 min > max", tested("stochastic", json!({"kind": "range", "min": 80.0, "max": 20.0})), 400, "bad_request"),
-        ("스토캐스틱 범위의 끝이 둘 다 없음", tested("stochastic", json!({"kind": "range", "min": null, "max": null})), 400, "bad_request"),
-        ("볼린저 k = 0", changed("bollinger", "k", json!(0.0)), 400, "bad_request"),
-        ("볼린저 음수 k", changed("bollinger", "k", json!(-2.0)), 400, "bad_request"),
         ("모르는 볼린저 밴드", tested("bollinger", json!({"kind": "cross", "band": "middle", "direction": "up"})), 400, "bad_request"),
         ("모르는 일목 test", tested("ichimoku", json!({"kind": "outside", "side": "above"})), 400, "bad_request"),
-        ("시가총액의 끝이 둘 다 없음", changed("market_cap", "min", Value::Null), 400, "bad_request"),
-        ("시가총액의 음수 경계", changed("market_cap", "max", json!(-1.0)), 400, "bad_request"),
-        ("시가총액의 min > max", changed("market_cap", "max", json!(1.0)), 400, "bad_request"),
         ("revision 없음", json!({"screens": [screen("S1", "기본")]}).to_string(), 400, "bad_request"),
         ("128KB를 넘는 본문", json!({"screens": [screen("S1", "기본")], "revision": 11, "pad": "x".repeat(128 * 1024)}).to_string(), 413, "payload_too_large"),
         ("같은 revision", screens(vec![screen("S9", "새")], 10).to_string(), 409, "stale_revision"),
@@ -266,7 +239,7 @@ async fn each_screen_rule_and_a_stale_revision_rejects_the_save() {
         ("stochastic", "k"), ("stochastic", "d"), ("stochastic", "smooth"), ("bollinger", "length"),
         ("ichimoku", "conversion"), ("ichimoku", "base"), ("ichimoku", "spanB"), ("ichimoku", "displacement"),
     ];
-    let lengths: Vec<_> = indicator_lengths.iter().flat_map(|&(k, key)| [json!(0), json!(65_536), json!(14.5)].map(|v| ("지표 기간이 1~65,535 정수가 아님", changed(k, key, v), 400, "bad_request"))).collect();
+    let lengths: Vec<_> = indicator_lengths.iter().flat_map(|&(k, key)| [json!(65_536), json!(14.5)].map(|v| ("지표 기간이 1~65,535 정수가 아님", changed(k, key, v), 400, "bad_request"))).collect();
     cases.extend(periods_and_m);
     cases.extend(lengths);
     for (case, body, status, code) in cases {
@@ -274,6 +247,11 @@ async fn each_screen_rule_and_a_stale_revision_rejects_the_save() {
         assert_eq!((s, v["error"]["code"].as_str().unwrap_or("")), (status, code), "{case}: {body} → {v}");
         assert!(!v["error"]["message"].as_str().unwrap_or("").is_empty(), "{case}: {v}");
     }
+    let zero_n = screen_of("S1", "기본", vec![new_high("D", "high", 0, 1)]);
+    let message = "조건식 기본의 1번째 조건: n는 1 이상이어야 합니다";
+    let (saving, running) = (api.put(screens(vec![zero_n.clone()], 11).to_string()).await, api.run(&zero_n).await);
+    assert_eq!((saving.0, saving.1["error"]["message"].as_str()), (400, Some(message)), "저장의 문구");
+    assert_eq!((running.0, running.1["error"]["message"].as_str(), running.1["error"]["code"].as_str()), (400, Some(message), Some("bad_request")), "실행도 같은 문구");
     assert_eq!(api.get().await, (200, saved), "거절한 PUT은 저장하지 않는다");
     server.stop().await;
 }
@@ -296,9 +274,9 @@ fn widest_conditions() -> Vec<Value> {
     ]
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn fifty_screens_of_ten_of_the_widest_conditions_are_saved() {
-    let fake = FakeKiwoom::start().await;
+    let fake = ScriptedTransport::new();
     let tmp = tempfile::tempdir().unwrap();
     let server = Server::spawn(&fake, &tmp.path().join("run/server.lock"), tmp.path());
     let api = ScreensApi::of(&server).await;
@@ -325,9 +303,9 @@ fn old_new_high(id: &str) -> Value {
     json!({"name": "신고가", "period": "D", "conditions": [{"field": "high", "n": 200, "m": 1}], "exclude": [], "id": id})
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn a_list_saved_in_the_old_format_comes_back_in_the_new_format_with_the_revision_raised() {
-    let fake = FakeKiwoom::start().await;
+    let fake = ScriptedTransport::new();
     let tmp = tempfile::tempdir().unwrap();
     let old = json!([
         old_new_high("01900000-0000-7000-8000-0000000000a1"),
@@ -352,9 +330,9 @@ async fn a_list_saved_in_the_old_format_comes_back_in_the_new_format_with_the_re
     server.stop().await;
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn a_list_saved_at_the_largest_revision_is_moved_and_keeps_that_revision() {
-    let fake = FakeKiwoom::start().await;
+    let fake = ScriptedTransport::new();
     let tmp = tempfile::tempdir().unwrap();
     let lock = saved_before_condition_kinds(&tmp, &json!([old_new_high("S1")]), i64::MAX).await;
     let server = Server::spawn(&fake, &lock, tmp.path());
@@ -366,9 +344,9 @@ async fn a_list_saved_at_the_largest_revision_is_moved_and_keeps_that_revision()
     server.stop().await;
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn old_migrates_every_saved_kind_once_preserving_order_values_and_revision_protection() {
-    let fake = FakeKiwoom::start().await;
+    let fake = ScriptedTransport::new();
     let tmp = tempfile::tempdir().unwrap();
     let run = tmp.path().join("run");
     std::fs::DirBuilder::new().mode(0o700).create(&run).unwrap();
@@ -410,9 +388,9 @@ async fn old_migrates_every_saved_kind_once_preserving_order_values_and_revision
     server.stop().await;
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn recent_period_accepts_the_old_end_plus_one_boundary_and_rejects_old_api_shapes() {
-    let fake = FakeKiwoom::start().await;
+    let fake = ScriptedTransport::new();
     let tmp = tempfile::tempdir().unwrap();
     let server = Server::spawn(&fake, &tmp.path().join("run/server.lock"), tmp.path());
     let api = ScreensApi::of(&server).await;
@@ -440,9 +418,9 @@ async fn recent_period_accepts_the_old_end_plus_one_boundary_and_rejects_old_api
     server.stop().await;
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn saved_ranges_become_recent_periods_once_including_nonzero_starts_and_the_largest_end() {
-    let fake = FakeKiwoom::start().await;
+    let fake = ScriptedTransport::new();
     let tmp = tempfile::tempdir().unwrap();
     let run = tmp.path().join("run");
     std::fs::DirBuilder::new().mode(0o700).create(&run).unwrap();

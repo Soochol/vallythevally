@@ -1,7 +1,7 @@
 import type { Page } from "@playwright/test";
 import { parseDrawingBody, UNSAVED_PREFIX } from "../src/chart/drawings/outbox";
 import { parseJournalRecord, STAGING_PREFIX } from "../src/chart/drawings/journal";
-import { test, expect, cell, chartOf, type App } from "./harness";
+import { test, expect, cell, chartOf, type Scenario } from "./harness";
 
 async function open(page: Page) {
   const loaded = page.waitForResponse((response) => response.url().includes("/api/drawings?") && response.request().method() === "GET");
@@ -10,11 +10,10 @@ async function open(page: Page) {
   await expect(chartOf(cell(page))).toHaveAttribute("data-bar-count", /^[1-9]\d*$/);
 }
 
-async function storedDrawings(app: App) {
-  const response = await fetch(`${app.url}/api/drawings?symbol=IDX%3A001`);
-  expect(response.status).toBe(200);
-  const raw: unknown = await response.json();
-  if (!Array.isArray(raw)) throw new Error("Expected the SQLite drawing list");
+async function storedDrawings(scenario: Scenario) {
+  const response = scenario.documents.drawings("IDX:001");
+  const raw: unknown = response;
+  if (!Array.isArray(raw)) throw new Error("Expected the saved drawing list");
   return raw.map((item: unknown) => {
     const drawing = parseDrawingBody(item);
     if (drawing === null) throw new Error("Expected a valid persisted drawing");
@@ -27,10 +26,10 @@ async function pendingRecords(page: Page) {
 }
 
 
-test("startup legacy read failure then late ACK retains revision maximum for backward-clock Undo", async ({ page, context, app }, info) => {
-  const original = { id: "01900000-0000-7000-8000-000000000053", symbol: "IDX:001", tool: "hline", points: [{ t: 1_700_000_000, price: 100 }], text: null, style: {}, locked: false, hidden: false, periods: null, z: 0, group: null, scope: { kind: "symbol" }, revision: 1 };
-  const seeded = await fetch(`${app.url}/api/drawings/${original.id}`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(original) });
-  expect(seeded.status).toBe(200);
+test("startup legacy read failure then late ACK retains revision maximum for backward-clock Undo", async ({ page, context, scenario }, info) => {
+  const original: Parameters<Scenario["documents"]["saveDrawing"]>[0] = { id: "01900000-0000-7000-8000-000000000053", symbol: "IDX:001", tool: "hline", points: [{ t: 1_700_000_000, price: 100 }], text: null, style: {}, locked: false, hidden: false, periods: null, z: 0, group: null, scope: { kind: "symbol" }, revision: 1 };
+  scenario.documents.saveDrawing(original);
+
   await page.addInitScript(original => {
     const legacyKey = `vv.unsaved.drawing.${original.id}`;
     localStorage.setItem(legacyKey, JSON.stringify({ v: 1, id: original.id, symbol: original.symbol, want: { kind: "put", body: { ...original, revision: 0 } }, lastRevision: 0 }));
@@ -74,17 +73,17 @@ test("startup legacy read failure then late ACK retains revision maximum for bac
   let putStored = false;
   await other.route(`**/api/drawings/${original.id}`, async route => {
     putBody = route.request().postDataJSON();
-    const response = await route.fetch();
-    expect(response.status()).toBe(200);
+    const response = await scenario.respond(route.request());
+    expect((response.status ?? 200)).toBe(200);
     putStored = true;
     await ackGate;
-    if (!other.isClosed()) await route.fulfill({ response });
+    if (!other.isClosed()) await route.fulfill({ status: response.status ?? 200, json: response.body, headers: response.headers });
   });
   try {
     await expect.poll(() => deleteStage !== undefined).toBe(true);
     await open(other);
     await expect.poll(() => putStored).toBe(true);
-    const storedBeforeDelete = await storedDrawings(app);
+    const storedBeforeDelete = await storedDrawings(scenario);
     const terminal = parseJournalRecord(deleteStage);
     if (!terminal) throw new Error("Expected reserved DELETE");
     expect(terminal.want.kind).toBe("delete");
@@ -100,13 +99,13 @@ test("startup legacy read failure then late ACK retains revision maximum for bac
     expect(storedBeforeDelete[0]?.revision).toBe(legacyStage.lastRevision);
     releaseDelete();
     await deleting;
-    await expect.poll(() => storedDrawings(app)).toEqual([]);
+    await expect.poll(() => storedDrawings(scenario)).toEqual([]);
     await expect.poll(() => pendingRecords(page)).toEqual([]);
     const afterDelete = await page.evaluate(id => JSON.parse(localStorage.getItem(`vv.drawing.completed.${id}`) ?? "null"), original.id);
     releaseAck();
     await expect(other.getByText(/^자동 저장됨 /)).toBeVisible();
     const afterAck = await page.evaluate(id => JSON.parse(localStorage.getItem(`vv.drawing.completed.${id}`) ?? "null"), original.id);
-    const serverAfterAck = await storedDrawings(app);
+    const serverAfterAck = await storedDrawings(scenario);
     expect(serverAfterAck).toEqual([]);
     expect(afterAck.order).toBe(afterDelete.order);
     expect(afterAck.uuid).toBe(afterDelete.uuid);
@@ -117,8 +116,8 @@ test("startup legacy read failure then late ACK retains revision maximum for bac
     await page.evaluate(clock => { Date.now = () => clock; }, acknowledged.revision - 60_000);
     await cell(page).focus();
     await page.keyboard.press("Control+z");
-    await expect.poll(async () => (await storedDrawings(app)).length).toBe(1);
-    const afterUndo = await storedDrawings(app);
+    await expect.poll(async () => (await storedDrawings(scenario)).length).toBe(1);
+    const afterUndo = await storedDrawings(scenario);
     const evidence = { legacyStage, deleteStage, putBody, storedBeforeDelete, afterDelete, afterAck, serverAfterAck, beforeUndoKeys, afterUndo };
     console.log(JSON.stringify(evidence));
     await info.attach("legacy-late-ack-revision.json", { body: JSON.stringify(evidence, null, 2), contentType: "application/json" });

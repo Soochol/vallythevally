@@ -1,7 +1,7 @@
 import type { Page } from "@playwright/test";
 import { parseDrawingBody, recordKey } from "../src/chart/drawings/outbox";
 import { parseJournalRecord } from "../src/chart/drawings/journal";
-import { test, expect, cell, chartOf, type App } from "./harness";
+import { test, expect, cell, chartOf, type Scenario } from "./harness";
 
 const mirror = (page: Page) => chartOf(cell(page)).locator(".drawing-mirror");
 
@@ -13,10 +13,9 @@ async function open(page: Page, url: string) {
   await expect(mirror(page)).toHaveAttribute("data-drawings", "[]");
 }
 
-async function drawings(app: App) {
-  const response = await fetch(`${app.url}/api/drawings?symbol=IDX%3A001`);
-  expect(response.status).toBe(200);
-  const raw: unknown = await response.json();
+async function drawings(scenario: Scenario) {
+  const response = scenario.documents.drawings("IDX:001");
+  const raw: unknown = response;
   if (!Array.isArray(raw)) throw new Error("Expected the stored drawing list");
   return raw.map((item: unknown) => {
     const drawing = parseDrawingBody(item);
@@ -31,10 +30,10 @@ async function journal(page: Page, id: string) {
 }
 
 for (const offset of [0, -60_000]) {
-  test(`failed DELETE survives another tab's old PUT acknowledgement with clock offset ${offset}`, async ({ page, app }, info) => {
+  test(`failed DELETE survives another tab's old PUT acknowledgement with clock offset ${offset}`, async ({ page, scenario }, info) => {
     const other = await page.context().newPage();
-    await open(page, app.url);
-    await open(other, app.url);
+    await open(page, "/");
+    await open(other, "/");
     const now = Date.now();
     await page.evaluate((time) => { Date.now = () => time; }, now);
 
@@ -42,12 +41,12 @@ for (const offset of [0, -60_000]) {
     const acknowledgement = new Promise<void>((resolve) => { release = resolve; });
     let accepted = false;
     await page.route("**/api/drawings/*", async (route) => {
-      if (route.request().method() !== "PUT") return route.continue();
-      const response = await route.fetch();
-      expect(response.status()).toBe(200);
+      if (route.request().method() !== "PUT") return route.fallback();
+      const response = await scenario.respond(route.request());
+      expect((response.status ?? 200)).toBe(200);
       accepted = true;
       await acknowledgement;
-      await route.fulfill({ response });
+      await route.fulfill({ status: response.status ?? 200, json: response.body, headers: response.headers });
     });
 
     try {
@@ -57,8 +56,8 @@ for (const offset of [0, -60_000]) {
       await page.keyboard.press("H");
       await page.mouse.click(bounds.x + bounds.width * 0.75, bounds.y + bounds.height * 0.4);
       await expect.poll(() => accepted).toBe(true);
-      const [created] = await drawings(app);
-      if (created === undefined) throw new Error("The held PUT must reach SQLite before deletion");
+      const [created] = await drawings(scenario);
+      if (created === undefined) throw new Error("The held PUT must reach the document store before deletion");
       expect(created.revision).toBe(now);
       expect((await journal(other, created.id))?.want.kind).toBe("put");
 
@@ -89,7 +88,7 @@ for (const offset of [0, -60_000]) {
       await other.getByRole("button", { name: "드로잉 지우기", exact: true }).click();
       await expect(other.locator("html")).toHaveAttribute("data-blocked-drawing-deletes", /^[1-9]\d*$/);
       await expect(mirror(other)).toHaveAttribute("data-drawings", "[]");
-      expect((await drawings(app)).map((drawing) => drawing.id)).toContain(created.id);
+      expect((await drawings(scenario)).map((drawing) => drawing.id)).toContain(created.id);
       const beforeAck = await journal(other, created.id);
       expect.soft(beforeAck?.want.kind, "the later unsent DELETE must replace the pending PUT journal").toBe("delete");
 
@@ -105,8 +104,8 @@ for (const offset of [0, -60_000]) {
       await other.reload();
       await expect(chartOf(cell(other))).toHaveAttribute("data-bar-count", /^[1-9]\d*$/);
       await expect.soft.poll(() => replayedDeletes, { message: "the new document must replay the recovered DELETE" }).toBeGreaterThan(0);
-      await expect.soft.poll(async () => (await drawings(app)).map((drawing) => drawing.id), {
-        message: "reloading the deleting tab must replay its DELETE to SQLite",
+      await expect.soft.poll(async () => (await drawings(scenario)).map((drawing) => drawing.id), {
+        message: "reloading the deleting tab must replay its DELETE to the document store",
       }).not.toContain(created.id);
       await expect.soft(mirror(other)).toHaveAttribute("data-drawings", "[]");
       await expect.soft.poll(() => journal(other, created.id)).toBeNull();

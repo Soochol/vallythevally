@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
 import type { Download, Locator, Page } from "@playwright/test";
-import { cell, chartOf, expect, test } from "./harness";
+import { type Scenario, cell, chartOf, expect, test } from "./harness";
 
 const HEAD_LINE = 22;
 const HEAD_PAD = 12;
@@ -95,12 +95,12 @@ async function measureInk(page: Page, b64: string, headPx: number, chartPx: numb
   );
 }
 
-async function openSamsung(page: Page, name = "삼성전자"): Promise<Locator> {
+async function openSamsung(page: Page, scenario: Scenario, name = "삼성전자"): Promise<Locator> {
   await recordComposedText(page);
   if (name !== "삼성전자") {
     await page.route("**/api/symbols/005930", async (route) => {
-      const response = await route.fetch();
-      await route.fulfill({ response, json: { ...(await response.json()), name } });
+      const response = await scenario.respond(route.request());
+      await route.fulfill({ status: response.status ?? 200, json: { ...scenario.market.symbols.find(value => value.code === "005930"), name } });
     });
   }
   await page.goto("/?symbol=005930");
@@ -160,8 +160,8 @@ const download = (page: Page, chart: Locator, act: () => Promise<void>, headLine
   Promise.all([page.waitForEvent("download"), act()]).then(([d]) => expectSnapshot(page, d, chart, headLines));
 
 test.describe("데스크톱", () => {
-  test("위 막대 버튼과 Alt+S로 머리가 붙은 차트 PNG를 내려받는다", async ({ page }, testInfo) => {
-    const chart = await openSamsung(page);
+  test("위 막대 버튼과 Alt+S로 머리가 붙은 차트 PNG를 내려받는다", async ({ scenario, page }, testInfo) => {
+    const chart = await openSamsung(page, scenario);
     const button = page.getByRole("toolbar", { name: "차트 도구 막대" }).getByRole("button", { name: "차트 이미지 내려받기" });
 
     const { png, drawn } = await download(page, chart, () => button.click());
@@ -172,9 +172,9 @@ test.describe("데스크톱", () => {
     await download(page, chart, () => page.keyboard.press("Alt+KeyS"));
   });
 
-  test("복사 버튼은 같은 PNG를 클립보드에 넣는다", async ({ page, context, baseURL }) => {
+  test("복사 버튼은 같은 PNG를 클립보드에 넣는다", async ({ scenario, page, context, baseURL }) => {
     await context.grantPermissions(["clipboard-read", "clipboard-write"], { origin: baseURL });
-    const chart = await openSamsung(page);
+    const chart = await openSamsung(page, scenario);
     await page.getByRole("toolbar", { name: "차트 도구 막대" }).getByRole("button", { name: "차트 이미지 복사" }).click();
     await expect(page.getByText("차트 이미지를 클립보드에 복사했습니다")).toBeVisible();
 
@@ -187,17 +187,17 @@ test.describe("데스크톱", () => {
 test.describe("휴대폰 390px", () => {
   test.use({ viewport: { width: 390, height: 844 } });
 
-  test("머리의 버튼으로 내려받기만 한다", async ({ page }, testInfo) => {
-    const chart = await openSamsung(page);
+  test("머리의 버튼으로 내려받기만 한다", async ({ scenario, page }, testInfo) => {
+    const chart = await openSamsung(page, scenario);
     await expect(page.getByRole("button", { name: "차트 이미지 복사" })).toBeHidden();
     const [d] = await Promise.all([page.waitForEvent("download"), page.getByRole("button", { name: "차트 이미지 내려받기" }).click()]);
     const { png } = await expectSnapshot(page, d, chart, (n) => n >= 3);
     await testInfo.attach("snapshot-phone.png", { body: png, contentType: "image/png" });
   });
 
-  test("복사 단축키는 쓰지 않는다", async ({ page, context, baseURL }) => {
+  test("복사 단축키는 쓰지 않는다", async ({ scenario, page, context, baseURL }) => {
     await context.grantPermissions(["clipboard-read", "clipboard-write"], { origin: baseURL });
-    const chart = await openSamsung(page);
+    const chart = await openSamsung(page, scenario);
     await page.evaluate(() => navigator.clipboard.writeText("before"));
     await chart.click();
     await page.keyboard.press("Alt+Shift+KeyS");
@@ -208,8 +208,8 @@ test.describe("휴대폰 390px", () => {
     expect(await page.evaluate(() => navigator.clipboard.readText())).toBe("before");
   });
 
-  test("긴 종목 이름도 시각과 겹치지 않는다", async ({ page }, testInfo) => {
-    const chart = await openSamsung(page, LONG_NAME);
+  test("긴 종목 이름도 시각과 겹치지 않는다", async ({ scenario, page }, testInfo) => {
+    const chart = await openSamsung(page, scenario, LONG_NAME);
     const { png, drawn } = await download(page, chart, () => page.getByRole("button", { name: "차트 이미지 내려받기" }).click(), (n) => n >= 3);
     expect(drawn.map((t) => t.text)).toContain(LONG_NAME);
     await testInfo.attach("snapshot-phone-long-name.png", { body: png, contentType: "image/png" });
@@ -219,8 +219,8 @@ test.describe("휴대폰 390px", () => {
 test.describe("휴대폰 320px", () => {
   test.use({ viewport: { width: 320, height: 700 } });
 
-  test("한 줄보다 긴 종목 이름은 줄여서 폭 안에 그린다", async ({ page }) => {
-    const chart = await openSamsung(page, `${LONG_NAME}(합성 H) 액티브`);
+  test("한 줄보다 긴 종목 이름은 줄여서 폭 안에 그린다", async ({ scenario, page }) => {
+    const chart = await openSamsung(page, scenario, `${LONG_NAME}(합성 H) 액티브`);
     const { drawn } = await download(page, chart, () => page.getByRole("button", { name: "차트 이미지 내려받기" }).click(), (n) => n >= 3);
     const name = drawn.find((t) => t.text.startsWith("TIGER"));
     expect(name?.text).toMatch(/^TIGER .+…$/);
