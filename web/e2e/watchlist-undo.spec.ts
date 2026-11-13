@@ -78,7 +78,7 @@ test("충돌 뒤 대상 목록이 지워지면 되돌리지 않고 최신 서버
   await expect.poll(() => held.reads).toBeGreaterThan(0);
   await listButton(other).click();
   await other.getByRole("menuitem", { name: "목록 지우기", exact: true }).click();
-  await other.getByRole("dialog").getByRole("button", { name: "확인", exact: true }).click();
+  await other.getByRole("dialog").getByRole("button", { name: "목록 지우기", exact: true }).click();
   await expect.poll(async () => (await serverLists(page)).length).toBe(1);
   const before = await readServer(page);
   held.release();

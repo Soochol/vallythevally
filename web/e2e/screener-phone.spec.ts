@@ -139,7 +139,7 @@ test("휴대폰에서 지우면 다음 조건식을 고르고 지운 식의 초�
   await nameField(dialog).fill("지울 초안");
   await dialog.getByRole("button", { name: "삭제", exact: true }).click();
   const saved = savedTo(page, "/api/screens");
-  await page.getByRole("dialog", { name: '"지울 초안" 조건식을 삭제할까요? 되돌릴 수 없습니다.' }).getByRole("button", { name: "확인", exact: true }).click();
+  await page.getByRole("dialog", { name: '"지울 초안" 조건식을 삭제할까요? 되돌릴 수 없습니다.' }).getByRole("button", { name: "조건식 지우기", exact: true }).click();
   await saved;
   await expect(dialog).toBeHidden();
   await expect(screenChooser(page)).toHaveAccessibleName("조건식: 둘째");
@@ -153,7 +153,7 @@ test("휴대폰에서 지우면 다음 조건식을 고르고 지운 식의 초�
   await expect(screenChooser(page)).toHaveAccessibleName("조건식: 임시");
   const reopened = await editChosen(page, "새 조건식");
   await reopened.getByRole("button", { name: "삭제", exact: true }).click();
-  await page.getByRole("dialog", { name: '"임시" 조건식을 삭제할까요? 되돌릴 수 없습니다.' }).getByRole("button", { name: "확인", exact: true }).click();
+  await page.getByRole("dialog", { name: '"임시" 조건식을 삭제할까요? 되돌릴 수 없습니다.' }).getByRole("button", { name: "조건식 지우기", exact: true }).click();
   await expect(reopened).toBeHidden();
   await expect(screenChooser(page)).toHaveAccessibleName("조건식: 둘째");
   await expectPicker(page, ["둘째"]);
@@ -208,7 +208,7 @@ test("휴대폰에서 삭제가 서버 오류로 실패하면 대화상자와 �
   await startPhone(app, page, [screenOf("a", "첫째"), screenOf("b", "둘째")]);
   const dialog = await editChosen(page);
   await failNextPut(page);
-  const confirm = page.getByRole("dialog", { name: '"첫째" 조건식을 삭제할까요? 되돌릴 수 없습니다.' }).getByRole("button", { name: "확인", exact: true });
+  const confirm = page.getByRole("dialog", { name: '"첫째" 조건식을 삭제할까요? 되돌릴 수 없습니다.' }).getByRole("button", { name: "조건식 지우기", exact: true });
   await dialog.getByRole("button", { name: "삭제", exact: true }).click();
   await confirm.click();
   await expect(dialog.getByRole("alert")).toContainText("삭제하지 못했습니다");

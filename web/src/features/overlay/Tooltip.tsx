@@ -44,5 +44,13 @@ export function TooltipHost() {
     tip.target.setAttribute("aria-describedby", [previous, id].filter(Boolean).join(" "));
     return () => { if (previous) tip.target.setAttribute("aria-describedby", previous); else tip.target.removeAttribute("aria-describedby"); };
   }, [id, tip]);
-  return tip && <Popover key={tip.text} anchorRect={() => tip.target.getBoundingClientRect()} role="tooltip" id={id} focus={false} dismiss={false} restoreFocus={false} onClose={() => setTip(null)} className="ui-tooltip">{tip.text}</Popover>;
+  return tip && <Popover key={tip.text} anchorRect={() => tip.target.getBoundingClientRect()} role="tooltip" id={id} focus={false} dismiss={false} restoreFocus={false} onClose={() => setTip(null)} className="ui-tooltip"><TipText text={tip.text} /></Popover>;
+}
+
+const KEYS_IN_TITLE = /^(.*?) \(([^()]+)\)(.*)$/;
+
+function TipText({ text }: { text: string }) {
+  const [, name, keys, rest] = KEYS_IN_TITLE.exec(text) ?? [];
+  if (name === undefined || keys === undefined) return text;
+  return <span className="inline-flex items-center gap-1.5">{name}<kbd>{keys}</kbd>{rest}</span>;
 }

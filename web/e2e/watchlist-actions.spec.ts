@@ -229,7 +229,7 @@ test("목록 복제·이름 바꾸기는 순서를 보존하며 목록 지우기
   await expect(listButton(page)).toHaveAccessibleName("관심종목 목록: 장기 관찰");
   await listButton(page).click();
   await menu.getByRole("menuitem", { name: "목록 지우기", exact: true }).click();
-  await page.getByRole("dialog").getByRole("button", { name: "확인", exact: true }).click();
+  await page.getByRole("dialog").getByRole("button", { name: "목록 지우기", exact: true }).click();
   await expect(listButton(page)).toHaveAccessibleName("관심종목 목록: 반도체");
   await page.reload();
   await expect(listButton(page)).toHaveAccessibleName("관심종목 목록: 반도체");

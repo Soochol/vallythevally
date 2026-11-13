@@ -199,7 +199,7 @@ test("빈 저장소를 채우고 만든 조건식으로 찾은 종목을 칸의 
     await screenAction(dialog, "지우기");
     const confirmation = page.getByRole("dialog", { name: `"${EDITED_NAME}" 조건식을 삭제할까요? 되돌릴 수 없습니다.` });
     await expect(confirmation).toBeVisible();
-    await confirmation.getByRole("button", { name: "확인", exact: true }).click();
+    await confirmation.getByRole("button", { name: "조건식 지우기", exact: true }).click();
     await saved;
     await expect(dialog).toBeHidden();
     await expect(panel(page).getByText("저장한 조건식이 없습니다")).toBeVisible();

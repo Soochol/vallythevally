@@ -405,7 +405,7 @@ function PanelMenu({ screen, rows, status, saveOnly = false }: { screen: Screen 
       ? []
       : [{ kind: "action", label: `새 목록 "${fresh}"`, disabled: nothing || lists.length >= MAX_WATCHLISTS, onSelect: () => sendToNewWatchlist(fresh, codes) }];
   const reload = async () => {
-    if (await confirmAction(FULL_RELOAD_CONFIRM)) void start(true).catch(showCommandError);
+    if (await confirmAction(FULL_RELOAD_CONFIRM, { action: "전체 다시 받기" })) void start(true).catch(showCommandError);
   };
   const items: MenuItem[] = [
     { kind: "heading", label: nothing ? "관심종목으로 보내기" : `결과 ${count(codes.length)}종목을 관심종목으로 보내기` },
