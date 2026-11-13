@@ -31,6 +31,7 @@ async function open(page: Page) {
   await page.addInitScript(installChartProbe);
   await page.addInitScript(installAxisProbe);
   await page.goto("/");
+  await page.getByRole("tablist", { name: "오른쪽 패널" }).hover();
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
   await expect.poll(() => page.evaluate(() => window.axisTexts().flatMap((axis) => axis.texts).map((label) => label.text))).toContain("−48.1조");
 }
