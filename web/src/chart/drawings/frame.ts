@@ -1,5 +1,6 @@
 import type { Period } from "../../api/generated/Period";
 import { hitTest, type HitItem, type Pane } from "./geometry";
+import type { Interaction } from "./interaction";
 import type { AxisLabel, HandleSpec, Shape, ToolContext } from "./toolSpec";
 import { toolOf } from "./tools";
 import type { DrawingBody, DrawingScope, ScreenPoint } from "./types";
@@ -33,3 +34,14 @@ export function renderItem(drawing: DrawingBody, selected: boolean, ctx: ToolCon
   return { drawing, id: drawing.id, z: drawing.z, shapes: tool.shapes(input, ctx), handles: handleSpecs.map((h) => h.at), handleSpecs, labels: tool.axisLabels(input, ctx) };
 }
 export const frameHit = (frame: RenderFrame, p: ScreenPoint) => frame.editable ? hitTest(frame.items, p, frame.pane) : { kind: "empty" as const };
+
+export function placementPreview(s: Extract<Interaction, { kind: "placing" | "drawing" }>, style: unknown, ctx: ToolContext): Shape[] {
+  const points = s.kind === "placing" ? [...s.fixed, s.cursor] : s.points.length === 1 ? [s.points[0], s.points[0]] : s.points;
+  const shapes = s.tool.shapes({ points, style, text: null, selected: true }, ctx);
+  const vertices = s.kind === "placing" ? s.fixed : s.tool.placement.kind === "freehand" ? [] : s.points;
+  for (const p of vertices) {
+    const screen = ctx.toScreen(p);
+    if (screen) shapes.push({ kind: "circle", c: screen, r: 4, stroke: { color: "$draw", width: 1, dash: "solid" }, fill: { on: true, color: "$chart-bg", opacity: 1 } });
+  }
+  return shapes;
+}

@@ -1,4 +1,4 @@
-import { distanceToSegment } from "../geometry";
+import { segmentDistance } from "../geometry";
 import { at, defaultStroke, readRecord, readStroke, strokeFields } from "../styleKit";
 import { defineTool, type ToolContext } from "../toolSpec";
 import type { DrawingPoint, ScreenPoint, Stroke } from "../types";
@@ -16,13 +16,13 @@ export function parseBrushStyle(raw: unknown): BrushStyle {
   return { ...o, v: 1, line: readStroke(o.line, brushDefaults().line) };
 }
 
-function distanceToTrail(trail: readonly ScreenPoint[], p: ScreenPoint): number {
+function distanceToTrail(trail: readonly ScreenPoint[], a: ScreenPoint, b: ScreenPoint): number {
   const [first, ...rest] = trail;
   if (first === undefined) return Infinity;
-  let best = distanceToSegment(first, first, p);
+  let best = segmentDistance(a, b, first, first);
   let previous = first;
   for (const next of rest) {
-    best = Math.min(best, distanceToSegment(previous, next, p));
+    best = Math.min(best, segmentDistance(a, b, previous, next));
     previous = next;
   }
   return best;
@@ -30,10 +30,17 @@ function distanceToTrail(trail: readonly ScreenPoint[], p: ScreenPoint): number 
 
 export function eraseBrush(points: readonly DrawingPoint[], eraser: readonly ScreenPoint[], radius: number, ctx: ToolContext): DrawingPoint[][] {
   const runs: DrawingPoint[][] = [[]];
+  let kept: ScreenPoint | null = null;
   for (const p of points) {
     const screen = ctx.toScreen(p);
-    if (screen !== null && distanceToTrail(eraser, screen) <= radius) runs.push([]);
-    else runs.at(-1)?.push(p);
+    if (screen !== null && distanceToTrail(eraser, screen, screen) <= radius) {
+      runs.push([]);
+      kept = null;
+      continue;
+    }
+    if (screen !== null && kept !== null && distanceToTrail(eraser, kept, screen) <= radius) runs.push([]);
+    runs.at(-1)?.push(p);
+    kept = screen;
   }
   return runs.filter((run) => run.length >= 2);
 }

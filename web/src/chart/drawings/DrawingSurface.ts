@@ -15,7 +15,7 @@ import { barLength, fromScreen, logicalToT, startAt, tToLogical, timelineOf, too
 import { reusableStyle } from "./objects";
 import * as clipboard from "./clipboard";
 import { DrawingLayer, VLinePaneLayer } from "./DrawingLayer";
-import { frameHit, renderItem, visible, type RenderFrame } from "./frame";
+import { frameHit, placementPreview, renderItem, visible, type RenderFrame } from "./frame";
 import { idsInBox, nudge, shapeBounds, type NudgeKey } from "./geometry";
 import { holds, resolvePress, type DragAction, type Mods } from "./gestures";
 import { toolHotkey } from "./hotkeys";
@@ -148,14 +148,7 @@ export class DrawingSurface implements ChartExtension {
     const items = drawings.filter((d) => visible(d, { layoutId, slot: this.slot, period: view?.period ?? "D", hideAll: prefs.hideAll }))
       .map((d) => renderItem(d, editable && session.selected.includes(d.id), c.ctx)).filter((item) => item !== null);
     const preview: Shape[] = [];
-    if (this.state.kind === "placing" || this.state.kind === "drawing") {
-      const s = this.state;
-      const points = s.kind === "placing" ? [...s.fixed, s.cursor] : s.points.length === 1 ? [s.points[0]!, s.points[0]!] : s.points;
-      preview.push(...s.tool.shapes({ points, style: prefs.lastStyle[s.tool.tool] ?? s.tool.defaultStyle(), text: null, selected: true }, c.ctx));
-      for (const p of s.kind === "placing" ? s.fixed : s.points) {
-        const screen = c.ctx.toScreen(p); if (screen) preview.push({ kind: "circle", c: screen, r: 4, stroke: { color: "$draw", width: 1, dash: "solid" }, fill: { on: true, color: "$chart-bg", opacity: 1 } });
-      }
-    }
+    if (this.state.kind === "placing" || this.state.kind === "drawing") preview.push(...placementPreview(this.state, prefs.lastStyle[this.state.tool.tool] ?? this.state.tool.defaultStyle(), c.ctx));
     if (this.state.kind === "mode") preview.push(...(modeOf(this.state.mode)?.preview(this.state.path, this.modeContext({ items, ctx: c.ctx })) ?? []));
     let transient: RenderFrame["transient"];
     if (this.transient) {

@@ -52,6 +52,12 @@ describe("채운 도형은 안쪽 전체가 몸통이다", () => {
     expect(hitShape(ellipse, { x: 100, y: 50 }, pane)).toBe("fill");
     expect(hitShape(ellipse, { x: 198, y: 50 }, pane)).toBe("line");
     expect(hitShape(ellipse, { x: 195, y: 95 }, pane)).toBeNull();
+    const flat: Shape = { kind: "ellipse", a: { x: 0, y: 0 }, b: { x: 200, y: 10 }, stroke };
+    expect(hitShape(flat, { x: 190, y: 5 }, pane)).toBe("line");
+    expect(hitShape(flat, { x: 30, y: 5 }, pane)).toBe("line");
+    expect(hitShape(flat, { x: 100, y: 15 }, pane)).toBe("line");
+    expect(hitShape(flat, { x: 100, y: 17 }, pane)).toBeNull();
+    expect(hitShape(flat, { x: 207, y: 5 }, pane)).toBeNull();
     expect(hitShape({ kind: "circle", c: { x: 50, y: 50 }, r: 10, stroke }, { x: 61, y: 50 }, pane)).toBe("line");
   });
 
@@ -92,6 +98,12 @@ describe("겹쳤을 때: 핸들 > 선 > 채움, 같으면 z가 큰 것", () => {
   test("고른 드로잉의 핸들이 선을 이긴다", () => {
     const selected: HitItem = { ...low, z: 0, handles: [{ x: 50, y: 104 }] };
     expect(hitTest([high, selected], { x: 50, y: 101 }, pane)).toEqual({ kind: "handle", id: "low", index: 0 });
+  });
+
+  test("핸들이 6px 안에 여럿이면 가장 가까운 핸들", () => {
+    const thin: HitItem = { id: "thin", z: 1, shapes: [{ kind: "rect", a: { x: 0, y: 0 }, b: { x: 100, y: 4 }, stroke }], handles: [{ x: 0, y: 0 }, { x: 100, y: 0 }, { x: 100, y: 4 }, { x: 0, y: 4 }] };
+    expect(hitTest([thin], { x: 100, y: 3 }, pane)).toEqual({ kind: "handle", id: "thin", index: 2 });
+    expect(hitTest([thin], { x: 1, y: 1 }, pane)).toEqual({ kind: "handle", id: "thin", index: 0 });
   });
 
   test("아무것도 없으면 빈 곳", () => {

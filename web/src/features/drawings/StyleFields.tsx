@@ -1,6 +1,7 @@
 import { Select } from "../menu/Select";
 import type { StyleField } from "../../chart/drawings/toolSpec";
 import { drawingColor } from "../../chart/drawings/DrawingLayer";
+import { TEXT_SIZE } from "../../chart/drawings/styleKit";
 import type { Dash, TextStyle, Width } from "../../chart/drawings/types";
 import { ColorPicker } from "../color/ColorPicker";
 
@@ -18,7 +19,7 @@ export function DashInput({ label, value, onChange }: { label: string; value: Da
 
 function TextAppearance({ value, change }: { value: TextStyle; change(v: TextStyle): void }) {
   return <div className="draw-field-stack"><ColorInput label="글자 색" value={value.color} onChange={(color) => change({ ...value, color })} />
-    <label>글자 크기<input className={INPUT} type="number" min={8} max={72} value={value.size} onChange={(e) => change({ ...value, size: Math.max(8, Math.min(72, Number(e.target.value))) })} /></label>
+    <label>글자 크기<input className={INPUT} type="number" min={TEXT_SIZE.min} max={TEXT_SIZE.max} value={value.size} onChange={(e) => change({ ...value, size: Math.max(TEXT_SIZE.min, Math.min(TEXT_SIZE.max, Number(e.target.value))) })} /></label>
     <label><input type="checkbox" checked={value.bold} onChange={(e) => change({ ...value, bold: e.target.checked })} /> 굵게</label>
     <label><input type="checkbox" checked={value.italic} onChange={(e) => change({ ...value, italic: e.target.checked })} /> 기울임</label></div>;
 }

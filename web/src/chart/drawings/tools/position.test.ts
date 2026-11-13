@@ -131,6 +131,14 @@ describe("매도 포지션", () => {
     expect(handleMove(short, points, 1, { t: 0, price: 150 })[2]?.price).toBe(200);
     expect(handleMove(short, points, 1, { t: 0, price: 220 })[2]?.price).toBe(220);
   });
+
+  test("좌표를 바로 넣어도 핸들과 같은 범위에서 멈춘다", () => {
+    const [, target, stop] = points;
+    expect(short.setPoint?.(points, 1, { t: target!.t, price: 230 }, ctx)[1]).toEqual({ t: target!.t, price: 200 });
+    expect(short.setPoint?.(points, 1, { t: 0, price: 170 }, ctx)[1]).toEqual({ t: 1060, price: 170 });
+    expect(short.setPoint?.(points, 2, { t: stop!.t, price: 150 }, ctx)[2]).toEqual({ t: stop!.t, price: 200 });
+    expect(short.setPoint?.(points, 0, { t: 9000, price: 300 }, ctx)[0]).toEqual({ t: target!.t - 60, price: stop!.price });
+  });
 });
 
 test("포지션 스타일: 글자 색 막대, 모르는 키 보존, 틀린 값은 기본값", () => {

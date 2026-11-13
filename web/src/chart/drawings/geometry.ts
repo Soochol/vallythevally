@@ -9,6 +9,7 @@ export const LINE_HIT_PX = 6;
 export const HANDLE_HIT_PX = 6;
 export const HANDLE_DIAMETER_PX = 8;
 export const AXIS_DECIDE_PX = 8;
+const ELLIPSE_ITERATIONS = 6;
 
 export interface Pane {
   width: number;
@@ -73,6 +74,17 @@ export function distanceToSegment(a: ScreenPoint, b: ScreenPoint, p: ScreenPoint
   return dist({ x: a.x + t * dx, y: a.y + t * dy }, p);
 }
 
+const turn = (o: ScreenPoint, a: ScreenPoint, b: ScreenPoint) => Math.sign((a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x));
+
+function segmentsCross(a: ScreenPoint, b: ScreenPoint, c: ScreenPoint, d: ScreenPoint): boolean {
+  return turn(c, d, a) * turn(c, d, b) < 0 && turn(a, b, c) * turn(a, b, d) < 0;
+}
+
+export function segmentDistance(a: ScreenPoint, b: ScreenPoint, c: ScreenPoint, d: ScreenPoint): number {
+  if (segmentsCross(a, b, c, d)) return 0;
+  return Math.min(distanceToSegment(c, d, a), distanceToSegment(c, d, b), distanceToSegment(a, b, c), distanceToSegment(a, b, d));
+}
+
 function insidePolygon(points: readonly ScreenPoint[], p: ScreenPoint): boolean {
   let inside = false;
   for (let i = 0, j = points.length - 1; i < points.length; j = i++) {
@@ -121,9 +133,23 @@ function boxEdgeDistance(box: Box, p: ScreenPoint): number {
 
 function ellipseDistance(c: ScreenPoint, rx: number, ry: number, p: ScreenPoint): number {
   if (rx === 0 || ry === 0) return distanceToSegment({ x: c.x - rx, y: c.y - ry }, { x: c.x + rx, y: c.y + ry }, p);
-  const d = Math.hypot((p.x - c.x) / rx, (p.y - c.y) / ry);
-  if (d === 0) return Math.min(rx, ry);
-  return dist(p, c) * Math.abs(1 - 1 / d);
+  const px = Math.abs(p.x - c.x);
+  const py = Math.abs(p.y - c.y);
+  let tx = Math.SQRT1_2;
+  let ty = Math.SQRT1_2;
+  for (let i = 0; i < ELLIPSE_ITERATIONS; i++) {
+    const ex = ((rx * rx - ry * ry) * tx ** 3) / rx;
+    const ey = ((ry * ry - rx * rx) * ty ** 3) / ry;
+    const r = Math.hypot(rx * tx - ex, ry * ty - ey);
+    const q = Math.hypot(px - ex, py - ey);
+    if (q === 0) break;
+    tx = Math.min(1, Math.max(0, (((px - ex) * r) / q + ex) / rx));
+    ty = Math.min(1, Math.max(0, (((py - ey) * r) / q + ey) / ry));
+    const t = Math.hypot(tx, ty);
+    tx /= t;
+    ty /= t;
+  }
+  return Math.hypot(px - rx * tx, py - ry * ty);
 }
 
 export type ShapeHit = "line" | "fill" | null;
@@ -164,8 +190,21 @@ export function hitShape(s: Shape, p: ScreenPoint, pane: Pane, measure: TextMeas
 
 const RANK = { handle: 2, line: 1, fill: 0 } as const;
 
+function nearestHandle(handles: readonly ScreenPoint[], p: ScreenPoint): number {
+  let best = -1;
+  let bestDistance = Infinity;
+  handles.forEach((h, i) => {
+    const d = dist(h, p);
+    if (d <= HANDLE_HIT_PX && d < bestDistance) {
+      best = i;
+      bestDistance = d;
+    }
+  });
+  return best;
+}
+
 function itemHit(item: HitItem, p: ScreenPoint, pane: Pane, measure: TextMeasure): { hit: Hit; rank: number } | null {
-  const handle = item.handles.findIndex((h) => dist(h, p) <= HANDLE_HIT_PX);
+  const handle = nearestHandle(item.handles, p);
   if (handle >= 0) return { hit: { kind: "handle", id: item.id, index: handle }, rank: RANK.handle };
   let part: ShapeHit = null;
   for (const s of item.shapes) {

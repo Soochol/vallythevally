@@ -128,6 +128,12 @@ function positionTool(side: PositionSide): Tool {
       if (labelled && ratio !== null) shapes.push(measureLabel({ x, y: a.y }, `손익비 ${ratio.toFixed(2)}`, style.label, DRAW, "middle", align));
       return shapes;
     },
+    setPoint(points, index, to, ctx) {
+      if (index === 0) return moves.entry(points, to, ctx);
+      if (index === 1) return moves.right(moves.target(points, to, ctx), to, ctx);
+      if (index === 2) return moves.stop(points, to, ctx);
+      return [...points];
+    },
     handles({ points }, ctx) {
       const all = trio(points);
       if (all === null) return [];
