@@ -1,4 +1,4 @@
-.drawing-toolbar { position:absolute; left:calc((100% - var(--chart-right, 0px)) / 2); bottom:36px; z-index:10; transform:translateX(-50%); display:flex; align-items:center; gap:4px; max-width:calc(100% - var(--chart-right, 0px) - 26rem); min-width:11rem; padding:5px; border-radius:var(--r-pill); color:var(--text-2); overflow-x:auto; overflow-y:hidden; scrollbar-width:none; }
+.drawing-toolbar { position:absolute; left:calc((100% - var(--chart-right, 0px)) / 2); top:calc(var(--chart-inset-top, 0px) + var(--size-4)); z-index:10; transform:translateX(-50%); display:flex; align-items:center; gap:4px; max-width:calc(100% - var(--chart-right, 0px) - 11rem); min-width:11rem; padding:5px; border-radius:var(--r-pill); color:var(--text-2); overflow-x:auto; overflow-y:hidden; scrollbar-width:none; }
 .drawing-toolbar>* { flex-shrink:0; }
 .draw-tool { display:grid; place-items:center; width:32px; height:32px; border-radius:var(--r-pill); color:var(--text-2); cursor:pointer; }
 .draw-tool:hover { background:var(--hover); color:var(--text); }
@@ -19,7 +19,7 @@
 .draw-tool-menu kbd { margin-left:auto; color:var(--text-3); font-size:var(--fs-xs); }
 .draw-separator { width:1px; height:18px; margin:0 4px; background:var(--line); }
 .draw-magnet-select { width:32px; padding:1px; color:var(--text-2); font-size:var(--fs-xs); background:var(--bg); border-radius:var(--r-s); }
-.draw-toolbar-bottom { display:flex; align-items:center; gap:4px; padding-left:8px; margin-left:4px; border-left:1px solid var(--line); }
+.draw-toolbar-end { display:flex; align-items:center; gap:4px; padding-left:8px; margin-left:4px; border-left:1px solid var(--line); }
 .drawing-overlay { position:absolute; inset:0; z-index:7; pointer-events:none; }
 .drawing-floating { display:flex; align-items:center; gap:4px; min-height:38px; padding:4px; max-width:calc(100dvw - 16px); flex-wrap:wrap; pointer-events:auto; white-space:nowrap; }
 .drawing-floating .icon-btn { width:28px; height:28px; }
