@@ -24,6 +24,16 @@ function confirm(slot: number, editor: DrawingEditor) {
   close(slot);
 }
 const draft = (patch: Partial<DrawingBody>) => useDrawingSession.setState((s) => s.editor ? { editor: { ...s.editor, draft: { ...s.editor.draft, ...patch } } } : s);
+const meaningful = (text: string | null) => text?.trim() ? text : null;
+function settlePoint(slot: number, index: number) {
+  const ctx = surfaceFor(slot)?.frame().ctx;
+  useDrawingSession.setState((s) => {
+    const editor = s.editor; const point = editor?.draft.points[index];
+    const setPoint = editor ? toolOf(editor.draft.tool)?.setPoint : undefined;
+    if (!editor || !point || !setPoint || !ctx) return s;
+    return { editor: { ...editor, draft: { ...editor.draft, points: setPoint(editor.draft.points, index, point, ctx) } } };
+  });
+}
 export function DrawingDetails({ slot, editor, anchor }: { slot: number; editor: DrawingEditor; anchor: RefObject<HTMLElement | null> }) {
   const tool = toolOf(editor.draft.tool);
   if (!tool) return null;
@@ -41,9 +51,9 @@ export function DrawingDetails({ slot, editor, anchor }: { slot: number; editor:
           const update = (patch: Partial<typeof p>) => draft({ points: editor.draft.points.map((point, j) => i === j ? { ...point, ...patch } : point) });
           return <fieldset className="draw-coordinate" key={i}><legend>{role?.label ?? `점 ${i + 1}`}</legend>
             {role?.uses !== "price" && (value === null
-              ? <label>시각 (Unix 초)<input aria-label={`점 ${i + 1} 시각 (Unix 초)`} className={INPUT} type="text" inputMode="numeric" value={p.t} onChange={(e) => { const t = parseSeconds(e.target.value); if (t !== null) update({ t }); }} /></label>
-              : <label>시각 (KST)<input aria-label={`점 ${i + 1} 시각`} className={INPUT} type="datetime-local" step={1} value={value} onChange={(e) => { const t = parseCalendarTime(e.target.value); if (t !== null) update({ t }); }} /></label>)}
-            {role?.uses !== "time" && <label>가격<input aria-label={`점 ${i + 1} 가격`} className={INPUT} type="number" step="any" value={p.price} onChange={(e) => { if (Number.isFinite(e.target.valueAsNumber)) update({ price: e.target.valueAsNumber }); }} /></label>}
+              ? <label>시각 (Unix 초)<input aria-label={`점 ${i + 1} 시각 (Unix 초)`} className={INPUT} type="text" inputMode="numeric" value={p.t} onBlur={() => settlePoint(slot, i)} onChange={(e) => { const t = parseSeconds(e.target.value); if (t !== null) update({ t }); }} /></label>
+              : <label>시각 (KST)<input aria-label={`점 ${i + 1} 시각`} className={INPUT} type="datetime-local" step={1} value={value} onBlur={() => settlePoint(slot, i)} onChange={(e) => { const t = parseCalendarTime(e.target.value); if (t !== null) update({ t }); }} /></label>)}
+            {role?.uses !== "time" && <label>가격<input aria-label={`점 ${i + 1} 가격`} className={INPUT} type="number" step="any" value={p.price} onBlur={() => settlePoint(slot, i)} onChange={(e) => { if (Number.isFinite(e.target.valueAsNumber)) update({ price: e.target.valueAsNumber }); }} /></label>}
           </fieldset>;
         })}
         </details>
@@ -54,7 +64,7 @@ export function DrawingDetails({ slot, editor, anchor }: { slot: number; editor:
           }} />{PERIOD_LABEL[p]}</label>)}</div></details>
       </div>
       <div className="draw-settings-foot"><button className="tb-btn" type="button" onClick={() => draft({ style: defaultObjectStyle(editor.draft) })}>기본 스타일로</button><span />
-        <button className="tb-btn" type="button" onClick={() => close(slot)}>취소</button><button className="btn-primary" type="button" onClick={() => confirm(slot, editor)}>확인</button></div>
+        <button className="tb-btn" type="button" onClick={() => close(slot)}>취소</button><button className="btn-primary" type="button" onClick={() => confirm(slot, { ...editor, draft: { ...editor.draft, text: meaningful(editor.draft.text) } })}>확인</button></div>
   </Popover>;
 }
 
@@ -62,7 +72,6 @@ export function DrawingTextEditor({ slot, editor }: { slot: number; editor: Draw
   const ref = useRef<HTMLTextAreaElement>(null);
   const anchor = useRef<HTMLDivElement>(null);
   const surface = surfaceFor(slot); const p = editor.draft.points.at(-1); const at = p ? surface?.frame().ctx.toScreen(p) : null;
-  const meaningful = (text: string | null) => text?.trim() ? text : null;
   const typed = { ...editor, draft: { ...editor.draft, text: meaningful(editor.draft.text) } };
   const submit = () => typed.draft.text === meaningful(editor.original.text) ? close(slot) : confirm(slot, typed);
   useEffect(() => { ref.current?.focus(); ref.current?.select(); }, []);

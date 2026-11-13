@@ -138,6 +138,7 @@ export interface ToolSpec<S> {
   bar: BarFields<S>;
   settings: SettingsTabs<S>;
   finalize?(placed: readonly DrawingPoint[], ctx: ToolContext): DrawingPoint[];
+  setPoint?(points: readonly DrawingPoint[], index: number, to: DrawingPoint, ctx: ToolContext): DrawingPoint[];
   shapes(d: ToolDrawing<S>, ctx: ToolContext): Shape[];
   handles(d: ToolDrawing<S>, ctx: ToolContext): HandleSpec[];
   axisLabels(d: ToolDrawing<S>, ctx: ToolContext): AxisLabel[];
