@@ -1,21 +1,13 @@
 import { selectOption, selectMinute } from "./select-option";
-import { test, expect, cell, chartOf, type Scenario } from "./harness";
+import { test, expect, cell, chartOf } from "./harness";
 import type { Page } from "@playwright/test";
-import type { Drawing } from "../src/api/generated/Drawing";
 import type { Bar } from "../src/api/generated/Bar";
 import type { DrawingBody } from "../src/chart/drawings/types";
 import { completionKey } from "../src/chart/drawings/journal";
+import { toolsByGroup } from "../src/chart/drawings/tools";
+import type { Tool } from "../src/chart/drawings/toolSpec";
+import { chartPoint, drawings, mirror, open, pickTool } from "./drawing-probe";
 
-interface Mirror { id: string; tool: string; selected: boolean; points: ({ x: number; y: number } | null)[]; handles: { x: number; y: number }[] }
-async function mirror(page: Page): Promise<Mirror[]> {
-  const json = await chartOf(cell(page)).locator(".drawing-mirror").getAttribute("data-drawings");
-  return JSON.parse(json ?? "[]");
-}
-const drawings = async (scenario: Scenario): Promise<Drawing[]> => scenario.documents.drawings("IDX:001");
-async function open(page: Page) {
-  await page.goto("/");
-  await expect(chartOf(cell(page))).toHaveAttribute("data-bar-count", /^[1-9]\d*$/);
-}
 async function draw(page: Page, tool = "T", shift = false) {
   const chart = chartOf(cell(page)); const r = (await chart.boundingBox())!;
   await cell(page).focus(); await page.keyboard.press(tool);
@@ -201,12 +193,22 @@ test("drawing engine: Alt tool aliases consume browser shortcuts and text fields
   expect(prevented).toBe(true);
   await page.keyboard.press("Alt+f");
   await expect(cell(page)).toBeFocused();
+  await page.getByRole("button", { name: "선택 도구", exact: true }).click();
+  const onLine = await chartPoint(page, 0.5, 0.5); await page.mouse.click(onLine.x, onLine.y);
+  await expect.poll(async () => (await mirror(page)).find((d) => d.tool === "hline")?.selected).toBe(true);
   await page.getByRole("button", { name: "드로잉 세부 설정" }).click();
   const dialog = page.getByRole("dialog", { name: "수평선 세부 설정" });
   await dialog.locator("summary").filter({ hasText: /^글자$/ }).click();
   const input = dialog.getByRole("textbox", { name: "글자", exact: true });
   await input.fill("A"); await input.press("Control+a"); await input.press("Control+c");
   await expect(dialog).toBeVisible(); await expect.poll(async () => (await drawings(scenario)).length).toBe(2);
+});
+
+const GROUP_LABEL: Record<Tool["group"], string> = { line: "선", fib: "피보나치", shape: "도형", note: "주석", measure: "측정" };
+
+test("drawing engine: the toolbar picks every registered tool by group and name", async ({ page }) => {
+  await open(page);
+  for (const [group, tools] of toolsByGroup()) for (const tool of tools) await pickTool(page, GROUP_LABEL[group], tool.label);
 });
 
 test("drawing engine: phone shows persisted shapes without editing controls", async ({ page, scenario }, testInfo) => {

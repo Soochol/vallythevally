@@ -1,12 +1,20 @@
 import type { Tool } from "../toolSpec";
 import type { DrawingTool } from "../types";
-import { hline } from "./hline";
-import { trendline } from "./trendline";
+import { FIB_TOOLS } from "./groups/fib";
+import { LINE_TOOLS } from "./groups/line";
+import { MEASURE_TOOLS } from "./groups/measure";
+import { NOTE_TOOLS } from "./groups/note";
+import { SHAPE_TOOLS } from "./groups/shape";
 
-export const TOOLS: readonly Tool[] = [
-  trendline,
-  hline,
-];
+const TOOL_GROUPS: Readonly<Record<Tool["group"], readonly Tool[]>> = {
+  line: LINE_TOOLS,
+  fib: FIB_TOOLS,
+  shape: SHAPE_TOOLS,
+  note: NOTE_TOOLS,
+  measure: MEASURE_TOOLS,
+};
+
+export const TOOLS: readonly Tool[] = Object.values(TOOL_GROUPS).flat();
 
 const BY_ID: ReadonlyMap<DrawingTool, Tool> = new Map(TOOLS.map((t) => [t.tool, t]));
 

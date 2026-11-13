@@ -130,8 +130,8 @@ test("없어진 넓게 보기 설정은 읽을 때 버려 다시 저장하지 �
 });
 
 
-test("고정 드로잉 도구는 구현된 도구만 읽고 새로고침용 UI 상태에 왕복한다", () => {
-  const { prefs, extra } = parseUiState({ ...DEFAULT_UI_PREFS, drawing: { pinnedTools: ["hline", "trendline", "hline", "fib", "wrong", null], future: 9 } });
+test("고정 드로잉 도구는 도구 이름만 중복 없이 읽고 새로고침용 UI 상태에 왕복한다", () => {
+  const { prefs, extra } = parseUiState({ ...DEFAULT_UI_PREFS, drawing: { pinnedTools: ["hline", "trendline", "hline", "wrong", null], future: 9 } });
   expect(prefs.drawing.pinnedTools).toEqual(["hline", "trendline"]);
   expect(parseUiState(toUiState(prefs, extra)).prefs.drawing).toEqual(prefs.drawing);
   expect(parseUiState({ ...DEFAULT_UI_PREFS, drawing: { pinnedTools: "hline" } }).prefs.drawing.pinnedTools).toEqual([]);
