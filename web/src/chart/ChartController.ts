@@ -29,10 +29,10 @@ import { BarFeed, displayBars, type FetchPage, type History } from "./barFeed";
 import { type CompareEntry, CompareLayer, compareVenue } from "./compare";
 import { CompareLegend } from "./compareLegend";
 import { type OpenPort, openIndicatorPort } from "./indicators/client";
-import { isFinancial } from "./indicators/kinds";
 import { IndicatorLayer } from "./indicators/layer";
 import { PanelControls } from "./panelControls";
 import { type IndicatorCommand, IndicatorLegend } from "./indicators/legendRows";
+import { chartIndicators, chartPanels } from "./indicators/shown";
 import { isTailChange } from "./indicators/sync";
 import { Legend, legendParts } from "./legend";
 import { addMainSeries, applyMainColors, type MainSeries, priceFormat, setMainData, updateMainBar } from "./series";
@@ -176,9 +176,9 @@ export class ChartController {
     this.resize.observe(el);
     this.panelControls = new PanelControls(el, this.chart, () => this.scheduleFrame(), () => {
       const shown = this.indicators.stretches();
-      const active = this.view?.settings.indicators.filter((c) => !isFinancial(c.spec) || this.view?.period === "Q" || this.view?.period === "Y") ?? [];
+      const drawn = this.view ? chartPanels(this.view.settings, this.view.period) : [];
       let n = 0;
-      const now = (this.view?.settings.panels ?? []).map((p) => active.some((c) => c.panel === p.id) ? shown[n++] ?? p.stretch : p.stretch);
+      const now = (this.view?.settings.panels ?? []).map((p) => drawn.some((d) => d.id === p.id) ? shown[n++] ?? p.stretch : p.stretch);
       deps.onPanelStretch?.(now);
       this.scheduleFrame();
     });
@@ -266,8 +266,8 @@ export class ChartController {
       this.feed.open({ symbol: next.symbol, venue: next.venue, period: next.period });
     }
     if (prev?.period !== next.period || prev?.settings.indicators !== next.settings.indicators || prev?.settings.panels !== next.settings.panels) {
-      const configs = next.settings.indicators.filter((c) => !isFinancial(c.spec) || next.period === "Q" || next.period === "Y");
-      const panels = next.settings.panels.filter((p) => configs.some((c) => c.panel === p.id));
+      const configs = chartIndicators(next.settings, next.period);
+      const panels = chartPanels(next.settings, next.period);
       this.withDataGuard(() => preserveTimeRange(this.chart.timeScale(), next.period, () => this.indicators.setConfigs(configs, panels)));
     }
     this.indicators.setPreview(next.previewIndicator ?? null);
@@ -658,7 +658,7 @@ export class ChartController {
     const i = this.hoverIndex ?? this.bars.length - 1;
     const bar = this.bars[i];
     const tops = this.paneTops();
-    const panels = this.view?.settings.panels.filter((p) => this.view?.settings.indicators.some((c) => c.panel === p.id && (!isFinancial(c.spec) || this.period() === "Q" || this.period() === "Y"))) ?? [];
+    const panels = view ? chartPanels(view.settings, this.period()) : [];
     this.panelControls.render(panels, tops);
     this.indicatorLegend.render(this.indicators.rows(this.financialHoverTime ?? bar?.t ?? null), tops, this.chart.priceScale("right").width());
     this.compareLegend.render(this.compare.rows(this.leftT(), bar?.t ?? null));
