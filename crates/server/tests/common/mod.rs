@@ -64,13 +64,15 @@ impl Server {
             let rest = server::kiwoom::rest::KiwoomRest::new(transport.transport(), auth, clock.clone());
             let db = server::db::AppDb::open(&parent.join("vally.db")).await.unwrap();
             let store_path = parent.join("screener.duckdb");
-            let store = tokio::task::spawn_blocking(move || server::screener::store::Store::open(&store_path).unwrap()).await.unwrap();
+            let dispatcher = tracing::dispatcher::get_default(Clone::clone);
+            let store = tokio::task::spawn_blocking(move || tracing::dispatcher::with_default(&dispatcher, || server::screener::store::Store::open(&store_path).unwrap())).await.unwrap();
             let symbols = Arc::new(server::symbols::SymbolDirectory::default());
             let (stream, _desired) = server::kiwoom::stream::KiwoomStream::detached();
             let state = server::app::application(server::app::ApplicationInputs { rest: rest.clone(), clock: clock.clone(), symbols: symbols.clone(), db, screener_store: store, stream: (stream, stream_events), static_dir });
             server::app::initialize_rest(&rest, &clock, &token_path).await;
             let mut background = tokio::task::JoinSet::new();
             background.spawn(server::app::initialize_market(state.clone(), value("VALLY_SCREENER_UPDATE_ON_START") == Some("on")));
+            background.spawn(server::app::daily_maintenance(state.clone()));
             let financial_path = value("VALLY_FINANCIAL_DB_PATH").map(PathBuf::from).unwrap_or_else(|| parent.join("financials.db"));
             let financial_store = server::financials::store::Store::open(&financial_path).await;
             let client = value("OPENDART_API_KEY").filter(|key| !key.is_empty()).map(|key| server::financials::client::Client::new(server::config::Secret::new(key.into()), value("VALLY_DART_BASE_URL").expect("DART tests require loopback URL").into(), value("VALLY_KIND_BASE_URL").expect("KIND tests require loopback URL").into()).unwrap());

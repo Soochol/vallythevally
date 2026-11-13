@@ -132,6 +132,13 @@ pub async fn initialize_market(state: Arc<AppState>, update_on_start: bool) {
     if update_on_start { state.screener.update_if_behind().await; }
 }
 
+pub async fn daily_maintenance(state: Arc<AppState>) {
+    tokio::join!(
+        daily_reset(state.clock.clone(), state.rest.clone(), state.symbols.clone(), state.bars.clone(), state.hub.clone()),
+        daily_token(state.clock.clone(), state.rest.clone()),
+    );
+}
+
 async fn serve(config: Config, token_file: TokenFile) -> ExitCode {
     let db = match AppDb::open(&config.db_path).await {
         Ok(db) => db,
@@ -189,8 +196,7 @@ async fn serve(config: Config, token_file: TokenFile) -> ExitCode {
     let stream = KiwoomStream::spawn(config.kiwoom_ws_url.clone(), rest.clone(), clock.clone());
     let state = application(ApplicationInputs { rest: rest.clone(), clock: clock.clone(), symbols: symbols.clone(), db, screener_store, stream, static_dir: config.static_dir.clone() });
     tokio::spawn(initialize_market(state.clone(), config.screener_update_on_start));
-    tokio::spawn(daily_reset(clock.clone(), rest.clone(), symbols.clone(), state.bars.clone(), state.hub.clone()));
-    tokio::spawn(daily_token(clock.clone(), rest.clone()));
+    tokio::spawn(daily_maintenance(state.clone()));
 
     let financial_store = crate::financials::store::Store::open(&config.financial_db_path).await;
     if let Err(failure) = financial_store { tracing::warn!(?failure, "재무 저장소를 열 수 없습니다"); }
