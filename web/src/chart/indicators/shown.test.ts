@@ -2,7 +2,7 @@ import { expect, test } from "vitest";
 import type { Period } from "../../api/generated/Period";
 import { type ChartSettings, DEFAULT_CHART_SETTINGS, type IndicatorConfig, type Panel } from "../settings";
 import type { IndicatorSpec } from "./kinds";
-import { chartIndicators, chartPanels, financialRequest } from "./shown";
+import { chartIndicators, chartPanels, financialRequest, type FinancialRequest } from "./shown";
 
 const config = (id: string, spec: IndicatorSpec, panel: IndicatorConfig["panel"], visible = true): IndicatorConfig => ({ id, spec, panel, visible, style: { colors: ["ind-1"], width: 2 } });
 const panel = (id: string): Panel => ({ id, stretch: 0.25 });
@@ -19,14 +19,14 @@ const technical = [ma, rsi, hiddenMacd];
 const financial = [revenue, hiddenDebt, dps];
 const mixed = [revenue, ma, dps, rsi, hiddenDebt, hiddenMacd];
 const panels = ["mixed", "financial", "empty", "technical", "hidden-financial"].map(panel);
-const intraday: Period[] = ["1m", "60m", "D", "W", "M"];
+const nonFinancialPeriods: Period[] = ["1m", "60m", "D", "W", "M"];
 const financialPeriods: Period[] = ["Q", "Y"];
 
-test.each([...intraday, ...financialPeriods])("%s 봉에서 기술지표만 있으면 숨긴 것까지 모두 그린다", (period) => {
+test.each([...nonFinancialPeriods, ...financialPeriods])("%s 봉에서 기술지표만 있으면 숨긴 것까지 모두 그린다", (period) => {
   expect(chartIndicators(settingsOf({ indicators: technical }), period)).toEqual(technical);
 });
 
-test.each(intraday)("%s 봉에서는 재무지표를 그리지 않는다", (period) => {
+test.each(nonFinancialPeriods)("%s 봉에서는 재무지표를 그리지 않는다", (period) => {
   expect(chartIndicators(settingsOf({ indicators: financial }), period)).toEqual([]);
   expect(chartIndicators(settingsOf({ indicators: mixed }), period)).toEqual([ma, rsi, hiddenMacd]);
 });
@@ -50,7 +50,7 @@ test.each<[Period, IndicatorConfig[], string[]]>([
   for (const p of shown) expect(panels).toContain(p);
 });
 
-test.each<[string, Period, IndicatorConfig[], { period: "Q" | "Y"; enabled: boolean }]>([
+test.each<[string, Period, IndicatorConfig[], FinancialRequest]>([
   ["분기 봉의 보이는 재무지표", "Q", [rsi, revenue], { period: "Q", enabled: true }],
   ["연 봉의 보이는 재무지표", "Y", [revenue], { period: "Y", enabled: true }],
   ["연 봉에서 일부만 숨김", "Y", [hiddenDebt, dps], { period: "Y", enabled: true }],
