@@ -1,9 +1,7 @@
-import { useEffect } from "react";
-import { queryOptions, useQuery, useQueryClient } from "@tanstack/react-query";
+import { queryOptions, useQuery } from "@tanstack/react-query";
 import type { FinancialPeriod } from "./generated/FinancialPeriod";
 import type { FinancialsPage } from "./generated/FinancialsPage";
-import { financialJobActive } from "../lib/financialJob";
-import { useFinancialUpdate } from "./financialUpdate";
+import { useFinancialJob } from "./financialUpdate";
 import { getJson } from "./http";
 
 interface FinancialRequest {
@@ -22,12 +20,7 @@ export const financialsQuery = (request: FinancialRequest) => queryOptions({
 });
 
 export function useFinancials(symbol: string, period: FinancialPeriod, enabled: boolean) {
-  const client = useQueryClient();
-  const update = useFinancialUpdate(enabled).data;
-  const active = financialJobActive(update?.status);
-  useEffect(() => {
-    if (enabled) void client.invalidateQueries({ queryKey: ["financials"] });
-  }, [client, enabled, update?.id, update?.status, update?.completedCompanies, update?.failedCompanies, update?.phase, update?.historyCompletedCompanies, update?.historyFailedCompanies]);
+  const { active } = useFinancialJob(enabled);
   const request = { symbol, period };
   const query = useQuery({
     ...financialsQuery(request),

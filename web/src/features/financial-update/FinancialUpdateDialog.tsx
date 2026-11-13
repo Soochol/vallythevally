@@ -1,8 +1,7 @@
-import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Fragment, type ReactNode, useState } from "react";
-import { commandFinancialUpdate, useFinancialUpdate } from "../../api/financialUpdate";
+import { useFinancialJob } from "../../api/financialUpdate";
 import { financialFailure } from "../../chart/financials";
-import { financialJobAction, financialJobView, type FinancialJobCommand } from "../../lib/financialJob";
+import { financialJobAction, financialJobView } from "../../lib/financialJob";
 import { useSelectionStore } from "../../stores/selection";
 import { DESKTOP_QUERY, useMediaQuery } from "../../lib/media";
 import { DialogFrame } from "../dialog/DialogParts";
@@ -17,12 +16,9 @@ export function FinancialUpdateDialog() {
 
 function UpdateDialog() {
   const close = useSelectionStore((s) => s.closeDialog);
-  const client = useQueryClient();
-  const query = useFinancialUpdate();
-  const command = useMutation({ mutationFn: (action: FinancialJobCommand) => commandFinancialUpdate(client, action) });
-  const job = query.data;
-  const view = job && financialJobView(job, command.isPending);
-  const action = financialJobAction(job, command.isPending);
+  const { page: job, query, command } = useFinancialJob();
+  const view = job && financialJobView(job, command.pending);
+  const action = financialJobAction(job, command.pending);
   const desktop = useMediaQuery(DESKTOP_QUERY);
   const [detailed, setDetailed] = useState(false);
   const content = <>
@@ -69,7 +65,7 @@ function UpdateDialog() {
       </div>
       <footer className="flex flex-none justify-end gap-2 border-t border-line px-4 py-3">
         <button type="button" className="tb-btn" onClick={close}>닫기</button>
-        <button type="button" className={action.command === "pause" ? "tb-btn disabled:opacity-50" : "btn-primary h-9 px-4 disabled:cursor-not-allowed disabled:opacity-50"} disabled={action.disabled} onClick={() => command.mutate(action.command)}>{action.label}</button>
+        <button type="button" className={action.command === "pause" ? "tb-btn disabled:opacity-50" : "btn-primary h-9 px-4 disabled:cursor-not-allowed disabled:opacity-50"} disabled={action.disabled} onClick={() => command.run(action.command)}>{action.label}</button>
       </footer>
   </>;
   return <Surface desktop={desktop} onClose={close}>{content}</Surface>;

@@ -2,6 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { createBrowserRouter, Navigate, RouterProvider } from "react-router";
+import { watchFinancialJob } from "./api/financialUpdate";
 import { retryDelay, shouldRetry } from "./api/retry";
 import { ChartRoute } from "./App";
 import { boot } from "./persist/boot";
@@ -17,6 +18,7 @@ const queryClient = new QueryClient({
     },
   },
 });
+watchFinancialJob(queryClient);
 
 // React 밖에서 한 번만 되살린다. StrictMode가 효과를 두 번 부르더라도 복원은 한 번이다.
 void boot(queryClient);
