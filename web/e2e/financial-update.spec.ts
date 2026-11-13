@@ -51,6 +51,7 @@ for (const size of [{ width: 1440, height: 900 }, { width: 1024, height: 768 }, 
     failNext = true;
     await dialog.getByRole("button", { name: "전체 업데이트", exact: true }).click();
     await expect(dialog).toContainText("일부 자료 확인 실패");
+    await dialog.getByRole("button", { name: "자세히", exact: true }).click();
     const failures = dialog.getByRole("region", { name: "실패·미확인 목록" });
     await expect(failures).toContainText("00126380");
     await expect(failures).toContainText("자료원 응답 오류");

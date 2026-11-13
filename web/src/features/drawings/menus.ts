@@ -65,6 +65,6 @@ export function drawingMenu(surface: DrawingSurface, empty = false, at: ScreenPo
     action("분봉만", () => periods(["1m", "3m", "5m", "10m", "15m", "30m", "60m"])), action("일·주·월만", () => periods(["D", "W", "M"])),
     action("지금 봉 주기만", () => periods([surface.host.view()?.period ?? "D"])),
     { kind: "separator" }, action("기본 스타일로", () => surface.updateSelected((d) => ({ ...d, style: defaultObjectStyle(d) }))),
-    { kind: "action", label: "지우기", icon: glyph(DRAWING_ICONS.trash), danger: true, hint: "Del", onSelect: () => surface.remove(true) },
+    { kind: "action", label: "지우기", icon: glyph(DRAWING_ICONS.trash), danger: true, onSelect: () => surface.remove(true) },
   ];
 }
