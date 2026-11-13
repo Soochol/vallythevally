@@ -4,6 +4,7 @@ import type { IndicatorConfig } from "../../chart/settings";
 import { symbolSub } from "../../lib/symbol";
 import { useLayoutStore, type Slot } from "../../stores/layout";
 import { defaultIndicatorMode, useSelectionStore } from "../../stores/selection";
+import { useUiStore } from "../../stores/ui";
 import { EmptyState, ErrorState, Skeleton } from "../overlay/State";
 import { ChevronIcon, CloseIcon, EyeIcon, PlusIcon, SearchIcon } from "../icons";
 import { addButton, stepIndex } from "../indicator-dialog/compareForm";
@@ -11,13 +12,15 @@ import { primaryLabel } from "../indicator-dialog/indicatorForm";
 import { IndicatorSettingsForm } from "../indicator-dialog/IndicatorSettingsForm";
 import { useLiveIndicatorDraft } from "../indicator-dialog/liveDraft";
 import { CompareSection } from "../indicator-command/CompareSection";
-import { COMMAND_TABS, commandKey, type CommandRow, type IndicatorCommandMode } from "../indicator-command/model";
+import { COMMAND_TABS, commandKey, currentKey, type CommandRow, type IndicatorCommandMode } from "../indicator-command/model";
 import { useIndicatorCommand, useIndicatorDraft, type EditableRow, type EditorAction } from "../indicator-command/useIndicatorCommand";
 
 export function IndicatorInspector() {
   const slot = useSelectionStore((s) => s.activeSlot);
   return <InspectorBody key={slot} slot={slot} />;
 }
+
+const AUTO_OPEN = "auto";
 
 const summary = (spec: IndicatorConfig["spec"]) => {
   const label = KINDS[spec.kind].label;
@@ -28,12 +31,12 @@ const summary = (spec: IndicatorConfig["spec"]) => {
 function InspectorBody({ slot }: { slot: Slot }) {
   const command = useIndicatorCommand(slot, defaultIndicatorMode(slot));
   const { cell, mode, input, rows, selected, symbols, search, editor } = command;
-  const [expanded, setExpanded] = useState(false);
+  const [opened, setOpened] = useState<string | null>(null);
   const request = useSelectionStore((s) => s.inspector);
   const inputRef = useRef<HTMLInputElement>(null);
   const revertRef = useRef<() => void>(null);
   const ids = useId();
-  const open = expanded && selected ? selected : null;
+  const open = selected && (opened === AUTO_OPEN || opened === selected.key) ? selected : null;
   const picked = open?.kind === "symbol" && open.selectable ? open.info : null;
   const compareButton = addButton(cell.chartSettings, picked, cell.symbol);
   const tabId = (value: IndicatorCommandMode) => `${ids}-tab-${value}`;
@@ -43,7 +46,7 @@ function InspectorBody({ slot }: { slot: Slot }) {
     const taken = request && useSelectionStore.getState().takeInspectorRequest();
     if (!taken) return;
     command.show(taken.mode, taken.indicatorId);
-    setExpanded(taken.indicatorId !== null);
+    setOpened(taken.indicatorId === null ? null : currentKey(taken.indicatorId));
     inputRef.current?.focus();
   }, [request]);
 
@@ -51,19 +54,21 @@ function InspectorBody({ slot }: { slot: Slot }) {
     if (open) document.getElementById(rowId(open))?.scrollIntoView({ block: "nearest" });
   }, [open?.key]);
 
-  const show = (value: IndicatorCommandMode) => { command.show(value); setExpanded(false); };
+  const show = (value: IndicatorCommandMode) => { command.show(value); setOpened(null); };
   const toggle = (row: CommandRow) => {
-    if (open?.key === row.key && row.kind !== "symbol") return setExpanded(false);
+    if (open?.key === row.key && row.kind !== "symbol") return setOpened(null);
     command.select(row);
-    setExpanded(true);
+    setOpened(row.key);
   };
-  const collapse = () => { setExpanded(false); inputRef.current?.focus(); };
+  const collapse = () => { setOpened(null); inputRef.current?.focus(); };
   const refocus = () => { inputRef.current?.focus(); inputRef.current?.select(); };
   const submit = () => {
     if (open?.kind === "current") return collapse();
     if (open && command.submit()) refocus();
   };
-  const escape = (event: KeyboardEvent) => {
+  const keys = (event: KeyboardEvent) => {
+    if (event.defaultPrevented || event.nativeEvent.isComposing || event.keyCode === 229) return;
+    if (commandKey(event.nativeEvent).kind === "submit" && event.target instanceof HTMLInputElement) { event.preventDefault(); submit(); return; }
     if (event.key !== "Escape" || !open) return;
     event.preventDefault();
     event.stopPropagation();
@@ -71,7 +76,7 @@ function InspectorBody({ slot }: { slot: Slot }) {
     collapse();
   };
 
-  return <section data-chart-control="" aria-labelledby={`${ids}-title`} className="flex min-h-0 flex-1 flex-col" onKeyDown={escape}>
+  return <section data-chart-control="" aria-labelledby={`${ids}-title`} className="flex min-h-0 flex-1 flex-col" onKeyDown={keys}>
     <header className="flex h-[52px] flex-none items-center gap-2 pl-4 pr-2.5">
       <h2 id={`${ids}-title`} className="text-m font-semibold">지표</h2>
       <label className="ml-1.5 flex h-8 min-w-0 flex-1 items-center gap-1.5 rounded-m bg-chart-bg px-2.5 text-text-3">
@@ -79,18 +84,17 @@ function InspectorBody({ slot }: { slot: Slot }) {
         <input ref={inputRef} type="search" aria-label="지표·비교 찾기" value={input} autoComplete="off" spellCheck={false}
           placeholder={mode === "compare" ? "종목 이름·코드" : "이평 20, bb 20 2"}
           className="min-w-0 flex-1 bg-transparent text-s text-text outline-none placeholder:text-text-3"
-          onChange={(event) => { command.type(event.target.value); setExpanded(event.target.value.trim() !== ""); }}
+          onChange={(event) => { command.type(event.target.value); setOpened(event.target.value.trim() === "" ? null : AUTO_OPEN); }}
           onKeyDown={(event) => {
             if (event.nativeEvent.isComposing || event.keyCode === 229) return;
             const action = commandKey(event.nativeEvent);
-            if (action.kind === "submit") { event.preventDefault(); submit(); return; }
             if (action.kind !== "move") return;
             event.preventDefault();
             const next = rows[stepIndex(open ? rows.indexOf(open) : -1, action.step, rows.length)];
-            if (next) { command.select(next); setExpanded(next.kind !== "symbol" || next.selectable); }
+            if (next) { command.select(next); setOpened(next.kind !== "symbol" || next.selectable ? next.key : null); }
           }} />
       </label>
-      <button type="button" className="icon-btn" aria-label="지표 패널 닫기" title="지표 패널 닫기" onClick={() => useSelectionStore.getState().showRightPanel("watch")}><CloseIcon size={16} /></button>
+      <button type="button" className="icon-btn" aria-label="지표 패널 닫기" title="지표 패널 닫기 (Alt+W)" onClick={() => { useUiStore.getState().toggleWatch(); document.getElementById("right-tab-indicators")?.focus(); }}><CloseIcon size={16} /></button>
     </header>
     <div role="tablist" aria-label="지표 창 보기" className="flex flex-none gap-5 border-b border-line px-4" onKeyDown={(event) => {
       if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
@@ -112,11 +116,11 @@ function InspectorBody({ slot }: { slot: Slot }) {
           {row.group !== rows[i - 1]?.group && <li role="presentation" className="px-2 pb-1 pt-2 text-xs text-text-3">{row.group}</li>}
           <li id={rowId(row)} className={`rounded-l ${open?.key === row.key ? "bg-raised shadow-[inset_0_0_0_1px_var(--accent-soft)]" : ""}`}>
             {row.kind === "symbol"
-              ? <button type="button" aria-pressed={selected?.key === row.key && expanded} disabled={!row.selectable} onClick={() => toggle(row)}
+              ? <button type="button" aria-pressed={open?.key === row.key} disabled={!row.selectable} onClick={() => toggle(row)}
                 className="flex h-9 w-full items-center gap-2 rounded-l px-2 text-left text-s hover:bg-raised disabled:opacity-50 aria-pressed:bg-accent-soft">
                 <span className="min-w-0 flex-1 truncate">{row.info.name}</span><span className="text-xs text-text-3">{symbolSub(row.info.code, row.info)}</span>
               </button>
-              : <IndicatorRow slot={slot} row={row} open={open?.key === row.key} onToggle={() => toggle(row)} onRemove={() => { if (open?.key === row.key) setExpanded(false); }}>
+              : <IndicatorRow slot={slot} row={row} open={open?.key === row.key} onToggle={() => toggle(row)}>
                 {open?.key === row.key && (row.kind === "current"
                   ? <LiveEditor key={row.key} slot={slot} config={row.config} revertRef={revertRef} />
                   : <AddEditor key={row.key} slot={slot} row={row} actionRef={editor} onAdded={refocus} />)}
@@ -138,7 +142,7 @@ function InspectorBody({ slot }: { slot: Slot }) {
 
 const rowName = (row: CommandRow) => row.kind === "current" ? specName(row.config.spec) : row.kind === "candidate" ? row.candidate.label : row.info.name;
 
-function IndicatorRow({ slot, row, open, onToggle, onRemove, children }: { slot: Slot; row: EditableRow; open: boolean; onToggle(): void; onRemove(): void; children: ReactNode }) {
+function IndicatorRow({ slot, row, open, onToggle, children }: { slot: Slot; row: EditableRow; open: boolean; onToggle(): void; children: ReactNode }) {
   const name = rowName(row);
   const label = row.kind === "current" ? KINDS[row.config.spec.kind].label : row.candidate.label;
   return <>
@@ -153,7 +157,7 @@ function IndicatorRow({ slot, row, open, onToggle, onRemove, children }: { slot:
       </button>
       {row.kind === "current" && <>
         <button type="button" className="icon-btn size-6" aria-label={`${name} ${row.config.visible ? "숨기기" : "보이기"}`} onClick={() => useLayoutStore.getState().updateIndicator(slot, row.config.id, { visible: !row.config.visible })}><EyeIcon size={14} off={!row.config.visible} /></button>
-        <button type="button" className="icon-btn size-6" aria-label={`${name} 지우기`} onClick={() => { onRemove(); useLayoutStore.getState().removeIndicator(slot, row.config.id); }}><CloseIcon size={14} /></button>
+        <button type="button" className="icon-btn size-6" aria-label={`${name} 지우기`} onClick={() => useLayoutStore.getState().removeIndicator(slot, row.config.id)}><CloseIcon size={14} /></button>
       </>}
     </div>
     {children}

@@ -139,6 +139,45 @@ test("인스펙터의 추가 후보 미리보기는 접거나 Esc를 누르거�
   expect(indicators(scenario)).toEqual(before);
 });
 
+test("인스펙터는 설정칸의 Enter로 추가하고, 펼친 지표를 범례에서 지우면 아무 줄도 펼치지 않으며, 닫기는 패널을 접고 레일로 초점을 옮긴다", async ({ page, scenario }) => {
+  scenario.documents.saveUiState({ ...scenario.documents.uiState(), indicatorWindow: "inspector" });
+  await page.goto("/?symbol=005930");
+  await expect(cell(page)).toHaveAttribute("aria-busy", "false");
+  const opener = topbar(page).getByRole("button", { name: "지표", exact: true });
+  await expect(opener).not.toHaveAttribute("aria-haspopup", "dialog");
+  await opener.click();
+  await expect(dialog(page)).toHaveCount(0);
+  await search(page).fill("이평 7");
+  const period = inspector(page).getByRole("group", { name: "이동평균 추가 설정", exact: true }).getByRole("textbox", { name: "기간", exact: true });
+  await period.fill("11");
+  await period.press("Enter");
+  await expect.poll(async () => indicators(scenario).map((i) => i.spec)).toContainEqual({ kind: "ma", method: "sma", period: 11 });
+  await search(page).fill("이평 13");
+  await search(page).press("Enter");
+  await expect.poll(async () => indicators(scenario).filter((i) => i.spec.kind === "ma").length).toBe(2);
+
+  await inspector(page).getByRole("tab", { name: /^이 칸에 띄운 지표/ }).click();
+  const first = inspector(page).getByRole("button", { name: "이동평균 단순 11 설정", exact: true });
+  await first.click();
+  await expect(first).toHaveAttribute("aria-expanded", "true");
+  const id = indicators(scenario).find((i) => i.spec.kind === "ma" && i.spec.period === 11)!.id;
+  const legendRow = cell(page).locator(`[data-indicator-row="${id}"]`);
+  await legendRow.hover();
+  await legendRow.getByRole("button", { name: /지우기$/ }).click();
+  await expect.poll(async () => indicators(scenario).map((i) => i.id)).not.toContain(id);
+  await expect(inspector(page).getByRole("button", { name: "이동평균 단순 13 설정", exact: true })).toBeVisible();
+  await expect(inspector(page).locator('[aria-expanded="true"]')).toHaveCount(0);
+
+  await search(page).focus();
+  await page.keyboard.press("Tab");
+  const close = inspector(page).getByRole("button", { name: "지표 패널 닫기", exact: true });
+  await expect(close).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(inspector(page)).toHaveCount(0);
+  await expect(rail(page).getByRole("tab", { name: "지표", exact: true })).toBeFocused();
+  await expect.poll(() => scenario.documents.uiState().watchCollapsed).toBe(true);
+});
+
 test.describe("휴대폰", () => {
   test.use({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
 

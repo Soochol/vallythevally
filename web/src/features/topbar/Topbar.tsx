@@ -7,6 +7,7 @@ import { useSymbolInfo } from "../../api/queries";
 import { PERIOD_LABEL, PERIODS, symbolSub } from "../../lib/symbol";
 import { useCell, useLayoutStore } from "../../stores/layout";
 import { useSelectionStore } from "../../stores/selection";
+import { useUiStore } from "../../stores/ui";
 import { openIndicatorCommand } from "../indicator-command/open";
 import { BrandIcon, ChevronIcon, CameraIcon, CopyIcon, IndicatorIcon, SearchIcon, SlidersIcon, CompareIcon } from "../icons";
 import { canCopyImage, saveSnapshot } from "../snapshot/saveSnapshot";
@@ -15,6 +16,7 @@ export function Topbar() {
   const slot = useSelectionStore((s) => s.activeSlot);
   const openSearch = useSelectionStore((s) => s.openSearch);
   const cell = useCell(slot);
+  const opensDialog = useUiStore((s) => s.prefs.indicatorWindow) === "dialog";
   const info = useSymbolInfo(cell.symbol).data;
   const { setPeriod } = useLayoutStore.getState();
   const settingsButton = useRef<HTMLButtonElement>(null);
@@ -37,8 +39,8 @@ export function Topbar() {
         ))}
       </div>
       <span className="tb-sep" />
-      <button type="button" className="tb-btn" aria-haspopup="dialog" title="지표 (I)" onClick={() => openIndicatorCommand(slot)}><IndicatorIcon />지표</button>
-      <button type="button" className="tb-btn" aria-haspopup="dialog" title="비교 종목" onClick={() => openIndicatorCommand(slot, "compare")}><CompareIcon />비교</button>
+      <button type="button" className="tb-btn" aria-haspopup={opensDialog ? "dialog" : undefined} title="지표 (I)" onClick={() => openIndicatorCommand(slot)}><IndicatorIcon />지표</button>
+      <button type="button" className="tb-btn" aria-haspopup={opensDialog ? "dialog" : undefined} title="비교 종목" onClick={() => openIndicatorCommand(slot, "compare")}><CompareIcon />비교</button>
       <span className="min-w-0 flex-1" />
       <FinancialUpdateButton />
       <button type="button" className="icon-btn" title="차트 이미지 내려받기 (Alt+S)" aria-label="차트 이미지 내려받기" onClick={() => saveSnapshot(slot, "download")}><CameraIcon /></button>

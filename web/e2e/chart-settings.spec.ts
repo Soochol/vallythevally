@@ -263,3 +263,19 @@ test("화면 가장자리에 반쯤 잘린 봉은 최고·최저에서 빼고, �
   }
   expect(errors).toEqual([]);
 });
+
+test("비교 종목이 있어 축 고정 안내가 붙어도 1280x600에서 팝오버는 버튼 아래에 열리고 지표 창 방식을 고른다", async ({ page, scenario }) => {
+  const layout = scenario.documents.layout(DEFAULT_LAYOUT_ID);
+  scenario.documents.saveLayout({ ...layout, revision: layout.revision + 1, cells: [{ ...layout.cells[0]!, chartSettings: { ...saved(scenario), compare: ["000660"] } }] });
+  await page.setViewportSize({ width: 1280, height: 600 });
+  await open(page);
+  const settings = await openSettings(page);
+  const button = (await settingsButton(page).boundingBox())!;
+  const box = (await settings.boundingBox())!;
+  expect(box.y).toBeGreaterThanOrEqual(button.y + button.height);
+  expect(box.y + box.height).toBeLessThanOrEqual(600);
+  const choices = settings.getByRole("group", { name: "지표 창" });
+  await expect(choices.getByRole("button", { name: "가운데 창", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await choices.getByRole("button", { name: "차트 옆", exact: true }).click();
+  await expect.poll(() => scenario.documents.uiState().indicatorWindow).toBe("inspector");
+});
