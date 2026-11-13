@@ -1,12 +1,13 @@
 import type { LayoutInput } from "../api/generated/LayoutInput";
+import type { UiState } from "../api/generated/UiState";
 import type { Watchlists } from "../api/generated/Watchlists";
-import { layoutPath, UI_STATE_PATH, WATCHLISTS_PATH } from "../api/userData";
+import { fetchWatchlists, layoutPath, UI_STATE_PATH, WATCHLISTS_PATH } from "../api/userData";
 import { useLayoutStore } from "../stores/layout";
 import { type SaveTarget, usePersistStore } from "../stores/persist";
 import { useUiStore } from "../stores/ui";
 import { useWatchlistStore } from "../stores/watchlist";
 import { exceedsLimit, WATCHLISTS_LIMIT_BYTES } from "./bytes";
-import { createSaver, type Saver, type SaverOptions } from "./saver";
+import { type CommitOutcome, type ConditionalCommit, createSaver, type Saver, type SaverOptions } from "./saver";
 import { clearUnsaved, writeUnsaved } from "./unsaved";
 import { toUiState } from "./uiState";
 
@@ -20,8 +21,10 @@ export interface AutosaveDeps {
   unsaved?: (target: SaveTarget) => SaverOptions<object>["unsaved"];
 }
 
+type WatchlistsBody = Omit<Watchlists, "revision">;
+
 export interface Autosave {
-  savers: Record<SaveTarget, Saver>;
+  savers: { layout: Saver<Omit<LayoutInput, "revision">>; ui: Saver<Omit<UiState, "revision">>; watchlist: Saver<WatchlistsBody> };
   retry(): void;
   flush(): void;
   stop(): void;
@@ -33,24 +36,16 @@ export function retryFailedSaves() {
   active?.retry();
 }
 
-export async function settleWatchlistSaves() {
-  const saver = active?.savers.watchlist;
-  saver?.flush();
-  await saver?.settled();
-  saver?.pauseCurrent();
-}
-
-export function resumeWatchlistSaves() {
-  active?.savers.watchlist.resume();
-}
-
-export function acceptWatchlistSave(value: Watchlists) {
-  useWatchlistStore.getState().load(value.lists, value.revision);
-  active?.savers.watchlist.acceptSaved(value.revision);
-}
-
-export function advanceWatchlistRevision(revision: number) {
-  active?.savers.watchlist.advanceRevision(revision);
+export function commitWatchlist(c: Pick<ConditionalCommit<WatchlistsBody>, "next" | "still">): Promise<CommitOutcome> {
+  if (!active) return Promise.reject(new Error("관심종목 저장이 시작되지 않았습니다"));
+  return active.savers.watchlist.commitConditional({
+    ...c,
+    read: async () => {
+      const { revision, ...value } = await fetchWatchlists();
+      return { value, revision };
+    },
+    accept: (saved) => useWatchlistStore.getState().load(saved.lists, saved.revision),
+  });
 }
 
 export function startAutosave(deps: AutosaveDeps): Autosave {
@@ -95,7 +90,7 @@ export function startAutosave(deps: AutosaveDeps): Autosave {
     onState: (s) => setSave("ui", s),
   });
 
-  const watchlist = createSaver<Omit<Watchlists, "revision">>({
+  const watchlist = createSaver<WatchlistsBody>({
     debounceMs: 0,
     read: () => ({ lists: [...useWatchlistStore.getState().lists] }),
     tooLarge: (v) => exceedsLimit({ ...v, revision: Number.MAX_SAFE_INTEGER }, WATCHLISTS_LIMIT_BYTES),

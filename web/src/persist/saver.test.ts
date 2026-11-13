@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { ApiRequestError } from "../api/http";
-import { createSaver, type SaveState, type SaverOptions, type Unsaved } from "./saver";
+import { createSaver, type Saver, type SaveState, type SaverOptions, type Unsaved } from "./saver";
 
 beforeEach(() => vi.useFakeTimers());
 afterEach(() => vi.useRealTimers());
@@ -59,68 +59,6 @@ test("마지막 편집 1초 뒤 최신 값을 한 번 보낸다", async () => {
   expect(t.sent[0]!.keepalive).toBe(false);
   expect(t.state()).toEqual({ kind: "saved", at: 42 });
   expect(t.states).toEqual(["pending", "pending", "saving", "saved"]);
-});
-
-test("외부 저장 승인 뒤에는 재시도와 미저장 본문을 지우고 다음 편집에 새 revision을 쓴다", async () => {
-  const t = setup({ send: async () => { throw new ApiRequestError("network", "실패"); } });
-  t.edit({ n: 1 });
-  await vi.advanceTimersByTimeAsync(1000);
-  expect(t.state().kind).toBe("failed");
-  expect(t.unsaved()).not.toBeNull();
-  t.saver.acceptSaved(500);
-  expect(t.unsaved()).toBeNull();
-  expect(t.state().kind).toBe("saved");
-  await vi.advanceTimersByTimeAsync(60_000);
-  expect(t.send).toHaveBeenCalledTimes(1);
-  t.edit({ n: 2 });
-  await vi.advanceTimersByTimeAsync(1000);
-  expect(t.revisions()).toEqual([102, 502]);
-});
-
-test("진행 중인 모든 전송이 끝날 때까지 기다리고 현재 편집의 재시도와 숨김 전송을 멈춘다", async () => {
-  const releases: (() => void)[] = [];
-  const t = setup({ send: () => new Promise<void>((resolve) => releases.push(resolve)) });
-  t.edit({ n: 1 });
-  await vi.advanceTimersByTimeAsync(1000);
-  t.saver.flush();
-  let settled = false;
-  void t.saver.settled().then(() => { settled = true; });
-  releases[1]!();
-  await vi.advanceTimersByTimeAsync(0);
-  expect(settled).toBe(false);
-  releases[0]!();
-  await vi.advanceTimersByTimeAsync(0);
-  expect(settled).toBe(true);
-  t.edit({ n: 2 });
-  t.saver.pauseCurrent();
-  await vi.advanceTimersByTimeAsync(10_000);
-  expect(t.send).toHaveBeenCalledTimes(2);
-  t.saver.flush();
-  t.saver.retry();
-  expect(t.send).toHaveBeenCalledTimes(2);
-  t.saver.resume();
-  t.saver.flush();
-  expect(t.send).toHaveBeenCalledTimes(2);
-  t.saver.retry();
-  expect(t.send).toHaveBeenCalledTimes(3);
-});
-
-test("조건부 저장이 현재 편집을 멈춰도 더 나중의 로컬 편집은 저장한다", async () => {
-  const t = setup();
-  t.edit({ n: 1 });
-  t.saver.pauseCurrent();
-  t.edit({ n: 2 });
-  await vi.advanceTimersByTimeAsync(1000);
-  expect(t.ns()).toEqual([2]);
-});
-
-test("새 revision만 관찰하면 아직 남은 로컬 편집을 저장 완료로 처리하지 않는다", async () => {
-  const t = setup();
-  t.edit({ n: 1 });
-  t.saver.advanceRevision(600);
-  await vi.advanceTimersByTimeAsync(1000);
-  expect(t.revisions()).toEqual([601]);
-  expect(t.ns()).toEqual([1]);
 });
 
 test("보내는 동안 들어온 편집은 응답 뒤 디바운스를 거쳐 다음 요청에 실린다", async () => {
@@ -323,4 +261,205 @@ test("R2: 나중 요청이 실패해도 같은 편집을 담은 앞 요청이 �
   await vi.advanceTimersByTimeAsync(60_000);
   expect(t.state()).toEqual({ kind: "saved", at: 42 });
   expect(t.send).toHaveBeenCalledTimes(2);
+});
+
+type Conditions = Parameters<Saver<Value>["commitConditional"]>[0];
+type Latest = Awaited<ReturnType<Conditions["read"]>>;
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (error: unknown) => void;
+  const promise = new Promise<T>((a, b) => { resolve = a; reject = b; });
+  return { promise, resolve, reject };
+}
+const isConditional = (json: string) => (JSON.parse(json) as Value).n === 99;
+const latestOf = (revision: number): Latest => ({ value: { n: 5 }, revision });
+
+function conditions(overrides: Partial<Conditions> = {}) {
+  return {
+    read: vi.fn<Conditions["read"]>(async () => latestOf(500)),
+    next: vi.fn<Conditions["next"]>(() => ({ n: 99 })),
+    still: vi.fn<Conditions["still"]>(() => true),
+    accept: vi.fn<Conditions["accept"]>(),
+    ...overrides,
+  };
+}
+
+test("조건부 저장은 최신 revision+1로 보내고 미저장 본문을 쓰고 지운 뒤 저장됨이 된다", async () => {
+  const put = deferred<void>();
+  const t = setup({ send: (_, json) => isConditional(json) ? put.promise : Promise.resolve() });
+  const c = conditions();
+  const result = t.saver.commitConditional(c);
+  await vi.advanceTimersByTimeAsync(0);
+  expect(c.next).toHaveBeenCalledWith({ n: 5 }, { kind: "idle" });
+  expect(t.sent.map((s) => JSON.parse(s.json))).toEqual([{ n: 99, revision: 501 }]);
+  expect(t.sent[0]!.keepalive).toBe(false);
+  expect(t.unsaved()).toEqual({ path: "/x", revision: 501, body: JSON.stringify({ n: 99, revision: 501 }) });
+  expect(t.state()).toEqual({ kind: "saving" });
+  put.resolve();
+  expect(await result).toBe("committed");
+  expect(c.accept).toHaveBeenCalledWith({ n: 99, revision: 501 });
+  expect(t.unsaved()).toBeNull();
+  expect(t.state()).toEqual({ kind: "saved", at: 42 });
+  expect(t.states).toEqual(["saving", "saved"]);
+});
+
+test("조건부 저장이 stale_revision이면 최신본을 다시 읽어 그 revision+1로 다시 보낸다", async () => {
+  let puts = 0;
+  const t = setup({ send: async (_, json) => { if (isConditional(json) && puts++ === 0) throw new ApiRequestError("stale_revision", "경쟁 저장"); } });
+  const c = conditions({ read: vi.fn<Conditions["read"]>().mockResolvedValueOnce(latestOf(500)).mockResolvedValueOnce({ value: { n: 7 }, revision: 510 }) });
+  expect(await t.saver.commitConditional(c)).toBe("committed");
+  expect(c.read).toHaveBeenCalledTimes(2);
+  expect(c.next).toHaveBeenLastCalledWith({ n: 7 }, { kind: "idle" });
+  expect(t.revisions()).toEqual([501, 511]);
+  expect(c.accept).toHaveBeenCalledWith({ n: 99, revision: 511 });
+  expect(t.unsaved()).toBeNull();
+});
+
+test("조건부 저장이 세 번 경쟁에 지면 conflict이고 이전 상태로 돌아간 뒤 편집을 다시 저장한다", async () => {
+  const t = setup({ send: async (_, json) => { if (isConditional(json)) throw new ApiRequestError("stale_revision", "경쟁 저장"); } });
+  const c = conditions();
+  expect(await t.saver.commitConditional(c)).toBe("conflict");
+  expect(c.read).toHaveBeenCalledTimes(3);
+  expect(t.revisions()).toEqual([501, 501, 501]);
+  expect(c.accept).not.toHaveBeenCalled();
+  expect(t.unsaved()).toBeNull();
+  expect(t.states).toEqual(["saving", "saving", "saving", "idle"]);
+  t.edit({ n: 1 });
+  await vi.advanceTimersByTimeAsync(1000);
+  expect(t.ns()).toEqual([99, 99, 99, 1]);
+});
+
+test("조건부 저장의 다음 값이 없으면 보내지 않고 conflict이다", async () => {
+  const t = setup();
+  const c = conditions({ next: vi.fn<Conditions["next"]>(() => null) });
+  expect(await t.saver.commitConditional(c)).toBe("conflict");
+  expect(c.read).toHaveBeenCalledOnce();
+  expect(t.send).not.toHaveBeenCalled();
+  expect(t.states).toEqual([]);
+});
+
+test.each<[string, Conditions["still"], number]>([
+  ["읽기 전", () => false, 0],
+  ["읽은 뒤", vi.fn<Conditions["still"]>().mockReturnValueOnce(true).mockReturnValue(false), 1],
+])("조건부 저장이 %s 무효가 되면 보내지 않고 superseded이다", async (_, still, reads) => {
+  const t = setup();
+  const c = conditions({ still });
+  expect(await t.saver.commitConditional(c)).toBe("superseded");
+  expect(c.read).toHaveBeenCalledTimes(reads);
+  expect(c.next).not.toHaveBeenCalled();
+  expect(t.send).not.toHaveBeenCalled();
+  expect(t.states).toEqual([]);
+});
+
+test("처음부터 실패: 최신본을 읽지 못하면 reject하고 이전 상태를 유지한 뒤 다시 시도로 편집을 보낸다", async () => {
+  const t = setup({ send: async (_, json) => { if (!isConditional(json)) throw new ApiRequestError("network", "실패"); } });
+  t.edit({ n: 1 });
+  await vi.advanceTimersByTimeAsync(1000);
+  const c = conditions({ read: vi.fn<Conditions["read"]>(async () => { throw new ApiRequestError("network", "읽기 실패"); }) });
+  await expect(t.saver.commitConditional(c)).rejects.toThrow("읽기 실패");
+  expect(t.state()).toEqual({ kind: "failed", reason: "error", message: "실패" });
+  expect(t.states).toEqual(["pending", "saving", "failed", "saving", "failed"]);
+  expect(t.ns()).toEqual([1, 1]);
+  await vi.advanceTimersByTimeAsync(60_000);
+  expect(t.send).toHaveBeenCalledTimes(2);
+  t.saver.retry();
+  expect(t.ns()).toEqual([1, 1, 1]);
+});
+
+test("도중 실패: 조건부 전송이 500이면 reject하고 저장 표시를 이전 상태로 되돌린 뒤 편집을 다시 저장한다", async () => {
+  const t = setup({ send: async (_, json) => { if (isConditional(json)) throw new ApiRequestError("internal", "저장 실패"); } });
+  t.edit({ n: 1 });
+  await vi.advanceTimersByTimeAsync(1000);
+  const c = conditions();
+  await expect(t.saver.commitConditional(c)).rejects.toThrow("저장 실패");
+  expect(c.accept).not.toHaveBeenCalled();
+  expect(t.state()).toEqual({ kind: "saved", at: 42 });
+  expect(t.states).toEqual(["pending", "saving", "saved", "saving", "saved"]);
+  expect(t.unsaved()).toEqual({ path: "/x", revision: 501, body: JSON.stringify({ n: 99, revision: 501 }) });
+  t.edit({ n: 2 });
+  await vi.advanceTimersByTimeAsync(1000);
+  expect(t.ns()).toEqual([1, 99, 2]);
+});
+
+test("조건부 저장은 진행 중 전송과 대기 중 편집을 먼저 비우고, 멈춘 현재 편집은 재개 뒤 다시 시도할 때만 보낸다", async () => {
+  const releases: ((ok: boolean) => void)[] = [];
+  const t = setup({ send: () => new Promise<void>((resolve, reject) => releases.push((ok) => ok ? resolve() : reject(new ApiRequestError("network", "실패")))) });
+  const latest = deferred<Latest>();
+  const c = conditions({ read: vi.fn<Conditions["read"]>(() => latest.promise), next: vi.fn<Conditions["next"]>(() => null) });
+  t.edit({ n: 1 });
+  await vi.advanceTimersByTimeAsync(1000);
+  t.edit({ n: 2 });
+  const result = t.saver.commitConditional(c);
+  expect(t.ns()).toEqual([1, 2]);
+  expect(t.sent[1]!.keepalive).toBe(true);
+  releases[1]!(false);
+  await vi.advanceTimersByTimeAsync(0);
+  expect(c.read).not.toHaveBeenCalled();
+  releases[0]!(true);
+  await vi.advanceTimersByTimeAsync(0);
+  expect(c.read).toHaveBeenCalledOnce();
+  await vi.advanceTimersByTimeAsync(10_000);
+  t.saver.flush();
+  t.saver.retry();
+  expect(t.send).toHaveBeenCalledTimes(2);
+  latest.resolve(latestOf(500));
+  expect(await result).toBe("conflict");
+  expect(c.next).toHaveBeenCalledWith({ n: 5 }, { kind: "failed", reason: "error", message: "실패" });
+  t.saver.flush();
+  expect(t.send).toHaveBeenCalledTimes(2);
+  t.saver.retry();
+  expect(t.ns()).toEqual([1, 2, 2]);
+});
+
+test("조건부 저장이 현재 편집을 멈춰도 더 나중의 로컬 편집은 저장한다", async () => {
+  const t = setup();
+  const latest = deferred<Latest>();
+  const c = conditions({ read: vi.fn<Conditions["read"]>(() => latest.promise), next: vi.fn<Conditions["next"]>(() => null) });
+  t.edit({ n: 1 });
+  const result = t.saver.commitConditional(c);
+  await vi.advanceTimersByTimeAsync(0);
+  expect(c.read).toHaveBeenCalledOnce();
+  t.edit({ n: 2 });
+  await vi.advanceTimersByTimeAsync(1000);
+  expect(t.ns()).toEqual([1, 2]);
+  latest.resolve(latestOf(500));
+  expect(await result).toBe("conflict");
+  await vi.advanceTimersByTimeAsync(1000);
+  expect(t.ns()).toEqual([1, 2]);
+});
+
+test("조건부 저장 뒤 무효가 되어 새 revision만 관찰하면 아직 남은 로컬 편집을 저장 완료로 처리하지 않는다", async () => {
+  const put = deferred<void>();
+  const t = setup({ send: (_, json) => isConditional(json) ? put.promise : Promise.resolve() });
+  let checks = 0;
+  const c = conditions({ still: vi.fn<Conditions["still"]>(() => checks++ < 2) });
+  const result = t.saver.commitConditional(c);
+  await vi.advanceTimersByTimeAsync(0);
+  t.edit({ n: 1 });
+  put.resolve();
+  expect(await result).toBe("committed");
+  expect(c.accept).not.toHaveBeenCalled();
+  await vi.advanceTimersByTimeAsync(1000);
+  expect(t.ns()).toEqual([99, 1]);
+  expect(t.revisions()).toEqual([501, 502]);
+  expect(t.state()).toEqual({ kind: "saved", at: 42 });
+});
+
+test("조건부 저장이 반영되면 실패한 편집의 재시도와 미저장 본문을 지우고 다음 편집에 새 revision을 쓴다", async () => {
+  const t = setup({ send: async (_, json) => { if (!isConditional(json)) throw new ApiRequestError("network", "실패"); } });
+  t.edit({ n: 1 });
+  await vi.advanceTimersByTimeAsync(1000);
+  expect(t.state().kind).toBe("failed");
+  const c = conditions();
+  expect(await t.saver.commitConditional(c)).toBe("committed");
+  expect(c.accept).toHaveBeenCalledWith({ n: 99, revision: 501 });
+  expect(t.unsaved()).toBeNull();
+  expect(t.state()).toEqual({ kind: "saved", at: 42 });
+  await vi.advanceTimersByTimeAsync(60_000);
+  expect(t.ns()).toEqual([1, 1, 99]);
+  t.edit({ n: 2 });
+  await vi.advanceTimersByTimeAsync(1000);
+  expect(t.ns()).toEqual([1, 1, 99, 2]);
+  expect(t.revisions()).toEqual([102, 103, 501, 503]);
 });
