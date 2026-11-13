@@ -246,3 +246,21 @@ test("DART 미설정 상태에서도 가격과 기술지표를 사용하고 재�
   await choosePeriod(page, false, "연");
   await expect(row(page, "revenue")).toContainText("DART 연동 미설정");
 });
+
+test("재무지표 미리보기 중에도 재무 수집 상태가 보이고 취소하면 사라진다", async ({ page, scenario }) => {
+  await page.goto("/?symbol=005930&period=Q");
+  await expect(cell(page)).toHaveAttribute("aria-busy", "false");
+  const status = page.getByLabel("재무 수집 상태");
+  const previewRow = page.locator("[data-indicator-row]").filter({ hasText: "매출액" });
+  await expect(status).toHaveCount(0);
+  await page.getByRole("button", { name: /^지표/ }).first().click();
+  const dialog = page.getByRole("dialog", { name: "지표·비교 입력창" });
+  await dialog.getByRole("option", { name: "매출액 추가 후보", exact: true }).click();
+  await expect(previewRow).toHaveCount(1);
+  await expect(status).toBeVisible();
+  expect(parseChartSettings(scenario.documents.layout(DEFAULT_LAYOUT_ID).cells[0]!.chartSettings).indicators.map((i) => i.spec.kind)).not.toContain("revenue");
+  await page.keyboard.press("Escape");
+  await expect(dialog).toBeHidden();
+  await expect(previewRow).toHaveCount(0);
+  await expect(status).toHaveCount(0);
+});
