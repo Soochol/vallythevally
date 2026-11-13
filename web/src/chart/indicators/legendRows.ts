@@ -38,6 +38,11 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, className: string, te
   return e;
 }
 
+function labelButton(button: HTMLButtonElement, label: string) {
+  button.title = label;
+  button.dataset.label = label;
+}
+
 export class IndicatorLegend {
   readonly priceBox = el("div", "flex flex-col gap-px");
   private readonly rows = new Map<string, RowEls>();
@@ -103,7 +108,7 @@ export class IndicatorLegend {
       b.innerHTML = iconMarkup(icon);
       b.type = "button";
       b.dataset.chartControl = "";
-      b.title = label;
+      labelButton(b, label);
       b.dataset.indicatorCommand = command;
       if (command === "edit") b.dataset.indicatorEdit = id;
       b.addEventListener("click", () => this.onCommand(id, command, b));
@@ -175,7 +180,7 @@ export class IndicatorLegend {
       r.text.textContent = selected?.text ?? row.detail.text;
     }
     if (r.collapse) {
-      r.collapse.title = row.panel?.collapsed ? "패널 펼치기" : "패널 접기";
+      labelButton(r.collapse, row.panel?.collapsed ? "패널 펼치기" : "패널 접기");
       r.collapse.setAttribute("aria-expanded", String(!row.panel?.collapsed));
       const icon = row.panel?.collapsed ? "up" : "down";
       if (r.collapse.dataset.icon !== icon) { r.collapse.innerHTML = iconMarkup(icon); r.collapse.dataset.icon = icon; }
@@ -205,7 +210,7 @@ export class IndicatorLegend {
     const hidden = row.state === "hidden";
     const icon = hidden ? "eyeOff" : "eye";
     if (r.toggle.dataset.icon !== icon) { r.toggle.innerHTML = iconMarkup(icon); r.toggle.dataset.icon = icon; }
-    r.toggle.title = hidden ? "보이기" : "숨기기";
-    r.root.querySelectorAll<HTMLButtonElement>("button[data-indicator-command]").forEach((b) => b.setAttribute("aria-label", `${row.name} ${b.title}`));
+    labelButton(r.toggle, hidden ? "보이기" : "숨기기");
+    r.root.querySelectorAll<HTMLButtonElement>("button[data-indicator-command]").forEach((b) => b.setAttribute("aria-label", `${row.name} ${b.dataset.label}`));
   }
 }

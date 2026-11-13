@@ -18,7 +18,7 @@ function seedScreen(scenario: Scenario) {
   scenario.documents.saveScreens({ screens: [SCREEN], revision: 1 });
 }
 
-test("위 막대는 종목 버튼과 검색 아이콘으로 같은 검색 창을 열고 툴팁은 이름과 단축키를 나눠 보인다", async ({ page }) => {
+test("위 막대는 종목 버튼과 검색 아이콘으로 같은 검색 창을 열고 툴팁은 이름과 단축키를 나눠 보이며 마우스를 올린 동안 브라우저 기본 툴팁은 막는다", async ({ page }) => {
   await open(page);
   const symbol = toolbar(page).getByRole("button", { name: /삼성전자/ });
   await expect(symbol).toContainText("005930");
@@ -30,10 +30,18 @@ test("위 막대는 종목 버튼과 검색 아이콘으로 같은 검색 창을
   await page.keyboard.press("Escape");
   expect(await toolbar(page).evaluate((node) => node.scrollWidth - node.clientWidth)).toBe(0);
 
-  await toolbar(page).getByRole("button", { name: "지표", exact: true }).hover();
+  const indicators = toolbar(page).getByRole("button", { name: "지표", exact: true });
+  await indicators.hover();
   const tip = page.getByRole("tooltip");
   await expect(tip).toHaveText("지표I");
   await expect(tip.locator("kbd")).toHaveText("I");
+  await expect(indicators).not.toHaveAttribute("title");
+  await page.mouse.move(700, 450);
+  await expect(tip).toHaveCount(0);
+  await expect(indicators).toHaveAttribute("title", "지표 (I)");
+  await indicators.focus();
+  await expect(tip).toHaveText("지표I");
+  await expect(indicators).toHaveAttribute("title", "지표 (I)");
 });
 
 test("재무자료 표시는 상태 점과 함께 배경 없는 상태 창을 열고 자세히에서 전체 현황을 편다", async ({ page }) => {

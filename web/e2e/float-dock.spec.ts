@@ -11,14 +11,19 @@ async function open(page: Page) {
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
 }
 
-test("드로잉 도구는 차트 아래 가운데의 도크이고 고른 도구는 강조색으로 채우며 펼침 메뉴는 도크 위로 열린다", async ({ page }, info) => {
+test("드로잉 도구는 위 막대 바로 아래 가운데의 도크이고 고른 도구는 강조색으로 채우며 펼침 메뉴는 도크 아래로 열린다", async ({ page }, info) => {
   await open(page);
   const bar = await boxOf(dock(page));
   const chart = await boxOf(cell(page));
   expect(Math.abs(bar.x + bar.width / 2 - (chart.x + chart.width / 2))).toBeLessThanOrEqual(1);
-  expect(bar.y).toBeGreaterThan(700);
-  expect(bar.y + bar.height).toBeLessThan(900);
+  const topbar = await boxOf(page.getByRole("toolbar", { name: "차트 도구 막대" }));
+  expect(bar.y).toBeGreaterThanOrEqual(topbar.y + topbar.height);
+  expect(bar.y - (topbar.y + topbar.height)).toBeLessThan(24);
   expect(bar.width).toBeGreaterThan(bar.height * 4);
+  const legend = await boxOf(cell(page).locator(".chart-legend"));
+  const venues = await boxOf(cell(page).getByRole("group", { name: "거래소", exact: true }));
+  expect(legend.y).toBeLessThan(bar.y + bar.height);
+  expect(venues.x + venues.width).toBeLessThan(bar.x);
   const pointer = dock(page).getByRole("button", { name: "선택 도구", exact: true });
   await expect(pointer).toHaveCSS("background-color", "rgb(199, 243, 107)");
   await dock(page).getByRole("button", { name: "추세선", exact: true }).click();
@@ -30,7 +35,8 @@ test("드로잉 도구는 차트 아래 가운데의 도크이고 고른 도구�
   const menu = page.getByRole("menu", { name: "선 도구", exact: true });
   await expect(menu).toBeVisible();
   const menuBox = await boxOf(menu);
-  expect(menuBox.y + menuBox.height).toBeLessThanOrEqual((await boxOf(dock(page))).y);
+  const docked = await boxOf(dock(page));
+  expect(menuBox.y).toBeGreaterThanOrEqual(docked.y + docked.height);
   await page.screenshot({ path: info.outputPath("1440-dock.png") });
   await menu.getByRole("menuitem", { name: /수평선/ }).click();
   await expect(dock(page).getByRole("button", { name: "수평선", exact: true })).toHaveAttribute("aria-pressed", "true");
@@ -44,7 +50,10 @@ test("좁고 낮은 창에서도 도크는 창 안에 있고 가격축 방식 �
     const axis = await boxOf(cell(page).getByRole("group", { name: "가격축 방식" }));
     expect(bar.x).toBeGreaterThanOrEqual(0);
     expect(bar.y + bar.height).toBeLessThanOrEqual(size.height);
-    expect(bar.x + bar.width).toBeLessThanOrEqual(axis.x);
+    expect(bar.y + bar.height <= axis.y || bar.x + bar.width <= axis.x).toBe(true);
+    const venues = await boxOf(cell(page).getByRole("group", { name: "거래소", exact: true }));
+    expect(venues.y >= bar.y + bar.height || venues.x + venues.width < bar.x).toBe(true);
+    expect(await dock(page).evaluate((node) => node.scrollWidth - node.clientWidth)).toBe(0);
     await dock(page).getByRole("button", { name: "드로잉 단축키 도움말", exact: true }).click();
     await expect(page.getByRole("dialog", { name: "드로잉 단축키", exact: true })).toBeVisible();
     await page.keyboard.press("Escape");

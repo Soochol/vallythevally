@@ -2,12 +2,12 @@ import { mkdir } from "node:fs/promises";
 import { resolve } from "node:path";
 import { allResult } from "./fixtures/screener";
 import type { ScreenerResult } from "../src/api/generated/ScreenerResult";
-import { cell, chartOf, DEFAULT_LAYOUT_ID, expect, test } from "./screener-harness";
+import { cell, chartOf, expect, test } from "./screener-harness";
 import { openScreener, panel, rows, runButton, updateBand, waitForUpdateToFinish } from "./screener-page";
 
 
 
-test("결과 표 정렬과 키보드 이동, 넓게 보기의 미니 차트·비교·칸 열기를 연결한다", async ({ scenario, screener, page }) => {
+test("결과 표 정렬과 키보드 이동, 행에서 Enter로 칸 열기를 연결한다", async ({ scenario, screener, page }) => {
   scenario.documents.saveScreens({ revision: 1, screens: [{ id: "all", name: "모든 종목", markets: [], exclude: [], conditions: [] }] });
   screener.showResult(allResult());
   await page.goto("/");
@@ -35,23 +35,9 @@ test("결과 표 정렬과 키보드 이동, 넓게 보기의 미니 차트·비
     await page.setViewportSize(size);
     await page.screenshot({ path: resolve(`../target/ux-screens/screener-results-${size.width}x${size.height}.png`) });
   }
-  await page.getByRole("button", { name: "넓게 보기", exact: true }).click();
-  const preview = page.getByRole("complementary", { name: "결과 종목 미리보기", exact: true });
   const other = result.rows.find((r) => r.symbol !== nextCode)!;
-  await rows(page).filter({ hasText: other.symbol }).getByRole("button").click();
-  await expect(preview.getByRole("img", { name: `${other.name} KRX 일봉 미니 차트`, exact: true })).toBeVisible();
-  await expect(preview.getByRole("img").locator("g")).not.toHaveCount(0);
-  await expect(cell(page)).toHaveAttribute("aria-label", `칸 1: ${next.name} 통합 일`);
-  await preview.getByRole("button", { name: "비교에 추가", exact: true }).click();
-  await expect.poll(async () => scenario.documents.layout(DEFAULT_LAYOUT_ID).cells[0]?.chartSettings).toMatchObject({ compare: expect.arrayContaining([other.symbol]) });
-  for (const size of [{ width: 1440, height: 900 }, { width: 1024, height: 768 }]) {
-    await page.setViewportSize(size);
-    await expect.poll(() => page.evaluate(() => [document.documentElement.scrollWidth - innerWidth, document.documentElement.scrollHeight - innerHeight])).toEqual([0, 0]);
-    await page.screenshot({ path: resolve(`../target/ux-screens/screener-wide-${size.width}x${size.height}.png`) });
-  }
   await rows(page).filter({ hasText: other.symbol }).getByRole("button").focus();
   await page.keyboard.press("Enter");
-  await expect(page.getByRole("button", { name: "넓게 보기", exact: true })).toBeVisible();
   await expect(cell(page)).toHaveAttribute("aria-label", `칸 1: ${other.name} 통합 일`);
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
   await expect(chartOf(cell(page))).not.toHaveAttribute("data-bar-count", "0");

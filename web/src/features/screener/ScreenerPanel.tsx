@@ -50,11 +50,9 @@ import { useWatchlistStore } from "../../stores/watchlist";
 import { ChevronIcon, MoreIcon, PenIcon, PlayIcon, PlusIcon, SpinnerIcon, StarIcon } from "../icons";
 import { Menu, type MenuItem } from "../menu/Menu";
 import { ownsChartKeyboard } from "../overlay/topLayer";
-import { EmptyState } from "../overlay/State";
 import { ResultTable } from "./ResultTable";
-import { ResultPreview } from "./ResultPreview";
-import { compareResult, dropPendingOpen, openResult, pendingResultCode, sendToNewWatchlist, sendToWatchlist } from "./resultActions";
-import { nextResult, previewRow, resultKeyAction } from "./results";
+import { dropPendingOpen, openResult, pendingResultCode, sendToNewWatchlist, sendToWatchlist } from "./resultActions";
+import { nextResult, resultKeyAction } from "./results";
 
 const PANEL_POLL_MS = 1_000;
 const RAIL_POLL_MS = 10_000;
@@ -128,7 +126,7 @@ export function PhoneScreener() {
   );
 }
 
-export function ScreenerPanel({ wide = false, onReturn = () => {} }: { wide?: boolean; onReturn?: () => void }) {
+export function ScreenerPanel() {
   const { editing: screenEditing, view, query: screens } = useScreenEditing();
   const desktop = useMediaQuery(DESKTOP_QUERY);
   const { chosen } = view;
@@ -142,18 +140,8 @@ export function ScreenerPanel({ wide = false, onReturn = () => {} }: { wide?: bo
   const rows = useMemo(() => (result ? sortRows(result.rows, sort) : []), [result, sort]);
   const queryClient = useQueryClient();
   const active = useActiveSymbol();
-  const [preview, setPreview] = useState<{ screenId: string; code: SymbolCode } | null>(null);
   const [editing, setEditing] = useState(false);
-  const selected = previewRow(rows, preview?.screenId === screen?.id ? preview?.code ?? null : null, active);
-  const select = (code: SymbolCode) => {
-    if (wide && screen) setPreview({ screenId: screen.id, code });
-    else void openResult(queryClient, code);
-  };
-  const openPreview = (code = selected?.symbol) => {
-    if (!code) return;
-    void openResult(queryClient, code);
-    onReturn();
-  };
+  const select = (code: SymbolCode) => void openResult(queryClient, code);
   const execute = () => {
     void screenEditing.run().then((outcome) => {
       if (outcome.kind === "invalid" && desktop) setEditing(true);
@@ -167,39 +155,34 @@ export function ScreenerPanel({ wide = false, onReturn = () => {} }: { wide?: bo
     setEditing(true);
   };
   const createScreen = desktop ? createInPanel : () => createInDialog(screenEditing);
-  useResultKeys({ rows, active: wide ? selected?.symbol ?? null : active, wide, onSelect: select, onOpen: openPreview, onRun: execute });
+  useResultKeys({ rows, active, onSelect: select, onRun: execute });
   useEffect(() => dropPendingOpen, []);
-  useEffect(() => { if (wide) dropPendingOpen(); }, [wide]);
   const band = status !== undefined && showsUpdateBand(status);
   return (
     <aside aria-label="스크리너" data-chart-control className="flex min-h-0 min-w-0 flex-1 flex-col">
-      <div className={wide ? "grid min-h-0 flex-1 grid-cols-[160px_minmax(0,1fr)_240px] min-[1280px]:grid-cols-[200px_minmax(0,1fr)_300px]" : "flex min-h-0 flex-1 flex-col"}>
-        {wide && <ScreenList screenEditing={screenEditing} entries={view.entries} loaded={screens.data !== undefined} chosen={screen?.id ?? null} onCreate={createScreen} />}
-        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-          <div className="max-h-[50%] flex-none overflow-y-auto">
-            {band && <UpdateBand status={status} />}
-            {chosen && desktop ? (
-              <SentenceEditor screenEditing={screenEditing} chosen={chosen} entries={view.entries} blocked={!status || block !== null} resultActions={<PanelMenu screen={screen} rows={rows} status={status} />} wide={wide} editing={editing} onEditingChange={setEditing} onRun={execute} />
-            ) : chosen ? (
-              <ScreenHeader screenEditing={screenEditing} chosen={chosen} entries={view.entries} block={block} status={status} rows={rows} onRun={execute} />
-            ) : (
-              <header className="flex h-11 flex-none items-center gap-1 border-b border-line pl-3 pr-1.5">
-                <h2 className="text-l font-[700]">스크리너</h2>
-                <span className="flex-1" />
-                <FinancialUpdateButton className="md:hidden" />
-                <PanelMenu screen={null} rows={rows} status={status} />
-              </header>
-            )}
-          </div>
-          <div className="min-h-0 flex-1 overflow-y-auto">
-            {screen ? (
-              <Results screen={screen} run={run} rows={rows} status={status} block={block} onRun={execute} onEdit={desktop ? () => setEditing(true) : openDialog} selected={wide ? selected?.symbol ?? null : active} onSelect={select} />
-            ) : (
-              <NoScreen query={screens} onCreate={createScreen} />
-            )}
-          </div>
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+        <div className="max-h-[50%] flex-none overflow-y-auto">
+          {band && <UpdateBand status={status} />}
+          {chosen && desktop ? (
+            <SentenceEditor screenEditing={screenEditing} chosen={chosen} entries={view.entries} blocked={!status || block !== null} resultActions={<PanelMenu screen={screen} rows={rows} status={status} />} editing={editing} onEditingChange={setEditing} onRun={execute} />
+          ) : chosen ? (
+            <ScreenHeader screenEditing={screenEditing} chosen={chosen} entries={view.entries} block={block} status={status} rows={rows} onRun={execute} />
+          ) : (
+            <header className="flex h-11 flex-none items-center gap-1 border-b border-line pl-3 pr-1.5">
+              <h2 className="text-l font-[700]">스크리너</h2>
+              <span className="flex-1" />
+              <FinancialUpdateButton className="md:hidden" />
+              <PanelMenu screen={null} rows={rows} status={status} />
+            </header>
+          )}
         </div>
-        {wide && (selected ? <ResultPreview row={selected} onOpen={openPreview} onCompare={() => compareResult(selected.symbol, selected.name)} /> : <aside className="border-l border-line"><EmptyState title="결과 종목을 골라 보세요">실행한 뒤 결과를 고르면 일봉을 미리 봅니다.</EmptyState></aside>)}
+        <div className="min-h-0 flex-1 overflow-y-auto">
+          {screen ? (
+            <Results screen={screen} run={run} rows={rows} status={status} block={block} onRun={execute} onEdit={desktop ? () => setEditing(true) : openDialog} selected={active} onSelect={select} />
+          ) : (
+            <NoScreen query={screens} onCreate={createScreen} />
+          )}
+        </div>
       </div>
       <StatusFooterLine footer={statusFooter(status, statusQuery.error)} status={status} onRetry={() => void statusQuery.refetch()} />
     </aside>
@@ -208,52 +191,33 @@ export function ScreenerPanel({ wide = false, onReturn = () => {} }: { wide?: bo
 
 interface ResultKeys {
   rows: readonly ScreenerRow[];
-  active: SymbolCode | null;
-  wide: boolean;
+  active: SymbolCode;
   onSelect(code: SymbolCode): void;
-  onOpen(code?: SymbolCode): void;
   onRun(): void;
 }
 
 export type ScreenerKeyEvent = Pick<KeyboardEvent, "key" | "ctrlKey" | "metaKey" | "altKey" | "shiftKey" | "isComposing" | "defaultPrevented" | "target" | "preventDefault">;
 
-export function handleResultKey(event: ScreenerKeyEvent, { rows, active, wide, onSelect, onOpen, onRun }: ResultKeys) {
+export function handleResultKey(event: ScreenerKeyEvent, { rows, active, onSelect, onRun }: ResultKeys) {
   if (useSelectionStore.getState().dialog || ownsChartKeyboard(event) || isTypingTarget(event.target)) return;
-  const action = resultKeyAction(event, wide);
+  const action = resultKeyAction(event);
   if (!action) return;
-  if (action.kind !== "run" && event.target instanceof Element && event.target.closest("[data-screen-list]")) return;
   if (action.kind === "run") {
     event.preventDefault();
     onRun();
-  } else if (action.kind === "move") {
-    const code = nextResult(rows, wide ? active : pendingResultCode() ?? active, action.step);
-    if (rows.length) event.preventDefault();
-    if (code) onSelect(code);
-  } else if (!(event.target instanceof Element) || !event.target.closest("button, a, summary, [role=button]")) {
-    event.preventDefault();
-    onOpen();
-  } else if (event.target.closest("[data-result-row]")) {
-    event.preventDefault();
-    onOpen(event.target.closest<HTMLTableRowElement>("tr")?.dataset.code);
+    return;
   }
+  const code = nextResult(rows, pendingResultCode() ?? active, action.step);
+  if (rows.length) event.preventDefault();
+  if (code) onSelect(code);
 }
 
-function useResultKeys({ rows, active, wide, onSelect, onOpen, onRun }: ResultKeys) {
+function useResultKeys({ rows, active, onSelect, onRun }: ResultKeys) {
   useEffect(() => {
-    const onKey = (event: KeyboardEvent) => handleResultKey(event, { rows, active, wide, onSelect, onOpen, onRun });
+    const onKey = (event: KeyboardEvent) => handleResultKey(event, { rows, active, onSelect, onRun });
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [rows, active, wide, onSelect, onOpen, onRun]);
-}
-
-function ScreenList({ screenEditing, entries, loaded, chosen, onCreate }: { screenEditing: ScreenEditing; entries: readonly ScreenEntry[]; loaded: boolean; chosen: string | null; onCreate(): void }) {
-  return <nav aria-label="저장한 조건식" data-screen-list className="flex min-h-0 flex-col border-r border-line bg-surface">
-    <div className="flex flex-none items-center justify-between border-b border-line p-2"><h2 className="text-s font-semibold">조건식</h2><button type="button" className="icon-btn" aria-label="새 조건식" disabled={!loaded} onClick={onCreate}><PlusIcon /></button></div>
-    <div className="min-h-0 flex-1 overflow-y-auto p-1">{entries.map(({ source: screen, name, conditions }) => <button key={screen.id} type="button" aria-current={screen.id === chosen || undefined}
-      className={`mb-1 w-full rounded-m p-2 text-left text-s ${screen.id === chosen ? "bg-accent-soft text-accent" : "hover:bg-raised"}`} onClick={() => { dropPendingOpen(); screenEditing.choose(screen.id); }}>
-      <b className="block break-words font-semibold">{name || screen.name}</b><small className="text-xs text-text-3">조건 {conditions}개</small>
-    </button>)}</div>
-  </nav>;
+  }, [rows, active, onSelect, onRun]);
 }
 
 interface HeaderProps {

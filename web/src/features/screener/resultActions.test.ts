@@ -6,7 +6,7 @@ import { DEFAULT_LAYOUT, useLayoutStore } from "../../stores/layout";
 import { useSelectionStore } from "../../stores/selection";
 import { useUiStore } from "../../stores/ui";
 import { useWatchlistStore } from "../../stores/watchlist";
-import { compareResult, dropPendingOpen, openResult, pendingResultCode, sendToNewWatchlist, sendToWatchlist } from "./resultActions";
+import { dropPendingOpen, openResult, pendingResultCode, sendToNewWatchlist, sendToWatchlist } from "./resultActions";
 
 const client = () => new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: Infinity } } });
 const symbol = (code: string): SymbolInfo => ({ code, name: code, market: "kospi", kind: "common", nxtEnabled: true });
@@ -73,18 +73,4 @@ test("관심종목 저장은 기존 목록의 중복을 건너뛰고 결과 순�
   const list = useWatchlistStore.getState().lists[1];
   expect(list).toMatchObject({ name: "실행 결과", symbols: ["035420", "000660"] });
   expect(useUiStore.getState().prefs.activeWatchlistId).toBe(list?.id);
-});
-
-test("비교 추가는 현재 종목, 중복과 최대 개수 제한을 지킨다", () => {
-  compareResult("005930", "삼성전자");
-  expect(cell().chartSettings.compare).toHaveLength(0);
-  compareResult("000660", "SK하이닉스");
-  compareResult("000660", "SK하이닉스");
-  expect(cell().chartSettings.compare).toHaveLength(1);
-  compareResult("035420", "NAVER");
-  compareResult("035720", "카카오");
-  compareResult("051910", "LG화학");
-  expect(cell().chartSettings.compare).toHaveLength(3);
-  expect(useSelectionStore.getState().toast?.text).toBe("비교 종목은 3개까지입니다");
-  expect(cell().symbol).toBe("005930");
 });

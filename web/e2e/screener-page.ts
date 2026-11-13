@@ -16,7 +16,8 @@ export const pickVenue = (page: Page, venue: string) => cell(page).getByRole("gr
 export const pickPeriod = (page: Page, period: string) => /^\d+분$/.test(period) ? selectOption(toolbar(page).getByRole("button", { name: "분봉" }), { label: period }) : toolbar(page).getByRole("group", { name: "봉 주기" }).getByRole("button", { name: period, exact: true }).click();
 
 export async function openScreener(page: Page) {
-  await rail(page).getByRole("tab", { name: /^스크리너/ }).click();
+  const tab = rail(page).getByRole("tab", { name: /^스크리너/ });
+  if (await tab.getAttribute("aria-selected") !== "true") await tab.click();
   await expect(panel(page)).toBeVisible();
 }
 

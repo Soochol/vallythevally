@@ -64,7 +64,6 @@ test("새 결과는 수동 실행으로만 반영하고 D/W/M 범위 편집·저
   await expect(rows(page).filter({ hasText: "110010" }).getByLabel("잠정", { exact: true })).toBeVisible();
   const before = await rows(page).filter({ hasText: "110010" }).textContent();
   screener.showResult(intradayResult(baseline, old.close + 200));
-  await page.getByRole("button", { name: "넓게 보기", exact: true }).click();
   await expect(rows(page).filter({ hasText: "110010" })).toHaveText(before!);
   await execute(page);
   await expect(rows(page).filter({ hasText: "110010" })).toContainText((old.close + 200).toLocaleString("ko-KR"));
@@ -227,7 +226,6 @@ for (const olderFails of [false, true]) {
     const original = await meta(page).textContent();
     await page.getByRole("tablist", { name: "오른쪽 패널" }).getByRole("tab", { name: "관심종목", exact: true }).click();
     await openScreener(page);
-    await page.getByRole("button", { name: "넓게 보기", exact: true }).click();
     const delivered = page.waitForEvent("requestfinished", (r) => new URL(r.url()).pathname === "/api/screener/run");
     held.reply(olderFails ? { status: 503, body: runError() } : { body: currentResult() });
     await delivered;

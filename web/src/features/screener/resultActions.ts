@@ -1,7 +1,6 @@
 import type { QueryClient } from "@tanstack/react-query";
 import type { SymbolCode } from "../../api/generated/SymbolCode";
 import { symbolInfoQuery } from "../../api/queries";
-import { compareRefusal } from "../../chart/settings";
 import type { VenueTarget } from "../../lib/venue";
 import { addSymbols } from "../../lib/watchlist";
 import { type Slot, useLayoutStore } from "../../stores/layout";
@@ -45,17 +44,6 @@ export async function openResult(queryClient: QueryClient, code: SymbolCode): Pr
   pendingOpen = null;
   useLayoutStore.getState().setSymbol(slot, target);
   useSelectionStore.getState().setPhoneTab("chart");
-}
-
-export function compareResult(code: SymbolCode, name: string) {
-  const { activeSlot: slot } = useSelectionStore.getState();
-  const layout = useLayoutStore.getState();
-  const cell = layout.layout.cells.find((cell) => cell.slot === slot);
-  if (!cell) return;
-  const refusal = compareRefusal(cell.chartSettings, code, cell.symbol);
-  if (refusal) return toast(refusal === "full" ? "비교 종목은 3개까지입니다" : refusal === "main" ? "현재 종목은 비교에 추가할 수 없습니다" : "이미 비교에 있습니다");
-  layout.addCompare(slot, code);
-  toast(`비교에 추가했습니다: ${name}`);
 }
 
 export function sendToWatchlist(listId: string, codes: readonly SymbolCode[]) {

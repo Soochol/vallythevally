@@ -64,28 +64,22 @@ function expectWholeRow(geometry: Awaited<ReturnType<typeof rowGeometry>>) {
 }
 
 const surfaces = [
-  { width: 320, height: 568, wide: false },
-  { width: 320, height: 844, wide: false },
-  { width: 360, height: 844, wide: false },
-  { width: 390, height: 844, wide: false },
-  { width: 1024, height: 768, wide: false },
-  { width: 1280, height: 600, wide: false },
-  { width: 1440, height: 900, wide: false },
-  { width: 1280, height: 600, wide: true },
-  { width: 1440, height: 900, wide: true },
+  { width: 320, height: 568 },
+  { width: 320, height: 844 },
+  { width: 360, height: 844 },
+  { width: 390, height: 844 },
+  { width: 1024, height: 768 },
+  { width: 1280, height: 600 },
+  { width: 1440, height: 900 },
 ];
 
-for (const { width, height, wide } of surfaces) {
-  test(`${width}×${height} ${wide ? "넓은 패널" : "기본 패널"}에서 세 조건의 성공·실행 중·실패 뒤 결과 행 전체를 읽고 스크롤해 차트로 연다`, async ({ scenario, screener, page }, info) => {
+for (const { width, height } of surfaces) {
+  test(`${width}×${height}에서 세 조건의 성공·실행 중·실패 뒤 결과 행 전체를 읽고 스크롤해 차트로 연다`, async ({ scenario, screener, page }, info) => {
     await page.setViewportSize({ width: width!, height: height! });
     scenario.documents.saveScreens({ screens: [screen], revision: 1 });
     screener.showResult(currentResult());
     await page.goto("/");
     await openPanel(page, width!);
-    if (wide) {
-      await page.getByRole("button", { name: "넓게 보기", exact: true }).click();
-      await expect(page.getByRole("button", { name: "오른쪽 탭으로", exact: true })).toHaveAttribute("aria-pressed", "true");
-    }
     await updateBand(page).getByRole("button", { name: "처음 받기" }).click();
     await waitForUpdateToFinish(page, "11-06(금)");
     await runButton(page).click();
@@ -107,24 +101,22 @@ for (const { width, height, wide } of surfaces) {
     await expect(panel(page).getByRole("alert")).toContainText("이전 결과와 수집 시각을 유지합니다");
     await expect(metadata(page)).toHaveText(original!);
     const failed = await rowGeometry(first);
-    await writeFile(info.outputPath("geometry.json"), JSON.stringify({ width, height, wide, success, running, failed }, null, 2));
+    await writeFile(info.outputPath("geometry.json"), JSON.stringify({ width, height, success, running, failed }, null, 2));
     await page.screenshot({ path: info.outputPath("failed.png"), fullPage: true });
-    await openRow(page, first, wide, 2_500);
+    await first.getByRole("button").click({ timeout: 2_500 });
     await expectChart(page, "가상전자");
     if (width! < 768) await openPanel(page, width!);
     expectWholeRow(success);
     expectWholeRow(running);
     expectWholeRow(failed);
     expectWholeRow(await rowGeometry(last));
-    await openRow(page, last, wide);
+    await last.getByRole("button").click();
     await expectChart(page, "가상정지");
     if (width! < 768) await openPanel(page, width!);
     await expect(metadata(page)).toHaveText(original!);
     await expect(panel(page).getByRole("alert")).toContainText("실행하지 못했습니다");
     await page.keyboard.press("ArrowUp");
-    if (wide) await page.keyboard.press("Enter");
     await expectChart(page, "가상신규");
-    if (wide) await page.getByRole("button", { name: "넓게 보기", exact: true }).click();
     if (width! < 768) await openPanel(page, width!);
     const selected = rows(page).filter({ hasText: "110090" });
     await expect(selected.getByRole("button")).toHaveAttribute("aria-current", "true");
@@ -161,7 +153,7 @@ for (const { width, height, wide } of surfaces) {
     await expect(results(page)).toHaveAttribute("aria-busy", "false");
     await expect(panel(page).getByRole("alert")).toHaveCount(0);
     expectWholeRow(await rowGeometry(first));
-    await openRow(page, first, wide);
+    await first.getByRole("button").click();
     await expectChart(page, "가상전자");
   });
 }
@@ -201,14 +193,4 @@ for (const [width, height] of [[320, 568], [1280, 600]]) {
     await expect(metadata(page)).toHaveText(original!);
     expect(await page.evaluate(() => document.documentElement.scrollHeight <= window.innerHeight)).toBe(true);
   });
-}
-
-async function openRow(page: Page, row: Locator, wide: boolean, timeout?: number) {
-  await row.getByRole("button").click({ timeout });
-  if (!wide) return;
-  await expect(page.getByRole("complementary", { name: "결과 종목 미리보기" }).getByRole("img")).toBeVisible();
-  await row.getByRole("button").press("Enter");
-  await expect(page.getByRole("button", { name: "넓게 보기", exact: true })).toBeVisible();
-  await page.getByRole("button", { name: "넓게 보기", exact: true }).click();
-  await row.getByRole("button").focus();
 }

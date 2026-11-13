@@ -24,12 +24,11 @@ for (const initialFailure of [true, false]) {
   });
 }
 
-test("긴 ETF 이름과 넓은 오른쪽 패널에서도 거래소가 차트 안에 있고 탭을 누를 수 있다", async ({ page }, info) => {
-  await page.setViewportSize({ width: 1024, height: 768 });
+test("긴 ETF 이름에서도 거래소가 차트 안에 있고 탭을 누를 수 있다", async ({ page }, info) => {
+  await page.setViewportSize({ width: 800, height: 768 });
   await page.goto("/?symbol=0000D0");
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
   await expect(cell(page)).toHaveAttribute("aria-label", /TIGER 엔비디아미국채커버드콜밸런스\(합성\)/);
-  await page.getByRole("button", { name: "넓게 보기", exact: true }).click();
   const tabs = page.getByRole("tablist", { name: "오른쪽 패널" });
   await tabs.getByRole("tab", { name: /^스크리너/ }).click({ timeout: 3000 });
   const watch = tabs.getByRole("tab", { name: "관심종목", exact: true });
@@ -48,5 +47,5 @@ test("긴 ETF 이름과 넓은 오른쪽 패널에서도 거래소가 차트 안
   const name = cell(page).getByText("TIGER 엔비디아미국채커버드콜밸런스(합성)", { exact: true });
   await expect(name).toHaveAttribute("aria-label", "TIGER 엔비디아미국채커버드콜밸런스(합성)");
   expect(await name.evaluate((el) => el.scrollWidth > el.clientWidth)).toBe(true);
-  await page.screenshot({ path: info.outputPath("long-etf-wide.png") });
+  await page.screenshot({ path: info.outputPath("long-etf.png") });
 });

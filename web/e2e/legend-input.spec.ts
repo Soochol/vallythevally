@@ -77,11 +77,10 @@ for (const action of ["십자선", "휠 확대", "끌기"]) {
       });
       return route.fulfill({ json: { symbol: query.get("symbol"), venue: query.get("venue"), period: query.get("period"), bars, current: null, nextBefore: null, seq: null } });
     });
-    await page.setViewportSize({ width: 1024, height: 768 });
+    await page.setViewportSize({ width: 800, height: 768 });
     await page.goto("/?symbol=0000D0");
     await expect(cell(page)).toHaveAttribute("aria-busy", "false");
     await expect(chartOf(cell(page))).toHaveAttribute("data-bar-count", "150");
-    await page.getByRole("button", { name: "넓게 보기", exact: true }).click();
     const name = cell(page).getByText(LONG_NAME, { exact: true });
     const box = await name.boundingBox();
     const chartBox = await cell(page).boundingBox();

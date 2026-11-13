@@ -23,7 +23,6 @@ interface EditorProps {
   entries: readonly ScreenEntry[];
   blocked: boolean;
   resultActions: ReactNode;
-  wide: boolean;
   editing: boolean;
   onEditingChange(editing: boolean): void;
   onRun(): void;
@@ -35,7 +34,7 @@ function scopeSummary(screen: Screen): string {
   return excluded ? `${markets} · ${excluded} 제외` : markets;
 }
 
-export function SentenceEditor({ screenEditing, chosen, entries, blocked, resultActions, wide, editing, onEditingChange, onRun }: EditorProps) {
+export function SentenceEditor({ screenEditing, chosen, entries, blocked, resultActions, editing, onEditingChange, onRun }: EditorProps) {
   const section = useRef<HTMLElement>(null);
   const head = useRef<HTMLDivElement>(null);
   const opener = useRef<HTMLButtonElement>(null);
@@ -43,8 +42,6 @@ export function SentenceEditor({ screenEditing, chosen, entries, blocked, result
   const [rename, setRename] = useState<string | null>(null);
   const { draft, runnable: checked, saving: busy, canSave, nameError, alerts, flagged } = chosen;
   const running = chosen.run?.kind === "running";
-  const inline = wide && (editing || flagged);
-  const floating = !wide && editing;
   const lines = checked.ok ? checked.screen.conditions.map(conditionSentence) : [];
   const choose = (id: string) => { dropPendingOpen(); screenEditing.choose(id); };
   const change = (update: (draft: ScreenDraft) => ScreenDraft) => screenEditing.edit(update);
@@ -61,8 +58,7 @@ export function SentenceEditor({ screenEditing, chosen, entries, blocked, result
         <ScreenerMenu label="조건식 고르기" items={entries.map((entry) => ({ kind: "radio", label: entry.title, checked: entry.source.id === chosen.source.id, onSelect: () => choose(entry.source.id) }))}><span className="truncate text-l font-semibold">{chosen.title}</span><ChevronIcon /></ScreenerMenu>
         {chosen.dirty && <ChangedBadge />}
         <span className="flex-1" />
-        {wide && <button type="button" className="tb-btn h-7 px-2 text-s" aria-expanded={inline} onClick={() => onEditingChange(!inline)}>{inline ? "조건 접기" : "조건 펼치기"}</button>}
-        {!floating && <button type="button" className="tb-btn h-7 px-2 text-s disabled:opacity-40" disabled={!canSave} onClick={save}>{busy ? "저장 중" : "저장"}</button>}
+        {!editing && <button type="button" className="tb-btn h-7 px-2 text-s disabled:opacity-40" disabled={!canSave} onClick={save}>{busy ? "저장 중" : "저장"}</button>}
         <ScreenerMenu label="조건식 메뉴" items={[
           { kind: "action", label: "이름 바꾸기", onSelect: () => { renameOpener.current = head.current?.querySelector<HTMLElement>('[aria-label="조건식 메뉴"]') ?? null; setRename(draft.name); } },
           { kind: "action", label: "새 조건식", icon: <PlusIcon />, onSelect: () => create() },
@@ -78,22 +74,22 @@ export function SentenceEditor({ screenEditing, chosen, entries, blocked, result
         <button type="submit" className="btn-primary h-8">적용</button>
       </form>
     </Popover>}
-    {!floating && nameError && <p role="alert" className="px-3 pb-2 text-xs text-danger">{nameError}</p>}
-    {inline ? <SentenceFields draft={draft} locked={busy} onChange={change} /> : <div aria-label="조건 요약" className="px-3 pb-3 text-s text-text-2">
+    {!editing && nameError && <p role="alert" className="px-3 pb-2 text-xs text-danger">{nameError}</p>}
+    <div aria-label="조건 요약" className="px-3 pb-3 text-s text-text-2">
       {!checked.ok && <p>{FIX_INVALID}</p>}
       {checked.ok && lines.length === 0 && <p>{NO_CONDITIONS_SENTENCE}</p>}
       {lines.slice(0, SUMMARY_LINES).map((line, index) => <p key={index} className="truncate" title={line}>{line}</p>)}
       {lines.length > SUMMARY_LINES && <p className="text-text-3">외 {lines.length - SUMMARY_LINES}개 조건</p>}
       {checked.ok && <p className="truncate text-xs text-text-3" title={scopeSummary(checked.screen)}>{scopeSummary(checked.screen)}</p>}
-    </div>}
+    </div>
     <div data-chart-control className="flex items-center gap-2 px-3 pb-3">
       <RunButton running={running} disabled={blocked || running || busy} onRun={onRun} />
-      {!wide && <button ref={opener} type="button" aria-haspopup="dialog" aria-expanded={editing} className="tb-btn h-8 flex-none gap-1 border border-line px-2 text-s aria-expanded:border-accent aria-expanded:text-accent" onClick={() => onEditingChange(!editing)}><PenIcon size={14} />편집</button>}
+      <button ref={opener} type="button" aria-haspopup="dialog" aria-expanded={editing} className="tb-btn h-8 flex-none gap-1 border border-line px-2 text-s aria-expanded:border-accent aria-expanded:text-accent" onClick={() => onEditingChange(!editing)}><PenIcon size={14} />편집</button>
       <span className="min-w-0 truncate text-xs text-text-3" title={blocked ? BLOCKED_HINT : RUNS_UNSAVED}>{blocked ? BLOCKED_HINT : RUNS_UNSAVED}</span>
       <span className="flex-1" />{resultActions}
     </div>
-    {!floating && alerts.map((message) => <p key={message} role="alert" className="px-3 pb-2 text-xs text-danger">{message}</p>)}
-    {floating && <EditorWindow draft={draft} section={section} opener={opener} flagged={flagged} nameError={nameError} canSave={canSave} busy={busy} running={running} blocked={blocked} alerts={alerts} onChange={change} onClose={() => onEditingChange(false)} onSave={save} onRun={onRun} />}
+    {!editing && alerts.map((message) => <p key={message} role="alert" className="px-3 pb-2 text-xs text-danger">{message}</p>)}
+    {editing && <EditorWindow draft={draft} section={section} opener={opener} flagged={flagged} nameError={nameError} canSave={canSave} busy={busy} running={running} blocked={blocked} alerts={alerts} onChange={change} onClose={() => onEditingChange(false)} onSave={save} onRun={onRun} />}
   </section>;
 }
 

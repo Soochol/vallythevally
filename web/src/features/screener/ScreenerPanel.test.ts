@@ -12,7 +12,7 @@ class KeyTarget extends EventTarget {
 }
 
 const key = (patch: Partial<ScreenerKeyEvent> = {}): ScreenerKeyEvent => ({ key: "Enter", ctrlKey: false, metaKey: false, altKey: false, shiftKey: false, isComposing: false, defaultPrevented: false, target: new KeyTarget(), preventDefault: vi.fn(), ...patch });
-const callbacks = (onRun = vi.fn()) => ({ rows: [], active: null, wide: false, onSelect: vi.fn(), onOpen: vi.fn(), onRun });
+const callbacks = (onRun = vi.fn()) => ({ rows: [], active: "005930", onSelect: vi.fn(), onRun });
 
 beforeEach(() => {
   vi.stubGlobal("HTMLElement", KeyTarget);
@@ -31,13 +31,13 @@ test("결과 영역의 Ctrl+Enter와 Meta+Enter는 실행을 한 번 부르고 �
   }
 });
 
-test("팝오버의 Enter와 Ctrl+Enter는 결과 열기나 실행이 가져가지 않는다", () => {
-  for (const ctrlKey of [false, true]) {
-    const event = key({ ctrlKey, target: new KeyTarget("BUTTON", true) });
-    const actions = { ...callbacks(), wide: true };
+test("팝오버의 Ctrl+Enter와 ↓는 실행이나 결과 이동이 가져가지 않는다", () => {
+  for (const patch of [{ ctrlKey: true }, { key: "ArrowDown" }]) {
+    const event = key({ ...patch, target: new KeyTarget("BUTTON", true) });
+    const actions = callbacks();
     handleResultKey(event, actions);
     expect(actions.onRun).not.toHaveBeenCalled();
-    expect(actions.onOpen).not.toHaveBeenCalled();
+    expect(actions.onSelect).not.toHaveBeenCalled();
     expect(event.preventDefault).not.toHaveBeenCalled();
   }
 });
@@ -65,7 +65,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
-async function editorMarkup(wide: boolean, editing: boolean, invalid = false) {
+async function editorMarkup(editing: boolean, invalid = false) {
   const source: Screen = { id: "s", name: "신고가", markets: ["kospi"], exclude: ["etf"], conditions: [{ kind: "new_high", period: "W", field: "high", n: 52, recentBars: 5 }] };
   const base: Screens = { revision: 1, screens: [source] };
   const screenEditing = createScreenEditing({
@@ -79,22 +79,21 @@ async function editorMarkup(wide: boolean, editing: boolean, invalid = false) {
   const { entries, chosen } = screenEditing.view();
   if (!chosen) throw new Error("문장 편집기에 보일 조건식이 있어야 합니다");
   const client = new QueryClient();
-  const editor = createElement(SentenceEditor, { screenEditing, chosen, entries, blocked: false, resultActions: null, wide, editing, onEditingChange: () => {}, onRun: () => {} });
+  const editor = createElement(SentenceEditor, { screenEditing, chosen, entries, blocked: false, resultActions: null, editing, onEditingChange: () => {}, onRun: () => {} });
   const markup = renderToStaticMarkup(createElement(QueryClientProvider, { client }, editor));
   client.clear();
   return markup;
 }
 
-test("오른쪽 탭은 조건 요약과 실행·편집만 보이고 문장 편집은 편집 창에서 연다", async () => {
-  const closed = await editorMarkup(false, false);
+test("패널은 조건 요약과 실행·편집만 보이고 문장 편집은 편집 창에서 연다", async () => {
+  const closed = await editorMarkup(false);
   expect(closed).toContain("52주 신고가");
   expect(closed).toContain("코스피 · ETF 제외");
   expect(closed).toContain('aria-haspopup="dialog" aria-expanded="false"');
   expect(closed).toContain('aria-keyshortcuts="Control+Enter Meta+Enter"');
   expect(closed).not.toContain('aria-label="문장형 조건식"');
   expect(closed).not.toContain('aria-label="조건 편집 창"');
-  expect(closed).not.toContain("조건 펼치기");
-  const open = await editorMarkup(false, true);
+  const open = await editorMarkup(true);
   expect(open).toContain('role="dialog" aria-label="조건 편집 창"');
   expect(open).toContain('aria-label="조건식 이름"');
   expect(open).toContain('aria-label="문장형 조건식"');
@@ -104,27 +103,11 @@ test("오른쪽 탭은 조건 요약과 실행·편집만 보이고 문장 편�
   expect([...open.matchAll(/>저장</g)]).toHaveLength(1);
 });
 
-test("넓게 보기는 조건 요약에서 문장 편집을 그 자리에 펼치고 편집 창을 쓰지 않는다", async () => {
-  const collapsed = await editorMarkup(true, false);
-  expect(collapsed).toContain("조건 펼치기");
-  expect(collapsed).toContain("52주 신고가");
-  expect(collapsed).not.toContain('aria-label="문장형 조건식"');
-  expect(collapsed).toContain('aria-keyshortcuts="Control+Enter Meta+Enter"');
-  const expanded = await editorMarkup(true, true);
-  expect(expanded).toContain("조건 접기");
-  expect(expanded).toContain('aria-label="문장형 조건식"');
-  expect(expanded).not.toContain('aria-label="조건 편집 창"');
-  expect(expanded).not.toContain("편집</button>");
-});
-
-test("검증에 실패하면 넓게 보기는 조건 편집을 펼치고 오른쪽 탭은 닫힌 패널과 편집 창에 오류를 한 번씩 보인다", async () => {
-  const wide = await editorMarkup(true, false, true);
-  expect(wide).toContain("이름을 넣으세요");
-  expect(wide).toContain('aria-label="문장형 조건식"');
-  const closed = await editorMarkup(false, false, true);
+test("검증에 실패하면 닫힌 패널과 편집 창에 오류를 한 번씩 보인다", async () => {
+  const closed = await editorMarkup(false, true);
   expect([...closed.matchAll(/이름을 넣으세요/g)]).toHaveLength(1);
   expect(closed).not.toContain('aria-label="문장형 조건식"');
-  const open = await editorMarkup(false, true, true);
+  const open = await editorMarkup(true, true);
   expect([...open.matchAll(/이름을 넣으세요/g)]).toHaveLength(1);
   expect(open).toContain('aria-label="조건식 이름" aria-invalid="true"');
 });
