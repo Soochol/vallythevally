@@ -1,11 +1,7 @@
 import { Choice, CHOICE_LABEL, fieldName, KindFields, NumberBox, PERIODS, Together, type LineUi } from "./ConditionFields";
 import { Select } from "../menu/Select";
 import { confirmAction } from "../overlay/Confirm";
-import { useQueryClient } from "@tanstack/react-query";
-import { type Ref, useEffect, useId, useRef, useState } from "react";
-import type { Screen } from "../../api/generated/Screen";
-import type { Screens } from "../../api/generated/Screens";
-import { saveScreens, useScreens } from "../../api/screener";
+import { type Ref, useEffect, useId, useRef } from "react";
 import {
   conditionSentence,
   EXCLUDE_LABEL,
@@ -16,14 +12,13 @@ import {
 import { useSelectionStore } from "../../stores/selection";
 import { DialogFrame, Errors, Row } from "../dialog/DialogParts";
 import { ArrowIcon, CloseIcon, PlusIcon } from "../icons";
-import { screenEditingFor } from "../screener/useScreenEditing";
+import { dropPendingOpen } from "../screener/resultActions";
+import { useScreenEditing } from "../screener/useScreenEditing";
 import {
   addCondition,
   changeKind,
   type ConditionDraft,
   checkCondition,
-  checkDraft,
-  draftOf,
   editCondition,
   type ExcludeGroup,
   excludesIn,
@@ -38,7 +33,6 @@ import {
   type ScreenDraft,
   toggleExclude,
   toggleMarket,
-  withScreen,
 } from "./screenForm";
 
 const EXCLUDE_ROWS: readonly { group: ExcludeGroup; label: string }[] = [
@@ -49,88 +43,55 @@ const FIELD_BOX = "ui-field";
 const CHIP =
   "h-9 rounded-m border border-line px-3 text-s text-text-2 hover:text-text " +
   "aria-pressed:border-accent aria-pressed:bg-accent-soft aria-pressed:font-[600] aria-pressed:text-accent max-md:h-9";
-const STALE_SAVE = "이 대화상자를 연 뒤 다른 탭이나 기기에서 조건식 목록이 바뀌어 덮어쓰지 않았습니다. 바뀐 목록을 불러왔습니다. 다시 저장하면 이 조건식을 지금 보이는 내용으로 바꿉니다.";
-const STALE_DELETE = "이 대화상자를 연 뒤 다른 탭이나 기기에서 조건식 목록이 바뀌어 삭제하지 않았습니다. 바뀐 목록을 불러왔으니 다시 삭제하세요.";
-
-type Saving = { kind: "idle" } | { kind: "saving" } | { kind: "failed"; message: string };
-
 export function ScreenDialog() {
-  const dialog = useSelectionStore((s) => s.dialog);
-  const screens = useScreens().data;
-  return dialog?.kind === "screen" && screens ? <ScreenDialogBody editId={dialog.editId} opened={screens} /> : null;
+  const open = useSelectionStore((s) => s.dialog?.kind === "screen");
+  return open ? <ScreenDialogBody /> : null;
 }
 
-function ScreenDialogBody({ editId, opened }: { editId: string | null; opened: Screens }) {
+function ScreenDialogBody() {
   const closeDialog = useSelectionStore((s) => s.closeDialog);
-  const client = useQueryClient();
+  const { editing, view: { chosen } } = useScreenEditing();
   const ids = useId();
   const nameRef = useRef<HTMLInputElement>(null);
   const formRef = useRef<HTMLFormElement>(null);
-  const [id] = useState(() => editId ?? crypto.randomUUID());
-  const [base, setBase] = useState(opened);
-  const [initial] = useState(() => draftOf(opened.screens.find((s) => s.id === editId) ?? null));
-  const [draft, setDraft] = useState(initial);
-  const [tried, setTried] = useState(false);
-  const [saving, setSaving] = useState<Saving>({ kind: "idle" });
 
   useEffect(() => nameRef.current?.focus(), []);
 
-  const busy = saving.kind === "saving";
-  const editing = editId !== null;
-  const check = checkDraft(draft, id, base.screens);
-  const errors = check.ok ? null : check.errors;
-  const nameError = tried || draft.name !== initial.name ? (errors?.name ?? null) : null;
-  const notice = saving.kind === "failed" ? saving.message : errors?.list;
+  if (!chosen) return null;
+  const { draft, runnable, dirty, saving: busy, nameError } = chosen;
+  const notice = chosen.notice ?? chosen.listError;
   const dismiss = () => {
     if (!busy) closeDialog();
   };
 
-  const store = async (change: (list: readonly Screen[]) => Screen[], stale: string, done: () => void) => {
-    setSaving({ kind: "saving" });
-    try {
-      const outcome = await saveScreens(client, change(base.screens), base.revision);
-      if (outcome.kind === "ok") return done();
-      setBase(outcome.latest);
-      setSaving({ kind: "failed", message: stale });
-    } catch (e) {
-      setSaving({ kind: "failed", message: `저장하지 못했습니다: ${e instanceof Error ? e.message : String(e)}` });
-    }
-  };
-
-  const submit = (e: React.SyntheticEvent<HTMLFormElement>) => {
+  const submit = async (e: React.SyntheticEvent<HTMLFormElement>) => {
     e.preventDefault();
-    if (busy) return;
-    if (!check.ok) {
-      setTried(true);
-      (check.errors.name ? nameRef.current : formRef.current?.querySelector<HTMLElement>("[aria-invalid=true]"))?.focus();
-      return;
-    }
-    const screen = check.screen;
-    void store((list) => withScreen(list, screen), STALE_SAVE, () => {
-      screenEditingFor(client).choose(screen.id);
-      closeDialog();
-    });
+    if (busy || !dirty) return;
+    const saved = editing.save();
+    if (!runnable.ok) (runnable.errors.name ? nameRef.current : formRef.current?.querySelector<HTMLElement>("[aria-invalid=true]"))?.focus();
+    if (await saved) closeDialog();
   };
 
   const remove = async () => {
-    const name = base.screens.find((s) => s.id === id)?.name ?? initial.name;
-    if (busy || !await confirmAction(`"${name}" 조건식을 삭제할까요? 되돌릴 수 없습니다.`)) return;
-    void store((list) => list.filter((s) => s.id !== id), STALE_DELETE, closeDialog);
+    if (busy || !await confirmAction(`"${draft.name}" 조건식을 삭제할까요? 되돌릴 수 없습니다.`)) return;
+    if (!await editing.remove()) return;
+    dropPendingOpen();
+    closeDialog();
   };
 
   return (
     <DialogFrame labelledBy={`${ids}-title`} width="w-[min(980px,calc(100vw-32px))]" onClose={dismiss}>
       <div className="ui-dialog-head">
         <h2 id={`${ids}-title`} className="min-w-0 flex-1 truncate text-l font-[650]">
-          {editing ? "조건식 편집" : "새 조건식"}
+          {chosen.stored ? "조건식 편집" : "새 조건식"}
         </h2>
         <button type="button" className="icon-btn flex-none" aria-label="닫기" title="닫기 (Esc)" onClick={dismiss}>
           <CloseIcon />
         </button>
       </div>
 
-      <form ref={formRef} onSubmit={submit} noValidate className="flex min-h-0 flex-1 flex-col">
-        <ScreenFields ids={ids} draft={draft} nameError={nameError} nameRef={nameRef} locked={busy} onChange={setDraft} />
+      <form ref={formRef} onSubmit={(e) => void submit(e)} noValidate className="flex min-h-0 flex-1 flex-col">
+        <ScreenFields ids={ids} draft={draft} nameError={nameError} nameRef={nameRef} locked={busy} onChange={editing.edit} />
 
         {notice && (
           <p role="alert" className="flex-none border-t border-line px-4 py-2 text-s leading-[1.45] text-danger">
@@ -138,11 +99,9 @@ function ScreenDialogBody({ editId, opened }: { editId: string | null; opened: S
           </p>
         )}
         <div className="ui-dialog-foot">
-          {editing && (
-            <button type="button" className="h-8 flex-none rounded-m px-3 text-danger hover:bg-raised disabled:opacity-50" disabled={busy} onClick={remove}>
-              삭제
-            </button>
-          )}
+          <button type="button" className="h-8 flex-none rounded-m px-3 text-danger hover:bg-raised disabled:opacity-50" disabled={busy} onClick={remove}>
+            삭제
+          </button>
           <span className="flex items-center gap-2 text-s text-text-3 max-md:hidden">
             <kbd>Enter</kbd> 저장 <kbd>Esc</kbd> 닫기
           </span>
@@ -150,7 +109,7 @@ function ScreenDialogBody({ editId, opened }: { editId: string | null; opened: S
           <button type="button" className="h-8 flex-none rounded-m border border-line px-4 hover:bg-raised disabled:opacity-50" disabled={busy} onClick={dismiss}>
             취소
           </button>
-          <button type="submit" className="btn-primary flex-none disabled:cursor-not-allowed disabled:opacity-50" disabled={busy}>
+          <button type="submit" className="btn-primary flex-none disabled:cursor-not-allowed disabled:opacity-50" disabled={busy || !dirty}>
             {busy ? "저장 중" : "저장"}
           </button>
         </div>
