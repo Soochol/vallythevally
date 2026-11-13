@@ -60,10 +60,14 @@ function positionMoves(side: PositionSide) {
   return {
     target: edit(([entry, target, stop], to) => [entry, { ...target, price: atLeast(direction, to.price, entry.price) }, stop]),
     stop: edit(([entry, target, stop], to) => [entry, target, { ...stop, price: atLeast(-direction, to.price, entry.price) }]),
-    right: edit(([entry, target, stop], to, ctx) => [entry, { ...target, t: Math.max(to.t, ctx.shiftBars(entry.t, 1) ?? entry.t) }, stop]),
-    entry: edit(([, target, stop], to, ctx) => {
+    right: edit(([entry, target, stop], to, ctx) => {
+      const earliest = Math.min(ctx.shiftBars(entry.t, 1) ?? entry.t, Math.max(target.t, entry.t));
+      return [entry, { ...target, t: Math.max(to.t, earliest) }, stop];
+    }),
+    entry: edit(([entry, target, stop], to, ctx) => {
+      const latest = Math.max(ctx.shiftBars(target.t, -1) ?? target.t, Math.min(entry.t, target.t));
       const price = Math.min(Math.max(to.price, Math.min(target.price, stop.price)), Math.max(target.price, stop.price));
-      return [{ t: Math.min(to.t, ctx.shiftBars(target.t, -1) ?? target.t), price }, target, stop];
+      return [{ t: Math.min(to.t, latest), price }, target, stop];
     }),
   };
 }
@@ -104,22 +108,24 @@ function positionTool(side: PositionSide): Tool {
       const a = entry === undefined ? null : ctx.toScreen(entry);
       const right = target === undefined ? null : ctx.xOf(target.t);
       if (entry === undefined || a === null || right === null) return [];
-      const outside = right > ctx.paneWidth && Math.min(right, ctx.paneWidth) - a.x < a.x;
-      const x = outside ? a.x - MEASURE_GAP : a.x + MEASURE_GAP;
-      const align = outside ? "right" : "left";
+      const shown = { left: Math.max(Math.min(a.x, right), 0), right: Math.min(Math.max(a.x, right), ctx.paneWidth) };
+      const towardLeft = shown.left + shown.right > ctx.paneWidth;
+      const x = towardLeft ? shown.right - MEASURE_GAP : shown.left + MEASURE_GAP;
+      const align = towardLeft ? "right" : "left";
+      const labelled = shown.left < shown.right;
       const shapes: Shape[] = [];
       const level = (point: DrawingPoint | undefined, name: string, fill: Fill) => {
         const y = point === undefined ? null : ctx.yOf(point.price);
         if (point === undefined || y === null) return;
         const { dy, baseline } = awayFrom(y, a.y);
         shapes.push({ kind: "rect", a, b: { x: right, y }, fill });
-        shapes.push(measureLabel({ x, y: y + dy }, levelText(name, entry.price, point.price, ctx), style.label, fill.color, baseline, align));
+        if (labelled) shapes.push(measureLabel({ x, y: y + dy }, levelText(name, entry.price, point.price, ctx), style.label, fill.color, baseline, align));
       };
       level(target, "목표", style.profit);
       level(stop, "손절", style.stop);
       shapes.push({ kind: "segment", a, b: { x: right, y: a.y }, stroke: thinStroke(DRAW) });
       const ratio = target === undefined || stop === undefined ? null : riskReward(entry.price, target.price, stop.price);
-      if (ratio !== null) shapes.push(measureLabel({ x, y: a.y }, `손익비 ${ratio.toFixed(2)}`, style.label, DRAW, "middle", align));
+      if (labelled && ratio !== null) shapes.push(measureLabel({ x, y: a.y }, `손익비 ${ratio.toFixed(2)}`, style.label, DRAW, "middle", align));
       return shapes;
     },
     handles({ points }, ctx) {

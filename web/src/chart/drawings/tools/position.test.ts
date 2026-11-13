@@ -23,11 +23,13 @@ const place = (tool: typeof long, at: DrawingPoint) => {
   if (tool.placement.kind !== "points" || tool.placement.oneClick === undefined) throw new Error("not one-click");
   return tool.placement.oneClick(at, ctx);
 };
-const handleMove = (tool: typeof long, points: DrawingPoint[], index: number, to: DrawingPoint) => {
-  const handle = tool.handles({ points, style, text: null, selected: true }, ctx)[index];
+const handleMove = (tool: typeof long, points: DrawingPoint[], index: number, to: DrawingPoint, c: ToolContext = ctx) => {
+  const handle = tool.handles({ points, style, text: null, selected: true }, c)[index];
   if (handle === undefined) throw new Error(`no handle ${index}`);
-  return handle.move(points, to, ctx);
+  return handle.move(points, to, c);
 };
+const labelSpots = (tool: typeof long, points: DrawingPoint[], c: ToolContext = ctx) =>
+  tool.shapes({ points, style, text: null, selected: false }, c).flatMap((s) => (s.kind === "text" ? [[s.at.x, s.align]] : []));
 const texts = (tool: typeof long, points: DrawingPoint[]) =>
   tool.shapes({ points, style, text: null, selected: false }, ctx).flatMap((s) => (s.kind === "text" ? [s.text] : []));
 
@@ -79,11 +81,24 @@ describe("매수 포지션", () => {
     expect(handleMove(long, points, 2, { t: 0, price: 1 })[1]).toEqual({ t: 1060, price: points[1]!.price });
   });
 
-  test("글자는 진입 쪽 상자 안에 붙어, 오른쪽 끝이 화면 밖이어도 보인다", () => {
-    const shapes = long.shapes({ points, style, text: null, selected: false }, ctx);
-    expect(shapes.flatMap((s) => (s.kind === "text" ? [[s.at.x, s.align]] : []))).toEqual([[106, "left"], [106, "left"], [106, "left"]]);
-    const atEdge = long.shapes({ points: place(long, { t: 7800, price: 200 }), style, text: null, selected: false }, ctx);
-    expect(atEdge.flatMap((s) => (s.kind === "text" ? [[s.at.x, s.align]] : []))).toEqual([[774, "right"], [774, "right"], [774, "right"]]);
+  test("글자는 상자의 화면에 보이는 구간 안, 칸 가운데에서 먼 끝에 붙어 가운데로 자라고, 상자가 화면 밖이면 없다", () => {
+    const offscreen: ToolContext = { ...ctx, toScreen: (p) => ({ x: p.t / 10, y: 500 - p.price }), xOf: (t) => t / 10 };
+    const three = (from: number, to: number) => [{ t: from, price: 200 }, { t: to, price: 220 }, { t: from, price: 190 }];
+    expect(labelSpots(long, points)).toEqual([[106, "left"], [106, "left"], [106, "left"]]);
+    expect(labelSpots(long, three(7800, 9000))).toEqual([[794, "right"], [794, "right"], [794, "right"]]);
+    expect(labelSpots(long, three(7000, 7900))).toEqual([[784, "right"], [784, "right"], [784, "right"]]);
+    expect(labelSpots(short, three(-1000, 10000), offscreen)).toEqual([[6, "left"], [6, "left"], [6, "left"]]);
+    expect(labelSpots(long, three(-2000, 4000), offscreen)).toEqual([[6, "left"], [6, "left"], [6, "left"]]);
+    expect(labelSpots(long, three(-5000, -1000), offscreen)).toEqual([]);
+    expect(labelSpots(long, three(9000, 12000), offscreen)).toEqual([]);
+  });
+
+  test("진입과 목표가 한 봉 안에 있어도 가격만 끌면 시각은 그대로다", () => {
+    const day = 86_400;
+    const daily: ToolContext = { ...ctx, shiftBars: (t, n) => (Math.floor(t / day) + n) * day };
+    const sameBar = [{ t: 2 * day + 3_600, price: 200 }, { t: 2 * day + 7_200, price: 220 }, { t: 2 * day + 3_600, price: 190 }];
+    expect(handleMove(long, sameBar, 3, { t: sameBar[0]!.t, price: 205 }, daily)[0]).toEqual({ t: sameBar[0]!.t, price: 205 });
+    expect(handleMove(long, sameBar, 2, { t: sameBar[1]!.t, price: 1 }, daily)[1]).toEqual(sameBar[1]);
   });
 
   test("점이 모자라거나 화면에 못 놓으면 던지지 않는다", () => {
