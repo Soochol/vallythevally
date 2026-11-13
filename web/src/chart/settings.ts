@@ -29,6 +29,18 @@ export interface ChartSettings {
   indicators: IndicatorConfig[];
   compare: SymbolCode[];
   panels: Panel[];
+  visibleBars: number | null;
+  showExtremes: boolean;
+}
+
+export const VISIBLE_BARS_MIN = 10;
+export const VISIBLE_BARS_MAX = 2000;
+
+const isVisibleBars = (x: unknown): x is number => typeof x === "number" && Number.isInteger(x) && x >= VISIBLE_BARS_MIN && x <= VISIBLE_BARS_MAX;
+
+export function clampVisibleBars(n: number): number | null {
+  if (!Number.isFinite(n)) return null;
+  return Math.min(VISIBLE_BARS_MAX, Math.max(VISIBLE_BARS_MIN, Math.round(n)));
 }
 
 export const DEFAULT_PANEL_STRETCH = 0.25;
@@ -52,6 +64,8 @@ export const DEFAULT_CHART_SETTINGS: ChartSettings = {
   ],
   compare: [],
   panels: [{ id: DEFAULT_VOLUME_PANEL, stretch: DEFAULT_PANEL_STRETCH }],
+  visibleBars: null,
+  showExtremes: false,
 };
 
 export const CHART_STYLE_LABEL: Record<ChartStyle, string> = {
@@ -80,21 +94,24 @@ export function parseChartSettings(raw: unknown): ChartSettings {
 
 function readChartSettings(raw: unknown): ChartSettings | null {
   if (!isRecord(raw)) return null;
-  const { v, style, scale, indicators, compare, panels } = raw;
+  const { v, style, scale, indicators, compare, panels, visibleBars = DEFAULT_CHART_SETTINGS.visibleBars, showExtremes = DEFAULT_CHART_SETTINGS.showExtremes } = raw;
   if (!isOneOf(CHART_STYLES, style) || !isOneOf(PRICE_SCALES, scale)) return null;
   if (!isCompareList(compare)) return null;
-  if (v === 1) return migrateV1({ style, scale, compare, indicators, panels });
+  if (!(visibleBars === null || isVisibleBars(visibleBars)) || typeof showExtremes !== "boolean") return null;
+  if (v === 1) return migrateV1({ style, scale, compare, visibleBars, showExtremes, indicators, panels });
   if (v !== 2 || !Array.isArray(indicators) || !Array.isArray(panels)) return null;
   const readPanels = panels.map(readPanel);
   const readIndicators = indicators.map(readIndicator);
   if (readPanels.includes(null) || readIndicators.includes(null)) return null;
-  const settings: ChartSettings = { v: 2, style, scale, compare, panels: readPanels as Panel[], indicators: readIndicators as IndicatorConfig[] };
+  const settings: ChartSettings = { v: 2, style, scale, compare, panels: readPanels as Panel[], indicators: readIndicators as IndicatorConfig[], visibleBars, showExtremes };
   return panelsMatch(settings) ? settings : null;
 }
 
-function migrateV1(v1: Pick<ChartSettings, "style" | "scale" | "compare"> & { indicators: unknown; panels: unknown }): ChartSettings | null {
-  if (!isEmptyArray(v1.indicators) || !isEmptyArray(v1.panels)) return null;
-  return { ...DEFAULT_CHART_SETTINGS, style: v1.style, scale: v1.scale, compare: v1.compare };
+type V1Kept = Pick<ChartSettings, "style" | "scale" | "compare" | "visibleBars" | "showExtremes">;
+
+function migrateV1({ indicators, panels, ...kept }: V1Kept & { indicators: unknown; panels: unknown }): ChartSettings | null {
+  if (!isEmptyArray(indicators) || !isEmptyArray(panels)) return null;
+  return { ...DEFAULT_CHART_SETTINGS, ...kept };
 }
 
 function readPanel(raw: unknown): Panel | null {

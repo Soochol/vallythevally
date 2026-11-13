@@ -79,6 +79,7 @@ test("관심종목 패널을 접으면 모르는 키와 함께 UiState를 보낸
         drawing: DEFAULT_UI_PREFS.drawing,
         pinnedMinutes: [],
         collapsedWatchGroups: [],
+        indicatorWindow: "dialog",
         revision: expect.any(Number),
       },
       keepalive: false,
