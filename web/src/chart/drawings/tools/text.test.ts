@@ -74,12 +74,11 @@ describe("글자", () => {
     expect(text.bar.fill?.get(style)).toEqual(style.background);
   });
 
-  test("작은 막대에서 배경 색을 고르면 꺼져 있던 배경이 켜진다", () => {
+  test("작은 막대에서 배경 색을 고르면 꺼져 있던 배경이 켜진다. 같은 색을 다시 골라도 켜진다", () => {
     const lens = text.bar.fill!;
     const recolored = lens.set(style, { ...lens.get(style), color: "#ff0000" });
     expect(text.shapes({ points, style: recolored, text: "a", selected: false }, ctx)[0]).toMatchObject({ box: { background: { on: true, color: "#ff0000" } } });
-    const off = text.parseStyle({ ...style, background: { ...style.background, color: "#ff0000" } });
-    expect(text.parseStyle(lens.set(off, lens.get(off)))).toMatchObject({ background: { on: false } });
+    expect(text.parseStyle(lens.set(style, lens.get(style)))).toMatchObject({ background: { on: true, color: style.background.color } });
   });
 
   test("줄바꿈 폭은 정해진 폭 가운데서 고른다", () => {

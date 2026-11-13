@@ -90,6 +90,12 @@ test("주석 도구: 공백뿐인 글자는 자리 표시로 남고, 바깥을 �
   await editor.press("Escape");
   await expect(editor).toBeHidden();
   expect((await drawings(scenario)).map((d) => d.text)).not.toContain("버릴 글자");
+  await cell(page).focus(); await page.keyboard.press("X");
+  await click(page, [0.2, 0.45]);
+  await editor.fill("  ");
+  await page.locator(".draw-text-editor").getByRole("button", { name: "세부 설정", exact: true }).click();
+  await page.getByRole("dialog", { name: "글자 세부 설정" }).getByRole("button", { name: "확인", exact: true }).click();
+  await expect.poll(async () => (await drawings(scenario)).filter((d) => d.tool === "text").map((d) => d.text ?? "").sort()).toEqual(["", "", "", "바깥 누르기"]);
 
   await pickTool(page, "주석", "말풍선");
   await drag(page, [0.55, 0.65], [0.65, 0.5]);
