@@ -83,7 +83,7 @@ export function ColorDialog({ label, initial, width, trigger, startCustom = fals
     <Popover data-chart-control="" anchor={trigger} onClose={onCancel} role="dialog" aria-modal="false" aria-labelledby={`${id}-title`} className="color-popover"
       onKeyDown={(e) => {
         if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); onCancel(); }
-        if (e.key === "Enter" && e.target instanceof HTMLInputElement && e.target.type === "text") { e.preventDefault(); e.stopPropagation(); apply(); }
+        if (e.key === "Enter" && e.target instanceof HTMLInputElement) { e.preventDefault(); e.stopPropagation(); apply(); }
         if (e.key === "Tab") {
           const nodes = [...e.currentTarget.querySelectorAll<HTMLElement>("button:not(:disabled),input:not(:disabled),[tabindex='0']")].filter((n) => n.tabIndex >= 0 && n.getClientRects().length > 0);
           const first = nodes[0]; const last = nodes.at(-1);

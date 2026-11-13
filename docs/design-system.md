@@ -109,7 +109,7 @@ DOM 범례는 `iconMarkup("gear" | "eye" | "eyeOff" | "close" | "up" | "down")`�
 
 `I`, 위 막대의 지표·비교·차트 설정과 휴대폰 지표 버튼은 `openIndicatorCommand(slot, mode?)`를 호출한다. 탭은 `current`(이 칸에 띄운 지표), `add`(지표 추가), `compare`(비교 종목)이다. 모드를 주지 않으면 띄운 지표가 있을 때 `current`, 없을 때 `add`로 연다. 위 막대의 비교 버튼은 `compare`로 연다. 종목 검색과 같은 `CommandFrame`을 쓰며 크기는 976×656px, 왼쪽 목록은 300px이다. 휴대폰 폭에서는 목록과 편집 영역을 위아래로 쌓는다. `DialogFrame`의 command 변형은 배경을 칠하지 않아 차트가 그대로 보인다. 입력 중인 가격 패널 지표는 `CellView.previewIndicator`로 전달해 같은 색의 옅은 후광(굵기 8, 불투명도 18%)과 함께 그린다.
 
-`commandRows`가 탭마다 목록을 만든다. `current`는 띄운 지표만 가격 패널·아래 패널로 묶고 색 점과 숨기기·지우기를 둔다. `add`는 `parseIndicatorInput` 후보만 가격 패널·아래 패널·재무지표로 묶고, 입력이 비면 모든 종류를 보인다. `compare`는 기존 검색 API가 반환한 종목만 보이고 3개 제한·중복 방지와 % 축 규칙을 유지한다. `current` 탭에서 글자를 치면 `add` 탭으로 넘어간다. 탭을 바꾸면 입력을 비운다. 두 지표 탭의 오른쪽 편집 영역은 같은 `IndicatorEditor`이고 주 버튼 문구만 `primaryLabel`을 따른다. 입력·선택·확정은 `useIndicatorCommand`, 초안·미리보기·확정은 `useIndicatorDraft`가 소유한다.
+`commandRows`가 탭마다 목록을 만든다. `current`는 띄운 지표만 가격 패널·아래 패널로 묶고 색 점과 숨기기·지우기를 둔다. `add`는 `parseIndicatorInput` 후보만 가격 패널·아래 패널·재무지표로 묶고, 입력이 비면 모든 종류를 보인다. `compare`는 기존 검색 API가 반환한 종목만 보이고 3개 제한·중복 방지와 % 축 규칙을 유지한다. `current` 탭은 열 때 첫 지표를 골라 편집 미리보기를 띄우고, Enter는 변경 적용이다. `current` 탭에서 글자를 치면 `add` 탭으로 넘어간다. 탭을 바꾸면 입력을 비운다. 두 지표 탭의 오른쪽 편집 영역은 같은 `IndicatorEditor`이고 주 버튼 문구만 `primaryLabel`을 따른다. 입력·선택·확정은 `useIndicatorCommand`, 초안·미리보기·확정은 `useIndicatorDraft`가 소유한다.
 
 `parseIndicatorInput`은 한글 이름·영문 약어·초성을 종류에 연결하고 뒤의 숫자를 `KINDS` 필드 순서로 읽는 순수 함수다. `이평 20`, `bb 20 2`, `rsi`, `roe`를 지원한다. 숫자가 생략되면 기본값을 쓰고 잘못된 숫자는 설정 오류로 표시한다. 오른쪽 설정은 범례와 같은 `IndicatorSettingsForm`이다. Enter는 확정 후 계속 추가하고, Shift+Enter는 확정 후 닫는다. Tab은 설정으로 이동하며 Esc와 바깥 누르기는 미확정 미리보기를 버린다.
 

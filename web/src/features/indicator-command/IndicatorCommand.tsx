@@ -72,7 +72,7 @@ export function IndicatorCommandBody({ slot, initialMode }: { slot: Slot; initia
         }}>
           {COMMAND_TABS.map((tab) => <button key={tab.mode} id={tabId(tab.mode)} type="button" role="tab" aria-selected={mode === tab.mode} aria-controls={`${ids}-panel`} tabIndex={mode === tab.mode ? 0 : -1} onClick={() => show(tab.mode)}
             className="inline-flex h-[26px] items-center gap-1.5 rounded-s px-3 text-s text-text-2 aria-selected:bg-accent aria-selected:font-semibold aria-selected:text-accent-ink">
-            {tab.label}{tab.mode === "current" && <span className="rounded-full bg-[var(--hover)] px-1.5 text-xs leading-4">{cell.chartSettings.indicators.length}</span>}
+            {tab.label}{tab.mode === "current" && <span className="rounded-full bg-[var(--hover)] px-1.5 text-xs leading-4"><span className="sr-only"> </span>{cell.chartSettings.indicators.length}<span className="sr-only">개</span></span>}
           </button>)}
         </div>
         <button type="button" className="icon-btn" aria-label="입력창 닫기" title="입력창 닫기 (Esc)" onClick={close}><CloseIcon size={16} /></button>
@@ -109,7 +109,7 @@ export function IndicatorCommandBody({ slot, initialMode }: { slot: Slot; initia
         </aside> : selected && selected.kind !== "symbol" ? <IndicatorEditor key={selected.key} row={selected} slot={slot} actionRef={editor} onCommitted={refocus} />
           : <aside className="p-5 text-s text-text-3">{mode === "current" ? "지표를 고르면 설정을 바꿀 수 있습니다." : "추가할 지표를 고르면 설정을 확인할 수 있습니다."}</aside>}
       </div>
-      <footer className="flex flex-none flex-wrap items-center gap-x-3.5 gap-y-1 border-t border-line px-4 py-2 text-xs text-text-3"><span><kbd>↑↓</kbd> 고르기</span><span><kbd>Tab</kbd> 설정</span><span><kbd>Enter</kbd> 추가하고 계속</span><span><kbd>Shift+Enter</kbd> 추가하고 닫기</span><span><kbd>Esc</kbd> 되돌리고 닫기</span></footer>
+      <footer className="flex flex-none flex-wrap items-center gap-x-3.5 gap-y-1 border-t border-line px-4 py-2 text-xs text-text-3"><span><kbd>↑↓</kbd> 고르기</span><span><kbd>Tab</kbd> 설정</span><span><kbd>Enter</kbd> {mode === "current" ? "적용" : "추가"}하고 계속</span><span><kbd>Shift+Enter</kbd> {mode === "current" ? "적용" : "추가"}하고 닫기</span><span><kbd>Esc</kbd> 되돌리고 닫기</span></footer>
     </div>
   </CommandFrame>;
 }
