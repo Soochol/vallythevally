@@ -74,6 +74,17 @@ export function distanceToSegment(a: ScreenPoint, b: ScreenPoint, p: ScreenPoint
   return dist({ x: a.x + t * dx, y: a.y + t * dy }, p);
 }
 
+const turn = (o: ScreenPoint, a: ScreenPoint, b: ScreenPoint) => Math.sign((a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x));
+
+function segmentsCross(a: ScreenPoint, b: ScreenPoint, c: ScreenPoint, d: ScreenPoint): boolean {
+  return turn(c, d, a) * turn(c, d, b) < 0 && turn(a, b, c) * turn(a, b, d) < 0;
+}
+
+export function segmentDistance(a: ScreenPoint, b: ScreenPoint, c: ScreenPoint, d: ScreenPoint): number {
+  if (segmentsCross(a, b, c, d)) return 0;
+  return Math.min(distanceToSegment(c, d, a), distanceToSegment(c, d, b), distanceToSegment(a, b, c), distanceToSegment(a, b, d));
+}
+
 function insidePolygon(points: readonly ScreenPoint[], p: ScreenPoint): boolean {
   let inside = false;
   for (let i = 0, j = points.length - 1; i < points.length; j = i++) {
