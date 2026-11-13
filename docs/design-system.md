@@ -1,6 +1,6 @@
 # UI 테마와 공통 컴포넌트 바꾸기
 
-[라임 다크 UI 스펙 #181](https://github.com/Soochol/vallythevally/issues/181)과 [차트 중심 UX 스펙 #200](https://github.com/Soochol/vallythevally/issues/200)의 적용 방법을 설명한다. 설계 배경은 [설계 맵 #178](https://github.com/Soochol/vallythevally/issues/178)에 있다.
+[라임 다크 UI 스펙 #181](https://github.com/Soochol/vallythevally/issues/181)과 [차트 중심 UX 스펙 #200](https://github.com/Soochol/vallythevally/issues/200)의 적용 방법을 설명한다. 색과 겹침 표면은 [플로트 스타일 스펙 #270](https://github.com/Soochol/vallythevally/issues/270)을 따른다. 설계 배경은 [설계 맵 #178](https://github.com/Soochol/vallythevally/issues/178)에 있다.
 
 ## 테마 바꾸기
 
@@ -9,7 +9,7 @@
 3. 차트 전용 색도 같은 파일에서 바꾼다. `readThemeTokens`가 격자, 봉, 거래량, 지표 기본색과 비교 종목 색을 읽는다. 새 토큰을 추가하면 `web/src/chart/theme.ts`와 Tailwind 연결이 필요한 `web/src/styles/index.css`에도 연결한다.
 4. 앱을 다시 빌드해 차트와 지표, 드로잉, 대화상자, PNG 내보내기를 확인한다. 사용자 지정 HEX 색은 테마가 바뀌어도 유지한다.
 
-현재 UI는 라임 다크만 제공한다. 첫 HTML부터 `color-scheme: dark`를 적용한다. `parseUiState`는 과거 `light` 설정을 `dark`로 읽고 다른 설정을 보존한다. 서버의 과거 테마 값 수용 범위는 바꾸지 않는다.
+현재 UI는 다크만 제공한다. 첫 HTML부터 `color-scheme: dark`를 적용한다. `parseUiState`는 과거 `light` 설정을 `dark`로 읽고 다른 설정을 보존한다. 서버의 과거 테마 값 수용 범위는 바꾸지 않는다.
 
 ## 화면과 대화상자 추가하기
 
@@ -47,7 +47,9 @@
 
 - HTML Popover API의 맨 위 층에 렌더링한다. `position.ts`가 가장자리에서 반대쪽을 선택하고 화면 안으로 맞춘다. 내용 크기·창 크기·스크롤이 바뀌면 다시 계산한다.
 - Esc와 바깥 누르기는 맨 위의 조작 가능한 화면만 닫고 연 버튼으로 포커스를 돌린다. 배경이 있는 창은 `backdrop`을 전달하며 직접 배경 닫기 핸들러를 달지 않는다. 바깥 pointerdown과 뒤따르는 click은 하나의 입력으로 소비해 부모의 버튼을 함께 실행하지 않는다. 중첩 색상 선택기에서 Esc를 누르면 부모 설정창은 남는다.
-- 공통 표면은 `.ui-popover`다. 색·테두리·반경 10과 그림자를 여기서 한 번 정한다. 화면마다 이 네 값을 재정의하지 않는다.
+- 공통 표면은 `.ui-popover`와 `.ui-dialog`다. 유리 바탕(`--glass`), 흐림(`--glass-blur`), 반경 16, 테두리를 겸한 그림자(`--shadow`)를 여기서 한 번 정한다. 화면마다 이 값을 재정의하지 않고, Popover의 `className`에는 크기와 안쪽 여백만 준다. `backdrop-filter`를 못 쓰거나 `prefers-reduced-transparency`이면 `--glass-solid`로 불투명하게 그린다.
+- 명령 입력창(종목 검색·지표)의 배경은 투명하다. 어두운 배경(`--scrim`)은 일반 대화상자와 확인 창만 쓰고, 배경을 흐리게 하지 않는다.
+- 묶음 버튼(`seg-btn`)의 선택은 `--accent` 채움과 `--accent-ink` 글자다. 가리킴은 `--hover`를 쓴다.
 - 일반 메뉴는 `features/menu/Menu.tsx`의 `MenuItem`으로 만든다. `radio`·`check`·`action`·`heading`·`separator`를 지원한다. ↑↓·Home·End·Enter·Space·글자 입력으로 이동/선택한다. 메뉴 키보드는 차트 단축키로 전파하지 않는다.
 - 폼의 선택 항목은 `Select`에 `label`, 현재 값, `options`, `onChange`를 전달한다. 브라우저 기본 select를 새로 만들지 않는다. 분봉은 `MinuteMenu`, 자석 세기는 버튼의 우클릭·길게 누르기 메뉴를 쓴다.
 - 일반 대화상자는 `DialogFrame`을 사용한다. 되돌릴 수 없는 작업은 `confirmAction(문구)`의 결과를 기다린다. 일반 알림은 `showToast(문구)`를 사용한다. 드로잉 삭제는 `DrawingSync.commitWithUndo(칸, 변경, 문구)`를 사용해 삭제 당시의 history 객체를 작업 식별자로 묶는다. 기록이 바뀌거나 취소된 알림의 되돌리기는 비활성화되고, 실행 시에도 같은 식별자인지 다시 검사한다. 알림은 6초 동안 보인다.
@@ -63,9 +65,9 @@
 
 DOM 범례는 `iconMarkup("gear" | "eye" | "eyeOff" | "close" | "up" | "down")`으로 같은 그림을 문자열로 얻는다. 이 결과에는 고정된 아이콘 데이터만 들어가며 사용자 문자열을 HTML에 넣지 않는다. 버튼의 title·aria-label은 버튼에 둔다.
 
-`tokens.css`의 반경은 5/7/10/12, 최소 글자는 11px이며 숫자는 전역 `tabular-nums`를 상속한다. `ui.css`와 `colors.css`의 치수는 `--size-*` 토큰을 참조하고 간격은 4px 배수를 사용한다. 색 토큰 값은 #181 그대로 유지한다. 분봉 별표는 `UiPrefs.pinnedMinutes`로 저장하고 잘못된 주기·중복을 읽기 경계에서 제거한다. 서버 API는 바꾸지 않는다.
+`tokens.css`의 반경은 7/9/16/18, 최소 글자는 11px이며 숫자는 전역 `tabular-nums`를 상속한다. `ui.css`와 `colors.css`의 치수는 `--size-*` 토큰을 참조하고 간격은 4px 배수를 사용한다. 색 토큰 값은 #270을 따른다. `--line`과 `--grid`는 반투명 흰색이므로 색 문자열을 직접 가공하지 않는다. 분봉 별표는 `UiPrefs.pinnedMinutes`로 저장하고 잘못된 주기·중복을 읽기 경계에서 제거한다. 서버 API는 바꾸지 않는다.
 
-시안 원본 9장은 [docs/mockups/ux-overhaul](mockups/ux-overhaul/)에 보관한다. 기능 규칙은 시안보다 #200과 #181이 우선이며 색상 선택기의 48색·최근 8색·HEX·선 샘플과 굵기 1~5를 유지한다.
+시안 원본 9장은 [docs/mockups/ux-overhaul](mockups/ux-overhaul/)에, 플로트 시안은 [docs/mockups/float](mockups/float/)에 보관한다. 기능 규칙은 시안보다 #200과 #181이 우선이며 색상 선택기의 48색·최근 8색·HEX·선 샘플과 굵기 1~5를 유지한다.
 
 
 ## 드로잉 조작 연결하기
@@ -100,7 +102,7 @@ DOM 범례는 `iconMarkup("gear" | "eye" | "eyeOff" | "close" | "up" | "down")`�
 
 ## 지표·비교 입력창
 
-`I`, 위 막대의 지표·비교·차트 설정과 휴대폰 지표 버튼은 `openIndicatorCommand`를 호출한다. 종목 검색과 같은 `CommandFrame`을 쓰며 지표 입력창의 기본 너비는 700px이다. `DialogFrame`의 command 변형만 옅은 배경을 적용한다. 목록에는 현재 지표, 추가할 지표 후보, 기존 검색 API가 반환한 비교 종목 후보를 둔다. 현재 지표의 보기·지우기는 목록에서 처리하고, 비교 종목의 3개 제한·중복 방지와 % 축 규칙을 유지한다.
+`I`, 위 막대의 지표·비교·차트 설정과 휴대폰 지표 버튼은 `openIndicatorCommand`를 호출한다. 종목 검색과 같은 `CommandFrame`을 쓰며 지표 입력창의 기본 너비는 700px이다. `DialogFrame`의 command 변형은 배경을 칠하지 않아 차트가 그대로 보인다. 입력 중인 가격 패널 지표는 `CellView.previewIndicator`로 전달해 같은 색의 옅은 후광(굵기 8, 불투명도 18%)과 함께 그린다. 목록에는 현재 지표, 추가할 지표 후보, 기존 검색 API가 반환한 비교 종목 후보를 둔다. 현재 지표의 보기·지우기는 목록에서 처리하고, 비교 종목의 3개 제한·중복 방지와 % 축 규칙을 유지한다.
 
 `parseIndicatorInput`은 한글 이름·영문 약어·초성을 종류에 연결하고 뒤의 숫자를 `KINDS` 필드 순서로 읽는 순수 함수다. `이평 20`, `bb 20 2`, `rsi`, `roe`를 지원한다. 숫자가 생략되면 기본값을 쓰고 잘못된 숫자는 설정 오류로 표시한다. 오른쪽 설정은 범례와 같은 `IndicatorSettingsForm`이다. Enter는 확정 후 계속 추가하고, Shift+Enter는 확정 후 닫는다. Tab은 설정으로 이동하며 Esc와 바깥 누르기는 미확정 미리보기를 버린다.
 

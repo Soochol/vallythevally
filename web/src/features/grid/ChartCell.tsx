@@ -97,8 +97,8 @@ export function ChartCell({ slot, status, onStatus }: Props) {
   useEffect(() => attachController(slot, ctl.current!), [slot]);
 
   useEffect(() => {
-    ctl.current?.apply({ symbol: cell.symbol, venue, period: cell.period, settings: chartSettings, info, compareNames });
-  }, [cell, chartSettings, venue, info, compareNames]);
+    ctl.current?.apply({ symbol: cell.symbol, venue, period: cell.period, settings: chartSettings, info, previewIndicator: preview?.id ?? null, compareNames });
+  }, [cell, chartSettings, venue, info, preview, compareNames]);
 
   useEffect(() => {
     ctl.current?.setFinancials(financial.data ?? null, financial.error ? "재무자료 조회 실패 · 재무자료 창에서 다시 확인하세요" : undefined);

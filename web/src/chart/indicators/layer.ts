@@ -106,6 +106,7 @@ export class IndicatorLayer {
   private readonly port: IndicatorPort;
   private readonly shown = new Map<string, Shown>();
   private readonly queue = new DrawQueue<Line>();
+  private previewId: string | null = null;
   private configs: IndicatorConfig[] = [];
   private panels: Panel[] = [];
   private gen = 0;
@@ -139,6 +140,12 @@ export class IndicatorLayer {
     open: OpenPort,
   ) {
     this.port = open({ message: (m) => this.onMessage(m), broken: () => this.onBroken() });
+  }
+
+  setPreview(id: string | null): void {
+    if (id === this.previewId) return;
+    this.previewId = id;
+    for (const s of this.shown.values()) this.styleLines(s);
   }
 
   setConfigs(configs: IndicatorConfig[], panels: Panel[]): void {
@@ -454,7 +461,7 @@ export class IndicatorLayer {
     const common = { visible: config.visible, priceLineVisible: false, lastValueVisible: config.panel !== "price", title: "" };
     if (isBarLine(id) || (isFinancial(config.spec) && isFinancialBar(config.spec.kind))) return common;
     const line = { ...common, color, lineWidth: config.style.width };
-    return isOverlay(config, id) ? line : { ...line, crosshairMarkerVisible: false };
+    return isOverlay(config, id) ? { ...line, halo: config.id === this.previewId } : { ...line, crosshairMarkerVisible: false };
   }
 
   private styleLines(s: Shown): void {
