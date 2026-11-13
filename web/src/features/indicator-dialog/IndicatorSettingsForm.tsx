@@ -4,7 +4,8 @@ import { indicatorCssColor, KINDS, type IndicatorColor } from "../../chart/indic
 import { loadValidator } from "../../chart/indicators/validate";
 import type { LineWidth } from "../../chart/settings";
 import { Errors, Row, Segment } from "../dialog/DialogParts";
-import { ColorPicker } from "../color/ColorPicker";
+import { ColorPicker, readRecent, rememberColor, resolvedColor } from "../color/ColorPicker";
+import { PRESET_COLORS, type HexColor } from "../../lib/colors";
 import { hasColor, placeErrors, type Draft, type FieldError, type Validate } from "./indicatorForm";
 
 const METHODS = [
@@ -18,6 +19,8 @@ const WIDTHS = [
   [4, "4"],
   [5, "5"],
 ] as const satisfies readonly (readonly [LineWidth, string])[];
+
+const PERIOD_PRESETS = ["5", "20", "60", "120"] as const;
 
 const NUMBER_INPUT =
   "ui-field w-24 disabled:opacity-50";
@@ -75,6 +78,9 @@ export function IndicatorSettingsForm({ draft, color, errors, onChange }: {
                 {f.toggle}
               </label>
             )}
+            {kind === "ma" && f.key === "period" && <span role="group" aria-label="자주 쓰는 기간" className="flex items-center gap-1">
+              {PERIOD_PRESETS.map((preset) => <button key={preset} type="button" aria-pressed={text === preset} className="h-6 rounded-m bg-[var(--hover)] px-2 text-xs text-text-2 aria-pressed:bg-accent-soft aria-pressed:text-accent" onClick={() => setText(f.key, preset)}>{preset}</button>)}
+            </span>}
             <span className="flex items-center gap-1.5">
               <input
                 id={inputId}
@@ -97,11 +103,27 @@ export function IndicatorSettingsForm({ draft, color, errors, onChange }: {
     })}
     {hasColor(draft.form) && (
       <>
-        <Row label="선 색상"><ColorPicker label="선 색상" value={indicatorCssColor(color)} width={draft.width} onChange={(color) => onChange({ ...draft, color })} /></Row>
+        <Row label="선 색상">
+          <QuickColors current={resolvedColor(indicatorCssColor(color))} onChoose={(next) => { rememberColor(next); onChange({ ...draft, color: next }); }} />
+          <ColorPicker label="선 색상" value={indicatorCssColor(color)} width={draft.width} onChange={(color) => onChange({ ...draft, color })} />
+        </Row>
         <Row label="선 굵기">
-          <Segment label="굵기" options={WIDTHS} value={draft.width} onChange={(width) => onChange({ ...draft, width })} />
+          <div role="group" aria-label="굵기" className="grid w-full max-w-[220px] grid-cols-5 gap-1">
+            {WIDTHS.map(([width, name]) => <button key={width} type="button" aria-label={name} aria-pressed={draft.width === width} className="grid h-7 place-items-center rounded-m bg-[var(--hover)] aria-pressed:bg-accent-soft aria-pressed:shadow-[inset_0_0_0_1px_var(--accent)]" onClick={() => onChange({ ...draft, width })}>
+              <i className="w-6 rounded-full" style={{ height: width, background: indicatorCssColor(color) }} />
+            </button>)}
+          </div>
         </Row>
       </>
     )}
   </>;
+}
+
+function QuickColors({ current, onChoose }: { current: HexColor; onChoose(color: HexColor): void }) {
+  const [recent] = useState(readRecent);
+  const swatch = (color: HexColor, name: string) => <button key={`${name}-${color}`} type="button" aria-label={`${name} ${color}`} aria-pressed={color === current} className="h-4 rounded-s aria-pressed:outline aria-pressed:outline-2 aria-pressed:outline-offset-1 aria-pressed:outline-text" style={{ background: color }} onClick={() => onChoose(color)} />;
+  return <div className="flex w-full max-w-[260px] flex-col gap-1.5">
+    <div role="group" aria-label="빠른 색상" className="grid grid-cols-12 gap-1">{PRESET_COLORS.map((color, i) => swatch(color, `빠른 색상 ${i + 1}`))}</div>
+    {recent.length > 0 && <div role="group" aria-label="최근 쓴 색상" className="grid grid-cols-12 gap-1">{recent.map((color) => swatch(color, "최근 쓴 색상"))}</div>}
+  </div>;
 }

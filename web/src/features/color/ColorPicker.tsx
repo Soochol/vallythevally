@@ -8,7 +8,11 @@ const FALLBACK = normalizeHex("#C7F36B");
 if (!FALLBACK) throw new Error("기본 색상이 올바르지 않습니다");
 const DEFAULT_COLOR = FALLBACK;
 
-function readRecent(): HexColor[] {
+export function rememberColor(color: HexColor): void {
+  try { localStorage.setItem(RECENT_KEY, JSON.stringify([color, ...readRecent().filter((c) => c !== color)].slice(0, 8))); } catch {}
+}
+
+export function readRecent(): HexColor[] {
   try {
     const stored: unknown = JSON.parse(localStorage.getItem(RECENT_KEY) ?? "[]");
     return Array.isArray(stored) ? [...new Set(stored.filter(isHexColor))].slice(0, 8) : [];
@@ -17,10 +21,10 @@ function readRecent(): HexColor[] {
   }
 }
 
-function resolvedColor(value: string): HexColor {
+export function resolvedColor(value: string): HexColor {
   const direct = normalizeHex(value);
   if (direct) return direct;
-  const variable = /^var\((--[\w-]+)\)$/.exec(value)?.[1];
+  const variable = typeof document === "undefined" ? undefined : /^var\((--[\w-]+)\)$/.exec(value)?.[1];
   return (variable ? normalizeHex(getComputedStyle(document.documentElement).getPropertyValue(variable)) : null) ?? DEFAULT_COLOR;
 }
 
@@ -60,7 +64,7 @@ function ColorDialog({ label, initial, width, trigger, onCancel, onApply }: {
 
   const apply = () => {
     if (!valid) return;
-    try { localStorage.setItem(RECENT_KEY, JSON.stringify([color, ...recent.filter((c) => c !== color)].slice(0, 8))); } catch {}
+    rememberColor(color);
     onApply(color);
   };
 

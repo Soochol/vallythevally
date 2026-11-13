@@ -25,6 +25,7 @@ import type { DrawingSync } from "./sync";
 import type { Shape } from "./toolSpec";
 import { toolOf } from "./tools";
 import type { DrawingBody, DrawingOp, DrawingScope, ScreenPoint } from "./types";
+import type { DrawingPoint } from "../../api/generated/DrawingPoint";
 import { modeOf, registeredModes, type ModeContext, type TransientShapes } from "./modes";
 
 const surfaces = new Map<number, DrawingSurface>();
@@ -310,12 +311,25 @@ export class DrawingSurface implements ChartExtension {
     const frame = this.frame(); const boxes = frame.items.filter((i) => useDrawingSession.getState().selected.includes(i.id)).flatMap((i) => i.shapes.map((s) => shapeBounds(s, frame.pane)));
     return boxes.length ? { x1: Math.min(...boxes.map((b) => b.x1)), x2: Math.max(...boxes.map((b) => b.x2)), y1: Math.min(...boxes.map((b) => b.y1)), y2: Math.max(...boxes.map((b) => b.y2)) } : null;
   }
+  pointAt(client: ScreenPoint): { price: number; t: DrawingPoint["t"] | null } | null {
+    const r = this.host.el.getBoundingClientRect();
+    const frame = this.projection();
+    const onBar = fromScreen(frame, { x: client.x - r.left, y: client.y - r.top });
+    if (onBar) return onBar;
+    const price = frame.axes.price.toPrice(client.y - r.top);
+    return price === null ? null : { price, t: null };
+  }
+  placeHorizontalLine(client: ScreenPoint) {
+    const tool = toolOf("hline"); const point = this.pointAt(client); const t = point?.t ?? this.host.bars().at(-1)?.t;
+    if (tool && point && t !== undefined) this.effect({ kind: "place", tool, points: [{ t, price: point.price }] });
+  }
+  fitPriceScale() { this.host.chart.priceScale("right").applyOptions({ autoScale: true }); }
   private contextMenu(e: MouseEvent) {
     if (!matchMedia(DESKTOP_QUERY).matches) return;
     e.preventDefault(); e.stopImmediatePropagation(); this.reset(); this.focus();
     const hit = frameHit(this.frame(), this.local(e)); const id = hit.kind === "empty" ? null : hit.id;
     const session = useDrawingSession.getState(); if (id && !session.selected.includes(id)) session.select([id]);
-    useDrawingSession.setState({ popup: { slot: this.slot, x: e.clientX, y: e.clientY, id } });
+    useDrawingSession.setState({ popup: { slot: this.slot, x: e.clientX, y: e.clientY, id, fromChart: true } });
   }
   private onKey(e: KeyboardEvent) {
     if (e.composedPath().some((target) => target instanceof Element && target.hasAttribute("data-chart-control"))) return;
