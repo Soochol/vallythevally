@@ -41,13 +41,13 @@ describe("글자", () => {
   });
 
   test("글자가 비어 있으면 자리 표시 문구를 그린다", () => {
-    for (const empty of [null, ""]) expect(text.shapes({ points, style, text: empty, selected: false }, ctx)[0]).toMatchObject({ text: "글자" });
+    for (const empty of [null, "", "  ", "\n"]) expect(text.shapes({ points, style, text: empty, selected: false }, ctx)[0]).toMatchObject({ text: "글자" });
   });
 
   test("테두리와 줄바꿈 폭을 켜면 상자에 걸린다", () => {
-    const on = text.parseStyle({ ...style, border: { color: "#ff0000", width: 3, dash: "dashed", on: true }, wrap: { on: true, width: 120 } });
+    const on = text.parseStyle({ ...style, border: { color: "#ff0000", width: 3, dash: "dashed", on: true }, wrap: { on: true, width: 150 } });
     expect(text.shapes({ points, style: on, text: "a", selected: false }, ctx)[0]).toMatchObject({
-      box: { border: { color: "#ff0000", width: 3, dash: "dashed" }, wrapWidth: 120 },
+      box: { border: { color: "#ff0000", width: 3, dash: "dashed" }, wrapWidth: 150 },
     });
   });
 
@@ -64,7 +64,7 @@ describe("글자", () => {
 
   test("parseStyle은 모르는 키를 남기고 틀린 값은 기본값으로 바꾼다", () => {
     const parsed = parseTextStyle({ v: 1, future: 3, label: { size: "big" }, border: { on: "yes", width: 9 }, wrap: { on: true, width: 1e9 } });
-    expect(parsed).toMatchObject({ future: 3, label: { size: 14 }, border: { on: false, width: 1 }, wrap: { on: true, width: 1000 } });
+    expect(parsed).toMatchObject({ future: 3, label: { size: 14 }, border: { on: false, width: 1 }, wrap: { on: true, width: 200 } });
     expect(parseTextStyle(null)).toEqual(style);
   });
 
@@ -72,6 +72,22 @@ describe("글자", () => {
     const next = text.bar.textColor?.set(style, "#00ff00");
     expect(text.parseStyle(next)).toMatchObject({ label: { color: "#00ff00" } });
     expect(text.bar.fill?.get(style)).toEqual(style.background);
+  });
+
+  test("작은 막대에서 배경 색을 고르면 꺼져 있던 배경이 켜진다", () => {
+    const lens = text.bar.fill!;
+    const recolored = lens.set(style, { ...lens.get(style), color: "#ff0000" });
+    expect(text.shapes({ points, style: recolored, text: "a", selected: false }, ctx)[0]).toMatchObject({ box: { background: { on: true, color: "#ff0000" } } });
+    const off = text.parseStyle({ ...style, background: { ...style.background, color: "#ff0000" } });
+    expect(text.parseStyle(lens.set(off, lens.get(off)))).toMatchObject({ background: { on: false } });
+  });
+
+  test("줄바꿈 폭은 정해진 폭 가운데서 고른다", () => {
+    const field = text.settings.style?.find((f) => f.label === "줄바꿈 폭");
+    if (field?.kind !== "select") throw new Error("no wrap width field");
+    expect(field.options.map((o) => o.value)).toEqual(["100", "150", "200", "300", "400", "600"]);
+    expect(text.parseStyle(field.lens.set(style, "400"))).toMatchObject({ wrap: { width: 400 } });
+    expect(text.parseStyle(field.lens.set(style, "333"))).toMatchObject({ wrap: { width: 200 } });
   });
 
   test("테두리 색을 바꿔도 테두리 켜짐은 남는다", () => {

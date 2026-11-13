@@ -47,7 +47,7 @@ describe("말풍선", () => {
   });
 
   test("글자가 비어 있으면 자리 표시 문구를 그린다", () => {
-    for (const empty of [null, ""]) expect(callout.shapes({ points, style, text: empty, selected: false }, ctx)[1]).toMatchObject({ text: "글자" });
+    for (const empty of [null, "", " \n "]) expect(callout.shapes({ points, style, text: empty, selected: false }, ctx)[1]).toMatchObject({ text: "글자" });
   });
 
   test("테두리를 끄면 상자 테두리만 사라지고 선은 남는다", () => {
