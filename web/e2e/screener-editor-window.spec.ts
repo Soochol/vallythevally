@@ -123,23 +123,13 @@ test("저장이 처음부터 실패하거나 충돌해도 창과 초안을 지�
   await expect(editorWindow(page)).toBeVisible();
 });
 
-test("창 밖 차트 조작은 창을 닫으면서 그대로 실행되고, 넓게 보기는 창 대신 조건을 그 자리에 펼친다", async ({ scenario, page }) => {
+test("창 밖 차트 조작은 창을 닫으면서 그대로 실행된다", async ({ scenario, page }) => {
   await seed(scenario, page);
   await editButton(page).click();
   await expect(editorWindow(page)).toBeVisible();
   await cell(page).getByRole("group", { name: "거래소" }).getByRole("button", { name: "KRX", exact: true }).click();
   await expect(editorWindow(page)).toHaveCount(0);
   await expect(cell(page)).toHaveAttribute("aria-label", /KRX/);
-
-  await editButton(page).click();
-  await page.getByRole("button", { name: "넓게 보기", exact: true }).click();
-  await expect(panel(page).getByRole("navigation", { name: "저장한 조건식" })).toBeVisible();
-  await expect(editorWindow(page)).toHaveCount(0);
-  await expect(editButton(page)).toHaveCount(0);
-  await expect(summary(page)).toContainText(SENTENCE);
-  await panel(page).getByRole("button", { name: "조건 펼치기", exact: true }).click();
-  await expect(panel(page).getByRole("group", { name: "문장형 조건식" })).toBeVisible();
-  await expect(editorWindow(page)).toHaveCount(0);
 });
 
 test("저장한 조건식이 없을 때 새 조건식을 누르면 편집 창이 바로 열리고 조건을 넣어 저장한다", async ({ scenario, page }) => {

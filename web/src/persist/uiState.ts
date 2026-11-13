@@ -10,11 +10,10 @@ export type Theme = UiState["theme"];
 export const MAX_RECENT = 10;
 
 export type RightPanel = "watch" | "screener" | "objects";
-export type RightPanelWidth = "normal" | "wide";
 
 export interface UiPrefs {
   rightPanel: RightPanel;
-  rightPanelWidth: RightPanelWidth;
+  panelWidth: number | null;
   lastLayoutId: string | null;
   theme: Theme;
   watchCollapsed: boolean;
@@ -29,7 +28,7 @@ export type UiExtra = Record<string, unknown>;
 
 export const DEFAULT_UI_PREFS: UiPrefs = {
   rightPanel: "watch",
-  rightPanelWidth: "normal",
+  panelWidth: null,
   lastLayoutId: null,
   theme: "dark",
   watchCollapsed: false,
@@ -49,7 +48,7 @@ export function parseUiState(raw: unknown): { prefs: UiPrefs; extra: UiExtra } {
     console.warn("UiState가 객체가 아니어서 기본값으로 엽니다", raw);
     return { prefs: DEFAULT_UI_PREFS, extra: {} };
   }
-  const { rightPanel, rightPanelWidth, lastLayoutId, theme, watchCollapsed, recentSymbols, activeWatchlistId, watchColumns, drawing, pinnedMinutes, revision: _revision, ...extra } = raw as Record<string, unknown>;
+  const { rightPanel, panelWidth, rightPanelWidth: _rightPanelWidth, lastLayoutId, theme, watchCollapsed, recentSymbols, activeWatchlistId, watchColumns, drawing, pinnedMinutes, revision: _revision, ...extra } = raw as Record<string, unknown>;
   const bad: string[] = [];
   const pick = <T>(key: string, value: unknown, ok: (x: unknown) => x is T, fallback: T, missingOk = false): T => {
     if (ok(value)) return value;
@@ -59,7 +58,7 @@ export function parseUiState(raw: unknown): { prefs: UiPrefs; extra: UiExtra } {
   pick("theme", theme, (x): x is Theme => x === "dark" || x === "light", DEFAULT_UI_PREFS.theme);
   const prefs: UiPrefs = {
     rightPanel: pick("rightPanel", rightPanel, (x): x is RightPanel => x === "watch" || x === "screener" || x === "objects", "watch", true),
-    rightPanelWidth: pick("rightPanelWidth", rightPanelWidth, (x): x is RightPanelWidth => x === "normal" || x === "wide", "normal", true),
+    panelWidth: pick("panelWidth", panelWidth, (x): x is number | null => x === null || (typeof x === "number" && Number.isFinite(x) && x > 0), null, true),
     lastLayoutId: pick("lastLayoutId", lastLayoutId, (x): x is string | null => x === null || typeof x === "string", null),
     theme: "dark",
     watchCollapsed: pick("watchCollapsed", watchCollapsed, (x): x is boolean => typeof x === "boolean", false, true),

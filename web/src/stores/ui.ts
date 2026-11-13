@@ -12,7 +12,7 @@ interface UiStore {
   load(prefs: UiPrefs, extra: UiExtra): void;
   toggleWatch(): void;
   setRightPanel(panel: RightPanel): void;
-  togglePanelWidth(): void;
+  setPanelWidth(width: number | null): void;
   togglePinnedMinute(period: Period): void;
   pushRecent(code: SymbolCode): void;
   clearRecent(): void;
@@ -35,7 +35,7 @@ export const useUiStore = create<UiStore>()((set) => {
     load: (prefs, extra) => set({ prefs, extra }),
     togglePinnedMinute: (period) => edit((p) => ({ ...p, pinnedMinutes: p.pinnedMinutes.includes(period) ? p.pinnedMinutes.filter((v) => v !== period) : [...p.pinnedMinutes, period] })),
     setRightPanel: (rightPanel) => edit((p) => p.rightPanel === rightPanel ? p : { ...p, rightPanel }),
-    togglePanelWidth: () => edit((p) => ({ ...p, rightPanelWidth: p.rightPanelWidth === "normal" ? "wide" : "normal" })),
+    setPanelWidth: (panelWidth) => edit((p) => p.panelWidth === panelWidth ? p : { ...p, panelWidth }),
     toggleWatch: () => edit((p) => ({ ...p, watchCollapsed: !p.watchCollapsed })),
     pushRecent: (code) =>
       edit((p) =>

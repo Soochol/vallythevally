@@ -5,8 +5,7 @@ import { useSymbolInfo } from "../../api/queries";
 import { PERIOD_LABEL, PERIODS, symbolSub } from "../../lib/symbol";
 import { useCell, useLayoutStore } from "../../stores/layout";
 import { useSelectionStore } from "../../stores/selection";
-import { useUiStore } from "../../stores/ui";
-import { BrandIcon, ChevronIcon, CameraIcon, CopyIcon, GearIcon, IndicatorIcon, PanelIcon, SearchIcon, CompareIcon } from "../icons";
+import { BrandIcon, ChevronIcon, CameraIcon, CopyIcon, GearIcon, IndicatorIcon, SearchIcon, CompareIcon } from "../icons";
 import { canCopyImage, saveSnapshot } from "../snapshot/saveSnapshot";
 import { StyleMenu } from "./StyleMenu";
 
@@ -14,7 +13,6 @@ export function Topbar() {
   const slot = useSelectionStore((s) => s.activeSlot);
   const openSearch = useSelectionStore((s) => s.openSearch);
   const openIndicatorCommand = useSelectionStore((s) => s.openIndicatorCommand);
-  const collapsed = useUiStore((s) => s.prefs.watchCollapsed);
   const cell = useCell(slot);
   const info = useSymbolInfo(cell.symbol).data;
   const { setPeriod, setStyle } = useLayoutStore.getState();
@@ -48,7 +46,6 @@ export function Topbar() {
         <SearchIcon size={14} />
         <kbd>/</kbd>
       </button>
-      {collapsed && <button type="button" className="icon-btn" title="패널 펴기 (Alt+W)" aria-label="패널 펴기" aria-expanded={false} onClick={() => useUiStore.getState().toggleWatch()}><PanelIcon /></button>}
     </header>
   );
 }
