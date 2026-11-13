@@ -1,6 +1,7 @@
 import { FinancialUpdateButton } from "../financial-update/FinancialUpdateButton";
 import { SentenceEditor } from "./SentenceEditor";
-import { availableSources, checkedSession, currentSession, selectedSource, useScreenEditor } from "./editorState";
+import { useWorkspace } from "./useWorkspace";
+import type { ScreenEntry, Workspace } from "./workspace";
 import { confirmAction } from "../overlay/Confirm";
 import { useQueryClient, type UseQueryResult } from "@tanstack/react-query";
 import { type ReactNode, useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
@@ -14,7 +15,7 @@ import type { ScreenerUpdate } from "../../api/generated/ScreenerUpdate";
 import type { Screens } from "../../api/generated/Screens";
 import type { SymbolCode } from "../../api/generated/SymbolCode";
 import type { UpdatePhase } from "../../api/generated/UpdatePhase";
-import { useScreenerStatus, useScreens, useUpdateCommands } from "../../api/screener";
+import { useScreenerStatus, useUpdateCommands } from "../../api/screener";
 import { isTypingTarget } from "../../lib/hotkeys";
 import { DESKTOP_QUERY, useMediaQuery } from "../../lib/media";
 import {
@@ -40,7 +41,7 @@ import {
 } from "../../lib/screener";
 import { listNameFrom, MAX_WATCHLISTS } from "../../lib/watchlist";
 import { useCell } from "../../stores/layout";
-import { type Rerun, rerunReason, runOf, type ScreenRun, shownResult, useScreenerStore } from "../../stores/screener";
+import { type Rerun, rerunReason, type ScreenRun, shownResult, useScreenerStore } from "../../stores/screener";
 import { useSelectionStore } from "../../stores/selection";
 import { serverNow, useServerClock } from "../../stores/serverClock";
 import { useWatchlistStore } from "../../stores/watchlist";
@@ -62,27 +63,13 @@ const FULL_RELOAD_CONFIRM =
 const toast = (text: string) => useSelectionStore.getState().showToast(text);
 const reasonOf = (e: unknown) => (e instanceof Error ? e.message : String(e));
 const showCommandError = (e: unknown) => toast(`업데이트 명령을 보내지 못했습니다: ${reasonOf(e)}`);
-const editScreen = (id: string | null, base?: Screens) => {
+const editScreen = (workspace: Workspace, id: string | null) => {
   if (!matchMedia(DESKTOP_QUERY).matches) return useSelectionStore.getState().openScreenEditor(id);
   useSelectionStore.getState().showRightPanel("screener");
-  if (id !== null) useScreenerStore.getState().choose(id);
-  else if (base) useScreenerStore.getState().choose(useScreenEditor.getState().create(base));
+  if (id !== null) workspace.choose(id);
+  else workspace.create();
 };
 const count = (n: number) => n.toLocaleString("ko-KR");
-
-function useChosenScreen() {
-  const screens = useScreens();
-  const chosenId = useScreenerStore((s) => s.chosenId);
-  const sessions = useScreenEditor((s) => s.sessions);
-  const desktop = useMediaQuery(DESKTOP_QUERY);
-  const base = screens.data;
-  const source = base ? selectedSource(base, chosenId, desktop ? sessions : {}) : null;
-  const session = desktop && base && source ? currentSession(base, source, sessions) : null;
-  const check = session && base ? checkedSession(session, base) : null;
-  const screen = check?.ok ? check.screen : source;
-  const run = useScreenerStore((s) => (screen && (!check || check.ok) ? runOf(s.runs, screen) : null));
-  return { screens, screen, run, session, source };
-}
 
 function useStoreStatus(pollWhileUpdatingMs: number) {
   const query = useScreenerStatus(pollWhileUpdatingMs);
@@ -110,7 +97,7 @@ function useMenuToggle() {
 
 export function ScreenerBadge() {
   const updating = isUpdating(useStoreStatus(RAIL_POLL_MS).data);
-  const shown = shownResult(useChosenScreen().run)?.rows.length;
+  const shown = shownResult(useWorkspace().view.chosen?.run ?? null)?.rows.length;
   if (updating) {
     return (
       <span className="absolute right-0.5 top-0.5 text-accent">
@@ -141,7 +128,10 @@ export function PhoneScreener() {
 }
 
 export function ScreenerPanel({ wide = false, onReturn = () => {} }: { wide?: boolean; onReturn?: () => void }) {
-  const { screens, screen, run, session, source } = useChosenScreen();
+  const { workspace, view, query: screens } = useWorkspace();
+  const { chosen } = view;
+  const screen = chosen ? (chosen.runnable.ok ? chosen.runnable.screen : chosen.source) : null;
+  const run = chosen?.run ?? null;
   const statusQuery = useStoreStatus(PANEL_POLL_MS);
   const status = statusQuery.data;
   const block = status ? runBlock(status) : null;
@@ -164,11 +154,9 @@ export function ScreenerPanel({ wide = false, onReturn = () => {} }: { wide?: bo
     onReturn();
   };
   const execute = () => {
-    if (session && source && screens.data && !checkedSession(session, screens.data).ok) {
-      useScreenEditor.getState().trySubmit(screens.data, source);
-      return;
-    }
-    if (screen && status && block === null && run?.kind !== "running") void useScreenerStore.getState().run(screen).then(refresh);
+    void workspace.run(!status || block !== null).then((attempt) => {
+      if (attempt === "ran") void refresh();
+    });
   };
   useResultKeys({ rows, active: wide ? selected?.symbol ?? null : active, wide, onSelect: select, onOpen: openPreview, onRun: execute });
   useEffect(() => dropPendingOpen, []);
@@ -177,14 +165,14 @@ export function ScreenerPanel({ wide = false, onReturn = () => {} }: { wide?: bo
   return (
     <aside aria-label="스크리너" data-chart-control className="flex min-h-0 min-w-0 flex-1 flex-col">
       <div className={wide ? "grid min-h-0 flex-1 grid-cols-[160px_minmax(0,1fr)_240px] min-[1280px]:grid-cols-[200px_minmax(0,1fr)_300px]" : "flex min-h-0 flex-1 flex-col"}>
-        {wide && <ScreenList base={screens.data} chosen={screen?.id ?? null} />}
+        {wide && <ScreenList workspace={workspace} entries={view.entries} loaded={screens.data !== undefined} chosen={screen?.id ?? null} />}
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
           <div className="max-h-[50%] flex-none overflow-y-auto">
             {band && <UpdateBand status={status} />}
-            {session && source && screens.data ? (
-              <SentenceEditor session={session} base={screens.data} source={source} running={run?.kind === "running"} blocked={!status || block !== null} resultActions={<PanelMenu screen={screen} rows={rows} status={status} />} wide={wide} expanded={expandedConditions} onExpandedChange={setExpandedConditions} onRun={execute} />
+            {chosen?.draft ? (
+              <SentenceEditor workspace={workspace} chosen={chosen} draft={chosen.draft} entries={view.entries} blocked={!status || block !== null} resultActions={<PanelMenu screen={screen} rows={rows} status={status} />} wide={wide} expanded={expandedConditions} onExpandedChange={setExpandedConditions} onRun={execute} />
             ) : screen ? (
-              <ScreenHeader screen={screen} screens={screens.data?.screens ?? []} run={run} block={block} status={status} rows={rows} onRun={execute} wide={wide} />
+              <ScreenHeader workspace={workspace} screen={screen} screens={screens.data?.screens ?? []} run={run} block={block} status={status} rows={rows} onRun={execute} wide={wide} />
             ) : (
               <header className="flex h-11 flex-none items-center gap-1 border-b border-line pl-3 pr-1.5">
                 <h2 className="text-l font-[700]">스크리너</h2>
@@ -196,9 +184,9 @@ export function ScreenerPanel({ wide = false, onReturn = () => {} }: { wide?: bo
           </div>
           <div className="min-h-0 flex-1 overflow-y-auto">
             {screen ? (
-              <Results screen={screen} run={run} rows={rows} status={status} block={block} onRun={execute} onEdit={() => session ? setExpandedConditions(true) : editScreen(screen.id)} selected={wide ? selected?.symbol ?? null : active} onSelect={select} />
+              <Results screen={screen} run={run} rows={rows} status={status} block={block} onRun={execute} onEdit={() => chosen?.draft ? setExpandedConditions(true) : editScreen(workspace, screen.id)} selected={wide ? selected?.symbol ?? null : active} onSelect={select} />
             ) : (
-              <NoScreen query={screens} />
+              <NoScreen workspace={workspace} query={screens} />
             )}
           </div>
         </div>
@@ -249,17 +237,13 @@ function useResultKeys({ rows, active, wide, onSelect, onOpen, onRun }: ResultKe
   }, [rows, active, wide, onSelect, onOpen, onRun]);
 }
 
-function ScreenList({ base, chosen }: { base: Screens | undefined; chosen: string | null }) {
-  const sessions = useScreenEditor((s) => s.sessions);
-  const screens = base ? availableSources(base, sessions) : [];
+function ScreenList({ workspace, entries, loaded, chosen }: { workspace: Workspace; entries: readonly ScreenEntry[]; loaded: boolean; chosen: string | null }) {
   return <nav aria-label="저장한 조건식" data-screen-list className="flex min-h-0 flex-col border-r border-line bg-surface">
-    <div className="flex flex-none items-center justify-between border-b border-line p-2"><h2 className="text-s font-semibold">조건식</h2><button type="button" className="icon-btn" aria-label="새 조건식" disabled={!base} onClick={() => editScreen(null, base)}><PlusIcon /></button></div>
-    <div className="min-h-0 flex-1 overflow-y-auto p-1">{screens.map((screen) => {
-      const draft = base ? currentSession(base, screen, sessions).draft : null;
-      return <button key={screen.id} type="button" aria-current={screen.id === chosen || undefined}
-      className={`mb-1 w-full rounded-m p-2 text-left text-s ${screen.id === chosen ? "bg-accent-soft text-accent" : "hover:bg-raised"}`} onClick={() => { dropPendingOpen(); useScreenerStore.getState().choose(screen.id); }}>
+    <div className="flex flex-none items-center justify-between border-b border-line p-2"><h2 className="text-s font-semibold">조건식</h2><button type="button" className="icon-btn" aria-label="새 조건식" disabled={!loaded} onClick={() => editScreen(workspace, null)}><PlusIcon /></button></div>
+    <div className="min-h-0 flex-1 overflow-y-auto p-1">{entries.map(({ source: screen, draft }) => <button key={screen.id} type="button" aria-current={screen.id === chosen || undefined}
+      className={`mb-1 w-full rounded-m p-2 text-left text-s ${screen.id === chosen ? "bg-accent-soft text-accent" : "hover:bg-raised"}`} onClick={() => { dropPendingOpen(); workspace.choose(screen.id); }}>
       <b className="block break-words font-semibold">{draft?.name || screen.name}</b><small className="text-xs text-text-3">조건 {draft?.conditions.length ?? screen.conditions.length}개</small>
-    </button>; })}</div>
+    </button>)}</div>
   </nav>;
 }
 
@@ -285,7 +269,7 @@ function runHint(block: RunBlock | null, status: ScreenerStatus | undefined): Re
   return "실행할 때 KRX 최신 자료를 수집합니다";
 }
 
-function ScreenHeader({ screen, screens, run, block, status, rows, onRun, wide }: HeaderProps & { wide: boolean }) {
+function ScreenHeader({ workspace, screen, screens, run, block, status, rows, onRun, wide }: HeaderProps & { workspace: Workspace; wide: boolean }) {
   const running = run?.kind === "running";
   const summary = [
     marketsInOrder(screen.markets).map((market) => MARKET_LABEL[market]).join("·") || "전 종목 대상",
@@ -297,13 +281,13 @@ function ScreenHeader({ screen, screens, run, block, status, rows, onRun, wide }
     <header className="flex-none border-b border-line px-3 pb-3 pt-2">
       <div className="flex items-center gap-1">
         <FinancialUpdateButton className="md:hidden" />
-        {wide ? <h2 className="min-w-0 truncate text-l font-bold">{screen.name}</h2> : <ScreenPicker screens={screens} screen={screen} />}
+        {wide ? <h2 className="min-w-0 truncate text-l font-bold">{screen.name}</h2> : <ScreenPicker workspace={workspace} screens={screens} screen={screen} />}
         <span className="flex-1" />
-        <button type="button" className="tb-btn h-7 gap-1 px-2 text-s text-text-2" title="조건식 편집" onClick={() => editScreen(screen.id)}>
+        <button type="button" className="tb-btn h-7 gap-1 px-2 text-s text-text-2" title="조건식 편집" onClick={() => editScreen(workspace, screen.id)}>
           <PenIcon size={14} />
           편집
         </button>
-        {!wide && <button type="button" className="icon-btn" title="새 조건식" aria-label="새 조건식" onClick={() => editScreen(null)}>
+        {!wide && <button type="button" className="icon-btn" title="새 조건식" aria-label="새 조건식" onClick={() => editScreen(workspace, null)}>
           <PlusIcon />
         </button>}
         <PanelMenu screen={screen} rows={rows} status={status} />
@@ -328,13 +312,12 @@ function ScreenHeader({ screen, screens, run, block, status, rows, onRun, wide }
   );
 }
 
-function ScreenPicker({ screens, screen }: { screens: readonly Screen[]; screen: Screen }) {
+function ScreenPicker({ workspace, screens, screen }: { workspace: Workspace; screens: readonly Screen[]; screen: Screen }) {
   const menu = useMenuToggle();
-  const choose = useScreenerStore((s) => s.choose);
   const items: MenuItem[] = [
-    ...screens.map((s): MenuItem => ({ kind: "radio", label: s.name, checked: s.id === screen.id, onSelect: () => { dropPendingOpen(); choose(s.id); } })),
+    ...screens.map((s): MenuItem => ({ kind: "radio", label: s.name, checked: s.id === screen.id, onSelect: () => { dropPendingOpen(); workspace.choose(s.id); } })),
     { kind: "separator" },
-    { kind: "action", label: "새 조건식…", onSelect: () => editScreen(null) },
+    { kind: "action", label: "새 조건식…", onSelect: () => editScreen(workspace, null) },
   ];
   return (
     <div ref={menu.root} className="relative -ml-1.5 min-w-0">
@@ -459,7 +442,7 @@ function Notice({ title, children, action, tone = "plain" }: { title: string; ch
   );
 }
 
-function NoScreen({ query }: { query: UseQueryResult<Screens> }) {
+function NoScreen({ workspace, query }: { workspace: Workspace; query: UseQueryResult<Screens> }) {
   if (query.isPending) return <Notice title="조건식을 불러오는 중입니다" />;
   if (query.isError) {
     return (
@@ -472,7 +455,7 @@ function NoScreen({ query }: { query: UseQueryResult<Screens> }) {
     <Notice
       title="저장한 조건식이 없습니다"
       action={
-        <button type="button" className="btn-primary mt-1 flex h-8 items-center gap-1.5 px-3 text-s" onClick={() => editScreen(null, query.data)}>
+        <button type="button" className="btn-primary mt-1 flex h-8 items-center gap-1.5 px-3 text-s" onClick={() => editScreen(workspace, null)}>
           <PlusIcon size={14} />새 조건식
         </button>
       }

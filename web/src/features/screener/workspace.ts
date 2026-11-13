@@ -43,8 +43,8 @@ export interface Workspace {
   view(): WorkspaceView;
   load(): Promise<void>;
   see(list: Screens): void;
-  edit(update: (draft: ScreenDraft) => ScreenDraft): void;
   choose(id: string): void;
+  edit(update: (draft: ScreenDraft) => ScreenDraft): void;
   create(copy?: boolean): string | null;
   save(): Promise<void>;
   remove(): Promise<boolean>;

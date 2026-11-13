@@ -25,12 +25,10 @@ interface SeenStore {
 }
 
 interface ScreenerState {
-  chosenId: string | null;
   runs: Readonly<Record<string, ScreenRun>>;
   sort: ResultSort;
   storeVersion: number;
   seen: SeenStore | null;
-  choose(id: string): void;
   setSort(sort: ResultSort): void;
   run(screen: Screen): Promise<void>;
   seeStatus(status: ScreenerStatus): void;
@@ -74,12 +72,10 @@ const asApiError = (e: unknown) => (e instanceof ApiRequestError ? e : new ApiRe
 export const useScreenerStore = create<ScreenerState>()((set, get) => {
   const record = (run: ScreenRun) => set((s) => ({ runs: { ...s.runs, [run.screen.id]: run } }));
   return {
-    chosenId: null,
     runs: {},
     sort: DEFAULT_SORT,
     storeVersion: 0,
     seen: null,
-    choose: (chosenId) => set({ chosenId }),
     setSort: (sort) => set({ sort }),
     run: async (screen) => {
       const snapshot = structuredClone(screen);

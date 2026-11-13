@@ -18,7 +18,7 @@ const backfilling = (full = false): ScreenerStatus["update"] => ({ phase: "backf
 const recentFull: ScreenerStatus["update"] = { phase: "recent", done: 0, total: 28, error: null, full: true };
 
 beforeEach(() => {
-  useScreenerStore.setState({ chosenId: null, runs: {}, storeVersion: 0, seen: null });
+  useScreenerStore.setState({ runs: {}, storeVersion: 0, seen: null });
   vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify(result), { status: 200 })));
 });
 afterEach(() => vi.unstubAllGlobals());
@@ -112,7 +112,6 @@ for (const olderFails of [false, true]) {
       const changed: Screen = { ...screen, conditions: [{ kind: "new_high", period: "W", field: "high", n: 60, recentBars: 2 }] };
       const older = useScreenerStore.getState().run(screen);
       const newer = useScreenerStore.getState().run(changed);
-      useScreenerStore.getState().choose("other");
       const fresh = { ...result, collectionStartedAt: 100, collectionCompletedAt: 101 };
       second.resolve(newerFails ? failedResponse() : responseOf(fresh));
       await newer;

@@ -16,6 +16,7 @@ import {
   KIND_GROUPS,
   kindChoiceOf,
   moveCondition,
+  placeCondition,
   removeCondition,
   removeMaLine,
   type ScreenDraft,
@@ -414,4 +415,14 @@ test("모든 봉 조건의 최근 기간은 양의 정수이며 끝+1 상한까�
     const changed = changeKind(start, 0, choice);
     expect(conditionOf(firstLine(changeKind(changed, 0, "new_low")))).toMatchObject({ recentBars: 260 });
   }
+});
+
+test("드래그 순서 변경은 양방향·자기 자신·없는 행을 안전하게 처리한다", () => {
+  let draft = addCondition(addCondition(addCondition({ name: "a", markets: [], exclude: [], conditions: [] })));
+  draft = placeCondition(draft, 0, 2);
+  expect(draft.conditions.map((c) => c.key)).toEqual([1, 2, 0]);
+  draft = placeCondition(draft, 0, 1);
+  expect(draft.conditions.map((c) => c.key)).toEqual([0, 1, 2]);
+  expect(placeCondition(draft, 0, 0)).toBe(draft);
+  expect(placeCondition(draft, 9, 0)).toBe(draft);
 });
