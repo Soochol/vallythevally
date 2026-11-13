@@ -56,6 +56,9 @@ describe("placement", () => {
     const jittered = step(step(s, down(31, 21), c).state, { kind: "finish" }, c);
     expect(jittered.effects).toMatchObject([{ kind: "place", points: [{ t: 10, price: 10 }, { t: 30, price: 20 }] }]);
     expect(step(step(s, down(34, 20), c).state, { kind: "finish" }, c).effects).toMatchObject([{ points: [{ t: 10 }, { t: 30 }, { t: 34 }] }]);
+    const two = context(trendline);
+    const clicked = step(step(IDLE, down(100, 100), two).state, up(100, 100), two).state;
+    expect(step(clicked, down(103, 100), two).effects).toMatchObject([{ kind: "place", points: [{ t: 100, price: 100 }, { t: 103, price: 100 }] }]);
     const free = context({ ...trendline, placement: { kind: "freehand", min: 2, max: 1000 } });
     s = step(IDLE, down(10, 10), free).state;
     s = step(s, move(20, 30), free).state;
