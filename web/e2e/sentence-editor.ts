@@ -2,6 +2,7 @@ import type { Locator, Page } from "@playwright/test";
 import { expect } from "./harness";
 
 export const sentenceEditor = (page: Page) => page.getByRole("region", { name: "조건식 편집", exact: true });
+export const editorWindow = (page: Page) => page.getByRole("dialog", { name: "조건 편집 창", exact: true });
 export const numberToken = (scope: Locator, name: string) => scope.getByRole("button", { name, exact: true });
 
 export async function setNumber(scope: Locator, name: string, value: string) {
@@ -63,9 +64,15 @@ export async function fillNumber(trigger: Locator, value: string) {
 }
 
 export async function expandEditor(page: Page) {
-  const expand = sentenceEditor(page).getByRole("button", { name: "조건 펼치기", exact: true });
-  if (await expand.count()) await expand.click();
-  await expect(sentenceEditor(page)).toBeVisible();
+  const fields = sentenceEditor(page).getByRole("group", { name: "문장형 조건식", exact: true });
+  if (await fields.count() === 0) await sentenceEditor(page).getByRole("button", { name: /^(편집|조건 펼치기)$/ }).click();
+  await expect(fields).toBeVisible();
+}
+
+export async function closeEditorWindow(page: Page) {
+  if (await editorWindow(page).count() === 0) return;
+  await editorWindow(page).getByRole("button", { name: "닫기", exact: true }).click();
+  await expect(editorWindow(page)).toHaveCount(0);
 }
 
 const KIND_NAMES: Readonly<Record<string, string>> = {

@@ -6,7 +6,7 @@ export const rail = (page: Page) => page.getByRole("tablist", { name: "오른쪽
 export const panel = (page: Page) => page.getByRole("complementary", { name: "스크리너" });
 export const updateBand = (page: Page) => panel(page).getByLabel("업데이트", { exact: true });
 export const storeLine = (page: Page) => panel(page).getByLabel("KRX 일봉 저장소");
-export const runButton = (page: Page) => panel(page).getByRole("button", { name: /^(실행|실행 중)$/ });
+export const runButton = (page: Page) => panel(page).getByRole("button", { name: /^(실행|실행 중)$/ }).and(page.locator(":not([role=dialog] *)"));
 export const results = (page: Page) => panel(page).getByRole("region", { name: "결과" });
 export const excludedLine = (page: Page) => results(page).getByText(/^대상 \d+종목 · 빠짐: /);
 export const rows = (page: Page) => results(page).locator("tr[data-code]");

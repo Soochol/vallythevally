@@ -2,13 +2,13 @@ import type { Page } from "@playwright/test";
 import { type App, expect, test } from "./harness";
 import { cell, chartOf } from "./harness";
 import { openScreener, panel, updateBand, waitForUpdateToFinish } from "./screener-page";
+import { editorWindow } from "./sentence-editor";
 
 test.use({ clockStart: "20261109100030", viewport: { width: 1440, height: 900 } });
 
 const SEEDED = { id: "seeded", name: "고가 60일 신고가", markets: ["kospi"], exclude: ["etf"], conditions: [{ kind: "new_high", period: "D", recentBars: 20, field: "high", n: 60 }] };
 const SENTENCE = "일봉 최근 20일 이내 고가가 60일 신고가인 봉이 있다";
 
-const editorWindow = (page: Page) => page.getByRole("dialog", { name: "조건식 편집", exact: true });
 const editButton = (page: Page) => panel(page).getByRole("button", { name: "편집", exact: true });
 const nameField = (page: Page) => editorWindow(page).getByRole("textbox", { name: "조건식 이름", exact: true });
 const summary = (page: Page) => panel(page).getByLabel("조건 요약", { exact: true });
@@ -56,7 +56,7 @@ test("창에서 고친 초안은 닫아도 남고 Ctrl+S로 저장하며 N으로
   await seed(app, page);
   await editButton(page).click();
   await editorWindow(page).getByRole("group", { name: "대상 시장" }).getByRole("button", { name: "코스닥", exact: true }).click();
-  await expect(editorWindow(page).getByText("변경됨", { exact: true })).toBeVisible();
+  await expect(panel(page).getByText("변경됨", { exact: true })).toBeVisible();
   await page.keyboard.press("Escape");
   await expect(editorWindow(page)).toHaveCount(0);
   await expect(panel(page).getByText("변경됨", { exact: true })).toBeVisible();
@@ -73,17 +73,15 @@ test("창에서 고친 초안은 닫아도 남고 Ctrl+S로 저장하며 N으로
   await expect(editorWindow(page).getByRole("list", { name: "조건" }).getByRole("listitem")).toHaveCount(2);
   await page.keyboard.press("Control+s");
   await expect.poll(async () => (await savedScreens(app))[0]).toMatchObject({ markets: ["kospi", "kosdaq"], conditions: [{ kind: "new_high" }, { kind: "rsi" }] });
-  await expect(editorWindow(page).getByText("변경됨", { exact: true })).toHaveCount(0);
+  await expect(panel(page).getByText("변경됨", { exact: true })).toHaveCount(0);
+  await expect(editorWindow(page).getByRole("button", { name: "저장", exact: true })).toBeDisabled();
   await expect(editorWindow(page)).toBeVisible();
 });
 
-test("메뉴의 이름 바꾸기는 창을 열어 이름을 고르고, 빈 이름으로 실행하면 창이 열려 오류를 보인다", async ({ app, page }) => {
+test("창 머리에서 이름을 고치고, 빈 이름으로 실행하면 닫힌 창이 열려 이름 입력에 포커스를 준다", async ({ app, page }) => {
   await seed(app, page);
-  await panel(page).getByRole("button", { name: "조건식 메뉴", exact: true }).click();
-  await page.getByRole("menuitem", { name: "이름 바꾸기", exact: true }).click();
-  await expect(nameField(page)).toBeFocused();
-  await page.keyboard.type("바꾼 이름");
-  await expect(nameField(page)).toHaveValue("바꾼 이름");
+  await editButton(page).click();
+  await nameField(page).fill("바꾼 이름");
   await expect(panel(page).getByRole("button", { name: "조건식 고르기", exact: true })).toHaveText("바꾼 이름");
 
   await nameField(page).fill("");
@@ -94,6 +92,7 @@ test("메뉴의 이름 바꾸기는 창을 열어 이름을 고르고, 빈 이�
   await expect(editorWindow(page)).toBeVisible();
   await expect(editorWindow(page).getByRole("alert").first()).toContainText("이름을 넣으세요");
   await expect(nameField(page)).toHaveAttribute("aria-invalid", "true");
+  await expect(nameField(page)).toBeFocused();
   expect((await savedScreens(app))[0].name).toBe(SEEDED.name);
 });
 
@@ -126,18 +125,22 @@ test("저장이 처음부터 실패하거나 충돌해도 창과 초안을 지�
   await expect(editorWindow(page)).toBeVisible();
 });
 
-test("넓게 보기에서도 같은 창을 편집 버튼 아래에 연다", async ({ app, page }) => {
+test("창 밖 차트 조작은 창을 닫으면서 그대로 실행되고, 넓게 보기는 창 대신 조건을 그 자리에 펼친다", async ({ app, page }) => {
   await seed(app, page);
-  await page.getByRole("button", { name: "넓게 보기" }).first().click();
-  await expect(panel(page).getByRole("navigation", { name: "저장한 조건식" })).toBeVisible();
-  await expect(summary(page)).toContainText(SENTENCE);
   await editButton(page).click();
-  await expect(editorWindow(page).getByRole("group", { name: "문장형 조건식" })).toBeVisible();
-  const button = (await editButton(page).boundingBox())!;
-  const windowBox = (await editorWindow(page).boundingBox())!;
-  expect(windowBox.y).toBeGreaterThanOrEqual(button.y + button.height);
-  expect(windowBox.x + windowBox.width).toBeLessThanOrEqual(1440);
-  await editorWindow(page).getByRole("button", { name: "닫기", exact: true }).click();
+  await expect(editorWindow(page)).toBeVisible();
+  await cell(page).getByRole("group", { name: "거래소" }).getByRole("button", { name: "KRX", exact: true }).click();
+  await expect(editorWindow(page)).toHaveCount(0);
+  await expect(cell(page)).toHaveAttribute("aria-label", /KRX/);
+
+  await editButton(page).click();
+  await page.getByRole("button", { name: "넓게 보기", exact: true }).click();
+  await expect(panel(page).getByRole("navigation", { name: "저장한 조건식" })).toBeVisible();
+  await expect(editorWindow(page)).toHaveCount(0);
+  await expect(editButton(page)).toHaveCount(0);
+  await expect(summary(page)).toContainText(SENTENCE);
+  await panel(page).getByRole("button", { name: "조건 펼치기", exact: true }).click();
+  await expect(panel(page).getByRole("group", { name: "문장형 조건식" })).toBeVisible();
   await expect(editorWindow(page)).toHaveCount(0);
 });
 

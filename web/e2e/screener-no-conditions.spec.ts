@@ -29,7 +29,8 @@ const statusChip = (dialog: Locator, name: string) => dialog.getByRole("group", 
 const asOfToday = (codes: readonly string[]) => EVERY_STOCK.filter(([code]) => codes.includes(code)).map(([code, name]) => [code, name, "당일"] as const);
 
 async function expectNoConditions(scope: Locator) {
-  await expect(scope.getByText(NO_CONDITIONS, { exact: true })).toBeVisible();
+  const fields = scope.getByRole("group", { name: "문장형 조건식", exact: true });
+  await expect((await fields.count() ? fields : scope).getByText(NO_CONDITIONS, { exact: true })).toBeVisible();
   await expect(conditionList(scope)).toHaveCount(0);
 }
 
@@ -115,8 +116,7 @@ test("새 조건식은 조건 없이 열리고 마지막 줄까지 뺐다가 다
     await openScreener(page);
     await expect(panel(page).getByRole("button", { name: "조건식 고르기", exact: true })).toHaveText(SCREEN_NAME);
     await expectNoConditions(panel(page));
-    await expect(panel(page).getByText("코스닥", { exact: true })).toBeVisible();
-    await expect(panel(page).getByText("관리종목", { exact: true })).toBeVisible();
+    await expect(panel(page).getByLabel("조건 요약", { exact: true })).toContainText("코스닥 · 관리종목 제외");
     dialog = await editScreen(page);
     await expectNoConditions(dialog);
     await expect(marketChip(dialog, "코스닥")).toHaveAttribute("aria-pressed", "true");
