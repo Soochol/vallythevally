@@ -68,11 +68,12 @@ function constrained(tool: Tool, fixed: readonly DrawingPoint[], at: ScreenPoint
   return snapped;
 }
 
-function repeatsLast(fixed: Anchors, p: DrawingPoint, c: Context): boolean {
+function repeatsLast(tool: Tool, fixed: Anchors, p: DrawingPoint, c: Context): boolean {
   const last = fixed.at(-1) ?? fixed[0];
   const a = c.ctx.toScreen(last);
   const b = c.ctx.toScreen(p);
-  return a !== null && b !== null ? distance(a, b) < PRESS_DISTANCE : last.t === p.t && last.price === p.price;
+  if (tool.placement.kind === "polyline" && a !== null && b !== null) return distance(a, b) < PRESS_DISTANCE;
+  return last.t === p.t && last.price === p.price;
 }
 
 function limitPoints(points: readonly DrawingPoint[], max: number): DrawingPoint[] {
@@ -174,7 +175,7 @@ export function step(s: Interaction, e: Input, c: Context): Transition {
     if (p === null) return result(s);
     if (e.kind === "move") return result({ ...s, cursor: p });
     if (e.kind !== "down") return result(s);
-    if (repeatsLast(s.fixed, p, c)) return result(s);
+    if (repeatsLast(s.tool, s.fixed, p, c)) return result(s);
     const points: Anchors = [s.fixed[0], ...s.fixed.slice(1), p];
     const placement = s.tool.placement;
     const max = placement.kind === "points" ? placement.count : placement.max;

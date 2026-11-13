@@ -28,10 +28,11 @@ const meaningful = (text: string | null) => text?.trim() ? text : null;
 function settlePoint(slot: number, index: number) {
   const ctx = surfaceFor(slot)?.frame().ctx;
   useDrawingSession.setState((s) => {
-    const editor = s.editor; const point = editor?.draft.points[index];
+    const editor = s.editor; const typed = editor?.draft.points[index]; const before = editor?.original.points[index];
     const setPoint = editor ? toolOf(editor.draft.tool)?.setPoint : undefined;
-    if (!editor || !point || !setPoint || !ctx) return s;
-    return { editor: { ...editor, draft: { ...editor.draft, points: setPoint(editor.draft.points, index, point, ctx) } } };
+    if (!editor || !typed || !before || !setPoint || !ctx) return s;
+    const points = editor.draft.points.map((p, i) => i === index ? before : p);
+    return { editor: { ...editor, draft: { ...editor.draft, points: setPoint(points, index, typed, ctx) } } };
   });
 }
 export function DrawingDetails({ slot, editor, anchor }: { slot: number; editor: DrawingEditor; anchor: RefObject<HTMLElement | null> }) {
