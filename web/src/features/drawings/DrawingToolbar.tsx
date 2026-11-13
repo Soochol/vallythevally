@@ -19,7 +19,7 @@ import { isTypingTarget } from "../../lib/hotkeys";
 const GROUP_LABEL = { line: "선", fib: "피보나치", shape: "도형", note: "주석", measure: "측정" };
 
 export function DrawingToolbar() {
-  const active = useDrawingSession((s) => s.tool); const pinned = useDrawingSession((s) => s.pinnedTool);
+  const active = useDrawingSession((s) => s.tool); const mode = useDrawingSession((s) => s.mode); const pinned = useDrawingSession((s) => s.pinnedTool);
   const prefs = useUiStore((s) => s.prefs.drawing); const slot = useSelectionStore((s) => s.activeSlot);
   const [help, setHelp] = useState(false);
   const root = useRef<HTMLElement>(null);
@@ -36,7 +36,7 @@ export function DrawingToolbar() {
   const setPrefs = useUiStore.getState().setDrawingPrefs;
   const action = (f: () => void) => { f(); surfaceFor(slot)?.focus(); };
   return <nav ref={root} data-chart-control aria-label="드로잉 도구" className="drawing-toolbar ui-island max-md:hidden">
-    <button className="draw-tool" data-active-tool aria-label="선택 도구" title="선택 (V)" aria-pressed={active === null} onClick={() => action(() => useDrawingSession.getState().setTool(null))}><Icon path={DRAWING_ICONS.pointer} /></button>
+    <button className="draw-tool" data-active-tool aria-label="선택 도구" title="선택 (V)" aria-pressed={active === null && mode === null} onClick={() => action(() => useDrawingSession.getState().setTool(null))}><Icon path={DRAWING_ICONS.pointer} /></button>
     {[...toolsByGroup()].map(([group, tools]) => {
       const t = tools.find((tool) => tool.tool === active) ?? lastTools[group] ?? tools[0]!;
       return <div className="draw-group" key={group}>
@@ -48,7 +48,7 @@ export function DrawingToolbar() {
       return <button key={id} className="draw-tool" data-active-tool aria-label={`${tool.label} 고정 도구`} title={`${tool.label} (${TOOL_HOTKEYS.find((h) => h.tool === id)?.keys ?? ""}) · 고정`} aria-pressed={active === id} onClick={() => setTool(tool)} onDoubleClick={() => action(() => useDrawingSession.getState().setTool(id, true))}><Icon path={tool.icon} /></button>;
     })}
     <div className="draw-separator" />
-    {MODES.filter((mode) => mode.id !== "demo").map((mode) => <button key={mode.id} className="draw-tool" aria-label={mode.label} title={mode.label} onClick={() => action(() => useDrawingSession.setState({ tool: null, mode: mode.id }))}><Icon path={mode.icon} /></button>)}
+    {MODES.filter((m) => m.id !== "demo").map((m) => <button key={m.id} className="draw-tool" data-active-tool aria-label={m.label} title={m.label} aria-pressed={mode === m.id} onClick={() => action(() => useDrawingSession.setState({ tool: null, mode: mode === m.id ? null : m.id }))}><Icon path={m.icon} /></button>)}
     <MagnetButton action={action} />
     <button className="draw-tool" aria-label="연속 그리기" title="연속 그리기" aria-pressed={prefs.keepDrawing} onClick={() => action(() => setPrefs({ keepDrawing: !prefs.keepDrawing }))}><Icon path={DRAWING_ICONS.keepDrawing} /></button>
     <div className="draw-toolbar-end"><button className="draw-tool" aria-label="개체 목록 열기" title="개체 목록" onClick={() => useSelectionStore.getState().showRightPanel("objects")}><Icon path={DRAWING_ICONS.objects} /></button>
