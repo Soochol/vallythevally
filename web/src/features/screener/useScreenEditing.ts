@@ -1,7 +1,6 @@
 import { type QueryClient, useQueryClient } from "@tanstack/react-query";
 import { useSyncExternalStore } from "react";
 import { saveScreens, screenerStatusQuery, screensQuery, useScreens } from "../../api/screener";
-import { DESKTOP_QUERY, useMediaQuery } from "../../lib/media";
 import { runBlock } from "../../lib/screener";
 import { useScreenerStore } from "../../stores/screener";
 import { createScreenEditing, type ScreenEditing, type ScreenRunner, type ScreensPort } from "./screenEditing";
@@ -55,11 +54,7 @@ const storeRunner = (client: QueryClient): ScreenRunner => ({
 export function screenEditingFor(client: QueryClient): ScreenEditing {
   const known = editings.get(client);
   if (known) return known;
-  const editing = createScreenEditing({
-    screens: queryScreens(client),
-    runner: storeRunner(client),
-    showsDrafts: () => typeof matchMedia !== "undefined" && matchMedia(DESKTOP_QUERY).matches,
-  });
+  const editing = createScreenEditing({ screens: queryScreens(client), runner: storeRunner(client) });
   editings.set(client, editing);
   return editing;
 }
@@ -68,7 +63,6 @@ export function useScreenEditing() {
   const editing = screenEditingFor(useQueryClient());
   const query = useScreens();
   useScreenerStore((s) => s.runs);
-  useMediaQuery(DESKTOP_QUERY);
   const view = useSyncExternalStore(editing.subscribe, editing.view, editing.view);
   return { editing, view, query };
 }

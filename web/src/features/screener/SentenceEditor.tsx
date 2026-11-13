@@ -8,18 +8,17 @@ import { ChevronIcon, CloseIcon, MoreIcon, PenIcon, PlayIcon, SpinnerIcon } from
 import { ScreenerMenu } from "./ScreenerMenu";
 import { SentenceFields } from "./SentenceFields";
 import { dropPendingOpen } from "./resultActions";
-import type { EditedScreen, ScreenEditing, ScreenEntry } from "./screenEditing";
+import { type ChosenScreen, FIX_INVALID, type ScreenEditing, type ScreenEntry } from "./screenEditing";
 import type { ScreenDraft } from "../screen-dialog/screenForm";
 
 const SUMMARY_LINES = 3;
-const INVALID_SUMMARY = "조건식의 잘못된 값을 고쳐 주세요";
 const KEEPS_DRAFT = "닫아도 편집 내용은 남습니다";
 const BLOCKED_HINT = "자료 상태를 확인한 뒤 실행하세요";
 const RUNS_UNSAVED = "저장 전에도 실행할 수 있습니다";
 
 interface EditorProps {
   screenEditing: ScreenEditing;
-  chosen: EditedScreen;
+  chosen: ChosenScreen;
   entries: readonly ScreenEntry[];
   blocked: boolean;
   resultActions: ReactNode;
@@ -47,7 +46,7 @@ export function SentenceEditor({ screenEditing, chosen, entries, blocked, result
   const inline = wide && (editing || flagged);
   const floating = !wide && editing;
   const lines = checked.ok ? checked.screen.conditions.map(conditionSentence) : [];
-  const listError = flagged ? checked.errors.list ?? INVALID_SUMMARY : null;
+  const listError = chosen.listError ?? (flagged ? FIX_INVALID : null);
   const saveError = chosen.notice;
   const alerts = [nameError, listError, saveError].filter((message): message is string => message !== null);
   const choose = (id: string) => { dropPendingOpen(); screenEditing.choose(id); };
@@ -88,7 +87,7 @@ export function SentenceEditor({ screenEditing, chosen, entries, blocked, result
     </Popover>}
     {!floating && nameError && <p role="alert" className="px-3 pb-2 text-xs text-danger">{nameError}</p>}
     {inline ? <SentenceFields draft={draft} locked={busy} onChange={change} /> : <div aria-label="조건 요약" className="px-3 pb-3 text-s text-text-2">
-      {!checked.ok && <p>{INVALID_SUMMARY}</p>}
+      {!checked.ok && <p>{FIX_INVALID}</p>}
       {checked.ok && lines.length === 0 && <p>{NO_CONDITIONS_SENTENCE}</p>}
       {lines.slice(0, SUMMARY_LINES).map((line, index) => <p key={index} className="truncate" title={line}>{line}</p>)}
       {lines.length > SUMMARY_LINES && <p className="text-text-3">외 {lines.length - SUMMARY_LINES}개 조건</p>}

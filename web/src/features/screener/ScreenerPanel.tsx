@@ -129,6 +129,7 @@ export function PhoneScreener() {
 
 export function ScreenerPanel({ wide = false, onReturn = () => {} }: { wide?: boolean; onReturn?: () => void }) {
   const { editing: screenEditing, view, query: screens } = useScreenEditing();
+  const desktop = useMediaQuery(DESKTOP_QUERY);
   const { chosen } = view;
   const screen = chosen?.screen ?? null;
   const run = chosen?.run ?? null;
@@ -170,7 +171,7 @@ export function ScreenerPanel({ wide = false, onReturn = () => {} }: { wide?: bo
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
           <div className="max-h-[50%] flex-none overflow-y-auto">
             {band && <UpdateBand status={status} />}
-            {chosen?.draft ? (
+            {chosen && desktop ? (
               <SentenceEditor screenEditing={screenEditing} chosen={chosen} entries={view.entries} blocked={!status || block !== null} resultActions={<PanelMenu screen={screen} rows={rows} status={status} />} wide={wide} editing={editing} onEditingChange={setEditing} onRun={execute} />
             ) : screen ? (
               <ScreenHeader screenEditing={screenEditing} screen={screen} screens={screens.data?.screens ?? []} run={run} block={block} status={status} rows={rows} onRun={execute} wide={wide} />
@@ -185,7 +186,7 @@ export function ScreenerPanel({ wide = false, onReturn = () => {} }: { wide?: bo
           </div>
           <div className="min-h-0 flex-1 overflow-y-auto">
             {screen ? (
-              <Results screen={screen} run={run} rows={rows} status={status} block={block} onRun={execute} onEdit={() => chosen?.draft ? setEditing(true) : editScreen(screenEditing, screen.id)} selected={wide ? selected?.symbol ?? null : active} onSelect={select} />
+              <Results screen={screen} run={run} rows={rows} status={status} block={block} onRun={execute} onEdit={() => desktop ? setEditing(true) : editScreen(screenEditing, screen.id)} selected={wide ? selected?.symbol ?? null : active} onSelect={select} />
             ) : (
               <NoScreen query={screens} onCreate={createScreen} />
             )}
