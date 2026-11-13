@@ -16,5 +16,8 @@ const server = createServer(async (req, res) => {
     res.end(await readFile(file));
   } catch { res.writeHead(500); res.end(); }
 });
-server.listen(Number(process.env.VALLY_E2E_PORT ?? 4173), "127.0.0.1");
+server.listen(Number(process.env.VALLY_E2E_PORT ?? 4173), "127.0.0.1", () => {
+  const address = server.address();
+  if (address && typeof address === "object") process.stdout.write(`addr=http://127.0.0.1:${address.port}\n`);
+});
 for (const signal of ["SIGINT", "SIGTERM"]) process.on(signal, () => server.close(() => process.exit(0)));

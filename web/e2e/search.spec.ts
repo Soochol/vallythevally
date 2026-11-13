@@ -1,3 +1,4 @@
+import { screenerScenario, readyStatus } from "./fixtures/screener";
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import type { ScreenerResult } from "../src/api/generated/ScreenerResult";
@@ -34,7 +35,7 @@ test("검색어를 바꾼 뒤 새 결과가 오기 전에는 Enter가 이전 결
   const isSecondQuery = (url: URL) => url.pathname === "/api/symbols" && url.searchParams.get("q") === "005930";
   await page.route(isSecondQuery, async (route) => {
     await held;
-    await route.continue();
+    await route.fallback();
   });
 
   await page.goto("/");
@@ -61,7 +62,7 @@ test("검색어를 바꾼 뒤 새 결과가 오기 전에는 Enter가 이전 결
   await expect(cell(page)).toHaveAttribute("aria-label", "칸 1: 삼성전자 통합 일");
 });
 
-test("초성 결과의 현재가·등락률·강조와 고른 한 종목의 추세가 보인다", async ({ page, app }) => {
+test("초성 결과의 현재가·등락률·강조와 고른 한 종목의 추세가 보인다", async ({ page, scenario }) => {
   await page.goto("/");
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
   await page.keyboard.press("/");
@@ -70,9 +71,9 @@ test("초성 결과의 현재가·등락률·강조와 고른 한 종목의 추�
   await input.fill("ㅅㅅ");
   const samsung = dialog.getByRole("option").filter({ hasText: "005930" });
   await expect(samsung).toHaveAttribute("aria-disabled", "false");
-  const quotes = await (await fetch(`${app.url}/api/quotes?symbols=005930`)).json();
-  await expect(samsung.getByLabel("현재가")).toHaveText(quotes[0].price.toLocaleString("ko-KR"));
-  await expect(samsung.getByLabel("등락률")).toHaveText(`${quotes[0].changeRate > 0 ? "+" : ""}${quotes[0].changeRate.toFixed(2)}%`);
+  const quotes = [scenario.market.quote("005930")!];
+  await expect(samsung.getByLabel("현재가")).toHaveText(quotes[0]!.price.toLocaleString("ko-KR"));
+  await expect(samsung.getByLabel("등락률")).toHaveText(`${quotes[0]!.changeRate > 0 ? "+" : ""}${quotes[0]!.changeRate.toFixed(2)}%`);
   await expect(samsung.locator("mark")).toHaveText(["삼성"]);
   await samsung.hover();
   await expect(dialog.getByRole("img", { name: "삼성전자 60일 추세" })).toBeVisible();
@@ -129,10 +130,10 @@ test("시장 필터와 > 명령 모드에서 명령을 실행한다", async ({ p
   await expect(page.getByRole("dialog", { name: "지표·비교 입력창", exact: true })).toBeVisible();
 });
 
-test("일부 시세 누락·추세 실패에도 다른 종목과 명령을 계속 고른다", async ({ page }) => {
+test("일부 시세 누락·추세 실패에도 다른 종목과 명령을 계속 고른다", async ({ scenario, page }) => {
   await page.route("**/api/quotes?*", async (route) => {
-    const response = await route.fetch();
-    const quotes = await response.json();
+    const response = await scenario.respond(route.request());
+    const quotes = (response.body ?? []) as { symbol: string }[];
     await route.fulfill({ json: quotes.filter((q: { symbol: string }) => q.symbol !== "006400") });
   });
   await page.route((url) => url.pathname === "/api/bars" && url.searchParams.get("limit") === "60", (route) => route.fulfill({ status: 503, json: { code: "unavailable", message: "시험 실패" } }));
@@ -150,11 +151,11 @@ test("일부 시세 누락·추세 실패에도 다른 종목과 명령을 계�
 });
 
 test.describe("검색에서 스크리너 실행", () => {
-  test.use({ krxMarket: "20261106", clockStart: "20261106203000" });
-  test("숨긴 오른쪽 스크리너 탭을 펼쳐 저장된 조건식을 실행하고 차트를 유지한다", async ({ page, app }) => {
-    test.setTimeout(180_000);
-    const seeded = await fetch(`${app.url}/api/screens`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ revision: 1, screens: [{ id: "search-run", name: "검색에서 실행", markets: [], exclude: ["etf"], conditions: [{ kind: "new_high", period: "D", recentBars: 20, field: "high", n: 60 }] }] }) });
-    expect(seeded.ok).toBe(true);
+  test.use({ clockStart: "20261106203000" });
+  test("숨긴 오른쪽 스크리너 탭을 펼쳐 저장된 조건식을 실행하고 차트를 유지한다", async ({ page, scenario }) => {
+    screenerScenario(scenario, { status: readyStatus() });
+    scenario.documents.saveScreens({ revision: 1, screens: [{ id: "search-run", name: "검색에서 실행", markets: [], exclude: ["etf"], conditions: [{ kind: "new_high", period: "D", recentBars: 20, field: "high", n: 60 }] }] });
+
     await page.goto("/");
     await expect(cell(page)).toHaveAttribute("aria-busy", "false");
     const chartLabel = await cell(page).getAttribute("aria-label");
@@ -285,11 +286,11 @@ test("Tab은 검색 안에 머물고 필터 버튼의 Enter는 종목을 열지 
   await expect(opener).toBeFocused();
 });
 
-test("시세의 첫 실패는 다시 받고 도중 실패에도 종목 열기를 막지 않는다", async ({ page }) => {
+test("시세의 첫 실패는 다시 받고 도중 실패에도 종목 열기를 막지 않는다", async ({ page, scenario }) => {
   let failQuotes = true;
   await page.route("**/api/quotes?*", (route) => failQuotes
     ? route.fulfill({ status: 503, json: { code: "unavailable", message: "시세 시험 실패" } })
-    : route.continue());
+    : route.fallback());
   await page.goto("/");
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
   await page.keyboard.press("/");
@@ -300,7 +301,7 @@ test("시세의 첫 실패는 다시 받고 도중 실패에도 종목 열기를
   await expect(error).toBeVisible();
   failQuotes = false;
   await error.getByRole("button", { name: "다시 시도" }).click();
-  await expect(dialog.getByRole("option").getByLabel("현재가")).toHaveText("50,000");
+  await expect(dialog.getByRole("option").getByLabel("현재가")).toHaveText(scenario.market.quote("005930")!.price.toLocaleString("ko-KR"));
   await expect(error).toBeHidden();
   failQuotes = true;
   await input.fill("006400");

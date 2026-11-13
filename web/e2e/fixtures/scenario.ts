@@ -1,3 +1,5 @@
+import { isPeriod } from "../../src/lib/symbol";
+import { parseUiState } from "../../src/persist/uiState";
 import type { BrowserContext, Request, Route, WebSocketRoute } from "@playwright/test";
 import type { Bar } from "../../src/api/generated/Bar";
 import type { BarsPage } from "../../src/api/generated/BarsPage";
@@ -28,7 +30,7 @@ const matches = (match: Matcher, request: Request) => typeof match === "string" 
 
 export class UserDocuments {
   private layouts = new Map<string, Layout>([[DEFAULT_LAYOUT_ID, { id: DEFAULT_LAYOUT_ID, name: "기본", arrangement: "1", sync: { crosshair: true, scroll: true }, cells: [{ slot: 0, symbol: "IDX:001", venue: null, period: "D", symbolLink: false, chartSettings: { v: 1, style: "candle", scale: "normal", indicators: [], compare: [], panels: [] } }], updatedAt: 0, revision: 0 }]]);
-  private watchlistValue: Watchlists = { lists: [{ id: FIRST_WATCHLIST_ID, name: "기본", symbols: ["005930", "000660", "373220", "035420", "005935", "069500", "IDX:001", "IDX:101"] }], revision: 0 };
+  private watchlistValue: Watchlists = { lists: [{ id: FIRST_WATCHLIST_ID, name: "기본", symbols: [] }], revision: 0 };
   private screenValue: Screens = { screens: [], revision: 0 };
   private uiValue: UiState = { lastLayoutId: DEFAULT_LAYOUT_ID, theme: "dark", revision: 0 };
   private drawingValues = new Map<string, Drawing>();
@@ -49,6 +51,7 @@ export class UserDocuments {
   saveWatchlists(value: Watchlists): Watchlists { this.watchlistValue = clone(value); return this.watchlists(); }
   screens(): Screens { return clone(this.screenValue); }
   saveScreens(value: Screens): Screens { this.screenValue = clone(value); return this.screens(); }
+  uiPrefs() { return parseUiState(this.uiValue).prefs; }
   uiState(): UiState { return clone(this.uiValue); }
   saveUiState(value: UiState): UiState { this.uiValue = clone(value); return this.uiState(); }
   drawings(symbol: string): Drawing[] { return clone([...this.drawingValues.values()].filter(value => value.symbol === symbol).sort((a, b) => a.z - b.z || a.id.localeCompare(b.id))); }
@@ -58,7 +61,7 @@ export class UserDocuments {
     this.drawingRevisions.set(saved.id, saved.revision);
     return clone(saved);
   }
-  deleteDrawing(id: string, revision: number): void { this.drawingValues.delete(id); this.drawingRevisions.set(id, revision); }
+  deleteDrawing(id: string): void { this.drawingValues.delete(id); this.drawingRevisions.delete(id); }
   drawingRevision(id: string): number { return this.drawingRevisions.get(id) ?? -1; }
 }
 
@@ -69,7 +72,7 @@ export class MarketFixtures {
     const info = findSymbol(symbol) ?? { code: symbol, name: symbol, kind: "common", market: "kospi", nxtEnabled: false, close: 10000, volume: 100000, years: 5 } satisfies Parameters<typeof barsPage>[0];
     const resolved = resolveVenue(info, venue ?? null);
     if ("error" in resolved) throw new Error(resolved.error);
-    return clone(barsPage(info, resolved.venue, period, limit, before, this.now));
+    return clone(barsPage(info.code === "086520" ? { ...info, years: 4.8 } : info, resolved.venue, period, before === null ? Math.max(1, limit - 1) : limit, before, this.now));
   }
   quote(symbol: string) { const info = findSymbol(symbol); return info ? quoteOf(info, this.now) : null; }
   search(query: string, options: { market?: string | null; kind?: string | null } = {}): SymbolInfo[] {
@@ -81,7 +84,7 @@ export class LiveFrames {
   private peers = new Map<WebSocketRoute, Map<string, Subscription>>();
   private seq = 0;
   private state: ConnectionStatus;
-  constructor(private readonly now: number) { this.state = { realtime: "live", since: Math.floor(now / 1000), backfilling: false }; }
+  constructor(private readonly now: number, private readonly market: MarketFixtures) { this.state = { realtime: "live", since: Math.floor(now / 1000), backfilling: false }; }
   connect(socket: WebSocketRoute) {
     const subscriptions = new Map<string, Subscription>();
     this.peers.set(socket, subscriptions);
@@ -105,6 +108,16 @@ export class LiveFrames {
     }
     return delivered;
   }
+  update(symbol: string, patch: Partial<Bar>): number {
+    let delivered = 0;
+    for (const [socket, subscriptions] of this.peers) for (const subscription of subscriptions.values()) if (subscription.symbol === symbol) {
+      const fixture = this.market.page({ symbol, venue: subscription.venue, period: subscription.period }).current;
+      if (!fixture) throw new Error(`Missing current bar fixture: ${symbol}/${subscription.period}`);
+      socket.send(JSON.stringify({ type: "bar", sub: subscription.sub, seq: ++this.seq, bar: { ...fixture, ...patch } } satisfies ServerMessage));
+      delivered++;
+    }
+    return delivered;
+  }
   status(status: ConnectionStatus): void { this.state = clone(status); this.emit({ type: "status", status }); }
   close(code = 1000, reason = "fixture close"): void { for (const socket of this.peers.keys()) socket.close({ code, reason }); this.peers.clear(); }
 }
@@ -118,7 +131,7 @@ export class Scenario {
   private failures: string[] = [];
   private contexts = new Set<BrowserContext>();
   private holds = new Set<() => void>();
-  constructor(readonly now = Date.parse("2026-11-09T10:00:00+09:00")) { this.market = new MarketFixtures(now); this.live = new LiveFrames(now); }
+  constructor(readonly now = Date.parse("2026-11-09T10:00:00+09:00")) { this.market = new MarketFixtures(now); this.live = new LiveFrames(now, this.market); }
   reply(match: Matcher, response: FixtureReply): void { this.on(match, () => clone(response)); }
   on(match: Matcher, handler: Handler): void { this.handlers.push({ match, handler }); }
   hold(match: Matcher) {
@@ -134,23 +147,28 @@ export class Scenario {
   async install(context: BrowserContext): Promise<void> {
     if (this.contexts.has(context)) return;
     this.contexts.add(context);
+    context.on("request", request => { if (new URL(request.url()).pathname.startsWith("/api/")) this.requests.push(request); });
     await context.route("**/*", async route => {
       const url = new URL(route.request().url());
       if (url.pathname.startsWith("/api/")) return this.fulfill(route);
-      if (url.hostname !== "127.0.0.1" && url.hostname !== "localhost") {
+      if (url.origin !== (process.env.VALLY_E2E_BASE_URL ?? `http://127.0.0.1:${process.env.VALLY_E2E_PORT ?? "4173"}`)) {
         this.failures.push(`Unexpected network request: ${url.origin}${url.pathname}`);
         return route.abort("blockedbyclient");
       }
       await route.continue();
     });
-    await context.routeWebSocket("**/api/ws", socket => this.live.connect(socket));
+    await context.routeWebSocket("**/*", socket => {
+      const url = new URL(socket.url());
+      if (url.pathname === "/api/ws" && url.host === new URL(process.env.VALLY_E2E_BASE_URL ?? `http://127.0.0.1:${process.env.VALLY_E2E_PORT ?? "4173"}`).host) this.live.connect(socket);
+      else { this.failures.push(`Unexpected WebSocket: ${url.origin}${url.pathname}`); socket.close({ code: 1008, reason: "Unexpected test network" }); }
+    });
   }
   async fulfill(route: Route): Promise<void> {
     const reply = await this.respond(route.request());
+    if (reply.status === 204) { await route.fulfill({ status: 204 }); return; }
     await route.fulfill({ status: reply.status ?? 200, json: reply.body ?? null, headers: { date: new Date(this.now).toUTCString(), ...reply.headers } });
   }
   async respond(request: Request): Promise<FixtureReply> {
-    this.requests.push(request);
     for (const { match, handler } of this.handlers.toReversed()) if (matches(match, request)) return handler(request);
     return this.baseline(request);
   }
@@ -184,10 +202,11 @@ export class Scenario {
     if (path === "/api/drawings" && method === "GET") return { body: this.documents.drawings(url.searchParams.get("symbol") ?? "") };
     if (path.startsWith("/api/drawings/")) {
       const id = decodeURIComponent(path.slice("/api/drawings/".length));
-      const revision = method === "DELETE" ? Number(url.searchParams.get("revision")) : Number(request.postDataJSON().revision);
-      if (revision <= this.documents.drawingRevision(id)) return stale();
-      if (method === "PUT") return { body: this.documents.saveDrawing(request.postDataJSON()) };
-      if (method === "DELETE") { this.documents.deleteDrawing(id, revision); return { status: 204 }; }
+      if (method === "DELETE") { this.documents.deleteDrawing(id); return { status: 204 }; }
+      if (method === "PUT") {
+        const value: DrawingInput = request.postDataJSON();
+        return value.revision <= this.documents.drawingRevision(id) ? stale() : { body: this.documents.saveDrawing(value) };
+      }
     }
     if (path === "/api/symbols" && method === "GET") return { body: this.market.search(url.searchParams.get("q") ?? "", { market: url.searchParams.get("market"), kind: url.searchParams.get("kind") }) };
     if (path === "/api/quotes" && method === "GET") return { body: (url.searchParams.get("symbols") ?? "").split(",").flatMap(symbol => { const quote = this.market.quote(symbol); return quote ? [quote] : []; }) };
@@ -195,12 +214,12 @@ export class Scenario {
       const symbol = url.searchParams.get("symbol") ?? "";
       const period = url.searchParams.get("period") ?? "D";
       const venue = url.searchParams.get("venue");
-      if (!["D", "W", "M", "Q", "Y", "1m", "3m", "5m", "10m", "15m", "30m", "60m"].includes(period)) return error(400, "bad_request", "Invalid period");
+      if (!isPeriod(period)) return error(400, "bad_request", "Invalid period");
       if (venue !== null && venue !== "combined" && venue !== "krx" && venue !== "nxt") return error(400, "bad_request", "Invalid venue");
       const value = findSymbol(symbol);
       if (symbol === "999999" || value?.fail === "unknown_symbol") return error(404, "unknown_symbol", `종목 ${symbol}을 찾을 수 없습니다`);
       if (value?.fail === "kiwoom_unavailable") return error(503, "kiwoom_unavailable", "조회가 응답하지 않습니다");
-      return { body: this.market.page({ symbol, period: period as Period, venue, limit: Number(url.searchParams.get("limit") ?? 500), before: url.searchParams.has("before") ? Number(url.searchParams.get("before")) : null }) };
+      return { body: this.market.page({ symbol, period, venue, limit: Number(url.searchParams.get("limit") ?? 500), before: url.searchParams.has("before") ? Number(url.searchParams.get("before")) : null }) };
     }
     if (/^\/api\/symbols\/[^/]+$/.test(path) && method === "GET") { const value = findSymbol(decodeURIComponent(path.slice("/api/symbols/".length))); return value ? { body: publicInfo(value) } : error(404, "unknown_symbol", "종목이 없습니다"); }
     if (path === "/api/screener/status" && method === "GET") return { body: { lastDay: null, needDay: "20261106", todayAvailable: false, fullHistory: { done: 0, total: 0 }, unconfirmed: 0, update: null } };

@@ -2,7 +2,7 @@ import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import { cell, expect, test } from "./harness";
 
-test("공통 메뉴는 잘리지 않고 선택·키보드·포커스와 분봉 고정 복원을 지원한다", async ({ app, page }) => {
+test("공통 메뉴는 잘리지 않고 선택·키보드·포커스와 분봉 고정 복원을 지원한다", async ({ scenario, page }) => {
   await page.goto("/?symbol=005930");
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
   const style = page.getByRole("button", { name: "봉 모양", exact: true });
@@ -37,7 +37,7 @@ test("공통 메뉴는 잘리지 않고 선택·키보드·포커스와 분봉 �
   await minutes.click(); await page.keyboard.press("Digit5");
   await expect(cell(page)).toHaveAttribute("aria-label", /5분/);
   await expect(page.getByRole("button", { name: "5분 고정 주기", exact: true })).toBeVisible();
-  await expect.poll(async () => (await (await fetch(`${app.url}/api/ui-state`)).json()).pinnedMinutes).toEqual(["5m"]);
+  await expect.poll(async () => scenario.documents.uiState().pinnedMinutes).toEqual(["5m"]);
   await page.reload();
   await page.getByRole("button", { name: "5분 고정 주기", exact: true }).click();
   await expect(cell(page)).toHaveAttribute("aria-label", /5분/);
@@ -45,7 +45,7 @@ test("공통 메뉴는 잘리지 않고 선택·키보드·포커스와 분봉 �
   await magnet.click({ button: "right" });
   await page.getByRole("menuitemradio", { name: "강", exact: true }).click();
   await expect(magnet).toBeFocused();
-  await expect.poll(async () => (await (await fetch(`${app.url}/api/ui-state`)).json()).drawing.magnetStrength).toBe("strong");
+  await expect.poll(async () => scenario.documents.uiPrefs().drawing.magnetStrength).toBe("strong");
   await page.reload(); await magnet.click({ button: "right" });
   await expect(page.getByRole("menuitemradio", { name: "강", exact: true })).toHaveAttribute("aria-checked", "true");
   await page.keyboard.press("Escape"); await expect(magnet).toBeFocused();
@@ -92,14 +92,14 @@ test("공통 범례 SVG와 화면 크기별 메뉴·페이지 경계를 확인�
   }
 });
 
-test("되돌릴 수 있는 드로잉 삭제는 공통 알림에서 복원한다", async ({ page, app }) => {
+test("되돌릴 수 있는 드로잉 삭제는 공통 알림에서 복원한다", async ({ page, scenario }) => {
   await page.goto("/?symbol=005930");
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
   const bounds = await cell(page).boundingBox();
   expect(bounds).not.toBeNull();
   await cell(page).focus(); await page.keyboard.press("H");
   await page.mouse.click(bounds!.x + bounds!.width * 0.7, bounds!.y + bounds!.height * 0.3);
-  const drawings = async () => (await (await fetch(`${app.url}/api/drawings?symbol=005930`)).json()) as { id: string }[];
+  const drawings = async () => scenario.documents.drawings("005930") as { id: string }[];
   await expect.poll(async () => (await drawings()).length).toBe(1);
   const original = (await drawings())[0]!.id;
   await page.getByRole("button", { name: "개체 목록 열기", exact: true }).click();

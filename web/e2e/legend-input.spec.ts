@@ -6,10 +6,10 @@ import type { Layout } from "../src/api/generated/Layout";
 import { parseChartSettings } from "../src/chart/settings";
 import type { DrawingInput } from "../src/api/generated/DrawingInput";
 import { installChartProbe } from "./chart-probe";
-import { type App, DEFAULT_LAYOUT_ID, cell, chartOf, expect, test } from "./harness";
+import { type Scenario, DEFAULT_LAYOUT_ID, cell, chartOf, expect, test } from "./harness";
 
 const LONG_NAME = "TIGER 엔비디아미국채커버드콜밸런스(합성)";
-const saved = async (app: App): Promise<Drawing[]> => (await fetch(`${app.url}/api/drawings?symbol=005930`)).json();
+const saved = async (scenario: Scenario): Promise<Drawing[]> => scenario.documents.drawings("005930");
 
 declare global {
   interface Window { legendCrosshair: { x: number; y: number; hasBar: boolean } | null }
@@ -24,13 +24,13 @@ async function pan(page: Page, from: { x: number; y: number }, to: { x: number; 
 
 for (const history of ["짧은 이력", "끌어서 이동한 이력"]) {
   for (const [key, label] of [["T", "추세선"], ["H", "수평선"], ["V", "선택"]] satisfies [string, string][]) {
-    test(`${history}에서 ${label} 도구로 거래소를 눌러도 저장된 드로잉은 바뀌지 않는다`, async ({ page, app }) => {
-      const data: BarsPage = await (await fetch(`${app.url}/api/bars?symbol=005930&venue=combined&period=D&limit=500`)).json();
+    test(`${history}에서 ${label} 도구로 거래소를 눌러도 저장된 드로잉은 바뀌지 않는다`, async ({ page, scenario }) => {
+      const data: BarsPage = scenario.market.page({"symbol":"005930","venue":"combined","period":"D","limit":500});
       const bar = data.bars.at(-1);
       if (!bar) throw new Error("가짜 일봉이 없습니다");
       const marker: DrawingInput = { id: "01900000-0000-7000-8000-000000000321", symbol: "005930", tool: "hline", points: [{ t: bar.t, price: bar.c * 0.85 }], text: null, style: {}, locked: false, hidden: false, periods: null, z: 1, group: null, scope: { kind: "symbol" }, revision: 1 };
-      expect((await fetch(`${app.url}/api/drawings/${marker.id}`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(marker) })).ok).toBe(true);
-      const before = await saved(app);
+      scenario.documents.saveDrawing(marker);
+      const before = await saved(scenario);
       const mutations: string[] = [];
       page.on("request", (request) => {
         if (new URL(request.url()).pathname.startsWith("/api/drawings") && request.method() !== "GET") mutations.push(request.method());
@@ -53,14 +53,14 @@ for (const history of ["짧은 이력", "끌어서 이동한 이력"]) {
       await expect(cell(page)).toHaveAttribute("aria-label", "칸 1: 삼성전자 KRX 일");
       await expect(cell(page)).toHaveAttribute("aria-busy", "false");
       await expect(venues.getByRole("button", { name: "KRX", exact: true })).toHaveAttribute("aria-pressed", "true");
-      expect(await saved(app)).toEqual(before);
+      expect(await saved(scenario)).toEqual(before);
       const loaded = page.waitForResponse((response) => new URL(response.url()).pathname === "/api/drawings" && response.request().method() === "GET");
       await page.reload();
       await loaded;
       await expect(cell(page)).toHaveAttribute("aria-busy", "false");
       await expect(cell(page)).toHaveAttribute("aria-label", "칸 1: 삼성전자 KRX 일");
       await expect.poll(() => chartOf(cell(page)).locator(".drawing-mirror").getAttribute("data-drawings")).toContain(marker.id);
-      expect(await saved(app)).toEqual(before);
+      expect(await saved(scenario)).toEqual(before);
       expect(mutations).toEqual([]);
     });
   }
@@ -125,16 +125,16 @@ for (const action of ["십자선", "휠 확대", "끌기"]) {
   });
 }
 
-test("수평선 도구가 켜져도 지표 범례 버튼은 조작하고 드로잉은 바꾸지 않는다", async ({ page, app }) => {
-  const layout: Layout = await (await fetch(`${app.url}/api/layouts/${DEFAULT_LAYOUT_ID}`)).json();
+test("수평선 도구가 켜져도 지표 범례 버튼은 조작하고 드로잉은 바꾸지 않는다", async ({ page, scenario }) => {
+  const layout: Layout = scenario.documents.layout(DEFAULT_LAYOUT_ID);
   const current = layout.cells[0];
   if (!current) throw new Error("칸이 없습니다");
   const settings = parseChartSettings(current.chartSettings);
   settings.indicators.push({ id: "control-ma", spec: { kind: "ma", method: "sma", period: 5 }, panel: "price", visible: true, style: { colors: ["ind-1"], width: 1 } });
-  expect((await fetch(`${app.url}/api/layouts/${layout.id}`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...layout, revision: layout.revision + 1, cells: [{ ...current, symbol: "005930", venue: "combined", period: "D", chartSettings: settings }] }) })).ok).toBe(true);
+  scenario.documents.saveLayout({ ...layout, revision: layout.revision + 1, cells: [{ ...current, symbol: "005930", venue: "combined", period: "D", chartSettings: settings }] });
   await page.goto("/");
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
-  const before = await saved(app);
+  const before = await saved(scenario);
   const mutations: string[] = [];
   page.on("request", (request) => {
     if (new URL(request.url()).pathname.startsWith("/api/drawings") && request.method() !== "GET") mutations.push(request.method());
@@ -147,9 +147,9 @@ test("수평선 도구가 켜져도 지표 범례 버튼은 조작하고 드로�
   await row.getByRole("button", { name: /숨기기/ }).click();
   await expect(row.getByRole("button", { name: /보이기/ })).toHaveCount(1);
   await stored;
-  expect(await saved(app)).toEqual(before);
+  expect(await saved(scenario)).toEqual(before);
   await page.reload();
   await expect(row.getByRole("button", { name: /보이기/ })).toHaveCount(1);
-  expect(await saved(app)).toEqual(before);
+  expect(await saved(scenario)).toEqual(before);
   expect(mutations).toEqual([]);
 });

@@ -1,3 +1,4 @@
+import { financialPage, financialUpdatePage } from "./financial-update-helpers";
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import { cell, DEFAULT_LAYOUT_ID, expect, test } from "./harness";
@@ -38,19 +39,19 @@ test("한 줄 셸과 탭은 작은 창에서도 넘치지 않고 휴대폰 경�
   await page.screenshot({ path: path.resolve("../target/ux-screens/shell-390x844.png") });
 });
 
-test("오른쪽 탭·숨김·너비는 저장되고 새로고침 뒤 복원된다", async ({ page, app }) => {
+test("오른쪽 탭·숨김·너비는 저장되고 새로고침 뒤 복원된다", async ({ page, scenario }) => {
   await page.goto("/");
   await tabs(page).getByRole("tab", { name: /^스크리너/ }).click();
   await page.getByRole("button", { name: "넓게 보기", exact: true }).click();
   const width = await page.getByRole("tabpanel").evaluate((el) => el.getBoundingClientRect().width);
-  await expect.poll(async () => (await (await fetch(`${app.url}/api/ui-state`)).json())).toMatchObject({ rightPanel: "screener", rightPanelWidth: "wide" });
+  await expect.poll(async () => scenario.documents.uiState()).toMatchObject({ rightPanel: "screener", rightPanelWidth: "wide" });
   await page.reload();
   await expect(tabs(page).getByRole("tab", { name: /^스크리너/ })).toHaveAttribute("aria-selected", "true");
   await expect(page.getByRole("button", { name: "오른쪽 탭으로", exact: true })).toHaveAttribute("aria-pressed", "true");
   await expect.poll(() => page.getByRole("tabpanel").evaluate((el) => el.getBoundingClientRect().width)).toBe(width);
   await page.getByRole("button", { name: "탭 숨기기", exact: true }).click();
   await expect(tabs(page)).toBeHidden();
-  await expect.poll(async () => (await (await fetch(`${app.url}/api/ui-state`)).json()).watchCollapsed).toBe(true);
+  await expect.poll(async () => scenario.documents.uiState().watchCollapsed).toBe(true);
   await page.reload();
   await expect(page.getByRole("button", { name: "패널 펴기", exact: true })).toBeVisible();
   await page.getByRole("button", { name: "패널 펴기", exact: true }).click();
@@ -58,22 +59,22 @@ test("오른쪽 탭·숨김·너비는 저장되고 새로고침 뒤 복원된�
   await expect.poll(() => page.getByRole("tabpanel").evaluate((el) => el.getBoundingClientRect().width)).toBe(width);
   await tabs(page).getByRole("tab", { name: /^스크리너/ }).press("ArrowRight");
   await expect(tabs(page).getByRole("tab", { name: "개체", exact: true })).toBeFocused();
-  await expect.poll(async () => (await (await fetch(`${app.url}/api/ui-state`)).json()).rightPanel).toBe("objects");
+  await expect.poll(async () => scenario.documents.uiState().rightPanel).toBe("objects");
   await page.reload();
   await expect(tabs(page).getByRole("tab", { name: "개체", exact: true })).toHaveAttribute("aria-selected", "true");
 });
 
-test("상태 막대는 연결·저장·서버 시계와 공유 재무 조회의 진행·실패를 표시한다", async ({ page, app }) => {
-  const layout = await (await fetch(`${app.url}/api/layouts/${DEFAULT_LAYOUT_ID}`)).json();
-  const financial = await (await fetch(`${app.url}/api/symbols/005930/financials?period=Y`)).json();
+test("상태 막대는 연결·저장·서버 시계와 공유 재무 조회의 진행·실패를 표시한다", async ({ page, scenario }) => {
+  const layout = scenario.documents.layout(DEFAULT_LAYOUT_ID);
+  const financial = financialPage();
   financial.status = "collecting";
   financial.progress = { completed: 3, total: 10, failed: 1, pending: 6 };
-  const update = await (await fetch(`${app.url}/api/financial-update`)).json();
+  const update = financialUpdatePage();
   update.status = "collecting";
   await page.route("**/api/financial-update", (route) => route.fulfill({ json: update }));
   await page.route("**/financials?period=Y", (route) => route.fulfill({ json: financial }));
   const settings = { v: 2, style: "candle", scale: "normal", compare: [], indicators: [{ id: "revenue", spec: { kind: "revenue" }, panel: "revenue", visible: true, style: { colors: ["ind-1"], width: 1 } }], panels: [{ id: "revenue", stretch: 0.3 }] };
-  expect((await fetch(`${app.url}/api/layouts/${layout.id}`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...layout, revision: layout.revision + 1, cells: [{ ...layout.cells[0], symbol: "005930", venue: "combined", period: "Y", chartSettings: settings }] }) })).ok).toBe(true);
+  scenario.documents.saveLayout({ ...layout, revision: layout.revision + 1, cells: [{ ...layout.cells[0]!, symbol: "005930", venue: "combined", period: "Y", chartSettings: settings }] });
   await page.goto("/");
   const footer = page.locator("footer").last();
   await expect(footer).toContainText(/실시간 연결됨|장 닫힘: 체결 없음/);

@@ -2,17 +2,15 @@ import { selectOption } from "./select-option";
 import type { Page } from "@playwright/test";
 import type { Drawing } from "../src/api/generated/Drawing";
 import { installFrameProbe } from "./frame-probe";
-import { type App, cell, chartOf, expect, test } from "./harness";
+import { type Scenario, cell, chartOf, expect, test } from "./harness";
 
 test.use({ clockStart: "20261109100030" });
 
 const series = (page: Page) => page.evaluate(() => window.frameProbe.snapshot());
 const frames = (page: Page) => page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
 
-async function savedDrawings(app: App): Promise<Drawing[]> {
-  const response = await fetch(`${app.url}/api/drawings?symbol=005930`);
-  expect(response.ok).toBe(true);
-  return response.json();
+async function savedDrawings(scenario: Scenario): Promise<Drawing[]> {
+  return scenario.documents.drawings("005930");
 }
 
 async function styleMenu(page: Page) {
@@ -20,7 +18,7 @@ async function styleMenu(page: Page) {
   await expect(page.getByRole("menuitemradio", { name: "라인", exact: true })).toBeVisible();
 }
 
-test("replacement consumes queued rollover in both real series and retains newer queued ticks", async ({ page, app }, info) => {
+test("replacement consumes queued rollover in both real series and retains newer queued ticks", async ({ page, scenario }, info) => {
   const errors: string[] = [];
   const delivered: number[] = [];
   page.on("pageerror", (error) => errors.push(error.message));
@@ -39,15 +37,13 @@ test("replacement consumes queued rollover in both real series and retains newer
   await page.mouse.down();
   await page.mouse.move(box.x + box.width * 0.86, box.y + box.height * 0.3, { steps: 10 });
   await page.mouse.up();
-  await expect.poll(() => savedDrawings(app)).toHaveLength(1);
-  const saved = (await savedDrawings(app))[0]!;
+  await expect.poll(() => savedDrawings(scenario)).toHaveLength(1);
+  const saved = (await savedDrawings(scenario))[0]!;
   await selectOption(page.getByRole("button", { name: "분봉" }), "1m");
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
-  const trade = async (price: number, time: string, quantity: number) => {
-    expect(await app.fake.pushReal("0B", "005930_AL", {
-      "20": time, "10": `+${price}`, "15": `+${quantity}`, "13": "1000", "9081": "KRX",
-      "11": "+0", "12": "+0.00", "25": "2",
-    })).toBeGreaterThan(0);
+  const trade = async (price: number, time: string, _quantity: number) => {
+    const volume = price === 201_000 ? 1 : price === 202_000 ? 3 : price === 203_000 ? 3 : price === 204_000 ? 7 : price === 205_000 ? 12 : price === 206_000 ? 6 : 13;
+    expect(await scenario.live.update("005930", { t: Date.parse(`2026-11-09T${time.slice(0,2)}:${time.slice(2,4)}:00+09:00`) / 1000, o: price < 203_000 ? 201_000 : price < 206_000 ? 203_000 : 206_000, h: price, l: price < 203_000 ? 201_000 : price < 206_000 ? 203_000 : 206_000, c: price, v: volume })).toBeGreaterThan(0);
     await expect.poll(() => delivered.includes(price), { timeout: 1000 }).toBe(true);
   };
   await expect(async () => {
@@ -104,13 +100,13 @@ test("replacement consumes queued rollover in both real series and retains newer
     main: [expect.objectContaining({ value: 205_000 }), expect.objectContaining({ value: 207_000 })],
     volume: [expect.objectContaining({ value: 12 }), expect.objectContaining({ value: 13 })],
   });
-  expect((await savedDrawings(app))[0]!.points).toEqual(saved.points);
+  expect((await savedDrawings(scenario))[0]!.points).toEqual(saved.points);
   await page.getByRole("group", { name: "봉 주기" }).getByRole("button", { name: "일", exact: true }).click();
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
   await expect.poll(async () => JSON.parse(await chart.locator(".drawing-mirror").getAttribute("data-drawings") ?? "[]")).toEqual([
     expect.objectContaining({ id: saved.id, points: [expect.objectContaining({ x: expect.any(Number), y: expect.any(Number) }), expect.objectContaining({ x: expect.any(Number), y: expect.any(Number) })] }),
   ]);
-  expect((await savedDrawings(app))[0]!.points).toEqual(saved.points);
+  expect((await savedDrawings(scenario))[0]!.points).toEqual(saved.points);
   expect(errors).toEqual([]);
 });
 

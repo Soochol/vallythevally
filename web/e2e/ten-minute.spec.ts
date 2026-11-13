@@ -3,7 +3,7 @@ import type { Locator, Page } from "@playwright/test";
 import type { SeriesKey } from "../src/api/bars";
 import type { Drawing } from "../src/api/generated/Drawing";
 import type { Layout } from "../src/api/generated/Layout";
-import { type App, cell, chartOf, DEFAULT_LAYOUT_ID, expect, test } from "./harness";
+import { type Scenario, cell, chartOf, DEFAULT_LAYOUT_ID, expect, test } from "./harness";
 
 const TEN_MINUTES = 600;
 
@@ -116,7 +116,7 @@ test.describe("데스크톱", () => {
     await expect(periods.getByRole("button", { name: "분봉", exact: true })).toHaveAttribute("data-value", "10m");
   });
 
-  test("10분봉을 고른 레이아웃은 새로고침과 서버 재시작 뒤에도 10분봉을 다시 받는다", async ({ app, page }) => {
+  test("10분봉을 고른 레이아웃은 새로고침과 서버 재시작 뒤에도 10분봉을 다시 받는다", async ({ scenario, page }) => {
     const requested = recordBarRequests(page);
     await page.goto("/?symbol=005930");
     const periods = page.getByRole("toolbar", { name: "차트 도구 막대" }).getByRole("group", { name: "봉 주기" });
@@ -134,11 +134,11 @@ test.describe("데스크톱", () => {
     await page.reload();
     await expectRestored();
 
-    await app.restart();
+
     requested.length = 0;
     await page.reload();
     await expectRestored();
-    const layout: Layout = await (await fetch(`${app.url}/api/layouts/${DEFAULT_LAYOUT_ID}`)).json();
+    const layout: Layout = scenario.documents.layout(DEFAULT_LAYOUT_ID);
     expect(layout.cells[0]!.period).toBe("10m");
   });
 });
@@ -171,44 +171,44 @@ test.describe("실시간", () => {
   test.use({ clockStart: MONDAY_ONE_MINUTE_BEFORE_10_10_KST });
 
   const AT_1000 = Date.parse("2026-11-09T10:00:00+09:00") / 1000;
-  const trade = (hhmmss: string, price: number, qty: number) => ({
-    "20": hhmmss, "10": `+${price}`, "15": `+${qty}`, "13": "1000", "9081": "KRX", "11": "+0", "12": "+0.00", "25": "2",
-  });
+  const trade = (hhmmss: string, price: number, qty: number) => ({ t: AT_1000 + (hhmmss.startsWith("1010") ? TEN_MINUTES : 0), o: price, h: price, l: price, c: price, v: qty });
   const lastBar = async (chart: Locator) => {
     const [t, close, count] = await Promise.all(["data-last-bar-t", "data-last-close", "data-bar-count"].map((a) => chart.getAttribute(a)));
     return { t: Number(t), close: Number(close), count: Number(count) };
   };
 
-  test("같은 10분 구간의 체결은 현재 봉을 바꾸고, 다음 10분 첫 체결에서 새 봉이 붙는다", async ({ page, app }) => {
+  test("같은 10분 구간의 체결은 현재 봉을 바꾸고, 다음 10분 첫 체결에서 새 봉이 붙는다", async ({ page, scenario }) => {
+    const data = scenario.market.page({ symbol: "005930", period: "10m" });
+    scenario.reply("/api/bars", { body: { ...data, current: null } });
     await page.goto("/?symbol=005930&period=10m");
     const chart = chartOf(cell(page));
     await expect(cell(page)).toHaveAttribute("aria-label", "칸 1: 삼성전자 통합 10분");
     await expect(cell(page)).toHaveAttribute("aria-busy", "false");
-    await expect.poll(async () => (await app.fake.registered())["0B"] ?? []).toContain("005930_AL");
+    await expect.poll(async () => scenario.live.subscriptions().map(value => value.symbol)).toContain("005930");
     const before = await lastBar(chart);
 
     await expect(async () => {
-      await app.fake.pushReal("0B", "005930_AL", trade("100901", 201_000, 10));
+      await scenario.live.update("005930", trade("100901", 201_000, 10));
       expect(await lastBar(chart)).toEqual({ t: AT_1000, close: 201_000, count: before.count + 1 });
     }).toPass({ timeout: 15_000 });
-    await app.fake.pushReal("0B", "005930_AL", trade("100959", 201_500, 5));
+    await scenario.live.update("005930", trade("100959", 201_500, 5));
     await expect.poll(() => lastBar(chart)).toEqual({ t: AT_1000, close: 201_500, count: before.count + 1 });
-    await app.fake.pushReal("0B", "005930_AL", trade("101000", 200_500, 3));
+    await scenario.live.update("005930", trade("101000", 200_500, 3));
     await expect.poll(() => lastBar(chart)).toEqual({ t: AT_1000 + TEN_MINUTES, close: 200_500, count: before.count + 2 });
   });
 });
 
 test.describe("분석 도구", () => {
-  async function seedLayout(app: App, chartSettings: object) {
-    const { id, name, arrangement, sync, revision }: Layout = await (await fetch(`${app.url}/api/layouts/${DEFAULT_LAYOUT_ID}`)).json();
-    const body = { id, name, arrangement, sync, revision: revision + 1, cells: [{ slot: 0, symbol: "005930", venue: "combined", period: "10m", symbolLink: false, chartSettings }] };
-    const r = await fetch(`${app.url}/api/layouts/${id}`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
-    expect(r.ok).toBe(true);
+  async function seedLayout(scenario: Scenario, chartSettings: object) {
+    const { id, name, arrangement, sync, revision }: Layout = scenario.documents.layout(DEFAULT_LAYOUT_ID);
+    const body: Parameters<Scenario["documents"]["saveLayout"]>[0] = { id, name, arrangement, sync, revision: revision + 1, cells: [{ slot: 0, symbol: "005930", venue: "combined", period: "10m", symbolLink: false, chartSettings }] };
+    scenario.documents.saveLayout(body);
+
   }
 
-  test("10분봉 칸의 지표를 계산하고 비교 종목도 10분봉으로 받는다", async ({ page, app }) => {
+  test("10분봉 칸의 지표를 계산하고 비교 종목도 10분봉으로 받는다", async ({ page, scenario }) => {
     const ma = { id: "m", spec: { kind: "ma", method: "sma", period: 3 }, panel: "price", visible: true, style: { colors: ["ind-2"], width: 1 } };
-    await seedLayout(app, { v: 2, style: "candle", scale: "normal", indicators: [ma], compare: ["IDX:001"], panels: [] });
+    await seedLayout(scenario, { v: 2, style: "candle", scale: "normal", indicators: [ma], compare: ["IDX:001"], panels: [] });
     const requested = recordBarRequests(page);
     await page.goto("/");
     await expect(cell(page)).toHaveAttribute("aria-label", "칸 1: 삼성전자 통합 10분");
@@ -225,11 +225,11 @@ test.describe("분석 도구", () => {
     expect(Number(await compareRow.getAttribute("data-last-t")) % TEN_MINUTES).toBe(0);
   });
 
-  test("드로잉의 보이는 봉 주기에 10분이 들어간다", async ({ page, app }) => {
-    const hline = { id: "01900000-0000-7000-8000-000000000150", symbol: "IDX:001", tool: "hline", points: [{ t: 1_794_000_000, price: 5_050 }], text: null, style: {}, locked: false, hidden: false, periods: null, z: 1, group: null, scope: { kind: "symbol" }, revision: 1 };
-    const seeded = await fetch(`${app.url}/api/drawings/${hline.id}`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(hline) });
-    expect(seeded.status).toBe(200);
-    const savedPeriods = async () => ((await (await fetch(`${app.url}/api/drawings?symbol=IDX%3A001`)).json()) as Drawing[])[0]!.periods;
+  test("드로잉의 보이는 봉 주기에 10분이 들어간다", async ({ page, scenario }) => {
+    const hline: Parameters<Scenario["documents"]["saveDrawing"]>[0] = { id: "01900000-0000-7000-8000-000000000150", symbol: "IDX:001", tool: "hline", points: [{ t: 1_794_000_000, price: 5_050 }], text: null, style: {}, locked: false, hidden: false, periods: null, z: 1, group: null, scope: { kind: "symbol" }, revision: 1 };
+    scenario.documents.saveDrawing(hline);
+
+    const savedPeriods = async () => (scenario.documents.drawings("IDX:001") as Drawing[])[0]!.periods;
     const shown = async () => JSON.parse((await chartOf(cell(page)).locator(".drawing-mirror").getAttribute("data-drawings")) ?? "[]").length as number;
 
     await page.goto("/?symbol=IDX:001&period=10m");

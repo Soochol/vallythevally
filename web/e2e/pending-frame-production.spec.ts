@@ -1,7 +1,7 @@
 import { selectOption } from "./select-option";
 import { test, expect, cell, chartOf } from './harness';
 test.use({ clockStart: '20261109100000' });
-test('minute rollover and style replacement keep subsequent live updates working', async ({page,app}) => {
+test('minute rollover and style replacement keep subsequent live updates working', async ({page,scenario}) => {
   const errors: string[] = []; const delivered: number[] = [];
   page.on('pageerror',error=>errors.push(error.message));
   page.on('websocket',socket=>socket.on('framereceived',({payload})=>{const message=JSON.parse(String(payload));if(message.type==='bar')delivered.push(message.bar.c);}));
@@ -10,11 +10,11 @@ test('minute rollover and style replacement keep subsequent live updates working
   await cell(page).focus();await page.keyboard.press('T');
   await page.mouse.move(box.x+box.width*.76,box.y+box.height*.4);await page.mouse.down();
   await page.mouse.move(box.x+box.width*.86,box.y+box.height*.3,{steps:10});await page.mouse.up();
-  await expect.poll(async()=> (await(await fetch(`${app.url}/api/drawings?symbol=005930`)).json()).length).toBe(1);
+  await expect.poll(async()=> scenario.documents.drawings("005930").length).toBe(1);
   await selectOption(page.getByRole('button',{name:'분봉',exact:true}), '1m');
   await expect(cell(page)).toHaveAttribute('aria-busy','false');
   const trade=async(price:number,time:string)=>{
-    await expect(async()=>{expect(await app.fake.pushReal('0B','005930_AL',{'20':time,'10':`+${price}`,'15':'+1','13':'1000','9081':'KRX','11':'+0','12':'+0.00','25':'2'})).toBeGreaterThan(0);await expect.poll(()=>delivered.includes(price),{timeout:1000}).toBe(true);}).toPass({timeout:15000});
+    await expect(async()=>{expect(await scenario.live.update('005930', { t: Date.parse(`2026-11-09T${time.slice(0,2)}:${time.slice(2,4)}:00+09:00`) / 1000, o: price, h: price, l: price, c: price, v: 1000 })).toBeGreaterThan(0);await expect.poll(()=>delivered.includes(price),{timeout:1000}).toBe(true);}).toPass({timeout:15000});
   };
   await trade(201000,'100001');await expect(chart).toHaveAttribute('data-last-close','201000');
   await page.getByRole('button',{name:'봉 모양',exact:true}).click();

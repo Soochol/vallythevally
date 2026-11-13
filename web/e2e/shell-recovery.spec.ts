@@ -4,7 +4,7 @@ for (const initialFailure of [true, false]) {
   test(initialFailure ? "처음 연 거래소 조회가 실패해도 범례에서 다른 거래소로 복구한다" : "거래소를 바꾼 뒤 조회가 실패해도 범례에서 다른 거래소로 복구한다", async ({ page }, info) => {
     await page.route("**/api/bars?*", (route) => new URL(route.request().url()).searchParams.get("venue") === "krx"
       ? route.fulfill({ status: 503, json: { error: { code: "kiwoom_unavailable", message: "시험용 KRX 조회 실패" } } })
-      : route.continue());
+      : route.fallback());
     await page.goto(initialFailure ? "/?symbol=005930&venue=krx" : "/?symbol=005930");
     const venues = cell(page).getByRole("group", { name: "거래소", exact: true });
     if (!initialFailure) {
