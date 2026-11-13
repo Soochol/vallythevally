@@ -78,6 +78,9 @@ export interface LayerHost {
 const GUIDES: Partial<Record<Kind, number[]>> = { rsi: [70, 30], stochSlow: [80, 20] };
 
 const tuple = (b: Bar): BarTuple => [b.t, b.o, b.h, b.l, b.c, b.v];
+const volumePoint = (b: Bar): Point => ({ t: b.t, v: b.v, up: b.c >= b.o });
+const isPlainVolume = (spec: IndicatorConfig["spec"]) => spec.kind === "volume" && spec.maPeriod === null;
+const usesWorker = (config: IndicatorConfig) => !isFinancial(config.spec) && !isPlainVolume(config.spec);
 
 function columnsOf(bars: readonly Bar[]): Columns {
   const col = (f: (b: Bar) => number) => Float64Array.from(bars, f);
@@ -167,7 +170,10 @@ export class IndicatorLayer {
     for (const config of configs) {
       const s = this.shown.get(config.id);
       if (!s || s.config.spec !== config.spec) {
-        if (s) this.removeShown(config.id);
+        if (s) {
+          this.removeShown(config.id);
+          this.port.post({ type: "drop", chart: this.port.chart, ids: [config.id] });
+        }
         this.shown.set(config.id, { config, gen: 0, status: { kind: config.visible ? "pending" : "hidden" }, lines: [] });
         if (config.visible) fresh.push(config);
         continue;
@@ -236,7 +242,16 @@ export class IndicatorLayer {
     this.display = next;
     if (op === "confirm") this.committedT = bar.t;
     if (next.length > prev.length || next.at(-1)?.c !== prev.at(-1)?.c) this.rebaseLeadingSpans();
-    if (this.configs.some((c) => c.visible) && !this.broken) {
+    this.host.guard(() => {
+      const point = volumePoint(bar);
+      for (const s of this.shown.values()) if (s.config.visible && isPlainVolume(s.config.spec)) {
+        for (const line of s.lines) {
+          line.points = applyToPoints(line.points, { op: "update", point });
+          this.put(line, point);
+        }
+      }
+    });
+    if (this.configs.some((c) => c.visible && usesWorker(c)) && !this.broken) {
       this.port.post({ type: "bar", chart: this.port.chart, kind: op, bar: tuple(bar) });
     }
   }
@@ -339,9 +354,17 @@ export class IndicatorLayer {
       const s = this.shown.get(c.id);
       if (!s) continue;
       s.gen = gen;
-      if (this.broken) s.status = { kind: "error", error: "calc", message: "" };
+      if (isPlainVolume(c.spec)) {
+        for (const line of s.lines) {
+          this.queue.forget(line);
+          line.points = this.display.map(volumePoint);
+          this.draw(line, line.points);
+        }
+        s.status = { kind: "ready" };
+      } else if (this.broken) s.status = { kind: "error", error: "calc", message: "" };
     }
-    if (this.broken) return;
+    configs = configs.filter(usesWorker);
+    if (this.broken || configs.length === 0) return;
     const last = this.display[this.display.length - 1];
     const current = last && last !== h.bars[h.bars.length - 1] ? tuple(last) : null;
     const cols = columnsOf(h.bars);
@@ -398,7 +421,7 @@ export class IndicatorLayer {
     this.broken = true;
     this.host.guard(() => {
       for (const s of this.shown.values()) {
-        if (s.status.kind === "hidden" || isFinancial(s.config.spec)) continue;
+        if (s.status.kind === "hidden" || !usesWorker(s.config)) continue;
         s.status = { kind: "error", error: "calc", message: "" };
         s.gen = 0;
         this.clearLines(s);
