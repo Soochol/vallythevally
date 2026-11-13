@@ -60,6 +60,9 @@ describe("placement", () => {
     let snapped = step(step(IDLE, down(10, 10), snapping).state, down(34, 20), snapping).state;
     snapped = step(snapped, down(35, 20), snapping).state;
     expect(step(snapped, { kind: "finish" }, snapping).effects).toMatchObject([{ kind: "place", points: [{ t: 10 }, { t: 30 }] }]);
+    const zoomed: ToolContext = { ...ctx, toScreen: (p) => ({ x: p.t * 2, y: p.price }), fromScreen: (p) => ({ t: p.x / 2, price: p.y }) };
+    const afterZoom: Context = { ...c, ctx: zoomed, point: (p) => zoomed.fromScreen(p) };
+    expect(step(step(s, down(31, 20), afterZoom).state, { kind: "finish" }, afterZoom).effects).toMatchObject([{ points: [{ t: 10 }, { t: 30 }, { t: 15.5 }] }]);
     const two = context(trendline);
     const clicked = step(step(IDLE, down(100, 100), two).state, up(100, 100), two).state;
     expect(step(clicked, down(103, 100), two).effects).toMatchObject([{ kind: "place", points: [{ t: 100, price: 100 }, { t: 103, price: 100 }] }]);

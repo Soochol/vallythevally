@@ -1,5 +1,5 @@
 import type { Page } from "@playwright/test";
-import { cell, expect, test } from "./harness";
+import { cell, chartOf, expect, test } from "./harness";
 import { chartPoint, drawings, mirror, open, pickTool } from "./drawing-probe";
 
 const KST = 9 * 3600;
@@ -102,4 +102,22 @@ test("꺾은선: 두 번 누르는 사이 마우스가 1px 움직여도 꼭짓�
     counts.push((await drawings(scenario))[i]!.points.length);
   }
   expect(counts).toEqual(Array.from({ length: 12 }, () => 3));
+});
+
+test("꺾은선: 꼭짓점 사이에 차트를 확대하면 같은 화면 자리를 다시 눌러도 꼭짓점을 더한다", async ({ page, scenario }) => {
+  await open(page);
+  const [a, b, c, far] = await Promise.all(([[0.2, 0.6], [0.3, 0.75], [0.45, 0.6], [0.85, 0.3]] as const).map(([x, y]) => chartPoint(page, x, y)));
+  await pickTool(page, "도형", "꺾은선");
+  await page.mouse.click(a!.x, a!.y);
+  await page.mouse.click(b!.x, b!.y);
+  await page.mouse.move(far!.x, far!.y);
+  for (let i = 0; i < 3; i++) { await page.mouse.wheel(0, -300); await page.waitForTimeout(150); }
+  await page.mouse.click(b!.x + 1, b!.y);
+  await page.mouse.click(c!.x, c!.y);
+  await page.mouse.dblclick(c!.x, c!.y);
+  await expect.poll(async () => (await drawings(scenario)).length).toBe(1);
+  expect((await drawings(scenario))[0]!.points).toHaveLength(4);
+  const r = (await chartOf(cell(page)).boundingBox())!;
+  const [, second] = (await mirror(page))[0]!.points;
+  expect(Math.abs(second!.x + r.x - b!.x)).toBeGreaterThan(50);
 });
