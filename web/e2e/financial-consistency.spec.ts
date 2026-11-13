@@ -74,7 +74,7 @@ test.describe("재무 시각과 가격 시각", () => {
     await open(page);
     const before = await coordinates(page); expect(before.drawX).toBeCloseTo(before.candleX!, 3);
     expect(commands()).toHaveLength(calls);
-    await row(page).getByTitle("보이기", { exact: true }).click({ force: true });
+    await row(page).getByRole("button", { name: / 보이기$/ }).click({ force: true });
     await row(page).locator("summary").click();
     await updateFromChart(page);
     await row(page).locator("summary").click();
@@ -102,7 +102,7 @@ test.describe("재무 시각과 가격 시각", () => {
     expect(after.drawX).toBeCloseTo(after.candleX!, 2);
     const right = await page.evaluate(() => window.chartProbe.chart.timeScale().width()) - after.candleX!;
     for (const title of ["숨기기", "보이기"]) {
-      await row(page).getByTitle(title, { exact: true }).click({ force: true }); await frames(page);
+      await row(page).getByRole("button", { name: new RegExp(` ${title}$`) }).click({ force: true }); await frames(page);
       const restored = await coordinates(page);
       expect(restored.drawX).toBeCloseTo(restored.candleX!, 2);
       expect(await page.evaluate(() => window.chartProbe.chart.timeScale().width()) - restored.candleX!).toBeCloseTo(right, 2);
