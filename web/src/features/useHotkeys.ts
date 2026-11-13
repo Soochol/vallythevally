@@ -2,6 +2,7 @@ import { ownsChartKeyboard } from "./overlay/topLayer";
 import { useEffect } from "react";
 import { isTypingTarget, matchHotkey } from "../lib/hotkeys";
 import { DESKTOP_QUERY } from "../lib/media";
+import { openIndicatorCommand } from "./indicator-command/open";
 import { PERIODS } from "../lib/symbol";
 import { useLayoutStore } from "../stores/layout";
 import { useSelectionStore } from "../stores/selection";
@@ -31,7 +32,7 @@ export function useHotkeys() {
         case "search":
           return sel.openSearch();
         case "indicators":
-          return sel.openIndicatorCommand(slot);
+          return openIndicatorCommand(slot);
         case "toggleWatch":
           return useUiStore.getState().toggleWatch();
         case "period":

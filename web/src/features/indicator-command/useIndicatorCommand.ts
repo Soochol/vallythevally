@@ -10,17 +10,17 @@ import { useValidator } from "../indicator-dialog/IndicatorSettingsForm";
 import { normalizeQuery } from "../search/highlight";
 import { searchList } from "../search/searchList";
 import { executeCommand } from "./execute";
-import { commandRows, modeAfterInput, selectedRow, type CommandRow, type IndicatorCommandMode } from "./model";
+import { commandRows, currentKey, modeAfterInput, selectedRow, type CommandRow, type IndicatorCommandMode } from "./model";
 import { useIndicatorPreview } from "./preview";
 
 export type EditorAction = { commit(): boolean; focus(): void };
 export type EditableRow = Exclude<CommandRow, { kind: "symbol" }>;
 
-export function useIndicatorCommand(slot: Slot, initialMode: IndicatorCommandMode) {
+export function useIndicatorCommand(slot: Slot, initialMode: IndicatorCommandMode, initialIndicator: string | null = null) {
   const cell = useCell(slot);
   const [mode, setMode] = useState(initialMode);
   const [input, setInput] = useState("");
-  const [chosen, setChosen] = useState("");
+  const [chosen, setChosen] = useState(initialIndicator ? currentKey(initialIndicator) : "");
   const editor = useRef<EditorAction | null>(null);
   const query = normalizeQuery(input);
   const search = useSymbolSearch(mode === "compare" ? query : "");
@@ -43,7 +43,7 @@ export function useIndicatorCommand(slot: Slot, initialMode: IndicatorCommandMod
   return {
     cell, mode, input, rows, selected, symbols, search, selectedSymbol, compareButton, editor, submit,
     type(value: string) { setInput(value); setChosen(""); setMode((mode) => modeAfterInput(mode, value)); },
-    show(next: IndicatorCommandMode) { setMode(next); setInput(""); setChosen(""); },
+    show(next: IndicatorCommandMode, indicator: string | null = null) { setMode(next); setInput(""); setChosen(indicator ? currentKey(indicator) : ""); },
     select(row: CommandRow) { if (row.kind !== "symbol" || row.selectable) setChosen(row.key); },
   };
 }

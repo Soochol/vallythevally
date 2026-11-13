@@ -32,12 +32,14 @@ export function candidateGroup(candidate: IndicatorCandidate): string {
   return kind.place === "price" ? PRICE_GROUP : BELOW_GROUP;
 }
 
+export const currentKey = (id: string) => `current:${id}`;
+
 const byGroup = (rows: CommandRow[]) => rows.sort((a, b) => GROUP_ORDER.indexOf(a.group) - GROUP_ORDER.indexOf(b.group));
 
 export function commandRows(settings: ChartSettings, input: string, mode: IndicatorCommandMode, symbols: SearchList): CommandRow[] {
   switch (mode) {
     case "current":
-      return byGroup(settings.indicators.map((config) => ({ kind: "current", key: `current:${config.id}`, group: config.panel === "price" ? PRICE_GROUP : BELOW_GROUP, config })));
+      return byGroup(settings.indicators.map((config) => ({ kind: "current", key: currentKey(config.id), group: config.panel === "price" ? PRICE_GROUP : BELOW_GROUP, config })));
     case "add":
       return byGroup(parseIndicatorInput(input).map((candidate) => ({ kind: "candidate", key: `new:${candidate.kind}:${input}`, group: candidateGroup(candidate), candidate })));
     case "compare":

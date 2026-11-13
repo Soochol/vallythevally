@@ -3,7 +3,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { expect, test } from "vitest";
 import { DEFAULT_LAYOUT, useLayoutStore } from "../../stores/layout";
-import { useSelectionStore, type IndicatorCommandMode } from "../../stores/selection";
+import type { IndicatorCommandMode } from "../../stores/selection";
 import { IndicatorCommandBody } from "./IndicatorCommand";
 
 function markup(mode: IndicatorCommandMode) {
@@ -53,16 +53,4 @@ test("비교 종목 탭은 같은 틀에서 비교 수·가격축·추가 동작
   expect(html).toContain("가격축을 % 변화로");
   expect(html).toContain("비교 종목 추가");
   expect(html).toContain('data-chart-control=""');
-});
-
-test("모드 없이 열면 띄운 지표가 있을 때 띄운 지표 탭, 없을 때 지표 추가 탭이다", () => {
-  useLayoutStore.getState().load(structuredClone(DEFAULT_LAYOUT));
-  useSelectionStore.getState().openIndicatorCommand(0);
-  expect(useSelectionStore.getState().dialog).toEqual({ kind: "indicatorCommand", slot: 0, mode: "current" });
-  for (const config of useLayoutStore.getState().layout.cells[0]!.chartSettings.indicators) useLayoutStore.getState().removeIndicator(0, config.id);
-  useSelectionStore.getState().openIndicatorCommand(0);
-  expect(useSelectionStore.getState().dialog).toMatchObject({ mode: "add" });
-  useSelectionStore.getState().openIndicatorCommand(0, "compare");
-  expect(useSelectionStore.getState().dialog).toMatchObject({ mode: "compare" });
-  useSelectionStore.getState().closeDialog();
 });

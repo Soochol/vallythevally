@@ -14,6 +14,7 @@ import { NXT_FALLBACK_NOTICE } from "../../persist/restore";
 import { type Slot, useCell, useLayoutStore } from "../../stores/layout";
 import { marketSocket } from "../../stores/realtime";
 import { useSelectionStore } from "../../stores/selection";
+import { openIndicatorCommand, shownIndicatorWindow } from "../indicator-command/open";
 import { useTheme } from "../../stores/ui";
 import { cellErrorView, olderErrorView } from "./cellError";
 import { useDrawingSurface } from "../../chart/drawings/useDrawingSurface";
@@ -81,6 +82,7 @@ export function ChartCell({ slot, status, onStatus }: Props) {
       onIndicatorCommand: (id, command, anchor) => {
         if (command === "refresh") return useSelectionStore.getState().openFinancialUpdate();
         if (command !== "edit") return runIndicatorCommand(slotRef.current, id, command);
+        if (shownIndicatorWindow() === "inspector") return openIndicatorCommand(slotRef.current, "current", id);
         const initial = useLayoutStore.getState().layout.cells.find((c) => c.slot === slotRef.current)?.chartSettings.indicators.find((i) => i.id === id);
         if (initial) setEditing((current) => current?.initial.id === id ? current : { initial, anchor });
       },

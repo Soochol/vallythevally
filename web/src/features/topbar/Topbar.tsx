@@ -7,13 +7,13 @@ import { useSymbolInfo } from "../../api/queries";
 import { PERIOD_LABEL, PERIODS, symbolSub } from "../../lib/symbol";
 import { useCell, useLayoutStore } from "../../stores/layout";
 import { useSelectionStore } from "../../stores/selection";
+import { openIndicatorCommand } from "../indicator-command/open";
 import { BrandIcon, ChevronIcon, CameraIcon, CopyIcon, IndicatorIcon, SearchIcon, SlidersIcon, CompareIcon } from "../icons";
 import { canCopyImage, saveSnapshot } from "../snapshot/saveSnapshot";
 
 export function Topbar() {
   const slot = useSelectionStore((s) => s.activeSlot);
   const openSearch = useSelectionStore((s) => s.openSearch);
-  const openIndicatorCommand = useSelectionStore((s) => s.openIndicatorCommand);
   const cell = useCell(slot);
   const info = useSymbolInfo(cell.symbol).data;
   const { setPeriod } = useLayoutStore.getState();

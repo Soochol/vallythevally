@@ -136,3 +136,12 @@ test("고정 드로잉 도구는 구현된 도구만 읽고 새로고침용 UI �
   expect(parseUiState(toUiState(prefs, extra)).prefs.drawing).toEqual(prefs.drawing);
   expect(parseUiState({ ...DEFAULT_UI_PREFS, drawing: { pinnedTools: "hline" } }).prefs.drawing.pinnedTools).toEqual([]);
 });
+
+test("지표 보기 우측 패널은 차트 옆 방식일 때만 왕복하고 가운데 창 방식이면 관심종목으로 연다", () => {
+  const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+  const { prefs, extra } = parseUiState({ ...DEFAULT_UI_PREFS, indicatorWindow: "inspector", rightPanel: "indicators" });
+  expect(parseUiState(toUiState(prefs, extra)).prefs).toMatchObject({ indicatorWindow: "inspector", rightPanel: "indicators" });
+  expect(parseUiState({ ...DEFAULT_UI_PREFS, rightPanel: "indicators" }).prefs.rightPanel).toBe("watch");
+  expect(parseUiState({ ...DEFAULT_UI_PREFS, indicatorWindow: "side", rightPanel: "indicators" }).prefs).toMatchObject({ indicatorWindow: "dialog", rightPanel: "watch" });
+  expect(warn).toHaveBeenCalledOnce();
+});
