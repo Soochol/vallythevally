@@ -1,4 +1,4 @@
-.drawing-toolbar { position:relative; z-index:10; display:flex; min-height:0; flex-direction:column; align-items:center; gap:4px; padding:8px 3px; border-right:1px solid var(--line); background:var(--bg); color:var(--text-2); overflow-y:auto; scrollbar-width:none; scrollbar-color:var(--line) transparent; }
+.drawing-toolbar { position:relative; z-index:10; display:flex; min-height:0; flex-direction:column; align-items:center; gap:4px; padding:calc(var(--chart-inset-top, 0px) + 8px) 3px 8px; border-right:1px solid var(--line); background:var(--bg); color:var(--text-2); overflow-y:auto; scrollbar-width:none; scrollbar-color:var(--line) transparent; }
 .drawing-toolbar>* { flex-shrink:0; }
 .draw-tool { display:grid; place-items:center; width:32px; height:32px; border-radius:var(--r-m); color:var(--text-2); cursor:pointer; }
 .draw-tool:hover { background:var(--raised); color:var(--text); }

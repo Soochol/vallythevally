@@ -131,7 +131,7 @@ for (const { width, height, wide } of surfaces) {
     const keyboardGeometry = await rowGeometry(selected, false);
     expectWholeRow(keyboardGeometry);
     await writeFile(info.outputPath("keyboard-geometry.json"), JSON.stringify(keyboardGeometry, null, 2));
-    if (width >= 768) expect((await page.getByRole("toolbar", { name: "차트 도구 막대" }).boundingBox())?.y).toBeCloseTo(0, 0);
+    if (width >= 768) expect((await page.getByRole("toolbar", { name: "차트 도구 막대" }).boundingBox())?.y).toBeCloseTo(12, 0);
     await page.screenshot({ path: info.outputPath("keyboard-selection.png"), fullPage: true });
     await openResultDetails(page);
     await metadata(page).scrollIntoViewIfNeeded();

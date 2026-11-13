@@ -99,32 +99,27 @@ function fakeRunner() {
   };
 }
 
-function opened(initial: Screens = base, options: { desktop?: () => boolean; publish?: boolean } = {}) {
+function opened(initial: Screens = base, options: { publish?: boolean } = {}) {
   const server = fakeServer(initial);
   const runner = fakeRunner();
-  const editing = createScreenEditing({ screens: server.port, runner: runner.runner, showsDrafts: options.desktop });
+  const editing = createScreenEditing({ screens: server.port, runner: runner.runner });
   if (options.publish !== false) server.publish();
   const chosen = () => {
     const shown = editing.view().chosen;
     if (!shown) throw new Error("고른 조건식이 있어야 합니다");
     return shown;
   };
-  const edited = () => {
-    const shown = chosen();
-    if (!shown.draft) throw new Error("조건식 초안이 보여야 합니다");
-    return shown;
-  };
-  return { editing, server, runner, sent: runner.sent, chosen, edited };
+  return { editing, server, runner, sent: runner.sent, chosen };
 }
 
 test("문장 변경은 저장본을 바꾸지 않고 시장·제외·순서·삭제를 유지한다", async () => {
-  const { editing, server, chosen, edited } = opened();
+  const { editing, server, chosen } = opened();
   editing.edit((d) => toggleExclude(toggleMarket(d, "kospi"), "etf"));
   editing.edit(addCondition);
-  const second = edited().draft.conditions.at(-1)!;
+  const second = chosen().draft.conditions.at(-1)!;
   editing.edit((d) => changeKind(d, second.key, "rsi"));
   editing.edit((d) => placeCondition(d, second.key, d.conditions[0]!.key));
-  expect(edited().draft.conditions.map((line) => line.kind)).toEqual(["rsi", "new_high"]);
+  expect(chosen().draft.conditions.map((line) => line.kind)).toEqual(["rsi", "new_high"]);
   editing.edit((d) => removeCondition(d, second.key));
   const runnable = chosen().runnable;
   expect(runnable.ok && runnable.screen).toEqual({ ...source, markets: ["kospi"], exclude: ["etf"] });
@@ -135,48 +130,47 @@ test("문장 변경은 저장본을 바꾸지 않고 시장·제외·순서·삭
 });
 
 test("잘못된 최근 기간은 저장하지 않고 초안과 검증 메시지를 보존한다", async () => {
-  const { editing, server, chosen, edited } = opened();
+  const { editing, server, chosen } = opened();
   editing.edit((d) => editCondition(d, { ...d.conditions[0]!, recentBars: "0" }));
   await editing.save();
   expect(chosen().runnable.ok).toBe(false);
-  expect(chosen().tried).toBe(true);
-  expect(edited().draft.conditions[0]!.recentBars).toBe("0");
+  expect(chosen()).toMatchObject({ flagged: true, alerts: ["조건식의 잘못된 값을 고쳐 주세요"] });
+  expect(chosen().draft.conditions[0]!.recentBars).toBe("0");
   expect(server.puts).toEqual([]);
 });
 
 test("저장 충돌은 초안을 보존하고 문구를 띄우며, 다시 저장하면 최신 목록의 다른 식을 지키며 덮어쓴다", async () => {
-  const { editing, server, chosen, edited } = opened();
+  const { editing, server, chosen } = opened();
   const other: Screen = { ...source, id: "b", name: "다른 식" };
   server.replace({ revision: 3, screens: [source, other] });
   editing.edit((d) => ({ ...d, name: "수정한 식" }));
   await editing.save();
   expect(server.outcomes).toEqual(["stale"]);
-  expect(chosen().notice).toBe("다른 탭이나 기기에서 조건식 목록이 바뀌어 덮어쓰지 않았습니다. 변경 내용은 유지했습니다. 다시 저장하면 최신 목록에 반영합니다.");
-  expect(edited().draft.name).toBe("수정한 식");
+  expect(chosen().alerts).toEqual(["다른 탭이나 기기에서 조건식 목록이 바뀌어 덮어쓰지 않았습니다. 변경 내용은 유지했습니다. 다시 저장하면 최신 목록에 반영합니다."]);
+  expect(chosen().draft.name).toBe("수정한 식");
   expect(chosen().dirty).toBe(true);
   await editing.save();
   expect(server.puts.at(-1)).toEqual({ revision: 4, screens: [{ ...source, name: "수정한 식" }, other] });
   expect(server.outcomes).toEqual(["stale", "ok"]);
   expect(chosen().dirty).toBe(false);
   expect(chosen().saving).toBe(false);
-  expect(chosen().notice).toBeNull();
+  expect(chosen().alerts).toEqual([]);
 });
 
 test("저장 도중에는 추가 편집과 중복 저장을 막고, 실패 뒤 다시 저장한다", async () => {
-  const { editing, server, chosen, edited } = opened();
+  const { editing, server, chosen } = opened();
   editing.edit((d) => ({ ...d, name: "바꿈" }));
   const release = server.pause();
   server.failNext("쓰기 실패");
   const pending = editing.save();
-  expect(chosen().saving).toBe(true);
+  expect(chosen()).toMatchObject({ saving: true, canSave: false });
   editing.edit((d) => ({ ...d, name: "저장 중 입력" }));
-  await editing.save();
+  expect(await editing.save()).toBe(false);
   expect(server.puts).toHaveLength(1);
-  expect(edited().draft.name).toBe("바꿈");
+  expect(chosen().draft.name).toBe("바꿈");
   release();
   await pending;
-  expect(chosen().saving).toBe(false);
-  expect(chosen().notice).toBe("저장하지 못했습니다: 쓰기 실패");
+  expect(chosen()).toMatchObject({ saving: false, canSave: true, alerts: ["저장하지 못했습니다: 쓰기 실패"] });
   await editing.save();
   expect(chosen().dirty).toBe(false);
   expect(server.stored().screens).toEqual([{ ...source, name: "바꿈" }]);
@@ -192,25 +186,28 @@ test("개수 제한은 나중에 알게 된 최신 목록으로 검사하고, �
   expect(!runnable.ok && runnable.errors.list).toContain("조건식은 50개까지");
   await editing.save();
   expect(server.puts).toEqual([]);
-  expect(chosen().tried).toBe(true);
+  expect(chosen()).toMatchObject({ flagged: true, alerts: ["조건식은 50개까지 저장할 수 있습니다. 하나를 지운 뒤 만드세요."] });
   server.replace({ revision: 3, screens: many(49) });
   server.publish();
   await editing.save();
   expect(server.puts.map((sent) => [sent.revision, sent.screens.length])).toEqual([[2, 50]]);
   expect(server.outcomes).toEqual(["stale"]);
+  server.replace({ revision: 4, screens: many(50) });
+  server.publish();
+  expect(chosen().alerts).toEqual(["조건식은 50개까지 저장할 수 있습니다. 하나를 지운 뒤 만드세요.", "다른 탭이나 기기에서 조건식 목록이 바뀌어 덮어쓰지 않았습니다. 변경 내용은 유지했습니다. 다시 저장하면 최신 목록에 반영합니다."]);
 });
 
 test("삭제 충돌·실패는 초안을 보존하고 다시 시도하면 지운다", async () => {
-  const { editing, server, chosen, edited } = opened();
+  const { editing, server, chosen } = opened();
   server.replace({ ...base, revision: 3 });
   editing.edit((d) => ({ ...d, name: "보존" }));
   expect(await editing.remove()).toBe(false);
-  expect(edited().draft.name).toBe("보존");
-  expect(chosen().notice).toBe("다른 탭이나 기기에서 조건식 목록이 바뀌어 삭제하지 않았습니다. 바뀐 목록을 불러왔으니 다시 삭제하세요.");
+  expect(chosen().draft.name).toBe("보존");
+  expect(chosen().alerts).toEqual(["다른 탭이나 기기에서 조건식 목록이 바뀌어 삭제하지 않았습니다. 바뀐 목록을 불러왔으니 다시 삭제하세요."]);
   server.failNext("삭제 실패");
   expect(await editing.remove()).toBe(false);
-  expect(edited().draft.name).toBe("보존");
-  expect(chosen().notice).toBe("삭제하지 못했습니다: 삭제 실패");
+  expect(chosen().draft.name).toBe("보존");
+  expect(chosen().alerts).toEqual(["삭제하지 못했습니다: 삭제 실패"]);
   expect(await editing.remove()).toBe(true);
   expect(server.outcomes).toEqual(["stale", "error", "ok"]);
   expect(server.stored().screens).toEqual([]);
@@ -218,7 +215,7 @@ test("삭제 충돌·실패는 초안을 보존하고 다시 시도하면 지운
 });
 
 test("저장하지 않은 초안 B를 지우면 요청 없이 사라지고, 남은 초안 A를 고르며 A의 편집은 남는다", async () => {
-  const { editing, server, chosen, edited } = opened({ revision: 0, screens: [] });
+  const { editing, server, chosen } = opened({ revision: 0, screens: [] });
   editing.create();
   const a = chosen().source.id;
   editing.edit((d) => ({ ...d, name: "남겨 둘 A" }));
@@ -231,7 +228,7 @@ test("저장하지 않은 초안 B를 지우면 요청 없이 사라지고, 남�
   expect(chosen().source.id).toBe(a);
   editing.choose("");
   expect(chosen().source.id).toBe(a);
-  expect(edited().draft.name).toBe("남겨 둘 A");
+  expect(chosen().draft.name).toBe("남겨 둘 A");
 });
 
 test("저장한 식을 지우면 남은 목록의 첫 식을 고른다", async () => {
@@ -265,45 +262,45 @@ test("50개가 찬 목록에서 하나를 지우면 새 초안을 저장할 수 
 });
 
 test("새 조건식과 복제는 서로 다른 ID로 남고, 다른 식을 골라도 편집이 사라지지 않는다", async () => {
-  const { editing, chosen, edited } = opened();
+  const { editing, chosen } = opened();
   editing.create();
   const id = chosen().source.id;
-  expect(edited().draft.conditions).toEqual([]);
+  expect(chosen().draft.conditions).toEqual([]);
   expect(chosen().dirty).toBe(true);
   editing.edit((d) => ({ ...d, name: "나의 조건" }));
   editing.create(true);
   const copyId = chosen().source.id;
   expect(copyId).not.toBe(id);
   expect(chosen().source.id).toBe(copyId);
-  expect(edited().draft.name).toBe("나의 조건 복사");
+  expect(chosen().draft.name).toBe("나의 조건 복사");
   editing.choose(source.id);
   editing.choose(id);
-  expect(edited().draft.name).toBe("나의 조건");
+  expect(chosen().draft.name).toBe("나의 조건");
   expect(editing.view().entries.map((entry) => [entry.source.id, entry.name])).toEqual([[source.id, source.name], [id, "나의 조건"], [copyId, "나의 조건 복사"]]);
 });
 
 test("다른 탭에서 목록이 바뀌어도 편집 중인 초안과 충돌 기준 revision은 그대로다", async () => {
-  const { editing, server, edited } = opened();
+  const { editing, server, chosen } = opened();
   editing.edit((d) => ({ ...d, name: "수정 중" }));
   server.replace({ revision: 4, screens: [{ ...source, name: "다른 탭", markets: ["kospi"] }] });
   server.publish();
   editing.edit((d) => toggleMarket(d, "kosdaq"));
-  expect(edited().draft.name).toBe("수정 중");
-  expect(edited().draft.markets).toEqual(["kosdaq"]);
+  expect(chosen().draft.name).toBe("수정 중");
+  expect(chosen().draft.markets).toEqual(["kosdaq"]);
   await editing.save();
   expect(server.puts.map((sent) => sent.revision)).toEqual([2]);
   expect(server.outcomes).toEqual(["stale"]);
 });
 
 test("고치지 않은 조건식은 최신 저장본을 보이고, 다음 편집도 그 값과 revision에서 시작한다", async () => {
-  const { editing, server, chosen, edited } = opened();
+  const { editing, server, chosen } = opened();
   editing.edit((d) => ({ ...d, name: "로컬 저장" }));
   await editing.save();
   const remote: Screen = { ...source, name: "다른 탭 저장", markets: ["kospi"] };
   server.replace({ revision: 3, screens: [remote] });
   server.publish();
-  expect(edited().draft.name).toBe(remote.name);
-  expect(edited().draft.markets).toEqual(remote.markets);
+  expect(chosen().draft.name).toBe(remote.name);
+  expect(chosen().draft.markets).toEqual(remote.markets);
   expect(chosen().dirty).toBe(false);
   editing.edit((d) => toggleExclude(d, "etf"));
   expect(chosen().draft).toMatchObject({ name: remote.name, markets: ["kospi"], exclude: ["etf"] });
@@ -319,13 +316,13 @@ test("최신 목록에서 지운 식은 고치지 않았으면 사라지고, 고
   clean.server.publish();
   expect(clean.editing.view()).toEqual({ entries: [], chosen: null });
 
-  const { editing, server, chosen, edited } = opened();
+  const { editing, server, chosen } = opened();
   editing.edit((d) => ({ ...d, name: "보존할 편집" }));
   server.replace({ revision: 2, screens: [] });
   server.publish();
   editing.choose("");
   expect(chosen().source.id).toBe(source.id);
-  expect(edited().draft.name).toBe("보존할 편집");
+  expect(chosen().draft.name).toBe("보존할 편집");
   await editing.save();
   expect(server.puts.map((sent) => sent.revision)).toEqual([2]);
   expect(server.outcomes).toEqual(["stale"]);
@@ -359,10 +356,12 @@ test("실행은 저장 전 초안을 그대로 보내고, 잘못된 값이면 �
   expect(chosen().dirty).toBe(true);
   expect(source.name).toBe("신고가");
   editing.edit((d) => ({ ...d, name: "" }));
-  expect(chosen().tried).toBe(false);
+  expect(chosen().title).toBe("이름 없음");
+  expect(editing.view().entries.map((entry) => entry.title)).toEqual(["이름 없음"]);
+  expect(chosen().flagged).toBe(false);
   expect(await editing.run()).toEqual({ kind: "invalid" });
   expect(sent).toHaveLength(1);
-  expect(chosen().tried).toBe(true);
+  expect(chosen().flagged).toBe(true);
   expect(chosen().nameError).toBe("이름을 넣으세요");
   expect(chosen().run).toBeNull();
 });
@@ -397,25 +396,52 @@ test("저장한 뒤 다른 탭이 고친 저장본을 실행한다", async () =>
   expect(sent).toEqual([remote]);
 });
 
-test("휴대폰 폭에서는 조건식 초안을 보이지 않고 저장본을 실행하지만, 초안은 지우지 않는다", async () => {
-  let desktop = true;
-  const stored: Screen = { conditions: [{ n: 200, field: "high", recentBars: 5, period: "D", kind: "new_high" }], exclude: [], markets: [], name: "신고가", id: "a" };
-  const { editing, sent, chosen, edited } = opened({ revision: 1, screens: [stored] }, { desktop: () => desktop });
-  await editing.run();
+test("조건식 초안은 저장하거나 지우기 전까지 목록에 변경됨으로 남고, 고친 것이 없으면 저장하지 않는다", async () => {
+  const { editing, server, chosen } = opened();
+  expect(editing.view().entries).toEqual([{ source, name: source.name, title: source.name, conditions: 1, dirty: false }]);
+  expect(chosen().canSave).toBe(false);
+  expect(await editing.save()).toBe(false);
+  expect(server.puts).toEqual([]);
   editing.edit((d) => ({ ...d, name: "고치는 중" }));
   editing.create();
   const added = chosen().source.id;
-  desktop = false;
-  expect(editing.view().entries).toEqual([{ source: stored, name: "신고가", conditions: 1 }]);
-  expect(chosen()).toMatchObject({ source: stored, dirty: false, runnable: { ok: true, screen: stored } });
-  expect(chosen().draft).toBeUndefined();
-  expect(chosen().run?.kind).toBe("done");
-  expect(await editing.run()).toEqual({ kind: "ran" });
-  desktop = true;
+  expect(chosen().stored).toBe(false);
+  expect(editing.view().entries.map((entry) => [entry.source.id, entry.name, entry.dirty])).toEqual([[source.id, "고치는 중", true], [added, "새 조건식", true]]);
+  expect(await editing.save()).toBe(true);
+  expect(chosen()).toMatchObject({ stored: true, dirty: false });
   expect(chosen().source.id).toBe(added);
-  editing.choose(stored.id);
-  expect(edited().draft.name).toBe("고치는 중");
-  expect(sent).toEqual([source, stored]);
+  expect(editing.view().entries.map((entry) => entry.dirty)).toEqual([true, false]);
+});
+
+test("목록 오류는 저장을 시도한 뒤에 보이고, 충돌·실패한 저장은 성공으로 알리지 않는다", async () => {
+  const { editing, server, chosen } = opened({ revision: 1, screens: many(50) });
+  editing.create();
+  expect(chosen().runnable.ok).toBe(false);
+  expect(chosen().alerts).toEqual([]);
+  expect(await editing.save()).toBe(false);
+  expect(chosen().alerts).toEqual(["조건식은 50개까지 저장할 수 있습니다. 하나를 지운 뒤 만드세요."]);
+  expect(server.puts).toEqual([]);
+  editing.choose("0");
+  editing.edit((d) => ({ ...d, name: "바꿈" }));
+  server.replace({ revision: 2, screens: many(50) });
+  expect(await editing.save()).toBe(false);
+  server.failNext("쓰기 실패");
+  expect(await editing.save()).toBe(false);
+  expect(await editing.save()).toBe(true);
+  expect(server.outcomes).toEqual(["stale", "error", "ok"]);
+});
+
+test("저장한 조건식을 지우면 다음 조건식을 고르고 지운 식의 초안도 버린다", async () => {
+  const second: Screen = { ...source, id: "b", name: "둘째" };
+  const { editing, server, chosen } = opened({ revision: 1, screens: [source, second] });
+  editing.edit((d) => ({ ...d, name: "지울 초안" }));
+  expect(await editing.remove()).toBe(true);
+  expect(chosen().source).toEqual(second);
+  server.replace({ revision: 5, screens: [source, second] });
+  server.publish();
+  editing.choose(source.id);
+  expect(chosen().draft.name).toBe(source.name);
+  expect(chosen().dirty).toBe(false);
 });
 
 test("같은 조건식을 실행하는 중이면 다시 보내지 않는다", async () => {
@@ -448,15 +474,15 @@ test("처음 목록을 불러오지 못하면 고른 조건식 없이 실패를 
 });
 
 test("충돌 저장 뒤 목록을 다시 불러오지 못해도 초안과 충돌 문구가 남고, 다시 저장하면 덮어쓴다", async () => {
-  const { editing, server, sent, chosen, edited } = opened();
+  const { editing, server, sent, chosen } = opened();
   editing.edit((d) => ({ ...d, name: "수정한 식" }));
   server.replace({ revision: 3, screens: [source] });
   await editing.save();
   server.failLoad("목록 읽기 실패");
   expect(await editing.run()).toEqual({ kind: "failed", message: "목록 읽기 실패" });
   expect(sent).toEqual([]);
-  expect(edited().draft.name).toBe("수정한 식");
-  expect(chosen().notice).toBe("다른 탭이나 기기에서 조건식 목록이 바뀌어 덮어쓰지 않았습니다. 변경 내용은 유지했습니다. 다시 저장하면 최신 목록에 반영합니다.");
+  expect(chosen().draft.name).toBe("수정한 식");
+  expect(chosen().alerts).toEqual(["다른 탭이나 기기에서 조건식 목록이 바뀌어 덮어쓰지 않았습니다. 변경 내용은 유지했습니다. 다시 저장하면 최신 목록에 반영합니다."]);
   await editing.save();
   expect(server.outcomes).toEqual(["stale", "ok"]);
   expect(server.stored().screens).toEqual([{ ...source, name: "수정한 식" }]);

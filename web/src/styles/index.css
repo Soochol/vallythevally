@@ -37,6 +37,7 @@
   --radius-s: var(--r-s);
   --radius-m: var(--r-m);
   --radius-l: var(--r-l);
+  --radius-xl: var(--r-xl);
 
   --font-sans: var(--font-sans);
   --shadow-dialog: var(--shadow);

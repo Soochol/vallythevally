@@ -89,8 +89,8 @@ test("% 축은 비교 종목 없이도 켜고 끄며, 비교 종목이 있는 �
   await page.goto("/");
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
   const chart = chartOf(cell(page));
-  const pct = page.getByRole("toolbar", { name: "차트 도구 막대" }).getByRole("button", { name: "%", exact: true });
-  const log = page.getByRole("toolbar", { name: "차트 도구 막대" }).getByRole("button", { name: "로그", exact: true });
+  const pct = cell(page).getByRole("group", { name: "가격축 방식" }).getByRole("button", { name: "%", exact: true });
+  const log = cell(page).getByRole("group", { name: "가격축 방식" }).getByRole("button", { name: "로그", exact: true });
 
   await pct.click();
   await expect(chart).toHaveAttribute("data-price-scale", "percent");
@@ -208,7 +208,7 @@ test("비교 종목이 저장된 칸을 열어도 지표 패널 축은 % 축이 
   await page.getByRole("dialog").getByRole("button", { name: "코스피 지우기" }).click();
   await page.keyboard.press("Escape");
   await expect(chartOf(cell(page))).toHaveAttribute("data-price-scale", "normal");
-  await page.getByRole("toolbar", { name: "차트 도구 막대" }).getByRole("button", { name: "로그", exact: true }).click();
+  await cell(page).getByRole("group", { name: "가격축 방식" }).getByRole("button", { name: "로그", exact: true }).click();
   await expect.poll(modes).toEqual({ main: 1, volume: 0 });
 });
 
