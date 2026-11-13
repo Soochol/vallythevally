@@ -38,10 +38,7 @@ async function chooseSymbol(page: Page, symbol: string) {
 test("drawings survive realtime updates, series replacement, resync and controller disposal", async ({ page, scenario, context }, testInfo) => {
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(error.message));
-  let unsubscribes = 0;
-  page.on("websocket", (socket) => socket.on("framesent", ({ payload }) => {
-    if (JSON.parse(String(payload)).type === "unsubscribe") unsubscribes++;
-  }));
+  const unsubscribes = () => scenario.live.messages.filter(message => message.type === "unsubscribe").length;
   await page.goto("/?symbol=005930");
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
   await expect.poll(async () => scenario.live.subscriptions().map(value => value.symbol)).toContain("005930");
@@ -105,7 +102,7 @@ test("drawings survive realtime updates, series replacement, resync and controll
   const windowListeners = await listenerTypes("window");
   const fontListeners = await listenerTypes("document.fonts");
   const oldMirror = (await chart.locator(".drawing-mirror").elementHandle())!;
-  const beforeDisposal = unsubscribes;
+  const beforeDisposal = unsubscribes();
   await page.evaluate(() => {
     history.pushState(null, "", "/controller-remount");
     window.dispatchEvent(new PopStateEvent("popstate"));
@@ -113,7 +110,7 @@ test("drawings survive realtime updates, series replacement, resync and controll
   await expect.poll(() => oldMirror.evaluate((element) => element.isConnected)).toBe(false);
   await expect(page).toHaveURL(/\/$/);
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
-  await expect.poll(() => unsubscribes).toBeGreaterThan(beforeDisposal);
+  await expect.poll(unsubscribes).toBeGreaterThan(beforeDisposal);
   await expectDrawing();
   const afterWindowListeners = await listenerTypes("window");
   const afterFontListeners = await listenerTypes("document.fonts");

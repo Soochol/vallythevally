@@ -30,11 +30,7 @@ interface Sent {
   symbol?: string;
 }
 
-function sentFrames(page: Page): Sent[] {
-  const sent: Sent[] = [];
-  page.on("websocket", (ws) => ws.on("framesent", ({ payload }) => sent.push(JSON.parse(String(payload)))));
-  return sent;
-}
+function sentFrames(scenario: Scenario): readonly Sent[] { return scenario.live.messages; }
 
 const tradeValues = (price: number, _time: string) => ({ c: Math.abs(Number(`+${price}`)), v: Math.abs(Number("1000")) });
 
@@ -53,7 +49,7 @@ async function addCompare(dialog: Locator, name: string) {
 test("비교 종목 탭에서 3개까지 넣고 4번째는 막히며, 빼면 그 구독을 풀고, 새로고침해도 남는다", async ({ page, scenario }) => {
   const errors: string[] = [];
   page.on("pageerror", (e) => errors.push(e.message));
-  const sent = sentFrames(page);
+  const sent = sentFrames(scenario);
   await seed(scenario);
   await page.goto("/");
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
@@ -260,11 +256,13 @@ test("가격 패널 지표 선과 가격 사이에 놓인 드로잉도 눌러 �
   await page.mouse.click(box.x + box.width * 0.2, box.y + box.height * 0.9);
   await expect.poll(selected).toBe(false);
 
-  await page.mouse.click(x, y);
+  const projected = JSON.parse((await mirror.getAttribute("data-drawings"))!) as { points: { y: number }[] }[];
+  const targetY = box.y + projected[0]!.points[0]!.y;
+  await page.mouse.click(x, targetY);
   await expect.poll(selected).toBe(true);
-  await page.mouse.move(x, y);
+  await page.mouse.move(x, targetY);
   await page.mouse.down();
-  await page.mouse.move(x, y + 40, { steps: 8 });
+  await page.mouse.move(x, targetY + 40, { steps: 8 });
   await page.mouse.up();
   await expect.poll(async () => scenario.documents.drawings("005930")[0]!.points[0]!.price).toBeLessThan(drawn.points[0]!.price);
   console.log("BAND_DRAWING", JSON.stringify({ lo, hi, price: drawn.points[0]!.price, at: at.time }));

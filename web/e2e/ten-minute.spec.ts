@@ -1,3 +1,4 @@
+import { november9BarAt } from "./fixtures/frames";
 import { selectOption } from "./select-option";
 import type { Locator, Page } from "@playwright/test";
 import type { SeriesKey } from "../src/api/bars";
@@ -116,7 +117,7 @@ test.describe("데스크톱", () => {
     await expect(periods.getByRole("button", { name: "분봉", exact: true })).toHaveAttribute("data-value", "10m");
   });
 
-  test("10분봉을 고른 레이아웃은 새로고침과 서버 재시작 뒤에도 10분봉을 다시 받는다", async ({ scenario, page }) => {
+  test("10분봉을 고른 레이아웃은 새로고침 뒤에도 10분봉을 다시 받는다", async ({ scenario, page }) => {
     const requested = recordBarRequests(page);
     await page.goto("/?symbol=005930");
     const periods = page.getByRole("toolbar", { name: "차트 도구 막대" }).getByRole("group", { name: "봉 주기" });
@@ -193,6 +194,7 @@ test.describe("실시간", () => {
     }).toPass({ timeout: 15_000 });
     await scenario.live.update("005930", trade("100959", 201_500, 5));
     await expect.poll(() => lastBar(chart)).toEqual({ t: AT_1000, close: 201_500, count: before.count + 1 });
+    scenario.live.bar("005930", november9BarAt("10:00", 201_500, 15), "confirmed");
     await scenario.live.update("005930", trade("101000", 200_500, 3));
     await expect.poll(() => lastBar(chart)).toEqual({ t: AT_1000 + TEN_MINUTES, close: 200_500, count: before.count + 2 });
   });

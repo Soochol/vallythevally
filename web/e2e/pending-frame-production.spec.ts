@@ -1,10 +1,11 @@
+import { november9BarAt } from "./fixtures/frames";
 import { selectOption } from "./select-option";
 import { test, expect, cell, chartOf } from './harness';
 test.use({ clockStart: '20261109100000' });
 test('minute rollover and style replacement keep subsequent live updates working', async ({page,scenario}) => {
   const errors: string[] = []; const delivered: number[] = [];
   page.on('pageerror',error=>errors.push(error.message));
-  page.on('websocket',socket=>socket.on('framereceived',({payload})=>{const message=JSON.parse(String(payload));if(message.type==='bar')delivered.push(message.bar.c);}));
+  scenario.live.observe(message => {if(message.type==='bar')delivered.push(message.bar.c);});
   await page.goto('/?symbol=005930'); await expect(cell(page)).toHaveAttribute('aria-busy','false');
   const chart=chartOf(cell(page)); const box=(await chart.boundingBox())!;
   await cell(page).focus();await page.keyboard.press('T');
@@ -26,7 +27,7 @@ test('minute rollover and style replacement keep subsequent live updates working
     window.cancelAnimationFrame=key=>{if(!pending.delete(key))cancel(key);};
     Reflect.set(window,'releaseReviewFrames',()=>{window.requestAnimationFrame=original;window.cancelAnimationFrame=cancel;for(const callback of pending.values())original(callback);});
   });
-  await trade(202000,'100059');await trade(203000,'100100');
+  await trade(202000,'100059');scenario.live.bar('005930',november9BarAt('10:00',202000),'confirmed');await trade(203000,'100100');
   await page.getByRole('menuitemradio',{name:'라인',exact:true}).evaluate(element=>(element as HTMLElement).click());
   await page.evaluate(()=>Reflect.get(window,'releaseReviewFrames')());
   await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));

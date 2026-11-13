@@ -1,3 +1,4 @@
+import { november9BarAt } from "./fixtures/frames";
 import { selectOption } from "./select-option";
 import type { Page } from "@playwright/test";
 import type { Drawing } from "../src/api/generated/Drawing";
@@ -22,10 +23,10 @@ test("replacement consumes queued rollover in both real series and retains newer
   const errors: string[] = [];
   const delivered: number[] = [];
   page.on("pageerror", (error) => errors.push(error.message));
-  page.on("websocket", (socket) => socket.on("framereceived", ({ payload }) => {
-    const message = JSON.parse(String(payload));
+  scenario.live.observe(message => {
+
     if (message.type === "bar") delivered.push(message.bar.c);
-  }));
+  });
   await page.addInitScript(installFrameProbe);
   await page.goto("/?symbol=005930");
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
@@ -55,6 +56,7 @@ test("replacement consumes queued rollover in both real series and retains newer
   await styleMenu(page);
   await page.evaluate(() => window.frameProbe.hold());
   await trade(202_000, "100059", 2);
+  scenario.live.bar("005930", november9BarAt("10:00", 202_000, 3), "confirmed");
   await trade(203_000, "100100", 3);
   await page.waitForTimeout(200);
   await page.getByRole("menuitemradio", { name: "라인", exact: true }).evaluate((element) => {
@@ -72,6 +74,7 @@ test("replacement consumes queued rollover in both real series and retains newer
   expect.soft(await chart.getAttribute("data-last-close")).toBe("203000");
   await trade(204_000, "100101", 4);
   await trade(205_000, "100102", 5);
+  scenario.live.bar("005930", november9BarAt("10:01", 205_000, 12), "confirmed");
   await expect(() => trade(206_000, "100200", 6)).toPass({ timeout: 45_000 });
   await page.evaluate(() => window.frameProbe.release());
   await frames(page);

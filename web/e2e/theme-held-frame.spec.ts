@@ -1,3 +1,4 @@
+import { november9BarAt } from "./fixtures/frames";
 import { selectOption } from "./select-option";
 import type { Page } from "@playwright/test";
 import { installFrameProbe } from "./frame-probe";
@@ -12,10 +13,10 @@ test("lime dark keeps main and volume coherent when a held rollover frame resume
   const errors: string[] = [];
   const delivered: number[] = [];
   page.on("pageerror", (error) => errors.push(error.message));
-  page.on("websocket", (socket) => socket.on("framereceived", ({ payload }) => {
-    const message = JSON.parse(String(payload));
+  scenario.live.observe(message => {
+
     if (message.type === "bar") delivered.push(message.bar.c);
-  }));
+  });
   await page.addInitScript(installFrameProbe);
   await page.goto("/?symbol=005930");
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
@@ -40,6 +41,7 @@ test("lime dark keeps main and volume coherent when a held rollover frame resume
   await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
   await page.evaluate(() => window.frameProbe.hold());
   await trade(202_000, "100059", 2);
+  scenario.live.bar("005930", november9BarAt("10:00", 202_000, 3), "confirmed");
   await trade(203_000, "100100", 3);
   await expect(page.getByRole("button", { name: "테마 바꾸기", exact: true })).toHaveCount(0);
   await page.evaluate(() => window.frameProbe.release());
@@ -52,6 +54,7 @@ test("lime dark keeps main and volume coherent when a held rollover frame resume
   await frames(page);
   const sameMinute = await lastBars();
   const sameMinuteClose = await chart.getAttribute("data-last-close");
+  scenario.live.bar("005930", november9BarAt("10:01", 204_000, 7), "confirmed");
   await trade(205_000, "100200", 5, 45_000);
   await frames(page);
   const nextMinute = await lastBars();

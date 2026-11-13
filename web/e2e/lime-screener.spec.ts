@@ -22,11 +22,11 @@ test("오른쪽 스크리너 탭에서 실제 조건식 편집창을 열어 조�
   await expect(editing.getByRole("button", { name: "조건 1 신고가 기간", exact: true })).toHaveText("60");
   await renameScreen(editing, "로컬 수정");
   const remote = scenario.documents.screens();
-  remote.screens[0].name = "다른 창에서 수정";
+  remote.screens[0]!.name = "다른 창에서 수정";
   scenario.documents.saveScreens({ ...remote, revision: remote.revision + 1 });
   await editing.getByRole("button", { name: "저장", exact: true }).click();
   await expect(editing.getByRole("alert")).toContainText("다른 탭이나 기기에서 조건식 목록이 바뀌어 덮어쓰지 않았습니다");
-  expect(scenario.documents.screens().screens[0].name).toBe("다른 창에서 수정");
+  expect(scenario.documents.screens().screens[0]!.name).toBe("다른 창에서 수정");
   await expect(editing.getByRole("button", { name: "조건식 고르기", exact: true })).toHaveText("로컬 수정");
   let rejected = false;
   await page.route("**/api/screens", async (route) => {

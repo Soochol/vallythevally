@@ -1,3 +1,4 @@
+import { november9BarAt } from "./fixtures/frames";
 import type { Page } from "@playwright/test";
 import type { Layout } from "../src/api/generated/Layout";
 import { installFrameProbe } from "./frame-probe";
@@ -33,10 +34,10 @@ test("후행스팬이 있는 칸에서 체결을 흘려도 모든 선의 update�
   const errors: string[] = [];
   const delivered: number[] = [];
   page.on("pageerror", (e) => errors.push(e.message));
-  page.on("websocket", (socket) => socket.on("framereceived", ({ payload }) => {
-    const m = JSON.parse(String(payload));
+  scenario.live.observe(m => {
+
     if (m.type === "bar" || m.type === "confirmed") delivered.push(m.bar.c);
-  }));
+  });
   await seedLayout(scenario, "1m", [{ id: "i1", spec: ICHIMOKU_FOR_30_MINUTE_BARS, panel: "price", visible: true, style: { colors: ["ind-1"], width: 1 } }], []);
   await page.addInitScript(installFrameProbe);
   await page.goto("/");
@@ -50,6 +51,7 @@ test("후행스팬이 있는 칸에서 체결을 흘려도 모든 선의 update�
   }).toPass({ timeout: 15_000 });
   for (const [i, p] of [201_500, 200_500, 202_000].entries()) await trade(scenario, page, delivered, p, `10004${i}`);
   const barsBefore = Number(await chartOf(cell(page)).getAttribute("data-bar-count"));
+  scenario.live.bar("005930", november9BarAt("10:00", 202_000), "confirmed");
   await expect(async () => {
     await trade(scenario, page, delivered, 203_000, "100101");
   }).toPass({ timeout: 45_000 });
@@ -190,10 +192,10 @@ test.describe("체결 없던 분 뒤", () => {
     page.on("console", (m) => {
       if (m.type() === "error" && m.text().includes("지표")) errors.push(m.text());
     });
-    page.on("websocket", (socket) => socket.on("framereceived", ({ payload }) => {
-      const m = JSON.parse(String(payload));
+    scenario.live.observe(m => {
+
       if (m.type === "bar" || m.type === "confirmed") delivered.push(m.bar.c);
-    }));
+    });
     const style = { colors: ["ind-1"], width: 1 };
     await seedLayout(scenario, "1m", [
       { id: "i1", spec: ICHIMOKU_FOR_30_MINUTE_BARS, panel: "price", visible: true, style },
@@ -224,7 +226,8 @@ test.describe("체결 없던 분 뒤", () => {
     await page.evaluate(() => window.frameProbe.hold());
     const repliesBefore = await page.evaluate(() => window.workerReplies);
     const deliveredBefore = delivered.length;
-    for (const [price, time] of [[202_000, "100201"], [203_000, "100301"]] as const) {
+    for (const [price, time, confirmedTime, confirmedPrice] of [[202_000, "100201", "10:00", 201_000], [203_000, "100301", "10:02", 202_000]] as const) {
+      scenario.live.bar("005930", november9BarAt(confirmedTime, confirmedPrice), "confirmed");
       expect(await scenario.live.update("005930", { t: Date.parse(`2026-11-09T${time.slice(0,2)}:${time.slice(2,4)}:00+09:00`) / 1000, c: price, o: price, h: price, l: price, v: 1000 })).toBeGreaterThan(0);
       await expect.poll(() => delivered.includes(price)).toBe(true);
     }
