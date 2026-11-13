@@ -13,7 +13,7 @@ use serde::de::DeserializeOwned;
 
 use crate::api::{self, ApiErrorCode, Layout, LayoutInput, LayoutSummary, Revision, Screen, Screens, UiState, UnixSeconds, Watchlists};
 use crate::http::{ApiFailure, AppState, symbol_list};
-use crate::screener::parse_screen;
+use crate::screener::{RunnableScreen, parse_screen};
 use crate::userdata::{self, StoreError, wire_name};
 
 pub const JSON_LIMIT: usize = 64 * 1024;
@@ -134,7 +134,7 @@ fn check_screens(all: &Screens) -> Result<(), ApiFailure> {
     Ok(())
 }
 
-fn check_screen(screen: &Screen) -> Result<(), ApiFailure> {
+pub(crate) fn check_screen(screen: &Screen) -> Result<RunnableScreen, ApiFailure> {
     if screen.id.is_empty() || screen.id.len() > MAX_SCREEN_ID_BYTES {
         return Err(ApiFailure::bad_request(format!("조건식 id는 1~{MAX_SCREEN_ID_BYTES}바이트여야 합니다: {}", screen.id)));
     }
@@ -145,7 +145,7 @@ fn check_screen(screen: &Screen) -> Result<(), ApiFailure> {
     if screen.conditions.len() > MAX_SCREEN_CONDITIONS {
         return Err(ApiFailure::bad_request(format!("조건식 {name}의 조건은 0~{MAX_SCREEN_CONDITIONS}줄이어야 합니다: {}줄", screen.conditions.len())));
     }
-    parse_screen(screen)?;
+    let runnable = parse_screen(screen)?;
     let mut markets = HashSet::new();
     if let Some(market) = screen.markets.iter().find(|m| !markets.insert(**m)) {
         return Err(ApiFailure::bad_request(format!("조건식 {name}의 시장 목록에 {}가 두 번 있습니다", wire_name(market))));
@@ -154,7 +154,7 @@ fn check_screen(screen: &Screen) -> Result<(), ApiFailure> {
     if let Some(kind) = screen.exclude.iter().find(|k| !kinds.insert(**k)) {
         return Err(ApiFailure::bad_request(format!("조건식 {name}의 제외 목록에 {}가 두 번 있습니다", wire_name(kind))));
     }
-    Ok(())
+    Ok(runnable)
 }
 
 async fn list_layouts(State(st): State<Arc<AppState>>) -> Result<Json<Vec<LayoutSummary>>, ApiFailure> {

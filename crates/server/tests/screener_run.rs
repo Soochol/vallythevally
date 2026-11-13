@@ -429,6 +429,19 @@ async fn a_traded_value_new_high_runs_and_no_condition_kind_or_market_is_refused
     let (status, body) = api.run(&lines(vec![bad_rsi], &[])).await;
     assert_eq!((status, body["error"]["code"].clone()), (400, json!("bad_request")), "저장과 같은 검사를 실행에도 한다: {body}");
     assert!(!body["error"]["message"].as_str().unwrap().contains("아직"), "{body}");
+    let named = |name: &str, conditions: Vec<Value>, markets: &[&str]| json!({"id": "S1", "name": name, "markets": markets, "exclude": [], "conditions": conditions});
+    let shapes = [
+        ("빈 이름", named(" ", vec![new_high("D", "high", 5, 1)], &[]), "조건식 이름은"),
+        ("빈 이름이 틀린 조건보다 먼저", named(" ", vec![new_high("D", "high", 0, 1)], &[]), "조건식 이름은"),
+        ("조건 11줄", named("가", vec![new_high("D", "high", 5, 1); 11], &[]), "조건은 0~10줄"),
+        ("겹친 시장", named("가", vec![new_high("D", "high", 5, 1)], &["kospi", "kospi"]), "시장 목록에"),
+        ("틀린 조건이 겹친 시장보다 먼저", named("가", vec![new_high("D", "high", 0, 1)], &["kospi", "kospi"]), "1번째 조건"),
+    ];
+    for (case, screen, expected) in shapes {
+        let (status, body) = api.run(&screen).await;
+        assert_eq!((status, body["error"]["code"].clone()), (400, json!("bad_request")), "{case}: {body}");
+        assert!(body["error"]["message"].as_str().unwrap().contains(expected), "{case}: {body}");
+    }
 }
 
 #[tokio::test(flavor = "multi_thread")]
