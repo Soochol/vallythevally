@@ -280,6 +280,7 @@ test("패널 머리는 줄마다 그 줄의 봉 주기로 조건을 풀고, 시�
   expect(seeded.status).toBe(200);
   await page.goto("/");
   await openScreener(page);
+  await expandEditor(page);
 
   const conditions = panel(page).getByRole("list", { name: "조건" });
   const markets = panel(page).getByRole("group", { name: "대상 시장", exact: true });

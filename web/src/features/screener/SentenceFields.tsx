@@ -74,7 +74,7 @@ function ConditionSearch({ disabled, onAdd }: { disabled: boolean; onAdd(kind: K
   const choices = conditionChoices(query ?? "");
   const add = (kind: KindChoice) => { onAdd(kind); setQuery(null); };
   return <>
-    <button ref={anchor} type="button" disabled={disabled} aria-expanded={query !== null} aria-haspopup="dialog" className="tb-btn h-8 w-full gap-1 border border-dashed border-line text-text-2 disabled:opacity-40" onClick={() => setQuery("")}><PlusIcon size={14} />조건 추가</button>
+    <button ref={anchor} type="button" data-add-condition disabled={disabled} aria-keyshortcuts="N" aria-expanded={query !== null} aria-haspopup="dialog" className="tb-btn h-8 w-full gap-1 border border-dashed border-line text-text-2 disabled:opacity-40" onClick={() => setQuery("")}><PlusIcon size={14} />조건 추가</button>
     {query !== null && <Popover anchor={anchor} role="dialog" aria-label="조건 추가" onClose={() => setQuery(null)} className="flex max-h-[50vh] w-[260px] flex-col rounded-m border border-line bg-surface p-2 shadow-dialog">
       <input autoFocus aria-label="조건 종류 검색" className="ui-field w-full flex-none px-2" placeholder="신고가, 이동평균, RSI…" value={query} onChange={(e) => setQuery(e.target.value)} onKeyDown={(e) => {
         if (e.nativeEvent.isComposing) return;
