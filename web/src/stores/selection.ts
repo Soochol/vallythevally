@@ -7,6 +7,7 @@ export interface ToastUndo {
   available(): boolean;
   run(): void;
   subscribe(listener: () => void): () => void;
+  shortcut?: string;
 }
 
 export type SearchPurpose = "open" | "watch";

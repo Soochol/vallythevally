@@ -24,5 +24,5 @@ export function Toast() {
 
 function UndoButton({ action, close }: { action: ToastUndo; close(): void }) {
   const enabled = useSyncExternalStore(action.subscribe, action.available);
-  return <button className="tb-btn h-7 border border-line px-2 text-s disabled:cursor-not-allowed disabled:opacity-40" disabled={!enabled} onClick={() => { action.run(); close(); }}>되돌리기</button>;
+  return <button className="tb-btn h-7 gap-1.5 border border-line px-2 text-s disabled:cursor-not-allowed disabled:opacity-40" disabled={!enabled} aria-keyshortcuts={action.shortcut === undefined ? undefined : "Control+Z Meta+Z"} onClick={() => { action.run(); close(); }}>되돌리기{action.shortcut && <kbd aria-hidden="true">{action.shortcut}</kbd>}</button>;
 }

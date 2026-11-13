@@ -109,7 +109,7 @@ export class DrawingSync {
   commitWithUndo(slot: number, ops: readonly DrawingOp[], message: string) {
     if (!this.commit(slot, ops)) return;
     const action = historyUndo(() => this.history(slot), () => this.undo(slot));
-    useSelectionStore.getState().showToast(message, { ...action, subscribe: this.subscribe });
+    useSelectionStore.getState().showToast(message, { ...action, subscribe: this.subscribe, shortcut: "Ctrl+Z" });
   }
 
   undo(slot: number, redo = false) {
