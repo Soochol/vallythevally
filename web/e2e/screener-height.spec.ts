@@ -3,6 +3,7 @@ import type { Locator, Page } from "@playwright/test";
 import type { ApiError } from "../src/api/generated/ApiError";
 import type { Screen } from "../src/api/generated/Screen";
 import { cell, chartOf, expect, test } from "./harness";
+import { closeEditorWindow, expandEditor } from "./sentence-editor";
 import { openResultDetails, openScreener, panel, results, rows, runButton, storeLine, updateBand, waitForUpdateToFinish } from "./screener-page";
 
 test.use({ krxMarket: "20261106", clockStart: "20261106203000" });
@@ -149,9 +150,10 @@ for (const { width, height, wide } of surfaces) {
     await expect(metadata(page)).toHaveText(original!);
     await panel(page).getByRole("alert").scrollIntoViewIfNeeded();
     await expect(panel(page).getByRole("alert")).toBeInViewport();
-    if (wide) await panel(page).getByRole("button", { name: "조건 펼치기", exact: true }).click();
+    if (width >= 768) await expandEditor(page);
     await panel(page).getByRole("list", { name: "조건", exact: true }).scrollIntoViewIfNeeded();
     await expect(panel(page).getByRole("list", { name: "조건", exact: true }).getByRole("listitem")).toHaveCount(3);
+    await closeEditorWindow(page);
     const menuToggle = panel(page).getByRole("button", { name: "스크리너 메뉴", exact: true });
     await menuToggle.click();
     await expect(page.getByRole("menu", { name: "스크리너 메뉴" }).getByRole("menuitem", { name: /^새 목록/ })).toBeEnabled();

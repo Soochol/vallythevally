@@ -184,6 +184,7 @@ test("옛 SQLite 조건식은 안내 없이 이전되고 편집·저장·서버 
   await app.restart({ legacyScreens: [legacy] });
   await page.goto("/");
   await openScreener(page);
+  await expandEditor(page);
   await expect(panel(page).getByRole("list", { name: "조건" })).toContainText(/최근\s*3일 이내/);
   await expect(page.getByRole("alert")).toHaveCount(0);
   await expect(page.getByText(/변환|이전되었습니다|새 규칙으로/)).toHaveCount(0);
@@ -193,6 +194,7 @@ test("옛 SQLite 조건식은 안내 없이 이전되고 편집·저장·서버 
   await app.restart();
   await page.reload();
   await openScreener(page);
+  await expandEditor(page);
   await expect(panel(page).getByRole("list", { name: "조건" })).toContainText(/월봉\s*최근\s*2개월 이내/);
   expect((await (await fetch(`${app.url}/api/screens`)).json()).revision).toBe(13);
   await expect(page.getByText(/변환|이전되었습니다|새 규칙으로/)).toHaveCount(0);

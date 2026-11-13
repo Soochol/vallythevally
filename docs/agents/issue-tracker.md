@@ -1,6 +1,6 @@
 # Issue tracker: GitHub
 
-Issues and specs for this repo live as GitHub issues. Use the `gh` CLI for all operations.
+The repository's issue tracker is GitHub. The commands below are references for issue-tracker tasks.
 
 ## Conventions
 
@@ -14,7 +14,7 @@ Issues and specs for this repo live as GitHub issues. Use the `gh` CLI for all o
 - **Apply / remove labels**: `gh issue edit <number> --add-label "..."` / `--remove-label "..."`
 - **Close**: post the explanation with `gh issue comment <number> --body "..."`, then `gh issue close <number>`. On an already-closed issue, `gh issue close --comment` drops the comment and still exits 0.
 
-- **Find a ticket's spec**: `gh api repos/<owner>/<repo>/issues/<n>/parent` returns the parent issue (a spec carries the `spec` label). **List a spec's tickets**: `gh api repos/<owner>/<repo>/issues/<n>/sub_issues --jq '[.[] | {number, title, state}]'`. How specs and tickets fit together is in [`AGENTS.md`](../../AGENTS.md#이슈와-새-기능).
+- **Find a ticket's spec**: `gh api repos/<owner>/<repo>/issues/<n>/parent` returns the parent issue (a spec carries the `spec` label). **List a spec's tickets**: `gh api repos/<owner>/<repo>/issues/<n>/sub_issues --jq '[.[] | {number, title, state}]'`.
 - **Edit an issue body safely**: write the current body to a file outside `/tmp` (`gh issue view <n> --json body --jq .body > ~/.cache/<n>.md`), check it is not empty, edit the file, save with `gh issue edit <n> --body-file <file>`, then read it back. A full `/tmp` once saved an empty body over a map issue. To recover a lost body, read the edit history: `gh api graphql -f query='query{repository(owner:"<owner>",name:"<repo>"){issue(number:<n>){userContentEdits(first:10){nodes{editedAt diff}}}}}'`; each `diff` holds the full body of that revision.
 - **Close as out of scope**: post the reason with `gh issue comment`, then `gh issue close <n> --reason "not planned"`.
 
