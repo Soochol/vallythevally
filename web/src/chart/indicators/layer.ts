@@ -242,15 +242,13 @@ export class IndicatorLayer {
     this.display = next;
     if (op === "confirm") this.committedT = bar.t;
     if (next.length > prev.length || next.at(-1)?.c !== prev.at(-1)?.c) this.rebaseLeadingSpans();
-    this.host.guard(() => {
-      const point = volumePoint(bar);
-      for (const s of this.shown.values()) if (s.config.visible && isPlainVolume(s.config.spec)) {
-        for (const line of s.lines) {
-          line.points = applyToPoints(line.points, { op: "update", point });
-          this.put(line, point);
-        }
+    const point = volumePoint(bar);
+    for (const s of this.shown.values()) if (s.config.visible && isPlainVolume(s.config.spec)) {
+      for (const line of s.lines) {
+        line.points = applyToPoints(line.points, { op: "update", point });
+        this.queue.push(line, { op: "update", point });
       }
-    });
+    }
     if (this.configs.some((c) => c.visible && usesWorker(c)) && !this.broken) {
       this.port.post({ type: "bar", chart: this.port.chart, kind: op, bar: tuple(bar) });
     }

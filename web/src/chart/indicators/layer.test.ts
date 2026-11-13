@@ -399,22 +399,30 @@ test.each([null, bar(1, 90), bar(2, 100)])("기본 거래량은 worker 응답 �
   expect(f.sent.filter(m => m.type === "create" || m.type === "bar")).toEqual([]);
 });
 
-test("기본 거래량은 빈 이력 뒤 현재 봉, 같은 종가의 거래량 변경, 확정과 다음 봉을 flush 없이 반영한다", () => {
+test("기본 거래량은 빈 이력 뒤 현재 봉, 같은 종가의 거래량 변경, 확정과 다음 봉을 프레임에 반영한다", () => {
   const f = fixture("1m", [VOLUME], VOLUME_PANELS);
   f.layer.reset(history([]));
   expect(f.active[0]?.data).toEqual([]);
   expect(f.layer.rows(null)[0]?.state).toBe("ok");
   const first = { ...bar(0, 110), v: 100 };
   f.layer.advance(history([], first), first, "live");
+  expect(f.layer.rows(first.t)[0]).toMatchObject({ state: "ok", values: [{ text: "100" }] });
+  expect(f.active[0]?.data).toEqual([]);
+  f.layer.flush();
   expect(f.active[0]?.data).toEqual(volumeRows([first]));
   const more = { ...first, v: 250 };
   f.layer.advance(history([], more), more, "live");
+  expect(f.layer.rows(more.t)[0]).toMatchObject({ values: [{ text: "250" }] });
+  expect(f.active[0]?.data).toEqual(volumeRows([first]));
+  f.layer.flush();
   expect(f.active[0]?.data).toEqual(volumeRows([more]));
   const confirmed = { ...more, c: 90, v: 500 };
   f.layer.advance(history([confirmed]), confirmed, "confirmed");
+  f.layer.flush();
   expect(f.active[0]?.data).toEqual(volumeRows([confirmed]));
   const next = { ...bar(1, 100), v: 0 };
   f.layer.advance(history([confirmed], next), next, "live");
+  f.layer.flush();
   expect(f.active[0]?.data).toEqual(volumeRows([confirmed, next]));
   const correction = { ...next, c: 80, v: 600 };
   f.layer.advance(history([confirmed, correction]), correction, "confirmed");
@@ -422,6 +430,35 @@ test("기본 거래량은 빈 이력 뒤 현재 봉, 같은 종가의 거래량 
   f.layer.advance(history([confirmed, revised]), revised, "live");
   expect(f.active[0]?.data).toEqual(volumeRows([confirmed, revised]));
   expect(f.active[0]?.rejected).toEqual([]);
+  expect(f.sent.filter(m => m.type === "create" || m.type === "bar")).toEqual([]);
+});
+
+test("기본 거래량은 같은 시각의 여러 체결과 rollover를 flush에서 두 최종 값으로 묶는다", () => {
+  const f = fixture("1m", [VOLUME], VOLUME_PANELS);
+  const bars = [bar(0)];
+  f.layer.reset(history(bars));
+  const series = f.active[0]!;
+  const updates = vi.spyOn(series, "update");
+  const first = { ...bar(1, 110), v: 100 };
+  const more = { ...first, v: 250 };
+  const confirmed = { ...more, c: 90, v: 500 };
+  const next = { ...bar(2, 100), v: 0 };
+  const latest = { ...next, v: 600 };
+  f.layer.advance(history(bars, first), first, "live");
+  f.layer.advance(history(bars, more), more, "live");
+  f.layer.advance(history([...bars, confirmed]), confirmed, "confirmed");
+  f.layer.advance(history([...bars, confirmed], next), next, "live");
+  f.layer.advance(history([...bars, confirmed], latest), latest, "live");
+  expect(f.layer.rows(confirmed.t)[0]).toMatchObject({ state: "ok", values: [{ text: "500" }] });
+  expect(f.layer.rows(latest.t)[0]).toMatchObject({ state: "ok", values: [{ text: "600" }] });
+  expect(series.data).toEqual(volumeRows(bars));
+  expect(updates).not.toHaveBeenCalled();
+  f.layer.flush();
+  expect(updates.mock.calls).toEqual(volumeRows([confirmed, latest]).map(point => [point]));
+  expect(series.data).toEqual(volumeRows([...bars, confirmed, latest]));
+  f.layer.flush();
+  expect(updates).toHaveBeenCalledTimes(2);
+  expect(series.rejected).toEqual([]);
   expect(f.sent.filter(m => m.type === "create" || m.type === "bar")).toEqual([]);
 });
 
@@ -438,6 +475,8 @@ test("기본 거래량은 숨긴 동안 비우고 다시 표시할 때 최신 �
   f.layer.advance(history(bars, live), live, "live");
   expect(f.active[0]?.data).toEqual([]);
   f.layer.setConfigs([VOLUME, second], panels);
+  expect(f.active.map(s => s.data)).toEqual([volumeRows([...bars, live]), volumeRows(bars)]);
+  f.layer.flush();
   expect(f.active.map(s => s.data)).toEqual([volumeRows([...bars, live]), volumeRows([...bars, live])]);
   f.theme.tokens = { ...TOKENS, upVol: "newUp", downVol: "newDown" };
   f.layer.setTheme();
@@ -508,6 +547,8 @@ test.each([true, false])("worker가 고장 나도 기본 거래량의 초기·�
   expect(f.active.at(-1)?.data).toEqual(volumeRows(bars));
   const current = { ...bar(2, 110), v: 4000 };
   f.layer.advance(history(bars, current), current, "live");
+  expect(f.layer.rows(current.t).map(row => row.state)).toEqual(["ok", "calc"]);
+  f.layer.flush();
   expect(f.active.at(-1)?.data).toEqual(volumeRows([...bars, current]));
   const ma: IndicatorConfig = { ...VOLUME, spec: { kind: "volume", maPeriod: 5 } };
   f.layer.setConfigs([ma, ICHIMOKU], VOLUME_PANELS);
