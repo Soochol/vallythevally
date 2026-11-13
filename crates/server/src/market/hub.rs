@@ -263,14 +263,6 @@ impl MarketHub {
         HubHandle { tx, next_conn: Arc::new(AtomicU64::new(1)) }
     }
 
-    /// 키움 세션 없이 띄운다. 시험이 체결과 세션 이벤트를 직접 넣는다.
-    #[cfg(test)]
-    pub(crate) fn detached(bars: Arc<BarService>, clock: Clock) -> (HubHandle, mpsc::Sender<StreamEvent>) {
-        let (stream, _) = KiwoomStream::detached();
-        let (events, rx) = mpsc::channel(64);
-        (MarketHub::spawn(bars, stream, rx, clock), events)
-    }
-
     async fn run(mut self, mut inputs: mpsc::UnboundedReceiver<HubInput>, mut events: mpsc::Receiver<StreamEvent>) {
         let mut tick = tokio::time::interval(Duration::from_secs(1));
         tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);

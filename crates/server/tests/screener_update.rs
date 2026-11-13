@@ -1168,16 +1168,14 @@ async fn a_run_after_the_stock_list_arrives_but_before_the_start_fills_the_store
     use axum::body::Body;
     use axum::http::Request;
     use http_body_util::BodyExt;
-    use server::bars::BarService;
+    use server::app::{ApplicationInputs, application};
     use server::clock::{Clock, kst};
     use server::config::Secret;
     use server::db::AppDb;
-    use server::http::{AppState, router};
+    use server::http::router;
     use server::kiwoom::auth::KiwoomAuth;
     use server::kiwoom::rest::{KiwoomRest, Priority};
     use server::kiwoom::stream::KiwoomStream;
-    use server::market::hub::MarketHub;
-    use server::screener::Screener;
     use server::screener::store::Store;
     use server::symbols::SymbolDirectory;
     use tower::ServiceExt;
@@ -1189,14 +1187,11 @@ async fn a_run_after_the_stock_list_arrives_but_before_the_start_fills_the_store
     let auth = KiwoomAuth::new(Secret::new(common::APP_KEY.into()), Secret::new(common::APP_SECRET.into()), None);
     let rest = KiwoomRest::new(fake.transport(), auth, clock.clone());
     let symbols = Arc::new(SymbolDirectory::default());
-    let bars = Arc::new(BarService::new(rest.clone(), symbols.clone(), clock.clone()));
     let store = Store::open(&upgraded.path().join("run/screener.duckdb")).unwrap();
-    let screener = Arc::new(Screener::new(store, rest.clone(), bars.clone(), symbols.clone(), clock.clone()));
     let db = AppDb::open(&upgraded.path().join("run/vally.db")).await.unwrap();
     let (stream, _desired) = KiwoomStream::detached();
     let (_events, events) = tokio::sync::mpsc::channel(1);
-    let hub = MarketHub::spawn(bars.clone(), stream, events, clock.clone());
-    let app = router(Arc::new(AppState { symbols: symbols.clone(), bars, rest: rest.clone(), db, clock, static_dir: upgraded.path().to_owned(), hub, screener }));
+    let app = router(application(ApplicationInputs { rest: rest.clone(), clock, symbols: symbols.clone(), db, screener_store: store, stream: (stream, events), static_dir: upgraded.path().to_owned() }));
     let call = |request: Request<Body>| {
         let app = app.clone();
         async move {

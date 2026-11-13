@@ -212,13 +212,14 @@ mod tests {
 
     use super::*;
     use crate::api::{Arrangement, Cell, LayoutInput, LayoutSync, Period, Venue};
-    use crate::bars::BarService;
+    use crate::app::{ApplicationInputs, application};
     use crate::clock::{Clock, kst};
     use crate::config::Secret;
     use crate::drawing_api::{DrawingPoint, DrawingTool};
     use crate::kiwoom::auth::KiwoomAuth;
     use crate::kiwoom::rest::KiwoomRest;
     use crate::kiwoom::rest::testing::FakeTransport;
+    use crate::kiwoom::stream::{KiwoomStream, StreamEvent};
     use crate::symbols::SymbolDirectory;
     use crate::userdata;
 
@@ -343,6 +344,7 @@ mod tests {
     struct Fixture {
         app: Router,
         kiwoom: Arc<FakeTransport>,
+        _events: tokio::sync::mpsc::Sender<StreamEvent>,
         _dir: tempfile::TempDir,
     }
 
@@ -353,11 +355,11 @@ mod tests {
         let clock = Clock::fake(kst(domain::KstDate::new(2026, 11, 9).unwrap(), 0, 34, 0));
         let rest = KiwoomRest::new(Arc::new(kiwoom.clone()), KiwoomAuth::new(Secret::new("k".into()), Secret::new("s".into()), None), clock.clone());
         let symbols = Arc::new(SymbolDirectory::default());
-        let bars = Arc::new(BarService::new(rest.clone(), symbols.clone(), clock.clone()));
-        let (hub, _events) = crate::market::hub::MarketHub::detached(bars.clone(), clock.clone());
-        let screener = Arc::new(crate::screener::Screener::new(crate::screener::store::Store::open(&dir.path().join("screener.duckdb")).unwrap(), rest.clone(), bars.clone(), symbols.clone(), clock.clone()));
-        let app = crate::http::router(Arc::new(AppState { symbols, bars, rest, db, clock, static_dir: dir.path().to_owned(), hub, screener }));
-        Fixture { app, kiwoom, _dir: dir }
+        let (stream, _desired) = KiwoomStream::detached();
+        let (events, receiver) = tokio::sync::mpsc::channel(64);
+        let screener_store = crate::screener::store::Store::open(&dir.path().join("screener.duckdb")).unwrap();
+        let app = crate::http::router(application(ApplicationInputs { rest, clock, symbols, db, screener_store, stream: (stream, receiver), static_dir: dir.path().to_owned() }));
+        Fixture { app, kiwoom, _events: events, _dir: dir }
     }
 
     async fn send(app: &Router, method: &str, uri: &str, body: impl Into<Body>) -> (StatusCode, Value) {
