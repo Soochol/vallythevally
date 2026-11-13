@@ -115,33 +115,45 @@ test("화면 내 최고·최저 스위치는 보이는 봉의 최고가·최저�
 
   const expected = () => page.evaluate(() => {
     const { chart, main } = window.chartProbe;
-    const range = chart.timeScale().getVisibleLogicalRange()!;
+    const scale = chart.timeScale();
+    const range = scale.getVisibleLogicalRange()!;
     let high = -Infinity;
     let low = Infinity;
-    let last = 0;
-    for (let i = Math.max(0, Math.ceil(range.from)); i <= Math.floor(range.to); i++) {
+    for (let i = Math.max(0, Math.floor(range.from)); i <= Math.ceil(range.to); i++) {
       const bar = main.dataByIndex(i);
-      if (!bar || !("high" in bar)) continue;
+      const x = bar ? scale.timeToCoordinate(bar.time) : null;
+      if (!bar || !("high" in bar) || x === null || x < 0 || x > scale.width()) continue;
       high = Math.max(high, bar.high);
       low = Math.min(low, bar.low);
     }
-    for (let i = Math.floor(range.to); i >= 0; i--) {
-      const bar = main.dataByIndex(i);
-      if (bar && "close" in bar) { last = bar.close; break; }
-    }
+    const lastBar = main.dataByIndex(Number.MAX_SAFE_INTEGER, -1);
+    const last = lastBar && "close" in lastBar ? lastBar.close : 0;
     const won = new Intl.NumberFormat("ko-KR", { maximumFractionDigits: 0 });
     const pct = (v: number) => { const p = Math.round((v - last) / last * 10000) / 100; return `${p > 0 ? "+" : p < 0 ? "−" : ""}${Math.abs(p).toFixed(2)}%`; };
     return { high: `최고 ${won.format(high)} (${pct(high)})`, low: `최저 ${won.format(low)} (${pct(low)})` };
   });
+  const tagsMatch = async () => {
+    const want = await expected();
+    return (await high.textContent()) === want.high && (await low.textContent()) === want.low;
+  };
   await expect(high).toBeVisible();
   await expect(low).toBeVisible();
-  await expect.poll(async () => ({ high: await high.textContent(), low: await low.textContent() })).toEqual(await expected());
+  await expect.poll(tagsMatch).toBe(true);
   const chartBox = (await chartOf(cell(page)).boundingBox())!;
   for (const tag of [high, low]) {
     const box = (await tag.boundingBox())!;
     expect(box.x).toBeGreaterThanOrEqual(chartBox.x);
     expect(box.x + box.width).toBeLessThanOrEqual(chartBox.x + chartBox.width);
   }
+
+  await page.evaluate(() => {
+    const scale = window.chartProbe.chart.timeScale();
+    const range = scale.getVisibleLogicalRange()!;
+    scale.setVisibleLogicalRange({ from: range.from - 37.6, to: range.to - 37.6 });
+  });
+  await expect.poll(tagsMatch).toBe(true);
+  await expect(high).toBeVisible();
+  await expect(low).toBeVisible();
 
   await page.keyboard.press("Escape");
   await page.reload();
@@ -183,4 +195,45 @@ test("비교 종목이 있으면 팝오버의 가격 축은 %로 고정한다", 
   for (const name of ["일반", "로그", "%"]) await expect(scale.getByRole("button", { name, exact: true })).toBeDisabled();
   await expect(scale.getByRole("button", { name: "%", exact: true })).toHaveAttribute("aria-pressed", "true");
   await expect(settings.getByText("비교 종목이 있으면 % 축으로 그립니다")).toBeVisible();
+});
+
+test("화면 왼쪽에 반쯤 잘린 봉이 가장 높아도 최고 꼬리표는 화면 안의 가장 높은 봉에 붙는다", async ({ page, scenario }) => {
+  const day = 86_400;
+  const start = Date.parse("2025-01-01T00:00:00+09:00") / 1000;
+  const bars = Array.from({ length: 300 }, (_, i) => {
+    const h = 100_000 - i * 100;
+    return { t: start + i * day, o: h - 200, h, l: h - 500, c: h - 300, v: 1000 };
+  });
+  scenario.reply((url) => url.pathname === "/api/bars" && url.searchParams.get("symbol") === "005930" && url.searchParams.get("period") === "D",
+    { body: { symbol: "005930", venue: "combined", period: "D", bars, current: null, nextBefore: null, seq: null } });
+  const layout = scenario.documents.layout(DEFAULT_LAYOUT_ID);
+  scenario.documents.saveLayout({ ...layout, revision: layout.revision + 1, cells: [{ ...layout.cells[0]!, symbol: "005930", venue: "combined", period: "D",
+    chartSettings: { ...saved(scenario), visibleBars: 60, showExtremes: true } }] });
+  await page.addInitScript(installChartProbe);
+  await page.goto("/");
+  await expect(cell(page)).toHaveAttribute("aria-busy", "false");
+  await expectShownBars(page, 60);
+  const high = cell(page).locator("[data-extreme=high] > span");
+  const lastClose = bars.at(-1)!.c;
+  const highText = (index: number) => `최고 ${new Intl.NumberFormat("ko-KR").format(bars[index]!.h)} (+${((bars[index]!.h - lastClose) / lastClose * 100).toFixed(2)}%)`;
+  await expect(high).toHaveText(highText(240));
+
+  await page.evaluate(() => {
+    const scale = window.chartProbe.chart.timeScale();
+    const range = scale.getVisibleLogicalRange()!;
+    scale.setVisibleLogicalRange({ from: range.from - 100.1, to: range.to - 100.1 });
+  });
+  await expect.poll(() => page.evaluate(() => window.chartProbe.chart.timeScale().getVisibleLogicalRange()!.from)).toBeLessThan(200);
+  const edge = await page.evaluate(() => {
+    const { chart, main } = window.chartProbe;
+    const range = chart.timeScale().getVisibleLogicalRange()!;
+    const cut = Math.floor(range.from);
+    const x = (i: number) => chart.timeScale().timeToCoordinate(main.dataByIndex(i)!.time);
+    return { cutX: x(cut), firstShown: x(cut)! < 0 ? cut + 1 : cut };
+  });
+  expect(edge.cutX).not.toBeNull();
+  expect(edge.cutX!).toBeLessThan(0);
+  const firstShown = edge.firstShown;
+  await expect(high).toBeVisible();
+  await expect(high).toHaveText(highText(firstShown));
 });

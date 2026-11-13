@@ -525,16 +525,22 @@ export class ChartController {
     const last = this.bars.at(-1);
     const range = this.chart.timeScale().getVisibleLogicalRange();
     const info = view?.settings.showExtremes && last && range ? this.main.api.barsInLogicalRange(range) : null;
-    const found = info && findExtremes(this.bars, info.barsBefore, this.bars.length - 1 - info.barsAfter);
     const paneWidth = this.chart.timeScale().width();
+    const xOf = (index: number) => this.chart.timeScale().timeToCoordinate(toChartTime(this.bars[index]!.t));
+    const onScreen = (index: number) => { const x = xOf(index); return x !== null && x >= 0 && x <= paneWidth; };
+    let first = Math.max(0, info?.barsBefore ?? 0);
+    let lastIndex = Math.min(this.bars.length - 1, this.bars.length - 1 - (info?.barsAfter ?? 0));
+    while (info && first <= lastIndex && !onScreen(first)) first++;
+    while (info && lastIndex >= first && !onScreen(lastIndex)) lastIndex--;
+    const found = info && findExtremes(this.bars, first, lastIndex);
     if (!view || !last || !found) return this.extremeTags.show(null, paneWidth);
     const paneHeight = this.chart.panes()[0]?.getHeight() ?? 0;
     const isIndex = isIndexCode(view.symbol);
     const tag = ({ index, price }: Extreme): ExtremeTag | null => {
-      const x = this.chart.timeScale().timeToCoordinate(toChartTime(this.bars[index]!.t));
+      const x = xOf(index);
       const y = this.main.api.priceToCoordinate(price);
-      if (x === null || y === null || x < 0 || x > paneWidth || y < 0 || y > paneHeight) return null;
-      return { x, y, price: formatPrice(price, isIndex), change: last.c === 0 ? "" : formatPercent((price - last.c) / last.c * 100) };
+      if (x === null || y === null || y < 0 || y > paneHeight) return null;
+      return { x, y, price: formatPrice(price, isIndex), change: last.c === 0 ? null : formatPercent((price - last.c) / last.c * 100) };
     };
     this.extremeTags.show({ high: tag(found.high), low: tag(found.low) }, paneWidth);
   }

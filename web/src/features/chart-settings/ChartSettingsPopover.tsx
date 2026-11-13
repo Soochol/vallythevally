@@ -51,7 +51,7 @@ export function ChartSettingsPopover({ slot, anchor, onClose }: { slot: Slot; an
         <div role="group" aria-labelledby={`${id}-bars`} className={`${SEGMENTS} grid-cols-5`}>
           {BAR_PRESETS.map((bars) => (
             <button key={bars ?? "auto"} ref={settings.visibleBars === bars ? focusFirst : undefined} type="button" className={SEGMENT}
-              aria-pressed={settings.visibleBars === bars} title={bars === null ? "칸 크기에 맞춘 기본 봉 수" : undefined}
+              aria-pressed={settings.visibleBars === bars} title={bars === null ? "기본 봉 수 (데스크톱 130, 휴대폰 90)" : undefined}
               onClick={() => { setDraft(null); setVisibleBars(slot, bars); }}>{bars ?? "자동"}</button>
           ))}
         </div>
@@ -68,10 +68,10 @@ export function ChartSettingsPopover({ slot, anchor, onClose }: { slot: Slot; an
       <div className="h-px bg-line" />
       <section className="flex flex-col gap-2">
         <h3 className="text-xs text-text-2">표시</h3>
-        <button type="button" role="switch" aria-checked={settings.showExtremes} aria-describedby={`${id}-extremes`} className="ui-switch" onClick={() => setShowExtremes(slot, !settings.showExtremes)}>
+        <button type="button" role="switch" aria-checked={settings.showExtremes} className="ui-switch" onClick={() => setShowExtremes(slot, !settings.showExtremes)}>
           <span className="flex flex-1 flex-col text-left leading-snug">
             <span className="font-medium">화면 내 최고·최저</span>
-            <span id={`${id}-extremes`} className="text-xs text-text-2">지금 보이는 봉 안에서 찾아 표시</span>
+            <span className="text-xs text-text-2">지금 보이는 봉 안에서 찾아 표시</span>
           </span>
           <span aria-hidden="true" className="ui-switch-track"><span /></span>
         </button>

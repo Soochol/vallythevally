@@ -48,7 +48,7 @@ export const useUiStore = create<UiStore>()((set) => {
     clearRecent: () => edit((p) => (p.recentSymbols.length === 0 ? p : { ...p, recentSymbols: [] })),
     setLastLayoutId: (id) => edit((p) => (p.lastLayoutId === id ? p : { ...p, lastLayoutId: id })),
     setActiveWatchlist: (id) => edit((p) => (p.activeWatchlistId === id ? p : { ...p, activeWatchlistId: id })),
-    setIndicatorWindow: (indicatorWindow) => edit((p) => p.indicatorWindow === indicatorWindow ? p : { ...p, indicatorWindow }),
+    setIndicatorWindow: (indicatorWindow) => edit((p) => (p.indicatorWindow === indicatorWindow ? p : { ...p, indicatorWindow })),
     setDrawingPrefs: (patch) => edit((p) => ({ ...p, drawing: { ...p.drawing, ...patch } })),
     setWatchGroupCollapsed: (id, collapsed, known) =>
       edit((p) => {

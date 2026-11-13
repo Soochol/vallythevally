@@ -4,7 +4,7 @@ export interface ExtremeTag {
   x: number;
   y: number;
   price: string;
-  change: string;
+  change: string | null;
 }
 
 const SIDE_LABEL: Record<ExtremeSide, string> = { high: "최고", low: "최저" };
@@ -31,7 +31,7 @@ class Tag {
     if (!tag) return;
     this.root.style.transform = `translate(${tag.x}px, ${tag.y}px)`;
     this.root.toggleAttribute("data-flip", tag.x > paneWidth - FLIP_WITHIN_PX);
-    this.price.textContent = `${tag.price} (${tag.change})`;
+    this.price.textContent = tag.change === null ? tag.price : `${tag.price} (${tag.change})`;
   }
 }
 
