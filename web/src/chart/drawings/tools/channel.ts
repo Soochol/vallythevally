@@ -1,4 +1,5 @@
 import { at, defaultFill, defaultStroke, EXTEND_OPTIONS, EXTENDS, readBool, readFill, readOneOf, readRecord, readStroke, select, strokeFields } from "../styleKit";
+import { extendedSegment } from "../geometry";
 import { type AxisLabel, defineTool, type Shape, type ToolContext } from "../toolSpec";
 import type { DrawingPoint, Extend, Fill, ScreenPoint, Stroke } from "../types";
 
@@ -41,18 +42,6 @@ function offsetTo(a: ScreenPoint, b: ScreenPoint, c: ScreenPoint): ScreenPoint {
   return { x: c.x - a.x - along * d.x, y: c.y - a.y - along * d.y };
 }
 
-function stretched(a: ScreenPoint, b: ScreenPoint, extend: Extend, ctx: ToolContext): [ScreenPoint, ScreenPoint] {
-  const d = { x: b.x - a.x, y: b.y - a.y };
-  const length = Math.hypot(d.x, d.y);
-  if (extend === "none" || length === 0) return [a, b];
-  const far = (Math.max(Math.abs(a.x), Math.abs(a.y), Math.abs(b.x), Math.abs(b.y)) + ctx.paneWidth + ctx.paneHeight) / length;
-  const left = extend === "left" || extend === "both";
-  const right = extend === "right" || extend === "both";
-  const before = a.x <= b.x ? left : right;
-  const after = a.x <= b.x ? right : left;
-  return [before ? plus(a, d, -far) : a, after ? plus(b, d, far) : b];
-}
-
 function screenPoints(points: readonly DrawingPoint[], ctx: ToolContext) {
   const [p0, p1, p2] = points;
   const a = p0 === undefined ? null : ctx.toScreen(p0);
@@ -91,7 +80,7 @@ export const channel = defineTool<ChannelStyle>({
   shapes({ points, style }, ctx) {
     const screen = screenPoints(points, ctx);
     if (screen === null) return [];
-    const [start, end] = stretched(screen.a, screen.b, style.extend, ctx);
+    const { a: start, b: end } = extendedSegment(screen.a, screen.b, style.extend, { width: ctx.paneWidth, height: ctx.paneHeight });
     const base: Shape = { kind: "segment", a: start, b: end, stroke: style.line };
     const d = screen.offset;
     if (d === null) return [base];

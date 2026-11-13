@@ -75,7 +75,7 @@ describe("평행 채널", () => {
     const [fill, base, opposite] = channel.shapes({ points, style: right, text: null, selected: false }, ctx);
     if (fill?.kind !== "polyline" || base?.kind !== "segment" || opposite?.kind !== "segment") throw new Error("unexpected shapes");
     expect(base.a).toEqual({ x: 100, y: 400 });
-    expect(base.b.x).toBeGreaterThan(ctx.paneWidth);
+    expect(base.b.y).toBeLessThan(0);
     expect(base.b.x + base.b.y).toBeCloseTo(500);
     expect(opposite.b).toEqual({ x: base.b.x - 50, y: base.b.y - 50 });
     expect(fill.points).toEqual([base.a, base.b, opposite.b, opposite.a]);

@@ -5,6 +5,7 @@ import {
   constrainAxis,
   constrainSquare,
   distanceToSegment,
+  extendedSegment,
   hitShape,
   hitTest,
   type HitItem,
@@ -102,6 +103,28 @@ test("상자 고르기는 상자에 걸친 드로잉", () => {
   const a: HitItem = { id: "a", z: 1, shapes: [line(10, 10, 50, 50)], handles: [] };
   const b: HitItem = { id: "b", z: 2, shapes: [line(300, 300, 350, 350)], handles: [] };
   expect(idsInBox([a, b], { x: 40, y: 0 }, { x: 0, y: 40 }, pane)).toEqual(["a"]);
+});
+
+test("두 점이 화면 밖에 있어도 연장해 화면을 지나는 선은 상자로 고른다", () => {
+  const offLeft: HitItem = { id: "left", z: 1, shapes: [{ kind: "segment", a: { x: -5000, y: 250 }, b: { x: -4000, y: 250 }, stroke, extend: "right" }], handles: [] };
+  const offRight: HitItem = { id: "right", z: 2, shapes: [{ kind: "segment", a: { x: 5000, y: 100 }, b: { x: 6000, y: 100 }, stroke, extend: "both" }], handles: [] };
+  expect(hitTest([offLeft], { x: 400, y: 250 }, pane)).toEqual({ kind: "body", id: "left", part: "line" });
+  expect(idsInBox([offLeft, offRight], { x: 300, y: 50 }, { x: 500, y: 300 }, pane)).toEqual(["left", "right"]);
+});
+
+test("연장한 선분은 방향과 길이에 상관없이 화면 전체를 덮는다", () => {
+  const diagonal: HitItem = { id: "diagonal", z: 1, shapes: [{ kind: "segment", a: { x: -5000, y: -5000 }, b: { x: -4999, y: -4999 }, stroke, extend: "right" }], handles: [] };
+  const tiny: HitItem = { id: "tiny", z: 2, shapes: [{ kind: "segment", a: { x: 100, y: 200 }, b: { x: 100 + 1e-12, y: 200 }, stroke, extend: "right" }], handles: [] };
+  expect(idsInBox([diagonal, tiny], { x: 150, y: 150 }, { x: 250, y: 250 }, pane)).toEqual(["diagonal", "tiny"]);
+  const far = extendedSegment({ x: -1e6, y: -1e6 }, { x: -999_999, y: -999_999 }, "right", pane);
+  expect(far.b.y).toBeGreaterThanOrEqual(pane.height);
+  const back = extendedSegment({ x: 5000, y: 5000 }, { x: 5001, y: 5001 }, "left", pane);
+  expect(back.a.x).toBeLessThanOrEqual(0);
+  expect(back.b).toEqual({ x: 5001, y: 5001 });
+  expect(extendedSegment({ x: 10, y: 10 }, { x: 10, y: 10 }, "both", pane)).toEqual({ a: { x: 10, y: 10 }, b: { x: 10, y: 10 } });
+  const point = { kind: "segment", a: { x: 0, y: 200 }, b: { x: 1e-170, y: 200 }, stroke, extend: "right" } as const;
+  expect(extendedSegment(point.a, point.b, point.extend, pane)).toEqual({ a: point.a, b: point.b });
+  expect(hitShape(point, { x: 400, y: 200 }, pane)).toBeNull();
 });
 
 describe("Shift 제약", () => {

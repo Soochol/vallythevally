@@ -45,6 +45,24 @@ function extendedRange(a: ScreenPoint, b: ScreenPoint, extend: Extend): { lo: nu
   return { lo: beforeA ? -Infinity : 0, hi: afterB ? Infinity : 1 };
 }
 
+function farthestCorner(p: ScreenPoint, pane: Pane): number {
+  return Math.max(Math.hypot(p.x, p.y), Math.hypot(pane.width - p.x, p.y), Math.hypot(p.x, pane.height - p.y), Math.hypot(pane.width - p.x, pane.height - p.y));
+}
+
+export function extendedSegment(a: ScreenPoint, b: ScreenPoint, extend: Extend, pane: Pane): { a: ScreenPoint; b: ScreenPoint } {
+  const d = { x: b.x - a.x, y: b.y - a.y };
+  if (extend === "none" || d.x * d.x + d.y * d.y === 0) return { a, b };
+  const length = Math.hypot(d.x, d.y);
+  const u = { x: d.x / length, y: d.y / length };
+  const { lo, hi } = extendedRange(a, b, extend);
+  const reachA = farthestCorner(a, pane);
+  const reachB = farthestCorner(b, pane);
+  return {
+    a: lo < 0 ? { x: a.x - u.x * reachA, y: a.y - u.y * reachA } : a,
+    b: hi > 1 ? { x: b.x + u.x * reachB, y: b.y + u.y * reachB } : b,
+  };
+}
+
 export function distanceToSegment(a: ScreenPoint, b: ScreenPoint, p: ScreenPoint, extend: Extend = "none"): number {
   const dx = b.x - a.x;
   const dy = b.y - a.y;
@@ -170,15 +188,8 @@ export function hitTest(items: readonly HitItem[], p: ScreenPoint, pane: Pane, m
 export function shapeBounds(s: Shape, pane: Pane, measure: TextMeasure = approxTextMeasure): Box {
   switch (s.kind) {
     case "segment": {
-      const ext = s.extend ?? "none";
-      if (ext === "none") return normalize(s.a, s.b);
-      const { lo, hi } = extendedRange(s.a, s.b, ext);
-      const dx = s.b.x - s.a.x;
-      const dy = s.b.y - s.a.y;
-      const far = Math.hypot(pane.width, pane.height) / Math.max(1e-9, Math.hypot(dx, dy));
-      const t0 = Math.max(lo, -far);
-      const t1 = Math.min(hi, 1 + far);
-      return normalize({ x: s.a.x + t0 * dx, y: s.a.y + t0 * dy }, { x: s.a.x + t1 * dx, y: s.a.y + t1 * dy });
+      const { a, b } = extendedSegment(s.a, s.b, s.extend ?? "none", pane);
+      return normalize(a, b);
     }
     case "polyline": {
       const xs = s.points.map((q) => q.x);
