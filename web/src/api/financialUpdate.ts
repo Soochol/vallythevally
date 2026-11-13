@@ -1,25 +1,21 @@
 import { queryOptions, type QueryClient, useQuery } from "@tanstack/react-query";
-import type { FinancialUpdateStatus } from "./generated/FinancialUpdateStatus";
 import type { FinancialUpdatePage } from "./generated/FinancialUpdatePage";
+import { financialJobActive, type FinancialJobCommand } from "../lib/financialJob";
 import { getJson, sendJson } from "./http";
 
-export const updateActive = (status: FinancialUpdateStatus | undefined) => status === "planning" || status === "collecting" || status === "pausing" || status === "checking";
-export function updateProgress(job: Pick<FinancialUpdatePage, "phase" | "completedCompanies" | "historyCompletedCompanies" | "totalCompanies">): { done: number; total: number } {
-  return { done: job.phase === "history" || job.phase === "complete" ? job.historyCompletedCompanies : job.completedCompanies, total: job.totalCompanies };
-}
 export const financialUpdateQuery = queryOptions({
   queryKey: ["financial-update"],
   queryFn: ({ signal }) => getJson<FinancialUpdatePage>("/api/financial-update", signal),
   staleTime: 0,
   retry: false,
-  refetchInterval: (query) => updateActive(query.state.data?.status) ? 1000 : false,
+  refetchInterval: (query) => financialJobActive(query.state.data?.status) ? 1000 : false,
 });
 
 export function useFinancialUpdate(enabled = true) {
   return useQuery({ ...financialUpdateQuery, enabled });
 }
 
-export async function commandFinancialUpdate(client: QueryClient, action: "start" | "pause" | "resume"): Promise<void> {
+export async function commandFinancialUpdate(client: QueryClient, action: FinancialJobCommand): Promise<void> {
   const keys = [["financial-update"], ["financials"]];
   await Promise.all(keys.map((queryKey) => client.cancelQueries({ queryKey })));
   try {
