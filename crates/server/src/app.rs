@@ -293,7 +293,13 @@ mod tests {
     use std::io::Write;
     use std::sync::{Arc, Mutex};
 
-    use fake_kiwoom::{APP_KEY, APP_SECRET, FakeKiwoom, TOKEN};
+    use futures::{SinkExt, StreamExt};
+    use tokio_tungstenite::tungstenite::Message;
+
+    use crate::kiwoom::rest::testing::FakeTransport;
+    use crate::kiwoom::wire::TokenResponse;
+
+    const TOKEN: &str = "ws-log-filter-regression-token";
 
     use super::*;
     use crate::config::Secret;
@@ -318,12 +324,25 @@ mod tests {
         let writer = out.clone();
         let subscriber = tracing_subscriber::registry().with(tracing_subscriber::fmt::layer().with_writer(move || writer.clone()).with_ansi(false).with_filter(filter));
         let _guard = tracing::subscriber::set_default(subscriber);
-        let fake = FakeKiwoom::start().await;
-        let transport = ReqwestTransport::new(fake.base_url()).unwrap();
-        let rest = KiwoomRest::new(Arc::new(transport), KiwoomAuth::new(Secret::new(APP_KEY.into()), Secret::new(APP_SECRET.into()), None), Clock::system());
-        let (_stream, mut events) = KiwoomStream::spawn(fake.ws_url(), rest, Clock::system());
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("ws://{}", listener.local_addr().unwrap());
+        let peer = tokio::spawn(async move {
+            let (tcp, _) = listener.accept().await.unwrap();
+            let mut socket = tokio_tungstenite::accept_async(tcp).await.unwrap();
+            let Message::Text(login) = socket.next().await.unwrap().unwrap() else { panic!("LOGIN frame") };
+            assert_eq!(serde_json::from_str::<serde_json::Value>(login.as_str()).unwrap(), serde_json::json!({"trnm":"LOGIN", "token":TOKEN}));
+            socket.send(Message::Text(r#"{"trnm":"LOGIN","return_code":0}"#.into())).await.unwrap();
+            let _ = socket.next().await;
+        });
+        let clock = Clock::system();
+        let transport = Arc::new(FakeTransport::new(Duration::ZERO, |_| panic!("current token needs no HTTP request")));
+        let rest = KiwoomRest::new(Arc::new(transport), KiwoomAuth::new(Secret::new("key".into()), Secret::new("secret".into()), None), clock.clone());
+        rest.auth().record_issued(TokenResponse { token: TOKEN.into(), expires_dt: "20991231000000".into() }, clock.now()).unwrap();
+        let (stream, mut events) = KiwoomStream::spawn(url, rest, clock);
         let live = tokio::time::timeout(Duration::from_secs(3), events.recv()).await.unwrap();
         assert!(matches!(live, Some(StreamEvent::Live { .. })), "{live:?}");
+        drop(stream);
+        tokio::time::timeout(Duration::from_secs(3), peer).await.unwrap().unwrap();
         String::from_utf8(out.0.lock().unwrap().clone()).unwrap()
     }
 
