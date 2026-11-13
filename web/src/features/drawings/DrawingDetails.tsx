@@ -62,12 +62,15 @@ export function DrawingTextEditor({ slot, editor }: { slot: number; editor: Draw
   const ref = useRef<HTMLTextAreaElement>(null);
   const anchor = useRef<HTMLDivElement>(null);
   const surface = surfaceFor(slot); const p = editor.draft.points.at(-1); const at = p ? surface?.frame().ctx.toScreen(p) : null;
+  const meaningful = (text: string | null) => text?.trim() ? text : null;
+  const typed = { ...editor, draft: { ...editor.draft, text: meaningful(editor.draft.text) } };
+  const submit = () => typed.draft.text === meaningful(editor.original.text) ? close(slot) : confirm(slot, typed);
   useEffect(() => { ref.current?.focus(); ref.current?.select(); }, []);
-  return <div data-chart-control ref={anchor} style={{ position: "absolute", left: Math.max(8, Math.min(at?.x ?? 80, (surface?.frame().pane.width ?? 500) - 300)), top: Math.max(8, Math.min(at?.y ?? 80, (surface?.frame().pane.height ?? 400) - 160)) }}><Popover anchor={anchor} onClose={() => close(slot)} className="draw-text-editor" style={{ width: 300 }}>
+  return <div data-chart-control ref={anchor} style={{ position: "absolute", left: Math.max(8, Math.min(at?.x ?? 80, (surface?.frame().pane.width ?? 500) - 300)), top: Math.max(8, Math.min(at?.y ?? 80, (surface?.frame().pane.height ?? 400) - 160)) }}><Popover anchor={anchor} onClose={(reason) => reason === "outside" ? submit() : close(slot)} className="draw-text-editor" style={{ width: 300 }}>
     <textarea ref={ref} className={INPUT} aria-label="드로잉 글자" rows={3} value={editor.draft.text ?? ""} onChange={(e) => draft({ text: e.target.value })} onKeyDown={(e) => {
       if (e.nativeEvent.isComposing || e.keyCode === 229) return;
-      if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); confirm(slot, editor); }
+      if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submit(); }
       if (e.key === "Escape") { e.preventDefault(); close(slot); }
-    }} /><div><span>Enter 확인 · Shift+Enter 줄바꿈</span><button className="tb-btn" onClick={() => close(slot)}>취소</button><button className="btn-primary" onClick={() => confirm(slot, editor)}>확인</button></div>
+    }} /><div><span>Enter 확인 · Shift+Enter 줄바꿈</span><button className="tb-btn" onClick={() => useDrawingSession.setState({ editor: { ...typed, kind: "settings" } })}>세부 설정</button><button className="tb-btn" onClick={() => close(slot)}>취소</button><button className="btn-primary" onClick={submit}>확인</button></div>
   </Popover></div>;
 }
