@@ -1,8 +1,8 @@
 import { describe, expect, test } from "vitest";
 import type { Shape, ToolContext } from "../toolSpec";
 import type { DrawingPoint } from "../types";
-import { fibext } from "./fibext";
-import type { FibStyle } from "./fibKit";
+import { fibext, FIBEXT_LEVELS } from "./fibext";
+import { fibDefaults } from "./fibKit";
 
 const ctx: ToolContext = {
   toScreen: (p) => (p.t < 0 ? null : { x: p.t / 10, y: 500 - p.price }),
@@ -25,7 +25,7 @@ const up: DrawingPoint[] = [
   { t: 2000, price: 200 },
   { t: 3000, price: 150 },
 ];
-const style = fibext.defaultStyle() as FibStyle;
+const style = fibDefaults(FIBEXT_LEVELS);
 const draw = (points: readonly DrawingPoint[], s: unknown = style) => fibext.shapes({ points, style: s, text: null, selected: false }, ctx);
 const levelPrices = (shapes: readonly Shape[]) => shapes.flatMap((s) => (s.kind === "segment" && s.stroke.dash === "solid" ? [500 - s.a.y] : []));
 
@@ -33,6 +33,7 @@ describe("피보나치 확장", () => {
   test("점 셋을 찍는다", () => {
     expect(fibext.placement).toEqual({ kind: "points", count: 3 });
     expect(fibext.pointRoles).toHaveLength(3);
+    expect(fibext.defaultStyle()).toEqual(style);
   });
 
   test("기본 수준은 0, 0.618, 1, 1.272, 1.618이 켜져 있고 2.618은 꺼져 있다", () => {

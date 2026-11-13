@@ -1,8 +1,8 @@
 import { describe, expect, test } from "vitest";
 import type { Shape, ToolContext } from "../toolSpec";
 import type { DrawingPoint } from "../types";
-import { fib } from "./fib";
-import type { FibStyle } from "./fibKit";
+import { fib, FIB_LEVELS } from "./fib";
+import { fibDefaults, type FibStyle, parseFibStyle } from "./fibKit";
 
 const fakeContext = (overrides: Partial<ToolContext> = {}): ToolContext => ({
   toScreen: (p) => (p.t < 0 ? null : { x: p.t / 10, y: 500 - p.price }),
@@ -25,14 +25,15 @@ const rising: DrawingPoint[] = [
   { t: 1000, price: 100 },
   { t: 2000, price: 200 },
 ];
-const style = fib.defaultStyle() as FibStyle;
+const style = fibDefaults(FIB_LEVELS);
 const draw = (points: readonly DrawingPoint[], s: unknown = style, ctx = fakeContext()) => fib.shapes({ points, style: s, text: null, selected: false }, ctx);
 const ofKind = <K extends Shape["kind"]>(shapes: readonly Shape[], kind: K) => shapes.filter((s): s is Extract<Shape, { kind: K }> => s.kind === kind);
 const levelPrices = (shapes: readonly Shape[]) => ofKind(shapes, "segment").filter((s) => s.stroke.dash === "solid").map((s) => 500 - s.a.y);
-const restyle = (patch: Partial<FibStyle>) => fib.parseStyle({ ...style, ...patch }) as FibStyle;
+const restyle = (patch: Partial<FibStyle>) => fib.parseStyle({ ...style, ...patch });
 
 describe("피보나치 되돌림", () => {
   test("점 둘을 찍는다", () => {
+    expect(fib.defaultStyle()).toEqual(style);
     expect(fib.placement).toEqual({ kind: "points", count: 2 });
     expect(fib.group).toBe("fib");
   });
@@ -123,7 +124,7 @@ describe("피보나치 되돌림", () => {
   });
 
   test("막대의 선 색은 켜진 수준의 색을 한 번에 바꾼다", () => {
-    const next = fib.bar.lineColor?.set(style, "#123456") as FibStyle;
+    const next = parseFibStyle(fib.bar.lineColor?.set(style, "#123456"), style);
     expect(next.levels.filter((l) => l.on).every((l) => l.color === "#123456")).toBe(true);
     expect(next.levels.filter((l) => !l.on).map((l) => l.color)).toEqual(style.levels.filter((l) => !l.on).map((l) => l.color));
     expect(fib.bar.lineColor?.get(next)).toBe("#123456");
@@ -138,8 +139,8 @@ describe("피보나치 되돌림", () => {
 
   test("값이 수가 아닌 수준은 버리고 24개를 넘는 수준은 자른다", () => {
     const many = Array.from({ length: 30 }, (_, i) => ({ value: i, color: "#111111", on: true }));
-    expect((fib.parseStyle({ levels: many }) as FibStyle).levels).toHaveLength(24);
+    expect(fib.parseStyle({ levels: many })).toHaveProperty("levels.length", 24);
     const mixed = [{ value: "0.5", color: "#111111", on: true }, { value: Number.NaN }, { value: 0.5, extra: 1 }];
-    expect((fib.parseStyle({ levels: mixed }) as FibStyle).levels).toEqual([{ value: 0.5, color: "$draw", on: true, extra: 1 }]);
+    expect(fib.parseStyle({ levels: mixed })).toHaveProperty("levels", [{ value: 0.5, color: "$draw", on: true, extra: 1 }]);
   });
 });

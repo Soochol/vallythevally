@@ -25,7 +25,7 @@ export function levelPrice(anchor: FibAnchor, ratio: number, reverse: boolean): 
   return zero + (one - zero) * ratio;
 }
 
-const fibDefaults = (levels: readonly Level[]): FibStyle => ({
+export const fibDefaults = (levels: readonly Level[]): FibStyle => ({
   v: 1,
   levels: levels.map((l) => ({ ...l })),
   line: { width: 1, dash: "solid" },
@@ -46,7 +46,7 @@ function readLevels(raw: unknown, fallback: readonly Level[]): Level[] {
   return levels.slice(0, MAX_LEVELS);
 }
 
-function parseFibStyle(raw: unknown, d: FibStyle): FibStyle {
+export function parseFibStyle(raw: unknown, d: FibStyle): FibStyle {
   const o = readRecord(raw);
   const line = readRecord(o.line);
   const { width, dash } = readStroke(line, { color: DRAW, ...d.line });
@@ -111,7 +111,10 @@ function levelShapes(style: FibStyle, anchor: FibAnchor, xs: readonly number[], 
     })
     .sort((a, b) => a.level.value - b.level.value);
   const bands: Shape[] = style.fill.on
-    ? drawn.slice(1).map(({ level, y }, i) => ({ kind: "hband", y1: drawn[i]!.y, y2: y, x1, x2, fill: { on: true, color: level.color, opacity: style.fill.opacity } }))
+    ? drawn.flatMap(({ y }, i): Shape[] => {
+        const upper = drawn[i + 1];
+        return upper === undefined ? [] : [{ kind: "hband", y1: y, y2: upper.y, x1, x2, fill: { on: true, color: upper.level.color, opacity: style.fill.opacity } }];
+      })
     : [];
   const lines: Shape[] = drawn.map(({ level, y }) => ({ kind: "segment", a: { x: x1, y }, b: { x: x2, y }, stroke: { color: level.color, width: style.line.width, dash: style.line.dash } }));
   const place = labelPlace(style.extend, x1, x2);
@@ -123,14 +126,23 @@ function levelShapes(style: FibStyle, anchor: FibAnchor, xs: readonly number[], 
   return [...bands, ...lines, ...labels];
 }
 
-export interface FibToolSpec {
+type FibPlacement =
+  | { count: 2; anchor(points: readonly [DrawingPoint, DrawingPoint]): FibAnchor }
+  | { count: 3; anchor(points: readonly [DrawingPoint, DrawingPoint, DrawingPoint]): FibAnchor };
+
+export type FibToolSpec = FibPlacement & {
   tool: "fib" | "fibext";
   label: string;
   icon: string;
-  count: 2 | 3;
   pointRoles: readonly PointRole[];
   levels: readonly Level[];
-  anchor(points: readonly DrawingPoint[]): FibAnchor;
+};
+
+function anchorOf(spec: FibPlacement, points: readonly DrawingPoint[]): FibAnchor | null {
+  const [a, b, c] = points;
+  if (a === undefined || b === undefined) return null;
+  if (spec.count === 2) return spec.anchor([a, b]);
+  return c === undefined ? null : spec.anchor([a, b, c]);
 }
 
 const L = at<FibStyle>();
@@ -167,11 +179,12 @@ export function defineFibTool(spec: FibToolSpec): Tool {
     },
     shapes({ points, style }, ctx) {
       const screens = points.map((p) => ctx.toScreen(p));
-      if (points.length < spec.count) return trendSegments(screens);
+      const anchor = anchorOf(spec, points);
+      if (anchor === null) return trendSegments(screens);
       const trend = style.trendLine ? trendSegments(screens) : [];
       const xs = screens.flatMap((s) => (s === null ? [] : [s.x]));
       if (xs.length < screens.length) return trend;
-      return [...levelShapes(style, spec.anchor(points), xs, ctx), ...trend];
+      return [...levelShapes(style, anchor, xs, ctx), ...trend];
     },
     handles({ points }, ctx) {
       return points.flatMap((p, i) => {
