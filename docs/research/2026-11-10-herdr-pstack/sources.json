@@ -1,0 +1,24 @@
+{
+  "observed_on": "2026-11-10",
+  "method": "GitHub public repository search, primary README and source inspection; no runtime execution",
+  "queries": [
+    "pstack herdr",
+    "herdr orchestrator",
+    "herdr-core orchestration"
+  ],
+  "repositories": [
+    {
+      "repository": "conscientiousness/herdr-pstack-orchestrator"
+    },
+    {
+      "repository": "TiewKH/pstack-herdr"
+    },
+    {
+      "repository": "giuseppecrj/pi-herdr-pstack"
+    },
+    {
+      "repository": "br1anchen/open-pstack"
+    }
+  ]
+}
+
