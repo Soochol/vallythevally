@@ -15,6 +15,10 @@ path = "src/lib.rs"
 name = "vally-server"
 path = "src/main.rs"
 
+[[bin]]
+name = "dart-smoke"
+path = "src/bin/dart-smoke.rs"
+
 [dependencies]
 domain = { path = "../domain" }
 indicators = { path = "../indicators" }
