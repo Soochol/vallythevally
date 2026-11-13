@@ -60,7 +60,7 @@ async fn complete_first_page_uses_latest_of_fifteen_without_fetching_another_pag
     assert_eq!(evidence["document"],"20260917000264");
     for invalid in [search(&entries,14),search(&format!("{entries}{ENTRY}"),35),search(ENTRY,35)] {
         fake.state.lock().unwrap().discovery_search = Some(invalid);
-        assert_eq!(fake.client().resolve(STOCK,true).await.unwrap_err(),Failure::InvalidResponse);
+        assert_eq!(fake.client().resolve(STOCK,true).await.unwrap_err(),Interrupt::Failure(Failure::InvalidResponse));
     }
     fake.state.lock().unwrap().discovery_search = Some("<section class=\"paging-group\"><div class=\"info\"><em>0</em></div></section>검색결과가 없습니다.".into());
     assert!(fake.client().resolve(STOCK,true).await.unwrap().is_none());
