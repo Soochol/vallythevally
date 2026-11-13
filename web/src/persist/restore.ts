@@ -10,7 +10,7 @@ import { parseChartSettings } from "../chart/settings";
 import { venueFor } from "../lib/venue";
 import { type CellState, DEFAULT_LAYOUT, type EditableLayout } from "../stores/layout";
 import { layoutPath, UI_STATE_PATH, WATCHLISTS_PATH } from "../api/userData";
-import { isWatchlists } from "../lib/watchlist";
+import { parseWatchlists } from "../lib/watchlist";
 import type { SaveTarget } from "../stores/persist";
 import type { Unsaved } from "./saver";
 import { parseUiState, type UiExtra, type UiPrefs } from "./uiState";
@@ -61,7 +61,7 @@ export async function restore(src: RestoreSources): Promise<Restored> {
   const localUi = newer(src.unsaved("ui"), UI_STATE_PATH, serverUi);
   const ui = parseUiState(localUi?.value ?? rawUi);
   const localWatch = newer(src.unsaved("watchlist"), WATCHLISTS_PATH, serverWatch.revision);
-  const localLists = localWatch && isWatchlists(localWatch.value.lists) ? localWatch.value.lists : null;
+  const localLists = localWatch ? parseWatchlists(localWatch.value.lists) : null;
 
   const stored = await openLayout(src, ui.prefs.lastLayoutId);
   const localLayout = stored && newer(src.unsaved("layout"), layoutPath(stored.id), stored.revision);

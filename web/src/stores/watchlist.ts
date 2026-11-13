@@ -4,14 +4,22 @@ import type { Watchlist } from "../api/generated/Watchlist";
 import {
   addSymbol,
   addSymbols,
+  assignGroup,
+  createGroup,
   DEFAULT_WATCHLISTS,
+  deleteGroup,
+  duplicateWatchlist,
   MAX_WATCHLISTS,
   listNameFrom,
+  moveGroupBy,
   moveSymbol,
   moveSymbolBy,
   removeSymbol,
+  renameGroup,
+  sameWatchlist,
   type Transfer,
   transferSymbol,
+  ungroup,
 } from "../lib/watchlist";
 import { useUiStore } from "./ui";
 import type { ToastUndo } from "./selection";
@@ -36,6 +44,12 @@ interface WatchlistState {
   move(list: string, code: SymbolCode, to: number): void;
   moveBy(list: string, code: SymbolCode, step: -1 | 1): void;
   transfer(from: string, to: string, code: SymbolCode, how: Transfer): void;
+  createGroup(list: string, id: string, name: string, codes?: readonly SymbolCode[]): void;
+  renameGroup(list: string, id: string, name: string): void;
+  moveGroupBy(list: string, id: string, step: -1 | 1): void;
+  ungroup(list: string, id: string): void;
+  deleteGroup(list: string, id: string): void;
+  assignGroup(list: string, code: SymbolCode, group: string | null): void;
 }
 
 export const useWatchlistStore = create<WatchlistState>()((set, get) => {
@@ -44,12 +58,17 @@ export const useWatchlistStore = create<WatchlistState>()((set, get) => {
       const lists = f(s.lists);
       return lists === s.lists ? s : { lists, revision: s.revision + 1 };
     });
-  const editSymbols = (id: string, f: (symbols: readonly SymbolCode[]) => readonly SymbolCode[]) =>
+  const editList = (id: string, f: (list: Watchlist) => Watchlist) =>
     edit((lists) => {
       const i = lists.findIndex((l) => l.id === id);
-      const symbols = i < 0 ? undefined : f(lists[i]!.symbols);
-      if (symbols === undefined || symbols === lists[i]!.symbols) return lists;
-      return lists.map((l, j) => (j === i ? { ...l, symbols: [...symbols] } : l));
+      const next = i < 0 ? undefined : f(lists[i]!);
+      if (next === undefined || next === lists[i]) return lists;
+      return lists.map((l, j) => (j === i ? next : l));
+    });
+  const editSymbols = (id: string, f: (symbols: readonly SymbolCode[]) => readonly SymbolCode[]) =>
+    editList(id, (l) => {
+      const symbols = f(l.symbols);
+      return symbols === l.symbols ? l : { ...l, symbols: [...symbols] };
     });
   return {
     lists: DEFAULT_WATCHLISTS,
@@ -58,28 +77,27 @@ export const useWatchlistStore = create<WatchlistState>()((set, get) => {
     load: (lists, revision) => set((s) => {
       const next = lists.map((incoming) => {
         const current = s.lists.find((l) => l.id === incoming.id);
-        return current && current.name === incoming.name && current.symbols.length === incoming.symbols.length && current.symbols.every((code, i) => code === incoming.symbols[i]) ? current : incoming;
+        return current && sameWatchlist(current, incoming) ? current : incoming;
       });
       return next.length === s.lists.length && next.every((l, i) => l === s.lists[i]) && (revision === undefined || (revision === s.revision && revision === s.loadedRevision))
         ? s : { lists: next, ...(revision === undefined ? {} : { revision, loadedRevision: revision }) };
     }),
-    create: (id, name) => edit((lists) => (lists.length >= MAX_WATCHLISTS ? lists : [...lists, { id, name, symbols: [] }])),
+    create: (id, name) => edit((lists) => (lists.length >= MAX_WATCHLISTS ? lists : [...lists, { id, name, symbols: [], groups: [] }])),
     duplicate: (source, id) => edit((lists) => {
       const original = lists.find((l) => l.id === source);
       if (!original || lists.length >= MAX_WATCHLISTS) return lists;
-      return [...lists, { id, name: listNameFrom(lists, `${original.name} 복사`), symbols: [...original.symbols] }];
+      return [...lists, duplicateWatchlist(original, id, listNameFrom(lists, `${original.name} 복사`), () => crypto.randomUUID())];
     }),
     rename: (id, name) => edit((lists) => (lists.some((l) => l.id === id && l.name !== name) ? lists.map((l) => (l.id === id ? { ...l, name } : l)) : lists)),
     removeList: (id) => edit((lists) => (lists.length <= 1 || !lists.some((l) => l.id === id) ? lists : lists.filter((l) => l.id !== id))),
     add: (list, code) => editSymbols(list, (l) => addSymbol(l, code)),
     addAll: (list, codes) => editSymbols(list, (l) => addSymbols(l, codes)),
-    remove: (list, code) => editSymbols(list, (l) => removeSymbol(l, code)),
+    remove: (list, code) => editList(list, (l) => removeSymbol(l, code)),
     removeWithUndo: (list, code): WatchlistRemoval | null => {
       const source = get().lists.find((l) => l.id === list);
-      const index = source?.symbols.indexOf(code) ?? -1;
-      if (!source || index < 0) return null;
-      const after = { ...source, symbols: source.symbols.filter((s) => s !== code) };
-      edit((lists) => lists.map((l) => l.id === list ? after : l));
+      if (!source?.symbols.includes(code)) return null;
+      const after = removeSymbol(source, code);
+      editList(list, () => after);
       const revision = get().revision;
       const available = () => get().revision === revision && get().lists.includes(after);
       return {
@@ -87,19 +105,23 @@ export const useWatchlistStore = create<WatchlistState>()((set, get) => {
         restore: (lists, allowRestored = false) => {
           if (!available()) return null;
           const target = lists.find((l) => l.id === list);
-          if (!target || target.name !== source.name) return null;
-          if (allowRestored && target.symbols.length === source.symbols.length && target.symbols.every((s, i) => s === source.symbols[i])) return [...lists];
-          if (target.symbols.length !== after.symbols.length || !target.symbols.every((s, i) => s === after.symbols[i])) return null;
-          const symbols = [...target.symbols];
-          symbols.splice(Math.min(index, symbols.length), 0, code);
-          return lists.map((l) => l.id === list ? { ...l, symbols } : l);
+          if (!target) return null;
+          if (allowRestored && sameWatchlist(target, source)) return [...lists];
+          if (!sameWatchlist(target, after)) return null;
+          return lists.map((l) => l.id === list ? source : l);
         },
         subscribe: (listener) => useWatchlistStore.subscribe(listener),
       };
     },
-    move: (list, code, to) => editSymbols(list, (l) => moveSymbol(l, code, to)),
-    moveBy: (list, code, step) => editSymbols(list, (l) => moveSymbolBy(l, code, step)),
+    move: (list, code, to) => editList(list, (l) => moveSymbol(l, code, to)),
+    moveBy: (list, code, step) => editList(list, (l) => moveSymbolBy(l, code, step)),
     transfer: (from, to, code, how) => edit((lists) => transferSymbol(lists, from, to, code, how)),
+    createGroup: (list, id, name, codes) => editList(list, (l) => createGroup(l, id, name, codes)),
+    renameGroup: (list, id, name) => editList(list, (l) => renameGroup(l, id, name)),
+    moveGroupBy: (list, id, step) => editList(list, (l) => moveGroupBy(l, id, step)),
+    ungroup: (list, id) => editList(list, (l) => ungroup(l, id)),
+    deleteGroup: (list, id) => editList(list, (l) => deleteGroup(l, id)),
+    assignGroup: (list, code, group) => editList(list, (l) => assignGroup(l, code, group)),
   };
 });
 

@@ -10,7 +10,7 @@ import { restore } from "./restore";
 import { DEFAULT_UI_PREFS, toUiState } from "./uiState";
 import { FIRST_WATCHLIST_ID, MAX_WATCHLIST_NAME, MAX_WATCHLISTS } from "../lib/watchlist";
 
-const FIRST = { id: FIRST_WATCHLIST_ID, name: "기본" };
+const FIRST = { id: FIRST_WATCHLIST_ID, name: "기본", groups: [] };
 
 let autosave: Autosave;
 let puts: { path: string; body: unknown; keepalive: boolean }[];
@@ -78,6 +78,7 @@ test("관심종목 패널을 접으면 모르는 키와 함께 UiState를 보낸
         watchColumns: ["price", "changeRate"],
         drawing: DEFAULT_UI_PREFS.drawing,
         pinnedMinutes: [],
+        collapsedWatchGroups: [],
         revision: expect.any(Number),
       },
       keepalive: false,
@@ -127,7 +128,7 @@ test("목록을 만들고 종목을 옮기면 목록 전체를 한 본문으로 
   expect(puts.at(-1)!.body).toEqual({
     lists: [
       { ...FIRST, symbols: [] },
-      { id: "L2", name: "반도체", symbols: ["005930"] },
+      { id: "L2", name: "반도체", symbols: ["005930"], groups: [] },
     ],
     revision: expect.any(Number),
   });
@@ -143,6 +144,7 @@ test("옛 한 목록 한도(64KB)에 들던 종목을 가장 긴 감싸개 20개
     id: String(i).padStart(64, "0"),
     name: "𝄞".repeat(MAX_WATCHLIST_NAME - String(i).length) + i,
     symbols: i === 0 ? codes : [],
+    groups: [],
   }));
   useWatchlistStore.getState().load(lists);
   useWatchlistStore.getState().move(lists[0]!.id, codes[1]!, 0);

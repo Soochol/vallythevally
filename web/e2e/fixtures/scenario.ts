@@ -19,6 +19,7 @@ import type { ServerMessage } from "../../src/api/generated/ServerMessage";
 import type { SymbolInfo } from "../../src/api/generated/SymbolInfo";
 import type { UiState } from "../../src/api/generated/UiState";
 import type { Venue } from "../../src/api/generated/Venue";
+import type { Watchlist } from "../../src/api/generated/Watchlist";
 import type { Watchlists } from "../../src/api/generated/Watchlists";
 import { barsPage, findSymbol, publicInfo, quoteOf, resolveVenue, search, SYMBOLS } from "../../dev/fakeMarket";
 
@@ -30,11 +31,12 @@ type Handler = (request: Request) => FixtureReply | Promise<FixtureReply>;
 type Subscription = Extract<ClientMessage, { type: "subscribe" }>;
 const clone = <T>(value: T): T => structuredClone(value);
 const error = (status: number, code: ApiError["error"]["code"], message: string): FixtureReply => ({ status, body: { error: { code, message, reason: null, retryAt: null, manualActionRequired: false } } satisfies ApiError });
+export type WatchlistSeed = Omit<Watchlist, "groups"> & Partial<Pick<Watchlist, "groups">>;
 const matches = (match: Matcher, request: Request) => typeof match === "string" ? new URL(request.url()).pathname === match : match(new URL(request.url()), request);
 
 export class UserDocuments {
   private layouts = new Map<string, Layout>([[DEFAULT_LAYOUT_ID, { id: DEFAULT_LAYOUT_ID, name: "기본", arrangement: "1", sync: { crosshair: true, scroll: true }, cells: [{ slot: 0, symbol: "IDX:001", venue: null, period: "D", symbolLink: false, chartSettings: { v: 1, style: "candle", scale: "normal", indicators: [], compare: [], panels: [] } }], updatedAt: 0, revision: 0 }]]);
-  private watchlistValue: Watchlists = { lists: [{ id: FIRST_WATCHLIST_ID, name: "기본", symbols: [] }], revision: 0 };
+  private watchlistValue: Watchlists = { lists: [{ id: FIRST_WATCHLIST_ID, name: "기본", symbols: [], groups: [] }], revision: 0 };
   private screenValue: Screens = { screens: [], revision: 0 };
   private uiValue: UiState = { lastLayoutId: DEFAULT_LAYOUT_ID, theme: "dark", revision: 0 };
   private drawingValues = new Map<string, Drawing>();
@@ -52,7 +54,10 @@ export class UserDocuments {
     return clone(saved);
   }
   watchlists(): Watchlists { return clone(this.watchlistValue); }
-  saveWatchlists(value: Watchlists): Watchlists { this.watchlistValue = clone(value); return this.watchlists(); }
+  saveWatchlists(value: { lists: readonly WatchlistSeed[]; revision: number }): Watchlists {
+    this.watchlistValue = { revision: value.revision, lists: value.lists.map((l) => ({ ...clone(l), groups: clone(l.groups ?? []) })) };
+    return this.watchlists();
+  }
   screens(): Screens { return clone(this.screenValue); }
   saveScreens(value: Screens): Screens { this.screenValue = clone(value); return this.screens(); }
   uiPrefs() { return parseUiState(this.uiValue).prefs; }
