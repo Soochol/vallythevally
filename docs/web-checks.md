@@ -41,6 +41,18 @@ cd web
 pnpm exec playwright install --only-shell chromium
 ```
 
+## 시험 작성 시 주의사항
+
+- `VALLY_CLOCK_START`는 서버의 시간 판단만 바꾼다. HTTP `Date` 헤더는 실제 시각이다. 둘을 함께 쓰는 시계 시험은 `clockStart: null`로 실행한다(#117).
+- Playwright `clock.setSystemTime`은 벽시계만 바꾸고 `performance.now`는 그대로다.
+- 임시 웹 시험 파일은 `web/` 안에 둔다. 밖에서는 ESM 설정이 적용되지 않아 `import.meta`가 실패할 수 있다.
+
+웹 검증 도구를 변경하면 다음 시험을 실행한다. 실원천 도구의 loopback 시험은 [실제 DART 확인](#명시적으로-실제-dart-확인)을 따른다.
+
+```sh
+python3 scripts/test-web.py
+```
+
 ## WASM 재사용과 직접 pnpm 명령
 
 `pnpm wasm`, `pnpm typecheck`, `pnpm test`, `pnpm build`도 같은 WASM 준비 경로를 사용한다. 이 명령에 외부 `flock`을 추가하지 않는다. `build-wasm.sh` 자체가 준비 도구로 연결된다.

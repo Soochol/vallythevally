@@ -20,7 +20,7 @@ These are not triage roles; skills and people use them as follows.
 
 | Label | Meaning |
 | ----- | ------- |
-| `spec` | The source spec of one feature. Its work tickets are sub-issues of it (see [`AGENTS.md`](../../AGENTS.md#이슈와-새-기능)). |
+| `spec` | A feature specification issue. |
 | `bug` | Something that is broken in released behaviour. |
 | `wayfinder:map` | A wayfinder map: the index of decisions for an effort that was still foggy. |
 | `wayfinder:research`, `wayfinder:prototype`, `wayfinder:grilling`, `wayfinder:task` | A decision ticket under a map, by how it gets resolved. |
