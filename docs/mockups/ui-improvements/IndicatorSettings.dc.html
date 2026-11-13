@@ -1,0 +1,254 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>지표 설정창 전체</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+button{border:0;background:none;color:inherit;font:inherit;cursor:pointer;padding:0}
+a{color:#C7F36B}a:hover{color:#DAF9A0}
+</style>
+</helmet>
+<div style="width: 1040px; height: 720px; box-sizing: border-box; padding: 32px; background: #050905; color: #F0F4EC; font-family: 'Noto Sans KR', system-ui, sans-serif; font-size: 12px; font-variant-numeric: tabular-nums; display: flex">
+<div style="flex: 1; min-width: 0; border-radius: 16px; background: #1B211B; box-shadow: 0 0 0 1px rgba(255,255,255,0.10), inset 0 1px 0 rgba(255,255,255,0.09), 0 24px 60px rgba(0,0,0,0.55); overflow: hidden; display: flex; flex-direction: column">
+
+<div style="display: flex; align-items: center; gap: 10px; height: 52px; flex: none; padding: 0 12px 0 16px; border-bottom: 1px solid rgba(255,255,255,0.08)">
+<svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#AEB8A8" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="6.5"></circle><path d="M16 16l4.5 4.5"></path></svg>
+<span style="flex: 1; font-size: 14px; color: #AEB8A8">이평 20, bb 20 2, 종목 이름·코드</span>
+<div style="display: flex; gap: 4px; padding: 4px; border-radius: 9px; background: #080B09">
+<button type="button" onClick="{{ showCurrent }}" style="{{ tabCurrentStyle }}">이 칸에 띄운 지표<span style="{{ countStyle }}">5</span></button>
+<button type="button" onClick="{{ showAdd }}" style="{{ tabAddStyle }}">지표 추가</button>
+<span style="display: grid; place-items: center; height: 26px; padding: 0 12px; color: #AEB8A8">비교 종목</span>
+</div>
+<span style="display: grid; place-items: center; width: 32px; height: 32px; color: #AEB8A8"><svg role="img" aria-label="닫기" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"></path></svg></span>
+</div>
+
+<div style="flex: 1; min-height: 0; display: flex">
+<div style="width: 300px; flex: none; border-right: 1px solid rgba(255,255,255,0.08); padding: 8px; box-sizing: border-box; display: flex; flex-direction: column; gap: 2px">
+<sc-for list="{{ sections }}" as="sec" hint-placeholder-count="2">
+<div style="display: flex; flex-direction: column; gap: 2px">
+<span style="padding: 8px 8px 4px; color: #AEB8A8; font-size: 11px">{{ sec.label }}</span>
+<sc-for list="{{ sec.rows }}" as="row" hint-placeholder-count="3">
+<button type="button" onClick="{{ row.pick }}" style="{{ row.style }}">
+<sc-if value="{{ row.isCurrent }}" hint-placeholder-val="{{ true }}">
+<span style="{{ row.dot }}"></span>
+</sc-if>
+<sc-if value="{{ row.isAdd }}" hint-placeholder-val="{{ false }}">
+<svg aria-hidden="true" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#AEB8A8" stroke-width="2.4" stroke-linecap="round" style="flex: none"><path d="M12 5v14M5 12h14"></path></svg>
+</sc-if>
+<span style="flex: 1; min-width: 0; text-align: left; font-weight: 500">{{ row.name }}</span>
+<sc-if value="{{ row.isCurrent }}" hint-placeholder-val="{{ true }}">
+<svg role="img" aria-label="숨기기" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#AEB8A8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+<svg role="img" aria-label="지우기" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#AEB8A8" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"></path></svg>
+</sc-if>
+</button>
+</sc-for>
+</div>
+</sc-for>
+</div>
+
+<div style="flex: 1; min-width: 0; padding: 20px; box-sizing: border-box; display: flex; flex-direction: column; gap: 14px">
+<div style="display: flex; align-items: center; gap: 10px">
+<span style="{{ dotStyle }}"></span>
+<b style="font-size: 17px; font-weight: 600">{{ title }}</b>
+<span style="color: #AEB8A8">{{ place }}</span>
+<span style="flex: 1"></span>
+<span style="display: inline-flex; align-items: center; gap: 6px; color: #C7F36B"><span style="width: 6px; height: 6px; border-radius: 50%; background: #C7F36B"></span>차트에 미리보기 중</span>
+</div>
+
+<div style="height: 60px; flex: none; border-radius: 9px; background: #080B09; box-shadow: inset 0 0 0 1px rgba(255,255,255,0.08); overflow: hidden">
+<svg role="img" aria-label="선 미리보기" width="636" height="60" viewBox="0 0 636 60" preserveAspectRatio="none" fill="none"><path d="M0 44 C 50 42, 80 18, 140 24 S 230 48, 290 38 S 390 8, 450 16 S 560 34, 636 12" stroke-linecap="round" style="{{ lineStyle }}"></path></svg>
+</div>
+
+<div style="flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 24px">
+<div style="display: flex; flex-direction: column; gap: 10px">
+<span style="color: #AEB8A8; font-size: 11px">설정값</span>
+<sc-if value="{{ isMa }}" hint-placeholder-val="{{ true }}">
+<div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px; padding: 4px; border-radius: 9px; background: #080B09">
+<span style="display: grid; place-items: center; height: 26px; border-radius: 7px; background: #2A332A; color: #C7F36B; font-weight: 600">단순</span>
+<span style="display: grid; place-items: center; height: 26px; color: #AEB8A8">지수</span>
+</div>
+</sc-if>
+<sc-for list="{{ fields }}" as="f" hint-placeholder-count="2">
+<div style="display: flex; align-items: center; gap: 8px">
+<span style="flex: 1; color: #AEB8A8">{{ f.label }}</span>
+<span style="display: inline-flex; align-items: center; width: 84px; height: 32px; padding: 0 10px; box-sizing: border-box; border: 1px solid rgba(255,255,255,0.16); border-radius: 9px; background: #080B09">{{ f.value }}</span>
+<span style="width: 14px; color: #AEB8A8">{{ f.unit }}</span>
+</div>
+</sc-for>
+<sc-if value="{{ isMa }}" hint-placeholder-val="{{ true }}">
+<div style="display: flex; align-items: center; justify-content: flex-end; gap: 4px">
+<sc-for list="{{ presets }}" as="p" hint-placeholder-count="4">
+<span style="{{ p.style }}">{{ p.label }}</span>
+</sc-for>
+<span style="width: 18px"></span>
+</div>
+</sc-if>
+<sc-if value="{{ noFields }}" hint-placeholder-val="{{ false }}">
+<span style="color: #AEB8A8; line-height: 1.5">정할 값이 없는 지표입니다. 분기봉·연봉에서 보고기간별 자료로 그립니다.</span>
+</sc-if>
+<span style="flex: 1"></span>
+<span style="color: #AEB8A8; font-size: 11px">선 굵기</span>
+<div style="display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 4px">
+<sc-for list="{{ widths }}" as="w" hint-placeholder-count="5">
+<button type="button" aria-label="{{ w.label }}" onClick="{{ w.pick }}" style="{{ w.style }}"><span style="{{ w.line }}"></span></button>
+</sc-for>
+</div>
+</div>
+
+<div style="display: flex; flex-direction: column; gap: 10px">
+<div style="display: flex; align-items: baseline; justify-content: space-between"><span style="color: #AEB8A8; font-size: 11px">선 색상</span><span style="display: inline-flex; align-items: center; gap: 6px"><span style="{{ chipStyle }}"></span>{{ colorName }}</span></div>
+<div style="display: grid; grid-template-columns: 40px repeat(5, minmax(0, 1fr)); align-items: center; gap: 4px">
+<span style="color: #AEB8A8; font-size: 11px">테마</span>
+<sc-for list="{{ theme }}" as="sw" hint-placeholder-count="5">
+<button type="button" aria-label="{{ sw.name }}" onClick="{{ sw.pick }}" style="{{ sw.style }}"></button>
+</sc-for>
+</div>
+<div style="height: 1px; background: rgba(255,255,255,0.08)"></div>
+<div style="display: flex; flex-direction: column; gap: 4px">
+<sc-for list="{{ rows }}" as="row" hint-placeholder-count="4">
+<div style="display: grid; grid-template-columns: 40px repeat(10, minmax(0, 1fr)); align-items: center; gap: 4px">
+<span style="color: #AEB8A8; font-size: 11px">{{ row.label }}</span>
+<sc-for list="{{ row.swatches }}" as="sw" hint-placeholder-count="10">
+<button type="button" aria-label="{{ sw.name }}" onClick="{{ sw.pick }}" style="{{ sw.style }}"></button>
+</sc-for>
+</div>
+</sc-for>
+</div>
+<div style="height: 1px; background: rgba(255,255,255,0.08)"></div>
+<div style="display: grid; grid-template-columns: 40px repeat(10, minmax(0, 1fr)); align-items: center; gap: 4px">
+<span style="color: #AEB8A8; font-size: 11px">최근</span>
+<sc-for list="{{ recent }}" as="sw" hint-placeholder-count="6">
+<button type="button" aria-label="{{ sw.name }}" onClick="{{ sw.pick }}" style="{{ sw.style }}"></button>
+</sc-for>
+</div>
+<div style="display: flex; align-items: center; gap: 8px">
+<span style="flex: 1; display: inline-flex; align-items: center; gap: 8px; height: 32px; padding: 0 10px; box-sizing: border-box; border: 1px solid rgba(255,255,255,0.16); border-radius: 9px; background: #080B09"><span style="color: #AEB8A8; font-size: 11px">HEX</span>{{ hex }}</span>
+<span style="display: inline-flex; align-items: center; height: 32px; padding: 0 12px; border-radius: 9px; background: rgba(255,255,255,0.085)">직접 고르기</span>
+</div>
+</div>
+</div>
+
+<div style="display: flex; align-items: center; justify-content: flex-end; gap: 8px">
+<span style="flex: 1; color: #AEB8A8; font-size: 11px">테마 색은 테마를 바꾸면 함께 바뀝니다</span>
+<span style="display: inline-flex; align-items: center; height: 36px; padding: 0 14px; border-radius: 9px; box-shadow: inset 0 0 0 1px rgba(255,255,255,0.16)">되돌리기</span>
+<span style="display: inline-flex; align-items: center; height: 36px; padding: 0 16px; border-radius: 9px; background: #C7F36B; color: #131B05; font-weight: 600">{{ primary }}</span>
+</div>
+</div>
+</div>
+
+<div style="display: flex; align-items: center; gap: 14px; height: 34px; flex: none; padding: 0 16px; border-top: 1px solid rgba(255,255,255,0.08); color: #AEB8A8; font-size: 11px">
+<span>↑↓ 고르기</span><span>Tab 설정</span><span>Enter 추가하고 계속</span><span>Shift+Enter 추가하고 닫기</span><span>Esc 되돌리고 닫기</span>
+</div>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1040,"height":720}}'>
+class Component extends DCLogic {
+renderVals() {
+const s = this.state || {};
+const tab = s.tab ?? 'current';
+const PRICE = '가격 패널', BELOW = '아래 패널', FIN = '재무지표 · 아래 패널';
+const bong = (label, value) => ({ label, value, unit: '봉' });
+const CURRENT = [
+{ id: 'ma5', name: '이동평균 5', kind: '이동평균', group: PRICE, color: 'theme-0', width: 1, ma: true, period: '5', fields: [bong('기간', '5')] },
+{ id: 'ma20', name: '이동평균 20', kind: '이동평균', group: PRICE, color: 'theme-1', width: 2, ma: true, period: '20', fields: [bong('기간', '20')] },
+{ id: 'bb', name: '볼린저 밴드 20·2', kind: '볼린저 밴드', group: PRICE, color: 'theme-2', width: 1, fields: [bong('기간', '20'), { label: '표준편차 배수', value: '2', unit: '' }] },
+{ id: 'vol', name: '거래량', kind: '거래량', group: BELOW, color: 'theme-0', width: 1, fields: [bong('이동평균', '20')] },
+{ id: 'rsi', name: 'RSI 14', kind: 'RSI', group: BELOW, color: 'theme-3', width: 1, fields: [bong('기간', '14'), bong('시그널', '9')] },
+];
+const ADD = [
+{ id: 'add-ma', name: '이동평균', group: PRICE, ma: true, period: '20', fields: [bong('기간', '20')] },
+{ id: 'add-bb', name: '볼린저 밴드', group: PRICE, fields: [bong('기간', '20'), { label: '표준편차 배수', value: '2', unit: '' }] },
+{ id: 'add-ichimoku', name: '일목균형표', group: PRICE, fields: [bong('전환선', '9'), bong('기준선', '26'), bong('선행스팬 B', '52'), bong('이동', '26')] },
+{ id: 'add-vol', name: '거래량', group: BELOW, fields: [bong('이동평균', '20')] },
+{ id: 'add-rsi', name: 'RSI', group: BELOW, fields: [bong('기간', '14'), bong('시그널', '9')] },
+{ id: 'add-macd', name: 'MACD', group: BELOW, fields: [bong('단기', '12'), bong('장기', '26'), bong('시그널', '9')] },
+{ id: 'add-stoch', name: '스토캐스틱 슬로우', group: BELOW, fields: [bong('%K', '14'), bong('%D', '3'), bong('스무딩', '3')] },
+{ id: 'add-revenue', name: '매출', group: FIN, fields: [] },
+{ id: 'add-op', name: '영업이익', group: FIN, fields: [] },
+{ id: 'add-roe', name: 'ROE', group: FIN, fields: [] },
+{ id: 'add-dps', name: 'DPS', group: FIN, fields: [] },
+].map((i) => ({ ...i, kind: i.name, color: 'theme-4', width: 1 }));
+const list = tab === 'current' ? CURRENT : ADD;
+const sel = (tab === 'current' ? s.selCurrent : s.selAdd) ?? list[tab === 'current' ? 1 : 0].id;
+const colors = s.colors || {};
+const widths = s.widths || {};
+const colorOf = (i) => colors[i.id] ?? i.color;
+const widthOf = (i) => widths[i.id] ?? i.width;
+const HUES = ['빨강', '주황', '노랑', '라임', '초록', '청록', '하늘', '파랑', '보라', '분홍'];
+const SETS = {
+theme: { names: ['테마 1', '테마 2', '테마 3', '테마 4', '테마 5'], colors: ['#E8C27A', '#B9A6FF', '#73D0BD', '#F49C73', '#A8B693'] },
+light: { label: '밝게', names: HUES, colors: ['#FFA3AB', '#FFC7A1', '#F6E3A0', '#DEF9A6', '#B0E8C2', '#A6E7DA', '#A5E1EC', '#A9C9FF', '#D4C8FF', '#F6C3E3'] },
+base: { label: '기본', names: HUES, colors: ['#FF6B78', '#F4935F', '#EBD06F', '#C7F36B', '#7FD69A', '#5FCDB8', '#6EC7D8', '#73A8FF', '#A48CFA', '#EE9DD0'] },
+deep: { label: '진하게', names: HUES, colors: ['#D9485A', '#D97A45', '#C29A45', '#94C23C', '#4CA977', '#42A99D', '#459DBD', '#4A7FE0', '#8B74E0', '#CC6BA8'] },
+gray: { label: '무채색', names: ['흰색', '회색 1', '회색 2', '회색 3', '회색 4', '회색 5', '회색 6', '회색 7', '회색 8', '회색 9'], colors: ['#FFFFFF', '#F0F4EC', '#D7DED1', '#C6CEC0', '#AEB8A8', '#98A391', '#87947F', '#78836F', '#5F695A', '#465044'] },
+recent: { names: ['최근 1', '최근 2', '최근 3', '최근 4', '최근 5', '최근 6'], colors: ['#73A8FF', '#FF6B78', '#C7F36B', '#D4C8FF', '#F0F4EC', '#42A99D'] },
+};
+const active = list.find((i) => i.id === sel) ?? list[0];
+const picked = colorOf(active);
+const width = widthOf(active);
+const lookup = {};
+Object.keys(SETS).forEach((key) => SETS[key].colors.forEach((hex, i) => { lookup[key + '-' + i] = { hex, name: key === 'theme' ? SETS[key].names[i] : hex }; }));
+const make = (key, height) => SETS[key].colors.map((hex, i) => {
+const id = key + '-' + i;
+return {
+name: SETS[key].names[i] + ' ' + hex,
+style: 'height:' + height + 'px;border-radius:6px;background:' + hex + ';box-shadow:' + (picked === id ? '0 0 0 2px #1B211B, 0 0 0 4px #F0F4EC' : 'inset 0 0 0 1px rgba(255,255,255,0.12)'),
+pick: () => this.setState({ colors: { ...colors, [active.id]: id } }),
+};
+});
+const groups = [];
+list.forEach((i) => { if (!groups.includes(i.group)) groups.push(i.group); });
+const tabStyle = (on) => 'display:inline-flex;align-items:center;gap:6px;height:26px;padding:0 12px;border-radius:7px;' + (on ? 'background:#C7F36B;color:#131B05;font-weight:600;' : 'color:#AEB8A8;');
+const now = lookup[picked];
+return {
+showCurrent: () => this.setState({ tab: 'current' }),
+showAdd: () => this.setState({ tab: 'add' }),
+tabCurrentStyle: tabStyle(tab === 'current'),
+tabAddStyle: tabStyle(tab === 'add'),
+countStyle: 'padding:0 6px;border-radius:999px;font-size:11px;line-height:16px;' + (tab === 'current' ? 'background:rgba(19,27,5,0.18);' : 'background:rgba(255,255,255,0.085);'),
+sections: groups.map((g) => ({
+label: g,
+rows: list.filter((i) => i.group === g).map((i) => ({
+name: i.name,
+isCurrent: tab === 'current',
+isAdd: tab === 'add',
+dot: 'flex:none;width:10px;height:10px;margin:0 1px;border-radius:50%;background:' + lookup[colorOf(i)].hex,
+style: 'display:flex;align-items:center;gap:8px;width:100%;height:34px;padding:0 8px;border-radius:9px;' + (i.id === active.id ? 'background:rgba(199,243,107,0.15);' : ''),
+pick: () => this.setState(tab === 'current' ? { selCurrent: i.id } : { selAdd: i.id }),
+})),
+})),
+title: active.kind,
+place: active.group === PRICE ? PRICE : BELOW,
+primary: tab === 'current' ? '설정 바꾸기' : active.name + ' 추가',
+isMa: Boolean(active.ma),
+noFields: active.fields.length === 0,
+fields: active.fields,
+presets: ['5', '20', '60', '120'].map((p) => ({ label: p, style: 'display:grid;place-items:center;width:36px;height:24px;border-radius:7px;' + (active.period === p ? 'background:rgba(199,243,107,0.15);color:#C7F36B;font-weight:600;' : 'background:rgba(255,255,255,0.085);color:#AEB8A8;') })),
+theme: make('theme', 24),
+rows: ['light', 'base', 'deep', 'gray'].map((key) => ({ label: SETS[key].label, swatches: make(key, 22) })),
+recent: make('recent', 22),
+hex: now.hex,
+colorName: now.name,
+dotStyle: 'width:12px;height:12px;border-radius:50%;background:' + now.hex,
+chipStyle: 'width:14px;height:14px;border-radius:5px;background:' + now.hex,
+lineStyle: 'stroke:' + now.hex + ';stroke-width:' + width + 'px',
+widths: [1, 2, 3, 4, 5].map((n) => ({
+label: '굵기 ' + n,
+style: 'display:grid;place-items:center;height:30px;border-radius:7px;' + (width === n ? 'background:rgba(199,243,107,0.15);box-shadow:inset 0 0 0 1px #C7F36B;' : 'background:rgba(255,255,255,0.085);'),
+line: 'display:block;width:28px;border-radius:999px;height:' + n + 'px;background:' + now.hex,
+pick: () => this.setState({ widths: { ...widths, [active.id]: n } }),
+})),
+};
+}
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,273 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>차트 옆 지표 인스펙터</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+button{border:0;background:none;color:inherit;font:inherit;cursor:pointer;padding:0}
+a{color:#C7F36B}a:hover{color:#DAF9A0}
+</style>
+</helmet>
+<div style="width: 1180px; height: 840px; box-sizing: border-box; padding: 24px; background: #080B09; color: #F0F4EC; font-family: 'Noto Sans KR', system-ui, sans-serif; font-size: 12px; font-variant-numeric: tabular-nums; display: flex; gap: 16px">
+
+<div style="position: relative; flex: 1; min-width: 0; border-radius: 16px; background: #0C100D; box-shadow: 0 0 0 1px rgba(255,255,255,0.08); overflow: hidden">
+<div style="position: absolute; left: 14px; top: 10px; display: flex; gap: 10px; align-items: baseline"><b style="font-size: 14px; font-weight: 600">한빛전자</b><span style="color: #AEB8A8">일 · 설정이 차트에 바로 보입니다</span></div>
+<sc-for list="{{ candles }}" as="c" hint-placeholder-count="60">
+<div style="{{ c.wick }}"></div><div style="{{ c.body }}"></div>
+</sc-for>
+<svg aria-hidden="true" width="736" height="792" viewBox="0 0 736 792" fill="none" style="position: absolute; left: 0; top: 0">
+<sc-for list="{{ lines }}" as="l" hint-placeholder-count="2">
+<path d="{{ l.d }}" stroke-linejoin="round" stroke-linecap="round" style="{{ l.style }}"></path>
+</sc-for>
+</svg>
+<div style="position: absolute; left: 0; right: 0; top: 590px; height: 1px; background: rgba(255,255,255,0.08)"></div>
+<span style="position: absolute; left: 14px; top: 598px; color: #AEB8A8; font-size: 11px">거래량</span>
+<sc-for list="{{ volumes }}" as="v" hint-placeholder-count="60">
+<div style="{{ v.style }}"></div>
+</sc-for>
+</div>
+
+<div style="width: 380px; flex: none; border-radius: 16px; background: #1B211B; box-shadow: 0 0 0 1px rgba(255,255,255,0.10), inset 0 1px 0 rgba(255,255,255,0.09), 0 24px 60px rgba(0,0,0,0.55); overflow: hidden; display: flex; flex-direction: column">
+<div style="display: flex; align-items: center; gap: 8px; height: 52px; flex: none; padding: 0 10px 0 16px">
+<b style="font-size: 14px; font-weight: 600">지표</b>
+<span style="flex: 1; display: inline-flex; align-items: center; gap: 6px; height: 32px; margin-left: 6px; padding: 0 10px; border-radius: 9px; background: #080B09; color: #AEB8A8"><svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="6.5"></circle><path d="M16 16l4.5 4.5"></path></svg>이평 20, bb 20 2</span>
+<span style="display: grid; place-items: center; width: 32px; height: 32px; color: #AEB8A8"><svg role="img" aria-label="닫기" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"></path></svg></span>
+</div>
+<div style="display: flex; gap: 20px; flex: none; padding: 0 16px; border-bottom: 1px solid rgba(255,255,255,0.08)">
+<button type="button" onClick="{{ showCurrent }}" style="{{ tabCurrentStyle }}">이 칸에 띄운 지표<span style="padding: 0 6px; border-radius: 999px; background: rgba(255,255,255,0.085); color: #AEB8A8; font-size: 11px; font-weight: 400; line-height: 16px">5</span></button>
+<button type="button" onClick="{{ showAdd }}" style="{{ tabAddStyle }}">지표 추가</button>
+<span style="display: inline-flex; align-items: center; height: 38px; color: #AEB8A8">비교 종목</span>
+</div>
+
+<div style="flex: 1; min-height: 0; padding: 4px 8px 8px; display: flex; flex-direction: column; gap: 2px">
+<sc-for list="{{ sections }}" as="sec" hint-placeholder-count="2">
+<div style="display: flex; flex-direction: column; gap: 2px">
+<span style="padding: 8px 8px 4px; color: #AEB8A8; font-size: 11px">{{ sec.label }}</span>
+<sc-for list="{{ sec.rows }}" as="row" hint-placeholder-count="3">
+<div style="{{ row.cardStyle }}">
+<button type="button" onClick="{{ row.pick }}" style="display: flex; align-items: center; gap: 8px; width: 100%; height: 36px; padding: 0 8px; text-align: left">
+<sc-if value="{{ row.isCurrent }}" hint-placeholder-val="{{ true }}">
+<span style="{{ row.dot }}"></span>
+</sc-if>
+<sc-if value="{{ row.isAdd }}" hint-placeholder-val="{{ false }}">
+<svg aria-hidden="true" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#AEB8A8" stroke-width="2.4" stroke-linecap="round" style="flex: none"><path d="M12 5v14M5 12h14"></path></svg>
+</sc-if>
+<span style="font-weight: 500">{{ row.name }}</span>
+<span style="flex: 1; min-width: 0; color: #AEB8A8; font-size: 11px">{{ row.sub }}</span>
+<sc-if value="{{ row.isCurrent }}" hint-placeholder-val="{{ true }}">
+<svg role="img" aria-label="숨기기" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#AEB8A8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+<svg role="img" aria-label="지우기" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#AEB8A8" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"></path></svg>
+</sc-if>
+<svg aria-hidden="true" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#AEB8A8" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" style="{{ row.chevron }}"><path d="M6 9l6 6 6-6"></path></svg>
+</button>
+<sc-if value="{{ row.open }}" hint-placeholder-val="{{ false }}">
+<div style="padding: 4px 12px 12px; display: flex; flex-direction: column; gap: 10px">
+<sc-if value="{{ isMa }}" hint-placeholder-val="{{ true }}">
+<div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px; padding: 4px; border-radius: 9px; background: #080B09">
+<span style="display: grid; place-items: center; height: 24px; border-radius: 7px; background: #2A332A; color: #C7F36B; font-weight: 600">단순</span>
+<span style="display: grid; place-items: center; height: 24px; color: #AEB8A8">지수</span>
+</div>
+</sc-if>
+<sc-for list="{{ fields }}" as="f" hint-placeholder-count="2">
+<div style="display: flex; align-items: center; gap: 8px">
+<span style="flex: 1; color: #AEB8A8">{{ f.label }}</span>
+<sc-if value="{{ f.presets }}" hint-placeholder-val="{{ false }}">
+<span style="display: inline-flex; gap: 4px"><span style="display: grid; place-items: center; width: 30px; height: 24px; border-radius: 7px; background: rgba(255,255,255,0.085); color: #AEB8A8">5</span><span style="display: grid; place-items: center; width: 30px; height: 24px; border-radius: 7px; background: rgba(255,255,255,0.085); color: #AEB8A8">20</span><span style="display: grid; place-items: center; width: 30px; height: 24px; border-radius: 7px; background: rgba(255,255,255,0.085); color: #AEB8A8">60</span><span style="display: grid; place-items: center; width: 34px; height: 24px; border-radius: 7px; background: rgba(255,255,255,0.085); color: #AEB8A8">120</span></span>
+</sc-if>
+<span style="display: inline-flex; align-items: center; width: 64px; height: 30px; padding: 0 10px; box-sizing: border-box; border: 1px solid rgba(255,255,255,0.16); border-radius: 9px; background: #080B09">{{ f.value }}</span>
+<span style="width: 12px; color: #AEB8A8">{{ f.unit }}</span>
+</div>
+</sc-for>
+<sc-if value="{{ noFields }}" hint-placeholder-val="{{ false }}">
+<span style="color: #AEB8A8; line-height: 1.5">정할 값이 없는 지표입니다.</span>
+</sc-if>
+<div style="display: flex; align-items: center; gap: 8px">
+<span style="width: 36px; color: #AEB8A8">굵기</span>
+<div style="flex: 1; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 4px">
+<sc-for list="{{ widths }}" as="w" hint-placeholder-count="5">
+<button type="button" aria-label="{{ w.label }}" onClick="{{ w.pick }}" style="{{ w.style }}"><span style="{{ w.line }}"></span></button>
+</sc-for>
+</div>
+</div>
+<div style="height: 1px; background: rgba(255,255,255,0.08)"></div>
+<div style="display: grid; grid-template-columns: 36px repeat(5, minmax(0, 1fr)); align-items: center; gap: 4px">
+<span style="color: #AEB8A8; font-size: 11px">테마</span>
+<sc-for list="{{ theme }}" as="sw" hint-placeholder-count="5">
+<button type="button" aria-label="{{ sw.name }}" onClick="{{ sw.pick }}" style="{{ sw.style }}"></button>
+</sc-for>
+</div>
+<div style="display: flex; flex-direction: column; gap: 4px">
+<sc-for list="{{ rows }}" as="prow" hint-placeholder-count="4">
+<div style="display: grid; grid-template-columns: 36px repeat(10, minmax(0, 1fr)); align-items: center; gap: 4px">
+<span style="color: #AEB8A8; font-size: 11px">{{ prow.label }}</span>
+<sc-for list="{{ prow.swatches }}" as="sw" hint-placeholder-count="10">
+<button type="button" aria-label="{{ sw.name }}" onClick="{{ sw.pick }}" style="{{ sw.style }}"></button>
+</sc-for>
+</div>
+</sc-for>
+</div>
+<div style="display: flex; align-items: center; gap: 8px">
+<span style="flex: 1; display: inline-flex; align-items: center; gap: 8px; height: 30px; padding: 0 10px; box-sizing: border-box; border: 1px solid rgba(255,255,255,0.16); border-radius: 9px; background: #080B09"><span style="{{ chipStyle }}"></span>{{ hex }}</span>
+<span style="display: inline-flex; align-items: center; height: 30px; padding: 0 12px; border-radius: 9px; background: rgba(255,255,255,0.085)">직접 고르기</span>
+<sc-if value="{{ isAddTab }}" hint-placeholder-val="{{ false }}">
+<span style="display: inline-flex; align-items: center; height: 30px; padding: 0 14px; border-radius: 9px; background: #C7F36B; color: #131B05; font-weight: 600">추가</span>
+</sc-if>
+</div>
+</div>
+</sc-if>
+</div>
+</sc-for>
+</div>
+</sc-for>
+</div>
+
+<div style="flex: none; padding: 10px 16px; border-top: 1px solid rgba(255,255,255,0.08); color: #AEB8A8; font-size: 11px">바로 반영 · Esc로 되돌리고 닫기</div>
+</div>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1180,"height":840}}'>
+class Component extends DCLogic {
+series() {
+if (this._series) return this._series;
+let seed = 20261113;
+const rnd = () => { seed = (seed * 1664525 + 1013904223) % 4294967296; return seed / 4294967296; };
+const out = [];
+let close = 52000;
+for (let i = 0; i < 160; i++) {
+const open = close * (1 + (rnd() - 0.5) * 0.012);
+close = open * (1 + (rnd() - 0.5) * 0.036 + Math.sin(i / 23) * 0.005 + 0.0006);
+out.push({ open, close, high: Math.max(open, close) * (1 + rnd() * 0.012), low: Math.min(open, close) * (1 - rnd() * 0.012), vol: 0.25 + rnd() * 0.75 });
+}
+this._series = out;
+return out;
+}
+renderVals() {
+const s = this.state || {};
+const tab = s.tab ?? 'current';
+const PRICE = '가격 패널', BELOW = '아래 패널', FIN = '재무지표 · 아래 패널';
+const bong = (label, value, presets) => ({ label, value, unit: '봉', presets: Boolean(presets) });
+const plain = (label, value) => ({ label, value, unit: '', presets: false });
+const CURRENT = [
+{ id: 'ma5', name: '이동평균', sub: '단순 · 5봉', group: PRICE, color: 'theme-0', width: 1, ma: 5, fields: [bong('기간', '5', true)] },
+{ id: 'ma20', name: '이동평균', sub: '단순 · 20봉', group: PRICE, color: 'theme-1', width: 2, ma: 20, fields: [bong('기간', '20', true)] },
+{ id: 'bb', name: '볼린저 밴드', sub: '20봉 · 2배', group: PRICE, color: 'theme-2', width: 1, fields: [bong('기간', '20'), plain('표준편차 배수', '2')] },
+{ id: 'vol', name: '거래량', sub: '이동평균 20봉', group: BELOW, color: 'theme-0', width: 1, fields: [bong('이동평균', '20')] },
+{ id: 'rsi', name: 'RSI', sub: '14봉 · 시그널 9', group: BELOW, color: 'theme-3', width: 1, fields: [bong('기간', '14'), bong('시그널', '9')] },
+];
+const ADD = [
+{ id: 'add-ma', name: '이동평균', sub: '', group: PRICE, ma: 20, fields: [bong('기간', '20', true)] },
+{ id: 'add-bb', name: '볼린저 밴드', sub: '', group: PRICE, fields: [bong('기간', '20'), plain('표준편차 배수', '2')] },
+{ id: 'add-ichimoku', name: '일목균형표', sub: '', group: PRICE, fields: [bong('전환선', '9'), bong('기준선', '26'), bong('선행스팬 B', '52')] },
+{ id: 'add-rsi', name: 'RSI', sub: '', group: BELOW, fields: [bong('기간', '14'), bong('시그널', '9')] },
+{ id: 'add-macd', name: 'MACD', sub: '', group: BELOW, fields: [bong('단기', '12'), bong('장기', '26'), bong('시그널', '9')] },
+{ id: 'add-stoch', name: '스토캐스틱 슬로우', sub: '', group: BELOW, fields: [bong('%K', '14'), bong('%D', '3')] },
+{ id: 'add-revenue', name: '매출', sub: '', group: FIN, fields: [] },
+{ id: 'add-op', name: '영업이익', sub: '', group: FIN, fields: [] },
+].map((i) => ({ ...i, color: 'theme-4', width: 1 }));
+const list = tab === 'current' ? CURRENT : ADD;
+const sel = (tab === 'current' ? s.selCurrent : s.selAdd) ?? list[tab === 'current' ? 1 : 0].id;
+const colors = s.colors || {};
+const widths = s.widths || {};
+const colorOf = (i) => colors[i.id] ?? i.color;
+const widthOf = (i) => widths[i.id] ?? i.width;
+const HUES = ['빨강', '주황', '노랑', '라임', '초록', '청록', '하늘', '파랑', '보라', '분홍'];
+const SETS = {
+theme: { names: ['테마 1', '테마 2', '테마 3', '테마 4', '테마 5'], colors: ['#E8C27A', '#B9A6FF', '#73D0BD', '#F49C73', '#A8B693'] },
+light: { label: '밝게', names: HUES, colors: ['#FFA3AB', '#FFC7A1', '#F6E3A0', '#DEF9A6', '#B0E8C2', '#A6E7DA', '#A5E1EC', '#A9C9FF', '#D4C8FF', '#F6C3E3'] },
+base: { label: '기본', names: HUES, colors: ['#FF6B78', '#F4935F', '#EBD06F', '#C7F36B', '#7FD69A', '#5FCDB8', '#6EC7D8', '#73A8FF', '#A48CFA', '#EE9DD0'] },
+deep: { label: '진하게', names: HUES, colors: ['#D9485A', '#D97A45', '#C29A45', '#94C23C', '#4CA977', '#42A99D', '#459DBD', '#4A7FE0', '#8B74E0', '#CC6BA8'] },
+gray: { label: '무채색', names: ['흰색', '회색 1', '회색 2', '회색 3', '회색 4', '회색 5', '회색 6', '회색 7', '회색 8', '회색 9'], colors: ['#FFFFFF', '#F0F4EC', '#D7DED1', '#C6CEC0', '#AEB8A8', '#98A391', '#87947F', '#78836F', '#5F695A', '#465044'] },
+};
+const lookup = {};
+Object.keys(SETS).forEach((key) => SETS[key].colors.forEach((hex, i) => { lookup[key + '-' + i] = hex; }));
+const active = list.find((i) => i.id === sel) ?? null;
+const picked = active ? colorOf(active) : '';
+const width = active ? widthOf(active) : 1;
+const make = (key, height) => SETS[key].colors.map((hex, i) => {
+const id = key + '-' + i;
+return {
+name: SETS[key].names[i] + ' ' + hex,
+style: 'height:' + height + 'px;border-radius:6px;background:' + hex + ';box-shadow:' + (picked === id ? '0 0 0 2px #232B23, 0 0 0 4px #F0F4EC' : 'inset 0 0 0 1px rgba(255,255,255,0.12)'),
+pick: () => this.setState({ colors: { ...colors, [active.id]: id } }),
+};
+});
+const all = this.series();
+const N = 100, W = 736, TOP = 56, PH = 500;
+const view = all.slice(all.length - N);
+const max = Math.max(...view.map((b) => b.high)), min = Math.min(...view.map((b) => b.low));
+const y = (v) => TOP + (max - v) / (max - min) * PH;
+const step = (W - 16) / N;
+const x = (i) => 4 + i * step + step / 2;
+const candles = view.map((b, i) => {
+const color = b.close >= b.open ? '#FF6B78' : '#5B9BFF';
+const top = y(Math.max(b.open, b.close));
+return {
+wick: 'position:absolute;width:1px;left:' + Math.round(x(i)) + 'px;top:' + y(b.high).toFixed(1) + 'px;height:' + (y(b.low) - y(b.high)).toFixed(1) + 'px;background:' + color,
+body: 'position:absolute;left:' + (Math.round(x(i)) - 2) + 'px;width:5px;top:' + top.toFixed(1) + 'px;height:' + Math.max(1, y(Math.min(b.open, b.close)) - top).toFixed(1) + 'px;background:' + color,
+};
+});
+const volumes = view.map((b, i) => ({ style: 'position:absolute;left:' + (Math.round(x(i)) - 2) + 'px;width:5px;bottom:16px;height:' + Math.round(b.vol * 130) + 'px;background:' + (b.close >= b.open ? 'rgba(255,107,120,0.38)' : 'rgba(91,155,255,0.38)') }));
+const maPath = (period) => view.map((_, i) => {
+const end = all.length - N + i + 1;
+const avg = all.slice(end - period, end).reduce((sum, b) => sum + b.close, 0) / period;
+return (i === 0 ? 'M' : 'L') + x(i).toFixed(1) + ' ' + y(avg).toFixed(1);
+}).join(' ');
+const lines = CURRENT.filter((i) => i.ma).map((i) => ({ d: maPath(i.ma), style: 'stroke:' + lookup[colorOf(i)] + ';stroke-width:' + widthOf(i) + 'px' }));
+if (tab === 'add' && active && active.ma) lines.push({ d: maPath(60), style: 'stroke:' + lookup[picked] + ';stroke-width:' + width + 'px;stroke-dasharray:6 5' });
+const groups = [];
+list.forEach((i) => { if (!groups.includes(i.group)) groups.push(i.group); });
+const tabStyle = (on) => 'display:inline-flex;align-items:center;gap:6px;height:38px;box-sizing:border-box;border-bottom:2px solid ' + (on ? '#C7F36B;color:#C7F36B;font-weight:600;' : 'transparent;color:#AEB8A8;');
+const key = tab === 'current' ? 'selCurrent' : 'selAdd';
+return {
+candles,
+volumes,
+lines,
+showCurrent: () => this.setState({ tab: 'current' }),
+showAdd: () => this.setState({ tab: 'add' }),
+tabCurrentStyle: tabStyle(tab === 'current'),
+tabAddStyle: tabStyle(tab === 'add'),
+isAddTab: tab === 'add',
+sections: groups.map((g) => ({
+label: g,
+rows: list.filter((i) => i.group === g).map((i) => {
+const open = active !== null && i.id === active.id;
+return {
+name: i.name,
+sub: i.sub,
+open,
+isCurrent: tab === 'current',
+isAdd: tab === 'add',
+dot: 'flex:none;width:10px;height:10px;margin:0 1px;border-radius:50%;background:' + lookup[colorOf(i)],
+chevron: 'flex:none;transition:transform .12s;transform:rotate(' + (open ? '180deg' : '0deg') + ')',
+cardStyle: 'border-radius:12px;' + (open ? 'background:#232B23;box-shadow:inset 0 0 0 1px rgba(199,243,107,0.45);' : ''),
+pick: () => this.setState({ [key]: open ? 'none' : i.id }),
+};
+}),
+})),
+isMa: Boolean(active && active.ma),
+noFields: Boolean(active && active.fields.length === 0),
+fields: active ? active.fields : [],
+theme: make('theme', 22),
+rows: ['light', 'base', 'deep', 'gray'].map((k) => ({ label: SETS[k].label, swatches: make(k, 20) })),
+hex: picked.startsWith('theme') ? '테마 ' + (Number(picked.slice(6)) + 1) : (lookup[picked] ?? ''),
+chipStyle: 'width:14px;height:14px;border-radius:5px;background:' + (lookup[picked] ?? 'transparent'),
+widths: [1, 2, 3, 4, 5].map((n) => ({
+label: '굵기 ' + n,
+style: 'display:grid;place-items:center;height:26px;border-radius:7px;' + (width === n ? 'background:rgba(199,243,107,0.15);box-shadow:inset 0 0 0 1px #C7F36B;' : 'background:rgba(255,255,255,0.085);'),
+line: 'display:block;width:24px;border-radius:999px;height:' + n + 'px;background:' + (lookup[picked] ?? '#AEB8A8'),
+pick: () => this.setState({ widths: { ...widths, [active.id]: n } }),
+})),
+};
+}
+}
+</script>
+</body>
+</html>
