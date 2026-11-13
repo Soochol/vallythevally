@@ -1,18 +1,18 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
-import type { FinancialsPage } from "../src/api/generated/FinancialsPage";
-import { chartDisplayOptions, seedChartDisplay } from "./chart-display-fixture";
+import { chartDisplayBars, chartDisplayOptions, seedChartDisplay } from "./chart-display-fixture";
 import { installAxisProbe } from "./axis-probe";
 import { installChartProbe } from "./chart-probe";
-import { cell, chartOf, expect, test } from "./harness";
+import { cell, chartOf, expect } from "./frontend-harness";
+import { financialTest as test } from "./financial-update-helpers";
 
 const SCREENS = path.resolve(import.meta.dirname, "../../target/ux-screens");
 
 test.use(chartDisplayOptions);
 
-test("휴대폰 주기 칩은 늦은 글꼴·앞 칩·선택 칩·줄 크기 변경 뒤에도 완전히 보인다", async ({ page, app }, testInfo) => {
+test("휴대폰 주기 칩은 늦은 글꼴·앞 칩·선택 칩·줄 크기 변경 뒤에도 완전히 보인다", async ({ page, scenario }, testInfo) => {
   await page.setViewportSize({ width: 390, height: 844 });
-  await seedChartDisplay(app, "Y");
+  await seedChartDisplay(scenario, "Y");
   let releaseFonts!: () => void;
   const fonts = new Promise<void>((resolve) => { releaseFonts = resolve; });
   let fontRequests = 0;
@@ -58,19 +58,15 @@ test("휴대폰 주기 칩은 늦은 글꼴·앞 칩·선택 칩·줄 크기 변
 });
 
 for (const viewport of [{ width: 1440, height: 900 }, { width: 1024, height: 768 }, { width: 390, height: 844 }]) {
-  test(`큰 재무 축·첫 시간 범위·주기 칩 ${viewport.width}×${viewport.height}`, async ({ page, app }) => {
+  test(`큰 재무 축·첫 시간 범위·주기 칩 ${viewport.width}×${viewport.height}`, async ({ page, scenario }) => {
     await page.setViewportSize(viewport);
-    await seedChartDisplay(app, "Y");
+    await seedChartDisplay(scenario, "Y");
     await page.addInitScript(installChartProbe);
     await page.addInitScript(installAxisProbe);
     const errors: string[] = [];
     page.on("pageerror", (error) => errors.push(error.message));
     await page.goto("/");
     await expect(cell(page)).toHaveAttribute("aria-busy", "false");
-    await expect.poll(async () => {
-      const data: FinancialsPage = await (await fetch(`${app.url}/api/symbols/000660/financials?period=Y`)).json();
-      return data.status;
-    }).toBe("ready");
     await expect.poll(() => page.evaluate(() => window.axisTexts().flatMap((axis) => axis.texts).map((label) => label.text))).toContain("−48.1조");
     for (const period of ["Y", "Q"] as const) {
       if (period === "Q") {
@@ -138,13 +134,9 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 1024, height: 768
   });
 }
 
-test("가격보다 오래된 재무자료를 먼저 받아도 첫 가격 봉부터 마지막 봉의 여백까지 보인다", async ({ page, app }) => {
-  await seedChartDisplay(app, "Y");
-  await app.fake.respondWith({ apiId: "ka10094", status: 200, body: {
-    return_code: 0, return_msg: "synthetic", stk_cd: "000660_AL",
-    stk_yr_pole_chart_qry: [2017, 2016].map((year) => ({ dt: `${year}0101`, open_pric: "1277000", high_pric: "1302000", low_pric: "1271000", cur_prc: "1296000", trde_qty: "3120000" })),
-    _headers: { "cont-yn": "N", "next-key": "" },
-  } });
+test("가격보다 오래된 재무자료를 먼저 받아도 첫 가격 봉부터 마지막 봉의 여백까지 보인다", async ({ page, scenario }) => {
+  await seedChartDisplay(scenario, "Y");
+  scenario.reply(url => url.pathname === "/api/bars" && url.searchParams.get("symbol") === "000660" && url.searchParams.get("period") === "Y", { body: chartDisplayBars("Y", 2) });
   await page.addInitScript(installChartProbe);
   await page.addInitScript(installAxisProbe);
   await page.goto("/");

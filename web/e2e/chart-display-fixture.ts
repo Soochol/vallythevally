@@ -1,32 +1,46 @@
-import { startUpdate } from "./financial-update-helpers";
-import type { Layout } from "../src/api/generated/Layout";
+import type { BarsPage } from "../src/api/generated/BarsPage";
+import type { FinancialPeriod } from "../src/api/generated/FinancialPeriod";
+import type { FinancialsPage } from "../src/api/generated/FinancialsPage";
 import type { ChartSettings } from "../src/chart/settings";
-import { type App, DEFAULT_LAYOUT_ID, expect } from "./harness";
+import { DEFAULT_LAYOUT_ID, type Scenario } from "./frontend-harness";
+import { financialPage } from "./financial-update-helpers";
 
 const METRICS = ["owner_roe", "investing_cash_flow", "dps", "debt_ratio"] as const;
 
-export async function seedChartDisplay(app: App, period: "Q" | "Y") {
-  app.dart!.largeValues = true;
-  for (const coarse of ["Q", "Y"] as const) await app.fake.respondWith({ apiId: coarse === "Y" ? "ka10094" : "ka10083", status: 200, body: {
-    return_code: 0, return_msg: "synthetic", stk_cd: "000660_AL",
-    [coarse === "Y" ? "stk_yr_pole_chart_qry" : "stk_mth_pole_chart_qry"]: Array.from({ length: coarse === "Y" ? 4 : 48 }, (_, i) => {
-      const date = new Date(Date.UTC(2017, coarse === "Y" ? 0 : 11 - i, 1));
-      if (coarse === "Y") date.setUTCFullYear(2017 - i);
-      return { dt: date.toISOString().slice(0, 10).replaceAll("-", ""), open_pric: "1277000", high_pric: "1302000", low_pric: "1271000", cur_prc: "1296000", trde_qty: "3120000" };
-    }), _headers: { "cont-yn": "N", "next-key": "" },
-  } });
-  await startUpdate(app, true);
-  const layout: Layout = await (await fetch(`${app.url}/api/layouts/${DEFAULT_LAYOUT_ID}`)).json();
-  const chartSettings: ChartSettings = { v: 2, style: "candle", scale: "normal", compare: [], indicators: METRICS.map((kind) => ({
-    id: kind, spec: { kind }, panel: kind, visible: true, style: { colors: ["ind-1"], width: 1 },
-  })), panels: METRICS.map((id) => ({ id, stretch: 0.3 })) };
-  const result = await fetch(`${app.url}/api/layouts/${layout.id}`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...layout, revision: layout.revision + 1, cells: [{ ...layout.cells[0], symbol: "000660", venue: "combined", period, chartSettings }] }) });
-  expect(result.ok, await result.text()).toBe(true);
+export function chartDisplayFinancials(period: FinancialPeriod): FinancialsPage {
+  const page = financialPage("000660", period);
+  page.series = page.series.map(series => ({ ...series, points: series.points.map(point => {
+    if (point.value === null) return point;
+    if (series.metric === "investing_cash_flow") {
+      const value = point.businessYear === 2016 ? -48_054_251_000_000 : -1_648_000_000;
+      return { ...point, value: period === "Q" && point.reportCode !== "11013" ? 0 : value, reportedValue: value };
+    }
+    if (series.metric === "dps") return { ...point, value: 2000, reportedValue: 2000 };
+    return point;
+  }) }));
+  return page;
 }
 
-export const chartDisplayOptions = { financialFixture: true, clockStart: "20171231120000", bootReplies: [{ apiId: "ka10099", status: 200, body: {
-  return_code: 0, return_msg: "synthetic", list: [
-    { code: "005930", name: "삼성전자", marketCode: "0", marketName: "거래소", kind: "A", state: "증거금20%", nxtEnable: "Y", regDay: "19750611", lastPrice: "70000", listCount: "100000" },
-    { code: "000660", name: "SK하이닉스", marketCode: "0", marketName: "거래소", kind: "A", state: "증거금20%", nxtEnable: "Y", regDay: "19961226", lastPrice: "1296000", listCount: "100000" },
-  ], _headers: { "cont-yn": "N", "next-key": "" },
-} }] };
+export function chartDisplayBars(period: FinancialPeriod, years = 4): BarsPage {
+  const bars = Array.from({ length: years * (period === "Y" ? 1 : 4) }, (_, i) => {
+    const year = 2018 - years + (period === "Y" ? i : Math.floor(i / 4));
+    const month = period === "Y" ? 1 : i % 4 * 3 + 1;
+    const day = `${year}-${String(month).padStart(2, "0")}-01`;
+    return { t: Date.parse(`${day}T00:00:00+09:00`) / 1000, o: 1_277_000, h: 1_302_000, l: 1_271_000, c: 1_296_000, v: period === "Q" ? 9_360_000 : 3_120_000 };
+  });
+  return { symbol: "000660", venue: "combined", period, bars, current: null, nextBefore: null, seq: null };
+}
+
+export async function seedChartDisplay(scenario: Scenario, period: FinancialPeriod) {
+  for (const value of ["Q", "Y"] as const) {
+    scenario.reply(url => url.pathname === "/api/symbols/000660/financials" && url.searchParams.get("period") === value, { body: chartDisplayFinancials(value) });
+    scenario.reply(url => url.pathname === "/api/bars" && url.searchParams.get("symbol") === "000660" && url.searchParams.get("period") === value, { body: chartDisplayBars(value) });
+  }
+  const layout = scenario.documents.layout(DEFAULT_LAYOUT_ID);
+  const chartSettings: ChartSettings = { v: 2, style: "candle", scale: "normal", compare: [], indicators: METRICS.map(kind => ({
+    id: kind, spec: { kind }, panel: kind, visible: true, style: { colors: ["ind-1"], width: 1 },
+  })), panels: METRICS.map(id => ({ id, stretch: 0.3 })) };
+  scenario.documents.saveLayout({ ...layout, revision: layout.revision + 1, cells: [{ ...layout.cells[0]!, symbol: "000660", venue: "combined", period, chartSettings }] });
+}
+
+export const chartDisplayOptions = {};
