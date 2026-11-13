@@ -11,7 +11,7 @@ export function PhoneTabs() {
   };
   const cls = "flex flex-col items-center justify-center gap-0.5 text-xs text-text-3 aria-pressed:text-accent";
   return (
-    <nav aria-label="휴대폰 탭" className="hidden grid-cols-4 border-t border-line bg-bg [grid-area:mtabs] max-md:grid">
+    <nav aria-label="휴대폰 탭" className="ui-island mx-auto my-1 hidden w-[min(calc(100%-1.5rem),22rem)] grid-cols-4 rounded-[var(--r-pill)] [grid-area:mtabs] max-md:grid">
       <button type="button" className={cls} aria-pressed={!searching && tab === "chart"} onClick={() => show("chart")}>
         <ChartIcon size={22} />
         차트

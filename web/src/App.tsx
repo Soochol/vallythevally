@@ -58,7 +58,7 @@ function ChartScreen() {
       <Topbar />
       <PhoneHeader cell={cell} info={info} status={status} />
       <PeriodChips cell={cell} />
-      <main aria-label="칸" className="grid min-h-0 min-w-0 grid-cols-[var(--tools-w)_minmax(0,1fr)] grid-rows-1 md:absolute md:inset-0 md:pr-[var(--chart-right)] max-md:grid-cols-1 max-md:[grid-area:grid]">
+      <main aria-label="칸" className="grid min-h-0 min-w-0 grid-cols-1 grid-rows-1 md:absolute md:inset-0 md:pr-[var(--chart-right)] max-md:[grid-area:grid]">
         <DrawingToolbar />
         <ChartCell slot={slot} status={status} onStatus={setStatus} />
       </main>

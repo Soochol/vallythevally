@@ -19,7 +19,7 @@
 .drawing-help { width:max-content; padding:var(--s4); }
 .draw-settings .color-control { align-items:flex-start; gap:var(--size-8); }
 .draw-settings .color-line-sample { display:none; }
-@media (height < 47.5rem) { .drawing-toolbar { gap:var(--size-4); padding-block:calc(var(--chart-inset-top, 0px) + var(--size-8)) var(--size-8); } .draw-tool { height:var(--size-32); } }
+
 
 .ui-popover { pointer-events:auto; position:fixed; inset:auto; margin:0; max-width:calc(100vw - var(--size-16)); max-height:calc(100dvh - var(--size-16)); overflow:auto; border:0; border-radius:var(--r-l); background:var(--glass); -webkit-backdrop-filter:var(--glass-blur); backdrop-filter:var(--glass-blur); color:var(--text); box-shadow:var(--shadow); font:var(--fs-s)/1.5 var(--font-sans); scrollbar-width:thin; outline:none; }
 .ui-island { background:var(--glass); -webkit-backdrop-filter:var(--glass-blur); backdrop-filter:var(--glass-blur); box-shadow:var(--shadow); }

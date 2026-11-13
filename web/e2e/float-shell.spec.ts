@@ -47,7 +47,7 @@ test("패널을 숨기면 차트와 위 막대가 넓어지고 상태 줄은 차
   await expect(status).toHaveCount(1);
   await expect(status).toContainText("Lightweight Charts");
   const strip = await boxOf(status);
-  expect(strip.x).toBeGreaterThan(40);
+  expect(strip.x).toBe(GAP);
   expect(strip.y + strip.height).toBeLessThan(900);
   await page.screenshot({ path: info.outputPath("1440-collapsed.png") });
   await toolbar(page).getByRole("button", { name: "패널 펴기", exact: true }).click();
