@@ -22,12 +22,15 @@ import type { SymbolCode } from "../api/generated/SymbolCode";
 import type { SymbolInfo } from "../api/generated/SymbolInfo";
 import type { UnixSeconds } from "../api/generated/UnixSeconds";
 import { ApiRequestError } from "../api/http";
+import { formatPercent, formatPrice } from "../lib/format";
 import type { Connection, MarketSocketLike } from "../api/socket";
 import { isIndexCode, PERIOD_LABEL, symbolSub } from "../lib/symbol";
 import { type ShownVenue, venueLabel } from "../lib/venue";
 import { BarFeed, displayBars, type FetchPage, type History } from "./barFeed";
 import { type CompareEntry, CompareLayer, compareVenue } from "./compare";
 import { CompareLegend } from "./compareLegend";
+import { type ExtremeTag, ExtremeTags } from "./extremeTags";
+import { type Extreme, findExtremes } from "./extremes";
 import { type OpenPort, openIndicatorPort } from "./indicators/client";
 import { IndicatorLayer } from "./indicators/layer";
 import { PanelControls } from "./panelControls";
@@ -115,6 +118,7 @@ export class ChartController {
   private readonly compare: CompareLayer;
   private readonly compareLegend: CompareLegend;
   private readonly legend: Legend;
+  private readonly extremeTags: ExtremeTags;
   get venueAnchor(): HTMLElement { return this.legend.venueAnchor; }
   private readonly feed: BarFeed;
   private readonly onStatus: (s: CellStatus) => void;
@@ -150,6 +154,7 @@ export class ChartController {
     this.chart.panes()[0]?.setPreserveEmptyPane(true);
     this.main = addMainSeries(this.chart, "candle", this.tokens, false, this.priceAxisGeometry());
     this.legend = new Legend(el);
+    this.extremeTags = new ExtremeTags(el);
     this.indicators = new IndicatorLayer(
       {
         chart: this.chart,
@@ -270,6 +275,8 @@ export class ChartController {
       const panels = chartPanels(next.settings, next.period);
       this.withDataGuard(() => preserveTimeRange(this.chart.timeScale(), next.period, () => this.indicators.setConfigs(configs, panels)));
     }
+    if (prev && prev.settings.visibleBars !== next.settings.visibleBars) this.fitInitialRange();
+    if (prev?.settings.showExtremes !== next.settings.showExtremes) this.scheduleFrame();
     this.indicators.setPreview(next.previewIndicator ?? null);
     this.compare.setCodes(compareEntries(next), { period: next.period, venueFor: (code) => compareVenue(code, next) });
     this.renderLegend();
@@ -354,6 +361,7 @@ export class ChartController {
     this.indicatorLegend.dispose();
     this.panelControls.dispose();
     this.compareLegend.dispose();
+    this.extremeTags.dispose();
     this.legend.dispose();
     this.chart.remove();
   }
@@ -509,6 +517,26 @@ export class ChartController {
     this.indicators.flush();
     if (this.axisLabels.refresh(time)) this.scheduleFrame();
     this.renderLegend();
+    this.renderExtremes();
+  }
+
+  private renderExtremes(): void {
+    const view = this.view;
+    const last = this.bars.at(-1);
+    const range = this.chart.timeScale().getVisibleLogicalRange();
+    const info = view?.settings.showExtremes && last && range ? this.main.api.barsInLogicalRange(range) : null;
+    const found = info && findExtremes(this.bars, info.barsBefore, this.bars.length - 1 - info.barsAfter);
+    const paneWidth = this.chart.timeScale().width();
+    if (!view || !last || !found) return this.extremeTags.show(null, paneWidth);
+    const paneHeight = this.chart.panes()[0]?.getHeight() ?? 0;
+    const isIndex = isIndexCode(view.symbol);
+    const tag = ({ index, price }: Extreme): ExtremeTag | null => {
+      const x = this.chart.timeScale().timeToCoordinate(toChartTime(this.bars[index]!.t));
+      const y = this.main.api.priceToCoordinate(price);
+      if (x === null || y === null || x < 0 || x > paneWidth || y < 0 || y > paneHeight) return null;
+      return { x, y, price: formatPrice(price, isIndex), change: last.c === 0 ? "" : formatPercent((price - last.c) / last.c * 100) };
+    };
+    this.extremeTags.show({ high: tag(found.high), low: tag(found.low) }, paneWidth);
   }
 
   private flushPendingDraw(): void {
@@ -598,10 +626,11 @@ export class ChartController {
     const start = scale.timeToIndex(toChartTime(first.t), false);
     const end = scale.timeToIndex(toChartTime(last.t), false);
     if (start === null || end === null) return;
-    const coarse = this.period() === "Y" || this.period() === "Q";
-    const show = matchMedia("(max-width: 767px)").matches ? 90 : 130;
-    this.initialRangeEnd = end + (coarse ? 0.5 + Math.min(2, bars.length * 0.05) : RIGHT_OFFSET);
-    scale.setVisibleLogicalRange({ from: coarse ? start - 0.5 : end + 1 - show, to: this.initialRangeEnd });
+    const chosen = this.view?.settings.visibleBars ?? null;
+    const whole = chosen === null && (this.period() === "Y" || this.period() === "Q");
+    const show = chosen ?? (matchMedia("(max-width: 767px)").matches ? 90 : 130);
+    this.initialRangeEnd = end + (whole ? 0.5 + Math.min(2, bars.length * 0.05) : RIGHT_OFFSET);
+    scale.setVisibleLogicalRange({ from: whole ? start - 0.5 : end + 1 - show, to: this.initialRangeEnd });
   }
 
   private onPrepended(h: History, added: number): void {
