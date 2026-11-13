@@ -1,6 +1,6 @@
 import type { IPrimitivePaneRenderer, IPrimitivePaneView, ISeriesPrimitive, ISeriesPrimitiveAxisView, IPanePrimitive, PrimitiveHoveredItem, SeriesAttachedParameter } from "lightweight-charts";
 import { frameHit, type RenderFrame } from "./frame";
-import { HANDLE_DIAMETER_PX } from "./geometry";
+import { extendedSegment, HANDLE_DIAMETER_PX } from "./geometry";
 import { prepareText, textFont, textLayout, type TextMeasure } from "./textLayout";
 import type { Shape } from "./toolSpec";
 import type { Fill, ScreenPoint, Stroke } from "./types";
@@ -37,16 +37,7 @@ export function paintShape(c: CanvasRenderingContext2D, s: Shape, pane: { width:
   c.save(); c.beginPath();
   switch (s.kind) {
     case "segment": {
-      let { a, b } = s;
-      const ext = s.extend ?? "none";
-      if (ext !== "none") {
-        const dx = b.x - a.x; const dy = b.y - a.y; const length = Math.hypot(dx, dy);
-        const far = (Math.max(Math.abs(a.x), Math.abs(a.y), Math.abs(b.x), Math.abs(b.y)) + pane.width + pane.height) / Math.max(1, length);
-        const left = ext === "left" || ext === "both"; const right = ext === "right" || ext === "both";
-        const before = a.x <= b.x ? left : right; const after = a.x <= b.x ? right : left;
-        a = before ? { x: a.x - far * dx, y: a.y - far * dy } : a;
-        b = after ? { x: b.x + far * dx, y: b.y + far * dy } : b;
-      }
+      const { a, b } = extendedSegment(s.a, s.b, s.extend ?? "none", pane);
       c.moveTo(a.x, a.y); c.lineTo(b.x, b.y); stroke(c, s.stroke);
       if (s.ends?.left === "arrow") arrow(c, s.b, s.a, s.stroke);
       if (s.ends?.right === "arrow") arrow(c, s.a, s.b, s.stroke);

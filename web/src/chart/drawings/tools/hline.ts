@@ -1,5 +1,5 @@
 import { at, defaultStroke, defaultText, readBool, readOneOf, readRecord, readStroke, readTextStyle, select, strokeFields } from "../styleKit";
-import { defineTool, type Shape } from "../toolSpec";
+import { defineTool, type SettingsTabs, type Shape } from "../toolSpec";
 import type { Stroke, TextStyle } from "../types";
 
 type Align = "left" | "center" | "right";
@@ -42,7 +42,45 @@ export function parseHLineStyle(raw: unknown): HLineStyle {
 const TEXT_GAP = 4;
 const BASELINE: Record<VAlign, "bottom" | "middle" | "top"> = { top: "bottom", middle: "middle", bottom: "top" };
 
+export function lineText(style: HLineStyle, text: string | null, y: number, x1: number, x2: number): Shape[] {
+  if (text === null || text === "") return [];
+  const { align, vAlign } = style.label;
+  const x = align === "left" ? x1 + TEXT_GAP : align === "center" ? (x1 + x2) / 2 : x2 - TEXT_GAP;
+  const dy = vAlign === "top" ? -TEXT_GAP : vAlign === "bottom" ? TEXT_GAP : 0;
+  return [{ kind: "text", at: { x, y: y + dy }, text, style: style.label, align, baseline: BASELINE[vAlign] }];
+}
+
 const L = at<HLineStyle>();
+
+export const hlineSettings: SettingsTabs<HLineStyle> = {
+  style: [...strokeFields("선", L("line")), { kind: "toggle", label: "가격 라벨", lens: L("priceLabel") }],
+  text: [
+    { kind: "text", label: "글자", multiline: false },
+    {
+      kind: "textStyle",
+      label: "글자 모양",
+      lens: { get: (s) => s.label, set: (s, v) => ({ ...s, label: { ...s.label, ...v } }) },
+    },
+    select(
+      "가로 정렬",
+      [
+        { value: "left", label: "왼쪽" },
+        { value: "center", label: "가운데" },
+        { value: "right", label: "오른쪽" },
+      ],
+      L("label", "align"),
+    ),
+    select(
+      "세로 정렬",
+      [
+        { value: "top", label: "위" },
+        { value: "middle", label: "가운데" },
+        { value: "bottom", label: "아래" },
+      ],
+      L("label", "vAlign"),
+    ),
+  ],
+};
 
 export const hline = defineTool<HLineStyle>({
   tool: "hline",
@@ -55,47 +93,12 @@ export const hline = defineTool<HLineStyle>({
   defaultStyle: hlineDefaults,
   parseStyle: parseHLineStyle,
   bar: { lineColor: L("line", "color"), width: L("line", "width"), dash: L("line", "dash") },
-  settings: {
-    style: [...strokeFields("선", L("line")), { kind: "toggle", label: "가격 라벨", lens: L("priceLabel") }],
-    text: [
-      { kind: "text", label: "글자", multiline: false },
-      {
-        kind: "textStyle",
-        label: "글자 모양",
-        lens: { get: (s) => s.label, set: (s, v) => ({ ...s, label: { ...s.label, ...v } }) },
-      },
-      select(
-        "가로 정렬",
-        [
-          { value: "left", label: "왼쪽" },
-          { value: "center", label: "가운데" },
-          { value: "right", label: "오른쪽" },
-        ],
-        L("label", "align"),
-      ),
-      select(
-        "세로 정렬",
-        [
-          { value: "top", label: "위" },
-          { value: "middle", label: "가운데" },
-          { value: "bottom", label: "아래" },
-        ],
-        L("label", "vAlign"),
-      ),
-    ],
-  },
+  settings: hlineSettings,
   shapes({ points, style, text }, ctx) {
     const p = points[0];
     const y = p === undefined ? null : ctx.yOf(p.price);
     if (y === null) return [];
-    const shapes: Shape[] = [{ kind: "segment", a: { x: 0, y }, b: { x: ctx.paneWidth, y }, stroke: style.line }];
-    if (text !== null && text !== "") {
-      const { align, vAlign } = style.label;
-      const x = align === "left" ? TEXT_GAP : align === "center" ? ctx.paneWidth / 2 : ctx.paneWidth - TEXT_GAP;
-      const dy = vAlign === "top" ? -TEXT_GAP : vAlign === "bottom" ? TEXT_GAP : 0;
-      shapes.push({ kind: "text", at: { x, y: y + dy }, text, style: style.label, align, baseline: BASELINE[vAlign] });
-    }
-    return shapes;
+    return [{ kind: "segment", a: { x: 0, y }, b: { x: ctx.paneWidth, y }, stroke: style.line }, ...lineText(style, text, y, 0, ctx.paneWidth)];
   },
   handles({ points }, ctx) {
     const p = points[0];

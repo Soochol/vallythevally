@@ -13,8 +13,8 @@ import {
   select,
   strokeFields,
 } from "../styleKit";
-import { type AxisLabel, defineTool, type Shape, type ToolContext } from "../toolSpec";
-import type { DrawingPoint, Extend, LineEnd, ScreenPoint, Stroke, TextStyle } from "../types";
+import { type AxisLabel, defineTool, type Shape, type StyleField, type Tool, type ToolContext } from "../toolSpec";
+import type { DrawingPoint, DrawingTool, Extend, LineEnd, ScreenPoint, Stroke, TextStyle } from "../types";
 
 export interface TrendStats {
   priceDiff: boolean;
@@ -25,15 +25,18 @@ export interface TrendStats {
   always: boolean;
 }
 
-export interface TrendStyle {
+export interface RayStyle {
   v: 1;
   line: Stroke;
-  extend: Extend;
   ends: { left: LineEnd; right: LineEnd };
   middlePoint: boolean;
   priceLabels: boolean;
   stats: TrendStats;
   label: TextStyle;
+}
+
+export interface TrendStyle extends RayStyle {
+  extend: Extend;
 }
 
 export const trendDefaults = (): TrendStyle => ({
@@ -73,6 +76,12 @@ export function parseTrendStyle(raw: unknown): TrendStyle {
   };
 }
 
+const withoutExtend = ({ extend: _, ...ray }: TrendStyle): RayStyle => ray;
+
+export const rayDefaults = (): RayStyle => withoutExtend(trendDefaults());
+
+export const parseRayStyle = (raw: unknown): RayStyle => withoutExtend(parseTrendStyle(raw));
+
 export function formatDuration(seconds: number): string {
   const s = Math.abs(seconds);
   const days = Math.floor(s / 86_400);
@@ -105,79 +114,105 @@ function endpoints(points: readonly DrawingPoint[], ctx: ToolContext) {
   return a === null || b === null ? null : { p0, p1, a, b };
 }
 
-const L = at<TrendStyle>();
+export interface StraightLine<S extends RayStyle> {
+  tool: Extract<DrawingTool, "trendline" | "ray" | "extline">;
+  label: string;
+  icon: string;
+  defaultStyle(): S;
+  parseStyle(raw: unknown): S;
+  extend(style: S, a: ScreenPoint, b: ScreenPoint): Extend;
+  extendFields: readonly StyleField<S>[];
+}
 
-export const trendline = defineTool<TrendStyle>({
+const END_OPTIONS: readonly { value: LineEnd; label: string }[] = [
+  { value: "plain", label: "없음" },
+  { value: "arrow", label: "화살표" },
+];
+
+export function straightLine<S extends RayStyle>(line: StraightLine<S>): Tool {
+  const L = at<S>();
+  return defineTool<S>({
+    tool: line.tool,
+    group: "line",
+    label: line.label,
+    icon: line.icon,
+    placement: { kind: "points", count: 2, shift: "angle45" },
+    pointRoles: [
+      { label: "시작", uses: "both" },
+      { label: "끝", uses: "both" },
+    ],
+    text: { editOnPlace: false },
+    defaultStyle: line.defaultStyle,
+    parseStyle: line.parseStyle,
+    bar: { lineColor: L("line", "color"), width: L("line", "width"), dash: L("line", "dash") },
+    settings: {
+      style: [
+        ...strokeFields("선", L("line")),
+        ...line.extendFields,
+        select("시작 모양", END_OPTIONS, L("ends", "left")),
+        select("끝 모양", END_OPTIONS, L("ends", "right")),
+        { kind: "toggle", label: "가운데 점", lens: L("middlePoint") },
+        { kind: "toggle", label: "가격 라벨", lens: L("priceLabels") },
+        { kind: "toggle", label: "통계 늘 보이기", lens: L("stats", "always") },
+        { kind: "toggle", label: "가격 차", lens: L("stats", "priceDiff") },
+        { kind: "toggle", label: "변화율", lens: L("stats", "percent") },
+        { kind: "toggle", label: "봉 수", lens: L("stats", "bars") },
+        { kind: "toggle", label: "걸린 시간", lens: L("stats", "duration") },
+        { kind: "toggle", label: "각도", lens: L("stats", "angle") },
+      ],
+      text: [
+        { kind: "text", label: "글자", multiline: true },
+        { kind: "textStyle", label: "글자 모양", lens: L("label") },
+      ],
+    },
+    shapes({ points, style, text, selected }, ctx) {
+      const ends = endpoints(points, ctx);
+      if (ends === null) return [];
+      const { p0, p1, a, b } = ends;
+      const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+      const shapes: Shape[] = [{ kind: "segment", a, b, stroke: style.line, extend: line.extend(style, a, b), ends: style.ends }];
+      if (style.middlePoint) shapes.push({ kind: "circle", c: mid, r: 3, stroke: style.line, fill: { on: true, color: style.line.color, opacity: 1 } });
+      if (text !== null && text !== "") shapes.push({ kind: "text", at: mid, text, style: style.label, align: "center", baseline: "bottom" });
+      const lines = selected || style.stats.always ? statsLines(p0, p1, a, b, selected ? { ...style.stats, percent: true, bars: true } : style.stats, ctx) : [];
+      if (lines.length > 0)
+        shapes.push({
+          kind: "text",
+          at: { x: b.x + 8, y: b.y },
+          text: lines.join("\n"),
+          style: { ...style.label, size: 12 },
+          align: "left",
+          baseline: "middle",
+          box: { background: { on: true, color: style.line.color, opacity: 0.15 }, padding: 4, wrapWidth: null },
+        });
+      return shapes;
+    },
+    handles({ points }, ctx) {
+      const ends = endpoints(points, ctx);
+      if (ends === null) return [];
+      const { a, b } = ends;
+      const replace = (i: number) => (pts: readonly DrawingPoint[], to: DrawingPoint) => pts.map((q, j) => (j === i ? to : q));
+      return [
+        { at: a, move: replace(0), constrain: { rule: "angle45", pivot: b } },
+        { at: b, move: replace(1), constrain: { rule: "angle45", pivot: a } },
+      ];
+    },
+    axisLabels({ points, style, selected }, ctx) {
+      const labels: AxisLabel[] = [];
+      for (const p of points) {
+        if (selected || style.priceLabels) labels.push({ axis: "price", value: p.price, text: ctx.formatPrice(p.price), color: style.line.color });
+        if (selected) labels.push({ axis: "time", value: p.t, text: ctx.formatTime(p.t), color: style.line.color });
+      }
+      return labels;
+    },
+  });
+}
+
+export const trendline = straightLine<TrendStyle>({
   tool: "trendline",
-  group: "line",
   label: "추세선",
   icon: "M4 20 L20 4",
-  placement: { kind: "points", count: 2, shift: "angle45" },
-  pointRoles: [
-    { label: "시작", uses: "both" },
-    { label: "끝", uses: "both" },
-  ],
-  text: { editOnPlace: false },
   defaultStyle: trendDefaults,
   parseStyle: parseTrendStyle,
-  bar: { lineColor: L("line", "color"), width: L("line", "width"), dash: L("line", "dash") },
-  settings: {
-    style: [
-      ...strokeFields("선", L("line")),
-      select("연장", EXTEND_OPTIONS, L("extend")),
-      select("시작 모양", [{ value: "plain", label: "없음" }, { value: "arrow", label: "화살표" }], L("ends", "left")),
-      select("끝 모양", [{ value: "plain", label: "없음" }, { value: "arrow", label: "화살표" }], L("ends", "right")),
-      { kind: "toggle", label: "가운데 점", lens: L("middlePoint") },
-      { kind: "toggle", label: "가격 라벨", lens: L("priceLabels") },
-      { kind: "toggle", label: "통계 늘 보이기", lens: L("stats", "always") },
-      { kind: "toggle", label: "가격 차", lens: L("stats", "priceDiff") },
-      { kind: "toggle", label: "변화율", lens: L("stats", "percent") },
-      { kind: "toggle", label: "봉 수", lens: L("stats", "bars") },
-      { kind: "toggle", label: "걸린 시간", lens: L("stats", "duration") },
-      { kind: "toggle", label: "각도", lens: L("stats", "angle") },
-    ],
-    text: [
-      { kind: "text", label: "글자", multiline: true },
-      { kind: "textStyle", label: "글자 모양", lens: L("label") },
-    ],
-  },
-  shapes({ points, style, text, selected }, ctx) {
-    const ends = endpoints(points, ctx);
-    if (ends === null) return [];
-    const { p0, p1, a, b } = ends;
-    const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
-    const shapes: Shape[] = [{ kind: "segment", a, b, stroke: style.line, extend: style.extend, ends: style.ends }];
-    if (style.middlePoint) shapes.push({ kind: "circle", c: mid, r: 3, stroke: style.line, fill: { on: true, color: style.line.color, opacity: 1 } });
-    if (text !== null && text !== "") shapes.push({ kind: "text", at: mid, text, style: style.label, align: "center", baseline: "bottom" });
-    const lines = selected || style.stats.always ? statsLines(p0, p1, a, b, selected ? { ...style.stats, percent: true, bars: true } : style.stats, ctx) : [];
-    if (lines.length > 0)
-      shapes.push({
-        kind: "text",
-        at: { x: b.x + 8, y: b.y },
-        text: lines.join("\n"),
-        style: { ...style.label, size: 12 },
-        align: "left",
-        baseline: "middle",
-        box: { background: { on: true, color: style.line.color, opacity: 0.15 }, padding: 4, wrapWidth: null },
-      });
-    return shapes;
-  },
-  handles({ points }, ctx) {
-    const ends = endpoints(points, ctx);
-    if (ends === null) return [];
-    const { a, b } = ends;
-    const replace = (i: number) => (pts: readonly DrawingPoint[], to: DrawingPoint) => pts.map((q, j) => (j === i ? to : q));
-    return [
-      { at: a, move: replace(0), constrain: { rule: "angle45", pivot: b } },
-      { at: b, move: replace(1), constrain: { rule: "angle45", pivot: a } },
-    ];
-  },
-  axisLabels({ points, style, selected }, ctx) {
-    const labels: AxisLabel[] = [];
-    for (const p of points) {
-      if (selected || style.priceLabels) labels.push({ axis: "price", value: p.price, text: ctx.formatPrice(p.price), color: style.line.color });
-      if (selected) labels.push({ axis: "time", value: p.t, text: ctx.formatTime(p.t), color: style.line.color });
-    }
-    return labels;
-  },
+  extend: (style) => style.extend,
+  extendFields: [select("연장", EXTEND_OPTIONS, at<TrendStyle>()("extend"))],
 });
