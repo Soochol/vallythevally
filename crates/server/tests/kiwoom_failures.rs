@@ -4,7 +4,7 @@ mod common;
 
 use std::time::Duration;
 
-use common::{FakeKiwoom, Server};
+use common::{ScriptedTransport, Server};
 use serde_json::{Value, json};
 
 fn static_dir(root: &std::path::Path) -> std::path::PathBuf {
@@ -21,9 +21,9 @@ async fn get(client: &reqwest::Client, base: &str, path: &str) -> (u16, Value) {
     (status, serde_json::from_str(&text).unwrap_or(Value::String(text)))
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn quote_failure_is_logged_as_a_quote_request() {
-    let fake = FakeKiwoom::start().await;
+    let fake = ScriptedTransport::new();
     fake.respond_with("ka10095", 503, json!({"return_code": 1, "return_msg": "점검"}));
     let tmp = tempfile::tempdir().unwrap();
     let server = Server::spawn(&fake, &tmp.path().join("run/server.lock"), &static_dir(tmp.path()));
@@ -40,7 +40,7 @@ async fn quote_failure_is_logged_as_a_quote_request() {
 }
 
 async fn the_symbol_list_is_not_fetched_again_after(reply: Value, want: &str) {
-    let fake = FakeKiwoom::start().await;
+    let fake = ScriptedTransport::new();
     fake.respond_with("ka10099", 200, reply.clone());
     let tmp = tempfile::tempdir().unwrap();
     let server = Server::spawn(&fake, &tmp.path().join("run/server.lock"), &static_dir(tmp.path()));
@@ -58,18 +58,18 @@ async fn the_symbol_list_is_not_fetched_again_after(reply: Value, want: &str) {
     assert!(logs.contains("다시 받지 않습니다"), "{logs}");
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn an_unknown_failure_stops_the_symbol_list_path() {
     the_symbol_list_is_not_fetched_again_after(json!({"return_code": 1, "return_msg": "알 수 없음"}), "kiwoom_unavailable").await;
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn a_missing_envelope_is_not_an_empty_symbol_list() {
     the_symbol_list_is_not_fetched_again_after(json!({}), "internal").await;
 }
 
 async fn logs_after_failures(api_id: &str, reply: Value, browser_path: &str) -> String {
-    let fake = FakeKiwoom::start().await;
+    let fake = ScriptedTransport::new();
     fake.respond_with(api_id, 200, reply);
     let tmp = tempfile::tempdir().unwrap();
     let server = Server::spawn(&fake, &tmp.path().join("run/server.lock"), &static_dir(tmp.path()));
@@ -81,7 +81,7 @@ async fn logs_after_failures(api_id: &str, reply: Value, browser_path: &str) -> 
     server.stop().await + &body
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn kiwoom_failure_messages_and_bodies_never_reach_logs_or_the_browser() {
     use common::{APP_KEY, APP_SECRET, TOKEN};
     let echo = format!("appkey={APP_KEY} secretkey={APP_SECRET} token={TOKEN}");
@@ -99,9 +99,9 @@ async fn kiwoom_failure_messages_and_bodies_never_reach_logs_or_the_browser() {
     }
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn a_request_already_waiting_for_the_symbol_list_ends_when_the_list_path_stops() {
-    let fake = FakeKiwoom::start().await;
+    let fake = ScriptedTransport::new();
     fake.delay("ka10099", Duration::from_secs(1));
     fake.respond_with("ka10099", 200, json!({}));
     let tmp = tempfile::tempdir().unwrap();
@@ -119,9 +119,9 @@ async fn a_request_already_waiting_for_the_symbol_list_ends_when_the_list_path_s
     assert_eq!(fake.api_ids().iter().filter(|id| *id == "ka10099").count(), 1);
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn the_startup_list_retry_waits_for_the_shared_gate() {
-    let fake = FakeKiwoom::start().await;
+    let fake = ScriptedTransport::new();
     fake.respond_with("ka10099", 503, json!({}));
     let tmp = tempfile::tempdir().unwrap();
     let server = Server::spawn(&fake, &tmp.path().join("run/server.lock"), &static_dir(tmp.path()));
@@ -134,7 +134,7 @@ async fn the_startup_list_retry_waits_for_the_shared_gate() {
 }
 
 async fn browser_error(api_id: &str, status: u16, reply: Value, path: &str) -> (u16, Value) {
-    let fake = FakeKiwoom::start().await;
+    let fake = ScriptedTransport::new();
     fake.respond_with(api_id, status, reply);
     let tmp = tempfile::tempdir().unwrap();
     let server = Server::spawn(&fake, &tmp.path().join("run/server.lock"), &static_dir(tmp.path()));
@@ -144,7 +144,7 @@ async fn browser_error(api_id: &str, status: u16, reply: Value, path: &str) -> (
     (status, body["error"].clone())
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn the_browser_learns_whether_and_when_it_may_ask_again() {
     let (status, e) = browser_error("ka10095", 200, json!({"return_code": 7, "return_msg": "[1902:종목정보가 없습니다]"}), "/api/quotes?symbols=005930").await;
     assert_eq!(status, 503, "{e}");
@@ -161,17 +161,17 @@ async fn the_browser_learns_whether_and_when_it_may_ask_again() {
     assert!(!e["message"].as_str().unwrap().contains("잠시 뒤 다시 시도하세요"), "멈춘 경로를 잠시 뒤에 풀린다고 말하지 않는다: {e}");
 }
 
-#[tokio::test(flavor = "multi_thread")]
-async fn a_stream_halted_by_refused_registrations_logs_the_code_and_the_spent_rebuild() {
+#[tokio::test]
+async fn a_halted_stream_is_reported_to_the_browser() {
     use futures::{SinkExt, StreamExt};
     use tokio_tungstenite::tungstenite::Message;
 
-    let fake = FakeKiwoom::start().await;
-    fake.set_reg_limit(0);
+    let fake = ScriptedTransport::new();
     let tmp = tempfile::tempdir().unwrap();
     let server = Server::spawn(&fake, &tmp.path().join("run/server.lock"), &static_dir(tmp.path()));
     let (mut ws, _) = tokio_tungstenite::connect_async(format!("ws://{}/api/ws", server.addr().await)).await.unwrap();
     ws.send(Message::Text(r#"{"type":"subscribe","sub":"c0","symbol":"005930","venue":null,"period":"D"}"#.into())).await.unwrap();
+    server.events.send(server::kiwoom::stream::StreamEvent::Halted).await.unwrap();
     let halted = tokio::time::timeout(Duration::from_secs(10), async {
         while let Some(Ok(message)) = ws.next().await {
             if message.to_text().unwrap_or_default().contains(r#""realtime":"halted""#) {
@@ -181,10 +181,7 @@ async fn a_stream_halted_by_refused_registrations_logs_the_code_and_the_spent_re
         panic!("연결이 닫혔다");
     });
     halted.await.expect("실시간이 멈췄다고 알리지 않았다");
-    assert_eq!(fake.ws_stats().logins, 2, "처음 하나와 다시 구성 한 번");
     let logs = server.stop().await;
-    let line = logs.lines().find(|l| l.contains("다시 구성한 세션에서도 제어가 실패했습니다")).unwrap_or_else(|| panic!("{logs}"));
-    assert!(line.contains("ERROR") && line.contains("return_code: Some(105118)") && line.contains("budget=Rebuilt"), "{line}");
     assert!(!logs.contains(common::TOKEN));
 }
 

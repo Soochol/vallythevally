@@ -14,7 +14,7 @@ fn point<'a>(page: &'a Value, metric: &str) -> &'a Value {
 #[tokio::test]
 async fn unchanged_manual_http_update_reuses_reports_and_actual_success_times() {
     let fake = Fake::start().await;
-    let kiwoom = common::FakeKiwoom::start().await;
+    let kiwoom = common::ScriptedTransport::new();
     let dir = tempdir();
     let server = process(&fake, &kiwoom, dir.path(), "20151231120000");
     let base = format!("http://{}", server.addr().await);
@@ -51,7 +51,7 @@ async fn unchanged_manual_http_update_reuses_reports_and_actual_success_times() 
 async fn corrected_report_http_update_reuses_comparison_periods_without_losing_quarter_cf_or_roe() {
     let fake = Fake::start().await;
     fake.state.lock().unwrap().integrated_financials = true;
-    let kiwoom = common::FakeKiwoom::start().await;
+    let kiwoom = common::ScriptedTransport::new();
     let dir = tempdir();
     let server = process(&fake, &kiwoom, dir.path(), "20171231120000");
     let base = format!("http://{}", server.addr().await);
@@ -87,7 +87,7 @@ async fn partial_correction_http_keeps_coherent_values_and_resumes_only_failed_r
     for failed_code in ["11014", "11011"] {
         let fake = Fake::start().await;
         fake.state.lock().unwrap().integrated_financials = true;
-        let kiwoom = common::FakeKiwoom::start().await;
+        let kiwoom = common::ScriptedTransport::new();
         let dir = tempdir();
         let server = process(&fake, &kiwoom, dir.path(), "20171231120000");
         let base = format!("http://{}", server.addr().await);
@@ -144,7 +144,7 @@ async fn partial_correction_http_keeps_coherent_values_and_resumes_only_failed_r
 async fn newly_disclosed_http_report_replaces_unpublished_without_refetching_saved_reports() {
     let fake = Fake::start().await;
     fake.state.lock().unwrap().integrated_financials = true;
-    let kiwoom = common::FakeKiwoom::start().await;
+    let kiwoom = common::ScriptedTransport::new();
     let dir = tempdir();
     let server = process(&fake, &kiwoom, dir.path(), "20171231120000");
     let base = format!("http://{}", server.addr().await);
@@ -186,7 +186,7 @@ async fn annual_correction_http_fills_absent_statement_or_dividends_when_the_oth
             state.integrated_financials = true;
             state.failures.insert(absence.clone(), "013".into());
         }
-        let kiwoom = common::FakeKiwoom::start().await;
+        let kiwoom = common::ScriptedTransport::new();
         let dir = tempdir();
         let server = process(&fake, &kiwoom, dir.path(), "20171231120000");
         let base = format!("http://{}", server.addr().await);
@@ -219,7 +219,7 @@ async fn legacy_http_snapshot_without_versions_keeps_coherent_values_during_part
     use sqlx::Connection;
     let fake = Fake::start().await;
     fake.state.lock().unwrap().integrated_financials = true;
-    let kiwoom = common::FakeKiwoom::start().await;
+    let kiwoom = common::ScriptedTransport::new();
     let dir = tempdir();
     let server = process(&fake, &kiwoom, dir.path(), "20171231120000");
     let base = format!("http://{}", server.addr().await);
@@ -265,7 +265,7 @@ async fn unchanged_http_inputs_remain_coherent_while_one_saved_report_is_retryin
     use sqlx::Connection;
     let fake = Fake::start().await;
     fake.state.lock().unwrap().integrated_financials = true;
-    let kiwoom = common::FakeKiwoom::start().await;
+    let kiwoom = common::ScriptedTransport::new();
     let dir = tempdir();
     let server = process(&fake, &kiwoom, dir.path(), "20171231120000");
     let base = format!("http://{}", server.addr().await);

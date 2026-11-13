@@ -7,15 +7,15 @@ pub(super) async fn json(client: &reqwest::Client, url: &str) -> Value {
     serde_json::from_slice(&response.bytes().await.unwrap()).unwrap()
 }
 
-fn listings(kiwoom: &common::FakeKiwoom) {
-    let mut body = fake_kiwoom::fixture("ka10099_0");
+fn listings(kiwoom: &common::ScriptedTransport) {
+    let mut body = common::support::fixture("ka10099_0");
     body["list"].as_array_mut().unwrap().retain(|row| ["005930", "005935", "000020", "000810", "0000D0"].contains(&row["code"].as_str().unwrap()));
     let mut alias = body["list"].as_array().unwrap().iter().find(|row| row["code"] == "005930").unwrap().clone();
     alias["code"] = "000660".into();
     alias["name"] = "합성 코스닥 증권".into();
     alias["marketCode"] = "10".into();
     body["list"].as_array_mut().unwrap().push(alias);
-    kiwoom.seen.respond_with("ka10099", StatusCode::OK, body);
+    kiwoom.respond_with("ka10099", 200, body);
 }
 
 pub(super) async fn start(client: &reqwest::Client, base: &str) -> Value {
@@ -36,7 +36,7 @@ pub(super) async fn finished(client: &reqwest::Client, base: &str) -> Value {
 #[tokio::test]
 async fn financial_http_reads_never_resolve_or_collect_a_company() {
     let fake = Fake::start().await;
-    let kiwoom = common::FakeKiwoom::start().await;
+    let kiwoom = common::ScriptedTransport::new();
     let dir = tempdir();
     let server = process(&fake, &kiwoom, dir.path(), "20171231120000");
     let base = format!("http://{}", server.addr().await);
@@ -60,7 +60,7 @@ async fn recent_http_update_deduplicates_companies_coalesces_starts_and_persists
         state.preferred = true;
         state.directory = Some(format!("<result><list><corp_code>{CORP}</corp_code><stock_code>005930</stock_code></list><list><corp_code>{CORP}</corp_code><stock_code>000660</stock_code></list><list><corp_code>00000002</corp_code><stock_code>000020</stock_code></list></result>"));
     }
-    let kiwoom = common::FakeKiwoom::start().await;
+    let kiwoom = common::ScriptedTransport::new();
     listings(&kiwoom);
     let dir = tempdir();
     let server = process(&fake, &kiwoom, dir.path(), "20190101120000");
@@ -107,7 +107,7 @@ async fn interrupted_recent_http_update_reads_checkpoints_and_resumes_the_origin
         state.stream_paused_report = Some("11014".into());
         state.stream_paused_company = Some(CORP.into());
     }
-    let kiwoom = common::FakeKiwoom::start().await;
+    let kiwoom = common::ScriptedTransport::new();
     listings(&kiwoom);
     let dir = tempdir();
     let server = process(&fake, &kiwoom, dir.path(), "20171231120000");
@@ -150,7 +150,7 @@ async fn a_company_failure_before_or_after_success_keeps_other_companies_and_pri
             state.directory = Some(format!("<result><list><corp_code>{CORP}</corp_code><stock_code>005930</stock_code></list><list><corp_code>00000002</corp_code><stock_code>000020</stock_code></list></result>"));
             state.failures.insert(format!("list.json///{failed}"), "900".into());
         }
-        let kiwoom = common::FakeKiwoom::start().await;
+        let kiwoom = common::ScriptedTransport::new();
         listings(&kiwoom);
         let dir = tempdir();
         let server = process(&fake, &kiwoom, dir.path(), "20171231120000");
@@ -181,7 +181,7 @@ async fn failed_checkpoint_storage_never_announces_completion_and_can_resume_aft
     use sqlx::Connection;
     use std::os::unix::fs::PermissionsExt;
     let fake = Fake::start().await;
-    let kiwoom = common::FakeKiwoom::start().await;
+    let kiwoom = common::ScriptedTransport::new();
     listings(&kiwoom);
     let dir = tempdir();
     let path = dir.path().join("run/financials.db");
@@ -220,7 +220,7 @@ async fn all_companies_recent_reports_precede_history_and_completed_history_is_r
     let fake = Fake::start().await;
     fake.state.lock().unwrap().preferred = true;
     fake.state.lock().unwrap().directory = Some(format!("<result><list><corp_code>{CORP}</corp_code><stock_code>005930</stock_code></list><list><corp_code>00000002</corp_code><stock_code>000020</stock_code></list></result>"));
-    let kiwoom = common::FakeKiwoom::start().await;
+    let kiwoom = common::ScriptedTransport::new();
     listings(&kiwoom);
     let dir = tempdir();
     let server = process(&fake, &kiwoom, dir.path(), "20200101120000");
@@ -267,10 +267,10 @@ pub(super) async fn command(client: &reqwest::Client, base: &str, action: &str) 
 async fn user_pause_saves_the_inflight_response_stops_the_next_request_and_survives_restart() {
     let fake = Fake::start().await;
     fake.state.lock().unwrap().stream_paused_report = Some("11013".into());
-    let kiwoom = common::FakeKiwoom::start().await;
-    let mut body = fake_kiwoom::fixture("ka10099_0");
+    let kiwoom = common::ScriptedTransport::new();
+    let mut body = common::support::fixture("ka10099_0");
     body["list"].as_array_mut().unwrap().retain(|row| row["code"] == "005930");
-    kiwoom.seen.respond_with("ka10099", StatusCode::OK, body);
+    kiwoom.respond_with("ka10099", 200, body);
     let dir = tempdir();
     let server = process(&fake, &kiwoom, dir.path(), "20171231120000");
     let base = format!("http://{}", server.addr().await);
@@ -313,10 +313,10 @@ async fn history_checkpoint_failure_stops_before_completion_and_resumes_after_re
     for first in [true, false] {
         let fake = Fake::start().await;
         fake.state.lock().unwrap().integrated_financials = true;
-        let kiwoom = common::FakeKiwoom::start().await;
-        let mut body = fake_kiwoom::fixture("ka10099_0");
+        let kiwoom = common::ScriptedTransport::new();
+        let mut body = common::support::fixture("ka10099_0");
         body["list"].as_array_mut().unwrap().retain(|row| row["code"] == "005930");
-        kiwoom.seen.respond_with("ka10099", StatusCode::OK, body);
+        kiwoom.respond_with("ka10099", 200, body);
         let dir = tempdir();
         let path = dir.path().join("run/financials.db");
         Store::open(&path).await.unwrap();
@@ -362,10 +362,10 @@ async fn history_checkpoint_failure_stops_before_completion_and_resumes_after_re
 async fn resuming_keeps_confirmed_absence_and_continues_the_pending_separate_request() {
     let fake = Fake::start().await;
     fake.state.lock().unwrap().stream_paused_report = Some("11014".into());
-    let kiwoom = common::FakeKiwoom::start().await;
-    let mut body = fake_kiwoom::fixture("ka10099_0");
+    let kiwoom = common::ScriptedTransport::new();
+    let mut body = common::support::fixture("ka10099_0");
     body["list"].as_array_mut().unwrap().retain(|row| row["code"] == "005930");
-    kiwoom.seen.respond_with("ka10099", StatusCode::OK, body);
+    kiwoom.respond_with("ka10099", 200, body);
     let dir = tempdir();
     let server = process(&fake, &kiwoom, dir.path(), "20190101120000");
     let base = format!("http://{}", server.addr().await);
@@ -396,10 +396,10 @@ async fn resuming_keeps_confirmed_absence_and_continues_the_pending_separate_req
 async fn pausing_an_inflight_listing_page_keeps_it_separate_and_resumes_the_next_page() {
     let fake = Fake::start().await;
     { let mut state = fake.state.lock().unwrap(); state.paused_list = true; state.list_pages = true; }
-    let kiwoom = common::FakeKiwoom::start().await;
-    let mut body = fake_kiwoom::fixture("ka10099_0");
+    let kiwoom = common::ScriptedTransport::new();
+    let mut body = common::support::fixture("ka10099_0");
     body["list"].as_array_mut().unwrap().retain(|row| row["code"] == "005930");
-    kiwoom.seen.respond_with("ka10099", StatusCode::OK, body);
+    kiwoom.respond_with("ka10099", 200, body);
     let dir = tempdir();
     let server = process(&fake, &kiwoom, dir.path(), "20151231120000");
     let base = format!("http://{}", server.addr().await);
@@ -431,10 +431,10 @@ async fn response_checkpoint_failure_stops_without_completion_and_reopens_withou
     use sqlx::Connection;
     use std::os::unix::fs::PermissionsExt;
     let fake = Fake::start().await;
-    let kiwoom = common::FakeKiwoom::start().await;
-    let mut body = fake_kiwoom::fixture("ka10099_0");
+    let kiwoom = common::ScriptedTransport::new();
+    let mut body = common::support::fixture("ka10099_0");
     body["list"].as_array_mut().unwrap().retain(|row| row["code"] == "005930");
-    kiwoom.seen.respond_with("ka10099", StatusCode::OK, body);
+    kiwoom.respond_with("ka10099", 200, body);
     let dir = tempdir();
     let path = dir.path().join("run/financials.db");
     Store::open(&path).await.unwrap();
@@ -468,10 +468,10 @@ async fn response_checkpoint_failure_stops_without_completion_and_reopens_withou
 #[tokio::test]
 async fn a_terminal_update_allows_the_next_start_to_create_a_new_job() {
     let fake = Fake::start().await;
-    let kiwoom = common::FakeKiwoom::start().await;
-    let mut body = fake_kiwoom::fixture("ka10099_0");
+    let kiwoom = common::ScriptedTransport::new();
+    let mut body = common::support::fixture("ka10099_0");
     body["list"].as_array_mut().unwrap().retain(|row| row["code"] == "005930");
-    kiwoom.seen.respond_with("ka10099", StatusCode::OK, body);
+    kiwoom.respond_with("ka10099", 200, body);
     let dir = tempdir();
     let server = process(&fake, &kiwoom, dir.path(), "20151231120000");
     let base = format!("http://{}", server.addr().await);
@@ -494,7 +494,7 @@ async fn authentication_stops_the_whole_job_and_requires_successful_explicit_con
     let fake = Fake::start().await;
     fake.state.lock().unwrap().preferred = true;
     fake.state.lock().unwrap().failures.insert("corpCode.xml".into(), "010".into());
-    let kiwoom = common::FakeKiwoom::start().await;
+    let kiwoom = common::ScriptedTransport::new();
     listings(&kiwoom);
     let dir = tempdir();
     let server = process(&fake, &kiwoom, dir.path(), "20151231120000");
@@ -530,10 +530,10 @@ async fn rate_limit_at_first_or_middle_request_persists_and_only_one_confirmatio
     for endpoint in ["corpCode.xml", "fnlttSinglAcntAll.json/2015/11014"] {
         let fake = Fake::start().await;
         fake.state.lock().unwrap().failures.insert(endpoint.into(), "020".into());
-        let kiwoom = common::FakeKiwoom::start().await;
-        let mut body = fake_kiwoom::fixture("ka10099_0");
+        let kiwoom = common::ScriptedTransport::new();
+        let mut body = common::support::fixture("ka10099_0");
         body["list"].as_array_mut().unwrap().retain(|row| row["code"] == "005930");
-        kiwoom.seen.respond_with("ka10099", StatusCode::OK, body);
+        kiwoom.respond_with("ka10099", 200, body);
         let dir = tempdir();
         let server = process(&fake, &kiwoom, dir.path(), "20151231120000");
         let base = format!("http://{}", server.addr().await);
@@ -580,10 +580,10 @@ async fn rate_limit_at_first_or_middle_request_persists_and_only_one_confirmatio
 async fn a_company_remote_failure_has_a_bounded_retry_budget_and_preserves_previous_values() {
     let fake = Fake::start().await;
     fake.state.lock().unwrap().directory = Some(format!("<result><list><corp_code>{CORP}</corp_code><stock_code>005930</stock_code></list><list><corp_code>00000002</corp_code><stock_code>000020</stock_code></list></result>"));
-    let kiwoom = common::FakeKiwoom::start().await;
-    let mut body = fake_kiwoom::fixture("ka10099_0");
+    let kiwoom = common::ScriptedTransport::new();
+    let mut body = common::support::fixture("ka10099_0");
     body["list"].as_array_mut().unwrap().retain(|row| ["005930", "000020"].contains(&row["code"].as_str().unwrap()));
-    kiwoom.seen.respond_with("ka10099", StatusCode::OK, body);
+    kiwoom.respond_with("ka10099", 200, body);
     let dir = tempdir();
     let server = process(&fake, &kiwoom, dir.path(), "20151231120000");
     let base = format!("http://{}", server.addr().await);
@@ -621,7 +621,7 @@ async fn http_authentication_and_limit_responses_stop_without_retrying_other_tar
     for (status, reason) in [(StatusCode::UNAUTHORIZED, "authentication"), (StatusCode::FORBIDDEN, "authentication"), (StatusCode::TOO_MANY_REQUESTS, "rate_limited")] {
         let fake = Fake::start().await;
         fake.state.lock().unwrap().http_failure = Some(status);
-        let kiwoom = common::FakeKiwoom::start().await;
+        let kiwoom = common::ScriptedTransport::new();
         listings(&kiwoom);
         let dir = tempdir();
         let server = process(&fake, &kiwoom, dir.path(), "20151231065959");
@@ -642,10 +642,10 @@ async fn authentication_during_listing_or_xbrl_keeps_checkpoints_and_resumes_aft
     for endpoint in ["list.json", "fnlttXbrl.xml"] {
         let fake = Fake::start().await;
         fake.state.lock().unwrap().failures.insert(endpoint.into(), "012".into());
-        let kiwoom = common::FakeKiwoom::start().await;
-        let mut body = fake_kiwoom::fixture("ka10099_0");
+        let kiwoom = common::ScriptedTransport::new();
+        let mut body = common::support::fixture("ka10099_0");
         body["list"].as_array_mut().unwrap().retain(|row| row["code"] == "005930");
-        kiwoom.seen.respond_with("ka10099", StatusCode::OK, body);
+        kiwoom.respond_with("ka10099", 200, body);
         let dir = tempdir();
         let server = process(&fake, &kiwoom, dir.path(), "20151231120000");
         let base = format!("http://{}", server.addr().await);
@@ -676,7 +676,7 @@ async fn authentication_during_listing_or_xbrl_keeps_checkpoints_and_resumes_aft
 #[tokio::test]
 async fn missing_dart_configuration_never_dispatches_on_repeated_start_or_resume() {
     let fake = Fake::start().await;
-    let kiwoom = common::FakeKiwoom::start().await;
+    let kiwoom = common::ScriptedTransport::new();
     let dir = tempdir();
     let server = common::Server::spawn_with(&kiwoom, &dir.path().join("run/server.lock"), dir.path(), &[("VALLY_CLOCK_START", std::ffi::OsStr::new("20151231120000"))]);
     let base = format!("http://{}", server.addr().await);
@@ -693,7 +693,7 @@ async fn missing_dart_configuration_never_dispatches_on_repeated_start_or_resume
 }
 
 
-pub(super) fn automatic_process(fake: &Fake, kiwoom: &common::FakeKiwoom, dir: &std::path::Path, start: &str) -> common::Server {
+pub(super) fn automatic_process(fake: &Fake, kiwoom: &common::ScriptedTransport, dir: &std::path::Path, start: &str) -> common::Server {
     common::Server::spawn_with(kiwoom, &dir.join("run/server.lock"), dir, &[
         ("OPENDART_API_KEY", std::ffi::OsStr::new(KEY)),
         ("VALLY_DART_BASE_URL", std::ffi::OsStr::new(&fake.url)),
@@ -706,10 +706,10 @@ pub(super) fn automatic_process(fake: &Fake, kiwoom: &common::FakeKiwoom, dir: &
 #[tokio::test]
 async fn automatic_start_catches_up_once_and_same_day_restart_does_not_create_another_job() {
     let fake = Fake::start().await;
-    let kiwoom = common::FakeKiwoom::start().await;
-    let mut body = fake_kiwoom::fixture("ka10099_0");
+    let kiwoom = common::ScriptedTransport::new();
+    let mut body = common::support::fixture("ka10099_0");
     body["list"].as_array_mut().unwrap().retain(|row| row["code"] == "005930");
-    kiwoom.seen.respond_with("ka10099", StatusCode::OK, body);
+    kiwoom.respond_with("ka10099", 200, body);
     let dir = tempdir();
     let server = automatic_process(&fake, &kiwoom, dir.path(), "20151231070001");
     let base = format!("http://{}", server.addr().await);

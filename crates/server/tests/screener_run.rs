@@ -6,9 +6,9 @@ use std::os::unix::fs::DirBuilderExt;
 use std::path::Path;
 use std::time::{Duration, Instant};
 
-use common::{FakeKiwoom, Server};
+use common::{ScriptedTransport, Server};
 use domain::{KstDate, Ohlcv, Price, StockCode, Volume, Weekday};
-use fake_kiwoom::krx::{DailyAnswer, KrxBar, KrxMarket, KrxStock};
+use common::support::krx::{DailyAnswer, KrxBar, KrxMarket, KrxStock};
 use indicators::{Columns, LineId, MaMethod, Spec, ValidSpec};
 use serde_json::{Value, json};
 use server::api::Market;
@@ -190,12 +190,12 @@ impl Api {
     }
 }
 
-fn boot(fake: &FakeKiwoom, dir: &Path, clock_start: &str) -> Server {
+fn boot(fake: &ScriptedTransport, dir: &Path, clock_start: &str) -> Server {
     Server::spawn_with(fake, &dir.join("run/server.lock"), dir, &[("VALLY_CLOCK_START", OsStr::new(clock_start))])
 }
 
 struct Loaded {
-    _fake: FakeKiwoom,
+    _fake: ScriptedTransport,
     _dir: tempfile::TempDir,
     _server: Server,
     api: Api,
@@ -203,7 +203,7 @@ struct Loaded {
 
 async fn loaded(market: KrxMarket) -> Loaded {
     let today = *market.days.last().unwrap();
-    let fake = FakeKiwoom::start().await;
+    let fake = ScriptedTransport::new();
     fake.set_krx_market(market);
     let dir = tempfile::tempdir().unwrap();
     let server = boot(&fake, dir.path(), &at(today, "2030"));
@@ -214,7 +214,7 @@ async fn loaded(market: KrxMarket) -> Loaded {
     Loaded { _fake: fake, _dir: dir, _server: server, api }
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn equal_values_are_new_highs_and_zero_volume_or_missing_days_are_skipped_in_ranges_and_n() {
     let days = fortnight();
     let equal = stock("200010", priced(&days, |_| 100));
@@ -246,7 +246,7 @@ async fn equal_values_are_new_highs_and_zero_volume_or_missing_days_are_skipped_
     );
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn a_listing_shorter_than_the_longest_n_is_counted_as_listed_too_short() {
     let days = fortnight();
     let session = loaded(KrxMarket {
@@ -264,13 +264,13 @@ async fn a_listing_shorter_than_the_longest_n_is_counted_as_listed_too_short() {
     assert_eq!((six["excluded"].clone(), hits(&six)), (excluded(2, 0), vec![hit("200010", days[14])]), "조건 가운데 가장 큰 n으로 센다");
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn an_unfilled_history_is_history_short_until_backfill_and_a_pre_1985_listing_then_starts_at_its_first_stored_bar() {
     let days = last_open_days(700, day(2026, 11, 6));
     let today = days[699];
     let mut pre_1985 = stock("200010", priced(&days, |_| 100));
     pre_1985.reg_day = day(1976, 3, 24);
-    let fake = FakeKiwoom::start().await;
+    let fake = ScriptedTransport::new();
     fake.set_krx_market(KrxMarket { days: days.clone(), stocks: vec![pre_1985, stock("200020", priced(&days[670..], |_| 100))] });
     let dir = tempfile::tempdir().unwrap();
     let server = boot(&fake, dir.path(), &at(today, "2030"));
@@ -300,7 +300,7 @@ async fn an_unfilled_history_is_history_short_until_backfill_and_a_pre_1985_list
     server.stop().await;
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn weekly_and_monthly_cells_count_the_unfinished_current_one_and_skip_holidays() {
     let closed = [day(2026, 10, 9), day(2026, 10, 12), day(2026, 10, 13), day(2026, 10, 14), day(2026, 10, 15), day(2026, 10, 16)];
     let days = open_days(day(2026, 9, 7), day(2026, 11, 4), &closed);
@@ -338,7 +338,7 @@ async fn weekly_and_monthly_cells_count_the_unfinished_current_one_and_skip_holi
     assert_eq!(price_and_change(&this_month, "200010"), (json!(220.0), json!(-12.0)), "월봉 줄이어도 등락률은 직전 일봉 종가 250 대비다");
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn a_market_holiday_is_not_a_daily_cell() {
     let days = open_days(day(2026, 10, 19), day(2026, 11, 6), &[day(2026, 11, 5)]);
     let (before_holiday, today) = (days.len() - 2, days.len() - 1);
@@ -351,7 +351,7 @@ async fn a_market_holiday_is_not_a_daily_cell() {
     );
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn conditions_combine_with_and_and_rows_carry_the_first_conditions_last_new_high_sorted_newest_first() {
     let days = fortnight();
     let lone_bar = stock("200050", vec![bar(days[14], 100, 1_000)]);
@@ -385,7 +385,7 @@ async fn conditions_combine_with_and_and_rows_carry_the_first_conditions_last_ne
     assert_eq!(row(&every_bar, "200050")["name"], "가상200050");
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn a_traded_value_new_high_runs_and_no_condition_kind_or_market_is_refused_any_more() {
     let days = fortnight();
     let traded = |code: &str, million_won: fn(usize) -> u64| {
@@ -431,7 +431,7 @@ async fn a_traded_value_new_high_runs_and_no_condition_kind_or_market_is_refused
     assert!(!body["error"]["message"].as_str().unwrap().contains("아직"), "{body}");
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn a_volume_or_traded_value_high_in_the_last_100_of_200_cells_follows_the_price_new_high_rules() {
     let days = last_open_days(300, day(2026, 11, 6));
     let flat_but = |code: &str, peaks: &[(usize, u64)]| {
@@ -476,7 +476,7 @@ async fn a_volume_or_traded_value_high_in_the_last_100_of_200_cells_follows_the_
     }
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn excluded_kinds_and_states_leave_the_universe_uncounted_even_when_audit_info_lists_several() {
     let days = fortnight();
     let flat = |code: &str| stock(code, priced(&days, |_| 100));
@@ -512,11 +512,11 @@ async fn excluded_kinds_and_states_leave_the_universe_uncounted_even_when_audit_
     assert_eq!((states["universe"].clone(), hits(&states)), (json!(6), today(&["200010", "200020", "200025", "200030", "200040"])));
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn a_run_is_refused_while_recent_days_fill_and_when_the_store_lacks_the_need_day() {
     let days = last_open_days(700, day(2026, 11, 6));
     let today = days[699];
-    let fake = FakeKiwoom::start().await;
+    let fake = ScriptedTransport::new();
     fake.set_krx_market(KrxMarket { days: days.clone(), stocks: vec![stock("200010", priced(&days, |_| 100)), stock("200020", priced(&days[670..], |_| 100))] });
     let dir = tempfile::tempdir().unwrap();
     let server = boot(&fake, dir.path(), &at(today, "2030"));
@@ -557,7 +557,7 @@ async fn a_run_is_refused_while_recent_days_fill_and_when_the_store_lacks_the_ne
     server.stop().await;
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn a_partly_stored_first_week_or_month_is_history_short_until_backfill_fills_it() {
     let today = day(2026, 11, 4);
     let days = last_open_days(1_300, today);
@@ -572,7 +572,7 @@ async fn a_partly_stored_first_week_or_month_is_history_short_until_backfill_fil
 
     let earlier = stock("200010", priced(&days[days.len() - 650..], |i| 10_000 - i as u64));
     let gapped = stock("200020", priced(&days, |i| if days[i] == its_monday { 300 } else if days[i] == today { 200 } else { 100 }));
-    let fake = FakeKiwoom::start().await;
+    let fake = ScriptedTransport::new();
     fake.set_krx_market(KrxMarket { days: days.clone(), stocks: vec![earlier, gapped] });
     let dir = tempfile::tempdir().unwrap();
     let server = boot(&fake, dir.path(), &at(today, "2030"));
@@ -605,12 +605,12 @@ async fn a_partly_stored_first_week_or_month_is_history_short_until_backfill_fil
     server.stop().await;
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn the_update_stores_the_kospi_calendar_back_to_its_first_day_once_then_appends_only_new_days() {
     let days = last_open_days(1_301, day(2026, 11, 6));
     let (yesterday, today) = (days[1_299], days[1_300]);
-    let calendar_keys = |calls: &[fake_kiwoom::Call]| calls.iter().filter(|c| c.api_id == "ka20006").map(|c| c.next_key.clone()).collect::<Vec<_>>();
-    let fake = FakeKiwoom::start().await;
+    let calendar_keys = |calls: &[common::support::Call]| calls.iter().filter(|c| c.api_id == "ka20006").map(|c| c.next_key.clone()).collect::<Vec<_>>();
+    let fake = ScriptedTransport::new();
     fake.set_krx_market(KrxMarket { days: days[..1_300].to_vec(), stocks: vec![stock("200010", priced(&days[1_270..1_300], |_| 100))] });
     let dir = tempfile::tempdir().unwrap();
     let server = boot(&fake, dir.path(), &at(yesterday, "2030"));
@@ -633,7 +633,7 @@ async fn the_update_stores_the_kospi_calendar_back_to_its_first_day_once_then_ap
     server.stop().await;
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn a_delisted_stocks_old_bars_do_not_fill_in_the_unstored_start_of_a_new_listings_first_week() {
     let today = day(2026, 11, 4);
     let days = last_open_days(1_300, today);
@@ -644,7 +644,7 @@ async fn a_delisted_stocks_old_bars_do_not_fill_in_the_unstored_start_of_a_new_l
     let listed_days = &days[listed_from..];
     let new_listing = stock("200020", priced(listed_days, |i| if listed_days[i] == day(2024, 7, 15) { 300 } else if listed_days[i] == today { 200 } else { 100 }));
     assert_eq!(new_listing.bars[new_listing.bars.len() - 600].day, day(2024, 7, 18), "최근 600관측일은 7-18(목)부터라 7-15·16·17이 빠진다");
-    let fake = FakeKiwoom::start().await;
+    let fake = ScriptedTransport::new();
     fake.set_krx_market(KrxMarket { days: days.iter().copied().filter(|d| *d <= last_traded).collect(), stocks: vec![delisted] });
     let dir = tempfile::tempdir().unwrap();
     let server = boot(&fake, dir.path(), &at(last_traded, "2030"));
@@ -681,12 +681,12 @@ async fn a_delisted_stocks_old_bars_do_not_fill_in_the_unstored_start_of_a_new_l
     server.stop().await;
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn runs_racing_into_recent_read_the_store_from_before_recent_or_are_refused() {
     let days = fortnight();
     let (yesterday, today) = (days[13], days[14]);
     let stopped_trading = stock("200020", priced(&days[..9], |_| 100));
-    let fake = FakeKiwoom::start().await;
+    let fake = ScriptedTransport::new();
     fake.set_krx_market(KrxMarket { days: days[..14].to_vec(), stocks: vec![stopped_trading.clone()] });
     let dir = tempfile::tempdir().unwrap();
     let server = boot(&fake, dir.path(), &at(yesterday, "2030"));
@@ -745,7 +745,7 @@ async fn runs_racing_into_recent_read_the_store_from_before_recent_or_are_refuse
     server.stop().await;
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn a_new_low_takes_the_smallest_value_ties_included_and_a_halted_day_is_no_low_volume_bar() {
     let days = fortnight();
     let stocks = vec![
@@ -772,7 +772,7 @@ async fn a_new_low_takes_the_smallest_value_ties_included_and_a_halted_day_is_no
     assert_eq!(hits(&api.result(&every(vec![new_low("D", "volume", 5, 2)])).await)[3], hit("200040", days[13]), "정지 전날의 거래량 500이 5일 신저거래량이다");
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn a_value_range_includes_both_bounds_in_won_and_shares() {
     let days = fortnight();
     let closing = |code: &str, close: u64, volume: u64, traded_million_won: u64| {
@@ -803,7 +803,7 @@ async fn a_value_range_includes_both_bounds_in_won_and_shares() {
     assert_eq!(hits(&api.result(&ranged(2, "close", Some(250.0), None)).await), Vec::<String>::new());
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn a_change_compares_with_the_close_back_bars_earlier_skipping_halted_days() {
     let days = fortnight();
     let stocks = vec![
@@ -836,7 +836,7 @@ async fn a_change_compares_with_the_close_back_bars_earlier_skipping_halted_days
     assert_eq!((two_back["excluded"].clone(), hits(&two_back)), (excluded(1, 0), vec![]), "200050은 실제 봉이 2개라 2봉 전 종가를 비교할 상장 기간이 부족하다");
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn near_extreme_compares_the_close_with_the_n_cell_high_or_low_inside_a_full_window() {
     let days = fortnight();
     let flat = |price: u64| move |d: KstDate| candle(d, [price; 4], 1_000);
@@ -862,7 +862,7 @@ async fn near_extreme_compares_the_close_with_the_n_cell_high_or_low_inside_a_fu
     );
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn a_surge_compares_with_the_average_of_the_n_bars_before_skipping_halted_days() {
     let days = fortnight();
     let traded = |code: &str, volume: fn(usize) -> u64, million_won: fn(usize) -> u64| {
@@ -890,7 +890,7 @@ fn picks(result: &Value, code: &str) -> bool {
     result["rows"].as_array().unwrap().iter().any(|r| r["symbol"] == code)
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn decimal_parameters_meet_their_exact_boundary_and_the_floats_beside_it_fall_either_side() {
     let days = fortnight();
     let (before_huge, huge) = (48_650_645_685_924_000, 49_185_802_788_469_164);
@@ -937,7 +937,7 @@ async fn decimal_parameters_meet_their_exact_boundary_and_the_floats_beside_it_f
     assert_eq!(price_and_change(&huge_row, "200040"), (json!(huge as f64), json!(1.1)), "결과 행의 종가와 등락률도 그 가격 그대로다");
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn a_surge_needs_a_value_above_zero_even_when_the_bars_before_average_zero() {
     let days = fortnight();
     let traded = |code: &str, today: u64| stock(code, days.iter().enumerate().map(|(i, &d)| KrxBar { traded_million_won: if i == 14 { today } else { 0 }, ..bar(d, 100, 100) }).collect());
@@ -952,7 +952,7 @@ async fn a_surge_needs_a_value_above_zero_even_when_the_bars_before_average_zero
     }
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn a_huge_traded_value_sum_in_some_stocks_leaves_every_stocks_weekly_and_monthly_result() {
     let days = fortnight();
     let traded = |code: &str, million_won: u64| stock(code, days.iter().map(|&d| KrxBar { traded_million_won: million_won, ..bar(d, 100, 100) }).collect());
@@ -980,7 +980,7 @@ async fn a_huge_traded_value_sum_in_some_stocks_leaves_every_stocks_weekly_and_m
     }
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn needed_bars_of_each_line_decide_listed_too_short_once_even_across_periods() {
     let days = fortnight();
     let listed_from = |code: &str, first: usize| stock(code, priced(&days[first..], |_| 100));
@@ -1007,12 +1007,12 @@ async fn needed_bars_of_each_line_decide_listed_too_short_once_even_across_perio
     }
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn history_short_needs_the_earliest_first_needed_day_over_lines_of_every_period() {
     let days = last_open_days(700, day(2026, 11, 6));
     let today = days[699];
     assert_eq!((days[0].weekday(), days[100].weekday()), (Weekday::Mon, Weekday::Mon), "140주가 꼭 차고, 최근 600관측일은 월요일에 시작한다");
-    let fake = FakeKiwoom::start().await;
+    let fake = ScriptedTransport::new();
     fake.set_krx_market(KrxMarket { days: days.clone(), stocks: vec![stock("200010", priced(&days, |_| 100)), stock("200020", priced(&days[670..], |_| 100))] });
     let dir = tempfile::tempdir().unwrap();
     let server = boot(&fake, dir.path(), &at(today, "2030"));
@@ -1042,7 +1042,7 @@ async fn history_short_needs_the_earliest_first_needed_day_over_lines_of_every_p
     server.stop().await;
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn daily_and_weekly_lines_combine_with_and_and_the_first_line_sets_the_matched_date_while_closes_stay_daily() {
     let days = open_days(day(2026, 10, 19), day(2026, 11, 4), &[]);
     let (monday, today) = (day(2026, 11, 2), *days.last().unwrap());
@@ -1222,7 +1222,7 @@ fn found(_days: &[KstDate], stocks: &[KrxStock], condition: &Value, candidates: 
     found.into_iter().map(|(day, code)| hit(code, day)).collect()
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn each_indicator_kind_and_test_picks_the_stocks_the_indicators_crate_finds_on_the_same_bars() {
     let days = last_open_days(200, day(2026, 11, 6));
     let stocks: Vec<KrxStock> = (0..24).map(|k| stock(&format!("2000{:02}", k + 10), walk(k as u64, if k % 4 == 3 { &days[40..] } else { &days }))).collect();
@@ -1312,7 +1312,7 @@ async fn each_indicator_kind_and_test_picks_the_stocks_the_indicators_crate_find
     }
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn a_cross_takes_lines_equal_on_the_bar_before_and_that_bar_skips_halted_days() {
     let days = fortnight();
     let ending = |code: &str, last_two: [(u64, u64); 2]| {
@@ -1348,7 +1348,7 @@ async fn a_cross_takes_lines_equal_on_the_bar_before_and_that_bar_skips_halted_d
     );
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn the_ichimoku_cloud_of_a_bar_is_the_leading_spans_computed_displacement_minus_one_bars_before() {
     let days = fortnight();
     let ranged = |d: KstDate, high: u64, low: u64, close: u64| candle(d, [close, high, low, close], 1_000);
@@ -1374,7 +1374,7 @@ async fn the_ichimoku_cloud_of_a_bar_is_the_leading_spans_computed_displacement_
     assert_eq!(hits(&api.result(&cloud("below")).await), [hit("200020", days[14])], "오늘 구름은 2봉 전 가운데 300이라 종가 200이 아래다");
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn needed_bars_of_indicator_lines_follow_the_indicator_warmup_and_count_listed_too_short() {
     let days = fortnight();
     let listed_cells = [9, 10, 11, 12];
@@ -1426,7 +1426,7 @@ async fn needed_bars_of_indicator_lines_follow_the_indicator_warmup_and_count_li
     }
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn an_indicator_value_meets_a_bound_equal_to_it_and_the_floats_beside_it_fall_either_side() {
     let days = last_open_days(200, day(2026, 11, 6));
     let bars = walk(7, &days);
@@ -1459,7 +1459,7 @@ async fn an_indicator_value_meets_a_bound_equal_to_it_and_the_floats_beside_it_f
     }
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn a_candidate_bar_and_the_bar_before_a_cross_need_every_line_of_the_indicator_computed() {
     let days = fortnight();
     let jumping_at = |first: usize| priced(&days, move |i| if i >= first { 130 } else { 100 });
@@ -1529,7 +1529,7 @@ fn with_shares(listed_shares: Option<u64>, stock: KrxStock) -> KrxStock {
     KrxStock { listed_shares, ..stock }
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn a_market_cap_is_the_last_daily_close_up_to_the_as_of_day_times_the_listed_shares_with_both_bounds_included() {
     let days = fortnight();
     let today = days[14];
@@ -1541,7 +1541,7 @@ async fn a_market_cap_is_the_last_daily_close_up_to_the_as_of_day_times_the_list
         with_shares(None, stock("200030", priced(&days, |_| 12_345))),
         with_shares(Some(0), stock("200040", priced(&days, |_| 12_345))),
     ];
-    let fake = FakeKiwoom::start().await;
+    let fake = ScriptedTransport::new();
     fake.set_krx_market(KrxMarket { days: days.clone(), stocks });
     let dir = tempfile::tempdir().unwrap();
     let server = boot(&fake, dir.path(), &at(today, "2030"));
@@ -1586,7 +1586,7 @@ async fn a_market_cap_is_the_last_daily_close_up_to_the_as_of_day_times_the_list
     server.stop().await;
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn markets_keep_only_their_own_stocks_with_kospi_holding_etfs_and_reits_and_leave_the_others_uncounted() {
     let days = fortnight();
     let today = days[14];
@@ -1622,7 +1622,7 @@ async fn markets_keep_only_their_own_stocks_with_kospi_holding_etfs_and_reits_an
     }
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn a_screen_without_conditions_is_saved_read_back_after_a_restart_and_finds_every_target_stock_on_the_as_of_day() {
     let days = fortnight();
     let today = days[14];
@@ -1636,7 +1636,7 @@ async fn a_screen_without_conditions_is_saved_read_back_after_a_restart_and_find
         listed_in("10", stock("200050", priced(&days[..9], |_| 100))),
         KrxStock { reg_day: day(2026, 11, 9), bars: vec![], ..stock("200060", priced(&days, |_| 100)) },
     ];
-    let fake = FakeKiwoom::start().await;
+    let fake = ScriptedTransport::new();
     fake.set_krx_market(KrxMarket { days, stocks });
     let dir = tempfile::tempdir().unwrap();
     let server = boot(&fake, dir.path(), &at(today, "2030"));
@@ -1678,7 +1678,7 @@ async fn a_screen_without_conditions_is_saved_read_back_after_a_restart_and_find
     server.stop().await;
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn a_market_cap_first_line_leaves_the_matched_date_to_the_next_bar_line_and_to_the_as_of_day_without_one() {
     let days = fortnight();
     let (monday, today) = (day(2026, 11, 2), days[14]);
@@ -1750,7 +1750,7 @@ fn fill_large_store(path: &Path, days: &[KstDate]) {
     store.set_last_day(*days.last().unwrap()).unwrap();
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn a_screen_over_4000_stocks_collects_all_summaries_and_judges_thousands_of_bars() {
     let days = last_open_days(LARGE_BARS, day(2026, 11, 6));
     let today = *days.last().unwrap();
@@ -1762,7 +1762,7 @@ async fn a_screen_over_4000_stocks_collects_all_summaries_and_judges_thousands_o
     tokio::task::spawn_blocking(move || fill_large_store(&path, &stored)).await.unwrap();
     eprintln!("가짜 저장소 {LARGE_STOCKS}종목 × {LARGE_BARS}봉을 {:?}에 채웠습니다", filling.elapsed());
 
-    let fake = FakeKiwoom::start().await;
+    let fake = ScriptedTransport::new();
     fake.set_quote_rows((0..LARGE_STOCKS).map(|i| {
         let code = format!("{:05}0", 10_000 + i);
         summary_row(&code, today, 100, 100, 1000, 0)
@@ -1829,7 +1829,7 @@ fn with_recent(mut condition: Value, count: u64) -> Value {
     condition
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn recent_periods_skip_empty_days_weeks_and_months_and_conditions_match_independently() {
     let days = open_days(day(2026, 1, 1), day(2026, 11, 6), &[]);
     let mut traded: Vec<KstDate> = days.iter().copied().filter(|d| d.day() == 5).take(10).collect();
@@ -1882,10 +1882,10 @@ async fn intraday_session(today: KstDate, count: usize, hhmm: &str) -> Loaded {
 }
 
 fn summary_row(code: &str, today: KstDate, close: u64, high: u64, volume: u64, traded: u64) -> Value {
-    fake_kiwoom::summary::row(code, KrxBar { day: today, open: 100, high, low: 90, close, volume, traded_million_won: traded, base: 100, adjustment_rate: None }, "090000")
+    common::support::summary::row(code, KrxBar { day: today, open: 100, high, low: 90, close, volume, traded_million_won: traded, base: 100, adjustment_rate: None }, "090000")
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn intraday_values_indicators_caps_and_results_share_one_overlay_and_reverted_crosses_disappear() {
     let today = day(2026, 11, 9);
     let session = intraday_session(today, 1, "1200").await;
@@ -1922,7 +1922,7 @@ async fn intraday_values_indicators_caps_and_results_share_one_overlay_and_rever
     assert_eq!(store.summary().unwrap().last_day, Some(day(2026, 11, 6)));
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn intraday_week_month_ohlcv_and_boundary_values_are_added_once_and_finalized_day_wins() {
     for today in [day(2026, 11, 9), day(2026, 12, 1)] {
         let session = intraday_session(today, 1, "1200").await;
@@ -1943,7 +1943,7 @@ async fn intraday_week_month_ohlcv_and_boundary_values_are_added_once_and_finali
     assert_eq!(row(&result, "300000")["provisional"], false);
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn intraday_no_trades_missing_other_dates_and_unreadable_rows_remain_distinct() {
     for (today, hhmm) in [(day(2026, 11, 9), "0755"), (day(2026, 11, 14), "1200")] {
         let session = intraday_session(today, 5, hhmm).await;
@@ -1965,7 +1965,7 @@ async fn intraday_no_trades_missing_other_dates_and_unreadable_rows_remain_disti
     }
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn intraday_different_conditions_share_full_listing_collection_and_failures_never_return_partial_results() {
     let today = day(2026, 11, 9);
     let session = intraday_session(today, 101, "1200").await;
@@ -1980,8 +1980,8 @@ async fn intraday_different_conditions_share_full_listing_collection_and_failure
     assert_eq!(b["universe"], 0);
     assert_eq!(a["collectionStartedAt"], b["collectionStartedAt"]);
     assert_eq!(session._fake.calls().iter().filter(|c| c.api_id == "ka10095").count() - seen, 2);
-    let fail = || fake_kiwoom::ScriptedReply { status: 200, body: json!({"return_code": 2, "return_msg": "[1501:입력 오류]"}), delay: Duration::ZERO };
-    for replies in [vec![fail()], vec![fake_kiwoom::ScriptedReply { status: 200, body: json!({"return_code": 0, "atn_stk_infr": &rows[..100]}), delay: Duration::ZERO }, fail()]] {
+    let fail = || common::support::ScriptedReply { status: 200, body: json!({"return_code": 2, "return_msg": "[1501:입력 오류]"}), delay: Duration::ZERO };
+    for replies in [vec![fail()], vec![common::support::ScriptedReply { status: 200, body: json!({"return_code": 0, "atn_stk_infr": &rows[..100]}), delay: Duration::ZERO }, fail()]] {
         session._fake.script("ka10095", replies);
         let (status, body) = session.api.run(&all).await;
         assert_ne!(status, 200, "{body}");
@@ -1990,7 +1990,7 @@ async fn intraday_different_conditions_share_full_listing_collection_and_failure
     }
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn intraday_adjustment_and_same_day_history_updates_abort_the_whole_result() {
     let today = day(2026, 11, 9);
     let session = intraday_session(today, 1, "1200").await;
@@ -2015,7 +2015,7 @@ async fn intraday_adjustment_and_same_day_history_updates_abort_the_whole_result
     assert!(body["rows"].is_null());
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn intraday_midnight_during_collection_returns_an_error_without_rows() {
     let today = day(2026, 11, 9);
     let Loaded { _fake: fake, _dir: dir, _server: server, .. } = intraday_session(today, 1, "1200").await;
@@ -2030,11 +2030,11 @@ async fn intraday_midnight_during_collection_returns_an_error_without_rows() {
     server.stop().await;
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn intraday_backfill_committing_during_collection_invalidates_the_same_update_generation() {
     let today = day(2026, 11, 6);
     let days = last_open_days(700, today);
-    let fake = FakeKiwoom::start().await;
+    let fake = ScriptedTransport::new();
     fake.set_krx_market(KrxMarket { days: days.clone(), stocks: vec![stock("300000", priced(&days, |_| 100))] });
     fake.delay("ka10081", Duration::from_millis(500));
     let dir = tempfile::tempdir().unwrap();
@@ -2057,7 +2057,7 @@ fn review_evidence(name: &str, value: &Value) {
     eprintln!("{name}: {value}");
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn regression_223_previous_date_on_closed_and_preopen_days() {
     let mut outcomes = Vec::new();
     for (today, hhmm) in [(day(2026, 11, 9), "0755"), (day(2026, 11, 14), "1200"), (day(2026, 11, 9), "1200"), (day(2026, 11, 9), "0830")] {
@@ -2078,7 +2078,7 @@ async fn regression_223_previous_date_on_closed_and_preopen_days() {
     review_evidence("previous-date", &json!(outcomes));
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn regression_223_adjustment_normal_update_recovers() {
     let today = day(2026, 11, 9);
     let days = last_open_days(20, today.add_days(-1));
@@ -2108,7 +2108,7 @@ async fn regression_223_adjustment_normal_update_recovers() {
     server.stop().await;
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn regression_223_withheld_stock_does_not_block_full_refetch() {
     let today = day(2026, 11, 6);
     let days = last_open_days(20, today);
@@ -2129,7 +2129,7 @@ async fn regression_223_withheld_stock_does_not_block_full_refetch() {
     review_evidence("withheld-refetch", &json!({"before": before, "fullUpdate": full, "afterFullUpdate": after, "normalUpdate": normal, "afterNormalUpdate": repeated}));
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn regression_223_first_listing_day_uses_overlay_for_history_readiness() {
     let today = day(2026, 11, 9);
     let days = last_open_days(20, today.add_days(-1));
@@ -2151,7 +2151,7 @@ async fn regression_223_first_listing_day_uses_overlay_for_history_readiness() {
     server.stop().await;
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn regression_223_new_generation_cannot_join_old_collection() {
     let today = day(2026, 11, 9);
     let days = last_open_days(20, today.add_days(-1));
@@ -2161,7 +2161,7 @@ async fn regression_223_new_generation_cannot_join_old_collection() {
     let server = boot(&fake, dir.path(), &at(today, "1200"));
     let api = Api::of(&server).await;
     let old_quote = summary_row("300000", today, 100, 100, 1000, 1);
-    fake.script("ka10095", vec![fake_kiwoom::ScriptedReply { status: 200, body: json!({"return_code": 0, "atn_stk_infr": [old_quote]}), delay: Duration::from_secs(5) }]);
+    fake.script("ka10095", vec![common::support::ScriptedReply { status: 200, body: json!({"return_code": 0, "atn_stk_infr": [old_quote]}), delay: Duration::from_secs(5) }]);
     let seen = fake.calls().iter().filter(|c| c.api_id == "ka10095").count();
     let screen = every(vec![]);
     let during = async {
@@ -2185,7 +2185,7 @@ async fn regression_223_new_generation_cannot_join_old_collection() {
     server.stop().await;
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn regression_223_closed_day_evidence_never_hides_missing_rows_or_conflicting_today_trades() {
     for (today, hhmm) in [(day(2026, 11, 9), "0755"), (day(2026, 11, 14), "1200")] {
         let session = intraday_session(today, 3, hhmm).await;
@@ -2203,7 +2203,7 @@ async fn regression_223_closed_day_evidence_never_hides_missing_rows_or_conflict
     }
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn regression_223_new_listing_week_month_boundaries_require_only_existing_past_bars() {
     for today in [day(2026, 11, 9), day(2026, 12, 1)] {
         let days = last_open_days(20, today.add_days(-1));
@@ -2227,7 +2227,7 @@ async fn regression_223_new_listing_week_month_boundaries_require_only_existing_
     }
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn regression_223_adjustment_refetch_missing_midway_recovers_or_excludes_after_restart_and_delisting() {
     let today = day(2026, 11, 9);
     let days = last_open_days(20, today.add_days(-1));
@@ -2251,7 +2251,7 @@ async fn regression_223_adjustment_refetch_missing_midway_recovers_or_excludes_a
     fake.delay("ka10081", Duration::ZERO);
     let server = boot(&fake, dir.path(), &at(today, "1200"));
     let api = Api::of(&server).await;
-    fake.script("ka10081", vec![fake_kiwoom::ScriptedReply { status: 200, body: json!({"return_code": 2, "return_msg": "[1501:입력 오류]"}), delay: Duration::ZERO }]);
+    fake.script("ka10081", vec![common::support::ScriptedReply { status: 200, body: json!({"return_code": 2, "return_msg": "[1501:입력 오류]"}), delay: Duration::ZERO }]);
     api.update().await;
     let failed = api.wait_for("재수집 오류", |s| !s["update"]["error"].is_null()).await;
     assert!(!failed["update"]["error"].is_null());
@@ -2259,11 +2259,11 @@ async fn regression_223_adjustment_refetch_missing_midway_recovers_or_excludes_a
     let server = boot(&fake, dir.path(), &at(today, "1200"));
     let api = Api::of(&server).await;
     assert_eq!(api.run(&every(vec![])).await.0, 409, "수정 확인 필요는 재시작해도 남는다");
-    let fake_kiwoom::krx::KrxPage::Page { mut body, .. } = fake_kiwoom::krx::respond(&market, "ka10081", &json!({"stk_cd": "300001"}), None).unwrap() else { panic!("일봉 페이지") };
+    let common::support::krx::KrxPage::Page { mut body, .. } = common::support::krx::respond(&market, "ka10081", &json!({"stk_cd": "300001"}), None).unwrap() else { panic!("일봉 페이지") };
     body["_headers"] = json!({"cont-yn": "Y", "next-key": "middle"});
     let mut missing = market.clone(); missing.stocks[1].daily = DailyAnswer::EmptyRow;
-    let fake_kiwoom::krx::KrxPage::Page { body: empty, .. } = fake_kiwoom::krx::respond(&missing, "ka10081", &json!({"stk_cd": "300001"}), None).unwrap() else { panic!("빈 일봉") };
-    fake.script("ka10081", vec![body, empty].into_iter().map(|body| fake_kiwoom::ScriptedReply { status: 200, body, delay: Duration::ZERO }).collect());
+    let common::support::krx::KrxPage::Page { body: empty, .. } = common::support::krx::respond(&missing, "ka10081", &json!({"stk_cd": "300001"}), None).unwrap() else { panic!("빈 일봉") };
+    fake.script("ka10081", vec![body, empty].into_iter().map(|body| common::support::ScriptedReply { status: 200, body, delay: Duration::ZERO }).collect());
     fake.set_krx_market(missing.clone());
     api.update().await;
     assert_eq!(api.settled().await["unconfirmed"], 1);
@@ -2294,7 +2294,7 @@ async fn regression_223_adjustment_refetch_missing_midway_recovers_or_excludes_a
     server.stop().await;
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn regression_223_pre0800_evidence_expires_when_collection_crosses_0800() {
     let today = day(2026, 11, 9);
     let Loaded { _fake: fake, _dir: dir, _server: server, .. } = intraday_session(today, 1, "0755").await;
@@ -2325,7 +2325,7 @@ fn early_krx_evidence(name: &str, responses: &Value) {
     std::fs::write(dir.join(format!("{name}.json")), serde_json::to_vec_pretty(responses).unwrap()).unwrap();
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn regression_223_early_krx_previous_date_remains_missing_after_0800() {
     let mut responses = Vec::new();
     for time in ["080000", "081500", "082959"] {
@@ -2344,7 +2344,7 @@ async fn regression_223_early_krx_previous_date_remains_missing_after_0800() {
     }
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn regression_223_early_krx_today_trade_is_used_after_0800() {
     let today = day(2026, 11, 9);
     let mut responses = Vec::new();
@@ -2367,7 +2367,7 @@ async fn regression_223_early_krx_today_trade_is_used_after_0800() {
     }
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn regression_223_early_krx_before_0800_distinguishes_current_from_absence() {
     let today = day(2026, 11, 9);
     let mut responses = Vec::new();

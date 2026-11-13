@@ -425,7 +425,7 @@ mod common;
 async fn real_price_api_remains_available_without_key_and_during_collection_and_logs_redact_key() {
     let fake = Fake::start().await;
     fake.state.lock().unwrap().delayed = true;
-    let kiwoom = common::FakeKiwoom::start().await;
+    let kiwoom = common::ScriptedTransport::new();
     let client = reqwest::Client::new();
     for configured in [false,true] {
         let dir = tempfile::tempdir().unwrap();
@@ -558,7 +558,7 @@ async fn http_settled(client: &reqwest::Client, base: &str) -> Value {
     panic!("HTTP collection did not settle");
 }
 
-fn process(fake: &Fake, kiwoom: &common::FakeKiwoom, dir: &std::path::Path, start: &str) -> common::Server {
+fn process(fake: &Fake, kiwoom: &common::ScriptedTransport, dir: &std::path::Path, start: &str) -> common::Server {
     common::Server::spawn_with(kiwoom,&dir.join("run/server.lock"),dir,&[
         ("OPENDART_API_KEY",std::ffi::OsStr::new(KEY)),
         ("VALLY_DART_BASE_URL",std::ffi::OsStr::new(&fake.url)),
@@ -575,7 +575,7 @@ fn report_calls(fake: &Fake, code: &str) -> usize {
 async fn review_restart_resumes_corrections_after_list_commit_and_partial_report_commit() {
     for paused in ["11013","11014"] {
         let fake = Fake::start().await;
-        let kiwoom = common::FakeKiwoom::start().await;
+        let kiwoom = common::ScriptedTransport::new();
         let dir = tempfile::tempdir().unwrap();
         let client = reqwest::Client::new();
         let server = process(&fake,&kiwoom,dir.path(),"20151231120000");
@@ -693,7 +693,7 @@ async fn review_same_day_disclosure_failure_retries_failed_endpoint_and_finds_co
 #[tokio::test]
 async fn review_unavailable_financial_store_keeps_real_price_and_user_data_routes_running() {
     let fake = Fake::start().await;
-    let kiwoom = common::FakeKiwoom::start().await;
+    let kiwoom = common::ScriptedTransport::new();
     for configured in [false,true] {
         let dir = tempfile::tempdir().unwrap();
         let db_directory = dir.path().join("db-is-directory");
@@ -916,7 +916,7 @@ async fn review2_failed_list_storage_keeps_real_price_usable_and_preserves_verif
     use sqlx::Connection;
     use std::os::unix::fs::PermissionsExt;
     let fake = Fake::start().await;
-    let kiwoom = common::FakeKiwoom::start().await;
+    let kiwoom = common::ScriptedTransport::new();
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("run/financials.db");
     let service = Financials::new(Some(fake.client()),Store::open(&path).await.unwrap(),clock());
@@ -962,7 +962,7 @@ async fn review2_failed_list_storage_keeps_real_price_usable_and_preserves_verif
 async fn calculated_http_contract_validates_period_and_preserves_price_during_collection() {
     let fake = Fake::start().await;
     fake.state.lock().unwrap().delayed = true;
-    let kiwoom = common::FakeKiwoom::start().await;
+    let kiwoom = common::ScriptedTransport::new();
     let client = reqwest::Client::new();
     for configured in [false,true] {
         let dir = tempfile::tempdir().unwrap();
@@ -999,7 +999,7 @@ async fn calculated_http_contract_validates_period_and_preserves_price_during_co
 async fn calculated_http_reads_saved_values_without_key_and_applies_correction_with_metadata() {
     use std::os::unix::fs::PermissionsExt;
     let fake = Fake::start().await;
-    let kiwoom = common::FakeKiwoom::start().await;
+    let kiwoom = common::ScriptedTransport::new();
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("run/financials.db");
     let service = Financials::new(Some(fake.client()),Store::open(&path).await.unwrap(),clock());

@@ -58,7 +58,6 @@ pub struct ScriptedTransport {
 
 impl ScriptedTransport {
     pub fn new() -> Self { Self::default() }
-    pub async fn start() -> Self { Self::new() }
     pub fn transport(&self) -> Arc<dyn Transport> { Arc::new(self.clone()) }
     pub fn respond_with(&self, id: &str, status: u16, body: Value) { self.replies.lock().unwrap().defaults.insert(id.into(), (status, body)); }
     pub fn respond_with_for_key(&self, id: &str, key: &str, status: u16, body: Value) { self.replies.lock().unwrap().continuations.insert((id.into(), key.into()), (status, body)); }

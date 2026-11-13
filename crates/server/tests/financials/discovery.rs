@@ -210,13 +210,13 @@ async fn first_and_mid_discovery_failures_retry_in_the_next_update_and_preserve_
 
 #[tokio::test]
 async fn first_and_mid_discovery_failures_leave_price_requests_usable() {
-    let kiwoom = common::FakeKiwoom::start().await;
-    let mut symbols = fake_kiwoom::fixture("ka10099_0");
+    let kiwoom = common::ScriptedTransport::new();
+    let mut symbols = common::support::fixture("ka10099_0");
     let mut preferred = symbols["list"].as_array().unwrap().iter().find(|row| row["code"] == "005935").unwrap().clone();
     preferred["code"] = STOCK.into();
     preferred["name"] = "현대차2우B".into();
     symbols["list"].as_array_mut().unwrap().push(preferred);
-    kiwoom.seen.respond_with("ka10099",StatusCode::OK,symbols);
+    kiwoom.respond_with("ka10099",200,symbols);
     let client = reqwest::Client::new();
     for collected in [false,true] {
         for stage in ["search","contents"] {

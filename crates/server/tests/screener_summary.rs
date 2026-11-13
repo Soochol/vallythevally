@@ -37,7 +37,7 @@ fn failure(detail: &str) -> ScriptedReply {
 }
 
 async fn setup(at: KstTime) -> (ScriptedTransport, Arc<SummaryCollector>, Clock) {
-    let fake = ScriptedTransport::start().await;
+    let fake = ScriptedTransport::new();
     let clock = Clock::fake(at);
     let rest = KiwoomRest::new(fake.transport(), KiwoomAuth::new(Secret::new(APP_KEY.into()), Secret::new(APP_SECRET.into()), None), clock.clone());
     let collector = SummaryCollector::new(rest, clock.clone());

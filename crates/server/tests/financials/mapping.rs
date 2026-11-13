@@ -285,7 +285,7 @@ async fn first_and_mid_notice_failures_retry_without_discarding_saved_company_or
 
 #[tokio::test]
 async fn first_and_mid_preferred_source_failures_leave_real_price_api_usable() {
-    let kiwoom = common::FakeKiwoom::start().await;
+    let kiwoom = common::ScriptedTransport::new();
     let client = reqwest::Client::new();
     for (notice_status, body, expected_failure) in [
         (Some(StatusCode::NOT_FOUND),NOTICE.into(),"remote"),
@@ -413,7 +413,7 @@ fn integrated_point<'a>(page: &'a Value, metric: &str) -> &'a Value {
 async fn preferred_mapping_calculations_and_quarter_year_prices_work_together() {
     let fake=verified_source().await;
     {let mut state=fake.state.lock().unwrap();state.integrated_financials=true;state.delayed=true;}
-    let kiwoom=common::FakeKiwoom::start().await;
+    let kiwoom=common::ScriptedTransport::new();
     let dir=tempdir();
     let server=process(&fake,&kiwoom,dir.path(),"20171231120000");
     let base=format!("http://{}",server.addr().await);

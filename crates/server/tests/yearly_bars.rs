@@ -14,7 +14,7 @@ use server::symbols::{Directory, SymbolDirectory};
 
 #[tokio::test(start_paused = true)]
 async fn yearly_stock_and_index_contracts_use_dedicated_trs_and_normalize_dates() {
-    let fake = ScriptedTransport::start().await;
+    let fake = ScriptedTransport::new();
     let clock = Clock::fake(kst(KstDate::new(2026, 11, 11).unwrap(), 12, 0, 0));
     let rest = KiwoomRest::new(fake.transport(), KiwoomAuth::new(Secret::new(APP_KEY.into()), Secret::new(APP_SECRET.into()), None), clock.clone());
     let symbols = Arc::new(SymbolDirectory::default());

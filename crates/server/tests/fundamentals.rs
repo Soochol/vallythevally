@@ -29,7 +29,7 @@ struct Fixture {
 
 impl Fixture {
     async fn start() -> Fixture {
-        let fake = ScriptedTransport::start().await;
+        let fake = ScriptedTransport::new();
         let clock = Clock::fake(KstTime::from_kst_civil(KstDate::new(2026, 11, 9).unwrap(), TimeOfDay::MIDNIGHT));
         let auth = KiwoomAuth::new(Secret::new("FAKE_KEY".into()), Secret::new("FAKE_SECRET".into()), None);
         let rest = KiwoomRest::new(fake.transport(), auth, clock.clone());

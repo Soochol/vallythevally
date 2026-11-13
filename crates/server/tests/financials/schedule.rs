@@ -181,10 +181,10 @@ async fn automatic_limit_confirmation_uses_one_request_and_waits_until_the_next_
 async fn automatic_restart_resumes_an_interrupted_checkpoint_without_redownloading_successes() {
     let fake = Fake::start().await;
     fake.state.lock().unwrap().stream_paused_report = Some("11014".into());
-    let kiwoom = common::FakeKiwoom::start().await;
-    let mut body = fake_kiwoom::fixture("ka10099_0");
+    let kiwoom = common::ScriptedTransport::new();
+    let mut body = common::support::fixture("ka10099_0");
     body["list"].as_array_mut().unwrap().retain(|row| row["code"] == "005930");
-    kiwoom.seen.respond_with("ka10099", StatusCode::OK, body);
+    kiwoom.respond_with("ka10099", 200, body);
     let dir = tempfile::tempdir_in(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target")).unwrap();
     let server = automatic_process(&fake, &kiwoom, dir.path(), "20151231120000");
     let base = format!("http://{}", server.addr().await);

@@ -119,15 +119,15 @@ async fn repeated_manual_start_during_mapping_coalesces_and_preserves_price_and_
         let before = settled_stock(&service,COMMON,false).await.collection;
         let other = settled(&service).await.collection;
         drop(service);
-        let kiwoom = common::FakeKiwoom::start().await;
-        let mut symbols = fake_kiwoom::fixture("ka10099_0");
+        let kiwoom = common::ScriptedTransport::new();
+        let mut symbols = common::support::fixture("ka10099_0");
         for (code,name) in [(STOCK,"현대차2우B"),(COMMON,"현대차")] {
             let mut row = symbols["list"].as_array().unwrap().iter().find(|row| row["code"] == "005935").unwrap().clone();
             row["code"] = code.into();
             row["name"] = name.into();
             symbols["list"].as_array_mut().unwrap().push(row);
         }
-        kiwoom.seen.respond_with("ka10099",StatusCode::OK,symbols);
+        kiwoom.respond_with("ka10099",200,symbols);
         let server = process(&fake,&kiwoom,dir.path(),"20160101120000");
         let base = format!("http://{}",server.addr().await);
         let client = reqwest::Client::new();
