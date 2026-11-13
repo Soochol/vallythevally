@@ -77,7 +77,7 @@ async function editorMarkup(wide: boolean, editing: boolean, invalid = false) {
     await screenEditing.run();
   }
   const { entries, chosen } = screenEditing.view();
-  if (!chosen?.draft) throw new Error("문장 편집기에 보일 조건식 초안이 있어야 합니다");
+  if (!chosen) throw new Error("문장 편집기에 보일 조건식이 있어야 합니다");
   const client = new QueryClient();
   const editor = createElement(SentenceEditor, { screenEditing, chosen, entries, blocked: false, resultActions: null, wide, editing, onEditingChange: () => {}, onRun: () => {} });
   const markup = renderToStaticMarkup(createElement(QueryClientProvider, { client }, editor));

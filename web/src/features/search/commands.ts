@@ -1,5 +1,5 @@
 import type { QueryClient } from "@tanstack/react-query";
-import type { RunOutcome, ScreenEditing } from "../screener/screenEditing";
+import { FIX_INVALID, type RunOutcome, type ScreenEditing } from "../screener/screenEditing";
 import { screenEditingFor } from "../screener/useScreenEditing";
 import { HOTKEYS } from "../../lib/hotkeys";
 import { useLayoutStore } from "../../stores/layout";
@@ -10,7 +10,7 @@ import { pressScale } from "../indicator-dialog/compareForm";
 import { saveSnapshot } from "../snapshot/saveSnapshot";
 
 const RUN_TOAST: Partial<Record<RunOutcome["kind"], string>> = {
-  invalid: "조건식의 잘못된 값을 고쳐 주세요",
+  invalid: FIX_INVALID,
   none: "조건식을 먼저 만들어 주세요",
   blocked: "자료 상태를 확인한 뒤 스크리너를 실행해 주세요",
 };

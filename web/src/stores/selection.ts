@@ -13,7 +13,7 @@ export type SearchPurpose = "open" | "watch";
 export type Dialog =
   | { kind: "search"; purpose: SearchPurpose }
   | { kind: "indicatorCommand"; slot: Slot; mode: "indicators" | "compare" }
-  | { kind: "screen"; editId: string | null }
+  | { kind: "screen" }
   | { kind: "financial-update" };
 export type PhoneTab = "chart" | "watch" | "screener";
 export type { RightPanel } from "../persist/uiState";
@@ -26,7 +26,7 @@ interface SelectionState {
   toast: null | { id: number; text: string; undo?: ToastUndo };
   openSearch(purpose?: SearchPurpose): void;
   openIndicatorCommand(slot: Slot, mode?: "indicators" | "compare"): void;
-  openScreenEditor(editId: string | null): void;
+  openScreenEditor(): void;
   openFinancialUpdate(): void;
   closeDialog(): void;
   setPhoneTab(tab: PhoneTab): void;
@@ -44,7 +44,7 @@ export const useSelectionStore = create<SelectionState>()((set) => ({
   toast: null,
   openSearch: (purpose = "open") => set({ dialog: { kind: "search", purpose } }),
   openIndicatorCommand: (slot, mode = "indicators") => set({ dialog: { kind: "indicatorCommand", slot, mode } }),
-  openScreenEditor: (editId) => set({ dialog: { kind: "screen", editId } }),
+  openScreenEditor: () => set({ dialog: { kind: "screen" } }),
   openFinancialUpdate: () => set({ dialog: { kind: "financial-update" } }),
   closeDialog: () => set({ dialog: null }),
   setPhoneTab: (phoneTab) => set({ phoneTab }),

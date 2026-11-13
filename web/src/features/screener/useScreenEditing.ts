@@ -1,10 +1,11 @@
 import { type QueryClient, useQueryClient } from "@tanstack/react-query";
 import { useSyncExternalStore } from "react";
 import { saveScreens, screenerStatusQuery, screensQuery, useScreens } from "../../api/screener";
-import { DESKTOP_QUERY, useMediaQuery } from "../../lib/media";
 import { runBlock } from "../../lib/screener";
 import { useScreenerStore } from "../../stores/screener";
-import { createScreenEditing, type ScreenEditing, type ScreenRunner, type ScreensPort } from "./screenEditing";
+import { confirmAction } from "../overlay/Confirm";
+import { dropPendingOpen } from "./resultActions";
+import { type ChosenScreen, createScreenEditing, type ScreenEditing, type ScreenRunner, type ScreensPort } from "./screenEditing";
 
 const reason = (e: unknown) => (e instanceof Error ? e.message : String(e));
 const editings = new WeakMap<QueryClient, ScreenEditing>();
@@ -55,20 +56,22 @@ const storeRunner = (client: QueryClient): ScreenRunner => ({
 export function screenEditingFor(client: QueryClient): ScreenEditing {
   const known = editings.get(client);
   if (known) return known;
-  const editing = createScreenEditing({
-    screens: queryScreens(client),
-    runner: storeRunner(client),
-    showsDrafts: () => typeof matchMedia !== "undefined" && matchMedia(DESKTOP_QUERY).matches,
-  });
+  const editing = createScreenEditing({ screens: queryScreens(client), runner: storeRunner(client) });
   editings.set(client, editing);
   return editing;
+}
+
+export async function removeChosen(editing: ScreenEditing, chosen: ChosenScreen): Promise<boolean> {
+  if (!await confirmAction(`"${chosen.draft.name}" 조건식을 삭제할까요? 되돌릴 수 없습니다.`)) return false;
+  if (!await editing.remove()) return false;
+  dropPendingOpen();
+  return true;
 }
 
 export function useScreenEditing() {
   const editing = screenEditingFor(useQueryClient());
   const query = useScreens();
   useScreenerStore((s) => s.runs);
-  useMediaQuery(DESKTOP_QUERY);
   const view = useSyncExternalStore(editing.subscribe, editing.view, editing.view);
   return { editing, view, query };
 }
