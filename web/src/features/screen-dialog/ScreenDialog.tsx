@@ -1,6 +1,5 @@
 import { Choice, CHOICE_LABEL, fieldName, KindFields, NumberBox, PERIODS, Together, type LineUi } from "./ConditionFields";
 import { Select } from "../menu/Select";
-import { confirmAction } from "../overlay/Confirm";
 import { type Ref, useEffect, useId, useRef } from "react";
 import {
   conditionSentence,
@@ -12,8 +11,7 @@ import {
 import { useSelectionStore } from "../../stores/selection";
 import { DialogFrame, Errors, Row } from "../dialog/DialogParts";
 import { ArrowIcon, CloseIcon, PlusIcon } from "../icons";
-import { dropPendingOpen } from "../screener/resultActions";
-import { useScreenEditing } from "../screener/useScreenEditing";
+import { removeChosen, useScreenEditing } from "../screener/useScreenEditing";
 import {
   addCondition,
   changeKind,
@@ -58,25 +56,21 @@ function ScreenDialogBody() {
   useEffect(() => nameRef.current?.focus(), []);
 
   if (!chosen) return null;
-  const { draft, runnable, dirty, saving: busy, nameError } = chosen;
-  const notice = chosen.notice ?? chosen.listError;
+  const { draft, runnable, canSave, saving: busy, nameError, alerts } = chosen;
   const dismiss = () => {
     if (!busy) closeDialog();
   };
 
   const submit = async (e: React.SyntheticEvent<HTMLFormElement>) => {
     e.preventDefault();
-    if (busy || !dirty) return;
+    if (!canSave) return;
     const saved = editing.save();
     if (!runnable.ok) (runnable.errors.name ? nameRef.current : formRef.current?.querySelector<HTMLElement>("[aria-invalid=true]"))?.focus();
     if (await saved) closeDialog();
   };
 
   const remove = async () => {
-    if (busy || !await confirmAction(`"${draft.name}" 조건식을 삭제할까요? 되돌릴 수 없습니다.`)) return;
-    if (!await editing.remove()) return;
-    dropPendingOpen();
-    closeDialog();
+    if (await removeChosen(editing, chosen)) closeDialog();
   };
 
   return (
@@ -93,10 +87,10 @@ function ScreenDialogBody() {
       <form ref={formRef} onSubmit={(e) => void submit(e)} noValidate className="flex min-h-0 flex-1 flex-col">
         <ScreenFields ids={ids} draft={draft} nameError={nameError} nameRef={nameRef} locked={busy} onChange={editing.edit} />
 
-        {notice && (
-          <p role="alert" className="flex-none border-t border-line px-4 py-2 text-s leading-[1.45] text-danger">
-            {notice}
-          </p>
+        {alerts.length > 0 && (
+          <div className="flex-none border-t border-line px-4 py-2 text-s leading-[1.45] text-danger">
+            {alerts.map((message) => <p key={message} role="alert">{message}</p>)}
+          </div>
         )}
         <div className="ui-dialog-foot">
           <button type="button" className="h-8 flex-none rounded-m px-3 text-danger hover:bg-raised disabled:opacity-50" disabled={busy} onClick={remove}>
@@ -109,7 +103,7 @@ function ScreenDialogBody() {
           <button type="button" className="h-8 flex-none rounded-m border border-line px-4 hover:bg-raised disabled:opacity-50" disabled={busy} onClick={dismiss}>
             취소
           </button>
-          <button type="submit" className="btn-primary flex-none disabled:cursor-not-allowed disabled:opacity-50" disabled={busy || !dirty}>
+          <button type="submit" className="btn-primary flex-none disabled:cursor-not-allowed disabled:opacity-50" disabled={!canSave}>
             {busy ? "저장 중" : "저장"}
           </button>
         </div>

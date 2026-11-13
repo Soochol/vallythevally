@@ -134,7 +134,7 @@ test("잘못된 최근 기간은 저장하지 않고 초안과 검증 메시지�
   editing.edit((d) => editCondition(d, { ...d.conditions[0]!, recentBars: "0" }));
   await editing.save();
   expect(chosen().runnable.ok).toBe(false);
-  expect(chosen().tried).toBe(true);
+  expect(chosen()).toMatchObject({ flagged: true, alerts: ["조건식의 잘못된 값을 고쳐 주세요"] });
   expect(chosen().draft.conditions[0]!.recentBars).toBe("0");
   expect(server.puts).toEqual([]);
 });
@@ -146,7 +146,7 @@ test("저장 충돌은 초안을 보존하고 문구를 띄우며, 다시 저장
   editing.edit((d) => ({ ...d, name: "수정한 식" }));
   await editing.save();
   expect(server.outcomes).toEqual(["stale"]);
-  expect(chosen().notice).toBe("다른 탭이나 기기에서 조건식 목록이 바뀌어 덮어쓰지 않았습니다. 변경 내용은 유지했습니다. 다시 저장하면 최신 목록에 반영합니다.");
+  expect(chosen().alerts).toEqual(["다른 탭이나 기기에서 조건식 목록이 바뀌어 덮어쓰지 않았습니다. 변경 내용은 유지했습니다. 다시 저장하면 최신 목록에 반영합니다."]);
   expect(chosen().draft.name).toBe("수정한 식");
   expect(chosen().dirty).toBe(true);
   await editing.save();
@@ -154,7 +154,7 @@ test("저장 충돌은 초안을 보존하고 문구를 띄우며, 다시 저장
   expect(server.outcomes).toEqual(["stale", "ok"]);
   expect(chosen().dirty).toBe(false);
   expect(chosen().saving).toBe(false);
-  expect(chosen().notice).toBeNull();
+  expect(chosen().alerts).toEqual([]);
 });
 
 test("저장 도중에는 추가 편집과 중복 저장을 막고, 실패 뒤 다시 저장한다", async () => {
@@ -163,15 +163,14 @@ test("저장 도중에는 추가 편집과 중복 저장을 막고, 실패 뒤 �
   const release = server.pause();
   server.failNext("쓰기 실패");
   const pending = editing.save();
-  expect(chosen().saving).toBe(true);
+  expect(chosen()).toMatchObject({ saving: true, canSave: false });
   editing.edit((d) => ({ ...d, name: "저장 중 입력" }));
-  await editing.save();
+  expect(await editing.save()).toBe(false);
   expect(server.puts).toHaveLength(1);
   expect(chosen().draft.name).toBe("바꿈");
   release();
   await pending;
-  expect(chosen().saving).toBe(false);
-  expect(chosen().notice).toBe("저장하지 못했습니다: 쓰기 실패");
+  expect(chosen()).toMatchObject({ saving: false, canSave: true, alerts: ["저장하지 못했습니다: 쓰기 실패"] });
   await editing.save();
   expect(chosen().dirty).toBe(false);
   expect(server.stored().screens).toEqual([{ ...source, name: "바꿈" }]);
@@ -187,12 +186,15 @@ test("개수 제한은 나중에 알게 된 최신 목록으로 검사하고, �
   expect(!runnable.ok && runnable.errors.list).toContain("조건식은 50개까지");
   await editing.save();
   expect(server.puts).toEqual([]);
-  expect(chosen().tried).toBe(true);
+  expect(chosen()).toMatchObject({ flagged: true, alerts: ["조건식은 50개까지 저장할 수 있습니다. 하나를 지운 뒤 만드세요."] });
   server.replace({ revision: 3, screens: many(49) });
   server.publish();
   await editing.save();
   expect(server.puts.map((sent) => [sent.revision, sent.screens.length])).toEqual([[2, 50]]);
   expect(server.outcomes).toEqual(["stale"]);
+  server.replace({ revision: 4, screens: many(50) });
+  server.publish();
+  expect(chosen().alerts).toEqual(["조건식은 50개까지 저장할 수 있습니다. 하나를 지운 뒤 만드세요.", "다른 탭이나 기기에서 조건식 목록이 바뀌어 덮어쓰지 않았습니다. 변경 내용은 유지했습니다. 다시 저장하면 최신 목록에 반영합니다."]);
 });
 
 test("삭제 충돌·실패는 초안을 보존하고 다시 시도하면 지운다", async () => {
@@ -201,11 +203,11 @@ test("삭제 충돌·실패는 초안을 보존하고 다시 시도하면 지운
   editing.edit((d) => ({ ...d, name: "보존" }));
   expect(await editing.remove()).toBe(false);
   expect(chosen().draft.name).toBe("보존");
-  expect(chosen().notice).toBe("다른 탭이나 기기에서 조건식 목록이 바뀌어 삭제하지 않았습니다. 바뀐 목록을 불러왔으니 다시 삭제하세요.");
+  expect(chosen().alerts).toEqual(["다른 탭이나 기기에서 조건식 목록이 바뀌어 삭제하지 않았습니다. 바뀐 목록을 불러왔으니 다시 삭제하세요."]);
   server.failNext("삭제 실패");
   expect(await editing.remove()).toBe(false);
   expect(chosen().draft.name).toBe("보존");
-  expect(chosen().notice).toBe("삭제하지 못했습니다: 삭제 실패");
+  expect(chosen().alerts).toEqual(["삭제하지 못했습니다: 삭제 실패"]);
   expect(await editing.remove()).toBe(true);
   expect(server.outcomes).toEqual(["stale", "error", "ok"]);
   expect(server.stored().screens).toEqual([]);
@@ -354,10 +356,12 @@ test("실행은 저장 전 초안을 그대로 보내고, 잘못된 값이면 �
   expect(chosen().dirty).toBe(true);
   expect(source.name).toBe("신고가");
   editing.edit((d) => ({ ...d, name: "" }));
-  expect(chosen().tried).toBe(false);
+  expect(chosen().title).toBe("이름 없음");
+  expect(editing.view().entries.map((entry) => entry.title)).toEqual(["이름 없음"]);
+  expect(chosen().flagged).toBe(false);
   expect(await editing.run()).toEqual({ kind: "invalid" });
   expect(sent).toHaveLength(1);
-  expect(chosen().tried).toBe(true);
+  expect(chosen().flagged).toBe(true);
   expect(chosen().nameError).toBe("이름을 넣으세요");
   expect(chosen().run).toBeNull();
 });
@@ -392,9 +396,10 @@ test("저장한 뒤 다른 탭이 고친 저장본을 실행한다", async () =>
   expect(sent).toEqual([remote]);
 });
 
-test("조건식 초안은 저장하거나 지우기 전까지 목록에 저장 안 됨으로 남고, 고친 것이 없으면 저장하지 않는다", async () => {
+test("조건식 초안은 저장하거나 지우기 전까지 목록에 변경됨으로 남고, 고친 것이 없으면 저장하지 않는다", async () => {
   const { editing, server, chosen } = opened();
-  expect(editing.view().entries).toEqual([{ source, name: source.name, conditions: 1, dirty: false }]);
+  expect(editing.view().entries).toEqual([{ source, name: source.name, title: source.name, conditions: 1, dirty: false }]);
+  expect(chosen().canSave).toBe(false);
   expect(await editing.save()).toBe(false);
   expect(server.puts).toEqual([]);
   editing.edit((d) => ({ ...d, name: "고치는 중" }));
@@ -412,9 +417,9 @@ test("목록 오류는 저장을 시도한 뒤에 보이고, 충돌·실패한 �
   const { editing, server, chosen } = opened({ revision: 1, screens: many(50) });
   editing.create();
   expect(chosen().runnable.ok).toBe(false);
-  expect(chosen().listError).toBeNull();
+  expect(chosen().alerts).toEqual([]);
   expect(await editing.save()).toBe(false);
-  expect(chosen().listError).toContain("조건식은 50개까지 저장할 수 있습니다");
+  expect(chosen().alerts).toEqual(["조건식은 50개까지 저장할 수 있습니다. 하나를 지운 뒤 만드세요."]);
   expect(server.puts).toEqual([]);
   editing.choose("0");
   editing.edit((d) => ({ ...d, name: "바꿈" }));
@@ -477,7 +482,7 @@ test("충돌 저장 뒤 목록을 다시 불러오지 못해도 초안과 충돌
   expect(await editing.run()).toEqual({ kind: "failed", message: "목록 읽기 실패" });
   expect(sent).toEqual([]);
   expect(chosen().draft.name).toBe("수정한 식");
-  expect(chosen().notice).toBe("다른 탭이나 기기에서 조건식 목록이 바뀌어 덮어쓰지 않았습니다. 변경 내용은 유지했습니다. 다시 저장하면 최신 목록에 반영합니다.");
+  expect(chosen().alerts).toEqual(["다른 탭이나 기기에서 조건식 목록이 바뀌어 덮어쓰지 않았습니다. 변경 내용은 유지했습니다. 다시 저장하면 최신 목록에 반영합니다."]);
   await editing.save();
   expect(server.outcomes).toEqual(["stale", "ok"]);
   expect(server.stored().screens).toEqual([{ ...source, name: "수정한 식" }]);

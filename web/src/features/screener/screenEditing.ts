@@ -25,6 +25,7 @@ export interface ScreenRunner {
 export interface ScreenEntry {
   source: Screen;
   name: string;
+  title: string;
   conditions: number;
   dirty: boolean;
 }
@@ -33,15 +34,16 @@ export interface ChosenScreen {
   source: Screen;
   screen: Screen;
   draft: ScreenDraft;
+  title: string;
   stored: boolean;
   dirty: boolean;
+  canSave: boolean;
   runnable: DraftCheck;
   run: ScreenRun | null;
   saving: boolean;
-  tried: boolean;
+  flagged: boolean;
   nameError: string | null;
-  listError: string | null;
-  notice: string | null;
+  alerts: readonly string[];
 }
 
 export interface ScreenEditingView {
@@ -90,6 +92,8 @@ interface Picked {
 export const FIX_INVALID = "조건식의 잘못된 값을 고쳐 주세요";
 const STALE_SAVE = "다른 탭이나 기기에서 조건식 목록이 바뀌어 덮어쓰지 않았습니다. 변경 내용은 유지했습니다. 다시 저장하면 최신 목록에 반영합니다.";
 const STALE_DELETE = "다른 탭이나 기기에서 조건식 목록이 바뀌어 삭제하지 않았습니다. 바뀐 목록을 불러왔으니 다시 삭제하세요.";
+const titleOf = (name: string) => name || "이름 없음";
+const canSave = (edit: EditState) => edit.saving.kind !== "saving" && isDirty(edit);
 const failed = (message: string): Saving => ({ kind: "failed", message });
 const reason = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
@@ -136,19 +140,23 @@ export function createScreenEditing({ screens, runner }: { screens: ScreensPort;
   const chosenOf = ({ list, source, edit }: Picked, runs: Runs): ChosenScreen => {
     const runnable = checkDraft(edit.form, source.id, latest(list, edit).screens);
     const named = edit.tried || edit.form.name !== edit.initial?.name;
+    const flagged = edit.tried && !runnable.ok;
+    const listError = flagged ? runnable.errors.list ?? FIX_INVALID : null;
+    const notice = edit.saving.kind === "failed" ? edit.saving.message : null;
     return {
       source,
       screen: runnable.ok ? runnable.screen : source,
       draft: edit.form,
+      title: titleOf(edit.form.name),
       stored: list.screens.some((screen) => screen.id === source.id),
       dirty: isDirty(edit),
+      canSave: canSave(edit),
       runnable,
       run: runnable.ok ? runOf(runs, runnable.screen) : null,
       saving: edit.saving.kind === "saving",
-      tried: edit.tried,
+      flagged,
       nameError: !runnable.ok && named ? runnable.errors.name : null,
-      listError: !runnable.ok && edit.tried ? runnable.errors.list ?? null : null,
-      notice: edit.saving.kind === "failed" ? edit.saving.message : null,
+      alerts: [listError, notice].filter((message): message is string => message !== null),
     };
   };
   const viewOf = (runs: Runs): ScreenEditingView => {
@@ -156,7 +164,7 @@ export function createScreenEditing({ screens, runner }: { screens: ScreensPort;
     if (!list) return { entries: [], chosen: null };
     const entries = sources(list, state.edits).map((source): ScreenEntry => {
       const edit = current(list, source, state.edits);
-      return { source, name: edit.form.name, conditions: edit.form.conditions.length, dirty: isDirty(edit) };
+      return { source, name: edit.form.name, title: titleOf(edit.form.name), conditions: edit.form.conditions.length, dirty: isDirty(edit) };
     });
     const picked = pick();
     return { entries, chosen: picked && chosenOf(picked, runs) };
@@ -193,7 +201,7 @@ export function createScreenEditing({ screens, runner }: { screens: ScreensPort;
     },
     save: async () => {
       const picked = pick();
-      if (!picked || picked.edit.saving.kind === "saving" || !isDirty(picked.edit)) return false;
+      if (!picked || !canSave(picked.edit)) return false;
       const { source, edit } = picked;
       const known = latest(picked.list, edit);
       const checked = checkDraft(edit.form, source.id, known.screens);

@@ -1,6 +1,7 @@
 import { FinancialUpdateButton } from "../financial-update/FinancialUpdateButton";
 import { SentenceEditor } from "./SentenceEditor";
 import { useScreenEditing } from "./useScreenEditing";
+import { CHANGED, ChangedBadge } from "./ChangedBadge";
 import { type ChosenScreen, FIX_INVALID, type ScreenEditing, type ScreenEntry } from "./screenEditing";
 import { confirmAction } from "../overlay/Confirm";
 import { useQueryClient, type UseQueryResult } from "@tanstack/react-query";
@@ -63,12 +64,10 @@ const FULL_RELOAD_CONFIRM =
 const toast = (text: string) => useSelectionStore.getState().showToast(text);
 const reasonOf = (e: unknown) => (e instanceof Error ? e.message : String(e));
 const showCommandError = (e: unknown) => toast(`업데이트 명령을 보내지 못했습니다: ${reasonOf(e)}`);
-const UNSAVED = "저장 안 됨";
-const editScreen = (screenEditing: ScreenEditing, desktop: boolean, id: string | null) => {
-  if (id !== null) screenEditing.choose(id);
-  else screenEditing.create();
-  if (desktop) useSelectionStore.getState().showRightPanel("screener");
-  else useSelectionStore.getState().openScreenEditor();
+const openDialog = () => useSelectionStore.getState().openScreenEditor();
+const createInDialog = (screenEditing: ScreenEditing) => {
+  screenEditing.create();
+  openDialog();
 };
 const count = (n: number) => n.toLocaleString("ko-KR");
 
@@ -161,7 +160,12 @@ export function ScreenerPanel({ wide = false, onReturn = () => {} }: { wide?: bo
       else if (outcome.kind === "failed") toast(outcome.message);
     });
   };
-  const createScreen = () => { editScreen(screenEditing, desktop, null); setEditing(true); };
+  const createInPanel = () => {
+    screenEditing.create();
+    useSelectionStore.getState().showRightPanel("screener");
+    setEditing(true);
+  };
+  const createScreen = desktop ? createInPanel : () => createInDialog(screenEditing);
   useResultKeys({ rows, active: wide ? selected?.symbol ?? null : active, wide, onSelect: select, onOpen: openPreview, onRun: execute });
   useEffect(() => dropPendingOpen, []);
   useEffect(() => { if (wide) dropPendingOpen(); }, [wide]);
@@ -188,7 +192,7 @@ export function ScreenerPanel({ wide = false, onReturn = () => {} }: { wide?: bo
           </div>
           <div className="min-h-0 flex-1 overflow-y-auto">
             {screen ? (
-              <Results screen={screen} run={run} rows={rows} status={status} block={block} onRun={execute} onEdit={() => desktop ? setEditing(true) : editScreen(screenEditing, desktop, screen.id)} selected={wide ? selected?.symbol ?? null : active} onSelect={select} />
+              <Results screen={screen} run={run} rows={rows} status={status} block={block} onRun={execute} onEdit={desktop ? () => setEditing(true) : openDialog} selected={wide ? selected?.symbol ?? null : active} onSelect={select} />
             ) : (
               <NoScreen query={screens} onCreate={createScreen} />
             )}
@@ -274,25 +278,25 @@ function runHint(block: RunBlock | null, status: ScreenerStatus | undefined): Re
 }
 
 function ScreenHeader({ screenEditing, chosen, entries, block, status, rows, onRun }: HeaderProps) {
-  const { screen, runnable } = chosen;
+  const { screen } = chosen;
   const running = chosen.run?.kind === "running";
   return (
     <header className="flex-none border-b border-line px-3 pb-3 pt-2">
       <div className="flex items-center gap-1">
         <FinancialUpdateButton className="md:hidden" />
         <ScreenPicker screenEditing={screenEditing} entries={entries} chosen={chosen} />
-        {chosen.dirty && <span className="flex-none rounded-s border border-warning px-1 text-xs text-warning">{UNSAVED}</span>}
+        {chosen.dirty && <ChangedBadge />}
         <span className="flex-1" />
-        <button type="button" className="tb-btn h-7 gap-1 px-2 text-s text-text-2" title="조건식 편집" onClick={() => editScreen(screenEditing, false, screen.id)}>
+        <button type="button" className="tb-btn h-7 gap-1 px-2 text-s text-text-2" title="조건식 편집" onClick={openDialog}>
           <PenIcon size={14} />
           편집
         </button>
-        <button type="button" className="icon-btn" title="새 조건식" aria-label="새 조건식" onClick={() => editScreen(screenEditing, false, null)}>
+        <button type="button" className="icon-btn" title="새 조건식" aria-label="새 조건식" onClick={() => createInDialog(screenEditing)}>
           <PlusIcon />
         </button>
         <PanelMenu screen={screen} rows={rows} status={status} />
       </div>
-      {runnable.ok ? <ScreenSummary screen={runnable.screen} /> : <p className="mt-1.5 rounded-m border border-line bg-surface px-2.5 py-2 text-s text-danger">{FIX_INVALID}</p>}
+      <ScreenSummary screen={screen} />
       <div className="mt-2.5 flex items-center gap-2.5">
         <button
           type="button"
@@ -314,11 +318,11 @@ function ScreenHeader({ screenEditing, chosen, entries, block, status, rows, onR
 
 function ScreenPicker({ screenEditing, entries, chosen }: { screenEditing: ScreenEditing; entries: readonly ScreenEntry[]; chosen: ChosenScreen }) {
   const menu = useMenuToggle();
-  const name = chosen.draft.name || "이름 없음";
+  const name = chosen.title;
   const items: MenuItem[] = [
-    ...entries.map((entry): MenuItem => ({ kind: "radio", label: entry.name || "이름 없음", hint: entry.dirty ? UNSAVED : undefined, checked: entry.source.id === chosen.source.id, onSelect: () => { dropPendingOpen(); screenEditing.choose(entry.source.id); } })),
+    ...entries.map((entry): MenuItem => ({ kind: "radio", label: entry.title, hint: entry.dirty ? CHANGED : undefined, checked: entry.source.id === chosen.source.id, onSelect: () => { dropPendingOpen(); screenEditing.choose(entry.source.id); } })),
     { kind: "separator" },
-    { kind: "action", label: "새 조건식…", onSelect: () => editScreen(screenEditing, false, null) },
+    { kind: "action", label: "새 조건식…", onSelect: () => createInDialog(screenEditing) },
   ];
   return (
     <div ref={menu.root} className="relative -ml-1.5 min-w-0">
