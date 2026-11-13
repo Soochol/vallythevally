@@ -51,7 +51,7 @@ function InspectorBody({ slot }: { slot: Slot }) {
 
   const show = (value: IndicatorCommandMode) => { command.show(value); setExpanded(false); };
   const toggle = (row: CommandRow) => {
-    if (open?.key === row.key) return setExpanded(false);
+    if (open?.key === row.key && row.kind !== "symbol") return setExpanded(false);
     command.select(row);
     setExpanded(true);
   };
@@ -59,7 +59,7 @@ function InspectorBody({ slot }: { slot: Slot }) {
   const refocus = () => { inputRef.current?.focus(); inputRef.current?.select(); };
   const submit = () => {
     if (open?.kind === "current") return collapse();
-    if ((mode === "compare" || open) && command.submit()) refocus();
+    if (open && command.submit()) refocus();
   };
   const escape = (event: KeyboardEvent) => {
     if (event.key !== "Escape" || !open) return;
@@ -88,7 +88,7 @@ function InspectorBody({ slot }: { slot: Slot }) {
             if (next) { command.select(next); setExpanded(next.kind !== "symbol" || next.selectable); }
           }} />
       </label>
-      <button type="button" className="icon-btn" aria-label="지표 패널 닫기" title="지표 패널 닫기 (Alt+W)" onClick={() => useSelectionStore.getState().showRightPanel("watch")}><CloseIcon size={16} /></button>
+      <button type="button" className="icon-btn" aria-label="지표 패널 닫기" title="지표 패널 닫기" onClick={() => useSelectionStore.getState().showRightPanel("watch")}><CloseIcon size={16} /></button>
     </header>
     <div role="tablist" aria-label="지표 창 보기" className="flex flex-none gap-5 border-b border-line px-4" onKeyDown={(event) => {
       if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
@@ -127,14 +127,17 @@ function InspectorBody({ slot }: { slot: Slot }) {
         {mode === "compare" && !symbols.selectable && search.isFetching && <li role="presentation"><Skeleton label="비교 종목 찾는 중" /></li>}
         {mode === "compare" && search.isError && <li role="presentation"><ErrorState message="종목을 찾지 못했습니다. 다시 시도해 보세요." retry={() => void search.refetch()} /></li>}
       </ul>
-      {mode === "compare" && <CompareSection slot={slot} button={compareButton} canAdd={selectedSymbol !== null} onAdd={() => { if (command.submit()) refocus(); }} className="mt-2 flex flex-col gap-3 border-t border-line px-2 pt-3" />}
+      {mode === "compare" && <CompareSection slot={slot} button={compareButton} canAdd={open?.kind === "symbol" && selectedSymbol !== null} onAdd={submit} className="mt-2 flex flex-col gap-3 border-t border-line px-2 pt-3" />}
     </div>
+    <p className="sr-only" aria-live="polite">{open ? `${rowName(open)} 펼침` : ""}</p>
     <footer className="flex-none border-t border-line px-4 py-2.5 text-xs text-text-3">바로 반영 · Esc로 되돌리고 닫기</footer>
   </section>;
 }
 
+const rowName = (row: CommandRow) => row.kind === "current" ? specName(row.config.spec) : row.kind === "candidate" ? row.candidate.label : row.info.name;
+
 function IndicatorRow({ slot, row, open, onToggle, onRemove, children }: { slot: Slot; row: EditableRow; open: boolean; onToggle(): void; onRemove(): void; children: ReactNode }) {
-  const name = row.kind === "current" ? specName(row.config.spec) : row.candidate.label;
+  const name = rowName(row);
   const label = row.kind === "current" ? KINDS[row.config.spec.kind].label : row.candidate.label;
   return <>
     <div className="flex h-9 items-center gap-2 px-2 text-s">

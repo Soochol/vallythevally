@@ -2,6 +2,7 @@ import type { Page } from "@playwright/test";
 import { mkdir } from "node:fs/promises";
 import { resolve } from "node:path";
 import { parseChartSettings } from "../src/chart/settings";
+import { installFrameProbe } from "./frame-probe";
 import { cell, DEFAULT_LAYOUT_ID, expect, test, type Scenario } from "./harness";
 
 const indicators = (scenario: Scenario) => parseChartSettings(scenario.documents.layout(DEFAULT_LAYOUT_ID).cells[0]!.chartSettings).indicators;
@@ -85,6 +86,15 @@ test("차트 옆을 고르면 지표 버튼이 우측 패널을 열어 지표를
   await topbar(page).getByRole("button", { name: "비교", exact: true }).click();
   await expect(inspector(page).getByRole("tab", { name: "비교 종목", exact: true })).toHaveAttribute("aria-selected", "true");
   await expect(inspector(page).getByText("비교 종목 0/3")).toBeVisible();
+  await expect(inspector(page).getByRole("button", { name: /추가$/ })).toBeDisabled();
+  await search(page).press("Enter");
+  await search(page).fill("삼성SDI");
+  const sdi = inspector(page).getByRole("button", { name: /^삼성SDI/ }).first();
+  await sdi.click();
+  await expect(sdi).toHaveAttribute("aria-pressed", "true");
+  await inspector(page).getByRole("button", { name: /^삼성SDI.*추가$/ }).click();
+  await expect.poll(() => parseChartSettings(scenario.documents.layout(DEFAULT_LAYOUT_ID).cells[0]!.chartSettings).compare).toEqual(["006400"]);
+  await expect(inspector(page).getByText("비교 종목 1/3")).toBeVisible();
   await expect(dialog(page)).toHaveCount(0);
 
   await chooseWindow(page, "가운데 창");
@@ -98,6 +108,30 @@ test("차트 옆을 고르면 지표 버튼이 우측 패널을 열어 지표를
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
   await expect(rail(page).getByRole("tab", { name: "관심종목", exact: true })).toHaveAttribute("aria-selected", "true");
   await expect(rail(page).getByRole("tab", { name: "지표", exact: true })).toHaveCount(0);
+});
+
+test("인스펙터의 추가 후보 미리보기는 접거나 Esc를 누르거나 탭을 바꾸면 지운다", async ({ page, scenario }) => {
+  scenario.documents.saveUiState({ ...scenario.documents.uiState(), indicatorWindow: "inspector" });
+  await page.addInitScript(installFrameProbe);
+  await page.goto("/?symbol=005930");
+  await expect(cell(page)).toHaveAttribute("aria-busy", "false");
+  const before = indicators(scenario);
+  const previews = () => page.evaluate(() => window.frameProbe.snapshot().filter((s) => s.type === "Custom" && s.data.length > 0).length);
+  await expect.poll(previews).toBe(0);
+  await topbar(page).getByRole("button", { name: "지표", exact: true }).click();
+  await search(page).fill("이평 7");
+  await expect.poll(previews).toBe(1);
+  await page.keyboard.press("Escape");
+  await expect.poll(previews).toBe(0);
+  await inspector(page).getByRole("button", { name: "이동평균 단순 7 추가 후보", exact: true }).click();
+  await expect.poll(previews).toBe(1);
+  await inspector(page).getByRole("button", { name: "이동평균 단순 7 추가 후보", exact: true }).click();
+  await expect.poll(previews).toBe(0);
+  await search(page).fill("이평 8");
+  await expect.poll(previews).toBe(1);
+  await inspector(page).getByRole("tab", { name: /^이 칸에 띄운 지표/ }).click();
+  await expect.poll(previews).toBe(0);
+  expect(indicators(scenario)).toEqual(before);
 });
 
 test.describe("휴대폰", () => {
