@@ -1,21 +1,22 @@
+mod support;
+
 use std::sync::Arc;
 
 use domain::{Feed, KstDate, Market, Period, SeriesKey, Symbol, SymbolInfo, SymbolKind, Venue};
-use fake_kiwoom::{APP_KEY, APP_SECRET, FakeKiwoom};
+use support::{APP_KEY, APP_SECRET, ScriptedTransport};
 use serde_json::json;
 use server::bars::BarService;
 use server::clock::{Clock, kst};
 use server::config::Secret;
 use server::kiwoom::auth::KiwoomAuth;
 use server::kiwoom::rest::KiwoomRest;
-use server::kiwoom::transport::ReqwestTransport;
 use server::symbols::{Directory, SymbolDirectory};
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn yearly_stock_and_index_contracts_use_dedicated_trs_and_normalize_dates() {
-    let fake = FakeKiwoom::start().await;
+    let fake = ScriptedTransport::start().await;
     let clock = Clock::fake(kst(KstDate::new(2026, 11, 11).unwrap(), 12, 0, 0));
-    let rest = KiwoomRest::new(Arc::new(ReqwestTransport::new(fake.base_url()).unwrap()), KiwoomAuth::new(Secret::new(APP_KEY.into()), Secret::new(APP_SECRET.into()), None), clock.clone());
+    let rest = KiwoomRest::new(fake.transport(), KiwoomAuth::new(Secret::new(APP_KEY.into()), Secret::new(APP_SECRET.into()), None), clock.clone());
     let symbols = Arc::new(SymbolDirectory::default());
     let samsung = Symbol::parse("005930").unwrap();
     symbols.replace(Directory::build(vec![SymbolInfo { symbol: samsung, name: "삼성전자".into(), kind: SymbolKind::Common, market: Market::Kospi, nxt_enabled: true }]));

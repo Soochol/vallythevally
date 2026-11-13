@@ -1,14 +1,15 @@
+mod support;
+
 use std::sync::Arc;
 use std::time::Duration;
 
 use domain::{KstDate, KstTime, StockCode, TimeOfDay, Venue};
-use fake_kiwoom::{APP_KEY, APP_SECRET, FakeKiwoom, KrxBar, ScriptedReply, summary};
+use support::{APP_KEY, APP_SECRET, ScriptedTransport, KrxBar, ScriptedReply, summary};
 use serde_json::{Value, json};
 use server::clock::{Clock, kst};
 use server::config::Secret;
 use server::kiwoom::auth::KiwoomAuth;
 use server::kiwoom::rest::{KiwoomError, KiwoomRest};
-use server::kiwoom::transport::ReqwestTransport;
 use server::kiwoom::wire::KrxSummaryValues;
 use server::screener::summary::{CollectionBasis, CollectionError, MissingSummary, SummaryCollector};
 
@@ -35,23 +36,23 @@ fn failure(detail: &str) -> ScriptedReply {
     ScriptedReply { status: 200, body: json!({"return_code": 2, "return_msg": detail}), delay: Duration::ZERO }
 }
 
-async fn setup(at: KstTime) -> (FakeKiwoom, Arc<SummaryCollector>, Clock) {
-    let fake = FakeKiwoom::start().await;
+async fn setup(at: KstTime) -> (ScriptedTransport, Arc<SummaryCollector>, Clock) {
+    let fake = ScriptedTransport::start().await;
     let clock = Clock::fake(at);
-    let rest = KiwoomRest::new(Arc::new(ReqwestTransport::new(fake.base_url()).unwrap()), KiwoomAuth::new(Secret::new(APP_KEY.into()), Secret::new(APP_SECRET.into()), None), clock.clone());
+    let rest = KiwoomRest::new(fake.transport(), KiwoomAuth::new(Secret::new(APP_KEY.into()), Secret::new(APP_SECRET.into()), None), clock.clone());
     let collector = SummaryCollector::new(rest, clock.clone());
     (fake, collector, clock)
 }
 
-async fn noon() -> (FakeKiwoom, Arc<SummaryCollector>, Clock) {
+async fn noon() -> (ScriptedTransport, Arc<SummaryCollector>, Clock) {
     setup(kst(day(12), 12, 0, 0)).await
 }
 
-fn calls(fake: &FakeKiwoom) -> usize {
+fn calls(fake: &ScriptedTransport) -> usize {
     fake.calls().iter().filter(|c| c.api_id == "ka10095").count()
 }
 
-async fn wait_calls(fake: &FakeKiwoom, n: usize) {
+async fn wait_calls(fake: &ScriptedTransport, n: usize) {
     tokio::time::timeout(Duration::from_secs(5), async {
         while calls(fake) < n {
             tokio::time::sleep(Duration::from_millis(5)).await;
@@ -59,7 +60,7 @@ async fn wait_calls(fake: &FakeKiwoom, n: usize) {
     }).await.unwrap();
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn batches_at_100_boundary_join_by_code_and_preserve_krx_units_and_times() {
     let (fake, collector, _) = noon().await;
     let mut rows: Vec<_> = (1..=201).rev().map(|n| {
@@ -96,7 +97,7 @@ async fn batches_at_100_boundary_join_by_code_and_preserve_krx_units_and_times()
     assert_eq!(sizes, [1, 99, 100, 100, 1, 100, 100, 100, 100, 1]);
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn concurrent_calls_share_one_collection_but_calls_after_completion_fetch_again() {
     let (fake, collector, _) = noon().await;
     fake.set_quote_rows(vec![row(1), row(2)]);
@@ -110,7 +111,7 @@ async fn concurrent_calls_share_one_collection_but_calls_after_completion_fetch_
     assert_eq!(calls(&fake), 2);
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn first_request_failure_never_publishes_a_batch_and_keeps_previous_completion() {
     let (fake, collector, _) = noon().await;
     fake.script("ka10095", vec![failure("[1501:입력 오류]")]);
@@ -123,7 +124,7 @@ async fn first_request_failure_never_publishes_a_batch_and_keeps_previous_comple
     assert!(Arc::ptr_eq(&previous, &collector.completed().unwrap()));
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn middle_request_failure_discards_partial_rows_without_mixing_previous_batch() {
     let (fake, collector, _) = noon().await;
     fake.script("ka10095", vec![reply((1..=100).map(row).collect()), failure("[1501:입력 오류]")]);
@@ -140,7 +141,7 @@ async fn middle_request_failure_discards_partial_rows_without_mixing_previous_ba
     assert!(Arc::ptr_eq(&previous, &collector.completed().unwrap()));
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn individual_missing_unreadable_duplicate_and_other_venue_rows_preserve_good_rows() {
     let (fake, collector, _) = noon().await;
     let mut bad = row(3);
@@ -160,7 +161,7 @@ async fn individual_missing_unreadable_duplicate_and_other_venue_rows_preserve_g
     assert_eq!(batch.stocks[&code(6)].result, Err(MissingSummary::MissingRow));
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn premarket_confirmed_no_trades_is_distinct_from_old_missing_or_unreadable_dates() {
     let (fake, collector, _) = setup(kst(day(12), 8, 0, 0)).await;
     let mut no_trades = row(1);
@@ -191,7 +192,7 @@ async fn premarket_confirmed_no_trades_is_distinct_from_old_missing_or_unreadabl
     assert_eq!(batch.missing_count(), 5);
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn holiday_does_not_turn_previous_trading_day_into_confirmed_no_trades() {
     let (fake, collector, _) = setup(kst(day(14), 12, 0, 0)).await;
     let mut friday = row(1);
@@ -201,7 +202,7 @@ async fn holiday_does_not_turn_previous_trading_day_into_confirmed_no_trades() {
     assert_eq!(batch.stocks[&code(1)].result, Err(MissingSummary::OtherDate(day(13))));
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn stale_trade_time_is_allowed_but_invalid_time_and_inconsistent_zero_volume_are_not() {
     let (fake, collector, _) = noon().await;
     let mut bad_time = row(2);
@@ -216,7 +217,7 @@ async fn stale_trade_time_is_allowed_but_invalid_time_and_inconsistent_zero_volu
     assert_eq!(batch.missing_count(), 3);
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn midnight_during_delayed_response_rejects_batch_then_new_date_fetches_again() {
     let (fake, collector, clock) = setup(kst(day(12), 23, 59, 0)).await;
     fake.set_quote_rows(vec![row(1)]);
@@ -238,7 +239,7 @@ async fn midnight_during_delayed_response_rejects_batch_then_new_date_fetches_ag
     assert_eq!(calls(&fake), 3);
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn cancel_notifies_all_waiters_and_late_response_cannot_replace_new_collection() {
     let (fake, collector, _) = noon().await;
     let mut delayed = reply(vec![row(1)]);
@@ -263,7 +264,7 @@ async fn cancel_notifies_all_waiters_and_late_response_cannot_replace_new_collec
     assert!(Arc::ptr_eq(&next, &collector.completed().unwrap()));
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn dropping_one_waiter_does_not_cancel_shared_collection_and_different_targets_do_not_join() {
     let (fake, collector, _) = noon().await;
     fake.set_quote_rows(vec![row(1)]);
@@ -277,7 +278,7 @@ async fn dropping_one_waiter_does_not_cancel_shared_collection_and_different_tar
     assert_eq!(calls(&fake), 1);
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn gate_global_stop_and_path_stop_keep_existing_kiwoom_error_contract() {
     for (message, stopped, gated) in [("[8003:인증 불확실]", false, true), ("[8050:인증 차단]", true, false), ("[9998:알 수 없음]", true, false)] {
         let (fake, collector, _) = noon().await;
@@ -292,7 +293,7 @@ async fn gate_global_stop_and_path_stop_keep_existing_kiwoom_error_contract() {
     }
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn new_date_call_ends_old_flight_and_never_joins_yesterdays_response() {
     let (fake, collector, clock) = noon().await;
     let mut delayed = reply(vec![row(1)]);
@@ -310,7 +311,7 @@ async fn new_date_call_ends_old_flight_and_never_joins_yesterdays_response() {
     assert_eq!(calls(&fake), 2);
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn unexpected_continuation_never_publishes_an_incomplete_batch() {
     let (fake, collector, _) = noon().await;
     let mut partial = reply(vec![row(1)]);
@@ -320,7 +321,7 @@ async fn unexpected_continuation_never_publishes_an_incomplete_batch() {
     assert!(collector.completed().is_none());
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn different_store_generations_and_update_epochs_cannot_share_a_flight() {
     let (fake, collector, _) = noon().await;
     fake.set_quote_rows(vec![row(1)]);

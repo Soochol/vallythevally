@@ -1,8 +1,10 @@
+mod support;
+
 use std::sync::Arc;
 
 use axum::{Router, body::Body, http::Request};
 use domain::{KstDate, KstTime, Market, Symbol, SymbolInfo, SymbolKind, TimeOfDay};
-use fake_kiwoom::{FakeKiwoom, fixture};
+use support::{ScriptedTransport, fixture};
 use http_body_util::BodyExt;
 use serde_json::{Value, json};
 use server::bars::BarService;
@@ -15,12 +17,11 @@ use server::kiwoom::api::ApiId;
 use server::kiwoom::auth::KiwoomAuth;
 use server::kiwoom::rest::KiwoomRest;
 use server::kiwoom::stream::KiwoomStream;
-use server::kiwoom::transport::ReqwestTransport;
 use server::symbols::{Directory, SymbolDirectory};
 use tower::ServiceExt;
 
 struct Fixture {
-    fake: FakeKiwoom,
+    fake: ScriptedTransport,
     rest: KiwoomRest,
     app: Router,
     _tmp: tempfile::TempDir,
@@ -28,10 +29,10 @@ struct Fixture {
 
 impl Fixture {
     async fn start() -> Fixture {
-        let fake = FakeKiwoom::start().await;
+        let fake = ScriptedTransport::start().await;
         let clock = Clock::fake(KstTime::from_kst_civil(KstDate::new(2026, 11, 9).unwrap(), TimeOfDay::MIDNIGHT));
         let auth = KiwoomAuth::new(Secret::new("FAKE_KEY".into()), Secret::new("FAKE_SECRET".into()), None);
-        let rest = KiwoomRest::new(Arc::new(ReqwestTransport::new(fake.base_url()).unwrap()), auth, clock.clone());
+        let rest = KiwoomRest::new(fake.transport(), auth, clock.clone());
         let symbols = Arc::new(SymbolDirectory::default());
         let listed = |code: &str, name: &str| SymbolInfo {
             symbol: Symbol::parse(code).unwrap(),
@@ -50,6 +51,7 @@ impl Fixture {
         let store = server::screener::store::Store::open(&tmp.path().join("screener.duckdb")).unwrap();
         let screener = Arc::new(server::screener::Screener::new(store, rest.clone(), bars.clone(), symbols.clone(), clock.clone()));
         let app = router(Arc::new(AppState { symbols, bars, rest: rest.clone(), db, clock, static_dir: tmp.path().to_owned(), hub, screener }));
+        tokio::time::pause();
         Fixture { fake, rest, app, _tmp: tmp }
     }
 
