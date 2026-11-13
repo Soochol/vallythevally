@@ -1,13 +1,34 @@
-import { workspaceFor } from "../screener/useWorkspace";
-import { screenerStatusQuery } from "../../api/screener";
+import type { QueryClient } from "@tanstack/react-query";
+import type { RunOutcome, ScreenEditing } from "../screener/screenEditing";
+import { screenEditingFor } from "../screener/useScreenEditing";
 import { HOTKEYS } from "../../lib/hotkeys";
-import { runBlock } from "../../lib/screener";
 import { useLayoutStore } from "../../stores/layout";
 import { useSelectionStore } from "../../stores/selection";
 import { useUiStore } from "../../stores/ui";
 import type { SearchCommand } from "../commands/registry";
 import { pressScale } from "../indicator-dialog/compareForm";
 import { saveSnapshot } from "../snapshot/saveSnapshot";
+
+const RUN_TOAST: Partial<Record<RunOutcome["kind"], string>> = {
+  invalid: "조건식의 잘못된 값을 고쳐 주세요",
+  none: "조건식을 먼저 만들어 주세요",
+  blocked: "자료 상태를 확인한 뒤 스크리너를 실행해 주세요",
+};
+
+export const screenerRunCommand = (editingOf: (client: QueryClient) => Pick<ScreenEditing, "run">): SearchCommand => ({
+  id: "screener-run",
+  label: "스크리너 실행",
+  keywords: "조건식 검색 screener",
+  shortcut: "Ctrl+Enter",
+  run: async ({ queryClient }) => {
+    const selection = useSelectionStore.getState();
+    selection.setPhoneTab("screener");
+    selection.showRightPanel("screener");
+    const outcome = await editingOf(queryClient).run();
+    const message = outcome.kind === "failed" ? outcome.message : RUN_TOAST[outcome.kind];
+    if (message) selection.showToast(message);
+  },
+});
 
 export const DEFAULT_SEARCH_COMMANDS: readonly SearchCommand[] = [
   ...HOTKEYS.flatMap(({ label, keys, action }): SearchCommand[] => {
@@ -24,19 +45,5 @@ export const DEFAULT_SEARCH_COMMANDS: readonly SearchCommand[] = [
       default: return [];
     }
   }),
-  { id: "screener-run", label: "스크리너 실행", keywords: "조건식 검색 screener", shortcut: "Ctrl+Enter", run: async ({ queryClient }) => {
-    const selection = useSelectionStore.getState();
-    selection.setPhoneTab("screener");
-    selection.showRightPanel("screener");
-    const workspace = workspaceFor(queryClient);
-    const [, status] = await Promise.all([
-      workspace.load(),
-      queryClient.fetchQuery({ ...screenerStatusQuery(1000), staleTime: 0 }),
-    ]);
-    const attempt = await workspace.run(runBlock(status) !== null);
-    if (attempt === "invalid") return selection.showToast("조건식의 잘못된 값을 고쳐 주세요");
-    if (attempt === "none") return selection.showToast("조건식을 먼저 만들어 주세요");
-    if (attempt === "blocked") return selection.showToast("자료 상태를 확인한 뒤 스크리너를 실행해 주세요");
-    if (attempt === "ran") await queryClient.invalidateQueries({ queryKey: ["screener", "status"] });
-  } },
+  screenerRunCommand(screenEditingFor),
 ];

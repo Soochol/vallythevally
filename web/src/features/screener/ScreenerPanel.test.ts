@@ -4,7 +4,7 @@ import type { Screens } from "../../api/generated/Screens";
 import { useSelectionStore } from "../../stores/selection";
 import { handleResultKey, type ScreenerKeyEvent } from "./ScreenerPanel";
 import { SentenceEditor } from "./SentenceEditor";
-import { createWorkspace } from "./workspace";
+import { createScreenEditing } from "./screenEditing";
 
 class KeyTarget extends EventTarget {
   constructor(readonly tagName = "BUTTON", readonly popover = false, readonly isContentEditable = false) { super(); }
@@ -68,16 +68,18 @@ import { renderToStaticMarkup } from "react-dom/server";
 async function editorMarkup(wide: boolean, expanded: boolean, invalid = false) {
   const source: Screen = { id: "s", name: "신고가", markets: [], exclude: [], conditions: [{ kind: "new_high", period: "W", field: "high", n: 52, recentBars: 5 }] };
   const base: Screens = { revision: 1, screens: [source] };
-  const workspace = createWorkspace({ screens: { load: async () => base, put: async () => ({ kind: "error", message: "쓰지 않음" }) }, runner: { runs: () => ({}), run: async () => {} } });
-  await workspace.load();
+  const editing = createScreenEditing({
+    screens: { watch: (see) => see(base), load: async () => ({ kind: "ok", list: base }), put: async () => ({ kind: "error", message: "쓰지 않음" }) },
+    runner: { runs: () => ({}), check: async () => ({ kind: "ready" }), run: async () => {} },
+  });
   if (invalid) {
-    workspace.edit((draft) => ({ ...draft, name: "" }));
-    await workspace.run(false);
+    editing.edit((draft) => ({ ...draft, name: "" }));
+    await editing.run();
   }
-  const { entries, chosen } = workspace.view();
-  if (!chosen?.draft) throw new Error("문장 편집기에 보일 초안이 있어야 합니다");
+  const { entries, chosen } = editing.view();
+  if (!chosen?.draft) throw new Error("문장 편집기에 보일 조건식 초안이 있어야 합니다");
   const client = new QueryClient();
-  const editor = createElement(SentenceEditor, { workspace, chosen, draft: chosen.draft, entries, blocked: false, resultActions: null, wide, expanded, onExpandedChange: () => {}, onRun: () => {} });
+  const editor = createElement(SentenceEditor, { editing, chosen, entries, blocked: false, resultActions: null, wide, expanded, onExpandedChange: () => {}, onRun: () => {} });
   const markup = renderToStaticMarkup(createElement(QueryClientProvider, { client }, editor));
   client.clear();
   return markup;

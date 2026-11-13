@@ -1,5 +1,6 @@
 import { type QueryClient, queryOptions, useQuery, useQueryClient } from "@tanstack/react-query";
 import { isUpdating, msUntilStatusTurns } from "../lib/screener";
+import type { Revision } from "./generated/Revision";
 import type { Screen } from "./generated/Screen";
 import type { ScreenerResult } from "./generated/ScreenerResult";
 import type { ScreenerStatus } from "./generated/ScreenerStatus";
@@ -18,9 +19,9 @@ export const useScreens = () => useQuery(screensQuery);
 
 export type SaveOutcome = { kind: "ok"; saved: Screens } | { kind: "stale"; latest: Screens };
 
-export async function saveScreens(client: QueryClient, screens: Screen[], revision: number): Promise<SaveOutcome> {
+export async function saveScreens(client: QueryClient, screens: Screen[], base: Revision): Promise<SaveOutcome> {
   try {
-    const saved = await putJson<Screens>("/api/screens", { screens, revision } satisfies Screens);
+    const saved = await putJson<Screens>("/api/screens", { screens, revision: base + 1 } satisfies Screens);
     await client.cancelQueries({ queryKey: SCREENS_KEY });
     client.setQueryData(SCREENS_KEY, saved);
     return { kind: "ok", saved };
