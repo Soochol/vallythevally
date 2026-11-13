@@ -29,14 +29,21 @@ export interface SaverOptions<T extends object> {
   now?(): number;
 }
 
-export interface Saver {
+export type CommitOutcome = "committed" | "conflict" | "superseded";
+
+export interface ConditionalCommit<T extends object> {
+  read(): Promise<{ value: T; revision: number }>;
+  next(latest: T, previous: SaveState): T | null;
+  still(): boolean;
+  accept(saved: T & { revision: number }): void;
+}
+
+const CONDITIONAL_ATTEMPTS = 3;
+
+export interface Saver<T extends object> {
   changed(): void;
   retry(): void;
-  settled(): Promise<void>;
-  advanceRevision(revision: number): void;
-  acceptSaved(revision: number): void;
-  pauseCurrent(): void;
-  resume(): void;
+  commitConditional(c: ConditionalCommit<T>): Promise<CommitOutcome>;
   /**
    * 탭이 숨을 때: 보내지 못한 편집이 있으면 기다리지 않고 keepalive로 보낸다.
    * 앞 요청이 아직 진행 중이어도 보낸다. 서버가 revision으로 순서를 지키므로 늦게 도착한 앞 요청이 이것을 덮지 못한다.
@@ -44,7 +51,7 @@ export interface Saver {
   flush(): void;
 }
 
-export function createSaver<T extends object>(o: SaverOptions<T>): Saver {
+export function createSaver<T extends object>(o: SaverOptions<T>): Saver<T> {
   const now = o.now ?? Date.now;
   let edits = 0;
   let savedEdits = 0;
@@ -55,6 +62,11 @@ export function createSaver<T extends object>(o: SaverOptions<T>): Saver {
   let pause: { kind: "active" | "retired"; edits: number } | null = null;
   let timer: ReturnType<typeof setTimeout> | null = null;
   const settled = new Set<() => void>();
+  let shown: SaveState = { kind: "idle" };
+  const show = (state: SaveState) => {
+    shown = state;
+    o.onState(state);
+  };
 
   const cancel = () => {
     if (timer !== null) clearTimeout(timer);
@@ -84,14 +96,14 @@ export function createSaver<T extends object>(o: SaverOptions<T>): Saver {
     if (o.tooLarge(value) && o.shrink?.()) value = o.read();
     const upTo = edits;
     if (o.tooLarge(value)) {
-      o.onState({ kind: "failed", reason: "too_large" });
+      show({ kind: "failed", reason: "too_large" });
       return;
     }
     const req = body(value);
     o.unsaved?.write(req);
     newest = req.revision;
     inFlight++;
-    o.onState({ kind: "saving" });
+    show({ kind: "saving" });
     let error: unknown = null;
     try {
       await o.send(req.path, req.body, { keepalive });
@@ -108,7 +120,7 @@ export function createSaver<T extends object>(o: SaverOptions<T>): Saver {
     if (inFlight === 0 && edits === savedEdits) {
       cancel();
       failures = 0;
-      o.onState({ kind: "saved", at: now() });
+      show({ kind: "saved", at: now() });
       return;
     }
     if (req.revision !== newest) {
@@ -116,21 +128,21 @@ export function createSaver<T extends object>(o: SaverOptions<T>): Saver {
       return;
     }
     if (tooLarge) {
-      o.onState({ kind: "failed", reason: "too_large" });
+      show({ kind: "failed", reason: "too_large" });
       return;
     }
     if (!done) {
-      o.onState({ kind: "failed", reason: "error", message: error instanceof Error ? error.message : String(error) });
+      show({ kind: "failed", reason: "error", message: error instanceof Error ? error.message : String(error) });
       const delay = RETRY_DELAYS_MS[failures++];
       if (delay !== undefined) schedule(delay);
       return;
     }
     failures = 0;
     if (edits > savedEdits) {
-      o.onState({ kind: "pending" });
+      show({ kind: "pending" });
       if (inFlight === 0) schedule(o.debounceMs);
     } else {
-      o.onState({ kind: "saved", at: now() });
+      show({ kind: "saved", at: now() });
     }
   }
 
@@ -139,13 +151,77 @@ export function createSaver<T extends object>(o: SaverOptions<T>): Saver {
     void send(false);
   }
 
+  const settle = () => inFlight === 0 ? Promise.resolve() : new Promise<void>((resolve) => settled.add(resolve));
+  const advanceRevision = (received: number) => { revision = Math.max(revision, received); };
+  function acceptSaved(received: number) {
+    advanceRevision(received);
+    savedEdits = edits;
+    cancel();
+    failures = 0;
+    o.unsaved?.clear(revision);
+    show({ kind: "saved", at: now() });
+  }
+  function pauseCurrent() {
+    cancel();
+    pause = { kind: "active", edits };
+  }
+  function resume() {
+    if (pause?.edits === edits) { pause = { kind: "retired", edits }; return; }
+    pause = null;
+    run();
+  }
+  function flush() {
+    if (edits === savedEdits || edits === pause?.edits) return;
+    void send(true);
+  }
+
+  async function commitConditional(c: ConditionalCommit<T>): Promise<CommitOutcome> {
+    flush();
+    await settle();
+    pauseCurrent();
+    const previous = shown;
+    const saving: SaveState = { kind: "saving" };
+    try {
+      for (let attempt = 0; attempt < CONDITIONAL_ATTEMPTS; attempt++) {
+        if (!c.still()) return "superseded";
+        const latest = await c.read();
+        if (!c.still()) return "superseded";
+        const value = c.next(latest.value, previous);
+        if (!value) return "conflict";
+        const saved = { ...value, revision: latest.revision + 1 };
+        const req: Unsaved = { path: o.path(), revision: saved.revision, body: JSON.stringify(saved) };
+        show(saving);
+        o.unsaved?.write(req);
+        try {
+          await o.send(req.path, req.body, { keepalive: false });
+        } catch (error) {
+          if (error instanceof ApiRequestError && error.code === "stale_revision") {
+            o.unsaved?.clear(req.revision);
+            continue;
+          }
+          throw error;
+        }
+        o.unsaved?.clear(req.revision);
+        if (c.still()) {
+          c.accept(saved);
+          acceptSaved(saved.revision);
+        } else advanceRevision(saved.revision);
+        return "committed";
+      }
+      return "conflict";
+    } finally {
+      if (shown === saving) show(previous);
+      resume();
+    }
+  }
+
   return {
     changed() {
       edits++;
       keep();
       if (inFlight > 0) return;
       failures = 0;
-      o.onState({ kind: "pending" });
+      show({ kind: "pending" });
       schedule(o.debounceMs);
     },
     retry() {
@@ -153,25 +229,7 @@ export function createSaver<T extends object>(o: SaverOptions<T>): Saver {
       failures = 0;
       run();
     },
-    settled: () => inFlight === 0 ? Promise.resolve() : new Promise((resolve) => settled.add(resolve)),
-    advanceRevision: (received) => { revision = Math.max(revision, received); },
-    acceptSaved(received) {
-      revision = Math.max(revision, received);
-      savedEdits = edits;
-      cancel();
-      failures = 0;
-      o.unsaved?.clear(revision);
-      o.onState({ kind: "saved", at: now() });
-    },
-    pauseCurrent() { cancel(); pause = { kind: "active", edits }; },
-    resume() {
-      if (pause?.edits === edits) { pause = { kind: "retired", edits }; return; }
-      pause = null;
-      run();
-    },
-    flush() {
-      if (edits === savedEdits || edits === pause?.edits) return;
-      void send(true);
-    },
+    commitConditional,
+    flush,
   };
 }
