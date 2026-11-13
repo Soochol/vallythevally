@@ -1,5 +1,5 @@
 import { november9BarAt } from "./fixtures/frames";
-import { selectOption } from "./select-option";
+import { selectMinute } from "./select-option";
 import type { Page } from "@playwright/test";
 import type { Drawing } from "../src/api/generated/Drawing";
 import { installFrameProbe } from "./frame-probe";
@@ -43,7 +43,7 @@ test("replacement consumes queued rollover in both real series and retains newer
   await page.mouse.up();
   await expect.poll(() => savedDrawings(scenario)).toHaveLength(1);
   const saved = (await savedDrawings(scenario))[0]!;
-  await selectOption(page.getByRole("button", { name: "분봉" }), "1m");
+  await selectMinute(page.getByRole("button", { name: "분봉" }), "1m");
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
   const trade = async (price: number, time: string, _quantity: number) => {
     const volume = price === 201_000 ? 1 : price === 202_000 ? 3 : price === 203_000 ? 3 : price === 204_000 ? 7 : price === 205_000 ? 12 : price === 206_000 ? 6 : 13;

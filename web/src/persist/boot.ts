@@ -2,6 +2,7 @@ import type { QueryClient } from "@tanstack/react-query";
 import { ApiRequestError, sendJson } from "../api/http";
 import { fetchSymbolInfo } from "../api/queries";
 import { fetchLayout, fetchLayouts, fetchUiState, fetchWatchlists } from "../api/userData";
+import { followLastMinute } from "../stores/lastMinute";
 import { useLayoutStore } from "../stores/layout";
 import { SAVE_TARGETS, usePersistStore } from "../stores/persist";
 import { useSelectionStore } from "../stores/selection";
@@ -57,6 +58,7 @@ export async function boot(queryClient: QueryClient) {
     if (restored.layoutDirty) autosave.savers.layout.changed();
     if (restored.uiDirty) autosave.savers.ui.changed();
     if (restored.watchlistDirty) autosave.savers.watchlist.changed();
+    followLastMinute();
     // 탭을 닫거나 새로고침할 때도 hidden이 온다. 미저장 본문은 편집마다 이미 남겨 두었으므로 여기서는 보내 보기만 한다.
     document.addEventListener("visibilitychange", () => {
       if (document.visibilityState === "hidden") autosave.flush();
@@ -68,6 +70,7 @@ export async function boot(queryClient: QueryClient) {
     const theme: Theme = "dark";
     useUiStore.getState().load({ ...DEFAULT_UI_PREFS, theme }, {});
     followTheme();
+    followLastMinute();
     const reason = e instanceof ApiRequestError ? e.message : String(e);
     setPhase({ kind: "offline", message: `${OFFLINE_MESSAGE} (${reason})` });
     toast(OFFLINE_MESSAGE);

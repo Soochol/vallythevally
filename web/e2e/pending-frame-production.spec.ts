@@ -1,5 +1,5 @@
 import { november9BarAt } from "./fixtures/frames";
-import { selectOption } from "./select-option";
+import { selectMinute } from "./select-option";
 import { test, expect, cell, chartOf } from './harness';
 test.use({ clockStart: '20261109100000' });
 test('minute rollover and style replacement keep subsequent live updates working', async ({page,scenario}) => {
@@ -12,7 +12,7 @@ test('minute rollover and style replacement keep subsequent live updates working
   await page.mouse.move(box.x+box.width*.76,box.y+box.height*.4);await page.mouse.down();
   await page.mouse.move(box.x+box.width*.86,box.y+box.height*.3,{steps:10});await page.mouse.up();
   await expect.poll(async()=> scenario.documents.drawings("005930").length).toBe(1);
-  await selectOption(page.getByRole('button',{name:'분봉',exact:true}), '1m');
+  await selectMinute(page.getByRole('button',{name:'분봉',exact:true}), '1m');
   await expect(cell(page)).toHaveAttribute('aria-busy','false');
   const trade=async(price:number,time:string)=>{
     await expect(async()=>{expect(await scenario.live.update('005930', { t: Date.parse(`2026-11-09T${time.slice(0,2)}:${time.slice(2,4)}:00+09:00`) / 1000, o: price, h: price, l: price, c: price, v: 1000 })).toBeGreaterThan(0);await expect.poll(()=>delivered.includes(price),{timeout:1000}).toBe(true);}).toPass({timeout:15000});

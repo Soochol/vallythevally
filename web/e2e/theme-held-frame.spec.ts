@@ -1,5 +1,5 @@
 import { november9BarAt } from "./fixtures/frames";
-import { selectOption } from "./select-option";
+import { selectMinute } from "./select-option";
 import type { Page } from "@playwright/test";
 import { installFrameProbe } from "./frame-probe";
 import { cell, chartOf, expect, test } from "./harness";
@@ -21,7 +21,7 @@ test("lime dark keeps main and volume coherent when a held rollover frame resume
   await page.goto("/?symbol=005930");
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
   const chart = chartOf(cell(page));
-  await selectOption(page.getByRole("button", { name: "분봉" }), "1m");
+  await selectMinute(page.getByRole("button", { name: "분봉" }), "1m");
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
   const trade = async (price: number, time: string, quantity: number, timeout = 15_000) => {
     await expect(async () => {

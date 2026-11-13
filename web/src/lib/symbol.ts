@@ -26,6 +26,10 @@ const _allPeriodsListed: Exclude<Period, (typeof PERIODS)[number]> extends never
 void _allPeriodsListed;
 export const isPeriod = (p: string): p is Period => (PERIODS as readonly string[]).includes(p);
 
+export type MinutePeriod = Extract<Period, `${number}m`>;
+export const isMinutePeriod = (p: string): p is MinutePeriod => isPeriod(p) && p.endsWith("m");
+export const MINUTE_PERIODS: readonly MinutePeriod[] = PERIODS.filter(isMinutePeriod);
+
 export const PERIOD_LABEL: Record<Period, string> = {
   "1m": "1분",
   "3m": "3분",

@@ -1,4 +1,4 @@
-import { selectOption } from "./select-option";
+import { selectMinute } from "./select-option";
 import type { Locator, Page } from "@playwright/test";
 import type { SeriesKey } from "../src/api/bars";
 import { cell, chartOf, expect, test } from "./harness";
@@ -30,7 +30,7 @@ async function expectCellShows(page: Page, requested: SeriesKey[], label: string
 async function choose(group: Locator, name: string) {
   const minutes = group.getByRole("button", { name: "분봉", exact: true });
   if (/^\d+분$/.test(name) && await minutes.count()) {
-    await selectOption(minutes, { label: name });
+    await selectMinute(minutes, { label: name });
     await expect(minutes).toHaveAttribute("data-value", name.replace("분", "m"));
     return;
   }

@@ -1,4 +1,4 @@
-import { selectOption } from "./select-option";
+import { selectOption, selectMinute } from "./select-option";
 import { test, expect, cell, chartOf, type Scenario } from "./harness";
 import type { Page } from "@playwright/test";
 import type { Drawing } from "../src/api/generated/Drawing";
@@ -106,7 +106,7 @@ test("drawing engine: daily anchors keep their time and price on 60-minute bars"
   await open(page); await cell(page).focus(); await page.keyboard.press("G"); await draw(page);
   await expect.poll(async () => (await drawings(scenario)).length).toBe(1);
   const saved = (await drawings(scenario))[0]!; const before = (await mirror(page))[0]!.points;
-  await selectOption(page.getByRole("button", { name: "분봉" }), "60m");
+  await selectMinute(page.getByRole("button", { name: "분봉" }), "60m");
   await expect(cell(page)).toHaveAttribute("aria-label", "칸 1: 코스피 60분");
   await expect(chartOf(cell(page))).toHaveAttribute("data-bar-count", "3600");
   await expect.poll(async () => (await mirror(page))[0]?.points.every((p) => p !== null)).toBe(true);

@@ -44,21 +44,72 @@ test("차트 우클릭은 누른 가격과 날짜를 머리에 두고 차트 동
   await expect.poll(async () => (await drawings(page)).length).toBe(0);
 });
 
-test("분봉 칩을 우클릭하면 위 막대에 꺼내거나 넣고, 꺼낸 주기는 강조 면으로 표시한다", async ({ page }, info) => {
+test("분봉 버튼은 마지막 분봉으로 바로 바꾸고, 분봉일 때 다시 누르면 단축키를 적은 세로 목록을 연다", async ({ scenario, page }, info) => {
   await open(page);
-  await toolbar(page).getByRole("button", { name: "분봉", exact: true }).click();
+  const minutes = toolbar(page).getByRole("button", { name: "분봉", exact: true });
   const menu = page.getByRole("menu", { name: "분봉", exact: true });
-  const five = menu.getByRole("menuitemradio", { name: "5분", exact: true });
-  await expect(menu.locator("[data-pinned]")).toHaveCount(0);
-  await five.click({ button: "right" });
+  await expect(minutes).toHaveText("3분");
+  await expect(minutes).toHaveAttribute("aria-pressed", "false");
+  await minutes.click();
+  await expect(cell(page)).toHaveAttribute("aria-label", / 3분$/);
+  await expect(minutes).toHaveAttribute("aria-pressed", "true");
+  await expect(menu).toBeHidden();
+
+  await minutes.click();
   await expect(menu).toBeVisible();
-  await expect(menu.locator("[data-pinned]")).toHaveText(["5분"]);
-  await expect(toolbar(page).getByRole("button", { name: "5분 고정 주기", exact: true })).toBeVisible();
-  await expect(menu.getByRole("menuitemcheckbox", { name: "5분 고정", exact: true })).toHaveAttribute("aria-checked", "true");
-  await page.screenshot({ path: info.outputPath("1440-minute-menu.png") });
-  await five.click({ button: "right" });
-  await expect(toolbar(page).getByRole("button", { name: "5분 고정 주기", exact: true })).toHaveCount(0);
+  const items = menu.getByRole("menuitemradio");
+  await expect(items).toHaveText(["1분1", "3분3", "5분5", "10분", "15분Shift+1", "30분Shift+3", "60분Shift+6"]);
+  await expect(menu.getByRole("menuitemradio", { name: "3분", exact: true })).toHaveAttribute("aria-checked", "true");
+  await expect(menu.getByRole("menuitemradio", { name: "30분", exact: true })).toHaveAttribute("aria-keyshortcuts", "Shift+3");
+  await expect(menu.getByRole("menuitemcheckbox")).toHaveCount(0);
+  const boxes = await Promise.all((await items.all()).map((item) => item.boundingBox()));
+  for (const [i, box] of boxes.entries()) {
+    expect(box!.x).toBe(boxes[0]!.x);
+    if (i > 0) expect(box!.y).toBeGreaterThan(boxes[i - 1]!.y + box!.height / 2);
+  }
   expect(await menu.evaluate((node) => node.scrollWidth - node.clientWidth)).toBe(0);
+  await page.screenshot({ path: info.outputPath("1440-minute-menu.png") });
+  await menu.getByRole("menuitemradio", { name: "10분", exact: true }).click();
+  await expect(menu).toBeHidden();
+  await expect(cell(page)).toHaveAttribute("aria-label", / 10분$/);
+
+  await toolbar(page).getByRole("button", { name: "일", exact: true }).click();
+  await expect(minutes).toHaveText("10분");
+  await expect(minutes).toHaveAttribute("aria-pressed", "false");
+  await minutes.click();
+  await expect(cell(page)).toHaveAttribute("aria-label", / 10분$/);
+  await expect(menu).toBeHidden();
+
+  await page.keyboard.press("Shift+Digit6");
+  await expect(cell(page)).toHaveAttribute("aria-label", / 60분$/);
+  await page.keyboard.press("KeyD");
+  await expect(cell(page)).toHaveAttribute("aria-label", / 일$/);
+  await expect(minutes).toHaveText("60분");
+  await expect.poll(async () => scenario.documents.uiState().lastMinute).toBe("60m");
+  await page.reload();
+  await expect(minutes).toHaveText("60분");
+  await minutes.click();
+  await expect(cell(page)).toHaveAttribute("aria-label", / 60분$/);
+});
+
+test("옛 저장값의 고정 분봉은 꺼내지 않고 버리며, 열 때 활성 칸의 분봉을 마지막 분봉으로 저장한다", async ({ scenario, page }) => {
+  const state = scenario.documents.uiState();
+  scenario.documents.saveUiState({ ...state, pinnedMinutes: ["5m", "60m"], recentSymbols: ["005930"], revision: state.revision + 1 });
+  const layout = scenario.documents.layout();
+  scenario.documents.saveLayout({ ...layout, revision: layout.revision + 1, cells: [{ ...layout.cells[0]!, symbol: "005930", venue: "combined", period: "10m" }] });
+  await page.goto("/");
+  await expect(cell(page)).toHaveAttribute("aria-busy", "false");
+  const minutes = toolbar(page).getByRole("button", { name: "분봉", exact: true });
+  await expect(toolbar(page).getByRole("group", { name: "봉 주기" }).getByRole("button")).toHaveText(["10분", "일", "주", "월", "분기", "연"]);
+  await expect(minutes).toHaveAttribute("aria-pressed", "true");
+  await expect.poll(async () => scenario.documents.uiState().lastMinute).toBe("10m");
+  expect(scenario.documents.uiState()).not.toHaveProperty("pinnedMinutes");
+  await toolbar(page).getByRole("button", { name: "일", exact: true }).click();
+  await expect(cell(page)).toHaveAttribute("aria-label", / 일$/);
+  await expect.poll(async () => scenario.documents.layout().cells[0]!.period).toBe("D");
+  await page.reload();
+  await expect(minutes).toHaveText("10분");
+  await expect(minutes).toHaveAttribute("aria-pressed", "false");
 });
 
 test("지표 설정은 색 격자·굵기 견본·기간 프리셋을 한 장에 두고 바로 적용하며 머리에서 숨기고 지운다", async ({ page }, info) => {
