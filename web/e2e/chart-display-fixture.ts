@@ -1,3 +1,4 @@
+import { startUpdate } from "./financial-update-helpers";
 import type { Layout } from "../src/api/generated/Layout";
 import type { ChartSettings } from "../src/chart/settings";
 import { type App, DEFAULT_LAYOUT_ID, expect } from "./harness";
@@ -14,6 +15,7 @@ export async function seedChartDisplay(app: App, period: "Q" | "Y") {
       return { dt: date.toISOString().slice(0, 10).replaceAll("-", ""), open_pric: "1277000", high_pric: "1302000", low_pric: "1271000", cur_prc: "1296000", trde_qty: "3120000" };
     }), _headers: { "cont-yn": "N", "next-key": "" },
   } });
+  await startUpdate(app, true);
   const layout: Layout = await (await fetch(`${app.url}/api/layouts/${DEFAULT_LAYOUT_ID}`)).json();
   const chartSettings: ChartSettings = { v: 2, style: "candle", scale: "normal", compare: [], indicators: METRICS.map((kind) => ({
     id: kind, spec: { kind }, panel: kind, visible: true, style: { colors: ["ind-1"], width: 1 },

@@ -1,8 +1,10 @@
+import { financialListings, startUpdate } from "./financial-update-helpers";
 import type { Page } from "@playwright/test";
 import type { Drawing } from "../src/api/generated/Drawing";
 import type { Layout } from "../src/api/generated/Layout";
 import { cell, DEFAULT_LAYOUT_ID, expect, test, type App } from "./harness";
 import { openScreener, panel } from "./screener-page";
+import { addCondition, renameScreen, sentenceEditor } from "./sentence-editor";
 import { selectOption } from "./select-option";
 
 const savedDrawings = async (app: App): Promise<Drawing[]> => (await fetch(`${app.url}/api/drawings?symbol=005930`)).json();
@@ -46,26 +48,35 @@ test("차트 안 굵기 메뉴의 방향키와 Esc는 드로잉 좌표·선택�
 
 test("조건식 배경 누르기는 한 표면만 닫고 중첩 메뉴 아래 미저장 이름을 보존한다", async ({ page }) => {
   await page.goto("/?symbol=005930"); await openScreener(page);
-  const open = () => panel(page).getByRole("button", { name: "새 조건식" }).first().click();
-  const dialog = page.getByRole("dialog", { name: "새 조건식", exact: true });
-  await open(); await page.mouse.click(10, 10); await expect(dialog).toBeHidden();
-  await open(); await dialog.getByLabel("이름", { exact: true }).fill("남겨 둘 조건식");
-  await dialog.getByRole("button", { name: "조건 더하기" }).click();
-  const trigger = dialog.getByRole("combobox", { name: "조건 1 종류", exact: true });
+  await panel(page).getByRole("button", { name: "새 조건식", exact: true }).click();
+  const editor = sentenceEditor(page);
+  await renameScreen(editor, "남겨 둘 조건식");
+  await addCondition(editor);
+  const number = editor.getByRole("button", { name: "조건 1 최근 기간", exact: true });
+  await number.click();
+  const popup = page.getByRole("dialog", { name: "조건 1 최근 기간 편집", exact: true });
+  await page.mouse.click(10, 10);
+  await expect(popup).toBeHidden();
+  await number.click();
+  await popup.getByRole("textbox").fill("7");
+  const trigger = popup.getByRole("combobox", { name: "봉 주기", exact: true });
   await trigger.click(); await page.mouse.click(10, 10);
-  await expect(page.getByRole("menu", { name: "조건 1 종류", exact: true })).toBeHidden();
-  await expect(dialog).toBeVisible(); await expect(trigger).toBeFocused();
-  await expect(dialog.getByLabel("이름", { exact: true })).toHaveValue("남겨 둘 조건식");
-  await page.keyboard.press("Escape"); await expect(dialog).toBeHidden();
+  await expect(page.getByRole("menu", { name: "봉 주기", exact: true })).toBeHidden();
+  await expect(popup).toBeVisible(); await expect(trigger).toBeFocused();
+  await expect(popup.getByRole("textbox")).toHaveValue("7");
+  await expect(editor.getByRole("button", { name: "조건식 고르기", exact: true })).toHaveText("남겨 둘 조건식");
+  await page.keyboard.press("Escape"); await expect(popup).toBeHidden();
+  await expect(number).toBeFocused();
+  await expect(editor).toBeVisible();
 });
 
 for (const outside of ["배경", "부모 제목", "부모 닫기 버튼"] as const) {
   test(`드로잉 색상 선택기 ${outside} 누르기는 설정 초안을 보존한다`, async ({ page, app }) => {
     await horizontalLine(page, app);
-    const settings = page.getByRole("dialog", { name: "수평선 설정", exact: true });
-    await page.getByRole("button", { name: "드로잉 설정", exact: true }).click();
+    const settings = page.getByRole("dialog", { name: "수평선 세부 설정", exact: true });
+    await page.getByRole("button", { name: "드로잉 세부 설정", exact: true }).click();
     await page.mouse.click(10, 10); await expect(settings).toBeHidden();
-    await page.getByRole("button", { name: "드로잉 설정", exact: true }).click();
+    await page.getByRole("button", { name: "드로잉 세부 설정", exact: true }).click();
     const width = settings.getByRole("combobox", { name: "선 굵기", exact: true });
     await selectOption(width, "4");
     const trigger = settings.getByRole("button", { name: "선 색 선택", exact: true });
@@ -73,8 +84,8 @@ for (const outside of ["배경", "부모 제목", "부모 닫기 버튼"] as con
     const color = page.getByRole("dialog", { name: "선 색", exact: true });
     await expect(color).toBeVisible();
     if (outside === "배경") await page.mouse.click(10, 10);
-    else if (outside === "부모 닫기 버튼") await settings.getByRole("button", { name: "설정 닫기", exact: true }).click();
-    else await settings.getByRole("heading", { name: "수평선", exact: true }).click();
+    else if (outside === "부모 닫기 버튼") await settings.getByRole("button", { name: "세부 설정 닫기", exact: true }).click();
+    else await settings.locator("strong").filter({ hasText: /^수평선$/ }).click();
     await expect(color).toBeHidden(); await expect(settings).toBeVisible();
     await expect(trigger).toBeFocused(); await expect(width).toHaveAttribute("data-value", "4");
   });
@@ -84,7 +95,10 @@ for (const source of ["전체 막대", "선택 막대", "개체 메뉴", "차트
   test(`${source}의 삭제 알림은 Ctrl+Z 후 다른 작업을 되돌리지 않는다`, async ({ page, app }) => {
     await horizontalLine(page, app);
     const original = (await savedDrawings(app))[0]!;
-    if (source === "전체 막대") await page.getByRole("button", { name: "이 종목 드로잉 모두 지우기", exact: true }).click();
+    if (source === "전체 막대") {
+      await page.getByRole("button", { name: "개체 목록 열기", exact: true }).click();
+      await page.getByRole("button", { name: "이 종목 드로잉 모두 지우기", exact: true }).click();
+    }
     else if (source === "선택 막대") await page.getByRole("button", { name: "드로잉 지우기", exact: true }).click();
     else if (source === "개체 메뉴") {
       await page.getByRole("button", { name: "드로잉 더 보기", exact: true }).click();
@@ -117,10 +131,11 @@ for (const source of ["전체 막대", "선택 막대", "개체 메뉴", "차트
 }
 
 test.describe("재무 자료의 중첩 DOM 메뉴", () => {
-  test.use({ financialFixture: true, clockStart: "20171231120000" });
+  test.use({ financialFixture: true, bootReplies: [financialListings], clockStart: "20171231120000" });
   test("보고기간 이름·방향키·Space·Enter·글자 이동과 단계별 Esc를 지킨다", async ({ page, app }) => {
     const layout: Layout = await (await fetch(`${app.url}/api/layouts/${DEFAULT_LAYOUT_ID}`)).json();
     expect((await fetch(`${app.url}/api/layouts/${DEFAULT_LAYOUT_ID}`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...layout, revision: layout.revision + 1, cells: [{ ...layout.cells[0], symbol: "005930", venue: "combined", period: "Y", chartSettings: { v: 2, style: "candle", scale: "normal", compare: [], indicators: [{ id: "revenue", spec: { kind: "revenue" }, panel: "revenue", visible: true, style: { colors: ["ind-2"], width: 1 } }], panels: [{ id: "revenue", stretch: 0.3 }] } }] }) })).ok).toBe(true);
+    await startUpdate(app, true);
     await page.goto("/");
     const row = page.locator('[data-indicator-row="revenue"]');
     await expect(row).toContainText("확인 완료");

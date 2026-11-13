@@ -1,3 +1,4 @@
+import { financialListings, startUpdate } from "./financial-update-helpers";
 import type { Page } from "@playwright/test";
 import { installAxisProbe } from "./axis-probe";
 import { installChartProbe } from "./chart-probe";
@@ -26,6 +27,10 @@ async function open(page: Page, app: App, period = "D") {
     stk_dt_pole_chart_qry: Array.from({ length: 130 }, (_, i) => ({ dt: new Date(Date.UTC(2026, 10, 6 - i)).toISOString().slice(0, 10).replaceAll("-", ""), open_pric: String(190000 - i * 100), high_pric: String(191000 - i * 100), low_pric: String(189000 - i * 100), cur_prc: String(190500 - i * 100), trde_qty: "1000000" })),
     _headers: { "cont-yn": "N", "next-key": "" },
   } });
+  if (period === "Y") {
+    await app.fake.respondWith(financialListings);
+    await startUpdate(app, true);
+  }
   await page.goto(`/?symbol=005930&period=${period}`);
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
   await expect.poll(() => plotted(page)).toBe(2);
@@ -36,8 +41,9 @@ const plotted = (page: Page) => page.evaluate(() => window.chartProbe.chart.pane
 
 async function addIndicator(page: Page, label: string, name: string) {
   await page.getByRole("button", { name: "지표", exact: true }).click();
-  const dialog = page.getByRole("dialog", { name: "지표 추가", exact: true });
-  await dialog.getByRole("option", { name: new RegExp(`^${label}(?: \\d+개 띄움)?$`) }).click();
+  const dialog = page.getByRole("dialog", { name: "지표·비교 입력창", exact: true });
+  await dialog.getByRole("combobox", { name: "지표·비교 찾기" }).fill(label);
+  await dialog.getByRole("option", { name: `${name} 추가 후보`, exact: true }).click();
   await dialog.getByRole("button", { name: `${name} 추가`, exact: true }).click();
   await page.keyboard.press("Escape");
   await expect(page.locator("[data-indicator-row]").filter({ hasText: name }).last()).toBeVisible();
@@ -80,8 +86,8 @@ test("비교 종목 추가 뒤 오류 없이 차트를 계속 그리고 축 폭 
   const before = await plotted(page);
   await page.getByRole("button", { name: "지표", exact: true }).click();
   const dialog = page.getByRole("dialog");
-  await dialog.getByRole("tab", { name: "비교 종목" }).click();
-  await dialog.getByRole("combobox", { name: "비교할 종목 찾기" }).fill("삼성SDI");
+  await dialog.getByRole("group", { name: "찾을 항목" }).getByRole("button", { name: "비교 종목", exact: true }).click();
+  await dialog.getByRole("combobox", { name: "지표·비교 찾기" }).fill("삼성SDI");
   await dialog.getByRole("option", { name: /삼성SDI/ }).first().click();
   await dialog.getByRole("button", { name: /^삼성SDI.*추가$/ }).click();
   await page.keyboard.press("Escape");

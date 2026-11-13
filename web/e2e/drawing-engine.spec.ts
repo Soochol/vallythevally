@@ -48,6 +48,7 @@ test("trendline placement, handles, settings, and persistence", async ({ page, a
 test("drawing engine: remembered style and preferences survive reload; drawing clears hide-all", async ({ page, app }) => {
   await open(page); const r = await draw(page); await expect.poll(async () => (await drawings(app)).length).toBe(1);
   await selectOption(page.getByRole("toolbar", { name: "드로잉 스타일" }).getByLabel("선 굵기"), "4");
+  await page.getByRole("button", { name: "개체 목록 열기", exact: true }).click();
   await page.getByRole("button", { name: "모든 드로잉 숨기기", exact: true }).click();
   await expect.poll(async () => (await mirror(page)).length).toBe(0);
   await cell(page).focus(); await page.keyboard.press("T");
@@ -149,8 +150,8 @@ test("drawing engine: settings preview, cancellation, coordinates and text", asy
   await open(page); await draw(page);
   await expect.poll(async () => (await drawings(app)).length).toBe(1);
   const original = (await drawings(app))[0]!;
-  await page.getByRole("button", { name: "드로잉 설정" }).click();
-  const dialog = page.getByRole("dialog", { name: "추세선 설정" });
+  await page.getByRole("button", { name: "드로잉 세부 설정" }).click();
+  const dialog = page.getByRole("dialog", { name: "추세선 세부 설정" });
   const defaultColor = await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue("--draw").trim());
   await expect(dialog.getByRole("button", { name: "선 색 선택", exact: true })).toContainText(defaultColor.toUpperCase());
   await selectOption(dialog.getByLabel("선 굵기"), "4");
@@ -162,10 +163,10 @@ test("drawing engine: settings preview, cancellation, coordinates and text", asy
   expect((await drawings(app))[0]!.style).toEqual(original.style);
   await dialog.getByRole("button", { name: "취소", exact: true }).click();
   expect((await drawings(app))[0]!.style).toEqual(original.style);
-  await page.getByRole("button", { name: "드로잉 설정" }).click();
-  await dialog.getByRole("tab", { name: "좌표", exact: true }).click();
+  await page.getByRole("button", { name: "드로잉 세부 설정" }).click();
+  await dialog.locator("summary").filter({ hasText: /^좌표$/ }).click();
   await dialog.getByLabel("점 1 가격").fill(String(original.points[0]!.price + 10));
-  await dialog.getByRole("tab", { name: "글자", exact: true }).click();
+  await dialog.locator("summary").filter({ hasText: /^글자$/ }).click();
   await expect(dialog.getByRole("button", { name: "글자 색 선택", exact: true })).toContainText(defaultColor.toUpperCase());
   await dialog.getByRole("textbox", { name: "글자", exact: true }).fill("지지 구간");
   await page.screenshot({ path: testInfo.outputPath("settings.png") });
@@ -200,9 +201,9 @@ test("drawing engine: Alt tool aliases consume browser shortcuts and text fields
   expect(prevented).toBe(true);
   await page.keyboard.press("Alt+f");
   await expect(cell(page)).toBeFocused();
-  await page.getByRole("button", { name: "드로잉 설정" }).click();
-  const dialog = page.getByRole("dialog", { name: "수평선 설정" });
-  await dialog.getByRole("tab", { name: "글자", exact: true }).click();
+  await page.getByRole("button", { name: "드로잉 세부 설정" }).click();
+  const dialog = page.getByRole("dialog", { name: "수평선 세부 설정" });
+  await dialog.locator("summary").filter({ hasText: /^글자$/ }).click();
   const input = dialog.getByRole("textbox", { name: "글자", exact: true });
   await input.fill("A"); await input.press("Control+a"); await input.press("Control+c");
   await expect(dialog).toBeVisible(); await expect.poll(async () => (await drawings(app)).length).toBe(2);
@@ -232,7 +233,7 @@ test("drawing engine: another tab's edit prevents undoing its content", async ({
   const changed = (await drawings(app))[0]!;
   await page.bringToFront(); await page.evaluate(() => window.dispatchEvent(new Event("focus")));
   await expect.poll(async () => (await mirror(page))[0]!.points[0]!.y).not.toBeNull();
-  await expect(page.getByRole("button", { name: "드로잉 설정" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "드로잉 세부 설정" })).toBeVisible();
   await cell(page).focus(); await page.keyboard.press("Control+z");
   await expect(page.getByText("다른 곳에서 바뀐 드로잉이라 되돌리지 않았습니다")).toBeVisible();
   expect((await drawings(app))[0]!.points).toEqual(changed.points);

@@ -124,6 +124,7 @@ export class ChartController {
   private hoverIndex: number | null = null;
   private ready: ReadyStatus | null = null;
   private settingData = false;
+  private initialRangeEnd: number | null = null;
   private disposed = false;
   private extensions = new Set<ChartExtension>();
   private readonly pendingDraw = new Map<UnixSeconds, Bar>();
@@ -214,8 +215,9 @@ export class ChartController {
       this.renderLegend();
     });
     this.chart.timeScale().subscribeVisibleLogicalRangeChange(() => {
-      if (this.settingData) return;
       const r = this.chart.timeScale().getVisibleLogicalRange();
+      if (r && this.initialRangeEnd !== null && Math.abs(r.to - this.initialRangeEnd) < 0.001) this.initialRangeEnd = null;
+      if (this.settingData) return;
       const left = this.leftT();
       const before = left === null ? -1 : this.bars.findIndex((bar) => bar.t >= left);
       if (r && before >= 0 && before < LOAD_OLDER_WITHIN) this.feed.needOlder();
@@ -254,6 +256,7 @@ export class ChartController {
         this.indicators.refreshPriceFormat();
       }
       this.history = null;
+      this.initialRangeEnd = null;
       this.ready = null;
       this.legend.setNotice(null);
       this.setBars([]);
@@ -271,7 +274,13 @@ export class ChartController {
   }
 
   setFinancials(page: FinancialsPage | null, message?: string): void {
-    this.withDataGuard(() => preserveTimeRange(this.chart.timeScale(), this.period(), () => this.indicators.setFinancials(page, message)));
+    const draw = () => this.indicators.setFinancials(page, message);
+    this.withDataGuard(() => {
+      if (this.initialRangeEnd !== null) {
+        draw();
+        this.fitInitialRange();
+      } else preserveTimeRange(this.chart.timeScale(), this.period(), draw);
+    });
     this.renderLegend();
   }
 
@@ -553,15 +562,11 @@ export class ChartController {
     this.realtimeSeen = false;
     if (this.realtimeLive) this.stalledAt = null;
     const bars = displayBars(h);
-    const coarse = this.period() === "Y" || this.period() === "Q";
-    const show = coarse ? bars.length : matchMedia("(max-width: 767px)").matches ? 90 : 130;
     this.withDataGuard(() => {
       this.setBars(bars);
-      const last = bars.at(-1);
-      const end = last ? this.chart.timeScale().timeToIndex(toChartTime(last.t), false) : null;
-      if (end !== null) this.chart.timeScale().setVisibleLogicalRange({ from: end + (coarse ? 0.5 : 1) - show, to: end + (coarse ? 0.5 + Math.min(2, bars.length * 0.05) : RIGHT_OFFSET) });
+      this.indicators.reset(h);
+      this.fitInitialRange();
     });
-    this.indicators.reset(h);
     this.compare.coverFrom(this.leftT());
     this.renderLegend();
     const latest = bars[bars.length - 1];
@@ -580,6 +585,21 @@ export class ChartController {
     } else {
       this.onStatus({ kind: "error", error: new ApiRequestError("internal", "받은 봉이 없습니다") });
     }
+  }
+
+  private fitInitialRange(): void {
+    const bars = this.bars;
+    const first = bars[0];
+    const last = bars.at(-1);
+    if (!first || !last) return;
+    const scale = this.chart.timeScale();
+    const start = scale.timeToIndex(toChartTime(first.t), false);
+    const end = scale.timeToIndex(toChartTime(last.t), false);
+    if (start === null || end === null) return;
+    const coarse = this.period() === "Y" || this.period() === "Q";
+    const show = matchMedia("(max-width: 767px)").matches ? 90 : 130;
+    this.initialRangeEnd = end + (coarse ? 0.5 + Math.min(2, bars.length * 0.05) : RIGHT_OFFSET);
+    scale.setVisibleLogicalRange({ from: coarse ? start - 0.5 : end + 1 - show, to: this.initialRangeEnd });
   }
 
   private onPrepended(h: History, added: number): void {

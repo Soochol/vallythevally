@@ -56,7 +56,12 @@ export function SentenceEditor({ session, base, source, running, blocked, result
   const choose = (id: string) => { dropPendingOpen(); useScreenerStore.getState().choose(id); };
   const open = (rename = false) => { setRenaming(rename); onEditingChange(true); };
   const create = (copy = false) => { choose(editor.create(base, copy ? session.draft : undefined)); open(); };
-  const save = () => void editor.save(client, base, source);
+  const save = () => {
+    void editor.save(client, base, source);
+    if (checked.ok) return;
+    onEditingChange(true);
+    requestAnimationFrame(() => section.current?.querySelector<HTMLElement>('[aria-invalid="true"]')?.focus());
+  };
   const screens = availableSources(base, sessions);
   const remove = async () => {
     if (!await confirmAction(`"${session.draft.name}" 조건식을 삭제할까요? 되돌릴 수 없습니다.`)) return;

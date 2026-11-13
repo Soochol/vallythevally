@@ -409,9 +409,10 @@ export class IndicatorLayer {
     this.drain();
     const old = new Map<string, Line[]>();
     for (const [id, s] of this.shown) {
-      old.set(id, s.lines);
-      for (const line of s.lines) this.removeLine(line);
+      const lines = s.lines;
+      old.set(id, lines);
       s.lines = [];
+      for (const line of lines) this.removeLine(line);
     }
     const ordered = [...this.configs].sort((a, b) => this.paneOf(a) - this.paneOf(b));
     for (const config of ordered) {
@@ -574,8 +575,8 @@ export class IndicatorLayer {
   private removeShown(id: string): void {
     const s = this.shown.get(id);
     if (!s) return;
-    for (const line of s.lines) this.removeLine(line);
     this.shown.delete(id);
+    for (const line of s.lines) this.removeLine(line);
   }
 
   applyStretch(): void {

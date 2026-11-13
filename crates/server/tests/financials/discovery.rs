@@ -1,5 +1,5 @@
 use super::*;
-use super::mapping::{tempdir, settled_stock};
+use super::mapping::tempdir;
 
 pub(super) const STOCK: &str = "005387";
 pub(super) const COMMON: &str = "005380";
@@ -37,8 +37,9 @@ async fn discovers_unlisted_preferred_preserves_provenance_and_shares_company_bu
     let dir = tempdir();
     let store = Store::open(&dir.path().join("financials.db")).await.unwrap();
     let service = Financials::new(Some(fake.client()),store.clone(),clock());
-    let common = settled_stock(&service,COMMON,false).await;
-    let preferred = settled_stock(&service,STOCK,true).await;
+    run_update(&service,&[(COMMON,false),(STOCK,true)]).await;
+    let common = service.read(COMMON).await;
+    let preferred = service.read(STOCK).await;
     assert_eq!(preferred.status,"ready");
     let security = preferred.security.unwrap();
     assert_eq!(security.company.corp_code,COMPANY);
@@ -61,7 +62,7 @@ async fn discovers_unlisted_preferred_preserves_provenance_and_shares_company_bu
     assert_eq!(dividends[2].share_class.as_deref(),Some("우선주"));
     fake.state.lock().unwrap().discovery_failure = Some(("search".into(),StatusCode::BAD_GATEWAY));
     let restarted = Financials::new(Some(fake.client()),store,clock());
-    assert_eq!(restarted.update_company(STOCK,true,false).await.security.unwrap().evidence,security.evidence);
+    assert_eq!(settled_stock(&restarted,STOCK,true).await.security.unwrap().evidence,security.evidence);
     assert_eq!(fake.count("search"),1);
     let state = fake.state.lock().unwrap();
     let params = &state.calls.iter().find(|(name,_)| name == "search").unwrap().1;
@@ -114,7 +115,7 @@ async fn exact_common_company_chain_is_required_and_direct_results_keep_preceden
     }
     fake.state.lock().unwrap().directory = Some(directory);
     fake.state.lock().unwrap().company_code = Some("00000002".into());
-    assert_eq!(fake.client().resolve(STOCK,true).await.unwrap_err(),Failure::InvalidResponse);
+    assert_eq!(fake.client().resolve(STOCK,true).await.unwrap_err(),Interrupt::Failure(Failure::InvalidResponse));
     let count = fake.count("search");
     for (code, preferred) in [(STOCK,false),("A005387",true)] {
         assert!(fake.client().resolve(code,preferred).await.unwrap().is_none());
@@ -136,7 +137,7 @@ async fn search_and_document_identity_are_unambiguous_and_source_errors_are_retr
     }
     for body in ["".into(),"<html>페이지 오류</html>".into(),search("",1),search(ENTRY,0),search(&ENTRY.replace("20260917000117","bad"),1)] {
         fake.state.lock().unwrap().discovery_search = Some(body);
-        assert_eq!(fake.client().resolve(STOCK,true).await.unwrap_err(),Failure::InvalidResponse);
+        assert_eq!(fake.client().resolve(STOCK,true).await.unwrap_err(),Interrupt::Failure(Failure::InvalidResponse));
     }
     fake.state.lock().unwrap().discovery_search = Some(search(ENTRY,1));
     for body in [CONTENTS.replace("20260917000264/68155","20260917000265/68155"),CONTENTS.replace("/000117/","/000118/"),CONTENTS.repeat(2)] {
@@ -145,21 +146,20 @@ async fn search_and_document_identity_are_unambiguous_and_source_errors_are_retr
     }
     for body in [String::new(),CONTENTS.replace("https://kind.krx.co.kr","https://untrusted.invalid")] {
         fake.state.lock().unwrap().discovery_contents = Some(body);
-        assert_eq!(fake.client().resolve(STOCK,true).await.unwrap_err(),Failure::InvalidResponse);
+        assert_eq!(fake.client().resolve(STOCK,true).await.unwrap_err(),Interrupt::Failure(Failure::InvalidResponse));
     }
     assert_eq!(fake.count("company.json"),0);
 }
 
 #[tokio::test]
-async fn first_and_mid_discovery_failures_retry_after_sixty_seconds_and_preserve_other_companies() {
+async fn first_and_mid_discovery_failures_retry_in_the_next_update_and_preserve_other_companies() {
     for collected in [false,true] {
         for stage in ["search","contents","notice"] {
             for failure in [Failure::Remote,Failure::Network,Failure::InvalidResponse] {
                 let fake = source().await;
                 let dir = tempdir();
                 let store = Store::open(&dir.path().join("financials.db")).await.unwrap();
-                let clock = clock();
-                let service = Financials::new(Some(fake.client()),store.clone(),clock.clone());
+                let service = Financials::new(Some(fake.client()),store.clone(),clock());
                 let previous = if collected { Some(settled_stock(&service,COMMON,false).await.collection) } else { None };
                 {
                     let mut state = fake.state.lock().unwrap();
@@ -178,16 +178,12 @@ async fn first_and_mid_discovery_failures_retry_after_sixty_seconds_and_preserve
                         }
                     }
                 }
-                let snapshot = service.update_company(STOCK,true,false).await;
+                let snapshot = settled_stock(&service,STOCK,true).await;
                 assert_eq!(snapshot.status,"failed");
                 assert_eq!(snapshot.failure,Some(failure));
                 assert!(store.security(STOCK).await.unwrap().is_none());
                 let before = fake.count(stage);
-                for jump in [0,59] {
-                    clock.jump(jump);
-                    assert_eq!(service.update_company(STOCK,true,false).await.failure,Some(failure));
-                    assert_eq!(fake.count(stage),before);
-                }
+                assert_eq!(before,if failure == Failure::InvalidResponse { 1 } else { 3 });
                 assert_eq!(settled_stock(&service,"000001",false).await.status,"ready");
                 if let Some(previous) = &previous {
                     assert_eq!(serde_json::to_value(store.collection(COMPANY).await.unwrap()).unwrap(),serde_json::to_value(previous).unwrap());
@@ -203,7 +199,6 @@ async fn first_and_mid_discovery_failures_retry_after_sixty_seconds_and_preserve
                     state.discovery_search = Some(search(ENTRY,1));
                     state.discovery_contents = Some(CONTENTS.into());
                 }
-                clock.jump(2);
                 let recovered = settled_stock(&service,STOCK,true).await;
                 assert_eq!(recovered.status,"ready");
                 assert_eq!(fake.count(stage),before+1);
@@ -251,26 +246,21 @@ async fn first_and_mid_discovery_failures_leave_price_requests_usable() {
 }
 
 #[tokio::test]
-async fn stalled_discovery_does_not_hold_other_stock_resolutions_or_saved_company_data() {
+async fn stalled_discovery_does_not_hold_saved_company_data_or_update_status() {
     let fake = source().await;
     let dir = tempdir();
     let store = Store::open(&dir.path().join("financials.db")).await.unwrap();
     let service = Financials::new(Some(fake.client()),store,clock());
     let previous = settled_stock(&service,COMMON,false).await.collection;
     fake.state.lock().unwrap().discovery_paused = Some("search".into());
-    let pending = {
-        let service = service.clone();
-        tokio::spawn(async move { service.update_company(STOCK,true,false).await })
-    };
+    service.start_update(vec![symbol(STOCK,true)]).await;
     tokio::time::timeout(Duration::from_secs(2),async {
         while fake.count("search") == 0 { tokio::time::sleep(Duration::from_millis(10)).await; }
     }).await.unwrap();
-    let saved = tokio::time::timeout(Duration::from_secs(1),service.update_company(COMMON,false,false)).await.unwrap();
+    let saved = tokio::time::timeout(Duration::from_secs(1),service.read(COMMON)).await.unwrap();
     assert_eq!(serde_json::to_value(saved.collection).unwrap(),serde_json::to_value(previous).unwrap());
-    let other = tokio::time::timeout(Duration::from_secs(1),service.update_company("000001",false,false)).await.unwrap();
-    assert_eq!(other.security.unwrap().company.corp_code,"00000002");
-    assert!(!pending.is_finished());
-    pending.abort();
+    let status = tokio::time::timeout(Duration::from_secs(1),service.update_status()).await.unwrap();
+    assert_eq!(status.status,FinancialUpdateStatus::Planning);
 }
 
 #[tokio::test]

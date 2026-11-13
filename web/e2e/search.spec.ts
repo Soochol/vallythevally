@@ -126,7 +126,7 @@ test("시장 필터와 > 명령 모드에서 명령을 실행한다", async ({ p
   await page.keyboard.press("/");
   await input.fill("> 지표");
   await input.press("Enter");
-  await expect(page.getByRole("dialog", { name: "지표 추가", exact: true })).toBeVisible();
+  await expect(page.getByRole("dialog", { name: "지표·비교 입력창", exact: true })).toBeVisible();
 });
 
 test("일부 시세 누락·추세 실패에도 다른 종목과 명령을 계속 고른다", async ({ page }) => {
