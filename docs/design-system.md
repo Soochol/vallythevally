@@ -26,12 +26,13 @@
 
 ## 색상 선택 연결하기
 
-1. `features/color/ColorPicker.tsx`를 사용한다. `label`, 현재 CSS 색, 선 굵기와 `onChange`를 전달한다. 작은 도구 막대에서는 `compact`를 켠다.
-2. 입력이나 저장소에서 온 색은 `normalizeHex` 또는 `isHexColor`로 검사한다. 선택기가 반환한 `HexColor`는 정규화된 `#RRGGBB`이다.
-3. 48색 프리셋을 바꾸려면 `lib/colors.ts`의 `PRESET_VALUES`를 수정한다. `PRESET_COLORS`의 개수, 중복과 색 변환 시험을 실행한다.
-4. 선택기의 최근 8색은 `vv.recent-colors.v1`에 저장한다. 선택창에서 취소하면 부모의 색은 바뀌지 않는다. 지표의 색과 굵기는 지표 추가 또는 변경 적용 때 차트 설정에 저장한다.
+1. 팝업으로 고를 때는 `features/color/ColorPicker.tsx`를 사용한다. `label`, 현재 CSS 색, 선 굵기와 `onChange`를 전달한다. 작은 도구 막대에서는 `compact`를 켠다. 드로잉이 이 방식을 쓴다.
+2. 폼 안에 펼쳐 고를 때는 `features/color/ColorTable.tsx`를 사용한다. 테마 줄(선택), 색상표, 최근 줄, HEX 표시와 "직접 고르기"를 그린다. "직접 고르기"는 `ColorDialog`의 사용자 지정 화면을 연다. 지표 설정이 이 방식을 쓰고 `theme`에 `ind-1`~`ind-5`를 넘긴다.
+3. 입력이나 저장소에서 온 색은 `normalizeHex` 또는 `isHexColor`로 검사한다. 선택기가 반환한 `HexColor`는 정규화된 `#RRGGBB`이다.
+4. 색상표는 `lib/colors.ts`의 `COLOR_TABLE`이다. 열 10개(빨강·주황·노랑·라임·초록·청록·하늘·파랑·보라·분홍)와 줄 4개(밝게·기본·진하게·무채색)다. 두 선택기의 표는 같은 `ColorGrid`이고, 스와치는 `aria-label`(색 이름과 HEX)과 `aria-pressed`를 갖는다. 값을 바꾸면 개수, 중복과 색 변환 시험을 실행한다.
+5. 최근 8색은 `vv.recent-colors.v1`에 저장한다. 선택창에서 취소하면 부모의 색은 바뀌지 않는다. 지표의 색과 굵기는 지표 추가 또는 변경 적용 때 차트 설정에 저장한다.
 
-기존 지표의 `ind-1`부터 `ind-5`는 테마를 따르는 색으로 계속 읽는다. 직접 고른 색은 HEX로 저장한다. 이 구분은 [ADR 0013](adr/0013-indicator-theme-and-custom-colors.md)을 따른다.
+지표의 테마 줄에서 고른 색은 `ind-1`부터 `ind-5` 토큰으로, 색상표·최근 줄·직접 고르기에서 고른 색은 HEX로 저장한다. 이 구분은 [ADR 0013](adr/0013-indicator-theme-and-custom-colors.md)을 따른다.
 
 ## 선 굵기 검증하기
 
@@ -71,7 +72,7 @@ DOM 범례는 `iconMarkup("gear" | "eye" | "eyeOff" | "close" | "up" | "down")`�
 
 `tokens.css`의 반경은 7/9/16/18, 최소 글자는 11px이며 숫자는 전역 `tabular-nums`를 상속한다. `ui.css`와 `colors.css`의 치수는 `--size-*` 토큰을 참조하고 간격은 4px 배수를 사용한다. 색 토큰 값은 #270을 따른다. `--line`과 `--grid`는 반투명 흰색이므로 색 문자열을 직접 가공하지 않는다. 분봉 별표는 `UiPrefs.pinnedMinutes`로 저장하고 잘못된 주기·중복을 읽기 경계에서 제거한다. 서버 API는 바꾸지 않는다.
 
-시안 원본 9장은 [docs/mockups/ux-overhaul](mockups/ux-overhaul/)에, 플로트 시안은 [docs/mockups/float](mockups/float/)에 보관한다. 기능 규칙은 시안보다 #200과 #181이 우선이며 색상 선택기의 48색·최근 8색·HEX·선 샘플과 굵기 1~5를 유지한다.
+시안 원본 9장은 [docs/mockups/ux-overhaul](mockups/ux-overhaul/)에, 플로트 시안은 [docs/mockups/float](mockups/float/)에 보관한다. 기능 규칙은 시안보다 #200과 #181이 우선이며 색상 선택기의 색상표(10색 4줄)·최근 8색·HEX·선 샘플과 굵기 1~5를 유지한다.
 
 
 ## 드로잉 조작 연결하기
@@ -90,7 +91,7 @@ DOM 범례는 `iconMarkup("gear" | "eye" | "eyeOff" | "close" | "up" | "down")`�
 
 ## 범례 설정과 패널
 
-`IndicatorSettingsForm`은 지표 종류별 입력과 색상·굵기를 그린다. 색은 48색 프리셋 격자와 최근 색을 폼 안에 펼쳐 한 번 눌러 바로 고르고, HEX와 사용자 지정은 기존 색상 선택기를 연다. 굵기는 선 견본 1~5로 고른다. 이동평균 기간에는 자주 쓰는 값(5·20·60·120)을 둔다. `IndicatorPopover` 머리에서 숨기고 지운다. `Draft`, 현재 색, 검사 오류와 `onChange`를 받아 범례 팝오버와 지표 추가 창에서 함께 쓴다. `IndicatorPopover`는 열 때의 설정을 보관하고 유효한 변경을 즉시 적용한다. Esc는 처음 설정으로 되돌리고, 바깥 클릭과 닫기는 변경을 유지한다. 중첩 색상 선택기의 Esc는 색상 선택기만 닫는다. 공통 Popover의 닫기 사유는 `escape`와 `outside`다.
+`IndicatorSettingsForm`은 맨 위의 선 미리보기 띠와 두 구역을 그린다. **설정값**은 지표 종류별 입력이고 **선**은 굵기와 `ColorTable`이다. 폼 폭이 600px 이상이면 두 구역을 좌우로, 좁으면 위아래로 쌓는다(컨테이너 쿼리). 굵기는 선 견본 1~5로 고른다. 이동평균 기간에는 자주 쓰는 값(5·20·60·120)을 둔다. `IndicatorPopover` 머리에서 숨기고 지운다. `Draft`, 현재 색, 검사 오류와 `onChange`를 받아 범례 팝오버와 지표 추가 창에서 함께 쓴다. `IndicatorPopover`는 열 때의 설정을 보관하고 유효한 변경을 즉시 적용한다. Esc는 처음 설정으로 되돌리고, 바깥 클릭과 닫기는 변경을 유지한다. 중첩 색상 선택기의 Esc는 색상 선택기만 닫는다. 공통 Popover의 닫기 사유는 `escape`와 `outside`다.
 
 패널의 높이 비율과 접힘은 `ChartSettings.panels`의 `stretch`와 `collapsed`에 저장한다. 과거 설정에서 `collapsed`가 없으면 펼친다. 접힌 패널은 최신 값과 이름만 한 줄에 표시하고 이름이나 행을 누르면 펼친다. 펼칠 때 저장한 높이 비율을 복원한다. `PanelControls`의 경계 손잡이는 포인터 끌기와 위·아래 화살표를 지원하며 `data-chart-control`로 드로잉 입력에서 제외한다. 재무 패널의 상태 점은 제목 옆에 두고 자세한 상태와 보고기간 선택은 팝오버에 모은다. 결산월은 첫 재무 범례에 한 번 표시한다.
 
@@ -104,10 +105,12 @@ DOM 범례는 `iconMarkup("gear" | "eye" | "eyeOff" | "close" | "up" | "down")`�
 
 `editorState`는 조건식별 draft와 저장 기준 revision을 메모리에 보관한다. 탭이나 조건식을 바꿔도 draft는 유지한다. 변경이 없는 세션은 최신 저장본을 따르고, 편집 중인 세션은 draft와 충돌 기준 revision을 보존한다. 개수 제한은 최신 목록으로 검사한다. 창을 닫거나 조건을 접어도 draft는 남고 패널은 `변경됨`을 보인다. 저장 버튼은 창이 열려 있으면 창 바닥에, 아니면 패널 머리에 하나만 둔다. 넓게 보기의 왼쪽 목록에도 미저장 식을 표시한다. 실행 버튼과 Ctrl+Enter 명령은 기존 `checkDraft`로 검증한 draft를 실행한다. 저장 충돌에서는 최신 목록을 저장 기준으로 삼고 편집 내용은 남겨 다시 저장할 수 있다.
 
-## 지표·비교 입력창
+## 지표 창
 
-`I`, 위 막대의 지표·비교·차트 설정과 휴대폰 지표 버튼은 `openIndicatorCommand`를 호출한다. 종목 검색과 같은 `CommandFrame`을 쓰며 지표 입력창의 기본 너비는 700px이다. `DialogFrame`의 command 변형은 배경을 칠하지 않아 차트가 그대로 보인다. 입력 중인 가격 패널 지표는 `CellView.previewIndicator`로 전달해 같은 색의 옅은 후광(굵기 8, 불투명도 18%)과 함께 그린다. 목록에는 현재 지표, 추가할 지표 후보, 기존 검색 API가 반환한 비교 종목 후보를 둔다. 현재 지표의 보기·지우기는 목록에서 처리하고, 비교 종목의 3개 제한·중복 방지와 % 축 규칙을 유지한다.
+`I`, 위 막대의 지표·비교·차트 설정과 휴대폰 지표 버튼은 `openIndicatorCommand(slot, mode?)`를 호출한다. 탭은 `current`(이 칸에 띄운 지표), `add`(지표 추가), `compare`(비교 종목)이다. 모드를 주지 않으면 띄운 지표가 있을 때 `current`, 없을 때 `add`로 연다. 위 막대의 비교 버튼은 `compare`로 연다. 종목 검색과 같은 `CommandFrame`을 쓰며 크기는 976×656px, 왼쪽 목록은 300px이다. 휴대폰 폭에서는 목록과 편집 영역을 위아래로 쌓는다. `DialogFrame`의 command 변형은 배경을 칠하지 않아 차트가 그대로 보인다. 입력 중인 가격 패널 지표는 `CellView.previewIndicator`로 전달해 같은 색의 옅은 후광(굵기 8, 불투명도 18%)과 함께 그린다.
+
+`commandRows`가 탭마다 목록을 만든다. `current`는 띄운 지표만 가격 패널·아래 패널로 묶고 색 점과 숨기기·지우기를 둔다. `add`는 `parseIndicatorInput` 후보만 가격 패널·아래 패널·재무지표로 묶고, 입력이 비면 모든 종류를 보인다. `compare`는 기존 검색 API가 반환한 종목만 보이고 3개 제한·중복 방지와 % 축 규칙을 유지한다. `current` 탭에서 글자를 치면 `add` 탭으로 넘어간다. 탭을 바꾸면 입력을 비운다. 두 지표 탭의 오른쪽 편집 영역은 같은 `IndicatorEditor`이고 주 버튼 문구만 `primaryLabel`을 따른다. 입력·선택·확정은 `useIndicatorCommand`, 초안·미리보기·확정은 `useIndicatorDraft`가 소유한다.
 
 `parseIndicatorInput`은 한글 이름·영문 약어·초성을 종류에 연결하고 뒤의 숫자를 `KINDS` 필드 순서로 읽는 순수 함수다. `이평 20`, `bb 20 2`, `rsi`, `roe`를 지원한다. 숫자가 생략되면 기본값을 쓰고 잘못된 숫자는 설정 오류로 표시한다. 오른쪽 설정은 범례와 같은 `IndicatorSettingsForm`이다. Enter는 확정 후 계속 추가하고, Shift+Enter는 확정 후 닫는다. Tab은 설정으로 이동하며 Esc와 바깥 누르기는 미확정 미리보기를 버린다.
 
-미리보기는 `useIndicatorPreview`가 소유하고 `ChartCell`이 저장된 설정과 합쳐 컨트롤러에만 전달한다. layout store와 autosave에는 미리보기를 쓰지 않는다. 추가·편집 확정 때만 `executeCommand`가 layout을 바꾼다. 입력창을 닫거나 후보가 바뀌면 이전 미리보기를 제거한다. 과거 `IndicatorDialog`·`ComparePanel`과 탭 상태·전용 스타일은 제거했다.
+미리보기는 `useIndicatorPreview`가 소유하고 `ChartCell`이 저장된 설정과 합쳐 컨트롤러에만 전달한다. layout store와 autosave에는 미리보기를 쓰지 않는다. 추가·편집 확정 때만 `executeCommand`가 layout을 바꾼다. 지표 창을 닫거나 후보가 바뀌면 이전 미리보기를 제거한다. 과거 `IndicatorDialog`·`ComparePanel`과 전용 스타일은 제거했다.

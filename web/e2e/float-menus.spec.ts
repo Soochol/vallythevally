@@ -68,11 +68,11 @@ test("지표 설정은 색 격자·굵기 견본·기간 프리셋을 한 장에
   await page.keyboard.press("Shift+Enter");
   await cell(page).getByRole("button", { name: "이동평균 단순 20 설정", exact: true }).first().click();
   const settings = page.getByRole("dialog", { name: "이동평균 단순 20 설정", exact: true });
-  await expect(settings.getByRole("group", { name: "빠른 색상" }).getByRole("button")).toHaveCount(48);
-  const mint = settings.getByRole("button", { name: "빠른 색상 7 #69C7B7", exact: true });
+  await expect(settings.getByRole("group", { name: "색상표" }).getByRole("button")).toHaveCount(40);
+  const mint = settings.getByRole("button", { name: "청록 #5FCDB8", exact: true });
   await mint.click();
   await expect(mint).toHaveAttribute("aria-pressed", "true");
-  await expect(settings.getByRole("button", { name: "선 색상 선택", exact: true })).toContainText("#69C7B7");
+  await expect(settings.getByRole("group", { name: "선 색상", exact: true })).toContainText("#5FCDB8");
   await settings.getByRole("group", { name: "굵기", exact: true }).getByRole("button", { name: "3", exact: true }).click();
   await settings.getByRole("group", { name: "자주 쓰는 기간" }).getByRole("button", { name: "60", exact: true }).click();
   await expect(cell(page).getByRole("button", { name: "이동평균 단순 60 설정", exact: true }).first()).toBeVisible();

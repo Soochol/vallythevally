@@ -23,7 +23,8 @@ test("추세선 작은 막대의 색·굵기·잠금·복제·삭제 되돌리�
   const bar = page.getByRole("toolbar", { name: "드로잉 스타일" });
   await bar.getByRole("button", { name: "선 색 선택", exact: true }).click();
   const picker = page.getByRole("dialog", { name: "선 색", exact: true });
-  await expect(picker.getByRole("button", { name: /^기본 색상 \d+ / })).toHaveCount(48);
+  await expect(picker.getByRole("group", { name: "기본 색상", exact: true }).getByRole("button")).toHaveCount(40);
+  await expect(picker.getByRole("group", { name: "테마 색", exact: true })).toHaveCount(0);
   await picker.getByRole("tab", { name: "사용자 지정", exact: true }).click();
   await picker.getByRole("textbox", { name: "HEX", exact: true }).fill("#224466");
   await picker.getByRole("button", { name: "선택", exact: true }).click();

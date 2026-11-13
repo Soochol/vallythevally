@@ -34,3 +34,22 @@
 .color-hex>i { flex:none; width:var(--size-29); height:var(--size-29); border-radius:var(--r-s); }
 .color-control[data-compact=true] .color-trigger { width:var(--size-28); height:var(--size-28); padding:var(--size-4); justify-content:center; border-color:transparent; background:transparent; }
 .color-control[data-compact=true] .color-trigger>span,.color-control[data-compact=true] .color-trigger>svg,.color-control[data-compact=true]>.color-line-sample { display:none; }
+.color-table { display:flex; flex-direction:column; gap:var(--size-8); min-width:0; }
+.color-table hr { border:0; border-top:var(--size-1) solid var(--line); }
+.color-table-head { display:flex; align-items:baseline; justify-content:space-between; gap:var(--size-8); font-size:var(--fs-s); }
+.color-table-head>span:first-child { font-size:var(--fs-xs); color:var(--text-3); }
+.color-table-head>span:last-child { display:inline-flex; align-items:center; gap:var(--size-8); }
+.color-table-head i { width:var(--size-14); height:var(--size-14); border-radius:var(--r-s); }
+.color-table-rows { display:flex; flex-direction:column; gap:var(--size-4); }
+.color-table-row { display:grid; grid-template-columns:var(--size-40) repeat(10,minmax(0,1fr)); align-items:center; gap:var(--size-4); min-height:var(--size-24); }
+.color-table-row[data-theme-row] { grid-template-columns:var(--size-40) repeat(5,minmax(0,1fr)); }
+.color-table-row>span { font-size:var(--fs-xs); color:var(--text-3); }
+.color-table-row>p { grid-column:2/-1; font-size:var(--fs-xs); color:var(--text-3); }
+.color-cell { height:var(--size-21); border-radius:var(--r-s); box-shadow:inset 0 0 0 var(--size-1) var(--line-strong); }
+.color-table-row[data-theme-row] .color-cell { height:var(--size-24); }
+.color-cell[aria-pressed=true] { box-shadow:0 0 0 var(--size-2) var(--surface),0 0 0 var(--size-4) var(--text); }
+.color-cell:hover { outline:var(--size-1) solid var(--text-2); outline-offset:var(--size-1); }
+.color-cell:focus-visible { outline:var(--size-2) solid var(--accent); outline-offset:var(--size-2); }
+.color-table-foot { display:flex; align-items:center; gap:var(--size-8); }
+.color-table-foot>.ui-field { display:inline-flex; flex:1; align-items:center; gap:var(--size-8); min-width:0; }
+.color-table-foot>.ui-field>span { font-size:var(--fs-xs); color:var(--text-3); }

@@ -49,6 +49,7 @@ for (const phone of [false, true]) test.describe(phone ? "휴대폰 재무지표
     await expect(cell(page)).toHaveAttribute("aria-busy", "false");
     await page.getByRole("button", { name: /^지표/ }).first().click();
     const dialog = page.getByRole("dialog");
+    await dialog.getByRole("tab", { name: "지표 추가", exact: true }).click();
     for (const label of LABELS) {
       await dialog.getByRole("option", { name: `${label} 추가 후보`, exact: true }).click();
       await dialog.getByRole("button", { name: `${label} 추가`, exact: true }).click();
@@ -255,6 +256,7 @@ test("재무지표 미리보기 중에도 재무 수집 상태가 보이고 취�
   await expect(status).toHaveCount(0);
   await page.getByRole("button", { name: /^지표/ }).first().click();
   const dialog = page.getByRole("dialog", { name: "지표·비교 입력창" });
+  await dialog.getByRole("tab", { name: "지표 추가", exact: true }).click();
   await dialog.getByRole("option", { name: "매출액 추가 후보", exact: true }).click();
   await expect(previewRow).toHaveCount(1);
   await expect(status).toBeVisible();

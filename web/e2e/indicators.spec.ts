@@ -2,6 +2,7 @@ import { november9BarAt } from "./fixtures/frames";
 import type { Page } from "@playwright/test";
 import type { Layout } from "../src/api/generated/Layout";
 import { installFrameProbe } from "./frame-probe";
+import { parseChartSettings } from "../src/chart/settings";
 import { type Scenario, barTimes, cell, chartOf, DEFAULT_LAYOUT_ID, dragTowardPast, expect, test } from "./harness";
 
 test.use({ clockStart: "20261109100030" });
@@ -275,4 +276,40 @@ test.describe("체결 없던 분 뒤", () => {
     expect(ends.filter((t) => t === lastMain)).toHaveLength(lines.length - 3);
     expect(await lagging()).toEqual([203_000]);
   });
+});
+
+test("지표 창에서 테마 색을 고르면 토큰을, 색상표의 색을 고르면 HEX를 저장하고 고친 색도 같은 규칙을 따른다", async ({ page, scenario }) => {
+  const saved = async () => parseChartSettings(scenario.documents.layout(DEFAULT_LAYOUT_ID).cells[0]!.chartSettings).indicators.filter((i) => i.spec.kind === "ma").map((i) => i.style.colors);
+  await page.goto("/?symbol=005930");
+  await expect(cell(page)).toHaveAttribute("aria-busy", "false");
+  await page.getByRole("button", { name: "지표", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "지표·비교 입력창" });
+  const input = dialog.getByRole("combobox", { name: "지표·비교 찾기" });
+  const theme = dialog.getByRole("group", { name: "테마 색", exact: true });
+  const table = dialog.getByRole("group", { name: "색상표", exact: true });
+  await input.fill("이평 9");
+  await expect(theme.getByRole("button", { name: /^테마 2 / })).toHaveAttribute("aria-pressed", "true");
+  await theme.getByRole("button", { name: /^테마 4 / }).click();
+  await expect(theme.getByRole("button", { name: /^테마 4 / })).toHaveAttribute("aria-pressed", "true");
+  await expect(dialog.getByRole("group", { name: "선 색상", exact: true })).toContainText("테마 4");
+  await dialog.getByRole("button", { name: "이동평균 단순 9 추가", exact: true }).click();
+  await expect.poll(saved).toEqual([["ind-4"]]);
+  await input.fill("이평 11");
+  await table.getByRole("button", { name: "진한 파랑 #4A7FE0", exact: true }).click();
+  await expect(table.getByRole("button", { name: "진한 파랑 #4A7FE0", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await expect(theme.getByRole("button", { pressed: true })).toHaveCount(0);
+  await dialog.getByRole("button", { name: "이동평균 단순 11 추가", exact: true }).click();
+  await expect.poll(saved).toEqual([["ind-4"], ["#4A7FE0"]]);
+
+  await dialog.getByRole("tab", { name: /^이 칸에 띄운 지표/ }).click();
+  await dialog.getByRole("button", { name: "이동평균 단순 9 설정", exact: true }).click();
+  await expect(theme.getByRole("button", { name: /^테마 4 / })).toHaveAttribute("aria-pressed", "true");
+  await table.getByRole("button", { name: "분홍 #EE9DD0", exact: true }).click();
+  await dialog.getByRole("button", { name: "변경 적용", exact: true }).click();
+  await expect.poll(saved).toEqual([["#EE9DD0"], ["#4A7FE0"]]);
+  await dialog.getByRole("button", { name: "이동평균 단순 11 설정", exact: true }).click();
+  await expect(table.getByRole("button", { name: "진한 파랑 #4A7FE0", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await theme.getByRole("button", { name: /^테마 1 / }).click();
+  await dialog.getByRole("button", { name: "변경 적용", exact: true }).click();
+  await expect.poll(saved).toEqual([["#EE9DD0"], ["ind-1"]]);
 });

@@ -9,16 +9,35 @@ export function normalizeHex(value: string): HexColor | null {
   return isHexColor(color) ? color : null;
 }
 
-const PRESET_VALUES = [
-  "#FF747E", "#F49C73", "#D4B575", "#E7D77D", "#C7F36B", "#80C995", "#69C7B7", "#6EC7D8",
-  "#73A8FF", "#8C9DFA", "#B5A2F5", "#D6A2F2", "#EE9DD0", "#E9A6AE", "#B4C3A1", "#A8B693",
-  "#F0F3EB", "#C6CEC0", "#A4B09C", "#87947F", "#D3B9A0", "#BDA0A7", "#A5B6CA", "#7DB9AB",
-  "#FF9FA6", "#FFC7A1", "#F8DCA0", "#F6EFA8", "#DAF9A0", "#A6E7BB", "#9AE9DD", "#A5E6F2",
-  "#A5C9FF", "#B7BEFF", "#D2BCFF", "#E9BDFF", "#FFBCE6", "#F6CFD5", "#D3DFC0", "#D1D9C5",
-  "#DE5863", "#DC7C46", "#BE9C4B", "#BAAD3F", "#91BF3D", "#4CA977", "#42A99D", "#459DBD",
+const HUES = ["빨강", "주황", "노랑", "라임", "초록", "청록", "하늘", "파랑", "보라", "분홍"] as const;
+const GRAYS = ["흰색", "회색 1", "회색 2", "회색 3", "회색 4", "회색 5", "회색 6", "회색 7", "회색 8", "회색 9"] as const;
+
+export interface ColorSwatch { name: string; color: HexColor }
+export interface ColorTableRow { label: string; swatches: readonly ColorSwatch[] }
+
+function tableRow(label: string, names: readonly string[], values: readonly string[]): ColorTableRow {
+  const swatches = values.map((value, i) => {
+    const color = normalizeHex(value);
+    if (!color) throw new Error("색상표 값이 올바르지 않습니다");
+    return { name: names[i] ?? color, color };
+  });
+  return { label, swatches };
+}
+
+export const COLOR_TABLE: readonly ColorTableRow[] = [
+  tableRow("밝게", HUES.map((hue) => `밝은 ${hue}`), ["#FFA3AB", "#FFC7A1", "#F6E3A0", "#DEF9A6", "#B0E8C2", "#A6E7DA", "#A5E1EC", "#A9C9FF", "#D4C8FF", "#F6C3E3"]),
+  tableRow("기본", HUES, ["#FF6B78", "#F4935F", "#EBD06F", "#C7F36B", "#7FD69A", "#5FCDB8", "#6EC7D8", "#73A8FF", "#A48CFA", "#EE9DD0"]),
+  tableRow("진하게", HUES.map((hue) => `진한 ${hue}`), ["#D9485A", "#D97A45", "#C29A45", "#94C23C", "#4CA977", "#42A99D", "#459DBD", "#4A7FE0", "#8B74E0", "#CC6BA8"]),
+  tableRow("무채색", GRAYS, ["#FFFFFF", "#F0F4EC", "#D7DED1", "#C6CEC0", "#AEB8A8", "#98A391", "#87947F", "#78836F", "#5F695A", "#465044"]),
 ];
 
-export const PRESET_COLORS: readonly HexColor[] = PRESET_VALUES.filter(isHexColor);
+export const PRESET_COLORS: readonly HexColor[] = COLOR_TABLE.flatMap((row) => row.swatches.map((swatch) => swatch.color));
+
+export const sameColor = (a: string, b: string): boolean => a.toUpperCase() === b.toUpperCase();
+
+export function colorName(color: HexColor): string {
+  return COLOR_TABLE.flatMap((row) => row.swatches).find((swatch) => sameColor(swatch.color, color))?.name ?? color.toUpperCase();
+}
 
 export interface HsvColor { h: number; s: number; v: number }
 
