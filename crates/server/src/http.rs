@@ -434,6 +434,7 @@ mod tests {
     use tower::ServiceExt;
 
     use super::*;
+    use crate::app::{ApplicationInputs, application};
     use crate::clock::{Clock, kst};
     use crate::user_routes::LAYOUT_LIMIT;
     use crate::config::Secret;
@@ -441,6 +442,7 @@ mod tests {
     use crate::kiwoom::auth::KiwoomAuth;
     use crate::kiwoom::rest::KiwoomRest;
     use crate::kiwoom::rest::testing::{FakeTransport, ok, status, token};
+    use crate::kiwoom::stream::{KiwoomStream, StreamEvent};
     use crate::symbols::Directory;
     use domain::{KstDate, Market, SymbolInfo, SymbolKind};
 
@@ -448,6 +450,7 @@ mod tests {
         app: Router,
         fake: Arc<FakeTransport>,
         hub: HubHandle,
+        _events: tokio::sync::mpsc::Sender<StreamEvent>,
         _dir: tempfile::TempDir,
     }
 
@@ -521,11 +524,13 @@ mod tests {
                 stock("005935", "삼성전자우", SymbolKind::Preferred, false),
             ]));
         }
-        let bars = Arc::new(BarService::new(rest.clone(), symbols.clone(), clock.clone()));
-        let (hub, _events) = crate::market::hub::MarketHub::detached(bars.clone(), clock.clone());
-        let screener = Arc::new(Screener::new(crate::screener::store::Store::open(&dir.path().join("screener.duckdb")).unwrap(), rest.clone(), bars.clone(), symbols.clone(), clock.clone()));
-        let app = router(Arc::new(AppState { symbols, bars, rest, db, clock, static_dir: dir.path().to_owned(), hub: hub.clone(), screener }));
-        Fixture { app, fake, hub, _dir: dir }
+        let (stream, _desired) = KiwoomStream::detached();
+        let (events, receiver) = tokio::sync::mpsc::channel(64);
+        let screener_store = crate::screener::store::Store::open(&dir.path().join("screener.duckdb")).unwrap();
+        let state = application(ApplicationInputs { rest, clock, symbols, db, screener_store, stream: (stream, receiver), static_dir: dir.path().to_owned() });
+        let hub = state.hub.clone();
+        let app = router(state);
+        Fixture { app, fake, hub, _events: events, _dir: dir }
     }
 
     async fn get(app: &Router, uri: &str) -> (StatusCode, axum::http::HeaderMap, Vec<u8>) {
@@ -1102,10 +1107,10 @@ mod tests {
         let clock = Clock::fake(kst(KstDate::new(2026, 11, 9).unwrap(), 9, 0, 0));
         let rest = KiwoomRest::new(Arc::new(fake.clone()), KiwoomAuth::new(Secret::new("k".into()), Secret::new("s".into()), None), clock.clone());
         let symbols = Arc::new(SymbolDirectory::default());
-        let bars = Arc::new(BarService::new(rest.clone(), symbols.clone(), clock.clone()));
-        let (hub, _events) = crate::market::hub::MarketHub::detached(bars.clone(), clock.clone());
-        let screener = Arc::new(Screener::new(crate::screener::store::Store::open(&dir.path().join("screener.duckdb")).unwrap(), rest.clone(), bars.clone(), symbols.clone(), clock.clone()));
-        let app = router(Arc::new(AppState { symbols: symbols.clone(), bars, rest: rest.clone(), db, clock, static_dir: dir.path().to_owned(), hub, screener }));
+        let (stream, _desired) = KiwoomStream::detached();
+        let (_events, events) = tokio::sync::mpsc::channel(64);
+        let screener_store = crate::screener::store::Store::open(&dir.path().join("screener.duckdb")).unwrap();
+        let app = router(application(ApplicationInputs { rest: rest.clone(), clock, symbols: symbols.clone(), db, screener_store, stream: (stream, events), static_dir: dir.path().to_owned() }));
 
         let nxt_layout = two_cells("005930");
         let started = tokio::time::Instant::now();

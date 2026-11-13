@@ -7,12 +7,11 @@ use domain::{KstDate, KstTime, Market, Symbol, SymbolInfo, SymbolKind, TimeOfDay
 use support::{ScriptedTransport, fixture};
 use http_body_util::BodyExt;
 use serde_json::{Value, json};
-use server::bars::BarService;
+use server::app::{ApplicationInputs, application};
 use server::clock::Clock;
 use server::config::Secret;
 use server::db::AppDb;
-use server::http::{AppState, router};
-use server::market::hub::MarketHub;
+use server::http::router;
 use server::kiwoom::api::ApiId;
 use server::kiwoom::auth::KiwoomAuth;
 use server::kiwoom::rest::KiwoomRest;
@@ -44,13 +43,10 @@ impl Fixture {
         symbols.replace(Directory::build(vec![listed("005930", "삼성전자"), listed("999999", "목록에만 있는 종목")]));
         let tmp = tempfile::tempdir().unwrap();
         let db = AppDb::open(&tmp.path().join("db.sqlite")).await.unwrap();
-        let bars = Arc::new(BarService::new(rest.clone(), symbols.clone(), clock.clone()));
         let (stream, _desired) = KiwoomStream::detached();
         let (_events, events) = tokio::sync::mpsc::channel(1);
-        let hub = MarketHub::spawn(bars.clone(), stream, events, clock.clone());
         let store = server::screener::store::Store::open(&tmp.path().join("screener.duckdb")).unwrap();
-        let screener = Arc::new(server::screener::Screener::new(store, rest.clone(), bars.clone(), symbols.clone(), clock.clone()));
-        let app = router(Arc::new(AppState { symbols, bars, rest: rest.clone(), db, clock, static_dir: tmp.path().to_owned(), hub, screener }));
+        let app = router(application(ApplicationInputs { rest: rest.clone(), clock, symbols, db, screener_store: store, stream: (stream, events), static_dir: tmp.path().to_owned() }));
         tokio::time::pause();
         Fixture { fake, rest, app, _tmp: tmp }
     }
