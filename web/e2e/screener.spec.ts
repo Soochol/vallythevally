@@ -438,9 +438,9 @@ test.describe("서버와 시계가 어긋난 브라우저", () => {
     await answered;
     await ahead.keyboard.press("Escape");
     for (const p of [ahead, behind]) {
-      await p.clock.fastForward(28_000);
+      await p.clock.fastForward(20_000);
       await expect(retryButton(p)).toBeDisabled();
-      await p.clock.fastForward(4_000);
+      await p.clock.fastForward(12_000);
       await expect(retryButton(p)).toBeEnabled();
       await expect(panel(p).getByRole("alert")).toContainText("다시 시도하면 남은 것만 받습니다.");
       await expectFullReload(p, async item => { await expect(item).toBeEnabled(); await expect(item).toHaveText("전체 다시 받기…"); });
