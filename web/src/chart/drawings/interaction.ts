@@ -68,6 +68,13 @@ function constrained(tool: Tool, fixed: readonly DrawingPoint[], at: ScreenPoint
   return snapped;
 }
 
+function repeatsLast(fixed: Anchors, p: DrawingPoint, c: Context): boolean {
+  const last = fixed.at(-1) ?? fixed[0];
+  const a = c.ctx.toScreen(last);
+  const b = c.ctx.toScreen(p);
+  return a !== null && b !== null ? distance(a, b) < PRESS_DISTANCE : last.t === p.t && last.price === p.price;
+}
+
 function limitPoints(points: readonly DrawingPoint[], max: number): DrawingPoint[] {
   if (points.length <= max) return [...points];
   const indices = new Set(Array.from({ length: max }, (_, i) => Math.floor(i * (points.length - 1) / (max - 1))));
@@ -167,8 +174,7 @@ export function step(s: Interaction, e: Input, c: Context): Transition {
     if (p === null) return result(s);
     if (e.kind === "move") return result({ ...s, cursor: p });
     if (e.kind !== "down") return result(s);
-    const last = s.fixed.at(-1);
-    if (last?.t === p.t && last.price === p.price) return result(s);
+    if (repeatsLast(s.fixed, p, c)) return result(s);
     const points: Anchors = [s.fixed[0], ...s.fixed.slice(1), p];
     const placement = s.tool.placement;
     const max = placement.kind === "points" ? placement.count : placement.max;
