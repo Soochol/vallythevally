@@ -14,7 +14,7 @@ test("옛 라이트 설정은 다크로 옮기고 다른 설정과 모르는 키
     activeWatchlistId: "W2",
     watchColumns: ["price", "volume"],
     drawing: DEFAULT_UI_PREFS.drawing,
-    pinnedMinutes: [],
+    lastMinute: "10m",
     collapsedWatchGroups: ["G1"],
     indicatorWindow: "inspector",
     phone: { symbol: "000660" },
@@ -30,7 +30,7 @@ test("옛 라이트 설정은 다크로 옮기고 다른 설정과 모르는 키
     activeWatchlistId: "W2",
     watchColumns: ["price", "volume"],
     drawing: DEFAULT_UI_PREFS.drawing,
-    pinnedMinutes: [],
+    lastMinute: "10m",
     collapsedWatchGroups: ["G1"],
     indicatorWindow: "inspector",
   });
@@ -68,10 +68,25 @@ test("고른 열은 정해진 차례로 읽고, 겹치면 틀린 값으로 본�
   expect(parseUiState({ lastLayoutId: null, theme: "dark", watchColumns: ["price", "price"] }).prefs.watchColumns).toEqual(DEFAULT_UI_PREFS.watchColumns);
 });
 
-test("고정 분봉은 중복과 잘못된 주기를 빼고 저장·복원한다", () => {
-  const { prefs, extra } = parseUiState({ lastLayoutId: null, theme: "dark", pinnedMinutes: ["5m", "60m", "D", "5m", "bad", 3], future: true });
-  expect(prefs.pinnedMinutes).toEqual(["5m", "60m"]);
-  expect(parseUiState(toUiState(prefs, extra))).toEqual({ prefs, extra });
+test("마지막 분봉은 왕복하고, 없으면 경고 없이 3분, 분봉이 아니면 3분으로 연다", () => {
+  const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+  const { prefs, extra } = parseUiState({ ...DEFAULT_UI_PREFS, lastMinute: "30m" });
+  expect(parseUiState(toUiState(prefs, extra)).prefs.lastMinute).toBe("30m");
+  const { lastMinute: _minute, ...older } = DEFAULT_UI_PREFS;
+  expect(parseUiState(older).prefs.lastMinute).toBe("3m");
+  expect(warn).not.toHaveBeenCalled();
+  for (const lastMinute of ["D", "M", "bad", 3, null]) expect(parseUiState({ ...DEFAULT_UI_PREFS, lastMinute }).prefs.lastMinute).toBe("3m");
+  expect(warn).toHaveBeenCalledTimes(5);
+});
+
+test("없어진 고정 분봉은 경고 없이 읽고 버려 다시 저장하지 않는다", () => {
+  const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+  const { lastMinute: _minute, ...older } = DEFAULT_UI_PREFS;
+  const { prefs, extra } = parseUiState({ ...older, pinnedMinutes: ["5m", "60m", "D", "bad", 3], future: true });
+  expect(prefs).toEqual(DEFAULT_UI_PREFS);
+  expect(extra).toEqual({ future: true });
+  expect(toUiState(prefs, extra)).not.toHaveProperty("pinnedMinutes");
+  expect(warn).not.toHaveBeenCalled();
 });
 
 test("접은 관심종목 그룹은 없으면 빈 목록, 틀리면 기본값이고 중복을 빼고 왕복한다", () => {

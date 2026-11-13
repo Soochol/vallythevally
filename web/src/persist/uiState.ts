@@ -1,5 +1,4 @@
-import { isPeriod } from "../lib/symbol";
-import type { Period } from "../api/generated/Period";
+import { isMinutePeriod, type MinutePeriod } from "../lib/symbol";
 import type { SymbolCode } from "../api/generated/SymbolCode";
 import type { UiState } from "../api/generated/UiState";
 import { DEFAULT_WATCH_COLUMNS, WATCH_COLUMNS, type WatchColumn } from "../lib/watchlist";
@@ -23,7 +22,7 @@ export interface UiPrefs {
   activeWatchlistId: string | null;
   watchColumns: readonly WatchColumn[];
   drawing: DrawingPrefs;
-  pinnedMinutes: Period[];
+  lastMinute: MinutePeriod;
   collapsedWatchGroups: readonly string[];
   indicatorWindow: IndicatorWindow;
 }
@@ -40,7 +39,7 @@ export const DEFAULT_UI_PREFS: UiPrefs = {
   activeWatchlistId: null,
   watchColumns: DEFAULT_WATCH_COLUMNS,
   drawing: DEFAULT_DRAWING_PREFS,
-  pinnedMinutes: [],
+  lastMinute: "3m",
   collapsedWatchGroups: [],
   indicatorWindow: "dialog",
 };
@@ -54,7 +53,7 @@ export function parseUiState(raw: unknown): { prefs: UiPrefs; extra: UiExtra } {
     console.warn("UiState가 객체가 아니어서 기본값으로 엽니다", raw);
     return { prefs: DEFAULT_UI_PREFS, extra: {} };
   }
-  const { rightPanel, panelWidth, rightPanelWidth: _rightPanelWidth, lastLayoutId, theme, watchCollapsed, recentSymbols, activeWatchlistId, watchColumns, drawing, pinnedMinutes, collapsedWatchGroups, indicatorWindow, revision: _revision, ...extra } = raw as Record<string, unknown>;
+  const { rightPanel, panelWidth, rightPanelWidth: _rightPanelWidth, lastLayoutId, theme, watchCollapsed, recentSymbols, activeWatchlistId, watchColumns, drawing, lastMinute, pinnedMinutes: _pinnedMinutes, collapsedWatchGroups, indicatorWindow, revision: _revision, ...extra } = raw as Record<string, unknown>;
   const bad: string[] = [];
   const pick = <T>(key: string, value: unknown, ok: (x: unknown) => x is T, fallback: T, missingOk = false): T => {
     if (ok(value)) return value;
@@ -73,7 +72,7 @@ export function parseUiState(raw: unknown): { prefs: UiPrefs; extra: UiExtra } {
     watchColumns: sortColumns(pick("watchColumns", watchColumns, isColumns, DEFAULT_WATCH_COLUMNS, true)),
     drawing: parseDrawingPrefs(drawing),
     indicatorWindow: pick("indicatorWindow", indicatorWindow, (x): x is IndicatorWindow => x === "dialog" || x === "inspector", "dialog", true),
-    pinnedMinutes: Array.isArray(pinnedMinutes) ? [...new Set(pinnedMinutes.filter((p): p is Period => typeof p === "string" && isPeriod(p) && p.endsWith("m")))] : [],
+    lastMinute: pick("lastMinute", lastMinute, (x): x is MinutePeriod => typeof x === "string" && isMinutePeriod(x), DEFAULT_UI_PREFS.lastMinute, true),
     collapsedWatchGroups: [...new Set(pick("collapsedWatchGroups", collapsedWatchGroups, isStringArray, [], true))],
   };
   if (bad.length) console.warn(`UiState의 ${bad.join(", ")} 값이 틀려 기본값으로 엽니다`, raw);

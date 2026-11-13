@@ -2,6 +2,7 @@ import type { QueryClient } from "@tanstack/react-query";
 import { ApiRequestError, sendJson } from "../api/http";
 import { fetchSymbolInfo } from "../api/queries";
 import { fetchLayout, fetchLayouts, fetchUiState, fetchWatchlists } from "../api/userData";
+import { followLastMinute } from "../stores/lastMinute";
 import { useLayoutStore } from "../stores/layout";
 import { SAVE_TARGETS, usePersistStore } from "../stores/persist";
 import { useSelectionStore } from "../stores/selection";
@@ -52,6 +53,7 @@ export async function boot(queryClient: QueryClient) {
     useUiStore.getState().load(restored.ui.prefs, restored.ui.extra);
     useWatchlistStore.getState().load(restored.watchlists);
     followTheme();
+    followLastMinute();
     for (const target of SAVE_TARGETS) clearUnsaved(target, restored.serverRevisions[target]);
     const autosave = startAutosave({ put: (path, json, o) => sendJson("PUT", path, json, o), toast, revisions: restored.revisions });
     if (restored.layoutDirty) autosave.savers.layout.changed();
@@ -68,6 +70,7 @@ export async function boot(queryClient: QueryClient) {
     const theme: Theme = "dark";
     useUiStore.getState().load({ ...DEFAULT_UI_PREFS, theme }, {});
     followTheme();
+    followLastMinute();
     const reason = e instanceof ApiRequestError ? e.message : String(e);
     setPhase({ kind: "offline", message: `${OFFLINE_MESSAGE} (${reason})` });
     toast(OFFLINE_MESSAGE);
