@@ -82,3 +82,13 @@ export async function updateFromChart(page: Page) {
   await dialog.getByRole("button", { name: "전체 업데이트", exact: true }).click();
   await dialog.getByRole("button", { name: "닫기", exact: true }).first().click();
 }
+
+export function seedFinancialLayout(scenario: Scenario) {
+  const layout = scenario.documents.layout();
+  scenario.documents.saveLayout({ ...layout, revision: layout.revision + 1, cells: [{ ...layout.cells[0]!, symbol: "005930", venue: "combined", period: "Y", chartSettings: { v: 2, style: "candle", scale: "normal", compare: [], indicators: [{ id: "revenue", spec: { kind: "revenue" }, panel: "revenue", visible: true, style: { colors: ["ind-2"], width: 1 } }], panels: [{ id: "revenue", stretch: 0.4 }] } }] });
+}
+
+export async function openFinancials(page: Page) {
+  await page.getByRole("button", { name: "재무자료", exact: true }).filter({ visible: true }).click();
+  return page.getByRole("dialog", { name: "재무자료", exact: true });
+}
