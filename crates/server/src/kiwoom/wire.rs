@@ -888,6 +888,16 @@ pub fn remove_message(kind: RealType, symbols: &BTreeSet<Symbol>) -> String {
 mod tests {
     use super::*;
 
+    fn trade_values(time: &str, price: i64, qty: i64, cumulative: i64, exchange: &str) -> Value {
+        json!({"20": time, "10": price.to_string(), "15": qty.to_string(), "13": cumulative.to_string(), "9081": exchange, "11": "0"})
+    }
+
+    fn index_values(time: &str, centi: i64, cumulative: i64) -> Value {
+        let sign = if centi < 0 { "-" } else { "+" };
+        let magnitude = centi.unsigned_abs();
+        json!({"20": time, "10": format!("{sign}{}.{:02}", magnitude / 100, magnitude % 100), "13": cumulative.to_string()})
+    }
+
     fn fixture(name: &str) -> String {
         let path = format!("{}/tests/fixtures/kiwoom/{name}.json", env!("CARGO_MANIFEST_DIR"));
         std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{path}: {e}"))
@@ -1405,10 +1415,10 @@ mod tests {
         let code = StockCode::parse("005930").unwrap();
         let day = Some(DayTotals { change_centi: 0, cumulative: Volume(100) });
         let tick = |exchange| RealTick { symbol: Symbol::Stock(code), hhmmss: TimeOfDay::hms(9, 30, 1).unwrap(), price: Price::from_centi(7_120_000).unwrap(), qty: Volume(15), exchange, day };
-        assert_eq!(one("0B", "005930_AL", fake_kiwoom::trade_0b("093001", -71_200, -15, 100, "NXT")), Ok(RealItem::Trade(tick(Some(Exchange::Nxt)))));
-        assert_eq!(one("0B", "005930_AL", fake_kiwoom::trade_0b("093001", 71_200, 15, 100, "KRX")), Ok(RealItem::Trade(tick(Some(Exchange::Krx)))));
-        assert_eq!(one("0B", "005930_AL", fake_kiwoom::trade_0b("093001", 71_200, 15, 100, "1")), Ok(RealItem::Trade(tick(None))));
-        assert_eq!(one("0B", "005930_AL", fake_kiwoom::trade_0b("093001", 71_200, 0, 100, "KRX")), Ok(RealItem::AuctionOnly));
+        assert_eq!(one("0B", "005930_AL", trade_values("093001", -71_200, -15, 100, "NXT")), Ok(RealItem::Trade(tick(Some(Exchange::Nxt)))));
+        assert_eq!(one("0B", "005930_AL", trade_values("093001", 71_200, 15, 100, "KRX")), Ok(RealItem::Trade(tick(Some(Exchange::Krx)))));
+        assert_eq!(one("0B", "005930_AL", trade_values("093001", 71_200, 15, 100, "1")), Ok(RealItem::Trade(tick(None))));
+        assert_eq!(one("0B", "005930_AL", trade_values("093001", 71_200, 0, 100, "KRX")), Ok(RealItem::AuctionOnly));
     }
 
     #[test]
@@ -1417,7 +1427,7 @@ mod tests {
             Ok(RealItem::Trade(tick)) => tick.day,
             other => panic!("{other:?}"),
         };
-        let mut v = fake_kiwoom::trade_0b("093001", -193_400, 15, 56_147_847, "KRX");
+        let mut v = trade_values("093001", -193_400, 15, 56_147_847, "KRX");
         v["11"] = "-8100".into();
         assert_eq!(day(v.clone()), Some(DayTotals { change_centi: -810_000, cumulative: Volume(56_147_847) }));
         for (fid, bad) in [("11", "x"), ("13", "")] {
@@ -1431,7 +1441,7 @@ mod tests {
 
     #[test]
     fn real_0b_that_cannot_be_read_is_an_error() {
-        let ok = fake_kiwoom::trade_0b("093001", 71_200, 15, 100, "KRX");
+        let ok = trade_values("093001", 71_200, 15, 100, "KRX");
         assert!(one("0B", "005930", ok.clone()).is_err(), "_AL만 등록한다");
         assert!(one("0B", "00593_AL", ok.clone()).is_err());
         for (fid, bad) in [("20", "093060"), ("20", "9301"), ("10", "0"), ("10", "x"), ("15", "")] {
@@ -1448,7 +1458,7 @@ mod tests {
     fn real_0j_level_is_a_signed_decimal_and_volume_is_cumulative() {
         let index = IndexCode::KOSPI;
         let at = TimeOfDay::hms(10, 56, 2).unwrap();
-        assert_eq!(one("0J", "001", fake_kiwoom::tick_0j("105602", -505_969, 28_264)), Ok(RealItem::Index { index, hhmmss: at, price: Price::from_centi(505_969).unwrap(), cumulative: 28_264, change_centi: None }));
+        assert_eq!(one("0J", "001", index_values("105602", -505_969, 28_264)), Ok(RealItem::Index { index, hhmmss: at, price: Price::from_centi(505_969).unwrap(), cumulative: 28_264, change_centi: None }));
         let change = |s: &str| match one("0J", "150", json!({"20": "105602", "10": "-1327.93", "11": s, "13": "28264"})) {
             Ok(RealItem::Index { change_centi, .. }) => change_centi,
             other => panic!("{other:?}"),
@@ -1464,13 +1474,13 @@ mod tests {
         for bad in ["1327.931", "0.00", ".5", "+", "1,327.93", "13a7.93"] {
             assert!(level(bad).is_err(), "{bad:?}");
         }
-        assert!(one("0J", "001_AL", fake_kiwoom::tick_0j("105602", 1, 1)).is_err());
+        assert!(one("0J", "001_AL", index_values("105602", 1, 1)).is_err());
     }
 
     #[test]
     fn real_frames_keep_each_item_separately() {
         let text = json!({"trnm": "REAL", "data": [
-            {"type": "0B", "item": "005930_AL", "values": fake_kiwoom::trade_0b("093001", 71_200, 15, 100, "KRX")},
+            {"type": "0B", "item": "005930_AL", "values": trade_values("093001", 71_200, 15, 100, "KRX")},
             {"type": "0B", "item": "005930_AL", "values": {"20": "x"}},
             {"type": "0D", "item": "005930_AL", "values": {}},
         ]}).to_string();

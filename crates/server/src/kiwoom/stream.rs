@@ -4,12 +4,11 @@ use std::collections::{BTreeSet, HashMap};
 use std::time::Duration;
 
 use domain::{IndexCode, KstTime, Price, Symbol, TimeOfDay, Volume};
-use futures::{SinkExt, StreamExt};
-use tokio::net::TcpStream;
+use futures::{Sink, SinkExt, Stream, StreamExt, future::BoxFuture};
 use tokio::sync::{mpsc, watch};
 use tokio::time::{Instant, sleep_until, timeout};
-use tokio_tungstenite::tungstenite::Message;
-use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async};
+use tokio_tungstenite::tungstenite::{Error as WsError, Message};
+use tokio_tungstenite::connect_async;
 
 use super::error::{Category, CodeKey, WsRejection, classify};
 use super::rest::KiwoomRest;
@@ -65,9 +64,13 @@ impl KiwoomStream {
     }
 
     pub(crate) fn spawn_with(url: String, rest: KiwoomRest, clock: Clock, timings: Timings) -> (KiwoomStream, mpsc::Receiver<StreamEvent>) {
+        Self::spawn_connector(Box::new(WebSocketConnector(url)), rest, clock, timings)
+    }
+
+    fn spawn_connector(connector: Box<dyn Connector>, rest: KiwoomRest, clock: Clock, timings: Timings) -> (KiwoomStream, mpsc::Receiver<StreamEvent>) {
         let (stream, desired) = KiwoomStream::detached();
         let (events, rx) = mpsc::channel(EVENT_BUFFER);
-        let session = Session { url, rest, clock, timings, desired, events, budget: TokenBudget::Fresh, rebuild: ControlBudget::Fresh, dropped: Dropped::default() };
+        let session = Session { connector, rest, clock, timings, desired, events, budget: TokenBudget::Fresh, rebuild: ControlBudget::Fresh, dropped: Dropped::default() };
         tokio::spawn(session.run());
         (stream, rx)
     }
@@ -233,7 +236,7 @@ struct Dropped {
 }
 
 struct Session {
-    url: String,
+    connector: Box<dyn Connector>,
     rest: KiwoomRest,
     clock: Clock,
     timings: Timings,
@@ -244,7 +247,23 @@ struct Session {
     dropped: Dropped,
 }
 
-type Socket = WebSocketStream<MaybeTlsStream<TcpStream>>;
+trait SessionSocket: Sink<Message, Error = WsError> + Stream<Item = Result<Message, WsError>> + Unpin + Send {}
+
+impl<T> SessionSocket for T where T: Sink<Message, Error = WsError> + Stream<Item = Result<Message, WsError>> + Unpin + Send {}
+
+type Socket = Box<dyn SessionSocket>;
+
+trait Connector: Send + Sync {
+    fn connect(&self) -> BoxFuture<'_, Result<Socket, WsError>>;
+}
+
+struct WebSocketConnector(String);
+
+impl Connector for WebSocketConnector {
+    fn connect(&self) -> BoxFuture<'_, Result<Socket, WsError>> {
+        Box::pin(async { connect_async(self.0.as_str()).await.map(|(socket, _)| Box::new(socket) as Socket) })
+    }
+}
 
 struct Conn {
     ws: Socket,
@@ -356,8 +375,8 @@ impl Session {
     }
 
     async fn connect(&mut self, attempt: u32) -> SessionState {
-        match timeout(self.timings.control, connect_async(self.url.as_str())).await {
-            Ok(Ok((ws, _))) => SessionState::LoggingIn { conn: Conn::new(ws, self.timings.silence), attempt },
+        match timeout(self.timings.control, self.connector.connect()).await {
+            Ok(Ok(ws)) => SessionState::LoggingIn { conn: Conn::new(ws, self.timings.silence), attempt },
             Ok(Err(e)) => {
                 tracing::warn!(error = %e, "키움 WebSocket에 연결하지 못했습니다");
                 self.retry_later(attempt)
@@ -576,24 +595,29 @@ impl Conn {
 
     /// 반쯤 열린 연결이면 close가 끝나지 않을 수 있어 기다리는 시간을 둔다.
     async fn close(mut self) {
-        let _ = timeout(self.silence, self.ws.close(None)).await;
+        let _ = timeout(self.silence, self.ws.close()).await;
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
+    use std::pin::Pin;
+    use std::sync::{Arc, Mutex, atomic::{AtomicUsize, Ordering}};
+    use std::task::{Context, Poll};
 
-    use domain::{IndexCode, StockCode};
-    use fake_kiwoom::{APP_KEY, APP_SECRET, FakeKiwoom, TOKEN, tick_0j, trade_0b};
+    use domain::{KstDate, StockCode};
+    use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender, unbounded};
+    use serde_json::{Value, json};
 
     use super::*;
     use crate::config::Secret;
     use crate::kiwoom::auth::KiwoomAuth;
-    use crate::kiwoom::transport::ReqwestTransport;
+    use crate::kiwoom::rest::testing::{FakeTransport, token};
     use crate::kiwoom::wire::TokenResponse;
 
-    const WAIT: Duration = Duration::from_secs(3);
+    const WAIT: Duration = Duration::from_secs(120);
+    type Frames = UnboundedSender<Result<Message, WsError>>;
+    type Script = dyn Fn(usize, &str, usize) -> Reply + Send + Sync;
 
     fn samsung() -> Symbol {
         Symbol::Stock(StockCode::parse("005930").unwrap())
@@ -604,22 +628,21 @@ mod tests {
     }
 
     fn fast() -> Timings {
-        Timings { control: Duration::from_millis(500), silence: Duration::from_secs(2), backoff: [Duration::from_millis(50); 5], live_resets_backoff_after: Duration::from_secs(60), rate_limit_pause: Duration::from_millis(300) }
+        Timings { control: Duration::from_millis(500), silence: Duration::from_secs(30), backoff: [Duration::from_millis(50); 5], live_resets_backoff_after: Duration::from_secs(60), rate_limit_pause: Duration::from_millis(300) }
     }
 
-    fn rest(fake: &FakeKiwoom) -> KiwoomRest {
-        let transport = ReqwestTransport::new(fake.base_url()).unwrap();
-        KiwoomRest::new(Arc::new(transport), KiwoomAuth::new(Secret::new(APP_KEY.into()), Secret::new(APP_SECRET.into()), None), Clock::system())
+    fn clock() -> Clock {
+        Clock::fake(crate::clock::kst(KstDate::new(2026, 11, 9).unwrap(), 9, 30, 0))
     }
 
-    fn holding_unrecorded(rest: &KiwoomRest, token: &str) {
-        rest.auth().record_issued(TokenResponse { token: token.into(), expires_dt: "20991231000000".into() }, Clock::system().now()).unwrap();
+    fn rest(clock: &Clock) -> (KiwoomRest, Arc<FakeTransport>) {
+        let transport = Arc::new(FakeTransport::new(Duration::ZERO, |_| token(1)));
+        let rest = KiwoomRest::new(Arc::new(transport.clone()), KiwoomAuth::new(Secret::new("key".into()), Secret::new("secret".into()), None), clock.clone());
+        (rest, transport)
     }
 
-    fn start(fake: &FakeKiwoom, rest: KiwoomRest, timings: Timings, desired: &[Symbol]) -> (KiwoomStream, mpsc::Receiver<StreamEvent>) {
-        let (stream, events) = KiwoomStream::spawn_with(fake.ws_url(), rest, Clock::system(), timings);
-        stream.set_desired(desired.iter().copied().collect());
-        (stream, events)
+    fn holding_unrecorded(rest: &KiwoomRest, clock: &Clock) {
+        rest.auth().record_issued(TokenResponse { token: "revoked-token".into(), expires_dt: "20991231000000".into() }, clock.now().plus_secs(-601)).unwrap();
     }
 
     async fn next(events: &mut mpsc::Receiver<StreamEvent>) -> StreamEvent {
@@ -627,19 +650,11 @@ mod tests {
     }
 
     async fn until(what: &str, f: impl Fn() -> bool) {
-        let deadline = Instant::now() + WAIT;
-        while !f() {
-            assert!(Instant::now() < deadline, "기다린 상태가 되지 않았다: {what}");
-            tokio::time::sleep(Duration::from_millis(10)).await;
+        for _ in 0..1000 {
+            if f() { return; }
+            tokio::task::yield_now().await;
         }
-    }
-
-    fn registered(fake: &FakeKiwoom) -> Vec<(String, Vec<String>)> {
-        fake.ws_stats().registered.into_iter().collect()
-    }
-
-    fn both_registered() -> Vec<(String, Vec<String>)> {
-        vec![("0B".into(), vec!["005930_AL".into()]), ("0J".into(), vec!["001".into()])]
+        panic!("기다린 상태가 되지 않았다: {what}");
     }
 
     fn tick(event: StreamEvent) -> RealTick {
@@ -649,148 +664,48 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn logs_in_registers_the_desired_set_and_turns_live() {
-        let fake = FakeKiwoom::start().await;
-        let (_stream, mut events) = start(&fake, rest(&fake), fast(), &[samsung(), kospi()]);
-        assert!(matches!(next(&mut events).await, StreamEvent::Live { .. }));
-        assert_eq!(registered(&fake), both_registered());
-        assert_eq!(fake.ws_stats().controls, ["LOGIN", "REG"], "원하는 집합을 REG 하나로");
-        assert_eq!(fake.issued(), 1);
+    fn trade(time: &str, price: i64, qty: i64, cumulative: i64, exchange: &str) -> Value {
+        json!({"type": "0B", "item": "005930_AL", "values": {"20": time, "10": price.to_string(), "15": qty.to_string(), "13": cumulative.to_string(), "9081": exchange, "11": "0"}})
     }
 
-    #[tokio::test]
-    async fn trades_become_ticks_and_auction_only_frames_are_dropped() {
-        let fake = FakeKiwoom::start().await;
-        let (_stream, mut events) = start(&fake, rest(&fake), fast(), &[samsung(), kospi()]);
-        assert!(matches!(next(&mut events).await, StreamEvent::Live { .. }));
-        assert_eq!(fake.push_real("0B", "005930_AL", trade_0b("093001", -71_200, -15, 100, "NXT")), 1);
-        let t = tick(next(&mut events).await);
-        assert_eq!((t.symbol, t.hhmmss, t.price.centi(), t.qty, t.exchange), (samsung(), TimeOfDay::hms(9, 30, 1).unwrap(), 7_120_000, Volume(15), Some(Exchange::Nxt)));
-        fake.push_real("0B", "005930_AL", trade_0b("093002", 71_300, 0, 100, "KRX"));
-        fake.push_real("0B", "005930_AL", trade_0b("093003", 71_400, 7, 107, "KRX"));
-        let t = tick(next(&mut events).await);
-        assert_eq!((t.hhmmss, t.price.centi(), t.qty, t.exchange), (TimeOfDay::hms(9, 30, 3).unwrap(), 7_140_000, Volume(7), Some(Exchange::Krx)), "체결량 0인 프레임은 오지 않는다");
+    fn index(centi: i64, cumulative: u64) -> Value {
+        let sign = if centi < 0 { "-" } else { "+" };
+        let magnitude = centi.unsigned_abs();
+        json!({"type": "0J", "item": "001", "values": {"20": "093001", "10": format!("{sign}{}.{:02}", magnitude / 100, magnitude % 100), "13": cumulative.to_string()}})
     }
 
-    #[tokio::test]
-    async fn index_ticks_take_the_level_and_the_cumulative_volume_increase() {
-        let fake = FakeKiwoom::start().await;
-        let (_stream, mut events) = start(&fake, rest(&fake), fast(), &[kospi()]);
-        assert!(matches!(next(&mut events).await, StreamEvent::Live { .. }));
-        let mut got = Vec::new();
-        for (cum, centi) in [(1_000, -505_969), (1_250, 506_010), (1_200, 506_020)] {
-            fake.push_real("0J", "001", tick_0j("093001", centi, cum));
-            let t = tick(next(&mut events).await);
-            assert_eq!((t.symbol, t.exchange), (kospi(), None));
-            got.push((t.price.centi(), t.qty.0));
+    struct ChannelSocket {
+        incoming: UnboundedReceiver<Result<Message, WsError>>,
+        outgoing: UnboundedSender<Message>,
+    }
+
+    impl Stream for ChannelSocket {
+        type Item = Result<Message, WsError>;
+
+        fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+            Pin::new(&mut self.incoming).poll_next(cx)
         }
-        assert_eq!(got, [(505_969, 0), (506_010, 250), (506_020, 0)], "첫 프레임은 0, 줄면 0");
     }
 
-    #[tokio::test]
-    async fn ping_is_echoed() {
-        let fake = FakeKiwoom::start().await;
-        let (_stream, mut events) = start(&fake, rest(&fake), fast(), &[samsung()]);
-        assert!(matches!(next(&mut events).await, StreamEvent::Live { .. }));
-        fake.set_ping_every(Duration::from_millis(30));
-        until("PING 세 번을 돌려보냈다", || fake.ws_stats().pongs >= 3).await;
-        assert_eq!(fake.ws_stats().logins, 1);
-    }
+    impl Sink<Message> for ChannelSocket {
+        type Error = WsError;
 
-    #[tokio::test]
-    async fn desired_changes_are_one_reg_and_one_remove_per_type() {
-        let fake = FakeKiwoom::start().await;
-        let (stream, mut events) = start(&fake, rest(&fake), fast(), &[samsung(), kospi()]);
-        assert!(matches!(next(&mut events).await, StreamEvent::Live { .. }));
-        stream.set_desired(BTreeSet::new());
-        until("모두 해지됐다", || registered(&fake).is_empty()).await;
-        assert_eq!(fake.ws_stats().controls, ["LOGIN", "REG", "REMOVE", "REMOVE"], "0B와 0J를 섞으면 105112다");
-        stream.set_desired([samsung(), kospi()].into());
-        until("다시 등록됐다", || registered(&fake) == both_registered()).await;
-        assert_eq!(fake.ws_stats().controls, ["LOGIN", "REG", "REMOVE", "REMOVE", "REG"]);
-        assert_eq!(fake.ws_stats().logins, 1);
-    }
+        fn poll_ready(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+            Poll::Ready(Ok(()))
+        }
 
-    #[tokio::test]
-    async fn a_dropped_session_goes_down_then_logs_in_again_with_the_same_token_and_registers_everything() {
-        let fake = FakeKiwoom::start().await;
-        let (_stream, mut events) = start(&fake, rest(&fake), fast(), &[samsung(), kospi()]);
-        assert!(matches!(next(&mut events).await, StreamEvent::Live { .. }));
-        fake.drop_sessions(1000, "Bye");
-        assert!(matches!(next(&mut events).await, StreamEvent::Down { .. }));
-        assert!(matches!(next(&mut events).await, StreamEvent::Live { .. }));
-        assert_eq!(registered(&fake), both_registered());
-        assert_eq!(fake.ws_stats().controls, ["LOGIN", "REG", "LOGIN", "REG"]);
-        assert_eq!(fake.issued(), 1, "다시 연결할 때 토큰을 새로 받지 않는다");
-    }
+        fn start_send(self: Pin<&mut Self>, message: Message) -> Result<(), Self::Error> {
+            self.outgoing.unbounded_send(message).map_err(|_| WsError::ConnectionClosed)
+        }
 
-    #[tokio::test]
-    async fn silence_closes_the_session() {
-        let fake = FakeKiwoom::start().await;
-        let timings = Timings { silence: Duration::from_millis(300), ..fast() };
-        let (_stream, mut events) = start(&fake, rest(&fake), timings, &[samsung()]);
-        assert!(matches!(next(&mut events).await, StreamEvent::Live { .. }));
-        fake.mute_ws(true);
-        assert!(matches!(next(&mut events).await, StreamEvent::Down { .. }));
-        fake.mute_ws(false);
-        fake.set_ping_every(Duration::from_millis(50));
-        assert!(matches!(next(&mut events).await, StreamEvent::Live { .. }));
-        tokio::time::sleep(Duration::from_millis(500)).await;
-        assert!(events.try_recv().is_err(), "PING이 오는 동안은 끊지 않는다");
-    }
+        fn poll_flush(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+            Poll::Ready(Ok(()))
+        }
 
-    #[tokio::test]
-    async fn a_rejected_login_reissues_the_token_once_and_recovers() {
-        let fake = FakeKiwoom::start().await;
-        let rest = rest(&fake);
-        holding_unrecorded(&rest, "FAKE-TOKEN-revoked");
-        let (_stream, mut events) = start(&fake, rest, fast(), &[samsung()]);
-        assert!(matches!(next(&mut events).await, StreamEvent::Live { .. }));
-        assert_eq!(fake.issued(), 1);
-        assert_eq!(fake.ws_stats().controls, ["LOGIN", "LOGIN", "REG"]);
-    }
-
-    #[tokio::test]
-    async fn a_login_rejected_again_after_the_one_reissue_halts() {
-        let fake = FakeKiwoom::start().await;
-        fake.reject_token(TOKEN);
-        let rest = rest(&fake);
-        holding_unrecorded(&rest, "FAKE-TOKEN-revoked");
-        let (_stream, mut events) = start(&fake, rest.clone(), fast(), &[samsung()]);
-        assert_eq!(next(&mut events).await, StreamEvent::Halted);
-        assert!(timeout(Duration::from_millis(300), events.recv()).await.unwrap().is_none(), "멈추면 태스크가 끝난다");
-        assert_eq!((fake.issued(), fake.ws_stats().controls), (1, vec!["LOGIN".to_owned(), "LOGIN".to_owned()]));
-        assert!(rest.halted().is_none(), "조회는 멈추지 않는다");
-    }
-
-    #[tokio::test]
-    async fn a_reissue_refused_by_the_issue_interval_waits_instead_of_looping() {
-        let fake = FakeKiwoom::start().await;
-        fake.reject_token(TOKEN);
-        let (_stream, mut events) = start(&fake, rest(&fake), fast(), &[samsung()]);
-        until("첫 LOGIN이 거절됐다", || fake.ws_stats().controls == ["LOGIN"]).await;
-        tokio::time::sleep(Duration::from_secs(1)).await;
-        assert_eq!((fake.issued(), fake.ws_stats().controls), (1, vec!["LOGIN".to_owned()]), "10분 뒤에야 다시 받는다");
-        assert!(events.try_recv().is_err(), "Halted도 Live도 아니다");
-    }
-
-    #[tokio::test]
-    async fn dropping_the_handle_ends_the_session() {
-        let fake = FakeKiwoom::start().await;
-        let (stream, mut events) = start(&fake, rest(&fake), fast(), &[samsung()]);
-        assert!(matches!(next(&mut events).await, StreamEvent::Live { .. }));
-        drop(stream);
-        until("세션이 닫혔다", || fake.ws_stats().sessions == 0).await;
-        assert!(timeout(WAIT, events.recv()).await.unwrap().is_none());
-    }
-
-    #[tokio::test]
-    async fn a_wss_handshake_fails_without_a_crypto_provider_panic() {
-        let fake = FakeKiwoom::start().await;
-        let url = format!("wss://127.0.0.1:{}/api/dostk/websocket", fake.addr.port());
-        let result = timeout(WAIT, connect_async(url.as_str())).await.expect("시간 안에 끝난다");
-        assert!(result.is_err(), "평문 HTTP 포트와는 TLS가 맺어지지 않는다");
+        fn poll_close(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+            self.outgoing.close_channel();
+            Poll::Ready(Ok(()))
+        }
     }
 
     #[derive(Clone, Copy)]
@@ -803,235 +718,451 @@ mod tests {
         Refuse,
     }
 
+    #[derive(Clone)]
     struct Peer {
-        url: String,
-        seen: Arc<std::sync::Mutex<Vec<(usize, String, Instant)>>>,
+        script: Arc<Script>,
+        seen: Arc<Mutex<Vec<(usize, Value, Instant)>>>,
+        frames: Arc<Mutex<Vec<Frames>>>,
+        attempts: Arc<AtomicUsize>,
     }
 
     impl Peer {
-        async fn start(script: impl Fn(usize, &str, usize) -> Reply + Send + Sync + 'static) -> Peer {
-            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-            let url = format!("ws://{}/api/dostk/websocket", listener.local_addr().unwrap());
-            let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
-            let script = Arc::new(script);
-            let log = seen.clone();
-            tokio::spawn(async move {
-                for conn in 0.. {
-                    let (tcp, _) = listener.accept().await.unwrap();
-                    if matches!(script(conn, "CONNECT", 1), Reply::Refuse) {
-                        drop(tcp);
-                        continue;
-                    }
-                    let (script, log) = (script.clone(), log.clone());
-                    tokio::spawn(async move {
-                        let Ok(mut ws) = tokio_tungstenite::accept_async(tcp).await else { return };
-                        let mut counts: HashMap<String, usize> = HashMap::new();
-                        while let Some(Ok(Message::Text(text))) = ws.next().await {
-                            let trnm = serde_json::from_str::<serde_json::Value>(text.as_str()).unwrap()["trnm"].as_str().unwrap().to_owned();
-                            log.lock().unwrap().push((conn, trnm.clone(), Instant::now()));
-                            let nth = counts.entry(trnm.clone()).and_modify(|n| *n += 1).or_insert(1);
-                            let ack = |code: u32| Message::Text(serde_json::json!({"trnm": trnm, "return_code": code, "return_msg": ""}).to_string().into());
-                            match script(conn, &trnm, *nth) {
-                                Reply::Ok => ws.send(ack(0)).await.unwrap(),
-                                Reply::OkThenFlood => {
-                                    ws.send(ack(0)).await.unwrap();
-                                    let item = serde_json::json!({"type":"0B", "name":"주식체결", "item":"005930_AL", "values":trade_0b("093001", 71000, 1, 100, "KRX")});
-                                    let frame = serde_json::json!({"trnm":"REAL", "data":vec![item; EVENT_BUFFER]});
-                                    ws.send(Message::Text(frame.to_string().into())).await.unwrap();
-                                }
-                                Reply::Code(code) => ws.send(ack(code)).await.unwrap(),
-                                Reply::Silent | Reply::Refuse => {}
-                                Reply::OkThenBye => {
-                                    ws.send(ack(0)).await.unwrap();
-                                    let _ = ws.close(Some(tokio_tungstenite::tungstenite::protocol::CloseFrame { code: 1000.into(), reason: "Bye".into() })).await;
-                                }
-                            }
-                        }
-                    });
-                }
-            });
-            Peer { url, seen }
+        fn new(script: impl Fn(usize, &str, usize) -> Reply + Send + Sync + 'static) -> Self {
+            Self { script: Arc::new(script), seen: Arc::default(), frames: Arc::default(), attempts: Arc::default() }
+        }
+
+        fn ok() -> Self {
+            Self::new(|_, _, _| Reply::Ok)
+        }
+
+        fn start(&self, timings: Timings, desired: &[Symbol]) -> (KiwoomStream, mpsc::Receiver<StreamEvent>, Arc<FakeTransport>) {
+            let clock = clock();
+            let (rest, transport) = rest(&clock);
+            let (stream, events) = self.start_rest(rest, clock, timings, desired);
+            (stream, events, transport)
+        }
+
+        fn start_rest(&self, rest: KiwoomRest, clock: Clock, timings: Timings, desired: &[Symbol]) -> (KiwoomStream, mpsc::Receiver<StreamEvent>) {
+            let (stream, events) = KiwoomStream::spawn_connector(Box::new(self.clone()), rest, clock, timings);
+            stream.set_desired(desired.iter().copied().collect());
+            (stream, events)
         }
 
         fn controls(&self, conn: usize) -> Vec<String> {
-            self.seen.lock().unwrap().iter().filter(|(c, ..)| *c == conn).map(|(_, t, _)| t.clone()).collect()
+            self.seen.lock().unwrap().iter().filter(|(c, ..)| *c == conn).map(|(_, v, _)| v["trnm"].as_str().unwrap().to_owned()).collect()
+        }
+
+        fn messages(&self, conn: usize) -> Vec<Value> {
+            self.seen.lock().unwrap().iter().filter(|(c, ..)| *c == conn).map(|(_, v, _)| v.clone()).collect()
         }
 
         fn logins(&self) -> usize {
-            self.seen.lock().unwrap().iter().filter(|(_, t, _)| t == "LOGIN").count()
+            self.seen.lock().unwrap().iter().filter(|(_, v, _)| v["trnm"] == "LOGIN").count()
         }
 
         fn sent_at(&self, conn: usize, trnm: &str) -> Vec<Instant> {
-            self.seen.lock().unwrap().iter().filter(|(c, t, _)| *c == conn && t == trnm).map(|(.., at)| *at).collect()
+            self.seen.lock().unwrap().iter().filter(|(c, v, _)| *c == conn && v["trnm"] == trnm).map(|(.., at)| *at).collect()
+        }
+
+        fn send(&self, conn: usize, message: Message) {
+            self.frames.lock().unwrap()[conn].unbounded_send(Ok(message)).unwrap();
+        }
+
+        fn real(&self, conn: usize, items: Vec<Value>) {
+            self.send(conn, Message::Text(json!({"trnm": "REAL", "data": items}).to_string().into()));
+        }
+
+        fn drop_session(&self, conn: usize) {
+            self.send(conn, Message::Close(Some(tokio_tungstenite::tungstenite::protocol::CloseFrame { code: 1000.into(), reason: "Bye".into() })));
         }
     }
 
-    fn start_with(peer: &Peer, fake: &FakeKiwoom, timings: Timings, desired: &[Symbol]) -> (KiwoomStream, mpsc::Receiver<StreamEvent>) {
-        let (stream, events) = KiwoomStream::spawn_with(peer.url.clone(), rest(fake), Clock::system(), timings);
-        stream.set_desired(desired.iter().copied().collect());
-        (stream, events)
-    }
-
-    #[tokio::test]
-    async fn a_control_answered_too_late_drops_the_connection_instead_of_resending_on_it() {
-        let fake = FakeKiwoom::start().await;
-        let peer = Peer::start(|conn, trnm, _| match (conn, trnm) {
-            (0, "REG") => Reply::Silent,
-            _ => Reply::Ok,
-        })
-        .await;
-        let (_stream, mut events) = start_with(&peer, &fake, fast(), &[samsung()]);
-        assert!(matches!(next(&mut events).await, StreamEvent::Live { .. }));
-        assert_eq!(peer.controls(0), ["LOGIN", "REG"], "응답 없는 REG를 같은 연결로 다시 보내면 늦은 ACK가 어느 요청의 것인지 모른다");
-        assert_eq!(peer.controls(1), ["LOGIN", "REG"]);
-    }
-
-    #[tokio::test]
-    async fn a_registration_refused_for_capacity_rebuilds_once_then_halts_only_the_stream() {
-        for code in [105115, 105118] {
-            let fake = FakeKiwoom::start().await;
-            let peer = Peer::start(move |_, trnm, _| if trnm == "REG" { Reply::Code(code) } else { Reply::Ok }).await;
-            let (_stream, mut events) = start_with(&peer, &fake, fast(), &[samsung()]);
-            assert_eq!(next(&mut events).await, StreamEvent::Halted, "{code}");
-            assert_eq!(peer.logins(), 2, "{code}: 처음 하나와 다시 구성 한 번");
-            assert_eq!(fake.issued(), 1);
+    impl Connector for Peer {
+        fn connect(&self) -> BoxFuture<'_, Result<Socket, WsError>> {
+            let conn = self.attempts.fetch_add(1, Ordering::SeqCst);
+            Box::pin(async move {
+                let (incoming_tx, incoming) = unbounded();
+                self.frames.lock().unwrap().push(incoming_tx.clone());
+                if matches!((self.script)(conn, "CONNECT", 1), Reply::Refuse) {
+                    return Err(WsError::ConnectionClosed);
+                }
+                let (outgoing, mut outgoing_rx) = unbounded();
+                let (script, seen) = (self.script.clone(), self.seen.clone());
+                tokio::spawn(async move {
+                    let mut counts: HashMap<String, usize> = HashMap::new();
+                    while let Some(Message::Text(text)) = outgoing_rx.next().await {
+                        let value: Value = serde_json::from_str(text.as_str()).unwrap();
+                        let trnm = value["trnm"].as_str().unwrap().to_owned();
+                        seen.lock().unwrap().push((conn, value, Instant::now()));
+                        if trnm == "PING" { continue; }
+                        let nth = counts.entry(trnm.clone()).and_modify(|n| *n += 1).or_insert(1);
+                        let reply = script(conn, &trnm, *nth);
+                        let code = match reply { Reply::Code(code) => code, _ => 0 };
+                        if !matches!(reply, Reply::Silent | Reply::Refuse) {
+                            let detail = if trnm == "LOGIN" && code == 3 { "(CODE=8005)" } else { "" };
+                            let ack = json!({"trnm": trnm, "return_code": code, "return_msg": detail});
+                            if incoming_tx.unbounded_send(Ok(Message::Text(ack.to_string().into()))).is_err() { return; }
+                        }
+                        if matches!(reply, Reply::OkThenBye) {
+                            let _ = incoming_tx.unbounded_send(Ok(Message::Close(None)));
+                        }
+                        if matches!(reply, Reply::OkThenFlood) {
+                            let frame = json!({"trnm": "REAL", "data": vec![trade("093001", 71000, 1, 100, "KRX"); EVENT_BUFFER]});
+                            let _ = incoming_tx.unbounded_send(Ok(Message::Text(frame.to_string().into())));
+                        }
+                    }
+                });
+                Ok(Box::new(ChannelSocket { incoming, outgoing }) as Socket)
+            })
         }
     }
 
-    #[tokio::test]
-    async fn a_rate_limited_registration_waits_before_it_is_sent_again_on_the_same_connection() {
-        let fake = FakeKiwoom::start().await;
-        let peer = Peer::start(|_, trnm, nth| if (trnm, nth) == ("REG", 1) { Reply::Code(105110) } else { Reply::Ok }).await;
-        let (_stream, mut events) = start_with(&peer, &fake, fast(), &[samsung()]);
+    #[tokio::test(start_paused = true)]
+    async fn logs_in_registers_the_desired_set_and_turns_live() {
+        let peer = Peer::ok();
+        let (_stream, mut events, transport) = peer.start(fast(), &[samsung(), kospi()]);
         assert!(matches!(next(&mut events).await, StreamEvent::Live { .. }));
-        let regs = peer.sent_at(0, "REG");
-        assert_eq!(regs.len(), 2, "같은 연결에서 다시 보낸다");
-        assert!(regs[1] - regs[0] >= fast().rate_limit_pause, "105110 뒤 바로 다시 보냈다: {:?}", regs[1] - regs[0]);
+        assert_eq!(peer.controls(0), ["LOGIN", "REG"]);
+        assert_eq!(peer.messages(0)[1], json!({"trnm": "REG", "grp_no": "1", "refresh": "1", "data": [{"item": ["005930_AL"], "type": ["0B"]}, {"item": ["001"], "type": ["0J"]}]}));
+        assert_eq!(transport.sent().len(), 1);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn trades_become_ticks_and_auction_only_frames_are_dropped() {
+        let peer = Peer::ok();
+        let (_stream, mut events, _) = peer.start(fast(), &[samsung()]);
+        assert!(matches!(next(&mut events).await, StreamEvent::Live { .. }));
+        peer.real(0, vec![trade("093001", -71_200, -15, 100, "NXT")]);
+        let t = tick(next(&mut events).await);
+        assert_eq!((t.symbol, t.hhmmss, t.price.centi(), t.qty, t.exchange), (samsung(), TimeOfDay::hms(9, 30, 1).unwrap(), 7_120_000, Volume(15), Some(Exchange::Nxt)));
+        peer.real(0, vec![trade("093002", 71_300, 0, 100, "KRX"), trade("093003", 71_400, 7, 107, "KRX")]);
+        let t = tick(next(&mut events).await);
+        assert_eq!((t.hhmmss, t.price.centi(), t.qty, t.exchange), (TimeOfDay::hms(9, 30, 3).unwrap(), 7_140_000, Volume(7), Some(Exchange::Krx)));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn index_ticks_take_the_level_and_the_cumulative_volume_increase() {
+        let peer = Peer::ok();
+        let (_stream, mut events, _) = peer.start(fast(), &[kospi()]);
+        assert!(matches!(next(&mut events).await, StreamEvent::Live { .. }));
+        let mut got = Vec::new();
+        for (cum, centi) in [(1_000, -505_969), (1_250, 506_010), (1_200, 506_020)] {
+            peer.real(0, vec![index(centi, cum)]);
+            let t = tick(next(&mut events).await);
+            assert_eq!((t.symbol, t.exchange), (kospi(), None));
+            got.push((t.price.centi(), t.qty.0));
+        }
+        assert_eq!(got, [(505_969, 0), (506_010, 250), (506_020, 0)]);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn ping_is_echoed() {
+        let peer = Peer::ok();
+        let (_stream, mut events, _) = peer.start(fast(), &[samsung()]);
+        assert!(matches!(next(&mut events).await, StreamEvent::Live { .. }));
+        for _ in 0..3 { peer.send(0, Message::Text(r#"{"trnm":"PING"}"#.into())); }
+        until("PING 세 번을 돌려보냈다", || peer.controls(0).iter().filter(|s| *s == "PING").count() == 3).await;
         assert_eq!(peer.logins(), 1);
     }
 
+    #[tokio::test(start_paused = true)]
+    async fn desired_changes_are_one_reg_and_one_remove_per_type() {
+        let peer = Peer::ok();
+        let (stream, mut events, _) = peer.start(fast(), &[samsung(), kospi()]);
+        assert!(matches!(next(&mut events).await, StreamEvent::Live { .. }));
+        stream.set_desired(BTreeSet::new());
+        until("모두 해지됐다", || peer.controls(0).len() == 4).await;
+        let messages = peer.messages(0);
+        assert_eq!(messages[2]["data"], json!([{"item": ["005930_AL"], "type": ["0B"]}]));
+        assert_eq!(messages[3]["data"], json!([{"item": ["001"], "type": ["0J"]}]));
+        stream.set_desired([samsung(), kospi()].into());
+        until("다시 등록됐다", || peer.controls(0).len() == 5).await;
+        assert_eq!(peer.controls(0), ["LOGIN", "REG", "REMOVE", "REMOVE", "REG"]);
+        assert_eq!(peer.logins(), 1);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_dropped_session_goes_down_then_logs_in_again_with_the_same_token_and_registers_everything() {
+        let peer = Peer::ok();
+        let (_stream, mut events, transport) = peer.start(fast(), &[samsung(), kospi()]);
+        assert!(matches!(next(&mut events).await, StreamEvent::Live { .. }));
+        peer.drop_session(0);
+        assert!(matches!(next(&mut events).await, StreamEvent::Down { .. }));
+        assert!(matches!(next(&mut events).await, StreamEvent::Live { .. }));
+        assert_eq!(peer.controls(1), ["LOGIN", "REG"]);
+        assert_eq!(peer.messages(0), peer.messages(1));
+        assert_eq!(transport.sent().len(), 1);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn silence_closes_the_session() {
+        let peer = Peer::ok();
+        let timings = Timings { silence: Duration::from_millis(300), ..fast() };
+        let (_stream, mut events, _) = peer.start(timings, &[samsung()]);
+        assert!(matches!(next(&mut events).await, StreamEvent::Live { .. }));
+        assert!(matches!(next(&mut events).await, StreamEvent::Down { .. }));
+        assert!(matches!(next(&mut events).await, StreamEvent::Live { .. }));
+        for _ in 0..5 {
+            tokio::time::advance(Duration::from_millis(100)).await;
+            peer.send(1, Message::Text(r#"{"trnm":"PING"}"#.into()));
+            tokio::task::yield_now().await;
+        }
+        assert!(events.try_recv().is_err());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_rejected_login_reissues_the_token_once_and_recovers() {
+        let peer = Peer::new(|conn, trnm, _| if (conn, trnm) == (0, "LOGIN") { Reply::Code(3) } else { Reply::Ok });
+        let clock = clock();
+        let (rest, transport) = rest(&clock);
+        holding_unrecorded(&rest, &clock);
+        let (_stream, mut events) = peer.start_rest(rest, clock, fast(), &[samsung()]);
+        assert!(matches!(next(&mut events).await, StreamEvent::Live { .. }));
+        assert_eq!(transport.sent().len(), 1);
+        assert_eq!(peer.controls(0), ["LOGIN"]);
+        assert_eq!(peer.controls(1), ["LOGIN", "REG"]);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_login_rejected_again_after_the_one_reissue_halts() {
+        let peer = Peer::new(|_, trnm, _| if trnm == "LOGIN" { Reply::Code(3) } else { Reply::Ok });
+        let clock = clock();
+        let (rest, transport) = rest(&clock);
+        holding_unrecorded(&rest, &clock);
+        let (_stream, mut events) = peer.start_rest(rest.clone(), clock, fast(), &[samsung()]);
+        assert_eq!(next(&mut events).await, StreamEvent::Halted);
+        assert!(events.recv().await.is_none());
+        assert_eq!((transport.sent().len(), peer.logins()), (1, 2));
+        assert!(rest.halted().is_none());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_reissue_refused_by_the_issue_interval_waits_instead_of_looping() {
+        let peer = Peer::new(|_, trnm, _| if trnm == "LOGIN" { Reply::Code(3) } else { Reply::Ok });
+        let (_stream, mut events, transport) = peer.start(fast(), &[samsung()]);
+        until("첫 LOGIN이 거절됐다", || peer.logins() == 1).await;
+        tokio::time::advance(Duration::from_secs(1)).await;
+        assert_eq!((transport.sent().len(), peer.logins()), (1, 1));
+        assert!(events.try_recv().is_err());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn dropping_the_handle_ends_the_session() {
+        let peer = Peer::ok();
+        let (stream, mut events, _) = peer.start(fast(), &[samsung()]);
+        assert!(matches!(next(&mut events).await, StreamEvent::Live { .. }));
+        drop(stream);
+        assert!(events.recv().await.is_none());
+        until("세션이 닫혔다", || peer.frames.lock().unwrap()[0].is_closed()).await;
+    }
+
     #[tokio::test]
+    async fn websocket_connector_handshakes_sends_receives_and_closes() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let connector = WebSocketConnector(format!("ws://{}", listener.local_addr().unwrap()));
+        let peer = tokio::spawn(async move {
+            let (tcp, _) = listener.accept().await.unwrap();
+            let mut socket = tokio_tungstenite::accept_async(tcp).await.unwrap();
+            assert_eq!(socket.next().await.unwrap().unwrap(), Message::Text("outgoing".into()));
+            socket.send(Message::Ping(vec![1, 2].into())).await.unwrap();
+            assert_eq!(socket.next().await.unwrap().unwrap(), Message::Pong(vec![1, 2].into()));
+            socket.send(Message::Text("incoming".into())).await.unwrap();
+            assert!(matches!(socket.next().await.unwrap().unwrap(), Message::Close(_)));
+        });
+        let mut socket = timeout(Duration::from_secs(3), connector.connect()).await.unwrap().unwrap();
+        socket.send(Message::Text("outgoing".into())).await.unwrap();
+        assert!(matches!(socket.next().await.unwrap().unwrap(), Message::Ping(_)));
+        socket.flush().await.unwrap();
+        assert_eq!(socket.next().await.unwrap().unwrap(), Message::Text("incoming".into()));
+        socket.close().await.unwrap();
+        timeout(Duration::from_secs(3), peer).await.unwrap().unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_wss_handshake_fails_without_a_crypto_provider_panic() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let connector = WebSocketConnector(format!("wss://{}", listener.local_addr().unwrap()));
+        let peer = tokio::spawn(async move {
+            let (mut tcp, _) = listener.accept().await.unwrap();
+            tokio::io::AsyncWriteExt::write_all(&mut tcp, b"HTTP/1.1 400 Bad Request\r\n\r\n").await.unwrap();
+        });
+        assert!(timeout(Duration::from_secs(3), connector.connect()).await.unwrap().is_err());
+        peer.await.unwrap();
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_control_answered_too_late_drops_the_connection_instead_of_resending_on_it() {
+        let peer = Peer::new(|conn, trnm, _| if (conn, trnm) == (0, "REG") { Reply::Silent } else { Reply::Ok });
+        let (_stream, mut events, _) = peer.start(fast(), &[samsung()]);
+        assert!(matches!(next(&mut events).await, StreamEvent::Live { .. }));
+        assert_eq!(peer.controls(0), ["LOGIN", "REG"]);
+        assert_eq!(peer.controls(1), ["LOGIN", "REG"]);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_registration_refused_for_capacity_rebuilds_once_then_halts_only_the_stream() {
+        for code in [105115, 105118] {
+            let peer = Peer::new(move |_, trnm, _| if trnm == "REG" { Reply::Code(code) } else { Reply::Ok });
+            let clock = clock();
+            let (rest, transport) = rest(&clock);
+            let (_stream, mut events) = peer.start_rest(rest.clone(), clock, fast(), &[samsung()]);
+            assert_eq!(next(&mut events).await, StreamEvent::Halted, "{code}");
+            assert_eq!(peer.logins(), 2);
+            assert_eq!(transport.sent().len(), 1);
+            assert!(rest.halted().is_none());
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_rate_limited_registration_waits_before_it_is_sent_again_on_the_same_connection() {
+        let peer = Peer::new(|_, trnm, nth| if (trnm, nth) == ("REG", 1) { Reply::Code(105110) } else { Reply::Ok });
+        let (_stream, mut events, _) = peer.start(fast(), &[samsung()]);
+        assert!(matches!(next(&mut events).await, StreamEvent::Live { .. }));
+        let regs = peer.sent_at(0, "REG");
+        assert_eq!(regs.len(), 2);
+        assert_eq!(regs[1] - regs[0], fast().rate_limit_pause);
+        assert_eq!(peer.logins(), 1);
+    }
+
+    #[tokio::test(start_paused = true)]
     async fn sessions_that_drop_right_after_turning_live_back_off_further_each_time() {
-        let fake = FakeKiwoom::start().await;
+        let peer = Peer::ok();
         let timings = Timings { backoff: [Duration::from_millis(100), Duration::from_millis(300), Duration::from_millis(700), Duration::from_millis(700), Duration::from_millis(700)], ..fast() };
-        let (_stream, mut events) = start(&fake, rest(&fake), timings, &[samsung()]);
+        let (_stream, mut events, _) = peer.start(timings, &[samsung()]);
         assert!(matches!(next(&mut events).await, StreamEvent::Live { .. }));
         let mut waits = Vec::new();
-        for _ in 0..3 {
-            fake.drop_sessions(1000, "Bye");
+        for conn in 0..3 {
+            peer.drop_session(conn);
             assert!(matches!(next(&mut events).await, StreamEvent::Down { .. }));
             let at = Instant::now();
             assert!(matches!(next(&mut events).await, StreamEvent::Live { .. }));
             waits.push(at.elapsed());
         }
-        assert!(waits[1] >= Duration::from_millis(300) && waits[2] >= Duration::from_millis(700), "곧 끊기는 세션은 실패로 쌓인다: {waits:?}");
+        assert_eq!(waits, [Duration::from_millis(100), Duration::from_millis(300), Duration::from_millis(700)]);
     }
 
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn a_session_that_stayed_live_long_enough_starts_the_backoff_over() {
-        let fake = FakeKiwoom::start().await;
+        let peer = Peer::ok();
         let timings = Timings { backoff: [Duration::from_millis(100), Duration::from_millis(700), Duration::from_millis(700), Duration::from_millis(700), Duration::from_millis(700)], live_resets_backoff_after: Duration::from_millis(400), ..fast() };
-        let (_stream, mut events) = start(&fake, rest(&fake), timings, &[samsung()]);
+        let (_stream, mut events, _) = peer.start(timings, &[samsung()]);
         assert!(matches!(next(&mut events).await, StreamEvent::Live { .. }));
-        fake.drop_sessions(1000, "Bye");
+        peer.drop_session(0);
         assert!(matches!(next(&mut events).await, StreamEvent::Down { .. }));
         assert!(matches!(next(&mut events).await, StreamEvent::Live { .. }));
-        tokio::time::sleep(timings.live_resets_backoff_after).await;
-        fake.drop_sessions(1000, "Bye");
+        tokio::time::advance(timings.live_resets_backoff_after).await;
+        peer.drop_session(1);
         assert!(matches!(next(&mut events).await, StreamEvent::Down { .. }));
         let at = Instant::now();
         assert!(matches!(next(&mut events).await, StreamEvent::Live { .. }));
-        assert!(at.elapsed() < Duration::from_millis(500), "안정된 연결 뒤에는 첫 간격으로 돌아간다: {:?}", at.elapsed());
+        assert_eq!(at.elapsed(), Duration::from_millis(100));
     }
 
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn a_stable_session_gets_its_control_rebuild_back() {
-        let fake = FakeKiwoom::start().await;
-        let peer = Peer::start(|conn, trnm, nth| match (conn, trnm, nth) {
-            (0, "REG", _) => Reply::Silent,
-            (1 | 2, "REG", 2) => Reply::Silent,
+        let peer = Peer::new(|conn, trnm, nth| match (conn, trnm, nth) {
+            (0, "REG", _) | (1 | 2, "REG", 2) => Reply::Silent,
             _ => Reply::Ok,
-        })
-        .await;
+        });
         let timings = Timings { control: Duration::from_millis(200), live_resets_backoff_after: Duration::from_millis(300), ..fast() };
-        let (stream, mut events) = start_with(&peer, &fake, timings, &[samsung()]);
+        let (stream, mut events, _) = peer.start(timings, &[samsung()]);
         assert!(matches!(next(&mut events).await, StreamEvent::Live { .. }));
-        tokio::time::sleep(timings.live_resets_backoff_after).await;
+        tokio::time::advance(timings.live_resets_backoff_after).await;
         stream.set_desired([samsung(), kospi()].into());
         assert!(matches!(next(&mut events).await, StreamEvent::Down { .. }));
-        assert!(matches!(next(&mut events).await, StreamEvent::Live { .. }), "안정된 세션 뒤라 다시 구성한다");
+        assert!(matches!(next(&mut events).await, StreamEvent::Live { .. }));
         stream.set_desired([samsung()].into());
         until("REMOVE가 받아들여졌다", || peer.controls(2).contains(&"REMOVE".to_owned())).await;
         stream.set_desired([samsung(), kospi()].into());
         assert!(matches!(next(&mut events).await, StreamEvent::Down { .. }));
-        assert_eq!(next(&mut events).await, StreamEvent::Halted, "다시 구성한 세션이 안정되기 전에 또 실패했다");
+        assert_eq!(next(&mut events).await, StreamEvent::Halted);
         assert_eq!(peer.logins(), 3);
     }
 
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn replacing_one_of_two_hundred_registrations_removes_before_it_registers() {
-        let fake = FakeKiwoom::start().await;
+        let peer = Peer::ok();
         let stock = |n: u32| Symbol::Stock(StockCode::parse(&format!("{n:06}")).unwrap());
         let desired: Vec<Symbol> = (1..=200).map(stock).collect();
-        let (stream, mut events) = start(&fake, rest(&fake), fast(), &desired);
+        let (stream, mut events, _) = peer.start(fast(), &desired);
         assert!(matches!(next(&mut events).await, StreamEvent::Live { .. }));
         stream.set_desired((2..=201).map(stock).collect());
-        until("바꾼 종목이 등록됐다", || fake.ws_stats().registered.get("0B").is_some_and(|items| items.contains(&"000201_AL".to_owned()))).await;
-        let stats = fake.ws_stats();
-        assert_eq!((stats.logins, stats.controls), (1, vec!["LOGIN".to_owned(), "REG".to_owned(), "REMOVE".to_owned(), "REG".to_owned()]), "201개가 되는 순간이 없어야 나머지 199개가 끊기지 않는다");
-        assert!(events.try_recv().is_err(), "끊기지 않았다");
+        until("바꾼 종목이 등록됐다", || peer.controls(0).len() == 4).await;
+        assert_eq!(peer.controls(0), ["LOGIN", "REG", "REMOVE", "REG"]);
+        assert_eq!(peer.messages(0)[2]["data"], json!([{"item": ["000001_AL"], "type": ["0B"]}]));
+        assert_eq!(peer.messages(0)[3]["data"], json!([{"item": ["000201_AL"], "type": ["0B"]}]));
+        assert!(events.try_recv().is_err());
     }
 
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn dropped_sessions_and_failed_connections_never_spend_the_control_rebuild() {
-        let fake = FakeKiwoom::start().await;
-        let peer = Peer::start(|conn, trnm, _| match (conn, trnm) {
+        let peer = Peer::new(|conn, trnm, _| match (conn, trnm) {
             (0 | 1, "CONNECT") => Reply::Refuse,
             (2..=4, "REG") => Reply::OkThenBye,
             (_, "REG") => Reply::Code(105118),
             _ => Reply::Ok,
-        })
-        .await;
-        let (_stream, mut events) = start_with(&peer, &fake, fast(), &[samsung()]);
+        });
+        let (_stream, mut events, _) = peer.start(fast(), &[samsung()]);
         for _ in 2..=4 {
             assert!(matches!(next(&mut events).await, StreamEvent::Live { .. }));
             assert!(matches!(next(&mut events).await, StreamEvent::Down { .. }));
         }
         assert_eq!(next(&mut events).await, StreamEvent::Halted);
-        assert_eq!(peer.logins(), 5, "07:50 같은 단절과 접속 실패 뒤에도 거절된 REG에 다시 구성 한 번이 남아 있다");
+        assert_eq!(peer.logins(), 5);
     }
 
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn down_delivery_delay_does_not_reset_the_control_budget() {
-        let fake = FakeKiwoom::start().await;
-        let peer = Peer::start(|conn, trnm, nth| match (conn, trnm, nth) {
+        let peer = Peer::new(|conn, trnm, nth| match (conn, trnm, nth) {
             (0, "REG", _) | (1, "REG", 2) => Reply::Code(105118),
             (1, "REG", 1) => Reply::OkThenFlood,
             _ => Reply::Ok,
-        }).await;
+        });
         let (stream, desired) = KiwoomStream::detached();
         let (events_tx, mut events) = mpsc::channel(EVENT_BUFFER);
-        let session = Session { url: peer.url.clone(), rest: rest(&fake), clock: Clock::system(), timings: Timings::default(), desired, events: events_tx, budget: TokenBudget::Fresh, rebuild: ControlBudget::Fresh, dropped: Dropped::default() };
+        let clock = clock();
+        let (rest, _) = rest(&clock);
+        let session = Session { connector: Box::new(peer.clone()), rest, clock, timings: Timings::default(), desired, events: events_tx, budget: TokenBudget::Fresh, rebuild: ControlBudget::Fresh, dropped: Dropped::default() };
         let sender = session.events.clone();
         stream.set_desired([samsung()].into());
         tokio::spawn(session.run());
         assert!(matches!(next(&mut events).await, StreamEvent::Live { .. }));
-        assert_eq!(peer.logins(), 2, "one rebuild already spent");
-        let live_at = Instant::now();
-        until("4096 real WS ticks fill the production event queue", || sender.capacity() == 0).await;
+        assert_eq!(peer.logins(), 2);
+        until("4096 real ticks fill the production event queue", || sender.capacity() == 0).await;
         stream.set_desired([samsung(), kospi()].into());
         until("second capacity rejection", || peer.controls(1).len() == 3).await;
-        tokio::time::sleep(Duration::from_millis(100)).await;
-        assert!(live_at.elapsed() < Duration::from_secs(1));
+        tokio::task::yield_now().await;
         assert_eq!(sender.capacity(), 0);
-        tokio::time::pause();
         tokio::time::advance(Duration::from_secs(61)).await;
-        tokio::time::resume();
         for _ in 0..EVENT_BUFFER { assert!(matches!(events.recv().await.unwrap(), StreamEvent::Tick { .. })); }
         assert!(matches!(next(&mut events).await, StreamEvent::Down { .. }));
-        let actual = next(&mut events).await;
-        println!("second control failure at <1s Live; Down delivery stalled 61s; actual={actual:?}, LOGIN={}", peer.logins());
-        assert_eq!(actual, StreamEvent::Halted, "time after connection close is not stable Live time");
+        assert_eq!(next(&mut events).await, StreamEvent::Halted);
         assert_eq!(peer.logins(), 2);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn transport_errors_reconnect_and_reset_index_cumulative_volume() {
+        let peer = Peer::ok();
+        let (_stream, mut events, _) = peer.start(fast(), &[kospi()]);
+        assert!(matches!(next(&mut events).await, StreamEvent::Live { .. }));
+        peer.real(0, vec![index(505_969, 1000)]);
+        assert_eq!(tick(next(&mut events).await).qty, Volume(0));
+        peer.frames.lock().unwrap()[0].unbounded_send(Err(WsError::ConnectionClosed)).unwrap();
+        assert!(matches!(next(&mut events).await, StreamEvent::Down { .. }));
+        assert!(matches!(next(&mut events).await, StreamEvent::Live { .. }));
+        peer.real(1, vec![index(506_010, 1250)]);
+        assert_eq!(tick(next(&mut events).await).qty, Volume(0));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn malformed_frames_and_stale_acks_do_not_interrupt_the_live_session() {
+        let peer = Peer::ok();
+        let (_stream, mut events, _) = peer.start(fast(), &[samsung()]);
+        assert!(matches!(next(&mut events).await, StreamEvent::Live { .. }));
+        peer.send(0, Message::Text("invalid json".into()));
+        peer.send(0, Message::Text(r#"{"trnm":"REG","return_code":105118}"#.into()));
+        peer.real(0, vec![json!({"type":"0B", "item":"005930_AL", "values":{"20":"x"}}), trade("093001", 71_200, 15, 100, "KRX")]);
+        assert_eq!(tick(next(&mut events).await).price.centi(), 7_120_000);
+        assert_eq!(peer.logins(), 1);
     }
 }
