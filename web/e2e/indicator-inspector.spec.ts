@@ -86,10 +86,15 @@ test("차트 옆을 고르면 지표 버튼이 우측 패널을 열어 지표를
   await topbar(page).getByRole("button", { name: "비교", exact: true }).click();
   await expect(inspector(page).getByRole("tab", { name: "비교 종목", exact: true })).toHaveAttribute("aria-selected", "true");
   await expect(inspector(page).getByText("비교 종목 0/3")).toBeVisible();
-  await expect(inspector(page).getByRole("button", { name: /추가$/ })).toBeDisabled();
-  await search(page).press("Enter");
   await search(page).fill("삼성SDI");
   const sdi = inspector(page).getByRole("button", { name: /^삼성SDI/ }).first();
+  await expect(sdi).toHaveAttribute("aria-pressed", "true");
+  await page.keyboard.press("Escape");
+  await expect(sdi).toHaveAttribute("aria-pressed", "false");
+  await expect(inspector(page).getByRole("button", { name: "비교 종목 추가", exact: true })).toBeDisabled();
+  await search(page).press("Enter");
+  await expect(sdi).toHaveAttribute("aria-pressed", "false");
+  expect(parseChartSettings(scenario.documents.layout(DEFAULT_LAYOUT_ID).cells[0]!.chartSettings).compare).toEqual([]);
   await sdi.click();
   await expect(sdi).toHaveAttribute("aria-pressed", "true");
   await inspector(page).getByRole("button", { name: /^삼성SDI.*추가$/ }).click();

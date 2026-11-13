@@ -6,7 +6,7 @@ import { useLayoutStore, type Slot } from "../../stores/layout";
 import { defaultIndicatorMode, useSelectionStore } from "../../stores/selection";
 import { EmptyState, ErrorState, Skeleton } from "../overlay/State";
 import { ChevronIcon, CloseIcon, EyeIcon, PlusIcon, SearchIcon } from "../icons";
-import { stepIndex } from "../indicator-dialog/compareForm";
+import { addButton, stepIndex } from "../indicator-dialog/compareForm";
 import { primaryLabel } from "../indicator-dialog/indicatorForm";
 import { IndicatorSettingsForm } from "../indicator-dialog/IndicatorSettingsForm";
 import { useLiveIndicatorDraft } from "../indicator-dialog/liveDraft";
@@ -27,13 +27,15 @@ const summary = (spec: IndicatorConfig["spec"]) => {
 
 function InspectorBody({ slot }: { slot: Slot }) {
   const command = useIndicatorCommand(slot, defaultIndicatorMode(slot));
-  const { cell, mode, input, rows, selected, symbols, search, selectedSymbol, compareButton, editor } = command;
+  const { cell, mode, input, rows, selected, symbols, search, editor } = command;
   const [expanded, setExpanded] = useState(false);
   const request = useSelectionStore((s) => s.inspector);
   const inputRef = useRef<HTMLInputElement>(null);
   const revertRef = useRef<() => void>(null);
   const ids = useId();
   const open = expanded && selected ? selected : null;
+  const picked = open?.kind === "symbol" && open.selectable ? open.info : null;
+  const compareButton = addButton(cell.chartSettings, picked, cell.symbol);
   const tabId = (value: IndicatorCommandMode) => `${ids}-tab-${value}`;
   const rowId = (row: CommandRow) => `${ids}-${row.key}`;
 
@@ -127,9 +129,9 @@ function InspectorBody({ slot }: { slot: Slot }) {
         {mode === "compare" && !symbols.selectable && search.isFetching && <li role="presentation"><Skeleton label="비교 종목 찾는 중" /></li>}
         {mode === "compare" && search.isError && <li role="presentation"><ErrorState message="종목을 찾지 못했습니다. 다시 시도해 보세요." retry={() => void search.refetch()} /></li>}
       </ul>
-      {mode === "compare" && <CompareSection slot={slot} button={compareButton} canAdd={open?.kind === "symbol" && selectedSymbol !== null} onAdd={submit} className="mt-2 flex flex-col gap-3 border-t border-line px-2 pt-3" />}
+      {mode === "compare" && <CompareSection slot={slot} button={compareButton} canAdd={picked !== null} onAdd={submit} className="mt-2 flex flex-col gap-3 border-t border-line px-2 pt-3" />}
     </div>
-    <p className="sr-only" aria-live="polite">{open ? `${rowName(open)} 펼침` : ""}</p>
+    <p className="sr-only" aria-live="polite">{open ? `${rowName(open)} ${open.kind === "symbol" ? "선택" : "펼침"}` : ""}</p>
     <footer className="flex-none border-t border-line px-4 py-2.5 text-xs text-text-3">바로 반영 · Esc로 되돌리고 닫기</footer>
   </section>;
 }
