@@ -79,31 +79,41 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
-function editorMarkup(wide: boolean, expanded: boolean, invalid = false) {
-  const source: Screen = { id: "s", name: "신고가", markets: [], exclude: [], conditions: [{ kind: "new_high", period: "W", field: "high", n: 52, recentBars: 5 }] };
+function editorMarkup(wide: boolean, editing: boolean, invalid = false) {
+  const source: Screen = { id: "s", name: "신고가", markets: ["kospi"], exclude: ["etf"], conditions: [{ kind: "new_high", period: "W", field: "high", n: 52, recentBars: 5 }] };
   const base: Screens = { revision: 1, screens: [source] };
   const session = sessionOf(base, source);
   const client = new QueryClient();
-  const editor = createElement(SentenceEditor, { session: invalid ? { ...session, draft: { ...session.draft, name: "" }, tried: true } : session, base, source, running: false, blocked: false, resultActions: null, wide, expanded, onExpandedChange: () => {}, onRun: () => {} });
+  const editor = createElement(SentenceEditor, { session: invalid ? { ...session, draft: { ...session.draft, name: "" }, tried: true } : session, base, source, running: false, blocked: false, resultActions: null, wide, editing, onEditingChange: () => {}, onRun: () => {} });
   const markup = renderToStaticMarkup(createElement(QueryClientProvider, { client }, editor));
   client.clear();
   return markup;
 }
 
-test("넓게 보기는 조건 요약에서 문장 편집을 펼치고 오른쪽 탭은 바로 편집한다", () => {
-  const collapsed = editorMarkup(true, false);
-  expect(collapsed).toContain("조건 펼치기");
-  expect(collapsed).toContain("52주 신고가");
-  expect(collapsed).not.toContain('aria-label="문장형 조건식"');
-  expect(collapsed).toContain('aria-keyshortcuts="Control+Enter Meta+Enter"');
-  const expanded = editorMarkup(true, true);
-  expect(expanded).toContain("조건 접기");
-  expect(expanded).toContain('aria-label="문장형 조건식"');
-  expect(editorMarkup(false, false)).toContain('aria-label="문장형 조건식"');
+test("패널은 조건 요약과 실행·편집만 보이고 문장 편집은 편집 창에서 연다", () => {
+  for (const wide of [false, true]) {
+    const closed = editorMarkup(wide, false);
+    expect(closed).toContain("52주 신고가");
+    expect(closed).toContain("코스피 · ETF 제외");
+    expect(closed).toContain('aria-haspopup="dialog" aria-expanded="false"');
+    expect(closed).toContain('aria-keyshortcuts="Control+Enter Meta+Enter"');
+    expect(closed).not.toContain('aria-label="문장형 조건식"');
+    expect(closed).not.toContain('aria-label="조건식 편집"');
+    const open = editorMarkup(wide, true);
+    expect(open).toContain('role="dialog" aria-label="조건식 편집"');
+    expect(open).toContain('aria-label="조건식 이름"');
+    expect(open).toContain('aria-label="문장형 조건식"');
+    expect(open).toContain('aria-keyshortcuts="Control+S Meta+S"');
+    expect(open).toContain("닫아도 편집 내용은 남습니다");
+    expect(open).toContain('aria-haspopup="dialog" aria-expanded="true"');
+  }
 });
 
-test("접힌 넓게 보기에서 검증에 실패하면 오류와 조건 편집을 함께 보인다", () => {
-  const invalid = editorMarkup(true, false, true);
-  expect(invalid).toContain("이름을 넣으세요");
-  expect(invalid).toContain('aria-label="문장형 조건식"');
+test("검증에 실패하면 닫힌 패널과 편집 창 모두 오류를 한 번씩 보인다", () => {
+  const closed = editorMarkup(false, false, true);
+  expect([...closed.matchAll(/이름을 넣으세요/g)]).toHaveLength(1);
+  expect(closed).toContain("조건식의 잘못된 값을 고쳐 주세요");
+  const open = editorMarkup(false, true, true);
+  expect([...open.matchAll(/이름을 넣으세요/g)]).toHaveLength(1);
+  expect(open).toContain('aria-label="조건식 이름" aria-invalid="true"');
 });

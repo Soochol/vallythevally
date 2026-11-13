@@ -152,7 +152,7 @@ export function ScreenerPanel({ wide = false, onReturn = () => {} }: { wide?: bo
   const queryClient = useQueryClient();
   const active = useActiveSymbol();
   const [preview, setPreview] = useState<{ screenId: string; code: SymbolCode } | null>(null);
-  const [expandedConditions, setExpandedConditions] = useState(false);
+  const [editing, setEditing] = useState(false);
   const selected = previewRow(rows, preview?.screenId === screen?.id ? preview?.code ?? null : null, active);
   const select = (code: SymbolCode) => {
     if (wide && screen) setPreview({ screenId: screen.id, code });
@@ -166,10 +166,12 @@ export function ScreenerPanel({ wide = false, onReturn = () => {} }: { wide?: bo
   const execute = () => {
     if (session && source && screens.data && !checkedSession(session, screens.data).ok) {
       useScreenEditor.getState().trySubmit(screens.data, source);
+      setEditing(true);
       return;
     }
     if (screen && status && block === null && run?.kind !== "running") void useScreenerStore.getState().run(screen).then(refresh);
   };
+  const createScreen = () => { editScreen(null, screens.data); setEditing(true); };
   useResultKeys({ rows, active: wide ? selected?.symbol ?? null : active, wide, onSelect: select, onOpen: openPreview, onRun: execute });
   useEffect(() => dropPendingOpen, []);
   useEffect(() => { if (wide) dropPendingOpen(); }, [wide]);
@@ -177,12 +179,12 @@ export function ScreenerPanel({ wide = false, onReturn = () => {} }: { wide?: bo
   return (
     <aside aria-label="스크리너" data-chart-control className="flex min-h-0 min-w-0 flex-1 flex-col">
       <div className={wide ? "grid min-h-0 flex-1 grid-cols-[160px_minmax(0,1fr)_240px] min-[1280px]:grid-cols-[200px_minmax(0,1fr)_300px]" : "flex min-h-0 flex-1 flex-col"}>
-        {wide && <ScreenList base={screens.data} chosen={screen?.id ?? null} />}
+        {wide && <ScreenList base={screens.data} chosen={screen?.id ?? null} onCreate={createScreen} />}
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
           <div className="max-h-[50%] flex-none overflow-y-auto">
             {band && <UpdateBand status={status} />}
             {session && source && screens.data ? (
-              <SentenceEditor session={session} base={screens.data} source={source} running={run?.kind === "running"} blocked={!status || block !== null} resultActions={<PanelMenu screen={screen} rows={rows} status={status} />} wide={wide} expanded={expandedConditions} onExpandedChange={setExpandedConditions} onRun={execute} />
+              <SentenceEditor session={session} base={screens.data} source={source} running={run?.kind === "running"} blocked={!status || block !== null} resultActions={<PanelMenu screen={screen} rows={rows} status={status} />} wide={wide} editing={editing} onEditingChange={setEditing} onRun={execute} />
             ) : screen ? (
               <ScreenHeader screen={screen} screens={screens.data?.screens ?? []} run={run} block={block} status={status} rows={rows} onRun={execute} wide={wide} />
             ) : (
@@ -196,9 +198,9 @@ export function ScreenerPanel({ wide = false, onReturn = () => {} }: { wide?: bo
           </div>
           <div className="min-h-0 flex-1 overflow-y-auto">
             {screen ? (
-              <Results screen={screen} run={run} rows={rows} status={status} block={block} onRun={execute} onEdit={() => session ? setExpandedConditions(true) : editScreen(screen.id)} selected={wide ? selected?.symbol ?? null : active} onSelect={select} />
+              <Results screen={screen} run={run} rows={rows} status={status} block={block} onRun={execute} onEdit={() => session ? setEditing(true) : editScreen(screen.id)} selected={wide ? selected?.symbol ?? null : active} onSelect={select} />
             ) : (
-              <NoScreen query={screens} />
+              <NoScreen query={screens} onCreate={createScreen} />
             )}
           </div>
         </div>
@@ -249,11 +251,11 @@ function useResultKeys({ rows, active, wide, onSelect, onOpen, onRun }: ResultKe
   }, [rows, active, wide, onSelect, onOpen, onRun]);
 }
 
-function ScreenList({ base, chosen }: { base: Screens | undefined; chosen: string | null }) {
+function ScreenList({ base, chosen, onCreate }: { base: Screens | undefined; chosen: string | null; onCreate(): void }) {
   const sessions = useScreenEditor((s) => s.sessions);
   const screens = base ? availableSources(base, sessions) : [];
   return <nav aria-label="저장한 조건식" data-screen-list className="flex min-h-0 flex-col border-r border-line bg-surface">
-    <div className="flex flex-none items-center justify-between border-b border-line p-2"><h2 className="text-s font-semibold">조건식</h2><button type="button" className="icon-btn" aria-label="새 조건식" disabled={!base} onClick={() => editScreen(null, base)}><PlusIcon /></button></div>
+    <div className="flex flex-none items-center justify-between border-b border-line p-2"><h2 className="text-s font-semibold">조건식</h2><button type="button" className="icon-btn" aria-label="새 조건식" disabled={!base} onClick={onCreate}><PlusIcon /></button></div>
     <div className="min-h-0 flex-1 overflow-y-auto p-1">{screens.map((screen) => {
       const draft = base ? currentSession(base, screen, sessions).draft : null;
       return <button key={screen.id} type="button" aria-current={screen.id === chosen || undefined}
@@ -459,7 +461,7 @@ function Notice({ title, children, action, tone = "plain" }: { title: string; ch
   );
 }
 
-function NoScreen({ query }: { query: UseQueryResult<Screens> }) {
+function NoScreen({ query, onCreate }: { query: UseQueryResult<Screens>; onCreate(): void }) {
   if (query.isPending) return <Notice title="조건식을 불러오는 중입니다" />;
   if (query.isError) {
     return (
@@ -472,7 +474,7 @@ function NoScreen({ query }: { query: UseQueryResult<Screens> }) {
     <Notice
       title="저장한 조건식이 없습니다"
       action={
-        <button type="button" className="btn-primary mt-1 flex h-8 items-center gap-1.5 px-3 text-s" onClick={() => editScreen(null, query.data)}>
+        <button type="button" className="btn-primary mt-1 flex h-8 items-center gap-1.5 px-3 text-s" onClick={onCreate}>
           <PlusIcon size={14} />새 조건식
         </button>
       }
