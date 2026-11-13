@@ -26,8 +26,8 @@ beforeEach(async () => {
   });
   vi.stubGlobal("window", new EventTarget());
   server = { revision: 100, lists: [
-    { id: "L", name: "기본", symbols: ["A", "X", "B"] },
-    { id: "other", name: "다른 목록", symbols: [] },
+    { id: "L", name: "기본", symbols: ["A", "X", "B"], groups: [] },
+    { id: "other", name: "다른 목록", symbols: [], groups: [] },
   ] };
   reads = []; writes = []; onRead = null; onWrite = null; putFailure = false;
   vi.stubGlobal("fetch", vi.fn<typeof fetch>(async (_url, init) => {
@@ -75,14 +75,14 @@ test("늦은 GET의 revision+1이 거절되면 최신 목록에서 다시 삽입
   const undo = await prepare();
   onRead = () => {
     onRead = null;
-    server = { revision: server.revision + 10, lists: [...server.lists, { id: "copy", name: "복제", symbols: ["A", "B"] }] };
+    server = { revision: server.revision + 10, lists: [...server.lists, { id: "copy", name: "복제", symbols: ["A", "B"], groups: [] }] };
   };
   undo.run();
   await vi.waitFor(() => expect(server.lists[0]!.symbols).toEqual(["A", "X", "B"]));
   await vi.waitFor(() => expect(usePersistStore.getState().saves.watchlist.kind).toBe("saved"));
   expect(writes.map((w) => w.revision)).toEqual(reads.map((r) => r + 1));
   expect(writes).toHaveLength(2);
-  expect(server.lists[2]).toEqual({ id: "copy", name: "복제", symbols: ["A", "B"] });
+  expect(server.lists[2]).toEqual({ id: "copy", name: "복제", symbols: ["A", "B"], groups: [] });
   expect(useWatchlistStore.getState().revision).toBe(server.revision);
   expect(useWatchlistStore.getState().lists).toEqual(server.lists);
   const accepted = server.revision;
@@ -99,7 +99,7 @@ test("충돌 뒤 L이 삭제되면 다시 쓰지 않고 알림을 남긴다", as
   undo.run();
   await vi.waitFor(() => expect(useSelectionStore.getState().toast?.text).toBe("다른 곳에서 바뀌어 되돌리지 못했습니다"));
   expect(writes).toHaveLength(1);
-  expect(server.lists).toEqual([{ id: "other", name: "다른 목록", symbols: [] }]);
+  expect(server.lists).toEqual([{ id: "other", name: "다른 목록", symbols: [], groups: [] }]);
 });
 
 test("계속 경쟁하면 세 번만 PUT하고 성공으로 처리하지 않는다", async () => {
@@ -164,4 +164,24 @@ test("알림은 주기적으로 조회하지 않고 focus 또는 storage 때만 
   window.dispatchEvent(new Event("storage"));
   await vi.advanceTimersByTimeAsync(0);
   expect(reads).toHaveLength(2);
+});
+
+test("그룹 안 종목을 되돌리면 서버에도 원래 그룹의 원래 자리로 돌아간다", async () => {
+  const grouped = { ...server.lists[0]!, groups: [{ id: "G", name: "반도체", symbols: ["B", "X"] }] };
+  server = { revision: 101, lists: [grouped, server.lists[1]!] };
+  useWatchlistStore.getState().load(structuredClone(server.lists), server.revision);
+  autosave.stop();
+  autosave = startAutosave({
+    put: (path, body, opts) => sendJson("PUT", path, body, opts),
+    toast: (text) => useSelectionStore.getState().showToast(text),
+    revisions: { layout: 0, ui: 0, watchlist: server.revision },
+  });
+  const undo = removeWithUndo("L", "X")!;
+  await vi.advanceTimersByTimeAsync(0);
+  expect(server.lists[0]).toMatchObject({ symbols: ["A", "B"], groups: [{ id: "G", symbols: ["B"] }] });
+  onRead = () => { onRead = null; server = { revision: server.revision + 1, lists: [...server.lists, { id: "copy", name: "복제", symbols: [], groups: [] }] }; };
+  undo.run();
+  await vi.waitFor(() => expect(server.lists[0]).toEqual(grouped));
+  expect(server.lists[2]!.id).toBe("copy");
+  expect(useWatchlistStore.getState().lists).toEqual(server.lists);
 });

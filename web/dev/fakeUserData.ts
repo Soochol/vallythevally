@@ -126,7 +126,7 @@ export function createUserData(seedWatchlist: string[], seedScreens: Screen[], n
     ],
   ]);
   let uiState: Record<string, unknown> = { lastLayoutId: DEFAULT_LAYOUT_ID, theme: "dark", revision: 0 };
-  let watchlists: Watchlists = { lists: [{ id: FIRST_WATCHLIST_ID, name: "기본", symbols: [...seedWatchlist] }], revision: 0 };
+  let watchlists: Watchlists = { lists: [{ id: FIRST_WATCHLIST_ID, name: "기본", symbols: [...seedWatchlist], groups: [] }], revision: 0 };
   let screens: Screens = { screens: seedScreens, revision: 0 };
 
   return {

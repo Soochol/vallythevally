@@ -122,6 +122,7 @@ fn generated_typescript_matches_the_committed_files() {
         generated::<UnixSeconds>(),
         generated::<UpdatePhase>(),
         generated::<Venue>(),
+        generated::<WatchGroup>(),
         generated::<Watchlist>(),
         generated::<Watchlists>(),
     ];

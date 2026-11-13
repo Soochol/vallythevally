@@ -11,7 +11,7 @@ use axum::routing::get;
 use domain::{Symbol, Venue};
 use serde::de::DeserializeOwned;
 
-use crate::api::{self, ApiErrorCode, Layout, LayoutInput, LayoutSummary, Revision, Screen, Screens, UiState, UnixSeconds, Watchlists};
+use crate::api::{self, ApiErrorCode, Layout, LayoutInput, LayoutSummary, Revision, Screen, Screens, UiState, UnixSeconds, Watchlist, Watchlists};
 use crate::http::{ApiFailure, AppState, symbol_list};
 use crate::screener::{RunnableScreen, parse_screen};
 use crate::userdata::{self, StoreError, wire_name};
@@ -61,9 +61,12 @@ pub(crate) fn parse_symbol(code: &str) -> Result<Symbol, ApiFailure> {
 
 pub const MAX_WATCHLISTS: usize = 20;
 pub const MAX_WATCHLIST_NAME_CHARS: usize = 20;
+pub const MAX_WATCH_GROUPS: usize = 20;
 const MAX_WATCHLIST_ID_BYTES: usize = 64;
-const LONGEST_WATCHLIST_WRAPPER_BYTES: usize = r#"{"id":"","name":"","symbols":[]},"#.len() + MAX_WATCHLIST_ID_BYTES + 4 * MAX_WATCHLIST_NAME_CHARS;
-pub const WATCHLISTS_LIMIT: usize = JSON_LIMIT + MAX_WATCHLISTS * LONGEST_WATCHLIST_WRAPPER_BYTES;
+const LONGEST_WATCH_GROUP_WRAPPER_BYTES: usize = r#"{"id":"","name":"","symbols":[]},"#.len() + MAX_WATCHLIST_ID_BYTES + 4 * MAX_WATCHLIST_NAME_CHARS;
+const LONGEST_WATCHLIST_WRAPPER_BYTES: usize =
+    LONGEST_WATCH_GROUP_WRAPPER_BYTES + r#""groups":[],"#.len() + MAX_WATCH_GROUPS * LONGEST_WATCH_GROUP_WRAPPER_BYTES;
+pub const WATCHLISTS_LIMIT: usize = 2 * JSON_LIMIT + MAX_WATCHLISTS * LONGEST_WATCHLIST_WRAPPER_BYTES;
 
 async fn get_watchlists(State(st): State<Arc<AppState>>) -> Result<Json<Watchlists>, ApiFailure> {
     Ok(Json(userdata::get_watchlists(&st.db).await?))
@@ -81,7 +84,7 @@ fn check_watchlists(all: &Watchlists) -> Result<(), ApiFailure> {
     if all.lists.is_empty() || all.lists.len() > MAX_WATCHLISTS {
         return Err(ApiFailure::bad_request(format!("관심종목 목록은 1~{MAX_WATCHLISTS}개여야 합니다: {}개", all.lists.len())));
     }
-    let (mut ids, mut names) = (HashSet::new(), HashSet::new());
+    let (mut ids, mut names, mut group_ids) = (HashSet::new(), HashSet::new(), HashSet::new());
     for list in &all.lists {
         if list.id.is_empty() || list.id.len() > MAX_WATCHLIST_ID_BYTES || !ids.insert(list.id.as_str()) {
             return Err(ApiFailure::bad_request(format!("관심종목 목록 id가 비었거나 길거나 겹칩니다: {}", list.id)));
@@ -97,6 +100,37 @@ fn check_watchlists(all: &Watchlists) -> Result<(), ApiFailure> {
         for code in &list.symbols {
             if !seen.insert(parse_symbol(&code.0)?) {
                 return Err(ApiFailure::bad_request(format!("관심종목 목록 {name}에 같은 종목이 두 번 있습니다: {}", code.0)));
+            }
+        }
+        check_watch_groups(list, &mut group_ids)?;
+    }
+    Ok(())
+}
+
+fn check_watch_groups<'a>(list: &'a Watchlist, ids: &mut HashSet<&'a str>) -> Result<(), ApiFailure> {
+    let list_name = &list.name;
+    if list.groups.len() > MAX_WATCH_GROUPS {
+        return Err(ApiFailure::bad_request(format!("관심종목 목록 {list_name}의 그룹은 {MAX_WATCH_GROUPS}개까지입니다: {}개", list.groups.len())));
+    }
+    let members: HashSet<&str> = list.symbols.iter().map(|c| c.0.as_str()).collect();
+    let (mut names, mut grouped) = (HashSet::new(), HashSet::new());
+    for group in &list.groups {
+        if group.id.is_empty() || group.id.len() > MAX_WATCHLIST_ID_BYTES || !ids.insert(group.id.as_str()) {
+            return Err(ApiFailure::bad_request(format!("관심종목 그룹 id가 비었거나 길거나 겹칩니다: {}", group.id)));
+        }
+        let name = group.name.trim();
+        if name.is_empty() || name != group.name || name.chars().count() > MAX_WATCHLIST_NAME_CHARS {
+            return Err(ApiFailure::bad_request(format!("관심종목 그룹 이름은 앞뒤 공백 없이 1~{MAX_WATCHLIST_NAME_CHARS}자여야 합니다: {:?}", group.name)));
+        }
+        if !names.insert(name) {
+            return Err(ApiFailure::bad_request(format!("관심종목 목록 {list_name}에 같은 이름의 그룹이 두 개 있습니다: {name}")));
+        }
+        for code in &group.symbols {
+            if !members.contains(code.0.as_str()) {
+                return Err(ApiFailure::bad_request(format!("관심종목 그룹 {name}의 종목이 목록 {list_name}에 없습니다: {}", code.0)));
+            }
+            if !grouped.insert(code.0.as_str()) {
+                return Err(ApiFailure::bad_request(format!("관심종목 목록 {list_name}에서 한 종목이 두 그룹에 있습니다: {}", code.0)));
             }
         }
     }

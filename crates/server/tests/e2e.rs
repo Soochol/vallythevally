@@ -116,9 +116,12 @@ async fn user_data_survives_a_restart_and_quotes_come_from_kiwoom() {
     let client = reqwest::Client::new();
 
     let watchlist = serde_json::json!({"lists": [
-        {"id": "01900000-0000-7000-8000-000000000002", "name": "기본", "symbols": ["005930", "IDX:001"]},
-        {"id": "L2", "name": "반도체", "symbols": ["000660", "005930"]},
-        {"id": "L3", "name": "지수", "symbols": ["IDX:101"]},
+        {"id": "01900000-0000-7000-8000-000000000002", "name": "기본", "symbols": ["005930", "IDX:001"], "groups": [
+            {"id": "G1", "name": "지수", "symbols": ["IDX:001"]},
+            {"id": "G2", "name": "빈 그룹", "symbols": []},
+        ]},
+        {"id": "L2", "name": "반도체", "symbols": ["000660", "005930"], "groups": []},
+        {"id": "L3", "name": "지수", "symbols": ["IDX:101"], "groups": []},
     ], "revision": 1_794_152_040_001_i64});
     let layout = serde_json::json!({"id": "0193aaaa-0000-7000-8000-000000000002", "name": "둘", "arrangement": "2v", "revision": 1_794_152_040_002_i64,
         "sync": {"crosshair": true, "scroll": false}, "cells": [

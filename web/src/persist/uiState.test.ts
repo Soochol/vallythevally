@@ -15,6 +15,7 @@ test("옛 라이트 설정은 다크로 옮기고 다른 설정과 모르는 키
     watchColumns: ["price", "volume"],
     drawing: DEFAULT_UI_PREFS.drawing,
     pinnedMinutes: [],
+    collapsedWatchGroups: ["G1"],
     phone: { symbol: "000660" },
   };
   const { prefs, extra } = parseUiState(raw);
@@ -29,6 +30,7 @@ test("옛 라이트 설정은 다크로 옮기고 다른 설정과 모르는 키
     watchColumns: ["price", "volume"],
     drawing: DEFAULT_UI_PREFS.drawing,
     pinnedMinutes: [],
+    collapsedWatchGroups: ["G1"],
   });
   expect(extra).toEqual({ phone: { symbol: "000660" } });
   expect(toUiState(prefs, extra)).toEqual({ ...raw, theme: "dark" });
@@ -67,6 +69,15 @@ test("고른 열은 정해진 차례로 읽고, 겹치면 틀린 값으로 본�
 test("고정 분봉은 중복과 잘못된 주기를 빼고 저장·복원한다", () => {
   const { prefs, extra } = parseUiState({ lastLayoutId: null, theme: "dark", pinnedMinutes: ["5m", "60m", "D", "5m", "bad", 3], future: true });
   expect(prefs.pinnedMinutes).toEqual(["5m", "60m"]);
+  expect(parseUiState(toUiState(prefs, extra))).toEqual({ prefs, extra });
+});
+
+test("접은 관심종목 그룹은 없으면 빈 목록, 틀리면 기본값이고 중복을 빼고 왕복한다", () => {
+  expect(parseUiState({ lastLayoutId: null, theme: "dark" }).prefs.collapsedWatchGroups).toEqual([]);
+  vi.spyOn(console, "warn").mockImplementation(() => {});
+  expect(parseUiState({ lastLayoutId: null, theme: "dark", collapsedWatchGroups: ["G1", 3] }).prefs.collapsedWatchGroups).toEqual([]);
+  const { prefs, extra } = parseUiState({ lastLayoutId: null, theme: "dark", collapsedWatchGroups: ["G1", "G2", "G1"] });
+  expect(prefs.collapsedWatchGroups).toEqual(["G1", "G2"]);
   expect(parseUiState(toUiState(prefs, extra))).toEqual({ prefs, extra });
 });
 

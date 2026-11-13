@@ -20,6 +20,7 @@ interface UiStore {
   setActiveWatchlist(id: string): void;
   toggleWatchColumn(column: WatchColumn): void;
   setDrawingPrefs(patch: Partial<DrawingPrefs>): void;
+  setWatchGroupCollapsed(id: string, collapsed: boolean, known: readonly string[]): void;
 }
 
 export const useUiStore = create<UiStore>()((set) => {
@@ -47,6 +48,12 @@ export const useUiStore = create<UiStore>()((set) => {
     setLastLayoutId: (id) => edit((p) => (p.lastLayoutId === id ? p : { ...p, lastLayoutId: id })),
     setActiveWatchlist: (id) => edit((p) => (p.activeWatchlistId === id ? p : { ...p, activeWatchlistId: id })),
     setDrawingPrefs: (patch) => edit((p) => ({ ...p, drawing: { ...p.drawing, ...patch } })),
+    setWatchGroupCollapsed: (id, collapsed, known) =>
+      edit((p) => {
+        const kept = p.collapsedWatchGroups.filter((g) => known.includes(g) && (collapsed || g !== id));
+        const next = collapsed && known.includes(id) && !kept.includes(id) ? [...kept, id] : kept;
+        return next.length === p.collapsedWatchGroups.length && next.every((g, i) => g === p.collapsedWatchGroups[i]) ? p : { ...p, collapsedWatchGroups: next };
+      }),
     toggleWatchColumn: (column) =>
       edit((p) => ({
         ...p,

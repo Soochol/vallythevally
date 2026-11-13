@@ -22,6 +22,7 @@ export interface UiPrefs {
   watchColumns: readonly WatchColumn[];
   drawing: DrawingPrefs;
   pinnedMinutes: Period[];
+  collapsedWatchGroups: readonly string[];
 }
 
 export type UiExtra = Record<string, unknown>;
@@ -37,6 +38,7 @@ export const DEFAULT_UI_PREFS: UiPrefs = {
   watchColumns: DEFAULT_WATCH_COLUMNS,
   drawing: DEFAULT_DRAWING_PREFS,
   pinnedMinutes: [],
+  collapsedWatchGroups: [],
 };
 
 const isStringArray = (x: unknown): x is string[] => Array.isArray(x) && x.every((s) => typeof s === "string");
@@ -48,7 +50,7 @@ export function parseUiState(raw: unknown): { prefs: UiPrefs; extra: UiExtra } {
     console.warn("UiState가 객체가 아니어서 기본값으로 엽니다", raw);
     return { prefs: DEFAULT_UI_PREFS, extra: {} };
   }
-  const { rightPanel, panelWidth, rightPanelWidth: _rightPanelWidth, lastLayoutId, theme, watchCollapsed, recentSymbols, activeWatchlistId, watchColumns, drawing, pinnedMinutes, revision: _revision, ...extra } = raw as Record<string, unknown>;
+  const { rightPanel, panelWidth, rightPanelWidth: _rightPanelWidth, lastLayoutId, theme, watchCollapsed, recentSymbols, activeWatchlistId, watchColumns, drawing, pinnedMinutes, collapsedWatchGroups, revision: _revision, ...extra } = raw as Record<string, unknown>;
   const bad: string[] = [];
   const pick = <T>(key: string, value: unknown, ok: (x: unknown) => x is T, fallback: T, missingOk = false): T => {
     if (ok(value)) return value;
@@ -67,6 +69,7 @@ export function parseUiState(raw: unknown): { prefs: UiPrefs; extra: UiExtra } {
     watchColumns: sortColumns(pick("watchColumns", watchColumns, isColumns, DEFAULT_WATCH_COLUMNS, true)),
     drawing: parseDrawingPrefs(drawing),
     pinnedMinutes: Array.isArray(pinnedMinutes) ? [...new Set(pinnedMinutes.filter((p): p is Period => typeof p === "string" && isPeriod(p) && p.endsWith("m")))] : [],
+    collapsedWatchGroups: [...new Set(pick("collapsedWatchGroups", collapsedWatchGroups, isStringArray, [], true))],
   };
   if (bad.length) console.warn(`UiState의 ${bad.join(", ")} 값이 틀려 기본값으로 엽니다`, raw);
   return { prefs, extra };

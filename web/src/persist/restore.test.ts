@@ -10,10 +10,10 @@ import { NXT_FALLBACK_NOTICE, restore, type RestoreSources } from "./restore";
 import type { Unsaved } from "./saver";
 
 const SERVER_LISTS = [
-  { id: "W1", name: "기본", symbols: ["005930", "IDX:001"] },
-  { id: "W2", name: "반도체", symbols: ["000660"] },
+  { id: "W1", name: "기본", symbols: ["005930", "IDX:001"], groups: [] },
+  { id: "W2", name: "반도체", symbols: ["000660"], groups: [] },
 ];
-const LOCAL_LISTS = [{ id: "W1", name: "기본", symbols: ["000660"] }];
+const LOCAL_LISTS = [{ id: "W1", name: "기본", symbols: ["000660"], groups: [] }];
 
 afterEach(() => vi.restoreAllMocks());
 
