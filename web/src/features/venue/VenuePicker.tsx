@@ -8,7 +8,7 @@ const CLASS = {
   desktop: "seg-btn",
   legend: "pointer-events-auto seg-btn !h-6 !min-w-0 !px-1.5 !text-xs",
   phone:
-    "h-[36px] min-w-[48px] px-2 text-s text-text-2 border-r border-line last:border-r-0 aria-pressed:bg-accent-soft aria-pressed:font-[650] aria-pressed:text-accent aria-disabled:text-text-3 aria-disabled:opacity-60",
+    "h-7 min-w-10 rounded-[var(--r-pill)] px-2 text-s text-text-2 aria-pressed:bg-accent aria-pressed:font-[650] aria-pressed:text-accent-ink aria-disabled:text-text-3 aria-disabled:opacity-60",
 } as const;
 
 /**
@@ -28,7 +28,7 @@ export function VenuePicker({ cell, info, variant }: { cell: CellState; info: Sy
       className={
         variant !== "phone"
           ? "inline-flex items-center gap-px"
-          : "inline-flex flex-none overflow-hidden rounded-m border border-line"
+          : "inline-flex flex-none gap-px rounded-[var(--r-pill)] bg-[var(--hover)] p-0.5"
       }
     >
       {VENUES.map((v) => {

@@ -1,8 +1,9 @@
-.drawing-toolbar { position:relative; z-index:10; display:flex; min-height:0; flex-direction:column; align-items:center; gap:4px; padding:calc(var(--chart-inset-top, 0px) + 8px) 3px 8px; border-right:1px solid var(--line); background:var(--bg); color:var(--text-2); overflow-y:auto; scrollbar-width:none; scrollbar-color:var(--line) transparent; }
+.drawing-toolbar { position:absolute; left:calc((100% - var(--chart-right, 0px)) / 2); bottom:36px; z-index:10; transform:translateX(-50%); display:flex; align-items:center; gap:4px; max-width:calc(100% - var(--chart-right, 0px) - 26rem); min-width:11rem; padding:5px; border-radius:var(--r-pill); color:var(--text-2); overflow-x:auto; overflow-y:hidden; scrollbar-width:none; }
 .drawing-toolbar>* { flex-shrink:0; }
-.draw-tool { display:grid; place-items:center; width:32px; height:32px; border-radius:var(--r-m); color:var(--text-2); cursor:pointer; }
-.draw-tool:hover { background:var(--raised); color:var(--text); }
+.draw-tool { display:grid; place-items:center; width:32px; height:32px; border-radius:var(--r-pill); color:var(--text-2); cursor:pointer; }
+.draw-tool:hover { background:var(--hover); color:var(--text); }
 .draw-tool[aria-pressed=true] { color:var(--accent); background:var(--accent-soft); }
+.draw-tool[data-active-tool][aria-pressed=true] { color:var(--accent-ink); background:var(--accent); }
 .draw-group { display:flex; position:relative; align-items:center; }
 .draw-group-toggle { position:absolute; right:-2px; bottom:0; }
 .draw-group-dot { display:grid; place-items:center; width:12px; height:12px; color:var(--text-2); border-radius:var(--r-s); }
@@ -16,9 +17,9 @@
 .draw-tool-choice [aria-checked=true] { color:var(--accent); }
 .draw-tool-choice [aria-checked=true] svg { fill:currentColor; }
 .draw-tool-menu kbd { margin-left:auto; color:var(--text-3); font-size:var(--fs-xs); }
-.draw-separator { height:1px; width:26px; margin:6px 0; background:var(--line); }
+.draw-separator { width:1px; height:18px; margin:0 4px; background:var(--line); }
 .draw-magnet-select { width:32px; padding:1px; color:var(--text-2); font-size:var(--fs-xs); background:var(--bg); border-radius:var(--r-s); }
-.draw-toolbar-bottom { margin-top:auto; display:grid; gap:3px; }
+.draw-toolbar-bottom { display:flex; align-items:center; gap:4px; padding-left:8px; margin-left:4px; border-left:1px solid var(--line); }
 .drawing-overlay { position:absolute; inset:0; z-index:7; pointer-events:none; }
 .drawing-floating { display:flex; align-items:center; gap:4px; min-height:38px; padding:4px; max-width:calc(100dvw - 16px); flex-wrap:wrap; pointer-events:auto; white-space:nowrap; }
 .drawing-floating .icon-btn { width:28px; height:28px; }

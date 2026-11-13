@@ -26,17 +26,18 @@ export function PhoneHeader({ cell, info, status }: { cell: CellState; info: Sym
   const dir = DIR_CLASS[direction(chg)];
 
   return (
-    <header className="hidden items-center gap-2 px-3 pb-1 pt-2 [grid-area:mhead] max-md:flex">
-      <div className="min-w-0 flex-1">
+    <header className="hidden px-3 pb-1 pt-2 [grid-area:mhead] max-md:block">
+      <div className="min-w-0">
         <div className="flex items-center gap-2">
           <button type="button" className="min-w-0 flex-1 truncate text-left" aria-haspopup="dialog" onClick={() => openSearch()}>
             <b className="text-l font-[650]">{info?.name ?? cell.symbol}</b>
             <small className="ml-1 text-s text-text-3">{symbolSub(cell.symbol, info)}</small>
           </button>
           <FinancialUpdateButton />
-          <VenuePicker cell={cell} info={info} variant="phone" />
+          <button type="button" className="icon-btn h-9 w-9 flex-none" title="차트 이미지 내려받기" aria-label="차트 이미지 내려받기" onClick={() => saveSnapshot(cell.slot, "download")}><CameraIcon size={20} /></button>
         </div>
-        <div className="flex h-[32px] items-baseline gap-2">
+        <div className="flex h-[32px] items-center gap-2">
+          <div className="flex min-w-0 flex-1 items-baseline gap-2 overflow-hidden">
           {ready ? (
             <>
               <strong className={`text-[24px] font-[650] tracking-[-0.02em] ${dir}`}>{formatPrice(ready.latest.c, isIndex)}</strong>
@@ -49,21 +50,14 @@ export function PhoneHeader({ cell, info, status }: { cell: CellState; info: Sym
           ) : (
             <strong className="text-[24px] font-[650] text-text-3">—</strong>
           )}
+          </div>
+          <VenuePicker cell={cell} info={info} variant="phone" />
         </div>
         <div className="mt-0.5 flex items-center justify-between gap-2 text-xs text-text-2">
           <ConnectionIndicator view={connection} />
           <Attribution text="Lightweight Charts™" className="text-text-3 underline underline-offset-2" />
         </div>
       </div>
-      <button
-        type="button"
-        className="icon-btn h-9 w-9"
-        title="차트 이미지 내려받기"
-        aria-label="차트 이미지 내려받기"
-        onClick={() => saveSnapshot(cell.slot, "download")}
-      >
-        <CameraIcon size={20} />
-      </button>
     </header>
   );
 }

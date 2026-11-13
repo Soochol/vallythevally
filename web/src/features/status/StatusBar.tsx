@@ -14,7 +14,7 @@ export function StatusBar({ floating = false }: { floating?: boolean }) {
   return (
     <footer
       className={`flex min-w-0 flex-none flex-wrap items-center gap-x-3 gap-y-1 whitespace-nowrap px-3 py-2 text-xs text-text-2 max-md:hidden ${
-        floating ? "ui-island absolute bottom-9 left-[calc(var(--tools-w)+var(--island-gap))] z-10 max-w-[calc(100%-var(--tools-w)-13rem)] rounded-m" : "border-t border-line"
+        floating ? "ui-island absolute bottom-[5.5rem] left-[var(--island-gap)] z-10 max-w-[calc(100%-var(--island-gap)*2-6rem)] rounded-m" : "border-t border-line"
       } ${halted ? "bg-[color-mix(in_srgb,var(--danger)_14%,transparent)]" : ""}`}
     >
       {stopped ? (
