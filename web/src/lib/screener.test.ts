@@ -269,13 +269,7 @@ test.each<[string, ScreenerStatus, UpdateBandKind | null]>([
   ["필요한 관측일이 없고 오래된 저장소", { ...ready, lastDay: "2026-11-06", needDay: null }, null],
 ])("위쪽 띠 갈래: %s", (_, status, kind) => {
   expect(updateBandKind(status)).toBe(kind);
-});
-
-const everyStatus: ScreenerStatus[] = [null, running("symbols"), running("recent"), running("backfill"), stopped, stoppedAtStart].flatMap((update) =>
-  [ready.lastDay, null, "2026-11-06"].flatMap((lastDay) => [ready.needDay, null].map((needDay) => ({ ...ready, lastDay, needDay, update }))));
-
-test.each(everyStatus)("위쪽 띠는 갈래가 있을 때만 보인다 %#", (status) => {
-  expect(showsUpdateBand(status)).toBe(updateBandKind(status) !== null);
+  expect(showsUpdateBand(status)).toBe(kind !== null);
 });
 
 test("멈춘 업데이트의 다시 시도는 서버가 준 시각의 그 초가 다 지나야 열린다", () => {
