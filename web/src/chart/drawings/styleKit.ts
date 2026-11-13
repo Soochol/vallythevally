@@ -7,6 +7,7 @@ export const DOWN: Color = "$down";
 
 export const defaultStroke = (): Stroke => ({ color: DRAW, width: 2, dash: "solid" });
 export const defaultFill = (): Fill => ({ on: true, color: DRAW, opacity: 0.2 });
+export const TEXT_SIZE = { min: 8, max: 72 } as const;
 export const defaultText = (): TextStyle => ({ color: DRAW, size: 14, bold: false, italic: false });
 
 export function prop<S, K extends keyof S>(key: K): Lens<S, S[K]> {
@@ -75,7 +76,7 @@ export function readTextStyle(raw: unknown, d: TextStyle): TextStyle {
   return {
     ...o,
     color: readString(o.color, d.color),
-    size: readNumber(o.size, d.size),
+    size: Math.min(TEXT_SIZE.max, Math.max(TEXT_SIZE.min, readNumber(o.size, d.size))),
     bold: readBool(o.bold, d.bold),
     italic: readBool(o.italic, d.italic),
   };
