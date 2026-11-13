@@ -51,7 +51,9 @@ test("replacement consumes queued rollover in both real series and retains newer
     await trade(201_000, "100001", 1);
     await expect(chart).toHaveAttribute("data-last-close", "201000", { timeout: 1000 });
   }).toPass({ timeout: 15_000 });
-  const initialVolume = (await series(page)).find((s) => s.type === "Histogram")!.data.at(-1)!;
+  const lastVolume = async () => (await series(page)).find((s) => s.type === "Histogram")!.data.at(-1)!;
+  await expect.poll(lastVolume).toMatchObject({ value: 1 });
+  const initialVolume = await lastVolume();
   expect("value" in initialVolume).toBe(true);
   await styleMenu(page);
   await page.evaluate(() => window.frameProbe.hold());
@@ -119,6 +121,7 @@ test("history-only snapshots remain identical across every main series style", a
   await page.addInitScript(installFrameProbe);
   await page.goto("/?symbol=005930");
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
+  await expect.poll(async () => { const all = await series(page); return all.length === 2 && all.every((s) => s.data.length > 0); }).toBe(true);
   const before = await series(page);
   const history = before.find((s) => s.type === "Candlestick")!.data.map((b) => ({ time: b.time, value: "close" in b ? b.close : undefined }));
   expect(history.length).toBeGreaterThan(0);
