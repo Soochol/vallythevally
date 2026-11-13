@@ -7,7 +7,10 @@ export default defineConfig({
   timeout: 90_000,
   expect: { timeout: 15_000 },
   reporter: [["list"], ["html", { open: "never" }]],
+  webServer: { command: "node e2e/serve.mjs", url: "http://127.0.0.1:4173", reuseExistingServer: false },
   use: {
+    baseURL: "http://127.0.0.1:4173",
+    serviceWorkers: "block",
     trace: "retain-on-failure",
     screenshot: "only-on-failure",
     locale: "ko-KR",
