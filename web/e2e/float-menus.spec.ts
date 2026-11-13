@@ -92,17 +92,24 @@ test("분봉 버튼은 마지막 분봉으로 바로 바꾸고, 분봉일 때 �
   await expect(cell(page)).toHaveAttribute("aria-label", / 60분$/);
 });
 
-test("옛 저장값의 고정 분봉은 읽어도 위 막대에 꺼내지 않고 다시 저장하지 않는다", async ({ scenario, page }) => {
+test("옛 저장값의 고정 분봉은 꺼내지 않고 버리며, 열 때 활성 칸의 분봉을 마지막 분봉으로 저장한다", async ({ scenario, page }) => {
   const state = scenario.documents.uiState();
-  scenario.documents.saveUiState({ ...state, pinnedMinutes: ["5m", "60m"], revision: state.revision + 1 });
-  await open(page);
+  scenario.documents.saveUiState({ ...state, pinnedMinutes: ["5m", "60m"], recentSymbols: ["005930"], revision: state.revision + 1 });
+  const layout = scenario.documents.layout();
+  scenario.documents.saveLayout({ ...layout, revision: layout.revision + 1, cells: [{ ...layout.cells[0]!, symbol: "005930", venue: "combined", period: "10m" }] });
+  await page.goto("/");
+  await expect(cell(page)).toHaveAttribute("aria-busy", "false");
   const minutes = toolbar(page).getByRole("button", { name: "분봉", exact: true });
-  await expect(minutes).toHaveText("3분");
-  await expect(toolbar(page).getByRole("group", { name: "봉 주기" }).getByRole("button")).toHaveText(["3분", "일", "주", "월", "분기", "연"]);
-  await minutes.click();
-  await expect(cell(page)).toHaveAttribute("aria-label", / 3분$/);
-  await expect.poll(async () => scenario.documents.uiState().lastMinute).toBe("3m");
+  await expect(toolbar(page).getByRole("group", { name: "봉 주기" }).getByRole("button")).toHaveText(["10분", "일", "주", "월", "분기", "연"]);
+  await expect(minutes).toHaveAttribute("aria-pressed", "true");
+  await expect.poll(async () => scenario.documents.uiState().lastMinute).toBe("10m");
   expect(scenario.documents.uiState()).not.toHaveProperty("pinnedMinutes");
+  await toolbar(page).getByRole("button", { name: "일", exact: true }).click();
+  await expect(cell(page)).toHaveAttribute("aria-label", / 일$/);
+  await expect.poll(async () => scenario.documents.layout().cells[0]!.period).toBe("D");
+  await page.reload();
+  await expect(minutes).toHaveText("10분");
+  await expect(minutes).toHaveAttribute("aria-pressed", "false");
 });
 
 test("지표 설정은 색 격자·굵기 견본·기간 프리셋을 한 장에 두고 바로 적용하며 머리에서 숨기고 지운다", async ({ page }, info) => {

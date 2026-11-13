@@ -53,12 +53,12 @@ export async function boot(queryClient: QueryClient) {
     useUiStore.getState().load(restored.ui.prefs, restored.ui.extra);
     useWatchlistStore.getState().load(restored.watchlists);
     followTheme();
-    followLastMinute();
     for (const target of SAVE_TARGETS) clearUnsaved(target, restored.serverRevisions[target]);
     const autosave = startAutosave({ put: (path, json, o) => sendJson("PUT", path, json, o), toast, revisions: restored.revisions });
     if (restored.layoutDirty) autosave.savers.layout.changed();
     if (restored.uiDirty) autosave.savers.ui.changed();
     if (restored.watchlistDirty) autosave.savers.watchlist.changed();
+    followLastMinute();
     // 탭을 닫거나 새로고침할 때도 hidden이 온다. 미저장 본문은 편집마다 이미 남겨 두었으므로 여기서는 보내 보기만 한다.
     document.addEventListener("visibilitychange", () => {
       if (document.visibilityState === "hidden") autosave.flush();
