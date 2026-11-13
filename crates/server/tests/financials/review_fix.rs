@@ -161,7 +161,7 @@ async fn repeated_manual_start_during_mapping_coalesces_and_preserves_price_and_
         assert_eq!(store.collection(COMPANY).await.unwrap().reports["2015/11011"].statement.refresh_version,before.refresh_version);
         fake.wait_for_call("statement_stream", 1).await;
         fake.state.lock().unwrap().stream_paused_report = None;
-        http_settled(&client, &base).await;
+        http_settled(&fake, &client, &base).await;
         let result = http_finished(&client,&base).await;
         let collection = store.collection(COMPANY).await.unwrap();
         assert_eq!(collection.refresh_version,before.refresh_version + 1);

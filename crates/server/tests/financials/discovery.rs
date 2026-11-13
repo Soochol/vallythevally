@@ -233,7 +233,7 @@ async fn first_and_mid_discovery_failures_leave_price_requests_usable() {
             } else { None };
             fake.state.lock().unwrap().discovery_failure = Some((stage.into(),StatusCode::BAD_GATEWAY));
             http_start(&client, &base).await;
-            http_settled(&client, &base).await;
+            http_settled(&fake, &client, &base).await;
             let response = client.get(format!("{base}/api/symbols/{STOCK}/financial-source")).send().await.unwrap();
             let snapshot: Value = serde_json::from_slice(&response.bytes().await.unwrap()).unwrap();
             assert_eq!(snapshot["status"],"failed");
@@ -254,9 +254,7 @@ async fn stalled_discovery_does_not_hold_saved_company_data_or_update_status() {
     let previous = settled_stock(&service,COMMON,false).await.collection;
     fake.state.lock().unwrap().discovery_paused = Some("search".into());
     service.start_update(vec![symbol(STOCK,true)]).await;
-    tokio::time::timeout(Duration::from_secs(2),async {
-        while fake.count("search") == 0 { tokio::time::sleep(Duration::from_millis(10)).await; }
-    }).await.unwrap();
+    fake.wait_for_call("search", 1).await;
     let saved = tokio::time::timeout(Duration::from_secs(1),service.read(COMMON)).await.unwrap();
     assert_eq!(serde_json::to_value(saved.collection).unwrap(),serde_json::to_value(previous).unwrap());
     let status = tokio::time::timeout(Duration::from_secs(1),service.update_status()).await.unwrap();

@@ -581,14 +581,11 @@ async fn http_start(client: &reqwest::Client, base: &str) {
     client.post(format!("{base}/api/financial-update")).send().await.unwrap().error_for_status().unwrap();
 }
 
-async fn http_settled(client: &reqwest::Client, base: &str) -> Value {
-    for _ in 0..300 {
-        let snapshot = http_snapshot(client,base).await;
-        let job: Value = serde_json::from_slice(&client.get(format!("{base}/api/financial-update")).send().await.unwrap().bytes().await.unwrap()).unwrap();
-        if !["planning", "collecting"].contains(&job["status"].as_str().unwrap()) && snapshot["status"] != "collecting" { return snapshot; }
-        tokio::time::sleep(Duration::from_millis(50)).await;
-    }
-    panic!("HTTP collection did not settle");
+async fn http_settled(fake: &Fake, client: &reqwest::Client, base: &str) -> Value {
+    updates::finished(fake, client, base).await;
+    let snapshot = http_snapshot(client, base).await;
+    assert_ne!(snapshot["status"], "collecting", "a terminal job must leave readable company data");
+    snapshot
 }
 
 fn process(fake: &Fake, kiwoom: &common::ScriptedTransport, dir: &std::path::Path, start: &str) -> common::Server {
@@ -615,7 +612,7 @@ async fn review_restart_resumes_corrections_after_list_commit_and_partial_report
         let base = format!("http://{}",server.addr().await);
         assert_eq!(client.get(format!("{base}/api/symbols/005930")).send().await.unwrap().status(),StatusCode::OK);
         http_start(&client, &base).await;
-        let original = http_settled(&client,&base).await;
+        let original = http_settled(&fake,&client,&base).await;
         assert_eq!(original["status"],"ready");
         let before = report_calls(&fake,paused);
         {
@@ -624,10 +621,7 @@ async fn review_restart_resumes_corrections_after_list_commit_and_partial_report
             state.paused_report = Some(paused.into());
         }
         client.post(format!("{base}/api/symbols/005930/financial-source")).send().await.unwrap();
-        for _ in 0..300 {
-            if report_calls(&fake,paused) > before { break; }
-            tokio::time::sleep(Duration::from_millis(20)).await;
-        }
+        fake.wait_for_source(paused, || report_calls(&fake, paused) > before).await;
         let update: Value = serde_json::from_slice(&client.get(format!("{base}/api/financial-update")).send().await.unwrap().bytes().await.unwrap()).unwrap();
         assert!(report_calls(&fake,paused) > before, "manual update did not request {paused}: {update}");
         let interrupted = http_snapshot(&client,&base).await;
@@ -642,7 +636,7 @@ async fn review_restart_resumes_corrections_after_list_commit_and_partial_report
         let base = format!("http://{}",restarted.addr().await);
         assert_eq!(client.get(format!("{base}/api/symbols/005930")).send().await.unwrap().status(),StatusCode::OK);
         http_start(&client, &base).await;
-        let recovered = http_settled(&client,&base).await;
+        let recovered = http_settled(&fake,&client,&base).await;
         assert_eq!(recovered["status"],"ready");
         for code in ["11013","11012","11014","11011"] {
             assert_eq!(recovered["collection"]["reports"][format!("2015/{code}")]["statement"]["data"]["accounts"][0]["fields"]["thstrm_amount"],"120","restart at {paused}, report {code}");
@@ -969,7 +963,7 @@ async fn review2_failed_list_storage_keeps_real_price_usable_and_preserves_verif
     assert_eq!(client.get(&price_url).send().await.unwrap().status(),StatusCode::OK);
     fake.state.lock().unwrap().correction = true;
     client.post(format!("{base}/api/symbols/005930/financial-source")).send().await.unwrap();
-    let failed = http_settled(&client,&base).await;
+    let failed = http_settled(&fake,&client,&base).await;
     assert_eq!(failed["failure"],"storage");
     assert_eq!(failed["collection"]["reports"],serde_json::to_value(&original.reports).unwrap());
     assert_eq!(tokio::time::timeout(Duration::from_secs(1),client.get(&price_url).send()).await.unwrap().unwrap().status(),StatusCode::OK);

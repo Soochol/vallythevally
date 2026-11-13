@@ -310,7 +310,7 @@ async fn first_and_mid_preferred_source_failures_leave_real_price_api_usable() {
                 state.notice = Some(body.clone());
             }
             http_start(&client, &base).await;
-            http_settled(&client, &base).await;
+            http_settled(&fake, &client, &base).await;
             let response = client.get(format!("{base}/api/symbols/005935/financial-source")).send().await.unwrap();
             let snapshot: Value = serde_json::from_slice(&response.bytes().await.unwrap()).unwrap();
             assert_eq!(snapshot["status"],"failed");
@@ -422,7 +422,7 @@ async fn preferred_mapping_calculations_and_quarter_year_prices_work_together() 
     for url in &prices {assert_eq!(client.get(url).send().await.unwrap().status(),StatusCode::OK);}
     assert_eq!(integrated_page(&client,&base,"005930","Y").await["status"],"not_collected");
     http_start(&client, &base).await;
-    http_settled(&client, &base).await;
+    http_settled(&fake, &client, &base).await;
     let preferred=integrated_page(&client,&base,"005935","Y").await;
     assert_eq!(preferred["corpCode"],CORP);assert_eq!(preferred["status"],"ready");
     assert_eq!(preferred["shareClassReason"],"preferred_issue_class_unverified");

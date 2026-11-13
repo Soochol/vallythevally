@@ -21,13 +21,13 @@ async fn unchanged_manual_http_update_reuses_reports_and_actual_success_times() 
     let client = reqwest::Client::new();
     client.get(format!("{base}/api/bars?symbol=005930&period=D&limit=5")).send().await.unwrap().error_for_status().unwrap();
     http_start(&client, &base).await;
-    let before = http_settled(&client, &base).await;
+    let before = http_settled(&fake, &client, &base).await;
     assert_eq!(before["status"], "ready");
     let endpoints = ["fnlttSinglAcntAll.json", "fnlttXbrl.xml", "alotMatter.json"];
     let counts = endpoints.map(|endpoint| fake.count(endpoint));
     let lists = fake.count("list.json");
     client.post(format!("{base}/api/symbols/005930/financials?period=Y")).send().await.unwrap().error_for_status().unwrap();
-    let after = http_settled(&client, &base).await;
+    let after = http_settled(&fake, &client, &base).await;
     assert_eq!(after["status"], "ready");
     assert_eq!(endpoints.map(|endpoint| fake.count(endpoint)), counts, "unchanged statements, XBRL and dividends must not download again");
     assert_eq!(fake.count("list.json"), lists + 1);
@@ -58,14 +58,14 @@ async fn corrected_report_http_update_reuses_comparison_periods_without_losing_q
     let client = reqwest::Client::new();
     client.get(format!("{base}/api/bars?symbol=005930&period=D&limit=5")).send().await.unwrap().error_for_status().unwrap();
     http_start(&client, &base).await;
-    let before = http_settled(&client, &base).await;
+    let before = http_settled(&fake, &client, &base).await;
     assert_eq!(before["status"], "ready");
     assert_eq!(point(&page(&client, &base, "Q").await, "revenue")["value"], 700.0);
     let endpoints = ["fnlttSinglAcntAll.json", "fnlttXbrl.xml", "alotMatter.json"];
     let counts = endpoints.map(|endpoint| fake.count(endpoint));
     fake.state.lock().unwrap().report_corrections.insert((2016, "11011".into()));
     client.post(format!("{base}/api/symbols/005930/financials?period=Q")).send().await.unwrap().error_for_status().unwrap();
-    let after = http_settled(&client, &base).await;
+    let after = http_settled(&fake, &client, &base).await;
     assert_eq!(after["status"], "ready");
     assert_eq!(endpoints.map(|endpoint| fake.count(endpoint)), counts.map(|count| count + 1));
     let quarter = page(&client, &base, "Q").await;
@@ -94,7 +94,7 @@ async fn partial_correction_http_keeps_coherent_values_and_resumes_only_failed_r
         let client = reqwest::Client::new();
         client.get(format!("{base}/api/bars?symbol=005930&period=D&limit=5")).send().await.unwrap().error_for_status().unwrap();
         http_start(&client, &base).await;
-    let before = http_settled(&client, &base).await;
+    let before = http_settled(&fake, &client, &base).await;
         assert_eq!(before["status"], "ready");
         let failure = format!("fnlttSinglAcntAll.json/2016/{failed_code}");
         {
@@ -103,7 +103,7 @@ async fn partial_correction_http_keeps_coherent_values_and_resumes_only_failed_r
             state.failures.insert(failure.clone(), "900".into());
         }
         client.post(format!("{base}/api/symbols/005930/financials?period=Q")).send().await.unwrap().error_for_status().unwrap();
-        assert_eq!(http_settled(&client, &base).await["status"], "partial_failure");
+        assert_eq!(http_settled(&fake, &client, &base).await["status"], "partial_failure");
         for period in ["Q", "Y"] {
             let saved = page(&client, &base, period).await;
             let revenue = point(&saved, "revenue");
@@ -122,7 +122,7 @@ async fn partial_correction_http_keeps_coherent_values_and_resumes_only_failed_r
         let counts = endpoints.map(|endpoint| fake.count(endpoint));
         fake.state.lock().unwrap().failures.remove(&failure);
         client.post(format!("{base}/api/symbols/005930/financials?period=Q")).send().await.unwrap().error_for_status().unwrap();
-        let recovered = http_settled(&client, &base).await;
+        let recovered = http_settled(&fake, &client, &base).await;
         assert_eq!(recovered["status"], "ready");
         assert_eq!(endpoints.map(|endpoint| fake.count(endpoint)), [counts[0] + 1, counts[1] + 1, counts[2]]);
         let quarter = page(&client, &base, "Q").await;
@@ -151,14 +151,14 @@ async fn newly_disclosed_http_report_replaces_unpublished_without_refetching_sav
     let client = reqwest::Client::new();
     client.get(format!("{base}/api/bars?symbol=005930&period=D&limit=5")).send().await.unwrap().error_for_status().unwrap();
     http_start(&client, &base).await;
-    let before = http_settled(&client, &base).await;
+    let before = http_settled(&fake, &client, &base).await;
     assert_eq!(before["status"], "ready");
     assert_eq!(before["collection"]["reports"]["2017/11013"]["statement"]["absent"], true);
     let known_calls = || fake.state.lock().unwrap().calls.iter().filter(|(endpoint, params)| endpoint == "fnlttSinglAcntAll.json" && params.get("bsns_year").is_some_and(|year| year == "2015" || year == "2016")).count();
     let count = known_calls();
     fake.state.lock().unwrap().report_corrections.insert((2017, "11013".into()));
     client.post(format!("{base}/api/symbols/005930/financials?period=Q")).send().await.unwrap().error_for_status().unwrap();
-    let after = http_settled(&client, &base).await;
+    let after = http_settled(&fake, &client, &base).await;
     assert_eq!(after["status"], "ready");
     let quarter = page(&client, &base, "Q").await;
     let revenue = quarter["series"][0]["points"].as_array().unwrap().iter().find(|point| point["businessYear"] == 2017 && point["reportCode"] == "11013").unwrap();
@@ -193,7 +193,7 @@ async fn annual_correction_http_fills_absent_statement_or_dividends_when_the_oth
         let client = reqwest::Client::new();
         client.get(format!("{base}/api/bars?symbol=005930&period=D&limit=5")).send().await.unwrap().error_for_status().unwrap();
         http_start(&client, &base).await;
-    let before = http_settled(&client, &base).await;
+    let before = http_settled(&fake, &client, &base).await;
         assert_eq!(before["status"], "ready");
         let fetch = if missing == "alotMatter.json" { "dividends" } else { "statement" };
         assert_eq!(before["collection"]["reports"]["2016/11011"][fetch]["absent"], true);
@@ -205,7 +205,7 @@ async fn annual_correction_http_fills_absent_statement_or_dividends_when_the_oth
             state.report_corrections.insert((2016, "11011".into()));
         }
         client.post(format!("{base}/api/symbols/005930/financials?period=Y")).send().await.unwrap().error_for_status().unwrap();
-        assert_eq!(http_settled(&client, &base).await["status"], "ready");
+        assert_eq!(http_settled(&fake, &client, &base).await["status"], "ready");
         let annual = page(&client, &base, "Y").await;
         assert_eq!(point(&annual, "revenue")["value"], 1200.0, "{missing}");
         assert_eq!(point(&annual, "dps")["value"], 10.0, "{missing}: {}", point(&annual, "dps"));
@@ -226,7 +226,7 @@ async fn legacy_http_snapshot_without_versions_keeps_coherent_values_during_part
     let client = reqwest::Client::new();
     client.get(format!("{base}/api/bars?symbol=005930&period=D&limit=5")).send().await.unwrap().error_for_status().unwrap();
     http_start(&client, &base).await;
-    let before = http_settled(&client, &base).await;
+    let before = http_settled(&fake, &client, &base).await;
     assert_eq!(before["status"], "ready");
     server.stop().await;
     {
@@ -252,7 +252,7 @@ async fn legacy_http_snapshot_without_versions_keeps_coherent_values_during_part
     let base = format!("http://{}", restarted.addr().await);
     client.get(format!("{base}/api/bars?symbol=005930&period=D&limit=5")).send().await.unwrap().error_for_status().unwrap();
     http_start(&client, &base).await;
-    assert_eq!(http_settled(&client, &base).await["status"], "partial_failure");
+    assert_eq!(http_settled(&fake, &client, &base).await["status"], "partial_failure");
     let quarter = page(&client, &base, "Q").await;
     assert_eq!(point(&quarter, "revenue")["value"], 700.0, "legacy zero versions must not make old and corrected receipts compatible");
     assert_eq!(point(&quarter, "owner_roe")["value"], 20.0);
@@ -272,7 +272,7 @@ async fn unchanged_http_inputs_remain_coherent_while_one_saved_report_is_retryin
     let client = reqwest::Client::new();
     client.get(format!("{base}/api/bars?symbol=005930&period=D&limit=5")).send().await.unwrap().error_for_status().unwrap();
     http_start(&client, &base).await;
-    let before = http_settled(&client, &base).await;
+    let before = http_settled(&fake, &client, &base).await;
     assert_eq!(before["status"], "ready");
     server.stop().await;
     let mut saved = before["collection"].clone();
@@ -287,14 +287,12 @@ async fn unchanged_http_inputs_remain_coherent_while_one_saved_report_is_retryin
     let base = format!("http://{}", restarted.addr().await);
     client.get(format!("{base}/api/bars?symbol=005930&period=D&limit=5")).send().await.unwrap().error_for_status().unwrap();
     client.post(format!("{base}/api/symbols/005930/financials?period=Q")).send().await.unwrap().error_for_status().unwrap();
-    tokio::time::timeout(Duration::from_secs(5), async {
-        while fake.count("statement_stream") == 0 { tokio::time::sleep(Duration::from_millis(10)).await; }
-    }).await.unwrap();
+    fake.wait_for_call("statement_stream", 1).await;
     let during = page(&client, &base, "Q").await;
     fake.state.lock().unwrap().stream_paused_report = None;
     assert_eq!(during["status"], "collecting");
     assert_eq!(point(&during, "owner_roe")["value"], 20.0, "reusing unchanged inputs must not temporarily split their validation snapshot");
-    assert_eq!(http_settled(&client, &base).await["status"], "ready");
+    assert_eq!(http_settled(&fake, &client, &base).await["status"], "ready");
     assert_eq!(endpoints.map(|endpoint| fake.count(endpoint)), [counts[0] + 1, counts[1] + 1, counts[2]]);
     restarted.stop().await;
 }
