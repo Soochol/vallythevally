@@ -48,3 +48,29 @@ test("메뉴와 팝오버는 같은 유리 표면을 쓰고 재무자료 상태�
   expect(await styleOf(financial)).toMatchObject({ background: "rgba(27, 33, 27, 0.74)", blur: "blur(22px) saturate(1.6)" });
   await page.screenshot({ path: info.outputPath("1440-financial.png") });
 });
+
+test("투명도 줄이기를 켜면 유리 표면은 흐림 없이 불투명하게 그려진다", async ({ context, page }) => {
+  await page.goto("/?symbol=005930");
+  await expect(cell(page)).toHaveAttribute("aria-busy", "false");
+  const cdp = await context.newCDPSession(page);
+  await cdp.send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-transparency", value: "reduce" }] });
+  await page.getByRole("button", { name: "분봉" }).first().click();
+  const minutes = page.locator(".minute-menu");
+  await expect(minutes).toBeVisible();
+  expect(await styleOf(minutes)).toMatchObject({ background: "rgb(27, 33, 27)", blur: "none" });
+  expect(await styleOf(page.getByRole("toolbar", { name: "차트 도구 막대" }))).toMatchObject({ background: "rgb(27, 33, 27)", blur: "none" });
+});
+
+test("드로잉 삭제 알림의 되돌리기는 Ctrl+Z 표시를 화면에만 보이고 접근성 이름은 되돌리기 그대로다", async ({ page }) => {
+  await page.goto("/?symbol=005930");
+  await expect(cell(page)).toHaveAttribute("aria-busy", "false");
+  const box = (await cell(page).boundingBox())!;
+  await page.mouse.click(box.x + box.width * 0.4, box.y + box.height * 0.6, { button: "right" });
+  await page.getByRole("menu", { name: "드로잉 메뉴", exact: true }).getByRole("menuitem", { name: /이 가격에 수평선/ }).click();
+  await page.mouse.click(box.x + box.width * 0.4, box.y + box.height * 0.25, { button: "right" });
+  await page.getByRole("menu", { name: "드로잉 메뉴", exact: true }).getByRole("menuitem", { name: /이 종목 드로잉 모두 지우기/ }).click();
+  const undo = page.getByRole("status").getByRole("button", { name: "되돌리기", exact: true });
+  await expect(undo).toBeVisible();
+  await expect(undo.locator("kbd")).toHaveText("Ctrl+Z");
+  await expect(undo).toHaveAttribute("aria-keyshortcuts", "Control+Z Meta+Z");
+});

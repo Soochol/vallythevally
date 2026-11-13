@@ -95,7 +95,7 @@ function MenuButton({ item, onClose, register }: { item: Focusable; onClose: Pro
         if (item.kind !== "check") onClose(true);
       }}
     >
-      <span className="w-[14px]">{item.kind === "action" ? item.icon : item.checked && <CheckIcon />}</span>
+      <span className="grid w-4 place-items-center">{item.kind === "action" ? item.icon : item.checked && <CheckIcon />}</span>
       <span className="group-disabled:opacity-40">{item.label}</span>
       {"hint" in item && item.hint && <span className="ml-auto pl-4 text-xs text-text-2">{item.hint}</span>}
     </button>
