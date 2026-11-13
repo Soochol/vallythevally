@@ -16,6 +16,7 @@ test("옛 라이트 설정은 다크로 옮기고 다른 설정과 모르는 키
     drawing: DEFAULT_UI_PREFS.drawing,
     pinnedMinutes: [],
     collapsedWatchGroups: ["G1"],
+    indicatorWindow: "inspector",
     phone: { symbol: "000660" },
   };
   const { prefs, extra } = parseUiState(raw);
@@ -31,6 +32,7 @@ test("옛 라이트 설정은 다크로 옮기고 다른 설정과 모르는 키
     drawing: DEFAULT_UI_PREFS.drawing,
     pinnedMinutes: [],
     collapsedWatchGroups: ["G1"],
+    indicatorWindow: "inspector",
   });
   expect(extra).toEqual({ phone: { symbol: "000660" } });
   expect(toUiState(prefs, extra)).toEqual({ ...raw, theme: "dark" });
@@ -86,6 +88,17 @@ test("오른쪽 탭을 왕복하고 잘못된 값은 기본으로 연다", () =>
   expect(parseUiState(toUiState(prefs, extra)).prefs).toMatchObject({ rightPanel: "screener", watchCollapsed: true });
   vi.spyOn(console, "warn").mockImplementation(() => {});
   expect(parseUiState({ ...DEFAULT_UI_PREFS, rightPanel: "bad" }).prefs).toEqual(DEFAULT_UI_PREFS);
+});
+
+test("지표 창 방식은 왕복하고, 없으면 경고 없이 가운데 창, 틀리면 가운데 창으로 연다", () => {
+  const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+  const { prefs, extra } = parseUiState({ ...DEFAULT_UI_PREFS, indicatorWindow: "inspector" });
+  expect(parseUiState(toUiState(prefs, extra)).prefs.indicatorWindow).toBe("inspector");
+  const { indicatorWindow: _mode, ...older } = DEFAULT_UI_PREFS;
+  expect(parseUiState(older).prefs.indicatorWindow).toBe("dialog");
+  expect(warn).not.toHaveBeenCalled();
+  expect(parseUiState({ ...DEFAULT_UI_PREFS, indicatorWindow: "side" }).prefs.indicatorWindow).toBe("dialog");
+  expect(warn).toHaveBeenCalledOnce();
 });
 
 test("사용자가 정한 패널 폭은 왕복하고 숫자가 아니거나 0 이하면 기본 폭으로 연다", () => {

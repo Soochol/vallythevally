@@ -65,8 +65,9 @@ test("drawings survive realtime updates, series replacement, resync and controll
   };
   await expectDrawing();
 
-  await page.getByRole("button", { name: "봉 모양", exact: true }).click();
-  await page.getByRole("menuitemradio", { name: "라인", exact: true }).click();
+  await page.getByRole("button", { name: "차트 설정", exact: true }).click();
+  await page.getByRole("dialog", { name: "차트 설정", exact: true }).getByRole("group", { name: "봉 모양" }).getByRole("button", { name: "라인", exact: true }).click();
+  await page.keyboard.press("Escape");
   await pushPrice(scenario, page, 202_000, "100002");
   await expectDrawing();
 

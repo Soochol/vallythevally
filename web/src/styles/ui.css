@@ -110,3 +110,21 @@ html.panel-resizing, html.panel-resizing * { cursor:col-resize !important; user-
 .sentence-lines > li > :not(:first-child) { order: 2; }
 
 .ui-popover.ui-dialog-backdrop[data-command-frame] { background:transparent; }
+
+.chart-extreme { position:absolute; left:0; top:0; z-index:3; pointer-events:none; }
+.chart-extreme[hidden] { display:none; }
+.chart-extreme>i { position:absolute; left:calc(-1 * var(--size-4)); top:calc(-1 * var(--size-4)); width:var(--size-8); height:var(--size-8); border-radius:var(--r-pill); box-shadow:0 0 0 var(--size-2) var(--chart-bg); }
+.chart-extreme>span { position:absolute; left:0; transform:translateX(calc(-1 * var(--size-10))); padding:var(--size-2) var(--size-8); border-radius:var(--r-s); background:var(--raised); box-shadow:0 0 0 var(--size-1) var(--line-strong); color:var(--text); font-size:var(--fs-xs); white-space:nowrap; font-variant-numeric:tabular-nums; }
+.chart-extreme[data-flip]>span { transform:translateX(calc(-100% + var(--size-10))); }
+.chart-extreme b { font-weight:600; }
+.chart-extreme[data-extreme=high]>i { background:var(--up); }
+.chart-extreme[data-extreme=high]>span { top:calc(-1 * var(--size-30)); }
+.chart-extreme[data-extreme=high] b { color:var(--up); }
+.chart-extreme[data-extreme=low]>i { background:var(--down); }
+.chart-extreme[data-extreme=low]>span { top:var(--size-10); }
+.chart-extreme[data-extreme=low] b { color:var(--down); }
+.ui-switch { display:flex; align-items:center; gap:var(--size-10); width:100%; border-radius:var(--r-m); }
+.ui-switch-track { position:relative; flex:none; width:var(--size-36); height:var(--size-20); border-radius:var(--r-pill); background:var(--line-strong); transition:background .12s; }
+.ui-switch-track>span { position:absolute; top:var(--size-2); left:var(--size-2); width:var(--size-16); height:var(--size-16); border-radius:var(--r-pill); background:var(--text); transition:left .12s; }
+.ui-switch[aria-checked=true] .ui-switch-track { background:var(--accent); }
+.ui-switch[aria-checked=true] .ui-switch-track>span { left:var(--size-18); background:var(--accent-ink); }

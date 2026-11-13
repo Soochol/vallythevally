@@ -3,6 +3,7 @@ import {
   addCompare,
   addIndicator,
   type ChartSettings,
+  clampVisibleBars,
   DEFAULT_CHART_SETTINGS,
   movePanel,
   parseChartSettings,
@@ -32,10 +33,30 @@ const rsi: ChartSettings = {
   ],
   compare: ["005930"],
   panels: [{ id: "p1", stretch: 0.3 }],
+  visibleBars: 240,
+  showExtremes: true,
 };
 
 test("맞는 v2 모양은 그대로 읽는다", () => {
   expect(parseChartSettings(rsi)).toEqual(rsi);
+});
+
+test("보이는 봉 수와 화면 내 최고·최저가 없는 저장값은 자동·끔으로 읽는다", () => {
+  const { visibleBars: _bars, showExtremes: _extremes, ...older } = rsi;
+  expect(parseChartSettings(older)).toEqual({ ...rsi, visibleBars: null, showExtremes: false });
+});
+
+test("자동 봉 수와 경계의 봉 수는 그대로 읽는다", () => {
+  expect(parseChartSettings({ ...rsi, visibleBars: null }).visibleBars).toBeNull();
+  expect(parseChartSettings({ ...rsi, visibleBars: 10 }).visibleBars).toBe(10);
+  expect(parseChartSettings({ ...rsi, visibleBars: 2000 }).visibleBars).toBe(2000);
+});
+
+test("직접 넣은 봉 수는 정수로 반올림해 10~2000 안으로 맞추고, 숫자가 아니면 받지 않는다", () => {
+  expect(clampVisibleBars(150.4)).toBe(150);
+  expect(clampVisibleBars(3)).toBe(10);
+  expect(clampVisibleBars(99999)).toBe(2000);
+  expect(clampVisibleBars(Number.NaN)).toBeNull();
 });
 
 test("v1은 읽을 때 기본 거래량 지표를 넣은 v2로 바꾼다", () => {
@@ -70,6 +91,12 @@ test.each([
   ["비교 종목 4개", { ...rsi, compare: ["005930", "000660", "035420", "IDX:001"] }],
   ["같은 비교 종목 둘", { ...rsi, compare: ["000660", "000660"] }],
   ["빠진 키", { v: 2, style: "candle", scale: "normal" }],
+  ["봉 수 9", { ...rsi, visibleBars: 9 }],
+  ["봉 수 2001", { ...rsi, visibleBars: 2001 }],
+  ["소수 봉 수", { ...rsi, visibleBars: 120.5 }],
+  ["문자열 봉 수", { ...rsi, visibleBars: "120" }],
+  ["켜짐이 문자열", { ...rsi, showExtremes: "true" }],
+  ["v1인데 봉 수가 틀림", { v: 1, style: "candle", scale: "normal", indicators: [], compare: [], panels: [], visibleBars: 0 }],
   ["v1인데 지표가 있음", { v: 1, style: "candle", scale: "normal", indicators: [rsi.indicators[0]], compare: [], panels: [] }],
   ["모르는 지표 종류", ind({ spec: { kind: "wma", period: 5 } })],
   ["지표 설정 필드가 빠짐", ind({ spec: { kind: "ma", period: 5 } })],

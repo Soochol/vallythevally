@@ -3,7 +3,7 @@ import { create } from "zustand";
 import type { SymbolCode } from "../api/generated/SymbolCode";
 import type { WatchColumn } from "../lib/watchlist";
 import type { DrawingPrefs } from "../chart/drawings/prefs";
-import { DEFAULT_UI_PREFS, MAX_RECENT, sortColumns, type RightPanel, type Theme, type UiExtra, type UiPrefs } from "../persist/uiState";
+import { DEFAULT_UI_PREFS, MAX_RECENT, sortColumns, type IndicatorWindow, type RightPanel, type Theme, type UiExtra, type UiPrefs } from "../persist/uiState";
 
 interface UiStore {
   prefs: UiPrefs;
@@ -21,6 +21,7 @@ interface UiStore {
   toggleWatchColumn(column: WatchColumn): void;
   setDrawingPrefs(patch: Partial<DrawingPrefs>): void;
   setWatchGroupCollapsed(id: string, collapsed: boolean, known: readonly string[]): void;
+  setIndicatorWindow(mode: IndicatorWindow): void;
 }
 
 export const useUiStore = create<UiStore>()((set) => {
@@ -47,6 +48,7 @@ export const useUiStore = create<UiStore>()((set) => {
     clearRecent: () => edit((p) => (p.recentSymbols.length === 0 ? p : { ...p, recentSymbols: [] })),
     setLastLayoutId: (id) => edit((p) => (p.lastLayoutId === id ? p : { ...p, lastLayoutId: id })),
     setActiveWatchlist: (id) => edit((p) => (p.activeWatchlistId === id ? p : { ...p, activeWatchlistId: id })),
+    setIndicatorWindow: (indicatorWindow) => edit((p) => (p.indicatorWindow === indicatorWindow ? p : { ...p, indicatorWindow })),
     setDrawingPrefs: (patch) => edit((p) => ({ ...p, drawing: { ...p.drawing, ...patch } })),
     setWatchGroupCollapsed: (id, collapsed, known) =>
       edit((p) => {
