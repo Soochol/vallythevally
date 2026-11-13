@@ -278,6 +278,7 @@ test("Tab은 검색 안에 머물고 필터 버튼의 Enter는 종목을 열지 
   await page.keyboard.press("Enter");
   await expect(filter).toHaveAttribute("aria-pressed", "true");
   await expect(dialog).toBeVisible();
+  await expect(dialog.getByRole("option")).toHaveCount(0);
   await dialog.getByRole("button").last().focus();
   await page.keyboard.press("Tab");
   await expect(input).toBeFocused();
