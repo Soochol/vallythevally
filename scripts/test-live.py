@@ -93,6 +93,7 @@ class LiveToolsTest(unittest.TestCase):
         self.root = Path(self.temporary.name)
         (self.root / "scripts").mkdir()
         shutil.copy2(ROOT / "scripts/chromium.mjs", self.root / "scripts/chromium.mjs")
+        shutil.copy2(ROOT / "scripts/dart-ui.mjs", self.root / "scripts/dart-ui.mjs")
         (self.root / "web").mkdir()
         (self.root / "web/package.json").write_text('{}')
         self.result = self.root / "result"
