@@ -3,7 +3,7 @@ import { createPortal } from "react-dom";
 import { VenuePicker } from "../venue/VenuePicker";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useFinancials } from "../../api/financials";
-import { isFinancial } from "../../chart/indicators/kinds";
+import { financialRequest } from "../../chart/indicators/shown";
 import { useSymbolInfo, useSymbolInfos } from "../../api/queries";
 import { type CellStatus, ChartController } from "../../chart/ChartController";
 import type { IndicatorCommand } from "../../chart/indicators/legendRows";
@@ -17,7 +17,7 @@ import { useSelectionStore } from "../../stores/selection";
 import { useTheme } from "../../stores/ui";
 import { cellErrorView, olderErrorView } from "./cellError";
 import { useDrawingSurface } from "../../chart/drawings/useDrawingSurface";
-import { previewSettings, useIndicatorPreview } from "../indicator-command/preview";
+import { useShownSettings } from "../indicator-command/preview";
 import { AxisMode } from "./AxisMode";
 import { IndicatorPopover } from "../indicator-dialog/IndicatorPopover";
 import type { IndicatorConfig } from "../../chart/settings";
@@ -54,14 +54,14 @@ interface Props {
 /** 컨트롤러를 붙였다 떼는 얇은 컴포넌트. 봉 데이터는 props로 받지 않는다(frontend.md §5.4). */
 export function ChartCell({ slot, status, onStatus }: Props) {
   const cell = useCell(slot);
-  const preview = useIndicatorPreview((s) => s.current?.slot === slot ? s.current.preview : null);
-  const chartSettings = useMemo(() => previewSettings(cell.chartSettings, preview), [cell.chartSettings, preview]);
+  const { settings: chartSettings, preview } = useShownSettings(slot, cell.chartSettings);
   const info = useSymbolInfo(cell.symbol).data;
   const venue = shownVenue(cell.venue, info);
   const compareInfos = useSymbolInfos(cell.chartSettings.compare);
   const compareKey = compareInfos.map((i) => `${i.code}:${i.name}`).join("|");
   const compareNames = useMemo(() => Object.fromEntries(compareInfos.map((i) => [i.code, i.name])), [compareKey]);
-  const financial = useFinancials(cell.symbol, cell.period === "Y" ? "Y" : "Q", (cell.period === "Q" || cell.period === "Y") && chartSettings.indicators.some((i) => isFinancial(i.spec) && i.visible));
+  const request = financialRequest(cell.period, chartSettings);
+  const financial = useFinancials(cell.symbol, request.period, request.enabled);
   const theme = useTheme();
   const openSearch = useSelectionStore((s) => s.openSearch);
   const chartEl = useRef<HTMLDivElement>(null);

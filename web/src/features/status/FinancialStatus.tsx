@@ -1,15 +1,18 @@
 import { useQuery } from "@tanstack/react-query";
 import { financialsQuery } from "../../api/financials";
 import { financialStatus, financialSummary } from "../../chart/financials";
-import { isFinancial } from "../../chart/indicators/kinds";
+import { financialRequest } from "../../chart/indicators/shown";
+import { useShownSettings } from "../indicator-command/preview";
 import { useCell } from "../../stores/layout";
 import { useSelectionStore } from "../../stores/selection";
 
 export function FinancialStatus() {
-  const cell = useCell(useSelectionStore((s) => s.activeSlot));
-  const visible = (cell.period === "Q" || cell.period === "Y") && cell.chartSettings.indicators.some((i) => i.visible && isFinancial(i.spec));
-  const query = useQuery({ ...financialsQuery({ symbol: cell.symbol, period: cell.period === "Y" ? "Y" : "Q" }), enabled: false });
-  if (!visible) return null;
+  const slot = useSelectionStore((s) => s.activeSlot);
+  const cell = useCell(slot);
+  const { settings } = useShownSettings(slot, cell.chartSettings);
+  const request = financialRequest(cell.period, settings);
+  const query = useQuery({ ...financialsQuery({ symbol: cell.symbol, period: request.period }), enabled: false });
+  if (!request.enabled) return null;
   const data = query.data;
   if (query.error) return <span aria-label="재무 수집 상태" className="truncate text-warning" title={String(query.error)}>재무자료 조회 실패</span>;
   if (!data) return <span aria-label="재무 수집 상태" className="truncate">재무자료 조회 중</span>;
