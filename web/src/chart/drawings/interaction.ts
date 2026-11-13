@@ -176,9 +176,9 @@ export function step(s: Interaction, e: Input, c: Context): Transition {
   }
   if (s.kind === "drawing") {
     const first = s.points[0];
-    const p = constrained(s.tool, [first], e.at, e.mods, c);
-    if (p === null) return result(s);
     const placement = s.tool.placement;
+    const p = placement.kind === "freehand" ? c.ctx.fromScreen(e.at) : constrained(s.tool, [first], e.at, e.mods, c);
+    if (p === null) return result(s);
     const captured = s.points.length >= FREEHAND_CAPTURE_LIMIT ? limitPoints(s.points, FREEHAND_CAPTURE_LIMIT / 2) : s.points;
     const points: Anchors = placement.kind === "freehand" ? [first, ...captured.slice(1), p] : [first, p];
     if (e.kind === "move") return result({ ...s, points });
@@ -197,9 +197,9 @@ export function step(s: Interaction, e: Input, c: Context): Transition {
     const resolution = resolvePress(c.tool ? "draw" : c.mode === "eraser" ? "erase" : "select", e.hit.kind, e.mods, c.registeredModes);
     if (!resolution) return result(s);
     if (c.tool) {
-      const p = c.point(e.at, "place", e.mods);
-      if (p === null) return result(s);
       const placement = c.tool.placement;
+      const p = placement.kind === "freehand" ? c.ctx.fromScreen(e.at) : c.point(e.at, "place", e.mods);
+      if (p === null) return result(s);
       if (placement.kind === "points" && placement.oneClick) return placed(c.tool, placement.oneClick(p, c.ctx), c);
       if (placement.kind === "points" && placement.count === 1) return placed(c.tool, [p], c);
       if (placement.kind === "polyline") return result({ kind: "placing", tool: c.tool, fixed: [p], cursor: p });
