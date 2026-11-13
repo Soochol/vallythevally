@@ -39,6 +39,10 @@ test("주석 도구: 글자·말풍선·가격 라벨·화살표를 놓고 새�
   await pickTool(page, "주석", "가격 라벨");
   await click(page, [0.8, 0.6]);
   await expect(editor).toBeHidden();
+  await page.getByRole("button", { name: "드로잉 더 보기" }).click();
+  await expect(page.getByRole("menuitem", { name: "복제", exact: true })).toBeVisible();
+  await expect(page.getByRole("menuitem", { name: "글자 고치기…" })).toHaveCount(0);
+  await page.keyboard.press("Escape");
   await pickTool(page, "주석", "화살표");
   await drag(page, [0.82, 0.75], [0.9, 0.65]);
   await expect.poll(async () => (await drawings(scenario)).map((d) => d.tool).sort()).toEqual(["arrow", "callout", "pricelabel", "text"]);

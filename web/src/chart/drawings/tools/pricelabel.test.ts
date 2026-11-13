@@ -23,7 +23,7 @@ const points = [{ t: 1000, price: 120 }];
 describe("가격 라벨", () => {
   test("점 하나이고 사용자가 쓰는 글자는 없다", () => {
     expect(pricelabel.placement).toEqual({ kind: "points", count: 1 });
-    expect(pricelabel.text).toEqual({ editOnPlace: false });
+    expect(pricelabel.text).toBeUndefined();
     expect(pricelabel.settings.text?.map((f) => f.kind)).toEqual(["textStyle"]);
   });
 

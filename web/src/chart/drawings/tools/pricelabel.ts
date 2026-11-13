@@ -33,7 +33,6 @@ export const pricelabel = defineTool<PriceLabelStyle>({
   icon: "M4 12 L9 7 H20 V17 H9 Z",
   placement: { kind: "points", count: 1 },
   pointRoles: [{ label: "가격", uses: "both" }],
-  text: { editOnPlace: false },
   defaultStyle: priceLabelDefaults,
   parseStyle: parsePriceLabelStyle,
   bar: { textColor: L("label", "color"), fill: shownOnPick(L("background")) },
