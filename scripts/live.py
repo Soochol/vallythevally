@@ -120,7 +120,7 @@ def run_live(root, args, web):
     command = ["web.py", "live", "--mode", args.mode, "--timeout", str(args.timeout), *(["--headed"] if args.headed else []), *(["--key-file", "[path omitted]"] if args.key_file else [])]
     with evidence.Run(root, "live", command) as record:
         record.plan("key", "server", "dependencies", "wasm", "types", "ui", "source", "chromium")
-        result = {"status": "failed", "mode": args.mode, "symbol": SYMBOL, "fresh_database": True, "limits": {"source_seconds": args.timeout, "app_polls": 300, "dart_requests_upper_bound": args.timeout * 4 + 2, "refresh_posts": 0}, "scope": "isolated fake-kiwoom + real OpenDART"}
+        result = {"status": "failed", "mode": args.mode, "symbol": SYMBOL, "fresh_database": True, "limits": {"source_seconds": args.timeout, "app_polls": 300, "dart_requests_upper_bound": args.timeout * 4 + 2, "refresh_posts": 0}, "scope": "isolated financial service + real OpenDART"}
         record.result = result
         processes = []
         try:
@@ -132,21 +132,16 @@ def run_live(root, args, web):
                 evidence.SECRETS.add(key)
             environment = web.environment_for(root, record.directory / "tmp")
             environment = {name: value for name, value in environment.items() if name in isolated_environment() or name in ("TMPDIR", "CARGO_TARGET_DIR", "CARGO_BUILD_JOBS")}
+            web.prepare_dart(root, environment, record)
             if args.mode == "full":
                 web.prepare_e2e(root, environment, record)
-            else:
-                web.prepare_server(root, environment, record)
-            environment.pop("VALLY_E2E_BIN_DIR", None)
             deadline = time.monotonic() + args.timeout
             state = record.directory / "state"
             state.mkdir(mode=0o700)
             record.verify()
             binaries = record.directory / "bin"
-            fake = Process([str(binaries / "fake-kiwoom"), "--bind", "127.0.0.1:0"], environment, record.directory / "fake.log", record)
-            processes.append(fake)
-            fake_base = fake.address(deadline)
-            child_environment = {**environment, "LD_LIBRARY_PATH": str(binaries), "OPENDART_API_KEY": key, "VALLY_KIWOOM_APP_KEY": "FAKE-APPKEY-e2e-7f3a91c2", "VALLY_KIWOOM_APP_SECRET": "FAKE-SECRET-e2e-c0ffee42", "VALLY_KIWOOM_BASE_URL": fake_base, "VALLY_KIWOOM_WS_URL": fake_base.replace("http:", "ws:") + "/api/dostk/websocket", "VALLY_BIND": "127.0.0.1:0", "VALLY_DB_PATH": str(state / "user.db"), "VALLY_SCREENER_DB_PATH": str(state / "screener.duckdb"), "VALLY_FINANCIAL_DB_PATH": str(state / "financials.db"), "VALLY_LOCK_PATH": str(state / "kiwoom.lock"), "VALLY_TOKEN_PATH": str(state / "fake-token.json"), "VALLY_STATIC_DIR": str(record.directory / "dist"), "VALLY_SCREENER_UPDATE_ON_START": "off", "VALLY_FINANCIAL_AUTOMATIC": "off", "VALLY_LOG": "info"}
-            server = Process([str(binaries / "vally-server")], child_environment, record.directory / "server.log", record)
+            child_environment = {**environment, "LD_LIBRARY_PATH": str(binaries), "OPENDART_API_KEY": key, "VALLY_FINANCIAL_DB_PATH": str(state / "financials.db"), "VALLY_STATIC_DIR": str(record.directory / "dist")}
+            server = Process([str(binaries / "dart-smoke")], child_environment, record.directory / "server.log", record)
             processes.append(server)
             base = server.address(deadline)
             with record.step("source"):

@@ -137,7 +137,6 @@ jobs:
       - uses: taiki-e/install-action@v2
         with:
           tool: wasm-pack
-      - run: cargo build --locked -p server -p fake-kiwoom
       - uses: pnpm/action-setup@v6
         with:
           version: 11.6.0

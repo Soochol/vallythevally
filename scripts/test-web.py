@@ -71,18 +71,7 @@ class WebWorkflowTest(unittest.TestCase):
         patch.object(web, "run_wasm_pack", write_package).start()
 
     def commands(self, command):
-        def run(arguments, cwd, environment):
-            if "dev.py" in " ".join(arguments):
-                directory = self.root / "target/dev/bin"
-                directory.mkdir(parents=True, exist_ok=True)
-                for name in web.dev.BINARIES:
-                    path = directory / name
-                    path.write_text('#!/bin/sh\nprintf "server-A\\n"\n')
-                    path.chmod(0o755)
-                with web.evidence.Run(self.root, "dev-build", arguments, environment["VALLY_EVIDENCE_DIR"]) as record:
-                    record.artifact("server", directory, "direct", "fixture-build")
-            return command(arguments, cwd, environment)
-        return patch.object(web, "run", run)
+        return patch.object(web, "run", command)
 
     def build_count(self):
         path = self.root / "build-count"
@@ -249,7 +238,7 @@ class WebWorkflowTest(unittest.TestCase):
             self.assertEqual(record.data["artifacts"]["wasm"]["execution"], "reused")
             self.assertTrue(record.data["artifacts"]["wasm"]["sha256"])
 
-    def test_source_edit_after_server_fails_before_browser(self):
+    def test_source_edit_during_preparation_fails_before_browser(self):
         source = self.root / "crates/engine/src/lib.rs"
         original = source.read_text()
         def fingerprint(root):
@@ -266,27 +255,24 @@ class WebWorkflowTest(unittest.TestCase):
         self.assertEqual(manifest["steps"]["playwright"]["status"], "not_run")
         self.assertFalse(any("playwright" in call for call in called))
 
-    def test_shared_binary_replacement_runs_verified_private_copy(self):
-        executed = []
+    def test_frontend_e2e_never_prepares_native_binaries_or_database(self):
         def command(arguments, cwd, environment):
+            self.assertFalse(any("dev.py" in arg or arg in ("cargo", "rustc") for arg in arguments))
+            self.assertNotIn("VALLY_E2E_BIN_DIR", environment)
             if "vite" in arguments[0]:
                 directory = Path(arguments[arguments.index("--outDir") + 1])
                 directory.mkdir()
                 (directory / "index.html").write_text("new UI")
-                (self.root / "target/dev/bin/vally-server").write_text('#!/bin/sh\nprintf "server-B\\n"\n')
-            if "playwright" in arguments[0]:
-                binary = Path(environment["VALLY_E2E_BIN_DIR"]) / "vally-server"
-                executed.append((binary, subprocess.check_output([str(binary)], text=True).strip()))
-        with self.commands(command):
+        with self.commands(command), patch.object(web, "prepare_dart", side_effect=AssertionError("native preparation")):
             web.run_e2e(self.root, [])
-        self.assertEqual([value for _, value in executed], ["server-A"])
         manifest = self.latest_manifest()
         self.assertEqual(manifest["status"], "passed")
-        self.assertEqual(manifest["artifacts"]["server"]["sha256"]["vally-server"], web.dev.digest(executed[0][0]))
-        self.assertNotEqual(executed[0][0].parent, self.root / "target/dev/bin")
+        self.assertNotIn("server", manifest["steps"])
+        self.assertNotIn("server", manifest["artifacts"])
+        self.assertFalse((self.root / "target/dev").exists())
 
-    def test_private_binary_wasm_and_ui_replacement_fail_current_run(self):
-        for name in ("server", "wasm", "ui"):
+    def test_wasm_and_ui_replacement_fail_current_run(self):
+        for name in ("wasm", "ui"):
             with self.subTest(name=name):
                 def command(arguments, cwd, environment):
                     if "vite" in arguments[0]:

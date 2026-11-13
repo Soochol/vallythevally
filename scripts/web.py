@@ -164,9 +164,9 @@ def check_web(root, arguments):
             run([str(root / "web/node_modules/.bin/vitest"), "run", *arguments], root / "web", environment)
 
 
-def prepare_server(root, environment, record):
+def prepare_dart(root, environment, record):
     with record.step("server"):
-        run([sys.executable, str(root / "scripts/dev.py"), "build", "--with-fake"], root, {**environment, "VALLY_EVIDENCE_DIR": str(record.directory / "server-build")})
+        run([sys.executable, str(root / "scripts/dev.py"), "build", "--bin", "dart-smoke"], root, {**environment, "VALLY_EVIDENCE_DIR": str(record.directory / "server-build")})
         state = json.loads((record.directory / "server-build/manifest.json").read_text())
         if state["status"] != "passed" or state["source"] != record.data["source"] or state["source_after"] != record.data["source"]:
             raise ValueError("서버 준비 입력이 이번 실행의 시작 source와 다릅니다")
@@ -180,14 +180,13 @@ def prepare_server(root, environment, record):
                     raise ValueError("서버 실행별 사본이 검증한 산출물과 다릅니다")
             record.artifact(name, destination if origin.is_dir() else destination / origin.name, artifact["execution"], artifact["key"], files=artifact.get("files"))
             record.data["artifacts"][name]["origin"] = str(origin)
-        for filename in dev.BINARIES:
+        for filename in ("dart-smoke",):
             if not (record.directory / "bin" / filename).is_file():
                 raise ValueError("검증한 서버 실행 파일이 빠졌습니다")
-        environment["VALLY_E2E_BIN_DIR"] = str(record.directory / "bin")
+
 
 
 def prepare_e2e(root, environment, record):
-    prepare_server(root, environment, record)
     prepare_web(root, environment)
     with record.step("ui"):
         run([str(root / "web/node_modules/.bin/vite"), "build", "--outDir", str(record.directory / "dist"), "--emptyOutDir"], root / "web", environment)
@@ -199,9 +198,9 @@ def prepare_e2e(root, environment, record):
 def run_e2e(root, arguments):
     with evidence.Run(root, "e2e", ["web.py", "e2e", *arguments]) as record:
         directory = record.directory
-        record.plan("server", "dependencies", "wasm", "types", "ui", "playwright")
+        record.plan("dependencies", "wasm", "types", "ui", "playwright")
         environment = environment_for(root, directory / "tmp")
-        environment.update({"VALLY_E2E_BIN_DIR": str(root / "target/dev/bin"), "VALLY_E2E_STATIC_DIR": str(directory / "dist"), "PLAYWRIGHT_HTML_OUTPUT_DIR": str(directory / "report"), "PLAYWRIGHT_HTML_OPEN": "never"})
+        environment.update({"VALLY_E2E_STATIC_DIR": str(directory / "dist"), "PLAYWRIGHT_HTML_OUTPUT_DIR": str(directory / "report"), "PLAYWRIGHT_HTML_OPEN": "never"})
         prepare_e2e(root, environment, record)
         options = list(arguments)
         if not any(arg == "--output" or arg.startswith("--output=") for arg in options):
@@ -234,7 +233,7 @@ def main():
     doctor = actions.add_parser("doctor", help="설치·빌드·인증 없이 로컬 Chromium 진단")
     doctor.add_argument("--headed", action="store_true")
     doctor.add_argument("--json", action="store_true", dest="machine")
-    live = actions.add_parser("live", help="명시 실행: 독립 fake-kiwoom + 실제 DART (005930만)")
+    live = actions.add_parser("live", help="명시 실행: 독립 재무 서비스 + 실제 DART (005930만)")
     live.add_argument("--mode", choices=("connect", "full"), default="connect")
     live.add_argument("--timeout", type=int, choices=range(10, 601), default=300, metavar="10..600", help="준비 이후 원천 최대 시간 (초), UI 최대 120초 별도")
     live.add_argument("--headed", action="store_true")
