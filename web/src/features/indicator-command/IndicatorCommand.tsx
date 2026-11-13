@@ -70,9 +70,9 @@ export function IndicatorCommandBody({ slot, initialMode }: { slot: Slot; initia
           command.show(next.mode);
           document.getElementById(tabId(next.mode))?.focus();
         }}>
-          {COMMAND_TABS.map((tab) => <button key={tab.mode} id={tabId(tab.mode)} type="button" role="tab" aria-selected={mode === tab.mode} aria-controls={`${ids}-panel`} tabIndex={mode === tab.mode ? 0 : -1} onClick={() => show(tab.mode)}
+          {COMMAND_TABS.map((tab) => <button key={tab.mode} id={tabId(tab.mode)} type="button" role="tab" aria-selected={mode === tab.mode} aria-label={tab.mode === "current" ? `${tab.label} ${cell.chartSettings.indicators.length}개` : undefined} aria-controls={`${ids}-panel`} tabIndex={mode === tab.mode ? 0 : -1} onClick={() => show(tab.mode)}
             className="inline-flex h-[26px] items-center gap-1.5 rounded-s px-3 text-s text-text-2 aria-selected:bg-accent aria-selected:font-semibold aria-selected:text-accent-ink">
-            {tab.label}{tab.mode === "current" && <span className="rounded-full bg-[var(--hover)] px-1.5 text-xs leading-4"><span className="sr-only"> </span>{cell.chartSettings.indicators.length}<span className="sr-only">개</span></span>}
+            {tab.label}{tab.mode === "current" && <span className="rounded-full bg-[var(--hover)] px-1.5 text-xs leading-4">{cell.chartSettings.indicators.length}</span>}
           </button>)}
         </div>
         <button type="button" className="icon-btn" aria-label="입력창 닫기" title="입력창 닫기 (Esc)" onClick={close}><CloseIcon size={16} /></button>

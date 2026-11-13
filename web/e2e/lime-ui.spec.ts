@@ -23,7 +23,7 @@ test("색상표와 직접 고른 색·굵기 5를 지표에 적용하고 관리 
   await picker.getByRole("slider", { name: "색조", exact: true }).press("Enter");
   await expect(picker).toHaveCount(0);
   await expect(dialog).toBeVisible();
-  expect((scenario.documents.layout(DEFAULT_LAYOUT_ID).cells[0]!.chartSettings as { indicators: { spec: { kind: string } }[] }).indicators.some((i) => i.spec.kind === "ma")).toBe(false);
+  await expect(dialog.getByRole("tab", { name: "이 칸에 띄운 지표 1개", exact: true })).toBeVisible();
   await dialog.getByRole("button", { name: "직접 고르기", exact: true }).click();
   await picker.getByRole("textbox", { name: "HEX", exact: true }).fill("#oops");
   await expect(picker.getByRole("button", { name: "선택", exact: true })).toBeDisabled();

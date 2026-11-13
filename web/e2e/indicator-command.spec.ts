@@ -93,7 +93,7 @@ test("지표 창은 띄운 지표 탭으로 열고 글자를 치면 지표 추�
   await expect(tab(/^지표 추가$/)).toHaveAttribute("aria-selected", "true");
   await expect(tab(/^지표 추가$/)).toBeFocused();
   await tab(/^이 칸에 띄운 지표/).click();
-  await expect(tab(/^이 칸에 띄운 지표/)).toContainText("2");
+  await expect(dialog.getByRole("tab", { name: "이 칸에 띄운 지표 2개", exact: true })).toBeVisible();
   await expect(dialog.getByRole("listbox")).toContainText("가격 패널");
   await dialog.getByRole("button", { name: "이동평균 단순 20 설정", exact: true }).click();
   await expect(dialog.getByRole("button", { name: "변경 적용", exact: true })).toBeVisible();
