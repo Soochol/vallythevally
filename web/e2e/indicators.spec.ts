@@ -82,6 +82,7 @@ test("후행스팬이 있는 칸에서 체결을 흘려도 모든 선의 update�
 });
 
 test("열기만 하면 v1 차트 설정을 서버에 쓰지 않고, 기본 거래량 지표를 보인다", async ({ page, scenario }) => {
+  await page.clock.install();
   const puts: string[] = [];
   page.on("request", (r) => {
     if (r.method() === "PUT" && r.url().includes("/api/layouts/")) puts.push(r.url());
@@ -92,7 +93,7 @@ test("열기만 하면 v1 차트 설정을 서버에 쓰지 않고, 기본 거�
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
   await expect(page.locator("[data-indicator-row]")).toHaveCount(1);
   await expect(page.locator("[data-indicator-row]")).toContainText("거래량");
-  await page.waitForTimeout(2500);
+  await page.clock.runFor(2500);
   expect(puts).toEqual([]);
   const after: Layout = scenario.documents.layout(DEFAULT_LAYOUT_ID);
   expect(after.revision).toBe(saved.revision);
@@ -145,6 +146,7 @@ test("wasm을 받지 못하면 봉은 그대로 그리고 지표 범례에 계�
 });
 
 test("일목균형표를 띄운 채 과거로 스크롤해도 다가갈 때마다 과거 페이지는 하나다", async ({ page, scenario }) => {
+  await page.clock.install();
   await seedLayout(scenario, "D", [{ id: "i1", spec: { kind: "ichimoku", conversion: 9, base: 26, spanB: 52, displacement: 26 }, panel: "price", visible: true, style: { colors: ["ind-1"], width: 1 } }], [], "086520");
   const older: string[] = [];
   page.on("request", (r) => {
@@ -154,11 +156,11 @@ test("일목균형표를 띄운 채 과거로 스크롤해도 다가갈 때마�
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
   const chart = chartOf(cell(page));
   await expect(page.locator('[data-indicator-row="i1"]')).toContainText(/\d/);
-  await page.waitForTimeout(1000);
+  await page.clock.runFor(1000);
   expect(older).toEqual([]);
   const before = await barTimes(chart);
   await dragTowardPast(page, chart, async () => expect((await barTimes(chart)).count).toBeGreaterThan(before.count));
-  await page.waitForTimeout(1500);
+  await page.clock.runFor(1500);
   expect(older).toHaveLength(1);
   await expect(page.locator('[data-indicator-row="i1"]')).toContainText(/\d/);
 });
