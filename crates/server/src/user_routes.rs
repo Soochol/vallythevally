@@ -126,7 +126,7 @@ fn check_screens(all: &Screens) -> Result<(), ApiFailure> {
     }
     let mut ids = HashSet::new();
     for screen in &all.screens {
-        check_screen(screen)?;
+        parse_stored_screen(screen)?;
         if !ids.insert(screen.id.as_str()) {
             return Err(ApiFailure::bad_request(format!("조건식 id가 겹칩니다: {}", screen.id)));
         }
@@ -134,7 +134,7 @@ fn check_screens(all: &Screens) -> Result<(), ApiFailure> {
     Ok(())
 }
 
-pub(crate) fn check_screen(screen: &Screen) -> Result<RunnableScreen, ApiFailure> {
+pub(crate) fn parse_stored_screen(screen: &Screen) -> Result<RunnableScreen, ApiFailure> {
     if screen.id.is_empty() || screen.id.len() > MAX_SCREEN_ID_BYTES {
         return Err(ApiFailure::bad_request(format!("조건식 id는 1~{MAX_SCREEN_ID_BYTES}바이트여야 합니다: {}", screen.id)));
     }

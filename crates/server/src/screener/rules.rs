@@ -6,7 +6,7 @@ use super::line::{Kind, Line};
 use super::market_cap::MarketCapRange;
 use crate::api::{BarField, Bound, Condition, ExcludeKind, Extreme, Market, RsiTest, Screen, StochasticTest, SurgeField};
 
-pub struct RunnableScreen {
+pub(crate) struct RunnableScreen {
     pub(super) lines: Vec<Line>,
     pub(super) market_caps: Vec<MarketCapRange>,
     pub(super) markets: Vec<Market>,
@@ -20,7 +20,7 @@ impl RunnableScreen {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Invalid(String);
+pub(crate) struct Invalid(String);
 
 impl fmt::Display for Invalid {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -28,7 +28,7 @@ impl fmt::Display for Invalid {
     }
 }
 
-pub fn parse_screen(screen: &Screen) -> Result<RunnableScreen, Invalid> {
+pub(crate) fn parse_screen(screen: &Screen) -> Result<RunnableScreen, Invalid> {
     let (mut lines, mut market_caps) = (Vec::new(), Vec::new());
     for (k, condition) in screen.conditions.iter().enumerate() {
         match rule_of(condition).map_err(|why| Invalid(format!("조건식 {}의 {}번째 조건: {why}", screen.name, k + 1)))? {
