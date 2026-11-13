@@ -22,17 +22,17 @@ async fn partial_first_page_is_a_retryable_source_failure_and_preserves_existing
             let previous = if collected { Some(settled_stock(&service,COMMON,false).await.collection) } else { None };
             fake.state.lock().unwrap().discovery_search = Some(broken);
             let failed = settled_stock(&service,STOCK,true).await;
-            assert_eq!(failed.status,"failed");
+            assert_eq!(failed.state,ReadState::Failed);
             assert_eq!(failed.failure,Some(Failure::InvalidResponse));
             assert!(failed.reason.is_none());
             assert!(store.security(STOCK).await.unwrap().is_none());
             assert_eq!(fake.count("search"),1);
             assert_eq!(fake.count("contents"),0);
             fake.state.lock().unwrap().discovery_search = Some(search(ENTRY,1));
-            assert_eq!(settled_stock(&service,"000001",false).await.status,"ready");
+            assert_eq!(settled_stock(&service,"000001",false).await.state,ReadState::Ready);
             if let Some(previous) = &previous { assert_eq!(serde_json::to_value(store.collection(COMPANY).await.unwrap()).unwrap(),serde_json::to_value(previous).unwrap()); }
             let recovered = settled_stock(&service,STOCK,true).await;
-            assert_eq!(recovered.status,"ready");
+            assert_eq!(recovered.state,ReadState::Ready);
             assert_eq!(fake.count("search"),2);
             assert_eq!(fake.count("contents"),1);
             assert!(recovered.security.unwrap().share_class.is_none());
@@ -74,8 +74,8 @@ async fn conflicting_document_or_receipt_identity_never_persists_provenance() {
         let store = Store::open(&dir.path().join("financials.db")).await.unwrap();
         let service = Financials::new(Some(fake.client()),store.clone(),clock());
         let snapshot = settled_stock(&service,STOCK,true).await;
-        assert_eq!(snapshot.status,"unsupported");
-        assert_eq!(snapshot.reason,Some("company_mapping_unverified"));
+        assert_eq!(snapshot.state,ReadState::Unsupported);
+        assert_eq!(snapshot.reason,Some(UnsupportedReason::CompanyMappingUnverified));
         assert!(snapshot.failure.is_none());
         assert!(store.security(STOCK).await.unwrap().is_none());
         assert_eq!(fake.count("contents"),0);

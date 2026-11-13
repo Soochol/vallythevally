@@ -1,8 +1,10 @@
 pub mod client;
 pub mod calculate;
+pub mod company_records;
 mod control;
 pub mod model;
 mod routes;
+mod response;
 mod updates;
 mod schedule;
 pub mod store;
@@ -14,7 +16,8 @@ use domain::{KstDate, KstTime};
 
 use crate::clock::Clock;
 use client::{Client, Row, digits, field};
-use model::{Collection, Dividend, Failure, Interrupt, Report, Security, Snapshot, Statement, StatementRequest, REPORT_CODES};
+use model::{Collection, Dividend, Failure, Interrupt, Report, Security, Statement, StatementRequest, REPORT_CODES};
+use company_records::{ReadContext, ReadResolution, ReadSnapshot};
 use store::Store;
 
 pub use routes::routes;
@@ -52,25 +55,20 @@ impl Financials {
         self.store.as_ref().map_err(|failure| *failure)
     }
 
-    pub async fn read(&self, stock: &str) -> Snapshot {
-        let mut snapshot = Snapshot { status: "not_configured", security: None, collection: Collection::default(), failure: None, reason: None };
+    pub async fn read(&self, stock: &str) -> ReadSnapshot {
+        let mut security = None;
+        let mut collection = Collection::default();
         let result = async {
             let store = self.store()?;
-            snapshot.security = store.security(stock).await?;
-            if let Some(security) = &snapshot.security { snapshot.collection = store.collection(&security.company.corp_code).await?; }
+            security = store.security(stock).await?;
+            if let Some(security) = &security { collection = store.collection(&security.company.corp_code).await?; }
             Ok::<_, Failure>(())
         }.await;
-        if let Err(failure) = result { snapshot.status = "failed"; snapshot.failure = Some(failure); return snapshot; }
-        if self.client.is_none() { return snapshot; }
-        let collection = match &snapshot.security { Some(security) => self.control.collection_state(&security.company.corp_code).await, None => CollectionState::default() };
-        snapshot.failure = collection.failure;
-        snapshot.status = if collection.collecting { "collecting" }
-            else if has_failures(&snapshot.collection) || snapshot.failure.is_some() { "partial_failure" }
-            else if snapshot.collection.reports.is_empty() { "not_collected" }
-            else if has_pending(&snapshot.collection) { "stale" }
-            else { "ready" };
-        if snapshot.security.is_none() { self.read_resolution(stock, &mut snapshot).await; }
-        snapshot
+        if let Err(failure) = result { return ReadSnapshot::resolve(security, collection, ReadContext::StorageFailed(failure)); }
+        if self.client.is_none() { return ReadSnapshot::resolve(security, collection, ReadContext::NotConfigured); }
+        let observed = match &security { Some(security) => self.control.collection_state(&security.company.corp_code).await, None => CollectionState::default() };
+        let resolution = if security.is_none() { self.read_resolution(stock).await } else { ReadResolution::Unchanged };
+        ReadSnapshot::resolve(security, collection, ReadContext::Configured { collecting: observed.collecting, failure: observed.failure, resolution })
     }
 
     async fn security(&self, stock: &str, preferred: bool) -> Result<Option<Security>, Interrupt> {
@@ -231,10 +229,6 @@ fn unmatched_disclosures(collection: &Collection, disclosures: &[Row]) -> bool {
     })
 }
 
-fn has_failures(collection: &Collection) -> bool {
-    collection.disclosure_failure.is_some() || collection.working_reports().values().any(|r| r.statement.failure.is_some() || r.dividends.failure.is_some() || r.statement.data.as_ref().is_some_and(|s| s.source_failure.is_some()))
-}
-
 fn validate_reused_reports(collection: &mut Collection) {
     let Collection { reports, staged_reports, disclosures, disclosure_version, .. } = collection;
     for report in staged_reports.as_mut().unwrap_or(reports).values_mut() {
@@ -286,11 +280,4 @@ fn statement_outdated(report: &Report, disclosures: &[Row]) -> bool {
 
 fn dividends_outdated(report: &Report, disclosures: &[Row]) -> bool {
     report.dividends.data.as_ref().is_some_and(|rows| rows.iter().any(|dividend| !receipt_is_current(disclosures, field(&dividend.fields, "rcept_no"))))
-}
-
-fn has_pending(collection: &Collection) -> bool {
-    collection.disclosure_version < collection.refresh_version || collection.working_reports().values().any(|report| {
-        report.statement_request.is_some() || report.statement.snapshot_version() < collection.disclosure_version || statement_outdated(report, &collection.disclosures)
-            || (report.report_code == "11011" && (report.dividends.snapshot_version() < collection.disclosure_version || dividends_outdated(report, &collection.disclosures)))
-    })
 }

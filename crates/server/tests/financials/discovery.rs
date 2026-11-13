@@ -40,7 +40,7 @@ async fn discovers_unlisted_preferred_preserves_provenance_and_shares_company_bu
     run_update(&service,&[(COMMON,false),(STOCK,true)]).await;
     let common = service.read(COMMON).await;
     let preferred = service.read(STOCK).await;
-    assert_eq!(preferred.status,"ready");
+    assert_eq!(preferred.state,ReadState::Ready);
     let security = preferred.security.unwrap();
     assert_eq!(security.company.corp_code,COMPANY);
     assert!(security.share_class.is_none());
@@ -179,15 +179,15 @@ async fn first_and_mid_discovery_failures_retry_in_the_next_update_and_preserve_
                     }
                 }
                 let snapshot = settled_stock(&service,STOCK,true).await;
-                assert_eq!(snapshot.status,"failed");
+                assert_eq!(snapshot.state,ReadState::Failed);
                 assert_eq!(snapshot.failure,Some(failure));
                 assert!(store.security(STOCK).await.unwrap().is_none());
                 let before = fake.count(stage);
                 assert_eq!(before,if failure == Failure::InvalidResponse { 1 } else { 3 });
-                assert_eq!(settled_stock(&service,"000001",false).await.status,"ready");
+                assert_eq!(settled_stock(&service,"000001",false).await.state,ReadState::Ready);
                 if let Some(previous) = &previous {
                     assert_eq!(serde_json::to_value(store.collection(COMPANY).await.unwrap()).unwrap(),serde_json::to_value(previous).unwrap());
-                    assert_eq!(settled_stock(&service,COMMON,false).await.status,"ready");
+                    assert_eq!(settled_stock(&service,COMMON,false).await.state,ReadState::Ready);
                 }
                 {
                     let mut state = fake.state.lock().unwrap();
@@ -200,7 +200,7 @@ async fn first_and_mid_discovery_failures_retry_in_the_next_update_and_preserve_
                     state.discovery_contents = Some(CONTENTS.into());
                 }
                 let recovered = settled_stock(&service,STOCK,true).await;
-                assert_eq!(recovered.status,"ready");
+                assert_eq!(recovered.state,ReadState::Ready);
                 assert_eq!(fake.count(stage),before+1);
                 assert_eq!(recovered.security.unwrap().company.corp_code,COMPANY);
             }

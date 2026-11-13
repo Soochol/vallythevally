@@ -5,7 +5,7 @@ use domain::{Symbol, SymbolKind};
 use serde::Deserialize;
 
 use crate::{api::{ApiErrorCode, FinancialPeriod, FinancialsPage, FinancialUpdatePage}, http::ApiFailure, symbols::SymbolDirectory};
-use super::{Financials, model::{Collection, Snapshot}};
+use super::{Financials, company_records::ReadSnapshot, response::FinancialSourceResponse};
 
 #[derive(Clone)]
 struct RouteState { service: Arc<Financials>, symbols: Arc<SymbolDirectory> }
@@ -29,20 +29,20 @@ async fn start(state: &RouteState) -> Result<FinancialUpdatePage, ApiFailure> {
     Ok(state.service.start_update(directory.all().cloned().collect()).await)
 }
 
-async fn open(State(state): State<RouteState>, Path(code): Path<String>) -> Result<Json<Snapshot>, ApiFailure> {
-    snapshot(state, code, false).await.map(Json)
+async fn open(State(state): State<RouteState>, Path(code): Path<String>) -> Result<Json<FinancialSourceResponse>, ApiFailure> {
+    snapshot(state, code, false).await.map(|snapshot| Json(snapshot.into()))
 }
 
-async fn refresh(State(state): State<RouteState>, Path(code): Path<String>) -> Result<Json<Snapshot>, ApiFailure> {
-    snapshot(state, code, true).await.map(Json)
+async fn refresh(State(state): State<RouteState>, Path(code): Path<String>) -> Result<Json<FinancialSourceResponse>, ApiFailure> {
+    snapshot(state, code, true).await.map(|snapshot| Json(snapshot.into()))
 }
 
-async fn snapshot(state: RouteState, code: String, force: bool) -> Result<Snapshot, ApiFailure> {
+async fn snapshot(state: RouteState, code: String, force: bool) -> Result<ReadSnapshot, ApiFailure> {
     let symbol = Symbol::parse(&code).map_err(|_| ApiFailure::bad_request("종목코드를 확인하세요"))?;
     let directory = state.symbols.updates().borrow().clone().ok_or_else(|| ApiFailure::new(ApiErrorCode::KiwoomUnavailable, "종목 목록을 아직 받지 못했습니다"))?;
     let info = directory.get(symbol).ok_or_else(|| ApiFailure::new(ApiErrorCode::UnknownSymbol, "없는 종목입니다"))?;
     if !matches!(info.kind, SymbolKind::Common | SymbolKind::Preferred) {
-        return Ok(Snapshot { status: "unsupported", security: None, collection: Collection::default(), failure: None, reason: Some("unsupported_product") });
+        return Ok(ReadSnapshot::unsupported_product());
     }
     if force { start(&state).await?; }
     Ok(state.service.read(&code).await)

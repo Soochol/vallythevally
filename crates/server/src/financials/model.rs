@@ -151,13 +151,4 @@ impl Collection {
     pub(crate) fn working_reports_mut(&mut self) -> &mut BTreeMap<String, Report> { self.staged_reports.as_mut().unwrap_or(&mut self.reports) }
 }
 
-#[derive(Clone, Debug, Serialize)]
-pub struct Snapshot {
-    pub status: &'static str,
-    pub security: Option<Security>,
-    pub collection: Collection,
-    pub failure: Option<Failure>,
-    pub reason: Option<&'static str>,
-}
-
 pub const REPORT_CODES: [&str; 4] = ["11013", "11012", "11014", "11011"];

@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use domain::{KstDate, KstTime, TimeOfDay};
 use server::api::{FinancialBasis, FinancialInputStatus as InputStatus, FinancialInputUsage as Usage, FinancialMetric as Metric, FinancialPeriod as Frequency, FinancialPoint, FinancialReason as Reason, FinancialReportingPeriod as Period, FinancialValueStatus as Status, FinancialsPage};
-use server::financials::{calculate::page, model::{Account, Basis, Collection, Company, Dividend, FactPeriod, Failure, Fetch, Report, Security, Snapshot, Statement, Verification}};
+use server::financials::{calculate::page, company_records::{ReadSnapshot, ReadState}, model::{Account, Basis, Collection, Company, Dividend, FactPeriod, Failure, Fetch, Report, Security, Statement, Verification}};
 
 fn duration(start: &str, end: &str) -> FactPeriod { FactPeriod::Duration { start: start.into(), end: end.into() } }
 fn instant(date: &str) -> FactPeriod { FactPeriod::Instant { date: date.into() } }
@@ -29,13 +29,13 @@ fn report(year: i32, code: &str, start: &str, end: &str, quarter_start: &str, pr
     ];
     Report { statement_request: None, business_year: year, report_code: code.into(), statement: fetch(Statement { basis: Basis::CFS, accounts, source_failure: None }), dividends: Fetch::default() }
 }
-fn snapshot(reports: Vec<Report>) -> Snapshot {
+fn snapshot(reports: Vec<Report>) -> ReadSnapshot {
     let mut collection = Collection { last_checked_at: Some(110), last_attempt_at: Some(90), ..Default::default() };
     collection.disclosures.push([("rcept_no".into(),"20250331000001".into()),("rcept_dt".into(),"20250331".into())].into_iter().collect());
     for r in reports { collection.reports.insert(format!("{}/{}",r.business_year,r.report_code),r); }
-    Snapshot { status: "ready", security: Some(Security { stock_code:"005930".into(),company:Company {corp_code:"00126380".into(),name:"합성 회사".into(),fiscal_month:Some(12)},share_class:Some("보통주".into()),share_class_reason:None,evidence:"synthetic".into() }), collection, failure:None,reason:None }
+    ReadSnapshot { state: ReadState::Ready, security: Some(Security { stock_code:"005930".into(),company:Company {corp_code:"00126380".into(),name:"합성 회사".into(),fiscal_month:Some(12)},share_class:Some("보통주".into()),share_class_reason:None,evidence:"synthetic".into() }), collection, failure:None,reason:None }
 }
-fn year() -> Snapshot {
+fn year() -> ReadSnapshot {
     let previous = report(2023,"11011","2023-01-01","2023-12-31","2023-10-01",80.0,80.0);
     let q1 = report(2024,"11013","2024-01-01","2024-03-31","2024-01-01",10.0,10.0);
     let mut q2 = report(2024,"11012","2024-01-01","2024-06-30","2024-04-01",20.0,30.0);
@@ -48,8 +48,8 @@ fn year() -> Snapshot {
 fn point<'a>(page: &'a FinancialsPage, metric: Metric, year: i32, code: &str) -> &'a FinancialPoint {
     page.series.iter().find(|s|s.metric == metric).unwrap().points.iter().find(|p|p.business_year == year && p.report_code == code).unwrap()
 }
-fn mutate(snapshot: &mut Snapshot, year: i32, code: &str, edit: impl FnOnce(&mut Statement)) { edit(snapshot.collection.reports.get_mut(&format!("{year}/{code}")).unwrap().statement.data.as_mut().unwrap()); }
-fn value(snapshot: Snapshot, metric: Metric, code: &str) -> FinancialPoint { point(&page("005930",Frequency::Q,snapshot),metric,2024,code).clone() }
+fn mutate(snapshot: &mut ReadSnapshot, year: i32, code: &str, edit: impl FnOnce(&mut Statement)) { edit(snapshot.collection.reports.get_mut(&format!("{year}/{code}")).unwrap().statement.data.as_mut().unwrap()); }
+fn value(snapshot: ReadSnapshot, metric: Metric, code: &str) -> FinancialPoint { point(&page("005930",Frequency::Q,snapshot),metric,2024,code).clone() }
 
 #[test]
 fn calculates_quarter_annual_q4_negative_cash_flow_and_owner_roe() {
@@ -181,7 +181,7 @@ fn first_and_mid_refresh_failures_preserve_independent_values_and_success_metada
     for existing in [false,true] {
         let mut data=year();let fetch=&mut data.collection.reports.get_mut("2024/11011").unwrap().statement;
         if !existing {fetch.data=None;fetch.last_success_at=None;}
-        fetch.failure=Some(Failure::Network);fetch.checked_at=Some(200);data.status="partial_failure";
+        fetch.failure=Some(Failure::Network);fetch.checked_at=Some(200);data.state=ReadState::PartialFailure;
         let response=page("005930",Frequency::Y,data);let p=point(&response,Metric::Revenue,2024,"11011");
         assert_eq!(response.status,"partial_failure");assert_eq!(response.progress.failed,1);
         if existing {assert_eq!(p.value,Some(1000.0));assert_eq!(p.inputs[0].last_success_at.unwrap().0,100);} else {assert_eq!(p.status,Status::Failed);assert_eq!(p.value,None);}
@@ -364,7 +364,7 @@ fn q4_missing_comparison_preserves_request_identity_state_and_history() {
             4=>data.collection.reports.get_mut("2024/11014").unwrap().statement=Fetch::default(),
             _=>{let r=data.collection.reports.get_mut("2024/11014").unwrap();r.statement.checked_at=Some(200);let statement=r.statement.data.as_mut().unwrap();statement.source_failure=Some(Failure::Remote);statement.accounts[0].cumulative_period=Verification::Unverified("matching_context_missing".into());},
         }
-        if case==3 || case==5 {data.status="partial_failure";}
+        if case==3 || case==5 {data.state=ReadState::PartialFailure;}
         let response=page("005930",Frequency::Q,data);
         let p=point(&response,Metric::Revenue,2024,"11011");
         assert_eq!(p.status,Status::NotCalculable);assert_eq!(p.reason,Some(Reason::MissingComparison));assert_eq!(p.value,None);
@@ -384,7 +384,7 @@ fn q4_missing_comparison_preserves_request_identity_state_and_history() {
 #[test]
 fn comparison_failure_with_stored_values_keeps_q4_and_dependency_warning() {
     let mut data=year();let fetch=&mut data.collection.reports.get_mut("2024/11014").unwrap().statement;
-    fetch.failure=Some(Failure::Network);fetch.checked_at=Some(200);data.status="partial_failure";
+    fetch.failure=Some(Failure::Network);fetch.checked_at=Some(200);data.state=ReadState::PartialFailure;
     let p=value(data,Metric::Revenue,"11011");assert_eq!(p.value,Some(700.0));assert_eq!(p.status,Status::Available);
     let comparison=p.inputs.iter().find(|i|i.usage==Usage::Comparison).unwrap();
     assert_eq!(comparison.status,InputStatus::Available);assert_eq!(comparison.failure.as_deref(),Some("network"));
@@ -399,7 +399,7 @@ fn comparison_failure_with_stored_values_keeps_q4_and_dependency_warning() {
 fn dps_preserves_verified_reporting_period_source_and_refresh_failure() {
     let mut r=verify_report_xbrl(report(2024,"11011","2024-01-01","2024-12-31","2024-10-01",100.0,100.0));
     r.dividends=fetch(vec![dividends("보통주","100")]);r.statement.failure=Some(Failure::Network);r.statement.checked_at=Some(200);
-    let mut data=snapshot(vec![r]);data.status="partial_failure";
+    let mut data=snapshot(vec![r]);data.state=ReadState::PartialFailure;
     let response=page("005930",Frequency::Y,data);let p=point(&response,Metric::Dps,2024,"11011");
     assert_eq!(p.value,Some(100.0));assert_eq!(p.status,Status::Available);assert_eq!(p.basis,Some(FinancialBasis::CFS));
     let anchor=p.inputs.iter().find(|i|i.usage==Usage::ReportingPeriod).unwrap();
@@ -423,7 +423,7 @@ fn invalid_comparison_keeps_receipt_failure_and_current_annual_evidence() {
 #[test]
 fn missing_comparison_item_keeps_initial_xbrl_failure_and_fetch_failure_priority() {
     for fetch_failure in [None,Some(Failure::Network)] {
-        let mut data=year();data.status="partial_failure";
+        let mut data=year();data.state=ReadState::PartialFailure;
         let report=data.collection.reports.get_mut("2024/11014").unwrap();
         let mut statement=report.statement.data.take().unwrap();
         statement.accounts.retain(|a|a.fields["account_id"]!="ifrs-full_Revenue");
