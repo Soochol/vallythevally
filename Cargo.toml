@@ -10,6 +10,12 @@ publish = false
 [workspace.lints.rust]
 unsafe_code = "forbid"
 
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+debug = false
+
 [profile.dev.package.libduckdb-sys]
 opt-level = 3
 debug = false
