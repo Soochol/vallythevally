@@ -17,7 +17,7 @@ interface Press {
 export type Interaction =
   | { kind: "idle" }
   | ({ kind: "pressing" } & Press)
-  | { kind: "placing"; tool: Tool; fixed: Anchors; cursor: DrawingPoint }
+  | { kind: "placing"; tool: Tool; fixed: Anchors; cursor: DrawingPoint; pressed: ScreenPoint }
   | { kind: "drawing"; tool: Tool; points: Anchors; start: ScreenPoint }
   | ({ kind: "dragging"; action: "move" | "clone" | "handle"; originals: DrawingBody[]; preview: DrawingBody[]; lock: AxisLock } & Press)
   | { kind: "box"; start: ScreenPoint; end: ScreenPoint }
@@ -68,12 +68,10 @@ function constrained(tool: Tool, fixed: readonly DrawingPoint[], at: ScreenPoint
   return snapped;
 }
 
-function repeatsLast(tool: Tool, fixed: Anchors, p: DrawingPoint, c: Context): boolean {
-  const last = fixed.at(-1) ?? fixed[0];
-  const a = c.ctx.toScreen(last);
-  const b = c.ctx.toScreen(p);
-  if (tool.placement.kind === "polyline" && a !== null && b !== null) return distance(a, b) < PRESS_DISTANCE;
-  return last.t === p.t && last.price === p.price;
+function repeatsLast(s: Extract<Interaction, { kind: "placing" }>, at: ScreenPoint, p: DrawingPoint): boolean {
+  const last = s.fixed.at(-1) ?? s.fixed[0];
+  if (last.t === p.t && last.price === p.price) return true;
+  return s.tool.placement.kind === "polyline" && distance(s.pressed, at) < PRESS_DISTANCE;
 }
 
 function limitPoints(points: readonly DrawingPoint[], max: number): DrawingPoint[] {
@@ -99,7 +97,7 @@ function click(s: Extract<Interaction, { kind: "pressing" }>, c: Context): Trans
       const tool = c.tool;
       const point = c.ctx.fromScreen(s.start);
       if (tool === null || point === null) return result(IDLE);
-      return result({ kind: "placing", tool, fixed: [point], cursor: point });
+      return result({ kind: "placing", tool, fixed: [point], cursor: point, pressed: s.start });
     }
     case "eraseOne": return result(IDLE, { kind: "mode", mode: "eraser", action: s.resolution.drag, path: [s.start] });
     case "keepSelection": return result(IDLE);
@@ -175,11 +173,11 @@ export function step(s: Interaction, e: Input, c: Context): Transition {
     if (p === null) return result(s);
     if (e.kind === "move") return result({ ...s, cursor: p });
     if (e.kind !== "down") return result(s);
-    if (repeatsLast(s.tool, s.fixed, p, c)) return result(s);
+    if (repeatsLast(s, e.at, p)) return result(s);
     const points: Anchors = [s.fixed[0], ...s.fixed.slice(1), p];
     const placement = s.tool.placement;
     const max = placement.kind === "points" ? placement.count : placement.max;
-    return points.length >= max ? placed(s.tool, points, c) : result({ ...s, fixed: points, cursor: p });
+    return points.length >= max ? placed(s.tool, points, c) : result({ ...s, fixed: points, cursor: p, pressed: e.at });
   }
   if (s.kind === "drawing") {
     const first = s.points[0];
@@ -193,9 +191,9 @@ export function step(s: Interaction, e: Input, c: Context): Transition {
       if (placement.kind === "freehand") return points.length >= placement.min ? placed(s.tool, points, c) : result(IDLE);
       if (distance(s.start, e.at) >= PRESS_DISTANCE && placement.kind === "points") {
         if (placement.count === 2) return placed(s.tool, points, c);
-        return result({ kind: "placing", tool: s.tool, fixed: points, cursor: p });
+        return result({ kind: "placing", tool: s.tool, fixed: points, cursor: p, pressed: e.at });
       }
-      return result({ kind: "placing", tool: s.tool, fixed: [first], cursor: p });
+      return result({ kind: "placing", tool: s.tool, fixed: [first], cursor: p, pressed: s.start });
     }
     return result(s);
   }
@@ -209,7 +207,7 @@ export function step(s: Interaction, e: Input, c: Context): Transition {
       if (p === null) return result(s);
       if (placement.kind === "points" && placement.oneClick) return placed(c.tool, placement.oneClick(p, c.ctx), c);
       if (placement.kind === "points" && placement.count === 1) return placed(c.tool, [p], c);
-      if (placement.kind === "polyline") return result({ kind: "placing", tool: c.tool, fixed: [p], cursor: p });
+      if (placement.kind === "polyline") return result({ kind: "placing", tool: c.tool, fixed: [p], cursor: p, pressed: e.at });
       return result({ kind: "drawing", tool: c.tool, points: [p], start: e.at });
     }
     return result({ kind: "pressing", start: e.at, hit: e.hit, resolution });
