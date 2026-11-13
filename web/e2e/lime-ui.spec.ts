@@ -4,7 +4,7 @@ import { cell, chartOf, DEFAULT_LAYOUT_ID, expect, test } from "./harness";
 
 test.use({ clockStart: "20261109100030" });
 
-test("48색과 직접 고른 색·굵기 5를 지표에 적용하고 관리 탭에서 편집하며 다시 열어도 실제 차트와 이미지에 남는다", async ({ scenario, page }, info) => {
+test("색상표와 직접 고른 색·굵기 5를 지표에 적용하고 관리 탭에서 편집하며 다시 열어도 실제 차트와 이미지에 남는다", async ({ scenario, page }, info) => {
   const errors: string[] = [];
   page.on("pageerror", (e) => errors.push(e.message));
   await page.addInitScript(installFrameProbe);
@@ -12,18 +12,25 @@ test("48색과 직접 고른 색·굵기 5를 지표에 적용하고 관리 탭�
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
   await page.getByRole("toolbar", { name: "차트 도구 막대" }).getByRole("button", { name: "지표", exact: true }).click();
   const dialog = page.getByRole("dialog", { name: "지표·비교 입력창", exact: true });
-  await expect(dialog.getByRole("listbox").getByText("이 칸에 띄운 지표", { exact: true })).toBeVisible();
+  await expect(dialog.getByRole("tab", { name: /^이 칸에 띄운 지표/ })).toHaveAttribute("aria-selected", "true");
   await expect(dialog.getByRole("button", { name: "거래량 설정", exact: true })).toBeVisible();
+  await dialog.getByRole("tab", { name: "지표 추가", exact: true }).click();
   await dialog.getByRole("group", { name: "굵기", exact: true }).getByRole("button", { name: "5", exact: true }).click();
-  await dialog.getByRole("button", { name: "선 색상 선택", exact: true }).click();
+  await expect(dialog.getByRole("group", { name: "색상표", exact: true }).getByRole("button")).toHaveCount(40);
+  await dialog.getByRole("button", { name: "직접 고르기", exact: true }).click();
   const picker = page.getByRole("dialog", { name: "선 색상", exact: true });
-  await expect(picker.getByRole("button", { name: /^기본 색상 \d+ / })).toHaveCount(48);
-  await picker.getByRole("tab", { name: "사용자 지정", exact: true }).click();
+  await expect(picker.getByRole("tab", { name: "사용자 지정", exact: true })).toHaveAttribute("aria-selected", "true");
+  await picker.getByRole("slider", { name: "색조", exact: true }).press("Enter");
+  await expect(picker).toHaveCount(0);
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByRole("tab", { name: "이 칸에 띄운 지표 1개", exact: true })).toBeVisible();
+  await dialog.getByRole("button", { name: "직접 고르기", exact: true }).click();
   await picker.getByRole("textbox", { name: "HEX", exact: true }).fill("#oops");
   await expect(picker.getByRole("button", { name: "선택", exact: true })).toBeDisabled();
   await picker.getByRole("textbox", { name: "HEX", exact: true }).fill("#8B5CF6");
   await picker.getByRole("button", { name: "선택", exact: true }).click();
   await dialog.getByRole("button", { name: "이동평균 단순 20 추가", exact: true }).click();
+  await dialog.getByRole("tab", { name: /^이 칸에 띄운 지표/ }).click();
   await expect(dialog.getByRole("button", { name: "이동평균 단순 20 설정", exact: true })).toBeVisible();
   await expect.poll(async () => {
     const saved = scenario.documents.layout(DEFAULT_LAYOUT_ID);
@@ -58,9 +65,11 @@ test("48색과 직접 고른 색·굵기 5를 지표에 적용하고 관리 탭�
   await dialog.getByRole("button", { name: "이동평균 단순 20 설정", exact: true }).click();
   await expect(page.getByRole("dialog", { name: "지표·비교 입력창", exact: true })).toContainText("#8B5CF6");
   await expect(page.getByRole("group", { name: "굵기", exact: true }).getByRole("button", { name: "5", exact: true })).toHaveAttribute("aria-pressed", "true");
-  await page.getByRole("button", { name: "선 색상 선택", exact: true }).click();
   await expect(page.getByRole("button", { name: "최근 색상 #8B5CF6", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "직접 고르기", exact: true }).click();
+  await expect(page.getByRole("dialog", { name: "선 색상", exact: true })).toBeVisible();
   await page.keyboard.press("Escape");
+  await expect(page.getByRole("dialog", { name: "선 색상", exact: true })).toHaveCount(0);
   await expect(page.getByRole("dialog", { name: "지표·비교 입력창", exact: true })).toBeVisible();
   await page.screenshot({ path: info.outputPath("indicator.png"), fullPage: true });
   expect(errors).toEqual([]);

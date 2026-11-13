@@ -82,7 +82,7 @@ test("비교 종목 추가 뒤 오류 없이 차트를 계속 그리고 축 폭 
   const before = await plotted(page);
   await page.getByRole("button", { name: "지표", exact: true }).click();
   const dialog = page.getByRole("dialog");
-  await dialog.getByRole("group", { name: "찾을 항목" }).getByRole("button", { name: "비교 종목", exact: true }).click();
+  await dialog.getByRole("tab", { name: "비교 종목", exact: true }).click();
   await dialog.getByRole("combobox", { name: "지표·비교 찾기" }).fill("삼성SDI");
   await dialog.getByRole("option", { name: /삼성SDI/ }).first().click();
   await dialog.getByRole("button", { name: /^삼성SDI.*추가$/ }).click();

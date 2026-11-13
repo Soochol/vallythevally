@@ -1,7 +1,8 @@
 import { Popover } from "../overlay/Popover";
 import { useId, useRef, useState } from "react";
-import { hexToHsv, hsvToHex, isHexColor, normalizeHex, PRESET_COLORS, type HexColor, type HsvColor } from "../../lib/colors";
+import { hexToHsv, hsvToHex, isHexColor, normalizeHex, type HexColor, type HsvColor } from "../../lib/colors";
 import { CheckIcon, ChevronIcon, CloseIcon } from "../icons";
+import { ColorGrid } from "./ColorGrid";
 
 const RECENT_KEY = "vv.recent-colors.v1";
 const FALLBACK = normalizeHex("#C7F36B");
@@ -44,16 +45,17 @@ export function ColorPicker({ label, value, width = 1, compact = false, onChange
   );
 }
 
-function ColorDialog({ label, initial, width, trigger, onCancel, onApply }: {
+export function ColorDialog({ label, initial, width, trigger, startCustom = false, onCancel, onApply }: {
   label: string;
   initial: HexColor;
   width: number;
+  startCustom?: boolean;
   trigger: React.RefObject<HTMLButtonElement | null>;
   onCancel(): void;
   onApply(color: HexColor): void;
 }) {
   const id = useId();
-  const [custom, setCustom] = useState(false);
+  const [custom, setCustom] = useState(startCustom);
   const [hsv, setHsv] = useState(() => hexToHsv(initial));
   const [text, setText] = useState<string>(initial);
   const [recent] = useState(readRecent);
@@ -81,7 +83,7 @@ function ColorDialog({ label, initial, width, trigger, onCancel, onApply }: {
     <Popover data-chart-control="" anchor={trigger} onClose={onCancel} role="dialog" aria-modal="false" aria-labelledby={`${id}-title`} className="color-popover"
       onKeyDown={(e) => {
         if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); onCancel(); }
-        if (e.key === "Enter" && e.target instanceof HTMLInputElement && e.target.type === "text") { e.preventDefault(); e.stopPropagation(); apply(); }
+        if (e.key === "Enter" && e.target instanceof HTMLInputElement) { e.preventDefault(); e.stopPropagation(); apply(); }
         if (e.key === "Tab") {
           const nodes = [...e.currentTarget.querySelectorAll<HTMLElement>("button:not(:disabled),input:not(:disabled),[tabindex='0']")].filter((n) => n.tabIndex >= 0 && n.getClientRects().length > 0);
           const first = nodes[0]; const last = nodes.at(-1);
@@ -110,7 +112,7 @@ function ColorDialog({ label, initial, width, trigger, onCancel, onApply }: {
           <label className="color-hex">HEX<input type="text" aria-label="HEX" value={text} maxLength={7} spellCheck={false} aria-invalid={!valid} aria-describedby={!valid ? `${id}-error` : undefined} onChange={(e) => { setText(e.target.value); const c = normalizeHex(e.target.value); if (c) setHsv(hexToHsv(c)); }} onBlur={() => { if (valid) setText(color); }} /><i style={{ background: color }} /></label>
           {!valid && <p id={`${id}-error`} role="alert" className="mt-2 text-xs text-danger"># 뒤에 6자리 색상 코드를 입력하세요.</p>}
         </div>
-      ) : <div id={`${id}-palette`} role="tabpanel" aria-labelledby={`${id}-palette-tab`} className="color-grid" aria-label="기본 색상 48개">{PRESET_COLORS.map((c, i) => swatch(c, `기본 색상 ${i + 1}`))}</div>}
+      ) : <div id={`${id}-palette`} role="tabpanel" aria-labelledby={`${id}-palette-tab`}><ColorGrid label="기본 색상" selected={color} onChoose={choose} /></div>}
       <div className="color-recent"><span>최근 사용</span><div className="color-grid" aria-label="최근 사용 색상">{recent.length ? recent.map((c) => swatch(c, "최근 색상")) : <p>색상을 선택하면 여기에 모입니다.</p>}</div></div>
       <div className="color-picker-sample"><span>선 샘플</span><div><i style={{ background: color, height: width }} /></div><span>{width} px</span></div>
       <div className="color-picker-foot"><button type="button" className="tb-btn border border-line" onClick={onCancel}>취소</button><button type="button" className="btn-primary" disabled={!valid} onClick={apply}>선택</button></div>

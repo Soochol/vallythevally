@@ -1,6 +1,7 @@
 import { expect, test } from "vitest";
 import type { IndicatorSpec } from "../../api/generated/IndicatorSpec";
-import { isFinancial, isFinancialBar, KIND_ORDER, KINDS } from "../../chart/indicators/kinds";
+import { colorsFrom, isFinancial, isFinancialBar, KIND_ORDER, KINDS } from "../../chart/indicators/kinds";
+import type { HexColor } from "../../lib/colors";
 import { addIndicator, DEFAULT_CHART_SETTINGS, type IndicatorConfig } from "../../chart/settings";
 import {
   checkForm,
@@ -134,4 +135,13 @@ test("새 지표의 색은 이 칸에서 아직 쓰지 않은 첫 색이다", ()
   expect(nextColor(DEFAULT_CHART_SETTINGS.indicators)).toBe("ind-2");
   const withMa = addIndicator(DEFAULT_CHART_SETTINGS, { kind: "ma", method: "sma", period: 5 }, { colors: ["ind-2"], width: 1 }).settings;
   expect(nextColor(withMa.indicators)).toBe("ind-3");
+});
+
+test("테마 색은 토큰 그대로, 표에서 고른 색은 HEX 그대로 초안과 저장 색이 된다", () => {
+  const ma = { kind: "ma", method: "sma", period: 20 } as const;
+  const config = (colors: IndicatorConfig["style"]["colors"]): IndicatorConfig => ({ id: "x", spec: ma, panel: "price", visible: true, style: { colors, width: 1 } });
+  expect(startDraft(config(["ind-3"]), "ma").color).toBe("ind-3");
+  expect(startDraft(config(["#4A7FE0" as HexColor]), "ma").color).toBe("#4A7FE0");
+  expect(colorsFrom(ma, "ind-3")).toEqual(["ind-3"]);
+  expect(colorsFrom(ma, "#4A7FE0" as HexColor)).toEqual(["#4A7FE0"]);
 });

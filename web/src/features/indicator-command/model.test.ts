@@ -1,32 +1,46 @@
 import { expect, test } from "vitest";
 import type { SymbolInfo } from "../../api/generated/SymbolInfo";
-import { DEFAULT_CHART_SETTINGS } from "../../chart/settings";
-import { commandKey, commandRows, selectedRow } from "./model";
+import { DEFAULT_CHART_SETTINGS, type ChartSettings } from "../../chart/settings";
+import { commandKey, commandRows, modeAfterInput, selectedRow } from "./model";
 
 const empty = { rows: [], selectable: true, empty: true };
 const info: SymbolInfo = { code: "005930", name: "삼성전자", market: "kospi", kind: "common", nxtEnabled: true };
+const withMa: ChartSettings = {
+  ...DEFAULT_CHART_SETTINGS,
+  indicators: [...DEFAULT_CHART_SETTINGS.indicators, { id: "ma", spec: { kind: "ma", method: "sma", period: 20 }, panel: "price", visible: true, style: { colors: ["ind-2"], width: 1 } }],
+};
 
-test("같은 목록 위쪽에는 띄운 지표를 두고 입력한 설정의 추가 후보를 고른다", () => {
-  const rows = commandRows(DEFAULT_CHART_SETTINGS, "이평 20", "indicators", empty);
-  expect(rows.map((row) => row.kind)).toEqual(["current", "candidate"]);
-  expect(rows[0]?.group).toBe("이 칸에 띄운 지표");
-  expect(selectedRow(rows, "")).toMatchObject({ kind: "candidate", candidate: { label: "이동평균 단순 20" } });
-  expect(selectedRow(rows, rows[0]!.key)).toMatchObject({ kind: "current" });
+test("띄운 지표 탭은 띄운 지표만 가격 패널·아래 패널로 묶고 첫 지표를 고른다", () => {
+  const rows = commandRows(withMa, "", "current", { rows: [{ info, group: "result" }], selectable: true, empty: false });
+  expect(rows.map((row) => [row.kind, row.group])).toEqual([["current", "가격 패널"], ["current", "아래 패널"]]);
+  expect(selectedRow(rows, "")).toMatchObject({ kind: "current", config: { id: "ma" } });
+  expect(selectedRow(rows, rows[1]!.key)).toMatchObject({ kind: "current", config: { spec: { kind: "volume" } } });
 });
 
-test("종목 검색이 끝나기 전에는 현재 지표를 추가 대상으로 대신 고르지 않는다", () => {
-  const pending = commandRows(DEFAULT_CHART_SETTINGS, "005930", "indicators", { rows: [], selectable: false, empty: false });
-  expect(selectedRow(pending, "")).toBeUndefined();
-  const stale = commandRows(DEFAULT_CHART_SETTINGS, "005930", "compare", { rows: [{ info, group: "result" }], selectable: false, empty: false });
+test("지표 추가 탭은 입력한 설정의 후보만 고르고 빈 입력은 모든 종류를 묶어 보인다", () => {
+  const typed = commandRows(withMa, "이평 20", "add", { rows: [{ info, group: "result" }], selectable: true, empty: false });
+  expect(typed.map((row) => row.kind)).toEqual(["candidate"]);
+  expect(selectedRow(typed, "")).toMatchObject({ kind: "candidate", group: "가격 패널", candidate: { label: "이동평균 단순 20" } });
+  const all = commandRows(withMa, "", "add", empty);
+  expect([...new Set(all.map((row) => row.group))]).toEqual(["가격 패널", "아래 패널", "재무지표"]);
+  expect(all.filter((row) => row.group === "재무지표").map((row) => row.kind === "candidate" && row.candidate.kind)).toContain("revenue");
+  expect(commandRows(withMa, "005930", "add", { rows: [{ info, group: "result" }], selectable: true, empty: false })).toEqual([]);
+});
+
+test("비교 종목 탭은 종목만 고르고 검색이 끝나기 전에는 고르지 않는다", () => {
+  const rows = commandRows(withMa, "삼성", "compare", { rows: [{ info, group: "result" }], selectable: true, empty: false });
+  expect(rows.map((row) => row.kind)).toEqual(["symbol"]);
+  expect(selectedRow(rows, "")).toMatchObject({ kind: "symbol", info, selectable: true });
+  const stale = commandRows(withMa, "005930", "compare", { rows: [{ info, group: "result" }], selectable: false, empty: false });
   expect(selectedRow(stale, "")).toBeUndefined();
   expect(selectedRow(stale, stale[0]!.key)).toBeUndefined();
-  const ready = commandRows(DEFAULT_CHART_SETTINGS, "005930", "indicators", { rows: [{ info, group: "result" }], selectable: true, empty: false });
-  expect(selectedRow(ready, "")).toMatchObject({ kind: "symbol", info, selectable: true });
 });
 
-test("비교 모드는 같은 입력창에서 종목 후보만 고른다", () => {
-  const rows = commandRows(DEFAULT_CHART_SETTINGS, "삼성", "compare", { rows: [{ info, group: "result" }], selectable: true, empty: false });
-  expect(rows.map((row) => row.kind)).toEqual(["symbol"]);
+test("띄운 지표 탭에서 글자를 치면 지표 추가 탭으로 넘어가고 다른 탭은 그대로다", () => {
+  expect(modeAfterInput("current", "이평")).toBe("add");
+  expect(modeAfterInput("current", " ")).toBe("current");
+  expect(modeAfterInput("add", "")).toBe("add");
+  expect(modeAfterInput("compare", "삼성")).toBe("compare");
 });
 
 test("Enter는 계속 추가하고 Shift+Enter만 추가 뒤 닫으며 한글 조합은 소비하지 않는다", () => {
