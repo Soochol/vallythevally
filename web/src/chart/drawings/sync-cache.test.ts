@@ -151,3 +151,13 @@ test("drawing edits, clone, object visibility and delete-toast Undo keep persist
   await sync.load(body.symbol);
   expect(sync.drawings(body.symbol).map((d) => d.id)).toEqual(["clone", body.id]);
 });
+
+test("an empty change asks nothing of the save phase while a real one still waits for recovery", () => {
+  const { sync } = setup(async () => Response.json([]));
+  usePersistStore.getState().setPhase({ kind: "restoring" });
+  useSelectionStore.setState({ toast: null });
+  expect(sync.commit(0, [])).toBe(false);
+  expect(useSelectionStore.getState().toast).toBeNull();
+  expect(sync.commit(0, [{ kind: "create", after: body }])).toBe(false);
+  expect(useSelectionStore.getState().toast?.text).toBe("서버 연결을 복구한 뒤 드로잉을 편집하세요");
+});
