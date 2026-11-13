@@ -1,11 +1,11 @@
-import { useFinancialUpdate } from "../../api/financialUpdate";
+import { useFinancialJob } from "../../api/financialUpdate";
 import { financialJobProgress, financialJobTone } from "../../lib/financialJob";
 import { useSelectionStore } from "../../stores/selection";
 import { TONE_CLASS } from "./tone";
 
 export function FinancialUpdateButton({ className = "" }: { className?: string }) {
   const open = useSelectionStore((s) => s.openFinancialUpdate);
-  const job = useFinancialUpdate().data;
+  const job = useFinancialJob().page;
   const progress = job ? financialJobProgress(job) : null;
   const tone = TONE_CLASS[financialJobTone(job?.status)];
   return <button type="button" data-financial-anchor className={`tb-btn flex-none gap-1.5 ${className}`} aria-label="재무자료" aria-haspopup="dialog" onClick={open}>
