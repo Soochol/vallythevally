@@ -8,14 +8,17 @@ from pathlib import Path
 import subprocess
 import os
 import tempfile
+import time
+import urllib.request
 import unittest
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 
 ROOT = Path(__file__).resolve().parent.parent
 SPEC = importlib.util.spec_from_file_location("web_checks", ROOT / "scripts/web.py")
 web = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(web)
+REAL_PROCESS = web.evidence.Process
 TOOLS = {"rustc": "same", "wasm-pack": "same"}
 
 
@@ -69,6 +72,9 @@ class WebWorkflowTest(unittest.TestCase):
         patch.object(web, "wasm_tools", return_value=TOOLS).start()
         patch.object(web.dev, "output", return_value=str(self.root / ".git")).start()
         patch.object(web, "run_wasm_pack", write_package).start()
+        self.static = MagicMock()
+        self.static.address.return_value = "http://127.0.0.1:54321"
+        patch.object(web.evidence, "Process", return_value=self.static).start()
 
     def commands(self, command):
         return patch.object(web, "run", command)
@@ -161,6 +167,8 @@ class WebWorkflowTest(unittest.TestCase):
                 (directory / "index.html").write_text("new UI")
             if "playwright" in arguments[0]:
                 self.assert_compile_unlocked()
+                self.assertEqual(environment["VALLY_E2E_BASE_URL"], "http://127.0.0.1:54321")
+                self.assertEqual(environment["VALLY_E2E_PORT"], "0")
                 temporary = Path(environment["TMPDIR"])
                 self.assertEqual(temporary, temporary.resolve())
                 self.assertTrue(temporary.is_relative_to(self.root))
@@ -175,6 +183,28 @@ class WebWorkflowTest(unittest.TestCase):
         self.assertNotEqual(observations[0], observations[1])
         self.assertEqual(stale.read_text(), "old UI")
         self.assertEqual(self.build_count(), 1)
+
+    def test_parallel_static_hosts_use_distinct_ports_and_cleanup_owned_processes(self):
+        distribution = self.root / "dist"
+        distribution.mkdir()
+        (distribution / "index.html").write_text("current browser fixture")
+        environment = {**os.environ, "VALLY_E2E_STATIC_DIR": str(distribution), "VALLY_E2E_PORT": "0"}
+        with web.evidence.Run(self.root, "static-probe", ["test"]) as record:
+            hosts = []
+            try:
+                for index in range(2):
+                    host = REAL_PROCESS(["node", str(ROOT / "web/e2e/serve.mjs")], environment, record.directory / f"static-{index}.log", record)
+                    hosts.append(host)
+                addresses = [host.address(time.monotonic() + 10) for host in hosts]
+                self.assertNotEqual(*addresses)
+                for address in addresses:
+                    with urllib.request.urlopen(address, timeout=3) as response:
+                        self.assertEqual(response.read(), b"current browser fixture")
+            finally:
+                for host in hosts:
+                    host.stop()
+            self.assertTrue(all(host.child.poll() is not None for host in hosts))
+            self.assertTrue(all(entry["stop_reason"] == "owned_cleanup" for entry in record.data["processes"]))
 
     def test_frontend_build_failure_never_runs_playwright_on_stale_assets(self):
         called = []

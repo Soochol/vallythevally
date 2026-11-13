@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+import time
 import tempfile
 import tomllib
 
@@ -198,7 +199,7 @@ def prepare_e2e(root, environment, record):
 def run_e2e(root, arguments):
     with evidence.Run(root, "e2e", ["web.py", "e2e", *arguments]) as record:
         directory = record.directory
-        record.plan("dependencies", "wasm", "types", "ui", "playwright")
+        record.plan("dependencies", "wasm", "types", "ui", "static", "playwright")
         environment = environment_for(root, directory / "tmp")
         environment.update({"VALLY_E2E_STATIC_DIR": str(directory / "dist"), "PLAYWRIGHT_HTML_OUTPUT_DIR": str(directory / "report"), "PLAYWRIGHT_HTML_OPEN": "never"})
         prepare_e2e(root, environment, record)
@@ -208,10 +209,19 @@ def run_e2e(root, arguments):
         if not any(arg == "--workers" or arg.startswith(("--workers=", "-j")) for arg in options):
             options.append("--workers=2")
         record.data["results"].update(playwright_output=options, report=str(directory / "report"))
-        with record.step("playwright"):
-            verify_ui(root, record)
-            run([str(root / "web/node_modules/.bin/playwright"), "test", *options], root / "web", environment)
-            verify_ui(root, record)
+        server = None
+        try:
+            with record.step("static"):
+                verify_ui(root, record)
+                environment["VALLY_E2E_PORT"] = "0"
+                server = evidence.Process(["node", str(root / "web/e2e/serve.mjs")], environment, directory / "static.log", record)
+                environment["VALLY_E2E_BASE_URL"] = server.address(time.monotonic() + 30)
+            with record.step("playwright"):
+                run([str(root / "web/node_modules/.bin/playwright"), "test", *options], root / "web", environment)
+                verify_ui(root, record)
+        finally:
+            if server:
+                server.stop()
         print(f"dev-web: E2E 산출물·결과: {directory}", flush=True)
 
 
@@ -223,12 +233,12 @@ def verify_ui(root, record):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="로컬 웹 검사와 가짜 키움 E2E 준비 자동화")
+    parser = argparse.ArgumentParser(description="로컬 웹 검사와 브라우저 E2E 준비 자동화")
     actions = parser.add_subparsers(dest="action", required=True)
     actions.add_parser("wasm", help="WASM 준비 또는 일치하는 로컬 산출물 재사용")
     check = actions.add_parser("check", help="의존성·WASM·타입 검사·Vitest 실행")
     check.add_argument("arguments", nargs=argparse.REMAINDER)
-    e2e = actions.add_parser("e2e", help="서버·현재 웹 빌드 후 Playwright 실행 (인수 전달, 기본 worker 2)")
+    e2e = actions.add_parser("e2e", help="현재 웹 빌드·독립 정적 호스트 후 Playwright 실행 (인수 전달, 기본 worker 2)")
     e2e.add_argument("arguments", nargs=argparse.REMAINDER)
     doctor = actions.add_parser("doctor", help="설치·빌드·인증 없이 로컬 Chromium 진단")
     doctor.add_argument("--headed", action="store_true")

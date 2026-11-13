@@ -1,9 +1,6 @@
 import json
 import os
 from pathlib import Path
-import re
-import subprocess
-import threading
 import time
 import urllib.error
 import urllib.request
@@ -29,42 +26,7 @@ def isolated_environment():
     return {name: os.environ[name] for name in names if name in os.environ}
 
 
-class Process:
-    def __init__(self, command, environment, log, record):
-        self.started = time.monotonic()
-        self.log = log
-        self.child = evidence.spawn(command, env=environment, cwd=record.root, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
-        self.entry = {"command": command, "pid": self.child.pid, "log": str(log), "execution": "direct", "status": "running"}
-        record.data.setdefault("processes", []).append(self.entry)
-        self.lines = ""
-        def drain():
-            with log.open("w") as stream:
-                for line in self.child.stdout:
-                    line = evidence.clean(line)
-                    self.lines = (self.lines + line)[-65536:]
-                    stream.write(line)
-                    stream.flush()
-        self.thread = threading.Thread(target=drain, daemon=True)
-        self.thread.start()
-        record.save()
-
-    def address(self, deadline):
-        until = min(deadline, time.monotonic() + 30)
-        while time.monotonic() < until:
-            match = re.search(r"addr=127\.0\.0\.1:(\d+)", self.lines)
-            if match:
-                return f"http://127.0.0.1:{match[1]}"
-            if self.child.poll() is not None:
-                raise ValueError("독립 프로세스 기동 실패: 정제된 로그를 확인하세요")
-            time.sleep(.1)
-        raise TimeoutError("독립 프로세스 기동 시간 초과")
-
-    def stop(self):
-        cleanup = self.child.poll() is None
-        evidence.stop_process(self.child)
-        self.thread.join(timeout=5)
-        self.child.stdout.close()
-        self.entry.update(status="stopped" if cleanup else ("passed" if self.child.returncode == 0 else "failed"), exit_code=self.child.returncode, stop_reason="owned_cleanup" if cleanup else "exited", elapsed_seconds=round(time.monotonic() - self.started, 3))
+Process = evidence.Process
 
 
 def get(base, route, deadline):
