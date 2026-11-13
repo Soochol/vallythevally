@@ -619,6 +619,19 @@ mod tests {
     type Frames = UnboundedSender<Result<Message, WsError>>;
     type Script = dyn Fn(usize, &str, usize) -> Reply + Send + Sync;
 
+    struct Captured(Arc<Mutex<Vec<u8>>>);
+
+    impl std::io::Write for Captured {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(bytes);
+            Ok(bytes.len())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
     fn samsung() -> Symbol {
         Symbol::Stock(StockCode::parse("005930").unwrap())
     }
@@ -1002,6 +1015,10 @@ mod tests {
     #[tokio::test(start_paused = true)]
     async fn a_registration_refused_for_capacity_rebuilds_once_then_halts_only_the_stream() {
         for code in [105115, 105118] {
+            let output = Arc::new(Mutex::new(Vec::new()));
+            let writer = output.clone();
+            let subscriber = tracing_subscriber::fmt().with_writer(move || Captured(writer.clone())).with_ansi(false).with_max_level(tracing::Level::TRACE).finish();
+            let _guard = tracing::subscriber::set_default(subscriber);
             let peer = Peer::new(move |_, trnm, _| if trnm == "REG" { Reply::Code(code) } else { Reply::Ok });
             let clock = clock();
             let (rest, transport) = rest(&clock);
@@ -1010,6 +1027,10 @@ mod tests {
             assert_eq!(peer.logins(), 2);
             assert_eq!(transport.sent().len(), 1);
             assert!(rest.halted().is_none());
+            let logs = String::from_utf8(output.lock().unwrap().clone()).unwrap();
+            let line = logs.lines().find(|line| line.contains("다시 구성한 세션에서도 제어가 실패했습니다")).unwrap_or_else(|| panic!("{logs}"));
+            assert!(line.contains("ERROR") && line.contains(&format!("return_code: Some({code})")) && line.contains("budget=Rebuilt"), "{line}");
+            assert!(!logs.contains("tok-1"));
         }
     }
 
