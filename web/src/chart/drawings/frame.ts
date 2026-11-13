@@ -38,7 +38,8 @@ export const frameHit = (frame: RenderFrame, p: ScreenPoint) => frame.editable ?
 export function placementPreview(s: Extract<Interaction, { kind: "placing" | "drawing" }>, style: unknown, ctx: ToolContext): Shape[] {
   const points = s.kind === "placing" ? [...s.fixed, s.cursor] : s.points.length === 1 ? [s.points[0], s.points[0]] : s.points;
   const shapes = s.tool.shapes({ points, style, text: null, selected: true }, ctx);
-  for (const p of s.kind === "placing" ? s.fixed : s.points) {
+  const vertices = s.kind === "placing" ? s.fixed : s.tool.placement.kind === "freehand" ? [] : s.points;
+  for (const p of vertices) {
     const screen = ctx.toScreen(p);
     if (screen) shapes.push({ kind: "circle", c: screen, r: 4, stroke: { color: "$draw", width: 1, dash: "solid" }, fill: { on: true, color: "$chart-bg", opacity: 1 } });
   }
