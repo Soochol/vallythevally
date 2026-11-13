@@ -655,15 +655,19 @@ mod tests {
         let first = "01900000-0000-7000-8000-000000000002";
         assert_eq!(
             json(&f.app, "/api/watchlists").await,
-            (StatusCode::OK, json!({"lists": [{"id": first, "name": "기본", "symbols": []}], "revision": 0}))
+            (StatusCode::OK, json!({"lists": [{"id": first, "name": "기본", "symbols": [], "groups": []}], "revision": 0}))
         );
         let all = json!({"lists": [
             {"id": first, "name": "기본", "symbols": ["005930", "IDX:001", "999990"]},
             {"id": "B", "name": "반도체", "symbols": ["000660", "005930"]},
             {"id": "C", "name": "빈 목록", "symbols": []},
         ], "revision": 1});
-        assert_eq!(put(&f.app, "/api/watchlists", &all).await, (StatusCode::OK, all.clone()), "목록에 없는 코드, 목록 사이 같은 종목도 받는다");
-        assert_eq!(json(&f.app, "/api/watchlists").await, (StatusCode::OK, all));
+        let mut stored = all.clone();
+        for list in stored["lists"].as_array_mut().unwrap() {
+            list["groups"] = json!([]);
+        }
+        assert_eq!(put(&f.app, "/api/watchlists", &all).await, (StatusCode::OK, stored.clone()), "그룹 키가 없는 옛 본문, 목록에 없는 코드, 목록 사이 같은 종목도 받는다");
+        assert_eq!(json(&f.app, "/api/watchlists").await, (StatusCode::OK, stored));
         let one = |name: &str, symbols: Value| json!({"id": "X", "name": name, "symbols": symbols});
         let body = |lists: Value, revision: i64| json!({"lists": lists, "revision": revision}).to_string();
         let many: Vec<Value> = (0..21).map(|i| json!({"id": format!("L{i}"), "name": format!("목록 {i}"), "symbols": []})).collect();
@@ -679,7 +683,7 @@ mod tests {
             (body(json!([one(&"가".repeat(21), json!([]))]), 2), StatusCode::BAD_REQUEST, "bad_request"),
             (json!({"lists": [one("가", json!([]))]}).to_string(), StatusCode::BAD_REQUEST, "bad_request"),
             ("{\"lists\": [".to_owned(), StatusCode::BAD_REQUEST, "bad_request"),
-            (json!({"lists": [one("가", json!([]))], "revision": 2, "pad": "x".repeat(70_000)}).to_string(), StatusCode::PAYLOAD_TOO_LARGE, "payload_too_large"),
+            (json!({"lists": [one("가", json!([]))], "revision": 2, "pad": "x".repeat(crate::user_routes::WATCHLISTS_LIMIT)}).to_string(), StatusCode::PAYLOAD_TOO_LARGE, "payload_too_large"),
             (body(json!([one("가", json!([]))]), 1), StatusCode::CONFLICT, "stale_revision"),
         ] {
             let (s, v) = send(&f.app, "PUT", "/api/watchlists", body).await;
@@ -689,6 +693,51 @@ mod tests {
         assert_eq!(json(&f.app, "/api/watchlists").await.1["lists"].as_array().unwrap().len(), 3, "거절한 PUT은 목록을 바꾸지 않는다");
         let twenty: Vec<Value> = many[..20].to_vec();
         assert_eq!(put(&f.app, "/api/watchlists", &json!({"lists": twenty, "revision": 3})).await.0, StatusCode::OK, "20개까지 받는다");
+    }
+
+    #[tokio::test]
+    async fn watch_groups_round_trip_and_invariant_rejections() {
+        let f = live_fixture(true).await;
+        let group = |id: &str, name: &str, symbols: Value| json!({"id": id, "name": name, "symbols": symbols});
+        let grouped = json!({"lists": [
+            {"id": "A", "name": "기본", "symbols": ["005930", "000660", "IDX:001", "035420"], "groups": [
+                group("G2", "관찰", json!(["035420", "005930"])),
+                group("G1", "반도체", json!(["000660"])),
+                group("G3", "빈 그룹", json!([])),
+            ]},
+            {"id": "B", "name": "둘", "symbols": ["005930"], "groups": [group("G4", "관찰", json!(["005930"]))]},
+        ], "revision": 1});
+        assert_eq!(put(&f.app, "/api/watchlists", &grouped).await, (StatusCode::OK, grouped.clone()));
+        assert_eq!(json(&f.app, "/api/watchlists").await, (StatusCode::OK, grouped.clone()), "그룹 순서와 그룹 안 순서를 그대로 돌려준다");
+
+        let body = |groups: Value| json!({"lists": [{"id": "A", "name": "기본", "symbols": ["005930", "000660"], "groups": groups}], "revision": 2}).to_string();
+        let many: Vec<Value> = (0..21).map(|i| group(&format!("G{i}"), &format!("그룹 {i}"), json!([]))).collect();
+        for groups in [
+            json!([group("G1", "가", json!(["035420"]))]),
+            json!([group("G1", "가", json!(["005930"])), group("G2", "나", json!(["005930"]))]),
+            json!([group("G1", "가", json!(["005930", "005930"]))]),
+            json!([group("G1", "가", json!([])), group("G2", "가", json!([]))]),
+            json!([group("G1", "가", json!([])), group("G1", "나", json!([]))]),
+            json!([group("", "가", json!([]))]),
+            json!([group(&"g".repeat(65), "가", json!([]))]),
+            json!([group("G1", "", json!([]))]),
+            json!([group("G1", " 가", json!([]))]),
+            json!([group("G1", &"가".repeat(21), json!([]))]),
+            json!(many),
+        ] {
+            let (s, v) = send(&f.app, "PUT", "/api/watchlists", body(groups.clone())).await;
+            assert_eq!((s, code(&v)), (StatusCode::BAD_REQUEST, "bad_request"), "{groups}: {v}");
+            assert!(!v["error"]["message"].as_str().unwrap().is_empty());
+        }
+        let across = json!({"lists": [
+            {"id": "A", "name": "가", "symbols": [], "groups": [group("G1", "가", json!([]))]},
+            {"id": "B", "name": "나", "symbols": [], "groups": [group("G1", "가", json!([]))]},
+        ], "revision": 2});
+        let (s, v) = put(&f.app, "/api/watchlists", &across).await;
+        assert_eq!((s, code(&v)), (StatusCode::BAD_REQUEST, "bad_request"), "그룹 id는 목록 사이에서도 겹치지 않는다");
+        assert_eq!(json(&f.app, "/api/watchlists").await, (StatusCode::OK, grouped), "거절한 PUT은 그룹을 바꾸지 않는다");
+        let twenty: Vec<Value> = many[..20].to_vec();
+        assert_eq!(put(&f.app, "/api/watchlists", &json!({"lists": [{"id": "A", "name": "기본", "symbols": [], "groups": twenty}], "revision": 3})).await.0, StatusCode::OK, "20개까지 받는다");
     }
 
     #[tokio::test]
@@ -703,11 +752,16 @@ mod tests {
         assert!(codes.len() >= 7_274, "리뷰 반례(7,274종목)보다 크다: {}", codes.len());
 
         let lists: Vec<Value> = (0..20)
-            .map(|i| json!({"id": format!("{i:0>64}"), "name": format!("{i:𝄞>20}"), "symbols": if i == 0 { codes.clone() } else { vec![] }}))
+            .map(|i| {
+                let groups: Vec<Value> = (0..20)
+                    .map(|j| json!({"id": format!("{i:0>32}{j:0>32}"), "name": format!("{j:𝄞>20}"), "symbols": if i == 0 && j == 0 { codes.clone() } else { vec![] }}))
+                    .collect();
+                json!({"id": format!("{i:0>64}"), "name": format!("{i:𝄞>20}"), "symbols": if i == 0 { codes.clone() } else { vec![] }, "groups": groups})
+            })
             .collect();
         let all = json!({"lists": lists, "revision": i64::MAX});
         let (s, v) = put(&f.app, "/api/watchlists", &all).await;
-        assert_eq!(s, StatusCode::OK, "옛 한도에 들던 목록을 가장 긴 감싸개 20개로 감싸도 받는다: {}", v["error"]);
+        assert_eq!(s, StatusCode::OK, "옛 한도에 들던 목록을 한 그룹에 모두 넣고 가장 긴 감싸개 20개와 그룹 400개로 감싸도 받는다: {}", v["error"]);
         assert_eq!(json(&f.app, "/api/watchlists").await, (StatusCode::OK, all));
     }
 

@@ -1,7 +1,7 @@
 
 use sqlx::Row;
 
-use crate::api::{Arrangement, Cell, Layout, LayoutInput, LayoutSummary, LayoutSync, Revision, Screens, SymbolCode, UiState, UnixSeconds, Watchlist, Watchlists};
+use crate::api::{Arrangement, Cell, Layout, LayoutInput, LayoutSummary, LayoutSync, Revision, Screens, SymbolCode, UiState, UnixSeconds, WatchGroup, Watchlist, Watchlists};
 use crate::db::{AppDb, DbError};
 
 #[derive(Debug)]
@@ -46,13 +46,29 @@ pub async fn get_watchlists(db: &AppDb) -> Result<Watchlists, StoreError> {
         .fetch_all(&mut *tx)
         .await?
         .into_iter()
-        .map(|r| Watchlist { id: r.get("id"), name: r.get("name"), symbols: Vec::new() })
+        .map(|r| Watchlist { id: r.get("id"), name: r.get("name"), symbols: Vec::new(), groups: Vec::new() })
         .collect();
     let items = sqlx::query("SELECT list_id, symbol FROM watchlist_items ORDER BY list_id, position").fetch_all(&mut *tx).await?;
     for item in items {
         let list_id: String = item.get("list_id");
         let list = lists.iter_mut().find(|l| l.id == list_id).ok_or_else(|| corrupt("watchlist_items", &list_id))?;
         list.symbols.push(SymbolCode(item.get("symbol")));
+    }
+    let groups = sqlx::query("SELECT id, list_id, name FROM watch_groups ORDER BY list_id, position").fetch_all(&mut *tx).await?;
+    for group in groups {
+        let list_id: String = group.get("list_id");
+        let list = lists.iter_mut().find(|l| l.id == list_id).ok_or_else(|| corrupt("watch_groups", &list_id))?;
+        list.groups.push(WatchGroup { id: group.get("id"), name: group.get("name"), symbols: Vec::new() });
+    }
+    let grouped = sqlx::query("SELECT group_id, list_id, symbol FROM watch_group_items ORDER BY group_id, position").fetch_all(&mut *tx).await?;
+    for item in grouped {
+        let (group_id, list_id): (String, String) = (item.get("group_id"), item.get("list_id"));
+        let group = lists
+            .iter_mut()
+            .find(|l| l.id == list_id)
+            .and_then(|l| l.groups.iter_mut().find(|g| g.id == group_id))
+            .ok_or_else(|| corrupt("watch_group_items", &group_id))?;
+        group.symbols.push(SymbolCode(item.get("symbol")));
     }
     let revision: i64 = sqlx::query_scalar("SELECT revision FROM watchlist_revision WHERE singleton = 1").fetch_one(&mut *tx).await?;
     Ok(Watchlists { lists, revision: Revision(revision) })
@@ -78,6 +94,24 @@ pub async fn put_watchlists(db: &AppDb, all: &Watchlists) -> Result<(), StoreErr
                 .bind(position as i64)
                 .execute(&mut *tx)
                 .await?;
+        }
+        for (group_position, group) in list.groups.iter().enumerate() {
+            sqlx::query("INSERT INTO watch_groups (id, list_id, name, position) VALUES (?, ?, ?, ?)")
+                .bind(&group.id)
+                .bind(&list.id)
+                .bind(&group.name)
+                .bind(group_position as i64)
+                .execute(&mut *tx)
+                .await?;
+            for (position, symbol) in group.symbols.iter().enumerate() {
+                sqlx::query("INSERT INTO watch_group_items (group_id, list_id, symbol, position) VALUES (?, ?, ?, ?)")
+                    .bind(&group.id)
+                    .bind(&list.id)
+                    .bind(&symbol.0)
+                    .bind(position as i64)
+                    .execute(&mut *tx)
+                    .await?;
+            }
         }
     }
     tx.commit().await?;
@@ -271,7 +305,15 @@ mod tests {
     }
 
     fn list(id: &str, name: &str, codes: &[&str]) -> Watchlist {
-        Watchlist { id: id.into(), name: name.into(), symbols: codes.iter().map(|c| SymbolCode((*c).into())).collect() }
+        Watchlist { id: id.into(), name: name.into(), symbols: symbols(codes), groups: Vec::new() }
+    }
+
+    fn symbols(codes: &[&str]) -> Vec<SymbolCode> {
+        codes.iter().map(|c| SymbolCode((*c).into())).collect()
+    }
+
+    fn group(id: &str, name: &str, codes: &[&str]) -> WatchGroup {
+        WatchGroup { id: id.into(), name: name.into(), symbols: symbols(codes) }
     }
 
     fn watch(lists: Vec<Watchlist>, revision: i64) -> Watchlists {
@@ -305,6 +347,43 @@ mod tests {
         assert_eq!(get_watchlists(&db).await.unwrap(), two, "지운 목록과 그 종목은 남지 않는다");
         let orphans: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM watchlist_items WHERE list_id = 'B'").fetch_one(db.read()).await.unwrap();
         assert_eq!(orphans, 0);
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn watch_groups_round_trip_in_order_and_go_with_their_list(_: SqlitePoolOptions, opts: SqliteConnectOptions) {
+        let db = db(opts).await;
+        let mut first = list(FIRST_LIST_ID, "기본", &["005930", "000660", "IDX:001", "035420", "051910"]);
+        first.groups = vec![group("G2", "관찰", &["051910", "005930"]), group("G1", "반도체", &["000660"]), group("G3", "빈 그룹", &[])];
+        let mut second = list("B", "둘", &["005930", "000660"]);
+        second.groups = vec![group("G4", "반도체", &["000660", "005930"])];
+        let grouped = watch(vec![first, second], 1);
+        put_watchlists(&db, &grouped).await.unwrap();
+        assert_eq!(get_watchlists(&db).await.unwrap(), grouped, "그룹 사이 순서와 그룹 안 순서를 그대로 돌려준다");
+
+        let mut regrouped = list(FIRST_LIST_ID, "기본", &["005930", "000660"]);
+        regrouped.groups = vec![group("G1", "반도체", &["005930", "000660"])];
+        let after = watch(vec![regrouped], 2);
+        put_watchlists(&db, &after).await.unwrap();
+        assert_eq!(get_watchlists(&db).await.unwrap(), after, "지운 목록·그룹과 그 종목은 남지 않는다");
+        let groups: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM watch_groups").fetch_one(db.read()).await.unwrap();
+        let items: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM watch_group_items").fetch_one(db.read()).await.unwrap();
+        assert_eq!((groups, items), (1, 2));
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn db_rejects_a_grouped_symbol_outside_its_list_or_in_two_groups(_: SqlitePoolOptions, opts: SqliteConnectOptions) {
+        let db = db(opts).await;
+        let saved = watch(vec![list(FIRST_LIST_ID, "기본", &["005930"])], 1);
+        put_watchlists(&db, &saved).await.unwrap();
+        let mut outside = list(FIRST_LIST_ID, "기본", &["005930"]);
+        outside.groups = vec![group("G1", "가", &["000660"])];
+        let mut twice = list(FIRST_LIST_ID, "기본", &["005930"]);
+        twice.groups = vec![group("G1", "가", &["005930"]), group("G2", "나", &["005930"])];
+        for (i, bad) in [outside, twice].into_iter().enumerate() {
+            let err = put_watchlists(&db, &watch(vec![bad], 2 + i as i64)).await.unwrap_err();
+            assert!(matches!(&err, StoreError::Db(e) if e.0.contains("constraint")), "{err:?}");
+        }
+        assert_eq!(get_watchlists(&db).await.unwrap(), saved, "실패한 트랜잭션은 아무것도 바꾸지 않는다");
     }
 
     #[tokio::test]
