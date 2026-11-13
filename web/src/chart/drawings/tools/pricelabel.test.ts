@@ -62,5 +62,7 @@ describe("가격 라벨", () => {
 
   test("작은 막대는 글자 색과 배경 채움만 건다", () => {
     expect(Object.entries(pricelabel.bar).filter(([, lens]) => lens !== undefined).map(([k]) => k).sort()).toEqual(["fill", "textColor"]);
+    const off = pricelabel.parseStyle({ ...style, background: { ...style.background, on: false } });
+    expect(pricelabel.parseStyle(pricelabel.bar.fill?.set(off, { ...style.background, on: false, color: "#00ff00" }))).toMatchObject({ background: { on: true, color: "#00ff00" } });
   });
 });

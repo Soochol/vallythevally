@@ -82,5 +82,7 @@ describe("말풍선", () => {
   test("작은 막대는 선 색·굵기·모양, 배경, 글자 색을 건다", () => {
     expect(Object.entries(callout.bar).filter(([, lens]) => lens !== undefined).map(([k]) => k).sort()).toEqual(["dash", "fill", "lineColor", "textColor", "width"]);
     expect(callout.parseStyle(callout.bar.width?.set(style, 4))).toMatchObject({ line: { width: 4 } });
+    const off = callout.parseStyle({ ...style, background: { ...style.background, on: false } });
+    expect(callout.parseStyle(callout.bar.fill?.set(off, { ...style.background, on: false, color: "#00ff00" }))).toMatchObject({ background: { on: true, color: "#00ff00" } });
   });
 });

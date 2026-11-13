@@ -46,10 +46,9 @@ const borderStroke: Lens<TextNoteStyle, Stroke> = {
   get: (s) => s.border,
   set: (s, v) => ({ ...s, border: { ...s.border, ...v } }),
 };
-const backgroundShownOnPick: Lens<TextNoteStyle, Fill> = {
-  get: (s) => s.background,
-  set: (s, v) => ({ ...s, background: { ...v, on: true } }),
-};
+export function shownOnPick<S>(fill: Lens<S, Fill>): Lens<S, Fill> {
+  return { get: fill.get, set: (s, v) => fill.set(s, { ...v, on: true }) };
+}
 const WRAP_OPTIONS = WRAP_WIDTHS.map((w) => ({ value: String(w), label: `${w}px` }));
 const wrapWidthText: Lens<TextNoteStyle, string> = {
   get: (s) => String(s.wrap.width),
@@ -66,7 +65,7 @@ export const text = defineTool<TextNoteStyle>({
   text: { editOnPlace: true },
   defaultStyle: textDefaults,
   parseStyle: parseTextStyle,
-  bar: { textColor: L("label", "color"), fill: backgroundShownOnPick },
+  bar: { textColor: L("label", "color"), fill: shownOnPick(L("background")) },
   settings: {
     style: [
       { kind: "fill", label: "배경", lens: L("background") },

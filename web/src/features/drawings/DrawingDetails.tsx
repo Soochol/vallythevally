@@ -62,8 +62,9 @@ export function DrawingTextEditor({ slot, editor }: { slot: number; editor: Draw
   const ref = useRef<HTMLTextAreaElement>(null);
   const anchor = useRef<HTMLDivElement>(null);
   const surface = surfaceFor(slot); const p = editor.draft.points.at(-1); const at = p ? surface?.frame().ctx.toScreen(p) : null;
-  const typed = { ...editor, draft: { ...editor.draft, text: editor.draft.text?.trim() ? editor.draft.text : null } };
-  const submit = () => typed.draft.text === editor.original.text ? close(slot) : confirm(slot, typed);
+  const meaningful = (text: string | null) => text?.trim() ? text : null;
+  const typed = { ...editor, draft: { ...editor.draft, text: meaningful(editor.draft.text) } };
+  const submit = () => typed.draft.text === meaningful(editor.original.text) ? close(slot) : confirm(slot, typed);
   useEffect(() => { ref.current?.focus(); ref.current?.select(); }, []);
   return <div data-chart-control ref={anchor} style={{ position: "absolute", left: Math.max(8, Math.min(at?.x ?? 80, (surface?.frame().pane.width ?? 500) - 300)), top: Math.max(8, Math.min(at?.y ?? 80, (surface?.frame().pane.height ?? 400) - 160)) }}><Popover anchor={anchor} onClose={(reason) => reason === "outside" ? submit() : close(slot)} className="draw-text-editor" style={{ width: 300 }}>
     <textarea ref={ref} className={INPUT} aria-label="드로잉 글자" rows={3} value={editor.draft.text ?? ""} onChange={(e) => draft({ text: e.target.value })} onKeyDown={(e) => {

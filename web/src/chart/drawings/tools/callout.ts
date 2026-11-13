@@ -1,7 +1,7 @@
 import { at, defaultFill, defaultStroke, defaultText, readBool, readFill, readRecord, readStroke, readTextStyle, strokeFields } from "../styleKit";
 import { defineTool, type Shape } from "../toolSpec";
 import type { DrawingPoint, Fill, ScreenPoint, Stroke, TextStyle } from "../types";
-import { NOTE_PADDING, shownText } from "./text";
+import { NOTE_PADDING, shownOnPick, shownText } from "./text";
 
 export interface CalloutStyle {
   v: 1;
@@ -52,7 +52,7 @@ export const callout = defineTool<CalloutStyle>({
   text: { editOnPlace: true },
   defaultStyle: calloutDefaults,
   parseStyle: parseCalloutStyle,
-  bar: { lineColor: L("line", "color"), width: L("line", "width"), dash: L("line", "dash"), fill: L("background"), textColor: L("label", "color") },
+  bar: { lineColor: L("line", "color"), width: L("line", "width"), dash: L("line", "dash"), fill: shownOnPick(L("background")), textColor: L("label", "color") },
   settings: {
     style: [
       ...strokeFields("선", L("line")),

@@ -1,6 +1,7 @@
 import { at, defaultFill, defaultText, readFill, readRecord, readTextStyle } from "../styleKit";
 import { defineTool } from "../toolSpec";
 import type { DrawingPoint, Fill, TextStyle } from "../types";
+import { shownOnPick } from "./text";
 
 export interface PriceLabelStyle {
   v: 1;
@@ -35,7 +36,7 @@ export const pricelabel = defineTool<PriceLabelStyle>({
   text: { editOnPlace: false },
   defaultStyle: priceLabelDefaults,
   parseStyle: parsePriceLabelStyle,
-  bar: { textColor: L("label", "color"), fill: L("background") },
+  bar: { textColor: L("label", "color"), fill: shownOnPick(L("background")) },
   settings: {
     style: [{ kind: "fill", label: "배경", lens: L("background") }],
     text: [{ kind: "textStyle", label: "글자 모양", lens: L("label") }],
