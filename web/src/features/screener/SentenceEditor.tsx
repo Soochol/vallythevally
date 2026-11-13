@@ -72,7 +72,7 @@ export function SentenceEditor({ screenEditing, chosen, entries, blocked, result
         ]}><MoreIcon size={16} /></ScreenerMenu>
       </fieldset>
     </div>
-    {rename !== null && <Popover anchor={head} focusTarget={renameOpener} role="dialog" aria-label="조건식 이름 바꾸기" onClose={() => setRename(null)} className="rounded-m border border-line bg-surface p-3 shadow-dialog">
+    {rename !== null && <Popover anchor={head} focusTarget={renameOpener} role="dialog" aria-label="조건식 이름 바꾸기" onClose={() => setRename(null)} className="p-3">
       <form className="flex flex-col gap-2" onSubmit={(e) => { e.preventDefault(); change((d) => ({ ...d, name: rename })); setRename(null); }}>
         <label className="text-s">조건식 이름<input autoFocus aria-label="조건식 이름" value={rename} onChange={(e) => setRename(e.target.value)} className="ui-field mt-1 w-full px-2" /></label>
         <button type="submit" className="btn-primary h-8">적용</button>

@@ -62,7 +62,7 @@ export function Menu({ label, items, onClose, root, className, style }: Props) {
       aria-label={label}
       onKeyDown={onKeyDown}
       style={{ minWidth: style?.minWidth }}
-      className={`z-40 flex min-w-[120px] flex-col whitespace-nowrap rounded-m border border-line bg-surface p-1 shadow-dialog ${className ?? ""}`}
+      className={`z-40 flex min-w-[120px] flex-col whitespace-nowrap p-1 ${className ?? ""}`}
     >
       {items.map((item, i) => {
         if (item.kind === "separator") return <div key={i} role="separator" className="my-1 border-t border-line" />;

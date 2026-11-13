@@ -23,7 +23,7 @@ export function NumberToken({ label, value, error, describedBy, presets, period,
   };
   return <span className="inline-flex">
     <button ref={anchor} type="button" aria-label={label} aria-haspopup="dialog" aria-expanded={editing !== null} aria-invalid={!!error} aria-describedby={describedBy} className="sentence-token" onClick={() => setEditing({ value, period })}>{value || "값"}</button>
-    {editing && <Popover anchor={anchor} placement="bottom" role="dialog" aria-label={`${label} 편집`} onClose={() => setEditing(null)} className="rounded-m border border-line bg-surface p-3 shadow-dialog">
+    {editing && <Popover anchor={anchor} placement="bottom" role="dialog" aria-label={`${label} 편집`} onClose={() => setEditing(null)} className="p-3">
       <form className="flex w-[220px] flex-col gap-2" onSubmit={(e) => { e.preventDefault(); apply(editing.value); }}>
         <label className="text-s text-text-2">{label}
           <input autoFocus aria-label={label} className="ui-field mt-1 w-full px-2" inputMode="decimal" autoComplete="off" value={editing.value} onChange={(e) => setEditing({ ...editing, value: e.target.value })} />
