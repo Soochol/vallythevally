@@ -1,7 +1,7 @@
 import type { Locator, Page } from "@playwright/test";
 import type { Screen } from "../src/api/generated/Screen";
 import type { Screens } from "../src/api/generated/Screens";
-import { type App, expect, test } from "./harness";
+import { type Scenario, expect, test } from "./harness";
 import { openScreener, panel, savedTo, screenChooser } from "./screener-page";
 import { renameScreen, sentenceEditor } from "./sentence-editor";
 
@@ -13,16 +13,15 @@ const CHANGED = "변경됨";
 test.use({ viewport: PHONE });
 
 const screenOf = (id: string, name: string): Screen => ({ id, name, markets: [], exclude: [], conditions: [] });
-const stored = async (app: App): Promise<Screens> => (await fetch(`${app.url}/api/screens`)).json();
+const stored = async (scenario: Scenario): Promise<Screens> => scenario.documents.screens();
 const dialogOf = (page: Page, title: string) => page.getByRole("dialog", { name: title, exact: true });
 const nameField = (dialog: Locator) => dialog.getByRole("textbox", { name: "이름", exact: true });
 const unsaved = (page: Page) => panel(page).getByText(CHANGED, { exact: true });
 const unavailable = JSON.stringify({ error: { code: "unavailable", message: "시험용 저장 실패" } });
 
-async function store(app: App, screens: Screen[]) {
-  const { revision } = await stored(app);
-  const response = await fetch(`${app.url}/api/screens`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ screens, revision: revision + 1 }) });
-  expect(response.ok).toBe(true);
+async function store(scenario: Scenario, screens: Screen[]) {
+  const { revision } = await stored(scenario);
+  scenario.documents.saveScreens({ screens, revision: revision + 1 });
 }
 
 async function openPhone(page: Page) {
@@ -30,8 +29,8 @@ async function openPhone(page: Page) {
   await expect(screenChooser(page).or(panel(page).getByText("저장한 조건식이 없습니다"))).toBeVisible();
 }
 
-async function startPhone(app: App, page: Page, screens: Screen[]) {
-  await store(app, screens);
+async function startPhone(scenario: Scenario, page: Page, screens: Screen[]) {
+  await store(scenario, screens);
   await page.goto("/");
   await openPhone(page);
 }
@@ -66,7 +65,7 @@ async function expectPicker(page: Page, expected: readonly string[]) {
 async function failNextPut(page: Page) {
   let failed = false;
   await page.route("**/api/screens", async (route) => {
-    if (route.request().method() !== "PUT" || failed) return route.continue();
+    if (route.request().method() !== "PUT" || failed) return route.fallback();
     failed = true;
     await route.fulfill({ status: 503, contentType: "application/json", body: unavailable });
   });
@@ -80,8 +79,8 @@ function countPuts(page: Page) {
   return puts;
 }
 
-test("휴대폰에서 고친 것이 있을 때만 저장하고, 저장하면 그 조건식을 고른 채 대화상자를 닫는다", async ({ app, page }) => {
-  await startPhone(app, page, [screenOf("a", "기존 식")]);
+test("휴대폰에서 고친 것이 있을 때만 저장하고, 저장하면 그 조건식을 고른 채 대화상자를 닫는다", async ({ scenario, page }) => {
+  await startPhone(scenario, page, [screenOf("a", "기존 식")]);
   const editing = await editChosen(page);
   await expect(editing.getByRole("button", { name: "저장", exact: true })).toBeDisabled();
   await closeDialog(editing);
@@ -94,28 +93,28 @@ test("휴대폰에서 고친 것이 있을 때만 저장하고, 저장하면 그
   await expect(dialog).toBeHidden();
   await expect(screenChooser(page)).toHaveAccessibleName("조건식: 휴대폰 식");
   await expect(unsaved(page)).toHaveCount(0);
-  expect((await stored(app)).screens).toMatchObject([{ id: "a", name: "기존 식" }, { name: "휴대폰 식", markets: ["kospi"], conditions: [] }]);
+  expect((await stored(scenario)).screens).toMatchObject([{ id: "a", name: "기존 식" }, { name: "휴대폰 식", markets: ["kospi"], conditions: [] }]);
 });
 
-test("휴대폰에서 저장이 충돌하면 문구와 초안을 남기고, 다시 저장하면 다른 기기의 식을 지키며 덮어쓴다", async ({ app, page }) => {
-  await startPhone(app, page, [screenOf("a", "기존 식")]);
+test("휴대폰에서 저장이 충돌하면 문구와 초안을 남기고, 다시 저장하면 다른 기기의 식을 지키며 덮어쓴다", async ({ scenario, page }) => {
+  await startPhone(scenario, page, [screenOf("a", "기존 식")]);
   const dialog = await editChosen(page);
   await nameField(dialog).fill("휴대폰 수정");
-  await store(app, [screenOf("a", "다른 기기 수정"), screenOf("b", "다른 기기 식")]);
+  await store(scenario, [screenOf("a", "다른 기기 수정"), screenOf("b", "다른 기기 식")]);
   await dialog.getByRole("button", { name: "저장", exact: true }).click();
   await expect(dialog.getByRole("alert")).toContainText(STALE);
   await expect(nameField(dialog)).toHaveValue("휴대폰 수정");
-  expect((await stored(app)).screens.map((screen) => screen.name)).toEqual(["다른 기기 수정", "다른 기기 식"]);
+  expect((await stored(scenario)).screens.map((screen) => screen.name)).toEqual(["다른 기기 수정", "다른 기기 식"]);
   const saved = savedTo(page, "/api/screens");
   await dialog.getByRole("button", { name: "저장", exact: true }).click();
   await saved;
   await expect(dialog).toBeHidden();
   await expect(screenChooser(page)).toHaveAccessibleName("조건식: 휴대폰 수정");
-  expect((await stored(app)).screens.map((screen) => [screen.id, screen.name])).toEqual([["a", "휴대폰 수정"], ["b", "다른 기기 식"]]);
+  expect((await stored(scenario)).screens.map((screen) => [screen.id, screen.name])).toEqual([["a", "휴대폰 수정"], ["b", "다른 기기 식"]]);
 });
 
-test("휴대폰에서 50개가 찬 목록의 새 조건식은 저장을 시도한 뒤 오류를 보이고 보내지 않으며, 닫아도 변경됨으로 남는다", async ({ app, page }) => {
-  await startPhone(app, page, Array.from({ length: 50 }, (_, index) => screenOf(`s${index}`, `식 ${index + 1}`)));
+test("휴대폰에서 50개가 찬 목록의 새 조건식은 저장을 시도한 뒤 오류를 보이고 보내지 않으며, 닫아도 변경됨으로 남는다", async ({ scenario, page }) => {
+  await startPhone(scenario, page, Array.from({ length: 50 }, (_, index) => screenOf(`s${index}`, `식 ${index + 1}`)));
   const puts = countPuts(page);
   const dialog = await createScreen(page);
   await nameField(dialog).fill("51번째");
@@ -130,11 +129,11 @@ test("휴대폰에서 50개가 찬 목록의 새 조건식은 저장을 시도�
   const reopened = await editChosen(page, "새 조건식");
   await expect(nameField(reopened)).toHaveValue("51번째");
   expect(puts).toEqual([]);
-  expect((await stored(app)).screens).toHaveLength(50);
+  expect((await stored(scenario)).screens).toHaveLength(50);
 });
 
-test("휴대폰에서 지우면 다음 조건식을 고르고 지운 식의 초안을 버리며, 저장하지 않은 초안은 요청 없이 지운다", async ({ app, page }) => {
-  await startPhone(app, page, [screenOf("a", "첫째"), screenOf("b", "둘째")]);
+test("휴대폰에서 지우면 다음 조건식을 고르고 지운 식의 초안을 버리며, 저장하지 않은 초안은 요청 없이 지운다", async ({ scenario, page }) => {
+  await startPhone(scenario, page, [screenOf("a", "첫째"), screenOf("b", "둘째")]);
   const dialog = await editChosen(page);
   await nameField(dialog).fill("지울 초안");
   await dialog.getByRole("button", { name: "삭제", exact: true }).click();
@@ -144,7 +143,7 @@ test("휴대폰에서 지우면 다음 조건식을 고르고 지운 식의 초�
   await expect(dialog).toBeHidden();
   await expect(screenChooser(page)).toHaveAccessibleName("조건식: 둘째");
   await expectPicker(page, ["둘째"]);
-  expect((await stored(app)).screens.map((screen) => screen.id)).toEqual(["b"]);
+  expect((await stored(scenario)).screens.map((screen) => screen.id)).toEqual(["b"]);
 
   const puts = countPuts(page);
   const draft = await createScreen(page);
@@ -160,8 +159,8 @@ test("휴대폰에서 지우면 다음 조건식을 고르고 지운 식의 초�
   expect(puts).toEqual([]);
 });
 
-test("조건식 초안은 휴대폰과 데스크톱 폭을 넘나들어도 남는다", async ({ app, page }) => {
-  await startPhone(app, page, [screenOf("a", "첫째")]);
+test("조건식 초안은 휴대폰과 데스크톱 폭을 넘나들어도 남는다", async ({ scenario, page }) => {
+  await startPhone(scenario, page, [screenOf("a", "첫째")]);
   const dialog = await editChosen(page);
   await nameField(dialog).fill("휴대폰 초안");
   await closeDialog(dialog);
@@ -182,11 +181,11 @@ test("조건식 초안은 휴대폰과 데스크톱 폭을 넘나들어도 남�
   await expectPicker(page, [`데스크톱 초안${CHANGED}`]);
   const reopened = await editChosen(page);
   await expect(nameField(reopened)).toHaveValue("데스크톱 초안");
-  expect((await stored(app)).screens.map((screen) => screen.name)).toEqual(["첫째"]);
+  expect((await stored(scenario)).screens.map((screen) => screen.name)).toEqual(["첫째"]);
 });
 
-test("휴대폰에서 저장이 서버 오류로 실패하면 대화상자와 초안과 문구가 남고, 다시 저장하면 성공한다", async ({ app, page }) => {
-  await startPhone(app, page, [screenOf("a", "기존 식")]);
+test("휴대폰에서 저장이 서버 오류로 실패하면 대화상자와 초안과 문구가 남고, 다시 저장하면 성공한다", async ({ scenario, page }) => {
+  await startPhone(scenario, page, [screenOf("a", "기존 식")]);
   const dialog = await editChosen(page);
   await nameField(dialog).fill("실패 뒤 저장");
   await failNextPut(page);
@@ -194,18 +193,18 @@ test("휴대폰에서 저장이 서버 오류로 실패하면 대화상자와 �
   await expect(dialog.getByRole("alert")).toContainText("저장하지 못했습니다");
   await expect(nameField(dialog)).toHaveValue("실패 뒤 저장");
   await expect(dialog.getByRole("button", { name: "저장", exact: true })).toBeEnabled();
-  expect((await stored(app)).screens.map((screen) => screen.name)).toEqual(["기존 식"]);
+  expect((await stored(scenario)).screens.map((screen) => screen.name)).toEqual(["기존 식"]);
   const saved = savedTo(page, "/api/screens");
   await dialog.getByRole("button", { name: "저장", exact: true }).click();
   await saved;
   await expect(dialog).toBeHidden();
   await expect(screenChooser(page)).toHaveAccessibleName("조건식: 실패 뒤 저장");
   await expect(unsaved(page)).toHaveCount(0);
-  expect((await stored(app)).screens.map((screen) => screen.name)).toEqual(["실패 뒤 저장"]);
+  expect((await stored(scenario)).screens.map((screen) => screen.name)).toEqual(["실패 뒤 저장"]);
 });
 
-test("휴대폰에서 삭제가 서버 오류로 실패하면 대화상자와 문구가 남고, 다시 지우면 다음 조건식을 고른다", async ({ app, page }) => {
-  await startPhone(app, page, [screenOf("a", "첫째"), screenOf("b", "둘째")]);
+test("휴대폰에서 삭제가 서버 오류로 실패하면 대화상자와 문구가 남고, 다시 지우면 다음 조건식을 고른다", async ({ scenario, page }) => {
+  await startPhone(scenario, page, [screenOf("a", "첫째"), screenOf("b", "둘째")]);
   const dialog = await editChosen(page);
   await failNextPut(page);
   const confirm = page.getByRole("dialog", { name: '"첫째" 조건식을 삭제할까요? 되돌릴 수 없습니다.' }).getByRole("button", { name: "확인", exact: true });
@@ -213,12 +212,12 @@ test("휴대폰에서 삭제가 서버 오류로 실패하면 대화상자와 �
   await confirm.click();
   await expect(dialog.getByRole("alert")).toContainText("삭제하지 못했습니다");
   await expect(nameField(dialog)).toHaveValue("첫째");
-  expect((await stored(app)).screens.map((screen) => screen.id)).toEqual(["a", "b"]);
+  expect((await stored(scenario)).screens.map((screen) => screen.id)).toEqual(["a", "b"]);
   const saved = savedTo(page, "/api/screens");
   await dialog.getByRole("button", { name: "삭제", exact: true }).click();
   await confirm.click();
   await saved;
   await expect(dialog).toBeHidden();
   await expect(screenChooser(page)).toHaveAccessibleName("조건식: 둘째");
-  expect((await stored(app)).screens.map((screen) => screen.id)).toEqual(["b"]);
+  expect((await stored(scenario)).screens.map((screen) => screen.id)).toEqual(["b"]);
 });
