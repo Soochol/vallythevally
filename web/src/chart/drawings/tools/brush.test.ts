@@ -50,6 +50,15 @@ describe("붓", () => {
     expect(erase([], 6)).toEqual([stroke]);
   });
 
+  test("점 사이가 지우개 반지름보다 넓어도 그 사이를 지나는 자취는 선분을 끊는다", () => {
+    const sparse = [{ t: 0, price: 50 }, { t: 40, price: 50 }, { t: 80, price: 50 }, { t: 120, price: 50 }];
+    const cut = (eraser: { x: number; y: number }[]) => brush.eraseAlong?.(sparse, eraser, 6, ctx);
+    expect(cut([{ x: 20, y: 0 }, { x: 20, y: 100 }])).toEqual([sparse.slice(1)]);
+    expect(cut([{ x: 60, y: 0 }, { x: 60, y: 100 }])).toEqual([sparse.slice(0, 2), sparse.slice(2)]);
+    expect(cut([{ x: 60, y: 54 }])).toEqual([sparse.slice(0, 2), sparse.slice(2)]);
+    expect(cut([{ x: 60, y: 57 }, { x: 70, y: 57 }])).toEqual([sparse]);
+  });
+
   test("parseStyle은 모르는 키를 남기고 틀린 값은 기본값으로 채운다", () => {
     expect(brush.parseStyle({ v: 1, future: "x", line: { color: "#abcdef", width: 0 } })).toMatchObject({ future: "x", line: { color: "#abcdef", width: 2 } });
     expect(brush.parseStyle(undefined)).toEqual(style);

@@ -138,6 +138,22 @@ test("drawing engine: lock, hide, order, multi-selection and object list", async
   await expect.poll(async () => { const ds = await drawings(scenario); return ds.find((d) => d.tool === "trendline")!.z > ds.find((d) => d.tool === "hline")!.z; }).toBe(true);
 });
 
+test("drawing engine: whitespace-only text in the settings dialog saves no text", async ({ page, scenario }) => {
+  await open(page); await draw(page);
+  await expect.poll(async () => (await drawings(scenario)).length).toBe(1);
+  await page.getByRole("button", { name: "드로잉 세부 설정" }).click();
+  const dialog = page.getByRole("dialog", { name: "추세선 세부 설정" });
+  await dialog.locator("summary").filter({ hasText: /^글자$/ }).click();
+  await dialog.getByRole("textbox", { name: "글자", exact: true }).fill("지지");
+  await dialog.getByRole("button", { name: "확인", exact: true }).click();
+  await expect.poll(async () => (await drawings(scenario))[0]!.text).toBe("지지");
+  await page.getByRole("button", { name: "드로잉 세부 설정" }).click();
+  await dialog.locator("summary").filter({ hasText: /^글자$/ }).click();
+  await dialog.getByRole("textbox", { name: "글자", exact: true }).fill("   ");
+  await dialog.getByRole("button", { name: "확인", exact: true }).click();
+  await expect.poll(async () => (await drawings(scenario))[0]!.text).toBeNull();
+});
+
 test("drawing engine: settings preview, cancellation, coordinates and text", async ({ page, scenario }, testInfo) => {
   await open(page); await draw(page);
   await expect.poll(async () => (await drawings(scenario)).length).toBe(1);

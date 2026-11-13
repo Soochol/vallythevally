@@ -96,3 +96,18 @@ test("측정 그룹 네 도구를 골라 놓고, 포지션 목표가 핸들을 �
   await expect.poll(async () => Math.max(...(await drift()))).toBeLessThan(1);
   expect(errors).toEqual([]);
 });
+
+test("포지션 세부 설정: 목표가와 손절가를 진입가 반대쪽에 넣으면 핸들처럼 진입가에서 멈춘다", async ({ page, scenario }) => {
+  await open(page);
+  await pickTool(page, "측정", "매수 포지션");
+  await clickAt(page, [0.45, 0.5]);
+  await expect.poll(async () => (await drawings(scenario)).length).toBe(1);
+  const [entry, target, stop] = (await savedOf(scenario, "long")).points;
+  await page.getByRole("button", { name: "드로잉 세부 설정" }).click();
+  const dialog = page.getByRole("dialog", { name: "매수 포지션 세부 설정" });
+  await dialog.locator("summary").filter({ hasText: /^좌표$/ }).click();
+  await dialog.getByLabel("점 2 가격").fill(String(entry!.price - 100));
+  await dialog.getByLabel("점 3 가격").fill(String(entry!.price + 100));
+  await dialog.getByRole("button", { name: "확인", exact: true }).click();
+  await expect.poll(async () => (await savedOf(scenario, "long")).points).toEqual([entry, { ...target, price: entry!.price }, { ...stop, price: entry!.price }]);
+});
