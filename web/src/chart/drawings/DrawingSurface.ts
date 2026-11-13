@@ -151,7 +151,7 @@ export class DrawingSurface implements ChartExtension {
     if (this.state.kind === "placing" || this.state.kind === "drawing") {
       const s = this.state;
       const points = s.kind === "placing" ? [...s.fixed, s.cursor] : s.points.length === 1 ? [s.points[0]!, s.points[0]!] : s.points;
-      preview.push(...s.tool.shapes({ points, style: prefs.lastStyle[s.tool.tool] ?? s.tool.defaultStyle(), text: null, selected: s.tool.tool === "trendline" }, c.ctx));
+      preview.push(...s.tool.shapes({ points, style: prefs.lastStyle[s.tool.tool] ?? s.tool.defaultStyle(), text: null, selected: true }, c.ctx));
       for (const p of s.kind === "placing" ? s.fixed : s.points) {
         const screen = c.ctx.toScreen(p); if (screen) preview.push({ kind: "circle", c: screen, r: 4, stroke: { color: "$draw", width: 1, dash: "solid" }, fill: { on: true, color: "$chart-bg", opacity: 1 } });
       }
