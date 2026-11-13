@@ -15,6 +15,7 @@ const CORP: &str = "00126380";
 #[derive(Default)]
 struct FakeState {
     calls: Vec<(String, BTreeMap<String, String>)>,
+    requests_changed: Arc<tokio::sync::Notify>,
     failures: HashMap<String, String>,
     http_failure: Option<StatusCode>,
     request_times: Vec<std::time::Instant>,
@@ -51,6 +52,13 @@ struct FakeState {
     report_corrections: std::collections::BTreeSet<(i32, String)>,
 }
 
+impl FakeState {
+    fn record(&mut self, endpoint: String, params: BTreeMap<String, String>) {
+        self.calls.push((endpoint, params));
+        self.requests_changed.notify_waiters();
+    }
+}
+
 struct Fake { state: Arc<Mutex<FakeState>>, url: String, task: tokio::task::JoinHandle<()> }
 
 impl Drop for Fake { fn drop(&mut self) { self.task.abort(); } }
@@ -65,8 +73,33 @@ impl Fake {
         Self { state, url, task }
     }
 
+    async fn wait_for_call(&self, endpoint: &str, count: usize) {
+        self.wait_for_source(endpoint, || self.count(endpoint) >= count).await;
+    }
+
+    async fn wait_for_source(&self, label: &str, ready: impl Fn() -> bool) {
+        let changed = self.state.lock().unwrap().requests_changed.clone();
+        let reached = tokio::time::timeout(Duration::from_secs(60), async {
+            loop {
+                let notified = changed.notified();
+                tokio::pin!(notified);
+                notified.as_mut().enable();
+                if ready() { return; }
+                tokio::time::timeout(Duration::from_secs(10), notified).await.unwrap_or_else(|error| panic!("{label} made no source progress: {error:?}; {:?}", self.observed()));
+            }
+        }).await;
+        reached.unwrap_or_else(|error| panic!("{label} was not reached: {error:?}; {:?}", self.observed()));
+    }
+
     fn client(&self) -> Client { Client::new(Secret::new(KEY.into()), self.url.clone(), self.url.clone()).unwrap() }
     fn count(&self, endpoint: &str) -> usize { self.state.lock().unwrap().calls.iter().filter(|(e, _)| e == endpoint).count() }
+
+    fn observed(&self) -> Vec<(String, BTreeMap<String, String>)> {
+        self.state.lock().unwrap().calls.iter().map(|(endpoint, params)| {
+            let scope = params.iter().filter(|(key, _)| matches!(key.as_str(), "corp_code" | "bsns_year" | "reprt_code")).map(|(key, value)| (key.clone(), value.clone())).collect();
+            (endpoint.clone(), scope)
+        }).collect()
+    }
 }
 
 fn zipped(name: &str, xml: &str) -> Vec<u8> {
@@ -78,14 +111,14 @@ fn zipped(name: &str, xml: &str) -> Vec<u8> {
 
 async fn kind(State(state): State<Arc<Mutex<FakeState>>>, Query(params): Query<BTreeMap<String, String>>) -> axum::Json<Value> {
     let mut state = state.lock().unwrap();
-    state.calls.push(("kind".into(), params.clone()));
+    state.record("kind".into(), params.clone());
     if let Some(rows) = state.kind_responses.get(&params["searchCorpName"]) { return axum::Json(rows.clone()); }
     axum::Json(if state.kind_other_code { json!([{ "repisusrtcd2":"005930", "secugrpId":"ST", "fssunqno":CORP }]) } else if state.preferred && params["searchCorpName"] == "005935" { json!([{"repisusrtcd2":"005935","secugrpId":"ST","fssunqno":CORP}]) } else { json!([]) })
 }
 
 async fn discovery(State(state): State<Arc<Mutex<FakeState>>>, Query(params): Query<BTreeMap<String, String>>) -> Response {
     let stage = if params["method"] == "searchContents" { "contents" } else { "search" };
-    state.lock().unwrap().calls.push((stage.into(), params));
+    state.lock().unwrap().record(stage.into(), params);
     loop {
         if state.lock().unwrap().discovery_paused.as_deref() != Some(stage) { break; }
         tokio::time::sleep(Duration::from_millis(5)).await;
@@ -105,7 +138,7 @@ async fn discovery(State(state): State<Arc<Mutex<FakeState>>>, Query(params): Qu
 
 async fn notice(State(state): State<Arc<Mutex<FakeState>>>) -> Response {
     let mut state = state.lock().unwrap();
-    state.calls.push(("notice".into(), BTreeMap::new()));
+    state.record("notice".into(), BTreeMap::new());
     if state.notice_network_failure {
         let stream = futures::stream::once(async { Err::<String, _>(std::io::Error::other("synthetic body failure")) });
         return Response::new(axum::body::Body::from_stream(stream));
@@ -117,7 +150,7 @@ async fn respond(State(state): State<Arc<Mutex<FakeState>>>, Path(endpoint): Pat
     let paused = {
         let mut state = state.lock().unwrap();
         let paused = (endpoint == "list.json" && state.paused_list) || (endpoint == "fnlttSinglAcntAll.json" && state.stream_paused_report.as_ref() == params.get("reprt_code") && state.stream_paused_company.as_ref().is_none_or(|company| Some(company) == params.get("corp_code")) && state.stream_paused_year.as_ref().is_none_or(|year| Some(year) == params.get("bsns_year")));
-        if paused { state.calls.push((if endpoint == "list.json" { "listing_stream" } else { "statement_stream" }.into(),params.clone())); }
+        if paused { state.record(if endpoint == "list.json" { "listing_stream" } else { "statement_stream" }.into(),params.clone()); }
         paused
     };
     if paused {
@@ -140,11 +173,11 @@ async fn respond_data(State(state): State<Arc<Mutex<FakeState>>>, Path(endpoint)
     {
         let mut state = state.lock().unwrap();
         state.request_times.push(std::time::Instant::now());
-        if let Some(status) = state.http_failure { state.calls.push((endpoint, params)); return (status, "synthetic transport failure").into_response(); }
+        if let Some(status) = state.http_failure { state.record(endpoint, params); return (status, "synthetic transport failure").into_response(); }
     }
     let (failure, correction, delayed, no_cfs, xbrl_failure, stale_statement, mismatched_xbrl, paused, nonstandard_account) = {
         let mut state = state.lock().unwrap();
-        state.calls.push((endpoint.clone(), params.clone()));
+        state.record(endpoint.clone(), params.clone());
         let scope = format!("{endpoint}/{}/{}", params.get("bsns_year").map_or("", String::as_str), params.get("reprt_code").map_or("", String::as_str));
         let company_scope = format!("{scope}/{}", params.get("corp_code").map_or("", String::as_str));
         (state.failures.get(&company_scope).or_else(|| state.failures.get(&scope)).or_else(|| state.failures.get(&endpoint)).cloned(), state.correction, state.delayed, state.no_cfs, state.xbrl_failure, state.stale_statement, state.mismatched_xbrl, endpoint == "fnlttSinglAcntAll.json" && state.paused_report.as_ref() == params.get("reprt_code"), state.nonstandard_account)
@@ -1045,3 +1078,27 @@ async fn calculated_http_reads_saved_values_without_key_and_applies_correction_w
 
 #[path = "financials/schedule.rs"]
 mod schedule;
+
+#[tokio::test(start_paused = true)]
+async fn source_observation_waits_while_earlier_paced_requests_are_progressing() {
+    let fake = Fake::start().await;
+    let state = fake.state.clone();
+    let producer = tokio::spawn(async move {
+        for endpoint in ["corpCode.xml", "company.json", "statement_stream"] {
+            tokio::time::sleep(Duration::from_secs(9)).await;
+            state.lock().unwrap().record(endpoint.into(), BTreeMap::new());
+        }
+    });
+    fake.wait_for_call("statement_stream", 1).await;
+    producer.await.unwrap();
+    assert_eq!(fake.count("corpCode.xml"), 1);
+    assert_eq!(fake.count("company.json"), 1);
+    assert_eq!(fake.count("statement_stream"), 1);
+}
+
+#[tokio::test(start_paused = true)]
+#[should_panic(expected = "statement_stream made no source progress")]
+async fn source_observation_stops_when_no_source_request_progresses() {
+    let fake = Fake::start().await;
+    fake.wait_for_call("statement_stream", 1).await;
+}

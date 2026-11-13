@@ -26,9 +26,7 @@ impl ScheduledApp {
 }
 
 async fn listing_count(fake: &Fake, count: usize) {
-    tokio::time::timeout(Duration::from_secs(8), async {
-        while fake.count("list.json") < count { tokio::time::sleep(Duration::from_millis(20)).await; }
-    }).await.expect("server clock must wake the daily financial check");
+    fake.wait_for_call("list.json", count).await;
 }
 
 #[tokio::test]
@@ -43,9 +41,7 @@ async fn seven_oclock_checks_run_without_reads_and_manual_overlap_joins_the_same
     assert_eq!(initial["historyComplete"], true);
     fake.state.lock().unwrap().paused_list = true;
     app.clock.jump(600);
-    tokio::time::timeout(Duration::from_secs(5), async {
-        while fake.count("listing_stream") == 0 { tokio::time::sleep(Duration::from_millis(20)).await; }
-    }).await.expect("the real server schedule must react at 07:00");
+    fake.wait_for_call("listing_stream", 1).await;
     let manual = start(&client, &app.base).await;
     assert_eq!(manual["id"].as_u64().unwrap(), initial["id"].as_u64().unwrap() + 1);
     assert_eq!(start(&client, &app.base).await["id"], manual["id"]);
@@ -74,9 +70,7 @@ async fn daily_confirmation_preempts_history_and_refreshes_old_corrections_befor
     }
     let clock = Clock::fake(kst(KstDate::new(2020, 1, 1).unwrap(), 6, 0, 0));
     let app = ScheduledApp::start(&fake, &path, clock.clone()).await;
-    tokio::time::timeout(Duration::from_secs(30), async {
-        while fake.count("statement_stream") == 0 { tokio::time::sleep(Duration::from_millis(20)).await; }
-    }).await.unwrap();
+    fake.wait_for_call("statement_stream", 1).await;
     let history = json(&client, &format!("{}/api/financial-update", app.base)).await;
     assert_eq!(history["phase"], "history");
     assert_eq!(history["completedCompanies"], 1);
@@ -116,9 +110,7 @@ async fn automatic_dates_and_restart_preserve_user_and_authentication_stops_unti
         let client = reqwest::Client::new();
         listing_count(&fake, 1).await;
         if user {
-            tokio::time::timeout(Duration::from_secs(8), async {
-                while fake.count("statement_stream") == 0 { tokio::time::sleep(Duration::from_millis(20)).await; }
-            }).await.unwrap();
+            fake.wait_for_call("statement_stream", 1).await;
             command(&client, &app.base, "pause").await;
             fake.state.lock().unwrap().stream_paused_report = None;
         }
@@ -189,18 +181,14 @@ async fn automatic_restart_resumes_an_interrupted_checkpoint_without_redownloadi
     let server = automatic_process(&fake, &kiwoom, dir.path(), "20151231120000");
     let base = format!("http://{}", server.addr().await);
     let client = reqwest::Client::new();
-    tokio::time::timeout(Duration::from_secs(10), async {
-        while fake.count("statement_stream") == 0 { tokio::time::sleep(Duration::from_millis(20)).await; }
-    }).await.unwrap();
+    fake.wait_for_call("statement_stream", 1).await;
     let interrupted = json(&client, &format!("{base}/api/financial-update")).await;
     assert_eq!(report_calls(&fake, "11013"), 1);
     server.stop().await;
     fake.state.lock().unwrap().stream_paused_report = None;
     let restarted = automatic_process(&fake, &kiwoom, dir.path(), "20151231130000");
     let base = format!("http://{}", restarted.addr().await);
-    tokio::time::timeout(Duration::from_secs(10), async {
-        while report_calls(&fake, "11011") == 0 { tokio::time::sleep(Duration::from_millis(20)).await; }
-    }).await.unwrap();
+    fake.wait_for_source("report 11011", || report_calls(&fake, "11011") > 0).await;
     let done = finished(&client, &base).await;
     assert_eq!(done["id"], interrupted["id"]);
     assert_eq!(done["historyComplete"], true);
@@ -221,9 +209,7 @@ async fn automatic_storage_failure_keeps_progress_without_retry_loops_and_reopen
     let clock = Clock::fake(kst(KstDate::new(2015, 12, 31).unwrap(), 12, 0, 0));
     let app = ScheduledApp::start(&fake, &path, clock.clone()).await;
     let client = reqwest::Client::new();
-    tokio::time::timeout(Duration::from_secs(8), async {
-        while fake.count("company.json") == 0 { tokio::time::sleep(Duration::from_millis(20)).await; }
-    }).await.unwrap();
+    fake.wait_for_call("company.json", 1).await;
     let failed = finished(&client, &app.base).await;
     assert_eq!(failed["stopReason"], "storage", "{failed}");
     assert_eq!(failed["completedCompanies"], 0);

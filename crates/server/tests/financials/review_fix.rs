@@ -2,12 +2,6 @@ use super::*;
 use super::discovery::{COMMON, COMPANY, ENTRY, STOCK, search, source};
 use super::mapping::tempdir;
 
-async fn until_call(fake: &Fake, endpoint: &str, count: usize) {
-    tokio::time::timeout(Duration::from_secs(5),async {
-        while fake.count(endpoint) < count { tokio::time::sleep(Duration::from_millis(5)).await; }
-    }).await.unwrap();
-}
-
 fn annual_calls(fake: &Fake, endpoint: &str) -> usize {
     fake.state.lock().unwrap().calls.iter().filter(|(name,params)| name == endpoint && params.get("corp_code").is_some_and(|corp| corp == COMPANY)
         && params.get("bsns_year").is_some_and(|year| year == "2015") && params.get("reprt_code").is_some_and(|code| code == "11011")).count()
@@ -146,7 +140,7 @@ async fn repeated_manual_start_during_mapping_coalesces_and_preserves_price_and_
             let base = base.clone();
             tokio::spawn(async move { client.post(format!("{base}/api/symbols/{STOCK}/financial-source")).send().await.unwrap() })
         };
-        until_call(&fake,"search",1).await;
+        fake.wait_for_call("search", 1).await;
         assert_eq!(tokio::time::timeout(Duration::from_secs(1),http_stock(&client,&base,COMMON)).await.unwrap()["status"],"ready");
         http_start(&client, &base).await;
         {
@@ -165,7 +159,7 @@ async fn repeated_manual_start_during_mapping_coalesces_and_preserves_price_and_
         let saved_other = tokio::time::timeout(Duration::from_secs(1),http_stock(&client,&base,"005930")).await.unwrap();
         assert_eq!(saved_other["collection"]["reports"],serde_json::to_value(&other.reports).unwrap());
         assert_eq!(store.collection(COMPANY).await.unwrap().reports["2015/11011"].statement.refresh_version,before.refresh_version);
-        until_call(&fake,"statement_stream",1).await;
+        fake.wait_for_call("statement_stream", 1).await;
         fake.state.lock().unwrap().stream_paused_report = None;
         http_settled(&client, &base).await;
         let result = http_finished(&client,&base).await;

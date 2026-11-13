@@ -115,9 +115,7 @@ async fn interrupted_recent_http_update_reads_checkpoints_and_resumes_the_origin
     let client = reqwest::Client::new();
     client.get(format!("{base}/api/bars?symbol=005930&period=D&limit=5")).send().await.unwrap().error_for_status().unwrap();
     let initial = start(&client, &base).await;
-    tokio::time::timeout(Duration::from_secs(30), async {
-        while fake.count("statement_stream") == 0 { tokio::time::sleep(Duration::from_millis(20)).await; }
-    }).await.unwrap();
+    fake.wait_for_call("statement_stream", 1).await;
     let checkpoint = json(&client, &format!("{base}/api/financial-update")).await;
     assert_eq!(checkpoint["completedCompanies"], 1);
     server.stop().await;
@@ -277,9 +275,7 @@ async fn user_pause_saves_the_inflight_response_stops_the_next_request_and_survi
     let client = reqwest::Client::new();
     client.get(format!("{base}/api/bars?symbol=005930&period=D&limit=5")).send().await.unwrap().error_for_status().unwrap();
     let initial = start(&client, &base).await;
-    tokio::time::timeout(Duration::from_secs(10), async {
-        while fake.count("statement_stream") == 0 { tokio::time::sleep(Duration::from_millis(10)).await; }
-    }).await.unwrap();
+    fake.wait_for_call("statement_stream", 1).await;
     let requested = command(&client, &base, "pause").await;
     assert_eq!(requested["status"], "pausing");
     assert_eq!(requested["stopReason"], "user");
@@ -372,9 +368,7 @@ async fn resuming_keeps_confirmed_absence_and_continues_the_pending_separate_req
     let client = reqwest::Client::new();
     client.get(format!("{base}/api/bars?symbol=005930&period=D&limit=5")).send().await.unwrap().error_for_status().unwrap();
     start(&client, &base).await;
-    tokio::time::timeout(Duration::from_secs(10), async {
-        while fake.count("statement_stream") == 0 { tokio::time::sleep(Duration::from_millis(10)).await; }
-    }).await.unwrap();
+    fake.wait_for_call("statement_stream", 1).await;
     command(&client, &base, "pause").await;
     fake.state.lock().unwrap().stream_paused_report = None;
     assert_eq!(finished(&client, &base).await["status"], "paused");
@@ -406,9 +400,7 @@ async fn pausing_an_inflight_listing_page_keeps_it_separate_and_resumes_the_next
     let client = reqwest::Client::new();
     client.get(format!("{base}/api/bars?symbol=005930&period=D&limit=5")).send().await.unwrap().error_for_status().unwrap();
     start(&client, &base).await;
-    tokio::time::timeout(Duration::from_secs(10), async {
-        while fake.count("listing_stream") == 0 { tokio::time::sleep(Duration::from_millis(10)).await; }
-    }).await.unwrap();
+    fake.wait_for_call("listing_stream", 1).await;
     assert_eq!(command(&client, &base, "pause").await["status"], "pausing");
     fake.state.lock().unwrap().paused_list = false;
     assert_eq!(finished(&client, &base).await["status"], "paused");
@@ -714,9 +706,7 @@ async fn automatic_start_catches_up_once_and_same_day_restart_does_not_create_an
     let server = automatic_process(&fake, &kiwoom, dir.path(), "20151231070001");
     let base = format!("http://{}", server.addr().await);
     let client = reqwest::Client::new();
-    tokio::time::timeout(Duration::from_secs(8), async {
-        while fake.count("list.json") == 0 { tokio::time::sleep(Duration::from_millis(20)).await; }
-    }).await.expect("startup catch-up must run independently of chart and status reads");
+    fake.wait_for_call("list.json", 1).await;
     let done = finished(&client, &base).await;
     assert_eq!(done["historyComplete"], true, "{done}");
     assert_eq!(done["nextCheckAt"], kst(KstDate::new(2016, 1, 1).unwrap(), 7, 0, 0).unix());
@@ -730,9 +720,7 @@ async fn automatic_start_catches_up_once_and_same_day_restart_does_not_create_an
     restarted.stop().await;
     let later = automatic_process(&fake, &kiwoom, dir.path(), "20160104120000");
     let base = format!("http://{}", later.addr().await);
-    tokio::time::timeout(Duration::from_secs(8), async {
-        while fake.count("list.json") == 1 { tokio::time::sleep(Duration::from_millis(20)).await; }
-    }).await.unwrap();
+    fake.wait_for_call("list.json", 2).await;
     let caught_up = finished(&client, &base).await;
     assert_eq!(caught_up["id"].as_u64().unwrap(), done["id"].as_u64().unwrap() + 1, "several missed dates require one current check");
     assert_eq!(fake.count("list.json"), 2);
