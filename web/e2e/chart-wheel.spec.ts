@@ -34,7 +34,7 @@ async function wheel(page: Page, deltaX: number, deltaY: number, key?: "Shift" |
   if (key) await page.keyboard.up(key);
 }
 
-test.beforeEach(async ({ page, app }) => {
+test.beforeEach(async ({ page, scenario }) => {
   const bars: Bar[] = Array.from({ length: 500 }, (_, index) => ({
     t: START + index * 86400, o: 5000, h: 5020, l: 4980, c: 5000, v: 1000,
   }));
@@ -42,8 +42,8 @@ test.beforeEach(async ({ page, app }) => {
     symbol: "IDX:001", venue: null, period: "D", bars, current: null, nextBefore: null, seq: null,
   } }));
   for (const marker of MARKERS) {
-    const response = await page.request.put(`${app.url}/api/drawings/${marker.id}`, { data: marker });
-    await expect(response).toBeOK();
+    scenario.documents.saveDrawing(marker);
+
   }
   await page.goto("/");
   await expect(chartOf(cell(page))).toHaveAttribute("data-bar-count", "500");

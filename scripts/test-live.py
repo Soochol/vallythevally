@@ -28,7 +28,7 @@ def signal_fixture(mode, root):
     if mode == "live":
         binaries = root / "target/dev/bin"
         binaries.mkdir(parents=True)
-        for name in ("vally-server", "fake-kiwoom"):
+        for name in ("dart-smoke",):
             path = binaries / name
             path.write_text("#!" + sys.executable + '\nimport time\nprint("addr=127.0.0.1:54321",flush=True)\ntime.sleep(120)\n')
             path.chmod(0o755)
@@ -93,6 +93,7 @@ class LiveToolsTest(unittest.TestCase):
         self.root = Path(self.temporary.name)
         (self.root / "scripts").mkdir()
         shutil.copy2(ROOT / "scripts/chromium.mjs", self.root / "scripts/chromium.mjs")
+        shutil.copy2(ROOT / "scripts/dart-ui.mjs", self.root / "scripts/dart-ui.mjs")
         (self.root / "web").mkdir()
         (self.root / "web/package.json").write_text('{}')
         self.result = self.root / "result"

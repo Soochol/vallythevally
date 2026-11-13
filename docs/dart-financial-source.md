@@ -90,4 +90,4 @@
 
 인증키는 저장 모델에 없으며 원문에 반사된 값도 제거한다. 외부 오류 메시지·요청 URL을 응답과 로그에 쓰지 않는다. reqwest의 debug/trace 로그는 인증키가 든 URL을 남길 수 있어 필터에서 차단한다.
 
-시험은 `crates/server/tests/financials.rs`의 합성 DART·XBRL·KIND 응답과 fake-kiwoom으로 수행한다. 실제 인증 API나 사용자 서버를 호출하지 않는다.
+시험은 `crates/server/tests/financials.rs`의 합성 DART·XBRL·KIND 응답과 주입한 합성 키움 transport으로 수행한다. 실제 인증 API나 사용자 서버를 호출하지 않는다.

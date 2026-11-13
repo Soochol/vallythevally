@@ -5,29 +5,29 @@ import type { Layout } from "../src/api/generated/Layout";
 import { parseChartSettings } from "../src/chart/settings";
 import { installChartProbe } from "./chart-probe";
 import { installFrameProbe } from "./frame-probe";
-import { type App, cell, DEFAULT_LAYOUT_ID, expect, test } from "./harness";
+import { type Scenario, cell, DEFAULT_LAYOUT_ID, expect, test } from "./harness";
 
-async function settings(app: App) {
-  const layout: Layout = await (await fetch(`${app.url}/api/layouts/${DEFAULT_LAYOUT_ID}`)).json();
+async function settings(scenario: Scenario) {
+  const layout: Layout = scenario.documents.layout(DEFAULT_LAYOUT_ID);
   return parseChartSettings(layout.cells[0]!.chartSettings);
 }
 
-async function seed(app: App) {
-  const layout: Layout = await (await fetch(`${app.url}/api/layouts/${DEFAULT_LAYOUT_ID}`)).json();
+async function seed(scenario: Scenario) {
+  const layout: Layout = scenario.documents.layout(DEFAULT_LAYOUT_ID);
   const chartSettings = { v: 2, style: "candle", scale: "normal", compare: [], indicators: [
     { id: "ma", spec: { kind: "ma", method: "sma", period: 5 }, panel: "price", visible: true, style: { colors: ["#C7F36B"], width: 1 } },
     { id: "volume", spec: { kind: "volume", maPeriod: null }, panel: "p-volume", visible: true, style: { colors: ["ind-1"], width: 1 } },
     { id: "rsi", spec: { kind: "rsi", period: 14, signal: null }, panel: "p-rsi", visible: true, style: { colors: ["ind-2"], width: 1 } },
   ], panels: [{ id: "p-volume", stretch: 0.25 }, { id: "p-rsi", stretch: 0.25 }] };
-  expect((await fetch(`${app.url}/api/layouts/${layout.id}`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...layout, revision: layout.revision + 1, cells: [{ ...layout.cells[0], symbol: "005930", venue: "combined", period: "D", chartSettings }] }) })).ok).toBe(true);
+  scenario.documents.saveLayout({ ...layout, revision: layout.revision + 1, cells: [{ ...layout.cells[0]!, symbol: "005930", venue: "combined", period: "D", chartSettings }] });
 }
 
 const row = (page: Page, id: string) => cell(page).locator(`[data-indicator-row="${id}"]`);
 const heights = (page: Page) => page.evaluate(() => window.chartProbe.chart.panes().map((pane) => pane.getHeight()));
 const maLine = (page: Page) => page.evaluate(() => window.frameProbe.snapshot().find((series) => series.type === "Custom" && series.scaleMode !== 2));
 
-async function open(page: Page, app: App) {
-  await seed(app);
+async function open(page: Page, scenario: Scenario) {
+  await seed(scenario);
   await page.addInitScript(installChartProbe);
   await page.addInitScript(installFrameProbe);
   await page.goto("/");
@@ -46,8 +46,8 @@ async function resize(page: Page) {
   await page.mouse.up();
 }
 
-test("범례 설정은 기간·색·굵기를 즉시 그리고 Esc로 처음 값과 선을 복원한다", async ({ page, app }) => {
-  await open(page, app);
+test("범례 설정은 기간·색·굵기를 즉시 그리고 Esc로 처음 값과 선을 복원한다", async ({ page, scenario }) => {
+  await open(page, scenario);
   const original = await maLine(page);
   await row(page, "ma").getByRole("button", { name: /설정 열기/ }).click();
   const popup = page.getByRole("dialog", { name: /이동평균.*설정/ });
@@ -63,28 +63,28 @@ test("범례 설정은 기간·색·굵기를 즉시 그리고 Esc로 처음 값
   await colors.getByRole("button", { name: "선택", exact: true }).click();
   await popup.getByRole("group", { name: "굵기", exact: true }).getByRole("button", { name: "5", exact: true }).click();
   await expect.poll(() => maLine(page).then((line) => line?.style)).toEqual({ color, width: 5 });
-  await expect.poll(async () => (await settings(app)).indicators[0]?.style).toEqual({ colors: [color], width: 5 });
+  await expect.poll(async () => (await settings(scenario)).indicators[0]?.style).toEqual({ colors: [color], width: 5 });
   await page.keyboard.press("Escape");
   await expect(popup).toHaveCount(0);
   await expect.poll(() => maLine(page).then((line) => ({ data: line?.data, style: line?.style }))).toEqual({ data: original?.data, style: original?.style });
-  await expect.poll(async () => (await settings(app)).indicators[0]?.spec).toEqual({ kind: "ma", method: "sma", period: 5 });
-  await expect.poll(async () => (await settings(app)).indicators[0]?.style).toEqual({ colors: ["#C7F36B"], width: 1 });
+  await expect.poll(async () => (await settings(scenario)).indicators[0]?.spec).toEqual({ kind: "ma", method: "sma", period: 5 });
+  await expect.poll(async () => (await settings(scenario)).indicators[0]?.style).toEqual({ colors: ["#C7F36B"], width: 1 });
   await expect(row(page, "ma").getByRole("button", { name: /설정 열기/ })).toBeFocused();
 });
 
-test("높이와 접기를 저장하고 재시작해 복원하며 접힌 패널은 최신 값 한 줄이다", async ({ page, app }) => {
-  await open(page, app);
+test("높이와 접기를 저장하고 새로고침해 복원하며 접힌 패널은 최신 값 한 줄이다", async ({ page, scenario }) => {
+  await open(page, scenario);
   const before = await heights(page);
   await resize(page);
   await expect.poll(() => heights(page).then((values) => values[1]! - before[1]!)).toBeGreaterThan(35);
-  await expect.poll(async () => (await settings(app)).panels[0]?.stretch).toBeGreaterThan(0.25);
+  await expect.poll(async () => (await settings(scenario)).panels[0]?.stretch).toBeGreaterThan(0.25);
   const resized = await heights(page);
   await row(page, "volume").hover();
   await row(page, "volume").getByRole("button", { name: /패널 접기/ }).click();
   await expect.poll(() => heights(page).then((values) => values[1])).toBeLessThanOrEqual(31);
   await expect(row(page, "volume")).toContainText(/거래량.*\d/);
-  await expect.poll(async () => (await settings(app)).panels[0]?.collapsed).toBe(true);
-  await app.restart();
+  await expect.poll(async () => (await settings(scenario)).panels[0]?.collapsed).toBe(true);
+
   await page.reload();
   await expect(row(page, "volume").getByRole("button", { name: /패널 펼치기/ })).toHaveAttribute("aria-expanded", "false");
   await expect.poll(() => heights(page).then((values) => values[1])).toBeLessThanOrEqual(31);
@@ -98,10 +98,9 @@ test("높이와 접기를 저장하고 재시작해 복원하며 접힌 패널�
 });
 
 for (const key of ["T", "H"]) {
-  test(`${key} 도구에서도 범례·팝오버·손잡이 입력은 드로잉 저장을 바꾸지 않는다`, async ({ page, app }) => {
-    await open(page, app);
-    const url = `${app.url}/api/drawings?symbol=005930`;
-    const before = await (await fetch(url)).json();
+  test(`${key} 도구에서도 범례·팝오버·손잡이 입력은 드로잉 저장을 바꾸지 않는다`, async ({ page, scenario }) => {
+    await open(page, scenario);
+    const before = scenario.documents.drawings("005930");
     const mutations: string[] = [];
     page.on("request", (request) => { if (new URL(request.url()).pathname.startsWith("/api/drawings") && request.method() !== "GET") mutations.push(request.method()); });
     await cell(page).focus(); await page.keyboard.press(key);
@@ -118,35 +117,34 @@ for (const key of ["T", "H"]) {
     await resize(page);
     await row(page, "rsi").hover();
     await row(page, "rsi").getByRole("button", { name: /패널 접기/ }).click();
-    await expect.poll(async () => (await settings(app)).panels[1]?.collapsed).toBe(true);
-    expect(await (await fetch(url)).json()).toEqual(before);
+    await expect.poll(async () => (await settings(scenario)).panels[1]?.collapsed).toBe(true);
+    expect(scenario.documents.drawings("005930")).toEqual(before);
     expect(mutations).toEqual([]);
     await page.reload();
     await expect(row(page, "ma")).toContainText("7");
-    expect(await (await fetch(url)).json()).toEqual(before);
+    expect(scenario.documents.drawings("005930")).toEqual(before);
     expect(mutations).toEqual([]);
   });
 }
 
-test("손잡이 화살표는 고른 드로잉을 움직이지 않고 범례에서 검색 단축키도 열린다", async ({ page, app }) => {
-  await open(page, app);
+test("손잡이 화살표는 고른 드로잉을 움직이지 않고 범례에서 검색 단축키도 열린다", async ({ page, scenario }) => {
+  await open(page, scenario);
   const box = await cell(page).boundingBox();
   if (!box) throw new Error("차트가 없습니다");
   await cell(page).focus();
   await page.keyboard.press("H");
   await page.mouse.click(box.x + box.width * 0.7, box.y + 250);
   await expect(page.getByRole("toolbar", { name: "드로잉 스타일" })).toBeVisible();
-  const url = `${app.url}/api/drawings?symbol=005930`;
-  await expect.poll(async () => (await (await fetch(url)).json()).length).toBe(1);
-  const before = await (await fetch(url)).json();
+  await expect.poll(async () => scenario.documents.drawings("005930").length).toBe(1);
+  const before = scenario.documents.drawings("005930");
   const mutations: string[] = [];
   page.on("request", (request) => { if (new URL(request.url()).pathname.startsWith("/api/drawings") && request.method() !== "GET") mutations.push(request.method()); });
   const height = (await heights(page))[1]!;
   await cell(page).locator('[data-panel-resize="p-volume"]').focus();
   await page.keyboard.press("ArrowUp");
   await expect.poll(() => heights(page).then((values) => values[1]! - height)).toBeGreaterThan(10);
-  await expect.poll(async () => (await settings(app)).panels[0]?.stretch).toBeGreaterThan(0.25);
-  expect(await (await fetch(url)).json()).toEqual(before);
+  await expect.poll(async () => (await settings(scenario)).panels[0]?.stretch).toBeGreaterThan(0.25);
+  expect(scenario.documents.drawings("005930")).toEqual(before);
   expect(mutations).toEqual([]);
   await row(page, "ma").getByRole("button", { name: /설정 열기/ }).focus();
   await page.keyboard.press("/");
@@ -154,9 +152,9 @@ test("손잡이 화살표는 고른 드로잉을 움직이지 않고 범례에�
 });
 
 for (const size of [{ width: 1440, height: 900 }, { width: 1024, height: 768 }, { width: 390, height: 844 }]) {
-  test(`범례 팝오버 화면 ${size.width}×${size.height}`, async ({ page, app }) => {
+  test(`범례 팝오버 화면 ${size.width}×${size.height}`, async ({ page, scenario }) => {
     await page.setViewportSize(size);
-    await open(page, app);
+    await open(page, scenario);
     await row(page, "ma").getByRole("button", { name: /설정 열기/ }).click();
     await expect(page.getByRole("dialog", { name: /이동평균.*설정/ })).toBeVisible();
     expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBe(0);

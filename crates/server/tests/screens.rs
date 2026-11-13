@@ -2,7 +2,7 @@ mod common;
 
 use std::os::unix::fs::DirBuilderExt;
 
-use common::{FakeKiwoom, Server};
+use common::{ScriptedTransport, Server};
 use serde_json::{Value, json};
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
 
@@ -96,9 +96,9 @@ fn every_condition() -> Vec<Value> {
     all
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn screens_start_empty_are_replaced_whole_and_survive_a_restart() {
-    let fake = FakeKiwoom::start().await;
+    let fake = ScriptedTransport::new();
     let tmp = tempfile::tempdir().unwrap();
     let lock = tmp.path().join("run/server.lock");
     let server = Server::spawn(&fake, &lock, tmp.path());
@@ -128,9 +128,9 @@ async fn screens_start_empty_are_replaced_whole_and_survive_a_restart() {
     server.stop().await;
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn every_condition_kind_and_test_is_saved_as_sent() {
-    let fake = FakeKiwoom::start().await;
+    let fake = ScriptedTransport::new();
     let tmp = tempfile::tempdir().unwrap();
     let server = Server::spawn(&fake, &tmp.path().join("run/server.lock"), tmp.path());
     let api = ScreensApi::of(&server).await;
@@ -156,9 +156,9 @@ async fn every_condition_kind_and_test_is_saved_as_sent() {
     server.stop().await;
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn each_screen_rule_and_a_stale_revision_rejects_the_save() {
-    let fake = FakeKiwoom::start().await;
+    let fake = ScriptedTransport::new();
     let tmp = tempfile::tempdir().unwrap();
     let server = Server::spawn(&fake, &tmp.path().join("run/server.lock"), tmp.path());
     let api = ScreensApi::of(&server).await;
@@ -296,9 +296,9 @@ fn widest_conditions() -> Vec<Value> {
     ]
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn fifty_screens_of_ten_of_the_widest_conditions_are_saved() {
-    let fake = FakeKiwoom::start().await;
+    let fake = ScriptedTransport::new();
     let tmp = tempfile::tempdir().unwrap();
     let server = Server::spawn(&fake, &tmp.path().join("run/server.lock"), tmp.path());
     let api = ScreensApi::of(&server).await;
@@ -325,9 +325,9 @@ fn old_new_high(id: &str) -> Value {
     json!({"name": "신고가", "period": "D", "conditions": [{"field": "high", "n": 200, "m": 1}], "exclude": [], "id": id})
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn a_list_saved_in_the_old_format_comes_back_in_the_new_format_with_the_revision_raised() {
-    let fake = FakeKiwoom::start().await;
+    let fake = ScriptedTransport::new();
     let tmp = tempfile::tempdir().unwrap();
     let old = json!([
         old_new_high("01900000-0000-7000-8000-0000000000a1"),
@@ -352,9 +352,9 @@ async fn a_list_saved_in_the_old_format_comes_back_in_the_new_format_with_the_re
     server.stop().await;
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn a_list_saved_at_the_largest_revision_is_moved_and_keeps_that_revision() {
-    let fake = FakeKiwoom::start().await;
+    let fake = ScriptedTransport::new();
     let tmp = tempfile::tempdir().unwrap();
     let lock = saved_before_condition_kinds(&tmp, &json!([old_new_high("S1")]), i64::MAX).await;
     let server = Server::spawn(&fake, &lock, tmp.path());
@@ -366,9 +366,9 @@ async fn a_list_saved_at_the_largest_revision_is_moved_and_keeps_that_revision()
     server.stop().await;
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn old_migrates_every_saved_kind_once_preserving_order_values_and_revision_protection() {
-    let fake = FakeKiwoom::start().await;
+    let fake = ScriptedTransport::new();
     let tmp = tempfile::tempdir().unwrap();
     let run = tmp.path().join("run");
     std::fs::DirBuilder::new().mode(0o700).create(&run).unwrap();
@@ -410,9 +410,9 @@ async fn old_migrates_every_saved_kind_once_preserving_order_values_and_revision
     server.stop().await;
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn recent_period_accepts_the_old_end_plus_one_boundary_and_rejects_old_api_shapes() {
-    let fake = FakeKiwoom::start().await;
+    let fake = ScriptedTransport::new();
     let tmp = tempfile::tempdir().unwrap();
     let server = Server::spawn(&fake, &tmp.path().join("run/server.lock"), tmp.path());
     let api = ScreensApi::of(&server).await;
@@ -440,9 +440,9 @@ async fn recent_period_accepts_the_old_end_plus_one_boundary_and_rejects_old_api
     server.stop().await;
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn saved_ranges_become_recent_periods_once_including_nonzero_starts_and_the_largest_end() {
-    let fake = FakeKiwoom::start().await;
+    let fake = ScriptedTransport::new();
     let tmp = tempfile::tempdir().unwrap();
     let run = tmp.path().join("run");
     std::fs::DirBuilder::new().mode(0o700).create(&run).unwrap();

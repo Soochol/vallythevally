@@ -4,11 +4,11 @@ for (const [serverTime, browserTime, market, connection] of [
   ["2026-11-12T10:00:00+09:00", "2026-11-12T03:00:00+09:00", "장중", "실시간 연결됨"],
   ["2026-11-12T22:00:00+09:00", "2026-11-12T10:00:00+09:00", "장 마감", "장 닫힘: 체결 없음"],
 ] satisfies readonly [string, string, string, string][]) {
-  test(`브라우저 시계가 틀려도 서버 기준 ${market}과 연결 상태가 일치한다`, async ({ page }, info) => {
+  test(`브라우저 시계가 틀려도 서버 기준 ${market}과 연결 상태가 일치한다`, async ({ scenario, page }, info) => {
     await page.clock.setFixedTime(new Date(browserTime));
     await page.route("**/api/**", async (route) => {
-      const response = await route.fetch();
-      await route.fulfill({ response, headers: { ...response.headers(), date: new Date(serverTime).toUTCString() } });
+      const response = await scenario.respond(route.request());
+      await route.fulfill({ status: response.status ?? 200, json: response.body, headers: { ...(response.headers ?? {}), date: new Date(serverTime).toUTCString() } });
     });
     await page.goto("/?symbol=005930");
     await expect(cell(page)).toHaveAttribute("aria-busy", "false");

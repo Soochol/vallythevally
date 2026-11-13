@@ -3,18 +3,24 @@ import path from "node:path";
 import type { SymbolInfo } from "../src/api/generated/SymbolInfo";
 import { cell, expect, test } from "./harness";
 
-const stocks = (base: number, prefix: string, marketCode: string) => Array.from({ length: 25 }, (_, i) => ({
-  code: String(base + i * 10), name: `${prefix}${String(i).padStart(2, "0")}`, marketCode, nxtEnable: "N",
+const stocks = (base: number, prefix: string, market: SymbolInfo["market"], kind: SymbolInfo["kind"] = "common") => Array.from({ length: 25 }, (_, i) => ({
+  code: String(base + i * 10), name: `${prefix}${String(i).padStart(2, "0")}`, market, kind, nxtEnabled: false,
 }));
-const kospi = stocks(100000, "삼가", "0");
-const kosdaq = stocks(200000, "삼나", "10");
-const etfs = stocks(300000, "삼다", "8");
+const kospi = stocks(100000, "삼가", "kospi");
+const kosdaq = stocks(200000, "삼나", "kosdaq");
+const etfs = stocks(300000, "삼다", "kospi", "etf");
 
-test.use({ bootReplies: [
-  { apiId: "ka10099", status: 200, body: { list: [...kospi, ...kosdaq, ...etfs], return_code: 0 } },
-] });
+test.beforeEach(async ({ scenario }) => {
+  scenario.on("/api/symbols", request => {
+    const query = new URL(request.url()).searchParams;
+    const dataset = query.get("kind") === "etf" ? etfs : query.get("market") === "kosdaq" ? kosdaq : kospi;
+    const q = query.get("q") ?? "";
+    return { body: dataset.filter(value => value.code.includes(q) || value.name.includes(q)).slice(0, 20) };
+  });
+  for (const info of [...kospi, ...kosdaq, ...etfs]) scenario.reply(`/api/symbols/${info.code}`, { body: info });
+});
 
-test("짧은 검색어의 시장·ETF 조건을 20개 상한 전에 적용하고 해제하면 원래 결과로 돌아간다", async ({ page, app }) => {
+test("짧은 검색어의 시장·ETF 조건을 20개 상한 전에 적용하고 해제하면 원래 결과로 돌아간다", async ({ page }) => {
   await page.goto("/");
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
   await page.keyboard.press("/");
@@ -22,7 +28,7 @@ test("짧은 검색어의 시장·ETF 조건을 20개 상한 전에 적용하고
   const input = dialog.getByRole("combobox");
   const options = dialog.getByRole("option");
   const codes = () => options.evaluateAll((nodes) => nodes.map((node) => node.getAttribute("data-symbol")));
-  const original: SymbolInfo[] = await (await page.request.get(`${app.url}/api/symbols?q=${encodeURIComponent("삼")}`)).json();
+  const original: SymbolInfo[] = kospi.slice(0, 20);
   expect(original.map((info) => info.code)).toEqual(kospi.slice(0, 20).map((info) => info.code));
   await input.fill("삼");
   await expect.poll(codes).toEqual(original.map((info) => info.code));
@@ -71,7 +77,7 @@ test("같은 검색어의 필터 응답을 기다리는 동안 Enter는 이전 �
   let release = () => {};
   const held = new Promise<void>((resolve) => { release = resolve; });
   const filtered = (url: URL) => url.pathname === "/api/symbols" && url.searchParams.get("market") === "kosdaq";
-  await page.route(filtered, async (route) => { await held; await route.continue(); });
+  await page.route(filtered, async (route) => { await held; await route.fallback(); });
   try {
     await page.goto("/");
     await expect(cell(page)).toHaveAttribute("aria-busy", "false");

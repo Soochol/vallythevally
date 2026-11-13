@@ -1,50 +1,16 @@
-import { type ChildProcess, spawn } from "node:child_process";
-import { existsSync } from "node:fs";
+import { spawn } from "node:child_process";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
-import { createServer } from "node:net";
+import { createServer as createTcpServer } from "node:net";
+import { createServer as createHttpServer } from "node:http";
 import path from "node:path";
 import { after, before, describe, test } from "node:test";
 import assert from "node:assert/strict";
 import { parseSectorMap, readSectorMap, SectorMapError } from "./sector-map.ts";
+import type { SymbolInfo } from "../../web/src/api/generated/SymbolInfo.ts";
 
 const HERE = import.meta.dirname;
 const REPO = path.resolve(HERE, "../..");
-const BIN_DIR = path.resolve(REPO, process.env.VALLY_E2E_BIN_DIR ?? "target/debug");
 const SCRATCH_ROOT = path.join(REPO, "target", "leader-cases-test");
-const START_TIMEOUT_MS = 15_000;
-
-class Proc {
-  readonly child: ChildProcess;
-  private output = "";
-
-  constructor(bin: string, env: Record<string, string>) {
-    if (!existsSync(bin)) throw new Error(`${bin}이 없습니다. 먼저 cargo build -p server -p fake-kiwoom`);
-    this.child = spawn(bin, [], { env, stdio: ["ignore", "pipe", "pipe"] });
-    for (const stream of [this.child.stdout!, this.child.stderr!]) {
-      stream.setEncoding("utf8");
-      stream.on("data", (chunk: string) => (this.output += chunk));
-    }
-  }
-
-  async waitFor(pattern: RegExp, what: string): Promise<string> {
-    const deadline = Date.now() + START_TIMEOUT_MS;
-    while (Date.now() < deadline) {
-      const match = pattern.exec(this.output);
-      if (match) return match[1]!;
-      if (this.child.exitCode !== null) break;
-      await new Promise((r) => setTimeout(r, 50));
-    }
-    throw new Error(`${what}가 뜨지 않았습니다:\n${this.output}`);
-  }
-
-  async kill(): Promise<void> {
-    if (this.child.exitCode !== null || this.child.signalCode !== null) return;
-    const exited = new Promise((r) => this.child.once("exit", r));
-    this.child.kill("SIGTERM");
-    await exited;
-  }
-}
-
 interface Run {
   code: number | null;
   stdout: string;
@@ -72,17 +38,8 @@ function sectorMap(sectors: Array<{ id: string; stocks: Array<ReturnType<typeof 
   };
 }
 
-async function waitUntilSymbolListSettles(url: string): Promise<void> {
-  const deadline = Date.now() + START_TIMEOUT_MS;
-  while (Date.now() < deadline) {
-    const res = await fetch(`${url}/api/symbols?q=${encodeURIComponent("삼성")}`);
-    if (res.status !== 503) return;
-  }
-  throw new Error("서버가 종목 목록을 받지 못했습니다");
-}
-
 async function freePort(): Promise<number> {
-  const server = createServer();
+  const server = createTcpServer();
   await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
   const address = server.address();
   await new Promise((r) => server.close(r));
@@ -125,37 +82,41 @@ describe("섹터 지도 모양", () => {
   });
 });
 
-describe("종목 목록 확인 (fake-kiwoom으로 띄운 서버)", () => {
+describe("종목 목록 확인 (합성 앱 HTTP 응답)", () => {
   let scratch = "";
   let serverUrl = "";
-  const procs: Proc[] = [];
+  const directory = new Map<string, string>([
+    ["247540", "에코프로비엠"], ["086520", "에코프로"], ["006400", "삼성SDI"],
+    ["005930", "삼성전자"], ["035420", "NAVER"], ["000810", "삼성화재"],
+  ]);
+  const api = createHttpServer((request, response) => {
+    const pathname = new URL(request.url ?? "/", "http://localhost").pathname;
+    if (request.method !== "GET" || !/^\/api\/symbols\/[^/]+$/.test(pathname)) {
+      response.writeHead(404).end();
+      return;
+    }
+    const code = decodeURIComponent(pathname.slice("/api/symbols/".length));
+    const name = directory.get(code);
+    response.setHeader("content-type", "application/json");
+    if (name === undefined) {
+      response.writeHead(404).end(JSON.stringify({ error: { code: "unknown_symbol", message: "시험 종목이 없습니다", reason: null, retryAt: null, manualActionRequired: false } }));
+      return;
+    }
+    const info: SymbolInfo = { code, name, kind: "common", market: "kospi", nxtEnabled: false };
+    response.writeHead(200).end(JSON.stringify(info));
+  });
 
   before(async () => {
     await mkdir(SCRATCH_ROOT, { recursive: true });
     scratch = await mkdtemp(path.join(SCRATCH_ROOT, "run-"));
-    const fake = new Proc(path.join(BIN_DIR, "fake-kiwoom"), {});
-    procs.push(fake);
-    const fakeBase = `http://${await fake.waitFor(/fake-kiwoom listening addr=(\S+)/, "가짜 키움")}`;
-    const server = new Proc(path.join(BIN_DIR, "vally-server"), {
-      VALLY_KIWOOM_APP_KEY: "FAKE-APPKEY-leader-cases",
-      VALLY_KIWOOM_APP_SECRET: "FAKE-SECRET-leader-cases",
-      VALLY_KIWOOM_BASE_URL: fakeBase,
-      VALLY_KIWOOM_WS_URL: `${fakeBase.replace(/^http/, "ws")}/api/dostk/websocket`,
-      VALLY_LOCK_PATH: path.join(scratch, "server.lock"),
-      VALLY_DB_PATH: path.join(scratch, "vally.db"),
-      VALLY_SCREENER_DB_PATH: path.join(scratch, "screener.duckdb"),
-      VALLY_SCREENER_UPDATE_ON_START: "off",
-      VALLY_TOKEN_PATH: path.join(scratch, "token.json"),
-      VALLY_BIND: "127.0.0.1:0",
-      VALLY_STATIC_DIR: scratch,
-    });
-    procs.push(server);
-    serverUrl = `http://${await server.waitFor(/포트를 열었습니다 addr=(\S+)/, "vally-server")}`;
-    await waitUntilSymbolListSettles(serverUrl);
+    await new Promise<void>((resolve) => api.listen(0, "127.0.0.1", resolve));
+    const address = api.address();
+    assert.ok(address !== null && typeof address !== "string");
+    serverUrl = `http://127.0.0.1:${address.port}`;
   });
 
   after(async () => {
-    await Promise.all(procs.map((p) => p.kill()));
+    await new Promise<void>((resolve, reject) => api.close((error) => error ? reject(error) : resolve()));
     if (scratch) await rm(scratch, { recursive: true, force: true });
   });
 
@@ -207,7 +168,7 @@ describe("종목 목록 확인 (fake-kiwoom으로 띄운 서버)", () => {
     for (const code of ["247540", "086520", "006400"]) assert.match(run.stdout, new RegExp(`^확인 못 함: ${code} `, "m"));
   });
 
-  test("저장소 지도를 돌리면 fake-kiwoom에 있는 종목은 통과하고 없는 종목만 찍힌다", async () => {
+  test("저장소 지도를 돌리면 합성 목록에 있는 종목은 통과하고 없는 종목만 찍힌다", async () => {
     const run = await runCheck(serverUrl);
     assert.equal(run.code, 1, run.stdout + run.stderr);
     assert.match(run.stdout, /확인 못 함 0개/);

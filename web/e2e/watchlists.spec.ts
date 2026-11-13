@@ -1,5 +1,5 @@
 import type { Page } from "@playwright/test";
-import { expect, test } from "./harness";
+import { type Scenario, expect, test } from "./harness";
 
 const panel = (page: Page) => page.getByRole("complementary", { name: "관심종목" });
 const listButton = (page: Page) => panel(page).getByRole("button", { name: /^관심종목 목록: / });
@@ -34,7 +34,7 @@ async function switchTo(page: Page, name: string) {
 
 const codes = (page: Page) => panel(page).locator("li[data-code]").evaluateAll((li) => li.map((e) => e.getAttribute("data-code")));
 
-test("목록 셋, 목록마다의 순서, 고른 열이 새로고침과 서버 재시작 뒤에도 그대로다", async ({ app, page }) => {
+test("목록 셋, 목록마다의 순서, 고른 열이 새로고침 뒤에도 그대로다", async ({ page }) => {
   await page.goto("/");
   await expect(listButton(page)).toHaveAccessibleName("관심종목 목록: 기본");
   await addToActiveList(page, "에코프로", "086520");
@@ -80,7 +80,7 @@ test("목록 셋, 목록마다의 순서, 고른 열이 새로고침과 서버 �
   await page.reload();
   await expectRestored();
 
-  await app.restart();
+
   await page.reload();
   await expectRestored();
 });
@@ -113,14 +113,13 @@ test("이름이 겹치면 만들지 않고 까닭을 보인다", async ({ page }
   await expect(listButton(page)).toHaveAccessibleName("관심종목 목록: 기본");
 });
 
-async function seed(url: string, lists: { id: string; name: string; symbols: string[] }[]) {
-  const res = await fetch(`${url}/api/watchlists`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ lists, revision: 100 }) });
-  expect(res.status).toBe(200);
+async function seed(scenario: Scenario, lists: { id: string; name: string; symbols: string[] }[]) {
+  scenario.documents.saveWatchlists({ lists, revision: 100 });
 }
 
-test("휴대폰에서 목록이 20개여도 옮기기·복사 메뉴의 모든 대상을 누를 수 있다", async ({ app, page }) => {
+test("휴대폰에서 목록이 20개여도 옮기기·복사 메뉴의 모든 대상을 누를 수 있다", async ({ scenario, page }) => {
   const symbols = Array.from({ length: 20 }, (_, i) => String(100_000 + i));
-  await seed(app.url, Array.from({ length: 20 }, (_, i) => ({ id: `L${i}`, name: `목록 ${i}`, symbols: i === 0 ? symbols : [] })));
+  await seed(scenario, Array.from({ length: 20 }, (_, i) => ({ id: `L${i}`, name: `목록 ${i}`, symbols: i === 0 ? symbols : [] })));
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/");
   await page.getByRole("navigation", { name: "휴대폰 탭" }).getByRole("button", { name: "관심종목" }).click();
@@ -143,8 +142,8 @@ test("휴대폰에서 목록이 20개여도 옮기기·복사 메뉴의 모든 �
   }
 });
 
-test("값 열을 모두 꺼도 패널의 기본 폭을 유지하고 종목 이름이 보인다", async ({ app, page }) => {
-  await seed(app.url, [{ id: "L0", name: "기본", symbols: ["005930"] }]);
+test("값 열을 모두 꺼도 패널의 기본 폭을 유지하고 종목 이름이 보인다", async ({ scenario, page }) => {
+  await seed(scenario, [{ id: "L0", name: "기본", symbols: ["005930"] }]);
   await page.goto("/?symbol=005930");
   const stock = panel(page).locator('li[data-code="005930"]');
   await expect(stock).toContainText("삼성전자");

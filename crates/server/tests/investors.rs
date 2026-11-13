@@ -2,10 +2,10 @@ mod common;
 
 use std::ffi::OsStr;
 
-use common::{FakeKiwoom, Server};
+use common::{ScriptedTransport, Server};
 use domain::KstDate;
-use fake_kiwoom::investors::{self, INVESTOR_FIELDS, PAGE_ROWS};
-use fake_kiwoom::krx::{self, KrxMarket, KrxStock};
+use common::support::investors::{self, INVESTOR_FIELDS, PAGE_ROWS};
+use common::support::krx::{self, KrxMarket, KrxStock};
 use serde_json::{Value, json};
 
 const FOREIGN: &str = "foreign-holdings";
@@ -52,7 +52,7 @@ fn list(endpoint: &str) -> &'static str {
 
 struct Api {
     server: Server,
-    fake: FakeKiwoom,
+    fake: ScriptedTransport,
     client: reqwest::Client,
     base: String,
     _tmp: tempfile::TempDir,
@@ -60,7 +60,7 @@ struct Api {
 
 impl Api {
     async fn boot() -> Api {
-        let fake = FakeKiwoom::start().await;
+        let fake = ScriptedTransport::new();
         fake.set_krx_market(market());
         let tmp = tempfile::tempdir().unwrap();
         let clock = format!("{}203000", today().yyyymmdd());
@@ -92,23 +92,10 @@ impl Api {
     }
 
     async fn kiwoom_page(&self, endpoint: &str, code: &str, next_key: Option<&str>) -> Value {
-        let (path, body) = if endpoint == FOREIGN {
-            ("frgnistt", json!({"stk_cd": code}))
-        } else {
-            ("stkinfo", json!({"dt": today().yyyymmdd(), "stk_cd": code, "amt_qty_tp": "2", "trde_tp": "0", "unit_tp": "1"}))
-        };
-        let resp = self
-            .client
-            .post(format!("{}/api/dostk/{path}", self.fake.base_url()))
-            .header("api-id", api_id(endpoint))
-            .header("authorization", format!("Bearer {}", common::TOKEN))
-            .header("cont-yn", if next_key.is_some() { "Y" } else { "N" })
-            .header("next-key", next_key.unwrap_or_default())
-            .body(body.to_string())
-            .send()
-            .await
-            .unwrap();
-        serde_json::from_str(&resp.text().await.unwrap()).unwrap()
+        let body = if endpoint == FOREIGN { json!({"stk_cd": code}) } else { json!({"dt": today().yyyymmdd(), "stk_cd": code, "amt_qty_tp": "2", "trde_tp": "0", "unit_tp": "1"}) };
+        let market = market();
+        let response = common::support::investors::answer(&market, api_id(endpoint), &body, next_key).unwrap();
+        serde_json::from_str(&response.body).unwrap()
     }
 }
 
@@ -180,7 +167,7 @@ fn invalid_request() -> Value {
     json!({"return_code": 2, "return_msg": "입력 값 오류입니다[1511:필수 입력 값에 값이 존재하지 않습니다]"})
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn unreadable_dates_on_the_first_page_are_distinct_from_a_normal_empty_range() {
     let api = Api::boot().await;
     for endpoint in [FOREIGN, NET_SHARES] {
@@ -205,7 +192,7 @@ async fn unreadable_dates_on_the_first_page_are_distinct_from_a_normal_empty_ran
     assert!(logs.lines().any(|l| l.contains("WARN") && l.contains("2026110X") && l.contains(krx::COMMON)), "{logs}");
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn a_wholly_undated_first_page_keeps_its_failures_and_walks_to_older_pages() {
     let api = Api::boot().await;
     let newest = newest_first(krx::COMMON);
@@ -228,7 +215,7 @@ async fn a_wholly_undated_first_page_keeps_its_failures_and_walks_to_older_pages
     }
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn a_wholly_undated_middle_page_does_not_hide_older_history() {
     let api = Api::boot().await;
     let newest = newest_first(krx::COMMON);
@@ -253,7 +240,7 @@ async fn a_wholly_undated_middle_page_does_not_hide_older_history() {
     assert!(logs.lines().any(|l| l.contains("WARN") && l.contains("2026110X") && l.contains(krx::COMMON)), "{logs}");
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn wholly_undated_history_has_no_invented_start_date_or_unknown_symbol_error() {
     let api = Api::boot().await;
     for endpoint in [FOREIGN, NET_SHARES] {
@@ -277,7 +264,7 @@ async fn wholly_undated_history_has_no_invented_start_date_or_unknown_symbol_err
     }
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn distinct_undated_pages_with_the_same_date_errors_still_reach_dated_history() {
     let api = Api::boot().await;
     let newest = newest_first(krx::COMMON);
@@ -303,7 +290,7 @@ async fn distinct_undated_pages_with_the_same_date_errors_still_reach_dated_hist
     }
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn repeated_continuation_keys_or_undated_pages_stop_without_looping() {
     let api = Api::boot().await;
     for endpoint in [FOREIGN, NET_SHARES] {
@@ -331,7 +318,7 @@ async fn repeated_continuation_keys_or_undated_pages_stop_without_looping() {
     }
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn an_empty_or_repeated_dated_page_still_ends_the_walk_even_with_a_next_key() {
     let api = Api::boot().await;
     let newest = newest_first(krx::COMMON);
@@ -351,7 +338,7 @@ async fn an_empty_or_repeated_dated_page_still_ends_the_walk_even_with_a_next_ke
     }
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn a_range_over_several_pages_comes_back_whole_in_day_order_and_the_walk_stops_at_from() {
     let api = Api::boot().await;
     let (from, to) = (day(2025, 1, 2), day(2026, 6, 30));
@@ -371,7 +358,7 @@ async fn a_range_over_several_pages_comes_back_whole_in_day_order_and_the_walk_s
     assert!(bodies.iter().all(|b| b["dt"] == today().yyyymmdd()), "ka10059는 언제나 오늘부터 거꾸로 받는다: {bodies:?}");
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn a_range_longer_than_kiwooms_history_gives_what_kiwoom_has_and_says_where_it_starts() {
     let api = Api::boot().await;
     let common = stock(krx::COMMON);
@@ -392,7 +379,7 @@ async fn a_range_longer_than_kiwooms_history_gives_what_kiwoom_has_and_says_wher
     assert_eq!(before_listing["skippedDays"], json!([]), "자료가 없는 기간은 빠진 날도 없다");
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn kiwooms_empty_answer_is_an_unknown_stock_and_does_not_stop_the_path() {
     let api = Api::boot().await;
     for endpoint in [FOREIGN, NET_SHARES] {
@@ -406,7 +393,7 @@ async fn kiwooms_empty_answer_is_an_unknown_stock_and_does_not_stop_the_path() {
     }
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn a_failure_on_the_first_page_answers_the_error_and_the_next_request_starts_over() {
     let api = Api::boot().await;
     let (from, to) = (day(2025, 1, 2), today());
@@ -425,7 +412,7 @@ async fn a_failure_on_the_first_page_answers_the_error_and_the_next_request_star
     assert!(logs.lines().any(|l| l.contains("투자자별 순매수 요청에 답하지 못했습니다")), "{logs}");
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn a_failure_on_a_middle_page_answers_the_error_instead_of_a_shortened_history() {
     let api = Api::boot().await;
     let (from, to) = (day(2025, 1, 2), today());
@@ -446,7 +433,7 @@ async fn a_failure_on_a_middle_page_answers_the_error_instead_of_a_shortened_his
     }
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn a_success_without_the_list_is_a_protocol_failure_that_stops_the_path_not_an_empty_history() {
     let api = Api::boot().await;
     for endpoint in [FOREIGN, NET_SHARES] {
@@ -460,7 +447,7 @@ async fn a_success_without_the_list_is_a_protocol_failure_that_stops_the_path_no
     }
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn when_every_row_in_the_range_is_unreadable_the_days_are_empty_and_each_row_is_a_skipped_day() {
     let api = Api::boot().await;
     let newest_first = newest_first(krx::COMMON);
@@ -484,7 +471,7 @@ async fn when_every_row_in_the_range_is_unreadable_the_days_are_empty_and_each_r
     }
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn some_unreadable_rows_stay_out_of_days_and_only_those_come_back_as_skipped_days() {
     let api = Api::boot().await;
     let newest_first = newest_first(krx::COMMON);
@@ -513,7 +500,7 @@ async fn some_unreadable_rows_stay_out_of_days_and_only_those_come_back_as_skipp
     }
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn bad_ranges_and_symbols_are_rejected_before_asking_kiwoom() {
     let api = Api::boot().await;
     for (path, status, code) in [

@@ -1,9 +1,6 @@
 import json
 import os
 from pathlib import Path
-import re
-import subprocess
-import threading
 import time
 import urllib.error
 import urllib.request
@@ -29,42 +26,7 @@ def isolated_environment():
     return {name: os.environ[name] for name in names if name in os.environ}
 
 
-class Process:
-    def __init__(self, command, environment, log, record):
-        self.started = time.monotonic()
-        self.log = log
-        self.child = evidence.spawn(command, env=environment, cwd=record.root, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
-        self.entry = {"command": command, "pid": self.child.pid, "log": str(log), "execution": "direct", "status": "running"}
-        record.data.setdefault("processes", []).append(self.entry)
-        self.lines = ""
-        def drain():
-            with log.open("w") as stream:
-                for line in self.child.stdout:
-                    line = evidence.clean(line)
-                    self.lines = (self.lines + line)[-65536:]
-                    stream.write(line)
-                    stream.flush()
-        self.thread = threading.Thread(target=drain, daemon=True)
-        self.thread.start()
-        record.save()
-
-    def address(self, deadline):
-        until = min(deadline, time.monotonic() + 30)
-        while time.monotonic() < until:
-            match = re.search(r"addr=127\.0\.0\.1:(\d+)", self.lines)
-            if match:
-                return f"http://127.0.0.1:{match[1]}"
-            if self.child.poll() is not None:
-                raise ValueError("독립 프로세스 기동 실패: 정제된 로그를 확인하세요")
-            time.sleep(.1)
-        raise TimeoutError("독립 프로세스 기동 시간 초과")
-
-    def stop(self):
-        cleanup = self.child.poll() is None
-        evidence.stop_process(self.child)
-        self.thread.join(timeout=5)
-        self.child.stdout.close()
-        self.entry.update(status="stopped" if cleanup else ("passed" if self.child.returncode == 0 else "failed"), exit_code=self.child.returncode, stop_reason="owned_cleanup" if cleanup else "exited", elapsed_seconds=round(time.monotonic() - self.started, 3))
+Process = evidence.Process
 
 
 def get(base, route, deadline):
@@ -120,7 +82,7 @@ def run_live(root, args, web):
     command = ["web.py", "live", "--mode", args.mode, "--timeout", str(args.timeout), *(["--headed"] if args.headed else []), *(["--key-file", "[path omitted]"] if args.key_file else [])]
     with evidence.Run(root, "live", command) as record:
         record.plan("key", "server", "dependencies", "wasm", "types", "ui", "source", "chromium")
-        result = {"status": "failed", "mode": args.mode, "symbol": SYMBOL, "fresh_database": True, "limits": {"source_seconds": args.timeout, "app_polls": 300, "dart_requests_upper_bound": args.timeout * 4 + 2, "refresh_posts": 0}, "scope": "isolated fake-kiwoom + real OpenDART"}
+        result = {"status": "failed", "mode": args.mode, "symbol": SYMBOL, "fresh_database": True, "limits": {"source_seconds": args.timeout, "app_polls": 300, "dart_requests_upper_bound": args.timeout * 4 + 2, "refresh_posts": 0}, "scope": "isolated financial service + real OpenDART"}
         record.result = result
         processes = []
         try:
@@ -132,21 +94,16 @@ def run_live(root, args, web):
                 evidence.SECRETS.add(key)
             environment = web.environment_for(root, record.directory / "tmp")
             environment = {name: value for name, value in environment.items() if name in isolated_environment() or name in ("TMPDIR", "CARGO_TARGET_DIR", "CARGO_BUILD_JOBS")}
+            web.prepare_dart(root, environment, record)
             if args.mode == "full":
                 web.prepare_e2e(root, environment, record)
-            else:
-                web.prepare_server(root, environment, record)
-            environment.pop("VALLY_E2E_BIN_DIR", None)
             deadline = time.monotonic() + args.timeout
             state = record.directory / "state"
             state.mkdir(mode=0o700)
             record.verify()
             binaries = record.directory / "bin"
-            fake = Process([str(binaries / "fake-kiwoom"), "--bind", "127.0.0.1:0"], environment, record.directory / "fake.log", record)
-            processes.append(fake)
-            fake_base = fake.address(deadline)
-            child_environment = {**environment, "LD_LIBRARY_PATH": str(binaries), "OPENDART_API_KEY": key, "VALLY_KIWOOM_APP_KEY": "FAKE-APPKEY-e2e-7f3a91c2", "VALLY_KIWOOM_APP_SECRET": "FAKE-SECRET-e2e-c0ffee42", "VALLY_KIWOOM_BASE_URL": fake_base, "VALLY_KIWOOM_WS_URL": fake_base.replace("http:", "ws:") + "/api/dostk/websocket", "VALLY_BIND": "127.0.0.1:0", "VALLY_DB_PATH": str(state / "user.db"), "VALLY_SCREENER_DB_PATH": str(state / "screener.duckdb"), "VALLY_FINANCIAL_DB_PATH": str(state / "financials.db"), "VALLY_LOCK_PATH": str(state / "kiwoom.lock"), "VALLY_TOKEN_PATH": str(state / "fake-token.json"), "VALLY_STATIC_DIR": str(record.directory / "dist"), "VALLY_SCREENER_UPDATE_ON_START": "off", "VALLY_FINANCIAL_AUTOMATIC": "off", "VALLY_LOG": "info"}
-            server = Process([str(binaries / "vally-server")], child_environment, record.directory / "server.log", record)
+            child_environment = {**environment, "LD_LIBRARY_PATH": str(binaries), "OPENDART_API_KEY": key, "VALLY_FINANCIAL_DB_PATH": str(state / "financials.db"), "VALLY_STATIC_DIR": str(record.directory / "dist")}
+            server = Process([str(binaries / "dart-smoke")], child_environment, record.directory / "server.log", record)
             processes.append(server)
             base = server.address(deadline)
             with record.step("source"):

@@ -64,13 +64,13 @@ class DevCacheTest(unittest.TestCase):
             yield builds
 
     def test_empty_bin_direct_retry_and_cache_restore_have_stable_artifact_files(self):
-        for with_fake in (False, True):
+        for binary in dev.BINARIES:
             for bundled in (False, True):
-                with self.subTest(with_fake=with_fake, bundled=bundled):
-                    root = self.root / f"fake-{with_fake}-bundled-{bundled}"
+                with self.subTest(binary=binary, bundled=bundled):
+                    root = self.root / f"{binary}-bundled-{bundled}"
                     root.mkdir()
-                    args = argparse.Namespace(action="build", with_fake=with_fake, bundled=bundled)
-                    binaries = dev.BINARIES if with_fake else dev.BINARIES[:1]
+                    args = argparse.Namespace(action="build", bin=binary, bundled=bundled)
+                    binaries = (binary,)
                     with self.execute_fixture(root) as builds:
                         for attempt in ("direct", "retry", "cache_restore"):
                             if attempt == "cache_restore":
@@ -91,7 +91,7 @@ class DevCacheTest(unittest.TestCase):
                 root.mkdir()
                 with self.execute_fixture(root), self.assertRaises(ValueError):
                     with dev.evidence.Run(root, "dev-build", ["dev.py", "build"]) as record:
-                        dev.execute(root, argparse.Namespace(action="build", with_fake=True, bundled=False))
+                        dev.execute(root, argparse.Namespace(action="build", bin="vally-server", bundled=False))
                         (root / "target/dev/bin" / filename).write_bytes(b"replaced after preparation")
                 manifest = json.loads((record.directory / "manifest.json").read_text())
                 self.assertEqual(manifest["status"], "failed")
@@ -138,7 +138,7 @@ class DevCacheTest(unittest.TestCase):
         shutil.rmtree(self.root / "target")
         dev.cached_build(self.root, self.cache, "key", lambda: "key", build)
         self.assertEqual(calls, ["build"])
-        self.assertTrue((self.root / "target/dev/bin/fake-kiwoom").is_file())
+        self.assertTrue((self.root / "target/dev/bin/dart-smoke").is_file())
         (self.cache / "binaries/key/vally-server").write_text("damaged")
         dev.cached_build(self.root, self.cache, "key", lambda: "key", build)
         self.assertEqual(calls, ["build", "build"])
@@ -255,9 +255,9 @@ class DevCacheTest(unittest.TestCase):
             dev.cargo_command(["build", "--release"], False)
 
     def test_fake_only_tests_do_not_prepare_duckdb(self):
-        self.assertFalse(dev.needs_duckdb(["cargo", "test", "-p", "fake-kiwoom"]))
+        self.assertFalse(dev.needs_duckdb(["cargo", "test", "-p", "domain"]))
         self.assertTrue(dev.needs_duckdb(["cargo", "test", "--workspace"]))
-        self.assertTrue(dev.needs_duckdb(["cargo", "build", "-p", "server", "-p", "fake-kiwoom"]))
+        self.assertTrue(dev.needs_duckdb(["cargo", "build", "-p", "server", "--bin", "dart-smoke"]))
 
 
     def test_manifest_records_direct_reuse_and_failure_without_claiming_old_binary(self):

@@ -1,40 +1,44 @@
+import { november9BarAt } from "./fixtures/frames";
 import type { Page } from "@playwright/test";
 import type { Layout } from "../src/api/generated/Layout";
 import { installFrameProbe } from "./frame-probe";
-import { type App, barTimes, cell, chartOf, DEFAULT_LAYOUT_ID, dragTowardPast, expect, test } from "./harness";
+import { type Scenario, barTimes, cell, chartOf, DEFAULT_LAYOUT_ID, dragTowardPast, expect, test } from "./harness";
 
 test.use({ clockStart: "20261109100030" });
 
 const ICHIMOKU_FOR_30_MINUTE_BARS = { kind: "ichimoku", conversion: 3, base: 5, spanB: 8, displacement: 6 };
 
-async function seedLayout(app: App, period: string, indicators: object[], panels: object[], symbol = "005930") {
-  const current: Layout = await (await fetch(`${app.url}/api/layouts/${DEFAULT_LAYOUT_ID}`)).json();
+async function seedLayout(scenario: Scenario, period: NonNullable<Parameters<Scenario["market"]["page"]>[0]["period"]>, indicators: object[], panels: object[], symbol = "005930") {
+  const current: Layout = scenario.documents.layout(DEFAULT_LAYOUT_ID);
   const { id, name, arrangement, sync, revision } = current;
   const chartSettings = { v: 2, style: "candle", scale: "normal", indicators, compare: [], panels };
-  const body = { id, name, arrangement, sync, revision: revision + 1, cells: [{ slot: 0, symbol, venue: "combined", period, symbolLink: false, chartSettings }] };
-  const r = await fetch(`${app.url}/api/layouts/${id}`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
-  expect(r.ok).toBe(true);
+  const body: Parameters<Scenario["documents"]["saveLayout"]>[0] = { id, name, arrangement, sync, revision: revision + 1, cells: [{ slot: 0, symbol, venue: "combined", period, symbolLink: false, chartSettings }] };
+  scenario.documents.saveLayout(body);
+  if (period === "1m") scenario.on("/api/bars", request => {
+    const url = new URL(request.url());
+    const data = scenario.market.page({ symbol, period, before: url.searchParams.has("before") ? Number(url.searchParams.get("before")) : null });
+    return { body: { ...data, bars: data.bars.filter(bar => bar.t < Date.parse("2026-11-09T10:00:00+09:00") / 1000), current: null } };
+  });
+
 }
 
 const series = (page: Page) => page.evaluate(() => window.frameProbe.snapshot());
 
-async function trade(app: App, page: Page, delivered: number[], price: number, time: string) {
-  expect(await app.fake.pushReal("0B", "005930_AL", {
-    "20": time, "10": `+${price}`, "15": "+1", "13": "1000", "9081": "KRX", "11": "+0", "12": "+0.00", "25": "2",
-  })).toBeGreaterThan(0);
+async function trade(scenario: Scenario, page: Page, delivered: number[], price: number, time: string) {
+  expect(await scenario.live.update("005930", { t: Date.parse(`2026-11-09T${time.slice(0,2)}:${time.slice(2,4)}:00+09:00`) / 1000, c: price, o: price, h: price, l: price, v: 1000 })).toBeGreaterThan(0);
   await expect.poll(() => delivered.includes(price), { timeout: 2000 }).toBe(true);
   await expect(chartOf(cell(page))).toHaveAttribute("data-last-close", String(price), { timeout: 2000 });
 }
 
-test("후행스팬이 있는 칸에서 체결을 흘려도 모든 선의 update는 그 선의 마지막 점만 바꾼다", async ({ page, app }) => {
+test("후행스팬이 있는 칸에서 체결을 흘려도 모든 선의 update는 그 선의 마지막 점만 바꾼다", async ({ page, scenario }) => {
   const errors: string[] = [];
   const delivered: number[] = [];
   page.on("pageerror", (e) => errors.push(e.message));
-  page.on("websocket", (socket) => socket.on("framereceived", ({ payload }) => {
-    const m = JSON.parse(String(payload));
+  scenario.live.observe(m => {
+
     if (m.type === "bar" || m.type === "confirmed") delivered.push(m.bar.c);
-  }));
-  await seedLayout(app, "1m", [{ id: "i1", spec: ICHIMOKU_FOR_30_MINUTE_BARS, panel: "price", visible: true, style: { colors: ["ind-1"], width: 1 } }], []);
+  });
+  await seedLayout(scenario, "1m", [{ id: "i1", spec: ICHIMOKU_FOR_30_MINUTE_BARS, panel: "price", visible: true, style: { colors: ["ind-1"], width: 1 } }], []);
   await page.addInitScript(installFrameProbe);
   await page.goto("/");
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
@@ -43,17 +47,18 @@ test("후행스팬이 있는 칸에서 체결을 흘려도 모든 선의 update�
   await expect.poll(async () => (await series(page)).filter((s) => s.type === "Custom" && s.data.length > 0).length).toBe(5);
 
   await expect(async () => {
-    await trade(app, page, delivered, 201_000, "100031");
+    await trade(scenario, page, delivered, 201_000, "100031");
   }).toPass({ timeout: 15_000 });
-  for (const [i, p] of [201_500, 200_500, 202_000].entries()) await trade(app, page, delivered, p, `10004${i}`);
+  for (const [i, p] of [201_500, 200_500, 202_000].entries()) await trade(scenario, page, delivered, p, `10004${i}`);
   const barsBefore = Number(await chartOf(cell(page)).getAttribute("data-bar-count"));
+  scenario.live.bar("005930", november9BarAt("10:00", 202_000), "confirmed");
   await expect(async () => {
-    await trade(app, page, delivered, 203_000, "100101");
+    await trade(scenario, page, delivered, 203_000, "100101");
   }).toPass({ timeout: 45_000 });
-  await trade(app, page, delivered, 203_500, "100102");
+  await trade(scenario, page, delivered, 203_500, "100102");
   await expect(chartOf(cell(page))).toHaveAttribute("data-bar-count", String(barsBefore + 1));
   const beforeSameClose = delivered.length;
-  await trade(app, page, delivered, 203_500, "100103");
+  await trade(scenario, page, delivered, 203_500, "100103");
   await expect.poll(() => delivered.length).toBeGreaterThan(beforeSameClose);
   const updatedLast = async () => (await series(page)).filter((s) => s.type === "Custom").map((l) => Number(l.updates.at(-1)?.time) === Number(l.data.at(-1)?.time));
   await expect.poll(updatedLast).toEqual([true, true, true, true, true]);
@@ -76,12 +81,12 @@ test("후행스팬이 있는 칸에서 체결을 흘려도 모든 선의 update�
   expect(errors).toEqual([]);
 });
 
-test("열기만 하면 v1 차트 설정을 서버에 쓰지 않고, 기본 거래량 지표를 보인다", async ({ page, app }) => {
+test("열기만 하면 v1 차트 설정을 서버에 쓰지 않고, 기본 거래량 지표를 보인다", async ({ page, scenario }) => {
   const puts: string[] = [];
   page.on("request", (r) => {
     if (r.method() === "PUT" && r.url().includes("/api/layouts/")) puts.push(r.url());
   });
-  const saved: Layout = await (await fetch(`${app.url}/api/layouts/${DEFAULT_LAYOUT_ID}`)).json();
+  const saved: Layout = scenario.documents.layout(DEFAULT_LAYOUT_ID);
   expect(saved.cells[0]!.chartSettings).toMatchObject({ v: 1, indicators: [] });
   await page.goto("/");
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
@@ -89,7 +94,7 @@ test("열기만 하면 v1 차트 설정을 서버에 쓰지 않고, 기본 거�
   await expect(page.locator("[data-indicator-row]")).toContainText("거래량");
   await page.waitForTimeout(2500);
   expect(puts).toEqual([]);
-  const after: Layout = await (await fetch(`${app.url}/api/layouts/${DEFAULT_LAYOUT_ID}`)).json();
+  const after: Layout = scenario.documents.layout(DEFAULT_LAYOUT_ID);
   expect(after.revision).toBe(saved.revision);
 });
 
@@ -121,8 +126,8 @@ test("첫 화면에서 거래량 막대는 봉보다 많아야 한 프레임 늦
 
 const ma = (id: string, period: number) => ({ id, spec: { kind: "ma", method: "sma", period }, panel: "price", visible: true, style: { colors: ["ind-2"], width: 1 } });
 
-test("설정값이 틀린 지표는 그리지 않고 설정 오류를 남기며, 같은 칸의 다른 지표는 그린다", async ({ page, app }) => {
-  await seedLayout(app, "D", [ma("bad", 0), ma("good", 5)], []);
+test("설정값이 틀린 지표는 그리지 않고 설정 오류를 남기며, 같은 칸의 다른 지표는 그린다", async ({ page, scenario }) => {
+  await seedLayout(scenario, "D", [ma("bad", 0), ma("good", 5)], []);
   await page.goto("/");
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
   await expect(page.locator('[data-indicator-row="bad"]')).toContainText("설정 오류");
@@ -130,8 +135,8 @@ test("설정값이 틀린 지표는 그리지 않고 설정 오류를 남기며,
   await expect(page.locator('[data-indicator-row="good"]')).not.toContainText("오류");
 });
 
-test("wasm을 받지 못하면 봉은 그대로 그리고 지표 범례에 계산 오류를 남긴다", async ({ page, app }) => {
-  await seedLayout(app, "D", [ma("m", 5)], []);
+test("wasm을 받지 못하면 봉은 그대로 그리고 지표 범례에 계산 오류를 남긴다", async ({ page, scenario }) => {
+  await seedLayout(scenario, "D", [ma("m", 5)], []);
   await page.context().route("**/*.wasm", (route) => route.abort());
   await page.goto("/");
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
@@ -139,8 +144,8 @@ test("wasm을 받지 못하면 봉은 그대로 그리고 지표 범례에 계�
   await expect(page.locator('[data-indicator-row="m"]')).toContainText("계산 오류");
 });
 
-test("일목균형표를 띄운 채 과거로 스크롤해도 다가갈 때마다 과거 페이지는 하나다", async ({ page, app }) => {
-  await seedLayout(app, "D", [{ id: "i1", spec: { kind: "ichimoku", conversion: 9, base: 26, spanB: 52, displacement: 26 }, panel: "price", visible: true, style: { colors: ["ind-1"], width: 1 } }], [], "086520");
+test("일목균형표를 띄운 채 과거로 스크롤해도 다가갈 때마다 과거 페이지는 하나다", async ({ page, scenario }) => {
+  await seedLayout(scenario, "D", [{ id: "i1", spec: { kind: "ichimoku", conversion: 9, base: 26, spanB: 52, displacement: 26 }, panel: "price", visible: true, style: { colors: ["ind-1"], width: 1 } }], [], "086520");
   const older: string[] = [];
   page.on("request", (r) => {
     if (r.url().includes("/api/bars") && r.url().includes("before=")) older.push(r.url());
@@ -180,19 +185,19 @@ function countWorkerReplies(): void {
 test.describe("체결 없던 분 뒤", () => {
   test.use({ clockStart: "20261109100330" });
 
-  test("선행스팬을 다시 놓은 프레임에 그 봉 확정과 다음 봉이 겹쳐도, 모든 선을 시각 순서대로 끝까지 그린다", async ({ page, app }) => {
+  test("선행스팬을 다시 놓은 프레임에 그 봉 확정과 다음 봉이 겹쳐도, 모든 선을 시각 순서대로 끝까지 그린다", async ({ page, scenario }) => {
     const errors: string[] = [];
     const delivered: number[] = [];
     page.on("pageerror", (e) => errors.push(e.message));
     page.on("console", (m) => {
       if (m.type() === "error" && m.text().includes("지표")) errors.push(m.text());
     });
-    page.on("websocket", (socket) => socket.on("framereceived", ({ payload }) => {
-      const m = JSON.parse(String(payload));
+    scenario.live.observe(m => {
+
       if (m.type === "bar" || m.type === "confirmed") delivered.push(m.bar.c);
-    }));
+    });
     const style = { colors: ["ind-1"], width: 1 };
-    await seedLayout(app, "1m", [
+    await seedLayout(scenario, "1m", [
       { id: "i1", spec: ICHIMOKU_FOR_30_MINUTE_BARS, panel: "price", visible: true, style },
       { id: "i2", spec: { kind: "bollinger", period: 20, k: 2 }, panel: "price", visible: true, style },
       { id: "i3", spec: { kind: "volume", maPeriod: 5 }, panel: "p1", visible: true, style },
@@ -214,17 +219,16 @@ test.describe("체결 없던 분 뒤", () => {
     };
 
     await expect(async () => {
-      await trade(app, page, delivered, 201_000, "100031");
+      await trade(scenario, page, delivered, 201_000, "100031");
     }).toPass({ timeout: 15_000 });
     await expect.poll(lagging).toEqual([201_000]);
 
     await page.evaluate(() => window.frameProbe.hold());
     const repliesBefore = await page.evaluate(() => window.workerReplies);
     const deliveredBefore = delivered.length;
-    for (const [price, time] of [[202_000, "100201"], [203_000, "100301"]] as const) {
-      expect(await app.fake.pushReal("0B", "005930_AL", {
-        "20": time, "10": `+${price}`, "15": "+1", "13": "1000", "9081": "KRX", "11": "+0", "12": "+0.00", "25": "2",
-      })).toBeGreaterThan(0);
+    for (const [price, time, confirmedTime, confirmedPrice] of [[202_000, "100201", "10:00", 201_000], [203_000, "100301", "10:02", 202_000]] as const) {
+      scenario.live.bar("005930", november9BarAt(confirmedTime, confirmedPrice), "confirmed");
+      expect(await scenario.live.update("005930", { t: Date.parse(`2026-11-09T${time.slice(0,2)}:${time.slice(2,4)}:00+09:00`) / 1000, c: price, o: price, h: price, l: price, v: 1000 })).toBeGreaterThan(0);
       await expect.poll(() => delivered.includes(price)).toBe(true);
     }
     await expect.poll(async () => (await page.evaluate(() => window.workerReplies)) - repliesBefore).toBe(delivered.length - deliveredBefore);

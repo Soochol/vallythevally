@@ -1,32 +1,32 @@
+import type { Screen } from "../src/api/generated/Screen";
 import type { Page } from "@playwright/test";
-import { type App, expect, test } from "./harness";
-import { cell, chartOf } from "./harness";
+import { type Scenario, expect, test } from "./screener-harness";
+import { cell, chartOf } from "./screener-harness";
 import { openScreener, panel, updateBand, waitForUpdateToFinish } from "./screener-page";
 import { editorWindow } from "./sentence-editor";
 
-test.use({ clockStart: "20261109100030", viewport: { width: 1440, height: 900 } });
+test.use({ viewport: { width: 1440, height: 900 } });
 
-const SEEDED = { id: "seeded", name: "고가 60일 신고가", markets: ["kospi"], exclude: ["etf"], conditions: [{ kind: "new_high", period: "D", recentBars: 20, field: "high", n: 60 }] };
+const SEEDED: Screen = { id: "seeded", name: "고가 60일 신고가", markets: ["kospi"], exclude: ["etf"], conditions: [{ kind: "new_high", period: "D", recentBars: 20, field: "high", n: 60 }] };
 const SENTENCE = "일봉 최근 20일 이내 고가가 60일 신고가인 봉이 있다";
 
 const editButton = (page: Page) => panel(page).getByRole("button", { name: "편집", exact: true });
 const nameField = (page: Page) => editorWindow(page).getByRole("textbox", { name: "조건식 이름", exact: true });
 const summary = (page: Page) => panel(page).getByLabel("조건 요약", { exact: true });
 const resultRows = (page: Page) => panel(page).locator("tr[data-code]");
-const savedScreens = async (app: App) => (await (await fetch(`${app.url}/api/screens`)).json()).screens;
+const savedScreens = (scenario: Scenario) => scenario.documents.screens().screens;
 
-async function seed(app: App, page: Page) {
-  const seeded = await fetch(`${app.url}/api/screens`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ screens: [SEEDED], revision: 1 }) });
-  expect(seeded.status).toBe(200);
+async function seed(scenario: Scenario, page: Page) {
+  scenario.documents.saveScreens({ screens: [SEEDED], revision: 1 });
   await page.goto("/?symbol=005930");
   await openScreener(page);
   await expect(summary(page)).toContainText(SENTENCE);
 }
 
-test("패널은 요약만 보이고 편집 창은 패널 왼쪽에 떠서 패널을 눌러도 남으며 Esc로 닫으면 편집 버튼으로 돌아온다", async ({ app, page }, info) => {
+test("패널은 요약만 보이고 편집 창은 패널 왼쪽에 떠서 패널을 눌러도 남으며 Esc로 닫으면 편집 버튼으로 돌아온다", async ({ scenario, page }, info) => {
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(error.message));
-  await seed(app, page);
+  await seed(scenario, page);
   await expect(summary(page)).toContainText("코스피 · ETF 제외");
   await expect(panel(page).getByRole("group", { name: "문장형 조건식" })).toHaveCount(0);
   await expect(editButton(page)).toHaveAttribute("aria-expanded", "false");
@@ -52,8 +52,8 @@ test("패널은 요약만 보이고 편집 창은 패널 왼쪽에 떠서 패널
   expect(errors).toEqual([]);
 });
 
-test("창에서 고친 초안은 닫아도 남고 Ctrl+S로 저장하며 N으로 조건 추가를 연다", async ({ app, page }) => {
-  await seed(app, page);
+test("창에서 고친 초안은 닫아도 남고 Ctrl+S로 저장하며 N으로 조건 추가를 연다", async ({ scenario, page }) => {
+  await seed(scenario, page);
   await editButton(page).click();
   await editorWindow(page).getByRole("group", { name: "대상 시장" }).getByRole("button", { name: "코스닥", exact: true }).click();
   await expect(panel(page).getByText("변경됨", { exact: true })).toBeVisible();
@@ -61,7 +61,7 @@ test("창에서 고친 초안은 닫아도 남고 Ctrl+S로 저장하며 N으로
   await expect(editorWindow(page)).toHaveCount(0);
   await expect(panel(page).getByText("변경됨", { exact: true })).toBeVisible();
   await expect(summary(page)).toContainText("코스피·코스닥 · ETF 제외");
-  expect((await savedScreens(app))[0].markets).toEqual(["kospi"]);
+  expect((await savedScreens(scenario))[0]!.markets).toEqual(["kospi"]);
 
   await editButton(page).click();
   await expect(editorWindow(page).getByRole("group", { name: "대상 시장" }).getByRole("button", { name: "코스닥", exact: true })).toHaveAttribute("aria-pressed", "true");
@@ -72,14 +72,14 @@ test("창에서 고친 초안은 닫아도 남고 Ctrl+S로 저장하며 N으로
   await page.keyboard.press("Enter");
   await expect(editorWindow(page).getByRole("list", { name: "조건" }).getByRole("listitem")).toHaveCount(2);
   await page.keyboard.press("Control+s");
-  await expect.poll(async () => (await savedScreens(app))[0]).toMatchObject({ markets: ["kospi", "kosdaq"], conditions: [{ kind: "new_high" }, { kind: "rsi" }] });
+  await expect.poll(async () => (await savedScreens(scenario))[0]).toMatchObject({ markets: ["kospi", "kosdaq"], conditions: [{ kind: "new_high" }, { kind: "rsi" }] });
   await expect(panel(page).getByText("변경됨", { exact: true })).toHaveCount(0);
   await expect(editorWindow(page).getByRole("button", { name: "저장", exact: true })).toBeDisabled();
   await expect(editorWindow(page)).toBeVisible();
 });
 
-test("창 머리에서 이름을 고치고, 빈 이름으로 실행하면 닫힌 창이 열려 이름 입력에 포커스를 준다", async ({ app, page }) => {
-  await seed(app, page);
+test("창 머리에서 이름을 고치고, 빈 이름으로 실행하면 닫힌 창이 열려 이름 입력에 포커스를 준다", async ({ scenario, page }) => {
+  await seed(scenario, page);
   await editButton(page).click();
   await nameField(page).fill("바꾼 이름");
   await expect(panel(page).getByRole("button", { name: "조건식 고르기", exact: true })).toHaveText("바꾼 이름");
@@ -93,40 +93,38 @@ test("창 머리에서 이름을 고치고, 빈 이름으로 실행하면 닫힌
   await expect(editorWindow(page).getByRole("alert").first()).toContainText("이름을 넣으세요");
   await expect(nameField(page)).toHaveAttribute("aria-invalid", "true");
   await expect(nameField(page)).toBeFocused();
-  expect((await savedScreens(app))[0].name).toBe(SEEDED.name);
+  expect((await savedScreens(scenario))[0]!.name).toBe(SEEDED.name);
 });
 
-test("저장이 처음부터 실패하거나 충돌해도 창과 초안을 지키고 다시 저장하면 반영한다", async ({ app, page }) => {
-  await seed(app, page);
+test("저장이 처음부터 실패하거나 충돌해도 창과 초안을 지키고 다시 저장하면 반영한다", async ({ scenario, page }) => {
+  await seed(scenario, page);
   await editButton(page).click();
   await nameField(page).fill("로컬 수정");
   let rejected = false;
-  await page.route("**/api/screens", async (route) => {
-    if (route.request().method() === "PUT" && !rejected) {
-      rejected = true;
-      await route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ code: "unavailable", message: "시험용 저장 실패" }) });
-    } else await route.continue();
+  scenario.on((url, request) => url.pathname === "/api/screens" && request.method() === "PUT" && !rejected, () => {
+    rejected = true;
+    return { status: 503, body: { error: { code: "internal", message: "시험용 저장 실패" } } };
   });
   const save = editorWindow(page).getByRole("button", { name: "저장", exact: true });
   await save.click();
   await expect(editorWindow(page).getByRole("alert")).toContainText("저장하지 못했습니다");
   await expect(nameField(page)).toHaveValue("로컬 수정");
 
-  const remote = await (await fetch(`${app.url}/api/screens`)).json();
-  remote.screens[0].exclude = [];
-  expect((await fetch(`${app.url}/api/screens`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...remote, revision: remote.revision + 1 }) })).ok).toBe(true);
+  const remote = scenario.documents.screens();
+  remote.screens[0]!.exclude = [];
+  scenario.documents.saveScreens({ ...remote, revision: remote.revision + 1 });
   await save.click();
   await expect(editorWindow(page).getByRole("alert")).toContainText("다른 탭이나 기기에서 조건식 목록이 바뀌어 덮어쓰지 않았습니다");
-  expect((await savedScreens(app))[0].name).toBe(SEEDED.name);
+  expect((await savedScreens(scenario))[0]!.name).toBe(SEEDED.name);
   await expect(nameField(page)).toHaveValue("로컬 수정");
   await save.click();
-  await expect.poll(async () => (await savedScreens(app))[0].name).toBe("로컬 수정");
+  await expect.poll(async () => (await savedScreens(scenario))[0]!.name).toBe("로컬 수정");
   await expect(editorWindow(page).getByRole("alert")).toHaveCount(0);
   await expect(editorWindow(page)).toBeVisible();
 });
 
-test("창 밖 차트 조작은 창을 닫으면서 그대로 실행되고, 넓게 보기는 창 대신 조건을 그 자리에 펼친다", async ({ app, page }) => {
-  await seed(app, page);
+test("창 밖 차트 조작은 창을 닫으면서 그대로 실행되고, 넓게 보기는 창 대신 조건을 그 자리에 펼친다", async ({ scenario, page }) => {
+  await seed(scenario, page);
   await editButton(page).click();
   await expect(editorWindow(page)).toBeVisible();
   await cell(page).getByRole("group", { name: "거래소" }).getByRole("button", { name: "KRX", exact: true }).click();
@@ -144,7 +142,7 @@ test("창 밖 차트 조작은 창을 닫으면서 그대로 실행되고, 넓�
   await expect(editorWindow(page)).toHaveCount(0);
 });
 
-test("저장한 조건식이 없을 때 새 조건식을 누르면 편집 창이 바로 열리고 조건을 넣어 저장한다", async ({ app, page }) => {
+test("저장한 조건식이 없을 때 새 조건식을 누르면 편집 창이 바로 열리고 조건을 넣어 저장한다", async ({ scenario, page }) => {
   await page.goto("/?symbol=005930");
   await openScreener(page);
   await panel(page).getByRole("button", { name: "새 조건식", exact: true }).click();
@@ -155,16 +153,15 @@ test("저장한 조건식이 없을 때 새 조건식을 누르면 편집 창이
   await page.getByRole("dialog", { name: "조건 추가", exact: true }).getByRole("textbox", { name: "조건 종류 검색" }).fill("신저가");
   await page.keyboard.press("Enter");
   await editorWindow(page).getByRole("button", { name: "저장", exact: true }).click();
-  await expect.poll(async () => await savedScreens(app)).toMatchObject([{ name: "새 조건식", conditions: [{ kind: "new_low" }] }]);
+  await expect.poll(async () => await savedScreens(scenario)).toMatchObject([{ name: "새 조건식", conditions: [{ kind: "new_low" }] }]);
   await expect(summary(page)).toContainText("신저가");
 });
 
 test.describe("자료가 있는 저장소", () => {
-  test.use({ krxMarket: "20261106", clockStart: "20261106203000" });
 
-  test("창을 연 채 창의 실행으로 결과를 받고 결과 행을 눌러 차트를 열어도 창이 남는다", async ({ app, page }, info) => {
-    const seeded = await fetch(`${app.url}/api/screens`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ screens: [{ ...SEEDED, markets: [] }], revision: 1 }) });
-    expect(seeded.status).toBe(200);
+
+  test("창을 연 채 창의 실행으로 결과를 받고 결과 행을 눌러 차트를 열어도 창이 남는다", async ({ scenario, page }, info) => {
+    scenario.documents.saveScreens({ screens: [{ ...SEEDED, markets: [] }], revision: 1 });
     await page.goto("/");
     await openScreener(page);
     await updateBand(page).getByRole("button", { name: "처음 받기" }).click();

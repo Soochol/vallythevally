@@ -1,9 +1,9 @@
-use axum::http::StatusCode;
-use axum::response::{IntoResponse, Response};
+use server::kiwoom::transport::HttpResponse;
+type Response = HttpResponse;
 use domain::KstDate;
 use serde_json::{Map, Value, json};
 
-use crate::krx::{KrxBar, KrxMarket, KrxStock};
+use super::krx::{KrxBar, KrxMarket, KrxStock};
 
 pub const PAGE_ROWS: usize = 100;
 pub const LISTED_SHARES_WHEN_UNKNOWN: u64 = 10_000_000;
@@ -90,7 +90,7 @@ pub(crate) fn answer(market: &KrxMarket, api_id: &str, body: &Value, next_key: O
         None => 0,
         Some(key) => match key.strip_prefix(code).and_then(|rest| rest.strip_prefix('-')).and_then(|n| n.parse::<usize>().ok()) {
             Some(n) if n >= 1 => n,
-            _ => return Some((StatusCode::INTERNAL_SERVER_ERROR, format!("가짜 키움이 모르는 next-key: {key}")).into_response()),
+            _ => return Some(unsupported(format!("unknown next-key: {key}"))),
         },
     };
     let start = (index * PAGE_ROWS).min(rows.len());
@@ -100,7 +100,7 @@ pub(crate) fn answer(market: &KrxMarket, api_id: &str, body: &Value, next_key: O
 }
 
 fn unsupported(why: String) -> Response {
-    (StatusCode::INTERNAL_SERVER_ERROR, why).into_response()
+    HttpResponse { status: 500, next_key: None, body: why }
 }
 
 fn page(list: &str, rows: Vec<Value>, next: Option<String>) -> Response {
@@ -108,7 +108,7 @@ fn page(list: &str, rows: Vec<Value>, next: Option<String>) -> Response {
     body[list] = Value::Array(rows);
     let last = next.is_none();
     body["_headers"] = json!({"cont-yn": if last { "N" } else { "Y" }, "next-key": next.unwrap_or_default()});
-    super::respond(body, last)
+    super::response(body, last)
 }
 
 fn signed(n: i64) -> String {

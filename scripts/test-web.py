@@ -8,14 +8,17 @@ from pathlib import Path
 import subprocess
 import os
 import tempfile
+import time
+import urllib.request
 import unittest
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 
 ROOT = Path(__file__).resolve().parent.parent
 SPEC = importlib.util.spec_from_file_location("web_checks", ROOT / "scripts/web.py")
 web = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(web)
+REAL_PROCESS = web.evidence.Process
 TOOLS = {"rustc": "same", "wasm-pack": "same"}
 
 
@@ -69,20 +72,12 @@ class WebWorkflowTest(unittest.TestCase):
         patch.object(web, "wasm_tools", return_value=TOOLS).start()
         patch.object(web.dev, "output", return_value=str(self.root / ".git")).start()
         patch.object(web, "run_wasm_pack", write_package).start()
+        self.static = MagicMock()
+        self.static.address.return_value = "http://127.0.0.1:54321"
+        patch.object(web.evidence, "Process", return_value=self.static).start()
 
     def commands(self, command):
-        def run(arguments, cwd, environment):
-            if "dev.py" in " ".join(arguments):
-                directory = self.root / "target/dev/bin"
-                directory.mkdir(parents=True, exist_ok=True)
-                for name in web.dev.BINARIES:
-                    path = directory / name
-                    path.write_text('#!/bin/sh\nprintf "server-A\\n"\n')
-                    path.chmod(0o755)
-                with web.evidence.Run(self.root, "dev-build", arguments, environment["VALLY_EVIDENCE_DIR"]) as record:
-                    record.artifact("server", directory, "direct", "fixture-build")
-            return command(arguments, cwd, environment)
-        return patch.object(web, "run", run)
+        return patch.object(web, "run", command)
 
     def build_count(self):
         path = self.root / "build-count"
@@ -172,6 +167,8 @@ class WebWorkflowTest(unittest.TestCase):
                 (directory / "index.html").write_text("new UI")
             if "playwright" in arguments[0]:
                 self.assert_compile_unlocked()
+                self.assertEqual(environment["VALLY_E2E_BASE_URL"], "http://127.0.0.1:54321")
+                self.assertEqual(environment["VALLY_E2E_PORT"], "0")
                 temporary = Path(environment["TMPDIR"])
                 self.assertEqual(temporary, temporary.resolve())
                 self.assertTrue(temporary.is_relative_to(self.root))
@@ -187,6 +184,28 @@ class WebWorkflowTest(unittest.TestCase):
         self.assertEqual(stale.read_text(), "old UI")
         self.assertEqual(self.build_count(), 1)
 
+    def test_parallel_static_hosts_use_distinct_ports_and_cleanup_owned_processes(self):
+        distribution = self.root / "dist"
+        distribution.mkdir()
+        (distribution / "index.html").write_text("current browser fixture")
+        environment = {**os.environ, "VALLY_E2E_STATIC_DIR": str(distribution), "VALLY_E2E_PORT": "0"}
+        with web.evidence.Run(self.root, "static-probe", ["test"]) as record:
+            hosts = []
+            try:
+                for index in range(2):
+                    host = REAL_PROCESS(["node", str(ROOT / "web/e2e/serve.mjs")], environment, record.directory / f"static-{index}.log", record)
+                    hosts.append(host)
+                addresses = [host.address(time.monotonic() + 10) for host in hosts]
+                self.assertNotEqual(*addresses)
+                for address in addresses:
+                    with urllib.request.urlopen(address, timeout=3) as response:
+                        self.assertEqual(response.read(), b"current browser fixture")
+            finally:
+                for host in hosts:
+                    host.stop()
+            self.assertTrue(all(host.child.poll() is not None for host in hosts))
+            self.assertTrue(all(entry["stop_reason"] == "owned_cleanup" for entry in record.data["processes"]))
+
     def test_frontend_build_failure_never_runs_playwright_on_stale_assets(self):
         called = []
         def command(arguments, cwd, environment):
@@ -197,6 +216,23 @@ class WebWorkflowTest(unittest.TestCase):
             web.run_e2e(self.root, [])
         self.assertFalse(any("playwright" in command for command in called))
 
+
+    def test_static_start_failure_stops_owned_host_and_never_runs_playwright(self):
+        commands = []
+        def command(arguments, cwd, environment):
+            commands.append(arguments[0])
+            if "vite" in arguments[0]:
+                directory = Path(arguments[arguments.index("--outDir") + 1])
+                directory.mkdir()
+                (directory / "index.html").write_text("new UI")
+        self.static.address.side_effect = TimeoutError("static host startup")
+        with self.commands(command), self.assertRaises(TimeoutError):
+            web.run_e2e(self.root, [])
+        self.static.stop.assert_called_once()
+        self.assertFalse(any("playwright" in command for command in commands))
+        manifest = self.latest_manifest()
+        self.assertEqual(manifest["steps"]["static"]["status"], "failed")
+        self.assertEqual(manifest["steps"]["playwright"]["status"], "not_run")
 
     def latest_manifest(self):
         path = next((self.root / "target/web-runs").glob("e2e-*/manifest.json"))
@@ -249,7 +285,7 @@ class WebWorkflowTest(unittest.TestCase):
             self.assertEqual(record.data["artifacts"]["wasm"]["execution"], "reused")
             self.assertTrue(record.data["artifacts"]["wasm"]["sha256"])
 
-    def test_source_edit_after_server_fails_before_browser(self):
+    def test_source_edit_during_preparation_fails_before_browser(self):
         source = self.root / "crates/engine/src/lib.rs"
         original = source.read_text()
         def fingerprint(root):
@@ -266,27 +302,24 @@ class WebWorkflowTest(unittest.TestCase):
         self.assertEqual(manifest["steps"]["playwright"]["status"], "not_run")
         self.assertFalse(any("playwright" in call for call in called))
 
-    def test_shared_binary_replacement_runs_verified_private_copy(self):
-        executed = []
+    def test_frontend_e2e_never_prepares_native_binaries_or_database(self):
         def command(arguments, cwd, environment):
+            self.assertFalse(any("dev.py" in arg or arg in ("cargo", "rustc") for arg in arguments))
+            self.assertNotIn("VALLY_E2E_BIN_DIR", environment)
             if "vite" in arguments[0]:
                 directory = Path(arguments[arguments.index("--outDir") + 1])
                 directory.mkdir()
                 (directory / "index.html").write_text("new UI")
-                (self.root / "target/dev/bin/vally-server").write_text('#!/bin/sh\nprintf "server-B\\n"\n')
-            if "playwright" in arguments[0]:
-                binary = Path(environment["VALLY_E2E_BIN_DIR"]) / "vally-server"
-                executed.append((binary, subprocess.check_output([str(binary)], text=True).strip()))
-        with self.commands(command):
+        with self.commands(command), patch.object(web, "prepare_dart", side_effect=AssertionError("native preparation")):
             web.run_e2e(self.root, [])
-        self.assertEqual([value for _, value in executed], ["server-A"])
         manifest = self.latest_manifest()
         self.assertEqual(manifest["status"], "passed")
-        self.assertEqual(manifest["artifacts"]["server"]["sha256"]["vally-server"], web.dev.digest(executed[0][0]))
-        self.assertNotEqual(executed[0][0].parent, self.root / "target/dev/bin")
+        self.assertNotIn("server", manifest["steps"])
+        self.assertNotIn("server", manifest["artifacts"])
+        self.assertFalse((self.root / "target/dev").exists())
 
-    def test_private_binary_wasm_and_ui_replacement_fail_current_run(self):
-        for name in ("server", "wasm", "ui"):
+    def test_wasm_and_ui_replacement_fail_current_run(self):
+        for name in ("wasm", "ui"):
             with self.subTest(name=name):
                 def command(arguments, cwd, environment):
                     if "vite" in arguments[0]:

@@ -20,7 +20,7 @@ import urllib.request
 import evidence
 
 
-BINARIES = ("vally-server", "fake-kiwoom")
+BINARIES = ("vally-server", "dart-smoke")
 BUILD_ENV_PREFIXES = ("CARGO_", "RUST", "CC", "CXX", "AR", "CFLAGS", "CPPFLAGS", "LDFLAGS", "SDKROOT", "MACOSX_")
 LOCAL_BUILD_ENV = {"CARGO_TARGET_DIR", "CARGO_BUILD_JOBS", "CCACHE_DIR", "CCACHE_BASEDIR"}
 
@@ -235,7 +235,7 @@ def needs_duckdb(command):
             packages.append(head[index + 1])
         elif arg.startswith("--package="):
             packages.append(arg.removeprefix("--package="))
-    return "--workspace" in head or not packages or any(name not in ("fake-kiwoom", "domain", "indicators", "indicators-wasm") for name in packages)
+    return "--workspace" in head or not packages or any(name not in ("domain", "indicators", "indicators-wasm") for name in packages)
 
 
 def compile_command(root, command, environment):
@@ -309,7 +309,7 @@ def main():
     build = subparsers.add_parser("build", help="개발 서버를 준비하고 동일 입력의 실행 파일 재사용")
     status = subparsers.add_parser("status", help="다운로드·컴파일 없이 캐시 상태 출력")
     for command in (build, status):
-        command.add_argument("--with-fake", action="store_true", help="E2E용 가짜 키움도 함께 준비")
+        command.add_argument("--bin", choices=BINARIES, default="vally-server", help="준비할 실행 파일 (기본 vally-server)")
     cargo = subparsers.add_parser("cargo", help="개발용 DuckDB와 공통 잠금으로 Cargo 검사·시험")
     cargo.add_argument("arguments", nargs=argparse.REMAINDER)
     args = parser.parse_args()
@@ -326,14 +326,14 @@ def execute(root, args):
     tools = toolchain(root)
     pin = load_pin(root)
     cache = cache_root(root)
-    binaries = BINARIES if getattr(args, "with_fake", False) else BINARIES[:1]
+    binaries = (getattr(args, "bin", "vally-server"),)
     current_key = lambda: fingerprint(root, tools, args.bundled, os.environ, binaries)
     key = current_key()
     if args.action == "status":
         artifact = pin["artifacts"].get(tools["host"])
         print(json.dumps({"key": key, "cache": str(cache), "binaries": valid_binaries(cache / "binaries" / key, key, binaries), "duckdb": bool(artifact and valid_library(library_entry(cache, artifact), artifact))}, indent=2))
         return
-    build_args = ["build", "-p", "server", *(["-p", "fake-kiwoom"] if args.with_fake else [])] if args.action == "build" else args.arguments
+    build_args = ["build", "-p", "server", "--bin", args.bin] if args.action == "build" else args.arguments
     command = cargo_command(build_args, args.bundled)
     library = prepare_duckdb(cache, pin, tools["host"]) if not args.bundled and needs_duckdb(command) else None
     environment = build_environment(root, cache, library)

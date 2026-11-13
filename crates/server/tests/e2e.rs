@@ -1,10 +1,9 @@
-//! 바이너리를 가짜 키움에 붙여 처음부터 끝까지 돌린다.
 
 mod common;
 
 use std::time::Duration;
 
-use common::{APP_KEY, APP_SECRET, FakeKiwoom, Server, TOKEN};
+use common::{APP_KEY, APP_SECRET, ScriptedTransport, Server, TOKEN};
 use serde_json::Value;
 
 fn static_dir(root: &std::path::Path) -> std::path::PathBuf {
@@ -21,9 +20,9 @@ async fn get(client: &reqwest::Client, base: &str, path: &str) -> (u16, Value) {
     (status, serde_json::from_str(&text).unwrap_or(Value::String(text)))
 }
 
-#[tokio::test(flavor = "multi_thread")]
-async fn serves_symbols_and_bars_from_fake_kiwoom_and_never_logs_secrets() {
-    let fake = FakeKiwoom::start().await;
+#[tokio::test]
+async fn serves_symbols_and_bars_from_injected_transport_and_never_logs_secrets() {
+    let fake = ScriptedTransport::new();
     let tmp = tempfile::tempdir().unwrap();
     let server = Server::spawn(&fake, &tmp.path().join("run/server.lock"), &static_dir(tmp.path()));
     let base = format!("http://{}", server.addr().await);
@@ -106,9 +105,9 @@ async fn put(client: &reqwest::Client, base: &str, path: &str, body: &Value) -> 
     (status, serde_json::from_str(&resp.text().await.unwrap()).unwrap())
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn user_data_survives_a_restart_and_quotes_come_from_kiwoom() {
-    let fake = FakeKiwoom::start().await;
+    let fake = ScriptedTransport::new();
     let tmp = tempfile::tempdir().unwrap();
     let lock = tmp.path().join("run/server.lock");
     let dist = static_dir(tmp.path());
@@ -161,22 +160,28 @@ async fn user_data_survives_a_restart_and_quotes_come_from_kiwoom() {
     }
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn second_instance_exits_1_without_touching_kiwoom() {
-    let first_kiwoom = FakeKiwoom::start().await;
-    let second_kiwoom = FakeKiwoom::start().await;
+    let first_kiwoom = ScriptedTransport::new();
+    let second_kiwoom = ScriptedTransport::new();
     let tmp = tempfile::tempdir().unwrap();
     let lock = tmp.path().join("run/server.lock");
     let dist = static_dir(tmp.path());
     let first = Server::spawn(&first_kiwoom, &lock, &dist);
     first.addr().await;
 
-    let mut second = Server::spawn(&second_kiwoom, &lock, &dist);
-    let status = tokio::time::timeout(Duration::from_secs(10), second.child.wait()).await.expect("두 번째 서버가 끝나지 않았다").unwrap();
-    assert_eq!(status.code(), Some(1));
-    tokio::time::sleep(Duration::from_millis(100)).await;
-    let logs = second.logs();
-    let pid = first.child.id().unwrap();
+    let output = tokio::process::Command::new(env!("CARGO_BIN_EXE_vally-server"))
+        .env_clear()
+        .env("VALLY_KIWOOM_APP_KEY", APP_KEY)
+        .env("VALLY_KIWOOM_APP_SECRET", APP_SECRET)
+        .env("VALLY_KIWOOM_BASE_URL", "http://127.0.0.1:9")
+        .env("VALLY_KIWOOM_WS_URL", "ws://127.0.0.1:9/api/dostk/websocket")
+        .env("VALLY_TOKEN_PATH", lock.with_file_name("token.json"))
+        .env("VALLY_LOCK_PATH", &lock)
+        .output().await.unwrap();
+    assert_eq!(output.status.code(), Some(1));
+    let logs = String::from_utf8(output.stderr).unwrap();
+    let pid = std::process::id();
     assert!(logs.contains(&format!("다른 서버가 이미 실행 중이다(pid {pid}")), "{logs}");
     assert_eq!(second_kiwoom.requests(), 0, "두 번째 서버는 키움에 아무것도 보내지 않는다");
     assert!(first_kiwoom.requests() >= 1);
@@ -185,7 +190,7 @@ async fn second_instance_exits_1_without_touching_kiwoom() {
 
 /// 실제 8050 응답의 HTTP 상태를 아직 재지 못해 200과 403 두 모양을 다 본다.
 async fn designated_terminal_stops_after_one_token_attempt(http_status: u16) {
-    let fake = FakeKiwoom::start().await;
+    let fake = ScriptedTransport::new();
     fake.respond_with("au10001", http_status, serde_json::json!({"return_code": 3, "return_msg": "인증에 실패했습니다[8050:지정단말기 인증에 실패했습니다]"}));
     let tmp = tempfile::tempdir().unwrap();
     let server = Server::spawn(&fake, &tmp.path().join("run/server.lock"), &static_dir(tmp.path()));
@@ -209,19 +214,30 @@ async fn designated_terminal_stops_after_one_token_attempt(http_status: u16) {
     assert!(!logs.contains("10초 뒤 다시 받습니다"), "멈춘 뒤에는 종목 목록을 다시 받지 않는다:\n{logs}");
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn designated_terminal_8050_with_http_200_halts_everything() {
     designated_terminal_stops_after_one_token_attempt(200).await;
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn designated_terminal_8050_with_http_403_halts_everything() {
     designated_terminal_stops_after_one_token_attempt(403).await;
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn scrolling_back_through_086520_daily_follows_the_kiwoom_chain_to_its_origin() {
-    let fake = FakeKiwoom::start().await;
+    let fake = ScriptedTransport::new();
+    let days: Vec<_> = std::iter::successors(Some(domain::KstDate::new(2026, 11, 6).unwrap()), |day| Some(day.add_days(-1)))
+        .filter(|day| !matches!(day.weekday(), domain::Weekday::Sat | domain::Weekday::Sun)).take(1200).collect();
+    let pages = days.chunks(300).enumerate().map(|(index, days)| {
+        let rows: Vec<_> = days.iter().enumerate().map(|(offset, day)| {
+            let close = 100_000 + ((index * 300 + offset) * 37 % 97) * 500;
+            serde_json::json!({"dt":day.yyyymmdd(),"cur_prc":close.to_string(),"open_pric":close.to_string(),"high_pric":(close+2000).to_string(),"low_pric":(close-2000).to_string(),"trde_qty":"500000","trde_prica":"50000","upd_rt":""})
+        }).collect();
+        common::support::ScriptedReply { status:200, delay:Duration::ZERO, body:serde_json::json!({"return_code":0,"stk_cd":"086520_AL","stk_dt_pole_chart_qry":rows,"_headers":{"cont-yn":if index==3 { "N" } else { "Y" },"next-key":if index==3 { String::new() } else { format!("P{}",index+2) }}}) }
+    }).collect();
+    fake.script("ka10081", pages);
+
     let tmp = tempfile::tempdir().unwrap();
     let server = Server::spawn(&fake, &tmp.path().join("run/server.lock"), &static_dir(tmp.path()));
     let base = format!("http://{}", server.addr().await);
@@ -279,9 +295,9 @@ fn ten_minute_starts(page: &Value) -> Vec<i64> {
     ts
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn ten_minute_bars_follow_each_venue_and_a_saved_layout_keeps_them() {
-    let fake = FakeKiwoom::start().await;
+    let fake = ScriptedTransport::new();
     let tmp = tempfile::tempdir().unwrap();
     let lock = tmp.path().join("run/server.lock");
     let dist = static_dir(tmp.path());
@@ -333,9 +349,9 @@ async fn ten_minute_bars_follow_each_venue_and_a_saved_layout_keeps_them() {
     server.stop().await;
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn a_ten_minute_failure_at_the_first_page_or_a_later_page_stops_only_that_request() {
-    let fake = FakeKiwoom::start().await;
+    let fake = ScriptedTransport::new();
     let invalid = serde_json::json!({"return_code": 2, "return_msg": "입력 값 오류입니다[1511:필수 입력 값에 값이 존재하지 않습니다]"});
     fake.respond_with("ka20005", 200, invalid.clone());
     fake.respond_with_for_key("ka10080", "A0059302026110216180000010000", 200, invalid);

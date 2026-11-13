@@ -12,20 +12,19 @@ python3 scripts/dev.py build
 
 로컬 시험은 `unshare` 없이 아래 개발 명령으로 실행한다. `scripts/check.sh`는 로컬 시험에 사용하지 않는다.
 
-E2E 전체 준비와 실행은 [웹 검사와 E2E 도구](web-checks.md)를 사용한다. 서버만 미리 준비하려면 다음 명령으로 가짜 키움도 포함한다.
+E2E는 네이티브 서버 없이 [웹 검사와 E2E 도구](web-checks.md)로 실행한다. 실제 DART를 명시적으로 확인하는 진단만 별도의 재무 서비스 실행 파일을 사용한다.
 
 ```sh
-python3 scripts/dev.py build --with-fake
+python3 scripts/dev.py build --bin dart-smoke
 ```
 
-가짜 키움의 JSON 시험 자료는 실행 파일에 포함한다. 빌드한 worktree를 제거해도 캐시에서 복원한 실행 파일이 그 경로를 읽지 않는다. SQLite·DuckDB 데이터 파일, 로그와 웹 빌드는 각 worktree에서 따로 준비한다.
+SQLite·DuckDB 데이터 파일과 로그는 각 서버 시험의 임시 경로에 둔다. 서비스 시험은 실제 저장소와 애플리케이션에 합성 transport를 주입한다. 시험 책임은 [이동 기록](testing-migration.md)을 따른다.
 
 Rust 검사는 같은 개발용 DuckDB를 사용한다.
 
 ```sh
 python3 scripts/dev.py cargo clippy -p server --all-targets -- -D warnings
 python3 scripts/dev.py cargo test -p server
-python3 scripts/dev.py cargo test -p fake-kiwoom
 python3 scripts/test-dev.py
 ```
 
@@ -56,7 +55,7 @@ cargo test --locked -p server --test contract
 flock "$(git rev-parse --path-format=absolute --git-common-dir)/compile.lock" env CARGO_BUILD_JOBS=4 cargo build --locked --release -p server
 ```
 
-DuckDB는 release 바이너리에 포함되므로 개발 캐시나 별도 `libduckdb.so`를 배포할 필요가 없다. 실제 배포 직전에 release 바이너리의 가짜 키움 환경 기동·주요 동작을 검증한다.
+DuckDB는 release 바이너리에 포함되므로 개발 캐시나 별도 `libduckdb.so`를 배포할 필요가 없다. 실제 배포 직전에 release 빌드를 검증한다. 키움 프로토콜·서비스 동작은 합성 transport와 loopback 어댑터 시험으로 확인하며 실제 키움 인증을 배포 시험에 사용하지 않는다.
 
 ## 공유 범위와 무효화
 
@@ -64,10 +63,10 @@ DuckDB는 release 바이너리에 포함되므로 개발 캐시나 별도 `libdu
 
 ```sh
 python3 scripts/dev.py status
-python3 scripts/dev.py status --with-fake
+python3 scripts/dev.py status --bin dart-smoke
 ```
 
-실행 파일 캐시 키는 workspace의 `crates/` 소스·시험 자료, `Cargo.toml`, `Cargo.lock`, `.cargo/` 및 상위·사용자 Cargo 설정, 개발 도구·DuckDB 고정값, Rust·Cargo·C/C++ 도구 체인과 빌드 환경을 포함한다. 각 크레이트의 `target` 안에 생긴 SQLx 시험 DB 등 빌드 출력, UI 파일과 Git 커밋 ID는 포함하지 않는다. 같은 소스가 다른 커밋·worktree에 있어도 재사용한다. 앱 서버 단독 준비와 가짜 키움을 포함한 준비는 별도 키다. 테스트 실행 파일은 worktree 사이에서 공유하지 않는다.
+실행 파일 캐시 키는 workspace의 `crates/` 소스·시험 자료, `Cargo.toml`, `Cargo.lock`, `.cargo/` 및 상위·사용자 Cargo 설정, 개발 도구·DuckDB 고정값, Rust·Cargo·C/C++ 도구 체인과 빌드 환경을 포함한다. 각 크레이트의 `target` 안에 생긴 SQLx 시험 DB 등 빌드 출력, UI 파일과 Git 커밋 ID는 포함하지 않는다. 같은 소스가 다른 커밋·worktree에 있어도 재사용한다. 요청한 실행 파일(`vally-server` 또는 `dart-smoke`)마다 키를 구분한다. 테스트 실행 파일은 worktree 사이에서 공유하지 않는다.
 
 도구가 정하는 `CARGO_TARGET_DIR`, 작업 수와 C/C++ 캐시 경로는 키에서 제외한다. 개발 명령은 각 worktree의 `target`과 작업 수 4를 사용한다. `CARGO_BUILD_TARGET`, Cargo 설정의 `build.target` 등 출력 경로를 바꾸는 사용자 target 설정은 실행 파일을 복원하기 전에 거절한다. 사용자 target 빌드는 일반 Cargo 명령을 사용한다.
 
@@ -95,6 +94,6 @@ python3 scripts/dev.py cargo test -p server financials::client::tls_tests
 
 `build`와 `cargo`는 `target/dev-runs/<종류>-<고유값>/manifest.json`에 HEAD·dirty source 지문, 명령·종료 코드·시간·정제된 로그와 실제 실행 파일의 SHA-256을 기록한다. 빌드는 `direct`, 체크섬과 기존 키를 검증한 캐시 복원은 `reused`다. 준비 실패도 manifest를 남기며 이전 실행 파일을 이번 실행의 성공 산출물로 기록하지 않는다. `status`는 읽기 전용 조회다. 웹 도구가 서버를 준비하면 해당 웹 실행의 `server-build/manifest.json`으로 연결한다. 환경 전체와 키·인증 URL은 수집하지 않는다. [Chromium 진단·실원천 smoke·실행 근거](web-checks.md)를 함께 확인한다.
 
-실행 시작과 종료의 source나 기록한 산출물 실물이 다르면 실패로 기록한다. SIGTERM·SIGINT 처리 범위와 명령별 자식 종료 코드 구분은 [실행 근거 확인](web-checks.md#실행-근거-확인)을 따른다. E2E와 실제 DART smoke는 공유 `target/dev/bin`을 직접 실행하지 않고 검증한 실행별 사본을 사용한다.
+실행 시작과 종료의 source나 기록한 산출물 실물이 다르면 실패로 기록한다. SIGTERM·SIGINT 처리 범위와 명령별 자식 종료 코드 구분은 [실행 근거 확인](web-checks.md#실행-근거-확인)을 따른다. 실제 DART smoke는 공유 `target/dev/bin`을 직접 실행하지 않고 검증한 실행별 사본을 사용한다. E2E에는 네이티브 실행 파일이 없다.
 
-서버 artifact의 `files`는 요청한 실행 파일만 기록한다. 서버 단독은 `vally-server`, `--with-fake`는 `fake-kiwoom`도 포함한다. 동적 `libduckdb.so`는 별도 DuckDB artifact다. 이후 정상적인 라이브러리 설치를 서버 파일 변경으로 세지 않으며, 기록한 실행 파일과 라이브러리의 바이트 변경은 계속 거절한다. 웹 실행별 사본도 이 파일 목록을 유지한다.
+서버 artifact의 `files`는 요청한 실행 파일만 기록한다. 기본값은 `vally-server`, `--bin dart-smoke`는 `dart-smoke`다. 동적 `libduckdb.so`는 별도 DuckDB artifact다. 이후 정상적인 라이브러리 설치를 서버 파일 변경으로 세지 않으며, 기록한 실행 파일과 라이브러리의 바이트 변경은 계속 거절한다. 웹 실행별 사본도 이 파일 목록을 유지한다.

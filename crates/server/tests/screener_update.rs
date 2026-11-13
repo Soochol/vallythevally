@@ -6,10 +6,10 @@ use std::os::unix::fs::DirBuilderExt;
 use std::path::Path;
 use std::time::Duration;
 
-use common::{FakeKiwoom, Server};
+use common::{ScriptedTransport, Server};
 use domain::KstDate;
-use fake_kiwoom::krx::{self, DailyAnswer, KrxMarket, KrxStock, PAGE_ROWS};
-use fake_kiwoom::{Call, fixture};
+use common::support::krx::{self, DailyAnswer, KrxMarket, KrxStock, PAGE_ROWS};
+use common::support::{Call, fixture};
 use serde_json::{Value, json};
 
 fn day(y: i32, m: u8, d: u8) -> KstDate {
@@ -94,7 +94,7 @@ async fn reply(resp: reqwest::Response) -> Value {
     body
 }
 
-async fn boot(fake: &FakeKiwoom, dir: &Path, clock_start: &str) -> (Server, Api) {
+async fn boot(fake: &ScriptedTransport, dir: &Path, clock_start: &str) -> (Server, Api) {
     let server = Server::spawn_with(fake, &dir.join("run/server.lock"), dir, &[("VALLY_CLOCK_START", OsStr::new(clock_start))]);
     let api = Api::of(&server).await;
     (server, api)
@@ -124,7 +124,7 @@ fn first_pages(codes: &[&str]) -> BTreeMap<String, Vec<Option<String>>> {
     codes.iter().map(|c| (c.to_string(), vec![None])).collect()
 }
 
-async fn update_once(fake: &FakeKiwoom, dir: &Path, market: &KrxMarket, clock_start: &str, full: bool) -> (Value, Vec<Call>) {
+async fn update_once(fake: &ScriptedTransport, dir: &Path, market: &KrxMarket, clock_start: &str, full: bool) -> (Value, Vec<Call>) {
     fake.set_krx_market(market.clone());
     let seen = fake.calls().len();
     let (server, api) = boot(fake, dir, clock_start).await;
@@ -146,9 +146,9 @@ fn first_load(market: &KrxMarket) -> BTreeMap<String, Vec<Option<String>>> {
         .collect()
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn first_load_fills_every_recent_page_then_follows_each_history_to_cont_yn_n() {
-    let fake = FakeKiwoom::start().await;
+    let fake = ScriptedTransport::new();
     let today = day(2026, 11, 6);
     let market = KrxMarket::sample(today);
     fake.set_krx_market(market.clone());
@@ -174,9 +174,9 @@ async fn first_load_fills_every_recent_page_then_follows_each_history_to_cont_yn
     server.stop().await;
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn one_missing_day_is_appended_from_a_single_ka10095_call() {
-    let fake = FakeKiwoom::start().await;
+    let fake = ScriptedTransport::new();
     let tmp = tempfile::tempdir().unwrap();
     let (yesterday, today) = (day(2026, 11, 4), day(2026, 11, 5));
     update_once(&fake, tmp.path(), &KrxMarket::sample(yesterday), &at(yesterday, "2030"), false).await;
@@ -190,9 +190,9 @@ async fn one_missing_day_is_appended_from_a_single_ka10095_call() {
     assert_eq!(count(&calls, "ka10081"), 0, "하루치는 일봉을 받지 않는다");
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn two_or_more_missing_days_take_one_daily_page_that_agrees_with_the_ka10095_day() {
-    let fake = FakeKiwoom::start().await;
+    let fake = ScriptedTransport::new();
     let tmp = tempfile::tempdir().unwrap();
     update_once(&fake, tmp.path(), &KrxMarket::sample(day(2026, 11, 3)), &at(day(2026, 11, 3), "2030"), false).await;
     let (_, appended) = update_once(&fake, tmp.path(), &KrxMarket::sample(day(2026, 11, 4)), &at(day(2026, 11, 4), "2030"), false).await;
@@ -210,9 +210,9 @@ async fn two_or_more_missing_days_take_one_daily_page_that_agrees_with_the_ka100
     );
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn a_stock_ka10095_skips_or_dates_before_the_target_day_is_unconfirmed_without_asking_for_its_daily_bars() {
-    let fake = FakeKiwoom::start().await;
+    let fake = ScriptedTransport::new();
     let tmp = tempfile::tempdir().unwrap();
     let (yesterday, today) = (day(2026, 11, 4), day(2026, 11, 5));
     update_once(&fake, tmp.path(), &KrxMarket::sample(yesterday), &at(yesterday, "2030"), false).await;
@@ -242,9 +242,9 @@ async fn a_stock_ka10095_skips_or_dates_before_the_target_day_is_unconfirmed_wit
     server.stop().await;
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn a_split_seen_in_the_overlapping_daily_bars_refetches_that_whole_history() {
-    let fake = FakeKiwoom::start().await;
+    let fake = ScriptedTransport::new();
     let tmp = tempfile::tempdir().unwrap();
     update_once(&fake, tmp.path(), &KrxMarket::sample(day(2026, 11, 6)), &at(day(2026, 11, 6), "2030"), false).await;
 
@@ -260,9 +260,9 @@ async fn a_split_seen_in_the_overlapping_daily_bars_refetches_that_whole_history
     assert_eq!(daily_chains(&calls), first_pages(&later.codes().iter().map(String::as_str).collect::<Vec<_>>()), "다시 받은 이력이 키움의 수정주가와 같다");
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn a_base_price_more_than_30_percent_off_the_stored_close_refetches_that_whole_history() {
-    let fake = FakeKiwoom::start().await;
+    let fake = ScriptedTransport::new();
     let tmp = tempfile::tempdir().unwrap();
     let before = day(2026, 11, 9);
     update_once(&fake, tmp.path(), &KrxMarket::sample(before), &at(before, "2030"), false).await;
@@ -278,9 +278,9 @@ async fn a_base_price_more_than_30_percent_off_the_stored_close_refetches_that_w
     assert_eq!(daily_chains(&calls), first_pages(&later.codes().iter().map(String::as_str).collect::<Vec<_>>()), "다시 받은 이력이 키움의 수정주가와 같다");
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn cancelling_keeps_what_was_stored_and_the_next_update_fetches_only_the_rest() {
-    let fake = FakeKiwoom::start().await;
+    let fake = ScriptedTransport::new();
     let today = day(2026, 11, 6);
     let market = KrxMarket::sample(today);
     fake.set_krx_market(market.clone());
@@ -316,9 +316,9 @@ async fn cancelling_keeps_what_was_stored_and_the_next_update_fetches_only_the_r
     server.stop().await;
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn a_history_cut_off_midway_is_fetched_again_from_its_first_page_and_only_that_one() {
-    let fake = FakeKiwoom::start().await;
+    let fake = ScriptedTransport::new();
     let today = day(2026, 11, 6);
     let market = KrxMarket::sample(today);
     fake.set_krx_market(market.clone());
@@ -360,9 +360,9 @@ async fn a_history_cut_off_midway_is_fetched_again_from_its_first_page_and_only_
     server.stop().await;
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn a_store_left_by_a_schema_version_with_no_upgrade_path_starts_empty() {
-    let fake = FakeKiwoom::start().await;
+    let fake = ScriptedTransport::new();
     let today = day(2026, 11, 6);
     let market = KrxMarket::sample(today);
     for version in [3, 7] {
@@ -417,9 +417,9 @@ fn stored_listing(dir: &Path) -> (i32, Vec<(String, String, Option<u64>)>) {
     (version, listed)
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn a_schema_4_store_keeps_its_daily_bars_and_history_and_is_listed_with_shares_and_markets_by_the_first_start_that_gets_the_stock_list() {
-    let fake = FakeKiwoom::start().await;
+    let fake = ScriptedTransport::new();
     let today = day(2026, 11, 6);
     let market = KrxMarket::sample(today);
     let screens = screens_across_the_upgrade();
@@ -489,9 +489,9 @@ async fn a_schema_4_store_keeps_its_daily_bars_and_history_and_is_listed_with_sh
     assert_eq!(stored_listing(upgraded.path()), (6, kept), "listed에 상장주식수와 시장이 찬다. 상장주식수가 없는 종목은 비워 둔다");
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn status_shows_each_phase_with_progress_and_the_kiwoom_error_that_stopped_the_update() {
-    let fake = FakeKiwoom::start().await;
+    let fake = ScriptedTransport::new();
     let today = day(2026, 11, 6);
     fake.set_krx_market(KrxMarket::sample(today));
     let tmp = tempfile::tempdir().unwrap();
@@ -536,9 +536,9 @@ async fn status_shows_each_phase_with_progress_and_the_kiwoom_error_that_stopped
     server.stop().await;
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn before_20_00_the_update_stops_at_the_last_day_before_today() {
-    let fake = FakeKiwoom::start().await;
+    let fake = ScriptedTransport::new();
     let tmp = tempfile::tempdir().unwrap();
     let today = day(2026, 11, 6);
     let market = KrxMarket::sample(today);
@@ -561,9 +561,9 @@ async fn before_20_00_the_update_stops_at_the_last_day_before_today() {
     server.stop().await;
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn starting_while_an_update_runs_returns_its_status_without_starting_another() {
-    let fake = FakeKiwoom::start().await;
+    let fake = ScriptedTransport::new();
     let today = day(2026, 11, 6);
     let market = KrxMarket::sample(today);
     fake.set_krx_market(market.clone());
@@ -579,9 +579,9 @@ async fn starting_while_an_update_runs_returns_its_status_without_starting_anoth
     server.stop().await;
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn a_full_update_fetches_every_history_again_and_a_plain_one_after_it_fetches_nothing() {
-    let fake = FakeKiwoom::start().await;
+    let fake = ScriptedTransport::new();
     let tmp = tempfile::tempdir().unwrap();
     let today = day(2026, 11, 6);
     let market = KrxMarket::sample(today);
@@ -596,9 +596,9 @@ async fn a_full_update_fetches_every_history_again_and_a_plain_one_after_it_fetc
     assert_eq!(count(&calls, "ka10081") + count(&calls, "ka10095"), 0, "다 받은 저장소에서는 받을 것이 없다");
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn a_cancelled_full_update_is_resumed_by_the_next_plain_update() {
-    let fake = FakeKiwoom::start().await;
+    let fake = ScriptedTransport::new();
     let tmp = tempfile::tempdir().unwrap();
     let today = day(2026, 11, 6);
     let market = KrxMarket::sample(today);
@@ -632,9 +632,9 @@ async fn a_cancelled_full_update_is_resumed_by_the_next_plain_update() {
     server.stop().await;
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn a_traded_value_that_differs_on_an_overlapping_day_refetches_that_whole_history() {
-    let fake = FakeKiwoom::start().await;
+    let fake = ScriptedTransport::new();
     let tmp = tempfile::tempdir().unwrap();
     update_once(&fake, tmp.path(), &KrxMarket::sample(day(2026, 11, 4)), &at(day(2026, 11, 4), "2030"), false).await;
 
@@ -648,9 +648,9 @@ async fn a_traded_value_that_differs_on_an_overlapping_day_refetches_that_whole_
     assert_eq!(daily_chains(&calls), want, "저장한 거래대금과 키움의 거래대금이 다른 종목만 전체를 다시 받는다");
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn cancelling_after_a_failed_update_keeps_its_error_until_the_next_start() {
-    let fake = FakeKiwoom::start().await;
+    let fake = ScriptedTransport::new();
     let today = day(2026, 11, 6);
     fake.set_krx_market(KrxMarket::sample(today));
     let tmp = tempfile::tempdir().unwrap();
@@ -669,9 +669,9 @@ async fn cancelling_after_a_failed_update_keeps_its_error_until_the_next_start()
     server.stop().await;
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn the_update_asks_for_the_kospi_calendar_behind_chart_requests_that_came_later() {
-    let fake = FakeKiwoom::start().await;
+    let fake = ScriptedTransport::new();
     let today = day(2026, 11, 6);
     let market = KrxMarket::sample(today);
     fake.set_krx_market(market.clone());
@@ -715,9 +715,9 @@ async fn the_update_asks_for_the_kospi_calendar_behind_chart_requests_that_came_
     server.stop().await;
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn a_listed_stock_kiwoom_gives_no_daily_bars_is_left_unconfirmed_and_filled_by_the_update_after_kiwoom_gives_them() {
-    let fake = FakeKiwoom::start().await;
+    let fake = ScriptedTransport::new();
     let tmp = tempfile::tempdir().unwrap();
     let today = day(2026, 11, 6);
     let market = KrxMarket::sample(today).with_daily_withheld();
@@ -756,9 +756,9 @@ async fn a_listed_stock_kiwoom_gives_no_daily_bars_is_left_unconfirmed_and_fille
     server.stop().await;
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn a_stored_stock_answered_with_an_empty_daily_row_or_an_unknown_code_stays_unconfirmed_until_kiwoom_answers_again() {
-    let fake = FakeKiwoom::start().await;
+    let fake = ScriptedTransport::new();
     let tmp = tempfile::tempdir().unwrap();
     let stored_through = day(2026, 11, 4);
     update_once(&fake, tmp.path(), &KrxMarket::sample(stored_through), &at(stored_through, "2030"), false).await;
@@ -776,9 +776,9 @@ async fn a_stored_stock_answered_with_an_empty_daily_row_or_an_unknown_code_stay
     assert_eq!(daily_chains(&calls), first_pages(&[krx::COMMON, krx::REIT]), "두 종목은 1페이지를 다시 받고, 겹친 봉이 같아 전체를 다시 받지 않는다");
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn a_full_update_again_refetches_every_confirmed_history_while_a_stock_stays_unconfirmed() {
-    let fake = FakeKiwoom::start().await;
+    let fake = ScriptedTransport::new();
     let tmp = tempfile::tempdir().unwrap();
     let today = day(2026, 11, 6);
     let market = KrxMarket::sample(today).with_daily_withheld();
@@ -803,9 +803,9 @@ fn listed_from(market: &KrxMarket, code: &str, reg_day: KstDate) -> KrxStock {
     stock
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn a_stock_listed_after_the_target_day_is_skipped_without_asking_kiwoom() {
-    let fake = FakeKiwoom::start().await;
+    let fake = ScriptedTransport::new();
     let tmp = tempfile::tempdir().unwrap();
     let (today, listing_day, upcoming) = (day(2026, 11, 6), day(2026, 11, 9), "110100");
     let mut market = KrxMarket::sample(today);
@@ -821,9 +821,9 @@ async fn a_stock_listed_after_the_target_day_is_skipped_without_asking_kiwoom() 
     assert_eq!(daily_chains(&calls).get(upcoming), Some(&vec![None]), "상장일에는 1페이지를 받는다");
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn the_server_starts_an_update_when_its_store_is_behind_the_target_day_and_not_when_it_is_up_to_date() {
-    let fake = FakeKiwoom::start().await;
+    let fake = ScriptedTransport::new();
     let tmp = tempfile::tempdir().unwrap();
     let (yesterday, today) = (day(2026, 11, 5), day(2026, 11, 6));
     update_once(&fake, tmp.path(), &KrxMarket::sample(yesterday).with_daily_withheld(), &at(yesterday, "2030"), false).await;
@@ -860,9 +860,9 @@ async fn the_server_starts_an_update_when_its_store_is_behind_the_target_day_and
     server.stop().await;
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn an_update_lists_the_stocks_the_server_got_at_start_or_at_07_45_without_asking_kiwoom_again() {
-    let fake = FakeKiwoom::start().await;
+    let fake = ScriptedTransport::new();
     let tmp = tempfile::tempdir().unwrap();
     let friday = day(2026, 11, 6);
     let market = KrxMarket::sample(friday);
@@ -902,9 +902,9 @@ async fn an_update_lists_the_stocks_the_server_got_at_start_or_at_07_45_without_
     server.stop().await;
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn a_new_full_update_refetches_every_confirmed_history_even_after_kiwoom_kept_withholding_one_history() {
-    let fake = FakeKiwoom::start().await;
+    let fake = ScriptedTransport::new();
     let tmp = tempfile::tempdir().unwrap();
     let today = day(2026, 11, 6);
     let market = KrxMarket::sample(today);
@@ -927,9 +927,9 @@ async fn a_new_full_update_refetches_every_confirmed_history_even_after_kiwoom_k
     assert_eq!(count(&calls, "ka10081"), 0, "다시 받을 표시가 남지 않는다");
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn full_history_counts_only_confirmed_stocks_so_a_stock_whose_history_was_complete_does_not_push_done_past_total() {
-    let fake = FakeKiwoom::start().await;
+    let fake = ScriptedTransport::new();
     let tmp = tempfile::tempdir().unwrap();
     let (yesterday, today) = (day(2026, 11, 5), day(2026, 11, 6));
     update_once(&fake, tmp.path(), &KrxMarket::sample(yesterday), &at(yesterday, "2030"), false).await;
@@ -949,9 +949,9 @@ async fn full_history_counts_only_confirmed_stocks_so_a_stock_whose_history_was_
     assert_eq!((status["fullHistory"].clone(), status["unconfirmed"].clone()), (json!({"done": 11, "total": 11}), json!(0)));
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn a_stock_whose_daily_bars_stop_before_the_target_day_is_logged_and_counted_as_unconfirmed() {
-    let fake = FakeKiwoom::start().await;
+    let fake = ScriptedTransport::new();
     let tmp = tempfile::tempdir().unwrap();
     let (stored_through, target) = (day(2026, 11, 6), day(2026, 11, 10));
     update_once(&fake, tmp.path(), &KrxMarket::sample(stored_through), &at(stored_through, "2030"), false).await;
@@ -986,9 +986,9 @@ fn assert_left_out_row_is_warned(logs: &str, code: &str, left_out: KstDate) {
     assert!(warned[0].contains("가격이 0"), "이유를 남긴다: {}", warned[0]);
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn a_zero_price_row_on_the_first_daily_page_is_left_out_and_the_recent_fill_still_fills_that_stock() {
-    let fake = FakeKiwoom::start().await;
+    let fake = ScriptedTransport::new();
     let tmp = tempfile::tempdir().unwrap();
     let today = day(2026, 11, 6);
     let left_out = day(2026, 10, 15);
@@ -1009,9 +1009,9 @@ async fn a_zero_price_row_on_the_first_daily_page_is_left_out_and_the_recent_fil
     assert_eq!(stored_days(tmp.path(), krx::NEW_LISTING), days_without(&market, krx::NEW_LISTING, left_out), "그 행만 빠진다");
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn a_zero_price_row_midway_through_a_history_is_left_out_and_the_backfill_finishes_every_stock() {
-    let fake = FakeKiwoom::start().await;
+    let fake = ScriptedTransport::new();
     let tmp = tempfile::tempdir().unwrap();
     let today = day(2026, 11, 6);
     let mut market = KrxMarket::sample(today);
@@ -1034,9 +1034,9 @@ async fn a_zero_price_row_midway_through_a_history_is_left_out_and_the_backfill_
     assert_eq!(stored_days(tmp.path(), krx::PRE_1985), days_without(&market, krx::PRE_1985, left_out), "그 행만 빠진 채 이력이 다 찬다");
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn a_stock_whose_daily_pages_never_end_is_skipped_by_the_backfill_and_fetched_again_by_the_next_update() {
-    let fake = FakeKiwoom::start().await;
+    let fake = ScriptedTransport::new();
     let tmp = tempfile::tempdir().unwrap();
     let today = day(2026, 11, 6);
     let mut market = KrxMarket::sample(today);
@@ -1061,9 +1061,9 @@ async fn a_stock_whose_daily_pages_never_end_is_skipped_by_the_backfill_and_fetc
     assert_eq!(daily_chains(&calls), BTreeMap::from([(krx::PRE_1985.to_owned(), whole_history_of(&market, krx::PRE_1985))]), "다음 업데이트는 건너뛴 종목만 다시 받는다");
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn a_kiwoom_failure_midway_through_the_backfill_stops_the_update_and_logs_the_stock_it_was_fetching() {
-    let fake = FakeKiwoom::start().await;
+    let fake = ScriptedTransport::new();
     let tmp = tempfile::tempdir().unwrap();
     let today = day(2026, 11, 6);
     fake.set_krx_market(KrxMarket::sample(today));
@@ -1082,9 +1082,9 @@ fn market_code_in(line: &str) -> bool {
     KrxMarket::sample(day(2026, 11, 6)).codes().iter().any(|c| line.contains(&format!("code={c}")) || line.contains(&format!("code=\"{c}\"")))
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn an_empty_dt_on_the_newest_daily_row_leaves_out_only_that_row_and_keeps_the_others() {
-    let fake = FakeKiwoom::start().await;
+    let fake = ScriptedTransport::new();
     let tmp = tempfile::tempdir().unwrap();
     let today = day(2026, 11, 6);
     let mut market = KrxMarket::sample(today);
@@ -1109,10 +1109,10 @@ fn list_loading(status: u16, body: &Value) -> bool {
     status == 503 && body["error"]["reason"] == "symbol_list_loading"
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn an_upgraded_store_whose_first_stock_list_comes_back_empty_refuses_runs_and_updates_until_a_normal_list_arrives() {
     for update_on_start in ["on", "off"] {
-        let fake = FakeKiwoom::start().await;
+        let fake = ScriptedTransport::new();
         fake.set_krx_market(KrxMarket::sample(day(2026, 11, 6)));
         fake.respond_with("ka10099", 200, json!({"return_code": 0, "return_msg": "정상적으로 처리되었습니다", "list": []}));
         let upgraded = schema_4_copy();
@@ -1144,7 +1144,7 @@ async fn an_upgraded_store_whose_first_stock_list_comes_back_empty_refuses_runs_
         assert_eq!(reply(api.client.get(&search).send().await.unwrap()).await.as_array().map(Vec::len), Some(1), "07:45에 비지 않은 목록을 받았다");
         let today = day(2026, 11, 9);
         fake.set_quote_rows(KrxMarket::sample(today).stocks.into_iter().map(|stock| {
-            let mut row = fake_kiwoom::summary::row(&stock.code, *stock.bars.last().unwrap(), "");
+            let mut row = common::support::summary::row(&stock.code, *stock.bars.last().unwrap(), "");
             for key in ["open_pric", "high_pric", "low_pric", "cur_prc", "trde_qty", "trde_prica"] { row[key] = "0".into(); }
             row
         }).collect());
@@ -1161,7 +1161,7 @@ async fn an_upgraded_store_whose_first_stock_list_comes_back_empty_refuses_runs_
     }
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn a_run_after_the_stock_list_arrives_but_before_the_start_fills_the_store_listing_fills_it_first_instead_of_answering_empty() {
     use std::sync::Arc;
 
@@ -1176,19 +1176,18 @@ async fn a_run_after_the_stock_list_arrives_but_before_the_start_fills_the_store
     use server::kiwoom::auth::KiwoomAuth;
     use server::kiwoom::rest::{KiwoomRest, Priority};
     use server::kiwoom::stream::KiwoomStream;
-    use server::kiwoom::transport::ReqwestTransport;
     use server::market::hub::MarketHub;
     use server::screener::Screener;
     use server::screener::store::Store;
     use server::symbols::SymbolDirectory;
     use tower::ServiceExt;
 
-    let fake = FakeKiwoom::start().await;
+    let fake = ScriptedTransport::new();
     fake.set_krx_market(KrxMarket::sample(day(2026, 11, 6)));
     let upgraded = schema_4_copy();
     let clock = Clock::fake(kst(day(2026, 11, 6), 20, 40, 0));
     let auth = KiwoomAuth::new(Secret::new(common::APP_KEY.into()), Secret::new(common::APP_SECRET.into()), None);
-    let rest = KiwoomRest::new(Arc::new(ReqwestTransport::new(fake.base_url()).unwrap()), auth, clock.clone());
+    let rest = KiwoomRest::new(fake.transport(), auth, clock.clone());
     let symbols = Arc::new(SymbolDirectory::default());
     let bars = Arc::new(BarService::new(rest.clone(), symbols.clone(), clock.clone()));
     let store = Store::open(&upgraded.path().join("run/screener.duckdb")).unwrap();

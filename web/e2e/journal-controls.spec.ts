@@ -4,7 +4,7 @@ import path from "node:path";
 import { createServer } from "vite";
 import { parseDrawingBody, recordKey, UNSAVED_PREFIX } from "../src/chart/drawings/outbox";
 import { parseJournalRecord, stageKey, STAGING_PREFIX, COMPLETION_PREFIX, completionKey } from "../src/chart/drawings/journal";
-import { test, expect, cell, chartOf, type App } from "./harness";
+import { test, expect, cell, chartOf, type Scenario } from "./harness";
 import type {} from "./journal-probe";
 
 const mirror = (page: Page) => chartOf(cell(page)).locator(".drawing-mirror");
@@ -25,11 +25,10 @@ async function createLine(page: Page) {
   await page.mouse.click(bounds.x + bounds.width * 0.75, bounds.y + bounds.height * 0.4);
 }
 
-async function storedDrawings(app: App) {
-  const response = await fetch(`${app.url}/api/drawings?symbol=IDX%3A001`);
-  expect(response.status).toBe(200);
-  const raw: unknown = await response.json();
-  if (!Array.isArray(raw)) throw new Error("Expected the SQLite drawing list");
+async function storedDrawings(scenario: Scenario) {
+  const response = scenario.documents.drawings("IDX:001");
+  const raw: unknown = response;
+  if (!Array.isArray(raw)) throw new Error("Expected the saved drawing list");
   return raw.map((item: unknown) => {
     const drawing = parseDrawingBody(item);
     if (drawing === null) throw new Error("Expected a valid persisted drawing");
@@ -41,11 +40,11 @@ async function pendingRecords(page: Page) {
   return page.evaluate(({ shared, stage }) => Object.keys(localStorage).filter((key) => key.startsWith(shared) || key.startsWith(stage)), { shared: UNSAVED_PREFIX, stage: STAGING_PREFIX });
 }
 
-test("actual app + HTTP/SQLite: delayed older admission cannot replace the same document's newer DELETE", async ({ page, app }, info) => {
+test("frontend journal + saved documents: delayed older admission cannot replace the same document's newer DELETE", async ({ page, scenario }, info) => {
   await open(page);
   await createLine(page);
   await expect(page.getByText(/^자동 저장됨 /)).toBeVisible();
-  const [original] = await storedDrawings(app);
+  const [original] = await storedDrawings(scenario);
   if (original === undefined) throw new Error("Expected the seeded drawing");
   const requests: string[] = [];
   page.on("request", (request) => {
@@ -71,12 +70,12 @@ test("actual app + HTTP/SQLite: delayed older admission cannot replace the same 
     expect(requests).toEqual([]);
     await page.evaluate(() => window.dispatchEvent(new Event("release-journal-control")));
     await expect(page.getByText(/^자동 저장됨 /)).toBeVisible();
-    await expect.poll(() => storedDrawings(app)).toEqual([]);
+    await expect.poll(() => storedDrawings(scenario)).toEqual([]);
     await expect.poll(() => pendingRecords(page)).toEqual([]);
     expect(requests).toEqual(["DELETE"]);
     await open(page);
     await expect(mirror(page)).toHaveAttribute("data-drawings", "[]");
-    expect(await storedDrawings(app)).toEqual([]);
+    expect(await storedDrawings(scenario)).toEqual([]);
     expect(requests).toEqual(["DELETE"]);
     await info.attach("same-document-admission.json", { body: JSON.stringify({ locks, requests }, null, 2), contentType: "application/json" });
   } finally {
@@ -85,7 +84,7 @@ test("actual app + HTTP/SQLite: delayed older admission cannot replace the same 
 });
 
 for (const failure of ["locks-unsupported", "locks-rejected", "staging-write", "shared-write"] as const) {
-  test(`actual app + HTTP/SQLite: ${failure} reports failure without unsafe transport`, async ({ page, app }, info) => {
+  test(`frontend journal + saved documents: ${failure} reports failure without unsafe transport`, async ({ page, scenario }, info) => {
     const requests: string[] = [];
     page.on("request", (request) => {
       if (request.url().includes("/api/drawings/") && ["PUT", "DELETE"].includes(request.method())) requests.push(request.method());
@@ -111,7 +110,7 @@ for (const failure of ["locks-unsupported", "locks-rejected", "staging-write", "
     await expect(retry).toBeVisible();
     await retry.click();
     await expect(retry).toBeVisible();
-    expect(await storedDrawings(app)).toEqual([]);
+    expect(await storedDrawings(scenario)).toEqual([]);
     expect(requests).toEqual([]);
     const records = await pendingRecords(page);
     expect(records).toHaveLength(failure === "staging-write" ? 0 : 1);
@@ -120,11 +119,11 @@ for (const failure of ["locks-unsupported", "locks-rejected", "staging-write", "
   });
 }
 
-test("actual app + HTTP/SQLite: reload transmits the staged PUT's fixed revision", async ({ page, app }, info) => {
+test("frontend journal + saved documents: reload transmits the staged PUT's fixed revision", async ({ page, scenario }, info) => {
   await open(page);
   await createLine(page);
   await expect(page.getByText(/^자동 저장됨 /)).toBeVisible();
-  const [original] = await storedDrawings(app);
+  const [original] = await storedDrawings(scenario);
   if (original === undefined) throw new Error("Expected the seeded drawing");
   await page.evaluate(() => {
     Date.now = () => 400;
@@ -150,15 +149,15 @@ test("actual app + HTTP/SQLite: reload transmits the staged PUT's fixed revision
     if (request.method() === "PUT" && request.url().includes("/api/drawings/")) sent.push(request.postDataJSON());
   });
   await open(page);
-  await expect.poll(async () => (await storedDrawings(app))[0]?.style).toMatchObject({ line: { width: 3 } });
+  await expect.poll(async () => (await storedDrawings(scenario))[0]?.style).toMatchObject({ line: { width: 3 } });
   await expect.poll(() => pendingRecords(page)).toEqual([]);
-  expect((await storedDrawings(app))[0]?.revision).toBe(staged.want.body.revision);
+  expect((await storedDrawings(scenario))[0]?.revision).toBe(staged.want.body.revision);
   expect(sent).toEqual([staged.want.body]);
   await info.attach("restored-fixed-revision.json", { body: JSON.stringify({ staged, sent }, null, 2), contentType: "application/json" });
 });
 
 
-test("actual app + HTTP/SQLite: completion quota failure retains recovery work and retry cleans without retransmission", async ({ page, app }, info) => {
+test("frontend journal + saved documents: completion quota failure retains recovery work and retry cleans without retransmission", async ({ page, scenario }, info) => {
   const requests: { method: string; body: unknown }[] = [];
   page.on("request", request => {
     if (request.url().includes("/api/drawings/") && ["PUT", "DELETE"].includes(request.method())) requests.push({ method: request.method(), body: request.postDataJSON() });
@@ -175,8 +174,8 @@ test("actual app + HTTP/SQLite: completion quota failure retains recovery work a
   await createLine(page);
   const retry = page.getByRole("button", { name: "다시 시도", exact: true }).first();
   await expect(retry).toBeVisible();
-  const [saved] = await storedDrawings(app);
-  if (!saved) throw new Error("Expected the acknowledged SQLite drawing");
+  const [saved] = await storedDrawings(scenario);
+  if (!saved) throw new Error("Expected the acknowledged saved drawing");
   expect(requests.map(request => request.method)).toEqual(["PUT"]);
   expect(await pendingRecords(page)).toHaveLength(2);
   expect(await page.evaluate(key => localStorage.getItem(key), completionKey(saved.id))).toBeNull();
@@ -190,7 +189,7 @@ test("actual app + HTTP/SQLite: completion quota failure retains recovery work a
   await expect.poll(() => pendingRecords(page)).toEqual([]);
   const completion = await page.evaluate(key => JSON.parse(localStorage.getItem(key) ?? "null"), completionKey(saved.id));
   expect(completion).toMatchObject({ id: saved.id, lastRevision: saved.revision });
-  expect(await storedDrawings(app)).toEqual([saved]);
+  expect(await storedDrawings(scenario)).toEqual([saved]);
   expect(requests.map(request => request.method)).toEqual(["PUT"]);
   await info.attach("completion-quota-retry.json", { body: JSON.stringify({ requests, saved, completion }), contentType: "application/json" });
 });

@@ -2,16 +2,15 @@ import { selectOption } from "./select-option";
 import type { Page } from "@playwright/test";
 import { parseJournalRecord, STAGING_PREFIX } from "../src/chart/drawings/journal";
 import { parseDrawingBody } from "../src/chart/drawings/outbox";
-import { test, expect, cell, chartOf, type App } from "./harness";
+import { test, expect, cell, chartOf, type Scenario } from "./harness";
 
 const mirror = (page: Page) => chartOf(cell(page)).locator(".drawing-mirror");
 const width = (page: Page) => page.getByRole("toolbar", { name: "드로잉 스타일" }).getByLabel("선 굵기");
 
-async function drawings(app: App) {
-  const response = await fetch(`${app.url}/api/drawings?symbol=IDX%3A001`);
-  expect(response.status).toBe(200);
-  const raw: unknown = await response.json();
-  if (!Array.isArray(raw)) throw new Error("Expected the SQLite drawing list");
+async function drawings(scenario: Scenario) {
+  const response = scenario.documents.drawings("IDX:001");
+  const raw: unknown = response;
+  if (!Array.isArray(raw)) throw new Error("Expected the saved drawing list");
   return raw.map((item: unknown) => {
     const drawing = parseDrawingBody(item);
     if (drawing === null) throw new Error("Expected a valid persisted drawing");
@@ -53,15 +52,15 @@ async function blockDrawingTransport(page: Page) {
 }
 
 for (const edits of ["put", "delete", "put-put", "put-delete"] as const) {
-  test(`drawing admission: ${edits} survives closing its tab behind another tab's lock`, async ({ page, context, app }, info) => {
+  test(`drawing admission: ${edits} survives closing its tab behind another tab's lock`, async ({ page, context, scenario }, info) => {
     await open(page);
     const bounds = await chartOf(cell(page)).boundingBox();
     if (bounds === null) throw new Error("Expected the drawing chart");
     await cell(page).focus();
     await page.keyboard.press("H");
     await page.mouse.click(bounds.x + bounds.width * 0.75, bounds.y + bounds.height * 0.4);
-    await expect.poll(async () => (await drawings(app)).length).toBe(1);
-    const [original] = await drawings(app);
+    await expect.poll(async () => (await drawings(scenario)).length).toBe(1);
+    const [original] = await drawings(scenario);
     if (original === undefined) throw new Error("Expected the seeded drawing");
     await expect(page.getByText(/^자동 저장됨 /)).toBeVisible();
 
@@ -95,24 +94,24 @@ for (const edits of ["put", "delete", "put-put", "put-delete"] as const) {
         body: JSON.stringify({ locks, intents }, null, 2),
         contentType: "application/json",
       });
-      expect(await drawings(app)).toEqual([original]);
+      expect(await drawings(scenario)).toEqual([original]);
       await editing.close();
       await page.evaluate(() => window.dispatchEvent(new Event("release-admission")));
 
       const recovered = await context.newPage();
       await open(recovered);
       if (deleted) {
-        await expect.poll(() => drawings(app)).toEqual([]);
+        await expect.poll(() => drawings(scenario)).toEqual([]);
         await expect(mirror(recovered)).toHaveAttribute("data-drawings", "[]");
       } else {
         const expectedWidth = edits === "put-put" ? 4 : 3;
-        await expect.poll(async () => (await drawings(app))[0]?.style).toMatchObject({ line: { width: expectedWidth } });
+        await expect.poll(async () => (await drawings(scenario))[0]?.style).toMatchObject({ line: { width: expectedWidth } });
         await selectLine(recovered);
         await expect(width(recovered)).toHaveAttribute("data-value", String(expectedWidth));
       }
-      const saved = await drawings(app);
-      await app.restart();
-      expect(await drawings(app)).toEqual(saved);
+      const saved = await drawings(scenario);
+
+      expect(await drawings(scenario)).toEqual(saved);
       await recovered.reload();
       await expect(chartOf(cell(recovered))).toHaveAttribute("data-bar-count", /^[1-9]\d*$/);
       await expect(mirror(recovered)).toHaveAttribute("data-drawings", deleted ? "[]" : new RegExp(original.id));

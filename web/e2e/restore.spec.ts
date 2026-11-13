@@ -1,6 +1,6 @@
 import { cell, expect, test } from "./harness";
 
-test("바꾼 종목·거래소·봉 주기가 새로고침과 서버 재시작 뒤에도 남는다", async ({ app, page }) => {
+test("바꾼 종목·거래소·봉 주기가 새로고침 뒤에도 남는다", async ({ page }) => {
   await page.goto("/?symbol=005930");
   const toolbar = page.getByRole("toolbar", { name: "차트 도구 막대" });
   await expect(cell(page)).toHaveAttribute("aria-label", "칸 1: 삼성전자 통합 일");
@@ -19,7 +19,7 @@ test("바꾼 종목·거래소·봉 주기가 새로고침과 서버 재시작 �
   await page.reload();
   await expectRestored();
 
-  await app.restart();
+
   await page.reload();
   await expectRestored();
 });

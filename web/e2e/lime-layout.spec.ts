@@ -3,9 +3,9 @@ import { cell, expect, test } from "./harness";
 
 test.use({ clockStart: "20261109100030" });
 
-test("라이트 저장값도 라임 다크로 열고 분봉은 하나의 메뉴이며 작은 창에서 도구가 페이지를 넘기지 않는다", async ({ app, page }, info) => {
-  const state = await (await fetch(`${app.url}/api/ui-state`)).json();
-  expect((await fetch(`${app.url}/api/ui-state`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...state, theme: "light", revision: state.revision + 1 }) })).ok).toBe(true);
+test("라이트 저장값도 라임 다크로 열고 분봉은 하나의 메뉴이며 작은 창에서 도구가 페이지를 넘기지 않는다", async ({ scenario, page }, info) => {
+  const state = scenario.documents.uiState();
+  scenario.documents.saveUiState({ ...state, theme: "light", revision: state.revision + 1 });
   await page.addInitScript(() => localStorage.setItem("vv.theme", "light"));
   const asked: string[] = [];
   page.on("request", (r) => { if (r.url().endsWith("/fundamentals")) asked.push(r.url()); });

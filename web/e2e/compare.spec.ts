@@ -1,24 +1,24 @@
 import type { Locator, Page } from "@playwright/test";
 import type { Layout } from "../src/api/generated/Layout";
 import { installFrameProbe } from "./frame-probe";
-import { type App, cell, chartOf, DEFAULT_LAYOUT_ID, expect, test } from "./harness";
+import { type Scenario, cell, chartOf, DEFAULT_LAYOUT_ID, expect, test } from "./harness";
 
 test.use({ clockStart: "20261109100030" });
 
-async function layoutOf(app: App): Promise<Layout> {
-  return (await fetch(`${app.url}/api/layouts/${DEFAULT_LAYOUT_ID}`)).json();
+async function layoutOf(scenario: Scenario): Promise<Layout> {
+  return scenario.documents.layout(DEFAULT_LAYOUT_ID);
 }
 
-const settingsOf = async (app: App) => (await layoutOf(app)).cells[0]!.chartSettings as { scale: string; compare: string[] };
+const settingsOf = async (scenario: Scenario) => (await layoutOf(scenario)).cells[0]!.chartSettings as { scale: string; compare: string[] };
 
 const VOLUME = { id: "v1", spec: { kind: "volume", maPeriod: null }, panel: "p1", visible: true, style: { colors: ["ind-1"], width: 1 } };
 
-async function seed(app: App, over: { compare?: string[]; scale?: string; indicators?: object[]; panels?: object[] } = {}, period = "1m") {
-  const { id, name, arrangement, sync, revision } = await layoutOf(app);
+async function seed(scenario: Scenario, over: { compare?: string[]; scale?: string; indicators?: object[]; panels?: object[] } = {}, period: Parameters<Scenario["market"]["page"]>[0]["period"] = "1m") {
+  const { id, name, arrangement, sync, revision } = await layoutOf(scenario);
   const chartSettings = { v: 2, style: "candle", scale: "normal", indicators: [], compare: [], panels: [], ...over };
-  const body = { id, name, arrangement, sync, revision: revision + 1, cells: [{ slot: 0, symbol: "005930", venue: "combined", period, symbolLink: false, chartSettings }] };
-  const r = await fetch(`${app.url}/api/layouts/${id}`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
-  expect(r.ok).toBe(true);
+  const body: Parameters<Scenario["documents"]["saveLayout"]>[0] = { id, name, arrangement, sync, revision: revision + 1, cells: [{ slot: 0, symbol: "005930", venue: "combined", period, symbolLink: false, chartSettings }] };
+  scenario.documents.saveLayout(body);
+
 }
 
 const rows = (page: Page) => cell(page).locator("[data-compare-row]");
@@ -30,15 +30,9 @@ interface Sent {
   symbol?: string;
 }
 
-function sentFrames(page: Page): Sent[] {
-  const sent: Sent[] = [];
-  page.on("websocket", (ws) => ws.on("framesent", ({ payload }) => sent.push(JSON.parse(String(payload)))));
-  return sent;
-}
+function sentFrames(scenario: Scenario): readonly Sent[] { return scenario.live.messages; }
 
-const tradeValues = (price: number, time: string) => ({
-  "20": time, "10": `+${price}`, "15": "+1", "13": "1000", "9081": "KRX", "11": "+0", "12": "+0.00", "25": "2",
-});
+const tradeValues = (price: number, _time: string) => ({ c: Math.abs(Number(`+${price}`)), v: Math.abs(Number("1000")) });
 
 async function openCompareTab(page: Page): Promise<Locator> {
   await page.getByRole("toolbar", { name: "차트 도구 막대" }).getByRole("button", { name: "비교", exact: true }).click();
@@ -52,11 +46,11 @@ async function addCompare(dialog: Locator, name: string) {
   await dialog.getByRole("button", { name: new RegExp(`^${name}.*추가$`) }).click();
 }
 
-test("비교 종목 탭에서 3개까지 넣고 4번째는 막히며, 빼면 그 구독을 풀고, 새로고침해도 남는다", async ({ page, app }) => {
+test("비교 종목 탭에서 3개까지 넣고 4번째는 막히며, 빼면 그 구독을 풀고, 새로고침해도 남는다", async ({ page, scenario }) => {
   const errors: string[] = [];
   page.on("pageerror", (e) => errors.push(e.message));
-  const sent = sentFrames(page);
-  await seed(app);
+  const sent = sentFrames(scenario);
+  await seed(scenario);
   await page.goto("/");
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
   const chart = chartOf(cell(page));
@@ -76,12 +70,12 @@ test("비교 종목 탭에서 3개까지 넣고 4번째는 막히며, 빼면 그
 
   const subOf = (symbol: string) => sent.find((m) => m.type === "subscribe" && m.symbol === symbol)?.sub;
   await expect.poll(() => ["006400", "000810", "IDX:001"].map((s) => subOf(s) !== undefined)).toEqual([true, true, true]);
-  await expect.poll(async () => (await settingsOf(app)).compare).toEqual(["006400", "000810", "IDX:001"]);
+  await expect.poll(async () => (await settingsOf(scenario)).compare).toEqual(["006400", "000810", "IDX:001"]);
 
   await dialog.getByRole("button", { name: "삼성화재 지우기" }).click();
   await expect(rows(page)).toHaveCount(2);
   await expect.poll(() => sent.some((m) => m.type === "unsubscribe" && m.sub === subOf("000810"))).toBe(true);
-  await expect.poll(async () => (await settingsOf(app)).compare).toEqual(["006400", "IDX:001"]);
+  await expect.poll(async () => (await settingsOf(scenario)).compare).toEqual(["006400", "IDX:001"]);
 
   await page.reload();
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
@@ -90,8 +84,8 @@ test("비교 종목 탭에서 3개까지 넣고 4번째는 막히며, 빼면 그
   expect(errors).toEqual([]);
 });
 
-test("% 축은 비교 종목 없이도 켜고 끄며, 비교 종목이 있는 동안은 %로 고정되고 다 빼면 저장된 축으로 돌아간다", async ({ page, app }) => {
-  await seed(app);
+test("% 축은 비교 종목 없이도 켜고 끄며, 비교 종목이 있는 동안은 %로 고정되고 다 빼면 저장된 축으로 돌아간다", async ({ page, scenario }) => {
+  await seed(scenario);
   await page.goto("/");
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
   const chart = chartOf(cell(page));
@@ -100,7 +94,7 @@ test("% 축은 비교 종목 없이도 켜고 끄며, 비교 종목이 있는 �
 
   await pct.click();
   await expect(chart).toHaveAttribute("data-price-scale", "percent");
-  await expect.poll(async () => (await settingsOf(app)).scale).toBe("percent");
+  await expect.poll(async () => (await settingsOf(scenario)).scale).toBe("percent");
   await pct.click();
   await expect(chart).toHaveAttribute("data-price-scale", "normal");
   await log.click();
@@ -112,44 +106,44 @@ test("% 축은 비교 종목 없이도 켜고 끄며, 비교 종목이 있는 �
   await expect(pct).toBeDisabled();
   await expect(log).toBeDisabled();
   await expect(dialog.getByRole("switch", { name: "가격축을 % 변화로" })).toBeDisabled();
-  await expect.poll(async () => (await settingsOf(app)).scale).toBe("log");
+  await expect.poll(async () => (await settingsOf(scenario)).scale).toBe("log");
 
   await dialog.getByRole("button", { name: "삼성SDI 지우기" }).click();
   await expect(chart).toHaveAttribute("data-price-scale", "log");
   await dialog.getByRole("switch", { name: "가격축을 % 변화로" }).click();
   await expect(chart).toHaveAttribute("data-price-scale", "percent");
-  await expect.poll(async () => (await settingsOf(app)).scale).toBe("percent");
+  await expect.poll(async () => (await settingsOf(scenario)).scale).toBe("percent");
 });
 
-test("비교 종목도 체결마다 움직인다", async ({ page, app }) => {
+test("비교 종목도 체결마다 움직인다", async ({ page, scenario }) => {
   const errors: string[] = [];
   page.on("pageerror", (e) => errors.push(e.message));
-  await seed(app, { compare: ["006400"] });
+  await seed(scenario, { compare: ["006400"] });
   await page.goto("/");
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
   await expect(row(page, "006400")).not.toHaveAttribute("data-last-t", "");
-  await expect.poll(async () => (await app.fake.registered())["0B"] ?? []).toEqual(expect.arrayContaining(["005930_AL", "006400_AL"]));
+  await expect.poll(async () => scenario.live.subscriptions().map(value => value.symbol)).toEqual(expect.arrayContaining(["005930", "006400"]));
 
   const chart = chartOf(cell(page));
   await expect(async () => {
-    expect(await app.fake.pushReal("0B", "005930_AL", tradeValues(201_000, "100031"))).toBeGreaterThan(0);
+    expect(await scenario.live.update("005930", tradeValues(201_000, "100031"))).toBeGreaterThan(0);
     await expect(chart).toHaveAttribute("data-last-close", "201000", { timeout: 1_000 });
   }).toPass({ timeout: 15_000 });
   const minute = await chart.getAttribute("data-last-bar-t");
 
   await expect(async () => {
-    expect(await app.fake.pushReal("0B", "006400_AL", tradeValues(55_500, "100032"))).toBeGreaterThan(0);
+    expect(await scenario.live.update("006400", tradeValues(55_500, "100032"))).toBeGreaterThan(0);
     await expect(row(page, "006400")).toHaveAttribute("data-last-close", "55500", { timeout: 1_000 });
   }).toPass({ timeout: 15_000 });
   await expect(row(page, "006400")).toHaveAttribute("data-last-t", minute!);
-  expect(await app.fake.pushReal("0B", "006400_AL", tradeValues(56_000, "100033"))).toBeGreaterThan(0);
+  expect(await scenario.live.update("006400", tradeValues(56_000, "100033"))).toBeGreaterThan(0);
   await expect(row(page, "006400")).toHaveAttribute("data-last-close", "56000");
   await expect(row(page, "006400")).toHaveAttribute("data-last-t", minute!);
   expect(errors).toEqual([]);
 });
 
-test("일반 축에서 그린 드로잉은 % 축이 되고 스크롤로 기준 봉이 바뀌어도 주 봉 시리즈의 가격 좌표에 붙어 있다", async ({ page, app }) => {
-  await seed(app, {}, "D");
+test("일반 축에서 그린 드로잉은 % 축이 되고 스크롤로 기준 봉이 바뀌어도 주 봉 시리즈의 가격 좌표에 붙어 있다", async ({ page, scenario }) => {
+  await seed(scenario, {}, "D");
   await page.addInitScript(installFrameProbe);
   await page.goto("/");
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
@@ -162,8 +156,9 @@ test("일반 축에서 그린 드로잉은 % 축이 되고 스크롤로 기준 �
   await page.mouse.down();
   await page.mouse.move(box.x + box.width * 0.86, box.y + box.height * 0.3, { steps: 10 });
   await page.mouse.up();
-  await expect.poll(async () => (await (await fetch(`${app.url}/api/drawings?symbol=005930`)).json()).length).toBe(1);
-  const [drawing] = await (await fetch(`${app.url}/api/drawings?symbol=005930`)).json();
+  await expect.poll(async () => scenario.documents.drawings("005930").length).toBe(1);
+  const [drawing] = scenario.documents.drawings("005930");
+  if (!drawing) throw new Error("Missing saved drawing");
   const prices: number[] = drawing.points.map((p: { price: number }) => p.price);
 
   const mirror = cell(page).locator(".drawing-mirror[data-drawings]");
@@ -193,12 +188,12 @@ test("일반 축에서 그린 드로잉은 % 축이 되고 스크롤로 기준 �
   await page.mouse.up();
   await expect.poll(async () => (await drawnY())[0]).not.toBe(inPercent[0]);
   await expect.poll(onCandles).toBe(true);
-  expect(await (await fetch(`${app.url}/api/drawings?symbol=005930`)).json()).toHaveLength(1);
+  expect(scenario.documents.drawings("005930")).toHaveLength(1);
   console.log("DRAWING_Y", JSON.stringify({ normal: before, percent: inPercent, afterScroll: await drawnY() }));
 });
 
-test("비교 종목이 저장된 칸을 열어도 지표 패널 축은 % 축이 아니다", async ({ page, app }) => {
-  await seed(app, { compare: ["IDX:001"], indicators: [VOLUME], panels: [{ id: "p1", stretch: 0.25 }] }, "D");
+test("비교 종목이 저장된 칸을 열어도 지표 패널 축은 % 축이 아니다", async ({ page, scenario }) => {
+  await seed(scenario, { compare: ["IDX:001"], indicators: [VOLUME], panels: [{ id: "p1", stretch: 0.25 }] }, "D");
   await page.addInitScript(installFrameProbe);
   await page.goto("/");
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
@@ -217,9 +212,9 @@ test("비교 종목이 저장된 칸을 열어도 지표 패널 축은 % 축이 
   await expect.poll(modes).toEqual({ main: 1, volume: 0 });
 });
 
-test("가격 패널 지표 선과 가격 사이에 놓인 드로잉도 눌러 고르고 끌 수 있다", async ({ page, app }) => {
+test("가격 패널 지표 선과 가격 사이에 놓인 드로잉도 눌러 고르고 끌 수 있다", async ({ page, scenario }) => {
   const style = { colors: ["ind-1"], width: 1 };
-  await seed(app, { indicators: [{ id: "b1", spec: { kind: "bollinger", period: 20, k: 2 }, panel: "price", visible: true, style }] }, "D");
+  await seed(scenario, { indicators: [{ id: "b1", spec: { kind: "bollinger", period: 20, k: 2 }, panel: "price", visible: true, style }] }, "D");
   await page.addInitScript(installFrameProbe);
   await page.goto("/");
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
@@ -247,12 +242,13 @@ test("가격 패널 지표 선과 가격 사이에 놓인 드로잉도 눌러 �
   await cell(page).focus();
   await page.keyboard.press("H");
   await page.mouse.click(x, y);
-  await expect.poll(async () => (await (await fetch(`${app.url}/api/drawings?symbol=005930`)).json()).length).toBe(1);
-  const [drawn] = await (await fetch(`${app.url}/api/drawings?symbol=005930`)).json();
-  const at = candles.reduce((a, c) => (Math.abs(c.time - drawn.points[0].t - 32400) < Math.abs(a.time - drawn.points[0].t - 32400) ? c : a));
+  await expect.poll(async () => scenario.documents.drawings("005930").length).toBe(1);
+  const [drawn] = scenario.documents.drawings("005930");
+  if (!drawn) throw new Error("Missing saved drawing");
+  const at = candles.reduce((a, c) => (Math.abs(c.time - drawn.points[0]!.t - 32400) < Math.abs(a.time - drawn.points[0]!.t - 32400) ? c : a));
   expect(tail.map((r) => r.time)).toContain(at.time);
-  expect(closeAt(at.time)).toBeLessThan(drawn.points[0].price);
-  expect(tail.find((r) => r.time === at.time)!.value!).toBeGreaterThan(drawn.points[0].price);
+  expect(closeAt(at.time)).toBeLessThan(drawn.points[0]!.price);
+  expect(tail.find((r) => r.time === at.time)!.value!).toBeGreaterThan(drawn.points[0]!.price);
 
   const mirror = cell(page).locator(".drawing-mirror[data-drawings]");
   const selected = async () => (JSON.parse((await mirror.getAttribute("data-drawings"))!) as { selected: boolean }[])[0]?.selected;
@@ -260,21 +256,23 @@ test("가격 패널 지표 선과 가격 사이에 놓인 드로잉도 눌러 �
   await page.mouse.click(box.x + box.width * 0.2, box.y + box.height * 0.9);
   await expect.poll(selected).toBe(false);
 
-  await page.mouse.click(x, y);
+  const projected = JSON.parse((await mirror.getAttribute("data-drawings"))!) as { points: { y: number }[] }[];
+  const targetY = box.y + projected[0]!.points[0]!.y;
+  await page.mouse.click(x, targetY);
   await expect.poll(selected).toBe(true);
-  await page.mouse.move(x, y);
+  await page.mouse.move(x, targetY);
   await page.mouse.down();
-  await page.mouse.move(x, y + 40, { steps: 8 });
+  await page.mouse.move(x, targetY + 40, { steps: 8 });
   await page.mouse.up();
-  await expect.poll(async () => (await (await fetch(`${app.url}/api/drawings?symbol=005930`)).json())[0].points[0].price).toBeLessThan(drawn.points[0].price);
-  console.log("BAND_DRAWING", JSON.stringify({ lo, hi, price: drawn.points[0].price, at: at.time }));
+  await expect.poll(async () => scenario.documents.drawings("005930")[0]!.points[0]!.price).toBeLessThan(drawn.points[0]!.price);
+  console.log("BAND_DRAWING", JSON.stringify({ lo, hi, price: drawn.points[0]!.price, at: at.time }));
 });
 
-test("% 축에서 같은 봉에 체결이 더 와도, 가격 패널 선마다 그 봉 시각 점의 기준값은 주 봉의 지금 종가다", async ({ page, app }) => {
+test("% 축에서 같은 봉에 체결이 더 와도, 가격 패널 선마다 그 봉 시각 점의 기준값은 주 봉의 지금 종가다", async ({ page, scenario }) => {
   const errors: string[] = [];
   page.on("pageerror", (e) => errors.push(e.message));
   const style = { colors: ["ind-1"], width: 1 };
-  await seed(app, {
+  await seed(scenario, {
     scale: "percent",
     indicators: [
       { id: "i1", spec: { kind: "ichimoku", conversion: 3, base: 5, spanB: 8, displacement: 6 }, panel: "price", visible: true, style },
@@ -297,7 +295,7 @@ test("% 축에서 같은 봉에 체결이 더 와도, 가격 패널 선마다 �
 
   for (const [price, time] of [[201_000, "100031"], [207_000, "100032"]] as const) {
     await expect(async () => {
-      await app.fake.pushReal("0B", "005930_AL", tradeValues(price, time));
+      await scenario.live.update("005930", tradeValues(price, time));
       await expect(chart).toHaveAttribute("data-last-close", String(price), { timeout: 1000 });
     }).toPass({ timeout: 15_000 });
     await expect.poll(lagging).toEqual([price]);

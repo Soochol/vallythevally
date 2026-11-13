@@ -1,9 +1,9 @@
+import { resultRows, type ScreenerScenario } from "./fixtures/screener";
 import { expectSentences, renameScreen, expandEditor, savedEditor, addCondition, conditionAction, toggleExclude } from "./sentence-editor";
 import type { Locator, Page } from "@playwright/test";
-import { expect, test } from "./harness";
+import { expect, test } from "./screener-harness";
 import { editor, excludedLine, expectRows, openScreener, panel, results, runButton, savedTo, updateBand, waitForUpdateToFinish } from "./screener-page";
 
-test.use({ krxMarket: "20261106", clockStart: "20261106203000" });
 
 const NO_CONDITIONS = "조건 없음 · 대상 종목 전체";
 const SCREEN_NAME = "조건 없는 대상 종목";
@@ -46,7 +46,8 @@ async function editScreen(page: Page) {
   return editor(page, "조건식 편집");
 }
 
-async function runAndExpect(page: Page, excluded: string, expected: readonly (readonly [code: string, name: string, matchedDate: string])[]) {
+async function runAndExpect(page: Page, screener: ScreenerScenario, excluded: string, expected: readonly (readonly [code: string, name: string, matchedDate: string])[]) {
+  screener.showResult(resultRows(expected, { universe: expected.length }));
   await expect(panel(page).getByText("실행하면 결과가 여기에 나옵니다")).toBeVisible();
   await runButton(page).click();
   await expect(results(page)).toContainText(`${expected.length}종목 · 11-06(금) 기준`);
@@ -54,8 +55,7 @@ async function runAndExpect(page: Page, excluded: string, expected: readonly (re
   await expectRows(page, expected);
 }
 
-test("새 조건식은 조건 없이 열리고 마지막 줄까지 뺐다가 다시 더할 수 있으며, 조건 없이 저장한 조건식은 다시 열어도 비어 있고, 실행하면 시장·제외 설정에 맞는 대상 종목 전체가 기준 관측일에 맞은 것으로 나온다", async ({ app, page }) => {
-  test.setTimeout(180_000);
+test("새 조건식은 조건 없이 열리고 마지막 줄을 빼고 다시 더하며, 빈 조건과 시장·제외 설정을 저장하고 반환된 대상 종목과 관측일을 표시한다", async ({ scenario, screener, page }) => {
   await page.goto("/");
   await openScreener(page);
   await updateBand(page).getByRole("button", { name: "처음 받기" }).click();
@@ -95,12 +95,12 @@ test("새 조건식은 조건 없이 열리고 마지막 줄까지 뺐다가 다
     await expect(panel(page).getByText("두 시장 모두")).toBeVisible();
     await expect(panel(page).getByRole("group", { name: "대상 시장", exact: true }).locator('button[aria-pressed="true"]')).toHaveCount(0);
     await expect(panel(page).getByRole("button", { name: / 제외 해제$/ })).toHaveCount(0);
-    const stored = await (await fetch(`${app.url}/api/screens`)).json();
+    const stored = scenario.documents.screens();
     expect(stored.screens).toEqual([{ id: expect.any(String), name: SCREEN_NAME, markets: [], exclude: [], conditions: [] }]);
   });
 
   await test.step("실행하면 시장도 제외도 고르지 않은 대상 종목 전체가 기준 관측일인 당일로 나온다", async () => {
-    await runAndExpect(page, "대상 10종목 · 빠짐: 상장 기간 부족 0 · 이력 덜 참 0", asOfToday(EVERY_STOCK.map(([code]) => code)));
+    await runAndExpect(page, screener, "대상 10종목 · 빠짐: 상장 기간 부족 0 · 이력 덜 참 0", asOfToday(EVERY_STOCK.map(([code]) => code)));
   });
 
   await test.step("다시 열어도 조건이 없고, 코스닥과 관리종목 제외를 골라 저장한 뒤 새로 고쳐 다시 열어도 그대로다", async () => {
@@ -125,6 +125,6 @@ test("새 조건식은 조건 없이 열리고 마지막 줄까지 뺐다가 다
   });
 
   await test.step("실행하면 코스닥에서 관리종목을 뺀 대상 종목 전체가 당일로 나온다", async () => {
-    await runAndExpect(page, "대상 3종목 · 빠짐: 상장 기간 부족 0 · 이력 덜 참 0", asOfToday(KOSDAQ_WITHOUT_MANAGED));
+    await runAndExpect(page, screener, "대상 3종목 · 빠짐: 상장 기간 부족 0 · 이력 덜 참 0", asOfToday(KOSDAQ_WITHOUT_MANAGED));
   });
 });

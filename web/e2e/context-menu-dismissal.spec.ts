@@ -1,13 +1,13 @@
 import type { Drawing } from "../src/api/generated/Drawing";
-import { cell, expect, test } from "./harness";
+import {  cell, expect, test } from "./harness";
 
 for (const outside of ["거래량 영역", "가격축"] as const) {
-  test(`차트 우클릭 메뉴는 ${outside}의 닫기 클릭을 소비하고 차트로 포커스를 돌린다`, async ({ page, app }) => {
+  test(`차트 우클릭 메뉴는 ${outside}의 닫기 클릭을 소비하고 차트로 포커스를 돌린다`, async ({ page, scenario }) => {
     await page.goto("/?symbol=005930");
     await expect(cell(page)).toHaveAttribute("aria-busy", "false");
     const box = await cell(page).boundingBox();
     if (!box) throw new Error("차트 영역이 없습니다");
-    const drawings = async (): Promise<Drawing[]> => (await fetch(`${app.url}/api/drawings?symbol=005930`)).json();
+    const drawings = async (): Promise<Drawing[]> => scenario.documents.drawings("005930");
     await cell(page).focus(); await page.keyboard.press("H");
     await page.mouse.click(box.x + box.width * 0.2, box.y + box.height * 0.2, { button: "right" });
     const menu = page.getByRole("menu", { name: "드로잉 메뉴", exact: true });

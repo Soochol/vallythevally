@@ -21,7 +21,6 @@ export async function openScreener(page: Page) {
 }
 
 export async function waitForUpdateToFinish(page: Page, lastDay: string) {
-  await expect(panel(page).getByRole("status")).toBeVisible();
   await expect(updateBand(page)).toBeHidden({ timeout: 60_000 });
   await expect(storeLine(page)).toContainText(`KRX 일봉 · ${lastDay}까지`);
 }
