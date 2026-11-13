@@ -1,11 +1,10 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type { Screen } from "../../api/generated/Screen";
 import type { Screens } from "../../api/generated/Screens";
-import { useScreenerStore } from "../../stores/screener";
 import { useSelectionStore } from "../../stores/selection";
-import { checkedSession, currentSession, sessionOf, useScreenEditor } from "./editorState";
 import { handleResultKey, type ScreenerKeyEvent } from "./ScreenerPanel";
 import { SentenceEditor } from "./SentenceEditor";
+import { createScreenEditing } from "./screenEditing";
 
 class KeyTarget extends EventTarget {
   constructor(readonly tagName = "BUTTON", readonly popover = false, readonly isContentEditable = false) { super(); }
@@ -19,30 +18,17 @@ beforeEach(() => {
   vi.stubGlobal("HTMLElement", KeyTarget);
   vi.stubGlobal("Element", KeyTarget);
   useSelectionStore.setState({ dialog: null });
-  useScreenEditor.setState({ sessions: {} });
-  useScreenerStore.setState({ runs: {} });
 });
 afterEach(() => vi.unstubAllGlobals());
 
-test("문장 편집의 Ctrl+Enter와 Meta+Enter는 현재 검증된 draft를 실행한다", async () => {
-  const source: Screen = { id: "s", name: "저장한 식", markets: [], exclude: [], conditions: [] };
-  const base: Screens = { revision: 1, screens: [source] };
-  useScreenEditor.getState().change(base, source, (draft) => ({ ...draft, name: "지금 편집 중", markets: ["kosdaq"] }));
-  const sent: Screen[] = [];
-  vi.stubGlobal("fetch", vi.fn(async (_url: string, init: RequestInit) => { sent.push(JSON.parse(String(init.body))); return new Response(JSON.stringify({ rows: [] })); }));
+test("결과 영역의 Ctrl+Enter와 Meta+Enter는 실행을 한 번 부르고 기본 동작을 막는다", () => {
   for (const modifiers of [{ ctrlKey: true }, { metaKey: true }]) {
-    const session = currentSession(base, source, useScreenEditor.getState().sessions);
-    const checked = checkedSession(session, base);
-    if (!checked.ok) throw new Error("검증된 draft여야 합니다");
     const event = key(modifiers);
-    const run = vi.fn(() => useScreenerStore.getState().run(checked.screen));
-    handleResultKey(event, callbacks(run));
-    expect(run).toHaveBeenCalledOnce();
-    await run.mock.results[0]?.value;
+    const actions = callbacks();
+    handleResultKey(event, actions);
+    expect(actions.onRun).toHaveBeenCalledOnce();
     expect(event.preventDefault).toHaveBeenCalledOnce();
   }
-  expect(sent).toEqual(Array.from({ length: 2 }, () => ({ ...source, name: "지금 편집 중", markets: ["kosdaq"] })));
-  expect(source.name).toBe("저장한 식");
 });
 
 test("팝오버의 Enter와 Ctrl+Enter는 결과 열기나 실행이 가져가지 않는다", () => {
@@ -79,19 +65,28 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
-function editorMarkup(wide: boolean, editing: boolean, invalid = false) {
+async function editorMarkup(wide: boolean, editing: boolean, invalid = false) {
   const source: Screen = { id: "s", name: "신고가", markets: ["kospi"], exclude: ["etf"], conditions: [{ kind: "new_high", period: "W", field: "high", n: 52, recentBars: 5 }] };
   const base: Screens = { revision: 1, screens: [source] };
-  const session = sessionOf(base, source);
+  const screenEditing = createScreenEditing({
+    screens: { watch: (see) => see(base), load: async () => ({ kind: "ok", list: base }), put: async () => ({ kind: "error", message: "쓰지 않음" }) },
+    runner: { runs: () => ({}), check: async () => ({ kind: "ready" }), run: async () => {} },
+  });
+  if (invalid) {
+    screenEditing.edit((draft) => ({ ...draft, name: "" }));
+    await screenEditing.run();
+  }
+  const { entries, chosen } = screenEditing.view();
+  if (!chosen?.draft) throw new Error("문장 편집기에 보일 조건식 초안이 있어야 합니다");
   const client = new QueryClient();
-  const editor = createElement(SentenceEditor, { session: invalid ? { ...session, draft: { ...session.draft, name: "" }, tried: true } : session, base, source, running: false, blocked: false, resultActions: null, wide, editing, onEditingChange: () => {}, onRun: () => {} });
+  const editor = createElement(SentenceEditor, { screenEditing, chosen, entries, blocked: false, resultActions: null, wide, editing, onEditingChange: () => {}, onRun: () => {} });
   const markup = renderToStaticMarkup(createElement(QueryClientProvider, { client }, editor));
   client.clear();
   return markup;
 }
 
-test("오른쪽 탭은 조건 요약과 실행·편집만 보이고 문장 편집은 편집 창에서 연다", () => {
-  const closed = editorMarkup(false, false);
+test("오른쪽 탭은 조건 요약과 실행·편집만 보이고 문장 편집은 편집 창에서 연다", async () => {
+  const closed = await editorMarkup(false, false);
   expect(closed).toContain("52주 신고가");
   expect(closed).toContain("코스피 · ETF 제외");
   expect(closed).toContain('aria-haspopup="dialog" aria-expanded="false"');
@@ -99,7 +94,7 @@ test("오른쪽 탭은 조건 요약과 실행·편집만 보이고 문장 편�
   expect(closed).not.toContain('aria-label="문장형 조건식"');
   expect(closed).not.toContain('aria-label="조건 편집 창"');
   expect(closed).not.toContain("조건 펼치기");
-  const open = editorMarkup(false, true);
+  const open = await editorMarkup(false, true);
   expect(open).toContain('role="dialog" aria-label="조건 편집 창"');
   expect(open).toContain('aria-label="조건식 이름"');
   expect(open).toContain('aria-label="문장형 조건식"');
@@ -109,27 +104,27 @@ test("오른쪽 탭은 조건 요약과 실행·편집만 보이고 문장 편�
   expect([...open.matchAll(/>저장</g)]).toHaveLength(1);
 });
 
-test("넓게 보기는 조건 요약에서 문장 편집을 그 자리에 펼치고 편집 창을 쓰지 않는다", () => {
-  const collapsed = editorMarkup(true, false);
+test("넓게 보기는 조건 요약에서 문장 편집을 그 자리에 펼치고 편집 창을 쓰지 않는다", async () => {
+  const collapsed = await editorMarkup(true, false);
   expect(collapsed).toContain("조건 펼치기");
   expect(collapsed).toContain("52주 신고가");
   expect(collapsed).not.toContain('aria-label="문장형 조건식"');
   expect(collapsed).toContain('aria-keyshortcuts="Control+Enter Meta+Enter"');
-  const expanded = editorMarkup(true, true);
+  const expanded = await editorMarkup(true, true);
   expect(expanded).toContain("조건 접기");
   expect(expanded).toContain('aria-label="문장형 조건식"');
   expect(expanded).not.toContain('aria-label="조건 편집 창"');
   expect(expanded).not.toContain("편집</button>");
 });
 
-test("검증에 실패하면 넓게 보기는 조건 편집을 펼치고 오른쪽 탭은 닫힌 패널과 편집 창에 오류를 한 번씩 보인다", () => {
-  const wide = editorMarkup(true, false, true);
+test("검증에 실패하면 넓게 보기는 조건 편집을 펼치고 오른쪽 탭은 닫힌 패널과 편집 창에 오류를 한 번씩 보인다", async () => {
+  const wide = await editorMarkup(true, false, true);
   expect(wide).toContain("이름을 넣으세요");
   expect(wide).toContain('aria-label="문장형 조건식"');
-  const closed = editorMarkup(false, false, true);
+  const closed = await editorMarkup(false, false, true);
   expect([...closed.matchAll(/이름을 넣으세요/g)]).toHaveLength(1);
   expect(closed).not.toContain('aria-label="문장형 조건식"');
-  const open = editorMarkup(false, true, true);
+  const open = await editorMarkup(false, true, true);
   expect([...open.matchAll(/이름을 넣으세요/g)]).toHaveLength(1);
   expect(open).toContain('aria-label="조건식 이름" aria-invalid="true"');
 });

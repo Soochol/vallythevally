@@ -149,7 +149,7 @@ const replace = (screen: Screen) => (list: readonly Screen[]) => list.map((s) =>
 test("조건식을 저장하면 목록 전체를 보내고, 서버가 받은 목록이 패널의 목록이 된다", async () => {
   const server = screensServer({ screens: [high], revision: 1_762_000_000_000 });
   const { stop, opened } = await watchScreens();
-  expect(await saveScreens(client, opened, (list) => [...list, close])).toEqual({ kind: "saved" });
+  expect(await saveScreens(client, [...opened.screens, close], opened.revision)).toEqual({ kind: "ok", saved: { screens: [high, close], revision: opened.revision + 1 } });
   expect(server.stored().screens).toEqual([high, close]);
   expect(client.getQueryData(screensQuery.queryKey)).toEqual(server.stored());
   stop();
@@ -160,14 +160,14 @@ test("다른 탭이 먼저 저장했으면 이 탭의 낡은 목록으로 덮어
   const { stop, opened } = await watchScreens();
   server.saveElsewhere([high, volume]);
 
-  const outcome = await saveScreens(client, opened, (list) => [...list, close]);
+  const outcome = await saveScreens(client, [...opened.screens, close], opened.revision);
   expect(outcome).toEqual({ kind: "stale", latest: server.stored() });
   expect(server.stored().screens).toEqual([high, volume]);
   expect(server.puts).toHaveLength(1);
   expect(client.getQueryData(screensQuery.queryKey)).toEqual(server.stored());
 
   if (outcome.kind !== "stale") throw new Error("충돌이어야 한다");
-  expect(await saveScreens(client, outcome.latest, (list) => [...list, close])).toEqual({ kind: "saved" });
+  expect((await saveScreens(client, [...outcome.latest.screens, close], outcome.latest.revision)).kind).toBe("ok");
   expect(server.stored().screens).toEqual([high, volume, close]);
   stop();
 });
@@ -183,7 +183,7 @@ test("편집을 연 뒤 재연결로 목록을 다시 읽어도 연 때의 목�
   await vi.waitFor(() => expect(client.getQueryData(screensQuery.queryKey)).toEqual(server.stored()));
 
   const renamed: Screen = { ...high, name: "고가 200일 신고가 고침" };
-  expect(await saveScreens(client, opened, replace(renamed))).toEqual({ kind: "stale", latest: server.stored() });
+  expect(await saveScreens(client, replace(renamed)(opened.screens), opened.revision)).toEqual({ kind: "stale", latest: server.stored() });
   expect(server.stored().screens).toEqual([halted, close]);
   expect(server.puts).toHaveLength(1);
   stop();

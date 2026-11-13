@@ -13,10 +13,10 @@ import {
   NO_CONDITIONS_SENTENCE,
   UNIT,
 } from "../../lib/screener";
-import { useScreenerStore } from "../../stores/screener";
 import { useSelectionStore } from "../../stores/selection";
 import { DialogFrame, Errors, Row } from "../dialog/DialogParts";
 import { ArrowIcon, CloseIcon, PlusIcon } from "../icons";
+import { screenEditingFor } from "../screener/useScreenEditing";
 import {
   addCondition,
   changeKind,
@@ -88,8 +88,8 @@ function ScreenDialogBody({ editId, opened }: { editId: string | null; opened: S
   const store = async (change: (list: readonly Screen[]) => Screen[], stale: string, done: () => void) => {
     setSaving({ kind: "saving" });
     try {
-      const outcome = await saveScreens(client, base, change);
-      if (outcome.kind === "saved") return done();
+      const outcome = await saveScreens(client, change(base.screens), base.revision);
+      if (outcome.kind === "ok") return done();
       setBase(outcome.latest);
       setSaving({ kind: "failed", message: stale });
     } catch (e) {
@@ -107,7 +107,7 @@ function ScreenDialogBody({ editId, opened }: { editId: string | null; opened: S
     }
     const screen = check.screen;
     void store((list) => withScreen(list, screen), STALE_SAVE, () => {
-      useScreenerStore.getState().choose(screen.id);
+      screenEditingFor(client).choose(screen.id);
       closeDialog();
     });
   };

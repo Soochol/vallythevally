@@ -18,7 +18,7 @@ const backfilling = (full = false): ScreenerStatus["update"] => ({ phase: "backf
 const recentFull: ScreenerStatus["update"] = { phase: "recent", done: 0, total: 28, error: null, full: true };
 
 beforeEach(() => {
-  useScreenerStore.setState({ chosenId: null, runs: {}, storeVersion: 0, seen: null });
+  useScreenerStore.setState({ runs: {}, storeVersion: 0, seen: null });
   vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify(result), { status: 200 })));
 });
 afterEach(() => vi.unstubAllGlobals());
@@ -112,7 +112,6 @@ for (const olderFails of [false, true]) {
       const changed: Screen = { ...screen, conditions: [{ kind: "new_high", period: "W", field: "high", n: 60, recentBars: 2 }] };
       const older = useScreenerStore.getState().run(screen);
       const newer = useScreenerStore.getState().run(changed);
-      useScreenerStore.getState().choose("other");
       const fresh = { ...result, collectionStartedAt: 100, collectionCompletedAt: 101 };
       second.resolve(newerFails ? failedResponse() : responseOf(fresh));
       await newer;
@@ -157,4 +156,11 @@ test("실행식은 호출 경계에서 복사되어 호출자의 중첩 수정�
   await pending;
   expect(runOf(useScreenerStore.getState().runs, screen)?.kind).toBe("done");
   expect(useScreenerStore.getState().runs.other?.kind).toBe("done");
+});
+
+test("필드 순서만 다른 같은 조건식은 같은 실행 결과에 속하고, 내용이 다르면 속하지 않는다", async () => {
+  await useScreenerStore.getState().run(screen);
+  const reordered: Screen = { conditions: [{ n: 1000, field: "high", recentBars: 20, period: "D", kind: "new_high" }], exclude: [], markets: [], name: screen.name, id: screen.id };
+  expect(runOf(useScreenerStore.getState().runs, reordered)?.kind).toBe("done");
+  expect(runOf(useScreenerStore.getState().runs, { ...screen, markets: ["kospi"] })).toBeNull();
 });
