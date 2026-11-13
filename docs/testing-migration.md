@@ -41,3 +41,21 @@ Playwright는 현재 프런트엔드 빌드와 `Scenario`의 애플리케이션 
 네이티브 실행 파일 제거, 실제 HTTP·WebSocket 어댑터와 전체 서버 시험의 책임은 [서버 이동 기록](testing-backend-migration.md)에 있다. 실제 DART 진단은 [웹 검사](web-checks.md)의 명시적 `live`만 사용한다.
 
 `close-while-saving.spec.ts` 하나는 시험이 소유한 loopback HTTP endpoint에서 layout GET과 PUT을 받는다. 브라우저가 실제로 닫힌 뒤의 keepalive 요청은 Playwright route가 처리하지 않으므로, 앞선 PUT을 붙잡은 실제 HTTP 경계에서 최신 편집 수신·보존과 새 문맥의 재열기를 검증한다. 이 endpoint는 문서 하나만 저장하며 시장 자료나 원천 프로토콜을 구현하지 않는다.
+
+## 제거 후 검증
+
+2026-11-13에 다음 검증을 완료했다. 최종 브라우저 실행은 현재 UI를 다시 빌드했으며 네이티브 실행 파일·DB·자료 수집 준비 단계가 없다.
+
+| 명령 | 결과 |
+| --- | --- |
+| `python3 scripts/web.py e2e --workers=4` | 335개 통과. Playwright 213.962초, 준비 포함 217.272초 |
+| `python3 scripts/web.py check --maxWorkers=2` | 타입 검사와 Vitest 814개 통과 |
+| `python3 scripts/dev.py cargo test -p server -- --test-threads=4` | 687개 통과 |
+| `python3 scripts/dev.py cargo test -p server --test financials -- --test-threads=4` | 마지막 관찰 방식 보정 후 85개 재검증 통과 |
+| `python3 scripts/dev.py cargo clippy -p server --all-targets -- -D warnings` | 통과 |
+| `python3 scripts/test-dev.py`, `scripts/test-web.py`, `scripts/test-live.py` | 각각 14개·17개·14개 통과 |
+| `node scripts/test-dart-ui.mjs` | 실제 loopback 재무 응답의 화면 표시·숫자 비교 통과 |
+| `node --test research/leader-cases/check-sector-symbols.test.ts` | 10개 통과 |
+| `python3 scripts/web.py doctor --json` | 실제 Chromium 페이지 실행 통과 |
+
+시간은 4개 worker를 사용한 한 번의 전체 실행값이다. 기존 59개·다른 worker 설정의 측정과 직접적인 배속 비교에 사용하지 않는다. 원천 API는 호출하지 않았다.
