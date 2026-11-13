@@ -43,6 +43,10 @@ flock "$(git rev-parse --path-format=absolute --git-common-dir)/compile.lock" en
 cargo test --locked -p server --test contract
 ```
 
+## 개발 프로필 디버그 정보
+
+개발·시험 빌드는 워크스페이스 크레이트에 줄 번호 정보만 남기고(`[profile.dev]`의 `debug = "line-tables-only"`), 외부 의존성에는 디버그 정보를 넣지 않는다(`[profile.dev.package."*"]`의 `debug = false`). worktree마다 쌓이는 `target`의 크기와 시험 실행 파일 링크 시간을 줄이려는 설정이다. 패닉 메시지와 backtrace는 워크스페이스 코드의 파일·줄 번호를 그대로 보여 준다. 디버거로 지역 변수를 볼 수 없고, 의존성 크레이트에서 컴파일된 코드에는 줄 정보가 없다. 배포용 release 프로필에는 적용되지 않는다.
+
 ## 수집 작업 회귀 시험
 
 수집 작업의 실패 처리는 처음부터 실패하는 경우와 진행 도중 실패하는 경우를 모두 확인한다(#118). 키움 종목 목록에 있어도 일봉을 주지 않는 종목이 있다(예: 002785 진흥기업우B). 개별 종목의 일봉 미제공은 해당 종목을 건너뛰고 기록하며 다른 종목의 처리는 계속하는지 확인한다(#116).
