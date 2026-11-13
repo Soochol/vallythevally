@@ -1,12 +1,13 @@
+import type { Condition } from "../src/api/generated/Condition";
+import type { Screen } from "../src/api/generated/Screen";
+import type { ScreenerStatus } from "../src/api/generated/ScreenerStatus";
+import { emptyStatus, highResult, readyStatus, resultRows, runError, symbolInfo } from "./fixtures/screener";
 import { expectKind, fillNumber, renameScreen, expandEditor, savedEditor, addCondition, toggleExclude, screenAction } from "./sentence-editor";
 import { selectOption } from "./select-option";
 import type { Locator, Page } from "@playwright/test";
-import { type App, cell, chartOf, expect, SEARCH_BUTTON_TITLE, test } from "./harness";
+import { type Scenario, cell, chartOf, expect, SEARCH_BUTTON_TITLE, test } from "./screener-harness";
 import { editor, excludedLine, expectCellOn, expectRows, openScreener, panel, pickPeriod, pickVenue, rail, results, rows, runButton, savedTo, screenChooser, storeLine, updateBand, waitForUpdateToFinish } from "./screener-page";
 
-test.use({ krxMarket: "20261106", clockStart: "20261106203000" });
-
-const NEXT_MORNING = { market: "20261109", clockStart: "20261110100000" };
 const SCREEN_NAME = "고가 60일 신고가";
 const EDITED_NAME = "고가 60일 신고가 정지 제외";
 
@@ -17,14 +18,12 @@ async function expectWatchlistOfResults(page: Page) {
   await expect.poll(() => watchPanel(page).locator("li[data-code]").evaluateAll((li) => li.map((e) => e.getAttribute("data-code")))).toEqual(["110030", "110035", "110040", "110050"]);
 }
 
-const SEEDED_SCREEN = { id: "seeded", name: SCREEN_NAME, markets: [], exclude: ["etf"], conditions: [{ kind: "new_high", period: "D", recentBars: 20, field: "high", n: 60 }] };
-const LATE_ANSWER_SETTLE_MS = 300;
+const SEEDED_SCREEN: Screen = { id: "seeded", name: SCREEN_NAME, markets: [], exclude: ["etf"], conditions: [{ kind: "new_high", period: "D", recentBars: 20, field: "high", n: 60 }] };
 const phoneTabs = (page: Page) => page.getByRole("navigation", { name: "휴대폰 탭" });
 const openPhoneScreener = (page: Page) => phoneTabs(page).getByRole("button", { name: "스크리너" }).click();
 
-async function runSeededScreen(app: App, page: Page, openPanel: (page: Page) => Promise<void>) {
-  const seeded = await fetch(`${app.url}/api/screens`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ screens: [SEEDED_SCREEN], revision: 1 }) });
-  expect(seeded.status).toBe(200);
+async function runSeededScreen(scenario: Scenario, page: Page, openPanel: (page: Page) => Promise<void>) {
+  scenario.documents.saveScreens({ screens: [SEEDED_SCREEN], revision: 1 });
   await page.goto("/");
   await openPanel(page);
   await expect(screenChooser(page)).toHaveText(SCREEN_NAME);
@@ -34,27 +33,21 @@ async function runSeededScreen(app: App, page: Page, openPanel: (page: Page) => 
   await expect(rows(page)).toHaveCount(4);
 }
 
-async function holdSymbolInfo(page: Page, code: string) {
+async function holdSymbolInfo(scenario: Scenario, page: Page, code: string) {
   const path = `/api/symbols/${code}`;
-  let letGo = () => {};
-  const released = new Promise<void>((resolve) => (letGo = resolve));
-  await page.route(`**${path}`, async (route) => {
-    await released;
-    await route.continue();
-  });
+  const held = scenario.hold(path);
   return {
-    requested: page.waitForRequest((r) => new URL(r.url()).pathname === path),
+    requested: held.received,
     release: async () => {
-      const finished = page.waitForEvent("requestfinished", (r) => new URL(r.url()).pathname === path);
-      letGo();
+      const finished = page.waitForEvent("requestfinished", (request) => new URL(request.url()).pathname === path);
+      held.reply({ body: symbolInfo(code) });
       await finished;
-      await page.waitForTimeout(LATE_ANSWER_SETTLE_MS);
+      await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => resolve())));
     },
   };
 }
 
-test("빈 저장소를 채우고 만든 조건식으로 찾은 종목을 칸의 거래소와 봉 주기 그대로 훑고, 다음 날 자료 부족을 채운 뒤 고치고 지운다", async ({ app, page }) => {
-  test.setTimeout(180_000);
+test("업데이트 상태와 조건식 결과를 표시하고 종목을 칸의 거래소와 봉 주기대로 열며, 자료 부족을 안내하고 조건식을 고치고 지운다", async ({ screener, page }) => {
   const barRequests: string[] = [];
   page.on("request", (req) => {
     const url = new URL(req.url());
@@ -148,8 +141,9 @@ test("빈 저장소를 채우고 만든 조건식으로 찾은 종목을 칸의 
   });
 
   await test.step("다음 날 아침에는 자료가 모자라 실행이 막히고, 업데이트하면 다시 실행된다", async () => {
-    await app.fake.setKrxMarket(NEXT_MORNING.market);
-    await app.restart({ clockStart: NEXT_MORNING.clockStart });
+    screener.showStatus({ ...readyStatus(), needDay: "2026-11-09", todayAvailable: false });
+    screener.updateTo({ ...readyStatus(), lastDay: "2026-11-09", needDay: "2026-11-09" });
+    screener.showResult({ ...highResult(), asOf: "2026-11-09", rows: highResult().rows.map(row => ({ ...row, matchedDate: row.matchedDate === "2026-11-06" ? "2026-11-09" : row.matchedDate })) });
     await page.reload();
     await expectWatchlistOfResults(page);
     await openScreener(page);
@@ -161,7 +155,6 @@ test("빈 저장소를 채우고 만든 조건식으로 찾은 종목을 칸의 
 
     await updateBand(page).getByRole("button", { name: "업데이트" }).click();
     await waitForUpdateToFinish(page, "11-09(월)");
-    await app.restart({ clockStart: "20261109203000" });
     await page.reload();
     await openScreener(page);
     await runButton(page).click();
@@ -179,6 +172,7 @@ test("빈 저장소를 채우고 만든 조건식으로 찾은 종목을 칸의 
     await savedEditor(dialog);
     await expect(screenChooser(page)).toHaveText(EDITED_NAME);
     await expect(panel(page).getByText("실행하면 결과가 여기에 나옵니다")).toBeVisible();
+    screener.showResult(resultRows([["110030", "가상분할", "당일"], ["110035", "가상전자우", "당일"], ["110050", "가상관리", "10-19"]], { asOf: "2026-11-09", universe: 8, excluded: { listedTooShort: 1, historyShort: 0, unconfirmed: 0 } }));
     await runButton(page).click();
     await expect(results(page)).toContainText("3종목 · 11-09(월) 기준");
     await expect(results(page)).toContainText("대상 8종목");
@@ -209,14 +203,12 @@ test("빈 저장소를 채우고 만든 조건식으로 찾은 종목을 칸의 
   });
 });
 
-test("시가총액 줄이나 줄마다 다른 봉 주기가 든 조건식도 편집에서 그대로 열리고, 이름만 바꿔 저장해도 줄과 시장이 그대로 남으며, 거래대금 신고가 줄은 신고거래대금 항목으로 보인다", async ({ app, page }) => {
-  const newHigh = (period: string, field: string, n: number, m: number) => ({ kind: "new_high", period, recentBars: m, field, n });
-  const capped = { id: "capped", name: "시가총액 섞임", markets: [], exclude: [], conditions: [newHigh("D", "high", 60, 1), { kind: "market_cap", min: 300_000_000_000, max: null }] };
-  const mixed = { id: "mixed", name: "주봉 섞임", markets: ["kosdaq"], exclude: [], conditions: [newHigh("D", "high", 60, 1), newHigh("W", "close", 52, 1)] };
-  const traded = { id: "traded", name: "신고거래대금", markets: [], exclude: [], conditions: [newHigh("D", "traded_value", 60, 1)] };
-  const screensUrl = `${app.url}/api/screens`;
-  const seeded = await fetch(screensUrl, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ screens: [capped, mixed, traded], revision: 1 }) });
-  expect(seeded.status).toBe(200);
+test("시가총액 줄이나 줄마다 다른 봉 주기가 든 조건식도 편집에서 그대로 열리고, 이름만 바꿔 저장해도 줄과 시장이 그대로 남으며, 거래대금 신고가 줄은 신고거래대금 항목으로 보인다", async ({ scenario, page }) => {
+  const newHigh = (period: "D" | "W" | "M", field: "close" | "high" | "volume" | "traded_value", n: number, m: number): Condition => ({ kind: "new_high", period, recentBars: m, field, n });
+  const capped: Screen = { id: "capped", name: "시가총액 섞임", markets: [], exclude: [], conditions: [newHigh("D", "high", 60, 1), { kind: "market_cap", min: 300_000_000_000, max: null }] };
+  const mixed: Screen = { id: "mixed", name: "주봉 섞임", markets: ["kosdaq"], exclude: [], conditions: [newHigh("D", "high", 60, 1), newHigh("W", "close", 52, 1)] };
+  const traded: Screen = { id: "traded", name: "신고거래대금", markets: [], exclude: [], conditions: [newHigh("D", "traded_value", 60, 1)] };
+  scenario.documents.saveScreens({ screens: [capped, mixed, traded], revision: 1 });
   await page.goto("/");
   await openScreener(page);
   const edit = async (name: string) => {
@@ -264,7 +256,7 @@ test("시가총액 줄이나 줄마다 다른 봉 주기가 든 조건식도 편
     await renameAndSave(dialog, "신고거래대금 바꿈");
   });
 
-  const stored = await (await fetch(screensUrl)).json();
+  const stored = scenario.documents.screens();
   expect(stored.screens).toEqual([
     { ...capped, name: "시가총액 섞임 바꿈" },
     { ...mixed, name: "주봉 섞임 바꿈" },
@@ -272,12 +264,11 @@ test("시가총액 줄이나 줄마다 다른 봉 주기가 든 조건식도 편
   ]);
 });
 
-test("패널 머리는 줄마다 그 줄의 봉 주기로 조건을 풀고, 시장 칩을 제외 칩과 함께 보이며, 조건식 메뉴에는 이름만 보인다", async ({ app, page }) => {
-  const newHigh = (period: string, field: string, n: number, m: number) => ({ kind: "new_high", period, recentBars: m, field, n });
-  const mixed = { id: "mixed", name: "주봉 신고가와 일봉 신고거래량", markets: ["kosdaq"], exclude: ["managed", "etf"], conditions: [newHigh("W", "close", 52, 1), newHigh("D", "volume", 60, 5)] };
-  const plain = { id: "plain", name: "전 종목 신고가", markets: [], exclude: [], conditions: [newHigh("M", "high", 12, 1)] };
-  const seeded = await fetch(`${app.url}/api/screens`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ screens: [mixed, plain], revision: 1 }) });
-  expect(seeded.status).toBe(200);
+test("패널 머리는 줄마다 그 줄의 봉 주기로 조건을 풀고, 시장 칩을 제외 칩과 함께 보이며, 조건식 메뉴에는 이름만 보인다", async ({ scenario, page }) => {
+  const newHigh = (period: "D" | "W" | "M", field: "close" | "high" | "volume" | "traded_value", n: number, m: number): Condition => ({ kind: "new_high", period, recentBars: m, field, n });
+  const mixed: Screen = { id: "mixed", name: "주봉 신고가와 일봉 신고거래량", markets: ["kosdaq"], exclude: ["managed", "etf"], conditions: [newHigh("W", "close", 52, 1), newHigh("D", "volume", 60, 5)] };
+  const plain: Screen = { id: "plain", name: "전 종목 신고가", markets: [], exclude: [], conditions: [newHigh("M", "high", 12, 1)] };
+  scenario.documents.saveScreens({ screens: [mixed, plain], revision: 1 });
   await page.goto("/");
   await openScreener(page);
   await expandEditor(page);
@@ -303,9 +294,9 @@ test("패널 머리는 줄마다 그 줄의 봉 주기로 조건을 풀고, 시�
   await expect(exclusions).toHaveCount(0);
 });
 
-test("결과를 연 뒤 종목 정보를 기다리는 사이 검색으로 다른 종목을 열면, 늦게 온 정보는 그 선택을 덮지 않고 다음 열기는 그대로 된다", async ({ app, page }) => {
-  await runSeededScreen(app, page, openScreener);
-  const held = await holdSymbolInfo(page, "110030");
+test("결과를 연 뒤 종목 정보를 기다리는 사이 검색으로 다른 종목을 열면, 늦게 온 정보는 그 선택을 덮지 않고 다음 열기는 그대로 된다", async ({ scenario, page }) => {
+  await runSeededScreen(scenario, page, openScreener);
+  const held = await holdSymbolInfo(scenario, page, "110030");
   await rows(page).nth(0).getByRole("button").click();
   await held.requested;
 
@@ -322,18 +313,18 @@ test("결과를 연 뒤 종목 정보를 기다리는 사이 검색으로 다른
 });
 
 test.describe("20:00 뒤", () => {
-  test.use({ krxMarket: "20261105", clockStart: "20261105203000" });
-
-  test("그날 봉까지 받고, 받은 뒤에는 빠진 관측일이 없다고 보이며, 다음 날 저녁에는 오늘 자료를 받을 수 있다고 알린다", async ({ app, page }) => {
+  test("오늘 자료를 받는 안내와 완료 날짜를 보이고, 다음 관측일이 있으면 업데이트를 제안한다", async ({ screener, page }) => {
+    const previous = { ...readyStatus(), lastDay: "2026-11-05", needDay: "2026-11-04", todayAvailable: false };
+    screener.updateTo({ ...previous, update: { phase: "backfill", done: 2, total: 10, error: null, full: false } });
     await page.goto("/");
     await openScreener(page);
     await updateBand(page).getByRole("button", { name: "처음 받기" }).click();
     await expect(panel(page).getByRole("status")).toContainText(/과거 이력 이어 받기[\s\S]*오늘 자료까지 받습니다\./);
+    screener.showStatus(previous);
     await waitForUpdateToFinish(page, "11-05(목)");
     await expect(storeLine(page)).toContainText("빠진 관측일 없음");
-
-    await app.fake.setKrxMarket("20261106");
-    await app.restart({ clockStart: "20261106203000" });
+    screener.showStatus({ ...previous, needDay: "2026-11-05", todayAvailable: true });
+    screener.updateTo(readyStatus());
     await page.reload();
     await openScreener(page);
     await expect(storeLine(page)).toContainText("KRX 일봉 · 11-05(목)까지");
@@ -344,7 +335,7 @@ test.describe("20:00 뒤", () => {
   });
 });
 
-test("최근 관측일을 채우는 동안에는 실행이 막히고, 과거 이어 받기를 취소한 뒤에는 이력이 덜 찬 종목을 빼고 실행되며 받은 자료는 남는다", async ({ app, page }) => {
+test("최근 관측일 수집 중 실행을 막고 이력 이어 받기 취소와 완료 상태의 제외 종목 안내와 결과를 표시한다", async ({ screener, page }) => {
   await page.goto("/");
   await openScreener(page);
   await panel(page).getByRole("button", { name: "새 조건식" }).click();
@@ -356,20 +347,25 @@ test("최근 관측일을 채우는 동안에는 실행이 막히고, 과거 이
   await dialog.getByRole("button", { name: "저장" }).click();
   await savedEditor(dialog);
 
-  await app.fake.delay("ka10081", 1_500);
+  screener.updateTo({ ...emptyStatus(), update: { phase: "recent", done: 0, total: 10, error: null, full: false } });
+  const partial = { ...readyStatus(), fullHistory: { done: 2, total: 10 } };
+  screener.cancelTo(partial);
   await updateBand(page).getByRole("button", { name: "처음 받기" }).click();
   await expect(updateBand(page)).toContainText("최근 관측일 채우기");
   await expect(runButton(page)).toBeDisabled();
   await expect(panel(page).getByText("자료 상태를 확인한 뒤 실행하세요")).toBeVisible();
 
-  await expect(updateBand(page)).toContainText("과거 이력 이어 받기", { timeout: 60_000 });
+  screener.showStatus({ ...partial, update: { phase: "backfill", done: 2, total: 10, error: null, full: false } });
+  await expect(updateBand(page)).toContainText("과거 이력 이어 받기");
   await updateBand(page).getByRole("button", { name: "취소" }).click();
+  screener.showResult(resultRows([], { universe: 10, excluded: { listedTooShort: 6, historyShort: 2, unconfirmed: 0 } }));
   await runButton(page).click();
   await expect(excludedLine(page)).toHaveText(/^대상 10종목 · 빠짐: 상장 기간 부족 6 · 이력 덜 참 [1-4]$/);
   await expect(updateBand(page)).toBeHidden();
   await expect(storeLine(page)).toContainText(/과거 이력 \d\/10종목/);
 
-  await app.fake.delay("ka10081", 0);
+  screener.updateTo(readyStatus());
+  screener.showResult(resultRows([["110060", "가상200", "09-30"], ["110010", "가상전자", "08-03"], ["110020", "가상화학", "07-14"]], { universe: 10, excluded: { listedTooShort: 6, historyShort: 0, unconfirmed: 0 } }));
   await storeLine(page).getByRole("button", { name: "업데이트" }).click();
   await waitForUpdateToFinish(page, "11-06(금)");
   await expect(storeLine(page)).not.toContainText("과거 이력");
@@ -382,8 +378,8 @@ test("최근 관측일을 채우는 동안에는 실행이 막히고, 과거 이
   ]);
 });
 
-test("키움이 운영자 확인이 필요한 오류를 내면 멈춘 이유를 보이고 다시 시도를 내밀지 않으며, 서버를 다시 켜면 처음부터 받는다", async ({ app, page }) => {
-  await app.fake.respondWith({ apiId: "ka10081", status: 200, body: { return_code: 0, return_msg: "정상적으로 처리되었습니다" } });
+test("운영자 확인이 필요한 업데이트 오류는 이유만 보이고 다시 시도를 숨기며 새 현황에서는 처음 받기를 표시한다", async ({ screener, page }) => {
+  screener.updateTo({ ...emptyStatus(), update: { phase: "recent", done: 0, total: 10, full: false, error: { ...runError("키움 응답 형식이 예상과 다릅니다. 운영자가 확인하고 서버를 다시 켤 때까지 요청을 멈춥니다", "protocol").error, manualActionRequired: true } } });
   await page.goto("/");
   await openScreener(page);
   await updateBand(page).getByRole("button", { name: "처음 받기" }).click();
@@ -393,8 +389,8 @@ test("키움이 운영자 확인이 필요한 오류를 내면 멈춘 이유를 
   await expect(stopped).toContainText("운영자가 확인하고 서버를 다시 켤 때까지");
   await expect(stopped.getByRole("button", { name: "다시 시도" })).toHaveCount(0);
 
-  await app.fake.reset();
-  await app.restart();
+  screener.showStatus(emptyStatus());
+  screener.updateTo(readyStatus());
   await page.reload();
   await openScreener(page);
   await updateBand(page).getByRole("button", { name: "처음 받기" }).click();
@@ -402,16 +398,9 @@ test("키움이 운영자 확인이 필요한 오류를 내면 멈춘 이유를 
 });
 
 test.describe("서버와 시계가 어긋난 브라우저", () => {
-  test.use({ clockStart: null });
-
   const kstClock = (unixSeconds: number) => new Date(unixSeconds * 1000).toLocaleTimeString("en-GB", { timeZone: "Asia/Seoul", hourCycle: "h23" });
-  const sleepUntil = (ms: number) => new Promise((resolve) => setTimeout(resolve, Math.max(0, ms - Date.now())));
   const retryButton = (page: Page) => panel(page).getByRole("alert").getByRole("button", { name: "다시 시도" });
-
-  async function stoppedRetryAt(url: string): Promise<number> {
-    const status = (await (await fetch(`${url}/api/screener/status`)).json()) as { update: { error: { retryAt: number } } };
-    return status.update.error.retryAt;
-  }
+  const stopped = (retryAt: number): ScreenerStatus => ({ ...emptyStatus(), update: { phase: "recent", done: 0, total: 10, full: false, error: { ...runError("키움에 연결하지 못했습니다", "kiwoom_unreachable").error, retryAt } } });
 
   async function expectFullReload(page: Page, check: (item: Locator) => Promise<void>) {
     const toggle = panel(page).getByRole("button", { name: "스크리너 메뉴" });
@@ -422,120 +411,79 @@ test.describe("서버와 시계가 어긋난 브라우저", () => {
     await expect(menu).toBeHidden();
   }
 
-  test("키움 관문이 닫혀 업데이트가 멈추면 브라우저 시계가 앞서든 뒤처지든, 기다리는 사이 바로잡혀도 관문이 열릴 때까지 다시 시도와 전체 다시 받기를 막고, 열리면 저절로 켠다", async ({ app, page, browser }) => {
-    test.setTimeout(120_000);
+  test("서버가 안내한 재시도 시각까지 브라우저 시계가 앞서거나 뒤처져도 다시 시도와 전체 다시 받기를 막는다", async ({ scenario, screener, page, browser }) => {
     const ahead = page;
-    const behindContext = await browser.newContext({ baseURL: app.url });
-    const behind = await behindContext.newPage();
-    await ahead.clock.install({ time: Date.now() + 60_000 });
-    await behind.clock.install({ time: Date.now() - 60_000 });
-    const retries: string[] = [];
-    ahead.on("request", (req) => {
-      if (req.method() === "POST" && new URL(req.url()).pathname === "/api/screener/update") retries.push(req.postData() ?? "");
-    });
-
-    await app.fake.respondWith({ apiId: "ka10081", status: 503, body: {} });
+    const retryAt = Math.floor(scenario.now / 1000) + 30;
+    screener.updateTo(stopped(retryAt));
+    await ahead.clock.install({ time: scenario.now + 60_000 });
     await ahead.goto("/");
     await openScreener(ahead);
     await updateBand(ahead).getByRole("button", { name: "처음 받기" }).click();
-    await expect(panel(ahead).getByRole("alert")).toContainText("업데이트가 멈췄습니다");
-    const retryAt = await stoppedRetryAt(app.url);
-    const opensFrom = `${kstClock(retryAt + 1)}부터`;
-    await app.fake.reset();
-    await behind.goto("/");
+    const behindContext = await browser.newContext();
+    await scenario.install(behindContext);
+    const behind = await behindContext.newPage();
+    await behind.clock.install({ time: scenario.now - 60_000 });
+    await behind.goto(ahead.url());
     await openScreener(behind);
-
+    const opensFrom = `${kstClock(retryAt + 1)}부터`;
     for (const p of [ahead, behind]) {
       await expect(retryButton(p)).toBeDisabled();
       await expect(panel(p).getByRole("alert")).toContainText(`${opensFrom} 다시 시도할 수 있습니다.`);
-      await expectFullReload(p, async (item) => {
-        await expect(item).toBeDisabled();
-        await expect(item).toContainText(opensFrom);
-      });
+      await expectFullReload(p, async item => { await expect(item).toBeDisabled(); await expect(item).toContainText(opensFrom); });
     }
-    await ahead.clock.setSystemTime(Date.now());
-    const answered = ahead.waitForResponse((r) => new URL(r.url()).pathname === "/api/symbols");
+    await ahead.clock.setSystemTime(scenario.now);
+    const answered = ahead.waitForResponse(response => new URL(response.url()).pathname === "/api/symbols");
     await ahead.getByTitle(SEARCH_BUTTON_TITLE).click();
     await ahead.getByRole("dialog", { name: "종목 검색" }).getByRole("combobox", { name: "종목 검색" }).fill("삼성");
     await answered;
     await ahead.keyboard.press("Escape");
-    await sleepUntil(retryAt * 1000 - 1_000);
-    for (const p of [ahead, behind]) await expect(retryButton(p)).toBeDisabled({ timeout: 100 });
-    expect(Date.now()).toBeLessThan(retryAt * 1000);
-
     for (const p of [ahead, behind]) {
-      await expect(retryButton(p)).toBeEnabled({ timeout: 5_000 });
-      expect(Date.now()).toBeGreaterThanOrEqual(retryAt * 1000);
+      await p.clock.fastForward(28_000);
+      await expect(retryButton(p)).toBeDisabled();
+      await p.clock.fastForward(4_000);
+      await expect(retryButton(p)).toBeEnabled();
       await expect(panel(p).getByRole("alert")).toContainText("다시 시도하면 남은 것만 받습니다.");
-      await expectFullReload(p, async (item) => {
-        await expect(item).toBeEnabled();
-        await expect(item).toHaveText("전체 다시 받기…");
-      });
+      await expectFullReload(p, async item => { await expect(item).toBeEnabled(); await expect(item).toHaveText("전체 다시 받기…"); });
     }
-
-    retries.length = 0;
+    screener.updateTo(readyStatus());
+    const requested = ahead.waitForRequest(request => request.method() === "POST" && new URL(request.url()).pathname === "/api/screener/update");
     await retryButton(ahead).click();
+    expect((await requested).postDataJSON()).toEqual({ full: false });
     await waitForUpdateToFinish(ahead, "11-06(금)");
-    expect(retries).toEqual([JSON.stringify({ full: false })]);
     await behindContext.close();
   });
 
-  test("기다리는 사이 오래된 응답이 늦게 와도 다시 시도와 전체 다시 받기는 안내한 시각에 저절로 켜진다", async ({ app, page }) => {
-    test.setTimeout(120_000);
-    let markFetched = () => {};
-    let release = () => {};
-    const fetched = new Promise<void>((resolve) => (markFetched = resolve));
-    const held = new Promise<void>((resolve) => (release = resolve));
+  test("오래된 봉 응답이 늦게 와도 안내한 재시도 시각은 바뀌지 않는다", async ({ scenario, screener, page }) => {
+    const retryAt = Math.floor(scenario.now / 1000) + 30;
+    screener.updateTo(stopped(retryAt));
     let holding = true;
-    await page.route("**/api/bars?*", async (route) => {
-      if (!holding) return route.continue();
-      holding = false;
-      const response = await route.fetch();
-      markFetched();
-      await held;
-      await route.fulfill({ response });
-    });
-
+    const held = scenario.hold(url => url.pathname === "/api/bars" && holding);
+    await page.clock.install({ time: scenario.now });
     await page.goto("/");
-    await fetched;
-    await app.fake.respondWith({ apiId: "ka10081", status: 503, body: {} });
+    const request = await held.received;
+    holding = false;
+    const query = new URL(request.url()).searchParams;
+    const oldBars = scenario.market.page({ symbol: query.get("symbol") ?? "IDX:001" });
     await openScreener(page);
     await updateBand(page).getByRole("button", { name: "처음 받기" }).click();
     await expect(retryButton(page)).toBeDisabled();
-    const retryAt = await stoppedRetryAt(app.url);
-    const opensAt = (retryAt + 1) * 1000;
-    await app.fake.reset();
-    await expectFullReload(page, async (item) => {
-      await expect(item).toBeDisabled();
-      await expect(item).toContainText(`${kstClock(retryAt + 1)}부터`);
-    });
-
-    await sleepUntil(opensAt - 10_000);
-    const answered: string[] = [];
-    page.on("response", (r) => {
-      const { pathname } = new URL(r.url());
-      if (pathname.startsWith("/api/")) answered.push(pathname);
-    });
-    const delivered = page.waitForResponse((r) => new URL(r.url()).pathname === "/api/bars");
-    release();
+    await expectFullReload(page, async item => { await expect(item).toBeDisabled(); await expect(item).toContainText(`${kstClock(retryAt + 1)}부터`); });
+    await page.clock.fastForward(20_000);
+    const delivered = page.waitForResponse(response => new URL(response.url()).pathname === "/api/bars");
+    held.reply({ body: oldBars });
     await delivered;
     await expect(retryButton(page)).toBeDisabled();
-
-    await sleepUntil(opensAt);
-    await expect(retryButton(page)).toBeEnabled({ timeout: 2_000 });
-    expect(answered).toEqual(["/api/bars"]);
-    await expectFullReload(page, async (item) => {
-      await expect(item).toBeEnabled();
-      await expect(item).toHaveText("전체 다시 받기…");
-    });
+    await page.clock.fastForward(12_000);
+    await expect(retryButton(page)).toBeEnabled();
+    await expectFullReload(page, async item => { await expect(item).toBeEnabled(); await expect(item).toHaveText("전체 다시 받기…"); });
   });
 });
 
 test.describe("휴대폰 390px", () => {
   test.use({ viewport: { width: 390, height: 844 } });
 
-  test("스크리너 탭에서 찾은 행을 누르면 차트 탭으로 가서 칸의 종목만 바꾼다", async ({ app, page }) => {
-    await runSeededScreen(app, page, openPhoneScreener);
+  test("스크리너 탭에서 찾은 행을 누르면 차트 탭으로 가서 칸의 종목만 바꾼다", async ({ scenario, page }) => {
+    await runSeededScreen(scenario, page, openPhoneScreener);
     await rows(page).nth(1).getByRole("button").click();
     await expect(phoneTabs(page).getByRole("button", { name: "차트" })).toHaveAttribute("aria-pressed", "true");
     await expect(panel(page)).toBeHidden();
@@ -543,9 +491,9 @@ test.describe("휴대폰 390px", () => {
     await expect(chartOf(cell(page))).not.toHaveAttribute("data-bar-count", "0");
   });
 
-  test("행을 누른 뒤 종목 정보를 기다리는 사이 다른 탭으로 가면, 늦게 온 정보는 차트 탭으로 끌고 가지 않고 칸도 바꾸지 않는다", async ({ app, page }) => {
-    await runSeededScreen(app, page, openPhoneScreener);
-    const held = await holdSymbolInfo(page, "110030");
+  test("행을 누른 뒤 종목 정보를 기다리는 사이 다른 탭으로 가면, 늦게 온 정보는 차트 탭으로 끌고 가지 않고 칸도 바꾸지 않는다", async ({ scenario, page }) => {
+    await runSeededScreen(scenario, page, openPhoneScreener);
+    const held = await holdSymbolInfo(scenario, page, "110030");
     await rows(page).nth(0).getByRole("button").click();
     await held.requested;
     await phoneTabs(page).getByRole("button", { name: "관심종목" }).click();

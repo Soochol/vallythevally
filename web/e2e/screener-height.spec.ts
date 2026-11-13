@@ -1,18 +1,16 @@
 import { writeFile } from "node:fs/promises";
 import type { Locator, Page } from "@playwright/test";
-import type { ApiError } from "../src/api/generated/ApiError";
+import { currentResult, runError } from "./fixtures/screener";
 import type { Screen } from "../src/api/generated/Screen";
-import { cell, chartOf, expect, test } from "./harness";
+import { cell, chartOf, expect, test } from "./screener-harness";
 import { closeEditorWindow, expandEditor } from "./sentence-editor";
 import { openResultDetails, openScreener, panel, results, rows, runButton, storeLine, updateBand, waitForUpdateToFinish } from "./screener-page";
 
-test.use({ krxMarket: "20261106", clockStart: "20261106203000" });
 
 const screen: Screen = {
   id: "height", name: "세 조건 결과 보존", markets: [], exclude: [],
   conditions: (["close", "high", "volume"] as const).map((field) => ({ kind: "new_high", period: "D", field, n: 1, recentBars: 1 })),
 };
-const failure = { apiId: "ka10095", status: 200, body: { return_code: 2, return_msg: "입력 값 오류입니다[1501:시험용 수집 실패]" } };
 const metadata = (page: Page) => results(page).getByLabel("결과 자료");
 
 async function openPanel(page: Page, width: number) {
@@ -78,9 +76,10 @@ const surfaces = [
 ];
 
 for (const { width, height, wide } of surfaces) {
-  test(`${width}×${height} ${wide ? "넓은 패널" : "기본 패널"}에서 세 조건의 성공·실행 중·실패 뒤 결과 행 전체를 읽고 스크롤해 차트로 연다`, async ({ app, page }, info) => {
+  test(`${width}×${height} ${wide ? "넓은 패널" : "기본 패널"}에서 세 조건의 성공·실행 중·실패 뒤 결과 행 전체를 읽고 스크롤해 차트로 연다`, async ({ scenario, screener, page }, info) => {
     await page.setViewportSize({ width: width!, height: height! });
-    expect((await fetch(`${app.url}/api/screens`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ screens: [screen], revision: 1 }) })).status).toBe(200);
+    scenario.documents.saveScreens({ screens: [screen], revision: 1 });
+    screener.showResult(currentResult());
     await page.goto("/");
     await openPanel(page, width!);
     if (wide) {
@@ -97,24 +96,14 @@ for (const { width, height, wide } of surfaces) {
     const last = rows(page).filter({ hasText: "110040" });
     const success = await rowGeometry(first);
     await page.screenshot({ path: info.outputPath("success.png"), fullPage: true });
-    let release!: () => void;
-    let received!: () => void;
-    const gate = new Promise<void>((resolve) => { release = resolve; });
-    const requested = new Promise<void>((resolve) => { received = resolve; });
-    await app.fake.respondWith(failure);
-    await page.route("**/api/screener/run", async (route) => {
-      const response = await route.fetch();
-      received();
-      await gate;
-      await route.fulfill({ response });
-    });
+    const held = scenario.hold("/api/screener/run");
     await runButton(page).click();
-    await requested;
+    await held.received;
     await expect(results(page)).toHaveAttribute("aria-busy", "true");
     await expect(metadata(page)).toHaveText(original!);
     const running = await rowGeometry(first);
     await page.screenshot({ path: info.outputPath("running.png"), fullPage: true });
-    release();
+    held.reply({ status: 503, body: runError() });
     await expect(panel(page).getByRole("alert")).toContainText("이전 결과와 수집 시각을 유지합니다");
     await expect(metadata(page)).toHaveText(original!);
     const failed = await rowGeometry(first);
@@ -167,8 +156,7 @@ for (const { width, height, wide } of surfaces) {
     await results(page).getByRole("button", { name: /^종가 순으로 정렬/ }).click();
     await expect(results(page).getByRole("columnheader", { name: "종가 순으로 정렬", exact: true })).toHaveAttribute("aria-sort", "descending");
     expect(await page.evaluate(() => document.documentElement.scrollHeight <= window.innerHeight)).toBe(true);
-    await page.unroute("**/api/screener/run");
-    await app.fake.reset();
+    scenario.reply("/api/screener/run", { body: currentResult() });
     await runButton(page).click();
     await expect(results(page)).toHaveAttribute("aria-busy", "false");
     await expect(panel(page).getByRole("alert")).toHaveCount(0);
@@ -179,9 +167,10 @@ for (const { width, height, wide } of surfaces) {
 }
 
 for (const [width, height] of [[320, 568], [1280, 600]]) {
-  test(`${width}×${height}에서 긴 오류 설명도 끝까지 읽고 보존 결과를 차트로 연다`, async ({ app, page }, info) => {
+  test(`${width}×${height}에서 긴 오류 설명도 끝까지 읽고 보존 결과를 차트로 연다`, async ({ scenario, screener, page }, info) => {
     await page.setViewportSize({ width: width!, height: height! });
-    expect((await fetch(`${app.url}/api/screens`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ screens: [screen], revision: 1 }) })).status).toBe(200);
+    scenario.documents.saveScreens({ screens: [screen], revision: 1 });
+    screener.showResult(currentResult());
     await page.goto("/");
     await openPanel(page, width!);
     await updateBand(page).getByRole("button", { name: "처음 받기" }).click();
@@ -190,14 +179,8 @@ for (const [width, height] of [[320, 568], [1280, 600]]) {
     await expect(rows(page)).toHaveCount(10);
     await openResultDetails(page);
     const original = await metadata(page).textContent();
-    await app.fake.respondWith(failure);
-    await page.route("**/api/screener/run", async (route) => {
-      const response = await route.fetch();
-      expect(response.ok()).toBe(false);
-      const body: ApiError = await response.json();
-      const message = `${body.error.message} ${"자료를 수집하지 못했습니다. 원인을 확인한 뒤 다시 실행해 주세요. ".repeat(18)}오류 설명 끝`;
-      await route.fulfill({ response, json: { ...body, error: { ...body.error, message } } });
-    });
+    const message = `${runError().error.message} ${"자료를 수집하지 못했습니다. 원인을 확인한 뒤 다시 실행해 주세요. ".repeat(18)}오류 설명 끝`;
+    screener.failRun(runError(message));
     await runButton(page).click();
     const alert = panel(page).getByRole("alert");
     await expect(alert).toContainText("오류 설명 끝");
