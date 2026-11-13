@@ -94,7 +94,7 @@ test("마지막 목록은 지울 수 없고, 지운 목록 대신 이웃 목록�
   await createList(page, "지울 목록");
   await openListMenu(page);
   await menu(page).getByRole("menuitem", { name: "목록 지우기" }).click();
-  await page.getByRole("dialog").getByRole("button", { name: "확인", exact: true }).click();
+  await page.getByRole("dialog").getByRole("button", { name: "목록 지우기", exact: true }).click();
   await expect(listButton(page)).toHaveAccessibleName("관심종목 목록: 기본");
   await openListMenu(page);
   await expect(menu(page).getByRole("menuitemradio")).toHaveText(["기본0"]);

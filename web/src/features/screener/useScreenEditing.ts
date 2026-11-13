@@ -62,7 +62,7 @@ export function screenEditingFor(client: QueryClient): ScreenEditing {
 }
 
 export async function removeChosen(editing: ScreenEditing, chosen: ChosenScreen): Promise<boolean> {
-  if (!await confirmAction(`"${chosen.draft.name}" 조건식을 삭제할까요? 되돌릴 수 없습니다.`)) return false;
+  if (!await confirmAction(`"${chosen.draft.name}" 조건식을 삭제할까요? 되돌릴 수 없습니다.`, { action: "조건식 지우기", danger: true })) return false;
   if (!await editing.remove()) return false;
   dropPendingOpen();
   return true;

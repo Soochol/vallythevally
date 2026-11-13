@@ -4,6 +4,9 @@ import type { FinancialUpdatePage } from "./generated/FinancialUpdatePage";
 import { getJson, sendJson } from "./http";
 
 export const updateActive = (status: FinancialUpdateStatus | undefined) => status === "planning" || status === "collecting" || status === "pausing" || status === "checking";
+export function updateProgress(job: Pick<FinancialUpdatePage, "phase" | "completedCompanies" | "historyCompletedCompanies" | "totalCompanies">): { done: number; total: number } {
+  return { done: job.phase === "history" || job.phase === "complete" ? job.historyCompletedCompanies : job.completedCompanies, total: job.totalCompanies };
+}
 export const financialUpdateQuery = queryOptions({
   queryKey: ["financial-update"],
   queryFn: ({ signal }) => getJson<FinancialUpdatePage>("/api/financial-update", signal),

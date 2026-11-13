@@ -28,7 +28,7 @@ test("명령 입력창은 차트를 어둡게 하거나 흐리게 하지 않고 
   await page.screenshot({ path: info.outputPath("1440-search.png") });
 });
 
-test("메뉴와 팝오버는 같은 유리 표면을 쓰고 일반 대화상자만 배경을 어둡게 한다", async ({ page }, info) => {
+test("메뉴와 팝오버는 같은 유리 표면을 쓰고 재무자료 상태는 배경 없이 뜬다", async ({ page }, info) => {
   await page.goto("/?symbol=005930");
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
   await page.getByRole("button", { name: "분봉" }).first().click();
@@ -44,7 +44,7 @@ test("메뉴와 팝오버는 같은 유리 표면을 쓰고 일반 대화상자�
   await page.getByRole("button", { name: "재무자료", exact: true }).filter({ visible: true }).click();
   const financial = page.getByRole("dialog", { name: "재무자료", exact: true });
   await expect(financial).toBeVisible();
-  expect(await styleOf(page.locator(".ui-dialog-backdrop"))).toMatchObject({ background: "rgba(5, 9, 5, 0.7)", blur: "none" });
+  await expect(page.locator(".ui-dialog-backdrop")).toHaveCount(0);
   expect(await styleOf(financial)).toMatchObject({ background: "rgba(27, 33, 27, 0.74)", blur: "blur(22px) saturate(1.6)" });
-  await page.screenshot({ path: info.outputPath("1440-dialog.png") });
+  await page.screenshot({ path: info.outputPath("1440-financial.png") });
 });
