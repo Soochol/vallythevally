@@ -1,0 +1,194 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>차트 설정</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+button{border:0;background:none;color:inherit;font:inherit;cursor:pointer;padding:0}
+a{color:#C7F36B}a:hover{color:#DAF9A0}
+</style>
+</helmet>
+<div style="width: 1180px; height: 680px; box-sizing: border-box; padding: 24px; background: #080B09; color: #F0F4EC; font-family: 'Noto Sans KR', system-ui, sans-serif; font-size: 12px; font-variant-numeric: tabular-nums; display: flex; flex-direction: column; gap: 12px">
+
+<div style="display: flex; align-items: center; gap: 4px; height: 48px; flex: none; padding: 0 12px; border-radius: 16px; background: #1B211B; box-shadow: 0 0 0 1px rgba(255,255,255,0.10), inset 0 1px 0 rgba(255,255,255,0.09)">
+<span style="display: flex; align-items: center; gap: 6px; padding-right: 4px; font-size: 14px; font-weight: 700"><svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#C7F36B" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M3 17l5-6 4 4 9-10"></path></svg>vally</span>
+<span style="display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 8px; border-radius: 9px; background: rgba(255,255,255,0.085)"><b style="font-weight: 600">한빛전자</b><span style="color: #AEB8A8">900010 · KRX</span></span>
+<span style="width: 1px; height: 20px; margin: 0 4px; background: rgba(255,255,255,0.08)"></span>
+<span style="display: inline-flex; align-items: center; height: 26px; padding: 0 8px; color: #AEB8A8">3분</span>
+<span style="display: inline-flex; align-items: center; height: 26px; padding: 0 8px; border-radius: 7px; background: #C7F36B; color: #131B05; font-weight: 600">일</span>
+<span style="display: inline-flex; align-items: center; height: 26px; padding: 0 8px; color: #AEB8A8">주</span>
+<span style="display: inline-flex; align-items: center; height: 26px; padding: 0 8px; color: #AEB8A8">월</span>
+<span style="width: 1px; height: 20px; margin: 0 4px; background: rgba(255,255,255,0.08)"></span>
+<span style="display: inline-flex; align-items: center; height: 30px; padding: 0 8px">지표</span>
+<span style="display: inline-flex; align-items: center; height: 30px; padding: 0 8px">비교</span>
+<span style="flex: 1"></span>
+<span style="display: grid; place-items: center; width: 32px; height: 32px; color: #AEB8A8"><svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8h3l2-3h6l2 3h3v11H4z"></path><circle cx="12" cy="13" r="3.5"></circle></svg></span>
+<span style="display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 10px; border-radius: 9px; background: rgba(199,243,107,0.15); color: #C7F36B; font-weight: 600"><svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 6h8M18 6h2M4 12h2M12 12h8M4 18h10M20 18h0"></path><circle cx="15" cy="6" r="2.2"></circle><circle cx="9" cy="12" r="2.2"></circle><circle cx="17" cy="18" r="2.2"></circle></svg>차트 설정</span>
+</div>
+
+<div style="flex: 1; min-height: 0; display: flex; gap: 16px">
+<div style="position: relative; flex: 1; border-radius: 16px; background: #0C100D; box-shadow: 0 0 0 1px rgba(255,255,255,0.08); overflow: hidden">
+<div style="position: absolute; left: 14px; top: 10px; display: flex; gap: 10px; align-items: baseline"><b style="font-size: 14px; font-weight: 600">한빛전자</b><span style="color: #AEB8A8">일 · 최근 {{ bars }}봉</span></div>
+<div style="position: absolute; left: 0; top: 0; width: 736px; height: 544px">
+<sc-for list="{{ grid }}" as="g" hint-placeholder-count="5">
+<div style="{{ g.lineStyle }}"></div>
+</sc-for>
+<sc-for list="{{ candles }}" as="c" hint-placeholder-count="60">
+<div style="{{ c.wick }}"></div><div style="{{ c.body }}"></div>
+</sc-for>
+<sc-if value="{{ extremes }}" hint-placeholder-val="{{ true }}">
+<div style="{{ highStyle }}"><span style="color: #FF8A94; font-weight: 600">최고</span> {{ highText }}</div>
+<div style="{{ lowStyle }}"><span style="color: #7DB0FF; font-weight: 600">최저</span> {{ lowText }}</div>
+<div style="{{ highDot }}"></div>
+<div style="{{ lowDot }}"></div>
+</sc-if>
+</div>
+<div style="position: absolute; right: 0; top: 0; width: 60px; height: 544px; border-left: 1px solid rgba(255,255,255,0.08)">
+<sc-for list="{{ grid }}" as="g" hint-placeholder-count="5">
+<span style="{{ g.labelStyle }}">{{ g.label }}</span>
+</sc-for>
+</div>
+<div style="position: absolute; left: 0; right: 0; bottom: 0; height: 28px; border-top: 1px solid rgba(255,255,255,0.08); display: flex; align-items: center; justify-content: space-between; padding: 0 72px 0 14px; color: #AEB8A8; font-size: 11px"><span>{{ fromLabel }}</span><span>오늘</span></div>
+</div>
+
+<div style="width: 320px; flex: none; align-self: flex-start; border-radius: 16px; background: #1B211B; box-shadow: 0 0 0 1px rgba(255,255,255,0.10), inset 0 1px 0 rgba(255,255,255,0.09), 0 24px 60px rgba(0,0,0,0.55); padding: 16px; display: flex; flex-direction: column; gap: 16px">
+<div style="display: flex; align-items: center; justify-content: space-between"><b style="font-size: 14px; font-weight: 600">차트 설정</b><svg role="img" aria-label="닫기" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#AEB8A8" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"></path></svg></div>
+
+<div style="display: flex; flex-direction: column; gap: 8px">
+<span style="color: #AEB8A8; font-size: 11px">화면에 보이는 봉</span>
+<div style="display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 4px; padding: 4px; border-radius: 9px; background: #080B09">
+<sc-for list="{{ presets }}" as="p" hint-placeholder-count="4">
+<button type="button" onClick="{{ p.pick }}" style="{{ p.style }}">{{ p.label }}</button>
+</sc-for>
+</div>
+<div style="display: flex; align-items: center; gap: 8px">
+<span style="flex: 1; color: #AEB8A8">직접 입력</span>
+<span style="display: inline-flex; align-items: center; justify-content: flex-end; width: 84px; height: 32px; padding: 0 10px; box-sizing: border-box; border: 1px solid rgba(255,255,255,0.16); border-radius: 9px; background: #080B09">{{ bars }}</span>
+<span style="color: #AEB8A8">봉</span>
+</div>
+</div>
+
+<div style="height: 1px; background: rgba(255,255,255,0.08)"></div>
+
+<div style="display: flex; flex-direction: column; gap: 10px">
+<span style="color: #AEB8A8; font-size: 11px">표시</span>
+<button type="button" role="switch" onClick="{{ toggleExtremes }}" style="display: flex; align-items: center; gap: 10px; text-align: left">
+<span style="flex: 1; display: flex; flex-direction: column; line-height: 1.35"><span style="font-weight: 500">화면 내 최고·최저</span><span style="color: #AEB8A8; font-size: 11px">지금 보이는 봉 안에서 찾아 표시</span></span>
+<span style="{{ trackStyle }}"><span style="{{ knobStyle }}"></span></span>
+</button>
+</div>
+
+<div style="height: 1px; background: rgba(255,255,255,0.08)"></div>
+
+<div style="display: grid; grid-template-columns: 56px minmax(0, 1fr); align-items: center; gap: 10px 8px">
+<span style="color: #AEB8A8">봉 모양</span>
+<div style="display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 4px; padding: 4px; border-radius: 9px; background: #080B09">
+<span style="display: grid; place-items: center; height: 26px; border-radius: 7px; background: #2A332A; color: #C7F36B; font-weight: 600">캔들</span>
+<span style="display: grid; place-items: center; height: 26px; color: #AEB8A8">바</span>
+<span style="display: grid; place-items: center; height: 26px; color: #AEB8A8">라인</span>
+<span style="display: grid; place-items: center; height: 26px; color: #AEB8A8">영역</span>
+</div>
+<span style="color: #AEB8A8">가격 축</span>
+<div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px; padding: 4px; border-radius: 9px; background: #080B09">
+<span style="display: grid; place-items: center; height: 26px; border-radius: 7px; background: #2A332A; color: #C7F36B; font-weight: 600">일반</span>
+<span style="display: grid; place-items: center; height: 26px; color: #AEB8A8">로그</span>
+<span style="display: grid; place-items: center; height: 26px; color: #AEB8A8">%</span>
+</div>
+</div>
+
+<span style="color: #AEB8A8; font-size: 11px">활성 칸에 바로 반영 · 레이아웃과 함께 저장</span>
+</div>
+</div>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1180,"height":680}}'>
+class Component extends DCLogic {
+series() {
+if (this._series) return this._series;
+let seed = 20261113;
+const rnd = () => { seed = (seed * 1664525 + 1013904223) % 4294967296; return seed / 4294967296; };
+const out = [];
+let close = 52000;
+for (let i = 0; i < 480; i++) {
+const open = close * (1 + (rnd() - 0.5) * 0.012);
+const drift = Math.sin(i / 37) * 0.004 + 0.0006;
+close = open * (1 + (rnd() - 0.5) * 0.036 + drift);
+const high = Math.max(open, close) * (1 + rnd() * 0.012);
+const low = Math.min(open, close) * (1 - rnd() * 0.012);
+out.push({ open, close, high, low });
+}
+this._series = out;
+return out;
+}
+renderVals() {
+const s = this.state || {};
+const bars = s.bars ?? 120;
+const extremes = s.extremes ?? true;
+const W = 736, H = 544, TOP = 64, BOTTOM = 48;
+const all = this.series();
+const view = all.slice(all.length - bars);
+let hi = 0, lo = 0;
+view.forEach((b, i) => { if (b.high > view[hi].high) hi = i; if (b.low < view[lo].low) lo = i; });
+const max = view[hi].high, min = view[lo].low;
+const y = (v) => TOP + (max - v) / (max - min) * (H - TOP - BOTTOM);
+const step = (W - 16) / bars;
+const bw = Math.max(1, Math.floor(step * 0.68));
+const x = (i) => 4 + i * step + step / 2;
+const won = (v) => Math.round(v / 10) * 10;
+const fmt = (v) => won(v).toLocaleString('en-US');
+const last = view[view.length - 1].close;
+const pct = (v) => { const p = (v - last) / last * 100; return (p > 0 ? '+' : '') + p.toFixed(2) + '%'; };
+const candles = view.map((b, i) => {
+const up = b.close >= b.open;
+const color = up ? '#FF6B78' : '#5B9BFF';
+const top = y(Math.max(b.open, b.close));
+const h = Math.max(1, y(Math.min(b.open, b.close)) - top);
+return {
+wick: 'position:absolute;width:1px;left:' + Math.round(x(i)) + 'px;top:' + y(b.high).toFixed(1) + 'px;height:' + (y(b.low) - y(b.high)).toFixed(1) + 'px;background:' + color,
+body: 'position:absolute;left:' + (Math.round(x(i)) - Math.floor(bw / 2)) + 'px;width:' + bw + 'px;top:' + top.toFixed(1) + 'px;height:' + h.toFixed(1) + 'px;background:' + color,
+};
+});
+const tag = (i, v, above) => {
+const right = x(i) > W - 190;
+return 'position:absolute;white-space:nowrap;padding:2px 8px;border-radius:7px;background:#1F261F;box-shadow:0 0 0 1px rgba(255,255,255,0.16);font-size:11px;color:#F0F4EC;top:' + (above ? y(v) - 30 : y(v) + 10).toFixed(1) + 'px;left:' + Math.round(x(i)) + 'px;transform:translateX(' + (right ? 'calc(-100% + 10px)' : '-10px') + ')';
+};
+const dot = (i, v, color) => 'position:absolute;width:7px;height:7px;border-radius:50%;box-shadow:0 0 0 2px #0C100D;background:' + color + ';left:' + (Math.round(x(i)) - 3) + 'px;top:' + (y(v) - 3.5).toFixed(1) + 'px';
+const grid = [0, 1, 2, 3, 4].map((n) => {
+const v = max - (max - min) * n / 4;
+return {
+label: fmt(v),
+lineStyle: 'position:absolute;left:0;right:0;height:1px;background:rgba(255,255,255,0.05);top:' + y(v).toFixed(1) + 'px',
+labelStyle: 'position:absolute;left:8px;font-size:11px;color:#AEB8A8;top:' + (y(v) - 8).toFixed(1) + 'px',
+};
+});
+const seg = 'display:grid;place-items:center;height:28px;border-radius:7px;font-size:12px;';
+return {
+bars,
+extremes,
+candles,
+grid,
+fromLabel: bars + '봉 전',
+highText: fmt(max) + ' (' + pct(max) + ')',
+lowText: fmt(min) + ' (' + pct(min) + ')',
+highStyle: tag(hi, max, true),
+lowStyle: tag(lo, min, false),
+highDot: dot(hi, max, '#FF6B78'),
+lowDot: dot(lo, min, '#5B9BFF'),
+presets: [60, 120, 240, 480].map((n) => ({ label: String(n), style: seg + (bars === n ? 'background:#C7F36B;color:#131B05;font-weight:600;' : 'color:#AEB8A8;'), pick: () => this.setState({ bars: n }) })),
+toggleExtremes: () => this.setState({ extremes: !extremes }),
+trackStyle: 'flex:none;position:relative;width:36px;height:20px;border-radius:999px;transition:background .12s;background:' + (extremes ? '#C7F36B' : 'rgba(255,255,255,0.16)'),
+knobStyle: 'position:absolute;top:2px;width:16px;height:16px;border-radius:50%;transition:left .12s;background:' + (extremes ? '#131B05' : '#F0F4EC') + ';left:' + (extremes ? '18px' : '2px'),
+};
+}
+}
+</script>
+</body>
+</html>
