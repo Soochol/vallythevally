@@ -37,6 +37,6 @@ test("a brush stroke in progress previews as one line without a vertex circle pe
 });
 test("point placement keeps a vertex circle on each fixed point", () => {
   const fixed: [{ t: number; price: number }] = [{ t: 10, price: 10 }];
-  const preview = placementPreview({ kind: "placing", tool: trendline, fixed, cursor: { t: 40, price: 30 }, pressed: { x: 10, y: 10 } }, trendline.defaultStyle(), ctx);
+  const preview = placementPreview({ kind: "placing", tool: trendline, fixed, cursor: { t: 40, price: 30 }, pressed: fixed[0] }, trendline.defaultStyle(), ctx);
   expect(preview.filter((s) => s.kind === "circle")).toMatchObject([{ c: { x: 10, y: 10 } }]);
 });
