@@ -70,6 +70,11 @@ const LABEL_GAP = 4;
 
 const mainColor = (style: FibStyle): Color => (style.levels.find((l) => l.on) ?? style.levels[0])?.color ?? DRAW;
 
+function recolor(style: FibStyle, color: Color): FibStyle {
+  const anyOn = style.levels.some((l) => l.on);
+  return { ...style, levels: style.levels.map((l) => (l.on || !anyOn ? { ...l, color } : l)) };
+}
+
 function trendSegments(screens: readonly (ScreenPoint | null)[]): Shape[] {
   return screens.flatMap((a, i): Shape[] => {
     const b = screens[i + 1];
@@ -159,7 +164,7 @@ export function defineFibTool(spec: FibToolSpec): Tool {
     defaultStyle: defaults,
     parseStyle: (raw) => parseFibStyle(raw, defaults()),
     bar: {
-      lineColor: { get: mainColor, set: (s, color) => ({ ...s, levels: s.levels.map((l) => (l.on ? { ...l, color } : l)) }) },
+      lineColor: { get: mainColor, set: recolor },
       width: L("line", "width"),
       dash: L("line", "dash"),
     },
@@ -183,7 +188,7 @@ export function defineFibTool(spec: FibToolSpec): Tool {
       if (anchor === null) return trendSegments(screens);
       const trend = style.trendLine ? trendSegments(screens) : [];
       const xs = screens.flatMap((s) => (s === null ? [] : [s.x]));
-      if (xs.length < screens.length) return trend;
+      if (xs.length < screens.length && style.extend !== "both") return trend;
       return [...levelShapes(style, anchor, xs, ctx), ...trend];
     },
     handles({ points }, ctx) {

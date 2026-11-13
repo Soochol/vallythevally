@@ -110,6 +110,12 @@ describe("피보나치 되돌림", () => {
     expect(levelPrices(draw([{ t: -1, price: 1 }, rising[1]!]))).toEqual([]);
   });
 
+  test("양쪽으로 연장하면 화면에 못 놓는 점이 있어도 수준 선을 칸 너비로 그린다", () => {
+    const shapes = draw([{ t: -1, price: 100 }, rising[1]!], restyle({ extend: "both" }));
+    expect(levelPrices(shapes)).toHaveLength(7);
+    expect(ofKind(shapes, "segment")[0]).toMatchObject({ a: { x: 0 }, b: { x: 800 } });
+  });
+
   test("핸들은 찍은 점마다 하나이고 자기 점만 옮긴다", () => {
     const ctx = fakeContext();
     const handles = fib.handles({ points: rising, style, text: null, selected: true }, ctx);
@@ -123,11 +129,15 @@ describe("피보나치 되돌림", () => {
     expect(fib.axisLabels({ points: rising, style, text: null, selected: false }, fakeContext())).toEqual([]);
   });
 
-  test("막대의 선 색은 켜진 수준의 색을 한 번에 바꾼다", () => {
+  test("막대의 선 색은 켜진 수준의 색을 한 번에 바꾸고, 켜진 수준이 없으면 모든 수준을 바꾼다", () => {
     const next = parseFibStyle(fib.bar.lineColor?.set(style, "#123456"), style);
     expect(next.levels.filter((l) => l.on).every((l) => l.color === "#123456")).toBe(true);
     expect(next.levels.filter((l) => !l.on).map((l) => l.color)).toEqual(style.levels.filter((l) => !l.on).map((l) => l.color));
     expect(fib.bar.lineColor?.get(next)).toBe("#123456");
+    const allOff = { ...style, levels: style.levels.map((l) => ({ ...l, on: false })) };
+    const recolored = parseFibStyle(fib.bar.lineColor?.set(allOff, "#654321"), style);
+    expect(recolored.levels.every((l) => l.color === "#654321")).toBe(true);
+    expect(fib.bar.lineColor?.get(recolored)).toBe("#654321");
     expect(fib.parseStyle(fib.bar.width?.set(style, 3))).toMatchObject({ line: { width: 3, dash: "solid" } });
   });
 
