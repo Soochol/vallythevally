@@ -2,7 +2,7 @@ import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import { cell, expect, test } from "./harness";
 
-test("공통 메뉴는 잘리지 않고 선택·키보드·포커스와 분봉 고정 복원을 지원한다", async ({ scenario, page }) => {
+test("공통 메뉴는 잘리지 않고 선택·키보드·포커스와 마지막 분봉 복원을 지원한다", async ({ scenario, page }) => {
   await page.goto("/?symbol=005930");
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
   await page.setViewportSize({ width: 390, height: 844 });
@@ -31,18 +31,20 @@ test("공통 메뉴는 잘리지 않고 선택·키보드·포커스와 분봉 �
   await opener.click({ button: "right" }); await page.keyboard.press("Escape"); await expect(opener).toBeFocused();
   await page.setViewportSize({ width: 1440, height: 900 });
   const minutes = page.getByRole("button", { name: "분봉", exact: true });
+  await expect(minutes).toHaveAttribute("aria-pressed", "true");
   await minutes.click();
-  await page.getByRole("menuitemcheckbox", { name: "5분 고정", exact: true }).click();
   await page.getByRole("menuitemradio", { name: "10분", exact: true }).click();
   await expect(cell(page)).toHaveAttribute("aria-label", /10분/);
   await minutes.click(); await page.keyboard.press("Shift+Digit3");
   await expect(cell(page)).toHaveAttribute("aria-label", /30분/);
   await minutes.click(); await page.keyboard.press("Digit5");
   await expect(cell(page)).toHaveAttribute("aria-label", /5분/);
-  await expect(page.getByRole("button", { name: "5분 고정 주기", exact: true })).toBeVisible();
-  await expect.poll(async () => scenario.documents.uiState().pinnedMinutes).toEqual(["5m"]);
+  await page.getByRole("toolbar", { name: "차트 도구 막대" }).getByRole("button", { name: "일", exact: true }).click();
+  await expect(cell(page)).toHaveAttribute("aria-label", / 일$/);
+  await expect.poll(async () => scenario.documents.uiState().lastMinute).toBe("5m");
   await page.reload();
-  await page.getByRole("button", { name: "5분 고정 주기", exact: true }).click();
+  await expect(minutes).toHaveText("5분");
+  await minutes.click();
   await expect(cell(page)).toHaveAttribute("aria-label", /5분/);
   const magnet = page.getByRole("button", { name: "자석", exact: true });
   await magnet.click({ button: "right" });

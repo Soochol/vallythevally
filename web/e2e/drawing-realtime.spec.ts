@@ -1,4 +1,4 @@
-import { selectOption } from "./select-option";
+import { selectMinute } from "./select-option";
 import type { Page } from "@playwright/test";
 import type { Drawing } from "../src/api/generated/Drawing";
 import { type Scenario, cell, chartOf, expect, SEARCH_BUTTON_TITLE, test } from "./harness";
@@ -71,7 +71,7 @@ test("drawings survive realtime updates, series replacement, resync and controll
   await pushPrice(scenario, page, 202_000, "100002");
   await expectDrawing();
 
-  await selectOption(page.getByRole("button", { name: "분봉" }), "1m");
+  await selectMinute(page.getByRole("button", { name: "분봉" }), "1m");
   await expect(cell(page)).toHaveAttribute("aria-label", "칸 1: 삼성전자 통합 1분");
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
   await pushPrice(scenario, page, 203_000, "100003");

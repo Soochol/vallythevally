@@ -1,5 +1,5 @@
 import { november9BarAt } from "./fixtures/frames";
-import { selectOption } from "./select-option";
+import { selectMinute } from "./select-option";
 import type { Locator, Page } from "@playwright/test";
 import type { SeriesKey } from "../src/api/bars";
 import type { Drawing } from "../src/api/generated/Drawing";
@@ -31,7 +31,7 @@ async function expectTenMinuteBars(page: Page, requested: SeriesKey[], label: st
 async function choose(group: Locator, name: string) {
   const minutes = group.getByRole("button", { name: "분봉", exact: true });
   if (/^\d+분$/.test(name) && await minutes.count()) {
-    await selectOption(minutes, { label: name });
+    await selectMinute(minutes, { label: name });
     await expect(minutes).toHaveAttribute("data-value", name.replace("분", "m"));
     return;
   }
@@ -68,7 +68,7 @@ test.describe("데스크톱", () => {
     const periods = toolbar.getByRole("group", { name: "봉 주기" });
     const venues = cell(page).getByRole("group", { name: "거래소" });
     await expect(cell(page)).toHaveAttribute("aria-label", "칸 1: 삼성전자 통합 일");
-    await expect(periods.getByRole("button")).toHaveText(["분봉", "일", "주", "월", "분기", "연"]);
+    await expect(periods.getByRole("button")).toHaveText(["3분", "일", "주", "월", "분기", "연"]);
 
     await choose(periods, "10분");
     await expectTenMinuteBars(page, requested, "삼성전자 통합 10분", { symbol: "005930", venue: "combined", period: "10m" });

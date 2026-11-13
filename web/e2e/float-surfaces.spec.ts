@@ -31,15 +31,17 @@ test("명령 입력창은 차트를 어둡게 하거나 흐리게 하지 않고 
 test("메뉴와 팝오버는 같은 유리 표면을 쓰고 재무자료 상태는 배경 없이 뜬다", async ({ page }, info) => {
   await page.goto("/?symbol=005930");
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
-  await page.getByRole("button", { name: "분봉" }).first().click();
+  const day = page.getByRole("toolbar", { name: "차트 도구 막대" }).getByRole("group", { name: "봉 주기" }).getByRole("button", { name: "일", exact: true });
+  expect(await styleOf(day)).toMatchObject({ background: "rgb(199, 243, 107)" });
+  const minuteButton = page.getByRole("button", { name: "분봉" }).first();
+  await minuteButton.click();
+  await expect(minuteButton).toHaveAttribute("aria-pressed", "true");
+  await minuteButton.click();
   const minutes = page.locator(".minute-menu");
   await expect(minutes).toBeVisible();
   expect(await styleOf(minutes)).toMatchObject({ background: "rgba(27, 33, 27, 0.74)", blur: "blur(22px) saturate(1.6)", radius: "16px" });
   await page.screenshot({ path: info.outputPath("1440-minute-menu.png") });
   await page.keyboard.press("Escape");
-
-  const day = page.getByRole("toolbar", { name: "차트 도구 막대" }).getByRole("group", { name: "봉 주기" }).getByRole("button", { name: "일", exact: true });
-  expect(await styleOf(day)).toMatchObject({ background: "rgb(199, 243, 107)" });
 
   await page.getByRole("button", { name: "재무자료", exact: true }).filter({ visible: true }).click();
   const financial = page.getByRole("dialog", { name: "재무자료", exact: true });
@@ -54,7 +56,10 @@ test("투명도 줄이기를 켜면 유리 표면은 흐림 없이 불투명하�
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
   const cdp = await context.newCDPSession(page);
   await cdp.send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-transparency", value: "reduce" }] });
-  await page.getByRole("button", { name: "분봉" }).first().click();
+  const minuteButton = page.getByRole("button", { name: "분봉" }).first();
+  await minuteButton.click();
+  await expect(minuteButton).toHaveAttribute("aria-pressed", "true");
+  await minuteButton.click();
   const minutes = page.locator(".minute-menu");
   await expect(minutes).toBeVisible();
   expect(await styleOf(minutes)).toMatchObject({ background: "rgb(27, 33, 27)", blur: "none" });

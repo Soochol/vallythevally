@@ -1,4 +1,4 @@
-import { selectOption } from "./select-option";
+import { selectMinute } from "./select-option";
 import { cell, expect, test } from "./harness";
 
 test.use({ clockStart: "20261109100030" });
@@ -15,7 +15,7 @@ test("라이트 저장값도 라임 다크로 열고 분봉은 하나의 메뉴�
   await expect(page.getByRole("button", { name: "테마 바꾸기" })).toHaveCount(0);
   await expect(page.getByRole("region", { name: "종목 정보" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "1분", exact: true })).toHaveCount(0);
-  await selectOption(page.getByRole("button", { name: "분봉", exact: true }), "10m");
+  await selectMinute(page.getByRole("button", { name: "분봉", exact: true }), "10m");
   await expect(cell(page)).toHaveAttribute("aria-label", /10분/);
   for (const size of [{ width: 1440, height: 900 }, { width: 1280, height: 720 }, { width: 1024, height: 768 }, { width: 768, height: 300 }]) {
     await page.setViewportSize(size);
