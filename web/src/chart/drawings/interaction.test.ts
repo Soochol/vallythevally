@@ -56,6 +56,10 @@ describe("placement", () => {
     const jittered = step(step(s, down(31, 21), c).state, { kind: "finish" }, c);
     expect(jittered.effects).toMatchObject([{ kind: "place", points: [{ t: 10, price: 10 }, { t: 30, price: 20 }] }]);
     expect(step(step(s, down(34, 20), c).state, { kind: "finish" }, c).effects).toMatchObject([{ points: [{ t: 10 }, { t: 30 }, { t: 34 }] }]);
+    const snapping: Context = { ...c, point: (p) => ({ t: Math.round(p.x / 10) * 10, price: p.y }) };
+    let snapped = step(step(IDLE, down(10, 10), snapping).state, down(34, 20), snapping).state;
+    snapped = step(snapped, down(35, 20), snapping).state;
+    expect(step(snapped, { kind: "finish" }, snapping).effects).toMatchObject([{ kind: "place", points: [{ t: 10 }, { t: 30 }] }]);
     const two = context(trendline);
     const clicked = step(step(IDLE, down(100, 100), two).state, up(100, 100), two).state;
     expect(step(clicked, down(103, 100), two).effects).toMatchObject([{ kind: "place", points: [{ t: 100, price: 100 }, { t: 103, price: 100 }] }]);

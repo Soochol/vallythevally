@@ -88,16 +88,18 @@ test("도형 도구: 사각형·타원·꺾은선·붓을 그리고 새로고침
 
 test("꺾은선: 두 번 누르는 사이 마우스가 1px 움직여도 꼭짓점을 더하지 않는다", async ({ page, scenario }) => {
   await open(page);
-  const magnet = page.getByRole("button", { name: "자석", exact: true });
-  await magnet.click();
-  await expect(magnet).toHaveAttribute("aria-pressed", "false");
-  await pickTool(page, "도형", "꺾은선");
-  const vertices = await Promise.all(([[0.2, 0.6], [0.3, 0.75], [0.4, 0.6]] as const).map(([x, y]) => chartPoint(page, x, y)));
-  for (const v of vertices) await page.mouse.click(v.x, v.y);
-  const last = vertices.at(-1)!;
-  await page.mouse.click(last.x + 1, last.y, { clickCount: 2 });
-  await expect.poll(async () => (await drawings(scenario)).length).toBe(1);
-  const polyline = (await drawings(scenario))[0]!;
-  expect(polyline.tool).toBe("path");
-  expect(polyline.points).toHaveLength(3);
+  await expect(page.getByRole("button", { name: "자석", exact: true })).toHaveAttribute("aria-pressed", "true");
+  const [a, b, c] = await Promise.all(([[0.2, 0.6], [0.3, 0.75], [0.4, 0.6]] as const).map(([x, y]) => chartPoint(page, x, y)));
+  const counts: number[] = [];
+  for (let i = 0; i < 12; i++) {
+    await pickTool(page, "도형", "꺾은선");
+    const x = Math.round(c!.x) + i;
+    await page.mouse.click(a!.x, a!.y);
+    await page.mouse.click(b!.x, b!.y);
+    await page.mouse.click(x, c!.y);
+    await page.mouse.click(x + 1, c!.y, { clickCount: 2 });
+    await expect.poll(async () => (await drawings(scenario)).length).toBe(i + 1);
+    counts.push((await drawings(scenario))[i]!.points.length);
+  }
+  expect(counts).toEqual(Array.from({ length: 12 }, () => 3));
 });
