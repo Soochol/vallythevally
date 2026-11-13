@@ -1,7 +1,9 @@
 import { expect, test } from 'vitest';
 import { step, IDLE, FREEHAND_CAPTURE_LIMIT, type Context, type Input, type Interaction } from './interaction';
 import { defineTool, type Placement, type ToolContext } from './toolSpec';
+import { brush } from './tools/brush';
 import { hline } from './tools/hline';
+import { trendline } from './tools/trendline';
 import type { DrawingPoint } from './types';
 const ctx: ToolContext={toScreen:p=>({x:p.t,y:p.price}),fromScreen:p=>({t:p.x,price:p.y}),xOf:t=>t,yOf:p=>p,timeAt:x=>x,priceAt:y=>y,shiftBars:(t,n)=>t+n,barsBetween:()=>({count:1,volume:1}),paneWidth:800,paneHeight:500,formatPrice:String,formatTime:String,logScale:false};
 const mods={ctrl:false,alt:false,shift:false};
@@ -56,4 +58,16 @@ test('freehand finalization below the saved minimum does not create an invalid d
  const r=run({kind:'freehand',min:2,max:1000},[down(0,10),up(10,10)],()=>[{t:0,price:10}]);
  expect(r.effects).toEqual([]);
  expect(r.state).toEqual(IDLE);
+});
+test('freehand ignores the magnet for the press and every dragged point while other placements still snap',()=>{
+ const magnet=(p:{x:number;y:number})=>({t:Math.floor(p.x/100)*100,price:0});
+ const draw=(tool:Context['tool'],events:Input[])=>{
+  const c: Context={tool,selected:[],drawings:[],lockAll:false,registeredModes:new Set(),ctx,point:magnet};
+  let state: Interaction=IDLE;const effects: ReturnType<typeof step>['effects']=[];
+  for(const e of events){const result=step(state,e,c);state=result.state;effects.push(...result.effects);}
+  return effects;
+ };
+ const events:Input[]=[down(15,12),move(42,30),move(170,44),up(260,51)];
+ expect(draw(brush,events)).toEqual([{kind:'place',tool:brush,points:[{t:15,price:12},{t:42,price:30},{t:170,price:44},{t:260,price:51}]}]);
+ expect(draw(trendline,events)).toMatchObject([{kind:'place',points:[{t:0,price:0},{t:200,price:0}]}]);
 });
