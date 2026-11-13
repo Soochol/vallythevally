@@ -107,7 +107,7 @@ function ListMenu({ list, onName }: { list: Watchlist; onName(n: Naming): void }
   }, []);
 
   const removeActive = async () => {
-    if (!await confirmAction(`${list.name} 목록과 그 안의 ${list.symbols.length}종목을 지웁니다`)) return;
+    if (!await confirmAction(`${list.name} 목록과 그 안의 ${list.symbols.length}종목을 지웁니다`, { action: "목록 지우기", danger: true })) return;
     const i = lists.findIndex((l) => l.id === list.id);
     const next = lists[i - 1] ?? lists[i + 1];
     useWatchlistStore.getState().removeList(list.id);

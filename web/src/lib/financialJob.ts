@@ -31,11 +31,22 @@ export interface FinancialJobAction {
   disabled: boolean;
 }
 
+export interface FinancialJobProgress {
+  done: number;
+  total: number;
+  text: string;
+}
+
+export type FinancialJobTone = "active" | "success" | "idle" | "warning";
+
 export interface FinancialJobView {
   title: string;
+  statusTone: FinancialJobTone;
+  progress: FinancialJobProgress | null;
   stopNote: string | null;
   nextCheckNote: string | null;
   latestCheckNote: string | null;
+  failedCompaniesNote: string | null;
   yearsNote: string;
   rows: [name: string, value: string][];
   phaseFailureNote: string | null;
@@ -55,13 +66,26 @@ function titleOf(job: FinancialUpdatePage): string {
   return STATUS[job.status];
 }
 
+export function financialJobTone(status: FinancialUpdateStatus | undefined): FinancialJobTone {
+  if (status === undefined || status === "idle") return "idle";
+  if (financialJobActive(status)) return "active";
+  return status === "ready" ? "success" : "warning";
+}
+
+export function financialJobProgress(job: FinancialUpdatePage): FinancialJobProgress | null {
+  if (!financialJobActive(job.status)) return null;
+  const done = job.phase === "history" || job.phase === "complete" ? job.historyCompletedCompanies : job.completedCompanies;
+  return { done, total: job.totalCompanies, text: `${PHASE[job.phase]} · ${done} / ${job.totalCompanies}회사` };
+}
+
 function resumeLabel(status: FinancialUpdateStatus): string {
   if (status === "stopped") return "확인 후 재개";
   if (status === "interrupted") return "이어서 업데이트";
   return "재개";
 }
 
-function actionOf(job: FinancialUpdatePage, commandPending: boolean): FinancialJobAction {
+export function financialJobAction(job: FinancialUpdatePage | undefined, commandPending: boolean): FinancialJobAction {
+  if (!job) return { command: "start", label: commandPending ? "요청 중" : "전체 업데이트", disabled: true };
   if (financialJobActive(job.status)) {
     return {
       command: "pause",
@@ -79,9 +103,12 @@ function actionOf(job: FinancialUpdatePage, commandPending: boolean): FinancialJ
 export function financialJobView(job: FinancialUpdatePage, commandPending: boolean): FinancialJobView {
   return {
     title: titleOf(job),
-    stopNote: job.stopReason && `정지 사유: ${STOP[job.stopReason]}. ${job.status === "pausing" ? "진행 중인 응답을 저장한 뒤 멈춥니다." : STOP_MESSAGE[job.stopReason]}`,
+    statusTone: financialJobTone(job.status),
+    progress: financialJobProgress(job),
+    stopNote: job.stopReason ? `정지 사유: ${STOP[job.stopReason]}. ${job.status === "pausing" ? "진행 중인 응답을 저장한 뒤 멈춥니다." : STOP_MESSAGE[job.stopReason]}` : null,
     nextCheckNote: job.nextCheckAt === null ? null : `${job.automatic ? "다음 자동 확인" : "다음 확인 기준"} (한국 시각): ${checkedTime(job.nextCheckAt)}${job.stopReason === "rate_limited" ? ". 요청 하나가 성공하면 이어 받습니다." : ""}`,
     latestCheckNote: job.latestCheckPending ? "진행 중인 응답을 저장한 뒤 최신 공시와 영향 자료부터 확인합니다." : null,
+    failedCompaniesNote: job.failedCompanies > 0 ? `회사 ${job.failedCompanies}곳을 확인하지 못했습니다. 다음 확인 때 다시 시도합니다.` : null,
     yearsNote: `최근 ${job.fromYear}~${job.throughYear} 사업연도 · 계산에 필요한 비교기간 포함`,
     rows: [
       ["현재 단계", PHASE[job.phase]],
@@ -97,7 +124,7 @@ export function financialJobView(job: FinancialUpdatePage, commandPending: boole
     phaseFailureNote: job.recentFailedCompanies > 0 || job.historyFailedCompanies > 0 ? `최근 단계 실패 ${job.recentFailedCompanies}회사 · 과거 단계 실패 ${job.historyFailedCompanies}회사` : null,
     lastCheckedNote: `마지막 확인 ${checkedTime(job.lastCheckedAt)}`,
     notice: NOTICE[job.status] ?? null,
-    failureNote: job.failure && `${financialFailure(job.failure)} · 저장된 완료 지점을 유지합니다.`,
-    action: actionOf(job, commandPending),
+    failureNote: job.failure ? `${financialFailure(job.failure)} · 저장된 완료 지점을 유지합니다.` : null,
+    action: financialJobAction(job, commandPending),
   };
 }
