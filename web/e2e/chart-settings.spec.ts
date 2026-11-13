@@ -197,7 +197,9 @@ test("비교 종목이 있으면 팝오버의 가격 축은 %로 고정한다", 
   await expect(settings.getByText("비교 종목이 있으면 % 축으로 그립니다")).toBeVisible();
 });
 
-test("화면 왼쪽에 반쯤 잘린 봉이 가장 높아도 최고 꼬리표는 화면 안의 가장 높은 봉에 붙는다", async ({ page, scenario }) => {
+test("화면 가장자리에 반쯤 잘린 봉은 최고·최저에서 빼고, 첫 봉이나 마지막 봉이 잘려도 오류 없이 다시 그린다", async ({ page, scenario }) => {
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
   const day = 86_400;
   const start = Date.parse("2025-01-01T00:00:00+09:00") / 1000;
   const bars = Array.from({ length: 300 }, (_, i) => {
@@ -236,4 +238,28 @@ test("화면 왼쪽에 반쯤 잘린 봉이 가장 높아도 최고 꼬리표는
   const firstShown = edge.firstShown;
   await expect(high).toBeVisible();
   await expect(high).toHaveText(highText(firstShown));
+
+  const low = cell(page).locator("[data-extreme=low] > span");
+  const lowText = (index: number) => {
+    const change = (bars[index]!.l - lastClose) / lastClose * 100;
+    return `최저 ${new Intl.NumberFormat("ko-KR").format(bars[index]!.l)} (${change > 0 ? "+" : change < 0 ? "−" : ""}${Math.abs(change).toFixed(2)}%)`;
+  };
+  for (const range of [{ from: 238.6, to: 298.6 }, { from: 0.3, to: 60.3 }]) {
+    const shown = await page.evaluate((target) => {
+      const { chart, main } = window.chartProbe;
+      const scale = chart.timeScale();
+      scale.setVisibleLogicalRange(target);
+      return new Promise<number[]>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => {
+        const inside: number[] = [];
+        for (let i = 0; i < 300; i++) {
+          const x = scale.timeToCoordinate(main.dataByIndex(i)!.time);
+          if (x !== null && x >= 0 && x <= scale.width()) inside.push(i);
+        }
+        resolve(inside);
+      })));
+    }, range);
+    await expect(high).toHaveText(highText(shown[0]!));
+    await expect(low).toHaveText(lowText(shown.at(-1)!));
+  }
+  expect(errors).toEqual([]);
 });

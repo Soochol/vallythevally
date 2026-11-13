@@ -528,8 +528,8 @@ export class ChartController {
     const paneWidth = this.chart.timeScale().width();
     const xOf = (index: number) => this.chart.timeScale().timeToCoordinate(toChartTime(this.bars[index]!.t));
     const onScreen = (index: number) => { const x = xOf(index); return x !== null && x >= 0 && x <= paneWidth; };
-    let first = Math.max(0, info?.barsBefore ?? 0);
-    let lastIndex = Math.min(this.bars.length - 1, this.bars.length - 1 - (info?.barsAfter ?? 0));
+    let first = Math.max(0, Math.floor(info?.barsBefore ?? 0));
+    let lastIndex = Math.min(this.bars.length - 1, this.bars.length - 1 - Math.floor(info?.barsAfter ?? 0));
     while (info && first <= lastIndex && !onScreen(first)) first++;
     while (info && lastIndex >= first && !onScreen(lastIndex)) lastIndex--;
     const found = info && findExtremes(this.bars, first, lastIndex);

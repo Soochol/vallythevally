@@ -51,7 +51,7 @@ export function ChartSettingsPopover({ slot, anchor, onClose }: { slot: Slot; an
         <div role="group" aria-labelledby={`${id}-bars`} className={`${SEGMENTS} grid-cols-5`}>
           {BAR_PRESETS.map((bars) => (
             <button key={bars ?? "auto"} ref={settings.visibleBars === bars ? focusFirst : undefined} type="button" className={SEGMENT}
-              aria-pressed={settings.visibleBars === bars} title={bars === null ? "기본 봉 수 (데스크톱 130, 휴대폰 90)" : undefined}
+              aria-pressed={settings.visibleBars === bars} title={bars === null ? "기본 봉 수 (데스크톱 130, 휴대폰 90, 분기봉·연봉은 전체)" : undefined}
               onClick={() => { setDraft(null); setVisibleBars(slot, bars); }}>{bars ?? "자동"}</button>
           ))}
         </div>
