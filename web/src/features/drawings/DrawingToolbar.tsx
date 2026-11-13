@@ -1,7 +1,7 @@
 import { Popover } from "../overlay/Popover";
 import { Menu } from "../menu/Menu";
 import { Icon, DRAWING_ICONS, CloseIcon, StarIcon } from "../icons";
-import { useEffect, useRef, useState } from "react";
+import { type RefObject, useEffect, useRef, useState } from "react";
 import { surfaceFor } from "../../chart/drawings/DrawingSurface";
 import { gestureHelp } from "../../chart/drawings/gestures";
 import { TOOL_HOTKEYS } from "../../chart/drawings/hotkeys";
@@ -31,6 +31,7 @@ export function DrawingToolbar() {
     };
     window.addEventListener("keydown", key); return () => window.removeEventListener("keydown", key);
   }, []);
+  useLegendClearance(root);
   const setTool = (tool: Tool) => { setLastTools((s) => ({ ...s, [tool.group]: tool })); useDrawingSession.getState().setTool(tool.tool); surfaceFor(slot)?.focus(); };
   const setPrefs = useUiStore.getState().setDrawingPrefs;
   const action = (f: () => void) => { f(); surfaceFor(slot)?.focus(); };
@@ -50,10 +51,54 @@ export function DrawingToolbar() {
     {MODES.filter((mode) => mode.id !== "demo").map((mode) => <button key={mode.id} className="draw-tool" aria-label={mode.label} title={mode.label} onClick={() => action(() => useDrawingSession.setState({ tool: null, mode: mode.id }))}><Icon path={mode.icon} /></button>)}
     <MagnetButton action={action} />
     <button className="draw-tool" aria-label="연속 그리기" title="연속 그리기" aria-pressed={prefs.keepDrawing} onClick={() => action(() => setPrefs({ keepDrawing: !prefs.keepDrawing }))}><Icon path={DRAWING_ICONS.keepDrawing} /></button>
-    <div className="draw-toolbar-bottom"><button className="draw-tool" aria-label="개체 목록 열기" title="개체 목록" onClick={() => useSelectionStore.getState().showRightPanel("objects")}><Icon path={DRAWING_ICONS.objects} /></button>
+    <div className="draw-toolbar-end"><button className="draw-tool" aria-label="개체 목록 열기" title="개체 목록" onClick={() => useSelectionStore.getState().showRightPanel("objects")}><Icon path={DRAWING_ICONS.objects} /></button>
       <button ref={helpButton} className="draw-tool" aria-label="드로잉 단축키 도움말" title="드로잉 단축키" onClick={() => setHelp(!help)}>?</button></div>
-    {help && <Popover anchor={helpButton} placement="top" onClose={() => setHelp(false)} className="drawing-help" role="dialog" aria-label="드로잉 단축키"><div className="draw-dialog-head"><strong>드로잉 단축키</strong><button className="icon-btn" aria-label="도움말 닫기" onClick={() => setHelp(false)}><CloseIcon /></button></div>{gestureHelp(registeredModes()).map((h) => <p key={h.keys}><kbd>{h.keys}</kbd><span>{h.label}</span></p>)}</Popover>}
+    {help && <Popover anchor={helpButton} placement="bottom" onClose={() => setHelp(false)} className="drawing-help" role="dialog" aria-label="드로잉 단축키"><div className="draw-dialog-head"><strong>드로잉 단축키</strong><button className="icon-btn" aria-label="도움말 닫기" onClick={() => setHelp(false)}><CloseIcon /></button></div>{gestureHelp(registeredModes()).map((h) => <p key={h.keys}><kbd>{h.keys}</kbd><span>{h.label}</span></p>)}</Popover>}
   </nav>;
+}
+
+const LEGEND_CLEARANCE_GAP = 8;
+
+const legendRows = (legend: Element) => [...legend.children].flatMap((child) => getComputedStyle(child).flexDirection === "column" ? [...child.children] : [child]);
+
+function legendMeetsBar(legend: Element, bar: DOMRect, shift: number) {
+  const range = document.createRange();
+  return legendRows(legend).some((row) => {
+    range.selectNodeContents(row);
+    const text = range.getBoundingClientRect();
+    if (text.width === 0) return false;
+    const top = text.top - shift;
+    return top < bar.bottom && text.right + LEGEND_CLEARANCE_GAP > bar.left;
+  });
+}
+
+function useLegendClearance(root: RefObject<HTMLElement | null>) {
+  useEffect(() => {
+    const bar = root.current;
+    const stage = bar?.parentElement;
+    if (!bar || !stage) return;
+    let watchedLegend: Element | null = null;
+    let shifted = false;
+    const update = (layoutChanged: boolean) => {
+      const legend = stage.querySelector(".chart-legend");
+      if (legend !== watchedLegend) {
+        if (watchedLegend) observer.unobserve(watchedLegend);
+        if (legend) observer.observe(legend);
+        watchedLegend = legend;
+      }
+      if (shifted && !layoutChanged) return;
+      shifted = legend !== null && bar.offsetParent !== null && legendMeetsBar(legend, bar.getBoundingClientRect(), shifted ? bar.offsetHeight : 0);
+      stage.style.setProperty("--legend-shift", shifted ? `${bar.offsetHeight}px` : "0px");
+    };
+    const observer = new ResizeObserver((entries) => update(entries.some((entry) => entry.target === bar || entry.target === stage)));
+    observer.observe(bar);
+    observer.observe(stage);
+    update(true);
+    return () => {
+      observer.disconnect();
+      stage.style.removeProperty("--legend-shift");
+    };
+  }, [root]);
 }
 
 function ToolGroup({ label, tools, onChoose }: { label: string; tools: readonly Tool[]; onChoose(tool: Tool): void }) {
@@ -61,13 +106,13 @@ function ToolGroup({ label, tools, onChoose }: { label: string; tools: readonly 
   const trigger = useRef<HTMLButtonElement>(null);
   const pinned = useUiStore((s) => s.prefs.drawing.pinnedTools);
   const typed = useRef({ text: "", at: 0 });
-  const aboveDock = () => {
+  const alongDock = () => {
     const own = trigger.current?.getBoundingClientRect();
     const dock = trigger.current?.closest("nav")?.getBoundingClientRect();
     return own && dock ? { left: own.left, right: own.right, top: dock.top, bottom: dock.bottom } : own;
   };
   return <div className="draw-group-toggle"><button ref={trigger} type="button" aria-label={`${label} 펼치기`} title={label} aria-haspopup="menu" aria-expanded={open} className="draw-group-dot" onClick={() => setOpen(!open)}><svg viewBox="0 0 8 8" width="8" height="8" aria-hidden="true"><circle cx="4" cy="4" r="2" fill="currentColor" /></svg></button>
-    {open && <Popover data-chart-control anchor={trigger} anchorRect={aboveDock} placement="top" role="menu" aria-label={label} className="draw-tool-menu" onClose={() => setOpen(false)} onKeyDown={(e) => {
+    {open && <Popover data-chart-control anchor={trigger} anchorRect={alongDock} placement="bottom" role="menu" aria-label={label} className="draw-tool-menu" onClose={() => setOpen(false)} onKeyDown={(e) => {
       e.stopPropagation();
       if (e.nativeEvent.isComposing) return;
       if (e.key === "Tab") { setOpen(false); return; }

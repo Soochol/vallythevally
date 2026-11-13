@@ -1,41 +1,74 @@
 import { useEffect, useId, useState } from "react";
 import { Popover } from "./Popover";
+
+interface HeldTitle { target: HTMLElement; text: string; watcher: MutationObserver | null }
+
 export function TooltipHost() {
   const [tip, setTip] = useState<{ target: HTMLElement; text: string } | null>(null);
   const id = useId();
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout> | undefined;
-    let target: HTMLElement | null = null;
-    const clear = () => {
+    let held: HeldTitle | null = null;
+    const hide = () => {
       clearTimeout(timer);
-      target = null;
       setTip(null);
     };
+    const release = () => {
+      hide();
+      if (!held) return;
+      if (held.watcher) {
+        held.watcher.disconnect();
+        if (!held.target.hasAttribute("title")) held.target.title = held.text;
+      }
+      held = null;
+    };
+    const suppressNativeTip = (next: HeldTitle) => {
+      const { target } = next;
+      next.watcher = new MutationObserver(() => {
+        if (!target.hasAttribute("title")) return;
+        next.text = target.title;
+        target.removeAttribute("title");
+        setTip((shown) => shown && (next.text ? { target, text: next.text } : null));
+      });
+      target.removeAttribute("title");
+      next.watcher.observe(target, { attributes: true, attributeFilter: ["title"] });
+    };
+    const hold = (target: HTMLElement, byPointer: boolean) => {
+      const next: HeldTitle = { target, text: target.title, watcher: null };
+      if (byPointer) suppressNativeTip(next);
+      held = next;
+      timer = setTimeout(() => { if (next.text) setTip({ target, text: next.text }); }, 400);
+    };
     const show = (e: Event) => {
-      const next = e.target instanceof Element ? e.target.closest<HTMLElement>("[title]") : null;
-      if (!next || next === target || !next.title) return;
-      clear(); target = next;
-      const text = next.title;
-      timer = setTimeout(() => setTip({ target: next, text }), 400);
+      if (!(e.target instanceof Element)) return;
+      const byPointer = e.type === "pointerover";
+      const next = e.target.closest<HTMLElement>("[title]");
+      if (held?.target.contains(e.target) && (!next || next.contains(held.target))) {
+        if (byPointer && !held.watcher) suppressNativeTip(held);
+        return;
+      }
+      if (!next?.title) return;
+      release();
+      hold(next, byPointer);
     };
     const leave = (e: Event) => {
-      if (e instanceof PointerEvent && e.relatedTarget instanceof Node && target?.contains(e.relatedTarget)) return;
-      clear();
+      if (e instanceof PointerEvent && e.relatedTarget instanceof Node && held?.target.contains(e.relatedTarget)) return;
+      release();
     };
     document.addEventListener("pointerover", show);
     document.addEventListener("focusin", show);
     document.addEventListener("pointerout", leave);
     document.addEventListener("focusout", leave);
-    document.addEventListener("pointerdown", clear);
-    document.addEventListener("keydown", clear);
+    document.addEventListener("pointerdown", hide);
+    document.addEventListener("keydown", hide);
     return () => {
-      clear();
+      release();
       document.removeEventListener("pointerover", show);
       document.removeEventListener("focusin", show);
       document.removeEventListener("pointerout", leave);
       document.removeEventListener("focusout", leave);
-      document.removeEventListener("pointerdown", clear);
-      document.removeEventListener("keydown", clear);
+      document.removeEventListener("pointerdown", hide);
+      document.removeEventListener("keydown", hide);
     };
   }, []);
   useEffect(() => {

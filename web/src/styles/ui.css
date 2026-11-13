@@ -23,7 +23,6 @@
 
 .ui-popover { pointer-events:auto; position:fixed; inset:auto; margin:0; max-width:calc(100vw - var(--size-16)); max-height:calc(100dvh - var(--size-16)); overflow:auto; border:0; border-radius:var(--r-l); background:var(--glass); -webkit-backdrop-filter:var(--glass-blur); backdrop-filter:var(--glass-blur); color:var(--text); box-shadow:var(--shadow); font:var(--fs-s)/1.5 var(--font-sans); scrollbar-width:thin; outline:none; }
 .ui-island { background:var(--glass); -webkit-backdrop-filter:var(--glass-blur); backdrop-filter:var(--glass-blur); box-shadow:var(--shadow); }
-.right-panel[data-covers] { background:var(--glass-solid); -webkit-backdrop-filter:none; backdrop-filter:none; }
 .ui-popover[role=menu] { position:fixed; inset:auto; padding:var(--size-4); }
 .ui-popover.ui-tooltip { border-radius:var(--r-m); }
 @supports not ((backdrop-filter:blur(1px)) or (-webkit-backdrop-filter:blur(1px))) { .ui-popover,.ui-dialog,.ui-island { background:var(--glass-solid); } }
@@ -63,6 +62,10 @@
 @media (width < 48rem) { .desktop-topbar { display:none; } }
 @media (width >= 48rem) { .app-shell { --chart-inset-top:calc(var(--island-gap) + var(--island-h) + var(--size-4)); } }
 @media (48rem <= width < 80rem) { .app-shell { --island-right:var(--island-gap) !important; --panel-top:calc(var(--island-gap) * 2 + var(--island-h)); } }
+.panel-resizer { outline:none; }
+.panel-resizer::after { content:""; position:absolute; inset-block:var(--size-16); left:50%; width:var(--size-2); transform:translateX(-50%); border-radius:var(--r-pill); background:transparent; transition:background-color .12s; }
+.panel-resizer:hover::after, .panel-resizer:focus-visible::after, .panel-resizer[data-dragging]::after { background:var(--accent); }
+html.panel-resizing, html.panel-resizing * { cursor:col-resize !important; user-select:none !important; }
 
 .financial-status-dot {
   display: block;

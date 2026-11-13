@@ -21,15 +21,12 @@ test("한 줄 셸과 탭은 작은 창에서도 넘치지 않고 휴대폰 경�
     expect((await page.getByRole("toolbar", { name: "차트 도구 막대" }).boundingBox())?.y).toBe(12);
     await expect(page.locator("footer").last()).toBeInViewport({ ratio: 1 });
     await expect(page.getByRole("navigation", { name: "드로잉 도구" })).toBeInViewport({ ratio: 1 });
-    for (const name of ["관심종목", "스크리너", "개체"]) {
+    for (const name of ["스크리너", "개체", "관심종목"]) {
       await tabs(page).getByRole("tab", { name: new RegExp(`^${name}`) }).click();
+      await expect(tabs(page).getByRole("tab", { name: new RegExp(`^${name}`) })).toHaveAttribute("aria-selected", "true");
       await expect.poll(() => page.evaluate(() => [document.documentElement.scrollWidth - innerWidth, document.documentElement.scrollHeight - innerHeight])).toEqual([0, 0]);
       await expect(cell(page)).toBeVisible();
-      await page.getByRole("button", { name: "넓게 보기", exact: true }).click();
-      await expect.poll(() => page.evaluate(() => [document.documentElement.scrollWidth - innerWidth, document.documentElement.scrollHeight - innerHeight])).toEqual([0, 0]);
-      await page.getByRole("button", { name: name === "스크리너" ? "오른쪽 탭으로" : "넓게 보기", exact: true }).click();
     }
-    await tabs(page).getByRole("tab", { name: "관심종목", exact: true }).click();
     await page.screenshot({ path: path.resolve(`../target/ux-screens/shell-${size.width}x${size.height}.png`) });
   }
   await page.setViewportSize({ width: 390, height: 844 });
@@ -40,25 +37,26 @@ test("한 줄 셸과 탭은 작은 창에서도 넘치지 않고 휴대폰 경�
   await page.screenshot({ path: path.resolve("../target/ux-screens/shell-390x844.png") });
 });
 
-test("오른쪽 탭·숨김·너비는 저장되고 새로고침 뒤 복원된다", async ({ page, scenario }) => {
+test("오른쪽 세로 탭·접힘은 저장되고 새로고침 뒤 복원되며 고른 탭을 다시 누르면 패널을 접는다", async ({ page, scenario }) => {
   await page.goto("/");
   await tabs(page).getByRole("tab", { name: /^스크리너/ }).click();
-  await page.getByRole("button", { name: "넓게 보기", exact: true }).click();
   const width = await page.getByRole("tabpanel").evaluate((el) => el.getBoundingClientRect().width);
-  await expect.poll(async () => scenario.documents.uiState()).toMatchObject({ rightPanel: "screener", rightPanelWidth: "wide" });
+  await expect.poll(async () => scenario.documents.uiState().rightPanel).toBe("screener");
   await page.reload();
   await expect(tabs(page).getByRole("tab", { name: /^스크리너/ })).toHaveAttribute("aria-selected", "true");
-  await expect(page.getByRole("button", { name: "오른쪽 탭으로", exact: true })).toHaveAttribute("aria-pressed", "true");
   await expect.poll(() => page.getByRole("tabpanel").evaluate((el) => el.getBoundingClientRect().width)).toBe(width);
-  await page.getByRole("button", { name: "탭 숨기기", exact: true }).click();
-  await expect(tabs(page)).toBeHidden();
+  await tabs(page).getByRole("tab", { name: /^스크리너/ }).click();
+  await expect(page.getByRole("tabpanel")).toBeHidden();
+  await expect(tabs(page)).toBeVisible();
+  await expect(tabs(page).getByRole("tab", { name: /^스크리너/ })).toHaveAttribute("aria-selected", "false");
   await expect.poll(async () => scenario.documents.uiState().watchCollapsed).toBe(true);
   await page.reload();
-  await expect(page.getByRole("button", { name: "패널 펴기", exact: true })).toBeVisible();
-  await page.getByRole("button", { name: "패널 펴기", exact: true }).click();
+  await expect(tabs(page)).toBeVisible();
+  await expect(page.getByRole("tabpanel")).toBeHidden();
+  await tabs(page).getByRole("tab", { name: /^스크리너/ }).click();
   await expect(tabs(page).getByRole("tab", { name: /^스크리너/ })).toHaveAttribute("aria-selected", "true");
   await expect.poll(() => page.getByRole("tabpanel").evaluate((el) => el.getBoundingClientRect().width)).toBe(width);
-  await tabs(page).getByRole("tab", { name: /^스크리너/ }).press("ArrowRight");
+  await tabs(page).getByRole("tab", { name: /^스크리너/ }).press("ArrowDown");
   await expect(tabs(page).getByRole("tab", { name: "개체", exact: true })).toBeFocused();
   await expect.poll(async () => scenario.documents.uiState().rightPanel).toBe("objects");
   await page.reload();

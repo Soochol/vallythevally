@@ -4,9 +4,8 @@ import { expect, test } from "vitest";
 import type { Screen } from "../../api/generated/Screen";
 import type { ScreenerRow } from "../../api/generated/ScreenerRow";
 import { DEFAULT_SORT, nextSort, sortRows } from "../../lib/screener";
-import { MiniChart } from "./ResultPreview";
 import { ResultTable } from "./ResultTable";
-import { nextResult, previewRow, resultKeyAction } from "./results";
+import { nextResult, resultKeyAction } from "./results";
 
 const screen: Screen = { id: "s", name: "신고가", markets: [], exclude: [], conditions: [] };
 const rows: ScreenerRow[] = [
@@ -41,25 +40,16 @@ test("↑↓는 표시 순서로 이동하고 양 끝과 빈 결과에서는 멈
   expect(nextResult([], null, 1)).toBeNull();
 });
 
-test("미리보기는 정렬해도 고른 종목을 유지하고 없어진 결과는 현재 종목이나 첫 행으로 돌아간다", () => {
-  const sorted = sortRows(rows, { key: "name", descending: false });
-  expect(previewRow(sorted, "035420", "005930")?.symbol).toBe("035420");
-  expect(previewRow(sorted, "gone", "005930")?.symbol).toBe("005930");
-  expect(previewRow(sorted, "gone", "gone")?.symbol).toBe("000660");
-  expect(previewRow([], null, "005930")).toBeNull();
-});
-
 const key = (key: string, patch: Partial<KeyboardEvent> = {}) => ({ key, ctrlKey: false, metaKey: false, altKey: false, shiftKey: false, isComposing: false, defaultPrevented: false, ...patch });
 
-test("실행과 넓게 보기의 칸 열기 단축키를 구분하고 다른 조합과 조합 중 입력은 무시한다", () => {
-  expect(resultKeyAction(key("Enter", { ctrlKey: true }), false)).toEqual({ kind: "run" });
-  expect(resultKeyAction(key("Enter", { metaKey: true }), true)).toEqual({ kind: "run" });
-  expect(resultKeyAction(key("Enter"), true)).toEqual({ kind: "open" });
-  expect(resultKeyAction(key("Enter"), false)).toBeNull();
-  expect(resultKeyAction(key("ArrowDown"), true)).toEqual({ kind: "move", step: 1 });
-  expect(resultKeyAction(key("ArrowUp"), false)).toEqual({ kind: "move", step: -1 });
+test("Ctrl+Enter는 실행, ↑↓는 이동이고 Enter 단독·다른 조합과 조합 중 입력은 무시한다", () => {
+  expect(resultKeyAction(key("Enter", { ctrlKey: true }))).toEqual({ kind: "run" });
+  expect(resultKeyAction(key("Enter", { metaKey: true }))).toEqual({ kind: "run" });
+  expect(resultKeyAction(key("Enter"))).toBeNull();
+  expect(resultKeyAction(key("ArrowDown"))).toEqual({ kind: "move", step: 1 });
+  expect(resultKeyAction(key("ArrowUp"))).toEqual({ kind: "move", step: -1 });
   for (const patch of [{ isComposing: true }, { defaultPrevented: true }, { altKey: true }, { shiftKey: true }, { ctrlKey: true }]) {
-    expect(resultKeyAction(key("ArrowDown", patch), true)).toBeNull();
+    expect(resultKeyAction(key("ArrowDown", patch))).toBeNull();
   }
 });
 
@@ -76,15 +66,4 @@ test("결과 표는 서버의 네 열과 정렬 상태, 오래된 일봉·잠정
   expect(html).toContain("−1.50%");
   expect(html).not.toContain("시가총액");
   expect(html).not.toContain("60일");
-});
-
-test("미니 차트는 실제 OHLC를 그리고 빈 자료와 가격이 같은 봉을 처리한다", () => {
-  expect(renderToStaticMarkup(createElement(MiniChart, { bars: [], name: "삼성전자" }))).toContain("일봉이 없습니다");
-  const html = renderToStaticMarkup(createElement(MiniChart, { bars: [
-    { t: 1, o: 100, h: 105, l: 95, c: 101, v: 10 },
-    { t: 2, o: 100, h: 100, l: 100, c: 100, v: 0 },
-  ], name: "삼성전자" }));
-  expect(html).toContain('aria-label="삼성전자 KRX 일봉 미니 차트"');
-  expect(html.match(/<rect/g)).toHaveLength(2);
-  expect(html).not.toMatch(/NaN|Infinity/);
 });

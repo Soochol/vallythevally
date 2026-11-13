@@ -201,7 +201,6 @@ export function iconMarkup(name: MarkupIcon, size = 14): string {
 }
 export const StarIcon = ({ size }: P) => <Icon size={size} path={ICON_PATHS.star} />;
 export const SortIcon = ({ size = 12, dir }: P & { dir: "up" | "down" }) => <Icon size={size} path={ICON_PATHS[dir]} />;
-
 export const ExpandIcon = ({ size = 16 }: P) => <Icon size={size} path="M8 3H3v5M16 3h5v5M3 16v5h5M21 16v5h-5" />;
-export const PanelIcon = ({ size = 16 }: P) => <Icon size={size}><rect x="3" y="4" width="18" height="16" rx="1" /><path d="M15 4v16" /></Icon>;
+
 export const CompareIcon = ({ size = 16 }: P) => <Icon size={size} path="M3 16l5-5 4 3 9-9M3 21l6-4 4 2 8-7" />;

@@ -69,7 +69,7 @@ test("관심종목 패널을 접으면 모르는 키와 함께 UiState를 보낸
       body: {
         phone: 1,
         rightPanel: "watch",
-        rightPanelWidth: "normal",
+        panelWidth: null,
         lastLayoutId: DEFAULT_LAYOUT.id,
         theme: "dark",
         watchCollapsed: true,

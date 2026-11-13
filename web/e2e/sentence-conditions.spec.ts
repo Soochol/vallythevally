@@ -2,7 +2,7 @@ import { selectOption } from "./select-option";
 import { mkdir } from "node:fs/promises";
 import { resolve } from "node:path";
 import { expect, test } from "./screener-harness";
-import { addCondition, conditionAction, numberToken, renameScreen, savedEditor, sentenceEditor, setNumber } from "./sentence-editor";
+import { addCondition, closeEditorWindow, conditionAction, editorWindow, numberToken, renameScreen, savedEditor, sentenceEditor, setNumber } from "./sentence-editor";
 import { openScreener, panel, runButton, updateBand, waitForUpdateToFinish } from "./screener-page";
 
 test.use({ clockStart: "20261106203000" });
@@ -89,7 +89,7 @@ test("모든 조건 종류의 문장 숫자 편집을 저장하고 마지막 줄
   }
 });
 
-test("넓게 보기에서 접힌 잘못된 조건을 저장하면 펼쳐진 첫 오류 값에 포커스를 준다", async ({ scenario, page }) => {
+test("편집 창을 닫은 뒤 잘못된 조건을 저장하면 창이 다시 열리고 첫 오류 값에 포커스를 준다", async ({ scenario, page }) => {
   await page.goto("/");
   await openScreener(page);
   await panel(page).getByRole("button", { name: "새 조건식", exact: true }).click();
@@ -97,9 +97,9 @@ test("넓게 보기에서 접힌 잘못된 조건을 저장하면 펼쳐진 첫 
   await renameScreen(editor, "접힌 오류 값");
   await addCondition(editor);
   await setNumber(editor, "조건 1 최근 기간", "0");
-  await page.getByRole("button", { name: "넓게 보기", exact: true }).click();
-  await expect(editor.getByRole("button", { name: "조건 펼치기", exact: true })).toBeVisible();
+  await closeEditorWindow(page);
   await editor.getByRole("button", { name: "저장", exact: true }).click();
+  await expect(editorWindow(page)).toBeVisible();
   const invalid = numberToken(editor, "조건 1 최근 기간");
   await expect(invalid).toBeVisible();
   await expect(invalid).toHaveAttribute("aria-invalid", "true");
