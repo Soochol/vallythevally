@@ -84,9 +84,9 @@ export class DrawingSync {
 
   history(slot: number) { return this.histories.get(slot) ?? EMPTY_HISTORY; }
   commit(slot: number, ops: readonly DrawingOp[], addHistory = true) {
-    if (usePersistStore.getState().phase.kind !== "ready") { toast("서버 연결을 복구한 뒤 드로잉을 편집하세요"); return false; }
     const changed = ops.filter((op) => op.kind !== "update" || !sameContent(op.before, op.after));
     if (!changed.length) return false;
+    if (usePersistStore.getState().phase.kind !== "ready") { toast("서버 연결을 복구한 뒤 드로잉을 편집하세요"); return false; }
     if (!this.journal) { this.recoveryFailed(); return false; }
     let stagingSucceeded = true;
     const staged: { op: DrawingOp; intent: queue.Intent }[] = [];

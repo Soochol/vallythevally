@@ -184,7 +184,10 @@ export class DrawingSurface implements ChartExtension {
     this.input(kind === "down" ? { kind, at, mods: modsOf(e), hit } : { kind, at, mods: modsOf(e) });
     if (wasCaptured || capturedHere || captures(this.state) || this.pointer !== null) { e.preventDefault(); e.stopImmediatePropagation(); }
     if (kind === "up") this.release();
-    if (kind === "move") this.host.el.style.cursor = captures(this.state) ? "grabbing" : useDrawingSession.getState().tool ? "crosshair" : hit.kind === "handle" ? "grab" : hit.kind === "body" ? "move" : "";
+    if (kind === "move") {
+      const session = useDrawingSession.getState(); const aiming = this.state.kind === "mode" || session.mode === "eraser";
+      this.host.el.style.cursor = captures(this.state) && !aiming ? "grabbing" : session.tool || aiming ? "crosshair" : hit.kind === "handle" ? "grab" : hit.kind === "body" ? "move" : "";
+    }
   }
   private capture(id: number) {
     this.pointer = id; this.host.el.setPointerCapture(id);
@@ -234,7 +237,7 @@ export class DrawingSurface implements ChartExtension {
     }
   }
   private modeContext(frame: Pick<RenderFrame, "items" | "ctx">): ModeContext {
-    return { ...frame, lockAll: useUiStore.getState().prefs.drawing.lockAll, scope: this.newScope(), newId: () => crypto.randomUUID() };
+    return { ...frame, lockAll: useUiStore.getState().prefs.drawing.lockAll, panesBottom: this.host.el.clientHeight - this.host.chart.timeScale().height(), scope: this.newScope(), newId: () => crypto.randomUUID() };
   }
   newScope(): DrawingScope {
     const kind = useUiStore.getState().prefs.drawing.newScope; const layoutId = useLayoutStore.getState().layout.id;
