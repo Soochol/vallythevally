@@ -20,8 +20,12 @@ export interface OverlayPoint extends CustomData<Time> {
   connect?: boolean;
 }
 
+const HALO_WIDTH = 8;
+const HALO_ALPHA = 0.18;
+
 export interface OverlayOptions extends CustomSeriesOptions {
   lineWidth: LineWidth;
+  halo: boolean;
 }
 
 export type OverlaySeries = ISeriesApi<"Custom", Time, OverlayPoint | WhitespaceData<Time>, OverlayOptions>;
@@ -55,10 +59,17 @@ export class OverlayLineView implements ICustomSeriesPaneView<Time, OverlayPoint
               ctx.moveTo(bar.x, y);
             }
           }
-          ctx.lineWidth = options.lineWidth;
           ctx.strokeStyle = options.color;
           ctx.lineJoin = "round";
           ctx.lineCap = "butt";
+          if (options.halo) {
+            ctx.save();
+            ctx.globalAlpha = HALO_ALPHA;
+            ctx.lineWidth = HALO_WIDTH;
+            ctx.stroke();
+            ctx.restore();
+          }
+          ctx.lineWidth = options.lineWidth;
           ctx.stroke();
         }),
     };
@@ -80,7 +91,7 @@ export class OverlayLineView implements ICustomSeriesPaneView<Time, OverlayPoint
   }
 
   defaultOptions(): OverlayOptions {
-    return { ...customSeriesDefaultOptions, lineWidth: 1 };
+    return { ...customSeriesDefaultOptions, lineWidth: 1, halo: false };
   }
 }
 

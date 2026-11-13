@@ -48,7 +48,7 @@ export function DialogFrame({ labelledBy, width, onClose, panelRef, children, va
         tabIndex={-1}
         onKeyDown={(e) => onDialogKeyDown(e, onClose)}
         className={
-          `ui-dialog flex ${width} flex-col overflow-hidden rounded-l border border-line bg-surface shadow-dialog outline-none ` +
+          `ui-dialog flex ${width} flex-col overflow-hidden rounded-l outline-none ` +
           "max-md:max-h-[85dvh] max-md:w-screen max-md:rounded-b-none"
         }
       >

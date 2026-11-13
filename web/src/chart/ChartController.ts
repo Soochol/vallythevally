@@ -69,6 +69,7 @@ export interface CellView {
   period: Period;
   settings: ChartSettings;
   info: SymbolInfo | undefined;
+  previewIndicator?: string | null;
   compareNames?: Readonly<Partial<Record<SymbolCode, string>>>;
 }
 
@@ -269,6 +270,7 @@ export class ChartController {
       const panels = next.settings.panels.filter((p) => configs.some((c) => c.panel === p.id));
       this.withDataGuard(() => preserveTimeRange(this.chart.timeScale(), next.period, () => this.indicators.setConfigs(configs, panels)));
     }
+    this.indicators.setPreview(next.previewIndicator ?? null);
     this.compare.setCodes(compareEntries(next), { period: next.period, venueFor: (code) => compareVenue(code, next) });
     this.renderLegend();
   }

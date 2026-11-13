@@ -63,19 +63,20 @@
     height: 36px; padding: 0 var(--s4); border-radius: var(--r-m);
     display: inline-flex; align-items: center; gap: 6px; color: var(--text); white-space: nowrap;
   }
-  .tb-btn:hover { background: var(--raised); }
+  .tb-btn:hover { background: var(--hover); }
   .tb-btn[aria-pressed="true"] { color: var(--accent); }
   .seg-btn {
     height: 34px; min-width: 32px; padding: 0 10px; border-radius: var(--r-s); color: var(--text-2); font-size: var(--fs-s); white-space: nowrap;
   }
-  .seg-btn:hover { background: var(--raised); color: var(--text); }
-  .seg-btn[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+  .seg-btn:hover { background: var(--hover); color: var(--text); }
+  .seg-btn[aria-pressed="true"]:hover { background: var(--accent); color: var(--accent-ink); }
+  .seg-btn[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); font-weight: 600; }
   .seg-btn[aria-disabled="true"] { color: var(--text-3); opacity: 0.6; cursor: not-allowed; }
   .seg-btn[aria-disabled="true"]:hover { background: none; }
   .icon-btn {
     width: 32px; height: 32px; display: grid; place-items: center; border-radius: var(--r-s); color: var(--text-2);
   }
-  .icon-btn:hover { background: var(--raised); color: var(--text); }
+  .icon-btn:hover { background: var(--hover); color: var(--text); }
   .btn-primary {
     height: 38px; padding: 0 var(--s5); border-radius: var(--r-m);
     background: var(--accent); color: var(--accent-ink); border: 1px solid var(--accent); font-weight: 650;
