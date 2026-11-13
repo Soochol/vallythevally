@@ -19,7 +19,7 @@ import { useHotkeys } from "./features/useHotkeys";
 import { useOpenFromAddress } from "./features/useOpenFromAddress";
 import { useCell } from "./stores/layout";
 import { PhoneSaveBand } from "./features/status/SaveStatus";
-import { RightPanel, useRightPanelWidth } from "./features/panel/RightPanel";
+import { RightPanel, useRightPanelLayout } from "./features/panel/RightPanel";
 import { PhoneWatch } from "./features/watch/Watchlist";
 import { usePersistStore } from "./stores/persist";
 import { useSelectionStore } from "./stores/selection";
@@ -36,7 +36,9 @@ function ChartScreen() {
   const cell = useCell(slot);
   const info = useSymbolInfo(cell.symbol).data;
   const pushRecent = useUiStore((s) => s.pushRecent);
-  const panelWidth = useRightPanelWidth();
+  const panel = useRightPanelLayout();
+  const beside = panel.width > 0 && !panel.covers;
+  const reserved = beside ? "calc(var(--watch-w) + var(--island-gap) * 2)" : "0px";
   const [status, setStatus] = useState<CellStatus>({ kind: "loading" });
 
   useHotkeys();
@@ -47,22 +49,21 @@ function ChartScreen() {
 
   return (
     <div
-      style={{ "--watch-w": `min(${panelWidth}px, 55vw)` } as React.CSSProperties}
+      style={{ "--watch-w": `min(${panel.width}px, 55vw)`, "--chart-right": reserved, "--island-right": beside ? reserved : "var(--island-gap)" } as React.CSSProperties}
       className={
-        "relative grid h-dvh min-h-0 min-w-0 overflow-hidden grid-cols-[minmax(0,1fr)_var(--watch-w)] " +
-        "grid-rows-[var(--topbar-h)_minmax(0,1fr)_var(--status-h)] [grid-template-areas:'top_top'_'grid_watch'_'status_status'] " +
-        "max-md:grid-cols-[minmax(0,1fr)] max-md:grid-rows-[auto_auto_minmax(0,1fr)_56px] max-md:[grid-template-areas:'mhead'_'mper'_'grid'_'mtabs']"
+        "app-shell relative h-dvh min-h-0 min-w-0 overflow-hidden bg-chart-bg " +
+        "max-md:grid max-md:grid-cols-[minmax(0,1fr)] max-md:grid-rows-[auto_auto_minmax(0,1fr)_56px] max-md:[grid-template-areas:'mhead'_'mper'_'grid'_'mtabs']"
       }
     >
       <Topbar />
       <PhoneHeader cell={cell} info={info} status={status} />
       <PeriodChips cell={cell} />
-      <main aria-label="칸" className="grid min-h-0 min-w-0 grid-cols-[var(--tools-w)_minmax(0,1fr)] grid-rows-1 bg-line [grid-area:grid] max-md:grid-cols-1">
+      <main aria-label="칸" className="grid min-h-0 min-w-0 grid-cols-[var(--tools-w)_minmax(0,1fr)] grid-rows-1 md:absolute md:inset-0 md:pr-[var(--chart-right)] max-md:grid-cols-1 max-md:[grid-area:grid]">
         <DrawingToolbar />
         <ChartCell slot={slot} status={status} onStatus={setStatus} />
       </main>
       <RightPanel />
-      <StatusBar />
+      {panel.width === 0 && <StatusBar floating />}
       <PhoneTabs />
       <PhoneWatch />
       <PhoneScreener />

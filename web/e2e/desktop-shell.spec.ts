@@ -16,8 +16,9 @@ test("한 줄 셸과 탭은 작은 창에서도 넘치지 않고 휴대폰 경�
   await mkdir(path.resolve("../target/ux-screens"), { recursive: true });
   for (const size of [{ width: 1440, height: 900 }, { width: 1280, height: 720 }, { width: 1024, height: 768 }, { width: 1280, height: 600 }]) {
     await page.setViewportSize(size);
-    await expect(page.getByRole("toolbar", { name: "차트 도구 막대" })).toHaveJSProperty("offsetHeight", 44);
-    await expect(page.locator("footer").last()).toHaveJSProperty("offsetHeight", 26);
+    await expect(page.getByRole("toolbar", { name: "차트 도구 막대" })).toHaveJSProperty("offsetHeight", 48);
+    expect((await page.getByRole("toolbar", { name: "차트 도구 막대" }).boundingBox())?.y).toBe(12);
+    await expect(page.locator("footer").last()).toBeInViewport({ ratio: 1 });
     await expect(page.getByRole("navigation", { name: "드로잉 도구" })).toHaveJSProperty("offsetWidth", 40);
     for (const name of ["관심종목", "스크리너", "개체"]) {
       await tabs(page).getByRole("tab", { name: new RegExp(`^${name}`) }).click();

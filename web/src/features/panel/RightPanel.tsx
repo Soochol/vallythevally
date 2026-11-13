@@ -6,6 +6,7 @@ import { ObjectList } from "../drawings/ObjectList";
 import { ExpandIcon, PanelIcon } from "../icons";
 import { ScreenerBadge, ScreenerPanel } from "../screener/ScreenerPanel";
 import { desktopPanelWidth } from "../watch/columns";
+import { StatusBar } from "../status/StatusBar";
 import { WatchPanel } from "../watch/Watchlist";
 
 const VIEWS: Record<View, { label: string; Content: ComponentType }> = {
@@ -15,14 +16,14 @@ const VIEWS: Record<View, { label: string; Content: ComponentType }> = {
 };
 const VIEW_ORDER = ["watch", "screener", "objects"] as const;
 
-export function useRightPanelWidth(): number {
+export function useRightPanelLayout(): { width: number; covers: boolean } {
   const collapsed = useUiStore((s) => s.prefs.watchCollapsed);
   const columns = useUiStore((s) => s.prefs.watchColumns);
   const view = useUiStore((s) => s.prefs.rightPanel);
   const width = useUiStore((s) => s.prefs.rightPanelWidth);
-  if (collapsed) return 0;
-  if (width === "wide") return 640;
-  return Math.max(view === "screener" ? 392 : 336, desktopPanelWidth(columns));
+  if (collapsed) return { width: 0, covers: false };
+  if (width === "wide") return { width: 640, covers: view === "screener" };
+  return { width: Math.max(view === "screener" ? 392 : 336, desktopPanelWidth(columns)), covers: false };
 }
 
 export function RightPanel() {
@@ -44,7 +45,7 @@ export function RightPanel() {
     document.getElementById(`right-tab-${to}`)?.focus();
   };
   return (
-    <div data-chart-control className={`right-panel flex min-h-0 min-w-0 flex-col overflow-hidden border-l border-line bg-bg ${wideScreener ? "z-20 [grid-area:2/1/3/3]" : "[grid-area:watch]"}`}>
+    <div data-chart-control data-covers={wideScreener ? "" : undefined} className={`right-panel ui-island absolute bottom-[var(--island-gap)] right-[var(--island-gap)] flex min-h-0 min-w-0 flex-col overflow-hidden rounded-xl ${wideScreener ? "left-[var(--island-gap)] top-[calc(var(--island-gap)*2+var(--island-h))] z-20" : "top-[var(--panel-top,var(--island-gap))] z-10 w-[var(--watch-w)]"}`}>
       <header data-chart-control className="flex h-10 flex-none items-center gap-1 border-b border-line px-1">
         <nav role="tablist" aria-label="오른쪽 패널" className="flex min-w-0 flex-1 items-center gap-1">
           {VIEW_ORDER.map((to) => <button key={to} id={`right-tab-${to}`} type="button" role="tab" aria-selected={to === view} aria-controls="right-tab-content" tabIndex={to === view ? 0 : -1}
@@ -57,6 +58,7 @@ export function RightPanel() {
         <button type="button" className="icon-btn !h-7 !w-7 flex-none" title="탭 숨기기 (Alt+W)" aria-label="탭 숨기기" aria-expanded={true} onClick={() => useUiStore.getState().toggleWatch()}><PanelIcon /></button>
       </header>
       <div id="right-tab-content" role="tabpanel" aria-labelledby={`right-tab-${view}`} className={`flex min-h-0 min-w-0 flex-1 flex-col ${view === "screener" ? "overflow-hidden" : "overflow-auto"}`}>{view === "screener" ? <ScreenerPanel wide={wide} onReturn={() => useUiStore.getState().togglePanelWidth()} /> : <Content />}</div>
+      <StatusBar />
     </div>
   );
 }

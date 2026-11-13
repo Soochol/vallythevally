@@ -3,7 +3,7 @@
   --fs-xs: 11px; --fs-s: 12px; --fs-m: 14px; --fs-l: 17px; --fs-xl: 28px;
   --s1: 4px; --s2: 4px; --s3: 8px; --s4: 12px; --s5: 16px; --s6: 24px;
   --r-s: 7px; --r-m: 9px; --r-l: 16px; --r-xl: 18px; --r-pill: 999px;
-  --topbar-h: 44px; --tools-w: 40px; --watch-w: 300px; --status-h: 26px;
+  --topbar-h: 44px; --tools-w: 40px; --watch-w: 300px; --status-h: 26px; --island-gap: 12px; --island-h: 48px;
   --bg: #080B09; --chart-bg: #080B09; --surface: #141914; --raised: #1F261F; --line: rgba(255, 255, 255, 0.08); --line-strong: rgba(255, 255, 255, 0.16); --grid: rgba(255, 255, 255, 0.035);
   --text: #F0F4EC; --text-2: #AEB8A8; --text-3: #78836F;
   --accent: #C7F36B; --accent-ink: #131B05; --accent-soft: rgba(199, 243, 107, 0.15); --hover: rgba(255, 255, 255, 0.085);

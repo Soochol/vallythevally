@@ -18,6 +18,7 @@ import { useTheme } from "../../stores/ui";
 import { cellErrorView, olderErrorView } from "./cellError";
 import { useDrawingSurface } from "../../chart/drawings/useDrawingSurface";
 import { previewSettings, useIndicatorPreview } from "../indicator-command/preview";
+import { AxisMode } from "./AxisMode";
 import { IndicatorPopover } from "../indicator-dialog/IndicatorPopover";
 import type { IndicatorConfig } from "../../chart/settings";
 import { DrawingOverlay } from "../drawings/DrawingOverlay";
@@ -131,6 +132,7 @@ export function ChartCell({ slot, status, onStatus }: Props) {
       className="relative min-h-0 min-w-0 bg-chart-bg focus-visible:outline-offset-[-2px]"
     >
       <div ref={chartEl} className="absolute inset-0" />
+      <AxisMode slot={slot} />
       {venueAnchor && createPortal(<VenuePicker cell={cell} info={info} variant="legend" />, venueAnchor)}
       <DrawingOverlay slot={slot} />
       {editing && cell.chartSettings.indicators.some((i) => i.id === editing.initial.id) && <IndicatorPopover key={editing.initial.id} slot={slot} {...editing} editRoot={chartEl.current!} onClose={() => setEditing(null)} />}
