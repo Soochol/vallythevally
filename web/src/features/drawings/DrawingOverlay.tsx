@@ -36,35 +36,54 @@ export function DrawingOverlay({ slot }: { slot: Slot }) {
   </div>;
 }
 
+function dockBottom(bar: HTMLElement | null) {
+  const dock = bar?.closest("main")?.querySelector<HTMLElement>(".drawing-toolbar");
+  const overlay = bar?.parentElement;
+  if (!dock?.offsetParent || !overlay) return 0;
+  return dock.getBoundingClientRect().bottom - overlay.getBoundingClientRect().top;
+}
+
 function FloatingBar({ slot }: { slot: number }) {
   const surface = surfaceFor(slot)!; const session = useDrawingSession();
   const selected = surface.selected(); const root = useRef<HTMLDivElement>(null);
   const detailsButton = useRef<HTMLButtonElement>(null);
-  const [position, setPosition] = useState({ x: 20, y: 60 });
+  const hideAll = useUiStore((s) => s.prefs.drawing.hideAll);
+  const [position, setPosition] = useState<{ x: number; y: number } | null>(null);
   const drag = useRef<{ x: number; y: number; baseX: number; baseY: number } | null>(null);
+  const size = useRef({ w: 350, h: 38 });
+  const framesWithoutBounds = useRef(0);
+  const lastSpot = useRef<{ x: number; y: number } | null>(null);
+  const [shown, setShown] = useState(false);
   useEffect(() => {
     let raf = 0;
     const follow = () => {
+      raf = requestAnimationFrame(follow);
+      if (!root.current) { setPosition(null); setShown(false); framesWithoutBounds.current = 0; lastSpot.current = null; return; }
       const bounds = surface.selectionBounds(); const pane = surface.frame().pane;
-      const toolbar = root.current?.querySelector<HTMLElement>(".drawing-floating");
-      const w = toolbar?.offsetWidth ?? 350; const h = toolbar?.offsetHeight ?? 38;
+      const toolbar = root.current.querySelector<HTMLElement>(".drawing-floating");
+      if (toolbar) size.current = { w: toolbar.offsetWidth, h: toolbar.offsetHeight };
+      const { w, h } = size.current;
       const saved = useDrawingSession.getState().toolbarAt;
+      if (bounds || saved) framesWithoutBounds.current = 0;
+      else if (framesWithoutBounds.current++ < 2) return;
       const x = Math.max(8, Math.min(saved?.x ?? (bounds ? (bounds.x1 + bounds.x2 - w) / 2 : 20), pane.width - w - 8));
       const above = bounds ? bounds.y1 - h - 14 : 60;
-      const y = Math.max(8, Math.min(saved?.y ?? (above < 48 ? (bounds?.y2 ?? 60) + 14 : above), pane.height - h - 8));
-      setPosition((old) => Math.abs(old.x - x) < 0.5 && Math.abs(old.y - y) < 0.5 ? old : { x, y });
-      raf = requestAnimationFrame(follow);
+      const top = Math.max(48, dockBottom(root.current) + 8);
+      const y = Math.max(8, Math.min(saved?.y ?? Math.max(top, above < top ? (bounds?.y2 ?? 60) + 14 : above), pane.height - h - 8));
+      const last = lastSpot.current; lastSpot.current = { x, y };
+      setPosition((old) => old && Math.abs(old.x - x) < 0.5 && Math.abs(old.y - y) < 0.5 ? old : { x, y });
+      if (last && Math.abs(last.x - x) < 0.5 && Math.abs(last.y - y) < 0.5) setShown(true);
     };
     follow(); return () => cancelAnimationFrame(raf);
   }, [surface]);
-  if (!selected.length || selected.every((d) => d.hidden) || useUiStore.getState().prefs.drawing.hideAll) return null;
+  if (!selected.length || selected.every((d) => d.hidden) || hideAll) return null;
   const first = selected[0]!; const tool = toolOf(first.tool); if (!tool) return null;
   const common = (field: keyof typeof tool.bar) => selected.every((d) => toolOf(d.tool)?.bar[field] !== undefined);
   const change = (update: (d: DrawingBody) => DrawingBody) => {
     surface.updateSelected(update);
   };
-  return <div ref={root} style={{ position: "absolute", left: position.x, top: position.y }}><Popover anchor={root} follow focus={false} dismiss={false} blockChartKeys={false} restoreFocus={false} onClose={() => {}} role="toolbar" aria-label="드로잉 스타일" className="drawing-floating" onPointerDown={(e) => { if (e.target instanceof HTMLButtonElement) e.preventDefault(); }}>
-    <button type="button" className="draw-grip" aria-label="스타일 막대 옮기기" title="끌어서 막대 옮기기" onPointerDown={(e) => { e.preventDefault(); e.currentTarget.setPointerCapture(e.pointerId); drag.current = { x: e.clientX, y: e.clientY, baseX: position.x, baseY: position.y }; }}
+  return <div ref={root} style={{ position: "absolute", left: position?.x, top: position?.y, visibility: shown ? undefined : "hidden" }}><Popover anchor={root} follow focus={false} dismiss={false} blockChartKeys={false} restoreFocus={false} onClose={() => {}} role="toolbar" aria-label="드로잉 스타일" className="drawing-floating" onPointerDown={(e) => { if (e.target instanceof HTMLButtonElement) e.preventDefault(); }}>
+    <button type="button" className="draw-grip" aria-label="스타일 막대 옮기기" title="끌어서 막대 옮기기" onPointerDown={(e) => { e.preventDefault(); e.currentTarget.setPointerCapture(e.pointerId); drag.current = { x: e.clientX, y: e.clientY, baseX: position?.x ?? 0, baseY: position?.y ?? 0 }; }}
       onPointerMove={(e) => { const d = drag.current; if (d) useDrawingSession.setState({ toolbarAt: { x: d.baseX + e.clientX - d.x, y: d.baseY + e.clientY - d.y } }); }} onPointerUp={() => { drag.current = null; }}><Icon path={DRAWING_ICONS.grip} /></button>
     {common("lineColor") && tool.bar.lineColor && <ColorPicker compact label="선 색" value={drawingColor(tool.bar.lineColor.get(first.style))} width={tool.bar.width?.get(first.style)} onChange={(color) => change((d) => ({ ...d, style: toolOf(d.tool)?.bar.lineColor?.set(d.style, color) ?? d.style }))} />}
     {common("fill") && tool.bar.fill && <ColorPicker compact label="채움 색" value={drawingColor(tool.bar.fill.get(first.style).color)} onChange={(color) => change((d) => { const lens = toolOf(d.tool)?.bar.fill; return lens ? { ...d, style: lens.set(d.style, { ...lens.get(d.style), color }) } : d; })} />}

@@ -15,6 +15,13 @@ import { ownsChartKeyboard } from "../overlay/topLayer";
 import { menuIndex } from "../overlay/position";
 import { toolOf } from "../../chart/drawings/tools";
 import { isTypingTarget } from "../../lib/hotkeys";
+import type { DrawingTool } from "../../chart/drawings/types";
+
+const hotkeysOf = (tool: DrawingTool) => TOOL_HOTKEYS.filter((h) => h.tool === tool).map((h) => h.keys);
+function toolTitle(tool: Tool, note?: string) {
+  const keys = hotkeysOf(tool.tool).join(" / ");
+  return [keys ? `${tool.label} (${keys})` : tool.label, note].filter(Boolean).join(" · ");
+}
 
 const GROUP_LABEL = { line: "선", fib: "피보나치", shape: "도형", note: "주석", measure: "측정" };
 
@@ -25,6 +32,7 @@ export function DrawingToolbar() {
   const root = useRef<HTMLElement>(null);
   const helpButton = useRef<HTMLButtonElement>(null);
   const [lastTools, setLastTools] = useState<Partial<Record<Tool["group"], Tool>>>({});
+  useEffect(() => { const tool = active && toolOf(active); if (tool) setLastTools((s) => ({ ...s, [tool.group]: tool })); }, [active]);
   useEffect(() => {
     const key = (e: KeyboardEvent) => {
       if (!ownsChartKeyboard(e) && e.code === "Slash" && e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey && !e.isComposing && !isTypingTarget(e.target) && e.target instanceof HTMLElement && e.target.closest("section[aria-label^='칸 ']") && !useDrawingSession.getState().editor) { e.preventDefault(); setHelp((v) => !v); }
@@ -32,7 +40,7 @@ export function DrawingToolbar() {
     window.addEventListener("keydown", key); return () => window.removeEventListener("keydown", key);
   }, []);
   useLegendClearance(root);
-  const setTool = (tool: Tool) => { setLastTools((s) => ({ ...s, [tool.group]: tool })); useDrawingSession.getState().setTool(tool.tool); surfaceFor(slot)?.focus(); };
+  const setTool = (tool: Tool) => { useDrawingSession.getState().setTool(tool.tool); surfaceFor(slot)?.focus(); };
   const setPrefs = useUiStore.getState().setDrawingPrefs;
   const action = (f: () => void) => { f(); surfaceFor(slot)?.focus(); };
   return <nav ref={root} data-chart-control aria-label="드로잉 도구" className="drawing-toolbar ui-island max-md:hidden">
@@ -40,12 +48,12 @@ export function DrawingToolbar() {
     {[...toolsByGroup()].map(([group, tools]) => {
       const t = tools.find((tool) => tool.tool === active) ?? lastTools[group] ?? tools[0]!;
       return <div className="draw-group" key={group}>
-      <button className="draw-tool" data-active-tool title={`${t.label} (${TOOL_HOTKEYS.filter((h) => h.tool === t.tool).map((h) => h.keys).join(" / ")})${pinned === t.tool ? " · 연속" : ""}`} aria-label={t.label} aria-pressed={active === t.tool} onClick={() => setTool(t)} onDoubleClick={() => action(() => useDrawingSession.getState().setTool(t.tool, true))}><Icon path={t.icon} /></button>
+      <button className="draw-tool" data-active-tool title={toolTitle(t, pinned === t.tool ? "연속" : undefined)} aria-label={t.label} aria-pressed={active === t.tool} onClick={() => setTool(t)} onDoubleClick={() => action(() => useDrawingSession.getState().setTool(t.tool, true))}><Icon path={t.icon} /></button>
       {tools.length > 1 && <ToolGroup label={`${GROUP_LABEL[group]} 도구`} tools={tools} onChoose={setTool} />}
     </div>; })}
     {prefs.pinnedTools.map((id) => {
       const tool = toolOf(id); if (!tool) return null;
-      return <button key={id} className="draw-tool" data-active-tool aria-label={`${tool.label} 고정 도구`} title={`${tool.label} (${TOOL_HOTKEYS.find((h) => h.tool === id)?.keys ?? ""}) · 고정`} aria-pressed={active === id} onClick={() => setTool(tool)} onDoubleClick={() => action(() => useDrawingSession.getState().setTool(id, true))}><Icon path={tool.icon} /></button>;
+      return <button key={id} className="draw-tool" data-active-tool aria-label={`${tool.label} 고정 도구`} title={toolTitle(tool, "고정")} aria-pressed={active === id} onClick={() => setTool(tool)} onDoubleClick={() => action(() => useDrawingSession.getState().setTool(id, true))}><Icon path={tool.icon} /></button>;
     })}
     <div className="draw-separator" />
     {MODES.filter((m) => m.id !== "demo").map((m) => <button key={m.id} className="draw-tool" data-active-tool aria-label={m.label} title={m.label} aria-pressed={mode === m.id} onClick={() => action(() => useDrawingSession.setState({ tool: null, mode: mode === m.id ? null : m.id }))}><Icon path={m.icon} /></button>)}
@@ -125,7 +133,7 @@ function ToolGroup({ label, tools, onChoose }: { label: string; tools: readonly 
       buttons[menuIndex(buttons.map((b) => b.getAttribute("aria-label") ?? b.textContent ?? ""), index, e.key, letters ? typed.current.text : "")]?.focus();
     }}>
       {tools.map((tool) => <div className="draw-tool-choice" key={tool.tool}>
-        <button type="button" role="menuitem" onClick={() => { onChoose(tool); setOpen(false); }}><Icon path={tool.icon} size={16} /><span>{tool.label}</span><kbd>{TOOL_HOTKEYS.find((h) => h.tool === tool.tool)?.keys}</kbd></button>
+        <button type="button" role="menuitem" onClick={() => { onChoose(tool); setOpen(false); }}><Icon path={tool.icon} size={16} /><span>{tool.label}</span>{hotkeysOf(tool.tool)[0] && <kbd>{hotkeysOf(tool.tool)[0]}</kbd>}</button>
         <button type="button" role="menuitemcheckbox" aria-label={`${tool.label} 막대에 고정`} aria-checked={pinned.includes(tool.tool)} title="막대에 고정" onClick={() => useUiStore.getState().setDrawingPrefs({ pinnedTools: pinned.includes(tool.tool) ? pinned.filter((id) => id !== tool.tool) : [...pinned, tool.tool] })}><StarIcon size={16} /></button>
       </div>)}
     </Popover>}

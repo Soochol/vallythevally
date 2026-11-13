@@ -39,7 +39,7 @@ export function ObjectList() {
     </div></header>
     {elsewhere > 0 && <p className="draw-objects-elsewhere">다른 칸·레이아웃에 {elsewhere}개</p>}
     {error && <ErrorState message={error} retry={() => void sync.load(cell.symbol)} />}
-    {!drawings.length && !error && <EmptyState title="차트에 생각을 그려 보세요" action="추세선 그리기" onAction={() => { useDrawingSession.getState().setTool("trendline"); surfaceFor(slot)?.focus(); }}><span>T 추세선 · H 수평선</span></EmptyState>}
+    {!drawings.length && !error && <EmptyState title="차트에 생각을 그려 보세요" action="추세선 그리기" onAction={() => { useDrawingSession.getState().setTool("trendline"); surfaceFor(slot)?.focus(); }}><span>T 추세선 · H 수평선 · R 사각형 · F 피보나치 · X 글자</span></EmptyState>}
     <div className="draw-object-rows">{groups.map((group) => <section key={group.kind} aria-label={group.label}>
       <h3 className="draw-object-group">{group.label} <span>{group.drawings.length}</span></h3>
       {group.drawings.map((d) => <ObjectRow key={d.id} drawing={d} selected={selected.includes(d.id)} update={(field) => update(d, field)}

@@ -80,6 +80,7 @@
 .drawing-help p:last-child { padding-bottom:16px; }
 .draw-load-error { position:absolute; top:60px; left:12px; background:var(--surface); border:1px solid var(--line); padding:8px; border-radius:var(--r-m); pointer-events:auto; font-size:var(--fs-s); color:var(--accent); }
 input[type=checkbox], input[type=range] { accent-color:var(--accent); }
+@media (width < 80rem) { .drawing-toolbar, .draw-toolbar-end { gap:2px; } .drawing-toolbar .draw-tool { width:28px; height:28px; } }
 @media (width < 48rem) { .drawing-toolbar { display:none; } }
 
 .drawing-toolbar::-webkit-scrollbar { display:none; }
