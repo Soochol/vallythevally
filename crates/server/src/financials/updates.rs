@@ -5,7 +5,7 @@ use domain::{KstTime, SymbolInfo, SymbolKind};
 use serde::{Deserialize, Serialize};
 
 use crate::api::{FinancialUpdateFailure, FinancialUpdatePage, FinancialUpdateStatus as Status, FinancialUpdatePhase as Phase, UnixSeconds};
-use super::{Financials, CollectionScope, control::JobContext, model::{Failure, Interrupt, Security, Snapshot}, schedule::due_check};
+use super::{Financials, CollectionScope, company_records::ReadResolution, control::JobContext, model::{Failure, Interrupt, Security}, schedule::due_check};
 
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(tag = "status", content = "value", rename_all = "snake_case")]
@@ -224,18 +224,16 @@ impl Financials {
     }
 
 
-    pub(super) async fn read_resolution(&self, stock: &str, snapshot: &mut Snapshot) {
+    pub(super) async fn read_resolution(&self, stock: &str) -> ReadResolution {
         let update = match self.store() { Ok(store) => store.job().await, Err(error) => Err(error) };
         match update {
-            Ok(Some(update)) => if let Some(target) = update.targets.iter().find(|target| target.code == stock) {
-                match target.resolution {
-                    Resolution::Unverified => { snapshot.status = "unsupported"; snapshot.reason = Some("company_mapping_unverified"); }
-                    Resolution::Failed(error) => { snapshot.status = "failed"; snapshot.failure = Some(error); }
-                    _ => {}
-                }
+            Ok(Some(update)) => match update.targets.iter().find(|target| target.code == stock).map(|target| &target.resolution) {
+                Some(Resolution::Unverified) => ReadResolution::Unverified,
+                Some(Resolution::Failed(error)) => ReadResolution::Failed(*error),
+                _ => ReadResolution::Unchanged,
             },
-            Err(error) => { snapshot.status = "failed"; snapshot.failure = Some(error); }
-            Ok(None) => {}
+            Err(error) => ReadResolution::Failed(error),
+            Ok(None) => ReadResolution::Unchanged,
         }
     }
 }

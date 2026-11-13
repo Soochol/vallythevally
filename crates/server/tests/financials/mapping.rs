@@ -66,8 +66,8 @@ async fn explicit_listing_notice_shares_company_collection_and_preserves_separat
     assert!(evidence["source_url"].as_str().unwrap().ends_with("/20260409000536/68155.htm"));
     let common = service.read("005930").await;
     let preferred = service.read("005935").await;
-    assert_eq!(common.status,"ready");
-    assert_eq!(preferred.status,"ready");
+    assert_eq!(common.state,ReadState::Ready);
+    assert_eq!(preferred.state,ReadState::Ready);
     assert_eq!(serde_json::to_value(&common.collection).unwrap(),serde_json::to_value(&preferred.collection).unwrap());
     assert_eq!(fake.count("fnlttSinglAcntAll.json"),4);
     assert_eq!(fake.count("alotMatter.json"),1);
@@ -82,7 +82,7 @@ async fn explicit_listing_notice_shares_company_collection_and_preserves_separat
     let before = fake.count("notice");
     let restarted = Financials::new(Some(fake.client()),store,clock());
     let saved = settled_stock(&restarted,"005935",true).await;
-    assert_eq!(saved.status,"ready");
+    assert_eq!(saved.state,ReadState::Ready);
     assert_eq!(saved.security.unwrap().evidence,preferred.security.unwrap().evidence);
     assert_eq!(fake.count("notice"),before);
 }
@@ -187,20 +187,20 @@ async fn unrecognized_notice_retries_in_the_next_update(body: String) {
         let previous = if already_collected { Some(settled(&service).await.collection) } else { None };
         fake.state.lock().unwrap().notice = Some(body.clone());
         let failed = settled_stock(&service,"005935",true).await;
-        assert_eq!(failed.status,"failed");
+        assert_eq!(failed.state,ReadState::Failed);
         assert_eq!(failed.failure,Some(Failure::InvalidResponse));
         assert!(failed.reason.is_none());
         assert!(store.security("005935").await.unwrap().is_none());
         assert_eq!(fake.count("notice"),1);
         if let Some(previous) = &previous {
             assert_eq!(serde_json::to_value(store.collection(CORP).await.unwrap()).unwrap(),serde_json::to_value(previous).unwrap());
-            assert_eq!(settled(&service).await.status,"ready");
+            assert_eq!(settled(&service).await.state,ReadState::Ready);
         }
         fake.state.lock().unwrap().notice = Some(NOTICE.into());
-        assert_eq!(settled_stock(&service,"000001",false).await.status,"ready");
+        assert_eq!(settled_stock(&service,"000001",false).await.state,ReadState::Ready);
         assert_eq!(store.collection("00000002").await.unwrap().reports.len(),4);
         let recovered = settled_stock(&service,"005935",true).await;
-        assert_eq!(recovered.status,"ready");
+        assert_eq!(recovered.state,ReadState::Ready);
         assert_eq!(fake.count("notice"),2);
         assert_eq!(recovered.security.as_ref().unwrap().company.corp_code,CORP);
         assert!(recovered.security.unwrap().share_class.is_none());
@@ -230,8 +230,8 @@ async fn valid_conflicting_notices_remain_mapping_absence_rather_than_source_fai
         let store = Store::open(&dir.path().join("financials.db")).await.unwrap();
         let service = Financials::new(Some(fake.client()),store.clone(),clock());
         let snapshot = settled_stock(&service,"005935",true).await;
-        assert_eq!(snapshot.status,"unsupported");
-        assert_eq!(snapshot.reason,Some("company_mapping_unverified"));
+        assert_eq!(snapshot.state,ReadState::Unsupported);
+        assert_eq!(snapshot.reason,Some(UnsupportedReason::CompanyMappingUnverified));
         assert!(snapshot.failure.is_none());
         assert!(store.security("005935").await.unwrap().is_none());
         assert_eq!(fake.count("company.json"),0);
@@ -257,16 +257,16 @@ async fn first_and_mid_notice_failures_retry_without_discarding_saved_company_or
                 }
             }
             let failed = settled_stock(&service,"005935",true).await;
-            assert_eq!(failed.status,"failed");
+            assert_eq!(failed.state,ReadState::Failed);
             assert_eq!(failed.failure,Some(failure));
             assert!(store.security("005935").await.unwrap().is_none());
             assert_eq!(fake.count("notice"),if failure == Failure::InvalidResponse { 1 } else { 3 });
             let before = fake.count("notice");
             if let Some(previous) = &previous {
                 assert_eq!(serde_json::to_value(store.collection(CORP).await.unwrap()).unwrap(),serde_json::to_value(previous).unwrap());
-                assert_eq!(settled(&service).await.status,"ready");
+                assert_eq!(settled(&service).await.state,ReadState::Ready);
             }
-            assert_eq!(settled_stock(&service,"000001",false).await.status,"ready");
+            assert_eq!(settled_stock(&service,"000001",false).await.state,ReadState::Ready);
             assert_eq!(store.collection("00000002").await.unwrap().reports.len(),4);
             {
                 let mut state = fake.state.lock().unwrap();
@@ -275,7 +275,7 @@ async fn first_and_mid_notice_failures_retry_without_discarding_saved_company_or
                 state.notice = Some(NOTICE.into());
             }
             let recovered = settled_stock(&service,"005935",true).await;
-            assert_eq!(recovered.status,"ready");
+            assert_eq!(recovered.state,ReadState::Ready);
             assert_eq!(recovered.security.unwrap().company.corp_code,CORP);
             assert_eq!(fake.count("notice"),before + 1);
             assert!(store.security("005935").await.unwrap().is_some());

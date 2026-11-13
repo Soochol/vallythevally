@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use domain::{KstDate, KstTime, TimeOfDay};
 
 use crate::api::{FinancialBasis, FinancialInput, FinancialInputStatus, FinancialInputUsage, FinancialMetric, FinancialPeriod, FinancialPoint, FinancialProgress, FinancialReason, FinancialReportingPeriod, FinancialSeries, FinancialValueStatus, FinancialsPage, SymbolCode, UnixSeconds};
-use super::{client::field, model::{Account, Basis, Collection, FactPeriod, Failure, Fetch, Report, Security, Snapshot, Statement, Verification}};
+use super::{client::field, company_records::ReadSnapshot, model::{Account, Basis, Collection, FactPeriod, Failure, Fetch, Report, Security, Statement, Verification}};
 
 use FinancialReason as Reason;
 use FinancialValueStatus as Status;
@@ -339,7 +339,7 @@ fn point(report: &Report, collection: &Collection, frequency: FinancialPeriod, m
     point
 }
 
-pub fn page(symbol: &str, frequency: FinancialPeriod, snapshot: Snapshot) -> FinancialsPage {
+pub fn page(symbol: &str, frequency: FinancialPeriod, snapshot: ReadSnapshot) -> FinancialsPage {
     let collection = &snapshot.collection;
     let mut progress = FinancialProgress { total: 0, completed: 0, failed: 0, pending: 0 };
     for report in collection.working_reports().values() {
@@ -372,5 +372,5 @@ pub fn page(symbol: &str, frequency: FinancialPeriod, snapshot: Snapshot) -> Fin
         points.sort_by_key(|p| (p.price_bucket.is_none(), p.price_bucket, p.business_year, p.report_code.clone()));
         FinancialSeries { metric, points }
     }).collect();
-    FinancialsPage { symbol: SymbolCode(symbol.into()), period: frequency, status: snapshot.status.into(), reason: snapshot.reason.map(str::to_owned), failure: failure(snapshot.failure), corp_code: snapshot.security.as_ref().map(|s| s.company.corp_code.clone()), fiscal_month: snapshot.security.as_ref().and_then(|s| s.company.fiscal_month), share_class: snapshot.security.as_ref().and_then(|s| s.share_class.clone()), share_class_reason: snapshot.security.as_ref().and_then(|s| s.share_class_reason.clone()), last_checked_at: collection.last_checked_at.map(UnixSeconds), last_attempt_at: collection.last_attempt_at.map(UnixSeconds), disclosure_failure: failure(collection.disclosure_failure), refresh_version: collection.refresh_version, disclosure_version: collection.disclosure_version, latest_corrections: true, progress, series }
+    FinancialsPage { symbol: SymbolCode(symbol.into()), period: frequency, status: snapshot.state.as_str().into(), reason: snapshot.reason.map(|reason| reason.as_str().to_owned()), failure: failure(snapshot.failure), corp_code: snapshot.security.as_ref().map(|s| s.company.corp_code.clone()), fiscal_month: snapshot.security.as_ref().and_then(|s| s.company.fiscal_month), share_class: snapshot.security.as_ref().and_then(|s| s.share_class.clone()), share_class_reason: snapshot.security.as_ref().and_then(|s| s.share_class_reason.clone()), last_checked_at: collection.last_checked_at.map(UnixSeconds), last_attempt_at: collection.last_attempt_at.map(UnixSeconds), disclosure_failure: failure(collection.disclosure_failure), refresh_version: collection.refresh_version, disclosure_version: collection.disclosure_version, latest_corrections: true, progress, series }
 }
