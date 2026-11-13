@@ -1,6 +1,6 @@
 import { createServer } from "node:http";
 import type { BrowserContext } from "@playwright/test";
-import type { LayoutInput } from "../src/api/generated/Layout";
+import type { LayoutInput } from "../src/api/generated/LayoutInput";
 import { cell, DEFAULT_LAYOUT_ID, expect, test } from "./harness";
 
 async function useLayoutEndpoint(context: BrowserContext, origin: string): Promise<void> {

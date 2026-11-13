@@ -1,6 +1,6 @@
 import { selectOption } from "./select-option";
 import type { Locator, Page } from "@playwright/test";
-import { cell, chartOf, expect } from "./frontend-harness";
+import { cell, chartOf, expect } from "./harness";
 
 export const rail = (page: Page) => page.getByRole("tablist", { name: "오른쪽 패널" });
 export const panel = (page: Page) => page.getByRole("complementary", { name: "스크리너" });

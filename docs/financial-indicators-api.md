@@ -34,7 +34,7 @@
 
 짧은 기간은 임의로 연장하지 않는다. 같은 가격봉에 보고기간이 겹치면 `period_overlap`과 `value=null`로 표시하며, 각각 계산한 값이 있으면 `reportedValue`와 원래 입력을 보존해 툴팁에서 확인할 수 있다. `reportedValue`를 차트에 합산하지 않는다. 자본총계가 0 이하인 부채비율은 비우지만 부채·자본 원금액을 모두 반환한다. DPS는 확인된 주식 종류와 실제 연간 결산일이 맞는 현금배당금만 사용하며, 분기는 `annual_only`다.
 
-시험은 `financial_calculations.rs`의 합성 저장 자료 및 `financials.rs`의 가짜 DART/XBRL과 fake-kiwoom을 사용한다. 실제 인증 API나 사용자 서버를 사용하지 않는다.
+시험은 `financial_calculations.rs`의 합성 저장 자료 및 `financials.rs`의 가짜 DART/XBRL과 주입한 합성 키움 transport을 사용한다. 실제 인증 API나 사용자 서버를 사용하지 않는다.
 
 ## 계산 입력의 상태와 사용 목적
 

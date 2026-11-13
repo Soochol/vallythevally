@@ -1,5 +1,5 @@
 import { financialTest as test, seedFinancialLayout, openFinancials, financialUpdatePage, expect } from "./financial-update-helpers";
-import { cell, chartOf } from "./frontend-harness";
+import { cell, chartOf } from "./harness";
 
 for (const size of [{ width: 1440, height: 900 }, { width: 1024, height: 768 }, { width: 390, height: 844 }]) test.describe(`${size.width} 재무자료 공통 창`, () => {
   const phone = size.width < 768;

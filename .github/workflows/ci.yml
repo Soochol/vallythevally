@@ -153,6 +153,8 @@ jobs:
         working-directory: web
       - run: ./scripts/allow-chromium-sandbox.sh
         working-directory: web
+      - name: Financial diagnostic display with loopback responses
+        run: node scripts/test-dart-ui.mjs
       - name: E2E with loopback networking only
         working-directory: web
         run: |

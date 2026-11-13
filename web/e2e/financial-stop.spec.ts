@@ -1,5 +1,5 @@
 import { financialTest as test, openFinancials, financialUpdatePage, expect } from "./financial-update-helpers";
-import { cell, chartOf } from "./frontend-harness";
+import { cell, chartOf } from "./harness";
 
 for (const viewport of [{ width: 1440, height: 900 }, { width: 1024, height: 768 }, { width: 390, height: 844 }]) test.describe(`${viewport.width} 인증·한도 정지`, () => {
   const phone = viewport.width < 768;

@@ -3,7 +3,7 @@ import path from "node:path";
 import { chartDisplayBars, chartDisplayOptions, seedChartDisplay } from "./chart-display-fixture";
 import { installAxisProbe } from "./axis-probe";
 import { installChartProbe } from "./chart-probe";
-import { cell, chartOf, expect } from "./frontend-harness";
+import { cell, chartOf, expect } from "./harness";
 import { financialTest as test } from "./financial-update-helpers";
 
 const SCREENS = path.resolve(import.meta.dirname, "../../target/ux-screens");

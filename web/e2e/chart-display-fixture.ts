@@ -2,7 +2,7 @@ import type { BarsPage } from "../src/api/generated/BarsPage";
 import type { FinancialPeriod } from "../src/api/generated/FinancialPeriod";
 import type { FinancialsPage } from "../src/api/generated/FinancialsPage";
 import type { ChartSettings } from "../src/chart/settings";
-import { DEFAULT_LAYOUT_ID, type Scenario } from "./frontend-harness";
+import { DEFAULT_LAYOUT_ID, type Scenario } from "./harness";
 import { financialPage } from "./financial-update-helpers";
 
 const METRICS = ["owner_roe", "investing_cash_flow", "dps", "debt_ratio"] as const;

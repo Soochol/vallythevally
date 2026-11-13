@@ -18,13 +18,13 @@ python3 scripts/web.py e2e e2e/search.spec.ts
 python3 scripts/web.py e2e --grep '조건식' --workers=3
 ```
 
-서버·가짜 키움 준비, frozen 의존성 설치, WASM 준비와 타입 검사, 현재 UI의 Vite 빌드가 성공한 뒤 Playwright를 실행한다. 준비 단계가 실패하면 시험을 실행하지 않는다. 실제 키움은 사용하지 않는다.
+frozen 의존성 설치, WASM 준비와 타입 검사, 현재 UI의 Vite 빌드가 성공한 뒤 실행별 정적 호스트와 Playwright를 시작한다. Rust 서버·DB·원천 수집을 준비하지 않는다. 각 시험의 `Scenario`가 생성된 애플리케이션 DTO 타입에 맞는 HTTP·WebSocket 응답과 문서 저장 상태를 제공한다. 알 수 없는 API·외부 통신은 실패한다. 준비 단계가 실패하면 시험을 실행하지 않는다.
 
 각 실행은 `target/web-runs/e2e-<고유값>/`에 다음 경로를 만든다.
 
 | 경로 | 용도 |
 |---|---|
-| `bin/` | 체크섬을 검증해 복사한 이번 실행 전용 서버·가짜 키움·DuckDB |
+| `static.log` | 동적 loopback 포트의 실행별 정적 호스트 로그 |
 | `dist/` | 이번 실행에서 빌드한 UI |
 | `tmp/` | 실행별 준비 경로 (브라우저 임시는 짧은 `target/t` 아래 고유 경로) |
 | `results/` | Playwright 결과·실패 추적 |
@@ -32,7 +32,9 @@ python3 scripts/web.py e2e --grep '조건식' --workers=3
 
 도구가 출력한 경로에서 결과를 확인한다. 기본 worker는 2이며 Playwright 인수로 바꿀 수 있다. `--output`을 직접 지정하면 해당 경로를 사용하므로 동시 실행마다 다른 경로를 선택한다. 브라우저 임시 경로는 절대 경로로 정규화해 `TMPDIR`로 전달한다.
 
-도구는 `VALLY_E2E_BIN_DIR`로 준비한 서버 경로를, `VALLY_E2E_STATIC_DIR`로 이번 UI 빌드를 전달한다. 이전 `web/dist`는 이 실행의 웹 산출물로 사용하지 않는다. 직접 Playwright를 실행하는 CI는 기본 `target/debug`와 `web/dist` 경로를 계속 사용한다.
+도구는 `VALLY_E2E_STATIC_DIR`로 이번 UI 빌드를 전달하고 정적 호스트를 빈 포트(`VALLY_E2E_PORT=0`)에 띄운다. 주소는 `VALLY_E2E_BASE_URL`로 Playwright에 전달한다. 종료 시 이번 호스트만 정리한다. 이전 `web/dist`는 이번 산출물로 사용하지 않는다. 직접 Playwright를 실행하는 CI는 `web/dist`와 기본 포트 4173을 사용한다. 동시 직접 실행에서는 서로 다른 `VALLY_E2E_PORT`를 지정한다.
+
+시험은 `harness.ts`의 `test`와 `scenario`를 사용한다. `scenario.documents`는 시험 안의 탭·추가 문맥에서 공유하고 다음 시험에서 새로 만든다. `scenario.reply/on/hold`와 실시간 프레임으로 화면 입력을 명시한다. 자료 수집·계산·재시도·재시작 영속성은 실제 Rust 서비스 시험이 담당한다. [책임 이동 기록](testing-migration.md)을 확인한다.
 
 브라우저가 없는 환경에서는 웹 의존성 설치 후 Chromium을 준비한다. Linux 시스템 의존성과 sandbox 설정은 기존 프로젝트 절차를 따른다.
 
@@ -43,7 +45,7 @@ pnpm exec playwright install --only-shell chromium
 
 ## 시험 작성 시 주의사항
 
-- `VALLY_CLOCK_START`는 서버의 시간 판단만 바꾼다. HTTP `Date` 헤더는 실제 시각이다. 둘을 함께 쓰는 시계 시험은 `clockStart: null`로 실행한다(#117).
+- `clockStart`는 브라우저 시계를 고정한다. 서버 기준 재시도 시험은 합성 응답의 `Date` 헤더와 함께 명시하고 필요하면 `clockStart: null`로 실행한다.
 - Playwright `clock.setSystemTime`은 벽시계만 바꾸고 `performance.now`는 그대로다.
 - 임시 웹 시험 파일은 `web/` 안에 둔다. 밖에서는 ESM 설정이 적용되지 않아 `import.meta`가 실패할 수 있다.
 
@@ -82,10 +84,10 @@ python3 scripts/web.py live --mode full --headed --key-file /absolute/path/to/.e
 
 `OPENDART_API_KEY` 환경변수 또는 명시한 `--key-file`에서 키 하나만 읽는다. 키가 없으면 준비·접속 없이 `not_configured`와 종료 코드 1을 기록한다. 파일을 복사하지 않고 서버 자식의 환경에만 키를 전달한다. 기존 `VALLY_ENV_FILE`·키움 설정·proxy 환경은 자식에 넘기지 않는다. 명령을 명시 실행하면 실제 DART를 호출하므로 자동 시험에서 사용하지 않는다.
 
-각 실행은 독립 fake-kiwoom과 앱 서버를 동적 loopback 포트로 시작한다. DB·가짜 토큰·잠금·로그는 `target/web-runs/live-<고유값>/`에 둔다. 사용자 서버와 실제 키움은 사용하지 않는다. 종료 시 자신이 시작한 프로세스만 중지한다. 제품의 DART client·TLS·인증서 검증을 그대로 사용하며 별도 Python DART 호출은 하지 않는다.
+각 실행은 키움 의존성이 없는 `dart-smoke` 재무 서비스를 동적 loopback 포트로 시작한다. 임시 재무 DB와 로그는 `target/web-runs/live-<고유값>/`에 둔다. 사용자 서버와 실제 키움은 사용하지 않는다. 종료 시 자신이 시작한 프로세스만 중지한다. 제품의 DART client·TLS·인증서 검증을 그대로 사용하며 별도 Python DART 호출은 하지 않는다.
 
 - `connect`는 새 DB에서 `corpCode.xml`·`company.json`을 통한 `005930`의 회사 식별을 확인한다. `connected`는 전체 수집과 UI를 검증했다는 뜻이 아니다.
-- `full`은 기존 서버·WASM 준비와 현재 UI 빌드 후 전체 수집이 `ready`로 끝나고 available 매출액이 존재해야 한다. 이어 Chromium에서 같은 보고연도의 표시값을 API 숫자와 비교하고 스크린샷을 남긴다. 수집 중의 available 값, `partial_failure`, 미확인·미공시·산출 불가만 있는 결과는 성공으로 세지 않는다. 각 지표의 available 개수와 상태·사유를 `result.json`에 남긴다.
+- `full`은 재무 서비스·WASM 준비와 현재 UI 빌드 후 전체 수집이 `ready`로 끝나고 available 매출액이 존재해야 한다. 이어 Chromium에서 같은 보고연도의 표시값을 실제 재무 API 숫자와 비교하고 스크린샷을 남긴다. 가격·종목·문서 응답은 진단용 브라우저 입력이며 실제 시세 검증으로 세지 않는다. 수집 중의 available 값, `partial_failure`, 미확인·미공시·산출 불가만 있는 결과는 성공으로 세지 않는다. 각 지표의 available 개수와 상태·사유를 `result.json`에 남긴다.
 
 종목은 `005930` 하나로 고정한다. 준비 이후 원천 단계는 `--timeout` 10~600초(기본 300초), 앱 조회는 최대 300회이며 UI는 별도 최대 120초다. refresh POST와 자동 재실행은 없다. 제품 DART client의 요청 간격 250ms와 단일 수집 작업에 따라 원천 단계의 요청 상한은 `4 × timeout + 2`다. 요청수를 프록시로 측정한 값은 아니며, 실제 호출은 준비와 응답 시간에 따라 더 적다. 빠른 mode도 제품 API가 시작한 수집은 종료 직전까지 진행될 수 있다. 네트워크 실패나 시간 초과는 실패 결과를 남긴다.
 
@@ -93,11 +95,14 @@ python3 scripts/web.py live --mode full --headed --key-file /absolute/path/to/.e
 
 ```sh
 python3 scripts/test-live.py
+node scripts/test-dart-ui.mjs
 ```
+
+`test-dart-ui.mjs`는 현재 `web/dist`를 열어 loopback 재무 응답이 진단 화면에 실제로 표시되는지 검증한다. 웹 빌드가 먼저 필요하며 외부 원천을 호출하지 않는다. 별도 산출물 경로는 첫 인수로 지정한다.
 
 ## 실행 근거 확인
 
-`web.py wasm/check/e2e/doctor/live`는 실행별 `target/web-runs/<종류>-<고유값>/manifest.json`을 남긴다. `e2e`와 `live`는 준비 시작 source를 고정하고 단계 진입·종료와 최종 종료에서 다시 대조한다. 서버·DuckDB는 자식 빌드 manifest의 source와 해시를 확인해 실행별 `bin`에 복사하고 그 사본을 실행한다. 이후 공유 `target/dev/bin`이 바뀌어도 실행 사본은 유지한다. `e2e`와 `live --mode full`은 현재 실행의 `dist`를 다시 빌드하며, 서버·DuckDB·WASM·UI의 기록과 실제 파일도 단계 경계와 브라우저 전후에 대조한다. source나 실행 산출물이 다르면 해당 실행은 실패하며 다른 실행을 막지 않는다. 이전 `web/dist`로 대체하지 않는다. 준비 실패 시 이후 단계는 `not_run`이며 Playwright를 실행하지 않는다.
+`web.py wasm/check/e2e/doctor/live`는 실행별 `target/web-runs/<종류>-<고유값>/manifest.json`을 남긴다. `e2e`와 `live`는 준비 시작 source를 고정하고 단계 진입·종료와 최종 종료에서 다시 대조한다. `live`의 재무 서비스·DuckDB는 자식 빌드 manifest의 source와 해시를 확인해 실행별 `bin`에 복사하고 그 사본을 실행한다. 이후 공유 `target/dev/bin`이 바뀌어도 실행 사본은 유지한다. `e2e`와 `live --mode full`은 현재 실행의 `dist`를 다시 빌드하며, 서버·DuckDB·WASM·UI의 기록과 실제 파일도 단계 경계와 브라우저 전후에 대조한다. source나 실행 산출물이 다르면 해당 실행은 실패하며 다른 실행을 막지 않는다. 이전 `web/dist`로 대체하지 않는다. 준비 실패 시 이후 단계는 `not_run`이며 Playwright를 실행하지 않는다.
 
 manifest는 HEAD, dirty 여부, 비밀 파일을 제외한 source 지문, 서버·DuckDB·WASM·UI의 SHA-256과 기존 빌드 키, 명령·종료 코드·시간·로그 경로를 기록한다. `execution`의 `direct`와 `reused`는 이번 빌드와 기존 지문 검증 후 재사용을 구분한다. 전체 종료 상태와 각 명령의 종료 코드는 별개다. 환경 전체와 diff 원문은 저장하지 않는다. 마지막 JSON 한 줄의 `manifest` 경로로 성공·실패 모두 확인한다. 로그는 키·토큰·인증 URL·헤더를 정제한다.
 

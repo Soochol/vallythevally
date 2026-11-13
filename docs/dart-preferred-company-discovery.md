@@ -59,7 +59,7 @@ curl --fail --silent --show-error 'https://kind.krx.co.kr/common/searchcorpname.
 
 ## 합성 자동시험
 
-`tests/financials/discovery.rs`와 `tests/financials/review_fix.rs`는 임의의 2종목·수량으로 만든 공시와 가짜 검색·문서경로·KIND·DART를 사용한다. 실제 관측 사본은 fixture로 넣지 않는다. worktree 내부 임시 DB와 fake-kiwoom으로 다음을 검증한다.
+`tests/financials/discovery.rs`와 `tests/financials/review_fix.rs`는 임의의 2종목·수량으로 만든 공시와 가짜 검색·문서경로·KIND·DART를 사용한다. 실제 관측 사본은 fixture로 넣지 않는다. worktree 내부 임시 DB와 주입한 합성 키움 transport으로 다음을 검증한다.
 
 - 목록 밖 우선주 연결과 출처 보존, 같은 회사 재무 수집 공유, 배당 원문의 종류별 행 보존과 종목 DPS 종류 미확인
 - 발행인·단축/표준코드·종류·회사번호 불일치, 코드 외부 참고 문자열, 중복 코드·종류·문서·게시시각, 잘못된 원문 경로

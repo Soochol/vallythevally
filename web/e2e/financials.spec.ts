@@ -6,7 +6,7 @@ import type { Layout } from "../src/api/generated/Layout";
 import type { Scenario } from "./fixtures/scenario";
 import { parseChartSettings, type ChartSettings } from "../src/chart/settings";
 import { installFrameProbe } from "./frame-probe";
-import { cell, chartOf, DEFAULT_LAYOUT_ID, expect, SEARCH_BUTTON_TITLE } from "./frontend-harness";
+import { cell, chartOf, DEFAULT_LAYOUT_ID, expect, SEARCH_BUTTON_TITLE } from "./harness";
 
 const METRICS = ["revenue", "operating_income", "owner_roe", "investing_cash_flow", "dps", "debt_ratio"] as const;
 const LABELS = ["매출액", "영업이익", "지배주주 ROE", "투자활동 현금흐름", "DPS", "부채비율"];

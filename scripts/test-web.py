@@ -217,6 +217,23 @@ class WebWorkflowTest(unittest.TestCase):
         self.assertFalse(any("playwright" in command for command in called))
 
 
+    def test_static_start_failure_stops_owned_host_and_never_runs_playwright(self):
+        commands = []
+        def command(arguments, cwd, environment):
+            commands.append(arguments[0])
+            if "vite" in arguments[0]:
+                directory = Path(arguments[arguments.index("--outDir") + 1])
+                directory.mkdir()
+                (directory / "index.html").write_text("new UI")
+        self.static.address.side_effect = TimeoutError("static host startup")
+        with self.commands(command), self.assertRaises(TimeoutError):
+            web.run_e2e(self.root, [])
+        self.static.stop.assert_called_once()
+        self.assertFalse(any("playwright" in command for command in commands))
+        manifest = self.latest_manifest()
+        self.assertEqual(manifest["steps"]["static"]["status"], "failed")
+        self.assertEqual(manifest["steps"]["playwright"]["status"], "not_run")
+
     def latest_manifest(self):
         path = next((self.root / "target/web-runs").glob("e2e-*/manifest.json"))
         return json.loads(path.read_text())

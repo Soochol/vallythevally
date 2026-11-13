@@ -37,9 +37,6 @@ pnpm -s build
 step "wasm: check against the reference values (offline.sh)"
 "$offline" node scripts/wasm-smoke.mjs
 
-step "e2e: build server and fake Kiwoom"
-cargo build --locked --quiet -p server -p fake-kiwoom
-
 step "e2e: playwright (offline.sh)"
 "$offline" ./node_modules/.bin/playwright test
 

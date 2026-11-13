@@ -2,11 +2,11 @@ import type { Page } from "@playwright/test";
 import type { FinancialPeriod } from "../src/api/generated/FinancialPeriod";
 import type { FinancialsPage } from "../src/api/generated/FinancialsPage";
 import type { FinancialUpdatePage } from "../src/api/generated/FinancialUpdatePage";
-import { test as base } from "./frontend-harness";
+import { test as base } from "./harness";
 import type { Scenario } from "./fixtures/scenario";
 import { edgeData, preferredDps, readyData, readyJob } from "./fixtures/financial-data";
 
-export { expect } from "./frontend-harness";
+export { expect } from "./harness";
 export type FinancialMode = "ready" | "edge";
 type Action = "start" | "pause" | "resume";
 

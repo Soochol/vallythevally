@@ -1,4 +1,4 @@
-import { cell, chartOf, expect, test } from "./frontend-harness";
+import { cell, chartOf, expect, test } from "./harness";
 
 test("브라우저 시나리오에서 초성 검색한 종목의 차트를 연다", async ({ page, scenario }) => {
   await page.goto("/");

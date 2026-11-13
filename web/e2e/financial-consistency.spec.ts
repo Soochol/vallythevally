@@ -12,7 +12,7 @@ import { toChartTime } from "../src/chart/time";
 import type { ChartSettings } from "../src/chart/settings";
 import { installChartProbe } from "./chart-probe";
 import { installFrameProbe } from "./frame-probe";
-import { type Scenario, cell, chartOf, DEFAULT_LAYOUT_ID, expect } from "./frontend-harness";
+import { type Scenario, cell, chartOf, DEFAULT_LAYOUT_ID, expect } from "./harness";
 
 const kst = (date: string) => Date.parse(`${date}T00:00:00+09:00`) / 1000;
 const markerId = "01900000-0000-7000-8000-000000000901";
