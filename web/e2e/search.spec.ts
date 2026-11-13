@@ -152,7 +152,7 @@ test("일부 시세 누락·추세 실패에도 다른 종목과 명령을 계�
 
 test.describe("검색에서 스크리너 실행", () => {
   test.use({ clockStart: "20261106203000" });
-  test("숨긴 오른쪽 스크리너 탭을 펼쳐 저장된 조건식을 실행하고 차트를 유지한다", async ({ page, scenario }) => {
+  test("접힌 오른쪽 패널을 스크리너 탭으로 펼쳐 저장된 조건식을 실행하고 차트를 유지한다", async ({ page, scenario }) => {
     screenerScenario(scenario);
     scenario.documents.saveScreens({ revision: 1, screens: [{ id: "search-run", name: "검색에서 실행", markets: [], exclude: ["etf"], conditions: [{ kind: "new_high", period: "D", recentBars: 20, field: "high", n: 60 }] }] });
 
@@ -160,8 +160,8 @@ test.describe("검색에서 스크리너 실행", () => {
     await expect(cell(page)).toHaveAttribute("aria-busy", "false");
     const chartLabel = await cell(page).getAttribute("aria-label");
     const tabs = page.getByRole("tablist", { name: "오른쪽 패널" });
-    await page.getByRole("button", { name: "탭 숨기기", exact: true }).click();
-    await expect(tabs).toBeHidden();
+    await tabs.getByRole("tab", { name: "관심종목", exact: true }).click();
+    await expect(page.getByRole("tabpanel")).toBeHidden();
     await page.keyboard.press("/");
     const dialog = page.getByRole("dialog", { name: "종목 검색" });
     await dialog.getByRole("combobox").fill("> 스크리너");
@@ -172,8 +172,8 @@ test.describe("검색에서 스크리너 실행", () => {
     await expect(cell(page)).toHaveAttribute("aria-label", chartLabel!);
     await updateBand(page).getByRole("button", { name: "처음 받기" }).click();
     await waitForUpdateToFinish(page, "11-06(금)");
-    await page.getByRole("button", { name: "탭 숨기기", exact: true }).click();
-    await expect(tabs).toBeHidden();
+    await tabs.getByRole("tab", { name: /^스크리너/ }).click();
+    await expect(page.getByRole("tabpanel")).toBeHidden();
     await page.keyboard.press("/");
     await dialog.getByRole("combobox").fill("> 스크리너");
     const run = page.waitForResponse((r) => r.url().endsWith("/api/screener/run") && r.ok());

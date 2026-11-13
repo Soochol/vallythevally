@@ -65,7 +65,7 @@ export async function fillNumber(trigger: Locator, value: string) {
 
 export async function expandEditor(page: Page) {
   const fields = sentenceEditor(page).getByRole("group", { name: "문장형 조건식", exact: true });
-  if (await fields.count() === 0) await sentenceEditor(page).getByRole("button", { name: /^(편집|조건 펼치기)$/ }).click();
+  if (await fields.count() === 0) await sentenceEditor(page).getByRole("button", { name: "편집", exact: true }).click();
   await expect(fields).toBeVisible();
 }
 

@@ -91,8 +91,8 @@ test("긴 종목명도 숫자 열을 밀지 않고 보통 이름은 기본 폭�
     for (const code of ["0205H0", "0000D0"]) {
       const name = row(page, code).locator("b");
       await expect(name).toHaveAttribute("title", (await name.textContent())!);
-      expect(await name.evaluate((el) => el.scrollWidth > el.clientWidth)).toBe(true);
     }
+    expect(await row(page, "0000D0").locator("b").evaluate((el) => el.scrollWidth > el.clientWidth)).toBe(true);
     await page.screenshot({ path: path.resolve(`../target/ux-screens/watchlist-review-${size.width}x${size.height}.png`) });
   }
 });

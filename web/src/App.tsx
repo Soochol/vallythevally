@@ -19,7 +19,7 @@ import { useHotkeys } from "./features/useHotkeys";
 import { useOpenFromAddress } from "./features/useOpenFromAddress";
 import { useCell } from "./stores/layout";
 import { PhoneSaveBand } from "./features/status/SaveStatus";
-import { RightPanel, useRightPanelLayout } from "./features/panel/RightPanel";
+import { RightPanel, useRightPanelWidth } from "./features/panel/RightPanel";
 import { PhoneWatch } from "./features/watch/Watchlist";
 import { usePersistStore } from "./stores/persist";
 import { useSelectionStore } from "./stores/selection";
@@ -36,9 +36,8 @@ function ChartScreen() {
   const cell = useCell(slot);
   const info = useSymbolInfo(cell.symbol).data;
   const pushRecent = useUiStore((s) => s.pushRecent);
-  const panel = useRightPanelLayout();
-  const beside = panel.width > 0 && !panel.covers;
-  const reserved = beside ? "calc(var(--watch-w) + var(--island-gap) * 2)" : "0px";
+  const panelWidth = useRightPanelWidth();
+  const reserved = panelWidth > 0 ? "calc(var(--watch-w) + var(--rail-w) + var(--island-gap) * 3)" : "calc(var(--rail-w) + var(--island-gap) * 2)";
   const [status, setStatus] = useState<CellStatus>({ kind: "loading" });
 
   useHotkeys();
@@ -49,7 +48,7 @@ function ChartScreen() {
 
   return (
     <div
-      style={{ "--watch-w": `min(${panel.width}px, 55vw)`, "--chart-right": reserved, "--island-right": beside ? reserved : "var(--island-gap)" } as React.CSSProperties}
+      style={{ "--watch-w": `min(${panelWidth}px, 55vw)`, "--chart-right": reserved, "--island-right": reserved } as React.CSSProperties}
       className={
         "app-shell relative h-dvh min-h-0 min-w-0 overflow-hidden bg-chart-bg " +
         "max-md:grid max-md:grid-cols-[minmax(0,1fr)] max-md:grid-rows-[auto_auto_minmax(0,1fr)_56px] max-md:[grid-template-areas:'mhead'_'mper'_'grid'_'mtabs']"
@@ -63,7 +62,7 @@ function ChartScreen() {
         <ChartCell slot={slot} status={status} onStatus={setStatus} />
       </main>
       <RightPanel />
-      {panel.width === 0 && <StatusBar floating />}
+      {panelWidth === 0 && <StatusBar floating />}
       <PhoneTabs />
       <PhoneWatch />
       <PhoneScreener />
