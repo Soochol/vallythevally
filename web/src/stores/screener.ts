@@ -13,9 +13,9 @@ interface CompletedRun {
 }
 
 export type ScreenRun =
-  | { kind: "running"; screen: Screen; shown: CompletedRun | null }
-  | ({ kind: "done"; screen: Screen } & CompletedRun)
-  | { kind: "failed"; screen: Screen; shown: CompletedRun | null; error: ApiRequestError };
+  | { kind: "running"; screen: Screen; key: string; shown: CompletedRun | null }
+  | ({ kind: "done"; screen: Screen; key: string } & CompletedRun)
+  | { kind: "failed"; screen: Screen; key: string; shown: CompletedRun | null; error: ApiRequestError };
 
 export type Rerun = { kind: "new_day"; day: KstDate } | { kind: "store_changed" };
 
@@ -36,12 +36,17 @@ interface ScreenerState {
   seeStatus(status: ScreenerStatus): void;
 }
 
-const sameScreen = (a: Screen, b: Screen) => JSON.stringify(a) === JSON.stringify(b);
+const canonical = (value: unknown): unknown => {
+  if (Array.isArray(value)) return value.map(canonical);
+  if (value === null || typeof value !== "object") return value;
+  return Object.fromEntries(Object.entries(value).sort(([a], [b]) => (a < b ? -1 : 1)).map(([key, field]) => [key, canonical(field)]));
+};
 
-export function runOf(runs: ScreenerState["runs"], screen: Screen): ScreenRun | null {
-  const run = runs[screen.id];
-  return run && sameScreen(run.screen, screen) ? run : null;
-}
+export const screenKey = (screen: Screen) => JSON.stringify(canonical(screen));
+
+const matching = (run: ScreenRun | undefined, key: string) => (run?.key === key ? run : null);
+
+export const runOf = (runs: ScreenerState["runs"], screen: Screen): ScreenRun | null => matching(runs[screen.id], screenKey(screen));
 
 function completedRun(run: ScreenRun | null): CompletedRun | null {
   if (run?.kind === "done") return run;
@@ -78,14 +83,15 @@ export const useScreenerStore = create<ScreenerState>()((set, get) => {
     setSort: (sort) => set({ sort }),
     run: async (screen) => {
       const snapshot = structuredClone(screen);
+      const key = screenKey(snapshot);
       const storeVersion = get().storeVersion;
-      const pending: ScreenRun = { kind: "running", screen: snapshot, shown: completedRun(runOf(get().runs, snapshot)) };
+      const pending: ScreenRun = { kind: "running", screen: snapshot, key, shown: completedRun(matching(get().runs[snapshot.id], key)) };
       record(pending);
       try {
         const result = await runScreen(snapshot);
-        if (get().runs[snapshot.id] === pending) record({ kind: "done", screen: snapshot, result, storeVersion });
+        if (get().runs[snapshot.id] === pending) record({ kind: "done", screen: snapshot, key, result, storeVersion });
       } catch (e) {
-        if (get().runs[snapshot.id] === pending) record({ kind: "failed", screen: snapshot, shown: pending.shown, error: asApiError(e) });
+        if (get().runs[snapshot.id] === pending) record({ kind: "failed", screen: snapshot, key, shown: pending.shown, error: asApiError(e) });
       }
     },
     seeStatus: (status) =>

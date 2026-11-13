@@ -158,3 +158,10 @@ test("실행식은 호출 경계에서 복사되어 호출자의 중첩 수정�
   expect(runOf(useScreenerStore.getState().runs, screen)?.kind).toBe("done");
   expect(useScreenerStore.getState().runs.other?.kind).toBe("done");
 });
+
+test("필드 순서만 다른 같은 조건식은 같은 실행 결과에 속하고, 내용이 다르면 속하지 않는다", async () => {
+  await useScreenerStore.getState().run(screen);
+  const reordered: Screen = { conditions: [{ n: 1000, field: "high", recentBars: 20, period: "D", kind: "new_high" }], exclude: [], markets: [], name: screen.name, id: screen.id };
+  expect(runOf(useScreenerStore.getState().runs, reordered)?.kind).toBe("done");
+  expect(runOf(useScreenerStore.getState().runs, { ...screen, markets: ["kospi"] })).toBeNull();
+});
