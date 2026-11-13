@@ -11,8 +11,9 @@ use axum::routing::get;
 use domain::{Symbol, Venue};
 use serde::de::DeserializeOwned;
 
-use crate::api::{self, ApiErrorCode, Bound, Condition, Layout, LayoutInput, LayoutSummary, Revision, RsiTest, Screen, Screens, StochasticTest, UiState, UnixSeconds, Watchlists};
+use crate::api::{self, ApiErrorCode, Layout, LayoutInput, LayoutSummary, Revision, Screen, Screens, UiState, UnixSeconds, Watchlists};
 use crate::http::{ApiFailure, AppState, symbol_list};
+use crate::screener::{RunnableScreen, parse_screen};
 use crate::userdata::{self, StoreError, wire_name};
 
 pub const JSON_LIMIT: usize = 64 * 1024;
@@ -125,7 +126,7 @@ fn check_screens(all: &Screens) -> Result<(), ApiFailure> {
     }
     let mut ids = HashSet::new();
     for screen in &all.screens {
-        check_screen(screen)?;
+        parse_stored_screen(screen)?;
         if !ids.insert(screen.id.as_str()) {
             return Err(ApiFailure::bad_request(format!("조건식 id가 겹칩니다: {}", screen.id)));
         }
@@ -133,7 +134,7 @@ fn check_screens(all: &Screens) -> Result<(), ApiFailure> {
     Ok(())
 }
 
-pub(crate) fn check_screen(screen: &Screen) -> Result<(), ApiFailure> {
+pub(crate) fn parse_stored_screen(screen: &Screen) -> Result<RunnableScreen, ApiFailure> {
     if screen.id.is_empty() || screen.id.len() > MAX_SCREEN_ID_BYTES {
         return Err(ApiFailure::bad_request(format!("조건식 id는 1~{MAX_SCREEN_ID_BYTES}바이트여야 합니다: {}", screen.id)));
     }
@@ -144,9 +145,7 @@ pub(crate) fn check_screen(screen: &Screen) -> Result<(), ApiFailure> {
     if screen.conditions.len() > MAX_SCREEN_CONDITIONS {
         return Err(ApiFailure::bad_request(format!("조건식 {name}의 조건은 0~{MAX_SCREEN_CONDITIONS}줄이어야 합니다: {}줄", screen.conditions.len())));
     }
-    for (line, condition) in screen.conditions.iter().enumerate() {
-        check_condition(condition).map_err(|why| ApiFailure::bad_request(format!("조건식 {name}의 {}번째 조건: {why}", line + 1)))?;
-    }
+    let runnable = parse_screen(screen)?;
     let mut markets = HashSet::new();
     if let Some(market) = screen.markets.iter().find(|m| !markets.insert(**m)) {
         return Err(ApiFailure::bad_request(format!("조건식 {name}의 시장 목록에 {}가 두 번 있습니다", wire_name(market))));
@@ -155,125 +154,7 @@ pub(crate) fn check_screen(screen: &Screen) -> Result<(), ApiFailure> {
     if let Some(kind) = screen.exclude.iter().find(|k| !kinds.insert(**k)) {
         return Err(ApiFailure::bad_request(format!("조건식 {name}의 제외 목록에 {}가 두 번 있습니다", wire_name(kind))));
     }
-    Ok(())
-}
-
-#[derive(Debug, Clone, Copy)]
-enum Allowed {
-    Any,
-    NonNegative,
-    Positive,
-    Percent,
-}
-
-impl Allowed {
-    fn check(self, what: &str, value: f64) -> Result<(), String> {
-        let (fits, rule) = match self {
-            Allowed::Any => ((f64::MIN..=f64::MAX).contains(&value), "유한한 수"),
-            Allowed::NonNegative => ((0.0..=f64::MAX).contains(&value), "0 이상의 유한한 수"),
-            Allowed::Positive => (value > 0.0 && value <= f64::MAX, "0보다 큰 유한한 수"),
-            Allowed::Percent => ((0.0..=100.0).contains(&value), "0~100인 수"),
-        };
-        if fits { Ok(()) } else { Err(format!("{what}는 {rule}여야 합니다: {value}")) }
-    }
-}
-
-fn at_least_one(what: &str, value: u32) -> Result<(), String> {
-    if value >= 1 { Ok(()) } else { Err(format!("{what}는 1 이상이어야 합니다")) }
-}
-
-fn indicator_length(what: &str, value: u16) -> Result<(), String> {
-    if value >= 1 { Ok(()) } else { Err(format!("{what}는 1~65,535여야 합니다")) }
-}
-
-fn bounds(min: Bound, max: Bound, allowed: Allowed) -> Result<(), String> {
-    if let Some(v) = min.0 {
-        allowed.check("min", v)?;
-    }
-    if let Some(v) = max.0 {
-        allowed.check("max", v)?;
-    }
-    match (min.0, max.0) {
-        (None, None) => Err("min과 max 가운데 하나는 있어야 합니다".to_owned()),
-        (Some(lo), Some(hi)) if lo > hi => Err(format!("min은 max 이하여야 합니다: min={lo}, max={hi}")),
-        _ => Ok(()),
-    }
-}
-
-fn fast_below_slow(fast: u16, slow: u16) -> Result<(), String> {
-    if fast < slow { Ok(()) } else { Err(format!("fast는 slow보다 작아야 합니다: fast={fast}, slow={slow}")) }
-}
-
-fn check_condition(condition: &Condition) -> Result<(), String> {
-    match *condition {
-        Condition::NewHigh { n, .. } | Condition::NewLow { n, .. } => {
-            at_least_one("n", n)?;
-        }
-        Condition::ValueRange { min, max, .. } | Condition::MarketCap { min, max } => bounds(min, max, Allowed::NonNegative)?,
-        Condition::Change { back, min_pct, max_pct, .. } => {
-            at_least_one("back", back)?;
-            bounds(min_pct, max_pct, Allowed::Any)?;
-        }
-        Condition::NearExtreme { n, within_pct, .. } => {
-            at_least_one("n", n)?;
-            Allowed::Percent.check("withinPct", within_pct)?;
-        }
-        Condition::Surge { n, times, .. } => {
-            at_least_one("n", n)?;
-            Allowed::Positive.check("times", times)?;
-        }
-        Condition::MaPosition { length, .. } => indicator_length("length", length)?,
-        Condition::MaAlignment { ref lengths, .. } => {
-            for &length in lengths {
-                indicator_length("lengths", length)?;
-            }
-            if !(2..=5).contains(&lengths.len()) {
-                return Err(format!("lengths는 2~5개여야 합니다: {}개", lengths.len()));
-            }
-            if lengths.windows(2).any(|pair| pair[0] >= pair[1]) {
-                return Err(format!("lengths는 겹치지 않고 커지는 순서여야 합니다: {lengths:?}"));
-            }
-        }
-        Condition::MaCross { fast, slow, .. } => {
-            indicator_length("slow", slow)?;
-            if let Some(fast) = fast {
-                indicator_length("fast", fast)?;
-                fast_below_slow(fast, slow)?;
-            }
-        }
-        Condition::Rsi { length, test, .. } => {
-            indicator_length("length", length)?;
-            match test {
-                RsiTest::Range { min, max } => bounds(min, max, Allowed::Percent)?,
-                RsiTest::Breakout { value, .. } => Allowed::Percent.check("value", value)?,
-            }
-        }
-        Condition::Macd { fast, slow, signal, .. } => {
-            indicator_length("fast", fast)?;
-            indicator_length("slow", slow)?;
-            indicator_length("signal", signal)?;
-            fast_below_slow(fast, slow)?;
-        }
-        Condition::Stochastic { k, d, smooth, test, .. } => {
-            indicator_length("k", k)?;
-            indicator_length("d", d)?;
-            indicator_length("smooth", smooth)?;
-            if let StochasticTest::Range { min, max } = test {
-                bounds(min, max, Allowed::Percent)?;
-            }
-        }
-        Condition::Bollinger { length, k, .. } => {
-            indicator_length("length", length)?;
-            Allowed::Positive.check("k", k)?;
-        }
-        Condition::Ichimoku { conversion, base, span_b, displacement, .. } => {
-            indicator_length("conversion", conversion)?;
-            indicator_length("base", base)?;
-            indicator_length("spanB", span_b)?;
-            indicator_length("displacement", displacement)?;
-        }
-    }
-    Ok(())
+    Ok(runnable)
 }
 
 async fn list_layouts(State(st): State<Arc<AppState>>) -> Result<Json<Vec<LayoutSummary>>, ApiFailure> {

@@ -6,83 +6,16 @@ use duckdb::arrow::array::{AsArray, RecordBatch};
 use duckdb::arrow::datatypes::{ArrowPrimitiveType, DataType, Decimal128Type, Int64Type, UInt32Type, UInt64Type};
 use duckdb::{Connection, Transaction, params};
 
-use super::exact::Decimal;
 use super::summary::{MissingSummary, SummaryBatch};
 use super::Observation;
 use crate::http::ApiFailure;
 use crate::kiwoom::wire::KrxSummaryValues;
-use super::indicator::Indicator;
-use super::line::{Cell, Kind, Line, Series};
-use super::market_cap::MarketCapRange;
+use super::line::{Cell, Line, Series};
+use super::rules::RunnableScreen;
 use super::store::{LISTING_LOST, StoreError, date_of, date_value, exclusion_mask, market_of, price_of, stock_code, unconfirmed_on};
-use crate::api::{self, BarField, Bound, Condition, ExcludeKind, Extreme, Market, Screen, ScreenPeriod, ScreenerExcluded, ScreenerResult, ScreenerRow, SurgeField, SymbolCode};
+use crate::api::{self, BarField, Market, ScreenPeriod, ScreenerExcluded, ScreenerResult, ScreenerRow, SymbolCode};
 
 const PERIODS: [ScreenPeriod; 3] = [ScreenPeriod::Day, ScreenPeriod::Week, ScreenPeriod::Month];
-
-pub(super) struct RunnableScreen {
-    lines: Vec<Line>,
-    market_caps: Vec<MarketCapRange>,
-    markets: Vec<Market>,
-    exclude: Vec<ExcludeKind>,
-}
-
-impl RunnableScreen {
-    pub(super) fn of(screen: &Screen) -> Result<RunnableScreen, String> {
-        let (mut lines, mut market_caps) = (Vec::new(), Vec::new());
-        for (k, condition) in screen.conditions.iter().enumerate() {
-            match rule_of(condition).map_err(|why| format!("{}번째 조건: {why}", k + 1))? {
-                Rule::Bars(line) => lines.push(line),
-                Rule::MarketCap(range) => market_caps.push(range),
-            }
-        }
-        Ok(RunnableScreen { lines, market_caps, markets: screen.markets.clone(), exclude: screen.exclude.clone() })
-    }
-
-    fn covers(&self, market: Market) -> bool {
-        self.markets.is_empty() || self.markets.contains(&market)
-    }
-}
-
-enum Rule {
-    Bars(Line),
-    MarketCap(MarketCapRange),
-}
-
-fn rule_of(condition: &Condition) -> Result<Rule, &'static str> {
-    let line = |period, recent_bars, kind| Ok(Rule::Bars(Line { period, recent_bars, kind }));
-    match *condition {
-        Condition::NewHigh { period, recent_bars, field, n } => line(period, recent_bars, Kind::NewExtreme { extreme: Extreme::High, field, n }),
-        Condition::NewLow { period, recent_bars, field, n } => line(period, recent_bars, Kind::NewExtreme { extreme: Extreme::Low, field, n }),
-        Condition::ValueRange { period, recent_bars, field, min, max } => line(period, recent_bars, Kind::ValueRange { field, min: bound(min)?, max: bound(max)? }),
-        Condition::Change { period, recent_bars, back, min_pct, max_pct } => line(period, recent_bars, Kind::Change { back, min_pct: bound(min_pct)?, max_pct: bound(max_pct)? }),
-        Condition::NearExtreme { period, recent_bars, extreme, n, within_pct } => line(period, recent_bars, Kind::NearExtreme { extreme, n, within_pct: decimal(within_pct)? }),
-        Condition::Surge { period, recent_bars, field, n, times } => line(period, recent_bars, Kind::Surge { field: surged(field), n, times: decimal(times)? }),
-        Condition::MaPosition { period, recent_bars, field, method, length, side } => line(period, recent_bars, Kind::Indicator(Indicator::ma_position(field, method, length, side)?)),
-        Condition::MaAlignment { period, recent_bars, method, ref lengths, order } => line(period, recent_bars, Kind::Indicator(Indicator::ma_alignment(method, lengths, order)?)),
-        Condition::MaCross { period, recent_bars, method, fast, slow, direction } => line(period, recent_bars, Kind::Indicator(Indicator::ma_cross(method, fast, slow, direction)?)),
-        Condition::Rsi { period, recent_bars, length, test } => line(period, recent_bars, Kind::Indicator(Indicator::rsi(length, test)?)),
-        Condition::Macd { period, recent_bars, fast, slow, signal, test } => line(period, recent_bars, Kind::Indicator(Indicator::macd(fast, slow, signal, test)?)),
-        Condition::Stochastic { period, recent_bars, k, d, smooth, test } => line(period, recent_bars, Kind::Indicator(Indicator::stochastic(k, d, smooth, test)?)),
-        Condition::Bollinger { period, recent_bars, length, k, test } => line(period, recent_bars, Kind::Indicator(Indicator::bollinger(length, k, test)?)),
-        Condition::Ichimoku { period, recent_bars, conversion, base, span_b, displacement, test } => line(period, recent_bars, Kind::Indicator(Indicator::ichimoku(conversion, base, span_b, displacement, test)?)),
-        Condition::MarketCap { min, max } => Ok(Rule::MarketCap(MarketCapRange { min: bound(min)?, max: bound(max)? })),
-    }
-}
-
-fn decimal(value: f64) -> Result<Decimal, &'static str> {
-    Decimal::of(value).ok_or("수는 유한해야 합니다")
-}
-
-fn bound(value: Bound) -> Result<Option<Decimal>, &'static str> {
-    value.0.map(decimal).transpose()
-}
-
-fn surged(field: SurgeField) -> BarField {
-    match field {
-        SurgeField::Volume => BarField::Volume,
-        SurgeField::TradedValue => BarField::TradedValue,
-    }
-}
 
 struct Cells {
     buckets: Vec<Bucket>,

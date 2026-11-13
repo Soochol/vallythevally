@@ -3,6 +3,7 @@ mod exact;
 mod indicator;
 mod line;
 mod market_cap;
+mod rules;
 pub mod store;
 pub mod summary;
 mod update;
@@ -23,8 +24,9 @@ use crate::clock::Clock;
 use crate::http::{ApiFailure, AppState, Lookup};
 use crate::kiwoom::rest::{KiwoomRest, Priority};
 use crate::symbols::SymbolDirectory;
-use crate::user_routes::{JSON_LIMIT, check_screen, read_json};
-use engine::{RunnableScreen, Snapshot};
+use crate::user_routes::{JSON_LIMIT, parse_stored_screen, read_json};
+use engine::Snapshot;
+pub(crate) use rules::{Invalid, RunnableScreen, parse_screen};
 use summary::{CollectionBasis, CollectionError, SummaryCollector};
 use store::{Listed, Store, StoreError};
 
@@ -392,7 +394,12 @@ async fn status(State(st): State<Arc<AppState>>) -> Result<Json<ScreenerStatus>,
 
 async fn run_screen(State(st): State<Arc<AppState>>, body: Body) -> Result<Json<ScreenerResult>, ApiFailure> {
     let screen: Screen = read_json(body, JSON_LIMIT, "조건식 본문").await?;
-    check_screen(&screen)?;
-    let screen = RunnableScreen::of(&screen).map_err(ApiFailure::bad_request)?;
+    let screen = parse_stored_screen(&screen)?;
     Ok(Json(st.screener.run_screen(screen).await?))
+}
+
+impl From<Invalid> for ApiFailure {
+    fn from(invalid: Invalid) -> Self {
+        ApiFailure::bad_request(invalid.to_string())
+    }
 }
