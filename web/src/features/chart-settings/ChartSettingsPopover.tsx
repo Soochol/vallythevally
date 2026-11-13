@@ -1,6 +1,8 @@
 import { type RefObject, useEffect, useId, useRef, useState } from "react";
 import { CHART_STYLE_LABEL, type ChartStyle, clampVisibleBars, type PriceScale, shownScale, VISIBLE_BARS_MAX, VISIBLE_BARS_MIN } from "../../chart/settings";
+import type { IndicatorWindow } from "../../persist/uiState";
 import { type Slot, useCell, useLayoutStore } from "../../stores/layout";
+import { useUiStore } from "../../stores/ui";
 import { CloseIcon } from "../icons";
 import { AXIS_LOCKED, LOG_LOCKED, pressScale } from "../indicator-dialog/compareForm";
 import { Popover } from "../overlay/Popover";
@@ -12,11 +14,16 @@ const SCALES = [
   { value: "log", label: "로그", title: "로그 축 (L)" },
   { value: "percent", label: "%", title: "가격축을 화면 왼쪽 끝 봉 기준 % 변화로" },
 ] as const satisfies readonly { value: PriceScale; label: string; title: string }[];
+const WINDOWS = [
+  { value: "dialog", label: "가운데 창" },
+  { value: "inspector", label: "차트 옆" },
+] as const satisfies readonly { value: IndicatorWindow; label: string }[];
 const SEGMENTS = "grid gap-1 rounded-m bg-chart-bg p-1";
 const SEGMENT = "seg-btn !h-7 !min-w-0 !px-1 disabled:cursor-not-allowed disabled:opacity-50";
 
 export function ChartSettingsPopover({ slot, anchor, onClose }: { slot: Slot; anchor: RefObject<HTMLElement | null>; onClose(): void }) {
   const settings = useCell(slot).chartSettings;
+  const indicatorWindow = useUiStore((s) => s.prefs.indicatorWindow);
   const { setVisibleBars, setShowExtremes, setStyle, setScale } = useLayoutStore.getState();
   const [draft, setDraft] = useState<string | null>(null);
   const firstFocus = useRef<HTMLElement | null>(null);
@@ -91,6 +98,14 @@ export function ChartSettingsPopover({ slot, anchor, onClose }: { slot: Slot; an
         </div>
       </div>
       {locked && <p className="text-xs text-text-3">{AXIS_LOCKED}</p>}
+      <div className="h-px bg-line" />
+      <section className="flex flex-col gap-2">
+        <h3 id={`${id}-window`} className="text-xs text-text-2">지표 창</h3>
+        <div role="group" aria-labelledby={`${id}-window`} className={`${SEGMENTS} grid-cols-2`}>
+          {WINDOWS.map(({ value, label }) => <button key={value} type="button" className={SEGMENT} aria-pressed={indicatorWindow === value} onClick={() => useUiStore.getState().setIndicatorWindow(value)}>{label}</button>)}
+        </div>
+        <p className="text-xs text-text-3">차트 옆은 오른쪽 패널에 엽니다. 좁은 화면에서는 가운데 창을 씁니다.</p>
+      </section>
       <p className="text-xs text-text-2">활성 칸에 바로 반영 · 레이아웃과 함께 저장</p>
     </Popover>
   );

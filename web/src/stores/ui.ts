@@ -3,7 +3,7 @@ import type { SymbolCode } from "../api/generated/SymbolCode";
 import type { MinutePeriod } from "../lib/symbol";
 import type { WatchColumn } from "../lib/watchlist";
 import type { DrawingPrefs } from "../chart/drawings/prefs";
-import { DEFAULT_UI_PREFS, MAX_RECENT, sortColumns, type IndicatorWindow, type RightPanel, type Theme, type UiExtra, type UiPrefs } from "../persist/uiState";
+import { DEFAULT_UI_PREFS, MAX_RECENT, panelFor, sortColumns, type IndicatorWindow, type RightPanel, type Theme, type UiExtra, type UiPrefs } from "../persist/uiState";
 
 interface UiStore {
   prefs: UiPrefs;
@@ -36,7 +36,7 @@ export const useUiStore = create<UiStore>()((set) => {
     revision: 0,
     load: (prefs, extra) => set({ prefs, extra }),
     setLastMinute: (lastMinute) => edit((p) => (p.lastMinute === lastMinute ? p : { ...p, lastMinute })),
-    setRightPanel: (rightPanel) => edit((p) => p.rightPanel === rightPanel ? p : { ...p, rightPanel }),
+    setRightPanel: (panel) => edit((p) => { const rightPanel = panelFor(panel, p.indicatorWindow); return p.rightPanel === rightPanel ? p : { ...p, rightPanel }; }),
     setPanelWidth: (panelWidth) => edit((p) => p.panelWidth === panelWidth ? p : { ...p, panelWidth }),
     toggleWatch: () => edit((p) => ({ ...p, watchCollapsed: !p.watchCollapsed })),
     pushRecent: (code) =>
@@ -48,7 +48,7 @@ export const useUiStore = create<UiStore>()((set) => {
     clearRecent: () => edit((p) => (p.recentSymbols.length === 0 ? p : { ...p, recentSymbols: [] })),
     setLastLayoutId: (id) => edit((p) => (p.lastLayoutId === id ? p : { ...p, lastLayoutId: id })),
     setActiveWatchlist: (id) => edit((p) => (p.activeWatchlistId === id ? p : { ...p, activeWatchlistId: id })),
-    setIndicatorWindow: (indicatorWindow) => edit((p) => (p.indicatorWindow === indicatorWindow ? p : { ...p, indicatorWindow })),
+    setIndicatorWindow: (indicatorWindow) => edit((p) => (p.indicatorWindow === indicatorWindow ? p : { ...p, indicatorWindow, rightPanel: panelFor(p.rightPanel, indicatorWindow) })),
     setDrawingPrefs: (patch) => edit((p) => ({ ...p, drawing: { ...p.drawing, ...patch } })),
     setWatchGroupCollapsed: (id, collapsed, known) =>
       edit((p) => {

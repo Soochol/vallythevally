@@ -6,6 +6,7 @@ import { useLayoutStore } from "../../stores/layout";
 import { useSelectionStore } from "../../stores/selection";
 import { useUiStore } from "../../stores/ui";
 import type { SearchCommand } from "../commands/registry";
+import { openIndicatorCommand } from "../indicator-command/open";
 import { pressScale } from "../indicator-dialog/compareForm";
 import { saveSnapshot } from "../snapshot/saveSnapshot";
 
@@ -33,7 +34,7 @@ export const screenerRunCommand = (editingOf: (client: QueryClient) => Pick<Scre
 export const DEFAULT_SEARCH_COMMANDS: readonly SearchCommand[] = [
   ...HOTKEYS.flatMap(({ label, keys, action }): SearchCommand[] => {
     switch (action.kind) {
-      case "indicators": return [{ id: "indicators", label, shortcut: keys, run: ({ slot }) => useSelectionStore.getState().openIndicatorCommand(slot) }];
+      case "indicators": return [{ id: "indicators", label, shortcut: keys, run: ({ slot }) => openIndicatorCommand(slot) }];
       case "toggleLog": return [{ id: "log", label, shortcut: keys, run: ({ slot }) => {
         const layout = useLayoutStore.getState();
         const cell = layout.layout.cells.find((c) => c.slot === slot);

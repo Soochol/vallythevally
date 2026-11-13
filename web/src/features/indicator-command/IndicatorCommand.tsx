@@ -1,14 +1,13 @@
 import { Fragment, useEffect, useId, useRef, type Ref } from "react";
 import { indicatorCssColor, isFinancial, KINDS, shownColor, specName } from "../../chart/indicators/kinds";
-import { shownScale } from "../../chart/settings";
 import { symbolSub } from "../../lib/symbol";
 import { useLayoutStore, type Slot } from "../../stores/layout";
 import { useSelectionStore } from "../../stores/selection";
-import { useSymbolInfos } from "../../api/queries";
 import { EmptyState, ErrorState, Skeleton } from "../overlay/State";
 import { CommandFrame } from "../commands/CommandFrame";
 import { CloseIcon, EyeIcon, PlusIcon, SearchIcon } from "../icons";
-import { AXIS_LOCKED, pressScale, stepIndex } from "../indicator-dialog/compareForm";
+import { stepIndex } from "../indicator-dialog/compareForm";
+import { CompareSection } from "./CompareSection";
 import { hasColor, panelLabel, primaryLabel } from "../indicator-dialog/indicatorForm";
 import { IndicatorSettingsForm } from "../indicator-dialog/IndicatorSettingsForm";
 import { candidateGroup, COMMAND_TABS, commandKey, type IndicatorCommandMode } from "./model";
@@ -16,14 +15,13 @@ import { useIndicatorCommand, useIndicatorDraft, type EditableRow, type EditorAc
 
 export function IndicatorCommand() {
   const dialog = useSelectionStore((s) => s.dialog);
-  return dialog?.kind === "indicatorCommand" ? <IndicatorCommandBody key={`${dialog.slot}-${dialog.mode}`} slot={dialog.slot} initialMode={dialog.mode} /> : null;
+  return dialog?.kind === "indicatorCommand" ? <IndicatorCommandBody key={`${dialog.slot}-${dialog.mode}-${dialog.indicatorId}`} slot={dialog.slot} initialMode={dialog.mode} initialIndicator={dialog.indicatorId} /> : null;
 }
 
-export function IndicatorCommandBody({ slot, initialMode }: { slot: Slot; initialMode: IndicatorCommandMode }) {
+export function IndicatorCommandBody({ slot, initialMode, initialIndicator = null }: { slot: Slot; initialMode: IndicatorCommandMode; initialIndicator?: string | null }) {
   const close = useSelectionStore((s) => s.closeDialog);
-  const command = useIndicatorCommand(slot, initialMode);
+  const command = useIndicatorCommand(slot, initialMode, initialIndicator);
   const { cell, mode, input, rows, selected, symbols, search, selectedSymbol, compareButton, editor } = command;
-  const compareInfos = useSymbolInfos(cell.chartSettings.compare);
   const inputRef = useRef<HTMLInputElement>(null);
   const ids = useId();
   const index = selected ? rows.indexOf(selected) : -1;
@@ -98,15 +96,8 @@ export function IndicatorCommandBody({ slot, initialMode }: { slot: Slot; initia
           {mode === "compare" && !symbols.selectable && search.isFetching && <li role="presentation"><Skeleton label="비교 종목 찾는 중" /></li>}
           {mode === "compare" && search.isError && <li role="presentation"><ErrorState message="종목을 찾지 못했습니다. 다시 시도해 보세요." retry={() => void search.refetch()} /></li>}
         </ul>
-        {mode === "compare" ? <aside className="flex min-h-0 flex-col gap-3 overflow-auto p-5">
-          <h3 className="text-m font-semibold">비교 종목 {cell.chartSettings.compare.length}/3</h3>
-          <p className="text-s text-text-2">비교 종목을 넣으면 가격축이 % 변화로 바뀝니다. 모두 지우면 원래 축으로 돌아갑니다.</p>
-          <button type="button" role="switch" aria-checked={shownScale(cell.chartSettings) === "percent"} disabled={cell.chartSettings.compare.length > 0} onClick={() => { const scale = pressScale(cell.chartSettings, "percent"); if (scale) useLayoutStore.getState().setScale(slot, scale); }} className="tb-btn border border-line disabled:opacity-50">가격축을 % 변화로</button>
-          {cell.chartSettings.compare.length > 0 && <p className="text-xs text-text-3">{AXIS_LOCKED}</p>}
-          <ul className="space-y-1">{cell.chartSettings.compare.map((code) => { const info = compareInfos.find((info) => info.code === code); const name = info?.name ?? code; return <li key={code} className="flex items-center gap-2 text-s"><span className="min-w-0 flex-1 truncate">{name}</span><button type="button" className="icon-btn size-6" aria-label={`${name} 지우기`} onClick={() => useLayoutStore.getState().removeCompare(slot, code)}><CloseIcon size={14} /></button></li>; })}</ul>
-          {compareButton.reason && <p className="text-s text-text-2">{compareButton.reason}</p>}
-          <button type="button" className="btn-primary mt-auto disabled:opacity-50" disabled={!compareButton.ok || !selectedSymbol} onClick={() => submit()}>{compareButton.label}</button>
-        </aside> : selected && selected.kind !== "symbol" ? <IndicatorEditor key={selected.key} row={selected} slot={slot} actionRef={editor} onCommitted={refocus} />
+        {mode === "compare" ? <CompareSection slot={slot} button={compareButton} canAdd={selectedSymbol !== null} onAdd={() => submit()} className="flex min-h-0 flex-col gap-3 overflow-auto p-5" />
+          : selected && selected.kind !== "symbol" ? <IndicatorEditor key={selected.key} row={selected} slot={slot} actionRef={editor} onCommitted={refocus} />
           : <aside className="p-5 text-s text-text-3">{mode === "current" ? "지표를 고르면 설정을 바꿀 수 있습니다." : "추가할 지표를 고르면 설정을 확인할 수 있습니다."}</aside>}
       </div>
       <footer className="flex flex-none flex-wrap items-center gap-x-3.5 gap-y-1 border-t border-line px-4 py-2 text-xs text-text-3"><span><kbd>↑↓</kbd> 고르기</span><span><kbd>Tab</kbd> 설정</span><span><kbd>Enter</kbd> {mode === "current" ? "적용" : "추가"}하고 계속</span><span><kbd>Shift+Enter</kbd> {mode === "current" ? "적용" : "추가"}하고 닫기</span><span><kbd>Esc</kbd> 되돌리고 닫기</span></footer>

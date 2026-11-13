@@ -44,11 +44,12 @@ export function useValidator(): Validate | "loading" | "failed" {
   return validate;
 }
 
-export function IndicatorSettingsForm({ draft, color, errors, onChange }: {
+export function IndicatorSettingsForm({ draft, color, errors, onChange, lineSample = true }: {
   draft: Draft;
   color: IndicatorColor;
   errors: readonly FieldError[];
   onChange(draft: Draft): void;
+  lineSample?: boolean;
 }) {
   const ids = useId();
   const kind = draft.form.kind;
@@ -58,7 +59,7 @@ export function IndicatorSettingsForm({ draft, color, errors, onChange }: {
   const lined = hasColor(draft.form);
   const css = indicatorCssColor(color);
   return <div className="@container flex flex-col gap-4">
-    {lined && <svg role="img" aria-label="선 미리보기" className="h-[60px] w-full flex-none rounded-m bg-chart-bg shadow-[inset_0_0_0_1px_var(--line)]" viewBox="0 0 636 60" preserveAspectRatio="none" fill="none">
+    {lined && lineSample && <svg role="img" aria-label="선 미리보기" className="h-[60px] w-full flex-none rounded-m bg-chart-bg shadow-[inset_0_0_0_1px_var(--line)]" viewBox="0 0 636 60" preserveAspectRatio="none" fill="none">
       <path d="M0 44 C 50 42, 80 18, 140 24 S 230 48, 290 38 S 390 8, 450 16 S 560 34, 636 12" stroke={css} strokeWidth={draft.width} strokeLinecap="round" vectorEffect="non-scaling-stroke" />
     </svg>}
     <div className="grid gap-5 @min-[600px]:grid-cols-[minmax(0,1fr)_320px]">

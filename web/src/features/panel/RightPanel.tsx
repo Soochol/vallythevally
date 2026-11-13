@@ -3,7 +3,8 @@ import { DESKTOP_QUERY, useMediaQuery } from "../../lib/media";
 import { type RightPanel as View, useSelectionStore } from "../../stores/selection";
 import { useUiStore } from "../../stores/ui";
 import { ObjectList } from "../drawings/ObjectList";
-import { DRAWING_ICONS, FunnelIcon, Icon, StarIcon } from "../icons";
+import { DRAWING_ICONS, FunnelIcon, Icon, IndicatorIcon, StarIcon } from "../icons";
+import { IndicatorInspector } from "../indicator-inspector/IndicatorInspector";
 import { ScreenerBadge, ScreenerPanel } from "../screener/ScreenerPanel";
 import { desktopPanelWidth } from "../watch/columns";
 import { StatusBar } from "../status/StatusBar";
@@ -15,8 +16,14 @@ const VIEWS: Record<View, { label: string; RailIcon: ComponentType; Content: Com
   watch: { label: "관심종목", RailIcon: StarIcon, Content: WatchPanel },
   screener: { label: "스크리너", RailIcon: FunnelIcon, Content: ScreenerPanel },
   objects: { label: "개체", RailIcon: ObjectsIcon, Content: ObjectList },
+  indicators: { label: "지표", RailIcon: IndicatorIcon, Content: IndicatorInspector },
 };
-const VIEW_ORDER = ["watch", "screener", "objects"] as const;
+const VIEW_ORDER = ["watch", "screener", "objects", "indicators"] as const satisfies readonly View[];
+
+function useRailViews(): readonly View[] {
+  const inspector = useUiStore((s) => s.prefs.indicatorWindow === "inspector");
+  return inspector ? VIEW_ORDER : VIEW_ORDER.filter((view) => view !== "indicators");
+}
 
 const PANEL_MIN_WIDTH = 392;
 const PANEL_MAX_SHARE = 0.55;
@@ -51,7 +58,7 @@ export function RightPanel() {
       {!collapsed && <PanelResizer />}
       {!collapsed && (
         <div data-chart-control className="right-panel ui-island absolute bottom-[var(--island-gap)] right-[calc(var(--island-gap)*2+var(--rail-w))] top-[var(--panel-top,var(--island-gap))] z-10 flex w-[var(--watch-w)] min-h-0 min-w-0 flex-col overflow-hidden rounded-xl">
-          <div id="right-tab-content" role="tabpanel" aria-labelledby={`right-tab-${view}`} className={`flex min-h-0 min-w-0 flex-1 flex-col ${view === "screener" ? "overflow-hidden" : "overflow-auto"}`}><Content /></div>
+          <div id="right-tab-content" role="tabpanel" aria-labelledby={`right-tab-${view}`} className={`flex min-h-0 min-w-0 flex-1 flex-col ${view === "screener" || view === "indicators" ? "overflow-hidden" : "overflow-auto"}`}><Content /></div>
           <StatusBar />
         </div>
       )}
@@ -103,22 +110,24 @@ function PanelResizer() {
 
 function PanelRail({ view, open }: { view: View; open: boolean }) {
   const show = useSelectionStore.getState().showRightPanel;
+  const views = useRailViews();
   const choose = (to: View) => {
     if (open && to === view) useUiStore.getState().toggleWatch();
     else show(to);
   };
   const move = (event: KeyboardEvent<HTMLButtonElement>, from: View) => {
-    const index = VIEW_ORDER.indexOf(from);
-    const next = event.key === "Home" ? 0 : event.key === "End" ? 2 : event.key === "ArrowDown" ? (index + 1) % 3 : event.key === "ArrowUp" ? (index + 2) % 3 : null;
+    const index = views.indexOf(from);
+    const count = views.length;
+    const next = event.key === "Home" ? 0 : event.key === "End" ? count - 1 : event.key === "ArrowDown" ? (index + 1) % count : event.key === "ArrowUp" ? (index + count - 1) % count : null;
     if (next === null) return;
     event.preventDefault();
-    const to = VIEW_ORDER[next]!;
+    const to = views[next]!;
     show(to);
     document.getElementById(`right-tab-${to}`)?.focus();
   };
   return (
     <nav data-chart-control role="tablist" aria-label="오른쪽 패널" aria-orientation="vertical" className="panel-rail ui-island absolute bottom-[var(--island-gap)] right-[var(--island-gap)] top-[var(--panel-top,var(--island-gap))] z-10 flex w-[var(--rail-w)] flex-col items-center gap-1 rounded-xl py-1.5">
-      {VIEW_ORDER.map((to) => {
+      {views.map((to) => {
         const { label, RailIcon } = VIEWS[to];
         const current = open && to === view;
         return (

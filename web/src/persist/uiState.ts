@@ -8,7 +8,8 @@ export type Theme = UiState["theme"];
 
 export const MAX_RECENT = 10;
 
-export type RightPanel = "watch" | "screener" | "objects";
+export const RIGHT_PANELS = ["watch", "screener", "objects", "indicators"] as const;
+export type RightPanel = (typeof RIGHT_PANELS)[number];
 
 export type IndicatorWindow = "dialog" | "inspector";
 
@@ -61,8 +62,10 @@ export function parseUiState(raw: unknown): { prefs: UiPrefs; extra: UiExtra } {
     return fallback;
   };
   pick("theme", theme, (x): x is Theme => x === "dark" || x === "light", DEFAULT_UI_PREFS.theme);
+  const windowMode = pick("indicatorWindow", indicatorWindow, (x): x is IndicatorWindow => x === "dialog" || x === "inspector", "dialog", true);
+  const panel = pick("rightPanel", rightPanel, (x): x is RightPanel => (RIGHT_PANELS as readonly unknown[]).includes(x), "watch", true);
   const prefs: UiPrefs = {
-    rightPanel: pick("rightPanel", rightPanel, (x): x is RightPanel => x === "watch" || x === "screener" || x === "objects", "watch", true),
+    rightPanel: panelFor(panel, windowMode),
     panelWidth: pick("panelWidth", panelWidth, (x): x is number | null => x === null || (typeof x === "number" && Number.isFinite(x) && x > 0), null, true),
     lastLayoutId: pick("lastLayoutId", lastLayoutId, (x): x is string | null => x === null || typeof x === "string", null),
     theme: "dark",
@@ -71,13 +74,15 @@ export function parseUiState(raw: unknown): { prefs: UiPrefs; extra: UiExtra } {
     activeWatchlistId: pick("activeWatchlistId", activeWatchlistId, (x): x is string | null => x === null || typeof x === "string", null, true),
     watchColumns: sortColumns(pick("watchColumns", watchColumns, isColumns, DEFAULT_WATCH_COLUMNS, true)),
     drawing: parseDrawingPrefs(drawing),
-    indicatorWindow: pick("indicatorWindow", indicatorWindow, (x): x is IndicatorWindow => x === "dialog" || x === "inspector", "dialog", true),
+    indicatorWindow: windowMode,
     lastMinute: pick("lastMinute", lastMinute, (x): x is MinutePeriod => typeof x === "string" && isMinutePeriod(x), DEFAULT_UI_PREFS.lastMinute, true),
     collapsedWatchGroups: [...new Set(pick("collapsedWatchGroups", collapsedWatchGroups, isStringArray, [], true))],
   };
   if (bad.length) console.warn(`UiState의 ${bad.join(", ")} 값이 틀려 기본값으로 엽니다`, raw);
   return { prefs, extra };
 }
+
+export const panelFor = (panel: RightPanel, mode: IndicatorWindow): RightPanel => panel === "indicators" && mode !== "inspector" ? "watch" : panel;
 
 export function toUiState(prefs: UiPrefs, extra: UiExtra): Omit<UiState, "revision"> {
   return { ...extra, ...prefs };

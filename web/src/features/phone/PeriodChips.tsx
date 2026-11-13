@@ -2,7 +2,7 @@ import { useCallback, useLayoutEffect, useId, useRef, useState } from "react";
 import type { Period } from "../../api/generated/Period";
 import { PERIOD_LABEL } from "../../lib/symbol";
 import { type CellState, useLayoutStore } from "../../stores/layout";
-import { useSelectionStore } from "../../stores/selection";
+import { openIndicatorCommand } from "../indicator-command/open";
 import { IndicatorIcon } from "../icons";
 import { RadioMenu } from "../menu/RadioMenu";
 
@@ -18,7 +18,6 @@ const CHIP =
 
 export function PeriodChips({ cell }: { cell: CellState }) {
   const setPeriod = useLayoutStore((s) => s.setPeriod);
-  const openIndicatorCommand = useSelectionStore((s) => s.openIndicatorCommand);
   const [menuOpen, setMenuOpen] = useState(false);
   const root = useRef<HTMLDivElement>(null);
   const navigation = useRef<HTMLElement>(null);
