@@ -6,7 +6,7 @@ import type { Bar } from "../../api/generated/Bar";
 import type { UnixSeconds } from "../../api/generated/UnixSeconds";
 import { normalizeHex } from "../../lib/colors";
 import type { History } from "../barFeed";
-import type { IndicatorConfig } from "../settings";
+import type { IndicatorConfig, Panel } from "../settings";
 import type { ThemeTokens } from "../theme";
 import { toChartTime } from "../time";
 import type { PortListener } from "./client";
@@ -19,12 +19,15 @@ interface Datum {
   value?: number;
   base?: number;
   connect?: boolean;
+  color?: string;
 }
 
 class FakeSeries {
   data: Datum[] = [];
   readonly sets: Datum[][] = [];
   readonly rejected: string[] = [];
+  readonly options: object[] = [];
+  readonly scaleOptions: object[] = [];
   failNextUpdate = false;
 
   get setDataCalls(): number {
@@ -51,9 +54,11 @@ class FakeSeries {
     else this.data.push(d);
   }
 
-  applyOptions(): void {}
+  applyOptions(options: object): void {
+    this.options.push(options);
+  }
   priceScale() {
-    return { applyOptions() {} };
+    return { applyOptions: (options: object) => this.scaleOptions.push(options) };
   }
   createPriceLine() {
     return { applyOptions() {} };
@@ -99,33 +104,37 @@ const tail = (gen: number, draws: Draws): Exclude<FromWorker, { type: "fatal" }>
   results: [{ id: ICHIMOKU.id, gen, ok: true, draws: inLineOrder(draws) }],
 });
 
-function fixture(period: "1m" | "Q" | "Y" = "1m") {
+function fixture(period: "1m" | "Q" | "Y" = "1m", configs: IndicatorConfig[] = [ICHIMOKU], panels: Panel[] = []) {
   expect(specLines(ICHIMOKU.spec)).toEqual(LINES);
   const series: FakeSeries[] = [];
+  const active: FakeSeries[] = [];
+  const theme = { tokens: TOKENS };
   const sent: ToWorker[] = [];
   const port: { listener?: PortListener } = {};
-  const add = () => {
+  const add = (_definition: unknown, options: object) => {
     const s = new FakeSeries();
+    s.applyOptions(options);
     series.push(s);
+    active.push(s);
     return s;
   };
   const chart = {
     addSeries: add,
     addCustomSeries: add,
-    removeSeries: () => {},
+    removeSeries: (s: FakeSeries) => active.splice(active.indexOf(s), 1),
     panes: () => [],
   };
   const layer = new IndicatorLayer(
-    { chart: chart as unknown as IChartApi, tokens: () => TOKENS, isIndex: () => false, period: () => period, requestFrame: () => {}, axisFormatted: () => {}, axisCoordinates: () => [], axisFailed: () => {}, guard: (draw) => draw() },
+    { chart: chart as unknown as IChartApi, tokens: () => theme.tokens, isIndex: () => false, period: () => period, requestFrame: () => {}, axisFormatted: () => {}, axisCoordinates: () => [], axisFailed: () => {}, guard: (draw) => draw() },
     (listener) => {
       port.listener = listener;
       return { chart: 1, post: (m) => sent.push(m), close: () => {} };
     },
   );
-  layer.setConfigs([ICHIMOKU], []);
+  layer.setConfigs(configs, panels);
   const reply = (m: Exclude<FromWorker, { type: "fatal" }>) => port.listener?.message(structuredClone(m));
   const line = (id: Line) => series[LINES.indexOf(id)]!;
-  return { layer, series, line, sent, reply };
+  return { layer, series, active, theme, line, sent, reply, breakWorker: () => port.listener?.broken("worker failed") };
 }
 
 interface Step {
@@ -359,4 +368,192 @@ test("재무값은 WASM 계산 없이 API bucket에 그리고 누락·겹침·�
   expect(line.data).toEqual([]);
   f.layer.setFinancials(null);
   expect(line.data).toEqual([]);
+});
+
+const VOLUME: IndicatorConfig = { id: "volume", spec: { kind: "volume", maPeriod: null }, panel: "p", visible: true, style: { colors: ["ind-1"], width: 1 } };
+const VOLUME_PANELS: Panel[] = [{ id: "p", stretch: 0.25 }];
+const volumeRows = (bars: Bar[], tokens = TOKENS): Datum[] => bars.map(b => ({ time: toChartTime(b.t), value: b.v, color: b.c >= b.o ? tokens.upVol : tokens.downVol }));
+const history = (bars: Bar[], current: Bar | null = null): History => ({ bars, current, nextBefore: null });
+
+function workerVolume(gen: number, value: number): Exclude<FromWorker, { type: "fatal" }> {
+  return { type: "created", chart: 1, results: [{ id: VOLUME.id, gen, ok: true, lines: [{ id: "volume", shift: 0 }, { id: "ma", shift: 0 }], draws: [set([0, 1], value), set([1], value / 2)] }] };
+}
+
+function latestCreate(f: Fixture): Extract<ToWorker, { type: "create" }> {
+  const message = f.sent.findLast(m => m.type === "create");
+  if (!message || message.type !== "create") throw new Error("worker 생성 요청이 없습니다");
+  return message;
+}
+
+test.each([null, bar(1, 90), bar(2, 100)])("기본 거래량은 worker 응답 없이 초기 이력과 중복 없는 현재 봉을 그리고 과거 prepend를 반영한다 (%j)", current => {
+  const f = fixture("1m", [VOLUME], VOLUME_PANELS);
+  const bars = [{ ...bar(0, 90), v: 0 }, { ...bar(1, 100), v: 1500 }];
+  const shown = current && current.t > bars[1]!.t ? [...bars, current] : bars;
+  f.layer.reset(history(bars, current));
+  expect(f.active[0]?.data).toEqual(volumeRows(shown));
+  expect(f.layer.rows(bars[0]!.t)[0]).toMatchObject({ state: "ok", values: [{ text: "0" }] });
+  expect(f.active[0]?.scaleOptions).toContainEqual({ mode: 0, scaleMargins: { top: 0.12, bottom: 0 } });
+  const older = { ...bar(-1, 105), v: 3000 };
+  f.layer.reset(history([older, ...bars], current));
+  expect(f.active[0]?.data).toEqual(volumeRows([older, ...shown]));
+  expect(f.sent.filter(m => m.type === "create" || m.type === "bar")).toEqual([]);
+});
+
+test("기본 거래량은 빈 이력 뒤 현재 봉, 같은 종가의 거래량 변경, 확정과 다음 봉을 프레임에 반영한다", () => {
+  const f = fixture("1m", [VOLUME], VOLUME_PANELS);
+  f.layer.reset(history([]));
+  expect(f.active[0]?.data).toEqual([]);
+  expect(f.layer.rows(null)[0]?.state).toBe("ok");
+  const first = { ...bar(0, 110), v: 100 };
+  f.layer.advance(history([], first), first, "live");
+  expect(f.layer.rows(first.t)[0]).toMatchObject({ state: "ok", values: [{ text: "100" }] });
+  expect(f.active[0]?.data).toEqual([]);
+  f.layer.flush();
+  expect(f.active[0]?.data).toEqual(volumeRows([first]));
+  const more = { ...first, v: 250 };
+  f.layer.advance(history([], more), more, "live");
+  expect(f.layer.rows(more.t)[0]).toMatchObject({ values: [{ text: "250" }] });
+  expect(f.active[0]?.data).toEqual(volumeRows([first]));
+  f.layer.flush();
+  expect(f.active[0]?.data).toEqual(volumeRows([more]));
+  const confirmed = { ...more, c: 90, v: 500 };
+  f.layer.advance(history([confirmed]), confirmed, "confirmed");
+  f.layer.flush();
+  expect(f.active[0]?.data).toEqual(volumeRows([confirmed]));
+  const next = { ...bar(1, 100), v: 0 };
+  f.layer.advance(history([confirmed], next), next, "live");
+  f.layer.flush();
+  expect(f.active[0]?.data).toEqual(volumeRows([confirmed, next]));
+  const correction = { ...next, c: 80, v: 600 };
+  f.layer.advance(history([confirmed, correction]), correction, "confirmed");
+  const revised = { ...correction, v: 800 };
+  f.layer.advance(history([confirmed, revised]), revised, "live");
+  expect(f.active[0]?.data).toEqual(volumeRows([confirmed, revised]));
+  expect(f.active[0]?.rejected).toEqual([]);
+  expect(f.sent.filter(m => m.type === "create" || m.type === "bar")).toEqual([]);
+});
+
+test("기본 거래량은 같은 시각의 여러 체결과 rollover를 flush에서 두 최종 값으로 묶는다", () => {
+  const f = fixture("1m", [VOLUME], VOLUME_PANELS);
+  const bars = [bar(0)];
+  f.layer.reset(history(bars));
+  const series = f.active[0]!;
+  const updates = vi.spyOn(series, "update");
+  const first = { ...bar(1, 110), v: 100 };
+  const more = { ...first, v: 250 };
+  const confirmed = { ...more, c: 90, v: 500 };
+  const next = { ...bar(2, 100), v: 0 };
+  const latest = { ...next, v: 600 };
+  f.layer.advance(history(bars, first), first, "live");
+  f.layer.advance(history(bars, more), more, "live");
+  f.layer.advance(history([...bars, confirmed]), confirmed, "confirmed");
+  f.layer.advance(history([...bars, confirmed], next), next, "live");
+  f.layer.advance(history([...bars, confirmed], latest), latest, "live");
+  expect(f.layer.rows(confirmed.t)[0]).toMatchObject({ state: "ok", values: [{ text: "500" }] });
+  expect(f.layer.rows(latest.t)[0]).toMatchObject({ state: "ok", values: [{ text: "600" }] });
+  expect(series.data).toEqual(volumeRows(bars));
+  expect(updates).not.toHaveBeenCalled();
+  f.layer.flush();
+  expect(updates.mock.calls).toEqual(volumeRows([confirmed, latest]).map(point => [point]));
+  expect(series.data).toEqual(volumeRows([...bars, confirmed, latest]));
+  f.layer.flush();
+  expect(updates).toHaveBeenCalledTimes(2);
+  expect(series.rejected).toEqual([]);
+  expect(f.sent.filter(m => m.type === "create" || m.type === "bar")).toEqual([]);
+});
+
+test("기본 거래량은 숨긴 동안 비우고 다시 표시할 때 최신 이력으로 복원하며 테마와 패널 순서를 따른다", () => {
+  const second: IndicatorConfig = { ...VOLUME, id: "second", panel: "q" };
+  const panels: Panel[] = [...VOLUME_PANELS, { id: "q", stretch: 0.5 }];
+  const f = fixture("1m", [VOLUME, second], panels);
+  const bars = [bar(0, 80), bar(1, 100)];
+  f.layer.reset(history(bars));
+  f.layer.setConfigs([{ ...VOLUME, visible: false }, second], panels);
+  expect(f.active[0]?.data).toEqual([]);
+  expect(f.layer.rows(at(1))[0]).toMatchObject({ state: "hidden", values: [] });
+  const live = { ...bar(2, 105), v: 2000 };
+  f.layer.advance(history(bars, live), live, "live");
+  expect(f.active[0]?.data).toEqual([]);
+  f.layer.setConfigs([VOLUME, second], panels);
+  expect(f.active.map(s => s.data)).toEqual([volumeRows([...bars, live]), volumeRows(bars)]);
+  f.layer.flush();
+  expect(f.active.map(s => s.data)).toEqual([volumeRows([...bars, live]), volumeRows([...bars, live])]);
+  f.theme.tokens = { ...TOKENS, upVol: "newUp", downVol: "newDown" };
+  f.layer.setTheme();
+  expect(f.active.map(s => s.data)).toEqual([volumeRows([...bars, live], f.theme.tokens), volumeRows([...bars, live], f.theme.tokens)]);
+  f.layer.setConfigs([second, VOLUME], [panels[1]!, panels[0]!]);
+  expect(f.layer.rows(live.t).map(row => ({ id: row.id, panel: row.panel?.index }))).toEqual([{ id: "second", panel: 0 }, { id: "volume", panel: 1 }]);
+  expect(f.active.map(s => s.data)).toEqual([volumeRows([...bars, live], f.theme.tokens), volumeRows([...bars, live], f.theme.tokens)]);
+  expect(f.active.every(s => s.options.some(o => "visible" in o && o.visible === true))).toBe(true);
+});
+
+test("거래량 MA를 끄면 이전 worker 엔진을 버리고 늦은 응답이 기본 거래량과 새 종목을 덮지 못한다", () => {
+  const ma: IndicatorConfig = { ...VOLUME, spec: { kind: "volume", maPeriod: 5 } };
+  const f = fixture("1m", [ma], VOLUME_PANELS);
+  const bars = [bar(0, 80), bar(1, 105)];
+  f.layer.reset(history(bars));
+  const old = latestCreate(f);
+  expect(old.engines).toEqual([{ id: VOLUME.id, spec: JSON.stringify(ma.spec) }]);
+  expect(f.active.map(s => s.data)).toEqual([[], []]);
+  f.reply(workerVolume(old.gen, 9000));
+  expect(f.active[0]?.data.map(d => d.value)).toEqual([9000, 9000]);
+  expect(f.active[1]?.data.map(d => d.value)).toEqual([4500]);
+  f.layer.setConfigs([VOLUME], VOLUME_PANELS);
+  expect(f.active.map(s => s.data)).toEqual([volumeRows(bars)]);
+  expect(f.sent).toContainEqual({ type: "drop", chart: 1, ids: [VOLUME.id] });
+  f.reply(workerVolume(old.gen, 99999));
+  f.reply({ type: "tail", chart: 1, results: [{ id: VOLUME.id, gen: old.gen, ok: true, draws: [update(2, 99999)] }] });
+  f.layer.flush();
+  expect(f.active.map(s => s.data)).toEqual([volumeRows(bars)]);
+  f.layer.clear();
+  expect(f.active[0]?.data).toEqual([]);
+  const other = [bar(100, 90), bar(101, 110)];
+  f.layer.reset(history(other));
+  f.reply(workerVolume(old.gen, 99999));
+  f.layer.flush();
+  expect(f.active[0]?.data).toEqual(volumeRows(other));
+  expect(f.layer.rows(at(100))[0]?.state).toBe("ok");
+});
+
+test("기본 거래량에 MA를 켜면 worker 결과를 기다리고 다시 끄면 최신 봉을 동기로 복원한다", () => {
+  const f = fixture("1m", [VOLUME], VOLUME_PANELS);
+  const bars = [bar(0), bar(1)];
+  f.layer.reset(history(bars));
+  const ma: IndicatorConfig = { ...VOLUME, spec: { kind: "volume", maPeriod: 5 } };
+  f.layer.setConfigs([ma], VOLUME_PANELS);
+  const request = latestCreate(f);
+  expect(f.active.map(s => s.data)).toEqual([[], []]);
+  expect(f.layer.rows(at(1))[0]?.state).toBe("pending");
+  f.reply(workerVolume(request.gen, 1200));
+  expect(f.layer.rows(at(1))[0]?.state).toBe("ok");
+  expect(f.active.map(s => s.data.map(d => d.value))).toEqual([[1200, 1200], [600]]);
+  const current = { ...bar(2), v: 3000 };
+  f.layer.advance(history(bars, current), current, "live");
+  expect(f.sent.at(-1)).toMatchObject({ type: "bar", kind: "preview", bar: [current.t, current.o, current.h, current.l, current.c, current.v] });
+  f.layer.setConfigs([VOLUME], VOLUME_PANELS);
+  expect(f.active.map(s => s.data)).toEqual([volumeRows([...bars, current])]);
+  f.reply({ type: "tail", chart: 1, results: [{ id: VOLUME.id, gen: request.gen, ok: false, error: "calc", message: "late failure" }] });
+  expect(f.layer.rows(current.t)[0]?.state).toBe("ok");
+  expect(f.active[0]?.data).toEqual(volumeRows([...bars, current]));
+});
+
+test.each([true, false])("worker가 고장 나도 기본 거래량의 초기·실시간·설정 전환은 보이고 다른 지표의 실패는 남는다 (초기 고장 %s)", beforeReset => {
+  const f = fixture("1m", [VOLUME, ICHIMOKU], VOLUME_PANELS);
+  if (beforeReset) f.breakWorker();
+  const bars = [bar(0, 90), bar(1, 100)];
+  f.layer.reset(history(bars));
+  if (!beforeReset) f.breakWorker();
+  expect(f.layer.rows(at(1)).map(row => row.state)).toEqual(["ok", "calc"]);
+  expect(f.active.at(-1)?.data).toEqual(volumeRows(bars));
+  const current = { ...bar(2, 110), v: 4000 };
+  f.layer.advance(history(bars, current), current, "live");
+  expect(f.layer.rows(current.t).map(row => row.state)).toEqual(["ok", "calc"]);
+  f.layer.flush();
+  expect(f.active.at(-1)?.data).toEqual(volumeRows([...bars, current]));
+  const ma: IndicatorConfig = { ...VOLUME, spec: { kind: "volume", maPeriod: 5 } };
+  f.layer.setConfigs([ma, ICHIMOKU], VOLUME_PANELS);
+  expect(f.layer.rows(current.t).map(row => row.state)).toEqual(["calc", "calc"]);
+  f.layer.setConfigs([VOLUME, ICHIMOKU], VOLUME_PANELS);
+  expect(f.layer.rows(current.t).map(row => row.state)).toEqual(["ok", "calc"]);
+  expect(f.active.at(-1)?.data).toEqual(volumeRows([...bars, current]));
 });

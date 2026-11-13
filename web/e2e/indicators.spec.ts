@@ -99,31 +99,52 @@ test("열기만 하면 v1 차트 설정을 서버에 쓰지 않고, 기본 거�
   expect(after.revision).toBe(saved.revision);
 });
 
-test("첫 화면에서 거래량 막대는 봉보다 많아야 한 프레임 늦게 그려진다", async ({ page }) => {
-  await page.addInitScript(installFrameProbe);
-  await page.addInitScript(() => {
-    const frames: { main: number; volume: number }[] = [];
-    (window as unknown as { frames_: typeof frames }).frames_ = frames;
-    const tick = () => {
-      const s = window.frameProbe?.snapshot() ?? [];
-      frames.push({
-        main: s.find((x) => x.type === "Candlestick")?.data.length ?? 0,
-        volume: s.find((x) => x.type === "Histogram")?.data.length ?? 0,
-      });
+for (const wasmDelay of [0, 80]) {
+  const name = wasmDelay === 0 ? "첫 화면에서 거래량 막대는 봉보다 많아야 한 프레임 늦게 그려진다" : "WASM 응답이 늦어도 첫 화면의 기본 거래량은 봉보다 많아야 한 프레임 늦게 준비된다";
+  test(name, async ({ page, scenario }) => {
+    const saved = scenario.documents.layout(DEFAULT_LAYOUT_ID);
+    scenario.documents.saveLayout({ ...saved, revision: saved.revision + 1, cells: saved.cells.map(c => ({ ...c, symbol: "005930", venue: "combined" })) });
+    let wasmRequests = 0;
+    if (wasmDelay > 0) await page.context().route("**/*.wasm", async route => {
+      wasmRequests++;
+      await new Promise(resolve => setTimeout(resolve, wasmDelay));
+      await route.continue();
+    });
+    await page.addInitScript(installFrameProbe);
+    await page.addInitScript(() => {
+      const frames: Window["volumeFrames"] = [];
+      window.volumeFrames = frames;
+      const tick = () => {
+        const s = window.frameProbe?.snapshot() ?? [];
+        const main = s.find(x => x.type === "Candlestick")?.data ?? [];
+        const last = main.at(-1);
+        frames.push({
+          main: main.length,
+          volume: s.find(x => x.type === "Histogram")?.data.length ?? 0,
+          lastClose: last && "close" in last ? last.close : null,
+        });
+        requestAnimationFrame(tick);
+      };
       requestAnimationFrame(tick);
-    };
-    requestAnimationFrame(tick);
+    });
+    await page.goto("/");
+    await expect(cell(page)).toHaveAttribute("aria-busy", "false");
+    await expect.poll(() => page.evaluate(() => window.volumeFrames.some(f => f.volume > 0))).toBe(true);
+    if (wasmDelay > 0) await expect.poll(() => wasmRequests).toBeGreaterThan(0);
+    const frames = await page.evaluate(() => window.volumeFrames);
+    const symbols = scenario.requests.filter(r => new URL(r.url()).pathname === "/api/bars").map(r => new URL(r.url()).searchParams.get("symbol"));
+    await test.info().attach("volume-frames", { body: JSON.stringify({ wasmDelay, frames, symbols }), contentType: "application/json" });
+    expect(symbols.length).toBeGreaterThan(0);
+    expect(new Set(symbols)).toEqual(new Set(["005930"]));
+    expect(new Set(frames.filter(f => f.main > 0).map(f => f.lastClose)).size).toBe(1);
+    const firstMain = frames.findIndex(f => f.main > 0);
+    const firstVolume = frames.findIndex(f => f.volume > 0);
+    test.info().annotations.push({ type: "frames", description: `main ${firstMain}, volume ${firstVolume}, gap ${firstVolume - firstMain}` });
+    expect(firstMain).toBeGreaterThanOrEqual(0);
+    expect(firstVolume - firstMain).toBeGreaterThanOrEqual(0);
+    expect(firstVolume - firstMain).toBeLessThanOrEqual(1);
   });
-  await page.goto("/?symbol=005930");
-  await expect(cell(page)).toHaveAttribute("aria-busy", "false");
-  await expect.poll(() => page.evaluate(() => (window as unknown as { frames_: { volume: number }[] }).frames_.some((f) => f.volume > 0))).toBe(true);
-  const frames = await page.evaluate(() => (window as unknown as { frames_: { main: number; volume: number }[] }).frames_);
-  const firstMain = frames.findIndex((f) => f.main > 0);
-  const firstVolume = frames.findIndex((f) => f.volume > 0);
-  test.info().annotations.push({ type: "frames", description: `main ${firstMain}, volume ${firstVolume}` });
-  expect(firstVolume - firstMain).toBeGreaterThanOrEqual(0);
-  expect(firstVolume - firstMain).toBeLessThanOrEqual(1);
-});
+}
 
 const ma = (id: string, period: number) => ({ id, spec: { kind: "ma", method: "sma", period }, panel: "price", visible: true, style: { colors: ["ind-2"], width: 1 } });
 
@@ -136,13 +157,16 @@ test("설정값이 틀린 지표는 그리지 않고 설정 오류를 남기며,
   await expect(page.locator('[data-indicator-row="good"]')).not.toContainText("오류");
 });
 
-test("wasm을 받지 못하면 봉은 그대로 그리고 지표 범례에 계산 오류를 남긴다", async ({ page, scenario }) => {
-  await seedLayout(scenario, "D", [ma("m", 5)], []);
+test("wasm을 받지 못해도 봉과 기본 거래량은 그리고 다른 지표 범례에 계산 오류를 남긴다", async ({ page, scenario }) => {
+  await seedLayout(scenario, "D", [ma("m", 5), { id: "v", spec: { kind: "volume", maPeriod: null }, panel: "p", visible: true, style: { colors: ["ind-1"], width: 1 } }], [{ id: "p", stretch: 0.25 }]);
+  await page.addInitScript(installFrameProbe);
   await page.context().route("**/*.wasm", (route) => route.abort());
   await page.goto("/");
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
   await expect(chartOf(cell(page))).not.toHaveAttribute("data-bar-count", "0");
   await expect(page.locator('[data-indicator-row="m"]')).toContainText("계산 오류");
+  await expect(page.locator('[data-indicator-row="v"]')).not.toContainText("오류");
+  await expect.poll(async () => (await series(page)).find(s => s.type === "Histogram")?.data.length ?? 0).toBeGreaterThan(0);
 });
 
 test("일목균형표를 띄운 채 과거로 스크롤해도 다가갈 때마다 과거 페이지는 하나다", async ({ page, scenario }) => {
@@ -168,6 +192,7 @@ test("일목균형표를 띄운 채 과거로 스크롤해도 다가갈 때마�
 declare global {
   interface Window {
     workerReplies: number;
+    volumeFrames: { main: number; volume: number; lastClose: number | null }[];
   }
 }
 
