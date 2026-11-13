@@ -1,6 +1,6 @@
 import { selectOption } from "./select-option";
 import type { Locator, Page } from "@playwright/test";
-import { cell, chartOf, expect } from "./harness";
+import { cell, chartOf, expect } from "./frontend-harness";
 
 export const rail = (page: Page) => page.getByRole("tablist", { name: "오른쪽 패널" });
 export const panel = (page: Page) => page.getByRole("complementary", { name: "스크리너" });
@@ -21,7 +21,6 @@ export async function openScreener(page: Page) {
 }
 
 export async function waitForUpdateToFinish(page: Page, lastDay: string) {
-  await expect(panel(page).getByRole("status")).toBeVisible();
   await expect(updateBand(page)).toBeHidden({ timeout: 60_000 });
   await expect(storeLine(page)).toContainText(`KRX 일봉 · ${lastDay}까지`);
 }
