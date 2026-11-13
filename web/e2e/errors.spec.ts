@@ -1,6 +1,7 @@
+import type { ApiError } from "../src/api/generated/ApiError";
 import { cell, chartOf, dragTowardPast, expect, test } from "./harness";
 
-const stopped = { error: { code: "kiwoom_auth_failed", message: "인증에 실패했습니다 [8050] 지정단말기 인증에 실패했습니다", reason: "kiwoom_auth", retryAt: null, manualActionRequired: true } };
+const stopped: ApiError = { error: { code: "kiwoom_auth_failed", message: "인증에 실패했습니다 [8050] 지정단말기 인증에 실패했습니다", reason: "auth_blocked", retryAt: null, manualActionRequired: true } };
 
 test("주소의 없는 종목은 알림으로 알리고 칸은 그대로 둔다", async ({ page }) => {
   await page.goto("/?symbol=999999");

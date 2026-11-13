@@ -57,7 +57,7 @@ for (const offset of [0, -60_000]) {
       await page.mouse.click(bounds.x + bounds.width * 0.75, bounds.y + bounds.height * 0.4);
       await expect.poll(() => accepted).toBe(true);
       const [created] = await drawings(scenario);
-      if (created === undefined) throw new Error("The held PUT must reach SQLite before deletion");
+      if (created === undefined) throw new Error("The held PUT must reach the document store before deletion");
       expect(created.revision).toBe(now);
       expect((await journal(other, created.id))?.want.kind).toBe("put");
 
@@ -105,7 +105,7 @@ for (const offset of [0, -60_000]) {
       await expect(chartOf(cell(other))).toHaveAttribute("data-bar-count", /^[1-9]\d*$/);
       await expect.soft.poll(() => replayedDeletes, { message: "the new document must replay the recovered DELETE" }).toBeGreaterThan(0);
       await expect.soft.poll(async () => (await drawings(scenario)).map((drawing) => drawing.id), {
-        message: "reloading the deleting tab must replay its DELETE to SQLite",
+        message: "reloading the deleting tab must replay its DELETE to the document store",
       }).not.toContain(created.id);
       await expect.soft(mirror(other)).toHaveAttribute("data-drawings", "[]");
       await expect.soft.poll(() => journal(other, created.id)).toBeNull();

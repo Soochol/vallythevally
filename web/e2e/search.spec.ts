@@ -1,4 +1,4 @@
-import { screenerScenario, readyStatus } from "./fixtures/screener";
+import { screenerScenario } from "./fixtures/screener";
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import type { ScreenerResult } from "../src/api/generated/ScreenerResult";
@@ -153,7 +153,7 @@ test("일부 시세 누락·추세 실패에도 다른 종목과 명령을 계�
 test.describe("검색에서 스크리너 실행", () => {
   test.use({ clockStart: "20261106203000" });
   test("숨긴 오른쪽 스크리너 탭을 펼쳐 저장된 조건식을 실행하고 차트를 유지한다", async ({ page, scenario }) => {
-    screenerScenario(scenario, { status: readyStatus() });
+    screenerScenario(scenario);
     scenario.documents.saveScreens({ revision: 1, screens: [{ id: "search-run", name: "검색에서 실행", markets: [], exclude: ["etf"], conditions: [{ kind: "new_high", period: "D", recentBars: 20, field: "high", n: 60 }] }] });
 
     await page.goto("/");

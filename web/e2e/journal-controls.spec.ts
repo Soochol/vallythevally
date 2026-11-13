@@ -40,7 +40,7 @@ async function pendingRecords(page: Page) {
   return page.evaluate(({ shared, stage }) => Object.keys(localStorage).filter((key) => key.startsWith(shared) || key.startsWith(stage)), { shared: UNSAVED_PREFIX, stage: STAGING_PREFIX });
 }
 
-test("actual scenario + HTTP/SQLite: delayed older admission cannot replace the same document's newer DELETE", async ({ page, scenario }, info) => {
+test("frontend journal + saved documents: delayed older admission cannot replace the same document's newer DELETE", async ({ page, scenario }, info) => {
   await open(page);
   await createLine(page);
   await expect(page.getByText(/^자동 저장됨 /)).toBeVisible();
@@ -84,7 +84,7 @@ test("actual scenario + HTTP/SQLite: delayed older admission cannot replace the 
 });
 
 for (const failure of ["locks-unsupported", "locks-rejected", "staging-write", "shared-write"] as const) {
-  test(`actual scenario + HTTP/SQLite: ${failure} reports failure without unsafe transport`, async ({ page, scenario }, info) => {
+  test(`frontend journal + saved documents: ${failure} reports failure without unsafe transport`, async ({ page, scenario }, info) => {
     const requests: string[] = [];
     page.on("request", (request) => {
       if (request.url().includes("/api/drawings/") && ["PUT", "DELETE"].includes(request.method())) requests.push(request.method());
@@ -119,7 +119,7 @@ for (const failure of ["locks-unsupported", "locks-rejected", "staging-write", "
   });
 }
 
-test("actual scenario + HTTP/SQLite: reload transmits the staged PUT's fixed revision", async ({ page, scenario }, info) => {
+test("frontend journal + saved documents: reload transmits the staged PUT's fixed revision", async ({ page, scenario }, info) => {
   await open(page);
   await createLine(page);
   await expect(page.getByText(/^자동 저장됨 /)).toBeVisible();
@@ -157,7 +157,7 @@ test("actual scenario + HTTP/SQLite: reload transmits the staged PUT's fixed rev
 });
 
 
-test("actual scenario + HTTP/SQLite: completion quota failure retains recovery work and retry cleans without retransmission", async ({ page, scenario }, info) => {
+test("frontend journal + saved documents: completion quota failure retains recovery work and retry cleans without retransmission", async ({ page, scenario }, info) => {
   const requests: { method: string; body: unknown }[] = [];
   page.on("request", request => {
     if (request.url().includes("/api/drawings/") && ["PUT", "DELETE"].includes(request.method())) requests.push({ method: request.method(), body: request.postDataJSON() });
@@ -175,7 +175,7 @@ test("actual scenario + HTTP/SQLite: completion quota failure retains recovery w
   const retry = page.getByRole("button", { name: "다시 시도", exact: true }).first();
   await expect(retry).toBeVisible();
   const [saved] = await storedDrawings(scenario);
-  if (!saved) throw new Error("Expected the acknowledged SQLite drawing");
+  if (!saved) throw new Error("Expected the acknowledged saved drawing");
   expect(requests.map(request => request.method)).toEqual(["PUT"]);
   expect(await pendingRecords(page)).toHaveLength(2);
   expect(await page.evaluate(key => localStorage.getItem(key), completionKey(saved.id))).toBeNull();

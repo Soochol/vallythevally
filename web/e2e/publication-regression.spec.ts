@@ -42,7 +42,7 @@ async function protocolRecords(page: Page) {
   return page.evaluate(prefix => Object.fromEntries(Object.keys(localStorage).filter(key => key.startsWith(prefix)).map(key => [key, JSON.parse(localStorage.getItem(key) ?? "null")])), COMPLETION_PREFIX);
 }
 
-test("actual scenario + HTTP/SQLite: first publication of an older never-sent PUT cannot revive a completed DELETE", async ({page, context, scenario}, info) => {
+test("frontend journal + saved documents: first publication of an older never-sent PUT cannot revive a completed DELETE", async ({page, context, scenario}, info) => {
   await open(page); await createLine(page);
   await expect(page.getByText(/^자동 저장됨 /)).toBeVisible();
   const [original] = await storedDrawings(scenario);
@@ -107,7 +107,7 @@ test("actual scenario + HTTP/SQLite: first publication of an older never-sent PU
 });
 
 
-test("actual scenario + HTTP/SQLite: native launch holds the id lock only until fetch starts, not until its ACK", async ({ page, context, scenario }, info) => {
+test("frontend journal + saved documents: native launch holds the id lock only until fetch starts, not until its ACK", async ({ page, context, scenario }, info) => {
   await open(page);
   await createLine(page);
   await expect(page.getByText(/^자동 저장됨 /)).toBeVisible();
@@ -188,7 +188,7 @@ test("actual scenario + HTTP/SQLite: native launch holds the id lock only until 
   }
 });
 
-test("actual scenario + HTTP/SQLite: a warm Storage task paused before diagnostic registration cannot publish below a completed DELETE", async ({ page, context, scenario }) => {
+test("frontend journal + saved documents: a warm Storage task paused before diagnostic registration cannot publish below a completed DELETE", async ({ page, context, scenario }) => {
   await open(page);
   await createLine(page);
   await expect(page.getByText(/^자동 저장됨 /)).toBeVisible();

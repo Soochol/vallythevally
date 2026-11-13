@@ -1,3 +1,4 @@
+import type { ApiError } from "../../src/api/generated/ApiError";
 import { isPeriod } from "../../src/lib/symbol";
 import { parseUiState } from "../../src/persist/uiState";
 import type { BrowserContext, Request, Route, WebSocketRoute } from "@playwright/test";
@@ -28,7 +29,7 @@ type Matcher = string | ((url: URL, request: Request) => boolean);
 type Handler = (request: Request) => FixtureReply | Promise<FixtureReply>;
 type Subscription = Extract<ClientMessage, { type: "subscribe" }>;
 const clone = <T>(value: T): T => structuredClone(value);
-const error = (status: number, code: string, message: string): FixtureReply => ({ status, body: { error: { code, message, reason: null, retryAt: null, manualActionRequired: false } } });
+const error = (status: number, code: ApiError["error"]["code"], message: string): FixtureReply => ({ status, body: { error: { code, message, reason: null, retryAt: null, manualActionRequired: false } } satisfies ApiError });
 const matches = (match: Matcher, request: Request) => typeof match === "string" ? new URL(request.url()).pathname === match : match(new URL(request.url()), request);
 
 export class UserDocuments {
@@ -151,7 +152,7 @@ export class Scenario {
     let received: (request: Request) => void = () => {};
     const request = new Promise<Request>(resolve => { received = resolve; });
     const pending = new Promise<FixtureReply>(resolve => { release = resolve; });
-    const cleanup = () => release({ status: 503, body: { error: { code: "fixture_closed", message: "Test closed a held request" } } });
+    const cleanup = () => release(error(503, "internal", "Test closed a held request"));
     this.holds.add(cleanup);
     this.on(match, input => { received(input); return pending; });
     return { received: request, reply: (response: FixtureReply) => { this.holds.delete(cleanup); release(response); } };
@@ -239,7 +240,7 @@ export class Scenario {
     if (/\/financials$/.test(path) && method === "GET") return { body: { symbol: decodeURIComponent(path.split("/")[3] ?? ""), period: url.searchParams.get("period") === "Q" ? "Q" : "Y", status: "not_collected", reason: null, failure: null, corpCode: null, fiscalMonth: null, shareClass: null, shareClassReason: null, lastCheckedAt: null, lastAttemptAt: null, disclosureFailure: null, refreshVersion: 0, disclosureVersion: 0, latestCorrections: false, progress: { total: 0, completed: 0, failed: 0, pending: 0 }, series: [] } satisfies FinancialsPage };
     const description = `Unconfigured API fixture: ${method} ${url.pathname}${url.search}`;
     this.failures.push(description);
-    return error(599, "fixture_missing", description);
+    return error(599, "internal", description);
   }
   async close(): Promise<void> { for (const release of this.holds) release(); this.holds.clear(); this.live.close(); if (this.failures.length) throw new Error(this.failures.join("\n")); }
 }
