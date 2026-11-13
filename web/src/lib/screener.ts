@@ -278,7 +278,15 @@ export function runBlock(status: ScreenerStatus): RunBlock | null {
   return null;
 }
 
-export const showsUpdateBand = (status: ScreenerStatus): boolean => status.update !== null || runBlock(status) !== null;
+export type UpdateBandKind = "running" | "stopped" | "empty" | "missing_day";
+
+export function updateBandKind(status: ScreenerStatus): UpdateBandKind | null {
+  if (status.update) return status.update.error === null ? "running" : "stopped";
+  const block = runBlock(status);
+  return block === "empty" || block === "missing_day" ? block : null;
+}
+
+export const showsUpdateBand = (status: ScreenerStatus): boolean => updateBandKind(status) !== null;
 
 const KST_OFFSET_MS = 9 * 3_600_000;
 const CLOSE_MS = 20 * 3_600_000;

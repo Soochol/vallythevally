@@ -37,6 +37,7 @@ import {
   type StatusFooter,
   statusFooter,
   todayConfirmed,
+  updateBandKind,
   type UpdateRetry,
   updateRetry,
 } from "../../lib/screener";
@@ -617,8 +618,9 @@ function UpdateBand({ status }: { status: ScreenerStatus }) {
   const reference = status.needDay ?? status.lastDay;
   const stored = status.lastDay && reference ? `${dayLabel(status.lastDay, reference)}까지 있습니다.` : "받은 자료가 없습니다.";
   const frame = "flex-none border-b border-line bg-surface px-3 py-2.5";
+  const kind = updateBandKind(status);
 
-  if (update && update.error === null) {
+  if (kind === "running" && update) {
     const percent = update.total > 0 ? Math.floor((update.done * 100) / update.total) : 0;
     return (
       <section aria-label="업데이트" role="status" className={frame}>
@@ -653,7 +655,7 @@ function UpdateBand({ status }: { status: ScreenerStatus }) {
     );
   }
 
-  if (update?.error && retry) {
+  if (kind === "stopped" && update?.error && retry) {
     return (
       <section aria-label="업데이트" role="alert" className={frame}>
         <div className="flex items-center gap-2">
@@ -682,8 +684,7 @@ function UpdateBand({ status }: { status: ScreenerStatus }) {
     );
   }
 
-  const block = runBlock(status);
-  if (block === "empty") {
+  if (kind === "empty") {
     return (
       <section aria-label="업데이트" className={frame}>
         <div className="flex items-center gap-2">
@@ -701,7 +702,7 @@ function UpdateBand({ status }: { status: ScreenerStatus }) {
     );
   }
 
-  if (block === "missing_day" && status.needDay !== null) {
+  if (kind === "missing_day" && status.needDay !== null) {
     return (
       <section aria-label="업데이트" className={frame}>
         <div className="flex items-center gap-2">

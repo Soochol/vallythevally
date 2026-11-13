@@ -20,6 +20,8 @@ import {
   sortRows,
   statusFooter,
   todayConfirmed,
+  updateBandKind,
+  type UpdateBandKind,
   updateRetry,
 } from "./screener";
 
@@ -247,6 +249,27 @@ test("위쪽 띠는 업데이트가 돌거나 멈췄을 때와 실행이 막혔�
   expect(showsUpdateBand({ ...ready, update: stopped })).toBe(true);
   expect(showsUpdateBand({ ...ready, lastDay: null })).toBe(true);
   expect(showsUpdateBand({ ...ready, lastDay: "2026-11-06" })).toBe(true);
+});
+
+const stoppedAtStart = { ...running("symbols"), done: 0, error: stopped.error };
+
+test.each<[string, ScreenerStatus, UpdateBandKind | null]>([
+  ["정상", ready, null],
+  ["종목 목록 받는 중", { ...ready, update: running("symbols") }, "running"],
+  ["최근 채우는 중", { ...ready, update: running("recent") }, "running"],
+  ["과거 이어 받는 중", { ...ready, update: running("backfill") }, "running"],
+  ["도중에 멈춤", { ...ready, update: stopped }, "stopped"],
+  ["시작하자마자 멈춤", { ...ready, update: stoppedAtStart }, "stopped"],
+  ["빈 저장소", { ...ready, lastDay: null }, "empty"],
+  ["직전 관측일 없음", { ...ready, lastDay: "2026-11-06" }, "missing_day"],
+  ["빈 저장소에서 시작하자마자 멈춤", { ...ready, lastDay: null, update: stoppedAtStart }, "stopped"],
+  ["직전 관측일 없이 도중에 멈춤", { ...ready, lastDay: "2026-11-06", update: stopped }, "stopped"],
+  ["빈 저장소에서 처음 받는 중", { ...ready, lastDay: null, update: running("symbols") }, "running"],
+  ["필요한 관측일이 없음", { ...ready, needDay: null }, null],
+  ["필요한 관측일이 없고 오래된 저장소", { ...ready, lastDay: "2026-11-06", needDay: null }, null],
+])("위쪽 띠 갈래: %s", (_, status, kind) => {
+  expect(updateBandKind(status)).toBe(kind);
+  expect(showsUpdateBand(status)).toBe(kind !== null);
 });
 
 test("멈춘 업데이트의 다시 시도는 서버가 준 시각의 그 초가 다 지나야 열린다", () => {
