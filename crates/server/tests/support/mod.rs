@@ -66,7 +66,11 @@ impl ScriptedTransport {
     pub fn set_quote_rows(&self, rows: Vec<Value>) { self.replies.lock().unwrap().quotes = Some(rows); }
     pub fn set_krx_market(&self, market: KrxMarket) { self.replies.lock().unwrap().market = Some(market); }
     pub fn reject_token(&self, token: &str) { self.replies.lock().unwrap().rejected.push(token.into()); }
-    pub fn reset(&self) { *self.replies.lock().unwrap() = Replies::default(); }
+    pub fn reset(&self) {
+        let mut replies = self.replies.lock().unwrap();
+        let market = replies.market.take();
+        *replies = Replies { market, ..Replies::default() };
+    }
     pub fn api_ids(&self) -> Vec<String> { self.seen.api_ids.lock().unwrap().clone() }
     pub fn calls(&self) -> Vec<Call> { self.seen.calls.lock().unwrap().clone() }
     pub fn requests(&self) -> usize { self.seen.calls.lock().unwrap().len() }
