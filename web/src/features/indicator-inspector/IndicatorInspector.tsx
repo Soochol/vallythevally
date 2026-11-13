@@ -68,7 +68,12 @@ function InspectorBody({ slot }: { slot: Slot }) {
   };
   const keys = (event: KeyboardEvent) => {
     if (event.defaultPrevented || event.nativeEvent.isComposing || event.keyCode === 229) return;
-    if (commandKey(event.nativeEvent).kind === "submit" && event.target instanceof HTMLInputElement) { event.preventDefault(); submit(); return; }
+    if (commandKey(event.nativeEvent).kind === "submit" && event.target instanceof HTMLInputElement) {
+      if (open?.kind === "current" && event.target !== inputRef.current) return;
+      event.preventDefault();
+      submit();
+      return;
+    }
     if (event.key !== "Escape" || !open) return;
     event.preventDefault();
     event.stopPropagation();

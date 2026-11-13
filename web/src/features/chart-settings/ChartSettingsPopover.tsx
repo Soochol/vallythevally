@@ -96,12 +96,12 @@ export function ChartSettingsPopover({ slot, anchor, onClose }: { slot: Slot; an
               title={locked ? (value === "log" ? LOG_LOCKED : AXIS_LOCKED) : title} onClick={() => pickScale(value)}>{label}</button>
           ))}
         </div>
+        {locked && <p className="col-start-2 text-xs text-text-3">{AXIS_LOCKED}</p>}
         <span id={`${id}-window`} className="text-text-2">지표 창</span>
         <div role="group" aria-labelledby={`${id}-window`} className={`${SEGMENTS} grid-cols-2`}>
           {WINDOWS.map(({ value, label, title }) => <button key={value} type="button" className={SEGMENT} title={title} aria-pressed={indicatorWindow === value} onClick={() => useUiStore.getState().setIndicatorWindow(value)}>{label}</button>)}
         </div>
       </div>
-      {locked && <p className="text-xs text-text-3">{AXIS_LOCKED}</p>}
       <p className="text-xs text-text-2">활성 칸에 바로 반영 · 레이아웃과 함께 저장</p>
     </Popover>
   );

@@ -274,6 +274,11 @@ test("비교 종목이 있어 축 고정 안내가 붙어도 1280x600에서 팝�
   const box = (await settings.boundingBox())!;
   expect(box.y).toBeGreaterThanOrEqual(button.y + button.height);
   expect(box.y + box.height).toBeLessThanOrEqual(600);
+  const note = (await settings.getByText("비교 종목이 있으면", { exact: false }).boundingBox())!;
+  const scale = (await settings.getByRole("group", { name: "가격 축" }).boundingBox())!;
+  const windowRow = (await settings.getByRole("group", { name: "지표 창" }).boundingBox())!;
+  expect(note.y).toBeGreaterThan(scale.y);
+  expect(note.y).toBeLessThan(windowRow.y);
   const choices = settings.getByRole("group", { name: "지표 창" });
   await expect(choices.getByRole("button", { name: "가운데 창", exact: true })).toHaveAttribute("aria-pressed", "true");
   await choices.getByRole("button", { name: "차트 옆", exact: true }).click();

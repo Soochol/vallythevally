@@ -63,8 +63,13 @@ test("차트 옆을 고르면 지표 버튼이 우측 패널을 열어 지표를
   await ma.click();
   await editor.getByRole("group", { name: "테마 색", exact: true }).getByRole("button", { name: /^테마 1 / }).click();
   await expect.poll(() => maColors(scenario)).toEqual([["ind-1"]]);
+  await editor.getByRole("textbox", { name: "기간", exact: true }).fill("0");
+  await editor.getByRole("textbox", { name: "기간", exact: true }).press("Enter");
+  await expect(ma).toHaveAttribute("aria-expanded", "true");
+  await expect(editor.getByRole("textbox", { name: "기간", exact: true })).toHaveValue("0");
   await page.keyboard.press("Escape");
   await expect.poll(() => maColors(scenario)).toEqual([["#EE9DD0"]]);
+  await expect.poll(async () => indicators(scenario).find((i) => i.spec.kind === "ma")?.spec).toEqual({ kind: "ma", method: "sma", period: 9 });
   await expect(ma).toHaveAttribute("aria-expanded", "false");
   await expect(search(page)).toBeFocused();
 
