@@ -100,8 +100,8 @@ test.describe("데스크톱", () => {
 
       await choose(cell(page).getByRole("group", { name: "거래소" }), "KRX");
       await expectTenMinuteBars(page, requested, "삼성전자 KRX 10분", { symbol: "005930", venue: "krx", period: "10m" });
-      await toolbar.getByRole("button", { name: "봉 모양" }).click();
-      await expect(page.getByRole("menu", { name: "봉 모양" })).toBeVisible();
+      await toolbar.getByRole("button", { name: "차트 설정", exact: true }).click();
+      await expect(page.getByRole("dialog", { name: "차트 설정", exact: true })).toBeInViewport({ ratio: 1 });
       await page.keyboard.press("Escape");
       await expect(toolbar.getByRole("button", { name: "차트 이미지 내려받기" })).toBeInViewport();
       await expect(toolbar.getByRole("button", { name: "테마 바꾸기" })).toHaveCount(0);

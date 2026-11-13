@@ -14,9 +14,12 @@ async function savedDrawings(scenario: Scenario): Promise<Drawing[]> {
   return scenario.documents.drawings("005930");
 }
 
+const styleButton = (page: Page, label: string) =>
+  page.getByRole("dialog", { name: "차트 설정", exact: true }).getByRole("group", { name: "봉 모양" }).getByRole("button", { name: label, exact: true });
+
 async function styleMenu(page: Page) {
-  await page.getByRole("button", { name: "봉 모양", exact: true }).click();
-  await expect(page.getByRole("menuitemradio", { name: "라인", exact: true })).toBeVisible();
+  if (!(await styleButton(page, "라인").isVisible())) await page.getByRole("button", { name: "차트 설정", exact: true }).click();
+  await expect(styleButton(page, "라인")).toBeVisible();
 }
 
 test("replacement consumes queued rollover in both real series and retains newer queued ticks", async ({ page, scenario }, info) => {
@@ -61,7 +64,7 @@ test("replacement consumes queued rollover in both real series and retains newer
   scenario.live.bar("005930", november9BarAt("10:00", 202_000, 3), "confirmed");
   await trade(203_000, "100100", 3);
   await page.waitForTimeout(200);
-  await page.getByRole("menuitemradio", { name: "라인", exact: true }).evaluate((element) => {
+  await styleButton(page, "라인").evaluate((element) => {
     if (element instanceof HTMLElement) element.click();
   });
   const snapshot = await series(page);
@@ -106,6 +109,8 @@ test("replacement consumes queued rollover in both real series and retains newer
     volume: [expect.objectContaining({ value: 12 }), expect.objectContaining({ value: 13 })],
   });
   expect((await savedDrawings(scenario))[0]!.points).toEqual(saved.points);
+  await page.keyboard.press("Escape");
+  await expect(styleButton(page, "라인")).toBeHidden();
   await page.getByRole("group", { name: "봉 주기" }).getByRole("button", { name: "일", exact: true }).click();
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
   await expect.poll(async () => JSON.parse(await chart.locator(".drawing-mirror").getAttribute("data-drawings") ?? "[]")).toEqual([
@@ -125,9 +130,9 @@ test("history-only snapshots remain identical across every main series style", a
   const before = await series(page);
   const history = before.find((s) => s.type === "Candlestick")!.data.map((b) => ({ time: b.time, value: "close" in b ? b.close : undefined }));
   expect(history.length).toBeGreaterThan(0);
-  for (const [label, type] of [["라인", "Line"], ["영역", "Area"], ["바", "Bar"], ["캔들", "Candlestick"]]) {
+  for (const [label, type] of [["라인", "Line"], ["영역", "Area"], ["바", "Bar"], ["캔들", "Candlestick"]] as const) {
     await styleMenu(page);
-    await page.getByRole("menuitemradio", { name: label, exact: true }).click();
+    await styleButton(page, label).click();
     const after = await series(page);
     expect(after.map((s) => s.type).sort()).toEqual(["Histogram", type].sort());
     expect(after.find((s) => s.type === type)!.data.map((b) => ({ time: b.time, value: "close" in b ? b.close : "value" in b ? b.value : undefined }))).toEqual(history);

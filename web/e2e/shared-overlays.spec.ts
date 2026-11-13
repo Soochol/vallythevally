@@ -5,28 +5,31 @@ import { cell, expect, test } from "./harness";
 test("공통 메뉴는 잘리지 않고 선택·키보드·포커스와 분봉 고정 복원을 지원한다", async ({ scenario, page }) => {
   await page.goto("/?symbol=005930");
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
-  const style = page.getByRole("button", { name: "봉 모양", exact: true });
-  const menu = page.getByRole("menu", { name: "봉 모양", exact: true });
-  for (const name of ["캔들", "바", "라인", "영역"]) {
-    await style.click();
+  await page.setViewportSize({ width: 390, height: 844 });
+  const opener = page.getByRole("navigation", { name: "봉 주기" }).getByRole("button", { name: "일", exact: true });
+  const menu = page.getByRole("menu", { name: "다른 봉 주기", exact: true });
+  for (const name of ["1분", "3분", "30분"]) {
+    await opener.click({ button: "right" });
     await expect(menu.locator(":scope")).toBeVisible();
-    await expect(menu.getByRole("menuitemradio")).toHaveCount(4);
+    await expect(menu.getByRole("menuitemradio")).toHaveCount(3);
     for (const item of await menu.getByRole("menuitemradio").all()) {
       const bounds = await item.boundingBox();
       expect(bounds).not.toBeNull();
       expect(bounds!.y).toBeGreaterThanOrEqual(0);
-      expect(bounds!.y + bounds!.height).toBeLessThanOrEqual(900);
+      expect(bounds!.y + bounds!.height).toBeLessThanOrEqual(844);
     }
     await menu.getByRole("menuitemradio", { name, exact: true }).click();
-    await expect(style).toBeFocused();
-    await expect(style).toHaveAttribute("title", `봉 모양: ${name}`);
+    await expect(opener).toBeFocused();
+    await expect(cell(page)).toHaveAttribute("aria-label", new RegExp(` ${name}$`));
   }
-  await style.click(); await page.keyboard.press("Home"); await page.keyboard.press("ArrowUp");
-  await expect(menu.getByRole("menuitemradio", { name: "영역" })).toBeFocused();
-  await page.keyboard.press("Home"); await menu.dispatchEvent("keydown", { key: "라", bubbles: true });
-  await expect(menu.getByRole("menuitemradio", { name: "라인" })).toBeFocused();
+  await opener.click({ button: "right" }); await page.keyboard.press("Home"); await page.keyboard.press("ArrowUp");
+  await expect(menu.getByRole("menuitemradio", { name: "30분" })).toBeFocused();
+  await page.keyboard.press("Home"); await menu.dispatchEvent("keydown", { key: "3", bubbles: true });
+  await expect(menu.getByRole("menuitemradio", { name: "3분" })).toBeFocused();
   await page.keyboard.press("Enter"); await expect(menu).toBeHidden();
-  await style.click(); await page.keyboard.press("Escape"); await expect(style).toBeFocused();
+  await expect(cell(page)).toHaveAttribute("aria-label", / 3분$/);
+  await opener.click({ button: "right" }); await page.keyboard.press("Escape"); await expect(opener).toBeFocused();
+  await page.setViewportSize({ width: 1440, height: 900 });
   const minutes = page.getByRole("button", { name: "분봉", exact: true });
   await minutes.click();
   await page.getByRole("menuitemcheckbox", { name: "5분 고정", exact: true }).click();
@@ -79,7 +82,10 @@ test("공통 범례 SVG와 화면 크기별 메뉴·페이지 경계를 확인�
   await mkdir(directory, { recursive: true });
   for (const size of [{ width: 1440, height: 900 }, { width: 1024, height: 768 }, { width: 390, height: 844 }]) {
     await page.setViewportSize(size);
-    if (size.width > 768) await page.getByRole("button", { name: "봉 모양", exact: true }).click();
+    if (size.width > 768) {
+      await page.getByRole("button", { name: "차트 설정", exact: true }).click();
+      await expect(page.getByRole("dialog", { name: "차트 설정", exact: true })).toBeVisible();
+    }
     await expect.poll(() => page.evaluate(() => ({ width: document.documentElement.scrollWidth - innerWidth, height: document.documentElement.scrollHeight - innerHeight }))).toEqual({ width: 0, height: 0 });
     const panels = page.locator("[popover]:popover-open");
     for (const panel of await panels.all()) {

@@ -37,13 +37,6 @@ export const SearchIcon = ({ size }: P) => (
     <path d="m15 15 5 5" />
   </Icon>
 );
-export const CandleIcon = ({ size }: P) => (
-  <Icon size={size}>
-    <path d="M8 3v3M8 16v4M16 6v3M16 18v3" />
-    <rect x="5.5" y="6" width="5" height="10" rx="0.5" />
-    <rect x="13.5" y="9" width="5" height="9" rx="0.5" />
-  </Icon>
-);
 export const ChevronIcon = ({ size = 12 }: P) => (
   <Icon size={size}>
     <path d="m7 10 5 5 5-5" />
@@ -124,10 +117,12 @@ export const IndicatorIcon = ({ size }: P) => (
     <path d="M3 21h18" />
   </Icon>
 );
-export const GearIcon = ({ size = 16 }: P) => (
+export const SlidersIcon = ({ size = 16 }: P) => (
   <Icon size={size}>
-    <circle cx="12" cy="12" r="3" />
-    <path d={ICON_PATHS.gear} />
+    <path d="M4 6h8M18 6h2M4 12h2M12 12h8M4 18h10M20 18h0" />
+    <circle cx="15" cy="6" r="2.2" />
+    <circle cx="9" cy="12" r="2.2" />
+    <circle cx="17" cy="18" r="2.2" />
   </Icon>
 );
 export const EyeIcon = ({ size = 16, off = false }: P & { off?: boolean }) => (
