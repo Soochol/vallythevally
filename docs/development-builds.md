@@ -10,6 +10,8 @@ python3 scripts/dev.py build
 
 ## 자동 시험
 
+로컬 시험은 `unshare` 없이 아래 개발 명령으로 실행한다. `scripts/check.sh`는 로컬 시험에 사용하지 않는다.
+
 E2E 전체 준비와 실행은 [웹 검사와 E2E 도구](web-checks.md)를 사용한다. 서버만 미리 준비하려면 다음 명령으로 가짜 키움도 포함한다.
 
 ```sh
@@ -41,6 +43,10 @@ python3 scripts/dev.py --bundled cargo check -p server
 flock "$(git rev-parse --path-format=absolute --git-common-dir)/compile.lock" env CARGO_BUILD_JOBS=4 cargo test --locked -p server --test contract --no-run
 cargo test --locked -p server --test contract
 ```
+
+## 수집 작업 회귀 시험
+
+수집 작업의 실패 처리는 처음부터 실패하는 경우와 진행 도중 실패하는 경우를 모두 확인한다(#118). 키움 종목 목록에 있어도 일봉을 주지 않는 종목이 있다(예: 002785 진흥기업우B). 개별 종목의 일봉 미제공은 해당 종목을 건너뛰고 기록하며 다른 종목의 처리는 계속하는지 확인한다(#116).
 
 ## 배포용 빌드
 
