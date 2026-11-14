@@ -81,13 +81,19 @@ describe("채운 도형은 안쪽 전체가 몸통이다", () => {
   });
 });
 
-describe("겹쳤을 때: 핸들 > 선 > 채움, 같으면 z가 큰 것", () => {
+describe("겹쳤을 때: 고른 드로잉의 핸들, 그다음 가장 위에 그린 드로잉", () => {
   const box: HitItem = { id: "box", z: 5, shapes: [{ kind: "rect", a: { x: 0, y: 0 }, b: { x: 200, y: 200 }, fill }], handles: [] };
   const low: HitItem = { id: "low", z: 1, shapes: [line(0, 100, 200, 100)], handles: [] };
   const high: HitItem = { id: "high", z: 2, shapes: [line(0, 102, 200, 102)], handles: [] };
 
-  test("선이 위의 채움을 이긴다", () => {
-    expect(hitTest([box, low], { x: 50, y: 100 }, pane)).toEqual({ kind: "body", id: "low", part: "line" });
+  test("위에 그린 채움이 아래 선을 이긴다", () => {
+    expect(hitTest([box, low], { x: 50, y: 100 }, pane)).toEqual({ kind: "body", id: "box", part: "fill" });
+    expect(hitTest([{ ...box, z: 0 }, low], { x: 50, y: 100 }, pane)).toEqual({ kind: "body", id: "low", part: "line" });
+  });
+
+  test("선 위에 놓인 글자 상자를 누르면 글자가 골라진다", () => {
+    const note: HitItem = { id: "note", z: 3, shapes: [{ kind: "text", at: { x: 40, y: 95 }, text: "메모", style: { color: "$draw", size: 12, bold: false, italic: false }, align: "left", baseline: "top", box: { padding: 4, wrapWidth: null } }], handles: [] };
+    expect(hitTest([low, note], { x: 50, y: 100 }, pane)).toEqual({ kind: "body", id: "note", part: "fill" });
   });
 
   test("같은 선끼리는 z가 큰 것", () => {
