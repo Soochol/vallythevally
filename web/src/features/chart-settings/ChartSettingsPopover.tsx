@@ -28,7 +28,7 @@ const SEGMENT = "seg-btn !h-7 !min-w-0 !px-1 disabled:cursor-not-allowed disable
 export function ChartSettingsPopover({ slot, anchor, onClose }: { slot: Slot; anchor: RefObject<HTMLElement | null>; onClose(): void }) {
   const settings = useCell(slot).chartSettings;
   const indicatorWindow = useUiStore((s) => s.prefs.indicatorWindow);
-  const { setVisibleBars, setShowExtremes, setShowOhlc, setShowOhlcChange, setExtremeBasis, setStyle, setScale } = useLayoutStore.getState();
+  const { setVisibleBars, setShowExtremes, setShowOhlc, setShowOhlcChange, setExtremeBasis, setShowDaySeparators, setStyle, setScale } = useLayoutStore.getState();
   const [draft, setDraft] = useState<string | null>(null);
   const firstFocus = useRef<HTMLElement | null>(null);
   const id = useId();
@@ -58,22 +58,21 @@ export function ChartSettingsPopover({ slot, anchor, onClose }: { slot: Slot; an
         <button type="button" className="icon-btn !size-7" aria-label="닫기" onClick={onClose}><CloseIcon /></button>
       </header>
       <section className="flex flex-col gap-2">
-        <h3 id={`${id}-bars`} className="text-xs text-text-2">화면에 보이는 봉</h3>
-        <div role="group" aria-labelledby={`${id}-bars`} className={`${SEGMENTS} grid-cols-5`}>
-          {BAR_PRESETS.map((bars) => (
-            <button key={bars ?? "auto"} ref={settings.visibleBars === bars ? focusFirst : undefined} type="button" className={SEGMENT}
-              aria-pressed={settings.visibleBars === bars} title={bars === null ? "기본 봉 수 (데스크톱 130, 휴대폰 90, 분기봉·연봉은 전체)" : undefined}
-              onClick={() => { setDraft(null); setVisibleBars(slot, bars); }}>{bars ?? "자동"}</button>
-          ))}
-        </div>
         <div className="flex items-center gap-2">
-          <span className="flex-1 text-text-2">직접 입력</span>
+          <h3 id={`${id}-bars`} className="flex-1 text-xs text-text-2">화면에 보이는 봉</h3>
           <input type="number" inputMode="numeric" min={VISIBLE_BARS_MIN} max={VISIBLE_BARS_MAX} step={1} aria-label="보이는 봉 수 직접 입력" placeholder="자동"
             ref={customBars ? focusFirst : undefined}
             className="ui-field !min-h-8 w-[84px] text-right" value={draft ?? settings.visibleBars ?? ""}
             onChange={(e) => setDraft(e.currentTarget.value)} onBlur={commitDraft}
             onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); commitDraft(); } }} />
           <span className="text-text-2">봉</span>
+        </div>
+        <div role="group" aria-labelledby={`${id}-bars`} className={`${SEGMENTS} grid-cols-5`}>
+          {BAR_PRESETS.map((bars) => (
+            <button key={bars ?? "auto"} ref={settings.visibleBars === bars ? focusFirst : undefined} type="button" className={SEGMENT}
+              aria-pressed={settings.visibleBars === bars} title={bars === null ? "기본 봉 수 (데스크톱 130, 휴대폰 90, 분기봉·연봉은 전체)" : undefined}
+              onClick={() => { setDraft(null); setVisibleBars(slot, bars); }}>{bars ?? "자동"}</button>
+          ))}
         </div>
       </section>
       <div className="h-px bg-line" />
@@ -94,9 +93,11 @@ export function ChartSettingsPopover({ slot, anchor, onClose }: { slot: Slot; an
             ))}
           </div>
         </div>
+        <SettingSwitch label="날짜 구분선" detail="분봉에서 날짜가 바뀌는 자리에 세로선"
+          checked={settings.showDaySeparators} onChange={(on) => setShowDaySeparators(slot, on)} />
       </section>
       <div className="h-px bg-line" />
-      <div className="grid grid-cols-[56px_minmax(0,1fr)] items-center gap-x-2 gap-y-2.5">
+      <div className="grid grid-cols-[56px_minmax(0,1fr)] items-center gap-x-2 gap-y-2">
         <span id={`${id}-style`} className="text-text-2">봉 모양</span>
         <div role="group" aria-labelledby={`${id}-style`} className={`${SEGMENTS} grid-cols-4`}>
           {STYLES.map((style) => <button key={style} type="button" className={SEGMENT} aria-pressed={settings.style === style} onClick={() => setStyle(slot, style)}>{CHART_STYLE_LABEL[style]}</button>)}

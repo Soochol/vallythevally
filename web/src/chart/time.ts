@@ -36,6 +36,15 @@ export function isIntraday(period: Period): boolean {
   return period !== "D" && period !== "W" && period !== "M" && period !== "Q" && period !== "Y";
 }
 
+const DAY_SECONDS = 86400;
+const kstDay = (t: UnixSeconds) => Math.floor((t + KST_OFFSET) / DAY_SECONDS);
+
+export function kstDateChanges(bars: readonly { t: UnixSeconds }[]): number[] {
+  const starts: number[] = [];
+  for (let i = 1; i < bars.length; i++) if (kstDay(bars[i]!.t) !== kstDay(bars[i - 1]!.t)) starts.push(i);
+  return starts;
+}
+
 /** 봉 시각. 일·주·월봉은 날짜만, 분봉은 `2026-11-06 19:55`. */
 export function formatBarTime(t: UnixSeconds, period: Period): string {
   return isIntraday(period) ? formatKstMinute(t) : kstParts(t).date;

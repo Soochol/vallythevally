@@ -29,6 +29,7 @@ import { type ShownVenue, venueLabel } from "../lib/venue";
 import { BarFeed, displayBars, type FetchPage, type History } from "./barFeed";
 import { type CompareEntry, CompareLayer, compareVenue } from "./compare";
 import { CompareLegend } from "./compareLegend";
+import { DaySeparators } from "./daySeparators";
 import { extremeChange, type ExtremeTag, ExtremeTags } from "./extremeTags";
 import { type Extreme, findExtremes } from "./extremes";
 import { type OpenPort, openIndicatorPort } from "./indicators/client";
@@ -119,6 +120,7 @@ export class ChartController {
   private readonly compareLegend: CompareLegend;
   private readonly legend: Legend;
   private readonly extremeTags: ExtremeTags;
+  private readonly daySeparators: DaySeparators;
   get venueAnchor(): HTMLElement { return this.legend.venueAnchor; }
   private readonly feed: BarFeed;
   private readonly onStatus: (s: CellStatus) => void;
@@ -155,6 +157,11 @@ export class ChartController {
     this.main = addMainSeries(this.chart, "candle", this.tokens, false, this.priceAxisGeometry());
     this.legend = new Legend(el);
     this.extremeTags = new ExtremeTags(el);
+    this.daySeparators = new DaySeparators(this.chart, {
+      shown: () => this.view !== null && this.view.settings.showDaySeparators && isIntraday(this.view.period),
+      bars: () => this.bars,
+      color: () => this.tokens.text3,
+    });
     this.indicators = new IndicatorLayer(
       {
         chart: this.chart,
@@ -279,6 +286,7 @@ export class ChartController {
     if (prev?.settings.showExtremes !== next.settings.showExtremes || prev?.settings.extremeBasis !== next.settings.extremeBasis) this.scheduleFrame();
     this.indicators.setPreview(next.previewIndicator ?? null);
     this.compare.setCodes(compareEntries(next), { period: next.period, venueFor: (code) => compareVenue(code, next) });
+    this.daySeparators.sync();
     this.renderLegend();
   }
 
