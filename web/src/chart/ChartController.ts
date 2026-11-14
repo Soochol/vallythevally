@@ -39,7 +39,7 @@ import { PanelControls } from "./panelControls";
 import { type IndicatorCommand, IndicatorLegend } from "./indicators/legendRows";
 import { chartIndicators, chartPanels } from "./indicators/shown";
 import { isTailChange } from "./indicators/sync";
-import { Legend, legendParts, ohlcRow } from "./legend";
+import { Legend, legendParts } from "./legend";
 import { addMainSeries, applyMainColors, type MainSeries, priceFormat, setMainData, updateMainBar } from "./series";
 import { type ChartSettings, type Panel, type PriceScale, shownScale } from "./settings";
 import { composeSnapshot, snapshotFileName } from "./snapshot";
@@ -291,6 +291,7 @@ export class ChartController {
     this.indicators.setPreview(next.previewIndicator ?? null);
     this.compare.setCodes(compareEntries(next), { period: next.period, venueFor: (code) => compareVenue(code, next) });
     this.daySeparators.sync();
+    this.legend.setDisplay(next.settings);
     this.renderLegend();
   }
 
@@ -710,7 +711,7 @@ export class ChartController {
     this.panelControls.render(panels, tops);
     this.indicatorLegend.render(this.indicators.rows(this.financialHoverTime ?? bar?.t ?? null), tops, this.chart.priceScale("right").width());
     this.compareLegend.render(this.compare.rows(this.leftT(), bar?.t ?? null));
-    if (!view || !bar) return this.legend.show(null, "hidden");
+    if (!view || !bar) return this.legend.show(null);
     this.legend.show({
       bar,
       prev: this.bars[i - 1] ?? null,
@@ -718,7 +719,7 @@ export class ChartController {
       isIndex: isIndexCode(view.symbol),
       period: view.period,
       stalledAt: this.stalledAt,
-    }, ohlcRow(view.settings));
+    });
   }
 }
 

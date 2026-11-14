@@ -41,7 +41,7 @@ export interface ChartSettings {
   panels: Panel[];
   visibleBars: number | null;
   showExtremes: boolean;
-  showOhlc: boolean;
+  showLegend: boolean;
   showOhlcChange: boolean;
   extremeBasis: ExtremeBasis;
   showDaySeparators: boolean;
@@ -80,7 +80,7 @@ export const DEFAULT_CHART_SETTINGS: ChartSettings = {
   panels: [{ id: DEFAULT_VOLUME_PANEL, stretch: DEFAULT_PANEL_STRETCH }],
   visibleBars: null,
   showExtremes: false,
-  showOhlc: true,
+  showLegend: true,
   showOhlcChange: false,
   extremeBasis: "last",
   showDaySeparators: false,
@@ -117,7 +117,7 @@ function readChartSettings(raw: unknown): ChartSettings | null {
     v, style, scale, indicators, compare, panels,
     visibleBars = DEFAULT_CHART_SETTINGS.visibleBars,
     showExtremes = DEFAULT_CHART_SETTINGS.showExtremes,
-    showOhlc = DEFAULT_CHART_SETTINGS.showOhlc,
+    showLegend = DEFAULT_CHART_SETTINGS.showLegend,
     showOhlcChange = DEFAULT_CHART_SETTINGS.showOhlcChange,
     extremeBasis = DEFAULT_CHART_SETTINGS.extremeBasis,
     showDaySeparators = DEFAULT_CHART_SETTINGS.showDaySeparators,
@@ -125,9 +125,9 @@ function readChartSettings(raw: unknown): ChartSettings | null {
   if (!isOneOf(CHART_STYLES, style) || !isOneOf(PRICE_SCALES, scale)) return null;
   if (!isCompareList(compare)) return null;
   if (!(visibleBars === null || isVisibleBars(visibleBars)) || typeof showExtremes !== "boolean") return null;
-  if (typeof showOhlc !== "boolean" || typeof showOhlcChange !== "boolean" || !isOneOf(EXTREME_BASES, extremeBasis)) return null;
+  if (typeof showLegend !== "boolean" || typeof showOhlcChange !== "boolean" || !isOneOf(EXTREME_BASES, extremeBasis)) return null;
   if (typeof showDaySeparators !== "boolean") return null;
-  const display = { showExtremes, showOhlc, showOhlcChange, extremeBasis, showDaySeparators };
+  const display = { showExtremes, showLegend, showOhlcChange, extremeBasis, showDaySeparators };
   if (v === 1) return migrateV1({ style, scale, compare, visibleBars, ...display, indicators, panels });
   if (v !== 2 || !Array.isArray(indicators) || !Array.isArray(panels)) return null;
   const readPanels = panels.map(readPanel);
@@ -137,7 +137,7 @@ function readChartSettings(raw: unknown): ChartSettings | null {
   return panelsMatch(settings) ? settings : null;
 }
 
-type V1Kept = Pick<ChartSettings, "style" | "scale" | "compare" | "visibleBars" | "showExtremes" | "showOhlc" | "showOhlcChange" | "extremeBasis" | "showDaySeparators">;
+type V1Kept = Pick<ChartSettings, "style" | "scale" | "compare" | "visibleBars" | "showExtremes" | "showLegend" | "showOhlcChange" | "extremeBasis" | "showDaySeparators">;
 
 function migrateV1({ indicators, panels, ...kept }: V1Kept & { indicators: unknown; panels: unknown }): ChartSettings | null {
   if (!isEmptyArray(indicators) || !isEmptyArray(panels)) return null;

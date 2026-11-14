@@ -29,7 +29,7 @@ const SEGMENT = "seg-btn !h-7 !min-w-0 !px-1 disabled:cursor-not-allowed disable
 export function ChartSettingsPopover({ cellId, anchor, onClose }: { cellId: WindowId; anchor: RefObject<HTMLElement | null>; onClose(): void }) {
   const settings = useCell(cellId).chartSettings;
   const indicatorWindow = useUiStore((s) => s.prefs.indicatorWindow);
-  const { setVisibleBars, setShowExtremes, setShowOhlc, setShowOhlcChange, setExtremeBasis, setShowDaySeparators, setStyle, setScale } = useLayoutStore.getState();
+  const { setVisibleBars, setShowExtremes, setShowLegend, setShowOhlcChange, setExtremeBasis, setShowDaySeparators, setStyle, setScale } = useLayoutStore.getState();
   const [draft, setDraft] = useState<string | null>(null);
   const firstFocus = useRef<HTMLElement | null>(null);
   const id = useId();
@@ -79,10 +79,10 @@ export function ChartSettingsPopover({ cellId, anchor, onClose }: { cellId: Wind
       <div className="h-px bg-line" />
       <section className="flex flex-col gap-2">
         <h3 className="sr-only">표시</h3>
-        <SettingSwitch label="봉 값 (시·고·저·종·량)" detail="범례에 봉의 시가·고가·저가·종가·거래량 줄을 표시"
-          checked={settings.showOhlc} onChange={(on) => setShowOhlc(cellId, on)} />
+        <SettingSwitch label="범례" detail="종목·현재가·지표·비교 종목 범례를 표시. 봉 값(시·고·저·종·량)은 항상 보임"
+          checked={settings.showLegend} onChange={(on) => setShowLegend(cellId, on)} />
         <SettingSwitch label="봉 값 등락률" detail="시·고·저·종 옆에 직전 봉 종가 대비 %"
-          checked={settings.showOhlcChange} disabled={!settings.showOhlc} onChange={(on) => setShowOhlcChange(cellId, on)} />
+          checked={settings.showOhlcChange} onChange={(on) => setShowOhlcChange(cellId, on)} />
         <SettingSwitch label="화면 내 최고·최저" detail="지금 보이는 봉 안에서 찾아 표시"
           checked={settings.showExtremes} onChange={(on) => setShowExtremes(cellId, on)} />
         <div className="flex items-center gap-2">
@@ -121,9 +121,9 @@ export function ChartSettingsPopover({ cellId, anchor, onClose }: { cellId: Wind
   );
 }
 
-function SettingSwitch({ label, detail, checked, disabled = false, onChange }: { label: string; detail: string; checked: boolean; disabled?: boolean; onChange(on: boolean): void }) {
+function SettingSwitch({ label, detail, checked, onChange }: { label: string; detail: string; checked: boolean; onChange(on: boolean): void }) {
   return (
-    <button type="button" role="switch" aria-checked={checked} disabled={disabled} title={detail} className="ui-switch disabled:cursor-not-allowed disabled:opacity-50" onClick={() => onChange(!checked)}>
+    <button type="button" role="switch" aria-checked={checked} title={detail} className="ui-switch" onClick={() => onChange(!checked)}>
       <span className="flex-1 text-left font-medium leading-snug">{label}</span>
       <span aria-hidden="true" className="ui-switch-track"><span /></span>
     </button>

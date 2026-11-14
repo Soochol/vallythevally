@@ -299,17 +299,20 @@ const zigzagBars: Bar[] = Array.from({ length: 300 }, (_, i) => {
   return { t: START + i * DAY, o: c - 150 + (i % 2) * 400, h: c + 600, l: c - 700, c, v: 1000 + i };
 });
 const ohlc = (page: Page) => cell(page).locator("[data-ohlc]");
-const ohlcSwitch = (page: Page) => popover(page).getByRole("switch", { name: /^봉 값 \(/ });
 const ohlcChangeSwitch = (page: Page) => popover(page).getByRole("switch", { name: /^봉 값 등락률/ });
 const extremesSwitch = (page: Page) => popover(page).getByRole("switch", { name: /^화면 내 최고·최저/ });
 const basisGroup = (page: Page) => popover(page).getByRole("group", { name: "최고·최저 등락률" });
 
 function openWith(scenario: Scenario, settings: Partial<ChartSettings>, bars: Bar[] = zigzagBars) {
+  openWithRaw(scenario, { ...DEFAULT_CHART_SETTINGS, ...settings }, bars);
+}
+
+function openWithRaw(scenario: Scenario, chartSettings: object, bars: Bar[] = zigzagBars) {
   scenario.reply((url) => url.pathname === "/api/bars" && url.searchParams.get("symbol") === "005930" && url.searchParams.get("period") === "D",
     { body: { symbol: "005930", venue: "combined", period: "D", bars, current: null, nextBefore: null, seq: null } });
   const layout = scenario.documents.layout(DEFAULT_LAYOUT_ID);
   scenario.documents.saveLayout({ ...layout, revision: layout.revision + 1, windows: withFirstChart(layout, { symbol: "005930", venue: "combined", period: "D",
-    chartSettings: { ...DEFAULT_CHART_SETTINGS, ...settings } }) });
+    chartSettings }) });
 }
 
 async function reload(page: Page) {
@@ -323,45 +326,123 @@ const ohlcCells = (bar: Bar, prev: Bar | null) => [
   expect.stringMatching(/^량[^(]+$/),
 ];
 
-test("봉 값 스위치를 끄면 범례의 봉 값 줄만 숨기고, 봉 주기를 바꾸거나 새로고침해도 꺼진 채다", async ({ page, scenario }) => {
-  const ma: IndicatorConfig = { id: "ma-price", spec: { kind: "ma", method: "sma", period: 5 }, panel: "price", visible: true, style: { colors: ["ind-2"], width: 1 } };
-  openWith(scenario, { indicators: [...DEFAULT_CHART_SETTINGS.indicators, ma] });
-  await open(page);
-  const priceRow = ohlc(page).locator("xpath=preceding-sibling::div[1]");
-  const name = cell(page).locator(".chart-legend [role=heading]");
-  const maRow = cell(page).locator(`[data-indicator-row="${ma.id}"]`);
-  await expect(ohlc(page)).toBeVisible();
-  await expect(ohlc(page)).toContainText("시");
-  await expect(ohlc(page)).not.toContainText("(");
-  await expect(maRow).toBeVisible();
-  expect(saved(scenario)).toMatchObject({ showOhlc: true, showOhlcChange: false, extremeBasis: "last" });
+const PRICE_MA: IndicatorConfig = { id: "ma-price", spec: { kind: "ma", method: "sma", period: 5 }, panel: "price", visible: true, style: { colors: ["ind-2"], width: 1 } };
+const VOLUME_ID = DEFAULT_CHART_SETTINGS.indicators[0]!.id;
+const legendSwitch = (page: Page) => popover(page).getByRole("switch", { name: /^범례/ });
+const venues = (page: Page) => cell(page).getByRole("group", { name: "거래소", exact: true });
+const legendRows = (page: Page) => ({
+  name: cell(page).locator(".chart-legend [role=heading]"),
+  priceRow: cell(page).locator("[data-price-row]"),
+  maRow: cell(page).locator(`[data-indicator-row="${PRICE_MA.id}"]`),
+  compareRow: cell(page).locator(`[data-compare-row="000660"]`),
+});
+const middle = async (locator: ReturnType<Page["locator"]>) => {
+  const box = (await locator.boundingBox())!;
+  return { left: box.x, right: box.x + box.width, y: box.y + box.height / 2 };
+};
 
+async function expectLegendOff(page: Page) {
+  const rows = legendRows(page);
+  for (const row of Object.values(rows)) await expect(row).toBeHidden();
+  await expect(ohlc(page)).toBeVisible();
+  await expect(cell(page).locator(`[data-indicator-row="${VOLUME_ID}"]`)).toBeVisible();
+  const venue = await middle(venues(page));
+  const values = await middle(ohlc(page));
+  expect(Math.abs(venue.y - values.y)).toBeLessThan(8);
+  expect(venue.right).toBeLessThanOrEqual(values.left);
+}
+
+test("범례 스위치를 끄면 거래소와 봉 값 줄만 한 줄로 남기고, 봉 주기를 바꾸거나 새로고침해도 꺼진 채다", async ({ page, scenario }) => {
+  openWith(scenario, { indicators: [...DEFAULT_CHART_SETTINGS.indicators, PRICE_MA], compare: ["000660"] });
+  await open(page);
+  const rows = legendRows(page);
+  for (const row of [...Object.values(rows), ohlc(page)]) await expect(row).toBeVisible();
   await openSettings(page);
-  await expect(ohlcSwitch(page)).toHaveAttribute("aria-checked", "true");
-  await ohlcSwitch(page).click();
-  await expect(ohlcSwitch(page)).toHaveAttribute("aria-checked", "false");
-  await expect(ohlc(page)).toBeHidden();
-  for (const kept of [name, priceRow, maRow]) await expect(kept).toBeVisible();
-  const priceBottom = (await priceRow.boundingBox())!;
-  expect((await maRow.boundingBox())!.y - (priceBottom.y + priceBottom.height)).toBeLessThan(12);
-  await expect.poll(() => saved(scenario).showOhlc).toBe(false);
+  await expect(legendSwitch(page)).toHaveAttribute("aria-checked", "true");
+
+  await legendSwitch(page).click();
+  await expect(legendSwitch(page)).toHaveAttribute("aria-checked", "false");
+  await expectLegendOff(page);
+  await expect.poll(() => saved(scenario).showLegend).toBe(false);
+  expect(saved(scenario)).not.toHaveProperty("showOhlc");
+
+  await expect(ohlcChangeSwitch(page)).toBeEnabled();
+  await ohlcChangeSwitch(page).click();
+  await expect(ohlc(page).locator(":scope > span").first()).toContainText("(");
+  await expect.poll(() => saved(scenario).showOhlcChange).toBe(true);
 
   await page.keyboard.press("Escape");
+  await venues(page).getByRole("button", { name: "KRX", exact: true }).click();
+  await expect(cell(page)).toHaveAttribute("aria-label", /: 삼성전자 KRX 일$/);
+  await expect(cell(page)).toHaveAttribute("aria-busy", "false");
+  await expectLegendOff(page);
+
   await selectMinute(page.getByRole("toolbar", { name: "차트 도구 막대" }).getByRole("button", { name: "분봉", exact: true }), { label: "5분" });
   await expect(cell(page)).toHaveAttribute("aria-label", / 5분$/);
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
-  await expect(priceRow).toBeVisible();
-  await expect(ohlc(page)).toBeHidden();
+  await expectLegendOff(page);
+  await expect.poll(() => firstChart(scenario.documents.layout(DEFAULT_LAYOUT_ID)).period).toBe("5m");
 
   await reload(page);
-  await expect(priceRow).toBeVisible();
-  await expect(ohlc(page)).toBeHidden();
+  await expect(cell(page)).toHaveAttribute("aria-label", /: 삼성전자 KRX 5분$/);
+  await expectLegendOff(page);
+  expect(saved(scenario)).toMatchObject({ showLegend: false, showOhlcChange: true });
+  expect(saved(scenario)).not.toHaveProperty("showOhlc");
   await openSettings(page);
-  await expect(ohlcSwitch(page)).toHaveAttribute("aria-checked", "false");
-  await expect(ohlcChangeSwitch(page)).toBeDisabled();
+  await expect(legendSwitch(page)).toHaveAttribute("aria-checked", "false");
+
+  await legendSwitch(page).click();
+  for (const row of [...Object.values(rows), ohlc(page)]) await expect(row).toBeVisible();
+  const venue = await middle(venues(page));
+  const name = await middle(rows.name);
+  expect(Math.abs(venue.y - name.y)).toBeLessThan(8);
+  await expect.poll(() => saved(scenario).showLegend).toBe(true);
 });
 
-test("봉 값 등락률 스위치는 시·고·저·종 옆에 직전 봉 종가 대비 %를 붙이고, 십자선이 가리키는 봉을 따르며, 봉 값 줄이 꺼지면 비활성이다", async ({ page, scenario }) => {
+test("범례를 끈 채 거래소 조회가 실패해도 봉 값 줄 앞의 거래소에서 다른 거래소로 복구한다", async ({ page, scenario }) => {
+  openWith(scenario, { showLegend: false });
+  await page.route("**/api/bars?*", (route) => new URL(route.request().url()).searchParams.get("venue") === "krx"
+    ? route.fulfill({ status: 503, json: { error: { code: "kiwoom_unavailable", message: "시험용 KRX 조회 실패" } } })
+    : route.fallback());
+  await open(page);
+  await expectLegendOff(page);
+  await venues(page).getByRole("button", { name: "KRX", exact: true }).click();
+  await expect(cell(page).getByRole("button", { name: "다시 시도", exact: true })).toBeVisible();
+  await venues(page).getByRole("button", { name: "통합", exact: true }).click({ timeout: 3000 });
+  await expect(cell(page)).toHaveAttribute("aria-label", /: 삼성전자 통합 일$/);
+  await expect(cell(page)).toHaveAttribute("aria-busy", "false");
+  await expectLegendOff(page);
+});
+
+test("showOhlc: false가 든 옛 설정은 봉 값 줄과 범례를 모두 보인다", async ({ page, scenario }) => {
+  const { showLegend: _legend, ...current } = DEFAULT_CHART_SETTINGS;
+  openWithRaw(scenario, { ...current, indicators: [...current.indicators, PRICE_MA], showOhlc: false });
+  await open(page);
+  for (const row of [legendRows(page).name, legendRows(page).priceRow, legendRows(page).maRow, ohlc(page)]) await expect(row).toBeVisible();
+  await openSettings(page);
+  await expect(legendSwitch(page)).toHaveAttribute("aria-checked", "true");
+  await ohlcChangeSwitch(page).click();
+  await expect.poll(() => saved(scenario).showOhlcChange).toBe(true);
+  expect(saved(scenario)).toMatchObject({ showLegend: true });
+  expect(saved(scenario)).not.toHaveProperty("showOhlc");
+});
+
+test("390x844에서 범례를 끄면 봉 값 줄만 남고 휴대폰 머리의 거래소는 그대로다", async ({ page, scenario }) => {
+  openWith(scenario, { indicators: [...DEFAULT_CHART_SETTINGS.indicators, PRICE_MA], compare: ["000660"] });
+  await open(page);
+  await openSettings(page);
+  await legendSwitch(page).click();
+  await expect.poll(() => saved(scenario).showLegend).toBe(false);
+  await page.keyboard.press("Escape");
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(ohlc(page)).toBeVisible();
+  await expect(legendRows(page).maRow).toBeHidden();
+  await expect(legendRows(page).compareRow).toBeHidden();
+  await expect(venues(page)).toBeHidden();
+  await expect(page.getByRole("group", { name: "거래소", exact: true })).toBeVisible();
+});
+
+test("봉 값 등락률 스위치는 시·고·저·종 옆에 직전 봉 종가 대비 %를 붙이고, 십자선이 가리키는 봉을 따른다", async ({ page, scenario }) => {
   openWith(scenario, { visibleBars: 60 });
   await open(page);
   const spans = ohlc(page).locator(":scope > span");
@@ -387,16 +468,6 @@ test("봉 값 등락률 스위치는 시·고·저·종 옆에 직전 봉 종가
   const box = (await chartOf(cell(page)).boundingBox())!;
   await page.mouse.move(box.x + x!, box.y + box.height / 3);
   await expect.poll(texts).toEqual(ohlcCells(zigzagBars[hovered]!, zigzagBars[hovered - 1]!));
-  await settingsButton(page).hover();
-
-  await openSettings(page);
-  await ohlcSwitch(page).click();
-  await expect(ohlcChangeSwitch(page)).toBeDisabled();
-  await expect(ohlcChangeSwitch(page)).toHaveAttribute("aria-checked", "true");
-  await expect.poll(() => saved(scenario)).toMatchObject({ showOhlc: false, showOhlcChange: true });
-  await ohlcSwitch(page).click();
-  await expect(ohlcChangeSwitch(page)).toBeEnabled();
-  await expect.poll(texts).toEqual(ohlcCells(zigzagBars[last]!, zigzagBars[last - 1]!));
 });
 
 test("최고·최저 등락률을 고가·저가 대비로 바꾸면 꼬리표가 최고가·최저가 대비 현재가 %를 적고, 새로고침 뒤 유지하며, 최고·최저가 꺼지면 비활성이다", async ({ page, scenario }) => {

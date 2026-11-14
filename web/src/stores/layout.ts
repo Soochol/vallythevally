@@ -55,7 +55,7 @@ interface LayoutState {
   setScale(cellId: WindowId, s: PriceScale): void;
   setVisibleBars(cellId: WindowId, n: number | null): void;
   setShowExtremes(cellId: WindowId, on: boolean): void;
-  setShowOhlc(cellId: WindowId, on: boolean): void;
+  setShowLegend(cellId: WindowId, on: boolean): void;
   setShowOhlcChange(cellId: WindowId, on: boolean): void;
   setExtremeBasis(cellId: WindowId, basis: ExtremeBasis): void;
   setShowDaySeparators(cellId: WindowId, on: boolean): void;
@@ -77,7 +77,7 @@ export const useLayoutStore = create<LayoutState>()((set) => {
       if (windows.every((w, i) => w === s.layout.windows[i])) return s;
       return { layout: { ...s.layout, windows }, revision: s.revision + 1 };
     });
-  const patchSetting = <K extends "style" | "scale" | "visibleBars" | "showExtremes" | "showOhlc" | "showOhlcChange" | "extremeBasis" | "showDaySeparators">(cellId: WindowId, key: K, value: ChartSettings[K]) =>
+  const patchSetting = <K extends "style" | "scale" | "visibleBars" | "showExtremes" | "showLegend" | "showOhlcChange" | "extremeBasis" | "showDaySeparators">(cellId: WindowId, key: K, value: ChartSettings[K]) =>
     patchCell(cellId, (c) => (c.chartSettings[key] === value ? c : { ...c, chartSettings: { ...c.chartSettings, [key]: value } }));
   const patchSettings = (cellId: WindowId, f: (s: ChartSettings) => ChartSettings) =>
     patchCell(cellId, (c) => {
@@ -99,7 +99,7 @@ export const useLayoutStore = create<LayoutState>()((set) => {
     setScale: (cellId, scale) => patchSetting(cellId, "scale", scale),
     setVisibleBars: (cellId, n) => patchSetting(cellId, "visibleBars", n),
     setShowExtremes: (cellId, on) => patchSetting(cellId, "showExtremes", on),
-    setShowOhlc: (cellId, on) => patchSetting(cellId, "showOhlc", on),
+    setShowLegend: (cellId, on) => patchSetting(cellId, "showLegend", on),
     setShowOhlcChange: (cellId, on) => patchSetting(cellId, "showOhlcChange", on),
     setExtremeBasis: (cellId, basis) => patchSetting(cellId, "extremeBasis", basis),
     setShowDaySeparators: (cellId, on) => patchSetting(cellId, "showDaySeparators", on),
