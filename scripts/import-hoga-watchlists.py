@@ -203,18 +203,28 @@ def write_once(api, original, desired, output, source_hashes):
     durable_json(output / "backup.json", original)
     durable_json(output / "journal.json", journal)
     failure = None
+    rejected = False
     try:
         api.put(incoming)
+    except error.HTTPError as exc:
+        failure = type(exc).__name__
+        rejected = True
+        exc.close()
     except (OSError, error.URLError, ImportFailure) as exc:
         failure = type(exc).__name__
+    else:
+        durable_json(output / "ack.json", {"revision": incoming["revision"], "document_hash": journal["desired_hash"]})
     try:
         current, _ = api.get()
     except (OSError, error.URLError, ImportFailure) as exc:
         durable_json(output / "receipt.json", {"status": "ambiguous", "error": type(exc).__name__})
         raise ImportFailure("PUT outcome unknown; journal retained, rerun dry-run before recovery") from exc
     if current["lists"] == desired:
-        owned = current["revision"] == incoming["revision"]
-        receipt = {"status": "applied" if owned else "satisfied-concurrent", "observed_revision": current["revision"], "document_hash": document_hash(current), "reconciled": failure is not None}
+        owned = failure is None and current["revision"] == incoming["revision"]
+        status = "applied" if owned else "satisfied-concurrent"
+        if failure is not None and not rejected and current["revision"] == incoming["revision"]:
+            status = "satisfied-unowned"
+        receipt = {"status": status, "observed_revision": current["revision"], "document_hash": document_hash(current), "reconciled": failure is not None}
         if owned:
             receipt["revision"] = incoming["revision"]
         durable_json(output / "receipt.json", receipt)
@@ -249,12 +259,12 @@ def restore_backup(backup_path, api, output):
     require(version == "2", "restore requires X-Vally-Watchlists-Version: 2")
     if current["lists"] == original["lists"]:
         return {"status": "already-restored"}
-    receipt_path = backup_path.with_name("receipt.json")
-    receipt = unique_json(receipt_path.read_bytes()) if receipt_path.exists() else {}
     expected_revision = journal["desired"]["revision"]
     require(current["lists"] == journal["desired"]["lists"] and current["revision"] == expected_revision, "restore refused: target changed after import")
-    if "document_hash" in receipt:
-        require(document_hash(current) == receipt["document_hash"], "restore refused: imported document mismatch")
+    ack_path = backup_path.with_name("ack.json")
+    require(ack_path.exists(), "restore refused: successful PUT acknowledgment missing; journal alone does not establish ownership")
+    acknowledgment = unique_json(ack_path.read_bytes())
+    require(expected_revision == original["revision"] + 1 and acknowledgment == {"revision": expected_revision, "document_hash": journal["desired_hash"]}, "restore refused: PUT acknowledgment does not match journal")
     output = prepare_output(output)
     return write_once(api, current, original["lists"], output, journal["source_hashes"])
 

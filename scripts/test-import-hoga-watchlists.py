@@ -98,10 +98,12 @@ class ImportTests(unittest.TestCase):
             self.assertEqual(journal["desired"], self.api.puts[0])
             self.assertEqual(journal["source_hashes"], self.source.hashes)
             self.assertEqual(json.loads((self.root / "apply/backup.json").read_bytes()), before)
+            self.assertFalse((self.root / "apply/ack.json").exists())
         self.api.before_put = inspect
         self.assertEqual(self.apply()["status"], "applied")
         self.assertEqual(len(self.api.puts), 1)
         self.assertEqual(self.api.current["revision"], 42)
+        self.assertEqual(os.stat(self.root / "apply/ack.json").st_mode & 0o777, 0o600)
         self.api.before_put = None
         self.assertEqual(self.apply("rerun")["status"], "unchanged")
         self.assertEqual(len(self.api.puts), 1)
@@ -113,17 +115,36 @@ class ImportTests(unittest.TestCase):
             self.apply("old")
         self.assertEqual(self.api.puts, [])
 
-    def test_lost_response_reconciles_without_second_put_and_can_restore(self):
-        before = copy.deepcopy(self.api.current)
+    def test_lost_response_reconciles_without_second_put_but_cannot_restore(self):
         self.api.failure = "after"
-        self.assertTrue(self.apply()["reconciled"])
+        result = self.apply()
+        self.assertTrue(result["reconciled"])
+        self.assertEqual(result["status"], "satisfied-unowned")
+        self.assertNotIn("revision", result)
+        self.assertFalse((self.root / "apply/ack.json").exists())
         self.assertEqual(len(self.api.puts), 1)
         self.api.failure = None
-        restored = importer.restore_backup(self.root / "apply/backup.json", self.api, self.root / "restore")
-        self.assertEqual(restored["status"], "applied")
-        self.assertEqual(self.api.current, {**before, "revision": 43})
-        self.assertEqual(importer.restore_backup(self.root / "apply/backup.json", self.api, self.root / "again")["status"], "already-restored")
-        self.assertEqual(len(self.api.puts), 2)
+        with self.assertRaisesRegex(importer.ImportFailure, "acknowledgment"):
+            importer.restore_backup(self.root / "apply/backup.json", self.api, self.root / "restore")
+        self.assertEqual(self.api.current, {"lists": self.plan["lists"], "revision": 42})
+        self.assertEqual(len(self.api.puts), 1)
+
+    def test_interruption_before_put_cannot_claim_identical_external_write(self):
+        real_put = self.api.put
+        def interrupted_put(value):
+            raise KeyboardInterrupt()
+        self.api.put = interrupted_put
+        with self.assertRaises(KeyboardInterrupt):
+            self.apply()
+        self.assertTrue((self.root / "apply/journal.json").exists())
+        self.assertFalse((self.root / "apply/ack.json").exists())
+        self.assertEqual(self.api.puts, [])
+        self.api.current = {"lists": copy.deepcopy(self.plan["lists"]), "revision": 42}
+        self.api.put = real_put
+        with self.assertRaisesRegex(importer.ImportFailure, "acknowledgment"):
+            importer.restore_backup(self.root / "apply/backup.json", self.api, self.root / "restore")
+        self.assertEqual(self.api.current, {"lists": self.plan["lists"], "revision": 42})
+        self.assertEqual(self.api.puts, [])
 
     def test_concurrent_identical_document_cannot_be_claimed_for_restore(self):
         def concurrent_save():
@@ -138,6 +159,7 @@ class ImportTests(unittest.TestCase):
         real_get = self.api.get
         def failed_verification():
             if self.api.puts:
+                self.assertEqual(json.loads((self.root / "apply/ack.json").read_bytes()), {"revision": 42, "document_hash": importer.document_hash(self.api.current)})
                 raise OSError("GET unavailable")
             return real_get()
         self.api.get = failed_verification
@@ -183,11 +205,74 @@ class ImportTests(unittest.TestCase):
                 importer.restore_backup(self.root / "apply/backup.json", self.api, self.root / "restore")
         self.assertEqual(len(self.api.puts), 1)
 
-    def test_journal_recovers_committed_write_without_receipt(self):
+    def test_acknowledged_write_can_restore_without_final_receipt(self):
+        before = copy.deepcopy(self.api.current)
         self.apply()
+        self.assertEqual(json.loads((self.root / "apply/ack.json").read_bytes()), {"revision": 42, "document_hash": importer.document_hash(self.api.current)})
         (self.root / "apply/receipt.json").unlink()
         importer.restore_backup(self.root / "apply/backup.json", self.api, self.root / "restore")
-        self.assertEqual(self.api.current["lists"][0]["id"], "old")
+        self.assertEqual(self.api.current, {**before, "revision": 43})
+        self.assertEqual(importer.restore_backup(self.root / "apply/backup.json", self.api, self.root / "again")["status"], "already-restored")
+        self.assertEqual(len(self.api.puts), 2)
+
+    def test_restore_requires_acknowledgment_consistent_with_journal(self):
+        self.apply()
+        ack_path = self.root / "apply/ack.json"
+        acknowledgment = json.loads(ack_path.read_bytes())
+        for value in [{**acknowledgment, "revision": 43}, {**acknowledgment, "document_hash": importer.document_hash({})}]:
+            ack_path.write_bytes(importer.encoded(value))
+            with self.assertRaisesRegex(importer.ImportFailure, "acknowledgment"):
+                importer.restore_backup(self.root / "apply/backup.json", self.api, self.root / "restore")
+        self.assertEqual(len(self.api.puts), 1)
+
+    def test_successful_put_without_durable_acknowledgment_cannot_restore(self):
+        durable_json = importer.durable_json
+        def fail_ack(path, value):
+            if path.name == "ack.json":
+                raise OSError("disk full")
+            durable_json(path, value)
+        with patch.object(importer, "durable_json", side_effect=fail_ack):
+            with self.assertRaises(OSError):
+                self.apply()
+        with self.assertRaisesRegex(importer.ImportFailure, "acknowledgment"):
+            importer.restore_backup(self.root / "apply/backup.json", self.api, self.root / "restore")
+        self.assertEqual(len(self.api.puts), 1)
+
+    def test_real_http_conflict_with_identical_revision_cannot_authorize_restore(self):
+        api = self.api
+        class Handler(BaseHTTPRequestHandler):
+            def log_message(self, *args):
+                pass
+
+            def do_GET(self):
+                self.send_response(200)
+                self.send_header("X-Vally-Watchlists-Version", "2")
+                self.end_headers()
+                self.wfile.write(importer.encoded(api.current))
+
+            def do_PUT(self):
+                value = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+                api.puts.append(value)
+                api.current = copy.deepcopy(value)
+                self.send_response(409)
+                self.end_headers()
+
+        with ThreadingHTTPServer(("127.0.0.1", 0), Handler) as server:
+            thread = threading.Thread(target=server.serve_forever)
+            thread.start()
+            try:
+                endpoint = importer.Api(f"http://127.0.0.1:{server.server_port}")
+                result = importer.apply_plan(self.plan, self.source, endpoint, self.root / "apply", True)
+                self.assertEqual(result["status"], "satisfied-concurrent")
+                self.assertNotIn("revision", result)
+                self.assertFalse((self.root / "apply/ack.json").exists())
+                with self.assertRaisesRegex(importer.ImportFailure, "acknowledgment"):
+                    importer.restore_backup(self.root / "apply/backup.json", endpoint, self.root / "restore")
+                self.assertEqual(api.current, {"lists": self.plan["lists"], "revision": 42})
+                self.assertEqual(len(api.puts), 1)
+            finally:
+                server.shutdown()
+                thread.join()
 
     def test_backup_failure_never_writes_target(self):
         with patch.object(importer.os, "fsync", side_effect=OSError("disk full")):

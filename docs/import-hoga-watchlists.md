@@ -41,13 +41,13 @@ python3 scripts/import-hoga-watchlists.py \
 
 서버 revision이 `r`이면 도구는 정확히 `r + 1`로 전체 문서 PUT 하나를 보낸다. 그 전에 `backup.json`에 원래 대상 문서를, `journal.json`에 원래 문서와 적용할 문서, revision, 원본 해시를 저장하고 파일과 디렉터리를 fsync한다. 백업 저장 실패 시 PUT하지 않는다. 이 백업은 관심종목의 논리 문서이며 SQLite 전체 백업은 아니다.
 
-적용 뒤 GET으로 목록 id, 이름, 순서, 그룹과 소속 전체를 비교한다. PUT 응답이 유실돼도 GET으로 확인하며 PUT을 반복하지 않는다. 가져올 내용이 이미 있으면 `unchanged`를 보고하고 PUT하지 않는다. 같은 원본으로 다시 실행할 때도 새 출력 경로를 지정한다.
+PUT 성공 응답을 받은 뒤 `ack.json`에 적용한 revision과 문서 해시를 기록하고 파일과 디렉터리를 fsync한다. 그 뒤 GET으로 목록 id, 이름, 순서, 그룹과 소속 전체를 비교한다. PUT 응답이 유실돼도 GET으로 확인하며 PUT을 반복하지 않는다. 가져올 내용이 이미 있으면 `unchanged`를 보고하고 PUT하지 않는다. 같은 원본으로 다시 실행할 때도 새 출력 경로를 지정한다.
 
-`receipt.json`의 `applied`는 적용할 내용과 정확한 PUT revision을 확인했다는 뜻이다. 같은 내용이 더 높은 revision에 있으면 `satisfied-concurrent`를 보고하며 그 revision을 복원 권한으로 삼지 않는다. PUT 뒤 원래 문서가 그대로면 `unchanged`, 다른 문서나 확인 불가 상태면 `ambiguous`로 기록하고 실패한다. 충돌 때 최신 revision으로 다시 덮어쓰지 않는다.
+`receipt.json`의 `applied`는 PUT 성공 응답을 저장하고 적용할 내용과 정확한 PUT revision을 확인했다는 뜻이다. HTTP 거절 뒤 같은 내용이 있거나 같은 내용이 다른 revision에 있으면 `satisfied-concurrent`를 보고한다. 응답 유실 뒤 정확한 revision에서 같은 내용이 확인되면 `satisfied-unowned`를 보고한다. 두 상태 모두 이 실행의 쓰기를 입증하지 않으므로 자동 복원할 수 없다. PUT 뒤 원래 문서가 그대로면 `unchanged`, 다른 문서나 확인 불가 상태면 `ambiguous`로 기록하고 실패한다. 충돌 때 최신 revision으로 다시 덮어쓰지 않는다.
 
 ## 복원
 
-적용한 디렉터리의 `backup.json`을 지정한다. 옆의 `journal.json`도 필요하다.
+적용한 디렉터리의 `backup.json`을 지정한다. 옆의 `journal.json`과 `ack.json`도 필요하다.
 
 ```sh
 python3 scripts/import-hoga-watchlists.py \
@@ -56,9 +56,11 @@ python3 scripts/import-hoga-watchlists.py \
 	--output target/hoga-restore-1
 ```
 
-도구는 현재 문서가 가져오기 문서와 같고 revision도 그 PUT의 revision과 정확히 같을 때만 복원한다. 내용이 같아도 이후에 한 번 저장했으면 복원하지 않는다. 응답 유실이나 중단 때문에 receipt가 없어도 journal의 정확한 revision을 기준으로 확인한다. 원래 내용이 이미 복원돼 있으면 PUT하지 않는다.
+도구는 성공 확인 파일의 해시와 revision이 journal과 일치하고 현재 문서도 그 문서와 정확한 revision일 때만 복원한다. 내용이 같아도 이후에 한 번 저장했으면 복원하지 않는다. PUT 성공 응답을 저장한 뒤 GET이 실패하거나 최종 `receipt.json`이 없어도 이 조건으로 복원할 수 있다. 원래 내용이 이미 복원돼 있으면 PUT하지 않는다.
 
-복원도 새 백업과 journal을 만든 뒤 현재 revision의 `+1`로 PUT한다. 예전 백업의 revision을 그대로 보내지 않는다. 적용 이후 편집이 있거나 상태가 모호하면 현재 자료를 덮어쓰지 말고 `target.json`, `journal.json`, `receipt.json`을 비교한다.
+PUT 전 journal만 있거나 HTTP 거절·응답 유실로 성공 확인이 없으면 자동 복원을 거절한다. 서버 적용과 성공 확인 파일 저장 사이에 프로세스가 중단된 경우도 같다. 같은 문서와 revision은 다른 쓰기 주체가 저장했을 수도 있다. 이 경우 백업과 journal은 읽기 전용 복구 자료로 보존하며 자동으로 복원 권한을 만들지 않는다.
+
+복원도 새 백업과 journal을 만든 뒤 현재 revision의 `+1`로 PUT한다. 예전 백업의 revision을 그대로 보내지 않는다. 적용 이후 편집이 있거나 상태가 모호하면 현재 자료를 덮어쓰지 말고 `target.json`, `journal.json`, `ack.json`, `receipt.json`을 비교한다.
 
 ## 합성 자료로 검증
 

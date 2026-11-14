@@ -7,6 +7,7 @@ import {
   addToGroup,
   moveToGroup,
   removeRow,
+  rowExists,
   type WatchRowRef,
   createGroup,
   DEFAULT_WATCHLISTS,
@@ -49,6 +50,7 @@ interface WatchlistState {
   moveBy(list: string, row: WatchRowRef, step: -1 | 1): void;
   transfer(from: string, to: string, row: WatchRowRef, how: Transfer): void;
   createGroup(list: string, id: string, name: string, codes?: readonly SymbolCode[]): void;
+  moveToNewGroup(list: string, row: WatchRowRef, id: string, name: string): void;
   renameGroup(list: string, id: string, name: string): void;
   moveGroupBy(list: string, id: string, step: -1 | 1): void;
   ungroup(list: string, id: string): void;
@@ -125,6 +127,11 @@ export const useWatchlistStore = create<WatchlistState>()((set, get) => {
     moveBy: (list, row, step) => editList(list, (l) => moveSymbolBy(l, row, step)),
     transfer: (from, to, row, how) => edit((lists) => transferSymbol(lists, from, to, row, how)),
     createGroup: (list, id, name, codes) => editList(list, (l) => createGroup(l, id, name, codes)),
+    moveToNewGroup: (list, row, id, name) => editList(list, (l) => {
+      if (!rowExists(l, row)) return l;
+      const created = createGroup(l, id, name);
+      return created === l ? l : moveToGroup(created, row, id);
+    }),
     renameGroup: (list, id, name) => editList(list, (l) => renameGroup(l, id, name)),
     moveGroupBy: (list, id, step) => editList(list, (l) => moveGroupBy(l, id, step)),
     ungroup: (list, id) => editList(list, (l) => ungroup(l, id)),

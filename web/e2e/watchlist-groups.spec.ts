@@ -194,6 +194,25 @@ async function membershipAction(page: Page, group: string, code: string, action:
   await page.getByRole("menu", { name: /행 동작$/ }).getByRole("menuitem", { name: action, exact: true }).click();
 }
 
+test("새 그룹으로 옮기기는 선택한 소속만 빼고 다른 소속과 목록 순서는 보존한다", async ({ scenario, page }) => {
+  await seed(scenario, [{ id: "A", name: "첫째", symbols: ["005935", "086520"] }, { id: "B", name: "둘째", symbols: ["086520", "000660"] }]);
+  await page.goto("/?symbol=005930");
+  await expect(membership(page, "첫째", "086520")).toContainText("에코프로");
+  await membershipAction(page, "첫째", "086520", "그룹으로 옮기기");
+  await page.getByRole("menu", { name: /그룹으로 옮기기$/ }).getByRole("menuitem", { name: "새 그룹…", exact: true }).click();
+  await nameGroup(page, "새 목적지");
+  const groups = [["첫째", ["005935"]], ["둘째", ["086520", "000660"]], ["새 목적지", ["086520"]]];
+  await expect.poll(() => servedGroups(scenario)).toEqual(groups);
+  expect(served(scenario).symbols).toEqual(["005930", "086520", "005935", "000660"]);
+  await expect(membership(page, "첫째", "086520")).toHaveCount(0);
+  await expect(membership(page, "둘째", "086520")).toBeVisible();
+  await expect(membership(page, "새 목적지", "086520")).toBeVisible();
+  await page.reload();
+  await expect(membership(page, "새 목적지", "086520")).toBeVisible();
+  expect(servedGroups(scenario)).toEqual(groups);
+  await expect(membership(page, "첫째", "086520")).toHaveCount(0);
+});
+
 test("중복 소속 행의 정렬·끌기·빼기·되돌리기·전체 제거는 해당 문맥을 지킨다", async ({ scenario, page }) => {
   await seed(scenario, [{ id: "A", name: "첫째", symbols: ["005935", "086520"] }, { id: "B", name: "둘째", symbols: ["005935", "086520", "000660"] }]);
   await page.goto("/?symbol=005930");

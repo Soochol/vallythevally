@@ -670,7 +670,12 @@ function groupItems(list: Watchlist, row: WatchRowRef, onNaming: GroupNaming["on
       if (undo) useSelectionStore.getState().showToast("그룹에서 뺐습니다", undo);
     } } satisfies MenuItem] : []),
     { kind: "separator" },
-    { kind: "action", label: "새 그룹…", icon: <PlusIcon />, disabled: list.groups.length >= MAX_WATCH_GROUPS, onSelect: () => startGroup(list, onNaming, [row.code]) },
+    { kind: "action", label: "새 그룹…", icon: <PlusIcon />, disabled: list.groups.length >= MAX_WATCH_GROUPS, onSelect: () => {
+      if (additive) return startGroup(list, onNaming, [row.code]);
+      const id = crypto.randomUUID();
+      useWatchlistStore.getState().moveToNewGroup(list.id, row, id, nextGroupName(list));
+      onNaming(id);
+    } },
   ];
 }
 

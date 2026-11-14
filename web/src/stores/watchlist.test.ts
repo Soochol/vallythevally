@@ -198,6 +198,28 @@ test("목록 복제는 그룹을 새 id로 복제한다", () => {
   expect(copy.groups[0]!.id).not.toBe("G");
 });
 
+test("새 그룹으로 행을 옮기면 한 번에 선택한 소속만 바꾸고 오래된 행은 무시한다", () => {
+  const s = useWatchlistStore.getState();
+  s.addAll(FIRST_WATCHLIST_ID, ["000660", "005930"]);
+  s.createGroup(FIRST_WATCHLIST_ID, "A", "첫째", ["000660", "005930"]);
+  s.createGroup(FIRST_WATCHLIST_ID, "B", "둘째", ["005930"]);
+  const before = useWatchlistStore.getState();
+  const updates: unknown[] = [];
+  const unsubscribe = useWatchlistStore.subscribe((state) => updates.push(state.lists[0]));
+  s.moveToNewGroup(FIRST_WATCHLIST_ID, { code: "005930", groupId: "A" }, "C", "셋째");
+  unsubscribe();
+  const after = useWatchlistStore.getState();
+  expect(after.revision).toBe(before.revision + 1);
+  expect(updates).toEqual([after.lists[0]]);
+  expect(after.lists[0]).toMatchObject({ symbols: ["000660", "005930"], groups: [
+    { id: "A", symbols: ["000660"] }, { id: "B", symbols: ["005930"] }, { id: "C", symbols: ["005930"] },
+  ] });
+  s.moveToNewGroup(FIRST_WATCHLIST_ID, { code: "005930", groupId: "A" }, "D", "넷째");
+  expect(useWatchlistStore.getState()).toBe(after);
+  s.moveToNewGroup(FIRST_WATCHLIST_ID, { code: "005930", groupId: "B" }, "C", "넷째");
+  expect(useWatchlistStore.getState()).toBe(after);
+});
+
 
 test("그룹 행 빼기 되돌리기는 모든 그룹 순서와 공유 소속을 그대로 복원한다", () => {
   const s = useWatchlistStore.getState();
