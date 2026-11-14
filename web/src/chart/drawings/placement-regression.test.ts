@@ -9,6 +9,7 @@ const ctx: ToolContext = {
   toScreen: (p) => ({ x: p.t, y: p.price }), fromScreen: (p) => ({ t: p.x, price: p.y }),
   xOf: (t) => t, yOf: (p) => p, timeAt: (x) => x, priceAt: (y) => y, shiftBars: (t, n) => t + n,
   barsBetween: () => ({ count: 1, volume: 1 }), paneWidth: 800, paneHeight: 500,
+  barsIn: () => [],
   formatPrice: String, formatTime: String, logScale: false,
 };
 const context: Context = {

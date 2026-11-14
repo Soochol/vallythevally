@@ -11,6 +11,7 @@ const ctx: ToolContext = {
   toScreen: (p) => ({ x: p.t, y: p.price }), fromScreen: (p) => ({ t: p.x, price: p.y }),
   xOf: (t) => t, yOf: (p) => p, timeAt: (x) => x, priceAt: (y) => y, shiftBars: (t, n) => t + n,
   barsBetween: () => ({ count: 2, volume: 10 }), paneWidth: 800, paneHeight: 600,
+  barsIn: () => [],
   formatPrice: String, formatTime: String, logScale: false,
 };
 const d: DrawingBody = { id: "a", symbol: "005930", tool: "trendline", points: [{ t: 10, price: 10 }, { t: 50, price: 50 }],

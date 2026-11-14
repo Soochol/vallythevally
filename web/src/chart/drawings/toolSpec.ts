@@ -1,3 +1,4 @@
+import type { Bar } from "../../api/generated/Bar";
 import type { UnixSeconds } from "../../api/generated/UnixSeconds";
 import type {
   Color,
@@ -60,6 +61,7 @@ export interface ToolContext {
   priceAt(y: number): number | null;
   shiftBars(t: UnixSeconds, n: number): UnixSeconds | null;
   barsBetween(t1: UnixSeconds, t2: UnixSeconds): { count: number; volume: number } | null;
+  barsIn(t1: UnixSeconds, t2?: UnixSeconds): readonly Bar[];
   paneWidth: number;
   paneHeight: number;
   formatPrice(p: number): string;

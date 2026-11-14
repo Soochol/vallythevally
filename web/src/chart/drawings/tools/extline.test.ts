@@ -12,6 +12,7 @@ const ctx: ToolContext = {
   priceAt: (y) => 500 - y,
   shiftBars: (t, n) => t + n * 60,
   barsBetween: () => null,
+  barsIn: () => [],
   paneWidth: 800,
   paneHeight: 500,
   formatPrice: (p) => p.toFixed(0),

@@ -186,6 +186,8 @@ function frameOf(bars: Bar[], period: Period): Frame {
 }
 
 const barAt = (t: number, v = 100): Bar => ({ t, o: 1, h: 2, l: 0.5, c: 1.5, v });
+const barStarts = (bars: readonly Bar[]) => bars.map((b) => b.t);
+const nov = (d: number) => kst(2026, 11, d);
 
 describe("화면 좌표", () => {
   const frame = frameOf(weekNov2.starts.map((t) => barAt(t)), "D");
@@ -206,6 +208,30 @@ describe("화면 좌표", () => {
     const ctx = toolContext(frame, { price: String, time: String });
     expect(ctx.barsBetween(kst(2026, 11, 2), kst(2026, 11, 4, 12))).toEqual({ count: 2, volume: 300 });
     expect(ctx.barsBetween(kst(2026, 10, 30), kst(2026, 11, 4))).toBeNull();
+  });
+
+  test("ToolContext의 barsIn은 두 시각이 든 봉 사이의 봉을 시간 순으로 준다", () => {
+    const ctx = toolContext(frame, { price: String, time: String });
+    expect(barStarts(ctx.barsIn(kst(2026, 11, 3, 12), nov(5)))).toEqual([nov(3), nov(4), nov(5)]);
+    expect(barStarts(ctx.barsIn(nov(5), kst(2026, 11, 3, 12)))).toEqual([nov(3), nov(4), nov(5)]);
+    expect(barStarts(ctx.barsIn(nov(4), nov(4)))).toEqual([nov(4)]);
+  });
+
+  test("barsIn은 끝 시각이 없으면 마지막 봉까지, 마지막 봉 뒤의 시각은 마지막 봉으로 본다", () => {
+    const ctx = toolContext(frame, { price: String, time: String });
+    expect(barStarts(ctx.barsIn(nov(5)))).toEqual([nov(5), nov(6)]);
+    expect(barStarts(ctx.barsIn(nov(4), nov(20)))).toEqual([nov(4), nov(5), nov(6)]);
+    expect(barStarts(ctx.barsIn(nov(20), nov(5)))).toEqual([nov(5), nov(6)]);
+    expect(barStarts(ctx.barsIn(nov(20)))).toEqual([nov(6)]);
+    expect(barStarts(ctx.barsIn(kst(2027, 6, 1)))).toEqual([nov(6)]);
+  });
+
+  test("barsIn은 어느 시각이든 첫 봉 앞이거나 봉이 없으면 빈 배열이다", () => {
+    const ctx = toolContext(frame, { price: String, time: String });
+    expect(ctx.barsIn(kst(2026, 10, 30), kst(2026, 11, 4))).toEqual([]);
+    expect(ctx.barsIn(kst(2026, 11, 4), kst(2026, 10, 30))).toEqual([]);
+    expect(ctx.barsIn(kst(2026, 10, 30))).toEqual([]);
+    expect(toolContext(frameOf([], "D"), { price: String, time: String }).barsIn(kst(2026, 11, 4))).toEqual([]);
   });
 
   test("축 역변환은 다른 축의 투영 가능 여부와 무관하다", () => {

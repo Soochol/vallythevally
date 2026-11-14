@@ -7,7 +7,7 @@ import type { Shape, ToolContext } from "../src/chart/drawings/toolSpec";
 import type { DrawingBody } from "../src/chart/drawings/types";
 
 const pane = { width: 800, height: 400 };
-const ctx: ToolContext = { toScreen: (p) => ({ x: p.t, y: p.price }), fromScreen: (p) => ({ t: p.x, price: p.y }), xOf: (t) => t, yOf: (p) => p, timeAt: (x) => x, priceAt: (y) => y, shiftBars: (t, n) => t + n, barsBetween: () => null, paneWidth: 800, paneHeight: 400, formatPrice: String, formatTime: String, logScale: false };
+const ctx: ToolContext = { toScreen: (p) => ({ x: p.t, y: p.price }), fromScreen: (p) => ({ t: p.x, price: p.y }), xOf: (t) => t, yOf: (p) => p, timeAt: (x) => x, priceAt: (y) => y, shiftBars: (t, n) => t + n, barsIn: () => [], barsBetween: () => null, paneWidth: 800, paneHeight: 400, formatPrice: String, formatTime: String, logScale: false };
 
 function frame(shapes: readonly Shape[]): RenderFrame {
   const drawing: DrawingBody = { id: "text", symbol: "IDX:001", tool: "hline", points: [{ t: 100, price: 100 }], text: null, style: {}, locked: false, hidden: false, periods: null, z: 1, group: null, scope: { kind: "symbol" }, revision: 0 };

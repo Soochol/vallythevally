@@ -232,6 +232,16 @@ export function barsBetween(f: Frame, t1: UnixSeconds, t2: UnixSeconds): { count
   return { count: hi - lo, volume };
 }
 
+export function barsIn(f: Frame, t1: UnixSeconds, t2?: UnixSeconds): readonly Bar[] {
+  const last = f.bars.length - 1;
+  const a = tToLogical(f.timeline, t1);
+  const b = t2 === undefined ? last : tToLogical(f.timeline, t2);
+  if (a === null || b === null) return [];
+  const lo = Math.min(Math.floor(Math.min(a, b)), last);
+  const hi = Math.min(Math.floor(Math.max(a, b)), last);
+  return f.bars.slice(lo, hi + 1);
+}
+
 export function toolContext(f: Frame, format: { price(p: number): string; time(t: UnixSeconds): string }): ToolContext {
   return {
     toScreen: (p) => toScreen(f, p),
@@ -242,6 +252,7 @@ export function toolContext(f: Frame, format: { price(p: number): string; time(t
     priceAt: (y) => f.axes.price.toPrice(y),
     shiftBars: (t, n) => shiftBars(f.timeline, t, n),
     barsBetween: (t1, t2) => barsBetween(f, t1, t2),
+    barsIn: (t1, t2) => barsIn(f, t1, t2),
     paneWidth: f.pane.width,
     paneHeight: f.pane.height,
     formatPrice: format.price,
