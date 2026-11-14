@@ -1,5 +1,7 @@
 import { describe, expect, test } from "vitest";
 import type { Bar } from "../../../api/generated/Bar";
+import type { Period } from "../../../api/generated/Period";
+import type { FineBarsRead } from "../finePeriod";
 import { hitShape } from "../geometry";
 import type { Shape, ToolContext } from "../toolSpec";
 import { parseVolProfileStyle, pocPrice, volProfileDefaults, volprofile, volumeProfile } from "./volprofile";
@@ -8,8 +10,9 @@ const bar = (t: number, h: number, l: number, v: number): Bar => ({ t, o: l, h, 
 const flat = (t: number, price: number, v: number) => bar(t, price, price, v);
 const LADDER = [flat(1000, 1, 10), flat(1500, 3, 15), flat(2000, 5, 40), flat(2500, 7, 14), flat(3000, 9, 21)];
 
-function ctxOf(bars: readonly Bar[]) {
+function ctxOf(bars: readonly Bar[], fine: FineBarsRead = { kind: "loading" }, period: Period = "D") {
   const asked: [number, number | undefined][] = [];
+  const fineAsked: [number, number][] = [];
   const ctx: ToolContext = {
     toScreen: (p) => ({ x: p.t / 10, y: 500 - p.price * 10 }),
     fromScreen: (s) => ({ t: s.x * 10, price: (500 - s.y) / 10 }),
@@ -20,15 +23,15 @@ function ctxOf(bars: readonly Bar[]) {
     shiftBars: (t, n) => Math.floor(t / 500) * 500 + n * 500,
     barsBetween: () => null,
     barsIn: (t1, t2) => (asked.push([t1, t2]), bars),
-    period: "D",
-    fineBarsIn: () => ({ kind: "loading" }),
+    period,
+    fineBarsIn: (t1, t2) => (fineAsked.push([t1, t2]), fine),
     paneWidth: 800,
     paneHeight: 500,
     formatPrice: (p) => `${Math.round(p * 1000) / 1000}`,
     formatTime: (t) => `t${t}`,
     logScale: false,
   };
-  return { ctx, asked };
+  return { ctx, asked, fineAsked };
 }
 const defaults = volProfileDefaults();
 const style = { ...defaults, rows: 5 };
@@ -36,6 +39,10 @@ const span = [{ t: 1000, price: 0 }, { t: 3000, price: 0 }];
 const drawing = (s = style, selected = false, points = span) => ({ points, style: s, text: null, selected });
 const rects = (shapes: Shape[]) => shapes.filter((s): s is Extract<Shape, { kind: "rect" }> => s.kind === "rect");
 const sum = (xs: readonly number[]) => xs.reduce((a, b) => a + b, 0);
+const texts = (shapes: Shape[]) => shapes.flatMap((s) => (s.kind === "text" ? [s.text] : []));
+const WIDE_BAR = [bar(1000, 9, 1, 100)];
+const FINE_EDGES = [flat(1000, 1, 90), flat(1300, 9, 10)];
+const barRows = (shapes: Shape[]) => rects(shapes).slice(1).map((r) => Math.round((r.b.x - r.a.x) * 1e6) / 1e6);
 
 describe("구간 거래량 프로파일", () => {
   test("두 점은 구간의 시작과 끝 시각만 쓴다", () => {
@@ -181,4 +188,87 @@ describe("구간 거래량 프로파일", () => {
     expect(performance.now() - started).toBeLessThan(200);
     expect(sum(profile.rows)).toBeCloseTo(sum(many.map((b) => b.v)), 6);
   });
+
+  test("세부 봉 읽기가 ready이면 줄별 거래량을 세부 봉에서 계산한다", () => {
+    const fine: FineBarsRead = { kind: "ready", period: "5m", bars: FINE_EDGES };
+    expect(volumeProfile(FINE_EDGES, 5, 0.7)!.rows).toEqual([90, 0, 0, 0, 10]);
+    expect(volumeProfile(WIDE_BAR, 5, 0.7)!.rows.map((v) => Math.round(v * 1e9) / 1e9)).toEqual([20, 20, 20, 20, 20]);
+    const { ctx, fineAsked } = ctxOf(WIDE_BAR, fine);
+    expect(barRows(volprofile.shapes(drawing(), ctx))).toEqual([80, 8.888889]);
+    expect(fineAsked[0]).toEqual([1000, 3000]);
+    expect(volprofile.axisLabels(drawing(), ctx)).toEqual([{ axis: "price", value: expect.closeTo(1.8, 9), text: "1.8", color: style.pocLine.color }]);
+    expect(volprofile.handles(drawing(), ctx).map((h) => h.at.y)).toEqual([450, 450]);
+  });
+
+  test("세부 봉을 받는 중이거나 받지 못했거나 쓸 수 없으면 차트의 봉으로 계산한다", () => {
+    const chart = barRows(volprofile.shapes(drawing(), ctxOf(WIDE_BAR).ctx));
+    expect(chart).toEqual(Array(5).fill(80));
+    for (const fine of [{ kind: "loading" }, { kind: "failed" }, { kind: "none", reason: "pastYear" }, { kind: "none", reason: "overLimit" }, { kind: "ready", period: "5m", bars: [] }] as const)
+      expect(barRows(volprofile.shapes(drawing(), ctxOf(WIDE_BAR, fine).ctx)), fine.kind).toEqual(chart);
+  });
+
+  test("틀 안 왼쪽 위에 무엇으로 계산했는지 막대 채움 색의 작은 글자로 적는다", () => {
+    const cases: [FineBarsRead, Period, string][] = [
+      [{ kind: "ready", period: "5m", bars: FINE_EDGES }, "D", "5분봉 기준"],
+      [{ kind: "loading" }, "D", "일봉 기준 · 분봉 받는 중"],
+      [{ kind: "failed" }, "D", "일봉 기준 · 분봉을 받지 못함"],
+      [{ kind: "none", reason: "pastYear" }, "D", "일봉 기준 · 분봉은 최근 1년까지"],
+      [{ kind: "none", reason: "overLimit" }, "D", "일봉 기준"],
+      [{ kind: "none", reason: "oneMinuteChart" }, "1m", "1분봉 기준"],
+      [{ kind: "ready", period: "5m", bars: [] }, "D", "일봉 기준"],
+      [{ kind: "ready", period: "1m", bars: FINE_EDGES }, "W", "1분봉 기준"],
+    ];
+    for (const [fine, period, text] of cases) expect(texts(volprofile.shapes(drawing(), ctxOf(WIDE_BAR, fine, period).ctx)), text).toEqual([text]);
+    const label = volprofile.shapes(drawing(), ctxOf(WIDE_BAR).ctx).find((s) => s.kind === "text");
+    expect(label).toEqual({ kind: "text", at: { x: 104, y: 414 }, text: "일봉 기준 · 분봉 받는 중", style: { color: style.bars.color, size: 11, bold: false, italic: false }, align: "left", baseline: "top" });
+  });
+
+  test("계산 기준 라벨을 끄거나 프로파일이 없으면 글자를 그리지 않는다", () => {
+    expect(texts(volprofile.shapes(drawing({ ...style, basisLabel: false }), ctxOf(WIDE_BAR).ctx))).toEqual([]);
+    expect(texts(volprofile.shapes(drawing(), ctxOf([]).ctx))).toEqual([]);
+  });
+
+  test("세부 봉으로 읽을 구간은 두 점의 시각이고, 점이 하나뿐이면 없다", () => {
+    const { ctx } = ctxOf(LADDER);
+    expect(volprofile.fineRange?.(drawing(), ctx)).toEqual({ t1: 1000, t2: 3000 });
+    expect(volprofile.fineRange?.(drawing(style, false, [span[1]!, span[0]!]), ctx)).toEqual({ t1: 3000, t2: 1000 });
+    expect(volprofile.fineRange?.(drawing(style, false, [span[0]!]), ctx)).toBeNull();
+  });
+
+  test("계산 기준 라벨이 없던 예전 스타일은 켠 것으로 읽는다", () => {
+    const { basisLabel: _, ...old } = defaults;
+    expect(parseVolProfileStyle(old).basisLabel).toBe(true);
+    expect(parseVolProfileStyle({ ...old, basisLabel: false }).basisLabel).toBe(false);
+    expect(volprofile.settings.style?.find((f) => f.label === "계산 기준 라벨")?.kind).toBe("toggle");
+  });
+
+  test("세부 봉이 있어도 불러온 차트 봉이 구간에 없으면 두 시각의 세로 점선만 그린다", () => {
+    const { ctx } = ctxOf([], { kind: "ready", period: "5m", bars: FINE_EDGES });
+    expect(volprofile.shapes(drawing(), ctx).map((s) => s.kind)).toEqual(["vline", "vline"]);
+    expect(volprofile.axisLabels(drawing(), ctx)).toEqual([]);
+  });
+
+  test("같은 봉에서도 줄 수와 값 영역 비율을 바꾸면 그 값으로 다시 계산한다", () => {
+    const wide = ctxOf(WIDE_BAR).ctx;
+    expect(rects(volprofile.shapes(drawing({ ...style, rows: 5 }), wide))).toHaveLength(6);
+    expect(rects(volprofile.shapes(drawing({ ...style, rows: 7 }), wide))).toHaveLength(8);
+    const { ctx } = ctxOf(LADDER);
+    const inValueArea = (valuePercent: number) => rects(volprofile.shapes(drawing({ ...style, valuePercent }), ctx)).filter((r) => r.fill?.color === style.valueArea.color).length;
+    expect(inValueArea(40)).toBe(1);
+    expect(inValueArea(100)).toBe(5);
+  });
+
+  test("세부 봉 1만 개로 그려도 같은 봉이면 프레임마다 다시 계산하지 않는다", () => {
+    const fineBars = Array.from({ length: 10_000 }, (_, i) => bar(1000 + i * 0.2, 5 + ((i * 37) % 500) / 100, 1 + ((i * 11) % 300) / 100, 1 + (i % 97)));
+    const { ctx } = ctxOf(WIDE_BAR, { kind: "ready", period: "5m", bars: fineBars });
+    const wide = drawing({ ...style, rows: 100 });
+    const started = performance.now();
+    for (let frame = 0; frame < 400; frame++) {
+      volprofile.shapes(wide, ctx);
+      volprofile.handles(wide, ctx);
+      volprofile.axisLabels(wide, ctx);
+    }
+    expect(performance.now() - started).toBeLessThan(800);
+  });
 });
+

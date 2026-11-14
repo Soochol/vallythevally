@@ -1,4 +1,6 @@
 import type { Bar } from "../../../api/generated/Bar";
+import { PERIOD_LABEL } from "../../../lib/symbol";
+import type { FineBarsRead } from "../finePeriod";
 import { at, readBool, readFill, readNumber, readRecord, readStroke, strokeFields } from "../styleKit";
 import { type AxisLabel, defineTool, type Shape, type ToolContext } from "../toolSpec";
 import type { DrawingPoint, Fill, Stroke } from "../types";
@@ -14,6 +16,7 @@ export interface VolProfileStyle {
   poc: boolean;
   pocLine: Stroke;
   pocLabel: boolean;
+  basisLabel: boolean;
 }
 
 export const ROWS = { min: 5, max: 100, step: 1 } as const;
@@ -29,6 +32,7 @@ export const volProfileDefaults = (): VolProfileStyle => ({
   poc: true,
   pocLine: { color: "#f23645", width: 2, dash: "solid" },
   pocLabel: true,
+  basisLabel: true,
 });
 
 const whole = (raw: unknown, fallback: number, { min, max }: { min: number; max: number }) => Math.min(max, Math.max(min, Math.round(readNumber(raw, fallback))));
@@ -47,6 +51,7 @@ export function parseVolProfileStyle(raw: unknown): VolProfileStyle {
     poc: readBool(o.poc, d.poc),
     pocLine: readStroke(o.pocLine, d.pocLine),
     pocLabel: readBool(o.pocLabel, d.pocLabel),
+    basisLabel: readBool(o.basisLabel, d.basisLabel),
   };
 }
 
@@ -108,10 +113,59 @@ export function volumeProfile(bars: readonly Bar[], rowCount: number, valueShare
   return { low, step, rows, poc, valueArea: { from, to } };
 }
 
-const profileOf = (points: readonly DrawingPoint[], style: VolProfileStyle, ctx: ToolContext) => {
+interface RecentProfile {
+  bars: readonly Bar[];
+  rows: number;
+  valueShare: number;
+  profile: Profile | null;
+}
+
+const RECENT_PROFILES = 16;
+const recentProfiles: RecentProfile[] = [];
+
+const sameBars = (a: readonly Bar[], b: readonly Bar[]) => a.length === b.length && a.every((bar, i) => bar === b[i]);
+
+function recentVolumeProfile(bars: readonly Bar[], rows: number, valueShare: number): Profile | null {
+  const index = recentProfiles.findIndex((r) => r.rows === rows && r.valueShare === valueShare && sameBars(r.bars, bars));
+  const hit = index < 0 ? { bars, rows, valueShare, profile: volumeProfile(bars, rows, valueShare) } : recentProfiles.splice(index, 1)[0]!;
+  recentProfiles.unshift(hit);
+  recentProfiles.length = Math.min(recentProfiles.length, RECENT_PROFILES);
+  return hit.profile;
+}
+
+interface Basis {
+  profile: Profile | null;
+  label: string;
+}
+
+const periodBasis = (period: keyof typeof PERIOD_LABEL) => `${PERIOD_LABEL[period]}봉 기준`;
+
+function basisLabel(read: FineBarsRead, ctx: ToolContext): string {
+  const chart = periodBasis(ctx.period);
+  switch (read.kind) {
+    case "ready":
+      return read.bars.length > 0 ? periodBasis(read.period) : chart;
+    case "loading":
+      return `${chart} · 분봉 받는 중`;
+    case "failed":
+      return `${chart} · 분봉을 받지 못함`;
+    case "none":
+      return read.reason === "pastYear" ? `${chart} · 분봉은 최근 1년까지` : chart;
+  }
+}
+
+const basisOf = (points: readonly DrawingPoint[], style: VolProfileStyle, ctx: ToolContext): Basis => {
   const [p0, p1] = points;
-  return p0 === undefined || p1 === undefined ? null : volumeProfile(loadedBarsIn(ctx, p0.t, p1.t), style.rows, style.valuePercent / 100);
+  if (p0 === undefined || p1 === undefined) return { profile: null, label: periodBasis(ctx.period) };
+  const chartBars = loadedBarsIn(ctx, p0.t, p1.t);
+  const read = ctx.fineBarsIn(p0.t, p1.t);
+  const label = basisLabel(read, ctx);
+  if (chartBars.length === 0) return { profile: null, label };
+  const bars = read.kind === "ready" && read.bars.length > 0 ? read.bars : chartBars;
+  return { profile: recentVolumeProfile(bars, style.rows, style.valuePercent / 100), label };
 };
+
+const profileOf = (points: readonly DrawingPoint[], style: VolProfileStyle, ctx: ToolContext) => basisOf(points, style, ctx).profile;
 
 const priceSpan = (profile: Profile, ctx: ToolContext) => {
   const top = ctx.yOf(rowLow(profile, profile.rows.length));
@@ -121,6 +175,8 @@ const priceSpan = (profile: Profile, ctx: ToolContext) => {
 
 const FRAME_OPACITY = 0.05;
 const FLAT_BAR_PX = 2;
+const BASIS_FONT_PX = 11;
+const BASIS_INSET_PX = 4;
 
 const L = at<VolProfileStyle>();
 
@@ -149,14 +205,19 @@ export const volprofile = defineTool<VolProfileStyle>({
       { kind: "toggle", label: "POC 선", lens: L("poc") },
       ...strokeFields("POC 선", L("pocLine")),
       { kind: "toggle", label: "POC 가격 라벨", lens: L("pocLabel") },
+      { kind: "toggle", label: "계산 기준 라벨", lens: L("basisLabel") },
     ],
+  },
+  fineRange({ points }) {
+    const [p0, p1] = points;
+    return p0 === undefined || p1 === undefined ? null : { t1: p0.t, t2: p1.t };
   },
   shapes({ points, style }, ctx) {
     const xs = points.slice(0, 2).flatMap((p) => {
       const x = ctx.xOf(p.t);
       return x === null ? [] : [x];
     });
-    const profile = profileOf(points, style, ctx);
+    const { profile, label } = basisOf(points, style, ctx);
     const span = profile === null ? null : priceSpan(profile, ctx);
     if (profile === null || span === null || xs.length < 2) {
       const edge: Stroke = { color: style.bars.color, width: 1, dash: "dashed" };
@@ -181,6 +242,10 @@ export const volprofile = defineTool<VolProfileStyle>({
     });
     const y = ctx.yOf(pocPrice(profile));
     if (style.poc && y !== null) shapes.push({ kind: "segment", a: { x: left, y }, b: { x: right, y }, stroke: style.pocLine });
+    if (style.basisLabel) {
+      const textStyle = { color: style.bars.color, size: BASIS_FONT_PX, bold: false, italic: false };
+      shapes.push({ kind: "text", at: { x: left + BASIS_INSET_PX, y: Math.min(span.top, span.bottom) + BASIS_INSET_PX }, text: label, style: textStyle, align: "left", baseline: "top" });
+    }
     return shapes;
   },
   handles({ points, style }, ctx) {

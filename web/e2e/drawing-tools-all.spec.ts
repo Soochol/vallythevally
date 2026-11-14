@@ -424,6 +424,7 @@ test.describe("봉을 읽는 도구", () => {
         return { x: r.x, y: r.y, width: r.width, height: r.height };
       });
       const shot = () => page.screenshot({ clip: pane, mask: [page.getByRole("navigation", { name: "드로잉 도구" }), cell(page).locator(".chart-legend")] });
+      await expect.poll(async () => (await mirror(page)).find((d) => d.tool === "volprofile")?.texts).toEqual([expect.stringMatching(/^\d+분봉 기준$/)]);
       const painted = await shot();
       for (const label of ["회귀 채널", "기준봉 VWAP", "구간 거래량 프로파일"]) {
         await list.getByRole("button", { name: `${label} 숨기기`, exact: true }).click();
