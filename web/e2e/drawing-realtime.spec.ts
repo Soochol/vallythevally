@@ -58,7 +58,7 @@ test("drawings survive realtime updates, series replacement, resync and controll
     await expect(chart.locator(".drawing-mirror")).toHaveCount(1);
     const at = expect.objectContaining({ x: expect.any(Number), y: expect.any(Number) });
     await expect.poll(() => mirror(page)).toEqual([
-      { id: saved.id, tool: "trendline", selected: expect.any(Boolean), points: [at, at], handles: expect.any(Array) },
+      { id: saved.id, tool: "trendline", selected: expect.any(Boolean), points: [at, at], handles: expect.any(Array), texts: expect.any(Array) },
     ]);
     if (place === "beforeFirstBar") expect((await mirror(page))[0]!.points.every((p) => p !== null && p.x < 0)).toBe(true);
     expect((await drawings(scenario))[0]!.points).toEqual(saved.points);
