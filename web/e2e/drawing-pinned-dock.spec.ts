@@ -1,4 +1,4 @@
-import type { BrowserContext, Page } from "@playwright/test";
+import type { BrowserContext, Locator, Page } from "@playwright/test";
 import { cell, chartOf, expect, test, type Scenario } from "./harness";
 import { TOOLS } from "../src/chart/drawings/tools";
 
@@ -47,6 +47,21 @@ async function settled(page: Page) {
     last = now;
     return same;
   }).toBe(true);
+}
+
+async function resizedFrame(page: Page, width: number, menu: Locator, anchor: Locator) {
+  const lefts = await page.evaluateHandle(([menu, anchor, width]) => ({
+    painted: new Promise<{ menu: number; anchor: number }>((resolve) => {
+      const observer = new ResizeObserver(() => {
+        if (innerWidth !== width) return;
+        observer.disconnect();
+        resolve({ menu: Math.round(menu.getBoundingClientRect().left), anchor: Math.round(anchor.getBoundingClientRect().left) });
+      });
+      observer.observe(document.documentElement);
+    }),
+  }), [await menu.elementHandle(), await anchor.elementHandle(), width] as const);
+  await page.setViewportSize({ width, height: 900 });
+  return lefts.evaluate((frame) => frame.painted);
 }
 
 const startsWith = (text: string) => new RegExp(`^${text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`);
@@ -105,12 +120,18 @@ test("고정 도구: 접힌 메뉴는 첫 도구에 포커스를 두고 별표 �
   expect(new Set(await menu.getByRole("menuitem").evaluateAll((items) => items.map((item) => Math.round(item.querySelector("svg")!.getBoundingClientRect().left)))).size, "접힌 메뉴의 아이콘 왼쪽 끝").toBe(1);
   const leftOf = (box: { x: number } | null) => Math.round(box!.x);
   await expect.poll(async () => leftOf(await menu.boundingBox())).toBe(leftOf(await dot.boundingBox()));
-  await page.setViewportSize({ width: 1024, height: 900 });
-  await expect.poll(async () => leftOf(await menu.boundingBox())).toBe(leftOf(await dot.boundingBox()));
+  const narrowed = await resizedFrame(page, 1024, menu, dot);
+  expect(narrowed.menu, "창 폭을 줄인 프레임의 접힌 메뉴").toBe(narrowed.anchor);
+  await expect.poll(async () => leftOf(await menu.boundingBox())).toBe(narrowed.anchor);
   const group = dock(page).getByRole("button", { name: "선 도구 펼치기", exact: true });
   await page.keyboard.press("Escape");
   await group.click();
   const lines = page.getByRole("menu", { name: "선 도구", exact: true });
-  await page.setViewportSize({ width: 1100, height: 900 });
-  await expect.poll(async () => leftOf(await lines.boundingBox())).toBe(leftOf(await group.boundingBox()));
+  const star = lines.getByRole("menuitemcheckbox").last();
+  const starred = await star.isChecked();
+  await star.click();
+  await expect(star).toBeChecked({ checked: !starred });
+  const widened = await resizedFrame(page, 1100, lines, group);
+  expect(widened.menu, "창 폭을 늘린 프레임의 선 도구 메뉴").toBe(widened.anchor);
+  await expect.poll(async () => leftOf(await lines.boundingBox())).toBe(widened.anchor);
 });
