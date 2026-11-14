@@ -13,7 +13,7 @@ import { executeCommand } from "./execute";
 import { commandRows, currentKey, modeAfterInput, selectedRow, type CommandRow, type IndicatorCommandMode } from "./model";
 import { useIndicatorPreview } from "./preview";
 
-export type EditorAction = { commit(): boolean; focus(): void };
+export type EditorAction = { commit(onCommitted: () => void): void; focus(): void };
 export type EditableRow = Exclude<CommandRow, { kind: "symbol" }>;
 
 export function useIndicatorCommand(slot: Slot, initialMode: IndicatorCommandMode, initialIndicator: string | null = null) {
@@ -32,12 +32,11 @@ export function useIndicatorCommand(slot: Slot, initialMode: IndicatorCommandMod
   const selectedSymbol = selected?.kind === "symbol" && selected.selectable ? selected.info : null;
   const compareButton = addButton(cell.chartSettings, selectedSymbol, cell.symbol);
 
-  const submit = (): boolean => {
-    if (selected?.kind !== "symbol") return selected ? editor.current?.commit() ?? false : false;
-    if (!selectedSymbol || !compareButton.ok) return false;
-    const added = executeCommand(slot, { kind: "compare", code: selectedSymbol.code });
-    if (added) queryClient.setQueryData(["symbol", selectedSymbol.code], selectedSymbol);
-    return added;
+  const submit = (onSubmitted: () => void) => {
+    if (selected?.kind !== "symbol") return editor.current?.commit(onSubmitted);
+    if (!selectedSymbol || !compareButton.ok || !executeCommand(slot, { kind: "compare", code: selectedSymbol.code })) return;
+    queryClient.setQueryData(["symbol", selectedSymbol.code], selectedSymbol);
+    onSubmitted();
   };
 
   return {
@@ -67,11 +66,23 @@ export function useIndicatorDraft(slot: Slot, row: EditableRow, actionRef: Ref<E
   }, [draft, validator, cell.chartSettings.indicators, slot]);
   useEffect(() => () => useIndicatorPreview.getState().set(slot, null), [slot]);
 
-  const commit = () => {
+  const commitNow = () => {
     if (!valid || !check.spec) return false;
     const committed = executeCommand(slot, { kind: "indicator", id: editing?.id ?? null, spec: check.spec, style });
     if (committed && !editing) setDraft((draft) => ({ ...draft, color: "auto" }));
     return committed;
+  };
+  const commitWhenValidatorLoads = useRef<(() => void) | null>(null);
+  useEffect(() => { commitWhenValidatorLoads.current = null; }, [draft]);
+  useEffect(() => {
+    const onCommitted = commitWhenValidatorLoads.current;
+    if (validator === "loading" || !onCommitted) return;
+    commitWhenValidatorLoads.current = null;
+    if (commitNow()) onCommitted();
+  }, [validator]);
+  const commit = (onCommitted: () => void) => {
+    if (validator === "loading") commitWhenValidatorLoads.current ??= onCommitted;
+    else if (commitNow()) onCommitted();
   };
   useImperativeHandle(actionRef, () => ({ commit, focus }));
 
