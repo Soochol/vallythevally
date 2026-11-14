@@ -142,6 +142,22 @@ test("범례 팝오버에서 겹치기를 켠 뒤 Esc는 별도 패널로 되돌
   await expect.poll(() => savedVolume(scenario)?.panel).toBe("p-volume");
   expect(saved(scenario).panels).toEqual([{ id: "p-volume", stretch: 0.25 }]);
   expect(savedVolume(scenario)?.style).toEqual(VOLUME.style);
+  await expect(row(page, "volume").getByRole("button", { name: /설정 열기/ })).toBeFocused();
+});
+
+test("겹치기를 켰다 끈 뒤 Esc는 열 때의 패널 순서와 높이로 되돌린다", async ({ page, scenario }) => {
+  const panels = [{ id: "p-rsi", stretch: 0.4 }, { id: "p-volume", stretch: 0.3 }];
+  await open(page, scenario, [RSI, VOLUME], panels);
+  await openPopover(page);
+  await overlaySwitch(page).click();
+  await expect.poll(() => savedVolume(scenario)?.panel).toBe("price");
+  await overlaySwitch(page).click();
+  await expect.poll(() => saved(scenario).panels.map((p) => p.stretch)).toEqual([0.25, 0.4]);
+  await page.keyboard.press("Escape");
+  await expect(popover(page)).toHaveCount(0);
+  await expect.poll(() => saved(scenario).panels).toEqual(panels);
+  expect(savedVolume(scenario)?.panel).toBe("p-volume");
+  await expect(row(page, "volume").getByRole("button", { name: /설정 열기/ })).toBeFocused();
 });
 
 test("지표 창에서 겹치기를 켜고 더한 거래량은 가격 패널에 겹쳐 더해진다", async ({ page, scenario }) => {

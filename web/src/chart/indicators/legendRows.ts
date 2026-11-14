@@ -14,13 +14,14 @@ interface RowEls {
   root: HTMLDivElement;
   swatch: HTMLSpanElement;
   name: HTMLButtonElement;
-  collapse: HTMLButtonElement | null;
+  collapse: HTMLButtonElement;
   values: HTMLSpanElement;
   badge: HTMLSpanElement;
   toggle: HTMLButtonElement;
-  up: HTMLButtonElement | null;
-  down: HTMLButtonElement | null;
-  key: string;
+  remove: HTMLButtonElement;
+  up: HTMLButtonElement;
+  down: HTMLButtonElement;
+  key: RowKey | null;
   detail: HTMLDetailsElement;
   summary: HTMLElement;
   text: HTMLElement;
@@ -43,6 +44,8 @@ function labelButton(button: HTMLButtonElement, label: string) {
   button.dataset.label = label;
 }
 
+type RowKey = "panel" | "price";
+
 export class IndicatorLegend {
   readonly priceBox = el("div", "flex flex-col gap-px");
   private readonly rows = new Map<string, RowEls>();
@@ -53,25 +56,20 @@ export class IndicatorLegend {
   ) {}
 
   render(rows: IndicatorRow[], paneTops: readonly number[], axisWidth = 72): void {
+    const focused = document.activeElement;
     const seen = new Set<string>();
     for (const row of rows) {
       seen.add(row.id);
-      const key = row.panel ? "panel" : "price";
-      let r = this.rows.get(row.id);
-      if (r && r.key !== key) {
-        r.dispose();
-        r.root.remove();
-        r = undefined;
-      }
-      r ??= this.build(row.id, key);
+      const r = this.rows.get(row.id) ?? this.build(row.id);
       this.rows.set(row.id, r);
+      this.place(r, row.panel ? "panel" : "price");
       this.fill(r, row);
       if (row.panel) {
         if (r.root.parentElement !== this.overlay) this.overlay.append(r.root);
         r.root.style.maxWidth = `calc(100% - ${axisWidth + 16}px)`;
         r.root.style.top = `${(paneTops[row.panel.index + 1] ?? 0) + 4}px`;
-        r.up!.disabled = row.panel.index === 0;
-        r.down!.disabled = row.panel.index === row.panel.count - 1;
+        r.up.disabled = row.panel.index === 0;
+        r.down.disabled = row.panel.index === row.panel.count - 1;
       }
     }
     const price = rows.filter((row) => !row.panel).map((row) => this.rows.get(row.id)!.root);
@@ -84,6 +82,7 @@ export class IndicatorLegend {
       r.root.remove();
       this.rows.delete(id);
     }
+    if (focused instanceof HTMLElement && focused !== document.activeElement && focused.isConnected) focused.focus({ preventScroll: true });
   }
 
   dispose(): void {
@@ -92,8 +91,19 @@ export class IndicatorLegend {
     this.priceBox.remove();
   }
 
-  private build(id: string, key: string): RowEls {
-    const root = el("div", key === "panel" ? `${ROW} absolute left-2 z-[4]` : ROW);
+  private place(r: RowEls, key: RowKey): void {
+    if (r.key === key) return;
+    r.key = key;
+    const panel = key === "panel";
+    r.root.className = panel ? `${ROW} absolute left-2 z-[4]` : ROW;
+    if (!panel) r.root.style.removeProperty("top");
+    if (!panel) r.root.style.removeProperty("max-width");
+    for (const button of [r.collapse, r.up, r.down]) button.hidden = !panel;
+    labelButton(r.remove, panel ? "패널 닫기" : "지우기");
+  }
+
+  private build(id: string): RowEls {
+    const root = el("div", ROW);
     root.dataset.indicatorRow = id;
     const swatch = el("span", "h-0.5 w-2.5 flex-none rounded-full");
     const name = el("button", "min-w-0 truncate text-text-2 hover:text-text");
@@ -115,12 +125,12 @@ export class IndicatorLegend {
       tools.append(b);
       return b;
     };
-    const collapse = key === "panel" ? button("down", "패널 접기", "collapse") : null;
-    const up = key === "panel" ? button("up", "패널 위로", "up") : null;
-    const down = key === "panel" ? button("down", "패널 아래로", "down") : null;
+    const collapse = button("down", "패널 접기", "collapse");
+    const up = button("up", "패널 위로", "up");
+    const down = button("down", "패널 아래로", "down");
     button("gear", "설정", "edit");
     const toggle = button("eye", "숨기기", "toggle");
-    button("close", key === "panel" ? "패널 닫기" : "지우기", "remove");
+    const remove = button("close", "지우기", "remove");
     const detail = el("details", "relative min-w-0 text-text-2");
     const summary = el("summary", "max-w-[18ch] cursor-pointer truncate text-xs max-md:max-w-[10ch]", "자료·갱신");
     summary.dataset.chartControl = "";
@@ -147,7 +157,7 @@ export class IndicatorLegend {
     box.append(select, text, refresh);
     detail.append(summary, box);
     root.append(swatch, name, detail, values, badge, tools);
-    const row: RowEls = { root, swatch, name, collapse, values, badge, toggle, up, down, key, detail, summary, text, select, refresh, reports: null, reportOptions: [], dispose: () => {} };
+    const row: RowEls = { root, swatch, name, collapse, values, badge, toggle, remove, up, down, key: null, detail, summary, text, select, refresh, reports: null, reportOptions: [], dispose: () => {} };
     const disposeSelect = domSelect(select, () => row.reportOptions.map((option, i) => ({ label: option.label, value: String(i) })), (value) => {
       select.dataset.value = value;
       const option = row.reportOptions[Number(value)];
@@ -179,12 +189,10 @@ export class IndicatorLegend {
       r.select.textContent = selected?.label ?? "";
       r.text.textContent = selected?.text ?? row.detail.text;
     }
-    if (r.collapse) {
-      labelButton(r.collapse, row.panel?.collapsed ? "패널 펼치기" : "패널 접기");
-      r.collapse.setAttribute("aria-expanded", String(!row.panel?.collapsed));
-      const icon = row.panel?.collapsed ? "up" : "down";
-      if (r.collapse.dataset.icon !== icon) { r.collapse.innerHTML = iconMarkup(icon); r.collapse.dataset.icon = icon; }
-    }
+    labelButton(r.collapse, row.panel?.collapsed ? "패널 펼치기" : "패널 접기");
+    r.collapse.setAttribute("aria-expanded", String(!row.panel?.collapsed));
+    const collapseIcon = row.panel?.collapsed ? "up" : "down";
+    if (r.collapse.dataset.icon !== collapseIcon) { r.collapse.innerHTML = iconMarkup(collapseIcon); r.collapse.dataset.icon = collapseIcon; }
     r.root.classList.toggle("indicator-collapsed", row.panel?.collapsed === true);
     if (row.panel?.collapsed) {
       r.root.dataset.chartControl = "";

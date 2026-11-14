@@ -16,7 +16,6 @@ export function IndicatorPopover({ cellId, initial, anchor, editRoot, onClose }:
   onClose(): void;
 }) {
   const trigger = useRef(anchor);
-  const anchorRect = useRef(anchor.getBoundingClientRect());
   const { draft, setDraft, validator, check, color, revert } = useLiveIndicatorDraft(cellId, initial);
   const shown = useLayoutStore((s) => chartWindows(s.layout).find((cell) => cell.id === cellId)?.chartSettings.indicators.find((i) => i.id === initial.id)?.visible ?? true);
 
@@ -25,10 +24,7 @@ export function IndicatorPopover({ cellId, initial, anchor, editRoot, onClose }:
     onClose();
   };
 
-  return <Popover isInside={(target) => target instanceof Element && editRoot.contains(target.closest("[data-indicator-edit]"))} anchor={trigger} anchorRect={() => {
-    if (trigger.current.isConnected) anchorRect.current = trigger.current.getBoundingClientRect();
-    return anchorRect.current;
-  }} onClose={close} role="dialog" aria-label={`${specName(initial.spec)} 설정`} data-chart-control="" className="w-[min(360px,calc(100vw-24px))] max-h-[calc(100dvh-24px)] overflow-auto p-3">
+  return <Popover isInside={(target) => target instanceof Element && editRoot.contains(target.closest("[data-indicator-edit]"))} anchor={trigger} onClose={close} role="dialog" aria-label={`${specName(initial.spec)} 설정`} data-chart-control="" className="w-[min(360px,calc(100vw-24px))] max-h-[calc(100dvh-24px)] overflow-auto p-3">
     <div className="mb-3 flex items-center gap-2">
       <h3 className="flex-1 text-m font-semibold">{KINDS[initial.spec.kind].label}</h3>
       <button type="button" className="icon-btn" aria-label={shown ? "지표 숨기기" : "지표 보이기"} aria-pressed={!shown} title={shown ? "숨기기" : "보이기"} onClick={() => useLayoutStore.getState().updateIndicator(cellId, initial.id, { visible: !shown })}><EyeIcon size={16} /></button>
