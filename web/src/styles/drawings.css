@@ -1,5 +1,8 @@
-.drawing-toolbar { position:absolute; left:calc((100% - var(--chart-right, 0px)) / 2); top:calc(var(--chart-inset-top, 0px) + var(--size-4)); z-index:10; transform:translateX(-50%); display:flex; align-items:center; gap:2px; max-width:calc(100% - var(--chart-right, 0px) - 11rem); min-width:11rem; padding:5px; border-radius:var(--r-pill); color:var(--text-2); overflow-x:auto; overflow-y:hidden; scrollbar-width:none; }
+.drawing-toolbar { position:absolute; left:calc((100% - var(--chart-right, 0px)) / 2); top:calc(var(--chart-inset-top, 0px) + var(--size-4)); z-index:10; transform:translateX(-50%); display:flex; align-items:center; gap:2px; --dock-reserve:11rem; max-width:calc(100% - var(--chart-right, 0px) - var(--dock-reserve)); min-width:11rem; padding:5px; border-radius:var(--r-pill); color:var(--text-2); overflow-x:auto; overflow-y:hidden; scrollbar-width:none; }
+@property --dock-reserve { syntax:"<length>"; inherits:false; initial-value:0px; }
+.drawing-toolbar[data-pinned] { transform:translateX(var(--dock-shift, -50%)); max-width:var(--dock-max, calc(100% - var(--chart-right, 0px) - var(--dock-reserve))); }
 .drawing-toolbar>* { flex-shrink:0; }
+.draw-pinned { display:flex; align-items:center; gap:inherit; }
 .draw-tool { display:grid; place-items:center; width:32px; height:32px; border-radius:var(--r-pill); color:var(--text-2); cursor:pointer; }
 .draw-tool:hover { background:var(--hover); color:var(--text); }
 .draw-tool[aria-pressed=true] { color:var(--accent); background:var(--accent-soft); }
@@ -12,7 +15,7 @@
 .draw-tool-choice { display:flex; align-items:center; }
 .draw-tool-choice button { display:flex; align-items:center; gap:8px; height:30px; padding:4px 8px; border-radius:var(--r-s); font-size:var(--fs-s); }
 .draw-tool-choice button:first-child { flex:1; }
-.draw-tool-choice button:last-child { width:30px; justify-content:center; }
+.draw-tool-choice [role=menuitemcheckbox] { width:30px; justify-content:center; }
 .draw-tool-choice button:hover, .draw-tool-choice button:focus-visible { background:var(--raised); }
 .draw-tool-choice [aria-checked=true] { color:var(--accent); }
 .draw-tool-choice [aria-checked=true] svg { fill:currentColor; }

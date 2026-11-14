@@ -1,7 +1,7 @@
 import { Popover } from "../overlay/Popover";
 import { Menu } from "../menu/Menu";
 import { Icon, DRAWING_ICONS, CloseIcon, StarIcon } from "../icons";
-import { type RefObject, useEffect, useRef, useState } from "react";
+import { type RefObject, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { surfaceFor } from "../../chart/drawings/DrawingSurface";
 import { gestureHelp } from "../../chart/drawings/gestures";
 import { TOOL_HOTKEYS } from "../../chart/drawings/hotkeys";
@@ -31,6 +31,9 @@ export function DrawingToolbar() {
   const [help, setHelp] = useState(false);
   const root = useRef<HTMLElement>(null);
   const helpButton = useRef<HTMLButtonElement>(null);
+  const pinnedRun = useRef<HTMLDivElement>(null);
+  const pinnedTools = prefs.pinnedTools.flatMap((id) => toolOf(id) ?? []);
+  const shownPins = usePinnedFit(root, pinnedRun, pinnedTools.length);
   const [lastTools, setLastTools] = useState<Partial<Record<Tool["group"], Tool>>>({});
   useEffect(() => { const tool = active && toolOf(active); if (tool) setLastTools((s) => ({ ...s, [tool.group]: tool })); }, [active]);
   useEffect(() => {
@@ -43,7 +46,9 @@ export function DrawingToolbar() {
   const setTool = (tool: Tool) => { useDrawingSession.getState().setTool(tool.tool); surfaceFor(slot)?.focus(); };
   const setPrefs = useUiStore.getState().setDrawingPrefs;
   const action = (f: () => void) => { f(); surfaceFor(slot)?.focus(); };
-  return <nav ref={root} data-chart-control aria-label="드로잉 도구" className="drawing-toolbar ui-island max-md:hidden">
+  const pinnedButton = (tool: Tool) => <button key={tool.tool} className="draw-tool" data-active-tool aria-label={`${tool.label} 고정 도구`} title={toolTitle(tool, "고정")} aria-pressed={active === tool.tool} onClick={() => setTool(tool)} onDoubleClick={() => action(() => useDrawingSession.getState().setTool(tool.tool, true))}><Icon path={tool.icon} /></button>;
+  const folded = pinnedTools.slice(shownPins);
+  return <nav ref={root} data-chart-control data-pinned={pinnedTools.length > 0 || undefined} aria-label="드로잉 도구" className="drawing-toolbar ui-island max-md:hidden">
     <button className="draw-tool" data-active-tool aria-label="선택 도구" title="선택 (V)" aria-pressed={active === null && mode === null} onClick={() => action(() => useDrawingSession.getState().setTool(null))}><Icon path={DRAWING_ICONS.pointer} /></button>
     {[...toolsByGroup()].map(([group, tools]) => {
       const t = tools.find((tool) => tool.tool === active) ?? lastTools[group] ?? tools[0]!;
@@ -51,10 +56,12 @@ export function DrawingToolbar() {
       <button className="draw-tool" data-active-tool title={toolTitle(t, pinned === t.tool ? "연속" : undefined)} aria-label={t.label} aria-pressed={active === t.tool} onClick={() => setTool(t)} onDoubleClick={() => action(() => useDrawingSession.getState().setTool(t.tool, true))}><Icon path={t.icon} /></button>
       {tools.length > 1 && <ToolGroup label={`${GROUP_LABEL[group]} 도구`} tools={tools} onChoose={setTool} />}
     </div>; })}
-    {prefs.pinnedTools.map((id) => {
-      const tool = toolOf(id); if (!tool) return null;
-      return <button key={id} className="draw-tool" data-active-tool aria-label={`${tool.label} 고정 도구`} title={toolTitle(tool, "고정")} aria-pressed={active === id} onClick={() => setTool(tool)} onDoubleClick={() => action(() => useDrawingSession.getState().setTool(id, true))}><Icon path={tool.icon} /></button>;
-    })}
+    {pinnedTools.length > 0 && <div ref={pinnedRun} className="draw-pinned">
+      {pinnedTools.slice(0, shownPins - 1).map(pinnedButton)}
+      {folded.length > 0
+        ? <div className="draw-group">{pinnedButton(pinnedTools[shownPins - 1]!)}<ToolGroup label="고정 도구" tools={folded} onChoose={setTool} pinnable={false} /></div>
+        : pinnedButton(pinnedTools[shownPins - 1]!)}
+    </div>}
     <div className="draw-separator" />
     {MODES.filter((m) => m.id !== "demo").map((m) => <button key={m.id} className="draw-tool" data-active-tool aria-label={m.label} title={m.label} aria-pressed={mode === m.id} onClick={() => action(() => useDrawingSession.setState({ tool: null, mode: mode === m.id ? null : m.id }))}><Icon path={m.icon} /></button>)}
     <MagnetButton action={action} />
@@ -109,7 +116,44 @@ function useLegendClearance(root: RefObject<HTMLElement | null>) {
   }, [root]);
 }
 
-function ToolGroup({ label, tools, onChoose }: { label: string; tools: readonly Tool[]; onChoose(tool: Tool): void }) {
+function usePinnedFit(root: RefObject<HTMLElement | null>, run: RefObject<HTMLElement | null>, count: number) {
+  const [room, setRoom] = useState(Infinity);
+  useLayoutEffect(() => {
+    const bar = root.current;
+    const stage = bar?.parentElement;
+    if (!bar || !stage || count === 0) return;
+    const fit = () => {
+      const pinned = run.current;
+      const first = pinned?.firstElementChild;
+      if (!pinned || !(first instanceof HTMLElement)) return;
+      const style = getComputedStyle(bar);
+      const gap = parseFloat(style.columnGap);
+      const slot = first.offsetWidth + gap;
+      const base = bar.offsetWidth - bar.clientWidth + bar.scrollWidth - pinned.offsetWidth - gap;
+      const center = parseFloat(style.left);
+      const end = 2 * center - parseFloat(style.getPropertyValue("--dock-reserve")) / 2;
+      const resting = center - base / 2;
+      const slots = Math.max(1, Math.floor((end - resting - base) / slot));
+      const fits = Math.min(count, slots);
+      const left = Math.max(parseFloat(style.getPropertyValue("--island-gap")), Math.min(resting, end - base - fits * slot));
+      bar.style.setProperty("--dock-shift", `${left - center}px`);
+      bar.style.setProperty("--dock-max", `${end - left}px`);
+      setRoom(slots);
+    };
+    const observer = new ResizeObserver(fit);
+    observer.observe(bar);
+    observer.observe(stage);
+    fit();
+    return () => {
+      observer.disconnect();
+      bar.style.removeProperty("--dock-shift");
+      bar.style.removeProperty("--dock-max");
+    };
+  }, [root, run, count]);
+  return Math.min(room, count);
+}
+
+function ToolGroup({ label, tools, onChoose, pinnable = true }: { label: string; tools: readonly Tool[]; onChoose(tool: Tool): void; pinnable?: boolean }) {
   const [open, setOpen] = useState(false);
   const trigger = useRef<HTMLButtonElement>(null);
   const pinned = useUiStore((s) => s.prefs.drawing.pinnedTools);
@@ -120,7 +164,7 @@ function ToolGroup({ label, tools, onChoose }: { label: string; tools: readonly 
     return own && dock ? { left: own.left, right: own.right, top: dock.top, bottom: dock.bottom } : own;
   };
   return <div className="draw-group-toggle"><button ref={trigger} type="button" aria-label={`${label} 펼치기`} title={label} aria-haspopup="menu" aria-expanded={open} className="draw-group-dot" onClick={() => setOpen(!open)}><svg viewBox="0 0 8 8" width="8" height="8" aria-hidden="true"><circle cx="4" cy="4" r="2" fill="currentColor" /></svg></button>
-    {open && <Popover data-chart-control anchor={trigger} anchorRect={alongDock} placement="bottom" role="menu" aria-label={label} className="draw-tool-menu" onClose={() => setOpen(false)} onKeyDown={(e) => {
+    {open && <Popover data-chart-control anchor={trigger} anchorRect={alongDock} follow placement="bottom" role="menu" aria-label={label} className="draw-tool-menu" onClose={() => setOpen(false)} onKeyDown={(e) => {
       e.stopPropagation();
       if (e.nativeEvent.isComposing) return;
       if (e.key === "Tab") { setOpen(false); return; }
@@ -134,7 +178,7 @@ function ToolGroup({ label, tools, onChoose }: { label: string; tools: readonly 
     }}>
       {tools.map((tool) => <div className="draw-tool-choice" key={tool.tool}>
         <button type="button" role="menuitem" onClick={() => { onChoose(tool); setOpen(false); }}><Icon path={tool.icon} size={16} /><span>{tool.label}</span>{hotkeysOf(tool.tool)[0] && <kbd>{hotkeysOf(tool.tool)[0]}</kbd>}</button>
-        <button type="button" role="menuitemcheckbox" aria-label={`${tool.label} 막대에 고정`} aria-checked={pinned.includes(tool.tool)} title="막대에 고정" onClick={() => useUiStore.getState().setDrawingPrefs({ pinnedTools: pinned.includes(tool.tool) ? pinned.filter((id) => id !== tool.tool) : [...pinned, tool.tool] })}><StarIcon size={16} /></button>
+        {pinnable && <button type="button" role="menuitemcheckbox" aria-label={`${tool.label} 막대에 고정`} aria-checked={pinned.includes(tool.tool)} title="막대에 고정" onClick={() => useUiStore.getState().setDrawingPrefs({ pinnedTools: pinned.includes(tool.tool) ? pinned.filter((id) => id !== tool.tool) : [...pinned, tool.tool] })}><StarIcon size={16} /></button>}
       </div>)}
     </Popover>}
   </div>;
