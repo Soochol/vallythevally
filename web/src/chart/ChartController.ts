@@ -468,8 +468,10 @@ export class ChartController {
   private recreateMain(isIndex: boolean): void {
     this.indicators.flush();
     this.withDataGuard(() => preserveTimeRange(this.chart.timeScale(), this.period(), () => {
-      this.chart.removeSeries(this.main.api);
+      const replaced = this.main;
       this.main = addMainSeries(this.chart, this.view?.settings.style ?? "candle", this.tokens, isIndex, this.priceAxisGeometry());
+      this.main.api.setSeriesOrder(replaced.api.seriesOrder());
+      this.chart.removeSeries(replaced.api);
       this.extensions.forEach((ext) => ext.reattach());
       this.setBars(this.bars);
     }));
