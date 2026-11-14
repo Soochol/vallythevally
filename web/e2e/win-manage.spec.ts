@@ -209,7 +209,25 @@ test("저장 전에 시작한 드로잉 읽기가 늦게 끝나도 저장 뒤 �
   await expect(objects.getByRole("region", { name: "이 레이아웃 공통" })).toContainText("1");
 });
 
-test("새 차트 창에 이 칸 범위로 바로 그려도 레이아웃 저장 뒤에 보내 서버가 받는다", async ({ page, scenario }) => {
+test("저장 전에 닫은 차트 창을 되돌리면 그 창의 드로잉 편집은 이 칸 범위로 저장된다", async ({ page, scenario }) => {
+  twoSamsungCharts(scenario);
+  cellDrawing(scenario);
+  let puts = 0;
+  scenario.on((url, request) => url.pathname.startsWith("/api/drawings/") && request.method() === "PUT" && puts++ === 0, () => unavailable);
+  await page.goto("/");
+  await expect(cell(page, 2)).toHaveAttribute("aria-busy", "false");
+  await tab(page, "개체 목록").click();
+  await cell(page, 2).click();
+  await page.getByRole("region", { name: "개체 목록" }).getByRole("region", { name: "이 칸" }).getByRole("button", { name: /잠그기$/ }).click();
+  await expect.poll(() => puts).toBe(1);
+  await closeButton(page, "칸 2 삼성전자").click();
+  await toast(page).getByRole("button", { name: "되돌리기" }).click();
+  await expect(cell(page, 2)).toBeVisible();
+  await expect.poll(() => scenario.documents.drawings("005930")[0], { timeout: 15_000 }).toMatchObject({ locked: true, scope: { kind: "cell", windowId: "cell-1" } });
+  expect(saved(scenario).windows.filter((w) => w.kind === "chart").map((w) => w.id)).toEqual(["cell-0", "cell-1"]);
+});
+
+test("새 차트 창은 바로 저장해 그 창에 이 칸 범위로 바로 그린 드로잉도 서버가 받는다", async ({ page, scenario }) => {
   twoSamsungCharts(scenario);
   const state = scenario.documents.uiState();
   scenario.documents.saveUiState({ ...state, drawing: { ...scenario.documents.uiPrefs().drawing, newScope: "cell" }, revision: state.revision + 1 });
@@ -225,6 +243,20 @@ test("새 차트 창에 이 칸 범위로 바로 그려도 레이아웃 저장 �
   const added = saved(scenario).windows.filter((w) => w.kind === "chart").at(-1)!;
   expect(scenario.documents.drawings("005930")[0]!.scope).toEqual({ kind: "cell", layoutId: DEFAULT_LAYOUT_ID, windowId: added.id });
   await expect(page.getByRole("status").filter({ hasText: "드로잉을 저장하지 못했습니다" })).toHaveCount(0);
+});
+
+test("좁은 데스크톱 폭에서도 창 더하기를 더한 위 막대의 버튼이 모두 막대 안에 있다", async ({ page }) => {
+  for (const width of [768, 800, 1024]) {
+    await page.setViewportSize({ width, height: 700 });
+    await page.goto("/");
+    await expect(cell(page)).toHaveAttribute("aria-busy", "false");
+    const bar = await boxOf(topbar(page));
+    await expect(addButton(page)).toBeVisible();
+    for (const button of await topbar(page).getByRole("button").all()) {
+      const box = await boxOf(button);
+      expect(box.x + box.width, `${width}px ${await button.getAttribute("aria-label") ?? await button.textContent()}`).toBeLessThanOrEqual(bar.x + bar.width + 1);
+    }
+  }
 });
 
 test("창 더하기 메뉴와 탭의 닫기 버튼을 키보드만으로 쓴다", async ({ page }) => {

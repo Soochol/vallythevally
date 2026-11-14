@@ -65,3 +65,15 @@ test("닫기 알림의 되돌리기는 창을 돌리고, 알림 뒤 다른 배�
   later.run();
   expect(layout().windows.some((w) => w.id === "objects")).toBe(false);
 });
+
+test("활성 칸을 닫을 때 첫 차트가 다른 탭 뒤에 숨어 있으면 그 탭을 골라 보인다", () => {
+  addWindow("chart", null);
+  addWindow("chart", room);
+  const [first, tabbed, beside] = charts();
+  const dock = () => layout().placement.dock!;
+  expect(JSON.stringify(dock())).toContain(`"tabs":["${first}","${tabbed}"],"active":"${tabbed}"`);
+  useSelectionStore.getState().setActiveCell(beside!);
+  expect(closeWindow(beside!, "칸 3")).toBe(true);
+  expect(active()).toBe(first);
+  expect(JSON.stringify(dock())).toContain(`"tabs":["${first}","${tabbed}"],"active":"${first}"`);
+});

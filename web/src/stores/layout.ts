@@ -235,7 +235,7 @@ export const useLayoutStore = create<LayoutState>()((set, get) => {
       const windows = [...layout.windows, { ...source, id }];
       const refs = windowRefs(windows);
       const dock = fittedDock(layout);
-      arrangeDock(windows, fitDock(room ? placeBeside(dock, id, source.id, { ...room, windows: refs }) : dock, refs));
+      arrangeDock(windows, selectTab(fitDock(room ? placeBeside(dock, id, source.id, { ...room, windows: refs }) : dock, refs), id));
       return id;
     },
     closeWindow: (id) => {
