@@ -326,3 +326,22 @@ test("고정 도구가 있는 막대를 차트 영역 오른쪽 끝에 놓으면
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
   expectSameSpot(await settledDock(page), dropped);
 });
+
+test("고정 도구가 있는 막대도 화살표 한 번에 16px씩 옮기고, 왼쪽 끝에 놓은 자리에 남는다", async ({ page, scenario }) => {
+  const state = scenario.documents.uiState();
+  scenario.documents.saveUiState({ ...state, drawing: { ...scenario.documents.uiPrefs().drawing, pinnedTools: TOOLS.slice(0, 12).map((t) => t.tool) }, revision: state.revision + 1 });
+  const home = await open(page);
+  await grip(page).focus();
+  for (let i = 1; i <= 3; i++) {
+    await page.keyboard.press("ArrowRight");
+    await expect.poll(async () => Math.round((await dockBox(page)).x - home.x)).toBe(16 * i);
+  }
+  expect((await settledDock(page)).width).toBeCloseTo(home.width, 0);
+  const area = await chartArea(page);
+  const dropped = await moveTo(page, () => ({ x: area.x - 100, y: area.y + area.height / 2 }));
+  expect(Math.round(dropped.x - area.x)).toBe(8);
+  await expectSavedRatios(scenario);
+  await page.reload();
+  await expect(cell(page)).toHaveAttribute("aria-busy", "false");
+  expectSameSpot(await settledDock(page), dropped);
+});
