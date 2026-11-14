@@ -185,6 +185,18 @@ describe("화살표 키", () => {
     ]);
   });
 
+  test("점이 쓰지 않는 축으로는 옮기지 않는다", () => {
+    const roles = [{ label: "시작", uses: "time" as const }, { label: "가격", uses: "price" as const }];
+    expect(nudge(points, "ArrowUp", ctx, roles)).toEqual([
+      { t: 60, price: 100 },
+      { t: 120, price: 200.5 },
+    ]);
+    expect(nudge(points, "ArrowRight", ctx, roles)).toEqual([
+      { t: 120, price: 100 },
+      { t: 120, price: 200 },
+    ]);
+  });
+
   test("한 점이라도 못 옮기면 옮기지 않는다", () => {
     expect(nudge([{ t: 0, price: 1 }], "ArrowLeft", ctx)).toBeNull();
   });
