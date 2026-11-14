@@ -122,7 +122,7 @@ test("고정 도구: 접힌 메뉴는 첫 도구에 포커스를 두고 별표 �
   await expect.poll(async () => leftOf(await menu.boundingBox())).toBe(leftOf(await dot.boundingBox()));
   const narrowed = await resizedFrame(page, 1024, menu, dot);
   expect(narrowed.menu, "창 폭을 줄인 프레임의 접힌 메뉴").toBe(narrowed.anchor);
-  await expect.poll(async () => leftOf(await menu.boundingBox())).toBe(narrowed.anchor);
+  await expect.poll(async () => leftOf(await menu.boundingBox()) - leftOf(await dot.boundingBox())).toBe(0);
   const group = dock(page).getByRole("button", { name: "선 도구 펼치기", exact: true });
   await page.keyboard.press("Escape");
   await group.click();
@@ -133,5 +133,5 @@ test("고정 도구: 접힌 메뉴는 첫 도구에 포커스를 두고 별표 �
   await expect(star).toBeChecked({ checked: !starred });
   const widened = await resizedFrame(page, 1100, lines, group);
   expect(widened.menu, "창 폭을 늘린 프레임의 선 도구 메뉴").toBe(widened.anchor);
-  await expect.poll(async () => leftOf(await lines.boundingBox())).toBe(widened.anchor);
+  await expect.poll(async () => leftOf(await lines.boundingBox()) - leftOf(await group.boundingBox())).toBe(0);
 });

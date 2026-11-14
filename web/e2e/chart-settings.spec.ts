@@ -2,7 +2,7 @@ import type { Page } from "@playwright/test";
 import { type ChartSettings, DEFAULT_CHART_SETTINGS, type IndicatorConfig } from "../src/chart/settings";
 import type { Bar } from "../src/api/generated/Bar";
 import { installChartProbe } from "./chart-probe";
-import { type Scenario, cell, chartOf, DEFAULT_LAYOUT_ID, expect, test, firstChart, withFirstChart } from "./harness";
+import { type Scenario, cell, chartOf, DEFAULT_LAYOUT_ID, expect, saveChartShare, test, firstChart, withFirstChart } from "./harness";
 import { selectMinute } from "./select-option";
 
 const RIGHT_OFFSET = 6;
@@ -428,8 +428,9 @@ test("showOhlc: false가 든 옛 설정은 봉 값 줄과 범례를 모두 보�
 });
 
 test("범례를 끈 좁은 칸에서는 봉 값이 거래소 옆에서, 값 한 칸도 들어가지 않으면 거래소 아래에서 줄을 바꾸고 오류 안내는 범례 안의 다음 줄에 한 줄로 둔다", async ({ page, scenario }) => {
-  await page.setViewportSize({ width: 860, height: 800 });
+  await page.setViewportSize({ width: 993, height: 800 });
   openWith(scenario, { showLegend: false, showOhlcChange: true });
+  saveChartShare(scenario, 0.4);
   await open(page);
   await expect.poll(() => scenario.live.subscriptions().some((s) => s.symbol === "005930")).toBe(true);
   scenario.live.emit({ type: "sub_error", sub: scenario.live.subscriptions().find((s) => s.symbol === "005930")!.sub, code: "realtime_limit" });
@@ -445,9 +446,9 @@ test("범례를 끈 좁은 칸에서는 봉 값이 거래소 옆에서, 값 한 
   }
   expect(await notice.evaluate((el) => { const range = document.createRange(); range.selectNodeContents(el); return range.getClientRects().length; })).toBe(1);
 
-  await page.setViewportSize({ width: 780, height: 800 });
-  await expect.poll(async () => (await venues(page).boundingBox())!.y + (await venues(page).boundingBox())!.height)
-    .toBeLessThanOrEqual((await ohlc(page).boundingBox())!.y);
+  await page.setViewportSize({ width: 793, height: 800 });
+  await expect.poll(async () => (await venues(page).boundingBox())!.y + (await venues(page).boundingBox())!.height - (await ohlc(page).boundingBox())!.y)
+    .toBeLessThanOrEqual(0);
   const narrow = (await cell(page).locator(".chart-legend").boundingBox())!;
   for (const value of await ohlc(page).locator(":scope > span").all()) {
     const box = (await value.boundingBox())!;
@@ -456,8 +457,9 @@ test("범례를 끈 좁은 칸에서는 봉 값이 거래소 옆에서, 값 한 
 });
 
 test("봉 값이 그대로면 크기가 바뀌어 다시 그려도 봉 값 줄의 칸을 새로 만들지 않는다", async ({ page, scenario }) => {
-  await page.setViewportSize({ width: 860, height: 800 });
+  await page.setViewportSize({ width: 993, height: 800 });
   openWith(scenario, { showLegend: false, showOhlcChange: true });
+  saveChartShare(scenario, 0.4);
   await open(page);
   await expect.poll(() => scenario.live.subscriptions().some((s) => s.symbol === "005930")).toBe(true);
   scenario.live.emit({ type: "sub_error", sub: scenario.live.subscriptions().find((s) => s.symbol === "005930")!.sub, code: "realtime_limit" });
@@ -474,9 +476,9 @@ test("봉 값이 그대로면 크기가 바뀌어 다시 그려도 봉 값 줄�
     }).observe(line, { childList: true });
     (window as unknown as { rebuiltOhlc: typeof rebuilt }).rebuiltOhlc = rebuilt;
   });
-  await page.setViewportSize({ width: 780, height: 800 });
-  await expect.poll(async () => (await venues(page).boundingBox())!.y + (await venues(page).boundingBox())!.height)
-    .toBeLessThanOrEqual((await ohlc(page).boundingBox())!.y);
+  await page.setViewportSize({ width: 793, height: 800 });
+  await expect.poll(async () => (await venues(page).boundingBox())!.y + (await venues(page).boundingBox())!.height - (await ohlc(page).boundingBox())!.y)
+    .toBeLessThanOrEqual(0);
   await page.waitForTimeout(1000);
   expect(await page.evaluate(() => (window as unknown as { rebuiltOhlc: unknown[] }).rebuiltOhlc)).toEqual([]);
 });

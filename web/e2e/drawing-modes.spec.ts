@@ -1,6 +1,6 @@
 import type { Page } from "@playwright/test";
 import { cell, chartOf, expect, test } from "./harness";
-import { bodyAlong, chartPoint, drawings, mirror, open, pickTool } from "./drawing-probe";
+import { bodyAlong, chartPoint, drawings, mirror, open, pickTool, settledMirror } from "./drawing-probe";
 
 type Point = { x: number; y: number };
 
@@ -105,7 +105,7 @@ test("지우개: 클릭·끌기·Ctrl+끌기로 지우고, 잠긴 드로잉은 �
 
 async function bodyOf(page: Page, id: string): Promise<Point> {
   const box = (await chartOf(cell(page)).boundingBox())!;
-  const points = (await mirror(page)).find((d) => d.id === id)!.points.map((p) => ({ x: box.x + p!.x, y: box.y + p!.y }));
+  const points = (await settledMirror(page)).find((d) => d.id === id)!.points.map((p) => ({ x: box.x + p!.x, y: box.y + p!.y }));
   const [a, b, c] = points;
   const segments = points.slice(1).map((p, i) => [points[i]!, p] as const);
   if (a && b && c) segments.push([a, { x: (b.x + c.x) / 2, y: (b.y + c.y) / 2 }]);

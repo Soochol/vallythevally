@@ -6,16 +6,14 @@ import { FinancialStatus } from "./FinancialStatus";
 import { MarketClock } from "./MarketClock";
 import { SaveStatus } from "./SaveStatus";
 
-export function StatusBar({ floating = false }: { floating?: boolean }) {
+export function StatusBar() {
   const stopped = useKiwoomStore((s) => s.stopped);
   const notice = useKiwoomStore((s) => s.notice);
   const connection = useConnectionView();
   const halted = !stopped && !notice && connection.tone === "red";
   return (
     <footer
-      className={`flex min-w-0 flex-none flex-wrap items-center gap-x-3 gap-y-1 whitespace-nowrap px-3 py-2 text-xs text-text-2 max-md:hidden ${
-        floating ? "ui-island absolute bottom-[5.5rem] left-[var(--island-gap)] z-10 max-w-[calc(100%-var(--island-gap)*2-6rem)] rounded-m" : "border-t border-line"
-      } ${halted ? "bg-[color-mix(in_srgb,var(--danger)_14%,transparent)]" : ""}`}
+      className={`status-bar flex min-w-0 flex-none items-center gap-x-3 overflow-hidden whitespace-nowrap border-t border-line px-3 text-xs text-text-2 max-md:hidden ${halted ? "bg-[color-mix(in_srgb,var(--danger)_14%,transparent)]" : ""}`}
     >
       {stopped ? (
         <span role="alert" className="min-w-0 truncate font-[650] text-danger" title={stopped}>

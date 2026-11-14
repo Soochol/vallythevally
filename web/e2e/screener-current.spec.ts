@@ -224,7 +224,7 @@ for (const olderFails of [false, true]) {
     await execute(page);
     const matchedDate = "2026-11-01";
     const original = await meta(page).textContent();
-    await page.getByRole("tablist", { name: "오른쪽 패널" }).getByRole("tab", { name: "관심종목", exact: true }).click();
+    await page.getByRole("tablist", { name: "창 묶음 2" }).getByRole("tab", { name: "관심종목", exact: true }).click();
     await openScreener(page);
     const delivered = page.waitForEvent("requestfinished", (r) => new URL(r.url()).pathname === "/api/screener/run");
     held.reply(olderFails ? { status: 503, body: runError() } : { body: currentResult() });

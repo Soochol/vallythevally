@@ -4,7 +4,6 @@ import { screenEditingFor } from "../screener/useScreenEditing";
 import { HOTKEYS } from "../../lib/hotkeys";
 import { chartWindows, useLayoutStore } from "../../stores/layout";
 import { useSelectionStore } from "../../stores/selection";
-import { useUiStore } from "../../stores/ui";
 import type { SearchCommand } from "../commands/registry";
 import { openIndicatorCommand } from "../indicator-command/open";
 import { pressScale } from "../indicator-dialog/compareForm";
@@ -24,7 +23,7 @@ export const screenerRunCommand = (editingOf: (client: QueryClient) => Pick<Scre
   run: async ({ queryClient }) => {
     const selection = useSelectionStore.getState();
     selection.setPhoneTab("screener");
-    selection.showRightPanel("screener");
+    useLayoutStore.getState().showWindow("screener");
     const outcome = await editingOf(queryClient).run();
     const message = outcome.kind === "failed" ? outcome.message : RUN_TOAST[outcome.kind];
     if (message) selection.showToast(message);
@@ -41,7 +40,7 @@ export const DEFAULT_SEARCH_COMMANDS: readonly SearchCommand[] = [
         const next = cell && pressScale(cell.chartSettings, "log");
         if (next) layout.setScale(cellId, next);
       } }];
-      case "toggleWatch": return [{ id: "watch-panel", label, shortcut: keys, run: () => useUiStore.getState().toggleWatch() }];
+      case "showWatchlist": return [{ id: "watch-panel", label, shortcut: keys, run: () => useLayoutStore.getState().showWindow("watchlist") }];
       case "snapshot": return [{ id: `snapshot-${action.mode}`, label, shortcut: keys, run: ({ cellId }) => saveSnapshot(cellId, action.mode) }];
       default: return [];
     }

@@ -23,7 +23,7 @@ export function Topbar() {
   const [settingsOpen, setSettingsOpen] = useState(false);
 
   return (
-    <header role="toolbar" aria-label="차트 도구 막대" className="desktop-topbar ui-island absolute left-[var(--island-gap)] right-[var(--island-right)] top-[var(--island-gap)] z-20 h-[var(--island-h)] rounded-l max-md:hidden">
+    <header role="toolbar" aria-label="차트 도구 막대" className="desktop-topbar ui-island relative z-20 mx-[var(--island-gap)] mt-[var(--island-gap)] h-[var(--island-h)] flex-none rounded-l max-md:hidden">
       <span className="app-brand" title="vallythevally"><BrandIcon /><span>vally</span></span>
       <button type="button" className="tb-btn shell-symbol" aria-haspopup="dialog" title="종목 바꾸기" onClick={() => openSearch()}>
         <b className="min-w-0 flex-1 truncate text-left font-semibold" title={info?.name ?? cell.symbol}>{info?.name ?? cell.symbol}</b>

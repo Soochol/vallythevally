@@ -1,5 +1,5 @@
 import { test as base, expect, type Locator, type Page } from "@playwright/test";
-import { Scenario } from "./fixtures/scenario";
+import { DEFAULT_LAYOUT_ID, Scenario } from "./fixtures/scenario";
 export { DEFAULT_LAYOUT_ID, firstChart, withFirstChart, type Scenario } from "./fixtures/scenario";
 
 export const test = base.extend<{ scenario: Scenario; clockStart: string | null }>({
@@ -16,6 +16,18 @@ export { expect };
 export const SEARCH_BUTTON_TITLE = "종목 검색 (/ 또는 Ctrl+K)";
 
 export const cell = (page: Page, n = 1): Locator => page.getByRole("region", { name: new RegExp(`^칸 ${n}: `) });
+
+export const windowTabs = (page: Page): Locator => page.getByRole("tablist", { name: /^창 묶음 / });
+
+export const windowTab = (page: Page, name: string): Locator => windowTabs(page).getByRole("tab", { name: new RegExp(`^${name}`) });
+
+export function saveChartShare(scenario: Scenario, ratio: number): void {
+  const layout = scenario.documents.layout(DEFAULT_LAYOUT_ID);
+  const side = layout.windows.filter((w) => w.kind !== "chart").map((w) => w.id);
+  const chart = layout.windows.find((w) => w.kind === "chart")!.id;
+  const root = { kind: "split", dir: "row", ratio, first: { kind: "group", id: "g1", tabs: [chart], active: chart }, second: { kind: "group", id: "g2", tabs: side, active: side[0] } };
+  scenario.documents.saveLayout({ ...layout, revision: layout.revision + 1, placement: { v: 1, dock: { root, floats: [] }, canvas: null } });
+}
 
 export const chartOf = (c: Locator): Locator => c.locator("[data-bar-count]");
 

@@ -37,7 +37,7 @@ export function DrawingOverlay({ cellId }: { cellId: WindowId }) {
 }
 
 function dockBottom(bar: HTMLElement | null) {
-  const dock = bar?.closest("main")?.querySelector<HTMLElement>(".drawing-toolbar");
+  const dock = bar?.closest("[role=tabpanel]")?.querySelector<HTMLElement>(".drawing-toolbar");
   const overlay = bar?.parentElement;
   if (!dock?.offsetParent || !overlay) return 0;
   return dock.getBoundingClientRect().bottom - overlay.getBoundingClientRect().top;
@@ -60,6 +60,8 @@ function FloatingBar({ cellId }: { cellId: WindowId }) {
       raf = requestAnimationFrame(follow);
       if (!root.current) { setPosition(null); setShown(false); framesWithoutBounds.current = 0; lastSpot.current = null; return; }
       const bounds = surface.selectionBounds(); const pane = surface.frame().pane;
+      if (pane.height <= 0) return;
+      root.current.style.setProperty("--floating-max", `${Math.max(0, pane.width - 16)}px`);
       const toolbar = root.current.querySelector<HTMLElement>(".drawing-floating");
       if (toolbar) size.current = { w: toolbar.offsetWidth, h: toolbar.offsetHeight };
       const { w, h } = size.current;
@@ -69,7 +71,7 @@ function FloatingBar({ cellId }: { cellId: WindowId }) {
       const x = Math.max(8, Math.min(saved?.x ?? (bounds ? (bounds.x1 + bounds.x2 - w) / 2 : 20), pane.width - w - 8));
       const above = bounds ? bounds.y1 - h - 14 : 60;
       const top = Math.max(48, dockBottom(root.current) + 8);
-      const y = Math.max(8, Math.min(saved?.y ?? Math.max(top, above < top ? (bounds?.y2 ?? 60) + 14 : above), pane.height - h - 8));
+      const y = Math.max(saved ? 8 : top, Math.min(saved?.y ?? Math.max(top, above < top ? (bounds?.y2 ?? 60) + 14 : above), pane.height - h - 8));
       const last = lastSpot.current; lastSpot.current = { x, y };
       setPosition((old) => old && Math.abs(old.x - x) < 0.5 && Math.abs(old.y - y) < 0.5 ? old : { x, y });
       if (last && Math.abs(last.x - x) < 0.5 && Math.abs(last.y - y) < 0.5) setShown(true);
@@ -82,7 +84,7 @@ function FloatingBar({ cellId }: { cellId: WindowId }) {
   const change = (update: (d: DrawingBody) => DrawingBody) => {
     surface.updateSelected(update);
   };
-  return <div ref={root} style={{ position: "absolute", left: position?.x, top: position?.y, visibility: shown ? undefined : "hidden" }}><Popover anchor={root} follow focus={false} dismiss={false} blockChartKeys={false} restoreFocus={false} onClose={() => {}} role="toolbar" aria-label="드로잉 스타일" className="drawing-floating" onPointerDown={(e) => { if (e.target instanceof HTMLButtonElement) e.preventDefault(); }}>
+  return <div ref={root} style={{ position: "absolute", left: position?.x, top: position?.y, visibility: shown ? undefined : "hidden" }}>{position && <Popover anchor={root} follow focus={false} dismiss={false} blockChartKeys={false} restoreFocus={false} onClose={() => {}} role="toolbar" aria-label="드로잉 스타일" className="drawing-floating" onPointerDown={(e) => { if (e.target instanceof HTMLButtonElement) e.preventDefault(); }}>
     <button type="button" className="draw-grip" aria-label="스타일 막대 옮기기" title="끌어서 막대 옮기기" onPointerDown={(e) => { e.preventDefault(); e.currentTarget.setPointerCapture(e.pointerId); drag.current = { x: e.clientX, y: e.clientY, baseX: position?.x ?? 0, baseY: position?.y ?? 0 }; }}
       onPointerMove={(e) => { const d = drag.current; if (d) useDrawingSession.setState({ toolbarAt: { x: d.baseX + e.clientX - d.x, y: d.baseY + e.clientY - d.y } }); }} onPointerUp={() => { drag.current = null; }}><Icon path={DRAWING_ICONS.grip} /></button>
     {common("lineColor") && tool.bar.lineColor && <ColorPicker compact label="선 색" value={drawingColor(tool.bar.lineColor.get(first.style))} width={tool.bar.width?.get(first.style)} onChange={(color) => change((d) => ({ ...d, style: toolOf(d.tool)?.bar.lineColor?.set(d.style, color) ?? d.style }))} />}
@@ -97,7 +99,7 @@ function FloatingBar({ cellId }: { cellId: WindowId }) {
     <button className="icon-btn" aria-label="드로잉 지우기" title="지우기 (Delete)" onClick={() => surface.remove(true)}><Icon path={DRAWING_ICONS.trash} /></button>
     <button className="icon-btn" aria-label="드로잉 더 보기" title="더 보기" onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); useDrawingSession.setState({ popup: { cellId, id: first.id, x: r.left, y: r.bottom + 5 } }); }}><MoreIcon /></button>
     <span className="sr-only">{session.selected.length}개 선택됨</span>
-  </Popover>
+  </Popover>}
     {session.editor?.kind === "settings" && <DrawingDetails cellId={cellId} editor={session.editor} anchor={detailsButton} />}
   </div>;
 }

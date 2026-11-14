@@ -49,7 +49,7 @@ test("추세선 작은 막대의 색·굵기·잠금·복제·삭제 되돌리�
   await expect.poll(async () => (await drawings(scenario)).map((d) => d.id)).toEqual([original.id]);
   await page.getByRole("button", { name: "되돌리기", exact: true }).click();
   await expect.poll(async () => (await drawings(scenario)).map((d) => d.id).sort()).toEqual([original.id, cloned.id].sort());
-  await page.getByRole("tab", { name: "개체", exact: true }).click();
+  await page.getByRole("tab", { name: "개체 목록", exact: true }).click();
   const object = page.getByRole("region", { name: "개체 목록" }).locator(`[data-drawing-id="${original.id}"]`);
   await object.getByRole("button", { name: "추세선 숨기기", exact: true }).click();
   await expect.poll(async () => (await drawings(scenario)).find((d) => d.id === original.id)?.hidden).toBe(true);

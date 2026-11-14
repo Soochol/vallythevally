@@ -37,7 +37,8 @@ import { useUiStore } from "../../stores/ui";
 import { useActiveWatchlist, useWatchlistStore } from "../../stores/watchlist";
 import { ArrowIcon, ChartIcon, ChevronIcon, CloseIcon, CopyIcon, ListIcon, MoreIcon, PlusIcon } from "../icons";
 import { Menu, type MenuItem } from "../menu/Menu";
-import { columnTemplate, type WatchVariant } from "./columns";
+import { columnTemplate, fitColumns, type WatchVariant } from "./columns";
+import { useElementSize } from "../workspace/size";
 import { removalUndo } from "./removalUndo";
 
 const DIR_CLASS = { up: "text-up", down: "text-down", flat: "text-text-2" } as const;
@@ -58,10 +59,12 @@ interface GroupNaming {
 
 export function WatchPanel() {
   const [naming, onNaming] = useState<string | null>(null);
+  const root = useRef<HTMLElement>(null);
+  const width = useElementSize(root)?.w ?? null;
   return (
-    <aside aria-label="관심종목" className="flex min-h-0 flex-1 flex-col">
+    <aside ref={root} aria-label="관심종목" className="flex min-h-0 min-w-0 flex-1 flex-col">
       <WatchHead onNaming={onNaming} />
-      <WatchList variant="desktop" editing={false} naming={naming} onNaming={onNaming} />
+      <WatchList variant="desktop" editing={false} naming={naming} onNaming={onNaming} width={width} />
     </aside>
   );
 }
@@ -247,12 +250,12 @@ function NameInput({ naming, onDone }: { naming: Naming; onDone(): void }) {
   );
 }
 
-function WatchList({ variant, editing, naming, onNaming }: { variant: WatchVariant; editing: boolean } & GroupNaming) {
+function WatchList({ variant, editing, naming, onNaming, width = null }: { variant: WatchVariant; editing: boolean; width?: number | null } & GroupNaming) {
   const list = useActiveWatchlist();
   const symbols = list.symbols;
   const chosen = useUiStore((s) => s.prefs.watchColumns);
   const collapsed = useUiStore((s) => s.prefs.collapsedWatchGroups);
-  const columns = editing ? [] : chosen;
+  const columns = editing ? [] : width === null ? chosen : fitColumns(chosen, width);
   const desktop = useMediaQuery(DESKTOP_QUERY);
   const onScreen = variant === "desktop" ? desktop : !desktop;
   const [dragOver, setDragOver] = useState<number | null>(null);

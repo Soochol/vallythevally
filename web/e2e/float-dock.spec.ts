@@ -11,14 +11,13 @@ async function open(page: Page) {
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
 }
 
-test("드로잉 도구는 위 막대 바로 아래 가운데의 도크이고 고른 도구는 강조색으로 채우며 펼침 메뉴는 도크 아래로 열린다", async ({ page }, info) => {
+test("드로잉 도구는 활성 칸 위쪽 가운데의 도크이고 고른 도구는 강조색으로 채우며 펼침 메뉴는 도크 아래로 열린다", async ({ page }, info) => {
   await open(page);
   const bar = await boxOf(dock(page));
   const chart = await boxOf(cell(page));
   expect(Math.abs(bar.x + bar.width / 2 - (chart.x + chart.width / 2))).toBeLessThanOrEqual(1);
-  const topbar = await boxOf(page.getByRole("toolbar", { name: "차트 도구 막대" }));
-  expect(bar.y).toBeGreaterThanOrEqual(topbar.y + topbar.height);
-  expect(bar.y - (topbar.y + topbar.height)).toBeLessThan(24);
+  expect(bar.y).toBeGreaterThanOrEqual(chart.y);
+  expect(bar.y - chart.y).toBeLessThan(24);
   expect(bar.width).toBeGreaterThan(bar.height * 4);
   const legend = await boxOf(cell(page).locator(".chart-legend"));
   const venues = await boxOf(cell(page).getByRole("group", { name: "거래소", exact: true }));

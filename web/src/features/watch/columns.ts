@@ -1,4 +1,4 @@
-import { DEFAULT_WATCH_COLUMNS, type WatchColumn } from "../../lib/watchlist";
+import type { WatchColumn } from "../../lib/watchlist";
 
 export type WatchVariant = "desktop" | "phone";
 
@@ -13,6 +13,10 @@ const NAME_MIN = 96;
 export const columnTemplate = (variant: WatchVariant, columns: readonly WatchColumn[]) =>
   ["minmax(0,1fr)", ...columns.map((c) => `${WIDTH[variant][c]}px`)].join(" ");
 
-const fittedWidth = (columns: readonly WatchColumn[]) => PADDING_X + NAME_MIN + columns.reduce((w, c) => w + GAP + WIDTH.desktop[c], 0);
+export const fittedWidth = (columns: readonly WatchColumn[]) => PADDING_X + NAME_MIN + columns.reduce((w, c) => w + GAP + WIDTH.desktop[c], 0);
 
-export const desktopPanelWidth = (columns: readonly WatchColumn[]) => Math.max(fittedWidth(columns), fittedWidth(DEFAULT_WATCH_COLUMNS));
+export function fitColumns(columns: readonly WatchColumn[], width: number): readonly WatchColumn[] {
+  let count = columns.length;
+  while (count > 1 && fittedWidth(columns.slice(0, count)) > width) count -= 1;
+  return count === columns.length ? columns : columns.slice(0, count);
+}

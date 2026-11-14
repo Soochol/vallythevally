@@ -51,10 +51,13 @@ export interface LayerOptions {
   focus?: boolean;
   dismiss?: boolean;
   follow?: boolean;
+  fitBelow?: number;
   backdrop?: boolean;
   blockChartKeys?: boolean;
   onClose(reason: "escape" | "outside"): void;
 }
+const FIT_MARGIN = 16;
+
 export function mountLayer(panel: HTMLElement, options: LayerOptions) {
   const focusTarget = options.focusTarget ?? options.trigger ?? (document.activeElement instanceof HTMLElement ? document.activeElement : null);
   panel.setAttribute("popover", "manual");
@@ -70,6 +73,11 @@ export function mountLayer(panel: HTMLElement, options: LayerOptions) {
   const place = () => {
     const anchor = options.anchor?.();
     if (!anchor) return;
+    if (options.fitBelow !== undefined) {
+      const room = innerHeight - anchor.bottom - FIT_MARGIN;
+      if (room >= options.fitBelow) panel.style.maxHeight = `${room}px`;
+      else panel.style.removeProperty("max-height");
+    }
     const position = placeOverlay(anchor, panel.getBoundingClientRect(), { width: innerWidth, height: innerHeight }, options.placement);
     panel.style.left = `${position.left}px`;
     panel.style.top = `${position.top}px`;

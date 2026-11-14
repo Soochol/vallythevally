@@ -8,6 +8,8 @@ import { IndicatorSettingsForm } from "./IndicatorSettingsForm";
 import { useLiveIndicatorDraft } from "./liveDraft";
 import type { WindowId } from "../../layout/kinds";
 
+const MIN_ROOM_BELOW = 240;
+
 export function IndicatorPopover({ cellId, initial, anchor, editRoot, onClose }: {
   cellId: WindowId;
   initial: IndicatorConfig;
@@ -26,7 +28,7 @@ export function IndicatorPopover({ cellId, initial, anchor, editRoot, onClose }:
 
   const isOwnToggle = (target: Node) => target instanceof Element && target.closest("[data-indicator-command=toggle]")?.closest("[data-indicator-row]")?.getAttribute("data-indicator-row") === initial.id && editRoot.contains(target);
 
-  return <Popover isInside={(target) => target instanceof Element && editRoot.contains(target.closest("[data-indicator-edit]"))} releasesClick={isOwnToggle} anchor={trigger} onClose={close} role="dialog" aria-label={`${specName(initial.spec)} 설정`} data-chart-control="" className="w-[min(360px,calc(100vw-24px))] max-h-[calc(100dvh-24px)] overflow-auto p-3">
+  return <Popover isInside={(target) => target instanceof Element && editRoot.contains(target.closest("[data-indicator-edit]"))} releasesClick={isOwnToggle} anchor={trigger} follow fitBelow={MIN_ROOM_BELOW} onClose={close} role="dialog" aria-label={`${specName(initial.spec)} 설정`} data-chart-control="" className="w-[min(360px,calc(100vw-24px))] max-h-[calc(100dvh-24px)] overflow-auto p-3">
     <div className="mb-3 flex items-center gap-2">
       <h3 className="flex-1 text-m font-semibold">{KINDS[initial.spec.kind].label}</h3>
       <button type="button" className="icon-btn" aria-label={shown ? "지표 숨기기" : "지표 보이기"} aria-pressed={!shown} title={shown ? "숨기기" : "보이기"} onClick={() => useLayoutStore.getState().updateIndicator(cellId, initial.id, { visible: !shown })}><EyeIcon size={16} /></button>

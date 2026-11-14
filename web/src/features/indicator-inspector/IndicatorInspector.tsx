@@ -4,7 +4,6 @@ import type { IndicatorConfig } from "../../chart/settings";
 import { symbolSub } from "../../lib/symbol";
 import { useLayoutStore } from "../../stores/layout";
 import { defaultIndicatorMode, useSelectionStore } from "../../stores/selection";
-import { useUiStore } from "../../stores/ui";
 import { EmptyState, ErrorState, Skeleton } from "../overlay/State";
 import { ChevronIcon, CloseIcon, EyeIcon, PlusIcon, SearchIcon } from "../icons";
 import { addButton, stepIndex } from "../indicator-dialog/compareForm";
@@ -100,7 +99,6 @@ function InspectorBody({ cellId }: { cellId: WindowId }) {
             if (next) { command.select(next); setOpened(next.kind !== "symbol" || next.selectable ? next.key : null); }
           }} />
       </label>
-      <button type="button" className="icon-btn" aria-label="지표 패널 닫기" title="지표 패널 닫기 (Alt+W)" onClick={() => { useUiStore.getState().toggleWatch(); document.getElementById("right-tab-indicators")?.focus(); }}><CloseIcon size={16} /></button>
     </header>
     <div role="tablist" aria-label="지표 창 보기" className="flex flex-none gap-5 border-b border-line px-4" onKeyDown={(event) => {
       if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;

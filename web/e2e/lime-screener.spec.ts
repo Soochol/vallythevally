@@ -3,9 +3,9 @@ import { expect, test } from "./screener-harness";
 
 test.use({ clockStart: "20261109100030" });
 
-test("오른쪽 스크리너 탭에서 실제 조건식 편집창을 열어 조건·시장·제외를 저장하고 다시 편집한다", async ({ scenario, page }, info) => {
+test("스크리너 창에서 실제 조건식 편집창을 열어 조건·시장·제외를 저장하고 다시 편집한다", async ({ scenario, page }, info) => {
   await page.goto("/");
-  await page.getByRole("tablist", { name: "오른쪽 패널" }).getByRole("tab", { name: /^스크리너/ }).click();
+  await page.getByRole("tablist", { name: "창 묶음 2" }).getByRole("tab", { name: /^스크리너/ }).click();
   await page.getByRole("complementary", { name: "스크리너", exact: true }).getByRole("button", { name: "새 조건식", exact: true }).click();
   const dialog = page.getByRole("region", { name: "조건식 편집", exact: true });
   await renameScreen(dialog, "라임 UI 조건식");
