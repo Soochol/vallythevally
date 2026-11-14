@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 import { TickMarkType } from "lightweight-charts";
-import { formatBarTime, formatKstClock, formatTickMark, fromChartTime, toChartTime } from "./time";
+import { formatBarTime, formatKstClock, formatTickMark, fromChartTime, kstDateChanges, toChartTime } from "./time";
 
 // 2026-11-06 00:00 KST = 2026-11-05 15:00 UTC
 const nov6Kst = Date.UTC(2026, 10, 6) / 1000 - 32400;
@@ -53,4 +53,23 @@ test("분기봉·연봉은 분봉 날짜 표시와 눈금을 쓰지 않는다", 
     expect(formatBarTime(nov6Kst, period)).toBe("2026-11-06");
     expect(formatTickMark(toChartTime(nov6Kst), TickMarkType.Month, period)).toBeNull();
   }
+});
+
+test("날짜가 바뀌는 봉은 이틀 넘게 걸친 분봉에서 각 날의 첫 봉만이고 맨 처음 봉은 빠진다", () => {
+  const minute = (day: number, h: number, m: number) => ({ t: nov6Kst + day * 86400 + h * 3600 + m * 60 });
+  const bars = [minute(0, 9, 0), minute(0, 9, 5), minute(0, 15, 30), minute(1, 9, 0), minute(1, 9, 5), minute(3, 8, 0), minute(3, 19, 55)];
+  expect(kstDateChanges(bars)).toEqual([3, 5]);
+});
+
+test("한국 시각 자정 앞뒤의 두 봉은 UTC로 같은 날이어도 다른 날이다", () => {
+  const before = Date.UTC(2026, 10, 6, 14, 59) / 1000;
+  const after = Date.UTC(2026, 10, 6, 15, 0) / 1000;
+  expect(kstDateChanges([{ t: before }, { t: after }])).toEqual([1]);
+  const utcMidnight = Date.UTC(2026, 10, 7, 0, 0) / 1000;
+  expect(kstDateChanges([{ t: utcMidnight - 60 }, { t: utcMidnight }])).toEqual([]);
+});
+
+test("봉이 0개나 1개면 날짜가 바뀌는 봉이 없다", () => {
+  expect(kstDateChanges([])).toEqual([]);
+  expect(kstDateChanges([{ t: nov6Kst }])).toEqual([]);
 });
