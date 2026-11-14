@@ -13,14 +13,15 @@ const onKey = (event: KeyboardEvent) => {
   }
 };
 let outsideClick: AbortController | null = null;
-function consumeOutsidePointer(event: PointerEvent) {
-  event.preventDefault(); event.stopPropagation();
+function consumeOutsidePointer(event: PointerEvent, released?: Node) {
+  if (!released) { event.preventDefault(); event.stopPropagation(); }
   outsideClick?.abort();
   const gesture = new AbortController();
   outsideClick = gesture;
   const release = () => { gesture.abort(); if (outsideClick === gesture) outsideClick = null; };
   const click = (event: MouseEvent) => {
-    if (event.detail > 0 || event.type === "contextmenu") { event.preventDefault(); event.stopImmediatePropagation(); }
+    const reachesReleased = released !== undefined && event.type === "click" && event.target instanceof Node && released.contains(event.target);
+    if (!reachesReleased && (event.detail > 0 || event.type === "contextmenu")) { event.preventDefault(); event.stopImmediatePropagation(); }
     release();
   };
   const options = { capture: true, once: true, signal: gesture.signal };
@@ -35,7 +36,7 @@ const onDown = (event: PointerEvent) => {
   if (!top || !(event.target instanceof Node)) return;
   const outside = !top.panel.contains(event.target) && !top.options.trigger?.contains(event.target) && !top.options.isInside?.(event.target);
   if (outside || (top.options.backdrop && event.target === top.panel)) {
-    if (top.options.blockChartKeys !== false && !top.options.releasesClick?.(event.target)) consumeOutsidePointer(event);
+    if (top.options.blockChartKeys !== false) consumeOutsidePointer(event, event.button === 0 && top.options.releasesClick?.(event.target) ? (event.target instanceof Element ? event.target.closest("button") ?? event.target : event.target) : undefined);
     top.options.onClose("outside");
   }
 };

@@ -207,3 +207,46 @@ test("키보드 Enter로 숨기기는 팝오버와 상관없이 바로 숨긴다
   await page.keyboard.press("Enter");
   await expect(row(page, "rsi").getByRole("button", { name: /보이기/ })).toHaveCount(1);
 });
+
+async function recordPointerEvents(page: Page) {
+  await page.evaluate(() => {
+    const seen: string[] = [];
+    Object.assign(window, { seenPointerEvents: seen });
+    for (const type of ["click", "contextmenu"]) document.addEventListener(type, () => seen.push(type), true);
+  });
+}
+const seenPointerEvents = (page: Page) => page.evaluate(() => (window as unknown as { seenPointerEvents: string[] }).seenPointerEvents);
+
+test("열린 팝오버 줄의 숨기기를 오른쪽 클릭하면 팝오버만 닫고 메뉴·숨기기를 실행하지 않는다", async ({ page, scenario }) => {
+  await open(page, scenario);
+  const popup = await openRsiPopup(page);
+  await recordPointerEvents(page);
+  await row(page, "rsi").getByRole("button", { name: /숨기기/ }).click({ button: "right" });
+  await expect(popup).toHaveCount(0);
+  expect(await seenPointerEvents(page)).toEqual([]);
+  expect((await settings(scenario)).indicators.find((i) => i.id === "rsi")?.visible).toBe(true);
+});
+
+test("열린 팝오버 줄의 숨기기에서 눌러 다른 곳에서 떼면 숨기지 않고 click도 소비한다", async ({ page, scenario }) => {
+  await open(page, scenario);
+  const popup = await openRsiPopup(page);
+  await recordPointerEvents(page);
+  const button = await row(page, "rsi").getByRole("button", { name: /숨기기/ }).boundingBox();
+  const chart = await cell(page).boundingBox();
+  if (!button || !chart) throw new Error("범례 버튼이나 차트가 없습니다");
+  await page.mouse.move(button.x + button.width / 2, button.y + button.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(chart.x + chart.width * 0.5, chart.y + chart.height * 0.3, { steps: 6 });
+  await page.mouse.up();
+  await expect(popup).toHaveCount(0);
+  expect(await seenPointerEvents(page)).toEqual([]);
+  expect((await settings(scenario)).indicators.find((i) => i.id === "rsi")?.visible).toBe(true);
+});
+
+async function openRsiPopup(page: Page) {
+  await row(page, "rsi").getByRole("button", { name: /설정 열기/ }).click();
+  const popup = page.getByRole("dialog", { name: /RSI.*설정/ });
+  await expect(popup).toBeVisible();
+  await row(page, "rsi").hover();
+  return popup;
+}
