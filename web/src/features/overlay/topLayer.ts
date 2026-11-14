@@ -35,12 +35,13 @@ const onDown = (event: PointerEvent) => {
   if (!top || !(event.target instanceof Node)) return;
   const outside = !top.panel.contains(event.target) && !top.options.trigger?.contains(event.target) && !top.options.isInside?.(event.target);
   if (outside || (top.options.backdrop && event.target === top.panel)) {
-    if (top.options.blockChartKeys !== false) consumeOutsidePointer(event);
+    if (top.options.blockChartKeys !== false && !top.options.releasesClick?.(event.target)) consumeOutsidePointer(event);
     top.options.onClose("outside");
   }
 };
 export interface LayerOptions {
   isInside?(target: Node): boolean;
+  releasesClick?(target: Node): boolean;
   anchor?: () => Rect | undefined;
   trigger?: HTMLElement | null;
   focusTarget?: HTMLElement | null;
