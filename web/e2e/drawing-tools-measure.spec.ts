@@ -106,13 +106,13 @@ test("포지션 세부 설정: 목표가와 손절가를 진입가 반대쪽에 
   await page.getByRole("button", { name: "드로잉 세부 설정" }).click();
   const dialog = page.getByRole("dialog", { name: "매수 포지션 세부 설정" });
   await dialog.locator("summary").filter({ hasText: /^좌표$/ }).click();
-  await dialog.getByLabel("점 2 가격").fill(String(entry!.price - 100));
-  await dialog.getByLabel("점 3 가격").fill(String(entry!.price + 100));
+  await dialog.getByLabel("목표 가격").fill(String(entry!.price - 100));
+  await dialog.getByLabel("손절 가격").fill(String(entry!.price + 100));
   await dialog.getByRole("button", { name: "확인", exact: true }).click();
   await expect.poll(async () => (await savedOf(scenario, "long")).points).toEqual([entry, { ...target, price: entry!.price }, { ...stop, price: entry!.price }]);
   await page.getByRole("button", { name: "드로잉 세부 설정" }).click();
   await dialog.locator("summary").filter({ hasText: /^좌표$/ }).click();
-  await dialog.getByLabel("점 2 시각", { exact: true }).fill(await dialog.getByLabel("점 1 시각", { exact: true }).inputValue());
+  await dialog.getByLabel("목표 시각", { exact: true }).fill(await dialog.getByLabel("진입 시각", { exact: true }).inputValue());
   await dialog.getByRole("button", { name: "확인", exact: true }).click();
   await expect.poll(async () => (await savedOf(scenario, "long")).points[1]!.t).not.toBe(target!.t);
   expect((await savedOf(scenario, "long")).points[1]!.t).toBeGreaterThan(entry!.t);
