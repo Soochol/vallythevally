@@ -2,7 +2,7 @@ import type { BarsPage } from "../src/api/generated/BarsPage";
 import type { FinancialPeriod } from "../src/api/generated/FinancialPeriod";
 import type { FinancialsPage } from "../src/api/generated/FinancialsPage";
 import type { ChartSettings } from "../src/chart/settings";
-import { DEFAULT_LAYOUT_ID, type Scenario } from "./harness";
+import { DEFAULT_LAYOUT_ID, type Scenario, withFirstChart } from "./harness";
 import { financialPage } from "./financial-update-helpers";
 
 const METRICS = ["owner_roe", "investing_cash_flow", "dps", "debt_ratio"] as const;
@@ -40,7 +40,7 @@ export async function seedChartDisplay(scenario: Scenario, period: FinancialPeri
   const chartSettings: ChartSettings = { v: 2, style: "candle", scale: "normal", visibleBars: null, showExtremes: false, showOhlc: true, showOhlcChange: false, extremeBasis: "last", showDaySeparators: false, compare: [], indicators: METRICS.map(kind => ({
     id: kind, spec: { kind }, panel: kind, visible: true, style: { colors: ["ind-1"], width: 1 },
   })), panels: METRICS.map(id => ({ id, stretch: 0.3 })) };
-  scenario.documents.saveLayout({ ...layout, revision: layout.revision + 1, cells: [{ ...layout.cells[0]!, symbol: "000660", venue: "combined", period, chartSettings }] });
+  scenario.documents.saveLayout({ ...layout, revision: layout.revision + 1, windows: withFirstChart(layout, { symbol: "000660", venue: "combined", period, chartSettings }) });
 }
 
 export const chartDisplayOptions = {};

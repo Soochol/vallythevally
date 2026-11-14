@@ -3,7 +3,7 @@ import type { UTCTimestamp } from "lightweight-charts";
 import type { Bar } from "../src/api/generated/Bar";
 import { type ChartSettings, DEFAULT_CHART_SETTINGS } from "../src/chart/settings";
 import { installChartProbe } from "./chart-probe";
-import { type Scenario, cell, DEFAULT_LAYOUT_ID, expect, test } from "./harness";
+import { type Scenario, cell, DEFAULT_LAYOUT_ID, expect, test, firstChart, withFirstChart } from "./harness";
 
 const KST = 32_400;
 const BARS_PER_DAY = 40;
@@ -16,7 +16,7 @@ const DAY_STARTS = DAYS.slice(1).map((_, d) => (d + 1) * BARS_PER_DAY);
 const SEPARATED = DAY_STARTS.map((i) => [minuteBars[i - 1]!.t + KST, minuteBars[i]!.t + KST] as const);
 const INK_CHANGED = 300;
 
-const saved = (scenario: Scenario) => scenario.documents.layout(DEFAULT_LAYOUT_ID).cells[0]!.chartSettings as ChartSettings;
+const saved = (scenario: Scenario) => firstChart(scenario.documents.layout(DEFAULT_LAYOUT_ID)).chartSettings as ChartSettings;
 const toolbar = (page: Page) => page.getByRole("toolbar", { name: "차트 도구 막대" });
 const popover = (page: Page) => page.getByRole("dialog", { name: "차트 설정", exact: true });
 const daySwitch = (page: Page) => popover(page).getByRole("switch", { name: "날짜 구분선" });
@@ -25,8 +25,8 @@ function openMinute(scenario: Scenario, settings: Partial<ChartSettings> = {}) {
   scenario.reply((url) => url.pathname === "/api/bars" && url.searchParams.get("symbol") === "005930" && url.searchParams.get("period") === "3m",
     { body: { symbol: "005930", venue: "combined", period: "3m", bars: minuteBars, current: null, nextBefore: null, seq: null } });
   const layout = scenario.documents.layout(DEFAULT_LAYOUT_ID);
-  scenario.documents.saveLayout({ ...layout, revision: layout.revision + 1, cells: [{ ...layout.cells[0]!, symbol: "005930", venue: "combined", period: "3m",
-    chartSettings: { ...DEFAULT_CHART_SETTINGS, ...settings } }] });
+  scenario.documents.saveLayout({ ...layout, revision: layout.revision + 1, windows: withFirstChart(layout, { symbol: "005930", venue: "combined", period: "3m",
+    chartSettings: { ...DEFAULT_CHART_SETTINGS, ...settings } }) });
 }
 
 async function open(page: Page) {

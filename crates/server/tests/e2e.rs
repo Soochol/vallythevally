@@ -124,10 +124,11 @@ async fn user_data_survives_a_restart_and_quotes_come_from_kiwoom() {
         {"id": "L2", "name": "반도체", "symbols": ["000660", "005930"], "groups": []},
         {"id": "L3", "name": "지수", "symbols": ["IDX:101"], "groups": []},
     ], "revision": 1_794_152_040_001_i64});
-    let layout = serde_json::json!({"id": "0193aaaa-0000-7000-8000-000000000002", "name": "둘", "arrangement": "2v", "revision": 1_794_152_040_002_i64,
-        "sync": {"crosshair": true, "scroll": false}, "cells": [
-            {"slot": 0, "symbol": "005930", "venue": "nxt", "period": "15m", "symbolLink": true, "chartSettings": {"v": 1, "indicators": ["ma"]}},
-            {"slot": 1, "symbol": "IDX:001", "venue": null, "period": "W", "symbolLink": false, "chartSettings": {"v": 1}}]});
+    let layout = serde_json::json!({"id": "0193aaaa-0000-7000-8000-000000000002", "name": "둘", "revision": 1_794_152_040_002_i64,
+        "sync": {"crosshair": true, "scroll": false}, "placement": {"v": 1, "dock": null, "canvas": null}, "windows": [
+            {"id": "cell-0", "link": "a", "kind": "chart", "symbol": "005930", "venue": "nxt", "period": "15m", "chartSettings": {"v": 1, "indicators": ["ma"]}},
+            {"id": "cell-1", "link": null, "kind": "chart", "symbol": "IDX:001", "venue": null, "period": "W", "chartSettings": {"v": 1}},
+            {"id": "watchlist", "link": "a", "kind": "watchlist"}]});
     let ui = serde_json::json!({"lastLayoutId": layout["id"], "theme": "light", "watchCollapsed": true, "revision": 1_794_152_040_003_i64});
     assert_eq!(put(&client, &base, "/api/watchlists", &watchlist).await, (200, watchlist.clone()));
     let mut saved = Value::Null;
@@ -337,14 +338,14 @@ async fn ten_minute_bars_follow_each_venue_and_a_saved_layout_keeps_them() {
     assert_eq!(status, 200, "{older}");
     assert!(ten_minute_starts(&older).iter().all(|t| *t < before), "{older}");
 
-    let layout = serde_json::json!({"id": "0193aaaa-0000-7000-8000-000000000010", "name": "10분", "arrangement": "2v", "revision": 1_794_152_040_010_i64,
-        "sync": {"crosshair": true, "scroll": true}, "cells": [
-            {"slot": 0, "symbol": "005930", "venue": "nxt", "period": "10m", "symbolLink": true, "chartSettings": {"v": 1, "indicators": ["ma"]}},
-            {"slot": 1, "symbol": "IDX:001", "venue": null, "period": "10m", "symbolLink": false, "chartSettings": {"v": 1}}]});
+    let layout = serde_json::json!({"id": "0193aaaa-0000-7000-8000-000000000010", "name": "10분", "revision": 1_794_152_040_010_i64,
+        "sync": {"crosshair": true, "scroll": true}, "placement": {}, "windows": [
+            {"id": "cell-0", "link": "a", "kind": "chart", "symbol": "005930", "venue": "nxt", "period": "10m", "chartSettings": {"v": 1, "indicators": ["ma"]}},
+            {"id": "cell-1", "link": null, "kind": "chart", "symbol": "IDX:001", "venue": null, "period": "10m", "chartSettings": {"v": 1}}]});
     let path = format!("/api/layouts/{}", layout["id"].as_str().unwrap());
     let (status, saved) = put(&client, &base, &path, &layout).await;
     assert_eq!(status, 200, "{saved}");
-    assert_eq!(saved["cells"], layout["cells"]);
+    assert_eq!(saved["windows"], layout["windows"]);
     server.stop().await;
 
     let server = Server::spawn(&fake, &lock, &dist);

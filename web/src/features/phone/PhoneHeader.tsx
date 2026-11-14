@@ -3,7 +3,7 @@ import type { SymbolInfo } from "../../api/generated/SymbolInfo";
 import type { CellStatus } from "../../chart/ChartController";
 import { direction, formatChange, formatPercent, formatPrice } from "../../lib/format";
 import { isIndexCode, symbolSub } from "../../lib/symbol";
-import type { CellState } from "../../stores/layout";
+import type { ChartWindowState } from "../../stores/layout";
 import { useSelectionStore } from "../../stores/selection";
 import { CameraIcon } from "../icons";
 import { saveSnapshot } from "../snapshot/saveSnapshot";
@@ -17,7 +17,7 @@ const DIR_CLASS = { up: "text-up", down: "text-down", flat: "text-text-2" } as c
  * 휴대폰 머리(frontend.md §4): 종목과 거래소(주식만), 현재 봉 종가(24px, 등락색), 등락, 그리고 셋째 줄에
  * 연결 상태(§2.2의 점과 문장)와 라이브러리 표기. 범례의 머리줄과 가격줄을 대신한다.
  */
-export function PhoneHeader({ cell, info, status }: { cell: CellState; info: SymbolInfo | undefined; status: CellStatus }) {
+export function PhoneHeader({ cell, info, status }: { cell: ChartWindowState; info: SymbolInfo | undefined; status: CellStatus }) {
   const openSearch = useSelectionStore((s) => s.openSearch);
   const isIndex = isIndexCode(cell.symbol);
   const connection = useConnectionView();
@@ -34,7 +34,7 @@ export function PhoneHeader({ cell, info, status }: { cell: CellState; info: Sym
             <small className="ml-1 text-s text-text-3">{symbolSub(cell.symbol, info)}</small>
           </button>
           <FinancialUpdateButton />
-          <button type="button" className="icon-btn h-9 w-9 flex-none" title="차트 이미지 내려받기" aria-label="차트 이미지 내려받기" onClick={() => saveSnapshot(cell.slot, "download")}><CameraIcon size={20} /></button>
+          <button type="button" className="icon-btn h-9 w-9 flex-none" title="차트 이미지 내려받기" aria-label="차트 이미지 내려받기" onClick={() => saveSnapshot(cell.id, "download")}><CameraIcon size={20} /></button>
         </div>
         <div className="flex h-[32px] items-center gap-2">
           <div className="flex min-w-0 flex-1 items-baseline gap-2 overflow-hidden">

@@ -2,12 +2,12 @@ import type { Page } from "@playwright/test";
 import { type ChartSettings, DEFAULT_CHART_SETTINGS, type IndicatorConfig } from "../src/chart/settings";
 import type { Bar } from "../src/api/generated/Bar";
 import { installChartProbe } from "./chart-probe";
-import { type Scenario, cell, chartOf, DEFAULT_LAYOUT_ID, expect, test } from "./harness";
+import { type Scenario, cell, chartOf, DEFAULT_LAYOUT_ID, expect, test, firstChart, withFirstChart } from "./harness";
 import { selectMinute } from "./select-option";
 
 const RIGHT_OFFSET = 6;
 
-const saved = (scenario: Scenario) => scenario.documents.layout(DEFAULT_LAYOUT_ID).cells[0]!.chartSettings as ChartSettings;
+const saved = (scenario: Scenario) => firstChart(scenario.documents.layout(DEFAULT_LAYOUT_ID)).chartSettings as ChartSettings;
 const shownBars = (page: Page) => page.evaluate(() => {
   const range = window.chartProbe.chart.timeScale().getVisibleLogicalRange();
   return range && Math.round(range.to - range.from + 1);
@@ -190,7 +190,7 @@ test("팝오버의 봉 모양과 가격 축은 활성 칸에 바로 반영한다
 
 test("비교 종목이 있으면 팝오버의 가격 축은 %로 고정한다", async ({ page, scenario }) => {
   const layout = scenario.documents.layout(DEFAULT_LAYOUT_ID);
-  scenario.documents.saveLayout({ ...layout, revision: layout.revision + 1, cells: [{ ...layout.cells[0]!, symbol: "005930", venue: "combined", chartSettings: { ...saved(scenario), compare: ["000660"] } }] });
+  scenario.documents.saveLayout({ ...layout, revision: layout.revision + 1, windows: withFirstChart(layout, { symbol: "005930", venue: "combined", chartSettings: { ...saved(scenario), compare: ["000660"] } }) });
   await open(page);
   const settings = await openSettings(page);
   const scale = settings.getByRole("group", { name: "가격 축" });
@@ -211,8 +211,8 @@ test("화면 가장자리에 반쯤 잘린 봉은 최고·최저에서 빼고, �
   scenario.reply((url) => url.pathname === "/api/bars" && url.searchParams.get("symbol") === "005930" && url.searchParams.get("period") === "D",
     { body: { symbol: "005930", venue: "combined", period: "D", bars, current: null, nextBefore: null, seq: null } });
   const layout = scenario.documents.layout(DEFAULT_LAYOUT_ID);
-  scenario.documents.saveLayout({ ...layout, revision: layout.revision + 1, cells: [{ ...layout.cells[0]!, symbol: "005930", venue: "combined", period: "D",
-    chartSettings: { ...saved(scenario), visibleBars: 60, showExtremes: true } }] });
+  scenario.documents.saveLayout({ ...layout, revision: layout.revision + 1, windows: withFirstChart(layout, { symbol: "005930", venue: "combined", period: "D",
+    chartSettings: { ...saved(scenario), visibleBars: 60, showExtremes: true } }) });
   await page.addInitScript(installChartProbe);
   await page.goto("/");
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
@@ -268,7 +268,7 @@ test("화면 가장자리에 반쯤 잘린 봉은 최고·최저에서 빼고, �
 
 test("비교 종목이 있어 축 고정 안내가 붙어도 1280x600에서 팝오버는 버튼 아래에 열리고 지표 창 방식을 고른다", async ({ page, scenario }) => {
   const layout = scenario.documents.layout(DEFAULT_LAYOUT_ID);
-  scenario.documents.saveLayout({ ...layout, revision: layout.revision + 1, cells: [{ ...layout.cells[0]!, chartSettings: { ...saved(scenario), compare: ["000660"] } }] });
+  scenario.documents.saveLayout({ ...layout, revision: layout.revision + 1, windows: withFirstChart(layout, { chartSettings: { ...saved(scenario), compare: ["000660"] } }) });
   await page.setViewportSize({ width: 1280, height: 600 });
   await open(page);
   const settings = await openSettings(page);
@@ -308,8 +308,8 @@ function openWith(scenario: Scenario, settings: Partial<ChartSettings>, bars: Ba
   scenario.reply((url) => url.pathname === "/api/bars" && url.searchParams.get("symbol") === "005930" && url.searchParams.get("period") === "D",
     { body: { symbol: "005930", venue: "combined", period: "D", bars, current: null, nextBefore: null, seq: null } });
   const layout = scenario.documents.layout(DEFAULT_LAYOUT_ID);
-  scenario.documents.saveLayout({ ...layout, revision: layout.revision + 1, cells: [{ ...layout.cells[0]!, symbol: "005930", venue: "combined", period: "D",
-    chartSettings: { ...DEFAULT_CHART_SETTINGS, ...settings } }] });
+  scenario.documents.saveLayout({ ...layout, revision: layout.revision + 1, windows: withFirstChart(layout, { symbol: "005930", venue: "combined", period: "D",
+    chartSettings: { ...DEFAULT_CHART_SETTINGS, ...settings } }) });
 }
 
 async function reload(page: Page) {

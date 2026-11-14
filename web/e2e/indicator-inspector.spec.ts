@@ -3,9 +3,9 @@ import { mkdir } from "node:fs/promises";
 import { resolve } from "node:path";
 import { parseChartSettings } from "../src/chart/settings";
 import { installFrameProbe } from "./frame-probe";
-import { cell, DEFAULT_LAYOUT_ID, expect, test, type Scenario } from "./harness";
+import { cell, DEFAULT_LAYOUT_ID, expect, test, type Scenario, firstChart } from "./harness";
 
-const indicators = (scenario: Scenario) => parseChartSettings(scenario.documents.layout(DEFAULT_LAYOUT_ID).cells[0]!.chartSettings).indicators;
+const indicators = (scenario: Scenario) => parseChartSettings(firstChart(scenario.documents.layout(DEFAULT_LAYOUT_ID)).chartSettings).indicators;
 const maColors = async (scenario: Scenario) => indicators(scenario).filter((i) => i.spec.kind === "ma").map((i) => i.style.colors);
 const rail = (page: Page) => page.getByRole("tablist", { name: "오른쪽 패널" });
 const inspector = (page: Page) => page.getByRole("region", { name: "지표", exact: true });
@@ -99,11 +99,11 @@ test("차트 옆을 고르면 지표 버튼이 우측 패널을 열어 지표를
   await expect(inspector(page).getByRole("button", { name: "비교 종목 추가", exact: true })).toBeDisabled();
   await search(page).press("Enter");
   await expect(sdi).toHaveAttribute("aria-pressed", "false");
-  expect(parseChartSettings(scenario.documents.layout(DEFAULT_LAYOUT_ID).cells[0]!.chartSettings).compare).toEqual([]);
+  expect(parseChartSettings(firstChart(scenario.documents.layout(DEFAULT_LAYOUT_ID)).chartSettings).compare).toEqual([]);
   await sdi.click();
   await expect(sdi).toHaveAttribute("aria-pressed", "true");
   await inspector(page).getByRole("button", { name: /^삼성SDI.*추가$/ }).click();
-  await expect.poll(() => parseChartSettings(scenario.documents.layout(DEFAULT_LAYOUT_ID).cells[0]!.chartSettings).compare).toEqual(["006400"]);
+  await expect.poll(() => parseChartSettings(firstChart(scenario.documents.layout(DEFAULT_LAYOUT_ID)).chartSettings).compare).toEqual(["006400"]);
   await expect(inspector(page).getByText("비교 종목 1/3")).toBeVisible();
   await expect(dialog(page)).toHaveCount(0);
 

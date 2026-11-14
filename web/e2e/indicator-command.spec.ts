@@ -2,9 +2,9 @@ import { mkdir } from "node:fs/promises";
 import { resolve } from "node:path";
 import { parseChartSettings } from "../src/chart/settings";
 import { installFrameProbe } from "./frame-probe";
-import { cell, DEFAULT_LAYOUT_ID, expect, test, type Scenario } from "./harness";
+import { cell, DEFAULT_LAYOUT_ID, expect, test, type Scenario, firstChart } from "./harness";
 
-const settings = async (scenario: Scenario) => parseChartSettings(scenario.documents.layout(DEFAULT_LAYOUT_ID).cells[0]!.chartSettings);
+const settings = async (scenario: Scenario) => parseChartSettings(firstChart(scenario.documents.layout(DEFAULT_LAYOUT_ID)).chartSettings);
 
 test("입력창에서 Enter로 연속 추가하고 Shift+Enter로 닫은 뒤 숨김·삭제·저장을 복원한다", async ({ page, scenario }) => {
   await page.goto("/?symbol=005930");

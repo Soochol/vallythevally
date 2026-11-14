@@ -12,7 +12,7 @@ import { toChartTime } from "../src/chart/time";
 import type { ChartSettings } from "../src/chart/settings";
 import { installChartProbe } from "./chart-probe";
 import { installFrameProbe } from "./frame-probe";
-import { type Scenario, cell, chartOf, DEFAULT_LAYOUT_ID, expect } from "./harness";
+import { type Scenario, cell, chartOf, DEFAULT_LAYOUT_ID, expect, withFirstChart } from "./harness";
 
 const kst = (date: string) => Date.parse(`${date}T00:00:00+09:00`) / 1000;
 const markerId = "01900000-0000-7000-8000-000000000901";
@@ -30,7 +30,7 @@ async function seed(scenario: Scenario, financial: FinancialFixture, compare = f
     { id: "ma", spec: { kind: "ma", method: "sma", period: 2 }, panel: "price", visible: true, style: { colors: ["ind-1"], width: 1 } },
     { id: "revenue", spec: { kind: "revenue" }, panel: "revenue", visible: !hidden, style: { colors: ["ind-2"], width: 1 } },
   ], panels: [{ id: "revenue", stretch: 0.4 }] };
-  scenario.documents.saveLayout({ ...layout, revision: layout.revision + 1, cells: [{ ...layout.cells[0]!, symbol: "005930", venue: "combined", period: "Y", chartSettings: settings }] });
+  scenario.documents.saveLayout({ ...layout, revision: layout.revision + 1, windows: withFirstChart(layout, { symbol: "005930", venue: "combined", period: "Y", chartSettings: settings }) });
   let id = 1;
   financial.job({ id, status: "ready" });
   financial.onCommand(() => { financial.job({ id: ++id, status: "ready" }); });

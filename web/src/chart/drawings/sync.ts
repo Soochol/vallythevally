@@ -9,6 +9,7 @@ import { EMPTY_HISTORY, historyUndo, planRedo, planUndo, record, sameContent, ty
 import * as queue from "./outbox";
 import { compareIntent, DrawingJournal } from "./journal";
 import { opId, type Drawing, type DrawingBody, type DrawingOp } from "./types";
+import type { WindowId } from "../../layout/kinds";
 
 const key = (symbol: string) => ["drawings", symbol] as const;
 export const drawingPath = (id: string) => `/api/drawings/${encodeURIComponent(id)}`;
@@ -26,7 +27,7 @@ export class DrawingSync {
   private recoveryError: string | null = null;
   private stageFailed = false;
   private saveFailure: SaveState | null = null;
-  private histories = new Map<number, History>();
+  private histories = new Map<WindowId, History>();
   private listeners = new Set<() => void>();
   private version = 0;
   private timer: ReturnType<typeof setTimeout> | null = null;
@@ -82,8 +83,8 @@ export class DrawingSync {
     return [...merged.values()].sort((a, b) => a.z - b.z);
   }
 
-  history(slot: number) { return this.histories.get(slot) ?? EMPTY_HISTORY; }
-  commit(slot: number, ops: readonly DrawingOp[], addHistory = true) {
+  history(cellId: WindowId) { return this.histories.get(cellId) ?? EMPTY_HISTORY; }
+  commit(cellId: WindowId, ops: readonly DrawingOp[], addHistory = true) {
     const changed = ops.filter((op) => op.kind !== "update" || !sameContent(op.before, op.after));
     if (!changed.length) return false;
     if (usePersistStore.getState().phase.kind !== "ready") { toast("서버 연결을 복구한 뒤 드로잉을 편집하세요"); return false; }
@@ -100,29 +101,29 @@ export class DrawingSync {
       } catch { stagingSucceeded = false; this.stageFailed = true; this.recoveryFailed(); break; }
     }
     if (stagingSucceeded) { if (this.stageFailed) this.recoveryError = null; this.stageFailed = false; }
-    if (addHistory && staged.length) this.histories.set(slot, record(this.history(slot), staged.map(({ op }) => op)));
+    if (addHistory && staged.length) this.histories.set(cellId, record(this.history(cellId), staged.map(({ op }) => op)));
     this.saveFailure = null;
     this.updateSave(); this.pump();
     return staged.length > 0;
   }
 
-  commitWithUndo(slot: number, ops: readonly DrawingOp[], message: string) {
-    if (!this.commit(slot, ops)) return;
-    const action = historyUndo(() => this.history(slot), () => this.undo(slot));
+  commitWithUndo(cellId: WindowId, ops: readonly DrawingOp[], message: string) {
+    if (!this.commit(cellId, ops)) return;
+    const action = historyUndo(() => this.history(cellId), () => this.undo(cellId));
     useSelectionStore.getState().showToast(message, { ...action, subscribe: this.subscribe, shortcut: "Ctrl+Z" });
   }
 
-  undo(slot: number, redo = false) {
+  undo(cellId: WindowId, redo = false) {
     const current = (id: string) => {
       for (const symbol of this.symbols) { const d = this.drawings(symbol).find((item) => item.id === id); if (d) return d; }
       return null;
     };
-    const plan = (redo ? planRedo : planUndo)(this.history(slot), current);
+    const plan = (redo ? planRedo : planUndo)(this.history(cellId), current);
     if (plan.kind === "nothing") return;
     if (plan.kind === "conflict") {
-      this.histories.set(slot, plan.history);
+      this.histories.set(cellId, plan.history);
       toast("다른 곳에서 바뀐 드로잉이라 되돌리지 않았습니다");
-    } else if (this.commit(slot, plan.ops, false)) this.histories.set(slot, plan.history);
+    } else if (this.commit(cellId, plan.ops, false)) this.histories.set(cellId, plan.history);
     this.emit();
   }
 

@@ -11,28 +11,28 @@ import { toolOf } from "../../chart/drawings/tools";
 import type { DrawingBody } from "../../chart/drawings/types";
 import { DESKTOP_QUERY, useMediaQuery } from "../../lib/media";
 import { useDrawingSession } from "../../stores/drawingSession";
-import type { Slot } from "../../stores/layout";
 import { useUiStore } from "../../stores/ui";
 import { Menu } from "../menu/Menu";
 import { DashInput, WidthInput } from "./StyleFields";
 import { drawingMenu } from "./menus";
 import { DrawingDetails, DrawingTextEditor } from "./DrawingDetails";
+import type { WindowId } from "../../layout/kinds";
 
 
-export function DrawingOverlay({ slot }: { slot: Slot }) {
+export function DrawingOverlay({ cellId }: { cellId: WindowId }) {
   const desktop = useMediaQuery(DESKTOP_QUERY);
   const session = useDrawingSession(); const sync = drawingSync(useQueryClient()); useDrawingVersion(sync);
   const root = useRef<HTMLDivElement>(null);
-  const surface = surfaceFor(slot);
+  const surface = surfaceFor(cellId);
   if (!desktop || !surface) return null;
   const error = sync.loadError(surface.host.view()?.symbol ?? "");
   return <div data-chart-control ref={root} className="drawing-overlay" onPointerDown={(e) => e.stopPropagation()}>
     {error && <div className="draw-load-error"><ErrorState message={error} retry={() => sync.refresh()} /></div>}
-    {session.selected.length > 0 && session.editor?.kind !== "text" && <FloatingBar slot={slot} />}
-    {session.popup?.slot === slot && <Menu label="드로잉 메뉴" root={root} items={drawingMenu(surface, session.popup.id === null, session.popup.fromChart ? { x: session.popup.x, y: session.popup.y } : null)}
+    {session.selected.length > 0 && session.editor?.kind !== "text" && <FloatingBar cellId={cellId} />}
+    {session.popup?.cellId === cellId && <Menu label="드로잉 메뉴" root={root} items={drawingMenu(surface, session.popup.id === null, session.popup.fromChart ? { x: session.popup.x, y: session.popup.y } : null)}
       className="fixed max-h-[min(600px,85vh)] overflow-y-auto text-s" style={{ left: session.popup.x, top: session.popup.y, minWidth: 220 }}
       onClose={(restore) => { useDrawingSession.setState({ popup: null }); if (restore) surface.focus(); }} />}
-    {session.editor?.kind === "text" && <DrawingTextEditor slot={slot} editor={session.editor} />}
+    {session.editor?.kind === "text" && <DrawingTextEditor cellId={cellId} editor={session.editor} />}
   </div>;
 }
 
@@ -43,8 +43,8 @@ function dockBottom(bar: HTMLElement | null) {
   return dock.getBoundingClientRect().bottom - overlay.getBoundingClientRect().top;
 }
 
-function FloatingBar({ slot }: { slot: number }) {
-  const surface = surfaceFor(slot)!; const session = useDrawingSession();
+function FloatingBar({ cellId }: { cellId: WindowId }) {
+  const surface = surfaceFor(cellId)!; const session = useDrawingSession();
   const selected = surface.selected(); const root = useRef<HTMLDivElement>(null);
   const detailsButton = useRef<HTMLButtonElement>(null);
   const hideAll = useUiStore((s) => s.prefs.drawing.hideAll);
@@ -95,9 +95,9 @@ function FloatingBar({ slot }: { slot: number }) {
     <button className="icon-btn" aria-label="드로잉 복제" title="복제" onClick={() => surface.clone()}><CopyIcon /></button>
     <button className="icon-btn" aria-label={selected.every((d) => d.locked) ? "잠금 풀기" : "잠금"} title="잠금" onClick={() => surface.updateSelected((d) => ({ ...d, locked: !selected.every((item) => item.locked) }))}><Icon path={selected.every((d) => d.locked) ? DRAWING_ICONS.lockAll : DRAWING_ICONS.unlocked} /></button>
     <button className="icon-btn" aria-label="드로잉 지우기" title="지우기 (Delete)" onClick={() => surface.remove(true)}><Icon path={DRAWING_ICONS.trash} /></button>
-    <button className="icon-btn" aria-label="드로잉 더 보기" title="더 보기" onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); useDrawingSession.setState({ popup: { slot, id: first.id, x: r.left, y: r.bottom + 5 } }); }}><MoreIcon /></button>
+    <button className="icon-btn" aria-label="드로잉 더 보기" title="더 보기" onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); useDrawingSession.setState({ popup: { cellId, id: first.id, x: r.left, y: r.bottom + 5 } }); }}><MoreIcon /></button>
     <span className="sr-only">{session.selected.length}개 선택됨</span>
   </Popover>
-    {session.editor?.kind === "settings" && <DrawingDetails slot={slot} editor={session.editor} anchor={detailsButton} />}
+    {session.editor?.kind === "settings" && <DrawingDetails cellId={cellId} editor={session.editor} anchor={detailsButton} />}
   </div>;
 }

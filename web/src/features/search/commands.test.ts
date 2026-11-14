@@ -1,5 +1,6 @@
 import { QueryClient } from "@tanstack/react-query";
 import { beforeEach, expect, test } from "vitest";
+import { windowId } from "../../layout/kinds";
 import { useSelectionStore } from "../../stores/selection";
 import type { RunOutcome } from "../screener/screenEditing";
 import { DEFAULT_SEARCH_COMMANDS, screenerRunCommand } from "./commands";
@@ -8,7 +9,7 @@ const client = new QueryClient();
 
 async function toastAfter(outcome: RunOutcome) {
   useSelectionStore.setState({ toast: null, phoneTab: "chart" });
-  await screenerRunCommand(() => ({ run: async () => outcome })).run({ queryClient: client, slot: 0 });
+  await screenerRunCommand(() => ({ run: async () => outcome })).run({ queryClient: client, cellId: windowId("cell-0") });
   return useSelectionStore.getState().toast?.text ?? null;
 }
 

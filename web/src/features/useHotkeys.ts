@@ -4,7 +4,7 @@ import { isTypingTarget, matchHotkey } from "../lib/hotkeys";
 import { DESKTOP_QUERY } from "../lib/media";
 import { openIndicatorCommand } from "./indicator-command/open";
 import { PERIODS } from "../lib/symbol";
-import { useLayoutStore } from "../stores/layout";
+import { chartWindows, useLayoutStore } from "../stores/layout";
 import { useSelectionStore } from "../stores/selection";
 import { useUiStore } from "../stores/ui";
 import { pressScale } from "./indicator-dialog/compareForm";
@@ -25,28 +25,28 @@ export function useHotkeys() {
       if (!action) return;
       e.preventDefault();
       const layout = useLayoutStore.getState();
-      const slot = sel.activeSlot;
-      const cell = layout.layout.cells.find((c) => c.slot === slot);
+      const cellId = sel.activeCell;
+      const cell = chartWindows(layout.layout).find((c) => c.id === cellId);
       if (!cell) return;
       switch (action.kind) {
         case "search":
           return sel.openSearch();
         case "indicators":
-          return openIndicatorCommand(slot);
+          return openIndicatorCommand(cellId);
         case "toggleWatch":
           return useUiStore.getState().toggleWatch();
         case "period":
-          return layout.setPeriod(slot, action.period);
+          return layout.setPeriod(cellId, action.period);
         case "periodStep": {
           const i = PERIODS.indexOf(cell.period);
           const next = PERIODS[Math.min(PERIODS.length - 1, Math.max(0, i + action.step))];
-          return next && layout.setPeriod(slot, next);
+          return next && layout.setPeriod(cellId, next);
         }
         case "snapshot":
-          return saveSnapshot(slot, action.mode);
+          return saveSnapshot(cellId, action.mode);
         case "toggleLog": {
           const next = pressScale(cell.chartSettings, "log");
-          return next && layout.setScale(slot, next);
+          return next && layout.setScale(cellId, next);
         }
         default: {
           const _exhaustive: never = action;

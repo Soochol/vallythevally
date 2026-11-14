@@ -32,8 +32,8 @@ export function ChartRoute() {
 }
 
 function ChartScreen() {
-  const slot = useSelectionStore((s) => s.activeSlot);
-  const cell = useCell(slot);
+  const cellId = useSelectionStore((s) => s.activeCell);
+  const cell = useCell(cellId);
   const info = useSymbolInfo(cell.symbol).data;
   const pushRecent = useUiStore((s) => s.pushRecent);
   const panelWidth = useRightPanelWidth();
@@ -59,7 +59,7 @@ function ChartScreen() {
       <PeriodChips cell={cell} />
       <main aria-label="칸" className="grid min-h-0 min-w-0 grid-cols-1 grid-rows-1 md:absolute md:inset-0 md:pr-[var(--chart-right)] max-md:[grid-area:grid]">
         <DrawingToolbar />
-        <ChartCell slot={slot} status={status} onStatus={setStatus} />
+        <ChartCell cellId={cellId} status={status} onStatus={setStatus} />
       </main>
       <RightPanel />
       {panelWidth === 0 && <StatusBar floating />}

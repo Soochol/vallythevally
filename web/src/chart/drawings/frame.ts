@@ -1,4 +1,5 @@
 import type { Period } from "../../api/generated/Period";
+import type { WindowId } from "../../layout/kinds";
 import { hitTest, type HitItem, type Pane } from "./geometry";
 import type { Interaction } from "./interaction";
 import type { AxisLabel, HandleSpec, Shape, ToolContext } from "./toolSpec";
@@ -20,11 +21,11 @@ export interface RenderFrame {
   editable: boolean;
 }
 
-export function inScope(scope: DrawingScope, layoutId: string, slot: number): boolean {
-  return scope.kind === "symbol" || (scope.layoutId === layoutId && (scope.kind === "layout" || scope.slot === slot));
+export function inScope(scope: DrawingScope, layoutId: string, cellId: WindowId): boolean {
+  return scope.kind === "symbol" || (scope.layoutId === layoutId && (scope.kind === "layout" || scope.windowId === cellId));
 }
-export function visible(d: DrawingBody, where: { layoutId: string; slot: number; period: Period; hideAll: boolean }) {
-  return !where.hideAll && !d.hidden && inScope(d.scope, where.layoutId, where.slot) && (d.periods === null || d.periods.includes(where.period));
+export function visible(d: DrawingBody, where: { layoutId: string; cellId: WindowId; period: Period; hideAll: boolean }) {
+  return !where.hideAll && !d.hidden && inScope(d.scope, where.layoutId, where.cellId) && (d.periods === null || d.periods.includes(where.period));
 }
 export function renderItem(drawing: DrawingBody, selected: boolean, ctx: ToolContext): RenderItem | null {
   const tool = toolOf(drawing.tool);

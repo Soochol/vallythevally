@@ -5,7 +5,7 @@ import type { Drawing } from "../src/api/generated/Drawing";
 import type { Layout } from "../src/api/generated/Layout";
 import type { Period } from "../src/api/generated/Period";
 import { installFrameProbe } from "./frame-probe";
-import { type Scenario, cell, chartOf, DEFAULT_LAYOUT_ID, dragTowardPast, expect, test } from "./harness";
+import { type Scenario, cell, chartOf, DEFAULT_LAYOUT_ID, dragTowardPast, expect, test, firstChart, withFirstChart } from "./harness";
 
 test.use({ clockStart: "20261109100030" });
 
@@ -42,7 +42,7 @@ async function choose(group: Locator, label: string) {
 
 async function seed(scenario: Scenario, period: Period) {
   const layout: Layout = scenario.documents.layout(DEFAULT_LAYOUT_ID);
-  const { id, name, arrangement, sync, revision } = layout;
+  const { id, name, sync, placement, revision } = layout;
   const chartSettings = {
     v: 2, style: "candle", scale: "normal", visibleBars: null, showExtremes: false, showOhlc: true, showOhlcChange: false, extremeBasis: "last", showDaySeparators: false, compare: ["IDX:001"],
     indicators: [
@@ -51,7 +51,7 @@ async function seed(scenario: Scenario, period: Period) {
       { id: "hidden-rsi", spec: { kind: "rsi", period: 5, signal: null }, panel: "rsi-panel", visible: false, style: { colors: ["ind-3"], width: 1 } },
     ], panels: [{ id: "volume-panel", stretch: 0.35 }, { id: "rsi-panel", stretch: 0.2 }],
   };
-  scenario.documents.saveLayout({ id, name, arrangement, sync, revision: revision + 1, cells: [{ slot: 0, symbol: "005930", venue: "combined", period, symbolLink: false, chartSettings }] });
+  scenario.documents.saveLayout({ id, name, sync, placement, revision: revision + 1, windows: withFirstChart(layout, { symbol: "005930", venue: "combined", period, chartSettings }) });
 
   return chartSettings;
 }
@@ -89,7 +89,7 @@ for (const phone of [false, true]) {
         expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBe(0);
         await expect.poll(async () => {
           const stored: Layout = scenario.documents.layout(DEFAULT_LAYOUT_ID);
-          return stored.cells[0]!.period;
+          return firstChart(stored).period;
         }).toBe("Y");
         await page.reload();
         await ready(page, `${name} 연`);
@@ -137,7 +137,7 @@ for (const { period, label } of PERIODS) {
     await choose(group, "월");
     await ready(page, "삼성전자 통합 월");
     await expect.poll(async () => JSON.parse((await cell(page).locator(".drawing-mirror").getAttribute("data-drawings")) ?? "[]").length).toBe(0);
-    const saved = page.waitForResponse((r) => r.request().method() === "PUT" && r.url().includes("/api/layouts/") && r.request().postDataJSON().cells[0].period === period && r.ok());
+    const saved = page.waitForResponse((r) => r.request().method() === "PUT" && r.url().includes("/api/layouts/") && firstChart(r.request().postDataJSON()).period === period && r.ok());
     await choose(group, label);
     await verify();
     await saved;
@@ -145,8 +145,8 @@ for (const { period, label } of PERIODS) {
     await page.reload();
     await verify();
     const stored: Layout = scenario.documents.layout(DEFAULT_LAYOUT_ID);
-    expect(stored.cells[0]!.period).toBe(period);
-    expect(stored.cells[0]!.chartSettings).toEqual(settings);
+    expect(firstChart(stored).period).toBe(period);
+    expect(firstChart(stored).chartSettings).toEqual(settings);
     const drawings: Drawing[] = scenario.documents.drawings("005930");
     expect(drawings).toHaveLength(1);
     expect(drawings[0]).toMatchObject(drawing);

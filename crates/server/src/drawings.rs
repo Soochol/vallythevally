@@ -10,7 +10,7 @@ use serde::Deserialize;
 use sqlx::Row;
 use sqlx::sqlite::SqliteRow;
 
-use crate::api::{Revision, SymbolCode, UnixSeconds};
+use crate::api::{Revision, SymbolCode, UnixSeconds, WindowId};
 use crate::db::AppDb;
 use crate::drawing_api::{Drawing, DrawingInput, DrawingScope};
 use crate::http::{ApiFailure, AppState};
@@ -54,11 +54,11 @@ impl From<DrawingError> for ApiFailure {
 
 fn read_drawing(r: &SqliteRow) -> Result<Drawing, StoreError> {
     let layout_id: Option<String> = r.get("layout_id");
-    let slot: Option<i64> = r.get("slot");
-    let scope = match (r.get::<String, _>("scope").as_str(), layout_id, slot) {
+    let window_id: Option<String> = r.get("window_id");
+    let scope = match (r.get::<String, _>("scope").as_str(), layout_id, window_id) {
         ("symbol", None, None) => DrawingScope::Symbol,
         ("layout", Some(layout_id), None) => DrawingScope::Layout { layout_id },
-        ("cell", Some(layout_id), Some(slot)) => DrawingScope::Cell { layout_id, slot: u8::try_from(slot).map_err(|e| corrupt("slot", e))? },
+        ("cell", Some(layout_id), Some(window_id)) => DrawingScope::Cell { layout_id, window_id: WindowId::try_from(window_id).map_err(|e| corrupt("창 id", e))? },
         (scope, ..) => return Err(corrupt("scope", scope)),
     };
     let periods: Option<String> = r.get("periods");
@@ -89,32 +89,36 @@ pub async fn upsert_drawing(db: &AppDb, input: DrawingInput, now: UnixSeconds) -
     let mut tx = db.begin_write().await?;
     let stored: Option<i64> = sqlx::query_scalar("SELECT revision FROM drawings WHERE id = ?").bind(&input.id).fetch_optional(&mut *tx).await?;
     check_newer(stored, input.revision)?;
-    let (scope, layout_id, slot) = match &input.scope {
+    let (scope, layout_id, window_id) = match &input.scope {
         DrawingScope::Symbol => ("symbol", None, None),
         DrawingScope::Layout { layout_id } => ("layout", Some(layout_id), None),
-        DrawingScope::Cell { layout_id, slot } => ("cell", Some(layout_id), Some(i64::from(*slot))),
+        DrawingScope::Cell { layout_id, window_id } => ("cell", Some(layout_id), Some(window_id.as_str())),
     };
     if let Some(layout_id) = layout_id {
-        let found: Option<i64> = match slot {
+        let found: Option<i64> = match window_id {
             None => sqlx::query_scalar("SELECT 1 FROM layouts WHERE id = ?").bind(layout_id).fetch_optional(&mut *tx).await?,
-            Some(slot) => {
-                sqlx::query_scalar("SELECT 1 FROM layout_cells WHERE layout_id = ? AND slot = ?").bind(layout_id).bind(slot).fetch_optional(&mut *tx).await?
+            Some(window_id) => {
+                sqlx::query_scalar("SELECT 1 FROM layout_windows WHERE layout_id = ? AND id = ? AND kind = 'chart'")
+                    .bind(layout_id)
+                    .bind(window_id)
+                    .fetch_optional(&mut *tx)
+                    .await?
             }
         };
         if found.is_none() {
-            return Err(DrawingError::MissingScope(match slot {
+            return Err(DrawingError::MissingScope(match window_id {
                 None => format!("드로잉 범위의 레이아웃이 없습니다: {layout_id}"),
-                Some(slot) => format!("드로잉 범위의 칸이 없습니다: 레이아웃 {layout_id}, slot {slot}"),
+                Some(window_id) => format!("드로잉 범위의 차트 창이 없습니다: 레이아웃 {layout_id}, 창 {window_id}"),
             }));
         }
     }
     sqlx::query(
-        "INSERT INTO drawings (id, symbol, tool, points, text, style, locked, hidden, periods, z, group_name, scope, layout_id, slot, updated_at, revision)
+        "INSERT INTO drawings (id, symbol, tool, points, text, style, locked, hidden, periods, z, group_name, scope, layout_id, window_id, updated_at, revision)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(id) DO UPDATE SET symbol = excluded.symbol, tool = excluded.tool, points = excluded.points, text = excluded.text,
                                        style = excluded.style, locked = excluded.locked, hidden = excluded.hidden, periods = excluded.periods,
                                        z = excluded.z, group_name = excluded.group_name, scope = excluded.scope, layout_id = excluded.layout_id,
-                                       slot = excluded.slot, updated_at = excluded.updated_at, revision = excluded.revision",
+                                       window_id = excluded.window_id, updated_at = excluded.updated_at, revision = excluded.revision",
     )
     .bind(&input.id)
     .bind(&input.symbol.0)
@@ -129,7 +133,7 @@ pub async fn upsert_drawing(db: &AppDb, input: DrawingInput, now: UnixSeconds) -
     .bind(&input.group)
     .bind(scope)
     .bind(layout_id)
-    .bind(slot)
+    .bind(window_id)
     .bind(now.0)
     .bind(input.revision.0)
     .execute(&mut *tx)
@@ -211,7 +215,7 @@ mod tests {
     use tower::ServiceExt;
 
     use super::*;
-    use crate::api::{Arrangement, Cell, LayoutInput, LayoutSync, Period, Venue};
+    use crate::api::{LayoutInput, LayoutSync, LayoutWindow, Period, Venue, WindowContent};
     use crate::app::{ApplicationInputs, application};
     use crate::clock::{Clock, kst};
     use crate::config::Secret;
@@ -224,6 +228,23 @@ mod tests {
     use crate::userdata;
 
     const DEFAULT_ID: &str = "01900000-0000-7000-8000-000000000001";
+
+    fn window_id(id: &str) -> WindowId {
+        WindowId::try_from(id.to_owned()).unwrap()
+    }
+
+    fn chart_window(id: &str) -> LayoutWindow {
+        let content = WindowContent::Chart { symbol: SymbolCode("005930".into()), venue: Some(Venue::Krx), period: Period::Day, chart_settings: json!({}) };
+        LayoutWindow { id: window_id(id), link: None, content }
+    }
+
+    fn layout(id: &str, windows: Vec<LayoutWindow>, revision: i64) -> LayoutInput {
+        LayoutInput { id: id.into(), name: id.into(), sync: LayoutSync { crosshair: true, scroll: true }, windows, placement: serde_json::Map::new(), revision: Revision(revision) }
+    }
+
+    fn cell(layout_id: &str, window: &str) -> DrawingScope {
+        DrawingScope::Cell { layout_id: layout_id.into(), window_id: window_id(window) }
+    }
 
     fn input(id: &str, symbol: &str, z: f64, scope: DrawingScope, revision: i64) -> DrawingInput {
         DrawingInput {
@@ -247,8 +268,7 @@ mod tests {
     async fn drawings_round_trip_every_field_and_list_by_z_within_one_symbol(_: SqlitePoolOptions, opts: SqliteConnectOptions) {
         let db = AppDb::connect(opts).await.unwrap();
         let top = upsert_drawing(&db, input("A", "005930", 2.5, DrawingScope::Symbol, 1), UnixSeconds(100)).await.unwrap();
-        let cell = DrawingScope::Cell { layout_id: DEFAULT_ID.into(), slot: 0 };
-        let bottom = upsert_drawing(&db, DrawingInput { group: None, periods: None, text: None, ..input("B", "005930", -1.0, cell, 1) }, UnixSeconds(200)).await.unwrap();
+        let bottom = upsert_drawing(&db, DrawingInput { group: None, periods: None, text: None, ..input("B", "005930", -1.0, cell(DEFAULT_ID, "cell-0"), 1) }, UnixSeconds(200)).await.unwrap();
         let layout = DrawingScope::Layout { layout_id: DEFAULT_ID.into() };
         upsert_drawing(&db, input("C", "000660", 0.0, layout.clone(), 1), UnixSeconds(300)).await.unwrap();
         assert_eq!(list_drawings_of(&db, "005930").await.unwrap(), [bottom, top.clone()], "z 오름차순, 다른 종목은 빠진다");
@@ -278,12 +298,14 @@ mod tests {
     }
 
     #[sqlx::test(migrations = "./migrations")]
-    async fn scope_must_name_an_existing_layout_and_cell(_: SqlitePoolOptions, opts: SqliteConnectOptions) {
+    async fn scope_must_name_an_existing_layout_and_chart_window(_: SqlitePoolOptions, opts: SqliteConnectOptions) {
         let db = AppDb::connect(opts).await.unwrap();
         for scope in [
             DrawingScope::Layout { layout_id: "nope".into() },
-            DrawingScope::Cell { layout_id: "nope".into(), slot: 0 },
-            DrawingScope::Cell { layout_id: DEFAULT_ID.into(), slot: 1 },
+            cell("nope", "cell-0"),
+            cell(DEFAULT_ID, "cell-1"),
+            cell(DEFAULT_ID, "watchlist"),
+            cell(DEFAULT_ID, "objects"),
         ] {
             let err = upsert_drawing(&db, input("A", "005930", 0.0, scope.clone(), 1), UnixSeconds(1)).await.unwrap_err();
             assert!(matches!(err, DrawingError::MissingScope(_)), "{scope:?}: {err:?}");
@@ -294,14 +316,34 @@ mod tests {
     #[sqlx::test(migrations = "./migrations")]
     async fn a_layout_scoped_drawing_blocks_deleting_its_layout(_: SqlitePoolOptions, opts: SqliteConnectOptions) {
         let db = AppDb::connect(opts).await.unwrap();
-        let cell = Cell { slot: 0, symbol: SymbolCode("005930".into()), venue: Some(Venue::Krx), period: Period::Day, symbol_link: false, chart_settings: json!({}) };
-        let second = LayoutInput { id: "L2".into(), name: "둘".into(), arrangement: Arrangement::One, sync: LayoutSync { crosshair: true, scroll: true }, cells: vec![cell], revision: Revision(1) };
-        userdata::put_layout(&db, &second, UnixSeconds(1)).await.unwrap();
+        userdata::put_layout(&db, &layout("L2", vec![chart_window("c")], 1), UnixSeconds(1)).await.unwrap();
         upsert_drawing(&db, input("A", "005930", 0.0, DrawingScope::Layout { layout_id: "L2".into() }, 1), UnixSeconds(1)).await.unwrap();
         let err = userdata::delete_layout(&db, "L2").await.unwrap_err();
         assert!(matches!(&err, StoreError::Db(e) if e.0.contains("FOREIGN KEY")), "{err:?}");
         delete_drawing_by_id(&db, "A").await.unwrap();
         userdata::delete_layout(&db, "L2").await.unwrap();
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn saving_a_layout_without_a_chart_window_widens_its_drawings_to_the_layout(_: SqlitePoolOptions, opts: SqliteConnectOptions) {
+        let db = AppDb::connect(opts).await.unwrap();
+        userdata::put_layout(&db, &layout("L", vec![chart_window("left"), chart_window("right")], 1), UnixSeconds(1)).await.unwrap();
+        let kept = upsert_drawing(&db, input("K", "005930", 0.0, cell("L", "left"), 10), UnixSeconds(1)).await.unwrap();
+        upsert_drawing(&db, input("W", "005930", 1.0, cell("L", "right"), 20), UnixSeconds(1)).await.unwrap();
+
+        let watchlist = LayoutWindow { id: window_id("right"), link: None, content: WindowContent::Watchlist };
+        userdata::put_layout(&db, &layout("L", vec![chart_window("left"), watchlist], 2), UnixSeconds(5)).await.unwrap();
+        let listed = list_drawings_of(&db, "005930").await.unwrap();
+        assert_eq!(listed[0], kept, "남은 차트 창의 드로잉은 그대로다");
+        assert_eq!((&listed[1].scope, listed[1].revision, listed[1].updated_at), (&DrawingScope::Layout { layout_id: "L".into() }, Revision(20), UnixSeconds(5)));
+
+        userdata::put_layout(&db, &layout("L", vec![chart_window("other")], 3), UnixSeconds(6)).await.unwrap();
+        assert!(list_drawings_of(&db, "005930").await.unwrap().iter().all(|d| d.scope == DrawingScope::Layout { layout_id: "L".into() }), "창이 없어지면 모두 넓힌다");
+
+        let next = upsert_drawing(&db, input("W", "005930", 1.0, DrawingScope::Layout { layout_id: "L".into() }, 21), UnixSeconds(7)).await.unwrap();
+        assert_eq!(next.revision, Revision(21), "넓힌 뒤 브라우저의 다음 번호를 받는다");
+        let err = upsert_drawing(&db, input("W", "005930", 1.0, cell("L", "right"), 22), UnixSeconds(8)).await.unwrap_err();
+        assert!(matches!(err, DrawingError::MissingScope(_)), "{err:?}");
     }
 
     #[test]
@@ -333,11 +375,11 @@ mod tests {
 
     #[test]
     fn wire_shape_matches_the_contract() {
-        let mut d = input("A", "005930", 1.5, DrawingScope::Cell { layout_id: "L".into(), slot: 2 }, 7);
+        let mut d = input("A", "005930", 1.5, cell("L", "cell-2"), 7);
         d.periods = Some(vec![Period::M60]);
         let v = serde_json::to_value(d.saved_at(UnixSeconds(9))).unwrap();
         assert_eq!(v["tool"], "trendline");
-        assert_eq!(v["scope"], json!({"kind": "cell", "layoutId": "L", "slot": 2}));
+        assert_eq!(v["scope"], json!({"kind": "cell", "layoutId": "L", "windowId": "cell-2"}));
         assert_eq!(v["points"][0], json!({"t": 1_794_100_000, "price": 193_400.5}));
         assert_eq!((v["periods"].clone(), v["group"].clone(), v["revision"].clone(), v["updatedAt"].clone()), (json!(["60m"]), json!("그룹 1"), json!(7), json!(9)));
         assert_eq!(serde_json::to_value(DrawingScope::Symbol).unwrap(), json!({"kind": "symbol"}));
@@ -412,7 +454,10 @@ mod tests {
             ("/api/drawings/D1", with(&|v| v["group"] = json!("")), StatusCode::BAD_REQUEST, "bad_request"),
             ("/api/drawings/D1", with(&|v| v["group"] = json!("가".repeat(101))), StatusCode::BAD_REQUEST, "bad_request"),
             ("/api/drawings/D1", with(&|v| v["scope"] = json!({"kind": "layout", "layoutId": "nope"})), StatusCode::BAD_REQUEST, "bad_request"),
-            ("/api/drawings/D1", with(&|v| v["scope"] = json!({"kind": "cell", "layoutId": DEFAULT_ID, "slot": 3})), StatusCode::BAD_REQUEST, "bad_request"),
+            ("/api/drawings/D1", with(&|v| v["scope"] = json!({"kind": "cell", "layoutId": DEFAULT_ID, "windowId": "cell-3"})), StatusCode::BAD_REQUEST, "bad_request"),
+            ("/api/drawings/D1", with(&|v| v["scope"] = json!({"kind": "cell", "layoutId": DEFAULT_ID, "windowId": "screener"})), StatusCode::BAD_REQUEST, "bad_request"),
+            ("/api/drawings/D1", with(&|v| v["scope"] = json!({"kind": "cell", "layoutId": DEFAULT_ID, "windowId": "cell 0"})), StatusCode::BAD_REQUEST, "bad_request"),
+            ("/api/drawings/D1", with(&|v| v["scope"] = json!({"kind": "cell", "layoutId": DEFAULT_ID, "slot": 0})), StatusCode::BAD_REQUEST, "bad_request"),
             ("/api/drawings/D1", with(&|v| v["scope"] = json!({"kind": "cell", "layoutId": DEFAULT_ID})), StatusCode::BAD_REQUEST, "bad_request"),
             ("/api/drawings/D1", with(&|v| v["revision"] = json!(null)), StatusCode::BAD_REQUEST, "bad_request"),
             ("/api/drawings/D1", with(&|v| v["style"] = json!({"pad": "x".repeat(JSON_LIMIT)})), StatusCode::PAYLOAD_TOO_LARGE, "payload_too_large"),
@@ -430,7 +475,7 @@ mod tests {
             v["tool"] = json!("brush");
             v["points"] = json!(brush);
             v["group"] = json!("가".repeat(100));
-            v["scope"] = json!({"kind": "cell", "layoutId": DEFAULT_ID, "slot": 0});
+            v["scope"] = json!({"kind": "cell", "layoutId": DEFAULT_ID, "windowId": "cell-0"});
         });
         assert!(near_limit.len() < JSON_LIMIT, "{}", near_limit.len());
         let (s, v) = send(&f.app, "PUT", "/api/drawings/D1", near_limit).await;

@@ -80,7 +80,7 @@ function useStoreStatus(pollWhileUpdatingMs: number) {
 }
 
 function useActiveSymbol(): SymbolCode {
-  return useCell(useSelectionStore((s) => s.activeSlot)).symbol;
+  return useCell(useSelectionStore((s) => s.activeCell)).symbol;
 }
 
 function useMenuToggle() {

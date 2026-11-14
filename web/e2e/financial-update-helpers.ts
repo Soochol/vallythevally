@@ -7,6 +7,7 @@ import type { Scenario } from "./fixtures/scenario";
 import { edgeData, preferredDps, readyData, readyJob } from "./fixtures/financial-data";
 
 export { expect } from "./harness";
+import { withFirstChart } from "./harness";
 export type FinancialMode = "ready" | "edge";
 type Action = "start" | "pause" | "resume";
 
@@ -85,7 +86,7 @@ export async function updateFromChart(page: Page) {
 
 export function seedFinancialLayout(scenario: Scenario) {
   const layout = scenario.documents.layout();
-  scenario.documents.saveLayout({ ...layout, revision: layout.revision + 1, cells: [{ ...layout.cells[0]!, symbol: "005930", venue: "combined", period: "Y", chartSettings: { v: 2, style: "candle", scale: "normal", compare: [], indicators: [{ id: "revenue", spec: { kind: "revenue" }, panel: "revenue", visible: true, style: { colors: ["ind-2"], width: 1 } }], panels: [{ id: "revenue", stretch: 0.4 }] } }] });
+  scenario.documents.saveLayout({ ...layout, revision: layout.revision + 1, windows: withFirstChart(layout, { symbol: "005930", venue: "combined", period: "Y", chartSettings: { v: 2, style: "candle", scale: "normal", compare: [], indicators: [{ id: "revenue", spec: { kind: "revenue" }, panel: "revenue", visible: true, style: { colors: ["ind-2"], width: 1 } }], panels: [{ id: "revenue", stretch: 0.4 }] } }) });
 }
 
 export async function openFinancials(page: Page) {

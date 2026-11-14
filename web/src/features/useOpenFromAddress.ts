@@ -22,14 +22,14 @@ export function useOpenFromAddress() {
 
   useEffect(() => {
     if (symbol === null && venueParam === null && period === null) return;
-    const slot = useSelectionStore.getState().activeSlot;
+    const cellId = useSelectionStore.getState().activeCell;
     const { setSymbol, setPeriod } = useLayoutStore.getState();
     const venue = venueParam !== null && isVenue(venueParam) ? venueParam : "combined";
     setParams({}, { replace: true });
     // 종목과 봉 주기를 한 번에 바꾼다. 따로 바꾸면 지금 종목의 새 봉 주기를 쓸데없이 한 번 더 받는다.
     const open = (target: VenueTarget | null) => {
-      if (period !== null && isPeriod(period)) setPeriod(slot, period);
-      if (target !== null) setSymbol(slot, target, venue);
+      if (period !== null && isPeriod(period)) setPeriod(cellId, period);
+      if (target !== null) setSymbol(cellId, target, venue);
     };
     if (symbol === null) return open(null);
     queryClient

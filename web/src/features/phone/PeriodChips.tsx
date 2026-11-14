@@ -1,7 +1,7 @@
 import { useCallback, useLayoutEffect, useId, useRef, useState } from "react";
 import type { Period } from "../../api/generated/Period";
 import { PERIOD_LABEL } from "../../lib/symbol";
-import { type CellState, useLayoutStore } from "../../stores/layout";
+import { type ChartWindowState, useLayoutStore } from "../../stores/layout";
 import { openIndicatorCommand } from "../indicator-command/open";
 import { IndicatorIcon } from "../icons";
 import { RadioMenu } from "../menu/RadioMenu";
@@ -16,7 +16,7 @@ const isMenuPeriod = (p: Period): p is (typeof MENU)[number] => (MENU as readonl
 const CHIP =
   "h-[36px] min-w-[44px] flex-none rounded-full border border-line px-3 text-text-2 aria-pressed:border-accent aria-pressed:bg-accent aria-pressed:font-[650] aria-pressed:text-accent-ink";
 
-export function PeriodChips({ cell }: { cell: CellState }) {
+export function PeriodChips({ cell }: { cell: ChartWindowState }) {
   const setPeriod = useLayoutStore((s) => s.setPeriod);
   const [menuOpen, setMenuOpen] = useState(false);
   const root = useRef<HTMLDivElement>(null);
@@ -91,7 +91,7 @@ export function PeriodChips({ cell }: { cell: CellState }) {
             onClick={() => {
               if (longPressed.current) return;
               setMenuOpen(false);
-              setPeriod(cell.slot, p);
+              setPeriod(cell.id, p);
             }}
           >
             {PERIOD_LABEL[p]}
@@ -104,7 +104,7 @@ export function PeriodChips({ cell }: { cell: CellState }) {
         aria-label="지표"
         title="지표 (I)"
         className="mb-2 mr-3 grid h-[36px] w-[44px] flex-none place-items-center rounded-full border border-line text-text"
-        onClick={() => openIndicatorCommand(cell.slot)}
+        onClick={() => openIndicatorCommand(cell.id)}
       >
         <IndicatorIcon />
       </button>
@@ -116,7 +116,7 @@ export function PeriodChips({ cell }: { cell: CellState }) {
           label="다른 봉 주기"
           options={MENU_OPTIONS}
           value={isMenuPeriod(cell.period) ? cell.period : null}
-          onChoose={(p) => setPeriod(cell.slot, p)}
+          onChoose={(p) => setPeriod(cell.id, p)}
           onClose={closeMenu}
           root={root}
           className="absolute left-3 top-[calc(100%-4px)]"

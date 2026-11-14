@@ -1,4 +1,4 @@
-import { cell, expect, test } from "./harness";
+import { cell, DEFAULT_LAYOUT_ID, expect, firstChart, test } from "./harness";
 
 test("바꾼 종목·거래소·봉 주기가 새로고침 뒤에도 남는다", async ({ page }) => {
   await page.goto("/?symbol=005930");
@@ -22,4 +22,21 @@ test("바꾼 종목·거래소·봉 주기가 새로고침 뒤에도 남는다",
 
   await page.reload();
   await expectRestored();
+});
+
+test("종목을 바꾸면 창 목록과 배치째 저장되고, 새로고침 뒤에도 바뀐 종목과 관심종목·스크리너·개체 목록 창이 남는다", async ({ page, scenario }) => {
+  const saved = page.waitForResponse((r) => r.request().method() === "PUT" && r.url().includes("/api/layouts/") && r.ok());
+  await page.goto("/?symbol=005930");
+  await expect(cell(page)).toHaveAttribute("aria-label", "칸 1: 삼성전자 통합 일");
+  await saved;
+
+  const stored = scenario.documents.layout(DEFAULT_LAYOUT_ID);
+  expect(Object.keys(stored).sort()).toEqual(["id", "name", "placement", "revision", "sync", "updatedAt", "windows"]);
+  expect(stored.placement).toEqual({ v: 1, dock: null, canvas: null });
+  expect(stored.windows.map((w) => [w.id, w.kind])).toEqual([["cell-0", "chart"], ["watchlist", "watchlist"], ["screener", "screener"], ["objects", "objects"]]);
+  expect(firstChart(stored)).toMatchObject({ symbol: "005930", venue: "combined", period: "D" });
+
+  await page.reload();
+  await expect(cell(page)).toHaveAttribute("aria-label", "칸 1: 삼성전자 통합 일");
+  expect(scenario.documents.layout(DEFAULT_LAYOUT_ID).windows.map((w) => w.kind)).toEqual(["chart", "watchlist", "screener", "objects"]);
 });

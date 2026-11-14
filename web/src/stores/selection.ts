@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import type { RightPanel } from "../persist/uiState";
-import { useLayoutStore, type Slot } from "./layout";
+import type { WindowId } from "../layout/kinds";
+import { chartWindows, DEFAULT_LAYOUT, useLayoutStore } from "./layout";
 import { useUiStore } from "./ui";
 
 export interface ToastUndo {
@@ -14,24 +15,24 @@ export type SearchPurpose = "open" | "watch";
 export type IndicatorCommandMode = "current" | "add" | "compare";
 export type Dialog =
   | { kind: "search"; purpose: SearchPurpose }
-  | { kind: "indicatorCommand"; slot: Slot; mode: IndicatorCommandMode; indicatorId: string | null }
+  | { kind: "indicatorCommand"; cellId: WindowId; mode: IndicatorCommandMode; indicatorId: string | null }
   | { kind: "screen" }
   | { kind: "financial-update" };
-export type InspectorRequest = { slot: Slot; mode: IndicatorCommandMode; indicatorId: string | null };
+export type InspectorRequest = { cellId: WindowId; mode: IndicatorCommandMode; indicatorId: string | null };
 export type PhoneTab = "chart" | "watch" | "screener";
 export type { RightPanel } from "../persist/uiState";
 
 /** 저장하지 않는 화면 상태(frontend.md §5.3). */
 interface SelectionState {
-  activeSlot: Slot;
+  activeCell: WindowId;
   dialog: null | Dialog;
   inspector: InspectorRequest | null;
   phoneTab: PhoneTab;
   panelDragWidth: number | null;
   toast: null | { id: number; text: string; undo?: ToastUndo };
   openSearch(purpose?: SearchPurpose): void;
-  openIndicatorDialog(slot: Slot, mode: IndicatorCommandMode, indicatorId: string | null): void;
-  openIndicatorInspector(slot: Slot, mode: IndicatorCommandMode, indicatorId: string | null): void;
+  openIndicatorDialog(cellId: WindowId, mode: IndicatorCommandMode, indicatorId: string | null): void;
+  openIndicatorInspector(cellId: WindowId, mode: IndicatorCommandMode, indicatorId: string | null): void;
   takeInspectorRequest(): InspectorRequest | null;
   openScreenEditor(): void;
   openFinancialUpdate(): void;
@@ -45,22 +46,22 @@ interface SelectionState {
 
 let toastId = 0;
 
-export function defaultIndicatorMode(slot: Slot): IndicatorCommandMode {
-  const cell = useLayoutStore.getState().layout.cells.find((cell) => cell.slot === slot);
-  return cell?.chartSettings.indicators.length ? "current" : "add";
+export function defaultIndicatorMode(cellId: WindowId): IndicatorCommandMode {
+  const chart = chartWindows(useLayoutStore.getState().layout).find((w) => w.id === cellId);
+  return chart?.chartSettings.indicators.length ? "current" : "add";
 }
 
 export const useSelectionStore = create<SelectionState>()((set, get) => ({
-  activeSlot: 0,
+  activeCell: chartWindows(DEFAULT_LAYOUT)[0]!.id,
   dialog: null,
   inspector: null,
   phoneTab: "chart",
   panelDragWidth: null,
   toast: null,
   openSearch: (purpose = "open") => set({ dialog: { kind: "search", purpose } }),
-  openIndicatorDialog: (slot, mode, indicatorId) => set({ dialog: { kind: "indicatorCommand", slot, mode, indicatorId } }),
-  openIndicatorInspector: (slot, mode, indicatorId) => {
-    set({ dialog: null, activeSlot: slot, inspector: { slot, mode, indicatorId } });
+  openIndicatorDialog: (cellId, mode, indicatorId) => set({ dialog: { kind: "indicatorCommand", cellId, mode, indicatorId } }),
+  openIndicatorInspector: (cellId, mode, indicatorId) => {
+    set({ dialog: null, activeCell: cellId, inspector: { cellId, mode, indicatorId } });
     get().showRightPanel("indicators");
   },
   takeInspectorRequest: () => {

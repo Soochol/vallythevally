@@ -1,7 +1,7 @@
 import { financialPage, financialUpdatePage } from "./financial-update-helpers";
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
-import { cell, DEFAULT_LAYOUT_ID, expect, test } from "./harness";
+import { cell, DEFAULT_LAYOUT_ID, expect, test, withFirstChart } from "./harness";
 
 const tabs = (page: import("@playwright/test").Page) => page.getByRole("tablist", { name: "오른쪽 패널" });
 
@@ -75,7 +75,7 @@ test("상태 막대는 연결·저장·서버 시계와 공유 재무 조회의 
   await page.route("**/api/financial-update", (route) => route.fulfill({ json: update }));
   await page.route("**/financials?period=Y", (route) => route.fulfill({ json: financial }));
   const settings = { v: 2, style: "candle", scale: "normal", compare: [], indicators: [{ id: "revenue", spec: { kind: "revenue" }, panel: "revenue", visible: true, style: { colors: ["ind-1"], width: 1 } }], panels: [{ id: "revenue", stretch: 0.3 }] };
-  scenario.documents.saveLayout({ ...layout, revision: layout.revision + 1, cells: [{ ...layout.cells[0]!, symbol: "005930", venue: "combined", period: "Y", chartSettings: settings }] });
+  scenario.documents.saveLayout({ ...layout, revision: layout.revision + 1, windows: withFirstChart(layout, { symbol: "005930", venue: "combined", period: "Y", chartSettings: settings }) });
   await page.goto("/");
   const footer = page.locator("footer").last();
   await expect(footer).toContainText(/실시간 연결됨|장 닫힘: 체결 없음/);

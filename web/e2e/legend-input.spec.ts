@@ -6,7 +6,7 @@ import type { Layout } from "../src/api/generated/Layout";
 import { parseChartSettings } from "../src/chart/settings";
 import type { DrawingInput } from "../src/api/generated/DrawingInput";
 import { installChartProbe } from "./chart-probe";
-import { type Scenario, DEFAULT_LAYOUT_ID, cell, chartOf, expect, test } from "./harness";
+import { type Scenario, DEFAULT_LAYOUT_ID, cell, chartOf, expect, test, firstChart, withFirstChart } from "./harness";
 
 const LONG_NAME = "TIGER 엔비디아미국채커버드콜밸런스(합성)";
 const saved = async (scenario: Scenario): Promise<Drawing[]> => scenario.documents.drawings("005930");
@@ -126,11 +126,11 @@ for (const action of ["십자선", "휠 확대", "끌기"]) {
 
 test("수평선 도구가 켜져도 지표 범례 버튼은 조작하고 드로잉은 바꾸지 않는다", async ({ page, scenario }) => {
   const layout: Layout = scenario.documents.layout(DEFAULT_LAYOUT_ID);
-  const current = layout.cells[0];
+  const current = firstChart(layout);
   if (!current) throw new Error("칸이 없습니다");
   const settings = parseChartSettings(current.chartSettings);
   settings.indicators.push({ id: "control-ma", spec: { kind: "ma", method: "sma", period: 5 }, panel: "price", visible: true, style: { colors: ["ind-1"], width: 1 } });
-  scenario.documents.saveLayout({ ...layout, revision: layout.revision + 1, cells: [{ ...current, symbol: "005930", venue: "combined", period: "D", chartSettings: settings }] });
+  scenario.documents.saveLayout({ ...layout, revision: layout.revision + 1, windows: withFirstChart(layout, { symbol: "005930", venue: "combined", period: "D", chartSettings: settings }) });
   await page.goto("/");
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
   const before = await saved(scenario);

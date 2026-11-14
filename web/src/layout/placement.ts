@@ -73,6 +73,7 @@ function readCanvas(raw: unknown): CanvasPlacement | null {
 }
 
 export function parsePlacement(raw: unknown): Placement {
+  if (isFields(raw) && Object.keys(raw).length === 0) return { v: 1, dock: null, canvas: null };
   if (!isFields(raw) || raw.v !== 1) {
     console.warn("배치가 v 1 객체가 아니어서 빈 배치로 엽니다", raw);
     return { v: 1, dock: null, canvas: null };

@@ -3,7 +3,7 @@ import { ApiRequestError, sendJson } from "../api/http";
 import { fetchSymbolInfo } from "../api/queries";
 import { fetchLayout, fetchLayouts, fetchUiState, fetchWatchlists } from "../api/userData";
 import { followLastMinute } from "../stores/lastMinute";
-import { useLayoutStore } from "../stores/layout";
+import { chartWindows, useLayoutStore } from "../stores/layout";
 import { SAVE_TARGETS, usePersistStore } from "../stores/persist";
 import { useSelectionStore } from "../stores/selection";
 import { useUiStore } from "../stores/ui";
@@ -50,6 +50,7 @@ export async function boot(queryClient: QueryClient) {
       unsaved: readUnsaved,
     });
     useLayoutStore.getState().load(restored.layout);
+    useSelectionStore.setState({ activeCell: chartWindows(restored.layout)[0]!.id });
     useUiStore.getState().load(restored.ui.prefs, restored.ui.extra);
     useWatchlistStore.getState().load(restored.watchlists);
     followTheme();

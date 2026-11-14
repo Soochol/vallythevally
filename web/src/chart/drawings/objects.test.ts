@@ -1,4 +1,5 @@
 import { expect, test } from "vitest";
+import { windowId } from "../../layout/kinds";
 import { copy, paste } from "./clipboard";
 import { objectGroups, objectName, renameObject, reusableStyle, defaultObjectStyle } from "./objects";
 import { hline } from "./tools/hline";
@@ -33,15 +34,15 @@ test("기본 스타일로 되돌려도 개체 이름은 남고 새 드로잉용 
 
 test("현재 종목 목록을 실제 범위로 묶고 다른 칸·레이아웃은 제외하며 z 내림차순을 지킨다", () => {
   const rows: DrawingBody[] = [drawing,
-    { ...drawing, id: "cell", scope: { kind: "cell", layoutId: "L", slot: 0 }, z: 5 },
+    { ...drawing, id: "cell", scope: { kind: "cell", layoutId: "L", windowId: "cell-0" }, z: 5 },
     { ...drawing, id: "layout", scope: { kind: "layout", layoutId: "L" } },
-    { ...drawing, id: "other-cell", scope: { kind: "cell", layoutId: "L", slot: 1 } },
+    { ...drawing, id: "other-cell", scope: { kind: "cell", layoutId: "L", windowId: "cell-1" } },
     { ...drawing, id: "other-layout", scope: { kind: "layout", layoutId: "other" } },
     { ...drawing, id: "top", z: 10, hidden: true },
   ];
-  expect(objectGroups(rows, "L", 0).map((g) => ({ label: g.label, ids: g.drawings.map((d) => d.id) }))).toEqual([
+  expect(objectGroups(rows, "L", windowId("cell-0")).map((g) => ({ label: g.label, ids: g.drawings.map((d) => d.id) }))).toEqual([
     { label: "이 칸", ids: ["cell"] }, { label: "이 레이아웃 공통", ids: ["layout"] }, { label: "이 종목 모든 칸 공통", ids: ["top", "line"] },
   ]);
-  expect(objectGroups([], "L", 0)).toEqual([]);
+  expect(objectGroups([], "L", windowId("cell-0"))).toEqual([]);
   expect(rows[0]?.id).toBe("line");
 });

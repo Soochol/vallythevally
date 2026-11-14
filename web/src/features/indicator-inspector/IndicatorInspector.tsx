@@ -2,7 +2,7 @@ import { Fragment, useEffect, useId, useImperativeHandle, useRef, useState, type
 import { indicatorCssColor, KINDS, shownColor, specName } from "../../chart/indicators/kinds";
 import type { IndicatorConfig } from "../../chart/settings";
 import { symbolSub } from "../../lib/symbol";
-import { useLayoutStore, type Slot } from "../../stores/layout";
+import { useLayoutStore } from "../../stores/layout";
 import { defaultIndicatorMode, useSelectionStore } from "../../stores/selection";
 import { useUiStore } from "../../stores/ui";
 import { EmptyState, ErrorState, Skeleton } from "../overlay/State";
@@ -14,10 +14,11 @@ import { useLiveIndicatorDraft } from "../indicator-dialog/liveDraft";
 import { CompareSection } from "../indicator-command/CompareSection";
 import { COMMAND_TABS, commandKey, currentKey, type CommandRow, type IndicatorCommandMode } from "../indicator-command/model";
 import { useIndicatorCommand, useIndicatorDraft, type EditableRow, type EditorAction } from "../indicator-command/useIndicatorCommand";
+import type { WindowId } from "../../layout/kinds";
 
 export function IndicatorInspector() {
-  const slot = useSelectionStore((s) => s.activeSlot);
-  return <InspectorBody key={slot} slot={slot} />;
+  const cellId = useSelectionStore((s) => s.activeCell);
+  return <InspectorBody key={cellId} cellId={cellId} />;
 }
 
 const AUTO_OPEN = "auto";
@@ -28,8 +29,8 @@ const summary = (spec: IndicatorConfig["spec"]) => {
   return name.startsWith(label) ? name.slice(label.length).trim() : name;
 };
 
-function InspectorBody({ slot }: { slot: Slot }) {
-  const command = useIndicatorCommand(slot, defaultIndicatorMode(slot));
+function InspectorBody({ cellId }: { cellId: WindowId }) {
+  const command = useIndicatorCommand(cellId, defaultIndicatorMode(cellId));
   const { cell, mode, input, rows, selected, symbols, search, editor } = command;
   const [opened, setOpened] = useState<string | null>(null);
   const request = useSelectionStore((s) => s.inspector);
@@ -125,10 +126,10 @@ function InspectorBody({ slot }: { slot: Slot }) {
                 className="flex h-9 w-full items-center gap-2 rounded-l px-2 text-left text-s hover:bg-raised disabled:opacity-50 aria-pressed:bg-accent-soft">
                 <span className="min-w-0 flex-1 truncate">{row.info.name}</span><span className="text-xs text-text-3">{symbolSub(row.info.code, row.info)}</span>
               </button>
-              : <IndicatorRow slot={slot} row={row} open={open?.key === row.key} onToggle={() => toggle(row)}>
+              : <IndicatorRow cellId={cellId} row={row} open={open?.key === row.key} onToggle={() => toggle(row)}>
                 {open?.key === row.key && (row.kind === "current"
-                  ? <LiveEditor key={row.key} slot={slot} config={row.config} revertRef={revertRef} />
-                  : <AddEditor key={row.key} slot={slot} row={row} actionRef={editor} onAdded={refocus} />)}
+                  ? <LiveEditor key={row.key} cellId={cellId} config={row.config} revertRef={revertRef} />
+                  : <AddEditor key={row.key} cellId={cellId} row={row} actionRef={editor} onAdded={refocus} />)}
               </IndicatorRow>}
           </li>
         </Fragment>)}
@@ -138,7 +139,7 @@ function InspectorBody({ slot }: { slot: Slot }) {
         {mode === "compare" && !symbols.selectable && search.isFetching && <li role="presentation"><Skeleton label="비교 종목 찾는 중" /></li>}
         {mode === "compare" && search.isError && <li role="presentation"><ErrorState message="종목을 찾지 못했습니다. 다시 시도해 보세요." retry={() => void search.refetch()} /></li>}
       </ul>
-      {mode === "compare" && <CompareSection slot={slot} button={compareButton} canAdd={picked !== null} onAdd={submit} className="mt-2 flex flex-col gap-3 border-t border-line px-2 pt-3" />}
+      {mode === "compare" && <CompareSection cellId={cellId} button={compareButton} canAdd={picked !== null} onAdd={submit} className="mt-2 flex flex-col gap-3 border-t border-line px-2 pt-3" />}
     </div>
     <p className="sr-only" aria-live="polite">{open ? `${rowName(open)} ${open.kind === "symbol" ? "선택" : "펼침"}` : ""}</p>
     <footer className="flex-none border-t border-line px-4 py-2.5 text-xs text-text-3">바로 반영 · Esc로 되돌리고 닫기</footer>
@@ -147,7 +148,7 @@ function InspectorBody({ slot }: { slot: Slot }) {
 
 const rowName = (row: CommandRow) => row.kind === "current" ? specName(row.config.spec) : row.kind === "candidate" ? row.candidate.label : row.info.name;
 
-function IndicatorRow({ slot, row, open, onToggle, children }: { slot: Slot; row: EditableRow; open: boolean; onToggle(): void; children: ReactNode }) {
+function IndicatorRow({ cellId, row, open, onToggle, children }: { cellId: WindowId; row: EditableRow; open: boolean; onToggle(): void; children: ReactNode }) {
   const name = rowName(row);
   const label = row.kind === "current" ? KINDS[row.config.spec.kind].label : row.candidate.label;
   return <>
@@ -161,8 +162,8 @@ function IndicatorRow({ slot, row, open, onToggle, children }: { slot: Slot; row
         <span aria-hidden="true" className={`flex-none text-text-2 transition-transform ${open ? "rotate-180" : ""}`}><ChevronIcon /></span>
       </button>
       {row.kind === "current" && <>
-        <button type="button" className="icon-btn size-6" aria-label={`${name} ${row.config.visible ? "숨기기" : "보이기"}`} onClick={() => useLayoutStore.getState().updateIndicator(slot, row.config.id, { visible: !row.config.visible })}><EyeIcon size={14} off={!row.config.visible} /></button>
-        <button type="button" className="icon-btn size-6" aria-label={`${name} 지우기`} onClick={() => useLayoutStore.getState().removeIndicator(slot, row.config.id)}><CloseIcon size={14} /></button>
+        <button type="button" className="icon-btn size-6" aria-label={`${name} ${row.config.visible ? "숨기기" : "보이기"}`} onClick={() => useLayoutStore.getState().updateIndicator(cellId, row.config.id, { visible: !row.config.visible })}><EyeIcon size={14} off={!row.config.visible} /></button>
+        <button type="button" className="icon-btn size-6" aria-label={`${name} 지우기`} onClick={() => useLayoutStore.getState().removeIndicator(cellId, row.config.id)}><CloseIcon size={14} /></button>
       </>}
     </div>
     {children}
@@ -171,9 +172,9 @@ function IndicatorRow({ slot, row, open, onToggle, children }: { slot: Slot; row
 
 const EDITOR = "flex flex-col gap-3 px-3 pb-3 pt-1";
 
-function LiveEditor({ slot, config, revertRef }: { slot: Slot; config: IndicatorConfig; revertRef: Ref<() => void> }) {
+function LiveEditor({ cellId, config, revertRef }: { cellId: WindowId; config: IndicatorConfig; revertRef: Ref<() => void> }) {
   const [initial] = useState(config);
-  const { draft, setDraft, validator, check, color, revert } = useLiveIndicatorDraft(slot, initial);
+  const { draft, setDraft, validator, check, color, revert } = useLiveIndicatorDraft(cellId, initial);
   const kind = KINDS[draft.form.kind];
   useImperativeHandle(revertRef, () => revert);
   return <div role="group" aria-label={`${specName(initial.spec)} 설정`} className={EDITOR}>
@@ -183,10 +184,10 @@ function LiveEditor({ slot, config, revertRef }: { slot: Slot; config: Indicator
   </div>;
 }
 
-function AddEditor({ slot, row, actionRef, onAdded }: { slot: Slot; row: EditableRow; actionRef: Ref<EditorAction>; onAdded(): void }) {
+function AddEditor({ cellId, row, actionRef, onAdded }: { cellId: WindowId; row: EditableRow; actionRef: Ref<EditorAction>; onAdded(): void }) {
   const root = useRef<HTMLDivElement>(null);
   const focus = () => root.current?.querySelector<HTMLElement>("button:not(:disabled),input:not(:disabled)")?.focus();
-  const { draft, setDraft, validator, check, errors, valid, color, commit } = useIndicatorDraft(slot, row, actionRef, focus);
+  const { draft, setDraft, validator, check, errors, valid, color, commit } = useIndicatorDraft(cellId, row, actionRef, focus);
   const kind = KINDS[draft.form.kind];
   return <div ref={root} role="group" aria-label={`${kind.label} 추가 설정`} className={EDITOR}>
     <IndicatorSettingsForm draft={draft} color={color} errors={errors} onChange={setDraft} lineSample={false} />

@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useId, useRef, type Ref } from "react";
 import { indicatorCssColor, isFinancial, KINDS, shownColor, specName } from "../../chart/indicators/kinds";
 import { symbolSub } from "../../lib/symbol";
-import { useLayoutStore, type Slot } from "../../stores/layout";
+import { useLayoutStore } from "../../stores/layout";
 import { useSelectionStore } from "../../stores/selection";
 import { EmptyState, ErrorState, Skeleton } from "../overlay/State";
 import { CommandFrame } from "../commands/CommandFrame";
@@ -12,15 +12,16 @@ import { hasColor, panelLabel, primaryLabel } from "../indicator-dialog/indicato
 import { IndicatorSettingsForm } from "../indicator-dialog/IndicatorSettingsForm";
 import { candidateGroup, COMMAND_TABS, commandKey, type IndicatorCommandMode } from "./model";
 import { useIndicatorCommand, useIndicatorDraft, type EditableRow, type EditorAction } from "./useIndicatorCommand";
+import type { WindowId } from "../../layout/kinds";
 
 export function IndicatorCommand() {
   const dialog = useSelectionStore((s) => s.dialog);
-  return dialog?.kind === "indicatorCommand" ? <IndicatorCommandBody key={`${dialog.slot}-${dialog.mode}-${dialog.indicatorId}`} slot={dialog.slot} initialMode={dialog.mode} initialIndicator={dialog.indicatorId} /> : null;
+  return dialog?.kind === "indicatorCommand" ? <IndicatorCommandBody key={`${dialog.cellId}-${dialog.mode}-${dialog.indicatorId}`} cellId={dialog.cellId} initialMode={dialog.mode} initialIndicator={dialog.indicatorId} /> : null;
 }
 
-export function IndicatorCommandBody({ slot, initialMode, initialIndicator = null }: { slot: Slot; initialMode: IndicatorCommandMode; initialIndicator?: string | null }) {
+export function IndicatorCommandBody({ cellId, initialMode, initialIndicator = null }: { cellId: WindowId; initialMode: IndicatorCommandMode; initialIndicator?: string | null }) {
   const close = useSelectionStore((s) => s.closeDialog);
-  const command = useIndicatorCommand(slot, initialMode, initialIndicator);
+  const command = useIndicatorCommand(cellId, initialMode, initialIndicator);
   const { cell, mode, input, rows, selected, symbols, search, selectedSymbol, compareButton, editor } = command;
   const inputRef = useRef<HTMLInputElement>(null);
   const ids = useId();
@@ -80,8 +81,8 @@ export function IndicatorCommandBody({ slot, initialMode, initialIndicator = nul
               {row.kind === "current" ? <>
                 <span aria-hidden="true" className="mx-px size-2.5 flex-none rounded-full" style={{ background: indicatorCssColor(shownColor(row.config.spec, row.config.style.colors)) }} />
                 <button type="button" className="min-w-0 flex-1 truncate text-left font-medium" aria-label={`${specName(row.config.spec)} 설정`} onClick={() => command.select(row)}>{specName(row.config.spec)}</button>
-                <button type="button" className="icon-btn size-6" aria-label={`${specName(row.config.spec)} ${row.config.visible ? "숨기기" : "보이기"}`} onClick={(event) => { event.stopPropagation(); useLayoutStore.getState().updateIndicator(slot, row.config.id, { visible: !row.config.visible }); }}><EyeIcon size={14} off={!row.config.visible} /></button>
-                <button type="button" className="icon-btn size-6" aria-label={`${specName(row.config.spec)} 지우기`} onClick={(event) => { event.stopPropagation(); useLayoutStore.getState().removeIndicator(slot, row.config.id); }}><CloseIcon size={14} /></button>
+                <button type="button" className="icon-btn size-6" aria-label={`${specName(row.config.spec)} ${row.config.visible ? "숨기기" : "보이기"}`} onClick={(event) => { event.stopPropagation(); useLayoutStore.getState().updateIndicator(cellId, row.config.id, { visible: !row.config.visible }); }}><EyeIcon size={14} off={!row.config.visible} /></button>
+                <button type="button" className="icon-btn size-6" aria-label={`${specName(row.config.spec)} 지우기`} onClick={(event) => { event.stopPropagation(); useLayoutStore.getState().removeIndicator(cellId, row.config.id); }}><CloseIcon size={14} /></button>
               </> : row.kind === "candidate" ? <><span aria-hidden="true" className="flex-none text-text-3"><PlusIcon size={12} /></span><span className="min-w-0 flex-1 font-medium">{row.candidate.label}</span></>
                 : <><span className="min-w-0 flex-1 truncate">{row.info.name}</span><span className="text-xs text-text-3">{symbolSub(row.info.code, row.info)}</span></>}
             </li>
@@ -92,8 +93,8 @@ export function IndicatorCommandBody({ slot, initialMode, initialIndicator = nul
           {mode === "compare" && !symbols.selectable && search.isFetching && <li role="presentation"><Skeleton label="비교 종목 찾는 중" /></li>}
           {mode === "compare" && search.isError && <li role="presentation"><ErrorState message="종목을 찾지 못했습니다. 다시 시도해 보세요." retry={() => void search.refetch()} /></li>}
         </ul>
-        {mode === "compare" ? <CompareSection slot={slot} button={compareButton} canAdd={selectedSymbol !== null} onAdd={() => submit()} className="flex min-h-0 flex-col gap-3 overflow-auto p-5" />
-          : selected && selected.kind !== "symbol" ? <IndicatorEditor key={selected.key} row={selected} slot={slot} actionRef={editor} onCommitted={refocus} />
+        {mode === "compare" ? <CompareSection cellId={cellId} button={compareButton} canAdd={selectedSymbol !== null} onAdd={() => submit()} className="flex min-h-0 flex-col gap-3 overflow-auto p-5" />
+          : selected && selected.kind !== "symbol" ? <IndicatorEditor key={selected.key} row={selected} cellId={cellId} actionRef={editor} onCommitted={refocus} />
           : <aside className="p-5 text-s text-text-3">{mode === "current" ? "지표를 고르면 설정을 바꿀 수 있습니다." : "추가할 지표를 고르면 설정을 확인할 수 있습니다."}</aside>}
       </div>
       <footer className="flex flex-none flex-wrap items-center gap-x-3.5 gap-y-1 border-t border-line px-4 py-2 text-xs text-text-3"><span><kbd>↑↓</kbd> 고르기</span><span><kbd>Tab</kbd> 설정</span><span><kbd>Enter</kbd> {mode === "current" ? "적용" : "추가"}하고 계속</span><span><kbd>Shift+Enter</kbd> {mode === "current" ? "적용" : "추가"}하고 닫기</span><span><kbd>Esc</kbd> 되돌리고 닫기</span></footer>
@@ -101,10 +102,10 @@ export function IndicatorCommandBody({ slot, initialMode, initialIndicator = nul
   </CommandFrame>;
 }
 
-function IndicatorEditor({ row, slot, actionRef, onCommitted }: { row: EditableRow; slot: Slot; actionRef: Ref<EditorAction>; onCommitted(): void }) {
+function IndicatorEditor({ row, cellId, actionRef, onCommitted }: { row: EditableRow; cellId: WindowId; actionRef: Ref<EditorAction>; onCommitted(): void }) {
   const controls = useRef<HTMLElement>(null);
   const focus = () => controls.current?.querySelector<HTMLElement>("button:not(:disabled),input:not(:disabled)")?.focus();
-  const { cell, editing, draft, setDraft, validator, check, errors, valid, color, commit } = useIndicatorDraft(slot, row, actionRef, focus);
+  const { cell, editing, draft, setDraft, validator, check, errors, valid, color, commit } = useIndicatorDraft(cellId, row, actionRef, focus);
   const kind = KINDS[draft.form.kind];
   const place = editing ? panelLabel(cell.chartSettings.panels, editing.panel) : row.kind === "candidate" ? candidateGroup(row.candidate) : "";
 

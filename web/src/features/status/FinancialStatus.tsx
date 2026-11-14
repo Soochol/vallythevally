@@ -7,9 +7,9 @@ import { useCell } from "../../stores/layout";
 import { useSelectionStore } from "../../stores/selection";
 
 export function FinancialStatus() {
-  const slot = useSelectionStore((s) => s.activeSlot);
-  const cell = useCell(slot);
-  const { settings } = useShownSettings(slot, cell.chartSettings);
+  const cellId = useSelectionStore((s) => s.activeCell);
+  const cell = useCell(cellId);
+  const { settings } = useShownSettings(cellId, cell.chartSettings);
   const request = financialRequest(cell.period, settings);
   const query = useQuery({ ...financialsQuery({ symbol: cell.symbol, period: request.period }), enabled: false });
   if (!request.enabled) return null;

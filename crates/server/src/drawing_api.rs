@@ -3,7 +3,7 @@ use std::ops::RangeInclusive;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-use crate::api::{Period, Revision, SymbolCode, UnixSeconds};
+use crate::api::{Period, Revision, SymbolCode, UnixSeconds, WindowId};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "lowercase")]
@@ -86,8 +86,8 @@ pub enum DrawingScope {
     Cell {
         #[serde(rename = "layoutId")]
         layout_id: String,
-        #[ts(type = "0 | 1 | 2 | 3")]
-        slot: u8,
+        #[serde(rename = "windowId")]
+        window_id: WindowId,
     },
 }
 

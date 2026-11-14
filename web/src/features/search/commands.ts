@@ -2,7 +2,7 @@ import type { QueryClient } from "@tanstack/react-query";
 import { FIX_INVALID, type RunOutcome, type ScreenEditing } from "../screener/screenEditing";
 import { screenEditingFor } from "../screener/useScreenEditing";
 import { HOTKEYS } from "../../lib/hotkeys";
-import { useLayoutStore } from "../../stores/layout";
+import { chartWindows, useLayoutStore } from "../../stores/layout";
 import { useSelectionStore } from "../../stores/selection";
 import { useUiStore } from "../../stores/ui";
 import type { SearchCommand } from "../commands/registry";
@@ -34,15 +34,15 @@ export const screenerRunCommand = (editingOf: (client: QueryClient) => Pick<Scre
 export const DEFAULT_SEARCH_COMMANDS: readonly SearchCommand[] = [
   ...HOTKEYS.flatMap(({ label, keys, action }): SearchCommand[] => {
     switch (action.kind) {
-      case "indicators": return [{ id: "indicators", label, shortcut: keys, run: ({ slot }) => openIndicatorCommand(slot) }];
-      case "toggleLog": return [{ id: "log", label, shortcut: keys, run: ({ slot }) => {
+      case "indicators": return [{ id: "indicators", label, shortcut: keys, run: ({ cellId }) => openIndicatorCommand(cellId) }];
+      case "toggleLog": return [{ id: "log", label, shortcut: keys, run: ({ cellId }) => {
         const layout = useLayoutStore.getState();
-        const cell = layout.layout.cells.find((c) => c.slot === slot);
+        const cell = chartWindows(layout.layout).find((c) => c.id === cellId);
         const next = cell && pressScale(cell.chartSettings, "log");
-        if (next) layout.setScale(slot, next);
+        if (next) layout.setScale(cellId, next);
       } }];
       case "toggleWatch": return [{ id: "watch-panel", label, shortcut: keys, run: () => useUiStore.getState().toggleWatch() }];
-      case "snapshot": return [{ id: `snapshot-${action.mode}`, label, shortcut: keys, run: ({ slot }) => saveSnapshot(slot, action.mode) }];
+      case "snapshot": return [{ id: `snapshot-${action.mode}`, label, shortcut: keys, run: ({ cellId }) => saveSnapshot(cellId, action.mode) }];
       default: return [];
     }
   }),

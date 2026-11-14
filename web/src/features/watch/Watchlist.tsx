@@ -508,8 +508,8 @@ function QuoteCell({ column, quote, limited, isIndex, variant }: { column: Watch
 
 function WatchRow({ list, row, index, last, columns, template, variant, editing, dropBefore, onMoved, onNaming, drag }: RowProps) {
   const { code } = row;
-  const slot = useSelectionStore((s) => s.activeSlot);
-  const cell = useCell(slot);
+  const cellId = useSelectionStore((s) => s.activeCell);
+  const cell = useCell(cellId);
   const active = cell.symbol === code;
   const others = useWatchlistStore((s) => s.lists).filter((l) => l.id !== list.id);
   const [menu, setMenu] = useState<{ kind: "actions" | "transfer" | "group" | "addGroup"; x: number; y: number } | null>(null);
@@ -526,7 +526,7 @@ function WatchRow({ list, row, index, last, columns, template, variant, editing,
   const label = unknown ? [name, "찾을 수 없음"] : [name, values, limited ? "실시간 아님" : ""];
 
   const open = () => {
-    useLayoutStore.getState().setSymbol(slot, info ?? { code, nxtEnabled: false });
+    useLayoutStore.getState().setSymbol(cellId, info ?? { code, nxtEnabled: false });
     if (variant === "phone") useSelectionStore.getState().setPhoneTab("chart");
   };
   const move = (step: -1 | 1) => {
@@ -542,7 +542,7 @@ function WatchRow({ list, row, index, last, columns, template, variant, editing,
   const compare = () => {
     const refusal = compareRefusal(cell.chartSettings, code, cell.symbol);
     if (refusal) return useSelectionStore.getState().showToast(refusal === "full" ? "비교 종목은 3개까지입니다" : refusal === "main" ? "현재 종목은 비교에 추가할 수 없습니다" : "이미 비교에 있습니다");
-    useLayoutStore.getState().addCompare(slot, code);
+    useLayoutStore.getState().addCompare(cellId, code);
     useSelectionStore.getState().showToast(`비교에 추가했습니다: ${name}`);
   };
   const context = (x: number, y: number) => { button.current?.focus(); setMenu({ kind: "actions", x, y }); };

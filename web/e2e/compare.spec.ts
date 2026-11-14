@@ -1,7 +1,7 @@
 import type { Locator, Page } from "@playwright/test";
 import type { Layout } from "../src/api/generated/Layout";
 import { installFrameProbe } from "./frame-probe";
-import { type Scenario, cell, chartOf, DEFAULT_LAYOUT_ID, expect, test } from "./harness";
+import { type Scenario, cell, chartOf, DEFAULT_LAYOUT_ID, expect, test, firstChart, withFirstChart } from "./harness";
 
 test.use({ clockStart: "20261109100030" });
 
@@ -9,14 +9,15 @@ async function layoutOf(scenario: Scenario): Promise<Layout> {
   return scenario.documents.layout(DEFAULT_LAYOUT_ID);
 }
 
-const settingsOf = async (scenario: Scenario) => (await layoutOf(scenario)).cells[0]!.chartSettings as { scale: string; compare: string[] };
+const settingsOf = async (scenario: Scenario) => firstChart(await layoutOf(scenario)).chartSettings as { scale: string; compare: string[] };
 
 const VOLUME = { id: "v1", spec: { kind: "volume", maPeriod: null }, panel: "p1", visible: true, style: { colors: ["ind-1"], width: 1 } };
 
 async function seed(scenario: Scenario, over: { compare?: string[]; scale?: string; indicators?: object[]; panels?: object[] } = {}, period: Parameters<Scenario["market"]["page"]>[0]["period"] = "1m") {
-  const { id, name, arrangement, sync, revision } = await layoutOf(scenario);
+  const layout = await layoutOf(scenario);
+  const { id, name, sync, placement, revision } = layout;
   const chartSettings = { v: 2, style: "candle", scale: "normal", indicators: [], compare: [], panels: [], ...over };
-  const body: Parameters<Scenario["documents"]["saveLayout"]>[0] = { id, name, arrangement, sync, revision: revision + 1, cells: [{ slot: 0, symbol: "005930", venue: "combined", period, symbolLink: false, chartSettings }] };
+  const body: Parameters<Scenario["documents"]["saveLayout"]>[0] = { id, name, sync, placement, revision: revision + 1, windows: withFirstChart(layout, { symbol: "005930", venue: "combined", period, chartSettings }) };
   scenario.documents.saveLayout(body);
 
 }

@@ -11,7 +11,7 @@ import { readThemeTokens } from "../../chart/theme";
 import { PERIOD_LABEL } from "../../lib/symbol";
 import { shownVenue, venueLabel } from "../../lib/venue";
 import { NXT_FALLBACK_NOTICE } from "../../persist/restore";
-import { type Slot, useCell, useLayoutStore } from "../../stores/layout";
+import { chartNumber, chartWindows, useCell, useLayoutStore } from "../../stores/layout";
 import { marketSocket } from "../../stores/realtime";
 import { useSelectionStore } from "../../stores/selection";
 import { openIndicatorCommand, shownIndicatorWindow } from "../indicator-command/open";
@@ -24,10 +24,11 @@ import { IndicatorPopover } from "../indicator-dialog/IndicatorPopover";
 import type { IndicatorConfig } from "../../chart/settings";
 import { DrawingOverlay } from "../drawings/DrawingOverlay";
 import { attachController } from "./controllers";
+import type { WindowId } from "../../layout/kinds";
 
-function runIndicatorCommand(slot: Slot, id: string, command: IndicatorCommand): void {
+function runIndicatorCommand(cellId: WindowId, id: string, command: IndicatorCommand): void {
   const store = useLayoutStore.getState();
-  const config = store.layout.cells.find((c) => c.slot === slot)?.chartSettings.indicators.find((i) => i.id === id);
+  const config = chartWindows(store.layout).find((c) => c.id === cellId)?.chartSettings.indicators.find((i) => i.id === id);
   if (!config) return;
   switch (command) {
     case "refresh":
@@ -35,27 +36,27 @@ function runIndicatorCommand(slot: Slot, id: string, command: IndicatorCommand):
     case "edit":
       return;
     case "collapse":
-      return store.togglePanel(slot, config.panel);
+      return store.togglePanel(cellId, config.panel);
     case "toggle":
-      return store.updateIndicator(slot, id, { visible: !config.visible });
+      return store.updateIndicator(cellId, id, { visible: !config.visible });
     case "remove":
-      return store.removeIndicator(slot, id);
+      return store.removeIndicator(cellId, id);
     case "up":
     case "down":
-      return store.movePanel(slot, config.panel, command === "up" ? -1 : 1);
+      return store.movePanel(cellId, config.panel, command === "up" ? -1 : 1);
   }
 }
 
 interface Props {
-  slot: Slot;
+  cellId: WindowId;
   status: CellStatus;
   onStatus: (s: CellStatus) => void;
 }
 
 /** 컨트롤러를 붙였다 떼는 얇은 컴포넌트. 봉 데이터는 props로 받지 않는다(frontend.md §5.4). */
-export function ChartCell({ slot, status, onStatus }: Props) {
-  const cell = useCell(slot);
-  const { settings: chartSettings, preview } = useShownSettings(slot, cell.chartSettings);
+export function ChartCell({ cellId, status, onStatus }: Props) {
+  const cell = useCell(cellId);
+  const { settings: chartSettings, preview } = useShownSettings(cellId, cell.chartSettings);
   const info = useSymbolInfo(cell.symbol).data;
   const venue = shownVenue(cell.venue, info);
   const compareInfos = useSymbolInfos(cell.chartSettings.compare);
@@ -71,8 +72,8 @@ export function ChartCell({ slot, status, onStatus }: Props) {
   const [venueAnchor, setVenueAnchor] = useState<HTMLElement | null>(null);
   const onStatusRef = useRef(onStatus);
   onStatusRef.current = onStatus;
-  const slotRef = useRef(slot);
-  slotRef.current = slot;
+  const cellIdRef = useRef(cellId);
+  cellIdRef.current = cellId;
 
   useEffect(() => {
     const c = new ChartController(chartEl.current!, {
@@ -81,13 +82,13 @@ export function ChartCell({ slot, status, onStatus }: Props) {
       socket: marketSocket,
       onIndicatorCommand: (id, command, anchor) => {
         if (command === "refresh") return useSelectionStore.getState().openFinancialUpdate();
-        if (command !== "edit") return runIndicatorCommand(slotRef.current, id, command);
-        if (shownIndicatorWindow() === "inspector") return openIndicatorCommand(slotRef.current, "current", id);
-        const initial = useLayoutStore.getState().layout.cells.find((c) => c.slot === slotRef.current)?.chartSettings.indicators.find((i) => i.id === id);
+        if (command !== "edit") return runIndicatorCommand(cellIdRef.current, id, command);
+        if (shownIndicatorWindow() === "inspector") return openIndicatorCommand(cellIdRef.current, "current", id);
+        const initial = chartWindows(useLayoutStore.getState().layout).find((c) => c.id === cellIdRef.current)?.chartSettings.indicators.find((i) => i.id === id);
         if (initial) setEditing((current) => current?.initial.id === id ? current : { initial, anchor });
       },
-      onPanelStretch: (stretches) => useLayoutStore.getState().setPanelStretches(slotRef.current, stretches),
-      onCompareRemove: (code) => useLayoutStore.getState().removeCompare(slotRef.current, code),
+      onPanelStretch: (stretches) => useLayoutStore.getState().setPanelStretches(cellIdRef.current, stretches),
+      onCompareRemove: (code) => useLayoutStore.getState().removeCompare(cellIdRef.current, code),
     });
     ctl.current = c;
     setVenueAnchor(c.venueAnchor);
@@ -97,7 +98,7 @@ export function ChartCell({ slot, status, onStatus }: Props) {
     };
   }, []);
 
-  useEffect(() => attachController(slot, ctl.current!), [slot]);
+  useEffect(() => attachController(cellId, ctl.current!), [cellId]);
 
   useEffect(() => {
     ctl.current?.apply({ symbol: cell.symbol, venue, period: cell.period, settings: chartSettings, info, previewIndicator: preview?.id ?? null, compareNames });
@@ -111,17 +112,18 @@ export function ChartCell({ slot, status, onStatus }: Props) {
   // 그대로 두면 다음 저장을 서버가 400으로 거절한다.
   useEffect(() => {
     if (info?.code === cell.symbol && cell.venue === "nxt" && !info.nxtEnabled) {
-      useLayoutStore.getState().setVenue(slot, "combined");
+      useLayoutStore.getState().setVenue(cellId, "combined");
       useSelectionStore.getState().showToast(NXT_FALLBACK_NOTICE);
     }
-  }, [info, cell.symbol, cell.venue, slot]);
+  }, [info, cell.symbol, cell.venue, cellId]);
 
   useEffect(() => {
     ctl.current?.setTheme(readThemeTokens());
   }, [theme]);
 
-  useDrawingSurface(ctl, slot);
+  useDrawingSurface(ctl, cellId);
 
+  const cellNumber = useLayoutStore((s) => chartNumber(s.layout, cellId));
   const name = info?.name ?? cell.symbol;
   const error = status.kind === "error" ? cellErrorView(status.error, cell.symbol) : null;
   const olderError = status.kind === "ready" && status.olderError ? olderErrorView(status.olderError, cell.symbol) : null;
@@ -129,15 +131,15 @@ export function ChartCell({ slot, status, onStatus }: Props) {
   return (
     <section
       tabIndex={0}
-      aria-label={`칸 ${slot + 1}: ${[name, venueLabel(cell.symbol, venue), PERIOD_LABEL[cell.period]].filter(Boolean).join(" ")}`}
+      aria-label={`칸 ${cellNumber}: ${[name, venueLabel(cell.symbol, venue), PERIOD_LABEL[cell.period]].filter(Boolean).join(" ")}`}
       aria-busy={status.kind === "loading"}
       className="relative min-h-0 min-w-0 bg-chart-bg focus-visible:outline-offset-[-2px]"
     >
       <div ref={chartEl} className="absolute inset-0" />
-      <AxisMode slot={slot} />
+      <AxisMode cellId={cellId} />
       {venueAnchor && createPortal(<VenuePicker cell={cell} info={info} variant="legend" />, venueAnchor)}
-      <DrawingOverlay slot={slot} />
-      {editing && cell.chartSettings.indicators.some((i) => i.id === editing.initial.id) && <IndicatorPopover key={editing.initial.id} slot={slot} {...editing} editRoot={chartEl.current!} onClose={() => setEditing(null)} />}
+      <DrawingOverlay cellId={cellId} />
+      {editing && cell.chartSettings.indicators.some((i) => i.id === editing.initial.id) && <IndicatorPopover key={editing.initial.id} cellId={cellId} {...editing} editRoot={chartEl.current!} onClose={() => setEditing(null)} />}
       {status.kind === "loading" && <div role="status" aria-label="차트 불러오는 중" className="pointer-events-none absolute inset-0 z-[5] grid place-items-center bg-chart-bg"><span className="chart-loading-label text-s text-text-3">차트 불러오는 중</span></div>}
       {olderError && (
         <div
@@ -163,7 +165,7 @@ export function ChartCell({ slot, status, onStatus }: Props) {
           className="absolute left-2 top-1/2 z-[5] flex max-w-[min(44ch,calc(100%-96px))] -translate-y-1/2 flex-col items-start gap-2 rounded-m border border-line bg-surface px-3 py-2 text-s text-text-2 shadow-dialog"
         >
           <p>분봉은 최근 1년까지 볼 수 있습니다. 더 과거는 일봉으로 보세요</p>
-          <button type="button" className="tb-btn border border-line" onClick={() => useLayoutStore.getState().setPeriod(slot, "D")}>
+          <button type="button" className="tb-btn border border-line" onClick={() => useLayoutStore.getState().setPeriod(cellId, "D")}>
             일봉으로 보기
           </button>
         </div>
