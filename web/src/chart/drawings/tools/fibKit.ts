@@ -1,16 +1,26 @@
 import { at, DRAW, EXTEND_OPTIONS, EXTENDS, readBool, readNumber, readOneOf, readRecord, readString, readStroke, select } from "../styleKit";
-import { type AxisLabel, defineTool, type Level, type PointRole, type Shape, type Tool, type ToolContext } from "../toolSpec";
-import type { Color, Dash, DrawingPoint, Extend, ScreenPoint, Stroke, Width } from "../types";
+import { type AxisLabel, defineTool, type HandleSpec, type Lens, type Level, type PointRole, type Shape, type Tool, type ToolContext } from "../toolSpec";
+import type { Color, Dash, DrawingPoint, Extend, Fill, ScreenPoint, Stroke, Width } from "../types";
 
 export const MAX_LEVELS = 24;
+
+export interface LineLook {
+  width: Width;
+  dash: Dash;
+}
+
+export interface Band {
+  on: boolean;
+  opacity: number;
+}
 
 export interface FibStyle {
   v: 1;
   levels: readonly Level[];
-  line: { width: Width; dash: Dash };
+  line: LineLook;
   extend: Extend;
   labels: { ratio: boolean; price: boolean };
-  fill: { on: boolean; opacity: number };
+  fill: Band;
   trendLine: boolean;
   reverse: boolean;
 }
@@ -36,7 +46,7 @@ export const fibDefaults = (levels: readonly Level[]): FibStyle => ({
   reverse: false,
 });
 
-function readLevels(raw: unknown, fallback: readonly Level[]): Level[] {
+export function readLevels(raw: unknown, fallback: readonly Level[]): Level[] {
   if (!Array.isArray(raw)) return fallback.map((l) => ({ ...l }));
   const levels = raw.flatMap((item): Level[] => {
     const o = readRecord(item);
@@ -46,20 +56,28 @@ function readLevels(raw: unknown, fallback: readonly Level[]): Level[] {
   return levels.slice(0, MAX_LEVELS);
 }
 
+export function readLineLook(raw: unknown, d: LineLook): LineLook {
+  const line = readRecord(raw);
+  const { width, dash } = readStroke(line, { color: DRAW, ...d });
+  return { ...line, width, dash };
+}
+
+export function readBand(raw: unknown, d: Band): Band {
+  const fill = readRecord(raw);
+  return { ...fill, on: readBool(fill.on, d.on), opacity: Math.min(1, Math.max(0, readNumber(fill.opacity, d.opacity))) };
+}
+
 export function parseFibStyle(raw: unknown, d: FibStyle): FibStyle {
   const o = readRecord(raw);
-  const line = readRecord(o.line);
-  const { width, dash } = readStroke(line, { color: DRAW, ...d.line });
   const labels = readRecord(o.labels);
-  const fill = readRecord(o.fill);
   return {
     ...o,
     v: 1,
     levels: readLevels(o.levels, d.levels),
-    line: { ...line, width, dash },
+    line: readLineLook(o.line, d.line),
     extend: readOneOf(o.extend, EXTENDS, d.extend),
     labels: { ...labels, ratio: readBool(labels.ratio, d.labels.ratio), price: readBool(labels.price, d.labels.price) },
-    fill: { ...fill, on: readBool(fill.on, d.fill.on), opacity: Math.min(1, Math.max(0, readNumber(fill.opacity, d.fill.opacity))) },
+    fill: readBand(o.fill, d.fill),
     trendLine: readBool(o.trendLine, d.trendLine),
     reverse: readBool(o.reverse, d.reverse),
   };
@@ -68,12 +86,18 @@ export function parseFibStyle(raw: unknown, d: FibStyle): FibStyle {
 const TREND_STROKE: Stroke = { color: "#868993", width: 1, dash: "dashed" };
 const LABEL_GAP = 4;
 
-const mainColor = (style: FibStyle): Color => (style.levels.find((l) => l.on) ?? style.levels[0])?.color ?? DRAW;
+export interface Leveled {
+  levels: readonly Level[];
+}
 
-function recolor(style: FibStyle, color: Color): FibStyle {
+export const mainColor = (style: Leveled): Color => (style.levels.find((l) => l.on) ?? style.levels[0])?.color ?? DRAW;
+
+export function recolor<S extends Leveled>(style: S, color: Color): S {
   const anyOn = style.levels.some((l) => l.on);
   return { ...style, levels: style.levels.map((l) => (l.on || !anyOn ? { ...l, color } : l)) };
 }
+
+export const levelColor = <S extends Leveled>(): Lens<S, Color> => ({ get: mainColor, set: recolor });
 
 function trendSegments(screens: readonly (ScreenPoint | null)[]): Shape[] {
   return screens.flatMap((a, i): Shape[] => {
@@ -192,10 +216,7 @@ export function defineFibTool(spec: FibToolSpec): Tool {
       return [...levelShapes(style, anchor, xs, ctx), ...trend];
     },
     handles({ points }, ctx) {
-      return points.flatMap((p, i) => {
-        const screen = ctx.toScreen(p);
-        return screen === null ? [] : [{ at: screen, move: (pts: readonly DrawingPoint[], to: DrawingPoint) => pts.map((q, j) => (j === i ? to : q)) }];
-      });
+      return pointHandles(points, ctx);
     },
     axisLabels({ points, style, selected }, ctx) {
       if (!selected) return [];
@@ -206,4 +227,29 @@ export function defineFibTool(spec: FibToolSpec): Tool {
       ]);
     },
   });
+}
+
+export function pointHandles(points: readonly DrawingPoint[], ctx: ToolContext): HandleSpec[] {
+  return points.flatMap((p, i) => {
+    const screen = ctx.toScreen(p);
+    return screen === null ? [] : [{ at: screen, move: (pts: readonly DrawingPoint[], to: DrawingPoint) => pts.map((q, j) => (j === i ? to : q)) }];
+  });
+}
+
+export type FanSide = "left" | "right";
+
+export function fanSide(origin: ScreenPoint, toward: ScreenPoint): FanSide | null {
+  if (origin.x === toward.x) return null;
+  return origin.x < toward.x ? "right" : "left";
+}
+
+export const fanRay = (origin: ScreenPoint, through: ScreenPoint, side: FanSide, stroke: Stroke): Shape => ({ kind: "segment", a: origin, b: through, stroke, extend: side });
+
+function rayAtX(origin: ScreenPoint, through: ScreenPoint, x: number): ScreenPoint {
+  return { x, y: origin.y + ((through.y - origin.y) * (x - origin.x)) / (through.x - origin.x) };
+}
+
+export function fanWedge(origin: ScreenPoint, p: ScreenPoint, q: ScreenPoint, side: FanSide, fill: Fill, ctx: ToolContext): Shape {
+  const x = side === "right" ? Math.max(ctx.paneWidth, origin.x) : Math.min(0, origin.x);
+  return { kind: "polyline", points: [origin, rayAtX(origin, p, x), rayAtX(origin, q, x)], closed: true, fill };
 }
