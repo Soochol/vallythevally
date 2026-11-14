@@ -65,7 +65,7 @@ export function priceRangeText(p0: DrawingPoint, p1: DrawingPoint, ctx: ToolCont
 }
 
 const L = at<PriceRangeStyle>();
-const bandFill: Lens<PriceRangeStyle, Fill> = {
+export const bandFill: Lens<PriceRangeStyle, Fill> = {
   get: (s) => s.up,
   set: (s, fill) => ({ ...s, up: fill, down: { ...s.down, color: fill.color } }),
 };
