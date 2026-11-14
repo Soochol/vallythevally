@@ -121,3 +121,30 @@ test("꺾은선: 꼭짓점 사이에 차트를 확대하면 같은 화면 자리
   const [, second] = (await mirror(page))[0]!.points;
   expect(Math.abs(second!.x + r.x - b!.x)).toBeGreaterThan(50);
 });
+
+test("삼각형: 도형 그룹 메뉴에서 골라 세 점을 찍으면 점 셋이 저장되고 새로고침 뒤에도 같은 자리에 보인다", async ({ page, scenario }) => {
+  const errors: string[] = [];
+  page.on("pageerror", (e) => errors.push(e.message));
+  await open(page);
+  await pickTool(page, "도형", "삼각형");
+  const corners = await Promise.all(([[0.3, 0.7], [0.4, 0.4], [0.5, 0.7]] as const).map(([x, y]) => chartPoint(page, x, y)));
+  for (const c of corners.slice(0, 2)) await page.mouse.click(c.x, c.y);
+  expect(await drawings(scenario)).toHaveLength(0);
+  await page.mouse.click(corners[2]!.x, corners[2]!.y);
+  await expect.poll(async () => (await drawings(scenario)).length).toBe(1);
+  const saved = (await drawings(scenario))[0]!;
+  expect(saved.tool).toBe("triangle");
+  expect(saved.points).toHaveLength(3);
+  await expect.poll(async () => (await mirror(page))[0]?.handles.length).toBe(3);
+
+  const before = (await mirror(page))[0]!;
+  await page.reload();
+  await expect.poll(async () => (await mirror(page)).length).toBe(1);
+  expect(await drawings(scenario)).toEqual([saved]);
+  const after = (await mirror(page))[0]!;
+  before.points.forEach((p, i) => {
+    expect(after.points[i]!.x).toBeCloseTo(p!.x, 0);
+    expect(after.points[i]!.y).toBeCloseTo(p!.y, 0);
+  });
+  expect(errors).toEqual([]);
+});
