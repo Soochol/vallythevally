@@ -1,5 +1,6 @@
 import type { Locator, Page } from "@playwright/test";
 import type { Layout } from "../src/api/generated/Layout";
+import { installChartProbe } from "./chart-probe";
 import { installFrameProbe } from "./frame-probe";
 import { type Scenario, cell, chartOf, DEFAULT_LAYOUT_ID, expect, test, firstChart, withFirstChart } from "./harness";
 
@@ -310,3 +311,40 @@ test("% 축에서 같은 봉에 체결이 더 와도, 가격 패널 선마다 �
   expect(atMain.map((r) => r.base)).toEqual(atMain.map(() => main.close));
   expect(errors).toEqual([]);
 });
+
+const SHAPES = [["바", "Bar"], ["라인", "Line"], ["영역", "Area"], ["캔들", "Candlestick"]] as const;
+
+for (const scale of ["normal", "log", "percent"] as const) {
+  test(`${scale} 축이 저장된 칸에 비교 종목이 있으면 봉 모양을 바꿀 때마다 오류 없이 비교 종목 선을 주 봉 위 % 축에 다시 그린다`, async ({ page, scenario }) => {
+    const errors: string[] = [];
+    page.on("pageerror", (e) => errors.push(e.message));
+    page.on("console", (m) => { if (m.type() === "error") errors.push(m.text()); });
+    await seed(scenario, { compare: ["006400"], scale });
+    await page.addInitScript(installChartProbe);
+    await page.goto("/");
+    await expect(cell(page)).toHaveAttribute("aria-busy", "false");
+    await expect(row(page, "006400")).not.toHaveAttribute("data-last-t", "");
+    const compareColor = await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue("--cmp-1").trim());
+    const pricePane = () => page.evaluate((color) => window.chartProbe.chart.panes()[0]!.getSeries().map((s) => ({
+      type: s.seriesType(),
+      mode: s.priceScale().options().mode,
+      scale: s.options().priceScaleId ?? "right",
+      visible: s.options().visible,
+      closes: s.data().map((d) => "close" in d ? d.close : "value" in d ? d.value : null),
+      compare: "color" in s.options() && (s.options() as { color: string }).color === color,
+    })), compareColor);
+    await expect.poll(async () => (await pricePane())[1]?.closes.length ?? 0).toBeGreaterThan(0);
+    const [candles, line] = await pricePane();
+    expect([candles, line].map((s) => [s!.scale, s!.visible, s!.compare])).toEqual([["right", true, false], ["right", true, true]]);
+
+    await page.getByRole("toolbar", { name: "차트 도구 막대" }).getByRole("button", { name: "차트 설정", exact: true }).click();
+    const shapes = page.getByRole("dialog", { name: "차트 설정", exact: true }).getByRole("group", { name: "봉 모양" });
+    for (const [name, type] of SHAPES) {
+      await shapes.getByRole("button", { name, exact: true }).click();
+      await expect(shapes.getByRole("button", { name, exact: true })).toHaveAttribute("aria-pressed", "true");
+      await expect.poll(pricePane).toEqual([{ ...candles, type, mode: 2 }, { ...line, mode: 2 }]);
+    }
+    await expect(chartOf(cell(page))).toHaveAttribute("data-price-scale", "percent");
+    expect(errors).toEqual([]);
+  });
+}
