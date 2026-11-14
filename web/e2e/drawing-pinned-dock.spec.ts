@@ -102,6 +102,7 @@ test("고정 도구: 접힌 메뉴는 첫 도구에 포커스를 두고 별표 �
   const menu = page.getByRole("menu", { name: "고정 도구", exact: true });
   await expect(menu.getByRole("menuitem").first()).toBeFocused();
   await expect(menu.getByRole("menuitemcheckbox")).toHaveCount(0);
+  expect(new Set(await menu.getByRole("menuitem").evaluateAll((items) => items.map((item) => Math.round(item.querySelector("svg")!.getBoundingClientRect().left)))).size, "접힌 메뉴의 아이콘 왼쪽 끝").toBe(1);
   const leftOf = (box: { x: number } | null) => Math.round(box!.x);
   await expect.poll(async () => leftOf(await menu.boundingBox())).toBe(leftOf(await dot.boundingBox()));
   await page.setViewportSize({ width: 1024, height: 900 });

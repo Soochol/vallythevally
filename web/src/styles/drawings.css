@@ -15,7 +15,7 @@
 .draw-tool-choice { display:flex; align-items:center; }
 .draw-tool-choice button { display:flex; align-items:center; gap:8px; height:30px; padding:4px 8px; border-radius:var(--r-s); font-size:var(--fs-s); }
 .draw-tool-choice button:first-child { flex:1; }
-.draw-tool-choice button:last-child { width:30px; justify-content:center; }
+.draw-tool-choice [role=menuitemcheckbox] { width:30px; justify-content:center; }
 .draw-tool-choice button:hover, .draw-tool-choice button:focus-visible { background:var(--raised); }
 .draw-tool-choice [aria-checked=true] { color:var(--accent); }
 .draw-tool-choice [aria-checked=true] svg { fill:currentColor; }
