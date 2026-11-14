@@ -220,7 +220,7 @@ test("drawing engine: Alt tool aliases consume browser shortcuts and text fields
   await expect(dialog).toBeVisible(); await expect.poll(async () => (await drawings(scenario)).length).toBe(2);
 });
 
-const GROUP_LABEL: Record<Tool["group"], string> = { line: "선", fib: "피보나치", shape: "도형", note: "주석", measure: "측정" };
+const GROUP_LABEL: Record<Tool["group"], string> = { line: "선", fib: "피보나치·갠", shape: "도형", note: "주석", measure: "측정", pattern: "패턴" };
 
 test("drawing engine: the toolbar picks every registered tool by group and name", async ({ page }) => {
   await open(page);

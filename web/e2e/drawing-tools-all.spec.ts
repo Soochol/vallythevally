@@ -6,7 +6,7 @@ import type { Tool } from "../src/chart/drawings/toolSpec";
 
 type At = readonly [number, number];
 
-const GROUP_LABEL: Record<Tool["group"], string> = { line: "선", fib: "피보나치", shape: "도형", note: "주석", measure: "측정" };
+const GROUP_LABEL: Record<Tool["group"], string> = { line: "선", fib: "피보나치·갠", shape: "도형", note: "주석", measure: "측정", pattern: "패턴" };
 const COLUMNS = 7;
 const CELL = { left: 0.06, top: 0.22, width: 0.11, height: 0.16 };
 const SPOTS: readonly At[] = [[0.15, 0.75], [0.6, 0.25], [0.85, 0.6], [0.35, 0.4]];

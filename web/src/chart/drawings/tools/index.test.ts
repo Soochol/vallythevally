@@ -18,22 +18,42 @@ test.each(TOOLS.map((t) => [t.tool, t] as const))("%s의 점 수는 서버 표(�
   expect(countOf(tool.placement)).toEqual(TOOL_POINTS[id]);
 });
 
-test("서버 표는 도구 21개다", () => {
-  expect(Object.keys(TOOL_POINTS)).toHaveLength(21);
+test("서버 표는 도구 36개다", () => {
+  expect(Object.keys(TOOL_POINTS)).toHaveLength(36);
 });
 
-test("등록 표는 서버 표의 21개 도구를 빠짐없이 담는다", () => {
-  expect(TOOLS.map((t) => t.tool).sort()).toEqual(Object.keys(TOOL_POINTS).sort());
+const FINAL_TABLE: readonly (readonly [Tool["group"], readonly (readonly [DrawingTool, string])[]])[] = [
+  ["line", [["trendline", "추세선"], ["ray", "반직선"], ["extline", "연장선"], ["hline", "수평선"], ["hray", "수평 반직선"], ["vline", "수직선"], ["crossline", "십자선"], ["channel", "평행 채널"], ["regression", "회귀 채널"], ["pitchfork", "피치포크"]]],
+  ["fib", [["fib", "피보나치 되돌림"], ["fibext", "피보나치 확장"], ["fibfan", "피보나치 팬"], ["fibtime", "피보나치 시간대"], ["gannfan", "갠 팬"], ["gannbox", "갠 상자"]]],
+  ["shape", [["rect", "사각형"], ["ellipse", "타원"], ["triangle", "삼각형"], ["path", "꺾은선"], ["brush", "붓"]]],
+  ["note", [["text", "글자"], ["callout", "말풍선"], ["pricelabel", "가격 라벨"], ["arrow", "화살표"]]],
+  ["measure", [["pricerange", "가격 범위"], ["daterange", "날짜 범위"], ["datepricerange", "날짜·가격 범위"], ["long", "매수 포지션"], ["short", "매도 포지션"], ["avwap", "기준봉 VWAP"], ["volprofile", "구간 거래량 프로파일"]]],
+  ["pattern", [["elliott", "엘리엇 충격 파동"], ["elliottabc", "엘리엇 조정 파동"], ["xabcd", "XABCD 패턴"], ["headshoulders", "헤드앤숄더"]]],
+];
+
+const FIRST_WAVE: readonly DrawingTool[] = [
+  "trendline", "ray", "extline", "hline", "hray", "vline", "channel",
+  "fib", "fibext",
+  "rect", "ellipse", "path", "brush",
+  "text", "callout", "pricelabel", "arrow",
+  "pricerange", "daterange", "long", "short",
+];
+
+test("최종 도구 표는 서버 표의 도구를 한 번씩 담는다", () => {
+  expect(FINAL_TABLE.flatMap(([, tools]) => tools.map(([id]) => id)).sort()).toEqual(Object.keys(TOOL_POINTS).sort());
 });
 
-test("도구 막대는 그룹과 도구를 정해진 순서와 이름으로 보인다", () => {
-  expect([...toolsByGroup()].map(([group, tools]) => [group, tools.map((t) => [t.tool, t.label])])).toEqual([
-    ["line", [["trendline", "추세선"], ["ray", "반직선"], ["extline", "연장선"], ["hline", "수평선"], ["hray", "수평 반직선"], ["vline", "수직선"], ["channel", "평행 채널"]]],
-    ["fib", [["fib", "피보나치 되돌림"], ["fibext", "피보나치 확장"]]],
-    ["shape", [["rect", "사각형"], ["ellipse", "타원"], ["path", "꺾은선"], ["brush", "붓"]]],
-    ["note", [["text", "글자"], ["callout", "말풍선"], ["pricelabel", "가격 라벨"], ["arrow", "화살표"]]],
-    ["measure", [["pricerange", "가격 범위"], ["daterange", "날짜 범위"], ["long", "매수 포지션"], ["short", "매도 포지션"]]],
-  ]);
+test("등록된 도구는 그룹마다 최종 도구 표의 순서와 이름을 따른다", () => {
+  const registered = new Map([...toolsByGroup()].map(([group, tools]) => [group, tools.map((t) => [t.tool, t.label] as const)]));
+  for (const group of registered.keys()) expect(FINAL_TABLE.map(([g]) => g), `${group} 그룹`).toContain(group);
+  for (const [group, final] of FINAL_TABLE) {
+    const tools = registered.get(group) ?? [];
+    expect(final.filter(([id]) => tools.some(([t]) => t === id)), `${group} 그룹`).toEqual(tools);
+  }
+});
+
+test("1차 도구 21개는 모두 등록돼 있다", () => {
+  for (const id of FIRST_WAVE) expect(toolOf(id), id).toBeDefined();
 });
 
 test("모드는 지우개와 시연 커서다", () => {
@@ -55,7 +75,7 @@ test("등록되지 않은 도구는 없다고 답한다", () => {
   for (const id of Object.keys(TOOL_POINTS) as DrawingTool[]) expect(toolOf(id) === undefined).toBe(!registered.has(id));
 });
 
-const GROUP_ORDER: readonly Tool["group"][] = ["line", "fib", "shape", "note", "measure"];
+const GROUP_ORDER: readonly Tool["group"][] = ["line", "fib", "shape", "note", "measure", "pattern"];
 const GROUP_FILES = import.meta.glob<Record<string, unknown>>(["./groups/**/*.{ts,tsx}", "!./groups/**/*.test.{ts,tsx}"], { eager: true });
 const fileGroup = (path: string) => path.slice("./groups/".length).replace(/\.tsx?$/, "");
 const toolsOfFile = (path: string): readonly Tool[] => {
@@ -73,7 +93,7 @@ test("그룹 파일마다 그 이름의 그룹 도구만 들어 있다", () => {
   }
 });
 
-test("등록 표는 선, 피보나치, 도형, 주석, 측정 그룹 순서로 이어진다", () => {
+test("등록 표는 선, 피보나치·갠, 도형, 주석, 측정, 패턴 그룹 순서로 이어진다", () => {
   const expected = GROUP_ORDER.flatMap((group) => toolsOfFile(`./groups/${group}.ts`));
   expect(TOOLS).toEqual(expected);
 });

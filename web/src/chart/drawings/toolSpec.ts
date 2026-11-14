@@ -129,7 +129,7 @@ export interface ToolDrawing<S> {
 
 export interface ToolSpec<S> {
   tool: DrawingTool;
-  group: "line" | "fib" | "shape" | "note" | "measure";
+  group: "line" | "fib" | "shape" | "note" | "measure" | "pattern";
   label: string;
   icon: string;
   placement: Placement;
