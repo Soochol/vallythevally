@@ -6,7 +6,7 @@ import type { Layout } from "../src/api/generated/Layout";
 import type { Scenario } from "./fixtures/scenario";
 import { parseChartSettings, type ChartSettings } from "../src/chart/settings";
 import { installFrameProbe } from "./frame-probe";
-import { cell, chartOf, DEFAULT_LAYOUT_ID, expect, SEARCH_BUTTON_TITLE } from "./harness";
+import { cell, chartOf, DEFAULT_LAYOUT_ID, expect, SEARCH_BUTTON_TITLE, firstChart, withFirstChart } from "./harness";
 
 const METRICS = ["revenue", "operating_income", "owner_roe", "investing_cash_flow", "dps", "debt_ratio"] as const;
 const LABELS = ["매출액", "영업이익", "지배주주 ROE", "투자활동 현금흐름", "DPS", "부채비율"];
@@ -19,7 +19,7 @@ async function seed(scenario: Scenario, period: "Q" | "Y" = "Y") {
     { id: "ma", spec: { kind: "ma", method: "sma", period: 5 }, panel: "price", visible: true, style: { colors: ["ind-1"], width: 1 } },
     ...METRICS.map((kind) => ({ id: kind, spec: { kind }, panel: kind, visible: true, style: { colors: ["ind-2"], width: 1 } } satisfies ChartSettings["indicators"][number])),
   ], panels: METRICS.map((id) => ({ id, stretch: 0.3 })) };
-  scenario.documents.saveLayout({ ...layout, revision: layout.revision + 1, cells: [{ ...layout.cells[0]!, symbol: "005930", venue: "combined", period, chartSettings }] });
+  scenario.documents.saveLayout({ ...layout, revision: layout.revision + 1, windows: withFirstChart(layout, { symbol: "005930", venue: "combined", period, chartSettings }) });
   return chartSettings;
 }
 
@@ -74,7 +74,7 @@ for (const phone of [false, true]) test.describe(phone ? "휴대폰 재무지표
       await page.mouse.up();
       await expect.poll(async () => {
         const saved: Layout = await scenario.documents.layout(DEFAULT_LAYOUT_ID);
-        return parseChartSettings(saved.cells[0]!.chartSettings).panels.some((p) => p.stretch !== 0.25);
+        return parseChartSettings(firstChart(saved).chartSettings).panels.some((p) => p.stretch !== 0.25);
       }).toBe(true);
       await choosePeriod(page, phone, "일");
       await choosePeriod(page, phone, "연");
@@ -84,7 +84,7 @@ for (const phone of [false, true]) test.describe(phone ? "휴대폰 재무지표
     await revenue.getByRole("button", { name: /숨기기/ }).click({ force: true });
     await expect.poll(async () => {
       const saved: Layout = await scenario.documents.layout(DEFAULT_LAYOUT_ID);
-      const settings = parseChartSettings(saved.cells[0]!.chartSettings);
+      const settings = parseChartSettings(firstChart(saved).chartSettings);
       return settings.indicators.find((i) => i.spec.kind === "revenue")?.visible;
     }).toBe(false);
     const before: Layout = await scenario.documents.layout(DEFAULT_LAYOUT_ID);
@@ -92,7 +92,7 @@ for (const phone of [false, true]) test.describe(phone ? "휴대폰 재무지표
     await expect(page.locator("[data-indicator-row]")).toHaveCount(7);
     await expect(page.locator("[data-indicator-row]").filter({ hasText: /^매출액/ }).getByRole("button", { name: /보이기/ })).toHaveCount(1);
     const after: Layout = await scenario.documents.layout(DEFAULT_LAYOUT_ID);
-    expect(after.cells[0]!.chartSettings).toEqual(before.cells[0]!.chartSettings);
+    expect(firstChart(after).chartSettings).toEqual(firstChart(before).chartSettings);
     expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBe(0);
     expect(errors).toEqual([]);
   });
@@ -159,7 +159,7 @@ test.describe("재무지원 경계", () => {
     await expect(row(page, "revenue")).toContainText("확인 완료");
     await expect(page.getByRole("contentinfo")).toContainText("자동 저장됨");
     const stored: Layout = await scenario.documents.layout(DEFAULT_LAYOUT_ID);
-    expect(stored.cells[0]!.chartSettings).toEqual(settings);
+    expect(firstChart(stored).chartSettings).toEqual(settings);
   });
 
   test("처음 회사 조회가 실패해도 가격과 다른 회사는 사용할 수 있다", async ({ page, scenario, financial }) => {
@@ -260,7 +260,7 @@ test("재무지표 미리보기 중에도 재무 수집 상태가 보이고 취�
   await dialog.getByRole("option", { name: "매출액 추가 후보", exact: true }).click();
   await expect(previewRow).toHaveCount(1);
   await expect(status).toBeVisible();
-  expect(parseChartSettings(scenario.documents.layout(DEFAULT_LAYOUT_ID).cells[0]!.chartSettings).indicators.map((i) => i.spec.kind)).not.toContain("revenue");
+  expect(parseChartSettings(firstChart(scenario.documents.layout(DEFAULT_LAYOUT_ID)).chartSettings).indicators.map((i) => i.spec.kind)).not.toContain("revenue");
   await page.keyboard.press("Escape");
   await expect(dialog).toBeHidden();
   await expect(previewRow).toHaveCount(0);

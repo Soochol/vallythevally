@@ -5,6 +5,7 @@ import type { ExcludeKind } from "../src/api/generated/ExcludeKind.ts";
 import type { Layout } from "../src/api/generated/Layout.ts";
 import type { LayoutInput } from "../src/api/generated/LayoutInput.ts";
 import type { LayoutSummary } from "../src/api/generated/LayoutSummary.ts";
+import type { LayoutWindow } from "../src/api/generated/LayoutWindow.ts";
 import type { Screen } from "../src/api/generated/Screen.ts";
 import type { Screens } from "../src/api/generated/Screens.ts";
 import type { ScreenPeriod } from "../src/api/generated/ScreenPeriod.ts";
@@ -37,7 +38,9 @@ const EXCLUDE_KINDS: readonly string[] = [
   "short_term_overheated",
   "trading_halted",
 ] satisfies ExcludeKind[];
-const CELLS_OF = { "1": 1, "2h": 2, "2v": 2, "3": 3, "4": 4 } as const;
+const MAX_WINDOWS = 12;
+const MAX_CHART_WINDOWS = 8;
+const WINDOW_ID = /^[A-Za-z0-9_-]{1,64}$/;
 
 export type Reply = { status: number; body: unknown };
 const ok = (body: unknown): Reply => ({ status: 200, body });
@@ -101,6 +104,18 @@ function screensProblem(screens: readonly Screen[]): string | null {
   return null;
 }
 
+function layoutWindowsError(windows: LayoutWindow[]): string | null {
+  if (windows.length < 1 || windows.length > MAX_WINDOWS) return `창은 1~${MAX_WINDOWS}개여야 합니다: ${windows.length}개`;
+  const ids = windows.map((w) => w.id);
+  if (!ids.every((id) => WINDOW_ID.test(id))) return "창 id는 1~64바이트의 A-Za-z0-9_-여야 합니다";
+  if (new Set(ids).size !== ids.length) return "창 id가 겹칩니다";
+  const charts = windows.filter((w) => w.kind === "chart").length;
+  if (charts < 1 || charts > MAX_CHART_WINDOWS) return `차트 창은 1~${MAX_CHART_WINDOWS}개여야 합니다: ${charts}개`;
+  const others = windows.filter((w) => w.kind !== "chart").map((w) => w.kind);
+  if (new Set(others).size !== others.length) return "차트가 아닌 창은 종류마다 하나만 둘 수 있습니다";
+  return null;
+}
+
 export function createUserData(seedWatchlist: string[], seedScreens: Screen[], nowSec: () => number = () => Math.floor(Date.now() / 1000)) {
   const layouts = new Map<string, Layout>([
     [
@@ -108,18 +123,22 @@ export function createUserData(seedWatchlist: string[], seedScreens: Screen[], n
       {
         id: DEFAULT_LAYOUT_ID,
         name: "기본",
-        arrangement: "1",
         sync: { crosshair: true, scroll: true },
-        cells: [
+        windows: [
           {
-            slot: 0,
+            id: "cell-0",
+            link: null,
+            kind: "chart",
             symbol: "IDX:001",
             venue: null,
             period: "D",
-            symbolLink: false,
             chartSettings: { v: 1, style: "candle", scale: "normal", indicators: [], compare: [], panels: [] },
           },
+          { id: "watchlist", link: null, kind: "watchlist" },
+          { id: "screener", link: null, kind: "screener" },
+          { id: "objects", link: null, kind: "objects" },
         ],
+        placement: {},
         updatedAt: 0,
         revision: 0,
       },
@@ -131,20 +150,23 @@ export function createUserData(seedWatchlist: string[], seedScreens: Screen[], n
 
   return {
     listLayouts: (): Reply =>
-      ok([...layouts.values()].map(({ id, name, arrangement, updatedAt }): LayoutSummary => ({ id, name, arrangement, updatedAt }))),
+      ok([...layouts.values()].map(({ id, name, updatedAt }): LayoutSummary => ({ id, name, updatedAt }))),
     getLayout: (id: string): Reply => {
       const l = layouts.get(id);
       return l ? ok(l) : fail(404, "not_found", `레이아웃 ${id}이 없습니다`);
     },
     putLayout: (id: string, body: unknown): Reply => {
-      if (!isObject(body) || !Array.isArray(body.cells)) return fail(400, "bad_request", "레이아웃 본문이 아닙니다");
+      if (!isObject(body) || !Array.isArray(body.windows) || !isObject(body.placement)) return fail(400, "bad_request", "레이아웃 본문이 아닙니다");
       const input = body as LayoutInput;
       if (input.id !== id) return fail(400, "bad_request", "주소의 id와 본문의 id가 다릅니다");
       if (!isRevision(input.revision)) return fail(400, "bad_request", "revision이 없습니다");
-      if (input.cells.length !== CELLS_OF[input.arrangement]) return fail(400, "bad_request", "칸 수가 배치와 맞지 않습니다");
-      for (const c of input.cells) {
-        if (bytes(c.chartSettings) > PAYLOAD_LIMIT_BYTES) return fail(413, "payload_too_large", "차트 설정이 64KB를 넘습니다");
-        if (c.symbol.startsWith("IDX:") !== (c.venue === null)) return fail(400, "bad_request", "지수에는 거래소가 없고, 주식에는 있어야 합니다");
+      const windowError = layoutWindowsError(input.windows);
+      if (windowError) return fail(400, "bad_request", windowError);
+      if (bytes(input.placement) > PAYLOAD_LIMIT_BYTES) return fail(413, "payload_too_large", "배치가 64KB를 넘습니다");
+      for (const w of input.windows) {
+        if (w.kind !== "chart") continue;
+        if (bytes(w.chartSettings) > PAYLOAD_LIMIT_BYTES) return fail(413, "payload_too_large", "차트 설정이 64KB를 넘습니다");
+        if (w.symbol.startsWith("IDX:") !== (w.venue === null)) return fail(400, "bad_request", "지수에는 거래소가 없고, 주식에는 있어야 합니다");
       }
       const stored = layouts.get(id);
       if (stored && input.revision <= stored.revision) return stale(stored.revision);

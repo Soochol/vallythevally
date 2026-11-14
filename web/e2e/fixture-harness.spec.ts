@@ -1,4 +1,4 @@
-import { cell, chartOf, expect, test } from "./harness";
+import { cell, chartOf, expect, test, firstChart } from "./harness";
 
 test("브라우저 시나리오에서 초성 검색한 종목의 차트를 연다", async ({ page, scenario }) => {
   await page.goto("/");
@@ -16,7 +16,7 @@ test("브라우저 시나리오는 자동 저장한 봉 주기를 새로고침 �
   await page.goto("/?symbol=005930");
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
   await page.getByRole("toolbar", { name: "차트 도구 막대" }).getByRole("button", { name: "주", exact: true }).click();
-  await expect.poll(() => scenario.documents.layout().cells[0]?.period).toBe("W");
+  await expect.poll(() => firstChart(scenario.documents.layout()).period).toBe("W");
   await page.reload();
   await expect(cell(page)).toHaveAttribute("aria-label", "칸 1: 삼성전자 통합 주");
 });

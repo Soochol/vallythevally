@@ -4,7 +4,7 @@ import type { SymbolInfo } from "../../api/generated/SymbolInfo";
 import { useSymbolInfos, useSymbolSearch } from "../../api/queries";
 import { compareRefusal } from "../../chart/settings";
 import { KIND_LABEL, MARKET_LABEL } from "../../lib/symbol";
-import { useLayoutStore } from "../../stores/layout";
+import { chartWindows, useLayoutStore } from "../../stores/layout";
 import { type SearchPurpose, useSelectionStore } from "../../stores/selection";
 import { useUiStore } from "../../stores/ui";
 import { useActiveWatchlist, useWatchlistStore } from "../../stores/watchlist";
@@ -28,7 +28,7 @@ export function SearchDialog() {
 
 function SearchDialogBody({ purpose }: { purpose: SearchPurpose }) {
   const close = useSelectionStore((s) => s.closeDialog);
-  const slot = useSelectionStore((s) => s.activeSlot);
+  const cellId = useSelectionStore((s) => s.activeCell);
   const watchlist = useActiveWatchlist();
   const watch = useSymbolInfos(watchlist.symbols);
   const recent = useSymbolInfos(useUiStore((s) => s.prefs.recentSymbols));
@@ -68,13 +68,13 @@ function SearchDialogBody({ purpose }: { purpose: SearchPurpose }) {
     const included = watchlist.symbols.includes(info.code);
     if (action === "compare") {
       const layout = useLayoutStore.getState();
-      const cell = layout.layout.cells.find((c) => c.slot === slot);
+      const cell = chartWindows(layout.layout).find((c) => c.id === cellId);
       const refusal = cell && compareRefusal(cell.chartSettings, info.code, cell.symbol);
       if (refusal) {
         selection.showToast(refusal === "full" ? "비교 종목은 3개까지입니다" : refusal === "main" ? "현재 종목은 비교에 추가할 수 없습니다" : "이미 비교에 있습니다");
         return;
       }
-      layout.addCompare(slot, info.code);
+      layout.addCompare(cellId, info.code);
       selection.showToast(`비교에 추가했습니다: ${info.name}`);
     } else if (action === "watch" || action === "toggleWatch") {
       if (included && action === "toggleWatch") {
@@ -86,7 +86,7 @@ function SearchDialogBody({ purpose }: { purpose: SearchPurpose }) {
         selection.showToast(`${watchlist.name}에 넣었습니다: ${info.name}`);
       }
     } else {
-      useLayoutStore.getState().setSymbol(slot, info);
+      useLayoutStore.getState().setSymbol(cellId, info);
       selection.setPhoneTab("chart");
     }
     close();
@@ -96,7 +96,7 @@ function SearchDialogBody({ purpose }: { purpose: SearchPurpose }) {
     if (row.kind === "symbol") return chooseSymbol(row.info, modifiers.ctrlKey || modifiers.metaKey ? "toggleWatch" : modifiers.shiftKey ? "compare" : purpose);
     close();
     try {
-      void Promise.resolve(row.command.run({ slot, queryClient })).catch((error: unknown) => useSelectionStore.getState().showToast(error instanceof Error ? error.message : "명령을 실행하지 못했습니다"));
+      void Promise.resolve(row.command.run({ cellId, queryClient })).catch((error: unknown) => useSelectionStore.getState().showToast(error instanceof Error ? error.message : "명령을 실행하지 못했습니다"));
     } catch (error) {
       useSelectionStore.getState().showToast(error instanceof Error ? error.message : "명령을 실행하지 못했습니다");
     }

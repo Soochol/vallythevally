@@ -4,7 +4,7 @@ import type { ChartSettings } from "../src/chart/settings";
 import type { Layout } from "../src/api/generated/Layout";
 import { installChartProbe } from "./chart-probe";
 import { installFrameProbe } from "./frame-probe";
-import { cell, chartOf, DEFAULT_LAYOUT_ID, expect, test } from "./harness";
+import { cell, chartOf, DEFAULT_LAYOUT_ID, expect, test, withFirstChart } from "./harness";
 
 declare global {
   interface Window {
@@ -33,7 +33,7 @@ test("같은 가격의 체결·worker 프레임은 거래량 축만 무효화하
   const layout: Layout = scenario.documents.layout(DEFAULT_LAYOUT_ID);
   const specs = [KINDS.volume.defaults, KINDS.rsi.defaults, KINDS.macd.defaults, KINDS.stochSlow.defaults];
   const chartSettings: ChartSettings = { v: 2, style: "candle", scale: "normal", visibleBars: null, showExtremes: false, showOhlc: true, showOhlcChange: false, extremeBasis: "last", showDaySeparators: false, compare: [], indicators: specs.map((spec, i) => ({ id: `i${i}`, spec, panel: `p${i}`, visible: true, style: { colors: ["ind-1", "ind-2", "ind-3"], width: 1 } })), panels: specs.map((_, i) => ({ id: `p${i}`, stretch: 0.3 })) };
-  scenario.documents.saveLayout({ ...layout, revision: layout.revision + 1, cells: [{ ...layout.cells[0]!, symbol: "005930", venue: "combined", period: "D", chartSettings }] });
+  scenario.documents.saveLayout({ ...layout, revision: layout.revision + 1, windows: withFirstChart(layout, { symbol: "005930", venue: "combined", period: "D", chartSettings }) });
 
   await page.addInitScript(installChartProbe);
   await page.addInitScript(installFrameProbe);

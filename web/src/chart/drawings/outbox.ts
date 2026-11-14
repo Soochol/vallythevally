@@ -121,11 +121,11 @@ function parsePoint(raw: unknown): DrawingPoint | null {
 function parseScope(raw: unknown): DrawingScope | null {
   const f = fields(raw);
   if (f === null) return null;
-  const { kind, layoutId, slot } = f;
+  const { kind, layoutId, windowId } = f;
   if (kind === "symbol") return { kind };
   if (typeof layoutId !== "string") return null;
   if (kind === "layout") return { kind, layoutId };
-  if (kind === "cell" && (slot === 0 || slot === 1 || slot === 2 || slot === 3)) return { kind, layoutId, slot };
+  if (kind === "cell" && typeof windowId === "string" && windowId.length > 0) return { kind, layoutId, windowId };
   return null;
 }
 

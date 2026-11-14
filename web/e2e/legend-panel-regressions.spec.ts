@@ -1,7 +1,7 @@
 import type { Page } from "@playwright/test";
 import type { Layout } from "../src/api/generated/Layout";
 import { installChartProbe } from "./chart-probe";
-import { type Scenario, cell, DEFAULT_LAYOUT_ID, expect, test } from "./harness";
+import { type Scenario, cell, DEFAULT_LAYOUT_ID, expect, test, firstChart, withFirstChart } from "./harness";
 
 const row = (page: Page, id: string) => cell(page).locator(`[data-indicator-row="${id}"]`);
 const layout = async (scenario: Scenario): Promise<Layout> => scenario.documents.layout(DEFAULT_LAYOUT_ID);
@@ -12,7 +12,7 @@ async function open(page: Page, scenario: Scenario, height = 900, stretches = Ar
     ...[5, 20].map((period, i) => ({ id: `ma${i}`, spec: { kind: "ma", method: "sma", period }, panel: "price", visible: true, style: { colors: ["ind-1"], width: 1 } })),
     ...stretches.map((_, i) => ({ id: `rsi${i}`, spec: { kind: "rsi", period: 14, signal: null }, panel: `p${i}`, visible: true, style: { colors: ["ind-2"], width: 1 } })),
   ], panels: stretches.map((stretch, i) => ({ id: `p${i}`, stretch })) };
-  scenario.documents.saveLayout({ ...saved, revision: saved.revision + 1, cells: [{ ...saved.cells[0]!, symbol: "005930", venue: "combined", period: "D", chartSettings }] });
+  scenario.documents.saveLayout({ ...saved, revision: saved.revision + 1, windows: withFirstChart(saved, { symbol: "005930", venue: "combined", period: "D", chartSettings }) });
   await page.setViewportSize({ width: 1440, height });
   await page.addInitScript(installChartProbe);
   await page.goto("/");
@@ -77,7 +77,7 @@ test("음수·0으로 저장된 패널 높이는 다른 설정을 보존하며 �
   expect(shown.map((pane) => pane.stretch)).toEqual([1, 0.25, 0.25, 0.3, 0.3, 0.3, 0.3]);
   await row(page, "ma1").hover();
   await row(page, "ma1").getByRole("button", { name: /숨기기/ }).click();
-  await expect.poll(async () => (await layout(scenario)).cells[0]?.chartSettings).toMatchObject({ panels: [{ id: "p0", stretch: 0.25 }, { id: "p1", stretch: 0.25 }, { id: "p2", stretch: 0.3 }, { id: "p3", stretch: 0.3 }, { id: "p4", stretch: 0.3 }, { id: "p5", stretch: 0.3 }] });
+  await expect.poll(async () => firstChart(await layout(scenario)).chartSettings).toMatchObject({ panels: [{ id: "p0", stretch: 0.25 }, { id: "p1", stretch: 0.25 }, { id: "p2", stretch: 0.3 }, { id: "p3", stretch: 0.3 }, { id: "p4", stretch: 0.3 }, { id: "p5", stretch: 0.3 }] });
 });
 
 test("같은 지표 이름을 다시 눌러도 Esc는 처음 연 설정으로 돌아간다", async ({ page, scenario }) => {
@@ -91,7 +91,7 @@ test("같은 지표 이름을 다시 눌러도 Esc는 처음 연 설정으로 �
   await expect(popup).toBeVisible();
   await page.keyboard.press("Escape");
   await expect(row(page, "ma0")).toContainText("단순 5");
-  await expect.poll(async () => (await layout(scenario)).cells[0]?.chartSettings).toMatchObject({ indicators: [ { id: "ma0", spec: { period: 5 } }, { id: "ma1", spec: { period: 20 } }, ...Array.from({ length: 6 }, (_, i) => ({ id: `rsi${i}` })) ] });
+  await expect.poll(async () => firstChart(await layout(scenario)).chartSettings).toMatchObject({ indicators: [ { id: "ma0", spec: { period: 5 } }, { id: "ma1", spec: { period: 20 } }, ...Array.from({ length: 6 }, (_, i) => ({ id: `rsi${i}` })) ] });
 });
 
 test("다른 지표 이름은 한 번 눌러 전환하고 각 창의 Esc 원본을 따로 유지한다", async ({ page, scenario }) => {

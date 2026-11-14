@@ -1,7 +1,7 @@
 import { createServer } from "node:http";
 import type { BrowserContext } from "@playwright/test";
 import type { LayoutInput } from "../src/api/generated/LayoutInput";
-import { cell, DEFAULT_LAYOUT_ID, expect, test } from "./harness";
+import { cell, DEFAULT_LAYOUT_ID, expect, test, firstChart } from "./harness";
 
 async function useLayoutEndpoint(context: BrowserContext, origin: string): Promise<void> {
   await context.addInitScript(origin => {
@@ -31,7 +31,7 @@ test("앞 저장이 끝나기 전에 탭을 닫아도 마지막 편집이 HTTP�
       const chunks: Buffer[] = [];
       for await (const chunk of request) chunks.push(Buffer.from(chunk));
       const value: LayoutInput = JSON.parse(Buffer.concat(chunks).toString("utf8"));
-      if (!held && value.cells[0]?.period === "W") { held = true; received(); await blocked; }
+      if (!held && firstChart(value).period === "W") { held = true; received(); await blocked; }
       if (value.revision > stored.revision) stored = { ...value, updatedAt: Math.floor(Date.now() / 1000) };
       else response.statusCode = 409;
     }
@@ -52,7 +52,7 @@ test("앞 저장이 끝나기 전에 탭을 닫아도 마지막 편집이 HTTP�
     await periods.getByRole("button", { name: "월", exact: true }).click();
     await context.unrouteAll({ behavior: "ignoreErrors" });
     await page.close();
-    await expect.poll(() => stored.cells[0]?.period).toBe("M");
+    await expect.poll(() => firstChart(stored).period).toBe("M");
     release();
     const fresh = await browser.newContext({ baseURL });
     try {

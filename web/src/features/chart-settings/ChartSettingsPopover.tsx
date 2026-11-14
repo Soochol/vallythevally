@@ -1,11 +1,12 @@
 import { type RefObject, useEffect, useId, useRef, useState } from "react";
 import { CHART_STYLE_LABEL, type ChartStyle, clampVisibleBars, type ExtremeBasis, type PriceScale, shownScale, VISIBLE_BARS_MAX, VISIBLE_BARS_MIN } from "../../chart/settings";
 import type { IndicatorWindow } from "../../persist/uiState";
-import { type Slot, useCell, useLayoutStore } from "../../stores/layout";
+import { useCell, useLayoutStore } from "../../stores/layout";
 import { useUiStore } from "../../stores/ui";
 import { CloseIcon } from "../icons";
 import { AXIS_LOCKED, LOG_LOCKED, pressScale } from "../indicator-dialog/compareForm";
 import { Popover } from "../overlay/Popover";
+import type { WindowId } from "../../layout/kinds";
 
 const BAR_PRESETS = [null, 60, 120, 240, 480] as const;
 const STYLES = Object.keys(CHART_STYLE_LABEL) as ChartStyle[];
@@ -25,8 +26,8 @@ const EXTREME_BASES = [
 const SEGMENTS = "grid gap-1 rounded-m bg-chart-bg p-1";
 const SEGMENT = "seg-btn !h-7 !min-w-0 !px-1 disabled:cursor-not-allowed disabled:opacity-50";
 
-export function ChartSettingsPopover({ slot, anchor, onClose }: { slot: Slot; anchor: RefObject<HTMLElement | null>; onClose(): void }) {
-  const settings = useCell(slot).chartSettings;
+export function ChartSettingsPopover({ cellId, anchor, onClose }: { cellId: WindowId; anchor: RefObject<HTMLElement | null>; onClose(): void }) {
+  const settings = useCell(cellId).chartSettings;
   const indicatorWindow = useUiStore((s) => s.prefs.indicatorWindow);
   const { setVisibleBars, setShowExtremes, setShowOhlc, setShowOhlcChange, setExtremeBasis, setShowDaySeparators, setStyle, setScale } = useLayoutStore.getState();
   const [draft, setDraft] = useState<string | null>(null);
@@ -42,13 +43,13 @@ export function ChartSettingsPopover({ slot, anchor, onClose }: { slot: Slot; an
   const commitDraft = () => {
     if (draft === null) return;
     setDraft(null);
-    if (draft.trim() === "") return setVisibleBars(slot, null);
+    if (draft.trim() === "") return setVisibleBars(cellId, null);
     const bars = clampVisibleBars(Number(draft));
-    if (bars !== null) setVisibleBars(slot, bars);
+    if (bars !== null) setVisibleBars(cellId, bars);
   };
   const pickScale = (scale: PriceScale) => {
     const next = scale === "normal" ? scale : pressScale(settings, scale);
-    if (next) setScale(slot, next);
+    if (next) setScale(cellId, next);
   };
 
   return (
@@ -71,7 +72,7 @@ export function ChartSettingsPopover({ slot, anchor, onClose }: { slot: Slot; an
           {BAR_PRESETS.map((bars) => (
             <button key={bars ?? "auto"} ref={settings.visibleBars === bars ? focusFirst : undefined} type="button" className={SEGMENT}
               aria-pressed={settings.visibleBars === bars} title={bars === null ? "기본 봉 수 (데스크톱 130, 휴대폰 90, 분기봉·연봉은 전체)" : undefined}
-              onClick={() => { setDraft(null); setVisibleBars(slot, bars); }}>{bars ?? "자동"}</button>
+              onClick={() => { setDraft(null); setVisibleBars(cellId, bars); }}>{bars ?? "자동"}</button>
           ))}
         </div>
       </section>
@@ -79,28 +80,28 @@ export function ChartSettingsPopover({ slot, anchor, onClose }: { slot: Slot; an
       <section className="flex flex-col gap-2">
         <h3 className="sr-only">표시</h3>
         <SettingSwitch label="봉 값 (시·고·저·종·량)" detail="범례에 봉의 시가·고가·저가·종가·거래량 줄을 표시"
-          checked={settings.showOhlc} onChange={(on) => setShowOhlc(slot, on)} />
+          checked={settings.showOhlc} onChange={(on) => setShowOhlc(cellId, on)} />
         <SettingSwitch label="봉 값 등락률" detail="시·고·저·종 옆에 직전 봉 종가 대비 %"
-          checked={settings.showOhlcChange} disabled={!settings.showOhlc} onChange={(on) => setShowOhlcChange(slot, on)} />
+          checked={settings.showOhlcChange} disabled={!settings.showOhlc} onChange={(on) => setShowOhlcChange(cellId, on)} />
         <SettingSwitch label="화면 내 최고·최저" detail="지금 보이는 봉 안에서 찾아 표시"
-          checked={settings.showExtremes} onChange={(on) => setShowExtremes(slot, on)} />
+          checked={settings.showExtremes} onChange={(on) => setShowExtremes(cellId, on)} />
         <div className="flex items-center gap-2">
           <span id={`${id}-extreme-basis`} className="flex-1 text-text-2">최고·최저 등락률</span>
           <div role="group" aria-labelledby={`${id}-extreme-basis`} className={`${SEGMENTS} grid-cols-2`}>
             {EXTREME_BASES.map(({ value, label, title }) => (
               <button key={value} type="button" className={SEGMENT} title={title} aria-pressed={settings.extremeBasis === value}
-                disabled={!settings.showExtremes} onClick={() => setExtremeBasis(slot, value)}>{label}</button>
+                disabled={!settings.showExtremes} onClick={() => setExtremeBasis(cellId, value)}>{label}</button>
             ))}
           </div>
         </div>
         <SettingSwitch label="날짜 구분선" detail="분봉에서 날짜가 바뀌는 자리에 세로선"
-          checked={settings.showDaySeparators} onChange={(on) => setShowDaySeparators(slot, on)} />
+          checked={settings.showDaySeparators} onChange={(on) => setShowDaySeparators(cellId, on)} />
       </section>
       <div className="h-px bg-line" />
       <div className="grid grid-cols-[56px_minmax(0,1fr)] items-center gap-x-2 gap-y-2">
         <span id={`${id}-style`} className="text-text-2">봉 모양</span>
         <div role="group" aria-labelledby={`${id}-style`} className={`${SEGMENTS} grid-cols-4`}>
-          {STYLES.map((style) => <button key={style} type="button" className={SEGMENT} aria-pressed={settings.style === style} onClick={() => setStyle(slot, style)}>{CHART_STYLE_LABEL[style]}</button>)}
+          {STYLES.map((style) => <button key={style} type="button" className={SEGMENT} aria-pressed={settings.style === style} onClick={() => setStyle(cellId, style)}>{CHART_STYLE_LABEL[style]}</button>)}
         </div>
         <span id={`${id}-scale`} className="text-text-2">가격 축</span>
         <div role="group" aria-labelledby={`${id}-scale`} className={`${SEGMENTS} grid-cols-3`}>

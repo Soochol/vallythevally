@@ -5,7 +5,7 @@ import type { DrawingBody } from "./types";
 
 const body = (id: string, price: number, revision = 0): DrawingBody => ({
   id, symbol: "005930", tool: "trendline", points: [{ t: 1, price }, { t: 2, price: price + 10 }], text: null, style: { v: 1 },
-  locked: false, hidden: false, periods: ["D", "60m"], z: 1, group: null, scope: { kind: "cell", layoutId: "L1", slot: 2 }, revision,
+  locked: false, hidden: false, periods: ["D", "60m"], z: 1, group: null, scope: { kind: "cell", layoutId: "L1", windowId: "cell-2" }, revision,
 });
 const put = (b: DrawingBody): Want => ({ kind: "put", body: b, reserved: true });
 const del: Want = { kind: "delete" };

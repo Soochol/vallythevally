@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import { DEFAULT_LAYOUT, useLayoutStore } from "../stores/layout";
+import { windowId, type WindowId } from "../layout/kinds";
+import type { Rect } from "../layout/placement";
+import { chartWindows, DEFAULT_LAYOUT, useLayoutStore } from "../stores/layout";
 import { usePersistStore } from "../stores/persist";
 import { useUiStore } from "../stores/ui";
 import { useWatchlistStore } from "../stores/watchlist";
@@ -10,6 +12,8 @@ import { restore } from "./restore";
 import { DEFAULT_UI_PREFS, toUiState } from "./uiState";
 import { FIRST_WATCHLIST_ID, MAX_WATCHLIST_NAME, MAX_WATCHLISTS } from "../lib/watchlist";
 
+const CELL = chartWindows(DEFAULT_LAYOUT)[0]!.id;
+const [CHART, ...OTHER_WINDOWS] = DEFAULT_LAYOUT.windows;
 const FIRST = { id: FIRST_WATCHLIST_ID, name: "기본", groups: [] };
 
 let autosave: Autosave;
@@ -41,21 +45,28 @@ afterEach(() => {
 test("복원한 값을 싣기만 하면 아무것도 보내지 않는다", async () => {
   useLayoutStore.getState().load(DEFAULT_LAYOUT);
   useUiStore.getState().pushRecent("IDX:001"); // 첫 칸의 종목은 이미 맨 앞이다
-  useLayoutStore.getState().setPeriod(0, "D"); // 같은 값
+  useLayoutStore.getState().setPeriod(CELL, "D"); // 같은 값
   await vi.advanceTimersByTimeAsync(10_000);
   expect(puts).toEqual([]);
 });
 
 test("칸을 바꾸면 1초 뒤 레이아웃을 통째로 보내고 저장됨이 된다", async () => {
-  useLayoutStore.getState().setPeriod(0, "W");
-  useLayoutStore.getState().setStyle(0, "line");
+  useLayoutStore.getState().setPeriod(CELL, "W");
+  useLayoutStore.getState().setStyle(CELL, "line");
   await vi.advanceTimersByTimeAsync(999);
   expect(puts).toEqual([]);
   expect(usePersistStore.getState().saves.layout).toEqual({ kind: "pending" });
   await vi.advanceTimersByTimeAsync(1);
   expect(puts).toHaveLength(1);
   expect(puts[0]!.path).toBe(`/api/layouts/${DEFAULT_LAYOUT.id}`);
-  expect(puts[0]!.body).toMatchObject({ id: DEFAULT_LAYOUT.id, cells: [{ period: "W", chartSettings: { style: "line" } }] });
+  expect(puts[0]!.body).toEqual({
+    id: DEFAULT_LAYOUT.id,
+    name: DEFAULT_LAYOUT.name,
+    sync: DEFAULT_LAYOUT.sync,
+    windows: [{ ...CHART, period: "W", chartSettings: { ...chartWindows(DEFAULT_LAYOUT)[0]!.chartSettings, style: "line" } }, ...OTHER_WINDOWS],
+    placement: { v: 1, dock: null, canvas: null },
+    revision: expect.any(Number),
+  });
   expect(puts[0]!.body).not.toHaveProperty("updatedAt");
   expect(usePersistStore.getState().saves.layout.kind).toBe("saved");
 });
@@ -176,23 +187,34 @@ test("줄여도 64KB를 넘으면 보내지 않고 실패로 남는다", async (
 });
 
 test("chartSettings가 64KB를 넘으면 레이아웃을 보내지 않는다", async () => {
-  const big = { ...DEFAULT_LAYOUT.cells[0]!.chartSettings, compare: Array.from({ length: 8000 }, (_, i) => String(i).padStart(6, "0")) };
-  useLayoutStore.getState().load({ ...DEFAULT_LAYOUT, cells: [{ ...DEFAULT_LAYOUT.cells[0]!, chartSettings: big }] });
-  useLayoutStore.getState().setPeriod(0, "M");
+  const chart = chartWindows(DEFAULT_LAYOUT)[0]!;
+  const big = { ...chart.chartSettings, compare: Array.from({ length: 8000 }, (_, i) => String(i).padStart(6, "0")) };
+  useLayoutStore.getState().load({ ...DEFAULT_LAYOUT, windows: [{ ...chart, chartSettings: big }, ...OTHER_WINDOWS] });
+  useLayoutStore.getState().setPeriod(CELL, "M");
+  await vi.advanceTimersByTimeAsync(10 * 60_000);
+  expect(puts).toEqual([]);
+  expect(usePersistStore.getState().saves.layout).toEqual({ kind: "failed", reason: "too_large" });
+});
+
+test("placement가 64KB를 넘으면 레이아웃을 보내지 않는다", async () => {
+  const order = Array.from({ length: 3000 }, (_, i) => windowId(`window-${i}`));
+  const rects = Object.fromEntries(order.map((id) => [id, { x: 0.125, y: 0.25, w: 0.5, h: 0.5 }])) as Record<WindowId, Rect>;
+  useLayoutStore.getState().load({ ...DEFAULT_LAYOUT, placement: { v: 1, dock: null, canvas: { rects, order } } });
+  useLayoutStore.getState().setPeriod(CELL, "M");
   await vi.advanceTimersByTimeAsync(10 * 60_000);
   expect(puts).toEqual([]);
   expect(usePersistStore.getState().saves.layout).toEqual({ kind: "failed", reason: "too_large" });
 });
 
 test("탭이 숨으면 기다리던 레이아웃을 keepalive로 곧바로 보낸다", async () => {
-  useLayoutStore.getState().setPeriod(0, "W");
+  useLayoutStore.getState().setPeriod(CELL, "W");
   autosave.flush();
   await vi.advanceTimersByTimeAsync(0);
   expect(puts.map((p) => [p.path, p.keepalive])).toEqual([[`/api/layouts/${DEFAULT_LAYOUT.id}`, true]]);
 });
 
 test("R1: 종목 정보를 못 받아 통합으로 그리는 NXT 칸은, 봉 주기만 바꿔 저장해도 nxt로 저장된다", async () => {
-  const stored = { ...DEFAULT_LAYOUT, cells: [{ ...DEFAULT_LAYOUT.cells[0]!, symbol: "005930", venue: "nxt" as const }], updatedAt: 1, revision: 1 };
+  const stored = { ...DEFAULT_LAYOUT, windows: [{ ...chartWindows(DEFAULT_LAYOUT)[0]!, symbol: "005930", venue: "nxt" as const }, ...OTHER_WINDOWS], updatedAt: 1, revision: 1 };
   const r = await restore({
     uiState: async () => ({ lastLayoutId: DEFAULT_LAYOUT.id, theme: "dark" }),
     layouts: async () => [],
@@ -203,8 +225,8 @@ test("R1: 종목 정보를 못 받아 통합으로 그리는 NXT 칸은, 봉 주
   });
   useLayoutStore.getState().load(r.layout);
   expect(r.layoutDirty).toBe(false);
-  useLayoutStore.getState().setPeriod(0, "W");
+  useLayoutStore.getState().setPeriod(CELL, "W");
   await vi.advanceTimersByTimeAsync(1000);
   expect(puts).toHaveLength(1);
-  expect(puts[0]!.body).toMatchObject({ cells: [{ symbol: "005930", venue: "nxt", period: "W" }] });
+  expect(puts[0]!.body).toMatchObject({ windows: [{ symbol: "005930", venue: "nxt", period: "W" }, ...OTHER_WINDOWS] });
 });

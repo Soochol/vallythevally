@@ -18,11 +18,11 @@ export const MAX_COVER_PAGES = 20;
 
 export const COMPARE_NOTE = { missing: "찾을 수 없음", failed: "받지 못함", limited: "실시간 아님", base: "% 기준: 첫 받은 봉" } as const;
 
-export type CompareSlot = 1 | 2 | 3;
+export type CompareColorIndex = 1 | 2 | 3;
 
 export interface CompareEntry {
   code: SymbolCode;
-  slot: CompareSlot;
+  slot: CompareColorIndex;
   name: string;
 }
 
@@ -293,7 +293,7 @@ export class CompareLayer {
     this.host.requestFrame();
   }
 
-  private color(slot: CompareSlot): string {
+  private color(slot: CompareColorIndex): string {
     return this.host.tokens().cmp[slot];
   }
 

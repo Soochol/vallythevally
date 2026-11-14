@@ -13,9 +13,9 @@ import { BrandIcon, ChevronIcon, CameraIcon, CopyIcon, IndicatorIcon, SearchIcon
 import { canCopyImage, saveSnapshot } from "../snapshot/saveSnapshot";
 
 export function Topbar() {
-  const slot = useSelectionStore((s) => s.activeSlot);
+  const cellId = useSelectionStore((s) => s.activeCell);
   const openSearch = useSelectionStore((s) => s.openSearch);
-  const cell = useCell(slot);
+  const cell = useCell(cellId);
   const opensDialog = useUiStore((s) => s.prefs.indicatorWindow) === "dialog";
   const info = useSymbolInfo(cell.symbol).data;
   const { setPeriod } = useLayoutStore.getState();
@@ -32,21 +32,21 @@ export function Topbar() {
       </button>
       <span className="tb-sep" />
       <div role="group" aria-label="봉 주기" className="flex flex-none items-center gap-px">
-        <MinuteMenu value={cell.period} onChange={(period) => setPeriod(slot, period)} />
+        <MinuteMenu value={cell.period} onChange={(period) => setPeriod(cellId, period)} />
         {PERIODS.filter((p) => !p.endsWith("m")).map((p) => (
           <button key={p} type="button" className="seg-btn" aria-pressed={cell.period === p}
-            title={periodKey(p) ? `${PERIOD_LABEL[p]} (${periodKey(p)})` : PERIOD_LABEL[p]} onClick={() => setPeriod(slot, p)}>{PERIOD_LABEL[p]}</button>
+            title={periodKey(p) ? `${PERIOD_LABEL[p]} (${periodKey(p)})` : PERIOD_LABEL[p]} onClick={() => setPeriod(cellId, p)}>{PERIOD_LABEL[p]}</button>
         ))}
       </div>
       <span className="tb-sep" />
-      <button type="button" className="tb-btn" aria-haspopup={opensDialog ? "dialog" : undefined} title="지표 (I)" onClick={() => openIndicatorCommand(slot)}><IndicatorIcon />지표</button>
-      <button type="button" className="tb-btn" aria-haspopup={opensDialog ? "dialog" : undefined} title="비교 종목" onClick={() => openIndicatorCommand(slot, "compare")}><CompareIcon />비교</button>
+      <button type="button" className="tb-btn" aria-haspopup={opensDialog ? "dialog" : undefined} title="지표 (I)" onClick={() => openIndicatorCommand(cellId)}><IndicatorIcon />지표</button>
+      <button type="button" className="tb-btn" aria-haspopup={opensDialog ? "dialog" : undefined} title="비교 종목" onClick={() => openIndicatorCommand(cellId, "compare")}><CompareIcon />비교</button>
       <span className="min-w-0 flex-1" />
       <FinancialUpdateButton />
-      <button type="button" className="icon-btn" title="차트 이미지 내려받기 (Alt+S)" aria-label="차트 이미지 내려받기" onClick={() => saveSnapshot(slot, "download")}><CameraIcon /></button>
-      {canCopyImage() && <button type="button" className="icon-btn" title="차트 이미지 복사 (Alt+Shift+S)" aria-label="차트 이미지 복사" onClick={() => saveSnapshot(slot, "copy")}><CopyIcon /></button>}
+      <button type="button" className="icon-btn" title="차트 이미지 내려받기 (Alt+S)" aria-label="차트 이미지 내려받기" onClick={() => saveSnapshot(cellId, "download")}><CameraIcon /></button>
+      {canCopyImage() && <button type="button" className="icon-btn" title="차트 이미지 복사 (Alt+Shift+S)" aria-label="차트 이미지 복사" onClick={() => saveSnapshot(cellId, "copy")}><CopyIcon /></button>}
       <button ref={settingsButton} type="button" className="tb-btn aria-expanded:bg-accent-soft aria-expanded:font-semibold aria-expanded:text-accent" aria-haspopup="dialog" aria-expanded={settingsOpen} onClick={() => setSettingsOpen((open) => !open)}><SlidersIcon />차트 설정</button>
-      {settingsOpen && <ChartSettingsPopover slot={slot} anchor={settingsButton} onClose={() => setSettingsOpen(false)} />}
+      {settingsOpen && <ChartSettingsPopover cellId={cellId} anchor={settingsButton} onClose={() => setSettingsOpen(false)} />}
       <button type="button" className="tb-btn shell-search" aria-haspopup="dialog" aria-label="종목·지표·명령 찾기" title="종목 검색 (/ 또는 Ctrl+K)" onClick={() => openSearch()}>
         <SearchIcon size={14} />
         <kbd>/</kbd>

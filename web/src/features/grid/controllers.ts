@@ -1,15 +1,15 @@
 import type { ChartController } from "../../chart/ChartController";
-import type { Slot } from "../../stores/layout";
+import type { WindowId } from "../../layout/kinds";
 
-const bySlot = new Map<Slot, ChartController>();
+const byCell = new Map<WindowId, ChartController>();
 
-export function attachController(slot: Slot, controller: ChartController): () => void {
-  bySlot.set(slot, controller);
+export function attachController(cellId: WindowId, controller: ChartController): () => void {
+  byCell.set(cellId, controller);
   return () => {
-    if (bySlot.get(slot) === controller) bySlot.delete(slot);
+    if (byCell.get(cellId) === controller) byCell.delete(cellId);
   };
 }
 
-export function controllerFor(slot: Slot): ChartController | undefined {
-  return bySlot.get(slot);
+export function controllerFor(cellId: WindowId): ChartController | undefined {
+  return byCell.get(cellId);
 }

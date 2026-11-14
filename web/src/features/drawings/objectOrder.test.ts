@@ -2,19 +2,22 @@ import { expect, test, vi } from "vitest";
 import { DrawingSurface } from "../../chart/drawings/DrawingSurface";
 import { objectGroups } from "../../chart/drawings/objects";
 import type { DrawingBody, DrawingOp } from "../../chart/drawings/types";
+import { windowId, type WindowId } from "../../layout/kinds";
 import { moveObject } from "./objectOrder";
 
-const drawing: DrawingBody = { id: "low", symbol: "005930", tool: "hline", points: [{ t: 1, price: 100 }], text: null, style: {}, locked: false, hidden: false, periods: null, z: 1, group: null, scope: { kind: "cell", layoutId: "L", slot: 0 }, revision: 1 };
+const CELL = windowId("cell-0");
+
+const drawing: DrawingBody = { id: "low", symbol: "005930", tool: "hline", points: [{ t: 1, price: 100 }], text: null, style: {}, locked: false, hidden: false, periods: null, z: 1, group: null, scope: { kind: "cell", layoutId: "L", windowId: CELL }, revision: 1 };
 
 function setup() {
   let drawings: DrawingBody[] = [{ ...drawing, id: "common-bottom", z: 0, scope: { kind: "symbol" } }, drawing, { ...drawing, id: "common", z: 2, scope: { kind: "symbol" } }, { ...drawing, id: "high", z: 3 }, { ...drawing, id: "common-top", z: 4, scope: { kind: "symbol" } }];
-  const commit = vi.fn((_slot: number, ops: readonly DrawingOp[]) => {
+  const commit = vi.fn((_cellId: WindowId, ops: readonly DrawingOp[]) => {
     for (const op of ops) if (op.kind === "update") drawings = drawings.map((d) => d.id === op.before.id ? op.after : d);
   });
   const surface: DrawingSurface = Object.assign(Object.create(DrawingSurface.prototype), {
-    slot: 0, host: { view: () => ({ symbol: drawing.symbol }) }, sync: { drawings: () => [...drawings].sort((a, b) => a.z - b.z), commit },
+    cellId: CELL, host: { view: () => ({ symbol: drawing.symbol }) }, sync: { drawings: () => [...drawings].sort((a, b) => a.z - b.z), commit },
   });
-  const group = () => objectGroups(drawings, "L", 0).find((g) => g.kind === "cell")?.drawings ?? [];
+  const group = () => objectGroups(drawings, "L", CELL).find((g) => g.kind === "cell")?.drawings ?? [];
   const ids = () => group().map((d) => d.id);
   return { surface, group, ids, commit, all: () => drawings };
 }

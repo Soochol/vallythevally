@@ -2,7 +2,7 @@ import { parseChartSettings } from "../src/chart/settings";
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import type { Page } from "@playwright/test";
-import { type Scenario, cell, DEFAULT_LAYOUT_ID, expect, test } from "./harness";
+import { type Scenario, cell, DEFAULT_LAYOUT_ID, expect, test, firstChart } from "./harness";
 
 const panel = (page: Page) => page.getByRole("complementary", { name: "관심종목" });
 const row = (page: Page, code: string) => panel(page).locator(`li[data-code="${code}"]`);
@@ -177,7 +177,7 @@ test("우클릭의 열기·비교·맨 위로·복사와 키보드·끌기를 �
   await expect(cell(page)).toHaveAttribute("aria-label", /삼성전자/);
   await action(page, "086520", "비교에 추가");
   await expect(page.getByRole("status").getByText("비교에 추가했습니다: 에코프로")).toBeVisible();
-  await expect.poll(async () => parseChartSettings(scenario.documents.layout(DEFAULT_LAYOUT_ID).cells[0]!.chartSettings).compare).toEqual(["086520"]);
+  await expect.poll(async () => parseChartSettings(firstChart(scenario.documents.layout(DEFAULT_LAYOUT_ID)).chartSettings).compare).toEqual(["086520"]);
   await action(page, "086520", "맨 위로");
   await expect.poll(() => codes(page)).toEqual(["086520", "005930", "005935"]);
   await expect(row(page, "086520").locator("[data-main]")).toBeFocused();

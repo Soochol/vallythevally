@@ -1,6 +1,6 @@
 import { test as base, expect, type Locator, type Page } from "@playwright/test";
 import { Scenario } from "./fixtures/scenario";
-export { DEFAULT_LAYOUT_ID, type Scenario } from "./fixtures/scenario";
+export { DEFAULT_LAYOUT_ID, firstChart, withFirstChart, type Scenario } from "./fixtures/scenario";
 
 export const test = base.extend<{ scenario: Scenario; clockStart: string | null }>({
   clockStart: [null, { option: true }],

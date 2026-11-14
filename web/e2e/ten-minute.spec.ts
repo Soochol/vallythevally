@@ -4,7 +4,7 @@ import type { Locator, Page } from "@playwright/test";
 import type { SeriesKey } from "../src/api/bars";
 import type { Drawing } from "../src/api/generated/Drawing";
 import type { Layout } from "../src/api/generated/Layout";
-import { type Scenario, cell, chartOf, DEFAULT_LAYOUT_ID, expect, test } from "./harness";
+import { type Scenario, cell, chartOf, DEFAULT_LAYOUT_ID, expect, test, firstChart, withFirstChart } from "./harness";
 
 const TEN_MINUTES = 600;
 
@@ -56,7 +56,7 @@ function toolbarLayout(page: Page) {
 const layoutSaved = (page: Page, want: { venue: string; period: string }) =>
   page.waitForResponse((r) => {
     if (r.request().method() !== "PUT" || !r.url().includes("/api/layouts/") || !r.ok()) return false;
-    const saved = (r.request().postDataJSON() as Layout).cells[0]!;
+    const saved = firstChart(r.request().postDataJSON() as Layout);
     return saved.venue === want.venue && saved.period === want.period;
   });
 
@@ -140,7 +140,7 @@ test.describe("데스크톱", () => {
     await page.reload();
     await expectRestored();
     const layout: Layout = scenario.documents.layout(DEFAULT_LAYOUT_ID);
-    expect(layout.cells[0]!.period).toBe("10m");
+    expect(firstChart(layout).period).toBe("10m");
   });
 });
 
@@ -202,8 +202,9 @@ test.describe("실시간", () => {
 
 test.describe("분석 도구", () => {
   async function seedLayout(scenario: Scenario, chartSettings: object) {
-    const { id, name, arrangement, sync, revision }: Layout = scenario.documents.layout(DEFAULT_LAYOUT_ID);
-    const body: Parameters<Scenario["documents"]["saveLayout"]>[0] = { id, name, arrangement, sync, revision: revision + 1, cells: [{ slot: 0, symbol: "005930", venue: "combined", period: "10m", symbolLink: false, chartSettings }] };
+    const layout: Layout = scenario.documents.layout(DEFAULT_LAYOUT_ID);
+    const { id, name, sync, placement, revision } = layout;
+    const body: Parameters<Scenario["documents"]["saveLayout"]>[0] = { id, name, sync, placement, revision: revision + 1, windows: withFirstChart(layout, { symbol: "005930", venue: "combined", period: "10m", chartSettings }) };
     scenario.documents.saveLayout(body);
 
   }

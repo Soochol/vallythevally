@@ -40,6 +40,12 @@ test.each([null, undefined, [], [{ v: 1 }], "x", 1, { v: 2, dock, canvas }, { v:
   expect(warn).toHaveBeenCalledOnce();
 });
 
+test("마이그레이션이 남긴 빈 객체는 경고 없이 빈 배치가 된다", () => {
+  const warn = silence();
+  expect(parsePlacement({})).toEqual({ v: 1, dock: null, canvas: null });
+  expect(warn).not.toHaveBeenCalled();
+});
+
 const badDocks: [string, unknown][] = [
   ["빈 tabs", { ...dock, root: group("main", [], "c1") }],
   ["tabs 밖의 active", { ...dock, root: group("main", ["c1"], "c9") }],

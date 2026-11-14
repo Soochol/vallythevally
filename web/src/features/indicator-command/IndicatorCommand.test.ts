@@ -2,14 +2,14 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { expect, test } from "vitest";
-import { DEFAULT_LAYOUT, useLayoutStore } from "../../stores/layout";
+import { chartWindows, DEFAULT_LAYOUT, useLayoutStore } from "../../stores/layout";
 import type { IndicatorCommandMode } from "../../stores/selection";
 import { IndicatorCommandBody } from "./IndicatorCommand";
 
 function markup(mode: IndicatorCommandMode) {
   useLayoutStore.getState().load(structuredClone(DEFAULT_LAYOUT));
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  const html = renderToStaticMarkup(createElement(QueryClientProvider, { client }, createElement(IndicatorCommandBody, { slot: 0, initialMode: mode })));
+  const html = renderToStaticMarkup(createElement(QueryClientProvider, { client }, createElement(IndicatorCommandBody, { cellId: chartWindows(DEFAULT_LAYOUT)[0]!.id, initialMode: mode })));
   client.clear();
   return html;
 }

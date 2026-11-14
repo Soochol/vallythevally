@@ -3,7 +3,7 @@ import type { Page } from "@playwright/test";
 import type { Layout } from "../src/api/generated/Layout";
 import { installFrameProbe } from "./frame-probe";
 import { parseChartSettings } from "../src/chart/settings";
-import { type Scenario, barTimes, cell, chartOf, DEFAULT_LAYOUT_ID, dragTowardPast, expect, test } from "./harness";
+import { type Scenario, barTimes, cell, chartOf, DEFAULT_LAYOUT_ID, dragTowardPast, expect, test, firstChart, withFirstChart } from "./harness";
 
 test.use({ clockStart: "20261109100030" });
 
@@ -11,9 +11,9 @@ const ICHIMOKU_FOR_30_MINUTE_BARS = { kind: "ichimoku", conversion: 3, base: 5, 
 
 async function seedLayout(scenario: Scenario, period: NonNullable<Parameters<Scenario["market"]["page"]>[0]["period"]>, indicators: object[], panels: object[], symbol = "005930") {
   const current: Layout = scenario.documents.layout(DEFAULT_LAYOUT_ID);
-  const { id, name, arrangement, sync, revision } = current;
+  const { id, name, sync, placement, revision } = current;
   const chartSettings = { v: 2, style: "candle", scale: "normal", indicators, compare: [], panels };
-  const body: Parameters<Scenario["documents"]["saveLayout"]>[0] = { id, name, arrangement, sync, revision: revision + 1, cells: [{ slot: 0, symbol, venue: "combined", period, symbolLink: false, chartSettings }] };
+  const body: Parameters<Scenario["documents"]["saveLayout"]>[0] = { id, name, sync, placement, revision: revision + 1, windows: withFirstChart(current, { symbol, venue: "combined", period, chartSettings }) };
   scenario.documents.saveLayout(body);
   if (period === "1m") scenario.on("/api/bars", request => {
     const url = new URL(request.url());
@@ -89,7 +89,7 @@ test("열기만 하면 v1 차트 설정을 서버에 쓰지 않고, 기본 거�
     if (r.method() === "PUT" && r.url().includes("/api/layouts/")) puts.push(r.url());
   });
   const saved: Layout = scenario.documents.layout(DEFAULT_LAYOUT_ID);
-  expect(saved.cells[0]!.chartSettings).toMatchObject({ v: 1, indicators: [] });
+  expect(firstChart(saved).chartSettings).toMatchObject({ v: 1, indicators: [] });
   await page.goto("/");
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
   await expect(page.locator("[data-indicator-row]")).toHaveCount(1);
@@ -104,7 +104,7 @@ for (const wasmDelay of [0, 80]) {
   const name = wasmDelay === 0 ? "첫 화면에서 거래량 막대는 봉보다 많아야 한 프레임 늦게 그려진다" : "WASM 응답이 늦어도 첫 화면의 기본 거래량은 봉보다 많아야 한 프레임 늦게 준비된다";
   test(name, async ({ page, scenario }) => {
     const saved = scenario.documents.layout(DEFAULT_LAYOUT_ID);
-    scenario.documents.saveLayout({ ...saved, revision: saved.revision + 1, cells: saved.cells.map(c => ({ ...c, symbol: "005930", venue: "combined" })) });
+    scenario.documents.saveLayout({ ...saved, revision: saved.revision + 1, windows: saved.windows.map(w => w.kind === "chart" ? { ...w, symbol: "005930", venue: "combined" } : w) });
     let wasmRequests = 0;
     if (wasmDelay > 0) await page.context().route("**/*.wasm", async route => {
       wasmRequests++;
@@ -336,7 +336,7 @@ test.describe("체결 없던 분 뒤", () => {
 });
 
 test("지표 창에서 테마 색을 고르면 토큰을, 색상표의 색을 고르면 HEX를 저장하고 고친 색도 같은 규칙을 따른다", async ({ page, scenario }) => {
-  const saved = async () => parseChartSettings(scenario.documents.layout(DEFAULT_LAYOUT_ID).cells[0]!.chartSettings).indicators.filter((i) => i.spec.kind === "ma").map((i) => i.style.colors);
+  const saved = async () => parseChartSettings(firstChart(scenario.documents.layout(DEFAULT_LAYOUT_ID)).chartSettings).indicators.filter((i) => i.spec.kind === "ma").map((i) => i.style.colors);
   await page.goto("/?symbol=005930");
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
   await page.getByRole("button", { name: "지표", exact: true }).click();

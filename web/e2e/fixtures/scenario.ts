@@ -13,6 +13,7 @@ import type { Drawing } from "../../src/api/generated/Drawing";
 import type { DrawingInput } from "../../src/api/generated/DrawingInput";
 import type { Layout } from "../../src/api/generated/Layout";
 import type { LayoutInput } from "../../src/api/generated/LayoutInput";
+import type { LayoutWindow } from "../../src/api/generated/LayoutWindow";
 import type { Period } from "../../src/api/generated/Period";
 import type { Screens } from "../../src/api/generated/Screens";
 import type { ServerMessage } from "../../src/api/generated/ServerMessage";
@@ -31,11 +32,21 @@ type Handler = (request: Request) => FixtureReply | Promise<FixtureReply>;
 type Subscription = Extract<ClientMessage, { type: "subscribe" }>;
 const clone = <T>(value: T): T => structuredClone(value);
 const error = (status: number, code: ApiError["error"]["code"], message: string): FixtureReply => ({ status, body: { error: { code, message, reason: null, retryAt: null, manualActionRequired: false } } satisfies ApiError });
+export type ChartWindow = Extract<LayoutWindow, { kind: "chart" }>;
+export function firstChart(layout: { windows: LayoutWindow[] }): ChartWindow {
+  const chart = layout.windows.find((w): w is ChartWindow => w.kind === "chart");
+  if (!chart) throw new Error("레이아웃에 차트 창이 없습니다");
+  return chart;
+}
+export function withFirstChart(layout: { windows: LayoutWindow[] }, patch: Partial<Omit<ChartWindow, "id" | "kind">>): LayoutWindow[] {
+  const chart = firstChart(layout);
+  return layout.windows.map((w) => (w === chart ? { ...chart, ...patch } : w));
+}
 export type WatchlistSeed = Omit<Watchlist, "groups"> & Partial<Pick<Watchlist, "groups">>;
 const matches = (match: Matcher, request: Request) => typeof match === "string" ? new URL(request.url()).pathname === match : match(new URL(request.url()), request);
 
 export class UserDocuments {
-  private layouts = new Map<string, Layout>([[DEFAULT_LAYOUT_ID, { id: DEFAULT_LAYOUT_ID, name: "기본", arrangement: "1", sync: { crosshair: true, scroll: true }, cells: [{ slot: 0, symbol: "IDX:001", venue: null, period: "D", symbolLink: false, chartSettings: { v: 1, style: "candle", scale: "normal", indicators: [], compare: [], panels: [] } }], updatedAt: 0, revision: 0 }]]);
+  private layouts = new Map<string, Layout>([[DEFAULT_LAYOUT_ID, { id: DEFAULT_LAYOUT_ID, name: "기본", sync: { crosshair: true, scroll: true }, windows: [{ id: "cell-0", link: null, kind: "chart", symbol: "IDX:001", venue: null, period: "D", chartSettings: { v: 1, style: "candle", scale: "normal", indicators: [], compare: [], panels: [] } }, { id: "watchlist", link: null, kind: "watchlist" }, { id: "screener", link: null, kind: "screener" }, { id: "objects", link: null, kind: "objects" }], placement: {}, updatedAt: 0, revision: 0 }]]);
   private watchlistValue: Watchlists = { lists: [{ id: FIRST_WATCHLIST_ID, name: "기본", symbols: [], groups: [] }], revision: 0 };
   private screenValue: Screens = { screens: [], revision: 0 };
   private uiValue: UiState = { lastLayoutId: DEFAULT_LAYOUT_ID, theme: "dark", revision: 0 };
@@ -47,7 +58,7 @@ export class UserDocuments {
     if (!value) throw new Error(`Missing layout fixture: ${id}`);
     return clone(value);
   }
-  layoutSummaries() { return [...this.layouts.values()].map(({ id, name, arrangement, updatedAt }) => ({ id, name, arrangement, updatedAt })); }
+  layoutSummaries() { return [...this.layouts.values()].map(({ id, name, updatedAt }) => ({ id, name, updatedAt })); }
   saveLayout(value: LayoutInput): Layout {
     const saved: Layout = { ...clone(value), updatedAt: Math.floor(Date.now() / 1000) };
     this.layouts.set(saved.id, saved);

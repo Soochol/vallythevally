@@ -5,11 +5,11 @@ import type { Layout } from "../src/api/generated/Layout";
 import { parseChartSettings } from "../src/chart/settings";
 import { installChartProbe } from "./chart-probe";
 import { installFrameProbe } from "./frame-probe";
-import { type Scenario, cell, DEFAULT_LAYOUT_ID, expect, test } from "./harness";
+import { type Scenario, cell, DEFAULT_LAYOUT_ID, expect, test, firstChart, withFirstChart } from "./harness";
 
 async function settings(scenario: Scenario) {
   const layout: Layout = scenario.documents.layout(DEFAULT_LAYOUT_ID);
-  return parseChartSettings(layout.cells[0]!.chartSettings);
+  return parseChartSettings(firstChart(layout).chartSettings);
 }
 
 async function seed(scenario: Scenario) {
@@ -19,7 +19,7 @@ async function seed(scenario: Scenario) {
     { id: "volume", spec: { kind: "volume", maPeriod: null }, panel: "p-volume", visible: true, style: { colors: ["ind-1"], width: 1 } },
     { id: "rsi", spec: { kind: "rsi", period: 14, signal: null }, panel: "p-rsi", visible: true, style: { colors: ["ind-2"], width: 1 } },
   ], panels: [{ id: "p-volume", stretch: 0.25 }, { id: "p-rsi", stretch: 0.25 }] };
-  scenario.documents.saveLayout({ ...layout, revision: layout.revision + 1, cells: [{ ...layout.cells[0]!, symbol: "005930", venue: "combined", period: "D", chartSettings }] });
+  scenario.documents.saveLayout({ ...layout, revision: layout.revision + 1, windows: withFirstChart(layout, { symbol: "005930", venue: "combined", period: "D", chartSettings }) });
 }
 
 const row = (page: Page, id: string) => cell(page).locator(`[data-indicator-row="${id}"]`);

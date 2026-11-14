@@ -4,7 +4,6 @@ import type { ScreenPoint } from "../../chart/drawings/types";
 import { formatBarTime } from "../../chart/time";
 import { formatPrice } from "../../lib/format";
 import { isIndexCode } from "../../lib/symbol";
-import type { Slot } from "../../stores/layout";
 import { useSelectionStore } from "../../stores/selection";
 import { activeWatchlist, useWatchlistStore } from "../../stores/watchlist";
 import { CopyIcon, DRAWING_ICONS, ExpandIcon, Icon, PlusIcon } from "../icons";
@@ -30,7 +29,7 @@ function chartItems(surface: DrawingSurface, at: ScreenPoint): MenuItem[] {
     { kind: "action", label: "이 가격에 수평선", icon: glyph(DRAWING_ICONS.hline), hint: "Alt+H", onSelect: () => surface.placeHorizontalLine(at) },
     { kind: "action", label: "관심종목에 넣기", icon: createElement(PlusIcon), disabled: watchlist.symbols.includes(view.symbol), onSelect: () => { useWatchlistStore.getState().add(watchlist.id, view.symbol); toast(`${watchlist.name}에 넣었습니다`); } },
     { kind: "action", label: "축 자동 맞춤", icon: createElement(ExpandIcon, { size: 14 }), onSelect: () => surface.fitPriceScale() },
-    ...(canCopyImage() ? [{ kind: "action" as const, label: "차트 이미지 복사", icon: createElement(CopyIcon, { size: 14 }), hint: "Alt+Shift+S", onSelect: () => void saveSnapshot(surface.slot as Slot, "copy") }] : []),
+    ...(canCopyImage() ? [{ kind: "action" as const, label: "차트 이미지 복사", icon: createElement(CopyIcon, { size: 14 }), hint: "Alt+Shift+S", onSelect: () => void saveSnapshot(surface.cellId, "copy") }] : []),
     { kind: "separator" },
   ];
 }
@@ -47,7 +46,7 @@ export function drawingMenu(surface: DrawingSurface, empty = false, at: ScreenPo
       ...(session.clip ? [action("붙여넣기", () => surface.paste())] : []),
       { kind: "check", label: "모든 드로잉 숨기기", checked: prefs.hideAll, onSelect: () => useUiStore.getState().setDrawingPrefs({ hideAll: !useUiStore.getState().prefs.drawing.hideAll }) },
       { kind: "check", label: "모든 드로잉 잠그기", checked: prefs.lockAll, onSelect: () => useUiStore.getState().setDrawingPrefs({ lockAll: !useUiStore.getState().prefs.drawing.lockAll }) },
-      { kind: "action", label: "이 종목 드로잉 모두 지우기…", icon: glyph(DRAWING_ICONS.trash), danger: true, disabled: removable.length === 0, onSelect: () => surface.sync.commitWithUndo(surface.slot, removable.map((before) => ({ kind: "delete", before })), `드로잉 ${removable.length}개를 지웠습니다`) },
+      { kind: "action", label: "이 종목 드로잉 모두 지우기…", icon: glyph(DRAWING_ICONS.trash), danger: true, disabled: removable.length === 0, onSelect: () => surface.sync.commitWithUndo(surface.cellId, removable.map((before) => ({ kind: "delete", before })), `드로잉 ${removable.length}개를 지웠습니다`) },
     ];
   }
   const first = selected[0]; if (!first) return [];

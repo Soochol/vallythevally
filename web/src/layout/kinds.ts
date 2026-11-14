@@ -1,3 +1,5 @@
+import type { LayoutWindow } from "../api/generated/LayoutWindow";
+
 export const WINDOW_HEAD_HEIGHT = 34;
 
 export type LinkRole = "follows" | "sends" | "none";
@@ -17,7 +19,7 @@ export const WINDOW_KINDS = Object.freeze({
   screener: { name: "스크리너", minSize: { w: 280, h: 240 }, maxCount: 1, link: "sends", home: "side" },
   objects: { name: "개체 목록", minSize: { w: 220, h: 140 }, maxCount: 1, link: "none", home: "side" },
   indicators: { name: "지표", minSize: { w: 240, h: 140 }, maxCount: 1, link: "none", home: "side" },
-} as const satisfies Record<string, WindowKindSpec>);
+} as const satisfies Record<LayoutWindow["kind"], WindowKindSpec>);
 
 export type WindowKind = keyof typeof WINDOW_KINDS;
 

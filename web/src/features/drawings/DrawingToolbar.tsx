@@ -27,7 +27,7 @@ const GROUP_LABEL = { line: "선", fib: "피보나치·갠", shape: "도형", no
 
 export function DrawingToolbar() {
   const active = useDrawingSession((s) => s.tool); const mode = useDrawingSession((s) => s.mode); const pinned = useDrawingSession((s) => s.pinnedTool);
-  const prefs = useUiStore((s) => s.prefs.drawing); const slot = useSelectionStore((s) => s.activeSlot);
+  const prefs = useUiStore((s) => s.prefs.drawing); const cellId = useSelectionStore((s) => s.activeCell);
   const [help, setHelp] = useState(false);
   const root = useRef<HTMLElement>(null);
   const helpButton = useRef<HTMLButtonElement>(null);
@@ -43,9 +43,9 @@ export function DrawingToolbar() {
     window.addEventListener("keydown", key); return () => window.removeEventListener("keydown", key);
   }, []);
   useLegendClearance(root);
-  const setTool = (tool: Tool) => { useDrawingSession.getState().setTool(tool.tool); surfaceFor(slot)?.focus(); };
+  const setTool = (tool: Tool) => { useDrawingSession.getState().setTool(tool.tool); surfaceFor(cellId)?.focus(); };
   const setPrefs = useUiStore.getState().setDrawingPrefs;
-  const action = (f: () => void) => { f(); surfaceFor(slot)?.focus(); };
+  const action = (f: () => void) => { f(); surfaceFor(cellId)?.focus(); };
   const pinnedButton = (tool: Tool) => <button key={tool.tool} className="draw-tool" data-active-tool aria-label={`${tool.label} 고정 도구`} title={toolTitle(tool, "고정")} aria-pressed={active === tool.tool} onClick={() => setTool(tool)} onDoubleClick={() => action(() => useDrawingSession.getState().setTool(tool.tool, true))}><Icon path={tool.icon} /></button>;
   const folded = pinnedTools.slice(shownPins);
   return <nav ref={root} data-chart-control data-pinned={pinnedTools.length > 0 || undefined} aria-label="드로잉 도구" className="drawing-toolbar ui-island max-md:hidden">

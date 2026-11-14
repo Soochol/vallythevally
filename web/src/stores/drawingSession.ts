@@ -2,9 +2,10 @@ import { create } from "zustand";
 import type { Clip } from "../chart/drawings/clipboard";
 import type { DrawingBody, DrawingTool } from "../chart/drawings/types";
 import type { ModeId } from "../chart/drawings/gestures";
+import type { WindowId } from "../layout/kinds";
 
 export type DrawingEditor = { kind: "settings" | "text"; original: DrawingBody; draft: DrawingBody };
-export interface Popup { slot: number; x: number; y: number; id: string | null; fromChart?: boolean }
+export interface Popup { cellId: WindowId; x: number; y: number; id: string | null; fromChart?: boolean }
 
 interface DrawingSession {
   tool: DrawingTool | null;

@@ -1,5 +1,5 @@
 import type { Page } from "@playwright/test";
-import { cell, expect, test } from "./harness";
+import { cell, expect, test, firstChart, withFirstChart } from "./harness";
 
 test.use({ clockStart: "20261109100030", viewport: { width: 1440, height: 900 } });
 
@@ -96,7 +96,7 @@ test("옛 저장값의 고정 분봉은 꺼내지 않고 버리며, 열 때 활�
   const state = scenario.documents.uiState();
   scenario.documents.saveUiState({ ...state, pinnedMinutes: ["5m", "60m"], recentSymbols: ["005930"], revision: state.revision + 1 });
   const layout = scenario.documents.layout();
-  scenario.documents.saveLayout({ ...layout, revision: layout.revision + 1, cells: [{ ...layout.cells[0]!, symbol: "005930", venue: "combined", period: "10m" }] });
+  scenario.documents.saveLayout({ ...layout, revision: layout.revision + 1, windows: withFirstChart(layout, { symbol: "005930", venue: "combined", period: "10m" }) });
   await page.goto("/");
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
   const minutes = toolbar(page).getByRole("button", { name: "분봉", exact: true });
@@ -106,7 +106,7 @@ test("옛 저장값의 고정 분봉은 꺼내지 않고 버리며, 열 때 활�
   expect(scenario.documents.uiState()).not.toHaveProperty("pinnedMinutes");
   await toolbar(page).getByRole("button", { name: "일", exact: true }).click();
   await expect(cell(page)).toHaveAttribute("aria-label", / 일$/);
-  await expect.poll(async () => scenario.documents.layout().cells[0]!.period).toBe("D");
+  await expect.poll(async () => firstChart(scenario.documents.layout()).period).toBe("D");
   await page.reload();
   await expect(minutes).toHaveText("10분");
   await expect(minutes).toHaveAttribute("aria-pressed", "false");

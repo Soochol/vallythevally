@@ -1,8 +1,8 @@
 import type { QueryClient } from "@tanstack/react-query";
-import type { Slot } from "../../stores/layout";
+import type { WindowId } from "../../layout/kinds";
 
 export interface CommandContext {
-  slot: Slot;
+  cellId: WindowId;
   queryClient: QueryClient;
 }
 

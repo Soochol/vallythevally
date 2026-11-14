@@ -1,5 +1,5 @@
-import type { Cell } from "../api/generated/Cell";
 import type { Layout } from "../api/generated/Layout";
+import type { LayoutWindow } from "../api/generated/LayoutWindow";
 import type { LayoutSummary } from "../api/generated/LayoutSummary";
 import type { SymbolCode } from "../api/generated/SymbolCode";
 import type { SymbolInfo } from "../api/generated/SymbolInfo";
@@ -7,8 +7,10 @@ import type { Watchlist } from "../api/generated/Watchlist";
 import type { Watchlists } from "../api/generated/Watchlists";
 import { ApiRequestError } from "../api/http";
 import { parseChartSettings } from "../chart/settings";
+import { windowId } from "../layout/kinds";
+import { parsePlacement } from "../layout/placement";
 import { venueFor } from "../lib/venue";
-import { type CellState, DEFAULT_LAYOUT, type EditableLayout } from "../stores/layout";
+import { type ChartWindowState, DEFAULT_LAYOUT, type EditableLayout, type WindowState } from "../stores/layout";
 import { layoutPath, UI_STATE_PATH, WATCHLISTS_PATH } from "../api/userData";
 import { parseWatchlists } from "../lib/watchlist";
 import type { SaveTarget } from "../stores/persist";
@@ -51,7 +53,8 @@ function newer(u: Unsaved | null, path: string, serverRevision: number): { value
 }
 
 function asLayout(v: Record<string, unknown>, stored: Layout): Layout | null {
-  const ok = v.id === stored.id && typeof v.name === "string" && typeof v.arrangement === "string" && Array.isArray(v.cells) && typeof v.sync === "object";
+  const placementIsObject = typeof v.placement === "object" && v.placement !== null && !Array.isArray(v.placement);
+  const ok = v.id === stored.id && typeof v.name === "string" && Array.isArray(v.windows) && placementIsObject && typeof v.sync === "object";
   return ok ? ({ ...stored, ...v } as Layout) : null;
 }
 
@@ -66,14 +69,16 @@ export async function restore(src: RestoreSources): Promise<Restored> {
   const stored = await openLayout(src, ui.prefs.lastLayoutId);
   const localLayout = stored && newer(src.unsaved("layout"), layoutPath(stored.id), stored.revision);
   const opened = (stored && localLayout && asLayout(localLayout.value, stored)) || stored;
-  const cells = await Promise.all((opened?.cells ?? []).map((c) => restoreCell(src, c)));
-  const layout: EditableLayout = opened ? { ...withoutServerFields(opened), cells: cells.map((c) => c.cell) } : DEFAULT_LAYOUT;
-  const notices = cells.some((c) => c.nxtFellBack) ? [NXT_FALLBACK_NOTICE] : [];
+  const windows = await Promise.all((opened?.windows ?? []).map((w) => restoreWindow(src, w)));
+  const layout: EditableLayout = opened
+    ? { id: opened.id, name: opened.name, sync: opened.sync, windows: windows.map((w) => w.window), placement: parsePlacement(opened.placement) }
+    : DEFAULT_LAYOUT;
+  const notices = windows.some((w) => w.nxtFellBack) ? [NXT_FALLBACK_NOTICE] : [];
   const lastLayoutFixed = ui.prefs.lastLayoutId !== layout.id;
   const serverRevisions = { layout: stored?.revision ?? 0, ui: serverUi, watchlist: serverWatch.revision };
   return {
     layout,
-    layoutDirty: stored === null || opened !== stored || cells.some((c) => c.dirty),
+    layoutDirty: stored === null || opened !== stored || windows.some((w) => w.dirty),
     ui: lastLayoutFixed ? { ...ui, prefs: { ...ui.prefs, lastLayoutId: layout.id } } : ui,
     uiDirty: lastLayoutFixed || localUi !== null,
     watchlists: localLists ?? serverWatch.lists,
@@ -88,8 +93,6 @@ export async function restore(src: RestoreSources): Promise<Restored> {
   };
 }
 
-const withoutServerFields = ({ updatedAt: _u, revision: _r, ...rest }: Layout) => rest;
-
 async function openLayout(src: RestoreSources, id: string | null): Promise<Layout | null> {
   if (id !== null) {
     try {
@@ -102,21 +105,22 @@ async function openLayout(src: RestoreSources, id: string | null): Promise<Layou
   return first ? src.layout(first.id) : null;
 }
 
-interface RestoredCell {
-  cell: CellState;
+interface RestoredWindow {
+  window: WindowState;
   dirty: boolean;
   nxtFellBack: boolean;
 }
 
-async function restoreCell(src: RestoreSources, raw: Cell): Promise<RestoredCell> {
-  const cell: CellState = { ...raw, chartSettings: parseChartSettings(raw.chartSettings) };
+async function restoreWindow(src: RestoreSources, raw: LayoutWindow): Promise<RestoredWindow> {
+  if (raw.kind !== "chart") return { window: { id: windowId(raw.id), link: raw.link, kind: raw.kind }, dirty: false, nxtFellBack: false };
+  const cell: ChartWindowState = { ...raw, id: windowId(raw.id), chartSettings: parseChartSettings(raw.chartSettings) };
   let info: Pick<SymbolInfo, "code" | "nxtEnabled">;
   try {
     info = await src.symbolInfo(cell.symbol);
   } catch {
-    return { cell, dirty: false, nxtFellBack: false };
+    return { window: cell, dirty: false, nxtFellBack: false };
   }
   const venue = venueFor(info, cell.venue);
-  if (venue === cell.venue) return { cell, dirty: false, nxtFellBack: false };
-  return { cell: { ...cell, venue }, dirty: true, nxtFellBack: cell.venue === "nxt" };
+  if (venue === cell.venue) return { window: cell, dirty: false, nxtFellBack: false };
+  return { window: { ...cell, venue }, dirty: true, nxtFellBack: cell.venue === "nxt" };
 }

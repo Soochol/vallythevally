@@ -1,6 +1,6 @@
-import type { Slot } from "../../stores/layout";
 import { useSelectionStore } from "../../stores/selection";
 import { controllerFor } from "../grid/controllers";
+import type { WindowId } from "../../layout/kinds";
 
 export type SnapshotMode = "download" | "copy";
 
@@ -10,8 +10,8 @@ export const canCopyImage = (): boolean => typeof ClipboardItem !== "undefined" 
 const toast = (text: string) => useSelectionStore.getState().showToast(text);
 
 /** 브라우저는 사용자 조작 직후에만 클립보드 쓰기를 허락한다. 그래서 `clipboard.write`를 기다리지 않고 바로 부르고 PNG는 Promise로 넘긴다. */
-export function saveSnapshot(slot: Slot, mode: SnapshotMode): void {
-  const shot = controllerFor(slot)?.snapshot(Math.floor(Date.now() / 1000));
+export function saveSnapshot(cellId: WindowId, mode: SnapshotMode): void {
+  const shot = controllerFor(cellId)?.snapshot(Math.floor(Date.now() / 1000));
   if (!shot) return;
   const png = new Promise<Blob>((resolve, reject) =>
     shot.canvas.toBlob((b) => (b ? resolve(b) : reject(new Error("toBlob"))), "image/png"),

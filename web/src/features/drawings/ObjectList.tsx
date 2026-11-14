@@ -14,17 +14,17 @@ import { EmptyState, ErrorState } from "../overlay/State";
 import { moveObject } from "./objectOrder";
 
 export function ObjectList() {
-  const slot = useSelectionStore((s) => s.activeSlot); const cell = useCell(slot);
+  const cellId = useSelectionStore((s) => s.activeCell); const cell = useCell(cellId);
   const layoutId = useLayoutStore((s) => s.layout.id); const selected = useDrawingSession((s) => s.selected);
   const prefs = useUiStore((s) => s.prefs.drawing);
   const sync = drawingSync(useQueryClient()); useDrawingVersion(sync);
   const [dragged, setDragged] = useState<string | null>(null);
   const all = sync.drawings(cell.symbol);
-  const groups = objectGroups(all, layoutId, slot);
+  const groups = objectGroups(all, layoutId, cellId);
   const drawings = groups.flatMap((group) => group.drawings);
   const elsewhere = all.length - drawings.length;
   const update = (before: DrawingBody, field: "hidden" | "locked") => {
-    sync.commit(slot, [{ kind: "update", before, after: { ...before, [field]: !before[field] } }]);
+    sync.commit(cellId, [{ kind: "update", before, after: { ...before, [field]: !before[field] } }]);
     if (field === "hidden" && !before.hidden) useDrawingSession.getState().select(selected.filter((id) => id !== before.id));
   };
   const error = sync.loadError(cell.symbol);
@@ -34,21 +34,21 @@ export function ObjectList() {
       <button className="icon-btn" aria-label="모든 드로잉 잠그기" title="모든 드로잉 잠그기" aria-pressed={prefs.lockAll} onClick={() => useUiStore.getState().setDrawingPrefs({ lockAll: !prefs.lockAll })}><Icon path={prefs.lockAll ? DRAWING_ICONS.lockAll : DRAWING_ICONS.unlocked} /></button>
       <button className="icon-btn" aria-label="이 종목 드로잉 모두 지우기" title="이 종목 드로잉 모두 지우기 · 잠긴 개체 제외" disabled={prefs.lockAll || !all.some((d) => !d.locked)} onClick={() => {
         const removable = all.filter((d) => !d.locked);
-        if (removable.length) { sync.commitWithUndo(slot, removable.map((before) => ({ kind: "delete", before })), `드로잉 ${removable.length}개를 지웠습니다`); useDrawingSession.getState().select(selected.filter((id) => !removable.some((d) => d.id === id))); }
+        if (removable.length) { sync.commitWithUndo(cellId, removable.map((before) => ({ kind: "delete", before })), `드로잉 ${removable.length}개를 지웠습니다`); useDrawingSession.getState().select(selected.filter((id) => !removable.some((d) => d.id === id))); }
       }}><Icon path={DRAWING_ICONS.trash} /></button>
     </div></header>
     {elsewhere > 0 && <p className="draw-objects-elsewhere">다른 칸·레이아웃에 {elsewhere}개</p>}
     {error && <ErrorState message={error} retry={() => void sync.load(cell.symbol)} />}
-    {!drawings.length && !error && <EmptyState title="차트에 생각을 그려 보세요" action="추세선 그리기" onAction={() => { useDrawingSession.getState().setTool("trendline"); surfaceFor(slot)?.focus(); }}><span>T 추세선 · H 수평선 · R 사각형 · F 피보나치 · X 글자</span></EmptyState>}
+    {!drawings.length && !error && <EmptyState title="차트에 생각을 그려 보세요" action="추세선 그리기" onAction={() => { useDrawingSession.getState().setTool("trendline"); surfaceFor(cellId)?.focus(); }}><span>T 추세선 · H 수평선 · R 사각형 · F 피보나치 · X 글자</span></EmptyState>}
     <div className="draw-object-rows">{groups.map((group) => <section key={group.kind} aria-label={group.label}>
       <h3 className="draw-object-group">{group.label} <span>{group.drawings.length}</span></h3>
       {group.drawings.map((d) => <ObjectRow key={d.id} drawing={d} selected={selected.includes(d.id)} update={(field) => update(d, field)}
-        rename={(name) => { const before = sync.drawings(cell.symbol).find((item) => item.id === d.id); if (before) sync.commit(slot, [{ kind: "update", before, after: renameObject(before, name) }]); }}
-        select={(toggle) => { useDrawingSession.getState().select([d.id], toggle); surfaceFor(slot)?.reveal(d.id); }}
-        remove={() => { sync.commitWithUndo(slot, [{ kind: "delete", before: d }], "드로잉을 지웠습니다"); useDrawingSession.getState().select(selected.filter((id) => id !== d.id)); }}
+        rename={(name) => { const before = sync.drawings(cell.symbol).find((item) => item.id === d.id); if (before) sync.commit(cellId, [{ kind: "update", before, after: renameObject(before, name) }]); }}
+        select={(toggle) => { useDrawingSession.getState().select([d.id], toggle); surfaceFor(cellId)?.reveal(d.id); }}
+        remove={() => { sync.commitWithUndo(cellId, [{ kind: "delete", before: d }], "드로잉을 지웠습니다"); useDrawingSession.getState().select(selected.filter((id) => id !== d.id)); }}
         dragStart={() => setDragged(d.id)} dragEnd={() => setDragged(null)}
-        drop={(above) => { if (dragged && dragged !== d.id) surfaceFor(slot)?.reorder(dragged, "front", d.id, above ? "above" : "below"); setDragged(null); }}
-        move={(direction) => moveObject(group.drawings, d.id, direction, surfaceFor(slot))} />)}
+        drop={(above) => { if (dragged && dragged !== d.id) surfaceFor(cellId)?.reorder(dragged, "front", d.id, above ? "above" : "below"); setDragged(null); }}
+        move={(direction) => moveObject(group.drawings, d.id, direction, surfaceFor(cellId))} />)}
     </section>)}</div>
     <p className="draw-objects-foot">Ctrl+클릭으로 여러 개 선택 · 끌어서 순서 변경 · F2 이름 바꾸기 · Alt+↑↓ 순서</p>
   </section>;

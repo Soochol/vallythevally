@@ -2,7 +2,7 @@ import { FinancialFixture } from "./financial-update-helpers";
 import type { Page } from "@playwright/test";
 import type { Drawing } from "../src/api/generated/Drawing";
 import type { Layout } from "../src/api/generated/Layout";
-import { cell, DEFAULT_LAYOUT_ID, expect, test, type Scenario } from "./harness";
+import { cell, DEFAULT_LAYOUT_ID, expect, test, type Scenario, withFirstChart } from "./harness";
 import { openScreener, panel } from "./screener-page";
 import { addCondition, renameScreen, sentenceEditor } from "./sentence-editor";
 import { selectOption } from "./select-option";
@@ -134,7 +134,7 @@ test.describe("재무 자료의 중첩 DOM 메뉴", () => {
   test.use({ clockStart: "20171231120000" });
   test("보고기간 이름·방향키·Space·Enter·글자 이동과 단계별 Esc를 지킨다", async ({ page, scenario }) => {
     const layout: Layout = scenario.documents.layout(DEFAULT_LAYOUT_ID);
-    scenario.documents.saveLayout({ ...layout, revision: layout.revision + 1, cells: [{ ...layout.cells[0]!, symbol: "005930", venue: "combined", period: "Y", chartSettings: { v: 2, style: "candle", scale: "normal", compare: [], indicators: [{ id: "revenue", spec: { kind: "revenue" }, panel: "revenue", visible: true, style: { colors: ["ind-2"], width: 1 } }], panels: [{ id: "revenue", stretch: 0.3 }] } }] });
+    scenario.documents.saveLayout({ ...layout, revision: layout.revision + 1, windows: withFirstChart(layout, { symbol: "005930", venue: "combined", period: "Y", chartSettings: { v: 2, style: "candle", scale: "normal", compare: [], indicators: [{ id: "revenue", spec: { kind: "revenue" }, panel: "revenue", visible: true, style: { colors: ["ind-2"], width: 1 } }], panels: [{ id: "revenue", stretch: 0.3 }] } }) });
     new FinancialFixture(scenario);
     await page.goto("/");
     const row = page.locator('[data-indicator-row="revenue"]');

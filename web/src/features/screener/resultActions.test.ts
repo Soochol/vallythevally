@@ -2,7 +2,7 @@ import { QueryClient } from "@tanstack/react-query";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type { SymbolInfo } from "../../api/generated/SymbolInfo";
 import { DEFAULT_WATCHLISTS, FIRST_WATCHLIST_ID } from "../../lib/watchlist";
-import { DEFAULT_LAYOUT, useLayoutStore } from "../../stores/layout";
+import { chartWindows, DEFAULT_LAYOUT, useLayoutStore } from "../../stores/layout";
 import { useSelectionStore } from "../../stores/selection";
 import { useUiStore } from "../../stores/ui";
 import { useWatchlistStore } from "../../stores/watchlist";
@@ -10,14 +10,15 @@ import { dropPendingOpen, openResult, pendingResultCode, sendToNewWatchlist, sen
 
 const client = () => new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: Infinity } } });
 const symbol = (code: string): SymbolInfo => ({ code, name: code, market: "kospi", kind: "common", nxtEnabled: true });
-const cell = () => useLayoutStore.getState().layout.cells[0]!;
+const CELL = chartWindows(DEFAULT_LAYOUT)[0]!.id;
+const cell = () => chartWindows(useLayoutStore.getState().layout)[0]!;
 
 beforeEach(() => {
   dropPendingOpen();
   useLayoutStore.getState().load(structuredClone(DEFAULT_LAYOUT));
-  useLayoutStore.getState().setSymbol(0, { code: "005930", nxtEnabled: true }, "nxt");
-  useLayoutStore.getState().setPeriod(0, "W");
-  useSelectionStore.setState({ activeSlot: 0, phoneTab: "screener", toast: null });
+  useLayoutStore.getState().setSymbol(CELL, { code: "005930", nxtEnabled: true }, "nxt");
+  useLayoutStore.getState().setPeriod(CELL, "W");
+  useSelectionStore.setState({ activeCell: CELL, phoneTab: "screener", toast: null });
   useWatchlistStore.getState().load(DEFAULT_WATCHLISTS);
 });
 afterEach(() => vi.unstubAllGlobals());
@@ -53,7 +54,7 @@ test.each(["chart", "tab", "unmount"])("정보 대기 중 다른 선택은 늦�
   let resolve: (response: Response) => void = () => {};
   vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>((done) => { resolve = done; })));
   const opened = openResult(client(), "000660");
-  if (change === "chart") useLayoutStore.getState().setSymbol(0, { code: "035420", nxtEnabled: true });
+  if (change === "chart") useLayoutStore.getState().setSymbol(CELL, { code: "035420", nxtEnabled: true });
   else if (change === "tab") useSelectionStore.getState().setPhoneTab("watch");
   else dropPendingOpen();
   resolve(Response.json(symbol("000660")));

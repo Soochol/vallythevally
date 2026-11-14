@@ -2,7 +2,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useImperativeHandle, useRef, useState, type Ref } from "react";
 import { useSymbolInfos, useSymbolSearch } from "../../api/queries";
 import { colorsFrom, shownColor } from "../../chart/indicators/kinds";
-import { useCell, type Slot } from "../../stores/layout";
+import { useCell } from "../../stores/layout";
 import { useActiveWatchlist } from "../../stores/watchlist";
 import { addButton } from "../indicator-dialog/compareForm";
 import { checkForm, nextColor, startDraft, type Draft } from "../indicator-dialog/indicatorForm";
@@ -12,12 +12,13 @@ import { searchList } from "../search/searchList";
 import { executeCommand } from "./execute";
 import { commandRows, currentKey, modeAfterInput, selectedRow, type CommandRow, type IndicatorCommandMode } from "./model";
 import { useIndicatorPreview } from "./preview";
+import type { WindowId } from "../../layout/kinds";
 
 export type EditorAction = { commit(onCommitted: () => void): void; focus(): void };
 export type EditableRow = Exclude<CommandRow, { kind: "symbol" }>;
 
-export function useIndicatorCommand(slot: Slot, initialMode: IndicatorCommandMode, initialIndicator: string | null = null) {
-  const cell = useCell(slot);
+export function useIndicatorCommand(cellId: WindowId, initialMode: IndicatorCommandMode, initialIndicator: string | null = null) {
+  const cell = useCell(cellId);
   const [mode, setMode] = useState(initialMode);
   const [input, setInput] = useState("");
   const [chosen, setChosen] = useState(initialIndicator ? currentKey(initialIndicator) : "");
@@ -34,7 +35,7 @@ export function useIndicatorCommand(slot: Slot, initialMode: IndicatorCommandMod
 
   const submit = (onSubmitted: () => void) => {
     if (selected?.kind !== "symbol") return editor.current?.commit(onSubmitted);
-    if (!selectedSymbol || !compareButton.ok || !executeCommand(slot, { kind: "compare", code: selectedSymbol.code })) return;
+    if (!selectedSymbol || !compareButton.ok || !executeCommand(cellId, { kind: "compare", code: selectedSymbol.code })) return;
     queryClient.setQueryData(["symbol", selectedSymbol.code], selectedSymbol);
     onSubmitted();
   };
@@ -47,8 +48,8 @@ export function useIndicatorCommand(slot: Slot, initialMode: IndicatorCommandMod
   };
 }
 
-export function useIndicatorDraft(slot: Slot, row: EditableRow, actionRef: Ref<EditorAction>, focus: () => void) {
-  const cell = useCell(slot);
+export function useIndicatorDraft(cellId: WindowId, row: EditableRow, actionRef: Ref<EditorAction>, focus: () => void) {
+  const cell = useCell(cellId);
   const editing = row.kind === "current" ? row.config : null;
   const candidate = row.kind === "candidate" ? row.candidate : null;
   const [draft, setDraft] = useState<Draft>(() => editing ? startDraft(editing, editing.spec.kind) : { ...startDraft(null, candidate!.kind), form: candidate!.form });
@@ -62,13 +63,13 @@ export function useIndicatorDraft(slot: Slot, row: EditableRow, actionRef: Ref<E
   const style = { colors, width: draft.width };
 
   useEffect(() => {
-    useIndicatorPreview.getState().set(slot, valid && check.spec ? editing ? { kind: "edit", id: editing.id, spec: check.spec, style } : { kind: "add", id: previewIds[0], panelId: previewIds[1], spec: check.spec, style } : null);
-  }, [draft, validator, cell.chartSettings.indicators, slot]);
-  useEffect(() => () => useIndicatorPreview.getState().set(slot, null), [slot]);
+    useIndicatorPreview.getState().set(cellId, valid && check.spec ? editing ? { kind: "edit", id: editing.id, spec: check.spec, style } : { kind: "add", id: previewIds[0], panelId: previewIds[1], spec: check.spec, style } : null);
+  }, [draft, validator, cell.chartSettings.indicators, cellId]);
+  useEffect(() => () => useIndicatorPreview.getState().set(cellId, null), [cellId]);
 
   const commitNow = () => {
     if (!valid || !check.spec) return false;
-    const committed = executeCommand(slot, { kind: "indicator", id: editing?.id ?? null, spec: check.spec, style });
+    const committed = executeCommand(cellId, { kind: "indicator", id: editing?.id ?? null, spec: check.spec, style });
     if (committed && !editing) setDraft((draft) => ({ ...draft, color: "auto" }));
     return committed;
   };
