@@ -163,3 +163,90 @@ for (const size of [{ width: 1440, height: 900 }, { width: 1024, height: 768 }, 
     await page.screenshot({ path: resolve(`../target/ux-screens/legend-panels-${size.width}x${size.height}.png`) });
   });
 }
+
+for (const [id, label, period] of [["rsi", "아래 패널 지표", "9"], ["ma", "가격 패널 지표", "10"]] satisfies [string, string, string][]) {
+  test(`${label}는 팝오버를 연 채 같은 줄의 숨기기를 한 번 눌러 숨기고 팝오버를 닫으며 고친 값을 유지한다`, async ({ page, scenario }) => {
+    await open(page, scenario);
+    await row(page, id).getByRole("button", { name: /설정 열기/ }).click();
+    const popup = page.getByRole("dialog", { name: /설정$/ });
+    await popup.getByRole("textbox", { name: "기간", exact: true }).fill(period);
+    await expect.poll(async () => (await settings(scenario)).indicators.find((i) => i.id === id)?.spec).toMatchObject({ period: Number(period) });
+    await row(page, id).getByRole("button", { name: /숨기기/ }).click();
+    await expect(popup).toHaveCount(0);
+    await expect(row(page, id).getByRole("button", { name: /보이기/ })).toHaveCount(1);
+    await expect.poll(async () => (await settings(scenario)).indicators.find((i) => i.id === id)).toMatchObject({ visible: false, spec: { period: Number(period) } });
+  });
+}
+
+test("팝오버를 연 채 차트의 빈 곳이나 다른 줄의 숨기기를 누르면 팝오버만 닫히고 그 클릭은 실행되지 않는다", async ({ page, scenario }) => {
+  await open(page, scenario);
+  const opened = async () => {
+    await row(page, "rsi").getByRole("button", { name: /설정 열기/ }).click();
+    const popup = page.getByRole("dialog", { name: /RSI.*설정/ });
+    await expect(popup).toBeVisible();
+    return popup;
+  };
+  let popup = await opened();
+  await row(page, "ma").getByRole("button", { name: /숨기기/ }).evaluate((button) => {
+    for (const type of ["pointerdown", "pointerup"]) button.dispatchEvent(new PointerEvent(type, { bubbles: true, cancelable: true, composed: true, button: 0 }));
+    button.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, composed: true, detail: 1 }));
+  });
+  await expect(popup).toHaveCount(0);
+  await expect(row(page, "ma").getByRole("button", { name: /숨기기/ })).toHaveCount(1);
+  popup = await opened();
+  const box = await cell(page).boundingBox();
+  if (!box) throw new Error("차트가 없습니다");
+  await page.mouse.click(box.x + box.width * 0.5, box.y + box.height * 0.3);
+  await expect(popup).toHaveCount(0);
+  expect((await settings(scenario)).indicators.map((i) => [i.id, i.visible])).toEqual([["ma", true], ["volume", true], ["rsi", true]]);
+});
+
+test("키보드 Enter로 숨기기는 팝오버와 상관없이 바로 숨긴다", async ({ page, scenario }) => {
+  await open(page, scenario);
+  await row(page, "rsi").getByRole("button", { name: /숨기기/ }).focus();
+  await page.keyboard.press("Enter");
+  await expect(row(page, "rsi").getByRole("button", { name: /보이기/ })).toHaveCount(1);
+});
+
+async function recordPointerEvents(page: Page) {
+  await page.evaluate(() => {
+    const seen: string[] = [];
+    Object.assign(window, { seenPointerEvents: seen });
+    for (const type of ["click", "contextmenu"]) document.addEventListener(type, () => seen.push(type), true);
+  });
+}
+const seenPointerEvents = (page: Page) => page.evaluate(() => (window as unknown as { seenPointerEvents: string[] }).seenPointerEvents);
+
+test("열린 팝오버 줄의 숨기기를 오른쪽 클릭하면 팝오버만 닫고 메뉴·숨기기를 실행하지 않는다", async ({ page, scenario }) => {
+  await open(page, scenario);
+  const popup = await openRsiPopup(page);
+  await recordPointerEvents(page);
+  await row(page, "rsi").getByRole("button", { name: /숨기기/ }).click({ button: "right" });
+  await expect(popup).toHaveCount(0);
+  expect(await seenPointerEvents(page)).toEqual([]);
+  expect((await settings(scenario)).indicators.find((i) => i.id === "rsi")?.visible).toBe(true);
+});
+
+test("열린 팝오버 줄의 숨기기에서 눌러 다른 곳에서 떼면 숨기지 않고 click도 소비한다", async ({ page, scenario }) => {
+  await open(page, scenario);
+  const popup = await openRsiPopup(page);
+  await recordPointerEvents(page);
+  const button = await row(page, "rsi").getByRole("button", { name: /숨기기/ }).boundingBox();
+  const chart = await cell(page).boundingBox();
+  if (!button || !chart) throw new Error("범례 버튼이나 차트가 없습니다");
+  await page.mouse.move(button.x + button.width / 2, button.y + button.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(chart.x + chart.width * 0.5, chart.y + chart.height * 0.3, { steps: 6 });
+  await page.mouse.up();
+  await expect(popup).toHaveCount(0);
+  expect(await seenPointerEvents(page)).toEqual([]);
+  expect((await settings(scenario)).indicators.find((i) => i.id === "rsi")?.visible).toBe(true);
+});
+
+async function openRsiPopup(page: Page) {
+  await row(page, "rsi").getByRole("button", { name: /설정 열기/ }).click();
+  const popup = page.getByRole("dialog", { name: /RSI.*설정/ });
+  await expect(popup).toBeVisible();
+  await row(page, "rsi").hover();
+  return popup;
+}
