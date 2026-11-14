@@ -190,9 +190,37 @@ test("일목균형표를 띄운 채 과거로 스크롤해도 다가갈 때마�
   await expect(page.locator('[data-indicator-row="i1"]')).toContainText(/\d/);
 });
 
+test("이동평균선을 띄운 채 과거로 끌면 워커 응답 전에도 선이 남고, 응답 뒤에는 붙인 과거까지 그린다", async ({ page, scenario }) => {
+  await page.clock.install();
+  await seedLayout(scenario, "D", [ma("m", 5)], [], "086520");
+  await page.addInitScript(installFrameProbe);
+  await page.addInitScript(holdWorkerReplies);
+  await page.goto("/");
+  await expect(cell(page)).toHaveAttribute("aria-busy", "false");
+  const chart = chartOf(cell(page));
+  const row = page.locator('[data-indicator-row="m"]');
+  const line = async () => (await series(page)).find((s) => s.type === "Custom")?.data.flatMap((d) => "value" in d ? [Number(d.time)] : []) ?? [];
+  const price = /\d,\d{3}/;
+  await expect(row).toContainText(price);
+  await expect.poll(async () => (await line()).length).toBeGreaterThan(0);
+  const firstBefore = (await line())[0]!;
+  const before = await barTimes(chart);
+
+  await page.evaluate(() => window.workerHold.start());
+  await dragTowardPast(page, chart, async () => expect((await barTimes(chart)).count).toBeGreaterThan(before.count));
+  await expect.poll(() => page.evaluate(() => window.workerHold.held())).toBeGreaterThan(0);
+  expect((await line())[0]).toBe(firstBefore);
+  expect(await row.innerText()).toMatch(price);
+
+  await page.evaluate(() => window.workerHold.release());
+  await expect.poll(async () => (await line())[0]).toBeLessThan(firstBefore);
+  await expect(row).toContainText(price);
+});
+
 declare global {
   interface Window {
     workerReplies: number;
+    workerHold: { start(): void; held(): number; release(): void };
     volumeFrames: { main: number; volume: number; lastClose: number | null }[];
   }
 }
@@ -205,6 +233,35 @@ function countWorkerReplies(): void {
       super(url, options);
       this.addEventListener("message", () => {
         window.workerReplies++;
+      });
+    }
+  };
+}
+
+function holdWorkerReplies(): void {
+  const held: { worker: Worker; data: unknown }[] = [];
+  const released = new WeakSet<MessageEvent>();
+  let holding = false;
+  window.workerHold = {
+    start: () => { holding = true; },
+    held: () => held.length,
+    release: () => {
+      holding = false;
+      for (const { worker, data } of held.splice(0)) {
+        const event = new MessageEvent("message", { data });
+        released.add(event);
+        worker.dispatchEvent(event);
+      }
+    },
+  };
+  const Base = window.Worker;
+  window.Worker = class extends Base {
+    constructor(url: string | URL, options?: WorkerOptions) {
+      super(url, options);
+      this.addEventListener("message", (event) => {
+        if (!holding || released.has(event)) return;
+        event.stopImmediatePropagation();
+        held.push({ worker: this, data: event.data });
       });
     }
   };

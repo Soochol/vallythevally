@@ -204,6 +204,10 @@ export class IndicatorLayer {
     this.host.guard(() => this.resetNow(h));
   }
 
+  prepend(h: History): void {
+    this.reset(h);
+  }
+
   private resetNow(h: History): void {
     this.history = h;
     this.display = displayBars(h);

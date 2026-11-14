@@ -557,3 +557,74 @@ test.each([true, false])("worker가 고장 나도 기본 거래량의 초기·�
   expect(f.layer.rows(current.t).map(row => row.state)).toEqual(["ok", "calc"]);
   expect(f.active.at(-1)?.data).toEqual(volumeRows([...bars, current]));
 });
+
+const OLDER = range(-10, -1).map((m) => bar(m));
+const EXTENDED: Draws = { conversion: set(range(-10, 19), 2), base: set(range(-10, 19), 2), spanA: set(range(-5, 24), 2), spanB: set(range(-5, 24), 2), lagging: set(range(-10, 14), 2) };
+const realPoints = (f: Fixture) => perLine((id) => f.line(id).data.filter((r) => r.value !== undefined).map((r) => ({ time: r.time, value: r.value })));
+const expectedPoints = (draws: Draws) => perLine((id) => {
+  const d = draws[id];
+  return d?.op === "set" ? d.points.map((p) => ({ time: toChartTime(p.t), value: p.v })) : [];
+});
+
+function prependedAfterFirstDraw() {
+  const f = fixture("1m", [ICHIMOKU, VOLUME], VOLUME_PANELS);
+  f.layer.reset(history(CONFIRMED));
+  f.reply(created(1));
+  f.layer.flush();
+  const drawnBefore = perLine((id) => f.line(id).data);
+  const setsBefore = perLine((id) => f.line(id).setDataCalls);
+  const legendBefore = f.layer.rows(at(10))[0];
+  f.layer.prepend(history([...OLDER, ...CONFIRMED]));
+  return { ...f, drawnBefore, setsBefore, legendBefore, request: latestCreate(f), setsSince: () => perLine((id) => f.line(id).setDataCalls - setsBefore[id]) };
+}
+
+test("과거 페이지를 붙이는 동안 워커 지표의 선과 범례 값은 직전 그대로이고, 새 세대 응답이 오면 선마다 한 번에 바꾼다", () => {
+  const f = prependedAfterFirstDraw();
+
+  expect(perLine((id) => f.line(id).data)).toEqual(f.drawnBefore);
+  expect(perLine((id) => f.line(id).sets.slice(f.setsBefore[id]).filter((rows) => rows.length === 0).length)).toEqual(perLine(() => 0));
+  expect(f.legendBefore).toMatchObject({ state: "ok" });
+  expect(f.legendBefore?.values.map((v) => v.text)).not.toContain("—");
+  expect(f.layer.rows(at(10))[0]).toEqual(f.legendBefore);
+  expect(f.sent.filter((m) => m.type === "create").map((m) => m.type === "create" && m.gen)).toEqual([1, f.request.gen]);
+  expect(f.request.gen).toBeGreaterThan(1);
+  expect(Array.from(f.request.cols.t)).toEqual([...OLDER, ...CONFIRMED].map((b) => b.t));
+  expect(f.request.engines).toEqual([{ id: ICHIMOKU.id, spec: JSON.stringify(ICHIMOKU.spec) }]);
+  expect(f.series[LINES.length]?.data).toEqual(volumeRows([...OLDER, ...CONFIRMED]));
+
+  f.reply(created(1, { conversion: set(range(0, 19), 9), base: set(range(0, 19), 9), spanA: set(range(5, 24), 9), spanB: set(range(5, 24), 9), lagging: set(range(0, 14), 9) }));
+  f.reply(tail(1, { conversion: update(20, 9), base: update(20, 9), spanA: update(25, 9), spanB: update(25, 9), lagging: update(15, 9) }));
+  f.layer.flush();
+  expect(perLine((id) => f.line(id).data)).toEqual(f.drawnBefore);
+  expect(f.layer.rows(at(10))[0]).toEqual(f.legendBefore);
+
+  f.reply(created(f.request.gen, EXTENDED));
+  f.layer.flush();
+  expect(f.setsSince()).toEqual(perLine(() => 1));
+  expect(realPoints(f)).toEqual(expectedPoints(EXTENDED));
+  expect(f.layer.rows(at(-5))[0]).toMatchObject({ state: "ok" });
+  expect(f.layer.rows(at(-5))[0]?.values.map((v) => v.text)).not.toContain("—");
+});
+
+test("과거 페이지를 붙인 뒤 새 세대가 실패하면 오류로 바꾸고 선을 비운다", () => {
+  const f = prependedAfterFirstDraw();
+  f.reply({ type: "created", chart: 1, results: [{ id: ICHIMOKU.id, gen: f.request.gen, ok: false, error: "calc", message: "failed" }] });
+
+  expect(f.layer.rows(at(10))[0]).toMatchObject({ state: "calc", values: [] });
+  expect(perLine((id) => f.line(id).data)).toEqual(perLine(() => []));
+  expect(f.series[LINES.length]?.data).toEqual(volumeRows([...OLDER, ...CONFIRMED]));
+});
+
+test("과거 페이지를 붙인 뒤 종목을 바꾸면 다른 종목의 응답이 올 때까지 지표 선을 비운다", () => {
+  const f = prependedAfterFirstDraw();
+  f.layer.clear();
+  expect(perLine((id) => f.line(id).data)).toEqual(perLine(() => []));
+  const other = range(100, 119).map((m) => bar(m, 105));
+  f.layer.reset(history(other));
+
+  expect(perLine((id) => f.line(id).data)).toEqual(perLine(() => []));
+  expect(f.layer.rows(at(110))[0]?.state).toBe("pending");
+  f.reply(created(f.request.gen, EXTENDED));
+  expect(perLine((id) => f.line(id).data)).toEqual(perLine(() => []));
+  expect(f.series[LINES.length]?.data).toEqual(volumeRows(other));
+});
