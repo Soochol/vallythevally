@@ -174,14 +174,16 @@ test("가격 패널에 겹친 거래량은 패널 없이 읽는다", () => {
 
 test("거래량을 겹치면 그 패널만 빼고, 되돌리면 맨 앞에 기본 높이 패널을 더한다", () => {
   const separate = withVolume("p0", [{ id: "p0", stretch: 0.4 }, { id: "p1", stretch: 0.3, collapsed: true }]);
-  const over = setIndicatorPlacement(separate, "v", "price", ids());
+  const over = setIndicatorPlacement(separate, "v", "price");
   expect(over.panels).toEqual([{ id: "p1", stretch: 0.3, collapsed: true }]);
   expect(over.indicators.map((i) => [i.id, i.panel])).toEqual([["v", "price"], ["a", "price"], ["b", "p1"]]);
   expect(parseChartSettings(over)).toEqual(over);
-  const back = setIndicatorPlacement(over, "v", "panel", ids());
-  expect(back.panels).toEqual([{ id: "id-1", stretch: 0.25 }, { id: "p1", stretch: 0.3, collapsed: true }]);
-  expect(back.indicators[0]).toMatchObject({ id: "v", panel: "id-1" });
+  const back = setIndicatorPlacement(over, "v", "panel");
+  expect(back.panels.map((p) => p.stretch)).toEqual([0.25, 0.3]);
+  expect(back.panels[1]).toEqual({ id: "p1", stretch: 0.3, collapsed: true });
+  expect(back.indicators[0]).toMatchObject({ id: "v", panel: back.panels[0]!.id });
   expect(parseChartSettings(back)).toEqual(back);
+  expect(setIndicatorPlacement(over, "v", "panel", { id: "p0", stretch: 0.4 }, 1)).toEqual(withVolume("p0", [{ id: "p1", stretch: 0.3, collapsed: true }, { id: "p0", stretch: 0.4 }]));
   expect(setIndicatorPlacement(over, "v", "price")).toBe(over);
   expect(setIndicatorPlacement(separate, "v", "panel")).toBe(separate);
 });

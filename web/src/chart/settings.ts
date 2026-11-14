@@ -237,12 +237,11 @@ export function updateIndicator(s: ChartSettings, id: string, patch: Partial<Pic
   return indicators.every((i, n) => i === s.indicators[n]) ? s : { ...s, indicators };
 }
 
-export function setIndicatorPlacement(s: ChartSettings, id: string, placement: Placement, makeId: () => string = newId): ChartSettings {
+export function setIndicatorPlacement(s: ChartSettings, id: string, placement: Placement, panel: Panel = { id: newId(), stretch: DEFAULT_PANEL_STRETCH }, at = 0): ChartSettings {
   const config = s.indicators.find((i) => i.id === id);
   if (!config || placementOfConfig(config) === placement || !placementsOf(config.spec.kind).includes(placement)) return s;
-  const panel = placement === "price" ? "price" : makeId();
-  const indicators = s.indicators.map((i) => (i === config ? { ...i, panel } : i));
-  const panels = placement === "price" ? s.panels.filter((p) => p.id !== config.panel) : [{ id: panel, stretch: DEFAULT_PANEL_STRETCH }, ...s.panels];
+  const indicators = s.indicators.map((i) => (i === config ? { ...i, panel: placement === "price" ? "price" : panel.id } : i));
+  const panels = placement === "price" ? s.panels.filter((p) => p.id !== config.panel) : [...s.panels.slice(0, at), panel, ...s.panels.slice(at)];
   return { ...s, indicators, panels };
 }
 

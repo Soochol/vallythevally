@@ -61,7 +61,7 @@ interface LayoutState {
   setShowDaySeparators(cellId: WindowId, on: boolean): void;
   addIndicator(cellId: WindowId, spec: IndicatorSpec, style: IndicatorConfig["style"], placement?: IndicatorPlacement): void;
   updateIndicator(cellId: WindowId, id: string, patch: Partial<Pick<IndicatorConfig, "spec" | "style" | "visible">>): void;
-  setIndicatorPlacement(cellId: WindowId, id: string, placement: IndicatorPlacement, panelId?: Panel["id"]): void;
+  setIndicatorPlacement(cellId: WindowId, id: string, placement: IndicatorPlacement, panel?: Panel, at?: number): void;
   removeIndicator(cellId: WindowId, id: string): void;
   movePanel(cellId: WindowId, panelId: string, step: -1 | 1): void;
   togglePanel(cellId: WindowId, panelId: string): void;
@@ -105,7 +105,7 @@ export const useLayoutStore = create<LayoutState>()((set) => {
     setShowDaySeparators: (cellId, on) => patchSetting(cellId, "showDaySeparators", on),
     addIndicator: (cellId, spec, style, placement) => patchSettings(cellId, (s) => edit.addIndicator(s, spec, style, undefined, placement).settings),
     updateIndicator: (cellId, id, patch) => patchSettings(cellId, (s) => edit.updateIndicator(s, id, patch)),
-    setIndicatorPlacement: (cellId, id, placement, panelId) => patchSettings(cellId, (s) => edit.setIndicatorPlacement(s, id, placement, panelId === undefined ? undefined : () => panelId)),
+    setIndicatorPlacement: (cellId, id, placement, panel, at) => patchSettings(cellId, (s) => edit.setIndicatorPlacement(s, id, placement, panel, at)),
     removeIndicator: (cellId, id) => patchSettings(cellId, (s) => edit.removeIndicator(s, id)),
     movePanel: (cellId, panelId, step) => patchSettings(cellId, (s) => edit.movePanel(s, panelId, step)),
     togglePanel: (cellId, panelId) => patchSettings(cellId, (s) => edit.togglePanel(s, panelId)),
