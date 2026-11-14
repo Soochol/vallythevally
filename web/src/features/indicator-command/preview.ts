@@ -1,11 +1,10 @@
 import { useMemo } from "react";
 import { create } from "zustand";
-import type { IndicatorSpec } from "../../chart/indicators/kinds";
-import { addIndicator, updateIndicator, type ChartSettings, type IndicatorConfig } from "../../chart/settings";
+import type { IndicatorSpec, Placement } from "../../chart/indicators/kinds";
+import { addIndicator, DEFAULT_PANEL_STRETCH, setIndicatorPlacement, updateIndicator, type ChartSettings, type IndicatorConfig } from "../../chart/settings";
 import type { WindowId } from "../../layout/kinds";
 
-export type Preview = { kind: "add"; id: string; panelId: string; spec: IndicatorSpec; style: IndicatorConfig["style"] }
-  | { kind: "edit"; id: string; spec: IndicatorSpec; style: IndicatorConfig["style"] };
+export type Preview = { kind: "add" | "edit"; id: string; panelId: string; spec: IndicatorSpec; style: IndicatorConfig["style"]; placement: Placement };
 
 export const useIndicatorPreview = create<{ current: { cellId: WindowId; preview: Preview } | null; set(cellId: WindowId, preview: Preview | null): void }>()((set) => ({
   current: null,
@@ -14,9 +13,9 @@ export const useIndicatorPreview = create<{ current: { cellId: WindowId; preview
 
 export function previewSettings(settings: ChartSettings, preview: Preview | null): ChartSettings {
   if (!preview) return settings;
-  if (preview.kind === "edit") return updateIndicator(settings, preview.id, { spec: preview.spec, style: preview.style });
+  if (preview.kind === "edit") return setIndicatorPlacement(updateIndicator(settings, preview.id, { spec: preview.spec, style: preview.style }), preview.id, preview.placement, { id: preview.panelId, stretch: DEFAULT_PANEL_STRETCH });
   let nextId = 0;
-  return addIndicator(settings, preview.spec, preview.style, () => nextId++ === 0 ? preview.id : preview.panelId).settings;
+  return addIndicator(settings, preview.spec, preview.style, () => nextId++ === 0 ? preview.id : preview.panelId, preview.placement).settings;
 }
 
 export function useShownSettings(cellId: WindowId, saved: ChartSettings): { settings: ChartSettings; preview: Preview | null } {

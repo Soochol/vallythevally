@@ -28,6 +28,8 @@ class FakeSeries {
   readonly rejected: string[] = [];
   readonly options: object[] = [];
   readonly scaleOptions: object[] = [];
+  pane = 0;
+  order: number | undefined;
   failNextUpdate = false;
 
   get setDataCalls(): number {
@@ -63,9 +65,12 @@ class FakeSeries {
   createPriceLine() {
     return { applyOptions() {} };
   }
+  setSeriesOrder(order: number) {
+    this.order = order;
+  }
 }
 
-const TOKENS = { text2: "text2", line: "line", upVol: "upVol", downVol: "downVol", ind: {} } as unknown as ThemeTokens;
+const TOKENS = { text2: "text2", line: "line", up: "#FF6B78", down: "#5B9BFF", upVol: "upVol", downVol: "downVol", ind: {} } as unknown as ThemeTokens;
 
 const T0 = Date.parse("2026-11-09T09:00:00+09:00") / 1000;
 const at = (minute: number): UnixSeconds => T0 + minute * 60;
@@ -111,8 +116,9 @@ function fixture(period: "1m" | "Q" | "Y" = "1m", configs: IndicatorConfig[] = [
   const theme = { tokens: TOKENS };
   const sent: ToWorker[] = [];
   const port: { listener?: PortListener } = {};
-  const add = (_definition: unknown, options: object) => {
+  const add = (_definition: unknown, options: object, pane = 0) => {
     const s = new FakeSeries();
+    s.pane = pane;
     s.applyOptions(options);
     series.push(s);
     active.push(s);
@@ -372,7 +378,8 @@ test("재무값은 WASM 계산 없이 API bucket에 그리고 누락·겹침·�
 
 const VOLUME: IndicatorConfig = { id: "volume", spec: { kind: "volume", maPeriod: null }, panel: "p", visible: true, style: { colors: ["ind-1"], width: 1 } };
 const VOLUME_PANELS: Panel[] = [{ id: "p", stretch: 0.25 }];
-const volumeRows = (bars: Bar[], tokens = TOKENS): Datum[] => bars.map(b => ({ time: toChartTime(b.t), value: b.v, color: b.c >= b.o ? tokens.upVol : tokens.downVol }));
+const VOLUME_COLORS = { up: "rgba(255, 107, 120, 0.38)", down: "rgba(91, 155, 255, 0.38)" };
+const volumeRows = (bars: Bar[], colors = VOLUME_COLORS): Datum[] => bars.map(b => ({ time: toChartTime(b.t), value: b.v, color: b.c >= b.o ? colors.up : colors.down }));
 const history = (bars: Bar[], current: Bar | null = null): History => ({ bars, current, nextBefore: null });
 
 function workerVolume(gen: number, value: number): Exclude<FromWorker, { type: "fatal" }> {
@@ -478,13 +485,51 @@ test("기본 거래량은 숨긴 동안 비우고 다시 표시할 때 최신 �
   expect(f.active.map(s => s.data)).toEqual([volumeRows([...bars, live]), volumeRows(bars)]);
   f.layer.flush();
   expect(f.active.map(s => s.data)).toEqual([volumeRows([...bars, live]), volumeRows([...bars, live])]);
-  f.theme.tokens = { ...TOKENS, upVol: "newUp", downVol: "newDown" };
+  f.theme.tokens = { ...TOKENS, up: "#102030", down: "#405060" };
+  const recolored = { up: "rgba(16, 32, 48, 0.38)", down: "rgba(64, 80, 96, 0.38)" };
   f.layer.setTheme();
-  expect(f.active.map(s => s.data)).toEqual([volumeRows([...bars, live], f.theme.tokens), volumeRows([...bars, live], f.theme.tokens)]);
+  expect(f.active.map(s => s.data)).toEqual([volumeRows([...bars, live], recolored), volumeRows([...bars, live], recolored)]);
   f.layer.setConfigs([second, VOLUME], [panels[1]!, panels[0]!]);
   expect(f.layer.rows(live.t).map(row => ({ id: row.id, panel: row.panel?.index }))).toEqual([{ id: "second", panel: 0 }, { id: "volume", panel: 1 }]);
-  expect(f.active.map(s => s.data)).toEqual([volumeRows([...bars, live], f.theme.tokens), volumeRows([...bars, live], f.theme.tokens)]);
+  expect(f.active.map(s => s.data)).toEqual([volumeRows([...bars, live], recolored), volumeRows([...bars, live], recolored)]);
   expect(f.active.every(s => s.options.some(o => "visible" in o && o.visible === true))).toBe(true);
+});
+
+const optionOf = (s: FakeSeries, key: string): unknown => s.options.findLast((o) => key in o)?.[key as keyof object];
+
+test("가격 패널에 겹친 거래량은 0번 pane의 자기 축 아래 20%에 막대를 봉 뒤로 그리고 이동평균선도 그 축을 쓴다", () => {
+  const over: IndicatorConfig = { ...VOLUME, spec: { kind: "volume", maPeriod: 20 }, panel: "price" };
+  const f = fixture("1m", [over], []);
+  f.layer.reset(history([bar(0), bar(1)]));
+  f.reply(workerVolume(1, 500));
+  const [bars, ma] = f.active;
+  expect([bars?.pane, ma?.pane]).toEqual([0, 0]);
+  expect(optionOf(bars!, "priceScaleId")).toBe("volume:volume");
+  expect(optionOf(ma!, "priceScaleId")).toBe("volume:volume");
+  expect(bars!.scaleOptions.at(-1)).toMatchObject({ scaleMargins: { top: 0.8, bottom: 0 } });
+  expect([bars?.order, ma?.order]).toEqual([0, undefined]);
+  expect([optionOf(bars!, "lastValueVisible"), optionOf(ma!, "lastValueVisible")]).toEqual([false, false]);
+  expect(ma!.data).toEqual([drawn(1, 250, 250)]);
+  expect(f.layer.rows(at(1))[0]).toMatchObject({ id: "volume", panel: null, values: [{ text: "500" }, { text: "250" }] });
+});
+
+test("거래량 막대의 알파는 barOpacity이고 별도 패널과 겹침, 테마 변경에 함께 따른다", () => {
+  const f = fixture("1m", [VOLUME], VOLUME_PANELS);
+  const bars = [bar(0, 80), bar(1, 100)];
+  f.layer.reset(history(bars));
+  expect(f.active[0]!.data).toEqual(volumeRows(bars));
+  const paler = { ...VOLUME, style: { ...VOLUME.style, barOpacity: 0.8 } };
+  f.layer.setConfigs([paler], VOLUME_PANELS);
+  const strong = { up: "rgba(255, 107, 120, 0.8)", down: "rgba(91, 155, 255, 0.8)" };
+  expect(f.active).toHaveLength(1);
+  expect(f.active[0]!.data).toEqual(volumeRows(bars, strong));
+  f.layer.setConfigs([{ ...paler, panel: "price" }], []);
+  expect(f.active).toHaveLength(1);
+  expect(f.active[0]!.pane).toBe(0);
+  expect(f.active[0]!.data).toEqual(volumeRows(bars, strong));
+  f.theme.tokens = { ...TOKENS, up: "#102030", down: "#405060" };
+  f.layer.setTheme();
+  expect(f.active[0]!.data).toEqual(volumeRows(bars, { up: "rgba(16, 32, 48, 0.8)", down: "rgba(64, 80, 96, 0.8)" }));
 });
 
 test("거래량 MA를 끄면 이전 worker 엔진을 버리고 늦은 응답이 기본 거래량과 새 종목을 덮지 못한다", () => {

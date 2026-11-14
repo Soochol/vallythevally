@@ -4,7 +4,7 @@ import type { LayoutWindow } from "../api/generated/LayoutWindow";
 import type { LinkColor } from "../api/generated/LinkColor";
 import type { Period } from "../api/generated/Period";
 import type { Venue } from "../api/generated/Venue";
-import type { IndicatorSpec } from "../chart/indicators/kinds";
+import type { IndicatorSpec, Placement as IndicatorPlacement } from "../chart/indicators/kinds";
 import type { SymbolCode } from "../api/generated/SymbolCode";
 import * as edit from "../chart/settings";
 import { type ChartSettings, type ChartStyle, DEFAULT_CHART_SETTINGS, type ExtremeBasis, type IndicatorConfig, type Panel, type PriceScale } from "../chart/settings";
@@ -59,8 +59,9 @@ interface LayoutState {
   setShowOhlcChange(cellId: WindowId, on: boolean): void;
   setExtremeBasis(cellId: WindowId, basis: ExtremeBasis): void;
   setShowDaySeparators(cellId: WindowId, on: boolean): void;
-  addIndicator(cellId: WindowId, spec: IndicatorSpec, style: IndicatorConfig["style"]): void;
+  addIndicator(cellId: WindowId, spec: IndicatorSpec, style: IndicatorConfig["style"], placement?: IndicatorPlacement): void;
   updateIndicator(cellId: WindowId, id: string, patch: Partial<Pick<IndicatorConfig, "spec" | "style" | "visible">>): void;
+  setIndicatorPlacement(cellId: WindowId, id: string, placement: IndicatorPlacement, panel?: Panel, at?: number): void;
   removeIndicator(cellId: WindowId, id: string): void;
   movePanel(cellId: WindowId, panelId: string, step: -1 | 1): void;
   togglePanel(cellId: WindowId, panelId: string): void;
@@ -102,8 +103,9 @@ export const useLayoutStore = create<LayoutState>()((set) => {
     setShowOhlcChange: (cellId, on) => patchSetting(cellId, "showOhlcChange", on),
     setExtremeBasis: (cellId, basis) => patchSetting(cellId, "extremeBasis", basis),
     setShowDaySeparators: (cellId, on) => patchSetting(cellId, "showDaySeparators", on),
-    addIndicator: (cellId, spec, style) => patchSettings(cellId, (s) => edit.addIndicator(s, spec, style).settings),
+    addIndicator: (cellId, spec, style, placement) => patchSettings(cellId, (s) => edit.addIndicator(s, spec, style, undefined, placement).settings),
     updateIndicator: (cellId, id, patch) => patchSettings(cellId, (s) => edit.updateIndicator(s, id, patch)),
+    setIndicatorPlacement: (cellId, id, placement, panel, at) => patchSettings(cellId, (s) => edit.setIndicatorPlacement(s, id, placement, panel, at)),
     removeIndicator: (cellId, id) => patchSettings(cellId, (s) => edit.removeIndicator(s, id)),
     movePanel: (cellId, panelId, step) => patchSettings(cellId, (s) => edit.movePanel(s, panelId, step)),
     togglePanel: (cellId, panelId) => patchSettings(cellId, (s) => edit.togglePanel(s, panelId)),

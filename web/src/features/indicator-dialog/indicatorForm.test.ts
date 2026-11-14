@@ -4,8 +4,11 @@ import { colorsFrom, isFinancial, isFinancialBar, KIND_ORDER, KINDS } from "../.
 import type { HexColor } from "../../lib/colors";
 import { addIndicator, DEFAULT_CHART_SETTINGS, type IndicatorConfig } from "../../chart/settings";
 import {
+  canOverlayPrice,
   checkForm,
+  draftStyle,
   formFromSpec,
+  hasBarOpacity,
   hasColor,
   nextColor,
   panelLabel,
@@ -127,8 +130,18 @@ test("편집은 그 지표의 설정과 모양으로, 추가는 기본값과 자
     visible: true,
     style: { colors: ["ind-2", "ind-4"], width: 2 },
   };
-  expect(startDraft(editing, "ma")).toEqual({ form: { kind: "volume", text: { maPeriod: "60" }, enabled: { maPeriod: true } }, color: "ind-4", width: 2 });
-  expect(startDraft(null, "macd")).toEqual({ form: formFromSpec(KINDS.macd.defaults), color: "auto", width: 1 });
+  expect(startDraft(editing, "ma")).toEqual({ form: { kind: "volume", text: { maPeriod: "60" }, enabled: { maPeriod: true } }, color: "ind-4", width: 2, placement: "panel", barOpacity: 0.38 });
+  expect(startDraft({ ...editing, panel: "price", style: { ...editing.style, barOpacity: 0.8 } }, "volume")).toMatchObject({ placement: "price", barOpacity: 0.8 });
+  expect(startDraft(null, "macd")).toEqual({ form: formFromSpec(KINDS.macd.defaults), color: "auto", width: 1, placement: "panel", barOpacity: 0.38 });
+  expect(startDraft(null, "ma")).toMatchObject({ placement: "price" });
+});
+
+test("막대 불투명도는 거래량 스타일에만 담고, 겹치기는 거래량만 고를 수 있다", () => {
+  const volume = { ...startDraft(null, "volume"), barOpacity: 0.55 };
+  expect(draftStyle(volume, ["ind-1"])).toEqual({ colors: ["ind-1"], width: 1, barOpacity: 0.55 });
+  expect(draftStyle({ ...startDraft(null, "macd"), barOpacity: 0.55 }, ["ind-1"])).toEqual({ colors: ["ind-1"], width: 1 });
+  expect(KIND_ORDER.filter(canOverlayPrice)).toEqual(["volume"]);
+  expect(KIND_ORDER.filter(hasBarOpacity)).toEqual(["volume"]);
 });
 
 test("새 지표의 색은 이 칸에서 아직 쓰지 않은 첫 색이다", () => {
