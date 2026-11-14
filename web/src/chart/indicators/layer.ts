@@ -205,7 +205,10 @@ export class IndicatorLayer {
   }
 
   prepend(h: History): void {
-    this.host.guard(() => this.load(h));
+    this.host.guard(() => {
+      this.load(h);
+      this.redrawPriceOverlays();
+    });
   }
 
   private resetNow(h: History): void {
@@ -578,6 +581,15 @@ export class IndicatorLayer {
   private overlayPoint(pt: Point): OverlayPoint {
     const main = this.display[firstAtOrAfter(this.display, pt.t)];
     return { time: toChartTime(pt.t), value: pt.v, base: main?.t === pt.t ? main.c : pt.v };
+  }
+
+  private redrawPriceOverlays(): void {
+    for (const s of this.shown.values()) if (usesWorker(s.config)) {
+      for (const line of s.lines) if (line.priceOverlay && line.points.length) {
+        this.queue.forget(line);
+        this.draw(line, line.points);
+      }
+    }
   }
 
   private rebaseLeadingSpans(): void {
