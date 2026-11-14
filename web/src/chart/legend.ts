@@ -102,6 +102,7 @@ export class Legend {
   private readonly venueAndOhlc = el("div", OHLC_ALONE.group);
   private readonly ohlc = el("div", OHLC_ALONE.values);
   private display: LegendDisplay = { showLegend: true, showOhlcChange: false };
+  private ohlcContent = "";
 
   constructor(parent: HTMLElement) {
     this.head.append(this.name, this.sub, this.venueAnchor, this.period, this.notice);
@@ -170,6 +171,9 @@ export class Legend {
     this.change.className = `text-s whitespace-pre ${dir}`;
     this.time.textContent = parts.time;
     this.fetched.hidden = !v.isCurrent;
+    const ohlcContent = JSON.stringify([parts.cells, withChange]);
+    if (ohlcContent === this.ohlcContent) return;
+    this.ohlcContent = ohlcContent;
     this.ohlc.replaceChildren(
       ...parts.cells.map(([k, val, change]) => {
         const span = el("span", "");

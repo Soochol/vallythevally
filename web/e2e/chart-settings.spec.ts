@@ -455,6 +455,32 @@ test("범례를 끈 좁은 칸에서는 봉 값이 거래소 옆에서, 값 한 
   }
 });
 
+test("봉 값이 그대로면 크기가 바뀌어 다시 그려도 봉 값 줄의 칸을 새로 만들지 않는다", async ({ page, scenario }) => {
+  await page.setViewportSize({ width: 860, height: 800 });
+  openWith(scenario, { showLegend: false, showOhlcChange: true });
+  await open(page);
+  await expect.poll(() => scenario.live.subscriptions().some((s) => s.symbol === "005930")).toBe(true);
+  scenario.live.emit({ type: "sub_error", sub: scenario.live.subscriptions().find((s) => s.symbol === "005930")!.sub, code: "realtime_limit" });
+  await expect(cell(page).getByText("실시간 한도 초과: 조회 값만 보입니다", { exact: true })).toBeVisible();
+  await expect(cell(page)).toHaveAttribute("aria-busy", "false");
+  await expect(ohlc(page).locator(":scope > span")).toHaveCount(5);
+  await ohlc(page).evaluate((line) => {
+    const rebuilt: string[] = [];
+    let shown = line.textContent;
+    new MutationObserver((records) => {
+      for (let i = 1; i < records.length; i++) rebuilt.push(`${line.textContent}`);
+      if (line.textContent === shown) rebuilt.push(`${line.textContent}`);
+      shown = line.textContent;
+    }).observe(line, { childList: true });
+    (window as unknown as { rebuiltOhlc: typeof rebuilt }).rebuiltOhlc = rebuilt;
+  });
+  await page.setViewportSize({ width: 780, height: 800 });
+  await expect.poll(async () => (await venues(page).boundingBox())!.y + (await venues(page).boundingBox())!.height)
+    .toBeLessThanOrEqual((await ohlc(page).boundingBox())!.y);
+  await page.waitForTimeout(1000);
+  expect(await page.evaluate(() => (window as unknown as { rebuiltOhlc: unknown[] }).rebuiltOhlc)).toEqual([]);
+});
+
 test("범례를 끈 지수는 거래소 자리 없이 봉 값이 범례 왼쪽 끝에서 시작한다", async ({ page, scenario }) => {
   const layout = scenario.documents.layout(DEFAULT_LAYOUT_ID);
   scenario.documents.saveLayout({ ...layout, revision: layout.revision + 1, windows: withFirstChart(layout, { symbol: "IDX:001", venue: null, period: "D",
