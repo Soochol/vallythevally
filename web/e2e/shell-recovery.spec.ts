@@ -29,7 +29,7 @@ test("긴 ETF 이름에서도 거래소가 차트 안에 있고 탭을 누를 �
   await page.goto("/?symbol=0000D0");
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
   await expect(cell(page)).toHaveAttribute("aria-label", /TIGER 엔비디아미국채커버드콜밸런스\(합성\)/);
-  const tabs = page.getByRole("tablist", { name: "오른쪽 패널" });
+  const tabs = page.getByRole("tablist", { name: "창 묶음 2" });
   await tabs.getByRole("tab", { name: /^스크리너/ }).click({ timeout: 3000 });
   const watch = tabs.getByRole("tab", { name: "관심종목", exact: true });
   const watchBox = await watch.boundingBox();

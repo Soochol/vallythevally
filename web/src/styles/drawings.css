@@ -1,6 +1,6 @@
-.drawing-toolbar { position:absolute; left:calc((100% - var(--chart-right, 0px)) / 2); top:calc(var(--chart-inset-top, 0px) + var(--size-4)); z-index:10; transform:translateX(-50%); display:flex; align-items:center; gap:2px; --dock-reserve:11rem; max-width:calc(100% - var(--chart-right, 0px) - var(--dock-reserve)); min-width:11rem; padding:5px; border-radius:var(--r-pill); color:var(--text-2); overflow-x:auto; overflow-y:hidden; scrollbar-width:none; }
+.drawing-toolbar { position:absolute; left:50%; top:var(--size-8); z-index:10; transform:translateX(-50%); display:flex; align-items:center; gap:2px; --dock-reserve:11rem; max-width:calc(100% - var(--dock-reserve)); min-width:11rem; padding:5px; border-radius:var(--r-pill); color:var(--text-2); overflow-x:auto; overflow-y:hidden; scrollbar-width:none; }
 @property --dock-reserve { syntax:"<length>"; inherits:false; initial-value:0px; }
-.drawing-toolbar[data-pinned] { transform:translateX(var(--dock-shift, -50%)); max-width:var(--dock-max, calc(100% - var(--chart-right, 0px) - var(--dock-reserve))); }
+.drawing-toolbar[data-pinned] { transform:translateX(var(--dock-shift, -50%)); max-width:var(--dock-max, calc(100% - var(--dock-reserve))); }
 .drawing-toolbar>* { flex-shrink:0; }
 .draw-pinned { display:flex; align-items:center; gap:inherit; }
 .draw-tool { display:grid; place-items:center; width:32px; height:32px; border-radius:var(--r-pill); color:var(--text-2); cursor:pointer; }
@@ -25,6 +25,7 @@
 .draw-toolbar-end { display:flex; align-items:center; gap:2px; padding-left:4px; margin-left:2px; border-left:1px solid var(--line); }
 .drawing-overlay { position:absolute; inset:0; z-index:7; pointer-events:none; }
 .drawing-floating { display:flex; align-items:center; gap:4px; min-height:38px; padding:4px; max-width:calc(100dvw - 16px); flex-wrap:wrap; pointer-events:auto; white-space:nowrap; }
+.ui-popover.drawing-floating { max-width:min(calc(100dvw - 16px), var(--floating-max, 100dvw)); }
 .drawing-floating .icon-btn { width:28px; height:28px; }
 .drawing-floating .icon-btn svg { width:17px; height:17px; }
 .drawing-floating input[type=color] { width:26px; height:26px; padding:4px; cursor:pointer; border:0; background:transparent; }

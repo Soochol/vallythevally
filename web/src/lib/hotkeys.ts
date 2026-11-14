@@ -7,7 +7,7 @@ export type HotkeyAction =
   | { kind: "periodStep"; step: -1 | 1 }
   | { kind: "toggleLog" }
   | { kind: "indicators" }
-  | { kind: "toggleWatch" }
+  | { kind: "showWatchlist" }
   | { kind: "snapshot"; mode: "download" | "copy" };
 
 export interface KeyLike {
@@ -41,9 +41,10 @@ export const HOTKEYS: { keys: string; label: string; action: HotkeyAction; match
     { keys: "I", label: "지표 추가", action: { kind: "indicators" }, match: plain("KeyI") },
     {
       keys: "Alt+W",
-      label: "오른쪽 패널 접기/펴기",
-      action: { kind: "toggleWatch" },
+      label: "관심종목 창 보이기",
+      action: { kind: "showWatchlist" },
       match: (e) => e.code === "KeyW" && e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey,
+      desktopOnly: true,
     },
     {
       keys: "Alt+S",

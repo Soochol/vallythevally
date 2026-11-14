@@ -37,8 +37,9 @@ test("숫자는 분봉이다. Shift를 붙이면 15·30·60분", () => {
   expect(matchHotkey(key("Digit1", { ctrlKey: true }), "desktop")).toBeNull();
 });
 
-test("Alt+W는 관심종목 접기, W만 누르면 주봉", () => {
-  expect(matchHotkey(key("KeyW", { altKey: true }), "desktop")).toEqual({ kind: "toggleWatch" });
+test("Alt+W는 데스크톱에서 관심종목 창 보이기, W만 누르면 주봉", () => {
+  expect(matchHotkey(key("KeyW", { altKey: true }), "desktop")).toEqual({ kind: "showWatchlist" });
+  expect(matchHotkey(key("KeyW", { altKey: true }), "phone")).toBeNull();
   expect(matchHotkey(key("KeyW"), "desktop")).toEqual({ kind: "period", period: "W" });
 });
 

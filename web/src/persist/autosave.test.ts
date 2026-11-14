@@ -71,26 +71,23 @@ test("칸을 바꾸면 1초 뒤 레이아웃을 통째로 보내고 저장됨이
   expect(usePersistStore.getState().saves.layout.kind).toBe("saved");
 });
 
-test("관심종목 패널을 접으면 모르는 키와 함께 UiState를 보낸다", async () => {
-  useUiStore.getState().toggleWatch();
+test("UI 설정을 바꾸면 모르는 키와 함께 UiState를 보낸다", async () => {
+  useUiStore.getState().setIndicatorWindow("inspector");
   await vi.advanceTimersByTimeAsync(1000);
   expect(puts).toEqual([
     {
       path: "/api/ui-state",
       body: {
         phone: 1,
-        rightPanel: "watch",
-        panelWidth: null,
         lastLayoutId: DEFAULT_LAYOUT.id,
         theme: "dark",
-        watchCollapsed: true,
         recentSymbols: ["IDX:001"],
         activeWatchlistId: null,
         watchColumns: ["price", "changeRate"],
         drawing: DEFAULT_UI_PREFS.drawing,
         lastMinute: "3m",
         collapsedWatchGroups: [],
-        indicatorWindow: "dialog",
+        indicatorWindow: "inspector",
         revision: expect.any(Number),
       },
       keepalive: false,
@@ -167,20 +164,20 @@ test("옛 한 목록 한도(64KB)에 들던 종목을 가장 긴 감싸개 20개
 
 test("UiState가 64KB를 넘으면 최근 본 종목을 지우고 한 번 다시 보낸다", async () => {
   const prefs = { ...DEFAULT_UI_PREFS, lastLayoutId: DEFAULT_LAYOUT.id };
-  const base = JSON.stringify({ ...toUiState(prefs, { blob: "" }), revision: Number.MAX_SAFE_INTEGER }).length;
+  const base = JSON.stringify({ ...toUiState({ ...prefs, indicatorWindow: "inspector" }, { blob: "" }), revision: Number.MAX_SAFE_INTEGER }).length;
   const blob = "x".repeat(PAYLOAD_LIMIT_BYTES - base);
   useUiStore.getState().load({ ...prefs, recentSymbols: ["005930", "000660"] }, { blob });
-  useUiStore.getState().toggleWatch();
+  useUiStore.getState().setIndicatorWindow("inspector");
   await vi.advanceTimersByTimeAsync(10_000);
   expect(toasts).toEqual([RECENT_CLEARED]);
   expect(puts).toHaveLength(1);
-  expect(puts[0]!.body).toMatchObject({ recentSymbols: [], watchCollapsed: true });
+  expect(puts[0]!.body).toMatchObject({ recentSymbols: [], indicatorWindow: "inspector" });
   expect(useUiStore.getState().prefs.recentSymbols).toEqual([]);
 });
 
 test("줄여도 64KB를 넘으면 보내지 않고 실패로 남는다", async () => {
   useUiStore.getState().load({ ...DEFAULT_UI_PREFS, recentSymbols: ["005930"] }, { blob: "x".repeat(PAYLOAD_LIMIT_BYTES) });
-  useUiStore.getState().toggleWatch();
+  useUiStore.getState().setIndicatorWindow("inspector");
   await vi.advanceTimersByTimeAsync(10 * 60_000);
   expect(puts).toEqual([]);
   expect(usePersistStore.getState().saves.ui).toEqual({ kind: "failed", reason: "too_large" });

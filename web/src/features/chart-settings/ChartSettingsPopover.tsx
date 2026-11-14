@@ -17,7 +17,7 @@ const SCALES = [
 ] as const satisfies readonly { value: PriceScale; label: string; title: string }[];
 const WINDOWS = [
   { value: "dialog", label: "가운데 창", title: "지표 창을 화면 가운데에 엽니다" },
-  { value: "inspector", label: "차트 옆", title: "지표 창을 오른쪽 패널에 엽니다. 좁은 화면에서는 가운데 창을 씁니다" },
+  { value: "inspector", label: "차트 옆", title: "지표 창을 작업 영역의 창으로 엽니다. 좁은 화면에서는 가운데 창을 씁니다" },
 ] as const satisfies readonly { value: IndicatorWindow; label: string; title: string }[];
 const EXTREME_BASES = [
   { value: "last", label: "현재가 대비", title: "최고가·최저가가 현재가보다 몇 % 높고 낮은지" },

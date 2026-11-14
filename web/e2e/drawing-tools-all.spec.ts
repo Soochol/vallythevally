@@ -1,5 +1,5 @@
 import type { Page } from "@playwright/test";
-import { cell, chartOf, expect, SEARCH_BUTTON_TITLE, test, type Scenario } from "./harness";
+import { cell, chartOf, expect, saveChartShare, SEARCH_BUTTON_TITLE, test, type Scenario } from "./harness";
 import { bodyAlong, chartPoint, drawings, mirror, open, pickTool } from "./drawing-probe";
 import { TOOLS, toolsByGroup } from "../src/chart/drawings/tools";
 import type { Tool } from "../src/chart/drawings/toolSpec";
@@ -81,7 +81,8 @@ test("등록된 도구는 36개다", () => {
 
 test(`모든 도구: 도구 막대에서 골라 놓고, 새로고침 뒤에도 ${TOOLS.length}개가 개체 목록에 도구 이름으로 남는다`, async ({ page, scenario }, testInfo) => {
   const errors: string[] = []; page.on("pageerror", (e) => errors.push(e.message));
-  await page.setViewportSize({ width: 1280, height: 800 });
+  saveChartShare(scenario, 0.642);
+  await page.setViewportSize({ width: 1280, height: 940 });
   await open(page);
   await placeAll(page, scenario);
   expect(await drawings(scenario)).toHaveLength(TOOLS.length);
@@ -144,7 +145,8 @@ test(`모든 도구: 휴대폰 폭에서는 ${TOOLS.length}개가 보이고 편�
 });
 
 for (const width of [1280, 1024, 800]) {
-  test(`도구 막대: 창 폭 ${width}px에서 차트 안에 머물고 모든 버튼과 그룹 메뉴에 닿는다`, async ({ page }) => {
+  test(`도구 막대: 창 폭 ${width}px에서 차트 안에 머물고 모든 버튼과 그룹 메뉴에 닿는다`, async ({ page, scenario }) => {
+    if (width === 800) saveChartShare(scenario, 0.5);
     await page.setViewportSize({ width, height: 800 });
     await open(page);
     const bar = page.getByRole("navigation", { name: "드로잉 도구" });
@@ -261,7 +263,10 @@ test("작은 막대: 위쪽 드로잉을 골라도 도크를 가리지 않는다
     new MutationObserver(() => {
       const bar = document.querySelector("[role=toolbar][aria-label='드로잉 스타일']")?.getBoundingClientRect();
       const dock = document.querySelector("nav[aria-label='드로잉 도구']")?.getBoundingClientRect();
-      if (bar?.width && dock && bar.top < dock.bottom && bar.bottom > dock.top && bar.left < dock.right && bar.right > dock.left) probe.overDock.push(bar.top);
+      let hidden = false;
+      for (let node: Element | null = document.querySelector("[role=toolbar][aria-label='드로잉 스타일']"); node; node = node.parentElement) if (node instanceof HTMLElement && node.style.visibility === "hidden") hidden = true;
+      const shown = !hidden;
+      if (shown && bar?.width && dock && bar.top < dock.bottom && bar.bottom > dock.top && bar.left < dock.right && bar.right > dock.left) probe.overDock.push(bar.top);
     }).observe(document.body, { subtree: true, childList: true, attributes: true });
   });
   const probe = () => page.evaluate(() => (window as unknown as { barProbe: { overDock: number[] } }).barProbe);

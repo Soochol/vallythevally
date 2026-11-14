@@ -6,7 +6,6 @@ import { openIndicatorCommand } from "./indicator-command/open";
 import { PERIODS } from "../lib/symbol";
 import { chartWindows, useLayoutStore } from "../stores/layout";
 import { useSelectionStore } from "../stores/selection";
-import { useUiStore } from "../stores/ui";
 import { pressScale } from "./indicator-dialog/compareForm";
 import { saveSnapshot } from "./snapshot/saveSnapshot";
 
@@ -33,8 +32,8 @@ export function useHotkeys() {
           return sel.openSearch();
         case "indicators":
           return openIndicatorCommand(cellId);
-        case "toggleWatch":
-          return useUiStore.getState().toggleWatch();
+        case "showWatchlist":
+          return layout.showWindow("watchlist");
         case "period":
           return layout.setPeriod(cellId, action.period);
         case "periodStep": {

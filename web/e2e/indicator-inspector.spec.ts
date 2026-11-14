@@ -7,7 +7,8 @@ import { cell, DEFAULT_LAYOUT_ID, expect, test, type Scenario, firstChart } from
 
 const indicators = (scenario: Scenario) => parseChartSettings(firstChart(scenario.documents.layout(DEFAULT_LAYOUT_ID)).chartSettings).indicators;
 const maColors = async (scenario: Scenario) => indicators(scenario).filter((i) => i.spec.kind === "ma").map((i) => i.style.colors);
-const rail = (page: Page) => page.getByRole("tablist", { name: "오른쪽 패널" });
+const rail = (page: Page) => page.getByRole("tablist", { name: "창 묶음 2" });
+const windowKinds = (scenario: Scenario) => scenario.documents.layout(DEFAULT_LAYOUT_ID).windows.map((w) => w.kind);
 const inspector = (page: Page) => page.getByRole("region", { name: "지표", exact: true });
 const search = (page: Page) => inspector(page).getByRole("searchbox", { name: "지표·비교 찾기" });
 const dialog = (page: Page) => page.getByRole("dialog", { name: "지표·비교 입력창" });
@@ -23,21 +24,21 @@ async function chooseWindow(page: Page, label: "가운데 창" | "차트 옆") {
   await expect(popover).toBeHidden();
 }
 
-test("차트 옆을 고르면 지표 버튼이 우측 패널을 열어 지표를 추가·편집하고, 되돌리면 관심종목과 가운데 창으로 돌아간다", async ({ page, scenario }) => {
+test("차트 옆을 고르면 지표 버튼이 지표 창을 보여 지표를 추가·편집하고, 가운데 창으로 되돌리면 지표 버튼이 가운데 창을 연다", async ({ page, scenario }) => {
   await page.goto("/?symbol=005930");
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
   await expect(rail(page).getByRole("tab", { name: "지표", exact: true })).toHaveCount(0);
 
   await chooseWindow(page, "차트 옆");
   await expect.poll(() => scenario.documents.uiState().indicatorWindow).toBe("inspector");
-  await expect(rail(page).getByRole("tab", { name: "지표", exact: true })).toBeVisible();
+  await expect(rail(page).getByRole("tab", { name: "지표", exact: true })).toHaveCount(0);
   await topbar(page).getByRole("button", { name: "지표", exact: true }).click();
   await expect(dialog(page)).toHaveCount(0);
   await expect(rail(page).getByRole("tab", { name: "지표", exact: true })).toHaveAttribute("aria-selected", "true");
   await expect(search(page)).toBeFocused();
   await expect(inspector(page).getByRole("tab", { name: /^이 칸에 띄운 지표/ })).toHaveAttribute("aria-selected", "true");
   await expect(inspector(page).getByRole("button", { name: "거래량 설정", exact: true })).toHaveAttribute("aria-expanded", "false");
-  await expect.poll(() => scenario.documents.uiState().rightPanel).toBe("indicators");
+  await expect.poll(() => windowKinds(scenario)).toContain("indicators");
 
   await search(page).fill("이평 9");
   await expect(inspector(page).getByRole("tab", { name: "지표 추가", exact: true })).toHaveAttribute("aria-selected", "true");
@@ -108,16 +109,16 @@ test("차트 옆을 고르면 지표 버튼이 우측 패널을 열어 지표를
   await expect(dialog(page)).toHaveCount(0);
 
   await chooseWindow(page, "가운데 창");
-  await expect(rail(page).getByRole("tab", { name: "지표", exact: true })).toHaveCount(0);
-  await expect(rail(page).getByRole("tab", { name: "관심종목", exact: true })).toHaveAttribute("aria-selected", "true");
-  await expect.poll(() => [scenario.documents.uiState().indicatorWindow, scenario.documents.uiState().rightPanel]).toEqual(["dialog", "watch"]);
+  await expect.poll(() => scenario.documents.uiState().indicatorWindow).toBe("dialog");
+  await rail(page).getByRole("tab", { name: "관심종목", exact: true }).click();
   await topbar(page).getByRole("button", { name: "지표", exact: true }).click();
   await expect(dialog(page)).toBeVisible();
+  await expect(rail(page).getByRole("tab", { name: "관심종목", exact: true })).toHaveAttribute("aria-selected", "true");
   await page.keyboard.press("Escape");
   await page.reload();
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
   await expect(rail(page).getByRole("tab", { name: "관심종목", exact: true })).toHaveAttribute("aria-selected", "true");
-  await expect(rail(page).getByRole("tab", { name: "지표", exact: true })).toHaveCount(0);
+  await expect(rail(page).getByRole("tab", { name: "지표", exact: true })).toHaveAttribute("aria-selected", "false");
 });
 
 test("인스펙터의 추가 후보 미리보기는 접거나 Esc를 누르거나 탭을 바꾸면 지운다", async ({ page, scenario }) => {
@@ -144,7 +145,7 @@ test("인스펙터의 추가 후보 미리보기는 접거나 Esc를 누르거�
   expect(indicators(scenario)).toEqual(before);
 });
 
-test("인스펙터는 설정칸의 Enter로 추가하고, 펼친 지표를 범례에서 지우면 아무 줄도 펼치지 않으며, 닫기는 패널을 접고 레일로 초점을 옮긴다", async ({ page, scenario }) => {
+test("인스펙터는 설정칸의 Enter로 추가하고, 펼친 지표를 범례에서 지우면 아무 줄도 펼치지 않는다", async ({ page, scenario }) => {
   scenario.documents.saveUiState({ ...scenario.documents.uiState(), indicatorWindow: "inspector" });
   await page.goto("/?symbol=005930");
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
@@ -172,22 +173,13 @@ test("인스펙터는 설정칸의 Enter로 추가하고, 펼친 지표를 범�
   await expect.poll(async () => indicators(scenario).map((i) => i.id)).not.toContain(id);
   await expect(inspector(page).getByRole("button", { name: "이동평균 단순 13 설정", exact: true })).toBeVisible();
   await expect(inspector(page).locator('[aria-expanded="true"]')).toHaveCount(0);
-
-  await search(page).focus();
-  await page.keyboard.press("Tab");
-  const close = inspector(page).getByRole("button", { name: "지표 패널 닫기", exact: true });
-  await expect(close).toBeFocused();
-  await page.keyboard.press("Enter");
-  await expect(inspector(page)).toHaveCount(0);
-  await expect(rail(page).getByRole("tab", { name: "지표", exact: true })).toBeFocused();
-  await expect.poll(() => scenario.documents.uiState().watchCollapsed).toBe(true);
 });
 
 test.describe("휴대폰", () => {
   test.use({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
 
   test("차트 옆 방식으로 저장돼 있어도 휴대폰의 지표 버튼은 가운데 창을 연다", async ({ page, scenario }) => {
-    scenario.documents.saveUiState({ ...scenario.documents.uiState(), indicatorWindow: "inspector", rightPanel: "indicators" });
+    scenario.documents.saveUiState({ ...scenario.documents.uiState(), indicatorWindow: "inspector" });
     await page.goto("/?symbol=005930");
     await expect(cell(page)).toHaveAttribute("aria-busy", "false");
     await page.getByRole("button", { name: "지표", exact: true }).click();

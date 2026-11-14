@@ -1,9 +1,9 @@
 import { financialPage, financialUpdatePage } from "./financial-update-helpers";
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
-import { cell, DEFAULT_LAYOUT_ID, expect, test, withFirstChart } from "./harness";
+import { cell, DEFAULT_LAYOUT_ID, expect, test, windowTabs, withFirstChart } from "./harness";
 
-const tabs = (page: import("@playwright/test").Page) => page.getByRole("tablist", { name: "오른쪽 패널" });
+const tabs = windowTabs;
 
 test("한 줄 셸과 탭은 작은 창에서도 넘치지 않고 휴대폰 경로를 유지한다", async ({ page }) => {
   await page.goto("/?symbol=005930");
@@ -23,7 +23,7 @@ test("한 줄 셸과 탭은 작은 창에서도 넘치지 않고 휴대폰 경�
     expect((await page.getByRole("toolbar", { name: "차트 도구 막대" }).boundingBox())?.y).toBe(12);
     await expect(page.locator("footer").last()).toBeInViewport({ ratio: 1 });
     await expect(page.getByRole("navigation", { name: "드로잉 도구" })).toBeInViewport({ ratio: 1 });
-    for (const name of ["스크리너", "개체", "관심종목"]) {
+    for (const name of ["스크리너", "개체 목록", "관심종목"]) {
       await tabs(page).getByRole("tab", { name: new RegExp(`^${name}`) }).click();
       await expect(tabs(page).getByRole("tab", { name: new RegExp(`^${name}`) })).toHaveAttribute("aria-selected", "true");
       await expect.poll(() => page.evaluate(() => [document.documentElement.scrollWidth - innerWidth, document.documentElement.scrollHeight - innerHeight])).toEqual([0, 0]);
@@ -32,37 +32,11 @@ test("한 줄 셸과 탭은 작은 창에서도 넘치지 않고 휴대폰 경�
     await page.screenshot({ path: path.resolve(`../target/ux-screens/shell-${size.width}x${size.height}.png`) });
   }
   await page.setViewportSize({ width: 390, height: 844 });
-  await expect(tabs(page)).toBeHidden();
+  await expect(tabs(page)).toHaveCount(0);
   await expect(page.getByRole("toolbar", { name: "차트 도구 막대" })).toBeHidden();
   await expect(cell(page)).toBeVisible();
   await expect.poll(() => page.evaluate(() => [document.documentElement.scrollWidth - innerWidth, document.documentElement.scrollHeight - innerHeight])).toEqual([0, 0]);
   await page.screenshot({ path: path.resolve("../target/ux-screens/shell-390x844.png") });
-});
-
-test("오른쪽 세로 탭·접힘은 저장되고 새로고침 뒤 복원되며 고른 탭을 다시 누르면 패널을 접는다", async ({ page, scenario }) => {
-  await page.goto("/");
-  await tabs(page).getByRole("tab", { name: /^스크리너/ }).click();
-  const width = await page.getByRole("tabpanel").evaluate((el) => el.getBoundingClientRect().width);
-  await expect.poll(async () => scenario.documents.uiState().rightPanel).toBe("screener");
-  await page.reload();
-  await expect(tabs(page).getByRole("tab", { name: /^스크리너/ })).toHaveAttribute("aria-selected", "true");
-  await expect.poll(() => page.getByRole("tabpanel").evaluate((el) => el.getBoundingClientRect().width)).toBe(width);
-  await tabs(page).getByRole("tab", { name: /^스크리너/ }).click();
-  await expect(page.getByRole("tabpanel")).toBeHidden();
-  await expect(tabs(page)).toBeVisible();
-  await expect(tabs(page).getByRole("tab", { name: /^스크리너/ })).toHaveAttribute("aria-selected", "false");
-  await expect.poll(async () => scenario.documents.uiState().watchCollapsed).toBe(true);
-  await page.reload();
-  await expect(tabs(page)).toBeVisible();
-  await expect(page.getByRole("tabpanel")).toBeHidden();
-  await tabs(page).getByRole("tab", { name: /^스크리너/ }).click();
-  await expect(tabs(page).getByRole("tab", { name: /^스크리너/ })).toHaveAttribute("aria-selected", "true");
-  await expect.poll(() => page.getByRole("tabpanel").evaluate((el) => el.getBoundingClientRect().width)).toBe(width);
-  await tabs(page).getByRole("tab", { name: /^스크리너/ }).press("ArrowDown");
-  await expect(tabs(page).getByRole("tab", { name: "개체", exact: true })).toBeFocused();
-  await expect.poll(async () => scenario.documents.uiState().rightPanel).toBe("objects");
-  await page.reload();
-  await expect(tabs(page).getByRole("tab", { name: "개체", exact: true })).toHaveAttribute("aria-selected", "true");
 });
 
 test("상태 막대는 연결·저장·서버 시계와 공유 재무 조회의 진행·실패를 표시한다", async ({ page, scenario }) => {
@@ -83,7 +57,7 @@ test("상태 막대는 연결·저장·서버 시계와 공유 재무 조회의 
   await expect(footer.getByLabel("재무 수집 상태")).toContainText("3/10");
   await expect(footer.getByLabel("재무 수집 상태")).toContainText("실패 1");
   await expect(footer.getByRole("progressbar", { name: "재무 수집 진행률" })).toHaveAttribute("value", "3");
-  await tabs(page).getByRole("tab", { name: "개체", exact: true }).click();
+  await tabs(page).getByRole("tab", { name: "개체 목록", exact: true }).click();
   await expect(footer).toContainText("자동 저장됨");
   financial.status = "partial_failure";
   update.status = "partial_failure";

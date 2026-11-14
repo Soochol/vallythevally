@@ -42,7 +42,7 @@ import {
   updateRetry,
 } from "../../lib/screener";
 import { listNameFrom, MAX_WATCHLISTS } from "../../lib/watchlist";
-import { useCell } from "../../stores/layout";
+import { useCell, useLayoutStore } from "../../stores/layout";
 import { type Rerun, rerunReason, type ScreenRun, shownResult, useScreenerStore } from "../../stores/screener";
 import { useSelectionStore } from "../../stores/selection";
 import { serverNow, useServerClock } from "../../stores/serverClock";
@@ -99,7 +99,7 @@ export function ScreenerBadge() {
   const shown = shownResult(useScreenEditing().view.chosen?.run ?? null)?.rows.length;
   if (updating) {
     return (
-      <span className="absolute right-0.5 top-0.5 text-accent">
+      <span className="text-accent">
         <SpinnerIcon size={10} />
         <span className="sr-only">업데이트 중</span>
       </span>
@@ -107,7 +107,7 @@ export function ScreenerBadge() {
   }
   if (shown === undefined) return null;
   return (
-    <span className="absolute -right-0.5 top-0 min-w-[16px] rounded-full bg-raised px-1 text-center text-xs font-[650] leading-[15px] text-text">
+    <span className="min-w-[16px] rounded-full bg-hover px-1 text-center text-xs font-[650] leading-[15px] text-text">
       <span className="sr-only">결과 </span>
       {shown > BADGE_MAX ? `${BADGE_MAX}+` : shown}
       <span className="sr-only">종목</span>
@@ -151,7 +151,7 @@ export function ScreenerPanel() {
   };
   const createInPanel = () => {
     screenEditing.create();
-    useSelectionStore.getState().showRightPanel("screener");
+    useLayoutStore.getState().showWindow("screener");
     setEditing(true);
   };
   const createScreen = desktop ? createInPanel : () => createInDialog(screenEditing);

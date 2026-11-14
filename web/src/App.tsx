@@ -19,12 +19,13 @@ import { useHotkeys } from "./features/useHotkeys";
 import { useOpenFromAddress } from "./features/useOpenFromAddress";
 import { useCell } from "./stores/layout";
 import { PhoneSaveBand } from "./features/status/SaveStatus";
-import { RightPanel, useRightPanelWidth } from "./features/panel/RightPanel";
 import { PhoneWatch } from "./features/watch/Watchlist";
 import { usePersistStore } from "./stores/persist";
 import { useSelectionStore } from "./stores/selection";
 import { useUiStore } from "./stores/ui";
-import { DrawingToolbar } from "./features/drawings/DrawingToolbar";
+import { Workspace } from "./features/workspace/Workspace";
+import { DESKTOP_QUERY, useMediaQuery } from "./lib/media";
+import type { WindowId } from "./layout/kinds";
 
 export function ChartRoute() {
   const restoring = usePersistStore((s) => s.phase.kind === "restoring");
@@ -36,9 +37,9 @@ function ChartScreen() {
   const cell = useCell(cellId);
   const info = useSymbolInfo(cell.symbol).data;
   const pushRecent = useUiStore((s) => s.pushRecent);
-  const panelWidth = useRightPanelWidth();
-  const reserved = panelWidth > 0 ? "calc(var(--watch-w) + var(--rail-w) + var(--island-gap) * 3)" : "calc(var(--rail-w) + var(--island-gap) * 2)";
-  const [status, setStatus] = useState<CellStatus>({ kind: "loading" });
+  const desktop = useMediaQuery(DESKTOP_QUERY);
+  const [phoneStatus, setPhoneStatus] = useState<{ cellId: WindowId; status: CellStatus } | null>(null);
+  const status: CellStatus = phoneStatus?.cellId === cellId ? phoneStatus.status : { kind: "loading" };
 
   useHotkeys();
   useOpenFromAddress();
@@ -48,21 +49,22 @@ function ChartScreen() {
 
   return (
     <div
-      style={{ "--watch-w": `min(${panelWidth}px, 55vw)`, "--chart-right": reserved, "--island-right": reserved } as React.CSSProperties}
       className={
-        "app-shell relative h-dvh min-h-0 min-w-0 overflow-hidden bg-chart-bg " +
+        "app-shell relative flex h-dvh min-h-0 min-w-0 flex-col overflow-hidden bg-bg " +
         "max-md:grid max-md:grid-cols-[minmax(0,1fr)] max-md:grid-rows-[auto_auto_minmax(0,1fr)_56px] max-md:[grid-template-areas:'mhead'_'mper'_'grid'_'mtabs']"
       }
     >
       <Topbar />
       <PhoneHeader cell={cell} info={info} status={status} />
       <PeriodChips cell={cell} />
-      <main aria-label="칸" className="grid min-h-0 min-w-0 grid-cols-1 grid-rows-1 md:absolute md:inset-0 md:pr-[var(--chart-right)] max-md:[grid-area:grid]">
-        <DrawingToolbar />
-        <ChartCell cellId={cellId} status={status} onStatus={setStatus} />
-      </main>
-      <RightPanel />
-      {panelWidth === 0 && <StatusBar floating />}
+      {desktop ? (
+        <Workspace />
+      ) : (
+        <main aria-label="칸" className="grid min-h-0 min-w-0 grid-cols-1 grid-rows-1 [grid-area:grid]">
+          <ChartCell key={cellId} cellId={cellId} status={status} onStatus={(next) => setPhoneStatus({ cellId, status: next })} />
+        </main>
+      )}
+      <StatusBar />
       <PhoneTabs />
       <PhoneWatch />
       <PhoneScreener />

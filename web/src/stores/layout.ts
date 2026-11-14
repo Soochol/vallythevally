@@ -8,12 +8,14 @@ import type { IndicatorSpec, Placement as IndicatorPlacement } from "../chart/in
 import type { SymbolCode } from "../api/generated/SymbolCode";
 import * as edit from "../chart/settings";
 import { type ChartSettings, type ChartStyle, DEFAULT_CHART_SETTINGS, type ExtremeBasis, type IndicatorConfig, type Panel, type PriceScale } from "../chart/settings";
+import { fitDock, type WindowList } from "../layout/dock/fit";
+import { selectTab } from "../layout/dock/tree";
 import { windowId, type WindowId } from "../layout/kinds";
-import type { Placement } from "../layout/placement";
+import type { DockPlacement, Placement } from "../layout/placement";
 import { venueFor, type VenueTarget } from "../lib/venue";
 
 type ChartWindowWire = Extract<LayoutWindow, { kind: "chart" }>;
-type OtherWindowKind = Exclude<LayoutWindow, { kind: "chart" }>["kind"];
+export type OtherWindowKind = Exclude<LayoutWindow, { kind: "chart" }>["kind"];
 
 export type ChartWindowState = Omit<ChartWindowWire, "id" | "chartSettings"> & { id: WindowId; chartSettings: ChartSettings };
 export type OtherWindowState = { id: WindowId; link: LinkColor | null; kind: OtherWindowKind };
@@ -29,6 +31,21 @@ export const chartWindow = (layout: EditableLayout, id: WindowId): ChartWindowSt
   chartWindows(layout).find((w) => w.id === id) ?? chartWindows(layout)[0]!;
 
 export const chartNumber = (layout: EditableLayout, id: WindowId): number => chartWindows(layout).findIndex((w) => w.id === id) + 1;
+
+export function windowRefs(windows: readonly WindowState[]): WindowList {
+  const [first, ...rest] = windows.map(({ id, kind }) => ({ id, kind }));
+  if (!first) throw new Error("창이 없는 레이아웃은 배치할 수 없습니다");
+  return [first, ...rest];
+}
+
+export const fittedDock = (layout: EditableLayout): DockPlacement => fitDock(layout.placement.dock, windowRefs(layout.windows));
+
+function freeWindowId(windows: readonly WindowState[], kind: OtherWindowKind): WindowId {
+  const used = new Set<string>(windows.map((w) => w.id));
+  let n = 1;
+  while (used.has(n === 1 ? kind : `${kind}-${n}`)) n += 1;
+  return windowId(n === 1 ? kind : `${kind}-${n}`);
+}
 
 export const DEFAULT_LAYOUT_ID = "01900000-0000-7000-8000-000000000001";
 export const DEFAULT_LAYOUT: EditableLayout = {
@@ -48,6 +65,9 @@ interface LayoutState {
   layout: EditableLayout;
   revision: number;
   load(layout: EditableLayout): void;
+  setDock(dock: DockPlacement): void;
+  selectTab(window: WindowId): void;
+  showWindow(kind: OtherWindowKind): void;
   setSymbol(cellId: WindowId, target: VenueTarget, venue?: Venue): void;
   setVenue(cellId: WindowId, venue: Venue): void;
   setPeriod(cellId: WindowId, p: Period): void;
@@ -70,7 +90,12 @@ interface LayoutState {
   removeCompare(cellId: WindowId, code: SymbolCode): void;
 }
 
-export const useLayoutStore = create<LayoutState>()((set) => {
+export const useLayoutStore = create<LayoutState>()((set, get) => {
+  const place = (windows: WindowState[], dock: DockPlacement) =>
+    set((s) => {
+      if (windows === s.layout.windows && dock === s.layout.placement.dock) return s;
+      return { layout: { ...s.layout, windows, placement: { ...s.layout.placement, dock } }, revision: s.revision + 1 };
+    });
   const patchCell = (cellId: WindowId, f: (c: ChartWindowState) => ChartWindowState) =>
     set((s) => {
       const windows = s.layout.windows.map((w) => (isChartWindow(w) && w.id === cellId ? f(w) : w));
@@ -88,6 +113,15 @@ export const useLayoutStore = create<LayoutState>()((set) => {
     layout: DEFAULT_LAYOUT,
     revision: 0,
     load: (layout) => set({ layout }),
+    setDock: (dock) => place(get().layout.windows, dock),
+    selectTab: (window) => place(get().layout.windows, selectTab(fittedDock(get().layout), window)),
+    showWindow: (kind) => {
+      const { windows, placement } = get().layout;
+      const shown = windows.find((w) => w.kind === kind);
+      const id = shown?.id ?? freeWindowId(windows, kind);
+      const next = shown ? windows : [...windows, { id, link: null, kind }];
+      place(next, selectTab(fitDock(placement.dock, windowRefs(next)), id));
+    },
     setSymbol: (cellId, target, wanted) =>
       patchCell(cellId, (c) => {
         const venue = venueFor(target, wanted ?? c.venue);

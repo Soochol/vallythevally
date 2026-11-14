@@ -1,8 +1,8 @@
 import { selectMinute } from "./select-option";
 import type { Locator, Page } from "@playwright/test";
-import { cell, chartOf, expect } from "./harness";
+import { cell, chartOf, expect, windowTabs } from "./harness";
 
-export const rail = (page: Page) => page.getByRole("tablist", { name: "오른쪽 패널" });
+export const rail = windowTabs;
 export const panel = (page: Page) => page.getByRole("complementary", { name: "스크리너" });
 export const updateBand = (page: Page) => panel(page).getByLabel("업데이트", { exact: true });
 export const storeLine = (page: Page) => panel(page).getByLabel("KRX 일봉 저장소");
