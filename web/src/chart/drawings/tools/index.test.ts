@@ -31,29 +31,17 @@ const FINAL_TABLE: readonly (readonly [Tool["group"], readonly (readonly [Drawin
   ["pattern", [["elliott", "엘리엇 충격 파동"], ["elliottabc", "엘리엇 조정 파동"], ["xabcd", "XABCD 패턴"], ["headshoulders", "헤드앤숄더"]]],
 ];
 
-const FIRST_WAVE: readonly DrawingTool[] = [
-  "trendline", "ray", "extline", "hline", "hray", "vline", "channel",
-  "fib", "fibext",
-  "rect", "ellipse", "path", "brush",
-  "text", "callout", "pricelabel", "arrow",
-  "pricerange", "daterange", "long", "short",
-];
-
 test("최종 도구 표는 서버 표의 도구를 한 번씩 담는다", () => {
   expect(FINAL_TABLE.flatMap(([, tools]) => tools.map(([id]) => id)).sort()).toEqual(Object.keys(TOOL_POINTS).sort());
 });
 
-test("등록된 도구는 그룹마다 최종 도구 표의 순서와 이름을 따른다", () => {
-  const registered = new Map([...toolsByGroup()].map(([group, tools]) => [group, tools.map((t) => [t.tool, t.label] as const)]));
-  for (const group of registered.keys()) expect(FINAL_TABLE.map(([g]) => g), `${group} 그룹`).toContain(group);
-  for (const [group, final] of FINAL_TABLE) {
-    const tools = registered.get(group) ?? [];
-    expect(final.filter(([id]) => tools.some(([t]) => t === id)), `${group} 그룹`).toEqual(tools);
-  }
+test("등록 표는 최종 도구 표와 그룹·순서·이름까지 같다", () => {
+  expect([...toolsByGroup()].map(([group, tools]) => [group, tools.map((t) => [t.tool, t.label])])).toEqual(FINAL_TABLE);
 });
 
-test("1차 도구 21개는 모두 등록돼 있다", () => {
-  for (const id of FIRST_WAVE) expect(toolOf(id), id).toBeDefined();
+test("서버 표의 도구는 모두 등록돼 있다", () => {
+  expect(TOOLS.map((t) => t.tool).sort()).toEqual(Object.keys(TOOL_POINTS).sort());
+  for (const id of Object.keys(TOOL_POINTS) as DrawingTool[]) expect(toolOf(id), id).toBeDefined();
 });
 
 test("모드는 지우개와 시연 커서다", () => {
@@ -68,11 +56,6 @@ test("등록 표에 같은 도구가 두 번 없다", () => {
 
 test("모든 도구의 기본 스타일은 parseStyle을 거쳐도 같다", () => {
   for (const t of TOOLS) expect(t.parseStyle(t.defaultStyle())).toEqual(t.defaultStyle());
-});
-
-test("등록되지 않은 도구는 없다고 답한다", () => {
-  const registered = new Set(TOOLS.map((t) => t.tool));
-  for (const id of Object.keys(TOOL_POINTS) as DrawingTool[]) expect(toolOf(id) === undefined).toBe(!registered.has(id));
 });
 
 const GROUP_ORDER: readonly Tool["group"][] = ["line", "fib", "shape", "note", "measure", "pattern"];
