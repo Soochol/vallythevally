@@ -2,7 +2,9 @@ import { afterEach, expect, test, vi } from "vitest";
 import {
   addCompare,
   addIndicator,
+  barOpacityOf,
   type ChartSettings,
+  type IndicatorConfig,
   clampVisibleBars,
   DEFAULT_CHART_SETTINGS,
   movePanel,
@@ -10,6 +12,7 @@ import {
   compareRefusal,
   removeCompare,
   removeIndicator,
+  setIndicatorPlacement,
   setPanelStretches,
   togglePanel,
   shownScale,
@@ -126,6 +129,10 @@ test.each([
   ["지표 설정 필드가 빠짐", ind({ spec: { kind: "ma", period: 5 } })],
   ["모르는 색", ind({ style: { colors: ["#fff"], width: 1 } })],
   ["굵기 6", ind({ style: { colors: ["ind-1"], width: 6 } })],
+  ["막대 불투명도 0.09", ind({ style: { colors: ["ind-1"], width: 1, barOpacity: 0.09 } })],
+  ["막대 불투명도 1.01", ind({ style: { colors: ["ind-1"], width: 1, barOpacity: 1.01 } })],
+  ["막대 불투명도가 문자열", ind({ style: { colors: ["ind-1"], width: 1, barOpacity: "0.5" } })],
+  ["막대 불투명도가 null", ind({ style: { colors: ["ind-1"], width: 1, barOpacity: null } })],
   ["가격 지표가 지표 패널에", ind({ panel: "p1" })],
   ["지표 패널 지표가 가격 패널에", { ...rsi, indicators: [rsi.indicators[0], { ...rsi.indicators[1]!, panel: "price" }] }],
   ["지표 없는 패널", { ...rsi, panels: [...rsi.panels, { id: "p2", stretch: 1 }] }],
@@ -137,6 +144,67 @@ test.each([
   const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
   expect(parseChartSettings(raw)).toEqual(DEFAULT_CHART_SETTINGS);
   expect(warn).toHaveBeenCalledOnce();
+});
+
+const volume = (panel: string, style: Partial<IndicatorConfig["style"]> = {}): IndicatorConfig => ({ id: "v", spec: { kind: "volume", maPeriod: 20 }, panel, visible: true, style: { colors: ["ind-1"], width: 1, ...style } });
+const withVolume = (panel: string, panels = rsi.panels, style: Partial<IndicatorConfig["style"]> = {}): ChartSettings => ({ ...rsi, indicators: [volume(panel, style), ...rsi.indicators], panels });
+
+test("막대 불투명도가 없는 옛 설정은 다른 값을 그대로 읽고 0.38로 그린다", () => {
+  const old = withVolume("p0", [{ id: "p0", stretch: 0.25 }, ...rsi.panels]);
+  const read = parseChartSettings(old);
+  expect(read).toEqual(old);
+  expect(read.indicators[0]!.style).not.toHaveProperty("barOpacity");
+  expect(barOpacityOf(read.indicators[0]!.style)).toBe(0.38);
+  expect(barOpacityOf(DEFAULT_CHART_SETTINGS.indicators[0]!.style)).toBe(0.38);
+});
+
+test.each([0.1, 0.8, 1])("막대 불투명도 %s는 그대로 읽는다", (barOpacity) => {
+  const saved = withVolume("p0", [{ id: "p0", stretch: 0.25 }, ...rsi.panels], { barOpacity });
+  expect(parseChartSettings(saved)).toEqual(saved);
+  expect(barOpacityOf(parseChartSettings(saved).indicators[0]!.style)).toBe(barOpacity);
+});
+
+test("가격 패널에 겹친 거래량은 패널 없이 읽는다", () => {
+  const over = withVolume("price");
+  expect(parseChartSettings(over)).toEqual(over);
+  const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+  expect(parseChartSettings({ ...over, panels: [{ id: "p0", stretch: 0.25 }, ...rsi.panels] })).toEqual(DEFAULT_CHART_SETTINGS);
+  expect(warn).toHaveBeenCalledOnce();
+});
+
+test("거래량을 겹치면 그 패널만 빼고, 되돌리면 맨 앞에 기본 높이 패널을 더한다", () => {
+  const separate = withVolume("p0", [{ id: "p0", stretch: 0.4 }, { id: "p1", stretch: 0.3, collapsed: true }]);
+  const over = setIndicatorPlacement(separate, "v", "price", ids());
+  expect(over.panels).toEqual([{ id: "p1", stretch: 0.3, collapsed: true }]);
+  expect(over.indicators.map((i) => [i.id, i.panel])).toEqual([["v", "price"], ["a", "price"], ["b", "p1"]]);
+  expect(parseChartSettings(over)).toEqual(over);
+  const back = setIndicatorPlacement(over, "v", "panel", ids());
+  expect(back.panels).toEqual([{ id: "id-1", stretch: 0.25 }, { id: "p1", stretch: 0.3, collapsed: true }]);
+  expect(back.indicators[0]).toMatchObject({ id: "v", panel: "id-1" });
+  expect(parseChartSettings(back)).toEqual(back);
+  expect(setIndicatorPlacement(over, "v", "price")).toBe(over);
+  expect(setIndicatorPlacement(separate, "v", "panel")).toBe(separate);
+});
+
+test("거래량이 아닌 지표의 자리는 바꾸지 않는다", () => {
+  expect(setIndicatorPlacement(rsi, "a", "panel")).toBe(rsi);
+  expect(setIndicatorPlacement(rsi, "b", "price")).toBe(rsi);
+  expect(setIndicatorPlacement(rsi, "nope", "price")).toBe(rsi);
+});
+
+test("거래량은 고른 자리에 더하고, 다른 지표는 고른 자리와 상관없이 제 자리에 더한다", () => {
+  const style = { colors: ["ind-1" as const], width: 1 as const, barOpacity: 0.6 };
+  const over = addIndicator(rsi, { kind: "volume", maPeriod: null }, style, ids(), "price");
+  expect(over.settings.panels).toEqual(rsi.panels);
+  expect(over.settings.indicators.at(-1)).toMatchObject({ panel: "price", style });
+  expect(parseChartSettings(over.settings)).toEqual(over.settings);
+  const separate = addIndicator(rsi, { kind: "volume", maPeriod: null }, style, ids(), "panel");
+  expect(separate.settings.panels.at(-1)).toEqual({ id: "id-2", stretch: 0.25 });
+  const ma = addIndicator(rsi, { kind: "ma", method: "sma", period: 5 }, style, ids(), "panel");
+  expect(ma.settings.panels).toEqual(rsi.panels);
+  expect(ma.settings.indicators.at(-1)!.panel).toBe("price");
+  const macd = addIndicator(rsi, { kind: "macd", fast: 12, slow: 26, signal: 9 }, style, ids(), "price");
+  expect(macd.settings.indicators.at(-1)!.panel).toBe("id-2");
 });
 
 test("가격 패널 지표는 패널을 만들지 않고, 지표 패널 지표는 맨 아래에 패널 하나를 붙인다", () => {

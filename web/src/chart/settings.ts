@@ -1,6 +1,6 @@
 import type { IndicatorSpec } from "./indicators/kinds";
 import type { SymbolCode } from "../api/generated/SymbolCode";
-import { isIndicatorColor, type IndicatorColor, KINDS, placementOf } from "./indicators/kinds";
+import { isIndicatorColor, type IndicatorColor, KINDS, type Placement, placementOf, placementsOf } from "./indicators/kinds";
 
 export type ChartStyle = "candle" | "bar" | "line" | "area";
 export type PriceScale = "normal" | "log" | "percent";
@@ -12,8 +12,17 @@ export interface IndicatorConfig {
   spec: IndicatorSpec;
   panel: "price" | Panel["id"];
   visible: boolean;
-  style: { colors: IndicatorColor[]; width: LineWidth };
+  style: { colors: IndicatorColor[]; width: LineWidth; barOpacity?: number };
 }
+
+export const DEFAULT_BAR_OPACITY = 0.38;
+export const BAR_OPACITY_MIN = 0.1;
+export const BAR_OPACITY_MAX = 1;
+
+export const barOpacityOf = (style: IndicatorConfig["style"]): number => style.barOpacity ?? DEFAULT_BAR_OPACITY;
+const isBarOpacity = (x: unknown): x is number => isNum(x) && x >= BAR_OPACITY_MIN && x <= BAR_OPACITY_MAX;
+
+export const placementOfConfig = (config: Pick<IndicatorConfig, "panel">): Placement => config.panel === "price" ? "price" : "panel";
 
 export interface Panel {
   id: string;
@@ -148,7 +157,9 @@ function readIndicator(raw: unknown): IndicatorConfig | null {
   if (!spec || !isRecord(style) || !isOneOf(WIDTHS, style.width)) return null;
   const colors = style.colors;
   if (!Array.isArray(colors) || !colors.every(isIndicatorColor)) return null;
-  return { id: raw.id, spec, panel: raw.panel, visible: raw.visible, style: { colors, width: style.width } };
+  const barOpacity = style.barOpacity;
+  if (barOpacity !== undefined && !isBarOpacity(barOpacity)) return null;
+  return { id: raw.id, spec, panel: raw.panel, visible: raw.visible, style: { colors, width: style.width, ...(barOpacity === undefined ? {} : { barOpacity }) } };
 }
 
 export function readSpecShape(raw: unknown): IndicatorSpec | null {
@@ -190,8 +201,8 @@ const isCompareList = (x: unknown): x is SymbolCode[] =>
 
 function panelsMatch(s: Pick<ChartSettings, "indicators" | "panels">): boolean {
   const panelIds = s.panels.map((p) => p.id);
-  const panelOwners = s.indicators.filter((i) => placementOf(i.spec) === "panel").map((i) => i.panel);
-  const eachOnItsPane = s.indicators.every((i) => (placementOf(i.spec) === "price") === (i.panel === "price"));
+  const panelOwners = s.indicators.filter((i) => placementOfConfig(i) === "panel").map((i) => i.panel);
+  const eachOnItsPane = s.indicators.every((i) => placementsOf(i.spec.kind).includes(placementOfConfig(i)));
   const onePerPanel = panelOwners.length === panelIds.length && allDistinct(panelOwners) && panelOwners.every((id) => panelIds.includes(id));
   return allDistinct(panelIds) && allDistinct(s.indicators.map((i) => i.id)) && eachOnItsPane && onePerPanel;
 }
@@ -203,9 +214,10 @@ export function addIndicator(
   spec: IndicatorSpec,
   style: IndicatorConfig["style"],
   makeId: () => string = newId,
+  placement: Placement = placementOf(spec),
 ): { settings: ChartSettings; id: string } {
   const id = makeId();
-  if (placementOf(spec) === "price") {
+  if ((placementsOf(spec.kind).includes(placement) ? placement : placementOf(spec)) === "price") {
     return { id, settings: { ...s, indicators: [...s.indicators, { id, spec, panel: "price", visible: true, style }] } };
   }
   const panel = makeId();
@@ -223,6 +235,15 @@ export function addIndicator(
 export function updateIndicator(s: ChartSettings, id: string, patch: Partial<Pick<IndicatorConfig, "spec" | "style" | "visible">>): ChartSettings {
   const indicators = s.indicators.map((i) => (i.id === id && (!patch.spec || patch.spec.kind === i.spec.kind) ? { ...i, ...patch } : i));
   return indicators.every((i, n) => i === s.indicators[n]) ? s : { ...s, indicators };
+}
+
+export function setIndicatorPlacement(s: ChartSettings, id: string, placement: Placement, makeId: () => string = newId): ChartSettings {
+  const config = s.indicators.find((i) => i.id === id);
+  if (!config || placementOfConfig(config) === placement || !placementsOf(config.spec.kind).includes(placement)) return s;
+  const panel = placement === "price" ? "price" : makeId();
+  const indicators = s.indicators.map((i) => (i === config ? { ...i, panel } : i));
+  const panels = placement === "price" ? s.panels.filter((p) => p.id !== config.panel) : [{ id: panel, stretch: DEFAULT_PANEL_STRETCH }, ...s.panels];
+  return { ...s, indicators, panels };
 }
 
 export function removeIndicator(s: ChartSettings, id: string): ChartSettings {

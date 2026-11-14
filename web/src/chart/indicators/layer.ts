@@ -15,7 +15,7 @@ import type { Period } from "../../api/generated/Period";
 import type { UnixSeconds } from "../../api/generated/UnixSeconds";
 import { formatPrice, formatVolume } from "../../lib/format";
 import { displayBars, type History } from "../barFeed";
-import type { IndicatorConfig, Panel } from "../settings";
+import { barOpacityOf, type IndicatorConfig, type Panel } from "../settings";
 import { indicatorColorValue, type ThemeTokens } from "../theme";
 import { toChartTime } from "../time";
 import type { IndicatorPort, OpenPort } from "./client";
@@ -34,8 +34,8 @@ type Plot = { overlay: true; series: OverlaySeries } | { overlay: false; series:
 type Line = Plot & {
   priceOverlay: boolean;
   id: LineId;
-  kind: Kind;
   shift: number;
+  barOpacity: number;
   points: Point[];
   guides: IPriceLine[];
 };
@@ -89,7 +89,14 @@ function columnsOf(bars: readonly Bar[]): Columns {
 
 const transferOf = (c: Columns) => [c.t.buffer, c.o.buffer, c.h.buffer, c.l.buffer, c.c.buffer, c.v.buffer];
 
-const isOverlay = (config: IndicatorConfig, id: LineId) => config.panel === "price" && !isBarLine(id);
+const isVolumeOverPrice = (config: IndicatorConfig) => config.panel === "price" && config.spec.kind === "volume";
+const isOverlay = (config: IndicatorConfig, id: LineId) => config.panel === "price" && !isBarLine(id) && !isVolumeOverPrice(config);
+const VOLUME_OVER_PRICE_MARGINS = { top: 0.8, bottom: 0 };
+
+function withAlpha(hex: string, alpha: number): string {
+  const channel = (i: number) => Number.parseInt(hex.slice(i, i + 2), 16);
+  return `rgba(${channel(1)}, ${channel(3)}, ${channel(5)}, ${alpha})`;
+}
 
 function firstAtOrAfter(bars: readonly Bar[], t: UnixSeconds): number {
   let lo = 0;
@@ -192,6 +199,7 @@ export class IndicatorLayer {
         }
       }
       if (prev.style !== config.style || prev.visible !== config.visible) this.styleLines(s);
+      if (barOpacityOf(prev.style) !== barOpacityOf(config.style)) this.redrawBars(s);
     }
     const orderChanged = configs.length !== prevConfigs.length || configs.some((c, i) => c.id !== prevConfigs[i]?.id);
     if (panelOrderChanged || orderChanged || [...this.shown.values()].some((s) => s.lines.length === 0)) this.rebuildSeries();
@@ -470,14 +478,16 @@ export class IndicatorLayer {
       const { series } = plot;
       // 새 pane은 차트 단위 rightPriceScale을 물려받는데, 가격 패널의 축 모드(%·로그)를 바꾸면 그 값도 바뀐다.
       if (pane > 0) series.priceScale().applyOptions({ mode: PriceScaleMode.Normal, scaleMargins: id === "volume" ? { top: 0.12, bottom: 0 } : { top: 0.14, bottom: 0.08 } });
+      if (isVolumeOverPrice(config)) series.priceScale().applyOptions({ mode: PriceScaleMode.Normal, scaleMargins: VOLUME_OVER_PRICE_MARGINS });
+      if (isVolumeOverPrice(config) && id === "volume") series.setSeriesOrder(0);
       const guides = i === 0 ? (GUIDES[config.spec.kind] ?? []).map((price) => series.createPriceLine(this.guide(price))) : [];
       const same = kept[i]?.id === id ? kept[i] : undefined;
-      return { ...plot, priceOverlay: isOverlay(config, id), id, kind: config.spec.kind, shift: same?.shift ?? 0, points: same?.points ?? [], guides };
+      return { ...plot, priceOverlay: isOverlay(config, id), id, shift: same?.shift ?? 0, barOpacity: barOpacityOf(config.style), points: same?.points ?? [], guides };
     });
   }
 
   private addPlot(config: IndicatorConfig, id: LineId, i: number, pane: number): Plot {
-    const options = { ...this.lineOptions(config, id, i), priceFormat: this.priceFormat(config) };
+    const options = { ...this.lineOptions(config, id, i), priceFormat: this.priceFormat(config), ...(isVolumeOverPrice(config) ? { priceScaleId: `volume:${config.id}` } : {}) };
     const bar = isFinancial(config.spec) ? isFinancialBar(config.spec.kind) : isBarLine(id);
     if (!bar) return { overlay: true, series: addOverlayLine(this.host.chart, options, pane, isOverlay(config, id)) };
     return { overlay: false, series: this.host.chart.addSeries(HistogramSeries, options, pane) };
@@ -583,6 +593,16 @@ export class IndicatorLayer {
     return { time: toChartTime(pt.t), value: pt.v, base: main?.t === pt.t ? main.c : pt.v };
   }
 
+  private redrawBars(s: Shown): void {
+    for (const line of s.lines) {
+      line.barOpacity = barOpacityOf(s.config.style);
+      if (isBarLine(line.id) && line.points.length) {
+        this.queue.forget(line);
+        this.draw(line, line.points);
+      }
+    }
+  }
+
   private redrawPriceOverlays(): void {
     for (const s of this.shown.values()) if (usesWorker(s.config)) {
       for (const line of s.lines) if (line.priceOverlay && line.points.length) {
@@ -602,8 +622,8 @@ export class IndicatorLayer {
     const time = toChartTime(pt.t);
     if (!isBarLine(line.id)) return { time, value: pt.v };
     const t = this.host.tokens();
-    const up = line.kind === "volume" ? pt.up !== false : pt.v >= 0;
-    return { time, value: pt.v, color: up ? t.upVol : t.downVol };
+    if (line.id === "volume") return { time, value: pt.v, color: withAlpha(pt.up !== false ? t.up : t.down, line.barOpacity) };
+    return { time, value: pt.v, color: pt.v >= 0 ? t.upVol : t.downVol };
   }
 
   private clearLines(s: Shown): void {

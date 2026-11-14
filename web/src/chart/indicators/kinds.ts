@@ -31,6 +31,7 @@ export type SpecField =
 interface KindInfo<K extends IndicatorKind> {
   label: string;
   place: Placement;
+  overPrice?: true;
   defaults: SpecOf<K>;
   fields: SpecField[];
   name(spec: SpecOf<K>): string;
@@ -77,6 +78,7 @@ export const KINDS: Registry = {
   volume: {
     label: "거래량",
     place: "panel",
+    overPrice: true,
     defaults: { kind: "volume", maPeriod: 20 },
     fields: [{ key: "maPeriod", label: "이동평균", type: "optionalInt", unit: "봉", toggle: "이동평균 함께 그리기", start: 20 }],
     name: () => "거래량",
@@ -123,6 +125,8 @@ export function specLines(spec: IndicatorSpec): PlotLineId[] {
 export function placementOf(spec: IndicatorSpec): Placement {
   return KINDS[spec.kind].place;
 }
+
+export const placementsOf = (kind: IndicatorKind): readonly Placement[] => KINDS[kind].overPrice ? ["panel", "price"] : [KINDS[kind].place];
 
 export const isBarLine = (line: PlotLineId): boolean => line === "volume" || line === "histogram";
 
