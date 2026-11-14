@@ -85,6 +85,11 @@ export class UserDocuments {
     this.drawingRevisions.set(saved.id, saved.revision);
     return clone(saved);
   }
+  hasScope(scope: DrawingInput["scope"]): boolean {
+    if (scope.kind === "symbol") return true;
+    const layout = this.layouts.get(scope.layoutId);
+    return layout !== undefined && (scope.kind === "layout" || layout.windows.some((w) => w.kind === "chart" && w.id === scope.windowId));
+  }
   deleteDrawing(id: string): void { this.drawingValues.delete(id); this.drawingRevisions.delete(id); }
   drawingRevision(id: string): number { return this.drawingRevisions.get(id) ?? -1; }
 }
@@ -243,7 +248,8 @@ export class Scenario {
       if (method === "DELETE") { this.documents.deleteDrawing(id); return { status: 204 }; }
       if (method === "PUT") {
         const value: DrawingInput = request.postDataJSON();
-        return value.revision <= this.documents.drawingRevision(id) ? stale() : { body: this.documents.saveDrawing(value) };
+        if (value.revision <= this.documents.drawingRevision(id)) return stale();
+        return this.documents.hasScope(value.scope) ? { body: this.documents.saveDrawing(value) } : error(400, "bad_request", "드로잉 범위의 레이아웃이나 차트 창이 없습니다");
       }
     }
     if (path === "/api/symbols" && method === "GET") return { body: this.market.search(url.searchParams.get("q") ?? "", { market: url.searchParams.get("market"), kind: url.searchParams.get("kind") }) };

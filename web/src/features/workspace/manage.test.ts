@@ -1,4 +1,3 @@
-import { QueryClient } from "@tanstack/react-query";
 import { beforeEach, expect, test } from "vitest";
 import { windowId } from "../../layout/kinds";
 import { chartWindows, DEFAULT_LAYOUT, useLayoutStore } from "../../stores/layout";
@@ -6,7 +5,6 @@ import { useSelectionStore } from "../../stores/selection";
 import { addWindow, closeWindow } from "./manage";
 
 const room = { area: { w: 1256, h: 684 }, gap: 6 };
-const client = new QueryClient();
 const layout = () => useLayoutStore.getState().layout;
 const active = () => useSelectionStore.getState().activeCell;
 const charts = () => chartWindows(layout()).map((w) => w.id);
@@ -42,17 +40,17 @@ test("활성 칸의 차트 창을 닫으면 남은 차트 창 가운데 창 목�
   addWindow("chart", room);
   const [first, second, third] = charts();
   expect(active()).toBe(third);
-  expect(closeWindow(third!, "칸 3", client)).toBe(true);
+  expect(closeWindow(third!, "칸 3")).toBe(true);
   expect(active()).toBe(first);
   useSelectionStore.getState().setActiveCell(second!);
-  expect(closeWindow(first!, "칸 1", client)).toBe(true);
+  expect(closeWindow(first!, "칸 1")).toBe(true);
   expect(active()).toBe(second);
-  expect(closeWindow(second!, "칸 1", client)).toBe(false);
+  expect(closeWindow(second!, "칸 1")).toBe(false);
   expect(charts()).toEqual([second]);
 });
 
 test("닫기 알림의 되돌리기는 창을 돌리고, 알림 뒤 다른 배치 변경이 있으면 쓸 수 없다", () => {
-  expect(closeWindow(windowId("screener"), "스크리너", client)).toBe(true);
+  expect(closeWindow(windowId("screener"), "스크리너")).toBe(true);
   const toast = useSelectionStore.getState().toast!;
   expect(toast.text).toBe("스크리너 창을 닫았습니다");
   expect(toast.undo!.available()).toBe(true);
@@ -60,7 +58,7 @@ test("닫기 알림의 되돌리기는 창을 돌리고, 알림 뒤 다른 배�
   expect(layout().windows.some((w) => w.id === "screener")).toBe(true);
   expect(toast.undo!.available()).toBe(false);
 
-  closeWindow(windowId("objects"), "개체 목록", client);
+  closeWindow(windowId("objects"), "개체 목록");
   const later = useSelectionStore.getState().toast!.undo!;
   addWindow("chart", room);
   expect(later.available()).toBe(false);

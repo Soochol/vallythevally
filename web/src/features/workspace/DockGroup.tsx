@@ -1,4 +1,3 @@
-import { useQueryClient } from "@tanstack/react-query";
 import { Fragment, type KeyboardEvent, useState } from "react";
 import { useSymbolInfo } from "../../api/queries";
 import type { GroupNode } from "../../layout/dock/tree";
@@ -39,11 +38,10 @@ function TabLabel({ window }: { window: WindowState }) {
 }
 
 function CloseTabButton({ id, name, reason, selected, onClosed }: { id: WindowId; name: string; reason: string | null; selected: boolean; onClosed(): void }) {
-  const client = useQueryClient();
   const label = `${name} 닫기`;
   return (
     <button type="button" className="dock-tab-close" aria-label={label} title={reason ?? label} disabled={reason !== null} tabIndex={selected ? 0 : -1}
-      onClick={() => { if (closeWindow(id, name, client)) onClosed(); }}>
+      onClick={() => { if (closeWindow(id, name)) onClosed(); }}>
       <CloseIcon size={12} />
     </button>
   );

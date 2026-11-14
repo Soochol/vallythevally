@@ -1,8 +1,5 @@
-import type { QueryClient } from "@tanstack/react-query";
-import { drawingSync } from "../../chart/drawings/sync";
 import type { WindowId, WindowKind } from "../../layout/kinds";
 import { chartWindows, type DockRoom, useLayoutStore } from "../../stores/layout";
-import { usePersistStore } from "../../stores/persist";
 import { type ToastUndo, useSelectionStore } from "../../stores/selection";
 import { DOCK_GAP } from "./size";
 
@@ -31,20 +28,10 @@ export function latestArrangementUndo(): ToastUndo {
   };
 }
 
-function reloadDrawingsAfterLayoutSave(client: QueryClient): void {
-  const stop = usePersistStore.subscribe((s, prev) => {
-    if (s.saves.layout === prev.saves.layout || s.saves.layout.kind !== "saved") return;
-    stop();
-    drawingSync(client).refresh();
-  });
-}
-
-export function closeWindow(id: WindowId, name: string, client: QueryClient): boolean {
-  const closing = useLayoutStore.getState().layout.windows.find((w) => w.id === id);
-  if (!closing || !useLayoutStore.getState().closeWindow(id)) return false;
+export function closeWindow(id: WindowId, name: string): boolean {
+  if (!useLayoutStore.getState().closeWindow(id)) return false;
   const selection = useSelectionStore.getState();
   if (selection.activeCell === id) selection.setActiveCell(chartWindows(useLayoutStore.getState().layout)[0]!.id);
-  if (closing.kind === "chart") reloadDrawingsAfterLayoutSave(client);
   selection.showToast(`${name} 창을 닫았습니다`, latestArrangementUndo());
   return true;
 }

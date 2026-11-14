@@ -154,6 +154,79 @@ test("이 칸 범위의 드로잉이 있는 차트 창을 닫으면 같은 종�
   expectServerRules(saved(scenario));
 });
 
+const cellDrawing = (scenario: Scenario) => scenario.documents.saveDrawing({ id: "01900000-0000-7000-8000-0000000000d2", symbol: "005930", tool: "hline", points: [{ t: NOV9, price: 70_000 }], style: {}, text: null, locked: false, hidden: false, periods: null, z: 1, group: null, scope: { kind: "cell", layoutId: DEFAULT_LAYOUT_ID, windowId: "cell-1" }, revision: 3 });
+const unavailable = { status: 503, body: { error: { code: "internal", message: "잠시 끊김", reason: null, retryAt: null, manualActionRequired: false } } };
+const layoutScope = { kind: "layout", layoutId: DEFAULT_LAYOUT_ID };
+
+test("재시도를 기다리는 드로잉 편집이 있는 차트 창을 닫아도 편집은 이 레이아웃 범위로 저장된다", async ({ page, scenario }) => {
+  twoSamsungCharts(scenario);
+  cellDrawing(scenario);
+  let puts = 0;
+  scenario.on((url, request) => url.pathname.startsWith("/api/drawings/") && request.method() === "PUT" && puts++ === 0, () => unavailable);
+  await page.goto("/");
+  await expect(cell(page, 2)).toHaveAttribute("aria-busy", "false");
+  await tab(page, "개체 목록").click();
+  await cell(page, 2).click();
+  await page.getByRole("region", { name: "개체 목록" }).getByRole("region", { name: "이 칸" }).getByRole("button", { name: /잠그기$/ }).click();
+  await expect.poll(() => puts).toBe(1);
+  await closeButton(page, "칸 2 삼성전자").click();
+  await expect.poll(() => scenario.documents.drawings("005930")[0], { timeout: 15_000 }).toMatchObject({ locked: true, scope: layoutScope });
+  await expect(page.getByRole("status").filter({ hasText: "드로잉을 저장하지 못했습니다" })).toHaveCount(0);
+});
+
+test("저장 전에 차트 창을 닫고 새로고침해도 저장 뒤 그 드로잉이 이 레이아웃 범위로 보인다", async ({ page, scenario }) => {
+  twoSamsungCharts(scenario);
+  cellDrawing(scenario);
+  await page.goto("/");
+  await expect(cell(page, 2)).toHaveAttribute("aria-busy", "false");
+  scenario.reply((url, request) => url.pathname.startsWith("/api/layouts/") && request.method() === "PUT", unavailable);
+  await closeButton(page, "칸 2 삼성전자").click();
+  await expect(cell(page, 2)).toHaveCount(0);
+  await page.reload();
+  scenario.on((url, request) => url.pathname.startsWith("/api/layouts/") && request.method() === "PUT", (request) => ({ body: scenario.documents.saveLayout(request.postDataJSON()) }));
+  await expect(cell(page, 1)).toHaveAttribute("aria-busy", "false");
+  await expect.poll(() => scenario.documents.drawings("005930")[0]?.scope).toEqual(layoutScope);
+  await tab(page, "개체 목록").click();
+  await expect(page.getByRole("region", { name: "개체 목록" }).getByRole("region", { name: "이 레이아웃 공통" })).toContainText("1");
+});
+
+test("저장 전에 시작한 드로잉 읽기가 늦게 끝나도 저장 뒤 다시 읽어 이 레이아웃 범위로 보인다", async ({ page, scenario }) => {
+  twoSamsungCharts(scenario);
+  cellDrawing(scenario);
+  await page.goto("/");
+  await expect(cell(page, 2)).toHaveAttribute("aria-busy", "false");
+  await tab(page, "개체 목록").click();
+  const objects = page.getByRole("region", { name: "개체 목록" });
+  await expect(objects).toContainText("다른 칸·레이아웃에 1개");
+  const before = scenario.documents.drawings("005930");
+  let reads = 0;
+  const held = scenario.hold((url, request) => url.pathname === "/api/drawings" && request.method() === "GET" && reads++ === 0);
+  await closeButton(page, "칸 2 삼성전자").click();
+  await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+  await held.received;
+  await expect.poll(() => scenario.documents.drawings("005930")[0]?.scope).toEqual(layoutScope);
+  held.reply({ body: before });
+  await expect(objects.getByRole("region", { name: "이 레이아웃 공통" })).toContainText("1");
+});
+
+test("새 차트 창에 이 칸 범위로 바로 그려도 레이아웃 저장 뒤에 보내 서버가 받는다", async ({ page, scenario }) => {
+  twoSamsungCharts(scenario);
+  const state = scenario.documents.uiState();
+  scenario.documents.saveUiState({ ...state, drawing: { ...scenario.documents.uiPrefs().drawing, newScope: "cell" }, revision: state.revision + 1 });
+  await page.goto("/");
+  await expect(cell(page, 2)).toHaveAttribute("aria-busy", "false");
+  await addWindow(page, "차트");
+  await expect(cell(page, 3)).toHaveAttribute("aria-busy", "false");
+  const bounds = await boxOf(cell(page, 3));
+  await cell(page, 3).focus();
+  await page.keyboard.press("H");
+  await page.mouse.click(bounds.x + bounds.width * 0.5, bounds.y + bounds.height * 0.4);
+  await expect.poll(() => scenario.documents.drawings("005930").length).toBe(1);
+  const added = saved(scenario).windows.filter((w) => w.kind === "chart").at(-1)!;
+  expect(scenario.documents.drawings("005930")[0]!.scope).toEqual({ kind: "cell", layoutId: DEFAULT_LAYOUT_ID, windowId: added.id });
+  await expect(page.getByRole("status").filter({ hasText: "드로잉을 저장하지 못했습니다" })).toHaveCount(0);
+});
+
 test("창 더하기 메뉴와 탭의 닫기 버튼을 키보드만으로 쓴다", async ({ page }) => {
   await page.goto("/");
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
