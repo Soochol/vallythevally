@@ -1,5 +1,6 @@
 import type { Tool } from "../../toolSpec";
 import { channel } from "../channel";
+import { crossline } from "../crossline";
 import { extline } from "../extline";
 import { hline } from "../hline";
 import { hray } from "../hray";
@@ -14,5 +15,6 @@ export const LINE_TOOLS: readonly Tool[] = [
   hline,
   hray,
   vline,
+  crossline,
   channel,
 ];
