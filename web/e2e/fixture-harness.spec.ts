@@ -1,4 +1,5 @@
 import { cell, chartOf, expect, test, firstChart } from "./harness";
+import { MarketFixtures } from "./fixtures/scenario";
 
 test("브라우저 시나리오에서 초성 검색한 종목의 차트를 연다", async ({ page, scenario }) => {
   await page.goto("/");
@@ -28,4 +29,13 @@ test("브라우저 시나리오의 실시간 봉이 차트에 반영된다", asy
   const current = scenario.market.page({ symbol: "005930" }).current!;
   scenario.live.bar("005930", { ...current, c: 202_000, h: 202_000 });
   await expect(chartOf(cell(page))).toHaveAttribute("data-last-close", "202000");
+});
+
+test("시세를 먼저 조회해도 같은 종목의 과거 봉 개수는 바뀌지 않는다", () => {
+  const history = (market: MarketFixtures) => market.page({ symbol: "086520", limit: 10_000 }).bars.length;
+  const pageFirst = new MarketFixtures(Date.parse("2031-01-02T09:01:00+09:00"));
+  const quoteFirst = new MarketFixtures(Date.parse("2031-01-02T09:02:00+09:00"));
+  const expected = history(pageFirst);
+  quoteFirst.quote("086520");
+  expect(history(quoteFirst)).toBe(expected);
 });
