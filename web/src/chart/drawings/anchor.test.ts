@@ -238,8 +238,8 @@ describe("화면 좌표", () => {
 
   test("ToolContext의 barsIn은 두 시각이 든 봉 사이의 봉을 시간 순으로 준다", () => {
     const ctx = toolContext(frame, { price: String, time: String });
-    expect(barStarts(ctx.barsIn(kst(2026, 11, 3, 12), nov(5)))).toEqual([nov(3), nov(4), nov(5)]);
-    expect(barStarts(ctx.barsIn(nov(5), kst(2026, 11, 3, 12)))).toEqual([nov(3), nov(4), nov(5)]);
+    expect(barStarts(ctx.barsIn(kst(2026, 11, 3, 6), nov(5)))).toEqual([nov(3), nov(4), nov(5)]);
+    expect(barStarts(ctx.barsIn(nov(5), kst(2026, 11, 3, 6)))).toEqual([nov(3), nov(4), nov(5)]);
     expect(barStarts(ctx.barsIn(nov(4), nov(4)))).toEqual([nov(4)]);
   });
 
@@ -275,7 +275,7 @@ describe("화면 좌표", () => {
     const ctx = toolContext(frame, { price: String, time: String });
     expect(ctx.priceAt(750)).toBe(2500);
     expect(ctx.timeAt(19)).toBe(kst(2026, 11, 3, 12));
-    expect(ctx.timeAt(0)).toBeNull();
+    expect(ctx.timeAt(0)).toBe(kst(2026, 10, 29, 8));
   });
 });
 

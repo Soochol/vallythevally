@@ -127,7 +127,7 @@ export class DrawingSurface implements ChartExtension {
     const raw = fromScreen(frame, at);
     if (!raw) return null;
     const logical = tToLogical(frame.timeline, raw.t);
-    if (logical === null) return raw;
+    if (logical === null || logical < -0.5) return raw;
     const start = startAt(frame.timeline, Math.floor(logical));
     if (start !== null && start > raw.t) return raw;
     if (start !== null && raw.t >= start + barLength(frame.timeline.period, start)) return raw;
