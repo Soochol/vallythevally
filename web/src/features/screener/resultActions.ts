@@ -1,9 +1,8 @@
 import type { QueryClient } from "@tanstack/react-query";
 import type { SymbolCode } from "../../api/generated/SymbolCode";
 import { symbolInfoQuery } from "../../api/queries";
-import type { VenueTarget } from "../../lib/venue";
 import { addSymbols } from "../../lib/watchlist";
-import { chartWindows, useLayoutStore } from "../../stores/layout";
+import { type SymbolTarget, useLayoutStore, watchedSymbol } from "../../stores/layout";
 import { useSelectionStore } from "../../stores/selection";
 import { useUiStore } from "../../stores/ui";
 import { useWatchlistStore } from "../../stores/watchlist";
@@ -13,29 +12,30 @@ interface ResultOpen {
   code: SymbolCode;
   layoutId: string;
   cellId: WindowId;
-  shown: SymbolCode | undefined;
+  sender: WindowId | null;
+  shown: SymbolCode | null;
   phoneTab: ReturnType<typeof useSelectionStore.getState>["phoneTab"];
 }
 
 let pendingOpen: ResultOpen | null = null;
-const shownIn = (cellId: WindowId) => chartWindows(useLayoutStore.getState().layout).find((cell) => cell.id === cellId)?.symbol;
+const shownIn = (sender: WindowId | null, cellId: WindowId) => watchedSymbol(useLayoutStore.getState().layout, sender, cellId);
 const toast = (text: string) => useSelectionStore.getState().showToast(text);
 
 export function pendingResultCode(): SymbolCode | null {
   const open = pendingOpen;
   return open && useLayoutStore.getState().layout.id === open.layoutId && useSelectionStore.getState().activeCell === open.cellId
-    && shownIn(open.cellId) === open.shown && useSelectionStore.getState().phoneTab === open.phoneTab ? open.code : null;
+    && shownIn(open.sender, open.cellId) === open.shown && useSelectionStore.getState().phoneTab === open.phoneTab ? open.code : null;
 }
 
 export function dropPendingOpen() {
   pendingOpen = null;
 }
 
-export async function openResult(queryClient: QueryClient, code: SymbolCode): Promise<void> {
+export async function openResult(queryClient: QueryClient, code: SymbolCode, sender: WindowId | null): Promise<void> {
   const { activeCell: cellId, phoneTab } = useSelectionStore.getState();
-  const open: ResultOpen = { code, layoutId: useLayoutStore.getState().layout.id, cellId, shown: shownIn(cellId), phoneTab };
+  const open: ResultOpen = { code, layoutId: useLayoutStore.getState().layout.id, cellId, sender, shown: shownIn(sender, cellId), phoneTab };
   pendingOpen = open;
-  let target: VenueTarget;
+  let target: SymbolTarget;
   try {
     target = await queryClient.fetchQuery(symbolInfoQuery(code));
   } catch {
@@ -43,7 +43,8 @@ export async function openResult(queryClient: QueryClient, code: SymbolCode): Pr
   }
   if (pendingOpen !== open || pendingResultCode() === null) return;
   pendingOpen = null;
-  useLayoutStore.getState().setSymbol(cellId, target);
+  const { notice } = useLayoutStore.getState().sendSymbol(sender, cellId, target);
+  if (notice) toast(notice);
   useSelectionStore.getState().setPhoneTab("chart");
 }
 

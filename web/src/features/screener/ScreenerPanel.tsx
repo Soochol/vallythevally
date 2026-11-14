@@ -42,7 +42,8 @@ import {
   updateRetry,
 } from "../../lib/screener";
 import { listNameFrom, MAX_WATCHLISTS } from "../../lib/watchlist";
-import { useCell, useLayoutStore } from "../../stores/layout";
+import { useLayoutStore, watchedSymbol } from "../../stores/layout";
+import type { WindowId } from "../../layout/kinds";
 import { type Rerun, rerunReason, type ScreenRun, shownResult, useScreenerStore } from "../../stores/screener";
 import { useSelectionStore } from "../../stores/selection";
 import { serverNow, useServerClock } from "../../stores/serverClock";
@@ -79,8 +80,9 @@ function useStoreStatus(pollWhileUpdatingMs: number) {
   return query;
 }
 
-function useActiveSymbol(): SymbolCode {
-  return useCell(useSelectionStore((s) => s.activeCell)).symbol;
+function useWatchedSymbol(sender: WindowId | null): SymbolCode | null {
+  const activeCell = useSelectionStore((s) => s.activeCell);
+  return useLayoutStore((s) => watchedSymbol(s.layout, sender, activeCell));
 }
 
 function useMenuToggle() {
@@ -121,12 +123,12 @@ export function PhoneScreener() {
   if (!shown || desktop) return null;
   return (
     <div className="fixed inset-x-0 bottom-[56px] top-0 z-30 flex flex-col bg-bg">
-      <ScreenerPanel />
+      <ScreenerPanel id={null} />
     </div>
   );
 }
 
-export function ScreenerPanel() {
+export function ScreenerPanel({ id }: { id: WindowId | null }) {
   const { editing: screenEditing, view, query: screens } = useScreenEditing();
   const desktop = useMediaQuery(DESKTOP_QUERY);
   const { chosen } = view;
@@ -139,9 +141,9 @@ export function ScreenerPanel() {
   const result = shownResult(run);
   const rows = useMemo(() => (result ? sortRows(result.rows, sort) : []), [result, sort]);
   const queryClient = useQueryClient();
-  const active = useActiveSymbol();
+  const active = useWatchedSymbol(id);
   const [editing, setEditing] = useState(false);
-  const select = (code: SymbolCode) => void openResult(queryClient, code);
+  const select = (code: SymbolCode) => void openResult(queryClient, code, id);
   const execute = () => {
     void screenEditing.run().then((outcome) => {
       if (outcome.kind === "invalid" && desktop) setEditing(true);
@@ -191,7 +193,7 @@ export function ScreenerPanel() {
 
 interface ResultKeys {
   rows: readonly ScreenerRow[];
-  active: SymbolCode;
+  active: SymbolCode | null;
   onSelect(code: SymbolCode): void;
   onRun(): void;
 }
