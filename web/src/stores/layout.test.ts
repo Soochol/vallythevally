@@ -313,3 +313,16 @@ test("닫은 차트를 되돌리면 그 창의 종목·봉 주기·차트 설정
   expect(firstChart().period).toBe("M");
   expect(windowRefs(state().layout.windows).map((w) => w.id)).toContain(id);
 });
+
+test("닫은 연동 차트를 되돌리면 지금 같은 색 차트의 종목을 따르고 봉 주기와 차트 설정은 닫을 때 값이다", () => {
+  linked();
+  const closed = chartWindows(state().layout).find((w) => w.id === "a2")!;
+  expect(state().closeWindow(windowId("a2"))).toBe(true);
+  state().setSymbol(windowId("a1"), SK);
+  state().setLink(windowId("off"), "b");
+  state().undoArrangement();
+  expect(shown().a2).toEqual(["000660", "combined", "W"]);
+  expect(chartWindows(state().layout).find((w) => w.id === "a2")!.chartSettings).toBe(closed.chartSettings);
+  expect(new Set(chartWindows(state().layout).filter((w) => w.link === "a").map((w) => w.symbol)).size).toBe(1);
+  expect(new Set(chartWindows(state().layout).filter((w) => w.link === "b").map((w) => w.symbol)).size).toBe(1);
+});

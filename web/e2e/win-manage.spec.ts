@@ -259,6 +259,21 @@ test("좁은 데스크톱 폭에서도 창 더하기를 더한 위 막대의 버
   }
 });
 
+test("닫기 버튼은 탭이나 연동 색 점에 가리지 않고 버튼 전체가 눌린다", async ({ page, scenario }) => {
+  twoSamsungCharts(scenario);
+  await page.goto("/");
+  await expect(cell(page, 2)).toHaveAttribute("aria-busy", "false");
+  const buttons = groups(page).locator(".dock-tabs").getByRole("button", { name: /닫기$/ });
+  await expect(buttons).toHaveCount(5);
+  for (const button of await buttons.all()) {
+    const box = await boxOf(button);
+    for (const dx of [1, box.width / 2, box.width - 1]) {
+      const hit = await page.evaluate(({ x, y }) => document.elementFromPoint(x, y)?.closest("button")?.getAttribute("aria-label") ?? null, { x: box.x + dx, y: box.y + box.height / 2 });
+      expect(hit).toBe(await button.getAttribute("aria-label"));
+    }
+  }
+});
+
 test("창 더하기 메뉴와 탭의 닫기 버튼을 키보드만으로 쓴다", async ({ page }) => {
   await page.goto("/");
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");

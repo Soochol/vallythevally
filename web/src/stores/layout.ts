@@ -213,7 +213,13 @@ export const useLayoutStore = create<LayoutState>()((set, get) => {
         const step = s.steps.at(-1);
         if (!step) return s;
         const current = new Map(s.layout.windows.map((w) => [w.id, w]));
-        const windows = step.before.windows.map((w) => current.get(w.id) ?? w);
+        const leaders = new Map<LinkColor, ChartWindowState>();
+        for (const chart of chartWindows(s.layout)) if (chart.link !== null && !leaders.has(chart.link)) leaders.set(chart.link, chart);
+        const restore = (w: WindowState): WindowState => {
+          const leader = isChartWindow(w) && w.link !== null ? leaders.get(w.link) : undefined;
+          return leader && isChartWindow(w) ? follow(w, leader, UNKNOWN_NXT) : w;
+        };
+        const windows = step.before.windows.map((w) => current.get(w.id) ?? restore(w));
         return { layout: { ...s.layout, windows, placement: step.before.placement }, steps: s.steps.slice(0, -1), revision: s.revision + 1 };
       }),
     setDock: (dock) => arrangeDock(get().layout.windows, dock),
