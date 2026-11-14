@@ -24,9 +24,11 @@ export function opId(op: DrawingOp): DrawingId {
   }
 }
 
-export type PointCount = { kind: "exact"; n: 1 | 2 | 3 } | { kind: "range"; min: 2; max: number };
+type ExactPoints = 1 | 2 | 3 | 4 | 5 | 6 | 7;
 
-const exact = (n: 1 | 2 | 3): PointCount => ({ kind: "exact", n });
+export type PointCount = { kind: "exact"; n: ExactPoints } | { kind: "range"; min: 2; max: number };
+
+const exact = (n: ExactPoints): PointCount => ({ kind: "exact", n });
 
 export const TOOL_POINTS: Record<DrawingTool, PointCount> = {
   trendline: exact(2),
@@ -50,6 +52,21 @@ export const TOOL_POINTS: Record<DrawingTool, PointCount> = {
   daterange: exact(2),
   long: exact(3),
   short: exact(3),
+  crossline: exact(1),
+  regression: exact(2),
+  pitchfork: exact(3),
+  fibfan: exact(2),
+  fibtime: exact(2),
+  gannfan: exact(2),
+  gannbox: exact(2),
+  triangle: exact(3),
+  datepricerange: exact(2),
+  avwap: exact(1),
+  volprofile: exact(2),
+  elliott: exact(6),
+  elliottabc: exact(4),
+  xabcd: exact(5),
+  headshoulders: exact(7),
 };
 
 export const isDrawingTool = (x: string): x is DrawingTool => Object.hasOwn(TOOL_POINTS, x);

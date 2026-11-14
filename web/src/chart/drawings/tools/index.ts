@@ -4,6 +4,7 @@ import { FIB_TOOLS } from "./groups/fib";
 import { LINE_TOOLS } from "./groups/line";
 import { MEASURE_TOOLS } from "./groups/measure";
 import { NOTE_TOOLS } from "./groups/note";
+import { PATTERN_TOOLS } from "./groups/pattern";
 import { SHAPE_TOOLS } from "./groups/shape";
 
 const TOOL_GROUPS: Readonly<Record<Tool["group"], readonly Tool[]>> = {
@@ -12,6 +13,7 @@ const TOOL_GROUPS: Readonly<Record<Tool["group"], readonly Tool[]>> = {
   shape: SHAPE_TOOLS,
   note: NOTE_TOOLS,
   measure: MEASURE_TOOLS,
+  pattern: PATTERN_TOOLS,
 };
 
 export const TOOLS: readonly Tool[] = Object.values(TOOL_GROUPS).flat();

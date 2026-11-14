@@ -8,7 +8,7 @@ export function textProbe() {
   canvas.width = 800; canvas.height = 400; document.body.append(canvas);
   const context = canvas.getContext("2d");
   if (!context) throw new Error("Canvas context unavailable");
-  const ctx: ToolContext = { toScreen: (p) => ({ x: p.t, y: p.price }), fromScreen: (p) => ({ t: p.x, price: p.y }), xOf: (t) => t, yOf: (p) => p, timeAt: (x) => x, priceAt: (y) => y, shiftBars: (t, n) => t + n, barsBetween: () => null, paneWidth: 800, paneHeight: 400, formatPrice: String, formatTime: String, logScale: false };
+  const ctx: ToolContext = { toScreen: (p) => ({ x: p.t, y: p.price }), fromScreen: (p) => ({ t: p.x, price: p.y }), xOf: (t) => t, yOf: (p) => p, timeAt: (x) => x, priceAt: (y) => y, shiftBars: (t, n) => t + n, barsIn: () => [], barsBetween: () => null, paneWidth: 800, paneHeight: 400, formatPrice: String, formatTime: String, logScale: false };
   const style = hlineDefaults();
   const rawLabel = hline.shapes({ points: [{ t: 650, price: 104 }], text: "MMMMMMMMMMMM", style: { ...style, label: { ...style.label, size: 28 } }, selected: false }, ctx).find((s) => s.kind === "text");
   if (!rawLabel) throw new Error("Hline label unavailable");

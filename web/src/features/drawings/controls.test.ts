@@ -11,7 +11,7 @@ import type { DrawingBody } from "../../chart/drawings/types";
 const defaults = hlineDefaults();
 const drawing: DrawingBody = { id: "line", symbol: "005930", tool: "hline", points: [{ t: 1, price: 100 }], text: null, style: { ...defaults, line: { ...defaults.line, color: "#123456" }, label: { ...defaults.label, color: "#123456" } }, locked: false, hidden: false, periods: null, z: 1, group: null, scope: { kind: "symbol" }, revision: 1 };
 
-const GROUP_LABEL: Record<Tool["group"], string> = { line: "선", fib: "피보나치", shape: "도형", note: "주석", measure: "측정" };
+const GROUP_LABEL: Record<Tool["group"], string> = { line: "선", fib: "피보나치·갠", shape: "도형", note: "주석", measure: "측정", pattern: "패턴" };
 
 test("드로잉 막대는 도구가 둘 이상인 그룹에만 펼침 버튼을 두고 전체 개체 조작은 없다", () => {
   const html = renderToStaticMarkup(createElement(DrawingToolbar));

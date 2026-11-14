@@ -6,12 +6,16 @@ import type { Tool } from "../src/chart/drawings/toolSpec";
 
 type At = readonly [number, number];
 
-const GROUP_LABEL: Record<Tool["group"], string> = { line: "선", fib: "피보나치", shape: "도형", note: "주석", measure: "측정" };
-const COLUMNS = 7;
-const CELL = { left: 0.06, top: 0.22, width: 0.11, height: 0.16 };
-const SPOTS: readonly At[] = [[0.15, 0.75], [0.6, 0.25], [0.85, 0.6], [0.35, 0.4]];
+const GROUP_LABEL: Record<Tool["group"], string> = { line: "선", fib: "피보나치·갠", shape: "도형", note: "주석", measure: "측정", pattern: "패턴" };
+const COLUMNS = 9;
+const ROWS = 4;
+const CELL = { left: 0.06, top: 0.22, width: 0.085, height: 0.12 };
+const SPOTS: readonly At[] = [[0.15, 0.75], [0.6, 0.25], [0.85, 0.6], [0.35, 0.4], [0.05, 0.05], [0.95, 0.95], [0.5, 0.6]];
+const menuGroups = () => [...toolsByGroup()].filter(([, tools]) => tools.length > 1);
 
 function cellSpots(index: number, count: number): At[] {
+  expect(index, "도구 격자 칸").toBeLessThan(COLUMNS * ROWS);
+  expect(count, "한 칸의 점").toBeLessThanOrEqual(SPOTS.length);
   const x0 = CELL.left + (index % COLUMNS) * CELL.width;
   const y0 = CELL.top + Math.floor(index / COLUMNS) * CELL.height;
   return SPOTS.slice(0, count).map(([fx, fy]) => [x0 + fx * CELL.width * 0.8, y0 + fy * CELL.height * 0.8]);
@@ -71,12 +75,12 @@ async function placeAll(page: Page, scenario: Scenario) {
 
 const tools = () => TOOLS.map((t) => t.tool).sort();
 
-test("모든 도구: 도구 막대에서 골라 놓고, 새로고침 뒤에도 21개가 개체 목록에 도구 이름으로 남는다", async ({ page, scenario }, testInfo) => {
+test(`모든 도구: 도구 막대에서 골라 놓고, 새로고침 뒤에도 ${TOOLS.length}개가 개체 목록에 도구 이름으로 남는다`, async ({ page, scenario }, testInfo) => {
   const errors: string[] = []; page.on("pageerror", (e) => errors.push(e.message));
   await page.setViewportSize({ width: 1280, height: 800 });
   await open(page);
   await placeAll(page, scenario);
-  expect(TOOLS).toHaveLength(21);
+  expect(await drawings(scenario)).toHaveLength(TOOLS.length);
   await expect.poll(async () => (await mirror(page)).map((d) => d.tool).sort()).toEqual(tools());
   const saved = await drawings(scenario);
 
@@ -107,7 +111,7 @@ test("모든 도구: 도구 막대에서 골라 놓고, 새로고침 뒤에도 2
   expect(errors).toEqual([]);
 });
 
-test("모든 도구: 휴대폰 폭에서는 21개가 보이고 편집 조작은 없다", async ({ page, scenario }, testInfo) => {
+test(`모든 도구: 휴대폰 폭에서는 ${TOOLS.length}개가 보이고 편집 조작은 없다`, async ({ page, scenario }, testInfo) => {
   await page.setViewportSize({ width: 1280, height: 800 });
   await open(page);
   await placeAll(page, scenario);
@@ -168,7 +172,7 @@ for (const width of [1280, 800]) {
     }
     expect((await bar.boundingBox())!).toEqual(box);
     const viewport = page.viewportSize()!;
-    for (const group of Object.values(GROUP_LABEL)) {
+    for (const group of menuGroups().map(([g]) => GROUP_LABEL[g])) {
       const toggle = bar.getByRole("button", { name: `${group} 도구 펼치기`, exact: true });
       await toggle.scrollIntoViewIfNeeded();
       await toggle.click();
@@ -190,7 +194,7 @@ for (const width of [1280, 800]) {
 test("도구 막대: 단축키가 없는 도구는 제목과 메뉴에 빈 단축키를 보이지 않는다", async ({ page }) => {
   await open(page);
   const bar = page.getByRole("navigation", { name: "드로잉 도구" });
-  for (const [group, tools] of toolsByGroup()) {
+  for (const [group, tools] of menuGroups()) {
     await bar.getByRole("button", { name: `${GROUP_LABEL[group]} 도구 펼치기`, exact: true }).click();
     const menu = page.getByRole("menu", { name: `${GROUP_LABEL[group]} 도구` });
     for (const tool of tools) {
@@ -203,7 +207,7 @@ test("도구 막대: 단축키가 없는 도구는 제목과 메뉴에 빈 단�
       await expect(bar.getByRole("button", { name: tool.label, exact: true })).not.toHaveAttribute("title", /\(\)/);
     }
   }
-  for (const tool of TOOLS) await expect(bar.getByRole("button", { name: `${tool.label} 고정 도구`, exact: true })).not.toHaveAttribute("title", /\(\)/);
+  for (const [, tools] of menuGroups()) for (const tool of tools) await expect(bar.getByRole("button", { name: `${tool.label} 고정 도구`, exact: true })).not.toHaveAttribute("title", /\(\)/);
 });
 
 test("도구 막대: 단축키로 고른 도구를 그룹 버튼이 기억한다", async ({ page }) => {

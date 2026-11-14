@@ -29,6 +29,7 @@ const ctx: ToolContext = {
   toScreen: (p) => ({ x: p.t, y: p.price }), fromScreen: (p) => ({ t: p.x, price: p.y }),
   xOf: (t) => t, yOf: (p) => p, timeAt: (x) => x, priceAt: (y) => y, shiftBars: (t, n) => t + n,
   barsBetween: () => null, paneWidth: 800, paneHeight: 500, formatPrice: String, formatTime: String, logScale: false,
+  barsIn: () => [],
 };
 test("a brush stroke in progress previews as one line without a vertex circle per point", () => {
   const points = Array.from({ length: 2000 }, (_, i) => ({ t: i / 4, price: 50 })) as [{ t: number; price: number }, ...{ t: number; price: number }[]];

@@ -23,7 +23,7 @@ function toolTitle(tool: Tool, note?: string) {
   return [keys ? `${tool.label} (${keys})` : tool.label, note].filter(Boolean).join(" · ");
 }
 
-const GROUP_LABEL = { line: "선", fib: "피보나치", shape: "도형", note: "주석", measure: "측정" };
+const GROUP_LABEL = { line: "선", fib: "피보나치·갠", shape: "도형", note: "주석", measure: "측정", pattern: "패턴" };
 
 export function DrawingToolbar() {
   const active = useDrawingSession((s) => s.tool); const mode = useDrawingSession((s) => s.mode); const pinned = useDrawingSession((s) => s.pinnedTool);
