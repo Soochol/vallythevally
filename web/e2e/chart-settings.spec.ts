@@ -427,6 +427,46 @@ test("showOhlc: false가 든 옛 설정은 봉 값 줄과 범례를 모두 보�
   expect(saved(scenario)).not.toHaveProperty("showOhlc");
 });
 
+test("범례를 끈 좁은 칸에서는 봉 값이 거래소 옆에서, 값 한 칸도 들어가지 않으면 거래소 아래에서 줄을 바꾸고 오류 안내는 범례 안의 다음 줄에 한 줄로 둔다", async ({ page, scenario }) => {
+  await page.setViewportSize({ width: 860, height: 800 });
+  openWith(scenario, { showLegend: false, showOhlcChange: true });
+  await open(page);
+  await expect.poll(() => scenario.live.subscriptions().some((s) => s.symbol === "005930")).toBe(true);
+  scenario.live.emit({ type: "sub_error", sub: scenario.live.subscriptions().find((s) => s.symbol === "005930")!.sub, code: "realtime_limit" });
+  const notice = cell(page).getByText("실시간 한도 초과: 조회 값만 보입니다", { exact: true });
+  await expect(notice).toBeVisible();
+  const venue = await middle(venues(page));
+  const first = await middle(ohlc(page).locator(":scope > span").first());
+  expect(Math.abs(venue.y - first.y)).toBeLessThan(8);
+  const legend = (await cell(page).locator(".chart-legend").boundingBox())!;
+  for (const part of [notice, ...await ohlc(page).locator(":scope > span").all()]) {
+    const box = (await part.boundingBox())!;
+    expect(box.x + box.width).toBeLessThanOrEqual(legend.x + legend.width);
+  }
+  expect(await notice.evaluate((el) => { const range = document.createRange(); range.selectNodeContents(el); return range.getClientRects().length; })).toBe(1);
+
+  await page.setViewportSize({ width: 780, height: 800 });
+  await expect.poll(async () => (await venues(page).boundingBox())!.y + (await venues(page).boundingBox())!.height)
+    .toBeLessThanOrEqual((await ohlc(page).boundingBox())!.y);
+  const narrow = (await cell(page).locator(".chart-legend").boundingBox())!;
+  for (const value of await ohlc(page).locator(":scope > span").all()) {
+    const box = (await value.boundingBox())!;
+    expect(box.x + box.width).toBeLessThanOrEqual(narrow.x + narrow.width);
+  }
+});
+
+test("범례를 끈 지수는 거래소 자리 없이 봉 값이 범례 왼쪽 끝에서 시작한다", async ({ page, scenario }) => {
+  const layout = scenario.documents.layout(DEFAULT_LAYOUT_ID);
+  scenario.documents.saveLayout({ ...layout, revision: layout.revision + 1, windows: withFirstChart(layout, { symbol: "IDX:001", venue: null, period: "D",
+    chartSettings: { ...DEFAULT_CHART_SETTINGS, showLegend: false } }) });
+  await page.goto("/");
+  await expect(cell(page)).toHaveAttribute("aria-busy", "false");
+  await expect(ohlc(page)).toBeVisible();
+  await expect(venues(page)).toHaveCount(0);
+  const legend = (await cell(page).locator(".chart-legend").boundingBox())!;
+  expect((await ohlc(page).boundingBox())!.x).toBe(legend.x);
+});
+
 test("390x844에서 범례를 끄면 봉 값 줄만 남고 휴대폰 머리의 거래소는 그대로다", async ({ page, scenario }) => {
   openWith(scenario, { indicators: [...DEFAULT_CHART_SETTINGS.indicators, PRICE_MA], compare: ["000660"] });
   await open(page);

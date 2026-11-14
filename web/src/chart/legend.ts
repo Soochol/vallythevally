@@ -7,8 +7,16 @@ import { formatBarTime, formatKstClock } from "./time";
 
 const ROW_SURFACE = "pr-1 rounded-s bg-[color-mix(in_srgb,var(--chart-bg)_78%,transparent)]";
 const ROW = `w-max ${ROW_SURFACE}`;
-const OHLC_LINE = `relative z-[6] flex items-center gap-2 ${ROW_SURFACE} max-md:w-auto`;
-const ohlcLineClass = (withChange: boolean) => `${withChange ? "w-fit max-w-full" : "w-max"} ${OHLC_LINE}`;
+const OHLC_LINE = `relative z-[6] flex items-center ${ROW_SURFACE} max-md:w-auto`;
+const OHLC = "flex flex-wrap gap-x-2 whitespace-nowrap text-s max-md:gap-x-1.5";
+const VENUE_AND_OHLC = "flex min-w-0 items-baseline gap-x-2 gap-y-1 [&>:empty]:hidden";
+const OHLC_ALONE = { line: `w-max ${OHLC_LINE}`, group: VENUE_AND_OHLC, values: OHLC };
+const OHLC_ALONE_WITH_CHANGE = { ...OHLC_ALONE, line: `w-fit max-w-full ${OHLC_LINE}` };
+const OHLC_WITH_VENUE_AND_NOTICE = {
+  line: `w-fit max-w-full flex-wrap gap-x-2 gap-y-1 ${OHLC_LINE}`,
+  group: `flex-wrap ${VENUE_AND_OHLC}`,
+  values: `grow basis-0 ${OHLC}`,
+};
 const DIR_CLASS = { up: "text-up", down: "text-down", flat: "text-text-2" } as const;
 
 export interface LegendBar {
@@ -88,10 +96,11 @@ export class Legend {
     "조회 값",
   );
   private readonly stalled = el("span", "self-center rounded-[9px] border border-accent px-1.5 text-xs text-accent");
-  private readonly notice = el("span", "text-xs text-accent max-md:hidden");
+  private readonly notice = el("span", "break-keep text-xs text-accent max-md:hidden");
   private readonly head = el("div", "relative z-[6] flex min-w-0 max-w-full items-center gap-1.5 overflow-hidden whitespace-nowrap rounded-s bg-[color-mix(in_srgb,var(--chart-bg)_78%,transparent)] pr-1 max-md:hidden");
-  private readonly ohlcLine = el("div", ohlcLineClass(false));
-  private readonly ohlc = el("div", "flex flex-wrap gap-x-2 whitespace-nowrap text-s max-md:gap-x-1.5");
+  private readonly ohlcLine = el("div", OHLC_ALONE.line);
+  private readonly venueAndOhlc = el("div", OHLC_ALONE.group);
+  private readonly ohlc = el("div", OHLC_ALONE.values);
   private display: LegendDisplay = { showLegend: true, showOhlcChange: false };
 
   constructor(parent: HTMLElement) {
@@ -104,7 +113,8 @@ export class Legend {
     this.fetched.title = "키움에서 조회한 값입니다. 체결마다 바뀌지 않습니다.";
     this.stalled.title = "실시간 시세가 멈췄습니다. 마지막으로 받은 값입니다.";
     this.priceRow.append(this.close, this.change, this.time, this.fetched, this.stalled);
-    this.ohlcLine.append(this.ohlc);
+    this.venueAndOhlc.append(this.ohlc);
+    this.ohlcLine.append(this.venueAndOhlc);
     this.body.append(this.priceRow, this.ohlcLine);
     this.root.append(this.head, this.body);
     parent.append(this.root);
@@ -134,7 +144,8 @@ export class Legend {
       this.head.append(this.notice);
       this.priceRow.after(this.ohlcLine);
     } else {
-      this.ohlcLine.replaceChildren(this.venueAnchor, this.ohlc, this.notice);
+      this.ohlc.before(this.venueAnchor);
+      this.ohlcLine.append(this.notice);
       this.head.after(this.ohlcLine);
     }
   }
@@ -143,9 +154,12 @@ export class Legend {
     this.priceRow.hidden = v === null;
     this.ohlc.hidden = v === null;
     this.ohlcLine.hidden = v === null && this.display.showLegend;
+    const { showLegend, showOhlcChange: withChange } = this.display;
+    const classes = !showLegend ? OHLC_WITH_VENUE_AND_NOTICE : withChange ? OHLC_ALONE_WITH_CHANGE : OHLC_ALONE;
+    this.ohlcLine.className = classes.line;
+    this.venueAndOhlc.className = classes.group;
+    this.ohlc.className = classes.values;
     if (!v) return;
-    const withChange = this.display.showOhlcChange;
-    this.ohlcLine.className = ohlcLineClass(withChange);
     const parts = legendParts(v);
     const dir = DIR_CLASS[parts.dir];
     this.close.textContent = parts.close;
