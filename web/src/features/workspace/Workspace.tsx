@@ -7,9 +7,7 @@ import { useLayoutStore, windowRefs } from "../../stores/layout";
 import { useSelectionStore } from "../../stores/selection";
 import { Divider } from "./Divider";
 import { DockGroup } from "./DockGroup";
-import { useElementSize } from "./size";
-
-export const DOCK_GAP = 6;
+import { DOCK_GAP, useElementSize } from "./size";
 
 export function Workspace() {
   const root = useRef<HTMLElement>(null);
@@ -24,7 +22,7 @@ export function Workspace() {
   const shownCharts = useMemo(() => listGroups(dock.root).map((group) => group.active).filter((id) => windows.some((w) => w.id === id && w.kind === "chart")), [dock, windows]);
 
   useEffect(() => {
-    if (saved && dock !== saved) useLayoutStore.getState().setDock(dock);
+    if (saved && dock !== saved) useLayoutStore.getState().settleDock(dock);
   }, [dock, saved]);
 
   useEffect(() => {

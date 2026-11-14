@@ -9,7 +9,9 @@ import type { SymbolCode } from "../api/generated/SymbolCode";
 import * as edit from "../chart/settings";
 import { type ChartSettings, type ChartStyle, DEFAULT_CHART_SETTINGS, type ExtremeBasis, type IndicatorConfig, type Panel, type PriceScale } from "../chart/settings";
 import { fitDock, type WindowList } from "../layout/dock/fit";
-import { selectTab } from "../layout/dock/tree";
+import type { Size } from "../layout/dock/geometry";
+import { placeBeside } from "../layout/dock/split";
+import { selectTab, withoutWindow } from "../layout/dock/tree";
 import { windowId, WINDOW_KINDS, type WindowId } from "../layout/kinds";
 import type { DockPlacement, Placement } from "../layout/placement";
 import { toward } from "../lib/josa";
@@ -93,6 +95,21 @@ function freeWindowId(windows: readonly WindowState[], kind: OtherWindowKind): W
   return windowId(n === 1 ? kind : `${kind}-${n}`);
 }
 
+function freeChartId(windows: readonly WindowState[]): WindowId {
+  const used = new Set<string>(windows.map((w) => w.id));
+  for (;;) {
+    const id = `chart-${Array.from(crypto.getRandomValues(new Uint8Array(6)), (byte) => byte.toString(16).padStart(2, "0")).join("")}`;
+    if (!used.has(id)) return windowId(id);
+  }
+}
+
+export const ARRANGEMENT_STEPS = 20;
+export type Arrangement = Pick<EditableLayout, "windows" | "placement">;
+export type ArrangementStep = { id: number; before: Arrangement };
+export type DockRoom = { area: Size; gap: number };
+
+let lastStepId = 0;
+
 export const DEFAULT_LAYOUT_ID = "01900000-0000-7000-8000-000000000001";
 export const DEFAULT_LAYOUT: EditableLayout = {
   id: DEFAULT_LAYOUT_ID,
@@ -110,10 +127,16 @@ export const DEFAULT_LAYOUT: EditableLayout = {
 interface LayoutState {
   layout: EditableLayout;
   revision: number;
+  steps: readonly ArrangementStep[];
   load(layout: EditableLayout): void;
+  arrange(next: Arrangement): void;
+  undoArrangement(): void;
   setDock(dock: DockPlacement): void;
+  settleDock(dock: DockPlacement): void;
   selectTab(window: WindowId): void;
   showWindow(kind: OtherWindowKind): void;
+  addChart(from: WindowId, room: DockRoom | null): WindowId | null;
+  closeWindow(id: WindowId): boolean;
   setSymbol(cellId: WindowId, target: SymbolTarget, venue?: Venue): SymbolChange;
   sendSymbol(sender: WindowId | null, cellId: WindowId, target: SymbolTarget): SymbolChange;
   setLink(window: WindowId, link: LinkColor | null, nxtOf?: NxtLookup): void;
@@ -139,11 +162,19 @@ interface LayoutState {
 }
 
 export const useLayoutStore = create<LayoutState>()((set, get) => {
-  const place = (windows: WindowState[], dock: DockPlacement) =>
+  const settle = (dock: DockPlacement) =>
+    set((s) => (dock === s.layout.placement.dock ? s : { layout: { ...s.layout, placement: { ...s.layout.placement, dock } }, revision: s.revision + 1 }));
+  const arrange = ({ windows, placement }: Arrangement) =>
     set((s) => {
-      if (windows === s.layout.windows && dock === s.layout.placement.dock) return s;
-      return { layout: { ...s.layout, windows, placement: { ...s.layout.placement, dock } }, revision: s.revision + 1 };
+      if (windows === s.layout.windows && placement === s.layout.placement) return s;
+      const step = { id: ++lastStepId, before: { windows: s.layout.windows, placement: s.layout.placement } };
+      return { layout: { ...s.layout, windows, placement }, steps: [...s.steps, step].slice(-ARRANGEMENT_STEPS), revision: s.revision + 1 };
     });
+  const arrangeDock = (windows: WindowState[], dock: DockPlacement) => {
+    const { layout } = get();
+    if (windows === layout.windows && dock === layout.placement.dock) return;
+    arrange({ windows, placement: { ...layout.placement, dock } });
+  };
   const patchWindows = (f: (w: WindowState) => WindowState) =>
     set((s) => {
       const windows = s.layout.windows.map(f);
@@ -174,15 +205,46 @@ export const useLayoutStore = create<LayoutState>()((set, get) => {
   return {
     layout: DEFAULT_LAYOUT,
     revision: 0,
-    load: (layout) => set({ layout }),
-    setDock: (dock) => place(get().layout.windows, dock),
-    selectTab: (window) => place(get().layout.windows, selectTab(fittedDock(get().layout), window)),
+    steps: [],
+    load: (layout) => set({ layout, steps: [] }),
+    arrange,
+    undoArrangement: () =>
+      set((s) => {
+        const step = s.steps.at(-1);
+        if (!step) return s;
+        const current = new Map(s.layout.windows.map((w) => [w.id, w]));
+        const windows = step.before.windows.map((w) => current.get(w.id) ?? w);
+        return { layout: { ...s.layout, windows, placement: step.before.placement }, steps: s.steps.slice(0, -1), revision: s.revision + 1 };
+      }),
+    setDock: (dock) => arrangeDock(get().layout.windows, dock),
+    settleDock: settle,
+    selectTab: (window) => settle(selectTab(fittedDock(get().layout), window)),
     showWindow: (kind) => {
       const { windows, placement } = get().layout;
       const shown = windows.find((w) => w.kind === kind);
-      const id = shown?.id ?? freeWindowId(windows, kind);
-      const next = shown ? windows : [...windows, { id, link: null, kind }];
-      place(next, selectTab(fitDock(placement.dock, windowRefs(next)), id));
+      if (shown) return get().selectTab(shown.id);
+      const id = freeWindowId(windows, kind);
+      const next = [...windows, { id, link: null, kind }];
+      arrangeDock(next, selectTab(fitDock(placement.dock, windowRefs(next)), id));
+    },
+    addChart: (from, room) => {
+      const { layout } = get();
+      if (chartWindows(layout).length >= WINDOW_KINDS.chart.maxCount) return null;
+      const source = chartWindow(layout, from);
+      const id = freeChartId(layout.windows);
+      const windows = [...layout.windows, { ...source, id }];
+      const refs = windowRefs(windows);
+      const dock = fittedDock(layout);
+      arrangeDock(windows, fitDock(room ? placeBeside(dock, id, source.id, { ...room, windows: refs }) : dock, refs));
+      return id;
+    },
+    closeWindow: (id) => {
+      const { layout } = get();
+      const closing = layout.windows.find((w) => w.id === id);
+      if (!closing || (isChartWindow(closing) && chartWindows(layout).length <= 1)) return false;
+      const windows = layout.windows.filter((w) => w !== closing);
+      arrangeDock(windows, fitDock(withoutWindow(fittedDock(layout), id), windowRefs(windows)));
+      return true;
     },
     setSymbol: (cellId, target, venue) => openIn(linkedCharts(get().layout, cellId), target, venue && { cellId, venue }),
     sendSymbol: (sender, cellId, target) => {
