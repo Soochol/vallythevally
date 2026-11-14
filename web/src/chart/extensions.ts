@@ -1,6 +1,7 @@
 import type { IChartApi } from "lightweight-charts";
 import type { Bar } from "../api/generated/Bar";
 import type { CellView } from "./ChartController";
+import type { FineBars } from "./fineBars";
 import type { MainSeries } from "./series";
 
 export interface ChartHost {
@@ -9,6 +10,7 @@ export interface ChartHost {
   series(): MainSeries["api"];
   bars(): readonly Bar[];
   view(): CellView | null;
+  fineBars: FineBars;
 }
 export interface ChartExtension {
   reattach(): void;

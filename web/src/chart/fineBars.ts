@@ -3,24 +3,9 @@ import type { Bar } from "../api/generated/Bar";
 import type { UnixSeconds } from "../api/generated/UnixSeconds";
 import type { MarketSocketLike } from "../api/socket";
 import { BarFeed, displayBars, type FetchPage, type History } from "./barFeed";
-import { chooseFinePeriod, type FinePeriod, type NoFineReason } from "./drawings/finePeriod";
+import { chooseFinePeriod, type FineBarsRead, type FineBarsReader, type FinePeriod, type FineSpan } from "./drawings/finePeriod";
 
 export const MAX_FINE_PAGES = 20;
-
-export interface FineSpan {
-  from: UnixSeconds;
-  to: UnixSeconds;
-}
-
-export type FineBarsRead =
-  | { kind: "ready"; period: FinePeriod; bars: readonly Bar[] }
-  | { kind: "loading" }
-  | { kind: "failed" }
-  | { kind: "none"; reason: NoFineReason };
-
-export interface FineBarsReader {
-  read(span: FineSpan): FineBarsRead;
-}
 
 const LOADING: FineBarsRead = { kind: "loading" };
 const FAILED: FineBarsRead = { kind: "failed" };

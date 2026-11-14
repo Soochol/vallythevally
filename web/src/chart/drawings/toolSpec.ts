@@ -1,5 +1,7 @@
 import type { Bar } from "../../api/generated/Bar";
+import type { Period } from "../../api/generated/Period";
 import type { UnixSeconds } from "../../api/generated/UnixSeconds";
+import type { FineBarsRead } from "./finePeriod";
 import type {
   Color,
   Dash,
@@ -62,6 +64,8 @@ export interface ToolContext {
   shiftBars(t: UnixSeconds, n: number): UnixSeconds | null;
   barsBetween(t1: UnixSeconds, t2: UnixSeconds): { count: number; volume: number } | null;
   barsIn(t1: UnixSeconds, t2?: UnixSeconds): readonly Bar[];
+  period: Period;
+  fineBarsIn(t1: UnixSeconds, t2: UnixSeconds): FineBarsRead;
   paneWidth: number;
   paneHeight: number;
   formatPrice(p: number): string;
@@ -144,6 +148,7 @@ export interface ToolSpec<S> {
   shapes(d: ToolDrawing<S>, ctx: ToolContext): Shape[];
   handles(d: ToolDrawing<S>, ctx: ToolContext): HandleSpec[];
   axisLabels(d: ToolDrawing<S>, ctx: ToolContext): AxisLabel[];
+  fineRange?(d: ToolDrawing<S>, ctx: ToolContext): { t1: UnixSeconds; t2: UnixSeconds } | null;
   eraseAlong?(points: readonly DrawingPoint[], eraser: readonly ScreenPoint[], radius: number, ctx: ToolContext): DrawingPoint[][];
 }
 
@@ -185,7 +190,7 @@ export function defineTool<S>(spec: ToolSpec<S>): Tool {
   const typed = (d: ToolDrawing<unknown>): ToolDrawing<S> => ({ ...d, style: parse(d.style) });
   const fields = (list: readonly StyleField<S>[] | undefined) => list?.map((f) => eraseField(f, parse));
   const maybe = <V>(lens: Lens<S, V> | undefined) => (lens === undefined ? undefined : eraseLens(lens, parse));
-  const { bar, settings } = spec;
+  const { bar, settings, fineRange } = spec;
   return {
     ...spec,
     defaultStyle: () => spec.defaultStyle(),
@@ -201,5 +206,6 @@ export function defineTool<S>(spec: ToolSpec<S>): Tool {
     shapes: (d, ctx) => spec.shapes(typed(d), ctx),
     handles: (d, ctx) => spec.handles(typed(d), ctx),
     axisLabels: (d, ctx) => spec.axisLabels(typed(d), ctx),
+    fineRange: fineRange && ((d, ctx) => fineRange(typed(d), ctx)),
   };
 }

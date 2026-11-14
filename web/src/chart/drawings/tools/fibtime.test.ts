@@ -16,6 +16,8 @@ const ctxWith = (overrides: Partial<ToolContext> = {}): ToolContext => ({
   shiftBars: (t, n) => t + n * BAR,
   barsBetween: (t1, t2) => ({ count: Math.abs(t2 - t1) / BAR, volume: 0 }),
   barsIn: () => [],
+  period: "D",
+  fineBarsIn: () => ({ kind: "loading" }),
   paneWidth: 800,
   paneHeight: 500,
   formatPrice: (p) => `${p}원`,
@@ -46,6 +48,7 @@ function chartOf(starts: readonly number[], period: Period): ToolContext {
       bars,
       pane: { width: 800, height: 400 },
       logScale: false,
+      fine: { read: () => ({ kind: "loading" }) },
     },
     { price: String, time: String },
   );

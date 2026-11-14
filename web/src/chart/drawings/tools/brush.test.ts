@@ -12,6 +12,8 @@ const ctx: ToolContext = {
   shiftBars: (t, n) => t + n,
   barsBetween: () => null,
   barsIn: () => [],
+  period: "D",
+  fineBarsIn: () => ({ kind: "loading" }),
   paneWidth: 800,
   paneHeight: 500,
   formatPrice: String,

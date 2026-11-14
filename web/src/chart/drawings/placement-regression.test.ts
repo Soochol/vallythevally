@@ -10,6 +10,8 @@ const ctx: ToolContext = {
   xOf: (t) => t, yOf: (p) => p, timeAt: (x) => x, priceAt: (y) => y, shiftBars: (t, n) => t + n,
   barsBetween: () => ({ count: 1, volume: 1 }), paneWidth: 800, paneHeight: 500,
   barsIn: () => [],
+  period: "D",
+  fineBarsIn: () => ({ kind: "loading" }),
   formatPrice: String, formatTime: String, logScale: false,
 };
 const context: Context = {

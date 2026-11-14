@@ -1,6 +1,7 @@
 import { describe, expect, test } from "vitest";
 import type { Bar } from "../../api/generated/Bar";
 import type { Period } from "../../api/generated/Period";
+import type { FineBarsReader, FineSpan } from "./finePeriod";
 import {
   type Axes,
   type Frame,
@@ -187,7 +188,9 @@ describe("§6.3 소수 index ↔ x", () => {
   });
 });
 
-function frameOf(bars: Bar[], period: Period): Frame {
+const noFine: FineBarsReader = { read: () => ({ kind: "loading" }) };
+
+function frameOf(bars: Bar[], period: Period, fine = noFine): Frame {
   const axes: Axes = {
     time: {
       coordinateOf: (k) => (Number.isInteger(k) ? 10 + k * 6 : 0),
@@ -196,7 +199,7 @@ function frameOf(bars: Bar[], period: Period): Frame {
     },
     price: { toY: (p) => 1000 - p / 10, toPrice: (y) => (1000 - y) * 10 },
   };
-  return { timeline: timelineOf(bars, period), axes, bars, pane: { width: 800, height: 400 }, logScale: false };
+  return { timeline: timelineOf(bars, period), axes, bars, pane: { width: 800, height: 400 }, logScale: false, fine };
 }
 
 const barAt = (t: number, v = 100): Bar => ({ t, o: 1, h: 2, l: 0.5, c: 1.5, v });
@@ -276,6 +279,60 @@ describe("화면 좌표", () => {
     expect(ctx.priceAt(750)).toBe(2500);
     expect(ctx.timeAt(19)).toBe(kst(2026, 11, 3, 12));
     expect(ctx.timeAt(0)).toBe(kst(2026, 10, 29, 8));
+  });
+});
+
+describe("세부 봉 읽기", () => {
+  function reading(bars: Bar[], period: Period) {
+    const asked: FineSpan[] = [];
+    const ready = { kind: "ready" as const, period: "1m" as const, bars: [barAt(nov(3))] };
+    const ctx = toolContext(frameOf(bars, period, { read: (span) => (asked.push(span), ready) }), { price: String, time: String });
+    return { ctx, asked, ready };
+  }
+  const inSpan = (bars: readonly Bar[], span: FineSpan | undefined) => bars.filter((b) => span !== undefined && b.t >= span.from && b.t < span.to);
+
+  test("일봉: barsIn과 같은 봉들의 첫 봉 시작부터 끝 봉의 다음 봉 시작 전까지를 읽는다", () => {
+    const bars = weekNov2.starts.map((t) => barAt(t));
+    const { ctx, asked, ready } = reading(bars, "D");
+    const leftHalfOfNov4 = logicalToT(weekNov2, 1.7)!;
+    const cases: [number, number, FineSpan][] = [
+      [kst(2026, 11, 3, 6), nov(5), { from: nov(3), to: nov(6) }],
+      [nov(5), kst(2026, 11, 3, 6), { from: nov(3), to: nov(6) }],
+      [nov(4), nov(4), { from: nov(4), to: nov(5) }],
+      [nov(6), nov(6), { from: nov(6), to: nov(9) }],
+      [leftHalfOfNov4, nov(5), { from: nov(4), to: nov(6) }],
+      [kst(2026, 10, 30), nov(4), { from: kst(2026, 10, 30), to: nov(5) }],
+      [nov(4), nov(20), { from: nov(4), to: nov(23) }],
+      [nov(20), nov(25), { from: nov(6), to: nov(26) }],
+    ];
+    for (const [t1, t2, span] of cases) {
+      expect(ctx.fineBarsIn(t1, t2)).toBe(ready);
+      expect(asked.at(-1)).toEqual(span);
+      expect(barStarts(inSpan(bars, asked.at(-1)))).toEqual(barStarts(ctx.barsIn(t1, t2)));
+    }
+    expect(ctx.period).toBe("D");
+  });
+
+  test("주봉: 주가 걸친 봉 시작부터 다음 주 시작 전까지를 읽는다", () => {
+    const weeks = days([2026, 10, 26], [2026, 11, 2], [2026, 11, 9], [2026, 11, 16]).map((t) => barAt(t));
+    const { ctx, asked } = reading(weeks, "W");
+    const cases: [number, number, FineSpan][] = [
+      [kst(2026, 11, 4), kst(2026, 11, 10), { from: nov(2), to: nov(16) }],
+      [kst(2026, 11, 17), kst(2026, 11, 17), { from: nov(16), to: nov(23) }],
+      [kst(2026, 10, 13), kst(2026, 10, 27), { from: kst(2026, 10, 12), to: nov(2) }],
+    ];
+    for (const [t1, t2, span] of cases) {
+      ctx.fineBarsIn(t1, t2);
+      expect(asked.at(-1)).toEqual(span);
+      expect(barStarts(inSpan(weeks, asked.at(-1)))).toEqual(barStarts(ctx.barsIn(t1, t2)));
+    }
+    expect(ctx.period).toBe("W");
+  });
+
+  test("차트에 봉이 없으면 세부 봉을 읽지 않고 받는 중이라 답한다", () => {
+    const { ctx, asked } = reading([], "D");
+    expect(ctx.fineBarsIn(nov(3), nov(5))).toEqual({ kind: "loading" });
+    expect(asked).toEqual([]);
   });
 });
 

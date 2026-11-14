@@ -1,3 +1,4 @@
+import type { Bar } from "../../api/generated/Bar";
 import type { Period } from "../../api/generated/Period";
 import type { UnixSeconds } from "../../api/generated/UnixSeconds";
 
@@ -6,6 +7,21 @@ export type FinePeriod = "1m" | "3m" | "5m" | "10m" | "15m" | "30m" | "60m";
 export type NoFineReason = "oneMinuteChart" | "pastYear" | "overLimit";
 
 export type FineChoice = { kind: "period"; period: FinePeriod } | { kind: "none"; reason: NoFineReason };
+
+export interface FineSpan {
+  from: UnixSeconds;
+  to: UnixSeconds;
+}
+
+export type FineBarsRead =
+  | { kind: "ready"; period: FinePeriod; bars: readonly Bar[] }
+  | { kind: "loading" }
+  | { kind: "failed" }
+  | { kind: "none"; reason: NoFineReason };
+
+export interface FineBarsReader {
+  read(span: FineSpan): FineBarsRead;
+}
 
 export const MAX_FINE_BARS = 10_000;
 export const LONGEST_SESSION_MINUTES = 720;

@@ -5,7 +5,7 @@ import { brush } from './tools/brush';
 import { hline } from './tools/hline';
 import { trendline } from './tools/trendline';
 import type { DrawingPoint } from './types';
-const ctx: ToolContext={toScreen:p=>({x:p.t,y:p.price}),fromScreen:p=>({t:p.x,price:p.y}),xOf:t=>t,yOf:p=>p,timeAt:x=>x,priceAt:y=>y,shiftBars:(t,n)=>t+n,barsIn:()=>[],barsBetween:()=>({count:1,volume:1}),paneWidth:800,paneHeight:500,formatPrice:String,formatTime:String,logScale:false};
+const ctx: ToolContext={toScreen:p=>({x:p.t,y:p.price}),fromScreen:p=>({t:p.x,price:p.y}),xOf:t=>t,yOf:p=>p,timeAt:x=>x,priceAt:y=>y,shiftBars:(t,n)=>t+n,barsIn:()=>[],period:"D",fineBarsIn:()=>({kind:"loading"}),barsBetween:()=>({count:1,volume:1}),paneWidth:800,paneHeight:500,formatPrice:String,formatTime:String,logScale:false};
 const mods={ctrl:false,alt:false,shift:false};
 function run(placement: Placement, events: Input[], finalize?: (p: readonly DrawingPoint[])=>DrawingPoint[]){
  const tool=defineTool({...hline,tool:'channel',placement,finalize});

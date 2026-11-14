@@ -4,7 +4,8 @@ import type { Bar } from "../api/generated/Bar";
 import type { BarsPage } from "../api/generated/BarsPage";
 import { ApiRequestError } from "../api/http";
 import type { SubEvent } from "../api/socket";
-import { FineBars, type FineSpan, MAX_FINE_PAGES } from "./fineBars";
+import type { FineSpan } from "./drawings/finePeriod";
+import { FineBars, MAX_FINE_PAGES } from "./fineBars";
 
 const kst = (y: number, m: number, d: number, h = 0, min = 0) => Date.UTC(y, m - 1, d, h, min) / 1000 - 9 * 3600;
 const NOW = kst(2026, 11, 13, 15);

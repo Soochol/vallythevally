@@ -31,6 +31,7 @@ import { type CompareEntry, CompareLayer, compareVenue } from "./compare";
 import { CompareLegend } from "./compareLegend";
 import { DaySeparators } from "./daySeparators";
 import { extremeChange, type ExtremeTag, ExtremeTags } from "./extremeTags";
+import { FineBars } from "./fineBars";
 import { type Extreme, findExtremes } from "./extremes";
 import { type OpenPort, openIndicatorPort } from "./indicators/client";
 import { IndicatorLayer } from "./indicators/layer";
@@ -123,6 +124,7 @@ export class ChartController {
   private readonly daySeparators: DaySeparators;
   get venueAnchor(): HTMLElement { return this.legend.venueAnchor; }
   private readonly feed: BarFeed;
+  private readonly fineBars: FineBars;
   private readonly onStatus: (s: CellStatus) => void;
   private tokens: ThemeTokens;
   private view: CellView | null = null;
@@ -218,6 +220,7 @@ export class ChartController {
       deps.fetchPage ?? fetchBarsPage,
       deps.socket,
     );
+    this.fineBars = new FineBars(deps.fetchPage ?? fetchBarsPage, deps.socket);
     this.unwatch = deps.socket?.watch((c) => this.onConnection(c)) ?? (() => {});
 
     this.chart.subscribeCrosshairMove((p) => {
@@ -276,6 +279,7 @@ export class ChartController {
       this.indicators.clear();
       this.onStatus({ kind: "loading" });
       this.feed.open({ symbol: next.symbol, venue: next.venue, period: next.period });
+      this.fineBars.open({ symbol: next.symbol, venue: next.venue, period: next.period });
     }
     if (prev?.period !== next.period || prev?.settings.indicators !== next.settings.indicators || prev?.settings.panels !== next.settings.panels) {
       const configs = chartIndicators(next.settings, next.period);
@@ -364,6 +368,7 @@ export class ChartController {
     this.resize.disconnect();
     this.unwatch();
     this.feed.dispose();
+    this.fineBars.dispose();
     this.compare.dispose();
     this.indicators.dispose();
     this.indicatorLegend.dispose();
@@ -375,7 +380,7 @@ export class ChartController {
   }
 
   attach(factory: ExtensionFactory): () => void {
-    const ext = factory({ el: this.el, chart: this.chart, series: () => this.main.api, bars: () => this.bars, view: () => this.view });
+    const ext = factory({ el: this.el, chart: this.chart, series: () => this.main.api, bars: () => this.bars, view: () => this.view, fineBars: this.fineBars });
     this.extensions.add(ext);
     return () => { if (this.extensions.delete(ext)) ext.dispose(); };
   }
