@@ -62,6 +62,10 @@ export class UserDocuments {
   saveLayout(value: LayoutInput): Layout {
     const saved: Layout = { ...clone(value), updatedAt: Math.floor(Date.now() / 1000) };
     this.layouts.set(saved.id, saved);
+    const charts = new Set(saved.windows.filter((w) => w.kind === "chart").map((w) => w.id));
+    for (const [id, drawing] of this.drawingValues) {
+      if (drawing.scope.kind === "cell" && drawing.scope.layoutId === saved.id && !charts.has(drawing.scope.windowId)) this.drawingValues.set(id, { ...drawing, scope: { kind: "layout", layoutId: saved.id }, updatedAt: saved.updatedAt });
+    }
     return clone(saved);
   }
   watchlists(): Watchlists { return clone(this.watchlistValue); }
