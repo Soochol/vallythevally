@@ -53,3 +53,24 @@ test("불러온 첫 봉보다 과거의 점이 있는 드로잉은 과거 봉을
   expect(scenario.documents.drawings(SYMBOL).map((d) => d.points)).toEqual([trend.points, channel.points]);
   expect(errors).toEqual([]);
 });
+
+test("첫 점이 불러온 봉보다 한참 과거인 드로잉을 개체 목록에서 골라도 보이는 자리를 지킨다", async ({ page, scenario }) => {
+  const errors: string[] = []; page.on("pageerror", (e) => errors.push(e.message));
+  const recent = scenario.market.page({ symbol: SYMBOL, limit: 40 });
+  const inside = recent.bars[20]!;
+  const trend: DrawingInput = { id: "01900000-0000-7000-8000-0000000000a3", symbol: SYMBOL, tool: "trendline", points: [{ t: recent.bars[0]!.t - 400 * 86_400, price: inside.c }, { t: inside.t, price: inside.c }], style: {}, text: null, locked: false, hidden: false, periods: null, z: 1, group: null, scope: { kind: "symbol" }, revision: 0 };
+  scenario.documents.saveDrawing(trend);
+  scenario.reply((url) => url.pathname === "/api/bars" && url.searchParams.get("symbol") === SYMBOL && !url.searchParams.has("before"), { body: recent });
+  scenario.hold((url) => url.pathname === "/api/bars" && url.searchParams.get("symbol") === SYMBOL && url.searchParams.has("before"));
+
+  await page.goto("/");
+  await expect(chartOf(cell(page))).toHaveAttribute("data-first-bar-t", String(recent.bars[0]!.t));
+  await page.getByRole("button", { name: "개체 목록 열기", exact: true }).click();
+  const before = (await settledMirror(page)).find((m) => m.id === trend.id)!.points[1]!;
+  await page.getByRole("region", { name: "개체 목록" }).getByRole("button", { name: "고르기: 추세선", exact: true }).click();
+  await expect.poll(async () => (await settledMirror(page)).find((m) => m.id === trend.id)?.selected).toBe(true);
+  const after = (await settledMirror(page)).find((m) => m.id === trend.id)!.points[1]!;
+  expect(after.x).toBeCloseTo(before.x, 0);
+  expect(after.y).toBeCloseTo(before.y, 0);
+  expect(errors).toEqual([]);
+});
