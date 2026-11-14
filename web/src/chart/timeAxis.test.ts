@@ -56,8 +56,10 @@ test("전역 금융 시각과 가격·미래 시각을 양방향으로 변환한
     expect(screen).not.toBeNull();
     expect(screen && fromScreen(frame, screen)).toEqual(point);
   }
-  expect(projection.toTime(-0.1)).toBeNull();
-  expect(projection.toLogical(year(2014))).toBeNull();
+  expect(projection.toLogical(year(2014))).toBe(-1);
+  expect(projection.toLogical(year(2010) + 365 * 86400 / 2)).toBeCloseTo(-5 + 182.5 / 365, 12);
+  expect(projection.toTime(-1)).toBe(year(2014));
+  expect(projection.toTime(-0.5)).toBe(year(2014) + 365 * 86400 / 2);
 });
 
 test("과거 봉이 기존 금융 시각을 채우거나 금융 시각이 사라져도 줌과 실제 시각의 오른쪽 위치를 보존한다", () => {
