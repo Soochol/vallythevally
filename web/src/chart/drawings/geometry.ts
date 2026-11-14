@@ -188,7 +188,6 @@ export function hitShape(s: Shape, p: ScreenPoint, pane: Pane, measure: TextMeas
   }
 }
 
-const RANK = { handle: 2, line: 1, fill: 0 } as const;
 
 function nearestHandle(handles: readonly ScreenPoint[], p: ScreenPoint): number {
   let best = -1;
@@ -203,23 +202,35 @@ function nearestHandle(handles: readonly ScreenPoint[], p: ScreenPoint): number 
   return best;
 }
 
-function itemHit(item: HitItem, p: ScreenPoint, pane: Pane, measure: TextMeasure): { hit: Hit; rank: number } | null {
+function itemHit(item: HitItem, p: ScreenPoint, pane: Pane, measure: TextMeasure): Hit | null {
   const handle = nearestHandle(item.handles, p);
-  if (handle >= 0) return { hit: { kind: "handle", id: item.id, index: handle }, rank: RANK.handle };
+  if (handle >= 0) return { kind: "handle", id: item.id, index: handle };
   let part: ShapeHit = null;
   for (const s of item.shapes) {
     const h = hitShape(s, p, pane, measure);
-    if (h === "line") return { hit: { kind: "body", id: item.id, part: h }, rank: RANK.line };
+    if (h === "line") return { kind: "body", id: item.id, part: h };
     part ??= h;
   }
-  return part === null ? null : { hit: { kind: "body", id: item.id, part }, rank: RANK[part] };
+  return part === null ? null : { kind: "body", id: item.id, part };
+}
+
+interface Ranked {
+  hit: Hit;
+  z: number;
+}
+
+function beats(next: Ranked, best: Ranked): boolean {
+  const nextHandle = next.hit.kind === "handle";
+  const bestHandle = best.hit.kind === "handle";
+  return nextHandle === bestHandle ? next.z >= best.z : nextHandle;
 }
 
 export function hitTest(items: readonly HitItem[], p: ScreenPoint, pane: Pane, measure: TextMeasure = approxTextMeasure): Hit {
-  let best: { hit: Hit; rank: number; z: number } | null = null;
+  let best: Ranked | null = null;
   for (const item of items) {
-    const h = itemHit(item, p, pane, measure);
-    if (h !== null && (best === null || h.rank > best.rank || (h.rank === best.rank && item.z >= best.z))) best = { ...h, z: item.z };
+    const hit = itemHit(item, p, pane, measure);
+    const next = hit === null ? null : { hit, z: item.z };
+    if (next !== null && (best === null || beats(next, best))) best = next;
   }
   return best === null ? { kind: "empty" } : best.hit;
 }
