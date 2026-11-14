@@ -6,7 +6,7 @@ import type { Venue } from "../api/generated/Venue";
 import type { IndicatorSpec } from "../chart/indicators/kinds";
 import type { SymbolCode } from "../api/generated/SymbolCode";
 import * as edit from "../chart/settings";
-import { type ChartSettings, type ChartStyle, DEFAULT_CHART_SETTINGS, type IndicatorConfig, type Panel, type PriceScale } from "../chart/settings";
+import { type ChartSettings, type ChartStyle, DEFAULT_CHART_SETTINGS, type ExtremeBasis, type IndicatorConfig, type Panel, type PriceScale } from "../chart/settings";
 import { venueFor, type VenueTarget } from "../lib/venue";
 
 export type Slot = Cell["slot"];
@@ -35,6 +35,9 @@ interface LayoutState {
   setScale(slot: Slot, s: PriceScale): void;
   setVisibleBars(slot: Slot, n: number | null): void;
   setShowExtremes(slot: Slot, on: boolean): void;
+  setShowOhlc(slot: Slot, on: boolean): void;
+  setShowOhlcChange(slot: Slot, on: boolean): void;
+  setExtremeBasis(slot: Slot, basis: ExtremeBasis): void;
   addIndicator(slot: Slot, spec: IndicatorSpec, style: IndicatorConfig["style"]): void;
   updateIndicator(slot: Slot, id: string, patch: Partial<Pick<IndicatorConfig, "spec" | "style" | "visible">>): void;
   removeIndicator(slot: Slot, id: string): void;
@@ -52,7 +55,7 @@ export const useLayoutStore = create<LayoutState>()((set) => {
       if (cells.every((c, i) => c === s.layout.cells[i])) return s;
       return { layout: { ...s.layout, cells }, revision: s.revision + 1 };
     });
-  const patchSetting = <K extends "style" | "scale" | "visibleBars" | "showExtremes">(slot: Slot, key: K, value: ChartSettings[K]) =>
+  const patchSetting = <K extends "style" | "scale" | "visibleBars" | "showExtremes" | "showOhlc" | "showOhlcChange" | "extremeBasis">(slot: Slot, key: K, value: ChartSettings[K]) =>
     patchCell(slot, (c) => (c.chartSettings[key] === value ? c : { ...c, chartSettings: { ...c.chartSettings, [key]: value } }));
   const patchSettings = (slot: Slot, f: (s: ChartSettings) => ChartSettings) =>
     patchCell(slot, (c) => {
@@ -74,6 +77,9 @@ export const useLayoutStore = create<LayoutState>()((set) => {
     setScale: (slot, scale) => patchSetting(slot, "scale", scale),
     setVisibleBars: (slot, n) => patchSetting(slot, "visibleBars", n),
     setShowExtremes: (slot, on) => patchSetting(slot, "showExtremes", on),
+    setShowOhlc: (slot, on) => patchSetting(slot, "showOhlc", on),
+    setShowOhlcChange: (slot, on) => patchSetting(slot, "showOhlcChange", on),
+    setExtremeBasis: (slot, basis) => patchSetting(slot, "extremeBasis", basis),
     addIndicator: (slot, spec, style) => patchSettings(slot, (s) => edit.addIndicator(s, spec, style).settings),
     updateIndicator: (slot, id, patch) => patchSettings(slot, (s) => edit.updateIndicator(s, id, patch)),
     removeIndicator: (slot, id) => patchSettings(slot, (s) => edit.removeIndicator(s, id)),

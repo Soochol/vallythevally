@@ -44,7 +44,7 @@ async function seed(scenario: Scenario, period: Period) {
   const layout: Layout = scenario.documents.layout(DEFAULT_LAYOUT_ID);
   const { id, name, arrangement, sync, revision } = layout;
   const chartSettings = {
-    v: 2, style: "candle", scale: "normal", visibleBars: null, showExtremes: false, compare: ["IDX:001"],
+    v: 2, style: "candle", scale: "normal", visibleBars: null, showExtremes: false, showOhlc: true, showOhlcChange: false, extremeBasis: "last", compare: ["IDX:001"],
     indicators: [
       { id: "ma5", spec: { kind: "ma", method: "sma", period: 5 }, panel: "price", visible: true, style: { colors: ["ind-2"], width: 2 } },
       { id: "volume", spec: { kind: "volume", maPeriod: 5 }, panel: "volume-panel", visible: true, style: { colors: ["ind-1"], width: 1 } },

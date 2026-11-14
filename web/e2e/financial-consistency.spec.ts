@@ -26,7 +26,7 @@ const frames = (page: Page) => page.evaluate(() => new Promise<void>((resolve) =
 
 async function seed(scenario: Scenario, financial: FinancialFixture, compare = false, hidden = false) {
   const layout = scenario.documents.layout(DEFAULT_LAYOUT_ID);
-  const settings: ChartSettings = { v: 2, style: "candle", scale: "normal", visibleBars: null, showExtremes: false, compare: compare ? ["IDX:001"] : [], indicators: [
+  const settings: ChartSettings = { v: 2, style: "candle", scale: "normal", visibleBars: null, showExtremes: false, showOhlc: true, showOhlcChange: false, extremeBasis: "last", compare: compare ? ["IDX:001"] : [], indicators: [
     { id: "ma", spec: { kind: "ma", method: "sma", period: 2 }, panel: "price", visible: true, style: { colors: ["ind-1"], width: 1 } },
     { id: "revenue", spec: { kind: "revenue" }, panel: "revenue", visible: !hidden, style: { colors: ["ind-2"], width: 1 } },
   ], panels: [{ id: "revenue", stretch: 0.4 }] };
