@@ -54,7 +54,7 @@ export function DrawingToolbar() {
   return <nav ref={root} data-chart-control data-pinned={pinnedTools.length > 0 || undefined} data-moved={moved || undefined} aria-label="드로잉 도구" className="drawing-toolbar ui-island max-md:hidden">
     <button type="button" className="draw-grip" aria-label="드로잉 도구 막대 옮기기" title="끌어서 막대 옮기기 · 두 번 누르면 기본 자리"
       onPointerDown={(e) => { if (e.button !== 0) return; e.preventDefault(); e.stopPropagation(); e.currentTarget.setPointerCapture(e.pointerId); dock.grab(e.clientX, e.clientY); }}
-      onPointerMove={(e) => dock.drag(e.clientX, e.clientY)} onPointerUp={() => dock.drop()} onPointerCancel={() => dock.cancel()}
+      onPointerMove={(e) => dock.drag(e.clientX, e.clientY)} onPointerUp={() => dock.drop()} onPointerCancel={() => dock.cancel()} onLostPointerCapture={() => dock.cancel()}
       onDoubleClick={() => dock.reset()}
       onKeyDown={(e) => {
         if (e.nativeEvent.isComposing || e.ctrlKey || e.metaKey || e.altKey) return;
@@ -133,7 +133,8 @@ function useLegendClearance(root: RefObject<HTMLElement | null>, moved: boolean)
   }, [root, moved]);
 }
 
-interface DockLayout { area: Size; bar: Size; home: Spot; spot: Spot; margin: number }
+interface DockLayout { area: Size; home: Spot; spot: Spot; free: Size; margin: number }
+interface DockGrab { x: number; y: number; start: Spot; size: Size; at: Spot | null }
 
 const ARROW_STEPS: Record<string, [number, number]> = { ArrowLeft: [-DOCK_STEP, 0], ArrowRight: [DOCK_STEP, 0], ArrowUp: [0, -DOCK_STEP], ArrowDown: [0, DOCK_STEP] };
 
@@ -142,8 +143,7 @@ const saveDockAt = (dockAt: DockAt | null) => useUiStore.getState().setDrawingPr
 function useDockPlacement(root: RefObject<HTMLElement | null>, run: RefObject<HTMLElement | null>, count: number, at: DockAt | null) {
   const [room, setRoom] = useState(Infinity);
   const [held, setHeld] = useState(false);
-  const live = useRef<Spot | null>(null);
-  const grab = useRef<{ x: number; y: number; start: Spot; travelled: boolean } | null>(null);
+  const grab = useRef<DockGrab | null>(null);
   const layout = useRef<DockLayout | null>(null);
   const place = useRef(() => {});
   const moved = at !== null || held;
@@ -157,6 +157,7 @@ function useDockPlacement(root: RefObject<HTMLElement | null>, run: RefObject<HT
       const edge = parseFloat(style.getPropertyValue("--island-gap"));
       const margin = parseFloat(style.getPropertyValue("--dock-home-top"));
       const reserve = parseFloat(style.getPropertyValue("--dock-reserve"));
+      const least = parseFloat(style.getPropertyValue("--dock-min"));
       const pinned = run.current;
       const first = pinned?.firstElementChild;
       const slot = count > 0 && first instanceof HTMLElement ? first.offsetWidth + gap : 0;
@@ -167,26 +168,28 @@ function useDockPlacement(root: RefObject<HTMLElement | null>, run: RefObject<HT
       const resting = center - base / 2;
       const slotsWithin = (max: number) => slot > 0 ? Math.max(1, Math.floor((max - base) / slot)) : 0;
       const homeSlots = slotsWithin(end - resting);
-      const homeLeft = slot > 0 ? Math.max(edge, Math.min(resting, end - base - Math.min(count, homeSlots) * slot)) : center - Math.min(base, area.width - reserve) / 2;
+      const homeLeft = slot > 0 ? Math.max(edge, Math.min(resting, end - base - Math.min(count, homeSlots) * slot)) : center - Math.max(least, Math.min(base, area.width - reserve)) / 2;
       const home = { left: homeLeft, top: margin };
-      if (!moved) {
+      const freeMax = area.width - 2 * edge;
+      const freeSlots = slotsWithin(freeMax);
+      const free = { width: Math.min(freeMax, Math.max(least, base + Math.min(count, freeSlots) * slot)), height: bar.offsetHeight };
+      const dragged = grab.current?.at ? grab.current : null;
+      if (!dragged && !at) {
         if (slot > 0) {
           bar.style.setProperty("--dock-shift", `${homeLeft - center}px`);
           bar.style.setProperty("--dock-max", `${end - homeLeft}px`);
           setRoom(homeSlots);
         }
-        layout.current = { area, bar: { width: bar.offsetWidth, height: bar.offsetHeight }, home, spot: home, margin };
+        layout.current = { area, home, spot: home, free, margin };
         return;
       }
-      const max = area.width - 2 * edge;
-      const slots = slotsWithin(max);
-      const size = { width: Math.min(max, base + Math.min(count, slots) * slot), height: bar.offsetHeight };
-      const spot = clampSpot(live.current ?? (at ? spotOf(at, area, size) : home), area, size, margin);
+      const size = dragged ? dragged.size : free;
+      const spot = clampSpot(dragged?.at ?? spotOf(at!, area, free), area, size, margin);
       bar.style.setProperty("--dock-left", `${spot.left}px`);
       bar.style.setProperty("--dock-top", `${spot.top}px`);
-      bar.style.setProperty("--dock-max", `${max}px`);
-      if (slot > 0) setRoom(slots);
-      layout.current = { area, bar: size, home, spot, margin };
+      bar.style.setProperty("--dock-max", `${dragged ? size.width : freeMax}px`);
+      if (slot > 0 && !dragged) setRoom(freeSlots);
+      layout.current = { area, home, spot, free, margin };
     };
     place.current = fit;
     const observer = new ResizeObserver(fit);
@@ -200,33 +203,32 @@ function useDockPlacement(root: RefObject<HTMLElement | null>, run: RefObject<HT
   }, [root, run, count, at, moved]);
   const settle = (spot: Spot) => {
     const l = layout.current;
-    if (l) saveDockAt(settleSpot(spot, l.home, l.area, l.bar));
+    if (l) saveDockAt(settleSpot(spot, l.home, l.area, l.free));
   };
-  const release = () => { grab.current = null; live.current = null; setHeld(false); };
+  const release = () => { grab.current = null; setHeld(false); };
   const controls = {
     grab(x: number, y: number) {
       const bar = root.current; const stage = bar?.parentElement;
       if (!bar || !stage) return;
       const own = bar.getBoundingClientRect(); const box = stage.getBoundingClientRect();
-      grab.current = { x, y, start: { left: own.left - box.left - stage.clientLeft, top: own.top - box.top - stage.clientTop }, travelled: false };
+      grab.current = { x, y, start: { left: own.left - box.left - stage.clientLeft, top: own.top - box.top - stage.clientTop }, size: { width: own.width, height: own.height }, at: null };
     },
     drag(x: number, y: number) {
       const g = grab.current;
       if (!g) return;
-      if (!g.travelled) { g.travelled = true; setHeld(true); }
-      live.current = { left: g.start.left + x - g.x, top: g.start.top + y - g.y };
+      if (!g.at) setHeld(true);
+      g.at = { left: g.start.left + x - g.x, top: g.start.top + y - g.y };
       place.current();
     },
     drop() {
-      const travelled = grab.current?.travelled;
-      if (travelled) { place.current(); const spot = layout.current?.spot; if (spot) settle(spot); }
+      if (grab.current?.at) { place.current(); const spot = layout.current?.spot; if (spot) settle(spot); }
       release();
     },
     cancel: release,
     nudge(key: string) {
       const step = ARROW_STEPS[key]; const l = layout.current;
       if (!step || !l) return false;
-      settle(clampSpot({ left: l.spot.left + step[0], top: l.spot.top + step[1] }, l.area, l.bar, l.margin));
+      settle(clampSpot({ left: l.spot.left + step[0], top: l.spot.top + step[1] }, l.area, l.free, l.margin));
       return true;
     },
     reset: () => saveDockAt(null),

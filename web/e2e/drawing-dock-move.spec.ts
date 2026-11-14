@@ -231,3 +231,56 @@ test("손잡이에 포커스를 두고 오른쪽 화살표를 세 번 누르면 
   await expect.poll(() => savedDockAt(scenario)).toBeNull();
   await expect(grip(page)).toBeFocused();
 });
+
+test("이동과 놓기가 한꺼번에 와도 막대는 놓은 자리에 남는다", async ({ page, scenario }) => {
+  const home = await open(page);
+  const g = (await grip(page).boundingBox())!;
+  const from = { x: g.x + g.width / 2, y: g.y + g.height / 2 };
+  const to = { x: from.x + 200, y: from.y + 300 };
+  const cdp = await page.context().newCDPSession(page);
+  await page.mouse.move(from.x, from.y);
+  await cdp.send("Input.dispatchMouseEvent", { type: "mousePressed", ...from, button: "left", buttons: 1, clickCount: 1 });
+  await Promise.all([
+    cdp.send("Input.dispatchMouseEvent", { type: "mouseMoved", ...to, button: "left", buttons: 1 }),
+    cdp.send("Input.dispatchMouseEvent", { type: "mouseReleased", ...to, button: "left", buttons: 0, clickCount: 1 }),
+  ]);
+  await expect(dock(page)).toHaveAttribute("data-moved");
+  expectSameSpot(await settledDock(page), { ...home, x: home.x + 200, y: home.y + 300 }, 1);
+  await expectSavedRatios(scenario);
+});
+
+test("고정 도구가 접힌 막대를 끌기 시작해도 막대가 튀지 않고, 5px 옮겨 놓으면 기본 자리에 붙는다", async ({ page, scenario }) => {
+  saveChartShare(scenario, 0.45);
+  const state = scenario.documents.uiState();
+  scenario.documents.saveUiState({ ...state, drawing: { ...scenario.documents.uiPrefs().drawing, pinnedTools: TOOLS.slice(0, 12).map((t) => t.tool) }, revision: state.revision + 1 });
+  const home = await open(page);
+  const g = (await grip(page).boundingBox())!;
+  const from = { x: g.x + g.width / 2, y: g.y + g.height / 2 };
+  await page.mouse.move(from.x, from.y);
+  await page.mouse.down();
+  await page.mouse.move(from.x + 1, from.y + 1);
+  expectSameSpot(await settledDock(page), { ...home, x: home.x + 1, y: home.y + 1 }, 0.5);
+  await page.mouse.move(from.x + 5, from.y + 5, { steps: 4 });
+  await page.mouse.up();
+  expectSameSpot(await settledDock(page), home, 0.5);
+  await expect(dock(page)).not.toHaveAttribute("data-moved");
+  expect(savedDockAt(scenario)).toBeNull();
+});
+
+test("좁은 차트 영역에서도 기본 자리 가까이 놓으면 붙고, 손잡이가 막대를 높이지 않는다", async ({ page, scenario }) => {
+  saveChartShare(scenario, 0.3);
+  await page.setViewportSize({ width: 1024, height: 768 });
+  const home = await open(page);
+  expect(await dock(page).evaluate((bar: HTMLElement) => bar.offsetHeight - bar.querySelector<HTMLElement>(".draw-tool")!.offsetHeight)).toBe(10);
+  expectSameSpot(await dragGrip(page, 10, 0), home, 0.5);
+  await expect(dock(page)).not.toHaveAttribute("data-moved");
+});
+
+test("차트 영역이 막대의 최소 폭보다 좁아도 옮긴 막대는 영역 밖으로 나가지 않는다", async ({ page, scenario }) => {
+  await page.setViewportSize({ width: 800, height: 600 });
+  saveChartShare(scenario, 0.2);
+  const state = scenario.documents.uiState();
+  scenario.documents.saveUiState({ ...state, drawing: { ...scenario.documents.uiPrefs().drawing, dockAt: { x: 1, y: 1 } }, revision: state.revision + 1 });
+  const moved = await open(page);
+  expectInside(moved, await chartArea(page));
+});
