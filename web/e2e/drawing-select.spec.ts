@@ -109,3 +109,15 @@ test("차트 칸 밖의 시간 축을 두 번 눌러도 드로잉을 고르거�
   await expect.poll(() => selectedIds(page)).toEqual([]);
   expect(errors).toEqual([]);
 });
+
+test("추세선을 놓는 도중 시간 축을 두 번 눌러도 놓던 점을 버리지 않는다", async ({ page, scenario }) => {
+  await open(page);
+  await pickTool(page, "선", "추세선");
+  const a = await chartPoint(page, 0.3, 0.4);
+  await page.mouse.click(a.x, a.y);
+  const box = (await chartOf(cell(page)).boundingBox())!;
+  await page.mouse.dblclick(box.x + box.width * 0.5, box.y + box.height - 8);
+  const b = await chartPoint(page, 0.6, 0.5);
+  await page.mouse.click(b.x, b.y);
+  await expect.poll(async () => (await drawings(scenario)).map((d) => d.tool)).toEqual(["trendline"]);
+});
