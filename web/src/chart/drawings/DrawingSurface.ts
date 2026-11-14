@@ -165,7 +165,7 @@ export class DrawingSurface implements ChartExtension {
       if (elapsed >= this.transient.fadeMs) this.transient = null;
       else transient = { shapes: this.transient.shapes, opacity: Math.max(0, 1 - Math.max(0, elapsed) / Math.max(1, this.transient.fadeMs)) };
     }
-    this.mirror.dataset.drawings = JSON.stringify(items.map((i) => ({ id: i.id, tool: i.drawing.tool, selected: session.selected.includes(i.id), points: i.drawing.points.map(c.ctx.toScreen), handles: i.handles })));
+    this.mirror.dataset.drawings = JSON.stringify(items.map((i) => ({ id: i.id, tool: i.drawing.tool, selected: session.selected.includes(i.id), points: i.drawing.points.map(c.ctx.toScreen), handles: i.handles, texts: i.shapes.flatMap((s) => (s.kind === "text" ? [s.text] : [])) })));
     return { items, preview, transient, box: this.state.kind === "box" ? this.state : null, pane: f.pane, ctx: c.ctx, editable };
   }
 

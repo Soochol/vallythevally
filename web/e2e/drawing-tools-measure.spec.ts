@@ -1,4 +1,6 @@
 import type { Page } from "@playwright/test";
+import { isMinutePeriod } from "../src/lib/symbol";
+import { isVenue } from "../src/lib/venue";
 import { cell, chartOf, expect, test, type Scenario } from "./harness";
 import { chartPoint, drawings, mirror, open, pickTool, settledMirror } from "./drawing-probe";
 
@@ -197,6 +199,7 @@ test("날짜·가격 범위, 기준봉 VWAP, 구간 거래량 프로파일을 �
     return { x: r.x, y: r.y, width: r.width, height: r.height };
   });
   const shot = () => page.screenshot({ clip: pane, mask: [page.getByRole("navigation", { name: "드로잉 도구" }), cell(page).locator(".chart-legend")] });
+  await expect.poll(() => textsOf(page, profile.id)).toEqual([expect.stringMatching(/^\d+분봉 기준$/)]);
   const painted = await shot();
   for (const label of ["날짜·가격 범위", "기준봉 VWAP", "구간 거래량 프로파일"]) {
     await list.getByRole("button", { name: `${label} 숨기기`, exact: true }).click();
@@ -217,5 +220,78 @@ test("날짜·가격 범위, 기준봉 VWAP, 구간 거래량 프로파일을 �
     return p === null ? Infinity : Math.max(Math.abs(p.x - was.x), Math.abs(p.y - was.y));
   }));
   await expect.poll(async () => Math.max(...(await drift()))).toBeLessThan(1);
+  expect(errors).toEqual([]);
+});
+
+const FINE_SYMBOL = "005930";
+const isFineBars = (url: URL) => url.pathname === "/api/bars" && url.searchParams.get("symbol") === FINE_SYMBOL && isMinutePeriod(url.searchParams.get("period") ?? "");
+
+function fineQuery(url: URL) {
+  const period = url.searchParams.get("period") ?? "";
+  const venue = url.searchParams.get("venue");
+  if (!isMinutePeriod(period) || (venue !== null && !isVenue(venue))) throw new Error(`분봉 조회가 아니다: ${url.search}`);
+  return { symbol: FINE_SYMBOL, period, venue, limit: Number(url.searchParams.get("limit") ?? 500) };
+}
+const fineRequests = (scenario: Scenario) => scenario.requests.map((r) => new URL(r.url())).filter(isFineBars);
+const minuteBasis = (period: string) => `${period.slice(0, -1)}분봉 기준`;
+
+const textsOf = async (page: Page, id: string) => (await mirror(page)).find((m) => m.id === id)?.texts;
+
+async function placeProfile(page: Page, scenario: Scenario) {
+  await page.goto(`/?symbol=${FINE_SYMBOL}`);
+  await expect(chartOf(cell(page))).toHaveAttribute("data-bar-count", /^[1-9]\d*$/);
+  expect(fineRequests(scenario)).toEqual([]);
+  await pickTool(page, "측정", "구간 거래량 프로파일");
+  await dragBetween(page, [0.55, 0.5], [0.85, 0.5]);
+  await expect.poll(async () => scenario.documents.drawings(FINE_SYMBOL).length).toBe(1);
+  return scenario.documents.drawings(FINE_SYMBOL)[0]!;
+}
+
+test("일봉 차트의 구간 거래량 프로파일은 분봉을 받아 계산하고, 받는 동안과 받은 뒤의 계산 기준을 틀 안에 적는다", async ({ page, scenario }) => {
+  const errors: string[] = [];
+  page.on("pageerror", (e) => errors.push(e.message));
+  const latest = scenario.hold((url) => isFineBars(url) && !url.searchParams.has("before"));
+  const profile = await placeProfile(page, scenario);
+  const asked = fineQuery(new URL((await latest.received).url()));
+  await expect.poll(() => textsOf(page, profile.id)).toEqual(["일봉 기준 · 분봉 받는 중"]);
+  latest.reply({ body: scenario.market.page(asked) });
+  await expect.poll(() => textsOf(page, profile.id)).toEqual([minuteBasis(asked.period)]);
+
+  const placed = (await mirror(page)).find((m) => m.id === profile.id)!;
+  expect(placed.selected).toBe(true);
+  const start = placed.handles[0]!;
+  const r = (await chartOf(cell(page)).boundingBox())!;
+  const sent = fineRequests(scenario).length;
+  await page.mouse.move(r.x + start.x, r.y + start.y);
+  await page.mouse.down();
+  await page.mouse.move(r.x + start.x - 150, r.y + start.y, { steps: 15 });
+  await expect.poll(async () => (await mirror(page)).find((m) => m.id === profile.id)!.handles[0]!.x).toBeLessThan(start.x - 100);
+  await page.waitForTimeout(500);
+  expect(fineRequests(scenario)).toHaveLength(sent);
+  await page.mouse.up();
+  await expect.poll(async () => scenario.documents.drawings(FINE_SYMBOL)[0]!.points[0]!.t).toBeLessThan(profile.points[0]!.t);
+  await expect.poll(() => fineRequests(scenario).length).toBeGreaterThan(sent);
+  await expect.poll(() => textsOf(page, profile.id)).toEqual([expect.stringMatching(/^\d+분봉 기준$/)]);
+  const pages = fineRequests(scenario).map((u) => `${u.searchParams.get("period")} ${u.searchParams.get("before")}`);
+  expect(new Set(pages).size).toBe(pages.length);
+
+  await page.getByRole("button", { name: "드로잉 세부 설정" }).click();
+  const settings = page.getByRole("dialog", { name: "구간 거래량 프로파일 세부 설정" });
+  await settings.getByLabel("계산 기준 라벨", { exact: true }).uncheck();
+  await settings.getByRole("button", { name: "확인", exact: true }).click();
+  await expect.poll(async () => scenario.documents.drawings(FINE_SYMBOL)[0]!.style).toMatchObject({ basisLabel: false });
+  await expect.poll(() => textsOf(page, profile.id)).toEqual([]);
+  expect(errors).toEqual([]);
+});
+
+test("분봉을 받지 못하면 구간 거래량 프로파일을 일봉으로 계산해 그대로 보이고 그 사실을 적는다", async ({ page, scenario }) => {
+  const errors: string[] = [];
+  page.on("pageerror", (e) => errors.push(e.message));
+  scenario.reply(isFineBars, { status: 503, body: { error: { code: "kiwoom_unavailable", message: "조회가 응답하지 않습니다", reason: null, retryAt: null, manualActionRequired: false } } });
+  const profile = await placeProfile(page, scenario);
+  await expect.poll(() => fineRequests(scenario).length).toBeGreaterThan(0);
+  await expect.poll(() => textsOf(page, profile.id)).toEqual(["일봉 기준 · 분봉을 받지 못함"]);
+  const shown = (await mirror(page)).find((m) => m.id === profile.id)!;
+  expect(shown.handles).toHaveLength(2);
   expect(errors).toEqual([]);
 });

@@ -2,7 +2,7 @@ import type { Page } from "@playwright/test";
 import { cell, chartOf, expect, type Scenario } from "./harness";
 import type { Drawing } from "../src/api/generated/Drawing";
 
-export interface Mirror { id: string; tool: string; selected: boolean; points: ({ x: number; y: number } | null)[]; handles: { x: number; y: number }[] }
+export interface Mirror { id: string; tool: string; selected: boolean; points: ({ x: number; y: number } | null)[]; handles: { x: number; y: number }[]; texts: string[] }
 
 export async function mirror(page: Page): Promise<Mirror[]> {
   const json = await chartOf(cell(page)).locator(".drawing-mirror").getAttribute("data-drawings");
