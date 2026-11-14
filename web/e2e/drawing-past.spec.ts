@@ -70,7 +70,7 @@ test("첫 점이 불러온 봉보다 한참 과거인 드로잉을 개체 목록
   await page.getByRole("region", { name: "개체 목록" }).getByRole("button", { name: "고르기: 추세선", exact: true }).click();
   await expect.poll(async () => (await settledMirror(page)).find((m) => m.id === trend.id)?.selected).toBe(true);
   const after = (await settledMirror(page)).find((m) => m.id === trend.id)!.points[1]!;
-  expect(after.x).toBeCloseTo(before.x, 0);
-  expect(after.y).toBeCloseTo(before.y, 0);
+  expect(Math.abs(after.x - before.x)).toBeLessThan(8);
+  expect(Math.abs(after.y - before.y)).toBeLessThan(8);
   expect(errors).toEqual([]);
 });

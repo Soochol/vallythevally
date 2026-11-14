@@ -297,11 +297,11 @@ export class DrawingSurface implements ChartExtension {
   reveal(id: string) {
     const symbol = this.host.view()?.symbol; if (!symbol) return;
     const d = this.sync.drawings(symbol).find((item) => item.id === id); if (!d || d.hidden) return;
-    const ctx = this.context().ctx; const point = d.points[0]; const screen = point ? ctx.toScreen(point) : null;
-    if (screen && (screen.x < 0 || screen.x > ctx.paneWidth)) {
-      const f = this.projection(); const logical = point ? xToLogical(f.axes.time, screen.x) : null;
+    const f = this.projection(); const ctx = this.context(f).ctx;
+    const onAxis = d.points.flatMap((p) => { const screen = ctx.toScreen(p); const logical = screen ? xToLogical(f.axes.time, screen.x) : null; return screen && logical !== null && logical >= 0 ? [{ x: screen.x, logical }] : []; })[0];
+    if (onAxis && (onAxis.x < 0 || onAxis.x > ctx.paneWidth)) {
       const range = this.host.chart.timeScale().getVisibleLogicalRange();
-      if (logical !== null && range) { const half = (range.to - range.from) / 2; this.host.chart.timeScale().setVisibleLogicalRange({ from: logical - half, to: logical + half }); }
+      if (range) { const half = (range.to - range.from) / 2; this.host.chart.timeScale().setVisibleLogicalRange({ from: onAxis.logical - half, to: onAxis.logical + half }); }
     }
     this.focus();
   }
