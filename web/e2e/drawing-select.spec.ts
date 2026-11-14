@@ -40,6 +40,7 @@ test("선 위에 놓인 글자 상자를 누르면 가장 위에 그린 글자�
   const lineY = line.points[0]!.y;
   const x = (line.points[0]!.x + line.points[1]!.x) / 2;
   await writeNote(page, await onChart(page, x, lineY - 6), "선 위 메모");
+  await expect.poll(async () => (await drawings(scenario)).map((d) => d.tool).sort()).toEqual(["text", "trendline"]);
   const note = (await drawings(scenario)).find((d) => d.tool === "text")!;
   await deselect(page);
 
@@ -61,6 +62,7 @@ test("글자와 말풍선은 한 번 누르면 고르고, 두 번 누르면 글�
   await expect(editor).toBeFocused();
   await editor.fill("고를 말풍선"); await editor.press("Enter");
   await expect(editor).toBeHidden();
+  await expect.poll(async () => (await drawings(scenario)).map((d) => d.tool).sort()).toEqual(["callout", "text"]);
   const saved = await drawings(scenario);
   const note = saved.find((d) => d.tool === "text")!;
   const callout = saved.find((d) => d.tool === "callout")!;
