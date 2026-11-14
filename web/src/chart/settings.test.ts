@@ -38,6 +38,7 @@ const rsi: ChartSettings = {
   showOhlc: false,
   showOhlcChange: true,
   extremeBasis: "extreme",
+  showDaySeparators: true,
 };
 
 test("맞는 v2 모양은 그대로 읽는다", () => {
@@ -55,6 +56,12 @@ test("봉 값 줄·봉 값 등락률·최고·최저 등락률 기준이 없는 
   const v1 = { v: 1, style: "bar", scale: "log", indicators: [], compare: [], panels: [] };
   expect(parseChartSettings(v1)).toMatchObject({ showOhlc: true, showOhlcChange: false, extremeBasis: "last" });
   expect(parseChartSettings({ ...v1, showOhlc: false, extremeBasis: "extreme" })).toMatchObject({ showOhlc: false, showOhlcChange: false, extremeBasis: "extreme" });
+});
+
+test("날짜 구분선 켜짐이 없는 저장값은 끔으로 읽고 나머지는 그대로 둔다", () => {
+  const { showDaySeparators: _days, ...older } = rsi;
+  expect(parseChartSettings(older)).toEqual({ ...rsi, showDaySeparators: false });
+  expect(parseChartSettings({ v: 1, style: "bar", scale: "log", indicators: [], compare: [], panels: [] })).toMatchObject({ showDaySeparators: false });
 });
 
 test("자동 봉 수와 경계의 봉 수는 그대로 읽는다", () => {
@@ -110,6 +117,7 @@ test.each([
   ["봉 값 줄 켜짐이 문자열", { ...rsi, showOhlc: "false" }],
   ["봉 값 등락률 켜짐이 숫자", { ...rsi, showOhlcChange: 1 }],
   ["모르는 최고·최저 등락률 기준", { ...rsi, extremeBasis: "high" }],
+  ["날짜 구분선 켜짐이 문자열", { ...rsi, showDaySeparators: "true" }],
   ["최고·최저 등락률 기준이 null", { ...rsi, extremeBasis: null }],
   ["v1인데 봉 값 줄 켜짐이 문자열", { v: 1, style: "candle", scale: "normal", indicators: [], compare: [], panels: [], showOhlc: "true" }],
   ["v1인데 봉 수가 틀림", { v: 1, style: "candle", scale: "normal", indicators: [], compare: [], panels: [], visibleBars: 0 }],
