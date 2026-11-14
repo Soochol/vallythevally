@@ -4,6 +4,7 @@ import { crossline } from "../crossline";
 import { extline } from "../extline";
 import { hline } from "../hline";
 import { hray } from "../hray";
+import { pitchfork } from "../pitchfork";
 import { ray } from "../ray";
 import { regression } from "../regression";
 import { trendline } from "../trendline";
@@ -19,4 +20,5 @@ export const LINE_TOOLS: readonly Tool[] = [
   crossline,
   channel,
   regression,
+  pitchfork,
 ];
