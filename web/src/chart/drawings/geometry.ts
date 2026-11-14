@@ -1,6 +1,6 @@
 import type { UnixSeconds } from "../../api/generated/UnixSeconds";
 import type { PriceAxis } from "./anchor";
-import type { Shape } from "./toolSpec";
+import type { PointRole, Shape } from "./toolSpec";
 import { approxTextMeasure, textBounds, textLayout, textLocalPoint, type TextMeasure } from "./textLayout";
 import type { DrawingId, DrawingPoint, Extend, ScreenPoint } from "./types";
 export { approxTextMeasure, type TextMeasure } from "./textLayout";
@@ -291,10 +291,13 @@ export interface NudgeContext {
   price: PriceAxis;
 }
 
-export function nudge(points: readonly DrawingPoint[], key: NudgeKey, ctx: NudgeContext): DrawingPoint[] | null {
+const AXIS_OF: Record<NudgeKey, PointRole["uses"]> = { ArrowLeft: "time", ArrowRight: "time", ArrowUp: "price", ArrowDown: "price" };
+
+export function nudge(points: readonly DrawingPoint[], key: NudgeKey, ctx: NudgeContext, roles: readonly PointRole[] = []): DrawingPoint[] | null {
   const moved: DrawingPoint[] = [];
-  for (const p of points) {
-    const next = nudgePoint(p, key, ctx);
+  for (const [i, p] of points.entries()) {
+    const uses = roles[i]?.uses ?? "both";
+    const next = uses === "both" || uses === AXIS_OF[key] ? nudgePoint(p, key, ctx) : p;
     if (next === null) return null;
     moved.push(next);
   }

@@ -347,8 +347,8 @@ export class DrawingSurface implements ChartExtension {
     else if (["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(e.code) && session.selected.length) {
       const key = e.code as NudgeKey; const f = this.projection(); const ctx = this.context(f).ctx;
       this.sync.commit(this.slot, this.selected().filter((d) => !d.locked && !prefs.lockAll).flatMap((before) => {
-        const points = nudge(before.points, key, { shiftBars: ctx.shiftBars, price: f.axes.price });
-        return points ? [{ kind: "update" as const, before, after: { ...before, points } }] : [];
+        const points = nudge(before.points, key, { shiftBars: ctx.shiftBars, price: f.axes.price }, toolOf(before.tool)?.pointRoles);
+        return points && points.some((p, i) => p !== before.points[i]) ? [{ kind: "update" as const, before, after: { ...before, points } }] : [];
       }));
     } else handled = false;
     if (handled) { e.preventDefault(); e.stopImmediatePropagation(); this.refresh(); }
