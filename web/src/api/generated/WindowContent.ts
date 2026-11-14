@@ -3,23 +3,12 @@ import type { Period } from "./Period";
 import type { SymbolCode } from "./SymbolCode";
 import type { Venue } from "./Venue";
 
-/**
- * 레이아웃의 칸 하나. 칸 = (종목, 거래소, 봉 주기, 차트 설정).
- */
-export type Cell = { 
-/**
- * 0부터. 칸 수보다 작다.
- */
-slot: 0 | 1 | 2 | 3, symbol: SymbolCode, 
+export type WindowContent = { "kind": "chart", symbol: SymbolCode, 
 /**
  * 지수면 null, 주식이면 언제나 값이 있다(ADR 0007).
  */
 venue: Venue | null, period: Period, 
 /**
- * 종목 연동(#7).
- */
-symbolLink: boolean, 
-/**
  * 프런트엔드가 모양을 정한다. 64KB 이하. 서버는 모르는 키까지 그대로 저장한다.
  */
-chartSettings: unknown, };
+chartSettings: unknown, } | { "kind": "watchlist" } | { "kind": "screener" } | { "kind": "objects" } | { "kind": "indicators" };
