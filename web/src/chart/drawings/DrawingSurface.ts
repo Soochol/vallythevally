@@ -67,7 +67,9 @@ export class DrawingSurface implements ChartExtension {
     on("contextmenu", (e) => this.contextMenu(e));
     on("dblclick", (e) => {
       if (this.state.kind === "placing") { e.preventDefault(); e.stopImmediatePropagation(); this.input({ kind: "finish" }); return; }
-      const frame = this.frame(); const hit = frameHit(frame, this.local(e));
+      const frame = this.frame(); const at = this.local(e);
+      if (!this.inPane(frame, at)) return;
+      const hit = frameHit(frame, at);
       if (hit.kind === "empty") return;
       e.preventDefault(); e.stopImmediatePropagation();
       const drawing = frame.items.find((item) => item.id === hit.id)?.drawing;
@@ -163,12 +165,13 @@ export class DrawingSurface implements ChartExtension {
     return { items, preview, transient, box: this.state.kind === "box" ? this.state : null, pane: f.pane, ctx: c.ctx, editable };
   }
 
+  private inPane(frame: RenderFrame, at: ScreenPoint) { return at.x >= 0 && at.y >= 0 && at.x < frame.pane.width && at.y < frame.pane.height; }
   private local(e: MouseEvent): ScreenPoint { const r = this.host.el.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; }
   private onPointer(e: PointerEvent, kind: "down" | "move" | "up") {
     if (!matchMedia(DESKTOP_QUERY).matches || (kind === "down" && e.button !== 0) || useDrawingSession.getState().editor) return;
     if (this.pointer !== null && this.pointer !== e.pointerId) return;
     const at = this.local(e); const frame = this.frame();
-    if (kind === "down" && (at.x < 0 || at.y < 0 || at.x >= frame.pane.width || at.y >= frame.pane.height)) return;
+    if (kind === "down" && !this.inPane(frame, at)) return;
     if (kind === "down") { this.focus(); useDrawingSession.setState({ popup: null }); }
     const hit = frameHit(frame, at);
     const wasCaptured = captures(this.state);
