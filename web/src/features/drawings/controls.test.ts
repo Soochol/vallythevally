@@ -3,7 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { expect, test } from "vitest";
 import { DrawingDetails } from "./DrawingDetails";
 import { DrawingToolbar } from "./DrawingToolbar";
-import { toolsByGroup } from "../../chart/drawings/tools";
+import { toolOf, toolsByGroup } from "../../chart/drawings/tools";
 import { hlineDefaults } from "../../chart/drawings/tools/hline";
 import type { Tool } from "../../chart/drawings/toolSpec";
 import type { DrawingBody } from "../../chart/drawings/types";
@@ -30,6 +30,17 @@ test("작은 막대의 팝오버는 모달 없이 기존 글자·좌표·주기�
   const html = renderToStaticMarkup(createElement(DrawingDetails, { slot: 0, editor: { kind: "settings", original: drawing, draft: drawing }, anchor: { current: null } }));
   expect(html).toContain("data-chart-control");
   expect(html).not.toContain('aria-modal="true"');
-  for (const label of ["수평선 세부 설정", "선 색 선택", "선 굵기", "선 모양", "가격 라벨", "글자 모양", "가로 정렬", "세로 정렬", "점 1 가격", "모든 봉 주기", "기본 스타일로"]) expect(html).toContain(label);
+  for (const label of ["수평선 세부 설정", "선 색 선택", "선 굵기", "선 모양", "가격 라벨", "글자 모양", "가로 정렬", "세로 정렬", "모든 봉 주기", "기본 스타일로"]) expect(html).toContain(label);
   expect(html).not.toContain('type="datetime-local"');
+});
+
+test("좌표 입력 이름은 도구가 정한 점 이름을 쓴다", () => {
+  const xabcd = toolOf("xabcd")!;
+  const pattern: DrawingBody = { ...drawing, id: "pattern", tool: "xabcd", style: JSON.parse(JSON.stringify(xabcd.defaultStyle()).replace(/"\$[a-z-]+"/g, '"#123456"')), points: [1, 2, 3, 4, 5].map((t) => ({ t, price: 100 + t })) };
+  const html = renderToStaticMarkup(createElement(DrawingDetails, { slot: 0, editor: { kind: "settings", original: pattern, draft: pattern }, anchor: { current: null } }));
+  expect(html).toContain('aria-label="점 A 가격"');
+  expect(html).toContain('aria-label="점 X 시각"');
+  expect(html).not.toContain('aria-label="점 2 가격"');
+  const line = renderToStaticMarkup(createElement(DrawingDetails, { slot: 0, editor: { kind: "settings", original: drawing, draft: drawing }, anchor: { current: null } }));
+  expect(line).toContain('aria-label="가격"');
 });
