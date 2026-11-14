@@ -42,6 +42,8 @@
 .ui-state { display:flex; flex-direction:column; align-items:flex-start; gap:var(--size-8); padding:var(--size-16); color:var(--text-2); }
 .ui-skeleton>span:not(.sr-only) { display:block; width:100%; min-width:var(--size-120); height:var(--size-12); border-radius:var(--r-s); background:var(--raised); }
 .ui-skeleton>span:nth-child(2) { width:75%; }
+.chart-loading-label { visibility:hidden; animation:chart-loading-label-in 0s linear .4s forwards; }
+@keyframes chart-loading-label-in { to { visibility:visible; } }
 @media (width < 48rem) { .ui-popover.ui-toast { bottom:var(--size-72); left:var(--size-12); right:var(--size-12); } }
 
 .desktop-topbar { display:flex; min-width:0; align-items:center; gap:var(--size-4); padding:0 var(--size-12); overflow-x:auto; overflow-y:hidden; scrollbar-width:none; white-space:nowrap; }
