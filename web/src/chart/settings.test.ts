@@ -35,6 +35,9 @@ const rsi: ChartSettings = {
   panels: [{ id: "p1", stretch: 0.3 }],
   visibleBars: 240,
   showExtremes: true,
+  showOhlc: false,
+  showOhlcChange: true,
+  extremeBasis: "extreme",
 };
 
 test("맞는 v2 모양은 그대로 읽는다", () => {
@@ -44,6 +47,14 @@ test("맞는 v2 모양은 그대로 읽는다", () => {
 test("보이는 봉 수와 화면 내 최고·최저가 없는 저장값은 자동·끔으로 읽는다", () => {
   const { visibleBars: _bars, showExtremes: _extremes, ...older } = rsi;
   expect(parseChartSettings(older)).toEqual({ ...rsi, visibleBars: null, showExtremes: false });
+});
+
+test("봉 값 줄·봉 값 등락률·최고·최저 등락률 기준이 없는 저장값은 보임·끔·현재가 대비로 읽고 나머지는 그대로 둔다", () => {
+  const { showOhlc: _ohlc, showOhlcChange: _change, extremeBasis: _basis, ...older } = rsi;
+  expect(parseChartSettings(older)).toEqual({ ...rsi, showOhlc: true, showOhlcChange: false, extremeBasis: "last" });
+  const v1 = { v: 1, style: "bar", scale: "log", indicators: [], compare: [], panels: [] };
+  expect(parseChartSettings(v1)).toMatchObject({ showOhlc: true, showOhlcChange: false, extremeBasis: "last" });
+  expect(parseChartSettings({ ...v1, showOhlc: false, extremeBasis: "extreme" })).toMatchObject({ showOhlc: false, showOhlcChange: false, extremeBasis: "extreme" });
 });
 
 test("자동 봉 수와 경계의 봉 수는 그대로 읽는다", () => {
@@ -96,6 +107,11 @@ test.each([
   ["소수 봉 수", { ...rsi, visibleBars: 120.5 }],
   ["문자열 봉 수", { ...rsi, visibleBars: "120" }],
   ["켜짐이 문자열", { ...rsi, showExtremes: "true" }],
+  ["봉 값 줄 켜짐이 문자열", { ...rsi, showOhlc: "false" }],
+  ["봉 값 등락률 켜짐이 숫자", { ...rsi, showOhlcChange: 1 }],
+  ["모르는 최고·최저 등락률 기준", { ...rsi, extremeBasis: "high" }],
+  ["최고·최저 등락률 기준이 null", { ...rsi, extremeBasis: null }],
+  ["v1인데 봉 값 줄 켜짐이 문자열", { v: 1, style: "candle", scale: "normal", indicators: [], compare: [], panels: [], showOhlc: "true" }],
   ["v1인데 봉 수가 틀림", { v: 1, style: "candle", scale: "normal", indicators: [], compare: [], panels: [], visibleBars: 0 }],
   ["v1인데 지표가 있음", { v: 1, style: "candle", scale: "normal", indicators: [rsi.indicators[0]], compare: [], panels: [] }],
   ["모르는 지표 종류", ind({ spec: { kind: "wma", period: 5 } })],

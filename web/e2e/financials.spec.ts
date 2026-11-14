@@ -15,7 +15,7 @@ const data = (financial: FinancialFixture, symbol = "005930", period: "Q" | "Y" 
 
 async function seed(scenario: Scenario, period: "Q" | "Y" = "Y") {
   const layout = scenario.documents.layout(DEFAULT_LAYOUT_ID);
-  const chartSettings: ChartSettings = { v: 2, style: "candle", scale: "normal", visibleBars: null, showExtremes: false, compare: [], indicators: [
+  const chartSettings: ChartSettings = { v: 2, style: "candle", scale: "normal", visibleBars: null, showExtremes: false, showOhlc: true, showOhlcChange: false, extremeBasis: "last", compare: [], indicators: [
     { id: "ma", spec: { kind: "ma", method: "sma", period: 5 }, panel: "price", visible: true, style: { colors: ["ind-1"], width: 1 } },
     ...METRICS.map((kind) => ({ id: kind, spec: { kind }, panel: kind, visible: true, style: { colors: ["ind-2"], width: 1 } } satisfies ChartSettings["indicators"][number])),
   ], panels: METRICS.map((id) => ({ id, stretch: 0.3 })) };

@@ -5,6 +5,7 @@ import { isIndicatorColor, type IndicatorColor, KINDS, placementOf } from "./ind
 export type ChartStyle = "candle" | "bar" | "line" | "area";
 export type PriceScale = "normal" | "log" | "percent";
 export type LineWidth = 1 | 2 | 3 | 4 | 5;
+export type ExtremeBasis = "last" | "extreme";
 
 export interface IndicatorConfig {
   id: string;
@@ -31,6 +32,9 @@ export interface ChartSettings {
   panels: Panel[];
   visibleBars: number | null;
   showExtremes: boolean;
+  showOhlc: boolean;
+  showOhlcChange: boolean;
+  extremeBasis: ExtremeBasis;
 }
 
 export const VISIBLE_BARS_MIN = 10;
@@ -66,6 +70,9 @@ export const DEFAULT_CHART_SETTINGS: ChartSettings = {
   panels: [{ id: DEFAULT_VOLUME_PANEL, stretch: DEFAULT_PANEL_STRETCH }],
   visibleBars: null,
   showExtremes: false,
+  showOhlc: true,
+  showOhlcChange: false,
+  extremeBasis: "last",
 };
 
 export const CHART_STYLE_LABEL: Record<ChartStyle, string> = {
@@ -78,6 +85,7 @@ export const CHART_STYLE_LABEL: Record<ChartStyle, string> = {
 const CHART_STYLES = ["candle", "bar", "line", "area"] as const satisfies readonly ChartStyle[];
 const PRICE_SCALES = ["normal", "log", "percent"] as const satisfies readonly PriceScale[];
 const WIDTHS = [1, 2, 3, 4, 5] as const satisfies readonly LineWidth[];
+const EXTREME_BASES = ["last", "extreme"] as const satisfies readonly ExtremeBasis[];
 
 const isOneOf = <T extends string | number>(xs: readonly T[], x: unknown): x is T => (xs as readonly unknown[]).includes(x);
 const isEmptyArray = (x: unknown): x is never[] => Array.isArray(x) && x.length === 0;
@@ -94,20 +102,29 @@ export function parseChartSettings(raw: unknown): ChartSettings {
 
 function readChartSettings(raw: unknown): ChartSettings | null {
   if (!isRecord(raw)) return null;
-  const { v, style, scale, indicators, compare, panels, visibleBars = DEFAULT_CHART_SETTINGS.visibleBars, showExtremes = DEFAULT_CHART_SETTINGS.showExtremes } = raw;
+  const {
+    v, style, scale, indicators, compare, panels,
+    visibleBars = DEFAULT_CHART_SETTINGS.visibleBars,
+    showExtremes = DEFAULT_CHART_SETTINGS.showExtremes,
+    showOhlc = DEFAULT_CHART_SETTINGS.showOhlc,
+    showOhlcChange = DEFAULT_CHART_SETTINGS.showOhlcChange,
+    extremeBasis = DEFAULT_CHART_SETTINGS.extremeBasis,
+  } = raw;
   if (!isOneOf(CHART_STYLES, style) || !isOneOf(PRICE_SCALES, scale)) return null;
   if (!isCompareList(compare)) return null;
   if (!(visibleBars === null || isVisibleBars(visibleBars)) || typeof showExtremes !== "boolean") return null;
-  if (v === 1) return migrateV1({ style, scale, compare, visibleBars, showExtremes, indicators, panels });
+  if (typeof showOhlc !== "boolean" || typeof showOhlcChange !== "boolean" || !isOneOf(EXTREME_BASES, extremeBasis)) return null;
+  const display = { showExtremes, showOhlc, showOhlcChange, extremeBasis };
+  if (v === 1) return migrateV1({ style, scale, compare, visibleBars, ...display, indicators, panels });
   if (v !== 2 || !Array.isArray(indicators) || !Array.isArray(panels)) return null;
   const readPanels = panels.map(readPanel);
   const readIndicators = indicators.map(readIndicator);
   if (readPanels.includes(null) || readIndicators.includes(null)) return null;
-  const settings: ChartSettings = { v: 2, style, scale, compare, panels: readPanels as Panel[], indicators: readIndicators as IndicatorConfig[], visibleBars, showExtremes };
+  const settings: ChartSettings = { v: 2, style, scale, compare, panels: readPanels as Panel[], indicators: readIndicators as IndicatorConfig[], visibleBars, ...display };
   return panelsMatch(settings) ? settings : null;
 }
 
-type V1Kept = Pick<ChartSettings, "style" | "scale" | "compare" | "visibleBars" | "showExtremes">;
+type V1Kept = Pick<ChartSettings, "style" | "scale" | "compare" | "visibleBars" | "showExtremes" | "showOhlc" | "showOhlcChange" | "extremeBasis">;
 
 function migrateV1({ indicators, panels, ...kept }: V1Kept & { indicators: unknown; panels: unknown }): ChartSettings | null {
   if (!isEmptyArray(indicators) || !isEmptyArray(panels)) return null;
