@@ -213,3 +213,33 @@ test("칸을 다시 열면 이전 응답을 버리고 새 종목으로 받는다
   expect(f.fetched.at(-1)).toEqual({ symbol: "000660", venue: "krx", period: "1m" });
   expect(f.subscribed()).toEqual(["000660/krx/1m"]);
 });
+
+test(`받지 못한 과거 페이지는 ${MAX_FINE_PAGES}페이지 한도에 세지 않는다`, async () => {
+  let older = 0;
+  let failAt = MAX_FINE_PAGES;
+  const f = fixture((q) => {
+    if (q.before !== undefined && ++older === failAt) throw new ApiRequestError("network", "x");
+    return minutePage(q);
+  });
+  const far = span(kst(2026, 11, 9));
+  f.store.demand([far]);
+  await f.settle();
+  expect(f.store.read(far)).toEqual({ kind: "failed" });
+  f.store.demand([span(kst(2026, 11, 9, 9))]);
+  await f.settle();
+  expect(f.fetched).toHaveLength(2 + MAX_FINE_PAGES);
+  expect(f.store.read(far)).toEqual({ kind: "none", reason: "overLimit" });
+
+  older = 0;
+  failAt = 1;
+  const g = fixture((q) => {
+    if (q.before !== undefined && ++older === failAt) throw new ApiRequestError("network", "x");
+    return minutePage(q);
+  });
+  g.store.demand([span(NOW - 200 * MIN)]);
+  await g.settle();
+  const reachedByTwentyPages = span(NOW - 210 * MIN);
+  g.store.demand([reachedByTwentyPages]);
+  await g.settle();
+  expect(g.store.read(reachedByTwentyPages).kind).toBe("ready");
+});

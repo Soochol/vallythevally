@@ -58,6 +58,7 @@ class FineSeries {
         prepended: (h) => {
           this.history = h;
           this.older = "idle";
+          this.pages++;
           changed(this);
         },
         failed: () => {
@@ -98,7 +99,6 @@ class FineSeries {
 
   pull(): void {
     if (this.latest !== "ready" || this.older !== "idle" || this.reachedFrom() || this.pages >= MAX_FINE_PAGES) return;
-    this.pages++;
     this.older = "loading";
     this.feed.retryOlder();
   }
