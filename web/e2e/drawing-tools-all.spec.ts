@@ -1,6 +1,6 @@
 import type { Page } from "@playwright/test";
-import { cell, chartOf, expect, test, type Scenario } from "./harness";
-import { chartPoint, drawings, mirror, open, pickTool } from "./drawing-probe";
+import { cell, chartOf, expect, SEARCH_BUTTON_TITLE, test, type Scenario } from "./harness";
+import { bodyAlong, chartPoint, drawings, mirror, open, pickTool } from "./drawing-probe";
 import { TOOLS, toolsByGroup } from "../src/chart/drawings/tools";
 import type { Tool } from "../src/chart/drawings/toolSpec";
 
@@ -75,6 +75,10 @@ async function placeAll(page: Page, scenario: Scenario) {
 
 const tools = () => TOOLS.map((t) => t.tool).sort();
 
+test("등록된 도구는 36개다", () => {
+  expect(TOOLS).toHaveLength(36);
+});
+
 test(`모든 도구: 도구 막대에서 골라 놓고, 새로고침 뒤에도 ${TOOLS.length}개가 개체 목록에 도구 이름으로 남는다`, async ({ page, scenario }, testInfo) => {
   const errors: string[] = []; page.on("pageerror", (e) => errors.push(e.message));
   await page.setViewportSize({ width: 1280, height: 800 });
@@ -139,7 +143,7 @@ test(`모든 도구: 휴대폰 폭에서는 ${TOOLS.length}개가 보이고 편�
   expect((await chart.screenshot()).equals(shown)).toBe(false);
 });
 
-for (const width of [1280, 800]) {
+for (const width of [1280, 1024, 800]) {
   test(`도구 막대: 창 폭 ${width}px에서 차트 안에 머물고 모든 버튼과 그룹 메뉴에 닿는다`, async ({ page }) => {
     await page.setViewportSize({ width, height: 800 });
     await open(page);
@@ -190,6 +194,32 @@ for (const width of [1280, 800]) {
     }
   });
 }
+
+test("도구 막대: 높이 300px 창에서도 그룹 메뉴는 창 안에 있고 메뉴 안을 넘겨 마지막 도구까지 고른다", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 300 });
+  await open(page);
+  const bar = page.getByRole("navigation", { name: "드로잉 도구" });
+  for (const [group, tools] of menuGroups()) {
+    const label = GROUP_LABEL[group];
+    await bar.getByRole("button", { name: `${label} 도구 펼치기`, exact: true }).click();
+    const menu = page.getByRole("menu", { name: `${label} 도구` });
+    await expect(menu).toBeVisible();
+    const m = (await menu.boundingBox())!;
+    expect(m.y, label).toBeGreaterThanOrEqual(0);
+    expect(m.y + m.height, label).toBeLessThanOrEqual(300);
+    const room = await menu.evaluate((el) => el.scrollHeight - el.clientHeight);
+    if (group === "line") expect(room, "선 도구 메뉴는 넘쳐서 넘긴다").toBeGreaterThan(0);
+    await page.mouse.move(m.x + m.width / 2, m.y + m.height / 2);
+    await page.mouse.wheel(0, room + 50);
+    await expect.poll(() => menu.evaluate((el) => el.scrollTop)).toBe(room);
+    const last = tools.at(-1)!;
+    const item = menu.getByRole("menuitem").filter({ hasText: last.label });
+    await expect(item).toBeInViewport({ ratio: 1 });
+    await item.click();
+    await expect(bar.getByRole("button", { name: last.label, exact: true })).toHaveAttribute("aria-pressed", "true");
+    await page.keyboard.press("Escape");
+  }
+});
 
 test("도구 막대: 단축키가 없는 도구는 제목과 메뉴에 빈 단축키를 보이지 않는다", async ({ page }) => {
   await open(page);
@@ -338,4 +368,135 @@ test("여러 도구: 다른 그룹의 드로잉 셋을 상자로 골라 함께 �
   await expect(style.getByRole("button", { name: "선 색 선택", exact: true })).toHaveCount(0);
   for (const label of ["선 굵기", "선 모양"]) await expect(style.getByRole("combobox", { name: label, exact: true })).toHaveCount(0);
   expect(errors).toEqual([]);
+});
+
+test.describe("봉을 읽는 도구", () => {
+  test.use({ clockStart: "20261109100000" });
+  const SYMBOL = "005930";
+  const BAR_TOOLS = ["avwap", "regression", "volprofile"];
+
+  async function pushPrice(scenario: Scenario, page: Page, price: number) {
+    await expect(async () => {
+      expect(await scenario.live.update(SYMBOL, { c: price, v: 1000 })).toBeGreaterThan(0);
+      await expect(chartOf(cell(page))).toHaveAttribute("data-last-close", String(price), { timeout: 1000 });
+    }).toPass({ timeout: 15_000 });
+  }
+
+  async function chooseSymbol(page: Page, symbol: string) {
+    await page.getByTitle(SEARCH_BUTTON_TITLE).click();
+    const dialog = page.getByRole("dialog", { name: "종목 검색" });
+    await dialog.getByRole("combobox", { name: "종목 검색" }).fill(symbol);
+    await dialog.getByRole("option").filter({ hasText: symbol }).first().click();
+    await expect(dialog).toBeHidden();
+    await expect(cell(page)).toHaveAttribute("aria-busy", "false");
+  }
+
+  async function choosePeriod(page: Page, label: string) {
+    await page.getByRole("toolbar", { name: "차트 도구 막대" }).getByRole("group", { name: "봉 주기" }).getByRole("button", { name: label, exact: true }).click();
+    await expect(cell(page)).toHaveAttribute("aria-label", new RegExp(` ${label}$`));
+    await expect(cell(page)).toHaveAttribute("aria-busy", "false");
+  }
+
+  async function bodyPoint(page: Page, id: string) {
+    const r = (await chartOf(cell(page)).boundingBox())!;
+    const x = r.x + (await mirror(page)).find((d) => d.id === id)!.points[0]!.x + 40;
+    return bodyAlong(page, [[{ x, y: r.y + r.height * 0.15 }, { x, y: r.y + r.height * 0.85 }]]);
+  }
+
+  test("회귀 채널, 기준봉 VWAP, 구간 거래량 프로파일을 함께 옮기고, 복제하고, 지우고, 되돌리고, 봉 주기·종목·실시간 봉을 거쳐도 남는다", async ({ page, scenario }) => {
+    const errors: string[] = []; page.on("pageerror", (e) => errors.push(e.message));
+    const bars = scenario.market.page({ symbol: SYMBOL }).bars;
+    expect(bars.some((b) => b.v > 0), `${SYMBOL} 봉의 거래량`).toBe(true);
+    const barOf = (t: number) => bars.findLastIndex((b) => b.t <= t);
+    const saved = () => scenario.documents.drawings(SYMBOL);
+    const count = async () => (await saved()).length;
+    const selected = async () => (await mirror(page)).filter((d) => d.selected).map((d) => d.tool).sort();
+    const shownTools = async () => (await mirror(page)).filter((d) => d.points.every((p) => p !== null)).map((d) => d.tool).sort();
+    const expectPainted = async (where: string) => {
+      await expect.poll(shownTools).toEqual(BAR_TOOLS);
+      const list = page.getByRole("region", { name: "개체 목록" });
+      if (!(await list.isVisible())) await page.getByRole("button", { name: "개체 목록 열기", exact: true }).click();
+      await list.hover();
+      const pane = await chartOf(cell(page)).evaluate((el) => {
+        const r = [...el.querySelectorAll("canvas")].map((c) => c.getBoundingClientRect()).sort((a, b) => b.width * b.height - a.width * a.height)[0]!;
+        return { x: r.x, y: r.y, width: r.width, height: r.height };
+      });
+      const shot = () => page.screenshot({ clip: pane, mask: [page.getByRole("navigation", { name: "드로잉 도구" }), cell(page).locator(".chart-legend")] });
+      const painted = await shot();
+      for (const label of ["회귀 채널", "기준봉 VWAP", "구간 거래량 프로파일"]) {
+        await list.getByRole("button", { name: `${label} 숨기기`, exact: true }).click();
+        await expect.poll(async () => (await shot()).equals(painted), { message: `${where}: 숨기면 그림이 바뀐다: ${label}` }).toBe(false);
+        await list.getByRole("button", { name: `${label} 보이기`, exact: true }).click();
+        await expect.poll(async () => (await shot()).equals(painted), { message: `${where}: 다시 보이면 그림이 돌아온다: ${label}` }).toBe(true);
+      }
+    };
+
+    await page.goto(`/?symbol=${SYMBOL}`);
+    await expect(chartOf(cell(page))).toHaveAttribute("data-bar-count", /^[1-9]\d*$/);
+    await expect.poll(async () => scenario.live.subscriptions().map((s) => s.symbol)).toContain(SYMBOL);
+
+    await pickTool(page, "선", "회귀 채널"); await clickAt(page, [[0.25, 0.5], [0.4, 0.5]]);
+    await expect.poll(count).toBe(1);
+    await pickTool(page, "측정", "기준봉 VWAP"); await clickAt(page, [[0.48, 0.5]]);
+    await expect.poll(count).toBe(2);
+    await pickTool(page, "측정", "구간 거래량 프로파일"); await clickAt(page, [[0.56, 0.5], [0.7, 0.5]]);
+    await expect.poll(count).toBe(3);
+    await page.keyboard.press("Escape");
+    await expect.poll(selected).toEqual([]);
+
+    const boxSelect = async () => {
+      const a = await chartPoint(page, 0.2, 0.18); const b = await chartPoint(page, 0.76, 0.86);
+      await cell(page).focus(); await page.keyboard.down("Control");
+      await page.mouse.move(a.x, a.y); await page.mouse.down();
+      await page.mouse.move(b.x, b.y, { steps: 10 }); await page.mouse.up(); await page.keyboard.up("Control");
+      await expect.poll(selected).toEqual(BAR_TOOLS);
+    };
+    await boxSelect();
+
+    const before = await saved();
+    const avwapId = before.find((d) => d.tool === "avwap")!.id;
+    const grab = await bodyPoint(page, avwapId);
+    await page.mouse.move(grab.x, grab.y); await page.mouse.down();
+    await page.mouse.move(grab.x + 60, grab.y, { steps: 10 }); await page.mouse.up();
+    await expect.poll(async () => (await saved()).every((d) => d.points[0]!.t !== before.find((x) => x.id === d.id)!.points[0]!.t)).toBe(true);
+    const moved = await saved();
+    const shifts = moved.flatMap((d) => d.points.map((p, i) => barOf(p.t) - barOf(before.find((x) => x.id === d.id)!.points[i]!.t)));
+    expect(shifts[0]).toBeGreaterThan(0);
+    expect(new Set(shifts), `옮긴 봉 수 ${shifts}`).toEqual(new Set([shifts[0]]));
+    await expect.poll(selected).toEqual(BAR_TOOLS);
+
+    const style = page.getByRole("toolbar", { name: "드로잉 스타일" });
+    await style.getByRole("button", { name: "드로잉 복제", exact: true }).click();
+    await expect.poll(count).toBe(6);
+    await expect.poll(async () => (await saved()).map((d) => d.tool).sort()).toEqual([...BAR_TOOLS, ...BAR_TOOLS].sort());
+    await cell(page).focus(); await page.keyboard.press("Control+z");
+    await expect.poll(count).toBe(3);
+
+    await page.keyboard.press("Escape");
+    await boxSelect();
+    await cell(page).focus(); await page.keyboard.press("Delete");
+    await expect.poll(count).toBe(0);
+    await expect.poll(async () => (await mirror(page)).length).toBe(0);
+    await page.keyboard.press("Control+z");
+    await expect.poll(async () => (await saved()).map((d) => [d.id, d.points]).sort()).toEqual(moved.map((d) => [d.id, d.points]).sort());
+    await expect.poll(shownTools).toEqual(BAR_TOOLS);
+
+    await choosePeriod(page, "주");
+    await expectPainted("주봉");
+    await choosePeriod(page, "일");
+    await expectPainted("일봉");
+    const wholeChart = () => chartOf(cell(page)).screenshot({ mask: [page.getByRole("navigation", { name: "드로잉 도구" }), cell(page).locator(".chart-legend")] });
+    const daily = await wholeChart();
+    await chooseSymbol(page, "005935");
+    await expect.poll(() => mirror(page)).toEqual([]);
+    await chooseSymbol(page, SYMBOL);
+    await expectPainted("종목을 바꿨다 돌아온 뒤");
+    await expect.poll(async () => (await wholeChart()).equals(daily), { message: "종목을 바꿨다 돌아오면 가격축까지 일봉 그림이 같다" }).toBe(true);
+
+    await pushPrice(scenario, page, 201_000);
+    await pushPrice(scenario, page, 202_500);
+    await expectPainted("실시간 봉 뒤");
+    expect((await saved()).map((d) => [d.id, d.points]).sort()).toEqual(moved.map((d) => [d.id, d.points]).sort());
+    expect(errors).toEqual([]);
+  });
 });

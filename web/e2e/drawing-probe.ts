@@ -43,3 +43,22 @@ export async function chartPoint(page: Page, fx: number, fy: number): Promise<{ 
   const r = (await chartOf(cell(page)).boundingBox())!;
   return { x: r.x + r.width * fx, y: r.y + r.height * fy };
 }
+
+type ScreenAt = { x: number; y: number };
+
+export async function bodyAlong(page: Page, segments: readonly (readonly [ScreenAt, ScreenAt])[]): Promise<ScreenAt> {
+  const host = chartOf(cell(page)).locator(".drawing-mirror");
+  const cursor = () => host.evaluate((el) => (el.parentElement as HTMLElement).style.cursor);
+  for (const [from, to] of segments) {
+    const steps = Math.max(1, Math.ceil(Math.hypot(to.x - from.x, to.y - from.y) / 2));
+    const run: ScreenAt[] = [];
+    for (let i = 0; i <= steps; i++) {
+      const at = { x: from.x + (to.x - from.x) * i / steps, y: from.y + (to.y - from.y) * i / steps };
+      await page.mouse.move(at.x, at.y);
+      if (await cursor() === "move") run.push(at);
+      else if (run.length > 0) break;
+    }
+    if (run.length > 0) return run[Math.floor(run.length / 2)]!;
+  }
+  throw new Error("드로잉의 몸통을 찾지 못했습니다");
+}
