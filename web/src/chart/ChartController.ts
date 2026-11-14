@@ -22,14 +22,14 @@ import type { SymbolCode } from "../api/generated/SymbolCode";
 import type { SymbolInfo } from "../api/generated/SymbolInfo";
 import type { UnixSeconds } from "../api/generated/UnixSeconds";
 import { ApiRequestError } from "../api/http";
-import { formatPercent, formatPrice } from "../lib/format";
+import { formatPrice } from "../lib/format";
 import type { Connection, MarketSocketLike } from "../api/socket";
 import { isIndexCode, PERIOD_LABEL, symbolSub } from "../lib/symbol";
 import { type ShownVenue, venueLabel } from "../lib/venue";
 import { BarFeed, displayBars, type FetchPage, type History } from "./barFeed";
 import { type CompareEntry, CompareLayer, compareVenue } from "./compare";
 import { CompareLegend } from "./compareLegend";
-import { type ExtremeTag, ExtremeTags } from "./extremeTags";
+import { extremeChange, type ExtremeTag, ExtremeTags } from "./extremeTags";
 import { type Extreme, findExtremes } from "./extremes";
 import { type OpenPort, openIndicatorPort } from "./indicators/client";
 import { IndicatorLayer } from "./indicators/layer";
@@ -37,7 +37,7 @@ import { PanelControls } from "./panelControls";
 import { type IndicatorCommand, IndicatorLegend } from "./indicators/legendRows";
 import { chartIndicators, chartPanels } from "./indicators/shown";
 import { isTailChange } from "./indicators/sync";
-import { Legend, legendParts } from "./legend";
+import { Legend, legendParts, ohlcRow } from "./legend";
 import { addMainSeries, applyMainColors, type MainSeries, priceFormat, setMainData, updateMainBar } from "./series";
 import { type ChartSettings, type Panel, type PriceScale, shownScale } from "./settings";
 import { composeSnapshot, snapshotFileName } from "./snapshot";
@@ -276,7 +276,7 @@ export class ChartController {
       this.withDataGuard(() => preserveTimeRange(this.chart.timeScale(), next.period, () => this.indicators.setConfigs(configs, panels)));
     }
     if (prev && prev.settings.visibleBars !== next.settings.visibleBars) this.fitInitialRange();
-    if (prev?.settings.showExtremes !== next.settings.showExtremes) this.scheduleFrame();
+    if (prev?.settings.showExtremes !== next.settings.showExtremes || prev?.settings.extremeBasis !== next.settings.extremeBasis) this.scheduleFrame();
     this.indicators.setPreview(next.previewIndicator ?? null);
     this.compare.setCodes(compareEntries(next), { period: next.period, venueFor: (code) => compareVenue(code, next) });
     this.renderLegend();
@@ -540,7 +540,7 @@ export class ChartController {
       const x = xOf(index);
       const y = this.main.api.priceToCoordinate(price);
       if (x === null || y === null || y < 0 || y > paneHeight) return null;
-      return { x, y, price: formatPrice(price, isIndex), change: last.c === 0 ? null : formatPercent((price - last.c) / last.c * 100) };
+      return { x, y, price: formatPrice(price, isIndex), change: extremeChange(price, last.c, view.settings.extremeBasis) };
     };
     this.extremeTags.show({ high: tag(found.high), low: tag(found.low) }, paneWidth);
   }
@@ -697,7 +697,7 @@ export class ChartController {
     this.panelControls.render(panels, tops);
     this.indicatorLegend.render(this.indicators.rows(this.financialHoverTime ?? bar?.t ?? null), tops, this.chart.priceScale("right").width());
     this.compareLegend.render(this.compare.rows(this.leftT(), bar?.t ?? null));
-    if (!view || !bar) return this.legend.show(null);
+    if (!view || !bar) return this.legend.show(null, "hidden");
     this.legend.show({
       bar,
       prev: this.bars[i - 1] ?? null,
@@ -705,7 +705,7 @@ export class ChartController {
       isIndex: isIndexCode(view.symbol),
       period: view.period,
       stalledAt: this.stalledAt,
-    });
+    }, ohlcRow(view.settings));
   }
 }
 

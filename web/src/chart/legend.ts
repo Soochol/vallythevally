@@ -2,9 +2,17 @@ import type { Bar } from "../api/generated/Bar";
 import type { Period } from "../api/generated/Period";
 import type { UnixSeconds } from "../api/generated/UnixSeconds";
 import { type Direction, direction, formatChange, formatPercent, formatPrice, formatVolume } from "../lib/format";
+import type { ChartSettings } from "./settings";
 import { formatBarTime, formatKstClock } from "./time";
 
-const ROW = "w-max pr-1 rounded-s bg-[color-mix(in_srgb,var(--chart-bg)_78%,transparent)]";
+const ROW_SURFACE = "pr-1 rounded-s bg-[color-mix(in_srgb,var(--chart-bg)_78%,transparent)]";
+const ROW = `w-max ${ROW_SURFACE}`;
+const OHLC = "flex flex-wrap gap-x-2 whitespace-nowrap text-s max-md:w-auto max-md:gap-x-1.5";
+const OHLC_CLASS: Record<OhlcRow, string> = {
+  hidden: `${ROW} ${OHLC}`,
+  values: `${ROW} ${OHLC}`,
+  valuesWithChange: `w-fit max-w-full ${ROW_SURFACE} ${OHLC}`,
+};
 const DIR_CLASS = { up: "text-up", down: "text-down", flat: "text-text-2" } as const;
 
 export interface LegendBar {
@@ -18,12 +26,30 @@ export interface LegendBar {
   stalledAt: UnixSeconds | null;
 }
 
+export interface PrevCloseChange {
+  text: string;
+  dir: Direction;
+}
+
 export interface LegendParts {
   close: string;
   change: string;
   dir: Direction;
   time: string;
-  cells: [label: string, value: string][];
+  cells: [label: string, value: string, change: PrevCloseChange | null][];
+}
+
+export type OhlcRow = "hidden" | "values" | "valuesWithChange";
+
+export function ohlcRow({ showOhlc, showOhlcChange }: Pick<ChartSettings, "showOhlc" | "showOhlcChange">): OhlcRow {
+  if (!showOhlc) return "hidden";
+  return showOhlcChange ? "valuesWithChange" : "values";
+}
+
+function prevCloseChange(value: number, prev: Bar | null): PrevCloseChange | null {
+  if (!prev || prev.c === 0) return null;
+  const chg = value - prev.c;
+  return { text: formatPercent((chg / prev.c) * 100), dir: direction(chg) };
 }
 
 export function legendParts({ bar, prev, isIndex, period }: LegendBar): LegendParts {
@@ -34,11 +60,11 @@ export function legendParts({ bar, prev, isIndex, period }: LegendBar): LegendPa
     dir: direction(chg),
     time: formatBarTime(bar.t, period),
     cells: [
-      ["시", formatPrice(bar.o, isIndex)],
-      ["고", formatPrice(bar.h, isIndex)],
-      ["저", formatPrice(bar.l, isIndex)],
-      ["종", formatPrice(bar.c, isIndex)],
-      ["량", formatVolume(bar.v)],
+      ["시", formatPrice(bar.o, isIndex), prevCloseChange(bar.o, prev)],
+      ["고", formatPrice(bar.h, isIndex), prevCloseChange(bar.h, prev)],
+      ["저", formatPrice(bar.l, isIndex), prevCloseChange(bar.l, prev)],
+      ["종", formatPrice(bar.c, isIndex), prevCloseChange(bar.c, prev)],
+      ["량", formatVolume(bar.v), null],
     ],
   };
 }
@@ -72,7 +98,7 @@ export class Legend {
   );
   private readonly stalled = el("span", "self-center rounded-[9px] border border-accent px-1.5 text-xs text-accent");
   private readonly notice = el("span", "text-xs text-accent");
-  private readonly ohlc = el("div", `${ROW} flex flex-wrap gap-x-2 whitespace-nowrap text-s max-md:w-auto max-md:gap-x-1.5`);
+  private readonly ohlc = el("div", OHLC_CLASS.values);
 
   constructor(parent: HTMLElement) {
     const head = el("div", "relative z-[6] flex min-w-0 max-w-full items-center gap-1.5 overflow-hidden whitespace-nowrap rounded-s bg-[color-mix(in_srgb,var(--chart-bg)_78%,transparent)] pr-1 max-md:hidden");
@@ -80,6 +106,7 @@ export class Legend {
     this.name.setAttribute("role", "heading");
     this.name.setAttribute("aria-level", "2");
     this.notice.hidden = true;
+    this.ohlc.dataset.ohlc = "";
     this.fetched.title = "키움에서 조회한 값입니다. 체결마다 바뀌지 않습니다.";
     this.stalled.title = "실시간 시세가 멈췄습니다. 마지막으로 받은 값입니다.";
     this.priceRow.append(this.close, this.change, this.time, this.fetched, this.stalled);
@@ -101,10 +128,11 @@ export class Legend {
     this.notice.hidden = text === null;
   }
 
-  show(v: LegendBar | null): void {
+  show(v: LegendBar | null, row: OhlcRow): void {
     this.priceRow.hidden = v === null;
-    this.ohlc.hidden = v === null;
+    this.ohlc.hidden = v === null || row === "hidden";
     if (!v) return;
+    this.ohlc.className = OHLC_CLASS[row];
     const parts = legendParts(v);
     const dir = DIR_CLASS[parts.dir];
     this.close.textContent = parts.close;
@@ -116,9 +144,10 @@ export class Legend {
     this.time.textContent = parts.time;
     this.fetched.hidden = !v.isCurrent;
     this.ohlc.replaceChildren(
-      ...parts.cells.map(([k, val]) => {
+      ...parts.cells.map(([k, val, change]) => {
         const span = el("span", "");
         span.append(el("i", "mr-[3px] not-italic text-text-3", k), val);
+        if (change && row === "valuesWithChange") span.append(" ", el("span", DIR_CLASS[change.dir], `(${change.text})`));
         return span;
       }),
     );

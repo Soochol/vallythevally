@@ -1,7 +1,9 @@
 import type { Page } from "@playwright/test";
-import type { ChartSettings } from "../src/chart/settings";
+import { type ChartSettings, DEFAULT_CHART_SETTINGS, type IndicatorConfig } from "../src/chart/settings";
+import type { Bar } from "../src/api/generated/Bar";
 import { installChartProbe } from "./chart-probe";
 import { type Scenario, cell, chartOf, DEFAULT_LAYOUT_ID, expect, test } from "./harness";
+import { selectMinute } from "./select-option";
 
 const RIGHT_OFFSET = 6;
 
@@ -283,4 +285,189 @@ test("비교 종목이 있어 축 고정 안내가 붙어도 1280x600에서 팝�
   await expect(choices.getByRole("button", { name: "가운데 창", exact: true })).toHaveAttribute("aria-pressed", "true");
   await choices.getByRole("button", { name: "차트 옆", exact: true }).click();
   await expect.poll(() => scenario.documents.uiState().indicatorWindow).toBe("inspector");
+});
+
+const won = (x: number) => new Intl.NumberFormat("ko-KR", { maximumFractionDigits: 0 }).format(x);
+const pct = (from: number, to: number) => {
+  const p = Math.round((to - from) / from * 10000) / 100;
+  return `${p > 0 ? "+" : p < 0 ? "−" : ""}${Math.abs(p).toFixed(2)}%`;
+};
+const DAY = 86_400;
+const START = Date.parse("2025-01-01T00:00:00+09:00") / 1000;
+const zigzagBars: Bar[] = Array.from({ length: 300 }, (_, i) => {
+  const c = 50_000 + (i % 7) * 300 - (i % 3) * 450;
+  return { t: START + i * DAY, o: c - 150 + (i % 2) * 400, h: c + 600, l: c - 700, c, v: 1000 + i };
+});
+const ohlc = (page: Page) => cell(page).locator("[data-ohlc]");
+const ohlcSwitch = (page: Page) => popover(page).getByRole("switch", { name: /^봉 값 \(/ });
+const ohlcChangeSwitch = (page: Page) => popover(page).getByRole("switch", { name: /^봉 값 등락률/ });
+const extremesSwitch = (page: Page) => popover(page).getByRole("switch", { name: /^화면 내 최고·최저/ });
+const basisGroup = (page: Page) => popover(page).getByRole("group", { name: "최고·최저 등락률" });
+
+function openWith(scenario: Scenario, settings: Partial<ChartSettings>, bars: Bar[] = zigzagBars) {
+  scenario.reply((url) => url.pathname === "/api/bars" && url.searchParams.get("symbol") === "005930" && url.searchParams.get("period") === "D",
+    { body: { symbol: "005930", venue: "combined", period: "D", bars, current: null, nextBefore: null, seq: null } });
+  const layout = scenario.documents.layout(DEFAULT_LAYOUT_ID);
+  scenario.documents.saveLayout({ ...layout, revision: layout.revision + 1, cells: [{ ...layout.cells[0]!, symbol: "005930", venue: "combined", period: "D",
+    chartSettings: { ...DEFAULT_CHART_SETTINGS, ...settings } }] });
+}
+
+async function reload(page: Page) {
+  if (await popover(page).isVisible()) await page.keyboard.press("Escape");
+  await page.reload();
+  await expect(cell(page)).toHaveAttribute("aria-busy", "false");
+}
+
+const ohlcCells = (bar: Bar, prev: Bar | null) => [
+  ...([["시", bar.o], ["고", bar.h], ["저", bar.l], ["종", bar.c]] as const).map(([k, v]) => `${k}${won(v)}${prev ? ` (${pct(prev.c, v)})` : ""}`),
+  expect.stringMatching(/^량[^(]+$/),
+];
+
+test("봉 값 스위치를 끄면 범례의 봉 값 줄만 숨기고, 봉 주기를 바꾸거나 새로고침해도 꺼진 채다", async ({ page, scenario }) => {
+  const ma: IndicatorConfig = { id: "ma-price", spec: { kind: "ma", method: "sma", period: 5 }, panel: "price", visible: true, style: { colors: ["ind-2"], width: 1 } };
+  openWith(scenario, { indicators: [...DEFAULT_CHART_SETTINGS.indicators, ma] });
+  await open(page);
+  const priceRow = ohlc(page).locator("xpath=preceding-sibling::div[1]");
+  const name = cell(page).locator(".chart-legend [role=heading]");
+  const maRow = cell(page).locator(`[data-indicator-row="${ma.id}"]`);
+  await expect(ohlc(page)).toBeVisible();
+  await expect(ohlc(page)).toContainText("시");
+  await expect(ohlc(page)).not.toContainText("(");
+  await expect(maRow).toBeVisible();
+  expect(saved(scenario)).toMatchObject({ showOhlc: true, showOhlcChange: false, extremeBasis: "last" });
+
+  await openSettings(page);
+  await expect(ohlcSwitch(page)).toHaveAttribute("aria-checked", "true");
+  await ohlcSwitch(page).click();
+  await expect(ohlcSwitch(page)).toHaveAttribute("aria-checked", "false");
+  await expect(ohlc(page)).toBeHidden();
+  for (const kept of [name, priceRow, maRow]) await expect(kept).toBeVisible();
+  const priceBottom = (await priceRow.boundingBox())!;
+  expect((await maRow.boundingBox())!.y - (priceBottom.y + priceBottom.height)).toBeLessThan(12);
+  await expect.poll(() => saved(scenario).showOhlc).toBe(false);
+
+  await page.keyboard.press("Escape");
+  await selectMinute(page.getByRole("toolbar", { name: "차트 도구 막대" }).getByRole("button", { name: "분봉", exact: true }), { label: "5분" });
+  await expect(cell(page)).toHaveAttribute("aria-label", / 5분$/);
+  await expect(cell(page)).toHaveAttribute("aria-busy", "false");
+  await expect(priceRow).toBeVisible();
+  await expect(ohlc(page)).toBeHidden();
+
+  await reload(page);
+  await expect(priceRow).toBeVisible();
+  await expect(ohlc(page)).toBeHidden();
+  await openSettings(page);
+  await expect(ohlcSwitch(page)).toHaveAttribute("aria-checked", "false");
+  await expect(ohlcChangeSwitch(page)).toBeDisabled();
+});
+
+test("봉 값 등락률 스위치는 시·고·저·종 옆에 직전 봉 종가 대비 %를 붙이고, 십자선이 가리키는 봉을 따르며, 봉 값 줄이 꺼지면 비활성이다", async ({ page, scenario }) => {
+  openWith(scenario, { visibleBars: 60 });
+  await open(page);
+  const spans = ohlc(page).locator(":scope > span");
+  const texts = () => spans.allTextContents();
+  const last = zigzagBars.length - 1;
+  await settingsButton(page).hover();
+  await expect.poll(texts).toEqual(ohlcCells(zigzagBars[last]!, null).map((x, i) => i < 4 ? (x as string).replace(/ \(.*\)$/, "") : x));
+
+  await openSettings(page);
+  await expect(ohlcChangeSwitch(page)).toHaveAttribute("aria-checked", "false");
+  await ohlcChangeSwitch(page).click();
+  await expect(ohlcChangeSwitch(page)).toHaveAttribute("aria-checked", "true");
+  await expect.poll(texts).toEqual(ohlcCells(zigzagBars[last]!, zigzagBars[last - 1]!));
+  await expect.poll(() => saved(scenario).showOhlcChange).toBe(true);
+  for (const [n, v] of [[0, zigzagBars[last]!.o], [3, zigzagBars[last]!.c]] as const) {
+    const change = v - zigzagBars[last - 1]!.c;
+    await expect(spans.nth(n).locator("span")).toHaveClass(change > 0 ? "text-up" : change < 0 ? "text-down" : "text-text-2");
+  }
+
+  await page.keyboard.press("Escape");
+  const hovered = last - 20;
+  const x = await page.evaluate((i) => window.chartProbe.chart.timeScale().timeToCoordinate(window.chartProbe.main.dataByIndex(i)!.time), hovered);
+  const box = (await chartOf(cell(page)).boundingBox())!;
+  await page.mouse.move(box.x + x!, box.y + box.height / 3);
+  await expect.poll(texts).toEqual(ohlcCells(zigzagBars[hovered]!, zigzagBars[hovered - 1]!));
+  await settingsButton(page).hover();
+
+  await openSettings(page);
+  await ohlcSwitch(page).click();
+  await expect(ohlcChangeSwitch(page)).toBeDisabled();
+  await expect(ohlcChangeSwitch(page)).toHaveAttribute("aria-checked", "true");
+  await expect.poll(() => saved(scenario)).toMatchObject({ showOhlc: false, showOhlcChange: true });
+  await ohlcSwitch(page).click();
+  await expect(ohlcChangeSwitch(page)).toBeEnabled();
+  await expect.poll(texts).toEqual(ohlcCells(zigzagBars[last]!, zigzagBars[last - 1]!));
+});
+
+test("최고·최저 등락률을 고가·저가 대비로 바꾸면 꼬리표가 최고가·최저가 대비 현재가 %를 적고, 새로고침 뒤 유지하며, 최고·최저가 꺼지면 비활성이다", async ({ page, scenario }) => {
+  const bars = Array.from({ length: 300 }, (_, i) => {
+    const h = 100_000 - i * 100;
+    return { t: START + i * DAY, o: h - 200, h, l: h - 500, c: h - 300, v: 1000 };
+  });
+  openWith(scenario, { visibleBars: 60, showExtremes: true }, bars);
+  await open(page);
+  await expectShownBars(page, 60);
+  const high = cell(page).locator("[data-extreme=high] > span");
+  const low = cell(page).locator("[data-extreme=low] > span");
+  const lastClose = bars.at(-1)!.c;
+  const highBar = bars[240]!;
+  const lowBar = bars[299]!;
+  await expect(high).toHaveText(`최고 ${won(highBar.h)} (${pct(lastClose, highBar.h)})`);
+  await expect(low).toHaveText(`최저 ${won(lowBar.l)} (${pct(lastClose, lowBar.l)})`);
+
+  await openSettings(page);
+  const current = basisGroup(page).getByRole("button", { name: "현재가 대비", exact: true });
+  const extreme = basisGroup(page).getByRole("button", { name: "고가·저가 대비", exact: true });
+  await expect(current).toHaveAttribute("aria-pressed", "true");
+  await expect(current).toHaveAttribute("title", /현재가/);
+  await expect(extreme).toHaveAttribute("title", /최고가/);
+  await extreme.click();
+  await expect(extreme).toHaveAttribute("aria-pressed", "true");
+  const extremeTexts = [`최고 ${won(highBar.h)} (${pct(highBar.h, lastClose)})`, `최저 ${won(lowBar.l)} (${pct(lowBar.l, lastClose)})`];
+  await expect(high).toHaveText(extremeTexts[0]!);
+  await expect(low).toHaveText(extremeTexts[1]!);
+  expect(extremeTexts[0]).toContain("(−");
+  expect(extremeTexts[1]).toContain("(+");
+  await expect.poll(() => saved(scenario).extremeBasis).toBe("extreme");
+
+  await reload(page);
+  await expect(high).toHaveText(extremeTexts[0]!);
+  await expect(low).toHaveText(extremeTexts[1]!);
+  await openSettings(page);
+  await expect(extreme).toHaveAttribute("aria-pressed", "true");
+  await extremesSwitch(page).click();
+  await expect(high).toBeHidden();
+  for (const button of [current, extreme]) await expect(button).toBeDisabled();
+  await expect.poll(() => saved(scenario)).toMatchObject({ showExtremes: false, extremeBasis: "extreme" });
+});
+
+test("1024x768에서 차트 설정 팝오버의 모든 조작이 창 안에 있고, 등락률이 붙은 봉 값 줄은 범례 폭 안에서 줄을 바꾼다", async ({ page }) => {
+  await page.setViewportSize({ width: 1024, height: 768 });
+  await open(page);
+  const settings = await openSettings(page);
+  const controls = settings.locator("button, input");
+  expect(await controls.count()).toBeGreaterThan(10);
+  for (const control of await controls.all()) {
+    const box = (await control.boundingBox())!;
+    expect(box.x).toBeGreaterThanOrEqual(0);
+    expect(box.y).toBeGreaterThanOrEqual(0);
+    expect(box.x + box.width).toBeLessThanOrEqual(1024);
+    expect(box.y + box.height).toBeLessThanOrEqual(768);
+  }
+
+  await ohlcChangeSwitch(page).click();
+  await expect(ohlc(page)).toContainText("(");
+  const legend = (await cell(page).locator(".chart-legend").boundingBox())!;
+  for (const value of await ohlc(page).locator(":scope > span").all()) {
+    const box = (await value.boundingBox())!;
+    expect(box.x + box.width).toBeLessThanOrEqual(legend.x + legend.width);
+  }
+});
+
+test("기본 설정의 봉 값 줄은 좁은 데스크톱 칸에서도 지금처럼 한 줄이다", async ({ page }) => {
+  await page.setViewportSize({ width: 900, height: 700 });
+  await open(page);
+  const row = (await ohlc(page).boundingBox())!;
+  const first = (await ohlc(page).locator(":scope > span").first().boundingBox())!;
+  expect(row.height).toBeLessThan(first.height * 1.5);
 });

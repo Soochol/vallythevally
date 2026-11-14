@@ -1,5 +1,5 @@
 import { type RefObject, useEffect, useId, useRef, useState } from "react";
-import { CHART_STYLE_LABEL, type ChartStyle, clampVisibleBars, type PriceScale, shownScale, VISIBLE_BARS_MAX, VISIBLE_BARS_MIN } from "../../chart/settings";
+import { CHART_STYLE_LABEL, type ChartStyle, clampVisibleBars, type ExtremeBasis, type PriceScale, shownScale, VISIBLE_BARS_MAX, VISIBLE_BARS_MIN } from "../../chart/settings";
 import type { IndicatorWindow } from "../../persist/uiState";
 import { type Slot, useCell, useLayoutStore } from "../../stores/layout";
 import { useUiStore } from "../../stores/ui";
@@ -18,13 +18,17 @@ const WINDOWS = [
   { value: "dialog", label: "가운데 창", title: "지표 창을 화면 가운데에 엽니다" },
   { value: "inspector", label: "차트 옆", title: "지표 창을 오른쪽 패널에 엽니다. 좁은 화면에서는 가운데 창을 씁니다" },
 ] as const satisfies readonly { value: IndicatorWindow; label: string; title: string }[];
+const EXTREME_BASES = [
+  { value: "last", label: "현재가 대비", title: "최고가·최저가가 현재가보다 몇 % 높고 낮은지" },
+  { value: "extreme", label: "고가·저가 대비", title: "현재가가 최고가보다 몇 % 내렸고 최저가보다 몇 % 올랐는지" },
+] as const satisfies readonly { value: ExtremeBasis; label: string; title: string }[];
 const SEGMENTS = "grid gap-1 rounded-m bg-chart-bg p-1";
 const SEGMENT = "seg-btn !h-7 !min-w-0 !px-1 disabled:cursor-not-allowed disabled:opacity-50";
 
 export function ChartSettingsPopover({ slot, anchor, onClose }: { slot: Slot; anchor: RefObject<HTMLElement | null>; onClose(): void }) {
   const settings = useCell(slot).chartSettings;
   const indicatorWindow = useUiStore((s) => s.prefs.indicatorWindow);
-  const { setVisibleBars, setShowExtremes, setStyle, setScale } = useLayoutStore.getState();
+  const { setVisibleBars, setShowExtremes, setShowOhlc, setShowOhlcChange, setExtremeBasis, setStyle, setScale } = useLayoutStore.getState();
   const [draft, setDraft] = useState<string | null>(null);
   const firstFocus = useRef<HTMLElement | null>(null);
   const id = useId();
@@ -48,7 +52,7 @@ export function ChartSettingsPopover({ slot, anchor, onClose }: { slot: Slot; an
   };
 
   return (
-    <Popover role="dialog" aria-labelledby={`${id}-title`} anchor={anchor} focus={false} onClose={onClose} className="flex w-[320px] flex-col gap-4 p-4">
+    <Popover role="dialog" aria-labelledby={`${id}-title`} anchor={anchor} focus={false} onClose={onClose} className="flex w-[320px] flex-col gap-3 px-4 py-3">
       <header className="flex items-center justify-between">
         <h2 id={`${id}-title`} className="text-m font-semibold">차트 설정</h2>
         <button type="button" className="icon-btn !size-7" aria-label="닫기" onClick={onClose}><CloseIcon /></button>
@@ -74,14 +78,22 @@ export function ChartSettingsPopover({ slot, anchor, onClose }: { slot: Slot; an
       </section>
       <div className="h-px bg-line" />
       <section className="flex flex-col gap-2">
-        <h3 className="text-xs text-text-2">표시</h3>
-        <button type="button" role="switch" aria-checked={settings.showExtremes} className="ui-switch" onClick={() => setShowExtremes(slot, !settings.showExtremes)}>
-          <span className="flex flex-1 flex-col text-left leading-snug">
-            <span className="font-medium">화면 내 최고·최저</span>
-            <span className="text-xs text-text-2">지금 보이는 봉 안에서 찾아 표시</span>
-          </span>
-          <span aria-hidden="true" className="ui-switch-track"><span /></span>
-        </button>
+        <h3 className="sr-only">표시</h3>
+        <SettingSwitch label="봉 값 (시·고·저·종·량)" detail="범례에 봉의 시가·고가·저가·종가·거래량 줄을 표시"
+          checked={settings.showOhlc} onChange={(on) => setShowOhlc(slot, on)} />
+        <SettingSwitch label="봉 값 등락률" detail="시·고·저·종 옆에 직전 봉 종가 대비 %"
+          checked={settings.showOhlcChange} disabled={!settings.showOhlc} onChange={(on) => setShowOhlcChange(slot, on)} />
+        <SettingSwitch label="화면 내 최고·최저" detail="지금 보이는 봉 안에서 찾아 표시"
+          checked={settings.showExtremes} onChange={(on) => setShowExtremes(slot, on)} />
+        <div className="flex items-center gap-2">
+          <span id={`${id}-extreme-basis`} className="flex-1 text-text-2">최고·최저 등락률</span>
+          <div role="group" aria-labelledby={`${id}-extreme-basis`} className={`${SEGMENTS} grid-cols-2`}>
+            {EXTREME_BASES.map(({ value, label, title }) => (
+              <button key={value} type="button" className={SEGMENT} title={title} aria-pressed={settings.extremeBasis === value}
+                disabled={!settings.showExtremes} onClick={() => setExtremeBasis(slot, value)}>{label}</button>
+            ))}
+          </div>
+        </div>
       </section>
       <div className="h-px bg-line" />
       <div className="grid grid-cols-[56px_minmax(0,1fr)] items-center gap-x-2 gap-y-2.5">
@@ -104,5 +116,14 @@ export function ChartSettingsPopover({ slot, anchor, onClose }: { slot: Slot; an
       </div>
       <p className="text-xs text-text-2">활성 칸에 바로 반영 · 레이아웃과 함께 저장</p>
     </Popover>
+  );
+}
+
+function SettingSwitch({ label, detail, checked, disabled = false, onChange }: { label: string; detail: string; checked: boolean; disabled?: boolean; onChange(on: boolean): void }) {
+  return (
+    <button type="button" role="switch" aria-checked={checked} disabled={disabled} title={detail} className="ui-switch disabled:cursor-not-allowed disabled:opacity-50" onClick={() => onChange(!checked)}>
+      <span className="flex-1 text-left font-medium leading-snug">{label}</span>
+      <span aria-hidden="true" className="ui-switch-track"><span /></span>
+    </button>
   );
 }

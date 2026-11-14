@@ -1,3 +1,6 @@
+import { formatPercent } from "../lib/format";
+import type { ExtremeBasis } from "./settings";
+
 export type ExtremeSide = "high" | "low";
 
 export interface ExtremeTag {
@@ -5,6 +8,11 @@ export interface ExtremeTag {
   y: number;
   price: string;
   change: string | null;
+}
+
+export function extremeChange(price: number, last: number, basis: ExtremeBasis): string | null {
+  const [from, to] = basis === "last" ? [last, price] : [price, last];
+  return from === 0 ? null : formatPercent((to - from) / from * 100);
 }
 
 const SIDE_LABEL: Record<ExtremeSide, string> = { high: "최고", low: "최저" };
