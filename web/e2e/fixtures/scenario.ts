@@ -85,6 +85,11 @@ export class UserDocuments {
   drawingRevision(id: string): number { return this.drawingRevisions.get(id) ?? -1; }
 }
 
+function fixtureSymbol(symbol: string) {
+  const info = findSymbol(symbol);
+  return info?.code === "086520" ? { ...info, years: 4.8 } : info;
+}
+
 export class MarketFixtures {
   constructor(readonly now: number) {}
   readonly symbols: SymbolInfo[] = [...SYMBOLS.map(publicInfo),
@@ -92,12 +97,12 @@ export class MarketFixtures {
     { code: "0000D0", name: "TIGER 엔비디아미국채커버드콜밸런스(합성)", kind: "etf", market: "kospi", nxtEnabled: false },
   ];
   page({ symbol, period = "D", venue, limit = 500, before = null }: { symbol: string; period?: Period; venue?: Venue | null; limit?: number; before?: number | null }): BarsPage {
-    const info = findSymbol(symbol) ?? { code: symbol, name: symbol, kind: "common", market: "kospi", nxtEnabled: false, close: 10000, volume: 100000, years: 5 } satisfies Parameters<typeof barsPage>[0];
+    const info = fixtureSymbol(symbol) ?? { code: symbol, name: symbol, kind: "common", market: "kospi", nxtEnabled: false, close: 10000, volume: 100000, years: 5 } satisfies Parameters<typeof barsPage>[0];
     const resolved = resolveVenue(info, venue ?? null);
     if ("error" in resolved) throw new Error(resolved.error);
-    return clone(barsPage(info.code === "086520" ? { ...info, years: 4.8 } : info, resolved.venue, period, before === null ? Math.max(1, limit - 1) : limit, before, this.now));
+    return clone(barsPage(info, resolved.venue, period, before === null ? Math.max(1, limit - 1) : limit, before, this.now));
   }
-  quote(symbol: string) { const info = findSymbol(symbol); return info ? quoteOf(info, this.now) : null; }
+  quote(symbol: string) { const info = fixtureSymbol(symbol); return info ? quoteOf(info, this.now) : null; }
   search(query: string, options: { market?: string | null; kind?: string | null } = {}): SymbolInfo[] {
     const extra = this.symbols.filter(value => query.length > 0 && !findSymbol(value.code) && (value.code === query || value.name.includes(query)));
     return [...search(query), ...extra].filter(value => (!options.market || value.market === options.market) && (!options.kind || value.kind === options.kind));
