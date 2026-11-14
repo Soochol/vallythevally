@@ -21,6 +21,7 @@ import type { UpdatePhase } from "../api/generated/UpdatePhase";
 import { KINDS } from "../chart/indicators/kinds";
 import { formatKstClockSeconds } from "../chart/time";
 import { MINUS } from "./format";
+import { endsWithFinalConsonant } from "./josa";
 
 export const PERIOD_NAME: Record<ScreenPeriod, string> = { D: "일봉", W: "주봉", M: "월봉" };
 export const UNIT: Record<ScreenPeriod, string> = { D: "일", W: "주", M: "개월" };
@@ -102,20 +103,6 @@ const VALUE_TEXT: Record<BarField, (n: number) => string> = {
   volume: (n) => `${decimal(n)}주`,
   traded_value: eokWon,
 };
-
-const HANGUL_FIRST = 0xac00;
-const HANGUL_LAST = 0xd7a3;
-const DIGIT_HAS_FINAL = "1011001110";
-const LETTERS_WITH_FINAL = "LMNR";
-
-function endsWithFinalConsonant(word: string): boolean {
-  const bare = word.endsWith(")") ? word.slice(0, word.lastIndexOf("(")) : word;
-  const last = bare.at(-1) ?? "";
-  const code = last.charCodeAt(0);
-  if (code >= HANGUL_FIRST && code <= HANGUL_LAST) return (code - HANGUL_FIRST) % 28 !== 0;
-  if (last >= "0" && last <= "9") return DIGIT_HAS_FINAL[Number(last)] === "1";
-  return LETTERS_WITH_FINAL.includes(last.toUpperCase());
-}
 
 const subject = (word: string) => `${word}${endsWithFinalConsonant(word) ? "이" : "가"}`;
 const object = (word: string) => `${word}${endsWithFinalConsonant(word) ? "을" : "를"}`;

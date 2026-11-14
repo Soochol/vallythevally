@@ -29,7 +29,8 @@ import {
   type WatchSection,
   watchSections,
 } from "../../lib/watchlist";
-import { useCell, useLayoutStore } from "../../stores/layout";
+import { useCell, useLayoutStore, watchedSymbol } from "../../stores/layout";
+import type { WindowId } from "../../layout/kinds";
 import type { WatchQuote } from "../../stores/quoteBook";
 import { quoteBook } from "../../stores/realtime";
 import { useSelectionStore } from "../../stores/selection";
@@ -57,14 +58,14 @@ interface GroupNaming {
   onNaming(id: string | null): void;
 }
 
-export function WatchPanel() {
+export function WatchPanel({ id }: { id: WindowId }) {
   const [naming, onNaming] = useState<string | null>(null);
   const root = useRef<HTMLElement>(null);
   const width = useElementSize(root)?.w ?? null;
   return (
     <aside ref={root} aria-label="관심종목" className="flex min-h-0 min-w-0 flex-1 flex-col">
       <WatchHead onNaming={onNaming} />
-      <WatchList variant="desktop" editing={false} naming={naming} onNaming={onNaming} width={width} />
+      <WatchList variant="desktop" sender={id} editing={false} naming={naming} onNaming={onNaming} width={width} />
     </aside>
   );
 }
@@ -82,7 +83,7 @@ export function PhoneWatch() {
           {editing ? "완료" : "편집"}
         </button>
       </WatchHead>
-      <WatchList variant="phone" editing={editing} naming={naming} onNaming={onNaming} />
+      <WatchList variant="phone" sender={null} editing={editing} naming={naming} onNaming={onNaming} />
     </section>
   );
 }
@@ -250,7 +251,7 @@ function NameInput({ naming, onDone }: { naming: Naming; onDone(): void }) {
   );
 }
 
-function WatchList({ variant, editing, naming, onNaming, width = null }: { variant: WatchVariant; editing: boolean; width?: number | null } & GroupNaming) {
+function WatchList({ variant, sender, editing, naming, onNaming, width = null }: { variant: WatchVariant; sender: WindowId | null; editing: boolean; width?: number | null } & GroupNaming) {
   const list = useActiveWatchlist();
   const symbols = list.symbols;
   const chosen = useUiStore((s) => s.prefs.watchColumns);
@@ -289,6 +290,7 @@ function WatchList({ variant, editing, naming, onNaming, width = null }: { varia
         columns={columns}
         template={template}
         variant={variant}
+        sender={sender}
         editing={editing}
         dropBefore={sameSection && dragOver === i}
         onMoved={setFocusRow}
@@ -466,6 +468,7 @@ interface RowProps {
   columns: readonly WatchColumn[];
   template: React.CSSProperties;
   variant: WatchVariant;
+  sender: WindowId | null;
   editing: boolean;
   dropBefore: boolean;
   onMoved(row: WatchRowRef): void;
@@ -509,11 +512,11 @@ function QuoteCell({ column, quote, limited, isIndex, variant }: { column: Watch
   );
 }
 
-function WatchRow({ list, row, index, last, columns, template, variant, editing, dropBefore, onMoved, onNaming, drag }: RowProps) {
+function WatchRow({ list, row, index, last, columns, template, variant, sender, editing, dropBefore, onMoved, onNaming, drag }: RowProps) {
   const { code } = row;
   const cellId = useSelectionStore((s) => s.activeCell);
   const cell = useCell(cellId);
-  const active = cell.symbol === code;
+  const active = useLayoutStore((s) => watchedSymbol(s.layout, sender, cellId)) === code;
   const others = useWatchlistStore((s) => s.lists).filter((l) => l.id !== list.id);
   const [menu, setMenu] = useState<{ kind: "actions" | "transfer" | "group" | "addGroup"; x: number; y: number } | null>(null);
   const root = useRef<HTMLLIElement>(null);
@@ -529,7 +532,8 @@ function WatchRow({ list, row, index, last, columns, template, variant, editing,
   const label = unknown ? [name, "찾을 수 없음"] : [name, values, limited ? "실시간 아님" : ""];
 
   const open = () => {
-    useLayoutStore.getState().setSymbol(cellId, info ?? { code, nxtEnabled: false });
+    const { notice } = useLayoutStore.getState().sendSymbol(sender, cellId, info ?? { code, nxtEnabled: false });
+    if (notice) useSelectionStore.getState().showToast(notice);
     if (variant === "phone") useSelectionStore.getState().setPhoneTab("chart");
   };
   const move = (step: -1 | 1) => {

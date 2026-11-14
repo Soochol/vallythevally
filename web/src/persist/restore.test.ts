@@ -149,6 +149,28 @@ test("차트가 아닌 창과 배치를 순서·연동 색 그대로 열고, 마
   expect(r.layoutDirty).toBe(false);
 });
 
+test("같은 연동 색인데 종목이 다른 차트 창은 창 목록에서 앞선 창의 종목으로 맞춰 열고 저장한다", async () => {
+  const windows: LayoutWindow[] = [
+    cell({ id: "cell-0", link: "b", symbol: "IDX:001", venue: null }),
+    cell({ id: "cell-1", link: "a", symbol: "005930", venue: "krx", period: "W" }),
+    cell({ id: "cell-2", link: "a", symbol: "005935", venue: "combined", period: "D" }),
+    cell({ id: "cell-3", link: "b", symbol: "005935", venue: "combined" }),
+    cell({ id: "cell-4", link: null, symbol: "005935", venue: "combined" }),
+    cell({ id: "cell-5", link: "a", symbol: "000660", venue: "nxt" }),
+    ...SIDE_WINDOWS,
+  ];
+  const r = await restore(sources({ layouts: [{ ...layout("L1"), windows }] }));
+  expect(chartWindows(r.layout).map((w) => [w.id, w.symbol, w.venue, w.period])).toEqual([
+    ["cell-0", "IDX:001", null, "D"],
+    ["cell-1", "005930", "krx", "W"],
+    ["cell-2", "005930", "combined", "D"],
+    ["cell-3", "IDX:001", null, "D"],
+    ["cell-4", "005935", "combined", "D"],
+    ["cell-5", "005930", "nxt", "D"],
+  ]);
+  expect(r.layoutDirty).toBe(true);
+});
+
 test("배치는 읽어 둔 모양으로 연다", async () => {
   const canvas = { rects: { "cell-0": { x: 0, y: 0, w: 0.7, h: 1 }, watchlist: { x: 0.7, y: 0, w: 0.3, h: 1 } }, order: ["cell-0", "watchlist"] };
   const r = await restore(sources({ layouts: [{ ...layout("L1", cell({})), placement: { v: 1, dock: null, canvas } }] }));

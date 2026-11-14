@@ -86,7 +86,8 @@ function SearchDialogBody({ purpose }: { purpose: SearchPurpose }) {
         selection.showToast(`${watchlist.name}에 넣었습니다: ${info.name}`);
       }
     } else {
-      useLayoutStore.getState().setSymbol(cellId, info);
+      const { notice } = useLayoutStore.getState().setSymbol(cellId, info);
+      if (notice) selection.showToast(notice);
       selection.setPhoneTab("chart");
     }
     close();

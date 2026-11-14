@@ -1,4 +1,4 @@
-import type { KeyboardEvent } from "react";
+import { Fragment, type KeyboardEvent, useState } from "react";
 import { useSymbolInfo } from "../../api/queries";
 import type { GroupNode } from "../../layout/dock/tree";
 import { WINDOW_KINDS, type WindowId } from "../../layout/kinds";
@@ -8,6 +8,7 @@ import { useCell, useLayoutStore, type WindowState } from "../../stores/layout";
 import { useSelectionStore } from "../../stores/selection";
 import { ScreenerBadge } from "../screener/ScreenerPanel";
 import { WINDOW_CONTENT } from "./contents";
+import { LinkDot } from "./LinkDot";
 
 export const tabId = (window: WindowId) => `window-tab-${window}`;
 const panelId = (group: string) => `window-panel-${group}`;
@@ -15,7 +16,18 @@ const panelId = (group: string) => `window-panel-${group}`;
 function ChartTabLabel({ id }: { id: WindowId }) {
   const cell = useCell(id);
   const name = useSymbolInfo(cell.symbol).data?.name ?? cell.symbol;
-  return <><span className="dock-tab-name">{name}</span><span className="dock-tab-sub">{PERIOD_LABEL[cell.period]}</span></>;
+  const [seen, setSeen] = useState(cell.symbol);
+  const [flash, setFlash] = useState(0);
+  if (seen !== cell.symbol) {
+    setSeen(cell.symbol);
+    setFlash((n) => n + 1);
+  }
+  return (
+    <>
+      <span className="dock-tab-name">{name}</span><span className="dock-tab-sub">{PERIOD_LABEL[cell.period]}</span>
+      {flash > 0 && <span key={flash} className="dock-tab-flash" aria-hidden="true" onAnimationEnd={() => setFlash(0)} />}
+    </>
+  );
 }
 
 function TabLabel({ window }: { window: WindowState }) {
@@ -57,11 +69,14 @@ export function DockGroup({ group, rect, number }: { group: GroupNode; rect: Rec
           if (!window) return null;
           const selected = tab === group.active;
           return (
-            <button key={tab} id={tabId(tab)} type="button" role="tab" data-window-id={tab} data-active-cell={tab === activeCell ? "" : undefined}
-              aria-selected={selected} aria-controls={selected ? panelId(group.id) : undefined} tabIndex={selected ? 0 : -1}
-              className="dock-tab" onClick={() => select(tab)} onKeyDown={(event) => move(event, tab)}>
-              <TabLabel window={window} />
-            </button>
+            <Fragment key={tab}>
+              <button id={tabId(tab)} type="button" role="tab" data-window-id={tab} data-active-cell={tab === activeCell ? "" : undefined}
+                aria-selected={selected} aria-controls={selected ? panelId(group.id) : undefined} tabIndex={selected ? 0 : -1}
+                className="dock-tab" onClick={() => select(tab)} onKeyDown={(event) => move(event, tab)}>
+                <TabLabel window={window} />
+              </button>
+              <LinkDot window={window} selected={selected} />
+            </Fragment>
           );
         })}
       </div>

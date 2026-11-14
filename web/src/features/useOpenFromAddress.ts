@@ -4,8 +4,8 @@ import { useSearchParams } from "react-router";
 import { ApiRequestError } from "../api/http";
 import { fetchSymbolInfo } from "../api/queries";
 import { isPeriod } from "../lib/symbol";
-import { isVenue, venueFor, type VenueTarget } from "../lib/venue";
-import { useLayoutStore } from "../stores/layout";
+import { isVenue, venueFor } from "../lib/venue";
+import { type SymbolTarget, useLayoutStore } from "../stores/layout";
 import { useSelectionStore } from "../stores/selection";
 
 /**
@@ -27,20 +27,17 @@ export function useOpenFromAddress() {
     const venue = venueParam !== null && isVenue(venueParam) ? venueParam : "combined";
     setParams({}, { replace: true });
     // 종목과 봉 주기를 한 번에 바꾼다. 따로 바꾸면 지금 종목의 새 봉 주기를 쓸데없이 한 번 더 받는다.
-    const open = (target: VenueTarget | null) => {
+    const open = (target: SymbolTarget | null, venueNotice: string | null = null) => {
       if (period !== null && isPeriod(period)) setPeriod(cellId, period);
-      if (target !== null) setSymbol(cellId, target, venue);
+      const linkNotice = target === null ? null : setSymbol(cellId, target, venue).notice;
+      const notice = [linkNotice, venueNotice].filter((n) => n !== null).join(". ");
+      if (notice) useSelectionStore.getState().showToast(notice);
     };
     if (symbol === null) return open(null);
     queryClient
       .fetchQuery({ queryKey: ["symbol", symbol], queryFn: ({ signal }) => fetchSymbolInfo(symbol, signal), staleTime: Infinity })
       .then(
-        (info) => {
-          if (venue === "nxt" && venueFor(info, venue) === "combined") {
-            useSelectionStore.getState().showToast("NXT에서 거래되지 않아 통합으로 엽니다");
-          }
-          open(info);
-        },
+        (info) => open(info, venue === "nxt" && venueFor(info, venue) === "combined" ? "NXT에서 거래되지 않아 통합으로 엽니다" : null),
         (e: unknown) => {
           if (e instanceof ApiRequestError && e.code === "unknown_symbol") {
             useSelectionStore.getState().showToast(`주소의 종목 ${symbol}를 찾을 수 없습니다`);

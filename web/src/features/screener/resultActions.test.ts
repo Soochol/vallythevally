@@ -26,14 +26,14 @@ afterEach(() => vi.unstubAllGlobals());
 test("결과 열기는 현재 칸의 거래소와 주기를 유지하고 휴대폰 차트로 돌아간다", async () => {
   const query = client();
   query.setQueryData(["symbol", "000660"], symbol("000660"));
-  await openResult(query, "000660");
+  await openResult(query, "000660", null);
   expect(cell()).toMatchObject({ symbol: "000660", venue: "nxt", period: "W" });
   expect(useSelectionStore.getState().phoneTab).toBe("chart");
 });
 
 test("종목 정보가 실패해도 통합으로 결과를 열 수 있다", async () => {
   vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("offline")));
-  await openResult(client(), "000660");
+  await openResult(client(), "000660", null);
   expect(cell()).toMatchObject({ symbol: "000660", venue: "combined", period: "W" });
 });
 
@@ -41,10 +41,10 @@ test("빠른 다음 열기는 늦은 이전 응답보다 우선한다", async ()
   let resolveFirst: (response: Response) => void = () => {};
   vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>((resolve) => { resolveFirst = resolve; })));
   const query = client();
-  const first = openResult(query, "000660");
+  const first = openResult(query, "000660", null);
   expect(pendingResultCode()).toBe("000660");
   query.setQueryData(["symbol", "035420"], symbol("035420"));
-  await openResult(query, "035420");
+  await openResult(query, "035420", null);
   resolveFirst(Response.json(symbol("000660")));
   await first;
   expect(cell().symbol).toBe("035420");
@@ -53,7 +53,7 @@ test("빠른 다음 열기는 늦은 이전 응답보다 우선한다", async ()
 test.each(["chart", "tab", "unmount"])("정보 대기 중 다른 선택은 늦은 응답으로 덮지 않는다 %s", async (change) => {
   let resolve: (response: Response) => void = () => {};
   vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>((done) => { resolve = done; })));
-  const opened = openResult(client(), "000660");
+  const opened = openResult(client(), "000660", null);
   if (change === "chart") useLayoutStore.getState().setSymbol(CELL, { code: "035420", nxtEnabled: true });
   else if (change === "tab") useSelectionStore.getState().setPhoneTab("watch");
   else dropPendingOpen();
@@ -61,6 +61,19 @@ test.each(["chart", "tab", "unmount"])("정보 대기 중 다른 선택은 늦�
   await opened;
   expect(cell().symbol).toBe(change === "chart" ? "035420" : "005930");
   expect(useSelectionStore.getState().phoneTab).toBe(change === "tab" ? "watch" : "screener");
+});
+
+test("연동 색이 켜진 스크리너 창은 그 색의 차트로 결과를 열고, 그 색의 차트가 없으면 아무것도 바꾸지 않고 알린다", async () => {
+  const query = client();
+  query.setQueryData(["symbol", "000660"], symbol("000660"));
+  const screener = useLayoutStore.getState().layout.windows.find((w) => w.kind === "screener")!.id;
+  useLayoutStore.getState().setLink(screener, "a");
+  await openResult(query, "000660", screener);
+  expect(cell().symbol).toBe("005930");
+  expect(useSelectionStore.getState().toast?.text).toBe("연동 A를 따르는 차트가 없습니다. 차트의 연동 색을 A로 맞추세요");
+  useLayoutStore.getState().setLink(CELL, "a");
+  await openResult(query, "000660", screener);
+  expect(cell()).toMatchObject({ symbol: "000660", venue: "nxt", period: "W" });
 });
 
 test("관심종목 저장은 기존 목록의 중복을 건너뛰고 결과 순서를 유지한다", () => {
