@@ -267,7 +267,7 @@ test("화면에 보이는 결과만 묶어서 시세를 묻고 스크롤하면 �
 test("Tab은 검색 안에 머물고 필터 버튼의 Enter는 종목을 열지 않는다", async ({ page }) => {
   await page.goto("/");
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
-  const opener = page.getByTitle(SEARCH_BUTTON_TITLE);
+  const opener = page.getByRole("button", { name: "종목·지표·명령 찾기", exact: true });
   await opener.click();
   const dialog = page.getByRole("dialog", { name: "종목 검색" });
   const input = dialog.getByRole("combobox");
