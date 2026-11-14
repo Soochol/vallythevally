@@ -1,8 +1,7 @@
 import { expect, test } from "vitest";
 import { windowId, type WindowKind, type WindowRef } from "../kinds";
 import type { DockNode, DockPlacement, Rect } from "../placement";
-import { dockMinSize, dropTarget, layoutDock, moveDivider, type DockSpace } from "./geometry";
-import { splitAt } from "./tree";
+import { dockMinSize, dropTarget, layoutDock, moveDivider, tabsMinSize, type DockSpace } from "./geometry";
 
 const ref = (id: string, kind: WindowKind): WindowRef => ({ id: windowId(id), kind });
 const group = (id: string, tabs: string[]): DockNode => ({ kind: "group", id, tabs: tabs.map(windowId), active: windowId(tabs[0] ?? "") });
@@ -19,6 +18,12 @@ const tree: DockNode = {
 };
 const dock: DockPlacement = { root: tree, floats: [] };
 
+const undersized = (root: DockNode, at: DockSpace) =>
+  layoutDock(root, at.area, at.gap).groups.filter(({ group: node, rect }) => {
+    const least = tabsMinSize(at.windows, node.tabs);
+    return rect.w < least.w || rect.h < least.h;
+  });
+
 const area = (rect: Rect) => rect.w * rect.h;
 const overlaps = (a: Rect, b: Rect) => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
 
@@ -26,7 +31,7 @@ test("1256×684 영역에서 묶음과 경계가 빈틈도 겹침도 없이 영�
   const layout = layoutDock(tree, space.area, space.gap);
   expect(layout.groups.map((box) => box.group.id)).toEqual(["g1", "g2", "g3", "g4"]);
   expect(layout.gutters).toHaveLength(3);
-  expect(layout.gutters.every((gutter) => (gutter.dir === "row" ? gutter.rect.w : gutter.rect.h) === 6)).toBe(true);
+  expect(layout.gutters.every((gutter) => (gutter.node.dir === "row" ? gutter.rect.w : gutter.rect.h) === 6)).toBe(true);
   const rects = [...layout.groups.map((box) => box.rect), ...layout.gutters.map((gutter) => gutter.rect)];
   expect(rects.reduce((sum, rect) => sum + area(rect), 0)).toBe(1256 * 684);
   for (const rect of rects) {
@@ -36,8 +41,8 @@ test("1256×684 영역에서 묶음과 경계가 빈틈도 겹침도 없이 영�
     expect(rect.y + rect.h).toBeLessThanOrEqual(684);
   }
   rects.forEach((a, i) => rects.slice(i + 1).forEach((b) => expect(overlaps(a, b)).toBe(false)));
-  expect(layout.groups[0]?.rect).toEqual({ x: 0, y: 0, w: 900, h: 339 });
-  expect(layout.groups[3]?.rect).toEqual({ x: 906, y: 413, w: 350, h: 271 });
+  expect(layout.groups[0]?.rect).toEqual({ x: 0, y: 0, w: 903, h: 339 });
+  expect(layout.groups[3]?.rect).toEqual({ x: 909, y: 414, w: 347, h: 270 });
 });
 
 test("묶음의 최소 크기는 탭 최소 크기의 큰 값에 창 머리를 더하고, 나눔은 간격과 함께 더한다", () => {
@@ -48,7 +53,7 @@ test("묶음의 최소 크기는 탭 최소 크기의 큰 값에 창 머리를 �
 test("경계를 옮기면 비율이 바뀌고, 최소 크기에 닿으면 멈췄다고 알린다", () => {
   const moved = moveDivider(dock, [], 0.6, space);
   expect(moved.clamped).toBe(false);
-  expect(splitAt(moved.dock.root, [])?.ratio).toBe(0.6);
+  expect(moved.dock.root.kind === "split" && moved.dock.root.ratio).toBe(0.6);
 
   const pushed = moveDivider(dock, [], 0.95, space);
   expect(pushed.clamped).toBe(true);
@@ -74,4 +79,27 @@ test("포인터가 가장자리에 가까우면 그쪽, 아니면 가운데를 �
   expect(dropTarget(rect, { x: 300, y: 110 })).toEqual({ zone: "top", preview: { x: 100, y: 100, w: 400, h: 100 } });
   expect(dropTarget(rect, { x: 300, y: 290 })).toEqual({ zone: "bottom", preview: { x: 100, y: 200, w: 400, h: 100 } });
   expect(dropTarget(rect, { x: 300, y: 200 })).toEqual({ zone: "center", preview: rect });
+});
+
+test("바깥 경계를 끝까지 옮겨도 안쪽 묶음은 최소 크기를 지킨다", () => {
+  const nested: DockPlacement = { root: { kind: "split", dir: "row", ratio: 0.5, first: group("g1", ["c1"]), second: { kind: "split", dir: "row", ratio: 0.5, first: group("g2", ["w"]), second: group("g3", ["s"]) } }, floats: [] };
+  const result = moveDivider(nested, [], 0.99, space);
+  expect(result.clamped).toBe(true);
+  expect(undersized(result.dock.root, space)).toEqual([]);
+  expect(layoutDock(result.dock.root, space.area, space.gap).groups.map((box) => box.rect.w)).toEqual([1256 - 6 - 566, 280, 280]);
+});
+
+test("영역이 간격보다 작으면 비율을 바꾸지 않는다", () => {
+  const result = moveDivider(dock, [], 5, { ...space, area: { w: 3, h: 3 } });
+  expect(result).toEqual({ dock, clamped: true });
+});
+
+test("소수 px 영역과 간격에서도 멈춘 쪽이 최소 크기를 지킨다", () => {
+  const pair: DockPlacement = { root: { kind: "split", dir: "row", ratio: 0.5, first: group("g1", ["w"]), second: group("g2", ["s"]) }, floats: [] };
+  const fractional: DockSpace = { ...space, area: { w: 520.6, h: 400.4 }, gap: 6.5 };
+  for (const ratio of [0.01, 0.99]) {
+    const result = moveDivider(pair, [], ratio, fractional);
+    expect(result.clamped).toBe(true);
+    expect(undersized(result.dock.root, fractional)).toEqual([]);
+  }
 });

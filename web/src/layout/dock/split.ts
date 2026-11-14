@@ -1,7 +1,7 @@
 import type { WindowId } from "../kinds";
 import type { DockNode, DockPlacement, Rect } from "../placement";
-import { dockMinSize, layoutDock, tabsMinSize, type DockSpace, type Edge } from "./geometry";
-import { findGroup, mapGroups, newGroupId, singleGroup, withoutWindow, type SplitNode } from "./tree";
+import { heldMinSize, layoutDock, ratioForLead, tabsMinSize, wholePixels, type DockSpace, type Edge } from "./geometry";
+import { newGroupId, rewriteGroups, singleGroup, withoutWindow, type SplitNode } from "./tree";
 
 export type SplitResult = { ok: true; dock: DockPlacement } | { ok: false; reason: "too-small" };
 
@@ -11,42 +11,36 @@ function splitBeside(target: DockNode, rect: Rect, window: WindowId, edge: Edge,
   const row = edge === "left" || edge === "right";
   const leads = edge === "left" || edge === "top";
   const need = tabsMinSize(space.windows, [window]);
-  const keep = dockMinSize(target, space);
-  const total = (row ? rect.w : rect.h) - space.gap;
+  const keep = heldMinSize(target, space);
+  const along = row ? rect.w : rect.h;
   const needAlong = row ? need.w : need.h;
   const keepAlong = row ? keep.w : keep.h;
-  if (total < needAlong + keepAlong || (row ? rect.h : rect.w) < (row ? need.h : need.w)) return null;
-  const share = Math.min(total - keepAlong, Math.max(needAlong, total * SPLIT_SHARE));
+  if (needAlong + space.gap + keepAlong > along || (row ? rect.h : rect.w) < (row ? need.h : need.w)) return null;
+  const share = Math.min(along - space.gap - keepAlong, Math.max(needAlong, Math.floor((along - space.gap) * SPLIT_SHARE)));
   const group = singleGroup(id, window);
   return {
     kind: "split",
     dir: row ? "row" : "column",
-    ratio: (leads ? share : total - share) / total,
+    ratio: ratioForLead(leads ? share : along - space.gap - share, along, space.gap),
     first: leads ? group : target,
     second: leads ? target : group,
   };
 }
 
-const isOnlyTab = (dock: DockPlacement, groupId: string, window: WindowId): boolean => {
-  const group = findGroup(dock.root, groupId);
-  return group !== null && group.tabs.length === 1 && group.tabs[0] === window;
-};
-
 export function splitGroup(dock: DockPlacement, window: WindowId, groupId: string, edge: Edge, space: DockSpace): SplitResult {
-  if (!findGroup(dock.root, groupId) || isOnlyTab(dock, groupId, window)) return { ok: true, dock };
+  const px = wholePixels(space);
   const rest = withoutWindow(dock, window);
-  const box = rest && layoutDock(rest.root, space.area, space.gap).groups.find((candidate) => candidate.group.id === groupId);
+  const box = rest && layoutDock(rest.root, px.area, px.gap).groups.find((candidate) => candidate.group.id === groupId);
   if (!rest || !box) return { ok: true, dock };
-  const split = splitBeside(box.group, box.rect, window, edge, newGroupId(rest.root), space);
+  const split = splitBeside(box.group, box.rect, window, edge, newGroupId(rest.root), px);
   if (!split) return { ok: false, reason: "too-small" };
-  const root = mapGroups(rest.root, (group) => (group.id === groupId ? split : group));
-  return root ? { ok: true, dock: { ...rest, root } } : { ok: true, dock };
+  return { ok: true, dock: { ...rest, root: rewriteGroups(rest.root, (group) => (group.id === groupId ? split : group)) } };
 }
 
 export function splitArea(dock: DockPlacement, window: WindowId, edge: Edge, space: DockSpace): SplitResult {
-  if (dock.root.kind === "group" && isOnlyTab(dock, dock.root.id, window)) return { ok: true, dock };
+  const px = wholePixels(space);
   const rest = withoutWindow(dock, window);
   if (!rest) return { ok: true, dock };
-  const split = splitBeside(rest.root, { x: 0, y: 0, ...space.area }, window, edge, newGroupId(rest.root), space);
+  const split = splitBeside(rest.root, { x: 0, y: 0, ...px.area }, window, edge, newGroupId(rest.root), px);
   return split ? { ok: true, dock: { ...rest, root: split } } : { ok: false, reason: "too-small" };
 }

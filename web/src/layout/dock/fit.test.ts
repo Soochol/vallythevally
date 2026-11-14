@@ -31,6 +31,11 @@ test("차트 셋은 왼쪽에 같은 높이로 쌓인다", () => {
   ]);
 });
 
+test("간격이 있어도 쌓은 차트의 높이가 같다", () => {
+  const boxes = layoutDock(defaultDock([c1, c2, c3, w]).root, { w: 1256, h: 684 }, 6).groups;
+  expect(boxes.slice(0, 3).map((box) => box.rect.h)).toEqual([224, 224, 224]);
+});
+
 test("차트만 있으면 오른쪽 묶음이 없다", () => {
   expect(defaultDock([c1])).toEqual({ root: group("g1", ["c1"]), floats: [] });
   expect(defaultDock([c1, c2]).root).toEqual({ kind: "split", dir: "column", ratio: 0.5, first: group("g1", ["c1"]), second: group("g2", ["c2"]) });
@@ -74,9 +79,9 @@ test("묶음의 고른 탭이 탭에 없으면 첫 탭으로 고친다", () => {
   expect(fitDock(dock, [c1, w, s]).root).toEqual(row(0.7, group("g1", ["c1"]), group("g2", ["w", "s"], "w")));
 });
 
-test("모든 묶음이 사라지면 기본 배치로 돌아간다", () => {
-  const dock: DockPlacement = { root: group("g9", ["gone"]), floats: [float("w")] };
-  expect(fitDock(dock, [c1, w])).toEqual(defaultDock([c1, w]));
+test("모든 묶음이 사라지면 떠 있지 않은 창으로 기본 배치를 만들고 떠 있는 창은 둔다", () => {
+  expect(fitDock({ root: group("g9", ["gone"]), floats: [float("w")] }, [c1, w, s])).toEqual({ root: row(0.72, group("g1", ["c1"]), group("g2", ["s"])), floats: [float("w")] });
+  expect(fitDock({ root: group("g9", ["gone"]), floats: [float("c1"), float("w")] }, [c1, w])).toEqual(defaultDock([c1, w]));
 });
 
 test("맞출 것이 없으면 받은 배치를 그대로 돌려준다", () => {

@@ -1,6 +1,6 @@
 import { WINDOW_KINDS, type HomeSpot, type WindowId, type WindowRef } from "../kinds";
 import type { DockNode, DockPlacement } from "../placement";
-import { listGroups, mapGroups, newGroupId, singleGroup, type GroupNode } from "./tree";
+import { listGroups, newGroupId, pruneGroups, rewriteGroups, singleGroup, type GroupNode } from "./tree";
 
 export type WindowList = readonly [WindowRef, ...WindowRef[]];
 
@@ -32,7 +32,7 @@ function insertMissing(root: DockNode, window: WindowRef, windows: readonly Wind
   const home = homeOf(window);
   const sameHome = (tab: WindowId) => windows.some((candidate) => candidate.id === tab && homeOf(candidate) === home);
   const target = listGroups(root).find((group) => group.tabs.some(sameHome));
-  if (target) return mapGroups(root, (group) => (group === target ? { ...group, tabs: [...group.tabs, window.id] } : group)) ?? root;
+  if (target) return rewriteGroups(root, (group) => (group === target ? { ...group, tabs: [...group.tabs, window.id] } : group));
   return {
     kind: "split",
     dir: "row",
@@ -51,15 +51,19 @@ export function fitDock(dock: DockPlacement | null, windows: WindowList): DockPl
     placed.add(window);
     return true;
   };
-  const kept = mapGroups(dock.root, (group) => {
+  const kept = pruneGroups(dock.root, (group) => {
     const tabs = group.tabs.filter(claim);
     const [firstTab] = tabs;
     if (!firstTab) return null;
     const active = tabs.includes(group.active) ? group.active : firstTab;
     return tabs.length === group.tabs.length && active === group.active ? group : { ...group, tabs, active };
   });
-  if (!kept) return defaultDock(windows);
   const floats = dock.floats.filter((float) => claim(float.window));
-  const root = windows.filter((window) => !placed.has(window.id)).reduce((node, window) => insertMissing(node, window, windows), kept);
+  const missing = windows.filter((window) => !placed.has(window.id));
+  if (!kept) {
+    const [first, ...more] = missing;
+    return first ? { root: defaultDock([first, ...more]).root, floats } : defaultDock(windows);
+  }
+  const root = missing.reduce((node, window) => insertMissing(node, window, windows), kept);
   return root === dock.root && floats.length === dock.floats.length ? dock : { root, floats };
 }

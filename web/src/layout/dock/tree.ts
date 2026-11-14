@@ -15,19 +15,17 @@ export const findGroup = (root: DockNode, id: string): GroupNode | null => listG
 export const groupOfWindow = (root: DockNode, window: WindowId): GroupNode | null =>
   listGroups(root).find((group) => group.tabs.includes(window)) ?? null;
 
-export function splitAt(root: DockNode, path: SplitPath): SplitNode | null {
-  let node = root;
-  for (const branch of path) {
-    if (node.kind !== "split") return null;
-    node = node[branch];
-  }
-  return node.kind === "split" ? node : null;
+export function rewriteGroups(node: DockNode, change: (group: GroupNode) => DockNode): DockNode {
+  if (node.kind === "group") return change(node);
+  const first = rewriteGroups(node.first, change);
+  const second = rewriteGroups(node.second, change);
+  return first === node.first && second === node.second ? node : { ...node, first, second };
 }
 
-export function mapGroups(node: DockNode, change: (group: GroupNode) => DockNode | null): DockNode | null {
+export function pruneGroups(node: DockNode, change: (group: GroupNode) => GroupNode | null): DockNode | null {
   if (node.kind === "group") return change(node);
-  const first = mapGroups(node.first, change);
-  const second = mapGroups(node.second, change);
+  const first = pruneGroups(node.first, change);
+  const second = pruneGroups(node.second, change);
   if (!first) return second;
   if (!second) return first;
   return first === node.first && second === node.second ? node : { ...node, first, second };
@@ -61,7 +59,7 @@ function withoutTab(group: GroupNode, window: WindowId): GroupNode | null {
 }
 
 export function withoutWindow(dock: DockPlacement, window: WindowId): DockPlacement | null {
-  const root = mapGroups(dock.root, (group) => withoutTab(group, window));
+  const root = pruneGroups(dock.root, (group) => withoutTab(group, window));
   if (!root) return null;
   const floats = dock.floats.filter((float) => float.window !== window);
   return root === dock.root && floats.length === dock.floats.length ? dock : { root, floats };
@@ -75,18 +73,17 @@ export function removeWindow(dock: DockPlacement, window: WindowId): RemoveResul
 }
 
 export function selectTab(dock: DockPlacement, window: WindowId): DockPlacement {
-  const root = mapGroups(dock.root, (group) => (group.tabs.includes(window) && group.active !== window ? { ...group, active: window } : group));
-  return root && root !== dock.root ? { ...dock, root } : dock;
+  const root = rewriteGroups(dock.root, (group) => (group.tabs.includes(window) && group.active !== window ? { ...group, active: window } : group));
+  return root === dock.root ? dock : { ...dock, root };
+}
+
+function withTab(group: GroupNode, window: WindowId, at: number | undefined): GroupNode {
+  const index = Math.max(0, Math.min(at ?? group.tabs.length, group.tabs.length));
+  return { ...group, tabs: [...group.tabs.slice(0, index), window, ...group.tabs.slice(index)], active: window };
 }
 
 export function putTab(dock: DockPlacement, window: WindowId, groupId: string, at?: number): DockPlacement {
-  if (!findGroup(dock.root, groupId)) return dock;
-  const root = mapGroups(dock.root, (group) => {
-    if (group.id !== groupId) return withoutTab(group, window);
-    const tabs = group.tabs.filter((tab) => tab !== window);
-    const index = Math.max(0, Math.min(at ?? tabs.length, tabs.length));
-    return { ...group, tabs: [...tabs.slice(0, index), window, ...tabs.slice(index)], active: window };
-  });
-  if (!root) return dock;
-  return { root, floats: dock.floats.filter((float) => float.window !== window) };
+  const rest = withoutWindow(dock, window);
+  if (!rest || !findGroup(rest.root, groupId)) return dock;
+  return { ...rest, root: rewriteGroups(rest.root, (group) => (group.id === groupId ? withTab(group, window, at) : group)) };
 }

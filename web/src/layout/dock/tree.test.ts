@@ -37,7 +37,7 @@ test("묶음을 차례로 돌고, 창이나 id로 묶음을 찾는다", () => {
 test("마지막 탭을 빼면 묶음이 사라지고 이웃이 자리를 채운다", () => {
   const dock = removed(defaultDock([c1, c2, w]), "c2");
   expect(dock.root).toEqual({ kind: "split", dir: "row", ratio: 0.72, first: group("g1", ["c1"]), second: group("g3", ["w"]) });
-  expect(layoutDock(dock.root, space.area, space.gap).groups[0]?.rect).toEqual({ x: 0, y: 0, w: 900, h: 684 });
+  expect(layoutDock(dock.root, space.area, space.gap).groups[0]?.rect).toEqual({ x: 0, y: 0, w: 903, h: 684 });
 });
 
 test("뿌리 묶음의 마지막 탭은 빼지 않는다", () => {
@@ -101,23 +101,39 @@ function problems(dock: DockPlacement, windows: readonly WindowRef[]): string[] 
   return found;
 }
 
-const ok = (result: { ok: true; dock: DockPlacement } | { ok: false }, before: DockPlacement) => (result.ok ? result.dock : before);
+type Outcome = { ok: true; dock: DockPlacement } | { ok: false; reason: string };
+
+const applied = (result: Outcome): DockPlacement => {
+  if (!result.ok) throw new Error(result.reason);
+  return result.dock;
+};
+
+const refused = (result: Outcome, before: DockPlacement): DockPlacement => {
+  if (result.ok) throw new Error("거절되어야 할 연산이 적용됐다");
+  return before;
+};
+
+const holding = (dock: DockPlacement, window: string): string => {
+  const found = groupOfWindow(dock.root, id(window));
+  if (!found) throw new Error(`${window}가 든 묶음이 없다`);
+  return found.id;
+};
 
 test("연산을 이어 적용해도 창은 한 번씩, 빈 묶음 없음, 비율 범위, 묶음 id 고유가 지켜진다", () => {
   const all: WindowList = [c1, c2, w, s, o, i];
   const steps: [string, readonly WindowRef[], (dock: DockPlacement) => DockPlacement][] = [
-    ["스크리너를 차트 오른쪽에", all, (dock) => ok(splitGroup(dock, id("s"), "g1", "right", space), dock)],
-    ["지표를 둘째 차트 묶음에", all, (dock) => putTab(dock, id("i"), "g2")],
+    ["스크리너를 차트 오른쪽에", all, (dock) => applied(splitGroup(dock, id("s"), "g1", "right", space))],
+    ["지표를 둘째 차트 묶음에", all, (dock) => putTab(dock, id("i"), holding(dock, "c2"))],
+    ["관심종목을 전체 왼쪽에", all, (dock) => applied(splitArea(dock, id("w"), "left", space))],
     ["뿌리 경계를 끝까지", all, (dock) => moveDivider(dock, [], 0.99, space).dock],
-    ["관심종목을 전체 왼쪽에", all, (dock) => ok(splitArea(dock, id("w"), "left", space), dock)],
-    ["작은 자리에 나누기 거절", all, (dock) => ok(splitGroup(dock, id("o"), "g2", "top", { ...space, area: { w: 700, h: 400 } }), dock)],
-    ["둘째 차트 빼기", [c1, w, s, o, i], (dock) => removed(dock, "c2")],
-    ["개체 목록 띄우기", [c1, w, s, o, i], (dock) => ({ ...removed(dock, "o"), floats: [{ window: id("o"), rect: { x: 0.5, y: 0.5, w: 0.3, h: 0.3 } }] })],
+    ["작은 자리에 나누기 거절", all, (dock) => refused(splitGroup(dock, id("o"), holding(dock, "c2"), "top", { ...space, area: { w: 700, h: 400 } }), dock)],
+    ["둘째 차트 빼기", [c1, w, s, o, i], (dock) => applied(removeWindow(dock, id("c2")))],
+    ["개체 목록 띄우기", [c1, w, s, o, i], (dock) => ({ ...applied(removeWindow(dock, id("o"))), floats: [{ window: id("o"), rect: { x: 0.5, y: 0.5, w: 0.3, h: 0.3 } }] })],
     ["차트 되살리기와 지표 닫기", [c1, c2, w, s, o], (dock) => fitDock(dock, [c1, c2, w, s, o])],
-    ["떠 있던 창을 묶음 아래에", [c1, c2, w, s, o], (dock) => ok(splitGroup(dock, id("o"), groupOfWindow(dock.root, id("c1"))?.id ?? "", "bottom", space), dock)],
+    ["떠 있던 창을 묶음 아래에", [c1, c2, w, s, o], (dock) => applied(splitGroup(dock, id("o"), holding(dock, "c1"), "bottom", space))],
     ["차트 하나 더", [c1, c2, c3, w, s, o], (dock) => fitDock(dock, [c1, c2, c3, w, s, o])],
-    ["탭 순서 바꾸기", [c1, c2, c3, w, s, o], (dock) => putTab(dock, id("c3"), groupOfWindow(dock.root, id("c1"))?.id ?? "", 0)],
-    ["관심종목 빼기", [c1, c2, c3, s, o], (dock) => removed(dock, "w")],
+    ["탭 순서 바꾸기", [c1, c2, c3, w, s, o], (dock) => putTab(dock, id("c3"), holding(dock, "c1"), 0)],
+    ["관심종목 빼기", [c1, c2, c3, s, o], (dock) => applied(removeWindow(dock, id("w")))],
   ];
   let dock = defaultDock(all);
   expect(problems(dock, all)).toEqual([]);
