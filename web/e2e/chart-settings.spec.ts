@@ -467,6 +467,18 @@ test("범례를 끈 지수는 거래소 자리 없이 봉 값이 범례 왼쪽 �
   expect((await ohlc(page).boundingBox())!.x).toBe(legend.x);
 });
 
+test("가격 패널에 겹친 거래량의 범례 줄도 범례를 끄면 숨는다", async ({ page, scenario }) => {
+  const volume = DEFAULT_CHART_SETTINGS.indicators[0]!;
+  openWith(scenario, { indicators: [{ ...volume, panel: "price" }], panels: [] });
+  await open(page);
+  const volumeRow = cell(page).locator(`[data-indicator-row="${volume.id}"]`);
+  await expect(volumeRow).toBeVisible();
+  await openSettings(page);
+  await legendSwitch(page).click();
+  await expect(volumeRow).toBeHidden();
+  await expect(ohlc(page)).toBeVisible();
+});
+
 test("390x844에서 범례를 끄면 봉 값 줄만 남고 휴대폰 머리의 거래소는 그대로다", async ({ page, scenario }) => {
   openWith(scenario, { indicators: [...DEFAULT_CHART_SETTINGS.indicators, PRICE_MA], compare: ["000660"] });
   await open(page);
