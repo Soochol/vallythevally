@@ -231,9 +231,7 @@ export function shapeBounds(s: Shape, pane: Pane, measure: TextMeasure = approxT
       return normalize(a, b);
     }
     case "polyline": {
-      const xs = s.points.map((q) => q.x);
-      const ys = s.points.map((q) => q.y);
-      return { x1: Math.min(...xs), y1: Math.min(...ys), x2: Math.max(...xs), y2: Math.max(...ys) };
+      return s.points.reduce((box, q) => ({ x1: Math.min(box.x1, q.x), y1: Math.min(box.y1, q.y), x2: Math.max(box.x2, q.x), y2: Math.max(box.y2, q.y) }), { x1: Infinity, y1: Infinity, x2: -Infinity, y2: -Infinity });
     }
     case "rect":
       return rectEdges(s.a, s.b, s.extend ?? "none", pane);

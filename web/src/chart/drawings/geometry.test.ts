@@ -189,3 +189,9 @@ describe("화살표 키", () => {
     expect(nudge([{ t: 0, price: 1 }], "ArrowLeft", ctx)).toBeNull();
   });
 });
+
+test("shapeBounds는 점이 아주 많은 꺾은선에서도 경계를 준다", async () => {
+  const { shapeBounds: bounds } = await import("./geometry");
+  const points = Array.from({ length: 200_000 }, (_, i) => ({ x: i, y: i % 7 }));
+  expect(bounds({ kind: "polyline", points, closed: false }, { width: 800, height: 400 })).toEqual({ x1: 0, y1: 0, x2: 199_999, y2: 6 });
+});
