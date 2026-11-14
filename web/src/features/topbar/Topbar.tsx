@@ -26,8 +26,8 @@ export function Topbar() {
     <header role="toolbar" aria-label="차트 도구 막대" className="desktop-topbar ui-island absolute left-[var(--island-gap)] right-[var(--island-right)] top-[var(--island-gap)] z-20 h-[var(--island-h)] rounded-l max-md:hidden">
       <span className="app-brand" title="vallythevally"><BrandIcon /><span>vally</span></span>
       <button type="button" className="tb-btn shell-symbol" aria-haspopup="dialog" title="종목 바꾸기" onClick={() => openSearch()}>
-        <b className="truncate font-semibold">{info?.name ?? cell.symbol}</b>
-        <span className="text-s text-text-3">{symbolSub(cell.symbol, info)}</span>
+        <b className="min-w-0 flex-1 truncate text-left font-semibold" title={info?.name ?? cell.symbol}>{info?.name ?? cell.symbol}</b>
+        <span className="flex-none text-s text-text-3">{symbolSub(cell.symbol, info)}</span>
         <ChevronIcon />
       </button>
       <span className="tb-sep" />

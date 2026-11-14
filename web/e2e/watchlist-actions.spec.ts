@@ -30,8 +30,6 @@ test("13종목이 34px 한 줄로 세로 스크롤 없이 보인다", async ({ s
   await page.goto("/?symbol=005930");
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
   await expect(row(page, "0205H0")).toContainText("에스케이증권제14호기업인수목적");
-  const longCode = row(page, "0205H0").locator("[data-main] > span:first-child small");
-  expect(await longCode.evaluate((el) => el.clientWidth < el.scrollWidth)).toBe(true);
   const list = panel(page).getByRole("list");
   await expect(list.locator("li")).toHaveCount(13);
   await expect.poll(() => list.evaluate((el) => el.scrollHeight - el.clientHeight)).toBeLessThanOrEqual(0);
@@ -236,4 +234,14 @@ test("목록 복제·이름 바꾸기는 순서를 보존하며 목록 지우기
   await expect(listButton(page)).toHaveAccessibleName("관심종목 목록: 반도체");
   await page.reload();
   await expect(listButton(page)).toHaveAccessibleName("관심종목 목록: 반도체");
+});
+
+test("관심종목 줄에는 종목 코드가 보이지 않는다", async ({ scenario, page }) => {
+  await seed(scenario);
+  await page.goto("/?symbol=005930");
+  await expect(cell(page)).toHaveAttribute("aria-busy", "false");
+  await expect(row(page, "005935")).toBeVisible();
+  for (const code of ["005930", "086520", "005935"]) {
+    await expect(row(page, code).getByText(code)).toHaveCount(0);
+  }
 });
