@@ -116,6 +116,22 @@ test("창 목록이 있어도 placement가 객체가 아닌 미저장 본문은 
   expect(r.layoutDirty).toBe(false);
 });
 
+test.each([
+  ["차트 창이 없다", [{ id: "watchlist", link: null, kind: "watchlist" }]],
+  ["창이 없다", []],
+  ["창 id가 형식에 맞지 않는다", [{ id: "칸 1", link: null, kind: "chart", symbol: "005930", venue: "combined", period: "M", chartSettings: {} }]],
+  ["창 id가 겹친다", [{ id: "a", link: null, kind: "watchlist" }, { id: "a", link: null, kind: "chart", symbol: "005930", venue: "combined", period: "M", chartSettings: {} }]],
+  ["모르는 종류가 있다", [{ id: "c", link: null, kind: "chart", symbol: "005930", venue: "combined", period: "M", chartSettings: {} }, { id: "x", link: null, kind: "nope" }]],
+  ["차트 창에 종목이 없다", [{ id: "c", link: null, kind: "chart", venue: "combined", period: "M", chartSettings: {} }]],
+  ["연동 색이 틀렸다", [{ id: "c", link: "d", kind: "chart", symbol: "005930", venue: "combined", period: "M", chartSettings: {} }]],
+  ["관심종목 창이 둘이다", [{ id: "c", link: null, kind: "chart", symbol: "005930", venue: "combined", period: "M", chartSettings: {} }, { id: "w1", link: null, kind: "watchlist" }, { id: "w2", link: null, kind: "watchlist" }]],
+])("%s면 미저장 본문을 버리고 서버 레이아웃을 연다", async (_, windows) => {
+  const draft = { id: "L1", name: "L1", sync: SYNC, windows, placement: {} };
+  const r = await restore(sources({ unsaved: { layout: unsaved("/api/layouts/L1", 11, draft) } }));
+  expect(chartWindows(r.layout).map((w) => w.period)).toEqual(["D"]);
+  expect(r.layoutDirty).toBe(false);
+});
+
 test("차트가 아닌 창과 배치를 순서·연동 색 그대로 열고, 마이그레이션이 남긴 빈 배치는 경고 없이 읽는다", async () => {
   const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
   const windows: LayoutWindow[] = [cell({ id: "cell-0", link: "a" }), { id: "watchlist", link: "a", kind: "watchlist" }, cell({ id: "cell-1", symbol: "IDX:001", venue: null }), ...SIDE_WINDOWS.slice(1)];

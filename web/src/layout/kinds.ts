@@ -1,6 +1,7 @@
 import type { LayoutWindow } from "../api/generated/LayoutWindow";
 
 export const WINDOW_HEAD_HEIGHT = 34;
+export const MAX_WINDOWS = 12;
 
 export type LinkRole = "follows" | "sends" | "none";
 export type HomeSpot = "wide" | "side";

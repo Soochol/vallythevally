@@ -1,5 +1,6 @@
 import type { Layout } from "../api/generated/Layout";
 import type { LayoutWindow } from "../api/generated/LayoutWindow";
+import type { LinkColor } from "../api/generated/LinkColor";
 import type { LayoutSummary } from "../api/generated/LayoutSummary";
 import type { SymbolCode } from "../api/generated/SymbolCode";
 import type { SymbolInfo } from "../api/generated/SymbolInfo";
@@ -7,7 +8,7 @@ import type { Watchlist } from "../api/generated/Watchlist";
 import type { Watchlists } from "../api/generated/Watchlists";
 import { ApiRequestError } from "../api/http";
 import { parseChartSettings } from "../chart/settings";
-import { windowId } from "../layout/kinds";
+import { MAX_WINDOWS, windowId, WINDOW_KINDS, type WindowKind } from "../layout/kinds";
 import { parsePlacement } from "../layout/placement";
 import { venueFor } from "../lib/venue";
 import { type ChartWindowState, DEFAULT_LAYOUT, type EditableLayout, type WindowState } from "../stores/layout";
@@ -52,10 +53,29 @@ function newer(u: Unsaved | null, path: string, serverRevision: number): { value
   return value && { value, revision: u.revision };
 }
 
+const isFields = (x: unknown): x is Record<string, unknown> => typeof x === "object" && x !== null && !Array.isArray(x);
+const WINDOW_ID = /^[A-Za-z0-9_-]{1,64}$/;
+const LINK_COLORS: readonly unknown[] = [null, "a", "b", "c"] satisfies (LinkColor | null)[];
+const isWindowKind = (k: unknown): k is WindowKind => typeof k === "string" && Object.hasOwn(WINDOW_KINDS, k);
+
+function isDraftWindow(w: unknown): w is LayoutWindow {
+  if (!isFields(w) || typeof w.id !== "string" || !WINDOW_ID.test(w.id) || !LINK_COLORS.includes(w.link) || !isWindowKind(w.kind)) return false;
+  return w.kind !== "chart" || (typeof w.symbol === "string" && typeof w.period === "string" && (w.venue === null || typeof w.venue === "string") && "chartSettings" in w);
+}
+
+function readDraftWindows(raw: unknown): LayoutWindow[] | null {
+  if (!Array.isArray(raw) || raw.length === 0 || raw.length > MAX_WINDOWS || !raw.every(isDraftWindow)) return null;
+  if (new Set(raw.map((w) => w.id)).size !== raw.length) return null;
+  const counts = new Map<WindowKind, number>();
+  for (const w of raw) counts.set(w.kind, (counts.get(w.kind) ?? 0) + 1);
+  const fits = [...counts].every(([kind, n]) => n <= WINDOW_KINDS[kind].maxCount);
+  return fits && counts.has("chart") ? raw : null;
+}
+
 function asLayout(v: Record<string, unknown>, stored: Layout): Layout | null {
-  const placementIsObject = typeof v.placement === "object" && v.placement !== null && !Array.isArray(v.placement);
-  const ok = v.id === stored.id && typeof v.name === "string" && Array.isArray(v.windows) && placementIsObject && typeof v.sync === "object";
-  return ok ? ({ ...stored, ...v } as Layout) : null;
+  const windows = readDraftWindows(v.windows);
+  const ok = v.id === stored.id && typeof v.name === "string" && windows !== null && isFields(v.placement) && isFields(v.sync);
+  return ok ? ({ ...stored, ...v, windows } as Layout) : null;
 }
 
 export async function restore(src: RestoreSources): Promise<Restored> {
