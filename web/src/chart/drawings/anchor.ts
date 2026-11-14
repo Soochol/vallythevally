@@ -327,8 +327,7 @@ export function fineSpan(f: Frame, t1: UnixSeconds, t2: UnixSeconds): FineSpan |
   const last = f.bars.at(-1);
   const range = slotRange(f, t1, t2);
   if (last === undefined || range === null) return null;
-  const to = slotsOf(f).toTime(range.hi + 1);
-  return to === null ? null : { from: Math.min(range.from, last.t), to };
+  return { from: Math.min(range.from, last.t), to: slotsOf(f).toTime(range.hi + 1) ?? Infinity };
 }
 
 export function toolContext(f: Frame, format: { price(p: number): string; time(t: UnixSeconds): string }): ToolContext {

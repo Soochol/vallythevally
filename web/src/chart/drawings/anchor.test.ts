@@ -304,6 +304,7 @@ describe("세부 봉 읽기", () => {
       [kst(2026, 10, 30), nov(4), { from: kst(2026, 10, 30), to: nov(5) }],
       [nov(4), nov(20), { from: nov(4), to: nov(23) }],
       [nov(20), nov(25), { from: nov(6), to: nov(26) }],
+      [nov(4), kst(2050, 1, 3), { from: nov(4), to: Infinity }],
     ];
     for (const [t1, t2, span] of cases) {
       expect(ctx.fineBarsIn(t1, t2)).toBe(ready);
