@@ -2,6 +2,7 @@ import type { Bar } from "../../../api/generated/Bar";
 import { at, readBool, readFill, readNumber, readRecord, readStroke, strokeFields } from "../styleKit";
 import { type AxisLabel, defineTool, type Shape, type ToolContext } from "../toolSpec";
 import type { DrawingPoint, Fill, Stroke } from "../types";
+import { loadedBarsIn } from "./avwap";
 
 export interface VolProfileStyle {
   v: 1;
@@ -60,6 +61,9 @@ export interface Profile {
 export const rowLow = (p: Profile, i: number) => p.low + i * p.step;
 export const pocPrice = (p: Profile) => rowLow(p, p.poc + 0.5);
 
+const RATIO_TOLERANCE = 1e-12;
+const ROW_EDGE_TOLERANCE = 1e-9;
+
 export function volumeProfile(bars: readonly Bar[], rowCount: number, valueShare: number): Profile | null {
   if (bars.length === 0) return null;
   let low = Infinity;
@@ -72,7 +76,7 @@ export function volumeProfile(bars: readonly Bar[], rowCount: number, valueShare
   }
   if (!(total > 0)) return null;
   const step = (high - low) / rowCount;
-  const rowOf = (price: number) => (step === 0 ? 0 : Math.min(rowCount - 1, Math.floor((price - low) / step)));
+  const rowOf = (price: number) => (step === 0 ? 0 : Math.min(rowCount - 1, Math.floor(((price - low) * rowCount) / (high - low) + ROW_EDGE_TOLERANCE)));
   const rows = new Array<number>(rowCount).fill(0);
   for (const bar of bars) {
     const first = rowOf(bar.l);
@@ -90,10 +94,10 @@ export function volumeProfile(bars: readonly Bar[], rowCount: number, valueShare
   rows.forEach((v, i) => {
     if (v > rows[poc]!) poc = i;
   });
-  const target = valueShare * total * (1 - 1e-9);
   let from = poc;
   let to = poc;
   let inside = rows[poc]!;
+  const target = valueShare * total * (1 - RATIO_TOLERANCE);
   while (inside < target) {
     const above = rows[to + 1];
     const below = rows[from - 1];
@@ -106,7 +110,7 @@ export function volumeProfile(bars: readonly Bar[], rowCount: number, valueShare
 
 const profileOf = (points: readonly DrawingPoint[], style: VolProfileStyle, ctx: ToolContext) => {
   const [p0, p1] = points;
-  return p0 === undefined || p1 === undefined ? null : volumeProfile(ctx.barsIn(p0.t, p1.t), style.rows, style.valuePercent / 100);
+  return p0 === undefined || p1 === undefined ? null : volumeProfile(loadedBarsIn(ctx, p0.t, p1.t), style.rows, style.valuePercent / 100);
 };
 
 const priceSpan = (profile: Profile, ctx: ToolContext) => {
@@ -114,6 +118,9 @@ const priceSpan = (profile: Profile, ctx: ToolContext) => {
   const bottom = ctx.yOf(profile.low);
   return top === null || bottom === null ? null : { top, bottom };
 };
+
+const FRAME_OPACITY = 0.05;
+const FLAT_BAR_PX = 2;
 
 const L = at<VolProfileStyle>();
 
@@ -160,14 +167,17 @@ export const volprofile = defineTool<VolProfileStyle>({
     const longest = (right - left) * (style.widthPercent / 100);
     const most = profile.rows[profile.poc]!;
     const shapes: Shape[] = [
-      { kind: "rect", a: { x: left, y: span.top }, b: { x: right, y: span.bottom }, stroke: { color: style.bars.color, width: 1, dash: "dotted" }, fill: { on: true, color: style.bars.color, opacity: 0 } },
+      { kind: "rect", a: { x: left, y: span.top }, b: { x: right, y: span.bottom }, stroke: { color: style.bars.color, width: 1, dash: "dotted" }, fill: { on: true, color: style.bars.color, opacity: FRAME_OPACITY } },
     ];
     profile.rows.forEach((volume, i) => {
-      const fill = i >= profile.valueArea.from && i <= profile.valueArea.to ? style.valueArea : style.bars;
+      const inValueArea = i >= profile.valueArea.from && i <= profile.valueArea.to;
+      const fill = inValueArea && style.valueArea.on ? style.valueArea : style.bars;
       const y1 = ctx.yOf(rowLow(profile, i));
       const y2 = ctx.yOf(rowLow(profile, i + 1));
       if (volume <= 0 || !fill.on || y1 === null || y2 === null) return;
-      shapes.push({ kind: "rect", a: { x: left, y: y2 }, b: { x: left + (longest * volume) / most, y: y1 }, fill });
+      const middle = (y1 + y2) / 2;
+      const half = (profile.step === 0 ? FLAT_BAR_PX : Math.abs(y1 - y2)) / 2;
+      shapes.push({ kind: "rect", a: { x: left, y: middle - half }, b: { x: left + (longest * volume) / most, y: middle + half }, fill });
     });
     const y = ctx.yOf(pocPrice(profile));
     if (style.poc && y !== null) shapes.push({ kind: "segment", a: { x: left, y }, b: { x: right, y }, stroke: style.pocLine });

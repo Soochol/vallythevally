@@ -163,6 +163,11 @@ test("날짜·가격 범위, 기준봉 VWAP, 구간 거래량 프로파일을 �
   await dragHandle(page, vwapMirror.handles[0]!, { x: 60, y: -50 });
   await expect.poll(async () => (await one("avwap")).points[0]!.t).toBeGreaterThan(anchored.points[0]!.t);
   expect((await one("avwap")).points[0]!.price).toBe(anchored.points[0]!.price);
+  await page.getByRole("button", { name: "드로잉 세부 설정" }).click();
+  const vwapSettings = page.getByRole("dialog", { name: "기준봉 VWAP 세부 설정" });
+  await vwapSettings.getByLabel("가격 라벨", { exact: true }).uncheck();
+  await vwapSettings.getByRole("button", { name: "확인", exact: true }).click();
+  await expect.poll(async () => (await one("avwap")).style).toMatchObject({ priceLabel: false });
 
   await pickTool(page, "측정", "구간 거래량 프로파일");
   await dragBetween(page, [0.55, 0.5], [0.85, 0.5]);
@@ -179,15 +184,39 @@ test("날짜·가격 범위, 기준봉 VWAP, 구간 거래량 프로파일을 �
   expect(dragged.points[0]).toEqual(profile.points[0]);
   expect(dragged.points[1]!.price).toBe(profile.points[1]!.price);
 
+  await page.getByRole("button", { name: "드로잉 세부 설정" }).click();
+  const settings = page.getByRole("dialog", { name: "구간 거래량 프로파일 세부 설정" });
+  for (const [label, typed] of [["줄 수", "12"], ["폭 비율", "25"], ["값 영역 비율", "35"]] as const) {
+    await settings.getByLabel(label, { exact: true }).selectText();
+    await settings.getByLabel(label, { exact: true }).pressSequentially(typed);
+  }
+  await settings.getByLabel("POC 가격 라벨", { exact: true }).uncheck();
+  await settings.getByRole("button", { name: "확인", exact: true }).click();
+  await expect.poll(async () => (await one("volprofile")).style).toMatchObject({ rows: 12, widthPercent: 25, valuePercent: 35, pocLabel: false });
+
   await cell(page).focus();
   await page.keyboard.press("Escape");
   await expect.poll(async () => (await mirror(page)).some((m) => m.selected)).toBe(false);
-  const shown = async () => (await mirror(page)).map((m) => [m.tool, m.points.every((p) => p !== null)]);
+  const placed = async () => (await mirror(page)).map((m) => [m.tool, m.points.every((p) => p !== null)]);
   const all = [["avwap", true], ["datepricerange", true], ["volprofile", true]];
   await choosePeriod(page, "주");
-  await expect.poll(async () => (await shown()).sort()).toEqual(all);
+  await expect.poll(async () => (await placed()).sort()).toEqual(all);
+  await page.getByRole("button", { name: "개체 목록 열기", exact: true }).click();
+  const list = page.getByRole("region", { name: "개체 목록" });
+  const pane = await chartOf(cell(page)).evaluate((el) => {
+    const r = [...el.querySelectorAll("canvas")].map((c) => c.getBoundingClientRect()).sort((a, b) => b.width * b.height - a.width * a.height)[0]!;
+    return { x: r.x, y: r.y, width: r.width, height: r.height };
+  });
+  const shot = () => page.screenshot({ clip: pane, mask: [page.getByRole("navigation", { name: "드로잉 도구" }), cell(page).locator(".chart-legend")] });
+  const painted = await shot();
+  for (const label of ["날짜·가격 범위", "기준봉 VWAP", "구간 거래량 프로파일"]) {
+    await list.getByRole("button", { name: `${label} 숨기기`, exact: true }).click();
+    await expect.poll(async () => (await shot()).equals(painted), { message: `주봉에서 숨기면 그림이 바뀐다: ${label}` }).toBe(false);
+    await list.getByRole("button", { name: `${label} 보이기`, exact: true }).click();
+    await expect.poll(async () => (await shot()).equals(painted), { message: `주봉에서 다시 보이면 그림이 돌아온다: ${label}` }).toBe(true);
+  }
   await choosePeriod(page, "일");
-  await expect.poll(async () => (await shown()).sort()).toEqual(all);
+  await expect.poll(async () => (await placed()).sort()).toEqual(all);
 
   const before = await saved();
   const screens = new Map((await settledMirror(page)).map((m) => [m.id, m.points]));

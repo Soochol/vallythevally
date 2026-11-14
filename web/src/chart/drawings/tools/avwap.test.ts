@@ -16,7 +16,7 @@ function ctxOf(bars: () => readonly Bar[]) {
     yOf: (price) => 500 - price,
     timeAt: (x) => x * 10,
     priceAt: (y) => 500 - y,
-    shiftBars: (t, n) => t + n * 60,
+    shiftBars: (t, n) => Math.floor(t / 500) * 500 + n * 500,
     barsBetween: () => null,
     barsIn: (t1, t2) => (asked.push([t1, t2]), bars()),
     paneWidth: 800,
@@ -48,7 +48,7 @@ describe("기준봉 VWAP", () => {
 
   test("거래량이 0인 앞쪽 봉은 건너뛰고, 그 뒤의 0 거래량 봉은 값을 이어 간다", () => {
     const { ctx } = ctxOf(() => [bar(0, 50, 40, 45, 0), bar(500, 60, 50, 55, 0), ...THREE, bar(4000, 90, 80, 85, 0)]);
-    expect(lines(avwap.shapes(drawing(), ctx))).toEqual([[[100, 10], [200, 12], [300, 12], [400, 12]]]);
+    expect(lines(avwap.shapes({ ...drawing(), points: [{ t: 0, price: 77 }] }, ctx))).toEqual([[[100, 10], [200, 12], [300, 12], [400, 12]]]);
   });
 
   test("모든 봉의 거래량이 0이면 기준 시각의 세로 점선만 그리고, 그 선으로 고르고 지운다", () => {
@@ -62,9 +62,16 @@ describe("기준봉 VWAP", () => {
 
   test("봉이 없거나 값이 하나뿐이면 세로 점선을 그리고 던지지 않는다", () => {
     expect(avwap.shapes(drawing(), ctxOf(() => []).ctx)).toEqual([{ kind: "vline", x: 100, stroke: { ...style.line, dash: "dashed" }, allPanes: false }]);
-    expect(avwap.shapes(drawing(), ctxOf(() => [THREE[2]!]).ctx).map((s) => s.kind)).toEqual(["polyline", "vline"]);
+    expect(avwap.shapes({ ...drawing(), points: [{ t: 3000, price: 77 }] }, ctxOf(() => [THREE[2]!]).ctx).map((s) => s.kind)).toEqual(["polyline", "vline"]);
     expect(avwap.shapes({ ...drawing(), points: [] }, ctxOf(() => THREE).ctx)).toEqual([]);
     expect(avwap.shapes({ ...drawing(), points: [{ t: -5, price: 1 }] }, ctxOf(() => []).ctx)).toEqual([]);
+  });
+
+  test("마지막 봉 뒤에 놓으면 barsIn이 돌려준 마지막 봉을 쓰지 않고 기준 시각의 세로 점선만 그린다", () => {
+    const { ctx } = ctxOf(() => [THREE[2]!]);
+    const later = { ...drawing(), points: [{ t: 5200, price: 77 }] };
+    expect(avwap.shapes(later, ctx)).toEqual([{ kind: "vline", x: 520, stroke: { ...style.line, dash: "dashed" }, allPanes: false }]);
+    expect(avwap.axisLabels(later, ctx)).toEqual([]);
   });
 
   test("편차 띠는 거래량 가중 표준편차에 배수를 곱해 위아래에 긋는다", () => {

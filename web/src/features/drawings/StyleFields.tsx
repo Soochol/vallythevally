@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { Select } from "../menu/Select";
 import type { StyleField } from "../../chart/drawings/toolSpec";
 import { drawingColor } from "../../chart/drawings/DrawingLayer";
@@ -16,10 +17,16 @@ export function WidthInput({ label, value, onChange }: { label: string; value: W
 export function DashInput({ label, value, onChange }: { label: string; value: Dash; onChange(v: Dash): void }) {
   return <Select label={label} className={INPUT} value={value} options={[{ value: "solid", label: "실선" }, { value: "dashed", label: "파선" }, { value: "dotted", label: "점선" }]} onChange={onChange} />;
 }
+function NumberInput({ label, min, max, step, value, onChange }: { label?: string; min: number; max: number; step?: number; value: number; onChange(v: number): void }) {
+  const [draft, setDraft] = useState<string | null>(null);
+  return <input aria-label={label} className={INPUT} type="number" min={min} max={max} step={step} value={draft ?? value}
+    onChange={(e) => { const v = e.target.valueAsNumber; setDraft(e.target.value); if (Number.isFinite(v) && v >= min) onChange(Math.min(max, v)); }}
+    onBlur={() => setDraft(null)} />;
+}
 
 function TextAppearance({ value, change }: { value: TextStyle; change(v: TextStyle): void }) {
   return <div className="draw-field-stack"><ColorInput label="글자 색" value={value.color} onChange={(color) => change({ ...value, color })} />
-    <label>글자 크기<input className={INPUT} type="number" min={TEXT_SIZE.min} max={TEXT_SIZE.max} value={value.size} onChange={(e) => change({ ...value, size: Math.max(TEXT_SIZE.min, Math.min(TEXT_SIZE.max, Number(e.target.value))) })} /></label>
+    <label>글자 크기<NumberInput min={TEXT_SIZE.min} max={TEXT_SIZE.max} value={value.size} onChange={(size) => change({ ...value, size })} /></label>
     <label><input type="checkbox" checked={value.bold} onChange={(e) => change({ ...value, bold: e.target.checked })} /> 굵게</label>
     <label><input type="checkbox" checked={value.italic} onChange={(e) => change({ ...value, italic: e.target.checked })} /> 기울임</label></div>;
 }
@@ -32,7 +39,7 @@ export function StyleFields({ fields, style, text, change, setText }: { fields: 
       case "width": input = <WidthInput label={field.label} value={field.lens.get(style)} onChange={(v) => set(field.lens, v)} />; break;
       case "dash": input = <DashInput label={field.label} value={field.lens.get(style)} onChange={(v) => set(field.lens, v)} />; break;
       case "toggle": input = <input aria-label={field.label} type="checkbox" checked={field.lens.get(style)} onChange={(e) => set(field.lens, e.target.checked)} />; break;
-      case "number": input = <input aria-label={field.label} className={INPUT} type="number" min={field.min} max={field.max} step={field.step} value={field.lens.get(style)} onChange={(e) => { const v = e.target.valueAsNumber; if (Number.isFinite(v)) set(field.lens, Math.max(field.min, Math.min(field.max, v))); }} />; break;
+      case "number": input = <NumberInput label={field.label} min={field.min} max={field.max} step={field.step} value={field.lens.get(style)} onChange={(v) => set(field.lens, v)} />; break;
       case "select": input = <Select label={field.label} className={INPUT} value={field.lens.get(style)} onChange={(value) => set(field.lens, value)} options={field.options} />; break;
       case "text": input = field.multiline ? <textarea aria-label={field.label} className={INPUT} value={text ?? ""} onChange={(e) => setText(e.target.value)} rows={3} /> : <input aria-label={field.label} className={INPUT} value={text ?? ""} onChange={(e) => setText(e.target.value)} />; break;
       case "textStyle": input = <TextAppearance value={field.lens.get(style)} change={(v) => set(field.lens, v)} />; break;

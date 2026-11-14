@@ -17,7 +17,7 @@ function ctxOf(bars: readonly Bar[]) {
     yOf: (price) => 500 - price * 10,
     timeAt: (x) => x * 10,
     priceAt: (y) => (500 - y) / 10,
-    shiftBars: (t, n) => t + n * 60,
+    shiftBars: (t, n) => Math.floor(t / 500) * 500 + n * 500,
     barsBetween: () => null,
     barsIn: (t1, t2) => (asked.push([t1, t2]), bars),
     paneWidth: 800,
@@ -48,6 +48,11 @@ describe("구간 거래량 프로파일", () => {
     expect(profile.rows.map((v) => Math.round(v * 1e9) / 1e9)).toEqual([2, 2, 22, 12, 2]);
   });
 
+  test("줄의 경계 가격에 있는 봉은 위 줄에 넣는다", () => {
+    expect(volumeProfile([flat(0, 10.1, 1), flat(1, 10.2, 100), flat(2, 10.7, 1)], 6, 0.7)!.rows).toEqual([1, 100, 0, 0, 0, 1]);
+    expect(volumeProfile([flat(0, 10_000, 1), flat(1, 10_125, 100), flat(2, 11_000, 1)], 24, 0.7)!.rows.indexOf(100)).toBe(3);
+  });
+
   test("저가와 고가가 같은 봉은 그 가격이 든 줄에 모두 넣는다", () => {
     expect(volumeProfile([bar(0, 10, 0, 10), flat(1, 5, 7), flat(2, 10, 3)], 5, 0.7)!.rows).toEqual([2, 2, 9, 2, 5]);
     expect(volumeProfile([flat(0, 5, 7), flat(1, 5, 3)], 5, 0.7)!.rows).toEqual([10, 0, 0, 0, 0]);
@@ -73,13 +78,35 @@ describe("구간 거래량 프로파일", () => {
     expect(volumeProfile(LADDER, 5, 0.55)!.valueArea).toEqual({ from: 1, to: 2 });
     expect(volumeProfile(LADDER, 5, 0.4)!.valueArea).toEqual({ from: 2, to: 2 });
     expect(volumeProfile(LADDER, 5, 1)!.valueArea).toEqual({ from: 0, to: 4 });
+    const huge = [flat(0, 1, 150_000_000_025), flat(1, 2, 699_999_999_950), flat(2, 3, 150_000_000_025)];
+    expect(volumeProfile(huge, 3, 0.7)!.valueArea).toEqual({ from: 1, to: 2 });
+    const rounded = [bar(0, 269.77, 269.21, 7), bar(1, 269.69, 269.45, 3), bar(2, 269.29, 269.21, 1), bar(3, 269.53000000000003, 269.45, 5)];
+    expect(volumeProfile(rounded, 7, 0.75)!.valueArea).toEqual({ from: 3, to: 6 });
+  });
+
+  test("값 영역 채움을 끄면 그 줄도 막대 채움으로 그린다", () => {
+    const plain = { ...style, valueArea: { ...style.valueArea, on: false } };
+    expect(rects(volprofile.shapes(drawing(plain), ctxOf(LADDER).ctx)).slice(1).map((r) => r.fill)).toEqual(Array(5).fill(style.bars));
+  });
+
+  test("줄이 얇아도 막대는 자기 줄 높이만큼만 칠한다", () => {
+    const thin = [bar(1000, 9.3, 9, 10), bar(2000, 9.2, 9.1, 30)];
+    const [frame, ...bars] = rects(volprofile.shapes(drawing({ ...style, rows: 100 }), ctxOf(thin).ctx));
+    for (const r of bars) expect(Math.abs(r.b.y - r.a.y)).toBeCloseTo(0.03, 9);
+    expect(Math.min(...bars.map((r) => r.a.y))).toBeCloseTo(frame!.a.y, 9);
+    expect(Math.max(...bars.map((r) => r.b.y))).toBeCloseTo(frame!.b.y, 9);
+  });
+
+  test("모든 봉의 저가와 고가가 같아도 그 가격의 막대가 보인다", () => {
+    const [, only] = rects(volprofile.shapes(drawing(), ctxOf([flat(1000, 20, 100), flat(2000, 20, 50)]).ctx));
+    expect(only).toMatchObject({ a: { x: 100, y: 299 }, b: { x: 180, y: 301 } });
   });
 
   test("줄마다 구간의 왼쪽 끝에서 막대를 긋고, 가장 많은 줄의 길이는 구간 폭 × 폭 비율이다", () => {
     const { ctx, asked } = ctxOf(LADDER);
     const [frame, ...bars] = rects(volprofile.shapes(drawing(), ctx));
     expect(asked[0]).toEqual([1000, 3000]);
-    expect(frame).toEqual({ kind: "rect", a: { x: 100, y: 410 }, b: { x: 300, y: 490 }, stroke: { color: style.bars.color, width: 1, dash: "dotted" }, fill: { on: true, color: style.bars.color, opacity: 0 } });
+    expect(frame).toEqual({ kind: "rect", a: { x: 100, y: 410 }, b: { x: 300, y: 490 }, stroke: { color: style.bars.color, width: 1, dash: "dotted" }, fill: { on: true, color: style.bars.color, opacity: 0.05 } });
     expect(bars.map((r) => [r.a.x, Math.round(r.b.x * 1e6) / 1e6, r.fill])).toEqual([
       [100, 120, style.bars],
       [100, 130, style.valueArea],
@@ -102,6 +129,13 @@ describe("구간 거래량 프로파일", () => {
     expect(volprofile.shapes(drawing(), ctxOf([flat(1000, 5, 0), bar(2000, 7, 3, 0)]).ctx)).toEqual(edges);
     expect(volprofile.axisLabels(drawing(), ctxOf([]).ctx)).toEqual([]);
     expect(volprofile.handles(drawing(), ctxOf([]).ctx).map((h) => h.at)).toEqual([{ x: 100, y: 250 }, { x: 300, y: 250 }]);
+  });
+
+  test("구간이 마지막 봉 뒤에 있으면 barsIn이 돌려준 마지막 봉을 쓰지 않는다", () => {
+    const { ctx } = ctxOf([flat(3000, 9, 21)]);
+    const later = drawing(style, false, [{ t: 4000, price: 0 }, { t: 5000, price: 0 }]);
+    expect(volprofile.shapes(later, ctx).map((s) => s.kind)).toEqual(["vline", "vline"]);
+    expect(volprofile.axisLabels(later, ctx)).toEqual([]);
   });
 
   test("점이 모자라거나 화면에 못 놓으면 그릴 수 있는 만큼만 돌려준다", () => {

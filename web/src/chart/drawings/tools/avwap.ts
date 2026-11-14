@@ -55,6 +55,12 @@ export function anchoredVwap(bars: readonly Bar[]): VwapValue[] {
   return values;
 }
 
+export function loadedBarsIn(ctx: ToolContext, t1: UnixSeconds, t2?: UnixSeconds): readonly Bar[] {
+  const bars = ctx.barsIn(t1, t2);
+  const first = ctx.shiftBars(t2 === undefined ? t1 : Math.min(t1, t2), 0);
+  return bars[0]?.t === first ? bars : [];
+}
+
 const vertices = (values: readonly VwapValue[], offset: (v: VwapValue) => number, ctx: ToolContext): ScreenPoint[] =>
   values.flatMap((v) => {
     const x = ctx.xOf(v.t);
@@ -85,7 +91,7 @@ export const avwap = defineTool<AvwapStyle>({
   shapes({ points, style }, ctx) {
     const p = points[0];
     if (p === undefined) return [];
-    const bars = ctx.barsIn(p.t);
+    const bars = loadedBarsIn(ctx, p.t);
     const values = anchoredVwap(bars);
     const line = vertices(values, () => 0, ctx);
     const shapes: Shape[] = [];
@@ -103,7 +109,7 @@ export const avwap = defineTool<AvwapStyle>({
   handles({ points }, ctx) {
     const p = points[0];
     if (p === undefined) return [];
-    const bars = ctx.barsIn(p.t);
+    const bars = loadedBarsIn(ctx, p.t);
     const x = ctx.xOf(bars[0]?.t ?? p.t);
     const first = anchoredVwap(bars)[0];
     const y = first === undefined ? null : ctx.yOf(first.price);
@@ -113,7 +119,7 @@ export const avwap = defineTool<AvwapStyle>({
     const p = points[0];
     if (p === undefined) return [];
     const labels: AxisLabel[] = [];
-    const last = style.priceLabel ? anchoredVwap(ctx.barsIn(p.t)).at(-1) : undefined;
+    const last = style.priceLabel ? anchoredVwap(loadedBarsIn(ctx, p.t)).at(-1) : undefined;
     if (last !== undefined) labels.push({ axis: "price", value: last.price, text: ctx.formatPrice(last.price), color: style.line.color });
     if (selected) labels.push({ axis: "time", value: p.t, text: ctx.formatTime(p.t), color: style.line.color });
     return labels;
