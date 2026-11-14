@@ -1,5 +1,5 @@
 import type { Locator, Page } from "@playwright/test";
-import { cell, chartOf, expect, test } from "./harness";
+import { cell, chartOf, expect, SEARCH_BUTTON_TITLE, test } from "./harness";
 
 test.use({ clockStart: "20261109100030", viewport: { width: 1440, height: 900 } });
 
@@ -149,4 +149,39 @@ test("스크리너를 연 1024px 창에서는 위 막대가 창 폭을 쓰며 �
 
   await page.setViewportSize({ width: 1280, height: 300 });
   expect(await overflow(page)).toEqual([0, 0]);
+});
+
+test("종목을 바꾸는 동안 차트 칸은 뼈대 막대 없이 차트 배경만 보이고 0.4초 뒤에 가운데 글자가 나타난다", async ({ page, scenario }) => {
+  await open(page);
+  const chart = await boxOf(cell(page));
+  const bar = await boxOf(toolbar(page));
+  const probe = { x: Math.round(chart.x + chart.width * 0.85), y: Math.round(bar.y + bar.height + 4) };
+  const pixelAtProbe = async () => {
+    const png = await page.screenshot({ clip: { ...probe, width: 1, height: 1 } });
+    return png.toString("base64");
+  };
+  const background = await pixelAtProbe();
+
+  const held = scenario.hold((url) => url.pathname === "/api/bars" && url.searchParams.get("symbol") === "086520");
+  await page.getByTitle(SEARCH_BUTTON_TITLE).click();
+  const dialog = page.getByRole("dialog", { name: "종목 검색" });
+  await dialog.getByRole("combobox", { name: "종목 검색" }).fill("ㅇㅋㅍㄹ");
+  await dialog.getByRole("option").filter({ hasText: "086520" }).click();
+  await held.received;
+
+  await expect(cell(page)).toHaveAttribute("aria-busy", "true");
+  await expect(cell(page).locator(".ui-skeleton")).toHaveCount(0);
+  expect(await pixelAtProbe()).toBe(background);
+  await expect(cell(page).getByRole("status", { name: "차트 불러오는 중" })).toHaveCount(1);
+
+  const label = cell(page).getByText("차트 불러오는 중", { exact: true });
+  await expect(label).toBeVisible();
+  const text = await boxOf(label);
+  const area = await boxOf(cell(page));
+  expect(Math.abs(text.x + text.width / 2 - (area.x + area.width / 2))).toBeLessThan(40);
+  expect(Math.abs(text.y + text.height / 2 - (area.y + area.height / 2))).toBeLessThan(40);
+
+  held.reply({ body: scenario.market.page({ symbol: "086520" }) });
+  await expect(cell(page)).toHaveAttribute("aria-busy", "false");
+  await expect(label).toBeHidden();
 });

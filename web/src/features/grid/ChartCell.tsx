@@ -1,4 +1,4 @@
-import { ErrorState, EmptyState, Skeleton } from "../overlay/State";
+import { ErrorState, EmptyState } from "../overlay/State";
 import { createPortal } from "react-dom";
 import { VenuePicker } from "../venue/VenuePicker";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -138,7 +138,7 @@ export function ChartCell({ slot, status, onStatus }: Props) {
       {venueAnchor && createPortal(<VenuePicker cell={cell} info={info} variant="legend" />, venueAnchor)}
       <DrawingOverlay slot={slot} />
       {editing && cell.chartSettings.indicators.some((i) => i.id === editing.initial.id) && <IndicatorPopover key={editing.initial.id} slot={slot} {...editing} editRoot={chartEl.current!} onClose={() => setEditing(null)} />}
-      {status.kind === "loading" && <div className="pointer-events-none absolute inset-0 z-[5] bg-chart-bg"><Skeleton label="차트 불러오는 중" /></div>}
+      {status.kind === "loading" && <div role="status" aria-label="차트 불러오는 중" className="pointer-events-none absolute inset-0 z-[5] grid place-items-center bg-chart-bg"><span className="chart-loading-label text-s text-text-3">차트 불러오는 중</span></div>}
       {olderError && (
         <div
           role="alert"
