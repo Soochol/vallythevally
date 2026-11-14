@@ -160,6 +160,24 @@ test("겹치기를 켰다 끈 뒤 Esc는 열 때의 패널 순서와 높이로 �
   await expect(row(page, "volume").getByRole("button", { name: /설정 열기/ })).toBeFocused();
 });
 
+test("차트 옆 지표 창에서 겹치기를 건드리지 않고 Esc를 누르면 그사이 옮긴 다른 패널 순서를 지킨다", async ({ page, scenario }) => {
+  scenario.documents.saveUiState({ ...scenario.documents.uiState(), indicatorWindow: "inspector" });
+  await open(page, scenario, [RSI, VOLUME], [{ id: "p-rsi", stretch: 0.4 }, { id: "p-volume", stretch: 0.3 }]);
+  await page.getByRole("toolbar", { name: "차트 도구 막대" }).getByRole("button", { name: "지표", exact: true }).click();
+  const inspector = page.getByRole("region", { name: "지표", exact: true });
+  await inspector.getByRole("button", { name: "거래량 설정", exact: true }).click();
+  const slider = inspector.getByRole("slider", { name: "막대 불투명도", exact: true });
+  await expect(slider).toBeVisible();
+  await row(page, "rsi").getByRole("button", { name: "RSI 14 패널 아래로" }).dispatchEvent("click");
+  await expect.poll(() => saved(scenario).panels.map((p) => p.id)).toEqual(["p-volume", "p-rsi"]);
+  await slider.focus();
+  await page.keyboard.press("Escape");
+  await expect(slider).toHaveCount(0);
+  await row(page, "rsi").getByRole("button", { name: "RSI 14 숨기기" }).dispatchEvent("click");
+  await expect.poll(() => saved(scenario).indicators.find((i) => i.id === "rsi")?.visible).toBe(false);
+  expect(saved(scenario).panels).toEqual([{ id: "p-volume", stretch: 0.3 }, { id: "p-rsi", stretch: 0.4 }]);
+});
+
 test("지표 창에서 겹치기를 켜고 더한 거래량은 가격 패널에 겹쳐 더해진다", async ({ page, scenario }) => {
   await open(page, scenario);
   await page.getByRole("button", { name: "지표", exact: true }).click();

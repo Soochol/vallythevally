@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { colorsFrom } from "../../chart/indicators/kinds";
 import { type IndicatorConfig, barOpacityOf, DEFAULT_PANEL_STRETCH, placementOfConfig } from "../../chart/settings";
 import { chartWindows, useLayoutStore } from "../../stores/layout";
@@ -17,12 +17,16 @@ export function useLiveIndicatorDraft(cellId: WindowId, initial: IndicatorConfig
     const at = panels.findIndex((p) => p.id === initial.panel);
     return { panel: panels[at] ?? { id: crypto.randomUUID(), stretch: DEFAULT_PANEL_STRETCH }, at: Math.max(0, at) };
   });
+  const placementChanged = useRef(false);
 
   useEffect(() => {
     const store = useLayoutStore.getState();
     const current = chartWindows(store.layout).find((cell) => cell.id === cellId)?.chartSettings.indicators.find((i) => i.id === initial.id);
     if (!current) return;
-    if (placementOfConfig(current) !== draft.placement) store.setIndicatorPlacement(cellId, initial.id, draft.placement, { id: opened.panel.id, stretch: DEFAULT_PANEL_STRETCH });
+    if (placementOfConfig(current) !== draft.placement) {
+      placementChanged.current = true;
+      store.setIndicatorPlacement(cellId, initial.id, draft.placement, { id: opened.panel.id, stretch: DEFAULT_PANEL_STRETCH });
+    }
     if (!check.ok) return;
     const spec = JSON.stringify(current.spec) === JSON.stringify(check.spec) ? current.spec : check.spec;
     const colors = color === originalColor ? initial.style.colors : colorsFrom(spec, color);
@@ -34,6 +38,7 @@ export function useLiveIndicatorDraft(cellId: WindowId, initial: IndicatorConfig
   const revert = () => {
     const store = useLayoutStore.getState();
     store.updateIndicator(cellId, initial.id, { spec: initial.spec, style: initial.style });
+    if (!placementChanged.current) return;
     store.setIndicatorPlacement(cellId, initial.id, "price");
     store.setIndicatorPlacement(cellId, initial.id, placementOfConfig(initial), opened.panel, opened.at);
   };
