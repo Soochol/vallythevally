@@ -1,6 +1,6 @@
 import type { Page } from "@playwright/test";
 import { cell, chartOf, expect, test, type Scenario } from "./harness";
-import { chartPoint, drawings, mirror, open, pickTool } from "./drawing-probe";
+import { chartPoint, drawings, mirror, open, pickTool, settledMirror } from "./drawing-probe";
 
 async function dragBetween(page: Page, from: [number, number], to: [number, number]) {
   const a = await chartPoint(page, ...from);
@@ -14,17 +14,6 @@ async function dragBetween(page: Page, from: [number, number], to: [number, numb
 async function clickAt(page: Page, at: [number, number]) {
   const p = await chartPoint(page, ...at);
   await page.mouse.click(p.x, p.y);
-}
-
-async function settledMirror(page: Page) {
-  let last = "";
-  await expect.poll(async () => {
-    const now = JSON.stringify(await mirror(page));
-    const same = now === last;
-    last = now;
-    return same;
-  }).toBe(true);
-  return mirror(page);
 }
 
 async function savedOf(scenario: Scenario, tool: string) {
