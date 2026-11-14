@@ -108,7 +108,7 @@ async fn put(client: &reqwest::Client, base: &str, path: &str, body: &Value) -> 
 #[tokio::test]
 async fn user_data_survives_a_restart_and_quotes_come_from_kiwoom() {
     let fake = ScriptedTransport::new();
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = tempfile::tempdir_in("target").unwrap();
     let lock = tmp.path().join("run/server.lock");
     let dist = static_dir(tmp.path());
     let server = Server::spawn(&fake, &lock, &dist);
@@ -118,7 +118,8 @@ async fn user_data_survives_a_restart_and_quotes_come_from_kiwoom() {
     let watchlist = serde_json::json!({"lists": [
         {"id": "01900000-0000-7000-8000-000000000002", "name": "기본", "symbols": ["005930", "IDX:001"], "groups": [
             {"id": "G1", "name": "지수", "symbols": ["IDX:001"]},
-            {"id": "G2", "name": "빈 그룹", "symbols": []},
+            {"id": "G2", "name": "공유", "symbols": ["IDX:001", "005930"]},
+            {"id": "G3", "name": "빈 그룹", "symbols": []},
         ]},
         {"id": "L2", "name": "반도체", "symbols": ["000660", "005930"], "groups": []},
         {"id": "L3", "name": "지수", "symbols": ["IDX:101"], "groups": []},

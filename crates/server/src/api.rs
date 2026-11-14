@@ -410,7 +410,7 @@ pub struct WatchGroup {
     pub symbols: Vec<SymbolCode>,
 }
 
-/// 관심종목 목록 하나. `symbols`는 전체 종목이고 중복이 없다. `groups`는 그 부분집합을 겹치지 않게 묶는다(ADR 0017).
+/// 관심종목 목록 하나. `symbols`는 전체 종목이고 중복이 없다. `groups`는 겹칠 수 있는 부분집합을 묶는다(ADR 0018).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[ts(export)]
 pub struct Watchlist {

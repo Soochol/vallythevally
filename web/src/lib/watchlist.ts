@@ -4,7 +4,7 @@ import type { Watchlist } from "../api/generated/Watchlist";
 
 export const MAX_WATCHLISTS = 20;
 export const MAX_WATCHLIST_NAME = 20;
-export const MAX_WATCH_GROUPS = 20;
+export const MAX_WATCH_GROUPS = 100;
 export const FIRST_WATCHLIST_ID = "01900000-0000-7000-8000-000000000002";
 export const DEFAULT_WATCHLISTS: readonly Watchlist[] = [{ id: FIRST_WATCHLIST_ID, name: "기본", symbols: [], groups: [] }];
 
@@ -23,8 +23,15 @@ export function addSymbols(list: readonly SymbolCode[], codes: readonly SymbolCo
   return fresh.length === 0 ? list : [...list, ...fresh];
 }
 
-export function groupOf(list: Watchlist, code: SymbolCode): WatchGroup | null {
-  return list.groups.find((g) => g.symbols.includes(code)) ?? null;
+export interface WatchRowRef {
+  code: SymbolCode;
+  groupId: string | null;
+}
+
+export const rowKey = (row: WatchRowRef): string => JSON.stringify([row.groupId, row.code]);
+
+export function rowExists(list: Watchlist, row: WatchRowRef): boolean {
+  return row.groupId === null ? ungrouped(list).includes(row.code) : list.groups.some((g) => g.id === row.groupId && g.symbols.includes(row.code));
 }
 
 export function ungrouped(list: Watchlist): readonly SymbolCode[] {
@@ -72,8 +79,10 @@ function reorder(codes: readonly SymbolCode[], code: SymbolCode, to: number): re
   return next;
 }
 
-export function moveSymbol(list: Watchlist, code: SymbolCode, to: number): Watchlist {
-  const group = groupOf(list, code);
+export function moveSymbol(list: Watchlist, row: WatchRowRef, to: number): Watchlist {
+  if (!rowExists(list, row)) return list;
+  const { code, groupId } = row;
+  const group = list.groups.find((g) => g.id === groupId);
   if (group) {
     const symbols = reorder(group.symbols, code, to);
     return symbols === group.symbols ? list : withGroups(list, (gs) => gs.map((g) => g === group ? { ...g, symbols: [...symbols] } : g));
@@ -86,9 +95,9 @@ export function moveSymbol(list: Watchlist, code: SymbolCode, to: number): Watch
   return { ...list, symbols: list.symbols.map((c) => looseSet.has(c) ? moved[next++]! : c) };
 }
 
-export function moveSymbolBy(list: Watchlist, code: SymbolCode, step: -1 | 1): Watchlist {
-  const section = groupOf(list, code)?.symbols ?? ungrouped(list);
-  return moveSymbol(list, code, section.indexOf(code) + step);
+export function moveSymbolBy(list: Watchlist, row: WatchRowRef, step: -1 | 1): Watchlist {
+  const section = list.groups.find((g) => g.id === row.groupId)?.symbols ?? ungrouped(list);
+  return moveSymbol(list, row, section.indexOf(row.code) + step);
 }
 
 export const nextGroupName = (list: Watchlist): string => nextName(list.groups, "그룹");
@@ -99,8 +108,7 @@ export const groupNameProblem = (list: Watchlist, typed: string, self: string | 
 export function createGroup(list: Watchlist, id: string, name: string, codes: readonly SymbolCode[] = []): Watchlist {
   if (list.groups.length >= MAX_WATCH_GROUPS || list.groups.some((g) => g.id === id || g.name === name)) return list;
   const members = [...new Set(codes)].filter((c) => list.symbols.includes(c));
-  const groups = members.reduce(withoutCode, list.groups);
-  return { ...list, groups: [...groups, { id, name, symbols: members }] };
+  return { ...list, groups: [...list.groups, { id, name, symbols: members }] };
 }
 
 export function renameGroup(list: Watchlist, id: string, name: string): Watchlist {
@@ -124,14 +132,29 @@ export function ungroup(list: Watchlist, id: string): Watchlist {
 export function deleteGroup(list: Watchlist, id: string): Watchlist {
   const group = list.groups.find((g) => g.id === id);
   if (!group) return list;
-  const gone = new Set(group.symbols);
-  return { ...list, symbols: list.symbols.filter((c) => !gone.has(c)), groups: list.groups.filter((g) => g !== group) };
+  const groups = list.groups.filter((g) => g !== group);
+  const shared = new Set(groups.flatMap((g) => g.symbols));
+  const gone = new Set(group.symbols.filter((c) => !shared.has(c)));
+  return { ...list, symbols: list.symbols.filter((c) => !gone.has(c)), groups };
 }
 
-export function assignGroup(list: Watchlist, code: SymbolCode, groupId: string | null): Watchlist {
-  const current = groupOf(list, code);
-  if (!list.symbols.includes(code) || (current?.id ?? null) === groupId || (groupId !== null && !list.groups.some((g) => g.id === groupId))) return list;
-  return withGroups(list, (gs) => withoutCode(gs, code).map((g) => g.id === groupId ? { ...g, symbols: [...g.symbols, code] } : g));
+export function addToGroup(list: Watchlist, code: SymbolCode, groupId: string): Watchlist {
+  if (!list.symbols.includes(code)) return list;
+  const group = list.groups.find((g) => g.id === groupId);
+  if (!group || group.symbols.includes(code)) return list;
+  return withGroups(list, (gs) => gs.map((g) => g === group ? { ...g, symbols: [...g.symbols, code] } : g));
+}
+
+export function removeRow(list: Watchlist, row: WatchRowRef): Watchlist {
+  if (!rowExists(list, row)) return list;
+  if (row.groupId === null) return removeSymbol(list, row.code);
+  return withGroups(list, (gs) => gs.map((g) => g.id === row.groupId ? { ...g, symbols: g.symbols.filter((c) => c !== row.code) } : g));
+}
+
+export function moveToGroup(list: Watchlist, row: WatchRowRef, groupId: string): Watchlist {
+  if (!rowExists(list, row) || row.groupId === groupId || !list.groups.some((g) => g.id === groupId)) return list;
+  const removed = row.groupId === null ? list : removeRow(list, row);
+  return addToGroup(removed, row.code, groupId);
 }
 
 export function duplicateWatchlist(original: Watchlist, id: string, name: string, newId: () => string): Watchlist {
@@ -175,15 +198,19 @@ export const nameProblem = (lists: readonly Watchlist[], typed: string, self: st
 
 export type Transfer = "move" | "copy";
 
-export function transferSymbol(lists: readonly Watchlist[], from: string, to: string, code: SymbolCode, how: Transfer): readonly Watchlist[] {
+export function transferSymbol(lists: readonly Watchlist[], from: string, to: string, row: WatchRowRef, how: Transfer): readonly Watchlist[] {
   const source = lists.find((l) => l.id === from);
   const target = lists.find((l) => l.id === to);
-  if (from === to || !source?.symbols.includes(code) || target === undefined) return lists;
+  if (from === to || !source || !rowExists(source, row) || target === undefined) return lists;
+  const { code } = row;
   const alreadyInTarget = target.symbols.includes(code);
   if (how === "copy" && alreadyInTarget) return lists;
   return lists.map((l) => {
     if (l.id === to) return alreadyInTarget ? l : { ...l, symbols: [...l.symbols, code] };
-    if (l.id === from && how === "move") return removeSymbol(l, code);
+    if (l.id === from && how === "move") {
+      const removed = removeRow(l, row);
+      return removed.groups.some((g) => g.symbols.includes(code)) ? removed : removeSymbol(removed, code);
+    }
     return l;
   });
 }
@@ -191,21 +218,20 @@ export function transferSymbol(lists: readonly Watchlist[], from: string, to: st
 const isCodes = (x: unknown): x is SymbolCode[] => Array.isArray(x) && x.every((s) => typeof s === "string");
 
 const isNamedCodes = (x: unknown): x is Named & { symbols: SymbolCode[] } =>
-  typeof x === "object" && x !== null && typeof (x as WatchGroup).id === "string" && typeof (x as WatchGroup).name === "string" && isCodes((x as WatchGroup).symbols);
+  typeof x === "object" && x !== null && "id" in x && typeof x.id === "string" && "name" in x && typeof x.name === "string" && "symbols" in x && isCodes(x.symbols);
 
 export function parseWatchlists(x: unknown): Watchlist[] | null {
   if (!Array.isArray(x) || x.length === 0 || !x.every(isNamedCodes)) return null;
   const lists: Watchlist[] = [];
   for (const l of x) {
-    const groups: unknown = (l as { groups?: unknown }).groups ?? [];
+    const groups: unknown = "groups" in l ? l.groups : [];
     if (!Array.isArray(groups) || !groups.every(isNamedCodes)) return null;
     const members = new Set(l.symbols);
-    const taken = new Set<SymbolCode>();
     lists.push({
       id: l.id,
       name: l.name,
-      symbols: l.symbols,
-      groups: groups.map((g) => ({ id: g.id, name: g.name, symbols: g.symbols.filter((c) => members.has(c) && !taken.has(c) && taken.add(c)) })),
+      symbols: [...members],
+      groups: groups.map((g) => ({ id: g.id, name: g.name, symbols: [...new Set(g.symbols)].filter((c) => members.has(c)) })),
     });
   }
   return lists;

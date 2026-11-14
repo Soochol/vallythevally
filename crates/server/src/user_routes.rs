@@ -61,22 +61,24 @@ pub(crate) fn parse_symbol(code: &str) -> Result<Symbol, ApiFailure> {
 
 pub const MAX_WATCHLISTS: usize = 20;
 pub const MAX_WATCHLIST_NAME_CHARS: usize = 20;
-pub const MAX_WATCH_GROUPS: usize = 20;
+pub const MAX_WATCH_GROUPS: usize = 100;
 const MAX_WATCHLIST_ID_BYTES: usize = 64;
 const LONGEST_WATCH_GROUP_WRAPPER_BYTES: usize = r#"{"id":"","name":"","symbols":[]},"#.len() + MAX_WATCHLIST_ID_BYTES + 4 * MAX_WATCHLIST_NAME_CHARS;
 const LONGEST_WATCHLIST_WRAPPER_BYTES: usize =
     LONGEST_WATCH_GROUP_WRAPPER_BYTES + r#""groups":[],"#.len() + MAX_WATCH_GROUPS * LONGEST_WATCH_GROUP_WRAPPER_BYTES;
-pub const WATCHLISTS_LIMIT: usize = 2 * JSON_LIMIT + MAX_WATCHLISTS * LONGEST_WATCHLIST_WRAPPER_BYTES;
+pub const WATCHLISTS_LIMIT: usize = (MAX_WATCH_GROUPS + 1) * JSON_LIMIT + MAX_WATCHLISTS * LONGEST_WATCHLIST_WRAPPER_BYTES;
 
-async fn get_watchlists(State(st): State<Arc<AppState>>) -> Result<Json<Watchlists>, ApiFailure> {
-    Ok(Json(userdata::get_watchlists(&st.db).await?))
+type WatchlistsResponse = ([(&'static str, &'static str); 1], Json<Watchlists>);
+
+async fn get_watchlists(State(st): State<Arc<AppState>>) -> Result<WatchlistsResponse, ApiFailure> {
+    Ok(([("x-vally-watchlists-version", "2")], Json(userdata::get_watchlists(&st.db).await?)))
 }
 
-async fn put_watchlists(State(st): State<Arc<AppState>>, body: Body) -> Result<Json<Watchlists>, ApiFailure> {
+async fn put_watchlists(State(st): State<Arc<AppState>>, body: Body) -> Result<WatchlistsResponse, ApiFailure> {
     let all: Watchlists = read_json(body, WATCHLISTS_LIMIT, "관심종목 본문").await?;
     check_watchlists(&all)?;
     userdata::put_watchlists(&st.db, &all).await?;
-    Ok(Json(all))
+    Ok(([("x-vally-watchlists-version", "2")], Json(all)))
 }
 
 /// 종목 목록에 없는 코드도 받는다. 상장폐지된 종목이 목록에서 사라져도 관심종목은 남아야 한다.
@@ -113,7 +115,7 @@ fn check_watch_groups<'a>(list: &'a Watchlist, ids: &mut HashSet<&'a str>) -> Re
         return Err(ApiFailure::bad_request(format!("관심종목 목록 {list_name}의 그룹은 {MAX_WATCH_GROUPS}개까지입니다: {}개", list.groups.len())));
     }
     let members: HashSet<&str> = list.symbols.iter().map(|c| c.0.as_str()).collect();
-    let (mut names, mut grouped) = (HashSet::new(), HashSet::new());
+    let mut names = HashSet::new();
     for group in &list.groups {
         if group.id.is_empty() || group.id.len() > MAX_WATCHLIST_ID_BYTES || !ids.insert(group.id.as_str()) {
             return Err(ApiFailure::bad_request(format!("관심종목 그룹 id가 비었거나 길거나 겹칩니다: {}", group.id)));
@@ -125,12 +127,13 @@ fn check_watch_groups<'a>(list: &'a Watchlist, ids: &mut HashSet<&'a str>) -> Re
         if !names.insert(name) {
             return Err(ApiFailure::bad_request(format!("관심종목 목록 {list_name}에 같은 이름의 그룹이 두 개 있습니다: {name}")));
         }
+        let mut grouped = HashSet::new();
         for code in &group.symbols {
             if !members.contains(code.0.as_str()) {
                 return Err(ApiFailure::bad_request(format!("관심종목 그룹 {name}의 종목이 목록 {list_name}에 없습니다: {}", code.0)));
             }
             if !grouped.insert(code.0.as_str()) {
-                return Err(ApiFailure::bad_request(format!("관심종목 목록 {list_name}에서 한 종목이 두 그룹에 있습니다: {}", code.0)));
+                return Err(ApiFailure::bad_request(format!("관심종목 그룹 {name}에 같은 종목이 두 번 있습니다: {}", code.0)));
             }
         }
     }

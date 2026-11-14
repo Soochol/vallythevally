@@ -25,7 +25,7 @@ async function open(page: Page) {
 async function moveToGroup(page: Page, code: string, group: string) {
   await row(page, code).locator("[data-main]").click({ button: "right" });
   await page.getByRole("menu", { name: /행 동작$/ }).getByRole("menuitem", { name: "그룹으로 옮기기", exact: true }).click();
-  await page.getByRole("menu", { name: /그룹으로 옮기기$/ }).getByRole(group === "새 그룹…" ? "menuitem" : "menuitemradio", { name: group, exact: true }).click();
+  await page.getByRole("menu", { name: /그룹으로 옮기기$/ }).getByRole((group === "새 그룹…" || group === "이 그룹에서 빼기") ? "menuitem" : "menuitemradio", { name: group, exact: true }).click();
 }
 
 async function nameGroup(page: Page, name: string) {
@@ -92,7 +92,7 @@ test("종목을 그룹 사이와 그룹 없음으로 옮기고 우클릭 메뉴�
   await row(page, "086520").locator("[data-main]").click({ button: "right" });
   await page.getByRole("menuitem", { name: "그룹으로 옮기기", exact: true }).click();
   const groups = page.getByRole("menu", { name: /그룹으로 옮기기$/ });
-  await expect(groups.getByRole("menuitemradio")).toHaveText(["반도체", "2차전지", "그룹 없음"]);
+  await expect(groups.getByRole("menuitemradio")).toHaveText(["반도체", "2차전지"]);
   await expect(groups.getByRole("menuitemradio", { checked: true })).toHaveText("2차전지");
   await groups.getByRole("menuitemradio", { name: "반도체", exact: true }).click();
   await expect.poll(() => servedGroups(scenario)).toEqual([["반도체", ["005935", "086520"]], ["2차전지", []]]);
@@ -102,8 +102,8 @@ test("종목을 그룹 사이와 그룹 없음으로 옮기고 우클릭 메뉴�
   await moveToGroup(page, "005930", "2차전지");
   await expect(groupHead(page, "2차전지")).toHaveAttribute("aria-expanded", "true");
   await expect(row(page, "005930").locator("[data-main]")).toBeFocused();
-  await moveToGroup(page, "005930", "그룹 없음");
-  await moveToGroup(page, "005935", "그룹 없음");
+  await moveToGroup(page, "005930", "이 그룹에서 빼기");
+  await moveToGroup(page, "005935", "이 그룹에서 빼기");
   await expect.poll(() => servedGroups(scenario)).toEqual([["반도체", ["086520"]], ["2차전지", []]]);
   expect(await codes(page)).toEqual(["086520", "005930", "005935", "000660"]);
 
@@ -143,7 +143,7 @@ test("그룹을 옮기고 풀고 지운다. 지울 때는 확인하고 종목도
   await groupMenu(page, "2차전지").click();
   await page.getByRole("menuitem", { name: "그룹 지우기", exact: true }).click();
   const confirm = page.getByRole("dialog");
-  await expect(confirm).toContainText("2차전지 그룹과 그 안의 1종목을 지웁니다");
+  await expect(confirm).toContainText("2차전지 그룹과 그 안의 1종목을 지웁니다. 다른 그룹에도 있는 종목은 남습니다");
   await confirm.getByRole("button", { name: "그룹 지우기", exact: true }).click();
   await expect.poll(() => served(scenario)).toMatchObject({ symbols: ["005930", "005935", "000660"], groups: [] });
   await expect(panel(page).getByText("그룹 없음")).toHaveCount(0);
@@ -185,4 +185,97 @@ test("휴대폰 관심종목도 그룹으로 묶어 보이고 편집에서 그�
   await page.getByRole("menu", { name: /그룹으로 옮기기$/ }).getByRole("menuitemradio", { name: "반도체", exact: true }).click();
   await expect.poll(() => servedGroups(scenario)).toEqual([["반도체", ["005935", "000660"]]]);
   await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBe(0);
+});
+
+const membership = (page: Page, group: string, code: string) => panel(page).getByRole("list", { name: group, exact: true }).locator(`li[data-code="${code}"]`);
+
+async function membershipAction(page: Page, group: string, code: string, action: string) {
+  await membership(page, group, code).locator("[data-main]").click({ button: "right" });
+  await page.getByRole("menu", { name: /행 동작$/ }).getByRole("menuitem", { name: action, exact: true }).click();
+}
+
+test("중복 소속 행의 정렬·끌기·빼기·되돌리기·전체 제거는 해당 문맥을 지킨다", async ({ scenario, page }) => {
+  await seed(scenario, [{ id: "A", name: "첫째", symbols: ["005935", "086520"] }, { id: "B", name: "둘째", symbols: ["005935", "086520", "000660"] }]);
+  await page.goto("/?symbol=005930");
+  await expect(membership(page, "둘째", "086520")).toContainText("에코프로");
+  const second = membership(page, "둘째", "086520").locator("[data-main]");
+  await second.press("Alt+ArrowUp");
+  await expect(second).toBeFocused();
+  await expect.poll(() => servedGroups(scenario)).toEqual([["첫째", ["005935", "086520"]], ["둘째", ["086520", "005935", "000660"]]]);
+  await membership(page, "둘째", "000660").dragTo(membership(page, "둘째", "086520"));
+  await expect.poll(() => servedGroups(scenario)).toEqual([["첫째", ["005935", "086520"]], ["둘째", ["000660", "086520", "005935"]]]);
+  await membership(page, "둘째", "086520").dragTo(membership(page, "첫째", "005935"));
+  expect(servedGroups(scenario)).toEqual([["첫째", ["005935", "086520"]], ["둘째", ["000660", "086520", "005935"]]]);
+  await second.press("Delete");
+  await expect.poll(() => servedGroups(scenario)).toEqual([["첫째", ["005935", "086520"]], ["둘째", ["000660", "005935"]]]);
+  expect(served(scenario).symbols).toContain("086520");
+  await page.getByRole("button", { name: "되돌리기", exact: true }).click();
+  await expect.poll(() => servedGroups(scenario)).toEqual([["첫째", ["005935", "086520"]], ["둘째", ["000660", "086520", "005935"]]]);
+  await membershipAction(page, "둘째", "086520", "관심종목에서 빼기");
+  await expect.poll(() => served(scenario).symbols).not.toContain("086520");
+  expect(served(scenario).groups.every((group) => !group.symbols.includes("086520"))).toBe(true);
+  await page.getByRole("button", { name: "되돌리기", exact: true }).click();
+  await expect.poll(() => served(scenario).groups[1]!.symbols).toEqual(["000660", "086520", "005935"]);
+  await page.reload();
+  await expect(membership(page, "첫째", "086520")).toBeVisible();
+  await expect(membership(page, "둘째", "086520")).toBeVisible();
+});
+
+test("그룹 추가와 새 그룹은 원래 소속을 보존하고 공유 종목은 그룹 삭제 뒤에도 남는다", async ({ scenario, page }) => {
+  await seed(scenario, [{ id: "A", name: "첫째", symbols: ["086520", "005935"] }, { id: "B", name: "둘째", symbols: [] }]);
+  await open(page);
+  await membershipAction(page, "첫째", "086520", "그룹에 추가");
+  const menu = page.getByRole("menu", { name: /그룹에 추가$/ });
+  await expect(menu.getByRole("menuitem", { name: "첫째 이미 있음", exact: true })).toBeDisabled();
+  await menu.getByRole("menuitem", { name: "둘째", exact: true }).click();
+  await expect.poll(() => servedGroups(scenario)).toEqual([["첫째", ["086520", "005935"]], ["둘째", ["086520"]]]);
+  await membershipAction(page, "둘째", "086520", "그룹에 추가");
+  await page.getByRole("menu", { name: /그룹에 추가$/ }).getByRole("menuitem", { name: "새 그룹…", exact: true }).click();
+  await nameGroup(page, "셋째");
+  await expect.poll(() => servedGroups(scenario)).toEqual([["첫째", ["086520", "005935"]], ["둘째", ["086520"]], ["셋째", ["086520"]]]);
+  await groupMenu(page, "첫째").click();
+  await page.getByRole("menuitem", { name: "그룹 지우기", exact: true }).click();
+  await expect(page.getByRole("dialog")).toContainText("그 안의 1종목");
+  await page.getByRole("dialog").getByRole("button", { name: "그룹 지우기", exact: true }).click();
+  await expect.poll(() => served(scenario).symbols).toEqual(["005930", "086520", "000660"]);
+  await expect(membership(page, "둘째", "086520")).toBeVisible();
+  await expect(membership(page, "셋째", "086520")).toBeVisible();
+});
+
+test("다른 목록으로 공유 행을 옮기고 목록을 복제해도 다른 소속과 순서는 남는다", async ({ scenario, page }) => {
+  await seed(scenario, [{ id: "A", name: "첫째", symbols: ["005935", "086520"] }, { id: "B", name: "둘째", symbols: ["086520", "005935", "000660"] }]);
+  await page.goto("/?symbol=005930");
+  await expect(membership(page, "둘째", "086520")).toContainText("에코프로");
+  await membershipAction(page, "둘째", "086520", "다른 목록에 복사");
+  await page.getByRole("menu", { name: /다른 목록으로$/ }).getByRole("menuitem", { name: "다른 목록", exact: true }).last().click();
+  await expect.poll(() => scenario.documents.watchlists().lists[1]!.symbols).toEqual(["086520"]);
+  expect(servedGroups(scenario)).toEqual([["첫째", ["005935", "086520"]], ["둘째", ["086520", "005935", "000660"]]]);
+  await membershipAction(page, "둘째", "086520", "다른 목록에 복사");
+  await page.getByRole("menu", { name: /다른 목록으로$/ }).getByRole("menuitem", { name: "다른 목록", exact: true }).first().click();
+  await expect.poll(() => servedGroups(scenario)).toEqual([["첫째", ["005935", "086520"]], ["둘째", ["005935", "000660"]]]);
+  expect(served(scenario).symbols).toContain("086520");
+  expect(scenario.documents.watchlists().lists[1]!.symbols).toEqual(["086520"]);
+  await panel(page).getByRole("button", { name: "관심종목 목록: 기본", exact: true }).click();
+  await page.getByRole("menuitem", { name: "복제", exact: true }).click();
+  await expect.poll(() => scenario.documents.watchlists().lists.length).toBe(3);
+  const [original, , copy] = scenario.documents.watchlists().lists;
+  expect(copy!.groups.map((g) => [g.name, g.symbols])).toEqual(original!.groups.map((g) => [g.name, g.symbols]));
+  expect(copy!.groups.every((g) => original!.groups.every((old) => old.id !== g.id))).toBe(true);
+  await page.reload();
+  await expect(panel(page).getByRole("button", { name: "관심종목 목록: 기본 복사", exact: true })).toBeVisible();
+  await expect(membership(page, "첫째", "086520")).toBeVisible();
+});
+
+test("휴대폰의 중복 소속 삭제 버튼은 선택한 그룹만 빼고 마지막 소속 뒤 그룹 없음에 남긴다", async ({ scenario, page }) => {
+  await seed(scenario, [{ id: "A", name: "첫째", symbols: ["086520"] }, { id: "B", name: "둘째", symbols: ["086520"] }]);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/?symbol=005930");
+  await page.getByRole("navigation", { name: "휴대폰 탭" }).getByRole("button", { name: "관심종목" }).click();
+  const sheet = page.getByRole("region", { name: "관심종목", exact: true });
+  await sheet.getByRole("button", { name: "편집", exact: true }).click();
+  await sheet.getByRole("list", { name: "둘째", exact: true }).getByRole("button", { name: "에코프로 지우기", exact: true }).click();
+  await expect.poll(() => servedGroups(scenario)).toEqual([["첫째", ["086520"]], ["둘째", []]]);
+  await sheet.getByRole("list", { name: "첫째", exact: true }).getByRole("button", { name: "에코프로 지우기", exact: true }).click();
+  await expect(sheet.getByRole("list", { name: "그룹 없음", exact: true }).locator('li[data-code="086520"]')).toBeVisible();
+  expect(served(scenario).symbols).toContain("086520");
 });

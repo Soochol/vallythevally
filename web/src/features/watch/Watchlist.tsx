@@ -14,7 +14,8 @@ import { DESKTOP_QUERY, useMediaQuery } from "../../lib/media";
 import { isIndexCode, symbolSub } from "../../lib/symbol";
 import {
   groupNameProblem,
-  groupOf,
+  rowKey,
+  type WatchRowRef,
   MAX_WATCH_GROUPS,
   MAX_WATCHLIST_NAME,
   MAX_WATCHLISTS,
@@ -37,7 +38,7 @@ import { useActiveWatchlist, useWatchlistStore } from "../../stores/watchlist";
 import { ArrowIcon, ChartIcon, ChevronIcon, CloseIcon, CopyIcon, ListIcon, MoreIcon, PlusIcon } from "../icons";
 import { Menu, type MenuItem } from "../menu/Menu";
 import { columnTemplate, type WatchVariant } from "./columns";
-import { removeWithUndo } from "./removalUndo";
+import { removalUndo } from "./removalUndo";
 
 const DIR_CLASS = { up: "text-up", down: "text-down", flat: "text-text-2" } as const;
 const ROW_GRID = "grid gap-1";
@@ -255,31 +256,31 @@ function WatchList({ variant, editing, naming, onNaming }: { variant: WatchVaria
   const desktop = useMediaQuery(DESKTOP_QUERY);
   const onScreen = variant === "desktop" ? desktop : !desktop;
   const [dragOver, setDragOver] = useState<number | null>(null);
-  const [dragged, setDragged] = useState<SymbolCode | null>(null);
+  const [dragged, setDragged] = useState<WatchRowRef | null>(null);
   const scroller = useRef<HTMLElement>(null);
-  const [focusCode, setFocusCode] = useState<SymbolCode | null>(null);
+  const [focusRow, setFocusRow] = useState<WatchRowRef | null>(null);
   const template = { gridTemplateColumns: columnTemplate(variant, columns) };
   const sections = watchSections(list);
 
   useEffect(() => (onScreen ? quoteBook.lease(symbols) : undefined), [onScreen, symbols]);
 
   useEffect(() => {
-    if (focusCode === null) return;
-    scroller.current?.querySelector<HTMLElement>(`[data-code="${CSS.escape(focusCode)}"] [data-main]`)?.focus();
-    setFocusCode(null);
-  }, [focusCode, list]);
+    if (focusRow === null) return;
+    scroller.current?.querySelector<HTMLElement>(`[data-row="${CSS.escape(rowKey(focusRow))}"] [data-main]`)?.focus();
+    setFocusRow(null);
+  }, [focusRow, list]);
 
   const endDrag = () => {
     setDragged(null);
     setDragOver(null);
   };
   const rows = (section: WatchSection) => {
-    const sameSection = dragged !== null && (groupOf(list, dragged)?.id ?? null) === (section.group?.id ?? null);
+    const sameSection = dragged !== null && dragged.groupId === (section.group?.id ?? null);
     return section.symbols.map((code, i) => (
       <WatchRow
-        key={code}
+        key={rowKey({ code, groupId: section.group?.id ?? null })}
         list={list}
-        code={code}
+        row={{ code, groupId: section.group?.id ?? null }}
         index={i}
         last={i === section.symbols.length - 1}
         columns={columns}
@@ -287,13 +288,13 @@ function WatchList({ variant, editing, naming, onNaming }: { variant: WatchVaria
         variant={variant}
         editing={editing}
         dropBefore={sameSection && dragOver === i}
-        onMoved={setFocusCode}
+        onMoved={setFocusRow}
         onNaming={onNaming}
         drag={{
-          start: () => setDragged(code),
+          start: () => setDragged({ code, groupId: section.group?.id ?? null }),
           over: () => sameSection && setDragOver(i),
           drop: () => {
-            if (sameSection) useWatchlistStore.getState().move(list.id, dragged, i);
+            if (sameSection && dragged) useWatchlistStore.getState().move(list.id, dragged, i);
             endDrag();
           },
           end: endDrag,
@@ -374,8 +375,9 @@ function GroupMenu({ list, group, onRename }: { list: Watchlist; group: WatchGro
   const store = useWatchlistStore.getState();
   const forget = () => setCollapsed(group.id, false);
   const remove = async () => {
-    const count = group.symbols.length;
-    if (!await confirmAction(count > 0 ? `${group.name} 그룹과 그 안의 ${count}종목을 지웁니다` : `${group.name} 그룹을 지웁니다`, { action: "그룹 지우기", danger: true })) return;
+    const shared = new Set(list.groups.filter((g) => g.id !== group.id).flatMap((g) => g.symbols));
+    const count = group.symbols.filter((c) => !shared.has(c)).length;
+    if (!await confirmAction(count > 0 ? `${group.name} 그룹과 그 안의 ${count}종목을 지웁니다. 다른 그룹에도 있는 종목은 남습니다` : `${group.name} 그룹을 지웁니다. 다른 그룹에도 있는 종목은 남습니다`, { action: "그룹 지우기", danger: true })) return;
     store.deleteGroup(list.id, group.id);
     forget();
   };
@@ -455,7 +457,7 @@ function GroupNameInput({ list, group, onDone }: { list: Watchlist; group: Watch
 
 interface RowProps {
   list: Watchlist;
-  code: SymbolCode;
+  row: WatchRowRef;
   index: number;
   last: boolean;
   columns: readonly WatchColumn[];
@@ -463,7 +465,7 @@ interface RowProps {
   variant: WatchVariant;
   editing: boolean;
   dropBefore: boolean;
-  onMoved(code: SymbolCode): void;
+  onMoved(row: WatchRowRef): void;
   onNaming: GroupNaming["onNaming"];
   drag: { start(): void; over(): void; drop(): void; end(): void };
 }
@@ -504,12 +506,13 @@ function QuoteCell({ column, quote, limited, isIndex, variant }: { column: Watch
   );
 }
 
-function WatchRow({ list, code, index, last, columns, template, variant, editing, dropBefore, onMoved, onNaming, drag }: RowProps) {
+function WatchRow({ list, row, index, last, columns, template, variant, editing, dropBefore, onMoved, onNaming, drag }: RowProps) {
+  const { code } = row;
   const slot = useSelectionStore((s) => s.activeSlot);
   const cell = useCell(slot);
   const active = cell.symbol === code;
   const others = useWatchlistStore((s) => s.lists).filter((l) => l.id !== list.id);
-  const [menu, setMenu] = useState<{ kind: "actions" | "transfer" | "group"; x: number; y: number } | null>(null);
+  const [menu, setMenu] = useState<{ kind: "actions" | "transfer" | "group" | "addGroup"; x: number; y: number } | null>(null);
   const root = useRef<HTMLLIElement>(null);
   const button = useRef<HTMLButtonElement>(null);
   const infoQuery = useSymbolInfo(code);
@@ -527,14 +530,15 @@ function WatchRow({ list, code, index, last, columns, template, variant, editing
     if (variant === "phone") useSelectionStore.getState().setPhoneTab("chart");
   };
   const move = (step: -1 | 1) => {
-    moveBy(list.id, code, step);
-    onMoved(code);
+    moveBy(list.id, row, step);
+    onMoved(row);
   };
-  const remove = () => {
-    const undo = removeWithUndo(list.id, code);
-    if (undo) useSelectionStore.getState().showToast(`${list.name}에서 뺐습니다: ${name}`, undo);
+  const remove = (wholeList = false) => {
+    const store = useWatchlistStore.getState();
+    const undo = removalUndo(wholeList ? store.removeFromListWithUndo(list.id, code) : store.removeRowWithUndo(list.id, row));
+    if (undo) useSelectionStore.getState().showToast(`${!wholeList && row.groupId !== null ? list.groups.find((g) => g.id === row.groupId)?.name ?? list.name : list.name}에서 뺐습니다: ${name}`, undo);
   };
-  const top = () => { useWatchlistStore.getState().move(list.id, code, 0); onMoved(code); };
+  const top = () => { useWatchlistStore.getState().move(list.id, row, 0); onMoved(row); };
   const compare = () => {
     const refusal = compareRefusal(cell.chartSettings, code, cell.symbol);
     if (refusal) return useSelectionStore.getState().showToast(refusal === "full" ? "비교 종목은 3개까지입니다" : refusal === "main" ? "현재 종목은 비교에 추가할 수 없습니다" : "이미 비교에 있습니다");
@@ -548,20 +552,23 @@ function WatchRow({ list, code, index, last, columns, template, variant, editing
     { kind: "action", label: "비교에 추가", icon: <PlusIcon />, hint: "Shift+↵", onSelect: compare },
     { kind: "separator" },
     { kind: "action", label: "맨 위로", icon: <ArrowIcon dir="up" />, hint: "Alt+Home", disabled: index === 0, onSelect: top },
+    { kind: "action", label: "그룹에 추가", icon: <PlusIcon />, onSelect: () => { button.current?.focus(); setMenu((current) => current && { ...current, kind: "addGroup" }); } },
     { kind: "action", label: "그룹으로 옮기기", icon: <ListIcon />, onSelect: () => { button.current?.focus(); setMenu((current) => current && { ...current, kind: "group" }); } },
     { kind: "action", label: "다른 목록에 복사", icon: <CopyIcon />, disabled: others.length === 0, onSelect: () => { button.current?.focus(); setMenu((current) => current && { ...current, kind: "transfer" }); } },
     { kind: "separator" },
-    { kind: "action", label: "관심종목에서 빼기", icon: <CloseIcon />, hint: "Del", danger: true, onSelect: remove },
+    ...(row.groupId !== null ? [{ kind: "action", label: "이 그룹에서 빼기", icon: <CloseIcon />, hint: "Del", onSelect: () => remove() } satisfies MenuItem] : []),
+    { kind: "action", label: "관심종목에서 빼기", icon: <CloseIcon />, hint: row.groupId === null ? "Del" : undefined, danger: true, onSelect: () => remove(true) },
   ];
 
   return (
     <li
       ref={root}
       data-code={code}
+      data-row={rowKey(row)}
       draggable={variant === "desktop"}
       onDragStart={(e) => {
         e.dataTransfer.effectAllowed = "move";
-        e.dataTransfer.setData("text/plain", code);
+        e.dataTransfer.setData("text/plain", rowKey(row));
         drag.start();
       }}
       onDragOver={(e) => {
@@ -624,18 +631,18 @@ function WatchRow({ list, code, index, last, columns, template, variant, editing
         )}
       </button>
       {variant === "desktop" ? menu && <Menu key={menu.kind} label={`${name} ${MENU_LABEL[menu.kind]}`} root={root} style={{ left: menu.x, top: menu.y }}
-        className="overflow-auto" items={menu.kind === "actions" ? items : menu.kind === "group" ? groupItems(list, code, onNaming, onMoved) : transferItems(list, code, name, others)} onClose={() => setMenu((current) => current === menu ? null : current)} /> : (
+        className="overflow-auto" items={menu.kind === "actions" ? items : (menu.kind === "group" || menu.kind === "addGroup") ? groupItems(list, row, onNaming, onMoved, menu.kind === "addGroup") : transferItems(list, row, name, others)} onClose={() => setMenu((current) => current === menu ? null : current)} /> : (
         editing && (
           <div className="absolute right-2 top-1/2 flex -translate-y-1/2 gap-1">
-            {list.groups.length > 0 && <GroupMoveMenu list={list} code={code} name={name} onNaming={onNaming} onMoved={onMoved} />}
-            <TransferMenu list={list} code={code} name={name} buttonClass="icon-btn h-10 w-10" />
+            {list.groups.length > 0 && <GroupMoveMenu list={list} row={row} name={name} onNaming={onNaming} onMoved={onMoved} onRemoveFromList={() => remove(true)} />}
+            <TransferMenu list={list} row={row} name={name} buttonClass="icon-btn h-10 w-10" />
             <button type="button" className="icon-btn h-10 w-10" aria-label={`${name} 위로`} disabled={index === 0} onClick={() => move(-1)}>
               <ArrowIcon dir="up" />
             </button>
             <button type="button" className="icon-btn h-10 w-10" aria-label={`${name} 아래로`} disabled={last} onClick={() => move(1)}>
               <ArrowIcon dir="down" />
             </button>
-            <button type="button" className="icon-btn h-10 w-10 text-danger" aria-label={`${name} 지우기`} onClick={remove}>
+            <button type="button" className="icon-btn h-10 w-10 text-danger" aria-label={`${name} 지우기`} onClick={() => remove()}>
               <CloseIcon size={18} />
             </button>
           </div>
@@ -645,25 +652,29 @@ function WatchRow({ list, code, index, last, columns, template, variant, editing
   );
 }
 
-const MENU_LABEL = { actions: "행 동작", group: "그룹으로 옮기기", transfer: "다른 목록으로" } as const;
+const MENU_LABEL = { actions: "행 동작", addGroup: "그룹에 추가", group: "그룹으로 옮기기", transfer: "다른 목록으로" } as const;
 
-function groupItems(list: Watchlist, code: SymbolCode, onNaming: GroupNaming["onNaming"], onMoved: RowProps["onMoved"]): MenuItem[] {
-  const current = groupOf(list, code)?.id ?? null;
-  const assign = (group: string | null) => {
-    useWatchlistStore.getState().assignGroup(list.id, code, group);
-    if (group !== null) setCollapsed(group, false);
-    onMoved(code);
+function groupItems(list: Watchlist, row: WatchRowRef, onNaming: GroupNaming["onNaming"], onMoved: RowProps["onMoved"], additive = false): MenuItem[] {
+  const assign = (group: string) => {
+    const store = useWatchlistStore.getState();
+    if (additive) store.addToGroup(list.id, row.code, group);
+    else store.moveToGroup(list.id, row, group);
+    setCollapsed(group, false);
+    onMoved({ code: row.code, groupId: group });
   };
   return [
-    { kind: "heading", label: "그룹으로 옮기기" },
-    ...list.groups.map((g): MenuItem => ({ kind: "radio", label: g.name, value: g.id, checked: g.id === current, onSelect: () => assign(g.id) })),
-    { kind: "radio", label: "그룹 없음", checked: current === null, onSelect: () => assign(null) },
+    { kind: "heading", label: additive ? "그룹에 추가" : "그룹으로 옮기기" },
+    ...list.groups.map((g): MenuItem => (additive ? { kind: "action", label: g.name, disabled: g.symbols.includes(row.code), hint: g.symbols.includes(row.code) ? "이미 있음" : undefined, onSelect: () => assign(g.id) } : { kind: "radio", label: g.name, value: g.id, checked: g.id === row.groupId, onSelect: () => assign(g.id) })),
+    ...(!additive && row.groupId !== null ? [{ kind: "action", label: "이 그룹에서 빼기", onSelect: () => {
+      const undo = removalUndo(useWatchlistStore.getState().removeRowWithUndo(list.id, row));
+      if (undo) useSelectionStore.getState().showToast("그룹에서 뺐습니다", undo);
+    } } satisfies MenuItem] : []),
     { kind: "separator" },
-    { kind: "action", label: "새 그룹…", icon: <PlusIcon />, disabled: list.groups.length >= MAX_WATCH_GROUPS, onSelect: () => startGroup(list, onNaming, [code]) },
+    { kind: "action", label: "새 그룹…", icon: <PlusIcon />, disabled: list.groups.length >= MAX_WATCH_GROUPS, onSelect: () => startGroup(list, onNaming, [row.code]) },
   ];
 }
 
-function GroupMoveMenu({ list, code, name, onNaming, onMoved }: { list: Watchlist; code: SymbolCode; name: string; onNaming: GroupNaming["onNaming"]; onMoved: RowProps["onMoved"] }) {
+function GroupMoveMenu({ list, row, name, onNaming, onMoved, onRemoveFromList }: { list: Watchlist; row: WatchRowRef; name: string; onNaming: GroupNaming["onNaming"]; onMoved: RowProps["onMoved"]; onRemoveFromList(): void }) {
   const [open, setOpen] = useState(false);
   const root = useRef<HTMLDivElement>(null);
   const button = useRef<HTMLButtonElement>(null);
@@ -685,16 +696,17 @@ function GroupMoveMenu({ list, code, name, onNaming, onMoved }: { list: Watchlis
       >
         <ListIcon />
       </button>
-      {open && <Menu label={`${name} 그룹으로 옮기기`} items={groupItems(list, code, onNaming, onMoved)} onClose={close} root={root} className="fixed overflow-auto" />}
+      {open && <Menu label={`${name} 그룹으로 옮기기`} items={[...groupItems(list, row, onNaming, onMoved), { kind: "separator" }, ...groupItems(list, row, onNaming, onMoved, true).slice(0, -2), { kind: "separator" }, { kind: "action", label: "관심종목에서 빼기", danger: true, onSelect: onRemoveFromList }]} onClose={close} root={root} className="fixed overflow-auto" />}
     </div>
   );
 }
 
-function transferItems(list: Watchlist, code: SymbolCode, name: string, others: readonly Watchlist[]): MenuItem[] {
+function transferItems(list: Watchlist, row: WatchRowRef, name: string, others: readonly Watchlist[]): MenuItem[] {
+  const { code } = row;
   const send = (to: Watchlist, how: Transfer) => {
     const { showToast } = useSelectionStore.getState();
     if (to.symbols.includes(code) && how === "copy") return showToast(`${name}은 이미 ${to.name}에 있습니다`);
-    useWatchlistStore.getState().transfer(list.id, to.id, code, how);
+    useWatchlistStore.getState().transfer(list.id, to.id, row, how);
     showToast(`${how === "move" ? "옮겼습니다" : "복사했습니다"}: ${name} → ${to.name}`);
   };
   return [
@@ -706,7 +718,7 @@ function transferItems(list: Watchlist, code: SymbolCode, name: string, others: 
   ];
 }
 
-function TransferMenu({ list, code, name, buttonClass }: { list: Watchlist; code: SymbolCode; name: string; buttonClass: string }) {
+function TransferMenu({ list, row, name, buttonClass }: { list: Watchlist; row: WatchRowRef; name: string; buttonClass: string }) {
   const others = useWatchlistStore((s) => s.lists).filter((l) => l.id !== list.id);
   const [open, setOpen] = useState(false);
   const root = useRef<HTMLDivElement>(null);
@@ -732,7 +744,7 @@ function TransferMenu({ list, code, name, buttonClass }: { list: Watchlist; code
       </button>
       {open && <Menu
             label={`${name} 다른 목록으로`}
-            items={transferItems(list, code, name, others)}
+            items={transferItems(list, row, name, others)}
             onClose={close}
             root={root}
             className="fixed overflow-auto"

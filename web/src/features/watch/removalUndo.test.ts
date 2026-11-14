@@ -5,7 +5,7 @@ import { startAutosave, type Autosave } from "../../persist/autosave";
 import { usePersistStore } from "../../stores/persist";
 import { useSelectionStore } from "../../stores/selection";
 import { useWatchlistStore } from "../../stores/watchlist";
-import { removeWithUndo } from "./removalUndo";
+import { removalUndo } from "./removalUndo";
 
 let autosave: Autosave;
 let server: Watchlists;
@@ -64,7 +64,7 @@ afterEach(() => {
 });
 
 async function prepare() {
-  const undo = removeWithUndo("L", "X")!;
+  const undo = removalUndo(useWatchlistStore.getState().removeFromListWithUndo("L", "X"))!;
   await vi.advanceTimersByTimeAsync(0);
   expect(server.lists[0]!.symbols).toEqual(["A", "B"]);
   reads.length = 0; writes.length = 0;
@@ -86,7 +86,7 @@ test("늦은 GET의 revision+1이 거절되면 최신 목록에서 다시 삽입
   expect(useWatchlistStore.getState().revision).toBe(server.revision);
   expect(useWatchlistStore.getState().lists).toEqual(server.lists);
   const accepted = server.revision;
-  useWatchlistStore.getState().moveBy("L", "B", -1);
+  useWatchlistStore.getState().moveBy("L", { code: "B", groupId: null }, -1);
   await vi.advanceTimersByTimeAsync(0);
   expect(server.revision).toBeGreaterThan(accepted);
   expect(server.lists[0]!.symbols).toEqual(["A", "B", "X"]);
@@ -136,7 +136,7 @@ test("다른 곳에서 X가 다시 들어왔으면 충돌 재조회 뒤 덧붙�
 
 test("GET을 받는 동안 로컬 순서를 바꾸면 늦은 응답은 삽입하지 않는다", async () => {
   const undo = await prepare();
-  onRead = () => { onRead = null; useWatchlistStore.getState().moveBy("L", "B", -1); };
+  onRead = () => { onRead = null; useWatchlistStore.getState().moveBy("L", { code: "B", groupId: null }, -1); };
   undo.run();
   await vi.waitFor(() => expect(server.lists[0]!.symbols).toEqual(["B", "A"]));
   expect(writes.every((w) => !w.lists[0]!.symbols.includes("X"))).toBe(true);
@@ -176,7 +176,7 @@ test("그룹 안 종목을 되돌리면 서버에도 원래 그룹의 원래 자
     toast: (text) => useSelectionStore.getState().showToast(text),
     revisions: { layout: 0, ui: 0, watchlist: server.revision },
   });
-  const undo = removeWithUndo("L", "X")!;
+  const undo = removalUndo(useWatchlistStore.getState().removeFromListWithUndo("L", "X"))!;
   await vi.advanceTimersByTimeAsync(0);
   expect(server.lists[0]).toMatchObject({ symbols: ["A", "B"], groups: [{ id: "G", symbols: ["B"] }] });
   onRead = () => { onRead = null; server = { revision: server.revision + 1, lists: [...server.lists, { id: "copy", name: "복제", symbols: [], groups: [] }] }; };

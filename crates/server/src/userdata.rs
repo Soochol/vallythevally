@@ -353,7 +353,7 @@ mod tests {
     async fn watch_groups_round_trip_in_order_and_go_with_their_list(_: SqlitePoolOptions, opts: SqliteConnectOptions) {
         let db = db(opts).await;
         let mut first = list(FIRST_LIST_ID, "기본", &["005930", "000660", "IDX:001", "035420", "051910"]);
-        first.groups = vec![group("G2", "관찰", &["051910", "005930"]), group("G1", "반도체", &["000660"]), group("G3", "빈 그룹", &[])];
+        first.groups = vec![group("G2", "관찰", &["051910", "005930"]), group("G1", "반도체", &["000660", "005930"]), group("G3", "빈 그룹", &[])];
         let mut second = list("B", "둘", &["005930", "000660"]);
         second.groups = vec![group("G4", "반도체", &["000660", "005930"])];
         let grouped = watch(vec![first, second], 1);
@@ -371,19 +371,48 @@ mod tests {
     }
 
     #[sqlx::test(migrations = "./migrations")]
-    async fn db_rejects_a_grouped_symbol_outside_its_list_or_in_two_groups(_: SqlitePoolOptions, opts: SqliteConnectOptions) {
+    async fn db_rejects_a_grouped_symbol_outside_its_list_or_twice_in_one_group(_: SqlitePoolOptions, opts: SqliteConnectOptions) {
         let db = db(opts).await;
         let saved = watch(vec![list(FIRST_LIST_ID, "기본", &["005930"])], 1);
         put_watchlists(&db, &saved).await.unwrap();
         let mut outside = list(FIRST_LIST_ID, "기본", &["005930"]);
         outside.groups = vec![group("G1", "가", &["000660"])];
         let mut twice = list(FIRST_LIST_ID, "기본", &["005930"]);
-        twice.groups = vec![group("G1", "가", &["005930"]), group("G2", "나", &["005930"])];
+        twice.groups = vec![group("G1", "가", &["005930", "005930"])];
         for (i, bad) in [outside, twice].into_iter().enumerate() {
             let err = put_watchlists(&db, &watch(vec![bad], 2 + i as i64)).await.unwrap_err();
             assert!(matches!(&err, StoreError::Db(e) if e.0.contains("constraint")), "{err:?}");
         }
         assert_eq!(get_watchlists(&db).await.unwrap(), saved, "실패한 트랜잭션은 아무것도 바꾸지 않는다");
+    }
+
+    #[tokio::test]
+    async fn migration_preserves_single_group_data_and_revision_then_allows_overlap() {
+        let tmp = tempfile::tempdir_in("target").unwrap();
+        let path = tmp.path().join("vally.db");
+        {
+            let pool = SqlitePoolOptions::new().connect_with(SqliteConnectOptions::new().filename(&path).create_if_missing(true)).await.unwrap();
+            sqlx::migrate!("./migrations").run_to(9, &pool).await.unwrap();
+            sqlx::query("INSERT INTO watchlist_items (list_id, symbol, position) VALUES (?, '0158S0', 0), (?, '005930', 1)")
+                .bind(FIRST_LIST_ID).bind(FIRST_LIST_ID).execute(&pool).await.unwrap();
+            sqlx::query("INSERT INTO watch_groups (id, list_id, name, position) VALUES ('G2', ?, '관찰', 0), ('G1', ?, '빈 그룹', 1)")
+                .bind(FIRST_LIST_ID).bind(FIRST_LIST_ID).execute(&pool).await.unwrap();
+            sqlx::query("INSERT INTO watch_group_items (group_id, list_id, symbol, position) VALUES ('G2', ?, '005930', 0), ('G2', ?, '0158S0', 1)")
+                .bind(FIRST_LIST_ID).bind(FIRST_LIST_ID).execute(&pool).await.unwrap();
+            sqlx::query("UPDATE watchlist_revision SET revision = 41").execute(&pool).await.unwrap();
+            pool.close().await;
+        }
+        let db = AppDb::open(&path).await.unwrap();
+        let mut original = list(FIRST_LIST_ID, "기본", &["0158S0", "005930"]);
+        original.groups = vec![group("G2", "관찰", &["005930", "0158S0"]), group("G1", "빈 그룹", &[])];
+        assert_eq!(get_watchlists(&db).await.unwrap(), watch(vec![original.clone()], 41));
+        original.groups[1].symbols.push(SymbolCode("0158S0".into()));
+        let overlap = watch(vec![original], 42);
+        put_watchlists(&db, &overlap).await.unwrap();
+        assert_eq!(get_watchlists(&db).await.unwrap(), overlap);
+        assert!(matches!(put_watchlists(&db, &overlap).await, Err(StoreError::Stale(Revision(42)))));
+        drop(db);
+        assert_eq!(get_watchlists(&AppDb::open(&path).await.unwrap()).await.unwrap(), overlap);
     }
 
     #[tokio::test]
