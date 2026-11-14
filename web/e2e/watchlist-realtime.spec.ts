@@ -57,3 +57,22 @@ test("제한된 관심종목은 실시간 아님을 표시하고 제한 해제 �
   await expect(row(page, "005930")).not.toContainText("실시간 아님");
   expect(requests).toHaveLength(1);
 });
+
+
+test("여러 그룹의 같은 종목은 한 번만 구독하고 모든 행에 같은 시세를 보인다", async ({ page, scenario }) => {
+  const current = scenario.documents.watchlists();
+  scenario.documents.saveWatchlists({ revision: current.revision + 1, lists: [{ id: "overlap", name: "공유", symbols: ["005930"], groups: [
+    { id: "A", name: "첫째", symbols: ["005930"] }, { id: "B", name: "둘째", symbols: ["005930"] },
+  ] }] });
+  scenario.reply("/api/quotes", { body: [quote()] });
+  const requests = countQuoteRequests(page);
+  await page.goto("/?symbol=005930");
+  const buttons = row(page, "005930").locator("[data-main]");
+  await expect(buttons).toHaveCount(2);
+  await expect(buttons.first()).toHaveAccessibleName("삼성전자 50,000 −1.96%");
+  await expect.poll(() => scenario.live.messages.filter((frame) => frame.type === "watch").map((frame) => frame.symbols)).toEqual([["005930"]]);
+  scenario.live.emit({ type: "quotes", quotes: [quote(51_500, 500, 0.98)] });
+  await expect(buttons.first()).toHaveAccessibleName("삼성전자 51,500 +0.98%");
+  await expect(buttons.last()).toHaveAccessibleName("삼성전자 51,500 +0.98%");
+  expect(requests).toHaveLength(1);
+});

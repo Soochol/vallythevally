@@ -1,5 +1,5 @@
 import { fetchWatchlists } from "../../api/userData";
-import type { SymbolCode } from "../../api/generated/SymbolCode";
+import type { WatchlistRemoval } from "../../stores/watchlist";
 import { commitWatchlist } from "../../persist/autosave";
 import { usePersistStore } from "../../stores/persist";
 import { type ToastUndo, useSelectionStore } from "../../stores/selection";
@@ -7,8 +7,7 @@ import { useWatchlistStore } from "../../stores/watchlist";
 
 const CONFLICT = "다른 곳에서 바뀌어 되돌리지 못했습니다";
 
-export function removeWithUndo(list: string, code: SymbolCode): ToastUndo | null {
-  const action = useWatchlistStore.getState().removeWithUndo(list, code);
+export function removalUndo(action: WatchlistRemoval | null): ToastUndo | null {
   if (!action) return null;
   let used = false;
   const available = () => !used && action.available();

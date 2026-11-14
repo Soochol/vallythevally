@@ -47,6 +47,8 @@ jobs:
         run: python3 scripts/test-dev.py
       - name: Test web verification workflow
         run: python3 scripts/test-web.py
+      - name: Test watchlist importer recovery
+        run: python3 scripts/test-import-hoga-watchlists.py
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: wasm32-unknown-unknown

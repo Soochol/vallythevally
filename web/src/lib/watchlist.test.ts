@@ -3,7 +3,11 @@ import type { Watchlist } from "../api/generated/Watchlist";
 import {
   addSymbol,
   addSymbols,
-  assignGroup,
+  addToGroup,
+  moveToGroup,
+  removeRow,
+  rowKey,
+  rowExists,
   createGroup,
   deleteGroup,
   displayOrder,
@@ -40,7 +44,8 @@ function expectInvariants(l: Watchlist) {
   const members = new Set(l.symbols);
   const grouped = l.groups.flatMap((g) => g.symbols);
   expect(grouped.every((c) => members.has(c)), "그룹의 종목은 목록에 있다").toBe(true);
-  expect(new Set(grouped).size, "한 종목은 그룹 하나에만 있다").toBe(grouped.length);
+  for (const group of l.groups) expect(new Set(group.symbols).size).toBe(group.symbols.length);
+  expect(members.size).toBe(l.symbols.length);
   expect(new Set(l.groups.map((g) => g.name)).size).toBe(l.groups.length);
   expect(new Set(l.groups.map((g) => g.id)).size).toBe(l.groups.length);
 }
@@ -68,18 +73,18 @@ test("그룹에 있는 종목을 지우면 그룹에서도 빠진다", () => {
 });
 
 test("끌어 놓으면 그 자리로 옮긴다", () => {
-  expect(symbolsOf(moveSymbol(flat, "035420", 0))).toEqual(["035420", "005930", "000660"]);
-  expect(symbolsOf(moveSymbol(flat, "005930", 2))).toEqual(["000660", "035420", "005930"]);
-  expect(symbolsOf(moveSymbol(flat, "005930", 99))).toEqual(["000660", "035420", "005930"]);
-  expect(moveSymbol(flat, "005930", 0)).toBe(flat);
-  expect(moveSymbol(flat, "999999", 0)).toBe(flat);
+  expect(symbolsOf(moveSymbol(flat, { code: "035420", groupId: null }, 0))).toEqual(["035420", "005930", "000660"]);
+  expect(symbolsOf(moveSymbol(flat, { code: "005930", groupId: null }, 2))).toEqual(["000660", "035420", "005930"]);
+  expect(symbolsOf(moveSymbol(flat, { code: "005930", groupId: null }, 99))).toEqual(["000660", "035420", "005930"]);
+  expect(moveSymbol(flat, { code: "005930", groupId: null }, 0)).toBe(flat);
+  expect(moveSymbol(flat, { code: "999999", groupId: null }, 0)).toBe(flat);
 });
 
 test("Alt+↑/↓는 한 칸씩 옮기고, 끝에서는 그대로다", () => {
-  expect(symbolsOf(moveSymbolBy(flat, "000660", -1))).toEqual(["000660", "005930", "035420"]);
-  expect(symbolsOf(moveSymbolBy(flat, "000660", 1))).toEqual(["005930", "035420", "000660"]);
-  expect(moveSymbolBy(flat, "005930", -1)).toBe(flat);
-  expect(moveSymbolBy(flat, "035420", 1)).toBe(flat);
+  expect(symbolsOf(moveSymbolBy(flat, { code: "000660", groupId: null }, -1))).toEqual(["000660", "005930", "035420"]);
+  expect(symbolsOf(moveSymbolBy(flat, { code: "000660", groupId: null }, 1))).toEqual(["005930", "035420", "000660"]);
+  expect(moveSymbolBy(flat, { code: "005930", groupId: null }, -1)).toBe(flat);
+  expect(moveSymbolBy(flat, { code: "035420", groupId: null }, 1)).toBe(flat);
 });
 
 test("화면 순서는 그룹 순서, 그룹 안 순서, 마지막에 그룹 없음을 목록 순서대로 둔다", () => {
@@ -90,25 +95,25 @@ test("화면 순서는 그룹 순서, 그룹 안 순서, 마지막에 그룹 없
 
 test("그룹 안 종목은 그 그룹 안에서만 옮긴다", () => {
   const l = grouped();
-  expect(moveSymbolBy(l, "2", -1).groups[0]!.symbols).toEqual(["2", "4"]);
-  expect(moveSymbolBy(l, "2", -1).symbols).toBe(l.symbols);
-  expect(moveSymbolBy(l, "4", -1)).toBe(l);
-  expect(moveSymbolBy(l, "2", 1)).toBe(l);
-  expect(moveSymbol(l, "2", 0).groups[0]!.symbols).toEqual(["2", "4"]);
+  expect(moveSymbolBy(l, { code: "2", groupId: "A" }, -1).groups[0]!.symbols).toEqual(["2", "4"]);
+  expect(moveSymbolBy(l, { code: "2", groupId: "A" }, -1).symbols).toBe(l.symbols);
+  expect(moveSymbolBy(l, { code: "4", groupId: "A" }, -1)).toBe(l);
+  expect(moveSymbolBy(l, { code: "2", groupId: "A" }, 1)).toBe(l);
+  expect(moveSymbol(l, { code: "2", groupId: "A" }, 0).groups[0]!.symbols).toEqual(["2", "4"]);
 });
 
 test("그룹 없음의 종목은 그룹 없음 안에서 옮기고 그룹의 종목 자리는 그대로 둔다", () => {
   const l = grouped();
-  const down = moveSymbolBy(l, "3", 1);
+  const down = moveSymbolBy(l, { code: "3", groupId: null }, 1);
   expect(down.symbols).toEqual(["1", "2", "6", "4", "5", "3"]);
   expect(watchSections(down).at(-1)!.symbols).toEqual(["1", "6", "3"]);
   expect(down.groups).toBe(l.groups);
-  expect(watchSections(moveSymbol(l, "6", 0)).at(-1)!.symbols).toEqual(["6", "1", "3"]);
-  expect(moveSymbolBy(l, "1", -1)).toBe(l);
-  expect(moveSymbolBy(l, "6", 1)).toBe(l);
+  expect(watchSections(moveSymbol(l, { code: "6", groupId: null }, 0)).at(-1)!.symbols).toEqual(["6", "1", "3"]);
+  expect(moveSymbolBy(l, { code: "1", groupId: null }, -1)).toBe(l);
+  expect(moveSymbolBy(l, { code: "6", groupId: null }, 1)).toBe(l);
 });
 
-test("그룹을 만들면 끝에 붙고, 이름이나 id가 겹치거나 20개면 그대로다", () => {
+test("그룹을 만들면 끝에 붙고, 이름이나 id가 겹치거나 100개면 그대로다", () => {
   const made = createGroup(grouped(), "C", "새 그룹");
   expect(made.groups.map((g) => [g.id, g.name, g.symbols])).toEqual([["A", "반도체", ["4", "2"]], ["B", "관찰", ["5"]], ["C", "새 그룹", []]]);
   expect(made.symbols).toEqual(grouped().symbols);
@@ -120,9 +125,9 @@ test("그룹을 만들면 끝에 붙고, 이름이나 id가 겹치거나 20개�
   expect(full.groups).toHaveLength(MAX_WATCH_GROUPS);
 });
 
-test("종목을 넣어 그룹을 만들면 원래 그룹에서 옮겨 온다. 목록에 없는 종목은 넣지 않는다", () => {
+test("종목을 넣어 그룹을 만들면 원래 그룹에도 남는다. 목록에 없는 종목은 넣지 않는다", () => {
   const made = createGroup(grouped(), "C", "새 그룹", ["2", "9", "1"]);
-  expect(made.groups.map((g) => g.symbols)).toEqual([["4"], ["5"], ["2", "1"]]);
+  expect(made.groups.map((g) => g.symbols)).toEqual([["4", "2"], ["5"], ["2", "1"]]);
   expectInvariants(made);
 });
 
@@ -157,17 +162,17 @@ test("그룹을 풀면 종목은 그룹 없음으로 남고, 그룹을 지우면
 
 test("종목을 다른 그룹이나 그룹 없음으로 옮기면 그 그룹 끝에 붙는다", () => {
   const l = grouped();
-  const moved = assignGroup(l, "2", "B");
+  const moved = moveToGroup(l, { code: "2", groupId: "A" }, "B");
   expect(moved.groups.map((g) => g.symbols)).toEqual([["4"], ["5", "2"]]);
   expectInvariants(moved);
-  expect(assignGroup(l, "1", "A").groups[0]!.symbols).toEqual(["4", "2", "1"]);
-  const freed = assignGroup(l, "4", null);
+  expect(moveToGroup(l, { code: "1", groupId: null }, "A").groups[0]!.symbols).toEqual(["4", "2", "1"]);
+  const freed = removeRow(l, { code: "4", groupId: "A" });
   expect(freed.groups[0]!.symbols).toEqual(["2"]);
   expect(watchSections(freed).at(-1)!.symbols).toEqual(["1", "3", "4", "6"]);
-  expect(assignGroup(l, "2", "A")).toBe(l);
-  expect(assignGroup(l, "1", null)).toBe(l);
-  expect(assignGroup(l, "9", "A")).toBe(l);
-  expect(assignGroup(l, "1", "Z")).toBe(l);
+  expect(moveToGroup(l, { code: "2", groupId: "A" }, "A")).toBe(l);
+  expect(moveToGroup(l, { code: "1", groupId: null }, "Z")).toBe(l);
+  expect(moveToGroup(l, { code: "9", groupId: null }, "A")).toBe(l);
+  expect(moveToGroup(l, { code: "1", groupId: null }, "Z")).toBe(l);
 });
 
 test("목록을 복제하면 그룹도 복제하고 그룹 id는 새로 만든다", () => {
@@ -190,7 +195,7 @@ test("새 그룹 이름은 비어 있는 가장 작은 번호이고, 그룹 이�
 test("저장해 둔 목록은 그룹 키가 없어도 받고, 그룹의 틀린 종목은 걸러 낸다", () => {
   expect(parseWatchlists([{ id: "L", name: "기본", symbols: ["1"] }])).toEqual([{ id: "L", name: "기본", symbols: ["1"], groups: [] }]);
   expect(parseWatchlists([{ ...grouped(), groups: [{ id: "A", name: "가", symbols: ["2", "9", "2"] }, { id: "B", name: "나", symbols: ["2", "3"] }] }])![0]!.groups)
-    .toEqual([{ id: "A", name: "가", symbols: ["2"] }, { id: "B", name: "나", symbols: ["3"] }]);
+    .toEqual([{ id: "A", name: "가", symbols: ["2"] }, { id: "B", name: "나", symbols: ["2", "3"] }]);
   expect(parseWatchlists([])).toBeNull();
   expect(parseWatchlists([{ id: "L", name: "기본", symbols: [1] }])).toBeNull();
   expect(parseWatchlists([{ id: "L", name: "기본", symbols: [], groups: [{ id: "A", symbols: [] }] }])).toBeNull();
@@ -200,26 +205,26 @@ test("저장해 둔 목록은 그룹 키가 없어도 받고, 그룹의 틀린 �
 const lists = (...xs: [string, string[]][]) => xs.map(([id, symbols]): Watchlist => ({ id, name: `이름 ${id}`, symbols, groups: [] }));
 
 test("옮기기는 대상 끝에 붙이고 원래 목록에서 뺀다. 이미 있으면 빼기만 한다", () => {
-  expect(transferSymbol(lists(["A", ["1", "2"]], ["B", ["3"]]), "A", "B", "1", "move")).toEqual(lists(["A", ["2"]], ["B", ["3", "1"]]));
-  expect(transferSymbol(lists(["A", ["1", "2"]], ["B", ["1"]]), "A", "B", "1", "move")).toEqual(lists(["A", ["2"]], ["B", ["1"]]));
+  expect(transferSymbol(lists(["A", ["1", "2"]], ["B", ["3"]]), "A", "B", { code: "1", groupId: null }, "move")).toEqual(lists(["A", ["2"]], ["B", ["3", "1"]]));
+  expect(transferSymbol(lists(["A", ["1", "2"]], ["B", ["1"]]), "A", "B", { code: "1", groupId: null }, "move")).toEqual(lists(["A", ["2"]], ["B", ["1"]]));
 });
 
 test("다른 목록으로 옮기면 원래 목록의 그룹에서도 빼고, 대상에서는 그룹 없음에 붙는다", () => {
   const target: Watchlist = { id: "T", name: "대상", symbols: ["7"], groups: [{ id: "C", name: "가", symbols: ["7"] }] };
-  const [source, after] = transferSymbol([grouped(), target], "L", "T", "2", "move");
+  const [source, after] = transferSymbol([grouped(), target], "L", "T", { code: "2", groupId: "A" }, "move");
   expect(source!.groups[0]!.symbols).toEqual(["4"]);
   expect(after).toEqual({ ...target, symbols: ["7", "2"] });
   expectInvariants(source!);
-  const [kept] = transferSymbol([grouped(), target], "L", "T", "2", "copy");
+  const [kept] = transferSymbol([grouped(), target], "L", "T", { code: "2", groupId: "A" }, "copy");
   expect(kept).toEqual(grouped());
 });
 
 test("복사는 원래 목록을 그대로 둔다. 이미 있거나 원래 목록에 없으면 바꾸지 않는다", () => {
-  expect(transferSymbol(lists(["A", ["1"]], ["B", []]), "A", "B", "1", "copy")).toEqual(lists(["A", ["1"]], ["B", ["1"]]));
+  expect(transferSymbol(lists(["A", ["1"]], ["B", []]), "A", "B", { code: "1", groupId: null }, "copy")).toEqual(lists(["A", ["1"]], ["B", ["1"]]));
   const same = lists(["A", ["1"]], ["B", ["1"]]);
-  expect(transferSymbol(same, "A", "B", "1", "copy")).toBe(same);
-  expect(transferSymbol(same, "A", "B", "9", "move")).toBe(same);
-  expect(transferSymbol(same, "A", "A", "1", "move")).toBe(same);
+  expect(transferSymbol(same, "A", "B", { code: "1", groupId: null }, "copy")).toBe(same);
+  expect(transferSymbol(same, "A", "B", { code: "9", groupId: null }, "move")).toBe(same);
+  expect(transferSymbol(same, "A", "A", { code: "1", groupId: null }, "move")).toBe(same);
 });
 
 test("새 목록 이름은 비어 있는 가장 작은 번호다", () => {
@@ -248,4 +253,40 @@ test("이름은 앞뒤 공백을 지우고 비지 않으며 20자까지이며 �
   expect(nameProblem(two, "가".repeat(20), null)).toBeNull();
   expect(nameProblem(two, "반도체", "a")).toBe("같은 이름의 목록이 있습니다");
   expect(nameProblem(two, "반도체", "b")).toBeNull();
+});
+
+
+test("겹치는 그룹 행은 정렬·빼기·이동에서 서로 독립적이고 전체 제거만 모든 소속을 지운다", () => {
+  const original = grouped();
+  const l = addToGroup(original, "2", "B");
+  expect(l.symbols).toBe(original.symbols);
+  expect(addToGroup(l, "2", "B")).toBe(l);
+  expect(displayOrder(l)).toEqual(["4", "2", "5", "2", "1", "3", "6"]);
+  const row = { code: "2", groupId: "B" };
+  expect(rowKey(row)).not.toBe(rowKey({ ...row, groupId: "A" }));
+  expect(rowExists(l, { ...row, groupId: null })).toBe(false);
+  const moved = moveSymbol(l, row, 0);
+  expect(moved.groups.map((g) => g.symbols)).toEqual([["4", "2"], ["2", "5"]]);
+  const removed = removeRow(l, row);
+  expect(removed.groups.map((g) => g.symbols)).toEqual([["4", "2"], ["5"]]);
+  expect(removed.symbols).toBe(l.symbols);
+  expect(removeRow(removed, row)).toBe(removed);
+  expect(moveSymbol(removed, row, 0)).toBe(removed);
+  const loose = removeRow(removed, { code: "2", groupId: "A" });
+  expect(watchSections(loose).at(-1)!.symbols).toContain("2");
+  expect(removeSymbol(l, "2").groups.map((g) => g.symbols)).toEqual([["4"], ["5"]]);
+  expect(deleteGroup(l, "A")).toMatchObject({ symbols: ["1", "2", "3", "5", "6"], groups: [{ id: "B", symbols: ["5", "2"] }] });
+  expect(moveToGroup(l, row, "A").groups.map((g) => g.symbols)).toEqual([["4", "2"], ["5"]]);
+  expectInvariants(l);
+});
+
+test("다른 목록으로 행을 옮겨도 원래 목록의 다른 그룹 소속은 남는다", () => {
+  const l = addToGroup(grouped(), "2", "B");
+  const target: Watchlist = { id: "T", name: "대상", symbols: [], groups: [] };
+  const after = transferSymbol([l, target], "L", "T", { code: "2", groupId: "A" }, "move");
+  expect(after[0]).toMatchObject({ symbols: l.symbols, groups: [{ symbols: ["4"] }, { symbols: ["5", "2"] }] });
+  expect(after[1]!.symbols).toEqual(["2"]);
+  const final = transferSymbol(after, "L", "T", { code: "2", groupId: "B" }, "move");
+  expect(final[0]!.symbols).not.toContain("2");
+  expect(final[1]!.symbols).toEqual(["2"]);
 });

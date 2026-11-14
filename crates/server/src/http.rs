@@ -702,7 +702,7 @@ mod tests {
         let grouped = json!({"lists": [
             {"id": "A", "name": "기본", "symbols": ["005930", "000660", "IDX:001", "035420"], "groups": [
                 group("G2", "관찰", json!(["035420", "005930"])),
-                group("G1", "반도체", json!(["000660"])),
+                group("G1", "반도체", json!(["000660", "005930"])),
                 group("G3", "빈 그룹", json!([])),
             ]},
             {"id": "B", "name": "둘", "symbols": ["005930"], "groups": [group("G4", "관찰", json!(["005930"]))]},
@@ -711,10 +711,9 @@ mod tests {
         assert_eq!(json(&f.app, "/api/watchlists").await, (StatusCode::OK, grouped.clone()), "그룹 순서와 그룹 안 순서를 그대로 돌려준다");
 
         let body = |groups: Value| json!({"lists": [{"id": "A", "name": "기본", "symbols": ["005930", "000660"], "groups": groups}], "revision": 2}).to_string();
-        let many: Vec<Value> = (0..21).map(|i| group(&format!("G{i}"), &format!("그룹 {i}"), json!([]))).collect();
+        let many: Vec<Value> = (0..101).map(|i| group(&format!("G{i}"), &format!("그룹 {i}"), json!([]))).collect();
         for groups in [
             json!([group("G1", "가", json!(["035420"]))]),
-            json!([group("G1", "가", json!(["005930"])), group("G2", "나", json!(["005930"]))]),
             json!([group("G1", "가", json!(["005930", "005930"]))]),
             json!([group("G1", "가", json!([])), group("G2", "가", json!([]))]),
             json!([group("G1", "가", json!([])), group("G1", "나", json!([]))]),
@@ -736,8 +735,14 @@ mod tests {
         let (s, v) = put(&f.app, "/api/watchlists", &across).await;
         assert_eq!((s, code(&v)), (StatusCode::BAD_REQUEST, "bad_request"), "그룹 id는 목록 사이에서도 겹치지 않는다");
         assert_eq!(json(&f.app, "/api/watchlists").await, (StatusCode::OK, grouped), "거절한 PUT은 그룹을 바꾸지 않는다");
-        let twenty: Vec<Value> = many[..20].to_vec();
-        assert_eq!(put(&f.app, "/api/watchlists", &json!({"lists": [{"id": "A", "name": "기본", "symbols": [], "groups": twenty}], "revision": 3})).await.0, StatusCode::OK, "20개까지 받는다");
+        let hundred: Vec<Value> = many[..100].to_vec();
+        assert_eq!(put(&f.app, "/api/watchlists", &json!({"lists": [{"id": "A", "name": "기본", "symbols": [], "groups": hundred}], "revision": 3})).await.0, StatusCode::OK, "100개까지 받는다");
+        let groups: Vec<Value> = (0..48).map(|i| group(&format!("G{i}"), &format!("그룹 {i}"), json!(["0158S0", "005930"]))).collect();
+        let overlap = json!({"lists": [{"id": "A", "name": "히트맵", "symbols": ["0158S0", "005930"], "groups": groups}], "revision": 4});
+        assert_eq!(put(&f.app, "/api/watchlists", &overlap).await, (StatusCode::OK, overlap.clone()));
+        assert_eq!(json(&f.app, "/api/watchlists").await, (StatusCode::OK, overlap));
+        let response = f.app.clone().oneshot(Request::builder().uri("/api/watchlists").body(Body::empty()).unwrap()).await.unwrap();
+        assert_eq!(response.headers()["x-vally-watchlists-version"], "2");
     }
 
     #[tokio::test]

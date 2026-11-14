@@ -123,7 +123,7 @@ test("자동 저장이 멈춘 뒤의 관심종목 조건부 저장은 보내지 
 test("목록을 만들고 종목을 옮기면 목록 전체를 한 본문으로 보낸다", async () => {
   const store = useWatchlistStore.getState();
   store.create("L2", "반도체");
-  store.transfer(FIRST_WATCHLIST_ID, "L2", "005930", "move");
+  store.transfer(FIRST_WATCHLIST_ID, "L2", { code: "005930", groupId: null }, "move");
   await vi.advanceTimersByTimeAsync(0);
   await vi.advanceTimersByTimeAsync(0);
   expect(puts.at(-1)!.body).toEqual({
@@ -148,7 +148,7 @@ test("옛 한 목록 한도(64KB)에 들던 종목을 가장 긴 감싸개 20개
     groups: [],
   }));
   useWatchlistStore.getState().load(lists);
-  useWatchlistStore.getState().move(lists[0]!.id, codes[1]!, 0);
+  useWatchlistStore.getState().move(lists[0]!.id, { code: codes[1]!, groupId: null }, 0);
   await vi.advanceTimersByTimeAsync(0);
   expect(usePersistStore.getState().saves.watchlist).not.toEqual({ kind: "failed", reason: "too_large" });
   expect(puts.at(-1)!.body).toEqual({ lists: [{ ...lists[0], symbols: [codes[1], codes[0], ...codes.slice(2)] }, ...lists.slice(1)], revision: expect.any(Number) });

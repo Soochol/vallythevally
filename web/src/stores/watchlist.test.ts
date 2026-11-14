@@ -27,7 +27,7 @@ test("종목 편집은 그 목록만 바꾸고 편집마다 revision이 는다",
   s.create("L2", "둘");
   s.add("L2", "005930");
   s.add("L2", "000660");
-  s.moveBy("L2", "000660", -1);
+  s.moveBy("L2", { code: "000660", groupId: null }, -1);
   s.add("L2", "005930");
   const after = useWatchlistStore.getState();
   expect(after.lists.map((l) => l.symbols)).toEqual([[], ["000660", "005930"]]);
@@ -61,7 +61,7 @@ test("복제는 이름을 겹치지 않게 만들고 종목 순서를 독립적�
   s.addAll(FIRST_WATCHLIST_ID, ["000660", "005930"]);
   s.duplicate(FIRST_WATCHLIST_ID, "copy1");
   s.duplicate(FIRST_WATCHLIST_ID, "copy2");
-  s.move("copy1", "005930", 0);
+  s.move("copy1", { code: "005930", groupId: null }, 0);
   expect(useWatchlistStore.getState().lists).toMatchObject([
     { name: "기본", symbols: ["000660", "005930"], groups: [] },
     { name: "기본 복사", symbols: ["005930", "000660"], groups: [] },
@@ -72,8 +72,8 @@ test("복제는 이름을 겹치지 않게 만들고 종목 순서를 독립적�
 test("빼기 되돌리기는 원래 순서를 한 번만 복원하고 없는 종목은 작업을 만들지 않는다", () => {
   const s = useWatchlistStore.getState();
   s.addAll(FIRST_WATCHLIST_ID, ["000660", "005930", "035420"]);
-  expect(s.removeWithUndo(FIRST_WATCHLIST_ID, "999999")).toBeNull();
-  const undo = s.removeWithUndo(FIRST_WATCHLIST_ID, "005930")!;
+  expect(s.removeFromListWithUndo(FIRST_WATCHLIST_ID, "999999")).toBeNull();
+  const undo = s.removeFromListWithUndo(FIRST_WATCHLIST_ID, "005930")!;
   expect(undo.available()).toBe(true);
   commit(undo);
   expect(useWatchlistStore.getState().lists[0]!.symbols).toEqual(["000660", "005930", "035420"]);
@@ -86,7 +86,7 @@ test("빼기 되돌리기는 원래 순서를 한 번만 복원하고 없는 종
 test("다른 목록 편집과 서버 재적재 뒤 오래된 빼기 되돌리기는 실행되지 않는다", () => {
   const s = useWatchlistStore.getState();
   s.addAll(FIRST_WATCHLIST_ID, ["000660", "005930"]);
-  const undo = s.removeWithUndo(FIRST_WATCHLIST_ID, "005930")!;
+  const undo = s.removeFromListWithUndo(FIRST_WATCHLIST_ID, "005930")!;
   const notified = { count: 0 };
   const unsubscribe = undo.subscribe(() => notified.count++);
   s.create("next", "새 목록");
@@ -94,7 +94,7 @@ test("다른 목록 편집과 서버 재적재 뒤 오래된 빼기 되돌리기
   expect(undo.available()).toBe(false);
   commit(undo);
   expect(useWatchlistStore.getState().lists[0]!.symbols).toEqual(["000660"]);
-  const next = s.removeWithUndo(FIRST_WATCHLIST_ID, "000660")!;
+  const next = s.removeFromListWithUndo(FIRST_WATCHLIST_ID, "000660")!;
   s.load([{ id: FIRST_WATCHLIST_ID, name: "서버", symbols: ["035420"], groups: [] }]);
   commit(next);
   expect(next.available()).toBe(false);
@@ -105,7 +105,7 @@ test("다른 목록 편집과 서버 재적재 뒤 오래된 빼기 되돌리기
 test("바깥에서 복제한 목록을 유지하며 해당 종목만 원래 위치에 다시 넣는다", () => {
   const s = useWatchlistStore.getState();
   s.addAll(FIRST_WATCHLIST_ID, ["000660", "005930", "035420"]);
-  const undo = s.removeWithUndo(FIRST_WATCHLIST_ID, "005930")!;
+  const undo = s.removeFromListWithUndo(FIRST_WATCHLIST_ID, "005930")!;
   s.load([
     { id: FIRST_WATCHLIST_ID, name: "기본", symbols: ["000660", "035420"], groups: [] },
     { id: "copy", name: "기본 복사", symbols: ["000660", "035420"], groups: [] },
@@ -126,7 +126,7 @@ test.each([
 ])("바깥에서 $name 뒤 되돌리기는 비활성이며 눌러도 바뀌지 않는다", ({ lists }) => {
   const s = useWatchlistStore.getState();
   s.addAll(FIRST_WATCHLIST_ID, ["000660", "005930", "035420"]);
-  const undo = s.removeWithUndo(FIRST_WATCHLIST_ID, "005930")!;
+  const undo = s.removeFromListWithUndo(FIRST_WATCHLIST_ID, "005930")!;
   s.load(lists);
   expect(undo.available()).toBe(false);
   const before = useWatchlistStore.getState();
@@ -137,7 +137,7 @@ test.each([
 test("마지막 종목을 뺀 작업은 목록 끝에 한 번만 다시 넣는다", () => {
   const s = useWatchlistStore.getState();
   s.addAll(FIRST_WATCHLIST_ID, ["000660", "005930"]);
-  const undo = s.removeWithUndo(FIRST_WATCHLIST_ID, "005930")!;
+  const undo = s.removeFromListWithUndo(FIRST_WATCHLIST_ID, "005930")!;
   s.load([{ id: FIRST_WATCHLIST_ID, name: "기본", symbols: ["000660"], groups: [] }]);
   commit(undo);
   commit(undo);
@@ -148,7 +148,7 @@ test("그룹 안 종목을 되돌리면 원래 그룹의 원래 자리로 돌아
   const s = useWatchlistStore.getState();
   s.addAll(FIRST_WATCHLIST_ID, ["000660", "005930", "035420", "051910"]);
   s.createGroup(FIRST_WATCHLIST_ID, "G", "반도체", ["051910", "005930", "000660"]);
-  const undo = s.removeWithUndo(FIRST_WATCHLIST_ID, "005930")!;
+  const undo = s.removeFromListWithUndo(FIRST_WATCHLIST_ID, "005930")!;
   expect(useWatchlistStore.getState().lists[0]!.groups[0]!.symbols).toEqual(["051910", "000660"]);
   commit(undo);
   expect(useWatchlistStore.getState().lists[0]).toMatchObject({
@@ -161,7 +161,7 @@ test("바깥에서 그룹이 바뀐 뒤 되돌리기는 비활성이며 눌러�
   const s = useWatchlistStore.getState();
   s.addAll(FIRST_WATCHLIST_ID, ["000660", "005930"]);
   s.createGroup(FIRST_WATCHLIST_ID, "G", "반도체", ["005930", "000660"]);
-  const undo = s.removeWithUndo(FIRST_WATCHLIST_ID, "005930")!;
+  const undo = s.removeFromListWithUndo(FIRST_WATCHLIST_ID, "005930")!;
   s.load([{ id: FIRST_WATCHLIST_ID, name: "기본", symbols: ["000660"], groups: [] }]);
   expect(undo.available()).toBe(false);
   const before = useWatchlistStore.getState();
@@ -174,7 +174,7 @@ test("그룹 편집은 목록 하나만 바꾸고 편집마다 revision이 늘�
   s.addAll(FIRST_WATCHLIST_ID, ["000660", "005930"]);
   const r0 = useWatchlistStore.getState().revision;
   s.createGroup(FIRST_WATCHLIST_ID, "G", "반도체");
-  s.assignGroup(FIRST_WATCHLIST_ID, "005930", "G");
+  s.addToGroup(FIRST_WATCHLIST_ID, "005930", "G");
   s.renameGroup(FIRST_WATCHLIST_ID, "G", "칩");
   s.createGroup(FIRST_WATCHLIST_ID, "H", "관찰");
   s.moveGroupBy(FIRST_WATCHLIST_ID, "H", -1);
@@ -196,4 +196,39 @@ test("목록 복제는 그룹을 새 id로 복제한다", () => {
   const copy = useWatchlistStore.getState().lists[1]!;
   expect(copy).toMatchObject({ id: "copy", name: "기본 복사", symbols: ["000660", "005930"], groups: [{ name: "반도체", symbols: ["005930"] }] });
   expect(copy.groups[0]!.id).not.toBe("G");
+});
+
+test("새 그룹으로 행을 옮기면 한 번에 선택한 소속만 바꾸고 오래된 행은 무시한다", () => {
+  const s = useWatchlistStore.getState();
+  s.addAll(FIRST_WATCHLIST_ID, ["000660", "005930"]);
+  s.createGroup(FIRST_WATCHLIST_ID, "A", "첫째", ["000660", "005930"]);
+  s.createGroup(FIRST_WATCHLIST_ID, "B", "둘째", ["005930"]);
+  const before = useWatchlistStore.getState();
+  const updates: unknown[] = [];
+  const unsubscribe = useWatchlistStore.subscribe((state) => updates.push(state.lists[0]));
+  s.moveToNewGroup(FIRST_WATCHLIST_ID, { code: "005930", groupId: "A" }, "C", "셋째");
+  unsubscribe();
+  const after = useWatchlistStore.getState();
+  expect(after.revision).toBe(before.revision + 1);
+  expect(updates).toEqual([after.lists[0]]);
+  expect(after.lists[0]).toMatchObject({ symbols: ["000660", "005930"], groups: [
+    { id: "A", symbols: ["000660"] }, { id: "B", symbols: ["005930"] }, { id: "C", symbols: ["005930"] },
+  ] });
+  s.moveToNewGroup(FIRST_WATCHLIST_ID, { code: "005930", groupId: "A" }, "D", "넷째");
+  expect(useWatchlistStore.getState()).toBe(after);
+  s.moveToNewGroup(FIRST_WATCHLIST_ID, { code: "005930", groupId: "B" }, "C", "넷째");
+  expect(useWatchlistStore.getState()).toBe(after);
+});
+
+
+test("그룹 행 빼기 되돌리기는 모든 그룹 순서와 공유 소속을 그대로 복원한다", () => {
+  const s = useWatchlistStore.getState();
+  s.addAll(FIRST_WATCHLIST_ID, ["000660", "005930"]);
+  s.createGroup(FIRST_WATCHLIST_ID, "A", "첫째", ["000660", "005930"]);
+  s.createGroup(FIRST_WATCHLIST_ID, "B", "둘째", ["005930", "000660"]);
+  const before = structuredClone(useWatchlistStore.getState().lists);
+  const undo = s.removeRowWithUndo(FIRST_WATCHLIST_ID, { code: "005930", groupId: "B" })!;
+  expect(useWatchlistStore.getState().lists[0]!.groups.map((g) => g.symbols)).toEqual([["000660", "005930"], ["000660"]]);
+  commit(undo);
+  expect(useWatchlistStore.getState().lists).toEqual(before);
 });
