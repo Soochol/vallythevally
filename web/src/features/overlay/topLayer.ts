@@ -81,12 +81,15 @@ export function mountLayer(panel: HTMLElement, options: LayerOptions) {
   }
   const observer = new ResizeObserver(place);
   observer.observe(panel);
+  const restyled = new MutationObserver(place);
+  if (options.follow) for (let around = options.trigger?.parentElement; around; around = around.parentElement) restyled.observe(around, { attributes: true });
   window.addEventListener("resize", place);
   window.addEventListener("scroll", place, true);
   if (options.focus !== false) (panel.querySelector<HTMLElement>("[autofocus]") ?? panel.querySelector<HTMLElement>("button[aria-checked=true]") ?? panel.querySelector<HTMLElement>("button:not(:disabled), input:not(:disabled), textarea, [tabindex='0']") ?? panel).focus();
   return () => {
     cancelAnimationFrame(frame);
     observer.disconnect();
+    restyled.disconnect();
     window.removeEventListener("resize", place);
     window.removeEventListener("scroll", place, true);
     const index = layers.indexOf(layer);
