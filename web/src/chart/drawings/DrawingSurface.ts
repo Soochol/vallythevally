@@ -67,8 +67,11 @@ export class DrawingSurface implements ChartExtension {
     on("contextmenu", (e) => this.contextMenu(e));
     on("dblclick", (e) => {
       if (this.state.kind === "placing") { e.preventDefault(); e.stopImmediatePropagation(); this.input({ kind: "finish" }); return; }
-      const hit = frameHit(this.frame(), this.local(e));
-      if (hit.kind !== "empty") { e.preventDefault(); e.stopImmediatePropagation(); this.openEditor(hit.id); }
+      const frame = this.frame(); const hit = frameHit(frame, this.local(e));
+      if (hit.kind === "empty") return;
+      e.preventDefault(); e.stopImmediatePropagation();
+      const drawing = frame.items.find((item) => item.id === hit.id)?.drawing;
+      this.openEditor(hit.id, drawing && toolOf(drawing.tool)?.text?.editOnPlace ? "text" : "settings");
     });
     const key = (e: KeyboardEvent) => this.onKey(e);
     window.addEventListener("keydown", key, true);
@@ -277,9 +280,8 @@ export class DrawingSurface implements ChartExtension {
   openEditor(id: string, kind: "settings" | "text" = "settings") {
     const symbol = this.host.view()?.symbol; const d = symbol ? this.sync.drawings(symbol).find((item) => item.id === id) : undefined;
     if (!d) return;
-    const tool = toolOf(d.tool); const nextKind = kind === "text" || tool?.text?.editOnPlace ? "text" : "settings";
     useDrawingSession.getState().select([d.id]);
-    useDrawingSession.setState({ editor: { kind: nextKind, original: d, draft: d }, popup: null });
+    useDrawingSession.setState({ editor: { kind, original: d, draft: d }, popup: null });
   }
   reorder(id: string, direction: "front" | "forward" | "backward" | "back", targetId?: string, dropPosition: "above" | "below" = "below") {
     const symbol = this.host.view()?.symbol; if (!symbol) return;
