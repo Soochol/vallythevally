@@ -130,6 +130,13 @@ describe("크기 바꾸기", () => {
     expect(resizeRect(small, "e", { x: 10, y: 0 }, min, [], AREA).rect).toEqual({ ...grown, w: min.w + 10 });
   });
 
+  test("오른쪽 가장자리의 좁은 창은 키운 뒤 창 머리가 영역 안에 오게 옮기고 그 자리에서 크기를 바꾼다", () => {
+    const narrow = { x: 1200, y: 100, w: 50, h: 200 };
+    expect(resizeRect(narrow, "s", { x: 0, y: 20 }, min, [], AREA).rect).toEqual({ x: 1176, y: 100, w: 280, h: 220 });
+    const result = resizeRect(narrow, "e", { x: 3, y: 0 }, min, [{ x: 1176, y: 300, w: 304, h: 200 }], AREA);
+    expect(result).toEqual({ rect: { x: 1176, y: 100, w: 280, h: 200 }, guides: { x: null, y: null }, atMinimum: false });
+  });
+
   test("위쪽 변은 작업 영역 위로 나가지 않는다", () => {
     const result = resizeRect(rect, "n", { x: 0, y: -500 }, min, [], AREA);
     expect(result.rect).toEqual({ ...rect, y: 0, h: 300 });

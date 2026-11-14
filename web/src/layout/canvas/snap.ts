@@ -93,7 +93,7 @@ export function resizeRect(
   others: readonly Rect[],
   area: Area,
 ): { rect: Rect; guides: Guides; atMinimum: boolean } {
-  const base = { ...rect, w: Math.max(rect.w, min.w), h: Math.max(rect.h, min.h) };
+  const base = keepHeadInArea({ ...rect, w: Math.max(rect.w, min.w), h: Math.max(rect.h, min.h) }, area);
   let resized = base;
   const guides: Guides = { x: null, y: null };
   let atMinimum = false;
