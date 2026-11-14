@@ -5,6 +5,7 @@ import { extline } from "../extline";
 import { hline } from "../hline";
 import { hray } from "../hray";
 import { ray } from "../ray";
+import { regression } from "../regression";
 import { trendline } from "../trendline";
 import { vline } from "../vline";
 
@@ -17,4 +18,5 @@ export const LINE_TOOLS: readonly Tool[] = [
   vline,
   crossline,
   channel,
+  regression,
 ];
