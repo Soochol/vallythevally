@@ -75,6 +75,10 @@ async function placeAll(page: Page, scenario: Scenario) {
 
 const tools = () => TOOLS.map((t) => t.tool).sort();
 
+test("등록된 도구는 36개다", () => {
+  expect(TOOLS).toHaveLength(36);
+});
+
 test(`모든 도구: 도구 막대에서 골라 놓고, 새로고침 뒤에도 ${TOOLS.length}개가 개체 목록에 도구 이름으로 남는다`, async ({ page, scenario }, testInfo) => {
   const errors: string[] = []; page.on("pageerror", (e) => errors.push(e.message));
   await page.setViewportSize({ width: 1280, height: 800 });
@@ -139,7 +143,7 @@ test(`모든 도구: 휴대폰 폭에서는 ${TOOLS.length}개가 보이고 편�
   expect((await chart.screenshot()).equals(shown)).toBe(false);
 });
 
-for (const width of [1280, 800]) {
+for (const width of [1280, 1024, 800]) {
   test(`도구 막대: 창 폭 ${width}px에서 차트 안에 머물고 모든 버튼과 그룹 메뉴에 닿는다`, async ({ page }) => {
     await page.setViewportSize({ width, height: 800 });
     await open(page);
@@ -190,6 +194,32 @@ for (const width of [1280, 800]) {
     }
   });
 }
+
+test("도구 막대: 높이 300px 창에서도 그룹 메뉴는 창 안에 있고 메뉴 안을 넘겨 마지막 도구까지 고른다", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 300 });
+  await open(page);
+  const bar = page.getByRole("navigation", { name: "드로잉 도구" });
+  for (const [group, tools] of menuGroups()) {
+    const label = GROUP_LABEL[group];
+    await bar.getByRole("button", { name: `${label} 도구 펼치기`, exact: true }).click();
+    const menu = page.getByRole("menu", { name: `${label} 도구` });
+    await expect(menu).toBeVisible();
+    const m = (await menu.boundingBox())!;
+    expect(m.y, label).toBeGreaterThanOrEqual(0);
+    expect(m.y + m.height, label).toBeLessThanOrEqual(300);
+    const room = await menu.evaluate((el) => el.scrollHeight - el.clientHeight);
+    if (group === "line") expect(room, "선 도구 메뉴는 넘쳐서 넘긴다").toBeGreaterThan(0);
+    await page.mouse.move(m.x + m.width / 2, m.y + m.height / 2);
+    await page.mouse.wheel(0, room + 50);
+    await expect.poll(() => menu.evaluate((el) => el.scrollTop)).toBe(room);
+    const last = tools.at(-1)!;
+    const item = menu.getByRole("menuitem").filter({ hasText: last.label });
+    await expect(item).toBeInViewport({ ratio: 1 });
+    await item.click();
+    await expect(bar.getByRole("button", { name: last.label, exact: true })).toHaveAttribute("aria-pressed", "true");
+    await page.keyboard.press("Escape");
+  }
+});
 
 test("도구 막대: 단축키가 없는 도구는 제목과 메뉴에 빈 단축키를 보이지 않는다", async ({ page }) => {
   await open(page);
