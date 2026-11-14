@@ -66,9 +66,9 @@ export class DrawingSurface implements ChartExtension {
     on("lostpointercapture", () => { if (this.pointer !== null) this.reset(); });
     on("contextmenu", (e) => this.contextMenu(e));
     on("dblclick", (e) => {
-      if (this.state.kind === "placing") { e.preventDefault(); e.stopImmediatePropagation(); this.input({ kind: "finish" }); return; }
       const frame = this.frame(); const at = this.local(e);
       if (!this.inPane(frame, at)) return;
+      if (this.state.kind === "placing") { e.preventDefault(); e.stopImmediatePropagation(); this.input({ kind: "finish" }); return; }
       const hit = frameHit(frame, at);
       if (hit.kind === "empty") return;
       e.preventDefault(); e.stopImmediatePropagation();
@@ -301,10 +301,12 @@ export class DrawingSurface implements ChartExtension {
     const symbol = this.host.view()?.symbol; if (!symbol) return;
     const d = this.sync.drawings(symbol).find((item) => item.id === id); if (!d || d.hidden) return;
     const f = this.projection(); const ctx = this.context(f).ctx;
-    const onAxis = d.points.flatMap((p) => { const screen = ctx.toScreen(p); const logical = screen ? xToLogical(f.axes.time, screen.x) : null; return screen && logical !== null && logical >= 0 ? [{ x: screen.x, logical }] : []; })[0];
-    if (onAxis && (onAxis.x < 0 || onAxis.x > ctx.paneWidth)) {
+    const onScreen = (x: number) => x >= 0 && x <= ctx.paneWidth;
+    const target = d.points.flatMap((p) => { const screen = ctx.toScreen(p); const logical = screen ? xToLogical(f.axes.time, screen.x) : null; return screen && logical !== null ? [{ x: screen.x, logical }] : []; })
+      .find((s) => onScreen(s.x) || s.logical >= 0);
+    if (target && !onScreen(target.x)) {
       const range = this.host.chart.timeScale().getVisibleLogicalRange();
-      if (range) { const half = (range.to - range.from) / 2; this.host.chart.timeScale().setVisibleLogicalRange({ from: onAxis.logical - half, to: onAxis.logical + half }); }
+      if (range) { const half = (range.to - range.from) / 2; this.host.chart.timeScale().setVisibleLogicalRange({ from: target.logical - half, to: target.logical + half }); }
     }
     this.focus();
   }
