@@ -166,6 +166,7 @@ test("날짜·가격 범위, 기준봉 VWAP, 구간 거래량 프로파일을 �
   const profile = await one("volprofile");
   expect(profile.points).toHaveLength(2);
   expect(profile.points[1]!.t).toBeGreaterThan(profile.points[0]!.t);
+  await expect.poll(() => textsOf(page, profile.id)).toEqual([expect.stringMatching(/^\d+분봉 기준$/)]);
   const profileMirror = (await mirror(page)).find((m) => m.id === profile.id)!;
   expect(profileMirror.selected).toBe(true);
   expect(profileMirror.handles).toHaveLength(2);
