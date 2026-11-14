@@ -39,6 +39,25 @@ describe("placement", () => {
     s = step(s, down(30, 30), three).state;
     expect(step(s, down(50, 40), three).effects).toMatchObject([{ kind: "place", points: [{ t: 10, price: 10 }, { t: 30, price: 30 }, { t: 50, price: 40 }] }]);
   });
+  test("seven points commit on the seventh click, and a drag places the first two", () => {
+    const seven = context({ ...trendline, placement: { kind: "points", count: 7 } });
+    const at = [10, 20, 30, 40, 50, 60, 70];
+    const expected = at.map((x) => ({ t: x, price: x + 5 }));
+    let s = step(IDLE, down(10, 15), seven).state;
+    s = step(s, up(10, 15), seven).state;
+    for (const x of at.slice(1, -1)) {
+      const r = step(s, down(x, x + 5), seven);
+      expect(r.effects).toEqual([]);
+      s = step(r.state, up(x, x + 5), seven).state;
+    }
+    expect(s).toMatchObject({ kind: "placing", fixed: expected.slice(0, 6) });
+    expect(step(s, down(70, 75), seven).effects).toMatchObject([{ kind: "place", points: expected }]);
+    s = step(IDLE, down(10, 15), seven).state;
+    s = step(s, up(20, 25), seven).state;
+    expect(s).toMatchObject({ kind: "placing", fixed: expected.slice(0, 2) });
+    for (const x of at.slice(2, -1)) s = step(s, down(x, x + 5), seven).state;
+    expect(step(s, down(70, 75), seven).effects).toMatchObject([{ kind: "place", points: expected }]);
+  });
   test("Shift constrains screen angle, cancel discards point tools", () => {
     const c = context(trendline);
     let s = step(IDLE, down(10, 10), c).state;

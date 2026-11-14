@@ -30,15 +30,35 @@ pub enum DrawingTool {
     Daterange,
     Long,
     Short,
+    Crossline,
+    Regression,
+    Pitchfork,
+    Fibfan,
+    Fibtime,
+    Gannfan,
+    Gannbox,
+    Triangle,
+    Datepricerange,
+    Avwap,
+    Volprofile,
+    Elliott,
+    Elliottabc,
+    Xabcd,
+    Headshoulders,
 }
 
 impl DrawingTool {
     pub const fn point_count(self) -> RangeInclusive<usize> {
         use DrawingTool::*;
         match self {
-            Hline | Hray | Vline | Text | Pricelabel => 1..=1,
-            Trendline | Ray | Extline | Arrow | Fib | Rect | Ellipse | Callout | Pricerange | Daterange => 2..=2,
-            Channel | Fibext | Long | Short => 3..=3,
+            Hline | Hray | Vline | Text | Pricelabel | Crossline | Avwap => 1..=1,
+            Trendline | Ray | Extline | Arrow | Fib | Rect | Ellipse | Callout | Pricerange | Daterange
+            | Regression | Fibfan | Fibtime | Gannfan | Gannbox | Datepricerange | Volprofile => 2..=2,
+            Channel | Fibext | Long | Short | Pitchfork | Triangle => 3..=3,
+            Elliottabc => 4..=4,
+            Xabcd => 5..=5,
+            Elliott => 6..=6,
+            Headshoulders => 7..=7,
             Path => 2..=100,
             Brush => 2..=1000,
         }

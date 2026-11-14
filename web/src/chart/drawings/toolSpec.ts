@@ -16,7 +16,7 @@ import type {
 export type Placement =
   | {
       kind: "points";
-      count: 1 | 2 | 3;
+      count: 1 | 2 | 3 | 4 | 5 | 6 | 7;
       shift?: "angle45" | "square";
       oneClick?: (at: DrawingPoint, ctx: ToolContext) => DrawingPoint[];
     }

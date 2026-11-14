@@ -314,8 +314,12 @@ mod tests {
             (Rect, 2, 2), (Ellipse, 2, 2), (Path, 2, 100), (Brush, 2, 1000),
             (Text, 1, 1), (Pricelabel, 1, 1), (Callout, 2, 2),
             (Pricerange, 2, 2), (Daterange, 2, 2), (Long, 3, 3), (Short, 3, 3),
+            (Crossline, 1, 1), (Regression, 2, 2), (Pitchfork, 3, 3),
+            (Fibfan, 2, 2), (Fibtime, 2, 2), (Gannfan, 2, 2), (Gannbox, 2, 2),
+            (Triangle, 3, 3), (Datepricerange, 2, 2), (Avwap, 1, 1), (Volprofile, 2, 2),
+            (Elliott, 6, 6), (Elliottabc, 4, 4), (Xabcd, 5, 5), (Headshoulders, 7, 7),
         ];
-        assert_eq!(table.len(), 21);
+        assert_eq!(table.len(), 36);
         for (tool, min, max) in table {
             let with = |n: usize| DrawingInput { tool, points: vec![DrawingPoint { t: UnixSeconds(0), price: 1.0 }; n], ..input("A", "005930", 0.0, DrawingScope::Symbol, 1) };
             for n in [min, max] {
@@ -398,7 +402,7 @@ mod tests {
         for (uri, sent, status, want) in [
             ("/api/drawings/OTHER", with(&|_| {}), StatusCode::BAD_REQUEST, "bad_request"),
             ("/api/drawings/D1", with(&|v| v["symbol"] = json!("bad")), StatusCode::BAD_REQUEST, "bad_request"),
-            ("/api/drawings/D1", with(&|v| v["tool"] = json!("pitchfork")), StatusCode::BAD_REQUEST, "bad_request"),
+            ("/api/drawings/D1", with(&|v| v["tool"] = json!("notatool")), StatusCode::BAD_REQUEST, "bad_request"),
             ("/api/drawings/D1", with(&|v| v["points"].as_array_mut().unwrap().truncate(2)), StatusCode::BAD_REQUEST, "bad_request"),
             ("/api/drawings/D1", with(&|v| v["points"][0]["t"] = json!(1.5)), StatusCode::BAD_REQUEST, "bad_request"),
             ("/api/drawings/D1", with(&|v| v["points"][0]["price"] = json!("1")), StatusCode::BAD_REQUEST, "bad_request"),
