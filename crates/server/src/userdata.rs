@@ -163,7 +163,6 @@ fn read_window(r: &SqliteRow) -> Result<LayoutWindow, StoreError> {
     Ok(LayoutWindow { id, link: link.map(|l| from_wire_name("link", l)).transpose()?, content })
 }
 
-/// 레이아웃 행과 창을 한 읽기 트랜잭션에서 읽는다. WAL에서는 첫 SELECT가 스냅숏을 고정한다.
 pub async fn get_layout(db: &AppDb, id: &str) -> Result<Layout, StoreError> {
     let mut tx = db.read().begin().await?;
     let row = sqlx::query("SELECT name, sync, placement, updated_at, revision FROM layouts WHERE id = ?")

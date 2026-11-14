@@ -216,7 +216,7 @@ async fn put_layout(State(st): State<Arc<AppState>>, Path(id): Path<String>, bod
     let nxt = check_layout(&id, &input)?;
     if !nxt.is_empty() {
         let dir = symbol_list(&st).await?;
-        if let Some(info) = nxt.iter().find_map(|s| dir.get(*s).filter(|i| !i.nxt_enabled)) {
+        if let Some(info) = nxt.iter().find_map(|s| listed_without_nxt(&dir, s)) {
             return Err(ApiFailure::bad_request(format!("NXT에서 거래되지 않는 종목입니다: {}({})", info.name, info.symbol.as_wire())));
         }
     }
@@ -224,7 +224,10 @@ async fn put_layout(State(st): State<Arc<AppState>>, Path(id): Path<String>, bod
     Ok(Json(userdata::put_layout(&st.db, &input, now).await?))
 }
 
-/// 목록에 없는 주식은 막지 않는다. 상장폐지된 종목을 연 차트 창도 저장되어야 한다.
+fn listed_without_nxt<'a>(dir: &'a crate::symbols::Directory, symbol: &Symbol) -> Option<&'a domain::SymbolInfo> {
+    dir.get(*symbol).filter(|info| !info.nxt_enabled)
+}
+
 fn check_layout(path_id: &str, input: &LayoutInput) -> Result<Vec<Symbol>, ApiFailure> {
     if input.id != path_id {
         return Err(ApiFailure::bad_request(format!("주소의 id({path_id})와 본문의 id({})가 다릅니다", input.id)));

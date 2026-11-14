@@ -48,6 +48,9 @@ export function commitWatchlist(c: Pick<ConditionalCommit<WatchlistsBody>, "next
   });
 }
 
+const exceedsServerFieldLimits = (l: Omit<LayoutInput, "revision">) =>
+  l.windows.some((w) => w.kind === "chart" && exceedsLimit(w.chartSettings)) || exceedsLimit(l.placement);
+
 export function startAutosave(deps: AutosaveDeps): Autosave {
   const setSave = usePersistStore.getState().setSave;
   const unsaved =
@@ -59,8 +62,7 @@ export function startAutosave(deps: AutosaveDeps): Autosave {
       const { id, name, sync, windows, placement } = useLayoutStore.getState().layout;
       return { id, name, sync, windows, placement };
     },
-    // 서버는 차트 창마다 chartSettings를, 그리고 placement를 각각 64KB로 막는다.
-    tooLarge: (l) => l.windows.some((w) => w.kind === "chart" && exceedsLimit(w.chartSettings)) || exceedsLimit(l.placement),
+    tooLarge: exceedsServerFieldLimits,
     path: () => layoutPath(useLayoutStore.getState().layout.id),
     revision: deps.revisions.layout,
     send: deps.put,

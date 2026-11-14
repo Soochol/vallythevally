@@ -45,7 +45,7 @@ afterEach(() => {
 test("복원한 값을 싣기만 하면 아무것도 보내지 않는다", async () => {
   useLayoutStore.getState().load(DEFAULT_LAYOUT);
   useUiStore.getState().pushRecent("IDX:001"); // 첫 칸의 종목은 이미 맨 앞이다
-  useLayoutStore.getState().setPeriod(CELL, "D"); // 같은 값
+  useLayoutStore.getState().setPeriod(CELL, "D");
   await vi.advanceTimersByTimeAsync(10_000);
   expect(puts).toEqual([]);
 });

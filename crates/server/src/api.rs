@@ -490,10 +490,8 @@ pub enum LinkColor {
 pub enum WindowContent {
     Chart {
         symbol: SymbolCode,
-        /// 지수면 null, 주식이면 언제나 값이 있다(ADR 0007).
         venue: Option<Venue>,
         period: Period,
-        /// 프런트엔드가 모양을 정한다. 64KB 이하. 서버는 모르는 키까지 그대로 저장한다.
         #[serde(rename = "chartSettings")]
         #[ts(type = "unknown")]
         chart_settings: serde_json::Value,

@@ -5,12 +5,4 @@ import type { SymbolCode } from "./SymbolCode";
 import type { Venue } from "./Venue";
 import type { WindowId } from "./WindowId";
 
-export type LayoutWindow = { id: WindowId, link: LinkColor | null, } & ({ "kind": "chart", symbol: SymbolCode, 
-/**
- * 지수면 null, 주식이면 언제나 값이 있다(ADR 0007).
- */
-venue: Venue | null, period: Period, 
-/**
- * 프런트엔드가 모양을 정한다. 64KB 이하. 서버는 모르는 키까지 그대로 저장한다.
- */
-chartSettings: unknown, } | { "kind": "watchlist" } | { "kind": "screener" } | { "kind": "objects" } | { "kind": "indicators" });
+export type LayoutWindow = { id: WindowId, link: LinkColor | null, } & ({ "kind": "chart", symbol: SymbolCode, venue: Venue | null, period: Period, chartSettings: unknown, } | { "kind": "watchlist" } | { "kind": "screener" } | { "kind": "objects" } | { "kind": "indicators" });
