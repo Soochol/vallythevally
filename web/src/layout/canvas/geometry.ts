@@ -2,25 +2,35 @@ import { WINDOW_HEAD_HEIGHT, WINDOW_KINDS, type WindowKind } from "../kinds";
 import type { Rect } from "../placement";
 
 export type Size = { w: number; h: number };
+export type Area = Size & { readonly __brand: "Area" };
+
+export const workArea = (w: number, h: number): Area | null => (w >= 1 && h >= 1 && Number.isFinite(w) && Number.isFinite(h) ? ({ w, h } as Area) : null);
 
 export const SNAP_DISTANCE = 8;
 export const WINDOW_GAP = 6;
 export const HEAD_GRIP = 80;
 
-export const toPx = (rect: Rect, area: Size): Rect => ({ x: rect.x * area.w, y: rect.y * area.h, w: rect.w * area.w, h: rect.h * area.h });
+export const toPx = (rect: Rect, area: Area): Rect => ({ x: rect.x * area.w, y: rect.y * area.h, w: rect.w * area.w, h: rect.h * area.h });
 
-export const toRatio = (rect: Rect, area: Size): Rect => ({ x: rect.x / area.w, y: rect.y / area.h, w: rect.w / area.w, h: rect.h / area.h });
+export const toRatio = (rect: Rect, area: Area): Rect => ({ x: rect.x / area.w, y: rect.y / area.h, w: rect.w / area.w, h: rect.h / area.h });
 
 export const minWindowSize = (kind: WindowKind): Size => ({ w: WINDOW_KINDS[kind].minSize.w, h: WINDOW_KINDS[kind].minSize.h + WINDOW_HEAD_HEIGHT });
 
 export const clamp = (value: number, lo: number, hi: number): number => Math.max(lo, Math.min(hi, value));
 
-export const headGrip = (rect: Rect, area: Size): number => Math.min(HEAD_GRIP, rect.w, area.w);
+const headGrip = (rect: Rect, area: Area): number => Math.min(HEAD_GRIP, rect.w, area.w);
 
-export function keepHeadInArea(rect: Rect, area: Size): Rect {
+export type Range = { lo: number; hi: number };
+
+export function headRanges(rect: Rect, area: Area): { x: Range; y: Range } {
   const grip = headGrip(rect, area);
-  const x = clamp(rect.x, grip - rect.w, area.w - grip);
-  const y = clamp(rect.y, 0, Math.max(0, area.h - WINDOW_HEAD_HEIGHT));
+  return { x: { lo: grip - rect.w, hi: area.w - grip }, y: { lo: 0, hi: Math.max(0, area.h - WINDOW_HEAD_HEIGHT) } };
+}
+
+export function keepHeadInArea(rect: Rect, area: Area): Rect {
+  const ranges = headRanges(rect, area);
+  const x = clamp(rect.x, ranges.x.lo, ranges.x.hi);
+  const y = clamp(rect.y, ranges.y.lo, ranges.y.hi);
   return x === rect.x && y === rect.y ? rect : { ...rect, x, y };
 }
 

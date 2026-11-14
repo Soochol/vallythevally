@@ -35,9 +35,29 @@ describe("옮기기", () => {
     expect(moveRect(moving, { x: 249, y: -296 }, [other], AREA)).toEqual({ rect: { ...moving, x: 350, y: 100 }, guides: { x: 600, y: 100 } });
   });
 
+  test("정확히 8px 떨어지면 달라붙는다", () => {
+    expect(moveRect(moving, { x: -92, y: 0 }, [], AREA)).toEqual({ rect: { ...moving, x: 0 }, guides: { x: 0, y: null } });
+  });
+
+  test("왼쪽과 오른쪽 후보 가운데 더 가까운 쪽에 달라붙는다", () => {
+    const right = { x: 600, y: 100, w: 300, h: 200 };
+    const near = { x: 357, y: 470, w: 100, h: 100 };
+    expect(moveRect({ x: 100, y: 400, w: 250, h: 150 }, { x: 8, y: 0 }, [{ ...right, x: 101 }, near], AREA)).toEqual({
+      rect: { x: 107, y: 400, w: 250, h: 150 },
+      guides: { x: 357, y: null },
+    });
+  });
+
   test("9px 떨어지면 달라붙지 않는다", () => {
     expect(moveRect(moving, { x: -91, y: 0 }, [], AREA)).toEqual({ rect: { ...moving, x: 9 }, guides: { x: null, y: null } });
     expect(moveRect(moving, { x: 235, y: 0 }, [other], AREA)).toEqual({ rect: { ...moving, x: 335 }, guides: { x: null, y: null } });
+  });
+
+  test("창 머리 규칙에 걸리는 후보를 건너뛰고 8px 안의 다른 후보에 달라붙는다", () => {
+    const low = { x: 100, y: 380, w: 300, h: 200 };
+    expect(moveRect({ x: 600, y: 100, w: 300, h: 200 }, { x: 0, y: 485 }, [low], AREA)).toEqual({ rect: { x: 600, y: 580, w: 300, h: 200 }, guides: { x: null, y: 580 } });
+    const wide = { x: 800, y: 300, w: 372, h: 200 };
+    expect(moveRect({ x: 600, y: 0, w: 300, h: 200 }, { x: 579, y: 0 }, [wide], AREA)).toEqual({ rect: { x: 1172, y: 0, w: 300, h: 200 }, guides: { x: 1172, y: 0 } });
   });
 
   test("창 머리는 언제나 작업 영역 안에 남는다", () => {
@@ -77,6 +97,28 @@ describe("크기 바꾸기", () => {
     expect(resizeRect(rect, "e", { x: 195, y: 0 }, min, [other], AREA)).toEqual({ rect: { ...rect, w: 494 }, guides: { x: 594, y: null }, atMinimum: false });
     expect(resizeRect(rect, "s", { x: 0, y: 3 }, min, [other], AREA)).toEqual({ rect: { ...rect, h: 200 }, guides: { x: null, y: 300 }, atMinimum: false });
     expect(resizeRect(rect, "e", { x: 185, y: 0 }, min, [other], AREA).guides).toEqual({ x: null, y: null });
+  });
+
+  test("최소 크기 아래의 후보는 건너뛰고 최소 크기에 닿지 않았으면 멈췄다고 알리지 않는다", () => {
+    const wide = { x: 100, y: 100, w: 400, h: 300 };
+    const others = [{ x: 378, y: 450, w: 300, h: 100 }, { x: 396, y: 450, w: 300, h: 100 }];
+    expect(resizeRect(wide, "e", { x: -117, y: 0 }, { w: 280, h: 194 }, others, AREA)).toEqual({ rect: { ...wide, w: 290 }, guides: { x: 390, y: null }, atMinimum: false });
+  });
+
+  test("왼쪽 변과 위쪽 변도 다른 창에 달라붙는다", () => {
+    const left = { x: 0, y: 0, w: 94, h: 90 };
+    expect(resizeRect(rect, "w", { x: -3, y: 0 }, min, [left], AREA)).toEqual({ rect: { ...rect, x: 94, w: 306 }, guides: { x: 94, y: null }, atMinimum: false });
+    expect(resizeRect(rect, "nw", { x: 3, y: -5 }, min, [left], AREA)).toEqual({ rect: { x: 100, y: 96, w: 300, h: 204 }, guides: { x: 100, y: 96 }, atMinimum: false });
+  });
+
+  test("최소 크기를 넘어 끌면 그 너머의 후보에 달라붙지 않고 안내선도 없다", () => {
+    const beyond = [{ x: 375, y: 450, w: 10, h: 10 }];
+    expect(resizeRect(rect, "e", { x: -26, y: 0 }, min, beyond, AREA)).toEqual({ rect: { ...rect, w: min.w }, guides: { x: null, y: null }, atMinimum: true });
+  });
+
+  test("끌어서 작업 영역 밖으로 키우지 않는다", () => {
+    expect(resizeRect(rect, "e", { x: 5000, y: 0 }, min, [], AREA).rect.w).toBe(1156);
+    expect(resizeRect(rect, "s", { x: 0, y: 5000 }, min, [], AREA).rect.h).toBe(516);
   });
 
   test("위쪽 변은 작업 영역 위로 나가지 않는다", () => {

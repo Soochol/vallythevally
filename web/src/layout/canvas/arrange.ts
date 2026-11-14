@@ -1,6 +1,6 @@
 import type { WindowId, WindowKind, WindowRef } from "../kinds";
 import type { CanvasPlacement, Rect } from "../placement";
-import { clamp, keepHeadInArea, minWindowSize, toPx, toRatio, WINDOW_GAP, type Size } from "./geometry";
+import { clamp, keepHeadInArea, minWindowSize, toPx, toRatio, WINDOW_GAP, type Area, type Size } from "./geometry";
 
 export const CASCADE_STEP = 24;
 export const SIDE_COLUMN_WIDTH = 300;
@@ -15,7 +15,7 @@ export const DEFAULT_WINDOW_SIZE: Readonly<Record<WindowKind, Size>> = Object.fr
 
 const sameSpot = (a: Rect, b: Rect): boolean => Math.abs(a.x - b.x) < 1 && Math.abs(a.y - b.y) < 1;
 
-export function placeNewWindow(kind: WindowKind, others: readonly Rect[], area: Size): Rect {
+export function placeNewWindow(kind: WindowKind, others: readonly Rect[], area: Area): Rect {
   const min = minWindowSize(kind);
   const wanted = DEFAULT_WINDOW_SIZE[kind];
   const w = Math.max(min.w, Math.min(wanted.w, area.w));
@@ -44,8 +44,8 @@ function packColumns(windows: readonly WindowRef[], height: number): Column[] {
   return columns;
 }
 
-function columnWidths(charts: number, sides: number, area: Size): { chart: number; side: number } {
-  const available = area.w - Math.max(0, charts + sides - 1) * WINDOW_GAP;
+function columnWidths(charts: number, sides: number, gap: number, area: Area): { chart: number; side: number } {
+  const available = area.w - Math.max(0, charts + sides - 1) * gap;
   if (charts === 0) return { chart: 0, side: available / sides };
   const chartMin = minWindowSize("chart").w;
   const sideTotal = sides * SIDE_COLUMN_WIDTH;
@@ -56,11 +56,13 @@ function columnWidths(charts: number, sides: number, area: Size): { chart: numbe
 
 const MIN_SIZE_TOLERANCE = 1e-6;
 
-export function tidyWindows(windows: readonly WindowRef[], area: Size): { rects: Record<WindowId, Rect>; undersized: number } {
+export function tidyWindows(windows: readonly WindowRef[], area: Area): { rects: Record<WindowId, Rect>; undersized: number } {
   const chartColumns = packColumns(windows.filter((window) => window.kind === "chart"), area.h);
   const sideColumns = packColumns(windows.filter((window) => window.kind !== "chart"), area.h);
-  const widths = columnWidths(chartColumns.length, sideColumns.length, area);
-  const rects = {} as Record<WindowId, Rect>;
+  const columns = chartColumns.length + sideColumns.length;
+  const gap = Math.min(WINDOW_GAP, area.w / (2 * columns));
+  const widths = columnWidths(chartColumns.length, sideColumns.length, gap, area);
+  const rects: Record<WindowId, Rect> = {};
   let undersized = 0;
   let x = 0;
   const lay = (column: Column, w: number) => {
@@ -73,35 +75,34 @@ export function tidyWindows(windows: readonly WindowRef[], area: Size): { rects:
       if (w < min.w - MIN_SIZE_TOLERANCE || h < min.h - MIN_SIZE_TOLERANCE) undersized++;
       y += h + WINDOW_GAP;
     }
-    x += w + WINDOW_GAP;
+    x += w + gap;
   };
   chartColumns.forEach((column) => lay(column, widths.chart));
   sideColumns.forEach((column) => lay(column, widths.side));
   return { rects, undersized };
 }
 
+const drawable = (rect: Rect, area: Area): boolean => {
+  const px = toPx(rect, area);
+  return [px.x, px.y, px.w, px.h].every(Number.isFinite) && px.w > 0 && px.h > 0;
+};
+
 const sameOrder = (a: readonly WindowId[], b: readonly WindowId[]): boolean => a.length === b.length && a.every((id, i) => id === b[i]);
 
-export function fitCanvas(placement: CanvasPlacement | null, windows: readonly WindowRef[], area: Size): CanvasPlacement {
+export function fitCanvas(placement: CanvasPlacement | null, windows: readonly WindowRef[], area: Area): CanvasPlacement {
   if (!placement) {
     const { rects } = tidyWindows(windows, area);
     return {
-      rects: Object.fromEntries(windows.map(({ id }) => [id, toRatio(rects[id]!, area)])) as Record<WindowId, Rect>,
+      rects: Object.fromEntries(Object.entries(rects).map(([id, rect]) => [id, toRatio(rect, area)])),
       order: windows.map(({ id }) => id),
     };
   }
   const listed = new Set(windows.map(({ id }) => id));
-  const rects = {} as Record<WindowId, Rect>;
+  const rects: Record<WindowId, Rect> = {};
   let changed = false;
   for (const [key, rect] of Object.entries(placement.rects) as [WindowId, Rect][]) {
-    if (!listed.has(key) || !(rect.w > 0 && rect.h > 0)) {
-      changed = true;
-      continue;
-    }
-    const px = toPx(rect, area);
-    const kept = keepHeadInArea(px, area);
-    rects[key] = kept === px ? rect : toRatio(kept, area);
-    if (kept !== px) changed = true;
+    if (listed.has(key) && drawable(rect, area)) rects[key] = rect;
+    else changed = true;
   }
   const order = [...new Set(placement.order)].filter((id) => listed.has(id) && rects[id]);
   for (const { id, kind } of windows) {
@@ -122,8 +123,8 @@ export function bringToFront(placement: CanvasPlacement, id: WindowId): CanvasPl
   return { ...placement, order: [...order.filter((other) => other !== id), id] };
 }
 
-export function rectsForArea(placement: CanvasPlacement, windows: readonly WindowRef[], area: Size): Record<WindowId, Rect> {
-  const drawn = {} as Record<WindowId, Rect>;
+export function rectsForArea(placement: CanvasPlacement, windows: readonly WindowRef[], area: Area): Record<WindowId, Rect> {
+  const drawn: Record<WindowId, Rect> = {};
   for (const { id, kind } of windows) {
     const stored = placement.rects[id];
     if (!stored) continue;

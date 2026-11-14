@@ -2,12 +2,12 @@ import { expect, test } from "vitest";
 import { WINDOW_KIND_LIST, type WindowRef } from "../kinds";
 import type { CanvasPlacement, Rect } from "../placement";
 import { bringToFront, fitCanvas, rectsForArea, tidyWindows } from "./arrange";
-import { minWindowSize, toRatio, type Size } from "./geometry";
+import { minWindowSize, toRatio, type Area } from "./geometry";
 import { moveRect, resizeRect, type ResizeHandle } from "./snap";
-import { AREA, expectPlacementInvariants, win, WINDOWS } from "./testing";
+import { area, AREA, expectPlacementInvariants, win, WINDOWS } from "./testing";
 
 const HANDLES: readonly ResizeHandle[] = ["n", "s", "e", "w", "ne", "nw", "se", "sw"];
-const AREAS: readonly Size[] = [AREA, { w: AREA.w / 2, h: AREA.h / 2 }, { w: 1920, h: 1000 }, { w: 400, h: 260 }, { w: 1280, h: 200 }];
+const AREAS: readonly Area[] = [AREA, area(AREA.w / 2, AREA.h / 2), area(1920, 1000), area(400, 260), area(1280, 200), area(60, 200), area(1, 1)];
 
 function random(seed: number) {
   let state = seed;
@@ -15,7 +15,7 @@ function random(seed: number) {
   return { next, int: (n: number) => Math.floor(next() * n), pick: <T>(items: readonly T[]): T => items[Math.floor(next() * items.length)]! };
 }
 
-type State = { placement: CanvasPlacement; windows: WindowRef[]; area: Size; added: number };
+type State = { placement: CanvasPlacement; windows: WindowRef[]; area: Area; added: number };
 
 function step(state: State, rng: ReturnType<typeof random>): State {
   const { placement, windows, area } = state;
