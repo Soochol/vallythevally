@@ -81,7 +81,8 @@ function edgeBounds(axis: Axis, side: Side, span: Span, min: number, area: Area)
   }
   const minBound = end - min;
   const gripBound = axis === "x" ? extent - Math.min(HEAD_GRIP, extent) : Math.max(0, extent - WINDOW_HEAD_HEIGHT);
-  return { lo: axis === "x" ? Math.min(0, span.start) : 0, hi: Math.min(minBound, gripBound), minBound };
+  const hi = Math.min(minBound, gripBound);
+  return { lo: Math.min(axis === "x" ? Math.min(0, span.start) : 0, hi), hi, minBound };
 }
 
 export function resizeRect(
