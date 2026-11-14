@@ -90,3 +90,22 @@ test("글자와 말풍선은 한 번 누르면 고르고, 두 번 누르면 글�
   expect((await drawings(scenario)).map((d) => d.text).sort()).toEqual(["고를 말풍선", "고를 메모"]);
   expect(errors).toEqual([]);
 });
+
+test("차트 칸 밖의 시간 축을 두 번 눌러도 드로잉을 고르거나 열지 않는다", async ({ page, scenario }) => {
+  const errors: string[] = []; page.on("pageerror", (e) => errors.push(e.message));
+  await open(page);
+  await cell(page).focus(); await page.keyboard.press("Shift+V");
+  const middle = await chartPoint(page, 0.5, 0.5);
+  await page.mouse.click(middle.x, middle.y);
+  await expect.poll(async () => (await drawings(scenario)).map((d) => d.tool)).toEqual(["vline"]);
+  await deselect(page);
+  const line = (await settledMirror(page))[0]!;
+  const box = (await chartOf(cell(page)).boundingBox())!;
+  const axis = { x: box.x + line.points[0]!.x, y: box.y + box.height - 8 };
+  await page.mouse.click(axis.x, axis.y);
+  await expect.poll(() => selectedIds(page)).toEqual([]);
+  await page.mouse.dblclick(axis.x, axis.y);
+  await expect(page.getByRole("dialog", { name: "수직선 세부 설정" })).toHaveCount(0);
+  await expect.poll(() => selectedIds(page)).toEqual([]);
+  expect(errors).toEqual([]);
+});
