@@ -57,7 +57,7 @@ describe("피보나치 팬", () => {
     const half = rayOf(left, HALF);
     expect(half.extend).toBe("left");
     expect(priceAt(half, 200)).toBeCloseTo(200);
-    expect(ofKind(left, "polyline").every((w) => w.points.slice(1).every((p) => p.x < 0))).toBe(true);
+    expect(ofKind(left, "polyline").every((w) => w.points.slice(1).every((p) => p.x === 0))).toBe(true);
     expect(ofKind(left, "text").every((t) => t.align === "right")).toBe(true);
   });
 
@@ -76,7 +76,7 @@ describe("피보나치 팬", () => {
     expect(wedges[0]).toMatchObject({ closed: true, fill: { on: true, color: "#f23645", opacity: 0.12 } });
     const corners: ScreenPoint[] = [...wedges[0]!.points];
     expect(corners[0]).toEqual({ x: 100, y: 400 });
-    expect(corners.slice(1).every((p) => p.x > 800)).toBe(true);
+    expect(corners.slice(1).map((p) => p.x)).toEqual([800, 800]);
     expect(ofKind(draw(points, restyle({ fill: { on: false, opacity: 0.12 } })), "polyline")).toEqual([]);
   });
 

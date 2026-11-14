@@ -1,4 +1,3 @@
-import type { UnixSeconds } from "../../../api/generated/UnixSeconds";
 import { at, readBool, readRecord } from "../styleKit";
 import { type AxisLabel, defineTool, type Level, type Shape, type ToolContext } from "../toolSpec";
 import type { DrawingPoint, Stroke } from "../types";
@@ -42,19 +41,31 @@ const LABEL_GAP = 4;
 
 interface TimeLine {
   level: Level | null;
-  t: UnixSeconds;
+  x: number;
 }
 
-function timeLines(style: FibTimeStyle, start: DrawingPoint, end: DrawingPoint | undefined, ctx: ToolContext): TimeLine[] {
-  if (end === undefined) return [{ level: null, t: start.t }];
+function screenXs(points: readonly DrawingPoint[], ctx: ToolContext): TimeLine[] {
+  return points.flatMap((p) => {
+    const x = ctx.xOf(p.t);
+    return x === null ? [] : [{ level: null, x }];
+  });
+}
+
+function timeLines(style: FibTimeStyle, start: DrawingPoint, end: DrawingPoint, ctx: ToolContext): TimeLine[] {
   const bars = ctx.barsBetween(start.t, end.t);
-  if (bars === null) return [start, end].map((p) => ({ level: null, t: p.t }));
-  const unit = Math.max(1, bars.count) * (end.t < start.t ? -1 : 1);
+  if (bars === null) return screenXs([start, end], ctx);
+  const startX = ctx.xOf(start.t);
+  const startBar = ctx.shiftBars(start.t, 0);
+  const startBarX = startBar === null ? null : ctx.xOf(startBar);
+  const intoBar = startX === null || startBarX === null ? 0 : startX - startBarX;
+  const unit = Math.max(1, bars.count);
+  const direction = end.t < start.t ? -1 : 1;
   return style.levels
     .filter((level) => level.on)
     .flatMap((level) => {
-      const t = ctx.shiftBars(start.t, Math.round(unit * level.value));
-      return t === null ? [] : [{ level, t }];
+      const t = ctx.shiftBars(start.t, direction * Math.round(unit * level.value));
+      const x = t === null ? null : ctx.xOf(t);
+      return x === null ? [] : [{ level, x: x + intoBar }];
     });
 }
 
@@ -83,10 +94,8 @@ export const fibtime = defineTool<FibTimeStyle>({
   },
   shapes({ points, style }, ctx) {
     const [start, end] = points;
-    if (start === undefined) return [];
-    return timeLines(style, start, end, ctx).flatMap(({ level, t }): Shape[] => {
-      const x = ctx.xOf(t);
-      if (x === null) return [];
+    if (start === undefined || end === undefined) return [];
+    return timeLines(style, start, end, ctx).flatMap(({ level, x }): Shape[] => {
       const stroke: Stroke = { color: level?.color ?? mainColor(style), width: style.line.width, dash: style.line.dash };
       const line: Shape = { kind: "vline", x, stroke, allPanes: false };
       if (level === null || !style.labels) return [line];

@@ -250,6 +250,6 @@ function rayAtX(origin: ScreenPoint, through: ScreenPoint, x: number): ScreenPoi
 }
 
 export function fanWedge(origin: ScreenPoint, p: ScreenPoint, q: ScreenPoint, side: FanSide, fill: Fill, ctx: ToolContext): Shape {
-  const x = side === "right" ? Math.max(ctx.paneWidth, origin.x) + 1 : Math.min(0, origin.x) - 1;
+  const x = side === "right" ? Math.max(ctx.paneWidth, origin.x) : Math.min(0, origin.x);
   return { kind: "polyline", points: [origin, rayAtX(origin, p, x), rayAtX(origin, q, x)], closed: true, fill };
 }

@@ -58,7 +58,7 @@ describe("갠 팬", () => {
     const one = named(shapes, "1×1");
     expect(one).toMatchObject({ a: { x: 300, y: 400 }, b: { x: 200, y: 300 }, extend: "left" });
     expect(ofKind(shapes, "segment").every((s) => s.extend === "left" && s.b.x < s.a.x)).toBe(true);
-    expect(ofKind(shapes, "polyline").every((w) => w.points.slice(1).every((p) => p.x < 0))).toBe(true);
+    expect(ofKind(shapes, "polyline").every((w) => w.points.slice(1).every((p) => p.x === 0))).toBe(true);
   });
 
   test("이웃한 선 사이를 선 색으로 옅게 칠하고 끌 수 있다", () => {
