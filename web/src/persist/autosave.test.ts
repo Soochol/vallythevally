@@ -71,6 +71,19 @@ test("칸을 바꾸면 1초 뒤 레이아웃을 통째로 보내고 저장됨이
   expect(usePersistStore.getState().saves.layout.kind).toBe("saved");
 });
 
+test("차트 창을 더하면 기다리지 않고 레이아웃을 보내고, 다른 창을 더하거나 닫으면 1초 뒤에 보낸다", async () => {
+  useLayoutStore.getState().showWindow("indicators");
+  useLayoutStore.getState().closeWindow(windowId("screener"));
+  await vi.advanceTimersByTimeAsync(999);
+  expect(puts).toEqual([]);
+  await vi.advanceTimersByTimeAsync(1);
+  expect(puts).toHaveLength(1);
+  const id = useLayoutStore.getState().addChart(CELL, null)!;
+  await vi.advanceTimersByTimeAsync(0);
+  expect(puts).toHaveLength(2);
+  expect((puts[1]!.body as { windows: { id: string }[] }).windows.map((w) => w.id)).toContain(id);
+});
+
 test("UI 설정을 바꾸면 모르는 키와 함께 UiState를 보낸다", async () => {
   useUiStore.getState().setIndicatorWindow("inspector");
   await vi.advanceTimersByTimeAsync(1000);

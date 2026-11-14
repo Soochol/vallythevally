@@ -16,8 +16,6 @@ const key = (symbol: string) => ["drawings", symbol] as const;
 export const drawingPath = (id: string) => `/api/drawings/${encodeURIComponent(id)}`;
 const toast = (text: string) => useSelectionStore.getState().showToast(text);
 const chartIds = (layout: EditableLayout) => new Set<string>(chartWindows(layout).map((w) => w.id));
-const scopedToWindowOf = (drawing: DrawingBody, layoutId: string, windows: (id: string) => boolean) =>
-  drawing.scope.kind === "cell" && drawing.scope.layoutId === layoutId && windows(drawing.scope.windowId);
 export const useDrawingSave = create<{ state: SaveState; retry(): void }>()(() => ({ state: { kind: "idle" }, retry: () => {} }));
 
 export class DrawingSync {
@@ -36,7 +34,6 @@ export class DrawingSync {
   private version = 0;
   private timer: ReturnType<typeof setTimeout> | null = null;
   private symbols = new Set<string>();
-  private unsavedCharts = new Set<string>();
   private loads = new Map<string, Promise<unknown>>();
   private errors = new Map<string, string>();
   save: SaveState = { kind: "idle" };
@@ -56,15 +53,7 @@ export class DrawingSync {
     window.addEventListener("focus", () => this.refresh());
     document.addEventListener("visibilitychange", () => document.visibilityState === "visible" ? this.refresh() : this.flush());
     window.addEventListener("pagehide", () => this.flush());
-    useLayoutStore.subscribe((s, prev) => {
-      if (s.layout.id !== prev.layout.id) this.unsavedCharts.clear();
-      else if (s.layout.windows !== prev.layout.windows) { this.widenClosedWindows(prev.layout, s.layout); this.holdNewCharts(prev.layout, s.layout); }
-    });
-    usePersistStore.subscribe((s, prev) => {
-      if (s.saves.layout === prev.saves.layout || s.saves.layout.kind !== "saved") return;
-      if (this.unsavedCharts.size) { this.unsavedCharts.clear(); this.pump(); }
-      if (this.holdsClosedWindowScopes()) this.reload();
-    });
+    usePersistStore.subscribe((s, prev) => { if (s.saves.layout !== prev.saves.layout && s.saves.layout.kind === "saved") this.followSavedLayout(useLayoutStore.getState().layout); });
     if (this.desired.size || this.recoveryError) this.updateSave();
   }
 
@@ -88,27 +77,13 @@ export class DrawingSync {
   refresh() { for (const symbol of this.symbols) void this.load(symbol); }
   private reload() { for (const symbol of this.symbols) void (this.loads.get(symbol) ?? Promise.resolve()).then(() => this.load(symbol)); }
 
-  private widenClosedWindows(before: EditableLayout, after: EditableLayout) {
-    const kept = chartIds(after);
-    const closed = (id: string) => chartIds(before).has(id) && !kept.has(id);
-    const ops: DrawingOp[] = [...this.desired.values()].flatMap(({ intent: { want } }) =>
-      want.kind === "put" && scopedToWindowOf(want.body, after.id, closed) ? [{ kind: "update", before: want.body, after: { ...want.body, scope: { kind: "layout", layoutId: after.id } } }] : []);
-    if (ops.length) this.commit(useSelectionStore.getState().activeCell, ops, false);
-  }
-
-  private holdNewCharts(before: EditableLayout, after: EditableLayout) {
-    const known = chartIds(before);
-    for (const id of chartIds(after)) if (!known.has(id)) this.unsavedCharts.add(id);
-  }
-
-  private waitsForLayoutSave(intent: queue.Intent): boolean {
-    return intent.want.kind === "put" && intent.want.body.scope.kind === "cell" && this.unsavedCharts.has(intent.want.body.scope.windowId);
-  }
-
-  private holdsClosedWindowScopes(): boolean {
-    const layout = useLayoutStore.getState().layout;
+  private followSavedLayout(layout: EditableLayout) {
     const charts = chartIds(layout);
-    return [...this.symbols].some((symbol) => (this.client.getQueryData<Drawing[]>(key(symbol)) ?? []).some((d) => scopedToWindowOf(d, layout.id, (id) => !charts.has(id))));
+    const closed = (drawing: DrawingBody) => drawing.scope.kind === "cell" && drawing.scope.layoutId === layout.id && !charts.has(drawing.scope.windowId);
+    const ops: DrawingOp[] = [...this.desired.values()].flatMap(({ intent: { want } }) =>
+      want.kind === "put" && closed(want.body) ? [{ kind: "update", before: want.body, after: { ...want.body, scope: { kind: "layout", layoutId: layout.id } } }] : []);
+    if (ops.length) this.commit(useSelectionStore.getState().activeCell, ops, false);
+    if ([...this.symbols].some((symbol) => (this.client.getQueryData<Drawing[]>(key(symbol)) ?? []).some(closed))) this.reload();
   }
   dataChanged() { this.refresh(); }
 
@@ -251,7 +226,7 @@ export class DrawingSync {
 
   private send(id: string, keepalive: boolean) {
     const lane = this.outbox.lanes.get(id);
-    if (lane?.state !== "waiting" || this.launches.has(id) || this.waitsForLayoutSave(lane.intent)) return;
+    if (lane?.state !== "waiting" || this.launches.has(id)) return;
     const desired = this.desired.get(id);
     if (desired?.intent.uuid !== lane.intent.uuid || desired.state !== "admitted") { this.outbox = queue.drop(this.outbox, id); return; }
     const journal = this.journal;

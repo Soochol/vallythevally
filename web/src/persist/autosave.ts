@@ -2,7 +2,7 @@ import type { LayoutInput } from "../api/generated/LayoutInput";
 import type { UiState } from "../api/generated/UiState";
 import type { Watchlists } from "../api/generated/Watchlists";
 import { fetchWatchlists, layoutPath, UI_STATE_PATH, WATCHLISTS_PATH } from "../api/userData";
-import { useLayoutStore } from "../stores/layout";
+import { chartWindows, type EditableLayout, useLayoutStore } from "../stores/layout";
 import { type SaveTarget, usePersistStore } from "../stores/persist";
 import { useUiStore } from "../stores/ui";
 import { useWatchlistStore } from "../stores/watchlist";
@@ -47,6 +47,11 @@ export function commitWatchlist(c: Pick<ConditionalCommit<WatchlistsBody>, "next
     accept: (saved) => useWatchlistStore.getState().load(saved.lists, saved.revision),
   });
 }
+
+const addsChartWindow = (before: EditableLayout, after: EditableLayout) => {
+  const known = new Set<string>(chartWindows(before).map((w) => w.id));
+  return before.id === after.id && chartWindows(after).some((w) => !known.has(w.id));
+};
 
 const exceedsServerFieldLimits = (l: Omit<LayoutInput, "revision">) =>
   l.windows.some((w) => w.kind === "chart" && exceedsLimit(w.chartSettings)) || exceedsLimit(l.placement);
@@ -104,7 +109,7 @@ export function startAutosave(deps: AutosaveDeps): Autosave {
   });
 
   const unsubscribe = [
-    useLayoutStore.subscribe((s, prev) => s.revision !== prev.revision && layout.changed()),
+    useLayoutStore.subscribe((s, prev) => s.revision !== prev.revision && layout.changed(addsChartWindow(prev.layout, s.layout) ? "now" : "soon")),
     useUiStore.subscribe((s, prev) => s.revision !== prev.revision && ui.changed()),
     useWatchlistStore.subscribe((s, prev) => s.revision !== prev.revision && s.revision !== s.loadedRevision && watchlist.changed()),
   ];

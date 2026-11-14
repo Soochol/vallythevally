@@ -41,7 +41,7 @@ export interface ConditionalCommit<T extends object> {
 const CONDITIONAL_ATTEMPTS = 3;
 
 export interface Saver<T extends object> {
-  changed(): void;
+  changed(when?: "soon" | "now"): void;
   retry(): void;
   commitConditional(c: ConditionalCommit<T>): Promise<CommitOutcome>;
   /**
@@ -216,13 +216,13 @@ export function createSaver<T extends object>(o: SaverOptions<T>): Saver<T> {
   }
 
   return {
-    changed() {
+    changed(when = "soon") {
       edits++;
       keep();
       if (inFlight > 0) return;
       failures = 0;
       show({ kind: "pending" });
-      schedule(o.debounceMs);
+      schedule(when === "now" ? 0 : o.debounceMs);
     },
     retry() {
       if (pause?.kind === "retired") pause = null;
