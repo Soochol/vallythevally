@@ -1,5 +1,7 @@
 import type { Period } from "../../api/generated/Period";
 import type { WindowId } from "../../layout/kinds";
+import { fineSpan, type Frame } from "./anchor";
+import type { FineSpan } from "./finePeriod";
 import { hitTest, type HitItem, type Pane } from "./geometry";
 import type { Interaction } from "./interaction";
 import type { AxisLabel, HandleSpec, Shape, ToolContext } from "./toolSpec";
@@ -33,6 +35,13 @@ export function renderItem(drawing: DrawingBody, selected: boolean, ctx: ToolCon
   const input = { ...drawing, selected };
   const handleSpecs = selected ? tool.handles(input, ctx) : [];
   return { drawing, id: drawing.id, z: drawing.z, shapes: tool.shapes(input, ctx), handles: handleSpecs.map((h) => h.at), handleSpecs, labels: tool.axisLabels(input, ctx) };
+}
+export function fineDemand(f: Frame, drawings: readonly DrawingBody[], ctx: ToolContext): FineSpan[] {
+  return drawings.flatMap((drawing) => {
+    const range = toolOf(drawing.tool)?.fineRange?.({ ...drawing, selected: false }, ctx);
+    const span = range ? fineSpan(f, range.t1, range.t2) : null;
+    return span ? [span] : [];
+  });
 }
 export const frameHit = (frame: RenderFrame, p: ScreenPoint) => frame.editable ? hitTest(frame.items, p, frame.pane) : { kind: "empty" as const };
 

@@ -15,7 +15,7 @@ import { barLength, fromScreen, logicalToT, startAt, tToLogical, timelineOf, too
 import { reusableStyle } from "./objects";
 import * as clipboard from "./clipboard";
 import { DrawingLayer, VLinePaneLayer } from "./DrawingLayer";
-import { frameHit, placementPreview, renderItem, visible, type RenderFrame } from "./frame";
+import { fineDemand, frameHit, placementPreview, renderItem, visible, type RenderFrame } from "./frame";
 import { idsInBox, nudge, shapeBounds, type NudgeKey } from "./geometry";
 import { holds, resolvePress, type DragAction, type Mods } from "./gestures";
 import { toolHotkey } from "./hotkeys";
@@ -81,6 +81,7 @@ export class DrawingSurface implements ChartExtension {
     const blur = () => this.reset(); window.addEventListener("blur", blur);
     this.cleanup.push(() => window.removeEventListener("keydown", key, true), () => window.removeEventListener("blur", blur));
     this.cleanup.push(sync.subscribe(() => this.refresh()));
+    this.cleanup.push(host.fineBars.subscribe(() => this.refresh()));
     this.cleanup.push(useDrawingSession.subscribe((s, old) => { if (s.tool !== old.tool || s.mode !== old.mode) this.reset(); this.refresh(); }));
     this.cleanup.push(useUiStore.subscribe(() => this.refresh()));
     const media = matchMedia(DESKTOP_QUERY); const resize = () => { this.reset(); this.refresh(); };
@@ -98,7 +99,7 @@ export class DrawingSurface implements ChartExtension {
     }
   }
   dispose() {
-    this.reset(); this.cleanup.forEach((f) => f()); this.paneLayers.forEach((f) => f());
+    this.reset(); this.cleanup.forEach((f) => f()); this.paneLayers.forEach((f) => f()); this.host.fineBars.demand([]);
     this.host.series().detachPrimitive(this.layer); this.mirror.remove();
     if (this.raf !== null) cancelAnimationFrame(this.raf);
     if (surfaces.get(this.cellId) === this) surfaces.delete(this.cellId);
@@ -113,7 +114,7 @@ export class DrawingSurface implements ChartExtension {
   projection(): Frame {
     const h = this.host; const ts = h.chart.timeScale(); const view = h.view(); const period = view?.period ?? "D";
     const bars = h.bars();
-    return { timeline: timelineOf(bars, period), bars, logScale: view?.settings.scale === "log",
+    return { timeline: timelineOf(bars, period), bars, logScale: view?.settings.scale === "log", fine: h.fineBars,
       pane: { width: ts.width(), height: h.chart.panes()[0]?.getHeight() ?? h.el.clientHeight },
       axes: { time: { coordinateOf: (i) => ts.logicalToCoordinate(i as Logical), indexAt: (x) => ts.coordinateToLogical(x), barSpacing: ts.options().barSpacing, projection: chartTimeProjection(ts, period) },
         price: { toY: (p) => h.series().priceToCoordinate(p), toPrice: (y) => h.series().coordinateToPrice(y) } } };
@@ -144,6 +145,8 @@ export class DrawingSurface implements ChartExtension {
     const session = useDrawingSession.getState(); const prefs = useUiStore.getState().prefs.drawing;
     const editable = matchMedia(DESKTOP_QUERY).matches;
     const layoutId = useLayoutStore.getState().layout.id;
+    const where = { layoutId, cellId: this.cellId, period: view?.period ?? "D", hideAll: prefs.hideAll };
+    this.host.fineBars.demand(fineDemand(f, c.drawings.filter((d) => visible(d, where)), c.ctx));
     let drawings = c.drawings;
     if (this.state.kind === "dragging") {
       const preview = this.state.preview;
@@ -151,7 +154,7 @@ export class DrawingSurface implements ChartExtension {
         : drawings.map((d) => preview.find((p) => p.id === d.id) ?? d);
     }
     if (session.editor && session.editor.draft.symbol === view?.symbol) drawings = drawings.map((d) => d.id === session.editor?.draft.id ? session.editor.draft : d);
-    const items = drawings.filter((d) => visible(d, { layoutId, cellId: this.cellId, period: view?.period ?? "D", hideAll: prefs.hideAll }))
+    const items = drawings.filter((d) => visible(d, where))
       .map((d) => renderItem(d, editable && session.selected.includes(d.id), c.ctx)).filter((item) => item !== null);
     const preview: Shape[] = [];
     if (this.state.kind === "placing" || this.state.kind === "drawing") preview.push(...placementPreview(this.state, prefs.lastStyle[this.state.tool.tool] ?? this.state.tool.defaultStyle(), c.ctx));

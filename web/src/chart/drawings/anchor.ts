@@ -1,6 +1,7 @@
 import type { Bar } from "../../api/generated/Bar";
 import type { Period } from "../../api/generated/Period";
 import type { UnixSeconds } from "../../api/generated/UnixSeconds";
+import type { FineBarsReader, FineSpan } from "./finePeriod";
 import { toChartTime } from "../time";
 import type { ToolContext } from "./toolSpec";
 import type { DrawingPoint, ScreenPoint } from "./types";
@@ -281,6 +282,7 @@ export interface Frame extends Projection {
   readonly bars: readonly Bar[];
   readonly pane: { readonly width: number; readonly height: number };
   readonly logScale: boolean;
+  readonly fine: FineBarsReader;
 }
 
 function firstAtOrAfter(bars: readonly Bar[], t: UnixSeconds): number {
@@ -321,6 +323,13 @@ export function barsIn(f: Frame, t1: UnixSeconds, t2?: UnixSeconds): readonly Ba
   return loadedBetween(f.bars, Math.min(range.from, last.t), t2 === undefined ? last.t : range.to);
 }
 
+export function fineSpan(f: Frame, t1: UnixSeconds, t2: UnixSeconds): FineSpan | null {
+  const last = f.bars.at(-1);
+  const range = slotRange(f, t1, t2);
+  if (last === undefined || range === null) return null;
+  return { from: Math.min(range.from, last.t), to: slotsOf(f).toTime(range.hi + 1) ?? Infinity };
+}
+
 export function toolContext(f: Frame, format: { price(p: number): string; time(t: UnixSeconds): string }): ToolContext {
   return {
     toScreen: (p) => toScreen(f, p),
@@ -332,6 +341,11 @@ export function toolContext(f: Frame, format: { price(p: number): string; time(t
     shiftBars: (t, n) => shiftBars(f, t, n),
     barsBetween: (t1, t2) => barsBetween(f, t1, t2),
     barsIn: (t1, t2) => barsIn(f, t1, t2),
+    period: f.timeline.period,
+    fineBarsIn: (t1, t2) => {
+      const span = fineSpan(f, t1, t2);
+      return span === null ? { kind: "loading" } : f.fine.read(span);
+    },
     paneWidth: f.pane.width,
     paneHeight: f.pane.height,
     formatPrice: format.price,

@@ -20,6 +20,8 @@ function ctxOf(bars: readonly Bar[]) {
     shiftBars: (t, n) => Math.floor(t / 500) * 500 + n * 500,
     barsBetween: () => null,
     barsIn: (t1, t2) => (asked.push([t1, t2]), bars),
+    period: "D",
+    fineBarsIn: () => ({ kind: "loading" }),
     paneWidth: 800,
     paneHeight: 500,
     formatPrice: (p) => `${Math.round(p * 1000) / 1000}`,

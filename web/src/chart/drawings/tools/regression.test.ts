@@ -16,6 +16,8 @@ function context(bars: readonly Bar[], overrides: Partial<ToolContext> = {}): To
     shiftBars: (t, n) => t + n * 100,
     barsBetween: () => null,
     barsIn: (t1, t2 = Infinity) => bars.filter((b) => b.t >= Math.min(t1, t2) && b.t <= Math.max(t1, t2)),
+    period: "D",
+    fineBarsIn: () => ({ kind: "loading" }),
     paneWidth: 800,
     paneHeight: 500,
     formatPrice: (p) => `${p}원`,

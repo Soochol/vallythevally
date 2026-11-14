@@ -8,6 +8,8 @@ const ctx: ToolContext = {
   xOf: (t) => t, yOf: (p) => p, timeAt: (x) => x, priceAt: (y) => y, shiftBars: (t, n) => t + n,
   barsBetween: () => null, paneWidth: 800, paneHeight: 600,
   barsIn: () => [],
+  period: "D",
+  fineBarsIn: () => ({ kind: "loading" }),
   formatPrice: String, formatTime: String, logScale: false,
 };
 const mode: ModeContext = { ctx, items: [], lockAll: false, panesBottom: 700, scope: { kind: "symbol" }, newId: () => "never" };

@@ -13,6 +13,8 @@ const ctx: ToolContext = {
   shiftBars: (t, n) => t + n * 60,
   barsBetween: (t1, t2) => ({ count: Math.round(Math.abs(t2 - t1) / 60), volume: 0 }),
   barsIn: () => [],
+  period: "D",
+  fineBarsIn: () => ({ kind: "loading" }),
   paneWidth: 800,
   paneHeight: 500,
   formatPrice: (p) => p.toFixed(0),

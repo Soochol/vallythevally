@@ -13,6 +13,8 @@ const ctx = (barsBetween: ToolContext["barsBetween"]): ToolContext => ({
   shiftBars: (t, n) => t + n * 60,
   barsBetween,
   barsIn: () => [],
+  period: "D",
+  fineBarsIn: () => ({ kind: "loading" }),
   paneWidth: 800,
   paneHeight: 500,
   formatPrice: (p) => (p < 0 ? `−${-p}` : `${p}`),
