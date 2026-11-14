@@ -284,3 +284,45 @@ test("차트 영역이 막대의 최소 폭보다 좁아도 옮긴 막대는 영
   const moved = await open(page);
   expectInside(moved, await chartArea(page));
 });
+
+test("차트 영역이 막대의 최소 폭보다 좁아도 끄는 동안 막대가 영역 안에 있고, 5px 옮겨 놓으면 기본 자리에 붙는다", async ({ page, scenario }) => {
+  await page.setViewportSize({ width: 800, height: 600 });
+  saveChartShare(scenario, 0.2);
+  await open(page);
+  const area = await chartArea(page);
+  const g = (await grip(page).boundingBox())!;
+  const from = { x: g.x + g.width / 2, y: g.y + g.height / 2 };
+  await page.mouse.move(from.x, from.y);
+  await page.mouse.down();
+  await page.mouse.move(from.x + 200, from.y + 200, { steps: 8 });
+  expectInside(await settledDock(page), area);
+  await page.mouse.move(from.x + 5, from.y + 5, { steps: 8 });
+  await page.mouse.up();
+  await settledDock(page);
+  await expect(dock(page)).not.toHaveAttribute("data-moved");
+  expect(savedDockAt(scenario) ?? null).toBeNull();
+});
+
+test("고정 도구가 있는 막대를 차트 영역 오른쪽 끝에 놓으면 놓은 자리에 남고 넘치는 고정 도구는 접는다", async ({ page, scenario }) => {
+  saveChartShare(scenario, 0.6);
+  const state = scenario.documents.uiState();
+  scenario.documents.saveUiState({ ...state, drawing: { ...scenario.documents.uiPrefs().drawing, pinnedTools: TOOLS.slice(0, 12).map((t) => t.tool) }, revision: state.revision + 1 });
+  await open(page);
+  const area = await chartArea(page);
+  const g = (await grip(page).boundingBox())!;
+  const from = { x: g.x + g.width / 2, y: g.y + g.height / 2 };
+  await page.mouse.move(from.x, from.y);
+  await page.mouse.down();
+  await page.mouse.move(area.x + area.width - 2, from.y + 300, { steps: 12 });
+  const during = await settledDock(page);
+  await page.mouse.up();
+  await expectSavedRatios(scenario);
+  const dropped = await settledDock(page);
+  expectSameSpot(dropped, during, 1);
+  expectInside(dropped, area);
+  expect(await dock(page).evaluate((el) => el.scrollWidth - el.clientWidth)).toBe(0);
+  await expect(dock(page).getByRole("button", { name: "고정 도구 펼치기", exact: true })).toBeVisible();
+  await page.reload();
+  await expect(cell(page)).toHaveAttribute("aria-busy", "false");
+  expectSameSpot(await settledDock(page), dropped);
+});
