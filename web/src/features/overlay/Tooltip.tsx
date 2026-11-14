@@ -1,7 +1,9 @@
 import { useEffect, useId, useState } from "react";
 import { Popover } from "./Popover";
 
-interface HeldTitle { target: HTMLElement; text: string; watcher: MutationObserver | null }
+interface HeldTitle { target: HTMLElement; text: string | null; restore: (() => void) | null }
+
+const dropTitle = (target: HTMLElement) => Element.prototype.removeAttribute.call(target, "title");
 
 export function TooltipHost() {
   const [tip, setTip] = useState<{ target: HTMLElement; text: string } | null>(null);
@@ -15,26 +17,44 @@ export function TooltipHost() {
     };
     const release = () => {
       hide();
-      if (!held) return;
-      if (held.watcher) {
-        held.watcher.disconnect();
-        if (!held.target.hasAttribute("title")) held.target.title = held.text;
-      }
+      held?.restore?.();
       held = null;
     };
     const suppressNativeTip = (next: HeldTitle) => {
       const { target } = next;
-      next.watcher = new MutationObserver(() => {
-        if (!target.hasAttribute("title")) return;
-        next.text = target.title;
-        target.removeAttribute("title");
-        setTip((shown) => shown && (next.text ? { target, text: next.text } : null));
-      });
-      target.removeAttribute("title");
-      next.watcher.observe(target, { attributes: true, attributeFilter: ["title"] });
+      let mirrored: string | null = null;
+      const ownsDescription = () => target.getAttribute("aria-description") === mirrored;
+      const describe = (text: string | null) => {
+        if (!ownsDescription()) return;
+        mirrored = text && text !== target.innerText ? text : null;
+        if (mirrored) target.setAttribute("aria-description", mirrored); else target.removeAttribute("aria-description");
+      };
+      const follow = (text: string | null) => {
+        next.text = text;
+        describe(text);
+        setTip((shown) => shown && (text ? { target, text } : null));
+      };
+      const takeTitle = () => {
+        const text = target.getAttribute("title");
+        dropTitle(target);
+        follow(text);
+      };
+      const watcher = new MutationObserver(() => { if (target.hasAttribute("title")) takeTitle(); });
+      target.removeAttribute = (name: string) => {
+        if (name.toLowerCase() === "title") follow(null);
+        Element.prototype.removeAttribute.call(target, name);
+      };
+      takeTitle();
+      watcher.observe(target, { attributes: true, attributeFilter: ["title"] });
+      next.restore = () => {
+        watcher.disconnect();
+        Reflect.deleteProperty(target, "removeAttribute");
+        if (mirrored !== null && ownsDescription()) target.removeAttribute("aria-description");
+        if (next.text !== null && !target.hasAttribute("title")) target.title = next.text;
+      };
     };
     const hold = (target: HTMLElement, byPointer: boolean) => {
-      const next: HeldTitle = { target, text: target.title, watcher: null };
+      const next: HeldTitle = { target, text: target.title, restore: null };
       if (byPointer) suppressNativeTip(next);
       held = next;
       timer = setTimeout(() => { if (next.text) setTip({ target, text: next.text }); }, 400);
@@ -44,7 +64,7 @@ export function TooltipHost() {
       const byPointer = e.type === "pointerover";
       const next = e.target.closest<HTMLElement>("[title]");
       if (held?.target.contains(e.target) && (!next || next.contains(held.target))) {
-        if (byPointer && !held.watcher) suppressNativeTip(held);
+        if (byPointer && !held.restore) suppressNativeTip(held);
         return;
       }
       if (!next?.title) return;
