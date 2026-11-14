@@ -93,13 +93,14 @@ export function resizeRect(
   others: readonly Rect[],
   area: Area,
 ): { rect: Rect; guides: Guides; atMinimum: boolean } {
-  let resized = rect;
+  const base = { ...rect, w: Math.max(rect.w, min.w), h: Math.max(rect.h, min.h) };
+  let resized = base;
   const guides: Guides = { x: null, y: null };
   let atMinimum = false;
   for (const axis of AXES) {
     const side = HANDLE_SIDES[handle][axis];
     if (!side) continue;
-    const span = spanOf(rect, axis);
+    const span = spanOf(base, axis);
     const end = span.start + span.size;
     const dragged = (side === "start" ? span.start : end) + offset[axis];
     const bounds = edgeBounds(axis, side, span, axis === "x" ? min.w : min.h, area);

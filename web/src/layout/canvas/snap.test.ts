@@ -121,10 +121,13 @@ describe("크기 바꾸기", () => {
     expect(resizeRect(rect, "s", { x: 0, y: 5000 }, min, [], AREA).rect.h).toBe(516);
   });
 
-  test("이미 최소 크기보다 작은 창은 어느 변을 잡아도 최소 크기로 키우고 알린다", () => {
-    const small = { x: 50, y: 100, w: 200, h: 300 };
-    expect(resizeRect(small, "w", { x: 0, y: 0 }, min, [], AREA)).toEqual({ rect: { ...small, x: -30, w: min.w }, guides: { x: null, y: null }, atMinimum: true });
-    expect(resizeRect(small, "e", { x: 0, y: 0 }, min, [], AREA)).toEqual({ rect: { ...small, w: min.w }, guides: { x: null, y: null }, atMinimum: true });
+  test("이미 최소 크기보다 작은 창은 왼쪽 위를 기준으로 최소 크기로 키운 뒤 크기를 바꾼다", () => {
+    const small = { x: 50, y: 100, w: 200, h: 100 };
+    const grown = { ...small, w: min.w, h: min.h };
+    for (const handle of ["w", "e", "n", "s"] as const) {
+      expect(resizeRect(small, handle, { x: 0, y: 0 }, min, [], AREA)).toEqual({ rect: grown, guides: { x: null, y: null }, atMinimum: false });
+    }
+    expect(resizeRect(small, "e", { x: 10, y: 0 }, min, [], AREA).rect).toEqual({ ...grown, w: min.w + 10 });
   });
 
   test("위쪽 변은 작업 영역 위로 나가지 않는다", () => {
