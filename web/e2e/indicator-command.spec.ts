@@ -65,6 +65,25 @@ test("설정 검사기를 받기 전에 누른 Shift+Enter는 검사기가 준�
   ]);
 });
 
+test("설정 검사기를 받기 전에 누른 Shift+Enter는 그 뒤 다른 후보로 바꾸면 아무것도 추가하지 않는다", async ({ page, scenario }) => {
+  await page.goto("/?symbol=005930");
+  await expect(cell(page)).toHaveAttribute("aria-busy", "false");
+  let releaseWasm!: () => void;
+  const wasmReleased = new Promise<void>((resolve) => { releaseWasm = resolve; });
+  await page.route("**/*.wasm", async (route) => { await wasmReleased; await route.fallback(); });
+  await page.getByRole("button", { name: "지표", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "지표·비교 입력창" });
+  const input = dialog.getByRole("combobox", { name: "지표·비교 찾기" });
+  await input.fill("이평 20");
+  await expect(dialog).toContainText("미리보기 준비 중");
+  await input.press("Shift+Enter");
+  await input.fill("rsi 9");
+  releaseWasm();
+  await expect(dialog).toContainText("차트에 미리보기 중");
+  await expect(dialog).toBeVisible();
+  expect((await settings(scenario)).indicators.map((i) => i.spec.kind)).toEqual(["volume"]);
+});
+
 test("입력창 설정 미리보기는 실제 선을 바꾸고 Esc는 선과 저장값을 복원한다", async ({ page, scenario }) => {
   await page.addInitScript(installFrameProbe);
   await page.goto("/?symbol=005930");

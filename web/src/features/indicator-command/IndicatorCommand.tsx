@@ -33,11 +33,7 @@ export function IndicatorCommandBody({ slot, initialMode, initialIndicator = nul
   }, [selected?.key, index]);
 
   const refocus = () => { inputRef.current?.focus(); inputRef.current?.select(); };
-  const submit = (closeAfter = false) => {
-    const added = command.submit();
-    if (added && closeAfter) close();
-    else if (added) refocus();
-  };
+  const submit = (closeAfter = false) => command.submit(closeAfter ? close : refocus);
   const show = (value: IndicatorCommandMode) => { command.show(value); inputRef.current?.focus(); };
 
   return <CommandFrame width="h-[656px] max-h-[calc(100dvh-32px)] w-[min(976px,calc(100vw-32px))] max-md:h-[85dvh]" labelledBy={`${ids}-title`} onClose={close}>
@@ -126,7 +122,7 @@ function IndicatorEditor({ row, slot, actionRef, onCommitted }: { row: EditableR
     {validator === "failed" && <p role="alert" className="text-s text-danger">지표 설정 검사기를 불러오지 못했습니다. 새로고침해 보세요.</p>}
     <div className="mt-auto flex flex-none items-center gap-2">
       <p className="flex-1 text-xs text-text-3">{hasColor(draft.form) && "테마 색은 테마를 바꾸면 함께 바뀝니다"}</p>
-      <button type="button" className="btn-primary disabled:opacity-50" disabled={!valid} onClick={() => { if (commit()) onCommitted(); }}>{primaryLabel(editing !== null, draft.form.kind, check.spec)}</button>
+      <button type="button" className="btn-primary disabled:opacity-50" disabled={!valid} onClick={() => commit(onCommitted)}>{primaryLabel(editing !== null, draft.form.kind, check.spec)}</button>
     </div>
   </aside>;
 }

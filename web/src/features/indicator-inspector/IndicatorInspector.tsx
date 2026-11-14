@@ -64,7 +64,7 @@ function InspectorBody({ slot }: { slot: Slot }) {
   const refocus = () => { inputRef.current?.focus(); inputRef.current?.select(); };
   const submit = () => {
     if (open?.kind === "current") return collapse();
-    if (open && command.submit()) refocus();
+    if (open) command.submit(refocus);
   };
   const keys = (event: KeyboardEvent) => {
     if (event.defaultPrevented || event.nativeEvent.isComposing || event.keyCode === 229) return;
@@ -192,6 +192,6 @@ function AddEditor({ slot, row, actionRef, onAdded }: { slot: Slot; row: Editabl
     <IndicatorSettingsForm draft={draft} color={color} errors={errors} onChange={setDraft} lineSample={false} />
     {errors.filter((error) => !kind.fields.some((field) => field.key === error.field)).map((error, i) => <p key={i} className="text-s text-danger">{error.message}</p>)}
     {validator === "failed" && <p role="alert" className="text-s text-danger">지표 설정 검사기를 불러오지 못했습니다. 새로고침해 보세요.</p>}
-    <button type="button" className="btn-primary self-end disabled:opacity-50" disabled={!valid} onClick={() => { if (commit()) onAdded(); }}>{primaryLabel(false, draft.form.kind, check.spec)}</button>
+    <button type="button" className="btn-primary self-end disabled:opacity-50" disabled={!valid} onClick={() => commit(onAdded)}>{primaryLabel(false, draft.form.kind, check.spec)}</button>
   </div>;
 }
