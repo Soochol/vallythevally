@@ -41,7 +41,7 @@ for (const history of ["loaded", "older"] as const) {
       await expect.poll(async () => (await mirror(page))[0]?.handles.length).toBe(1);
       const before = (await mirror(page))[0]!;
       expect(before.selected).toBe(true);
-      if (history === "older") expect(before.points).toEqual([null]);
+      if (history === "older") expect(before.points[0]!.x).toBeLessThan(0);
       const handle = before.handles[0]!;
       const x = box.width * 0.7;
       expect(Math.abs(x - handle.x)).toBeGreaterThan(20);

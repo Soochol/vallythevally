@@ -9,7 +9,6 @@ import {
   logicalToT,
   logicalToX,
   nextBarStart,
-  shiftBars,
   startAt,
   type TimeAxis,
   type Timeline,
@@ -19,6 +18,7 @@ import {
   tToLogical,
   xToLogical,
 } from "./anchor";
+import { toolOf } from "./tools";
 
 const kst = (y: number, m: number, d: number, h = 0, min = 0) => Date.UTC(y, m - 1, d, h, min) / 1000 - 9 * 3600;
 const HOUR = 3600;
@@ -107,12 +107,32 @@ describe("규칙 3: 마지막 봉 뒤는 실제 봉 경계", () => {
   });
 });
 
-describe("규칙 4: 첫 봉 앞", () => {
-  test("시각과 index 모두 null", () => {
-    expect(tToLogical(weekNov2, kst(2026, 11, 1))).toBeNull();
-    expect(logicalToT(weekNov2, -0.25)).toBeNull();
-    expect(startAt(weekNov2, -1)).toBeNull();
+describe("규칙 4: 첫 봉 앞은 봉 간격으로 이어 센다", () => {
+  test("일봉은 주말을 건너 거꾸로 센다", () => {
+    expect(startAt(weekNov2, -1)).toBe(kst(2026, 10, 30));
+    expect(startAt(weekNov2, -5)).toBe(kst(2026, 10, 26));
+    expect(startAt(weekNov2, -6)).toBe(kst(2026, 10, 23));
+    expect(tToLogical(weekNov2, kst(2026, 10, 30, 12))).toBeCloseTo(-0.5, 12);
+    expect(tToLogical(weekNov2, kst(2026, 11, 1))).toBe(0);
+    expect(tToLogical(weekNov2, kst(2025, 11, 3))).toBe(-260);
+    expect(logicalToT(weekNov2, -0.25)).toBe(kst(2026, 10, 30, 18));
     expect(tToLogical(tl("D", []), kst(2026, 11, 1))).toBeNull();
+  });
+
+  test("주·월·분기·연·분봉도 거꾸로 센다", () => {
+    expect(startAt(tl("W", [kst(2026, 11, 2)]), -2)).toBe(kst(2026, 10, 19));
+    expect(startAt(tl("M", [kst(2026, 3, 1)]), -3)).toBe(kst(2025, 12, 1));
+    expect(startAt(tl("Q", [kst(2027, 1, 1)]), -1)).toBe(kst(2026, 10, 1));
+    expect(startAt(tl("Y", [kst(2027, 1, 1)]), -2)).toBe(kst(2025, 1, 1));
+    expect(startAt(tl("5m", [kst(2026, 11, 6, 9)]), -2)).toBe(kst(2026, 11, 6, 8, 50));
+    expect(tToLogical(tl("M", [kst(2026, 3, 1)]), kst(2026, 1, 16))).toBeCloseTo(-2 + 15 / 31, 12);
+  });
+
+  test("첫 봉 앞의 시각과 logical도 서로 거꾸로다", () => {
+    for (const t of [kst(2026, 10, 30, 3), kst(2026, 10, 12, 23, 59), kst(2020, 1, 2, 9)]) {
+      const logical = tToLogical(weekNov2, t);
+      expect(logical === null ? null : logicalToT(weekNov2, logical)).toBe(t);
+    }
   });
 });
 
@@ -144,12 +164,6 @@ describe("거꾸로: logical → t", () => {
   });
 });
 
-test("shiftBars는 n봉 뒤의 봉 시작이다", () => {
-  expect(shiftBars(weekNov2, kst(2026, 11, 3, 14), 1)).toBe(kst(2026, 11, 4));
-  expect(shiftBars(weekNov2, kst(2026, 11, 6), 1)).toBe(kst(2026, 11, 9));
-  expect(shiftBars(weekNov2, kst(2026, 11, 3), -1)).toBe(kst(2026, 11, 2));
-  expect(shiftBars(weekNov2, kst(2026, 11, 2), -1)).toBeNull();
-});
 
 describe("§6.3 소수 index ↔ x", () => {
   const SPACING = 8;
@@ -199,21 +213,33 @@ describe("화면 좌표", () => {
     expect(s === null ? null : fromScreen(frame, s)).toEqual(p);
   });
 
-  test("첫 봉 앞의 점은 그리지 않는다", () => {
-    expect(toScreen(frame, { t: kst(2026, 10, 30), price: 2500 })).toBeNull();
-    expect(fromScreen(frame, { x: 0, y: 10 })).toBeNull();
+  test("첫 봉 앞의 점도 봉 간격으로 이어 그린다", () => {
+    const p = { t: kst(2026, 10, 30, 12), price: 2500 };
+    const s = toScreen(frame, p);
+    expect(s).toEqual({ x: 10 - 0.5 * 6, y: 750 });
+    expect(s === null ? null : fromScreen(frame, s)).toEqual(p);
+    expect(fromScreen(frame, { x: 10 - 6, y: 750 })).toEqual({ t: kst(2026, 10, 30), price: 2500 });
   });
 
-  test("ToolContext의 barsBetween은 봉 수와 거래량 합이다", () => {
+  test("shiftBars는 점 아래 봉에서 n봉 옮긴 봉 시작이다", () => {
     const ctx = toolContext(frame, { price: String, time: String });
-    expect(ctx.barsBetween(kst(2026, 11, 2), kst(2026, 11, 4, 12))).toEqual({ count: 2, volume: 300 });
-    expect(ctx.barsBetween(kst(2026, 10, 30), kst(2026, 11, 4))).toBeNull();
+    expect(ctx.shiftBars(kst(2026, 11, 3, 6), 1)).toBe(kst(2026, 11, 4));
+    expect(ctx.shiftBars(kst(2026, 11, 3, 14), 1)).toBe(kst(2026, 11, 5));
+    expect(ctx.shiftBars(kst(2026, 11, 6), 1)).toBe(kst(2026, 11, 9));
+    expect(ctx.shiftBars(kst(2026, 11, 3), -1)).toBe(kst(2026, 11, 2));
+    expect(ctx.shiftBars(kst(2026, 11, 2), -1)).toBe(kst(2026, 10, 30));
+  });
+
+  test("ToolContext의 barsBetween은 봉 수와 불러온 봉의 거래량 합이다", () => {
+    const ctx = toolContext(frame, { price: String, time: String });
+    expect(ctx.barsBetween(kst(2026, 11, 2), kst(2026, 11, 4, 6))).toEqual({ count: 2, volume: 300 });
+    expect(ctx.barsBetween(kst(2026, 10, 30), kst(2026, 11, 4))).toEqual({ count: 3, volume: 300 });
   });
 
   test("ToolContext의 barsIn은 두 시각이 든 봉 사이의 봉을 시간 순으로 준다", () => {
     const ctx = toolContext(frame, { price: String, time: String });
-    expect(barStarts(ctx.barsIn(kst(2026, 11, 3, 12), nov(5)))).toEqual([nov(3), nov(4), nov(5)]);
-    expect(barStarts(ctx.barsIn(nov(5), kst(2026, 11, 3, 12)))).toEqual([nov(3), nov(4), nov(5)]);
+    expect(barStarts(ctx.barsIn(kst(2026, 11, 3, 6), nov(5)))).toEqual([nov(3), nov(4), nov(5)]);
+    expect(barStarts(ctx.barsIn(nov(5), kst(2026, 11, 3, 6)))).toEqual([nov(3), nov(4), nov(5)]);
     expect(barStarts(ctx.barsIn(nov(4), nov(4)))).toEqual([nov(4)]);
   });
 
@@ -226,19 +252,30 @@ describe("화면 좌표", () => {
     expect(barStarts(ctx.barsIn(kst(2027, 6, 1)))).toEqual([nov(6)]);
   });
 
-  test("barsIn은 어느 시각이든 첫 봉 앞이거나 봉이 없으면 빈 배열이다", () => {
+  test("barsIn은 첫 봉 앞에서 시작한 구간의 불러온 봉만 준다", () => {
     const ctx = toolContext(frame, { price: String, time: String });
-    expect(ctx.barsIn(kst(2026, 10, 30), kst(2026, 11, 4))).toEqual([]);
-    expect(ctx.barsIn(kst(2026, 11, 4), kst(2026, 10, 30))).toEqual([]);
-    expect(ctx.barsIn(kst(2026, 10, 30))).toEqual([]);
+    expect(barStarts(ctx.barsIn(kst(2026, 10, 30), kst(2026, 11, 4)))).toEqual([nov(2), nov(3), nov(4)]);
+    expect(barStarts(ctx.barsIn(kst(2026, 11, 4), kst(2026, 10, 30)))).toEqual([nov(2), nov(3), nov(4)]);
+    expect(barStarts(ctx.barsIn(kst(2026, 10, 30)))).toEqual([nov(2), nov(3), nov(4), nov(5), nov(6)]);
+    expect(ctx.barsIn(kst(2026, 10, 26), kst(2026, 10, 30))).toEqual([]);
     expect(toolContext(frameOf([], "D"), { price: String, time: String }).barsIn(kst(2026, 11, 4))).toEqual([]);
+  });
+
+  test("점이 봉의 왼쪽 절반에 있으면 그 봉부터 센다", () => {
+    const ctx = toolContext(frame, { price: String, time: String });
+    const leftHalfOfNov4 = logicalToT(weekNov2, 1.7)!;
+    expect(leftHalfOfNov4).toBeLessThan(nov(4));
+    expect(barStarts(ctx.barsIn(leftHalfOfNov4))).toEqual([nov(4), nov(5), nov(6)]);
+    expect(barStarts(ctx.barsIn(leftHalfOfNov4, nov(5)))).toEqual([nov(4), nov(5)]);
+    expect(ctx.shiftBars(leftHalfOfNov4, 0)).toBe(nov(4));
+    expect(ctx.barsBetween(leftHalfOfNov4, nov(6))).toEqual({ count: 2, volume: 300 });
   });
 
   test("축 역변환은 다른 축의 투영 가능 여부와 무관하다", () => {
     const ctx = toolContext(frame, { price: String, time: String });
     expect(ctx.priceAt(750)).toBe(2500);
     expect(ctx.timeAt(19)).toBe(kst(2026, 11, 3, 12));
-    expect(ctx.timeAt(0)).toBeNull();
+    expect(ctx.timeAt(0)).toBe(kst(2026, 10, 29, 8));
   });
 });
 
@@ -262,8 +299,8 @@ describe("frontend.md §3.5 보이는 모습", () => {
     expect(a === null ? null : startAt(h60, a)).toBe(kst(2026, 11, 4, 8));
   });
 
-  test("받은 첫 날의 00:00은 첫 60분봉(08:00) 앞이라 규칙 4로 그리지 않는다", () => {
-    expect(tToLogical(h60, kst(2026, 11, 3))).toBeNull();
+  test("받은 첫 날의 00:00은 첫 60분봉(08:00) 앞이라 규칙 4로 60분씩 거꾸로 센다", () => {
+    expect(tToLogical(h60, kst(2026, 11, 3))).toBe(-8);
   });
 
   test("저장값을 고치지 않는다: 일봉 점을 60분봉 화면에서 읽어도 t는 그대로다", () => {
@@ -306,6 +343,37 @@ describe("분기봉·연봉의 KST 달력과 미래 드로잉", () => {
     const screen = toScreen(frame, point);
     expect(Number.isFinite(screen?.x)).toBe(true);
     expect(screen === null ? null : fromScreen(frame, screen)).toEqual(point);
-    expect(shiftBars(timeline, first, 2)).toBe(startAt(timeline, 2));
+    expect(toolContext(frame, { price: String, time: String }).shiftBars(first, 2)).toBe(startAt(timeline, 2));
   });
+});
+
+describe("주 계열에 봉이 없는 시간축 칸", () => {
+  const slots = tl("D", [nov(2), nov(3), nov(4), nov(5), nov(6)]);
+  const loaded = [nov(2), nov(3), nov(5), nov(6)].map((t) => barAt(t));
+  const shared: Frame = {
+    ...frameOf(loaded, "D"),
+    axes: { ...frameOf(loaded, "D").axes, time: { ...frameOf(loaded, "D").axes.time, projection: { toLogical: (t) => tToLogical(slots, t), toTime: (l) => logicalToT(slots, l) } } },
+  };
+  const ctx = toolContext(shared, { price: String, time: String });
+
+  test("봉 이동과 봉 세기는 화면의 칸을 센다", () => {
+    expect(ctx.shiftBars(nov(3), 2)).toBe(nov(5));
+    expect(ctx.xOf(ctx.shiftBars(nov(3), 2)!)! - ctx.xOf(nov(3))!).toBe(2 * 6);
+    expect(ctx.barsBetween(nov(3), nov(6))).toEqual({ count: 3, volume: 300 });
+    expect(barStarts(ctx.barsIn(nov(3), nov(5)))).toEqual([nov(3), nov(5)]);
+  });
+
+  test("피보나치 시간대 선은 시작에서 수준만큼 칸을 건너 그린다", () => {
+    const fibtime = toolOf("fibtime")!;
+    const style = { ...fibtime.defaultStyle() as object, labels: false };
+    const xs = fibtime.shapes({ points: [{ t: nov(2), price: 1 }, { t: nov(3), price: 1 }], style, text: null, selected: false }, ctx).flatMap((s) => s.kind === "vline" ? [s.x] : []);
+    expect(xs.slice(0, 4)).toEqual([0, 1, 2, 3].map((n) => ctx.xOf(nov(2))! + n * 6));
+  });
+});
+
+test("회귀 채널은 첫 점이 불러온 첫 봉 앞이어도 불러온 봉으로 그린다", () => {
+  const frame = frameOf(weekNov2.starts.map((t, i) => ({ ...barAt(t), c: 100 + i })), "D");
+  const regression = toolOf("regression")!;
+  const shapes = regression.shapes({ points: [{ t: kst(2026, 10, 28), price: 1 }, { t: nov(6), price: 1 }], style: regression.defaultStyle(), text: null, selected: false }, toolContext(frame, { price: String, time: String }));
+  expect(shapes.length).toBeGreaterThan(0);
 });

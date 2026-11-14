@@ -49,12 +49,14 @@ export function DrawingDetails({ slot, editor, anchor }: { slot: number; editor:
         {editor.draft.points.map((p, i) => {
           const role = tool.pointRoles?.[i];
           const value = role?.uses === "price" ? null : calendarTime(p.t);
+          const name = role?.label ?? `점 ${i + 1}`;
+          const fieldName = (field: string) => name === field ? field : `${name} ${field}`;
           const update = (patch: Partial<typeof p>) => draft({ points: editor.draft.points.map((point, j) => i === j ? { ...point, ...patch } : point) });
-          return <fieldset className="draw-coordinate" key={i}><legend>{role?.label ?? `점 ${i + 1}`}</legend>
+          return <fieldset className="draw-coordinate" key={i}><legend>{name}</legend>
             {role?.uses !== "price" && (value === null
-              ? <label>시각 (Unix 초)<input aria-label={`점 ${i + 1} 시각 (Unix 초)`} className={INPUT} type="text" inputMode="numeric" value={p.t} onBlur={() => settlePoint(slot, i)} onChange={(e) => { const t = parseSeconds(e.target.value); if (t !== null) update({ t }); }} /></label>
-              : <label>시각 (KST)<input aria-label={`점 ${i + 1} 시각`} className={INPUT} type="datetime-local" step={1} value={value} onBlur={() => settlePoint(slot, i)} onChange={(e) => { const t = parseCalendarTime(e.target.value); if (t !== null) update({ t }); }} /></label>)}
-            {role?.uses !== "time" && <label>가격<input aria-label={`점 ${i + 1} 가격`} className={INPUT} type="number" step="any" value={p.price} onBlur={() => settlePoint(slot, i)} onChange={(e) => { if (Number.isFinite(e.target.valueAsNumber)) update({ price: e.target.valueAsNumber }); }} /></label>}
+              ? <label>시각 (Unix 초)<input aria-label={fieldName("시각 (Unix 초)")} className={INPUT} type="text" inputMode="numeric" value={p.t} onBlur={() => settlePoint(slot, i)} onChange={(e) => { const t = parseSeconds(e.target.value); if (t !== null) update({ t }); }} /></label>
+              : <label>시각 (KST)<input aria-label={fieldName("시각")} className={INPUT} type="datetime-local" step={1} value={value} onBlur={() => settlePoint(slot, i)} onChange={(e) => { const t = parseCalendarTime(e.target.value); if (t !== null) update({ t }); }} /></label>)}
+            {role?.uses !== "time" && <label>가격<input aria-label={fieldName("가격")} className={INPUT} type="number" step="any" value={p.price} onBlur={() => settlePoint(slot, i)} onChange={(e) => { if (Number.isFinite(e.target.valueAsNumber)) update({ price: e.target.valueAsNumber }); }} /></label>}
           </fieldset>;
         })}
         </details>

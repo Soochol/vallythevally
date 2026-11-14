@@ -173,7 +173,7 @@ test("drawing engine: settings preview, cancellation, coordinates and text", asy
   expect((await drawings(scenario))[0]!.style).toEqual(original.style);
   await page.getByRole("button", { name: "드로잉 세부 설정" }).click();
   await dialog.locator("summary").filter({ hasText: /^좌표$/ }).click();
-  await dialog.getByLabel("점 1 가격").fill(String(original.points[0]!.price + 10));
+  await dialog.getByLabel("시작 가격").fill(String(original.points[0]!.price + 10));
   await dialog.locator("summary").filter({ hasText: /^글자$/ }).click();
   await expect(dialog.getByRole("button", { name: "글자 색 선택", exact: true })).toContainText(defaultColor.toUpperCase());
   await dialog.getByRole("textbox", { name: "글자", exact: true }).fill("지지 구간");

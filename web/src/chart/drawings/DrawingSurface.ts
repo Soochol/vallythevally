@@ -66,9 +66,14 @@ export class DrawingSurface implements ChartExtension {
     on("lostpointercapture", () => { if (this.pointer !== null) this.reset(); });
     on("contextmenu", (e) => this.contextMenu(e));
     on("dblclick", (e) => {
+      const frame = this.frame(); const at = this.local(e);
+      if (!this.inPane(frame, at)) return;
       if (this.state.kind === "placing") { e.preventDefault(); e.stopImmediatePropagation(); this.input({ kind: "finish" }); return; }
-      const hit = frameHit(this.frame(), this.local(e));
-      if (hit.kind !== "empty") { e.preventDefault(); e.stopImmediatePropagation(); this.openEditor(hit.id); }
+      const hit = frameHit(frame, at);
+      if (hit.kind === "empty") return;
+      e.preventDefault(); e.stopImmediatePropagation();
+      const drawing = frame.items.find((item) => item.id === hit.id)?.drawing;
+      this.openEditor(hit.id, drawing && toolOf(drawing.tool)?.text?.editOnPlace ? "text" : "settings");
     });
     const key = (e: KeyboardEvent) => this.onKey(e);
     window.addEventListener("keydown", key, true);
@@ -124,7 +129,7 @@ export class DrawingSurface implements ChartExtension {
     const raw = fromScreen(frame, at);
     if (!raw) return null;
     const logical = tToLogical(frame.timeline, raw.t);
-    if (logical === null) return raw;
+    if (logical === null || logical < -0.5) return raw;
     const start = startAt(frame.timeline, Math.floor(logical));
     if (start !== null && start > raw.t) return raw;
     if (start !== null && raw.t >= start + barLength(frame.timeline.period, start)) return raw;
@@ -160,12 +165,13 @@ export class DrawingSurface implements ChartExtension {
     return { items, preview, transient, box: this.state.kind === "box" ? this.state : null, pane: f.pane, ctx: c.ctx, editable };
   }
 
+  private inPane(frame: RenderFrame, at: ScreenPoint) { return at.x >= 0 && at.y >= 0 && at.x < frame.pane.width && at.y < frame.pane.height; }
   private local(e: MouseEvent): ScreenPoint { const r = this.host.el.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; }
   private onPointer(e: PointerEvent, kind: "down" | "move" | "up") {
     if (!matchMedia(DESKTOP_QUERY).matches || (kind === "down" && e.button !== 0) || useDrawingSession.getState().editor) return;
     if (this.pointer !== null && this.pointer !== e.pointerId) return;
     const at = this.local(e); const frame = this.frame();
-    if (kind === "down" && (at.x < 0 || at.y < 0 || at.x >= frame.pane.width || at.y >= frame.pane.height)) return;
+    if (kind === "down" && !this.inPane(frame, at)) return;
     if (kind === "down") { this.focus(); useDrawingSession.setState({ popup: null }); }
     const hit = frameHit(frame, at);
     const wasCaptured = captures(this.state);
@@ -277,9 +283,8 @@ export class DrawingSurface implements ChartExtension {
   openEditor(id: string, kind: "settings" | "text" = "settings") {
     const symbol = this.host.view()?.symbol; const d = symbol ? this.sync.drawings(symbol).find((item) => item.id === id) : undefined;
     if (!d) return;
-    const tool = toolOf(d.tool); const nextKind = kind === "text" || tool?.text?.editOnPlace ? "text" : "settings";
     useDrawingSession.getState().select([d.id]);
-    useDrawingSession.setState({ editor: { kind: nextKind, original: d, draft: d }, popup: null });
+    useDrawingSession.setState({ editor: { kind, original: d, draft: d }, popup: null });
   }
   reorder(id: string, direction: "front" | "forward" | "backward" | "back", targetId?: string, dropPosition: "above" | "below" = "below") {
     const symbol = this.host.view()?.symbol; if (!symbol) return;
@@ -295,11 +300,12 @@ export class DrawingSurface implements ChartExtension {
   reveal(id: string) {
     const symbol = this.host.view()?.symbol; if (!symbol) return;
     const d = this.sync.drawings(symbol).find((item) => item.id === id); if (!d || d.hidden) return;
-    const ctx = this.context().ctx; const point = d.points[0]; const screen = point ? ctx.toScreen(point) : null;
-    if (screen && (screen.x < 0 || screen.x > ctx.paneWidth)) {
-      const f = this.projection(); const logical = point ? xToLogical(f.axes.time, screen.x) : null;
+    const f = this.projection(); const ctx = this.context(f).ctx;
+    const point = d.points[0]; const screen = point ? ctx.toScreen(point) : null;
+    const logical = screen ? xToLogical(f.axes.time, screen.x) : null;
+    if (screen && logical !== null && logical >= 0 && (screen.x < 0 || screen.x > ctx.paneWidth)) {
       const range = this.host.chart.timeScale().getVisibleLogicalRange();
-      if (logical !== null && range) { const half = (range.to - range.from) / 2; this.host.chart.timeScale().setVisibleLogicalRange({ from: logical - half, to: logical + half }); }
+      if (range) { const half = (range.to - range.from) / 2; this.host.chart.timeScale().setVisibleLogicalRange({ from: logical - half, to: logical + half }); }
     }
     this.focus();
   }
@@ -347,8 +353,8 @@ export class DrawingSurface implements ChartExtension {
     else if (["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(e.code) && session.selected.length) {
       const key = e.code as NudgeKey; const f = this.projection(); const ctx = this.context(f).ctx;
       this.sync.commit(this.slot, this.selected().filter((d) => !d.locked && !prefs.lockAll).flatMap((before) => {
-        const points = nudge(before.points, key, { shiftBars: ctx.shiftBars, price: f.axes.price });
-        return points ? [{ kind: "update" as const, before, after: { ...before, points } }] : [];
+        const points = nudge(before.points, key, { shiftBars: ctx.shiftBars, price: f.axes.price }, toolOf(before.tool)?.pointRoles);
+        return points && points.some((p, i) => p !== before.points[i]) ? [{ kind: "update" as const, before, after: { ...before, points } }] : [];
       }));
     } else handled = false;
     if (handled) { e.preventDefault(); e.stopImmediatePropagation(); this.refresh(); }

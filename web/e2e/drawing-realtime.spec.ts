@@ -54,13 +54,13 @@ test("drawings survive realtime updates, series replacement, resync and controll
   await page.mouse.up();
   await expect.poll(() => drawings(scenario)).toHaveLength(1);
   const saved = (await drawings(scenario))[0]!;
-  const expectDrawing = async (projected = true) => {
+  const expectDrawing = async (place: "loaded" | "beforeFirstBar" = "loaded") => {
     await expect(chart.locator(".drawing-mirror")).toHaveCount(1);
+    const at = expect.objectContaining({ x: expect.any(Number), y: expect.any(Number) });
     await expect.poll(() => mirror(page)).toEqual([
-      { id: saved.id, tool: "trendline", selected: expect.any(Boolean),
-        points: projected ? [expect.objectContaining({ x: expect.any(Number), y: expect.any(Number) }), expect.objectContaining({ x: expect.any(Number), y: expect.any(Number) })] : [null, null],
-        handles: expect.any(Array) },
+      { id: saved.id, tool: "trendline", selected: expect.any(Boolean), points: [at, at], handles: expect.any(Array) },
     ]);
+    if (place === "beforeFirstBar") expect((await mirror(page))[0]!.points.every((p) => p !== null && p.x < 0)).toBe(true);
     expect((await drawings(scenario))[0]!.points).toEqual(saved.points);
   };
   await expectDrawing();
@@ -75,7 +75,7 @@ test("drawings survive realtime updates, series replacement, resync and controll
   await expect(cell(page)).toHaveAttribute("aria-label", "칸 1: 삼성전자 통합 1분");
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
   await pushPrice(scenario, page, 203_000, "100003");
-  await expectDrawing(false);
+  await expectDrawing("beforeFirstBar");
   await page.getByRole("group", { name: "봉 주기" }).getByRole("button", { name: "일", exact: true }).click();
   await expect(cell(page)).toHaveAttribute("aria-label", "칸 1: 삼성전자 통합 일");
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");

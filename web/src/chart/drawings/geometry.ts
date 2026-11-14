@@ -1,6 +1,6 @@
 import type { UnixSeconds } from "../../api/generated/UnixSeconds";
 import type { PriceAxis } from "./anchor";
-import type { Shape } from "./toolSpec";
+import type { PointRole, Shape } from "./toolSpec";
 import { approxTextMeasure, textBounds, textLayout, textLocalPoint, type TextMeasure } from "./textLayout";
 import type { DrawingId, DrawingPoint, Extend, ScreenPoint } from "./types";
 export { approxTextMeasure, type TextMeasure } from "./textLayout";
@@ -188,7 +188,6 @@ export function hitShape(s: Shape, p: ScreenPoint, pane: Pane, measure: TextMeas
   }
 }
 
-const RANK = { handle: 2, line: 1, fill: 0 } as const;
 
 function nearestHandle(handles: readonly ScreenPoint[], p: ScreenPoint): number {
   let best = -1;
@@ -203,23 +202,35 @@ function nearestHandle(handles: readonly ScreenPoint[], p: ScreenPoint): number 
   return best;
 }
 
-function itemHit(item: HitItem, p: ScreenPoint, pane: Pane, measure: TextMeasure): { hit: Hit; rank: number } | null {
+function itemHit(item: HitItem, p: ScreenPoint, pane: Pane, measure: TextMeasure): Hit | null {
   const handle = nearestHandle(item.handles, p);
-  if (handle >= 0) return { hit: { kind: "handle", id: item.id, index: handle }, rank: RANK.handle };
+  if (handle >= 0) return { kind: "handle", id: item.id, index: handle };
   let part: ShapeHit = null;
   for (const s of item.shapes) {
     const h = hitShape(s, p, pane, measure);
-    if (h === "line") return { hit: { kind: "body", id: item.id, part: h }, rank: RANK.line };
+    if (h === "line") return { kind: "body", id: item.id, part: h };
     part ??= h;
   }
-  return part === null ? null : { hit: { kind: "body", id: item.id, part }, rank: RANK[part] };
+  return part === null ? null : { kind: "body", id: item.id, part };
+}
+
+interface Ranked {
+  hit: Hit;
+  z: number;
+}
+
+function beats(next: Ranked, best: Ranked): boolean {
+  const nextHandle = next.hit.kind === "handle";
+  const bestHandle = best.hit.kind === "handle";
+  return nextHandle === bestHandle ? next.z >= best.z : nextHandle;
 }
 
 export function hitTest(items: readonly HitItem[], p: ScreenPoint, pane: Pane, measure: TextMeasure = approxTextMeasure): Hit {
-  let best: { hit: Hit; rank: number; z: number } | null = null;
+  let best: Ranked | null = null;
   for (const item of items) {
-    const h = itemHit(item, p, pane, measure);
-    if (h !== null && (best === null || h.rank > best.rank || (h.rank === best.rank && item.z >= best.z))) best = { ...h, z: item.z };
+    const hit = itemHit(item, p, pane, measure);
+    const next = hit === null ? null : { hit, z: item.z };
+    if (next !== null && (best === null || beats(next, best))) best = next;
   }
   return best === null ? { kind: "empty" } : best.hit;
 }
@@ -231,9 +242,7 @@ export function shapeBounds(s: Shape, pane: Pane, measure: TextMeasure = approxT
       return normalize(a, b);
     }
     case "polyline": {
-      const xs = s.points.map((q) => q.x);
-      const ys = s.points.map((q) => q.y);
-      return { x1: Math.min(...xs), y1: Math.min(...ys), x2: Math.max(...xs), y2: Math.max(...ys) };
+      return s.points.reduce((box, q) => ({ x1: Math.min(box.x1, q.x), y1: Math.min(box.y1, q.y), x2: Math.max(box.x2, q.x), y2: Math.max(box.y2, q.y) }), { x1: Infinity, y1: Infinity, x2: -Infinity, y2: -Infinity });
     }
     case "rect":
       return rectEdges(s.a, s.b, s.extend ?? "none", pane);
@@ -293,10 +302,13 @@ export interface NudgeContext {
   price: PriceAxis;
 }
 
-export function nudge(points: readonly DrawingPoint[], key: NudgeKey, ctx: NudgeContext): DrawingPoint[] | null {
+const AXIS_OF: Record<NudgeKey, PointRole["uses"]> = { ArrowLeft: "time", ArrowRight: "time", ArrowUp: "price", ArrowDown: "price" };
+
+export function nudge(points: readonly DrawingPoint[], key: NudgeKey, ctx: NudgeContext, roles: readonly PointRole[] = []): DrawingPoint[] | null {
   const moved: DrawingPoint[] = [];
-  for (const p of points) {
-    const next = nudgePoint(p, key, ctx);
+  for (const [i, p] of points.entries()) {
+    const uses = roles[i]?.uses ?? "both";
+    const next = uses === "both" || uses === AXIS_OF[key] ? nudgePoint(p, key, ctx) : p;
     if (next === null) return null;
     moved.push(next);
   }

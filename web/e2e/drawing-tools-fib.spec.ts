@@ -1,17 +1,6 @@
 import type { Page } from "@playwright/test";
 import { cell, chartOf, expect, test } from "./harness";
-import { chartPoint, drawings, mirror, open, pickTool } from "./drawing-probe";
-
-async function settledMirror(page: Page) {
-  let last = "";
-  await expect.poll(async () => {
-    const now = JSON.stringify(await mirror(page));
-    const same = now === last;
-    last = now;
-    return same;
-  }).toBe(true);
-  return mirror(page);
-}
+import { chartPoint, drawings, mirror, open, pickTool, settledMirror } from "./drawing-probe";
 
 async function clickAt(page: Page, spots: readonly (readonly [number, number])[]) {
   for (const [fx, fy] of spots) {

@@ -17,7 +17,9 @@ export function timelineOf(bars: readonly Bar[], period: Period): Timeline {
 const DAY = 86_400;
 export const MAX_FUTURE_BARS = 5_000;
 
-const MINUTES: Record<Exclude<Period, "D" | "W" | "M" | "Q" | "Y">, number> = {
+type CalendarPeriod = "D" | "W" | "M" | "Q" | "Y";
+
+const MINUTES: Record<Exclude<Period, CalendarPeriod>, number> = {
   "1m": 1,
   "3m": 3,
   "5m": 5,
@@ -26,6 +28,11 @@ const MINUTES: Record<Exclude<Period, "D" | "W" | "M" | "Q" | "Y">, number> = {
   "30m": 30,
   "60m": 60,
 };
+
+const isCalendar = (period: Period): period is CalendarPeriod => period === "D" || period === "W" || period === "M" || period === "Q" || period === "Y";
+
+const TYPICAL_LENGTH: Record<CalendarPeriod, number> = { D: (7 / 5) * DAY, W: 7 * DAY, M: 30.44 * DAY, Q: 91.31 * DAY, Y: 365.25 * DAY };
+const MONTHS_PER_BAR = { M: 1, Q: 3, Y: 12 } as const;
 
 function kstCalendar(t: UnixSeconds) {
   const wall = toChartTime(t);
@@ -97,7 +104,7 @@ const futureCache = new WeakMap<Timeline, UnixSeconds[]>();
 function futureStart(tl: Timeline, n: number): UnixSeconds | null {
   const last = tl.starts.at(-1);
   if (last === undefined || n > MAX_FUTURE_BARS) return null;
-  if (tl.period !== "D" && tl.period !== "W" && tl.period !== "M" && tl.period !== "Q" && tl.period !== "Y") return last + n * MINUTES[tl.period] * 60;
+  if (!isCalendar(tl.period)) return last + n * MINUTES[tl.period] * 60;
   let future = futureCache.get(tl);
   if (future === undefined) {
     future = [];
@@ -107,8 +114,48 @@ function futureStart(tl: Timeline, n: number): UnixSeconds | null {
   return future[n - 1] ?? null;
 }
 
+function startBefore(period: Period, first: UnixSeconds, n: number): UnixSeconds {
+  switch (period) {
+    case "D": {
+      let t = kstCalendar(first).midnight - Math.floor(n / 5) * 7 * DAY;
+      for (let left = n % 5; left > 0; ) {
+        t -= DAY;
+        const weekday = kstCalendar(t).weekday;
+        if (weekday !== 0 && weekday !== 6) left--;
+      }
+      return t;
+    }
+    case "W": {
+      const c = kstCalendar(first);
+      return c.midnight - ((c.weekday + 6) % 7) * DAY - n * 7 * DAY;
+    }
+    case "M":
+    case "Q":
+    case "Y": {
+      const wall = toChartTime(first);
+      const d = new Date(wall * 1000);
+      const months = MONTHS_PER_BAR[period];
+      const month = Math.floor(d.getUTCMonth() / months) * months;
+      return Date.UTC(d.getUTCFullYear(), month - n * months, 1) / 1000 - (wall - first);
+    }
+    default:
+      return first - n * MINUTES[period] * 60;
+  }
+}
+
+function pastIndex(period: Period, first: UnixSeconds, t: UnixSeconds): number | null {
+  const typical = isCalendar(period) ? TYPICAL_LENGTH[period] : MINUTES[period] * 60;
+  let n = Math.max(1, Math.ceil((first - t) / typical));
+  if (!Number.isSafeInteger(n) || !Number.isFinite(startBefore(period, first, n))) return null;
+  while (startBefore(period, first, n) > t) n++;
+  while (n > 1 && startBefore(period, first, n - 1) <= t) n--;
+  return -n;
+}
+
 export function startAt(tl: Timeline, k: number): UnixSeconds | null {
-  if (!Number.isInteger(k) || k < 0) return null;
+  if (!Number.isInteger(k)) return null;
+  const first = tl.starts[0];
+  if (k < 0) return first === undefined ? null : startBefore(tl.period, first, -k);
   const real = tl.starts[k];
   if (real !== undefined) return real;
   return futureStart(tl, k - (tl.starts.length - 1));
@@ -118,7 +165,8 @@ function barIndexAtOrBefore(tl: Timeline, t: UnixSeconds): number | null {
   const { starts } = tl;
   const first = starts[0];
   const last = starts.at(-1);
-  if (first === undefined || last === undefined || t < first) return null;
+  if (first === undefined || last === undefined) return null;
+  if (t < first) return pastIndex(tl.period, first, t);
   if (t >= last) {
     let k = starts.length - 1;
     for (let next = startAt(tl, k + 1); next !== null && next <= t; next = startAt(tl, k + 1)) k++;
@@ -145,23 +193,23 @@ export function tToLogical(tl: Timeline, t: UnixSeconds): number | null {
 }
 
 export function logicalToT(tl: Timeline, logical: number): UnixSeconds | null {
-  if (!Number.isFinite(logical) || logical < 0) return null;
+  if (!Number.isFinite(logical)) return null;
   const k = Math.floor(logical);
   const start = startAt(tl, k);
   if (start === null) return null;
   return Math.round(start + (logical - k) * barLength(tl.period, start));
 }
 
-export function shiftBars(tl: Timeline, t: UnixSeconds, n: number): UnixSeconds | null {
-  const logical = tToLogical(tl, t);
-  return logical === null ? null : startAt(tl, Math.floor(logical) + n);
+export interface TimeProjection {
+  toLogical(t: UnixSeconds): number | null;
+  toTime(logical: number): UnixSeconds | null;
 }
 
 export interface TimeAxis {
   coordinateOf(index: number): number | null;
   indexAt(x: number): number | null;
   readonly barSpacing: number;
-  readonly projection?: { toLogical(t: UnixSeconds): number | null; toTime(logical: number): UnixSeconds | null };
+  readonly projection?: TimeProjection;
 }
 
 export interface PriceAxis {
@@ -193,14 +241,28 @@ export interface Projection {
   readonly axes: Axes;
 }
 
+function slotsOf(p: Projection): TimeProjection {
+  return p.axes.time.projection ?? { toLogical: (t) => tToLogical(p.timeline, t), toTime: (logical) => logicalToT(p.timeline, logical) };
+}
+
 export function timeToX(p: Projection, t: UnixSeconds): number | null {
-  const logical = p.axes.time.projection ? p.axes.time.projection.toLogical(t) : tToLogical(p.timeline, t);
+  const logical = slotsOf(p).toLogical(t);
   return logical === null ? null : logicalToX(p.axes.time, logical);
 }
 
 export function xToTime(p: Projection, x: number): UnixSeconds | null {
   const logical = xToLogical(p.axes.time, x);
-  return logical === null ? null : p.axes.time.projection ? p.axes.time.projection.toTime(logical) : logicalToT(p.timeline, logical);
+  return logical === null ? null : slotsOf(p).toTime(logical);
+}
+
+function slotUnder(p: Projection, t: UnixSeconds): number | null {
+  const logical = slotsOf(p).toLogical(t);
+  return logical === null ? null : Math.floor(logical + 0.5);
+}
+
+export function shiftBars(p: Projection, t: UnixSeconds, n: number): UnixSeconds | null {
+  const slot = slotUnder(p, t);
+  return slot === null ? null : slotsOf(p).toTime(slot + n);
 }
 
 export function toScreen(p: Projection, point: DrawingPoint): ScreenPoint | null {
@@ -221,25 +283,42 @@ export interface Frame extends Projection {
   readonly logScale: boolean;
 }
 
-export function barsBetween(f: Frame, t1: UnixSeconds, t2: UnixSeconds): { count: number; volume: number } | null {
-  const a = tToLogical(f.timeline, t1);
-  const b = tToLogical(f.timeline, t2);
+function firstAtOrAfter(bars: readonly Bar[], t: UnixSeconds): number {
+  let lo = 0;
+  let hi = bars.length;
+  while (lo < hi) {
+    const mid = Math.floor((lo + hi) / 2);
+    if ((bars[mid]?.t ?? Infinity) < t) lo = mid + 1;
+    else hi = mid;
+  }
+  return lo;
+}
+
+const loadedBetween = (bars: readonly Bar[], from: UnixSeconds, to: UnixSeconds) => bars.slice(firstAtOrAfter(bars, from), firstAtOrAfter(bars, to + 1));
+
+function slotRange(f: Frame, t1: UnixSeconds, t2: UnixSeconds): { lo: number; hi: number; from: number; to: number } | null {
+  const a = slotUnder(f, t1);
+  const b = slotUnder(f, t2);
   if (a === null || b === null) return null;
-  const lo = Math.floor(Math.min(a, b));
-  const hi = Math.floor(Math.max(a, b));
+  const lo = Math.min(a, b);
+  const hi = Math.max(a, b);
+  return { lo, hi, from: slotsOf(f).toTime(lo) ?? Infinity, to: slotsOf(f).toTime(hi) ?? Infinity };
+}
+
+export function barsBetween(f: Frame, t1: UnixSeconds, t2: UnixSeconds): { count: number; volume: number } | null {
+  const range = slotRange(f, t1, t2);
+  if (range === null) return null;
   let volume = 0;
-  for (const bar of f.bars.slice(lo, hi + 1)) volume += bar.v;
-  return { count: hi - lo, volume };
+  for (const bar of loadedBetween(f.bars, range.from, range.to)) volume += bar.v;
+  return { count: range.hi - range.lo, volume };
 }
 
 export function barsIn(f: Frame, t1: UnixSeconds, t2?: UnixSeconds): readonly Bar[] {
-  const last = f.bars.length - 1;
-  const a = tToLogical(f.timeline, t1);
-  const b = t2 === undefined ? last : tToLogical(f.timeline, t2);
-  if (a === null || b === null) return [];
-  const lo = Math.min(Math.floor(Math.min(a, b)), last);
-  const hi = Math.min(Math.floor(Math.max(a, b)), last);
-  return f.bars.slice(lo, hi + 1);
+  const last = f.bars.at(-1);
+  if (last === undefined) return [];
+  const range = slotRange(f, t1, t2 ?? t1);
+  if (range === null) return [];
+  return loadedBetween(f.bars, Math.min(range.from, last.t), t2 === undefined ? last.t : range.to);
 }
 
 export function toolContext(f: Frame, format: { price(p: number): string; time(t: UnixSeconds): string }): ToolContext {
@@ -250,7 +329,7 @@ export function toolContext(f: Frame, format: { price(p: number): string; time(t
     yOf: (price) => f.axes.price.toY(price),
     timeAt: (x) => xToTime(f, x),
     priceAt: (y) => f.axes.price.toPrice(y),
-    shiftBars: (t, n) => shiftBars(f.timeline, t, n),
+    shiftBars: (t, n) => shiftBars(f, t, n),
     barsBetween: (t1, t2) => barsBetween(f, t1, t2),
     barsIn: (t1, t2) => barsIn(f, t1, t2),
     paneWidth: f.pane.width,

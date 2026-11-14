@@ -9,6 +9,17 @@ export async function mirror(page: Page): Promise<Mirror[]> {
   return JSON.parse(json ?? "[]");
 }
 
+export async function settledMirror(page: Page): Promise<Mirror[]> {
+  let last = "";
+  await expect.poll(async () => {
+    const now = JSON.stringify(await mirror(page));
+    const same = now === last;
+    last = now;
+    return same;
+  }).toBe(true);
+  return mirror(page);
+}
+
 export const drawings = async (scenario: Scenario): Promise<Drawing[]> => scenario.documents.drawings("IDX:001");
 
 export async function open(page: Page) {

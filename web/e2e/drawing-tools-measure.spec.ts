@@ -1,6 +1,6 @@
 import type { Page } from "@playwright/test";
 import { cell, chartOf, expect, test, type Scenario } from "./harness";
-import { chartPoint, drawings, mirror, open, pickTool } from "./drawing-probe";
+import { chartPoint, drawings, mirror, open, pickTool, settledMirror } from "./drawing-probe";
 
 async function dragBetween(page: Page, from: [number, number], to: [number, number]) {
   const a = await chartPoint(page, ...from);
@@ -14,17 +14,6 @@ async function dragBetween(page: Page, from: [number, number], to: [number, numb
 async function clickAt(page: Page, at: [number, number]) {
   const p = await chartPoint(page, ...at);
   await page.mouse.click(p.x, p.y);
-}
-
-async function settledMirror(page: Page) {
-  let last = "";
-  await expect.poll(async () => {
-    const now = JSON.stringify(await mirror(page));
-    const same = now === last;
-    last = now;
-    return same;
-  }).toBe(true);
-  return mirror(page);
 }
 
 async function savedOf(scenario: Scenario, tool: string) {
@@ -106,13 +95,13 @@ test("포지션 세부 설정: 목표가와 손절가를 진입가 반대쪽에 
   await page.getByRole("button", { name: "드로잉 세부 설정" }).click();
   const dialog = page.getByRole("dialog", { name: "매수 포지션 세부 설정" });
   await dialog.locator("summary").filter({ hasText: /^좌표$/ }).click();
-  await dialog.getByLabel("점 2 가격").fill(String(entry!.price - 100));
-  await dialog.getByLabel("점 3 가격").fill(String(entry!.price + 100));
+  await dialog.getByLabel("목표 가격").fill(String(entry!.price - 100));
+  await dialog.getByLabel("손절 가격").fill(String(entry!.price + 100));
   await dialog.getByRole("button", { name: "확인", exact: true }).click();
   await expect.poll(async () => (await savedOf(scenario, "long")).points).toEqual([entry, { ...target, price: entry!.price }, { ...stop, price: entry!.price }]);
   await page.getByRole("button", { name: "드로잉 세부 설정" }).click();
   await dialog.locator("summary").filter({ hasText: /^좌표$/ }).click();
-  await dialog.getByLabel("점 2 시각", { exact: true }).fill(await dialog.getByLabel("점 1 시각", { exact: true }).inputValue());
+  await dialog.getByLabel("목표 시각", { exact: true }).fill(await dialog.getByLabel("진입 시각", { exact: true }).inputValue());
   await dialog.getByRole("button", { name: "확인", exact: true }).click();
   await expect.poll(async () => (await savedOf(scenario, "long")).points[1]!.t).not.toBe(target!.t);
   expect((await savedOf(scenario, "long")).points[1]!.t).toBeGreaterThan(entry!.t);

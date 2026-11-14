@@ -36,6 +36,7 @@ export function chartTimeProjection(scale: ChartTimeScale, period: Period) {
       if (nextTime === null) return null;
       if (nextTime === t) return next;
       const index = nextTime > t ? next - 1 : next;
+      if (index < 0) return tToLogical({ period, starts: [nextTime] }, t);
       const start = at(index);
       if (start === null) return null;
       if (nextTime < t) {
@@ -45,8 +46,12 @@ export function chartTimeProjection(scale: ChartTimeScale, period: Period) {
       return t < start + barLength(period, start) ? index + (t - start) / barLength(period, start) : next;
     },
     toTime(logical: number): number | null {
-      if (logical < 0 || !Number.isFinite(logical)) return null;
+      if (!Number.isFinite(logical)) return null;
       const index = Math.floor(logical);
+      if (index < 0) {
+        const first = at(0);
+        return first === null ? null : logicalToT({ period, starts: [first] }, logical);
+      }
       const start = at(index);
       if (start !== null) return Math.round(start + (logical - index) * barLength(period, start));
       const last = lastIndex();

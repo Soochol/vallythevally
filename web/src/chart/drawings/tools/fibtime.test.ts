@@ -50,7 +50,7 @@ function chartOf(starts: readonly number[], period: Period): ToolContext {
     { price: String, time: String },
   );
 }
-const barIndexes = (shapes: readonly Shape[]) => ofKind(shapes, "vline").map((l) => Math.floor(l.x / SPACING));
+const barIndexes = (shapes: readonly Shape[]) => ofKind(shapes, "vline").map((l) => Math.floor(l.x / SPACING + 0.5));
 
 describe("피보나치 시간대", () => {
   test("두 점은 시각만 쓰고 기본 수준은 피보나치 수열이다", () => {
@@ -110,10 +110,10 @@ describe("피보나치 시간대", () => {
 
   test("달 봉처럼 길이가 다른 봉에서도 첫 점이 봉 늦게 있으면 세로선마다 제 봉에 남는다", () => {
     const months = chartOf([kst(2026, 1, 1), kst(2026, 2, 1), kst(2026, 3, 1), kst(2026, 4, 1)], "M");
-    const lateJanuary = { t: kst(2026, 1, 30, 12), price: 1 };
+    const lateJanuary = { t: kst(2026, 1, 16, 4), price: 1 };
     expect(barIndexes(draw([lateJanuary, { t: kst(2026, 2, 10), price: 1 }], style, months)).slice(0, 6)).toEqual([0, 1, 2, 3, 5, 8]);
     const backward = chartOf([kst(2025, 9, 1), kst(2025, 10, 1), kst(2025, 11, 1), kst(2025, 12, 1), kst(2026, 1, 1)], "M");
-    const lateJanuaryBack = { t: kst(2026, 1, 31, 12), price: 1 };
+    const lateJanuaryBack = { t: kst(2026, 1, 16, 4), price: 1 };
     expect(barIndexes(draw([lateJanuaryBack, { t: kst(2025, 12, 10), price: 1 }], style, backward)).slice(0, 4)).toEqual([4, 3, 2, 1]);
   });
 
