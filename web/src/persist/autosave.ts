@@ -18,6 +18,7 @@ export interface AutosaveDeps {
   put(path: string, json: string, opts: { keepalive: boolean }): Promise<unknown>;
   toast(text: string): void;
   revisions: Record<SaveTarget, number>;
+  serverCharts?: readonly string[];
   unsaved?: (target: SaveTarget) => SaverOptions<object>["unsaved"];
 }
 
@@ -31,6 +32,17 @@ export interface Autosave {
 }
 
 let active: Autosave | null = null;
+let serverCharts: ReadonlySet<string> | null = null;
+const sendingCharts = new Set<ReadonlySet<string>>();
+
+export function serverMayLackChart(id: string): boolean {
+  return active === null || serverCharts === null || !serverCharts.has(id) || [...sendingCharts].some((charts) => !charts.has(id));
+}
+
+function chartsIn(json: string): ReadonlySet<string> {
+  const { windows } = JSON.parse(json) as Pick<LayoutInput, "windows">;
+  return new Set(windows.filter((w) => w.kind === "chart").map((w) => w.id));
+}
 
 export function retryFailedSaves() {
   active?.retry();
@@ -61,6 +73,8 @@ export function startAutosave(deps: AutosaveDeps): Autosave {
   const unsaved =
     deps.unsaved ?? ((target: SaveTarget) => ({ write: (u) => writeUnsaved(target, u), clear: (upTo) => clearUnsaved(target, upTo) }));
 
+  serverCharts = deps.serverCharts ? new Set(deps.serverCharts) : null;
+  sendingCharts.clear();
   const layout = createSaver<Omit<LayoutInput, "revision">>({
     debounceMs: DEBOUNCE_MS,
     read: () => {
@@ -70,7 +84,17 @@ export function startAutosave(deps: AutosaveDeps): Autosave {
     tooLarge: exceedsServerFieldLimits,
     path: () => layoutPath(useLayoutStore.getState().layout.id),
     revision: deps.revisions.layout,
-    send: deps.put,
+    send: async (path, json, opts) => {
+      const charts = chartsIn(json);
+      sendingCharts.add(charts);
+      try {
+        const saved = await deps.put(path, json, opts);
+        serverCharts = charts;
+        return saved;
+      } finally {
+        sendingCharts.delete(charts);
+      }
+    },
     unsaved: unsaved("layout"),
     onState: (s) => setSave("layout", s),
   });

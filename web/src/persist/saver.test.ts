@@ -463,3 +463,28 @@ test("조건부 저장이 반영되면 실패한 편집의 재시도와 미저�
   expect(t.ns()).toEqual([1, 1, 99, 2]);
   expect(t.revisions()).toEqual([102, 103, 501, 503]);
 });
+
+test("보내는 중에 바로 저장을 청하면 앞 요청이 끝나는 즉시 보내고, 그다음 편집은 다시 1초 기다린다", async () => {
+  let value: Value = { n: 0 };
+  const sent: number[] = [];
+  let finish = () => {};
+  const send: Send = async (_path, json) => {
+    sent.push((JSON.parse(json) as Value).n);
+    if (sent.length === 1) await new Promise<void>((resolve) => { finish = resolve; });
+  };
+  const saver = createSaver<Value>({ debounceMs: 1000, read: () => value, tooLarge: () => false, path: () => "/x", revision: 1, send, onState: () => {}, now: () => 42 });
+  value = { n: 1 };
+  saver.changed();
+  await vi.advanceTimersByTimeAsync(1000);
+  value = { n: 2 };
+  saver.changed("now");
+  finish();
+  await vi.advanceTimersByTimeAsync(0);
+  expect(sent).toEqual([1, 2]);
+  value = { n: 3 };
+  saver.changed();
+  await vi.advanceTimersByTimeAsync(999);
+  expect(sent).toEqual([1, 2]);
+  await vi.advanceTimersByTimeAsync(1);
+  expect(sent).toEqual([1, 2, 3]);
+});

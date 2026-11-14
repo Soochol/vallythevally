@@ -5,7 +5,7 @@ import { chartWindows, DEFAULT_LAYOUT, useLayoutStore } from "../stores/layout";
 import { usePersistStore } from "../stores/persist";
 import { useUiStore } from "../stores/ui";
 import { useWatchlistStore } from "../stores/watchlist";
-import { type Autosave, commitWatchlist, RECENT_CLEARED, startAutosave } from "./autosave";
+import { type Autosave, commitWatchlist, RECENT_CLEARED, serverMayLackChart, startAutosave } from "./autosave";
 import { PAYLOAD_LIMIT_BYTES } from "./bytes";
 import { ApiRequestError } from "../api/http";
 import { restore } from "./restore";
@@ -82,6 +82,32 @@ test("차트 창을 더하면 기다리지 않고 레이아웃을 보내고, 다
   await vi.advanceTimersByTimeAsync(0);
   expect(puts).toHaveLength(2);
   expect((puts[1]!.body as { windows: { id: string }[] }).windows.map((w) => w.id)).toContain(id);
+});
+
+test("서버가 가진 차트 창은 보낸 레이아웃이 성공한 뒤에 바뀌고, 보내는 중인 본문에 없는 창은 서버에 없을 수 있다", async () => {
+  autosave.stop();
+  let finish = () => {};
+  autosave = startAutosave({
+    put: (path, json, { keepalive }) => { puts.push({ path, body: JSON.parse(json), keepalive }); return new Promise<void>((resolve) => { finish = resolve; }); },
+    toast: (t) => toasts.push(t),
+    revisions: { layout: 0, ui: 0, watchlist: 0 },
+    serverCharts: [CELL],
+    unsaved: () => undefined,
+  });
+  expect(serverMayLackChart(CELL)).toBe(false);
+  const id = useLayoutStore.getState().addChart(CELL, null)!;
+  expect(serverMayLackChart(id)).toBe(true);
+  await vi.advanceTimersByTimeAsync(0);
+  expect(puts).toHaveLength(1);
+  expect(serverMayLackChart(id)).toBe(true);
+  finish();
+  await vi.advanceTimersByTimeAsync(0);
+  expect(serverMayLackChart(id)).toBe(false);
+  useLayoutStore.getState().closeWindow(id);
+  await vi.advanceTimersByTimeAsync(1000);
+  expect(puts).toHaveLength(2);
+  expect(serverMayLackChart(id)).toBe(true);
+  expect(serverMayLackChart(CELL)).toBe(false);
 });
 
 test("UI 설정을 바꾸면 모르는 키와 함께 UiState를 보낸다", async () => {

@@ -31,6 +31,7 @@ export interface RestoreSources {
 export interface Restored {
   layout: EditableLayout;
   layoutDirty: boolean;
+  serverCharts: readonly string[];
   ui: { prefs: UiPrefs; extra: UiExtra };
   uiDirty: boolean;
   watchlists: readonly Watchlist[];
@@ -102,6 +103,7 @@ export async function restore(src: RestoreSources): Promise<Restored> {
   return {
     layout,
     layoutDirty: stored === null || opened !== stored || windows.some((w) => w.dirty) || linkedWindows !== restoredWindows,
+    serverCharts: (stored?.windows ?? []).filter((w) => w.kind === "chart").map((w) => w.id),
     ui: lastLayoutFixed ? { ...ui, prefs: { ...ui.prefs, lastLayoutId: layout.id } } : ui,
     uiDirty: lastLayoutFixed || localUi !== null,
     watchlists: localLists ?? serverWatch.lists,
