@@ -93,3 +93,23 @@ for (const symbol of SYMBOLS) for (const width of [1440, 1280, 1024]) {
     }
   });
 }
+
+test("고정 도구: 접힌 메뉴는 첫 도구에 포커스를 두고 별표 없이 열리며, 창 폭이 바뀌어도 메뉴가 점 아래에 머문다", async ({ context, scenario }) => {
+  const page = await load(context, scenario, 1100, "005930", TOOLS.slice(0, 14).map((t) => t.tool));
+  const dot = dock(page).getByRole("button", { name: "고정 도구 펼치기", exact: true });
+  await dot.focus();
+  await page.keyboard.press("Enter");
+  const menu = page.getByRole("menu", { name: "고정 도구", exact: true });
+  await expect(menu.getByRole("menuitem").first()).toBeFocused();
+  await expect(menu.getByRole("menuitemcheckbox")).toHaveCount(0);
+  const leftOf = (box: { x: number } | null) => Math.round(box!.x);
+  await expect.poll(async () => leftOf(await menu.boundingBox())).toBe(leftOf(await dot.boundingBox()));
+  await page.setViewportSize({ width: 1024, height: 900 });
+  await expect.poll(async () => leftOf(await menu.boundingBox())).toBe(leftOf(await dot.boundingBox()));
+  const group = dock(page).getByRole("button", { name: "선 도구 펼치기", exact: true });
+  await page.keyboard.press("Escape");
+  await group.click();
+  const lines = page.getByRole("menu", { name: "선 도구", exact: true });
+  await page.setViewportSize({ width: 1100, height: 900 });
+  await expect.poll(async () => leftOf(await lines.boundingBox())).toBe(leftOf(await group.boundingBox()));
+});

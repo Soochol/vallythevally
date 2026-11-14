@@ -59,7 +59,7 @@ export function DrawingToolbar() {
     {pinnedTools.length > 0 && <div ref={pinnedRun} className="draw-pinned">
       {pinnedTools.slice(0, shownPins - 1).map(pinnedButton)}
       {folded.length > 0
-        ? <div className="draw-group">{pinnedButton(pinnedTools[shownPins - 1]!)}<ToolGroup label="고정 도구" tools={folded} onChoose={setTool} /></div>
+        ? <div className="draw-group">{pinnedButton(pinnedTools[shownPins - 1]!)}<ToolGroup label="고정 도구" tools={folded} onChoose={setTool} pinnable={false} /></div>
         : pinnedButton(pinnedTools[shownPins - 1]!)}
     </div>}
     <div className="draw-separator" />
@@ -153,7 +153,7 @@ function usePinnedFit(root: RefObject<HTMLElement | null>, run: RefObject<HTMLEl
   return Math.min(room, count);
 }
 
-function ToolGroup({ label, tools, onChoose }: { label: string; tools: readonly Tool[]; onChoose(tool: Tool): void }) {
+function ToolGroup({ label, tools, onChoose, pinnable = true }: { label: string; tools: readonly Tool[]; onChoose(tool: Tool): void; pinnable?: boolean }) {
   const [open, setOpen] = useState(false);
   const trigger = useRef<HTMLButtonElement>(null);
   const pinned = useUiStore((s) => s.prefs.drawing.pinnedTools);
@@ -164,7 +164,7 @@ function ToolGroup({ label, tools, onChoose }: { label: string; tools: readonly 
     return own && dock ? { left: own.left, right: own.right, top: dock.top, bottom: dock.bottom } : own;
   };
   return <div className="draw-group-toggle"><button ref={trigger} type="button" aria-label={`${label} 펼치기`} title={label} aria-haspopup="menu" aria-expanded={open} className="draw-group-dot" onClick={() => setOpen(!open)}><svg viewBox="0 0 8 8" width="8" height="8" aria-hidden="true"><circle cx="4" cy="4" r="2" fill="currentColor" /></svg></button>
-    {open && <Popover data-chart-control anchor={trigger} anchorRect={alongDock} placement="bottom" role="menu" aria-label={label} className="draw-tool-menu" onClose={() => setOpen(false)} onKeyDown={(e) => {
+    {open && <Popover data-chart-control anchor={trigger} anchorRect={alongDock} follow placement="bottom" role="menu" aria-label={label} className="draw-tool-menu" onClose={() => setOpen(false)} onKeyDown={(e) => {
       e.stopPropagation();
       if (e.nativeEvent.isComposing) return;
       if (e.key === "Tab") { setOpen(false); return; }
@@ -178,7 +178,7 @@ function ToolGroup({ label, tools, onChoose }: { label: string; tools: readonly 
     }}>
       {tools.map((tool) => <div className="draw-tool-choice" key={tool.tool}>
         <button type="button" role="menuitem" onClick={() => { onChoose(tool); setOpen(false); }}><Icon path={tool.icon} size={16} /><span>{tool.label}</span>{hotkeysOf(tool.tool)[0] && <kbd>{hotkeysOf(tool.tool)[0]}</kbd>}</button>
-        <button type="button" role="menuitemcheckbox" aria-label={`${tool.label} 막대에 고정`} aria-checked={pinned.includes(tool.tool)} title="막대에 고정" onClick={() => useUiStore.getState().setDrawingPrefs({ pinnedTools: pinned.includes(tool.tool) ? pinned.filter((id) => id !== tool.tool) : [...pinned, tool.tool] })}><StarIcon size={16} /></button>
+        {pinnable && <button type="button" role="menuitemcheckbox" aria-label={`${tool.label} 막대에 고정`} aria-checked={pinned.includes(tool.tool)} title="막대에 고정" onClick={() => useUiStore.getState().setDrawingPrefs({ pinnedTools: pinned.includes(tool.tool) ? pinned.filter((id) => id !== tool.tool) : [...pinned, tool.tool] })}><StarIcon size={16} /></button>}
       </div>)}
     </Popover>}
   </div>;
