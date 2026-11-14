@@ -45,6 +45,10 @@ describe("엘리엇 조정 파동", () => {
     expect(elliottabc.placement).toEqual({ kind: "points", count: 4 });
   });
 
+  test("점 이름은 꼬리표 모양과 상관없이 파동 이름이다", () => {
+    expect(elliottabc.pointRoles?.map((r) => r.label)).toEqual(["시작", "A파", "B파", "C파"]);
+  });
+
   test("꼬리표 모양 셋의 글자", () => {
     expect(marks(elliottabc, "upper", 4)).toEqual(["0", "A", "B", "C"]);
     expect(marks(elliottabc, "paren", 4)).toEqual(["(0)", "(A)", "(B)", "(C)"]);

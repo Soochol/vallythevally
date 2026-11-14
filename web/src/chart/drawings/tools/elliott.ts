@@ -15,6 +15,7 @@ interface WaveToolSpec<F extends string> {
   label: string;
   icon: string;
   count: 4 | 6;
+  roles: readonly string[];
   forms: readonly [WaveForm<F>, ...WaveForm<F>[]];
 }
 
@@ -29,7 +30,7 @@ function defineWaveTool<F extends string>(spec: WaveToolSpec<F>): Tool {
     label: spec.label,
     icon: spec.icon,
     count: spec.count,
-    roles: spec.forms[0].marks.map((mark) => `점 ${mark}`),
+    roles: spec.roles,
     defaultStyle: defaults,
     parseStyle: (o: StyleRecord) => ({ ...readPatternStyle(o), form: readOneOf(o.form, values, first) }),
     textFields: [select("꼬리표 모양", spec.forms.map(({ value, label }) => ({ value, label })), form)],
@@ -44,6 +45,7 @@ export const elliott = defineWaveTool<ImpulseForm>({
   label: "엘리엇 충격 파동",
   icon: "M2 19 L6 11 L9 15 L15 4 L18 10 L22 6",
   count: 6,
+  roles: ["시작", "1파", "2파", "3파", "4파", "5파"],
   forms: [
     { value: "number", label: "숫자 1", marks: ["0", "1", "2", "3", "4", "5"] },
     { value: "paren", label: "괄호 (1)", marks: ["(0)", "(1)", "(2)", "(3)", "(4)", "(5)"] },
@@ -58,6 +60,7 @@ export const elliottabc = defineWaveTool<CorrectiveForm>({
   label: "엘리엇 조정 파동",
   icon: "M3 5 L9 16 L14 10 L21 20",
   count: 4,
+  roles: ["시작", "A파", "B파", "C파"],
   forms: [
     { value: "upper", label: "대문자 A", marks: ["0", "A", "B", "C"] },
     { value: "paren", label: "괄호 (A)", marks: ["(0)", "(A)", "(B)", "(C)"] },

@@ -77,7 +77,7 @@ describe("패턴 도구의 공통 틀", () => {
   });
 
   test("점 이름은 세부 설정의 좌표에 보이고, 축 라벨은 없다", () => {
-    expect(elliott.pointRoles?.map((r) => r.label)).toEqual(["점 0", "점 1", "점 2", "점 3", "점 4", "점 5"]);
+    expect(elliott.pointRoles?.map((r) => r.label)).toEqual(["시작", "1파", "2파", "3파", "4파", "5파"]);
     expect(elliott.axisLabels({ points: zigzag, style, text: null, selected: true }, ctx)).toEqual([]);
   });
 
