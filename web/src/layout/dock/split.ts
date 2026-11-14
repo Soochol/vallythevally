@@ -15,7 +15,8 @@ function splitBeside(target: DockNode, rect: Rect, window: WindowId, edge: Edge,
   const along = row ? rect.w : rect.h;
   const needAlong = row ? need.w : need.h;
   const keepAlong = row ? keep.w : keep.h;
-  if (needAlong + space.gap + keepAlong > along || (row ? rect.h : rect.w) < (row ? need.h : need.w)) return null;
+  const across = row ? rect.h : rect.w;
+  if (needAlong + space.gap + keepAlong > along || across < Math.max(row ? need.h : need.w, row ? keep.h : keep.w)) return null;
   const share = Math.min(along - space.gap - keepAlong, Math.max(needAlong, Math.floor((along - space.gap) * SPLIT_SHARE)));
   const group = singleGroup(id, window);
   return {

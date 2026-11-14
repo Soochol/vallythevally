@@ -46,6 +46,7 @@ test("어떤 비율로도 최소 크기를 못 지키면 나누지 않고 자리
   expect(splitGroup(charts, windowId("s"), "g3", "left", space)).toEqual({ ok: false, reason: "too-small" });
   expect(splitGroup(charts, windowId("s"), "g1", "bottom", space)).toEqual({ ok: false, reason: "too-small" });
   expect(splitGroup(dock, windowId("s"), "g1", "right", { ...space, area: { w: 1256, h: 260 } })).toEqual({ ok: false, reason: "too-small" });
+  expect(splitGroup(dock, windowId("o"), "g1", "right", { ...space, area: { w: 1256, h: 190 } })).toEqual({ ok: false, reason: "too-small" });
 });
 
 test("하나뿐인 탭을 자기 묶음에 나눠 놓으면 아무것도 바꾸지 않는다", () => {
