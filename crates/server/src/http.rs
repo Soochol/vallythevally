@@ -574,11 +574,19 @@ mod tests {
 
     const DEFAULT_ID: &str = "01900000-0000-7000-8000-000000000001";
 
-    fn two_cells(nxt_symbol: &str) -> Value {
-        json!({"id": "L2", "name": "둘", "arrangement": "2h", "sync": {"crosshair": false}, "revision": 1, "cells": [
-            {"slot": 1, "symbol": nxt_symbol, "venue": "nxt", "period": "5m", "symbolLink": true, "chartSettings": {"v": 1, "x": [1]}},
-            {"slot": 0, "symbol": "IDX:101", "venue": null, "period": "D", "symbolLink": false, "chartSettings": {}}
+    fn two_charts(nxt_symbol: &str) -> Value {
+        json!({"id": "L2", "name": "둘", "sync": {"crosshair": false}, "revision": 1, "placement": {"v": 1, "dock": null, "future": [1]}, "windows": [
+            {"id": "right", "link": "a", "kind": "chart", "symbol": nxt_symbol, "venue": "nxt", "period": "5m", "chartSettings": {"v": 1, "x": [1]}},
+            {"id": "watchlist", "link": "b", "kind": "watchlist"},
+            {"id": "left", "link": null, "kind": "chart", "symbol": "IDX:101", "venue": null, "period": "D", "chartSettings": {}},
+            {"id": "screener", "link": null, "kind": "screener"},
+            {"id": "objects", "link": null, "kind": "objects"},
+            {"id": "indicators", "link": null, "kind": "indicators"}
         ]})
+    }
+
+    fn chart_window(id: &str) -> Value {
+        json!({"id": id, "link": null, "kind": "chart", "symbol": "IDX:001", "venue": null, "period": "D", "chartSettings": {}})
     }
 
     #[tokio::test(start_paused = true)]
@@ -787,37 +795,54 @@ mod tests {
     async fn layouts_round_trip_and_rejections() {
         let f = live_fixture(true).await;
         let (s, v) = json(&f.app, "/api/layouts").await;
-        assert_eq!((s, v), (StatusCode::OK, json!([{"id": DEFAULT_ID, "name": "기본", "arrangement": "1", "updatedAt": 0}])));
+        assert_eq!((s, v), (StatusCode::OK, json!([{"id": DEFAULT_ID, "name": "기본", "updatedAt": 0}])));
         let (s, v) = json(&f.app, &format!("/api/layouts/{DEFAULT_ID}")).await;
-        assert_eq!((s, v["cells"][0]["symbol"].as_str(), v["sync"].clone()), (StatusCode::OK, Some("IDX:001"), json!({"crosshair": true, "scroll": true})));
+        assert_eq!((s, v["windows"][0]["symbol"].as_str(), v["sync"].clone()), (StatusCode::OK, Some("IDX:001"), json!({"crosshair": true, "scroll": true})));
+        let ids: Vec<&str> = v["windows"].as_array().unwrap().iter().map(|w| w["id"].as_str().unwrap()).collect();
+        assert_eq!((ids, v["placement"].clone()), (vec!["cell-0", "watchlist", "screener", "objects"], json!({})));
 
-        let (s, saved) = put(&f.app, "/api/layouts/L2", &two_cells("005930")).await;
+        let (s, saved) = put(&f.app, "/api/layouts/L2", &two_charts("005930")).await;
         assert_eq!(s, StatusCode::OK, "{saved}");
         assert_eq!(saved["updatedAt"], 1_794_152_040, "서버 시계(2026-11-09 00:34 KST)");
         assert_eq!(saved["sync"], json!({"crosshair": false, "scroll": true}), "빠진 키는 true");
-        assert_eq!(saved["cells"][0]["slot"], 0, "slot 순서로 돌려준다");
+        assert_eq!((&saved["windows"], &saved["placement"]), (&two_charts("005930")["windows"], &two_charts("005930")["placement"]), "보낸 순서와 모양 그대로");
         assert_eq!(json(&f.app, "/api/layouts/L2").await, (StatusCode::OK, saved));
-        assert_eq!(put(&f.app, "/api/layouts/L3", &json!({"id": "L3", "name": "폐지", "arrangement": "1", "sync": {}, "revision": 1, "cells": [
-            {"slot": 0, "symbol": "999990", "venue": "nxt", "period": "D", "symbolLink": false, "chartSettings": {}}]})).await.0, StatusCode::OK, "목록에 없는 종목은 막지 않는다");
+        assert_eq!(put(&f.app, "/api/layouts/L3", &json!({"id": "L3", "name": "폐지", "sync": {}, "revision": 1, "placement": {}, "windows": [
+            {"id": "c", "link": null, "kind": "chart", "symbol": "999990", "venue": "nxt", "period": "D", "chartSettings": {}}]})).await.0, StatusCode::OK, "목록에 없는 종목은 막지 않는다");
 
         let with = |f: &dyn Fn(&mut Value)| {
-            let mut v = two_cells("005930");
+            let mut v = two_charts("005930");
             v["revision"] = json!(2);
             f(&mut v);
             v
         };
+        let windows = |v: &mut Value| v["windows"].as_array_mut().unwrap().clone();
         for (uri, body, status, want) in [
-            ("/api/layouts/OTHER", two_cells("005930"), StatusCode::BAD_REQUEST, "bad_request"),
-            ("/api/layouts/L2", with(&|v| v["arrangement"] = json!("3")), StatusCode::BAD_REQUEST, "bad_request"),
-            ("/api/layouts/L2", with(&|v| v["cells"][0]["slot"] = json!(0)), StatusCode::BAD_REQUEST, "bad_request"),
-            ("/api/layouts/L2", with(&|v| v["cells"][1]["venue"] = json!("krx")), StatusCode::BAD_REQUEST, "bad_request"),
-            ("/api/layouts/L2", with(&|v| v["cells"][0]["venue"] = json!(null)), StatusCode::BAD_REQUEST, "bad_request"),
-            ("/api/layouts/L2", with(&|v| v["cells"][0]["symbol"] = json!("bad")), StatusCode::BAD_REQUEST, "bad_request"),
+            ("/api/layouts/OTHER", two_charts("005930"), StatusCode::BAD_REQUEST, "bad_request"),
+            ("/api/layouts/L2", with(&|v| v["windows"] = json!([])), StatusCode::BAD_REQUEST, "bad_request"),
+            ("/api/layouts/L2", with(&|v| v["windows"] = json!((0..13).map(|i| chart_window(&format!("c{i}"))).collect::<Vec<_>>())), StatusCode::BAD_REQUEST, "bad_request"),
+            ("/api/layouts/L2", with(&|v| v["windows"][2]["id"] = json!("right")), StatusCode::BAD_REQUEST, "bad_request"),
+            ("/api/layouts/L2", with(&|v| v["windows"][2]["id"] = json!("왼쪽")), StatusCode::BAD_REQUEST, "bad_request"),
+            ("/api/layouts/L2", with(&|v| v["windows"][2]["id"] = json!("a.b")), StatusCode::BAD_REQUEST, "bad_request"),
+            ("/api/layouts/L2", with(&|v| v["windows"][2]["id"] = json!("")), StatusCode::BAD_REQUEST, "bad_request"),
+            ("/api/layouts/L2", with(&|v| v["windows"][2]["id"] = json!("x".repeat(65))), StatusCode::BAD_REQUEST, "bad_request"),
+            ("/api/layouts/L2", with(&|v| v["windows"] = json!([{"id": "watchlist", "link": null, "kind": "watchlist"}])), StatusCode::BAD_REQUEST, "bad_request"),
+            ("/api/layouts/L2", with(&|v| v["windows"] = json!((0..9).map(|i| chart_window(&format!("c{i}"))).collect::<Vec<_>>())), StatusCode::BAD_REQUEST, "bad_request"),
+            ("/api/layouts/L2", with(&|v| { let mut w = windows(v); w.push(json!({"id": "watchlist2", "link": null, "kind": "watchlist"})); v["windows"] = json!(w); }), StatusCode::BAD_REQUEST, "bad_request"),
+            ("/api/layouts/L2", with(&|v| v["windows"][1]["kind"] = json!("orders")), StatusCode::BAD_REQUEST, "bad_request"),
+            ("/api/layouts/L2", with(&|v| v["windows"][1]["link"] = json!("d")), StatusCode::BAD_REQUEST, "bad_request"),
+            ("/api/layouts/L2", with(&|v| v["windows"][2]["venue"] = json!("krx")), StatusCode::BAD_REQUEST, "bad_request"),
+            ("/api/layouts/L2", with(&|v| v["windows"][0]["venue"] = json!(null)), StatusCode::BAD_REQUEST, "bad_request"),
+            ("/api/layouts/L2", with(&|v| v["windows"][0]["symbol"] = json!("bad")), StatusCode::BAD_REQUEST, "bad_request"),
             ("/api/layouts/L2", with(&|v| v["name"] = json!(" ")), StatusCode::BAD_REQUEST, "bad_request"),
-            ("/api/layouts/L2", with(&|v| v["cells"][0]["period"] = json!("2m")), StatusCode::BAD_REQUEST, "bad_request"),
-            ("/api/layouts/L2", two_cells("005935"), StatusCode::BAD_REQUEST, "bad_request"),
+            ("/api/layouts/L2", with(&|v| v["windows"][0]["period"] = json!("2m")), StatusCode::BAD_REQUEST, "bad_request"),
+            ("/api/layouts/L2", with(&|v| v["placement"] = json!([1])), StatusCode::BAD_REQUEST, "bad_request"),
+            ("/api/layouts/L2", with(&|v| v["placement"] = json!(null)), StatusCode::BAD_REQUEST, "bad_request"),
+            ("/api/layouts/L2", with(&|v| v["placement"] = json!("{}")), StatusCode::BAD_REQUEST, "bad_request"),
+            ("/api/layouts/L2", two_charts("005935"), StatusCode::BAD_REQUEST, "bad_request"),
             ("/api/layouts/L2", with(&|v| v["name"] = json!("기본")), StatusCode::CONFLICT, "conflict"),
-            ("/api/layouts/L2", with(&|v| v["cells"][0]["chartSettings"] = json!({"pad": "x".repeat(65_536)})), StatusCode::PAYLOAD_TOO_LARGE, "payload_too_large"),
+            ("/api/layouts/L2", with(&|v| v["windows"][0]["chartSettings"] = json!({"pad": "x".repeat(65_536)})), StatusCode::PAYLOAD_TOO_LARGE, "payload_too_large"),
+            ("/api/layouts/L2", with(&|v| v["placement"] = json!({"pad": "x".repeat(65_536)})), StatusCode::PAYLOAD_TOO_LARGE, "payload_too_large"),
             ("/api/layouts/L2", with(&|v| v["pad"] = json!("x".repeat(LAYOUT_LIMIT))), StatusCode::PAYLOAD_TOO_LARGE, "payload_too_large"),
             ("/api/layouts/L2", with(&|v| v["revision"] = json!(null)), StatusCode::BAD_REQUEST, "bad_request"),
             ("/api/layouts/L2", with(&|v| v["revision"] = json!(1)), StatusCode::CONFLICT, "stale_revision"),
@@ -826,15 +851,19 @@ mod tests {
             let (s, v) = put(&f.app, uri, &body).await;
             assert_eq!((s, code(&v)), (status, want), "{uri} {v}");
         }
-        let (_, v) = put(&f.app, "/api/layouts/L2", &two_cells("005935")).await;
+        let (_, v) = put(&f.app, "/api/layouts/L2", &two_charts("005935")).await;
         assert!(v["error"]["message"].as_str().unwrap().contains("NXT에서 거래되지 않는 종목입니다"), "{v}");
         assert_eq!(json(&f.app, "/api/layouts/L2").await.1["revision"], 1, "거절한 PUT은 저장하지 않는다");
-        let mut four_big = json!({"id": "L4", "name": "넷", "arrangement": "4", "sync": {}, "revision": 1, "cells": []});
-        for slot in 0..4 {
-            four_big["cells"].as_array_mut().unwrap().push(json!({"slot": slot, "symbol": "IDX:001", "venue": null, "period": "D", "symbolLink": false,
-                "chartSettings": {"pad": "x".repeat(60_000)}}));
+        let mut biggest = json!({"id": "L4", "name": "가득", "sync": {}, "revision": 1, "placement": {"pad": "x".repeat(65_000)}, "windows": []});
+        for i in 0..8 {
+            let mut w = chart_window(&format!("c{i}"));
+            w["chartSettings"] = json!({"pad": "x".repeat(65_000)});
+            biggest["windows"].as_array_mut().unwrap().push(w);
         }
-        assert_eq!(put(&f.app, "/api/layouts/L4", &four_big).await.0, StatusCode::OK, "칸마다 64KB 아래면 합이 64KB를 넘어도 된다");
+        for kind in ["watchlist", "screener", "objects", "indicators"] {
+            biggest["windows"].as_array_mut().unwrap().push(json!({"id": kind, "link": "c", "kind": kind}));
+        }
+        assert_eq!(put(&f.app, "/api/layouts/L4", &biggest).await.0, StatusCode::OK, "창 12개, 차트 창 8개와 배치가 저마다 64KB 아래면 받는다");
 
         let (s, v) = json(&f.app, "/api/layouts/nope").await;
         assert_eq!((s, code(&v)), (StatusCode::NOT_FOUND, "not_found"));
@@ -849,15 +878,15 @@ mod tests {
     #[tokio::test]
     async fn layout_without_nxt_saves_before_the_symbol_list_arrives() {
         let f = live_fixture(false).await;
-        let mut body = two_cells("005930");
-        body["cells"][0]["venue"] = json!("combined");
+        let mut body = two_charts("005930");
+        body["windows"][0]["venue"] = json!("combined");
         assert_eq!(put(&f.app, "/api/layouts/L2", &body).await.0, StatusCode::OK);
     }
 
     #[tokio::test(start_paused = true)]
     async fn layout_with_nxt_waits_for_the_symbol_list() {
         let f = fixture(false, false).await;
-        let (s, v) = put(&f.app, "/api/layouts/L2", &two_cells("005930")).await;
+        let (s, v) = put(&f.app, "/api/layouts/L2", &two_charts("005930")).await;
         assert_eq!((s, code(&v)), (StatusCode::SERVICE_UNAVAILABLE, "kiwoom_unavailable"));
     }
 
@@ -1171,7 +1200,7 @@ mod tests {
         let screener_store = crate::screener::store::Store::open(&dir.path().join("screener.duckdb")).unwrap();
         let app = router(application(ApplicationInputs { rest: rest.clone(), clock, symbols: symbols.clone(), db, screener_store, stream: (stream, events), static_dir: dir.path().to_owned() }));
 
-        let nxt_layout = two_cells("005930");
+        let nxt_layout = two_charts("005930");
         let started = tokio::time::Instant::now();
         let (symbol, bar, layout, list) = tokio::join!(
             json(&app, "/api/symbols/005930"),

@@ -11,13 +11,15 @@ use axum::routing::get;
 use domain::{Symbol, Venue};
 use serde::de::DeserializeOwned;
 
-use crate::api::{self, ApiErrorCode, Layout, LayoutInput, LayoutSummary, Revision, Screen, Screens, UiState, UnixSeconds, Watchlist, Watchlists};
+use crate::api::{self, ApiErrorCode, Layout, LayoutInput, LayoutSummary, Revision, Screen, Screens, UiState, UnixSeconds, Watchlist, Watchlists, WindowContent};
 use crate::http::{ApiFailure, AppState, symbol_list};
 use crate::screener::{RunnableScreen, parse_screen};
 use crate::userdata::{self, StoreError, wire_name};
 
 pub const JSON_LIMIT: usize = 64 * 1024;
-pub const LAYOUT_LIMIT: usize = 4 * JSON_LIMIT + 16 * 1024;
+pub const MAX_WINDOWS: usize = 12;
+pub const MAX_CHART_WINDOWS: usize = 8;
+pub const LAYOUT_LIMIT: usize = (MAX_CHART_WINDOWS + 1) * JSON_LIMIT + 16 * 1024;
 
 pub fn routes() -> Router<Arc<AppState>> {
     Router::new()
@@ -204,8 +206,12 @@ async fn get_layout(State(st): State<Arc<AppState>>, Path(id): Path<String>) -> 
 
 async fn put_layout(State(st): State<Arc<AppState>>, Path(id): Path<String>, body: Body) -> Result<Json<Layout>, ApiFailure> {
     let input: LayoutInput = read_json(body, LAYOUT_LIMIT, "레이아웃 본문").await?;
-    if input.cells.iter().any(|c| c.chart_settings.to_string().len() > JSON_LIMIT) {
-        return Err(too_large("칸의 chartSettings", JSON_LIMIT));
+    let oversized_chart = input.windows.iter().any(|w| matches!(&w.content, WindowContent::Chart { chart_settings, .. } if chart_settings.to_string().len() > JSON_LIMIT));
+    if oversized_chart {
+        return Err(too_large("차트 창의 chartSettings", JSON_LIMIT));
+    }
+    if serde_json::to_string(&input.placement).expect("JSON 객체는 언제나 직렬화된다").len() > JSON_LIMIT {
+        return Err(too_large("placement", JSON_LIMIT));
     }
     let nxt = check_layout(&id, &input)?;
     if !nxt.is_empty() {
@@ -218,7 +224,7 @@ async fn put_layout(State(st): State<Arc<AppState>>, Path(id): Path<String>, bod
     Ok(Json(userdata::put_layout(&st.db, &input, now).await?))
 }
 
-/// 목록에 없는 주식은 막지 않는다. 상장폐지된 종목을 연 칸도 저장되어야 한다.
+/// 목록에 없는 주식은 막지 않는다. 상장폐지된 종목을 연 차트 창도 저장되어야 한다.
 fn check_layout(path_id: &str, input: &LayoutInput) -> Result<Vec<Symbol>, ApiFailure> {
     if input.id != path_id {
         return Err(ApiFailure::bad_request(format!("주소의 id({path_id})와 본문의 id({})가 다릅니다", input.id)));
@@ -226,22 +232,33 @@ fn check_layout(path_id: &str, input: &LayoutInput) -> Result<Vec<Symbol>, ApiFa
     if input.name.trim().is_empty() {
         return Err(ApiFailure::bad_request("레이아웃 이름이 비어 있습니다"));
     }
-    let n = input.arrangement.cell_count();
-    let slots: HashSet<usize> = input.cells.iter().map(|c| usize::from(c.slot)).collect();
-    if input.cells.len() != n || slots != (0..n).collect() {
-        return Err(ApiFailure::bad_request(format!("배치 {:?}에는 slot 0부터 {}까지 칸이 하나씩 있어야 합니다", input.arrangement, n - 1)));
+    if !(1..=MAX_WINDOWS).contains(&input.windows.len()) {
+        return Err(ApiFailure::bad_request(format!("창은 1~{MAX_WINDOWS}개여야 합니다: {}개", input.windows.len())));
+    }
+    let mut ids = HashSet::new();
+    if let Some(w) = input.windows.iter().find(|w| !ids.insert(&w.id)) {
+        return Err(ApiFailure::bad_request(format!("창 id가 겹칩니다: {}", w.id.as_str())));
+    }
+    let charts = input.windows.iter().filter(|w| w.content.is_chart()).count();
+    if !(1..=MAX_CHART_WINDOWS).contains(&charts) {
+        return Err(ApiFailure::bad_request(format!("차트 창은 1~{MAX_CHART_WINDOWS}개여야 합니다: {charts}개")));
+    }
+    let mut kinds = HashSet::new();
+    if let Some(w) = input.windows.iter().filter(|w| !w.content.is_chart()).find(|w| !kinds.insert(userdata::window_kind(&w.content))) {
+        return Err(ApiFailure::bad_request(format!("{} 창은 하나만 둘 수 있습니다", userdata::window_kind(&w.content))));
     }
     let mut nxt = Vec::new();
-    for c in &input.cells {
-        let symbol = parse_symbol(&c.symbol.0)?;
-        let venue = c.venue.map(|v| match v {
+    for w in &input.windows {
+        let WindowContent::Chart { symbol: code, venue, .. } = &w.content else { continue };
+        let symbol = parse_symbol(&code.0)?;
+        let venue = venue.map(|v| match v {
             api::Venue::Combined => Venue::Combined,
             api::Venue::Krx => Venue::Krx,
             api::Venue::Nxt => Venue::Nxt,
         });
         match (symbol, venue) {
-            (Symbol::Stock(_), None) => return Err(ApiFailure::bad_request(format!("주식 칸에는 거래소가 있어야 합니다: {}", c.symbol.0))),
-            (Symbol::Index(_), Some(_)) => return Err(ApiFailure::bad_request(format!("지수에는 거래소가 없습니다: {}", c.symbol.0))),
+            (Symbol::Stock(_), None) => return Err(ApiFailure::bad_request(format!("주식 차트 창에는 거래소가 있어야 합니다: {}", code.0))),
+            (Symbol::Index(_), Some(_)) => return Err(ApiFailure::bad_request(format!("지수에는 거래소가 없습니다: {}", code.0))),
             (Symbol::Stock(_), Some(Venue::Nxt)) => nxt.push(symbol),
             _ => {}
         }

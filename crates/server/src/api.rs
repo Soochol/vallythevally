@@ -429,33 +429,6 @@ pub struct Watchlists {
     pub revision: Revision,
 }
 
-/// 칸 배치. `2h` 좌우, `2v` 상하. #3은 `1`만 쓴다.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
-#[ts(export)]
-pub enum Arrangement {
-    #[serde(rename = "1")]
-    One,
-    #[serde(rename = "2h")]
-    TwoH,
-    #[serde(rename = "2v")]
-    TwoV,
-    #[serde(rename = "3")]
-    Three,
-    #[serde(rename = "4")]
-    Four,
-}
-
-impl Arrangement {
-    pub const fn cell_count(self) -> usize {
-        match self {
-            Arrangement::One => 1,
-            Arrangement::TwoH | Arrangement::TwoV => 2,
-            Arrangement::Three => 3,
-            Arrangement::Four => 4,
-        }
-    }
-}
-
 /// 칸 동기화. 저장된 값에 키가 빠져 있으면 true로 읽는다.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[ts(export)]
@@ -470,23 +443,80 @@ const fn yes() -> bool {
     true
 }
 
-/// 레이아웃의 칸 하나. 칸 = (종목, 거래소, 봉 주기, 차트 설정).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
-#[serde(rename_all = "camelCase")]
+pub const WINDOW_ID_BYTES: std::ops::RangeInclusive<usize> = 1..=64;
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
+#[serde(try_from = "String", into = "String")]
+#[ts(export, type = "string")]
+pub struct WindowId(String);
+
+impl WindowId {
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl TryFrom<String> for WindowId {
+    type Error = String;
+
+    fn try_from(text: String) -> Result<Self, String> {
+        let valid = WINDOW_ID_BYTES.contains(&text.len()) && text.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-');
+        if valid {
+            Ok(WindowId(text))
+        } else {
+            Err(format!("창 id는 {}~{}바이트의 A-Z a-z 0-9 _ -여야 합니다: {text:?}", WINDOW_ID_BYTES.start(), WINDOW_ID_BYTES.end()))
+        }
+    }
+}
+
+impl From<WindowId> for String {
+    fn from(id: WindowId) -> String {
+        id.0
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "lowercase")]
 #[ts(export)]
-pub struct Cell {
-    /// 0부터. 칸 수보다 작다.
-    #[ts(type = "0 | 1 | 2 | 3")]
-    pub slot: u8,
-    pub symbol: SymbolCode,
-    /// 지수면 null, 주식이면 언제나 값이 있다(ADR 0007).
-    pub venue: Option<Venue>,
-    pub period: Period,
-    /// 종목 연동(#7).
-    pub symbol_link: bool,
-    /// 프런트엔드가 모양을 정한다. 64KB 이하. 서버는 모르는 키까지 그대로 저장한다.
-    #[ts(type = "unknown")]
-    pub chart_settings: serde_json::Value,
+pub enum LinkColor {
+    A,
+    B,
+    C,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(tag = "kind", rename_all = "lowercase")]
+#[ts(export)]
+pub enum WindowContent {
+    Chart {
+        symbol: SymbolCode,
+        /// 지수면 null, 주식이면 언제나 값이 있다(ADR 0007).
+        venue: Option<Venue>,
+        period: Period,
+        /// 프런트엔드가 모양을 정한다. 64KB 이하. 서버는 모르는 키까지 그대로 저장한다.
+        #[serde(rename = "chartSettings")]
+        #[ts(type = "unknown")]
+        chart_settings: serde_json::Value,
+    },
+    Watchlist,
+    Screener,
+    Objects,
+    Indicators,
+}
+
+impl WindowContent {
+    pub const fn is_chart(&self) -> bool {
+        matches!(self, WindowContent::Chart { .. })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct LayoutWindow {
+    pub id: WindowId,
+    pub link: Option<LinkColor>,
+    #[serde(flatten)]
+    pub content: WindowContent,
 }
 
 /// `GET /api/layouts` → `LayoutSummary[]`(표시 순서).
@@ -496,7 +526,6 @@ pub struct Cell {
 pub struct LayoutSummary {
     pub id: String,
     pub name: String,
-    pub arrangement: Arrangement,
     pub updated_at: UnixSeconds,
 }
 
@@ -508,10 +537,10 @@ pub struct Layout {
     /// 브라우저가 만드는 UUID v7.
     pub id: String,
     pub name: String,
-    pub arrangement: Arrangement,
     pub sync: LayoutSync,
-    /// 길이는 arrangement의 칸 수와 같다. slot 0부터 차례로.
-    pub cells: Vec<Cell>,
+    pub windows: Vec<LayoutWindow>,
+    #[ts(type = "unknown")]
+    pub placement: serde_json::Map<String, serde_json::Value>,
     pub updated_at: UnixSeconds,
     pub revision: Revision,
 }
@@ -523,9 +552,10 @@ pub struct Layout {
 pub struct LayoutInput {
     pub id: String,
     pub name: String,
-    pub arrangement: Arrangement,
     pub sync: LayoutSync,
-    pub cells: Vec<Cell>,
+    pub windows: Vec<LayoutWindow>,
+    #[ts(type = "unknown")]
+    pub placement: serde_json::Map<String, serde_json::Value>,
     pub revision: Revision,
 }
 
@@ -1037,18 +1067,35 @@ mod tests {
 
     #[test]
     fn user_data_json_shape() {
-        let layout: LayoutInput = serde_json::from_value(json!({
-            "id": "01900000-0000-7000-8000-000000000001", "name": "기본", "arrangement": "1", "sync": {"scroll": false},
-            "cells": [{"slot": 0, "symbol": "005930", "venue": "nxt", "period": "5m", "symbolLink": false,
-                       "chartSettings": {"v": 1, "future": [1, 2]}}],
+        let body = json!({
+            "id": "01900000-0000-7000-8000-000000000001", "name": "기본", "sync": {"scroll": false},
+            "windows": [
+                {"id": "cell-0", "link": "a", "kind": "chart", "symbol": "005930", "venue": "nxt", "period": "5m",
+                 "chartSettings": {"v": 1, "future": [1, 2]}},
+                {"id": "watchlist", "link": null, "kind": "watchlist"}
+            ],
+            "placement": {"v": 1, "dock": null},
             "revision": 1_794_152_040_123_i64
-        }))
-        .unwrap();
+        });
+        let layout: LayoutInput = serde_json::from_value(body.clone()).unwrap();
         assert_eq!(layout.sync, LayoutSync { crosshair: true, scroll: false });
-        assert_eq!(layout.cells[0].venue, Some(Venue::Nxt));
-        assert_eq!(layout.cells[0].chart_settings, json!({"v": 1, "future": [1, 2]}));
-        assert_eq!(layout.arrangement.cell_count(), 1);
+        assert_eq!(layout.windows[0].link, Some(LinkColor::A));
+        let WindowContent::Chart { venue, chart_settings, .. } = &layout.windows[0].content else { panic!("{:?}", layout.windows[0]) };
+        assert_eq!(*venue, Some(Venue::Nxt));
+        assert_eq!(*chart_settings, json!({"v": 1, "future": [1, 2]}));
+        assert_eq!(layout.windows[1].content, WindowContent::Watchlist);
         assert_eq!(layout.revision, Revision(1_794_152_040_123), "Date.now() 크기의 ms도 정확히 받는다");
+        let mut expected = body.clone();
+        expected["sync"] = json!({"crosshair": true, "scroll": false});
+        assert_eq!(serde_json::to_value(&layout).unwrap(), expected);
+        for bad_id in ["", "a b", "창", &"x".repeat(65)] {
+            let mut bad = body.clone();
+            bad["windows"][1]["id"] = json!(bad_id);
+            assert!(serde_json::from_value::<LayoutInput>(bad).is_err(), "{bad_id:?}");
+        }
+        let mut list = body.clone();
+        list["placement"] = json!([]);
+        assert!(serde_json::from_value::<LayoutInput>(list).is_err(), "배치는 객체여야 한다");
 
         let ui: UiState = serde_json::from_value(json!({"lastLayoutId": null, "theme": "light", "watchCollapsed": true})).unwrap();
         assert_eq!(serde_json::to_value(&ui).unwrap(), json!({"lastLayoutId": null, "theme": "light", "watchCollapsed": true}));
