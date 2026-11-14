@@ -3,7 +3,7 @@ import { windowId, type WindowKind, type WindowRef } from "../kinds";
 import type { DockNode, DockPlacement } from "../placement";
 import { defaultDock } from "./fit";
 import { layoutDock, tabsMinSize, type DockSpace } from "./geometry";
-import { splitArea, splitGroup } from "./split";
+import { placeBeside, splitArea, splitGroup } from "./split";
 
 const ref = (id: string, kind: WindowKind): WindowRef => ({ id: windowId(id), kind });
 const group = (id: string, tabs: string[], active = tabs[0] ?? ""): DockNode => ({ kind: "group", id, tabs: tabs.map(windowId), active: windowId(active) });
@@ -97,4 +97,22 @@ test("나누기에 성공하면 모든 묶음이 최소 크기를 지킨다", ()
     if (!outcome.ok) throw new Error(outcome.reason);
     expect(undersized(outcome.dock.root, at)).toEqual([]);
   }
+});
+
+const fullSide = group("g2", ["w", "s", "o"]);
+
+test("옆에 놓기는 가로로 긴 묶음을 오른쪽으로, 세로로 긴 묶음을 아래로 나눈다", () => {
+  const wide = placeBeside(dock, windowId("c2"), windowId("c1"), space);
+  expect(wide.root).toMatchObject({ kind: "split", first: { kind: "split", dir: "row", first: group("g1", ["c1"]), second: group("g3", ["c2"]) }, second: fullSide });
+  const tall = placeBeside(dock, windowId("c2"), windowId("c1"), { ...space, area: { w: 700, h: 900 } });
+  expect(tall.root).toMatchObject({ kind: "split", first: { kind: "split", dir: "column", first: group("g1", ["c1"]), second: group("g3", ["c2"]) }, second: fullSide });
+});
+
+test("옆에 놓을 자리가 최소 크기보다 작으면 그 묶음의 탭으로 넣는다", () => {
+  const small: DockSpace = { ...space, area: { w: 700, h: 400 } };
+  expect(placeBeside(dock, windowId("c2"), windowId("c1"), small)).toEqual({ root: split("row", 0.72, group("g1", ["c1", "c2"], "c2"), fullSide), floats: [] });
+});
+
+test("옆에 둘 창이 묶음에 없으면 배치를 그대로 둔다", () => {
+  expect(placeBeside(dock, windowId("c2"), windowId("missing"), space)).toBe(dock);
 });

@@ -1,7 +1,7 @@
 import type { WindowId } from "../kinds";
 import type { DockNode, DockPlacement, Rect } from "../placement";
 import { heldMinSize, layoutDock, ratioForLead, tabsMinSize, wholePixels, type DockSpace, type Edge } from "./geometry";
-import { newGroupId, rewriteGroups, singleGroup, withoutWindow, type SplitNode } from "./tree";
+import { newGroupId, putTab, rewriteGroups, singleGroup, withoutWindow, type SplitNode } from "./tree";
 
 export type SplitResult = { ok: true; dock: DockPlacement } | { ok: false; reason: "too-small" };
 
@@ -44,4 +44,12 @@ export function splitArea(dock: DockPlacement, window: WindowId, edge: Edge, spa
   if (!rest) return { ok: true, dock };
   const split = splitBeside(rest.root, { x: 0, y: 0, ...px.area }, window, edge, newGroupId(rest.root), px);
   return split ? { ok: true, dock: { ...rest, root: split } } : { ok: false, reason: "too-small" };
+}
+
+export function placeBeside(dock: DockPlacement, window: WindowId, beside: WindowId, space: DockSpace): DockPlacement {
+  const px = wholePixels(space);
+  const box = layoutDock(dock.root, px.area, px.gap).groups.find(({ group }) => group.tabs.includes(beside));
+  if (!box) return dock;
+  const split = splitGroup(dock, window, box.group.id, box.rect.w > box.rect.h ? "right" : "bottom", space);
+  return split.ok ? split.dock : putTab(dock, window, box.group.id);
 }
