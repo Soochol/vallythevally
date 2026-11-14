@@ -68,9 +68,11 @@ describe("갠 팬", () => {
     expect(ofKind(draw(points, gannfan.parseStyle({ ...style, fill: { on: false, opacity: 0.08 } })), "polyline")).toEqual([]);
   });
 
-  test("이름 꼬리표는 원점에서 1×1 거리만큼 떨어진 곳에 적고 끌 수 있다", () => {
-    const label = ofKind(draw(points), "text").find((t) => t.text === "1×1");
-    expect(label).toMatchObject({ at: { x: 204, y: 300 }, align: "left" });
+  test("이름 꼬리표는 선이 지나는 격자점에 적고 끌 수 있다", () => {
+    const at = (name: string) => ofKind(draw(points), "text").find((t) => t.text === name)?.at;
+    expect(at("1×1")).toEqual({ x: 204, y: 300 });
+    expect(at("2×1")).toEqual({ x: 204, y: 200 });
+    expect(at("1×2")).toEqual({ x: 304, y: 300 });
     expect(ofKind(draw(points, gannfan.parseStyle({ ...style, labels: false })), "text")).toEqual([]);
   });
 

@@ -1,6 +1,6 @@
 import { at, DRAW, readBool, readRecord, readStroke, strokeFields } from "../styleKit";
 import { defineTool, type Shape } from "../toolSpec";
-import type { ScreenPoint, Stroke } from "../types";
+import type { Stroke } from "../types";
 import { type Band, fanRay, fanSide, fanWedge, pointHandles, readBand } from "./fibKit";
 import { cornerLabels, cornersOf } from "./rect";
 
@@ -74,7 +74,6 @@ export const gannfan = defineTool<GannFanStyle>({
     if (side === null) return [{ kind: "segment", a, b, stroke: style.line }];
     const dx = b.x - a.x;
     const dy = b.y - a.y;
-    const reach = Math.hypot(dx, dy);
     const lines = GANN_RATIOS.map((ratio) => ({ ratio, through: { x: a.x + dx * ratio.time, y: a.y + dy * ratio.price } }));
     const fill = { on: true, color: style.line.color, opacity: style.fill.opacity };
     const wedges: Shape[] = style.fill.on
@@ -84,14 +83,10 @@ export const gannfan = defineTool<GannFanStyle>({
         })
       : [];
     const rays = lines.map(({ through }) => fanRay(a, through, side, style.line));
-    const labelAt = (through: ScreenPoint): ScreenPoint => {
-      const length = Math.hypot(through.x - a.x, through.y - a.y);
-      return { x: a.x + ((through.x - a.x) * reach) / length + (side === "right" ? LABEL_GAP : -LABEL_GAP), y: a.y + ((through.y - a.y) * reach) / length };
-    };
     const labels: Shape[] = style.labels
       ? lines.map(({ ratio, through }) => ({
           kind: "text",
-          at: labelAt(through),
+          at: { x: through.x + (side === "right" ? LABEL_GAP : -LABEL_GAP), y: through.y },
           text: `${ratio.price}×${ratio.time}`,
           align: side === "right" ? "left" : "right",
           baseline: "middle",
