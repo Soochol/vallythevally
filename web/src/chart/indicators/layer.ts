@@ -205,19 +205,22 @@ export class IndicatorLayer {
   }
 
   prepend(h: History): void {
-    this.reset(h);
+    this.host.guard(() => this.load(h));
   }
 
   private resetNow(h: History): void {
-    this.history = h;
-    this.display = displayBars(h);
-    this.committedT = h.bars[h.bars.length - 1]?.t ?? null;
-    const visible = this.configs.filter((c) => c.visible);
     for (const s of this.shown.values()) {
       this.clearLines(s);
       if (s.config.visible) s.status = { kind: "pending" };
     }
-    this.create(visible);
+    this.load(h);
+  }
+
+  private load(h: History): void {
+    this.history = h;
+    this.display = displayBars(h);
+    this.committedT = h.bars[h.bars.length - 1]?.t ?? null;
+    this.create(this.configs.filter((c) => c.visible));
     for (const s of this.shown.values()) if (isFinancial(s.config.spec)) this.drawFinancial(s);
   }
 
