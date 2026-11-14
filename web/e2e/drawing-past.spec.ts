@@ -75,10 +75,10 @@ test("첫 점이 불러온 봉보다 한참 과거인 드로잉을 개체 목록
   expect(errors).toEqual([]);
 });
 
-test("화면에 보이는 과거 점이 있는 드로잉은 개체 목록에서 골라도 화면을 옮기지 않는다", async ({ page, scenario }) => {
+for (const [where, days] of [["화면 안", 60], ["화면 왼쪽 밖", 300]] as const) test(`첫 점이 ${where}의 과거 빈 곳인 드로잉은 개체 목록에서 골라도 화면을 옮기지 않는다`, async ({ page, scenario }) => {
   const recent = scenario.market.page({ symbol: SYMBOL, limit: 40 });
   const last = recent.bars.at(-1)!;
-  const trend: DrawingInput = { id: "01900000-0000-7000-8000-0000000000a4", symbol: SYMBOL, tool: "trendline", points: [{ t: recent.bars[0]!.t - 60 * 86_400, price: last.c }, { t: last.t + 400 * 86_400, price: last.c }], style: {}, text: null, locked: false, hidden: false, periods: null, z: 1, group: null, scope: { kind: "symbol" }, revision: 0 };
+  const trend: DrawingInput = { id: "01900000-0000-7000-8000-0000000000a4", symbol: SYMBOL, tool: "trendline", points: [{ t: recent.bars[0]!.t - days * 86_400, price: last.c }, { t: last.t + 400 * 86_400, price: last.c }], style: {}, text: null, locked: false, hidden: false, periods: null, z: 1, group: null, scope: { kind: "symbol" }, revision: 0 };
   scenario.documents.saveDrawing(trend);
   scenario.reply((url) => url.pathname === "/api/bars" && url.searchParams.get("symbol") === SYMBOL && !url.searchParams.has("before"), { body: recent });
   scenario.hold((url) => url.pathname === "/api/bars" && url.searchParams.get("symbol") === SYMBOL && url.searchParams.has("before"));
@@ -87,7 +87,7 @@ test("화면에 보이는 과거 점이 있는 드로잉은 개체 목록에서 
   await expect(chartOf(cell(page))).toHaveAttribute("data-first-bar-t", String(recent.bars[0]!.t));
   await page.getByRole("button", { name: "개체 목록 열기", exact: true }).click();
   const before = (await settledMirror(page)).find((m) => m.id === trend.id)!.points[0]!;
-  expect(before.x).toBeGreaterThan(0);
+  expect(before.x > 0).toBe(where === "화면 안");
   await page.getByRole("region", { name: "개체 목록" }).getByRole("button", { name: "고르기: 추세선", exact: true }).click();
   await expect.poll(async () => (await settledMirror(page)).find((m) => m.id === trend.id)?.selected).toBe(true);
   const after = (await settledMirror(page)).find((m) => m.id === trend.id)!.points[0]!;
