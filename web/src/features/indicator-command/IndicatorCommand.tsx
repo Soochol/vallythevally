@@ -10,7 +10,7 @@ import { stepIndex } from "../indicator-dialog/compareForm";
 import { CompareSection } from "./CompareSection";
 import { hasColor, panelLabel, primaryLabel } from "../indicator-dialog/indicatorForm";
 import { IndicatorSettingsForm } from "../indicator-dialog/IndicatorSettingsForm";
-import { candidateGroup, COMMAND_TABS, commandKey, type IndicatorCommandMode } from "./model";
+import { BELOW_GROUP, candidateGroup, COMMAND_TABS, commandKey, PRICE_GROUP, type IndicatorCommandMode } from "./model";
 import { useIndicatorCommand, useIndicatorDraft, type EditableRow, type EditorAction } from "./useIndicatorCommand";
 import type { WindowId } from "../../layout/kinds";
 
@@ -107,7 +107,7 @@ function IndicatorEditor({ row, cellId, actionRef, onCommitted }: { row: Editabl
   const focus = () => controls.current?.querySelector<HTMLElement>("button:not(:disabled),input:not(:disabled)")?.focus();
   const { cell, editing, draft, setDraft, validator, check, errors, valid, color, commit } = useIndicatorDraft(cellId, row, actionRef, focus);
   const kind = KINDS[draft.form.kind];
-  const place = editing ? panelLabel(cell.chartSettings.panels, editing.panel) : row.kind === "candidate" ? candidateGroup(row.candidate) : "";
+  const place = draft.placement === "price" ? PRICE_GROUP : editing && editing.panel !== "price" ? panelLabel(cell.chartSettings.panels, editing.panel) : row.kind === "candidate" ? candidateGroup(row.candidate) : BELOW_GROUP;
 
   return <aside ref={controls} className="flex min-h-0 flex-col gap-4 overflow-auto p-5">
     <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1">

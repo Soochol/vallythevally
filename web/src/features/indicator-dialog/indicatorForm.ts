@@ -5,11 +5,13 @@ import {
   type IndicatorKind,
   KINDS,
   colorLine,
+  type Placement,
+  placementsOf,
   type Validate,
   shownColor,
   specName,
 } from "../../chart/indicators/kinds";
-import { type IndicatorConfig, type LineWidth, type Panel, readSpecShape } from "../../chart/settings";
+import { barOpacityOf, DEFAULT_BAR_OPACITY, type IndicatorConfig, type LineWidth, type Panel, placementOfConfig, readSpecShape } from "../../chart/settings";
 
 export type { Validate };
 export interface FieldError {
@@ -27,6 +29,15 @@ export interface Draft {
   form: SpecForm;
   color: IndicatorColor | "auto";
   width: LineWidth;
+  placement: Placement;
+  barOpacity: number;
+}
+
+export const canOverlayPrice = (kind: IndicatorKind): boolean => placementsOf(kind).includes("price") && placementsOf(kind).includes("panel");
+export const hasBarOpacity = (kind: IndicatorKind): boolean => kind === "volume";
+
+export function draftStyle(draft: Draft, colors: IndicatorColor[]): IndicatorConfig["style"] {
+  return { colors, width: draft.width, ...(hasBarOpacity(draft.form.kind) ? { barOpacity: draft.barOpacity } : {}) };
 }
 
 export function formFromSpec(spec: IndicatorSpec): SpecForm {
@@ -48,9 +59,9 @@ export function formFromSpec(spec: IndicatorSpec): SpecForm {
 
 export function startDraft(editing: IndicatorConfig | null, kind: IndicatorKind): Draft {
   if (editing) {
-    return { form: formFromSpec(editing.spec), color: shownColor(editing.spec, editing.style.colors), width: editing.style.width };
+    return { form: formFromSpec(editing.spec), color: shownColor(editing.spec, editing.style.colors), width: editing.style.width, placement: placementOfConfig(editing), barOpacity: barOpacityOf(editing.style) };
   }
-  return { form: formFromSpec(KINDS[kind].defaults), color: "auto", width: 1 };
+  return { form: formFromSpec(KINDS[kind].defaults), color: "auto", width: 1, placement: KINDS[kind].place, barOpacity: DEFAULT_BAR_OPACITY };
 }
 
 const INT = /^\d+$/;

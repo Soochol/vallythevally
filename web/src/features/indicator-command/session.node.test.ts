@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { afterEach, beforeAll, beforeEach, expect, test, vi } from "vitest";
-import { colorsFrom } from "../../chart/indicators/kinds";
+import { colorsFrom, placementOf } from "../../chart/indicators/kinds";
 import { parseChartSettings, shownScale } from "../../chart/settings";
 import { startAutosave, type Autosave } from "../../persist/autosave";
 import { chartWindows, DEFAULT_LAYOUT, useLayoutStore } from "../../stores/layout";
@@ -33,7 +33,7 @@ function add(input: string) {
   expect(candidate.errors).toEqual([]);
   const checked = checkForm(candidate.form, (spec) => validateSpec(JSON.stringify(spec)));
   if (!checked.ok) throw new Error(JSON.stringify(checked.errors));
-  expect(executeCommand(CELL, { kind: "indicator", id: null, spec: checked.spec, style: { colors: colorsFrom(checked.spec, "ind-2"), width: 1 } })).toBe(true);
+  expect(executeCommand(CELL, { kind: "indicator", id: null, spec: checked.spec, style: { colors: colorsFrom(checked.spec, "ind-2"), width: 1 }, placement: placementOf(checked.spec) })).toBe(true);
 }
 
 test("입력으로 여러 지표를 계속 추가하고 확정한 설정만 저장·복원한다", async () => {
@@ -47,12 +47,12 @@ test("입력으로 여러 지표를 계속 추가하고 확정한 설정만 저�
 
 test("추가·편집 미리보기를 취소하면 원본 설정으로 돌아가고 autosave는 호출하지 않는다", async () => {
   const original = structuredClone(settings());
-  const preview = { kind: "add", id: "preview", panelId: "preview-pane", spec: { kind: "ma", method: "sma", period: 9 }, style: { colors: ["ind-2"], width: 5 } } as const;
+  const preview = { kind: "add", id: "preview", panelId: "preview-pane", spec: { kind: "ma", method: "sma", period: 9 }, style: { colors: ["ind-2"], width: 5 }, placement: "price" } as const;
   useIndicatorPreview.getState().set(CELL, { ...preview, style: { colors: ["ind-2"], width: 5 } });
   expect(previewSettings(settings(), useIndicatorPreview.getState().current!.preview).indicators.at(-1)?.spec).toEqual(preview.spec);
   await vi.advanceTimersByTimeAsync(5000);
   const current = settings().indicators[0]!;
-  useIndicatorPreview.getState().set(CELL, { kind: "edit", id: current.id, spec: { kind: "volume", maPeriod: 60 }, style: { colors: ["ind-3"], width: 3 } });
+  useIndicatorPreview.getState().set(CELL, { kind: "edit", id: current.id, panelId: "preview-pane", spec: { kind: "volume", maPeriod: 60 }, style: { colors: ["ind-3"], width: 3 }, placement: "panel" });
   expect(previewSettings(settings(), useIndicatorPreview.getState().current!.preview).indicators[0]?.spec).toEqual({ kind: "volume", maPeriod: 60 });
   useIndicatorPreview.getState().set(CELL, null);
   await vi.advanceTimersByTimeAsync(5000);
@@ -85,9 +85,9 @@ test("비교 종목 추가는 중복·현재 종목·4번째를 막고 % 축과 
 test("편집 확정은 기존 id에만 적용하고 삭제된 지표를 다시 만들지 않는다", () => {
   add("이평 5");
   const id = settings().indicators.at(-1)!.id;
-  expect(executeCommand(CELL, { kind: "indicator", id, spec: { kind: "ma", method: "sma", period: 9 }, style: { colors: ["ind-4"], width: 5 } })).toBe(true);
+  expect(executeCommand(CELL, { kind: "indicator", id, spec: { kind: "ma", method: "sma", period: 9 }, style: { colors: ["ind-4"], width: 5 }, placement: "price" })).toBe(true);
   expect(settings().indicators.at(-1)).toMatchObject({ id, spec: { kind: "ma", period: 9 }, style: { width: 5 } });
   useLayoutStore.getState().removeIndicator(CELL, id);
-  expect(executeCommand(CELL, { kind: "indicator", id, spec: { kind: "ma", method: "sma", period: 12 }, style: { colors: ["ind-4"], width: 5 } })).toBe(false);
+  expect(executeCommand(CELL, { kind: "indicator", id, spec: { kind: "ma", method: "sma", period: 12 }, style: { colors: ["ind-4"], width: 5 }, placement: "price" })).toBe(false);
   expect(settings().indicators).toHaveLength(1);
 });

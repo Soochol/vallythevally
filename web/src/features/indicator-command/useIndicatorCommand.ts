@@ -5,7 +5,7 @@ import { colorsFrom, shownColor } from "../../chart/indicators/kinds";
 import { useCell } from "../../stores/layout";
 import { useActiveWatchlist } from "../../stores/watchlist";
 import { addButton } from "../indicator-dialog/compareForm";
-import { checkForm, nextColor, startDraft, type Draft } from "../indicator-dialog/indicatorForm";
+import { checkForm, draftStyle, nextColor, startDraft, type Draft } from "../indicator-dialog/indicatorForm";
 import { useValidator } from "../indicator-dialog/IndicatorSettingsForm";
 import { normalizeQuery } from "../search/highlight";
 import { searchList } from "../search/searchList";
@@ -60,16 +60,16 @@ export function useIndicatorDraft(cellId: WindowId, row: EditableRow, actionRef:
   const valid = check.ok && errors.length === 0;
   const color = draft.color === "auto" ? nextColor(cell.chartSettings.indicators) : draft.color;
   const colors = editing && color === shownColor(editing.spec, editing.style.colors) ? editing.style.colors : check.spec ? colorsFrom(check.spec, color) : [];
-  const style = { colors, width: draft.width };
+  const style = draftStyle(draft, colors);
 
   useEffect(() => {
-    useIndicatorPreview.getState().set(cellId, valid && check.spec ? editing ? { kind: "edit", id: editing.id, spec: check.spec, style } : { kind: "add", id: previewIds[0], panelId: previewIds[1], spec: check.spec, style } : null);
+    useIndicatorPreview.getState().set(cellId, valid && check.spec ? { kind: editing ? "edit" : "add", id: editing?.id ?? previewIds[0], panelId: previewIds[1], spec: check.spec, style, placement: draft.placement } : null);
   }, [draft, validator, cell.chartSettings.indicators, cellId]);
   useEffect(() => () => useIndicatorPreview.getState().set(cellId, null), [cellId]);
 
   const commitNow = () => {
     if (!valid || !check.spec) return false;
-    const committed = executeCommand(cellId, { kind: "indicator", id: editing?.id ?? null, spec: check.spec, style });
+    const committed = executeCommand(cellId, { kind: "indicator", id: editing?.id ?? null, spec: check.spec, style, placement: draft.placement });
     if (committed && !editing) setDraft((draft) => ({ ...draft, color: "auto" }));
     return committed;
   };

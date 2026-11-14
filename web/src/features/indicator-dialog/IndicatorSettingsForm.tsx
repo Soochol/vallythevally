@@ -2,10 +2,10 @@ import { useEffect, useId, useState } from "react";
 import type { MaMethod } from "../../api/generated/MaMethod";
 import { INDICATOR_COLORS, indicatorCssColor, KINDS, type IndicatorColor, type IndicatorToken } from "../../chart/indicators/kinds";
 import { loadValidator } from "../../chart/indicators/validate";
-import type { LineWidth } from "../../chart/settings";
+import { BAR_OPACITY_MAX, BAR_OPACITY_MIN, type LineWidth } from "../../chart/settings";
 import { Errors, Row, Segment } from "../dialog/DialogParts";
 import { ColorTable, type ThemeSwatch } from "../color/ColorTable";
-import { hasColor, placeErrors, type Draft, type FieldError, type Validate } from "./indicatorForm";
+import { canOverlayPrice, hasBarOpacity, hasColor, placeErrors, type Draft, type FieldError, type Validate } from "./indicatorForm";
 
 const METHODS = [
   ["sma", "단순"],
@@ -22,6 +22,8 @@ const WIDTHS = [
 const PERIOD_PRESETS = ["5", "20", "60", "120"] as const;
 
 const THEME_SWATCHES: readonly ThemeSwatch<IndicatorToken>[] = INDICATOR_COLORS.map((token, i) => ({ name: `테마 ${i + 1}`, value: token, css: indicatorCssColor(token) }));
+
+const percent = (opacity: number) => Math.round(opacity * 100);
 
 const NUMBER_INPUT =
   "ui-field w-24 disabled:opacity-50";
@@ -112,6 +114,19 @@ export function IndicatorSettingsForm({ draft, color, errors, onChange, lineSamp
             </Row>
           );
         })}
+        {canOverlayPrice(kind) && <Row label="패널">
+          <button type="button" role="switch" aria-checked={draft.placement === "price"} aria-describedby={`${ids}-overlay`} className="ui-switch min-h-[30px] text-s" onClick={() => onChange({ ...draft, placement: draft.placement === "price" ? "panel" : "price" })}>
+            <span className="flex-1 text-left">가격 패널에 겹치기</span>
+            <span aria-hidden="true" className="ui-switch-track"><span /></span>
+          </button>
+          <p id={`${ids}-overlay`} className="text-xs text-text-3">거래량을 봉 아래쪽에 겹쳐 그립니다. 끄면 별도 패널</p>
+        </Row>}
+        {hasBarOpacity(kind) && <Row label="막대 불투명도" labelFor={`${ids}-opacity`}>
+          <span className="flex min-h-[30px] min-w-0 items-center gap-2">
+            <input id={`${ids}-opacity`} type="range" min={BAR_OPACITY_MIN * 100} max={BAR_OPACITY_MAX * 100} step={1} value={percent(draft.barOpacity)} aria-valuetext={`${percent(draft.barOpacity)}%`} className="min-w-0 flex-1 accent-[var(--accent)]" onChange={(e) => onChange({ ...draft, barOpacity: Number(e.target.value) / 100 })} />
+            <output htmlFor={`${ids}-opacity`} className="w-10 flex-none text-right text-s tabular-nums text-text-2">{percent(draft.barOpacity)}%</output>
+          </span>
+        </Row>}
       </section>
       {lined && <section aria-labelledby={`${ids}-line`} className="flex min-w-0 flex-col gap-3">
         <h4 id={`${ids}-line`} className="text-xs text-text-3">선</h4>
