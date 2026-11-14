@@ -25,24 +25,38 @@ export function dockMinSize(node: DockNode, space: Pick<DockSpace, "gap" | "wind
     : { w: Math.max(first.w, second.w), h: first.h + second.h + space.gap };
 }
 
-export function heldMinSize(node: DockNode, space: Pick<DockSpace, "gap" | "windows">): Size {
-  if (node.kind === "group") return tabsMinSize(space.windows, node.tabs);
-  const first = heldMinSize(node.first, space);
-  const second = heldMinSize(node.second, space);
-  const along = (firstMin: number, secondMin: number) =>
-    Math.max(Math.ceil((firstMin + space.gap) / node.ratio), Math.ceil((secondMin + space.gap) / (1 - node.ratio))) - space.gap;
-  return node.dir === "row"
-    ? { w: along(first.w, second.w), h: Math.max(first.h, second.h) }
-    : { w: Math.max(first.w, second.w), h: along(first.h, second.h) };
-}
-
 export const leadLength = (ratio: number, along: number, gap: number): number =>
   Math.max(0, Math.min(along, Math.round(ratio * (along + gap)) - gap));
 
 export const ratioForLead = (lead: number, along: number, gap: number): number => (lead + gap) / (along + gap);
 
+function splitFits(ratio: number, along: number, gap: number, firstMin: number, secondMin: number): boolean {
+  const lead = leadLength(ratio, along, gap);
+  return lead >= firstMin && along - lead - Math.min(gap, along - lead) >= secondMin;
+}
+
+const ROUNDING_STEPS = 3;
+
+function leastAlong(ratio: number, gap: number, firstMin: number, secondMin: number): number {
+  const floor = firstMin + gap + secondMin;
+  let along = Math.max(floor, Math.ceil((firstMin + gap - 0.5) / ratio) - gap, Math.floor((secondMin + gap - 0.5) / (1 - ratio)) + 1 - gap);
+  for (let step = 0; step < ROUNDING_STEPS && along > floor && splitFits(ratio, along - 1, gap, firstMin, secondMin); step += 1) along -= 1;
+  for (let step = 0; step < ROUNDING_STEPS && !splitFits(ratio, along, gap, firstMin, secondMin); step += 1) along += 1;
+  return along;
+}
+
+export function heldMinSize(node: DockNode, space: Pick<DockSpace, "gap" | "windows">): Size {
+  if (node.kind === "group") return tabsMinSize(space.windows, node.tabs);
+  const first = heldMinSize(node.first, space);
+  const second = heldMinSize(node.second, space);
+  return node.dir === "row"
+    ? { w: leastAlong(node.ratio, space.gap, first.w, second.w), h: Math.max(first.h, second.h) }
+    : { w: Math.max(first.w, second.w), h: leastAlong(node.ratio, space.gap, first.h, second.h) };
+}
+
 export function wholePixels<T extends Pick<DockSpace, "area" | "gap">>(space: T): T {
-  return { ...space, area: { w: Math.max(0, Math.floor(space.area.w)), h: Math.max(0, Math.floor(space.area.h)) }, gap: Math.max(0, Math.round(space.gap)) };
+  const whole = (length: number, round: (x: number) => number) => (Number.isFinite(length) ? Math.max(0, round(length)) : 0);
+  return { ...space, area: { w: whole(space.area.w, Math.floor), h: whole(space.area.h, Math.floor) }, gap: whole(space.gap, Math.round) };
 }
 
 export type GroupBox = { group: GroupNode; rect: Rect };
@@ -81,7 +95,7 @@ export type DividerResult = { dock: DockPlacement; clamped: boolean };
 export function moveDivider(dock: DockPlacement, path: SplitPath, ratio: number, space: DockSpace): DividerResult {
   const px = wholePixels(space);
   const box = layoutDock(dock.root, px.area, px.gap).gutters.find((gutter) => gutter.path.join() === path.join());
-  if (!box || !Number.isFinite(ratio)) return { dock, clamped: false };
+  if (!box || Number.isNaN(ratio)) return { dock, clamped: false };
   const row = box.node.dir === "row";
   const along = row ? box.bounds.w : box.bounds.h;
   const firstMin = heldMinSize(box.node.first, px);

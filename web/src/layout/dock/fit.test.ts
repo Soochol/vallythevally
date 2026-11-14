@@ -81,7 +81,7 @@ test("묶음의 고른 탭이 탭에 없으면 첫 탭으로 고친다", () => {
 
 test("모든 묶음이 사라지면 떠 있지 않은 창으로 기본 배치를 만들고 떠 있는 창은 둔다", () => {
   expect(fitDock({ root: group("g9", ["gone"]), floats: [float("w")] }, [c1, w, s])).toEqual({ root: row(0.72, group("g1", ["c1"]), group("g2", ["s"])), floats: [float("w")] });
-  expect(fitDock({ root: group("g9", ["gone"]), floats: [float("c1"), float("w")] }, [c1, w])).toEqual(defaultDock([c1, w]));
+  expect(fitDock({ root: group("g9", ["gone"]), floats: [float("c1"), float("w")] }, [c1, w])).toEqual({ root: group("g1", ["c1"]), floats: [float("w")] });
 });
 
 test("맞출 것이 없으면 받은 배치를 그대로 돌려준다", () => {

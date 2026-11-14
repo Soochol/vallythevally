@@ -69,7 +69,7 @@ test("하나뿐인 탭을 다른 묶음에 나눠 놓으면 빈 묶음은 사라
 test("작업 영역의 가장자리에 놓으면 트리 전체 옆에 새 묶음을 둔다", () => {
   const rest = split("row", 0.72, group("g1", ["c1"]), sideRest);
   expect(splitArea(dock, windowId("s"), "bottom", space)).toEqual({ ok: true, dock: { root: split("column", 0.5, rest, group("g3", ["s"])), floats: [] } });
-  expect(splitArea(dock, windowId("s"), "left", space)).toEqual({ ok: true, dock: { root: split("row", 454 / 1262, group("g3", ["s"]), rest), floats: [] } });
+  expect(splitArea(dock, windowId("s"), "left", space)).toEqual({ ok: true, dock: { root: split("row", 456 / 1262, group("g3", ["s"]), rest), floats: [] } });
   expect(splitArea(dock, windowId("s"), "right", { ...space, area: { w: 600, h: 684 } })).toEqual({ ok: false, reason: "too-small" });
 });
 

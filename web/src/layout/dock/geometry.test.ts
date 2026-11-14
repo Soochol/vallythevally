@@ -1,7 +1,7 @@
 import { expect, test } from "vitest";
 import { windowId, type WindowKind, type WindowRef } from "../kinds";
 import type { DockNode, DockPlacement, Rect } from "../placement";
-import { dockMinSize, dropTarget, layoutDock, moveDivider, tabsMinSize, type DockSpace } from "./geometry";
+import { dockMinSize, dropTarget, heldMinSize, layoutDock, moveDivider, tabsMinSize, type DockSpace } from "./geometry";
 
 const ref = (id: string, kind: WindowKind): WindowRef => ({ id: windowId(id), kind });
 const group = (id: string, tabs: string[]): DockNode => ({ kind: "group", id, tabs: tabs.map(windowId), active: windowId(tabs[0] ?? "") });
@@ -102,4 +102,39 @@ test("소수 px 영역과 간격에서도 멈춘 쪽이 최소 크기를 지킨�
     expect(result.clamped).toBe(true);
     expect(undersized(result.dock.root, fractional)).toEqual([]);
   }
+});
+
+test("비율을 둔 최소 크기는 모든 묶음이 들어가는 가장 작은 폭과 같다", () => {
+  const row = (ratio: number, first: DockNode, second: DockNode): DockNode => ({ kind: "split", dir: "row", ratio, first, second });
+  const trees = [
+    row(0.6445, group("g1", ["c1"]), group("g2", ["w"])),
+    row(0.766568848490715, row(0.5433138398220763, group("g1", ["s"]), group("g2", ["c1"])), group("g3", ["o"])),
+    row(0.72, group("g1", ["c1"]), row(1 / 3, group("g2", ["w"]), row(0.5, group("g3", ["s"]), group("g4", ["o"])))),
+  ];
+  for (const gap of [0, 6, 7]) {
+    for (const node of trees) {
+      const at: DockSpace = { ...space, gap, area: { w: 0, h: 684 } };
+      const fits = (w: number) => undersized(node, { ...at, area: { w, h: 684 } }).length === 0;
+      const least = heldMinSize(node, at).w;
+      expect({ gap, least, fits: fits(least), below: fits(least - 1) }).toEqual({ gap, least, fits: true, below: false });
+    }
+  }
+});
+
+test("경계는 최소 크기가 허락하는 끝까지 간다", () => {
+  const nested: DockPlacement = {
+    root: { kind: "split", dir: "row", ratio: 706 / 931, first: { kind: "split", dir: "row", ratio: 0.6445, first: group("g1", ["c1"]), second: group("g2", ["w"]) }, second: group("g3", ["c2"]) },
+    floats: [],
+  };
+  const narrow: DockSpace = { ...space, area: { w: 925, h: 567 } };
+  const result = moveDivider(nested, [], 0.0001, narrow);
+  expect(result.clamped).toBe(true);
+  expect(layoutDock(result.dock.root, narrow.area, narrow.gap).groups.map((box) => box.rect.w)).toEqual([403, 220, 290]);
+});
+
+test("무한대 비율은 끝까지 밀고, 크기를 모르는 영역에서는 비율을 바꾸지 않는다", () => {
+  const pushed = moveDivider(dock, [], Infinity, space);
+  expect(pushed.clamped).toBe(true);
+  expect(layoutDock(pushed.dock.root, space.area, space.gap).groups[2]?.rect.w).toBe(280);
+  for (const w of [NaN, Infinity]) expect(moveDivider(dock, [], 0.5, { ...space, area: { w, h: 684 } })).toEqual({ dock, clamped: true });
 });

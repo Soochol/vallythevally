@@ -62,7 +62,10 @@ export function fitDock(dock: DockPlacement | null, windows: WindowList): DockPl
   const missing = windows.filter((window) => !placed.has(window.id));
   if (!kept) {
     const [first, ...more] = missing;
-    return first ? { root: defaultDock([first, ...more]).root, floats } : defaultDock(windows);
+    if (first) return { root: defaultDock([first, ...more]).root, floats };
+    const [docked, ...stillFloating] = floats;
+    const dockedRef = docked && windows.find((window) => window.id === docked.window);
+    return dockedRef ? { root: defaultDock([dockedRef]).root, floats: stillFloating } : defaultDock(windows);
   }
   const root = missing.reduce((node, window) => insertMissing(node, window, windows), kept);
   return root === dock.root && floats.length === dock.floats.length ? dock : { root, floats };
