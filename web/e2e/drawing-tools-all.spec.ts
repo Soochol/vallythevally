@@ -237,7 +237,9 @@ test("도구 막대: 단축키가 없는 도구는 제목과 메뉴에 빈 단�
       await expect(bar.getByRole("button", { name: tool.label, exact: true })).not.toHaveAttribute("title", /\(\)/);
     }
   }
-  for (const [, tools] of menuGroups()) for (const tool of tools) await expect(bar.getByRole("button", { name: `${tool.label} 고정 도구`, exact: true })).not.toHaveAttribute("title", /\(\)/);
+  const pinned = bar.getByRole("button", { name: /고정 도구$/ });
+  await expect(pinned.first()).toBeVisible();
+  for (const button of await pinned.all()) await expect(button).not.toHaveAttribute("title", /\(\)/);
 });
 
 test("도구 막대: 단축키로 고른 도구를 그룹 버튼이 기억한다", async ({ page }) => {
