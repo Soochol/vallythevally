@@ -1,6 +1,7 @@
-.drawing-toolbar { position:absolute; left:50%; top:var(--size-8); z-index:10; transform:translateX(-50%); display:flex; align-items:center; gap:2px; --dock-reserve:11rem; max-width:calc(100% - var(--dock-reserve)); min-width:11rem; padding:5px; border-radius:var(--r-pill); color:var(--text-2); overflow-x:auto; overflow-y:hidden; scrollbar-width:none; }
+.drawing-toolbar { position:absolute; left:50%; --dock-home-top:var(--size-8); top:var(--dock-home-top); z-index:10; transform:translateX(-50%); display:flex; align-items:center; gap:2px; --dock-reserve:11rem; max-width:calc(100% - var(--dock-reserve)); min-width:11rem; padding:5px; border-radius:var(--r-pill); color:var(--text-2); overflow-x:auto; overflow-y:hidden; scrollbar-width:none; }
 @property --dock-reserve { syntax:"<length>"; inherits:false; initial-value:0px; }
 .drawing-toolbar[data-pinned] { transform:translateX(var(--dock-shift, -50%)); max-width:var(--dock-max, calc(100% - var(--dock-reserve))); }
+.drawing-toolbar[data-moved] { left:var(--dock-left, 50%); top:var(--dock-top, var(--dock-home-top)); transform:none; max-width:var(--dock-max, calc(100% - 2 * var(--island-gap))); }
 .drawing-toolbar>* { flex-shrink:0; }
 .draw-pinned { display:flex; align-items:center; gap:inherit; }
 .draw-tool { display:grid; place-items:center; width:32px; height:32px; border-radius:var(--r-pill); color:var(--text-2); cursor:pointer; }

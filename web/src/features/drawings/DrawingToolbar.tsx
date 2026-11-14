@@ -17,6 +17,8 @@ import { menuIndex } from "../overlay/position";
 import { toolOf } from "../../chart/drawings/tools";
 import { isTypingTarget } from "../../lib/hotkeys";
 import type { DrawingTool } from "../../chart/drawings/types";
+import type { DockAt } from "../../chart/drawings/prefs";
+import { DOCK_STEP, clampSpot, settleSpot, spotOf, type Size, type Spot } from "./dockSpot";
 
 const hotkeysOf = (tool: DrawingTool) => TOOL_HOTKEYS.filter((h) => h.tool === tool).map((h) => h.keys);
 function toolTitle(tool: Tool, note?: string) {
@@ -34,7 +36,7 @@ export function DrawingToolbar() {
   const helpButton = useRef<HTMLButtonElement>(null);
   const pinnedRun = useRef<HTMLDivElement>(null);
   const pinnedTools = prefs.pinnedTools.flatMap((id) => toolOf(id) ?? []);
-  const shownPins = usePinnedFit(root, pinnedRun, pinnedTools.length);
+  const { shown: shownPins, moved, controls: dock } = useDockPlacement(root, pinnedRun, pinnedTools.length, prefs.dockAt);
   const [lastTools, setLastTools] = useState<Partial<Record<Tool["group"], Tool>>>({});
   useEffect(() => { const tool = active && toolOf(active); if (tool) setLastTools((s) => ({ ...s, [tool.group]: tool })); }, [active]);
   useEffect(() => {
@@ -43,13 +45,23 @@ export function DrawingToolbar() {
     };
     window.addEventListener("keydown", key); return () => window.removeEventListener("keydown", key);
   }, []);
-  useLegendClearance(root);
+  useLegendClearance(root, moved);
   const setTool = (tool: Tool) => { useDrawingSession.getState().setTool(tool.tool); surfaceFor(cellId)?.focus(); };
   const setPrefs = useUiStore.getState().setDrawingPrefs;
   const action = (f: () => void) => { f(); surfaceFor(cellId)?.focus(); };
   const pinnedButton = (tool: Tool) => <button key={tool.tool} className="draw-tool" data-active-tool aria-label={`${tool.label} 고정 도구`} title={toolTitle(tool, "고정")} aria-pressed={active === tool.tool} onClick={() => setTool(tool)} onDoubleClick={() => action(() => useDrawingSession.getState().setTool(tool.tool, true))}><Icon path={tool.icon} /></button>;
   const folded = pinnedTools.slice(shownPins);
-  return <nav ref={root} data-chart-control data-pinned={pinnedTools.length > 0 || undefined} aria-label="드로잉 도구" className="drawing-toolbar ui-island max-md:hidden">
+  return <nav ref={root} data-chart-control data-pinned={pinnedTools.length > 0 || undefined} data-moved={moved || undefined} aria-label="드로잉 도구" className="drawing-toolbar ui-island max-md:hidden">
+    <button type="button" className="draw-grip" aria-label="드로잉 도구 막대 옮기기" title="끌어서 막대 옮기기 · 두 번 누르면 기본 자리"
+      onPointerDown={(e) => { if (e.button !== 0) return; e.preventDefault(); e.stopPropagation(); e.currentTarget.setPointerCapture(e.pointerId); dock.grab(e.clientX, e.clientY); }}
+      onPointerMove={(e) => dock.drag(e.clientX, e.clientY)} onPointerUp={() => dock.drop()} onPointerCancel={() => dock.cancel()}
+      onDoubleClick={() => dock.reset()}
+      onKeyDown={(e) => {
+        if (e.nativeEvent.isComposing || e.ctrlKey || e.metaKey || e.altKey) return;
+        if (e.key === "Home") dock.reset();
+        else if (!dock.nudge(e.key)) return;
+        e.preventDefault(); e.stopPropagation();
+      }}><Icon path={DRAWING_ICONS.grip} /></button>
     <button className="draw-tool" data-active-tool aria-label="선택 도구" title="선택 (V)" aria-pressed={active === null && mode === null} onClick={() => action(() => useDrawingSession.getState().setTool(null))}><Icon path={DRAWING_ICONS.pointer} /></button>
     {[...toolsByGroup()].map(([group, tools]) => {
       const t = tools.find((tool) => tool.tool === active) ?? lastTools[group] ?? tools[0]!;
@@ -69,7 +81,7 @@ export function DrawingToolbar() {
     <button className="draw-tool" aria-label="연속 그리기" title="연속 그리기" aria-pressed={prefs.keepDrawing} onClick={() => action(() => setPrefs({ keepDrawing: !prefs.keepDrawing }))}><Icon path={DRAWING_ICONS.keepDrawing} /></button>
     <div className="draw-toolbar-end"><button className="draw-tool" aria-label="개체 목록 열기" title="개체 목록" onClick={() => useLayoutStore.getState().showWindow("objects")}><Icon path={DRAWING_ICONS.objects} /></button>
       <button ref={helpButton} className="draw-tool" aria-label="드로잉 단축키 도움말" title="드로잉 단축키" onClick={() => setHelp(!help)}>?</button></div>
-    {help && <Popover anchor={helpButton} placement="bottom" onClose={() => setHelp(false)} className="drawing-help" role="dialog" aria-label="드로잉 단축키"><div className="draw-dialog-head"><strong>드로잉 단축키</strong><button className="icon-btn" aria-label="도움말 닫기" onClick={() => setHelp(false)}><CloseIcon /></button></div>{gestureHelp(registeredModes()).map((h) => <p key={h.keys}><kbd>{h.keys}</kbd><span>{h.label}</span></p>)}</Popover>}
+    {help && <Popover anchor={helpButton} follow placement="bottom" onClose={() => setHelp(false)} className="drawing-help" role="dialog" aria-label="드로잉 단축키"><div className="draw-dialog-head"><strong>드로잉 단축키</strong><button className="icon-btn" aria-label="도움말 닫기" onClick={() => setHelp(false)}><CloseIcon /></button></div>{gestureHelp(registeredModes()).map((h) => <p key={h.keys}><kbd>{h.keys}</kbd><span>{h.label}</span></p>)}</Popover>}
   </nav>;
 }
 
@@ -88,11 +100,15 @@ function legendMeetsBar(legend: Element, bar: DOMRect, shift: number) {
   });
 }
 
-function useLegendClearance(root: RefObject<HTMLElement | null>) {
+function useLegendClearance(root: RefObject<HTMLElement | null>, moved: boolean) {
   useEffect(() => {
     const bar = root.current;
     const stage = bar?.parentElement;
     if (!bar || !stage) return;
+    if (moved) {
+      stage.style.setProperty("--legend-shift", "0px");
+      return () => stage.style.removeProperty("--legend-shift");
+    }
     let watchedLegend: Element | null = null;
     let shifted = false;
     const update = (layoutChanged: boolean) => {
@@ -114,44 +130,108 @@ function useLegendClearance(root: RefObject<HTMLElement | null>) {
       observer.disconnect();
       stage.style.removeProperty("--legend-shift");
     };
-  }, [root]);
+  }, [root, moved]);
 }
 
-function usePinnedFit(root: RefObject<HTMLElement | null>, run: RefObject<HTMLElement | null>, count: number) {
+interface DockLayout { area: Size; bar: Size; home: Spot; spot: Spot; margin: number }
+
+const ARROW_STEPS: Record<string, [number, number]> = { ArrowLeft: [-DOCK_STEP, 0], ArrowRight: [DOCK_STEP, 0], ArrowUp: [0, -DOCK_STEP], ArrowDown: [0, DOCK_STEP] };
+
+const saveDockAt = (dockAt: DockAt | null) => useUiStore.getState().setDrawingPrefs({ dockAt });
+
+function useDockPlacement(root: RefObject<HTMLElement | null>, run: RefObject<HTMLElement | null>, count: number, at: DockAt | null) {
   const [room, setRoom] = useState(Infinity);
+  const [held, setHeld] = useState(false);
+  const live = useRef<Spot | null>(null);
+  const grab = useRef<{ x: number; y: number; start: Spot; travelled: boolean } | null>(null);
+  const layout = useRef<DockLayout | null>(null);
+  const place = useRef(() => {});
+  const moved = at !== null || held;
   useLayoutEffect(() => {
     const bar = root.current;
     const stage = bar?.parentElement;
-    if (!bar || !stage || count === 0) return;
+    if (!bar || !stage) return;
     const fit = () => {
-      const pinned = run.current;
-      const first = pinned?.firstElementChild;
-      if (!pinned || !(first instanceof HTMLElement)) return;
       const style = getComputedStyle(bar);
       const gap = parseFloat(style.columnGap);
-      const slot = first.offsetWidth + gap;
-      const base = bar.offsetWidth - bar.clientWidth + bar.scrollWidth - pinned.offsetWidth - gap;
-      const center = parseFloat(style.left);
-      const end = 2 * center - parseFloat(style.getPropertyValue("--dock-reserve")) / 2;
+      const edge = parseFloat(style.getPropertyValue("--island-gap"));
+      const margin = parseFloat(style.getPropertyValue("--dock-home-top"));
+      const reserve = parseFloat(style.getPropertyValue("--dock-reserve"));
+      const pinned = run.current;
+      const first = pinned?.firstElementChild;
+      const slot = count > 0 && first instanceof HTMLElement ? first.offsetWidth + gap : 0;
+      const base = bar.offsetWidth - bar.clientWidth + bar.scrollWidth - (slot > 0 && pinned ? pinned.offsetWidth + gap : 0);
+      const area = { width: stage.clientWidth, height: stage.clientHeight };
+      const center = area.width / 2;
+      const end = area.width - reserve / 2;
       const resting = center - base / 2;
-      const slots = Math.max(1, Math.floor((end - resting - base) / slot));
-      const fits = Math.min(count, slots);
-      const left = Math.max(parseFloat(style.getPropertyValue("--island-gap")), Math.min(resting, end - base - fits * slot));
-      bar.style.setProperty("--dock-shift", `${left - center}px`);
-      bar.style.setProperty("--dock-max", `${end - left}px`);
-      setRoom(slots);
+      const slotsWithin = (max: number) => slot > 0 ? Math.max(1, Math.floor((max - base) / slot)) : 0;
+      const homeSlots = slotsWithin(end - resting);
+      const homeLeft = slot > 0 ? Math.max(edge, Math.min(resting, end - base - Math.min(count, homeSlots) * slot)) : center - Math.min(base, area.width - reserve) / 2;
+      const home = { left: homeLeft, top: margin };
+      if (!moved) {
+        if (slot > 0) {
+          bar.style.setProperty("--dock-shift", `${homeLeft - center}px`);
+          bar.style.setProperty("--dock-max", `${end - homeLeft}px`);
+          setRoom(homeSlots);
+        }
+        layout.current = { area, bar: { width: bar.offsetWidth, height: bar.offsetHeight }, home, spot: home, margin };
+        return;
+      }
+      const max = area.width - 2 * edge;
+      const slots = slotsWithin(max);
+      const size = { width: Math.min(max, base + Math.min(count, slots) * slot), height: bar.offsetHeight };
+      const spot = clampSpot(live.current ?? (at ? spotOf(at, area, size) : home), area, size, margin);
+      bar.style.setProperty("--dock-left", `${spot.left}px`);
+      bar.style.setProperty("--dock-top", `${spot.top}px`);
+      bar.style.setProperty("--dock-max", `${max}px`);
+      if (slot > 0) setRoom(slots);
+      layout.current = { area, bar: size, home, spot, margin };
     };
+    place.current = fit;
     const observer = new ResizeObserver(fit);
     observer.observe(bar);
     observer.observe(stage);
     fit();
     return () => {
       observer.disconnect();
-      bar.style.removeProperty("--dock-shift");
-      bar.style.removeProperty("--dock-max");
+      for (const name of ["--dock-shift", "--dock-max", "--dock-left", "--dock-top"]) bar.style.removeProperty(name);
     };
-  }, [root, run, count]);
-  return Math.min(room, count);
+  }, [root, run, count, at, moved]);
+  const settle = (spot: Spot) => {
+    const l = layout.current;
+    if (l) saveDockAt(settleSpot(spot, l.home, l.area, l.bar));
+  };
+  const release = () => { grab.current = null; live.current = null; setHeld(false); };
+  const controls = {
+    grab(x: number, y: number) {
+      const bar = root.current; const stage = bar?.parentElement;
+      if (!bar || !stage) return;
+      const own = bar.getBoundingClientRect(); const box = stage.getBoundingClientRect();
+      grab.current = { x, y, start: { left: own.left - box.left - stage.clientLeft, top: own.top - box.top - stage.clientTop }, travelled: false };
+    },
+    drag(x: number, y: number) {
+      const g = grab.current;
+      if (!g) return;
+      if (!g.travelled) { g.travelled = true; setHeld(true); }
+      live.current = { left: g.start.left + x - g.x, top: g.start.top + y - g.y };
+      place.current();
+    },
+    drop() {
+      const travelled = grab.current?.travelled;
+      if (travelled) { place.current(); const spot = layout.current?.spot; if (spot) settle(spot); }
+      release();
+    },
+    cancel: release,
+    nudge(key: string) {
+      const step = ARROW_STEPS[key]; const l = layout.current;
+      if (!step || !l) return false;
+      settle(clampSpot({ left: l.spot.left + step[0], top: l.spot.top + step[1] }, l.area, l.bar, l.margin));
+      return true;
+    },
+    reset: () => saveDockAt(null),
+  };
+  return { shown: Math.min(room, count), moved, controls };
 }
 
 function ToolGroup({ label, tools, onChoose, pinnable = true }: { label: string; tools: readonly Tool[]; onChoose(tool: Tool): void; pinnable?: boolean }) {
