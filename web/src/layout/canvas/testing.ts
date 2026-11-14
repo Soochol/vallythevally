@@ -33,6 +33,7 @@ export function expectInside(rect: Rect, area: Area) {
 export function expectPlacementInvariants(placement: CanvasPlacement, windows: readonly WindowRef[], area: Area) {
   const ids = windows.map(({ id }) => id);
   expect(Object.keys(placement.rects).sort()).toEqual([...ids].sort());
+  ids.forEach((id) => expect(Object.hasOwn(placement.rects, id)).toBe(true));
   expect([...placement.order].sort()).toEqual([...ids].sort());
   for (const rect of Object.values(placement.rects)) {
     for (const value of [rect.x, rect.y, rect.w, rect.h]) expect(Number.isFinite(value)).toBe(true);
@@ -41,6 +42,7 @@ export function expectPlacementInvariants(placement: CanvasPlacement, windows: r
   }
   const drawn = rectsForArea(placement, windows, area);
   expect(Object.keys(drawn).sort()).toEqual([...ids].sort());
+  Object.values(drawn).forEach((rect) => [rect.x, rect.y, rect.w, rect.h].forEach((value) => expect(Number.isFinite(value)).toBe(true)));
   Object.values(drawn).forEach((rect) => expectHeadInArea(rect, area));
 }
 

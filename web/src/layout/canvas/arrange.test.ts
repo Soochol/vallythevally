@@ -3,7 +3,7 @@ import { windowId } from "../kinds";
 import type { CanvasPlacement, Rect } from "../placement";
 import { bringToFront, fitCanvas, placeNewWindow, rectsForArea, tidyWindows } from "./arrange";
 import { countOverlaps, minWindowSize, toPx, toRatio, type Area } from "./geometry";
-import { area, AREA, expectHeadInArea, expectInside, expectRectClose, win, WINDOWS } from "./testing";
+import { area, AREA, expectHeadInArea, expectInside, expectPlacementInvariants, expectRectClose, win, WINDOWS } from "./testing";
 
 const id = windowId;
 const ratio = (rect: Rect) => toRatio(rect, AREA);
@@ -75,6 +75,19 @@ describe("창 목록에 맞추기", () => {
   test("그릴 수 없는 사각형은 새 창의 자리로 다시 놓는다", () => {
     const huge: CanvasPlacement = { ...stored, rects: { ...stored.rects, [id("w")]: { x: 0.1, y: 0.1, w: 1e306, h: 0.5 } } };
     expectRectClose(toPx(fitCanvas(huge, two, AREA).rects[id("w")]!, AREA), { x: 468, y: 108, w: 320, h: 400 });
+  });
+
+  test("작업 영역과 상관없이 비율이 터무니없이 큰 사각형은 다시 놓는다", () => {
+    const huge: CanvasPlacement = { rects: { [id("c1")]: { x: 0, y: 0, w: 1e306, h: 0.5 } }, order: [id("c1")] };
+    const fitted = fitCanvas(huge, [win("c1", "chart")], area(1, 1));
+    expectPlacementInvariants(fitted, [win("c1", "chart")], AREA);
+  });
+
+  test.each(["constructor", "toString", "__proto__", "hasOwnProperty"])("창 id가 %s여도 사각형을 하나 갖는다", (raw) => {
+    const windows = [win("c1", "chart"), win(raw, "watchlist")];
+    const only: CanvasPlacement = { rects: { [id("c1")]: stored.rects[id("c1")]! }, order: [id("c1")] };
+    expectPlacementInvariants(fitCanvas(only, windows, AREA), windows, AREA);
+    expectPlacementInvariants(fitCanvas(null, windows, AREA), windows, AREA);
   });
 
   test("작업 영역 밖에 있는 사각형은 저장값을 그대로 두고 창 머리가 영역 안에 오게 그린다", () => {

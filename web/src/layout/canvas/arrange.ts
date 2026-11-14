@@ -62,7 +62,7 @@ export function tidyWindows(windows: readonly WindowRef[], area: Area): { rects:
   const columns = chartColumns.length + sideColumns.length;
   const gap = Math.min(WINDOW_GAP, area.w / (2 * columns));
   const widths = columnWidths(chartColumns.length, sideColumns.length, gap, area);
-  const rects: Record<WindowId, Rect> = {};
+  const rects = new Map<WindowId, Rect>();
   let undersized = 0;
   let x = 0;
   const lay = (column: Column, w: number) => {
@@ -71,7 +71,7 @@ export function tidyWindows(windows: readonly WindowRef[], area: Area): { rects:
     for (const window of column.windows) {
       const min = minWindowSize(window.kind);
       const h = min.h + extra;
-      rects[window.id] = { x, y, w, h };
+      rects.set(window.id, { x, y, w, h });
       if (w < min.w - MIN_SIZE_TOLERANCE || h < min.h - MIN_SIZE_TOLERANCE) undersized++;
       y += h + WINDOW_GAP;
     }
@@ -79,13 +79,15 @@ export function tidyWindows(windows: readonly WindowRef[], area: Area): { rects:
   };
   chartColumns.forEach((column) => lay(column, widths.chart));
   sideColumns.forEach((column) => lay(column, widths.side));
-  return { rects, undersized };
+  return { rects: Object.fromEntries(rects), undersized };
 }
 
-const drawable = (rect: Rect, area: Area): boolean => {
-  const px = toPx(rect, area);
-  return [px.x, px.y, px.w, px.h].every(Number.isFinite) && px.w > 0 && px.h > 0;
-};
+const MAX_RATIO = 1e4;
+
+const drawable = (rect: Rect): boolean =>
+  [rect.x, rect.y, rect.w, rect.h].every((value) => Math.abs(value) <= MAX_RATIO) && rect.w > 0 && rect.h > 0;
+
+const storedRect = (placement: CanvasPlacement, id: WindowId): Rect | undefined => (Object.hasOwn(placement.rects, id) ? placement.rects[id] : undefined);
 
 const sameOrder = (a: readonly WindowId[], b: readonly WindowId[]): boolean => a.length === b.length && a.every((id, i) => id === b[i]);
 
@@ -98,23 +100,23 @@ export function fitCanvas(placement: CanvasPlacement | null, windows: readonly W
     };
   }
   const listed = new Set(windows.map(({ id }) => id));
-  const rects: Record<WindowId, Rect> = {};
+  const rects = new Map<WindowId, Rect>();
   let changed = false;
   for (const [key, rect] of Object.entries(placement.rects) as [WindowId, Rect][]) {
-    if (listed.has(key) && drawable(rect, area)) rects[key] = rect;
+    if (listed.has(key) && drawable(rect)) rects.set(key, rect);
     else changed = true;
   }
-  const order = [...new Set(placement.order)].filter((id) => listed.has(id) && rects[id]);
+  const order = [...new Set(placement.order)].filter((id) => rects.has(id));
   for (const { id, kind } of windows) {
     if (order.includes(id)) continue;
-    if (!rects[id]) {
-      const others = Object.values(rects).map((rect) => toPx(rect, area));
-      rects[id] = toRatio(placeNewWindow(kind, others, area), area);
+    if (!rects.has(id)) {
+      const others = [...rects.values()].map((rect) => toPx(rect, area));
+      rects.set(id, toRatio(placeNewWindow(kind, others, area), area));
       changed = true;
     }
     order.push(id);
   }
-  return changed || !sameOrder(order, placement.order) ? { rects, order } : placement;
+  return changed || !sameOrder(order, placement.order) ? { rects: Object.fromEntries(rects), order } : placement;
 }
 
 export function bringToFront(placement: CanvasPlacement, id: WindowId): CanvasPlacement {
@@ -124,16 +126,16 @@ export function bringToFront(placement: CanvasPlacement, id: WindowId): CanvasPl
 }
 
 export function rectsForArea(placement: CanvasPlacement, windows: readonly WindowRef[], area: Area): Record<WindowId, Rect> {
-  const drawn: Record<WindowId, Rect> = {};
+  const drawn = new Map<WindowId, Rect>();
   for (const { id, kind } of windows) {
-    const stored = placement.rects[id];
+    const stored = storedRect(placement, id);
     if (!stored) continue;
     const px = toPx(stored, area);
     const min = minWindowSize(kind);
     const w = Math.max(px.w, min.w);
     const h = Math.max(px.h, min.h);
     const grown = w === px.w && h === px.h ? px : { x: clamp(px.x, Math.min(px.x, 0), area.w - w), y: clamp(px.y, Math.min(px.y, 0), area.h - h), w, h };
-    drawn[id] = keepHeadInArea(grown, area);
+    drawn.set(id, keepHeadInArea(grown, area));
   }
-  return drawn;
+  return Object.fromEntries(drawn);
 }
