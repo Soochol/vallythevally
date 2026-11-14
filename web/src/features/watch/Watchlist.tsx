@@ -618,7 +618,7 @@ function WatchRow({ list, row, index, last, columns, template, variant, editing,
       >
         <span className={`min-w-0 ${variant === "desktop" ? "flex items-baseline gap-1" : ""} ${unknown ? "opacity-50" : ""}`}>
           <b title={name} className={variant === "desktop" ? "min-w-0 shrink-0 max-w-full truncate font-[550]" : "block truncate font-[550]"}>{name}</b>
-          <small className={`${variant === "desktop" ? "w-0 min-w-0 grow truncate" : ""} text-xs text-text-3`}>{symbolSub(code, info)}</small>
+          {symbolSub(code, info) !== code && <small className={`${variant === "desktop" ? "w-0 min-w-0 grow truncate" : ""} text-xs text-text-3`}>{symbolSub(code, info)}</small>}
         </span>
         {unknown ? (
           columns.length > 0 && (

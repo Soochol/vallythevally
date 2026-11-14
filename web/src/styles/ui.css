@@ -53,7 +53,7 @@
 .desktop-topbar .tb-sep { margin-inline:var(--size-4); }
 .app-brand { display:flex; align-items:center; gap:var(--size-4); padding-right:var(--size-4); font-size:var(--fs-m); font-weight:720; }
 .app-brand svg { color:var(--accent); }
-.desktop-topbar .shell-symbol { flex:0 1 auto; min-width:0; max-width:var(--size-228); background:var(--hover); }
+.desktop-topbar .shell-symbol { flex:0 1 var(--size-228); width:var(--size-228); min-width:0; background:var(--hover); }
 .desktop-topbar .shell-search { border:var(--size-1) solid var(--line); color:var(--text-3); }
 .shell-search kbd { padding-inline:var(--size-4); }
 @media (width < 48rem) { .desktop-topbar { display:none; } }
