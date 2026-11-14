@@ -345,3 +345,28 @@ test("고정 도구가 있는 막대도 화살표 한 번에 16px씩 옮기고, 
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
   expectSameSpot(await settledDock(page), dropped);
 });
+
+test("위아래에 자리가 없는 드로잉의 스타일 막대는 겹치지 않는 옮긴 막대를 따라 움직이지 않는다", async ({ page }) => {
+  await page.addInitScript(installChartProbe);
+  await open(page);
+  await pickTool(page, "선", "추세선");
+  const chart = (await chartOf(cell(page)).boundingBox())!;
+  const paneHeight = await page.evaluate(() => window.chartProbe.chart.panes()[0]!.getHeight());
+  const a = await chartPoint(page, 0.72, 0.03);
+  const b = { x: (await chartPoint(page, 0.88, 0)).x, y: chart.y + paneHeight - 12 };
+  await page.mouse.move(a.x, a.y); await page.mouse.down();
+  await page.mouse.move(b.x, b.y, { steps: 10 }); await page.mouse.up();
+  const style = page.getByRole("toolbar", { name: "드로잉 스타일" });
+  await expect(style).toBeVisible();
+  const area = await chartArea(page);
+  const tops: number[] = [];
+  for (const fy of [0.1, 0.5, 0.9]) {
+    const bar = await moveTo(page, () => ({ x: area.x, y: area.y + fy * area.height }));
+    let last = "";
+    await expect.poll(async () => { const now = JSON.stringify(await style.boundingBox()); const same = now === last; last = now; return same; }).toBe(true);
+    const box = (await style.boundingBox())!;
+    expect(box.x).toBeGreaterThan(bar.x + bar.width);
+    tops.push(Math.round(box.y));
+  }
+  expect(new Set(tops).size).toBe(1);
+});

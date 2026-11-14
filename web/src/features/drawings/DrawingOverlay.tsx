@@ -82,10 +82,11 @@ function FloatingBar({ cellId }: { cellId: WindowId }) {
       const below = (bounds?.y2 ?? 60) + 14;
       const dock = dockBox(root.current);
       const lowest = pane.height - h - 8;
-      const fits = (y: number) => y >= 8 && y <= lowest && (!dock || clearOfDock(dock, x, y, w, h));
+      const within = (y: number) => Math.max(8, Math.min(y, lowest));
+      const clear = (y: number) => !dock || clearOfDock(dock, x, y, w, h);
       const top = Math.max(48, (dock?.bottom ?? 0) + 8);
-      const y = saved ? Math.max(8, Math.min(saved.y, lowest))
-        : dock?.moved ? Math.max(8, Math.min([above, below, dock.bottom + DOCK_CLEARANCE, dock.top - h - DOCK_CLEARANCE].find(fits) ?? above, lowest))
+      const y = saved ? within(saved.y)
+        : dock?.moved ? [above, below].find((y) => y === within(y) && clear(y)) ?? [within(above), within(below), within(dock.bottom + DOCK_CLEARANCE), within(dock.top - h - DOCK_CLEARANCE)].find(clear) ?? within(above)
         : Math.max(top, Math.min(Math.max(top, above < top ? below : above), lowest));
       const last = lastSpot.current; lastSpot.current = { x, y };
       setPosition((old) => old && Math.abs(old.x - x) < 0.5 && Math.abs(old.y - y) < 0.5 ? old : { x, y });
