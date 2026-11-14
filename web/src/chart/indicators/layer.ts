@@ -204,16 +204,26 @@ export class IndicatorLayer {
     this.host.guard(() => this.resetNow(h));
   }
 
+  prepend(h: History): void {
+    this.host.guard(() => {
+      this.load(h);
+      this.redrawPriceOverlays();
+    });
+  }
+
   private resetNow(h: History): void {
-    this.history = h;
-    this.display = displayBars(h);
-    this.committedT = h.bars[h.bars.length - 1]?.t ?? null;
-    const visible = this.configs.filter((c) => c.visible);
     for (const s of this.shown.values()) {
       this.clearLines(s);
       if (s.config.visible) s.status = { kind: "pending" };
     }
-    this.create(visible);
+    this.load(h);
+  }
+
+  private load(h: History): void {
+    this.history = h;
+    this.display = displayBars(h);
+    this.committedT = h.bars[h.bars.length - 1]?.t ?? null;
+    this.create(this.configs.filter((c) => c.visible));
     for (const s of this.shown.values()) if (isFinancial(s.config.spec)) this.drawFinancial(s);
   }
 
@@ -571,6 +581,15 @@ export class IndicatorLayer {
   private overlayPoint(pt: Point): OverlayPoint {
     const main = this.display[firstAtOrAfter(this.display, pt.t)];
     return { time: toChartTime(pt.t), value: pt.v, base: main?.t === pt.t ? main.c : pt.v };
+  }
+
+  private redrawPriceOverlays(): void {
+    for (const s of this.shown.values()) if (usesWorker(s.config)) {
+      for (const line of s.lines) if (line.priceOverlay && line.points.length) {
+        this.queue.forget(line);
+        this.draw(line, line.points);
+      }
+    }
   }
 
   private rebaseLeadingSpans(): void {

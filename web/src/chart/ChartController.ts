@@ -645,7 +645,7 @@ export class ChartController {
     if (added === 0) return this.updateIntradayEnd();
     this.withDataGuard(() => preserveTimeRange(this.chart.timeScale(), this.period(), () => {
       this.setBars(displayBars(h));
-      this.indicators.reset(h);
+      this.indicators.prepend(h);
     }));
     if (this.financialHoverTime !== null) this.hoverIndex = this.bars.findIndex((bar) => bar.t === this.financialHoverTime);
     this.compare.coverFrom(this.leftT());

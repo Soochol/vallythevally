@@ -557,3 +557,112 @@ test.each([true, false])("worker가 고장 나도 기본 거래량의 초기·�
   expect(f.layer.rows(current.t).map(row => row.state)).toEqual(["ok", "calc"]);
   expect(f.active.at(-1)?.data).toEqual(volumeRows([...bars, current]));
 });
+
+const OLDER = range(-10, -1).map((m) => bar(m));
+const EXTENDED: Draws = { conversion: set(range(-10, 19), 2), base: set(range(-10, 19), 2), spanA: set(range(-5, 24), 2), spanB: set(range(-5, 24), 2), lagging: set(range(-10, 14), 2) };
+const realPoints = (f: Fixture) => perLine((id) => f.line(id).data.filter((r) => r.value !== undefined).map((r) => ({ time: r.time, value: r.value })));
+const expectedPoints = (draws: Draws) => perLine((id) => {
+  const d = draws[id];
+  return d?.op === "set" ? d.points.map((p) => ({ time: toChartTime(p.t), value: p.v })) : [];
+});
+
+const HIDDEN_MA: IndicatorConfig = { id: "hiddenMa", spec: { kind: "ma", method: "sma", period: 5 }, panel: "price", visible: false, style: { colors: ["ind-2"], width: 1 } };
+
+const RSI: IndicatorConfig = { id: "rsi", spec: { kind: "rsi", period: 5, signal: null }, panel: "r", visible: true, style: { colors: ["ind-3"], width: 1 } };
+
+function prependedAfterFirstDraw() {
+  const f = fixture("1m", [ICHIMOKU, HIDDEN_MA, RSI, VOLUME], [{ id: "r", stretch: 0.25 }, ...VOLUME_PANELS]);
+  f.layer.reset(history(CONFIRMED));
+  f.reply(created(1));
+  f.reply({ type: "created", chart: 1, results: [{ id: RSI.id, gen: 1, ok: true, lines: [{ id: "rsi", shift: 0 }], draws: [set(range(5, 19), 50)] }] });
+  f.layer.flush();
+  const pointsBefore = realPoints(f);
+  const rsiLine = f.series[LINES.length + 1]!;
+  const rsiBefore = rsiLine.data;
+  const allSetsBefore = f.series.map((s) => s.setDataCalls);
+  const legendBefore = f.layer.rows(at(10))[0];
+  f.layer.prepend(history([...OLDER, ...CONFIRMED]));
+  const drawnAfterPrepend = perLine((id) => f.line(id).data);
+  const setsAfterPrepend = perLine((id) => f.line(id).setDataCalls);
+  const emptySetsInPrepend = f.series.flatMap((s, i) => s.sets.slice(allSetsBefore[i])).filter((rows) => rows.length === 0).length;
+  return { ...f, pointsBefore, rsiLine, rsiBefore, drawnAfterPrepend, emptySetsInPrepend, hiddenLine: f.series[LINES.length]!, volumeLine: f.series.at(-1)!, legendBefore, request: latestCreate(f), setsSincePrepend: () => perLine((id) => f.line(id).setDataCalls - setsAfterPrepend[id]) };
+}
+
+test("과거 페이지를 붙이는 동안 워커 지표의 선과 범례 값은 직전 그대로이고, 새 세대 응답이 오면 선마다 한 번에 바꾼다", () => {
+  const f = prependedAfterFirstDraw();
+
+  expect(realPoints(f)).toEqual(f.pointsBefore);
+  expect(perLine((id) => f.line(id).data[0])).toEqual(perLine(() => ({ time: toChartTime(OLDER[0]!.t), base: OLDER[0]!.c })));
+  expect(f.emptySetsInPrepend).toBe(0);
+  expect(f.rsiBefore.map((r) => r.value)).toEqual(range(5, 19).map(() => 50));
+  expect(f.rsiLine.data).toEqual(f.rsiBefore);
+  expect(f.layer.rows(at(10)).find((row) => row.id === RSI.id)).toMatchObject({ state: "ok", values: [{ text: "50.00" }] });
+  expect(f.hiddenLine.data).toEqual([]);
+  expect(f.layer.rows(at(10))[1]).toMatchObject({ id: HIDDEN_MA.id, state: "hidden", values: [] });
+  expect(f.legendBefore).toMatchObject({ state: "ok" });
+  expect(f.legendBefore?.values.map((v) => v.text)).not.toContain("—");
+  expect(f.layer.rows(at(10))[0]).toEqual(f.legendBefore);
+  expect(f.sent.filter((m) => m.type === "create").map((m) => m.type === "create" && m.gen)).toEqual([1, f.request.gen]);
+  expect(f.request.gen).toBeGreaterThan(1);
+  expect(Array.from(f.request.cols.t)).toEqual([...OLDER, ...CONFIRMED].map((b) => b.t));
+  expect(f.request.engines).toEqual([ICHIMOKU, RSI].map((c) => ({ id: c.id, spec: JSON.stringify(c.spec) })));
+  expect(f.volumeLine.data).toEqual(volumeRows([...OLDER, ...CONFIRMED]));
+
+  f.reply(created(1, { conversion: set(range(0, 19), 9), base: set(range(0, 19), 9), spanA: set(range(5, 24), 9), spanB: set(range(5, 24), 9), lagging: set(range(0, 14), 9) }));
+  f.reply(tail(1, { conversion: update(20, 9), base: update(20, 9), spanA: update(25, 9), spanB: update(25, 9), lagging: update(15, 9) }));
+  f.layer.flush();
+  expect(perLine((id) => f.line(id).data)).toEqual(f.drawnAfterPrepend);
+  expect(f.layer.rows(at(10))[0]).toEqual(f.legendBefore);
+
+  f.reply(created(f.request.gen, EXTENDED));
+  f.layer.flush();
+  expect(f.setsSincePrepend()).toEqual(perLine(() => 1));
+  expect(realPoints(f)).toEqual(expectedPoints(EXTENDED));
+  expect(f.layer.rows(at(-5))[0]).toMatchObject({ state: "ok" });
+  expect(f.layer.rows(at(-5))[0]?.values.map((v) => v.text)).not.toContain("—");
+});
+
+test("과거 페이지를 붙인 뒤 새 세대가 실패하면 오류로 바꾸고 선을 비운다", () => {
+  const f = prependedAfterFirstDraw();
+  f.reply({ type: "created", chart: 1, results: [{ id: ICHIMOKU.id, gen: f.request.gen, ok: false, error: "calc", message: "failed" }] });
+
+  expect(f.layer.rows(at(10))[0]).toMatchObject({ state: "calc", values: [] });
+  expect(perLine((id) => f.line(id).data)).toEqual(perLine(() => []));
+  expect(f.volumeLine.data).toEqual(volumeRows([...OLDER, ...CONFIRMED]));
+});
+
+test("과거 페이지를 붙인 뒤 종목을 바꾸면 다른 종목의 응답이 올 때까지 지표 선을 비운다", () => {
+  const f = prependedAfterFirstDraw();
+  f.layer.clear();
+  expect(perLine((id) => f.line(id).data)).toEqual(perLine(() => []));
+  const other = range(100, 119).map((m) => bar(m, 105));
+  f.layer.reset(history(other));
+
+  expect(perLine((id) => f.line(id).data)).toEqual(perLine(() => []));
+  expect(f.layer.rows(at(110))[0]?.state).toBe("pending");
+  f.reply(created(f.request.gen, EXTENDED));
+  expect(perLine((id) => f.line(id).data)).toEqual(perLine(() => []));
+  expect(f.volumeLine.data).toEqual(volumeRows(other));
+});
+
+test("그리지 않은 실시간 갱신이 남은 채 과거 페이지를 붙여도, 다음 프레임은 거부되는 갱신 없이 그 점들을 그대로 보인다", () => {
+  const f = fixture();
+  f.layer.reset(history(CONFIRMED));
+  f.reply(created(1));
+  f.layer.flush();
+  const live = bar(21);
+  const previous = bar(20);
+  const confirmed = [...CONFIRMED, previous];
+  f.layer.advance(history(confirmed), previous, "confirmed");
+  f.reply(tail(1, { conversion: update(20, 7) }));
+  f.layer.advance(history(confirmed, live), live, "live");
+  f.reply(tail(1, { conversion: update(21, 8) }));
+  expect(f.sent.filter((m) => m.type === "create")).toHaveLength(1);
+
+  f.layer.prepend(history([...OLDER, ...confirmed], live));
+  f.layer.flush();
+
+  expect(f.series.flatMap((s) => s.rejected)).toEqual([]);
+  expect(consoleError).not.toHaveBeenCalled();
+  expect(f.line("conversion").data.slice(-2)).toEqual([drawn(20, 7, close(20)), drawn(21, 8, close(21))]);
+});
