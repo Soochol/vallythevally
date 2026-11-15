@@ -124,6 +124,7 @@ test("드로잉 도구는 활성 칸 위쪽 가운데의 도크이고 고른 도
   expect(menuBox.y).toBeGreaterThanOrEqual(docked.y + docked.height);
   await page.screenshot({ path: info.outputPath("1440-dock.png") });
   await menu.getByRole("menuitem", { name: /수평선/ }).click();
+  await expandDock(page);
   await expect(dock(page).getByRole("button", { name: "수평선", exact: true })).toHaveAttribute("aria-pressed", "true");
 });
 
