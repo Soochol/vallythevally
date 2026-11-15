@@ -245,6 +245,12 @@ impl StockQuotes {
             stk_cd: codes.iter().map(|c| kiwoom_stock_code(*c, venue)).collect::<Vec<_>>().join("|"),
         })
     }
+
+    pub fn of_venues(rows: &[(StockCode, Venue)]) -> Option<Self> {
+        (1..=Self::MAX).contains(&rows.len()).then(|| StockQuotes {
+            stk_cd: rows.iter().map(|(c, v)| kiwoom_stock_code(*c, *v)).collect::<Vec<_>>().join("|"),
+        })
+    }
 }
 
 impl sealed::Sealed for StockQuotes {}
@@ -376,6 +382,8 @@ mod tests {
         assert!(StockQuotes::new(&many[..100], Venue::Krx).is_some());
         assert!(StockQuotes::new(&many, Venue::Krx).is_none(), "101개는 1634로 거절된다");
         assert!(StockQuotes::new(&[], Venue::Combined).is_none());
+        let mixed = StockQuotes::of_venues(&[(codes[0], Venue::Nxt), (codes[1], Venue::Combined), (codes[0], Venue::Krx)]).unwrap();
+        assert_eq!(serde_json::to_value(mixed).unwrap(), json!({"stk_cd": "005930_NX|000660_AL|005930"}));
     }
 
     #[test]

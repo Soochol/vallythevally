@@ -359,10 +359,10 @@ pub struct QuoteRow {
     pub trde_prica: String,
 }
 
-/// ka10095 한 행의 통합 시세. 가격은 centi(원 × 100)다. 거래정지 종목은 현재가가 0일 수 있어 `Price`가 아니다.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct StockQuote {
     pub code: StockCode,
+    pub venue: Venue,
     pub price_centi: u64,
     /// 기준가(`base_pric`). 등락은 현재가 − 기준가다(backend.md §4.6 "현재가의 등락").
     pub base_centi: u64,
@@ -370,7 +370,6 @@ pub struct StockQuote {
     pub at: KstTime,
 }
 
-/// 빈 행(없는 코드, NXT 불가 종목의 `_NX`, kiwoom.md §12.4)과 통합(`_AL`)이 아닌 행은 뺀다.
 pub fn parse_quotes(body: StockQuotesResponse) -> Vec<StockQuote> {
     body.atn_stk_infr
         .iter()
@@ -469,7 +468,11 @@ fn parse_krx_quote_row(r: &QuoteRow) -> Result<KrxDayQuote, WireError> {
 }
 
 fn parse_quote_row(r: &QuoteRow) -> Result<StockQuote, WireError> {
-    let code = r.stk_cd.strip_suffix("_AL").ok_or_else(|| WireError(format!("통합 시세(_AL)가 아닙니다: {:?}", r.stk_cd)))?;
+    let (code, venue) = match (r.stk_cd.strip_suffix("_AL"), r.stk_cd.strip_suffix("_NX")) {
+        (Some(code), _) => (code, Venue::Combined),
+        (_, Some(code)) => (code, Venue::Nxt),
+        _ => (r.stk_cd.as_str(), Venue::Krx),
+    };
     let code = StockCode::parse(code).map_err(|e| WireError(format!("{e}: {:?}", r.stk_cd)))?;
     let won = |s: &str| unsigned(s)?.checked_mul(100).ok_or_else(|| WireError(format!("가격이 너무 큽니다: {s:?}")));
     let (price_centi, base_centi) = (won(&r.cur_prc)?, won(&r.base_pric)?);
@@ -485,7 +488,7 @@ fn parse_quote_row(r: &QuoteRow) -> Result<StockQuote, WireError> {
     if signalled != Some(computed) {
         tracing::warn!(stk_cd = %r.stk_cd, cur_prc = %r.cur_prc, base_pric = %r.base_pric, pred_pre_sig = %r.pred_pre_sig, "등락 방향 필드가 현재가 − 기준가와 맞지 않습니다. 계산한 값을 씁니다");
     }
-    Ok(StockQuote { code, price_centi, base_centi, volume: Volume(unsigned(&r.trde_qty)?), at })
+    Ok(StockQuote { code, venue, price_centi, base_centi, volume: Volume(unsigned(&r.trde_qty)?), at })
 }
 
 #[derive(Deserialize)]
@@ -1091,11 +1094,19 @@ mod tests {
     }
 
     #[test]
-    fn quotes_take_abs_price_and_base_and_skip_empty_and_non_combined_rows() {
+    fn quotes_take_abs_price_and_base_and_skip_empty_rows() {
         let body: StockQuotesResponse = serde_json::from_str(&fixture("ka10095_synthetic")).unwrap();
         let quotes = parse_quotes(body);
-        let got: Vec<_> = quotes.iter().map(|q| (q.code.as_str(), q.price_centi, q.base_centi, q.volume.0)).collect();
-        assert_eq!(got, [("005930", 5_000_000, 5_100_000, 1_234_567), ("000660", 12_050_000, 12_000_000, 765_432), ("035720", 4_200_000, 4_200_000, 1_000)], "005935_NX 빈 행은 빠진다");
+        let got: Vec<_> = quotes.iter().map(|q| (q.code.as_str(), q.venue, q.price_centi, q.base_centi, q.volume.0)).collect();
+        assert_eq!(
+            got,
+            [
+                ("005930", Venue::Combined, 5_000_000, 5_100_000, 1_234_567),
+                ("000660", Venue::Combined, 12_050_000, 12_000_000, 765_432),
+                ("035720", Venue::Combined, 4_200_000, 4_200_000, 1_000)
+            ],
+            "005935_NX 빈 행은 빠진다"
+        );
         let at = KstTime::from_kst_civil(KstDate::parse_yyyymmdd("20261106").unwrap(), TimeOfDay::hms(19, 59, 59).unwrap());
         assert_eq!(quotes[0].at, at);
 
@@ -1105,8 +1116,8 @@ mod tests {
         };
         let mismatch = parse_quotes(StockQuotesResponse { atn_stk_infr: vec![row("005930_AL", "5")] });
         assert_eq!((mismatch[0].price_centi, mismatch[0].base_centi), (10_000, 9_000), "방향이 어긋나도 계산한 값을 쓴다");
-        let krx_bad_time = vec![row("005930", "2"), row("005930_NX", "2"), QuoteRow { cntr_tm: "99".into(), ..row("000660_AL", "2") }];
-        assert!(parse_quotes(StockQuotesResponse { atn_stk_infr: krx_bad_time }).is_empty());
+        let venues = parse_quotes(StockQuotesResponse { atn_stk_infr: vec![row("005930", "2"), row("005930_NX", "2"), QuoteRow { cntr_tm: "99".into(), ..row("000660_AL", "2") }] });
+        assert_eq!(venues.iter().map(|q| (q.code.as_str(), q.venue)).collect::<Vec<_>>(), [("005930", Venue::Krx), ("005930", Venue::Nxt)], "접미사가 거래소를 정하고, 시각을 읽지 못한 행은 빠진다");
     }
 
     #[test]
