@@ -2,7 +2,7 @@
 use sqlx::Row;
 use sqlx::sqlite::SqliteRow;
 
-use crate::api::{Layout, LayoutInput, LayoutSummary, LayoutWindow, Revision, Screens, SymbolCode, UiState, UnixSeconds, WatchGroup, Watchlist, Watchlists, WindowContent, WindowId};
+use crate::api::{Layout, LayoutInput, LayoutSummary, LayoutWindow, Revision, Screens, SymbolCode, UiState, UnixSeconds, WatchGroup, Watchlist, Watchlists, WindowContent, WindowId, parse_layout_feed};
 use crate::db::{AppDb, DbError};
 
 #[derive(Debug)]
@@ -151,9 +151,9 @@ fn read_window(r: &SqliteRow) -> Result<LayoutWindow, StoreError> {
             let (Some(symbol), Some(period), Some(chart_settings)) = (symbol, period, chart_settings) else {
                 return Err(corrupt("차트 창", id.as_str()));
             };
+            let venue = venue.map(|v| from_wire_name("venue", v)).transpose()?;
             WindowContent::Chart {
-                symbol: SymbolCode(symbol),
-                venue: venue.map(|v| from_wire_name("venue", v)).transpose()?,
+                feed: parse_layout_feed(&symbol, venue).map_err(|e| corrupt("차트 창", e))?,
                 period: from_wire_name("period", period)?,
                 chart_settings: serde_json::from_str(&chart_settings).map_err(|e| corrupt("chart_settings", e))?,
             }
@@ -219,8 +219,8 @@ pub async fn put_layout(db: &AppDb, input: &LayoutInput, now: UnixSeconds) -> Re
     sqlx::query("DELETE FROM layout_windows WHERE layout_id = ?").bind(&input.id).execute(&mut *tx).await?;
     for (position, w) in input.windows.iter().enumerate() {
         let (symbol, venue, period, chart_settings) = match &w.content {
-            WindowContent::Chart { symbol, venue, period, chart_settings } => {
-                (Some(&symbol.0), venue.as_ref().map(wire_name), Some(wire_name(period)), Some(chart_settings.to_string()))
+            WindowContent::Chart { feed, period, chart_settings } => {
+                (Some(feed.0.symbol().as_wire()), feed.0.venue().map(|v| v.as_wire()), Some(wire_name(period)), Some(chart_settings.to_string()))
             }
             WindowContent::Watchlist | WindowContent::Screener | WindowContent::Objects | WindowContent::Indicators => (None, None, None, None),
         };
@@ -353,7 +353,7 @@ mod tests {
     }
 
     fn chart(id: &str, symbol: &str, venue: Option<Venue>) -> LayoutWindow {
-        let content = WindowContent::Chart { symbol: SymbolCode(symbol.into()), venue, period: Period::M5, chart_settings: json!({"v": 1, "future": [id]}) };
+        let content = WindowContent::Chart { feed: parse_layout_feed(symbol, venue).unwrap(), period: Period::M5, chart_settings: json!({"v": 1, "future": [id]}) };
         LayoutWindow { id: window_id(id), link: None, content }
     }
 
@@ -477,7 +477,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn migration_turns_cells_into_chart_windows_and_adds_the_side_windows() {
+    async fn layout_migration_turns_cells_into_chart_windows_and_adds_the_side_windows() {
         let tmp = tempfile::tempdir().unwrap();
         let path = tmp.path().join("vally.db");
         {
@@ -513,9 +513,9 @@ mod tests {
         );
         assert_eq!(
             migrated.windows[0].content,
-            WindowContent::Chart { symbol: SymbolCode("005930".into()), venue: Some(Venue::Nxt), period: Period::M5, chart_settings: json!({"v": 1, "left": true}) }
+            WindowContent::Chart { feed: parse_layout_feed("005930", Some(Venue::Nxt)).unwrap(), period: Period::M5, chart_settings: json!({"v": 1, "left": true}) }
         );
-        assert!(matches!(&migrated.windows[1].content, WindowContent::Chart { venue: None, period: Period::Week, .. }));
+        assert!(matches!(&migrated.windows[1].content, WindowContent::Chart { feed: crate::api::ChartFeed(domain::Feed::Index(code)), period: Period::Week, .. } if code.as_str() == "101"));
         assert_eq!((migrated.placement.is_empty(), migrated.revision, migrated.updated_at), (true, Revision(7), UnixSeconds(50)));
         assert_eq!(kinds(&get_layout(&db, DEFAULT_ID).await.unwrap()).len(), 4, "기본 레이아웃도 차트 창 하나와 오른쪽 창 셋");
 
@@ -558,7 +558,7 @@ mod tests {
             kinds(&seeded),
             [("cell-0", "chart".into(), None), ("watchlist", "watchlist".into(), None), ("screener", "screener".into(), None), ("objects", "objects".into(), None)]
         );
-        assert!(matches!(&seeded.windows[0].content, WindowContent::Chart { symbol, venue: None, .. } if symbol.0 == "IDX:001"));
+        assert!(matches!(&seeded.windows[0].content, WindowContent::Chart { feed: crate::api::ChartFeed(domain::Feed::Index(code)), .. } if code.as_str() == "001"));
         assert!(seeded.placement.is_empty());
 
         let mut linked = chart("right", "005930", Some(Venue::Nxt));
@@ -599,13 +599,54 @@ mod tests {
     }
 
     #[sqlx::test(migrations = "./migrations")]
-    async fn db_rejects_venue_on_an_index_and_a_stock_without_venue(_: SqlitePoolOptions, opts: SqliteConnectOptions) {
+    async fn layout_db_rejects_venue_on_an_index_and_a_stock_without_venue(_: SqlitePoolOptions, opts: SqliteConnectOptions) {
         let db = db(opts).await;
-        for bad in [chart("c", "IDX:001", Some(Venue::Krx)), chart("c", "005930", None)] {
-            let err = put_layout(&db, &layout("L2", "둘", vec![bad]), UnixSeconds(1)).await.unwrap_err();
-            assert!(matches!(&err, StoreError::Db(e) if e.0.contains("CHECK")), "{err:?}");
+        let before = get_layout(&db, DEFAULT_ID).await.unwrap();
+        for (symbol, venue) in [("IDX:001", Some("krx")), ("005930", None)] {
+            let mut tx = db.begin_write().await.unwrap();
+            let err = sqlx::query("UPDATE layout_windows SET symbol = ?, venue = ? WHERE layout_id = ? AND kind = 'chart'")
+                .bind(symbol).bind(venue).bind(DEFAULT_ID).execute(&mut *tx).await.unwrap_err();
+            assert!(matches!(&err, sqlx::Error::Database(e) if e.message().contains("CHECK")), "{err:?}");
+            tx.rollback().await.unwrap();
+            assert_eq!(get_layout(&db, DEFAULT_ID).await.unwrap(), before);
         }
-        assert!(matches!(get_layout(&db, "L2").await, Err(StoreError::NotFound)), "실패한 트랜잭션은 레이아웃도 남기지 않는다");
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn layout_reads_existing_flat_stock_and_index_rows(_: SqlitePoolOptions, opts: SqliteConnectOptions) {
+        let db = db(opts).await;
+        let cases = [("005930", Some("combined")), ("0158S0", Some("krx")), ("000660", Some("nxt")), ("IDX:101", None)];
+        let mut tx = db.begin_write().await.unwrap();
+        sqlx::query("DELETE FROM layout_windows WHERE layout_id = ?").bind(DEFAULT_ID).execute(&mut *tx).await.unwrap();
+        for (position, (symbol, venue)) in cases.iter().enumerate() {
+            sqlx::query("INSERT INTO layout_windows (layout_id, id, position, kind, symbol, venue, period, chart_settings) VALUES (?, ?, ?, 'chart', ?, ?, '5m', '{\"future\":[1,2]}')")
+                .bind(DEFAULT_ID).bind(format!("saved-{position}")).bind(position as i64).bind(symbol).bind(venue).execute(&mut *tx).await.unwrap();
+        }
+        tx.commit().await.unwrap();
+        let read = get_layout(&db, DEFAULT_ID).await.unwrap();
+        assert_eq!(read.windows.len(), cases.len());
+        for (position, ((symbol, venue), window)) in cases.iter().zip(&read.windows).enumerate() {
+            let WindowContent::Chart { feed, .. } = &window.content else { panic!("{window:?}") };
+            assert_eq!(feed.0.symbol().as_wire(), *symbol);
+            assert_eq!(feed.0.venue().map(|v| v.as_wire()), *venue);
+            assert_eq!(serde_json::to_value(window).unwrap(), json!({
+                "id": format!("saved-{position}"), "link": null, "kind": "chart", "symbol": symbol, "venue": venue,
+                "period": "5m", "chartSettings": {"future": [1, 2]}
+            }));
+        }
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn layout_read_rejects_malformed_stored_symbols(_: SqlitePoolOptions, opts: SqliteConnectOptions) {
+        let db = db(opts).await;
+        for (symbol, venue) in [("bad", Some("krx")), ("IDX:bad", None)] {
+            let mut tx = db.begin_write().await.unwrap();
+            sqlx::query("UPDATE layout_windows SET symbol = ?, venue = ? WHERE layout_id = ? AND kind = 'chart'")
+                .bind(symbol).bind(venue).bind(DEFAULT_ID).execute(&mut *tx).await.unwrap();
+            tx.commit().await.unwrap();
+            let err = get_layout(&db, DEFAULT_ID).await.unwrap_err();
+            assert!(matches!(&err, StoreError::Db(e) if e.0.contains("차트 창")), "{symbol}: {err:?}");
+        }
     }
 
     #[sqlx::test(migrations = "./migrations")]

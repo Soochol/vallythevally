@@ -215,7 +215,7 @@ mod tests {
     use tower::ServiceExt;
 
     use super::*;
-    use crate::api::{LayoutInput, LayoutSync, LayoutWindow, Period, Venue, WindowContent};
+    use crate::api::{ChartFeed, LayoutInput, LayoutSync, LayoutWindow, Period, WindowContent};
     use crate::app::{ApplicationInputs, application};
     use crate::clock::{Clock, kst};
     use crate::config::Secret;
@@ -234,7 +234,7 @@ mod tests {
     }
 
     fn chart_window(id: &str) -> LayoutWindow {
-        let content = WindowContent::Chart { symbol: SymbolCode("005930".into()), venue: Some(Venue::Krx), period: Period::Day, chart_settings: json!({}) };
+        let content = WindowContent::Chart { feed: ChartFeed(domain::Feed::Stock(domain::StockCode::parse("005930").unwrap(), domain::Venue::Krx)), period: Period::Day, chart_settings: json!({}) };
         LayoutWindow { id: window_id(id), link: None, content }
     }
 

@@ -484,13 +484,75 @@ pub enum LinkColor {
     C,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(try_from = "LayoutFeedFields", into = "LayoutFeedFields")]
+pub struct ChartFeed(pub domain::Feed);
+
+#[derive(Serialize, Deserialize, TS)]
+struct LayoutFeedFields {
+    symbol: SymbolCode,
+    venue: Option<Venue>,
+}
+
+pub(crate) fn parse_layout_feed(symbol: &str, venue: Option<Venue>) -> Result<ChartFeed, String> {
+    match (domain::Symbol::parse(symbol).map_err(|e| e.to_string())?, venue) {
+        (domain::Symbol::Stock(code), Some(venue)) => Ok(ChartFeed(domain::Feed::Stock(code, venue.into()))),
+        (domain::Symbol::Index(code), None) => Ok(ChartFeed(domain::Feed::Index(code))),
+        (domain::Symbol::Stock(_), None) => Err(format!("주식 차트 창에는 거래소가 있어야 합니다: {symbol}")),
+        (domain::Symbol::Index(_), Some(_)) => Err(format!("지수에는 거래소가 없습니다: {symbol}")),
+    }
+}
+
+impl TryFrom<LayoutFeedFields> for ChartFeed {
+    type Error = String;
+
+    fn try_from(fields: LayoutFeedFields) -> Result<Self, Self::Error> {
+        parse_layout_feed(&fields.symbol.0, fields.venue)
+    }
+}
+
+impl From<ChartFeed> for LayoutFeedFields {
+    fn from(feed: ChartFeed) -> Self {
+        Self { symbol: SymbolCode(feed.0.symbol().as_wire()), venue: feed.0.venue().map(Into::into) }
+    }
+}
+
+impl TS for ChartFeed {
+    type WithoutGenerics = Self;
+    type OptionInnerType = Self;
+
+    fn decl() -> String {
+        LayoutFeedFields::decl()
+    }
+
+    fn decl_concrete() -> String {
+        LayoutFeedFields::decl_concrete()
+    }
+
+    fn name() -> String {
+        LayoutFeedFields::name()
+    }
+
+    fn inline() -> String {
+        LayoutFeedFields::inline()
+    }
+
+    fn inline_flattened() -> String {
+        LayoutFeedFields::inline_flattened()
+    }
+
+    fn visit_dependencies(visitor: &mut impl ts_rs::TypeVisitor) {
+        LayoutFeedFields::visit_dependencies(visitor);
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[serde(tag = "kind", rename_all = "lowercase")]
 #[ts(export)]
 pub enum WindowContent {
     Chart {
-        symbol: SymbolCode,
-        venue: Option<Venue>,
+        #[serde(flatten)]
+        feed: ChartFeed,
         period: Period,
         #[serde(rename = "chartSettings")]
         #[ts(type = "unknown")]
@@ -1064,6 +1126,45 @@ mod tests {
     }
 
     #[test]
+    fn layout_chart_feed_json_round_trips_existing_flat_fields() {
+        let stock = domain::StockCode::parse("005930").unwrap();
+        let index = domain::IndexCode::parse("001").unwrap();
+        for (symbol, venue, expected) in [
+            ("005930", Some("combined"), domain::Feed::Stock(stock, domain::Venue::Combined)),
+            ("005930", Some("krx"), domain::Feed::Stock(stock, domain::Venue::Krx)),
+            ("005930", Some("nxt"), domain::Feed::Stock(stock, domain::Venue::Nxt)),
+            ("IDX:001", None, domain::Feed::Index(index)),
+        ] {
+            let body = json!({"id": "chart", "link": "a", "kind": "chart", "symbol": symbol, "venue": venue, "period": "5m", "chartSettings": {"future": [1, 2]}});
+            let window: LayoutWindow = serde_json::from_value(body.clone()).unwrap();
+            assert_eq!(window.content, WindowContent::Chart { feed: ChartFeed(expected), period: Period::M5, chart_settings: json!({"future": [1, 2]}) });
+            assert_eq!(serde_json::to_value(window).unwrap(), body);
+        }
+        let window: LayoutWindow = serde_json::from_value(json!({"id": "chart", "kind": "chart", "symbol": "IDX:001", "period": "D", "chartSettings": {}})).unwrap();
+        assert_eq!(serde_json::to_value(window).unwrap()["venue"], serde_json::Value::Null);
+    }
+
+    #[test]
+    fn layout_chart_feed_json_rejects_invalid_symbol_venue_combinations() {
+        for (symbol, venue) in [
+            ("005930", None),
+            ("005930", Some(serde_json::Value::Null)),
+            ("IDX:001", Some(json!("combined"))),
+            ("IDX:001", Some(json!("krx"))),
+            ("IDX:001", Some(json!("nxt"))),
+            ("bad", Some(json!("krx"))),
+            ("IDX:bad", None),
+            ("005930", Some(json!("unknown"))),
+        ] {
+            let mut body = json!({"id": "chart", "kind": "chart", "symbol": symbol, "period": "D", "chartSettings": {}});
+            if let Some(venue) = venue {
+                body["venue"] = venue;
+            }
+            assert!(serde_json::from_value::<LayoutWindow>(body.clone()).is_err(), "{body}");
+        }
+    }
+
+    #[test]
     fn user_data_json_shape() {
         let body = json!({
             "id": "01900000-0000-7000-8000-000000000001", "name": "기본", "sync": {"scroll": false},
@@ -1078,8 +1179,8 @@ mod tests {
         let layout: LayoutInput = serde_json::from_value(body.clone()).unwrap();
         assert_eq!(layout.sync, LayoutSync { crosshair: true, scroll: false });
         assert_eq!(layout.windows[0].link, Some(LinkColor::A));
-        let WindowContent::Chart { venue, chart_settings, .. } = &layout.windows[0].content else { panic!("{:?}", layout.windows[0]) };
-        assert_eq!(*venue, Some(Venue::Nxt));
+        let WindowContent::Chart { feed, chart_settings, .. } = &layout.windows[0].content else { panic!("{:?}", layout.windows[0]) };
+        assert_eq!(feed.0, domain::Feed::Stock(domain::StockCode::parse("005930").unwrap(), domain::Venue::Nxt));
         assert_eq!(*chart_settings, json!({"v": 1, "future": [1, 2]}));
         assert_eq!(layout.windows[1].content, WindowContent::Watchlist);
         assert_eq!(layout.revision, Revision(1_794_152_040_123), "Date.now() 크기의 ms도 정확히 받는다");
