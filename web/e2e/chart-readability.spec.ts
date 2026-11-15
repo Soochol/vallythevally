@@ -412,12 +412,18 @@ test("saved moved toolbar retains coordinate meaning through compact resize and 
   expect(await dock.boundingBox()).toEqual(normal);
 });
 
-test("compact toolbar drag, cancel, snap and keyboard nudge retain the current home", async ({ page, scenario }, testInfo) => {
+for (const medium of [false, true]) test(medium ? "medium height toolbar drag, cancel, snap and keyboard nudge retain the current home" : "compact toolbar drag, cancel, snap and keyboard nudge retain the current home", async ({ page, scenario }, testInfo) => {
   await page.addInitScript(installChartProbe);
-  seed(scenario);
+  const count = medium ? 1 : 4;
+  seed(scenario, count);
+  if (medium) {
+    const base = scenario.documents.layout();
+    scenario.documents.saveLayout({ ...base, windows: base.windows.filter((window) => window.kind === "chart"), placement: { v: 1, dock: null, canvas: { rects: { "cell-0": { x: .02, y: .02, w: .65, h: .38 } }, order: ["cell-0"] } } });
+    scenario.documents.saveUiState({ ...scenario.documents.uiState(), layoutMode: "canvas" });
+  }
   await page.setViewportSize({ width: 1024, height: 768 });
   await page.goto("/");
-  await settle(page, 4);
+  await settle(page, count);
   await quietPresentation(page);
   const dock = page.getByRole("navigation", { name: "드로잉 도구" });
   const grip = dock.getByRole("button", { name: "드로잉 도구 막대 옮기기", exact: true });
@@ -433,42 +439,43 @@ test("compact toolbar drag, cancel, snap and keyboard nudge retain the current h
   const during = await dock.boundingBox();
   await writeFile(testInfo.outputPath("compact-drag-rectangles.json"), JSON.stringify({ before: box, during }, null, 2));
   if (!during) throw new Error("끄는 도구 막대가 없습니다");
+  expect.soft(during.width).toBe(box.width);
   expect.soft(during.x).toBeCloseTo(box.x + 1, 0);
   expect.soft(during.y).toBeCloseTo(box.y + 1, 0);
   await grip.dispatchEvent("pointercancel");
   await page.mouse.up();
-  await settle(page, 4);
+  await settle(page, count);
   expect(await dock.boundingBox()).toEqual(box);
   expect(storedPresentation(scenario)).toBe(saved);
   await page.mouse.move(from.x, from.y);
   await page.mouse.down();
   await page.mouse.move(from.x + 5, from.y + 5);
   await page.mouse.up();
-  await settle(page, 4);
+  await settle(page, count);
   await expect(dock).not.toHaveAttribute("data-moved");
   expect(await dock.boundingBox()).toEqual(box);
   expect(storedPresentation(scenario)).toBe(saved);
   await grip.focus();
   await page.keyboard.press("ArrowRight");
-  await settle(page, 4);
+  await settle(page, count);
   const nudged = await dock.boundingBox();
   if (!nudged) throw new Error("옮긴 도구 막대가 없습니다");
   expect(nudged.x).toBeCloseTo(box.x + 16, 0);
   await page.keyboard.press("Home");
-  await settle(page, 4);
+  await settle(page, count);
   expect(await dock.boundingBox()).toEqual(box);
   expect(scenario.documents.uiPrefs().drawing.dockAt).toBeNull();
   await page.mouse.move(from.x, from.y);
   await page.mouse.down();
   await page.mouse.move(from.x - 100, from.y + 20, { steps: 8 });
   await page.mouse.up();
-  await settle(page, 4);
+  await settle(page, count);
   const persisted = await dock.boundingBox();
   await expect.poll(() => scenario.documents.uiPrefs().drawing.dockAt).not.toBeNull();
   const prefs = scenario.documents.uiPrefs().drawing;
   expect(prefs.dockAt).not.toBeNull();
   await page.reload();
-  await settle(page, 4);
+  await settle(page, count);
   expect(await dock.boundingBox()).toEqual(persisted);
   expect(scenario.documents.uiPrefs().drawing).toEqual(prefs);
   const movedHandle = await grip.boundingBox();
@@ -477,7 +484,7 @@ test("compact toolbar drag, cancel, snap and keyboard nudge retain the current h
   await page.mouse.down();
   await page.mouse.move(from.x, from.y, { steps: 8 });
   await page.mouse.up();
-  await settle(page, 4);
+  await settle(page, count);
   expect(await dock.boundingBox()).toEqual(box);
   await expect.poll(() => scenario.documents.uiPrefs().drawing.dockAt).toBeNull();
 });
