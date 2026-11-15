@@ -32,6 +32,25 @@ async function symbol(page: Page, code: string) {
 
 test.beforeEach(async ({ page }) => { await page.setViewportSize({ width: 1440, height: 900 }); });
 
+test("긴 레이아웃 이름도 좁은 위 막대 안에 보이고 전체 이름으로 메뉴를 연다", async ({ page, scenario }) => {
+  const name = "가나다라마바사아자차카타파하가나다라마바";
+  scenario.documents.saveLayout({ ...scenario.documents.layout(), name, revision: 1 });
+  for (const width of [768, 800, 1024]) {
+    await page.setViewportSize({ width, height: 700 });
+    await page.goto("/");
+    await expect(cell(page)).toHaveAttribute("aria-busy", "false");
+    await expect(trigger(page)).toHaveAccessibleName(`레이아웃: ${name}`);
+    const bar = await topbar(page).boundingBox();
+    for (const button of await topbar(page).getByRole("button").all()) {
+      const box = await button.boundingBox();
+      expect(box!.x + box!.width).toBeLessThanOrEqual(bar!.x + bar!.width + 1);
+    }
+    await trigger(page).click();
+    await expect(menu(page).getByRole("menuitemradio", { name, exact: true })).toHaveAttribute("aria-checked", "true");
+    await page.keyboard.press("Escape");
+  }
+});
+
 test("새 이름 저장 전 원본에도 편집을 저장하고 이후 따로 바꾼 창·종목·봉 주기를 전환과 새로고침 뒤 지킨다", async ({ page, scenario }) => {
   await page.goto("/");
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");

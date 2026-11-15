@@ -41,8 +41,8 @@ export function Topbar() {
         ))}
       </div>
       <span className="tb-sep" />
-      <button type="button" className="tb-btn" aria-haspopup={opensDialog ? "dialog" : undefined} title="지표 (I)" onClick={() => openIndicatorCommand(cellId)}><IndicatorIcon />지표</button>
-      <button type="button" className="tb-btn" aria-haspopup={opensDialog ? "dialog" : undefined} title="비교 종목" onClick={() => openIndicatorCommand(cellId, "compare")}><CompareIcon />비교</button>
+      <button type="button" className="tb-btn" aria-label="지표" aria-haspopup={opensDialog ? "dialog" : undefined} title="지표 (I)" onClick={() => openIndicatorCommand(cellId)}><IndicatorIcon /><span className="max-lg:hidden">지표</span></button>
+      <button type="button" className="tb-btn" aria-label="비교" aria-haspopup={opensDialog ? "dialog" : undefined} title="비교 종목" onClick={() => openIndicatorCommand(cellId, "compare")}><CompareIcon /><span className="max-lg:hidden">비교</span></button>
       <span className="min-w-0 flex-1" />
       <LayoutMenu />
       <AddWindowMenu />
