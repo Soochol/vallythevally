@@ -66,7 +66,7 @@
 .dock-group[data-active-cell]::after { box-shadow:inset 0 0 0 var(--size-1) color-mix(in srgb,var(--accent) 45%,transparent); }
 .dock-tabs { display:flex; flex:none; align-items:stretch; gap:var(--size-1); height:var(--size-34); padding:0 var(--size-4); border-bottom:var(--size-1) solid var(--line); overflow-x:auto; overflow-y:hidden; scrollbar-width:none; }
 .dock-tabs::-webkit-scrollbar { display:none; }
-.dock-tab { display:flex; flex-shrink:0; align-items:center; gap:var(--size-5); max-width:var(--size-228); margin-top:var(--size-4); padding:0 var(--size-10); border-radius:var(--r-m) var(--r-m) 0 0; color:var(--text-2); font-size:var(--fs-s); white-space:nowrap; outline:none; }
+.dock-tab { touch-action:none; user-select:none; display:flex; flex-shrink:0; align-items:center; gap:var(--size-5); max-width:var(--size-228); margin-top:var(--size-4); padding:0 var(--size-10); border-radius:var(--r-m) var(--r-m) 0 0; color:var(--text-2); font-size:var(--fs-s); white-space:nowrap; outline:none; }
 .dock-tab:hover { background:var(--hover); color:var(--text); }
 .dock-tab:focus-visible { box-shadow:inset 0 0 0 var(--size-2) var(--accent); }
 .dock-tab[aria-selected=true] { background:var(--raised); color:var(--text); font-weight:650; }
@@ -163,3 +163,14 @@ html.dock-resizing-row, html.dock-resizing-row * { cursor:row-resize !important;
 .ui-switch-track>span { position:absolute; top:var(--size-2); left:var(--size-2); width:var(--size-16); height:var(--size-16); border-radius:var(--r-pill); background:var(--text); transition:left .12s; }
 .ui-switch[aria-checked=true] .ui-switch-track { background:var(--accent); }
 .ui-switch[aria-checked=true] .ui-switch-track>span { left:var(--size-18); background:var(--accent-ink); }
+
+.dock-window-host { display:flex; flex:1; flex-direction:column; min-width:0; min-height:0; }
+.dock-add { display:grid; flex:none; place-items:center; align-self:center; width:26px; height:26px; margin-left:auto; border-radius:var(--r-m); color:var(--text-3); }
+.dock-add:hover, .dock-add:focus-visible { background:var(--hover); color:var(--accent); }
+.dock-input-shield { position:fixed; inset:0; z-index:100; cursor:grabbing; }
+.dock-drop-preview { position:absolute; z-index:101; display:grid; place-items:center; padding:12px; border:2px solid var(--accent); border-radius:var(--r-l); background:color-mix(in srgb,var(--accent) 18%,transparent); pointer-events:none; }
+.dock-drop-preview span { max-width:100%; padding:8px 12px; border-radius:var(--r-m); background:var(--surface); color:var(--accent); font-size:var(--fs-s); box-shadow:0 2px 12px #0002; text-align:center; }
+.dock-drop-preview[data-dock-preview=blocked] { border-color:var(--warning); background:color-mix(in srgb,var(--warning) 12%,transparent); }
+.dock-drop-preview[data-dock-preview=blocked] span { color:var(--warning); }
+.workspace[data-dock-dragging] .dock-panel { pointer-events:none; }
+html.dock-dragging, html.dock-dragging * { cursor:grabbing !important; user-select:none !important; }

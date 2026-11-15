@@ -326,3 +326,30 @@ test("닫은 연동 차트를 되돌리면 지금 같은 색 차트의 종목을
   expect(new Set(chartWindows(state().layout).filter((w) => w.link === "a").map((w) => w.symbol)).size).toBe(1);
   expect(new Set(chartWindows(state().layout).filter((w) => w.link === "b").map((w) => w.symbol)).size).toBe(1);
 });
+
+test("묶음 더하기는 기존 창 옮기기와 새 차트 더하기를 각각 한 번에 되돌린다", () => {
+  state().settleDock(fittedDock(state().layout));
+  const original = arrangement();
+  state().showWindow("watchlist", "g1");
+  expect(groupOfWindow(fittedDock(state().layout).root, windowId("watchlist"))?.id).toBe("g1");
+  expect(state().steps).toHaveLength(1);
+  state().showWindow("watchlist", "g1");
+  expect(state().steps).toHaveLength(1);
+  state().undoArrangement();
+  expect(arrangement()).toEqual(original);
+  const id = state().addChart(firstChart().id, room, "g2");
+  expect(id).not.toBeNull();
+  if (!id) throw new Error("차트를 더하지 못했습니다");
+  expect(groupOfWindow(fittedDock(state().layout).root, id)?.id).toBe("g2");
+  expect(state().steps).toHaveLength(1);
+  state().undoArrangement();
+  expect(arrangement()).toEqual(original);
+});
+
+test("사라진 묶음에는 창이나 기록을 더하지 않는다", () => {
+  const before = arrangement();
+  state().showWindow("indicators", "missing");
+  expect(state().addChart(firstChart().id, room, "missing")).toBeNull();
+  expect(arrangement()).toEqual(before);
+  expect(state().steps).toHaveLength(0);
+});

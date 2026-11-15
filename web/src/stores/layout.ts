@@ -11,7 +11,7 @@ import { type ChartSettings, type ChartStyle, DEFAULT_CHART_SETTINGS, type Extre
 import { fitDock, type WindowList } from "../layout/dock/fit";
 import type { Size } from "../layout/dock/geometry";
 import { placeBeside } from "../layout/dock/split";
-import { selectTab, withoutWindow } from "../layout/dock/tree";
+import { findGroup, groupOfWindow, putTab, selectTab, withoutWindow } from "../layout/dock/tree";
 import { windowId, WINDOW_KINDS, type WindowId } from "../layout/kinds";
 import type { DockPlacement, Placement } from "../layout/placement";
 import { toward } from "../lib/josa";
@@ -134,8 +134,8 @@ interface LayoutState {
   setDock(dock: DockPlacement): void;
   settleDock(dock: DockPlacement): void;
   selectTab(window: WindowId): void;
-  showWindow(kind: OtherWindowKind): void;
-  addChart(from: WindowId, room: DockRoom | null): WindowId | null;
+  showWindow(kind: OtherWindowKind, targetGroup?: string): void;
+  addChart(from: WindowId, room: DockRoom | null, targetGroup?: string): WindowId | null;
   closeWindow(id: WindowId): boolean;
   setSymbol(cellId: WindowId, target: SymbolTarget, venue?: Venue): SymbolChange;
   sendSymbol(sender: WindowId | null, cellId: WindowId, target: SymbolTarget): SymbolChange;
@@ -225,23 +225,30 @@ export const useLayoutStore = create<LayoutState>()((set, get) => {
     setDock: (dock) => arrangeDock(get().layout.windows, dock),
     settleDock: settle,
     selectTab: (window) => settle(selectTab(fittedDock(get().layout), window)),
-    showWindow: (kind) => {
+    showWindow: (kind, targetGroup) => {
       const { windows, placement } = get().layout;
+      const dock = fittedDock(get().layout);
+      if (targetGroup && !findGroup(dock.root, targetGroup)) return;
       const shown = windows.find((w) => w.kind === kind);
-      if (shown) return get().selectTab(shown.id);
+      if (shown) {
+        if (targetGroup && groupOfWindow(dock.root, shown.id)?.id !== targetGroup) arrangeDock(windows, putTab(dock, shown.id, targetGroup));
+        else get().selectTab(shown.id);
+        return;
+      }
       const id = freeWindowId(windows, kind);
       const next = [...windows, { id, link: null, kind }];
-      arrangeDock(next, selectTab(fitDock(placement.dock, windowRefs(next)), id));
+      arrangeDock(next, targetGroup ? putTab(dock, id, targetGroup) : selectTab(fitDock(placement.dock, windowRefs(next)), id));
     },
-    addChart: (from, room) => {
+    addChart: (from, room, targetGroup) => {
       const { layout } = get();
+      const dock = fittedDock(layout);
+      if (targetGroup && !findGroup(dock.root, targetGroup)) return null;
       if (chartWindows(layout).length >= WINDOW_KINDS.chart.maxCount) return null;
       const source = chartWindow(layout, from);
       const id = freeChartId(layout.windows);
       const windows = [...layout.windows, { ...source, id }];
       const refs = windowRefs(windows);
-      const dock = fittedDock(layout);
-      arrangeDock(windows, selectTab(fitDock(room ? placeBeside(dock, id, source.id, { ...room, windows: refs }) : dock, refs), id));
+      arrangeDock(windows, targetGroup ? putTab(dock, id, targetGroup) : selectTab(fitDock(room ? placeBeside(dock, id, source.id, { ...room, windows: refs }) : dock, refs), id));
       return id;
     },
     closeWindow: (id) => {

@@ -8,6 +8,8 @@ import { chartNumber, chartWindows, useCell, useLayoutStore, type WindowState } 
 import { useSelectionStore } from "../../stores/selection";
 import { CloseIcon } from "../icons";
 import { ScreenerBadge } from "../screener/ScreenerPanel";
+import { AddWindowMenu } from "./AddWindowMenu";
+import type { DockInteraction } from "./dockInteraction";
 import { WINDOW_CONTENT } from "./contents";
 import { LinkDot } from "./LinkDot";
 import { closeWindow, LAST_CHART_REASON } from "./manage";
@@ -74,17 +76,15 @@ const TAB_KEYS: Record<string, (index: number, count: number) => number> = {
   End: (_index, count) => count - 1,
 };
 
-export function DockGroup({ group, rect, number }: { group: GroupNode; rect: Rect; number: number }) {
+export function DockGroup({ group, rect, number, interaction }: { group: GroupNode; rect: Rect; number: number; interaction: Pick<DockInteraction, "selectTab" | "keyTab" | "pressTab" | "contextTab"> }) {
   const windows = useLayoutStore((s) => s.layout.windows);
   const activeCell = useSelectionStore((s) => s.activeCell);
   const shown = windows.find((w) => w.id === group.active);
   if (!shown) return null;
-  const { Content, overflow } = WINDOW_CONTENT[shown.kind];
-  const select = (window: WindowId) => {
-    useLayoutStore.getState().selectTab(window);
-    if (windows.some((w) => w.id === window && w.kind === "chart")) useSelectionStore.getState().setActiveCell(window);
-  };
+  const { overflow } = WINDOW_CONTENT[shown.kind];
+  const select = interaction.selectTab;
   const move = (event: KeyboardEvent<HTMLButtonElement>, from: WindowId) => {
+    if (interaction.keyTab(event, from)) return;
     const step = TAB_KEYS[event.key];
     if (!step) return;
     event.preventDefault();
@@ -104,7 +104,8 @@ export function DockGroup({ group, rect, number }: { group: GroupNode; rect: Rec
             <Fragment key={tab}>
               <button id={tabId(tab)} type="button" role="tab" data-window-id={tab} data-active-cell={tab === activeCell ? "" : undefined}
                 aria-selected={selected} aria-controls={selected ? panelId(group.id) : undefined} tabIndex={selected ? 0 : -1}
-                className="dock-tab" onClick={() => select(tab)} onKeyDown={(event) => move(event, tab)}>
+                className="dock-tab" onClick={() => select(tab)} onKeyDown={(event) => move(event, tab)}
+                onPointerDown={(event) => interaction.pressTab(event, tab)} onContextMenu={(event) => interaction.contextTab(event, tab)} onDragStart={(event) => event.preventDefault()}>
                 <TabLabel window={window} />
               </button>
               <LinkDot window={window} selected={selected} />
@@ -112,10 +113,9 @@ export function DockGroup({ group, rect, number }: { group: GroupNode; rect: Rec
             </Fragment>
           );
         })}
+        <AddWindowMenu targetGroup={group.id} />
       </div>
-      <div id={panelId(group.id)} role="tabpanel" aria-labelledby={tabId(shown.id)} data-window-id={shown.id} className={`dock-panel ${overflow === "auto" ? "overflow-auto" : "overflow-hidden"}`}>
-        <Content key={shown.id} id={shown.id} />
-      </div>
+      <div id={panelId(group.id)} role="tabpanel" aria-labelledby={tabId(shown.id)} data-window-id={shown.id} className={`dock-panel ${overflow === "auto" ? "overflow-auto" : "overflow-hidden"}`} />
     </div>
   );
 }

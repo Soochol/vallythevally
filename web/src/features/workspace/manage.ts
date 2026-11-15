@@ -1,5 +1,6 @@
+import { findGroup } from "../../layout/dock/tree";
 import type { WindowId, WindowKind } from "../../layout/kinds";
-import { chartWindows, type DockRoom, useLayoutStore } from "../../stores/layout";
+import { chartWindows, fittedDock, type DockRoom, useLayoutStore } from "../../stores/layout";
 import { type ToastUndo, useSelectionStore } from "../../stores/selection";
 import { DOCK_GAP } from "./size";
 
@@ -11,10 +12,16 @@ export function workspaceRoom(): DockRoom | null {
   return area ? { area: { w: area.clientWidth, h: area.clientHeight }, gap: DOCK_GAP } : null;
 }
 
-export function addWindow(kind: WindowKind, room: DockRoom | null): void {
-  if (kind !== "chart") return useLayoutStore.getState().showWindow(kind);
-  const id = useLayoutStore.getState().addChart(useSelectionStore.getState().activeCell, room);
+export function addWindow(kind: WindowKind, room: DockRoom | null, targetGroup?: string): WindowId | null {
+  if (kind !== "chart") {
+    const state = useLayoutStore.getState();
+    if (targetGroup && !findGroup(fittedDock(state.layout).root, targetGroup)) return null;
+    state.showWindow(kind, targetGroup);
+    return useLayoutStore.getState().layout.windows.find((window) => window.kind === kind)?.id ?? null;
+  }
+  const id = useLayoutStore.getState().addChart(useSelectionStore.getState().activeCell, room, targetGroup);
   if (id) useSelectionStore.getState().setActiveCell(id);
+  return id;
 }
 
 export function latestArrangementUndo(): ToastUndo {
