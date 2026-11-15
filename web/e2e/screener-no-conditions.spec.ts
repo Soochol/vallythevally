@@ -52,7 +52,7 @@ async function runAndExpect(page: Page, screener: ScreenerScenario, excluded: st
   await runButton(page).click();
   await expect(results(page)).toContainText(`${expected.length}종목 · 11-06(금) 기준`);
   await expect(excludedLine(page)).toHaveText(excluded);
-  await expectRows(page, expected);
+  await expectRows(page, expected.map(([code, name]) => [code, name]));
 }
 
 test("새 조건식은 조건 없이 열리고 마지막 줄을 빼고 다시 더하며, 빈 조건과 시장·제외 설정을 저장하고 반환된 대상 종목과 관측일을 표시한다", async ({ scenario, screener, page }) => {

@@ -19,8 +19,8 @@ test("결과 표 정렬과 키보드 이동, 행에서 Enter로 칸 열기를 �
   const result: ScreenerResult = await (await response).json();
   await expect(rows(page)).toHaveCount(10);
   for (const descending of [true, false]) {
-    await panel(page).getByRole("button", { name: "종가 순으로 정렬", exact: true }).click();
-    await expect(panel(page).getByRole("columnheader", { name: "종가 순으로 정렬", exact: true })).toHaveAttribute("aria-sort", descending ? "descending" : "ascending");
+    await panel(page).getByRole("button", { name: "현재가 순으로 정렬", exact: true }).click();
+    await expect(panel(page).getByRole("columnheader", { name: "현재가 순으로 정렬", exact: true })).toHaveAttribute("aria-sort", descending ? "descending" : "ascending");
     const prices = result.rows.map((r) => r.close).sort((a, b) => descending ? b - a : a - b);
     await expect.poll(() => rows(page).evaluateAll((items) => items.map((r) => Number(r.children[1]?.childNodes[0]?.textContent?.replaceAll(",", ""))))).toEqual(prices);
   }

@@ -29,7 +29,10 @@ test("위 막대 섬은 창 폭을 쓰고 작업 영역은 그 아래에서 12px
   expect(area.y + area.height).toBe(strip.y - GAP);
   expect(chart.x).toBeGreaterThanOrEqual(area.x);
   expect(chart.y + chart.height).toBeLessThanOrEqual(area.y + area.height);
-  await expect(status).toContainText("Lightweight Charts");
+  const attribution = status.getByRole("link", { name: "TradingView", exact: true });
+  await expect(attribution).toBeVisible();
+  await expect(attribution).toHaveAttribute("href", "https://www.tradingview.com/");
+  await expect(status).not.toContainText("Charts by TradingView Lightweight Charts™");
   await expect(status.getByLabel("장 상태와 서버 시계")).toBeVisible();
   await expect(page.locator("footer")).toHaveCount(1);
   expect(await overflow(page)).toEqual([0, 0]);

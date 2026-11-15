@@ -53,12 +53,13 @@ test("Ctrl+Enter는 실행, ↑↓는 이동이고 Enter 단독·다른 조합�
   }
 });
 
-test("결과 표는 서버의 네 열과 정렬 상태, 오래된 일봉·잠정 정보를 읽을 수 있게 표시한다", () => {
-  const html = renderToStaticMarkup(createElement(ResultTable, { screen, rows, asOf: "2026-11-12", selected: "000660", sort: DEFAULT_SORT, onSort: () => {}, onSelect: () => {} }));
-  expect(html.match(/scope="col"/g)).toHaveLength(4);
+test("결과 표는 세 열과 정렬·선택 상태, 오래된 일봉·잠정 정보를 읽을 수 있게 표시한다", () => {
+  const html = renderToStaticMarkup(createElement(ResultTable, { screen, rows, asOf: "2026-11-12", selected: "000660", sort: nextSort(DEFAULT_SORT, "close"), onSort: () => {}, onSelect: () => {} }));
+  expect(html.match(/scope="col"/g)).toHaveLength(3);
   expect(html).toContain('aria-sort="descending"');
-  expect(html).toContain('aria-label="종가 순으로 정렬"');
-  expect(html).toContain('aria-label="충족일 순으로 정렬"');
+  expect(html).toContain('aria-label="현재가 순으로 정렬"');
+  expect(html).not.toContain("충족일");
+  expect(html).not.toContain("첫 봉 조건 일치");
   expect(html).toContain('aria-selected="true"');
   expect(html).toContain("삼성전자");
   expect(html).toContain("최신 일봉 2026-11-11 · 당일 요약 잠정");
