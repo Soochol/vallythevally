@@ -87,6 +87,7 @@ export function fakeApi(screenerScenario: string | undefined): Plugin {
           const id = decodeURIComponent(path.slice("/layouts/".length));
           if (method === "GET") return reply(res, user.getLayout(id));
           if (method === "PUT") return reply(res, user.putLayout(id, await readJson(req)));
+          if (method === "DELETE") return reply(res, user.deleteLayout(id));
         }
         if (path === "/ui-state") {
           if (method === "GET") return reply(res, user.getUiState());

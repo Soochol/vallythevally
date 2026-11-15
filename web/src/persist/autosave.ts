@@ -30,27 +30,35 @@ export interface Autosave {
   retry(): void;
   flush(): void;
   stop(): void;
+  replaceLayout(layout: EditableLayout, revision: number, serverCharts: readonly string[]): void;
 }
 
 type ServerLayout = { revision: number; charts: ReadonlySet<string> | null };
 
 let active: Autosave | null = null;
-let savedLayout: ServerLayout = { revision: -Infinity, charts: null };
-let unsureLayouts: ServerLayout[] = [];
-const sendingCharts = new Set<ReadonlySet<string>>();
+interface LayoutSession {
+  current: EditableLayout;
+  saver: Saver<Omit<LayoutInput, "revision">>;
+  owned: boolean;
+  saved: ServerLayout;
+  unsure: ServerLayout[];
+  sending: Set<ReadonlySet<string>>;
+  sent: { mark: number; charts: ReadonlySet<string> }[];
+}
+let session: LayoutSession | null = null;
 const SENT_HISTORY = 64;
-let sentLayouts: { mark: number; charts: ReadonlySet<string> }[] = [];
 let lastMark = 0;
 
 export const layoutSendMark = (): number => lastMark;
 
 export function layoutSentWithoutChart(id: string, since: number): boolean {
-  return sentLayouts.some((sent) => sent.mark > since && !sent.charts.has(id));
+  return session?.sent.some((sent) => sent.mark > since && !sent.charts.has(id)) ?? false;
 }
 
 export function serverMayLackChart(id: string): boolean {
-  const candidates = [savedLayout, ...unsureLayouts];
-  return active === null || candidates.some(({ charts }) => charts === null || !charts.has(id)) || [...sendingCharts].some((charts) => !charts.has(id));
+  if (!active || !session) return true;
+  const candidates = [session.saved, ...session.unsure];
+  return candidates.some(({ charts }) => charts === null || !charts.has(id)) || [...session.sending].some((charts) => !charts.has(id));
 }
 
 function layoutSent(json: string): ServerLayout & { charts: ReadonlySet<string> } {
@@ -87,38 +95,47 @@ export function startAutosave(deps: AutosaveDeps): Autosave {
   const unsaved =
     deps.unsaved ?? ((target: SaveTarget) => ({ write: (u) => writeUnsaved(target, u), clear: (upTo) => clearUnsaved(target, upTo) }));
 
-  savedLayout = { revision: -Infinity, charts: deps.serverCharts ? new Set(deps.serverCharts) : null };
-  unsureLayouts = [];
-  sendingCharts.clear();
-  const layout = createSaver<Omit<LayoutInput, "revision">>({
-    debounceMs: DEBOUNCE_MS,
-    read: () => {
-      const { id, name, sync, windows, placement } = useLayoutStore.getState().layout;
-      return { id, name, sync, windows, placement };
-    },
-    tooLarge: exceedsServerFieldLimits,
-    path: () => layoutPath(useLayoutStore.getState().layout.id),
-    revision: deps.revisions.layout,
-    send: async (path, json, opts) => {
-      const sent = layoutSent(json);
-      sendingCharts.add(sent.charts);
-      sentLayouts = [...sentLayouts, { mark: ++lastMark, charts: sent.charts }].slice(-SENT_HISTORY);
-      try {
-        const saved = await deps.put(path, json, opts);
-        if (sent.revision > savedLayout.revision) savedLayout = sent;
-        unsureLayouts = unsureLayouts.filter((layout) => layout.revision > savedLayout.revision);
-        return saved;
-      } catch (e) {
-        const stale = e instanceof ApiRequestError && e.code === "stale_revision";
-        if (sent.revision > savedLayout.revision) unsureLayouts = [...unsureLayouts, stale ? { revision: sent.revision, charts: null } : sent];
-        throw e;
-      } finally {
-        sendingCharts.delete(sent.charts);
-      }
-    },
-    unsaved: unsaved("layout"),
-    onState: (s) => setSave("layout", s),
-  });
+  function createLayoutSession(current: EditableLayout, revision: number, serverCharts?: readonly string[]): LayoutSession {
+    const path = layoutPath(current.id);
+    const drafts = deps.unsaved ? unsaved("layout") : { write: (u: Parameters<typeof writeUnsaved>[1]) => writeUnsaved("layout", u), clear: (upTo: number) => clearUnsaved("layout", upTo, path) };
+    const owner: LayoutSession = {
+      current, owned: true, saved: { revision: -Infinity, charts: serverCharts ? new Set(serverCharts) : null },
+      unsure: [], sending: new Set(), sent: [],
+      saver: createSaver<Omit<LayoutInput, "revision">>({
+        debounceMs: DEBOUNCE_MS,
+        read: () => {
+          const { id, name, sync, windows, placement } = owner.current;
+          return { id, name, sync, windows, placement };
+        },
+        tooLarge: exceedsServerFieldLimits,
+        path: () => path,
+        revision,
+        acceptStaleRevision: false,
+        send: async (path, json, opts) => {
+          const sent = layoutSent(json);
+          owner.sending.add(sent.charts);
+          owner.sent = [...owner.sent, { mark: ++lastMark, charts: sent.charts }].slice(-SENT_HISTORY);
+          try {
+            const saved = await deps.put(path, json, opts);
+            if (owner.owned && sent.revision > owner.saved.revision) owner.saved = sent;
+            if (owner.owned) owner.unsure = owner.unsure.filter((layout) => layout.revision > owner.saved.revision);
+            return saved;
+          } catch (e) {
+            const stale = e instanceof ApiRequestError && e.code === "stale_revision";
+            if (owner.owned && sent.revision > owner.saved.revision) owner.unsure = [...owner.unsure, stale ? { revision: sent.revision, charts: null } : sent];
+            throw e;
+          } finally {
+            owner.sending.delete(sent.charts);
+          }
+        },
+        unsaved: drafts && { write: (u) => { if (owner.owned) drafts.write(u); }, clear: (upTo) => { if (owner.owned) drafts.clear(upTo); } },
+        onState: (s) => { if (owner.owned) setSave("layout", s); },
+      }),
+    };
+    return owner;
+  }
+  let layoutSession = createLayoutSession(useLayoutStore.getState().layout, deps.revisions.layout, deps.serverCharts);
+  session = layoutSession;
 
   const ui = createSaver({
     debounceMs: DEBOUNCE_MS,
@@ -154,21 +171,39 @@ export function startAutosave(deps: AutosaveDeps): Autosave {
   });
 
   const unsubscribe = [
-    useLayoutStore.subscribe((s, prev) => s.revision !== prev.revision && layout.changed(addsChartWindow(prev.layout, s.layout) ? "now" : "soon")),
+    useLayoutStore.subscribe((s, prev) => {
+      if (s.layout.id !== layoutSession.current.id) return;
+      layoutSession.current = s.layout;
+      if (s.revision !== prev.revision) layoutSession.saver.changed(addsChartWindow(prev.layout, s.layout) ? "now" : "soon");
+    }),
     useUiStore.subscribe((s, prev) => s.revision !== prev.revision && ui.changed()),
     useWatchlistStore.subscribe((s, prev) => s.revision !== prev.revision && s.revision !== s.loadedRevision && watchlist.changed()),
   ];
-  const savers = { layout, ui, watchlist };
-  const all = Object.values(savers);
+  const savers = { get layout() { return layoutSession.saver; }, ui, watchlist };
+  const all = () => Object.values(savers);
   const autosave: Autosave = {
     savers,
-    retry: () => all.forEach((s) => s.retry()),
-    flush: () => all.forEach((s) => s.flush()),
+    replaceLayout(layout, revision, serverCharts) {
+      layoutSession.owned = false;
+      void layoutSession.saver.stop();
+      layoutSession = createLayoutSession(layout, revision, serverCharts);
+      session = layoutSession;
+      setSave("layout", { kind: "idle" });
+    },
+    retry: () => all().forEach((s) => s.retry()),
+    flush: () => all().forEach((s) => s.flush()),
     stop: () => {
       unsubscribe.forEach((u) => u());
+      layoutSession.owned = false;
+      all().forEach((s) => { void s.stop(); });
       if (active === autosave) active = null;
     },
   };
   active = autosave;
   return autosave;
+}
+
+export function layoutAutosave(): Autosave {
+  if (!active) throw new Error("레이아웃 저장이 시작되지 않았습니다");
+  return active;
 }

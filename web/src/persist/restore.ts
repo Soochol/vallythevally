@@ -88,33 +88,53 @@ export async function restore(src: RestoreSources): Promise<Restored> {
   const localLists = localWatch ? parseWatchlists(localWatch.value.lists) : null;
 
   const stored = await openLayout(src, ui.prefs.lastLayoutId);
-  const localLayout = stored && newer(src.unsaved("layout"), layoutPath(stored.id), stored.revision);
-  const opened = (stored && localLayout && asLayout(localLayout.value, stored)) || stored;
-  const windows = await Promise.all((opened?.windows ?? []).map((w) => restoreWindow(src, w)));
-  const restoredWindows = windows.map((w) => w.window);
-  const nxtBySymbol = new Map(windows.flatMap((w) => (w.info ? [[w.info.code, w.info.nxtEnabled] as const] : [])));
-  const linkedWindows = alignLinks(restoredWindows, (code) => nxtBySymbol.get(code));
-  const layout: EditableLayout = opened
-    ? { id: opened.id, name: opened.name, sync: opened.sync, windows: linkedWindows, placement: parsePlacement(opened.placement) }
-    : DEFAULT_LAYOUT;
-  const notices = windows.some((w) => w.nxtFellBack) ? [NXT_FALLBACK_NOTICE] : [];
+  const restored = stored ? await restoreLayout(stored, src) : {
+    layout: DEFAULT_LAYOUT, dirty: true, serverCharts: [], revision: 0, serverRevision: 0, notices: [],
+  };
+  const { layout, notices } = restored;
   const lastLayoutFixed = ui.prefs.lastLayoutId !== layout.id;
   const serverRevisions = { layout: stored?.revision ?? 0, ui: serverUi, watchlist: serverWatch.revision };
   return {
     layout,
-    layoutDirty: stored === null || opened !== stored || windows.some((w) => w.dirty) || linkedWindows !== restoredWindows,
-    serverCharts: (stored?.windows ?? []).filter((w) => w.kind === "chart").map((w) => w.id),
+    layoutDirty: restored.dirty,
+    serverCharts: restored.serverCharts,
     ui: lastLayoutFixed ? { ...ui, prefs: { ...ui.prefs, lastLayoutId: layout.id } } : ui,
     uiDirty: lastLayoutFixed || localUi !== null,
     watchlists: localLists ?? serverWatch.lists,
     watchlistDirty: localLists !== null,
     serverRevisions,
     revisions: {
-      layout: Math.max(serverRevisions.layout, opened !== stored ? (localLayout?.revision ?? 0) : 0),
+      layout: restored.revision,
       ui: Math.max(serverUi, localUi?.revision ?? 0),
       watchlist: Math.max(serverWatch.revision, localLists ? localWatch!.revision : 0),
     },
     notices,
+  };
+}
+
+export interface RestoredLayout {
+  layout: EditableLayout;
+  dirty: boolean;
+  serverCharts: readonly string[];
+  serverRevision: number;
+  revision: number;
+  notices: string[];
+}
+
+export async function restoreLayout(stored: Layout, src: Pick<RestoreSources, "symbolInfo" | "unsaved">): Promise<RestoredLayout> {
+  const local = newer(src.unsaved("layout"), layoutPath(stored.id), stored.revision);
+  const opened = (local && asLayout(local.value, stored)) || stored;
+  const windows = await Promise.all(opened.windows.map((w) => restoreWindow(src, w)));
+  const restoredWindows = windows.map((w) => w.window);
+  const nxtBySymbol = new Map(windows.flatMap((w) => (w.info ? [[w.info.code, w.info.nxtEnabled] as const] : [])));
+  const linkedWindows = alignLinks(restoredWindows, (code) => nxtBySymbol.get(code));
+  return {
+    layout: { id: opened.id, name: opened.name, sync: opened.sync, windows: linkedWindows, placement: parsePlacement(opened.placement) },
+    dirty: opened !== stored || windows.some((w) => w.dirty) || linkedWindows !== restoredWindows,
+    serverCharts: stored.windows.filter((w) => w.kind === "chart").map((w) => w.id),
+    serverRevision: stored.revision,
+    revision: Math.max(stored.revision, opened !== stored ? (local?.revision ?? 0) : 0),
+    notices: windows.some((w) => w.nxtFellBack) ? [NXT_FALLBACK_NOTICE] : [],
   };
 }
 
@@ -137,7 +157,7 @@ interface RestoredWindow {
   nxtFellBack: boolean;
 }
 
-async function restoreWindow(src: RestoreSources, raw: LayoutWindow): Promise<RestoredWindow> {
+async function restoreWindow(src: Pick<RestoreSources, "symbolInfo">, raw: LayoutWindow): Promise<RestoredWindow> {
   if (raw.kind !== "chart") return { window: { id: windowId(raw.id), link: raw.link, kind: raw.kind }, dirty: false, nxtFellBack: false };
   const cell: ChartWindowState = { ...raw, id: windowId(raw.id), chartSettings: parseChartSettings(raw.chartSettings) };
   let info: VenueTarget;

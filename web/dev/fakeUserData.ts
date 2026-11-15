@@ -160,6 +160,8 @@ export function createUserData(seedWatchlist: string[], seedScreens: Screen[], n
       const input = body as LayoutInput;
       if (input.id !== id) return fail(400, "bad_request", "주소의 id와 본문의 id가 다릅니다");
       if (!isRevision(input.revision)) return fail(400, "bad_request", "revision이 없습니다");
+      if (typeof input.name !== "string" || [...input.name.trim()].length < 1 || [...input.name.trim()].length > 20) return fail(400, "bad_request", "레이아웃 이름은 1~20자여야 합니다");
+      if ([...layouts.values()].some((layout) => layout.id !== id && layout.name === input.name.trim())) return fail(409, "conflict", "같은 이름의 레이아웃이 있습니다");
       const windowError = layoutWindowsError(input.windows);
       if (windowError) return fail(400, "bad_request", windowError);
       if (bytes(input.placement) > PAYLOAD_LIMIT_BYTES) return fail(413, "payload_too_large", "배치가 64KB를 넘습니다");
@@ -173,6 +175,10 @@ export function createUserData(seedWatchlist: string[], seedScreens: Screen[], n
       const saved: Layout = { ...input, updatedAt: nowSec() };
       layouts.set(id, saved);
       return ok(saved);
+    },
+    deleteLayout: (id: string): Reply => {
+      if (!layouts.delete(id)) return fail(404, "not_found", "레이아웃이 없습니다");
+      return ok(null);
     },
     getUiState: (): Reply => ok(uiState),
     putUiState: (body: unknown): Reply => {

@@ -1,7 +1,7 @@
 import type { QueryClient } from "@tanstack/react-query";
 import { ApiRequestError, sendJson } from "../api/http";
 import { fetchSymbolInfo } from "../api/queries";
-import { fetchLayout, fetchLayouts, fetchUiState, fetchWatchlists } from "../api/userData";
+import { fetchLayout, layoutPath, fetchLayouts, fetchUiState, fetchWatchlists } from "../api/userData";
 import { followLastMinute } from "../stores/lastMinute";
 import { chartWindows, useLayoutStore } from "../stores/layout";
 import { SAVE_TARGETS, usePersistStore } from "../stores/persist";
@@ -54,7 +54,7 @@ export async function boot(queryClient: QueryClient) {
     useUiStore.getState().load(restored.ui.prefs, restored.ui.extra);
     useWatchlistStore.getState().load(restored.watchlists);
     followTheme();
-    for (const target of SAVE_TARGETS) clearUnsaved(target, restored.serverRevisions[target]);
+    for (const target of SAVE_TARGETS) clearUnsaved(target, restored.serverRevisions[target], target === "layout" ? layoutPath(restored.layout.id) : undefined);
     const autosave = startAutosave({ put: (path, json, o) => sendJson("PUT", path, json, o), toast, revisions: restored.revisions, serverCharts: restored.serverCharts });
     if (restored.layoutDirty) autosave.savers.layout.changed();
     if (restored.uiDirty) autosave.savers.ui.changed();
