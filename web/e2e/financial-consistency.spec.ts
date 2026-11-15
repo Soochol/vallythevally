@@ -194,6 +194,64 @@ test.describe("재무 시각과 가격 시각", () => {
 });
 
 test.describe("같은 재무 키의 응답 순서", () => {
+  test("자동 완료 뒤 도착한 첫 재무 GET도 최신 정정의 빈 값과 사유를 유지한다", async ({ page, scenario, financial }, info) => {
+    await seed(scenario, financial, false, true);
+    financial.job({ status: "collecting", phase: "recent", totalCompanies: 2, completedCompanies: 1, automatic: true });
+    const old = data(financial);
+    const events: string[] = [];
+    const jobs: FinancialUpdatePage[] = [];
+    const reads: FinancialsPage[] = [];
+    scenario.on((url, request) => url.pathname === "/api/financial-update" && request.method() === "GET", () => {
+      const response = financial.job();
+      jobs.push(response);
+      events.push(`job GET ${response.status}`);
+      return { body: response };
+    });
+    let holding = true;
+    scenario.on(url => url.pathname === "/api/symbols/005930/financials" && url.searchParams.get("period") === "Y", () => {
+      const response = data(financial);
+      reads.push(response);
+      events.push("latest financial GET delivered");
+      return { body: response };
+    });
+    const first = scenario.hold(url => url.pathname === "/api/symbols/005930/financials" && url.searchParams.get("period") === "Y" && holding);
+    await page.clock.install({ time: scenario.now });
+    await page.addInitScript(installFrameProbe);
+    await page.goto("/");
+    const button = page.getByRole("button", { name: "재무자료", exact: true }).filter({ visible: true });
+    await expect(button).toContainText("50%");
+    await row(page).getByRole("button", { name: / 보이기$/ }).click({ force: true });
+    await first.received;
+    holding = false;
+    events.push("cold first financial GET held");
+    await expect(page.getByLabel("재무 수집 상태", { exact: true })).toContainText("재무자료 조회 중");
+    financial.show("edge");
+    financial.job({ status: "ready", phase: "complete", completedCompanies: 2, lastCheckedAt: scenario.now / 1000 });
+    await page.clock.fastForward(1000);
+    await expect.poll(() => jobs.at(-1)?.status).toBe("ready");
+    await expect(button).not.toContainText("%");
+    events.push("ready rendered before old financial GET delivery");
+    first.reply({ body: old });
+    events.push("old financial GET delivered after ready");
+    await expect(row(page)).toContainText("확인 완료");
+    await frames(page);
+    await row(page).locator("summary").click();
+    await selectOption(row(page).getByRole("combobox"), { index: 1 });
+    const actual = await series(page);
+    const detail = await row(page).locator("details").innerText();
+    const server = data(financial);
+    const commands = scenario.requests.filter(request => request.method() === "POST" && new URL(request.url()).pathname === "/api/financial-update").length;
+    await writeFile(info.outputPath("automatic-cold-get.json"), JSON.stringify({ events, jobs, old, reads, server, actual, detail, commands }, null, 2));
+    expect(actual).toEqual([]);
+    await expect(row(page).locator("details")).toContainText("보고기간이 겹쳐 표시 불가");
+    expect(commands).toBe(0);
+    await page.clock.fastForward(2500);
+    await frames(page);
+    expect(await series(page)).toEqual([]);
+    await expect(row(page).locator("details")).toContainText("보고기간이 겹쳐 표시 불가");
+    await writeFile(info.outputPath("automatic-cold-get.json"), JSON.stringify({ events, jobs, old, reads, server, actual, detail, commands, settled: await series(page), settledDetail: await row(page).locator("details").innerText() }, null, 2));
+  });
+
   test("중첩 POST와 늦은 GET이 최신 정정의 빈 값과 사유를 되돌리지 않는다", async ({ page, scenario, financial }, info) => {
     await seed(scenario, financial);
     await page.addInitScript(installFrameProbe);
