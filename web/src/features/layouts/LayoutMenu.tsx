@@ -53,18 +53,20 @@ function NameDialog({ kind, onClose }: { kind: Naming; onClose(): void }) {
   const close = () => { if (!busy) onClose(); };
   return (
     <DialogFrame labelledBy={`${id}-title`} width="w-[360px]" onClose={close}>
-      <form className="flex flex-col gap-4 p-5" onSubmit={(event) => {
+      <form className="flex flex-col" onSubmit={(event) => {
         event.preventDefault();
         if (busy) return;
         const problem = layoutNameProblem(value, layouts, kind === "rename" ? layout.id : undefined);
         if (problem) { setError(problem); return; }
         void layoutCommands[kind](value).then(onClose).catch((reason: unknown) => setError(reason instanceof Error ? reason.message : String(reason)));
       }}>
-        <h2 id={`${id}-title`} className="font-semibold">{title}</h2>
-        <label htmlFor={`${id}-name`}>레이아웃 이름</label>
-        <input id={`${id}-name`} autoFocus value={value} disabled={busy} aria-invalid={error !== null} aria-describedby={error ? `${id}-error` : undefined} className="rounded-m border border-line bg-bg px-3 py-2" onChange={(event) => { setValue(event.target.value); setError(null); }} />
-        <Errors id={`${id}-error`} messages={error ? [error] : []} />
-        <div className="flex justify-end gap-2"><button type="button" className="tb-btn" disabled={busy} onClick={close}>취소</button><button type="submit" className="tb-btn text-accent" disabled={busy}>저장</button></div>
+        <header className="ui-dialog-head"><h2 id={`${id}-title`}>{title}</h2></header>
+        <div className="flex flex-col gap-3 p-6">
+          <label htmlFor={`${id}-name`}>레이아웃 이름</label>
+          <input id={`${id}-name`} autoFocus value={value} disabled={busy} aria-invalid={error !== null} aria-describedby={error ? `${id}-error` : undefined} className="ui-field" onChange={(event) => { setValue(event.target.value); setError(null); }} />
+          <Errors id={`${id}-error`} messages={error ? [error] : []} />
+        </div>
+        <footer className="ui-dialog-foot justify-end"><button type="button" className="tb-btn" disabled={busy} onClick={close}>취소</button><button type="submit" className="btn-primary" disabled={busy}>저장</button></footer>
       </form>
     </DialogFrame>
   );
