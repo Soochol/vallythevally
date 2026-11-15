@@ -330,12 +330,17 @@ for (const mode of MODES) {
     await expect.poll(() => scenario.requests.filter((request) => request.method() === "PUT" && new URL(request.url()).pathname === `/api/layouts/${DEFAULT_LAYOUT_ID}`).length).toBeGreaterThan(0);
     await pending.received;
     const source = mode === "dock" ? tab(page, "screener") : head(page, "watchlist");
+    const original = await boxOf(mode === "dock" ? group(page, "screener") : frame(page, "watchlist"));
     const target = await boxOf(mode === "dock" ? group(page, "cell-0") : head(page, "cell-0"));
     await drag(page, source, { x: target.x + 150, y: target.y + target.height / 2 }, false);
+    const draft = mode === "dock" ? page.locator("[data-dock-preview]") : frame(page, "watchlist");
+    const dragging = await boxOf(draft);
     pending.reply({ status: 503, body: { error: { code: "internal", message: "저장 연결 끊김" } } });
     await expect(page.getByRole("contentinfo")).toContainText("저장하지 못했습니다");
+    expect(await boxOf(draft)).toEqual(dragging);
     await page.mouse.up();
     const moved = await boxOf(mode === "dock" ? group(page, "screener") : frame(page, "watchlist"));
+    expect(moved).not.toEqual(original);
     await expect(page.getByRole("contentinfo")).toContainText("저장하지 못했습니다");
     if (mode === "canvas") await page.getByRole("navigation", { name: "창 종류" }).getByRole("button", { name: "개체 목록 창 더하기" }).click();
     await page.getByRole("button", { name: "개체 목록 닫기", exact: true }).click();
