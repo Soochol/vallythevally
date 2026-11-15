@@ -383,7 +383,7 @@ impl MarketHub {
                 .conns
                 .values()
                 .filter(|c| c.watch_venue != Venue::Combined)
-                .flat_map(|c| c.requested_watch.iter())
+                .flat_map(|c| c.requested_watch.iter().take(super::subscriptions::REALTIME_LIMIT))
                 .filter_map(|s| match s {
                     Symbol::Stock(code) if dir.get(*s).is_some_and(|info| info.nxt_enabled) => Some(*code),
                     _ => None,
@@ -2521,6 +2521,24 @@ mod tests {
         assert_eq!(quote_messages(take(&out).await), vec![], "시작 값을 받기 전에는 내지 않는다");
         h.events.send(fill(&h, SAMSUNG, (9, 0, 52), 112, Some(Exchange::Krx), 1, (12, 1_005))).await.unwrap();
         assert_eq!(quote_messages(take(&out).await), vec![quotes_msg(api::Venue::Krx, vec![venue_quote(SAMSUNG, api::Venue::Krx, 112.0, 12.0, 705, at(9, 0, 52))])], "조회 값 700에 1_000을 넘은 KRX 체결 4와 1만 더한다");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_missing_nxt_row_is_zero_only_when_krx_already_equals_the_combined_volume() {
+        let h = std_harness();
+        let (conn, out) = connect(&h).await;
+        live(&h).await;
+        *h.day_volumes.lock().unwrap() = HashMap::from([("005930_AL".to_owned(), 1_000), ("005930".to_owned(), 1_000)]);
+        h.hub.watch(conn, vec![samsung().feed.symbol()], Venue::Krx);
+        settle().await;
+        h.events.send(fill(&h, SAMSUNG, (9, 0, 51), 112, Some(Exchange::Krx), 5, (12, 1_005))).await.unwrap();
+        assert_eq!(quote_messages(take(&out).await), vec![quotes_msg(api::Venue::Krx, vec![venue_quote(SAMSUNG, api::Venue::Krx, 112.0, 12.0, 1_005, at(9, 0, 51))])]);
+        *h.day_volumes.lock().unwrap() = HashMap::from([("005930_AL".to_owned(), 1_005), ("005930".to_owned(), 900)]);
+        h.hub.watch(conn, vec![samsung().feed.symbol()], Venue::Nxt);
+        h.hub.watch(conn, vec![samsung().feed.symbol()], Venue::Krx);
+        settle().await;
+        h.events.send(fill(&h, SAMSUNG, (9, 0, 52), 113, Some(Exchange::Krx), 1, (13, 1_006))).await.unwrap();
+        assert_eq!(quote_messages(take(&out).await), vec![quotes_msg(api::Venue::Krx, vec![venue_quote(SAMSUNG, api::Venue::Krx, 113.0, 13.0, 1_006, at(9, 0, 52))])], "이미 읽은 값은 그대로 이어진다");
     }
 
     #[tokio::test(start_paused = true)]

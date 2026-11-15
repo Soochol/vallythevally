@@ -5,6 +5,7 @@ use domain::{KstTime, StockCode};
 use crate::kiwoom::stream::Exchange;
 
 pub const RETRY_SECS: i64 = 5;
+const MAX_RETRY_SECS: i64 = 60;
 const MAX_BUFFERED: usize = 4_096;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -42,6 +43,7 @@ enum Applied {
 #[derive(Default)]
 pub struct DayTallies {
     by_code: HashMap<StockCode, Tally>,
+    failures: HashMap<StockCode, u32>,
 }
 
 impl DayTallies {
@@ -51,6 +53,7 @@ impl DayTallies {
 
     pub fn take_due(&mut self, wanted: &BTreeSet<StockCode>, now: KstTime) -> Vec<StockCode> {
         self.by_code.retain(|code, _| wanted.contains(code));
+        self.failures.retain(|code, _| wanted.contains(code));
         let mut due = Vec::new();
         for code in wanted {
             let start = match self.by_code.get(code) {
@@ -73,7 +76,7 @@ impl DayTallies {
                 None
             }
             Tally::Seeding { .. } => {
-                self.by_code.insert(code, retry(now));
+                self.by_code.insert(code, retry(now, 0));
                 None
             }
             Tally::Retry { .. } => None,
@@ -82,7 +85,7 @@ impl DayTallies {
                 Applied::AlreadyCounted => None,
                 Applied::Broken => {
                     tracing::debug!(code = code.as_str(), "거래소별 거래량을 이을 수 없어 다시 조회합니다");
-                    self.by_code.insert(code, retry(now));
+                    self.by_code.insert(code, retry(now, 0));
                     None
                 }
             },
@@ -94,13 +97,16 @@ impl DayTallies {
             return;
         };
         let buffered = std::mem::take(buffered);
+        let failures = self.failures.get(&code).copied().unwrap_or(0);
         let Some(mut live) = volumes else {
-            self.by_code.insert(code, retry(now));
+            self.by_code.insert(code, retry(now, failures));
+            self.failures.insert(code, failures + 1);
             return;
         };
+        self.failures.remove(&code);
         for fill in buffered {
             if matches!(count(&mut live, fill, true), Applied::Broken) {
-                self.by_code.insert(code, retry(now));
+                self.by_code.insert(code, retry(now, 0));
                 return;
             }
         }
@@ -108,17 +114,20 @@ impl DayTallies {
     }
 }
 
-fn retry(now: KstTime) -> Tally {
-    Tally::Retry { at: now.plus_secs(RETRY_SECS) }
+fn retry(now: KstTime, failures: u32) -> Tally {
+    Tally::Retry { at: now.plus_secs((RETRY_SECS << failures.min(4)).min(MAX_RETRY_SECS)) }
 }
 
 fn count(live: &mut DayVolumes, fill: Fill, inside_snapshot: bool) -> Applied {
-    let (Some(combined), Some(exchange)) = (fill.combined_cumulative, fill.exchange) else {
+    let Some(combined) = fill.combined_cumulative else {
         return Applied::Broken;
     };
     if combined == live.combined || (inside_snapshot && combined < live.combined) {
         return Applied::AlreadyCounted;
     }
+    let Some(exchange) = fill.exchange else {
+        return Applied::Broken;
+    };
     if live.combined.checked_add(fill.qty) != Some(combined) {
         return Applied::Broken;
     }
@@ -219,6 +228,32 @@ mod tests {
         t.seeded(code(), Some(START), at(2));
         assert_eq!(t.apply(code(), fill(Some(Exchange::Krx), 1, 1_051), at(3)), None);
         assert_eq!(t.take_due(&BTreeSet::from([code()]), at(7)), vec![code()]);
+    }
+
+    #[test]
+    fn a_fill_without_an_exchange_inside_the_snapshot_breaks_nothing() {
+        let mut t = DayTallies::default();
+        t.take_due(&BTreeSet::from([code()]), at(0));
+        t.apply(code(), fill(None, 2, 995), at(1));
+        t.seeded(code(), Some(START), at(2));
+        assert_eq!(t.apply(code(), fill(Some(Exchange::Krx), 5, 1_005), at(3)), Some(VenueVolumes { krx: 705, nxt: 300 }));
+    }
+
+    #[test]
+    fn repeated_failed_snapshots_are_retried_less_and_less_often() {
+        let mut t = DayTallies::default();
+        let wanted = BTreeSet::from([code()]);
+        let mut now = at(0);
+        let mut waits = Vec::new();
+        for _ in 0..6 {
+            t.take_due(&wanted, now);
+            t.seeded(code(), None, now);
+            let wait = (1..=120).find(|s| !t.take_due(&wanted, now.plus_secs(*s)).is_empty()).unwrap();
+            waits.push(wait);
+            now = now.plus_secs(wait);
+            t.seeded(code(), None, now);
+        }
+        assert_eq!(waits, [5, 10, 20, 40, 60, 60]);
     }
 
     #[test]

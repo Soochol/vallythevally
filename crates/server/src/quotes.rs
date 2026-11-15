@@ -90,7 +90,19 @@ pub async fn day_volumes(rest: &KiwoomRest, codes: &[StockCode]) -> Result<HashM
         };
         seen.entry(q.code).or_default()[slot] = Some(q.volume.0);
     }
-    Ok(seen.into_iter().filter_map(|(code, v)| Some((code, DayVolumes { combined: v[0]?, krx: v[1]?, nxt: v[2]? }))).collect())
+    Ok(seen
+        .into_iter()
+        .filter_map(|(code, [combined, krx, nxt])| {
+            let combined = combined?;
+            let (krx, nxt) = match (krx, nxt) {
+                (Some(krx), Some(nxt)) => (krx, nxt),
+                (Some(krx), None) if krx == combined => (krx, 0),
+                (None, Some(nxt)) if nxt == combined => (0, nxt),
+                _ => return None,
+            };
+            Some((code, DayVolumes { combined, krx, nxt }))
+        })
+        .collect())
 }
 
 pub const DAY_VOLUME_CHUNK: usize = StockQuotes::MAX / 3;
