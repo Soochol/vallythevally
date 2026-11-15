@@ -42,6 +42,7 @@ export function ResultTable({ screen, asOf, rows, selected, sort, onSort, onSele
   const cellId = useSelectionStore((s) => s.activeCell);
   const cell = useCell(cellId);
   const menuRow = menu && rows.find((row) => row.symbol === menu.code);
+  useEffect(() => { if (menu && !menuRow) setMenu(null); }, [menu, menuRow]);
   useEffect(() => {
     const root = table.current;
     const row = root && [...root.querySelectorAll<HTMLTableRowElement>("tbody tr")].find((row) => row.dataset.code === selected);
