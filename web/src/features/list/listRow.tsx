@@ -19,7 +19,7 @@ export const listRowFill = (active: boolean) => (active ? "bg-surface" : "");
 export const listRowSelection = (active: boolean) => `${listRowEdge(active)} ${listRowFill(active)}`;
 
 export function SymbolName({ name, code }: { name: string; code: SymbolCode }) {
-  return <b title={`${name} ${code}`} className="block min-w-0 truncate text-m font-[550]">{name}</b>;
+  return <b title={name === code ? code : `${name} ${code}`} className="block min-w-0 truncate text-m font-[550]">{name}</b>;
 }
 
 export function PriceText({ children }: { children: ReactNode }) {

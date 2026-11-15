@@ -93,6 +93,7 @@ test("두 목록의 줄은 같은 글자 크기·굵기·배지·높이·열 폭
   }
   expect((await look(watchRates[0]!)).background).not.toBe((await look(watchRates[1]!)).background);
   expect((await look(watchRates[1]!)).background).not.toBe((await look(watchRates[2]!)).background);
+  expect((await look(watchRates[0]!)).background).not.toBe((await look(watchRates[2]!)).background);
 
   for (const row of [watchRow(page, "005930"), watchRow(page, "000660"), rowOf(page, rows[0]!.symbol), rowOf(page, rows[3]!.symbol), rowOf(page, rows[4]!.symbol), rowOf(page, rows[5]!.symbol)]) {
     expect((await look(row)).height).toBe(34);
@@ -117,17 +118,20 @@ test("고른 줄과 포인터가 올라간 줄의 바탕과 왼쪽 선이 두 �
   const chosenWatch = watchRow(page, "000660");
   await chosenWatch.locator("[data-main]").click();
   await expect(chosenWatch.locator("[data-main]")).toHaveAttribute("aria-current", "true");
+  await page.mouse.move(0, 0);
   const watchChosenLook = { fill: (await look(chosenWatch)).background, edge: await edge(chosenWatch) };
   const chosenResult = rowOf(page, rows[1]!.symbol);
   await chosenResult.getByRole("button").click();
   await expect(chosenResult).toHaveAttribute("aria-selected", "true");
   await expect(chosenResult.getByRole("button")).toHaveAttribute("aria-current", "true");
+  await page.mouse.move(0, 0);
   expect({ fill: (await look(chosenResult)).background, edge: await edge(chosenResult.locator("td").first()) }).toEqual(watchChosenLook);
   expect(watchChosenLook.edge.width).toBe("2px");
   expect(watchChosenLook.fill).not.toBe("rgba(0, 0, 0, 0)");
   const idleWatch = watchRow(page, "035420");
   const idleResult = rowOf(page, rows[2]!.symbol);
   expect(await edge(idleWatch)).toEqual(await edge(idleResult.locator("td").first()));
+  expect((await look(idleResult)).background).toBe((await look(idleWatch)).background);
   await rowOf(page, rows[2]!.symbol).hover();
   const hoveredResult = (await look(rowOf(page, rows[2]!.symbol))).background;
   await watchRow(page, "035420").locator("[data-main]").hover();
