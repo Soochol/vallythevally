@@ -15,7 +15,7 @@ export function workspaceRoom(): DockRoom | null {
 export function addWindow(kind: WindowKind, room: DockRoom | null, targetGroup?: string): WindowId | null {
   if (kind !== "chart") {
     const state = useLayoutStore.getState();
-    if (targetGroup && !findGroup(fittedDock(state.layout).root, targetGroup)) return null;
+    if (targetGroup && useLayoutStore.getState().canvasArea === null && !findGroup(fittedDock(state.layout).root, targetGroup)) return null;
     state.showWindow(kind, targetGroup);
     return useLayoutStore.getState().layout.windows.find((window) => window.kind === kind)?.id ?? null;
   }
@@ -36,13 +36,11 @@ export function latestArrangementUndo(): ToastUndo {
 }
 
 export function closeWindow(id: WindowId, name: string): boolean {
-  if (!useLayoutStore.getState().closeWindow(id)) return false;
+  const state = useLayoutStore.getState();
   const selection = useSelectionStore.getState();
-  if (selection.activeCell === id) {
-    const first = chartWindows(useLayoutStore.getState().layout)[0]!.id;
-    useLayoutStore.getState().selectTab(first);
-    selection.setActiveCell(first);
-  }
+  const replacement = selection.activeCell === id ? chartWindows(state.layout).find((window) => window.id !== id)?.id : undefined;
+  if (!state.closeWindow(id, replacement)) return false;
+  if (replacement) selection.setActiveCell(replacement);
   selection.showToast(`${name} 창을 닫았습니다`, latestArrangementUndo());
   return true;
 }

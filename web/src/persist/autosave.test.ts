@@ -203,6 +203,7 @@ test("UI 설정을 바꾸면 모르는 키와 함께 UiState를 보낸다", asyn
         lastMinute: "3m",
         collapsedWatchGroups: [],
         indicatorWindow: "inspector",
+        layoutMode: "dock",
         revision: expect.any(Number),
       },
       keepalive: false,

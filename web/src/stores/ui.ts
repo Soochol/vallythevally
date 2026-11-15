@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import type { SymbolCode } from "../api/generated/SymbolCode";
+import type { LayoutMode } from "../layout/modes";
 import type { MinutePeriod } from "../lib/symbol";
 import type { WatchColumn } from "../lib/watchlist";
 import type { DrawingPrefs } from "../chart/drawings/prefs";
@@ -19,6 +20,7 @@ interface UiStore {
   setDrawingPrefs(patch: Partial<DrawingPrefs>): void;
   setWatchGroupCollapsed(id: string, collapsed: boolean, known: readonly string[]): void;
   setIndicatorWindow(mode: IndicatorWindow): void;
+  setLayoutMode(mode: LayoutMode): void;
 }
 
 export const useUiStore = create<UiStore>()((set) => {
@@ -42,6 +44,7 @@ export const useUiStore = create<UiStore>()((set) => {
     clearRecent: () => edit((p) => (p.recentSymbols.length === 0 ? p : { ...p, recentSymbols: [] })),
     setLastLayoutId: (id) => edit((p) => (p.lastLayoutId === id ? p : { ...p, lastLayoutId: id })),
     setActiveWatchlist: (id) => edit((p) => (p.activeWatchlistId === id ? p : { ...p, activeWatchlistId: id })),
+    setLayoutMode: (layoutMode) => edit((p) => (p.layoutMode === layoutMode ? p : { ...p, layoutMode })),
     setIndicatorWindow: (indicatorWindow) => edit((p) => (p.indicatorWindow === indicatorWindow ? p : { ...p, indicatorWindow })),
     setDrawingPrefs: (patch) => edit((p) => ({ ...p, drawing: { ...p.drawing, ...patch } })),
     setWatchGroupCollapsed: (id, collapsed, known) =>

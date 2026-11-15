@@ -14,6 +14,7 @@ test("옛 라이트 설정은 다크로 옮기고 다른 설정과 모르는 키
     lastMinute: "10m",
     collapsedWatchGroups: ["G1"],
     indicatorWindow: "inspector",
+    layoutMode: "dock",
     phone: { symbol: "000660" },
   };
   const { prefs, extra } = parseUiState(raw);
@@ -27,6 +28,7 @@ test("옛 라이트 설정은 다크로 옮기고 다른 설정과 모르는 키
     lastMinute: "10m",
     collapsedWatchGroups: ["G1"],
     indicatorWindow: "inspector",
+    layoutMode: "dock",
   });
   expect(extra).toEqual({ phone: { symbol: "000660" } });
   expect(toUiState(prefs, extra)).toEqual({ ...raw, theme: "dark" });
@@ -123,3 +125,14 @@ test("고정 드로잉 도구는 도구 이름만 중복 없이 읽고 새로고
   expect(parseUiState({ ...DEFAULT_UI_PREFS, drawing: { pinnedTools: "hline" } }).prefs.drawing.pinnedTools).toEqual([]);
 });
 
+
+test("창 배치 방식은 없거나 틀리면 도킹이고 캔버스 설정은 왕복한다", () => {
+  const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+  const { layoutMode: _mode, ...older } = DEFAULT_UI_PREFS;
+  expect(parseUiState(older).prefs.layoutMode).toBe("dock");
+  expect(warn).not.toHaveBeenCalled();
+  expect(parseUiState({ ...older, layoutMode: "free" }).prefs.layoutMode).toBe("dock");
+  const state = parseUiState({ ...older, layoutMode: "canvas" });
+  expect(state.extra).not.toHaveProperty("layoutMode");
+  expect(parseUiState(toUiState(state.prefs, state.extra)).prefs.layoutMode).toBe("canvas");
+});

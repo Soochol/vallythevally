@@ -21,9 +21,10 @@ interface Props {
   root: RefObject<HTMLElement | null>;
   className?: string;
   style?: React.CSSProperties;
+  children?: ReactNode;
 }
 
-export function Menu({ label, items, onClose, root, className, style }: Props) {
+export function Menu({ label, items, onClose, root, className, style, children }: Props) {
   const point = typeof style?.left === "number" && typeof style?.top === "number" ? { x: style.left, y: style.top } : undefined;
   const trigger = useRef<HTMLElement | null>(point ? null : root.current?.querySelector<HTMLElement>("[aria-expanded=true]") ?? root.current?.querySelector<HTMLElement>("button") ?? null);
   const focusTarget = useRef<HTMLElement | null>(point
@@ -41,7 +42,7 @@ export function Menu({ label, items, onClose, root, className, style }: Props) {
     if (["ArrowDown", "ArrowUp", "Home", "End"].includes(e.key)) {
       e.preventDefault();
       all[menuIndex(all.map((b) => b.textContent ?? ""), i, e.key)]?.focus();
-    } else if (e.key === "Tab") onClose(true);
+    } else if (e.key === "Tab" && (!children || e.shiftKey || document.activeElement !== all.at(-1))) onClose(true);
     else if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && e.key !== " ") {
       e.preventDefault();
       const now = Date.now();
@@ -75,6 +76,7 @@ export function Menu({ label, items, onClose, root, className, style }: Props) {
         }
         return <MenuButton key={i} item={item} onClose={onClose} register={(el) => buttons.current.push(el)} />;
       })}
+      {children}
     </Popover>
   );
 }

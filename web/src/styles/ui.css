@@ -174,3 +174,38 @@ html.dock-resizing-row, html.dock-resizing-row * { cursor:row-resize !important;
 .dock-drop-preview[data-dock-preview=blocked] span { color:var(--warning); }
 .workspace[data-dock-dragging] .dock-panel { pointer-events:none; }
 html.dock-dragging, html.dock-dragging * { cursor:grabbing !important; user-select:none !important; }
+
+.canvas-workspace { position:absolute; inset:0; display:flex; flex-direction:column; }
+.canvas-stage { position:relative; flex:1; min-width:0; min-height:0; overflow:hidden; isolation:isolate; }
+.window-frame { position:absolute; display:flex; flex-direction:column; overflow:hidden; isolation:isolate; border-radius:var(--r-l); background:var(--surface); box-shadow:0 0 0 var(--size-1) var(--line-strong); }
+.window-frame[data-active-cell] { box-shadow:0 0 0 var(--size-1) var(--accent); }
+.window-head { height:var(--size-34); min-height:var(--size-34); display:flex; align-items:center; gap:var(--s3); padding:0 var(--s3) 0 var(--s4); background:var(--surface); cursor:grab; user-select:none; touch-action:none; outline-offset:calc(-1 * var(--size-2)); }
+.window-head:focus-visible { outline:var(--size-2) solid var(--accent); }
+.window-title { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:var(--fs-s); }
+.window-actions { display:flex; align-items:center; margin-left:auto; gap:var(--s1); }
+.window-action { display:grid; place-items:center; width:var(--size-24); height:var(--size-24); border-radius:var(--r-s); color:var(--text-2); }
+.window-action:hover { background:var(--hover); color:var(--text); }
+.window-action:disabled { opacity:.3; }
+.window-panel { position:relative; display:flex; flex:1; flex-direction:column; min-width:0; min-height:0; background:var(--surface); }
+.window-resize { position:absolute; z-index:50; touch-action:none; }
+.window-resize-n,.window-resize-s { left:var(--size-10); right:var(--size-10); height:var(--size-5); cursor:ns-resize; }
+.window-resize-n { top:0; } .window-resize-s { bottom:0; }
+.window-resize-e,.window-resize-w { top:var(--size-10); bottom:var(--size-10); width:var(--size-5); cursor:ew-resize; }
+.window-resize-e { right:0; } .window-resize-w { left:0; }
+.window-resize-ne,.window-resize-nw,.window-resize-se,.window-resize-sw { width:var(--size-10); height:var(--size-10); }
+.window-resize-ne { top:0; right:0; cursor:nesw-resize; } .window-resize-nw { top:0; left:0; cursor:nwse-resize; }
+.window-resize-se { bottom:0; right:0; cursor:nwse-resize; } .window-resize-sw { bottom:0; left:0; cursor:nesw-resize; }
+.canvas-input-shield { position:absolute; inset:0; z-index:100; cursor:grabbing; }
+.canvas-gesturing { user-select:none; }
+.canvas-gesturing .window-panel { pointer-events:none; }
+.canvas-guide { position:absolute; z-index:101; pointer-events:none; background:var(--accent); }
+.canvas-guide-x { top:0; bottom:0; width:var(--size-1); } .canvas-guide-y { left:0; right:0; height:var(--size-1); }
+.canvas-kind-lane { position:relative; height:var(--size-48); flex:none; display:flex; justify-content:center; align-items:center; gap:var(--s4); }
+.canvas-kind-dock { display:flex; align-items:center; gap:var(--s1); padding:var(--s1); border-radius:var(--r-pill); background:var(--surface); box-shadow:0 0 0 var(--size-1) var(--line); }
+.canvas-kind-button { display:flex; align-items:center; justify-content:center; gap:var(--s3); padding:var(--s1) var(--s3); border-radius:var(--r-pill); color:var(--text-2); font-size:var(--fs-xs); }
+.canvas-kind-button:hover { background:var(--hover); color:var(--text); } .canvas-kind-button:disabled { opacity:.3; }
+.canvas-tidy { position:absolute; right:0; gap:var(--s3); }
+.layout-mode-control { display:flex; flex-direction:column; gap:var(--s3); margin-top:var(--s1); padding:var(--s3); border-top:var(--size-1) solid var(--line); color:var(--text-2); font-size:var(--fs-s); }
+.layout-mode-segments { display:flex; padding:var(--size-2); border-radius:var(--r-m); background:var(--bg); }
+.layout-mode-segments button { flex:1; padding:var(--s1) var(--s3); border-radius:var(--r-s); }
+.layout-mode-segments button[aria-pressed=true] { background:var(--accent-soft); color:var(--accent); }

@@ -3,7 +3,7 @@ interface Layer { panel: HTMLElement; options: LayerOptions }
 const layers: Layer[] = [];
 export function ownsChartKeyboard(event: Pick<KeyboardEvent, "key" | "target">): boolean {
   return layers.some((layer) => layer.options.blockChartKeys !== false)
-    || (event.key === "Escape" && layers.length > 0)
+    || (event.key === "Escape" && (layers.length > 0 || (event.target instanceof Element && event.target.closest("[data-chart-escape-owner]") !== null)))
     || (event.target instanceof Element && event.target.closest("[popover]:popover-open") !== null);
 }
 const onKey = (event: KeyboardEvent) => {

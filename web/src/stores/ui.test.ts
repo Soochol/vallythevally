@@ -19,3 +19,12 @@ test("관심종목 그룹을 접고 펴면서 없어진 그룹 id는 지운다",
   s.setWatchGroupCollapsed("Z", true, ["C"]);
   expect(useUiStore.getState().prefs.collapsedWatchGroups).toEqual(["C"]);
 });
+
+test("창 배치 방식을 바꾸면 한 번 저장하고 같은 값은 저장하지 않는다", () => {
+  const revision = useUiStore.getState().revision;
+  useUiStore.getState().setLayoutMode("canvas");
+  expect(useUiStore.getState().prefs.layoutMode).toBe("canvas");
+  expect(useUiStore.getState().revision).toBe(revision + 1);
+  useUiStore.getState().setLayoutMode("canvas");
+  expect(useUiStore.getState().revision).toBe(revision + 1);
+});
