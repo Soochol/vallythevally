@@ -3,7 +3,7 @@ import { create } from "zustand";
 import type { Layout } from "../../api/generated/Layout";
 import type { LayoutInput } from "../../api/generated/LayoutInput";
 import type { LayoutSummary } from "../../api/generated/LayoutSummary";
-import { deleteJson, putJson } from "../../api/http";
+import { ApiRequestError, deleteJson, putJson } from "../../api/http";
 import { fetchSymbolInfo } from "../../api/queries";
 import { fetchLayout, fetchLayouts, layoutPath } from "../../api/userData";
 import { defaultDock } from "../../layout/dock/fit";
@@ -59,6 +59,7 @@ export interface LayoutCommandsDeps {
 }
 
 export function createLayoutCommands(deps: LayoutCommandsDeps) {
+  let pendingDelete: { id: string; next: RestoredLayout; resume(): void } | null = null;
   const refresh = async () => {
     const layouts = await deps.list();
     useLayoutsStore.setState({ layouts });
@@ -68,11 +69,40 @@ export function createLayoutCommands(deps: LayoutCommandsDeps) {
     try { await refresh(); }
     catch (error) { showLayoutError(`레이아웃 변경은 저장했지만 목록을 새로 읽지 못했습니다. ${error instanceof Error ? error.message : String(error)}`); }
   };
+  const finishDeletion = async (pending: NonNullable<typeof pendingDelete>) => {
+    pendingDelete = null;
+    clearUnsaved("layout", Number.MAX_SAFE_INTEGER, layoutPath(pending.id));
+    deps.install(pending.next);
+    await afterMutation();
+  };
+  const reconcileDeletion = async () => {
+    const pending = pendingDelete;
+    if (!pending) return false;
+    try { await deps.get(pending.id); }
+    catch (error) {
+      if (error instanceof ApiRequestError && error.code === "not_found") {
+        await finishDeletion(pending);
+        return true;
+      }
+      throw new Error(`레이아웃 지우기 결과를 확인하지 못했습니다. 연결을 확인한 뒤 다시 시도하세요. ${error instanceof Error ? error.message : String(error)}`);
+    }
+    pendingDelete = null;
+    pending.resume();
+    return false;
+  };
   const run = async (work: () => Promise<void>) => {
     if (useLayoutsStore.getState().phase !== "ready" || usePersistStore.getState().phase.kind !== "ready") return;
     useLayoutsStore.setState({ phase: "busy" });
-    try { await work(); }
-    finally { useLayoutsStore.setState({ phase: "ready" }); }
+    const previousId = useLayoutStore.getState().layout.id;
+    try {
+      if (pendingDelete && await reconcileDeletion()) return;
+      await work();
+    } finally {
+      if (previousId !== useLayoutStore.getState().layout.id && typeof document !== "undefined") {
+        flushSync(() => useLayoutsStore.setState({ phase: "ready" }));
+        document.querySelector<HTMLButtonElement>("[data-layout-trigger]")?.focus();
+      } else useLayoutsStore.setState({ phase: "ready" });
+    }
   };
   const name = (input: string, ownId?: string) => {
     const problem = layoutNameProblem(input, useLayoutsStore.getState().layouts, ownId);
@@ -123,11 +153,14 @@ export function createLayoutCommands(deps: LayoutCommandsDeps) {
       await saver.save();
       const next = await deps.restore(await deps.get(first.id));
       await saver.saveAndSuspend();
+      const pending = { id, next, resume: () => saver.resume() };
+      pendingDelete = pending;
       try { await deps.delete(id); }
-      catch (error) { saver.resume(); throw error; }
-      clearUnsaved("layout", Number.MAX_SAFE_INTEGER, layoutPath(id));
-      deps.install(next);
-      await afterMutation();
+      catch (error) {
+        if (await reconcileDeletion()) return;
+        throw error;
+      }
+      await finishDeletion(pending);
     }),
     resetPlacement: () => {
       if (useLayoutsStore.getState().phase !== "ready") return;

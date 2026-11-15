@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type { Layout } from "../../api/generated/Layout";
 import type { LayoutInput } from "../../api/generated/LayoutInput";
+import { ApiRequestError } from "../../api/http";
 import { type Autosave, startAutosave } from "../../persist/autosave";
 import { restoreLayout } from "../../persist/restore";
 import { chartWindows, DEFAULT_LAYOUT, useLayoutStore } from "../../stores/layout";
@@ -58,6 +59,52 @@ test("보내지 못한 편집 저장에 실패하면 다음 레이아웃을 읽�
   expect(get).not.toHaveBeenCalled();
   expect(install).not.toHaveBeenCalled();
   expect(useLayoutStore.getState().layout.id).toBe(DEFAULT_LAYOUT.id);
+});
+
+test.each([false, true])("레이아웃 저장 순서가 거절되면 배경 저장 여부와 관계없이 전환하지 않는다: %s", async (background) => {
+  put = async () => { throw new ApiRequestError("stale_revision", "더 새 레이아웃이 있습니다"); };
+  useLayoutStore.getState().setPeriod(CELL, "W");
+  if (background) await vi.advanceTimersByTimeAsync(1000);
+  await expect(setup().open("next")).rejects.toThrow("더 새 레이아웃이 있습니다");
+  expect(install).not.toHaveBeenCalled();
+  expect(useLayoutStore.getState().layout.id).toBe(DEFAULT_LAYOUT.id);
+  expect(chartWindows(useLayoutStore.getState().layout)[0]!.period).toBe("W");
+  expect(usePersistStore.getState().saves.layout.kind).toBe("failed");
+});
+
+test.each([false, true])("지우기 결과를 확인할 수 없으면 저장을 멈추고 다음 명령에서 실제 존재 여부를 확인한다: %s", async (deleted) => {
+  const deletion = deferred<void>();
+  let available = false;
+  const commands = setup({
+    get: async (id) => {
+      if (id === "next") return stored(id);
+      if (!available) throw new ApiRequestError("network", "확인 연결 끊김");
+      if (deleted) throw new ApiRequestError("not_found", "레이아웃이 없습니다");
+      return stored(id);
+    },
+    delete: () => deletion.promise,
+  });
+  const deleting = commands.delete();
+  const rejected = expect(deleting).rejects.toThrow("지우기 결과를 확인하지 못했습니다");
+  await vi.advanceTimersByTimeAsync(0);
+  useLayoutStore.getState().setPeriod(CELL, "W");
+  deletion.reject(new ApiRequestError("network", "응답 끊김"));
+  await rejected;
+  autosave.flush();
+  autosave.retry();
+  await vi.advanceTimersByTimeAsync(70_000);
+  expect(sent).toHaveLength(0);
+  available = true;
+  await commands.refresh();
+  await vi.advanceTimersByTimeAsync(0);
+  if (deleted) {
+    expect(install).toHaveBeenCalledOnce();
+    expect(install.mock.calls[0]![0].layout.id).toBe("next");
+    expect(sent).toHaveLength(0);
+  } else {
+    expect(install).not.toHaveBeenCalled();
+    expect(sent.at(-1)).toMatchObject({ id: DEFAULT_LAYOUT.id, windows: [{ period: "W" }, {}, {}, {}] });
+  }
 });
 
 test("다음 레이아웃을 읽는 동안의 편집도 바꾸기 전에 원래 레이아웃에 저장하고 명령을 겹치지 않는다", async () => {

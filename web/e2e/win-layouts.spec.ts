@@ -132,6 +132,58 @@ test("이 레이아웃 범위의 드로잉이 있으면 지우기를 거절하�
   expect(scenario.documents.layoutSummaries()).toHaveLength(2);
 });
 
+test("서버가 더 새 저장 순서 때문에 편집을 거절하면 레이아웃을 바꾸지 않고 미저장본을 남긴다", async ({ page, scenario }) => {
+  scenario.documents.saveLayout({ ...scenario.documents.layout(), id: "01900000-0000-7000-8000-0000000000b1", name: "복기", revision: 1 });
+  await page.goto("/");
+  await expect(cell(page)).toHaveAttribute("aria-busy", "false");
+  scenario.documents.saveLayout({ ...scenario.documents.layout(), revision: Date.parse("2030-01-01") });
+  await topbar(page).getByRole("button", { name: "주", exact: true }).click();
+  await trigger(page).click();
+  await menu(page).getByRole("menuitemradio", { name: "복기", exact: true }).click();
+  await expect(trigger(page)).toBeEnabled();
+  await expect(trigger(page)).toHaveAccessibleName("레이아웃: 기본");
+  await expect(cell(page)).toHaveAttribute("aria-label", / 주$/);
+  expect(firstChart(scenario.documents.layout()).period).toBe("D");
+  const draft = await page.evaluate(() => {
+    const raw = localStorage.getItem("vv.unsaved.layout");
+    return raw ? JSON.parse(raw).body : null;
+  });
+  expect(draft).toContain('"period":"W"');
+});
+
+for (const unavailable of [false, true]) {
+  test(`지우기 응답을 잃어도 저장을 재개하기 전에 존재 여부를 확인한다: ${unavailable ? "확인 연결도 끊김" : "바로 확인"}`, async ({ page, scenario }) => {
+    const id = "01900000-0000-7000-8000-0000000000b1";
+    scenario.documents.saveLayout({ ...scenario.documents.layout(), id, name: "복기", revision: 1 });
+    await page.goto("/");
+    await expect(cell(page)).toHaveAttribute("aria-busy", "false");
+    let canCheck = !unavailable;
+    scenario.on((url, request) => url.pathname === `/api/layouts/${DEFAULT_LAYOUT_ID}` && request.method() === "GET", () => canCheck
+      ? { status: 404, body: { error: { code: "not_found", message: "레이아웃이 없습니다" } } }
+      : { status: 503, body: { error: { code: "internal", message: "확인 연결 끊김" } } });
+    const deletion = scenario.hold((url, request) => url.pathname === `/api/layouts/${DEFAULT_LAYOUT_ID}` && request.method() === "DELETE");
+    await action(page, "지우기");
+    await page.getByRole("button", { name: "레이아웃 지우기", exact: true }).click();
+    await deletion.received;
+    expect(scenario.documents.deleteLayout(DEFAULT_LAYOUT_ID)).toBe(true);
+    await topbar(page).getByRole("button", { name: "주", exact: true }).click();
+    deletion.reply({ status: 503, body: { error: { code: "internal", message: "지우기 응답 끊김" } } });
+    const sourcePuts = () => scenario.requests.filter((request) => request.method() === "PUT" && new URL(request.url()).pathname === `/api/layouts/${DEFAULT_LAYOUT_ID}`);
+    if (unavailable) {
+      await expect(page.getByRole("status").filter({ hasText: "지우기 결과를 확인하지 못했습니다" })).toBeVisible();
+      await page.clock.fastForward(70_000);
+      expect(sourcePuts()).toHaveLength(0);
+      canCheck = true;
+      await trigger(page).click();
+    }
+    await expect(trigger(page)).toHaveAccessibleName("레이아웃: 복기");
+    await expect(trigger(page)).toBeEnabled();
+    await page.clock.fastForward(70_000);
+    expect(sourcePuts()).toHaveLength(0);
+    expect(scenario.documents.layoutSummaries().map((entry) => entry.id)).toEqual([id]);
+  });
+}
+
 test("닫은 창과 기본 도킹 배치는 메뉴의 배치 되돌리기로 되살린다", async ({ page, scenario }) => {
   const base = scenario.documents.layout();
   const placement = { v: 1, dock: { root: { kind: "split", dir: "row", ratio: 0.3, first: { kind: "group", id: "side", tabs: ["watchlist", "screener", "objects"], active: "watchlist" }, second: { kind: "group", id: "chart", tabs: ["cell-0"], active: "cell-0" } }, floats: [] }, canvas: null };
@@ -167,7 +219,7 @@ test("레이아웃 메뉴를 키보드로 열고 이동·선택·닫기와 초�
   await page.keyboard.press("ArrowDown");
   await page.keyboard.press("Enter");
   await expect(trigger(page)).toHaveAccessibleName("레이아웃: 복기");
-  await trigger(page).focus();
+  await expect(trigger(page)).toBeFocused();
   await page.keyboard.press("Space");
   await expect(menu(page)).toBeVisible();
   await page.keyboard.press("Escape");

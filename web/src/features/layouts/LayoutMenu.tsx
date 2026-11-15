@@ -32,7 +32,7 @@ export function LayoutMenu() {
   ];
   return (
     <div ref={root} className="contents">
-      <button type="button" className="tb-btn max-w-[104px] max-lg:max-w-14 aria-expanded:bg-accent-soft aria-expanded:text-accent" aria-label={`레이아웃: ${layout.name}`} title={`레이아웃: ${layout.name}`} aria-haspopup="menu" aria-expanded={open} disabled={offline || busy} onClick={() => {
+      <button data-layout-trigger="" type="button" className="tb-btn max-w-[104px] max-lg:max-w-14 aria-expanded:bg-accent-soft aria-expanded:text-accent" aria-label={`레이아웃: ${layout.name}`} title={`레이아웃: ${layout.name}`} aria-haspopup="menu" aria-expanded={open} disabled={offline || busy} onClick={() => {
         if (open) { setOpen(false); return; }
         void layoutCommands.refresh().then(() => setOpen(true)).catch(showLayoutError);
       }}><span className="truncate">{layout.name}</span><ChevronIcon /></button>

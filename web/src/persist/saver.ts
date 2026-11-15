@@ -23,6 +23,7 @@ export interface SaverOptions<T extends object> {
   shrink?(): boolean;
   path(): string;
   revision: number;
+  acceptStaleRevision?: boolean;
   send(path: string, json: string, opts: { keepalive: boolean }): Promise<unknown>;
   unsaved?: { write(u: Unsaved): void; clear(upTo: number): void };
   onState(state: SaveState): void;
@@ -132,8 +133,7 @@ export function createSaver<T extends object>(o: SaverOptions<T>): Saver<T> {
     inFlight--;
     if (inFlight === 0) { settled.forEach((resolve) => resolve()); settled.clear(); }
     if (stopped) return;
-    // stale_revision: 서버에 이것보다 새 편집(이 탭의 나중 요청, 또는 다른 탭)이 이미 있다. 이 본문은 할 일을 마쳤다.
-    const done = error === null || (error instanceof ApiRequestError && error.code === "stale_revision");
+    const done = error === null || (o.acceptStaleRevision !== false && error instanceof ApiRequestError && error.code === "stale_revision");
     const tooLarge = error instanceof ApiRequestError && error.code === "payload_too_large";
     if (done || tooLarge) o.unsaved?.clear(req.revision);
     if (done) savedEdits = Math.max(savedEdits, upTo);

@@ -227,7 +227,7 @@ export class Scenario {
     if (path === "/api/layouts" && method === "GET") return { body: this.documents.layoutSummaries() };
     if (path.startsWith("/api/layouts/")) {
       const id = decodeURIComponent(path.slice("/api/layouts/".length));
-      if (method === "GET") return { body: this.documents.layout(id) };
+      if (method === "GET") return this.documents.layoutSummaries().some((layout) => layout.id === id) ? { body: this.documents.layout(id) } : error(404, "not_found", "레이아웃이 없습니다");
       if (method === "PUT") {
         const value: LayoutInput = request.postDataJSON();
         if ([...value.name.trim()].length < 1 || [...value.name.trim()].length > 20) return error(400, "bad_request", "레이아웃 이름은 1~20자여야 합니다");

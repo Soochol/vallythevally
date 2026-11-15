@@ -110,6 +110,7 @@ export function startAutosave(deps: AutosaveDeps): Autosave {
         tooLarge: exceedsServerFieldLimits,
         path: () => path,
         revision,
+        acceptStaleRevision: false,
         send: async (path, json, opts) => {
           const sent = layoutSent(json);
           owner.sending.add(sent.charts);
