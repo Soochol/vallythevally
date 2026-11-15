@@ -70,3 +70,53 @@ test("드로잉과 막대 사이에 빈자리가 있으면 막대 너머보다 �
   const style = { width: 333, height: 38 };
   expect(avoidDock(422, [-22, 122], style, pane, { left: 300, top: 156, right: 726, bottom: 196 }, { left: 500, top: 30, right: 620, bottom: 100 }, 8, 8)).toEqual({ left: 422, top: 110 });
 });
+
+test("기본 자리가 도크를 피해도 선택 드로잉을 덮으면 비킨다", () => {
+  expect(avoidDock(150, [100], { width: 300, height: 38 }, { width: 900, height: 600 },
+    { left: 100, top: 400, right: 500, bottom: 440 }, { left: 200, top: 100, right: 400, bottom: 200 }, 8, 8))
+    .toEqual({ left: 150, top: 54 });
+});
+
+test("도크 가장자리 후보가 막혀도 드로잉 옆의 가까운 빈자리를 찾는다", () => {
+  expect(avoidDock(200, [160], { width: 200, height: 40 }, { width: 600, height: 400 },
+    { left: 200, top: 100, right: 400, bottom: 140 }, { left: 240, top: 0, right: 300, bottom: 400 }, 8, 8))
+    .toEqual({ left: 308, top: 160 });
+});
+
+test("가로와 세로를 함께 옮겨 두 장애물 사이의 빈자리를 찾는다", () => {
+  expect(avoidDock(200, [100], { width: 100, height: 40 }, { width: 500, height: 300 },
+    { left: 0, top: 0, right: 300, bottom: 180 }, { left: 300, top: 180, right: 500, bottom: 300 }, 8, 8))
+    .toEqual({ left: 192, top: 188 });
+});
+
+test("낮은 칸에서 8px 간격을 없애면 두 장애물을 겹치지 않고 피한다", () => {
+  expect(avoidDock(183, [40], { width: 333, height: 38 }, { width: 646, height: 124 },
+    { left: 134, top: 48, right: 512, bottom: 84 }, { left: 350, top: 90, right: 500, bottom: 116 }, 8, 8))
+    .toEqual({ left: 183, top: 10 });
+});
+
+test("칸 여백을 없애야 들어가면 두 장애물을 피하며 칸 끝에 붙인다", () => {
+  expect(avoidDock(20, [20], { width: 80, height: 40 }, { width: 200, height: 100 },
+    { left: 0, top: 40, right: 200, bottom: 100 }, { left: 100, top: 0, right: 200, bottom: 40 }, 8, 8))
+    .toEqual({ left: 20, top: 0 });
+});
+
+test("드로잉까지 피할 수 없으면 칸 안에서 도크를 피한다", () => {
+  expect(avoidDock(40, [50], { width: 80, height: 40 }, { width: 200, height: 150 },
+    { left: 0, top: 60, right: 200, bottom: 100 }, { left: 0, top: 0, right: 200, bottom: 150 }, 8, 8))
+    .toEqual({ left: 40, top: 12 });
+});
+
+test("장애물을 모두 피할 수 없는 칸에서도 막대는 같은 칸 안 자리에 남는다", () => {
+  const pane = { width: 200, height: 100 };
+  const style = { width: 80, height: 40 };
+  const dock = { left: 0, top: 0, right: 200, bottom: 100 };
+  const drawing = { left: 0, top: 0, right: 200, bottom: 100 };
+  expect(avoidDock(190, [90], style, pane, dock, drawing, 8, 8)).toEqual({ left: 120, top: 60 });
+  expect(avoidDock(-20, [-10], style, pane, dock, drawing, 8, 8)).toEqual({ left: 0, top: 0 });
+});
+
+test("막대보다 작은 칸에는 왼쪽 위를 맞춰 조작 부분을 남긴다", () => {
+  expect(avoidDock(50, [50], { width: 80, height: 40 }, { width: 60, height: 30 },
+    { left: 0, top: 0, right: 60, bottom: 30 }, null, 8, 8)).toEqual({ left: 0, top: 0 });
+});
