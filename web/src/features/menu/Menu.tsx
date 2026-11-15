@@ -42,7 +42,7 @@ export function Menu({ label, items, onClose, root, className, style, children }
     if (["ArrowDown", "ArrowUp", "Home", "End"].includes(e.key)) {
       e.preventDefault();
       all[menuIndex(all.map((b) => b.textContent ?? ""), i, e.key)]?.focus();
-    } else if (e.key === "Tab" && !children) onClose(true);
+    } else if (e.key === "Tab" && (!children || e.shiftKey || document.activeElement !== all.at(-1))) onClose(true);
     else if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && e.key !== " ") {
       e.preventDefault();
       const now = Date.now();
