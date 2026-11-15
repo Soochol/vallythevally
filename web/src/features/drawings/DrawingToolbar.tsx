@@ -124,7 +124,7 @@ function useDockPlacement(root: RefObject<HTMLElement | null>, run: RefObject<HT
       const normalWidth = Math.max(least, Math.min(natural, slot > 0 ? end - homeLeft : area.width - reserve));
       const normal = [Math.max(margin, homeLeft), margin, normalWidth, bar.offsetHeight].join(",");
       if (bar.dataset.dockNormal !== normal) bar.dataset.dockNormal = normal;
-      const compact = stage.dataset.legendDensity === "compact";
+      const compact = stage.hasAttribute("data-legend-beside");
       const compactLeft = parseFloat(stage.style.getPropertyValue("--legend-dock-left"));
       const compactWidth = parseFloat(stage.style.getPropertyValue("--legend-dock-width"));
       const home = compact ? { left: compactLeft, top: 8 } : { left: Math.max(margin, homeLeft), top: margin };
@@ -152,7 +152,7 @@ function useDockPlacement(root: RefObject<HTMLElement | null>, run: RefObject<HT
     observer.observe(bar);
     observer.observe(stage);
     const presentation = new MutationObserver(fit);
-    presentation.observe(stage, { attributes: true, attributeFilter: ["data-legend-density", "style"] });
+    presentation.observe(stage, { attributes: true, attributeFilter: ["data-legend-beside", "style"] });
     fit();
     return () => {
       observer.disconnect();

@@ -249,6 +249,7 @@ export class Legend {
     };
     const normal = () => {
       if (this.host.dataset.legendDensity) delete this.host.dataset.legendDensity;
+      delete this.host.dataset.legendBeside;
       set("--legend-shift", "0px");
     };
     normal();
@@ -277,9 +278,20 @@ export class Legend {
       set("--legend-shift", "0px");
       const compact = this.contentBounds();
       const left = compact.right - hostBox.left + 8;
-      set("--legend-dock-left", `${left}px`);
-      set("--legend-dock-width", `${Math.max(0, chartBox.right - hostBox.left - viewport.axisWidth - 8 - left)}px`);
+      const width = chartBox.right - hostBox.left - viewport.axisWidth - 8 - left;
+      const grip = toolbar?.querySelector(".draw-grip");
+      const tools = [...this.host.querySelectorAll(".drawing-toolbar .draw-tool")];
+      if (toolbar && grip && tools.length > 0) {
+        const style = getComputedStyle(toolbar);
+        const minimum = grip.getBoundingClientRect().width + Math.max(...tools.map((tool) => tool.getBoundingClientRect().width)) + parseFloat(style.columnGap) + parseFloat(style.paddingLeft) + parseFloat(style.paddingRight) + parseFloat(style.borderLeftWidth) + parseFloat(style.borderRightWidth);
+        if (width >= minimum) {
+          this.host.dataset.legendBeside = "";
+          set("--legend-dock-left", `${left}px`);
+          set("--legend-dock-width", `${width}px`);
+        }
+      }
     }
+    if (!this.host.hasAttribute("data-legend-beside")) for (const name of ["--legend-dock-left", "--legend-dock-width"]) this.host.style.removeProperty(name);
     if (toolbar) toolbar.scrollLeft = scroll;
     this.finalGeometry = this.geometrySnapshot();
   }
@@ -292,6 +304,7 @@ export class Legend {
     this.presentationMutations.disconnect();
     this.toolbarMutations.disconnect();
     delete this.host.dataset.legendDensity;
+    delete this.host.dataset.legendBeside;
     for (const name of ["--legend-shift", "--legend-dock-left", "--legend-dock-width"]) this.host.style.removeProperty(name);
     this.root.remove();
   }

@@ -103,6 +103,6 @@ input[type=checkbox], input[type=range] { accent-color:var(--accent); }
   [data-legend-density=compact] .chart-legend [data-price-row]>span.self-center { line-height:14px; }
   [data-legend-density=compact] .chart-legend [data-price-row]>span:first-child { font-size:14px; }
   [data-legend-density=compact] .chart-legend [data-ohlc] { font-size:11px; line-height:14px; }
-  [data-legend-density=compact] .drawing-toolbar { min-width:0; max-width:var(--legend-dock-width); }
-  [data-legend-density=compact] .drawing-toolbar:not([data-moved]) { left:var(--legend-dock-left); top:8px; transform:none; }
+  [data-legend-beside] .drawing-toolbar { min-width:0; max-width:var(--legend-dock-width); }
+  [data-legend-beside] .drawing-toolbar:not([data-moved]) { left:var(--legend-dock-left); top:8px; transform:none; }
 }
