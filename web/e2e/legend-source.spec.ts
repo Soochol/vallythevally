@@ -122,6 +122,16 @@ test("all legend owners bound native main and shifted future fields without hove
   expect(after.counts.paint).toBeGreaterThan(before.counts.paint);
   expect(after.projections).toHaveLength(before.projections);
   expect(after.projections.every((projection) => projection.safe)).toBe(true);
+  await page.setViewportSize({ width: 1440, height: 300 });
+  await frames(page, 60);
+  await expect(page.locator("[data-chart-overlay-host]")).toHaveAttribute("data-legend-density", "compact");
+  const compact = { projection: await page.evaluate(() => window.legendSources.projections.at(-1)), fields: await boundedFields(page) };
+  for (const button of await cell(page).locator(".chart-legend button[data-indicator-command]:not([hidden])").all()) {
+    await expect(button).toHaveCSS("width", "18px");
+    await expect(button).toHaveCSS("height", "18px");
+  }
+  await page.setViewportSize({ width: 1440, height: 1200 });
+  await frames(page, 60);
   const hidden = cell(page).locator('[data-indicator-row="hidden"]');
   await expect(hidden.getByRole("button", { name: /보이기$/ })).toHaveCSS("width", "18px");
   await hidden.hover();
@@ -130,7 +140,7 @@ test("all legend owners bound native main and shifted future fields without hove
   await cell(page).locator('[data-compare-row="000660"]').hover();
   await cell(page).getByRole("button", { name: "SK하이닉스 비교 종목 지우기", exact: true }).click();
   await expect(cell(page).locator("[data-compare-row]")).toHaveCount(0);
-  await writeFile(testInfo.outputPath("combined-native-fields.json"), JSON.stringify({ pending, before, after, future, samples }, null, 2));
+  await writeFile(testInfo.outputPath("combined-native-fields.json"), JSON.stringify({ pending, before, after, future, samples, compact }, null, 2));
   await page.screenshot({ path: testInfo.outputPath("combined-native.png") });
 });
 
@@ -157,7 +167,8 @@ for (const count of [4, 300, 3000]) test(`source ${count} uses bounded projectio
   const before = await page.evaluate(() => ({ counts: { ...window.legendSources.counts }, projection: window.legendSources.projections.at(-1), nodes: document.querySelectorAll("*").length, elements: [...document.querySelectorAll("*")].map((element) => `${element.tagName}:${element.getAttribute("class") ?? ""}`) }));
   expect(before.projection?.fields.find((field) => field.key === "price/0")?.alternatives).toHaveLength(count);
   expect(before.projection?.fields).toHaveLength(10);
-  expect(before.projection?.nodes).toBeLessThan(70);
+  expect(before.projection?.nodes).toBe(37);
+  expect(before.projection?.peakNodes).toBe(47);
   for (const bar of extended.slice(-Math.min(count, 20), -1)) await hover(page, bar.t);
   await frames(page, 30);
   const hovered = await page.evaluate(() => ({ counts: { ...window.legendSources.counts }, nodes: document.querySelectorAll("*").length, elements: [...document.querySelectorAll("*")].map((element) => `${element.tagName}:${element.getAttribute("class") ?? ""}`) }));
