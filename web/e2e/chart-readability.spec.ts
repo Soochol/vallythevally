@@ -148,6 +148,86 @@ const storedDocuments = (scenario: Scenario) => JSON.stringify({ layout: scenari
 
 const storedPresentation = (scenario: Scenario) => JSON.stringify({ placement: scenario.documents.layout().placement, charts: scenario.documents.layout().windows.filter((window) => window.kind === "chart").map((window) => window.chartSettings), drawing: scenario.documents.uiPrefs().drawing });
 
+for (const pinned of [false, true]) test(`minimum canvas toolbar retains help, movement and ${pinned ? "full pinned tools" : "default tools"}`, async ({ page, scenario }, testInfo) => {
+  const base = scenario.documents.layout();
+  scenario.documents.saveLayout({ ...base, revision: base.revision + 1,
+    windows: [{ id: "cell-0", kind: "chart", link: null, symbol: "005930", venue: "combined", period: "D", chartSettings: SETTINGS }],
+    placement: { v: 1, dock: null, canvas: { rects: { "cell-0": { x: .02, y: .02, w: .28, h: .32 } }, order: ["cell-0"] } },
+  });
+  const state = scenario.documents.uiState();
+  scenario.documents.saveUiState({ ...state, layoutMode: "canvas", drawing: { ...scenario.documents.uiPrefs().drawing, pinnedTools: pinned ? TOOLS.map((tool) => tool.tool) : [], dockAt: null } });
+  await page.addInitScript(installChartProbe);
+  await page.setViewportSize({ width: 1024, height: 768 });
+  await page.goto("/");
+  await settle(page, 1);
+  await quietPresentation(page);
+  const saved = storedPresentation(scenario);
+  const documents = storedDocuments(scenario);
+  const dock = page.getByRole("navigation", { name: "드로잉 도구" });
+  const grip = dock.getByRole("button", { name: "드로잉 도구 막대 옮기기", exact: true });
+  const help = dock.getByRole("button", { name: "드로잉 단축키 도움말", exact: true });
+  const boxes = await dock.evaluate((bar) => {
+    const style = getComputedStyle(bar);
+    const grip = bar.querySelector(".draw-grip");
+    const tools = [...bar.querySelectorAll(".draw-tool")];
+    if (!grip || tools.length === 0) throw new Error("도구와 손잡이가 없습니다");
+    return { toolbar: bar.getBoundingClientRect().toJSON(), grip: grip.getBoundingClientRect().toJSON(), tools: tools.map((tool) => tool.getBoundingClientRect().toJSON()), minimum: grip.getBoundingClientRect().width + Math.max(...tools.map((tool) => tool.getBoundingClientRect().width)) + parseFloat(style.columnGap) + parseFloat(style.paddingLeft) + parseFloat(style.paddingRight) + parseFloat(style.borderLeftWidth) + parseFloat(style.borderRightWidth) };
+  });
+  await writeFile(testInfo.outputPath("minimum-toolbar-rectangles.json"), JSON.stringify({ boxes, charts: await geometry(page) }, null, 2));
+  await page.screenshot({ path: testInfo.outputPath("minimum-canvas-chart.png") });
+  expect.soft(boxes.toolbar.width).toBeGreaterThanOrEqual(boxes.minimum);
+  const fullyActionable = async (button: ReturnType<typeof dock.getByRole>) => {
+    await button.scrollIntoViewIfNeeded();
+    await expect.poll(() => button.evaluate((element) => {
+      const bar = element.closest("nav")?.getBoundingClientRect();
+      const box = element.getBoundingClientRect();
+      return bar !== undefined && box.left >= bar.left && box.right <= bar.right && box.top >= bar.top && box.bottom <= bar.bottom && [[box.left + 1, box.top + box.height / 2], [box.right - 1, box.top + box.height / 2], [box.left + box.width / 2, box.top + 1], [box.left + box.width / 2, box.bottom - 1]].every(([x, y]) => x !== undefined && y !== undefined && element.contains(document.elementFromPoint(x, y)));
+    })).toBe(true);
+  };
+  await fullyActionable(help);
+  await help.click();
+  await expect(page.getByRole("dialog", { name: "드로잉 단축키", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "도움말 닫기", exact: true }).click();
+  if (pinned) {
+    const folded = dock.getByRole("button", { name: "고정 도구 펼치기", exact: true });
+    await fullyActionable(folded);
+    await folded.click();
+    const last = TOOLS.at(-1);
+    if (!last) throw new Error("고정 도구가 없습니다");
+    await page.getByRole("menu", { name: "고정 도구", exact: true }).getByRole("menuitem", { name: last.label, exact: false }).click();
+  }
+  expect(storedPresentation(scenario)).toBe(saved);
+  expect(storedDocuments(scenario)).toBe(documents);
+  await fullyActionable(grip);
+  const home = await dock.boundingBox();
+  const handle = await grip.boundingBox();
+  if (!home || !handle) throw new Error("도구 막대가 없습니다");
+  const from = { x: handle.x + handle.width / 2, y: handle.y + handle.height / 2 };
+  await page.mouse.move(from.x, from.y);
+  await page.mouse.down();
+  await page.mouse.move(from.x + 1, from.y + 1);
+  await grip.dispatchEvent("pointercancel");
+  await page.mouse.up();
+  await settle(page, 1);
+  expect(await dock.boundingBox()).toEqual(home);
+  expect(storedPresentation(scenario)).toBe(saved);
+  await page.mouse.move(from.x, from.y);
+  await page.mouse.down();
+  await page.mouse.move(from.x, from.y + 60, { steps: 8 });
+  await page.mouse.up();
+  await settle(page, 1);
+  await expect.poll(() => scenario.documents.uiPrefs().drawing.dockAt).not.toBeNull();
+  const moved = await dock.boundingBox();
+  const prefs = scenario.documents.uiPrefs().drawing;
+  await page.reload();
+  await settle(page, 1);
+  expect(await dock.boundingBox()).toEqual(moved);
+  expect(scenario.documents.uiPrefs().drawing).toEqual(prefs);
+  await fullyActionable(help);
+  await help.click();
+  await expect(page.getByRole("dialog", { name: "드로잉 단축키", exact: true })).toBeVisible();
+});
+
 async function quietPresentation(page: Page) {
   await page.mouse.move(0, 0);
   await expect.poll(() => page.evaluate(async () => {
