@@ -180,6 +180,7 @@ test("휴대폰 관심종목도 그룹으로 묶어 보이고 편집에서 그�
   const sheet = page.getByRole("region", { name: "관심종목", exact: true });
   await expect(sheet.getByRole("button", { name: "반도체 1종목", exact: true })).toBeVisible();
   await expect(sheet.getByText("그룹 없음", { exact: true })).toBeVisible();
+  for (const code of ["005935", "000660"]) await expect(sheet.locator(`li[data-code="${code}"]`).getByText(code)).toHaveCount(0);
   await sheet.getByRole("button", { name: "편집", exact: true }).click();
   await sheet.locator('li[data-code="000660"]').getByRole("button", { name: /그룹으로 옮기기$/ }).click();
   await page.getByRole("menu", { name: /그룹으로 옮기기$/ }).getByRole("menuitemradio", { name: "반도체", exact: true }).click();

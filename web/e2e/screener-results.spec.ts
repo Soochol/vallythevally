@@ -3,7 +3,7 @@ import { resolve } from "node:path";
 import { allResult } from "./fixtures/screener";
 import type { ScreenerResult } from "../src/api/generated/ScreenerResult";
 import { cell, chartOf, expect, test } from "./screener-harness";
-import { openScreener, panel, rows, runButton, updateBand, waitForUpdateToFinish } from "./screener-page";
+import { openScreener, panel, rowOf, rows, runButton, updateBand, waitForUpdateToFinish } from "./screener-page";
 
 
 
@@ -36,7 +36,7 @@ test("결과 표 정렬과 키보드 이동, 행에서 Enter로 칸 열기를 �
     await page.screenshot({ path: resolve(`../target/ux-screens/screener-results-${size.width}x${size.height}.png`) });
   }
   const other = result.rows.find((r) => r.symbol !== nextCode)!;
-  await rows(page).filter({ hasText: other.symbol }).getByRole("button").focus();
+  await rowOf(page, other.symbol).getByRole("button").focus();
   await page.keyboard.press("Enter");
   await expect(cell(page)).toHaveAttribute("aria-label", `칸 1: ${other.name} 통합 일`);
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
