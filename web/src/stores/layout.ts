@@ -131,6 +131,7 @@ interface LayoutState {
   steps: readonly ArrangementStep[];
   load(layout: EditableLayout): void;
   rename(name: string): void;
+  setCrosshairSync(enabled: boolean): void;
   arrange(next: Arrangement): void;
   undoArrangement(): void;
   setDock(dock: DockPlacement): void;
@@ -211,6 +212,7 @@ export const useLayoutStore = create<LayoutState>()((set, get) => {
     steps: [],
     load: (layout) => set((s) => ({ layout, steps: [], session: s.session + 1 })),
     rename: (name) => set((s) => s.layout.name === name ? s : { layout: { ...s.layout, name }, revision: s.revision + 1 }),
+    setCrosshairSync: (enabled) => set((s) => s.layout.sync.crosshair === enabled ? s : { layout: { ...s.layout, sync: { ...s.layout.sync, crosshair: enabled } }, revision: s.revision + 1 }),
     arrange,
     undoArrangement: () =>
       set((s) => {
