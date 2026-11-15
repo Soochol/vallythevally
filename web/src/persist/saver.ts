@@ -43,6 +43,11 @@ const CONDITIONAL_ATTEMPTS = 3;
 export interface Saver<T extends object> {
   changed(when?: "soon" | "now"): void;
   retry(): void;
+  save(): Promise<void>;
+  saveAndSuspend(): Promise<void>;
+  resume(): void;
+  advanceRevision(revision: number): void;
+  stop(): Promise<void>;
   commitConditional(c: ConditionalCommit<T>): Promise<CommitOutcome>;
   /**
    * 탭이 숨을 때: 보내지 못한 편집이 있으면 기다리지 않고 keepalive로 보낸다.
@@ -53,6 +58,16 @@ export interface Saver<T extends object> {
 
 export function createSaver<T extends object>(o: SaverOptions<T>): Saver<T> {
   const now = o.now ?? Date.now;
+  let stopped = false;
+  let suspended = false;
+  let barrier = false;
+  const requests = new Set<Promise<unknown>>();
+  const request: SaverOptions<T>["send"] = (path, json, opts) => {
+    const pending = o.send(path, json, opts);
+    requests.add(pending);
+    void pending.finally(() => requests.delete(pending)).catch(() => {});
+    return pending;
+  };
   let edits = 0;
   let urgent = false;
   const nextDelay = () => (urgent ? 0 : o.debounceMs);
@@ -67,7 +82,7 @@ export function createSaver<T extends object>(o: SaverOptions<T>): Saver<T> {
   let shown: SaveState = { kind: "idle" };
   const show = (state: SaveState) => {
     shown = state;
-    o.onState(state);
+    if (!stopped) o.onState(state);
   };
 
   const cancel = () => {
@@ -76,6 +91,7 @@ export function createSaver<T extends object>(o: SaverOptions<T>): Saver<T> {
   };
   const schedule = (ms: number) => {
     cancel();
+    if (stopped || suspended || barrier) return;
     timer = setTimeout(() => {
       timer = null;
       run();
@@ -109,12 +125,13 @@ export function createSaver<T extends object>(o: SaverOptions<T>): Saver<T> {
     show({ kind: "saving" });
     let error: unknown = null;
     try {
-      await o.send(req.path, req.body, { keepalive });
+      await request(req.path, req.body, { keepalive });
     } catch (e) {
       error = e;
     }
     inFlight--;
     if (inFlight === 0) { settled.forEach((resolve) => resolve()); settled.clear(); }
+    if (stopped) return;
     // stale_revision: 서버에 이것보다 새 편집(이 탭의 나중 요청, 또는 다른 탭)이 이미 있다. 이 본문은 할 일을 마쳤다.
     const done = error === null || (error instanceof ApiRequestError && error.code === "stale_revision");
     const tooLarge = error instanceof ApiRequestError && error.code === "payload_too_large";
@@ -150,7 +167,7 @@ export function createSaver<T extends object>(o: SaverOptions<T>): Saver<T> {
   }
 
   function run() {
-    if (inFlight > 0 || edits === savedEdits || edits === pause?.edits) return;
+    if (stopped || suspended || barrier || inFlight > 0 || edits === savedEdits || edits === pause?.edits) return;
     void send(false);
   }
 
@@ -174,21 +191,23 @@ export function createSaver<T extends object>(o: SaverOptions<T>): Saver<T> {
     run();
   }
   function flush() {
-    if (edits === savedEdits || edits === pause?.edits) return;
+    if (stopped || suspended || barrier || edits === savedEdits || edits === pause?.edits) return;
     void send(true);
   }
 
   async function commitConditional(c: ConditionalCommit<T>): Promise<CommitOutcome> {
+    if (stopped) return "superseded";
     flush();
     await settle();
+    if (stopped) return "superseded";
     pauseCurrent();
     const previous = shown;
     const saving: SaveState = { kind: "saving" };
     try {
       for (let attempt = 0; attempt < CONDITIONAL_ATTEMPTS; attempt++) {
-        if (!c.still()) return "superseded";
+        if (stopped || !c.still()) return "superseded";
         const latest = await c.read();
-        if (!c.still()) return "superseded";
+        if (stopped || !c.still()) return "superseded";
         const value = c.next(latest.value, previous);
         if (!value) return "conflict";
         const saved = { ...value, revision: latest.revision + 1 };
@@ -196,8 +215,10 @@ export function createSaver<T extends object>(o: SaverOptions<T>): Saver<T> {
         show(saving);
         o.unsaved?.write(req);
         try {
-          await o.send(req.path, req.body, { keepalive: false });
+          await request(req.path, req.body, { keepalive: false });
+          if (stopped) return "superseded";
         } catch (error) {
+          if (stopped) return "superseded";
           if (error instanceof ApiRequestError && error.code === "stale_revision") {
             o.unsaved?.clear(req.revision);
             continue;
@@ -218,21 +239,57 @@ export function createSaver<T extends object>(o: SaverOptions<T>): Saver<T> {
     }
   }
 
+  async function save(suspend: boolean) {
+    if (stopped || suspended || barrier) throw new Error("저장기를 사용할 수 없습니다");
+    barrier = true;
+    cancel();
+    const waiting = inFlight > 0;
+    try {
+      await settle();
+      if (stopped) throw new Error("저장기를 사용할 수 없습니다");
+      if (waiting && shown.kind === "failed") throw new Error(shown.reason === "error" ? shown.message : "레이아웃이 저장 한도를 넘습니다");
+      while (edits > savedEdits) {
+        await send(false);
+        if (stopped) throw new Error("저장기를 사용할 수 없습니다");
+        if (shown.kind === "failed") throw new Error(shown.reason === "error" ? shown.message : "레이아웃이 저장 한도를 넘습니다");
+      }
+      suspended = suspend;
+    } finally {
+      barrier = false;
+      if (!suspended && edits > savedEdits) schedule(nextDelay());
+    }
+  }
+
   return {
     changed(when = "soon") {
+      if (stopped) return;
       edits++;
       urgent ||= when === "now";
       keep();
-      if (inFlight > 0) return;
+      if (suspended || barrier || inFlight > 0) return;
       failures = 0;
       show({ kind: "pending" });
       schedule(nextDelay());
     },
     retry() {
+      if (stopped || suspended || barrier) return;
       if (pause?.kind === "retired") pause = null;
       failures = 0;
       run();
     },
+    save: () => save(false),
+    saveAndSuspend: () => save(true),
+    resume() {
+      if (stopped) return;
+      suspended = false;
+      run();
+    },
+    async stop() {
+      stopped = true;
+      cancel();
+      await Promise.allSettled([...requests]);
+    },
+    advanceRevision,
     commitConditional,
     flush,
   };

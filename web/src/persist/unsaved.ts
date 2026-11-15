@@ -29,9 +29,9 @@ export function writeUnsaved(target: SaveTarget, u: Unsaved) {
   }
 }
 
-export function clearUnsaved(target: SaveTarget, upTo: number) {
+export function clearUnsaved(target: SaveTarget, upTo: number, path?: string) {
   const u = readUnsaved(target);
-  if (u === null || u.revision > upTo) return;
+  if (u === null || u.revision > upTo || (path !== undefined && u.path !== path)) return;
   try {
     localStorage.removeItem(key(target));
   } catch {

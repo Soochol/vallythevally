@@ -488,3 +488,52 @@ test("보내는 중에 바로 저장을 청하면 앞 요청이 끝나는 즉시
   await vi.advanceTimersByTimeAsync(1);
   expect(sent).toEqual([1, 2, 3]);
 });
+
+test("저장 후 멈추기는 도중 편집까지 보내고 재개 전에는 새 요청을 만들지 않는다", async () => {
+  const first = deferred<void>();
+  const t = setup({ send: vi.fn<Send>().mockReturnValueOnce(first.promise).mockResolvedValue(undefined) });
+  t.edit({ n: 1 });
+  const barrier = t.saver.saveAndSuspend();
+  await vi.advanceTimersByTimeAsync(0);
+  t.edit({ n: 2 });
+  first.resolve();
+  await barrier;
+  expect(t.ns()).toEqual([1, 2]);
+  t.edit({ n: 3 });
+  t.saver.flush();
+  t.saver.retry();
+  await vi.advanceTimersByTimeAsync(10_000);
+  expect(t.ns()).toEqual([1, 2]);
+  t.saver.resume();
+  await vi.advanceTimersByTimeAsync(0);
+  expect(t.ns()).toEqual([1, 2, 3]);
+});
+
+test("멈추기 전 저장이 실패하면 거절하고 현재 편집은 다시 저장할 수 있다", async () => {
+  const send = vi.fn<Send>().mockRejectedValueOnce(new Error("실패")).mockResolvedValue(undefined);
+  const t = setup({ send });
+  t.edit({ n: 1 });
+  await expect(t.saver.saveAndSuspend()).rejects.toThrow("실패");
+  t.saver.retry();
+  await vi.advanceTimersByTimeAsync(0);
+  expect(t.ns()).toEqual([1, 1]);
+});
+
+test.each([true, false])("종료한 저장기의 늦은 응답은 상태와 미저장본을 건드리지 않는다: %s", async (ok) => {
+  const request = deferred<void>();
+  const t = setup({ send: () => request.promise });
+  t.edit({ n: 1 });
+  await vi.advanceTimersByTimeAsync(1000);
+  const stopped = t.saver.stop();
+  const states = [...t.states];
+  const draft = t.unsaved();
+  if (ok) request.resolve(); else request.reject(new Error("실패"));
+  await stopped;
+  t.saver.flush();
+  t.saver.retry();
+  t.edit({ n: 2 });
+  await vi.advanceTimersByTimeAsync(100_000);
+  expect(t.states).toEqual(states);
+  expect(t.unsaved()).toEqual(draft);
+  expect(t.ns()).toEqual([1]);
+});
