@@ -13,6 +13,7 @@ import type { FrameBindings } from "./WindowFrame";
 type Operation = { kind: "move" } | { kind: "resize"; handle: ResizeHandle };
 type Start = { pointer: number; window: WindowState; operation: Operation; point: { x: number; y: number }; rect: Rect; area: Area; expected: CanvasPlacement; session: number; topology: string; capture: HTMLElement };
 type Gesture = { kind: "idle" } | { kind: "pressed"; start: Start; next: CanvasPlacement } | { kind: "dragging"; start: Start; next: CanvasPlacement; atMinimum: boolean };
+type Maximization = { window: WindowId; base: CanvasPlacement };
 const NO_GUIDES: Guides = { x: null, y: null };
 const ARROWS: Record<string, { x: number; y: number }> = { ArrowLeft: { x: -16, y: 0 }, ArrowRight: { x: 16, y: 0 }, ArrowUp: { x: 0, y: -16 }, ArrowDown: { x: 0, y: 16 } };
 const topologyOf = (windows: readonly WindowState[]) => windows.map((window) => window.id).join("\n");
@@ -25,7 +26,8 @@ export function useCanvasInteraction(canvas: CanvasPlacement, windows: readonly 
   const [draft, setDraft] = useState<CanvasPlacement | null>(null);
   const [guides, setGuides] = useState(NO_GUIDES);
   const [dragging, setDragging] = useState(false);
-  const [maximized, setMaximized] = useState<WindowId | null>(null);
+  const [maximization, setMaximization] = useState<Maximization | null>(null);
+  const maximized = maximization?.base === canvas ? maximization.window : null;
   const maximizedRef = useRef(maximized);
   maximizedRef.current = maximized;
   const suppressedPointer = useRef<number | null>(null);
@@ -93,7 +95,7 @@ export function useCanvasInteraction(canvas: CanvasPlacement, windows: readonly 
     const cancelPointer = (event: globalThis.PointerEvent) => { const active = gesture.current; if (active.kind !== "idle" && active.start.pointer === event.pointerId) cancel(); };
     const key = (event: globalThis.KeyboardEvent) => {
       if (gesture.current.kind === "idle") {
-        if (event.key === "Escape" && maximizedRef.current) { event.preventDefault(); event.stopImmediatePropagation(); setMaximized(null); }
+        if (event.key === "Escape" && maximizedRef.current) { event.preventDefault(); event.stopImmediatePropagation(); setMaximization(null); }
         return;
       }
       event.preventDefault();
@@ -129,16 +131,22 @@ export function useCanvasInteraction(canvas: CanvasPlacement, windows: readonly 
   useEffect(() => {
     const active = gesture.current;
     if (active.kind !== "idle" && !valid(active.start)) finishRef.current(true);
-    if (maximized && !windows.some((window) => window.id === maximized)) setMaximized(null);
-  }, [canvas, session, topology, area.w, area.h, maximized, windows]);
+    if (maximization && maximization.base !== canvas) setMaximization(null);
+  }, [canvas, session, topology, area.w, area.h, maximization, windows]);
 
-  useEffect(() => { setMaximized(null); }, [session, topology]);
+  useEffect(() => { setMaximization(null); }, [session, topology]);
 
   const choose = (window: WindowState) => { if (window.kind === "chart") useSelectionStore.getState().setActiveCell(window.id); };
-  const toggleMaximize = (id: WindowId) => {
+  const toggleMaximize = (window: WindowState) => {
     finishRef.current(true);
-    setMaximized((current) => current === id ? null : id);
-    document.querySelector<HTMLElement>(`[data-window-header="${id}"]`)?.focus({ preventScroll: true });
+    const state = useLayoutStore.getState();
+    const expected = state.layout.placement.canvas;
+    if (!expected) return;
+    const base = bringToFront(expected, window.id);
+    if (!state.commitCanvas({ session: state.session, expected, next: base })) return;
+    choose(window);
+    setMaximization((current) => current?.window === window.id && current.base === base ? null : { window: window.id, base });
+    document.querySelector<HTMLElement>(`[data-window-header="${window.id}"]`)?.focus({ preventScroll: true });
   };
   const press = (event: PointerEvent<HTMLDivElement>, window: WindowState, operation: Operation) => {
     if (event.button !== 0 || !event.isPrimary || maximized || gesture.current.kind !== "idle") return;
@@ -160,8 +168,8 @@ export function useCanvasInteraction(canvas: CanvasPlacement, windows: readonly 
   };
   const keyHeader = (event: KeyboardEvent<HTMLDivElement>, window: WindowState) => {
     if (event.target !== event.currentTarget) return;
-    if (event.key === "Escape" && maximized) { event.preventDefault(); setMaximized(null); return; }
-    if (event.key === "Enter") { event.preventDefault(); toggleMaximize(window.id); return; }
+    if (event.key === "Escape" && maximized) { event.preventDefault(); setMaximization(null); return; }
+    if (event.key === "Enter") { event.preventDefault(); toggleMaximize(window); return; }
     if (event.key === "Delete" || event.key === "Backspace") { event.preventDefault(); closeWindow(window.id, WINDOW_KINDS[window.kind].name); return; }
     const offset = ARROWS[event.key];
     if (!offset || event.altKey || event.ctrlKey || event.metaKey || maximized) return;
@@ -184,7 +192,7 @@ export function useCanvasInteraction(canvas: CanvasPlacement, windows: readonly 
     },
     header: {
       onPointerDown: (event) => press(event, window, { kind: "move" }),
-      onDoubleClick: (event) => { if (!(event.target instanceof Element && event.target.closest("button"))) toggleMaximize(window.id); },
+      onDoubleClick: (event) => { if (!(event.target instanceof Element && event.target.closest("button"))) toggleMaximize(window); },
       onKeyDown: (event) => keyHeader(event, window),
       onLostPointerCapture: () => { if (gesture.current.kind !== "idle") finishRef.current(true); },
     },

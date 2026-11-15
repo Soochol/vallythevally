@@ -72,6 +72,7 @@ test("실제 도킹 자리를 보존해 전환하고 차트 인스턴스와 두 
   const requests = barsRequests();
   await mode(page, "캔버스", true);
   await expect(frame(page, "cell-0")).toBeVisible();
+  await screenshot(page, "initial");
   for (const [i, id] of ["cell-0", "watchlist"].entries()) {
     const after = await boxOf(frame(page, id));
     for (const axis of ["x", "y", "width", "height"] as const) expect(Math.abs(after[axis] - before[i]![axis])).toBeLessThanOrEqual(1);
@@ -98,6 +99,101 @@ test("실제 도킹 자리를 보존해 전환하고 차트 인스턴스와 두 
   await page.reload();
   await expect(frame(page, "cell-0")).toBeVisible();
   expect(await boxOf(frame(page, "cell-0"))).toEqual(moved);
+});
+
+test("두 차트의 저장되지 않은 기본 도킹은 첫 캔버스 왕복 뒤에도 같은 순서와 자리다", async ({ page, scenario }) => {
+  const layout = scenario.documents.layout(DEFAULT_LAYOUT_ID);
+  const first = layout.windows.find((window) => window.kind === "chart")!;
+  scenario.documents.saveLayout({ ...layout, windows: [first, { ...first, id: "cell-1" }, ...layout.windows.filter((window) => window.kind !== "chart")], placement: { v: 1, dock: null, canvas: null }, revision: layout.revision + 1 });
+  await page.goto("/");
+  await expect(cell(page, 2)).toHaveAttribute("aria-busy", "false");
+  const before = await Promise.all([boxOf(cell(page)), boxOf(cell(page, 2))]);
+  expect(before[0]!.y).toBeLessThan(before[1]!.y);
+  expect(saved(scenario)).toEqual({ v: 1, dock: null, canvas: null });
+  await mode(page, "캔버스");
+  await expect(frame(page, "cell-1")).toBeVisible();
+  await expect.poll(() => saved(scenario).dock).not.toBeNull();
+  await mode(page, "도킹");
+  expect(await Promise.all([boxOf(cell(page)), boxOf(cell(page, 2))])).toEqual(before);
+});
+
+test("포털 안의 차트와 관심종목 내용을 실제로 누르면 그 창이 앞으로 온다", async ({ page, scenario }) => {
+  seedCanvas(scenario);
+  await page.goto("/");
+  await expect(cell(page, 2)).toHaveAttribute("aria-busy", "false");
+  const chart = chartOf(cell(page));
+  await chart.evaluate((element) => element.setAttribute("data-retained-probe", "body-activation"));
+  const body = await boxOf(chart);
+  await page.mouse.click(body.x + 35, body.y + 60);
+  await expect(frame(page, "cell-0")).toHaveCSS("z-index", "3");
+  await expect(frame(page, "cell-0")).toHaveAttribute("data-active-cell", "");
+  await expect(chart).toHaveAttribute("data-retained-probe", "body-activation");
+  await frame(page, "watchlist").locator(".dock-window-host").click({ position: { x: 30, y: 80 } });
+  await expect(frame(page, "watchlist")).toHaveCSS("z-index", "3");
+  await expect(frame(page, "cell-0")).toHaveCSS("z-index", "2");
+  await expect(frame(page, "cell-0")).toHaveAttribute("data-active-cell", "");
+});
+
+test("활성 차트를 닫은 알림의 되돌리기 한 번은 남은 차트가 다른 창 뒤에 있어도 원래 창과 자리를 돌린다", async ({ page, scenario }) => {
+  seedCanvas(scenario);
+  await page.goto("/");
+  await expect(cell(page, 2)).toHaveAttribute("aria-busy", "false");
+  await header(page, "cell-1").click({ position: { x: 60, y: 17 } });
+  await expect(frame(page, "cell-1")).toHaveAttribute("data-active-cell", "");
+  const before = saved(scenario).canvas;
+  const closing = await boxOf(frame(page, "cell-1"));
+  await frame(page, "cell-1").getByRole("button", { name: "차트 닫기" }).click();
+  await expect(frame(page, "cell-1")).toHaveCount(0);
+  await expect(frame(page, "cell-0")).toHaveAttribute("data-active-cell", "");
+  await expect(frame(page, "cell-0")).toHaveCSS("z-index", "2");
+  await page.getByRole("status").filter({ hasText: "차트 창을 닫았습니다" }).getByRole("button", { name: "되돌리기" }).click();
+  await expect(frame(page, "cell-1")).toHaveCount(1);
+  expect(await boxOf(frame(page, "cell-1"))).toEqual(closing);
+  await expect.poll(() => saved(scenario).canvas).toEqual(before);
+});
+
+test("크게 본 차트 위에서도 창 종류와 위 막대가 기존 관심종목을 드러낸다", async ({ page, scenario }) => {
+  seedCanvas(scenario);
+  await page.goto("/");
+  await expect(cell(page, 2)).toHaveAttribute("aria-busy", "false");
+  const before = saved(scenario).canvas!.rects;
+  const original = await boxOf(frame(page, "cell-1"));
+  for (const source of ["kind", "topbar"]) {
+    await frame(page, "cell-1").getByRole("button", { name: "차트 크게 보기" }).click();
+    await expect(frame(page, "cell-1")).toHaveAttribute("data-maximized", "");
+    if (source === "kind") await page.getByRole("navigation", { name: "창 종류" }).getByRole("button", { name: "관심종목 창 더하기" }).click();
+    else {
+      await page.getByRole("toolbar", { name: "차트 도구 막대" }).getByRole("button", { name: "창 더하기" }).click();
+      await page.getByRole("menu", { name: "창 더하기" }).getByRole("menuitem", { name: /^관심종목/ }).click();
+    }
+    await expect(frame(page, "cell-1")).not.toHaveAttribute("data-maximized");
+    expect(await boxOf(frame(page, "cell-1"))).toEqual(original);
+    const requested = await boxOf(header(page, "watchlist"));
+    await expect.poll(() => page.evaluate(({ x, y }) => document.elementFromPoint(x, y)?.closest("[data-canvas-window]")?.getAttribute("data-canvas-window"), { x: requested.x + 60, y: requested.y + 17 })).toBe("watchlist");
+    expect(saved(scenario).canvas!.rects).toEqual(before);
+  }
+});
+
+test("뒤 차트를 Enter로 크게 보면 활성 칸과 도구 막대도 따라가고 다음 창 요청이 크게 보기를 끝낸다", async ({ page, scenario }) => {
+  seedCanvas(scenario);
+  await page.goto("/");
+  await expect(cell(page, 2)).toHaveAttribute("aria-busy", "false");
+  await header(page, "cell-1").click({ position: { x: 60, y: 17 } });
+  await expect(frame(page, "cell-1")).toHaveAttribute("data-active-cell", "");
+  const before = saved(scenario).canvas!.rects;
+  await header(page, "cell-0").focus();
+  await page.keyboard.press("Enter");
+  await expect(frame(page, "cell-0")).toHaveAttribute("data-maximized", "");
+  await expect(frame(page, "cell-0")).toHaveAttribute("data-active-cell", "");
+  await expect(frame(page, "cell-0").getByRole("navigation", { name: "드로잉 도구" })).toBeVisible();
+  await page.getByRole("group", { name: "봉 주기", exact: true }).getByRole("button", { name: "주", exact: true }).click();
+  await expect.poll(() => scenario.documents.layout(DEFAULT_LAYOUT_ID).windows.find((window) => window.id === "cell-0")).toMatchObject({ period: "W" });
+  expect(scenario.documents.layout(DEFAULT_LAYOUT_ID).windows.find((window) => window.id === "cell-1")).toMatchObject({ period: "D" });
+  await expect(frame(page, "cell-0")).toHaveAttribute("data-maximized", "");
+  expect(saved(scenario).canvas!.rects).toEqual(before);
+  await page.getByRole("navigation", { name: "창 종류" }).getByRole("button", { name: "관심종목 창 더하기" }).click();
+  await expect(frame(page, "cell-0")).not.toHaveAttribute("data-maximized");
+  await expect(frame(page, "watchlist")).toHaveCSS("z-index", "3");
 });
 
 test("실제 머리 끌기는 안내선으로 가장자리에 붙고 크기 조작은 최소 크기에서 멈춰 한 번 저장한다", async ({ page, scenario }) => {
