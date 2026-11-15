@@ -383,7 +383,7 @@ impl MarketHub {
                 .conns
                 .values()
                 .filter(|c| c.watch_venue != Venue::Combined)
-                .flat_map(|c| c.requested_watch.iter().take(super::subscriptions::REALTIME_LIMIT))
+                .flat_map(|c| c.requested_watch.iter().filter(|s| dir.get(**s).is_some()).take(super::subscriptions::REALTIME_LIMIT))
                 .filter_map(|s| match s {
                     Symbol::Stock(code) if dir.get(*s).is_some_and(|info| info.nxt_enabled) => Some(*code),
                     _ => None,
@@ -2521,6 +2521,21 @@ mod tests {
         assert_eq!(quote_messages(take(&out).await), vec![], "시작 값을 받기 전에는 내지 않는다");
         h.events.send(fill(&h, SAMSUNG, (9, 0, 52), 112, Some(Exchange::Krx), 1, (12, 1_005))).await.unwrap();
         assert_eq!(quote_messages(take(&out).await), vec![quotes_msg(api::Venue::Krx, vec![venue_quote(SAMSUNG, api::Venue::Krx, 112.0, 12.0, 705, at(9, 0, 52))])], "조회 값 700에 1_000을 넘은 KRX 체결 4와 1만 더한다");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn unlisted_watch_rows_do_not_use_up_the_day_volume_places() {
+        let h = std_harness();
+        let (conn, out) = connect(&h).await;
+        live(&h).await;
+        let mut rows = vec![Symbol::parse(UNLISTED).unwrap()];
+        rows.extend(fillers(REALTIME_LIMIT - 1));
+        rows.push(samsung().feed.symbol());
+        h.hub.watch(conn, rows, Venue::Krx);
+        tokio::time::sleep(Duration::from_secs(3)).await;
+        assert!(h.desired.borrow().contains(&samsung().feed.symbol()), "마지막 목록 줄도 실시간 자리를 받는다");
+        h.events.send(fill(&h, SAMSUNG, (9, 0, 51), 112, Some(Exchange::Krx), 5, (12, 1_005))).await.unwrap();
+        assert_eq!(quote_messages(take(&out).await), vec![quotes_msg(api::Venue::Krx, vec![venue_quote(SAMSUNG, api::Venue::Krx, 112.0, 12.0, 705, at(9, 0, 51))])]);
     }
 
     #[tokio::test(start_paused = true)]
