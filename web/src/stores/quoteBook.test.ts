@@ -13,6 +13,7 @@ const quote = (symbol: SymbolCode, price: number, source: Quote["source"] = "rea
   volume: 1,
   t: 1_000,
   source,
+  venue: "combined",
 });
 
 interface Fetch {
@@ -39,7 +40,7 @@ function setup() {
       }),
   });
   const price = (code: SymbolCode) => book.get(code).quote?.price;
-  const realtime = (...quotes: Quote[]) => emit({ type: "quotes", quotes });
+  const realtime = (...quotes: Quote[]) => emit({ type: "quotes", venue: "combined", quotes });
   return { book, watches, fetches, price, realtime, emit: (e: QuoteEvent) => emit(e) };
 }
 

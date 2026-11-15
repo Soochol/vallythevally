@@ -82,11 +82,12 @@ impl From<Period> for domain::Period {
 }
 
 /// 거래소(ADR 0007). 주식에만 있고 지수에는 없다(`null`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export)]
 pub enum Venue {
     /// 통합 시세(KRX + NXT). 칸의 기본값.
+    #[default]
     Combined,
     Krx,
     Nxt,
@@ -174,7 +175,9 @@ pub enum ClientMessage {
     Subscribe { sub: String, symbol: SymbolCode, venue: Option<Venue>, period: Period },
     Unsubscribe { sub: String },
     /// 지금 보이는 관심종목 목록 전체, 위에서부터. 받을 때마다 통째로 바꾼다. 빈 배열은 목록을 닫았다는 뜻이다.
-    Watch { symbols: Vec<SymbolCode> },
+    /// `venue`는 이 연결의 관심종목 시세 거래소 하나다. 없거나 null이면 통합이다. 같은 목록으로 거래소만 바꿔 다시 보내면
+    /// 다음 시세부터 새 거래소 기준이고, 실시간 등록 집합은 바뀌지 않는다.
+    Watch { symbols: Vec<SymbolCode>, venue: Option<Venue> },
 }
 
 /// `/api/ws` 서버 → 브라우저. `seq`는 (종목, 거래소, 봉 주기) 흐름마다 하나씩 늘어나는 번호다.
@@ -220,7 +223,9 @@ pub enum ServerMessage {
         from: Option<UnixSeconds>,
     },
     /// 관심종목 현재가(`source: realtime`). `bar`와 같은 100ms 묶음으로 바뀐 종목만 온다. 종목마다 가장 새 값 하나다.
-    Quotes { quotes: Vec<Quote> },
+    /// `venue`는 그 시점에 이 연결이 `watch`로 요청한 거래소다. 한 메시지의 `quotes`는 모두 이 요청에서 만든 값이다.
+    /// `watch`가 거래소를 바꾸면 그 전 요청으로 만든 값은 더 보내지 않지만 이미 나간 메시지는 `venue`로 가려낸다.
+    Quotes { venue: Venue, quotes: Vec<Quote> },
     /// 이 연결의 관심종목 가운데 실시간 한도로 받지 못하는 종목, 목록 순서. 바뀔 때만 온다. 브라우저는 통째로 바꾼다.
     WatchLimited { symbols: Vec<SymbolCode> },
 }
@@ -341,8 +346,8 @@ pub enum QuoteSource {
     Polled,
 }
 
-/// `GET /api/quotes?symbols=005930,IDX:001` → `Quote[]`.
-/// 주식은 통합 시세(ka10095 `_AL`), 지수는 지수 일봉의 최신 페이지에서 만든다.
+/// `GET /api/quotes?symbols=005930,IDX:001&venue=krx` → `Quote[]`.
+/// 주식은 `venue`(`combined` 기본, `krx`, `nxt`)의 시세(ka10095), 지수는 지수 일봉의 최신 페이지에서 만든다.
 /// 값을 얻지 못한 종목(없는 코드, 빈 행)은 응답에서 빠진다. 순서는 요청 순서다.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
@@ -359,6 +364,8 @@ pub struct Quote {
     pub volume: u64,
     pub t: UnixSeconds,
     pub source: QuoteSource,
+    /// 이 값을 만든 거래소. 요청이 NXT인데 그 종목이 NXT에서 거래되지 않으면 요청과 달리 통합이다. 지수면 null.
+    pub venue: Option<Venue>,
 }
 
 /// `GET /api/symbols/:code/fundamentals` → 주식의 기본 정보(ka10001, 통합 시세). 지수는 400 `bad_request`.
@@ -1207,11 +1214,12 @@ mod tests {
             volume: 56_147_847,
             t: UnixSeconds(1_794_131_999),
             source: QuoteSource::Polled,
+            venue: Some(Venue::Krx),
         };
         assert_eq!(
             serde_json::to_value(&q).unwrap(),
             json!({"symbol": "005930", "price": 193_400.0, "change": -8_100.0, "changeRate": -4.02,
-                   "volume": 56_147_847, "t": 1_794_131_999, "source": "polled"})
+                   "volume": 56_147_847, "t": 1_794_131_999, "source": "polled", "venue": "krx"})
         );
     }
 
@@ -1222,7 +1230,11 @@ mod tests {
         let unsub: ClientMessage = serde_json::from_value(json!({"type": "unsubscribe", "sub": "c0"})).unwrap();
         assert_eq!(unsub, ClientMessage::Unsubscribe { sub: "c0".into() });
         let watch: ClientMessage = serde_json::from_value(json!({"type": "watch", "symbols": ["005930", "IDX:001"]})).unwrap();
-        assert_eq!(watch, ClientMessage::Watch { symbols: vec![SymbolCode("005930".into()), SymbolCode("IDX:001".into())] });
+        assert_eq!(watch, ClientMessage::Watch { symbols: vec![SymbolCode("005930".into()), SymbolCode("IDX:001".into())], venue: None });
+        let krx_watch: ClientMessage = serde_json::from_value(json!({"type": "watch", "symbols": ["005930"], "venue": "krx"})).unwrap();
+        assert_eq!(krx_watch, ClientMessage::Watch { symbols: vec![SymbolCode("005930".into())], venue: Some(Venue::Krx) });
+        let null_watch: ClientMessage = serde_json::from_value(json!({"type": "watch", "symbols": [], "venue": null})).unwrap();
+        assert_eq!(null_watch, ClientMessage::Watch { symbols: vec![], venue: None });
 
         let status = ConnectionStatus { realtime: RealtimeState::Reconnecting, since: UnixSeconds(1_794_182_400), backfilling: true };
         let bar = Bar { t: UnixSeconds(1_794_182_400), o: 1.0, h: 2.0, l: 1.0, c: 2.0, v: 3 };
@@ -1247,6 +1259,7 @@ mod tests {
             ),
             (
                 ServerMessage::Quotes {
+                    venue: Venue::Nxt,
                     quotes: vec![Quote {
                         symbol: SymbolCode("005930".into()),
                         price: 71_200.0,
@@ -1255,9 +1268,10 @@ mod tests {
                         volume: 9,
                         t: UnixSeconds(4),
                         source: QuoteSource::Realtime,
+                        venue: Some(Venue::Combined),
                     }],
                 },
-                json!({"type": "quotes", "quotes": [{"symbol": "005930", "price": 71_200.0, "change": 200.0, "changeRate": 0.5, "volume": 9, "t": 4, "source": "realtime"}]}),
+                json!({"type": "quotes", "venue": "nxt", "quotes": [{"symbol": "005930", "price": 71_200.0, "change": 200.0, "changeRate": 0.5, "volume": 9, "t": 4, "source": "realtime", "venue": "combined"}]}),
             ),
             (ServerMessage::WatchLimited { symbols: vec![SymbolCode("000660".into())] }, json!({"type": "watch_limited", "symbols": ["000660"]})),
         ];

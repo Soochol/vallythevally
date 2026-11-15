@@ -10,7 +10,7 @@ use std::sync::{Arc, Mutex};
 use tokio::sync::Notify;
 
 use super::SubId;
-use crate::api::{Bar, Quote, ServerMessage};
+use crate::api::{Bar, Quote, ServerMessage, Venue};
 
 pub const MUST_CAPACITY: usize = 256;
 
@@ -29,6 +29,7 @@ struct State {
     must: VecDeque<ServerMessage>,
     bars: BTreeMap<String, (u64, Bar)>,
     quotes: BTreeMap<String, Quote>,
+    quote_venue: Venue,
     closed: bool,
 }
 
@@ -77,6 +78,14 @@ impl Outbox {
         }
     }
 
+    pub fn set_quote_venue(&self, venue: Venue) {
+        let mut s = self.state.lock().expect("outbox 잠금");
+        if s.quote_venue != venue {
+            s.quote_venue = venue;
+            s.quotes.clear();
+        }
+    }
+
     pub fn close(&self) {
         self.state.lock().expect("outbox 잠금").closed = true;
         self.wake.notify_one();
@@ -89,7 +98,7 @@ impl Outbox {
         if with_bars {
             messages.extend(std::mem::take(&mut s.bars).into_iter().map(|(sub, (seq, bar))| ServerMessage::Bar { sub, seq, bar }));
             if !s.quotes.is_empty() {
-                messages.push(ServerMessage::Quotes { quotes: std::mem::take(&mut s.quotes).into_values().collect() });
+                messages.push(ServerMessage::Quotes { venue: s.quote_venue, quotes: std::mem::take(&mut s.quotes).into_values().collect() });
             }
         }
         Batch { messages, closed: s.closed }
@@ -205,6 +214,7 @@ mod tests {
             volume: 1,
             t: UnixSeconds(0),
             source: crate::api::QuoteSource::Realtime,
+            venue: Some(Venue::Combined),
         };
         out.set_quote(quote("005930", 1.0));
         out.set_quote(quote("000660", 5.0));
@@ -215,10 +225,33 @@ mod tests {
             out.take(true).messages,
             vec![
                 ServerMessage::Bar { sub: "a".into(), seq: 1, bar: bar(2.0) },
-                ServerMessage::Quotes { quotes: vec![quote("000660", 5.0), quote("005930", 2.0)] },
+                ServerMessage::Quotes { venue: Venue::Combined, quotes: vec![quote("000660", 5.0), quote("005930", 2.0)] },
             ]
         );
         assert_eq!(out.take(true).messages, vec![]);
+    }
+
+    #[test]
+    fn changing_the_quote_venue_drops_pending_quotes_and_tags_the_next_message() {
+        let out = Outbox::new();
+        let quote = |price: f64| Quote {
+            symbol: crate::api::SymbolCode("005930".into()),
+            price,
+            change: 0.0,
+            change_rate: 0.0,
+            volume: 1,
+            t: UnixSeconds(0),
+            source: crate::api::QuoteSource::Realtime,
+            venue: Some(Venue::Combined),
+        };
+        out.set_quote(quote(1.0));
+        out.set_quote_venue(Venue::Combined);
+        assert_eq!(out.take(true).messages, vec![ServerMessage::Quotes { venue: Venue::Combined, quotes: vec![quote(1.0)] }], "같은 거래소면 버리지 않는다");
+        out.set_quote(quote(2.0));
+        out.set_quote_venue(Venue::Krx);
+        assert_eq!(out.take(true).messages, vec![], "옛 거래소 기준 현재가는 나가지 않는다");
+        out.set_quote(quote(3.0));
+        assert_eq!(out.take(true).messages, vec![ServerMessage::Quotes { venue: Venue::Krx, quotes: vec![quote(3.0)] }]);
     }
 
     #[test]

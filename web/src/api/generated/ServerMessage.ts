@@ -6,8 +6,9 @@ import type { ReloadReason } from "./ReloadReason";
 import type { SubErrorCode } from "./SubErrorCode";
 import type { SymbolCode } from "./SymbolCode";
 import type { UnixSeconds } from "./UnixSeconds";
+import type { Venue } from "./Venue";
 
 /**
  * `/api/ws` 서버 → 브라우저. `seq`는 (종목, 거래소, 봉 주기) 흐름마다 하나씩 늘어나는 번호다.
  */
-export type ServerMessage = { "type": "hello", protocol: 1, serverTime: UnixSeconds, status: ConnectionStatus, } | { "type": "status", status: ConnectionStatus, } | { "type": "subscribed", sub: string, seq: number, current: Bar | null, } | { "type": "sub_error", sub: string, code: SubErrorCode, } | { "type": "bar", sub: string, seq: number, bar: Bar, } | { "type": "confirmed", sub: string, seq: number, bar: Bar, } | { "type": "reload", sub: string, seq: number, reason: ReloadReason, from: UnixSeconds | null, } | { "type": "quotes", quotes: Array<Quote>, } | { "type": "watch_limited", symbols: Array<SymbolCode>, };
+export type ServerMessage = { "type": "hello", protocol: 1, serverTime: UnixSeconds, status: ConnectionStatus, } | { "type": "status", status: ConnectionStatus, } | { "type": "subscribed", sub: string, seq: number, current: Bar | null, } | { "type": "sub_error", sub: string, code: SubErrorCode, } | { "type": "bar", sub: string, seq: number, bar: Bar, } | { "type": "confirmed", sub: string, seq: number, bar: Bar, } | { "type": "reload", sub: string, seq: number, reason: ReloadReason, from: UnixSeconds | null, } | { "type": "quotes", venue: Venue, quotes: Array<Quote>, } | { "type": "watch_limited", symbols: Array<SymbolCode>, };

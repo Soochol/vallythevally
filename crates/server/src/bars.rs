@@ -187,6 +187,10 @@ impl BarService {
         BarService { rest, symbols, clock, slots: Mutex::new(HashMap::new()), next_id: AtomicU64::new(1), resets: AtomicU64::new(0) }
     }
 
+    pub fn rest(&self) -> &KiwoomRest {
+        &self.rest
+    }
+
     pub fn directory_updates(&self) -> tokio::sync::watch::Receiver<Option<Arc<Directory>>> {
         self.symbols.updates()
     }
