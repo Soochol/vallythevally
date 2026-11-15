@@ -491,7 +491,7 @@ mod tests {
             if kiwoom_down {
                 return status(503, json!({}));
             }
-            if s.api_id == ApiId::Ka10095 && s.body.contains("_NX") || s.api_id == ApiId::Ka10095 && !s.body.contains("_AL") {
+            if s.api_id == ApiId::Ka10095 && (s.body.contains("_NX") || !s.body.contains("_AL")) {
                 let body: Value = serde_json::from_str(&s.body).unwrap();
                 let rows: Vec<Value> = body["stk_cd"].as_str().unwrap().split('|').map(|stk_cd| {
                     let (price, volume) = match stk_cd.split_once('_') {
@@ -652,7 +652,7 @@ mod tests {
     #[tokio::test(start_paused = true)]
     async fn quotes_ask_kiwoom_for_the_requested_venue_and_fall_back_to_combined_for_symbols_not_on_nxt() {
         let f = fixture(false, true).await;
-        let asked = |f: &Fixture| f.fake.market_sent().into_iter().filter(|s| s.api_id == ApiId::Ka10095).map(|s| s.body).last().unwrap();
+        let asked = |f: &Fixture| f.fake.market_sent().into_iter().filter(|s| s.api_id == ApiId::Ka10095).map(|s| s.body).next_back().unwrap();
         let summary = |v: &Value| -> Vec<(String, Option<String>, f64, u64)> {
             v.as_array().unwrap().iter().map(|q| (q["symbol"].as_str().unwrap().to_owned(), q["venue"].as_str().map(str::to_owned), q["price"].as_f64().unwrap(), q["volume"].as_u64().unwrap())).collect()
         };

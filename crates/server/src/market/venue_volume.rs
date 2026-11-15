@@ -1,12 +1,3 @@
-//! 거래소(KRX·NXT)별 당일 누적 거래량. 체결 프레임의 누적(`DayTotals::cumulative`)은 통합 값이라 거래소별로는 쓸 수 없다.
-//!
-//! 조회한 시점의 (통합, KRX, NXT) 누적에서 시작해 그 뒤 체결 수량을 그 체결의 거래소에 더한다.
-//! 조회 시점과 체결 프레임의 순서는 통합 누적이 맞춘다. 통합 누적은 체결마다 그 수량만큼 늘어나므로
-//! 조회한 통합 누적 이하의 체결은 이미 조회 값에 들어 있고, 그보다 큰 체결만 더한다.
-//! 조회가 끝난 뒤에 통합 누적이 거꾸로 가면(날이 바뀌었거나 순서가 뒤바뀜) 이을 수 없는 것으로 본다.
-//! 더하는 체결의 통합 누적이 바로 앞 누적 + 수량이 아니면 체결이 빠졌거나 거래소를 알 수 없다는 뜻이다.
-//! 이때는 값을 내지 않고 조회부터 다시 한다.
-
 use std::collections::{BTreeSet, HashMap};
 
 use domain::{KstTime, StockCode};
@@ -58,7 +49,6 @@ impl DayTallies {
         self.by_code.contains_key(&code)
     }
 
-    /// `wanted`에 없는 종목은 버리고, 새로 필요하거나 다시 조회할 때가 된 종목을 조회 중으로 바꿔 돌려준다.
     pub fn take_due(&mut self, wanted: &BTreeSet<StockCode>, now: KstTime) -> Vec<StockCode> {
         self.by_code.retain(|code, _| wanted.contains(code));
         let mut due = Vec::new();
@@ -76,7 +66,6 @@ impl DayTallies {
         due
     }
 
-    /// 체결 하나를 반영한다. 이 체결 뒤의 거래소별 누적을 믿을 수 있을 때만 돌려준다.
     pub fn apply(&mut self, code: StockCode, fill: Fill, now: KstTime) -> Option<VenueVolumes> {
         match self.by_code.get_mut(&code)? {
             Tally::Seeding { buffered } if buffered.len() < MAX_BUFFERED => {
@@ -100,7 +89,6 @@ impl DayTallies {
         }
     }
 
-    /// 조회가 끝났다. `volumes`가 None이면 값을 얻지 못한 것이다. 조회하는 동안 받은 체결을 이어 붙인다.
     pub fn seeded(&mut self, code: StockCode, volumes: Option<DayVolumes>, now: KstTime) {
         let Some(Tally::Seeding { buffered }) = self.by_code.get_mut(&code) else {
             return;

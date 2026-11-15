@@ -359,7 +359,6 @@ pub struct QuoteRow {
     pub trde_prica: String,
 }
 
-/// ka10095 한 행의 시세. `venue`는 응답 코드의 접미사가 가리키는 거래소다(`_AL` 통합, 접미사 없음 KRX, `_NX` NXT). 가격은 centi(원 × 100)다. 거래정지 종목은 현재가가 0일 수 있어 `Price`가 아니다.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct StockQuote {
     pub code: StockCode,
@@ -371,7 +370,6 @@ pub struct StockQuote {
     pub at: KstTime,
 }
 
-/// 빈 행(없는 코드, NXT 불가 종목의 `_NX`, kiwoom.md §12.4)은 뺀다.
 pub fn parse_quotes(body: StockQuotesResponse) -> Vec<StockQuote> {
     body.atn_stk_infr
         .iter()

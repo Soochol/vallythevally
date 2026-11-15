@@ -78,7 +78,6 @@ impl Outbox {
         }
     }
 
-    /// 이 연결이 요청한 관심종목 거래소. 바뀌면 그 전 요청으로 만든 대기 중 현재가를 버린다.
     pub fn set_quote_venue(&self, venue: Venue) {
         let mut s = self.state.lock().expect("outbox 잠금");
         if s.quote_venue != venue {

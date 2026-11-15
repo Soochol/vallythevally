@@ -72,8 +72,6 @@ impl HubHandle {
         self.send(HubInput::Disconnect(conn));
     }
 
-    /// 그 연결이 보는 관심종목 목록과 시세 거래소를 통째로 바꾼다. 위가 먼저 실시간 자리를 받는다.
-    /// 거래소만 바꿔도 키움 등록 집합은 그대로고, 다음 시세부터 새 거래소 기준이다.
     pub fn watch(&self, conn: ConnId, symbols: Vec<Symbol>, venue: Venue) {
         self.send(HubInput::Watch { conn, symbols, venue });
     }
@@ -379,8 +377,6 @@ impl MarketHub {
         self.directory.borrow().as_ref().and_then(|dir| dir.get(symbol)).is_some_and(|info| info.nxt_enabled)
     }
 
-    /// 거래소별 거래량이 필요한 종목: KRX나 NXT를 보는 연결의 관심종목 가운데 NXT에서도 거래되는 주식.
-    /// NXT에서 거래되지 않는 종목은 통합과 KRX가 같아서 따로 세지 않는다.
     fn sync_day_volumes(&mut self, now: KstTime) {
         let wanted: BTreeSet<StockCode> = match &*self.directory.borrow() {
             Some(dir) => self
@@ -2382,12 +2378,12 @@ mod tests {
     }
 
 
-    fn fill(h: &Harness, code: &str, hhmmss: (u32, u32, u32), price: u64, exchange: Option<Exchange>, qty: u64, change_won: i64, cumulative: u64) -> StreamEvent {
+    fn fill(h: &Harness, code: &str, hhmmss: (u32, u32, u32), price: u64, exchange: Option<Exchange>, qty: u64, day: (i64, u64)) -> StreamEvent {
         let StreamEvent::Tick { mut tick, received_at } = trade(h, hhmmss, price, qty, exchange) else {
             unreachable!("trade는 Tick이다")
         };
         tick.symbol = Symbol::parse(code).unwrap();
-        tick.day = Some(DayTotals { change_centi: change_won * 100, cumulative: Volume(cumulative) });
+        tick.day = Some(DayTotals { change_centi: day.0 * 100, cumulative: Volume(day.1) });
         StreamEvent::Tick { tick, received_at }
     }
 
@@ -2424,11 +2420,11 @@ mod tests {
         h.hub.watch(conn, vec![samsung().feed.symbol()], Venue::Krx);
         settle().await;
         assert_eq!(day_volume_requests(&h), [r#"{"stk_cd":"005930_AL|005930|005930_NX"}"#], "통합·KRX·NXT 누적을 한 요청으로 묻는다");
-        h.events.send(fill(&h, SAMSUNG, (9, 0, 51), 112, Some(Exchange::Krx), 5, 12, 1_005)).await.unwrap();
+        h.events.send(fill(&h, SAMSUNG, (9, 0, 51), 112, Some(Exchange::Krx), 5, (12, 1_005))).await.unwrap();
         assert_eq!(quote_messages(take(&out).await), vec![quotes_msg(api::Venue::Krx, vec![venue_quote(SAMSUNG, api::Venue::Krx, 112.0, 12.0, 705, at(9, 0, 51))])], "거래량은 통합 1_005가 아니라 KRX 누적이다");
-        h.events.send(fill(&h, SAMSUNG, (9, 0, 52), 90, Some(Exchange::Nxt), 4, -10, 1_009)).await.unwrap();
+        h.events.send(fill(&h, SAMSUNG, (9, 0, 52), 90, Some(Exchange::Nxt), 4, (-10, 1_009))).await.unwrap();
         assert_eq!(quote_messages(take(&out).await), vec![], "NXT 체결은 KRX 시세를 움직이지 않는다");
-        h.events.send(fill(&h, SAMSUNG, (9, 0, 53), 113, Some(Exchange::Krx), 1, 13, 1_010)).await.unwrap();
+        h.events.send(fill(&h, SAMSUNG, (9, 0, 53), 113, Some(Exchange::Krx), 1, (13, 1_010))).await.unwrap();
         assert_eq!(quote_messages(take(&out).await), vec![quotes_msg(api::Venue::Krx, vec![venue_quote(SAMSUNG, api::Venue::Krx, 113.0, 13.0, 706, at(9, 0, 53))])], "NXT 체결 수량은 KRX 거래량에 들어가지 않고, 등락은 그 가격과 기준가의 차이다");
         assert_eq!(day_volume_requests(&h).len(), 1, "다시 묻지 않는다");
     }
@@ -2440,9 +2436,9 @@ mod tests {
         live(&h).await;
         h.hub.watch(conn, vec![samsung().feed.symbol()], Venue::Nxt);
         settle().await;
-        h.events.send(fill(&h, SAMSUNG, (9, 0, 51), 112, Some(Exchange::Krx), 5, 12, 1_005)).await.unwrap();
+        h.events.send(fill(&h, SAMSUNG, (9, 0, 51), 112, Some(Exchange::Krx), 5, (12, 1_005))).await.unwrap();
         assert_eq!(quote_messages(take(&out).await), vec![], "KRX 체결은 NXT 시세를 움직이지 않는다");
-        h.events.send(fill(&h, SAMSUNG, (9, 0, 52), 90, Some(Exchange::Nxt), 4, -10, 1_009)).await.unwrap();
+        h.events.send(fill(&h, SAMSUNG, (9, 0, 52), 90, Some(Exchange::Nxt), 4, (-10, 1_009))).await.unwrap();
         assert_eq!(quote_messages(take(&out).await), vec![quotes_msg(api::Venue::Nxt, vec![venue_quote(SAMSUNG, api::Venue::Nxt, 90.0, -10.0, 304, at(9, 0, 52))])]);
     }
 
@@ -2453,7 +2449,7 @@ mod tests {
         live(&h).await;
         h.hub.watch(conn, vec![Symbol::parse(NOT_ON_NXT).unwrap()], Venue::Nxt);
         settle().await;
-        h.events.send(fill(&h, NOT_ON_NXT, (9, 0, 51), 112, Some(Exchange::Krx), 5, 12, 2_005)).await.unwrap();
+        h.events.send(fill(&h, NOT_ON_NXT, (9, 0, 51), 112, Some(Exchange::Krx), 5, (12, 2_005))).await.unwrap();
         assert_eq!(quote_messages(take(&out).await), vec![quotes_msg(api::Venue::Nxt, vec![venue_quote(NOT_ON_NXT, api::Venue::Combined, 112.0, 12.0, 2_005, at(9, 0, 51))])], "요청은 NXT, 값은 통합이다");
         assert_eq!(day_volume_requests(&h), Vec::<String>::new(), "통합 누적을 그대로 쓰므로 거래소별 거래량을 묻지 않는다");
     }
@@ -2465,8 +2461,8 @@ mod tests {
         live(&h).await;
         h.hub.watch(conn, vec![Symbol::parse(NOT_ON_NXT).unwrap()], Venue::Krx);
         settle().await;
-        h.events.send(fill(&h, NOT_ON_NXT, (9, 0, 51), 112, Some(Exchange::Krx), 5, 12, 2_005)).await.unwrap();
-        h.events.send(fill(&h, NOT_ON_NXT, (9, 0, 52), 113, None, 5, 13, 2_010)).await.unwrap();
+        h.events.send(fill(&h, NOT_ON_NXT, (9, 0, 51), 112, Some(Exchange::Krx), 5, (12, 2_005))).await.unwrap();
+        h.events.send(fill(&h, NOT_ON_NXT, (9, 0, 52), 113, None, 5, (13, 2_010))).await.unwrap();
         assert_eq!(quote_messages(take(&out).await), vec![quotes_msg(api::Venue::Krx, vec![venue_quote(NOT_ON_NXT, api::Venue::Krx, 112.0, 12.0, 2_005, at(9, 0, 51))])], "거래소를 모르는 체결은 움직이지 않는다");
     }
 
@@ -2478,9 +2474,9 @@ mod tests {
         let list = vec![samsung().feed.symbol()];
         h.hub.watch(conn, list.clone(), Venue::Combined);
         settle().await;
-        h.events.send(fill(&h, SAMSUNG, (9, 0, 51), 112, Some(Exchange::Krx), 5, 12, 1_005)).await.unwrap();
+        h.events.send(fill(&h, SAMSUNG, (9, 0, 51), 112, Some(Exchange::Krx), 5, (12, 1_005))).await.unwrap();
         assert_eq!(quote_messages(take(&out).await), vec![quotes_msg(api::Venue::Combined, vec![venue_quote(SAMSUNG, api::Venue::Combined, 112.0, 12.0, 1_005, at(9, 0, 51))])]);
-        h.events.send(fill(&h, SAMSUNG, (9, 0, 52), 113, Some(Exchange::Krx), 1, 13, 1_006)).await.unwrap();
+        h.events.send(fill(&h, SAMSUNG, (9, 0, 52), 113, Some(Exchange::Krx), 1, (13, 1_006))).await.unwrap();
         settle().await;
         tokio::time::sleep(Duration::from_secs(2)).await;
         let registered = h.desired.borrow().clone();
@@ -2491,7 +2487,7 @@ mod tests {
         assert_eq!(quote_messages(out.take(true).messages), vec![], "바꾸기 전 거래소로 만든 대기 중 시세는 나가지 않는다");
         tokio::time::sleep(Duration::from_secs(2)).await;
         assert_eq!(*h.desired.borrow(), registered, "등록 집합은 그대로다");
-        h.events.send(fill(&h, SAMSUNG, (9, 0, 53), 114, Some(Exchange::Krx), 1, 14, 1_007)).await.unwrap();
+        h.events.send(fill(&h, SAMSUNG, (9, 0, 53), 114, Some(Exchange::Krx), 1, (14, 1_007))).await.unwrap();
         assert_eq!(quote_messages(take(&out).await), vec![quotes_msg(api::Venue::Krx, vec![venue_quote(SAMSUNG, api::Venue::Krx, 114.0, 14.0, 707, at(9, 0, 53))])]);
     }
 
@@ -2504,10 +2500,10 @@ mod tests {
         h.hub.watch(a, vec![samsung().feed.symbol()], Venue::Krx);
         h.hub.watch(b, vec![samsung().feed.symbol()], Venue::Combined);
         settle().await;
-        h.events.send(fill(&h, SAMSUNG, (9, 0, 51), 112, Some(Exchange::Nxt), 5, 12, 1_005)).await.unwrap();
+        h.events.send(fill(&h, SAMSUNG, (9, 0, 51), 112, Some(Exchange::Nxt), 5, (12, 1_005))).await.unwrap();
         assert_eq!(quote_messages(take(&out_a).await), vec![]);
         assert_eq!(quote_messages(take(&out_b).await), vec![quotes_msg(api::Venue::Combined, vec![venue_quote(SAMSUNG, api::Venue::Combined, 112.0, 12.0, 1_005, at(9, 0, 51))])]);
-        h.events.send(fill(&h, SAMSUNG, (9, 0, 52), 113, Some(Exchange::Krx), 2, 13, 1_007)).await.unwrap();
+        h.events.send(fill(&h, SAMSUNG, (9, 0, 52), 113, Some(Exchange::Krx), 2, (13, 1_007))).await.unwrap();
         assert_eq!(quote_messages(take(&out_a).await), vec![quotes_msg(api::Venue::Krx, vec![venue_quote(SAMSUNG, api::Venue::Krx, 113.0, 13.0, 702, at(9, 0, 52))])]);
         assert_eq!(quote_messages(take(&out_b).await), vec![quotes_msg(api::Venue::Combined, vec![venue_quote(SAMSUNG, api::Venue::Combined, 113.0, 13.0, 1_007, at(9, 0, 52))])]);
     }
@@ -2519,11 +2515,11 @@ mod tests {
         live(&h).await;
         h.hub.watch(conn, vec![samsung().feed.symbol()], Venue::Krx);
         tokio::time::sleep(Duration::from_millis(50)).await;
-        h.events.send(fill(&h, SAMSUNG, (9, 0, 50), 110, Some(Exchange::Krx), 3, 10, 998)).await.unwrap();
-        h.events.send(fill(&h, SAMSUNG, (9, 0, 50), 110, Some(Exchange::Nxt), 2, 10, 1_000)).await.unwrap();
-        h.events.send(fill(&h, SAMSUNG, (9, 0, 51), 111, Some(Exchange::Krx), 4, 11, 1_004)).await.unwrap();
+        h.events.send(fill(&h, SAMSUNG, (9, 0, 50), 110, Some(Exchange::Krx), 3, (10, 998))).await.unwrap();
+        h.events.send(fill(&h, SAMSUNG, (9, 0, 50), 110, Some(Exchange::Nxt), 2, (10, 1_000))).await.unwrap();
+        h.events.send(fill(&h, SAMSUNG, (9, 0, 51), 111, Some(Exchange::Krx), 4, (11, 1_004))).await.unwrap();
         assert_eq!(quote_messages(take(&out).await), vec![], "시작 값을 받기 전에는 내지 않는다");
-        h.events.send(fill(&h, SAMSUNG, (9, 0, 52), 112, Some(Exchange::Krx), 1, 12, 1_005)).await.unwrap();
+        h.events.send(fill(&h, SAMSUNG, (9, 0, 52), 112, Some(Exchange::Krx), 1, (12, 1_005))).await.unwrap();
         assert_eq!(quote_messages(take(&out).await), vec![quotes_msg(api::Venue::Krx, vec![venue_quote(SAMSUNG, api::Venue::Krx, 112.0, 12.0, 705, at(9, 0, 52))])], "조회 값 700에 1_000을 넘은 KRX 체결 4와 1만 더한다");
     }
 
@@ -2534,14 +2530,14 @@ mod tests {
         live(&h).await;
         h.hub.watch(conn, vec![samsung().feed.symbol()], Venue::Krx);
         settle().await;
-        h.events.send(fill(&h, SAMSUNG, (9, 0, 51), 112, Some(Exchange::Krx), 5, 12, 1_005)).await.unwrap();
+        h.events.send(fill(&h, SAMSUNG, (9, 0, 51), 112, Some(Exchange::Krx), 5, (12, 1_005))).await.unwrap();
         assert_eq!(quote_messages(take(&out).await).len(), 1);
-        h.events.send(fill(&h, SAMSUNG, (9, 0, 52), 113, Some(Exchange::Krx), 5, 13, 1_030)).await.unwrap();
+        h.events.send(fill(&h, SAMSUNG, (9, 0, 52), 113, Some(Exchange::Krx), 5, (13, 1_030))).await.unwrap();
         assert_eq!(quote_messages(take(&out).await), vec![], "1_005 다음이 1_030이면 사이 체결이 빠졌다");
         *h.day_volumes.lock().unwrap() = HashMap::from([("005930_AL".to_owned(), 1_031), ("005930".to_owned(), 720), ("005930_NX".to_owned(), 311)]);
         tokio::time::sleep(Duration::from_secs(6)).await;
         assert_eq!(day_volume_requests(&h).len(), 2, "다시 묻는다");
-        h.events.send(fill(&h, SAMSUNG, (9, 0, 58), 114, Some(Exchange::Krx), 9, 14, 1_040)).await.unwrap();
+        h.events.send(fill(&h, SAMSUNG, (9, 0, 58), 114, Some(Exchange::Krx), 9, (14, 1_040))).await.unwrap();
         assert_eq!(quote_messages(take(&out).await), vec![quotes_msg(api::Venue::Krx, vec![venue_quote(SAMSUNG, api::Venue::Krx, 114.0, 14.0, 729, at(9, 0, 58))])]);
     }
 
@@ -2556,7 +2552,7 @@ mod tests {
         h.hub.watch(conn, list, Venue::Combined);
         settle().await;
         tokio::time::sleep(Duration::from_secs(10)).await;
-        h.events.send(fill(&h, SAMSUNG, (9, 0, 51), 112, Some(Exchange::Nxt), 5, 12, 1_005)).await.unwrap();
+        h.events.send(fill(&h, SAMSUNG, (9, 0, 51), 112, Some(Exchange::Nxt), 5, (12, 1_005))).await.unwrap();
         assert_eq!(quote_messages(take(&out).await), vec![quotes_msg(api::Venue::Combined, vec![venue_quote(SAMSUNG, api::Venue::Combined, 112.0, 12.0, 1_005, at(9, 0, 51))])]);
         assert_eq!(day_volume_requests(&h).len(), 1);
     }

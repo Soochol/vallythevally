@@ -16,7 +16,6 @@ use crate::symbols::Directory;
 
 const INDEX_BARS: usize = 2;
 
-/// 요청한 거래소가 NXT인데 그 종목이 NXT에서 거래되지 않으면 통합이다. 그 밖에는 요청한 거래소다.
 pub fn effective_venue(requested: Venue, nxt_enabled: bool) -> Venue {
     match requested {
         Venue::Nxt if !nxt_enabled => Venue::Combined,
@@ -25,7 +24,6 @@ pub fn effective_venue(requested: Venue, nxt_enabled: bool) -> Venue {
 }
 
 /// `symbols`는 중복이 없어야 한다. 값을 얻은 종목만 요청 순서대로 돌려준다.
-/// `directory`는 NXT를 요청할 때 NXT 거래 여부를 알려 준다. 목록에 없는 종목은 NXT에서 거래되지 않는 것으로 본다.
 pub async fn quotes(rest: &KiwoomRest, bars: &BarService, directory: Option<&Directory>, symbols: &[Symbol], requested: Venue) -> Result<Vec<api::Quote>, BarError> {
     let stocks: Vec<(StockCode, Venue)> = symbols
         .iter()
@@ -70,20 +68,15 @@ async fn index_quote(bars: &BarService, code: IndexCode) -> Result<Option<(Symbo
     Ok(Some((symbol, quote(symbol, None, last.close().centi(), prev.close().centi(), last.volume().0, bucket.start().unix(), api::QuoteSource::Polled))))
 }
 
-/// 기준가는 |현재가| − 전일대비다(kiwoom.md §11.3). 거래소와 상관없이 체결 하나에서 하나로 정해진다.
 pub fn base_centi(price: Price, change_centi: i64) -> Option<u64> {
     u64::try_from(price.centi() as i64 - change_centi).ok().filter(|b| *b > 0)
 }
 
-/// `volume`은 `venue`의 당일 누적이어야 한다.
-/// 지수에는 거래소가 없어서 `venue`를 무시한다.
 pub fn realtime(symbol: Symbol, venue: Venue, price: Price, base_centi: u64, volume: u64, at: KstTime) -> api::Quote {
     let venue = matches!(symbol, Symbol::Stock(_)).then_some(venue);
     quote(symbol, venue, price.centi(), base_centi, volume, at.unix(), api::QuoteSource::Realtime)
 }
 
-/// 종목마다 통합·KRX·NXT의 당일 누적 거래량을 한 요청으로 묻는다(종목당 3행). 세 행을 모두 얻은 종목만 돌려준다.
-/// `codes`는 `DAY_VOLUME_CHUNK`개 이하여야 한다.
 pub async fn day_volumes(rest: &KiwoomRest, codes: &[StockCode]) -> Result<HashMap<StockCode, DayVolumes>, crate::kiwoom::rest::KiwoomError> {
     let rows: Vec<(StockCode, Venue)> = codes.iter().flat_map(|c| [Venue::Combined, Venue::Krx, Venue::Nxt].map(|v| (*c, v))).collect();
     let req = StockQuotes::of_venues(&rows).expect("종목 수가 DAY_VOLUME_CHUNK 이하다");
@@ -100,7 +93,6 @@ pub async fn day_volumes(rest: &KiwoomRest, codes: &[StockCode]) -> Result<HashM
     Ok(seen.into_iter().filter_map(|(code, v)| Some((code, DayVolumes { combined: v[0]?, krx: v[1]?, nxt: v[2]? }))).collect())
 }
 
-/// 한 요청에 종목당 3행이 들어가서 100행 상한 안에서 묻는 종목 수다.
 pub const DAY_VOLUME_CHUNK: usize = StockQuotes::MAX / 3;
 
 fn quote(symbol: Symbol, venue: Option<Venue>, price_centi: u64, base_centi: u64, volume: u64, t: i64, source: api::QuoteSource) -> api::Quote {
