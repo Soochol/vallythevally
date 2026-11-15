@@ -10,6 +10,7 @@ export const runButton = (page: Page) => panel(page).getByRole("button", { name:
 export const results = (page: Page) => panel(page).getByRole("region", { name: "결과" });
 export const excludedLine = (page: Page) => results(page).getByText(/^대상 \d+종목 · 빠짐: /);
 export const rows = (page: Page) => results(page).locator("tr[data-code]");
+export const rowOf = (page: Page, code: string) => results(page).locator(`tr[data-code="${code}"]`);
 export const editor = (page: Page, title: string) => page.getByRole("region", { name: "조건식 편집", exact: true }).or(page.getByRole("dialog", { name: title }));
 const toolbar = (page: Page) => page.getByRole("toolbar", { name: "차트 도구 막대" });
 export const pickVenue = (page: Page, venue: string) => cell(page).getByRole("group", { name: "거래소" }).getByRole("button", { name: venue, exact: true }).click();

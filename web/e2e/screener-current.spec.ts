@@ -5,7 +5,7 @@ import type { Screen } from "../src/api/generated/Screen";
 import type { ScreenerResult } from "../src/api/generated/ScreenerResult";
 import { type Scenario, expect, test } from "./screener-harness";
 import { selectOption } from "./select-option";
-import { editor, openResultDetails, openScreener, panel, results, rows, runButton, savedTo, updateBand, waitForUpdateToFinish } from "./screener-page";
+import { editor, openResultDetails, openScreener, panel, results, rowOf, rows, runButton, savedTo, updateBand, waitForUpdateToFinish } from "./screener-page";
 
 
 const screen: Screen = { id: "current", name: "최신 자료 확인", markets: [], exclude: [], conditions: [{ kind: "new_high", period: "D", field: "close", n: 1, recentBars: 1 }] };
@@ -60,22 +60,22 @@ test("새 결과는 수동 실행으로만 반영하고 D/W/M 범위 편집·저
   const old = baseline.rows.find((r) => r.symbol === "110010")!;
   await intraday(screener, page, baseline, old.close + 100);
   await execute(page);
-  await expect(rows(page).filter({ hasText: "110010" })).toContainText((old.close + 100).toLocaleString("ko-KR"));
-  await expect(rows(page).filter({ hasText: "110010" }).getByLabel("잠정", { exact: true })).toBeVisible();
-  const before = await rows(page).filter({ hasText: "110010" }).textContent();
+  await expect(rowOf(page, "110010")).toContainText((old.close + 100).toLocaleString("ko-KR"));
+  await expect(rowOf(page, "110010").getByLabel("잠정", { exact: true })).toBeVisible();
+  const before = await rowOf(page, "110010").textContent();
   screener.showResult(intradayResult(baseline, old.close + 200));
-  await expect(rows(page).filter({ hasText: "110010" })).toHaveText(before!);
+  await expect(rowOf(page, "110010")).toHaveText(before!);
   await execute(page);
-  await expect(rows(page).filter({ hasText: "110010" })).toContainText((old.close + 200).toLocaleString("ko-KR"));
+  await expect(rowOf(page, "110010")).toContainText((old.close + 200).toLocaleString("ko-KR"));
   for (const period of ["D", "W", "M"]) {
     for (const recent of [1, 2, 3]) {
       await editRecent(page, period, recent);
       await expect(results(page)).toHaveCount(period === "D" && recent === 1 ? 1 : 0);
       screener.showResult(intradayResult(baseline, old.close + 200, period === "M" ? "2026-11-01" : "2026-11-09"));
       await execute(page);
-      await expect(rows(page).filter({ hasText: "110010" })).toContainText((old.close + 200).toLocaleString("ko-KR"));
-      await expect(rows(page).filter({ hasText: "110010" }).getByLabel("잠정", { exact: true })).toBeVisible();
-      await expect(rows(page).filter({ hasText: "110010" }).getByRole("cell")).toHaveCount(3);
+      await expect(rowOf(page, "110010")).toContainText((old.close + 200).toLocaleString("ko-KR"));
+      await expect(rowOf(page, "110010").getByLabel("잠정", { exact: true })).toBeVisible();
+      await expect(rowOf(page, "110010").getByRole("cell")).toHaveCount(3);
     }
   }
   await editRecent(page, "D", 2);
@@ -93,8 +93,8 @@ test("새 결과는 수동 실행으로만 반영하고 D/W/M 범위 편집·저
   await saved;
   screener.showResult(intradayResult(baseline, old.close + 200, "2026-11-06"));
   await execute(page);
-  await expect(rows(page).filter({ hasText: "110010" })).toContainText((old.close + 200).toLocaleString("ko-KR"));
-  await expect(rows(page).filter({ hasText: "110010" }).getByLabel("잠정", { exact: true })).toBeVisible();
+  await expect(rowOf(page, "110010")).toContainText((old.close + 200).toLocaleString("ko-KR"));
+  await expect(rowOf(page, "110010").getByLabel("잠정", { exact: true })).toBeVisible();
   await expect(meta(page)).toContainText("수집 범위 (KST) 2026-11-09 10:");
   await expect(meta(page)).toContainText("기준 관측일 2026-11-09");
 });
@@ -146,11 +146,11 @@ for (const width of [1440, 1024, 390, 360, 320]) {
     await prepare(scenario, page, open);
     await execute(page);
     const halted = currentResult().rows.find((r) => r.symbol === "110040")!;
-    await expect(rows(page).filter({ hasText: "110040" }).getByLabel("잠정", { exact: true })).toHaveCount(0);
-    await expect(rows(page).filter({ hasText: "110040" }).locator(`[title*="최신 일봉 ${halted.latestBarDate}"]`)).toBeVisible();
+    await expect(rowOf(page, "110040").getByLabel("잠정", { exact: true })).toHaveCount(0);
+    await expect(rowOf(page, "110040").locator(`[title*="최신 일봉 ${halted.latestBarDate}"]`)).toBeVisible();
     await expect(meta(page)).toContainText("수집 범위 (KST)");
     expect(await panel(page).evaluate((e) => e.scrollWidth <= e.clientWidth)).toBe(true);
-    await rows(page).filter({ hasText: "110040" }).scrollIntoViewIfNeeded();
+    await rowOf(page, "110040").scrollIntoViewIfNeeded();
     await page.screenshot({ path: info.outputPath(`result-${width}.png`), fullPage: true });
   });
 }
@@ -222,7 +222,7 @@ for (const olderFails of [false, true]) {
     screener.showResult(intradayResult(currentResult(), 61_500, "2026-11-01"));
     await editRecent(page, "M", 2);
     await execute(page);
-    const newestPrice = rows(page).filter({ hasText: "110010" }).getByRole("cell").nth(1);
+    const newestPrice = rowOf(page, "110010").getByRole("cell").nth(1);
     await expect(newestPrice).toHaveText("61,500*");
     const original = await meta(page).textContent();
     await page.getByRole("tablist", { name: "창 묶음 2" }).getByRole("tab", { name: "관심종목", exact: true }).click();
