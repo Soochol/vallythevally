@@ -8,7 +8,6 @@ import type { WatchGroup } from "../../api/generated/WatchGroup";
 import type { Watchlist } from "../../api/generated/Watchlist";
 import { ApiRequestError } from "../../api/http";
 import { useSymbolInfo } from "../../api/queries";
-import { compareRefusal } from "../../chart/settings";
 import { direction, formatChange, formatPercent, formatPrice, formatVolume } from "../../lib/format";
 import { DESKTOP_QUERY, useMediaQuery } from "../../lib/media";
 import { isIndexCode } from "../../lib/symbol";
@@ -36,8 +35,9 @@ import { quoteBook } from "../../stores/realtime";
 import { useSelectionStore } from "../../stores/selection";
 import { useUiStore } from "../../stores/ui";
 import { useActiveWatchlist, useWatchlistStore } from "../../stores/watchlist";
-import { ArrowIcon, ChartIcon, ChevronIcon, CloseIcon, CopyIcon, ListIcon, MoreIcon, PlusIcon } from "../icons";
+import { ArrowIcon, ChevronIcon, CloseIcon, CopyIcon, ListIcon, MoreIcon, PlusIcon } from "../icons";
 import { Menu, type MenuItem } from "../menu/Menu";
+import { addRowToCompare, symbolRowMenuItems } from "../list/symbolRowMenu";
 import { LIST_HEAD, LIST_ROW_HEIGHT, LIST_ROW_HOVER, PriceText, RateBadge, SymbolName, listRowSelection } from "../list/listRow";
 import { columnTemplate, fitColumns, type WatchVariant } from "./columns";
 import { useElementSize } from "../workspace/size";
@@ -545,22 +545,19 @@ function WatchRow({ list, row, index, last, columns, template, variant, sender, 
     if (undo) useSelectionStore.getState().showToast(`${!wholeList && row.groupId !== null ? list.groups.find((g) => g.id === row.groupId)?.name ?? list.name : list.name}에서 뺐습니다: ${name}`, undo);
   };
   const top = () => { useWatchlistStore.getState().move(list.id, row, 0); onMoved(row); };
-  const compare = () => {
-    const refusal = compareRefusal(cell.chartSettings, code, cell.symbol);
-    if (refusal) return useSelectionStore.getState().showToast(refusal === "full" ? "비교 종목은 3개까지입니다" : refusal === "main" ? "현재 종목은 비교에 추가할 수 없습니다" : "이미 비교에 있습니다");
-    useLayoutStore.getState().addCompare(cellId, code);
-    useSelectionStore.getState().showToast(`비교에 추가했습니다: ${name}`);
-  };
+  const compare = () => addRowToCompare(cellId, cell, code, name);
   const context = (x: number, y: number) => { button.current?.focus(); setMenu({ kind: "actions", x, y }); };
+  const common = symbolRowMenuItems({ name, code, onOpen: open, onCompare: compare });
   const items: MenuItem[] = [
-    { kind: "heading", label: `${name} ${code}` },
-    { kind: "action", label: "이 칸에 열기", icon: <ChartIcon />, hint: "↵", onSelect: open },
-    { kind: "action", label: "비교에 추가", icon: <PlusIcon />, hint: "Shift+↵", onSelect: compare },
+    common.heading,
+    common.open,
+    common.compare,
     { kind: "separator" },
     { kind: "action", label: "맨 위로", icon: <ArrowIcon dir="up" />, hint: "Alt+Home", disabled: index === 0, onSelect: top },
     { kind: "action", label: "그룹에 추가", icon: <PlusIcon />, onSelect: () => { button.current?.focus(); setMenu((current) => current && { ...current, kind: "addGroup" }); } },
     { kind: "action", label: "그룹으로 옮기기", icon: <ListIcon />, onSelect: () => { button.current?.focus(); setMenu((current) => current && { ...current, kind: "group" }); } },
     { kind: "action", label: "다른 목록에 복사", icon: <CopyIcon />, disabled: others.length === 0, onSelect: () => { button.current?.focus(); setMenu((current) => current && { ...current, kind: "transfer" }); } },
+    common.copyCode,
     { kind: "separator" },
     ...(row.groupId !== null ? [{ kind: "action", label: "이 그룹에서 빼기", icon: <CloseIcon />, hint: "Del", onSelect: () => remove() } satisfies MenuItem] : []),
     { kind: "action", label: "관심종목에서 빼기", icon: <CloseIcon />, hint: row.groupId === null ? "Del" : undefined, danger: true, onSelect: () => remove(true) },

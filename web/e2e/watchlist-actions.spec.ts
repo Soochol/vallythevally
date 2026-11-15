@@ -167,6 +167,16 @@ test("다른 탭이 같은 목록을 바꾸면 빼기 되돌리기를 비활성�
   await expect.poll(() => codes(page)).toEqual(["005935", "005930"]);
 });
 
+test("우클릭 메뉴의 종목코드 복사는 코드를 클립보드에 넣고 알린다", async ({ scenario, page, context, baseURL }) => {
+  await context.grantPermissions(["clipboard-read", "clipboard-write"], { origin: baseURL });
+  await seed(scenario);
+  await page.goto("/");
+  await expect(row(page, "086520")).toContainText("에코프로");
+  await action(page, "086520", "종목코드 복사");
+  await expect(page.getByRole("status").getByText("종목코드를 복사했습니다: 086520")).toBeVisible();
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe("086520");
+});
+
 test("우클릭의 열기·비교·맨 위로·복사와 키보드·끌기를 지원한다", async ({ scenario, page }) => {
   await seed(scenario);
   await page.goto("/");
