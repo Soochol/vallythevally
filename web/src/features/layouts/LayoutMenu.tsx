@@ -1,4 +1,5 @@
-import { useId, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import { useLayoutStore } from "../../stores/layout";
 import { usePersistStore } from "../../stores/persist";
 import { DialogFrame, Errors } from "../dialog/DialogParts";
@@ -18,6 +19,10 @@ export function LayoutMenu() {
   const offline = usePersistStore((s) => s.phase.kind !== "ready");
   const { phase, layouts } = useLayoutsStore();
   const busy = phase === "busy";
+  const closeNaming = () => {
+    flushSync(() => setNaming(null));
+    root.current?.querySelector<HTMLButtonElement>("[data-layout-trigger]")?.focus();
+  };
   const items: MenuItem[] = [
     ...layouts.map((entry): MenuItem => ({ kind: "radio", label: entry.name, value: entry.id, checked: entry.id === layout.id, onSelect: () => { void layoutCommands.open(entry.id).catch(showLayoutError); } })),
     { kind: "separator" },
@@ -37,7 +42,7 @@ export function LayoutMenu() {
         void layoutCommands.refresh().then(() => setOpen(true)).catch(showLayoutError);
       }}><span className="truncate">{layout.name}</span><ChevronIcon /></button>
       {open && !busy && <Menu label="레이아웃" root={root} items={items} onClose={() => setOpen(false)} />}
-      {naming && <NameDialog kind={naming} onClose={() => setNaming(null)} />}
+      {naming && <NameDialog kind={naming} onClose={closeNaming} />}
     </div>
   );
 }
@@ -48,6 +53,8 @@ function NameDialog({ kind, onClose }: { kind: Naming; onClose(): void }) {
   const busy = useLayoutsStore((s) => s.phase === "busy");
   const [value, setValue] = useState(kind === "rename" ? layout.name : "");
   const [error, setError] = useState<string | null>(null);
+  const input = useRef<HTMLInputElement>(null);
+  useEffect(() => { if (error !== null && !busy) input.current?.focus(); }, [error, busy]);
   const id = useId();
   const title = kind === "saveAs" ? "새 이름으로 저장" : "이름 바꾸기";
   const close = () => { if (!busy) onClose(); };
@@ -63,7 +70,7 @@ function NameDialog({ kind, onClose }: { kind: Naming; onClose(): void }) {
         <header className="ui-dialog-head"><h2 id={`${id}-title`}>{title}</h2></header>
         <div className="flex flex-col gap-3 p-6">
           <label htmlFor={`${id}-name`}>레이아웃 이름</label>
-          <input id={`${id}-name`} autoFocus value={value} disabled={busy} aria-invalid={error !== null} aria-describedby={error ? `${id}-error` : undefined} className="ui-field" onChange={(event) => { setValue(event.target.value); setError(null); }} />
+          <input ref={input} id={`${id}-name`} autoFocus value={value} disabled={busy} aria-invalid={error !== null} aria-describedby={error ? `${id}-error` : undefined} className="ui-field" onChange={(event) => { setValue(event.target.value); setError(null); }} />
           <Errors id={`${id}-error`} messages={error ? [error] : []} />
         </div>
         <footer className="ui-dialog-foot justify-end"><button type="button" className="tb-btn" disabled={busy} onClick={close}>취소</button><button type="submit" className="btn-primary" disabled={busy}>저장</button></footer>

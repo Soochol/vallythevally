@@ -228,6 +228,46 @@ test("레이아웃 메뉴를 키보드로 열고 이동·선택·닫기와 초�
   await expect(trigger(page)).toBeFocused();
 });
 
+test("이름 입력을 키보드로 저장·취소하고 서버가 거절해도 초점을 유지한다", async ({ page, scenario }) => {
+  await page.goto("/");
+  await expect(cell(page)).toHaveAttribute("aria-busy", "false");
+  const open = async (kind: "새 이름으로 저장" | "이름 바꾸기") => {
+    await expect(trigger(page)).toBeFocused();
+    await page.keyboard.press("Enter");
+    await expect(menu(page).getByRole("menuitemradio").first()).toBeFocused();
+    await page.keyboard.press("Home");
+    await page.keyboard.press("ArrowDown");
+    if (kind === "이름 바꾸기") await page.keyboard.press("ArrowDown");
+    await page.keyboard.press("Enter");
+    const dialog = page.getByRole("dialog", { name: kind, exact: true });
+    await expect(dialog.getByRole("textbox")).toBeFocused();
+    return dialog;
+  };
+  await trigger(page).focus();
+  const renamed = await open("이름 바꾸기");
+  await renamed.getByRole("textbox").fill("키보드");
+  await page.keyboard.press("Enter");
+  await expect(renamed).toBeHidden();
+  await expect(trigger(page)).toHaveAccessibleName("레이아웃: 키보드");
+  await expect(trigger(page)).toBeFocused();
+  await expect(page.getByRole("contentinfo")).toContainText("자동 저장됨");
+  for (const kind of ["이름 바꾸기", "새 이름으로 저장"] as const) {
+    const cancelled = await open(kind);
+    await page.keyboard.press("Escape");
+    await expect(cancelled).toBeHidden();
+    await expect(trigger(page)).toBeFocused();
+    const rejected = await open(kind);
+    await rejected.getByRole("textbox").fill("거절된 이름");
+    scenario.reply((url, request) => url.pathname.startsWith("/api/layouts/") && request.method() === "PUT", { status: 409, body: { error: { code: "conflict", message: "서버에서 거절했습니다" } } });
+    await page.keyboard.press("Enter");
+    await expect(rejected).toContainText("서버에서 거절했습니다");
+    await expect(rejected.getByRole("textbox")).toBeFocused();
+    await page.keyboard.press("Escape");
+    await expect(rejected).toBeHidden();
+    await expect(trigger(page)).toBeFocused();
+  }
+});
+
 test("같은 창 id를 가진 레이아웃으로 바꾸면 지표 인스펙터의 검색과 미리보기 초안을 비운다", async ({ page, scenario }) => {
   const base = scenario.documents.layout();
   const withInspector: Layout = { ...base, windows: [...base.windows, { id: "indicators", kind: "indicators", link: null }], placement: {}, revision: 1 };
