@@ -8,6 +8,7 @@ import { useLayoutStore, type WindowState } from "../../stores/layout";
 import { useUiStore } from "../../stores/ui";
 import { useSelectionStore } from "../../stores/selection";
 import { closeWindow } from "./manage";
+import { focusWithoutActivation, isProgrammaticFocus } from "./focus";
 import type { FrameBindings } from "./WindowFrame";
 
 type Operation = { kind: "move" } | { kind: "resize"; handle: ResizeHandle };
@@ -146,7 +147,7 @@ export function useCanvasInteraction(canvas: CanvasPlacement, windows: readonly 
     if (!state.commitCanvas({ session: state.session, expected, next: base })) return;
     choose(window);
     setMaximization((current) => current?.window === window.id && current.base === base ? null : { window: window.id, base });
-    document.querySelector<HTMLElement>(`[data-window-header="${window.id}"]`)?.focus({ preventScroll: true });
+    focusWithoutActivation(document.querySelector<HTMLElement>(`[data-window-header="${window.id}"]`));
   };
   const press = (event: PointerEvent<HTMLDivElement>, window: WindowState, operation: Operation) => {
     if (event.button !== 0 || !event.isPrimary || maximized || gesture.current.kind !== "idle") return;
@@ -156,7 +157,7 @@ export function useCanvasInteraction(canvas: CanvasPlacement, windows: readonly 
     event.preventDefault();
     event.stopPropagation();
     const header = document.querySelector<HTMLElement>(`[data-window-header="${window.id}"]`);
-    header?.focus({ preventScroll: true });
+    focusWithoutActivation(header);
     const rect = rectsForArea(canvas, windows, area)[window.id]!;
     const start: Start = { pointer: event.pointerId, window, operation, point: { x: event.clientX, y: event.clientY }, rect, area, expected: canvas, session: state.session, topology, capture: event.currentTarget };
     const next = bringToFront(canvas, window.id);
@@ -192,7 +193,7 @@ export function useCanvasInteraction(canvas: CanvasPlacement, windows: readonly 
     },
     header: {
       onFocus: (event) => {
-        if (!(event.target instanceof HTMLElement) || !event.target.matches(":focus-visible") || gesture.current.kind !== "idle") return;
+        if (isProgrammaticFocus(event.target) || !(event.target instanceof HTMLElement) || !event.target.matches(":focus-visible") || gesture.current.kind !== "idle") return;
         const state = useLayoutStore.getState();
         const expected = state.layout.placement.canvas;
         if (!expected) return;

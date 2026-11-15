@@ -11,6 +11,7 @@ import { useSelectionStore } from "../../stores/selection";
 import { useUiStore } from "../../stores/ui";
 import { commandAt, evaluateDock, type DockCommand, type DockPlan } from "./dockCommands";
 import { closeWindow } from "./manage";
+import { focusWithoutActivation, isProgrammaticFocus } from "./focus";
 import type { FrameBindings } from "./WindowFrame";
 
 export type TabMenu = { window: WindowId; x: number; y: number };
@@ -23,7 +24,7 @@ const NO_GUIDES: Guides = { x: null, y: null };
 const ARROWS: Record<string, Point> = { ArrowLeft: { x: -16, y: 0 }, ArrowRight: { x: 16, y: 0 }, ArrowUp: { x: 0, y: -16 }, ArrowDown: { x: 0, y: 16 } };
 const topologyOf = (windows: readonly WindowState[]) => windows.map((window) => window.id).join("\n");
 export const floatPanelId = (id: WindowId) => `float-panel-${id}`;
-export const focusTab = (id: WindowId) => requestAnimationFrame(() => (document.getElementById(`window-tab-${id}`) ?? document.querySelector<HTMLElement>(`[data-window-header="${id}"]`))?.focus({ preventScroll: true }));
+export const focusTab = (id: WindowId) => requestAnimationFrame(() => focusWithoutActivation(document.getElementById(`window-tab-${id}`) ?? document.querySelector<HTMLElement>(`[data-window-header="${id}"]`)));
 
 function choose(id: WindowId) {
   if (useLayoutStore.getState().layout.windows.some((window) => window.id === id && window.kind === "chart")) useSelectionStore.getState().setActiveCell(id);
@@ -199,12 +200,12 @@ export function useDockInteraction({ root, dock, space, enabled }: { root: RefOb
     if (!area || (state.layout.placement.dock !== null && state.layout.placement.dock !== dock)) return;
     const capture = operation.kind === "tab" ? root.current! : event.currentTarget;
     gesture.current = { kind: "pressed", start: { pointer: event.pointerId, window, operation, point: { x: event.clientX, y: event.clientY }, dock, expected: state.layout.placement.dock, area, session: state.session, topology: topologyOf(state.layout.windows), capture } };
-    event.currentTarget.focus({ preventScroll: true });
+    focusWithoutActivation(event.currentTarget);
     capture.setPointerCapture(event.pointerId);
     if (operation.kind !== "tab") { choose(window.id); setOutcome({ draft: frontFloat(dock, window.id), next: dock, preview: { kind: "unchanged" }, guides: NO_GUIDES, atMinimum: false }); }
   };
   const openMenu = (window: WindowId, x: number, y: number) => {
-    document.getElementById(`window-tab-${window}`)?.focus();
+    focusWithoutActivation(document.getElementById(`window-tab-${window}`));
     setMenu({ window, x, y });
   };
   const contextTab = (event: MouseEvent<HTMLButtonElement>, window: WindowId) => { event.preventDefault(); openMenu(window, event.clientX, event.clientY); };
@@ -240,7 +241,7 @@ export function useDockInteraction({ root, dock, space, enabled }: { root: RefOb
       },
       header: {
         onFocus: (event) => {
-          if (!enabled || !(event.target instanceof HTMLElement) || !event.target.matches(":focus-visible") || gesture.current.kind !== "idle") return;
+          if (!enabled || isProgrammaticFocus(event.target) || !(event.target instanceof HTMLElement) || !event.target.matches(":focus-visible") || gesture.current.kind !== "idle") return;
           const state = useLayoutStore.getState();
           const expected = state.layout.placement.dock;
           if (!expected) return;

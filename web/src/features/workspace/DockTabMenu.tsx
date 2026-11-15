@@ -9,6 +9,7 @@ import { Menu, type MenuItem } from "../menu/Menu";
 import { closeWindow, LAST_CHART_REASON } from "./manage";
 import { evaluateDock, EDGE_LABEL, type DockCommand } from "./dockCommands";
 import { focusTab, type DockInteraction } from "./dockInteraction";
+import { focusWithoutActivation } from "./focus";
 
 export function DockTabMenu({ interaction, dock, space, root }: { interaction: DockInteraction; dock: DockPlacement; space: DockSpace; root: RefObject<HTMLElement | null> }) {
   const acted = useRef(false);
@@ -45,7 +46,7 @@ export function DockTabMenu({ interaction, dock, space, root }: { interaction: D
     closeWindow(window.id, name);
     const next = groupOfWindow(useLayoutStore.getState().layout.placement.dock?.root ?? dock.root, source.tabs.find((id) => id !== window.id) ?? window.id);
     if (next) focusTab(next.active);
-    else requestAnimationFrame(() => document.querySelector<HTMLElement>('[role=tab][aria-selected=true]')?.focus());
+    else requestAnimationFrame(() => focusWithoutActivation(document.querySelector<HTMLElement>('[role=tab][aria-selected=true]')));
   } });
   return <Menu label="창 배치" root={root} items={items} style={{ left: menu.x, top: menu.y }} onClose={() => {
     interaction.setMenu(null);

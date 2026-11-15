@@ -590,7 +590,7 @@ for (const surface of ["canvas", "dock-float"] as const) {
     await expect(head(page, "cell-1")).toHaveCSS("outline-style", "solid");
     await page.keyboard.press("Delete");
     await expect(head(page, "cell-1")).toHaveCount(0);
-    const successor = surface === "canvas" ? head(page, "cell-0") : tab(page, "cell-0");
+    const successor = surface === "canvas" ? head(page, "cell-0") : head(page, "screener");
     await expect(successor).toBeFocused();
     await exposed(successor);
     await page.keyboard.press("Tab");
@@ -631,7 +631,7 @@ for (const mode of MODES) {
       await expect(page.locator(":focus")).toBeInViewport({ ratio: 1 });
       await exposed(page.locator(":focus"));
       const undo = page.getByRole("status").filter({ hasText: `${closing === "cell-1" ? "차트" : "스크리너"} 창을 닫았습니다` }).getByRole("button", { name: "되돌리기", exact: true });
-      await expect(undo).toBeEnabled();
+      await expect(undo).toBeEnabled({ timeout: 1500 });
       await undo.click();
       await expect(head(page, closing)).toBeVisible();
       await expect.poll(() => windows(scenario).map((window) => window.id)).toEqual(original.map((window) => window.id));
@@ -658,7 +658,7 @@ test("떠 있는 차트를 닫고 가려진 교체 탭 대신 보이는 창 머�
   await exposed(page.locator(":focus"));
   await expect(tab(page, "cell-0")).toHaveAttribute("data-active-cell", "");
   const undo = page.getByRole("status").filter({ hasText: "차트 창을 닫았습니다" }).getByRole("button", { name: "되돌리기", exact: true });
-  await expect(undo).toBeEnabled();
+  await expect(undo).toBeEnabled({ timeout: 1500 });
   await undo.click();
   await expect(head(page, "cell-1")).toBeVisible();
   await expect.poll(() => windows(scenario).map((window) => window.id)).toEqual(original.map((window) => window.id));
@@ -673,7 +673,9 @@ test("가로로 스크롤한 도킹 탭에서 옆 창을 닫으면 선택된 탭
   } } });
   await page.setViewportSize({ width: 1024, height: 768 });
   await page.goto("/");
-  await tabTo(page, tab(page, "watchlist"));
+  const selected = tab(page, "watchlist");
+  for (let step = 0; step < 240 && !await selected.evaluate((element) => element === document.activeElement); step++) await page.keyboard.press("Tab");
+  await expect(selected).toBeFocused();
   await tabTo(page, head(page, "screener"));
   await page.keyboard.press("Delete");
   await expect(head(page, "screener")).toHaveCount(0);
@@ -683,7 +685,7 @@ test("가로로 스크롤한 도킹 탭에서 옆 창을 닫으면 선택된 탭
   await exposed(tab(page, "watchlist"));
   await expect(tab(page, "cell-0")).toHaveAttribute("data-active-cell", "");
   const undo = page.getByRole("status").filter({ hasText: "스크리너 창을 닫았습니다" }).getByRole("button", { name: "되돌리기", exact: true });
-  await expect(undo).toBeEnabled();
+  await expect(undo).toBeEnabled({ timeout: 1500 });
   await undo.click();
   await expect(head(page, "screener")).toBeVisible();
 });

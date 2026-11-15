@@ -3,6 +3,7 @@ import type { WindowId, WindowKind } from "../../layout/kinds";
 import { chartWindows, fittedDock, type DockRoom, useLayoutStore } from "../../stores/layout";
 import { type ToastUndo, useSelectionStore } from "../../stores/selection";
 import { DOCK_GAP } from "./size";
+import { focusAfterClose } from "./focus";
 
 export const LAST_CHART_REASON = "차트 창은 하나 이상 있어야 합니다";
 export const CHART_LIMIT_REASON = "차트 창은 8개까지 둘 수 있습니다";
@@ -43,9 +44,8 @@ export function closeWindow(id: WindowId, name: string): boolean {
   if (!state.closeWindow(id, replacement)) return false;
   if (replacement) selection.setActiveCell(replacement);
   if (focusedHeader) requestAnimationFrame(() => {
-    const next = replacement ?? selection.activeCell;
-    const target = document.querySelector<HTMLElement>(`[data-window-header="${next}"]`) ?? document.getElementById(`window-tab-${next}`) ?? document.querySelector<HTMLElement>("[data-window-header], [role=tab][aria-selected=true]");
-    target?.focus({ preventScroll: true });
+    if (useLayoutStore.getState().session !== state.session) return;
+    focusAfterClose(replacement ?? useSelectionStore.getState().activeCell);
   });
   selection.showToast(`${name} 창을 닫았습니다`, latestArrangementUndo());
   return true;
