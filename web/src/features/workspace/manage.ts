@@ -36,13 +36,11 @@ export function latestArrangementUndo(): ToastUndo {
 }
 
 export function closeWindow(id: WindowId, name: string): boolean {
-  if (!useLayoutStore.getState().closeWindow(id)) return false;
+  const state = useLayoutStore.getState();
   const selection = useSelectionStore.getState();
-  if (selection.activeCell === id) {
-    const first = chartWindows(useLayoutStore.getState().layout)[0]!.id;
-    useLayoutStore.getState().selectTab(first);
-    selection.setActiveCell(first);
-  }
+  const replacement = selection.activeCell === id ? chartWindows(state.layout).find((window) => window.id !== id)?.id : undefined;
+  if (!state.closeWindow(id, replacement)) return false;
+  if (replacement) selection.setActiveCell(replacement);
   selection.showToast(`${name} 창을 닫았습니다`, latestArrangementUndo());
   return true;
 }

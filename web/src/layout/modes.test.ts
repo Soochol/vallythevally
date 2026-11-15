@@ -67,6 +67,24 @@ test("이미 쓴 방식은 원래 배치를 보존하며 닫거나 더한 창만
   expect(listGroups(returned.dock!.root).flatMap((group) => group.tabs)).not.toContain(b);
 });
 
+test("처음 캔버스를 쓰면 보이던 기본 도킹을 기억해 왕복 뒤에도 차트 순서가 같다", () => {
+  const initial: Placement = { v: 1, dock: null, canvas: null };
+  const before = defaultDock(windows);
+  const canvas = placementForMode(initial, windows, "canvas", room);
+  expect(initial).toEqual({ v: 1, dock: null, canvas: null });
+  expect(canvas.dock).toEqual(before);
+  const returned = placementForMode(canvas, windows, "dock", room);
+  expect(returned.dock).toBe(canvas.dock);
+  expect(listGroups(returned.dock!.root).map((group) => group.tabs)).toEqual([[a], [b], [c, d]]);
+});
+
+test("캔버스만 저장된 레이아웃의 첫 도킹은 캔버스 앞 차례로 만든다", () => {
+  const canvas = canvasFromDock(defaultDock(windows), windows, room);
+  const converted = placementForMode({ v: 1, dock: null, canvas }, windows, "dock", room);
+  expect(listGroups(converted.dock!.root).map((group) => group.tabs)).toEqual([[b], [a], [c, d]]);
+  expect(converted.canvas).toBe(canvas);
+});
+
 test("떠 있는 창도 원래 도킹 작업 영역의 픽셀 크기와 자리를 보존한다", () => {
   const dock = defaultDock([windows[0], windows[2]!, windows[3]!]);
   dock.floats = [{ window: b, rect: { x: .2, y: .15, w: .4, h: .5 } }];

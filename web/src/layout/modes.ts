@@ -47,6 +47,10 @@ export function placementForMode(placement: Placement, windows: WindowList, targ
     const dock = placement.dock ? fitDock(placement.dock, windows) : placement.canvas ? dockFromCanvas(placement.canvas, windows) : defaultDock(windows);
     return dock === placement.dock ? placement : { ...placement, dock };
   }
-  const canvas = placement.canvas ? fitCanvas(placement.canvas, windows, room.canvas) : canvasFromDock(fitDock(placement.dock, windows), windows, room);
-  return canvas === placement.canvas ? placement : { ...placement, canvas };
+  if (placement.canvas) {
+    const canvas = fitCanvas(placement.canvas, windows, room.canvas);
+    return canvas === placement.canvas ? placement : { ...placement, canvas };
+  }
+  const dock = fitDock(placement.dock, windows);
+  return { ...placement, dock, canvas: canvasFromDock(dock, windows, room) };
 }

@@ -1,7 +1,11 @@
 import { beforeEach, expect, test } from "vitest";
+import { workArea } from "../../layout/canvas/geometry";
 import { windowId } from "../../layout/kinds";
-import { chartWindows, DEFAULT_LAYOUT, useLayoutStore } from "../../stores/layout";
+import { placementForMode } from "../../layout/modes";
+import { DEFAULT_UI_PREFS } from "../../persist/uiState";
+import { chartWindows, DEFAULT_LAYOUT, useLayoutStore, windowRefs } from "../../stores/layout";
 import { useSelectionStore } from "../../stores/selection";
+import { useUiStore } from "../../stores/ui";
 import { addWindow, closeWindow } from "./manage";
 
 const room = { area: { w: 1256, h: 684 }, gap: 6 };
@@ -10,8 +14,9 @@ const active = () => useSelectionStore.getState().activeCell;
 const charts = () => chartWindows(layout()).map((w) => w.id);
 
 beforeEach(() => {
-  useLayoutStore.setState({ layout: structuredClone(DEFAULT_LAYOUT), revision: 0, steps: [] });
+  useLayoutStore.setState({ layout: structuredClone(DEFAULT_LAYOUT), revision: 0, steps: [], canvasArea: null });
   useSelectionStore.setState({ activeCell: chartWindows(DEFAULT_LAYOUT)[0]!.id, toast: null });
+  useUiStore.getState().load(DEFAULT_UI_PREFS, {});
 });
 
 test("차트 창을 더하면 활성 칸의 내용과 연동 색을 복사한 새 창이 활성 칸이 된다", () => {
@@ -76,4 +81,31 @@ test("활성 칸을 닫을 때 첫 차트가 다른 탭 뒤에 숨어 있으면 
   expect(closeWindow(beside!, "칸 3")).toBe(true);
   expect(active()).toBe(first);
   expect(JSON.stringify(dock())).toContain(`"tabs":["${first}","${tabbed}"],"active":"${first}"`);
+});
+
+test("활성 캔버스 차트 닫기와 남은 차트 앞으로 보이기는 한 단계이며 알림 한 번으로 복원한다", () => {
+  const state = () => useLayoutStore.getState();
+  const canvasArea = workArea(1256, 636)!;
+  state().settlePlacement(placementForMode(layout().placement, windowRefs(layout().windows), "canvas", { dock: room, canvas: canvasArea }));
+  state().setCanvasArea(canvasArea);
+  useUiStore.getState().setLayoutMode("canvas");
+  const id = addWindow("chart", room)!;
+  state().setPeriod(id, "W");
+  const before = layout().placement;
+  const steps = state().steps.length;
+  const first = charts()[0]!;
+  expect(before.canvas!.order.at(-1)).toBe(id);
+  expect(before.canvas!.order.indexOf(first)).toBeLessThan(before.canvas!.order.indexOf(windowId("watchlist")));
+  expect(closeWindow(id, "차트")).toBe(true);
+  expect(state().steps).toHaveLength(steps + 1);
+  expect(layout().placement.canvas!.order.at(-1)).toBe(first);
+  expect(active()).toBe(first);
+  state().setPeriod(first, "M");
+  const undo = useSelectionStore.getState().toast!.undo!;
+  expect(undo.available()).toBe(true);
+  undo.run();
+  expect(layout().placement).toBe(before);
+  expect(chartWindows(layout()).find((window) => window.id === id)?.period).toBe("W");
+  expect(chartWindows(layout()).find((window) => window.id === first)?.period).toBe("M");
+  expect(undo.available()).toBe(false);
 });

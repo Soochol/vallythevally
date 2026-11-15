@@ -145,7 +145,7 @@ interface LayoutState {
   selectTab(window: WindowId): void;
   showWindow(kind: OtherWindowKind, targetGroup?: string): void;
   addChart(from: WindowId, room: DockRoom | null, targetGroup?: string): WindowId | null;
-  closeWindow(id: WindowId): boolean;
+  closeWindow(id: WindowId, replacement?: WindowId): boolean;
   setSymbol(cellId: WindowId, target: SymbolTarget, venue?: Venue): SymbolChange;
   sendSymbol(sender: WindowId | null, cellId: WindowId, target: SymbolTarget): SymbolChange;
   setLink(window: WindowId, link: LinkColor | null, nxtOf?: NxtLookup): void;
@@ -322,14 +322,19 @@ export const useLayoutStore = create<LayoutState>()((set, get) => {
       arrangeDock(windows, targetGroup ? putTab(dock, id, targetGroup) : selectTab(fitDock(room ? placeBeside(dock, id, source.id, { ...room, windows: refs }) : dock, refs), id));
       return id;
     },
-    closeWindow: (id) => {
+    closeWindow: (id, replacement) => {
       const { layout } = get();
       const closing = layout.windows.find((w) => w.id === id);
       if (!closing || (isChartWindow(closing) && chartWindows(layout).length <= 1)) return false;
       const windows = layout.windows.filter((w) => w !== closing);
       const canvasArea = get().canvasArea;
-      if (canvasActive() && canvasArea) arrangeCanvas(windows, fitCanvas(layout.placement.canvas, windowRefs(windows), canvasArea));
-      else arrangeDock(windows, fitDock(withoutWindow(fittedDock(layout), id), windowRefs(windows)));
+      if (canvasActive() && canvasArea) {
+        const canvas = fitCanvas(layout.placement.canvas, windowRefs(windows), canvasArea);
+        arrangeCanvas(windows, replacement ? bringToFront(canvas, replacement) : canvas);
+      } else {
+        const dock = fitDock(withoutWindow(fittedDock(layout), id), windowRefs(windows));
+        arrangeDock(windows, replacement ? selectTab(dock, replacement) : dock);
+      }
       return true;
     },
     setSymbol: (cellId, target, venue) => openIn(linkedCharts(get().layout, cellId), target, venue && { cellId, venue }),
