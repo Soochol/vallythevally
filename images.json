@@ -1,0 +1,9 @@
+{
+  "source_head": "c9c7f2853f2137f864a1da67c0d3af86bc2b1447",
+  "images": {
+    "win-canvas-initial.png": "6648c9cb654d5a66bb388f3f057947c8aa2ac8f9fb73394eb5f71dd949d96e7a",
+    "win-canvas-overlap.png": "ddfd9c0a1246a80b476234b48e105885fcc7239d9ddf005d62754355c35a0d77",
+    "win-canvas-guides.png": "0697db297d7f80be169fbd992a6c99e127f97b28debc9777973b5e26498891f6",
+    "win-canvas-tidied.png": "3783eef973d3e168402e5f77db6774972930c853aea73ea917505e365aace560"
+  }
+}
