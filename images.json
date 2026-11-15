@@ -1,9 +1,9 @@
 {
-  "source_head": "c9c7f2853f2137f864a1da67c0d3af86bc2b1447",
+  "source_head": "9c200f20647b082c72ecd200cd36a1013b531e60",
   "images": {
-    "win-canvas-initial.png": "6648c9cb654d5a66bb388f3f057947c8aa2ac8f9fb73394eb5f71dd949d96e7a",
-    "win-canvas-overlap.png": "ddfd9c0a1246a80b476234b48e105885fcc7239d9ddf005d62754355c35a0d77",
-    "win-canvas-guides.png": "0697db297d7f80be169fbd992a6c99e127f97b28debc9777973b5e26498891f6",
-    "win-canvas-tidied.png": "3783eef973d3e168402e5f77db6774972930c853aea73ea917505e365aace560"
+    "win-canvas-initial.png": "c51a10e566f7045b907a8132ee559416332d69877e4e45cb7cb6ccc1628aecce",
+    "win-canvas-overlap.png": "bae6d03a4e2fce2c79383f25be4376ddeec8bf7bdef19e4afa3348f4c224c8c3",
+    "win-canvas-guides.png": "8065b1ed22942f4b1b0c488ef54f55d61c8d36b15a4d907a609090f630df8031",
+    "win-canvas-tidied.png": "691399a1e94af20c7813e47090ded8c501b7a50544ea56312fe2fe529e1a09fc"
   }
 }
