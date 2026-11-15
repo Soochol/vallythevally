@@ -353,3 +353,21 @@ test("사라진 묶음에는 창이나 기록을 더하지 않는다", () => {
   expect(arrangement()).toEqual(before);
   expect(state().steps).toHaveLength(0);
 });
+
+test("십자선 연동은 scroll과 배치 기록을 지키고 바뀔 때만 저장 순서를 올린다", () => {
+  state().setDock(fittedDock(state().layout));
+  const { windows, placement, sync } = state().layout;
+  const steps = state().steps;
+  const revision = state().revision;
+  state().setCrosshairSync(false);
+  expect(state().layout.sync).toEqual({ crosshair: false, scroll: sync.scroll });
+  expect(state().layout.windows).toBe(windows);
+  expect(state().layout.placement).toBe(placement);
+  expect(state().steps).toBe(steps);
+  expect(state().revision).toBe(revision + 1);
+  state().setCrosshairSync(false);
+  expect(state().revision).toBe(revision + 1);
+  state().setCrosshairSync(true);
+  expect(state().layout.sync.crosshair).toBe(true);
+  expect(state().revision).toBe(revision + 2);
+});

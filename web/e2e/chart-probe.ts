@@ -2,7 +2,7 @@ import type { IChartApi, ISeriesApi, SeriesType, Time } from "lightweight-charts
 
 type Series = Pick<ISeriesApi<SeriesType, Time>, "seriesType" | "attachPrimitive" | "dataByIndex" | "priceToCoordinate" | "coordinateToPrice">;
 declare global {
-  interface Window { chartProbe: { chart: IChartApi; main: Series } }
+  interface Window { chartProbe: { chart: IChartApi; main: Series }; chartProbes: { chart: IChartApi; main: Series }[] }
 }
 
 export function installChartProbe() {
@@ -17,7 +17,11 @@ export function installChartProbe() {
   Map.prototype.set = function (key: unknown, value: unknown) {
     if (isSeries(key) && key.seriesType() === "Candlestick" && !seen.has(key)) {
       seen.add(key);
-      setTimeout(() => key.attachPrimitive({ attached: ({ chart }) => { window.chartProbe = { chart, main: key }; } }), 0);
+      setTimeout(() => key.attachPrimitive({ attached: ({ chart }) => {
+        window.chartProbe = { chart, main: key };
+        window.chartProbes ??= [];
+        if (!window.chartProbes.some((probe) => probe.chart === chart)) window.chartProbes.push(window.chartProbe);
+      } }), 0);
     }
     return set.call(this, key, value);
   };
