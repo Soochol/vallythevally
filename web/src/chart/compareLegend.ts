@@ -1,6 +1,5 @@
 import { iconMarkup } from "../features/icons";
 import type { CompareLegendValues, CompareRow } from "./compare";
-
 import type { LegendProjection } from "./legendProjection";
 
 const ROW =
@@ -71,16 +70,16 @@ export class CompareLegend {
   }
 
   private fill(r: RowEls, row: CompareRow): void {
-      r.swatch.style.background = row.color;
-      r.name.textContent = row.name;
-      r.value.textContent = row.value;
-      r.value.className = `font-medium ${DIR_CLASS[row.dir]}`;
-      r.note.textContent = row.notes.join(" · ");
-      r.note.hidden = row.notes.length === 0;
-      r.root.classList.toggle("opacity-60", row.failed);
-      r.remove.setAttribute("aria-label", `${row.name} 비교 종목 지우기`);
-      r.root.dataset.lastT = String(row.last?.t ?? "");
-      r.root.dataset.lastClose = String(row.last?.c ?? "");
+    r.swatch.style.background = row.color;
+    r.name.textContent = row.name;
+    r.value.textContent = row.value;
+    r.value.className = `font-medium ${DIR_CLASS[row.dir]}`;
+    r.note.textContent = row.notes.join(" · ");
+    r.note.hidden = row.notes.length === 0;
+    r.root.classList.toggle("opacity-60", row.failed);
+    r.remove.setAttribute("aria-label", `${row.name} 비교 종목 지우기`);
+    r.root.dataset.lastT = String(row.last?.t ?? "");
+    r.root.dataset.lastClose = String(row.last?.c ?? "");
   }
 
   dispose(): void {

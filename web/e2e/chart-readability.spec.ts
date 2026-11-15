@@ -534,4 +534,20 @@ test("native pinned boundary keeps stable frames and real help", async ({ page, 
   await help.scrollIntoViewIfNeeded();
   await help.click();
   await expect(page.getByRole("dialog", { name: "드로잉 단축키", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "도움말 닫기", exact: true }).click();
+  const repeated = [];
+  for (const width of [1015, 1016, 1024, 1016]) {
+    await page.setViewportSize({ width, height: 768 });
+    const frames = await page.evaluate(async () => {
+      const samples = [];
+      for (let i = 0; i < 60; i++) {
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+        samples.push(document.querySelector(".drawing-toolbar")?.getBoundingClientRect().toJSON());
+      }
+      return samples;
+    });
+    expect(new Set(frames.slice(15).map((frame) => JSON.stringify(frame))).size).toBe(1);
+    repeated.push({ width, frames });
+  }
+  await writeFile(testInfo.outputPath("repeated-native-frames.json"), JSON.stringify(repeated, null, 2));
 });

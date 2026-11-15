@@ -2,7 +2,6 @@ import { domSelect } from "../../features/menu/domSelect";
 import { mountLayer } from "../../features/overlay/topLayer";
 import { iconMarkup, type MarkupIcon } from "../../features/icons";
 import { indicatorErrorText, type IndicatorRow, type PriceLegendValues } from "./layer";
-
 import type { LegendField, LegendProjection } from "../legendProjection";
 
 export type IndicatorCommand = "edit" | "toggle" | "remove" | "up" | "down" | "refresh" | "collapse";
