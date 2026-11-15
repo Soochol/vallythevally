@@ -12,7 +12,7 @@ const LONG_NAME = "에스케이증권제14호기업인수목적아주아주길�
 const WATCHED = ["005930", "000660", "035420"];
 const watchPanel = (page: Page) => page.getByRole("complementary", { name: "관심종목" });
 const watchRow = (page: Page, code: string) => watchPanel(page).locator(`li[data-code="${code}"]`);
-const quote = (symbol: string, price: number, change: number, changeRate: number): Quote => ({ symbol, price, change, changeRate, volume: 1000, t: 1794186000, source: "realtime" });
+const quote = (symbol: string, price: number, change: number, changeRate: number): Quote => ({ symbol, price, change, changeRate, volume: 1000, t: 1794186000, source: "realtime", venue: "combined" });
 
 function seedCanvas(scenario: Scenario, watched: readonly string[]) {
   const layout = scenario.documents.layout(DEFAULT_LAYOUT_ID);
