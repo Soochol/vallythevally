@@ -79,8 +79,10 @@ export function reportPanels(bundle: Bundle): Panel[] {
   add("institution", "기관 누적 순매수 수량 · 관측 구간별", "기본", true, INSTITUTIONS.map((key) => plot(institutionNames[key], "shares", bundle.institutionCumulative.map((c) => sample(c.day, c.segmentNet?.[key] ?? null, c.reason)))));
   const financials = bundle.dart.financials;
   for (const field of FINANCIAL_FIELDS) {
+    const shares = field.id === "shares" ? "commonShares" : field.id === "outstanding-shares" ? "outstandingCommonShares" : null;
     const samples = financials.timeline.map((point) => {
-      const p = financials.quarters.find((p) => `${p.year}-Q${p.quarter}` === point.financialPeriod);
+      const p = shares ? financials.quarters.findLast((p) => p[shares].availableFrom !== null && p[shares].availableFrom <= point.day && p[shares].sources.every((s) => s.filedOn < point.day))
+        : financials.quarters.find((p) => `${p.year}-Q${p.quarter}` === point.financialPeriod);
       const annual = field.id === "dps" ? financials.annual.findLast((a) => a.dps.availableFrom !== null && a.dps.availableFrom <= point.day) : null;
       return publishedSample(point.day, field.disclosure(annual ?? p ?? null, point.values));
     });
