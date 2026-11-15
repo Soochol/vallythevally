@@ -2,19 +2,19 @@ import type { Page } from "@playwright/test";
 import { expect } from "./harness";
 
 type Counts = { base: number; indicator: number; compare: number; fit: number; paint: number };
-type Field = { key: string; alternatives: string[]; width: number };
+type Field = { key: string; alternatives: string[]; measuredAlternatives: string[]; width: number };
 type Projection = { density: string; fields: Field[]; nodes: number; peakNodes: number; safe: boolean };
 
 declare global {
   interface Window {
-    legendSources: { counts: Counts; projections: Projection[]; holdWorkers: boolean; pendingWorkers: (() => void)[]; times: number[] };
+    legendSources: { counts: Counts; projections: Projection[]; holdWorkers: boolean; pendingWorkers: (() => void)[]; times: number[]; rawAlternatives: WeakMap<HTMLElement, string[]> };
   }
 }
 
 export async function installLegendSourceProbe(page: Page, holdWorkers = false): Promise<void> {
   await page.addInitScript((hold) => {
-    const probe: Window["legendSources"] = window.legendSources = { counts: { base: 0, indicator: 0, compare: 0, fit: 0, paint: 0 }, projections: [], holdWorkers: hold, pendingWorkers: [], times: [] };
-    const alternatives = new WeakMap<HTMLElement, string[]>();
+    const probe: Window["legendSources"] = window.legendSources = { counts: { base: 0, indicator: 0, compare: 0, fit: 0, paint: 0 }, projections: [], holdWorkers: hold, pendingWorkers: [], times: [], rawAlternatives: new WeakMap() };
+    const alternatives = new WeakMap<HTMLElement, Pick<Field, "alternatives" | "measuredAlternatives">>();
     const attachmentSafety = new WeakMap<HTMLElement, boolean>();
     const peakNodes = new WeakMap<HTMLElement, number>();
     const append = Element.prototype.append;
@@ -23,7 +23,9 @@ export async function installLegendSourceProbe(page: Page, holdWorkers = false):
       append.apply(this, nodes);
       if (!(this instanceof HTMLElement)) return;
       for (const node of nodes) if (node instanceof HTMLElement && node.style.whiteSpace === "pre" && node.style.height === "0px") {
-        alternatives.set(this, (node.textContent ?? "").split("\n"));
+        const raw = probe.rawAlternatives.get(this);
+        if (!raw) throw new Error("측정 전 범례 원천 필드가 없습니다");
+        alternatives.set(this, { alternatives: raw, measuredAlternatives: (node.textContent ?? "").split("\n") });
         const root = this.closest<HTMLElement>(".chart-legend[aria-hidden=true]");
         if (root) peakNodes.set(root, Math.max(peakNodes.get(root) ?? 0, root.querySelectorAll("*").length));
       }
@@ -42,7 +44,7 @@ export async function installLegendSourceProbe(page: Page, holdWorkers = false):
         };
         const fields = [...this.querySelectorAll<HTMLElement>("*")].flatMap((element) => {
           const values = alternatives.get(element);
-          return values ? [{ key: key(element), alternatives: values, width: element.getBoundingClientRect().width }] : [];
+          return values ? [{ key: key(element), ...values, width: element.getBoundingClientRect().width }] : [];
         });
         probe.projections.push({ density: this.closest<HTMLElement>("[data-chart-overlay-host]")?.dataset.legendDensity ?? "normal", fields, nodes: this.querySelectorAll("*").length, peakNodes: peakNodes.get(this) ?? 0, safe: attachmentSafety.get(this) === true });
       }
@@ -72,6 +74,9 @@ export async function installLegendSourceProbe(page: Page, holdWorkers = false):
     const response = await route.fetch();
     let body = await response.text();
     if (!body.includes("priceLegendValues()")) return route.fulfill({ response, body });
+    const measurement = /function \w+\((\w+)\)\{(?=(?:let|const) \w+=\1\.map\(\(\{element:\w+\}\)=>getComputedStyle\(\w+\)\))/g;
+    expect([...body.matchAll(measurement)]).toHaveLength(1);
+    body = body.replace(measurement, (match, fields: string) => `${match}for(const field of ${fields})window.legendSources.rawAlternatives.set(field.element,Array.from(field.alternatives));`);
     const entries = [
       { expression: /setLayoutBars\(\w+\)\{/g, name: "base" },
       { expression: /priceLegendValues\(\)\{/g, name: "indicator" },

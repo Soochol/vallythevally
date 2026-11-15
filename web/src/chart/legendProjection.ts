@@ -12,7 +12,7 @@ export function reserveLegendFields(fields: readonly LegendField[]): void {
   const styles = fields.map(({ element }) => getComputedStyle(element));
   const probes = fields.map(({ element, alternatives }, i) => {
     const probe = document.createElement("span");
-    probe.textContent = alternatives.join("\n");
+    probe.textContent = [...new Set(alternatives)].join("\n");
     const style = styles[i];
     if (style) Object.assign(probe.style, { font: style.font, letterSpacing: style.letterSpacing, fontFeatureSettings: style.fontFeatureSettings, fontVariantNumeric: style.fontVariantNumeric });
     Object.assign(probe.style, { position: "absolute", whiteSpace: "pre", width: "max-content", maxWidth: "none", height: "0px", overflow: "hidden" });
