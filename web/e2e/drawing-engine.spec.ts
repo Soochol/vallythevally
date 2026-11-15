@@ -6,7 +6,8 @@ import type { DrawingBody } from "../src/chart/drawings/types";
 import { completionKey } from "../src/chart/drawings/journal";
 import { toolsByGroup } from "../src/chart/drawings/tools";
 import type { Tool } from "../src/chart/drawings/toolSpec";
-import { chartPoint, drawings, mirror, open, pickTool, expandDock } from "./drawing-probe";
+import { chartPoint, drawings, mirror, open, pickTool, expandDock, type Mirror } from "./drawing-probe";
+import { installChartProbe } from "./chart-probe";
 
 async function draw(page: Page, tool = "T", shift = false) {
   const chart = chartOf(cell(page)); const r = (await chart.boundingBox())!;
@@ -87,6 +88,11 @@ test("drawing engine: handles, Shift 45°, clone, clipboard, undo and redo", asy
 });
 
 test("drawing engine: daily anchors keep their time and price on 60-minute bars", async ({ page, scenario }) => {
+  await page.addInitScript(installChartProbe);
+  const capture = () => chartOf(cell(page)).locator(".drawing-mirror").evaluate((el) => {
+    const visible: Mirror[] = JSON.parse(el.getAttribute("data-drawings") ?? "[]");
+    return { points: visible[0]!.points, spacing: window.chartProbe.chart.timeScale().options().barSpacing };
+  });
   const first = Date.UTC(2026, 4, 1) / 1000 - 9 * 3600;
   await page.route("**/api/bars?**", async (route) => {
     const q = new URL(route.request().url()).searchParams; const period = q.get("period")!;
@@ -97,13 +103,13 @@ test("drawing engine: daily anchors keep their time and price on 60-minute bars"
   });
   await open(page); await cell(page).focus(); await page.keyboard.press("G"); await draw(page);
   await expect.poll(async () => (await drawings(scenario)).length).toBe(1);
-  const saved = (await drawings(scenario))[0]!; const before = (await mirror(page))[0]!.points;
+  const saved = (await drawings(scenario))[0]!; const { points: before, spacing: beforeSpacing } = await capture();
   await selectMinute(page.getByRole("button", { name: "분봉" }), "60m");
   await expect(cell(page)).toHaveAttribute("aria-label", "칸 1: 코스피 60분");
   await expect(chartOf(cell(page))).toHaveAttribute("data-bar-count", "3600");
   await expect.poll(async () => (await mirror(page))[0]?.points.every((p) => p !== null)).toBe(true);
-  const after = (await mirror(page))[0]!.points;
-  expect((after[1]!.x - after[0]!.x) / (before[1]!.x - before[0]!.x)).toBeCloseTo(24, 1);
+  const { points: after, spacing: afterSpacing } = await capture();
+  expect((after[1]!.x - after[0]!.x) / (before[1]!.x - before[0]!.x)).toBeCloseTo(24 * afterSpacing / beforeSpacing, 1);
   expect((await drawings(scenario))[0]!.points).toEqual(saved.points);
   await page.reload(); await expect.poll(async () => (await mirror(page)).length).toBe(1);
   expect((await drawings(scenario))[0]!.points).toEqual(saved.points);

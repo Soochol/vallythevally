@@ -2,10 +2,11 @@
 import type { QuoteSource } from "./QuoteSource";
 import type { SymbolCode } from "./SymbolCode";
 import type { UnixSeconds } from "./UnixSeconds";
+import type { Venue } from "./Venue";
 
 /**
- * `GET /api/quotes?symbols=005930,IDX:001` → `Quote[]`.
- * 주식은 통합 시세(ka10095 `_AL`), 지수는 지수 일봉의 최신 페이지에서 만든다.
+ * `GET /api/quotes?symbols=005930,IDX:001&venue=krx` → `Quote[]`.
+ * 주식은 `venue`(`combined` 기본, `krx`, `nxt`)의 시세(ka10095), 지수는 지수 일봉의 최신 페이지에서 만든다.
  * 값을 얻지 못한 종목(없는 코드, 빈 행)은 응답에서 빠진다. 순서는 요청 순서다.
  */
 export type Quote = { symbol: SymbolCode, price: number, 
@@ -20,4 +21,8 @@ changeRate: number,
 /**
  * 당일 누적.
  */
-volume: number, t: UnixSeconds, source: QuoteSource, };
+volume: number, t: UnixSeconds, source: QuoteSource, 
+/**
+ * 이 값을 만든 거래소. 요청이 NXT인데 그 종목이 NXT에서 거래되지 않으면 요청과 달리 통합이다. 지수면 null.
+ */
+venue: Venue | null, };

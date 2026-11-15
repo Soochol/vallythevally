@@ -1,9 +1,10 @@
 import type { WatchColumn } from "../../lib/watchlist";
+import { LIST_PRICE_WIDTH, LIST_RATE_WIDTH } from "../list/listRow";
 
 export type WatchVariant = "desktop" | "phone";
 
 const WIDTH: Record<WatchVariant, Record<WatchColumn, number>> = {
-  desktop: { price: 76, change: 64, changeRate: 60, volume: 56 },
+  desktop: { price: LIST_PRICE_WIDTH, change: 64, changeRate: LIST_RATE_WIDTH, volume: 56 },
   phone: { price: 80, change: 64, changeRate: 64, volume: 52 },
 };
 const GAP = 4;
