@@ -92,17 +92,12 @@ export function createLayoutCommands(deps: LayoutCommandsDeps) {
   };
   const run = async (work: () => Promise<void>) => {
     if (useLayoutsStore.getState().phase !== "ready" || usePersistStore.getState().phase.kind !== "ready") return;
-    const previousId = useLayoutStore.getState().layout.id;
-    const fromMenu = typeof document !== "undefined" && Boolean(document.activeElement?.closest('[role="menu"][aria-label="레이아웃"]'));
     useLayoutsStore.setState({ phase: "busy" });
     try {
       if (pendingDelete && await reconcileDeletion()) return;
       await work();
     } finally {
-      if (typeof document !== "undefined" && (fromMenu || previousId !== useLayoutStore.getState().layout.id)) {
-        flushSync(() => useLayoutsStore.setState({ phase: "ready" }));
-        document.querySelector<HTMLButtonElement>("[data-layout-trigger]")?.focus();
-      } else useLayoutsStore.setState({ phase: "ready" });
+      useLayoutsStore.setState({ phase: "ready" });
     }
   };
   const name = (input: string, ownId?: string) => {

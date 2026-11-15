@@ -179,6 +179,7 @@ for (const unavailable of [false, true]) {
     }
     await expect(trigger(page)).toHaveAccessibleName("레이아웃: 복기");
     await expect(trigger(page)).toBeEnabled();
+    if (unavailable) await expect(menu(page).getByRole("menuitemradio", { name: "복기", exact: true })).toBeFocused();
     await page.clock.fastForward(70_000);
     expect(sourcePuts()).toHaveLength(0);
     expect(scenario.documents.layoutSummaries().map((entry) => entry.id)).toEqual([id]);
@@ -223,10 +224,60 @@ test("레이아웃 메뉴를 키보드로 열고 이동·선택·닫기와 초�
   await expect(trigger(page)).toBeFocused();
   await page.keyboard.press("Space");
   await expect(menu(page)).toBeVisible();
+  await expect(menu(page).getByRole("menuitemradio", { name: "복기", exact: true })).toBeFocused();
   await page.keyboard.press("Escape");
   await expect(menu(page)).toBeHidden();
   await expect(trigger(page)).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(menu(page).getByRole("menuitemradio", { name: "복기", exact: true })).toBeFocused();
+  await page.keyboard.press("Tab");
+  await expect(menu(page)).toBeHidden();
+  await expect(topbar(page).getByRole("button", { name: "창 더하기", exact: true })).toBeFocused();
 });
+
+test("레이아웃 목록을 읽지 못해도 버튼에 초점을 돌려 키보드로 다시 연다", async ({ page, scenario }) => {
+  await page.goto("/");
+  await expect(cell(page)).toHaveAttribute("aria-busy", "false");
+  const reading = scenario.hold("/api/layouts");
+  await trigger(page).focus();
+  await page.keyboard.press("Enter");
+  await reading.received;
+  await expect(trigger(page)).toBeDisabled();
+  reading.reply({ status: 503, body: { error: { code: "internal", message: "목록 연결 끊김" } } });
+  await expect(page.getByRole("status").filter({ hasText: "목록 연결 끊김" })).toBeVisible();
+  await expect(trigger(page)).toBeFocused();
+  scenario.reply("/api/layouts", { body: scenario.documents.layoutSummaries() });
+  await page.keyboard.press("Enter");
+  await expect(menu(page).getByRole("menuitemradio").first()).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(trigger(page)).toBeFocused();
+});
+
+for (const outcome of ["취소", "거절", "성공"] as const) {
+  test(`지우기 확인을 키보드로 마친 뒤 레이아웃 버튼에 초점을 돌린다: ${outcome}`, async ({ page, scenario }) => {
+    scenario.documents.saveLayout({ ...scenario.documents.layout(), id: "01900000-0000-7000-8000-0000000000b1", name: "복기", revision: 1 });
+    if (outcome === "거절") scenario.documents.saveDrawing({ id: "01900000-0000-7000-8000-0000000000d1", symbol: "005930", tool: "hline", points: [{ t: 1, price: 70_000 }], style: {}, text: null, locked: false, hidden: false, periods: null, z: 1, group: null, scope: { kind: "layout", layoutId: DEFAULT_LAYOUT_ID }, revision: 3 });
+    await page.goto("/");
+    await expect(cell(page)).toHaveAttribute("aria-busy", "false");
+    await trigger(page).focus();
+    await page.keyboard.press("Enter");
+    await expect(menu(page).getByRole("menuitemradio").first()).toBeFocused();
+    for (let i = 0; i < 4; i++) await page.keyboard.press("ArrowDown");
+    await expect(menu(page).getByRole("menuitem", { name: "지우기", exact: true })).toBeFocused();
+    await page.keyboard.press("Enter");
+    await expect(page.getByRole("dialog").getByRole("button", { name: "취소", exact: true })).toBeFocused();
+    if (outcome === "취소") await page.keyboard.press("Escape");
+    else {
+      await page.keyboard.press("Tab");
+      await page.keyboard.press("Enter");
+    }
+    await expect(page.getByRole("dialog")).toBeHidden();
+    if (outcome === "거절") await expect(page.getByRole("status").filter({ hasText: "드로잉이 있어 지울 수 없습니다" })).toBeVisible();
+    await expect(trigger(page)).toHaveAccessibleName(`레이아웃: ${outcome === "성공" ? "복기" : "기본"}`);
+    await expect(trigger(page)).toBeFocused();
+    expect(scenario.documents.layoutSummaries()).toHaveLength(outcome === "성공" ? 1 : 2);
+  });
+}
 
 test("이름 입력을 키보드로 저장·취소하고 서버가 거절해도 초점을 유지한다", async ({ page, scenario }) => {
   await page.goto("/");
@@ -257,15 +308,53 @@ test("이름 입력을 키보드로 저장·취소하고 서버가 거절해도 
     await expect(cancelled).toBeHidden();
     await expect(trigger(page)).toBeFocused();
     const rejected = await open(kind);
+    await rejected.getByRole("textbox").fill(" ");
+    for (let attempt = 0; attempt < 2; attempt++) {
+      await page.keyboard.press("Tab");
+      await page.keyboard.press("Tab");
+      await expect(rejected.getByRole("button", { name: "저장", exact: true })).toBeFocused();
+      await page.keyboard.press("Enter");
+      await expect(rejected).toContainText("1~20자");
+      await expect(rejected.getByRole("textbox")).toBeFocused();
+    }
     await rejected.getByRole("textbox").fill("거절된 이름");
     scenario.reply((url, request) => url.pathname.startsWith("/api/layouts/") && request.method() === "PUT", { status: 409, body: { error: { code: "conflict", message: "서버에서 거절했습니다" } } });
-    await page.keyboard.press("Enter");
-    await expect(rejected).toContainText("서버에서 거절했습니다");
-    await expect(rejected.getByRole("textbox")).toBeFocused();
+    for (let attempt = 0; attempt < 2; attempt++) {
+      await page.keyboard.press("Tab");
+      await page.keyboard.press("Tab");
+      await expect(rejected.getByRole("button", { name: "저장", exact: true })).toBeFocused();
+      await page.keyboard.press("Enter");
+      await expect(rejected).toContainText("서버에서 거절했습니다");
+      await expect(rejected.getByRole("textbox")).toBeFocused();
+      await expect(rejected.getByRole("textbox")).toHaveValue("거절된 이름");
+    }
     await page.keyboard.press("Escape");
     await expect(rejected).toBeHidden();
     await expect(trigger(page)).toBeFocused();
   }
+});
+
+test("새 이름 저장으로 화면을 바꾸는 동안 입력과 거절 사유를 지키고 완료 뒤 버튼에 초점을 돌린다", async ({ page, scenario }) => {
+  await page.goto("/");
+  await expect(cell(page)).toHaveAttribute("aria-busy", "false");
+  await action(page, "새 이름으로 저장…");
+  const dialog = page.getByRole("dialog", { name: "새 이름으로 저장", exact: true });
+  await dialog.getByRole("textbox").fill("복기");
+  scenario.reply((url, request) => url.pathname.startsWith("/api/layouts/") && request.method() === "PUT", { status: 409, body: { error: { code: "conflict", message: "다시 저장하세요" } } });
+  await page.keyboard.press("Enter");
+  await expect(dialog).toContainText("다시 저장하세요");
+  await expect(dialog.getByRole("textbox")).toBeFocused();
+  scenario.on((url, request) => url.pathname.startsWith("/api/layouts/") && request.method() === "PUT", (request) => ({ body: scenario.documents.saveLayout(request.postDataJSON()) }));
+  const listing = scenario.hold("/api/layouts");
+  await page.keyboard.press("Enter");
+  await listing.received;
+  await expect(trigger(page)).toHaveAccessibleName("레이아웃: 복기");
+  await expect(dialog.getByRole("textbox")).toBeDisabled();
+  await expect(dialog.getByRole("textbox")).toHaveValue("복기");
+  await expect(dialog).toContainText("다시 저장하세요");
+  listing.reply({ body: scenario.documents.layoutSummaries() });
+  await expect(dialog).toBeHidden();
+  await expect(trigger(page)).toBeFocused();
 });
 
 test("같은 창 id를 가진 레이아웃으로 바꾸면 지표 인스펙터의 검색과 미리보기 초안을 비운다", async ({ page, scenario }) => {
