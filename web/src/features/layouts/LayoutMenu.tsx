@@ -34,6 +34,7 @@ export function LayoutMenu() {
     { kind: "action", label: "이름 바꾸기…", onSelect: () => layoutMenu.startNaming("rename") },
     { kind: "action", label: "지우기", disabled: layouts.length <= 1, danger: true, onSelect: () => { void layoutMenu.confirmDelete(); } },
     { kind: "separator" },
+    { kind: "check", label: "십자선 연동", checked: layout.sync.crosshair, onSelect: () => useLayoutStore.getState().setCrosshairSync(!layout.sync.crosshair) },
     { kind: "action", label: "기본 배치로", onSelect: layoutCommands.resetPlacement },
     { kind: "action", label: "배치 되돌리기", disabled: !canUndo, onSelect: () => useLayoutStore.getState().undoArrangement() },
   ];

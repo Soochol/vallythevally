@@ -7,6 +7,7 @@ import { financialRequest } from "../../chart/indicators/shown";
 import { useSymbolInfo, useSymbolInfos } from "../../api/queries";
 import { type CellStatus, ChartController } from "../../chart/ChartController";
 import type { IndicatorCommand } from "../../chart/indicators/legendRows";
+import { crosshairSync } from "../../chart/crosshairSync";
 import { readThemeTokens } from "../../chart/theme";
 import { PERIOD_LABEL } from "../../lib/symbol";
 import { shownVenue, venueLabel } from "../../lib/venue";
@@ -56,6 +57,9 @@ interface Props {
 /** 컨트롤러를 붙였다 떼는 얇은 컴포넌트. 봉 데이터는 props로 받지 않는다(frontend.md §5.4). */
 export function ChartCell({ cellId, status, onStatus }: Props) {
   const cell = useCell(cellId);
+  const layoutId = useLayoutStore((s) => s.layout.id);
+  const layoutSession = useLayoutStore((s) => s.session);
+  const crosshairEnabled = useLayoutStore((s) => s.layout.sync.crosshair);
   const { settings: chartSettings, preview } = useShownSettings(cellId, cell.chartSettings);
   const info = useSymbolInfo(cell.symbol).data;
   const venue = shownVenue(cell.venue, info);
@@ -99,6 +103,11 @@ export function ChartCell({ cellId, status, onStatus }: Props) {
   }, []);
 
   useEffect(() => attachController(cellId, ctl.current!), [cellId]);
+
+  useEffect(() => {
+    if (!crosshairEnabled || !ctl.current || !chartEl.current) return;
+    return crosshairSync.connect(`${layoutSession}:${layoutId}`, ctl.current, chartEl.current);
+  }, [cellId, layoutId, layoutSession, crosshairEnabled]);
 
   useEffect(() => {
     ctl.current?.apply({ symbol: cell.symbol, venue, period: cell.period, settings: chartSettings, info, previewIndicator: preview?.id ?? null, compareNames });

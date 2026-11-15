@@ -29,6 +29,8 @@ import { type ShownVenue, venueLabel } from "../lib/venue";
 import { BarFeed, displayBars, type FetchPage, type History } from "./barFeed";
 import { type CompareEntry, CompareLayer, compareVenue } from "./compare";
 import { CompareLegend } from "./compareLegend";
+import { CrosshairMarker } from "./crosshairMarker";
+import { barInterval, crosshairVisible, type PointedBar } from "./crosshairSync";
 import { DaySeparators } from "./daySeparators";
 import { extremeChange, type ExtremeTag, ExtremeTags } from "./extremeTags";
 import { FineBars } from "./fineBars";
@@ -122,6 +124,9 @@ export class ChartController {
   private readonly legend: Legend;
   private readonly extremeTags: ExtremeTags;
   private readonly daySeparators: DaySeparators;
+  private readonly crosshairMarker: CrosshairMarker;
+  private readonly pointedListeners = new Set<(bar: PointedBar) => void>();
+  private pointerOwnsCrosshair = false;
   get venueAnchor(): HTMLElement { return this.legend.venueAnchor; }
   private readonly feed: BarFeed;
   private readonly fineBars: FineBars;
@@ -157,6 +162,8 @@ export class ChartController {
     // 주 시리즈를 바꿔 붙이는 동안 가격 pane이 비어도 라이브러리가 지우지 않게 한다. 지우면 지표 패널이 0번이 된다.
     this.chart.panes()[0]?.setPreserveEmptyPane(true);
     this.main = addMainSeries(this.chart, "candle", this.tokens, false, this.priceAxisGeometry());
+    this.crosshairMarker = new CrosshairMarker({ element: el, chart: this.chart, bars: () => this.bars, period: () => this.period() });
+    el.addEventListener("pointerleave", this.clearPointedBar);
     this.legend = new Legend(el);
     this.extremeTags = new ExtremeTags(el);
     this.daySeparators = new DaySeparators(this.chart, {
@@ -182,6 +189,8 @@ export class ChartController {
     this.compareLegend = new CompareLegend((code) => deps.onCompareRemove?.(code));
     this.legend.body.append(this.indicatorLegend.priceBox, this.compareLegend.box);
     this.resize = new ResizeObserver(() => {
+      if (!crosshairVisible(el)) this.clearPointedBar();
+      this.crosshairMarker.refresh();
       const width = this.axisWidth();
       if (this.chart.options().rightPriceScale.minimumWidth !== width) this.chart.priceScale("right").applyOptions({ minimumWidth: width });
       this.indicators.applyStretch();
@@ -229,6 +238,10 @@ export class ChartController {
       this.hoverIndex =
         this.financialHoverTime !== null && n > 0 ? this.bars.findIndex((bar) => bar.t === this.financialHoverTime) : null;
       this.renderLegend();
+      if (p.sourceEvent) this.pointerOwnsCrosshair = true;
+      if (!this.pointerOwnsCrosshair || !this.el.matches(":hover")) return;
+      const bar = this.hoverIndex === null ? undefined : this.bars[this.hoverIndex];
+      this.emitPointedBar(p.point && bar && crosshairVisible(this.el) ? barInterval(bar.t, this.period()) : null);
     });
     this.chart.timeScale().subscribeVisibleLogicalRangeChange(() => {
       const r = this.chart.timeScale().getVisibleLogicalRange();
@@ -271,6 +284,8 @@ export class ChartController {
         this.main.api.applyOptions({ priceFormat: priceFormat(isIndex, this.priceAxisGeometry()) });
         this.indicators.refreshPriceFormat();
       }
+      this.clearPointedBar();
+      this.crosshairMarker.show(null);
       this.history = null;
       this.initialRangeEnd = null;
       this.ready = null;
@@ -294,6 +309,28 @@ export class ChartController {
     this.legend.setDisplay(next.settings);
     this.renderLegend();
   }
+
+  subscribePointedBar(listener: (bar: PointedBar) => void): () => void {
+    if (this.pointedListeners.size === 0) this.pointerOwnsCrosshair = false;
+    this.pointedListeners.add(listener);
+    return () => {
+      this.pointedListeners.delete(listener);
+      if (this.pointedListeners.size === 0) this.pointerOwnsCrosshair = false;
+    };
+  }
+
+  showSyncedCrosshair(bar: PointedBar): void {
+    this.crosshairMarker.show(bar);
+  }
+
+  private emitPointedBar(bar: PointedBar): void {
+    for (const listener of this.pointedListeners) listener(bar);
+  }
+
+  private readonly clearPointedBar = (): void => {
+    this.pointerOwnsCrosshair = false;
+    this.emitPointedBar(null);
+  };
 
   setFinancials(page: FinancialsPage | null, message?: string): void {
     const draw = () => this.indicators.setFinancials(page, message);
@@ -361,6 +398,10 @@ export class ChartController {
 
   dispose(): void {
     this.disposed = true;
+    this.clearPointedBar();
+    this.pointedListeners.clear();
+    this.el.removeEventListener("pointerleave", this.clearPointedBar);
+    this.crosshairMarker.dispose();
     this.chart.chartElement().removeEventListener("wheel", this.onWheel, true);
     this.extensions.forEach((ext) => ext.dispose());
     this.extensions.clear();
@@ -534,6 +575,7 @@ export class ChartController {
     if (this.axisLabels.refresh(time)) this.scheduleFrame();
     this.renderLegend();
     this.renderExtremes();
+    this.crosshairMarker.refresh();
   }
 
   private renderExtremes(): void {
