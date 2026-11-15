@@ -118,13 +118,13 @@ async function within(inner: Locator, outer: Locator) {
   expect(a.y + a.height).toBeLessThanOrEqual(b.y + b.height + 1);
 }
 
-async function tabTo(page: Page, target: Locator) {
+async function tabTo(page: Page, target: Locator, key: "Tab" | "Shift+Tab" = "Tab") {
   for (let step = 0; step < 240; step++) {
     if (await target.evaluate((element) => element === document.activeElement)) {
       await expect(target).toBeInViewport({ ratio: 1 });
       return;
     }
-    await page.keyboard.press("Tab");
+    await page.keyboard.press(key);
   }
   throw new Error(`Tab으로 ${await target.getAttribute("aria-label")}에 닿지 못했습니다`);
 }
@@ -595,5 +595,128 @@ for (const surface of ["canvas", "dock-float"] as const) {
     await exposed(successor);
     await page.keyboard.press("Tab");
     await expect(page.locator(":focus")).toBeInViewport({ ratio: 1 });
+  });
+}
+
+for (const mode of MODES) {
+  for (const closing of ["screener", "cell-1"] as const) {
+    test(`${mode}: 가려진 차트가 있는 창 닫기는 보이는 초점과 한 번의 되돌리기를 보존한다 (${closing})`, async ({ page, scenario }) => {
+      const base = scenario.documents.layout();
+      const rect = { x: .15, y: .12, w: .6, h: .7 };
+      const original: LayoutWindow[] = [chartWindow("cell-0"), { id: "objects", kind: "objects", link: null }, { id: "screener", kind: "screener", link: null }, ...(closing === "cell-1" ? [chartWindow("cell-1")] : []), { id: "watchlist", kind: "watchlist", link: null }];
+      scenario.documents.saveLayout({ ...base, windows: original, placement: {
+        v: 1,
+        canvas: { rects: Object.fromEntries(original.map((window) => [window.id, rect])), order: original.map((window) => window.id) },
+        dock: { root: { kind: "group", id: "side", tabs: ["watchlist"], active: "watchlist" }, floats: original.filter((window) => window.id !== "watchlist").map((window) => ({ window: window.id, rect })) },
+      } });
+      scenario.documents.saveUiState({ ...scenario.documents.uiState(), layoutMode: mode });
+      await page.goto("/");
+      await ready(page, closing === "cell-1" ? 2 : 1);
+      await tabTo(page, head(page, closing));
+      await exposed(head(page, closing));
+      await tabTo(page, head(page, "objects").getByRole("button", { name: "개체 목록 닫기", exact: true }), "Shift+Tab");
+      await exposed(page.locator(":focus"));
+      await tabTo(page, head(page, closing));
+      await exposed(head(page, closing));
+      await page.keyboard.press("Tab");
+      await expect(head(page, closing).getByRole("button").first()).toBeFocused();
+      await exposed(page.locator(":focus"));
+      await page.keyboard.press("Shift+Tab");
+      await expect(head(page, closing)).toBeFocused();
+      await expect.poll(() => mode === "canvas" ? placement(scenario).canvas?.order.at(-1) : placement(scenario).dock?.floats.at(-1)?.window).toBe(closing);
+      const before = placement(scenario);
+      await page.keyboard.press("Delete");
+      await expect(head(page, closing)).toHaveCount(0);
+      await expect(frame(page, "cell-0")).toHaveAttribute("data-active-cell", "");
+      await expect(page.locator(":focus")).toBeInViewport({ ratio: 1 });
+      await exposed(page.locator(":focus"));
+      const undo = page.getByRole("status").filter({ hasText: `${closing === "cell-1" ? "차트" : "스크리너"} 창을 닫았습니다` }).getByRole("button", { name: "되돌리기", exact: true });
+      await expect(undo).toBeEnabled();
+      await undo.click();
+      await expect(head(page, closing)).toBeVisible();
+      await expect.poll(() => windows(scenario).map((window) => window.id)).toEqual(original.map((window) => window.id));
+      await expect.poll(() => placement(scenario)).toEqual(before);
+    });
+  }
+}
+
+test("떠 있는 차트를 닫고 가려진 교체 탭 대신 보이는 창 머리에 초점을 둔다", async ({ page, scenario }) => {
+  const base = scenario.documents.layout();
+  const rect = { x: 0, y: 0, w: .8, h: .8 };
+  const original: LayoutWindow[] = [chartWindow("cell-0"), { id: "screener", kind: "screener", link: null }, chartWindow("cell-1")];
+  scenario.documents.saveLayout({ ...base, windows: original, placement: { v: 1, canvas: null, dock: {
+    root: { kind: "group", id: "chart", tabs: ["cell-0"], active: "cell-0" }, floats: [{ window: "screener", rect }, { window: "cell-1", rect }],
+  } } });
+  await page.goto("/");
+  await ready(page, 2);
+  await tabTo(page, head(page, "cell-1"));
+  await expect.poll(() => placement(scenario).dock?.floats.at(-1)?.window).toBe("cell-1");
+  const before = placement(scenario);
+  await page.keyboard.press("Delete");
+  await expect(head(page, "cell-1")).toHaveCount(0);
+  await expect(head(page, "screener")).toBeFocused();
+  await exposed(page.locator(":focus"));
+  await expect(tab(page, "cell-0")).toHaveAttribute("data-active-cell", "");
+  const undo = page.getByRole("status").filter({ hasText: "차트 창을 닫았습니다" }).getByRole("button", { name: "되돌리기", exact: true });
+  await expect(undo).toBeEnabled();
+  await undo.click();
+  await expect(head(page, "cell-1")).toBeVisible();
+  await expect.poll(() => windows(scenario).map((window) => window.id)).toEqual(original.map((window) => window.id));
+  await expect.poll(() => placement(scenario)).toEqual(before);
+});
+
+test("가로로 스크롤한 도킹 탭에서 옆 창을 닫으면 선택된 탭으로 초점을 돌린다", async ({ page, scenario }) => {
+  const base = scenario.documents.layout();
+  const original: LayoutWindow[] = [...Array.from({ length: 8 }, (_, index) => chartWindow(`cell-${index}`)), { id: "watchlist", kind: "watchlist", link: null }, { id: "screener", kind: "screener", link: null }];
+  scenario.documents.saveLayout({ ...base, windows: original, placement: { v: 1, canvas: null, dock: {
+    root: { kind: "group", id: "tabs", tabs: original.filter((window) => window.id !== "screener").map((window) => window.id), active: "watchlist" }, floats: [{ window: "screener", rect: { x: .15, y: .12, w: .6, h: .7 } }],
+  } } });
+  await page.setViewportSize({ width: 1024, height: 768 });
+  await page.goto("/");
+  await tabTo(page, tab(page, "watchlist"));
+  await tabTo(page, head(page, "screener"));
+  await page.keyboard.press("Delete");
+  await expect(head(page, "screener")).toHaveCount(0);
+  await expect(tab(page, "watchlist")).toBeFocused();
+  await expect(tab(page, "watchlist")).toHaveAttribute("aria-selected", "true");
+  await expect(tab(page, "watchlist")).toBeInViewport({ ratio: 1 });
+  await exposed(tab(page, "watchlist"));
+  await expect(tab(page, "cell-0")).toHaveAttribute("data-active-cell", "");
+  const undo = page.getByRole("status").filter({ hasText: "스크리너 창을 닫았습니다" }).getByRole("button", { name: "되돌리기", exact: true });
+  await expect(undo).toBeEnabled();
+  await undo.click();
+  await expect(head(page, "screener")).toBeVisible();
+});
+
+for (const mode of MODES) {
+  test(`${mode}: 키보드에서 뒤 창의 크기 조작으로 넘어가 취소해도 순서와 기록은 같다`, async ({ page, scenario }) => {
+    const base = scenario.documents.layout();
+    const rear = { x: .05, y: .1, w: .4, h: .6 }, front = { x: .55, y: .2, w: .4, h: .6 };
+    scenario.documents.saveLayout({ ...base, windows: [chartWindow("cell-0"), { id: "objects", kind: "objects", link: null }, { id: "screener", kind: "screener", link: null }], placement: {
+      v: 1, canvas: { rects: { "cell-0": rear, objects: rear, screener: front }, order: ["cell-0", "objects", "screener"] },
+      dock: { root: { kind: "group", id: "chart", tabs: ["cell-0"], active: "cell-0" }, floats: [{ window: "objects", rect: rear }, { window: "screener", rect: front }] },
+    } });
+    scenario.documents.saveUiState({ ...scenario.documents.uiState(), layoutMode: mode });
+    await page.goto("/");
+    await ready(page);
+    await tabTo(page, layoutButton(page));
+    const beforeStyle = await frame(page, "objects").getAttribute("style");
+    if (!beforeStyle) throw new Error("창의 배치가 없습니다");
+    const before = placement(scenario);
+    const handle = await boxOf(frame(page, "objects").locator('[data-resize-handle="se"]'));
+    await page.mouse.move(handle.x + handle.width / 2, handle.y + handle.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(handle.x + 40, handle.y + 40, { steps: 5 });
+    const stage = mode === "canvas" ? page.locator("[data-canvas-stage]") : page.getByRole("main", { name: "작업 영역" });
+    const dragging = mode === "canvas" ? "data-canvas-dragging" : "data-dock-dragging";
+    await expect(stage).toHaveAttribute(dragging, "");
+    await page.keyboard.press("Escape");
+    await page.mouse.up();
+    await expect(stage).not.toHaveAttribute(dragging);
+    await expect(frame(page, "objects")).toHaveAttribute("style", beforeStyle);
+    expect(placement(scenario)).toEqual(before);
+    await layoutButton(page).click();
+    await expect(layoutMenu(page).getByRole("menuitem", { name: "배치 되돌리기", exact: true })).toBeDisabled();
+    expect(placement(scenario)).toEqual(before);
   });
 }
