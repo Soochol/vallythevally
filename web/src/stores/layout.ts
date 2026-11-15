@@ -8,14 +8,17 @@ import type { IndicatorSpec, Placement as IndicatorPlacement } from "../chart/in
 import type { SymbolCode } from "../api/generated/SymbolCode";
 import * as edit from "../chart/settings";
 import { type ChartSettings, type ChartStyle, DEFAULT_CHART_SETTINGS, type ExtremeBasis, type IndicatorConfig, type Panel, type PriceScale } from "../chart/settings";
+import { bringToFront, fitCanvas } from "../layout/canvas/arrange";
+import type { Area } from "../layout/canvas/geometry";
 import { fitDock, type WindowList } from "../layout/dock/fit";
 import type { Size } from "../layout/dock/geometry";
 import { placeBeside } from "../layout/dock/split";
 import { findGroup, groupOfWindow, putTab, selectTab, withoutWindow } from "../layout/dock/tree";
 import { windowId, WINDOW_KINDS, type WindowId } from "../layout/kinds";
-import type { DockPlacement, Placement } from "../layout/placement";
+import type { CanvasPlacement, DockPlacement, Placement } from "../layout/placement";
 import { toward } from "../lib/josa";
 import { venueFor, type VenueTarget } from "../lib/venue";
+import { useUiStore } from "./ui";
 
 type ChartWindowWire = Extract<LayoutWindow, { kind: "chart" }>;
 export type OtherWindowKind = Exclude<LayoutWindow, { kind: "chart" }>["kind"];
@@ -129,6 +132,10 @@ interface LayoutState {
   revision: number;
   session: number;
   steps: readonly ArrangementStep[];
+  canvasArea: Area | null;
+  setCanvasArea(area: Area | null): void;
+  settlePlacement(placement: Placement): void;
+  commitCanvas(edit: { session: number; expected: CanvasPlacement; next: CanvasPlacement }): boolean;
   load(layout: EditableLayout): void;
   rename(name: string): void;
   arrange(next: Arrangement): void;
@@ -164,6 +171,12 @@ interface LayoutState {
 }
 
 export const useLayoutStore = create<LayoutState>()((set, get) => {
+  const canvasActive = () => useUiStore.getState().prefs.layoutMode === "canvas" && get().canvasArea !== null;
+  const arrangeCanvas = (windows: WindowState[], canvas: CanvasPlacement) => {
+    const { layout } = get();
+    if (windows === layout.windows && canvas === layout.placement.canvas) return;
+    arrange({ windows, placement: { ...layout.placement, canvas } });
+  };
   const settle = (dock: DockPlacement) =>
     set((s) => (dock === s.layout.placement.dock ? s : { layout: { ...s.layout, placement: { ...s.layout.placement, dock } }, revision: s.revision + 1 }));
   const arrange = ({ windows, placement }: Arrangement) =>
@@ -209,6 +222,37 @@ export const useLayoutStore = create<LayoutState>()((set, get) => {
     revision: 0,
     session: 0,
     steps: [],
+    canvasArea: null,
+    setCanvasArea: (canvasArea) => set({ canvasArea }),
+    settlePlacement: (placement) => set((s) => {
+      if (placement === s.layout.placement) return s;
+      const initializedDock = s.layout.placement.dock === null && placement.dock !== null;
+      const initializedCanvas = s.layout.placement.canvas === null && placement.canvas !== null;
+      const steps = initializedDock || initializedCanvas ? s.steps.map((step) => ({
+        ...step,
+        before: {
+          ...step.before,
+          placement: {
+            ...step.before.placement,
+            dock: initializedDock && step.before.placement.dock === null ? placement.dock : step.before.placement.dock,
+            canvas: initializedCanvas && step.before.placement.canvas === null ? placement.canvas : step.before.placement.canvas,
+          },
+        },
+      })) : s.steps;
+      return { layout: { ...s.layout, placement }, steps, revision: s.revision + 1 };
+    }),
+    commitCanvas: ({ session, expected, next }) => {
+      const state = get();
+      if (!canvasActive() || session !== state.session || expected !== state.layout.placement.canvas) return false;
+      const sameOrder = next.order.length === expected.order.length && next.order.every((id, index) => id === expected.order[index]);
+      const sameRects = Object.keys(next.rects).length === Object.keys(expected.rects).length && Object.entries(next.rects).every(([id, rect]) => {
+        const before = expected.rects[windowId(id)];
+        return before && rect.x === before.x && rect.y === before.y && rect.w === before.w && rect.h === before.h;
+      });
+      if (sameOrder && sameRects) return true;
+      arrangeCanvas(state.layout.windows, next);
+      return true;
+    },
     load: (layout) => set((s) => ({ layout, steps: [], session: s.session + 1 })),
     rename: (name) => set((s) => s.layout.name === name ? s : { layout: { ...s.layout, name }, revision: s.revision + 1 }),
     arrange,
@@ -228,9 +272,24 @@ export const useLayoutStore = create<LayoutState>()((set, get) => {
       }),
     setDock: (dock) => arrangeDock(get().layout.windows, dock),
     settleDock: settle,
-    selectTab: (window) => settle(selectTab(fittedDock(get().layout), window)),
+    selectTab: (window) => {
+      const { layout, canvasArea } = get();
+      if (canvasActive() && canvasArea) {
+        arrangeCanvas(layout.windows, bringToFront(fitCanvas(layout.placement.canvas, windowRefs(layout.windows), canvasArea), window));
+        return;
+      }
+      settle(selectTab(fittedDock(layout), window));
+    },
     showWindow: (kind, targetGroup) => {
       const { windows, placement } = get().layout;
+      const canvasArea = get().canvasArea;
+      if (canvasActive() && canvasArea) {
+        const shown = windows.find((w) => w.kind === kind);
+        const id = shown?.id ?? freeWindowId(windows, kind);
+        const next = shown ? windows : [...windows, { id, link: null, kind }];
+        arrangeCanvas(next, bringToFront(fitCanvas(placement.canvas, windowRefs(next), canvasArea), id));
+        return;
+      }
       const dock = fittedDock(get().layout);
       if (targetGroup && !findGroup(dock.root, targetGroup)) return;
       const shown = windows.find((w) => w.kind === kind);
@@ -245,6 +304,14 @@ export const useLayoutStore = create<LayoutState>()((set, get) => {
     },
     addChart: (from, room, targetGroup) => {
       const { layout } = get();
+      const canvasArea = get().canvasArea;
+      if (canvasActive() && canvasArea) {
+        if (chartWindows(layout).length >= WINDOW_KINDS.chart.maxCount) return null;
+        const id = freeChartId(layout.windows);
+        const windows = [...layout.windows, { ...chartWindow(layout, from), id }];
+        arrangeCanvas(windows, bringToFront(fitCanvas(layout.placement.canvas, windowRefs(windows), canvasArea), id));
+        return id;
+      }
       const dock = fittedDock(layout);
       if (targetGroup && !findGroup(dock.root, targetGroup)) return null;
       if (chartWindows(layout).length >= WINDOW_KINDS.chart.maxCount) return null;
@@ -260,7 +327,9 @@ export const useLayoutStore = create<LayoutState>()((set, get) => {
       const closing = layout.windows.find((w) => w.id === id);
       if (!closing || (isChartWindow(closing) && chartWindows(layout).length <= 1)) return false;
       const windows = layout.windows.filter((w) => w !== closing);
-      arrangeDock(windows, fitDock(withoutWindow(fittedDock(layout), id), windowRefs(windows)));
+      const canvasArea = get().canvasArea;
+      if (canvasActive() && canvasArea) arrangeCanvas(windows, fitCanvas(layout.placement.canvas, windowRefs(windows), canvasArea));
+      else arrangeDock(windows, fitDock(withoutWindow(fittedDock(layout), id), windowRefs(windows)));
       return true;
     },
     setSymbol: (cellId, target, venue) => openIn(linkedCharts(get().layout, cellId), target, venue && { cellId, venue }),
