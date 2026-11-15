@@ -24,3 +24,17 @@ export function settleSpot(spot: Spot, home: Spot, area: Size, bar: Size): DockA
   const nearHome = Math.abs(spot.left - home.left) < DOCK_SNAP && Math.abs(spot.top - home.top) < DOCK_SNAP;
   return nearHome ? null : dockAtOf(spot, area, bar);
 }
+
+export interface Edges { left: number; top: number; right: number; bottom: number }
+
+export function avoidDock(left: number, tops: readonly number[], bar: Size, pane: Size, dock: Edges, clearance: number, margin: number): Spot {
+  const within = (value: number, size: number, total: number) => Math.max(margin, Math.min(value, total - size - margin));
+  const clear = (x: number, y: number) => x + bar.width + clearance <= dock.left || x >= dock.right + clearance || y + bar.height + clearance <= dock.top || y >= dock.bottom + clearance;
+  const preferred = tops.find((top) => top === within(top, bar.height, pane.height) && clear(left, top));
+  if (preferred !== undefined) return { left, top: preferred };
+  const clamped = [...tops, dock.bottom + clearance, dock.top - bar.height - clearance].map((top) => within(top, bar.height, pane.height)).find((top) => clear(left, top));
+  if (clamped !== undefined) return { left, top: clamped };
+  const top = within(tops[0] ?? margin, bar.height, pane.height);
+  const beside = [dock.right + clearance, dock.left - bar.width - clearance].find((x) => x === within(x, bar.width, pane.width) && clear(x, top));
+  return { left: beside ?? left, top };
+}

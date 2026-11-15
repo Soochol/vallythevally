@@ -17,6 +17,8 @@ import { DashInput, WidthInput } from "./StyleFields";
 import { drawingMenu } from "./menus";
 import { DrawingDetails, DrawingTextEditor } from "./DrawingDetails";
 import type { WindowId } from "../../layout/kinds";
+import { OVERLAY_GAP } from "../overlay/position";
+import { avoidDock, type Edges } from "./dockSpot";
 
 
 export function DrawingOverlay({ cellId }: { cellId: WindowId }) {
@@ -36,9 +38,7 @@ export function DrawingOverlay({ cellId }: { cellId: WindowId }) {
   </div>;
 }
 
-type DockBox = { moved: boolean; left: number; top: number; right: number; bottom: number };
-
-function dockBox(bar: HTMLElement | null): DockBox | null {
+function dockBox(bar: HTMLElement | null): (Edges & { moved: boolean }) | null {
   const dock = bar?.closest("[role=tabpanel]")?.querySelector<HTMLElement>(".drawing-toolbar");
   const overlay = bar?.parentElement;
   if (!dock?.offsetParent || !overlay) return null;
@@ -47,10 +47,6 @@ function dockBox(bar: HTMLElement | null): DockBox | null {
 }
 
 const DOCK_CLEARANCE = 8;
-
-function clearOfDock(dock: DockBox, x: number, y: number, w: number, h: number) {
-  return x + w + DOCK_CLEARANCE <= dock.left || x >= dock.right + DOCK_CLEARANCE || y + h + DOCK_CLEARANCE <= dock.top || y >= dock.bottom + DOCK_CLEARANCE;
-}
 
 function FloatingBar({ cellId }: { cellId: WindowId }) {
   const surface = surfaceFor(cellId)!; const session = useDrawingSession();
@@ -77,16 +73,16 @@ function FloatingBar({ cellId }: { cellId: WindowId }) {
       const saved = useDrawingSession.getState().toolbarAt;
       if (bounds || saved) framesWithoutBounds.current = 0;
       else if (framesWithoutBounds.current++ < 2) return;
-      const x = Math.max(8, Math.min(saved?.x ?? (bounds ? (bounds.x1 + bounds.x2 - w) / 2 : 20), pane.width - w - 8));
+      const left = Math.max(8, Math.min(saved?.x ?? (bounds ? (bounds.x1 + bounds.x2 - w) / 2 : 20), pane.width - w - 8));
       const above = bounds ? bounds.y1 - h - 14 : 60;
       const below = (bounds?.y2 ?? 60) + 14;
       const dock = dockBox(root.current);
       const lowest = pane.height - h - 8;
-      const within = (y: number) => Math.max(8, Math.min(y, lowest));
-      const clear = (y: number) => !dock || clearOfDock(dock, x, y, w, h);
       const top = Math.max(48, (dock?.bottom ?? 0) + 8);
-      const y = saved ? within(saved.y)
-        : dock?.moved ? [above, below].find((y) => y === within(y) && clear(y)) ?? [within(above), within(below), within(dock.bottom + DOCK_CLEARANCE), within(dock.top - h - DOCK_CLEARANCE)].find(clear) ?? within(above)
+      const avoided = !saved && dock?.moved ? avoidDock(left, [above + OVERLAY_GAP, below + OVERLAY_GAP], { width: w, height: h }, pane, dock, DOCK_CLEARANCE, 8) : null;
+      const x = avoided?.left ?? left;
+      const y = avoided ? avoided.top - OVERLAY_GAP
+        : saved ? Math.max(8, Math.min(saved.y, lowest))
         : Math.max(top, Math.min(Math.max(top, above < top ? below : above), lowest));
       const last = lastSpot.current; lastSpot.current = { x, y };
       setPosition((old) => old && Math.abs(old.x - x) < 0.5 && Math.abs(old.y - y) < 0.5 ? old : { x, y });
