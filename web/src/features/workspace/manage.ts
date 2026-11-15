@@ -45,6 +45,7 @@ export function closeWindow(id: WindowId, name: string): boolean {
   if (replacement) selection.setActiveCell(replacement);
   if (focusedHeader) requestAnimationFrame(() => {
     if (useLayoutStore.getState().session !== state.session) return;
+    if (document.activeElement !== document.body) return;
     focusAfterClose(replacement ?? useSelectionStore.getState().activeCell);
   });
   selection.showToast(`${name} 창을 닫았습니다`, latestArrangementUndo());

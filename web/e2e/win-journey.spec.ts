@@ -599,6 +599,42 @@ for (const surface of ["canvas", "dock-float"] as const) {
 }
 
 for (const mode of MODES) {
+  for (const destination of ["button", "input", "body"] as const) {
+    test(`${mode}: 창 닫기 뒤 ${destination} 초점에서 새 입력을 보존하고 잃은 초점만 복구한다`, async ({ page, scenario }) => {
+      const base = scenario.documents.layout();
+      const watch = { x: .05, y: .1, w: .4, h: .6 }, screener = { x: .55, y: .2, w: .4, h: .6 };
+      scenario.documents.saveLayout({ ...base, windows: [chartWindow("cell-0"), { id: "watchlist", kind: "watchlist", link: null }, { id: "screener", kind: "screener", link: null }], placement: {
+        v: 1, canvas: { rects: { "cell-0": watch, watchlist: watch, screener }, order: ["cell-0", "watchlist", "screener"] },
+        dock: { root: { kind: "group", id: "chart", tabs: ["cell-0"], active: "cell-0" }, floats: [{ window: "watchlist", rect: watch }, { window: "screener", rect: screener }] },
+      } });
+      scenario.documents.saveUiState({ ...scenario.documents.uiState(), layoutMode: mode });
+      await page.goto("/");
+      await ready(page);
+      if (destination === "input") await frame(page, "watchlist").getByRole("button", { name: "새 그룹", exact: true }).click();
+      const target = destination === "input" ? frame(page, "watchlist").getByRole("textbox", { name: "그룹 이름", exact: true }) : destination === "button" ? topbar(page).getByRole("button", { name: "창 더하기", exact: true }) : page.locator("body");
+      await expect(target).toBeVisible();
+      expect(await target.evaluate(async (target, destination) => {
+        const header = document.querySelector<HTMLElement>('[data-window-header="screener"]');
+        if (!header || !(target instanceof HTMLElement)) throw new Error("닫기 초점 대상을 찾지 못했습니다");
+        header.focus();
+        header.dispatchEvent(new KeyboardEvent("keydown", { key: "Delete", bubbles: true, cancelable: true }));
+        if (destination !== "body") target.focus();
+        await Promise.resolve();
+        return document.activeElement === target;
+      }, destination)).toBe(true);
+      await expect(head(page, "screener")).toHaveCount(0);
+      await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+      if (destination === "body") {
+        await expect(page.locator(":focus")).not.toHaveJSProperty("tagName", "BODY");
+        await exposed(page.locator(":focus"));
+      } else {
+        await expect(target).toBeFocused();
+      }
+    });
+  }
+}
+
+for (const mode of MODES) {
   for (const closing of ["screener", "cell-1"] as const) {
     test(`${mode}: 가려진 차트가 있는 창 닫기는 보이는 초점과 한 번의 되돌리기를 보존한다 (${closing})`, async ({ page, scenario }) => {
       const base = scenario.documents.layout();
