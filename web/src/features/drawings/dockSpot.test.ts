@@ -39,20 +39,28 @@ test("스타일 막대는 옮긴 막대와 8px 넘게 떨어진 드로잉 위 �
   const pane = { width: 900, height: 600 };
   const style = { width: 300, height: 38 };
   const dock = { left: 100, top: 400, right: 500, bottom: 440 };
-  expect(avoidDock(150, [452, 560], style, pane, dock, 8, 8)).toEqual({ left: 150, top: 452 });
-  expect(avoidDock(150, [452, 640], style, pane, { ...dock, top: 492, bottom: 532 }, 8, 8)).toEqual({ left: 150, top: 554 });
+  expect(avoidDock(150, [452, 560], style, pane, dock, null, 8, 8)).toEqual({ left: 150, top: 452 });
+  expect(avoidDock(150, [452, 640], style, pane, { ...dock, top: 492, bottom: 532 }, null, 8, 8)).toEqual({ left: 150, top: 554 });
 });
 
 test("위아래 자리가 모두 막대와 겹치면 막대 옆으로 비킨다", () => {
   const pane = { width: 900, height: 132 };
   const style = { width: 300, height: 38 };
   const dock = { left: 8, top: 46, right: 434, bottom: 86 };
-  const spot = avoidDock(170, [16, 90], style, pane, dock, 8, 8);
+  const spot = avoidDock(170, [16, 90], style, pane, dock, null, 8, 8);
   expect(spot).toEqual({ left: 442, top: 16 });
 });
 
 test("겹치지 않는 옮긴 막대는 스타일 막대의 자리를 바꾸지 않는다", () => {
   const pane = { width: 900, height: 600 };
   const style = { width: 300, height: 38 };
-  for (const top of [50, 250, 500]) expect(avoidDock(560, [-30, 640], style, pane, { left: 8, top, right: 434, bottom: top + 40 }, 8, 8)).toEqual({ left: 560, top: 8 });
+  for (const top of [50, 250, 500]) expect(avoidDock(560, [-30, 640], style, pane, { left: 8, top, right: 434, bottom: top + 40 }, null, 8, 8)).toEqual({ left: 560, top: 8 });
+});
+
+test("막대를 비키는 자리가 드로잉을 덮으면 드로잉을 덮지 않는 자리를 고른다", () => {
+  const pane = { width: 900, height: 560 };
+  const style = { width: 333, height: 38 };
+  const dock = { left: 560, top: 62, right: 986, bottom: 102 };
+  const drawing = { left: 760, top: 17, right: 902, bottom: 29 };
+  expect(avoidDock(605, [-27, 51], style, { ...pane, width: 1000 }, dock, drawing, 8, 8)).toEqual({ left: 605, top: 110 });
 });

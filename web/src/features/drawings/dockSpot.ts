@@ -27,14 +27,17 @@ export function settleSpot(spot: Spot, home: Spot, area: Size, bar: Size): DockA
 
 export interface Edges { left: number; top: number; right: number; bottom: number }
 
-export function avoidDock(left: number, tops: readonly number[], bar: Size, pane: Size, dock: Edges, clearance: number, margin: number): Spot {
+export function avoidDock(left: number, tops: readonly number[], bar: Size, pane: Size, dock: Edges, drawing: Edges | null, clearance: number, margin: number): Spot {
   const within = (value: number, size: number, total: number) => Math.max(margin, Math.min(value, total - size - margin));
-  const clear = (x: number, y: number) => x + bar.width + clearance <= dock.left || x >= dock.right + clearance || y + bar.height + clearance <= dock.top || y >= dock.bottom + clearance;
-  const preferred = tops.find((top) => top === within(top, bar.height, pane.height) && clear(left, top));
+  const apart = (box: Edges, spot: Spot, gap: number) => spot.left + bar.width + gap <= box.left || spot.left >= box.right + gap || spot.top + bar.height + gap <= box.top || spot.top >= box.bottom + gap;
+  const clear = (spot: Spot) => apart(dock, spot, clearance);
+  const open = (spot: Spot) => clear(spot) && (!drawing || apart(drawing, spot, 0));
+  const preferred = tops.find((top) => top === within(top, bar.height, pane.height) && clear({ left, top }));
   if (preferred !== undefined) return { left, top: preferred };
-  const clamped = [...tops, dock.bottom + clearance, dock.top - bar.height - clearance].map((top) => within(top, bar.height, pane.height)).find((top) => clear(left, top));
-  if (clamped !== undefined) return { left, top: clamped };
   const top = within(tops[0] ?? margin, bar.height, pane.height);
-  const beside = [dock.right + clearance, dock.left - bar.width - clearance].find((x) => x === within(x, bar.width, pane.width) && clear(x, top));
-  return { left: beside ?? left, top };
+  const spots = [
+    ...[...tops, dock.bottom + clearance, dock.top - bar.height - clearance].map((y) => ({ left, top: within(y, bar.height, pane.height) })),
+    ...[dock.right + clearance, dock.left - bar.width - clearance].filter((x) => x === within(x, bar.width, pane.width)).map((x) => ({ left: x, top })),
+  ];
+  return spots.find(open) ?? spots.find(clear) ?? { left, top };
 }
