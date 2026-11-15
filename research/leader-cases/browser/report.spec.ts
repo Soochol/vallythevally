@@ -6,6 +6,7 @@ import { dartPatternFixture, ORIGINAL } from "../fixtures/dart-patterns.ts";
 import { day } from "../source-utils.ts";
 import { calendar } from "../fixtures/sources.ts";
 import { syntheticInputs } from "../fixtures/report.ts";
+import { sharePublicationBundles } from "../fixtures/share-publication.ts";
 import { browserBundle } from "../generate-report.ts";
 import { parseManuscript } from "../manuscript.ts";
 import { reportPage } from "../report-page.ts";
@@ -17,6 +18,7 @@ let reportUrl: string;
 let escapedUrl: string;
 let patternsUrl: string;
 let malformedUrl: string;
+const shareUrls = new Map<string, string>();
 test.beforeAll(async () => {
   await mkdir(scratch, { recursive: true });
   const inputs = await syntheticInputs(scratch);
@@ -37,6 +39,13 @@ test.beforeAll(async () => {
   const patternsPath = path.join(scratch, "dart-patterns.html");
   await writeFile(patternsPath, reportPage(patternBundle, inputs.manuscript, await browserBundle(), await encodeBundle(patternBundle)));
   patternsUrl = pathToFileURL(patternsPath).href;
+  const shareBundles = await sharePublicationBundles(inputs.bundle);
+  const script = await browserBundle();
+  for (const [name, bundle] of Object.entries(shareBundles)) {
+    const file = path.join(scratch, `share-publication-${name}.html`);
+    await writeFile(file, reportPage(bundle, inputs.manuscript, script, await encodeBundle(bundle)));
+    shareUrls.set(name, pathToFileURL(file).href);
+  }
 });
 test("offline report uses real charts, shared dates/ranges and late-mounted panels", async ({ page }) => {
   const errors: string[] = [];
@@ -179,4 +188,47 @@ test("a corrupt embedded page is rejected under local-file CSP without a false r
   expect(await page.locator("html").getAttribute("data-report-ready")).toBeNull();
   await expect(page.getByText("자료 묶음을 읽지 못했습니다. HTML을 다시 생성하세요.")).toBeVisible();
   expect(errors).toEqual([]);
+});
+
+for (const scenario of [
+  { name: "independent", common: [120, 120, 240, 240, 240], outstanding: [113, 113, 233, 233, 233] },
+  { name: "separateDates", common: [120, 120, 240, 240, 240], outstanding: [113, 113, 113, 233, 233] },
+  { name: "explicitNull", common: [120, 120, null, null, null], outstanding: [113, 113, 113, null, null] },
+  { name: "missingAvailability", common: [120, 120, 120, 120, 120], outstanding: [113, 113, 113, 113, 113] },
+  { name: "sourceDates", common: [120, 120, 120, 120, 240], outstanding: [113, 113, 113, 233, 233] },
+]) test(`offline share publication chart preserves ${scenario.name}`, async ({ page }) => {
+  const errors: string[] = [], requests: string[] = [];
+  page.on("pageerror", (e) => errors.push(e.message));
+  page.on("console", (m) => { if (m.type() === "error") errors.push(m.text()); });
+  page.on("request", (r) => { if (/^https?:/.test(r.url())) requests.push(r.url()); });
+  await page.context().setOffline(true);
+  await page.goto(shareUrls.get(scenario.name)!);
+  await expect(page.locator("html")).toHaveAttribute("data-report-ready", "true");
+  await page.getByRole("checkbox", { name: "재무", exact: true }).check();
+  for (const id of ["financial-shares", "financial-outstanding-shares"]) await expect(page.locator(`[data-panel="${id}"] canvas`).first()).toBeAttached();
+  const data = await page.evaluate(() => window.leaderReport.inspect().filter((p) => ["financial-shares", "financial-outstanding-shares", "financial-operating-profit"].includes(p.id)).map((p) => ({ id: p.id, points: p.series.flatMap((s) => s.data).filter((v): v is { time: string; value: number } => typeof v === "object" && v !== null && "time" in v && "value" in v && typeof v.time === "string" && typeof v.value === "number") })));
+  const dates = ["2022-03-18", "2022-03-21", "2022-03-22", "2022-03-23", "2022-03-24"];
+  expect.soft(dates.map((d) => data.find((p) => p.id === "financial-shares")!.points.find((p) => p.time === d)?.value ?? null)).toEqual(scenario.common);
+  expect.soft(dates.map((d) => data.find((p) => p.id === "financial-outstanding-shares")!.points.find((p) => p.time === d)?.value ?? null)).toEqual(scenario.outstanding);
+  const op = data.find((p) => p.id === "financial-operating-profit")!.points;
+  expect(op.some((p) => p.time < "2022-03-24")).toBe(false);
+  expect(op.find((p) => p.time === "2022-03-24")?.value).toBe(200);
+  const evidence = page.locator('details[data-evidence="financials"]');
+  await evidence.locator(":scope > summary").click();
+  const annual = evidence.locator(":scope > details").filter({ has: page.getByText("annual", { exact: true }) });
+  await annual.locator(":scope > summary").click();
+  const latest = annual.locator(":scope > details").nth(1);
+  await latest.locator(":scope > summary").click();
+  for (const [key, reason] of [["commonShares", "invalid_share_count"], ["outstandingCommonShares", "common_share_snapshot_missing_or_ambiguous"]]) {
+    const measure = latest.locator(":scope > details").filter({ has: page.getByText(key!, { exact: true }) });
+    await measure.locator(":scope > summary").click();
+    if (scenario.name === "explicitNull") await expect(measure).toContainText(`reason: ${reason}`);
+    if (scenario.name === "missingAvailability") await expect(measure).toContainText("availableFrom: null");
+    const sources = measure.locator(":scope > details").filter({ has: page.getByText("sources", { exact: true }) });
+    await sources.locator(":scope > summary").click();
+    await sources.locator(":scope > details > summary").click();
+    await expect(sources).toContainText(`receipt: ${ORIGINAL}`);
+  }
+  expect(errors).toEqual([]);
+  expect(requests).toEqual([]);
 });

@@ -9,7 +9,7 @@ export const SHARE_RECEIPT = "20210319009993";
 export const COMMON = "의결권 있는 주식\n(보통주)";
 export type Evidence = "valid" | "missing" | "company" | "stock" | "no-stock" | "period" | "report" | "unavailable" | "middle-unavailable";
 export type Statement = "valid" | "company" | "period" | "report" | "mixed-receipt";
-export async function dartPatternFixture(options: { kinds?: string[]; evidence?: Evidence; revisedAccounts?: boolean; statement?: Statement; mixedShareReceipts?: boolean } = {}) {
+export async function dartPatternFixture(options: { kinds?: string[]; evidence?: Evidence; revisedAccounts?: boolean; statement?: Statement; mixedShareReceipts?: boolean; currentShares?: boolean } = {}) {
   const calls: URL[] = [];
   const original = { corp_code: CORP, stock_code: CODE, corp_name: "합성 법인", rcept_no: ORIGINAL, rcept_dt: "20220321", report_nm: "사업보고서 (2021.12)" };
   const corrected = { ...original, rcept_no: CORRECTED, rcept_dt: "20220323", report_nm: "[첨부정정]사업보고서 (2021.12)" };
@@ -36,6 +36,7 @@ export async function dartPatternFixture(options: { kinds?: string[]; evidence?:
     const annual = url.searchParams.get("reprt_code") === "11011";
     if (url.pathname === "/api/fnlttSinglAcntAll.json" && annual && year === "2021") return json({ status: "000", list: accounts(2021, 4).map((r, i) => ({ ...r, corp_code: options.statement === "company" ? "88888888" : CORP, bsns_year: options.statement === "period" ? "2020" : "2021", reprt_code: options.statement === "report" ? "11012" : "11011", rcept_no: options.revisedAccounts || options.statement === "mixed-receipt" && i === 0 ? CORRECTED : ORIGINAL })) });
     if (url.pathname === "/api/stockTotqySttus.json" && annual && year === "2020") return json({ status: "000", list: [...(options.kinds ?? [COMMON]), "합계", "비고"].map((se) => ({ corp_code: CORP, rcept_no: options.mixedShareReceipts && se === "합계" ? totalShares.rcept_no : SHARE_RECEIPT, se, istc_totqy: se === "비고" ? "-" : "120", tesstk_co: "7", distb_stock_co: "113" })) });
+    if (url.pathname === "/api/stockTotqySttus.json" && annual && year === "2021" && options.currentShares) return json({ status: "000", list: [COMMON, "합계"].map((se) => ({ corp_code: CORP, rcept_no: ORIGINAL, se, istc_totqy: "240", tesstk_co: "7", distb_stock_co: "233" })) });
     return json({ status: "013" });
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));

@@ -6,6 +6,7 @@ import { test } from "node:test";
 import { dartPatternFixture, ORIGINAL, COMMON } from "./fixtures/dart-patterns.ts";
 import { calendar } from "./fixtures/sources.ts";
 import { syntheticInputs, syntheticManuscript } from "./fixtures/report.ts";
+import { sharePublicationBundles } from "./fixtures/share-publication.ts";
 import { parseManuscript } from "./manuscript.ts";
 import { parseBundle } from "./report-input.ts";
 import { accountingPlots, calendarFor, publishedSample, reportPanels, sample, type Plot } from "./report-model.ts";
@@ -128,4 +129,44 @@ test("HTML consumer retains original-receipt evidence outside the final disclosu
   assert.equal(op.samples.findLast((s) => s.day <= "2022-03-21")?.value ?? null, null);
   assert.equal(op.samples.find((s) => s.day === "2022-03-22")?.value, 200);
   assert.equal(bundle.dart.financials.annual[1]!.filedOn, "2022-03-21");
+});
+
+test("share publication selects each eligible snapshot without waiting for financial corrections", async (t) => {
+  const inputs = await syntheticInputs(await scratch());
+  const bundles = await sharePublicationBundles(inputs.bundle);
+  const dates = ["2022-03-18", "2022-03-21", "2022-03-22", "2022-03-23", "2022-03-24"];
+  const cases = [
+    { name: "independent", bundle: bundles.independent, common: [120, 120, 240, 240, 240], outstanding: [113, 113, 233, 233, 233] },
+    { name: "separate dates", bundle: bundles.separateDates, common: [120, 120, 240, 240, 240], outstanding: [113, 113, 113, 233, 233] },
+    { name: "explicit null", bundle: bundles.explicitNull, common: [120, 120, null, null, null], outstanding: [113, 113, 113, null, null] },
+    { name: "missing availability", bundle: bundles.missingAvailability, common: [120, 120, 120, 120, 120], outstanding: [113, 113, 113, 113, 113] },
+    { name: "same-day and future sources", bundle: bundles.sourceDates, common: [120, 120, 120, 120, 240], outstanding: [113, 113, 113, 233, 233] },
+  ];
+  for (const scenario of cases) await t.test(scenario.name, () => {
+    const bundle = parseBundle(scenario.bundle);
+    const panels = reportPanels(bundle);
+    const chartDates = calendarFor(panels, bundle, inputs.manuscript);
+    for (const [id, expected, key] of [
+      ["financial-shares", scenario.common, "commonShares"],
+      ["financial-outstanding-shares", scenario.outstanding, "outstandingCommonShares"],
+    ] as const) {
+      const plot = panels.find((p) => p.id === id)!.plots[0]!;
+      const chart = plotRuns(plot, chartDates, bundle.calendar).flat();
+      assert.deepEqual(dates.map((d) => chart.find((p) => p.time === d)?.value ?? null), expected, id);
+      dates.forEach((date, index) => {
+        const selected = plot.samples.findLast((p) => p.day <= date)!;
+        const original = expected[index] !== 120 && expected[index] !== 113;
+        const period = bundle.dart.financials.quarters.find((p) => p.year === (original ? 2021 : 2020) && p.quarter === 4)!;
+        assert.deepEqual(selected.evidence, period[key], `${id} evidence on ${date}`);
+        assert.equal(selected.reason, expected[index] === null ? period[key].reason : null);
+        assert.equal(selected.evidence!.sources[0]!.receipt, original ? ORIGINAL : "20210319009993");
+      });
+    }
+    const op = panels.find((p) => p.id === "financial-operating-profit")!.plots[0]!;
+    const chart = plotRuns(op, chartDates, bundle.calendar).flat();
+    assert.ok(!chart.some((p) => p.time < "2022-03-24"));
+    assert.equal(chart.find((p) => p.time === "2022-03-24")?.value, 200);
+    assert.equal(op.samples.find((p) => p.day === "2022-03-24")!.evidence!.sources[0]!.receipt, "20220323009992");
+    assert.equal(bundle.dart.financials.quarters.find((p) => p.year === 2021 && p.quarter === 4)!.availableFrom, "2022-03-24");
+  });
 });
