@@ -333,6 +333,7 @@ export class CompareLayer {
     }
     line.pages++;
     line.older = "loading";
+    this.host.requestFrame();
     line.feed.needOlder();
   }
 

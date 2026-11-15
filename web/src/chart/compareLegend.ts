@@ -1,5 +1,7 @@
 import { iconMarkup } from "../features/icons";
-import type { CompareRow } from "./compare";
+import type { CompareLegendValues, CompareRow } from "./compare";
+
+import type { LegendProjection } from "./legendProjection";
 
 const ROW =
   "flex w-max max-w-full items-center gap-1.5 whitespace-nowrap rounded-s pr-1 text-s " +
@@ -26,6 +28,9 @@ export class CompareLegend {
   readonly box = el("div", "flex flex-col gap-px");
   private readonly rows = new Map<string, RowEls>();
 
+  private layoutRows: readonly CompareRow[] = [];
+  private layoutValues: readonly CompareLegendValues[] = [];
+
   constructor(private readonly onRemove: (code: string) => void) {}
 
   render(rows: readonly CompareRow[]): void {
@@ -37,16 +42,7 @@ export class CompareLegend {
         r = this.build(row.code);
         this.rows.set(row.code, r);
       }
-      r.swatch.style.background = row.color;
-      r.name.textContent = row.name;
-      r.value.textContent = row.value;
-      r.value.className = `font-medium ${DIR_CLASS[row.dir]}`;
-      r.note.textContent = row.notes.join(" · ");
-      r.note.hidden = row.notes.length === 0;
-      r.root.classList.toggle("opacity-60", row.failed);
-      r.remove.setAttribute("aria-label", `${row.name} 비교 종목 지우기`);
-      r.root.dataset.lastT = String(row.last?.t ?? "");
-      r.root.dataset.lastClose = String(row.last?.c ?? "");
+      this.fill(r, row);
     }
     for (const [code, r] of this.rows) {
       if (seen.has(code)) continue;
@@ -57,12 +53,42 @@ export class CompareLegend {
     if (order.length !== this.box.children.length || order.some((root, i) => this.box.children[i] !== root)) this.box.replaceChildren(...order);
   }
 
+  setLayoutRows(rows: readonly CompareRow[], values: readonly CompareLegendValues[]): void {
+    this.layoutRows = rows;
+    this.layoutValues = values;
+  }
+
+  projection(): LegendProjection {
+    const root = el("div", this.box.className);
+    const choices = new Map(this.layoutValues.map((row) => [row.code, row.values]));
+    const fields = this.layoutRows.map((row) => {
+      const elements = this.build(row.code, false);
+      this.fill(elements, row);
+      root.append(elements.root);
+      return { element: elements.value, alternatives: choices.get(row.code) ?? [] };
+    });
+    return { root, fields };
+  }
+
+  private fill(r: RowEls, row: CompareRow): void {
+      r.swatch.style.background = row.color;
+      r.name.textContent = row.name;
+      r.value.textContent = row.value;
+      r.value.className = `font-medium ${DIR_CLASS[row.dir]}`;
+      r.note.textContent = row.notes.join(" · ");
+      r.note.hidden = row.notes.length === 0;
+      r.root.classList.toggle("opacity-60", row.failed);
+      r.remove.setAttribute("aria-label", `${row.name} 비교 종목 지우기`);
+      r.root.dataset.lastT = String(row.last?.t ?? "");
+      r.root.dataset.lastClose = String(row.last?.c ?? "");
+  }
+
   dispose(): void {
     this.rows.clear();
     this.box.remove();
   }
 
-  private build(code: string): RowEls {
+  private build(code: string, interactive = true): RowEls {
     const root = el("div", `group pointer-events-auto ${ROW}`);
     root.dataset.compareRow = code;
     const swatch = el("span", "h-0.5 w-2.5 flex-none rounded-full");
@@ -74,7 +100,7 @@ export class CompareLegend {
     remove.dataset.chartControl = "";
     remove.title = "지우기";
     remove.innerHTML = iconMarkup("close");
-    remove.addEventListener("click", () => this.onRemove(code));
+    if (interactive) remove.addEventListener("click", () => this.onRemove(code));
     root.append(swatch, name, value, note, remove);
     return { root, swatch, name, value, note, remove };
   }

@@ -529,7 +529,7 @@ test("native pinned boundary keeps stable frames and real help", async ({ page, 
   });
   await writeFile(testInfo.outputPath("minimal-frames.json"), JSON.stringify({ foldedBox, frames }, null, 2));
   await page.screenshot({ path: testInfo.outputPath("minimal.png") });
-  expect(new Set(frames.slice(15).map((frame) => JSON.stringify(frame.toolbar))).size).toBe(1);
+  expect.soft(new Set(frames.slice(15).map((frame) => JSON.stringify(frame.toolbar))).size).toBe(1);
   const help = dock.getByRole("button", { name: "드로잉 단축키 도움말", exact: true });
   await help.scrollIntoViewIfNeeded();
   await help.click();

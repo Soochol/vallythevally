@@ -136,6 +136,8 @@ export class ChartController {
   private history: History | null = null;
   private bars: Bar[] = [];
   private hoverIndex: number | null = null;
+  private readonly pendingLegendSources = new Set<"base" | "indicators" | "compare">(["base", "indicators", "compare"]);
+  private legendLeftT: UnixSeconds | null = null;
   private ready: ReadyStatus | null = null;
   private settingData = false;
   private initialRangeEnd: number | null = null;
@@ -164,7 +166,7 @@ export class ChartController {
     this.main = addMainSeries(this.chart, "candle", this.tokens, false, this.priceAxisGeometry());
     this.crosshairMarker = new CrosshairMarker({ element: el, chart: this.chart, bars: () => this.bars, period: () => this.period() });
     el.addEventListener("pointerleave", this.clearPointedBar);
-    this.legend = new Legend(el);
+    this.legend = new Legend(el, () => [this.indicatorLegend.projection(), this.compareLegend.projection()]);
     this.extremeTags = new ExtremeTags(el);
     this.daySeparators = new DaySeparators(this.chart, {
       shown: () => this.view !== null && this.view.settings.showDaySeparators && isIntraday(this.view.period),
@@ -177,7 +179,7 @@ export class ChartController {
         tokens: () => this.tokens,
         isIndex: () => this.view !== null && isIndexCode(this.view.symbol),
         period: () => this.period(),
-        requestFrame: () => this.scheduleFrame(),
+        requestFrame: () => this.requestLegendSources("indicators"),
         guard: (draw) => this.withDataGuard(draw),
         axisFormatted: (pane) => this.axisLabels.record(pane),
         axisCoordinates: (pane) => this.axisLabels.lastCoordinates(pane),
@@ -223,7 +225,7 @@ export class ChartController {
       {
         chart: this.chart,
         tokens: () => this.tokens,
-        requestFrame: () => this.scheduleFrame(),
+        requestFrame: () => this.requestLegendSources("compare"),
         guard: (draw) => this.withDataGuard(draw),
       },
       deps.fetchPage ?? fetchBarsPage,
@@ -237,7 +239,7 @@ export class ChartController {
       this.financialHoverTime = typeof p.time === "number" ? fromChartTime(p.time) : null;
       this.hoverIndex =
         this.financialHoverTime !== null && n > 0 ? this.bars.findIndex((bar) => bar.t === this.financialHoverTime) : null;
-      this.renderLegend();
+      this.paintLegend();
       if (p.sourceEvent) this.pointerOwnsCrosshair = true;
       if (!this.pointerOwnsCrosshair || !this.el.matches(":hover")) return;
       const bar = this.hoverIndex === null ? undefined : this.bars[this.hoverIndex];
@@ -307,6 +309,7 @@ export class ChartController {
     this.compare.setCodes(compareEntries(next), { period: next.period, venueFor: (code) => compareVenue(code, next) });
     this.daySeparators.sync();
     this.legend.setDisplay(next.settings);
+    this.requestLegendSources("base", "indicators", "compare");
     this.renderLegend();
   }
 
@@ -340,6 +343,7 @@ export class ChartController {
         this.fitInitialRange();
       } else preserveTimeRange(this.chart.timeScale(), this.period(), draw);
     });
+    this.requestLegendSources("indicators");
     this.renderLegend();
   }
 
@@ -393,6 +397,7 @@ export class ChartController {
     applyMainColors(this.main, tokens);
     this.indicators.setTheme();
     this.compare.setTheme();
+    this.requestLegendSources("indicators", "compare");
     this.renderLegend();
   }
 
@@ -520,6 +525,7 @@ export class ChartController {
 
   private setBars(bars: Bar[]): void {
     this.bars = bars;
+    this.requestLegendSources("base", "indicators", "compare");
     this.pendingDraw.clear();
     setMainData(this.main, bars);
     this.compare.realign(bars);
@@ -549,14 +555,16 @@ export class ChartController {
       this.withDataGuard(() => this.setBars(next));
     }
     this.indicators.advance(h, bar, kind);
-    this.scheduleFrame();
+    this.requestLegendSources("base", "indicators", "compare");
     this.refreshReady();
   }
 
   private onConnection(c: Connection): void {
+    const previousStalledAt = this.stalledAt;
     const live = c.socket === "open" && c.status.realtime === "live";
     if (this.realtimeLive && !live && this.stalledAt === null) this.stalledAt = this.lastRealtimeAt ?? nowSeconds();
     this.realtimeLive = live;
+    if (previousStalledAt !== this.stalledAt) this.requestLegendSources("base");
     this.scheduleFrame();
   }
 
@@ -746,7 +754,39 @@ export class ChartController {
     return chartTimeProjection(this.chart.timeScale(), this.period()).toTime(Math.max(0, Math.floor(r.from)));
   }
 
+  private requestLegendSources(...sources: ("base" | "indicators" | "compare")[]): void {
+    for (const source of sources) this.pendingLegendSources.add(source);
+    this.scheduleFrame();
+  }
+
+  private refreshPendingLegendSources(): void {
+    const left = this.leftT();
+    if (left !== this.legendLeftT) this.pendingLegendSources.add("compare");
+    this.legendLeftT = left;
+    const view = this.view;
+    if (this.pendingLegendSources.has("base")) this.legend.setLayoutBars(view ? this.bars.map((bar, i) => ({
+      bar, prev: this.bars[i - 1] ?? null,
+      isCurrent: this.history?.current?.t === bar.t && !this.realtimeSeen,
+      isIndex: isIndexCode(view.symbol), period: view.period, stalledAt: this.stalledAt,
+    })) : []);
+    if (this.pendingLegendSources.has("indicators")) this.indicatorLegend.setLayoutRows(this.indicators.rows(this.bars.at(-1)?.t ?? null), this.indicators.priceLegendValues());
+    if (this.pendingLegendSources.has("compare")) this.compareLegend.setLayoutRows(this.compare.rows(left, null), this.compare.legendValues(left));
+    this.pendingLegendSources.clear();
+  }
+
+  private fitLegendGeometry(): void {
+    this.legend.fit({ pricePane: this.paneBounds()[0] ?? null, axisWidth: this.chart.priceScale("right").width() });
+  }
+
   private renderLegend(): void {
+    this.compare.flush(this.bars);
+    this.indicators.flush();
+    this.refreshPendingLegendSources();
+    this.paintLegend();
+    this.fitLegendGeometry();
+  }
+
+  private paintLegend(): void {
     const view = this.view;
     const i = this.hoverIndex ?? this.bars.length - 1;
     const bar = this.bars[i];
@@ -765,7 +805,6 @@ export class ChartController {
       period: view.period,
       stalledAt: this.stalledAt,
     });
-    this.legend.fit({ pricePane: panes[0] ?? null, axisWidth });
   }
 }
 
