@@ -19,6 +19,7 @@ export function watchFinancialJob(client: QueryClient): () => void {
     const page: unknown = event.query.state.data;
     if (page === seen) return;
     seen = page;
+    void client.cancelQueries({ queryKey: ["financials"] });
     void client.invalidateQueries({ queryKey: ["financials"] });
   });
 }
