@@ -14,7 +14,7 @@ const watchPanel = (page: Page) => page.getByRole("complementary", { name: "관�
 const watchRow = (page: Page, code: string) => watchPanel(page).locator(`li[data-code="${code}"]`);
 const quote = (symbol: string, price: number, change: number, changeRate: number): Quote => ({ symbol, price, change, changeRate, volume: 1000, t: 1794186000, source: "realtime" });
 
-function seedCanvas(scenario: Scenario) {
+function seedCanvas(scenario: Scenario, watched: readonly string[]) {
   const layout = scenario.documents.layout(DEFAULT_LAYOUT_ID);
   const windows: LayoutWindow[] = [
     { id: "cell-0", link: null, kind: "chart", symbol: "005930", venue: "combined", period: "D", chartSettings: SETTINGS },
@@ -26,12 +26,12 @@ function seedCanvas(scenario: Scenario) {
   scenario.documents.saveUiState({ ...scenario.documents.uiState(), layoutMode: "canvas" });
   scenario.documents.saveScreens({ revision: 1, screens: [{ id: "all", name: "모든 종목", markets: [], exclude: [], conditions: [] }] });
   const lists = scenario.documents.watchlists();
-  scenario.documents.saveWatchlists({ lists: lists.lists.map((list, i) => (i === 0 ? { ...list, symbols: WATCHED } : list)), revision: lists.revision + 1 });
+  scenario.documents.saveWatchlists({ lists: lists.lists.map((list, i) => (i === 0 ? { ...list, symbols: [...watched] } : list)), revision: lists.revision + 1 });
   scenario.reply("/api/quotes", { body: [quote("005930", 71_200, 1_200, 1.71), quote("000660", 183_500, -2_500, -1.34), quote("035420", 210_000, 0, 0)] });
 }
 
-async function showBoth(scenario: Scenario, screener: { showResult(result: ReturnType<typeof allResult>): void }, page: Page) {
-  seedCanvas(scenario);
+async function showBoth(scenario: Scenario, screener: { showResult(result: ReturnType<typeof allResult>): void }, page: Page, watched: readonly string[] = WATCHED) {
+  seedCanvas(scenario, watched);
   const result = allResult();
   const [up, down, flat, long, provisional, old] = result.rows;
   result.rows = [
@@ -151,6 +151,17 @@ test("두 목록의 줄에는 종목코드 글자가 없고 풍선말에 이름�
   }
   const visible = await watchPanel(page).locator("li").allInnerTexts();
   for (const text of visible) expect(text).not.toMatch(/\b\d{6}\b|지수/);
+});
+
+test("종목 정보를 찾을 수 없는 관심종목은 이름 자리에 코드를 적고 풍선말에는 코드를 한 번만 적는다", async ({ scenario, screener, page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  scenario.reply("/api/symbols/999999", { status: 404, body: { error: { code: "unknown_symbol", message: "없는 종목입니다" } } });
+  await showBoth(scenario, screener, page, [...WATCHED, "999999"]);
+  const unknown = watchRow(page, "999999");
+  await expect(unknown.locator("b")).toHaveText("999999");
+  await expect(unknown.locator("b")).toHaveAttribute("title", "999999");
+  await expect(unknown).toContainText("찾을 수 없음");
+  expect((await look(unknown)).height).toBe(34);
 });
 
 test("긴 이름은 줄 안에서 말줄임표로 잘리고 숫자 열을 밀지 않는다", async ({ scenario, screener, page }) => {
