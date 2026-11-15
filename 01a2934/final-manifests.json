@@ -1,0 +1,103 @@
+[
+  {
+    "run": "check-k9cjecvo",
+    "command": [
+      "web.py",
+      "check",
+      "src/layout",
+      "src/features/workspace/manage.test.ts",
+      "src/stores/layout.test.ts",
+      "src/persist",
+      "src/chart/legend.test.ts",
+      "src/chart/settings.test.ts",
+      "src/chart/indicators/layer.test.ts",
+      "src/chart/compare.test.ts",
+      "src/features/drawings/controls.test.ts",
+      "src/features/drawings/dockSpot.test.ts",
+      "src/features/screener/results.test.ts"
+    ],
+    "source": {
+      "head": "01a2934d9508fcf8130c4e51fe68eb77115249bf",
+      "dirty": false,
+      "sha256": "f715de4093c521fa80ce9e546d166f30dc5afebc555accc1ddc75add2add1ae1"
+    },
+    "source_after": {
+      "head": "01a2934d9508fcf8130c4e51fe68eb77115249bf",
+      "dirty": false,
+      "sha256": "f715de4093c521fa80ce9e546d166f30dc5afebc555accc1ddc75add2add1ae1"
+    },
+    "status": "passed",
+    "exit_code": 0
+  },
+  {
+    "run": "e2e-_retnd41",
+    "command": [
+      "web.py",
+      "e2e",
+      "e2e/win-journey.spec.ts",
+      "e2e/win-shell.spec.ts",
+      "e2e/win-manage.spec.ts",
+      "e2e/win-link.spec.ts",
+      "e2e/win-layouts.spec.ts",
+      "e2e/win-dock.spec.ts",
+      "e2e/win-crosshair.spec.ts",
+      "e2e/win-canvas.spec.ts",
+      "e2e/win-float.spec.ts",
+      "e2e/restore.spec.ts",
+      "e2e/close-while-saving.spec.ts",
+      "e2e/float-shell.spec.ts",
+      "e2e/chart-readability.spec.ts",
+      "e2e/legend-source.spec.ts",
+      "e2e/legend-geometry.spec.ts",
+      "e2e/legend-panels.spec.ts",
+      "e2e/legend-panel-regressions.spec.ts",
+      "e2e/drawing-dock-move.spec.ts",
+      "e2e/drawing-pinned-dock.spec.ts",
+      "e2e/drawing-tools-all.spec.ts",
+      "e2e/chart-settings.spec.ts",
+      "e2e/compare.spec.ts",
+      "e2e/float-dock.spec.ts",
+      "e2e/float-surfaces.spec.ts",
+      "e2e/overlay-input.spec.ts",
+      "e2e/screener-results.spec.ts",
+      "e2e/screener-height.spec.ts",
+      "--workers=4"
+    ],
+    "source": {
+      "head": "01a2934d9508fcf8130c4e51fe68eb77115249bf",
+      "dirty": false,
+      "sha256": "f715de4093c521fa80ce9e546d166f30dc5afebc555accc1ddc75add2add1ae1"
+    },
+    "source_after": {
+      "head": "01a2934d9508fcf8130c4e51fe68eb77115249bf",
+      "dirty": false,
+      "sha256": "f715de4093c521fa80ce9e546d166f30dc5afebc555accc1ddc75add2add1ae1"
+    },
+    "status": "passed",
+    "exit_code": 0
+  },
+  {
+    "run": "e2e-ox0m53iv",
+    "command": [
+      "web.py",
+      "e2e",
+      "e2e/float-dock.spec.ts",
+      "--grep",
+      "style bar keeps|style bar fits",
+      "--repeat-each=10",
+      "--workers=1"
+    ],
+    "source": {
+      "head": "01a2934d9508fcf8130c4e51fe68eb77115249bf",
+      "dirty": false,
+      "sha256": "f715de4093c521fa80ce9e546d166f30dc5afebc555accc1ddc75add2add1ae1"
+    },
+    "source_after": {
+      "head": "01a2934d9508fcf8130c4e51fe68eb77115249bf",
+      "dirty": false,
+      "sha256": "f715de4093c521fa80ce9e546d166f30dc5afebc555accc1ddc75add2add1ae1"
+    },
+    "status": "passed",
+    "exit_code": 0
+  }
+]

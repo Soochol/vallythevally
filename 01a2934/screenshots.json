@@ -1,0 +1,140 @@
+[
+  {
+    "file": "dock-basic-1440x900.png",
+    "source": "target/web-runs/e2e-_retnd41/results/win-journey-dock-1440x900\uc5d0\uc11c-\uc704-\ub9c9\ub300\u00b7\ub4dc\ub85c\uc789\u00b7\ucc3d-\uba38\ub9ac\ub97c-\ubaa8\ub450-\uc4f4\ub2e4-chromium/dock-basic-1440x900.png",
+    "kind": "final-clean",
+    "sha256": "0a4310e2842a34fc6391a69a9563a9579cafbd08337eaef76ba513e9c8113f11"
+  },
+  {
+    "file": "dock-basic-1024x768.png",
+    "source": "target/web-runs/e2e-_retnd41/results/win-journey-dock-1024x768\uc5d0\uc11c-\uc704-\ub9c9\ub300\u00b7\ub4dc\ub85c\uc789\u00b7\ucc3d-\uba38\ub9ac\ub97c-\ubaa8\ub450-\uc4f4\ub2e4-chromium/dock-basic-1024x768.png",
+    "kind": "final-clean",
+    "sha256": "535eb90bd94bd7267c8a8bbc396de5af37b7068a351d051f1edb1612cce5238a"
+  },
+  {
+    "file": "canvas-basic-1440x900.png",
+    "source": "target/web-runs/e2e-_retnd41/results/win-journey-canvas-1440x900\uc5d0\uc11c-\uc704-\ub9c9\ub300\u00b7\ub4dc\ub85c\uc789\u00b7\ucc3d-\uba38\ub9ac\ub97c-\ubaa8\ub450-\uc4f4\ub2e4-chromium/canvas-basic-1440x900.png",
+    "kind": "final-clean",
+    "sha256": "65d052f7f54c361f28f2d52fbd1893fea084556aa278c3709e21c3fc9a23151c"
+  },
+  {
+    "file": "canvas-basic-1024x768.png",
+    "source": "target/web-runs/e2e-_retnd41/results/win-journey-canvas-1024x768\uc5d0\uc11c-\uc704-\ub9c9\ub300\u00b7\ub4dc\ub85c\uc789\u00b7\ucc3d-\uba38\ub9ac\ub97c-\ubaa8\ub450-\uc4f4\ub2e4-chromium/canvas-basic-1024x768.png",
+    "kind": "final-clean",
+    "sha256": "8a03945bb6b4204b78044a011b0b7b28c12c08615f20a5506677e666f371cb62"
+  },
+  {
+    "file": "dock-four-charts-1440x900.png",
+    "source": "target/web-runs/e2e-_retnd41/results/win-journey-dock-\ucc28\ud2b8-\ub137\uacfc-\uc606-\ucc3d\uc758-\ubc30\uce58\ub97c-\ub450-\ud654\uba74-\ud06c\uae30\ub85c-\uae30\ub85d\ud55c\ub2e4-chromium/dock-four-charts-1440x900.png",
+    "kind": "final-clean",
+    "sha256": "fa12fe5ff72c62a69e876b0b90b4ebffdae6b4cbc37a062ef759bc90332c638f"
+  },
+  {
+    "file": "dock-four-charts-1024x768.png",
+    "source": "target/web-runs/e2e-_retnd41/results/win-journey-dock-\ucc28\ud2b8-\ub137\uacfc-\uc606-\ucc3d\uc758-\ubc30\uce58\ub97c-\ub450-\ud654\uba74-\ud06c\uae30\ub85c-\uae30\ub85d\ud55c\ub2e4-chromium/dock-four-charts-1024x768.png",
+    "kind": "final-clean",
+    "sha256": "862faaeb69ebdf4cc6cccce43c0e8f7bdf1b635c37da1c3bb0dc69912930173d"
+  },
+  {
+    "file": "canvas-four-charts-1440x900.png",
+    "source": "target/web-runs/e2e-_retnd41/results/win-journey-canvas-\ucc28\ud2b8-\ub137\uacfc-\uc606-\ucc3d\uc758-\ubc30\uce58\ub97c-\ub450-\ud654\uba74-\ud06c\uae30\ub85c-\uae30\ub85d\ud55c\ub2e4-chromium/canvas-four-charts-1440x900.png",
+    "kind": "final-clean",
+    "sha256": "b42b6b270372155883c7e4d22e8d02610360fe9d4049518738f2f0739520412f"
+  },
+  {
+    "file": "canvas-four-charts-1024x768.png",
+    "source": "target/web-runs/e2e-_retnd41/results/win-journey-canvas-\ucc28\ud2b8-\ub137\uacfc-\uc606-\ucc3d\uc758-\ubc30\uce58\ub97c-\ub450-\ud654\uba74-\ud06c\uae30\ub85c-\uae30\ub85d\ud55c\ub2e4-chromium/canvas-four-charts-1024x768.png",
+    "kind": "final-clean",
+    "sha256": "05c24236573799f79d94a90c154b5797a5a254f8b2e7a672e6437245bcefd272"
+  },
+  {
+    "file": "dock-float-1440x900.png",
+    "source": "target/web-runs/e2e-_retnd41/results/win-journey-\uc228\uae34-\uc5f0\ub3d9-\ucc28\ud2b8\uc640-\ucc3d-\ubc94\uc704-\ub4dc\ub85c\uc789\uc740-\ub5a0-\uc788\ub294-\ucc3d\uacfc-\uce94\ubc84\uc2a4\ub97c-\uac70\uccd0-\uac19\uc740-\ucc3d\uc744-\ub530\ub978\ub2e4-chromium/dock-float-1440x900.png",
+    "kind": "final-clean",
+    "sha256": "49141e241169fe98e081c8ad1b45d371374ff26906f9ed6bc18248c45f9c2d9a"
+  },
+  {
+    "file": "dock-float-1024x768.png",
+    "source": "target/web-runs/e2e-_retnd41/results/win-journey-\uc228\uae34-\uc5f0\ub3d9-\ucc28\ud2b8\uc640-\ucc3d-\ubc94\uc704-\ub4dc\ub85c\uc789\uc740-\ub5a0-\uc788\ub294-\ucc3d\uacfc-\uce94\ubc84\uc2a4\ub97c-\uac70\uccd0-\uac19\uc740-\ucc3d\uc744-\ub530\ub978\ub2e4-chromium/dock-float-1024x768.png",
+    "kind": "final-clean",
+    "sha256": "04158ad5536e439f410a2295bf95ca5c306f3ba8c18a341ba1745da18adf08f4"
+  },
+  {
+    "file": "canvas-overlap-1440x900.png",
+    "source": "target/web-runs/e2e-_retnd41/results/win-journey-\uc228\uae34-\uc5f0\ub3d9-\ucc28\ud2b8\uc640-\ucc3d-\ubc94\uc704-\ub4dc\ub85c\uc789\uc740-\ub5a0-\uc788\ub294-\ucc3d\uacfc-\uce94\ubc84\uc2a4\ub97c-\uac70\uccd0-\uac19\uc740-\ucc3d\uc744-\ub530\ub978\ub2e4-chromium/canvas-overlap-1440x900.png",
+    "kind": "final-clean",
+    "sha256": "fca9a27541a8a5bb7978d38ddaabda150142402d2a07ca8a0ee91f7185e6434a"
+  },
+  {
+    "file": "canvas-overlap-1024x768.png",
+    "source": "target/web-runs/e2e-_retnd41/results/win-journey-\uc228\uae34-\uc5f0\ub3d9-\ucc28\ud2b8\uc640-\ucc3d-\ubc94\uc704-\ub4dc\ub85c\uc789\uc740-\ub5a0-\uc788\ub294-\ucc3d\uacfc-\uce94\ubc84\uc2a4\ub97c-\uac70\uccd0-\uac19\uc740-\ucc3d\uc744-\ub530\ub978\ub2e4-chromium/canvas-overlap-1024x768.png",
+    "kind": "final-clean",
+    "sha256": "0c636790fd305a071e07121543771c4a8903148611dd79948a4fe74cbbd03467"
+  },
+  {
+    "file": "readability-1440x900.png",
+    "source": "target/web-runs/e2e-_retnd41/results/chart-readability-four-cha-1159f-readable-inside-their-panes-chromium/readability-1440x900.png",
+    "kind": "final-clean",
+    "sha256": "ef405f0ae4bd2972dd8e9013af57358cefeeb9136e4661e6c2164d54aa54151d"
+  },
+  {
+    "file": "before-1440x900.png",
+    "source": ".audit/layout-finish/evidence/readability-before/readability-1440x900.png",
+    "kind": "historical-before",
+    "sha256": "0a027dbcca242492471bf82a5074c9d24edb1098a1a2b78ad3ce4486bf332a06"
+  },
+  {
+    "file": "readability-1024x768.png",
+    "source": "target/web-runs/e2e-_retnd41/results/chart-readability-four-cha-1159f-readable-inside-their-panes-chromium/readability-1024x768.png",
+    "kind": "final-clean",
+    "sha256": "1d24758b07521d39ab97b62cfa479452b5aebff0b71e66d9c597af3faffd6a11"
+  },
+  {
+    "file": "before-1024x768.png",
+    "source": ".audit/layout-finish/evidence/readability-before/readability-1024x768.png",
+    "kind": "historical-before",
+    "sha256": "19f7e8008c9b531e823f2845644f6a7bfc3903561cd4b48be5806355971d993f"
+  },
+  {
+    "file": "readability-1024x920.png",
+    "source": "target/web-runs/e2e-_retnd41/results/chart-readability-four-cha-1159f-readable-inside-their-panes-chromium/readability-1024x920.png",
+    "kind": "final-clean",
+    "sha256": "0955a5837324c83cee4ca874b11b2c54327f1e513529d944844985e355164feb"
+  },
+  {
+    "file": "before-1024x920.png",
+    "source": ".audit/layout-finish/evidence/readability-before/readability-1024x920.png",
+    "kind": "historical-before",
+    "sha256": "a2cc20058984a05a8ad2b6fa80235fdc9fb0b3620bfedc2005e9f887166d76ca"
+  },
+  {
+    "file": "readability-rectangles.json",
+    "source": "target/web-runs/e2e-_retnd41/results/chart-readability-four-cha-1159f-readable-inside-their-panes-chromium/readability-rectangles.json",
+    "kind": "final-clean",
+    "sha256": "4844da782c2e1aacd5674bc2dd3bb5a349ff6fa606b8859be3af5339f9f3e5e5"
+  },
+  {
+    "file": "tall-normal-rectangles.json",
+    "source": "target/web-runs/e2e-_retnd41/results/chart-readability-tall-nor-cab0f-etry-and-saved-presentation-chromium/tall-normal-rectangles.json",
+    "kind": "final-clean",
+    "sha256": "cdce3b9e623776f9b2adad60cf8f54ae8c36de9a314be8dbb873824fabb2c9c2"
+  },
+  {
+    "file": "minimal-frames.json",
+    "source": "target/web-runs/e2e-_retnd41/results/chart-readability-native-p-5138c-stable-frames-and-real-help-chromium/minimal-frames.json",
+    "kind": "final-clean",
+    "sha256": "d84917e91193cd6e0697590a816882bcb02449036685137227494968aec941e2"
+  },
+  {
+    "file": "before-manifest.json",
+    "source": ".audit/layout-finish/evidence/readability-before/manifest.json",
+    "kind": "historical-before",
+    "sha256": "ef65f8d56eba00937b0b7acbad2a26253cc0c66f2fa42749e3d93437703bfbd3"
+  },
+  {
+    "file": "before-rectangles.json",
+    "source": ".audit/layout-finish/evidence/readability-before/rectangles.json",
+    "kind": "historical-before",
+    "sha256": "dd8bd41427c4826601179efe942474b9127a3982c191b7569d2cdf2ec1b43474"
+  }
+]
