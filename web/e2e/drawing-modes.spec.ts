@@ -1,6 +1,6 @@
 import type { Page } from "@playwright/test";
 import { cell, chartOf, expect, test } from "./harness";
-import { bodyAlong, chartPoint, drawings, mirror, open, pickTool, settledMirror } from "./drawing-probe";
+import { bodyAlong, chartPoint, drawings, expandDock, mirror, open, pickTool, settledMirror } from "./drawing-probe";
 
 type Point = { x: number; y: number };
 
@@ -27,6 +27,7 @@ async function middleOf(page: Page, id: string): Promise<Point> {
 const eraserButton = (page: Page) => page.getByRole("navigation", { name: "드로잉 도구" }).getByRole("button", { name: "지우개", exact: true });
 
 async function pickEraser(page: Page) {
+  await expandDock(page);
   await eraserButton(page).click();
   await expect(eraserButton(page)).toHaveAttribute("aria-pressed", "true");
 }
@@ -45,12 +46,14 @@ test("지우개: 클릭·끌기·Ctrl+끌기로 지우고, 잠긴 드로잉은 �
   if (!first || !second) throw new Error("추세선 둘이 저장되지 않았습니다");
   const both = await ids();
 
+  await expandDock(page);
   await expect(eraserButton(page)).toHaveAttribute("aria-pressed", "false");
   await pickEraser(page);
   await expect(page.getByRole("button", { name: "선택 도구", exact: true })).toHaveAttribute("aria-pressed", "false");
   const firstMiddle = await middleOf(page, first);
   await page.mouse.click(firstMiddle.x, firstMiddle.y);
   await expect.poll(ids).toEqual([second]);
+  await expandDock(page);
   await expect(eraserButton(page)).toHaveAttribute("aria-pressed", "false");
   await page.keyboard.press("Control+z");
   await expect.poll(ids).toEqual(both);
@@ -71,6 +74,7 @@ test("지우개: 클릭·끌기·Ctrl+끌기로 지우고, 잠긴 드로잉은 �
   await pickEraser(page);
   await drag(page, await middleOf(page, first), await middleOf(page, second), 30);
   await expect.poll(ids).toEqual([first]);
+  await expandDock(page);
   await expect(eraserButton(page)).toHaveAttribute("aria-pressed", "false");
 
   await pickTool(page, "도형", "붓");
@@ -96,6 +100,7 @@ test("지우개: 클릭·끌기·Ctrl+끌기로 지우고, 잠긴 드로잉은 �
   expect((await mirror(page)).map((d) => d.points)).toEqual(before.map((d) => d.points));
   await expect.poll(async () => drawings(scenario)).toEqual(saved);
 
+  await expandDock(page);
   await page.getByRole("button", { name: "드로잉 단축키 도움말", exact: true }).click();
   const help = page.getByRole("dialog", { name: "드로잉 단축키" });
   await expect(help).toContainText("시연 커서");

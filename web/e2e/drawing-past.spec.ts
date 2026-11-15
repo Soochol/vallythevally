@@ -1,7 +1,7 @@
 import type { DrawingInput } from "../src/api/generated/DrawingInput";
 import type { DrawingTool } from "../src/api/generated/DrawingTool";
 import { cell, chartOf, expect, test } from "./harness";
-import { settledMirror } from "./drawing-probe";
+import { settledMirror, expandDock } from "./drawing-probe";
 
 const SYMBOL = "IDX:001";
 
@@ -25,7 +25,7 @@ test("불러온 첫 봉보다 과거의 점이 있는 드로잉은 과거 봉을
   await expect(chart).toHaveAttribute("data-first-bar-t", String(first));
   const list = page.getByRole("region", { name: "개체 목록" });
   const select = async (name: string) => {
-    if (!(await list.isVisible())) await page.getByRole("button", { name: "개체 목록 열기", exact: true }).click();
+    if (!(await list.isVisible())) await (await expandDock(page)).getByRole("button", { name: "개체 목록 열기", exact: true }).click();
     await list.getByRole("button", { name: `고르기: ${name}`, exact: true }).click();
   };
   const screens = async () => {
@@ -65,7 +65,7 @@ test("첫 점이 불러온 봉보다 한참 과거인 드로잉을 개체 목록
 
   await page.goto("/");
   await expect(chartOf(cell(page))).toHaveAttribute("data-first-bar-t", String(recent.bars[0]!.t));
-  await page.getByRole("button", { name: "개체 목록 열기", exact: true }).click();
+  await (await expandDock(page)).getByRole("button", { name: "개체 목록 열기", exact: true }).click();
   const before = (await settledMirror(page)).find((m) => m.id === trend.id)!.points[1]!;
   await page.getByRole("region", { name: "개체 목록" }).getByRole("button", { name: "고르기: 추세선", exact: true }).click();
   await expect.poll(async () => (await settledMirror(page)).find((m) => m.id === trend.id)?.selected).toBe(true);
@@ -85,7 +85,7 @@ for (const [where, days] of [["화면 안", 60], ["화면 왼쪽 밖", 300]] as 
 
   await page.goto("/");
   await expect(chartOf(cell(page))).toHaveAttribute("data-first-bar-t", String(recent.bars[0]!.t));
-  await page.getByRole("button", { name: "개체 목록 열기", exact: true }).click();
+  await (await expandDock(page)).getByRole("button", { name: "개체 목록 열기", exact: true }).click();
   const before = (await settledMirror(page)).find((m) => m.id === trend.id)!.points[0]!;
   expect(before.x > 0).toBe(where === "화면 안");
   await page.getByRole("region", { name: "개체 목록" }).getByRole("button", { name: "고르기: 추세선", exact: true }).click();

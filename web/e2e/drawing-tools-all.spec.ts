@@ -1,10 +1,21 @@
 import type { Page } from "@playwright/test";
 import { cell, chartOf, expect, saveChartShare, SEARCH_BUTTON_TITLE, test, type Scenario } from "./harness";
-import { bodyAlong, chartPoint, drawings, mirror, open, pickTool } from "./drawing-probe";
+import { bodyAlong, chartPoint, drawings, expandDock, mirror, open, pickTool as pickExpanded } from "./drawing-probe";
 import { TOOLS, toolsByGroup } from "../src/chart/drawings/tools";
 import type { Tool } from "../src/chart/drawings/toolSpec";
 
 type At = readonly [number, number];
+
+async function collapseDock(page: Page) {
+  await page.mouse.move(5, 5);
+  await cell(page).focus();
+  await expect(page.getByRole("navigation", { name: "드로잉 도구" }).locator(".draw-pill")).toHaveAttribute("aria-expanded", "false");
+}
+
+async function pickTool(page: Page, group: string, label: string) {
+  await collapseDock(page);
+  await pickExpanded(page, group, label);
+}
 
 const GROUP_LABEL: Record<Tool["group"], string> = { line: "선", fib: "피보나치·갠", shape: "도형", note: "주석", measure: "측정", pattern: "패턴" };
 const COLUMNS = 9;
@@ -95,11 +106,12 @@ test(`모든 도구: 도구 막대에서 골라 놓고, 새로고침 뒤에도 $
   expect(await drawings(scenario)).toEqual(saved);
   await page.screenshot({ path: testInfo.outputPath("all-tools-1280.png") });
 
-  await page.getByRole("button", { name: "개체 목록 열기", exact: true }).click();
+  await expandDock(page); await page.getByRole("button", { name: "개체 목록 열기", exact: true }).click();
   const list = page.getByRole("region", { name: "개체 목록" });
   await expect(list.locator(".draw-object-row")).toHaveCount(TOOLS.length);
   for (const tool of TOOLS) await expect(list.getByRole("button", { name: `고르기: ${tool.label}`, exact: true })).toHaveCount(1);
 
+  await collapseDock(page);
   const chart = chartOf(cell(page));
   const pane = await chart.evaluate((el) => {
     const r = [...el.querySelectorAll("canvas")].map((c) => c.getBoundingClientRect()).sort((a, b) => b.width * b.height - a.width * a.height)[0]!;
@@ -120,7 +132,7 @@ test(`모든 도구: 휴대폰 폭에서는 ${TOOLS.length}개가 보이고 편�
   await page.setViewportSize({ width: 1280, height: 800 });
   await open(page);
   await placeAll(page, scenario);
-  await page.getByRole("button", { name: "개체 목록 열기", exact: true }).click();
+  await expandDock(page); await page.getByRole("button", { name: "개체 목록 열기", exact: true }).click();
   await page.getByRole("region", { name: "개체 목록" }).getByRole("button", { name: "고르기: 추세선", exact: true }).click();
   await expect.poll(async () => (await mirror(page)).find((d) => d.tool === "trendline")?.handles.length).toBe(2);
   await page.setViewportSize({ width: 390, height: 844 });
@@ -151,6 +163,10 @@ for (const width of [1280, 1024, 800]) {
     await open(page);
     const bar = page.getByRole("navigation", { name: "드로잉 도구" });
     const chart = (await chartOf(cell(page)).boundingBox())!;
+    const pill = (await bar.boundingBox())!;
+    expect(pill.x).toBeGreaterThanOrEqual(chart.x);
+    expect(pill.x + pill.width).toBeLessThanOrEqual(chart.x + chart.width);
+    await expandDock(page);
     const box = (await bar.boundingBox())!;
     expect(box.x).toBeGreaterThanOrEqual(chart.x);
     expect(box.x + box.width).toBeLessThanOrEqual(chart.x + chart.width);
@@ -179,6 +195,7 @@ for (const width of [1280, 1024, 800]) {
     expect((await bar.boundingBox())!).toEqual(box);
     const viewport = page.viewportSize()!;
     for (const group of menuGroups().map(([g]) => GROUP_LABEL[g])) {
+      await expandDock(page);
       const toggle = bar.getByRole("button", { name: `${group} 도구 펼치기`, exact: true });
       await toggle.scrollIntoViewIfNeeded();
       await toggle.click();
@@ -203,6 +220,7 @@ test("도구 막대: 높이 300px 창에서도 그룹 메뉴는 창 안에 있�
   const bar = page.getByRole("navigation", { name: "드로잉 도구" });
   for (const [group, tools] of menuGroups()) {
     const label = GROUP_LABEL[group];
+    await expandDock(page);
     await bar.getByRole("button", { name: `${label} 도구 펼치기`, exact: true }).click();
     const menu = page.getByRole("menu", { name: `${label} 도구` });
     await expect(menu).toBeVisible();
@@ -218,6 +236,7 @@ test("도구 막대: 높이 300px 창에서도 그룹 메뉴는 창 안에 있�
     const item = menu.getByRole("menuitem").filter({ hasText: last.label });
     await expect(item).toBeInViewport({ ratio: 1 });
     await item.click();
+    await expandDock(page);
     await expect(bar.getByRole("button", { name: last.label, exact: true })).toHaveAttribute("aria-pressed", "true");
     await page.keyboard.press("Escape");
   }
@@ -227,6 +246,7 @@ test("도구 막대: 단축키가 없는 도구는 제목과 메뉴에 빈 단�
   await open(page);
   const bar = page.getByRole("navigation", { name: "드로잉 도구" });
   for (const [group, tools] of menuGroups()) {
+    await expandDock(page);
     await bar.getByRole("button", { name: `${GROUP_LABEL[group]} 도구 펼치기`, exact: true }).click();
     const menu = page.getByRole("menu", { name: `${GROUP_LABEL[group]} 도구` });
     for (const tool of tools) {
@@ -239,6 +259,7 @@ test("도구 막대: 단축키가 없는 도구는 제목과 메뉴에 빈 단�
       await expect(bar.getByRole("button", { name: tool.label, exact: true })).not.toHaveAttribute("title", /\(\)/);
     }
   }
+  await expandDock(page);
   const pinned = bar.getByRole("button", { name: /고정 도구$/ });
   await expect(pinned.first()).toBeVisible();
   for (const button of await pinned.all()) await expect(button).not.toHaveAttribute("title", /\(\)/);
@@ -248,8 +269,10 @@ test("도구 막대: 단축키로 고른 도구를 그룹 버튼이 기억한다
   await open(page);
   const bar = page.getByRole("navigation", { name: "드로잉 도구" });
   await cell(page).focus(); await page.keyboard.press("Alt+j");
+  await expandDock(page);
   await expect(bar.getByRole("button", { name: "수평 반직선", exact: true })).toHaveAttribute("aria-pressed", "true");
   await page.keyboard.press("Escape");
+  await expandDock(page);
   await expect(bar.getByRole("button", { name: "선택 도구", exact: true })).toHaveAttribute("aria-pressed", "true");
   await expect(bar.getByRole("button", { name: "수평 반직선", exact: true })).toBeVisible();
 });
@@ -284,7 +307,7 @@ test("작은 막대: 위쪽 드로잉을 골라도 도크를 가리지 않는다
     await page.keyboard.press("Escape");
   }
   expect(await drawings(scenario)).toHaveLength(3);
-  await page.getByRole("button", { name: "개체 목록 열기", exact: true }).click();
+  await expandDock(page); await page.getByRole("button", { name: "개체 목록 열기", exact: true }).click();
   const list = page.getByRole("region", { name: "개체 목록" });
   await list.getByRole("button", { name: "모든 드로잉 숨기기", exact: true }).click();
   await list.getByRole("button", { name: "고르기: 추세선", exact: true }).first().click();
@@ -307,7 +330,7 @@ test("작은 막대: 이 봉 주기에 그려지지 않는 드로잉을 골라�
   await expect.poll(async () => (await drawings(scenario))[0]!.periods?.includes("D")).toBe(false);
   await page.keyboard.press("Escape");
   await expect.poll(async () => (await mirror(page)).length).toBe(0);
-  await page.getByRole("button", { name: "개체 목록 열기", exact: true }).click();
+  await expandDock(page); await page.getByRole("button", { name: "개체 목록 열기", exact: true }).click();
   await page.getByRole("region", { name: "개체 목록" }).getByRole("button", { name: "고르기: 추세선", exact: true }).click();
   const style = page.getByRole("toolbar", { name: "드로잉 스타일" });
   await expect(style).toBeVisible();
@@ -366,7 +389,7 @@ test("여러 도구: 다른 그룹의 드로잉 셋을 상자로 골라 함께 �
 
   await pickTool(page, "측정", "날짜 범위"); await clickAt(page, [[0.74, 0.7], [0.8, 0.7]]);
   await expect.poll(count).toBe(4);
-  await page.getByRole("button", { name: "개체 목록 열기", exact: true }).click();
+  await expandDock(page); await page.getByRole("button", { name: "개체 목록 열기", exact: true }).click();
   const list = page.getByRole("region", { name: "개체 목록" });
   await list.getByRole("button", { name: "고르기: 말풍선", exact: true }).click();
   await list.getByRole("button", { name: "고르기: 날짜 범위", exact: true }).click({ modifiers: ["Control"] });
@@ -422,8 +445,9 @@ test.describe("봉을 읽는 도구", () => {
     const expectPainted = async (where: string) => {
       await expect.poll(shownTools).toEqual(BAR_TOOLS);
       const list = page.getByRole("region", { name: "개체 목록" });
-      if (!(await list.isVisible())) await page.getByRole("button", { name: "개체 목록 열기", exact: true }).click();
+      if (!(await list.isVisible())) { await expandDock(page); await page.getByRole("button", { name: "개체 목록 열기", exact: true }).click(); }
       await list.hover();
+      await collapseDock(page);
       const pane = await chartOf(cell(page)).evaluate((el) => {
         const r = [...el.querySelectorAll("canvas")].map((c) => c.getBoundingClientRect()).sort((a, b) => b.width * b.height - a.width * a.height)[0]!;
         return { x: r.x, y: r.y, width: r.width, height: r.height };

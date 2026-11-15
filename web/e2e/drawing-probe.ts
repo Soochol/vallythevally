@@ -27,8 +27,26 @@ export async function open(page: Page) {
   await expect(chartOf(cell(page))).toHaveAttribute("data-bar-count", /^[1-9]\d*$/);
 }
 
+export const drawingDock = (page: Page) => page.getByRole("navigation", { name: "드로잉 도구" });
+
+export async function expandDock(page: Page) {
+  const bar = drawingDock(page);
+  const pill = bar.locator(".draw-pill");
+  await bar.hover();
+  await expect(pill).toHaveAttribute("aria-expanded", "true");
+  await expect(bar.getByRole("button", { name: "드로잉 도구 막대 옮기기", exact: true })).toBeVisible();
+  let last = "";
+  await expect.poll(async () => {
+    const now = JSON.stringify(await bar.boundingBox());
+    const same = now === last;
+    last = now;
+    return same;
+  }).toBe(true);
+  return bar;
+}
+
 export async function pickTool(page: Page, group: string, label: string) {
-  const bar = page.getByRole("navigation", { name: "드로잉 도구" });
+  const bar = await expandDock(page);
   const toggle = bar.getByRole("button", { name: `${group} 도구 펼치기`, exact: true });
   if (await toggle.count()) {
     await toggle.click();
@@ -36,6 +54,7 @@ export async function pickTool(page: Page, group: string, label: string) {
   } else {
     await bar.getByRole("button", { name: label, exact: true }).click();
   }
+  await expandDock(page);
   await expect(bar.getByRole("button", { name: label, exact: true })).toHaveAttribute("aria-pressed", "true");
 }
 

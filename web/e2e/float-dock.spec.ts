@@ -2,7 +2,7 @@ import { writeFile } from "node:fs/promises";
 import type { Locator, Page, TestInfo } from "@playwright/test";
 import { cell, chartOf, expect, test } from "./harness";
 import { installChartProbe } from "./chart-probe";
-import { pickTool, settledMirror } from "./drawing-probe";
+import { expandDock, pickTool, settledMirror } from "./drawing-probe";
 
 test.use({ clockStart: "20261109100030", viewport: { width: 1440, height: 900 } });
 
@@ -34,6 +34,7 @@ async function drag(page: Page, from: Point, to: Point) {
 }
 
 async function moveDock(page: Page, to: Point): Promise<Box> {
+  await expandDock(page);
   const bar = await boxOf(dock(page));
   const grip = await boxOf(dock(page).getByRole("button", { name: "드로잉 도구 막대 옮기기", exact: true }));
   const from = { x: grip.x + grip.width / 2, y: grip.y + grip.height / 2 };
@@ -56,6 +57,7 @@ async function styleGeometry(page: Page) {
   await expect.poll(async () => (await settledMirror(page)).filter((drawing) => drawing.selected && drawing.tool === "trendline").length).toBe(1);
   const style = page.getByRole("toolbar", { name: "드로잉 스타일", exact: true });
   await expect(style).toBeVisible();
+  await expandDock(page);
   const styleBox = await settledBox(style);
   const chart = await boxOf(chartOf(cell(page)));
   const selected = (await settledMirror(page)).find((drawing) => drawing.selected && drawing.tool === "trendline")!;
@@ -95,6 +97,7 @@ async function open(page: Page) {
 
 test("드로잉 도구는 활성 칸 위쪽 가운데의 도크이고 고른 도구는 강조색으로 채우며 펼침 메뉴는 도크 아래로 열린다", async ({ page }, info) => {
   await open(page);
+  await expandDock(page);
   const bar = await boxOf(dock(page));
   const chart = await boxOf(cell(page));
   expect(Math.abs(bar.x + bar.width / 2 - (chart.x + chart.width / 2))).toBeLessThanOrEqual(1);
@@ -107,11 +110,12 @@ test("드로잉 도구는 활성 칸 위쪽 가운데의 도크이고 고른 도
   expect(venues.x + venues.width).toBeLessThan(bar.x);
   const pointer = dock(page).getByRole("button", { name: "선택 도구", exact: true });
   await expect(pointer).toHaveCSS("background-color", "rgb(199, 243, 107)");
-  await dock(page).getByRole("button", { name: "추세선", exact: true }).click();
+  await (await expandDock(page)).getByRole("button", { name: "추세선", exact: true }).click();
   await expect(dock(page).getByRole("button", { name: "추세선", exact: true })).toHaveCSS("background-color", "rgb(199, 243, 107)");
   await expect(pointer).not.toHaveCSS("background-color", "rgb(199, 243, 107)");
   await page.keyboard.press("Escape");
 
+  await expandDock(page);
   await dock(page).getByRole("button", { name: "선 도구 펼치기", exact: true }).click();
   const menu = page.getByRole("menu", { name: "선 도구", exact: true });
   await expect(menu).toBeVisible();
@@ -123,10 +127,13 @@ test("드로잉 도구는 활성 칸 위쪽 가운데의 도크이고 고른 도
   await expect(dock(page).getByRole("button", { name: "수평선", exact: true })).toHaveAttribute("aria-pressed", "true");
 });
 
-test("좁고 낮은 창에서도 도크는 창 안에 있고 가격축 방식 버튼과 겹치지 않으며 도구를 끝까지 누를 수 있다", async ({ page }) => {
+test("좁고 낮은 창에서도 도크는 창 안에 있고 가격축 방식 버튼과 겹치지 않으며 도구를 끝까지 누를 수 있다", async ({ page, scenario }) => {
+  const st = scenario.documents.uiState();
+  scenario.documents.saveUiState({ ...st, drawing: { ...scenario.documents.uiPrefs().drawing, keepDrawing: true }, revision: st.revision + 1 });
   await open(page);
   for (const size of [{ width: 1024, height: 768 }, { width: 1280, height: 300 }]) {
     await page.setViewportSize(size);
+    await expandDock(page);
     const bar = await boxOf(dock(page));
     const axis = await boxOf(cell(page).getByRole("group", { name: "가격축 방식" }));
     expect(bar.x).toBeGreaterThanOrEqual(0);
@@ -135,7 +142,7 @@ test("좁고 낮은 창에서도 도크는 창 안에 있고 가격축 방식 �
     const venues = await boxOf(cell(page).getByRole("group", { name: "거래소", exact: true }));
     expect(venues.y >= bar.y + bar.height || venues.x + venues.width < bar.x).toBe(true);
     expect(await dock(page).evaluate((node) => node.scrollWidth - node.clientWidth)).toBe(0);
-    await dock(page).getByRole("button", { name: "드로잉 단축키 도움말", exact: true }).click();
+    await (await expandDock(page)).getByRole("button", { name: "드로잉 단축키 도움말", exact: true }).click();
     await expect(page.getByRole("dialog", { name: "드로잉 단축키", exact: true })).toBeVisible();
     await page.keyboard.press("Escape");
     expect(await page.evaluate(() => [document.documentElement.scrollWidth - innerWidth, document.documentElement.scrollHeight - innerHeight])).toEqual([0, 0]);
@@ -149,7 +156,7 @@ test.describe("selected drawing in a 1024×768 pane", () => {
     await page.addInitScript(installChartProbe);
     await open(page);
     await expect(chartOf(cell(page))).toHaveAttribute("data-bar-count", /^[1-9]\d*$/);
-    const start = await settledBox(dock(page));
+    const start = await settledBox(await expandDock(page));
     const pane = await paneOf(page);
     const bar = await moveDock(page, { x: pane.x + (pane.width - start.width) / 2, y: pane.y + 40 });
     await pickTool(page, "선", "추세선");
@@ -171,7 +178,7 @@ test.describe("selected drawing in a short 1024×330 pane", () => {
     await expect(chartOf(cell(page))).toHaveAttribute("data-bar-count", /^[1-9]\d*$/);
     await pickTool(page, "선", "추세선");
     const pane = await paneOf(page);
-    const start = await settledBox(dock(page));
+    const start = await settledBox(await expandDock(page));
     await drag(page, { x: pane.x + pane.width * 0.45, y: pane.y + 92 }, { x: pane.x + pane.width * 0.55, y: pane.y + 102 });
     await expect.poll(async () => (await settledMirror(page)).some((drawing) => drawing.selected)).toBe(true);
     await moveDock(page, { x: pane.x + (pane.width - start.width) / 2, y: pane.y + 48 });
@@ -188,7 +195,7 @@ test.describe("selected drawing in a short 1024×330 pane", () => {
     await open(page);
     await expect(chartOf(cell(page))).toHaveAttribute("data-bar-count", /^[1-9]\d*$/);
     const pane = await paneOf(page);
-    const start = await settledBox(dock(page));
+    const start = await settledBox(await expandDock(page));
     await moveDock(page, { x: pane.x + (pane.width - start.width) / 2, y: pane.y + 48 });
     await pickTool(page, "선", "추세선");
     await drag(page, { x: pane.x + 320, y: pane.y + 20 }, { x: pane.x + 620, y: pane.y + 110 });

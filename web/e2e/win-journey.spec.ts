@@ -423,6 +423,8 @@ for (const mode of MODES) {
       await expect(layoutMenu(page)).toBeVisible();
       await page.keyboard.press("Escape");
       const tools = page.getByRole("navigation", { name: "드로잉 도구" });
+      await tools.hover();
+      await expect(tools.getByRole("button", { name: "드로잉 단축키 도움말" })).toBeVisible();
       for (const button of await tools.getByRole("button").all()) {
         if (!await button.isVisible() || !await button.isEnabled()) continue;
         await button.scrollIntoViewIfNeeded();

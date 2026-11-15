@@ -1,6 +1,7 @@
 import type { Page } from "@playwright/test";
 import type { Screen } from "../src/api/generated/Screen";
 import { cell, expect, SEARCH_BUTTON_TITLE, test, type Scenario } from "./harness";
+import { expandDock } from "./drawing-probe";
 import { openScreener, panel } from "./screener-page";
 import { expandEditor, screenAction, sentenceEditor } from "./sentence-editor";
 
@@ -86,7 +87,7 @@ test("조건 문장은 번호 배지와 알약 낱말로 보이고 지우기 확
 
 test("고른 드로잉의 작은 막대는 설정·복제·잠금·지우기 순서다", async ({ page }) => {
   await open(page);
-  await page.getByRole("navigation", { name: "드로잉 도구" }).getByRole("button", { name: "추세선", exact: true }).click();
+  await (await expandDock(page)).getByRole("button", { name: "추세선", exact: true }).click();
   const box = (await cell(page).boundingBox())!;
   await page.mouse.click(box.x + box.width * 0.3, box.y + box.height * 0.6);
   await page.mouse.click(box.x + box.width * 0.6, box.y + box.height * 0.4);

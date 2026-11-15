@@ -1,6 +1,7 @@
 import type { BrowserContext, Locator, Page } from "@playwright/test";
 import { cell, chartOf, expect, test, type Scenario } from "./harness";
 import { TOOLS } from "../src/chart/drawings/tools";
+import { expandDock } from "./drawing-probe";
 
 test.use({ clockStart: "20261109100030" });
 
@@ -23,7 +24,6 @@ async function load(context: BrowserContext, scenario: Scenario, width: number, 
   await page.setViewportSize({ width, height: 900 });
   await page.goto(`/?symbol=${symbol}`);
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
-  if (pinned.length > 0) await expect(dock(page).getByRole("button", { name: /고정 도구$/ }).first()).toBeVisible();
   await settled(page);
   return page;
 }
@@ -75,9 +75,13 @@ for (const symbol of SYMBOLS) for (const width of [1440, 1280, 1024]) {
       const page = await load(context, scenario, width, symbol, pinned.map((t) => t.tool));
       const label = `고정 ${count}개`;
       expect(await legendRows(page), `${label}: 범례 위치`).toEqual(before);
+      const pill = (await dock(page).boundingBox())!;
+      const pillBox = { left: pill.x, top: pill.y, right: pill.x + pill.width, bottom: pill.y + pill.height };
+      for (const row of await legendRows(page)) expect(meets(pillBox, row), `${label}: 접힌 알약과 범례 줄 겹침`).toBe(false);
+      await expandDock(page);
+      expect(await legendRows(page), `${label}: 펼친 뒤 범례 위치`).toEqual(before);
       const bar = (await dock(page).boundingBox())!;
       const barBox = { left: bar.x, top: bar.y, right: bar.x + bar.width, bottom: bar.y + bar.height };
-      for (const row of await legendRows(page)) expect(meets(barBox, row), `${label}: 범례 줄과 겹침`).toBe(false);
       expect(await dock(page).evaluate((el) => el.scrollWidth - el.clientWidth), `${label}: 도구 막대 넘침`).toBe(0);
       const chart = (await chartOf(cell(page)).boundingBox())!;
       expect(barBox.left, label).toBeGreaterThanOrEqual(chart.x);
@@ -111,6 +115,7 @@ for (const symbol of SYMBOLS) for (const width of [1440, 1280, 1024]) {
 
 test("고정 도구: 접힌 메뉴는 첫 도구에 포커스를 두고 별표 없이 열리며, 창 폭이 바뀌어도 메뉴가 점 아래에 머문다", async ({ context, scenario }) => {
   const page = await load(context, scenario, 1100, "005930", TOOLS.slice(0, 14).map((t) => t.tool));
+  await expandDock(page);
   const dot = dock(page).getByRole("button", { name: "고정 도구 펼치기", exact: true });
   await dot.focus();
   await page.keyboard.press("Enter");
@@ -123,8 +128,9 @@ test("고정 도구: 접힌 메뉴는 첫 도구에 포커스를 두고 별표 �
   const narrowed = await resizedFrame(page, 1024, menu, dot);
   expect(narrowed.menu, "창 폭을 줄인 프레임의 접힌 메뉴").toBe(narrowed.anchor);
   await expect.poll(async () => leftOf(await menu.boundingBox()) - leftOf(await dot.boundingBox())).toBe(0);
-  const group = dock(page).getByRole("button", { name: "선 도구 펼치기", exact: true });
   await page.keyboard.press("Escape");
+  await expandDock(page);
+  const group = dock(page).getByRole("button", { name: "선 도구 펼치기", exact: true });
   await group.click();
   const lines = page.getByRole("menu", { name: "선 도구", exact: true });
   const star = lines.getByRole("menuitemcheckbox").last();

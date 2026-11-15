@@ -1,6 +1,6 @@
 import type { Page } from "@playwright/test";
 import { cell, chartOf, expect, test } from "./harness";
-import { chartPoint, drawings, mirror, open, pickTool } from "./drawing-probe";
+import { chartPoint, drawings, mirror, open, pickTool, expandDock, drawingDock } from "./drawing-probe";
 
 type At = readonly [number, number];
 
@@ -43,6 +43,7 @@ test("line tools: each toolbar pick saves its tool and point count and stays in 
   const errors = watchErrors(page);
   await open(page);
   for (const [index, { label, tool, clicks }] of LINE_TOOLS.entries()) {
+    await drawingDock(page).hover();
     await pickTool(page, "선", label);
     await clickAll(page, clicks);
     await expect.poll(async () => (await drawings(scenario)).length).toBe(index + 1);
@@ -74,13 +75,13 @@ test("line tools: each toolbar pick saves its tool and point count and stays in 
 test("line tools: Alt+J picks the horizontal ray and Shift+V picks the vertical line", async ({ page, scenario }) => {
   const errors = watchErrors(page);
   await open(page);
-  const bar = page.getByRole("navigation", { name: "드로잉 도구" });
   for (const { keys, label, tool, at } of [
     { keys: "Alt+j", label: "수평 반직선", tool: "hray", at: [0.4, 0.35] as At },
     { keys: "Shift+V", label: "수직선", tool: "vline", at: [0.6, 0.45] as At },
   ]) {
     await cell(page).focus();
     await page.keyboard.press(keys);
+    const bar = await expandDock(page);
     await expect(bar.getByRole("button", { name: label, exact: true })).toHaveAttribute("aria-pressed", "true");
     await clickAll(page, [at]);
     await expect.poll(async () => (await drawings(scenario)).at(-1)?.tool).toBe(tool);

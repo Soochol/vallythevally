@@ -2,7 +2,7 @@ import type { Page } from "@playwright/test";
 import { isMinutePeriod } from "../src/lib/symbol";
 import { isVenue } from "../src/lib/venue";
 import { cell, chartOf, expect, test, type Scenario } from "./harness";
-import { chartPoint, drawings, mirror, open, pickTool, settledMirror } from "./drawing-probe";
+import { chartPoint, drawings, mirror, open, pickTool, settledMirror, expandDock, drawingDock } from "./drawing-probe";
 
 async function dragBetween(page: Page, from: [number, number], to: [number, number]) {
   const a = await chartPoint(page, ...from);
@@ -28,7 +28,7 @@ test("측정 그룹 네 도구를 골라 놓고, 포지션 목표가 핸들을 �
   const errors: string[] = [];
   page.on("pageerror", (e) => errors.push(e.message));
   await open(page);
-  const bar = page.getByRole("navigation", { name: "드로잉 도구" });
+  const bar = await expandDock(page);
   await expect(bar.getByRole("button", { name: "측정 도구 펼치기", exact: true })).toBeVisible();
 
   await pickTool(page, "측정", "가격 범위");
@@ -193,7 +193,7 @@ test("날짜·가격 범위, 기준봉 VWAP, 구간 거래량 프로파일을 �
   const all = [["avwap", true], ["datepricerange", true], ["volprofile", true]];
   await choosePeriod(page, "주");
   await expect.poll(async () => (await placed()).sort()).toEqual(all);
-  await page.getByRole("button", { name: "개체 목록 열기", exact: true }).click();
+  await (await expandDock(page)).getByRole("button", { name: "개체 목록 열기", exact: true }).click();
   const list = page.getByRole("region", { name: "개체 목록" });
   const pane = await chartOf(cell(page)).evaluate((el) => {
     const r = [...el.querySelectorAll("canvas")].map((c) => c.getBoundingClientRect()).sort((a, b) => b.width * b.height - a.width * a.height)[0]!;
@@ -201,6 +201,8 @@ test("날짜·가격 범위, 기준봉 VWAP, 구간 거래량 프로파일을 �
   });
   const shot = () => page.screenshot({ clip: pane, mask: [page.getByRole("navigation", { name: "드로잉 도구" }), cell(page).locator(".chart-legend")] });
   await expect.poll(() => textsOf(page, profile.id)).toEqual([expect.stringMatching(/^\d+분봉 기준$/)]);
+  await page.mouse.move(5, 5);
+  await expect(drawingDock(page).locator(".draw-pill")).toHaveAttribute("aria-expanded", "false");
   const painted = await shot();
   for (const label of ["날짜·가격 범위", "기준봉 VWAP", "구간 거래량 프로파일"]) {
     await list.getByRole("button", { name: `${label} 숨기기`, exact: true }).click();

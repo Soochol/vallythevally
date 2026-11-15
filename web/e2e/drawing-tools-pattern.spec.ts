@@ -1,6 +1,6 @@
 import type { Page } from "@playwright/test";
 import { cell, chartOf, expect, test } from "./harness";
-import { chartPoint, drawings, mirror, open, pickTool } from "./drawing-probe";
+import { chartPoint, drawings, mirror, open, pickTool, expandDock } from "./drawing-probe";
 
 type At = readonly [number, number];
 
@@ -26,7 +26,7 @@ test("패턴 도구: 네 도구를 골라 점을 다 찍으면 저장되고, 머
   const errors: string[] = [];
   page.on("pageerror", (e) => errors.push(e.message));
   await open(page);
-  const bar = page.getByRole("navigation", { name: "드로잉 도구" });
+  const bar = await expandDock(page);
   await expect(bar.getByRole("button", { name: "패턴 도구 펼치기", exact: true })).toBeVisible();
 
   await pickTool(page, "패턴", "엘리엇 충격 파동");

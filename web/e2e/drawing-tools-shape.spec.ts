@@ -1,6 +1,6 @@
 import type { Page } from "@playwright/test";
 import { cell, chartOf, expect, test } from "./harness";
-import { chartPoint, drawings, mirror, open, pickTool } from "./drawing-probe";
+import { chartPoint, drawings, mirror, open, pickTool, expandDock } from "./drawing-probe";
 
 const KST = 9 * 3600;
 const DAY = 86400;
@@ -53,7 +53,7 @@ test("도형 도구: 사각형·타원·꺾은선·붓을 그리고 새로고침
   expect(polyline.tool).toBe("path");
   expect(polyline.points).toHaveLength(4);
 
-  await expect(page.getByRole("button", { name: "자석", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await expect((await expandDock(page)).getByRole("button", { name: "자석", exact: true })).toHaveAttribute("aria-pressed", "true");
   await pickTool(page, "도형", "붓");
   const trail = await Promise.all(([[0.46, 0.6], [0.52, 0.72], [0.58, 0.58], [0.64, 0.74], [0.7, 0.62]] as const).map(([x, y]) => chartPoint(page, x, y)));
   await page.mouse.move(trail[0]!.x, trail[0]!.y);
@@ -88,7 +88,7 @@ test("도형 도구: 사각형·타원·꺾은선·붓을 그리고 새로고침
 
 test("꺾은선: 두 번 누르는 사이 마우스가 1px 움직여도 꼭짓점을 더하지 않는다", async ({ page, scenario }) => {
   await open(page);
-  await expect(page.getByRole("button", { name: "자석", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await expect((await expandDock(page)).getByRole("button", { name: "자석", exact: true })).toHaveAttribute("aria-pressed", "true");
   const [a, b, c] = await Promise.all(([[0.2, 0.6], [0.3, 0.75], [0.4, 0.6]] as const).map(([x, y]) => chartPoint(page, x, y)));
   const counts: number[] = [];
   for (let i = 0; i < 12; i++) {

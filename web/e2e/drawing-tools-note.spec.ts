@@ -1,6 +1,6 @@
 import type { Page } from "@playwright/test";
 import { cell, expect, test } from "./harness";
-import { chartPoint, drawings, mirror, open, pickTool } from "./drawing-probe";
+import { chartPoint, drawings, mirror, open, pickTool, expandDock } from "./drawing-probe";
 
 async function drag(page: Page, from: [number, number], to: [number, number]) {
   const a = await chartPoint(page, ...from); const b = await chartPoint(page, ...to);
@@ -50,7 +50,7 @@ test("주석 도구: 글자·말풍선·가격 라벨·화살표를 놓고 새�
   expect(saved.find((d) => d.tool === "pricelabel")!.points).toHaveLength(1);
   expect(saved.find((d) => d.tool === "arrow")!.points).toHaveLength(2);
 
-  await page.getByRole("button", { name: "개체 목록 열기", exact: true }).click();
+  await (await expandDock(page)).getByRole("button", { name: "개체 목록 열기", exact: true }).click();
   const list = page.getByRole("region", { name: "개체 목록" });
   for (const name of ["한글 메모", "실적 발표", "가격 라벨", "화살표"]) await expect(list.getByRole("button", { name: `고르기: ${name}`, exact: true })).toBeVisible();
 
@@ -78,7 +78,7 @@ test("주석 도구: 공백뿐인 글자는 자리 표시로 남고, 바깥을 �
   await editor.fill("   ");
   await editor.press("Enter");
   await expect(editor).toBeHidden();
-  await page.getByRole("button", { name: "개체 목록 열기", exact: true }).click();
+  await (await expandDock(page)).getByRole("button", { name: "개체 목록 열기", exact: true }).click();
   await expect(page.getByRole("region", { name: "개체 목록" }).getByRole("button", { name: "고르기: 글자", exact: true })).toBeVisible();
   expect((await drawings(scenario))[0]!.text).toBeNull();
 
