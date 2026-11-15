@@ -1,4 +1,3 @@
-import { CHART_CREDIT } from "../../chart/snapshot";
 import { useKiwoomStore } from "../../stores/kiwoom";
 import { Attribution } from "./attribution";
 import { ConnectionIndicator, useConnectionView } from "./ConnectionIndicator";
@@ -30,7 +29,7 @@ export function StatusBar() {
       <SaveStatus />
       <FinancialStatus />
       <span className="flex-1" />
-      <Attribution text={CHART_CREDIT} className="flex-none text-text-2 underline underline-offset-2" />
+      <Attribution icon className="flex flex-none items-center text-text-2 hover:text-text" />
     </footer>
   );
 }

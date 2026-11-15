@@ -26,14 +26,13 @@ export async function waitForUpdateToFinish(page: Page, lastDay: string) {
   await expect(storeLine(page)).toContainText(`KRX 일봉 · ${lastDay}까지`);
 }
 
-export async function expectRows(page: Page, expected: readonly (readonly [code: string, name: string, matchedDate: string])[]) {
+export async function expectRows(page: Page, expected: readonly (readonly [code: string, name: string])[]) {
   await openResultDetails(page);
   await expect(rows(page)).toHaveCount(expected.length);
   await expect.poll(() => rows(page).evaluateAll((li) => li.map((e) => e.getAttribute("data-code")))).toEqual(expected.map(([code]) => code));
-  for (const [i, [, name, matchedDate]] of expected.entries()) {
+  for (const [i, [, name]] of expected.entries()) {
     const row = rows(page).nth(i);
     await expect(row.locator("b")).toHaveText(name);
-    await expect(row.getByRole("cell").last()).toHaveText(matchedDate);
   }
 }
 

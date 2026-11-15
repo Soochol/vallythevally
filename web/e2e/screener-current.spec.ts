@@ -53,7 +53,7 @@ async function editRecent(page: Page, period: string, recent: number) {
   await savedEditor(dialog);
 }
 
-test("새 결과는 수동 실행으로만 반영하고 D/W/M 범위 편집·저장 뒤 날짜와 가격을 표시한다", async ({ scenario, screener, page }) => {
+test("새 결과는 수동 실행으로만 반영하고 D/W/M 범위 편집·저장 뒤 가격과 잠정을 표시한다", async ({ scenario, screener, page }) => {
   await prepare(scenario, page);
   const baseline = currentResult();
   await execute(page);
@@ -75,8 +75,7 @@ test("새 결과는 수동 실행으로만 반영하고 D/W/M 범위 편집·저
       await execute(page);
       await expect(rows(page).filter({ hasText: "110010" })).toContainText((old.close + 200).toLocaleString("ko-KR"));
       await expect(rows(page).filter({ hasText: "110010" }).getByLabel("잠정", { exact: true })).toBeVisible();
-      const expected = period === "M" ? "2026-11-01" : "2026-11-09";
-      await expect(rows(page).filter({ hasText: "110010" }).locator(`[title="첫 봉 조건 일치 ${expected}"]`)).toBeVisible();
+      await expect(rows(page).filter({ hasText: "110010" }).getByRole("cell")).toHaveCount(3);
     }
   }
   await editRecent(page, "D", 2);
@@ -94,7 +93,8 @@ test("새 결과는 수동 실행으로만 반영하고 D/W/M 범위 편집·저
   await saved;
   screener.showResult(intradayResult(baseline, old.close + 200, "2026-11-06"));
   await execute(page);
-  await expect(rows(page).filter({ hasText: "110010" }).locator('[title="첫 봉 조건 일치 2026-11-06"]')).toBeVisible();
+  await expect(rows(page).filter({ hasText: "110010" })).toContainText((old.close + 200).toLocaleString("ko-KR"));
+  await expect(rows(page).filter({ hasText: "110010" }).getByLabel("잠정", { exact: true })).toBeVisible();
   await expect(meta(page)).toContainText("수집 범위 (KST) 2026-11-09 10:");
   await expect(meta(page)).toContainText("기준 관측일 2026-11-09");
 });
@@ -222,7 +222,8 @@ for (const olderFails of [false, true]) {
     screener.showResult(intradayResult(currentResult(), 61_500, "2026-11-01"));
     await editRecent(page, "M", 2);
     await execute(page);
-    const matchedDate = "2026-11-01";
+    const newestPrice = rows(page).filter({ hasText: "110010" }).getByRole("cell").nth(1);
+    await expect(newestPrice).toHaveText("61,500*");
     const original = await meta(page).textContent();
     await page.getByRole("tablist", { name: "창 묶음 2" }).getByRole("tab", { name: "관심종목", exact: true }).click();
     await openScreener(page);
@@ -231,7 +232,7 @@ for (const olderFails of [false, true]) {
     await delivered;
     await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())));
     await expect(meta(page)).toHaveText(original!);
-    await expect(rows(page).filter({ hasText: "110010" }).locator(`[title="첫 봉 조건 일치 ${matchedDate}"]`)).toBeVisible();
+    await expect(newestPrice).toHaveText("61,500*");
     await expect(panel(page).getByRole("alert")).toHaveCount(0);
   });
 }
