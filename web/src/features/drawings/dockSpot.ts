@@ -31,13 +31,13 @@ export function avoidDock(left: number, tops: readonly number[], bar: Size, pane
   const within = (value: number, size: number, total: number) => Math.max(margin, Math.min(value, total - size - margin));
   const apart = (box: Edges, spot: Spot, gap: number) => spot.left + bar.width + gap <= box.left || spot.left >= box.right + gap || spot.top + bar.height + gap <= box.top || spot.top >= box.bottom + gap;
   const clear = (spot: Spot) => apart(dock, spot, clearance);
-  const open = (spot: Spot) => clear(spot) && (!drawing || apart(drawing, spot, 0));
-  const preferred = tops.find((top) => top === within(top, bar.height, pane.height) && clear({ left, top }));
-  if (preferred !== undefined) return { left, top: preferred };
-  const top = within(tops[0] ?? margin, bar.height, pane.height);
+  const natural = { left, top: tops.find((top) => top === within(top, bar.height, pane.height)) ?? within(tops[0] ?? margin, bar.height, pane.height) };
+  if (clear(natural)) return natural;
   const spots = [
     ...[...tops, dock.bottom + clearance, dock.top - bar.height - clearance].map((y) => ({ left, top: within(y, bar.height, pane.height) })),
-    ...[dock.right + clearance, dock.left - bar.width - clearance].filter((x) => x === within(x, bar.width, pane.width)).map((x) => ({ left: x, top })),
-  ];
-  return spots.find(open) ?? spots.find(clear) ?? { left, top };
+    ...[dock.right + clearance, dock.left - bar.width - clearance].filter((x) => x === within(x, bar.width, pane.width)).map((x) => ({ left: x, top: natural.top })),
+  ].filter(clear);
+  const free = drawing ? spots.filter((spot) => apart(drawing, spot, 0)) : spots;
+  const distance = (spot: Spot) => Math.hypot(spot.left - natural.left, spot.top - natural.top);
+  return (free.length ? free : spots).reduce<Spot | null>((best, spot) => best && distance(best) <= distance(spot) ? best : spot, null) ?? natural;
 }

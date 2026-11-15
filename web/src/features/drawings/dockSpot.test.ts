@@ -35,12 +35,12 @@ test("기본 자리에서 가로·세로 16px 안이면 기본 자리가 된다"
   expect(settleSpot({ left: 300, top: 30 }, home, area, bar)).toEqual(dockAtOf({ left: 300, top: 30 }, area, bar));
 });
 
-test("스타일 막대는 옮긴 막대와 8px 넘게 떨어진 드로잉 위 자리를 그대로 쓴다", () => {
+test("스타일 막대는 옮긴 막대와 8px 넘게 떨어진 드로잉 위 자리를 그대로 쓰고, 막히면 가장 가까운 빈자리로 비킨다", () => {
   const pane = { width: 900, height: 600 };
   const style = { width: 300, height: 38 };
   const dock = { left: 100, top: 400, right: 500, bottom: 440 };
   expect(avoidDock(150, [452, 560], style, pane, dock, null, 8, 8)).toEqual({ left: 150, top: 452 });
-  expect(avoidDock(150, [452, 640], style, pane, { ...dock, top: 492, bottom: 532 }, null, 8, 8)).toEqual({ left: 150, top: 554 });
+  expect(avoidDock(150, [452, 640], style, pane, { ...dock, top: 492, bottom: 532 }, null, 8, 8)).toEqual({ left: 150, top: 446 });
 });
 
 test("위아래 자리가 모두 막대와 겹치면 막대 옆으로 비킨다", () => {
@@ -63,4 +63,10 @@ test("막대를 비키는 자리가 드로잉을 덮으면 드로잉을 덮지 �
   const dock = { left: 560, top: 62, right: 986, bottom: 102 };
   const drawing = { left: 760, top: 17, right: 902, bottom: 29 };
   expect(avoidDock(605, [-27, 51], style, { ...pane, width: 1000 }, dock, drawing, 8, 8)).toEqual({ left: 605, top: 110 });
+});
+
+test("드로잉과 막대 사이에 빈자리가 있으면 막대 너머보다 그 자리를 고른다", () => {
+  const pane = { width: 958, height: 580 };
+  const style = { width: 333, height: 38 };
+  expect(avoidDock(422, [-22, 122], style, pane, { left: 300, top: 156, right: 726, bottom: 196 }, { left: 500, top: 30, right: 620, bottom: 100 }, 8, 8)).toEqual({ left: 422, top: 110 });
 });

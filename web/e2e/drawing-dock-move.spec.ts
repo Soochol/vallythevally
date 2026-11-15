@@ -359,14 +359,14 @@ test("위아래에 자리가 없는 드로잉의 스타일 막대는 겹치지 �
   const style = page.getByRole("toolbar", { name: "드로잉 스타일" });
   await expect(style).toBeVisible();
   const area = await chartArea(page);
-  const tops: number[] = [];
-  for (const fy of [0.1, 0.5, 0.9]) {
-    const bar = await moveTo(page, () => ({ x: area.x, y: area.y + fy * area.height }));
+  const spots: string[] = [];
+  for (const [dx, fy] of [[0, 0.1], [0, 0.5], [0, 0.9], [100, 0.9], [200, 0.9]] as const) {
+    const bar = await moveTo(page, () => ({ x: area.x + dx, y: area.y + fy * area.height }));
     let last = "";
     await expect.poll(async () => { const now = JSON.stringify(await style.boundingBox()); const same = now === last; last = now; return same; }).toBe(true);
     const box = (await style.boundingBox())!;
-    expect(box.x).toBeGreaterThan(bar.x + bar.width);
-    tops.push(Math.round(box.y));
+    expect(box.x + box.width <= bar.x || box.x >= bar.x + bar.width || box.y + box.height <= bar.y || box.y >= bar.y + bar.height).toBe(true);
+    spots.push(`${Math.round(box.x)},${Math.round(box.y)}`);
   }
-  expect(new Set(tops).size).toBe(1);
+  expect(new Set(spots).size).toBe(1);
 });
