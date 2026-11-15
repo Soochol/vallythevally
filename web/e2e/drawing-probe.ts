@@ -41,7 +41,7 @@ export async function expandDock(page: Page) {
     const same = now === last;
     last = now;
     return same;
-  }).toBe(true);
+  }, { intervals: [30, 30, 60, 100] }).toBe(true);
   return bar;
 }
 

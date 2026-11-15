@@ -1,6 +1,6 @@
 import type { Page } from "@playwright/test";
 import { cell, chartOf, expect, saveChartShare, SEARCH_BUTTON_TITLE, test, type Scenario } from "./harness";
-import { bodyAlong, chartPoint, drawings, expandDock, mirror, open, pickTool as pickExpanded } from "./drawing-probe";
+import { bodyAlong, chartPoint, drawings, expandDock, mirror, open, pickTool } from "./drawing-probe";
 import { TOOLS, toolsByGroup } from "../src/chart/drawings/tools";
 import type { Tool } from "../src/chart/drawings/toolSpec";
 
@@ -10,11 +10,6 @@ async function collapseDock(page: Page) {
   await page.mouse.move(5, 5);
   await cell(page).focus();
   await expect(page.getByRole("navigation", { name: "드로잉 도구" }).locator(".draw-pill")).toHaveAttribute("aria-expanded", "false");
-}
-
-async function pickTool(page: Page, group: string, label: string) {
-  await collapseDock(page);
-  await pickExpanded(page, group, label);
 }
 
 const GROUP_LABEL: Record<Tool["group"], string> = { line: "선", fib: "피보나치·갠", shape: "도형", note: "주석", measure: "측정", pattern: "패턴" };
