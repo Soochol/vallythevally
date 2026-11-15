@@ -127,6 +127,7 @@ export const DEFAULT_LAYOUT: EditableLayout = {
 interface LayoutState {
   layout: EditableLayout;
   revision: number;
+  session: number;
   steps: readonly ArrangementStep[];
   load(layout: EditableLayout): void;
   rename(name: string): void;
@@ -206,8 +207,9 @@ export const useLayoutStore = create<LayoutState>()((set, get) => {
   return {
     layout: DEFAULT_LAYOUT,
     revision: 0,
+    session: 0,
     steps: [],
-    load: (layout) => set({ layout, steps: [] }),
+    load: (layout) => set((s) => ({ layout, steps: [], session: s.session + 1 })),
     rename: (name) => set((s) => s.layout.name === name ? s : { layout: { ...s.layout, name }, revision: s.revision + 1 }),
     arrange,
     undoArrangement: () =>

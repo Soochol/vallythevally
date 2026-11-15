@@ -142,6 +142,7 @@ test("서버가 더 새 저장 순서 때문에 편집을 거절하면 레이아
   await menu(page).getByRole("menuitemradio", { name: "복기", exact: true }).click();
   await expect(trigger(page)).toBeEnabled();
   await expect(trigger(page)).toHaveAccessibleName("레이아웃: 기본");
+  await expect(trigger(page)).toBeFocused();
   await expect(cell(page)).toHaveAttribute("aria-label", / 주$/);
   expect(firstChart(scenario.documents.layout()).period).toBe("D");
   const draft = await page.evaluate(() => {
@@ -244,6 +245,25 @@ test("같은 창 id를 가진 레이아웃으로 바꾸면 지표 인스펙터�
   await expect(inspector(page).getByRole("button", { name: "이동평균 단순 9 추가 후보", exact: true })).toHaveCount(0);
   await expect(cell(page).getByText("이동평균 단순 9", { exact: true })).toHaveCount(0);
 });
+
+for (const roundTrip of [false, true]) {
+  test(`이전 레이아웃의 주소 종목 조회는 전환 뒤 적용하지 않는다: ${roundTrip ? "원래 레이아웃으로 돌아옴" : "다른 레이아웃"}`, async ({ page, scenario }) => {
+    const id = "01900000-0000-7000-8000-0000000000b1";
+    scenario.documents.saveLayout({ ...scenario.documents.layout(), id, name: "복기", revision: 1 });
+    const pending = scenario.hold("/api/symbols/005930");
+    await page.goto("/?symbol=005930&period=W");
+    await pending.received;
+    await expect(cell(page)).toHaveAttribute("aria-busy", "false");
+    await choose(page, "복기");
+    if (roundTrip) await choose(page, "기본");
+    const response = page.waitForResponse((value) => new URL(value.url()).pathname === "/api/symbols/005930");
+    pending.reply({ body: scenario.market.symbols.find((info) => info.code === "005930") });
+    await (await response).finished();
+    await page.clock.fastForward(5000);
+    await expect(cell(page)).toHaveAttribute("aria-label", "칸 1: 코스피 일");
+    expect(firstChart(scenario.documents.layout(roundTrip ? DEFAULT_LAYOUT_ID : id))).toMatchObject({ symbol: "IDX:001", period: "D" });
+  });
+}
 
 test("연결 없이 기본 화면으로 열면 레이아웃 메뉴가 비활성이다", async ({ page, scenario }) => {
   scenario.reply("/api/ui-state", { status: 503, body: { error: { code: "internal", message: "연결 끊김" } } });
