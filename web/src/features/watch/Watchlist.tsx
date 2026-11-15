@@ -11,7 +11,7 @@ import { useSymbolInfo } from "../../api/queries";
 import { compareRefusal } from "../../chart/settings";
 import { direction, formatChange, formatPercent, formatPrice, formatVolume } from "../../lib/format";
 import { DESKTOP_QUERY, useMediaQuery } from "../../lib/media";
-import { isIndexCode, symbolSub } from "../../lib/symbol";
+import { isIndexCode } from "../../lib/symbol";
 import {
   groupNameProblem,
   rowKey,
@@ -38,13 +38,13 @@ import { useUiStore } from "../../stores/ui";
 import { useActiveWatchlist, useWatchlistStore } from "../../stores/watchlist";
 import { ArrowIcon, ChartIcon, ChevronIcon, CloseIcon, CopyIcon, ListIcon, MoreIcon, PlusIcon } from "../icons";
 import { Menu, type MenuItem } from "../menu/Menu";
+import { LIST_HEAD, LIST_ROW_HEIGHT, LIST_ROW_HOVER, PriceText, RateBadge, SymbolName, listRowSelection } from "../list/listRow";
 import { columnTemplate, fitColumns, type WatchVariant } from "./columns";
 import { useElementSize } from "../workspace/size";
 import { removalUndo } from "./removalUndo";
 
 const DIR_CLASS = { up: "text-up", down: "text-down", flat: "text-text-2" } as const;
 const ROW_GRID = "grid gap-1";
-const BADGE_CLASS = { up: "bg-up/10 text-up", down: "bg-down/10 text-down", flat: "bg-raised text-text-2" } as const;
 const GROUP_HEAD = "flex h-[30px] items-center gap-1.5 border-t border-line pl-2 pr-1.5 text-s max-md:h-11 max-md:pl-3";
 function setCollapsed(id: string, collapsed: boolean) {
   const known = useWatchlistStore.getState().lists.flatMap((l) => l.groups.map((g) => g.id));
@@ -312,7 +312,7 @@ function WatchList({ variant, sender, editing, naming, onNaming, width = null }:
 
   return (
     <>
-      <div className={`${ROW_GRID} flex-none px-3 py-1 text-xs text-text-3`} style={template} aria-hidden="true" title="끌거나 Alt+↑↓로 순서를 바꿉니다">
+      <div className={`${ROW_GRID} flex-none px-3 py-1 ${LIST_HEAD}`} style={template} aria-hidden="true" title="끌거나 Alt+↑↓로 순서를 바꿉니다">
         <span>종목</span>
         {columns.map((c) => (
           <span key={c} className="text-right">
@@ -505,11 +505,10 @@ function QuoteCell({ column, quote, limited, isIndex, variant }: { column: Watch
       </span>
     );
   if (!quote) return <span className="text-right text-text-3">—</span>;
-  return (
-    <span className={`whitespace-nowrap text-right ${column === "changeRate" && variant === "desktop" ? `rounded-s px-1 py-0.5 text-s font-[550] ${BADGE_CLASS[direction(quote.change)]}` : SIGNED.has(column) ? `text-s font-[550] ${DIR_CLASS[direction(quote.change)]}` : ""}`}>
-      {cellText(column, quote, isIndex)}
-    </span>
-  );
+  const text = cellText(column, quote, isIndex);
+  if (column === "changeRate" && variant === "desktop") return <RateBadge direction={direction(quote.change)}>{text}</RateBadge>;
+  if (column === "price") return <PriceText>{text}</PriceText>;
+  return <span className={`whitespace-nowrap text-right ${SIGNED.has(column) ? `text-s font-[550] ${DIR_CLASS[direction(quote.change)]}` : ""}`}>{text}</span>;
 }
 
 function WatchRow({ list, row, index, last, columns, template, variant, sender, editing, dropBefore, onMoved, onNaming, drag }: RowProps) {
@@ -588,7 +587,7 @@ function WatchRow({ list, row, index, last, columns, template, variant, sender, 
       }}
       onDragEnd={drag.end}
       onContextMenu={variant === "desktop" ? (e) => { e.preventDefault(); context(e.clientX, e.clientY); } : undefined}
-      className={`group relative border-l-2 ${active ? "border-l-accent bg-surface" : "border-l-transparent"} ${
+      className={`group relative ${listRowSelection(active)} ${
         dropBefore ? "shadow-[inset_0_2px_0_var(--accent)]" : ""
       }`}
     >
@@ -619,13 +618,12 @@ function WatchRow({ list, row, index, last, columns, template, variant, sender, 
           move(e.key === "ArrowUp" ? -1 : 1);
         }}
         style={template}
-        className={`${ROW_GRID} h-[34px] w-full items-center pl-2.5 pr-3 text-left hover:bg-surface max-md:h-auto max-md:min-h-[56px] max-md:px-4 max-md:py-2 ${
+        className={`${ROW_GRID} ${LIST_ROW_HEIGHT} w-full items-center pl-2.5 pr-3 text-left ${LIST_ROW_HOVER} max-md:h-auto max-md:min-h-[56px] max-md:px-4 max-md:py-2 ${
           editing ? (list.groups.length > 0 ? "max-md:pr-[220px]" : "max-md:pr-[176px]") : ""
         }`}
       >
-        <span className={`min-w-0 ${variant === "desktop" ? "flex items-baseline gap-1" : ""} ${unknown ? "opacity-50" : ""}`}>
-          <b title={name} className={variant === "desktop" ? "min-w-0 shrink-0 max-w-full truncate font-[550]" : "block truncate font-[550]"}>{name}</b>
-          {symbolSub(code, info) !== code && <small className={`${variant === "desktop" ? "w-0 min-w-0 grow truncate" : ""} text-xs text-text-3`}>{symbolSub(code, info)}</small>}
+        <span className={`min-w-0 ${unknown ? "opacity-50" : ""}`}>
+          <SymbolName name={name} code={code} />
         </span>
         {unknown ? (
           columns.length > 0 && (
