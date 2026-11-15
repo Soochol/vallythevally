@@ -4,6 +4,7 @@ import { Icon, DRAWING_ICONS, CopyIcon, MoreIcon } from "../icons";
 import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { drawingColor } from "../../chart/drawings/DrawingLayer";
+import { HANDLE_HIT_PX } from "../../chart/drawings/geometry";
 import { ColorPicker } from "../color/ColorPicker";
 import { surfaceFor } from "../../chart/drawings/DrawingSurface";
 import { drawingSync, useDrawingVersion } from "../../chart/drawings/sync";
@@ -64,7 +65,7 @@ function FloatingBar({ cellId }: { cellId: WindowId }) {
     const follow = () => {
       raf = requestAnimationFrame(follow);
       if (!root.current) { setPosition(null); setShown(false); framesWithoutBounds.current = 0; lastSpot.current = null; return; }
-      const bounds = surface.selectionBounds(); const pane = surface.frame().pane;
+      const bounds = surface.selectionBounds(); const frame = surface.frame(); const pane = frame.pane;
       if (pane.height <= 0) return;
       root.current.style.setProperty("--floating-max", `${Math.max(0, pane.width - 16)}px`);
       const toolbar = root.current.querySelector<HTMLElement>(".drawing-floating");
@@ -79,7 +80,10 @@ function FloatingBar({ cellId }: { cellId: WindowId }) {
       const dock = dockBox(root.current);
       const lowest = pane.height - h - 8;
       const top = Math.max(48, (dock?.bottom ?? 0) + 8);
-      const avoided = !saved && dock?.moved ? avoidDock(left, [above + OVERLAY_GAP, below + OVERLAY_GAP], { width: w, height: h }, pane, dock, bounds && { left: bounds.x1, top: bounds.y1, right: bounds.x2, bottom: bounds.y2 }, DOCK_CLEARANCE, 8) : null;
+      const avoided = !saved && dock?.moved ? avoidDock(left, [above + OVERLAY_GAP, below + OVERLAY_GAP], { width: w, height: h }, pane, dock, {
+        bounds: bounds && { left: bounds.x1 - HANDLE_HIT_PX, top: bounds.y1 - HANDLE_HIT_PX, right: bounds.x2 + HANDLE_HIT_PX, bottom: bounds.y2 + HANDLE_HIT_PX },
+        handles: frame.items.flatMap((item) => item.handles).map(({ x, y }) => ({ left: x - HANDLE_HIT_PX, top: y - HANDLE_HIT_PX, right: x + HANDLE_HIT_PX, bottom: y + HANDLE_HIT_PX })),
+      }, DOCK_CLEARANCE, 8) : null;
       const x = avoided?.left ?? left;
       const y = avoided ? avoided.top - OVERLAY_GAP
         : saved ? Math.max(8, Math.min(saved.y, lowest))
