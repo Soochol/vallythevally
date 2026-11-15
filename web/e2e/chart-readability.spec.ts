@@ -57,11 +57,14 @@ async function geometry(page: Page) {
       const panes = chart.panes().map((pane) => {
         const element = pane.getHTMLElement();
         if (!element) throw new Error("차트 패널이 없습니다");
-        return { ...rect(element), stretch: pane.getStretchFactor() };
+        return { ...rect(element), right: body.getBoundingClientRect().left + chart.timeScale().width(), stretch: pane.getStretchFactor() };
       });
-      const toolbar = body.querySelector(".drawing-toolbar");
+      const host = body.closest("section")?.parentElement;
+      const toolbar = host?.querySelector(".drawing-toolbar");
+      const chartBox = chart.chartElement().getBoundingClientRect();
+      const timeAxis = { x: chartBox.x, y: chartBox.bottom - chart.timeScale().height(), right: chartBox.right, bottom: chartBox.bottom };
       return {
-        body: rect(body), panes,
+        body: rect(body), panes, timeAxis,
         rows: { head: { box: rect(head), text: head.textContent, texts: textRects(head) }, price: { box: rect(price), text: price.textContent, texts: textRects(price) }, ohlc: { box: rect(ohlc), text: ohlc.textContent, texts: textRects(ohlc) } },
         venues: [...head.querySelectorAll("button")].map((button) => ({ label: button.getAttribute("aria-label"), ...rect(button) })),
         volume: { box: rect(volume), text: volume.textContent, texts: textRects(volume), commands: [...volume.querySelectorAll("button[data-indicator-command]:not([hidden])")].map((button) => ({ label: button.getAttribute("aria-label"), ...rect(button) })) },
@@ -76,6 +79,7 @@ const contained = (box: Box, pane: Box) => box.x >= pane.x - 0.5 && box.y >= pan
 const disjoint = (a: Box, b: Box) => a.right <= b.x + 0.5 || b.right <= a.x + 0.5 || a.bottom <= b.y + 0.5 || b.bottom <= a.y + 0.5;
 
 function readable(charts: Awaited<ReturnType<typeof geometry>>) {
+  expect(charts.filter((chart) => chart.toolbar !== null)).toHaveLength(1);
   for (const [index, chart] of charts.entries()) {
     const pane = chart.panes[0];
     const volumePane = chart.panes[1];
@@ -98,7 +102,14 @@ function readable(charts: Awaited<ReturnType<typeof geometry>>) {
       for (const row of [chart.rows.price, chart.rows.ohlc]) for (const text of row.texts) expect.soft(disjoint(venue, text), `chart ${index + 1} venue clears other rows`).toBe(true);
     }
     for (const box of [...chart.volume.texts, ...chart.volume.commands]) expect.soft(contained(box, volumePane), `chart ${index + 1} volume text and full action boxes stay inside volume pane`).toBe(true);
-    for (const command of chart.volume.commands) expect.soft(command.height, "indicator controls retain 18px hit boxes").toBe(18);
+    for (const command of chart.volume.commands) {
+      expect.soft(command.height, "indicator controls retain 18px hit boxes").toBe(18);
+      expect.soft(command.width, "indicator controls retain 18px hit boxes").toBe(18);
+    }
+    const priceBoxes = [...Object.values(chart.rows).flatMap((row) => row.texts), ...chart.venues];
+    const volumeBoxes = [...chart.volume.texts, ...chart.volume.commands];
+    for (const box of [...priceBoxes, ...volumeBoxes]) expect.soft(disjoint(box, chart.timeAxis), `chart ${index + 1} text and controls clear time axis`).toBe(true);
+    for (const priceBox of priceBoxes) for (const volumeBox of volumeBoxes) expect.soft(disjoint(priceBox, volumeBox), `chart ${index + 1} price and volume text and controls do not overlap`).toBe(true);
     if (chart.toolbar) for (const box of [...Object.values(chart.rows).flatMap((row) => row.texts), ...chart.venues, ...chart.volume.texts, ...chart.volume.commands]) expect.soft(disjoint(box, chart.toolbar), `chart ${index + 1} toolbar clears text and controls`).toBe(true);
   }
 }
