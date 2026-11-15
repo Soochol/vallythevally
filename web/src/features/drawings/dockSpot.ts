@@ -27,7 +27,9 @@ export function settleSpot(spot: Spot, home: Spot, area: Size, bar: Size): DockA
 
 export interface Edges { left: number; top: number; right: number; bottom: number }
 
-export function avoidDock(left: number, tops: readonly number[], bar: Size, pane: Size, dock: Edges, drawing: Edges | null, clearance: number, margin: number): Spot {
+export interface SelectionObstacles { bounds: Edges | null; handles: readonly Edges[] }
+
+export function avoidDock(left: number, tops: readonly number[], bar: Size, pane: Size, dock: Edges, selection: SelectionObstacles, clearance: number, margin: number): Spot {
   const within = (value: number, size: number, total: number) => Math.max(margin, Math.min(value, total - size - margin));
   const apart = (box: Edges, spot: Spot, gap: number) => spot.left + bar.width + gap <= box.left || spot.left >= box.right + gap || spot.top + bar.height + gap <= box.top || spot.top >= box.bottom + gap;
   const preferred = { left, top: tops.find((top) => top === within(top, bar.height, pane.height)) ?? tops[0] ?? margin };
@@ -46,8 +48,9 @@ export function avoidDock(left: number, tops: readonly number[], bar: Size, pane
     }
     return best;
   };
-  const obstacles = drawing ? [dock, drawing] : [dock];
-  for (const boxes of [obstacles, [dock]]) {
+  const handles = [dock, ...selection.handles];
+  const groups = selection.bounds ? [[...handles, selection.bounds], handles, [dock]] : [handles, [dock]];
+  for (const boxes of groups) {
     for (const { gap, inset } of [{ gap: clearance, inset: margin }, { gap: 0, inset: margin }, { gap: 0, inset: 0 }]) {
       const spot = nearest(boxes, gap, inset);
       if (spot) return spot;
