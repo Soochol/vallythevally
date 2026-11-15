@@ -201,9 +201,13 @@ for (const pinned of [false, true]) test(`minimum canvas toolbar retains help, m
   const venues = cell(page).getByRole("group", { name: "거래소" });
   await venues.getByRole("button", { name: "KRX", exact: true }).click();
   await expect(cell(page)).toHaveAttribute("aria-label", "칸 1: 삼성전자 KRX 일");
+  await expect.poll(() => scenario.documents.layout().windows.find((window) => window.kind === "chart")?.venue).toBe("krx");
   await venues.getByRole("button", { name: "통합", exact: true }).click();
   await expect(cell(page)).toHaveAttribute("aria-label", "칸 1: 삼성전자 통합 일");
+  await expect.poll(() => scenario.documents.layout().windows.find((window) => window.kind === "chart")?.venue).toBe("combined");
   await settle(page, 1);
+  const afterVenue = storedPresentation(scenario);
+  const afterVenueDocuments = storedDocuments(scenario);
   await fullyActionable(grip);
   const home = await dock.boundingBox();
   const handle = await grip.boundingBox();
@@ -216,7 +220,8 @@ for (const pinned of [false, true]) test(`minimum canvas toolbar retains help, m
   await page.mouse.up();
   await settle(page, 1);
   expect(await dock.boundingBox()).toEqual(home);
-  expect(storedPresentation(scenario)).toBe(saved);
+  expect(storedPresentation(scenario)).toBe(afterVenue);
+  expect(storedDocuments(scenario)).toBe(afterVenueDocuments);
   await page.mouse.move(from.x, from.y);
   await page.mouse.down();
   await page.mouse.move(from.x, from.y + 60, { steps: 8 });
@@ -470,7 +475,7 @@ for (const medium of [false, true]) test(medium ? "medium height toolbar drag, c
   await page.keyboard.press("Home");
   await settle(page, count);
   expect(await dock.boundingBox()).toEqual(box);
-  expect(scenario.documents.uiPrefs().drawing.dockAt).toBeNull();
+  await expect.poll(() => scenario.documents.uiPrefs().drawing.dockAt).toBeNull();
   await page.mouse.move(from.x, from.y);
   await page.mouse.down();
   await page.mouse.move(from.x - 100, from.y + 20, { steps: 8 });

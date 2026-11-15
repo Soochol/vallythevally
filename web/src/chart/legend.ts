@@ -289,7 +289,9 @@ export class Legend {
           set("--legend-dock-width", `${width}px`);
         }
       }
-    } else if (!toolbar?.dataset.moved) set("--legend-shift", `${shift}px`);
+      if (toolbar && !this.host.hasAttribute("data-legend-beside")) normal();
+    }
+    if (!this.host.hasAttribute("data-legend-beside") && !toolbar?.dataset.moved) set("--legend-shift", `${shift}px`);
     if (!this.host.hasAttribute("data-legend-beside")) for (const name of ["--legend-dock-left", "--legend-dock-width"]) this.host.style.removeProperty(name);
     if (toolbar) toolbar.scrollLeft = scroll;
     this.finalGeometry = this.geometrySnapshot();
