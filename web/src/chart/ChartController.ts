@@ -154,11 +154,17 @@ export class ChartController {
   private stalledAt: UnixSeconds | null = null;
   private readonly unwatch: () => void;
   private readonly resize: ResizeObserver;
+  private readonly hostResize: ResizeObserver;
 
   constructor(el: HTMLElement, deps: ControllerDeps) {
     this.el = el;
     this.tokens = deps.tokens;
     this.onStatus = deps.onStatus;
+    this.hostResize = new ResizeObserver(() => {
+      const view = this.initialView;
+      if (view && (view.hostWidth !== el.clientWidth || view.hostHeight !== el.clientHeight)) this.releaseInitialView();
+    });
+    this.hostResize.observe(el);
     this.chart = createChart(el, { ...this.chartOptions(), autoSize: true });
     this.axisLabels = new AxisLabelCache(this.chart, () => this.scheduleFrame());
     this.chart.chartElement().addEventListener("wheel", this.onWheel, { capture: true, passive: false });
@@ -195,7 +201,6 @@ export class ChartController {
     this.compareLegend = new CompareLegend((code) => deps.onCompareRemove?.(code));
     this.legend.body.append(this.indicatorLegend.priceBox, this.compareLegend.box);
     this.resize = new ResizeObserver(() => {
-      if (this.initialView && (this.initialView.hostWidth !== el.clientWidth || this.initialView.hostHeight !== el.clientHeight)) this.releaseInitialView();
       if (!crosshairVisible(el)) this.clearPointedBar();
       this.crosshairMarker.refresh();
       const width = this.axisWidth();
@@ -420,6 +425,7 @@ export class ChartController {
     if (this.frame !== null) cancelAnimationFrame(this.frame);
     if (this.statusTimer !== null) clearTimeout(this.statusTimer);
     this.resize.disconnect();
+    this.hostResize.disconnect();
     this.unwatch();
     this.feed.dispose();
     this.fineBars.dispose();

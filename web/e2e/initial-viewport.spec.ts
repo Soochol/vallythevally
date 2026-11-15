@@ -94,6 +94,7 @@ for (const action of ["pan", "vertical wheel", "horizontal wheel", "width resize
       }
     });
     if (action !== "width resize") expect(result.taken!.range).not.toEqual(result.before.range);
+    if (action !== "vertical wheel") expect(result.taken!.spacing).toBeCloseTo(result.before.spacing, 6);
     expect(result.taken!.locked).toBe(false);
     expect(result.after.locked).toBe(false);
     expect(result.after.spacing).toBeCloseTo(result.taken!.spacing, 6);
