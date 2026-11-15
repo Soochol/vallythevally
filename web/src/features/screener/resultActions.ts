@@ -65,3 +65,12 @@ export function sendToNewWatchlist(name: string, codes: readonly SymbolCode[]) {
   useUiStore.getState().setActiveWatchlist(id);
   sendToWatchlist(id, codes);
 }
+
+export function addResultToWatchlist(listId: string, code: SymbolCode, name: string) {
+  const store = useWatchlistStore.getState();
+  const list = store.lists.find((list) => list.id === listId);
+  if (!list) return;
+  if (list.symbols.includes(code)) return toast(`${list.name}에 이미 있습니다: ${name}`);
+  store.addAll(listId, [code]);
+  toast(`${list.name}에 넣었습니다: ${name}`);
+}

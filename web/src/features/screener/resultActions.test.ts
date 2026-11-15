@@ -6,7 +6,7 @@ import { chartWindows, DEFAULT_LAYOUT, useLayoutStore } from "../../stores/layou
 import { useSelectionStore } from "../../stores/selection";
 import { useUiStore } from "../../stores/ui";
 import { useWatchlistStore } from "../../stores/watchlist";
-import { dropPendingOpen, openResult, pendingResultCode, sendToNewWatchlist, sendToWatchlist } from "./resultActions";
+import { addResultToWatchlist, dropPendingOpen, openResult, pendingResultCode, sendToNewWatchlist, sendToWatchlist } from "./resultActions";
 
 const client = () => new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: Infinity } } });
 const symbol = (code: string): SymbolInfo => ({ code, name: code, market: "kospi", kind: "common", nxtEnabled: true });
@@ -87,4 +87,14 @@ test("관심종목 저장은 기존 목록의 중복을 건너뛰고 결과 순�
   const list = useWatchlistStore.getState().lists[1];
   expect(list).toMatchObject({ name: "실행 결과", symbols: ["035420", "000660"] });
   expect(useUiStore.getState().prefs.activeWatchlistId).toBe(list?.id);
+});
+
+test("한 종목 넣기는 이름을 알리고 이미 든 목록은 바꾸지 않는다", () => {
+  addResultToWatchlist(FIRST_WATCHLIST_ID, "000660", "SK하이닉스");
+  expect(useWatchlistStore.getState().lists[0]?.symbols).toContain("000660");
+  expect(useSelectionStore.getState().toast?.text).toBe("기본에 넣었습니다: SK하이닉스");
+  const revision = useWatchlistStore.getState().revision;
+  addResultToWatchlist(FIRST_WATCHLIST_ID, "000660", "SK하이닉스");
+  expect(useWatchlistStore.getState().revision).toBe(revision);
+  expect(useSelectionStore.getState().toast?.text).toBe("기본에 이미 있습니다: SK하이닉스");
 });
