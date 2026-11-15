@@ -21,7 +21,7 @@ function linkedCharts(scenario: Scenario, secondVenue: Venue = "combined") {
 }
 
 const tabOf = (page: Page, id: string) => windowTabs(page).locator(`[role=tab][data-window-id="${id}"]`);
-const dotOf = (page: Page, id: string) => windowTabs(page).locator(`[role=tab][data-window-id="${id}"] + button`);
+const dotOf = (page: Page, id: string) => windowTabs(page).locator(`[role=tab][data-window-id="${id}"] + .link-dot`);
 const row = (page: Page, code: string) => page.getByRole("complementary", { name: "관심종목" }).locator(`li[data-code="${code}"] [data-main]`);
 const toast = (page: Page, text: string) => page.getByRole("status").filter({ hasText: text });
 const savedWindow = (scenario: Scenario, id: string) => scenario.documents.layout(DEFAULT_LAYOUT_ID).windows.find((w) => w.id === id);

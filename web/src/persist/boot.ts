@@ -55,7 +55,7 @@ export async function boot(queryClient: QueryClient) {
     useWatchlistStore.getState().load(restored.watchlists);
     followTheme();
     for (const target of SAVE_TARGETS) clearUnsaved(target, restored.serverRevisions[target]);
-    const autosave = startAutosave({ put: (path, json, o) => sendJson("PUT", path, json, o), toast, revisions: restored.revisions });
+    const autosave = startAutosave({ put: (path, json, o) => sendJson("PUT", path, json, o), toast, revisions: restored.revisions, serverCharts: restored.serverCharts });
     if (restored.layoutDirty) autosave.savers.layout.changed();
     if (restored.uiDirty) autosave.savers.ui.changed();
     if (restored.watchlistDirty) autosave.savers.watchlist.changed();

@@ -2,7 +2,9 @@ import { isCancelledError, type QueryClient } from "@tanstack/react-query";
 import { useSyncExternalStore } from "react";
 import { create } from "zustand";
 import { ApiRequestError, deleteJson, getJson, putJson } from "../../api/http";
+import { layoutSendMark, layoutSentWithoutChart, serverMayLackChart } from "../../persist/autosave";
 import type { SaveState } from "../../persist/saver";
+import { chartWindows, type EditableLayout, useLayoutStore } from "../../stores/layout";
 import { usePersistStore } from "../../stores/persist";
 import { useSelectionStore } from "../../stores/selection";
 import { EMPTY_HISTORY, historyUndo, planRedo, planUndo, record, sameContent, type History } from "./history";
@@ -14,6 +16,7 @@ import type { WindowId } from "../../layout/kinds";
 const key = (symbol: string) => ["drawings", symbol] as const;
 export const drawingPath = (id: string) => `/api/drawings/${encodeURIComponent(id)}`;
 const toast = (text: string) => useSelectionStore.getState().showToast(text);
+const chartIds = (layout: EditableLayout) => new Set<string>(chartWindows(layout).map((w) => w.id));
 export const useDrawingSave = create<{ state: SaveState; retry(): void }>()(() => ({ state: { kind: "idle" }, retry: () => {} }));
 
 export class DrawingSync {
@@ -51,6 +54,7 @@ export class DrawingSync {
     window.addEventListener("focus", () => this.refresh());
     document.addEventListener("visibilitychange", () => document.visibilityState === "visible" ? this.refresh() : this.flush());
     window.addEventListener("pagehide", () => this.flush());
+    usePersistStore.subscribe((s, prev) => { if (s.saves.layout !== prev.saves.layout && s.saves.layout.kind === "saved") this.followSavedLayout(useLayoutStore.getState().layout); });
     if (this.desired.size || this.recoveryError) this.updateSave();
   }
 
@@ -72,6 +76,24 @@ export class DrawingSync {
   }
 
   refresh() { for (const symbol of this.symbols) void this.load(symbol); }
+  private reload() { for (const symbol of this.symbols) void (this.loads.get(symbol) ?? Promise.resolve()).then(() => this.load(symbol)); }
+
+  private awaitsLayoutSave(want: queue.Intent["want"], sentAt?: number): boolean {
+    if (want.kind !== "put" || want.body.scope.kind !== "cell") return false;
+    const layout = useLayoutStore.getState().layout;
+    if (want.body.scope.layoutId !== layout.id) return false;
+    const window = want.body.scope.windowId;
+    return !chartIds(layout).has(window) || serverMayLackChart(window) || (sentAt !== undefined && layoutSentWithoutChart(window, sentAt));
+  }
+
+  private followSavedLayout(layout: EditableLayout) {
+    const charts = chartIds(layout);
+    const closed = (drawing: DrawingBody) => drawing.scope.kind === "cell" && drawing.scope.layoutId === layout.id && !charts.has(drawing.scope.windowId);
+    const ops: DrawingOp[] = [...this.desired.values()].flatMap(({ intent: { want } }) =>
+      want.kind === "put" && closed(want.body) ? [{ kind: "update", before: want.body, after: { ...want.body, scope: { kind: "layout", layoutId: layout.id } } }] : []);
+    if (ops.length) this.commit(useSelectionStore.getState().activeCell, ops, false);
+    if ([...this.symbols].some((symbol) => (this.client.getQueryData<Drawing[]>(key(symbol)) ?? []).some(closed))) this.reload();
+  }
   dataChanged() { this.refresh(); }
 
   drawings(symbol: string): DrawingBody[] {
@@ -227,6 +249,8 @@ export class DrawingSync {
       if (!started) return false;
       this.outbox = started.outbox;
       const { want, symbol } = started.send;
+      const awaitedAtSend = this.awaitsLayoutSave(want);
+      const sentAt = layoutSendMark();
       const sending = want.kind === "delete" ? deleteJson(drawingPath(id), { keepalive }) : putJson<Drawing>(drawingPath(id), want.body, { keepalive });
       this.updateSave();
       void sending.then(async (saved) => {
@@ -240,6 +264,7 @@ export class DrawingSync {
         this.settle(id, { kind: "ok" });
       }).catch((e: unknown) => {
         const outcome: queue.Outcome = e instanceof ApiRequestError && e.code === "stale_revision" ? { kind: "stale" }
+          : e instanceof ApiRequestError && e.code === "bad_request" && (awaitedAtSend || this.awaitsLayoutSave(want, sentAt)) ? { kind: "networkError" }
           : e instanceof ApiRequestError && (e.code === "bad_request" || e.code === "payload_too_large" || e.code === "not_found") ? { kind: "clientError", tooLarge: e.code === "payload_too_large" }
           : { kind: "networkError" };
         this.settle(id, outcome);

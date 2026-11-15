@@ -57,6 +57,7 @@
 .desktop-topbar .shell-search { border:var(--size-1) solid var(--line); color:var(--text-3); }
 .shell-search kbd { padding-inline:var(--size-4); }
 @media (width < 48rem) { .desktop-topbar { display:none; } }
+@media (width < 52rem) { .app-brand > span { display:none; } }
 .workspace { position:relative; flex:1; min-width:0; min-height:0; margin:var(--island-gap); overflow:hidden; }
 .status-bar { height:var(--size-28); }
 .dock-group { position:absolute; display:flex; flex-direction:column; min-width:0; min-height:0; overflow:hidden; border-radius:var(--r-l); background:var(--surface); box-shadow:0 0 0 var(--size-1) var(--line); }
@@ -85,6 +86,11 @@
 .link-dot:hover { box-shadow:0 0 0 var(--size-2) var(--hover); }
 .link-dot:not([data-link]):hover { box-shadow:inset 0 0 0 var(--size-2) var(--text-2); }
 .link-dot:focus-visible { outline:var(--size-2) solid var(--accent); outline-offset:var(--size-1); }
+.dock-tab-close { position:relative; display:grid; flex:none; align-self:center; place-items:center; width:var(--size-20); height:var(--size-20); margin:var(--size-4) var(--size-2) 0 0; border-radius:var(--r-pill); color:var(--text-3); outline:none; }
+.link-dot + .dock-tab-close { margin-left:calc(var(--size-29) - var(--size-18)); }
+.dock-tab-close:not(:disabled):hover { background:var(--hover); color:var(--text); }
+.dock-tab-close:focus-visible { box-shadow:inset 0 0 0 var(--size-2) var(--accent); }
+.dock-tab-close:disabled { opacity:.35; cursor:not-allowed; }
 .dock-panel { position:relative; display:flex; flex:1; flex-direction:column; min-width:0; min-height:0; }
 .dock-divider { position:absolute; z-index:20; touch-action:none; outline:none; }
 .dock-divider[aria-orientation=vertical] { cursor:col-resize; }

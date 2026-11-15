@@ -41,7 +41,7 @@ export interface ConditionalCommit<T extends object> {
 const CONDITIONAL_ATTEMPTS = 3;
 
 export interface Saver<T extends object> {
-  changed(): void;
+  changed(when?: "soon" | "now"): void;
   retry(): void;
   commitConditional(c: ConditionalCommit<T>): Promise<CommitOutcome>;
   /**
@@ -54,6 +54,8 @@ export interface Saver<T extends object> {
 export function createSaver<T extends object>(o: SaverOptions<T>): Saver<T> {
   const now = o.now ?? Date.now;
   let edits = 0;
+  let urgent = false;
+  const nextDelay = () => (urgent ? 0 : o.debounceMs);
   let savedEdits = 0;
   let inFlight = 0;
   let failures = 0;
@@ -95,6 +97,7 @@ export function createSaver<T extends object>(o: SaverOptions<T>): Saver<T> {
     let value = o.read();
     if (o.tooLarge(value) && o.shrink?.()) value = o.read();
     const upTo = edits;
+    urgent = false;
     if (o.tooLarge(value)) {
       show({ kind: "failed", reason: "too_large" });
       return;
@@ -124,7 +127,7 @@ export function createSaver<T extends object>(o: SaverOptions<T>): Saver<T> {
       return;
     }
     if (req.revision !== newest) {
-      if (inFlight === 0 && edits > savedEdits && timer === null) schedule(o.debounceMs);
+      if (inFlight === 0 && edits > savedEdits && timer === null) schedule(nextDelay());
       return;
     }
     if (tooLarge) {
@@ -140,7 +143,7 @@ export function createSaver<T extends object>(o: SaverOptions<T>): Saver<T> {
     failures = 0;
     if (edits > savedEdits) {
       show({ kind: "pending" });
-      if (inFlight === 0) schedule(o.debounceMs);
+      if (inFlight === 0) schedule(nextDelay());
     } else {
       show({ kind: "saved", at: now() });
     }
@@ -216,13 +219,14 @@ export function createSaver<T extends object>(o: SaverOptions<T>): Saver<T> {
   }
 
   return {
-    changed() {
+    changed(when = "soon") {
       edits++;
+      urgent ||= when === "now";
       keep();
       if (inFlight > 0) return;
       failures = 0;
       show({ kind: "pending" });
-      schedule(o.debounceMs);
+      schedule(nextDelay());
     },
     retry() {
       if (pause?.kind === "retired") pause = null;

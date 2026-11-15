@@ -1,8 +1,9 @@
 import type { LayoutInput } from "../api/generated/LayoutInput";
+import { ApiRequestError } from "../api/http";
 import type { UiState } from "../api/generated/UiState";
 import type { Watchlists } from "../api/generated/Watchlists";
 import { fetchWatchlists, layoutPath, UI_STATE_PATH, WATCHLISTS_PATH } from "../api/userData";
-import { useLayoutStore } from "../stores/layout";
+import { chartWindows, type EditableLayout, useLayoutStore } from "../stores/layout";
 import { type SaveTarget, usePersistStore } from "../stores/persist";
 import { useUiStore } from "../stores/ui";
 import { useWatchlistStore } from "../stores/watchlist";
@@ -18,6 +19,7 @@ export interface AutosaveDeps {
   put(path: string, json: string, opts: { keepalive: boolean }): Promise<unknown>;
   toast(text: string): void;
   revisions: Record<SaveTarget, number>;
+  serverCharts?: readonly string[];
   unsaved?: (target: SaveTarget) => SaverOptions<object>["unsaved"];
 }
 
@@ -30,7 +32,31 @@ export interface Autosave {
   stop(): void;
 }
 
+type ServerLayout = { revision: number; charts: ReadonlySet<string> | null };
+
 let active: Autosave | null = null;
+let savedLayout: ServerLayout = { revision: -Infinity, charts: null };
+let unsureLayouts: ServerLayout[] = [];
+const sendingCharts = new Set<ReadonlySet<string>>();
+const SENT_HISTORY = 64;
+let sentLayouts: { mark: number; charts: ReadonlySet<string> }[] = [];
+let lastMark = 0;
+
+export const layoutSendMark = (): number => lastMark;
+
+export function layoutSentWithoutChart(id: string, since: number): boolean {
+  return sentLayouts.some((sent) => sent.mark > since && !sent.charts.has(id));
+}
+
+export function serverMayLackChart(id: string): boolean {
+  const candidates = [savedLayout, ...unsureLayouts];
+  return active === null || candidates.some(({ charts }) => charts === null || !charts.has(id)) || [...sendingCharts].some((charts) => !charts.has(id));
+}
+
+function layoutSent(json: string): ServerLayout & { charts: ReadonlySet<string> } {
+  const { windows, revision } = JSON.parse(json) as Pick<LayoutInput, "windows" | "revision">;
+  return { revision, charts: new Set(windows.filter((w) => w.kind === "chart").map((w) => w.id)) };
+}
 
 export function retryFailedSaves() {
   active?.retry();
@@ -48,6 +74,11 @@ export function commitWatchlist(c: Pick<ConditionalCommit<WatchlistsBody>, "next
   });
 }
 
+const addsChartWindow = (before: EditableLayout, after: EditableLayout) => {
+  const known = new Set<string>(chartWindows(before).map((w) => w.id));
+  return before.id === after.id && chartWindows(after).some((w) => !known.has(w.id));
+};
+
 const exceedsServerFieldLimits = (l: Omit<LayoutInput, "revision">) =>
   l.windows.some((w) => w.kind === "chart" && exceedsLimit(w.chartSettings)) || exceedsLimit(l.placement);
 
@@ -56,6 +87,9 @@ export function startAutosave(deps: AutosaveDeps): Autosave {
   const unsaved =
     deps.unsaved ?? ((target: SaveTarget) => ({ write: (u) => writeUnsaved(target, u), clear: (upTo) => clearUnsaved(target, upTo) }));
 
+  savedLayout = { revision: -Infinity, charts: deps.serverCharts ? new Set(deps.serverCharts) : null };
+  unsureLayouts = [];
+  sendingCharts.clear();
   const layout = createSaver<Omit<LayoutInput, "revision">>({
     debounceMs: DEBOUNCE_MS,
     read: () => {
@@ -65,7 +99,23 @@ export function startAutosave(deps: AutosaveDeps): Autosave {
     tooLarge: exceedsServerFieldLimits,
     path: () => layoutPath(useLayoutStore.getState().layout.id),
     revision: deps.revisions.layout,
-    send: deps.put,
+    send: async (path, json, opts) => {
+      const sent = layoutSent(json);
+      sendingCharts.add(sent.charts);
+      sentLayouts = [...sentLayouts, { mark: ++lastMark, charts: sent.charts }].slice(-SENT_HISTORY);
+      try {
+        const saved = await deps.put(path, json, opts);
+        if (sent.revision > savedLayout.revision) savedLayout = sent;
+        unsureLayouts = unsureLayouts.filter((layout) => layout.revision > savedLayout.revision);
+        return saved;
+      } catch (e) {
+        const stale = e instanceof ApiRequestError && e.code === "stale_revision";
+        if (sent.revision > savedLayout.revision) unsureLayouts = [...unsureLayouts, stale ? { revision: sent.revision, charts: null } : sent];
+        throw e;
+      } finally {
+        sendingCharts.delete(sent.charts);
+      }
+    },
     unsaved: unsaved("layout"),
     onState: (s) => setSave("layout", s),
   });
@@ -104,7 +154,7 @@ export function startAutosave(deps: AutosaveDeps): Autosave {
   });
 
   const unsubscribe = [
-    useLayoutStore.subscribe((s, prev) => s.revision !== prev.revision && layout.changed()),
+    useLayoutStore.subscribe((s, prev) => s.revision !== prev.revision && layout.changed(addsChartWindow(prev.layout, s.layout) ? "now" : "soon")),
     useUiStore.subscribe((s, prev) => s.revision !== prev.revision && ui.changed()),
     useWatchlistStore.subscribe((s, prev) => s.revision !== prev.revision && s.revision !== s.loadedRevision && watchlist.changed()),
   ];

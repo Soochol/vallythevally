@@ -1,10 +1,11 @@
 import { beforeEach, expect, test } from "vitest";
+import { DEFAULT_CHART_SETTINGS } from "../chart/settings";
+import { layoutDock } from "../layout/dock/geometry";
 import { groupOfWindow, listGroups } from "../layout/dock/tree";
-import { windowId } from "../layout/kinds";
+import { MAX_WINDOWS, windowId } from "../layout/kinds";
 import type { LinkColor } from "../api/generated/LinkColor";
 import type { SymbolCode } from "../api/generated/SymbolCode";
-import { DEFAULT_CHART_SETTINGS } from "../chart/settings";
-import { type ChartWindowState, chartWindows, DEFAULT_LAYOUT, fittedDock, nextLink, useLayoutStore, watchedSymbol, type WindowState } from "./layout";
+import { ARRANGEMENT_STEPS, type ChartWindowState, chartWindow, chartWindows, DEFAULT_LAYOUT, fittedDock, nextLink, useLayoutStore, watchedSymbol, windowRefs, type WindowState } from "./layout";
 
 const state = () => useLayoutStore.getState();
 const shownTab = (kind: string) => {
@@ -13,7 +14,14 @@ const shownTab = (kind: string) => {
   return id !== undefined && placement.dock !== null && groupOfWindow(placement.dock.root, id)?.active === id;
 };
 
-beforeEach(() => useLayoutStore.setState({ layout: structuredClone(DEFAULT_LAYOUT), revision: 0 }));
+beforeEach(() => useLayoutStore.setState({ layout: structuredClone(DEFAULT_LAYOUT), revision: 0, steps: [] }));
+
+const room = { area: { w: 1256, h: 684 }, gap: 6 };
+const firstChart = () => chartWindows(state().layout)[0]!;
+const arrangement = () => {
+  const { windows, placement } = state().layout;
+  return structuredClone({ windows, placement });
+};
 
 test("탭 고르기는 맞춘 배치에 고른 탭을 남기고 저장 순서를 올린다", () => {
   state().selectTab(windowId("screener"));
@@ -201,4 +209,120 @@ test("주소로 연 거래소는 활성 칸에만 쓰고, 같은 색의 다른 �
   state().setVenue(windowId("a2"), "nxt");
   state().setSymbol(windowId("a1"), SK, "krx");
   expect([shown().a1, shown().a2]).toEqual([["000660", "krx", "D"], ["000660", "nxt", "W"]]);
+});
+
+test("차트 더하기는 원본 칸의 종목·거래소·봉 주기·차트 설정·연동 색을 복사해 원본 옆 묶음에 놓고, 8개가 차면 더하지 않는다", () => {
+  const source = { ...firstChart(), symbol: "005930", venue: "nxt" as const, period: "W" as const, link: "b" as const, chartSettings: { ...DEFAULT_CHART_SETTINGS, style: "line" as const, visibleBars: 120 } };
+  useLayoutStore.setState({ layout: { ...state().layout, windows: state().layout.windows.map((w) => (w.id === source.id ? source : w)) } });
+  const id = state().addChart(source.id, room);
+  if (!id) throw new Error("차트 창을 더하지 못했습니다");
+  expect(chartWindow(state().layout, id)).toEqual({ ...source, id });
+  expect(id).toMatch(/^[A-Za-z0-9_-]{1,64}$/);
+  const dock = state().layout.placement.dock!;
+  const boxes = layoutDock(dock.root, room.area, room.gap).groups;
+  const boxOf = (window: string) => boxes.find((box) => box.group.tabs.includes(windowId(window)))!.rect;
+  expect(boxOf(id).x).toBeGreaterThan(boxOf(source.id).x + boxOf(source.id).w);
+  expect(boxOf(id).y).toBe(boxOf(source.id).y);
+
+  while (chartWindows(state().layout).length < 8) expect(state().addChart(source.id, room)).not.toBeNull();
+  const full = state().layout;
+  expect(state().addChart(source.id, room)).toBeNull();
+  expect(state().layout).toBe(full);
+  expect(full.windows.length).toBeLessThanOrEqual(MAX_WINDOWS);
+  expect(new Set(full.windows.map((w) => w.id)).size).toBe(full.windows.length);
+  expect(listGroups(full.placement.dock!.root).flatMap((group) => group.tabs).sort()).toEqual(full.windows.map((w) => w.id).sort());
+});
+
+test("이미 있는 종류를 다시 보이면 창 수가 그대로이고 기록하지 않는다", () => {
+  state().showWindow("screener");
+  expect(state().layout.windows).toHaveLength(DEFAULT_LAYOUT.windows.length);
+  expect(shownTab("screener")).toBe(true);
+  expect(state().steps).toHaveLength(0);
+});
+
+test("마지막 차트 창은 닫지 않는다", () => {
+  const before = state().layout;
+  expect(state().closeWindow(firstChart().id)).toBe(false);
+  expect(state().layout).toBe(before);
+});
+
+test("묶음의 마지막 탭을 닫으면 묶음이 사라지고 이웃이 자리를 채운다", () => {
+  for (const id of ["watchlist", "screener", "objects"]) expect(state().closeWindow(windowId(id))).toBe(true);
+  expect(state().layout.windows.map((w) => w.kind)).toEqual(["chart"]);
+  expect(state().layout.placement.dock!.root).toEqual({ kind: "group", id: "g1", tabs: [firstChart().id], active: firstChart().id });
+});
+
+test("더하기 → 닫기 → 되돌리기 → 되돌리기 뒤 처음 창 목록과 배치로 돌아온다", () => {
+  const start = arrangement();
+  const id = state().addChart(firstChart().id, room)!;
+  expect(state().closeWindow(windowId("screener"))).toBe(true);
+  expect(state().steps).toHaveLength(2);
+  state().undoArrangement();
+  expect(state().layout.windows.some((w) => w.id === "screener")).toBe(true);
+  expect(state().layout.windows.some((w) => w.id === id)).toBe(true);
+  state().undoArrangement();
+  expect(arrangement()).toEqual(start);
+  expect(state().steps).toHaveLength(0);
+  const revision = state().revision;
+  state().undoArrangement();
+  expect(state().revision).toBe(revision);
+});
+
+test(`배치 기록은 최근 ${ARRANGEMENT_STEPS}단계만 남기고, 레이아웃을 통째로 열면 비운다`, () => {
+  const start = arrangement();
+  for (let n = 0; n < ARRANGEMENT_STEPS + 1; n += 1) {
+    if (n % 2 === 0) state().showWindow("indicators");
+    else state().closeWindow(windowId("indicators"));
+  }
+  expect(state().steps).toHaveLength(ARRANGEMENT_STEPS);
+  for (let n = 0; n < ARRANGEMENT_STEPS; n += 1) state().undoArrangement();
+  expect(state().layout.windows.some((w) => w.kind === "indicators")).toBe(true);
+  expect(arrangement()).not.toEqual(start);
+
+  state().showWindow("indicators");
+  state().closeWindow(windowId("screener"));
+  state().load(structuredClone(DEFAULT_LAYOUT));
+  expect(state().steps).toHaveLength(0);
+  state().undoArrangement();
+  expect(state().layout.windows.some((w) => w.id === "screener")).toBe(true);
+});
+
+test("탭 고르기와 배치 맞추기는 기록하지 않고, 경계 옮기기는 한 단계로 기록한다", () => {
+  state().selectTab(windowId("screener"));
+  state().settleDock(fittedDock(state().layout));
+  expect(state().steps).toHaveLength(0);
+  const dock = fittedDock(state().layout);
+  if (dock.root.kind !== "split") throw new Error("기본 배치가 나뉘어 있지 않습니다");
+  state().setDock({ ...dock, root: { ...dock.root, ratio: 0.6 } });
+  expect(state().steps).toHaveLength(1);
+  state().undoArrangement();
+  expect(state().layout.placement.dock).toBe(dock);
+});
+
+test("닫은 차트를 되돌리면 그 창의 종목·봉 주기·차트 설정이 돌아오고, 남은 창의 내용은 지금 값을 유지한다", () => {
+  const id = state().addChart(firstChart().id, room)!;
+  state().setSymbol(id, { code: "005930", name: "삼성전자", nxtEnabled: true }, "krx");
+  state().setPeriod(id, "W");
+  state().setStyle(id, "area");
+  state().setVisibleBars(id, 90);
+  const closed = chartWindow(state().layout, id);
+  expect(state().closeWindow(id)).toBe(true);
+  state().setPeriod(firstChart().id, "M");
+  state().undoArrangement();
+  expect(chartWindow(state().layout, id)).toEqual(closed);
+  expect(firstChart().period).toBe("M");
+  expect(windowRefs(state().layout.windows).map((w) => w.id)).toContain(id);
+});
+
+test("닫은 연동 차트를 되돌리면 지금 같은 색 차트의 종목을 따르고 봉 주기와 차트 설정은 닫을 때 값이다", () => {
+  linked();
+  const closed = chartWindows(state().layout).find((w) => w.id === "a2")!;
+  expect(state().closeWindow(windowId("a2"))).toBe(true);
+  state().setSymbol(windowId("a1"), SK);
+  state().setLink(windowId("off"), "b");
+  state().undoArrangement();
+  expect(shown().a2).toEqual(["000660", "combined", "W"]);
+  expect(chartWindows(state().layout).find((w) => w.id === "a2")!.chartSettings).toBe(closed.chartSettings);
+  expect(new Set(chartWindows(state().layout).filter((w) => w.link === "a").map((w) => w.symbol)).size).toBe(1);
+  expect(new Set(chartWindows(state().layout).filter((w) => w.link === "b").map((w) => w.symbol)).size).toBe(1);
 });

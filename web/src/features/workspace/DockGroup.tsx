@@ -4,11 +4,13 @@ import type { GroupNode } from "../../layout/dock/tree";
 import { WINDOW_KINDS, type WindowId } from "../../layout/kinds";
 import type { Rect } from "../../layout/placement";
 import { PERIOD_LABEL } from "../../lib/symbol";
-import { useCell, useLayoutStore, type WindowState } from "../../stores/layout";
+import { chartNumber, chartWindows, useCell, useLayoutStore, type WindowState } from "../../stores/layout";
 import { useSelectionStore } from "../../stores/selection";
+import { CloseIcon } from "../icons";
 import { ScreenerBadge } from "../screener/ScreenerPanel";
 import { WINDOW_CONTENT } from "./contents";
 import { LinkDot } from "./LinkDot";
+import { closeWindow, LAST_CHART_REASON } from "./manage";
 
 export const tabId = (window: WindowId) => `window-tab-${window}`;
 const panelId = (group: string) => `window-panel-${group}`;
@@ -33,6 +35,36 @@ function ChartTabLabel({ id }: { id: WindowId }) {
 function TabLabel({ window }: { window: WindowState }) {
   if (window.kind === "chart") return <ChartTabLabel id={window.id} />;
   return <><span className="dock-tab-name">{WINDOW_KINDS[window.kind].name}</span>{window.kind === "screener" && <ScreenerBadge />}</>;
+}
+
+function CloseTabButton({ id, name, reason, selected, onClosed }: { id: WindowId; name: string; reason: string | null; selected: boolean; onClosed(): void }) {
+  const label = `${name} 닫기`;
+  return (
+    <button type="button" className="dock-tab-close" aria-label={label} title={reason ?? label} disabled={reason !== null} tabIndex={selected ? 0 : -1}
+      onClick={() => { if (closeWindow(id, name)) onClosed(); }}>
+      <CloseIcon size={12} />
+    </button>
+  );
+}
+
+function ChartCloseButton({ id, selected, onClosed }: { id: WindowId; selected: boolean; onClosed(): void }) {
+  const cell = useCell(id);
+  const number = useLayoutStore((s) => chartNumber(s.layout, id));
+  const alone = useLayoutStore((s) => chartWindows(s.layout).length <= 1);
+  const name = useSymbolInfo(cell.symbol).data?.name ?? cell.symbol;
+  return <CloseTabButton id={id} name={`칸 ${number} ${name}`} reason={alone ? LAST_CHART_REASON : null} selected={selected} onClosed={onClosed} />;
+}
+
+function CloseTab({ window, selected, onClosed }: { window: WindowState; selected: boolean; onClosed(): void }) {
+  if (window.kind === "chart") return <ChartCloseButton id={window.id} selected={selected} onClosed={onClosed} />;
+  return <CloseTabButton id={window.id} name={WINDOW_KINDS[window.kind].name} reason={null} selected={selected} onClosed={onClosed} />;
+}
+
+function focusShownTab(group: string) {
+  requestAnimationFrame(() => {
+    const tabs = document.querySelector(`[data-dock-group="${group}"]`) ?? document;
+    tabs.querySelector<HTMLElement>('[role=tab][aria-selected=true]')?.focus();
+  });
 }
 
 const TAB_KEYS: Record<string, (index: number, count: number) => number> = {
@@ -76,6 +108,7 @@ export function DockGroup({ group, rect, number }: { group: GroupNode; rect: Rec
                 <TabLabel window={window} />
               </button>
               <LinkDot window={window} selected={selected} />
+              <CloseTab window={window} selected={selected} onClosed={() => focusShownTab(group.id)} />
             </Fragment>
           );
         })}
