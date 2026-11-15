@@ -249,6 +249,7 @@ export class DrawingSync {
       if (!started) return false;
       this.outbox = started.outbox;
       const { want, symbol } = started.send;
+      const awaitedAtSend = this.awaitsLayoutSave(want);
       const sending = want.kind === "delete" ? deleteJson(drawingPath(id), { keepalive }) : putJson<Drawing>(drawingPath(id), want.body, { keepalive });
       this.updateSave();
       void sending.then(async (saved) => {
@@ -262,7 +263,7 @@ export class DrawingSync {
         this.settle(id, { kind: "ok" });
       }).catch((e: unknown) => {
         const outcome: queue.Outcome = e instanceof ApiRequestError && e.code === "stale_revision" ? { kind: "stale" }
-          : e instanceof ApiRequestError && e.code === "bad_request" && this.awaitsLayoutSave(want) ? { kind: "networkError" }
+          : e instanceof ApiRequestError && e.code === "bad_request" && (awaitedAtSend || this.awaitsLayoutSave(want)) ? { kind: "networkError" }
           : e instanceof ApiRequestError && (e.code === "bad_request" || e.code === "payload_too_large" || e.code === "not_found") ? { kind: "clientError", tooLarge: e.code === "payload_too_large" }
           : { kind: "networkError" };
         this.settle(id, outcome);

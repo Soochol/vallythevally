@@ -1,4 +1,5 @@
 import type { LayoutInput } from "../api/generated/LayoutInput";
+import { ApiRequestError } from "../api/http";
 import type { UiState } from "../api/generated/UiState";
 import type { Watchlists } from "../api/generated/Watchlists";
 import { fetchWatchlists, layoutPath, UI_STATE_PATH, WATCHLISTS_PATH } from "../api/userData";
@@ -91,6 +92,10 @@ export function startAutosave(deps: AutosaveDeps): Autosave {
         const saved = await deps.put(path, json, opts);
         serverCharts = charts;
         return saved;
+      } catch (e) {
+        const known = serverCharts;
+        serverCharts = known && !(e instanceof ApiRequestError && e.code === "stale_revision") ? new Set([...known].filter((id) => charts.has(id))) : null;
+        throw e;
       } finally {
         sendingCharts.delete(charts);
       }

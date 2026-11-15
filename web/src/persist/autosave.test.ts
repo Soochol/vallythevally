@@ -110,6 +110,29 @@ test("서버가 가진 차트 창은 보낸 레이아웃이 성공한 뒤에 바
   expect(serverMayLackChart(CELL)).toBe(false);
 });
 
+test("결과를 모르는 레이아웃 저장 뒤에는 보낸 본문에 없던 차트 창도 서버에 없을 수 있고, stale이면 모두 모른다", async () => {
+  autosave.stop();
+  const second = windowId("second");
+  let reply: () => Promise<void> = async () => { throw new TypeError("connection reset"); };
+  autosave = startAutosave({
+    put: (path, json, { keepalive }) => { puts.push({ path, body: JSON.parse(json), keepalive }); return reply(); },
+    toast: (t) => toasts.push(t),
+    revisions: { layout: 0, ui: 0, watchlist: 0 },
+    serverCharts: [CELL, second],
+    unsaved: () => undefined,
+  });
+  expect(serverMayLackChart(second)).toBe(false);
+  useLayoutStore.getState().setPeriod(CELL, "W");
+  await vi.advanceTimersByTimeAsync(1000);
+  expect(puts).toHaveLength(1);
+  expect(serverMayLackChart(second)).toBe(true);
+  expect(serverMayLackChart(CELL)).toBe(false);
+  reply = async () => { throw new ApiRequestError("stale_revision", "더 새 편집"); };
+  useLayoutStore.getState().setPeriod(CELL, "M");
+  await vi.advanceTimersByTimeAsync(10_000);
+  expect(serverMayLackChart(CELL)).toBe(true);
+});
+
 test("UI 설정을 바꾸면 모르는 키와 함께 UiState를 보낸다", async () => {
   useUiStore.getState().setIndicatorWindow("inspector");
   await vi.advanceTimersByTimeAsync(1000);

@@ -423,6 +423,81 @@ test("저장하지 못한 레이아웃 사본으로 다시 열어도 서버가 �
   expect(drawingPuts).toBe(1);
 });
 
+const scopeRejected = { status: 400, body: { error: { code: "bad_request", message: "드로잉 범위의 레이아웃이나 차트 창이 없습니다", reason: null, retryAt: null, manualActionRequired: false } } };
+
+test("새 창 레이아웃이 서버에 닿기 전에 거절된 드로잉은 그 응답이 레이아웃 저장 뒤에 와도 다시 보낸다", async ({ page, scenario }) => {
+  drawInCells(scenario);
+  let releaseLayout = () => {};
+  const layoutGate = new Promise<void>((resolve) => { releaseLayout = resolve; });
+  let releaseDrawing = () => {};
+  const drawingGate = new Promise<void>((resolve) => { releaseDrawing = resolve; });
+  let layoutPuts = 0;
+  let layoutAnswered = false;
+  scenario.on((url, request) => isPut("/api/layouts/")(url, request) && layoutPuts++ === 0, async (request) => {
+    await layoutGate;
+    const body = scenario.documents.saveLayout(request.postDataJSON());
+    layoutAnswered = true;
+    return { body };
+  });
+  let drawingPuts = 0;
+  scenario.on((url, request) => isPut("/api/drawings/")(url, request), async (request) => {
+    drawingPuts += 1;
+    const value: DrawingInput = request.postDataJSON();
+    const known = scenario.documents.hasScope(value.scope);
+    if (drawingPuts === 1) await drawingGate;
+    return known ? { body: scenario.documents.saveDrawing(value) } : scopeRejected;
+  });
+  await page.goto("/");
+  await expect(cell(page)).toHaveAttribute("aria-busy", "false");
+  await addWindow(page, "차트");
+  await expect(cell(page, 2)).toHaveAttribute("aria-busy", "false");
+  await expect.poll(() => layoutPuts).toBe(1);
+  await drawLine(page, 2);
+  await expect.poll(() => drawingPuts).toBe(1);
+  releaseLayout();
+  await expect.poll(() => layoutAnswered).toBe(true);
+  releaseDrawing();
+  await expect.poll(() => scenario.documents.drawings("IDX:001").length, { timeout: 15_000 }).toBe(1);
+  await expect(drawingFailed(page)).toHaveCount(0);
+});
+
+test("서버가 반영하고 연결이 끊긴 닫기 저장 뒤 되돌려 그린 드로잉은 다시 보내 저장된다", async ({ page, scenario }) => {
+  twoSamsungCharts(scenario);
+  drawInCells(scenario);
+  let layoutPuts = 0;
+  let releaseSecond = () => {};
+  const secondGate = new Promise<void>((resolve) => { releaseSecond = resolve; });
+  await page.route("**/api/layouts/**", async (route) => {
+    if (route.request().method() !== "PUT") return route.fallback();
+    layoutPuts += 1;
+    if (layoutPuts === 1) {
+      scenario.documents.saveLayout(route.request().postDataJSON());
+      return route.abort("connectionreset");
+    }
+    if (layoutPuts === 2) await secondGate;
+    return route.fallback();
+  });
+  let drawingPuts = 0;
+  scenario.on((url, request) => isPut("/api/drawings/")(url, request), (request) => {
+    drawingPuts += 1;
+    const value: DrawingInput = request.postDataJSON();
+    return scenario.documents.hasScope(value.scope) ? { body: scenario.documents.saveDrawing(value) } : scopeRejected;
+  });
+  await page.goto("/");
+  await expect(cell(page, 2)).toHaveAttribute("aria-busy", "false");
+  await closeButton(page, "칸 2 삼성전자").click();
+  await expect.poll(() => saved(scenario).windows.filter((w) => w.kind === "chart").length).toBe(1);
+  await toast(page).getByRole("button", { name: "되돌리기" }).click();
+  await expect(cell(page, 2)).toHaveAttribute("aria-busy", "false");
+  await expect.poll(() => layoutPuts).toBe(2);
+  await drawLine(page, 2);
+  await expect.poll(() => drawingPuts).toBe(1);
+  await expect(drawingFailed(page)).toHaveCount(0);
+  releaseSecond();
+  await expect.poll(() => scenario.documents.drawings("005930").map((d) => d.scope), { timeout: 15_000 }).toEqual([{ kind: "cell", layoutId: DEFAULT_LAYOUT_ID, windowId: "cell-1" }]);
+  await expect(drawingFailed(page)).toHaveCount(0);
+});
+
 test("창 더하기 메뉴와 탭의 닫기 버튼을 키보드만으로 쓴다", async ({ page }) => {
   await page.goto("/");
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
