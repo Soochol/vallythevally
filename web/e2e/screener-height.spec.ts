@@ -4,7 +4,7 @@ import { currentResult, runError } from "./fixtures/screener";
 import type { Screen } from "../src/api/generated/Screen";
 import { cell, chartOf, expect, test } from "./screener-harness";
 import { closeEditorWindow, expandEditor } from "./sentence-editor";
-import { openResultDetails, openScreener, panel, results, rows, runButton, storeLine, updateBand, waitForUpdateToFinish } from "./screener-page";
+import { openResultDetails, openScreener, panel, results, rowOf, rows, runButton, storeLine, updateBand, waitForUpdateToFinish } from "./screener-page";
 
 
 const screen: Screen = {
@@ -86,8 +86,8 @@ for (const { width, height } of surfaces) {
     await expect(rows(page)).toHaveCount(10);
     await openResultDetails(page);
     const original = await metadata(page).textContent();
-    const first = rows(page).filter({ hasText: "110010" });
-    const last = rows(page).filter({ hasText: "110040" });
+    const first = rowOf(page, "110010");
+    const last = rowOf(page, "110040");
     const success = await rowGeometry(first);
     await page.screenshot({ path: info.outputPath("success.png"), fullPage: true });
     const held = scenario.hold("/api/screener/run");
@@ -118,7 +118,7 @@ for (const { width, height } of surfaces) {
     await page.keyboard.press("ArrowUp");
     await expectChart(page, "가상신규");
     if (width! < 768) await openPanel(page, width!);
-    const selected = rows(page).filter({ hasText: "110090" });
+    const selected = rowOf(page, "110090");
     await expect(selected.getByRole("button")).toHaveAttribute("aria-current", "true");
     const keyboardGeometry = await rowGeometry(selected, false);
     expectWholeRow(keyboardGeometry);
@@ -182,7 +182,7 @@ for (const [width, height] of [[320, 568], [1280, 600]]) {
     await page.screenshot({ path: info.outputPath("long-error-start.png"), fullPage: true });
     await alert.evaluate((e) => e.scrollIntoView({ block: "end" }));
     await page.screenshot({ path: info.outputPath("long-error-end.png"), fullPage: true });
-    const first = rows(page).filter({ hasText: "110010" });
+    const first = rowOf(page, "110010");
     const geometry = await rowGeometry(first);
     expectWholeRow(geometry);
     await writeFile(info.outputPath("long-error-geometry.json"), JSON.stringify(geometry, null, 2));
