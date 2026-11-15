@@ -42,17 +42,6 @@ export const ChevronIcon = ({ size = 12 }: P) => (
     <path d="m7 10 5 5 5-5" />
   </Icon>
 );
-export const SunIcon = ({ size }: P) => (
-  <Icon size={size}>
-    <circle cx="12" cy="12" r="4" />
-    <path d="M12 2.5v2M12 19.5v2M2.5 12h2M19.5 12h2M5.3 5.3l1.4 1.4M17.3 17.3l1.4 1.4M5.3 18.7l1.4-1.4M17.3 6.7l1.4-1.4" />
-  </Icon>
-);
-export const MoonIcon = ({ size }: P) => (
-  <Icon size={size}>
-    <path d="M19 14.5A7.5 7.5 0 0 1 9.5 5a7.5 7.5 0 1 0 9.5 9.5z" />
-  </Icon>
-);
 export const ChartIcon = ({ size }: P) => (
   <Icon size={size}>
     <path d="M4 4v16h16" />
@@ -67,11 +56,6 @@ export const CheckIcon = ({ size = 14 }: P) => (
 export const PlusIcon = ({ size = 16 }: P) => (
   <Icon size={size}>
     <path d="M12 5v14M5 12h14" />
-  </Icon>
-);
-export const ChevronRightIcon = ({ size = 16, flip = false }: P & { flip?: boolean }) => (
-  <Icon size={size}>
-    <path d={flip ? "m14.5 6-6 6 6 6" : "m9.5 6 6 6-6 6"} />
   </Icon>
 );
 export const CloseIcon = ({ size = 14 }: P) => (

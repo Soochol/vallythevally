@@ -4,12 +4,13 @@ import { useLayoutStore } from "../../stores/layout";
 import { PlusIcon } from "../icons";
 import { Menu, type MenuItem } from "../menu/Menu";
 import { addWindow, CHART_LIMIT_REASON, workspaceRoom } from "./manage";
+import { focusWithoutActivation } from "./focus";
 
 function kindItem(kind: WindowKind, count: number, targetGroup?: string): MenuItem {
   const { name, maxCount } = WINDOW_KINDS[kind];
   const onSelect = () => {
     const id = addWindow(kind, workspaceRoom(), targetGroup);
-    if (targetGroup && id) requestAnimationFrame(() => document.getElementById(`window-tab-${id}`)?.focus());
+    if (targetGroup && id) requestAnimationFrame(() => focusWithoutActivation(document.getElementById(`window-tab-${id}`)));
   };
   if (maxCount > 1) {
     const full = count >= maxCount;

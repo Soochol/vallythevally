@@ -42,6 +42,8 @@ export interface CompareRow {
   last: Bar | null;
 }
 
+export type CompareLegendValues = Pick<CompareRow, "code"> & { values: readonly CompareRow["value"][] };
+
 export interface CompareHost {
   chart: IChartApi;
   tokens(): ThemeTokens;
@@ -84,6 +86,11 @@ const hasTime = (xs: readonly Bar[], t: UnixSeconds) => xs[atOrAfter(xs, t)]?.t 
 function atOrBefore(xs: readonly Bar[], t: UnixSeconds): number {
   const i = atOrAfter(xs, t);
   return xs[i]?.t === t ? i : i - 1;
+}
+
+function legendValue(base: Bar | undefined, at: Bar | undefined): Pick<CompareRow, "value" | "dir"> {
+  const pct = base && at && at.t >= base.t ? (at.c / base.c - 1) * 100 : null;
+  return { value: pct === null ? "—" : formatPercent(pct), dir: pct === null ? "flat" : direction(pct) };
 }
 
 const firstT = (h: History | null): UnixSeconds | null => (h ? (h.bars[0] ?? h.current)?.t ?? null : null);
@@ -237,7 +244,6 @@ export class CompareLayer {
         const pts = line.points;
         const base = leftT === null ? undefined : pts[atOrAfter(pts, leftT)];
         const at = hoverT === null ? undefined : pts[atOrBefore(pts, hoverT)];
-        const pct = base && at && at.t >= base.t ? (at.c / base.c - 1) * 100 : null;
         const first = firstT(line.history);
         const notes: string[] = [];
         if (line.status === "failed" || line.status === "missing") notes.push(COMPARE_NOTE[line.status]);
@@ -247,13 +253,22 @@ export class CompareLayer {
           code: line.entry.code,
           name: line.entry.name,
           color: tokens.cmp[line.entry.slot],
-          value: pct === null ? "—" : formatPercent(pct),
-          dir: pct === null ? "flat" : direction(pct),
+          ...legendValue(base, at),
           notes,
           failed: line.status === "failed" || line.status === "missing",
           last: pts[pts.length - 1] ?? null,
         };
       });
+  }
+
+  legendValues(leftT: UnixSeconds | null): readonly CompareLegendValues[] {
+    return [...this.lines.values()].map((line) => {
+      const start = leftT === null ? line.points.length : atOrAfter(line.points, leftT);
+      const base = line.points[start];
+      const values = [legendValue(base, undefined).value];
+      for (let i = start; i < line.points.length; i++) values.push(legendValue(base, line.points[i]).value);
+      return { code: line.entry.code, values };
+    });
   }
 
   setTheme(): void {
@@ -318,6 +333,7 @@ export class CompareLayer {
     }
     line.pages++;
     line.older = "loading";
+    this.host.requestFrame();
     line.feed.needOlder();
   }
 

@@ -45,7 +45,6 @@ export function DrawingToolbar() {
     };
     window.addEventListener("keydown", key); return () => window.removeEventListener("keydown", key);
   }, []);
-  useLegendClearance(root, moved);
   const setTool = (tool: Tool) => { useDrawingSession.getState().setTool(tool.tool); surfaceFor(cellId)?.focus(); };
   const setPrefs = useUiStore.getState().setDrawingPrefs;
   const action = (f: () => void) => { f(); surfaceFor(cellId)?.focus(); };
@@ -85,56 +84,8 @@ export function DrawingToolbar() {
   </nav>;
 }
 
-const LEGEND_CLEARANCE_GAP = 8;
-
-const legendRows = (legend: Element) => [...legend.children].flatMap((child) => getComputedStyle(child).flexDirection === "column" ? [...child.children] : [child]);
-
-function legendMeetsBar(legend: Element, bar: DOMRect, shift: number) {
-  const range = document.createRange();
-  return legendRows(legend).some((row) => {
-    range.selectNodeContents(row);
-    const text = range.getBoundingClientRect();
-    if (text.width === 0) return false;
-    const top = text.top - shift;
-    return top < bar.bottom && text.right + LEGEND_CLEARANCE_GAP > bar.left;
-  });
-}
-
-function useLegendClearance(root: RefObject<HTMLElement | null>, moved: boolean) {
-  useEffect(() => {
-    const bar = root.current;
-    const stage = bar?.parentElement;
-    if (!bar || !stage) return;
-    if (moved) {
-      stage.style.setProperty("--legend-shift", "0px");
-      return () => stage.style.removeProperty("--legend-shift");
-    }
-    let watchedLegend: Element | null = null;
-    let shifted = false;
-    const update = (layoutChanged: boolean) => {
-      const legend = stage.querySelector(".chart-legend");
-      if (legend !== watchedLegend) {
-        if (watchedLegend) observer.unobserve(watchedLegend);
-        if (legend) observer.observe(legend);
-        watchedLegend = legend;
-      }
-      if (shifted && !layoutChanged) return;
-      shifted = legend !== null && bar.offsetParent !== null && legendMeetsBar(legend, bar.getBoundingClientRect(), shifted ? bar.offsetHeight : 0);
-      stage.style.setProperty("--legend-shift", shifted ? `${bar.offsetHeight}px` : "0px");
-    };
-    const observer = new ResizeObserver((entries) => update(entries.some((entry) => entry.target === bar || entry.target === stage)));
-    observer.observe(bar);
-    observer.observe(stage);
-    update(true);
-    return () => {
-      observer.disconnect();
-      stage.style.removeProperty("--legend-shift");
-    };
-  }, [root, moved]);
-}
-
 interface DockLayout { area: Size; size: Size; home: Spot; spot: Spot; margin: number }
-interface DockGrab { x: number; y: number; start: Spot; at: Spot | null }
+interface DockGrab { x: number; y: number; start: Spot; home: Spot; at: Spot | null }
 
 const ARROW_STEPS: Record<string, [number, number]> = { ArrowLeft: [-DOCK_STEP, 0], ArrowRight: [DOCK_STEP, 0], ArrowUp: [0, -DOCK_STEP], ArrowDown: [0, DOCK_STEP] };
 
@@ -170,38 +121,49 @@ function useDockPlacement(root: RefObject<HTMLElement | null>, run: RefObject<HT
       const homeSlots = slotsWithin(end - resting);
       const natural = base + Math.min(count, homeSlots) * slot;
       const homeLeft = slot > 0 ? Math.max(edge, Math.min(resting, end - natural)) : center - Math.max(least, Math.min(base, area.width - reserve)) / 2;
-      const home = { left: Math.max(margin, homeLeft), top: margin };
+      const normalWidth = Math.max(least, Math.min(natural, slot > 0 ? end - homeLeft : area.width - reserve));
+      const normal = [Math.max(margin, homeLeft), margin, normalWidth, bar.offsetHeight].join(",");
+      if (bar.dataset.dockNormal !== normal) bar.dataset.dockNormal = normal;
+      const compact = stage.hasAttribute("data-legend-beside");
+      const compactLeft = parseFloat(stage.style.getPropertyValue("--legend-dock-left"));
+      const compactWidth = parseFloat(stage.style.getPropertyValue("--legend-dock-width"));
+      const home = compact ? { left: compactLeft, top: 8 } : { left: Math.max(margin, homeLeft), top: margin };
       const freeMax = area.width - 2 * edge;
-      const size = { width: Math.min(freeMax, Math.max(least, natural)), height: bar.offsetHeight };
-      if (slot > 0) setRoom(homeSlots);
+      const size = { width: Math.min(freeMax, compact ? Math.min(compactWidth, natural) : Math.max(least, natural)), height: bar.offsetHeight };
+      if (slot > 0) setRoom(compact ? slotsWithin(compactWidth) : homeSlots);
       const target = grab.current?.at ?? (at && spotOf(at, area, size));
       if (!target) {
         if (slot > 0) {
           bar.style.setProperty("--dock-shift", `${homeLeft - center}px`);
           bar.style.setProperty("--dock-max", `${end - homeLeft}px`);
         }
-        layout.current = { area, size, home, spot: home, margin };
+        const homeSize = compact ? { width: Math.min(compactWidth, natural), height: size.height } : size;
+        layout.current = { area, size: homeSize, home, spot: home, margin };
         return;
       }
       const spot = clampSpot(target, area, size, margin);
       bar.style.setProperty("--dock-left", `${spot.left}px`);
       bar.style.setProperty("--dock-top", `${spot.top}px`);
-      bar.style.setProperty("--dock-max", `${size.width < natural ? size.width : freeMax}px`);
+      bar.style.setProperty("--dock-max", `${compact || size.width < natural ? size.width : freeMax}px`);
       layout.current = { area, size, home, spot, margin };
     };
     place.current = fit;
     const observer = new ResizeObserver(fit);
     observer.observe(bar);
     observer.observe(stage);
+    const presentation = new MutationObserver(fit);
+    presentation.observe(stage, { attributes: true, attributeFilter: ["data-legend-beside", "style"] });
     fit();
     return () => {
       observer.disconnect();
+      presentation.disconnect();
+      delete bar.dataset.dockNormal;
       for (const name of ["--dock-shift", "--dock-max", "--dock-left", "--dock-top"]) bar.style.removeProperty(name);
     };
   }, [root, run, count, at, moved]);
   const settle = (spot: Spot) => {
     const l = layout.current;
-    if (l) saveDockAt(settleSpot(spot, clampSpot(l.home, l.area, l.size, l.margin), l.area, l.size));
+    if (l) saveDockAt(settleSpot(spot, clampSpot(grab.current?.home ?? l.home, l.area, l.size, l.margin), l.area, l.size));
   };
   const release = () => { grab.current = null; setHeld(false); };
   const controls = {
@@ -209,7 +171,8 @@ function useDockPlacement(root: RefObject<HTMLElement | null>, run: RefObject<HT
       const bar = root.current; const stage = bar?.parentElement;
       if (!bar || !stage) return;
       const own = bar.getBoundingClientRect(); const box = stage.getBoundingClientRect();
-      grab.current = { x, y, start: { left: own.left - box.left - stage.clientLeft, top: own.top - box.top - stage.clientTop }, at: null };
+      const start = { left: own.left - box.left - stage.clientLeft, top: own.top - box.top - stage.clientTop };
+      grab.current = { x, y, start, home: layout.current?.home ?? start, at: null };
     },
     drag(x: number, y: number) {
       const g = grab.current;

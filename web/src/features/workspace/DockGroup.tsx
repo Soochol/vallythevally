@@ -13,6 +13,7 @@ import type { DockInteraction } from "./dockInteraction";
 import { WINDOW_CONTENT } from "./contents";
 import { LinkDot } from "./LinkDot";
 import { closeWindow, LAST_CHART_REASON } from "./manage";
+import { focusWithoutActivation } from "./focus";
 
 export const tabId = (window: WindowId) => `window-tab-${window}`;
 const panelId = (group: string) => `window-panel-${group}`;
@@ -65,7 +66,7 @@ function CloseTab({ window, selected, onClosed }: { window: WindowState; selecte
 function focusShownTab(group: string) {
   requestAnimationFrame(() => {
     const tabs = document.querySelector(`[data-dock-group="${group}"]`) ?? document;
-    tabs.querySelector<HTMLElement>('[role=tab][aria-selected=true]')?.focus();
+    focusWithoutActivation(tabs.querySelector<HTMLElement>('[role=tab][aria-selected=true]'));
   });
 }
 
@@ -90,7 +91,7 @@ export function DockGroup({ group, rect, number, interaction }: { group: GroupNo
     event.preventDefault();
     const to = group.tabs[step(group.tabs.indexOf(from), group.tabs.length)]!;
     select(to);
-    document.getElementById(tabId(to))?.focus();
+    focusWithoutActivation(document.getElementById(tabId(to)));
   };
   return (
     <div data-dock-group={group.id} data-kind={shown.kind} data-active-cell={shown.id === activeCell ? "" : undefined} className="dock-group"

@@ -3,6 +3,7 @@ import type { WindowId, WindowKind } from "../../layout/kinds";
 import { chartWindows, fittedDock, type DockRoom, useLayoutStore } from "../../stores/layout";
 import { type ToastUndo, useSelectionStore } from "../../stores/selection";
 import { DOCK_GAP } from "./size";
+import { focusAfterClose } from "./focus";
 
 export const LAST_CHART_REASON = "차트 창은 하나 이상 있어야 합니다";
 export const CHART_LIMIT_REASON = "차트 창은 8개까지 둘 수 있습니다";
@@ -38,9 +39,15 @@ export function latestArrangementUndo(): ToastUndo {
 export function closeWindow(id: WindowId, name: string): boolean {
   const state = useLayoutStore.getState();
   const selection = useSelectionStore.getState();
+  const focusedHeader = globalThis.document?.activeElement?.closest<HTMLElement>("[data-window-header]")?.dataset.windowHeader === id;
   const replacement = selection.activeCell === id ? chartWindows(state.layout).find((window) => window.id !== id)?.id : undefined;
   if (!state.closeWindow(id, replacement)) return false;
   if (replacement) selection.setActiveCell(replacement);
+  if (focusedHeader) requestAnimationFrame(() => {
+    if (useLayoutStore.getState().session !== state.session) return;
+    if (document.activeElement !== document.body) return;
+    focusAfterClose(replacement ?? useSelectionStore.getState().activeCell);
+  });
   selection.showToast(`${name} 창을 닫았습니다`, latestArrangementUndo());
   return true;
 }

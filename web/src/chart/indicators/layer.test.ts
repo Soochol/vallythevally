@@ -109,7 +109,7 @@ const tail = (gen: number, draws: Draws): Exclude<FromWorker, { type: "fatal" }>
   results: [{ id: ICHIMOKU.id, gen, ok: true, draws: inLineOrder(draws) }],
 });
 
-function fixture(period: "1m" | "Q" | "Y" = "1m", configs: IndicatorConfig[] = [ICHIMOKU], panels: Panel[] = []) {
+function fixture(period: "1m" | "Q" | "Y" = "1m", configs: IndicatorConfig[] = [ICHIMOKU], panels: Panel[] = [], isIndex = false) {
   expect(specLines(ICHIMOKU.spec)).toEqual(LINES);
   const series: FakeSeries[] = [];
   const active: FakeSeries[] = [];
@@ -131,7 +131,7 @@ function fixture(period: "1m" | "Q" | "Y" = "1m", configs: IndicatorConfig[] = [
     panes: () => [],
   };
   const layer = new IndicatorLayer(
-    { chart: chart as unknown as IChartApi, tokens: () => theme.tokens, isIndex: () => false, period: () => period, requestFrame: () => {}, axisFormatted: () => {}, axisCoordinates: () => [], axisFailed: () => {}, guard: (draw) => draw() },
+    { chart: chart as unknown as IChartApi, tokens: () => theme.tokens, isIndex: () => isIndex, period: () => period, requestFrame: () => {}, axisFormatted: () => {}, axisCoordinates: () => [], axisFailed: () => {}, guard: (draw) => draw() },
     (listener) => {
       port.listener = listener;
       return { chart: 1, post: (m) => sent.push(m), close: () => {} };
@@ -710,4 +710,89 @@ test("그리지 않은 실시간 갱신이 남은 채 과거 페이지를 붙여
   expect(f.series.flatMap((s) => s.rejected)).toEqual([]);
   expect(consoleError).not.toHaveBeenCalled();
   expect(f.line("conversion").data.slice(-2)).toEqual([drawn(20, 7, close(20)), drawn(21, 8, close(21))]);
+});
+
+test("가격 범례 원천은 주 봉 밖의 이동된 시각과 결측값을 실제 rows 표시와 같은 슬롯으로 담는다", () => {
+  const f = fixture();
+  f.layer.reset({ bars: CONFIRMED, current: null, nextBefore: null });
+  expect(f.layer.priceLegendValues()).toEqual([{ id: "ichi", slots: [] }]);
+  f.reply(created(1, { conversion: set(range(0, 19), 123456), base: set(range(0, 19), 1), spanA: set(range(5, 24), 9999999), spanB: set(range(5, 24), -100), lagging: set(range(0, 14), 0.01) }));
+  const choices = f.layer.priceLegendValues();
+  expect(choices[0]?.slots[2]).toContain("9,999,999");
+  expect(choices[0]?.slots[0]).toContain("—");
+  for (const t of [null, ...range(0, 24).map(at)]) for (const row of f.layer.rows(t).filter((row) => !row.panel)) {
+    row.values.forEach((value, slot) => expect(choices.find((choice) => choice.id === row.id)?.slots[slot]).toContain(value.text));
+  }
+  expect(f.layer.rows(at(24))[0]?.values[2]?.text).toBe("9,999,999");
+  f.layer.clear();
+  expect(f.layer.priceLegendValues()).toEqual([{ id: "ichi", slots: [] }]);
+  f.layer.setConfigs([], []);
+  expect(f.layer.priceLegendValues()).toEqual([]);
+  f.layer.dispose();
+});
+
+
+test("가격 범례 원천은 pending·hidden·error·패널 이동과 재계산 뒤의 현재 상태만 남긴다", () => {
+  const f = fixture();
+  f.layer.reset({ bars: CONFIRMED, current: null, nextBefore: null });
+  const check = () => {
+    const choices = f.layer.priceLegendValues();
+    for (const t of [null, ...range(0, 24).map(at)]) for (const row of f.layer.rows(t).filter((row) => !row.panel)) {
+      row.values.forEach((value, i) => expect(choices.find((choice) => choice.id === row.id)?.slots[i]).toContain(value.text));
+    }
+    return choices;
+  };
+  expect(check()[0]?.slots).toEqual([]);
+  f.reply(created(1));
+  expect(check()[0]?.slots).toHaveLength(5);
+  f.layer.setConfigs([{ ...ICHIMOKU, visible: false }], []);
+  expect(f.layer.rows(at(0))[0]?.state).toBe("hidden");
+  expect(check()[0]?.slots).toEqual([]);
+  f.layer.setConfigs([ICHIMOKU], []);
+  expect(f.layer.rows(at(0))[0]?.state).toBe("pending");
+  expect(check()[0]?.slots).toEqual([]);
+  f.reply(created(latestCreate(f).gen));
+  f.breakWorker();
+  expect(f.layer.rows(at(0))[0]?.state).toBe("calc");
+  expect(check()[0]?.slots).toEqual([]);
+  f.layer.setConfigs([{ ...ICHIMOKU, panel: "p" }], [{ id: "p", stretch: .25 }]);
+  expect(check()).toEqual([]);
+  f.layer.setConfigs([{ ...ICHIMOKU, panel: "missing" }], []);
+  expect(check()).toHaveLength(1);
+  f.layer.dispose();
+});
+
+test("재무 패널의 실제 등록 시각은 기술 결측값에 포함되고 재무 텍스트는 가격 원천에 들어오지 않는다", () => {
+  const financial: IndicatorConfig = { id: "finance", spec: { kind: "debt_ratio" }, panel: "missing", visible: true, style: { colors: ["ind-1"], width: 1 } };
+  const f = fixture("Q", [ICHIMOKU, financial]);
+  f.layer.reset({ bars: CONFIRMED, current: null, nextBefore: null });
+  f.reply(created(1, perLine(() => set(range(0, 19), 1))));
+  expect(f.layer.priceLegendValues()[0]?.slots.every((slot) => !slot.includes("—"))).toBe(true);
+  const point: FinancialPoint = { businessYear: 2026, reportCode: "11013", status: "available", reason: null, value: 987654321, reportedValue: null, period: { kind: "instant", date: "2026-03-31" }, priceBucket: at(25), basis: "CFS", currency: "KRW", inputs: [] };
+  const page: FinancialsPage = { symbol: "005930", period: "Q", status: "ready", reason: null, failure: null, corpCode: null, fiscalMonth: 3, shareClass: null, shareClassReason: null, lastCheckedAt: null, lastAttemptAt: null, disclosureFailure: null, refreshVersion: 0, disclosureVersion: 0, latestCorrections: true, progress: { total: 1, completed: 1, failed: 0, pending: 0 }, series: [{ metric: "debt_ratio", points: [point] }] };
+  f.layer.setFinancials(page);
+  const choices = f.layer.priceLegendValues();
+  expect(choices.map((row) => row.id)).toEqual(["ichi"]);
+  expect(choices[0]?.slots.every((slot) => slot.includes("—"))).toBe(true);
+  const finance = f.layer.rows(at(25)).find((row) => row.id === "finance");
+  expect(finance?.panel).toMatchObject({ index: -1 });
+  expect(finance?.values[0]?.text).toContain("987,654,321");
+  expect(JSON.stringify(choices)).not.toContain("987,654,321");
+  f.layer.setFinancials(null);
+  expect(f.layer.priceLegendValues()[0]?.slots.every((slot) => !slot.includes("—"))).toBe(true);
+  f.layer.dispose();
+});
+
+
+test.each([false, true])("가격·지수·소수 지표·거래량의 원천 슬롯은 각각의 실제 표시 formatter를 따른다 (지수=%s)", (isIndex) => {
+  const configs = [{ ...HIDDEN_MA, visible: true }, { ...RSI, panel: "price" }, { ...VOLUME, panel: "price" }];
+  const f = fixture("1m", configs, [], isIndex);
+  f.layer.reset({ bars: [{ ...bar(0), v: 2000000 }, { ...bar(1), v: 3000000 }], current: null, nextBefore: null });
+  f.reply({ type: "created", chart: 1, results: configs.filter((config) => config.spec.kind !== "volume").map((config) => ({ id: config.id, gen: latestCreate(f).gen, ok: true, lines: specLines(config.spec).filter((id) => id !== "financial").map((id) => ({ id, shift: 0 })), draws: specLines(config.spec).map(() => set([0, 1], 123.456)) })) });
+  const choices = f.layer.priceLegendValues();
+  expect(choices.find((row) => row.id === HIDDEN_MA.id)?.slots[0]).toContain(isIndex ? "123.46" : "123");
+  expect(choices.find((row) => row.id === RSI.id)?.slots[0]).toContain("123.46");
+  expect(choices.find((row) => row.id === VOLUME.id)?.slots[0]).toContain("200만");
+  for (const t of [null, at(0), at(1)]) for (const row of f.layer.rows(t)) row.values.forEach((value, i) => expect(choices.find((choice) => choice.id === row.id)?.slots[i]).toContain(value.text));
+  f.layer.dispose();
 });
