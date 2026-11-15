@@ -1,6 +1,6 @@
 import type { Page } from "@playwright/test";
 import { cell, chartOf, expect, test } from "./harness";
-import { chartPoint, drawings, mirror, open, pickTool, settledMirror } from "./drawing-probe";
+import { chartPoint, drawings, mirror, open, pickTool, settledMirror, expandDock } from "./drawing-probe";
 
 async function clickAt(page: Page, spots: readonly (readonly [number, number])[]) {
   for (const [fx, fy] of spots) {
@@ -20,7 +20,7 @@ test("피보나치 되돌림과 확장을 놓고, 수준을 끄고, 새로고침
   await clickAt(page, [[0.2, 0.3], [0.4, 0.6]]);
   await expect.poll(async () => (await drawings(scenario)).map((d) => [d.tool, d.points.length])).toEqual([["fib", 2]]);
 
-  await expect(page.getByRole("navigation", { name: "드로잉 도구" }).getByRole("button", { name: "피보나치·갠 도구 펼치기", exact: true })).toBeVisible();
+  await expect((await expandDock(page)).getByRole("button", { name: "피보나치·갠 도구 펼치기", exact: true })).toBeVisible();
   await pickTool(page, "피보나치·갠", "피보나치 확장");
   await clickAt(page, [[0.55, 0.65], [0.7, 0.3], [0.82, 0.5]]);
   await expect.poll(async () => (await drawings(scenario)).map((d) => [d.tool, d.points.length]).sort()).toEqual([["fib", 2], ["fibext", 3]]);

@@ -1,6 +1,7 @@
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import { cell, expect, test } from "./harness";
+import { expandDock } from "./drawing-probe";
 
 test("공통 메뉴는 잘리지 않고 선택·키보드·포커스와 마지막 분봉 복원을 지원한다", async ({ scenario, page }) => {
   await page.goto("/?symbol=005930");
@@ -46,12 +47,13 @@ test("공통 메뉴는 잘리지 않고 선택·키보드·포커스와 마지�
   await expect(minutes).toHaveText("5분");
   await minutes.click();
   await expect(cell(page)).toHaveAttribute("aria-label", /5분/);
+  await expandDock(page);
   const magnet = page.getByRole("button", { name: "자석", exact: true });
   await magnet.click({ button: "right" });
   await page.getByRole("menuitemradio", { name: "강", exact: true }).click();
   await expect(magnet).toBeFocused();
   await expect.poll(async () => scenario.documents.uiPrefs().drawing.magnetStrength).toBe("strong");
-  await page.reload(); await magnet.click({ button: "right" });
+  await page.reload(); await expandDock(page); await magnet.click({ button: "right" });
   await expect(page.getByRole("menuitemradio", { name: "강", exact: true })).toHaveAttribute("aria-checked", "true");
   await page.keyboard.press("Escape"); await expect(magnet).toBeFocused();
   await magnet.hover(); await page.mouse.down();
@@ -111,6 +113,7 @@ test("되돌릴 수 있는 드로잉 삭제는 공통 알림에서 복원한다"
   const drawings = async () => scenario.documents.drawings("005930") as { id: string }[];
   await expect.poll(async () => (await drawings()).length).toBe(1);
   const original = (await drawings())[0]!.id;
+  await expandDock(page);
   await page.getByRole("button", { name: "개체 목록 열기", exact: true }).click();
   await page.getByRole("button", { name: "이 종목 드로잉 모두 지우기", exact: true }).click();
   await expect.poll(async () => (await drawings()).length).toBe(0);

@@ -257,7 +257,9 @@ test("겹친 창을 누르면 앞으로 오고 가지런히·기본 배치·크�
   await frame(page, "cell-0").getByRole("button", { name: "차트 크게 보기" }).click();
   await expect(frame(page, "cell-0")).toHaveAttribute("data-maximized", "");
   await cell(page).focus();
-  await frame(page, "cell-0").getByRole("navigation", { name: "드로잉 도구" }).getByRole("button", { name: "드로잉 단축키 도움말" }).click();
+  const tools = frame(page, "cell-0").getByRole("navigation", { name: "드로잉 도구" });
+  await tools.hover();
+  await tools.getByRole("button", { name: "드로잉 단축키 도움말" }).click();
   await expect(page.getByRole("dialog", { name: "드로잉 단축키" })).toBeVisible();
   await page.keyboard.press("Escape");
   await expect(page.getByRole("dialog", { name: "드로잉 단축키" })).toHaveCount(0);
@@ -401,6 +403,11 @@ test("겹친 차트는 맨 위만 그리기를 받고 가려진 차트도 실시
   const toolbarBox = await boxOf(toolbar), frameBox = await boxOf(frame(page, "cell-0"));
   expect(toolbarBox.x).toBeGreaterThanOrEqual(frameBox.x);
   expect(toolbarBox.x + toolbarBox.width).toBeLessThanOrEqual(frameBox.x + frameBox.width + 1);
+  await toolbar.hover();
+  await expect(toolbar.getByRole("button", { name: "드로잉 단축키 도움말" })).toBeVisible();
+  const settledToolbarBox = await boxOf(toolbar);
+  expect(settledToolbarBox.x).toBeGreaterThanOrEqual(frameBox.x);
+  expect(settledToolbarBox.x + settledToolbarBox.width).toBeLessThanOrEqual(frameBox.x + frameBox.width + 1);
   await toolbar.getByRole("button", { name: "드로잉 단축키 도움말" }).click();
   const popup = page.getByRole("dialog", { name: "드로잉 단축키" });
   await expect(popup).toBeVisible();

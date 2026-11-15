@@ -330,9 +330,18 @@ export class DrawingSurface implements ChartExtension {
     if (tool && point && t !== undefined) this.effect({ kind: "place", tool, points: [{ t, price: point.price }] });
   }
   fitPriceScale() { this.host.chart.priceScale("right").applyOptions({ autoScale: true }); }
+  private keepsDrawing() { return useUiStore.getState().prefs.drawing.keepDrawing || useDrawingSession.getState().pinnedTool !== null; }
+  private endDrawingRun() {
+    const session = useDrawingSession.getState();
+    this.input({ kind: "cancel" }); this.release(); session.setTool(null); session.select([]); useDrawingSession.setState({ popup: null });
+    if (useUiStore.getState().prefs.drawing.keepDrawing) useUiStore.getState().setDrawingPrefs({ keepDrawing: false });
+    this.focus();
+  }
   private contextMenu(e: MouseEvent) {
     if (!matchMedia(DESKTOP_QUERY).matches) return;
-    e.preventDefault(); e.stopImmediatePropagation(); this.reset(); this.focus();
+    e.preventDefault(); e.stopImmediatePropagation();
+    if (this.keepsDrawing()) { this.endDrawingRun(); return; }
+    this.reset(); this.focus();
     const hit = frameHit(this.frame(), this.local(e)); const id = hit.kind === "empty" ? null : hit.id;
     const session = useDrawingSession.getState(); if (id && !session.selected.includes(id)) session.select([id]);
     useDrawingSession.setState({ popup: { cellId: this.cellId, x: e.clientX, y: e.clientY, id, fromChart: true } });
@@ -349,7 +358,7 @@ export class DrawingSurface implements ChartExtension {
     else if (e.code === "KeyV" && !ctrl && !e.altKey && !e.shiftKey) session.setTool(null);
     else if (e.code === "KeyG" && !ctrl && !e.altKey) ui.setDrawingPrefs(e.shiftKey ? { magnetStrength: prefs.magnetStrength === "weak" ? "strong" : "weak" } : { magnet: !prefs.magnet });
     else if (e.code === "KeyH" && ctrl && e.altKey) ui.setDrawingPrefs({ hideAll: !prefs.hideAll });
-    else if (e.code === "Escape") { this.input({ kind: "cancel" }); this.release(); session.setTool(null); session.select([]); useDrawingSession.setState({ popup: null }); }
+    else if (e.code === "Escape") this.endDrawingRun();
     else if ((e.code === "Delete" || e.code === "Backspace") && session.selected.length) this.remove();
     else if (ctrl && e.code === "KeyC" && session.selected.length) this.copy();
     else if (ctrl && e.code === "KeyV" && session.clip) this.paste();

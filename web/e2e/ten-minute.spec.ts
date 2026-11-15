@@ -5,6 +5,7 @@ import type { SeriesKey } from "../src/api/bars";
 import type { Drawing } from "../src/api/generated/Drawing";
 import type { Layout } from "../src/api/generated/Layout";
 import { type Scenario, cell, chartOf, DEFAULT_LAYOUT_ID, expect, test, firstChart, withFirstChart } from "./harness";
+import { expandDock } from "./drawing-probe";
 
 const TEN_MINUTES = 600;
 
@@ -245,6 +246,7 @@ test.describe("분석 도구", () => {
       await page.getByRole("menuitem", { name: item, exact: true }).click();
     };
 
+    await expandDock(page);
     await page.getByRole("button", { name: "개체 목록 열기" }).click();
     await pick("분봉만");
     await expect.poll(savedPeriods).toEqual(["1m", "3m", "5m", "10m", "15m", "30m", "60m"]);

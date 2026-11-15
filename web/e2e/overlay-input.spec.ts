@@ -1,3 +1,4 @@
+import { expandDock } from "./drawing-probe";
 import { FinancialFixture } from "./financial-update-helpers";
 import type { Page } from "@playwright/test";
 import type { Drawing } from "../src/api/generated/Drawing";
@@ -96,7 +97,7 @@ for (const source of ["전체 막대", "선택 막대", "개체 메뉴", "차트
     await horizontalLine(page, scenario);
     const original = (await savedDrawings(scenario))[0]!;
     if (source === "전체 막대") {
-      await page.getByRole("button", { name: "개체 목록 열기", exact: true }).click();
+      await (await expandDock(page)).getByRole("button", { name: "개체 목록 열기", exact: true }).click();
       await page.getByRole("button", { name: "이 종목 드로잉 모두 지우기", exact: true }).click();
     }
     else if (source === "선택 막대") await page.getByRole("button", { name: "드로잉 지우기", exact: true }).click();

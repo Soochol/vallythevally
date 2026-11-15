@@ -4,6 +4,7 @@ import type { LayoutWindow } from "../src/api/generated/LayoutWindow";
 import { toChartTime } from "../src/chart/time";
 import { TOOLS } from "../src/chart/drawings/tools";
 import { installChartProbe } from "./chart-probe";
+import { expandDock } from "./drawing-probe";
 import { cell, chartOf, expect, type Scenario, test } from "./harness";
 
 test.use({ clockStart: "20261109100000", actionTimeout: 10_000 });
@@ -166,6 +167,7 @@ for (const pinned of [false, true]) test(`minimum canvas toolbar retains help, m
   const dock = page.getByRole("navigation", { name: "드로잉 도구" });
   const grip = dock.getByRole("button", { name: "드로잉 도구 막대 옮기기", exact: true });
   const help = dock.getByRole("button", { name: "드로잉 단축키 도움말", exact: true });
+  await expandDock(page);
   const boxes = await dock.evaluate((bar) => {
     const style = getComputedStyle(bar);
     const grip = bar.querySelector(".draw-grip");
@@ -190,6 +192,7 @@ for (const pinned of [false, true]) test(`minimum canvas toolbar retains help, m
   await page.getByRole("button", { name: "도움말 닫기", exact: true }).click();
   if (pinned) {
     const folded = dock.getByRole("button", { name: "고정 도구 펼치기", exact: true });
+    await expandDock(page);
     await fullyActionable(folded);
     await folded.click();
     const last = TOOLS.at(-1);
@@ -206,6 +209,7 @@ for (const pinned of [false, true]) test(`minimum canvas toolbar retains help, m
   await expect(cell(page)).toHaveAttribute("aria-label", "칸 1: 삼성전자 통합 일");
   await expect.poll(() => scenario.documents.layout().windows.find((window) => window.kind === "chart")?.venue).toBe("combined");
   await settle(page, 1);
+  await expandDock(page);
   const afterVenue = storedPresentation(scenario);
   const afterVenueDocuments = storedDocuments(scenario);
   await fullyActionable(grip);
@@ -232,8 +236,10 @@ for (const pinned of [false, true]) test(`minimum canvas toolbar retains help, m
   const prefs = scenario.documents.uiPrefs().drawing;
   await page.reload();
   await settle(page, 1);
+  await expandDock(page);
   expect(await dock.boundingBox()).toEqual(moved);
   expect(scenario.documents.uiPrefs().drawing).toEqual(prefs);
+  await expandDock(page);
   await fullyActionable(help);
   await help.click();
   await expect(page.getByRole("dialog", { name: "드로잉 단축키", exact: true })).toBeVisible();
@@ -292,7 +298,7 @@ test("compact controls support hover, keyboard, venue, settings, collapse, toolb
   await expect(collapse).toHaveAttribute("aria-expanded", "true");
   await settle(page, 4);
   readable(await geometry(page));
-  const help = page.getByRole("navigation", { name: "드로잉 도구" }).getByRole("button", { name: "드로잉 단축키 도움말", exact: true });
+  const help = (await expandDock(page)).getByRole("button", { name: "드로잉 단축키 도움말", exact: true });
   await help.scrollIntoViewIfNeeded();
   await help.click();
   await expect(page.getByRole("dialog", { name: "드로잉 단축키", exact: true })).toBeVisible();
@@ -369,6 +375,7 @@ test("full pinned toolbar restores normal capacity, focus, scroll and saved stat
     await quietPresentation(page);
     readable(await geometry(page));
     expect(await dock.locator(".draw-pinned [data-active-tool]").count()).toBeLessThan(capacity);
+    await expandDock(page);
     const help = dock.getByRole("button", { name: "드로잉 단축키 도움말", exact: true });
     await help.scrollIntoViewIfNeeded();
     await help.focus();
@@ -379,6 +386,8 @@ test("full pinned toolbar restores normal capacity, focus, scroll and saved stat
     await quietPresentation(page);
     await expect(help).toBeFocused();
     expect(await dock.evaluate((element) => element.scrollLeft)).toBe(scroll);
+    await help.blur();
+    await expect(dock.locator(".draw-pill")).toHaveAttribute("aria-expanded", "false");
     await page.setViewportSize({ width: 1440, height: 1600 });
     await settle(page, 4);
     await quietPresentation(page);
@@ -438,6 +447,7 @@ for (const medium of [false, true]) test(medium ? "medium height toolbar drag, c
   await quietPresentation(page);
   const dock = page.getByRole("navigation", { name: "드로잉 도구" });
   const grip = dock.getByRole("button", { name: "드로잉 도구 막대 옮기기", exact: true });
+  await expandDock(page);
   const box = await dock.boundingBox();
   const handle = await grip.boundingBox();
   if (!box || !handle) throw new Error("도구 막대가 없습니다");
@@ -487,6 +497,7 @@ for (const medium of [false, true]) test(medium ? "medium height toolbar drag, c
   expect(prefs.dockAt).not.toBeNull();
   await page.reload();
   await settle(page, count);
+  await expandDock(page);
   expect(await dock.boundingBox()).toEqual(persisted);
   expect(scenario.documents.uiPrefs().drawing).toEqual(prefs);
   const movedHandle = await grip.boundingBox();
@@ -511,6 +522,7 @@ test("native pinned boundary keeps stable frames and real help", async ({ page, 
   await settle(page, 1);
   const dock = page.getByRole("navigation", { name: "드로잉 도구" });
   const folded = dock.getByRole("button", { name: "고정 도구 펼치기", exact: true });
+  await expandDock(page);
   await folded.scrollIntoViewIfNeeded();
   const foldedBox = await folded.boundingBox();
   await folded.click();
@@ -530,11 +542,13 @@ test("native pinned boundary keeps stable frames and real help", async ({ page, 
   await writeFile(testInfo.outputPath("minimal-frames.json"), JSON.stringify({ foldedBox, frames }, null, 2));
   await page.screenshot({ path: testInfo.outputPath("minimal.png") });
   expect.soft(new Set(frames.slice(15).map((frame) => JSON.stringify(frame.toolbar))).size).toBe(1);
+  await expandDock(page);
   const help = dock.getByRole("button", { name: "드로잉 단축키 도움말", exact: true });
   await help.scrollIntoViewIfNeeded();
   await help.click();
   await expect(page.getByRole("dialog", { name: "드로잉 단축키", exact: true })).toBeVisible();
   await page.getByRole("button", { name: "도움말 닫기", exact: true }).click();
+  await expandDock(page);
   const repeated = [];
   for (const width of [1015, 1016, 1024, 1016]) {
     await page.setViewportSize({ width, height: 768 });

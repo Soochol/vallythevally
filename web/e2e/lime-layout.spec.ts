@@ -1,5 +1,6 @@
 import { selectMinute } from "./select-option";
 import { cell, expect, test } from "./harness";
+import { expandDock } from "./drawing-probe";
 
 test.use({ clockStart: "20261109100030" });
 
@@ -20,11 +21,13 @@ test("라이트 저장값도 라임 다크로 열고 분봉은 하나의 메뉴�
   for (const size of [{ width: 1440, height: 900 }, { width: 1280, height: 720 }, { width: 1024, height: 768 }, { width: 768, height: 300 }]) {
     await page.setViewportSize(size);
     await expect.poll(() => page.evaluate(() => ({ width: document.documentElement.scrollWidth - innerWidth, height: document.documentElement.scrollHeight - innerHeight }))).toEqual({ width: 0, height: 0 });
+    await expandDock(page);
     const help = page.getByRole("button", { name: "드로잉 단축키 도움말", exact: true });
     await help.scrollIntoViewIfNeeded();
     await help.click();
     await expect(page.getByRole("dialog", { name: "드로잉 단축키", exact: true })).toBeVisible();
     await page.getByRole("button", { name: "도움말 닫기", exact: true }).click();
+    await expandDock(page);
     const tools = page.getByLabel("선 도구 펼치기", { exact: true });
     await tools.scrollIntoViewIfNeeded();
     await tools.click();

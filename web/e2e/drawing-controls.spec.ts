@@ -3,6 +3,7 @@ import { resolve } from "node:path";
 import type { Drawing } from "../src/api/generated/Drawing";
 import { cell, chartOf, expect, test, type Scenario } from "./harness";
 import { selectOption } from "./select-option";
+import { expandDock } from "./drawing-probe";
 
 const drawings = async (scenario: Scenario): Promise<Drawing[]> => scenario.documents.drawings("IDX:001");
 
@@ -70,17 +71,21 @@ test("추세선 작은 막대의 색·굵기·잠금·복제·삭제 되돌리�
 
 test("드로잉 그룹의 별표 고정은 새로고침 뒤 도구와 메뉴에 복원된다", async ({ scenario, page }) => {
   await page.goto("/");
+  await expandDock(page);
   await page.getByRole("button", { name: "선 도구 펼치기", exact: true }).click();
   const pinned = page.getByRole("menuitemcheckbox", { name: "수평선 막대에 고정", exact: true });
   await pinned.click();
   await expect(pinned).toHaveAttribute("aria-checked", "true");
   await page.keyboard.press("Escape");
+  await expandDock(page);
   await expect(page.getByRole("button", { name: "수평선 고정 도구", exact: true })).toBeVisible();
   await expect(page.getByRole("contentinfo")).toContainText("자동 저장됨");
   await expect.poll(async () => scenario.documents.uiPrefs().drawing.pinnedTools).toContain("hline");
   await page.reload();
+  await expandDock(page);
   await page.getByRole("button", { name: "수평선 고정 도구", exact: true }).click();
   await expect(page.getByRole("button", { name: "수평선 고정 도구", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await expandDock(page);
   await page.getByRole("button", { name: "선 도구 펼치기", exact: true }).click();
   await expect(pinned).toHaveAttribute("aria-checked", "true");
 });

@@ -1,7 +1,7 @@
 import type { Page } from "@playwright/test";
 import { cell, chartOf, expect, saveChartShare, test, type Scenario } from "./harness";
 import { installChartProbe } from "./chart-probe";
-import { chartPoint, pickTool, settledMirror } from "./drawing-probe";
+import { chartPoint, expandDock, pickTool, settledMirror } from "./drawing-probe";
 import { TOOLS } from "../src/chart/drawings/tools";
 
 test.use({ clockStart: "20261109100030", viewport: { width: 1440, height: 900 } });
@@ -10,7 +10,10 @@ type Box = { x: number; y: number; width: number; height: number };
 
 const dock = (page: Page) => page.getByRole("navigation", { name: "드로잉 도구" });
 const grip = (page: Page) => dock(page).getByRole("button", { name: "드로잉 도구 막대 옮기기", exact: true });
-const dockBox = async (page: Page): Promise<Box> => (await dock(page).boundingBox())!;
+const dockBox = async (page: Page): Promise<Box> => {
+  await expandDock(page);
+  return (await dock(page).boundingBox())!;
+};
 const chartArea = (page: Page): Promise<Box> => dock(page).evaluate((bar) => {
   const { x, y, width, height } = bar.parentElement!.getBoundingClientRect();
   return { x, y, width, height };
@@ -43,6 +46,17 @@ async function settledDock(page: Page): Promise<Box> {
   return dockBox(page);
 }
 
+async function restingBox(page: Page): Promise<Box> {
+  let last = "";
+  await expect.poll(async () => {
+    const now = JSON.stringify(await dock(page).boundingBox());
+    const same = now === last;
+    last = now;
+    return same;
+  }).toBe(true);
+  return (await dock(page).boundingBox())!;
+}
+
 async function open(page: Page, symbol = "005930") {
   await page.goto(`/?symbol=${symbol}`);
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
@@ -51,6 +65,7 @@ async function open(page: Page, symbol = "005930") {
 }
 
 async function dragGrip(page: Page, dx: number, dy: number) {
+  await expandDock(page);
   const g = (await grip(page).boundingBox())!;
   const from = { x: g.x + g.width / 2, y: g.y + g.height / 2 };
   await page.mouse.move(from.x, from.y);
@@ -206,6 +221,7 @@ test("손잡이를 두 번 누르면 기본 자리로 돌아가고, 기본 자�
   const home = await open(page);
   await moveTo(page, middle);
   await expectSavedRatios(scenario);
+  await expandDock(page);
   await grip(page).dblclick();
   expectSameSpot(await settledDock(page), home, 1);
   await expect.poll(() => savedDockAt(scenario)).toBeNull();
@@ -253,13 +269,15 @@ test("고정 도구가 접힌 막대를 끌기 시작해도 막대가 튀지 않
   saveChartShare(scenario, 0.45);
   const state = scenario.documents.uiState();
   scenario.documents.saveUiState({ ...state, drawing: { ...scenario.documents.uiPrefs().drawing, pinnedTools: TOOLS.slice(0, 12).map((t) => t.tool) }, revision: state.revision + 1 });
-  const home = await open(page);
+  await open(page);
+  await expandDock(page);
+  const home = await restingBox(page);
   const g = (await grip(page).boundingBox())!;
   const from = { x: g.x + g.width / 2, y: g.y + g.height / 2 };
   await page.mouse.move(from.x, from.y);
   await page.mouse.down();
   await page.mouse.move(from.x + 1, from.y + 1);
-  expectSameSpot(await settledDock(page), { ...home, x: home.x + 1, y: home.y + 1 }, 0.5);
+  expectSameSpot(await restingBox(page), { ...home, x: home.x + 1, y: home.y + 1 }, 0.5);
   await page.mouse.move(from.x + 5, from.y + 5, { steps: 4 });
   await page.mouse.up();
   expectSameSpot(await settledDock(page), home, 0.5);

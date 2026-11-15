@@ -19,6 +19,7 @@ import { isTypingTarget } from "../../lib/hotkeys";
 import type { DrawingTool } from "../../chart/drawings/types";
 import type { DockAt } from "../../chart/drawings/prefs";
 import { DOCK_STEP, clampSpot, settleSpot, spotOf, type Size, type Spot } from "./dockSpot";
+import { DockHold, useDockExpansion, useHoldDockOpen } from "./dockExpansion";
 
 const hotkeysOf = (tool: DrawingTool) => TOOL_HOTKEYS.filter((h) => h.tool === tool).map((h) => h.keys);
 function toolTitle(tool: Tool, note?: string) {
@@ -36,7 +37,22 @@ export function DrawingToolbar() {
   const helpButton = useRef<HTMLButtonElement>(null);
   const pinnedRun = useRef<HTMLDivElement>(null);
   const pinnedTools = prefs.pinnedTools.flatMap((id) => toolOf(id) ?? []);
-  const { shown: shownPins, moved, controls: dock } = useDockPlacement(root, pinnedRun, pinnedTools.length, prefs.dockAt);
+  const pill = useRef<HTMLButtonElement>(null);
+  const keep = prefs.keepDrawing || pinned !== null;
+  const { shown: shownPins, moved, dragging, controls: dock } = useDockPlacement(root, pinnedRun, pinnedTools.length, prefs.dockAt, keep);
+  const { expanded, acquire, expand } = useDockExpansion(root, keep, dragging);
+  useEffect(() => (help ? acquire() : undefined), [help, acquire]);
+  const toggled = useRef(false);
+  useLayoutEffect(() => {
+    const bar = root.current;
+    if (!bar || !toggled.current) { toggled.current = true; return; }
+    bar.dataset.toggling = "";
+    const done = setTimeout(() => delete bar.dataset.toggling, 220);
+    return () => clearTimeout(done);
+  }, [expanded]);
+  useLayoutEffect(() => {
+    if (expanded && document.activeElement === pill.current) root.current?.querySelector<HTMLElement>(".draw-grip")?.focus({ preventScroll: true });
+  }, [expanded]);
   const [lastTools, setLastTools] = useState<Partial<Record<Tool["group"], Tool>>>({});
   useEffect(() => { const tool = active && toolOf(active); if (tool) setLastTools((s) => ({ ...s, [tool.group]: tool })); }, [active]);
   useEffect(() => {
@@ -50,7 +66,11 @@ export function DrawingToolbar() {
   const action = (f: () => void) => { f(); surfaceFor(cellId)?.focus(); };
   const pinnedButton = (tool: Tool) => <button key={tool.tool} className="draw-tool" data-active-tool aria-label={`${tool.label} 고정 도구`} title={toolTitle(tool, "고정")} aria-pressed={active === tool.tool} onClick={() => setTool(tool)} onDoubleClick={() => action(() => useDrawingSession.getState().setTool(tool.tool, true))}><Icon path={tool.icon} /></button>;
   const folded = pinnedTools.slice(shownPins);
-  return <nav ref={root} data-chart-control data-pinned={pinnedTools.length > 0 || undefined} data-moved={moved || undefined} aria-label="드로잉 도구" className="drawing-toolbar ui-island max-md:hidden">
+  const current = mode ? MODES.find((m) => m.id === mode) : active ? toolOf(active) : undefined;
+  const currentLabel = current?.label ?? "선택 도구";
+  return <DockHold.Provider value={acquire}><nav ref={root} data-chart-control data-pinned={pinnedTools.length > 0 || undefined} data-moved={moved || undefined} data-collapsed={!expanded || undefined} aria-label="드로잉 도구" className="drawing-toolbar ui-island max-md:hidden">
+    <button ref={pill} type="button" className="draw-tool draw-pill" data-picked={active !== null || mode !== null || undefined} aria-expanded={expanded} aria-label={`드로잉 도구 펼치기 · 지금 ${currentLabel}`} title="드로잉 도구 펼치기"
+      onClick={(e) => expand((e.nativeEvent as PointerEvent).pointerType ?? "mouse")}><Icon path={current?.icon ?? DRAWING_ICONS.pointer} /></button>
     <button type="button" className="draw-grip" aria-label="드로잉 도구 막대 옮기기" title="끌어서 막대 옮기기 · 두 번 누르면 기본 자리"
       onPointerDown={(e) => { if (e.button !== 0) return; e.preventDefault(); e.stopPropagation(); e.currentTarget.setPointerCapture(e.pointerId); dock.grab(e.clientX, e.clientY); }}
       onPointerMove={(e) => dock.drag(e.clientX, e.clientY)} onPointerUp={() => dock.drop()} onPointerCancel={() => dock.cancel()} onLostPointerCapture={() => dock.cancel()}
@@ -81,7 +101,7 @@ export function DrawingToolbar() {
     <div className="draw-toolbar-end"><button className="draw-tool" aria-label="개체 목록 열기" title="개체 목록" onClick={() => useLayoutStore.getState().showWindow("objects")}><Icon path={DRAWING_ICONS.objects} /></button>
       <button ref={helpButton} className="draw-tool" aria-label="드로잉 단축키 도움말" title="드로잉 단축키" onClick={() => setHelp(!help)}>?</button></div>
     {help && <Popover anchor={helpButton} follow placement="bottom" onClose={() => setHelp(false)} className="drawing-help" role="dialog" aria-label="드로잉 단축키"><div className="draw-dialog-head"><strong>드로잉 단축키</strong><button className="icon-btn" aria-label="도움말 닫기" onClick={() => setHelp(false)}><CloseIcon /></button></div>{gestureHelp(registeredModes()).map((h) => <p key={h.keys}><kbd>{h.keys}</kbd><span>{h.label}</span></p>)}</Popover>}
-  </nav>;
+  </nav></DockHold.Provider>;
 }
 
 interface DockLayout { area: Size; size: Size; home: Spot; spot: Spot; margin: number }
@@ -91,7 +111,7 @@ const ARROW_STEPS: Record<string, [number, number]> = { ArrowLeft: [-DOCK_STEP, 
 
 const saveDockAt = (dockAt: DockAt | null) => useUiStore.getState().setDrawingPrefs({ dockAt });
 
-function useDockPlacement(root: RefObject<HTMLElement | null>, run: RefObject<HTMLElement | null>, count: number, at: DockAt | null) {
+function useDockPlacement(root: RefObject<HTMLElement | null>, run: RefObject<HTMLElement | null>, count: number, at: DockAt | null, keep: boolean) {
   const [room, setRoom] = useState(Infinity);
   const [held, setHeld] = useState(false);
   const grab = useRef<DockGrab | null>(null);
@@ -108,11 +128,15 @@ function useDockPlacement(root: RefObject<HTMLElement | null>, run: RefObject<HT
       const edge = parseFloat(style.getPropertyValue("--island-gap"));
       const margin = parseFloat(style.getPropertyValue("--dock-home-top"));
       const reserve = parseFloat(style.getPropertyValue("--dock-reserve"));
+      const pill = parseFloat(style.getPropertyValue("--dock-pill"));
       const least = parseFloat(style.getPropertyValue("--dock-min"));
       const pinned = run.current;
       const first = pinned?.firstElementChild;
       const slot = count > 0 && first instanceof HTMLElement ? first.offsetWidth + gap : 0;
-      const base = bar.offsetWidth - bar.clientWidth + bar.scrollWidth - (slot > 0 && pinned ? pinned.offsetWidth + gap : 0);
+      const grip = bar.querySelector<HTMLElement>(".draw-grip");
+      const tail = bar.querySelector<HTMLElement>(".draw-toolbar-end");
+      const content = grip && tail ? tail.offsetLeft + tail.offsetWidth - grip.offsetLeft : 0;
+      const base = bar.offsetWidth - bar.clientWidth + parseFloat(style.paddingLeft) + parseFloat(style.paddingRight) + content - (slot > 0 && pinned ? pinned.offsetWidth + gap : 0);
       const area = { width: stage.clientWidth, height: stage.clientHeight };
       const center = area.width / 2;
       const end = area.width - reserve / 2;
@@ -122,7 +146,8 @@ function useDockPlacement(root: RefObject<HTMLElement | null>, run: RefObject<HT
       const natural = base + Math.min(count, homeSlots) * slot;
       const homeLeft = slot > 0 ? Math.max(edge, Math.min(resting, end - natural)) : center - Math.max(least, Math.min(base, area.width - reserve)) / 2;
       const normalWidth = Math.max(least, Math.min(natural, slot > 0 ? end - homeLeft : area.width - reserve));
-      const normal = [Math.max(margin, homeLeft), margin, normalWidth, bar.offsetHeight].join(",");
+      const normalLeft = Math.max(margin, homeLeft);
+      const normal = (keep ? [normalLeft, margin, normalWidth, bar.offsetHeight] : [normalLeft + (normalWidth - pill) / 2, margin, pill, bar.offsetHeight]).join(",");
       if (bar.dataset.dockNormal !== normal) bar.dataset.dockNormal = normal;
       const compact = stage.hasAttribute("data-legend-beside");
       const compactLeft = parseFloat(stage.style.getPropertyValue("--legend-dock-left"));
@@ -132,6 +157,8 @@ function useDockPlacement(root: RefObject<HTMLElement | null>, run: RefObject<HT
       const size = { width: Math.min(freeMax, compact ? Math.min(compactWidth, natural) : Math.max(least, natural)), height: bar.offsetHeight };
       if (slot > 0) setRoom(compact ? slotsWithin(compactWidth) : homeSlots);
       const target = grab.current?.at ?? (at && spotOf(at, area, size));
+      const fullWidth = target || compact ? size.width : normalWidth;
+      bar.style.setProperty("--dock-inset", `${(fullWidth - pill) / 2}px`);
       if (!target) {
         if (slot > 0) {
           bar.style.setProperty("--dock-shift", `${homeLeft - center}px`);
@@ -158,9 +185,9 @@ function useDockPlacement(root: RefObject<HTMLElement | null>, run: RefObject<HT
       observer.disconnect();
       presentation.disconnect();
       delete bar.dataset.dockNormal;
-      for (const name of ["--dock-shift", "--dock-max", "--dock-left", "--dock-top"]) bar.style.removeProperty(name);
+      for (const name of ["--dock-shift", "--dock-max", "--dock-left", "--dock-top", "--dock-inset"]) bar.style.removeProperty(name);
     };
-  }, [root, run, count, at, moved]);
+  }, [root, run, count, at, moved, keep]);
   const settle = (spot: Spot) => {
     const l = layout.current;
     if (l) saveDockAt(settleSpot(spot, clampSpot(grab.current?.home ?? l.home, l.area, l.size, l.margin), l.area, l.size));
@@ -194,11 +221,12 @@ function useDockPlacement(root: RefObject<HTMLElement | null>, run: RefObject<HT
     },
     reset: () => saveDockAt(null),
   };
-  return { shown: Math.min(room, count), moved, controls };
+  return { shown: Math.min(room, count), moved, dragging: held, controls };
 }
 
 function ToolGroup({ label, tools, onChoose, pinnable = true }: { label: string; tools: readonly Tool[]; onChoose(tool: Tool): void; pinnable?: boolean }) {
   const [open, setOpen] = useState(false);
+  useHoldDockOpen(open);
   const trigger = useRef<HTMLButtonElement>(null);
   const pinned = useUiStore((s) => s.prefs.drawing.pinnedTools);
   const typed = useRef({ text: "", at: 0 });
@@ -230,6 +258,7 @@ function ToolGroup({ label, tools, onChoose, pinnable = true }: { label: string;
 function MagnetButton({ action }: { action(f: () => void): void }) {
   const prefs = useUiStore((s) => s.prefs.drawing);
   const [open, setOpen] = useState(false);
+  useHoldDockOpen(open);
   const root = useRef<HTMLDivElement>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const held = useRef(false);
