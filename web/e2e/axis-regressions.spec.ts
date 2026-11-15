@@ -27,6 +27,14 @@ async function assertRendered(page: Page) {
   }).toPass({ timeout: 3000 });
 }
 
+async function resizeChart(page: Page, target: { viewport: Parameters<Page["setViewportSize"]>[0]; layout: "작업 영역" | "칸" }) {
+  await page.setViewportSize(target.viewport);
+  const main = page.getByRole("main", { name: target.layout, exact: true });
+  await expect(main).toBeVisible();
+  await expect(cell(page)).toHaveAttribute("aria-busy", "false");
+  await expect.poll(() => main.evaluate((element) => element.contains(window.chartProbe.chart.chartElement()))).toBe(true);
+}
+
 async function open(page: Page) {
   await page.addInitScript(installChartProbe);
   await page.addInitScript(installAxisProbe);
@@ -75,9 +83,9 @@ test.describe("축 표시 회귀", () => {
       await page.evaluate((saved) => { if (saved) window.chartProbe.chart.timeScale().setVisibleLogicalRange(saved); }, range);
       await page.evaluate(() => window.chartProbe.chart.panes()[0]!.setHeight(180));
       await assertRendered(page);
-      await page.setViewportSize({ width: 390, height: 844 });
+      await resizeChart(page, { viewport: { width: 390, height: 844 }, layout: "칸" });
       await assertRendered(page);
-      await page.setViewportSize({ width: 1440, height: 900 });
+      await resizeChart(page, { viewport: { width: 1440, height: 900 }, layout: "작업 영역" });
     }
   });
 
