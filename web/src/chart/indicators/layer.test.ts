@@ -711,3 +711,23 @@ test("그리지 않은 실시간 갱신이 남은 채 과거 페이지를 붙여
   expect(consoleError).not.toHaveBeenCalled();
   expect(f.line("conversion").data.slice(-2)).toEqual([drawn(20, 7, close(20)), drawn(21, 8, close(21))]);
 });
+
+
+test("가격 범례 원천은 주 봉 밖의 이동된 시각과 결측값을 실제 rows 표시와 같은 슬롯으로 담는다", () => {
+  const f = fixture();
+  f.layer.reset({ bars: CONFIRMED, current: null, nextBefore: null });
+  expect(f.layer.priceLegendValues()).toEqual([{ id: "ichi", slots: [] }]);
+  f.reply(created(1, { conversion: set(range(0, 19), 123456), base: set(range(0, 19), 1), spanA: set(range(5, 24), 9999999), spanB: set(range(5, 24), -100), lagging: set(range(0, 14), 0.01) }));
+  const choices = f.layer.priceLegendValues();
+  expect(choices[0]?.slots[2]).toContain("9,999,999");
+  expect(choices[0]?.slots[0]).toContain("—");
+  for (const t of [null, ...range(0, 24).map(at)]) for (const row of f.layer.rows(t).filter((row) => !row.panel)) {
+    row.values.forEach((value, slot) => expect(choices.find((choice) => choice.id === row.id)?.slots[slot]).toContain(value.text));
+  }
+  expect(f.layer.rows(at(24))[0]?.values[2]?.text).toBe("9,999,999");
+  f.layer.clear();
+  expect(f.layer.priceLegendValues()).toEqual([{ id: "ichi", slots: [] }]);
+  f.layer.setConfigs([], []);
+  expect(f.layer.priceLegendValues()).toEqual([]);
+  f.layer.dispose();
+});

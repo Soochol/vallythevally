@@ -62,6 +62,8 @@ export interface IndicatorRow {
   panel: { index: number; count: number; collapsed?: boolean } | null;
 }
 
+export type PriceLegendValues = Pick<IndicatorRow, "id"> & { slots: readonly (readonly IndicatorRow["values"][number]["text"][])[] };
+
 export interface LayerHost {
   chart: IChartApi;
   tokens(): ThemeTokens;
@@ -336,7 +338,7 @@ export class IndicatorLayer {
           : s.lines.map((line, i) => {
               const pt = pointAtTime(line.points, time);
               const color = isBarLine(line.id) ? tokens.text2 : indicatorColorValue(tokens, lineColor(config.spec, config.style.colors, i));
-              return { text: pt ? this.format(config, pt.v) : "—", color };
+              return { text: this.legendText(config, pt), color };
             });
       const primary = lines.findIndex((l) => !isBarLine(l));
       return {
@@ -348,6 +350,27 @@ export class IndicatorLayer {
         panel: panelIndex < 0 ? null : { index: panelIndex, count: this.panels.length, collapsed },
       };
     });
+  }
+
+  priceLegendValues(): readonly PriceLegendValues[] {
+    const times = new Set(this.display.map((bar) => bar.t));
+    const rows: { id: IndicatorRow["id"]; slots: { values: string[]; count: number }[] }[] = [];
+    for (const config of this.configs) {
+      const shown = this.shown.get(config.id);
+      const panelIndex = config.panel === "price" ? -1 : this.panels.findIndex((panel) => panel.id === config.panel);
+      const price = !isFinancial(config.spec) && panelIndex < 0;
+      const row: { id: IndicatorRow["id"]; slots: { values: string[]; count: number }[] } = { id: config.id, slots: [] };
+      if (price) rows.push(row);
+      for (const line of shown?.lines ?? []) {
+        const values: string[] = [];
+        for (const point of line.points) {
+          times.add(point.t);
+          if (price && shown?.status.kind === "ready") values.push(this.legendText(config, point));
+        }
+        if (price && shown?.status.kind === "ready") row.slots.push({ values, count: line.points.length });
+      }
+    }
+    return rows.map((row) => ({ id: row.id, slots: row.slots.map(({ values, count }) => count < times.size ? [...values, "—"] : values) }));
   }
 
   stretches(): Panel["stretch"][] {
@@ -539,6 +562,10 @@ export class IndicatorLayer {
         return series ? this.host.axisCoordinates(series.getPane()) : [];
       },
     };
+  }
+
+  private legendText(config: IndicatorConfig, point: Point | undefined): string {
+    return point ? this.format(config, point.v) : "—";
   }
 
   private format(config: IndicatorConfig, v: number): string {

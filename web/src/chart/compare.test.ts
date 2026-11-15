@@ -277,3 +277,25 @@ test("목록에 없는 비교 종목은 찾을 수 없음으로 남긴다", asyn
   expect(f.layer.rows(1, 3)[0]).toMatchObject({ notes: [COMPARE_NOTE.missing], failed: true, value: "—" });
   expect(f.series[0]!.times).toEqual([]);
 });
+
+
+test("비교 범례 원천은 실제 기준과 정렬된 봉의 모든 표시값 및 null을 포함하고 제거시 줄어든다", async () => {
+  const f = fixture((q) => page(q.symbol, [bar(2, 100), bar(4, 10000), bar(6, 1), bar(9, 999999)], null));
+  const main = bars(1, 8);
+  f.setMain(main);
+  f.layer.setCodes([entry("000660"), entry("035420", 2)], key);
+  await f.settle();
+  f.flush();
+  for (const left of [null, 1, 3, 5, 8]) {
+    const choices = f.layer.legendValues(left);
+    for (const t of [null, ...ts(main)]) for (const row of f.layer.rows(left, t)) {
+      expect(choices.find((choice) => choice.code === row.code)?.values).toContain(row.value);
+    }
+  }
+  expect(f.layer.legendValues(1)[0]?.values).toContain("+9,900.00%");
+  expect(f.layer.legendValues(5)[0]?.values).not.toContain("+9,900.00%");
+  expect(f.layer.legendValues(null).every((row) => row.values.join() === "—")).toBe(true);
+  f.layer.setCodes([], key);
+  expect(f.layer.legendValues(1)).toEqual([]);
+  f.layer.dispose();
+});
