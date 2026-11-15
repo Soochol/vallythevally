@@ -143,10 +143,10 @@ for (const { width, height } of surfaces) {
     await runButton(page).scrollIntoViewIfNeeded();
     await expect(runButton(page)).toBeInViewport();
     await expect(storeLine(page)).toBeInViewport();
-    await expect(results(page).getByRole("button", { name: /^종가 순으로 정렬/ })).toBeEnabled();
+    await expect(results(page).getByRole("button", { name: /^현재가 순으로 정렬/ })).toBeEnabled();
     await storeLine(page).getByRole("button", { name: "업데이트", exact: true }).click({ trial: true });
-    await results(page).getByRole("button", { name: /^종가 순으로 정렬/ }).click();
-    await expect(results(page).getByRole("columnheader", { name: "종가 순으로 정렬", exact: true })).toHaveAttribute("aria-sort", "descending");
+    await results(page).getByRole("button", { name: /^현재가 순으로 정렬/ }).click();
+    await expect(results(page).getByRole("columnheader", { name: "현재가 순으로 정렬", exact: true })).toHaveAttribute("aria-sort", "descending");
     expect(await page.evaluate(() => document.documentElement.scrollHeight <= window.innerHeight)).toBe(true);
     scenario.reply("/api/screener/run", { body: currentResult() });
     await runButton(page).click();

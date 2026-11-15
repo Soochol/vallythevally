@@ -40,10 +40,10 @@ async function runAndExpect(page: Page, screener: ScreenerScenario, excluded: st
   await runButton(page).click();
   await expect(results(page)).toContainText(`${expected.length}종목 · 11-06(금) 기준`);
   await expect(excludedLine(page)).toHaveText(excluded);
-  await expectRows(page, expected);
+  await expectRows(page, expected.map(([code, name]) => [code, name]));
 }
 
-test("봉·지표·시가총액 줄을 일봉과 주봉으로 편집·정렬·저장하고 서버 결과의 날짜와 종목을 차트로 열며 잘못된 값과 시장 설정을 구분한다", async ({ scenario, screener, page }) => {
+test("봉·지표·시가총액 줄을 일봉과 주봉으로 편집·정렬·저장하고 서버 결과의 종목을 차트로 열며 잘못된 값과 시장 설정을 구분한다", async ({ scenario, screener, page }) => {
   const barRequests: string[] = [];
   const screenSaves: string[] = [];
   page.on("request", (req) => {

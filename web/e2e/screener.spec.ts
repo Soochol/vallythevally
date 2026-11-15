@@ -86,12 +86,12 @@ test("업데이트 상태와 조건식 결과를 표시하고 종목을 칸의 �
     await runButton(page).click();
     await expect(results(page)).toContainText("4종목 · 11-06(금) 기준");
     await expect(results(page)).toContainText("대상 9종목 · 빠짐: 상장 기간 부족 1 · 이력 덜 참 0");
-    await expect(results(page).getByRole("columnheader", { name: "충족일 순으로 정렬", exact: true })).toHaveAttribute("aria-sort", "descending");
+    await expect(results(page).getByRole("columnheader")).toHaveText(["종목", "현재가", "등락률"]);
     await expectRows(page, [
-      ["110030", "가상분할", "당일"],
-      ["110035", "가상전자우", "당일"],
-      ["110040", "가상정지", "10-23"],
-      ["110050", "가상관리", "10-19"],
+      ["110030", "가상분할"],
+      ["110035", "가상전자우"],
+      ["110040", "가상정지"],
+      ["110050", "가상관리"],
     ]);
     await expect(rail(page).getByRole("tab", { name: /^스크리너/ })).toContainText("결과 4종목");
   });
@@ -177,9 +177,9 @@ test("업데이트 상태와 조건식 결과를 표시하고 종목을 칸의 �
     await expect(results(page)).toContainText("3종목 · 11-09(월) 기준");
     await expect(results(page)).toContainText("대상 8종목");
     await expectRows(page, [
-      ["110030", "가상분할", "당일"],
-      ["110035", "가상전자우", "당일"],
-      ["110050", "가상관리", "10-19"],
+      ["110030", "가상분할"],
+      ["110035", "가상전자우"],
+      ["110050", "가상관리"],
     ]);
   });
 
@@ -372,9 +372,9 @@ test("최근 관측일 수집 중 실행을 막고 이력 이어 받기 취소�
   await results(page).getByRole("button", { name: "새 자료로 다시 실행" }).click();
   await expect(excludedLine(page)).toHaveText("대상 10종목 · 빠짐: 상장 기간 부족 6 · 이력 덜 참 0");
   await expectRows(page, [
-    ["110060", "가상200", "09-30"],
-    ["110010", "가상전자", "08-03"],
-    ["110020", "가상화학", "07-14"],
+    ["110060", "가상200"],
+    ["110010", "가상전자"],
+    ["110020", "가상화학"],
   ]);
 });
 

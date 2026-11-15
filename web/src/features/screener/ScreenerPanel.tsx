@@ -512,8 +512,7 @@ function ResultList({ screen, result, rows, running, rerun, onRun, onEdit, selec
       <div aria-label="결과 자료" className="flex-none space-y-1 px-3 pt-1 text-xs leading-relaxed text-text-2">
         <p>기준 관측일 {result.asOf} · KRX</p>
         <p>수집 범위 (KST) <time>{collectionTime(result.collectionStartedAt)}</time> ~ <time>{collectionTime(result.collectionCompletedAt)}</time></p>
-        <p>종가는 일봉 0봉 가격 · 등락률은 직전 거래 일봉 대비</p>
-        <p>{screen.conditions.some((condition) => "period" in condition) ? "충족일은 첫 봉 조건의 최근 일치일 · 주·월봉은 시작일" : "충족일은 기준 관측일입니다"}</p>
+        <p>현재가는 일봉 0봉 가격 · 등락률은 직전 거래 일봉 대비</p>
         <p>잠정은 이번 수집의 당일 요약입니다</p>
         <p>자료 누락 {count(result.missingSummary)}종목{result.missingSummary > 0 && " · 자료를 확인하지 못해 판정에서 빠졌습니다"}</p>
       </div>
