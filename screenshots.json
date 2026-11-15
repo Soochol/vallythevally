@@ -1,0 +1,110 @@
+[
+  {
+    "name": "dock-basic-1440x900.png",
+    "size": [
+      1440,
+      900
+    ],
+    "sha256": "ac4a309b7e7408b5eb54cb8b9c635845ae4813760bd57080c7b284a94d588a9d",
+    "source": "target/web-runs/e2e-tv7d0rs9/results/win-journey-dock-1440x900에서-위-막대·드로잉·창-머리를-모두-쓴다-chromium/dock-basic-1440x900.png"
+  },
+  {
+    "name": "dock-basic-1024x768.png",
+    "size": [
+      1024,
+      768
+    ],
+    "sha256": "df827cd1f743edc4422579b27e6c65d3387b9a2176c9cd9e60f3bb97a70444bd",
+    "source": "target/web-runs/e2e-tv7d0rs9/results/win-journey-dock-1024x768에서-위-막대·드로잉·창-머리를-모두-쓴다-chromium/dock-basic-1024x768.png"
+  },
+  {
+    "name": "canvas-basic-1440x900.png",
+    "size": [
+      1440,
+      900
+    ],
+    "sha256": "463a6ba3bf7cbfdc2e38af2af7541e25fd0617272d75532fc6b37fa3d6a4ea79",
+    "source": "target/web-runs/e2e-tv7d0rs9/results/win-journey-canvas-1440x900에서-위-막대·드로잉·창-머리를-모두-쓴다-chromium/canvas-basic-1440x900.png"
+  },
+  {
+    "name": "canvas-basic-1024x768.png",
+    "size": [
+      1024,
+      768
+    ],
+    "sha256": "4e8e19e205e54d9b5dbd764aaf10364ea890ef10030c5a0076408503bb773eae",
+    "source": "target/web-runs/e2e-tv7d0rs9/results/win-journey-canvas-1024x768에서-위-막대·드로잉·창-머리를-모두-쓴다-chromium/canvas-basic-1024x768.png"
+  },
+  {
+    "name": "dock-four-charts-1440x900.png",
+    "size": [
+      1440,
+      900
+    ],
+    "sha256": "4a09efc7070c2b58721d6d15ce06a88ae356f62ad064c875a2f38f0e20573632",
+    "source": "target/web-runs/e2e-tv7d0rs9/results/win-journey-dock-차트-넷과-옆-창의-배치를-두-화면-크기로-기록한다-chromium/dock-four-charts-1440x900.png"
+  },
+  {
+    "name": "dock-four-charts-1024x768.png",
+    "size": [
+      1024,
+      768
+    ],
+    "sha256": "7a84aa530a27a2f7647b16255b38693288091e09366cc4da647287120a8c05b0",
+    "source": "target/web-runs/e2e-tv7d0rs9/results/win-journey-dock-차트-넷과-옆-창의-배치를-두-화면-크기로-기록한다-chromium/dock-four-charts-1024x768.png"
+  },
+  {
+    "name": "canvas-four-charts-1440x900.png",
+    "size": [
+      1440,
+      900
+    ],
+    "sha256": "61fb6af3a618ea2a19c92ea4840307a702257f381cd87813ee838ed9a329ddc6",
+    "source": "target/web-runs/e2e-tv7d0rs9/results/win-journey-canvas-차트-넷과-옆-창의-배치를-두-화면-크기로-기록한다-chromium/canvas-four-charts-1440x900.png"
+  },
+  {
+    "name": "canvas-four-charts-1024x768.png",
+    "size": [
+      1024,
+      768
+    ],
+    "sha256": "6304ed6b7e1cc585be34d1143cea26b03c20e8b93a39f506a5a0f82642dc94bf",
+    "source": "target/web-runs/e2e-tv7d0rs9/results/win-journey-canvas-차트-넷과-옆-창의-배치를-두-화면-크기로-기록한다-chromium/canvas-four-charts-1024x768.png"
+  },
+  {
+    "name": "dock-float-1440x900.png",
+    "size": [
+      1440,
+      900
+    ],
+    "sha256": "b9d7273b0c221af43f2ba46e05e63b06d7e68933f9a613891d413997b87d3201",
+    "source": "target/web-runs/e2e-tv7d0rs9/results/win-journey-숨긴-연동-차트와-창-범위-드로잉은-떠-있는-창과-캔버스를-거쳐-같은-창을-따른다-chromium/dock-float-1440x900.png"
+  },
+  {
+    "name": "dock-float-1024x768.png",
+    "size": [
+      1024,
+      768
+    ],
+    "sha256": "71c35b728d97ce494cc5e4094cb3ffee4c4fe4947a0cb6fa5f58c0c98d29dac3",
+    "source": "target/web-runs/e2e-tv7d0rs9/results/win-journey-숨긴-연동-차트와-창-범위-드로잉은-떠-있는-창과-캔버스를-거쳐-같은-창을-따른다-chromium/dock-float-1024x768.png"
+  },
+  {
+    "name": "canvas-overlap-1440x900.png",
+    "size": [
+      1440,
+      900
+    ],
+    "sha256": "6d64a8facb53b3e1aac26c768d476fa7f1b537f2ade4d9b680e3762ff20ea0da",
+    "source": "target/web-runs/e2e-tv7d0rs9/results/win-journey-숨긴-연동-차트와-창-범위-드로잉은-떠-있는-창과-캔버스를-거쳐-같은-창을-따른다-chromium/canvas-overlap-1440x900.png"
+  },
+  {
+    "name": "canvas-overlap-1024x768.png",
+    "size": [
+      1024,
+      768
+    ],
+    "sha256": "f9d9e9b5c1311f40e1715ea77e27bf7a2cfa2fa69f3b50383fef6d2671280542",
+    "source": "target/web-runs/e2e-tv7d0rs9/results/win-journey-숨긴-연동-차트와-창-범위-드로잉은-떠-있는-창과-캔버스를-거쳐-같은-창을-따른다-chromium/canvas-overlap-1024x768.png"
+  }
+]

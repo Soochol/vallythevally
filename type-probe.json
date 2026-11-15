@@ -1,0 +1,13 @@
+[
+  {
+    "stage": "dto-only",
+    "exit": 1,
+    "hasKindsError": true
+  },
+  {
+    "stage": "dto-and-kinds",
+    "exit": 1,
+    "hasContentsError": true,
+    "hasIconsError": true
+  }
+]

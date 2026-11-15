@@ -1,0 +1,32 @@
+[
+  {
+    "path": "target/web-runs/check-jeartwsj/manifest.json",
+    "status": "passed",
+    "exit_code": 0,
+    "source": {
+      "head": "d796bb937e54baf132a75950d7c7af1cc2b024c6",
+      "dirty": false,
+      "sha256": "a7ab225d06038d6c1077f85cae96ce205a28b567d3573f9165e4ba13a7be2db4"
+    },
+    "source_after": {
+      "head": "d796bb937e54baf132a75950d7c7af1cc2b024c6",
+      "dirty": false,
+      "sha256": "a7ab225d06038d6c1077f85cae96ce205a28b567d3573f9165e4ba13a7be2db4"
+    }
+  },
+  {
+    "path": "target/web-runs/e2e-tv7d0rs9/manifest.json",
+    "status": "passed",
+    "exit_code": 0,
+    "source": {
+      "head": "d796bb937e54baf132a75950d7c7af1cc2b024c6",
+      "dirty": false,
+      "sha256": "a7ab225d06038d6c1077f85cae96ce205a28b567d3573f9165e4ba13a7be2db4"
+    },
+    "source_after": {
+      "head": "d796bb937e54baf132a75950d7c7af1cc2b024c6",
+      "dirty": false,
+      "sha256": "a7ab225d06038d6c1077f85cae96ce205a28b567d3573f9165e4ba13a7be2db4"
+    }
+  }
+]
