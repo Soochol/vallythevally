@@ -92,10 +92,22 @@ test("all legend owners bound native main and shifted future fields without hove
   await expect(cell(page).locator('[data-indicator-row="ichi"] > span.font-medium')).toBeEmpty();
   await expect.poll(() => page.evaluate(() => window.legendSources.pendingWorkers.length)).toBeGreaterThan(0);
   const pending = await page.evaluate(() => window.legendSources.projections.at(-1));
+  const beforeWorkers = await page.evaluate(() => ({ ...window.legendSources.counts, projections: window.legendSources.projections.length }));
   await page.evaluate(() => { window.legendSources.holdWorkers = false; window.legendSources.pendingWorkers.splice(0).forEach((send) => send()); });
   await expect(cell(page).locator('[data-indicator-row="ichi"] > span.font-medium')).not.toBeEmpty();
   await expect(cell(page).locator('[data-compare-row="000660"]')).not.toHaveAttribute("data-last-t", "");
   await frames(page, 60);
+  const afterWorkers = await page.evaluate(() => ({ ...window.legendSources.counts, projections: window.legendSources.projections.length }));
+  expect(afterWorkers.base).toBe(beforeWorkers.base);
+  expect(afterWorkers.indicator).toBeGreaterThan(beforeWorkers.indicator);
+  expect(afterWorkers.projections).toBeGreaterThan(beforeWorkers.projections);
+  expect(await scenario.live.update("000660", { c: 777_777, v: 1000 })).toBeGreaterThan(0);
+  await frames(page, 30);
+  const afterCompare = await page.evaluate(() => ({ ...window.legendSources.counts, projections: window.legendSources.projections.length }));
+  expect(afterCompare.base).toBe(afterWorkers.base);
+  expect(afterCompare.indicator).toBe(afterWorkers.indicator);
+  expect(afterCompare.compare).toBeGreaterThan(afterWorkers.compare);
+  expect(afterCompare.projections).toBeGreaterThan(afterWorkers.projections);
   const before = await page.evaluate(() => ({ counts: { ...window.legendSources.counts }, projections: window.legendSources.projections.length }));
   const source = scenario.market.page({ symbol: "005930", venue: "combined", period: "D" });
   const samples = [];
@@ -140,6 +152,8 @@ test("all legend owners bound native main and shifted future fields without hove
   await cell(page).locator('[data-compare-row="000660"]').hover();
   await cell(page).getByRole("button", { name: "SK하이닉스 비교 종목 지우기", exact: true }).click();
   await expect(cell(page).locator("[data-compare-row]")).toHaveCount(0);
+  await frames(page);
+  expect(await page.evaluate(() => window.legendSources.projections.at(-1)?.fields.some((field) => field.key.startsWith("compare/")))).toBe(false);
   await writeFile(testInfo.outputPath("combined-native-fields.json"), JSON.stringify({ pending, before, after, future, samples, compact }, null, 2));
   await page.screenshot({ path: testInfo.outputPath("combined-native.png") });
 });
@@ -193,4 +207,24 @@ for (const count of [4, 300, 3000]) test(`source ${count} uses bounded projectio
   await frames(page, 30);
   await boundedFields(page);
   await writeFile(testInfo.outputPath("bounded-source.json"), JSON.stringify({ count, before, hovered, narrowed, stalled: await page.evaluate(() => window.legendSources.projections.at(-1)) }, null, 2));
+});
+
+for (const compare of [[], ["005930"]]) test(`range changes without actual comparison entries keep current source families: ${compare.join(",") || "empty"}`, async ({ page, scenario }) => {
+  await page.addInitScript(installChartProbe);
+  await installLegendSourceProbe(page);
+  seed(scenario, { indicators: [], panels: [], compare });
+  await page.goto("/");
+  await ready(page);
+  const before = await page.evaluate(() => ({ ...window.legendSources.counts }));
+  await page.evaluate(() => {
+    const scale = window.chartProbe.chart.timeScale();
+    const range = scale.getVisibleLogicalRange();
+    if (!range) throw new Error("차트 범위가 없습니다");
+    scale.setVisibleLogicalRange({ from: range.from + 2, to: range.to + 2 });
+  });
+  await frames(page, 30);
+  const after = await page.evaluate(() => window.legendSources.counts);
+  expect(after.base).toBe(before.base);
+  expect(after.indicator).toBe(before.indicator);
+  expect(after.compare).toBe(before.compare);
 });

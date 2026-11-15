@@ -166,7 +166,10 @@ export class ChartController {
     this.main = addMainSeries(this.chart, "candle", this.tokens, false, this.priceAxisGeometry());
     this.crosshairMarker = new CrosshairMarker({ element: el, chart: this.chart, bars: () => this.bars, period: () => this.period() });
     el.addEventListener("pointerleave", this.clearPointedBar);
-    this.legend = new Legend(el, () => [this.indicatorLegend.projection(), this.compareLegend.projection()]);
+    this.legend = new Legend(el, {
+      projectRows: () => [this.indicatorLegend.projection(), this.compareLegend.projection()],
+      readViewport: () => ({ pricePane: this.paneBounds()[0] ?? null, axisWidth: this.chart.priceScale("right").width() }),
+    });
     this.extremeTags = new ExtremeTags(el);
     this.daySeparators = new DaySeparators(this.chart, {
       shown: () => this.view !== null && this.view.settings.showDaySeparators && isIntraday(this.view.period),
@@ -759,11 +762,12 @@ export class ChartController {
     this.scheduleFrame();
   }
 
-  private refreshPendingLegendSources(): void {
+  private refreshPendingLegendSources(): boolean {
     const left = this.leftT();
-    if (left !== this.legendLeftT) this.pendingLegendSources.add("compare");
-    this.legendLeftT = left;
     const view = this.view;
+    if (left !== this.legendLeftT && view && compareEntries(view).length > 0) this.pendingLegendSources.add("compare");
+    this.legendLeftT = left;
+    const changed = this.pendingLegendSources.size > 0;
     if (this.pendingLegendSources.has("base")) this.legend.setLayoutBars(view ? this.bars.map((bar, i) => ({
       bar, prev: this.bars[i - 1] ?? null,
       isCurrent: this.history?.current?.t === bar.t && !this.realtimeSeen,
@@ -772,18 +776,15 @@ export class ChartController {
     if (this.pendingLegendSources.has("indicators")) this.indicatorLegend.setLayoutRows(this.indicators.rows(this.bars.at(-1)?.t ?? null), this.indicators.priceLegendValues());
     if (this.pendingLegendSources.has("compare")) this.compareLegend.setLayoutRows(this.compare.rows(left, null), this.compare.legendValues(left));
     this.pendingLegendSources.clear();
-  }
-
-  private fitLegendGeometry(): void {
-    this.legend.fit({ pricePane: this.paneBounds()[0] ?? null, axisWidth: this.chart.priceScale("right").width() });
+    return changed;
   }
 
   private renderLegend(): void {
     this.compare.flush(this.bars);
     this.indicators.flush();
-    this.refreshPendingLegendSources();
+    const sourcesChanged = this.refreshPendingLegendSources();
     this.paintLegend();
-    this.fitLegendGeometry();
+    this.legend.fit(sourcesChanged ? "content" : "geometry");
   }
 
   private paintLegend(): void {

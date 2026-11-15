@@ -114,6 +114,39 @@ function emptyAlternatives(): LayoutAlternatives {
   return { price: { close: [], change: [], time: [], fetched: [], stalled: [] }, cells: [], present: false };
 }
 
+type LegendViewport = { readonly pricePane: PaneBounds | null; readonly axisWidth: number };
+type LegendHost = {
+  readonly projectRows: () => readonly LegendProjection[];
+  readonly readViewport: () => LegendViewport;
+};
+type GeometryBox = Pick<DOMRectReadOnly, "x" | "y" | "width" | "height">;
+type LegendGeometryInputs = {
+  readonly desktop: boolean;
+  readonly chart: GeometryBox;
+  readonly host: GeometryBox;
+  readonly viewport: LegendViewport;
+  readonly toolbar: { readonly element: HTMLElement; readonly normal: string; readonly moved: boolean; readonly visible: boolean } | null;
+};
+type PresentationState = { readonly kind: "invalidated" } | { readonly kind: "settled"; readonly inputs: LegendGeometryInputs };
+type LayoutChange = "content" | "geometry";
+
+function geometryBox(element: HTMLElement): GeometryBox {
+  const { x, y, width, height } = element.getBoundingClientRect();
+  return { x, y, width, height };
+}
+
+function sameBox(first: GeometryBox, second: GeometryBox): boolean {
+  return first.x === second.x && first.y === second.y && first.width === second.width && first.height === second.height;
+}
+
+function sameGeometryInputs(first: LegendGeometryInputs, second: LegendGeometryInputs): boolean {
+  return first.desktop === second.desktop && sameBox(first.chart, second.chart) && sameBox(first.host, second.host)
+    && first.viewport.axisWidth === second.viewport.axisWidth
+    && first.viewport.pricePane?.top === second.viewport.pricePane?.top && first.viewport.pricePane?.height === second.viewport.pricePane?.height
+    && first.toolbar?.element === second.toolbar?.element && first.toolbar?.normal === second.toolbar?.normal
+    && first.toolbar?.moved === second.toolbar?.moved && first.toolbar?.visible === second.toolbar?.visible;
+}
+
 /**
  * 칸 왼쪽 위 범례(frontend.md §2.3). React가 아니라 컨트롤러가 DOM을 직접 고친다.
  * 휴대폰에서는 머리줄과 가격줄을 휴대폰 머리가 대신하므로 숨긴다(§4).
@@ -139,13 +172,12 @@ export class Legend {
   private readonly presentationResize: ResizeObserver;
   private readonly presentationMutations: MutationObserver;
   private readonly toolbarMutations: MutationObserver;
-  private viewport: { pricePane: PaneBounds | null; axisWidth: number } | null = null;
+  private presentation: PresentationState = { kind: "invalidated" };
   private presentationFrame: number | null = null;
-  private finalGeometry = "";
   private disposed = false;
-  private readonly fontsChanged = () => this.schedulePresentation();
+  private readonly fontsChanged = () => this.fit("content");
 
-  constructor(private readonly parent: HTMLElement, private readonly projectRows: () => readonly LegendProjection[]) {
+  constructor(private readonly parent: HTMLElement, private readonly presentationHost: LegendHost) {
     this.host = parent.closest<HTMLElement>("[data-chart-overlay-host]") ?? parent;
     this.head.append(this.name, this.sub, this.venueAnchor, this.period, this.notice);
     this.name.setAttribute("role", "heading");
@@ -160,14 +192,12 @@ export class Legend {
     this.body.append(this.price.row, this.ohlcLine);
     this.root.append(this.head, this.body);
     parent.append(this.root);
-    this.presentationResize = new ResizeObserver(() => {
-      if (this.geometrySnapshot() !== this.finalGeometry) this.schedulePresentation();
-    });
+    this.presentationResize = new ResizeObserver(() => this.fit("geometry"));
     this.presentationResize.observe(parent);
-    this.presentationMutations = new MutationObserver(() => this.schedulePresentation());
+    this.presentationMutations = new MutationObserver(() => this.fit("content"));
     this.presentationMutations.observe(this.venueAnchor, { subtree: true, childList: true, characterData: true, attributes: true });
     this.toolbarMutations = new MutationObserver((records) => {
-      if (records.some((record) => record.type === "attributes" || [...record.addedNodes, ...record.removedNodes].some((node) => node instanceof Element && node.matches(".drawing-toolbar")))) this.schedulePresentation();
+      if (records.some((record) => record.type === "attributes" || [...record.addedNodes, ...record.removedNodes].some((node) => node instanceof Element && node.matches(".drawing-toolbar")))) this.fit("geometry");
     });
     this.toolbarMutations.observe(this.host, { childList: true, subtree: true, attributes: true, attributeFilter: ["data-moved", "data-dock-normal"] });
     document.fonts.addEventListener("loadingdone", this.fontsChanged);
@@ -175,24 +205,27 @@ export class Legend {
   }
 
   setHead(h: { name: string; sub: string; period: string }): void {
+    if (this.name.textContent === h.name && this.sub.textContent === h.sub && this.period.textContent === h.period) return;
     this.name.textContent = h.name;
     this.name.setAttribute("aria-label", h.name);
     this.sub.textContent = h.sub;
     this.period.textContent = h.period;
-    this.schedulePresentation();
+    this.fit("content");
   }
 
   /** 머리줄 끝의 짧은 안내(구독 오류). null이면 숨긴다. */
   setNotice(text: string | null): void {
+    if (this.notice.textContent === (text ?? "") && this.notice.hidden === (text === null)) return;
     this.notice.textContent = text ?? "";
     this.notice.hidden = text === null;
-    this.schedulePresentation();
+    this.fit("content");
   }
 
   setDisplay(display: LegendDisplay): void {
+    if (display.showLegend === this.display.showLegend && display.showOhlcChange === this.display.showOhlcChange) return;
     const moved = display.showLegend !== this.display.showLegend;
-    this.display = display;
-    this.schedulePresentation();
+    this.display = { showLegend: display.showLegend, showOhlcChange: display.showOhlcChange };
+    this.fit("content");
     if (!moved) return;
     this.head.hidden = !display.showLegend;
     this.body.hidden = !display.showLegend;
@@ -252,15 +285,11 @@ export class Legend {
       });
     }
     this.layout = layout;
-    this.schedulePresentation();
+    this.fit("content");
   }
 
-  fit(viewport: { pricePane: PaneBounds | null; axisWidth: number }): void {
-    this.viewport = viewport;
-    this.schedulePresentation();
-  }
-
-  private schedulePresentation(): void {
+  fit(change: LayoutChange): void {
+    if (change === "content") this.presentation = { kind: "invalidated" };
     if (this.disposed || this.presentationFrame !== null) return;
     this.presentationFrame = requestAnimationFrame(() => {
       this.presentationFrame = null;
@@ -268,11 +297,16 @@ export class Legend {
     });
   }
 
-  private geometrySnapshot(): string {
-    return [this.parent, this.host.querySelector(".drawing-toolbar")].map((element) => {
-      const box = element?.getBoundingClientRect();
-      return box ? [box.x, box.y, box.width, box.height].join(",") : "";
-    }).join(";");
+  private readGeometryInputs(): LegendGeometryInputs {
+    const viewport = this.presentationHost.readViewport();
+    const toolbar = this.host.querySelector<HTMLElement>(".drawing-toolbar");
+    return {
+      desktop: !matchMedia("(width < 48rem)").matches,
+      chart: geometryBox(this.parent),
+      host: geometryBox(this.host),
+      viewport: { axisWidth: viewport.axisWidth, pricePane: viewport.pricePane ? { top: viewport.pricePane.top, height: viewport.pricePane.height } : null },
+      toolbar: toolbar ? { element: toolbar, normal: toolbar.dataset.dockNormal ?? "", moved: !!toolbar.dataset.moved, visible: toolbar.offsetParent !== null } : null,
+    };
   }
 
   private contentBounds(root: HTMLElement): { right: number; bottom: number } {
@@ -322,7 +356,7 @@ export class Legend {
     if (!this.display.showLegend) line.append(this.notice.cloneNode(true));
     body.append(price.row);
     if (this.display.showLegend) body.append(line);
-    for (const projected of this.projectRows()) {
+    for (const projected of this.presentationHost.projectRows()) {
       body.append(projected.root);
       fields.push(...projected.fields);
     }
@@ -333,12 +367,12 @@ export class Legend {
   }
 
   private refreshPresentation(): void {
-    const viewport = this.viewport;
-    if (!viewport) return;
-    const toolbar = this.host.querySelector<HTMLElement>(".drawing-toolbar");
+    const inputs = this.readGeometryInputs();
+    if (this.presentation.kind === "settled" && sameGeometryInputs(this.presentation.inputs, inputs)) return;
+    this.presentation = { kind: "invalidated" };
+    const { viewport, chart: chartBox, host: hostBox } = inputs;
+    const toolbar = inputs.toolbar?.element;
     const scroll = toolbar?.scrollLeft ?? 0;
-    const hostBox = this.host.getBoundingClientRect();
-    const chartBox = this.parent.getBoundingClientRect();
     const set = (name: string, value: string) => {
       if (this.host.style.getPropertyValue(name) !== value) this.host.style.setProperty(name, value);
     };
@@ -348,8 +382,8 @@ export class Legend {
       set("--legend-shift", "0px");
     };
     normal();
-    if (matchMedia("(width < 48rem)").matches || !viewport.pricePane) {
-      this.finalGeometry = this.geometrySnapshot();
+    if (!inputs.desktop || !viewport.pricePane) {
+      this.presentation = { kind: "settled", inputs };
       return;
     }
     const projection = this.projection();
@@ -357,10 +391,10 @@ export class Legend {
     try {
       reserveLegendFields(projection.fields);
       let shift = 0;
-      if (toolbar && toolbar.offsetParent !== null) {
-        const [left, top, width, height] = (toolbar.dataset.dockNormal ?? "").split(",").map(Number);
+      if (toolbar && inputs.toolbar?.visible) {
+        const [left, top, width, height] = inputs.toolbar.normal.split(",").map(Number);
         if (left === undefined || top === undefined || width === undefined || height === undefined || ![left, top, width, height].every(Number.isFinite)) return;
-        const bar = { left: hostBox.left + left, top: hostBox.top + top, right: hostBox.left + left + width, bottom: hostBox.top + top + height };
+        const bar = { left: hostBox.x + left, top: hostBox.y + top, right: hostBox.x + left + width, bottom: hostBox.y + top + height };
         const range = document.createRange();
         const rows = [...projection.root.children].flatMap((child) => getComputedStyle(child).flexDirection === "column" ? [...child.children] : [child]);
         if (rows.some((row) => {
@@ -370,14 +404,14 @@ export class Legend {
         })) shift = height;
       }
       const bounds = this.contentBounds(projection.root);
-      const paneBottom = chartBox.top + viewport.pricePane.top + viewport.pricePane.height;
+      const paneBottom = chartBox.y + viewport.pricePane.top + viewport.pricePane.height;
       if (bounds.bottom + shift > paneBottom + 0.5) {
         this.host.dataset.legendDensity = "compact";
         set("--legend-shift", "0px");
         reserveLegendFields(projection.fields);
         const compact = this.contentBounds(projection.root);
-        const left = compact.right - hostBox.left + 8;
-        const width = chartBox.right - hostBox.left - viewport.axisWidth - 8 - left;
+        const left = compact.right - hostBox.x + 8;
+        const width = (chartBox.x + chartBox.width) - hostBox.x - viewport.axisWidth - 8 - left;
         const grip = toolbar?.querySelector(".draw-grip");
         const tools = [...this.host.querySelectorAll(".drawing-toolbar .draw-tool")];
         if (toolbar && grip && tools.length > 0) {
@@ -391,13 +425,13 @@ export class Legend {
         }
         if (toolbar && !this.host.hasAttribute("data-legend-beside")) normal();
       }
-      if (!this.host.hasAttribute("data-legend-beside") && !toolbar?.dataset.moved) set("--legend-shift", `${shift}px`);
+      if (!this.host.hasAttribute("data-legend-beside") && !inputs.toolbar?.moved) set("--legend-shift", `${shift}px`);
       if (!this.host.hasAttribute("data-legend-beside")) for (const name of ["--legend-dock-left", "--legend-dock-width"]) this.host.style.removeProperty(name);
     } finally {
       projection.root.remove();
     }
     if (toolbar) toolbar.scrollLeft = scroll;
-    this.finalGeometry = this.geometrySnapshot();
+    this.presentation = { kind: "settled", inputs };
   }
 
   dispose(): void {
