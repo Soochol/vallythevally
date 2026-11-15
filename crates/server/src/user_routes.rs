@@ -8,7 +8,7 @@ use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::Json;
 use axum::routing::get;
-use domain::{Symbol, Venue};
+use domain::{Feed, Symbol, Venue};
 use serde::de::DeserializeOwned;
 
 use crate::api::{self, ApiErrorCode, Layout, LayoutInput, LayoutSummary, Revision, Screen, Screens, UiState, UnixSeconds, Watchlist, Watchlists, WindowContent};
@@ -252,18 +252,8 @@ fn check_layout(path_id: &str, input: &LayoutInput) -> Result<Vec<Symbol>, ApiFa
     }
     let mut nxt = Vec::new();
     for w in &input.windows {
-        let WindowContent::Chart { symbol: code, venue, .. } = &w.content else { continue };
-        let symbol = parse_symbol(&code.0)?;
-        let venue = venue.map(|v| match v {
-            api::Venue::Combined => Venue::Combined,
-            api::Venue::Krx => Venue::Krx,
-            api::Venue::Nxt => Venue::Nxt,
-        });
-        match (symbol, venue) {
-            (Symbol::Stock(_), None) => return Err(ApiFailure::bad_request(format!("주식 차트 창에는 거래소가 있어야 합니다: {}", code.0))),
-            (Symbol::Index(_), Some(_)) => return Err(ApiFailure::bad_request(format!("지수에는 거래소가 없습니다: {}", code.0))),
-            (Symbol::Stock(_), Some(Venue::Nxt)) => nxt.push(symbol),
-            _ => {}
+        if let WindowContent::Chart { feed: api::ChartFeed(Feed::Stock(code, Venue::Nxt)), .. } = &w.content {
+            nxt.push(Symbol::Stock(*code));
         }
     }
     Ok(nxt)

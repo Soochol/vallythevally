@@ -3,4 +3,4 @@ import type { Period } from "./Period";
 import type { SymbolCode } from "./SymbolCode";
 import type { Venue } from "./Venue";
 
-export type WindowContent = { "kind": "chart", symbol: SymbolCode, venue: Venue | null, period: Period, chartSettings: unknown, } | { "kind": "watchlist" } | { "kind": "screener" } | { "kind": "objects" } | { "kind": "indicators" };
+export type WindowContent = { "kind": "chart", period: Period, chartSettings: unknown, symbol: SymbolCode, venue: Venue | null, } | { "kind": "watchlist" } | { "kind": "screener" } | { "kind": "objects" } | { "kind": "indicators" };
