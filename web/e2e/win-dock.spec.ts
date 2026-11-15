@@ -278,3 +278,24 @@ test("끌 때 차트 드로잉과 관심종목·포털 도구 입력을 막고 �
   await stock.click();
   await expect(cell(page)).toHaveAttribute("aria-label", /SK하이닉스/);
 });
+
+test("탭 중심의 수평 끌기는 순서를 바꾸고 위쪽으로 끌면 전체 가장자리를 나눈다", async ({ page }) => {
+  await page.goto("/");
+  await expect(cell(page)).toHaveAttribute("aria-busy", "false");
+  const watch = await boxOf(tab(page, "관심종목"));
+  await dragTo(page, tab(page, "스크리너"), { x: watch.x + watch.width / 2, y: watch.y + watch.height / 2 });
+  await expect(groups(page)).toHaveCount(2);
+  await expect(groupWith(page, "관심종목").getByRole("tab")).toHaveText([/^스크리너/, /^관심종목/, /^개체 목록/]);
+  const objects = await boxOf(tab(page, "개체 목록"));
+  await dragTo(page, tab(page, "스크리너"), { x: objects.x + objects.width / 2, y: objects.y + objects.height / 2 });
+  await expect(groupWith(page, "관심종목").getByRole("tab")).toHaveText([/^관심종목/, /^개체 목록/, /^스크리너/]);
+  const source = await boxOf(tab(page, "스크리너"));
+  const room = await boxOf(area(page));
+  await startDrag(page, tab(page, "스크리너"));
+  await page.mouse.move(source.x + source.width / 2, room.y + 5, { steps: 8 });
+  await expect(preview(page)).toContainText("위에 나눠 놓기");
+  expect((await boxOf(preview(page))).width).toBe(room.width);
+  await page.mouse.up();
+  await expect(groups(page)).toHaveCount(3);
+  expect((await boxOf(groupWith(page, "스크리너"))).y).toBe(room.y);
+});

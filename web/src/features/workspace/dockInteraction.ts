@@ -68,7 +68,7 @@ export function useDockInteraction({ root, dock, space }: { root: RefObject<HTML
       const active = gesture.current;
       const latest = current.current;
       return active.kind !== "idle" && root.current && latest.space
-        ? commandAt(root.current, latest.dock, active.press.window, { x: event.clientX, y: event.clientY }, latest.space)
+        ? commandAt(root.current, latest.dock, active.press.window, { x: event.clientX, y: event.clientY }, latest.space, active.press)
         : null;
     };
     const move = (event: globalThis.PointerEvent) => {
@@ -152,7 +152,7 @@ export function useDockInteraction({ root, dock, space }: { root: RefObject<HTML
     const active = gesture.current;
     const latest = current.current;
     if (active.kind !== "dragging" || !root.current || !latest.space) return;
-    const command = commandAt(root.current, latest.dock, active.press.window, active.point, latest.space);
+    const command = commandAt(root.current, latest.dock, active.press.window, active.point, latest.space, active.press);
     setPreview(command ? evaluateDock(latest.dock, command, latest.space) : { kind: "unchanged" });
   }, [width, height, root]);
 

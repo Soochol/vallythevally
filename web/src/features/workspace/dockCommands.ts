@@ -43,13 +43,11 @@ export function evaluateDock(dock: DockPlacement, command: DockCommand, space: D
   return { kind: "change", dock: result.dock, rect: box.rect, label: command.kind === "tab" ? "이 묶음에 탭으로 넣기" : EDGE_LABEL[command.edge] };
 }
 
-export function commandAt(root: HTMLElement, dock: DockPlacement, window: WindowId, point: { x: number; y: number }, space: DockSpace): DockCommand | null {
+export function commandAt(root: HTMLElement, dock: DockPlacement, window: WindowId, point: { x: number; y: number }, space: DockSpace, origin: { x: number; y: number }): DockCommand | null {
   const bounds = root.getBoundingClientRect();
   const local = { x: point.x - bounds.left, y: point.y - bounds.top };
   if (local.x < 0 || local.y < 0 || local.x >= space.area.w || local.y >= space.area.h) return null;
-  const edges: [Edge, number][] = [["left", local.x], ["right", space.area.w - local.x], ["top", local.y], ["bottom", space.area.h - local.y]];
-  const [edge, distance] = edges.reduce((near, next) => next[1] < near[1] ? next : near);
-  if (distance < 24) return { kind: "area-edge", window, edge };
+  let reorder: DockCommand | null = null;
   const source = groupOfWindow(dock.root, window);
   const strip = source && document.getElementById(`window-panel-${source.id}`)?.previousElementSibling;
   const stripBox = strip?.getBoundingClientRect();
@@ -57,10 +55,17 @@ export function commandAt(root: HTMLElement, dock: DockPlacement, window: Window
     const rest = source.tabs.filter((id) => id !== window);
     const at = rest.findIndex((id) => {
       const box = document.getElementById(`window-tab-${id}`)?.getBoundingClientRect();
-      return box !== undefined && point.x < box.left + box.width / 2;
+      if (!box) return false;
+      const midpoint = box.left + box.width / 2;
+      return point.x === midpoint ? point.x < origin.x : point.x < midpoint;
     });
-    return { kind: "tab", window, group: source.id, at: at < 0 ? rest.length : at };
+    reorder = { kind: "tab", window, group: source.id, at: at < 0 ? rest.length : at };
   }
+  if (reorder && Math.abs(point.x - origin.x) > Math.abs(point.y - origin.y)) return reorder;
+  const edges: [Edge, number][] = [["left", local.x], ["right", space.area.w - local.x], ["top", local.y], ["bottom", space.area.h - local.y]];
+  const [edge, distance] = edges.reduce((near, next) => next[1] < near[1] ? next : near);
+  if (distance < 24) return { kind: "area-edge", window, edge };
+  if (reorder) return reorder;
   const box = layoutDock(dock.root, space.area, space.gap).groups.find(({ rect }) => local.x >= rect.x && local.x < rect.x + rect.w && local.y >= rect.y && local.y < rect.y + rect.h);
   if (!box) return null;
   const { zone } = dropTarget(box.rect, local);
