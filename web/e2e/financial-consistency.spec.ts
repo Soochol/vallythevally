@@ -321,12 +321,18 @@ test.describe("같은 재무 키의 응답 순서", () => {
     const periods = page.getByRole("toolbar").getByRole("group", { name: "봉 주기" });
     await periods.getByRole("button", { name: "분기", exact: true }).click();
     await expect(row(page)).toContainText("확인 완료");
+    await expect.poll(() => series(page)).toEqual([100]);
     const quarter = await series(page);
     const requests: string[] = [];
     page.on("request", request => { if (new URL(request.url()).pathname.endsWith("/financials")) requests.push(request.url()); });
+    const krxBars = page.waitForResponse(response => {
+      const url = new URL(response.url());
+      return response.request().method() === "GET" && url.pathname === "/api/bars" && url.searchParams.get("symbol") === "005930" && url.searchParams.get("venue") === "krx" && url.searchParams.get("period") === "Q" && !url.searchParams.has("before");
+    });
     await page.getByRole("group", { name: "거래소", exact: true }).getByRole("button", { name: "KRX", exact: true }).click();
+    expect((await krxBars).ok()).toBe(true);
     await expect(cell(page)).toHaveAttribute("aria-busy", "false");
-    expect(await series(page)).toEqual(quarter);
+    await expect.poll(() => series(page)).toEqual(quarter);
     await periods.getByRole("button", { name: "일", exact: true }).click();
     await expect(row(page)).toHaveCount(0);
     await page.clock.fastForward(1500);
