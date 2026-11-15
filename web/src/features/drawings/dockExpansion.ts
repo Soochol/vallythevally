@@ -31,7 +31,7 @@ export function useDockExpansion(root: RefObject<HTMLElement | null>, keep: bool
     if (!bar) return;
     const enter = (e: PointerEvent) => {
       if (e.pointerType === "touch") return;
-      over.current = true; stop("close");
+      over.current = true; stop("close"); setTapped(false);
       if (!timers.current.open) hoverAfter(DOCK_OPEN_DELAY_MS, true);
     };
     const leave = (e: PointerEvent) => {

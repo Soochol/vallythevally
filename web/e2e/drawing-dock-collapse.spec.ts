@@ -325,3 +325,28 @@ test("막대 위에서의 우클릭은 연속 그리기를 풀지 않는다", as
   await expect(page.getByRole("menu", { name: "자석 세기", exact: true })).toBeVisible();
   expect(keepSaved(scenario)).toBe(true);
 });
+
+test.describe("터치와 마우스를 함께 쓰는 기기", () => {
+  test.use({ hasTouch: true });
+
+  test("터치로 알약을 눌러 펼친 뒤 마우스가 막대를 벗어나면 접힌다", async ({ page }) => {
+    await open(page);
+    await collapsed(page);
+    const box = (await dock(page).boundingBox())!;
+    await page.touchscreen.tap(box.x + box.width / 2, box.y + box.height / 2);
+    await expanded(page);
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await page.mouse.move(5, 5);
+    await collapsed(page);
+  });
+
+  test("터치로 펼친 막대는 바깥을 터치로 누르면 접힌다", async ({ page }) => {
+    await open(page);
+    const box = (await dock(page).boundingBox())!;
+    await page.touchscreen.tap(box.x + box.width / 2, box.y + box.height / 2);
+    await expanded(page);
+    const outside = await chartPoint(page, 0.5, 0.7);
+    await page.touchscreen.tap(outside.x, outside.y);
+    await collapsed(page);
+  });
+});
