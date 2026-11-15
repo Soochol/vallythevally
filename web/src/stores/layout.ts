@@ -129,6 +129,7 @@ interface LayoutState {
   revision: number;
   steps: readonly ArrangementStep[];
   load(layout: EditableLayout): void;
+  rename(name: string): void;
   arrange(next: Arrangement): void;
   undoArrangement(): void;
   setDock(dock: DockPlacement): void;
@@ -207,6 +208,7 @@ export const useLayoutStore = create<LayoutState>()((set, get) => {
     revision: 0,
     steps: [],
     load: (layout) => set({ layout, steps: [] }),
+    rename: (name) => set((s) => s.layout.name === name ? s : { layout: { ...s.layout, name }, revision: s.revision + 1 }),
     arrange,
     undoArrangement: () =>
       set((s) => {

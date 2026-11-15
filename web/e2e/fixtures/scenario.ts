@@ -68,6 +68,10 @@ export class UserDocuments {
     }
     return clone(saved);
   }
+  deleteLayout(id: string): boolean {
+    if ([...this.drawingValues.values()].some((drawing) => drawing.scope.kind !== "symbol" && drawing.scope.layoutId === id)) return false;
+    return this.layouts.delete(id);
+  }
   watchlists(): Watchlists { return clone(this.watchlistValue); }
   saveWatchlists(value: { lists: readonly WatchlistSeed[]; revision: number }): Watchlists {
     this.watchlistValue = { revision: value.revision, lists: value.lists.map((l) => ({ ...clone(l), groups: clone(l.groups ?? []) })) };
@@ -226,9 +230,15 @@ export class Scenario {
       if (method === "GET") return { body: this.documents.layout(id) };
       if (method === "PUT") {
         const value: LayoutInput = request.postDataJSON();
+        if ([...value.name.trim()].length < 1 || [...value.name.trim()].length > 20) return error(400, "bad_request", "레이아웃 이름은 1~20자여야 합니다");
+        if (this.documents.layoutSummaries().some((layout) => layout.id !== id && layout.name === value.name.trim())) return error(409, "conflict", "같은 이름의 레이아웃이 있습니다");
         const stored = this.documents.layoutSummaries().some(value => value.id === id) ? this.documents.layout(id) : null;
         return stored && value.revision <= stored.revision ? stale() : { body: this.documents.saveLayout(value) };
       }
+    }
+    if (path.startsWith("/api/layouts/") && method === "DELETE") {
+      const id = decodeURIComponent(path.slice("/api/layouts/".length));
+      return this.documents.deleteLayout(id) ? { body: null } : error(409, "conflict", "이 레이아웃 범위의 드로잉이 있어 지울 수 없습니다");
     }
     if (path === "/api/watchlists") {
       if (method === "GET") return { body: this.documents.watchlists() };

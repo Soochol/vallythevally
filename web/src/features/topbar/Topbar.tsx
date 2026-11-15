@@ -11,6 +11,7 @@ import { useUiStore } from "../../stores/ui";
 import { openIndicatorCommand } from "../indicator-command/open";
 import { BrandIcon, ChevronIcon, CameraIcon, CopyIcon, IndicatorIcon, SearchIcon, SlidersIcon, CompareIcon } from "../icons";
 import { canCopyImage, saveSnapshot } from "../snapshot/saveSnapshot";
+import { LayoutMenu } from "../layouts/LayoutMenu";
 import { AddWindowMenu } from "../workspace/AddWindowMenu";
 
 export function Topbar() {
@@ -43,6 +44,7 @@ export function Topbar() {
       <button type="button" className="tb-btn" aria-haspopup={opensDialog ? "dialog" : undefined} title="지표 (I)" onClick={() => openIndicatorCommand(cellId)}><IndicatorIcon />지표</button>
       <button type="button" className="tb-btn" aria-haspopup={opensDialog ? "dialog" : undefined} title="비교 종목" onClick={() => openIndicatorCommand(cellId, "compare")}><CompareIcon />비교</button>
       <span className="min-w-0 flex-1" />
+      <LayoutMenu />
       <AddWindowMenu />
       <FinancialUpdateButton />
       <button type="button" className="icon-btn" title="차트 이미지 내려받기 (Alt+S)" aria-label="차트 이미지 내려받기" onClick={() => saveSnapshot(cellId, "download")}><CameraIcon /></button>

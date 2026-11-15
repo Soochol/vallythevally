@@ -537,3 +537,19 @@ test.each([true, false])("종료한 저장기의 늦은 응답은 상태와 미�
   expect(t.unsaved()).toEqual(draft);
   expect(t.ns()).toEqual([1]);
 });
+
+test("저장 장벽을 기다리는 중 종료해도 다음 PUT을 보내지 않는다", async () => {
+  const sending = deferred<void>();
+  const t = setup({ send: () => sending.promise });
+  t.edit({ n: 1 });
+  const saving = t.saver.saveAndSuspend();
+  const rejection = expect(saving).rejects.toThrow("저장기를 사용할 수 없습니다");
+  await vi.advanceTimersByTimeAsync(0);
+  const stopping = t.saver.stop();
+  t.edit({ n: 2 });
+  sending.resolve();
+  await stopping;
+  await rejection;
+  await vi.advanceTimersByTimeAsync(100_000);
+  expect(t.ns()).toEqual([1]);
+});

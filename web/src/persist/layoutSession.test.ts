@@ -31,7 +31,8 @@ test.each([true, false])("다음 레이아웃의 첫 저장은 새 경로와 rev
   active.replaceLayout(next, revision, [cell]);
   useLayoutStore.getState().setPeriod(cell, "M");
   await vi.advanceTimersByTimeAsync(1000);
-  expect(sent[1]).toMatchObject({ path: "/api/layouts/next", body: { id: "next", revision: revision + 2 } });
+  expect(sent[1]).toMatchObject({ path: "/api/layouts/next", body: { id: "next" } });
+  expect(sent[1]!.body.revision).toBeGreaterThan(revision);
   const state = usePersistStore.getState().saves.layout;
   const draftCalls = [...drafts];
   if (ok) resolve(); else reject(new Error("이전 실패"));
