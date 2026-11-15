@@ -233,7 +233,7 @@ async function quietPresentation(page: Page) {
   await expect.poll(() => page.evaluate(async () => {
     let mutations = 0;
     const observer = new MutationObserver((records) => { mutations += records.length; });
-    for (const host of document.querySelectorAll("[data-chart-overlay-host]")) observer.observe(host, { attributes: true, attributeFilter: ["data-legend-density", "style"] });
+    for (const host of document.querySelectorAll("[data-chart-overlay-host]")) observer.observe(host, { attributes: true, attributeFilter: ["data-legend-density", "data-legend-beside", "style"] });
     for (let n = 0; n < 12; n++) await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
     observer.disconnect();
     return mutations;

@@ -258,7 +258,7 @@ export class Legend {
       return;
     }
     let shift = 0;
-    if (toolbar && !toolbar.dataset.moved && toolbar.offsetParent !== null) {
+    if (toolbar && toolbar.offsetParent !== null) {
       const [left, top, width, height] = (toolbar.dataset.dockNormal ?? "").split(",").map(Number);
       if (left === undefined || top === undefined || width === undefined || height === undefined || ![left, top, width, height].every(Number.isFinite)) return;
       const bar = { left: hostBox.left + left, top: hostBox.top + top, right: hostBox.left + left + width, bottom: hostBox.top + top + height };
@@ -270,10 +270,9 @@ export class Legend {
         return text.width > 0 && text.top < bar.bottom && text.right + 8 > bar.left;
       })) shift = height;
     }
-    set("--legend-shift", `${shift}px`);
     const bounds = this.contentBounds();
     const paneBottom = chartBox.top + viewport.pricePane.top + viewport.pricePane.height;
-    if (bounds.bottom > paneBottom + 0.5) {
+    if (bounds.bottom + shift > paneBottom + 0.5) {
       this.host.dataset.legendDensity = "compact";
       set("--legend-shift", "0px");
       const compact = this.contentBounds();
@@ -290,7 +289,7 @@ export class Legend {
           set("--legend-dock-width", `${width}px`);
         }
       }
-    }
+    } else if (!toolbar?.dataset.moved) set("--legend-shift", `${shift}px`);
     if (!this.host.hasAttribute("data-legend-beside")) for (const name of ["--legend-dock-left", "--legend-dock-width"]) this.host.style.removeProperty(name);
     if (toolbar) toolbar.scrollLeft = scroll;
     this.finalGeometry = this.geometrySnapshot();
