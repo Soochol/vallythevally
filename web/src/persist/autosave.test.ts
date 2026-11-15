@@ -133,6 +133,47 @@ test("결과를 모르는 레이아웃 저장 뒤에는 보낸 본문에 없던 
   expect(serverMayLackChart(CELL)).toBe(true);
 });
 
+test("이미 확정된 레이아웃보다 오래된 요청의 응답은 성공이든 stale이든 서버 차트 창을 바꾸지 않는다", async () => {
+  autosave.stop();
+  const second = windowId("second");
+  const replies: { resolve(): void; reject(e: unknown): void }[] = [];
+  autosave = startAutosave({
+    put: (path, json, { keepalive }) => {
+      puts.push({ path, body: JSON.parse(json), keepalive });
+      return new Promise<void>((resolve, reject) => { replies.push({ resolve, reject }); });
+    },
+    toast: (t) => toasts.push(t),
+    revisions: { layout: 0, ui: 0, watchlist: 0 },
+    serverCharts: [CELL, second],
+    unsaved: () => undefined,
+  });
+  const layout = useLayoutStore.getState().layout;
+  useLayoutStore.getState().load({ ...layout, windows: [...layout.windows, { ...chartWindows(layout)[0]!, id: second }] });
+  useLayoutStore.getState().setPeriod(CELL, "W");
+  await vi.advanceTimersByTimeAsync(1000);
+  useLayoutStore.getState().closeWindow(second);
+  autosave.flush();
+  expect(puts).toHaveLength(2);
+  replies[1]!.resolve();
+  await vi.advanceTimersByTimeAsync(0);
+  expect(serverMayLackChart(second)).toBe(true);
+  replies[0]!.resolve();
+  await vi.advanceTimersByTimeAsync(0);
+  expect(serverMayLackChart(second)).toBe(true);
+  expect(serverMayLackChart(CELL)).toBe(false);
+
+  useLayoutStore.getState().setPeriod(CELL, "M");
+  await vi.advanceTimersByTimeAsync(1000);
+  useLayoutStore.getState().setPeriod(CELL, "D");
+  autosave.flush();
+  expect(puts).toHaveLength(4);
+  replies[3]!.resolve();
+  await vi.advanceTimersByTimeAsync(0);
+  replies[2]!.reject(new ApiRequestError("stale_revision", "더 새 편집"));
+  await vi.advanceTimersByTimeAsync(0);
+  expect(serverMayLackChart(CELL)).toBe(false);
+});
+
 test("UI 설정을 바꾸면 모르는 키와 함께 UiState를 보낸다", async () => {
   useUiStore.getState().setIndicatorWindow("inspector");
   await vi.advanceTimersByTimeAsync(1000);

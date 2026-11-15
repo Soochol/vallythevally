@@ -32,17 +32,21 @@ export interface Autosave {
   stop(): void;
 }
 
+type ServerLayout = { revision: number; charts: ReadonlySet<string> | null };
+
 let active: Autosave | null = null;
-let serverCharts: ReadonlySet<string> | null = null;
+let savedLayout: ServerLayout = { revision: -Infinity, charts: null };
+let unsureLayouts: ServerLayout[] = [];
 const sendingCharts = new Set<ReadonlySet<string>>();
 
 export function serverMayLackChart(id: string): boolean {
-  return active === null || serverCharts === null || !serverCharts.has(id) || [...sendingCharts].some((charts) => !charts.has(id));
+  const candidates = [savedLayout, ...unsureLayouts];
+  return active === null || candidates.some(({ charts }) => charts === null || !charts.has(id)) || [...sendingCharts].some((charts) => !charts.has(id));
 }
 
-function chartsIn(json: string): ReadonlySet<string> {
-  const { windows } = JSON.parse(json) as Pick<LayoutInput, "windows">;
-  return new Set(windows.filter((w) => w.kind === "chart").map((w) => w.id));
+function layoutSent(json: string): ServerLayout & { charts: ReadonlySet<string> } {
+  const { windows, revision } = JSON.parse(json) as Pick<LayoutInput, "windows" | "revision">;
+  return { revision, charts: new Set(windows.filter((w) => w.kind === "chart").map((w) => w.id)) };
 }
 
 export function retryFailedSaves() {
@@ -74,7 +78,8 @@ export function startAutosave(deps: AutosaveDeps): Autosave {
   const unsaved =
     deps.unsaved ?? ((target: SaveTarget) => ({ write: (u) => writeUnsaved(target, u), clear: (upTo) => clearUnsaved(target, upTo) }));
 
-  serverCharts = deps.serverCharts ? new Set(deps.serverCharts) : null;
+  savedLayout = { revision: -Infinity, charts: deps.serverCharts ? new Set(deps.serverCharts) : null };
+  unsureLayouts = [];
   sendingCharts.clear();
   const layout = createSaver<Omit<LayoutInput, "revision">>({
     debounceMs: DEBOUNCE_MS,
@@ -86,18 +91,19 @@ export function startAutosave(deps: AutosaveDeps): Autosave {
     path: () => layoutPath(useLayoutStore.getState().layout.id),
     revision: deps.revisions.layout,
     send: async (path, json, opts) => {
-      const charts = chartsIn(json);
-      sendingCharts.add(charts);
+      const sent = layoutSent(json);
+      sendingCharts.add(sent.charts);
       try {
         const saved = await deps.put(path, json, opts);
-        serverCharts = charts;
+        if (sent.revision > savedLayout.revision) savedLayout = sent;
+        unsureLayouts = unsureLayouts.filter((layout) => layout.revision > savedLayout.revision);
         return saved;
       } catch (e) {
-        const known = serverCharts;
-        serverCharts = known && !(e instanceof ApiRequestError && e.code === "stale_revision") ? new Set([...known].filter((id) => charts.has(id))) : null;
+        const stale = e instanceof ApiRequestError && e.code === "stale_revision";
+        if (sent.revision > savedLayout.revision) unsureLayouts = [...unsureLayouts, stale ? { revision: sent.revision, charts: null } : sent];
         throw e;
       } finally {
-        sendingCharts.delete(charts);
+        sendingCharts.delete(sent.charts);
       }
     },
     unsaved: unsaved("layout"),
