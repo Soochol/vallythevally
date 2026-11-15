@@ -383,7 +383,10 @@ impl MarketHub {
                 .conns
                 .values()
                 .filter(|c| c.watch_venue != Venue::Combined)
-                .flat_map(|c| c.requested_watch.iter().filter(|s| dir.get(**s).is_some()).take(super::subscriptions::REALTIME_LIMIT))
+                .flat_map(|c| {
+                    let mut seen = HashSet::new();
+                    c.requested_watch.iter().filter(|s| dir.get(**s).is_some() && seen.insert(**s)).take(super::subscriptions::REALTIME_LIMIT).collect::<Vec<_>>()
+                })
                 .filter_map(|s| match s {
                     Symbol::Stock(code) if dir.get(*s).is_some_and(|info| info.nxt_enabled) => Some(*code),
                     _ => None,
@@ -2534,6 +2537,19 @@ mod tests {
         h.hub.watch(conn, rows, Venue::Krx);
         tokio::time::sleep(Duration::from_secs(3)).await;
         assert!(h.desired.borrow().contains(&samsung().feed.symbol()), "마지막 목록 줄도 실시간 자리를 받는다");
+        h.events.send(fill(&h, SAMSUNG, (9, 0, 51), 112, Some(Exchange::Krx), 5, (12, 1_005))).await.unwrap();
+        assert_eq!(quote_messages(take(&out).await), vec![quotes_msg(api::Venue::Krx, vec![venue_quote(SAMSUNG, api::Venue::Krx, 112.0, 12.0, 705, at(9, 0, 51))])]);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn repeated_watch_rows_do_not_use_up_the_day_volume_places() {
+        let h = std_harness();
+        let (conn, out) = connect(&h).await;
+        live(&h).await;
+        let mut rows = vec![fillers(1)[0]; REALTIME_LIMIT];
+        rows.push(samsung().feed.symbol());
+        h.hub.watch(conn, rows, Venue::Krx);
+        tokio::time::sleep(Duration::from_secs(3)).await;
         h.events.send(fill(&h, SAMSUNG, (9, 0, 51), 112, Some(Exchange::Krx), 5, (12, 1_005))).await.unwrap();
         assert_eq!(quote_messages(take(&out).await), vec![quotes_msg(api::Venue::Krx, vec![venue_quote(SAMSUNG, api::Venue::Krx, 112.0, 12.0, 705, at(9, 0, 51))])]);
     }
