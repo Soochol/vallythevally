@@ -2,6 +2,7 @@ import type { Page } from "@playwright/test";
 import { parseDrawingBody, UNSAVED_PREFIX } from "../src/chart/drawings/outbox";
 import { parseJournalRecord, STAGING_PREFIX } from "../src/chart/drawings/journal";
 import { test, expect, cell, chartOf, type Scenario } from "./harness";
+import { expandDock } from "./drawing-probe";
 
 async function open(page: Page) {
   const loaded = page.waitForResponse((response) => response.url().includes("/api/drawings?") && response.request().method() === "GET");
@@ -46,6 +47,7 @@ test("startup legacy read failure then late ACK retains revision maximum for bac
   await open(page);
   await expect(page.getByRole("button", { name: "다시 시도", exact: true }).first()).toBeVisible();
   expect(await page.evaluate(id => JSON.parse(localStorage.getItem(`vv.unsaved.drawing.${id}`) ?? "null"), original.id)).toMatchObject({ v: 1, lastRevision: 0, want: { kind: "put", body: { revision: 0 } } });
+  await expandDock(page);
   await page.getByRole("button", { name: "개체 목록 열기" }).click();
   await page.getByRole("button", { name: "고르기: 수평선" }).click();
   let releaseDelete = () => {};

@@ -6,6 +6,7 @@ import { parseDrawingBody, recordKey, UNSAVED_PREFIX } from "../src/chart/drawin
 import { parseJournalRecord, stageKey, STAGING_PREFIX, COMPLETION_PREFIX, completionKey } from "../src/chart/drawings/journal";
 import { test, expect, cell, chartOf, type Scenario } from "./harness";
 import type {} from "./journal-probe";
+import { expandDock } from "./drawing-probe";
 
 const mirror = (page: Page) => chartOf(cell(page)).locator(".drawing-mirror");
 const width = (page: Page) => page.getByRole("toolbar", { name: "드로잉 스타일" }).getByLabel("선 굵기");
@@ -58,6 +59,7 @@ test("frontend journal + saved documents: delayed older admission cannot replace
     });
   }), original.id);
   try {
+    await expandDock(page);
     await page.getByRole("button", { name: "개체 목록 열기" }).click();
     await page.getByRole("button", { name: "고르기: 수평선" }).click();
     await selectOption(width(page), "3");
@@ -136,6 +138,7 @@ test("frontend journal + saved documents: reload transmits the staged PUT's fixe
       return nativeFetch(input, init);
     };
   });
+  await expandDock(page);
   await page.getByRole("button", { name: "개체 목록 열기" }).click();
   await page.getByRole("button", { name: "고르기: 수평선" }).click();
   await selectOption(width(page), "3");

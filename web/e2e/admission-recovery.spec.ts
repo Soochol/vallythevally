@@ -3,6 +3,7 @@ import type { Page } from "@playwright/test";
 import { parseJournalRecord, STAGING_PREFIX } from "../src/chart/drawings/journal";
 import { parseDrawingBody } from "../src/chart/drawings/outbox";
 import { test, expect, cell, chartOf, type Scenario } from "./harness";
+import { expandDock } from "./drawing-probe";
 
 const mirror = (page: Page) => chartOf(cell(page)).locator(".drawing-mirror");
 const width = (page: Page) => page.getByRole("toolbar", { name: "드로잉 스타일" }).getByLabel("선 굵기");
@@ -24,6 +25,7 @@ async function open(page: Page) {
 }
 
 async function selectLine(page: Page) {
+  await expandDock(page);
   await page.getByRole("button", { name: "개체 목록 열기" }).click();
   await page.getByRole("button", { name: "고르기: 수평선" }).click();
   await expect(width(page)).toBeVisible();

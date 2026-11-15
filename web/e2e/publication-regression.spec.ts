@@ -3,6 +3,7 @@ import type { Page } from "@playwright/test";
 import { parseDrawingBody, UNSAVED_PREFIX } from "../src/chart/drawings/outbox";
 import { parseJournalRecord, COMPLETION_PREFIX, completionKey, STAGING_PREFIX } from "../src/chart/drawings/journal";
 import { test, expect, cell, chartOf, type Scenario } from "./harness";
+import { expandDock } from "./drawing-probe";
 
 const width = (page: Page) => page.getByRole("toolbar", { name: "드로잉 스타일" }).getByLabel("선 굵기");
 
@@ -48,8 +49,10 @@ test("frontend journal + saved documents: first publication of an older never-se
   const [original] = await storedDrawings(scenario);
   if (!original) throw new Error("Expected seeded line");
   const other = await context.newPage(); await open(other);
+  await expandDock(page);
   await page.getByRole("button", {name: "개체 목록 열기"}).click();
   await page.getByRole("button", {name: "고르기: 수평선"}).click();
+  await expandDock(other);
   await other.getByRole("button", {name: "개체 목록 열기"}).click();
   await other.getByRole("button", {name: "고르기: 수평선"}).click();
   let release = () => {}; let held = false; let olderRecord: unknown;
@@ -116,6 +119,7 @@ test("frontend journal + saved documents: native launch holds the id lock only u
   const other = await context.newPage();
   await open(other);
   for (const tab of [page, other]) {
+    await expandDock(tab);
     await tab.getByRole("button", { name: "개체 목록 열기" }).click();
     await tab.getByRole("button", { name: "고르기: 수평선" }).click();
   }
@@ -197,6 +201,7 @@ test("frontend journal + saved documents: a warm Storage task paused before diag
   const other = await context.newPage();
   await open(other);
   for (const tab of [page, other]) {
+    await expandDock(tab);
     await tab.getByRole("button", { name: "개체 목록 열기" }).click();
     await tab.getByRole("button", { name: "고르기: 수평선" }).click();
   }

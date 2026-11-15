@@ -2,6 +2,7 @@ import { selectOption } from "./select-option";
 import { test, expect, cell, chartOf, type Scenario } from './harness';
 import type { Page } from '@playwright/test';
 import type { Drawing } from '../src/api/generated/Drawing';
+import { expandDock } from "./drawing-probe";
 
 const drawings = async (scenario: Scenario): Promise<Drawing[]> => scenario.documents.drawings("IDX:001");
 async function mirror(page: Page) {
@@ -49,6 +50,7 @@ test('server accepted extreme timestamp must not blank settings', async ({page,s
   scenario.documents.saveDrawing(body);
 
   await page.reload(); await expect.poll(async ()=>(await mirror(page)).length).toBe(1);
+  await expandDock(page);
   await page.getByRole('button',{name:'개체 목록 열기'}).click();
   await page.getByRole('button',{name:'고르기: 수평선'}).click();
   await page.getByRole('button',{name:'드로잉 세부 설정',exact:true}).click();
@@ -78,6 +80,7 @@ test('late PUT response must not allow undo to delete newer other-tab work', asy
   const initial=(await drawings(scenario))[0]!;
   const other=await page.context().newPage();
   await other.goto("/"); await expect.poll(async ()=>(await mirror(other)).length).toBe(1);
+  await expandDock(other);
   await other.getByRole('button',{name:'개체 목록 열기'}).click();
   await other.getByRole('button',{name:'고르기: 수평선'}).click();
   await selectOption(other.getByRole('toolbar',{name:'드로잉 스타일'}).getByLabel('선 굵기'), '4');
@@ -106,6 +109,7 @@ test('visible extreme timestamp has a safe numeric editor and preserves unrelate
   scenario.documents.saveDrawing({...d,tool:'trendline',points:[{...point,t:Number.MAX_SAFE_INTEGER},{...point,t:point.t+86400}],revision:d.revision+100});
 
   await page.reload(); await expect.poll(async ()=>(await mirror(page)).length).toBe(1);
+  await expandDock(page);
   await page.getByRole('button',{name:'개체 목록 열기'}).click();
   await page.getByRole('button',{name:'고르기: 추세선'}).click();
   await page.getByRole('button',{name:'드로잉 세부 설정',exact:true}).click();

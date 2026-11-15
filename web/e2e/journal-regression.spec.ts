@@ -2,6 +2,7 @@ import type { Page } from "@playwright/test";
 import { parseDrawingBody, recordKey } from "../src/chart/drawings/outbox";
 import { parseJournalRecord } from "../src/chart/drawings/journal";
 import { test, expect, cell, chartOf, type Scenario } from "./harness";
+import { expandDock } from "./drawing-probe";
 
 const mirror = (page: Page) => chartOf(cell(page)).locator(".drawing-mirror");
 
@@ -83,6 +84,7 @@ for (const offset of [0, -60_000]) {
           return nativeFetch(input, init);
         };
       });
+      await expandDock(other);
       await other.getByRole("button", { name: "개체 목록 열기" }).click();
       await other.getByRole("button", { name: "고르기: 수평선" }).click();
       await other.getByRole("button", { name: "드로잉 지우기", exact: true }).click();

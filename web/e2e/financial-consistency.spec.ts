@@ -13,6 +13,7 @@ import type { ChartSettings } from "../src/chart/settings";
 import { installChartProbe } from "./chart-probe";
 import { installFrameProbe } from "./frame-probe";
 import { type Scenario, cell, chartOf, DEFAULT_LAYOUT_ID, expect, withFirstChart } from "./harness";
+import { expandDock } from "./drawing-probe";
 
 const kst = (date: string) => Date.parse(`${date}T00:00:00+09:00`) / 1000;
 const markerId = "01900000-0000-7000-8000-000000000901";
@@ -150,6 +151,7 @@ test.describe("재무 시각과 가격 시각", () => {
       if (point.x === null || point.y === null) throw new Error("실제 시각의 좌표가 없습니다");
       return { x: box.x + point.x, y: box.y + point.y };
     };
+    await expandDock(page);
     await page.getByRole("button", { name: "자석", exact: true }).click({ button: "right" });
     await page.getByRole("menuitemradio", { name: "강", exact: true }).click();
     const start = await move(2021, 132); const end = await move(2023, 152);
@@ -163,6 +165,7 @@ test.describe("재무 시각과 가격 시각", () => {
     await page.mouse.move(handle.x, handle.y); await page.mouse.down(); await page.mouse.move(target.x, target.y, { steps: 8 }); await page.mouse.up();
     await expect.poll(async () => (await drawings(scenario)).find((d) => d.id === created.id)!.points[1]).toEqual({ t: kst("2024-01-01"), price: 165 });
     await page.keyboard.press("Escape");
+    await expandDock(page);
     const magnet = page.getByRole("button", { name: "자석", exact: true });
     const old = await move(2015, 150);
     old.x += await page.evaluate(() => window.chartProbe.chart.timeScale().options().barSpacing / 4);
