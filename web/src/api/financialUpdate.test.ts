@@ -1,7 +1,8 @@
-import { environmentManager, QueryClient } from "@tanstack/react-query";
+import { environmentManager, QueryClient, QueryObserver } from "@tanstack/react-query";
 import { afterEach, beforeEach, expect, type MockInstance, test, vi } from "vitest";
 import type { FinancialsPage } from "./generated/FinancialsPage";
 import type { FinancialUpdatePage } from "./generated/FinancialUpdatePage";
+import type { FinancialPoint } from "./generated/FinancialPoint";
 import { financialsQuery } from "./financials";
 import { financialUpdateQuery, watchFinancialJob } from "./financialUpdate";
 
@@ -129,4 +130,46 @@ test("성공 응답이 아닌 상태 변화는 데이터가 사라져도 무효�
   await client.resetQueries({ queryKey: financialUpdateQuery.queryKey });
   expect(client.getQueryData(financialUpdateQuery.queryKey)).toBeUndefined();
   expectNoneInvalidated();
+});
+
+test.each([false, true])("자동 완료 뒤 늦은 재무 GET은 두 구독자의 최신 정정을 되돌리지 않는다 (기존 cache %s)", async (cached) => {
+  const revenue: FinancialPoint = {
+    businessYear: 2025, reportCode: "11011", status: "available", reason: null, value: 1000, reportedValue: 1000,
+    period: { kind: "duration", start: "2025-01-01", end: "2025-12-31" }, priceBucket: 1735657200, basis: "CFS", currency: "KRW", inputs: [],
+  };
+  const old: FinancialsPage = { ...page(), series: [{ metric: "revenue", points: [revenue] }] };
+  const corrected: FinancialsPage = { ...old, refreshVersion: 4, disclosureVersion: 4, series: [{ metric: "revenue", points: [{ ...revenue, status: "not_calculable", value: null, reason: "period_overlap" }] }] };
+  let releaseOld = (_response: Response) => {};
+  const pending = new Promise<Response>(resolve => { releaseOld = resolve; });
+  const events: string[] = [];
+  let reads = 0;
+  vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+    if (url === "/api/financial-update") return jobBody();
+    events.push(`financial GET ${++reads}`);
+    return reads === 1 ? pending : json(corrected);
+  }));
+  await fetchJob();
+  events.push("collecting observed");
+  const options = financialsQuery(requests[0]);
+  if (cached) client.setQueryData(options.queryKey, old);
+  const observers = [new QueryObserver(client, options), new QueryObserver(client, options)];
+  const stop = observers.map(observer => observer.subscribe(() => {}));
+  const firstRead = client.fetchQuery(options).catch(() => undefined);
+  try {
+    expect(reads).toBe(1);
+    for (const observer of observers) expect(observer.getCurrentResult().data).toEqual(cached ? old : undefined);
+    respond(job({ status: "ready", phase: "complete", completedCompanies: 10, lastCheckedAt: 200 }));
+    await fetchJob();
+    events.push("ready observed before old GET delivery");
+    releaseOld(json(old));
+    await firstRead;
+    await vi.waitFor(() => { for (const observer of observers) expect(observer.getCurrentResult().isFetching).toBe(false); });
+    const actual = observers.map(observer => observer.getCurrentResult().data?.series.find(series => series.metric === "revenue")?.points[0]);
+    console.info(JSON.stringify({ events, reads, job: client.getQueryData(financialUpdateQuery.queryKey)?.status, actual }));
+    for (const point of actual) expect(point).toMatchObject({ value: null, reason: "period_overlap" });
+    expect(client.getQueryData(options.queryKey)).toEqual(corrected);
+  } finally {
+    releaseOld(json(old));
+    stop.forEach(unsubscribe => unsubscribe());
+  }
 });
