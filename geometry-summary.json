@@ -1,0 +1,98 @@
+[
+  {
+    "case": "endpoint",
+    "viewport": {
+      "width": 1024,
+      "height": 768
+    },
+    "pane": {
+      "x": 12,
+      "y": 106,
+      "width": 646,
+      "height": 474
+    },
+    "dock": {
+      "x": 146,
+      "y": 146,
+      "width": 378,
+      "height": 36
+    },
+    "styleBefore": {
+      "x": 317,
+      "y": 190,
+      "width": 333,
+      "height": 38
+    },
+    "styleAfter": {
+      "x": 27.375,
+      "y": 190,
+      "width": 333,
+      "height": 38
+    },
+    "finalEndpointsAccessible": true
+  },
+  {
+    "case": "short",
+    "viewport": {
+      "width": 1024,
+      "height": 330
+    },
+    "pane": {
+      "x": 12,
+      "y": 106,
+      "width": 646,
+      "height": 124
+    },
+    "dock": {
+      "x": 146,
+      "y": 154,
+      "width": 378,
+      "height": 36
+    },
+    "styleBefore": {
+      "x": 195.421875,
+      "y": 145.59375,
+      "width": 333,
+      "height": 38
+    },
+    "styleAfter": {
+      "x": 195.421875,
+      "y": 116,
+      "width": 333,
+      "height": 38
+    },
+    "finalEndpointsAccessible": true
+  },
+  {
+    "case": "handles",
+    "viewport": {
+      "width": 1024,
+      "height": 330
+    },
+    "pane": {
+      "x": 12,
+      "y": 106,
+      "width": 646,
+      "height": 124
+    },
+    "dock": {
+      "x": 146,
+      "y": 154,
+      "width": 378,
+      "height": 36
+    },
+    "styleBefore": {
+      "x": 317,
+      "y": 114,
+      "width": 333,
+      "height": 38
+    },
+    "styleAfter": {
+      "x": 291.875,
+      "y": 190,
+      "width": 333,
+      "height": 38
+    },
+    "finalEndpointsAccessible": true
+  }
+]

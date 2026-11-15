@@ -1,0 +1,60 @@
+{
+  "viewport": {
+    "width": 1024,
+    "height": 768
+  },
+  "pane": {
+    "x": 12,
+    "y": 106,
+    "width": 646,
+    "height": 474
+  },
+  "dock": {
+    "x": 146,
+    "y": 146,
+    "width": 378,
+    "height": 36
+  },
+  "style": {
+    "x": 317,
+    "y": 190,
+    "width": 333,
+    "height": 38
+  },
+  "endpoints": [
+    {
+      "x": 374.375,
+      "y": 196.9999999999999
+    },
+    {
+      "x": 592.875,
+      "y": 565
+    }
+  ],
+  "hits": [
+    {
+      "point": {
+        "x": 374.375,
+        "y": 196.9999999999999
+      },
+      "tag": "SPAN",
+      "label": "드로잉 스타일",
+      "accessible": false
+    },
+    {
+      "point": {
+        "x": 592.875,
+        "y": 565
+      },
+      "tag": "CANVAS",
+      "label": "칸 1: 삼성전자 통합 일",
+      "accessible": true
+    }
+  ],
+  "free": {
+    "x": 20,
+    "y": 190,
+    "width": 333,
+    "height": 38
+  }
+}
