@@ -1,0 +1,2858 @@
+[
+  {
+    "size": {
+      "width": 1440,
+      "height": 900
+    },
+    "overflow": [
+      0,
+      0
+    ],
+    "charts": [
+      {
+        "body": {
+          "x": 12,
+          "y": 106,
+          "w": 1018,
+          "h": 159,
+          "bottom": 265
+        },
+        "group": {
+          "x": 12,
+          "y": 72,
+          "w": 1018,
+          "h": 193,
+          "bottom": 265
+        },
+        "legend": {
+          "x": 32,
+          "y": 156,
+          "w": 496.84375,
+          "h": 32,
+          "bottom": 188
+        },
+        "name": {
+          "x": 32,
+          "y": 156,
+          "w": 212,
+          "h": 18,
+          "bottom": 174
+        },
+        "price": {
+          "x": 252,
+          "y": 156,
+          "w": 276.84375,
+          "h": 18,
+          "bottom": 174
+        },
+        "ohlc": {
+          "x": 32,
+          "y": 174,
+          "w": 328,
+          "h": 14,
+          "bottom": 188
+        },
+        "volume": {
+          "x": 20,
+          "y": 210,
+          "w": 216,
+          "h": 18,
+          "bottom": 228
+        },
+        "nameText": {
+          "x": 32,
+          "y": 156,
+          "w": 208,
+          "h": 18,
+          "bottom": 174
+        },
+        "priceText": {
+          "x": 252,
+          "y": 156,
+          "w": 272.84375,
+          "h": 18,
+          "bottom": 174
+        },
+        "ohlcText": {
+          "x": 32,
+          "y": 174,
+          "w": 328,
+          "h": 14,
+          "bottom": 188
+        },
+        "volumeText": {
+          "x": 20,
+          "y": 210,
+          "w": 212,
+          "h": 18,
+          "bottom": 228
+        },
+        "shift": "40px",
+        "panes": [
+          {
+            "height": 103,
+            "stretch": 1,
+            "rect": {
+              "x": 12,
+              "y": 106,
+              "w": 1018,
+              "h": 103,
+              "bottom": 209
+            }
+          },
+          {
+            "height": 26,
+            "stretch": 0.25,
+            "rect": {
+              "x": 12,
+              "y": 210,
+              "w": 1018,
+              "h": 26,
+              "bottom": 236
+            }
+          }
+        ],
+        "legendText": "\uc0bc\uc131\uc804\uc790005930\ud1b5\ud569KRXNXT\uc77c193,500\u22124,000  \u22122.03%2026-11-09\uc870\ud68c \uac12\uc2dc197,700\uace0198,800\uc800189,300\uc885193,500\ub7c91,443\ub9cc",
+        "volumeTextContent": "\uac70\ub798\ub7c9\uc790\ub8cc\u00b7\uac31\uc2e0\uc804\uccb4 \uc7ac\ubb34\uc790\ub8cc \uc5c5\ub370\uc774\ud2b81,443\ub9cc",
+        "buttons": [
+          {
+            "label": "\ud1b5\ud569",
+            "rect": {
+              "x": 126,
+              "y": 153,
+              "w": 32,
+              "h": 24,
+              "bottom": 177
+            }
+          },
+          {
+            "label": "KRX",
+            "rect": {
+              "x": 159,
+              "y": 153,
+              "w": 32,
+              "h": 24,
+              "bottom": 177
+            }
+          },
+          {
+            "label": "NXT",
+            "rect": {
+              "x": 192,
+              "y": 153,
+              "w": 34,
+              "h": 24,
+              "bottom": 177
+            }
+          },
+          {
+            "label": "\uac70\ub798\ub7c9 \uc124\uc815 \uc5f4\uae30",
+            "rect": {
+              "x": 36,
+              "y": 212,
+              "w": 30,
+              "h": 14,
+              "bottom": 226
+            }
+          },
+          {
+            "label": "\ubcf4\uace0\uae30\uac04 \uc790\ub8cc",
+            "rect": {
+              "x": 0,
+              "y": 0,
+              "w": 0,
+              "h": 0,
+              "bottom": 0
+            }
+          },
+          {
+            "label": "\uc804\uccb4 \uc7ac\ubb34\uc790\ub8cc \uc5c5\ub370\uc774\ud2b8",
+            "rect": {
+              "x": 0,
+              "y": 0,
+              "w": 0,
+              "h": 0,
+              "bottom": 0
+            }
+          },
+          {
+            "label": "\uac70\ub798\ub7c9 \ud328\ub110 \uc811\uae30",
+            "rect": {
+              "x": 119,
+              "y": 210,
+              "w": 18,
+              "h": 18,
+              "bottom": 228
+            }
+          },
+          {
+            "label": "\uac70\ub798\ub7c9 \ud328\ub110 \uc704\ub85c",
+            "rect": {
+              "x": 138,
+              "y": 210,
+              "w": 18,
+              "h": 18,
+              "bottom": 228
+            }
+          },
+          {
+            "label": "\uac70\ub798\ub7c9 \ud328\ub110 \uc544\ub798\ub85c",
+            "rect": {
+              "x": 157,
+              "y": 210,
+              "w": 18,
+              "h": 18,
+              "bottom": 228
+            }
+          },
+          {
+            "label": "\uac70\ub798\ub7c9 \uc124\uc815",
+            "rect": {
+              "x": 176,
+              "y": 210,
+              "w": 18,
+              "h": 18,
+              "bottom": 228
+            }
+          },
+          {
+            "label": "\uac70\ub798\ub7c9 \uc228\uae30\uae30",
+            "rect": {
+              "x": 195,
+              "y": 210,
+              "w": 18,
+              "h": 18,
+              "bottom": 228
+            }
+          },
+          {
+            "label": "\uac70\ub798\ub7c9 \ud328\ub110 \ub2eb\uae30",
+            "rect": {
+              "x": 214,
+              "y": 210,
+              "w": 18,
+              "h": 18,
+              "bottom": 228
+            }
+          }
+        ],
+        "axis": {
+          "x": 12,
+          "y": 236,
+          "w": 1018,
+          "h": 28,
+          "bottom": 264
+        }
+      },
+      {
+        "body": {
+          "x": 12,
+          "y": 305,
+          "w": 1018,
+          "h": 158,
+          "bottom": 463
+        },
+        "group": {
+          "x": 12,
+          "y": 271,
+          "w": 1018,
+          "h": 192,
+          "bottom": 463
+        },
+        "legend": {
+          "x": 32,
+          "y": 315,
+          "w": 496.84375,
+          "h": 32,
+          "bottom": 347
+        },
+        "name": {
+          "x": 32,
+          "y": 315,
+          "w": 212,
+          "h": 18,
+          "bottom": 333
+        },
+        "price": {
+          "x": 252,
+          "y": 315,
+          "w": 276.84375,
+          "h": 18,
+          "bottom": 333
+        },
+        "ohlc": {
+          "x": 32,
+          "y": 333,
+          "w": 328,
+          "h": 14,
+          "bottom": 347
+        },
+        "volume": {
+          "x": 20,
+          "y": 409,
+          "w": 216,
+          "h": 18,
+          "bottom": 427
+        },
+        "nameText": {
+          "x": 32,
+          "y": 315,
+          "w": 208,
+          "h": 18,
+          "bottom": 333
+        },
+        "priceText": {
+          "x": 252,
+          "y": 315,
+          "w": 272.84375,
+          "h": 18,
+          "bottom": 333
+        },
+        "ohlcText": {
+          "x": 32,
+          "y": 333,
+          "w": 328,
+          "h": 14,
+          "bottom": 347
+        },
+        "volumeText": {
+          "x": 20,
+          "y": 409,
+          "w": 212,
+          "h": 18,
+          "bottom": 427
+        },
+        "shift": "",
+        "panes": [
+          {
+            "height": 103,
+            "stretch": 1,
+            "rect": {
+              "x": 12,
+              "y": 305,
+              "w": 1018,
+              "h": 103,
+              "bottom": 408
+            }
+          },
+          {
+            "height": 26,
+            "stretch": 0.25,
+            "rect": {
+              "x": 12,
+              "y": 409,
+              "w": 1018,
+              "h": 26,
+              "bottom": 435
+            }
+          }
+        ],
+        "legendText": "\uc0bc\uc131\uc804\uc790005930\ud1b5\ud569KRXNXT\uc77c193,500\u22124,000  \u22122.03%2026-11-09\uc870\ud68c \uac12\uc2dc197,700\uace0198,800\uc800189,300\uc885193,500\ub7c91,443\ub9cc",
+        "volumeTextContent": "\uac70\ub798\ub7c9\uc790\ub8cc\u00b7\uac31\uc2e0\uc804\uccb4 \uc7ac\ubb34\uc790\ub8cc \uc5c5\ub370\uc774\ud2b81,443\ub9cc",
+        "buttons": [
+          {
+            "label": "\ud1b5\ud569",
+            "rect": {
+              "x": 126,
+              "y": 312,
+              "w": 32,
+              "h": 24,
+              "bottom": 336
+            }
+          },
+          {
+            "label": "KRX",
+            "rect": {
+              "x": 159,
+              "y": 312,
+              "w": 32,
+              "h": 24,
+              "bottom": 336
+            }
+          },
+          {
+            "label": "NXT",
+            "rect": {
+              "x": 192,
+              "y": 312,
+              "w": 34,
+              "h": 24,
+              "bottom": 336
+            }
+          },
+          {
+            "label": "\uac70\ub798\ub7c9 \uc124\uc815 \uc5f4\uae30",
+            "rect": {
+              "x": 36,
+              "y": 411,
+              "w": 30,
+              "h": 14,
+              "bottom": 425
+            }
+          },
+          {
+            "label": "\ubcf4\uace0\uae30\uac04 \uc790\ub8cc",
+            "rect": {
+              "x": 0,
+              "y": 0,
+              "w": 0,
+              "h": 0,
+              "bottom": 0
+            }
+          },
+          {
+            "label": "\uc804\uccb4 \uc7ac\ubb34\uc790\ub8cc \uc5c5\ub370\uc774\ud2b8",
+            "rect": {
+              "x": 0,
+              "y": 0,
+              "w": 0,
+              "h": 0,
+              "bottom": 0
+            }
+          },
+          {
+            "label": "\uac70\ub798\ub7c9 \ud328\ub110 \uc811\uae30",
+            "rect": {
+              "x": 119,
+              "y": 409,
+              "w": 18,
+              "h": 18,
+              "bottom": 427
+            }
+          },
+          {
+            "label": "\uac70\ub798\ub7c9 \ud328\ub110 \uc704\ub85c",
+            "rect": {
+              "x": 138,
+              "y": 409,
+              "w": 18,
+              "h": 18,
+              "bottom": 427
+            }
+          },
+          {
+            "label": "\uac70\ub798\ub7c9 \ud328\ub110 \uc544\ub798\ub85c",
+            "rect": {
+              "x": 157,
+              "y": 409,
+              "w": 18,
+              "h": 18,
+              "bottom": 427
+            }
+          },
+          {
+            "label": "\uac70\ub798\ub7c9 \uc124\uc815",
+            "rect": {
+              "x": 176,
+              "y": 409,
+              "w": 18,
+              "h": 18,
+              "bottom": 427
+            }
+          },
+          {
+            "label": "\uac70\ub798\ub7c9 \uc228\uae30\uae30",
+            "rect": {
+              "x": 195,
+              "y": 409,
+              "w": 18,
+              "h": 18,
+              "bottom": 427
+            }
+          },
+          {
+            "label": "\uac70\ub798\ub7c9 \ud328\ub110 \ub2eb\uae30",
+            "rect": {
+              "x": 214,
+              "y": 409,
+              "w": 18,
+              "h": 18,
+              "bottom": 427
+            }
+          }
+        ],
+        "axis": {
+          "x": 12,
+          "y": 435,
+          "w": 1018,
+          "h": 28,
+          "bottom": 463
+        }
+      },
+      {
+        "body": {
+          "x": 12,
+          "y": 503,
+          "w": 1018,
+          "h": 159,
+          "bottom": 662
+        },
+        "group": {
+          "x": 12,
+          "y": 469,
+          "w": 1018,
+          "h": 193,
+          "bottom": 662
+        },
+        "legend": {
+          "x": 32,
+          "y": 513,
+          "w": 496.84375,
+          "h": 32,
+          "bottom": 545
+        },
+        "name": {
+          "x": 32,
+          "y": 513,
+          "w": 212,
+          "h": 18,
+          "bottom": 531
+        },
+        "price": {
+          "x": 252,
+          "y": 513,
+          "w": 276.84375,
+          "h": 18,
+          "bottom": 531
+        },
+        "ohlc": {
+          "x": 32,
+          "y": 531,
+          "w": 328,
+          "h": 14,
+          "bottom": 545
+        },
+        "volume": {
+          "x": 20,
+          "y": 607,
+          "w": 216,
+          "h": 18,
+          "bottom": 625
+        },
+        "nameText": {
+          "x": 32,
+          "y": 513,
+          "w": 208,
+          "h": 18,
+          "bottom": 531
+        },
+        "priceText": {
+          "x": 252,
+          "y": 513,
+          "w": 272.84375,
+          "h": 18,
+          "bottom": 531
+        },
+        "ohlcText": {
+          "x": 32,
+          "y": 531,
+          "w": 328,
+          "h": 14,
+          "bottom": 545
+        },
+        "volumeText": {
+          "x": 20,
+          "y": 607,
+          "w": 212,
+          "h": 18,
+          "bottom": 625
+        },
+        "shift": "",
+        "panes": [
+          {
+            "height": 103,
+            "stretch": 1,
+            "rect": {
+              "x": 12,
+              "y": 503,
+              "w": 1018,
+              "h": 103,
+              "bottom": 606
+            }
+          },
+          {
+            "height": 26,
+            "stretch": 0.25,
+            "rect": {
+              "x": 12,
+              "y": 607,
+              "w": 1018,
+              "h": 26,
+              "bottom": 633
+            }
+          }
+        ],
+        "legendText": "\uc0bc\uc131\uc804\uc790005930\ud1b5\ud569KRXNXT\uc77c193,500\u22124,000  \u22122.03%2026-11-09\uc870\ud68c \uac12\uc2dc197,700\uace0198,800\uc800189,300\uc885193,500\ub7c91,443\ub9cc",
+        "volumeTextContent": "\uac70\ub798\ub7c9\uc790\ub8cc\u00b7\uac31\uc2e0\uc804\uccb4 \uc7ac\ubb34\uc790\ub8cc \uc5c5\ub370\uc774\ud2b81,443\ub9cc",
+        "buttons": [
+          {
+            "label": "\ud1b5\ud569",
+            "rect": {
+              "x": 126,
+              "y": 510,
+              "w": 32,
+              "h": 24,
+              "bottom": 534
+            }
+          },
+          {
+            "label": "KRX",
+            "rect": {
+              "x": 159,
+              "y": 510,
+              "w": 32,
+              "h": 24,
+              "bottom": 534
+            }
+          },
+          {
+            "label": "NXT",
+            "rect": {
+              "x": 192,
+              "y": 510,
+              "w": 34,
+              "h": 24,
+              "bottom": 534
+            }
+          },
+          {
+            "label": "\uac70\ub798\ub7c9 \uc124\uc815 \uc5f4\uae30",
+            "rect": {
+              "x": 36,
+              "y": 609,
+              "w": 30,
+              "h": 14,
+              "bottom": 623
+            }
+          },
+          {
+            "label": "\ubcf4\uace0\uae30\uac04 \uc790\ub8cc",
+            "rect": {
+              "x": 0,
+              "y": 0,
+              "w": 0,
+              "h": 0,
+              "bottom": 0
+            }
+          },
+          {
+            "label": "\uc804\uccb4 \uc7ac\ubb34\uc790\ub8cc \uc5c5\ub370\uc774\ud2b8",
+            "rect": {
+              "x": 0,
+              "y": 0,
+              "w": 0,
+              "h": 0,
+              "bottom": 0
+            }
+          },
+          {
+            "label": "\uac70\ub798\ub7c9 \ud328\ub110 \uc811\uae30",
+            "rect": {
+              "x": 119,
+              "y": 607,
+              "w": 18,
+              "h": 18,
+              "bottom": 625
+            }
+          },
+          {
+            "label": "\uac70\ub798\ub7c9 \ud328\ub110 \uc704\ub85c",
+            "rect": {
+              "x": 138,
+              "y": 607,
+              "w": 18,
+              "h": 18,
+              "bottom": 625
+            }
+          },
+          {
+            "label": "\uac70\ub798\ub7c9 \ud328\ub110 \uc544\ub798\ub85c",
+            "rect": {
+              "x": 157,
+              "y": 607,
+              "w": 18,
+              "h": 18,
+              "bottom": 625
+            }
+          },
+          {
+            "label": "\uac70\ub798\ub7c9 \uc124\uc815",
+            "rect": {
+              "x": 176,
+              "y": 607,
+              "w": 18,
+              "h": 18,
+              "bottom": 625
+            }
+          },
+          {
+            "label": "\uac70\ub798\ub7c9 \uc228\uae30\uae30",
+            "rect": {
+              "x": 195,
+              "y": 607,
+              "w": 18,
+              "h": 18,
+              "bottom": 625
+            }
+          },
+          {
+            "label": "\uac70\ub798\ub7c9 \ud328\ub110 \ub2eb\uae30",
+            "rect": {
+              "x": 214,
+              "y": 607,
+              "w": 18,
+              "h": 18,
+              "bottom": 625
+            }
+          }
+        ],
+        "axis": {
+          "x": 12,
+          "y": 633,
+          "w": 1018,
+          "h": 28,
+          "bottom": 661
+        }
+      },
+      {
+        "body": {
+          "x": 12,
+          "y": 702,
+          "w": 1018,
+          "h": 158,
+          "bottom": 860
+        },
+        "group": {
+          "x": 12,
+          "y": 668,
+          "w": 1018,
+          "h": 192,
+          "bottom": 860
+        },
+        "legend": {
+          "x": 32,
+          "y": 712,
+          "w": 496.84375,
+          "h": 32,
+          "bottom": 744
+        },
+        "name": {
+          "x": 32,
+          "y": 712,
+          "w": 212,
+          "h": 18,
+          "bottom": 730
+        },
+        "price": {
+          "x": 252,
+          "y": 712,
+          "w": 276.84375,
+          "h": 18,
+          "bottom": 730
+        },
+        "ohlc": {
+          "x": 32,
+          "y": 730,
+          "w": 328,
+          "h": 14,
+          "bottom": 744
+        },
+        "volume": {
+          "x": 20,
+          "y": 806,
+          "w": 216,
+          "h": 18,
+          "bottom": 824
+        },
+        "nameText": {
+          "x": 32,
+          "y": 712,
+          "w": 208,
+          "h": 18,
+          "bottom": 730
+        },
+        "priceText": {
+          "x": 252,
+          "y": 712,
+          "w": 272.84375,
+          "h": 18,
+          "bottom": 730
+        },
+        "ohlcText": {
+          "x": 32,
+          "y": 730,
+          "w": 328,
+          "h": 14,
+          "bottom": 744
+        },
+        "volumeText": {
+          "x": 20,
+          "y": 806,
+          "w": 212,
+          "h": 18,
+          "bottom": 824
+        },
+        "shift": "",
+        "panes": [
+          {
+            "height": 103,
+            "stretch": 1,
+            "rect": {
+              "x": 12,
+              "y": 702,
+              "w": 1018,
+              "h": 103,
+              "bottom": 805
+            }
+          },
+          {
+            "height": 26,
+            "stretch": 0.25,
+            "rect": {
+              "x": 12,
+              "y": 806,
+              "w": 1018,
+              "h": 26,
+              "bottom": 832
+            }
+          }
+        ],
+        "legendText": "\uc0bc\uc131\uc804\uc790005930\ud1b5\ud569KRXNXT\uc77c193,500\u22124,000  \u22122.03%2026-11-09\uc870\ud68c \uac12\uc2dc197,700\uace0198,800\uc800189,300\uc885193,500\ub7c91,443\ub9cc",
+        "volumeTextContent": "\uac70\ub798\ub7c9\uc790\ub8cc\u00b7\uac31\uc2e0\uc804\uccb4 \uc7ac\ubb34\uc790\ub8cc \uc5c5\ub370\uc774\ud2b81,443\ub9cc",
+        "buttons": [
+          {
+            "label": "\ud1b5\ud569",
+            "rect": {
+              "x": 126,
+              "y": 709,
+              "w": 32,
+              "h": 24,
+              "bottom": 733
+            }
+          },
+          {
+            "label": "KRX",
+            "rect": {
+              "x": 159,
+              "y": 709,
+              "w": 32,
+              "h": 24,
+              "bottom": 733
+            }
+          },
+          {
+            "label": "NXT",
+            "rect": {
+              "x": 192,
+              "y": 709,
+              "w": 34,
+              "h": 24,
+              "bottom": 733
+            }
+          },
+          {
+            "label": "\uac70\ub798\ub7c9 \uc124\uc815 \uc5f4\uae30",
+            "rect": {
+              "x": 36,
+              "y": 808,
+              "w": 30,
+              "h": 14,
+              "bottom": 822
+            }
+          },
+          {
+            "label": "\ubcf4\uace0\uae30\uac04 \uc790\ub8cc",
+            "rect": {
+              "x": 0,
+              "y": 0,
+              "w": 0,
+              "h": 0,
+              "bottom": 0
+            }
+          },
+          {
+            "label": "\uc804\uccb4 \uc7ac\ubb34\uc790\ub8cc \uc5c5\ub370\uc774\ud2b8",
+            "rect": {
+              "x": 0,
+              "y": 0,
+              "w": 0,
+              "h": 0,
+              "bottom": 0
+            }
+          },
+          {
+            "label": "\uac70\ub798\ub7c9 \ud328\ub110 \uc811\uae30",
+            "rect": {
+              "x": 119,
+              "y": 806,
+              "w": 18,
+              "h": 18,
+              "bottom": 824
+            }
+          },
+          {
+            "label": "\uac70\ub798\ub7c9 \ud328\ub110 \uc704\ub85c",
+            "rect": {
+              "x": 138,
+              "y": 806,
+              "w": 18,
+              "h": 18,
+              "bottom": 824
+            }
+          },
+          {
+            "label": "\uac70\ub798\ub7c9 \ud328\ub110 \uc544\ub798\ub85c",
+            "rect": {
+              "x": 157,
+              "y": 806,
+              "w": 18,
+              "h": 18,
+              "bottom": 824
+            }
+          },
+          {
+            "label": "\uac70\ub798\ub7c9 \uc124\uc815",
+            "rect": {
+              "x": 176,
+              "y": 806,
+              "w": 18,
+              "h": 18,
+              "bottom": 824
+            }
+          },
+          {
+            "label": "\uac70\ub798\ub7c9 \uc228\uae30\uae30",
+            "rect": {
+              "x": 195,
+              "y": 806,
+              "w": 18,
+              "h": 18,
+              "bottom": 824
+            }
+          },
+          {
+            "label": "\uac70\ub798\ub7c9 \ud328\ub110 \ub2eb\uae30",
+            "rect": {
+              "x": 214,
+              "y": 806,
+              "w": 18,
+              "h": 18,
+              "bottom": 824
+            }
+          }
+        ],
+        "axis": {
+          "x": 12,
+          "y": 832,
+          "w": 1018,
+          "h": 28,
+          "bottom": 860
+        }
+      }
+    ]
+  },
+  {
+    "size": {
+      "width": 1024,
+      "height": 768
+    },
+    "overflow": [
+      0,
+      0
+    ],
+    "charts": [
+      {
+        "body": {
+          "x": 12,
+          "y": 106,
+          "w": 718,
+          "h": 126,
+          "bottom": 232
+        },
+        "group": {
+          "x": 12,
+          "y": 72,
+          "w": 718,
+          "h": 160,
+          "bottom": 232
+        },
+        "legend": {
+          "x": 32,
+          "y": 152,
+          "w": 496.84375,
+          "h": 32,
+          "bottom": 184
+        },
+        "name": {
+          "x": 32,
+          "y": 152,
+          "w": 212,
+          "h": 18,
+          "bottom": 170
+        },
+        "price": {
+          "x": 252,
+          "y": 152,
+          "w": 276.84375,
+          "h": 18,
+          "bottom": 170
+        },
+        "ohlc": {
+          "x": 32,
+          "y": 170,
+          "w": 328,
+          "h": 14,
+          "bottom": 184
+        },
+        "volume": {
+          "x": 20,
+          "y": 185,
+          "w": 216,
+          "h": 18,
+          "bottom": 203
+        },
+        "nameText": {
+          "x": 32,
+          "y": 152,
+          "w": 208,
+          "h": 18,
+          "bottom": 170
+        },
+        "priceText": {
+          "x": 252,
+          "y": 152,
+          "w": 272.84375,
+          "h": 18,
+          "bottom": 170
+        },
+        "ohlcText": {
+          "x": 32,
+          "y": 170,
+          "w": 328,
+          "h": 14,
+          "bottom": 184
+        },
+        "volumeText": {
+          "x": 20,
+          "y": 185,
+          "w": 212,
+          "h": 18,
+          "bottom": 203
+        },
+        "shift": "36px",
+        "panes": [
+          {
+            "height": 78,
+            "stretch": 1,
+            "rect": {
+              "x": 12,
+              "y": 106,
+              "w": 718,
+              "h": 78,
+              "bottom": 184
+            }
+          },
+          {
+            "height": 19,
+            "stretch": 0.25,
+            "rect": {
+              "x": 12,
+              "y": 185,
+              "w": 718,
+              "h": 19,
+              "bottom": 204
+            }
+          }
+        ],
+        "legendText": "\uc0bc\uc131\uc804\uc790005930\ud1b5\ud569KRXNXT\uc77c193,500\u22124,000  \u22122.03%2026-11-09\uc870\ud68c \uac12\uc2dc197,700\uace0198,800\uc800189,300\uc885193,500\ub7c91,443\ub9cc",
+        "volumeTextContent": "\uac70\ub798\ub7c9\uc790\ub8cc\u00b7\uac31\uc2e0\uc804\uccb4 \uc7ac\ubb34\uc790\ub8cc \uc5c5\ub370\uc774\ud2b81,443\ub9cc",
+        "buttons": [
+          {
+            "label": "\ud1b5\ud569",
+            "rect": {
+              "x": 126,
+              "y": 149,
+              "w": 32,
+              "h": 24,
+              "bottom": 173
+            }
+          },
+          {
+            "label": "KRX",
+            "rect": {
+              "x": 159,
+              "y": 149,
+              "w": 32,
+              "h": 24,
+              "bottom": 173
+            }
+          },
+          {
+            "label": "NXT",
+            "rect": {
+              "x": 192,
+              "y": 149,
+              "w": 34,
+              "h": 24,
+              "bottom": 173
+            }
+          },
+          {
+            "label": "\uac70\ub798\ub7c9 \uc124\uc815 \uc5f4\uae30",
+            "rect": {
+              "x": 36,
+              "y": 187,
+              "w": 30,
+              "h": 14,
+              "bottom": 201
+            }
+          },
+          {
+            "label": "\ubcf4\uace0\uae30\uac04 \uc790\ub8cc",
+            "rect": {
+              "x": 0,
+              "y": 0,
+              "w": 0,
+              "h": 0,
+              "bottom": 0
+            }
+          },
+          {
+            "label": "\uc804\uccb4 \uc7ac\ubb34\uc790\ub8cc \uc5c5\ub370\uc774\ud2b8",
+            "rect": {
+              "x": 0,
+              "y": 0,
+              "w": 0,
+              "h": 0,
+              "bottom": 0
+            }
+          },
+          {
+            "label": "\uac70\ub798\ub7c9 \ud328\ub110 \uc811\uae30",
+            "rect": {
+              "x": 119,
+              "y": 185,
+              "w": 18,
+              "h": 18,
+              "bottom": 203
+            }
+          },
+          {
+            "label": "\uac70\ub798\ub7c9 \ud328\ub110 \uc704\ub85c",
+            "rect": {
+              "x": 138,
+              "y": 185,
+              "w": 18,
+              "h": 18,
+              "bottom": 203
+            }
+          },
+          {
+            "label": "\uac70\ub798\ub7c9 \ud328\ub110 \uc544\ub798\ub85c",
+            "rect": {
+              "x": 157,
+              "y": 185,
+              "w": 18,
+              "h": 18,
+              "bottom": 203
+            }
+          },
+          {
+            "label": "\uac70\ub798\ub7c9 \uc124\uc815",
+            "rect": {
+              "x": 176,
+              "y": 185,
+              "w": 18,
+              "h": 18,
+              "bottom": 203
+            }
+          },
+          {
+            "label": "\uac70\ub798\ub7c9 \uc228\uae30\uae30",
+            "rect": {
+              "x": 195,
+              "y": 185,
+              "w": 18,
+              "h": 18,
+              "bottom": 203
+            }
+          },
+          {
+            "label": "\uac70\ub798\ub7c9 \ud328\ub110 \ub2eb\uae30",
+            "rect": {
+              "x": 214,
+              "y": 185,
+              "w": 18,
+              "h": 18,
+              "bottom": 203
+            }
+          }
+        ],
+        "axis": {
+          "x": 12,
+          "y": 204,
+          "w": 718,
+          "h": 28,
+          "bottom": 232
+        }
+      },
+      {
+        "body": {
+          "x": 12,
+          "y": 272,
+          "w": 718,
+          "h": 125,
+          "bottom": 397
+        },
+        "group": {
+          "x": 12,
+          "y": 238,
+          "w": 718,
+          "h": 159,
+          "bottom": 397
+        },
+        "legend": {
+          "x": 32,
+          "y": 282,
+          "w": 496.84375,
+          "h": 32,
+          "bottom": 314
+        },
+        "name": {
+          "x": 32,
+          "y": 282,
+          "w": 212,
+          "h": 18,
+          "bottom": 300
+        },
+        "price": {
+          "x": 252,
+          "y": 282,
+          "w": 276.84375,
+          "h": 18,
+          "bottom": 300
+        },
+        "ohlc": {
+          "x": 32,
+          "y": 300,
+          "w": 328,
+          "h": 14,
+          "bottom": 314
+        },
+        "volume": {
+          "x": 20,
+          "y": 349,
+          "w": 216,
+          "h": 18,
+          "bottom": 367
+        },
+        "nameText": {
+          "x": 32,
+          "y": 282,
+          "w": 208,
+          "h": 18,
+          "bottom": 300
+        },
+        "priceText": {
+          "x": 252,
+          "y": 282,
+          "w": 272.84375,
+          "h": 18,
+          "bottom": 300
+        },
+        "ohlcText": {
+          "x": 32,
+          "y": 300,
+          "w": 328,
+          "h": 14,
+          "bottom": 314
+        },
+        "volumeText": {
+          "x": 20,
+          "y": 349,
+          "w": 212,
+          "h": 18,
+          "bottom": 367
+        },
+        "shift": "",
+        "panes": [
+          {
+            "height": 76,
+            "stretch": 1,
+            "rect": {
+              "x": 12,
+              "y": 272,
+              "w": 718,
+              "h": 76,
+              "bottom": 348
+            }
+          },
+          {
+            "height": 19,
+            "stretch": 0.25,
+            "rect": {
+              "x": 12,
+              "y": 349,
+              "w": 718,
+              "h": 19,
+              "bottom": 368
+            }
+          }
+        ],
+        "legendText": "\uc0bc\uc131\uc804\uc790005930\ud1b5\ud569KRXNXT\uc77c193,500\u22124,000  \u22122.03%2026-11-09\uc870\ud68c \uac12\uc2dc197,700\uace0198,800\uc800189,300\uc885193,500\ub7c91,443\ub9cc",
+        "volumeTextContent": "\uac70\ub798\ub7c9\uc790\ub8cc\u00b7\uac31\uc2e0\uc804\uccb4 \uc7ac\ubb34\uc790\ub8cc \uc5c5\ub370\uc774\ud2b81,443\ub9cc",
+        "buttons": [
+          {
+            "label": "\ud1b5\ud569",
+            "rect": {
+              "x": 126,
+              "y": 279,
+              "w": 32,
+              "h": 24,
+              "bottom": 303
+            }
+          },
+          {
+            "label": "KRX",
+            "rect": {
+              "x": 159,
+              "y": 279,
+              "w": 32,
+              "h": 24,
+              "bottom": 303
+            }
+          },
+          {
+            "label": "NXT",
+            "rect": {
+              "x": 192,
+              "y": 279,
+              "w": 34,
+              "h": 24,
+              "bottom": 303
+            }
+          },
+          {
+            "label": "\uac70\ub798\ub7c9 \uc124\uc815 \uc5f4\uae30",
+            "rect": {
+              "x": 36,
+              "y": 351,
+              "w": 30,
+              "h": 14,
+              "bottom": 365
+            }
+          },
+          {
+            "label": "\ubcf4\uace0\uae30\uac04 \uc790\ub8cc",
+            "rect": {
+              "x": 0,
+              "y": 0,
+              "w": 0,
+              "h": 0,
+              "bottom": 0
+            }
+          },
+          {
+            "label": "\uc804\uccb4 \uc7ac\ubb34\uc790\ub8cc \uc5c5\ub370\uc774\ud2b8",
+            "rect": {
+              "x": 0,
+              "y": 0,
+              "w": 0,
+              "h": 0,
+              "bottom": 0
+            }
+          },
+          {
+            "label": "\uac70\ub798\ub7c9 \ud328\ub110 \uc811\uae30",
+            "rect": {
+              "x": 119,
+              "y": 349,
+              "w": 18,
+              "h": 18,
+              "bottom": 367
+            }
+          },
+          {
+            "label": "\uac70\ub798\ub7c9 \ud328\ub110 \uc704\ub85c",
+            "rect": {
+              "x": 138,
+              "y": 349,
+              "w": 18,
+              "h": 18,
+              "bottom": 367
+            }
+          },
+          {
+            "label": "\uac70\ub798\ub7c9 \ud328\ub110 \uc544\ub798\ub85c",
+            "rect": {
+              "x": 157,
+              "y": 349,
+              "w": 18,
+              "h": 18,
+              "bottom": 367
+            }
+          },
+          {
+            "label": "\uac70\ub798\ub7c9 \uc124\uc815",
+            "rect": {
+              "x": 176,
+              "y": 349,
+              "w": 18,
+              "h": 18,
+              "bottom": 367
+            }
+          },
+          {
+            "label": "\uac70\ub798\ub7c9 \uc228\uae30\uae30",
+            "rect": {
+              "x": 195,
+              "y": 349,
+              "w": 18,
+              "h": 18,
+              "bottom": 367
+            }
+          },
+          {
+            "label": "\uac70\ub798\ub7c9 \ud328\ub110 \ub2eb\uae30",
+            "rect": {
+              "x": 214,
+              "y": 349,
+              "w": 18,
+              "h": 18,
+              "bottom": 367
+            }
+          }
+        ],
+        "axis": {
+          "x": 12,
+          "y": 368,
+          "w": 718,
+          "h": 28,
+          "bottom": 396
+        }
+      },
+      {
+        "body": {
+          "x": 12,
+          "y": 437,
+          "w": 718,
+          "h": 126,
+          "bottom": 563
+        },
+        "group": {
+          "x": 12,
+          "y": 403,
+          "w": 718,
+          "h": 160,
+          "bottom": 563
+        },
+        "legend": {
+          "x": 32,
+          "y": 447,
+          "w": 496.84375,
+          "h": 32,
+          "bottom": 479
+        },
+        "name": {
+          "x": 32,
+          "y": 447,
+          "w": 212,
+          "h": 18,
+          "bottom": 465
+        },
+        "price": {
+          "x": 252,
+          "y": 447,
+          "w": 276.84375,
+          "h": 18,
+          "bottom": 465
+        },
+        "ohlc": {
+          "x": 32,
+          "y": 465,
+          "w": 328,
+          "h": 14,
+          "bottom": 479
+        },
+        "volume": {
+          "x": 20,
+          "y": 516,
+          "w": 216,
+          "h": 18,
+          "bottom": 534
+        },
+        "nameText": {
+          "x": 32,
+          "y": 447,
+          "w": 208,
+          "h": 18,
+          "bottom": 465
+        },
+        "priceText": {
+          "x": 252,
+          "y": 447,
+          "w": 272.84375,
+          "h": 18,
+          "bottom": 465
+        },
+        "ohlcText": {
+          "x": 32,
+          "y": 465,
+          "w": 328,
+          "h": 14,
+          "bottom": 479
+        },
+        "volumeText": {
+          "x": 20,
+          "y": 516,
+          "w": 212,
+          "h": 18,
+          "bottom": 534
+        },
+        "shift": "",
+        "panes": [
+          {
+            "height": 78,
+            "stretch": 1,
+            "rect": {
+              "x": 12,
+              "y": 437,
+              "w": 718,
+              "h": 78,
+              "bottom": 515
+            }
+          },
+          {
+            "height": 19,
+            "stretch": 0.25,
+            "rect": {
+              "x": 12,
+              "y": 516,
+              "w": 718,
+              "h": 19,
+              "bottom": 535
+            }
+          }
+        ],
+        "legendText": "\uc0bc\uc131\uc804\uc790005930\ud1b5\ud569KRXNXT\uc77c193,500\u22124,000  \u22122.03%2026-11-09\uc870\ud68c \uac12\uc2dc197,700\uace0198,800\uc800189,300\uc885193,500\ub7c91,443\ub9cc",
+        "volumeTextContent": "\uac70\ub798\ub7c9\uc790\ub8cc\u00b7\uac31\uc2e0\uc804\uccb4 \uc7ac\ubb34\uc790\ub8cc \uc5c5\ub370\uc774\ud2b81,443\ub9cc",
+        "buttons": [
+          {
+            "label": "\ud1b5\ud569",
+            "rect": {
+              "x": 126,
+              "y": 444,
+              "w": 32,
+              "h": 24,
+              "bottom": 468
+            }
+          },
+          {
+            "label": "KRX",
+            "rect": {
+              "x": 159,
+              "y": 444,
+              "w": 32,
+              "h": 24,
+              "bottom": 468
+            }
+          },
+          {
+            "label": "NXT",
+            "rect": {
+              "x": 192,
+              "y": 444,
+              "w": 34,
+              "h": 24,
+              "bottom": 468
+            }
+          },
+          {
+            "label": "\uac70\ub798\ub7c9 \uc124\uc815 \uc5f4\uae30",
+            "rect": {
+              "x": 36,
+              "y": 518,
+              "w": 30,
+              "h": 14,
+              "bottom": 532
+            }
+          },
+          {
+            "label": "\ubcf4\uace0\uae30\uac04 \uc790\ub8cc",
+            "rect": {
+              "x": 0,
+              "y": 0,
+              "w": 0,
+              "h": 0,
+              "bottom": 0
+            }
+          },
+          {
+            "label": "\uc804\uccb4 \uc7ac\ubb34\uc790\ub8cc \uc5c5\ub370\uc774\ud2b8",
+            "rect": {
+              "x": 0,
+              "y": 0,
+              "w": 0,
+              "h": 0,
+              "bottom": 0
+            }
+          },
+          {
+            "label": "\uac70\ub798\ub7c9 \ud328\ub110 \uc811\uae30",
+            "rect": {
+              "x": 119,
+              "y": 516,
+              "w": 18,
+              "h": 18,
+              "bottom": 534
+            }
+          },
+          {
+            "label": "\uac70\ub798\ub7c9 \ud328\ub110 \uc704\ub85c",
+            "rect": {
+              "x": 138,
+              "y": 516,
+              "w": 18,
+              "h": 18,
+              "bottom": 534
+            }
+          },
+          {
+            "label": "\uac70\ub798\ub7c9 \ud328\ub110 \uc544\ub798\ub85c",
+            "rect": {
+              "x": 157,
+              "y": 516,
+              "w": 18,
+              "h": 18,
+              "bottom": 534
+            }
+          },
+          {
+            "label": "\uac70\ub798\ub7c9 \uc124\uc815",
+            "rect": {
+              "x": 176,
+              "y": 516,
+              "w": 18,
+              "h": 18,
+              "bottom": 534
+            }
+          },
+          {
+            "label": "\uac70\ub798\ub7c9 \uc228\uae30\uae30",
+            "rect": {
+              "x": 195,
+              "y": 516,
+              "w": 18,
+              "h": 18,
+              "bottom": 534
+            }
+          },
+          {
+            "label": "\uac70\ub798\ub7c9 \ud328\ub110 \ub2eb\uae30",
+            "rect": {
+              "x": 214,
+              "y": 516,
+              "w": 18,
+              "h": 18,
+              "bottom": 534
+            }
+          }
+        ],
+        "axis": {
+          "x": 12,
+          "y": 535,
+          "w": 718,
+          "h": 28,
+          "bottom": 563
+        }
+      },
+      {
+        "body": {
+          "x": 12,
+          "y": 603,
+          "w": 718,
+          "h": 125,
+          "bottom": 728
+        },
+        "group": {
+          "x": 12,
+          "y": 569,
+          "w": 718,
+          "h": 159,
+          "bottom": 728
+        },
+        "legend": {
+          "x": 32,
+          "y": 613,
+          "w": 496.84375,
+          "h": 32,
+          "bottom": 645
+        },
+        "name": {
+          "x": 32,
+          "y": 613,
+          "w": 212,
+          "h": 18,
+          "bottom": 631
+        },
+        "price": {
+          "x": 252,
+          "y": 613,
+          "w": 276.84375,
+          "h": 18,
+          "bottom": 631
+        },
+        "ohlc": {
+          "x": 32,
+          "y": 631,
+          "w": 328,
+          "h": 14,
+          "bottom": 645
+        },
+        "volume": {
+          "x": 20,
+          "y": 680,
+          "w": 216,
+          "h": 18,
+          "bottom": 698
+        },
+        "nameText": {
+          "x": 32,
+          "y": 613,
+          "w": 208,
+          "h": 18,
+          "bottom": 631
+        },
+        "priceText": {
+          "x": 252,
+          "y": 613,
+          "w": 272.84375,
+          "h": 18,
+          "bottom": 631
+        },
+        "ohlcText": {
+          "x": 32,
+          "y": 631,
+          "w": 328,
+          "h": 14,
+          "bottom": 645
+        },
+        "volumeText": {
+          "x": 20,
+          "y": 680,
+          "w": 212,
+          "h": 18,
+          "bottom": 698
+        },
+        "shift": "",
+        "panes": [
+          {
+            "height": 76,
+            "stretch": 1,
+            "rect": {
+              "x": 12,
+              "y": 603,
+              "w": 718,
+              "h": 76,
+              "bottom": 679
+            }
+          },
+          {
+            "height": 19,
+            "stretch": 0.25,
+            "rect": {
+              "x": 12,
+              "y": 680,
+              "w": 718,
+              "h": 19,
+              "bottom": 699
+            }
+          }
+        ],
+        "legendText": "\uc0bc\uc131\uc804\uc790005930\ud1b5\ud569KRXNXT\uc77c193,500\u22124,000  \u22122.03%2026-11-09\uc870\ud68c \uac12\uc2dc197,700\uace0198,800\uc800189,300\uc885193,500\ub7c91,443\ub9cc",
+        "volumeTextContent": "\uac70\ub798\ub7c9\uc790\ub8cc\u00b7\uac31\uc2e0\uc804\uccb4 \uc7ac\ubb34\uc790\ub8cc \uc5c5\ub370\uc774\ud2b81,443\ub9cc",
+        "buttons": [
+          {
+            "label": "\ud1b5\ud569",
+            "rect": {
+              "x": 126,
+              "y": 610,
+              "w": 32,
+              "h": 24,
+              "bottom": 634
+            }
+          },
+          {
+            "label": "KRX",
+            "rect": {
+              "x": 159,
+              "y": 610,
+              "w": 32,
+              "h": 24,
+              "bottom": 634
+            }
+          },
+          {
+            "label": "NXT",
+            "rect": {
+              "x": 192,
+              "y": 610,
+              "w": 34,
+              "h": 24,
+              "bottom": 634
+            }
+          },
+          {
+            "label": "\uac70\ub798\ub7c9 \uc124\uc815 \uc5f4\uae30",
+            "rect": {
+              "x": 36,
+              "y": 682,
+              "w": 30,
+              "h": 14,
+              "bottom": 696
+            }
+          },
+          {
+            "label": "\ubcf4\uace0\uae30\uac04 \uc790\ub8cc",
+            "rect": {
+              "x": 0,
+              "y": 0,
+              "w": 0,
+              "h": 0,
+              "bottom": 0
+            }
+          },
+          {
+            "label": "\uc804\uccb4 \uc7ac\ubb34\uc790\ub8cc \uc5c5\ub370\uc774\ud2b8",
+            "rect": {
+              "x": 0,
+              "y": 0,
+              "w": 0,
+              "h": 0,
+              "bottom": 0
+            }
+          },
+          {
+            "label": "\uac70\ub798\ub7c9 \ud328\ub110 \uc811\uae30",
+            "rect": {
+              "x": 119,
+              "y": 680,
+              "w": 18,
+              "h": 18,
+              "bottom": 698
+            }
+          },
+          {
+            "label": "\uac70\ub798\ub7c9 \ud328\ub110 \uc704\ub85c",
+            "rect": {
+              "x": 138,
+              "y": 680,
+              "w": 18,
+              "h": 18,
+              "bottom": 698
+            }
+          },
+          {
+            "label": "\uac70\ub798\ub7c9 \ud328\ub110 \uc544\ub798\ub85c",
+            "rect": {
+              "x": 157,
+              "y": 680,
+              "w": 18,
+              "h": 18,
+              "bottom": 698
+            }
+          },
+          {
+            "label": "\uac70\ub798\ub7c9 \uc124\uc815",
+            "rect": {
+              "x": 176,
+              "y": 680,
+              "w": 18,
+              "h": 18,
+              "bottom": 698
+            }
+          },
+          {
+            "label": "\uac70\ub798\ub7c9 \uc228\uae30\uae30",
+            "rect": {
+              "x": 195,
+              "y": 680,
+              "w": 18,
+              "h": 18,
+              "bottom": 698
+            }
+          },
+          {
+            "label": "\uac70\ub798\ub7c9 \ud328\ub110 \ub2eb\uae30",
+            "rect": {
+              "x": 214,
+              "y": 680,
+              "w": 18,
+              "h": 18,
+              "bottom": 698
+            }
+          }
+        ],
+        "axis": {
+          "x": 12,
+          "y": 699,
+          "w": 718,
+          "h": 28,
+          "bottom": 727
+        }
+      }
+    ]
+  },
+  {
+    "size": {
+      "width": 1024,
+      "height": 920
+    },
+    "overflow": [
+      0,
+      0
+    ],
+    "charts": [
+      {
+        "body": {
+          "x": 12,
+          "y": 106,
+          "w": 718,
+          "h": 164,
+          "bottom": 270
+        },
+        "group": {
+          "x": 12,
+          "y": 72,
+          "w": 718,
+          "h": 198,
+          "bottom": 270
+        },
+        "legend": {
+          "x": 32,
+          "y": 152,
+          "w": 496.84375,
+          "h": 32,
+          "bottom": 184
+        },
+        "name": {
+          "x": 32,
+          "y": 152,
+          "w": 212,
+          "h": 18,
+          "bottom": 170
+        },
+        "price": {
+          "x": 252,
+          "y": 152,
+          "w": 276.84375,
+          "h": 18,
+          "bottom": 170
+        },
+        "ohlc": {
+          "x": 32,
+          "y": 170,
+          "w": 328,
+          "h": 14,
+          "bottom": 184
+        },
+        "volume": {
+          "x": 20,
+          "y": 215,
+          "w": 216,
+          "h": 18,
+          "bottom": 233
+        },
+        "nameText": {
+          "x": 32,
+          "y": 152,
+          "w": 208,
+          "h": 18,
+          "bottom": 170
+        },
+        "priceText": {
+          "x": 252,
+          "y": 152,
+          "w": 272.84375,
+          "h": 18,
+          "bottom": 170
+        },
+        "ohlcText": {
+          "x": 32,
+          "y": 170,
+          "w": 328,
+          "h": 14,
+          "bottom": 184
+        },
+        "volumeText": {
+          "x": 20,
+          "y": 215,
+          "w": 212,
+          "h": 18,
+          "bottom": 233
+        },
+        "shift": "36px",
+        "panes": [
+          {
+            "height": 108,
+            "stretch": 1,
+            "rect": {
+              "x": 12,
+              "y": 106,
+              "w": 718,
+              "h": 108,
+              "bottom": 214
+            }
+          },
+          {
+            "height": 27,
+            "stretch": 0.25,
+            "rect": {
+              "x": 12,
+              "y": 215,
+              "w": 718,
+              "h": 27,
+              "bottom": 242
+            }
+          }
+        ],
+        "legendText": "\uc0bc\uc131\uc804\uc790005930\ud1b5\ud569KRXNXT\uc77c193,500\u22124,000  \u22122.03%2026-11-09\uc870\ud68c \uac12\uc2dc197,700\uace0198,800\uc800189,300\uc885193,500\ub7c91,443\ub9cc",
+        "volumeTextContent": "\uac70\ub798\ub7c9\uc790\ub8cc\u00b7\uac31\uc2e0\uc804\uccb4 \uc7ac\ubb34\uc790\ub8cc \uc5c5\ub370\uc774\ud2b81,443\ub9cc",
+        "buttons": [
+          {
+            "label": "\ud1b5\ud569",
+            "rect": {
+              "x": 126,
+              "y": 149,
+              "w": 32,
+              "h": 24,
+              "bottom": 173
+            }
+          },
+          {
+            "label": "KRX",
+            "rect": {
+              "x": 159,
+              "y": 149,
+              "w": 32,
+              "h": 24,
+              "bottom": 173
+            }
+          },
+          {
+            "label": "NXT",
+            "rect": {
+              "x": 192,
+              "y": 149,
+              "w": 34,
+              "h": 24,
+              "bottom": 173
+            }
+          },
+          {
+            "label": "\uac70\ub798\ub7c9 \uc124\uc815 \uc5f4\uae30",
+            "rect": {
+              "x": 36,
+              "y": 217,
+              "w": 30,
+              "h": 14,
+              "bottom": 231
+            }
+          },
+          {
+            "label": "\ubcf4\uace0\uae30\uac04 \uc790\ub8cc",
+            "rect": {
+              "x": 0,
+              "y": 0,
+              "w": 0,
+              "h": 0,
+              "bottom": 0
+            }
+          },
+          {
+            "label": "\uc804\uccb4 \uc7ac\ubb34\uc790\ub8cc \uc5c5\ub370\uc774\ud2b8",
+            "rect": {
+              "x": 0,
+              "y": 0,
+              "w": 0,
+              "h": 0,
+              "bottom": 0
+            }
+          },
+          {
+            "label": "\uac70\ub798\ub7c9 \ud328\ub110 \uc811\uae30",
+            "rect": {
+              "x": 119,
+              "y": 215,
+              "w": 18,
+              "h": 18,
+              "bottom": 233
+            }
+          },
+          {
+            "label": "\uac70\ub798\ub7c9 \ud328\ub110 \uc704\ub85c",
+            "rect": {
+              "x": 138,
+              "y": 215,
+              "w": 18,
+              "h": 18,
+              "bottom": 233
+            }
+          },
+          {
+            "label": "\uac70\ub798\ub7c9 \ud328\ub110 \uc544\ub798\ub85c",
+            "rect": {
+              "x": 157,
+              "y": 215,
+              "w": 18,
+              "h": 18,
+              "bottom": 233
+            }
+          },
+          {
+            "label": "\uac70\ub798\ub7c9 \uc124\uc815",
+            "rect": {
+              "x": 176,
+              "y": 215,
+              "w": 18,
+              "h": 18,
+              "bottom": 233
+            }
+          },
+          {
+            "label": "\uac70\ub798\ub7c9 \uc228\uae30\uae30",
+            "rect": {
+              "x": 195,
+              "y": 215,
+              "w": 18,
+              "h": 18,
+              "bottom": 233
+            }
+          },
+          {
+            "label": "\uac70\ub798\ub7c9 \ud328\ub110 \ub2eb\uae30",
+            "rect": {
+              "x": 214,
+              "y": 215,
+              "w": 18,
+              "h": 18,
+              "bottom": 233
+            }
+          }
+        ],
+        "axis": {
+          "x": 12,
+          "y": 242,
+          "w": 718,
+          "h": 28,
+          "bottom": 270
+        }
+      },
+      {
+        "body": {
+          "x": 12,
+          "y": 310,
+          "w": 718,
+          "h": 163,
+          "bottom": 473
+        },
+        "group": {
+          "x": 12,
+          "y": 276,
+          "w": 718,
+          "h": 197,
+          "bottom": 473
+        },
+        "legend": {
+          "x": 32,
+          "y": 320,
+          "w": 496.84375,
+          "h": 32,
+          "bottom": 352
+        },
+        "name": {
+          "x": 32,
+          "y": 320,
+          "w": 212,
+          "h": 18,
+          "bottom": 338
+        },
+        "price": {
+          "x": 252,
+          "y": 320,
+          "w": 276.84375,
+          "h": 18,
+          "bottom": 338
+        },
+        "ohlc": {
+          "x": 32,
+          "y": 338,
+          "w": 328,
+          "h": 14,
+          "bottom": 352
+        },
+        "volume": {
+          "x": 20,
+          "y": 417,
+          "w": 216,
+          "h": 18,
+          "bottom": 435
+        },
+        "nameText": {
+          "x": 32,
+          "y": 320,
+          "w": 208,
+          "h": 18,
+          "bottom": 338
+        },
+        "priceText": {
+          "x": 252,
+          "y": 320,
+          "w": 272.84375,
+          "h": 18,
+          "bottom": 338
+        },
+        "ohlcText": {
+          "x": 32,
+          "y": 338,
+          "w": 328,
+          "h": 14,
+          "bottom": 352
+        },
+        "volumeText": {
+          "x": 20,
+          "y": 417,
+          "w": 212,
+          "h": 18,
+          "bottom": 435
+        },
+        "shift": "",
+        "panes": [
+          {
+            "height": 106,
+            "stretch": 1,
+            "rect": {
+              "x": 12,
+              "y": 310,
+              "w": 718,
+              "h": 106,
+              "bottom": 416
+            }
+          },
+          {
+            "height": 27,
+            "stretch": 0.25,
+            "rect": {
+              "x": 12,
+              "y": 417,
+              "w": 718,
+              "h": 27,
+              "bottom": 444
+            }
+          }
+        ],
+        "legendText": "\uc0bc\uc131\uc804\uc790005930\ud1b5\ud569KRXNXT\uc77c193,500\u22124,000  \u22122.03%2026-11-09\uc870\ud68c \uac12\uc2dc197,700\uace0198,800\uc800189,300\uc885193,500\ub7c91,443\ub9cc",
+        "volumeTextContent": "\uac70\ub798\ub7c9\uc790\ub8cc\u00b7\uac31\uc2e0\uc804\uccb4 \uc7ac\ubb34\uc790\ub8cc \uc5c5\ub370\uc774\ud2b81,443\ub9cc",
+        "buttons": [
+          {
+            "label": "\ud1b5\ud569",
+            "rect": {
+              "x": 126,
+              "y": 317,
+              "w": 32,
+              "h": 24,
+              "bottom": 341
+            }
+          },
+          {
+            "label": "KRX",
+            "rect": {
+              "x": 159,
+              "y": 317,
+              "w": 32,
+              "h": 24,
+              "bottom": 341
+            }
+          },
+          {
+            "label": "NXT",
+            "rect": {
+              "x": 192,
+              "y": 317,
+              "w": 34,
+              "h": 24,
+              "bottom": 341
+            }
+          },
+          {
+            "label": "\uac70\ub798\ub7c9 \uc124\uc815 \uc5f4\uae30",
+            "rect": {
+              "x": 36,
+              "y": 419,
+              "w": 30,
+              "h": 14,
+              "bottom": 433
+            }
+          },
+          {
+            "label": "\ubcf4\uace0\uae30\uac04 \uc790\ub8cc",
+            "rect": {
+              "x": 0,
+              "y": 0,
+              "w": 0,
+              "h": 0,
+              "bottom": 0
+            }
+          },
+          {
+            "label": "\uc804\uccb4 \uc7ac\ubb34\uc790\ub8cc \uc5c5\ub370\uc774\ud2b8",
+            "rect": {
+              "x": 0,
+              "y": 0,
+              "w": 0,
+              "h": 0,
+              "bottom": 0
+            }
+          },
+          {
+            "label": "\uac70\ub798\ub7c9 \ud328\ub110 \uc811\uae30",
+            "rect": {
+              "x": 119,
+              "y": 417,
+              "w": 18,
+              "h": 18,
+              "bottom": 435
+            }
+          },
+          {
+            "label": "\uac70\ub798\ub7c9 \ud328\ub110 \uc704\ub85c",
+            "rect": {
+              "x": 138,
+              "y": 417,
+              "w": 18,
+              "h": 18,
+              "bottom": 435
+            }
+          },
+          {
+            "label": "\uac70\ub798\ub7c9 \ud328\ub110 \uc544\ub798\ub85c",
+            "rect": {
+              "x": 157,
+              "y": 417,
+              "w": 18,
+              "h": 18,
+              "bottom": 435
+            }
+          },
+          {
+            "label": "\uac70\ub798\ub7c9 \uc124\uc815",
+            "rect": {
+              "x": 176,
+              "y": 417,
+              "w": 18,
+              "h": 18,
+              "bottom": 435
+            }
+          },
+          {
+            "label": "\uac70\ub798\ub7c9 \uc228\uae30\uae30",
+            "rect": {
+              "x": 195,
+              "y": 417,
+              "w": 18,
+              "h": 18,
+              "bottom": 435
+            }
+          },
+          {
+            "label": "\uac70\ub798\ub7c9 \ud328\ub110 \ub2eb\uae30",
+            "rect": {
+              "x": 214,
+              "y": 417,
+              "w": 18,
+              "h": 18,
+              "bottom": 435
+            }
+          }
+        ],
+        "axis": {
+          "x": 12,
+          "y": 444,
+          "w": 718,
+          "h": 28,
+          "bottom": 472
+        }
+      },
+      {
+        "body": {
+          "x": 12,
+          "y": 513,
+          "w": 718,
+          "h": 164,
+          "bottom": 677
+        },
+        "group": {
+          "x": 12,
+          "y": 479,
+          "w": 718,
+          "h": 198,
+          "bottom": 677
+        },
+        "legend": {
+          "x": 32,
+          "y": 523,
+          "w": 496.84375,
+          "h": 32,
+          "bottom": 555
+        },
+        "name": {
+          "x": 32,
+          "y": 523,
+          "w": 212,
+          "h": 18,
+          "bottom": 541
+        },
+        "price": {
+          "x": 252,
+          "y": 523,
+          "w": 276.84375,
+          "h": 18,
+          "bottom": 541
+        },
+        "ohlc": {
+          "x": 32,
+          "y": 541,
+          "w": 328,
+          "h": 14,
+          "bottom": 555
+        },
+        "volume": {
+          "x": 20,
+          "y": 622,
+          "w": 216,
+          "h": 18,
+          "bottom": 640
+        },
+        "nameText": {
+          "x": 32,
+          "y": 523,
+          "w": 208,
+          "h": 18,
+          "bottom": 541
+        },
+        "priceText": {
+          "x": 252,
+          "y": 523,
+          "w": 272.84375,
+          "h": 18,
+          "bottom": 541
+        },
+        "ohlcText": {
+          "x": 32,
+          "y": 541,
+          "w": 328,
+          "h": 14,
+          "bottom": 555
+        },
+        "volumeText": {
+          "x": 20,
+          "y": 622,
+          "w": 212,
+          "h": 18,
+          "bottom": 640
+        },
+        "shift": "",
+        "panes": [
+          {
+            "height": 108,
+            "stretch": 1,
+            "rect": {
+              "x": 12,
+              "y": 513,
+              "w": 718,
+              "h": 108,
+              "bottom": 621
+            }
+          },
+          {
+            "height": 27,
+            "stretch": 0.25,
+            "rect": {
+              "x": 12,
+              "y": 622,
+              "w": 718,
+              "h": 27,
+              "bottom": 649
+            }
+          }
+        ],
+        "legendText": "\uc0bc\uc131\uc804\uc790005930\ud1b5\ud569KRXNXT\uc77c193,500\u22124,000  \u22122.03%2026-11-09\uc870\ud68c \uac12\uc2dc197,700\uace0198,800\uc800189,300\uc885193,500\ub7c91,443\ub9cc",
+        "volumeTextContent": "\uac70\ub798\ub7c9\uc790\ub8cc\u00b7\uac31\uc2e0\uc804\uccb4 \uc7ac\ubb34\uc790\ub8cc \uc5c5\ub370\uc774\ud2b81,443\ub9cc",
+        "buttons": [
+          {
+            "label": "\ud1b5\ud569",
+            "rect": {
+              "x": 126,
+              "y": 520,
+              "w": 32,
+              "h": 24,
+              "bottom": 544
+            }
+          },
+          {
+            "label": "KRX",
+            "rect": {
+              "x": 159,
+              "y": 520,
+              "w": 32,
+              "h": 24,
+              "bottom": 544
+            }
+          },
+          {
+            "label": "NXT",
+            "rect": {
+              "x": 192,
+              "y": 520,
+              "w": 34,
+              "h": 24,
+              "bottom": 544
+            }
+          },
+          {
+            "label": "\uac70\ub798\ub7c9 \uc124\uc815 \uc5f4\uae30",
+            "rect": {
+              "x": 36,
+              "y": 624,
+              "w": 30,
+              "h": 14,
+              "bottom": 638
+            }
+          },
+          {
+            "label": "\ubcf4\uace0\uae30\uac04 \uc790\ub8cc",
+            "rect": {
+              "x": 0,
+              "y": 0,
+              "w": 0,
+              "h": 0,
+              "bottom": 0
+            }
+          },
+          {
+            "label": "\uc804\uccb4 \uc7ac\ubb34\uc790\ub8cc \uc5c5\ub370\uc774\ud2b8",
+            "rect": {
+              "x": 0,
+              "y": 0,
+              "w": 0,
+              "h": 0,
+              "bottom": 0
+            }
+          },
+          {
+            "label": "\uac70\ub798\ub7c9 \ud328\ub110 \uc811\uae30",
+            "rect": {
+              "x": 119,
+              "y": 622,
+              "w": 18,
+              "h": 18,
+              "bottom": 640
+            }
+          },
+          {
+            "label": "\uac70\ub798\ub7c9 \ud328\ub110 \uc704\ub85c",
+            "rect": {
+              "x": 138,
+              "y": 622,
+              "w": 18,
+              "h": 18,
+              "bottom": 640
+            }
+          },
+          {
+            "label": "\uac70\ub798\ub7c9 \ud328\ub110 \uc544\ub798\ub85c",
+            "rect": {
+              "x": 157,
+              "y": 622,
+              "w": 18,
+              "h": 18,
+              "bottom": 640
+            }
+          },
+          {
+            "label": "\uac70\ub798\ub7c9 \uc124\uc815",
+            "rect": {
+              "x": 176,
+              "y": 622,
+              "w": 18,
+              "h": 18,
+              "bottom": 640
+            }
+          },
+          {
+            "label": "\uac70\ub798\ub7c9 \uc228\uae30\uae30",
+            "rect": {
+              "x": 195,
+              "y": 622,
+              "w": 18,
+              "h": 18,
+              "bottom": 640
+            }
+          },
+          {
+            "label": "\uac70\ub798\ub7c9 \ud328\ub110 \ub2eb\uae30",
+            "rect": {
+              "x": 214,
+              "y": 622,
+              "w": 18,
+              "h": 18,
+              "bottom": 640
+            }
+          }
+        ],
+        "axis": {
+          "x": 12,
+          "y": 649,
+          "w": 718,
+          "h": 28,
+          "bottom": 677
+        }
+      },
+      {
+        "body": {
+          "x": 12,
+          "y": 717,
+          "w": 718,
+          "h": 163,
+          "bottom": 880
+        },
+        "group": {
+          "x": 12,
+          "y": 683,
+          "w": 718,
+          "h": 197,
+          "bottom": 880
+        },
+        "legend": {
+          "x": 32,
+          "y": 727,
+          "w": 496.84375,
+          "h": 32,
+          "bottom": 759
+        },
+        "name": {
+          "x": 32,
+          "y": 727,
+          "w": 212,
+          "h": 18,
+          "bottom": 745
+        },
+        "price": {
+          "x": 252,
+          "y": 727,
+          "w": 276.84375,
+          "h": 18,
+          "bottom": 745
+        },
+        "ohlc": {
+          "x": 32,
+          "y": 745,
+          "w": 328,
+          "h": 14,
+          "bottom": 759
+        },
+        "volume": {
+          "x": 20,
+          "y": 824,
+          "w": 216,
+          "h": 18,
+          "bottom": 842
+        },
+        "nameText": {
+          "x": 32,
+          "y": 727,
+          "w": 208,
+          "h": 18,
+          "bottom": 745
+        },
+        "priceText": {
+          "x": 252,
+          "y": 727,
+          "w": 272.84375,
+          "h": 18,
+          "bottom": 745
+        },
+        "ohlcText": {
+          "x": 32,
+          "y": 745,
+          "w": 328,
+          "h": 14,
+          "bottom": 759
+        },
+        "volumeText": {
+          "x": 20,
+          "y": 824,
+          "w": 212,
+          "h": 18,
+          "bottom": 842
+        },
+        "shift": "",
+        "panes": [
+          {
+            "height": 106,
+            "stretch": 1,
+            "rect": {
+              "x": 12,
+              "y": 717,
+              "w": 718,
+              "h": 106,
+              "bottom": 823
+            }
+          },
+          {
+            "height": 27,
+            "stretch": 0.25,
+            "rect": {
+              "x": 12,
+              "y": 824,
+              "w": 718,
+              "h": 27,
+              "bottom": 851
+            }
+          }
+        ],
+        "legendText": "\uc0bc\uc131\uc804\uc790005930\ud1b5\ud569KRXNXT\uc77c193,500\u22124,000  \u22122.03%2026-11-09\uc870\ud68c \uac12\uc2dc197,700\uace0198,800\uc800189,300\uc885193,500\ub7c91,443\ub9cc",
+        "volumeTextContent": "\uac70\ub798\ub7c9\uc790\ub8cc\u00b7\uac31\uc2e0\uc804\uccb4 \uc7ac\ubb34\uc790\ub8cc \uc5c5\ub370\uc774\ud2b81,443\ub9cc",
+        "buttons": [
+          {
+            "label": "\ud1b5\ud569",
+            "rect": {
+              "x": 126,
+              "y": 724,
+              "w": 32,
+              "h": 24,
+              "bottom": 748
+            }
+          },
+          {
+            "label": "KRX",
+            "rect": {
+              "x": 159,
+              "y": 724,
+              "w": 32,
+              "h": 24,
+              "bottom": 748
+            }
+          },
+          {
+            "label": "NXT",
+            "rect": {
+              "x": 192,
+              "y": 724,
+              "w": 34,
+              "h": 24,
+              "bottom": 748
+            }
+          },
+          {
+            "label": "\uac70\ub798\ub7c9 \uc124\uc815 \uc5f4\uae30",
+            "rect": {
+              "x": 36,
+              "y": 826,
+              "w": 30,
+              "h": 14,
+              "bottom": 840
+            }
+          },
+          {
+            "label": "\ubcf4\uace0\uae30\uac04 \uc790\ub8cc",
+            "rect": {
+              "x": 0,
+              "y": 0,
+              "w": 0,
+              "h": 0,
+              "bottom": 0
+            }
+          },
+          {
+            "label": "\uc804\uccb4 \uc7ac\ubb34\uc790\ub8cc \uc5c5\ub370\uc774\ud2b8",
+            "rect": {
+              "x": 0,
+              "y": 0,
+              "w": 0,
+              "h": 0,
+              "bottom": 0
+            }
+          },
+          {
+            "label": "\uac70\ub798\ub7c9 \ud328\ub110 \uc811\uae30",
+            "rect": {
+              "x": 119,
+              "y": 824,
+              "w": 18,
+              "h": 18,
+              "bottom": 842
+            }
+          },
+          {
+            "label": "\uac70\ub798\ub7c9 \ud328\ub110 \uc704\ub85c",
+            "rect": {
+              "x": 138,
+              "y": 824,
+              "w": 18,
+              "h": 18,
+              "bottom": 842
+            }
+          },
+          {
+            "label": "\uac70\ub798\ub7c9 \ud328\ub110 \uc544\ub798\ub85c",
+            "rect": {
+              "x": 157,
+              "y": 824,
+              "w": 18,
+              "h": 18,
+              "bottom": 842
+            }
+          },
+          {
+            "label": "\uac70\ub798\ub7c9 \uc124\uc815",
+            "rect": {
+              "x": 176,
+              "y": 824,
+              "w": 18,
+              "h": 18,
+              "bottom": 842
+            }
+          },
+          {
+            "label": "\uac70\ub798\ub7c9 \uc228\uae30\uae30",
+            "rect": {
+              "x": 195,
+              "y": 824,
+              "w": 18,
+              "h": 18,
+              "bottom": 842
+            }
+          },
+          {
+            "label": "\uac70\ub798\ub7c9 \ud328\ub110 \ub2eb\uae30",
+            "rect": {
+              "x": 214,
+              "y": 824,
+              "w": 18,
+              "h": 18,
+              "bottom": 842
+            }
+          }
+        ],
+        "axis": {
+          "x": 12,
+          "y": 851,
+          "w": 718,
+          "h": 28,
+          "bottom": 879
+        }
+      }
+    ]
+  }
+]

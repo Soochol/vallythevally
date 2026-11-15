@@ -1,0 +1,75 @@
+import type { Page } from "@playwright/test";
+import type { LayoutWindow } from "../src/api/generated/LayoutWindow";
+import { installChartProbe } from "./chart-probe";
+import { cell, chartOf, expect, type Scenario, test } from "./harness";
+test.use({ clockStart: "20261109100000", actionTimeout: 10_000 });
+const MODES = ["dock", "canvas"] as const;
+
+const SETTINGS = { v: 1, style: "candle", scale: "normal", indicators: [], compare: [], panels: [], visibleBars: 40 };
+
+const chartWindow = (id: string, symbol = "005930"): LayoutWindow => ({ id, kind: "chart", link: null, symbol, venue: "combined", period: "D", chartSettings: SETTINGS });
+
+function seed(scenario: Scenario, count = 2, mode: typeof MODES[number] = "dock", sideWindows = true) {
+  const base = scenario.documents.layout();
+  const next = [...Array.from({ length: count }, (_, i) => chartWindow(`cell-${i}`)), ...(sideWindows ? base.windows.filter((window) => window.kind !== "chart") : [])];
+  scenario.documents.saveLayout({ ...base, windows: next, placement: {}, revision: base.revision + 1 });
+  scenario.documents.saveUiState({ ...scenario.documents.uiState(), layoutMode: mode });
+  const watchlists = scenario.documents.watchlists();
+  scenario.documents.saveWatchlists({ ...watchlists, lists: watchlists.lists.map((list) => ({ ...list, symbols: ["035420", "000660"] })) });
+}
+
+async function ready(page: Page, count = 1) {
+  for (let n = 1; n <= count; n++) {
+    await expect(cell(page, n)).toHaveAttribute("aria-busy", "false");
+    await expect(chartOf(cell(page, n))).toHaveAttribute("data-bar-count", /^[1-9]\d*$/);
+  }
+}
+
+
+test("readability compact prototype", async ({ page, scenario }, testInfo) => {
+  await page.addInitScript(installChartProbe);
+  seed(scenario, 4, "dock");
+  await page.goto("/");
+  await ready(page, 4);
+  await expect.poll(() => page.evaluate(() => window.chartProbes?.length)).toBe(4);
+  const captures = [];
+  for (const size of [{width:1440,height:900},{width:1024,height:768},{width:1024,height:920}]) {
+    await page.setViewportSize(size);
+    await page.evaluate(() => document.fonts.ready);
+    await expect.poll(() => page.evaluate(() => window.chartProbes.every(p => p.chart.chartElement().getBoundingClientRect().height === p.chart.chartElement().parentElement?.getBoundingClientRect().height))).toBe(true);
+    await page.evaluate(() => {
+      for (const probe of window.chartProbes) probe.chart.chartElement().parentElement?.classList.add("readability-compact");
+    });
+    await page.addStyleTag({content: `
+      .readability-compact .chart-legend { top:calc(10px + var(--legend-shift,0px)); display:grid; grid-template-columns:max-content max-content; gap:0px 8px; }
+      .readability-compact .chart-legend > :first-child { grid-column:1; grid-row:1; height:18px; gap:4px; }
+      .readability-compact .chart-legend > :first-child * { font-size:11px; line-height:14px; } .readability-compact .chart-legend [role=group] { height:18px; }
+      .readability-compact .chart-legend > :first-child > [role=heading] { font-size:12px; }
+      .readability-compact .chart-legend button { height:18px !important; padding-inline:4px !important; font-size:11px !important; line-height:14px !important; }
+      .readability-compact .chart-legend > :nth-child(2) { display:contents; }
+      .readability-compact [data-price-row] { grid-column:2; grid-row:1; gap:4px; height:18px; align-items:center; }
+      .readability-compact [data-price-row] > * { font-size:11px; line-height:14px; }
+      .readability-compact [data-price-row] > :first-child { font-size:14px; line-height:18px; }
+      .readability-compact [data-price-row] + div { grid-column:1 / -1; grid-row:2; }
+      .readability-compact [data-ohlc] { font-size:11px; line-height:14px; }
+      .readability-compact [data-indicator-row] { font-size:11px; line-height:14px; height:18px; margin-top:-4px; }
+      .readability-compact [data-indicator-row] button { line-height:14px; }
+    `});
+    await page.screenshot({path:testInfo.outputPath(`compact-${size.width}x${size.height}.png`)});
+    captures.push(await page.evaluate((size) => {
+      const rect = (e: Element | null | undefined) => { if (!e) return null; const r = e.getBoundingClientRect(); return {x:r.x,y:r.y,w:r.width,h:r.height,bottom:r.bottom}; };
+      const textRect = (e: Element | null | undefined) => { if (!e) return null; const range = document.createRange(); range.selectNodeContents(e); const r = range.getBoundingClientRect(); return {x:r.x,y:r.y,w:r.width,h:r.height,bottom:r.bottom}; };
+      return {size, overflow:[document.documentElement.scrollWidth-innerWidth,document.documentElement.scrollHeight-innerHeight],charts:window.chartProbes.map(({chart}) => {
+        const body=chart.chartElement().parentElement;
+        const root=body?.querySelector(".chart-legend");
+        const price=root?.querySelector("[data-price-row]");
+        const ohlc=root?.querySelector("[data-ohlc]");
+        const volume=body?.querySelector("[data-indicator-row]");
+        const group=body?.closest("[data-dock-group]");
+        return {body:rect(body), group:rect(group), legend:rect(root), name:rect(root?.firstElementChild), price:rect(price), ohlc:rect(ohlc), volume:rect(volume),nameText:textRect(root?.firstElementChild),priceText:textRect(price),ohlcText:textRect(ohlc),volumeText:textRect(volume),shift:body?getComputedStyle(body).getPropertyValue("--legend-shift"):null,panes:chart.panes().map(p=>({height:p.getHeight(),stretch:p.getStretchFactor(),rect:rect(p.getHTMLElement())})), legendText:root?.textContent,volumeTextContent:volume?.textContent,buttons:[...body?.querySelectorAll(".chart-legend button,[data-indicator-row] button") ?? []].map(b=>({label:b.getAttribute("aria-label") ?? b.textContent,rect:rect(b)})),axis:rect(chart.timeScale().getVisibleLogicalRange() && chart.chartElement().querySelector("table tr:last-child"))};
+      })};
+    },size));
+  }
+  await testInfo.attach("compact-rects", {body:JSON.stringify(captures,null,2),contentType:"application/json"});
+  process.stdout.write(JSON.stringify(captures,null,2));
+});
