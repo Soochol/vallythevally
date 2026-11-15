@@ -38,6 +38,15 @@ let active: Autosave | null = null;
 let savedLayout: ServerLayout = { revision: -Infinity, charts: null };
 let unsureLayouts: ServerLayout[] = [];
 const sendingCharts = new Set<ReadonlySet<string>>();
+const SENT_HISTORY = 64;
+let sentLayouts: { mark: number; charts: ReadonlySet<string> }[] = [];
+let lastMark = 0;
+
+export const layoutSendMark = (): number => lastMark;
+
+export function layoutSentWithoutChart(id: string, since: number): boolean {
+  return sentLayouts.some((sent) => sent.mark > since && !sent.charts.has(id));
+}
 
 export function serverMayLackChart(id: string): boolean {
   const candidates = [savedLayout, ...unsureLayouts];
@@ -93,6 +102,7 @@ export function startAutosave(deps: AutosaveDeps): Autosave {
     send: async (path, json, opts) => {
       const sent = layoutSent(json);
       sendingCharts.add(sent.charts);
+      sentLayouts = [...sentLayouts, { mark: ++lastMark, charts: sent.charts }].slice(-SENT_HISTORY);
       try {
         const saved = await deps.put(path, json, opts);
         if (sent.revision > savedLayout.revision) savedLayout = sent;

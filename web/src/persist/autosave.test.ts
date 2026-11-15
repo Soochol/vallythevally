@@ -5,7 +5,7 @@ import { chartWindows, DEFAULT_LAYOUT, useLayoutStore } from "../stores/layout";
 import { usePersistStore } from "../stores/persist";
 import { useUiStore } from "../stores/ui";
 import { useWatchlistStore } from "../stores/watchlist";
-import { type Autosave, commitWatchlist, RECENT_CLEARED, serverMayLackChart, startAutosave } from "./autosave";
+import { type Autosave, commitWatchlist, layoutSendMark, layoutSentWithoutChart, RECENT_CLEARED, serverMayLackChart, startAutosave } from "./autosave";
 import { PAYLOAD_LIMIT_BYTES } from "./bytes";
 import { ApiRequestError } from "../api/http";
 import { restore } from "./restore";
@@ -172,6 +172,18 @@ test("이미 확정된 레이아웃보다 오래된 요청의 응답은 성공�
   replies[2]!.reject(new ApiRequestError("stale_revision", "더 새 편집"));
   await vi.advanceTimersByTimeAsync(0);
   expect(serverMayLackChart(CELL)).toBe(false);
+});
+
+test("표시 뒤에 보낸 레이아웃 본문에 차트 창이 빠졌는지 알려 준다", async () => {
+  const id = useLayoutStore.getState().addChart(CELL, null)!;
+  await vi.advanceTimersByTimeAsync(0);
+  const mark = layoutSendMark();
+  expect(layoutSentWithoutChart(id, mark)).toBe(false);
+  useLayoutStore.getState().closeWindow(id);
+  await vi.advanceTimersByTimeAsync(1000);
+  expect(layoutSentWithoutChart(id, mark)).toBe(true);
+  expect(layoutSentWithoutChart(CELL, mark)).toBe(false);
+  expect(layoutSentWithoutChart(id, layoutSendMark())).toBe(false);
 });
 
 test("UI 설정을 바꾸면 모르는 키와 함께 UiState를 보낸다", async () => {

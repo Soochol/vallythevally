@@ -2,7 +2,7 @@ import { isCancelledError, type QueryClient } from "@tanstack/react-query";
 import { useSyncExternalStore } from "react";
 import { create } from "zustand";
 import { ApiRequestError, deleteJson, getJson, putJson } from "../../api/http";
-import { serverMayLackChart } from "../../persist/autosave";
+import { layoutSendMark, layoutSentWithoutChart, serverMayLackChart } from "../../persist/autosave";
 import type { SaveState } from "../../persist/saver";
 import { chartWindows, type EditableLayout, useLayoutStore } from "../../stores/layout";
 import { usePersistStore } from "../../stores/persist";
@@ -78,12 +78,12 @@ export class DrawingSync {
   refresh() { for (const symbol of this.symbols) void this.load(symbol); }
   private reload() { for (const symbol of this.symbols) void (this.loads.get(symbol) ?? Promise.resolve()).then(() => this.load(symbol)); }
 
-  private awaitsLayoutSave(want: queue.Intent["want"]): boolean {
+  private awaitsLayoutSave(want: queue.Intent["want"], sentAt?: number): boolean {
     if (want.kind !== "put" || want.body.scope.kind !== "cell") return false;
     const layout = useLayoutStore.getState().layout;
     if (want.body.scope.layoutId !== layout.id) return false;
     const window = want.body.scope.windowId;
-    return !chartIds(layout).has(window) || serverMayLackChart(window);
+    return !chartIds(layout).has(window) || serverMayLackChart(window) || (sentAt !== undefined && layoutSentWithoutChart(window, sentAt));
   }
 
   private followSavedLayout(layout: EditableLayout) {
@@ -250,6 +250,7 @@ export class DrawingSync {
       this.outbox = started.outbox;
       const { want, symbol } = started.send;
       const awaitedAtSend = this.awaitsLayoutSave(want);
+      const sentAt = layoutSendMark();
       const sending = want.kind === "delete" ? deleteJson(drawingPath(id), { keepalive }) : putJson<Drawing>(drawingPath(id), want.body, { keepalive });
       this.updateSave();
       void sending.then(async (saved) => {
@@ -263,7 +264,7 @@ export class DrawingSync {
         this.settle(id, { kind: "ok" });
       }).catch((e: unknown) => {
         const outcome: queue.Outcome = e instanceof ApiRequestError && e.code === "stale_revision" ? { kind: "stale" }
-          : e instanceof ApiRequestError && e.code === "bad_request" && (awaitedAtSend || this.awaitsLayoutSave(want)) ? { kind: "networkError" }
+          : e instanceof ApiRequestError && e.code === "bad_request" && (awaitedAtSend || this.awaitsLayoutSave(want, sentAt)) ? { kind: "networkError" }
           : e instanceof ApiRequestError && (e.code === "bad_request" || e.code === "payload_too_large" || e.code === "not_found") ? { kind: "clientError", tooLarge: e.code === "payload_too_large" }
           : { kind: "networkError" };
         this.settle(id, outcome);

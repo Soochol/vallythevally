@@ -498,6 +498,50 @@ test("서버가 반영하고 연결이 끊긴 닫기 저장 뒤 되돌려 그린
   await expect(drawingFailed(page)).toHaveCount(0);
 });
 
+test("드로잉이 서버에 머무는 사이 그 창을 닫았다 되돌려도 거절된 드로잉을 다시 보내 저장한다", async ({ page, scenario }) => {
+  twoSamsungCharts(scenario);
+  drawInCells(scenario);
+  let layoutPuts = 0;
+  let closeApplied = () => {};
+  const closeOnServer = new Promise<void>((resolve) => { closeApplied = resolve; });
+  let releaseClose = () => {};
+  const closeGate = new Promise<void>((resolve) => { releaseClose = resolve; });
+  let undoAnswered = false;
+  scenario.on((url, request) => isPut("/api/layouts/")(url, request), async (request) => {
+    layoutPuts += 1;
+    const n = layoutPuts;
+    const body = scenario.documents.saveLayout(request.postDataJSON());
+    if (n === 1) { closeApplied(); await closeGate; }
+    if (n === 2) undoAnswered = true;
+    return { body };
+  });
+  let drawingPuts = 0;
+  let drawingJudged = false;
+  let releaseDrawing = () => {};
+  const drawingGate = new Promise<void>((resolve) => { releaseDrawing = resolve; });
+  scenario.on((url, request) => isPut("/api/drawings/")(url, request), async (request) => {
+    drawingPuts += 1;
+    const value: DrawingInput = request.postDataJSON();
+    if (drawingPuts === 1) await closeOnServer;
+    const known = scenario.documents.hasScope(value.scope);
+    if (drawingPuts === 1) { drawingJudged = true; await drawingGate; }
+    return known ? { body: scenario.documents.saveDrawing(value) } : scopeRejected;
+  });
+  await page.goto("/");
+  await expect(cell(page, 2)).toHaveAttribute("aria-busy", "false");
+  await drawLine(page, 2);
+  await expect.poll(() => drawingPuts).toBe(1);
+  await closeButton(page, "칸 2 삼성전자").click();
+  await expect.poll(() => drawingJudged).toBe(true);
+  await toast(page).getByRole("button", { name: "되돌리기" }).click();
+  await expect(cell(page, 2)).toHaveAttribute("aria-busy", "false");
+  releaseClose();
+  await expect.poll(() => undoAnswered).toBe(true);
+  releaseDrawing();
+  await expect.poll(() => scenario.documents.drawings("005930").map((d) => d.scope), { timeout: 15_000 }).toEqual([{ kind: "cell", layoutId: DEFAULT_LAYOUT_ID, windowId: "cell-1" }]);
+  await expect(drawingFailed(page)).toHaveCount(0);
+});
+
 test("창 더하기 메뉴와 탭의 닫기 버튼을 키보드만으로 쓴다", async ({ page }) => {
   await page.goto("/");
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
