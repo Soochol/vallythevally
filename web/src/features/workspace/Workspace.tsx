@@ -12,9 +12,10 @@ import { useUiStore } from "../../stores/ui";
 import { CanvasWorkspace } from "./CanvasWorkspace";
 import { canvasPanelId } from "./canvasInteraction";
 import { Divider } from "./Divider";
+import { DockFloats } from "./DockFloats";
 import { DockGroup } from "./DockGroup";
 import { DockTabMenu } from "./DockTabMenu";
-import { useDockInteraction } from "./dockInteraction";
+import { floatPanelId, useDockInteraction } from "./dockInteraction";
 import { WindowHost } from "./WindowHost";
 import { CANVAS_DOCK_HEIGHT, DOCK_GAP, useElementSize } from "./size";
 
@@ -31,13 +32,15 @@ export function Workspace() {
   const dock = useMemo(() => fitDock(saved, refs), [saved, refs]);
   const canvas = useMemo(() => canvasArea && fitCanvas(placement.canvas, refs, canvasArea), [placement.canvas, refs, canvasArea]);
   const [draft, setDraft] = useState<DockPlacement | null>(null);
-  const shown = draft ?? dock;
+  const space: DockSpace | null = area && { area, gap: DOCK_GAP, windows: refs };
+  const interaction = useDockInteraction({ root, dock, space, enabled: mode === "dock" });
+  const shown = draft ?? interaction.shown;
   const activeCell = useSelectionStore((s) => s.activeCell);
-  const shownCharts = useMemo(() => listGroups(dock.root).map((group) => group.active).filter((id) => windows.some((w) => w.id === id && w.kind === "chart")), [dock, windows]);
+  const shownCharts = useMemo(() => [...listGroups(dock.root).map((group) => group.active), ...dock.floats.map((float) => float.window)].filter((id) => windows.some((w) => w.id === id && w.kind === "chart")), [dock, windows]);
 
   useEffect(() => {
-    if (mode === "dock" && saved && dock !== saved) useLayoutStore.getState().settleDock(dock);
-  }, [dock, saved, mode]);
+    if (mode === "dock" && dock !== saved && (saved || placement.canvas === null)) useLayoutStore.getState().settleDock(dock);
+  }, [dock, saved, mode, placement.canvas]);
 
   useEffect(() => {
     if (mode !== "dock") return;
@@ -52,19 +55,18 @@ export function Workspace() {
   }, [mode, canvasArea, area, placement, refs]);
   useLayoutEffect(() => () => useLayoutStore.getState().setCanvasArea(null), []);
 
-  const space: DockSpace | null = area && { area, gap: DOCK_GAP, windows: refs };
   const boxes = space && layoutDock(shown.root, space.area, space.gap);
-  const interaction = useDockInteraction({ root, dock, space });
   const preview = interaction.preview;
   return (
     <main ref={root} aria-label="작업 영역" className="workspace" data-dock-dragging={interaction.dragging ? "" : undefined} onLostPointerCapture={interaction.lostCapture}>
       {mode === "canvas" && canvas && canvasArea ? <CanvasWorkspace canvas={canvas} windows={windows} area={canvasArea} /> : null}
       {mode === "dock" && boxes?.groups.map(({ group, rect }, index) => <DockGroup key={group.id} group={group} rect={rect} number={index + 1} interaction={interaction} />)}
       {mode === "dock" && space && boxes?.gutters.map((box) => <Divider key={box.path.join("-") || "root"} box={box} dock={dock} space={space} onDraft={setDraft} />)}
+      {mode === "dock" && area && <DockFloats dock={shown} windows={windows} area={area} interaction={interaction} />}
       <div ref={parking} hidden inert />
       {windows.map((window) => {
         const group = groupOfWindow(shown.root, window.id);
-        const panel = mode === "canvas" ? canvasPanelId(window.id) : group?.active === window.id ? `window-panel-${group.id}` : null;
+        const panel = mode === "canvas" ? canvasPanelId(window.id) : shown.floats.some((float) => float.window === window.id) ? floatPanelId(window.id) : group?.active === window.id ? `window-panel-${group.id}` : null;
         return <WindowHost key={window.id} window={window} panel={panel} parking={parking} />;
       })}
       {mode === "dock" && interaction.dragging && <div className="dock-input-shield" aria-hidden="true" />}

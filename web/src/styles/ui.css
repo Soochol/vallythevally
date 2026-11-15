@@ -209,3 +209,7 @@ html.dock-dragging, html.dock-dragging * { cursor:grabbing !important; user-sele
 .layout-mode-segments { display:flex; padding:var(--size-2); border-radius:var(--r-m); background:var(--bg); }
 .layout-mode-segments button { flex:1; padding:var(--s1) var(--s3); border-radius:var(--r-s); }
 .layout-mode-segments button[aria-pressed=true] { background:var(--accent-soft); color:var(--accent); }
+.dock-floats { position:absolute; inset:0; z-index:20; pointer-events:none; isolation:isolate; }
+.dock-floats .window-frame { pointer-events:auto; background:var(--surface); box-shadow:0 0 0 var(--size-1) var(--line-strong), 0 12px 36px #0005; }
+.dock-floats .window-frame[data-active-cell] { box-shadow:0 0 0 var(--size-1) var(--accent), 0 12px 36px #0005; }
+.window-attach { width:auto; padding:0 6px; font-size:var(--fs-xs); }
