@@ -1,5 +1,7 @@
 import { beforeEach, expect, test } from "vitest";
 import { DEFAULT_CHART_SETTINGS } from "../chart/settings";
+import { detachWindow, moveFloat } from "../layout/dock/floats";
+import { useUiStore } from "./ui";
 import { layoutDock } from "../layout/dock/geometry";
 import { groupOfWindow, listGroups } from "../layout/dock/tree";
 import { MAX_WINDOWS, windowId } from "../layout/kinds";
@@ -370,4 +372,54 @@ test("십자선 연동은 scroll과 배치 기록을 지키고 바뀔 때만 저
   state().setCrosshairSync(true);
   expect(state().layout.sync.crosshair).toBe(true);
   expect(state().revision).toBe(revision + 2);
+});
+
+
+test("도킹 떠 있는 창의 한 동작을 한 단계로 기록하고 되돌리기는 원래 묶음 기억도 되살린다", () => {
+  useUiStore.setState((s) => ({ prefs: { ...s.prefs, layoutMode: "dock" } }));
+  state().load(structuredClone(DEFAULT_LAYOUT));
+  const dock = fittedDock(state().layout);
+  state().settleDock(dock);
+  const id = windowId("screener");
+  const origin = groupOfWindow(dock.root, id)!.id;
+  const floated = detachWindow(dock, id, { x: .2, y: .2, w: .3, h: .4 });
+  expect(state().commitDock({ session: state().session, expected: dock, next: floated })).toBe(true);
+  expect(state().steps).toHaveLength(1);
+  expect(state().dockOrigins.get(id)).toBe(origin);
+  const moved = moveFloat(floated, id, { x: .3, y: .2, w: .3, h: .4 });
+  state().commitDock({ session: state().session, expected: floated, next: moved });
+  expect(state().steps).toHaveLength(2);
+  state().attachFloat(id);
+  expect(state().steps).toHaveLength(3);
+  expect(groupOfWindow(state().layout.placement.dock!.root, id)?.id).toBe(origin);
+  expect(state().dockOrigins.has(id)).toBe(false);
+  state().undoArrangement();
+  expect(state().layout.placement.dock).toBe(moved);
+  expect(state().dockOrigins.get(id)).toBe(origin);
+  state().undoArrangement();
+  expect(state().layout.placement.dock).toBe(floated);
+  state().undoArrangement();
+  expect(state().layout.placement.dock).toBe(dock);
+});
+
+test("오래된 도킹 세션·배치·방식의 커밋을 거절하고 같은 배치는 기록하지 않는다", () => {
+  useUiStore.setState((s) => ({ prefs: { ...s.prefs, layoutMode: "dock" } }));
+  state().load(structuredClone(DEFAULT_LAYOUT));
+  const dock = fittedDock(state().layout);
+  state().settleDock(dock);
+  const session = state().session;
+  const next = detachWindow(dock, windowId("screener"), { x: .1, y: .1, w: .3, h: .4 });
+  expect(state().commitDock({ session, expected: dock, next: { ...dock } })).toBe(true);
+  expect(state().steps).toHaveLength(0);
+  expect(state().commitDock({ session: session - 1, expected: dock, next })).toBe(false);
+  expect(state().commitDock({ session, expected: { ...dock }, next })).toBe(false);
+  useUiStore.setState((s) => ({ prefs: { ...s.prefs, layoutMode: "canvas" } }));
+  expect(state().commitDock({ session, expected: dock, next })).toBe(false);
+  useUiStore.setState((s) => ({ prefs: { ...s.prefs, layoutMode: "dock" } }));
+  state().commitDock({ session, expected: dock, next });
+  state().load(state().layout);
+  expect(state().dockOrigins.size).toBe(0);
+  expect(state().commitDock({ session, expected: next, next: dock })).toBe(false);
+  state().attachFloat(windowId("screener"));
+  expect(state().layout.placement.dock!.floats).toHaveLength(0);
 });

@@ -90,4 +90,6 @@ test("떠 있는 창도 원래 도킹 작업 영역의 픽셀 크기와 자리�
   dock.floats = [{ window: b, rect: { x: .2, y: .15, w: .4, h: .5 } }];
   const result = canvasFromDock(dock, windows, room);
   expect(toPx(result.rects[b]!, room.canvas)).toEqual({ x: 280, y: 114, w: 560, h: 380 });
+  expect(result.order.at(-1)).toBe(b);
+  expect(result.order.slice(0, -1)).toEqual(expect.arrayContaining([a, c, d]));
 });
