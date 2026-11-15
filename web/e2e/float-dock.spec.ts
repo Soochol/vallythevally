@@ -182,6 +182,21 @@ test.describe("selected drawing in a short 1024×330 pane", () => {
     expect(geometry.pane.height).toBeLessThanOrEqual(128);
     expectStyleClear(geometry, free);
   });
+
+  test("style bar keeps endpoint handles clear when the drawing spans the short pane", async ({ page }, info) => {
+    await page.addInitScript(installChartProbe);
+    await open(page);
+    await expect(chartOf(cell(page))).toHaveAttribute("data-bar-count", /^[1-9]\d*$/);
+    const pane = await paneOf(page);
+    const start = await settledBox(dock(page));
+    await moveDock(page, { x: pane.x + (pane.width - start.width) / 2, y: pane.y + 48 });
+    await pickTool(page, "선", "추세선");
+    await drag(page, { x: pane.x + 320, y: pane.y + 20 }, { x: pane.x + 620, y: pane.y + 110 });
+    const geometry = await styleGeometry(page);
+    const free = { x: pane.x + 8, y: pane.y + pane.height - geometry.style.height, width: geometry.style.width, height: geometry.style.height };
+    await attachStyleGeometry(page, info, geometry, free);
+    expectStyleClear(geometry, free);
+  });
 });
 
 test.describe("휴대폰", () => {
