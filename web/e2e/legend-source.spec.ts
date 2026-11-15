@@ -47,15 +47,21 @@ async function boundedFields(page: Page) {
     const projection = window.legendSources.projections.at(-1);
     if (!projection) throw new Error("범례 원천 투영이 없습니다");
     const values: { key: string; text: string; width: number; bound: number; included: boolean }[] = [];
-    const sample = (key: string, element: HTMLElement) => {
+    const sample = (key: string, element: HTMLElement, text = element.textContent ?? "", width = element.getBoundingClientRect().width) => {
       if (element.offsetParent === null) return;
       const bound = projection.fields.find((field) => field.key === key);
       if (!bound) throw new Error(`원천 필드가 없습니다: ${key}`);
-      const text = element.textContent ?? "";
-      values.push({ key, text, width: element.getBoundingClientRect().width, bound: bound.width, included: bound.alternatives.includes(text) });
+      values.push({ key, text, width, bound: bound.width, included: bound.alternatives.includes(text) });
     };
     document.querySelectorAll<HTMLElement>("[data-price-row] > span").forEach((element, i) => sample(`price/${i}`, element));
-    document.querySelectorAll<HTMLElement>("[data-ohlc] > span > span").forEach((element, i) => sample(`ohlc/${i}`, element));
+    document.querySelectorAll<HTMLElement>("[data-ohlc] > span").forEach((element, i) => {
+      const label = element.querySelector("i");
+      if (!label) throw new Error("봉 값 필드 이름이 없습니다");
+      const range = document.createRange();
+      range.setStartAfter(label);
+      range.setEnd(element, element.childNodes.length);
+      sample(`ohlc/${i}`, element, (element.textContent ?? "").slice(label.textContent?.length ?? 0), range.getBoundingClientRect().width);
+    });
     document.querySelectorAll<HTMLElement>(".chart-legend [data-indicator-row]").forEach((row) => row.querySelectorAll<HTMLElement>(":scope > span.font-medium > span").forEach((element, i) => sample(`indicator/${row.dataset.indicatorRow}/${i}`, element)));
     document.querySelectorAll<HTMLElement>("[data-compare-row]").forEach((row) => {
       const element = row.querySelector<HTMLElement>(":scope > span.font-medium");

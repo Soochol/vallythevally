@@ -97,10 +97,10 @@ function ohlcClasses({ showLegend, showOhlcChange }: LegendDisplay) {
 
 function ohlcCell([label, value, change]: LegendParts["cells"][number], withChange: boolean) {
   const root = el("span", "");
-  const slot = el("span", "", value);
-  if (change && withChange) slot.append(" ", el("span", DIR_CLASS[change.dir], `(${change.text})`));
-  root.append(el("i", "mr-[3px] not-italic text-text-3", label), slot);
-  return { root, slot };
+  const name = el("i", "mr-[3px] not-italic text-text-3", label);
+  root.append(name, value);
+  if (change && withChange) root.append(" ", el("span", DIR_CLASS[change.dir], `(${change.text})`));
+  return { root, name };
 }
 
 function statusParts(value: LegendBar) {
@@ -311,8 +311,10 @@ export class Legend {
     line.hidden = !this.layout.present && this.display.showLegend;
     for (const { label, values } of this.layout.cells) {
       const cell = ohlcCell([label, values[0] ?? "", null], false);
+      const slot = el("span", "", values[0] ?? "");
+      cell.root.replaceChildren(cell.name, slot);
       ohlc.append(cell.root);
-      fields.push({ element: cell.slot, alternatives: values });
+      fields.push({ element: slot, alternatives: values });
     }
     if (!this.display.showLegend) group.append(this.venueAnchor.cloneNode(true));
     group.append(ohlc);
