@@ -1,18 +1,14 @@
-# Final independent adversarial review
+# Current-main independent interrogate review
 
-Intent: keep the automatic style bar inside the pane and clear of the moved dock and selected handles whenever a free placement exists. Reduce optional spacing before accepting overlap. Preserve saved toolbar positions and window layout.
+Reviewed by gpt-6-astra. Result: report-only; no verified findings. This is the independently executed Astra arm of the parent's interrogate panel, with no nested agents or source edits.
 
-Result: report-only, no verified findings. Reviewed by gpt-6-astra against HEAD `d4331706b7f09915026959c81d78ad40584e7b2c`, base `c400e65131dd20e8d05eea2a8c6998c644c2e093`, in isolated `target/review-final-astra`. This supersedes the defect verdict on `ee59ea6`; it is not a merge-ready verdict. The layout-finish PR #375 integration gate remains open.
+Intent: keep the automatically placed style bar inside the actual pane and clear of the moved dock and every actual selected handle box whenever a feasible placement exists. Relax optional spacing before allowing overlap; preserve saved toolbar positions and window state.
 
-## Executed adversarial checks
+Reviewed HEAD `8bf2861bd8b801533327e340667ca72f70ad01ea` in isolated `target/review-main-astra`, based on `5578aabc4ead5923f854daf638947fbf974545fa`. Both the isolated checkout and parent checkout were clean. Applied the interrogate procedure and Codex mapping, with TypeScript/type-system guidance for source inspection.
 
-Run from the task worktree root with Node v24.13.1:
+## Executed adversarial probe
 
-```sh
-node target/review-final-astra/target/geometry-probe.mjs
-```
-
-The script imports the real final `dockSpot.ts`. Exit 0; output retained in `target/review-final-astra/target/geometry-probe.log`:
+From the isolated checkout, ran `node target/geometry-probe.mjs` against its own imported `../web/src/features/drawings/dockSpot.ts`. Exit code 0:
 
 ```json
 {"fixture":"sol","spot":{"left":281,"top":84},"actual":{"inside":true,"dockClear":true,"endpointsClear":true},"witness":{"left":8,"top":86}}
@@ -23,26 +19,24 @@ The script imports the real final `dockSpot.ts`. Exit 0; output retained in `tar
 {"fixture":"no-bounds","spot":{"left":492,"top":120},"requiredConstraints":"pass"}
 ```
 
-The first two cases replay the independently proven failures with the new required `{ bounds, handles }` argument and the caller's actual natural-position inputs. Both return contained, dock-clear and endpoint-clear placements. The 750 deterministic bounded integer cases use an exhaustive grid witness to identify the earliest feasible obstacle/spacing tier and assert that the implementation satisfies that tier. Cases include absent bounds, up to three handles, out-of-pane obstacles, and oversized bars. Extra fixtures directly exercise dock-only fallback, handles outside drawing bounds, and handles with no bounds. This is bounded evidence, not a proof for all continuous geometry.
+The bounded brute-force oracle finds the first feasible constraint tier independently and checks the real solver's answer against it. Both old failure fixtures now retain endpoint accessibility. The probe also covers absent bounds, handles outside the pane and deterministic dock-only fallback. No candidate findings were dropped; none failed the run.
 
-## Integration and existing evidence
+## Integration and official evidence
 
-The final diff is limited to the four authorized files. `SelectionObstacles` requires both fields. The overlay uses displayed frame handles; `frame.ts:36` only populates those handles for selected drawings. Bounds and handle boxes use the existing six-pixel hit radius. The solver keeps all handles in the full-bounds tier, then tries handles plus dock, then dock alone, exhausting gap/inset relaxation within each tier. The `!saved && dock?.moved` guard and saved-position branch preserve saved-coordinate behavior. No storage or window-layout source changed.
+Independently compared the complete `git diff c400e65131dd20e8d05eea2a8c6998c644c2e093 d4331706b7f09915026959c81d78ad40584e7b2c` with `git diff 5578aabc4ead5923f854daf638947fbf974545fa 8bf2861bd8b801533327e340667ca72f70ad01ea`. They are byte-identical, SHA-256 `e24d77d1153b03a3d0c95107c8223e00aed7a3bddf7948e450105d6aa06fecad`. Independently checked all four file blob IDs against `.audit/dock-style-overlap-main-comparison.json`; all match. `git merge-base --is-ancestor` confirms the new base is included.
 
-I inspected the final run manifests, logs and geometry attachments rather than launching duplicate browser builds:
+The base-to-base browser source changes are only generated `LayoutWindow.ts` and `WindowContent.ts` property ordering. Both retain the same chart fields and types. The other changes are server files and a plan document; none changes the overlay/dock runtime. The new official type checks pass.
 
-- `target/web-runs/check-6yatmc7x/manifest.json`: `python3 scripts/web.py check src/features/drawings/dockSpot.test.ts`; 22 tests passed (`command-2.log`).
-- `target/web-runs/e2e-u5ttdw8v/manifest.json`: `python3 scripts/web.py e2e e2e/float-dock.spec.ts e2e/float-surfaces.spec.ts e2e/overlay-input.spec.ts e2e/drawing-dock-move.spec.ts`; 36 passed (`command-3.log`).
-- `target/web-runs/e2e-oo5ysf1a/manifest.json`: `python3 scripts/web.py e2e e2e/float-dock.spec.ts --grep 'style bar keeps|style bar fits' --repeat-each=10`; 30 passed (`command-3.log`).
+`DrawingOverlay` still samples `surface.frame().pane`, actual toolbar offset dimensions and `dockBox()` DOM rectangles on each animation frame. `dockBox()` translates viewport rectangles into overlay coordinates. `frame.ts:renderItem` supplies handles only for selected items; the overlay expands every such handle by the existing 6px hit radius. The changed code neither persists positions nor modifies the saved-toolbar branch. The avoidance call is still gated by `!saved && dock?.moved`. The bounds/handles contract therefore does not depend on PR375's future default toolbar placement.
 
-All three manifests report clean final HEAD `d433170`, source fingerprint `a0722d971df334170d05d2762587fe2815351e6ae06a8aaadb6494054d76de11`, passed status, and exit code 0. The repeat pattern now includes the additional fallback regression, giving three tests times ten executions.
+Read all three official manifests and command logs. Each records passed/exit0, identical source/source_after, clean HEAD `8bf2861bd8b801533327e340667ca72f70ad01ea`, and source fingerprint `d1ca5826cee16d4c6e798f677b48961138ffab7761ec0fcefc552dfd70b53932`:
 
-The final attachments show a 1024×768 viewport with a 646×474 pane and a 1024×330 viewport with a 646×124 pane. Dock size is 378×36; style size is 333×38. All captured endpoint hit tests reach CANVAS. The added fallback case previously failed in `e2e-hm835znk`: its upper endpoint hit the style grip while a free witness existed. In `e2e-vqwnkbe4` and final `e2e-u5ttdw8v`, both endpoint hits reach CANVAS and the style bar is contained below the dock. The dirty precommit success and clean final success have the same source fingerprint; they are still recorded separately.
+- `target/web-runs/check-cthia2ni/manifest.json`: 22 units; scoped dockSpot command.
+- `target/web-runs/e2e-7xjdzawj/manifest.json`: 36 browser tests across float-dock, float-surfaces, overlay-input and drawing-dock-move.
+- `target/web-runs/e2e-liboger0/manifest.json`: 30 passes, each of three overlap regressions repeated ten times.
 
-## Findings, dropped hypotheses, and limits
+Separately recomputed inside/nonoverlap/6px-handle predicates from all 33 `results/*/style-geometry.json` artifacts across the two browser runs. All witnesses and final style rectangles fit the pane and avoid dock and handles; all endpoint hit targets are accessible CANVAS. Actual panes are 646×474 at viewport 1024×768 and 646×124 at viewport 1024×330. Dock is 378×36, style is 333×38. The three scoped-run final style origins are (27.375,190), (195.421875,116), and (291.875,190), in viewport coordinates.
 
-No verified findings. Zero new defect findings were dropped. The two old endpoint fixtures now pass and their prior finding is resolved. The bounded search found no candidate-completeness or fallback-order failure. I make no claim of exhaustive fractional-coordinate or performance coverage.
+## Limits
 
-The brief requires repeating these checks and independent review after layout-finish #375 lands on main, using its actual toolbar rectangles. This review establishes the current pre-layout implementation only. No application files, full suite, external service, real Kiwoom transport, hc/orch process, or nested agent were used. Repro artifacts stay under this review worktree's target directory.
-
-Procedure followed: pstack:interrogate independent adversary; Codex platform mapping; repository web-check instructions; TypeScript best-practices and type-system-discipline. The parent owns the panel and final rerun of reviewer commands.
+This report establishes the reviewed local HEAD and its scoped geometry evidence. It does not establish current remote PR HEAD, CI, conflict or thread state, and is not a merge-ready declaration. The newer explicit t1q0 instruction removes the earlier PR375 waiting order; later PR375 layout integration and the full suite remain with PR375/the parent. No full suite, main merge, deployment or external session was performed.

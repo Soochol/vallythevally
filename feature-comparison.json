@@ -1,0 +1,30 @@
+{
+  "previousHead": "d4331706b7f09915026959c81d78ad40584e7b2c",
+  "previousBase": "c400e65131dd20e8d05eea2a8c6998c644c2e093",
+  "base": "5578aabc4ead5923f854daf638947fbf974545fa",
+  "head": "8bf2861bd8b801533327e340667ca72f70ad01ea",
+  "featurePatchIdentical": true,
+  "featurePatchSha256": "e24d77d1153b03a3d0c95107c8223e00aed7a3bddf7948e450105d6aa06fecad",
+  "files": [
+    {
+      "path": "web/src/features/drawings/dockSpot.ts",
+      "oldBlob": "6b0ac761f445e5b4521c7f03c319141924deffa3",
+      "newBlob": "6b0ac761f445e5b4521c7f03c319141924deffa3"
+    },
+    {
+      "path": "web/src/features/drawings/DrawingOverlay.tsx",
+      "oldBlob": "ed541de461263f3da4b6354787fbf93be14fcce7",
+      "newBlob": "ed541de461263f3da4b6354787fbf93be14fcce7"
+    },
+    {
+      "path": "web/src/features/drawings/dockSpot.test.ts",
+      "oldBlob": "a09b02c15676cf7a2088652e4e32a40df3da4ff9",
+      "newBlob": "a09b02c15676cf7a2088652e4e32a40df3da4ff9"
+    },
+    {
+      "path": "web/e2e/float-dock.spec.ts",
+      "oldBlob": "2cbdcde106a418ada69928916ae290963f501bf3",
+      "newBlob": "2cbdcde106a418ada69928916ae290963f501bf3"
+    }
+  ]
+}

@@ -17,19 +17,42 @@
       "width": 378,
       "height": 36
     },
-    "styleBefore": {
-      "x": 317,
-      "y": 190,
-      "width": 333,
-      "height": 38
-    },
-    "styleAfter": {
+    "style": {
       "x": 27.375,
       "y": 190,
       "width": 333,
       "height": 38
     },
-    "finalEndpointsAccessible": true
+    "endpoints": [
+      {
+        "x": 374.375,
+        "y": 196.9999999999999
+      },
+      {
+        "x": 592.875,
+        "y": 565
+      }
+    ],
+    "hits": [
+      {
+        "point": {
+          "x": 374.375,
+          "y": 196.9999999999999
+        },
+        "tag": "CANVAS",
+        "label": "칸 1: 삼성전자 통합 일",
+        "accessible": true
+      },
+      {
+        "point": {
+          "x": 592.875,
+          "y": 565
+        },
+        "tag": "CANVAS",
+        "label": "칸 1: 삼성전자 통합 일",
+        "accessible": true
+      }
+    ]
   },
   {
     "case": "short",
@@ -49,19 +72,42 @@
       "width": 378,
       "height": 36
     },
-    "styleBefore": {
-      "x": 195.421875,
-      "y": 145.59375,
-      "width": 333,
-      "height": 38
-    },
-    "styleAfter": {
+    "style": {
       "x": 195.421875,
       "y": 116,
       "width": 333,
       "height": 38
     },
-    "finalEndpointsAccessible": true
+    "endpoints": [
+      {
+        "x": 303.125,
+        "y": 198.00000000000003
+      },
+      {
+        "x": 369.625,
+        "y": 208
+      }
+    ],
+    "hits": [
+      {
+        "point": {
+          "x": 303.125,
+          "y": 198.00000000000003
+        },
+        "tag": "CANVAS",
+        "label": "칸 1: 삼성전자 통합 일",
+        "accessible": true
+      },
+      {
+        "point": {
+          "x": 369.625,
+          "y": 208
+        },
+        "tag": "CANVAS",
+        "label": "칸 1: 삼성전자 통합 일",
+        "accessible": true
+      }
+    ]
   },
   {
     "case": "handles",
@@ -81,18 +127,41 @@
       "width": 378,
       "height": 36
     },
-    "styleBefore": {
-      "x": 317,
-      "y": 114,
-      "width": 333,
-      "height": 38
-    },
-    "styleAfter": {
+    "style": {
       "x": 291.875,
       "y": 190,
       "width": 333,
       "height": 38
     },
-    "finalEndpointsAccessible": true
+    "endpoints": [
+      {
+        "x": 331.625,
+        "y": 141.30090407938258
+      },
+      {
+        "x": 630.875,
+        "y": 216
+      }
+    ],
+    "hits": [
+      {
+        "point": {
+          "x": 331.625,
+          "y": 141.30090407938258
+        },
+        "tag": "CANVAS",
+        "label": "칸 1: 삼성전자 통합 일",
+        "accessible": true
+      },
+      {
+        "point": {
+          "x": 630.875,
+          "y": 216
+        },
+        "tag": "CANVAS",
+        "label": "칸 1: 삼성전자 통합 일",
+        "accessible": true
+      }
+    ]
   }
 ]

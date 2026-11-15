@@ -10,11 +10,11 @@
     "--repeat-each=10"
   ],
   "source": {
-    "head": "d4331706b7f09915026959c81d78ad40584e7b2c",
+    "head": "8bf2861bd8b801533327e340667ca72f70ad01ea",
     "dirty": false,
-    "sha256": "a0722d971df334170d05d2762587fe2815351e6ae06a8aaadb6494054d76de11"
+    "sha256": "d1ca5826cee16d4c6e798f677b48961138ffab7761ec0fcefc552dfd70b53932"
   },
-  "started_at": 1794740831.382096,
+  "started_at": 1794745577.274232,
   "status": "passed",
   "exit_code": 0,
   "steps": {
@@ -22,37 +22,37 @@
       "status": "passed",
       "execution": "direct",
       "exit_code": 0,
-      "elapsed_seconds": 2.821
+      "elapsed_seconds": 0.4
     },
     "wasm": {
       "status": "passed",
       "execution": "direct",
       "exit_code": 0,
-      "elapsed_seconds": 0.265
+      "elapsed_seconds": 0.072
     },
     "types": {
       "status": "passed",
       "execution": "direct",
       "exit_code": 0,
-      "elapsed_seconds": 4.61
+      "elapsed_seconds": 1.428
     },
     "ui": {
       "status": "passed",
       "execution": "direct",
       "exit_code": 0,
-      "elapsed_seconds": 9.421
+      "elapsed_seconds": 0.776
     },
     "static": {
       "status": "passed",
       "execution": "direct",
       "exit_code": 0,
-      "elapsed_seconds": 1.701
+      "elapsed_seconds": 0.225
     },
     "playwright": {
       "status": "passed",
       "execution": "direct",
       "exit_code": 0,
-      "elapsed_seconds": 75.75
+      "elapsed_seconds": 52.537
     }
   },
   "artifacts": {
@@ -68,9 +68,9 @@
       }
     },
     "ui": {
-      "path": "/home/dev/.herdr/worktrees/vallythevally/dock-style-overlap/dock-style-overlap/target/web-runs/e2e-oo5ysf1a/dist",
+      "path": "/home/dev/.herdr/worktrees/vallythevally/dock-style-overlap/dock-style-overlap/target/web-runs/e2e-liboger0/dist",
       "execution": "direct",
-      "key": "a0722d971df334170d05d2762587fe2815351e6ae06a8aaadb6494054d76de11",
+      "key": "d1ca5826cee16d4c6e798f677b48961138ffab7761ec0fcefc552dfd70b53932",
       "sha256": {
         "assets/PretendardVariable.subset.0-BHUkWNFR.woff2": "8713e83342c3f5ed316bf22bf50a3d991a5b5dd16c0c45c54a6ad81f62be7df3",
         "assets/PretendardVariable.subset.1-C-__qv6_.woff2": "b1c51b35964614cf67d44166752af0c6cf3a2a4a50daf304af2a7327611242ae",
@@ -173,16 +173,16 @@
     }
   },
   "results": {
-    "directory": "/home/dev/.herdr/worktrees/vallythevally/dock-style-overlap/dock-style-overlap/target/web-runs/e2e-oo5ysf1a",
+    "directory": "/home/dev/.herdr/worktrees/vallythevally/dock-style-overlap/dock-style-overlap/target/web-runs/e2e-liboger0",
     "playwright_output": [
       "e2e/float-dock.spec.ts",
       "--grep",
       "style bar keeps|style bar fits",
       "--repeat-each=10",
-      "--output=/home/dev/.herdr/worktrees/vallythevally/dock-style-overlap/dock-style-overlap/target/web-runs/e2e-oo5ysf1a/results",
+      "--output=/home/dev/.herdr/worktrees/vallythevally/dock-style-overlap/dock-style-overlap/target/web-runs/e2e-liboger0/results",
       "--workers=2"
     ],
-    "report": "/home/dev/.herdr/worktrees/vallythevally/dock-style-overlap/dock-style-overlap/target/web-runs/e2e-oo5ysf1a/report"
+    "report": "/home/dev/.herdr/worktrees/vallythevally/dock-style-overlap/dock-style-overlap/target/web-runs/e2e-liboger0/report"
   },
   "commands": [
     {
@@ -192,11 +192,11 @@
         "--frozen-lockfile"
       ],
       "cwd": "/home/dev/.herdr/worktrees/vallythevally/dock-style-overlap/dock-style-overlap/web",
-      "log": "/home/dev/.herdr/worktrees/vallythevally/dock-style-overlap/dock-style-overlap/target/web-runs/e2e-oo5ysf1a/command-0.log",
+      "log": "/home/dev/.herdr/worktrees/vallythevally/dock-style-overlap/dock-style-overlap/target/web-runs/e2e-liboger0/command-0.log",
       "execution": "direct",
       "status": "passed",
       "exit_code": 0,
-      "elapsed_seconds": 2.421,
+      "elapsed_seconds": 0.347,
       "process_exit_code": 0
     },
     {
@@ -205,11 +205,11 @@
         "-b"
       ],
       "cwd": "/home/dev/.herdr/worktrees/vallythevally/dock-style-overlap/dock-style-overlap/web",
-      "log": "/home/dev/.herdr/worktrees/vallythevally/dock-style-overlap/dock-style-overlap/target/web-runs/e2e-oo5ysf1a/command-1.log",
+      "log": "/home/dev/.herdr/worktrees/vallythevally/dock-style-overlap/dock-style-overlap/target/web-runs/e2e-liboger0/command-1.log",
       "execution": "direct",
       "status": "passed",
       "exit_code": 0,
-      "elapsed_seconds": 4.233,
+      "elapsed_seconds": 1.368,
       "process_exit_code": 0
     },
     {
@@ -217,15 +217,15 @@
         "/home/dev/.herdr/worktrees/vallythevally/dock-style-overlap/dock-style-overlap/web/node_modules/.bin/vite",
         "build",
         "--outDir",
-        "/home/dev/.herdr/worktrees/vallythevally/dock-style-overlap/dock-style-overlap/target/web-runs/e2e-oo5ysf1a/dist",
+        "/home/dev/.herdr/worktrees/vallythevally/dock-style-overlap/dock-style-overlap/target/web-runs/e2e-liboger0/dist",
         "--emptyOutDir"
       ],
       "cwd": "/home/dev/.herdr/worktrees/vallythevally/dock-style-overlap/dock-style-overlap/web",
-      "log": "/home/dev/.herdr/worktrees/vallythevally/dock-style-overlap/dock-style-overlap/target/web-runs/e2e-oo5ysf1a/command-2.log",
+      "log": "/home/dev/.herdr/worktrees/vallythevally/dock-style-overlap/dock-style-overlap/target/web-runs/e2e-liboger0/command-2.log",
       "execution": "direct",
       "status": "passed",
       "exit_code": 0,
-      "elapsed_seconds": 7.705,
+      "elapsed_seconds": 0.715,
       "process_exit_code": 0
     },
     {
@@ -236,15 +236,15 @@
         "--grep",
         "style bar keeps|style bar fits",
         "--repeat-each=10",
-        "--output=/home/dev/.herdr/worktrees/vallythevally/dock-style-overlap/dock-style-overlap/target/web-runs/e2e-oo5ysf1a/results",
+        "--output=/home/dev/.herdr/worktrees/vallythevally/dock-style-overlap/dock-style-overlap/target/web-runs/e2e-liboger0/results",
         "--workers=2"
       ],
       "cwd": "/home/dev/.herdr/worktrees/vallythevally/dock-style-overlap/dock-style-overlap/web",
-      "log": "/home/dev/.herdr/worktrees/vallythevally/dock-style-overlap/dock-style-overlap/target/web-runs/e2e-oo5ysf1a/command-3.log",
+      "log": "/home/dev/.herdr/worktrees/vallythevally/dock-style-overlap/dock-style-overlap/target/web-runs/e2e-liboger0/command-3.log",
       "execution": "direct",
       "status": "passed",
       "exit_code": 0,
-      "elapsed_seconds": 75.341,
+      "elapsed_seconds": 52.417,
       "process_exit_code": 0
     }
   ],
@@ -254,19 +254,19 @@
         "node",
         "/home/dev/.herdr/worktrees/vallythevally/dock-style-overlap/dock-style-overlap/web/e2e/serve.mjs"
       ],
-      "pid": 1099515,
-      "log": "/home/dev/.herdr/worktrees/vallythevally/dock-style-overlap/dock-style-overlap/target/web-runs/e2e-oo5ysf1a/static.log",
+      "pid": 4084176,
+      "log": "/home/dev/.herdr/worktrees/vallythevally/dock-style-overlap/dock-style-overlap/target/web-runs/e2e-liboger0/static.log",
       "execution": "direct",
       "status": "stopped",
       "exit_code": 0,
       "stop_reason": "owned_cleanup",
-      "elapsed_seconds": 76.6
+      "elapsed_seconds": 52.676
     }
   ],
-  "elapsed_seconds": 94.925,
+  "elapsed_seconds": 55.507,
   "source_after": {
-    "head": "d4331706b7f09915026959c81d78ad40584e7b2c",
+    "head": "8bf2861bd8b801533327e340667ca72f70ad01ea",
     "dirty": false,
-    "sha256": "a0722d971df334170d05d2762587fe2815351e6ae06a8aaadb6494054d76de11"
+    "sha256": "d1ca5826cee16d4c6e798f677b48961138ffab7761ec0fcefc552dfd70b53932"
   }
 }

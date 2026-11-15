@@ -1,19 +1,11 @@
-# Final no-comments review
+# No-comments review: PR 377 on current main
 
-Independent review of the full current diff against `origin/main`, limited to the four named files. The goal is to keep the style toolbar, dock, and selected endpoints accessible when space permits. This report supersedes `.audit/dock-style-overlap-no-comments.md`.
+- Reviewed HEAD: `8bf2861bd8b801533327e340667ca72f70ad01ea`; base: `5578aabc4ead5923f854daf638947fbf974545fa`.
+- Scope: the complete four-file feature diff (`dockSpot.ts`, `DrawingOverlay.tsx`, `dockSpot.test.ts`, `float-dock.spec.ts`). The diff contains no comments or suppressions. A scan of all four complete files also found no comment lines or lint/TypeScript suppressions.
+- Current patch SHA-256 independently computed: `e24d77d1153b03a3d0c95107c8223e00aed7a3bddf7948e450105d6aa06fecad`. All four HEAD blobs independently match prior HEAD `d4331706b7f09915026959c81d78ad40584e7b2c`. `.audit/dock-style-overlap-main-comparison.json` records identical prior and current patches with this hash. The prior base object is unavailable locally, so the prior patch hash was not independently recomputed in this review.
+- Findings: 0; comment deletions: 0; restorations: 0; MUST KILL flags: 0; HOLDs: 0; suppressions: 0; open findings: 0.
+- Reruns: 0; architect sketches: 0; fixes: 0; encoding offers: 0; encodings: 0; unenforced constraints: 0. No source edits or tests were performed in this review.
 
-The scoped files contain no comments or lint, TypeScript, coverage, or formatter suppressions. The added diff contains none. No application files were edited and no tests were run.
+## Lead verification note
 
-- Deletions: 0; restored: 0; HOLD: 0; reruns: 0.
-- MUST KILL flags: 0; foreign-rule comment kills: 0; skips: 0.
-- Architect sketches: 0; fixes: 0; encoding offers: 0; encodings: 0.
-- Unenforced constraints: 0; other open findings: 0.
-
-SHA-256 of `git diff origin/main -- web/src/features/drawings/dockSpot.ts web/src/features/drawings/DrawingOverlay.tsx web/src/features/drawings/dockSpot.test.ts web/e2e/float-dock.spec.ts`: `e24d77d1153b03a3d0c95107c8223e00aed7a3bddf7948e450105d6aa06fecad`.
-
-| File | SHA-256 |
-| --- | --- |
-| `web/src/features/drawings/dockSpot.ts` | `3da91d7a1784120d341be899260bf58776fa68f260ddd68030e149fbd8fa7913` |
-| `web/src/features/drawings/DrawingOverlay.tsx` | `5c8051dfe8950cf86ec70996f8279ae1dbe051a8e0d47879ffff32d2baeed478` |
-| `web/src/features/drawings/dockSpot.test.ts` | `b7851f81a40ad377db6ee9676e1ad63873b07cb243d9fc51d1fd6a219d570a46` |
-| `web/e2e/float-dock.spec.ts` | `0de56b6c0b07259fe3302bf50dc5b320a1cdeef8e6d58629f3d5e02fe466ab25` |
+The earlier base object is present in this repository. `git cat-file -t c400e65131dd20e8d05eea2a8c6998c644c2e093` returns `commit`. The lead independently recomputed both complete patches and all blobs in dock-style-overlap-main-comparison.json. The final SOL and Astra reviewers independently confirmed that equality too. The original comment scan and zero-finding verdict remain valid. The stated inability to recompute the prior patch is a review limitation, not missing repository history.
