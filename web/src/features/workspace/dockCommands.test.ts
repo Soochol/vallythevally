@@ -1,4 +1,5 @@
 import { expect, test } from "vitest";
+import { detachWindow } from "../../layout/dock/floats";
 import { defaultDock } from "../../layout/dock/fit";
 import { layoutDock, type DockSpace } from "../../layout/dock/geometry";
 import { windowId, type WindowRef } from "../../layout/kinds";
@@ -35,4 +36,17 @@ test("같은 순서로 넣기와 하나뿐인 탭의 자기 묶음 나누기는 
   const reordered = evaluateDock(dock, { kind: "tab", window: screener, group: "g2", at: 0 }, space);
   if (reordered.kind !== "change") throw new Error("탭 순서를 바꾸지 못했습니다");
   expect(layoutDock(reordered.dock.root, space.area, space.gap).groups[1]?.group.tabs).toEqual([screener, watchlist]);
+});
+
+
+test("떠 있는 창을 탭 또는 가장자리에 붙이고 작은 나누기는 저장 배치를 건드리지 않는다", () => {
+  const floating = detachWindow(dock, screener, { x: .2, y: .2, w: .3, h: .4 });
+  for (const command of [{ kind: "tab", window: screener, group: "g1" }, { kind: "group-edge", window: screener, group: "g1", edge: "bottom" }] as const) {
+    const plan = evaluateDock(floating, command, space);
+    if (plan.kind !== "change") throw new Error("떠 있는 창을 붙이지 못했습니다");
+    expect(plan.dock.floats).toHaveLength(0);
+    expect(layoutDock(plan.dock.root, space.area, space.gap).groups.flatMap(({ group }) => group.tabs).filter((id) => id === screener)).toHaveLength(1);
+  }
+  expect(evaluateDock(floating, { kind: "group-edge", window: screener, group: "g1", edge: "bottom" }, { ...space, area: { w: 1256, h: 300 } })).toMatchObject({ kind: "blocked", label: SMALL_DOCK_NOTICE });
+  expect(floating.floats).toHaveLength(1);
 });

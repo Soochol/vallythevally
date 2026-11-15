@@ -1,5 +1,6 @@
 import { CASCADE_STEP, fitCanvas } from "./canvas/arrange";
-import { keepHeadInArea, minWindowSize, toRatio, type Area } from "./canvas/geometry";
+import { keepHeadInArea, minWindowSize, toRatio, workArea, type Area } from "./canvas/geometry";
+import { floatRects } from "./dock/floats";
 import { defaultDock, fitDock, type WindowList } from "./dock/fit";
 import { layoutDock, type Size } from "./dock/geometry";
 import type { WindowId } from "./kinds";
@@ -26,8 +27,10 @@ export function canvasFromDock(dock: DockPlacement, windows: WindowList, room: P
     rects.set(group.active, toRatio(keepHeadInArea(rect, room.canvas), room.canvas));
     order.push(group.active);
   }
+  const dockArea = workArea(room.dock.area.w, room.dock.area.h)!;
+  const drawnFloats = floatRects(dock, windows, dockArea);
   for (const float of dock.floats) {
-    const rect = { x: float.rect.x * room.dock.area.w, y: float.rect.y * room.dock.area.h, w: float.rect.w * room.dock.area.w, h: float.rect.h * room.dock.area.h };
+    const rect = drawnFloats[float.window]!;
     rects.set(float.window, toRatio(keepHeadInArea(rect, room.canvas), room.canvas));
     order.push(float.window);
   }

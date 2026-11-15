@@ -1,4 +1,5 @@
 import { type RefObject, useRef } from "react";
+import { LAST_DOCKED_NOTICE } from "../../layout/dock/floats";
 import type { DockSpace, Edge } from "../../layout/dock/geometry";
 import { groupOfWindow, listGroups } from "../../layout/dock/tree";
 import { WINDOW_KINDS } from "../../layout/kinds";
@@ -27,6 +28,7 @@ export function DockTabMenu({ interaction, dock, space, root }: { interaction: D
   };
   const edges: Edge[] = ["left", "right", "top", "bottom"];
   const items: MenuItem[] = edges.map((edge) => action(EDGE_LABEL[edge], { kind: "group-edge", window: window.id, group: source.id, edge }));
+  items.unshift({ kind: "action", label: "띄우기", disabled: !interaction.canDetach(window.id), hint: !interaction.canDetach(window.id) ? LAST_DOCKED_NOTICE : undefined, onSelect: () => { acted.current = true; interaction.detach(window.id); } }, { kind: "separator" });
   const destinations = listGroups(dock.root).filter((group) => group.id !== source.id);
   if (destinations.length) {
     items.push({ kind: "separator" }, { kind: "heading", label: "다른 묶음으로 옮기기" });

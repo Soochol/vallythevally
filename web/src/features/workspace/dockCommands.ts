@@ -19,8 +19,8 @@ export const EDGE_LABEL: Record<Edge, string> = { left: "왼쪽에 나눠 놓기
 
 export function evaluateDock(dock: DockPlacement, command: DockCommand, space: DockSpace): DockPlan {
   const source = groupOfWindow(dock.root, command.window);
-  if (!source) return { kind: "unchanged" };
-  if (command.kind === "tab" && source.id === command.group) {
+  if (!source && !dock.floats.some((float) => float.window === command.window)) return { kind: "unchanged" };
+  if (command.kind === "tab" && source?.id === command.group) {
     const rest = source.tabs.filter((id) => id !== command.window);
     const at = Math.max(0, Math.min(command.at ?? rest.length, rest.length));
     const tabs = [...rest.slice(0, at), command.window, ...rest.slice(at)];

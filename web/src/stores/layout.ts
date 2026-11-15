@@ -10,14 +10,16 @@ import * as edit from "../chart/settings";
 import { type ChartSettings, type ChartStyle, DEFAULT_CHART_SETTINGS, type ExtremeBasis, type IndicatorConfig, type Panel, type PriceScale } from "../chart/settings";
 import { bringToFront, fitCanvas } from "../layout/canvas/arrange";
 import type { Area } from "../layout/canvas/geometry";
+import { attachFloat, closeDockWindow, frontFloat, reconcileOrigins, type DockOrigins } from "../layout/dock/floats";
 import { fitDock, type WindowList } from "../layout/dock/fit";
 import type { Size } from "../layout/dock/geometry";
 import { placeBeside } from "../layout/dock/split";
-import { findGroup, groupOfWindow, putTab, selectTab, withoutWindow } from "../layout/dock/tree";
+import { findGroup, groupOfWindow, putTab, selectTab } from "../layout/dock/tree";
 import { windowId, WINDOW_KINDS, type WindowId } from "../layout/kinds";
 import type { CanvasPlacement, DockPlacement, Placement } from "../layout/placement";
 import { toward } from "../lib/josa";
 import { venueFor, type VenueTarget } from "../lib/venue";
+import { readDockOrigins, writeDockOrigins } from "../persist/dockOrigins";
 import { useUiStore } from "./ui";
 
 type ChartWindowWire = Extract<LayoutWindow, { kind: "chart" }>;
@@ -108,7 +110,7 @@ function freeChartId(windows: readonly WindowState[]): WindowId {
 
 export const ARRANGEMENT_STEPS = 20;
 export type Arrangement = Pick<EditableLayout, "windows" | "placement">;
-export type ArrangementStep = { id: number; before: Arrangement };
+export type ArrangementStep = { id: number; before: Arrangement; dockOrigins: DockOrigins };
 export type DockRoom = { area: Size; gap: number };
 
 let lastStepId = 0;
@@ -132,6 +134,9 @@ interface LayoutState {
   revision: number;
   session: number;
   steps: readonly ArrangementStep[];
+  dockOrigins: DockOrigins;
+  commitDock(edit: { session: number; expected: DockPlacement | null; next: DockPlacement }): boolean;
+  attachFloat(window: WindowId): void;
   canvasArea: Area | null;
   setCanvasArea(area: Area | null): void;
   settlePlacement(placement: Placement): void;
@@ -179,12 +184,12 @@ export const useLayoutStore = create<LayoutState>()((set, get) => {
     arrange({ windows, placement: { ...layout.placement, canvas } });
   };
   const settle = (dock: DockPlacement) =>
-    set((s) => (dock === s.layout.placement.dock ? s : { layout: { ...s.layout, placement: { ...s.layout.placement, dock } }, revision: s.revision + 1 }));
+    set((s) => (dock === s.layout.placement.dock ? s : { dockOrigins: reconcileOrigins(s.layout.placement.dock, dock, s.dockOrigins), layout: { ...s.layout, placement: { ...s.layout.placement, dock } }, revision: s.revision + 1 }));
   const arrange = ({ windows, placement }: Arrangement) =>
     set((s) => {
       if (windows === s.layout.windows && placement === s.layout.placement) return s;
-      const step = { id: ++lastStepId, before: { windows: s.layout.windows, placement: s.layout.placement } };
-      return { layout: { ...s.layout, windows, placement }, steps: [...s.steps, step].slice(-ARRANGEMENT_STEPS), revision: s.revision + 1 };
+      const step = { id: ++lastStepId, dockOrigins: s.dockOrigins, before: { windows: s.layout.windows, placement: s.layout.placement } };
+      return { dockOrigins: reconcileOrigins(fittedDock(s.layout), placement.dock, s.dockOrigins), layout: { ...s.layout, windows, placement }, steps: [...s.steps, step].slice(-ARRANGEMENT_STEPS), revision: s.revision + 1 };
     });
   const arrangeDock = (windows: WindowState[], dock: DockPlacement) => {
     const { layout } = get();
@@ -223,6 +228,18 @@ export const useLayoutStore = create<LayoutState>()((set, get) => {
     revision: 0,
     session: 0,
     steps: [],
+    dockOrigins: new Map(),
+    commitDock: ({ session, expected, next }) => {
+      const state = get();
+      if (useUiStore.getState().prefs.layoutMode !== "dock" || session !== state.session || expected !== state.layout.placement.dock) return false;
+      if (next !== expected && JSON.stringify(next) !== JSON.stringify(expected ?? fittedDock(state.layout))) arrangeDock(state.layout.windows, next);
+      return true;
+    },
+    attachFloat: (window) => {
+      const state = get();
+      const dock = state.layout.placement.dock;
+      if (dock && useUiStore.getState().prefs.layoutMode === "dock") state.commitDock({ session: state.session, expected: dock, next: attachFloat(dock, window, state.dockOrigins.get(window), windowRefs(state.layout.windows)) });
+    },
     canvasArea: null,
     setCanvasArea: (canvasArea) => set({ canvasArea }),
     settlePlacement: (placement) => set((s) => {
@@ -240,7 +257,7 @@ export const useLayoutStore = create<LayoutState>()((set, get) => {
           },
         },
       })) : s.steps;
-      return { layout: { ...s.layout, placement }, steps, revision: s.revision + 1 };
+      return { dockOrigins: reconcileOrigins(s.layout.placement.dock, placement.dock, s.dockOrigins), layout: { ...s.layout, placement }, steps, revision: s.revision + 1 };
     }),
     commitCanvas: ({ session, expected, next }) => {
       const state = get();
@@ -254,7 +271,7 @@ export const useLayoutStore = create<LayoutState>()((set, get) => {
       arrangeCanvas(state.layout.windows, next);
       return true;
     },
-    load: (layout) => set((s) => ({ layout, steps: [], session: s.session + 1 })),
+    load: (layout) => set((s) => ({ layout, dockOrigins: readDockOrigins(layout), steps: [], session: s.session + 1 })),
     rename: (name) => set((s) => s.layout.name === name ? s : { layout: { ...s.layout, name }, revision: s.revision + 1 }),
     setCrosshairSync: (enabled) => set((s) => s.layout.sync.crosshair === enabled ? s : { layout: { ...s.layout, sync: { ...s.layout.sync, crosshair: enabled } }, revision: s.revision + 1 }),
     arrange,
@@ -270,7 +287,7 @@ export const useLayoutStore = create<LayoutState>()((set, get) => {
           return leader && isChartWindow(w) ? follow(w, leader, UNKNOWN_NXT) : w;
         };
         const windows = step.before.windows.map((w) => current.get(w.id) ?? restore(w));
-        return { layout: { ...s.layout, windows, placement: step.before.placement }, steps: s.steps.slice(0, -1), revision: s.revision + 1 };
+        return { dockOrigins: step.dockOrigins, layout: { ...s.layout, windows, placement: step.before.placement }, steps: s.steps.slice(0, -1), revision: s.revision + 1 };
       }),
     setDock: (dock) => arrangeDock(get().layout.windows, dock),
     settleDock: settle,
@@ -280,7 +297,9 @@ export const useLayoutStore = create<LayoutState>()((set, get) => {
         arrangeCanvas(layout.windows, bringToFront(fitCanvas(layout.placement.canvas, windowRefs(layout.windows), canvasArea), window));
         return;
       }
-      settle(selectTab(fittedDock(layout), window));
+      const dock = fittedDock(layout);
+      if (dock.floats.some((float) => float.window === window)) arrangeDock(layout.windows, frontFloat(dock, window));
+      else settle(selectTab(dock, window));
     },
     showWindow: (kind, targetGroup) => {
       const { windows, placement } = get().layout;
@@ -334,7 +353,7 @@ export const useLayoutStore = create<LayoutState>()((set, get) => {
         const canvas = fitCanvas(layout.placement.canvas, windowRefs(windows), canvasArea);
         arrangeCanvas(windows, replacement ? bringToFront(canvas, replacement) : canvas);
       } else {
-        const dock = fitDock(withoutWindow(fittedDock(layout), id), windowRefs(windows));
+        const dock = closeDockWindow(fittedDock(layout), id, windowRefs(windows));
         arrangeDock(windows, replacement ? selectTab(dock, replacement) : dock);
       }
       return true;
@@ -380,3 +399,7 @@ export const useLayoutStore = create<LayoutState>()((set, get) => {
 });
 
 export const useCell = (cellId: WindowId): ChartWindowState => useLayoutStore((s) => chartWindow(s.layout, cellId));
+
+useLayoutStore.subscribe((state, previous) => {
+  if (state.layout !== previous.layout || state.dockOrigins !== previous.dockOrigins) writeDockOrigins(state.layout, state.dockOrigins);
+});
