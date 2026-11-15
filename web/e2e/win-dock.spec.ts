@@ -203,6 +203,66 @@ test("5px 이하는 탭 고르기이고 Esc·영역 밖 놓기·포인터 취소
   await expect(menu(page).getByRole("menuitem", { name: "배치 되돌리기", exact: true })).toBeDisabled();
 });
 
+for (const cancellation of ["Escape", "pointercancel", "lostpointercapture"]) {
+  test(`${cancellation} 취소 뒤 원래 비활성 탭에 늦게 놓아도 선택·배치·기록을 지킨다`, async ({ page, scenario }) => {
+    await page.goto("/");
+    await expect(cell(page)).toHaveAttribute("aria-busy", "false");
+    await persistBaseline(page, scenario);
+    const original = saved(scenario);
+    const source = tab(page, "스크리너");
+    const from = await boxOf(source);
+    const chart = await boxOf(groups(page).first());
+    await startDrag(page, source);
+    await page.mouse.move(chart.x + chart.width / 2, chart.y + chart.height - 60, { steps: 12 });
+    await expect(preview(page)).toBeVisible();
+    if (cancellation === "Escape") await page.keyboard.press("Escape");
+    else if (cancellation === "pointercancel") await area(page).dispatchEvent("pointercancel", { pointerId: 1 });
+    else await area(page).evaluate((root) => root.releasePointerCapture(1));
+    await expect(preview(page)).toHaveCount(0);
+    await area(page).dispatchEvent("pointerdown", { pointerId: 2, pointerType: "touch", isPrimary: false });
+    await page.mouse.move(from.x + from.width / 2, from.y + from.height / 2, { steps: 12 });
+    await page.mouse.up();
+    await expect(tab(page, "관심종목")).toHaveAttribute("aria-selected", "true");
+    await expect(source).toHaveAttribute("aria-selected", "false");
+    expect(saved(scenario)).toEqual(original);
+    await expect(groups(page)).toHaveCount(2);
+    expect(await boxOf(source)).toEqual(from);
+    await source.press("Shift+F10");
+    await expect(menu(page).getByRole("menuitem", { name: "배치 되돌리기", exact: true })).toBeDisabled();
+    await page.keyboard.press("Escape");
+    await source.press("Enter");
+    await expect(source).toHaveAttribute("aria-selected", "true");
+    await tab(page, "관심종목").click();
+    await source.click();
+    await expect(source).toHaveAttribute("aria-selected", "true");
+  });
+}
+
+test("취소한 끌기의 클릭이 없어도 다음 키보드 선택과 새 포인터 클릭을 받는다", async ({ page }) => {
+  await page.goto("/");
+  await expect(cell(page)).toHaveAttribute("aria-busy", "false");
+  const source = tab(page, "스크리너");
+  const chart = await boxOf(groups(page).first());
+  await startDrag(page, source);
+  await page.mouse.move(chart.x + chart.width / 2, chart.y + chart.height - 60, { steps: 12 });
+  await expect(preview(page)).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(preview(page)).toHaveCount(0);
+  const elsewhere = await page.context().newPage();
+  await elsewhere.bringToFront();
+  await elsewhere.mouse.up();
+  await elsewhere.close();
+  await page.bringToFront();
+  await source.press("Enter");
+  await expect(source).toHaveAttribute("aria-selected", "true");
+  await groupWith(page, "스크리너").getByRole("button", { name: "이 묶음에 창 더하기" }).click();
+  await expect(page.getByRole("menu", { name: "창 더하기" })).toBeVisible();
+  await page.keyboard.press("Escape");
+  await tab(page, "관심종목").click();
+  await source.click();
+  await expect(source).toHaveAttribute("aria-selected", "true");
+});
+
 test("같은 줄에서 순서를 바꾸고 Alt 화살표·메뉴 키·우클릭으로 같은 이동을 한다", async ({ page }) => {
   await page.goto("/");
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");

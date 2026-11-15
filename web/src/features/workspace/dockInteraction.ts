@@ -26,8 +26,7 @@ export function useDockInteraction({ root, dock, space }: { root: RefObject<HTML
   const [preview, setPreview] = useState<DockPlan | null>(null);
   const [dragging, setDragging] = useState(false);
   const [menu, setMenu] = useState<TabMenu | null>(null);
-  const suppressClick = useRef(false);
-  const clickTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const suppressedPointer = useRef<number | null>(null);
   const layoutId = useLayoutStore((s) => s.layout.id);
 
   const finish = (restoreFocus: boolean) => {
@@ -41,9 +40,7 @@ export function useDockInteraction({ root, dock, space }: { root: RefObject<HTML
       if (restoreFocus) focusTab(previous.press.window);
     }
     if (previous.kind === "dragging") {
-      suppressClick.current = true;
-      if (clickTimer.current) clearTimeout(clickTimer.current);
-      clickTimer.current = setTimeout(() => { suppressClick.current = false; }, 0);
+      suppressedPointer.current = previous.press.pointer;
     }
   };
   const finishRef = useRef(finish);
@@ -118,7 +115,11 @@ export function useDockInteraction({ root, dock, space }: { root: RefObject<HTML
       }
     };
     const shield = (event: Event) => {
-      if (gesture.current.kind !== "dragging" && !(event.type === "click" && suppressClick.current)) return;
+      const fromGesture = event instanceof globalThis.PointerEvent && event.pointerId === suppressedPointer.current;
+      if (event.type === "pointerdown" && fromGesture) suppressedPointer.current = null;
+      const suppressClick = event.type === "click" && fromGesture && event.detail > 0;
+      if (suppressClick) suppressedPointer.current = null;
+      if (gesture.current.kind !== "dragging" && !suppressClick) return;
       event.preventDefault();
       event.stopImmediatePropagation();
     };
@@ -131,7 +132,6 @@ export function useDockInteraction({ root, dock, space }: { root: RefObject<HTML
     window.addEventListener("blur", cancel);
     return () => {
       cancel();
-      if (clickTimer.current) clearTimeout(clickTimer.current);
       document.removeEventListener("pointermove", move, true);
       document.removeEventListener("pointerup", up, true);
       document.removeEventListener("pointercancel", cancelPointer, true);
