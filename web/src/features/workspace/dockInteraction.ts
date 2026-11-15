@@ -239,6 +239,14 @@ export function useDockInteraction({ root, dock, space, enabled }: { root: RefOb
         useLayoutStore.getState().commitDock({ session, expected: dock, next: frontFloat(dock, window.id) });
       },
       header: {
+        onFocus: (event) => {
+          if (!enabled || !(event.target instanceof HTMLElement) || !event.target.matches(":focus-visible") || gesture.current.kind !== "idle") return;
+          const state = useLayoutStore.getState();
+          const expected = state.layout.placement.dock;
+          if (!expected) return;
+          choose(window.id);
+          state.commitDock({ session: state.session, expected, next: frontFloat(expected, window.id) });
+        },
         onPointerDown: (event) => { if (rect) press(event, window, { kind: "float-move", rect }); },
         onLostPointerCapture: lostCapture,
         onKeyDown: (event) => {

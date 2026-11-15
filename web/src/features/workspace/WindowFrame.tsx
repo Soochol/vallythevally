@@ -5,7 +5,7 @@ import type { Rect } from "../../layout/placement";
 
 export type FrameBindings = {
   activate(event: globalThis.PointerEvent): void;
-  header: Pick<HTMLAttributes<HTMLDivElement>, "onPointerDown" | "onDoubleClick" | "onKeyDown" | "onLostPointerCapture">;
+  header: Pick<HTMLAttributes<HTMLDivElement>, "onPointerDown" | "onDoubleClick" | "onKeyDown" | "onLostPointerCapture" | "onFocus">;
   resize(handle: ResizeHandle): HTMLAttributes<HTMLDivElement>["onPointerDown"];
 };
 

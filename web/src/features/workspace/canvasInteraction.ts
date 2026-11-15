@@ -191,6 +191,14 @@ export function useCanvasInteraction(canvas: CanvasPlacement, windows: readonly 
       state.commitCanvas({ session: state.session, expected: canvas, next: bringToFront(canvas, window.id) });
     },
     header: {
+      onFocus: (event) => {
+        if (!(event.target instanceof HTMLElement) || !event.target.matches(":focus-visible") || gesture.current.kind !== "idle") return;
+        const state = useLayoutStore.getState();
+        const expected = state.layout.placement.canvas;
+        if (!expected) return;
+        choose(window);
+        state.commitCanvas({ session: state.session, expected, next: bringToFront(expected, window.id) });
+      },
       onPointerDown: (event) => press(event, window, { kind: "move" }),
       onDoubleClick: (event) => { if (!(event.target instanceof Element && event.target.closest("button"))) toggleMaximize(window); },
       onKeyDown: (event) => keyHeader(event, window),

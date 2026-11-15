@@ -38,9 +38,15 @@ export function latestArrangementUndo(): ToastUndo {
 export function closeWindow(id: WindowId, name: string): boolean {
   const state = useLayoutStore.getState();
   const selection = useSelectionStore.getState();
+  const focusedHeader = globalThis.document?.activeElement?.closest<HTMLElement>("[data-window-header]")?.dataset.windowHeader === id;
   const replacement = selection.activeCell === id ? chartWindows(state.layout).find((window) => window.id !== id)?.id : undefined;
   if (!state.closeWindow(id, replacement)) return false;
   if (replacement) selection.setActiveCell(replacement);
+  if (focusedHeader) requestAnimationFrame(() => {
+    const next = replacement ?? selection.activeCell;
+    const target = document.querySelector<HTMLElement>(`[data-window-header="${next}"]`) ?? document.getElementById(`window-tab-${next}`) ?? document.querySelector<HTMLElement>("[data-window-header], [role=tab][aria-selected=true]");
+    target?.focus({ preventScroll: true });
+  });
   selection.showToast(`${name} 창을 닫았습니다`, latestArrangementUndo());
   return true;
 }
