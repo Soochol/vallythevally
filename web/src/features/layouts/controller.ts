@@ -6,6 +6,7 @@ import type { LayoutSummary } from "../../api/generated/LayoutSummary";
 import { ApiRequestError, deleteJson, putJson } from "../../api/http";
 import { fetchSymbolInfo } from "../../api/queries";
 import { fetchLayout, fetchLayouts, layoutPath } from "../../api/userData";
+import { tidyCanvas } from "../workspace/canvasCommands";
 import { defaultDock } from "../../layout/dock/fit";
 import { layoutAutosave } from "../../persist/autosave";
 import { restoreLayout, type RestoredLayout } from "../../persist/restore";
@@ -160,6 +161,7 @@ export function createLayoutCommands(deps: LayoutCommandsDeps) {
     }),
     resetPlacement: () => {
       if (useLayoutsStore.getState().phase !== "ready") return;
+      if (useUiStore.getState().prefs.layoutMode === "canvas" && useLayoutStore.getState().canvasArea) { tidyCanvas(); return; }
       const { layout, arrange } = useLayoutStore.getState();
       arrange({ windows: layout.windows, placement: { ...layout.placement, dock: defaultDock(windowRefs(layout.windows)) } });
     },

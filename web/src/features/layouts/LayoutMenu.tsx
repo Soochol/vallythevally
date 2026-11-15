@@ -1,4 +1,6 @@
 import { type RefObject, useId, useLayoutEffect, useRef } from "react";
+import { useUiStore } from "../../stores/ui";
+import { setLayoutMode } from "../workspace/canvasCommands";
 import { useLayoutStore } from "../../stores/layout";
 import { usePersistStore } from "../../stores/persist";
 import { DialogFrame, Errors } from "../dialog/DialogParts";
@@ -12,6 +14,7 @@ export function LayoutMenu() {
   const trigger = useRef<HTMLButtonElement>(null);
   const nameInput = useRef<HTMLInputElement>(null);
   const { surface, focus } = useLayoutMenuPresentation();
+  const mode = useUiStore((s) => s.prefs.layoutMode);
   const layout = useLayoutStore((s) => s.layout);
   const canUndo = useLayoutStore((s) => s.steps.length > 0);
   const offline = usePersistStore((s) => s.phase.kind !== "ready");
@@ -37,7 +40,15 @@ export function LayoutMenu() {
   return (
     <div ref={root} className="contents">
       <button ref={trigger} data-layout-trigger="" type="button" className="tb-btn max-w-[104px] max-lg:max-w-14 aria-expanded:bg-accent-soft aria-expanded:text-accent" aria-label={`레이아웃: ${layout.name}`} title={`레이아웃: ${layout.name}`} aria-haspopup="menu" aria-expanded={surface.kind === "menu"} disabled={offline || busy} onClick={() => { void layoutMenu.toggle(); }}><span className="truncate">{layout.name}</span><ChevronIcon /></button>
-      {surface.kind === "menu" && !busy && <Menu label="레이아웃" root={root} items={items} onClose={layoutMenu.dismissMenu} />}
+      {surface.kind === "menu" && !busy && <Menu label="레이아웃" root={root} items={items} onClose={layoutMenu.dismissMenu}>
+        <div className="layout-mode-control" onKeyDown={(event) => event.stopPropagation()}>
+          <span id="layout-mode-label">창 배치 방식</span>
+          <div role="group" aria-labelledby="layout-mode-label" className="layout-mode-segments">
+            <button type="button" aria-pressed={mode === "dock"} onClick={() => setLayoutMode("dock")}>도킹</button>
+            <button type="button" aria-pressed={mode === "canvas"} onClick={() => setLayoutMode("canvas")}>캔버스</button>
+          </div>
+        </div>
+      </Menu>}
       {surface.kind === "naming" && <NameDialog naming={surface} input={nameInput} />}
     </div>
   );

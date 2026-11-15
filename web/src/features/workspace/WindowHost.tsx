@@ -1,18 +1,17 @@
 import { type RefObject, useLayoutEffect, useState } from "react";
 import { createPortal } from "react-dom";
-import type { GroupNode } from "../../layout/dock/tree";
 import type { WindowState } from "../../stores/layout";
 import { WINDOW_CONTENT } from "./contents";
 
-export function WindowHost({ window, group, parking }: { window: WindowState; group: GroupNode | null; parking: RefObject<HTMLDivElement | null> }) {
+export function WindowHost({ window, panel, parking }: { window: WindowState; panel: string | null; parking: RefObject<HTMLDivElement | null> }) {
   const [host] = useState(() => {
     const element = document.createElement("div");
     element.className = "dock-window-host";
     return element;
   });
-  const active = group?.active === window.id;
+  const active = panel !== null;
   useLayoutEffect(() => {
-    const destination = active && group ? document.getElementById(`window-panel-${group.id}`) : parking.current;
+    const destination = (panel && document.getElementById(panel)) || parking.current;
     if (destination && host.parentElement !== destination) destination.appendChild(host);
   });
   useLayoutEffect(() => () => host.remove(), [host]);
