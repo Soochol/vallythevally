@@ -30,14 +30,28 @@ export interface Edges { left: number; top: number; right: number; bottom: numbe
 export function avoidDock(left: number, tops: readonly number[], bar: Size, pane: Size, dock: Edges, drawing: Edges | null, clearance: number, margin: number): Spot {
   const within = (value: number, size: number, total: number) => Math.max(margin, Math.min(value, total - size - margin));
   const apart = (box: Edges, spot: Spot, gap: number) => spot.left + bar.width + gap <= box.left || spot.left >= box.right + gap || spot.top + bar.height + gap <= box.top || spot.top >= box.bottom + gap;
-  const clear = (spot: Spot) => apart(dock, spot, clearance);
-  const natural = { left, top: tops.find((top) => top === within(top, bar.height, pane.height)) ?? within(tops[0] ?? margin, bar.height, pane.height) };
-  if (clear(natural)) return natural;
-  const spots = [
-    ...[...tops, dock.bottom + clearance, dock.top - bar.height - clearance].map((y) => ({ left, top: within(y, bar.height, pane.height) })),
-    ...[dock.right + clearance, dock.left - bar.width - clearance].filter((x) => x === within(x, bar.width, pane.width)).map((x) => ({ left: x, top: natural.top })),
-  ].filter(clear);
-  const free = drawing ? spots.filter((spot) => apart(drawing, spot, 0)) : spots;
-  const distance = (spot: Spot) => Math.hypot(spot.left - natural.left, spot.top - natural.top);
-  return (free.length ? free : spots).reduce<Spot | null>((best, spot) => best && distance(best) <= distance(spot) ? best : spot, null) ?? natural;
+  const preferred = { left, top: tops.find((top) => top === within(top, bar.height, pane.height)) ?? tops[0] ?? margin };
+  const natural = clampSpot(preferred, pane, bar, margin);
+  const nearest = (obstacles: readonly Edges[], gap: number, inset: number): Spot | null => {
+    if (bar.width + inset * 2 > pane.width || bar.height + inset * 2 > pane.height) return null;
+    const xs = [natural.left, inset, pane.width - bar.width - inset, ...obstacles.flatMap((box) => [box.left - bar.width - gap, box.right + gap])];
+    const ys = [natural.top, ...tops, inset, pane.height - bar.height - inset, ...obstacles.flatMap((box) => [box.top - bar.height - gap, box.bottom + gap])];
+    let best: Spot | null = null;
+    let distance = Infinity;
+    for (const x of xs) for (const y of ys) {
+      const spot = clampSpot({ left: x, top: y }, pane, bar, inset);
+      if (!obstacles.every((box) => apart(box, spot, gap))) continue;
+      const next = (spot.left - natural.left) ** 2 + (spot.top - natural.top) ** 2;
+      if (next < distance) { best = spot; distance = next; }
+    }
+    return best;
+  };
+  const obstacles = drawing ? [dock, drawing] : [dock];
+  for (const boxes of [obstacles, [dock]]) {
+    for (const { gap, inset } of [{ gap: clearance, inset: margin }, { gap: 0, inset: margin }, { gap: 0, inset: 0 }]) {
+      const spot = nearest(boxes, gap, inset);
+      if (spot) return spot;
+    }
+  }
+  return clampSpot(preferred, pane, bar, 0);
 }
