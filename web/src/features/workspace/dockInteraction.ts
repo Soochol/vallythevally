@@ -16,7 +16,7 @@ import type { FrameBindings } from "./WindowFrame";
 export type TabMenu = { window: WindowId; x: number; y: number };
 type Point = { x: number; y: number };
 type Operation = { kind: "tab" } | { kind: "float-move"; rect: Rect } | { kind: "float-resize"; rect: Rect; handle: ResizeHandle };
-type Start = { pointer: number; window: WindowState; operation: Operation; point: Point; area: Area; dock: DockPlacement; session: number; topology: string; capture: HTMLElement };
+type Start = { pointer: number; window: WindowState; operation: Operation; point: Point; area: Area; dock: DockPlacement; expected: DockPlacement | null; session: number; topology: string; capture: HTMLElement };
 type Outcome = { draft: DockPlacement; next: DockPlacement; preview: DockPlan; guides: Guides; atMinimum: boolean };
 type Gesture = { kind: "idle" } | { kind: "pressed"; start: Start } | { kind: "dragging"; start: Start; point: Point; shift: boolean };
 const NO_GUIDES: Guides = { x: null, y: null };
@@ -65,7 +65,7 @@ export function useDockInteraction({ root, dock, space, enabled }: { root: RefOb
   const valid = (start: Start) => {
     const state = useLayoutStore.getState();
     const latest = current.current;
-    return latest.enabled && useUiStore.getState().prefs.layoutMode === "dock" && state.session === start.session && state.layout.placement.dock === start.dock && topologyOf(state.layout.windows) === start.topology && (start.operation.kind === "tab" || (latest.space?.area.w === start.area.w && latest.space.area.h === start.area.h && root.current?.clientWidth === start.area.w && root.current.clientHeight === start.area.h));
+    return latest.enabled && useUiStore.getState().prefs.layoutMode === "dock" && state.session === start.session && state.layout.placement.dock === start.expected && latest.space !== null && root.current !== null && root.current.clientWidth > 0 && root.current.clientHeight > 0 && topologyOf(state.layout.windows) === start.topology && (start.operation.kind === "tab" || (latest.space?.area.w === start.area.w && latest.space.area.h === start.area.h && root.current?.clientWidth === start.area.w && root.current.clientHeight === start.area.h));
   };
   const validRef = useRef(valid);
   validRef.current = valid;
@@ -100,10 +100,10 @@ export function useDockInteraction({ root, dock, space, enabled }: { root: RefOb
   const execute = (command: DockCommand) => {
     const latest = current.current;
     const state = useLayoutStore.getState();
-    if (!latest.enabled || !latest.space || state.layout.placement.dock !== latest.dock) return;
+    if (!latest.enabled || !latest.space || (state.layout.placement.dock !== null && state.layout.placement.dock !== latest.dock)) return;
     const plan = evaluateDock(latest.dock, command, latest.space);
     if (plan.kind === "blocked") useSelectionStore.getState().showToast(plan.label);
-    if (plan.kind === "change") { state.commitDock({ session: state.session, expected: latest.dock, next: plan.dock }); choose(command.window); }
+    if (plan.kind === "change") { state.commitDock({ session: state.session, expected: state.layout.placement.dock, next: plan.dock }); choose(command.window); }
     else if (plan.kind === "unchanged" && command.kind === "tab") selectTab(command.window);
     focusTab(command.window);
   };
@@ -133,12 +133,12 @@ export function useDockInteraction({ root, dock, space, enabled }: { root: RefOb
       if (!accepted) return;
       if (result) {
         if (result.preview.kind === "blocked") useSelectionStore.getState().showToast(result.preview.label);
-        useLayoutStore.getState().commitDock({ session: active.start.session, expected: active.start.dock, next: result.next });
+        if (result.next !== active.start.dock) useLayoutStore.getState().commitDock({ session: active.start.session, expected: active.start.expected, next: result.next });
         if (result.atMinimum) minimumNotice(active.start.window);
-        choose(active.start.window.id);
+        if (active.start.operation.kind !== "tab" || result.next !== active.start.dock) choose(active.start.window.id);
         focusTab(active.start.window.id);
       } else if (active.start.operation.kind === "tab") selectTab(active.start.window.id);
-      else useLayoutStore.getState().commitDock({ session: active.start.session, expected: active.start.dock, next: frontFloat(active.start.dock, active.start.window.id) });
+      else useLayoutStore.getState().commitDock({ session: active.start.session, expected: active.start.expected, next: frontFloat(active.start.dock, active.start.window.id) });
     };
     const cancel = () => { if (gesture.current.kind !== "idle") finishRef.current(true); };
     const cancelPointer = (event: globalThis.PointerEvent) => { const active = gesture.current; if (active.kind !== "idle" && active.start.pointer === event.pointerId) cancel(); };
@@ -196,9 +196,9 @@ export function useDockInteraction({ root, dock, space, enabled }: { root: RefOb
     if (operation.kind === "float-move" && event.target instanceof Element && event.target.closest("button, input, a, select")) return;
     const area = workArea(space.area.w, space.area.h);
     const state = useLayoutStore.getState();
-    if (!area || state.layout.placement.dock !== dock) return;
+    if (!area || (state.layout.placement.dock !== null && state.layout.placement.dock !== dock)) return;
     const capture = operation.kind === "tab" ? root.current! : event.currentTarget;
-    gesture.current = { kind: "pressed", start: { pointer: event.pointerId, window, operation, point: { x: event.clientX, y: event.clientY }, dock, area, session: state.session, topology: topologyOf(state.layout.windows), capture } };
+    gesture.current = { kind: "pressed", start: { pointer: event.pointerId, window, operation, point: { x: event.clientX, y: event.clientY }, dock, expected: state.layout.placement.dock, area, session: state.session, topology: topologyOf(state.layout.windows), capture } };
     event.currentTarget.focus({ preventScroll: true });
     capture.setPointerCapture(event.pointerId);
     if (operation.kind !== "tab") { choose(window.id); setOutcome({ draft: frontFloat(dock, window.id), next: dock, preview: { kind: "unchanged" }, guides: NO_GUIDES, atMinimum: false }); }
@@ -221,9 +221,9 @@ export function useDockInteraction({ root, dock, space, enabled }: { root: RefOb
   const detach = (window: WindowId) => {
     const state = useLayoutStore.getState();
     const area = space && workArea(space.area.w, space.area.h);
-    if (!enabled || !space || !area || state.layout.placement.dock !== dock) return;
+    if (!enabled || !space || !area || (state.layout.placement.dock !== null && state.layout.placement.dock !== dock)) return;
     const rect = detachedRect(dock, window, space, area);
-    if (rect && state.commitDock({ session: state.session, expected: dock, next: detachWindow(dock, window, rect) })) { choose(window); focusTab(window); }
+    if (rect && state.commitDock({ session: state.session, expected: state.layout.placement.dock, next: detachWindow(dock, window, rect) })) { choose(window); focusTab(window); }
   };
   const lostCapture = (event: PointerEvent<HTMLElement>) => { const active = gesture.current; if (active.kind !== "idle" && active.start.pointer === event.pointerId) finishRef.current(true); };
   const floatBindings = (window: WindowState): FrameBindings => {
@@ -233,8 +233,9 @@ export function useDockInteraction({ root, dock, space, enabled }: { root: RefOb
       activate: (event) => {
         if (!enabled || gesture.current.kind !== "idle") return;
         const target = event.target;
-        if (target instanceof Element && (target.closest("[data-resize-handle]") || target.closest("[data-window-header]"))) return;
+        if (target instanceof Element && (target.closest("[data-resize-handle]") || (target.closest("[data-window-header]") && !target.closest("button")))) return;
         choose(window.id);
+        if (target instanceof Element && target.closest(".window-action")) return;
         useLayoutStore.getState().commitDock({ session, expected: dock, next: frontFloat(dock, window.id) });
       },
       header: {

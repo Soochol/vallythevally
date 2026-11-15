@@ -316,7 +316,7 @@ test("취소·캡처 상실·초점 상실·영역 변경은 떠 있는 창의 �
 });
 
 
-test("붙이기는 살아 있는 사용자 묶음으로 돌아가고 머리 가운데 놓기는 탭으로 넣는다", async ({ page }) => {
+test("새로고침 뒤에도 붙이기는 살아 있는 사용자 묶음으로 돌아가고 머리 가운데 놓기는 탭으로 넣는다", async ({ page }) => {
   await page.goto("/");
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
   const chart = await boxOf(groups(page).first());
@@ -325,6 +325,8 @@ test("붙이기는 살아 있는 사용자 묶음으로 돌아가고 머리 가�
   await page.mouse.up();
   const origin = await tab(page, "스크리너").locator("xpath=ancestor::*[@data-dock-group]").getAttribute("data-dock-group");
   await detach(page);
+  await page.reload();
+  await expect(frame(page)).toBeVisible();
   await frame(page).getByRole("button", { name: "스크리너 붙이기" }).click();
   expect(await tab(page, "스크리너").locator("xpath=ancestor::*[@data-dock-group]").getAttribute("data-dock-group")).toBe(origin);
   await detach(page);
@@ -370,4 +372,67 @@ test("놓을 때 실제 포인터 위치와 Shift 상태로 다시 판정한다"
   await page.keyboard.up("Shift");
   await expect(frame(page)).toHaveCount(0);
   await expect(groups(page).first().getByRole("tab", { name: "스크리너" })).toHaveAttribute("aria-selected", "true");
+});
+
+
+test("마지막 도킹 보조 창을 닫아도 나머지 떠 있는 창은 자리와 차례를 지킨다", async ({ page, scenario }) => {
+  const layout = scenario.documents.layout(DEFAULT_LAYOUT_ID);
+  scenario.documents.saveLayout({ ...layout, windows: layout.windows.filter((window) => ["chart", "screener", "watchlist"].includes(window.kind)), placement: {}, revision: layout.revision + 1 });
+  await page.goto("/");
+  await expect(cell(page)).toHaveAttribute("aria-busy", "false");
+  await detach(page, "코스피", "cell-0");
+  await detach(page, "관심종목", "watchlist");
+  const before = await boxOf(frame(page, "watchlist"));
+  await page.getByRole("button", { name: "스크리너 닫기", exact: true }).click();
+  await expect(frame(page, "watchlist")).toBeVisible();
+  expect(await boxOf(frame(page, "watchlist"))).toEqual(before);
+  await undo(page);
+  expect(await boxOf(frame(page, "watchlist"))).toEqual(before);
+});
+
+test("머리의 연동 색 점을 누르면 색 변경과 함께 떠 있는 차트를 활성화하고 앞으로 올린다", async ({ page, scenario }) => {
+  twoCharts(scenario);
+  const layout = scenario.documents.layout(DEFAULT_LAYOUT_ID);
+  scenario.documents.saveLayout({ ...layout, revision: layout.revision + 1, placement: { v: 1, canvas: null, dock: { root: { kind: "group", id: "g1", tabs: ["cell-0", "watchlist", "objects"], active: "cell-0" }, floats: [{ window: "cell-1", rect: { x: .05, y: .1, w: .5, h: .5 } }, { window: "screener", rect: { x: .6, y: .25, w: .25, h: .5 } }] } } });
+  await page.goto("/");
+  await expect(cell(page, 2)).toHaveAttribute("aria-busy", "false");
+  await cell(page).click({ position: { x: 50, y: 20 } });
+  await expect(frame(page, "cell-1")).not.toHaveAttribute("data-active-cell");
+  const link = frame(page, "cell-1").getByRole("button", { name: /^연동 색:/ });
+  await expect(link).toHaveAccessibleName("연동 색: B");
+  await link.click();
+  await expect(link).toHaveAccessibleName("연동 색: C");
+  await expect(frame(page, "cell-1")).toHaveAttribute("data-active-cell", "");
+  await expect.poll(() => saved(scenario).dock?.floats.at(-1)?.window).toBe("cell-1");
+});
+
+test("화면에서 최소 크기로 커진 떠 있는 창은 캔버스로 전환해도 머리와 위치가 같다", async ({ page, scenario }) => {
+  const layout = scenario.documents.layout(DEFAULT_LAYOUT_ID);
+  scenario.documents.saveLayout({ ...layout, revision: layout.revision + 1, placement: { v: 1, canvas: null, dock: { root: { kind: "group", id: "g1", tabs: ["cell-0", "watchlist", "objects"], active: "cell-0" }, floats: [{ window: "screener", rect: { x: .8, y: .8, w: .12, h: .12 } }] } } });
+  await page.goto("/");
+  await expect(cell(page)).toHaveAttribute("aria-busy", "false");
+  const before = await boxOf(frame(page));
+  await page.getByRole("button", { name: /^레이아웃:/ }).click();
+  await page.getByRole("group", { name: "창 배치 방식" }).getByRole("button", { name: "캔버스", exact: true }).click();
+  await page.keyboard.press("Escape");
+  await expect(page.locator('[data-canvas-window="screener"]')).toBeVisible();
+  expect(await boxOf(page.locator('[data-canvas-window="screener"]'))).toEqual(before);
+});
+
+test("일반 차트 탭을 영역 밖이나 거절한 자리에 놓으면 활성 칸과 배치가 바뀌지 않는다", async ({ page, scenario }) => {
+  twoCharts(scenario);
+  await page.setViewportSize({ width: 1440, height: 450 });
+  await page.goto("/");
+  await expect(cell(page, 2)).toHaveAttribute("aria-busy", "false");
+  await page.locator("#window-tab-cell-1").click();
+  const active = page.locator("#window-tab-cell-1");
+  await expect(active).toHaveAttribute("data-active-cell", "");
+  for (const outside of [true, false]) {
+    const group = await boxOf(groups(page).last());
+    await start(page, page.locator("#window-tab-cell-0"));
+    await page.mouse.move(outside ? 700 : group.x + group.width / 2, outside ? 20 : group.y + group.height - 45, { steps: 8 });
+    if (!outside) await expect(preview(page)).toHaveAttribute("data-dock-preview", "blocked");
+    await page.mouse.up();
+    await expect(active).toHaveAttribute("data-active-cell", "");
+  }
 });

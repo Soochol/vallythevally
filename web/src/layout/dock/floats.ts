@@ -2,9 +2,9 @@ import { placeNewWindow, rectsForArea } from "../canvas/arrange";
 import { keepHeadInArea, toRatio, type Area } from "../canvas/geometry";
 import type { WindowId, WindowRef } from "../kinds";
 import type { DockPlacement, Rect } from "../placement";
-import { fitDock, type WindowList } from "./fit";
+import { defaultDock, fitDock, type WindowList } from "./fit";
 import { layoutDock, type DockSpace } from "./geometry";
-import { findGroup, groupOfWindow, listGroups, putTab, selectTab, withoutWindow } from "./tree";
+import { findGroup, groupOfWindow, listGroups, newGroupId, putTab, selectTab, singleGroup, withoutWindow } from "./tree";
 
 export type DockOrigins = ReadonlyMap<WindowId, string>;
 export const LAST_DOCKED_NOTICE = "마지막으로 도킹된 창은 띄울 수 없습니다";
@@ -55,4 +55,11 @@ export function detachedRect(dock: DockPlacement, window: WindowId, space: DockS
   const group = layoutDock(dock.root, space.area, space.gap).groups.find(({ group }) => group.tabs.includes(window));
   const position = point ? { x: point.x - 80, y: point.y - 14 } : { x: (group?.rect.x ?? base.x) + 24, y: (group?.rect.y ?? base.y) + 24 };
   return toRatio(keepHeadInArea({ ...base, ...position }, area), area);
+}
+
+export function closeDockWindow(dock: DockPlacement, window: WindowId, windows: WindowList): DockPlacement {
+  const rest = withoutWindow(dock, window);
+  if (rest) return fitDock(rest, windows);
+  const [promoted, ...floats] = dock.floats.filter((float) => float.window !== window);
+  return promoted ? fitDock({ root: singleGroup(newGroupId(dock.root), promoted.window), floats }, windows) : defaultDock(windows);
 }

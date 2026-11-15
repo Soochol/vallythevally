@@ -39,8 +39,8 @@ export function Workspace() {
   const shownCharts = useMemo(() => [...listGroups(dock.root).map((group) => group.active), ...dock.floats.map((float) => float.window)].filter((id) => windows.some((w) => w.id === id && w.kind === "chart")), [dock, windows]);
 
   useEffect(() => {
-    if (mode === "dock" && dock !== saved && (saved || placement.canvas === null)) useLayoutStore.getState().settleDock(dock);
-  }, [dock, saved, mode, placement.canvas]);
+    if (mode === "dock" && saved && dock !== saved) useLayoutStore.getState().settleDock(dock);
+  }, [dock, saved, mode]);
 
   useEffect(() => {
     if (mode !== "dock") return;

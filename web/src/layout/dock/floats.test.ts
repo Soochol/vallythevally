@@ -2,7 +2,7 @@ import { expect, test } from "vitest";
 import { toPx, workArea } from "../canvas/geometry";
 import { windowId } from "../kinds";
 import { defaultDock, type WindowList } from "./fit";
-import { attachFloat, canDetach, detachedRect, detachWindow, floatRects, frontFloat, moveFloat, reconcileOrigins } from "./floats";
+import { attachFloat, canDetach, closeDockWindow, detachedRect, detachWindow, floatRects, frontFloat, moveFloat, reconcileOrigins } from "./floats";
 import { groupOfWindow, listGroups, putTab } from "./tree";
 
 const a = windowId("a"), b = windowId("b"), c = windowId("c"), d = windowId("d");
@@ -72,4 +72,13 @@ test("새 창 크기와 비율을 쓰고 작은 작업 영역에서도 머리와
   expect(box.w).toBeGreaterThanOrEqual(240);
   expect(box.y).toBeGreaterThanOrEqual(0);
   expect(box.y + 34).toBeLessThanOrEqual(small.h);
+});
+
+
+test("마지막 도킹 보조 창을 닫으면 한 창만 붙이고 나머지 떠 있는 창의 자리를 지킨다", () => {
+  const first = defaultDock([windows[0], windows[2]!, { id: d, kind: "watchlist" }]);
+  const floats = detachWindow(detachWindow(first, a, rect), d, { ...rect, x: .5 });
+  const next = closeDockWindow(floats, c, [windows[0], { id: d, kind: "watchlist" }]);
+  expect(listGroups(next.root).flatMap((group) => group.tabs)).toEqual([a]);
+  expect(next.floats).toEqual([{ window: d, rect: { ...rect, x: .5 } }]);
 });

@@ -423,3 +423,19 @@ test("오래된 도킹 세션·배치·방식의 커밋을 거절하고 같은 �
   state().attachFloat(windowId("screener"));
   expect(state().layout.placement.dock!.floats).toHaveLength(0);
 });
+
+
+test("저장하지 않은 기본 도킹의 커밋은 초기 저장 없이 원래 묶음을 기억하고 한 단계로 되돌린다", () => {
+  useUiStore.getState().setLayoutMode("dock");
+  state().load(structuredClone(DEFAULT_LAYOUT));
+  const dock = fittedDock(state().layout);
+  expect(state().commitDock({ session: state().session, expected: null, next: dock })).toBe(true);
+  expect(state().layout.placement.dock).toBeNull();
+  expect(state().steps).toHaveLength(0);
+  const floated = detachWindow(dock, windowId("screener"), { x: .2, y: .2, w: .3, h: .4 });
+  expect(state().commitDock({ session: state().session, expected: null, next: floated })).toBe(true);
+  expect(state().dockOrigins.get(windowId("screener"))).toBe("g2");
+  expect(state().steps).toHaveLength(1);
+  state().undoArrangement();
+  expect(state().layout.placement.dock).toBeNull();
+});

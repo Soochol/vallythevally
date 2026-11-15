@@ -1,6 +1,7 @@
 import { expect, test } from "vitest";
 import { rectsForArea } from "./canvas/arrange";
 import { countOverlaps, toPx, workArea } from "./canvas/geometry";
+import { floatRects } from "./dock/floats";
 import { defaultDock, type WindowList } from "./dock/fit";
 import { layoutDock } from "./dock/geometry";
 import { listGroups } from "./dock/tree";
@@ -92,4 +93,14 @@ test("떠 있는 창도 원래 도킹 작업 영역의 픽셀 크기와 자리�
   expect(toPx(result.rects[b]!, room.canvas)).toEqual({ x: 280, y: 114, w: 560, h: 380 });
   expect(result.order.at(-1)).toBe(b);
   expect(result.order.slice(0, -1)).toEqual(expect.arrayContaining([a, c, d]));
+});
+
+
+test("최소 크기로 커져 보이는 떠 있는 창도 첫 캔버스에서 같은 자리를 지킨다", () => {
+  const dock = defaultDock([windows[0], windows[1]!, windows[3]!]);
+  dock.floats = [{ window: c, rect: { x: .8, y: .8, w: .12, h: .12 } }];
+  const shown = floatRects(dock, windows, workArea(room.dock.area.w, room.dock.area.h)!)[c]!;
+  const result = canvasFromDock(dock, windows, room);
+  expect(rectsForArea(result, windows, room.canvas)[c]).toEqual(shown);
+  expect(result.order.at(-1)).toBe(c);
 });

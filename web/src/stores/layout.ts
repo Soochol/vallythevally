@@ -10,15 +10,16 @@ import * as edit from "../chart/settings";
 import { type ChartSettings, type ChartStyle, DEFAULT_CHART_SETTINGS, type ExtremeBasis, type IndicatorConfig, type Panel, type PriceScale } from "../chart/settings";
 import { bringToFront, fitCanvas } from "../layout/canvas/arrange";
 import type { Area } from "../layout/canvas/geometry";
-import { attachFloat, frontFloat, reconcileOrigins, type DockOrigins } from "../layout/dock/floats";
+import { attachFloat, closeDockWindow, frontFloat, reconcileOrigins, type DockOrigins } from "../layout/dock/floats";
 import { fitDock, type WindowList } from "../layout/dock/fit";
 import type { Size } from "../layout/dock/geometry";
 import { placeBeside } from "../layout/dock/split";
-import { findGroup, groupOfWindow, putTab, selectTab, withoutWindow } from "../layout/dock/tree";
+import { findGroup, groupOfWindow, putTab, selectTab } from "../layout/dock/tree";
 import { windowId, WINDOW_KINDS, type WindowId } from "../layout/kinds";
 import type { CanvasPlacement, DockPlacement, Placement } from "../layout/placement";
 import { toward } from "../lib/josa";
 import { venueFor, type VenueTarget } from "../lib/venue";
+import { readDockOrigins, writeDockOrigins } from "../persist/dockOrigins";
 import { useUiStore } from "./ui";
 
 type ChartWindowWire = Extract<LayoutWindow, { kind: "chart" }>;
@@ -134,7 +135,7 @@ interface LayoutState {
   session: number;
   steps: readonly ArrangementStep[];
   dockOrigins: DockOrigins;
-  commitDock(edit: { session: number; expected: DockPlacement; next: DockPlacement }): boolean;
+  commitDock(edit: { session: number; expected: DockPlacement | null; next: DockPlacement }): boolean;
   attachFloat(window: WindowId): void;
   canvasArea: Area | null;
   setCanvasArea(area: Area | null): void;
@@ -188,7 +189,7 @@ export const useLayoutStore = create<LayoutState>()((set, get) => {
     set((s) => {
       if (windows === s.layout.windows && placement === s.layout.placement) return s;
       const step = { id: ++lastStepId, dockOrigins: s.dockOrigins, before: { windows: s.layout.windows, placement: s.layout.placement } };
-      return { dockOrigins: reconcileOrigins(s.layout.placement.dock, placement.dock, s.dockOrigins), layout: { ...s.layout, windows, placement }, steps: [...s.steps, step].slice(-ARRANGEMENT_STEPS), revision: s.revision + 1 };
+      return { dockOrigins: reconcileOrigins(fittedDock(s.layout), placement.dock, s.dockOrigins), layout: { ...s.layout, windows, placement }, steps: [...s.steps, step].slice(-ARRANGEMENT_STEPS), revision: s.revision + 1 };
     });
   const arrangeDock = (windows: WindowState[], dock: DockPlacement) => {
     const { layout } = get();
@@ -231,7 +232,7 @@ export const useLayoutStore = create<LayoutState>()((set, get) => {
     commitDock: ({ session, expected, next }) => {
       const state = get();
       if (useUiStore.getState().prefs.layoutMode !== "dock" || session !== state.session || expected !== state.layout.placement.dock) return false;
-      if (next !== expected && JSON.stringify(next) !== JSON.stringify(expected)) arrangeDock(state.layout.windows, next);
+      if (next !== expected && JSON.stringify(next) !== JSON.stringify(expected ?? fittedDock(state.layout))) arrangeDock(state.layout.windows, next);
       return true;
     },
     attachFloat: (window) => {
@@ -270,7 +271,7 @@ export const useLayoutStore = create<LayoutState>()((set, get) => {
       arrangeCanvas(state.layout.windows, next);
       return true;
     },
-    load: (layout) => set((s) => ({ layout, dockOrigins: new Map(), steps: [], session: s.session + 1 })),
+    load: (layout) => set((s) => ({ layout, dockOrigins: readDockOrigins(layout), steps: [], session: s.session + 1 })),
     rename: (name) => set((s) => s.layout.name === name ? s : { layout: { ...s.layout, name }, revision: s.revision + 1 }),
     setCrosshairSync: (enabled) => set((s) => s.layout.sync.crosshair === enabled ? s : { layout: { ...s.layout, sync: { ...s.layout.sync, crosshair: enabled } }, revision: s.revision + 1 }),
     arrange,
@@ -352,7 +353,7 @@ export const useLayoutStore = create<LayoutState>()((set, get) => {
         const canvas = fitCanvas(layout.placement.canvas, windowRefs(windows), canvasArea);
         arrangeCanvas(windows, replacement ? bringToFront(canvas, replacement) : canvas);
       } else {
-        const dock = fitDock(withoutWindow(fittedDock(layout), id), windowRefs(windows));
+        const dock = closeDockWindow(fittedDock(layout), id, windowRefs(windows));
         arrangeDock(windows, replacement ? selectTab(dock, replacement) : dock);
       }
       return true;
@@ -398,3 +399,7 @@ export const useLayoutStore = create<LayoutState>()((set, get) => {
 });
 
 export const useCell = (cellId: WindowId): ChartWindowState => useLayoutStore((s) => chartWindow(s.layout, cellId));
+
+useLayoutStore.subscribe((state, previous) => {
+  if (state.layout !== previous.layout || state.dockOrigins !== previous.dockOrigins) writeDockOrigins(state.layout, state.dockOrigins);
+});
