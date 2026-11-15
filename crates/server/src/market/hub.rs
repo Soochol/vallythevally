@@ -2582,12 +2582,18 @@ mod tests {
         settle().await;
         h.events.send(fill(&h, SAMSUNG, (9, 0, 51), 112, Some(Exchange::Krx), 5, (12, 1_005))).await.unwrap();
         assert_eq!(quote_messages(take(&out).await), vec![quotes_msg(api::Venue::Krx, vec![venue_quote(SAMSUNG, api::Venue::Krx, 112.0, 12.0, 1_005, at(9, 0, 51))])]);
-        *h.day_volumes.lock().unwrap() = HashMap::from([("005930_AL".to_owned(), 1_005), ("005930".to_owned(), 900)]);
-        h.hub.watch(conn, vec![samsung().feed.symbol()], Venue::Nxt);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_seed_missing_the_nxt_row_while_krx_is_below_combined_is_not_used() {
+        let h = std_harness();
+        let (conn, out) = connect(&h).await;
+        live(&h).await;
+        *h.day_volumes.lock().unwrap() = HashMap::from([("005930_AL".to_owned(), 1_000), ("005930".to_owned(), 900)]);
         h.hub.watch(conn, vec![samsung().feed.symbol()], Venue::Krx);
         settle().await;
-        h.events.send(fill(&h, SAMSUNG, (9, 0, 52), 113, Some(Exchange::Krx), 1, (13, 1_006))).await.unwrap();
-        assert_eq!(quote_messages(take(&out).await), vec![quotes_msg(api::Venue::Krx, vec![venue_quote(SAMSUNG, api::Venue::Krx, 113.0, 13.0, 1_006, at(9, 0, 52))])], "이미 읽은 값은 그대로 이어진다");
+        h.events.send(fill(&h, SAMSUNG, (9, 0, 51), 112, Some(Exchange::Krx), 5, (12, 1_005))).await.unwrap();
+        assert_eq!(quote_messages(take(&out).await), vec![]);
     }
 
     #[tokio::test(start_paused = true)]
