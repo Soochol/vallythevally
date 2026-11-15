@@ -352,5 +352,6 @@ export function quoteOf(s: FakeSymbol, nowMs: number): Quote | null {
     volume: last.v,
     t: Math.floor(nowMs / 1000),
     source: "polled",
+    venue: s.kind === "index" ? null : "combined",
   };
 }

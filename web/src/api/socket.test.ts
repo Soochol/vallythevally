@@ -160,12 +160,12 @@ describe("MarketSocket", () => {
     socket.setWatch(["005930", "000660"]);
     expect(last().sent).toEqual([]);
     last().receive(hello());
-    expect(last().sent).toEqual([{ type: "watch", symbols: ["005930", "000660"] }]);
+    expect(last().sent).toEqual([{ type: "watch", symbols: ["005930", "000660"], venue: null }]);
     socket.setWatch(["000660"]);
     socket.setWatch([]);
     expect(last().sent.slice(1)).toEqual([
-      { type: "watch", symbols: ["000660"] },
-      { type: "watch", symbols: [] },
+      { type: "watch", symbols: ["000660"], venue: null },
+      { type: "watch", symbols: [], venue: null },
     ]);
   });
 
@@ -175,11 +175,11 @@ describe("MarketSocket", () => {
     last().receive(hello());
     const events: QuoteEvent[] = [];
     socket.onQuotes((e) => events.push(e));
-    const quote: Quote = { symbol: "005930", price: 71_000, change: 500, changeRate: 0.71, volume: 10, t: 1_000, source: "realtime" };
-    last().receive({ type: "quotes", quotes: [quote] });
+    const quote: Quote = { symbol: "005930", price: 71_000, change: 500, changeRate: 0.71, volume: 10, t: 1_000, source: "realtime", venue: "combined" };
+    last().receive({ type: "quotes", venue: "combined", quotes: [quote] });
     last().receive({ type: "watch_limited", symbols: ["000660"] });
     expect(events).toEqual([
-      { type: "quotes", quotes: [quote] },
+      { type: "quotes", venue: "combined", quotes: [quote] },
       { type: "watch_limited", symbols: ["000660"] },
     ]);
   });
@@ -195,7 +195,7 @@ describe("MarketSocket", () => {
     last().drop();
     vi.advanceTimersByTime(1000);
     last().receive(hello());
-    expect(last().sent).toEqual([{ type: "watch", symbols: ["005930", "IDX:001"] }]);
+    expect(last().sent).toEqual([{ type: "watch", symbols: ["005930", "IDX:001"], venue: null }]);
     expect(events).toEqual([{ type: "resync" }]);
   });
 

@@ -180,7 +180,7 @@ export class MarketSocket implements MarketSocketLike {
   }
 
   private sendWatch(): void {
-    this.send({ type: "watch", symbols: this.watchSymbols });
+    this.send({ type: "watch", symbols: this.watchSymbols, venue: null });
   }
 
   private emitQuotes(e: QuoteEvent): void {

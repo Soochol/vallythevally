@@ -339,6 +339,10 @@ fn with_snapshot(
 pub const MAX_QUOTE_SYMBOLS: usize = 200;
 
 async fn quotes(State(st): State<Arc<AppState>>, Query(q): Query<HashMap<String, String>>) -> Result<Json<Vec<api::Quote>>, ApiFailure> {
+    let venue = match q.get("venue") {
+        None => Venue::Combined,
+        Some(s) => Venue::parse(s).ok_or_else(|| ApiFailure::bad_request(format!("거래소는 combined, krx, nxt 중 하나입니다: {s}")))?,
+    };
     let raw = q.get("symbols").map_or("", String::as_str);
     if raw.is_empty() {
         return Ok(Json(Vec::new()));
@@ -353,7 +357,12 @@ async fn quotes(State(st): State<Arc<AppState>>, Query(q): Query<HashMap<String,
             symbols.push(s);
         }
     }
-    Ok(Json(crate::quotes::quotes(&st.rest, &st.bars, &symbols).await.map_err(|e| Lookup::Quotes.failure(e, st.clock.now()))?))
+    let failure = |e: BarError| Lookup::Quotes.failure(e, st.clock.now());
+    let directory = match venue {
+        Venue::Nxt if symbols.iter().any(|s| matches!(s, Symbol::Stock(_))) => Some(st.symbols.ready(&st.rest).await.map_err(|e| failure(e.into()))?),
+        _ => None,
+    };
+    Ok(Json(crate::quotes::quotes(&st.rest, &st.bars, directory.as_deref(), &symbols, venue).await.map_err(failure)?))
 }
 
 async fn method_not_allowed(method: Method, uri: Uri) -> ApiFailure {
@@ -482,6 +491,19 @@ mod tests {
             if kiwoom_down {
                 return status(503, json!({}));
             }
+            if s.api_id == ApiId::Ka10095 && s.body.contains("_NX") || s.api_id == ApiId::Ka10095 && !s.body.contains("_AL") {
+                let body: Value = serde_json::from_str(&s.body).unwrap();
+                let rows: Vec<Value> = body["stk_cd"].as_str().unwrap().split('|').map(|stk_cd| {
+                    let (price, volume) = match stk_cd.split_once('_') {
+                        Some((_, "NX")) => ("49900", "234567"),
+                        Some(_) => ("50000", "1234567"),
+                        None => ("50100", "1000000"),
+                    };
+                    json!({"stk_cd": stk_cd, "cur_prc": price, "base_pric": "51000", "pred_pre_sig": "5", "trde_qty": volume,
+                           "cntr_tm": "195959", "dt": "20261106"})
+                }).collect();
+                return ok(json!({"atn_stk_infr": rows, "return_code": 0}), None);
+            }
             if s.api_id == ApiId::Ka10095 {
                 let path = format!("{}/tests/fixtures/kiwoom/ka10095_synthetic.json", env!("CARGO_MANIFEST_DIR"));
                 return ok(serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap(), None);
@@ -601,10 +623,10 @@ mod tests {
         assert_eq!(
             v,
             json!([
-                {"symbol": "IDX:001", "price": 2500.5, "change": 0.5, "volume": 4321, "t": 1_793_890_800, "source": "polled"},
-                {"symbol": "000660", "price": 120_500.0, "change": 500.0, "volume": 765_432, "t": 1_793_890_800 + 15 * 3600 + 30 * 60, "source": "polled"},
-                {"symbol": "005930", "price": 50_000.0, "change": -1_000.0, "volume": 1_234_567, "t": 1_793_890_800 + 71_999, "source": "polled"},
-                {"symbol": "IDX:101", "price": 899.0, "change": -1.0, "volume": 77, "t": 1_794_150_000, "source": "polled"},
+                {"symbol": "IDX:001", "price": 2500.5, "change": 0.5, "volume": 4321, "t": 1_793_890_800, "source": "polled", "venue": null},
+                {"symbol": "000660", "price": 120_500.0, "change": 500.0, "volume": 765_432, "t": 1_793_890_800 + 15 * 3600 + 30 * 60, "source": "polled", "venue": "combined"},
+                {"symbol": "005930", "price": 50_000.0, "change": -1_000.0, "volume": 1_234_567, "t": 1_793_890_800 + 71_999, "source": "polled", "venue": "combined"},
+                {"symbol": "IDX:101", "price": 899.0, "change": -1.0, "volume": 77, "t": 1_794_150_000, "source": "polled", "venue": null},
             ]),
             "요청 순서. 없는 지수, 빈 행, 중복은 빠진다. IDX:101은 진행 중인 오늘 봉과 그 앞 확정 봉"
         );
@@ -625,6 +647,36 @@ mod tests {
         let f = fixture(true, true).await;
         let (s, v) = json(&f.app, "/api/quotes?symbols=005930").await;
         assert_eq!((s, code(&v)), (StatusCode::SERVICE_UNAVAILABLE, "kiwoom_unavailable"));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn quotes_ask_kiwoom_for_the_requested_venue_and_fall_back_to_combined_for_symbols_not_on_nxt() {
+        let f = fixture(false, true).await;
+        let asked = |f: &Fixture| f.fake.market_sent().into_iter().filter(|s| s.api_id == ApiId::Ka10095).map(|s| s.body).last().unwrap();
+        let summary = |v: &Value| -> Vec<(String, Option<String>, f64, u64)> {
+            v.as_array().unwrap().iter().map(|q| (q["symbol"].as_str().unwrap().to_owned(), q["venue"].as_str().map(str::to_owned), q["price"].as_f64().unwrap(), q["volume"].as_u64().unwrap())).collect()
+        };
+        let (s, v) = json(&f.app, "/api/quotes?symbols=005930,IDX:001,005935&venue=krx").await;
+        assert_eq!(s, StatusCode::OK, "{v}");
+        assert_eq!(asked(&f), r#"{"stk_cd":"005930|005935"}"#);
+        assert_eq!(
+            summary(&v),
+            [("005930".into(), Some("krx".into()), 50_100.0, 1_000_000), ("IDX:001".into(), None, 2_500.5, 4_321), ("005935".into(), Some("krx".into()), 50_100.0, 1_000_000)]
+        );
+        let (s, v) = json(&f.app, "/api/quotes?symbols=005935,005930&venue=nxt").await;
+        assert_eq!(s, StatusCode::OK, "{v}");
+        assert_eq!(asked(&f), r#"{"stk_cd":"005935_AL|005930_NX"}"#, "NXT에서 거래되지 않는 종목은 통합으로 묻는다");
+        assert_eq!(summary(&v), [("005935".into(), Some("combined".into()), 50_000.0, 1_234_567), ("005930".into(), Some("nxt".into()), 49_900.0, 234_567)]);
+        assert_eq!(v[1]["change"], -1_100.0, "등락은 그 가격과 기준가의 차이다");
+        let (_, v) = json(&f.app, "/api/quotes?symbols=005930&venue=combined").await;
+        assert_eq!(asked(&f), r#"{"stk_cd":"005930_AL"}"#);
+        assert_eq!(v[0]["venue"], "combined");
+        let (s, v) = json(&f.app, "/api/quotes?symbols=IDX:001&venue=nxt").await;
+        assert_eq!((s, v), (StatusCode::OK, json!([{"symbol": "IDX:001", "price": 2500.5, "change": 0.5, "changeRate": 0.5 / 2500.0 * 100.0, "volume": 4321, "t": 1_793_890_800, "source": "polled", "venue": null}])), "지수에는 거래소가 없다");
+        for uri in ["/api/quotes?symbols=005930&venue=tokyo", "/api/quotes?symbols=&venue=tokyo", "/api/quotes?symbols=005930&venue=KRX"] {
+            let (s, v) = json(&f.app, uri).await;
+            assert_eq!((s, code(&v)), (StatusCode::BAD_REQUEST, "bad_request"), "{uri}: {v}");
+        }
     }
 
     #[tokio::test(start_paused = true)]

@@ -10,23 +10,41 @@ use crate::api;
 use crate::bars::{BarError, BarService};
 use crate::kiwoom::api::StockQuotes;
 use crate::kiwoom::rest::{KiwoomRest, MergeScope, Priority};
-use crate::kiwoom::stream::DayTotals;
 use crate::kiwoom::wire::parse_quotes;
+use crate::market::venue_volume::DayVolumes;
+use crate::symbols::Directory;
 
 const INDEX_BARS: usize = 2;
 
+/// 요청한 거래소가 NXT인데 그 종목이 NXT에서 거래되지 않으면 통합이다. 그 밖에는 요청한 거래소다.
+pub fn effective_venue(requested: Venue, nxt_enabled: bool) -> Venue {
+    match requested {
+        Venue::Nxt if !nxt_enabled => Venue::Combined,
+        venue => venue,
+    }
+}
+
 /// `symbols`는 중복이 없어야 한다. 값을 얻은 종목만 요청 순서대로 돌려준다.
-pub async fn quotes(rest: &KiwoomRest, bars: &BarService, symbols: &[Symbol]) -> Result<Vec<api::Quote>, BarError> {
-    let stocks: Vec<StockCode> = symbols.iter().filter_map(|s| if let Symbol::Stock(c) = s { Some(*c) } else { None }).collect();
+/// `directory`는 NXT를 요청할 때 NXT 거래 여부를 알려 준다. 목록에 없는 종목은 NXT에서 거래되지 않는 것으로 본다.
+pub async fn quotes(rest: &KiwoomRest, bars: &BarService, directory: Option<&Directory>, symbols: &[Symbol], requested: Venue) -> Result<Vec<api::Quote>, BarError> {
+    let stocks: Vec<(StockCode, Venue)> = symbols
+        .iter()
+        .filter_map(|s| if let Symbol::Stock(c) = s { Some(*c) } else { None })
+        .map(|code| {
+            let nxt_enabled = directory.and_then(|d| d.get(Symbol::Stock(code))).is_some_and(|info| info.nxt_enabled);
+            (code, effective_venue(requested, nxt_enabled))
+        })
+        .collect();
     let indexes = symbols.iter().filter_map(|s| if let Symbol::Index(c) = s { Some(*c) } else { None });
     let stock_quotes = async {
         let mut out = Vec::new();
         for chunk in stocks.chunks(StockQuotes::MAX) {
-            let req = StockQuotes::new(chunk, Venue::Combined).expect("chunks는 1~MAX개다");
+            let req = StockQuotes::of_venues(chunk).expect("chunks는 1~MAX개다");
             let page = rest.call(&req, None, Priority::Screen, MergeScope::default()).await?;
-            out.extend(parse_quotes(page.body).into_iter().map(|q| {
+            let asked: HashMap<StockCode, Venue> = chunk.iter().copied().collect();
+            out.extend(parse_quotes(page.body).into_iter().filter(|q| asked.get(&q.code) == Some(&q.venue)).map(|q| {
                 let symbol = Symbol::Stock(q.code);
-                (symbol, quote(symbol, q.price_centi, q.base_centi, q.volume.0, q.at.unix(), api::QuoteSource::Polled))
+                (symbol, quote(symbol, Some(q.venue), q.price_centi, q.base_centi, q.volume.0, q.at.unix(), api::QuoteSource::Polled))
             }));
         }
         Ok::<_, BarError>(out)
@@ -49,16 +67,43 @@ async fn index_quote(bars: &BarService, code: IndexCode) -> Result<Option<(Symbo
         return Ok(None);
     };
     let symbol = Symbol::Index(code);
-    Ok(Some((symbol, quote(symbol, last.close().centi(), prev.close().centi(), last.volume().0, bucket.start().unix(), api::QuoteSource::Polled))))
+    Ok(Some((symbol, quote(symbol, None, last.close().centi(), prev.close().centi(), last.volume().0, bucket.start().unix(), api::QuoteSource::Polled))))
 }
 
-/// 기준가는 |현재가| − 전일대비다(kiwoom.md §11.3).
-pub fn realtime(symbol: Symbol, price: Price, day: DayTotals, at: KstTime) -> Option<api::Quote> {
-    let base_centi = u64::try_from(price.centi() as i64 - day.change_centi).ok().filter(|b| *b > 0)?;
-    Some(quote(symbol, price.centi(), base_centi, day.cumulative.0, at.unix(), api::QuoteSource::Realtime))
+/// 기준가는 |현재가| − 전일대비다(kiwoom.md §11.3). 거래소와 상관없이 체결 하나에서 하나로 정해진다.
+pub fn base_centi(price: Price, change_centi: i64) -> Option<u64> {
+    u64::try_from(price.centi() as i64 - change_centi).ok().filter(|b| *b > 0)
 }
 
-fn quote(symbol: Symbol, price_centi: u64, base_centi: u64, volume: u64, t: i64, source: api::QuoteSource) -> api::Quote {
+/// `volume`은 `venue`의 당일 누적이어야 한다.
+/// 지수에는 거래소가 없어서 `venue`를 무시한다.
+pub fn realtime(symbol: Symbol, venue: Venue, price: Price, base_centi: u64, volume: u64, at: KstTime) -> api::Quote {
+    let venue = matches!(symbol, Symbol::Stock(_)).then_some(venue);
+    quote(symbol, venue, price.centi(), base_centi, volume, at.unix(), api::QuoteSource::Realtime)
+}
+
+/// 종목마다 통합·KRX·NXT의 당일 누적 거래량을 한 요청으로 묻는다(종목당 3행). 세 행을 모두 얻은 종목만 돌려준다.
+/// `codes`는 `DAY_VOLUME_CHUNK`개 이하여야 한다.
+pub async fn day_volumes(rest: &KiwoomRest, codes: &[StockCode]) -> Result<HashMap<StockCode, DayVolumes>, crate::kiwoom::rest::KiwoomError> {
+    let rows: Vec<(StockCode, Venue)> = codes.iter().flat_map(|c| [Venue::Combined, Venue::Krx, Venue::Nxt].map(|v| (*c, v))).collect();
+    let req = StockQuotes::of_venues(&rows).expect("종목 수가 DAY_VOLUME_CHUNK 이하다");
+    let page = rest.call(&req, None, Priority::Screen, MergeScope::default()).await?;
+    let mut seen: HashMap<StockCode, [Option<u64>; 3]> = HashMap::new();
+    for q in parse_quotes(page.body) {
+        let slot = match q.venue {
+            Venue::Combined => 0,
+            Venue::Krx => 1,
+            Venue::Nxt => 2,
+        };
+        seen.entry(q.code).or_default()[slot] = Some(q.volume.0);
+    }
+    Ok(seen.into_iter().filter_map(|(code, v)| Some((code, DayVolumes { combined: v[0]?, krx: v[1]?, nxt: v[2]? }))).collect())
+}
+
+/// 한 요청에 종목당 3행이 들어가서 100행 상한 안에서 묻는 종목 수다.
+pub const DAY_VOLUME_CHUNK: usize = StockQuotes::MAX / 3;
+
+fn quote(symbol: Symbol, venue: Option<Venue>, price_centi: u64, base_centi: u64, volume: u64, t: i64, source: api::QuoteSource) -> api::Quote {
     let change_centi = price_centi as i64 - base_centi as i64;
     api::Quote {
         symbol: api::SymbolCode(symbol.as_wire()),
@@ -68,12 +113,13 @@ fn quote(symbol: Symbol, price_centi: u64, base_centi: u64, volume: u64, t: i64,
         volume,
         t: api::UnixSeconds(t),
         source,
+        venue: venue.map(Into::into),
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use domain::{KstDate, Volume};
+    use domain::KstDate;
 
     use super::*;
     use crate::clock::kst;
@@ -83,10 +129,19 @@ mod tests {
         let symbol = Symbol::parse("005930").unwrap();
         let at = kst(KstDate::new(2026, 11, 9).unwrap(), 10, 0, 1);
         let price = Price::from_centi(19_340_000).unwrap();
-        let q = realtime(symbol, price, DayTotals { change_centi: -810_000, cumulative: Volume(56_147_847) }, at).unwrap();
-        assert_eq!(q, quote(symbol, 19_340_000, 20_150_000, 56_147_847, at.unix(), api::QuoteSource::Realtime));
-        assert_eq!((q.price, q.change, q.volume, q.source), (193_400.0, -8_100.0, 56_147_847, api::QuoteSource::Realtime));
+        let base = base_centi(price, -810_000).unwrap();
+        let q = realtime(symbol, Venue::Combined, price, base, 56_147_847, at);
+        assert_eq!(q, quote(symbol, Some(Venue::Combined), 19_340_000, 20_150_000, 56_147_847, at.unix(), api::QuoteSource::Realtime));
+        assert_eq!((q.price, q.change, q.volume, q.source, q.venue), (193_400.0, -8_100.0, 56_147_847, api::QuoteSource::Realtime, Some(api::Venue::Combined)));
         assert!((q.change_rate - -4.0198).abs() < 1e-3, "{}", q.change_rate);
-        assert_eq!(realtime(symbol, price, DayTotals { change_centi: 19_340_000, cumulative: Volume(1) }, at), None, "기준가 0");
+        assert_eq!(base_centi(price, 19_340_000), None, "기준가 0");
+    }
+
+    #[test]
+    fn only_nxt_requests_fall_back_to_combined_for_symbols_not_on_nxt() {
+        assert_eq!(effective_venue(Venue::Nxt, false), Venue::Combined);
+        assert_eq!(effective_venue(Venue::Nxt, true), Venue::Nxt);
+        assert_eq!(effective_venue(Venue::Krx, false), Venue::Krx);
+        assert_eq!(effective_venue(Venue::Combined, false), Venue::Combined);
     }
 }
