@@ -1,6 +1,8 @@
-.drawing-toolbar { position:absolute; left:50%; top:var(--size-8); z-index:10; transform:translateX(-50%); display:flex; align-items:center; gap:2px; --dock-reserve:11rem; max-width:calc(100% - var(--dock-reserve)); min-width:11rem; padding:5px; border-radius:var(--r-pill); color:var(--text-2); overflow-x:auto; overflow-y:hidden; scrollbar-width:none; }
+.drawing-toolbar { position:absolute; left:50%; --dock-home-top:var(--size-8); top:var(--dock-home-top); z-index:10; transform:translateX(-50%); display:flex; align-items:center; gap:2px; --dock-reserve:11rem; max-width:calc(100% - var(--dock-reserve)); --dock-min:11rem; min-width:var(--dock-min); padding:5px; border-radius:var(--r-pill); color:var(--text-2); overflow-x:auto; overflow-y:hidden; scrollbar-width:none; }
 @property --dock-reserve { syntax:"<length>"; inherits:false; initial-value:0px; }
+@property --dock-min { syntax:"<length>"; inherits:false; initial-value:0px; }
 .drawing-toolbar[data-pinned] { transform:translateX(var(--dock-shift, -50%)); max-width:var(--dock-max, calc(100% - var(--dock-reserve))); }
+.drawing-toolbar[data-moved] { left:var(--dock-left, 50%); top:var(--dock-top, var(--dock-home-top)); transform:none; max-width:var(--dock-max, calc(100% - 2 * var(--island-gap))); min-width:min(var(--dock-min), var(--dock-max, 100%)); }
 .drawing-toolbar>* { flex-shrink:0; }
 .draw-pinned { display:flex; align-items:center; gap:inherit; }
 .draw-tool { display:grid; place-items:center; width:32px; height:32px; border-radius:var(--r-pill); color:var(--text-2); cursor:pointer; }
@@ -85,7 +87,8 @@
 .draw-load-error { position:absolute; top:60px; left:12px; background:var(--surface); border:1px solid var(--line); padding:8px; border-radius:var(--r-m); pointer-events:auto; font-size:var(--fs-s); color:var(--accent); }
 input[type=checkbox], input[type=range] { accent-color:var(--accent); }
 .drawing-toolbar .draw-tool { width:30px; height:30px; }
-@media (width < 80rem) { .drawing-toolbar .draw-tool { width:26px; height:26px; } }
+.drawing-toolbar .draw-grip { height:30px; }
+@media (width < 80rem) { .drawing-toolbar .draw-tool { width:26px; height:26px; } .drawing-toolbar .draw-grip { height:26px; } }
 @media (width < 48rem) { .drawing-toolbar { display:none; } }
 
 .drawing-toolbar::-webkit-scrollbar { display:none; }
