@@ -105,7 +105,7 @@ enum HubInput {
     DailyReset,
     Seeded { key: SeriesKey, generation: u64, result: Result<Seed, BarError> },
     Verified { key: SeriesKey, generation: u64, bucket: Bucket, attempt: u32, result: Result<Option<ConfirmedBar>, BarError> },
-    DayVolumes { codes: Vec<StockCode>, result: Result<HashMap<StockCode, DayVolumes>, KiwoomError> },
+    DayVolumes { requests: Vec<(StockCode, u64)>, result: Result<HashMap<StockCode, DayVolumes>, KiwoomError> },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -318,7 +318,7 @@ impl MarketHub {
             }
             HubInput::Seeded { key, generation, result } => self.on_seeded(key, generation, result, now),
             HubInput::Verified { key, generation, bucket, attempt, result } => self.on_verified(key, generation, bucket, attempt, result, now),
-            HubInput::DayVolumes { codes, result } => self.on_day_volumes(codes, result, now),
+            HubInput::DayVolumes { requests, result } => self.on_day_volumes(requests, result, now),
         }
     }
 
@@ -396,24 +396,26 @@ impl MarketHub {
         };
         let due = self.tallies.take_due(&wanted, now);
         for chunk in due.chunks(quotes::DAY_VOLUME_CHUNK) {
-            let (bars, tx, codes) = (self.bars.clone(), self.tx.clone(), chunk.to_vec());
+            let (bars, tx) = (self.bars.clone(), self.tx.clone());
+            let requests: Vec<(StockCode, u64)> = chunk.iter().map(|code| (*code, self.tallies.request(*code))).collect();
             tokio::spawn(async move {
+                let codes: Vec<StockCode> = requests.iter().map(|(code, _)| *code).collect();
                 let result = quotes::day_volumes(bars.rest(), &codes).await;
-                let _ = tx.send(HubInput::DayVolumes { codes, result });
+                let _ = tx.send(HubInput::DayVolumes { requests, result });
             });
         }
     }
 
-    fn on_day_volumes(&mut self, codes: Vec<StockCode>, result: Result<HashMap<StockCode, DayVolumes>, KiwoomError>, now: KstTime) {
+    fn on_day_volumes(&mut self, requests: Vec<(StockCode, u64)>, result: Result<HashMap<StockCode, DayVolumes>, KiwoomError>, now: KstTime) {
         let mut volumes = match result {
             Ok(volumes) => volumes,
             Err(e) => {
-                tracing::warn!(reason = %e, count = codes.len(), "거래소별 거래량의 시작 값을 받지 못했습니다. 다시 조회합니다");
+                tracing::warn!(reason = %e, count = requests.len(), "거래소별 거래량의 시작 값을 받지 못했습니다. 다시 조회합니다");
                 HashMap::new()
             }
         };
-        for code in codes {
-            self.tallies.seeded(code, volumes.remove(&code), now);
+        for (code, request) in requests {
+            self.tallies.seeded(code, request, volumes.remove(&code), now);
         }
     }
 
@@ -2552,6 +2554,22 @@ mod tests {
         tokio::time::sleep(Duration::from_secs(3)).await;
         h.events.send(fill(&h, SAMSUNG, (9, 0, 51), 112, Some(Exchange::Krx), 5, (12, 1_005))).await.unwrap();
         assert_eq!(quote_messages(take(&out).await), vec![quotes_msg(api::Venue::Krx, vec![venue_quote(SAMSUNG, api::Venue::Krx, 112.0, 12.0, 705, at(9, 0, 51))])]);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_day_volume_whose_venues_do_not_add_up_to_the_combined_volume_is_not_used() {
+        let h = std_harness();
+        let (conn, out) = connect(&h).await;
+        live(&h).await;
+        *h.day_volumes.lock().unwrap() = HashMap::from([("005930_AL".to_owned(), 1_000), ("005930".to_owned(), 700), ("005930_NX".to_owned(), 200)]);
+        h.hub.watch(conn, vec![samsung().feed.symbol()], Venue::Krx);
+        settle().await;
+        h.events.send(fill(&h, SAMSUNG, (9, 0, 51), 112, Some(Exchange::Krx), 5, (12, 1_005))).await.unwrap();
+        assert_eq!(quote_messages(take(&out).await), vec![]);
+        *h.day_volumes.lock().unwrap() = HashMap::from([("005930_AL".to_owned(), 1_005), ("005930".to_owned(), 705), ("005930_NX".to_owned(), 300)]);
+        tokio::time::sleep(Duration::from_secs(6)).await;
+        h.events.send(fill(&h, SAMSUNG, (9, 0, 58), 113, Some(Exchange::Krx), 1, (13, 1_006))).await.unwrap();
+        assert_eq!(quote_messages(take(&out).await), vec![quotes_msg(api::Venue::Krx, vec![venue_quote(SAMSUNG, api::Venue::Krx, 113.0, 13.0, 706, at(9, 0, 58))])], "다시 받은 값이 맞으면 그때부터 낸다");
     }
 
     #[tokio::test(start_paused = true)]

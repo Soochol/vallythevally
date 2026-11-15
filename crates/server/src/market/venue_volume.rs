@@ -29,7 +29,7 @@ pub struct Fill {
 }
 
 enum Tally {
-    Seeding { buffered: Vec<Fill> },
+    Seeding { request: u64, buffered: Vec<Fill> },
     Live(DayVolumes),
     Retry { at: KstTime },
 }
@@ -43,6 +43,7 @@ enum Applied {
 #[derive(Default)]
 pub struct DayTallies {
     by_code: HashMap<StockCode, Tally>,
+    next_request: u64,
     failures: HashMap<StockCode, u32>,
 }
 
@@ -62,7 +63,8 @@ impl DayTallies {
                 Some(_) => false,
             };
             if start {
-                self.by_code.insert(*code, Tally::Seeding { buffered: Vec::new() });
+                self.next_request += 1;
+                self.by_code.insert(*code, Tally::Seeding { request: self.next_request, buffered: Vec::new() });
                 due.push(*code);
             }
         }
@@ -71,7 +73,7 @@ impl DayTallies {
 
     pub fn apply(&mut self, code: StockCode, fill: Fill, now: KstTime) -> Option<VenueVolumes> {
         match self.by_code.get_mut(&code)? {
-            Tally::Seeding { buffered } if buffered.len() < MAX_BUFFERED => {
+            Tally::Seeding { buffered, .. } if buffered.len() < MAX_BUFFERED => {
                 buffered.push(fill);
                 None
             }
@@ -92,10 +94,20 @@ impl DayTallies {
         }
     }
 
-    pub fn seeded(&mut self, code: StockCode, volumes: Option<DayVolumes>, now: KstTime) {
-        let Some(Tally::Seeding { buffered }) = self.by_code.get_mut(&code) else {
+    pub fn request(&self, code: StockCode) -> u64 {
+        match self.by_code.get(&code) {
+            Some(Tally::Seeding { request, .. }) => *request,
+            _ => 0,
+        }
+    }
+
+    pub fn seeded(&mut self, code: StockCode, request: u64, volumes: Option<DayVolumes>, now: KstTime) {
+        let Some(Tally::Seeding { request: current, buffered }) = self.by_code.get_mut(&code) else {
             return;
         };
+        if *current != request {
+            return;
+        }
         let buffered = std::mem::take(buffered);
         let failures = self.failures.get(&code).copied().unwrap_or(0);
         let Some(mut live) = volumes else {
@@ -161,7 +173,7 @@ mod tests {
     fn live(volumes: DayVolumes) -> DayTallies {
         let mut t = DayTallies::default();
         assert_eq!(t.take_due(&BTreeSet::from([code()]), at(0)), vec![code()]);
-        t.seeded(code(), Some(volumes), at(0));
+        t.seeded(code(), t.request(code()), Some(volumes), at(0));
         t
     }
 
@@ -181,7 +193,7 @@ mod tests {
         assert_eq!(t.apply(code(), fill(Some(Exchange::Krx), 4, 998), at(1)), None, "조회 중에는 모아 둔다");
         assert_eq!(t.apply(code(), fill(Some(Exchange::Nxt), 2, 1_000), at(1)), None);
         assert_eq!(t.apply(code(), fill(Some(Exchange::Nxt), 3, 1_003), at(1)), None);
-        t.seeded(code(), Some(START), at(2));
+        t.seeded(code(), t.request(code()), Some(START), at(2));
         assert_eq!(t.apply(code(), fill(Some(Exchange::Krx), 1, 1_004), at(3)), Some(VenueVolumes { krx: 701, nxt: 303 }), "1_000 이하는 조회 값에 있고 1_003만 더해졌다");
     }
 
@@ -207,7 +219,7 @@ mod tests {
         assert_eq!(t.take_due(&BTreeSet::from([code()]), at(3)), Vec::<StockCode>::new(), "다시 조회는 5초 뒤");
         assert_eq!(t.apply(code(), fill(Some(Exchange::Krx), 1, 1_011), at(4)), None, "다시 받기 전에는 값을 내지 않는다");
         assert_eq!(t.take_due(&BTreeSet::from([code()]), at(6)), vec![code()]);
-        t.seeded(code(), Some(DayVolumes { combined: 1_012, krx: 710, nxt: 302 }), at(7));
+        t.seeded(code(), t.request(code()), Some(DayVolumes { combined: 1_012, krx: 710, nxt: 302 }), at(7));
         assert_eq!(t.apply(code(), fill(Some(Exchange::Nxt), 8, 1_020), at(8)), Some(VenueVolumes { krx: 710, nxt: 310 }));
     }
 
@@ -225,7 +237,7 @@ mod tests {
         let mut t = DayTallies::default();
         t.take_due(&BTreeSet::from([code()]), at(0));
         t.apply(code(), fill(Some(Exchange::Krx), 1, 1_050), at(1));
-        t.seeded(code(), Some(START), at(2));
+        t.seeded(code(), t.request(code()), Some(START), at(2));
         assert_eq!(t.apply(code(), fill(Some(Exchange::Krx), 1, 1_051), at(3)), None);
         assert_eq!(t.take_due(&BTreeSet::from([code()]), at(7)), vec![code()]);
     }
@@ -235,7 +247,7 @@ mod tests {
         let mut t = DayTallies::default();
         t.take_due(&BTreeSet::from([code()]), at(0));
         t.apply(code(), fill(None, 2, 995), at(1));
-        t.seeded(code(), Some(START), at(2));
+        t.seeded(code(), t.request(code()), Some(START), at(2));
         assert_eq!(t.apply(code(), fill(Some(Exchange::Krx), 5, 1_005), at(3)), Some(VenueVolumes { krx: 705, nxt: 300 }));
     }
 
@@ -247,20 +259,33 @@ mod tests {
         let mut waits = Vec::new();
         for _ in 0..6 {
             t.take_due(&wanted, now);
-            t.seeded(code(), None, now);
+            t.seeded(code(), t.request(code()), None, now);
             let wait = (1..=120).find(|s| !t.take_due(&wanted, now.plus_secs(*s)).is_empty()).unwrap();
             waits.push(wait);
             now = now.plus_secs(wait);
-            t.seeded(code(), None, now);
+            t.seeded(code(), t.request(code()), None, now);
         }
         assert_eq!(waits, [5, 10, 20, 40, 60, 60]);
+    }
+
+    #[test]
+    fn an_answer_to_a_dropped_request_does_not_touch_the_new_request() {
+        let mut t = DayTallies::default();
+        let wanted = BTreeSet::from([code()]);
+        t.take_due(&wanted, at(0));
+        let old = t.request(code());
+        t.take_due(&BTreeSet::new(), at(1));
+        t.take_due(&wanted, at(2));
+        t.seeded(code(), old, None, at(3));
+        t.seeded(code(), t.request(code()), Some(START), at(3));
+        assert_eq!(t.apply(code(), fill(Some(Exchange::Krx), 5, 1_005), at(4)), Some(VenueVolumes { krx: 705, nxt: 300 }));
     }
 
     #[test]
     fn a_failed_snapshot_is_retried_and_symbols_no_longer_wanted_are_dropped() {
         let mut t = DayTallies::default();
         t.take_due(&BTreeSet::from([code()]), at(0));
-        t.seeded(code(), None, at(1));
+        t.seeded(code(), t.request(code()), None, at(1));
         assert_eq!(t.take_due(&BTreeSet::from([code()]), at(5)), Vec::<StockCode>::new());
         assert_eq!(t.take_due(&BTreeSet::from([code()]), at(6)), vec![code()]);
         t.take_due(&BTreeSet::new(), at(7));
