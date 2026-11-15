@@ -580,9 +580,8 @@ export class ChartController {
 
   private renderExtremes(): void {
     const view = this.view;
-    const last = this.bars.at(-1);
     const range = this.chart.timeScale().getVisibleLogicalRange();
-    const info = view?.settings.showExtremes && last && range ? this.main.api.barsInLogicalRange(range) : null;
+    const info = view?.settings.showExtremes && this.bars.length && range ? this.main.api.barsInLogicalRange(range) : null;
     const paneWidth = this.chart.timeScale().width();
     const xOf = (index: number) => this.chart.timeScale().timeToCoordinate(toChartTime(this.bars[index]!.t));
     const onScreen = (index: number) => { const x = xOf(index); return x !== null && x >= 0 && x <= paneWidth; };
@@ -591,6 +590,7 @@ export class ChartController {
     while (info && first <= lastIndex && !onScreen(first)) first++;
     while (info && lastIndex >= first && !onScreen(lastIndex)) lastIndex--;
     const found = info && findExtremes(this.bars, first, lastIndex);
+    const last = this.bars[lastIndex];
     if (!view || !last || !found) return this.extremeTags.show(null, paneWidth);
     const paneHeight = this.chart.panes()[0]?.getHeight() ?? 0;
     const isIndex = isIndexCode(view.symbol);
