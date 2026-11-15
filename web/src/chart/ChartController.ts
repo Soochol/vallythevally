@@ -38,7 +38,7 @@ import { type Extreme, findExtremes } from "./extremes";
 import { type OpenPort, openIndicatorPort } from "./indicators/client";
 import { IndicatorLayer } from "./indicators/layer";
 import { PanelControls } from "./panelControls";
-import { type IndicatorCommand, IndicatorLegend } from "./indicators/legendRows";
+import { type IndicatorCommand, IndicatorLegend, type PaneBounds } from "./indicators/legendRows";
 import { chartIndicators, chartPanels } from "./indicators/shown";
 import { isTailChange } from "./indicators/sync";
 import { Legend, legendParts } from "./legend";
@@ -733,9 +733,9 @@ export class ChartController {
     this.onStatus({ kind: "error", error });
   }
 
-  private paneTops(): number[] {
+  private paneBounds(): PaneBounds[] {
     const top = this.el.getBoundingClientRect().top;
-    return this.chart.panes().map((p) => (p.getHTMLElement()?.getBoundingClientRect().top ?? top) - top);
+    return this.chart.panes().map((p) => ({ top: (p.getHTMLElement()?.getBoundingClientRect().top ?? top) - top, height: p.getHeight() }));
   }
 
   /** Lightweight Charts는 % 축의 0%를 `floor(보이는 논리 범위 왼쪽)` 자리의 봉으로 잡는다. */
@@ -750,13 +750,14 @@ export class ChartController {
     const view = this.view;
     const i = this.hoverIndex ?? this.bars.length - 1;
     const bar = this.bars[i];
-    const tops = this.paneTops();
+    const panes = this.paneBounds();
+    const axisWidth = this.chart.priceScale("right").width();
     const panels = view ? chartPanels(view.settings, this.period()) : [];
-    this.panelControls.render(panels, tops);
-    this.indicatorLegend.render(this.indicators.rows(this.financialHoverTime ?? bar?.t ?? null), tops, this.chart.priceScale("right").width());
+    this.panelControls.render(panels, panes.map((pane) => pane.top));
+    this.indicatorLegend.render(this.indicators.rows(this.financialHoverTime ?? bar?.t ?? null), panes, axisWidth);
     this.compareLegend.render(this.compare.rows(this.leftT(), bar?.t ?? null));
-    if (!view || !bar) return this.legend.show(null);
-    this.legend.show({
+    if (!view || !bar) this.legend.show(null);
+    else this.legend.show({
       bar,
       prev: this.bars[i - 1] ?? null,
       isCurrent: this.history?.current?.t === bar.t && !this.realtimeSeen,
@@ -764,6 +765,7 @@ export class ChartController {
       period: view.period,
       stalledAt: this.stalledAt,
     });
+    this.legend.fit({ pricePane: panes[0] ?? null, axisWidth });
   }
 }
 

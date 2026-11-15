@@ -44,6 +44,8 @@ function labelButton(button: HTMLButtonElement, label: string) {
   button.dataset.label = label;
 }
 
+export interface PaneBounds { readonly top: number; readonly height: number }
+
 type RowKey = "panel" | "price";
 
 export class IndicatorLegend {
@@ -55,7 +57,7 @@ export class IndicatorLegend {
     private readonly onCommand: (id: string, command: IndicatorCommand, anchor: HTMLElement) => void,
   ) {}
 
-  render(rows: IndicatorRow[], paneTops: readonly number[], axisWidth = 72): void {
+  render(rows: IndicatorRow[], panes: readonly PaneBounds[], axisWidth = 72): void {
     const focused = document.activeElement;
     const seen = new Set<string>();
     for (const row of rows) {
@@ -67,7 +69,10 @@ export class IndicatorLegend {
       if (row.panel) {
         if (r.root.parentElement !== this.overlay) this.overlay.append(r.root);
         r.root.style.maxWidth = `calc(100% - ${axisWidth + 16}px)`;
-        r.root.style.top = `${(paneTops[row.panel.index + 1] ?? 0) + 4}px`;
+        const pane = panes[row.panel.index + 1];
+        const height = Math.max(r.root.getBoundingClientRect().height, ...[...r.root.querySelectorAll("button")].map((button) => button.getBoundingClientRect().height));
+        const marginTop = parseFloat(getComputedStyle(r.root).marginTop);
+        r.root.style.top = `${(pane?.top ?? 0) - marginTop + Math.min(4, Math.max(0, (pane?.height ?? 0) - height))}px`;
         r.up.disabled = row.panel.index === 0;
         r.down.disabled = row.panel.index === row.panel.count - 1;
       }

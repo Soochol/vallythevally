@@ -2,6 +2,7 @@ import type { Bar } from "../api/generated/Bar";
 import type { Period } from "../api/generated/Period";
 import type { UnixSeconds } from "../api/generated/UnixSeconds";
 import { type Direction, direction, formatChange, formatPercent, formatPrice, formatVolume } from "../lib/format";
+import type { PaneBounds } from "./indicators/legendRows";
 import type { ChartSettings } from "./settings";
 import { formatBarTime, formatKstClock } from "./time";
 
@@ -104,7 +105,18 @@ export class Legend {
   private display: LegendDisplay = { showLegend: true, showOhlcChange: false };
   private ohlcContent = "";
 
-  constructor(parent: HTMLElement) {
+  private readonly host: HTMLElement;
+  private readonly presentationResize: ResizeObserver;
+  private readonly presentationMutations: MutationObserver;
+  private readonly toolbarMutations: MutationObserver;
+  private viewport: { pricePane: PaneBounds | null; axisWidth: number } | null = null;
+  private presentationFrame: number | null = null;
+  private finalGeometry = "";
+  private disposed = false;
+  private readonly fontsChanged = () => this.schedulePresentation();
+
+  constructor(private readonly parent: HTMLElement) {
+    this.host = parent.closest<HTMLElement>("[data-chart-overlay-host]") ?? parent;
     this.head.append(this.name, this.sub, this.venueAnchor, this.period, this.notice);
     this.name.setAttribute("role", "heading");
     this.name.setAttribute("aria-level", "2");
@@ -119,6 +131,19 @@ export class Legend {
     this.body.append(this.priceRow, this.ohlcLine);
     this.root.append(this.head, this.body);
     parent.append(this.root);
+    this.presentationResize = new ResizeObserver(() => {
+      if (this.geometrySnapshot() !== this.finalGeometry) this.schedulePresentation();
+    });
+    this.presentationResize.observe(parent);
+    this.presentationResize.observe(this.root);
+    this.presentationMutations = new MutationObserver(() => this.schedulePresentation());
+    this.presentationMutations.observe(this.root, { subtree: true, childList: true, characterData: true });
+    this.toolbarMutations = new MutationObserver((records) => {
+      if (records.some((record) => record.type === "attributes" || [...record.addedNodes, ...record.removedNodes].some((node) => node instanceof Element && node.matches(".drawing-toolbar")))) this.schedulePresentation();
+    });
+    this.toolbarMutations.observe(this.host, { childList: true, subtree: true, attributes: true, attributeFilter: ["data-moved", "data-dock-normal"] });
+    document.fonts.addEventListener("loadingdone", this.fontsChanged);
+    void document.fonts.ready.then(this.fontsChanged);
   }
 
   setHead(h: { name: string; sub: string; period: string }): void {
@@ -184,7 +209,90 @@ export class Legend {
     );
   }
 
+  fit(viewport: { pricePane: PaneBounds | null; axisWidth: number }): void {
+    this.viewport = viewport;
+    this.schedulePresentation();
+  }
+
+  private schedulePresentation(): void {
+    if (this.disposed || this.presentationFrame !== null) return;
+    this.presentationFrame = requestAnimationFrame(() => {
+      this.presentationFrame = null;
+      this.refreshPresentation();
+    });
+  }
+
+  private geometrySnapshot(): string {
+    return [this.parent, this.root, this.host.querySelector(".drawing-toolbar")].map((element) => {
+      const box = element?.getBoundingClientRect();
+      return box ? [box.x, box.y, box.width, box.height].join(",") : "";
+    }).join(";");
+  }
+
+  private contentBounds(): { right: number; bottom: number } {
+    const box = this.root.getBoundingClientRect();
+    const range = document.createRange();
+    range.selectNodeContents(this.root);
+    const boxes = [...range.getClientRects(), ...[...this.root.querySelectorAll("*")].flatMap((element) => [...element.getClientRects()])].filter((rect) => rect.width > 0 && rect.height > 0);
+    return { right: Math.max(box.left, ...boxes.map((rect) => rect.right)), bottom: Math.max(box.top, ...boxes.map((rect) => rect.bottom)) };
+  }
+
+  private refreshPresentation(): void {
+    const viewport = this.viewport;
+    if (!viewport) return;
+    const toolbar = this.host.querySelector<HTMLElement>(".drawing-toolbar");
+    const scroll = toolbar?.scrollLeft ?? 0;
+    const hostBox = this.host.getBoundingClientRect();
+    const chartBox = this.parent.getBoundingClientRect();
+    const set = (name: string, value: string) => {
+      if (this.host.style.getPropertyValue(name) !== value) this.host.style.setProperty(name, value);
+    };
+    const normal = () => {
+      if (this.host.dataset.legendDensity) delete this.host.dataset.legendDensity;
+      set("--legend-shift", "0px");
+    };
+    normal();
+    if (matchMedia("(width < 48rem)").matches || !viewport.pricePane) {
+      this.finalGeometry = this.geometrySnapshot();
+      return;
+    }
+    let shift = 0;
+    if (toolbar && !toolbar.dataset.moved && toolbar.offsetParent !== null) {
+      const [left, top, width, height] = (toolbar.dataset.dockNormal ?? "").split(",").map(Number);
+      if (left === undefined || top === undefined || width === undefined || height === undefined || ![left, top, width, height].every(Number.isFinite)) return;
+      const bar = { left: hostBox.left + left, top: hostBox.top + top, right: hostBox.left + left + width, bottom: hostBox.top + top + height };
+      const range = document.createRange();
+      const rows = [...this.root.children].flatMap((child) => getComputedStyle(child).flexDirection === "column" ? [...child.children] : [child]);
+      if (rows.some((row) => {
+        range.selectNodeContents(row);
+        const text = range.getBoundingClientRect();
+        return text.width > 0 && text.top < bar.bottom && text.right + 8 > bar.left;
+      })) shift = height;
+    }
+    set("--legend-shift", `${shift}px`);
+    const bounds = this.contentBounds();
+    const paneBottom = chartBox.top + viewport.pricePane.top + viewport.pricePane.height;
+    if (bounds.bottom > paneBottom + 0.5) {
+      this.host.dataset.legendDensity = "compact";
+      set("--legend-shift", "0px");
+      const compact = this.contentBounds();
+      const left = compact.right - hostBox.left + 8;
+      set("--legend-dock-left", `${left}px`);
+      set("--legend-dock-width", `${Math.max(0, chartBox.right - hostBox.left - viewport.axisWidth - 8 - left)}px`);
+    }
+    if (toolbar) toolbar.scrollLeft = scroll;
+    this.finalGeometry = this.geometrySnapshot();
+  }
+
   dispose(): void {
+    this.disposed = true;
+    document.fonts.removeEventListener("loadingdone", this.fontsChanged);
+    if (this.presentationFrame !== null) cancelAnimationFrame(this.presentationFrame);
+    this.presentationResize.disconnect();
+    this.presentationMutations.disconnect();
+    this.toolbarMutations.disconnect();
+    delete this.host.dataset.legendDensity;
+    for (const name of ["--legend-shift", "--legend-dock-left", "--legend-dock-width"]) this.host.style.removeProperty(name);
     this.root.remove();
   }
 }
