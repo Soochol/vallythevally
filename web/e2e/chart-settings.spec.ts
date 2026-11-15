@@ -121,15 +121,15 @@ test("화면 내 최고·최저 스위치는 보이는 봉의 최고가·최저�
     const range = scale.getVisibleLogicalRange()!;
     let high = -Infinity;
     let low = Infinity;
+    let last = 0;
     for (let i = Math.max(0, Math.floor(range.from)); i <= Math.ceil(range.to); i++) {
       const bar = main.dataByIndex(i);
       const x = bar ? scale.timeToCoordinate(bar.time) : null;
       if (!bar || !("high" in bar) || x === null || x < 0 || x > scale.width()) continue;
       high = Math.max(high, bar.high);
       low = Math.min(low, bar.low);
+      last = bar.close;
     }
-    const lastBar = main.dataByIndex(Number.MAX_SAFE_INTEGER, -1);
-    const last = lastBar && "close" in lastBar ? lastBar.close : 0;
     const won = new Intl.NumberFormat("ko-KR", { maximumFractionDigits: 0 });
     const pct = (v: number) => { const p = Math.round((v - last) / last * 10000) / 100; return `${p > 0 ? "+" : p < 0 ? "−" : ""}${Math.abs(p).toFixed(2)}%`; };
     return { high: `최고 ${won.format(high)} (${pct(high)})`, low: `최저 ${won.format(low)} (${pct(low)})` };
@@ -199,7 +199,7 @@ test("비교 종목이 있으면 팝오버의 가격 축은 %로 고정한다", 
   await expect(settings.getByText("비교 종목이 있으면 % 축으로 그립니다")).toBeVisible();
 });
 
-test("화면 가장자리에 반쯤 잘린 봉은 최고·최저에서 빼고, 첫 봉이나 마지막 봉이 잘려도 오류 없이 다시 그린다", async ({ page, scenario }) => {
+test("화면 가장자리에 반쯤 잘린 봉은 최고·최저에서 빼고, 두 등락률 기준은 이동·확대 뒤 화면 끝 봉 종가를 쓴다", async ({ page, scenario }, testInfo) => {
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(error.message));
   const day = 86_400;
@@ -218,9 +218,12 @@ test("화면 가장자리에 반쯤 잘린 봉은 최고·최저에서 빼고, �
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
   await expectShownBars(page, 60);
   const high = cell(page).locator("[data-extreme=high] > span");
-  const lastClose = bars.at(-1)!.c;
-  const highText = (index: number) => `최고 ${new Intl.NumberFormat("ko-KR").format(bars[index]!.h)} (+${((bars[index]!.h - lastClose) / lastClose * 100).toFixed(2)}%)`;
-  await expect(high).toHaveText(highText(240));
+  const highText = (index: number, lastIndex: number, basis: ChartSettings["extremeBasis"] = "last") => {
+    const price = bars[index]!.h;
+    const close = bars[lastIndex]!.c;
+    return `최고 ${won(price)} (${basis === "last" ? pct(close, price) : pct(price, close)})`;
+  };
+  await expect(high).toHaveText(highText(240, 299));
 
   await page.evaluate(() => {
     const scale = window.chartProbe.chart.timeScale();
@@ -233,35 +236,65 @@ test("화면 가장자리에 반쯤 잘린 봉은 최고·최저에서 빼고, �
     const range = chart.timeScale().getVisibleLogicalRange()!;
     const cut = Math.floor(range.from);
     const x = (i: number) => chart.timeScale().timeToCoordinate(main.dataByIndex(i)!.time);
-    return { cutX: x(cut), firstShown: x(cut)! < 0 ? cut + 1 : cut };
+    const right = Math.ceil(range.to);
+    return { cutX: x(cut), firstShown: x(cut)! < 0 ? cut + 1 : cut, lastShown: x(right)! > chart.timeScale().width() ? right - 1 : right };
   });
   expect(edge.cutX).not.toBeNull();
   expect(edge.cutX!).toBeLessThan(0);
   const firstShown = edge.firstShown;
   await expect(high).toBeVisible();
-  await expect(high).toHaveText(highText(firstShown));
+  await expect(high).toHaveText(highText(firstShown, edge.lastShown));
 
   const low = cell(page).locator("[data-extreme=low] > span");
-  const lowText = (index: number) => {
-    const change = (bars[index]!.l - lastClose) / lastClose * 100;
-    return `최저 ${new Intl.NumberFormat("ko-KR").format(bars[index]!.l)} (${change > 0 ? "+" : change < 0 ? "−" : ""}${Math.abs(change).toFixed(2)}%)`;
+  const lowText = (index: number, basis: ChartSettings["extremeBasis"] = "last") => {
+    const price = bars[index]!.l;
+    const close = bars[index]!.c;
+    return `최저 ${won(price)} (${basis === "last" ? pct(close, price) : pct(price, close)})`;
   };
-  for (const range of [{ from: 238.6, to: 298.6 }, { from: 0.3, to: 60.3 }]) {
-    const shown = await page.evaluate((target) => {
-      const { chart, main } = window.chartProbe;
-      const scale = chart.timeScale();
-      scale.setVisibleLogicalRange(target);
-      return new Promise<number[]>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => {
-        const inside: number[] = [];
-        for (let i = 0; i < 300; i++) {
-          const x = scale.timeToCoordinate(main.dataByIndex(i)!.time);
-          if (x !== null && x >= 0 && x <= scale.width()) inside.push(i);
-        }
-        resolve(inside);
-      })));
-    }, range);
-    await expect(high).toHaveText(highText(shown[0]!));
-    await expect(low).toHaveText(lowText(shown.at(-1)!));
+  await expect(low).toHaveText(lowText(edge.lastShown));
+  await page.screenshot({ path: testInfo.outputPath("historical-visible-close.png") });
+  for (const basis of ["last", "extreme"] as const) {
+    await openSettings(page);
+    await basisGroup(page).getByRole("button", { name: basis === "last" ? "현재가 대비" : "고가·저가 대비", exact: true }).click();
+    await page.keyboard.press("Escape");
+    for (const range of [{ from: 238.6, to: 298.6 }, { from: 0.3, to: 60.3 }, { from: 79.2, to: 109.2 }, { from: 20.3, to: 180.3 }]) {
+      const shown = await page.evaluate((target) => {
+        const { chart, main } = window.chartProbe;
+        const scale = chart.timeScale();
+        scale.setVisibleLogicalRange(target);
+        return new Promise<number[]>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => {
+          const inside: number[] = [];
+          for (let i = 0; i < 300; i++) {
+            const x = scale.timeToCoordinate(main.dataByIndex(i)!.time);
+            if (x !== null && x >= 0 && x <= scale.width()) inside.push(i);
+          }
+          resolve(inside);
+        })));
+      }, range);
+      expect(shown.length).toBeGreaterThan(0);
+      if (range.to < 298) expect(shown.at(-1)).toBeLessThan(bars.length - 1);
+      await expect(high).toHaveText(highText(shown[0]!, shown.at(-1)!, basis));
+      await expect(low).toHaveText(lowText(shown.at(-1)!, basis));
+    }
+    await page.screenshot({ path: testInfo.outputPath(`historical-${basis}.png`) });
+    await page.evaluate(() => window.chartProbe.chart.timeScale().setVisibleLogicalRange({ from: 240, to: 305.5 }));
+    await expect(high).toHaveText(highText(240, 299, basis));
+    await expect(low).toHaveText(lowText(299, basis));
+  }
+  expect(errors).toEqual([]);
+});
+
+test("봉이 없는 화면은 두 등락률 기준 모두 최고·최저 꼬리표를 숨긴다", async ({ page, scenario }) => {
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  openWith(scenario, { showExtremes: true }, []);
+  await open(page);
+  for (const basis of ["현재가 대비", "고가·저가 대비"]) {
+    await openSettings(page);
+    const button = basisGroup(page).getByRole("button", { name: basis, exact: true });
+    await button.click();
+    await expect(button).toHaveAttribute("aria-pressed", "true");
+    for (const side of ["high", "low"]) await expect(cell(page).locator(`[data-extreme=${side}] > span`)).toBeHidden();
   }
   expect(errors).toEqual([]);
 });
@@ -570,8 +603,8 @@ test("최고·최저 등락률을 고가·저가 대비로 바꾸면 꼬리표�
   const current = basisGroup(page).getByRole("button", { name: "현재가 대비", exact: true });
   const extreme = basisGroup(page).getByRole("button", { name: "고가·저가 대비", exact: true });
   await expect(current).toHaveAttribute("aria-pressed", "true");
-  await expect(current).toHaveAttribute("title", /현재가/);
-  await expect(extreme).toHaveAttribute("title", /최고가/);
+  await expect(current).toHaveAttribute("title", /화면 오른쪽 끝 봉 종가/);
+  await expect(extreme).toHaveAttribute("title", /화면 오른쪽 끝 봉 종가/);
   await extreme.click();
   await expect(extreme).toHaveAttribute("aria-pressed", "true");
   const extremeTexts = [`최고 ${won(highBar.h)} (${pct(highBar.h, lastClose)})`, `최저 ${won(lowBar.l)} (${pct(lowBar.l, lastClose)})`];

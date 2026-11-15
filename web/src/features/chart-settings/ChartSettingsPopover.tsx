@@ -20,8 +20,8 @@ const WINDOWS = [
   { value: "inspector", label: "차트 옆", title: "지표 창을 작업 영역의 창으로 엽니다. 좁은 화면에서는 가운데 창을 씁니다" },
 ] as const satisfies readonly { value: IndicatorWindow; label: string; title: string }[];
 const EXTREME_BASES = [
-  { value: "last", label: "현재가 대비", title: "최고가·최저가가 현재가보다 몇 % 높고 낮은지" },
-  { value: "extreme", label: "고가·저가 대비", title: "현재가가 최고가보다 몇 % 내렸고 최저가보다 몇 % 올랐는지" },
+  { value: "last", label: "현재가 대비", title: "최고가·최저가가 화면 오른쪽 끝 봉 종가보다 몇 % 높고 낮은지" },
+  { value: "extreme", label: "고가·저가 대비", title: "화면 오른쪽 끝 봉 종가가 최고가보다 몇 % 내렸고 최저가보다 몇 % 올랐는지" },
 ] as const satisfies readonly { value: ExtremeBasis; label: string; title: string }[];
 const SEGMENTS = "grid gap-1 rounded-m bg-chart-bg p-1";
 const SEGMENT = "seg-btn !h-7 !min-w-0 !px-1 disabled:cursor-not-allowed disabled:opacity-50";
