@@ -338,7 +338,7 @@ test.describe("같은 재무 키의 응답 순서", () => {
   });
 
   test("cold Y 조회를 수동 갱신 중 재활성화해도 최신 정정의 빈 값으로 확인한다", async ({ page, scenario, financial }, info) => {
-    await seed(scenario, financial);
+    await seed(scenario, financial, false, true);
     const deferred = () => {
       let release = () => {};
       const promise = new Promise<void>(resolve => { release = resolve; });
@@ -380,6 +380,11 @@ test.describe("같은 재무 키의 응답 순서", () => {
     await page.clock.install({ time: scenario.now });
     await page.addInitScript(installFrameProbe);
     await page.goto("/");
+    await page.getByRole("button", { name: "재무자료", exact: true }).filter({ visible: true }).click();
+    const initialJob = page.getByRole("dialog", { name: "재무자료", exact: true });
+    await expect(initialJob).toContainText("최근 자료 확인 완료");
+    await initialJob.getByRole("button", { name: "닫기", exact: true }).first().click();
+    await row(page).getByRole("button", { name: / 보이기$/ }).click({ force: true });
     await expect.poll(() => oldResponses.length).toBe(1);
     await row(page).locator("summary").click();
     await updateFromChart(page);
