@@ -198,6 +198,12 @@ for (const pinned of [false, true]) test(`minimum canvas toolbar retains help, m
   }
   expect(storedPresentation(scenario)).toBe(saved);
   expect(storedDocuments(scenario)).toBe(documents);
+  const venues = cell(page).getByRole("group", { name: "거래소" });
+  await venues.getByRole("button", { name: "KRX", exact: true }).click();
+  await expect(cell(page)).toHaveAttribute("aria-label", "칸 1: 삼성전자 KRX 일");
+  await venues.getByRole("button", { name: "통합", exact: true }).click();
+  await expect(cell(page)).toHaveAttribute("aria-label", "칸 1: 삼성전자 통합 일");
+  await settle(page, 1);
   await fullyActionable(grip);
   const home = await dock.boundingBox();
   const handle = await grip.boundingBox();
