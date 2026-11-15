@@ -499,3 +499,39 @@ for (const medium of [false, true]) test(medium ? "medium height toolbar drag, c
   expect(await dock.boundingBox()).toEqual(box);
   await expect.poll(() => scenario.documents.uiPrefs().drawing.dockAt).toBeNull();
 });
+
+test("native pinned boundary keeps stable frames and real help", async ({ page, scenario }, testInfo) => {
+  await page.addInitScript(installChartProbe);
+  seed(scenario, 1);
+  const base = scenario.documents.layout();
+  scenario.documents.saveLayout({ ...base, windows: base.windows.filter((window) => window.kind === "chart"), placement: { v: 1, dock: null, canvas: { rects: { "cell-0": { x: .02, y: .02, w: .5, h: .38 } }, order: ["cell-0"] } } });
+  scenario.documents.saveUiState({ ...scenario.documents.uiState(), layoutMode: "canvas", drawing: { ...scenario.documents.uiPrefs().drawing, pinnedTools: TOOLS.map((tool) => tool.tool), dockAt: null } });
+  await page.setViewportSize({ width: 1015, height: 768 });
+  await page.goto("/");
+  await settle(page, 1);
+  const dock = page.getByRole("navigation", { name: "드로잉 도구" });
+  const folded = dock.getByRole("button", { name: "고정 도구 펼치기", exact: true });
+  await folded.scrollIntoViewIfNeeded();
+  const foldedBox = await folded.boundingBox();
+  await folded.click();
+  await expect(page.getByRole("menu", { name: "고정 도구", exact: true })).toBeVisible();
+  await page.keyboard.press("Escape");
+  await page.setViewportSize({ width: 1016, height: 768 });
+  const frames = await page.evaluate(async () => {
+    const frames = [];
+    for (let i = 0; i < 60; i++) {
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      const bar = document.querySelector<HTMLElement>(".drawing-toolbar");
+      const host = bar?.parentElement;
+      frames.push({ toolbar: bar?.getBoundingClientRect().toJSON(), density: host?.dataset.legendDensity, capacity: host?.style.getPropertyValue("--legend-dock-width"), ohlc: host?.querySelector("[data-ohlc]")?.textContent });
+    }
+    return frames;
+  });
+  await writeFile(testInfo.outputPath("minimal-frames.json"), JSON.stringify({ foldedBox, frames }, null, 2));
+  await page.screenshot({ path: testInfo.outputPath("minimal.png") });
+  expect(new Set(frames.slice(15).map((frame) => JSON.stringify(frame.toolbar))).size).toBe(1);
+  const help = dock.getByRole("button", { name: "드로잉 단축키 도움말", exact: true });
+  await help.scrollIntoViewIfNeeded();
+  await help.click();
+  await expect(page.getByRole("dialog", { name: "드로잉 단축키", exact: true })).toBeVisible();
+});
