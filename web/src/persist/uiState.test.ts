@@ -15,6 +15,7 @@ test("옛 라이트 설정은 다크로 옮기고 다른 설정과 모르는 키
     collapsedWatchGroups: ["G1"],
     indicatorWindow: "inspector",
     layoutMode: "dock",
+    venue: "krx",
     phone: { symbol: "000660" },
   };
   const { prefs, extra } = parseUiState(raw);
@@ -29,6 +30,7 @@ test("옛 라이트 설정은 다크로 옮기고 다른 설정과 모르는 키
     collapsedWatchGroups: ["G1"],
     indicatorWindow: "inspector",
     layoutMode: "dock",
+    venue: "krx",
   });
   expect(extra).toEqual({ phone: { symbol: "000660" } });
   expect(toUiState(prefs, extra)).toEqual({ ...raw, theme: "dark" });
@@ -135,4 +137,11 @@ test("창 배치 방식은 없거나 틀리면 도킹이고 캔버스 설정은 
   const state = parseUiState({ ...older, layoutMode: "canvas" });
   expect(state.extra).not.toHaveProperty("layoutMode");
   expect(parseUiState(toUiState(state.prefs, state.extra)).prefs.layoutMode).toBe("canvas");
+});
+
+test("거래소는 통합·KRX·NXT만 받고 없거나 틀리면 통합이다", () => {
+  vi.spyOn(console, "warn").mockImplementation(() => {});
+  expect(parseUiState({ venue: "nxt" }).prefs.venue).toBe("nxt");
+  expect(parseUiState({ lastLayoutId: null, theme: "dark" }).prefs.venue).toBe("combined");
+  expect(parseUiState({ venue: "KRX" }).prefs.venue).toBe("combined");
 });

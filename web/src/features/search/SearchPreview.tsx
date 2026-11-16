@@ -5,6 +5,8 @@ import type { SymbolInfo } from "../../api/generated/SymbolInfo";
 import { getJson } from "../../api/http";
 import type { SearchPurpose } from "../../stores/selection";
 import { KIND_LABEL, MARKET_LABEL } from "../../lib/symbol";
+import { shownVenue } from "../../lib/venue";
+import { useVenue } from "../../stores/ui";
 import { EmptyState, ErrorState, Skeleton } from "../overlay/State";
 
 export function QuoteValue({ quote, large = false }: { quote: Quote | undefined; large?: boolean }) {
@@ -16,9 +18,10 @@ export function QuoteValue({ quote, large = false }: { quote: Quote | undefined;
 }
 
 export function SearchPreview({ info, quote, purpose }: { info: SymbolInfo; quote: Quote | undefined; purpose: SearchPurpose }) {
+  const venue = shownVenue(info.code, useVenue(), info);
   const trend = useQuery({
-    queryKey: ["search-trend", info.code],
-    queryFn: ({ signal }) => getJson<BarsPage>(`/api/bars?${new URLSearchParams({ symbol: info.code, period: "D", limit: "60", ...(info.kind === "index" ? {} : { venue: "combined" }) })}`, signal),
+    queryKey: ["search-trend", info.code, venue],
+    queryFn: ({ signal }) => getJson<BarsPage>(`/api/bars?${new URLSearchParams({ symbol: info.code, period: "D", limit: "60", ...(venue === null ? {} : { venue }) })}`, signal),
     staleTime: 60_000,
     retry: false,
   });

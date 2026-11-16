@@ -21,7 +21,7 @@ const queryClient = new QueryClient({
 watchFinancialJob(queryClient);
 
 // React 밖에서 한 번만 되살린다. StrictMode가 효과를 두 번 부르더라도 복원은 한 번이다.
-void boot(queryClient);
+void boot();
 marketSocket.start();
 
 const router = createBrowserRouter([

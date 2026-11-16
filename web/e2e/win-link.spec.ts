@@ -135,15 +135,16 @@ test("위 막대 검색으로 바꾼 종목은 같은 색의 차트로 퍼지고
   await expect(tabOf(page, "cell-2").locator(".dock-tab-flash")).toHaveCount(0);
 });
 
-test("주소로 연 종목은 같은 색의 차트로 퍼지되 거래소는 활성 칸에만 쓰고, NXT 안내와 연동 알림을 함께 보인다", async ({ page, scenario }) => {
+test("주소로 연 종목은 같은 색의 차트로 퍼지고, venue는 앱 전체 거래소를 바꾸며 연동 알림만 보인다", async ({ page, scenario }) => {
   linkedCharts(scenario, "nxt");
   await page.goto("/?symbol=000660");
   await expect(toast(page, "연동 A: 차트 2개가 SK하이닉스로 바뀌었습니다")).toBeVisible();
   await drawn(cell(page, 1), /^칸 1: SK하이닉스 통합 일$/);
-  await drawn(cell(page, 2), /^칸 2: SK하이닉스 NXT 주$/);
+  await drawn(cell(page, 2), /^칸 2: SK하이닉스 통합 주$/);
 
   await page.goto("/?symbol=005935&venue=nxt");
-  await expect(toast(page, "연동 A: 차트 2개가 삼성전자우로 바뀌었습니다. NXT에서 거래되지 않아 통합으로 엽니다")).toBeVisible();
+  await expect(toast(page, "연동 A: 차트 2개가 삼성전자우로 바뀌었습니다")).toBeVisible();
+  await expect(page.getByRole("group", { name: "거래소", exact: true }).getByRole("button", { name: "NXT", exact: true })).toHaveAttribute("aria-pressed", "true");
   await drawn(cell(page, 1), /^칸 1: 삼성전자우 통합 일$/);
   await drawn(cell(page, 2), /^칸 2: 삼성전자우 통합 주$/);
   await expect(cell(page, 3)).toHaveAttribute("aria-label", /^칸 3: SK하이닉스 /);

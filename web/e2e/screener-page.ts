@@ -13,7 +13,7 @@ export const rows = (page: Page) => results(page).locator("tr[data-code]");
 export const rowOf = (page: Page, code: string) => results(page).locator(`tr[data-code="${code}"]`);
 export const editor = (page: Page, title: string) => page.getByRole("region", { name: "조건식 편집", exact: true }).or(page.getByRole("dialog", { name: title }));
 const toolbar = (page: Page) => page.getByRole("toolbar", { name: "차트 도구 막대" });
-export const pickVenue = (page: Page, venue: string) => cell(page).getByRole("group", { name: "거래소" }).getByRole("button", { name: venue, exact: true }).click();
+export const pickVenue = (page: Page, venue: string) => page.getByRole("group", { name: "거래소" }).getByRole("button", { name: venue, exact: true }).click();
 export const pickPeriod = (page: Page, period: string) => /^\d+분$/.test(period) ? selectMinute(toolbar(page).getByRole("button", { name: "분봉" }), { label: period }) : toolbar(page).getByRole("group", { name: "봉 주기" }).getByRole("button", { name: period, exact: true }).click();
 
 export async function openScreener(page: Page) {

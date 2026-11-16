@@ -67,7 +67,7 @@ test.describe("데스크톱", () => {
     await page.goto("/?symbol=005930");
     const toolbar = page.getByRole("toolbar", { name: "차트 도구 막대" });
     const periods = toolbar.getByRole("group", { name: "봉 주기" });
-    const venues = cell(page).getByRole("group", { name: "거래소" });
+    const venues = page.getByRole("group", { name: "거래소" });
     await expect(cell(page)).toHaveAttribute("aria-label", "칸 1: 삼성전자 통합 일");
     await expect(periods.getByRole("button")).toHaveText(["3분", "일", "주", "월", "분기", "연"]);
 
@@ -99,7 +99,7 @@ test.describe("데스크톱", () => {
       await expectTenMinuteBars(page, requested, "삼성전자 통합 10분", { symbol: "005930", venue: "combined", period: "10m" });
       expect(await toolbarLayout(page)).toEqual({ wrapped: [], pageOverflow: 0, toolbarOverflow: 0 });
 
-      await choose(cell(page).getByRole("group", { name: "거래소" }), "KRX");
+      await choose(page.getByRole("group", { name: "거래소" }), "KRX");
       await expectTenMinuteBars(page, requested, "삼성전자 KRX 10분", { symbol: "005930", venue: "krx", period: "10m" });
       await toolbar.getByRole("button", { name: "차트 설정", exact: true }).click();
       await expect(page.getByRole("dialog", { name: "차트 설정", exact: true })).toBeInViewport({ ratio: 1 });
@@ -148,19 +148,20 @@ test.describe("데스크톱", () => {
 test.describe("휴대폰 390px", () => {
   test.use({ viewport: { width: 390, height: 844 } });
 
-  test("봉 주기 칩의 5분과 15분 사이에서 10분을 고르고, 다시 열어도 10분 칩이 눌려 있다", async ({ page }) => {
+  test("봉 주기 칩의 5분과 15분 사이에서 10분을 고르고, 다시 열어도 10분 칩이 눌려 있다", async ({ page, scenario }) => {
     const requested = recordBarRequests(page);
     await page.goto("/?symbol=005930");
     const chips = page.getByRole("navigation", { name: "봉 주기" });
     await expect(cell(page)).toHaveAttribute("aria-label", "칸 1: 삼성전자 통합 일");
     await expect(chips.getByRole("button")).toHaveText(["5분", "10분", "15분", "60분", "일", "주", "월", "분기", "연"]);
 
+    const saved = layoutSaved(page, { venue: "combined", period: "10m" });
     await choose(chips, "10분");
     await expectTenMinuteBars(page, requested, "삼성전자 통합 10분", { symbol: "005930", venue: "combined", period: "10m" });
-    const saved = layoutSaved(page, { venue: "krx", period: "10m" });
     await choose(page.getByRole("group", { name: "거래소" }), "KRX");
     await expectTenMinuteBars(page, requested, "삼성전자 KRX 10분", { symbol: "005930", venue: "krx", period: "10m" });
     await saved;
+    await expect.poll(() => scenario.documents.uiState().venue).toBe("krx");
 
     await page.reload();
     await expect(cell(page)).toHaveAttribute("aria-label", "칸 1: 삼성전자 KRX 10분");

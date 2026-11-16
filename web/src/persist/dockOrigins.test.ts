@@ -82,7 +82,7 @@ test("설정·종목·연동·이름 변경과 모드 왕복 뒤에도 최신 �
   state().rename("새 이름");
   state().setPeriod(chart, "W");
   state().setStyle(chart, "line");
-  state().setSymbol(chart, { code: "005930", nxtEnabled: false });
+  state().setSymbol(chart, { code: "005930" });
   state().setLink(id, "b");
   useUiStore.getState().setLayoutMode("canvas");
   useUiStore.getState().setLayoutMode("dock");

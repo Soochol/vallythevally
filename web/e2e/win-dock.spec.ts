@@ -321,7 +321,7 @@ test("끌 때 차트 드로잉과 관심종목·포털 도구 입력을 막고 �
   await expect(area(page)).toHaveAttribute("data-dock-dragging", "");
   await page.mouse.move(chart.x + chart.width * 0.8, chart.y + chart.height * 0.3, { steps: 10 });
   await page.mouse.wheel(0, 300);
-  const exchange = cell(page).getByRole("group", { name: "거래소", exact: true });
+  const exchange = page.getByRole("group", { name: "거래소", exact: true });
   const krx = exchange.getByRole("button", { name: "KRX", exact: true });
   await krx.dispatchEvent("click");
   await expect(krx).toHaveAttribute("aria-pressed", "false");

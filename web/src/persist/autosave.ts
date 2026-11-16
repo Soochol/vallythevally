@@ -10,6 +10,7 @@ import { useWatchlistStore } from "../stores/watchlist";
 import { exceedsLimit, WATCHLISTS_LIMIT_BYTES } from "./bytes";
 import { type CommitOutcome, type ConditionalCommit, createSaver, type Saver, type SaverOptions } from "./saver";
 import { clearUnsaved, writeUnsaved } from "./unsaved";
+import { toWireWindow } from "./layoutWire";
 import { toUiState } from "./uiState";
 
 const DEBOUNCE_MS = 1000;
@@ -105,7 +106,7 @@ export function startAutosave(deps: AutosaveDeps): Autosave {
         debounceMs: DEBOUNCE_MS,
         read: () => {
           const { id, name, sync, windows, placement } = owner.current;
-          return { id, name, sync, windows, placement };
+          return { id, name, sync, windows: windows.map(toWireWindow), placement };
         },
         tooLarge: exceedsServerFieldLimits,
         path: () => path,

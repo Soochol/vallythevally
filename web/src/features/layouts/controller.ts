@@ -4,7 +4,6 @@ import type { Layout } from "../../api/generated/Layout";
 import type { LayoutInput } from "../../api/generated/LayoutInput";
 import type { LayoutSummary } from "../../api/generated/LayoutSummary";
 import { ApiRequestError, deleteJson, putJson } from "../../api/http";
-import { fetchSymbolInfo } from "../../api/queries";
 import { fetchLayout, fetchLayouts, layoutPath } from "../../api/userData";
 import { tidyCanvas } from "../workspace/canvasCommands";
 import { defaultDock } from "../../layout/dock/fit";
@@ -13,6 +12,7 @@ import { restoreLayout, type RestoredLayout } from "../../persist/restore";
 import { clearUnsaved, readUnsaved } from "../../persist/unsaved";
 import { useDrawingSession } from "../../stores/drawingSession";
 import { useLayoutStore, chartWindows, windowRefs } from "../../stores/layout";
+import { toWireWindow } from "../../persist/layoutWire";
 import { usePersistStore } from "../../stores/persist";
 import { useSelectionStore } from "../../stores/selection";
 import { useUiStore } from "../../stores/ui";
@@ -46,7 +46,6 @@ function install(next: RestoredLayout) {
   useUiStore.getState().setLastLayoutId(next.layout.id);
   if (next.dirty) autosave.savers.layout.changed();
   usePersistStore.getState().setPhase({ kind: "ready" });
-  next.notices.forEach((text) => useSelectionStore.getState().showToast(text));
 }
 
 export interface LayoutCommandsDeps {
@@ -121,7 +120,7 @@ export function createLayoutCommands(deps: LayoutCommandsDeps) {
       const saver = layoutAutosave().savers.layout;
       await saver.save();
       const snapshot = useLayoutStore.getState().layout;
-      const saved = await deps.put({ ...snapshot, id: deps.uuid(), name: nextName, revision: Date.now() });
+      const saved = await deps.put({ ...snapshot, windows: snapshot.windows.map(toWireWindow), id: deps.uuid(), name: nextName, revision: Date.now() });
       try {
         const next = await deps.restore(saved);
         await saver.saveAndSuspend();
@@ -135,7 +134,7 @@ export function createLayoutCommands(deps: LayoutCommandsDeps) {
       try {
         const snapshot = useLayoutStore.getState().layout;
         const latest = await deps.get(snapshot.id);
-        const saved = await deps.put({ ...snapshot, name: nextName, revision: Math.max(Date.now(), latest.revision + 1) });
+        const saved = await deps.put({ ...snapshot, windows: snapshot.windows.map(toWireWindow), name: nextName, revision: Math.max(Date.now(), latest.revision + 1) });
         saver.advanceRevision(saved.revision);
         useLayoutStore.getState().rename(nextName);
       } finally { saver.resume(); }
@@ -172,6 +171,6 @@ export const layoutCommands = createLayoutCommands({
   list: fetchLayouts, get: fetchLayout,
   put: (body) => putJson<Layout>(layoutPath(body.id), body),
   delete: (id) => deleteJson(layoutPath(id)),
-  restore: (stored) => restoreLayout(stored, { symbolInfo: (code) => fetchSymbolInfo(code), unsaved: readUnsaved }),
+  restore: (stored) => restoreLayout(stored, { unsaved: readUnsaved }),
   install, uuid: () => crypto.randomUUID(),
 });

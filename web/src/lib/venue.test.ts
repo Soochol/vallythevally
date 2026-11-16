@@ -1,28 +1,9 @@
 import { expect, test } from "vitest";
-import { isVenue, shownVenue, venueFor } from "./venue";
+import { isVenue, shownVenue } from "./venue";
 
 const samsung = { code: "005930", nxtEnabled: true };
 const samsungPref = { code: "005935", nxtEnabled: false };
 const kospi = { code: "IDX:001", nxtEnabled: false };
-
-test("지수는 언제나 거래소가 없다", () => {
-  expect(venueFor(kospi, "krx")).toBeNull();
-  expect(venueFor(kospi, null)).toBeNull();
-});
-
-test("지수에서 주식으로 오면 통합이다", () => {
-  expect(venueFor(samsung, null)).toBe("combined");
-});
-
-test("주식끼리는 허용되는 거래소를 유지한다", () => {
-  expect(venueFor(samsung, "krx")).toBe("krx");
-  expect(venueFor(samsung, "nxt")).toBe("nxt");
-  expect(venueFor(samsungPref, "krx")).toBe("krx");
-});
-
-test("NXT 불가 종목으로 가면 NXT는 통합이 된다", () => {
-  expect(venueFor(samsungPref, "nxt")).toBe("combined");
-});
 
 test("주소의 거래소 값은 셋 중 하나만 받는다", () => {
   expect(isVenue("krx")).toBe(true);
@@ -30,16 +11,24 @@ test("주소의 거래소 값은 셋 중 하나만 받는다", () => {
   expect(isVenue("")).toBe(false);
 });
 
-test("그리는 거래소: 종목 정보가 있으면 저장된 거래소를 그 정보로 확인한다", () => {
-  expect(shownVenue("nxt", samsung)).toBe("nxt");
-  expect(shownVenue("nxt", samsungPref)).toBe("combined");
-  expect(shownVenue("krx", samsungPref)).toBe("krx");
-  expect(shownVenue(null, kospi)).toBeNull();
+test("지수는 앱 전체 거래소와 상관없이 거래소가 없다", () => {
+  expect(shownVenue(kospi.code, "krx", kospi)).toBeNull();
+  expect(shownVenue(kospi.code, "nxt", undefined)).toBeNull();
 });
 
-test("그리는 거래소: 종목 정보가 없으면(받는 중·실패) NXT만 통합으로 그린다", () => {
-  expect(shownVenue("nxt", undefined)).toBe("combined");
-  expect(shownVenue("krx", undefined)).toBe("krx");
-  expect(shownVenue("combined", undefined)).toBe("combined");
-  expect(shownVenue(null, undefined)).toBeNull();
+test("주식은 앱 전체 거래소를 그대로 보인다", () => {
+  expect(shownVenue(samsung.code, "krx", samsung)).toBe("krx");
+  expect(shownVenue(samsung.code, "nxt", samsung)).toBe("nxt");
+  expect(shownVenue(samsungPref.code, "krx", samsungPref)).toBe("krx");
+  expect(shownVenue(samsungPref.code, "combined", samsungPref)).toBe("combined");
+});
+
+test("NXT에서 거래되지 않는 종목은 NXT일 때 통합으로 보인다", () => {
+  expect(shownVenue(samsungPref.code, "nxt", samsungPref)).toBe("combined");
+});
+
+test("종목 정보가 없으면(받는 중·실패) NXT만 통합으로 그린다", () => {
+  expect(shownVenue("005930", "nxt", undefined)).toBe("combined");
+  expect(shownVenue("005930", "krx", undefined)).toBe("krx");
+  expect(shownVenue("005930", "combined", undefined)).toBe("combined");
 });

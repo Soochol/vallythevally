@@ -16,7 +16,7 @@ const cell = () => chartWindows(useLayoutStore.getState().layout)[0]!;
 beforeEach(() => {
   dropPendingOpen();
   useLayoutStore.getState().load(structuredClone(DEFAULT_LAYOUT));
-  useLayoutStore.getState().setSymbol(CELL, { code: "005930", nxtEnabled: true }, "nxt");
+  useLayoutStore.getState().setSymbol(CELL, { code: "005930" });
   useLayoutStore.getState().setPeriod(CELL, "W");
   useSelectionStore.setState({ activeCell: CELL, phoneTab: "screener", toast: null });
   useWatchlistStore.getState().load(DEFAULT_WATCHLISTS);
@@ -27,14 +27,14 @@ test("결과 열기는 현재 칸의 거래소와 주기를 유지하고 휴대�
   const query = client();
   query.setQueryData(["symbol", "000660"], symbol("000660"));
   await openResult(query, "000660", null);
-  expect(cell()).toMatchObject({ symbol: "000660", venue: "nxt", period: "W" });
+  expect(cell()).toMatchObject({ symbol: "000660", period: "W" });
   expect(useSelectionStore.getState().phoneTab).toBe("chart");
 });
 
 test("종목 정보가 실패해도 통합으로 결과를 열 수 있다", async () => {
   vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("offline")));
   await openResult(client(), "000660", null);
-  expect(cell()).toMatchObject({ symbol: "000660", venue: "combined", period: "W" });
+  expect(cell()).toMatchObject({ symbol: "000660", period: "W" });
 });
 
 test("빠른 다음 열기는 늦은 이전 응답보다 우선한다", async () => {
@@ -54,7 +54,7 @@ test.each(["chart", "tab", "unmount"])("정보 대기 중 다른 선택은 늦�
   let resolve: (response: Response) => void = () => {};
   vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>((done) => { resolve = done; })));
   const opened = openResult(client(), "000660", null);
-  if (change === "chart") useLayoutStore.getState().setSymbol(CELL, { code: "035420", nxtEnabled: true });
+  if (change === "chart") useLayoutStore.getState().setSymbol(CELL, { code: "035420" });
   else if (change === "tab") useSelectionStore.getState().setPhoneTab("watch");
   else dropPendingOpen();
   resolve(Response.json(symbol("000660")));
@@ -73,7 +73,7 @@ test("연동 색이 켜진 스크리너 창은 그 색의 차트로 결과를 �
   expect(useSelectionStore.getState().toast?.text).toBe("연동 A를 따르는 차트가 없습니다. 차트의 연동 색을 A로 맞추세요");
   useLayoutStore.getState().setLink(CELL, "a");
   await openResult(query, "000660", screener);
-  expect(cell()).toMatchObject({ symbol: "000660", venue: "nxt", period: "W" });
+  expect(cell()).toMatchObject({ symbol: "000660", period: "W" });
 });
 
 test("관심종목 저장은 기존 목록의 중복을 건너뛰고 결과 순서를 유지한다", () => {

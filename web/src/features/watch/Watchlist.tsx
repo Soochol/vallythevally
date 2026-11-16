@@ -531,7 +531,7 @@ function WatchRow({ list, row, index, last, columns, template, variant, sender, 
   const label = unknown ? [name, "찾을 수 없음"] : [name, values, limited ? "실시간 아님" : ""];
 
   const open = () => {
-    const { notice } = useLayoutStore.getState().sendSymbol(sender, cellId, info ?? { code, nxtEnabled: false });
+    const { notice } = useLayoutStore.getState().sendSymbol(sender, cellId, info ?? { code });
     if (notice) useSelectionStore.getState().showToast(notice);
     if (variant === "phone") useSelectionStore.getState().setPhoneTab("chart");
   };

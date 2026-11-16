@@ -362,7 +362,13 @@ const ohlcCells = (bar: Bar, prev: Bar | null) => [
 const PRICE_MA: IndicatorConfig = { id: "ma-price", spec: { kind: "ma", method: "sma", period: 5 }, panel: "price", visible: true, style: { colors: ["ind-2"], width: 1 } };
 const VOLUME_ID = DEFAULT_CHART_SETTINGS.indicators[0]!.id;
 const legendSwitch = (page: Page) => popover(page).getByRole("switch", { name: /^범례/ });
-const venues = (page: Page) => cell(page).getByRole("group", { name: "거래소", exact: true });
+const venues = (page: Page) => page.getByRole("group", { name: "거래소", exact: true });
+const fallbackBadge = (page: Page) => cell(page).getByText("통합", { exact: true });
+
+function showFallbackBadge(scenario: Scenario) {
+  scenario.reply("/api/symbols/005930", { body: { code: "005930", name: "삼성전자", kind: "common", market: "kospi", nxtEnabled: false } });
+  scenario.documents.saveUiState({ ...scenario.documents.uiState(), venue: "nxt" });
+}
 const legendRows = (page: Page) => ({
   name: cell(page).locator(".chart-legend [role=heading]"),
   priceRow: cell(page).locator("[data-price-row]"),
@@ -379,13 +385,14 @@ async function expectLegendOff(page: Page) {
   for (const row of Object.values(rows)) await expect(row).toBeHidden();
   await expect(ohlc(page)).toBeVisible();
   await expect(cell(page).locator(`[data-indicator-row="${VOLUME_ID}"]`)).toBeVisible();
-  const venue = await middle(venues(page));
+  const venue = await middle(fallbackBadge(page));
   const values = await middle(ohlc(page));
   expect(Math.abs(venue.y - values.y)).toBeLessThan(8);
   expect(venue.right).toBeLessThanOrEqual(values.left);
 }
 
-test("범례 스위치를 끄면 거래소와 봉 값 줄만 한 줄로 남기고, 봉 주기를 바꾸거나 새로고침해도 꺼진 채다", async ({ page, scenario }) => {
+test("범례 스위치를 끄면 통합 표시와 봉 값 줄만 한 줄로 남기고, 봉 주기를 바꾸거나 새로고침해도 꺼진 채다", async ({ page, scenario }) => {
+  showFallbackBadge(scenario);
   openWith(scenario, { indicators: [...DEFAULT_CHART_SETTINGS.indicators, PRICE_MA], compare: ["000660"] });
   await open(page);
   const rows = legendRows(page);
@@ -405,9 +412,6 @@ test("범례 스위치를 끄면 거래소와 봉 값 줄만 한 줄로 남기�
   await expect.poll(() => saved(scenario).showOhlcChange).toBe(true);
 
   await page.keyboard.press("Escape");
-  await venues(page).getByRole("button", { name: "KRX", exact: true }).click();
-  await expect(cell(page)).toHaveAttribute("aria-label", /: 삼성전자 KRX 일$/);
-  await expect(cell(page)).toHaveAttribute("aria-busy", "false");
   await expectLegendOff(page);
 
   await selectMinute(page.getByRole("toolbar", { name: "차트 도구 막대" }).getByRole("button", { name: "분봉", exact: true }), { label: "5분" });
@@ -417,7 +421,7 @@ test("범례 스위치를 끄면 거래소와 봉 값 줄만 한 줄로 남기�
   await expect.poll(() => firstChart(scenario.documents.layout(DEFAULT_LAYOUT_ID)).period).toBe("5m");
 
   await reload(page);
-  await expect(cell(page)).toHaveAttribute("aria-label", /: 삼성전자 KRX 5분$/);
+  await expect(cell(page)).toHaveAttribute("aria-label", /: 삼성전자 통합 5분$/);
   await expectLegendOff(page);
   expect(saved(scenario)).toMatchObject({ showLegend: false, showOhlcChange: true });
   expect(saved(scenario)).not.toHaveProperty("showOhlc");
@@ -426,25 +430,25 @@ test("범례 스위치를 끄면 거래소와 봉 값 줄만 한 줄로 남기�
 
   await legendSwitch(page).click();
   for (const row of [...Object.values(rows), ohlc(page)]) await expect(row).toBeVisible();
-  const venue = await middle(venues(page));
+  const venue = await middle(fallbackBadge(page));
   const name = await middle(rows.name);
   expect(Math.abs(venue.y - name.y)).toBeLessThan(8);
   await expect.poll(() => saved(scenario).showLegend).toBe(true);
 });
 
-test("범례를 끈 채 거래소 조회가 실패해도 봉 값 줄 앞의 거래소에서 다른 거래소로 복구한다", async ({ page, scenario }) => {
+test("범례를 끈 채 거래소 조회가 실패해도 위 막대에서 다른 거래소로 복구한다", async ({ page, scenario }) => {
   openWith(scenario, { showLegend: false });
   await page.route("**/api/bars?*", (route) => new URL(route.request().url()).searchParams.get("venue") === "krx"
     ? route.fulfill({ status: 503, json: { error: { code: "kiwoom_unavailable", message: "시험용 KRX 조회 실패" } } })
     : route.fallback());
   await open(page);
-  await expectLegendOff(page);
+  await expect(ohlc(page)).toBeVisible();
   await venues(page).getByRole("button", { name: "KRX", exact: true }).click();
   await expect(cell(page).getByRole("button", { name: "다시 시도", exact: true })).toBeVisible();
   await venues(page).getByRole("button", { name: "통합", exact: true }).click({ timeout: 3000 });
   await expect(cell(page)).toHaveAttribute("aria-label", /: 삼성전자 통합 일$/);
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
-  await expectLegendOff(page);
+  await expect(ohlc(page)).toBeVisible();
 });
 
 test("showOhlc: false가 든 옛 설정은 봉 값 줄과 범례를 모두 보인다", async ({ page, scenario }) => {
@@ -460,7 +464,8 @@ test("showOhlc: false가 든 옛 설정은 봉 값 줄과 범례를 모두 보�
   expect(saved(scenario)).not.toHaveProperty("showOhlc");
 });
 
-test("범례를 끈 좁은 칸에서는 봉 값이 거래소 옆에서, 값 한 칸도 들어가지 않으면 거래소 아래에서 줄을 바꾸고 오류 안내는 범례 안의 다음 줄에 한 줄로 둔다", async ({ page, scenario }) => {
+test("범례를 끈 좁은 칸에서는 봉 값이 통합 표시 옆에서 줄을 바꾸고 오류 안내는 범례 안의 다음 줄에 한 줄로 둔다", async ({ page, scenario }) => {
+  showFallbackBadge(scenario);
   await page.setViewportSize({ width: 993, height: 800 });
   openWith(scenario, { showLegend: false, showOhlcChange: true });
   saveChartShare(scenario, 0.4);
@@ -469,7 +474,7 @@ test("범례를 끈 좁은 칸에서는 봉 값이 거래소 옆에서, 값 한 
   scenario.live.emit({ type: "sub_error", sub: scenario.live.subscriptions().find((s) => s.symbol === "005930")!.sub, code: "realtime_limit" });
   const notice = cell(page).getByText("실시간 한도 초과: 조회 값만 보입니다", { exact: true });
   await expect(notice).toBeVisible();
-  const venue = await middle(venues(page));
+  const venue = await middle(fallbackBadge(page));
   const first = await middle(ohlc(page).locator(":scope > span").first());
   expect(Math.abs(venue.y - first.y)).toBeLessThan(8);
   const legend = (await cell(page).locator(".chart-legend").boundingBox())!;
@@ -479,9 +484,9 @@ test("범례를 끈 좁은 칸에서는 봉 값이 거래소 옆에서, 값 한 
   }
   expect(await notice.evaluate((el) => { const range = document.createRange(); range.selectNodeContents(el); return range.getClientRects().length; })).toBe(1);
 
+  const wide = (await cell(page).locator(".chart-legend").boundingBox())!.width;
   await page.setViewportSize({ width: 793, height: 800 });
-  await expect.poll(async () => (await venues(page).boundingBox())!.y + (await venues(page).boundingBox())!.height - (await ohlc(page).boundingBox())!.y)
-    .toBeLessThanOrEqual(0);
+  await expect.poll(async () => (await cell(page).locator(".chart-legend").boundingBox())!.width).toBeLessThan(wide);
   const narrow = (await cell(page).locator(".chart-legend").boundingBox())!;
   for (const value of await ohlc(page).locator(":scope > span").all()) {
     const box = (await value.boundingBox())!;
@@ -490,6 +495,7 @@ test("범례를 끈 좁은 칸에서는 봉 값이 거래소 옆에서, 값 한 
 });
 
 test("봉 값이 그대로면 크기가 바뀌어 다시 그려도 봉 값 줄의 칸을 새로 만들지 않는다", async ({ page, scenario }) => {
+  showFallbackBadge(scenario);
   await page.setViewportSize({ width: 993, height: 800 });
   openWith(scenario, { showLegend: false, showOhlcChange: true });
   saveChartShare(scenario, 0.4);
@@ -509,21 +515,21 @@ test("봉 값이 그대로면 크기가 바뀌어 다시 그려도 봉 값 줄�
     }).observe(line, { childList: true });
     (window as unknown as { rebuiltOhlc: typeof rebuilt }).rebuiltOhlc = rebuilt;
   });
+  const wide = (await cell(page).locator(".chart-legend").boundingBox())!.width;
   await page.setViewportSize({ width: 793, height: 800 });
-  await expect.poll(async () => (await venues(page).boundingBox())!.y + (await venues(page).boundingBox())!.height - (await ohlc(page).boundingBox())!.y)
-    .toBeLessThanOrEqual(0);
+  await expect.poll(async () => (await cell(page).locator(".chart-legend").boundingBox())!.width).toBeLessThan(wide);
   await page.waitForTimeout(1000);
   expect(await page.evaluate(() => (window as unknown as { rebuiltOhlc: unknown[] }).rebuiltOhlc)).toEqual([]);
 });
 
-test("범례를 끈 지수는 거래소 자리 없이 봉 값이 범례 왼쪽 끝에서 시작한다", async ({ page, scenario }) => {
+test("범례를 끈 지수는 통합 표시 자리 없이 봉 값이 범례 왼쪽 끝에서 시작한다", async ({ page, scenario }) => {
   const layout = scenario.documents.layout(DEFAULT_LAYOUT_ID);
   scenario.documents.saveLayout({ ...layout, revision: layout.revision + 1, windows: withFirstChart(layout, { symbol: "IDX:001", venue: null, period: "D",
     chartSettings: { ...DEFAULT_CHART_SETTINGS, showLegend: false } }) });
   await page.goto("/");
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
   await expect(ohlc(page)).toBeVisible();
-  await expect(venues(page)).toHaveCount(0);
+  await expect(fallbackBadge(page)).toHaveCount(0);
   const legend = (await cell(page).locator(".chart-legend").boundingBox())!;
   expect((await ohlc(page).boundingBox())!.x).toBe(legend.x);
 });
@@ -551,7 +557,6 @@ test("390x844에서 범례를 끄면 봉 값 줄만 남고 휴대폰 머리의 �
   await expect(ohlc(page)).toBeVisible();
   await expect(legendRows(page).maRow).toBeHidden();
   await expect(legendRows(page).compareRow).toBeHidden();
-  await expect(venues(page)).toBeHidden();
   await expect(page.getByRole("group", { name: "거래소", exact: true })).toBeVisible();
 });
 

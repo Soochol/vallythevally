@@ -12,6 +12,7 @@ import { openIndicatorCommand } from "../indicator-command/open";
 import { BrandIcon, ChevronIcon, CameraIcon, CopyIcon, IndicatorIcon, SearchIcon, SlidersIcon, CompareIcon } from "../icons";
 import { canCopyImage, saveSnapshot } from "../snapshot/saveSnapshot";
 import { LayoutMenu } from "../layouts/LayoutMenu";
+import { VenuePicker } from "../venue/VenuePicker";
 import { AddWindowMenu } from "../workspace/AddWindowMenu";
 
 export function Topbar() {
@@ -44,12 +45,13 @@ export function Topbar() {
       <button type="button" className="tb-btn" aria-label="지표" aria-haspopup={opensDialog ? "dialog" : undefined} title="지표 (I)" onClick={() => openIndicatorCommand(cellId)}><IndicatorIcon /><span className="max-lg:hidden">지표</span></button>
       <button type="button" className="tb-btn" aria-label="비교" aria-haspopup={opensDialog ? "dialog" : undefined} title="비교 종목" onClick={() => openIndicatorCommand(cellId, "compare")}><CompareIcon /><span className="max-lg:hidden">비교</span></button>
       <span className="min-w-0 flex-1" />
+      <VenuePicker variant="desktop" />
       <LayoutMenu />
       <AddWindowMenu />
       <FinancialUpdateButton />
       <button type="button" className="icon-btn" title="차트 이미지 내려받기 (Alt+S)" aria-label="차트 이미지 내려받기" onClick={() => saveSnapshot(cellId, "download")}><CameraIcon /></button>
       {canCopyImage() && <button type="button" className="icon-btn" title="차트 이미지 복사 (Alt+Shift+S)" aria-label="차트 이미지 복사" onClick={() => saveSnapshot(cellId, "copy")}><CopyIcon /></button>}
-      <button ref={settingsButton} type="button" className="tb-btn aria-expanded:bg-accent-soft aria-expanded:font-semibold aria-expanded:text-accent" aria-haspopup="dialog" aria-expanded={settingsOpen} onClick={() => setSettingsOpen((open) => !open)}><SlidersIcon />차트 설정</button>
+      <button ref={settingsButton} type="button" className="tb-btn aria-expanded:bg-accent-soft aria-expanded:font-semibold aria-expanded:text-accent" aria-label="차트 설정" aria-haspopup="dialog" aria-expanded={settingsOpen} onClick={() => setSettingsOpen((open) => !open)}><SlidersIcon /><span className="max-xl:hidden">차트 설정</span></button>
       {settingsOpen && <ChartSettingsPopover cellId={cellId} anchor={settingsButton} onClose={() => setSettingsOpen(false)} />}
       <button type="button" className="tb-btn shell-search" aria-haspopup="dialog" aria-label="종목·지표·명령 찾기" title="종목 검색 (/ 또는 Ctrl+K)" onClick={() => openSearch()}>
         <SearchIcon size={14} />
