@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { useKiwoomLinkStore } from "../stores/kiwoomLink";
+import { receiveKiwoomLinkPush, useKiwoomLinkStore } from "../stores/kiwoomLink";
 import type { KiwoomLinkStatus } from "./generated/KiwoomLinkStatus";
 import type { SystemSettings } from "./generated/SystemSettings";
 import type { KiwoomConnectInput } from "./generated/KiwoomConnectInput";
@@ -40,5 +40,9 @@ export const deleteKiwoomKey = () => applyLink(() => sendJson<KiwoomLinkStatus>(
 export const connectKiwoom = (input: KiwoomConnectInput) => applyLink(() => post(`${KIWOOM}/connect`, input));
 export const disconnectKiwoom = () => applyLink(() => post(`${KIWOOM}/disconnect`));
 export const recheckKiwoomTokenFile = () => applyLink(() => post(`${KIWOOM}/recheck-token-file`));
-export const saveRegisteredIp = (input: RegisteredIpInput) => applyLink(() => putJson<KiwoomLinkStatus>(`${KIWOOM}/registered-ip`, input));
+export async function saveRegisteredIp(input: RegisteredIpInput): Promise<void> {
+  const { registeredIp } = await putJson<KiwoomLinkStatus>(`${KIWOOM}/registered-ip`, input);
+  const current = useKiwoomLinkStore.getState().status;
+  if (current) receiveKiwoomLinkPush({ ...current, registeredIp });
+}
 export const checkPublicIp = () => sendJson<PublicIpCheck>("POST", `${KIWOOM}/ip-check`, "{}");

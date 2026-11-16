@@ -50,14 +50,14 @@ export function KiwoomIpHelp({ status, openByItself, checked, onChecked, command
             <p className="text-s text-text-3">누를 때만 서버가 외부 서비스에 한 번 묻습니다. 서버의 공인 IP가 그 서비스에 알려지고, 키와 토큰은 보내지 않습니다.</p>
             {checked && (
               <div className="flex flex-col gap-1">
-                <div className="flex items-center gap-2">
-                  <span className="font-mono text-m text-text">{checked.ip}</span>
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="min-w-0 break-all font-mono text-m text-text">{checked.ip}</span>
                   <button type="button" className="tb-btn h-7 px-2 text-s" onClick={() => void copy()}>{copied ? "복사됨" : "복사"}</button>
                 </div>
                 <p className="text-s text-text-3">마지막 확인 <time>{formatKstClockSeconds(checked.checkedAt)}</time></p>
               </div>
             )}
-            {status?.registeredIp && <p className="text-s text-text-3">마지막으로 포털에 등록한 IP <span className="font-mono">{status.registeredIp.ip}</span></p>}
+            {status?.registeredIp && <p className="text-s text-text-3">마지막으로 포털에 등록한 IP <span className="break-all font-mono">{status.registeredIp.ip}</span></p>}
             {ipDiffers(checked?.ip ?? null, status) && <p role="alert" className="text-s text-warning">지금 공인 IP와 다릅니다. 공유기·통신사에서 IP가 바뀌었을 수 있습니다</p>}
           </div>
           <ol className="flex list-decimal flex-col gap-1 pl-5 text-m text-text-2">

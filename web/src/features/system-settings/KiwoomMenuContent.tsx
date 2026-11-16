@@ -22,9 +22,15 @@ export function KiwoomMenuContent() {
     if (!view.needsConfirmations) setConfirmations(NO_CONFIRMATIONS);
   }, [view.needsConfirmations]);
 
-  const confirm = (next: Confirmations, registeredIpChecked: boolean) => {
+  const confirm = async (next: Confirmations, registeredIpChecked: boolean) => {
     setConfirmations(next);
-    if (registeredIpChecked && checkedIp) void command.run(() => saveRegisteredIp({ ip: checkedIp.ip }));
+    if (!registeredIpChecked || !checkedIp) return;
+    if (!(await command.run(() => saveRegisteredIp({ ip: checkedIp.ip })))) setConfirmations((c) => ({ ...c, registeredIp: false }));
+  };
+
+  const connect = async (acknowledged: boolean) => {
+    await command.run(() => connectKiwoom({ acknowledged }));
+    if (useKiwoomLinkStore.getState().status?.problem === "authBlocked8050") setConfirmations(NO_CONFIRMATIONS);
   };
 
   return (
@@ -33,9 +39,9 @@ export function KiwoomMenuContent() {
         status={status}
         view={view}
         confirmations={confirmations}
-        onConfirm={confirm}
+        onConfirm={(next, registeredIpChecked) => void confirm(next, registeredIpChecked)}
         busy={command.busy}
-        onConnect={(acknowledged) => void command.run(() => connectKiwoom({ acknowledged }))}
+        onConnect={(acknowledged) => void connect(acknowledged)}
         onDisconnect={() => void command.run(disconnectKiwoom)}
         onRecheckTokenFile={() => void command.run(recheckKiwoomTokenFile)}
       />

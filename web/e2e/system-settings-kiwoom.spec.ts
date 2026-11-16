@@ -82,9 +82,14 @@ test.describe("1440×900", () => {
       expect(consoleText.join("\n")).not.toContain(secret);
     }
     for (const request of scenario.requests) {
-      expect(request.url()).not.toContain(FAKE_APP_KEY);
-      expect(JSON.stringify(await request.allHeaders())).not.toContain(FAKE_APP_SECRET);
+      for (const secret of [FAKE_APP_KEY, FAKE_APP_SECRET]) {
+        expect(decodeURIComponent(request.url())).not.toContain(secret);
+        expect(JSON.stringify(await request.allHeaders())).not.toContain(secret);
+      }
     }
+    const [put] = callsTo(scenario, "PUT", "/api/system/kiwoom/key");
+    expect(new URL(put!.url()).search).toBe("");
+    expect(await put!.headerValue("content-type")).toContain("application/json");
 
     await panel(page).getByRole("button", { name: "키움에 연결" }).dblclick();
     await connect.received;
@@ -116,7 +121,23 @@ test.describe("1440×900", () => {
     await panel(page).getByRole("button", { name: "지우기" }).click();
     await page.getByRole("dialog", { name: "저장한 키움 키를 지웁니다" }).getByRole("button", { name: "키 지우기" }).click();
     await expect(panel(page).getByRole("heading", { name: "키 없음" })).toBeVisible();
-    expect(callsTo(scenario, "DELETE", "/api/system/kiwoom/key")).toHaveLength(1);
+    const deletes = callsTo(scenario, "DELETE", "/api/system/kiwoom/key");
+    expect(deletes).toHaveLength(1);
+    expect(await deletes[0]!.headerValue("content-type")).toContain("application/json");
+  });
+
+  test("저장하고 지워 키 없음으로 돌아오면 입력칸은 비어 있다", async ({ page, scenario }) => {
+    scenario.live.kiwoomLink = NO_KEY;
+    scenario.on(route("PUT", "/api/system/kiwoom/key"), () => { scenario.live.link(DISCONNECTED); return { body: DISCONNECTED }; });
+    scenario.on(route("DELETE", "/api/system/kiwoom/key"), () => { scenario.live.link(NO_KEY); return { body: NO_KEY }; });
+    await openKiwoom(page);
+    await page.getByLabel("앱키", { exact: true }).fill(FAKE_APP_KEY);
+    await page.getByLabel("시크릿", { exact: true }).fill(FAKE_APP_SECRET);
+    await page.getByRole("button", { name: "저장" }).click();
+    await panel(page).getByRole("button", { name: "지우기" }).click();
+    await page.getByRole("dialog", { name: "저장한 키움 키를 지웁니다" }).getByRole("button", { name: "키 지우기" }).click();
+    await expect(page.getByLabel("앱키", { exact: true })).toHaveValue("");
+    await expect(page.getByLabel("시크릿", { exact: true })).toHaveValue("");
   });
 
   test("환경 키면 폼이 막히고 배지와 가린 값만 보인다", async ({ page, scenario }) => {
@@ -151,6 +172,7 @@ test.describe("1440×900", () => {
     const ipHelp = panel(page).getByRole("button", { name: /공인 IP 확인 · 포털 안내/ });
     await expect(ipHelp).toHaveAttribute("aria-expanded", "true");
     await expect(reconnect).toBeDisabled();
+    expect(callsTo(scenario, "POST", "/api/system/kiwoom/ip-check")).toHaveLength(0);
 
     await panel(page).getByRole("button", { name: "내 공인 IP 확인" }).click();
     await expect(panel(page)).toContainText("203.0.113.7");
@@ -174,6 +196,79 @@ test.describe("1440×900", () => {
     await connect.received;
     expect(callsTo(scenario, "POST", "/api/system/kiwoom/connect")[0]!.postDataJSON()).toEqual({ acknowledged: true } satisfies KiwoomConnectInput);
     connect.reply({ body: { ...CONNECTED_KIWOOM } });
+  });
+
+  test("등록한 IP 저장이 실패하면 확인이 풀려 다시 연결 단추가 꺼진 채다", async ({ page, scenario }) => {
+    scenario.live.kiwoomLink = failed("authBlocked8050", null, BLOCKED_MESSAGE, { needsAcknowledgement: true });
+    scenario.on(route("POST", "/api/system/kiwoom/ip-check"), () => ({ body: { ip: "203.0.113.7", checkedAt: serverSeconds(scenario) } satisfies PublicIpCheck }));
+    scenario.on(route("PUT", "/api/system/kiwoom/registered-ip"), () => ({ status: 500, body: { error: { code: "internal", message: "등록한 IP를 파일에 쓰지 못했습니다", reason: null, retryAt: null, manualActionRequired: false } } }));
+    await openKiwoom(page);
+    await panel(page).getByRole("button", { name: "내 공인 IP 확인" }).click();
+    await expect(panel(page)).toContainText("203.0.113.7");
+    await panel(page).getByLabel("반복 발급 잠금이 풀렸는지 확인했습니다").check();
+    await panel(page).getByLabel("포털에 지금 공인 IP를 등록했습니다").check();
+    await expect(panel(page).getByRole("alert").filter({ hasText: "등록한 IP를 파일에 쓰지 못했습니다" })).toBeVisible();
+    await expect(panel(page).getByLabel("포털에 지금 공인 IP를 등록했습니다")).not.toBeChecked();
+    await expect(panel(page).getByRole("button", { name: /^다시 연결/ })).toBeDisabled();
+  });
+
+  test("연결을 눌러 8050이 다시 오면 확인 칸을 다시 받는다", async ({ page, scenario }) => {
+    scenario.live.kiwoomLink = failed("authBlocked8050", null, BLOCKED_MESSAGE, { needsAcknowledgement: true });
+    const refused = failed("authBlocked8050", serverSeconds(scenario) + 600, BLOCKED_MESSAGE, { needsAcknowledgement: true });
+    scenario.on(route("POST", "/api/system/kiwoom/connect"), () => { scenario.live.link(refused); return { body: refused }; });
+    await openKiwoom(page);
+    await panel(page).getByLabel("포털에 지금 공인 IP를 등록했습니다").check();
+    await panel(page).getByLabel("반복 발급 잠금이 풀렸는지 확인했습니다").check();
+    await panel(page).getByRole("button", { name: /^다시 연결/ }).click();
+    await expect(panel(page).getByLabel("반복 발급 잠금이 풀렸는지 확인했습니다")).not.toBeChecked();
+    await expect(panel(page).getByLabel("포털에 지금 공인 IP를 등록했습니다")).not.toBeChecked();
+    await expect(panel(page).getByRole("button", { name: /^다시 연결/ })).toBeDisabled();
+  });
+
+  test("확인한 연결이 간격 안이라 대기로 돌아와도 확인은 남고, 간격 뒤 acknowledged로 다시 보낸다", async ({ page, scenario }) => {
+    scenario.live.kiwoomLink = failed("authBlocked8050", null, BLOCKED_MESSAGE, { needsAcknowledgement: true });
+    const waiting = failed("issueIntervalWait", serverSeconds(scenario) + 3, "키움 토큰은 발급 사이를 10분 띄웁니다", { needsAcknowledgement: true });
+    const bodies: KiwoomConnectInput[] = [];
+    scenario.on(route("POST", "/api/system/kiwoom/connect"), (request) => {
+      bodies.push(request.postDataJSON());
+      if (bodies.length === 1) { scenario.live.link(waiting); return { body: waiting }; }
+      return { body: CONNECTED_KIWOOM };
+    });
+    await openKiwoom(page);
+    await panel(page).getByLabel("포털에 지금 공인 IP를 등록했습니다").check();
+    await panel(page).getByLabel("반복 발급 잠금이 풀렸는지 확인했습니다").check();
+    await panel(page).getByRole("button", { name: /^다시 연결/ }).click();
+    const reconnect = panel(page).getByRole("button", { name: /^다시 연결/ });
+    await expect(reconnect).toContainText("뒤 가능");
+    await expect(panel(page).getByLabel("반복 발급 잠금이 풀렸는지 확인했습니다")).toBeChecked();
+    await expect(reconnect).toBeEnabled({ timeout: 8000 });
+    await reconnect.click();
+    await expect.poll(() => bodies).toEqual([{ acknowledged: true }, { acknowledged: true }]);
+  });
+
+  test("등록한 IP를 저장하는 동안 푸시가 와도 저장한 IP가 보인다", async ({ page, scenario }) => {
+    const blocked = failed("authBlocked8050", null, BLOCKED_MESSAGE, { needsAcknowledgement: true });
+    scenario.live.kiwoomLink = blocked;
+    scenario.on(route("POST", "/api/system/kiwoom/ip-check"), () => ({ body: { ip: "203.0.113.7", checkedAt: serverSeconds(scenario) } satisfies PublicIpCheck }));
+    const saving = scenario.hold(route("PUT", "/api/system/kiwoom/registered-ip"));
+    await openKiwoom(page);
+    await panel(page).getByRole("button", { name: "내 공인 IP 확인" }).click();
+    await expect(panel(page)).toContainText("203.0.113.7");
+    await panel(page).getByLabel("포털에 지금 공인 IP를 등록했습니다").check();
+    await saving.received;
+    scenario.live.link({ ...blocked, message: BLOCKED_MESSAGE });
+    saving.reply({ body: { ...blocked, registeredIp: { ip: "203.0.113.7", at: serverSeconds(scenario) } } });
+    await expect(panel(page)).toContainText("마지막으로 포털에 등록한 IP 203.0.113.7");
+  });
+
+  test("체크 칸을 키보드로 눌러도 초점이 칸에 남는다", async ({ page, scenario }) => {
+    scenario.live.kiwoomLink = failed("authBlocked8050", null, BLOCKED_MESSAGE, { needsAcknowledgement: true });
+    await openKiwoom(page);
+    const lock = panel(page).getByLabel("반복 발급 잠금이 풀렸는지 확인했습니다");
+    await lock.focus();
+    await page.keyboard.press("Space");
+    await expect(lock).toBeChecked();
+    await expect(lock).toBeFocused();
   });
 
   test("8050 확인 칸은 8050이 풀리면 비워진다", async ({ page, scenario }) => {
@@ -248,8 +343,8 @@ test.describe("360px 폭", () => {
   test.use({ viewport: { width: 360, height: 800 } });
 
   test("8050 화면과 키 폼이 가로 스크롤 없이 들어간다", async ({ page, scenario }) => {
-    scenario.live.kiwoomLink = failed("authBlocked8050", serverSeconds(scenario) + 570, BLOCKED_MESSAGE, { needsAcknowledgement: true, registeredIp: { ip: "2001:db8:85a3:0:0:8a2e:370:7334", at: serverSeconds(scenario) } });
-    scenario.on(route("POST", "/api/system/kiwoom/ip-check"), () => ({ body: { ip: "2001:db8:85a3:0:0:8a2e:370:7335", checkedAt: serverSeconds(scenario) } satisfies PublicIpCheck }));
+    scenario.live.kiwoomLink = failed("authBlocked8050", serverSeconds(scenario) + 570, BLOCKED_MESSAGE, { needsAcknowledgement: true, registeredIp: { ip: "2001:db8:aaaa:bbbb:cccc:dddd:eeee:fff0", at: serverSeconds(scenario) } });
+    scenario.on(route("POST", "/api/system/kiwoom/ip-check"), () => ({ body: { ip: "2001:db8:aaaa:bbbb:cccc:dddd:eeee:ffff", checkedAt: serverSeconds(scenario) } satisfies PublicIpCheck }));
     await page.goto("/?symbol=005930");
     await expect(cell(page)).toBeVisible();
     await page.getByRole("button", { name: "시스템 설정", exact: true }).click();

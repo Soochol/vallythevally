@@ -43,10 +43,10 @@ export function KiwoomStatusCard({ status, view, confirmations, onConfirm, busy,
       {status && view.stage === "connecting" && <Steps step={status.step} />}
       {status && view.stage === "connected" && <ConnectedFacts status={status} />}
       {view.countdown && status?.retryAt != null && <Waiting retryAt={status.retryAt} remaining={view.countdown.remainingSeconds} progress={view.countdown.progress} />}
-      {view.stage === "keyNeedsCheck" && <p className="text-m text-text">앱키·시크릿을 확인하세요. 새 키를 저장하면 풀립니다.</p>}
+      {view.stage === "keyNeedsCheck" && <p className="text-m text-text">{status?.keySource === "env" ? "앱키·시크릿을 확인하세요." : "앱키·시크릿을 확인하세요. 새 키를 저장하면 풀립니다."}</p>}
       {view.stage === "pathStopped" && <p className="text-m text-text">서버 로그를 확인하세요. 이 상태만 서버를 다시 켜야 풀립니다.</p>}
       {view.stage === "tokenFileUnusable" && <TokenFile busy={busy} onRecheck={onRecheckTokenFile} />}
-      {view.needsConfirmations && <Confirm confirmations={confirmations} onConfirm={onConfirm} disabled={busy} />}
+      {view.needsConfirmations && <Confirm confirmations={confirmations} onConfirm={onConfirm} />}
       {view.connect && (
         <div className="flex flex-col items-start gap-2">
           <button type="button" className="btn-primary h-9 px-4 disabled:cursor-not-allowed disabled:opacity-50" disabled={!view.connect.enabled || busy} onClick={() => onConnect(view.connect!.acknowledged)}>
@@ -117,9 +117,9 @@ function TokenFile({ busy, onRecheck }: { busy: boolean; onRecheck(): void }) {
   );
 }
 
-function Confirm({ confirmations, onConfirm, disabled }: { confirmations: Confirmations; onConfirm(next: Confirmations, registeredIpChecked: boolean): void; disabled: boolean }) {
+function Confirm({ confirmations, onConfirm }: { confirmations: Confirmations; onConfirm(next: Confirmations, registeredIpChecked: boolean): void }) {
   return (
-    <fieldset className="flex flex-col gap-2 border-0 p-0" disabled={disabled}>
+    <fieldset className="flex flex-col gap-2 border-0 p-0">
       <legend className="sr-only">다시 연결하기 전 확인</legend>
       <label className="flex items-start gap-2 text-m">
         <input type="checkbox" className="mt-1" checked={confirmations.registeredIp} onChange={(e) => onConfirm({ ...confirmations, registeredIp: e.target.checked }, e.target.checked)} />

@@ -48,7 +48,7 @@ export function KiwoomKeyForm({ status, command }: { status: KiwoomLinkStatus | 
             <input className={FIELD} type={type} name="kiwoom-app-secret" autoComplete="off" spellCheck={false} disabled={locked || command.busy} value={form.appSecret} onChange={(e) => dispatch({ type: "appSecret", value: e.target.value })} />
           </label>
           <div className="flex flex-wrap items-center gap-2">
-            <button type="button" className="tb-btn h-9 px-3" aria-pressed={form.reveal} onClick={() => dispatch({ type: "toggleReveal" })}>{form.reveal ? "입력 가리기" : "입력 보기"}</button>
+            <button type="button" className="tb-btn h-9 px-3" onClick={() => dispatch({ type: "toggleReveal" })}>{form.reveal ? "입력 가리기" : "입력 보기"}</button>
             <button type="submit" className="btn-primary h-9 px-4 disabled:cursor-not-allowed disabled:opacity-50" disabled={locked || command.busy || !canSaveKey(form)}>저장</button>
             {form.editing && <button type="button" className="tb-btn h-9 px-3" onClick={() => dispatch({ type: "cancel" })}>취소</button>}
           </div>

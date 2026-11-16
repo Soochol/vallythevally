@@ -6,7 +6,7 @@ const base: KiwoomLinkStatus = {
   keySource: "file", appKeyTail: "7Q2D", credentialId: null, state: "disconnected", problem: null, message: "", retryAt: null, needsAcknowledgement: false,
   step: null, tokenExpiresAt: null, realtimeRegistered: null, symbolCount: null, registeredIp: null,
 };
-const failed = (problem: NonNullable<KiwoomLinkStatus["problem"]>, retryAt: number | null = null): KiwoomLinkStatus => ({ ...base, state: "failed", problem, retryAt });
+const failed = (problem: NonNullable<KiwoomLinkStatus["problem"]>, retryAt: number | null = null, patch: Partial<KiwoomLinkStatus> = {}): KiwoomLinkStatus => ({ ...base, state: "failed", problem, retryAt, ...patch });
 const both = { registeredIp: true, lockChecked: true };
 
 describe("상태별 행동", () => {
@@ -77,6 +77,16 @@ describe("인증 차단 8050", () => {
   it("확인 칸과 IP 도움 자동 펼침을 요구한다", () => {
     expect(panelView(blocked, 0, NO_CONFIRMATIONS)).toMatchObject({ needsConfirmations: true, ipHelpOpensByItself: true });
     expect(panelView(failed("issueIntervalWait", 5), 0)).toMatchObject({ needsConfirmations: false, ipHelpOpensByItself: false });
+  });
+  it("확인 뒤 간격 안에서 받은 대기도 확인을 다시 요구하고 acknowledged로 보낸다", () => {
+    const waiting = failed("issueIntervalWait", 1000, { needsAcknowledgement: true });
+    expect(panelView(waiting, 900, both).connect).toMatchObject({ enabled: false, acknowledged: true });
+    expect(panelView(waiting, 1000, NO_CONFIRMATIONS).connect).toMatchObject({ enabled: false, acknowledged: true });
+    expect(panelView(waiting, 1000, both).connect).toMatchObject({ enabled: true, acknowledged: true });
+    expect(panelView(waiting, 1000, both)).toMatchObject({ stage: "wait", needsConfirmations: true, ipHelpOpensByItself: true });
+  });
+  it("확인이 필요 없는 대기는 acknowledged false로 보낸다", () => {
+    expect(panelView(failed("issueIntervalWait", 1000), 1000).connect).toMatchObject({ enabled: true, acknowledged: false });
   });
   it("간격 정보가 없으면 체크만으로 켜진다", () => {
     expect(panelView(failed("authBlocked8050"), 0, both).connect?.enabled).toBe(true);

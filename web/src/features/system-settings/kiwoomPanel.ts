@@ -91,23 +91,22 @@ export function panelView(status: KiwoomLinkStatus | null, now: UnixSeconds, con
 function failedView(base: PanelView, status: KiwoomLinkStatus, now: UnixSeconds, confirmations: Confirmations): PanelView {
   const countdown = countdownOf(status.retryAt, now);
   const elapsed = !countdown || countdown.remainingSeconds === 0;
+  const acknowledging = status.problem === "authBlocked8050" || status.needsAcknowledgement;
+  const confirmed = confirmations.registeredIp && confirmations.lockChecked;
+  const retry = (label: string, enabled: boolean, readyNotice: boolean): ConnectAction => ({ label, enabled, acknowledged: acknowledging, readyNotice });
+  const withConfirmations = { needsConfirmations: acknowledging, ipHelpOpensByItself: acknowledging };
   switch (status.problem) {
-    case "authBlocked8050": {
-      const confirmed = confirmations.registeredIp && confirmations.lockChecked;
-      return {
-        ...base,
-        stage: "authBlocked",
-        countdown,
-        needsConfirmations: true,
-        ipHelpOpensByItself: true,
-        connect: { label: waitingLabel(countdown), enabled: confirmed && elapsed, acknowledged: true, readyNotice: confirmed && elapsed && countdown !== null },
-      };
-    }
+    case "authBlocked8050":
+      return { ...base, ...withConfirmations, stage: "authBlocked", countdown, connect: retry(waitingLabel(countdown), confirmed && elapsed, confirmed && elapsed && countdown !== null) };
     case "issueIntervalWait":
-    case "authUncertain":
-      return { ...base, stage: "wait", countdown, connect: { label: waitingLabel(countdown), enabled: elapsed, acknowledged: false, readyNotice: elapsed } };
-    case "network":
-      return { ...base, stage: "network", countdown, connect: { label: countdown && !elapsed ? waitingLabel(countdown) : "다시 시도", enabled: elapsed, acknowledged: false, readyNotice: false } };
+    case "authUncertain": {
+      const enabled = elapsed && (!acknowledging || confirmed);
+      return { ...base, ...withConfirmations, stage: "wait", countdown, connect: retry(waitingLabel(countdown), enabled, enabled) };
+    }
+    case "network": {
+      const enabled = elapsed && (!acknowledging || confirmed);
+      return { ...base, ...withConfirmations, stage: "network", countdown, connect: retry(countdown && !elapsed ? waitingLabel(countdown) : "다시 시도", enabled, false) };
+    }
     case "keyNeedsCheck":
       return { ...base, stage: "keyNeedsCheck", countdown };
     case "tokenFileUnusable":
