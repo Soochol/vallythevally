@@ -14,6 +14,7 @@ pub const ASSETS: &[Asset] = &[
     Asset { path: "/main.js", content_type: JAVASCRIPT, bytes: include_bytes!("../../page/main.js") },
     Asset { path: "/worker.js", content_type: JAVASCRIPT, bytes: include_bytes!("../../page/worker.js") },
     Asset { path: "/decode.js", content_type: JAVASCRIPT, bytes: include_bytes!("../../page/decode.js") },
+    Asset { path: "/latest.js", content_type: JAVASCRIPT, bytes: include_bytes!("../../page/latest.js") },
     Asset { path: "/seek.js", content_type: JAVASCRIPT, bytes: include_bytes!("../../page/seek.js") },
     Asset { path: "/replay.js", content_type: JAVASCRIPT, bytes: include_bytes!("../../page/replay.js") },
     Asset { path: "/view.js", content_type: JAVASCRIPT, bytes: include_bytes!("../../page/view.js") },

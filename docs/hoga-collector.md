@@ -217,7 +217,7 @@ collector serve [--data <폴더>] [--bind 127.0.0.1:8090]
 
 | 길 | 응답 |
 |---|---|
-| `GET /`, `/style.css`, `/main.js`, `/worker.js`, `/decode.js`, `/seek.js`, `/replay.js`, `/view.js` | 화면 파일. `Cache-Control: no-cache` |
+| `GET /`, `/style.css`, `/main.js`, `/worker.js`, `/decode.js`, `/seek.js`, `/latest.js`, `/replay.js`, `/view.js` | 화면 파일. `Cache-Control: no-cache` |
 | `GET /data/dates.json` | `spans/` 아래 `index.json`이 있는 날짜를 오름차순으로 담은 JSON 문자열 배열(`["20260720"]`). `no-store` |
 | `GET /data/<날짜>/index.json` | `spans/<날짜>/index.json` 그대로. `no-store` |
 | `GET /data/<날짜>/<종목>/<HHMM>-r<N>.hoga` | `spans/<날짜>/<종목>/<HHMM>-r<N>.hoga.br`의 내용 |

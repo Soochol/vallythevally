@@ -1,4 +1,5 @@
 import { openSpan } from "./decode.js";
+import { STALE, latestOnly } from "./latest.js";
 import { SPAN_MINUTES, entryIndexAt } from "./seek.js";
 import { RECENT_TRADE_LIMIT, buildFrame, emptyFrame, formatClock, parseClock } from "./replay.js";
 import { createView } from "./view.js";
@@ -361,22 +362,15 @@ function selectItem(item, startMs) {
   requestGapFiles();
 }
 
-let dateRequest = 0;
+const fetchDayIndex = latestOnly((date) => fetchJson(`/data/${date}/index.json`));
 
 async function selectDate(date, wantedItem, startMs) {
-  const request = ++dateRequest;
   setReady(false);
   setStatus("목록을 받는 중");
   state.entries = [];
   el.date.value = date;
-  let index;
-  try {
-    index = await fetchJson(`/data/${date}/index.json`);
-  } catch (error) {
-    if (request === dateRequest) throw error;
-    return;
-  }
-  if (request !== dateRequest) return;
+  const index = await fetchDayIndex(date);
+  if (index === STALE) return;
   state.date = date;
   el.replay.dataset.date = date;
   state.index = index;

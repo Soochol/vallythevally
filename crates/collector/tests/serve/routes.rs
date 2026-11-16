@@ -122,6 +122,7 @@ async fn page_files_come_with_their_content_types() {
         ("/worker.js", "text/javascript; charset=utf-8"),
         ("/decode.js", "text/javascript; charset=utf-8"),
         ("/seek.js", "text/javascript; charset=utf-8"),
+        ("/latest.js", "text/javascript; charset=utf-8"),
         ("/replay.js", "text/javascript; charset=utf-8"),
         ("/view.js", "text/javascript; charset=utf-8"),
     ];
