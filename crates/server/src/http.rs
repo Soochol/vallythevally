@@ -33,6 +33,8 @@ pub struct AppState {
     pub hub: HubHandle,
     pub screener: Arc<Screener>,
     pub link: Link,
+    pub system: crate::system_routes::SystemState,
+    pub registered: tokio::sync::watch::Receiver<std::collections::BTreeSet<Symbol>>,
 }
 
 pub fn router(state: Arc<AppState>) -> Router {
@@ -47,6 +49,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .merge(crate::drawings::routes())
         .merge(crate::screener::routes())
         .merge(crate::investors::routes())
+        .merge(crate::system_routes::routes(state.clone()))
         .route("/api", any(api_not_found))
         .route("/api/{*rest}", any(api_not_found))
         .method_not_allowed_fallback(method_not_allowed)
@@ -1228,6 +1231,7 @@ mod tests {
         let (mut ws, _) = tokio_tungstenite::connect_async(format!("ws://{addr}/api/ws")).await.unwrap();
         let hello = recv_json(&mut ws).await;
         assert_eq!((hello["type"].as_str(), hello["protocol"].as_i64()), (Some("hello"), Some(1)), "{hello}");
+        assert_eq!(recv_json(&mut ws).await["type"], "kiwoom_link", "hello 바로 뒤에 키움 연결 상태가 온다");
         for text in [
             "not json",
             r#"{"type":"subscribe","sub":"bad","symbol":"IDX:001","venue":"krx","period":"D"}"#,

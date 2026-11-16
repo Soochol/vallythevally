@@ -24,7 +24,7 @@ python3 scripts/dev.py build                                   # target/dev/bin/
 python3 .claude/skills/verify-vally/scripts/build_ui.py target/verify-vally/ui   # frozen pnpm install, WASM, tsc, vite build; can wait a long time on the shared cargo compile lock when other sessions build
 ```
 
-Start one sandbox (prints a JSON state line with `base_url`, `dir`, pids; ready means `GET /` answers 200). The server does not contact Kiwoom when it starts (ADR 0021): the sandbox starts **not connected**, so symbols, bars and realtime are unavailable and API calls answer `reason: "not_connected"` until the Kiwoom connection is made. The system-settings connect route (`/api/system/*`, task `srv-system-api`) does not exist yet. Until it lands, journeys that need symbols (`search-chart`, `watchlist-add`, anything with a chart) cannot reach their precondition and fail; do not weaken them. Once the route exists, `up` must call it against the loopback fake and wait for `/api/symbols?q=005930`.
+Start one sandbox (prints a JSON state line with `base_url`, `dir`, pids; ready means `GET /` answers 200). The server does not contact Kiwoom when it starts (ADR 0021), so `up` connects it: after `GET /` answers 200 it posts `/api/system/kiwoom/connect` (`{"acknowledged": false}`, JSON, loopback Host) against the loopback fake, requires the answer `connected`, and waits until `/api/symbols/005930` returns the symbol. The printed state therefore describes a connected sandbox. The sandbox key file lives in `run/kiwoom-key.json` of the run folder, never in the user's state folder.
 
 ```sh
 python3 .claude/skills/verify-vally/scripts/vv.py up

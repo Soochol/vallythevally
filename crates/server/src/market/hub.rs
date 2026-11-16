@@ -54,8 +54,12 @@ pub struct HubHandle {
 impl HubHandle {
     /// 연결을 등록한다. 허브가 `hello`를 그 연결의 outbox에 넣는다.
     pub fn connect(&self, outbox: Arc<Outbox>) -> ConnId {
+        self.connect_greeted(outbox, None)
+    }
+
+    pub fn connect_greeted(&self, outbox: Arc<Outbox>, greeting: Option<ServerMessage>) -> ConnId {
         let conn = ConnId(self.next_conn.fetch_add(1, Ordering::SeqCst));
-        self.send(HubInput::Connect { conn, outbox });
+        self.send(HubInput::Connect { conn, outbox, greeting });
         conn
     }
 
@@ -96,7 +100,7 @@ impl HubHandle {
 }
 
 enum HubInput {
-    Connect { conn: ConnId, outbox: Arc<Outbox> },
+    Connect { conn: ConnId, outbox: Arc<Outbox>, greeting: Option<ServerMessage> },
     Subscribe { conn: ConnId, sub: SubId, key: SeriesKey },
     Unsubscribe { conn: ConnId, sub: SubId },
     Disconnect(ConnId),
@@ -289,9 +293,9 @@ impl MarketHub {
     fn on_input(&mut self, input: HubInput) {
         let now = self.clock.now();
         match input {
-            HubInput::Connect { conn, outbox } => {
+            HubInput::Connect { conn, outbox, greeting } => {
                 let hello = ServerMessage::Hello { protocol: PROTOCOL, server_time: UnixSeconds(now.unix()), status: self.status() };
-                if outbox.push(hello).is_ok() {
+                if outbox.push(hello).is_ok() && greeting.is_none_or(|greeting| outbox.push(greeting).is_ok()) {
                     self.conns.insert(conn, Conn { outbox, subs: HashMap::new(), requested_watch: Vec::new(), watch_venue: Venue::Combined, limited_sent: BTreeSet::new() });
                 }
             }

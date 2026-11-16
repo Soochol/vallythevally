@@ -118,6 +118,7 @@ def start(run_id, run_dir):
         f"VALLY_FINANCIAL_DB_PATH={run_dir}/data/financials.db",
         f"VALLY_LOCK_PATH={run_dir}/run/server.lock",
         f"VALLY_TOKEN_PATH={run_dir}/run/token.json",
+        f"VALLY_KIWOOM_KEY_PATH={run_dir}/run/kiwoom-key.json",
         "VALLY_SCREENER_UPDATE_ON_START=off",
         "VALLY_FINANCIAL_AUTOMATIC=off",
         "VALLY_LOG=info",
@@ -136,6 +137,7 @@ def start(run_id, run_dir):
         try:
             status, _ = http(f"{state['base_url']}/", timeout=2)
             if status == 200:
+                connect(run_dir, state)
                 print(json.dumps(state))
                 return state
         except Exception:
@@ -143,6 +145,29 @@ def start(run_id, run_dir):
         time.sleep(0.2)
     stop(run_dir)
     sys.exit(f"up: not ready (GET / never answered 200); see {run_dir}/server.log")
+
+
+def connect(run_dir, state):
+    request = urllib.request.Request(f"{state['base_url']}/api/system/kiwoom/connect", data=b'{"acknowledged": false}', method="POST", headers={"Content-Type": "application/json"})
+    try:
+        with NO_PROXY_OPENER.open(request, timeout=30) as r:
+            link = json.loads(r.read())
+    except Exception as e:
+        stop(run_dir)
+        sys.exit(f"up: connect request failed ({e}); see {run_dir}/server.log")
+    if link.get("state") != "connected":
+        stop(run_dir)
+        sys.exit(f"up: loopback Kiwoom did not connect: {link.get('state')} {link.get('problem')} {link.get('message')}; see {run_dir}/server.log")
+    for _ in range(50):
+        try:
+            status, body = http(f"{state['base_url']}/api/symbols/005930", timeout=2)
+            if status == 200 and b"005930" in body:
+                return
+        except Exception:
+            pass
+        time.sleep(0.2)
+    stop(run_dir)
+    sys.exit(f"up: connected but symbols never loaded; see {run_dir}/server.log")
 
 
 def connections(pid):

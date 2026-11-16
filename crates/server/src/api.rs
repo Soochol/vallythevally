@@ -228,6 +228,7 @@ pub enum ServerMessage {
     Quotes { venue: Venue, quotes: Vec<Quote> },
     /// 이 연결의 관심종목 가운데 실시간 한도로 받지 못하는 종목, 목록 순서. 바뀔 때만 온다. 브라우저는 통째로 바꾼다.
     WatchLimited { symbols: Vec<SymbolCode> },
+    KiwoomLink { status: KiwoomLinkStatus },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -271,6 +272,125 @@ pub struct ConnectionStatus {
     pub since: UnixSeconds,
     /// 끊긴 구간을 조회로 메우는 중.
     pub backfilling: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub enum KeySource {
+    Env,
+    File,
+    None,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub enum KiwoomLinkState {
+    NoKey,
+    Disconnected,
+    Connecting,
+    Connected,
+    Failed,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub enum KiwoomConnectStep {
+    CheckingKey,
+    Token,
+    Symbols,
+    Realtime,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub enum KiwoomLinkProblem {
+    AuthBlocked8050,
+    KeyNeedsCheck,
+    IssueIntervalWait,
+    AuthUncertain,
+    Network,
+    TokenFileUnusable,
+    PathStopped,
+    KeyFileUnusable,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct KiwoomLinkStatus {
+    pub key_source: KeySource,
+    pub app_key_tail: Option<String>,
+    pub credential_id: Option<String>,
+    pub state: KiwoomLinkState,
+    pub problem: Option<KiwoomLinkProblem>,
+    pub message: String,
+    pub retry_at: Option<UnixSeconds>,
+    pub needs_acknowledgement: bool,
+    pub step: Option<KiwoomConnectStep>,
+    pub token_expires_at: Option<UnixSeconds>,
+    pub realtime_registered: Option<u32>,
+    pub symbol_count: Option<u32>,
+}
+
+#[derive(Clone, PartialEq, Eq, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct KiwoomKeyInput {
+    pub app_key: String,
+    pub app_secret: String,
+}
+
+impl std::fmt::Debug for KiwoomKeyInput {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("KiwoomKeyInput([가림])")
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct KiwoomConnectInput {
+    pub acknowledged: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub enum KiwoomTargetKind {
+    Kiwoom,
+    Loopback,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct KiwoomTarget {
+    pub kind: KiwoomTargetKind,
+    pub host: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct SystemSettings {
+    pub bind: String,
+    pub log_filter: String,
+    pub static_dir: String,
+    pub db_path: String,
+    pub screener_db_path: String,
+    pub financial_db_path: String,
+    pub screener_update_on_start: bool,
+    pub financial_automatic: bool,
+    pub opendart_key_present: bool,
+    pub token_path: String,
+    pub key_path: String,
+    pub lock_path: String,
+    pub kiwoom_target: KiwoomTarget,
+    pub server_version: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]

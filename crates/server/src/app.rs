@@ -32,6 +32,8 @@ use crate::kiwoom::transport::ReqwestTransport;
 use crate::screener::Screener;
 use crate::screener::store::Store;
 use crate::symbols::SymbolDirectory;
+use crate::system_routes::SystemState;
+use crate::kiwoom::key_file::{KeyFile, startup_key};
 
 const DAILY_RESET_AT: TimeOfDay = match TimeOfDay::hms(7, 45, 0) {
     Some(t) => t,
@@ -67,7 +69,8 @@ pub fn main() -> ExitCode {
         }
     };
     let token_file = TokenFile::new(config.token_path.clone(), &lock);
-    let code = runtime.block_on(serve(config, token_file));
+    let key_file = KeyFile::new(config.kiwoom_key_path.clone(), &lock);
+    let code = runtime.block_on(serve(config, token_file, key_file));
     drop(lock);
     code
 }
@@ -107,12 +110,17 @@ pub struct ApplicationInputs {
 }
 
 pub fn application(inputs: ApplicationInputs) -> Arc<AppState> {
+    application_with_system(inputs, SystemState::unconfigured())
+}
+
+pub fn application_with_system(inputs: ApplicationInputs, system: SystemState) -> Arc<AppState> {
     let ApplicationInputs { rest, clock, symbols, db, screener_store, stream: (stream, events), static_dir, screener_update_on_connect } = inputs;
     let bars = Arc::new(BarService::new(rest.clone(), symbols.clone(), clock.clone()));
     let screener = Arc::new(Screener::new(screener_store, rest.clone(), bars.clone(), symbols.clone(), clock.clone()));
+    let registered = stream.watch_desired();
     let hub = MarketHub::spawn(bars.clone(), stream, events, clock.clone());
     let link = Link::new(rest.clone(), symbols.clone(), screener.clone(), clock.clone(), screener_update_on_connect);
-    Arc::new(AppState { symbols, bars, rest, db, clock, static_dir, hub, screener, link })
+    Arc::new(AppState { symbols, bars, rest, db, clock, static_dir, hub, screener, link, system, registered })
 }
 
 pub async fn daily_maintenance(state: Arc<AppState>) {
@@ -122,7 +130,7 @@ pub async fn daily_maintenance(state: Arc<AppState>) {
     );
 }
 
-async fn serve(config: Config, token_file: TokenFile) -> ExitCode {
+async fn serve(config: Config, token_file: TokenFile, key_file: KeyFile) -> ExitCode {
     let db = match AppDb::open(&config.db_path).await {
         Ok(db) => db,
         Err(e) => {
@@ -151,10 +159,16 @@ async fn serve(config: Config, token_file: TokenFile) -> ExitCode {
             return ExitCode::from(1);
         }
     };
-    match listener.local_addr() {
-        Ok(addr) => tracing::info!(%addr, "포트를 열었습니다"),
-        Err(e) => tracing::warn!(error = %e, "연 주소를 읽지 못했습니다"),
-    }
+    let bound_port = match listener.local_addr() {
+        Ok(addr) => {
+            tracing::info!(%addr, "포트를 열었습니다");
+            addr.port()
+        }
+        Err(e) => {
+            tracing::error!(error = %e, "연 주소를 읽지 못했습니다");
+            return ExitCode::from(1);
+        }
+    };
     let transport = match ReqwestTransport::new(config.kiwoom_base_url.clone()) {
         Ok(t) => t,
         Err(e) => {
@@ -169,9 +183,11 @@ async fn serve(config: Config, token_file: TokenFile) -> ExitCode {
             Clock::fake(start)
         }
     };
+    let env_key = config.kiwoom_credentials.is_some();
+    let startup = startup_key(config.kiwoom_credentials.clone(), &key_file);
     let rest = KiwoomRest::new(
         Arc::new(transport),
-        match &config.kiwoom_credentials {
+        match &startup.credentials {
             Some(credentials) => KiwoomAuth::new(credentials.app_key.clone(), credentials.app_secret.clone(), Some(token_file)),
             None => KiwoomAuth::keyless(Some(token_file)),
         },
@@ -180,7 +196,9 @@ async fn serve(config: Config, token_file: TokenFile) -> ExitCode {
     rest.set_access(crate::kiwoom::rest::Access::Closed);
     let symbols = Arc::new(SymbolDirectory::default());
     let stream = KiwoomStream::spawn(config.kiwoom_ws_url.clone(), rest.clone(), clock.clone());
-    let state = application(ApplicationInputs { rest: rest.clone(), clock: clock.clone(), symbols: symbols.clone(), db, screener_store, stream, static_dir: config.static_dir.clone(), screener_update_on_connect: config.screener_update_on_start });
+    let system = SystemState::new(key_file, env_key, startup.file_problem, crate::api::SystemSettings::from_config(&config));
+    let state = application_with_system(ApplicationInputs { rest: rest.clone(), clock: clock.clone(), symbols: symbols.clone(), db, screener_store, stream, static_dir: config.static_dir.clone(), screener_update_on_connect: config.screener_update_on_start }, system);
+    state.system.bound(bound_port);
     tokio::spawn(daily_maintenance(state.clone()));
 
     let financial_store = crate::financials::store::Store::open(&config.financial_db_path).await;

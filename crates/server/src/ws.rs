@@ -14,6 +14,7 @@ use crate::api::{ClientMessage, ServerMessage, SubErrorCode, SymbolCode};
 use crate::http::AppState;
 use crate::market::hub::HubHandle;
 use crate::market::outbox::Outbox;
+use crate::system_routes::kiwoom_status;
 use crate::market::{ConnId, SubId};
 
 /// 구독 하나에 `bar`는 초당 10회까지다.
@@ -21,16 +22,22 @@ pub const BAR_FLUSH: Duration = Duration::from_millis(100);
 
 pub async fn upgrade(State(st): State<Arc<AppState>>, ws: WebSocketUpgrade) -> Response {
     let hub = st.hub.clone();
-    ws.on_upgrade(move |socket| serve(socket, hub))
+    ws.on_upgrade(move |socket| serve(socket, st, hub))
 }
 
-async fn serve(socket: WebSocket, hub: HubHandle) {
+async fn serve(socket: WebSocket, st: Arc<AppState>, hub: HubHandle) {
     let outbox = Outbox::new();
-    let conn = hub.connect(outbox.clone());
+    let conn = hub.connect_greeted(outbox.clone(), Some(ServerMessage::KiwoomLink { status: kiwoom_status(&st) }));
     let (sink, mut incoming) = socket.split();
     let mut writer = tokio::spawn(write(sink, outbox.clone()));
+    let mut link_changes = st.link.subscribe();
     loop {
         tokio::select! {
+            changed = link_changes.changed() => {
+                if changed.is_err() || outbox.push(ServerMessage::KiwoomLink { status: kiwoom_status(&st) }).is_err() {
+                    break;
+                }
+            }
             msg = incoming.next() => match msg {
                 Some(Ok(Message::Text(text))) => on_text(&hub, &outbox, conn, text.as_str()),
                 Some(Ok(Message::Close(_)) | Err(_)) | None => break,

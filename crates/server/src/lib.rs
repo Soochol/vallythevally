@@ -18,6 +18,7 @@ pub mod market;
 pub mod quotes;
 pub mod screener;
 pub mod symbols;
+pub mod system_routes;
 pub mod user_routes;
 pub mod userdata;
 pub mod ws;

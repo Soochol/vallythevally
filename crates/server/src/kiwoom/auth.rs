@@ -50,6 +50,12 @@ pub enum AuthError {
     BadTokenResponse,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CredentialSummary {
+    pub app_key_tail: Option<String>,
+    pub credential_prefix: String,
+}
+
 struct Issued {
     token: Secret<String>,
     issued_at: KstTime,
@@ -145,6 +151,19 @@ impl KiwoomAuth {
 
     pub fn watch_halted(&self) -> watch::Receiver<Option<Halt>> {
         self.halted.subscribe()
+    }
+
+    pub fn credential_summary(&self) -> Option<CredentialSummary> {
+        let st = self.lock();
+        let credentials = st.credentials.as_ref()?;
+        let key = credentials.app_key.expose();
+        let app_key_tail = (key.chars().count() >= 8).then(|| key.chars().rev().take(4).collect::<Vec<_>>().into_iter().rev().collect());
+        let credential_prefix = credentials.id.trim_start_matches("sha256:").chars().take(8).collect();
+        Some(CredentialSummary { app_key_tail, credential_prefix })
+    }
+
+    pub fn token_expires_at(&self) -> Option<KstTime> {
+        self.lock().issued.as_ref().map(|i| i.expires_at)
     }
 
     pub fn has_credentials(&self) -> bool {
