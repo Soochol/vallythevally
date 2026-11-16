@@ -7,6 +7,7 @@ use futures::FutureExt;
 use futures::future::{BoxFuture, Shared};
 use tokio::sync::watch;
 
+use super::auth::Halt;
 use super::error::Category;
 use super::rest::{Access, GateCause, KiwoomError, KiwoomRest, Priority};
 use crate::clock::Clock;
@@ -85,6 +86,7 @@ struct Inner {
     update_on_start: bool,
     state: watch::Sender<LinkState>,
     flight: Mutex<Option<(bool, Flight)>>,
+    released_8050: Mutex<Option<Halt>>,
     epoch: watch::Sender<u64>,
 }
 
@@ -94,7 +96,7 @@ pub struct Link(Arc<Inner>);
 impl Link {
     pub fn new(rest: KiwoomRest, symbols: Arc<SymbolDirectory>, screener: Arc<Screener>, clock: Clock, update_on_start: bool) -> Link {
         rest.set_access(Access::Closed);
-        let link = Link(Arc::new(Inner { rest, symbols, screener, clock, update_on_start, state: watch::channel(LinkState::Disconnected).0, flight: Mutex::new(None), epoch: watch::channel(0).0 }));
+        let link = Link(Arc::new(Inner { rest, symbols, screener, clock, update_on_start, state: watch::channel(LinkState::Disconnected).0, flight: Mutex::new(None), released_8050: Mutex::new(None), epoch: watch::channel(0).0 }));
         link.0.state.send_replace(link.resting_state());
         link.watch_halts();
         link
@@ -157,11 +159,22 @@ impl Link {
         let mut slot = self.0.flight.lock().expect("연결 잠금");
         self.0.epoch.send_modify(|epoch| *epoch += 1);
         slot.take();
+        self.restore_unsent_8050();
         then();
     }
 
     fn set(&self, state: LinkState) {
         self.0.state.send_replace(state);
+    }
+
+    fn restore_unsent_8050(&self) {
+        let released = self.0.released_8050.lock().expect("8050 잠금").take();
+        let auth = self.0.rest.auth();
+        if let Some(halt) = released
+            && auth.issue_blocked_until(self.0.clock.now()).is_none()
+        {
+            auth.restore_halt(halt);
+        }
     }
 
     fn publish(&self, epoch: u64, write: impl FnOnce()) -> Result<(), Stale> {
@@ -219,14 +232,11 @@ impl Link {
     }
 
     async fn run_connect(&self, acknowledged: bool, epoch: u64) -> Result<LinkState, Stale> {
-        let auth = self.0.rest.auth();
-        let acknowledged_8050 = auth.halted().filter(|halt| halt.is_8050() && acknowledged);
         let outcome = self.connect_steps(acknowledged, epoch).await;
-        if let Some(halt) = acknowledged_8050
-            && !matches!(outcome, Ok(LinkState::Connected))
-            && auth.issue_blocked_until(self.0.clock.now()).is_none()
-        {
-            auth.restore_halt(halt);
+        if matches!(outcome, Ok(LinkState::Connected)) {
+            self.0.released_8050.lock().expect("8050 잠금").take();
+        } else {
+            self.restore_unsent_8050();
         }
         outcome
     }
@@ -250,7 +260,10 @@ impl Link {
                 if let Some(until) = auth.issue_blocked_until(now) {
                     return self.finish(epoch, LinkState::Failed(LinkFailure::of(&KiwoomError::Gated { until, cause: GateCause::IssueInterval })));
                 }
-                auth.release_8050();
+                self.publish(epoch, || {
+                    *self.0.released_8050.lock().expect("8050 잠금") = Some(halt);
+                    auth.release_8050();
+                })?;
             }
             Some(halt) => return self.finish(epoch, LinkState::Failed(LinkFailure::of(&halt.into()))),
             None => {}

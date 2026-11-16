@@ -610,3 +610,41 @@ async fn an_acknowledged_caller_joined_to_a_flight_does_not_reconnect_after_a_di
     assert_eq!(server.link_state(), LinkState::Disconnected, "outcome {outcome:?} {:?}", fake.api_ids());
     server.stop().await;
 }
+
+async fn abandoned_acknowledged_connect(fake: &ScriptedTransport, env: &Env) -> Server {
+    reject_issue(fake, EIGHT_FIFTY);
+    let server = spawn(fake, env, &[OFF, ("VALLY_CLOCK_START", "20261109100000"), ("KIWOOM_SEND_SPACING_MILLIS", "3000")]);
+    server.addr().await;
+    assert_eq!(failure(server.connect(false).await).problem, Problem::AuthBlocked8050);
+    server.clock().jump(601);
+    let acknowledged = tokio::spawn({
+        let link = server.link();
+        async move { link.connect(true).await }
+    });
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    server.link().disconnect();
+    let plain = server.connect(false).await;
+    assert_eq!(failure(plain).problem, Problem::AuthBlocked8050);
+    acknowledged.await.unwrap();
+    server
+}
+
+#[tokio::test]
+async fn a_plain_connect_right_after_an_abandoned_acknowledged_one_sends_nothing() {
+    let fake = ScriptedTransport::new();
+    let env = env();
+    let server = abandoned_acknowledged_connect(&fake, &env).await;
+    assert_eq!(fake.issued(), 1, "{:?}", fake.api_ids());
+    server.stop().await;
+}
+
+#[tokio::test]
+async fn the_state_after_an_abandoned_acknowledged_connect_still_shows_8050() {
+    let fake = ScriptedTransport::new();
+    let env = env();
+    let server = abandoned_acknowledged_connect(&fake, &env).await;
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert_eq!(failure(server.link_state()).problem, Problem::AuthBlocked8050);
+    assert!(server.link().needs_acknowledgement());
+    server.stop().await;
+}
