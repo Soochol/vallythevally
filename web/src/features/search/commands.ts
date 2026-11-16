@@ -8,6 +8,7 @@ import type { SearchCommand } from "../commands/registry";
 import { openIndicatorCommand } from "../indicator-command/open";
 import { pressScale } from "../indicator-dialog/compareForm";
 import { saveSnapshot } from "../snapshot/saveSnapshot";
+import { openSystemSettings } from "../system-settings/open";
 
 const RUN_TOAST: Partial<Record<RunOutcome["kind"], string>> = {
   invalid: FIX_INVALID,
@@ -41,6 +42,7 @@ export const DEFAULT_SEARCH_COMMANDS: readonly SearchCommand[] = [
         if (next) layout.setScale(cellId, next);
       } }];
       case "showWatchlist": return [{ id: "watch-panel", label, shortcut: keys, run: () => useLayoutStore.getState().showWindow("watchlist") }];
+      case "systemSettings": return [{ id: "system-settings", label, keywords: "설정 키움 연결 키 system", shortcut: keys, run: () => openSystemSettings() }];
       case "snapshot": return [{ id: `snapshot-${action.mode}`, label, shortcut: keys, run: ({ cellId }) => saveSnapshot(cellId, action.mode) }];
       default: return [];
     }

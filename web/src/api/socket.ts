@@ -1,6 +1,7 @@
 import type { SeriesKey } from "./bars";
 import type { ClientMessage } from "./generated/ClientMessage";
 import type { ConnectionStatus } from "./generated/ConnectionStatus";
+import type { KiwoomLinkStatus } from "./generated/KiwoomLinkStatus";
 import type { ServerMessage } from "./generated/ServerMessage";
 import type { SymbolCode } from "./generated/SymbolCode";
 import type { Venue } from "./generated/Venue";
@@ -82,7 +83,7 @@ export class MarketSocket implements MarketSocketLike {
   private watchVenue: Venue = "combined";
   private readonly quoteHandlers = new Set<(e: QuoteEvent) => void>();
 
-  constructor(private readonly opts: { url: () => string; connect?: Connect }) {}
+  constructor(private readonly opts: { url: () => string; connect?: Connect; onKiwoomLink?: (status: KiwoomLinkStatus) => void }) {}
 
   start(): void {
     if (this.running) return;
@@ -167,6 +168,8 @@ export class MarketSocket implements MarketSocketLike {
       case "quotes":
       case "watch_limited":
         return this.emitQuotes(m);
+      case "kiwoom_link":
+        return this.opts.onKiwoomLink?.(m.status);
       default:
         return;
     }

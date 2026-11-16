@@ -8,7 +8,9 @@ import type { ClientMessage } from "../../src/api/generated/ClientMessage";
 import type { ConnectionStatus } from "../../src/api/generated/ConnectionStatus";
 import type { FinancialsPage } from "../../src/api/generated/FinancialsPage";
 import type { FinancialUpdatePage } from "../../src/api/generated/FinancialUpdatePage";
+import type { KiwoomLinkStatus } from "../../src/api/generated/KiwoomLinkStatus";
 import type { ScreenerStatus } from "../../src/api/generated/ScreenerStatus";
+import type { SystemSettings } from "../../src/api/generated/SystemSettings";
 import type { Drawing } from "../../src/api/generated/Drawing";
 import type { DrawingInput } from "../../src/api/generated/DrawingInput";
 import type { Layout } from "../../src/api/generated/Layout";
@@ -122,6 +124,17 @@ export class MarketFixtures {
   }
 }
 
+export const CONNECTED_KIWOOM: KiwoomLinkStatus = {
+  keySource: "file", appKeyTail: "1234", registeredIp: null, credentialId: null, state: "connected", problem: null, message: "키움에 연결되어 있습니다",
+  retryAt: null, needsAcknowledgement: false, step: null, tokenExpiresAt: null, realtimeRegistered: 0, symbolCount: 2800,
+};
+
+export const DEFAULT_SYSTEM_SETTINGS: SystemSettings = {
+  bind: "127.0.0.1:8080", logFilter: "info", staticDir: "web/dist", dbPath: "data/vally.db", screenerDbPath: "data/screener.db", financialDbPath: "data/financial.db",
+  screenerUpdateOnStart: true, financialAutomatic: false, opendartKeyPresent: true, tokenPath: "state/kiwoom-token.json", keyPath: "state/kiwoom-key.json", lockPath: "state/vally.lock",
+  kiwoomTarget: { kind: "kiwoom", host: "api.kiwoom.com" }, serverVersion: "0.1.0-test",
+};
+
 export class LiveFrames {
   readonly messages: ClientMessage[] = [];
   private observers = new Set<(frame: ServerMessage) => void>();
@@ -130,11 +143,13 @@ export class LiveFrames {
   private peers = new Map<WebSocketRoute, Map<string, Subscription>>();
   private seq = 0;
   private state: ConnectionStatus;
+  kiwoomLink: KiwoomLinkStatus = CONNECTED_KIWOOM;
   constructor(private readonly now: number, private readonly market: MarketFixtures) { this.state = { realtime: "live", since: Math.floor(now / 1000), backfilling: false }; }
   connect(socket: WebSocketRoute) {
     const subscriptions = new Map<string, Subscription>();
     this.peers.set(socket, subscriptions);
     socket.send(JSON.stringify({ type: "hello", protocol: 1, serverTime: Math.floor(this.now / 1000), status: this.state } satisfies ServerMessage));
+    socket.send(JSON.stringify({ type: "kiwoom_link", status: this.kiwoomLink } satisfies ServerMessage));
     socket.onMessage(message => {
       const input: ClientMessage = JSON.parse(String(message));
       this.messages.push(input);
@@ -165,6 +180,7 @@ export class LiveFrames {
     }
     return delivered;
   }
+  link(status: KiwoomLinkStatus): void { this.kiwoomLink = clone(status); this.emit({ type: "kiwoom_link", status }); }
   status(status: ConnectionStatus): void { this.state = clone(status); this.emit({ type: "status", status }); }
   close(code = 1000, reason = "fixture close"): void { for (const socket of this.peers.keys()) socket.close({ code, reason }); this.peers.clear(); }
 }
@@ -262,6 +278,8 @@ export class Scenario {
         return this.documents.hasScope(value.scope) ? { body: this.documents.saveDrawing(value) } : error(400, "bad_request", "드로잉 범위의 레이아웃이나 차트 창이 없습니다");
       }
     }
+    if (path === "/api/system/kiwoom" && method === "GET") return { body: this.live.kiwoomLink };
+    if (path === "/api/system/settings" && method === "GET") return { body: DEFAULT_SYSTEM_SETTINGS };
     if (path === "/api/symbols" && method === "GET") return { body: this.market.search(url.searchParams.get("q") ?? "", { market: url.searchParams.get("market"), kind: url.searchParams.get("kind") }) };
     if (path === "/api/quotes" && method === "GET") {
       const venue = url.searchParams.get("venue") ?? "combined";

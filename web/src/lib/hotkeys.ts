@@ -8,6 +8,7 @@ export type HotkeyAction =
   | { kind: "toggleLog" }
   | { kind: "indicators" }
   | { kind: "showWatchlist" }
+  | { kind: "systemSettings" }
   | { kind: "snapshot"; mode: "download" | "copy" };
 
 export interface KeyLike {
@@ -45,6 +46,12 @@ export const HOTKEYS: { keys: string; label: string; action: HotkeyAction; match
       action: { kind: "showWatchlist" },
       match: (e) => e.code === "KeyW" && e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey,
       desktopOnly: true,
+    },
+    {
+      keys: "Alt+,",
+      label: "시스템 설정",
+      action: { kind: "systemSettings" },
+      match: (e) => e.code === "Comma" && e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey,
     },
     {
       keys: "Alt+S",

@@ -1,10 +1,11 @@
 import { create } from "zustand";
 import { type Connection, MarketSocket, sameOriginWsUrl } from "../api/socket";
 import { fetchQuotes } from "../api/userData";
+import { receiveKiwoomLinkPush } from "./kiwoomLink";
 import { QuoteBook } from "./quoteBook";
 import { useUiStore } from "./ui";
 
-export const marketSocket = new MarketSocket({ url: () => sameOriginWsUrl(location) });
+export const marketSocket = new MarketSocket({ url: () => sameOriginWsUrl(location), onKiwoomLink: receiveKiwoomLinkPush });
 
 export const quoteBook = new QuoteBook({ socket: marketSocket, fetchQuotes });
 
