@@ -329,3 +329,66 @@ async fn rechecking_an_unreadable_token_file_clears_the_stop_without_asking_kiwo
     assert_eq!(fake.issued(), 0, "다시 읽은 파일의 토큰을 쓴다");
     server.stop().await;
 }
+
+#[tokio::test]
+async fn disconnecting_during_a_stream_backoff_opens_no_websocket() {
+    let socket = counted_socket().await;
+    let fake = ScriptedTransport::new();
+    let env = env();
+    let server = spawn(&fake, &env, &[OFF, ("VALLY_KIWOOM_WS_URL", socket.url.as_str())]);
+    server.addr().await;
+    assert_eq!(server.connect(false).await, LinkState::Connected);
+    for _ in 0..50 {
+        if socket.accepts.load(Ordering::SeqCst) >= 1 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    server.link().disconnect();
+    let at_disconnect = socket.accepts.load(Ordering::SeqCst);
+    tokio::time::sleep(Duration::from_secs(4)).await;
+    assert_eq!(socket.accepts.load(Ordering::SeqCst), at_disconnect, "끊은 뒤에는 다시 접속하지 않는다");
+    server.stop().await;
+}
+
+#[tokio::test]
+async fn a_connect_after_a_disconnect_is_not_swallowed_by_the_abandoned_attempt() {
+    let fake = ScriptedTransport::new();
+    fake.delay("au10001", Duration::from_secs(2));
+    let env = env();
+    let server = spawn(&fake, &env, &[OFF]);
+    server.addr().await;
+    let abandoned = tokio::spawn({
+        let link = server.link();
+        async move { link.connect(false).await }
+    });
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    server.link().disconnect();
+    let second = failure(server.connect(false).await);
+    assert_eq!(second.problem, Problem::IssueIntervalWait, "{}", second.message);
+    abandoned.await.unwrap();
+    assert_eq!(fake.issued(), 1, "{:?}", fake.api_ids());
+    tokio::time::sleep(Duration::from_millis(2500)).await;
+    assert_eq!(server.connect(false).await, LinkState::Connected);
+    assert_eq!(fake.issued(), 1, "먼저 받던 토큰이 파일에 남아 있다: {:?}", fake.api_ids());
+    server.stop().await;
+}
+
+#[tokio::test]
+async fn a_token_issued_for_the_replaced_key_is_not_kept_for_the_new_key() {
+    let fake = ScriptedTransport::new();
+    fake.delay("au10001", Duration::from_secs(2));
+    let env = env();
+    let server = spawn(&fake, &env, &[OFF]);
+    server.addr().await;
+    let first = tokio::spawn({
+        let link = server.link();
+        async move { link.connect(false).await }
+    });
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    server.link().replace_key(Secret::new("FAKE-APPKEY-other".into()), Secret::new("other-secret".into()));
+    first.await.unwrap();
+    let saved: Value = serde_json::from_str(&std::fs::read_to_string(token_path(&env.lock)).unwrap()).unwrap();
+    assert!(saved["token"].is_null(), "옛 키로 받은 토큰이 새 키의 것으로 기록됐다: {saved}");
+    server.stop().await;
+}

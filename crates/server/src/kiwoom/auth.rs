@@ -73,6 +73,7 @@ impl Credentials {
 #[derive(Default)]
 struct State {
     credentials: Option<Credentials>,
+    issuing_for: Option<String>,
     issued: Option<Issued>,
     last_request_at: Option<KstTime>,
     /// 토큰 무효 응답을 받아 다시 발급해야 한다.
@@ -236,6 +237,7 @@ impl KiwoomAuth {
             secretkey: credentials.app_secret.expose(),
         };
         let body = Secret::new(serde_json::to_string(&req).expect("문자열만 담은 구조체"));
+        st.issuing_for = Some(credentials.id.clone());
         let previous = st.last_request_at.replace(now);
         if let Err(e) = self.save(&st) {
             st.last_request_at = previous;
@@ -283,6 +285,11 @@ impl KiwoomAuth {
             return Err(AuthError::BadTokenResponse);
         }
         let mut st = self.lock();
+        let still_ours = st.issuing_for.is_none() || st.credentials.as_ref().map(|c| &c.id) == st.issuing_for.as_ref();
+        if !still_ours {
+            tracing::warn!("토큰을 받는 동안 앱키가 바뀌어 그 토큰은 쓰지 않습니다");
+            return Ok(TokenGen(st.issued_count));
+        }
         st.issued_count += 1;
         let generation = TokenGen(st.issued_count);
         st.issued = Some(Issued { token: Secret::new(resp.token), issued_at: now, expires_at, generation });

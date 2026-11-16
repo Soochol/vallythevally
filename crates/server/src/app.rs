@@ -177,6 +177,7 @@ async fn serve(config: Config, token_file: TokenFile) -> ExitCode {
         },
         clock.clone(),
     );
+    rest.set_access(crate::kiwoom::rest::Access::Closed);
     let symbols = Arc::new(SymbolDirectory::default());
     let stream = KiwoomStream::spawn(config.kiwoom_ws_url.clone(), rest.clone(), clock.clone());
     let state = application(ApplicationInputs { rest: rest.clone(), clock: clock.clone(), symbols: symbols.clone(), db, screener_store, stream, static_dir: config.static_dir.clone(), screener_update_on_connect: config.screener_update_on_start });

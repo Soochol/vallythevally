@@ -83,6 +83,7 @@ struct Inner {
     update_on_start: bool,
     state: watch::Sender<LinkState>,
     flight: Mutex<Option<Flight>>,
+    epoch: watch::Sender<u64>,
 }
 
 #[derive(Clone)]
@@ -91,7 +92,7 @@ pub struct Link(Arc<Inner>);
 impl Link {
     pub fn new(rest: KiwoomRest, symbols: Arc<SymbolDirectory>, screener: Arc<Screener>, clock: Clock, update_on_start: bool) -> Link {
         rest.set_access(Access::Closed);
-        let link = Link(Arc::new(Inner { rest, symbols, screener, clock, update_on_start, state: watch::channel(LinkState::Disconnected).0, flight: Mutex::new(None) }));
+        let link = Link(Arc::new(Inner { rest, symbols, screener, clock, update_on_start, state: watch::channel(LinkState::Disconnected).0, flight: Mutex::new(None), epoch: watch::channel(0).0 }));
         link.0.state.send_replace(link.resting_state());
         link
     }
@@ -123,12 +124,17 @@ impl Link {
         }
     }
 
+    fn abandon_connect(&self) {
+        self.0.epoch.send_modify(|epoch| *epoch += 1);
+        self.0.flight.lock().expect("연결 잠금").take();
+    }
+
     fn set(&self, state: LinkState) {
         self.0.state.send_replace(state);
     }
 
-    fn aborted(&self) -> bool {
-        self.0.rest.access() == Access::Closed
+    fn aborted(&self, epoch: u64) -> bool {
+        *self.0.epoch.borrow() != epoch || self.0.rest.access() == Access::Closed
     }
 
     pub async fn connect(&self, acknowledged: bool) -> LinkState {
@@ -139,8 +145,11 @@ impl Link {
                 None => {
                     let link = self.clone();
                     let task = tokio::spawn(async move {
-                        let outcome = link.run_connect(acknowledged).await;
-                        link.0.flight.lock().expect("연결 잠금").take();
+                        let epoch = *link.0.epoch.borrow();
+                        let outcome = link.run_connect(acknowledged, epoch).await;
+                        if *link.0.epoch.borrow() == epoch {
+                            link.0.flight.lock().expect("연결 잠금").take();
+                        }
                         outcome
                     });
                     let flight = async move { task.await.unwrap_or(LinkState::Disconnected) }.boxed().shared();
@@ -152,7 +161,7 @@ impl Link {
         flight.await
     }
 
-    async fn run_connect(&self, acknowledged: bool) -> LinkState {
+    async fn run_connect(&self, acknowledged: bool, epoch: u64) -> LinkState {
         let rest = &self.0.rest;
         let auth = rest.auth();
         if self.is_connected() {
@@ -184,17 +193,17 @@ impl Link {
         } else {
             self.set(LinkState::Connecting(ConnectStep::Token));
             if let Err(error) = rest.issue_token().await {
-                return self.fail(&error);
+                return self.fail(&error, epoch);
             }
-            if self.aborted() {
+            if self.aborted(epoch) {
                 return self.state();
             }
         }
         self.set(LinkState::Connecting(ConnectStep::Symbols));
-        if let Err(error) = self.load_symbols().await {
-            return self.fail(&error);
+        if let Err(error) = self.load_symbols(epoch).await {
+            return self.fail(&error, epoch);
         }
-        if self.aborted() {
+        if self.aborted(epoch) {
             return self.state();
         }
         self.set(LinkState::Connecting(ConnectStep::Realtime));
@@ -209,8 +218,8 @@ impl Link {
         state
     }
 
-    fn fail(&self, error: &KiwoomError) -> LinkState {
-        if matches!(error, KiwoomError::NotConnected) {
+    fn fail(&self, error: &KiwoomError, epoch: u64) -> LinkState {
+        if matches!(error, KiwoomError::NotConnected) || self.aborted(epoch) {
             return self.state();
         }
         self.0.rest.set_access(Access::Closed);
@@ -218,7 +227,7 @@ impl Link {
         self.finish(LinkState::Failed(LinkFailure::of(error)))
     }
 
-    async fn load_symbols(&self) -> Result<(), KiwoomError> {
+    async fn load_symbols(&self, epoch: u64) -> Result<(), KiwoomError> {
         loop {
             let error = match self.0.symbols.refresh(&self.0.rest, Priority::Screen).await {
                 Ok(()) => return Ok(()),
@@ -230,8 +239,12 @@ impl Link {
             };
             let at = crate::app::next_try(&self.0.clock, retry_at, SYMBOL_LIST_RETRY);
             tracing::warn!(error = %error, %at, "종목 목록을 받지 못했습니다. 그 시각에 다시 받습니다");
-            self.0.clock.sleep_until(at).await;
-            if self.aborted() {
+            let mut abandoned = self.0.epoch.subscribe();
+            tokio::select! {
+                () = self.0.clock.sleep_until(at) => {}
+                _ = abandoned.wait_for(|current| *current != epoch) => {}
+            }
+            if self.aborted(epoch) {
                 return Err(KiwoomError::NotConnected);
             }
         }
@@ -249,6 +262,7 @@ impl Link {
     }
 
     pub fn disconnect(&self) {
+        self.abandon_connect();
         self.0.rest.set_access(Access::Closed);
         self.set(self.resting_state());
     }
@@ -262,15 +276,16 @@ impl Link {
 
     pub fn replace_key(&self, app_key: Secret<String>, app_secret: Secret<String>) -> LinkState {
         let auth = self.0.rest.auth();
+        if matches!(self.state(), LinkState::Connected | LinkState::Connecting(_)) {
+            self.disconnect();
+        }
         auth.replace_credentials(app_key, app_secret);
         auth.release_key_rejection();
-        if matches!(self.state(), LinkState::Connected | LinkState::Connecting(_)) {
-            return self.state();
-        }
         self.finish(self.resting_state())
     }
 
     pub fn clear_key(&self) -> LinkState {
+        self.abandon_connect();
         self.0.rest.set_access(Access::Closed);
         self.0.rest.auth().clear_credentials();
         self.finish(self.resting_state())

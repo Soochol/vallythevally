@@ -382,6 +382,9 @@ impl Session {
             () = sleep_until(retry_at) => {}
             () = self.events.closed() => return None,
         }
+        if *self.access.borrow() != Access::Open {
+            return Some(SessionState::Disconnected { retry_at: Instant::now(), attempt });
+        }
         if self.rest.halted().is_some() {
             return Some(SessionState::Halted);
         }
