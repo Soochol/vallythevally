@@ -126,7 +126,7 @@ function SearchDialogBody({ purpose }: { purpose: SearchPurpose }) {
           <SearchIcon size={20} />
           <input ref={inputRef} onKeyDown={onKeyDown} autoFocus value={input} onChange={(e) => setInput(e.target.value)}
             placeholder="종목 이름, 코드, 초성 · >로 명령" aria-label="종목 검색" role="combobox"
-            aria-expanded={rows.length > 0} aria-controls={`${ids}-list`} aria-autocomplete="list"
+            aria-expanded={!offline && rows.length > 0} aria-controls={offline ? undefined : `${ids}-list`} aria-autocomplete="list"
             aria-activedescendant={activeIndex >= 0 ? optionId(activeIndex) : undefined}
             autoComplete="off" spellCheck={false} className="min-w-0 flex-1 bg-transparent text-text outline-none placeholder:text-text-3" />
         </label>

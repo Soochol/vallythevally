@@ -118,6 +118,8 @@ test("연결 안 함에서 검색 창은 Enter로 숨은 종목을 열지 않는
   await page.keyboard.press("/");
   const search = page.getByRole("dialog", { name: "종목 검색" });
   await expect(search.getByText("키움에 연결하면 검색할 수 있습니다")).toBeVisible();
+  await expect(search.getByRole("combobox", { name: "종목 검색" })).toHaveAttribute("aria-expanded", "false");
+  await expect(search.getByRole("combobox", { name: "종목 검색" })).not.toHaveAttribute("aria-controls");
   await page.keyboard.press("Enter");
   await expect(search).toBeVisible();
   await expect(cell(page)).toHaveAttribute("aria-label", /삼성전자/);
