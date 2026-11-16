@@ -305,7 +305,7 @@ pub fn launch(paths: &Paths, peer: &Peer, kiwoom: &Arc<FakeKiwoom>, timings: Tim
 impl Running {
     pub async fn stop(self) -> Finish {
         let _ = self.stop.send(true);
-        self.task.await.unwrap().expect("잠금을 잡았다")
+        self.task.await.unwrap().unwrap()
     }
 
     pub async fn finish(self) -> Result<Finish, StartError> {

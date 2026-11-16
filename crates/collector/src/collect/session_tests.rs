@@ -28,7 +28,7 @@ async fn running_session(peer: &Peer) -> (Paths, Arc<FakeKiwoom>, Running) {
 }
 
 fn halted(finish: Result<Finish, super::start::StartError>) -> Halt {
-    match finish.expect("잠금을 잡았다") {
+    match finish.unwrap() {
         Finish::Halted(halt) => halt,
         Finish::Shutdown => panic!("멈춰야 하는데 정상 종료했다"),
     }

@@ -51,15 +51,13 @@ impl CollectorConfig {
         };
         variables.extend(process.iter().map(|(name, value)| (name.clone(), value.clone())));
         let present = |name: &str| variables.get(name).filter(|value| !value.is_empty()).cloned();
-        let missing: Vec<&str> = [APP_KEY_VARIABLE, APP_SECRET_VARIABLE]
-            .into_iter()
-            .filter(|name| present(name).is_none())
-            .collect();
-        if !missing.is_empty() {
+        let (Some(app_key), Some(app_secret)) = (present(APP_KEY_VARIABLE), present(APP_SECRET_VARIABLE)) else {
+            let missing: Vec<&str> = [APP_KEY_VARIABLE, APP_SECRET_VARIABLE]
+                .into_iter()
+                .filter(|name| present(name).is_none())
+                .collect();
             return Err(ConfigError(format!("{}가 없습니다", missing.join(", "))));
-        }
-        let app_key = present(APP_KEY_VARIABLE).expect("위에서 있음을 확인했다");
-        let app_secret = present(APP_SECRET_VARIABLE).expect("위에서 있음을 확인했다");
+        };
         reject_app_server_key(process, &app_key)?;
         let token_path = match present(TOKEN_PATH_VARIABLE) {
             Some(path) => PathBuf::from(path),
