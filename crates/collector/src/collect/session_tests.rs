@@ -227,8 +227,8 @@ async fn a_second_invalid_token_response_stops_the_collector() {
     let halt = halted(finish);
     assert!(matches!(halt, Halt::Login(rejection) if rejection.category == Category::TokenInvalid));
     let recorded = events(&raw_lines(&paths.data(), date));
-    assert_eq!(recorded.len(), 1);
-    assert_eq!(recorded[0].0, "down");
+    assert_eq!(recorded.last().unwrap().0, "down");
+    assert!(recorded.last().unwrap().1.as_deref().unwrap().contains("멈춥니다"));
 }
 
 #[tokio::test(start_paused = true)]
@@ -518,4 +518,21 @@ async fn failed_reconnects_do_not_repeat_down() {
     running.stop().await;
     let names: Vec<String> = events(&raw_lines(&paths.data(), date)).into_iter().map(|(event, _)| event).collect();
     assert_eq!(names, ["live", "down"]);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_halt_after_a_disconnect_records_why_it_stopped() {
+    let peer = Peer::new(|connection, trnm, _| match (connection, trnm) {
+        (0, "REG") => Reply::AckThenClose,
+        (_, "REG") => Reply::Code(105115),
+        _ => Reply::Ack,
+    });
+    let paths = Paths::new();
+    let running = launch(&paths, &peer, &FakeKiwoom::issuing_tokens(), timings());
+    let date = running.wall.date();
+    halted(running.finish().await);
+    let recorded = events(&raw_lines(&paths.data(), date));
+    let names: Vec<&str> = recorded.iter().map(|(event, _)| event.as_str()).collect();
+    assert_eq!(names, ["live", "down", "down"]);
+    assert!(recorded[2].1.as_deref().unwrap().contains("REG가 거절돼 멈춥니다"));
 }

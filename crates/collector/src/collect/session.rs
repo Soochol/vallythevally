@@ -314,7 +314,14 @@ impl Session {
             Exit::Shutdown => ("종료".to_owned(), Finish::Shutdown),
             Exit::Halt(halt) => (halt.reason(), Finish::Halted(halt)),
         };
-        if let Err(Exit::Halt(Halt::Output(error))) = self.mark_down(&reason) {
+        let written = match &finish {
+            Finish::Halted(_) => {
+                let recv_ms = self.wall_clock.now_ms();
+                self.out.write_event(&RawLine::Down { recv_ms, reason: &reason }).map_err(Exit::from)
+            }
+            Finish::Shutdown => self.mark_down(&reason),
+        };
+        if let Err(Exit::Halt(Halt::Output(error))) = written {
             tracing::error!(%error, "down 사건 줄을 쓰지 못했습니다");
         }
         if let Err(error) = self.out.close() {
