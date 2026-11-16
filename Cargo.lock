@@ -1263,6 +1263,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "hoga-format"
+version = "0.1.0"
+
+[[package]]
 name = "html5ever"
 version = "0.40.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
