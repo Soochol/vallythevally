@@ -123,7 +123,7 @@ export interface SendOptions {
   keepalive?: boolean;
 }
 
-export async function sendJson<T>(method: "PUT" | "POST", path: string, json: string, opts: SendOptions = {}): Promise<T> {
+export async function sendJson<T>(method: "PUT" | "POST" | "DELETE", path: string, json: string, opts: SendOptions = {}): Promise<T> {
   const res = await request(path, {
     method,
     body: json,

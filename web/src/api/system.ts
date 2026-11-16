@@ -2,7 +2,11 @@ import { useQuery } from "@tanstack/react-query";
 import { useKiwoomLinkStore } from "../stores/kiwoomLink";
 import type { KiwoomLinkStatus } from "./generated/KiwoomLinkStatus";
 import type { SystemSettings } from "./generated/SystemSettings";
-import { getJson } from "./http";
+import type { KiwoomConnectInput } from "./generated/KiwoomConnectInput";
+import type { KiwoomKeyInput } from "./generated/KiwoomKeyInput";
+import type { PublicIpCheck } from "./generated/PublicIpCheck";
+import type { RegisteredIpInput } from "./generated/RegisteredIpInput";
+import { getJson, putJson, sendJson } from "./http";
 
 export async function loadKiwoomLink(signal?: AbortSignal): Promise<void> {
   const pushesAtRequest = useKiwoomLinkStore.getState().pushes;
@@ -21,3 +25,20 @@ export function useSystemSettings() {
     staleTime: Infinity,
   });
 }
+
+const KIWOOM = "/api/system/kiwoom";
+
+async function applyLink(run: () => Promise<KiwoomLinkStatus>): Promise<void> {
+  const pushesAtRequest = useKiwoomLinkStore.getState().pushes;
+  useKiwoomLinkStore.getState().receiveSnapshot(await run(), pushesAtRequest);
+}
+
+const post = (path: string, body: unknown = {}) => sendJson<KiwoomLinkStatus>("POST", path, JSON.stringify(body));
+
+export const saveKiwoomKey = (input: KiwoomKeyInput) => applyLink(() => putJson<KiwoomLinkStatus>(`${KIWOOM}/key`, input));
+export const deleteKiwoomKey = () => applyLink(() => sendJson<KiwoomLinkStatus>("DELETE", `${KIWOOM}/key`, "{}"));
+export const connectKiwoom = (input: KiwoomConnectInput) => applyLink(() => post(`${KIWOOM}/connect`, input));
+export const disconnectKiwoom = () => applyLink(() => post(`${KIWOOM}/disconnect`));
+export const recheckKiwoomTokenFile = () => applyLink(() => post(`${KIWOOM}/recheck-token-file`));
+export const saveRegisteredIp = (input: RegisteredIpInput) => applyLink(() => putJson<KiwoomLinkStatus>(`${KIWOOM}/registered-ip`, input));
+export const checkPublicIp = () => sendJson<PublicIpCheck>("POST", `${KIWOOM}/ip-check`, "{}");
