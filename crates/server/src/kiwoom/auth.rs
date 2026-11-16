@@ -193,6 +193,16 @@ impl KiwoomAuth {
         });
     }
 
+    pub fn restore_halt(&self, halt: Halt) {
+        self.halted.send_if_modified(|current| {
+            let restore = current.is_none();
+            if restore {
+                *current = Some(halt);
+            }
+            restore
+        });
+    }
+
     pub fn release_8050(&self) {
         self.halted.send_if_modified(|halt| {
             let release = halt.as_ref().is_some_and(Halt::is_8050);

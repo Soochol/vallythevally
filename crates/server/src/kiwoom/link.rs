@@ -184,6 +184,19 @@ impl Link {
     }
 
     async fn run_connect(&self, acknowledged: bool, epoch: u64) -> Result<LinkState, Stale> {
+        let auth = self.0.rest.auth();
+        let acknowledged_8050 = auth.halted().filter(|halt| halt.is_8050() && acknowledged);
+        let outcome = self.connect_steps(acknowledged, epoch).await;
+        if let Some(halt) = acknowledged_8050
+            && !matches!(outcome, Ok(LinkState::Connected))
+            && auth.issue_blocked_until(self.0.clock.now()).is_none()
+        {
+            auth.restore_halt(halt);
+        }
+        outcome
+    }
+
+    async fn connect_steps(&self, acknowledged: bool, epoch: u64) -> Result<LinkState, Stale> {
         let rest = &self.0.rest;
         let auth = rest.auth();
         if self.aborted(epoch) {

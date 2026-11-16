@@ -519,3 +519,25 @@ async fn racing_connect_and_disconnect_on_threads_always_ends_disconnected() {
     assert!(stuck.is_empty(), "{} {:?}", stuck.len(), &stuck[..stuck.len().min(5)]);
     server.stop().await;
 }
+
+#[tokio::test]
+async fn an_acknowledged_connect_abandoned_before_its_request_keeps_the_8050_block() {
+    let fake = ScriptedTransport::new();
+    reject_issue(&fake, EIGHT_FIFTY);
+    let env = env();
+    let server = spawn(&fake, &env, &[OFF, ("VALLY_CLOCK_START", "20261109100000"), ("KIWOOM_SEND_SPACING_MILLIS", "3000")]);
+    server.addr().await;
+    assert_eq!(failure(server.connect(false).await).problem, Problem::AuthBlocked8050);
+    server.clock().jump(601);
+    let acknowledged = tokio::spawn({
+        let link = server.link();
+        async move { link.connect(true).await }
+    });
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    server.link().disconnect();
+    acknowledged.await.unwrap();
+    assert!(server.link().needs_acknowledgement(), "요청이 나가기 전에 끊긴 확인은 8050 멈춤을 풀지 못한다");
+    assert_eq!(failure(server.connect(false).await).problem, Problem::AuthBlocked8050);
+    assert_eq!(fake.issued(), 1, "{:?}", fake.api_ids());
+    server.stop().await;
+}
