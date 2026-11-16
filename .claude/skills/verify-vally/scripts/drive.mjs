@@ -18,6 +18,7 @@ const journeys = {
     await cell.waitFor();
     await expect(cell).toHaveAttribute("aria-busy", "false");
     log("opened", await cell.getAttribute("aria-label"));
+    await expect(cell).toHaveAttribute("aria-label", /^칸 1: 코스피 /);
     await page.getByTitle(SEARCH_BUTTON_TITLE).click();
     const dialog = page.getByRole("dialog", { name: "종목 검색" });
     await dialog.getByRole("combobox", { name: "종목 검색" }).fill("삼성전자");
@@ -41,6 +42,7 @@ const journeys = {
     await page.goto("/");
     const panel = page.getByRole("complementary", { name: "관심종목" });
     await expect(panel.getByRole("button", { name: /^관심종목 목록: / })).toHaveAccessibleName("관심종목 목록: 기본");
+    await expect(panel.locator("li[data-code]")).toHaveCount(0);
     await page.screenshot({ path: join(evidence, "01-watchlist-empty.png") });
     await panel.getByRole("button", { name: "관심종목에 넣기" }).click();
     const dialog = page.getByRole("dialog", { name: "관심종목에 넣을 종목 검색" });

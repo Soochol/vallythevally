@@ -41,12 +41,24 @@ def load(run_dir):
     return json.loads((run_dir / "state.json").read_text())
 
 
+NO_PROXY_OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+
+
+def start_time(pid):
+    return Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()[19]
+
+
+def save(run_dir, state):
+    (run_dir / "state.json").write_text(json.dumps(state, indent=1))
+
+
 def http(url, timeout=3):
-    with urllib.request.urlopen(url, timeout=timeout) as r:
+    with NO_PROXY_OPENER.open(url, timeout=timeout) as r:
         return r.status, r.read()
 
 
 def up():
+    signal.signal(signal.SIGTERM, lambda *_: sys.exit(143))
     for needed in (SERVER_BIN, UI_DIR / "index.html"):
         if not needed.is_file():
             sys.exit(f"up: missing {needed}. Build first: python3 scripts/dev.py build ; python3 .claude/skills/verify-vally/scripts/build_ui.py {UI_DIR}")
@@ -55,14 +67,28 @@ def up():
     for sub in ("data", "evidence", "run"):
         (run_dir / sub).mkdir(parents=True)
     (run_dir / "run").chmod(0o700)
+    try:
+        return start(run_id, run_dir)
+    except BaseException:
+        stop(run_dir)
+        raise
+
+
+def start(run_id, run_dir):
+    state = {"run_id": run_id, "dir": str(run_dir)}
+    save(run_dir, state)
     kiwoom_port_file = run_dir / "kiwoom.port"
     kiwoom_log = run_dir / "evidence/kiwoom-requests.jsonl"
     kiwoom = subprocess.Popen([sys.executable, str(HERE / "verification_loopback_kiwoom.py"), str(kiwoom_port_file), str(kiwoom_log)],
                               stdout=open(run_dir / "kiwoom.out", "w"), stderr=subprocess.STDOUT, start_new_session=True)
-    for _ in range(50):
+    state.update(kiwoom_pid=kiwoom.pid, kiwoom_start=start_time(kiwoom.pid))
+    save(run_dir, state)
+    for _ in range(100):
         if kiwoom_port_file.is_file() and kiwoom_port_file.read_text():
             break
         time.sleep(0.1)
+    else:
+        sys.exit(f"up: loopback Kiwoom stand-in never reported its port; see {run_dir}/kiwoom.out")
     kiwoom_port = int(kiwoom_port_file.read_text())
     port = free_port()
     assert port != USER_SERVER_PORT
@@ -85,11 +111,12 @@ def up():
         "VALLY_LOG=info",
         "",
     ]))
-    env = {k: v for k, v in os.environ.items() if not k.startswith("VALLY_") and k != "OPENDART_API_KEY"}
+    env = {k: v for k, v in os.environ.items() if not k.startswith("VALLY_") and k != "OPENDART_API_KEY" and not k.lower().endswith("_proxy")}
+    env["NO_PROXY"] = env["no_proxy"] = "127.0.0.1,localhost"
     env["VALLY_ENV_FILE"] = str(env_file)
     server = subprocess.Popen([str(SERVER_BIN)], cwd=run_dir, env=env, stdout=open(run_dir / "server.log", "w"), stderr=subprocess.STDOUT, start_new_session=True)
-    state = {"run_id": run_id, "dir": str(run_dir), "base_url": f"http://127.0.0.1:{port}", "server_pid": server.pid, "kiwoom_pid": kiwoom.pid, "kiwoom_url": f"http://127.0.0.1:{kiwoom_port}"}
-    (run_dir / "state.json").write_text(json.dumps(state, indent=1))
+    state.update(base_url=f"http://127.0.0.1:{port}", server_pid=server.pid, server_start=start_time(server.pid), kiwoom_url=f"http://127.0.0.1:{kiwoom_port}")
+    save(run_dir, state)
     deadline = time.monotonic() + 40
     while time.monotonic() < deadline:
         if server.poll() is not None:
@@ -122,7 +149,7 @@ def doctor(run_dir):
     if "kiwoom.com" in (run_dir / "server.env").read_text():
         problems.append("real Kiwoom host in env file")
     for name in ("server_pid", "kiwoom_pid"):
-        if not alive(state[name]):
+        if not ours(state, name):
             problems.append(f"{name} {state[name]} is not running")
     if state["base_url"].endswith(f":{USER_SERVER_PORT}"):
         problems.append("run targets the user's server port")
@@ -146,20 +173,36 @@ def doctor(run_dir):
     return not problems
 
 
+def ours(state, name):
+    pid = state.get(name)
+    expected = state.get(name.replace("_pid", "_start"))
+    if not pid or not expected or not alive(pid):
+        return None
+    return pid if start_time(pid) == expected else None
+
+
+def signal_ours(pid, sig):
+    try:
+        if os.getpgid(pid) == pid:
+            os.killpg(pid, sig)
+        else:
+            os.kill(pid, sig)
+    except ProcessLookupError:
+        pass
+
+
 def stop(run_dir):
     state = load(run_dir) if (run_dir / "state.json").is_file() else {}
     for name in ("server_pid", "kiwoom_pid"):
-        pid = state.get(name)
-        if pid and alive(pid):
-            os.killpg(pid, signal.SIGTERM)
+        if pid := ours(state, name):
+            signal_ours(pid, signal.SIGTERM)
     for name in ("server_pid", "kiwoom_pid"):
-        pid = state.get(name)
         for _ in range(50):
-            if not pid or not alive(pid):
+            if not ours(state, name):
                 break
             time.sleep(0.1)
-        if pid and alive(pid):
-            os.killpg(pid, signal.SIGKILL)
+        if pid := ours(state, name):
+            signal_ours(pid, signal.SIGKILL)
 
 
 def run_all(journeys):

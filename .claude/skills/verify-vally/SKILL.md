@@ -21,7 +21,7 @@ Prerequisites (once per checkout or after code changes, from the repo root):
 
 ```sh
 python3 scripts/dev.py build                                   # target/dev/bin/vally-server (reuses the shared cache)
-python3 .claude/skills/verify-vally/scripts/build_ui.py target/verify-vally/ui   # frozen pnpm install, WASM, tsc, vite build
+python3 .claude/skills/verify-vally/scripts/build_ui.py target/verify-vally/ui   # frozen pnpm install, WASM, tsc, vite build; can wait a long time on the shared cargo compile lock when other sessions build
 ```
 
 Start one sandbox (prints a JSON state line with `base_url`, `dir`, pids; ready means `/api/symbols?q=005930` returns the loaded symbol, not merely that the port answers):
@@ -58,7 +58,7 @@ Playwright (`web/node_modules/@playwright/test`, Chromium) through one script. S
 node .claude/skills/verify-vally/scripts/drive.mjs <base_url> <run-dir>/evidence <journey>
 ```
 
-Journeys: `search-chart` (search button `title="종목 검색 (/ 또는 Ctrl+K)"`, dialog `종목 검색`, combobox `종목 검색`, option text `005930`, then `region` named `칸 1: …` with `data-bar-count`), `watchlist-add` (complementary `관심종목`, button `관심종목에 넣기`, `li[data-code]`). The journey exits 1 on a failed expectation, a console error, or a page error. Add journeys to `drive.mjs` per `features/*.md`.
+Journeys: `search-chart` (search button `title="종목 검색 (/ 또는 Ctrl+K)"`, dialog `종목 검색`, combobox `종목 검색`, option text `005930`, then `region` named `칸 1: …` with `data-bar-count`), `watchlist-add` (complementary `관심종목`, button `관심종목에 넣기`, `li[data-code]`). Each journey asserts its fresh-start precondition (코스피 cell, empty 기본 list), so run one `up` per journey set and never reuse a run for a second pass; a reused run fails with the precondition error. The journey exits 1 on a failed expectation, a console error, or a page error. Add journeys to `drive.mjs` per `features/*.md`.
 
 The existing repo harnesses are for mocked responses, not this skill: `python3 scripts/web.py e2e <spec>` (ADR 0016: Playwright against synthetic responses; no server) and `python3 scripts/web.py doctor` (Chromium check). Reuse their selectors; use them for broad regression, and this skill for "does the real server plus real UI work".
 
