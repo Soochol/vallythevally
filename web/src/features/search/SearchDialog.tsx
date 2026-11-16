@@ -53,7 +53,7 @@ function SearchDialogBody({ purpose }: { purpose: SearchPurpose }) {
     ...(mode.kind === "symbols" ? symbolList.rows.filter((row) => query !== "" || matchesMarket(row.info, market)).map((row): ResultRow => ({ kind: "symbol", ...row })) : []),
     ...(query === "" || mode.kind === "commands" ? matchingCommands(commands, query).map((command): ResultRow => ({ kind: "command", command, group: "commands" })) : []),
   ];
-  const selectable = mode.kind === "commands" || symbolList.selectable;
+  const selectable = mode.kind === "commands" || (!offline && symbolList.selectable);
   const activeIndex = selectable ? Math.min(active, rows.length - 1) : -1;
   const selected = rows[activeIndex];
   const contents = rows.map((row) => row.kind === "symbol" ? `${row.group}-${row.info.code}` : row.command.id).join("|");

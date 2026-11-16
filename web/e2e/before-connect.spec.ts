@@ -91,6 +91,38 @@ test("연결됨 상태 메시지가 오면 카드가 사라지고 기존 화면�
   await expect(page.getByRole("complementary", { name: "관심종목" }).getByText("저장된 목록 · 시세 없음")).toHaveCount(0);
 });
 
+test("연결 중 다른 이유로 실패한 차트도 연결됨이 되면 다시 받는다", async ({ page, scenario }) => {
+  beforeConnect(scenario, { state: "connecting" });
+  let failing = true;
+  const requests: string[] = [];
+  scenario.on((url) => url.pathname === "/api/bars" && failing, (request) => {
+    requests.push(request.url());
+    return { status: 503, body: { error: { code: "kiwoom_unavailable", message: "키움에 닿지 못했습니다", reason: "kiwoom_unreachable", retryAt: null, manualActionRequired: false } } };
+  });
+  await open(page);
+  await expect(guide(page).getByRole("heading", { name: "키움에 연결하는 중입니다" })).toBeVisible();
+  await expect(guide(page).getByRole("button")).toHaveCount(0);
+  failing = false;
+  scenario.reply("/api/quotes", { body: [] });
+  scenario.live.link({ ...CONNECTED_KIWOOM });
+  await expect(guide(page)).toHaveCount(0);
+  await expect(page.getByRole("alert")).toHaveCount(0);
+  await expect(cell(page)).toHaveAttribute("aria-busy", "false");
+});
+
+test("연결 안 함에서 검색 창은 Enter로 숨은 종목을 열지 않는다", async ({ page, scenario }) => {
+  beforeConnect(scenario, disconnected);
+  const lists = scenario.documents.watchlists();
+  scenario.documents.saveWatchlists({ lists: lists.lists.map((list, i) => (i === 0 ? { ...list, symbols: ["000810"] } : list)), revision: lists.revision + 1 });
+  await open(page);
+  await page.keyboard.press("/");
+  const search = page.getByRole("dialog", { name: "종목 검색" });
+  await expect(search.getByText("키움에 연결하면 검색할 수 있습니다")).toBeVisible();
+  await page.keyboard.press("Enter");
+  await expect(search).toBeVisible();
+  await expect(cell(page)).toHaveAttribute("aria-label", /삼성전자/);
+});
+
 test.describe("360px 폭", () => {
   test.use({ viewport: { width: 360, height: 800 } });
 
@@ -103,4 +135,16 @@ test.describe("360px 폭", () => {
     expect(box!.x).toBeGreaterThanOrEqual(0);
     expect(box!.x + box!.width).toBeLessThanOrEqual(360);
   });
+});
+
+test("긴 서버 문장도 차트 칸이 낮을 때 안내 단추가 눌린다", async ({ page, scenario }) => {
+  beforeConnect(scenario, { state: "failed", problem: "authUncertain", message: "키움이 지정단말기 인증을 거절했습니다 ".repeat(8) });
+  await page.setViewportSize({ width: 1024, height: 768 });
+  await open(page);
+  const button = guide(page).getByRole("button", { name: "시스템 설정 열기" });
+  await expect(button).toBeVisible();
+  const [card, chart] = await Promise.all([guide(page).boundingBox(), cell(page).boundingBox()]);
+  expect(card!.y + card!.height).toBeLessThanOrEqual(chart!.y + chart!.height + 1);
+  await button.click();
+  await expect(dialog(page)).toBeVisible();
 });

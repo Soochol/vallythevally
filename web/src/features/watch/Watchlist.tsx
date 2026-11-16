@@ -112,7 +112,7 @@ function WatchHead({ children, onNaming }: { children?: React.ReactNode; onNamin
         <>
           <ListMenu list={list} onName={setNaming} />
           <span className="flex-none text-s text-text-3">{list.symbols.length}종목</span>
-          {offline && <span className="min-w-0 truncate text-xs text-text-3">저장된 목록 · 시세 없음</span>}
+          {offline && <span className="min-w-0 shrink-[8] truncate text-xs text-text-3">저장된 목록 · 시세 없음</span>}
           <span className="flex-1" />
           <button
             type="button"

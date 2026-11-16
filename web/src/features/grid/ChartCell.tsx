@@ -132,10 +132,12 @@ export function ChartCell({ cellId, status, onStatus }: Props) {
   const refusedBeforeConnect = status.kind === "error" && status.error.reason === "not_connected";
   const notice = beforeConnect(link) ?? (refusedBeforeConnect && link === null ? NOT_CONNECTED_FALLBACK : null);
   const connected = link?.state === "connected";
+  const failedRef = useRef(false);
+  failedRef.current = status.kind === "error";
   useEffect(() => {
-    if (refusedBeforeConnect && connected) ctl.current?.reload();
-  }, [refusedBeforeConnect, connected]);
-  const error = status.kind === "error" && notice === null && !refusedBeforeConnect ? cellErrorView(status.error, cell.symbol) : null;
+    if (connected && failedRef.current) ctl.current?.reload();
+  }, [connected]);
+  const error = status.kind === "error" && notice === null ? cellErrorView(status.error, cell.symbol) : null;
   const olderError = status.kind === "ready" && status.olderError ? olderErrorView(status.olderError, cell.symbol) : null;
 
   return (
