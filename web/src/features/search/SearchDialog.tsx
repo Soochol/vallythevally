@@ -16,6 +16,8 @@ import { DEFAULT_SEARCH_COMMANDS } from "./commands";
 import { highlight } from "./highlight";
 import { GROUP_LABEL, searchList, type SearchGroup } from "./searchList";
 import { MARKET_FILTERS, SEARCH_FILTERS, matchesMarket, matchingCommands, type MarketFilter, searchMode } from "./searchMode";
+import { useBeforeConnect } from "../status/beforeConnect";
+import { OpenSettingsButton } from "../status/BeforeConnectCard";
 import { QuoteValue, SearchPreview } from "./SearchPreview";
 import { useSearchQuotes } from "./useSearchQuotes";
 
@@ -42,14 +44,16 @@ function SearchDialogBody({ purpose }: { purpose: SearchPurpose }) {
   const mode = searchMode(input);
   const query = mode.query;
   const filters = SEARCH_FILTERS[market];
-  const search = useSymbolSearch(mode.kind === "symbols" ? query : "", filters);
+  const beforeConnect = useBeforeConnect();
+  const offline = beforeConnect !== null && mode.kind === "symbols";
+  const search = useSymbolSearch(mode.kind === "symbols" && !offline ? query : "", filters);
   const ids = useId();
   const symbolList = searchList(query, { watch, recent }, search.data, filters);
   const rows: ResultRow[] = [
     ...(mode.kind === "symbols" ? symbolList.rows.filter((row) => query !== "" || matchesMarket(row.info, market)).map((row): ResultRow => ({ kind: "symbol", ...row })) : []),
     ...(query === "" || mode.kind === "commands" ? matchingCommands(commands, query).map((command): ResultRow => ({ kind: "command", command, group: "commands" })) : []),
   ];
-  const selectable = mode.kind === "commands" || symbolList.selectable;
+  const selectable = mode.kind === "commands" || (!offline && symbolList.selectable);
   const activeIndex = selectable ? Math.min(active, rows.length - 1) : -1;
   const selected = rows[activeIndex];
   const contents = rows.map((row) => row.kind === "symbol" ? `${row.group}-${row.info.code}` : row.command.id).join("|");
@@ -122,7 +126,7 @@ function SearchDialogBody({ purpose }: { purpose: SearchPurpose }) {
           <SearchIcon size={20} />
           <input ref={inputRef} onKeyDown={onKeyDown} autoFocus value={input} onChange={(e) => setInput(e.target.value)}
             placeholder="종목 이름, 코드, 초성 · >로 명령" aria-label="종목 검색" role="combobox"
-            aria-expanded={rows.length > 0} aria-controls={`${ids}-list`} aria-autocomplete="list"
+            aria-expanded={!offline && rows.length > 0} aria-controls={offline ? undefined : `${ids}-list`} aria-autocomplete="list"
             aria-activedescendant={activeIndex >= 0 ? optionId(activeIndex) : undefined}
             autoComplete="off" spellCheck={false} className="min-w-0 flex-1 bg-transparent text-text outline-none placeholder:text-text-3" />
         </label>
@@ -131,7 +135,10 @@ function SearchDialogBody({ purpose }: { purpose: SearchPurpose }) {
           {MARKET_FILTERS.map(({ value, label }) => <button key={value} type="button" aria-pressed={market === value} onClick={() => setMarket(value)} className={`seg-btn px-2 text-xs ${market === value ? "bg-accent-soft text-accent" : "text-text-3"}`}>{label}</button>)}
         </div>}
       </div>
-      <div className="flex min-h-0 flex-1">
+      {offline ? <div role="status" className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 p-6 text-center">
+        <p className="text-m text-text">키움에 연결하면 검색할 수 있습니다</p>
+        {beforeConnect?.canOpenSettings && <OpenSettingsButton />}
+      </div> : <div className="flex min-h-0 flex-1">
         <ul ref={list} id={`${ids}-list`} role="listbox" aria-label={purpose === "watch" ? "관심종목에 넣을 종목" : query === "" ? "관심종목과 최근 본 종목" : "검색 결과"}
           aria-busy={!selectable && !search.isError} className="min-w-0 flex-1 overflow-auto p-1">
           {rows.map((row, i) => <Fragment key={row.kind === "symbol" ? `${row.group}-${row.info.code}` : row.command.id}>
@@ -154,7 +161,7 @@ function SearchDialogBody({ purpose }: { purpose: SearchPurpose }) {
           {quotes.isError && <li role="presentation"><ErrorState message="시세를 받지 못했습니다. 종목은 계속 열 수 있습니다." retry={() => void quotes.refetch()} /></li>}
         </ul>
         {selected?.kind === "symbol" ? <SearchPreview key={selected.info.code} purpose={purpose} info={selected.info} quote={bySymbol.get(selected.info.code)} /> : <aside className="w-[280px] flex-none space-y-3 border-l border-line p-4 text-text-2 max-md:hidden"><h3 className="font-semibold text-text">{selected?.kind === "command" ? selected.command.label : "종목·명령 찾기"}</h3><p className="text-s">{selected?.kind === "command" ? "Enter를 눌러 실행합니다" : "종목을 고르면 현재가와 60일 추세를 볼 수 있습니다"}</p><p className="text-xs text-text-3">&gt;로 시작하면 명령만 찾습니다</p></aside>}
-      </div>
+      </div>}
       <div className="flex flex-none flex-wrap items-center gap-2 border-t border-line px-4 py-2 text-xs text-text-3">
         <span><kbd>↑↓</kbd> 고르기</span><span><kbd>↵</kbd> {purpose === "watch" ? "관심종목에 넣기" : "열기"}</span><span><kbd>Ctrl+↵</kbd> 관심종목</span><span><kbd>Shift+↵</kbd> 비교</span><span><kbd>Esc</kbd> 닫기</span>
       </div>

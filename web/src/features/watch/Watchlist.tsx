@@ -43,6 +43,7 @@ import { LIST_HEAD, LIST_ROW_HEIGHT, LIST_ROW_HOVER, PriceText, RateBadge, Symbo
 import { columnTemplate, fitColumns, type WatchVariant } from "./columns";
 import { useElementSize } from "../workspace/size";
 import { removalUndo } from "./removalUndo";
+import { useBeforeConnect } from "../status/beforeConnect";
 
 const DIR_CLASS = { up: "text-up", down: "text-down", flat: "text-text-2" } as const;
 const ROW_GRID = "grid gap-1";
@@ -101,6 +102,7 @@ function WatchHead({ children, onNaming }: { children?: React.ReactNode; onNamin
   const list = useActiveWatchlist();
   const openSearch = useSelectionStore((s) => s.openSearch);
   const [naming, setNaming] = useState<Naming | null>(null);
+  const offline = useBeforeConnect() !== null;
   return (
     <div className="flex h-9 flex-none items-center gap-1 border-b border-line pl-1.5 pr-1 max-md:h-12">
       <h2 className="sr-only">관심종목</h2>
@@ -110,6 +112,7 @@ function WatchHead({ children, onNaming }: { children?: React.ReactNode; onNamin
         <>
           <ListMenu list={list} onName={setNaming} />
           <span className="flex-none text-s text-text-3">{list.symbols.length}종목</span>
+          {offline && <span className="min-w-0 shrink-[8] truncate text-xs text-text-3">저장된 목록 · 시세 없음</span>}
           <span className="flex-1" />
           <button
             type="button"
