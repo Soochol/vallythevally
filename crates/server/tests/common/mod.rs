@@ -60,7 +60,10 @@ impl Server {
         let thread = std::thread::spawn(move || {
             let subscriber = tracing_subscriber::registry().with(tracing_subscriber::fmt::layer().with_ansi(false).with_writer(move || writer.clone()).with_filter(tracing_subscriber::EnvFilter::new("server=trace")));
             let _guard = tracing::subscriber::set_default(subscriber);
-            let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+            let runtime = match overrides.get("SERVER_RUNTIME_THREADS") {
+                Some(threads) => tokio::runtime::Builder::new_multi_thread().worker_threads(threads.parse().unwrap()).enable_all().build().unwrap(),
+                None => tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap(),
+            };
             runtime.block_on(async move {
                 tokio::select! {
                     _ = stopped => {},

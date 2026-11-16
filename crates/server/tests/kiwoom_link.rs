@@ -438,3 +438,84 @@ async fn a_disconnect_during_a_stream_backoff_reports_not_connected_at_once() {
     assert!(realtime.contains("notConnected"), "{realtime}");
     server.stop().await;
 }
+
+async fn slow_upgrade_peer(hold: Duration) -> (String, Arc<AtomicUsize>, Arc<AtomicUsize>) {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("ws://{}/api/dostk/websocket", listener.local_addr().unwrap());
+    let tcp = Arc::new(AtomicUsize::new(0));
+    let logins = Arc::new(AtomicUsize::new(0));
+    let (tcp_count, login_count) = (tcp.clone(), logins.clone());
+    tokio::spawn(async move {
+        while let Ok((stream, _)) = listener.accept().await {
+            tcp_count.fetch_add(1, Ordering::SeqCst);
+            let login_count = login_count.clone();
+            tokio::spawn(async move {
+                use futures::StreamExt;
+                tokio::time::sleep(hold).await;
+                let Ok(mut socket) = tokio_tungstenite::accept_async(stream).await else { return };
+                while let Some(Ok(message)) = socket.next().await {
+                    if message.to_text().unwrap_or_default().contains("LOGIN") {
+                        login_count.fetch_add(1, Ordering::SeqCst);
+                    }
+                }
+            });
+        }
+    });
+    (url, tcp, logins)
+}
+
+#[tokio::test]
+async fn a_handshake_in_flight_at_disconnect_sends_no_login() {
+    let (url, tcp, logins) = slow_upgrade_peer(Duration::from_millis(1500)).await;
+    let fake = ScriptedTransport::new();
+    let env = env();
+    let server = spawn(&fake, &env, &[OFF, ("VALLY_KIWOOM_WS_URL", url.as_str())]);
+    server.addr().await;
+    assert_eq!(server.connect(false).await, LinkState::Connected);
+    for _ in 0..40 {
+        if tcp.load(Ordering::SeqCst) > 0 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    assert_eq!(tcp.load(Ordering::SeqCst), 1);
+    server.link().disconnect();
+    tokio::time::sleep(Duration::from_secs(4)).await;
+    assert_eq!(logins.load(Ordering::SeqCst), 0, "끊은 뒤에는 LOGIN을 보내지 않는다");
+    server.stop().await;
+}
+
+#[tokio::test]
+async fn racing_connect_and_disconnect_on_threads_always_ends_disconnected() {
+    let fake = ScriptedTransport::new();
+    let env = env();
+    let server = spawn(&fake, &env, &[OFF, ("SERVER_RUNTIME_THREADS", "4")]);
+    server.addr().await;
+    assert_eq!(server.connect(false).await, LinkState::Connected);
+    server.link().disconnect();
+    let mut stuck = Vec::new();
+    for round in 0..600u64 {
+        let link = server.link();
+        let connecting = server.connect(false);
+        tokio::pin!(connecting);
+        let first = futures::poll!(connecting.as_mut());
+        while !matches!(link.state(), LinkState::Connecting(_) | LinkState::Connected) {
+            std::hint::spin_loop();
+        }
+        let spin = std::time::Instant::now();
+        while spin.elapsed() < Duration::from_nanos((round % 40) * 5_000) {
+            std::hint::spin_loop();
+        }
+        link.disconnect();
+        if first.is_pending() {
+            connecting.await;
+        }
+        tokio::time::sleep(Duration::from_millis(5)).await;
+        if server.link_state() != LinkState::Disconnected {
+            stuck.push((round, server.link_state()));
+            server.link().disconnect();
+        }
+    }
+    assert!(stuck.is_empty(), "{} {:?}", stuck.len(), &stuck[..stuck.len().min(5)]);
+    server.stop().await;
+}

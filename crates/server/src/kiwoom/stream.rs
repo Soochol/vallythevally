@@ -412,7 +412,11 @@ impl Session {
     }
 
     async fn connect(&mut self, attempt: u32) -> SessionState {
-        match timeout(self.timings.control, self.connector.connect()).await {
+        let connected = tokio::select! {
+            connected = timeout(self.timings.control, self.connector.connect()) => connected,
+            _ = self.access.wait_for(|access| *access != Access::Open) => return SessionState::Disconnected { retry_at: Instant::now(), attempt },
+        };
+        match connected {
             Ok(Ok(ws)) => SessionState::LoggingIn { conn: Conn::new(ws, self.timings.silence), attempt },
             Ok(Err(e)) => {
                 tracing::warn!(error = %e, "키움 WebSocket에 연결하지 못했습니다");
@@ -426,6 +430,10 @@ impl Session {
     }
 
     async fn log_in(&mut self, mut conn: Conn, attempt: u32) -> Option<SessionState> {
+        if *self.access.borrow() != Access::Open {
+            conn.close().await;
+            return Some(SessionState::Disconnected { retry_at: Instant::now(), attempt });
+        }
         let Some((token, generation)) = self.rest.auth().current(self.clock.now()) else {
             conn.close().await;
             return Some(SessionState::Disconnected { retry_at: Instant::now(), attempt });

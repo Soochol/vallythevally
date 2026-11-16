@@ -73,6 +73,8 @@ pub enum LinkState {
     Failed(LinkFailure),
 }
 
+struct Stale;
+
 type Flight = Shared<BoxFuture<'static, LinkState>>;
 
 struct Inner {
@@ -124,18 +126,36 @@ impl Link {
         }
     }
 
-    fn abandon_connect(&self) {
+    fn abandon_connect(&self, then: impl FnOnce()) {
         let mut slot = self.0.flight.lock().expect("연결 잠금");
         self.0.epoch.send_modify(|epoch| *epoch += 1);
         slot.take();
+        then();
     }
 
     fn set(&self, state: LinkState) {
         self.0.state.send_replace(state);
     }
 
+    fn publish(&self, epoch: u64, write: impl FnOnce()) -> Result<(), Stale> {
+        let _slot = self.0.flight.lock().expect("연결 잠금");
+        if *self.0.epoch.borrow() != epoch {
+            return Err(Stale);
+        }
+        write();
+        Ok(())
+    }
+
+    fn step(&self, epoch: u64, state: LinkState) -> Result<(), Stale> {
+        self.publish(epoch, || self.set(state))
+    }
+
+    fn open_access(&self, epoch: u64, access: Access) -> Result<(), Stale> {
+        self.publish(epoch, || self.0.rest.set_access(access))
+    }
+
     fn aborted(&self, epoch: u64) -> bool {
-        *self.0.epoch.borrow() != epoch || self.0.rest.access() == Access::Closed
+        *self.0.epoch.borrow() != epoch
     }
 
     pub async fn connect(&self, acknowledged: bool) -> LinkState {
@@ -147,9 +167,10 @@ impl Link {
                     let link = self.clone();
                     let epoch = *self.0.epoch.borrow();
                     let task = tokio::spawn(async move {
-                        let outcome = link.run_connect(acknowledged, epoch).await;
+                        let outcome = link.run_connect(acknowledged, epoch).await.unwrap_or_else(|Stale| link.state());
+                        let mut slot = link.0.flight.lock().expect("연결 잠금");
                         if *link.0.epoch.borrow() == epoch {
-                            link.0.flight.lock().expect("연결 잠금").take();
+                            slot.take();
                         }
                         outcome
                     });
@@ -162,73 +183,73 @@ impl Link {
         flight.await
     }
 
-    async fn run_connect(&self, acknowledged: bool, epoch: u64) -> LinkState {
+    async fn run_connect(&self, acknowledged: bool, epoch: u64) -> Result<LinkState, Stale> {
         let rest = &self.0.rest;
         let auth = rest.auth();
-        if *self.0.epoch.borrow() != epoch {
-            return self.state();
+        if self.aborted(epoch) {
+            return Err(Stale);
         }
         if self.is_connected() {
-            return LinkState::Connected;
+            return Ok(LinkState::Connected);
         }
-        self.set(LinkState::Connecting(ConnectStep::CheckingKey));
+        self.step(epoch, LinkState::Connecting(ConnectStep::CheckingKey))?;
         if !auth.has_credentials() {
-            return self.finish(LinkState::NoKey);
+            return self.finish(epoch, LinkState::NoKey);
         }
         match auth.halted() {
             Some(halt) if halt.is_8050() && acknowledged => {
                 let now = self.0.clock.now();
                 if let Some(until) = auth.issue_blocked_until(now) {
-                    return self.finish(LinkState::Failed(LinkFailure::of(&KiwoomError::Gated { until, cause: GateCause::IssueInterval })));
+                    return self.finish(epoch, LinkState::Failed(LinkFailure::of(&KiwoomError::Gated { until, cause: GateCause::IssueInterval })));
                 }
                 auth.release_8050();
             }
-            Some(halt) => return self.finish(LinkState::Failed(LinkFailure::of(&halt.into()))),
+            Some(halt) => return self.finish(epoch, LinkState::Failed(LinkFailure::of(&halt.into()))),
             None => {}
         }
         let now = self.0.clock.now();
         let has_token = auth.current(now).is_some();
         if !has_token && let Some(until) = auth.issue_blocked_until(now) {
-            return self.finish(LinkState::Failed(LinkFailure::of(&KiwoomError::Gated { until, cause: GateCause::IssueInterval })));
+            return self.finish(epoch, LinkState::Failed(LinkFailure::of(&KiwoomError::Gated { until, cause: GateCause::IssueInterval })));
         }
-        rest.set_access(Access::Connecting);
+        self.open_access(epoch, Access::Connecting)?;
         if has_token {
             tracing::info!("파일의 토큰을 다시 씁니다. 발급하지 않습니다");
         } else {
-            self.set(LinkState::Connecting(ConnectStep::Token));
+            self.step(epoch, LinkState::Connecting(ConnectStep::Token))?;
             if let Err(error) = rest.issue_token().await {
                 return self.fail(&error, epoch);
             }
-            if self.aborted(epoch) {
-                return self.state();
-            }
         }
-        self.set(LinkState::Connecting(ConnectStep::Symbols));
+        self.step(epoch, LinkState::Connecting(ConnectStep::Symbols))?;
         if let Err(error) = self.load_symbols(epoch).await {
             return self.fail(&error, epoch);
         }
-        if self.aborted(epoch) {
-            return self.state();
-        }
-        self.set(LinkState::Connecting(ConnectStep::Realtime));
-        rest.set_access(Access::Open);
-        self.set(LinkState::Connected);
+        self.step(epoch, LinkState::Connecting(ConnectStep::Realtime))?;
+        self.publish(epoch, || {
+            rest.set_access(Access::Open);
+            self.set(LinkState::Connected);
+        })?;
         self.start_screener_update();
-        LinkState::Connected
+        Ok(LinkState::Connected)
     }
 
-    fn finish(&self, state: LinkState) -> LinkState {
-        self.set(state.clone());
-        state
+    fn finish(&self, epoch: u64, state: LinkState) -> Result<LinkState, Stale> {
+        self.step(epoch, state.clone())?;
+        Ok(state)
     }
 
-    fn fail(&self, error: &KiwoomError, epoch: u64) -> LinkState {
-        if matches!(error, KiwoomError::NotConnected) || self.aborted(epoch) {
-            return self.state();
+    fn fail(&self, error: &KiwoomError, epoch: u64) -> Result<LinkState, Stale> {
+        if matches!(error, KiwoomError::NotConnected) {
+            return Err(Stale);
         }
-        self.0.rest.set_access(Access::Closed);
         tracing::warn!(error = %error, "키움에 연결하지 못했습니다");
-        self.finish(LinkState::Failed(LinkFailure::of(error)))
+        let state = LinkState::Failed(LinkFailure::of(error));
+        self.publish(epoch, || {
+            self.0.rest.set_access(Access::Closed);
+            self.set(state.clone());
+        })?;
+        Ok(state)
     }
 
     async fn load_symbols(&self, epoch: u64) -> Result<(), KiwoomError> {
@@ -266,32 +287,41 @@ impl Link {
     }
 
     pub fn disconnect(&self) {
-        self.abandon_connect();
-        self.0.rest.set_access(Access::Closed);
-        self.set(self.resting_state());
+        self.abandon_connect(|| {
+            self.0.rest.set_access(Access::Closed);
+            self.set(self.resting_state());
+        });
+    }
+
+    fn rest_as(&self, state: LinkState) -> LinkState {
+        self.set(state.clone());
+        state
     }
 
     pub fn recheck_token_file(&self) -> LinkState {
         match self.0.rest.auth().recheck_token_file() {
-            Ok(()) if !self.is_connected() && !matches!(self.state(), LinkState::Connecting(_)) => self.finish(self.resting_state()),
+            Ok(()) if !self.is_connected() && !matches!(self.state(), LinkState::Connecting(_)) => self.rest_as(self.resting_state()),
             Ok(()) | Err(_) => self.state(),
         }
     }
 
     pub fn replace_key(&self, app_key: Secret<String>, app_secret: Secret<String>) -> LinkState {
         let auth = self.0.rest.auth();
-        if matches!(self.state(), LinkState::Connected | LinkState::Connecting(_)) {
-            self.disconnect();
-        }
-        auth.replace_credentials(app_key, app_secret);
-        auth.release_key_rejection();
-        self.finish(self.resting_state())
+        self.abandon_connect(|| {
+            self.0.rest.set_access(Access::Closed);
+            auth.replace_credentials(app_key, app_secret);
+            auth.release_key_rejection();
+            self.set(self.resting_state());
+        });
+        self.state()
     }
 
     pub fn clear_key(&self) -> LinkState {
-        self.abandon_connect();
-        self.0.rest.set_access(Access::Closed);
-        self.0.rest.auth().clear_credentials();
-        self.finish(self.resting_state())
+        self.abandon_connect(|| {
+            self.0.rest.set_access(Access::Closed);
+            self.0.rest.auth().clear_credentials();
+            self.set(self.resting_state());
+        });
+        self.state()
     }
 }
