@@ -125,8 +125,9 @@ impl Link {
     }
 
     fn abandon_connect(&self) {
+        let mut slot = self.0.flight.lock().expect("연결 잠금");
         self.0.epoch.send_modify(|epoch| *epoch += 1);
-        self.0.flight.lock().expect("연결 잠금").take();
+        slot.take();
     }
 
     fn set(&self, state: LinkState) {

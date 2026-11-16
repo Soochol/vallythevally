@@ -410,3 +410,31 @@ async fn a_disconnect_right_after_connect_starts_wins() {
     assert_eq!(fake.requests(), 0, "{:?}", fake.api_ids());
     server.stop().await;
 }
+
+#[tokio::test]
+async fn a_disconnect_during_a_stream_backoff_reports_not_connected_at_once() {
+    let socket = counted_socket().await;
+    let fake = ScriptedTransport::new();
+    let env = env();
+    let server = spawn(&fake, &env, &[OFF, ("VALLY_KIWOOM_WS_URL", socket.url.as_str())]);
+    let addr = server.addr().await;
+    assert_eq!(server.connect(false).await, LinkState::Connected);
+    tokio::time::sleep(Duration::from_secs(6)).await;
+    server.link().disconnect();
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    let (mut ws, _) = tokio_tungstenite::connect_async(format!("ws://{addr}/api/ws")).await.unwrap();
+    let realtime = tokio::time::timeout(Duration::from_secs(2), async {
+        use futures::StreamExt;
+        while let Some(Ok(message)) = ws.next().await {
+            let text = message.to_text().unwrap_or_default().to_owned();
+            if let Some(at) = text.find(r#""realtime":""#) {
+                return text[at..(at + 40).min(text.len())].to_owned();
+            }
+        }
+        String::new()
+    })
+    .await
+    .unwrap();
+    assert!(realtime.contains("notConnected"), "{realtime}");
+    server.stop().await;
+}

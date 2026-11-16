@@ -381,6 +381,7 @@ impl Session {
         tokio::select! {
             () = sleep_until(retry_at) => {}
             () = self.events.closed() => return None,
+            _ = self.access.wait_for(|access| *access != Access::Open) => {}
         }
         if *self.access.borrow() != Access::Open {
             return Some(SessionState::Disconnected { retry_at: Instant::now(), attempt });
