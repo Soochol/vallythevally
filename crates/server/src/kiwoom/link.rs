@@ -84,7 +84,7 @@ struct Inner {
     clock: Clock,
     update_on_start: bool,
     state: watch::Sender<LinkState>,
-    flight: Mutex<Option<Flight>>,
+    flight: Mutex<Option<(bool, Flight)>>,
     epoch: watch::Sender<u64>,
 }
 
@@ -96,7 +96,34 @@ impl Link {
         rest.set_access(Access::Closed);
         let link = Link(Arc::new(Inner { rest, symbols, screener, clock, update_on_start, state: watch::channel(LinkState::Disconnected).0, flight: Mutex::new(None), epoch: watch::channel(0).0 }));
         link.0.state.send_replace(link.resting_state());
+        link.watch_halts();
         link
+    }
+
+    fn watch_halts(&self) {
+        let inner = Arc::downgrade(&self.0);
+        let mut halted = self.0.rest.auth().watch_halted();
+        tokio::spawn(async move {
+            loop {
+                if halted.wait_for(Option::is_some).await.is_err() {
+                    return;
+                }
+                let Some(inner) = inner.upgrade() else { return };
+                Link(inner).stop_for_halt();
+                if halted.wait_for(Option::is_none).await.is_err() {
+                    return;
+                }
+            }
+        });
+    }
+
+    fn stop_for_halt(&self) {
+        self.abandon_connect(|| {
+            if matches!(self.state(), LinkState::Connected | LinkState::Connecting(_)) {
+                self.0.rest.set_access(Access::Closed);
+                self.set(self.resting_state());
+            }
+        });
     }
 
     pub fn state(&self) -> LinkState {
@@ -159,28 +186,34 @@ impl Link {
     }
 
     pub async fn connect(&self, acknowledged: bool) -> LinkState {
-        let flight = {
-            let mut slot = self.0.flight.lock().expect("연결 잠금");
-            match slot.as_ref() {
-                Some(flight) => flight.clone(),
-                None => {
-                    let link = self.clone();
-                    let epoch = *self.0.epoch.borrow();
-                    let task = tokio::spawn(async move {
-                        let outcome = link.run_connect(acknowledged, epoch).await.unwrap_or_else(|Stale| link.state());
-                        let mut slot = link.0.flight.lock().expect("연결 잠금");
-                        if *link.0.epoch.borrow() == epoch {
-                            slot.take();
-                        }
-                        outcome
-                    });
-                    let flight = async move { task.await.unwrap_or(LinkState::Disconnected) }.boxed().shared();
-                    *slot = Some(flight.clone());
-                    flight
-                }
+        loop {
+            let (started_acknowledged, flight) = self.join_or_start(acknowledged);
+            let outcome = flight.await;
+            if acknowledged && !started_acknowledged && outcome != LinkState::Connected {
+                continue;
             }
-        };
-        flight.await
+            return outcome;
+        }
+    }
+
+    fn join_or_start(&self, acknowledged: bool) -> (bool, Flight) {
+        let mut slot = self.0.flight.lock().expect("연결 잠금");
+        if let Some((started_acknowledged, flight)) = slot.as_ref() {
+            return (*started_acknowledged, flight.clone());
+        }
+        let link = self.clone();
+        let epoch = *self.0.epoch.borrow();
+        let task = tokio::spawn(async move {
+            let outcome = link.run_connect(acknowledged, epoch).await.unwrap_or_else(|Stale| link.state());
+            let mut slot = link.0.flight.lock().expect("연결 잠금");
+            if *link.0.epoch.borrow() == epoch {
+                slot.take();
+            }
+            outcome
+        });
+        let flight = async move { task.await.unwrap_or(LinkState::Disconnected) }.boxed().shared();
+        *slot = Some((acknowledged, flight.clone()));
+        (acknowledged, flight)
     }
 
     async fn run_connect(&self, acknowledged: bool, epoch: u64) -> Result<LinkState, Stale> {

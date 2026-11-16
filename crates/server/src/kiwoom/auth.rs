@@ -138,6 +138,10 @@ impl KiwoomAuth {
         self.state.lock().expect("auth 잠금")
     }
 
+    pub fn watch_halted(&self) -> watch::Receiver<Option<Halt>> {
+        self.halted.subscribe()
+    }
+
     pub fn has_credentials(&self) -> bool {
         self.lock().credentials.is_some()
     }

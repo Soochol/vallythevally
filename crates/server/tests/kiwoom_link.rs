@@ -541,3 +541,44 @@ async fn an_acknowledged_connect_abandoned_before_its_request_keeps_the_8050_blo
     assert_eq!(fake.issued(), 1, "{:?}", fake.api_ids());
     server.stop().await;
 }
+
+#[tokio::test]
+async fn an_acknowledged_connect_joining_an_unacknowledged_flight_is_not_swallowed() {
+    let fake = ScriptedTransport::new();
+    reject_issue(&fake, EIGHT_FIFTY);
+    let env = env();
+    let server = spawn(&fake, &env, &[OFF, ("VALLY_CLOCK_START", "20261109100000")]);
+    server.addr().await;
+    assert_eq!(failure(server.connect(false).await).problem, Problem::AuthBlocked8050);
+    server.clock().jump(601);
+    fake.reset();
+    let link = server.link();
+    let (_, acknowledged) = tokio::join!(link.connect(false), link.connect(true));
+    assert_eq!(acknowledged, LinkState::Connected);
+    assert_eq!(fake.issued(), 2, "처음 8050 거절 한 건과 확인한 연결의 발급 한 건: {:?}", fake.api_ids());
+    server.stop().await;
+}
+
+#[tokio::test]
+async fn an_8050_at_the_daily_reissue_leaves_the_link_failed_and_closed() {
+    let fake = ScriptedTransport::new();
+    let env = env();
+    let server = spawn(&fake, &env, &[OFF, ("VALLY_CLOCK_START", "20261109200458")]);
+    server.addr().await;
+    assert_eq!(server.connect(false).await, LinkState::Connected);
+    reject_issue(&fake, EIGHT_FIFTY);
+    server.clock().jump(601);
+    for _ in 0..60 {
+        if fake.issued() >= 2 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert_eq!(fake.issued(), 2, "{:?}", fake.api_ids());
+    assert_eq!(failure(server.link_state()).problem, Problem::AuthBlocked8050);
+    let base = format!("http://{}", server.addr().await);
+    assert_eq!(get(&base, "/api/bars?symbol=005930&period=D").await.1["error"]["reason"], "not_connected");
+    assert_eq!(failure(server.connect(false).await).problem, Problem::AuthBlocked8050);
+    server.stop().await;
+}
