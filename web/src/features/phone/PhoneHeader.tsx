@@ -7,6 +7,7 @@ import type { ChartWindowState } from "../../stores/layout";
 import { useSelectionStore } from "../../stores/selection";
 import { CameraIcon } from "../icons";
 import { saveSnapshot } from "../snapshot/saveSnapshot";
+import { PhoneSystemButton } from "../system-settings/SystemButton";
 import { VenuePicker } from "../venue/VenuePicker";
 import { Attribution } from "../status/attribution";
 import { ConnectionIndicator, useConnectionView } from "../status/ConnectionIndicator";
@@ -34,6 +35,7 @@ export function PhoneHeader({ cell, info, status }: { cell: ChartWindowState; in
             <small className="ml-1 text-s text-text-3">{symbolSub(cell.symbol, info)}</small>
           </button>
           <FinancialUpdateButton />
+          <PhoneSystemButton />
           <button type="button" className="icon-btn h-9 w-9 flex-none" title="차트 이미지 내려받기" aria-label="차트 이미지 내려받기" onClick={() => saveSnapshot(cell.id, "download")}><CameraIcon size={20} /></button>
         </div>
         <div className="flex h-[32px] items-center gap-2">

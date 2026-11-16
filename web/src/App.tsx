@@ -2,6 +2,8 @@ import { FinancialUpdateDialog } from "./features/financial-update/FinancialUpda
 import { ConfirmHost } from "./features/overlay/Confirm";
 import { TooltipHost } from "./features/overlay/Tooltip";
 import { useEffect, useState } from "react";
+import { loadKiwoomLink } from "./api/system";
+import { SystemSettingsDialog } from "./features/system-settings/SystemSettingsDialog";
 import { useSymbolInfo } from "./api/queries";
 import type { CellStatus } from "./chart/ChartController";
 import { ChartCell } from "./features/grid/ChartCell";
@@ -42,6 +44,11 @@ function ChartScreen() {
   const status: CellStatus = phoneStatus?.cellId === cellId ? phoneStatus.status : { kind: "loading" };
 
   useHotkeys();
+  useEffect(() => {
+    const load = new AbortController();
+    void loadKiwoomLink(load.signal);
+    return () => load.abort();
+  }, []);
   useOpenFromAddress();
   useEffect(() => {
     if (info) pushRecent(info.code);
@@ -73,6 +80,7 @@ function ChartScreen() {
       <IndicatorCommand />
       <ScreenDialog />
       <FinancialUpdateDialog />
+      <SystemSettingsDialog />
       <Toast />
       <ConfirmHost />
       <TooltipHost />

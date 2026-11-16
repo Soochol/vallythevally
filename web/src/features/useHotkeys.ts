@@ -8,6 +8,7 @@ import { chartWindows, useLayoutStore } from "../stores/layout";
 import { useSelectionStore } from "../stores/selection";
 import { pressScale } from "./indicator-dialog/compareForm";
 import { saveSnapshot } from "./snapshot/saveSnapshot";
+import { openSystemSettings } from "./system-settings/open";
 
 /** 화면 전체의 단축키. 대화상자가 열려 있거나 입력칸에 초점이 있으면 쓰지 않는다. */
 export function useHotkeys() {
@@ -23,6 +24,7 @@ export function useHotkeys() {
       const action = matchHotkey(e, matchMedia(DESKTOP_QUERY).matches ? "desktop" : "phone");
       if (!action) return;
       e.preventDefault();
+      if (action.kind === "systemSettings") return openSystemSettings();
       const layout = useLayoutStore.getState();
       const cellId = sel.activeCell;
       const cell = chartWindows(layout.layout).find((c) => c.id === cellId);

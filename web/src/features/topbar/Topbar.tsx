@@ -13,6 +13,7 @@ import { BrandIcon, ChevronIcon, CameraIcon, CopyIcon, IndicatorIcon, SearchIcon
 import { canCopyImage, saveSnapshot } from "../snapshot/saveSnapshot";
 import { LayoutMenu } from "../layouts/LayoutMenu";
 import { VenuePicker } from "../venue/VenuePicker";
+import { SystemButton } from "../system-settings/SystemButton";
 import { AddWindowMenu } from "../workspace/AddWindowMenu";
 
 export function Topbar() {
@@ -53,6 +54,7 @@ export function Topbar() {
       {canCopyImage() && <button type="button" className="icon-btn" title="차트 이미지 복사 (Alt+Shift+S)" aria-label="차트 이미지 복사" onClick={() => saveSnapshot(cellId, "copy")}><CopyIcon /></button>}
       <button ref={settingsButton} type="button" className="tb-btn aria-expanded:bg-accent-soft aria-expanded:font-semibold aria-expanded:text-accent" aria-label="차트 설정" aria-haspopup="dialog" aria-expanded={settingsOpen} onClick={() => setSettingsOpen((open) => !open)}><SlidersIcon /><span className="max-xl:hidden">차트 설정</span></button>
       {settingsOpen && <ChartSettingsPopover cellId={cellId} anchor={settingsButton} onClose={() => setSettingsOpen(false)} />}
+      <SystemButton />
       <button type="button" className="tb-btn shell-search" aria-haspopup="dialog" aria-label="종목·지표·명령 찾기" title="종목 검색 (/ 또는 Ctrl+K)" onClick={() => openSearch()}>
         <SearchIcon size={14} />
         <kbd>/</kbd>

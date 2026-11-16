@@ -183,3 +183,9 @@ export const SortIcon = ({ size = 12, dir }: P & { dir: "up" | "down" }) => <Ico
 export const ExpandIcon = ({ size = 16 }: P) => <Icon size={size} path="M8 3H3v5M16 3h5v5M3 16v5h5M21 16v5h-5" />;
 
 export const CompareIcon = ({ size = 16 }: P) => <Icon size={size} path="M3 16l5-5 4 3 9-9M3 21l6-4 4 2 8-7" />;
+export const GearIcon = ({ size = 16 }: P) => (
+  <Icon size={size}>
+    <circle cx="12" cy="12" r="3" />
+    <path d="M12 2.8v2.4M12 18.8v2.4M2.8 12h2.4M18.8 12h2.4M5.5 5.5l1.7 1.7M16.8 16.8l1.7 1.7M5.5 18.5l1.7-1.7M16.8 7.2l1.7-1.7" />
+  </Icon>
+);

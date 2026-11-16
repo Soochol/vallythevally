@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import type { WindowId } from "../layout/kinds";
+import type { SystemMenuId } from "../features/system-settings/menus";
 import { chartWindows, DEFAULT_LAYOUT, useLayoutStore } from "./layout";
 
 export interface ToastUndo {
@@ -15,7 +16,8 @@ export type Dialog =
   | { kind: "search"; purpose: SearchPurpose }
   | { kind: "indicatorCommand"; cellId: WindowId; mode: IndicatorCommandMode; indicatorId: string | null }
   | { kind: "screen" }
-  | { kind: "financial-update" };
+  | { kind: "financial-update" }
+  | { kind: "system-settings"; menu: SystemMenuId | null };
 export type InspectorRequest = { cellId: WindowId; mode: IndicatorCommandMode; indicatorId: string | null };
 export type PhoneTab = "chart" | "watch" | "screener";
 
@@ -33,6 +35,7 @@ interface SelectionState {
   takeInspectorRequest(): InspectorRequest | null;
   openScreenEditor(): void;
   openFinancialUpdate(): void;
+  openSystemSettings(menu: SystemMenuId | null): void;
   closeDialog(): void;
   setPhoneTab(tab: PhoneTab): void;
   showToast(text: string, undo?: ToastUndo): void;
@@ -66,6 +69,7 @@ export const useSelectionStore = create<SelectionState>()((set, get) => ({
   },
   openScreenEditor: () => set({ dialog: { kind: "screen" } }),
   openFinancialUpdate: () => set({ dialog: { kind: "financial-update" } }),
+  openSystemSettings: (menu) => set({ dialog: { kind: "system-settings", menu } }),
   closeDialog: () => set({ dialog: null }),
   setPhoneTab: (phoneTab) => set({ phoneTab }),
   showToast: (text, undo) => set({ toast: { id: ++toastId, text, undo } }),
