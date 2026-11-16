@@ -46,7 +46,9 @@ impl Fixture {
         let (stream, _desired) = KiwoomStream::detached();
         let (_events, events) = tokio::sync::mpsc::channel(1);
         let store = server::screener::store::Store::open(&tmp.path().join("screener.duckdb")).unwrap();
-        let app = router(application(ApplicationInputs { rest: rest.clone(), clock, symbols, db, screener_store: store, stream: (stream, events), static_dir: tmp.path().to_owned() }));
+        let state = application(ApplicationInputs { rest: rest.clone(), clock, symbols, db, screener_store: store, stream: (stream, events), static_dir: tmp.path().to_owned(), screener_update_on_connect: false });
+        rest.set_access(server::kiwoom::rest::Access::Open);
+        let app = router(state);
         tokio::time::pause();
         Fixture { fake, rest, app, _tmp: tmp }
     }

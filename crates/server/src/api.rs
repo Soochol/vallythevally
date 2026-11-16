@@ -252,7 +252,7 @@ pub enum ReloadReason {
     DailyReset,
 }
 
-/// 키움 실시간 연결. `reconnecting`이면 `since`부터 현재 봉이 멈춰 있을 수 있다. `halted`는 운영자가 고쳐야 한다.
+/// 키움 실시간 연결. `reconnecting`이면 `since`부터 현재 봉이 멈춰 있을 수 있다. `halted`는 운영자가 고쳐야 한다. `notConnected`는 사용자가 키움에 연결하지 않았거나 연결을 끊은 상태다.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export)]
@@ -260,6 +260,7 @@ pub enum RealtimeState {
     Live,
     Reconnecting,
     Halted,
+    NotConnected,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -1063,6 +1064,7 @@ pub enum ApiErrorReason {
     MissingDay,
     Updating,
     DataChanged,
+    NotConnected,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]

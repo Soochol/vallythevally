@@ -32,6 +32,7 @@ test.each<[string, Connection, number, ReturnType<typeof connectionView>]>([
     MON_1000,
     { tone: "amber", pulse: false, text: "키움에 다시 연결하는 중 (14:02부터)" },
   ],
+  ["연결 안 함은 회색", open({ realtime: "notConnected" }), MON_1000, { tone: "gray", pulse: false, text: "키움에 연결하지 않았습니다" }],
   ["halted", open({ realtime: "halted", backfilling: true }), MON_1000, { tone: "red", pulse: false, text: "실시간 멈춤: 서버를 다시 켜야 합니다" }],
 ])("%s", (_name, c, now, expected) => {
   expect(connectionView(c, now)).toEqual(expected);

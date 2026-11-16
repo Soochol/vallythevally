@@ -17,6 +17,7 @@ use crate::bars::{BarError, BarService, DEFAULT_LIMIT, MAX_LIMIT};
 use crate::clock::Clock;
 use crate::db::AppDb;
 use crate::kiwoom::error::{Category, Failure, Note, Surface};
+use crate::kiwoom::link::Link;
 use crate::kiwoom::rest::{KiwoomError, KiwoomRest};
 use crate::market::hub::{HubHandle, HubSnapshot};
 use crate::screener::Screener;
@@ -31,6 +32,7 @@ pub struct AppState {
     pub static_dir: PathBuf,
     pub hub: HubHandle,
     pub screener: Arc<Screener>,
+    pub link: Link,
 }
 
 pub fn router(state: Arc<AppState>) -> Router {
@@ -192,7 +194,11 @@ impl Lookup {
 fn reason(e: &KiwoomError) -> api::ApiErrorReason {
     use api::ApiErrorReason as R;
     let Some(f) = e.failure() else {
-        return if matches!(e, KiwoomError::TokenFile(_)) { R::TokenFile } else { R::IssueInterval };
+        return match e {
+            KiwoomError::TokenFile(_) => R::TokenFile,
+            KiwoomError::NotConnected => R::NotConnected,
+            _ => R::IssueInterval,
+        };
     };
     match f.category() {
         Category::RateLimit => R::RateLimited,
@@ -549,7 +555,8 @@ mod tests {
         let (stream, _desired) = KiwoomStream::detached();
         let (events, receiver) = tokio::sync::mpsc::channel(64);
         let screener_store = crate::screener::store::Store::open(&dir.path().join("screener.duckdb")).unwrap();
-        let state = application(ApplicationInputs { rest, clock, symbols, db, screener_store, stream: (stream, receiver), static_dir: dir.path().to_owned() });
+        let state = application(ApplicationInputs { rest: rest.clone(), clock, symbols, db, screener_store, stream: (stream, receiver), static_dir: dir.path().to_owned(), screener_update_on_connect: false });
+        rest.set_access(crate::kiwoom::rest::Access::Open);
         let hub = state.hub.clone();
         let app = router(state);
         Fixture { app, fake, hub, _events: events, _dir: dir }
@@ -1250,7 +1257,9 @@ mod tests {
         let (stream, _desired) = KiwoomStream::detached();
         let (_events, events) = tokio::sync::mpsc::channel(64);
         let screener_store = crate::screener::store::Store::open(&dir.path().join("screener.duckdb")).unwrap();
-        let app = router(application(ApplicationInputs { rest: rest.clone(), clock, symbols: symbols.clone(), db, screener_store, stream: (stream, events), static_dir: dir.path().to_owned() }));
+        let state = application(ApplicationInputs { rest: rest.clone(), clock, symbols: symbols.clone(), db, screener_store, stream: (stream, events), static_dir: dir.path().to_owned(), screener_update_on_connect: false });
+        rest.set_access(crate::kiwoom::rest::Access::Open);
+        let app = router(state);
 
         let nxt_layout = two_charts("005930");
         let started = tokio::time::Instant::now();

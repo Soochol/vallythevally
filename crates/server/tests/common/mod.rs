@@ -8,6 +8,7 @@ use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::io::Write;
+use server::kiwoom::link::{ConnectStep, LinkState};
 use tokio::sync::watch;
 use tracing_subscriber::prelude::*;
 
@@ -24,7 +25,14 @@ impl Write for Captured {
     fn flush(&mut self) -> std::io::Result<()> { Ok(()) }
 }
 
+struct Control {
+    link: server::kiwoom::link::Link,
+    runtime: tokio::runtime::Handle,
+    clock: server::clock::Clock,
+}
+
 pub struct Server {
+    control: Arc<std::sync::OnceLock<Control>>,
     thread: Option<std::thread::JoinHandle<()>>,
     shutdown: Option<tokio::sync::oneshot::Sender<()>>,
     address: watch::Receiver<Option<SocketAddr>>,
@@ -46,6 +54,8 @@ impl Server {
         let overrides: std::collections::HashMap<String, String> = overrides.iter().map(|(key, value)| ((*key).into(), value.to_str().unwrap().into())).collect();
         let (address, receiver) = watch::channel(None);
         let (events, stream_events) = tokio::sync::mpsc::channel(16);
+        let control = Arc::new(std::sync::OnceLock::new());
+        let publish = control.clone();
         let (shutdown, stopped) = tokio::sync::oneshot::channel();
         let thread = std::thread::spawn(move || {
             let subscriber = tracing_subscriber::registry().with(tracing_subscriber::fmt::layer().with_ansi(false).with_writer(move || writer.clone()).with_filter(tracing_subscriber::EnvFilter::new("server=trace")));
@@ -60,18 +70,35 @@ impl Server {
             let instance = server::instance::InstanceLock::acquire(&lock).unwrap();
             let token_path = value("VALLY_TOKEN_PATH").map(PathBuf::from).unwrap_or_else(|| token_path(&lock));
             let clock = value("VALLY_CLOCK_START").map(|at| server::clock::Clock::fake(server::kiwoom::wire::parse_kst_datetime(at).unwrap())).unwrap_or_else(server::clock::Clock::system);
-            let auth = server::kiwoom::auth::KiwoomAuth::new(server::config::Secret::new(value("VALLY_KIWOOM_APP_KEY").unwrap_or(APP_KEY).into()), server::config::Secret::new(APP_SECRET.into()), Some(server::kiwoom::token_file::TokenFile::new(token_path.clone(), &instance)));
+            let token_file = server::kiwoom::token_file::TokenFile::new(token_path.clone(), &instance);
+            let auth = match value("VALLY_KIWOOM_APP_KEY") {
+                Some("") => server::kiwoom::auth::KiwoomAuth::keyless(Some(token_file)),
+                key => server::kiwoom::auth::KiwoomAuth::new(server::config::Secret::new(key.unwrap_or(APP_KEY).into()), server::config::Secret::new(APP_SECRET.into()), Some(token_file)),
+            };
             let rest = server::kiwoom::rest::KiwoomRest::with_send_spacing(transport.transport(), auth, clock.clone(), std::time::Duration::from_millis(value("KIWOOM_SEND_SPACING_MILLIS").map_or(1, |millis| millis.parse().unwrap())));
             let db = server::db::AppDb::open(&parent.join("vally.db")).await.unwrap();
             let store_path = parent.join("screener.duckdb");
             let dispatcher = tracing::dispatcher::get_default(Clone::clone);
             let store = tokio::task::spawn_blocking(move || tracing::dispatcher::with_default(&dispatcher, || server::screener::store::Store::open(&store_path).unwrap())).await.unwrap();
             let symbols = Arc::new(server::symbols::SymbolDirectory::default());
-            let (stream, _desired) = server::kiwoom::stream::KiwoomStream::detached();
-            let state = server::app::application(server::app::ApplicationInputs { rest: rest.clone(), clock: clock.clone(), symbols: symbols.clone(), db, screener_store: store, stream: (stream, stream_events), static_dir });
-            server::app::initialize_rest(&rest, &clock, &token_path).await;
+            let (stream, stream_events, _desired) = match value("VALLY_KIWOOM_WS_URL") {
+                Some(url) => {
+                    let (stream, events) = server::kiwoom::stream::KiwoomStream::spawn(url.into(), rest.clone(), clock.clone());
+                    (stream, events, None)
+                }
+                None => {
+                    let (stream, desired) = server::kiwoom::stream::KiwoomStream::detached();
+                    (stream, stream_events, Some(desired))
+                }
+            };
+            let state = server::app::application(server::app::ApplicationInputs { rest: rest.clone(), clock: clock.clone(), symbols: symbols.clone(), db, screener_store: store, stream: (stream, stream_events), static_dir, screener_update_on_connect: value("VALLY_SCREENER_UPDATE_ON_START") == Some("on") });
             let mut background = tokio::task::JoinSet::new();
-            background.spawn(server::app::initialize_market(state.clone(), value("VALLY_SCREENER_UPDATE_ON_START") == Some("on")));
+            publish.set(Control { link: state.link.clone(), runtime: tokio::runtime::Handle::current(), clock: clock.clone() }).ok();
+            if value("VALLY_KIWOOM_CONNECT") != Some("off") {
+                let link = state.link.clone();
+                background.spawn(async move { link.connect(false).await; });
+                state.link.subscribe().wait_for(|state| matches!(state, LinkState::NoKey | LinkState::Connected | LinkState::Failed(_) | LinkState::Connecting(ConnectStep::Symbols | ConnectStep::Realtime))).await.unwrap();
+            }
             background.spawn(server::app::daily_maintenance(state.clone()));
             let financial_path = value("VALLY_FINANCIAL_DB_PATH").map(PathBuf::from).unwrap_or_else(|| parent.join("financials.db"));
             let financial_store = server::financials::store::Store::open(&financial_path).await;
@@ -88,8 +115,20 @@ impl Server {
                 }
             });
         });
-        Self { thread: Some(thread), shutdown: Some(shutdown), address: receiver, output, events }
+        Self { control, thread: Some(thread), shutdown: Some(shutdown), address: receiver, output, events }
     }
+
+    pub fn link_state(&self) -> LinkState { self.control.get().expect("서버가 아직 준비되지 않았습니다").link.state() }
+
+    pub async fn connect(&self, acknowledged: bool) -> LinkState {
+        let control = self.control.get().expect("서버가 아직 준비되지 않았습니다");
+        let link = control.link.clone();
+        control.runtime.spawn(async move { link.connect(acknowledged).await }).await.unwrap()
+    }
+
+    pub fn clock(&self) -> server::clock::Clock { self.control.get().expect("서버가 아직 준비되지 않았습니다").clock.clone() }
+
+    pub fn link(&self) -> server::kiwoom::link::Link { self.control.get().expect("서버가 아직 준비되지 않았습니다").link.clone() }
 
     pub fn logs(&self) -> String { String::from_utf8(self.output.0.lock().unwrap().clone()).unwrap() }
 

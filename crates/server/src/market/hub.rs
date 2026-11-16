@@ -695,6 +695,11 @@ impl MarketHub {
                 let from = *self.gap_from.get_or_insert(at);
                 self.session_down(RealtimeState::Reconnecting, from);
             }
+            StreamEvent::Idle => {
+                let now = self.clock.now();
+                self.gap_from.get_or_insert(now);
+                self.session_down(RealtimeState::NotConnected, now);
+            }
             StreamEvent::Halted => {
                 let now = self.clock.now();
                 self.gap_from.get_or_insert(now);

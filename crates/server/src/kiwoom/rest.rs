@@ -9,11 +9,11 @@ use std::fmt;
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 
-use tokio::sync::{Notify, oneshot};
+use tokio::sync::{Notify, oneshot, watch};
 use tokio::time::Instant;
 
 use super::api::{ApiId, MarketRequest};
-use super::auth::{AuthError, Halt, KiwoomAuth, MIN_ISSUE_INTERVAL_SECS, TokenGen};
+use super::auth::{AuthError, BeginIssueError, Halt, KiwoomAuth, MIN_ISSUE_INTERVAL_SECS, TokenGen};
 use super::error::{self, Category, Failure, Note, Retry, Stop};
 use super::token_file::FileError;
 use super::transport::{HttpRequest, HttpResponse, Transport, TransportError};
@@ -90,6 +90,14 @@ pub enum KiwoomError {
     Gated { until: KstTime, cause: GateCause },
     Stopped(Failure),
     TokenFile(FileError),
+    NotConnected,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Access {
+    Closed,
+    Connecting,
+    Open,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -102,14 +110,14 @@ impl KiwoomError {
     pub fn failure(&self) -> Option<&Failure> {
         match self {
             KiwoomError::Failed(f) | KiwoomError::Stopped(f) | KiwoomError::Gated { cause: GateCause::Failure(f), .. } => Some(f),
-            KiwoomError::Gated { cause: GateCause::IssueInterval, .. } | KiwoomError::TokenFile(_) => None,
+            KiwoomError::Gated { cause: GateCause::IssueInterval, .. } | KiwoomError::TokenFile(_) | KiwoomError::NotConnected => None,
         }
     }
 
     pub fn retry_at(&self) -> Option<KstTime> {
         match self {
             KiwoomError::Gated { until, .. } => Some(*until),
-            KiwoomError::Failed(_) | KiwoomError::Stopped(_) | KiwoomError::TokenFile(_) => None,
+            KiwoomError::Failed(_) | KiwoomError::Stopped(_) | KiwoomError::TokenFile(_) | KiwoomError::NotConnected => None,
         }
     }
 
@@ -132,9 +140,10 @@ impl fmt::Display for KiwoomError {
                 Category::AuthBlocked | Category::Unsupported | Category::Unknown | Category::Protocol => failure.fmt(f),
                 _ => write!(f, "{failure}. 운영자가 확인하고 서버를 다시 켤 때까지 보내지 않습니다"),
             },
+            KiwoomError::NotConnected => f.write_str("키움에 연결하지 않았습니다. 시스템 설정에서 연결하세요"),
             KiwoomError::TokenFile(e) => write!(
                 f,
-                "토큰 파일을 쓸 수 없어 키움 토큰을 발급하지 않습니다({e}). 파일을 고치거나, 마지막 발급 요청에서 {}분이 지난 뒤 지우고 서버를 다시 켜세요",
+                "토큰 파일을 쓸 수 없어 키움 토큰을 발급하지 않습니다({e}). 파일을 고치거나, 마지막 발급 요청에서 {}분이 지난 뒤 지우고 시스템 설정에서 토큰 파일을 다시 확인하세요",
                 MIN_ISSUE_INTERVAL_SECS / 60
             ),
         }
@@ -271,6 +280,7 @@ struct Inner {
     queue: Mutex<Queue>,
     wake: Notify,
     path_stopped: Notify,
+    access: watch::Sender<Access>,
 }
 
 #[derive(Clone)]
@@ -297,7 +307,7 @@ impl KiwoomRest {
     }
 
     pub fn with_send_spacing(transport: Arc<dyn Transport>, auth: KiwoomAuth, clock: Clock, send_spacing: Duration) -> Self {
-        let inner = Arc::new(Inner { transport, auth, clock, send_spacing, queue: Mutex::new(Queue::default()), wake: Notify::new(), path_stopped: Notify::new() });
+        let inner = Arc::new(Inner { transport, auth, clock, send_spacing, queue: Mutex::new(Queue::default()), wake: Notify::new(), path_stopped: Notify::new(), access: watch::channel(Access::Open).0 });
         tokio::spawn(run(inner.clone()));
         KiwoomRest(inner)
     }
@@ -314,9 +324,25 @@ impl KiwoomRest {
         self.0.auth.until_halted().await.into()
     }
 
+    pub fn access(&self) -> Access {
+        *self.0.access.borrow()
+    }
+
+    pub fn watch_access(&self) -> watch::Receiver<Access> {
+        self.0.access.subscribe()
+    }
+
+    pub fn set_access(&self, access: Access) {
+        self.0.access.send_replace(access);
+        self.0.wake.notify_one();
+    }
+
     pub fn blocked(&self) -> Option<KiwoomError> {
         let auth = &self.0.auth;
         let now = self.0.clock.now();
+        if self.access() == Access::Closed {
+            return Some(KiwoomError::NotConnected);
+        }
         self.halted().or_else(|| {
             if !auth.needs_issue(now) {
                 return None;
@@ -351,6 +377,9 @@ impl KiwoomRest {
 
     /// 토큰을 새로 받는다. 서버를 켤 때와 매일 20:05에만 부른다.
     pub async fn issue_token(&self) -> Result<TokenGen, KiwoomError> {
+        if self.access() == Access::Closed {
+            return Err(KiwoomError::NotConnected);
+        }
         let (tx, rx) = oneshot::channel();
         self.0.lock().issue_waiters.push(tx);
         self.0.wake.notify_one();
@@ -415,6 +444,10 @@ impl Inner {
     fn enqueue(&self, key: DedupeKey, priority: Priority) -> oneshot::Receiver<JobResult> {
         let (tx, rx) = oneshot::channel();
         let mut q = self.lock();
+        if *self.access.borrow() == Access::Closed {
+            let _ = tx.send(Err(KiwoomError::NotConnected));
+            return rx;
+        }
         if let Some(err) = q.stopped(key.api_id) {
             let _ = tx.send(Err(err));
             return rx;
@@ -457,6 +490,14 @@ impl Inner {
     fn next_step(&self) -> Step {
         let now_kst = self.clock.now();
         let mut q = self.lock();
+        if *self.access.borrow() == Access::Closed {
+            let err = KiwoomError::NotConnected;
+            q.fail_queued(&err);
+            for w in q.issue_waiters.drain(..) {
+                let _ = w.send(Err(err.clone()));
+            }
+            return Step::Idle;
+        }
         if let Some(halt) = self.auth.halted() {
             let err = KiwoomError::from(halt);
             q.fail_queued(&err);
@@ -560,7 +601,8 @@ impl Inner {
                 };
                 (q, outcome)
             }
-            Err(e) => {
+            Err(BeginIssueError::NoKey) => (self.lock(), Err(KiwoomError::NotConnected)),
+            Err(BeginIssueError::File(e)) => {
                 tracing::error!(error = %e, "토큰 파일에 발급 요청 시각을 쓰지 못해 발급 요청을 보내지 않습니다");
                 (self.lock(), Err(KiwoomError::TokenFile(e)))
             }

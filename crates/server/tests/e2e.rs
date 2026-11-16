@@ -86,8 +86,8 @@ async fn serves_symbols_and_bars_from_injected_transport_and_never_logs_secrets(
 
     let seen = &fake.seen;
     let api_ids = seen.api_ids.lock().unwrap().clone();
-    assert_eq!(api_ids[0], "au10001", "토큰 발급이 먼저 나간다");
-    assert_eq!(api_ids.iter().filter(|a| *a == "au10001").count(), 1);
+    assert_eq!(api_ids[0], "au10001", "켜고 연결하면 토큰 발급이 먼저 나간다");
+    assert_eq!(api_ids.iter().filter(|a| *a == "au10001").count(), 1, "켜고 연결하면 발급은 한 번이다");
     assert_eq!(seen.token_bodies.lock().unwrap()[0]["appkey"], APP_KEY);
     let auths = seen.authorizations.lock().unwrap().clone();
     assert!(auths[1..].iter().all(|a| *a == format!("Bearer {TOKEN}")));
@@ -182,6 +182,7 @@ async fn second_instance_exits_1_without_touching_kiwoom() {
         .env("VALLY_KIWOOM_BASE_URL", "http://127.0.0.1:9")
         .env("VALLY_KIWOOM_WS_URL", "ws://127.0.0.1:9/api/dostk/websocket")
         .env("VALLY_TOKEN_PATH", lock.with_file_name("token.json"))
+        .env("VALLY_KIWOOM_KEY_PATH", lock.with_file_name("kiwoom-key.json"))
         .env("VALLY_LOCK_PATH", &lock)
         .output().await.unwrap();
     assert_eq!(output.status.code(), Some(1));
@@ -202,18 +203,19 @@ async fn designated_terminal_stops_after_one_token_attempt(http_status: u16) {
     let base = format!("http://{}", server.addr().await);
     let client = reqwest::Client::new();
 
-    let mut last = Value::Null;
     for path in ["/api/symbols/005930", "/api/symbols?q=%EC%82%BC%EC%84%B1", "/api/bars?symbol=005930&period=D", "/api/quotes?symbols=005930", "/api/bars?symbol=IDX:001&period=D"] {
         let (status, body) = get(&client, &base, path).await;
-        assert_eq!((status, body["error"]["code"].as_str()), (502, Some("kiwoom_auth_failed")), "{path}: {body}");
-        last = body;
+        assert_eq!((status, body["error"]["code"].as_str(), body["error"]["reason"].as_str()), (503, Some("kiwoom_unavailable"), Some("not_connected")), "{path}: {body}");
     }
-    let message = last["error"]["message"].as_str().unwrap();
-    assert!(message.contains("8050") && message.contains("공인 IP를 키움 포털에 등록하세요"), "{message}");
+    let server::kiwoom::link::LinkState::Failed(failure) = server.link_state() else { panic!("연결이 실패해야 한다") };
+    assert_eq!(failure.problem, server::kiwoom::link::Problem::AuthBlocked8050);
+    assert!(failure.message.contains("8050") && failure.message.contains("공인 IP를 키움 포털에 등록하세요") && failure.message.contains("시스템 설정에서 다시 연결하세요"), "{}", failure.message);
 
     let longer_than_one_startup_list_retry = Duration::from_secs(11);
     tokio::time::sleep(longer_than_one_startup_list_retry).await;
     assert_eq!(fake.api_ids(), ["au10001"], "발급 시도는 한 번뿐이고 시세 요청은 없다");
+    assert!(matches!(server.connect(false).await, server::kiwoom::link::LinkState::Failed(f) if f.problem == server::kiwoom::link::Problem::AuthBlocked8050), "확인 없이는 다시 연결하지 못한다");
+    assert_eq!(fake.api_ids(), ["au10001"], "확인 없는 연결 시도는 요청을 보내지 않는다");
     let logs = server.stop().await;
     assert!(logs.contains("공인 IP를 키움 포털에 등록하세요"), "{logs}");
     assert!(!logs.contains("10초 뒤 다시 받습니다"), "멈춘 뒤에는 종목 목록을 다시 받지 않는다:\n{logs}");

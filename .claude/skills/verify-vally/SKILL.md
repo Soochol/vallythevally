@@ -13,7 +13,7 @@ Hard rules (AGENTS.md and the task that created this skill):
 - Kill only processes this skill started (pids in the run's `state.json`), never by name.
 - Do not run a second server in the user's checkout. This skill needs no write access outside `target/`.
 
-The server cannot run without a Kiwoom peer, so `scripts/verification_loopback_kiwoom.py` is a VERIFICATION-ONLY loopback stand-in. It replays `crates/server/tests/fixtures/kiwoom/*.json` (read-only reuse) by the `api-id` header. Realtime WebSocket is not provided: the server logs a WebSocket connect failure and retries; that is expected and means no live ticks.
+The server cannot run without a Kiwoom peer, so `scripts/verification_loopback_kiwoom.py` is a VERIFICATION-ONLY loopback stand-in. It replays `crates/server/tests/fixtures/kiwoom/*.json` (read-only reuse) by the `api-id` header. Realtime WebSocket is not provided: once connected, the server logs a WebSocket connect failure and retries; that is expected and means no live ticks. Before a connect the server does not try the WebSocket at all.
 
 ## Launch
 
@@ -24,7 +24,7 @@ python3 scripts/dev.py build                                   # target/dev/bin/
 python3 .claude/skills/verify-vally/scripts/build_ui.py target/verify-vally/ui   # frozen pnpm install, WASM, tsc, vite build; can wait a long time on the shared cargo compile lock when other sessions build
 ```
 
-Start one sandbox (prints a JSON state line with `base_url`, `dir`, pids; ready means `/api/symbols?q=005930` returns the loaded symbol, not merely that the port answers):
+Start one sandbox (prints a JSON state line with `base_url`, `dir`, pids; ready means `GET /` answers 200). The server does not contact Kiwoom when it starts (ADR 0021): the sandbox starts **not connected**, so symbols, bars and realtime are unavailable and API calls answer `reason: "not_connected"` until the Kiwoom connection is made. The system-settings connect route (`/api/system/*`, task `srv-system-api`) does not exist yet. Until it lands, journeys that need symbols (`search-chart`, `watchlist-add`, anything with a chart) cannot reach their precondition and fail; do not weaken them. Once the route exists, `up` must call it against the loopback fake and wait for `/api/symbols?q=005930`.
 
 ```sh
 python3 .claude/skills/verify-vally/scripts/vv.py up
@@ -48,7 +48,7 @@ Read-only. Run first, and whenever something looks off:
 python3 .claude/skills/verify-vally/scripts/vv.py doctor [run-dir]    # default: newest run; exit 1 on any problem
 ```
 
-Checks: Kiwoom URLs are `127.0.0.1`, no `kiwoom.com` in the env file, our server and fake pids are alive, the port is owned by our server pid (and is not 8080), our server has no non-loopback TCP connection, `GET /` is 200, `/api/symbols/005930` is loaded. Failure of "symbol not loaded" usually means the fake did not serve `ka10099`; read `server.log`.
+Checks: Kiwoom URLs are `127.0.0.1`, no `kiwoom.com` in the env file, our server and fake pids are alive, the port is owned by our server pid (and is not 8080), our server has no non-loopback TCP connection, `GET /` is 200, and `/api/symbols/005930` either returns the loaded symbol (`connected: true`) or answers `not_connected` (`connected: false`, not a problem). After a connect, a failure of "neither loaded nor not_connected" or a missing symbol usually means the fake did not serve `ka10099`; read `server.log`.
 
 ## Drive
 

@@ -43,6 +43,12 @@ test("오류 본문의 사유, 다시 보낼 시각, 사람 조치 여부를 그
   expect(e).toMatchObject({ code: "kiwoom_unavailable", reason: "rate_limited", retryAt: 1_794_182_430, manualActionRequired: false });
 });
 
+test("연결 전 조회의 사유 not_connected를 그대로 읽는다", async () => {
+  reply(503, { error: { code: "kiwoom_unavailable", message: "키움에 연결하지 않았습니다", reason: "not_connected", retryAt: null, manualActionRequired: false } });
+  const e = await getJson("/api/bars").catch((x: unknown) => x);
+  expect(e).toMatchObject({ code: "kiwoom_unavailable", reason: "not_connected", retryAt: null, manualActionRequired: false });
+});
+
 const sentAt = Date.parse("2026-11-11T10:42:00+09:00");
 const serverNowSeen = () => serverNow(useServerClock.getState().serverTimeOrigin);
 const dated = (date: number, status = 200, body: unknown = {}) =>

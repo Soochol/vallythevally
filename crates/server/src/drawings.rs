@@ -404,7 +404,9 @@ mod tests {
         let (stream, _desired) = KiwoomStream::detached();
         let (events, receiver) = tokio::sync::mpsc::channel(64);
         let screener_store = crate::screener::store::Store::open(&dir.path().join("screener.duckdb")).unwrap();
-        let app = crate::http::router(application(ApplicationInputs { rest, clock, symbols, db, screener_store, stream: (stream, receiver), static_dir: dir.path().to_owned() }));
+        let state = application(ApplicationInputs { rest: rest.clone(), clock, symbols, db, screener_store, stream: (stream, receiver), static_dir: dir.path().to_owned(), screener_update_on_connect: false });
+        rest.set_access(crate::kiwoom::rest::Access::Open);
+        let app = crate::http::router(state);
         Fixture { app, kiwoom, _events: events, _dir: dir }
     }
 
