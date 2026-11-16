@@ -201,7 +201,7 @@ fn spanning(o: Price, h: Price, l: Price, c: Price, v: Volume) -> Ohlcv {
 
 /// 앞의 `+`/`-`(이중 부호 포함)를 모두 뗀 절댓값.
 fn unsigned(s: &str) -> Result<u64, WireError> {
-    s.trim_start_matches(['+', '-']).parse().map_err(|_| WireError(format!("숫자가 아닙니다: {s:?}")))
+    s.trim().trim_start_matches(['+', '-']).parse().map_err(|_| WireError(format!("숫자가 아닙니다: {s:?}")))
 }
 
 fn stock_price(s: &str) -> Result<Price, WireError> {
@@ -565,7 +565,7 @@ fn optional<T>(s: &str, parse: fn(&str) -> Result<T, WireError>) -> Result<Optio
 }
 
 fn signed(s: &str) -> Result<i64, WireError> {
-    s.strip_prefix('+').unwrap_or(s).parse().map_err(|_| WireError(format!("정수가 아닙니다: {s:?}")))
+    s.trim().strip_prefix('+').unwrap_or(s.trim()).parse().map_err(|_| WireError(format!("정수가 아닙니다: {s:?}")))
 }
 
 fn decimal(s: &str) -> Result<f64, WireError> {
@@ -832,12 +832,13 @@ fn hhmmss(s: &str) -> Result<TimeOfDay, WireError> {
 
 /// 0J 지수는 소수 2자리 문자열이고 앞에 등락 부호가 붙는다(kiwoom.md 11.5). REST 지수(100배 정수)와 다르다.
 fn index_level(s: &str) -> Result<Price, WireError> {
-    level_centi(s.trim_start_matches(['+', '-']))
+    level_centi(s.trim().trim_start_matches(['+', '-']))
         .and_then(Price::from_centi)
         .ok_or_else(|| WireError(format!("지수가 소수 2자리 이하의 양수가 아닙니다: {s:?}")))
 }
 
 fn signed_level_centi(s: &str) -> Option<i64> {
+    let s = s.trim();
     let (negative, abs) = match s.strip_prefix('-') {
         Some(abs) => (true, abs),
         None => (false, s.strip_prefix('+').unwrap_or(s)),
@@ -1039,6 +1040,33 @@ mod tests {
         assert_eq!(index_price("+505969").unwrap().centi(), 505_969);
         assert!(stock_price("0").is_err());
         assert!(stock_price("").is_err());
+    }
+
+    #[test]
+    fn surrounding_spaces_are_trimmed_but_inner_spaces_and_blanks_are_errors() {
+        assert_eq!((unsigned(" 172500"), unsigned("172500 "), unsigned(" +172500"), unsigned(" --32411 ")), (Ok(172_500), Ok(172_500), Ok(172_500), Ok(32_411)));
+        assert_eq!((signed(" +8100"), signed("-8100 ")), (Ok(8_100), Ok(-8_100)));
+        assert_eq!(level_centi_of(" -1327.93 "), Some(132_793));
+        assert_eq!(signed_level_centi(" -43.69 "), Some(-4_369));
+        for bad in ["", " ", "   ", "172 500", "1 72500", "+ 172500"] {
+            assert!(unsigned(bad).is_err(), "{bad:?}");
+        }
+        assert!(index_level(" ").is_err());
+    }
+
+    fn level_centi_of(s: &str) -> Option<i64> {
+        index_level(s).ok().map(|p| p.centi() as i64)
+    }
+
+    #[test]
+    fn real_0b_reads_values_padded_with_spaces() {
+        let mut v = trade_values("093001", 71_200, 15, 100, "KRX");
+        v["10"] = " 172500".into();
+        v["11"] = " +8100".into();
+        match one("0B", "005930_AL", v) {
+            Ok(RealItem::Trade(tick)) => assert_eq!((tick.price.centi(), tick.day.map(|d| d.change_centi)), (17_250_000, Some(810_000))),
+            other => panic!("{other:?}"),
+        }
     }
 
     fn basic_info(name: &str) -> StockFundamentals {
