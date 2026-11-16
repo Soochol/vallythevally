@@ -30,6 +30,8 @@ python3 scripts/test-dev.py
 
 도구는 `--locked`와 개발용 기능 선택을 붙인다. 컴파일만 저장소 공통 잠금 안에서 작업 수 4로 수행한다. `cargo test`는 `--no-run`으로 먼저 컴파일한 뒤 잠금 밖에서 실행한다. 이 명령에 외부 `flock`을 추가하면 같은 잠금을 이중으로 기다리므로 도구가 잠금을 관리하게 한다.
 
+병합 검사는 작업자 컴파일 뒤에 줄 서지 않도록 환경변수 `VALLY_COMPILE_LANE=gate`로 실행한다. 이 값이면 `dev.py cargo`와 `web.py`의 WASM 준비가 `compile.lock` 대신 같은 위치의 `compile-gate.lock`을 잡는다. 병합 검사끼리는 서로 기다리고, 작업자 빌드와는 기다리지 않으므로 컴파일이 동시에 최대 두 개(작업자 하나, 병합 검사 하나) 돈다. 값이 비어 있으면 일반 개발 명령은 지금처럼 `compile.lock` 아래에서 하나씩 컴파일한다. 다른 값은 오류다. 병합 검사 단계 명령 예: `env VALLY_COMPILE_LANE=gate python3 scripts/dev.py cargo test -p server`.
+
 일반 Cargo와 CI·배포 명령은 기존 bundled DuckDB가 기본이다. 사전 빌드를 사용하지 않는 개발 검사는 다음처럼 실행한다. `ccache`가 설치돼 있으면 C/C++ 컴파일에 자동으로 연결한다.
 
 ```sh

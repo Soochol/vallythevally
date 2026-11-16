@@ -94,6 +94,15 @@ class WebWorkflowTest(unittest.TestCase):
             web.ensure_wasm(self.root, self.environment)
         self.assertEqual(self.build_count(), 1)
 
+    def test_gate_wasm_build_does_not_wait_for_worker_compile_lock(self):
+        (self.root / ".git").mkdir(exist_ok=True)
+        with (self.root / ".git/compile.lock").open("a") as stream:
+            fcntl.flock(stream, fcntl.LOCK_EX)
+            with patch.dict(os.environ, {web.dev.COMPILE_LANE_ENV: "gate"}):
+                self.assertEqual(web.dev.compile_lock_path(self.root).name, "compile-gate.lock")
+                web.ensure_wasm(self.root, self.environment)
+        self.assertEqual(self.build_count(), 1)
+
     def test_transitive_source_settings_and_corrupt_outputs_rebuild(self):
         web.ensure_wasm(self.root, self.environment)
         for name in ["crates/engine/src/lib.rs", "Cargo.lock"]:

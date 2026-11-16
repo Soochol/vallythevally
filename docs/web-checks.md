@@ -57,7 +57,7 @@ python3 scripts/test-web.py
 
 ## WASM 재사용과 직접 pnpm 명령
 
-`pnpm wasm`, `pnpm typecheck`, `pnpm test`, `pnpm build`도 같은 WASM 준비 경로를 사용한다. 이 명령에 외부 `flock`을 추가하지 않는다. `build-wasm.sh` 자체가 준비 도구로 연결된다.
+`pnpm wasm`, `pnpm typecheck`, `pnpm test`, `pnpm build`도 같은 WASM 준비 경로를 사용한다. 이 명령에 외부 `flock`을 추가하지 않는다. `build-wasm.sh` 자체가 준비 도구로 연결된다. 병합 검사는 `VALLY_COMPILE_LANE=gate`로 실행해 WASM 준비도 별도 병합 검사 잠금을 쓴다([개발 빌드](development-builds.md) 참고).
 
 WASM의 입력은 해당 크레이트와 전이적인 로컬 의존성의 파일, workspace 매니페스트·lockfile, Cargo 설정, 빌드 도구·도구 체인과 빌드 환경이다. 산출물의 체크섬은 `target/web/wasm.json`에 저장한다. UI만 바뀌면 WASM을 재사용한다. 입력 변경·파일 누락·손상 시 다시 준비하며, 동시에 요청하면 잠금 획득 후 다른 요청이 준비했는지 재확인한다.
 
