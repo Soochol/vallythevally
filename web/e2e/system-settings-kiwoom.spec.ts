@@ -282,6 +282,20 @@ test.describe("1440×900", () => {
     await expect(panel(page)).toContainText("마지막으로 포털에 등록한 IP 203.0.113.7");
   });
 
+  test("연결 중을 거쳐 푸시만으로 8050이 다시 오면 확인 칸을 다시 받는다", async ({ page, scenario }) => {
+    const blocked = failed("authBlocked8050", null, BLOCKED_MESSAGE, { needsAcknowledgement: true });
+    scenario.live.kiwoomLink = blocked;
+    await openKiwoom(page);
+    await panel(page).getByLabel("포털에 지금 공인 IP를 등록했습니다").check();
+    await panel(page).getByLabel("반복 발급 잠금이 풀렸는지 확인했습니다").check();
+    scenario.live.link({ ...blocked, state: "connecting", problem: null, step: "token", message: "키움에 연결하는 중입니다" });
+    await expect(panel(page).getByRole("heading", { name: "연결 중" })).toBeVisible();
+    scenario.live.link(blocked);
+    await expect(panel(page).getByLabel("반복 발급 잠금이 풀렸는지 확인했습니다")).not.toBeChecked();
+    await expect(panel(page).getByLabel("포털에 지금 공인 IP를 등록했습니다")).not.toBeChecked();
+    await expect(panel(page).getByRole("button", { name: /^다시 연결/ })).toBeDisabled();
+  });
+
   test("체크 칸을 키보드로 눌러도 초점이 칸에 남는다", async ({ page, scenario }) => {
     scenario.live.kiwoomLink = failed("authBlocked8050", null, BLOCKED_MESSAGE, { needsAcknowledgement: true });
     await openKiwoom(page);

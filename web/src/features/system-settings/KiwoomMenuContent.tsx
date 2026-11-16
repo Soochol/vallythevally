@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { PublicIpCheck } from "../../api/generated/PublicIpCheck";
 import { connectKiwoom, disconnectKiwoom, recheckKiwoomTokenFile, saveRegisteredIp } from "../../api/system";
 import { useKiwoomLinkStore } from "../../stores/kiwoomLink";
@@ -17,6 +17,12 @@ export function KiwoomMenuContent() {
   const [confirmations, setConfirmations] = useState<Confirmations>(NO_CONFIRMATIONS);
   const [checkedIp, setCheckedIp] = useState<PublicIpCheck | null>(null);
   const view = panelView(status, now, confirmations);
+
+  const previousStage = useRef(view.stage);
+  useEffect(() => {
+    if (previousStage.current === "connecting" && view.stage === "authBlocked") setConfirmations(NO_CONFIRMATIONS);
+    previousStage.current = view.stage;
+  }, [view.stage]);
 
   const keepsConfirmations = view.needsConfirmations || view.stage === "connecting";
   useEffect(() => {
