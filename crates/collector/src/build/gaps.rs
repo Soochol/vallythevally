@@ -13,6 +13,7 @@ impl GapInterval {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LineEvent {
     Other,
+    Real,
     Live,
     Down,
 }
@@ -20,6 +21,7 @@ pub enum LineEvent {
 #[derive(Debug, Default)]
 pub struct GapTracker {
     previous_line_ms: Option<u32>,
+    real_seen: bool,
     down_since: Option<u32>,
     gaps: Vec<GapInterval>,
 }
@@ -28,11 +30,13 @@ impl GapTracker {
     pub fn record(&mut self, line_ms: u32, event: LineEvent) {
         match event {
             LineEvent::Other => {}
+            LineEvent::Real => self.real_seen = true,
             LineEvent::Down => {
                 self.down_since.get_or_insert(line_ms);
             }
             LineEvent::Live => {
-                let gap_start = self.down_since.take().or(self.previous_line_ms);
+                let unannounced_start = self.previous_line_ms.filter(|_| self.real_seen);
+                let gap_start = self.down_since.take().or(unannounced_start);
                 if let Some(from_ms) = gap_start {
                     self.gaps.push(GapInterval::new(from_ms, line_ms));
                 }
@@ -87,8 +91,20 @@ mod tests {
     }
 
     #[test]
-    fn live_without_down_starts_at_the_previous_line() {
-        let gaps = tracked(&[(10, LineEvent::Other), (25, LineEvent::Other), (60, LineEvent::Live)]);
+    fn live_without_down_after_real_lines_starts_at_the_previous_line() {
+        let gaps = tracked(&[(10, LineEvent::Real), (25, LineEvent::Other), (60, LineEvent::Live)]);
+        assert_eq!(gaps, vec![gap(25, 60)]);
+    }
+
+    #[test]
+    fn live_after_only_control_lines_is_not_a_gap() {
+        let gaps = tracked(&[(10, LineEvent::Other), (25, LineEvent::Other), (60, LineEvent::Live), (70, LineEvent::Real)]);
+        assert_eq!(gaps, vec![]);
+    }
+
+    #[test]
+    fn down_before_any_real_line_is_still_a_gap() {
+        let gaps = tracked(&[(10, LineEvent::Other), (25, LineEvent::Down), (60, LineEvent::Live)]);
         assert_eq!(gaps, vec![gap(25, 60)]);
     }
 
