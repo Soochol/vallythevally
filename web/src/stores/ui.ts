@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import type { Venue } from "../api/generated/Venue";
 import type { SymbolCode } from "../api/generated/SymbolCode";
 import type { LayoutMode } from "../layout/modes";
 import type { MinutePeriod } from "../lib/symbol";
@@ -21,6 +22,7 @@ interface UiStore {
   setWatchGroupCollapsed(id: string, collapsed: boolean, known: readonly string[]): void;
   setIndicatorWindow(mode: IndicatorWindow): void;
   setLayoutMode(mode: LayoutMode): void;
+  setVenue(venue: Venue): void;
 }
 
 export const useUiStore = create<UiStore>()((set) => {
@@ -45,6 +47,7 @@ export const useUiStore = create<UiStore>()((set) => {
     setLastLayoutId: (id) => edit((p) => (p.lastLayoutId === id ? p : { ...p, lastLayoutId: id })),
     setActiveWatchlist: (id) => edit((p) => (p.activeWatchlistId === id ? p : { ...p, activeWatchlistId: id })),
     setLayoutMode: (layoutMode) => edit((p) => (p.layoutMode === layoutMode ? p : { ...p, layoutMode })),
+    setVenue: (venue) => edit((p) => (p.venue === venue ? p : { ...p, venue })),
     setIndicatorWindow: (indicatorWindow) => edit((p) => (p.indicatorWindow === indicatorWindow ? p : { ...p, indicatorWindow })),
     setDrawingPrefs: (patch) => edit((p) => ({ ...p, drawing: { ...p.drawing, ...patch } })),
     setWatchGroupCollapsed: (id, collapsed, known) =>
@@ -60,5 +63,7 @@ export const useUiStore = create<UiStore>()((set) => {
       })),
   };
 });
+
+export const useVenue = (): Venue => useUiStore((s) => s.prefs.venue);
 
 export const useTheme = (): Theme => useUiStore((s) => s.prefs.theme);

@@ -1,12 +1,11 @@
 import { afterEach, expect, test, vi } from "vitest";
 import type { Layout } from "../api/generated/Layout";
 import type { LayoutWindow } from "../api/generated/LayoutWindow";
-import type { SymbolInfo } from "../api/generated/SymbolInfo";
 import { ApiRequestError } from "../api/http";
 import { DEFAULT_CHART_SETTINGS } from "../chart/settings";
 import { chartWindows, DEFAULT_LAYOUT } from "../stores/layout";
 import type { SaveTarget } from "../stores/persist";
-import { NXT_FALLBACK_NOTICE, restore, type RestoreSources } from "./restore";
+import { restore, type RestoreSources } from "./restore";
 import type { Unsaved } from "./saver";
 
 const SERVER_LISTS = [
@@ -16,9 +15,6 @@ const SERVER_LISTS = [
 const LOCAL_LISTS = [{ id: "W1", name: "기본", symbols: ["000660"], groups: [] }];
 
 afterEach(() => vi.restoreAllMocks());
-
-const info = (code: string, nxtEnabled: boolean): SymbolInfo => ({ code, name: code, kind: "common", market: "kospi", nxtEnabled });
-const INFOS: Record<string, SymbolInfo> = { "005930": info("005930", true), "005935": info("005935", false) };
 
 type ChartWindow = Extract<LayoutWindow, { kind: "chart" }>;
 const cell = (over: Partial<ChartWindow>): ChartWindow => ({
@@ -40,7 +36,7 @@ const SYNC = { crosshair: true, scroll: true };
 const layout = (id: string, ...cells: ChartWindow[]): Layout => ({ id, name: id, sync: SYNC, windows: [...cells, ...SIDE_WINDOWS], placement: {}, updatedAt: 1, revision: 10 });
 
 function sources(
-  opts: { lastLayoutId?: string | null; layouts?: Layout[]; symbolInfo?: RestoreSources["symbolInfo"]; unsaved?: Partial<Record<SaveTarget, Unsaved>> } = {},
+  opts: { lastLayoutId?: string | null; layouts?: Layout[]; unsaved?: Partial<Record<SaveTarget, Unsaved>> } = {},
 ): RestoreSources {
   const layouts = opts.layouts ?? [layout("L1", cell({}))];
   return {
@@ -53,25 +49,17 @@ function sources(
     },
     watchlists: async () => ({ lists: SERVER_LISTS, revision: 30 }),
     unsaved: (target) => opts.unsaved?.[target] ?? null,
-    symbolInfo:
-      opts.symbolInfo ??
-      (async (code) => {
-        const i = INFOS[code];
-        if (!i) throw new ApiRequestError("unknown_symbol", "없음");
-        return i;
-      }),
   };
 }
 
 test("저장된 값을 그대로 열면 아무것도 저장하지 않는다", async () => {
-  const r = await restore(sources({ layouts: [layout("L1", cell({ venue: "nxt" }))] }));
-  expect(chartWindows(r.layout)[0]).toMatchObject({ symbol: "005930", venue: "nxt", chartSettings: DEFAULT_CHART_SETTINGS });
+  const r = await restore(sources({ layouts: [layout("L1", cell({}))] }));
+  expect(chartWindows(r.layout)[0]).toMatchObject({ symbol: "005930", chartSettings: DEFAULT_CHART_SETTINGS });
   expect(r.layoutDirty).toBe(false);
   expect(r.uiDirty).toBe(false);
   expect(r.ui.prefs.theme).toBe("dark");
   expect(r.ui.extra).toEqual({ extraKey: 1 });
   expect(r.watchlists).toEqual(SERVER_LISTS);
-  expect(r.notices).toEqual([]);
   expect(r.revisions).toEqual({ layout: 10, ui: 20, watchlist: 30 });
   expect(r.ui.extra).not.toHaveProperty("revision");
 });
@@ -160,13 +148,13 @@ test("같은 연동 색인데 종목이 다른 차트 창은 창 목록에서 �
     ...SIDE_WINDOWS,
   ];
   const r = await restore(sources({ layouts: [{ ...layout("L1"), windows }] }));
-  expect(chartWindows(r.layout).map((w) => [w.id, w.symbol, w.venue, w.period])).toEqual([
-    ["cell-0", "IDX:001", null, "D"],
-    ["cell-1", "005930", "krx", "W"],
-    ["cell-2", "005930", "combined", "D"],
-    ["cell-3", "IDX:001", null, "D"],
-    ["cell-4", "005935", "combined", "D"],
-    ["cell-5", "005930", "nxt", "D"],
+  expect(chartWindows(r.layout).map((w) => [w.id, w.symbol, w.period])).toEqual([
+    ["cell-0", "IDX:001", "D"],
+    ["cell-1", "005930", "W"],
+    ["cell-2", "005930", "D"],
+    ["cell-3", "IDX:001", "D"],
+    ["cell-4", "005935", "D"],
+    ["cell-5", "005930", "D"],
   ]);
   expect(r.layoutDirty).toBe(true);
 });
@@ -200,58 +188,15 @@ test("R2: 서버가 이미 가진 것(같거나 큰 revision)이나 다른 레�
   expect(r.revisions).toEqual({ layout: 10, ui: 20, watchlist: 30 });
 });
 
-test("NXT 불가 종목에 NXT가 저장돼 있으면 통합으로 열고, 고친 값을 저장하고, 알린다", async () => {
-  const r = await restore(sources({ layouts: [layout("L1", cell({ symbol: "005935", venue: "nxt" }))] }));
-  expect(chartWindows(r.layout)[0]!.venue).toBe("combined");
-  expect(r.layoutDirty).toBe(true);
-  expect(r.notices).toEqual([NXT_FALLBACK_NOTICE]);
-});
-
-test("종목 정보를 잠깐 못 받으면 저장된 NXT를 그대로 둔다(통합은 그릴 때만 쓴다)", async () => {
-  const r = await restore(
-    sources({
-      layouts: [layout("L1", cell({ venue: "nxt" }))],
-      symbolInfo: async () => Promise.reject(new ApiRequestError("kiwoom_unavailable", "잠시 뒤")),
-    }),
-  );
-  expect(chartWindows(r.layout)[0]!.venue).toBe("nxt");
-  expect(r.layoutDirty).toBe(false);
-  expect(r.notices).toEqual([]);
-});
-
-test("한 칸의 확인된 NXT 불가를 고쳐 저장해도, 확인하지 못한 다른 칸의 NXT는 그대로다", async () => {
-  const two = layout("L1", cell({ id: "cell-0", symbol: "005935", venue: "nxt" }), cell({ id: "cell-1", symbol: "000660", venue: "nxt" }));
-  const r = await restore(
-    sources({
-      layouts: [two],
-      symbolInfo: async (code) => {
-        if (code === "005935") return INFOS["005935"]!;
-        throw new ApiRequestError("kiwoom_unavailable", "잠시 뒤");
-      },
-    }),
-  );
-  expect(chartWindows(r.layout).map((c) => c.venue)).toEqual(["combined", "nxt"]);
-  expect(r.layoutDirty).toBe(true);
-  expect(r.notices).toEqual([NXT_FALLBACK_NOTICE]);
-});
-
-test("종목 정보를 잠깐 못 받아도 KRX는 그대로 연다", async () => {
-  const r = await restore(
-    sources({ layouts: [layout("L1", cell({ venue: "krx" }))], symbolInfo: async () => Promise.reject(new ApiRequestError("network", "x")) }),
-  );
-  expect(chartWindows(r.layout)[0]!.venue).toBe("krx");
+test("칸마다 저장돼 있던 거래소는 읽지 않는다", async () => {
+  const r = await restore(sources({ layouts: [layout("L1", cell({ symbol: "005935", venue: "nxt" }), cell({ id: "cell-1", symbol: "IDX:001", venue: null }))] }));
+  for (const w of chartWindows(r.layout)) expect(w).not.toHaveProperty("venue");
   expect(r.layoutDirty).toBe(false);
 });
 
-test("없는 종목이면 칸을 그대로 둔다(칸이 오류를 보인다)", async () => {
+test("종목 정보를 받지 않고 연다", async () => {
   const r = await restore(sources({ layouts: [layout("L1", cell({ symbol: "999999", venue: "nxt" }))] }));
-  expect(chartWindows(r.layout)[0]).toMatchObject({ symbol: "999999", venue: "nxt" });
-  expect(r.layoutDirty).toBe(false);
-});
-
-test("지수 칸은 거래소 없이 연다", async () => {
-  const r = await restore(sources({ layouts: [layout("L1", cell({ symbol: "IDX:001", venue: null }))] }));
-  expect(chartWindows(r.layout)[0]!.venue).toBeNull();
+  expect(chartWindows(r.layout)[0]).toMatchObject({ symbol: "999999" });
   expect(r.layoutDirty).toBe(false);
 });
 

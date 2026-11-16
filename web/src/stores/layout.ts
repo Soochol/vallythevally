@@ -3,8 +3,8 @@ import type { LayoutSync } from "../api/generated/LayoutSync";
 import type { LayoutWindow } from "../api/generated/LayoutWindow";
 import type { LinkColor } from "../api/generated/LinkColor";
 import type { Period } from "../api/generated/Period";
-import type { Venue } from "../api/generated/Venue";
 import type { IndicatorSpec, Placement as IndicatorPlacement } from "../chart/indicators/kinds";
+import type { SymbolInfo } from "../api/generated/SymbolInfo";
 import type { SymbolCode } from "../api/generated/SymbolCode";
 import * as edit from "../chart/settings";
 import { type ChartSettings, type ChartStyle, DEFAULT_CHART_SETTINGS, type ExtremeBasis, type IndicatorConfig, type Panel, type PriceScale } from "../chart/settings";
@@ -18,14 +18,13 @@ import { findGroup, groupOfWindow, putTab, selectTab } from "../layout/dock/tree
 import { windowId, WINDOW_KINDS, type WindowId } from "../layout/kinds";
 import type { CanvasPlacement, DockPlacement, Placement } from "../layout/placement";
 import { toward } from "../lib/josa";
-import { venueFor, type VenueTarget } from "../lib/venue";
 import { readDockOrigins, writeDockOrigins } from "../persist/dockOrigins";
 import { useUiStore } from "./ui";
 
 type ChartWindowWire = Extract<LayoutWindow, { kind: "chart" }>;
 export type OtherWindowKind = Exclude<LayoutWindow, { kind: "chart" }>["kind"];
 
-export type ChartWindowState = Omit<ChartWindowWire, "id" | "chartSettings"> & { id: WindowId; chartSettings: ChartSettings };
+export type ChartWindowState = Omit<ChartWindowWire, "id" | "chartSettings" | "venue"> & { id: WindowId; chartSettings: ChartSettings };
 export type OtherWindowState = { id: WindowId; link: LinkColor | null; kind: OtherWindowKind };
 export type WindowState = ChartWindowState | OtherWindowState;
 
@@ -52,7 +51,7 @@ export const linkLabel = (link: LinkColor): string => link.toUpperCase();
 
 export const nextLink = (link: LinkColor | null): LinkColor | null => (link === null ? "a" : link === "a" ? "b" : link === "b" ? "c" : null);
 
-export type SymbolTarget = VenueTarget & { name?: string };
+export type SymbolTarget = Pick<SymbolInfo, "code"> & { name?: string };
 export type SymbolChange = { changed: WindowId[]; notice: string | null };
 
 const unfollowedNotice = (link: LinkColor) => `연동 ${linkLabel(link)}를 따르는 차트가 없습니다. 차트의 연동 색을 ${linkLabel(link)}로 맞추세요`;
@@ -72,23 +71,17 @@ export function watchedSymbol(layout: EditableLayout, sender: WindowId | null, a
   return chartWindows(layout).find((w) => w.link === link)?.symbol ?? null;
 }
 
-export type NxtLookup = (code: SymbolCode) => boolean | undefined;
-
-const UNKNOWN_NXT: NxtLookup = () => undefined;
-
-function follow(chart: ChartWindowState, leader: ChartWindowState, nxtOf: NxtLookup): ChartWindowState {
-  if (chart.symbol === leader.symbol) return chart;
-  const nxtEnabled = nxtOf(leader.symbol) ?? leader.venue === "nxt";
-  return { ...chart, symbol: leader.symbol, venue: venueFor({ code: leader.symbol, nxtEnabled }, chart.venue) };
+function follow(chart: ChartWindowState, leader: ChartWindowState): ChartWindowState {
+  return chart.symbol === leader.symbol ? chart : { ...chart, symbol: leader.symbol };
 }
 
-export function alignLinks(windows: WindowState[], nxtOf: NxtLookup = UNKNOWN_NXT): WindowState[] {
+export function alignLinks(windows: WindowState[]): WindowState[] {
   const leaders = new Map<LinkColor, ChartWindowState>();
   const aligned = windows.map((w) => {
     if (!isChartWindow(w) || w.link === null) return w;
     const leader = leaders.get(w.link);
     if (!leader) leaders.set(w.link, w);
-    return leader ? follow(w, leader, nxtOf) : w;
+    return leader ? follow(w, leader) : w;
   });
   return aligned.every((w, i) => w === windows[i]) ? windows : aligned;
 }
@@ -121,7 +114,7 @@ export const DEFAULT_LAYOUT: EditableLayout = {
   name: "기본",
   sync: { crosshair: true, scroll: true },
   windows: [
-    { id: windowId("cell-0"), link: null, kind: "chart", symbol: "IDX:001", venue: null, period: "D", chartSettings: DEFAULT_CHART_SETTINGS },
+    { id: windowId("cell-0"), link: null, kind: "chart", symbol: "IDX:001", period: "D", chartSettings: DEFAULT_CHART_SETTINGS },
     { id: windowId("watchlist"), link: null, kind: "watchlist" },
     { id: windowId("screener"), link: null, kind: "screener" },
     { id: windowId("objects"), link: null, kind: "objects" },
@@ -152,10 +145,9 @@ interface LayoutState {
   showWindow(kind: OtherWindowKind, targetGroup?: string): void;
   addChart(from: WindowId, room: DockRoom | null, targetGroup?: string): WindowId | null;
   closeWindow(id: WindowId, replacement?: WindowId): boolean;
-  setSymbol(cellId: WindowId, target: SymbolTarget, venue?: Venue): SymbolChange;
+  setSymbol(cellId: WindowId, target: SymbolTarget): SymbolChange;
   sendSymbol(sender: WindowId | null, cellId: WindowId, target: SymbolTarget): SymbolChange;
-  setLink(window: WindowId, link: LinkColor | null, nxtOf?: NxtLookup): void;
-  setVenue(cellId: WindowId, venue: Venue): void;
+  setLink(window: WindowId, link: LinkColor | null): void;
   setPeriod(cellId: WindowId, p: Period): void;
   setStyle(cellId: WindowId, s: ChartStyle): void;
   setScale(cellId: WindowId, s: PriceScale): void;
@@ -204,13 +196,12 @@ export const useLayoutStore = create<LayoutState>()((set, get) => {
     });
   const patchCell = (cellId: WindowId, f: (c: ChartWindowState) => ChartWindowState) =>
     patchWindows((w) => (isChartWindow(w) && w.id === cellId ? f(w) : w));
-  const openIn = (charts: readonly ChartWindowState[], target: SymbolTarget, wanted?: { cellId: WindowId; venue: Venue }): SymbolChange => {
+  const openIn = (charts: readonly ChartWindowState[], target: SymbolTarget): SymbolChange => {
     const ids = new Set<WindowId>(charts.map((c) => c.id));
     const changed = charts.filter((c) => c.symbol !== target.code).map((c) => c.id);
     patchWindows((w) => {
       if (!isChartWindow(w) || !ids.has(w.id)) return w;
-      const venue = venueFor(target, wanted?.cellId === w.id ? wanted.venue : w.venue);
-      return w.symbol === target.code && w.venue === venue ? w : { ...w, symbol: target.code, venue };
+      return w.symbol === target.code ? w : { ...w, symbol: target.code };
     });
     const link = charts[0]?.link ?? null;
     const notice = link !== null && changed.length > 1 ? `연동 ${linkLabel(link)}: 차트 ${changed.length}개가 ${toward(target.name ?? target.code)} 바뀌었습니다` : null;
@@ -284,7 +275,7 @@ export const useLayoutStore = create<LayoutState>()((set, get) => {
         for (const chart of chartWindows(s.layout)) if (chart.link !== null && !leaders.has(chart.link)) leaders.set(chart.link, chart);
         const restore = (w: WindowState): WindowState => {
           const leader = isChartWindow(w) && w.link !== null ? leaders.get(w.link) : undefined;
-          return leader && isChartWindow(w) ? follow(w, leader, UNKNOWN_NXT) : w;
+          return leader && isChartWindow(w) ? follow(w, leader) : w;
         };
         const windows = step.before.windows.map((w) => current.get(w.id) ?? restore(w));
         return { dockOrigins: step.dockOrigins, layout: { ...s.layout, windows, placement: step.before.placement }, steps: s.steps.slice(0, -1), revision: s.revision + 1 };
@@ -358,7 +349,7 @@ export const useLayoutStore = create<LayoutState>()((set, get) => {
       }
       return true;
     },
-    setSymbol: (cellId, target, venue) => openIn(linkedCharts(get().layout, cellId), target, venue && { cellId, venue }),
+    setSymbol: (cellId, target) => openIn(linkedCharts(get().layout, cellId), target),
     sendSymbol: (sender, cellId, target) => {
       const { layout } = get();
       const link = senderLink(layout, sender);
@@ -366,14 +357,13 @@ export const useLayoutStore = create<LayoutState>()((set, get) => {
       const charts = chartWindows(layout).filter((w) => w.link === link);
       return charts.length ? openIn(charts, target) : { changed: [], notice: unfollowedNotice(link) };
     },
-    setLink: (id, link, nxtOf = UNKNOWN_NXT) => {
+    setLink: (id, link) => {
       const leader = link === null ? undefined : chartWindows(get().layout).find((c) => c.id !== id && c.link === link);
       patchWindows((w) => {
         if (w.id !== id || w.link === link || WINDOW_KINDS[w.kind].link === "none") return w;
-        return isChartWindow(w) && leader ? follow({ ...w, link }, leader, nxtOf) : { ...w, link };
+        return isChartWindow(w) && leader ? follow({ ...w, link }, leader) : { ...w, link };
       });
     },
-    setVenue: (cellId, venue) => patchCell(cellId, (c) => (c.venue === null || c.venue === venue ? c : { ...c, venue })),
     setPeriod: (cellId, period) => patchCell(cellId, (c) => (c.period === period ? c : { ...c, period })),
     setStyle: (cellId, style) => patchSetting(cellId, "style", style),
     setScale: (cellId, scale) => patchSetting(cellId, "scale", scale),

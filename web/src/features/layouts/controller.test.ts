@@ -3,13 +3,14 @@ import type { Layout } from "../../api/generated/Layout";
 import type { LayoutInput } from "../../api/generated/LayoutInput";
 import { ApiRequestError } from "../../api/http";
 import { type Autosave, startAutosave } from "../../persist/autosave";
+import { toWireWindow } from "../../persist/layoutWire";
 import { restoreLayout } from "../../persist/restore";
 import { chartWindows, DEFAULT_LAYOUT, useLayoutStore } from "../../stores/layout";
 import { usePersistStore } from "../../stores/persist";
 import { createLayoutCommands, layoutNameProblem, useLayoutsStore } from "./controller";
 
 const CELL = chartWindows(DEFAULT_LAYOUT)[0]!.id;
-const stored = (id: string): Layout => ({ ...DEFAULT_LAYOUT, id, name: id, revision: 10, updatedAt: 0 });
+const stored = (id: string): Layout => ({ ...DEFAULT_LAYOUT, windows: DEFAULT_LAYOUT.windows.map(toWireWindow), id, name: id, revision: 10, updatedAt: 0 });
 const summary = (id: string) => ({ id, name: id, updatedAt: 0 });
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -26,7 +27,7 @@ function setup(overrides: Partial<Parameters<typeof createLayoutCommands>[0]> = 
     list: async () => [summary(DEFAULT_LAYOUT.id), summary("next")],
     get: async (id) => stored(id),
     put: async (value) => ({ ...value, updatedAt: 0 }), delete: async () => {},
-    restore: (value) => restoreLayout(value, { symbolInfo: async () => { throw new Error("없음"); }, unsaved: () => null }),
+    restore: (value) => restoreLayout(value, { unsaved: () => null }),
     install, uuid: () => "copy", ...overrides,
   });
 }
@@ -180,7 +181,7 @@ test("거래소 확인을 기다리는 동안의 편집도 마지막 장벽으�
   await vi.advanceTimersByTimeAsync(0);
   expect(normalize).toHaveBeenCalledOnce();
   useLayoutStore.getState().setPeriod(CELL, "W");
-  normalized.resolve(await restoreLayout(stored("next"), { symbolInfo: async () => { throw new Error("없음"); }, unsaved: () => null }));
+  normalized.resolve(await restoreLayout(stored("next"), { unsaved: () => null }));
   await opening;
   expect(sent.at(-1)).toMatchObject({ id: DEFAULT_LAYOUT.id, windows: [{ period: "W" }, {}, {}, {}] });
   expect(install).toHaveBeenCalledOnce();

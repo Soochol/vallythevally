@@ -1,6 +1,6 @@
 import { ErrorState, EmptyState } from "../overlay/State";
 import { createPortal } from "react-dom";
-import { VenuePicker } from "../venue/VenuePicker";
+import { VenueFallbackBadge } from "../venue/VenuePicker";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useFinancials } from "../../api/financials";
 import { financialRequest } from "../../chart/indicators/shown";
@@ -11,12 +11,11 @@ import { crosshairSync } from "../../chart/crosshairSync";
 import { readThemeTokens } from "../../chart/theme";
 import { PERIOD_LABEL } from "../../lib/symbol";
 import { shownVenue, venueLabel } from "../../lib/venue";
-import { NXT_FALLBACK_NOTICE } from "../../persist/restore";
 import { chartNumber, chartWindows, useCell, useLayoutStore } from "../../stores/layout";
 import { marketSocket } from "../../stores/realtime";
 import { useSelectionStore } from "../../stores/selection";
 import { openIndicatorCommand, shownIndicatorWindow } from "../indicator-command/open";
-import { useTheme } from "../../stores/ui";
+import { useTheme, useVenue } from "../../stores/ui";
 import { cellErrorView, olderErrorView } from "./cellError";
 import { useDrawingSurface } from "../../chart/drawings/useDrawingSurface";
 import { useShownSettings } from "../indicator-command/preview";
@@ -62,7 +61,8 @@ export function ChartCell({ cellId, status, onStatus }: Props) {
   const crosshairEnabled = useLayoutStore((s) => s.layout.sync.crosshair);
   const { settings: chartSettings, preview } = useShownSettings(cellId, cell.chartSettings);
   const info = useSymbolInfo(cell.symbol).data;
-  const venue = shownVenue(cell.venue, info);
+  const appVenue = useVenue();
+  const venue = shownVenue(cell.symbol, appVenue, info);
   const compareInfos = useSymbolInfos(cell.chartSettings.compare);
   const compareKey = compareInfos.map((i) => `${i.code}:${i.name}`).join("|");
   const compareNames = useMemo(() => Object.fromEntries(compareInfos.map((i) => [i.code, i.name])), [compareKey]);
@@ -117,15 +117,6 @@ export function ChartCell({ cellId, status, onStatus }: Props) {
     ctl.current?.setFinancials(financial.data ?? null, financial.error ? "재무자료 조회 실패 · 재무자료 창에서 다시 확인하세요" : undefined);
   }, [cell.symbol, cell.period, financial.data, financial.error]);
 
-  // 복원 때 종목 정보를 못 받아 확인하지 못한 NXT가 나중에 NXT 불가로 확인되면, 그때 저장 원본을 고친다.
-  // 그대로 두면 다음 저장을 서버가 400으로 거절한다.
-  useEffect(() => {
-    if (info?.code === cell.symbol && cell.venue === "nxt" && !info.nxtEnabled) {
-      useLayoutStore.getState().setVenue(cellId, "combined");
-      useSelectionStore.getState().showToast(NXT_FALLBACK_NOTICE);
-    }
-  }, [info, cell.symbol, cell.venue, cellId]);
-
   useEffect(() => {
     ctl.current?.setTheme(readThemeTokens());
   }, [theme]);
@@ -146,7 +137,7 @@ export function ChartCell({ cellId, status, onStatus }: Props) {
     >
       <div ref={chartEl} className="absolute inset-0" />
       <AxisMode cellId={cellId} />
-      {venueAnchor && createPortal(<VenuePicker cell={cell} info={info} variant="legend" />, venueAnchor)}
+      {venueAnchor && venue !== null && venue !== appVenue && createPortal(<VenueFallbackBadge />, venueAnchor)}
       <DrawingOverlay cellId={cellId} />
       {editing && cell.chartSettings.indicators.some((i) => i.id === editing.initial.id) && <IndicatorPopover key={editing.initial.id} cellId={cellId} {...editing} editRoot={chartEl.current!} onClose={() => setEditing(null)} />}
       {status.kind === "loading" && <div role="status" aria-label="차트 불러오는 중" className="pointer-events-none absolute inset-0 z-[5] grid place-items-center bg-chart-bg"><span className="chart-loading-label text-s text-text-3">차트 불러오는 중</span></div>}

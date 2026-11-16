@@ -2,16 +2,13 @@ import type { Layout } from "../api/generated/Layout";
 import type { LayoutWindow } from "../api/generated/LayoutWindow";
 import type { LinkColor } from "../api/generated/LinkColor";
 import type { LayoutSummary } from "../api/generated/LayoutSummary";
-import type { SymbolCode } from "../api/generated/SymbolCode";
-import type { SymbolInfo } from "../api/generated/SymbolInfo";
 import type { Watchlist } from "../api/generated/Watchlist";
 import type { Watchlists } from "../api/generated/Watchlists";
 import { ApiRequestError } from "../api/http";
 import { parseChartSettings } from "../chart/settings";
 import { MAX_WINDOWS, windowId, WINDOW_KINDS, type WindowKind } from "../layout/kinds";
 import { parsePlacement } from "../layout/placement";
-import { venueFor, type VenueTarget } from "../lib/venue";
-import { alignLinks, type ChartWindowState, DEFAULT_LAYOUT, type EditableLayout, type WindowState } from "../stores/layout";
+import { alignLinks, DEFAULT_LAYOUT, type EditableLayout, type WindowState } from "../stores/layout";
 import { layoutPath, UI_STATE_PATH, WATCHLISTS_PATH } from "../api/userData";
 import { parseWatchlists } from "../lib/watchlist";
 import type { SaveTarget } from "../stores/persist";
@@ -24,7 +21,6 @@ export interface RestoreSources {
   layouts(): Promise<LayoutSummary[]>;
   layout(id: string): Promise<Layout>;
   watchlists(): Promise<Watchlists>;
-  symbolInfo(code: SymbolCode): Promise<SymbolInfo>;
   unsaved(target: SaveTarget): Unsaved | null;
 }
 
@@ -38,10 +34,7 @@ export interface Restored {
   watchlistDirty: boolean;
   serverRevisions: Record<SaveTarget, number>;
   revisions: Record<SaveTarget, number>;
-  notices: string[];
 }
-
-export const NXT_FALLBACK_NOTICE = "NXT에서 거래되지 않아 통합으로 엽니다";
 
 const revisionOf = (raw: unknown): number => {
   const r = typeof raw === "object" && raw !== null ? (raw as { revision?: unknown }).revision : undefined;
@@ -89,9 +82,9 @@ export async function restore(src: RestoreSources): Promise<Restored> {
 
   const stored = await openLayout(src, ui.prefs.lastLayoutId);
   const restored = stored ? await restoreLayout(stored, src) : {
-    layout: DEFAULT_LAYOUT, dirty: true, serverCharts: [], revision: 0, serverRevision: 0, notices: [],
+    layout: DEFAULT_LAYOUT, dirty: true, serverCharts: [], revision: 0, serverRevision: 0,
   };
-  const { layout, notices } = restored;
+  const { layout } = restored;
   const lastLayoutFixed = ui.prefs.lastLayoutId !== layout.id;
   const serverRevisions = { layout: stored?.revision ?? 0, ui: serverUi, watchlist: serverWatch.revision };
   return {
@@ -108,7 +101,6 @@ export async function restore(src: RestoreSources): Promise<Restored> {
       ui: Math.max(serverUi, localUi?.revision ?? 0),
       watchlist: Math.max(serverWatch.revision, localLists ? localWatch!.revision : 0),
     },
-    notices,
   };
 }
 
@@ -118,23 +110,19 @@ export interface RestoredLayout {
   serverCharts: readonly string[];
   serverRevision: number;
   revision: number;
-  notices: string[];
 }
 
-export async function restoreLayout(stored: Layout, src: Pick<RestoreSources, "symbolInfo" | "unsaved">): Promise<RestoredLayout> {
+export async function restoreLayout(stored: Layout, src: Pick<RestoreSources, "unsaved">): Promise<RestoredLayout> {
   const local = newer(src.unsaved("layout"), layoutPath(stored.id), stored.revision);
   const opened = (local && asLayout(local.value, stored)) || stored;
-  const windows = await Promise.all(opened.windows.map((w) => restoreWindow(src, w)));
-  const restoredWindows = windows.map((w) => w.window);
-  const nxtBySymbol = new Map(windows.flatMap((w) => (w.info ? [[w.info.code, w.info.nxtEnabled] as const] : [])));
-  const linkedWindows = alignLinks(restoredWindows, (code) => nxtBySymbol.get(code));
+  const restoredWindows = opened.windows.map(restoreWindow);
+  const linkedWindows = alignLinks(restoredWindows);
   return {
     layout: { id: opened.id, name: opened.name, sync: opened.sync, windows: linkedWindows, placement: parsePlacement(opened.placement) },
-    dirty: opened !== stored || windows.some((w) => w.dirty) || linkedWindows !== restoredWindows,
+    dirty: opened !== stored || linkedWindows !== restoredWindows,
     serverCharts: stored.windows.filter((w) => w.kind === "chart").map((w) => w.id),
     serverRevision: stored.revision,
     revision: Math.max(stored.revision, opened !== stored ? (local?.revision ?? 0) : 0),
-    notices: windows.some((w) => w.nxtFellBack) ? [NXT_FALLBACK_NOTICE] : [],
   };
 }
 
@@ -150,23 +138,8 @@ async function openLayout(src: RestoreSources, id: string | null): Promise<Layou
   return first ? src.layout(first.id) : null;
 }
 
-interface RestoredWindow {
-  window: WindowState;
-  info?: VenueTarget;
-  dirty: boolean;
-  nxtFellBack: boolean;
-}
-
-async function restoreWindow(src: Pick<RestoreSources, "symbolInfo">, raw: LayoutWindow): Promise<RestoredWindow> {
-  if (raw.kind !== "chart") return { window: { id: windowId(raw.id), link: raw.link, kind: raw.kind }, dirty: false, nxtFellBack: false };
-  const cell: ChartWindowState = { ...raw, id: windowId(raw.id), chartSettings: parseChartSettings(raw.chartSettings) };
-  let info: VenueTarget;
-  try {
-    info = await src.symbolInfo(cell.symbol);
-  } catch {
-    return { window: cell, dirty: false, nxtFellBack: false };
-  }
-  const venue = venueFor(info, cell.venue);
-  if (venue === cell.venue) return { window: cell, info, dirty: false, nxtFellBack: false };
-  return { window: { ...cell, venue }, info, dirty: true, nxtFellBack: cell.venue === "nxt" };
+function restoreWindow(raw: LayoutWindow): WindowState {
+  if (raw.kind !== "chart") return { id: windowId(raw.id), link: raw.link, kind: raw.kind };
+  const { venue: _venue, ...chart } = raw;
+  return { ...chart, id: windowId(raw.id), chartSettings: parseChartSettings(raw.chartSettings) };
 }

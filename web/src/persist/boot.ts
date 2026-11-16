@@ -1,6 +1,4 @@
-import type { QueryClient } from "@tanstack/react-query";
 import { ApiRequestError, sendJson } from "../api/http";
-import { fetchSymbolInfo } from "../api/queries";
 import { fetchLayout, layoutPath, fetchLayouts, fetchUiState, fetchWatchlists } from "../api/userData";
 import { followLastMinute } from "../stores/lastMinute";
 import { chartWindows, useLayoutStore } from "../stores/layout";
@@ -31,7 +29,7 @@ function followTheme() {
   useUiStore.subscribe((s, prev) => s.prefs.theme !== prev.prefs.theme && paintTheme(s.prefs.theme));
 }
 
-export async function boot(queryClient: QueryClient) {
+export async function boot() {
   const { setPhase } = usePersistStore.getState();
   const toast = (text: string) => useSelectionStore.getState().showToast(text);
   try {
@@ -40,13 +38,6 @@ export async function boot(queryClient: QueryClient) {
       layouts: () => fetchLayouts(),
       layout: (id) => fetchLayout(id),
       watchlists: () => fetchWatchlists(),
-      symbolInfo: (code) =>
-        queryClient.fetchQuery({
-          queryKey: ["symbol", code],
-          queryFn: ({ signal }) => fetchSymbolInfo(code, signal),
-          staleTime: Infinity,
-          retry: false,
-        }),
       unsaved: readUnsaved,
     });
     useLayoutStore.getState().load(restored.layout);
@@ -64,7 +55,6 @@ export async function boot(queryClient: QueryClient) {
     document.addEventListener("visibilitychange", () => {
       if (document.visibilityState === "hidden") autosave.flush();
     });
-    restored.notices.forEach(toast);
     setPhase({ kind: "ready" });
   } catch (e) {
     console.warn("마지막 화면을 되살리지 못했습니다", e);

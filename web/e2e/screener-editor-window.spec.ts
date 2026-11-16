@@ -127,7 +127,7 @@ test("창 밖 차트 조작은 창을 닫으면서 그대로 실행된다", asyn
   await seed(scenario, page);
   await editButton(page).click();
   await expect(editorWindow(page)).toBeVisible();
-  await cell(page).getByRole("group", { name: "거래소" }).getByRole("button", { name: "KRX", exact: true }).click();
+  await page.getByRole("group", { name: "거래소" }).getByRole("button", { name: "KRX", exact: true }).click();
   await expect(editorWindow(page)).toHaveCount(0);
   await expect(cell(page)).toHaveAttribute("aria-label", /KRX/);
 });

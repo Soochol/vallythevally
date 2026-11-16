@@ -14,7 +14,7 @@ import { ConnectionIndicator, useConnectionView } from "../status/ConnectionIndi
 const DIR_CLASS = { up: "text-up", down: "text-down", flat: "text-text-2" } as const;
 
 /**
- * 휴대폰 머리(frontend.md §4): 종목과 거래소(주식만), 현재 봉 종가(24px, 등락색), 등락, 그리고 셋째 줄에
+ * 휴대폰 머리(frontend.md §4): 종목, 현재 봉 종가(24px, 등락색), 등락, 그리고 셋째 줄에
  * 연결 상태(§2.2의 점과 문장)와 라이브러리 표기. 범례의 머리줄과 가격줄을 대신한다.
  */
 export function PhoneHeader({ cell, info, status }: { cell: ChartWindowState; info: SymbolInfo | undefined; status: CellStatus }) {
@@ -51,7 +51,7 @@ export function PhoneHeader({ cell, info, status }: { cell: ChartWindowState; in
             <strong className="text-[24px] font-[650] text-text-3">—</strong>
           )}
           </div>
-          <VenuePicker cell={cell} info={info} variant="phone" />
+          <VenuePicker variant="phone" />
         </div>
         <div className="mt-0.5 flex items-center justify-between gap-2 text-xs text-text-2">
           <ConnectionIndicator view={connection} />

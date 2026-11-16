@@ -105,9 +105,7 @@ test("드로잉 도구는 활성 칸 위쪽 가운데의 도크이고 고른 도
   expect(bar.y - chart.y).toBeLessThan(24);
   expect(bar.width).toBeGreaterThan(bar.height * 4);
   const legend = await boxOf(cell(page).locator(".chart-legend"));
-  const venues = await boxOf(cell(page).getByRole("group", { name: "거래소", exact: true }));
   expect(legend.y).toBeLessThan(bar.y + bar.height);
-  expect(venues.x + venues.width).toBeLessThan(bar.x);
   const pointer = dock(page).getByRole("button", { name: "선택 도구", exact: true });
   await expect(pointer).toHaveCSS("background-color", "rgb(199, 243, 107)");
   await (await expandDock(page)).getByRole("button", { name: "추세선", exact: true }).click();
@@ -140,8 +138,6 @@ test("좁고 낮은 창에서도 도크는 창 안에 있고 가격축 방식 �
     expect(bar.x).toBeGreaterThanOrEqual(0);
     expect(bar.y + bar.height).toBeLessThanOrEqual(size.height);
     expect(bar.y + bar.height <= axis.y || bar.x + bar.width <= axis.x).toBe(true);
-    const venues = await boxOf(cell(page).getByRole("group", { name: "거래소", exact: true }));
-    expect(venues.y >= bar.y + bar.height || venues.x + venues.width < bar.x).toBe(true);
     expect(await dock(page).evaluate((node) => node.scrollWidth - node.clientWidth)).toBe(0);
     await (await expandDock(page)).getByRole("button", { name: "드로잉 단축키 도움말", exact: true }).click();
     await expect(page.getByRole("dialog", { name: "드로잉 단축키", exact: true })).toBeVisible();

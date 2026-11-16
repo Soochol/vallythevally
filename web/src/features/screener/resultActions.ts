@@ -39,7 +39,7 @@ export async function openResult(queryClient: QueryClient, code: SymbolCode, sen
   try {
     target = await queryClient.fetchQuery(symbolInfoQuery(code));
   } catch {
-    target = { code, nxtEnabled: false };
+    target = { code };
   }
   if (pendingOpen !== open || pendingResultCode() === null) return;
   pendingOpen = null;

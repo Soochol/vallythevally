@@ -76,7 +76,6 @@ async function geometry(page: Page) {
       return {
         body: rect(body), panes, timeAxis,
         rows: { head: { box: rect(head), text: head.textContent, texts: textRects(head) }, price: { box: rect(price), text: price.textContent, texts: textRects(price) }, ohlc: { box: rect(ohlc), text: ohlc.textContent, texts: textRects(ohlc) } },
-        venues: [...head.querySelectorAll("button")].map((button) => ({ label: button.getAttribute("aria-label"), ...rect(button) })),
         volume: { box: rect(volume), text: volume.textContent, texts: textRects(volume), commands: [...volume.querySelectorAll("button[data-indicator-command]:not([hidden])")].map((button) => ({ label: button.getAttribute("aria-label"), ...rect(button) })) },
         toolbar: toolbar ? rect(toolbar) : null,
       };
@@ -105,23 +104,17 @@ function readable(charts: Awaited<ReturnType<typeof geometry>>) {
     for (const [i, row] of Object.values(chart.rows).entries()) for (const later of Object.values(chart.rows).slice(i + 1)) {
       for (const a of row.texts) for (const b of later.texts) expect.soft(disjoint(a, b), `chart ${index + 1} text rows do not overlap`).toBe(true);
     }
-    expect(chart.venues.length).toBeGreaterThan(0);
-    for (const venue of chart.venues) {
-      expect.soft(venue.height, "venue controls retain 24px hit boxes").toBe(24);
-      expect.soft(contained(venue, pane), `chart ${index + 1} venue stays in its price pane`).toBe(true);
-      for (const row of [chart.rows.price, chart.rows.ohlc]) for (const text of row.texts) expect.soft(disjoint(venue, text), `chart ${index + 1} venue clears other rows`).toBe(true);
-    }
     expect.soft(contained(chart.volume.box, volumePane), `chart ${index + 1} volume row stays inside volume pane`).toBe(true);
     for (const box of [...chart.volume.texts, ...chart.volume.commands]) expect.soft(contained(box, volumePane), `chart ${index + 1} volume text and full action boxes stay inside volume pane`).toBe(true);
     for (const command of chart.volume.commands) {
       expect.soft(command.height, "indicator controls retain 18px hit boxes").toBe(18);
       expect.soft(command.width, "indicator controls retain 18px hit boxes").toBe(18);
     }
-    const priceBoxes = [...Object.values(chart.rows).flatMap((row) => row.texts), ...chart.venues];
+    const priceBoxes = [...Object.values(chart.rows).flatMap((row) => row.texts)];
     const volumeBoxes = [...chart.volume.texts, ...chart.volume.commands];
     for (const box of [...priceBoxes, ...volumeBoxes]) expect.soft(disjoint(box, chart.timeAxis), `chart ${index + 1} text and controls clear time axis`).toBe(true);
     for (const priceBox of priceBoxes) for (const volumeBox of volumeBoxes) expect.soft(disjoint(priceBox, volumeBox), `chart ${index + 1} price and volume text and controls do not overlap`).toBe(true);
-    if (chart.toolbar) for (const box of [...Object.values(chart.rows).flatMap((row) => row.texts), ...chart.venues, ...chart.volume.texts, ...chart.volume.commands]) expect.soft(disjoint(box, chart.toolbar), `chart ${index + 1} toolbar clears text and controls`).toBe(true);
+    if (chart.toolbar) for (const box of [...Object.values(chart.rows).flatMap((row) => row.texts), ...chart.volume.texts, ...chart.volume.commands]) expect.soft(disjoint(box, chart.toolbar), `chart ${index + 1} toolbar clears text and controls`).toBe(true);
   }
 }
 
@@ -201,13 +194,14 @@ for (const pinned of [false, true]) test(`minimum canvas toolbar retains help, m
   }
   expect(storedPresentation(scenario)).toBe(saved);
   expect(storedDocuments(scenario)).toBe(documents);
-  const venues = cell(page).getByRole("group", { name: "거래소" });
+  const venues = page.getByRole("group", { name: "거래소" });
   await venues.getByRole("button", { name: "KRX", exact: true }).click();
   await expect(cell(page)).toHaveAttribute("aria-label", "칸 1: 삼성전자 KRX 일");
-  await expect.poll(() => scenario.documents.layout().windows.find((window) => window.kind === "chart")?.venue).toBe("krx");
+  await expect.poll(() => scenario.documents.layout().windows.find((window) => window.kind === "chart")?.venue).toBe("combined");
+  await expect.poll(() => scenario.documents.uiState().venue).toBe("krx");
   await venues.getByRole("button", { name: "통합", exact: true }).click();
   await expect(cell(page)).toHaveAttribute("aria-label", "칸 1: 삼성전자 통합 일");
-  await expect.poll(() => scenario.documents.layout().windows.find((window) => window.kind === "chart")?.venue).toBe("combined");
+  await expect.poll(() => scenario.documents.uiState().venue).toBe("combined");
   await settle(page, 1);
   await expandDock(page);
   const afterVenue = storedPresentation(scenario);
@@ -265,12 +259,12 @@ test("compact controls support hover, keyboard, venue, settings, collapse, toolb
   await settle(page, 4);
   readable(await geometry(page));
   const current = cell(page);
-  const venue = current.getByRole("group", { name: "거래소" }).getByRole("button", { name: "KRX", exact: true });
+  const venue = page.getByRole("group", { name: "거래소" }).getByRole("button", { name: "KRX", exact: true });
   await venue.focus();
   await page.keyboard.press("Enter");
   await expect(current).toHaveAttribute("aria-label", "칸 1: 삼성전자 KRX 일");
   await expect(venue).toHaveAttribute("aria-pressed", "true");
-  await current.getByRole("group", { name: "거래소" }).getByRole("button", { name: "통합", exact: true }).click();
+  await page.getByRole("group", { name: "거래소" }).getByRole("button", { name: "통합", exact: true }).click();
   await settle(page, 4);
   const volume = current.locator("[data-indicator-row]");
   await volume.hover();

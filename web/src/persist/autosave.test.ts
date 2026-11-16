@@ -1,3 +1,4 @@
+import type { Layout } from "../api/generated/Layout";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { windowId, type WindowId } from "../layout/kinds";
 import type { Rect } from "../layout/placement";
@@ -63,7 +64,7 @@ test("칸을 바꾸면 1초 뒤 레이아웃을 통째로 보내고 저장됨이
     id: DEFAULT_LAYOUT.id,
     name: DEFAULT_LAYOUT.name,
     sync: DEFAULT_LAYOUT.sync,
-    windows: [{ ...CHART, period: "W", chartSettings: { ...chartWindows(DEFAULT_LAYOUT)[0]!.chartSettings, style: "line" } }, ...OTHER_WINDOWS],
+    windows: [{ ...CHART, venue: null, period: "W", chartSettings: { ...chartWindows(DEFAULT_LAYOUT)[0]!.chartSettings, style: "line" } }, ...OTHER_WINDOWS],
     placement: { v: 1, dock: null, canvas: null },
     revision: expect.any(Number),
   });
@@ -204,6 +205,7 @@ test("UI 설정을 바꾸면 모르는 키와 함께 UiState를 보낸다", asyn
         collapsedWatchGroups: [],
         indicatorWindow: "inspector",
         layoutMode: "dock",
+        venue: "combined",
         revision: expect.any(Number),
       },
       keepalive: false,
@@ -326,20 +328,24 @@ test("탭이 숨으면 기다리던 레이아웃을 keepalive로 곧바로 보�
   expect(puts.map((p) => [p.path, p.keepalive])).toEqual([[`/api/layouts/${DEFAULT_LAYOUT.id}`, true]]);
 });
 
-test("R1: 종목 정보를 못 받아 통합으로 그리는 NXT 칸은, 봉 주기만 바꿔 저장해도 nxt로 저장된다", async () => {
-  const stored = { ...DEFAULT_LAYOUT, windows: [{ ...chartWindows(DEFAULT_LAYOUT)[0]!, symbol: "005930", venue: "nxt" as const }, ...OTHER_WINDOWS], updatedAt: 1, revision: 1 };
+test("칸마다 저장돼 있던 거래소는 저장할 때 주식 창에 combined, 지수 창에 null로 바뀐다", async () => {
+  const first = chartWindows(DEFAULT_LAYOUT)[0]!;
+  const stored = {
+    ...DEFAULT_LAYOUT,
+    windows: [{ ...first, symbol: "005930", venue: "nxt" as const }, { ...first, id: "cell-1", symbol: "IDX:001", venue: "krx" as const }, ...OTHER_WINDOWS],
+    updatedAt: 1,
+    revision: 1,
+  };
   const r = await restore({
     uiState: async () => ({ lastLayoutId: DEFAULT_LAYOUT.id, theme: "dark" }),
     layouts: async () => [],
-    layout: async () => stored,
+    layout: async () => stored as unknown as Layout,
     watchlists: async () => ({ lists: [{ ...FIRST, symbols: [] }], revision: 0 }),
     unsaved: () => null,
-    symbolInfo: async () => Promise.reject(new ApiRequestError("kiwoom_unavailable", "잠시 뒤")),
   });
   useLayoutStore.getState().load(r.layout);
-  expect(r.layoutDirty).toBe(false);
   useLayoutStore.getState().setPeriod(CELL, "W");
   await vi.advanceTimersByTimeAsync(1000);
   expect(puts).toHaveLength(1);
-  expect(puts[0]!.body).toMatchObject({ windows: [{ symbol: "005930", venue: "nxt", period: "W" }, ...OTHER_WINDOWS] });
+  expect(puts[0]!.body).toMatchObject({ windows: [{ symbol: "005930", venue: "combined", period: "W" }, { symbol: "IDX:001", venue: null }, ...OTHER_WINDOWS] });
 });

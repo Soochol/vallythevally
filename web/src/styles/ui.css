@@ -57,7 +57,8 @@
 .desktop-topbar .shell-search { border:var(--size-1) solid var(--line); color:var(--text-3); }
 .shell-search kbd { padding-inline:var(--size-4); }
 @media (width < 48rem) { .desktop-topbar { display:none; } }
-@media (width < 52rem) { .app-brand > span { display:none; } }
+@media (width < 80rem) { .desktop-topbar .venue-picker .seg-btn { min-width:0; padding-inline:var(--size-4); } .desktop-topbar .tb-sep, .shell-search kbd { display:none; } }
+@media (width < 52rem) { .app-brand > span { display:none; } .desktop-topbar { gap:var(--size-2); } }
 .workspace { position:relative; flex:1; min-width:0; min-height:0; margin:var(--island-gap); overflow:hidden; }
 .status-bar { height:var(--size-28); }
 .dock-group { position:absolute; display:flex; flex-direction:column; min-width:0; min-height:0; overflow:hidden; border-radius:var(--r-l); background:var(--surface); box-shadow:0 0 0 var(--size-1) var(--line); }

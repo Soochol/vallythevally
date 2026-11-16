@@ -8,7 +8,7 @@ import type { DrawingInput } from "../src/api/generated/DrawingInput";
 import { installChartProbe } from "./chart-probe";
 import { type Scenario, DEFAULT_LAYOUT_ID, cell, chartOf, expect, test, firstChart, withFirstChart } from "./harness";
 
-const LONG_NAME = "TIGER 엔비디아미국채커버드콜밸런스(합성)";
+const LONG_NAME = "TIGER 엔비디아미국채커버드콜밸런스(합성) 장기 보유 목적 포트폴리오 시험 종목";
 const saved = async (scenario: Scenario): Promise<Drawing[]> => scenario.documents.drawings("005930");
 
 declare global {
@@ -48,7 +48,7 @@ for (const history of ["짧은 이력", "끌어서 이동한 이력"]) {
       }
       await cell(page).focus();
       await page.keyboard.press(key);
-      const venues = cell(page).getByRole("group", { name: "거래소", exact: true });
+      const venues = page.getByRole("group", { name: "거래소", exact: true });
       await venues.getByRole("button", { name: "KRX", exact: true }).click({ timeout: 3000 });
       await expect(cell(page)).toHaveAttribute("aria-label", "칸 1: 삼성전자 KRX 일");
       await expect(cell(page)).toHaveAttribute("aria-busy", "false");
@@ -67,7 +67,8 @@ for (const history of ["짧은 이력", "끌어서 이동한 이력"]) {
 }
 
 for (const action of ["십자선", "휠 확대", "끌기"]) {
-  test(`긴 종목명 위 ${action} 입력은 차트로 전달된다`, async ({ page }, info) => {
+  test(`긴 종목명 위 ${action} 입력은 차트로 전달된다`, async ({ page, scenario }, info) => {
+    scenario.reply("/api/symbols/0000D0", { body: { code: "0000D0", name: LONG_NAME, kind: "etf", market: "kospi", nxtEnabled: false } });
     await page.addInitScript(installChartProbe);
     await page.route("**/api/bars?*", (route) => {
       const query = new URL(route.request().url()).searchParams;
