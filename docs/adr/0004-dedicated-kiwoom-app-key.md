@@ -2,7 +2,7 @@
 
 키움 접근토큰을 다시 발급받으면 기존 토큰이 폐기될 수 있다(FAQ25). 또 토큰 하나에 WebSocket 세션은 하나뿐이다(공지 49). 그래서 같은 키로 두 곳에서 토큰을 받으면 서로의 실시간 연결을 끊는다.
 
-- **키는 하나**: vallythevally는 실계좌 앱키 하나(`VALLY_KIWOOM_APP_KEY`, `VALLY_KIWOOM_APP_SECRET`, `VALLY_ENV_FILE`이 가리키는 파일. 로컬에서는 메인 체크아웃 루트의 `.env`)만 쓴다. 모의투자 키는 쓰지 않는다.
+- **키는 하나**(호가 복기 수집기의 전용 두 번째 키는 [ADR 0022](0022-hoga-replay-collects-quotes-for-personal-replay.md)): vallythevally는 실계좌 앱키 하나(`VALLY_KIWOOM_APP_KEY`, `VALLY_KIWOOM_APP_SECRET`, `VALLY_ENV_FILE`이 가리키는 파일. 로컬에서는 메인 체크아웃 루트의 `.env`)만 쓴다. 모의투자 키는 쓰지 않는다.
   - (2026-11-16 개정) 화면에서 저장한 키 파일(`VALLY_KIWOOM_KEY_PATH`, 기본 `$XDG_STATE_HOME/vallythevally/kiwoom-key.json`, 디렉터리 700, 파일 600)도 입력 경로다. 환경에 키가 있으면 환경이 앞선다. 어느 경로든 키는 하나다. ADR 0021.
   - 이 키는 원래 hoga-ops의 `KIWOOM_APP_KEY_6`이었다. 2026-11-08에 옮겼고, hoga-ops `.env`에서는 주석 처리했다.
   - 다른 어떤 프로그램과도 공유하지 않는다.
