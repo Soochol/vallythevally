@@ -10,6 +10,9 @@ const [baseURL, evidence, journey] = process.argv.slice(2);
 if (!baseURL || !evidence || !journey) throw new Error("usage: drive.mjs <base-url> <evidence-dir> <journey>");
 mkdirSync(evidence, { recursive: true });
 
+let tag = journey;
+for (let n = 2; existsSync(join(evidence, `${tag}.json`)); n++) tag = `${journey}-${n}`;
+const shot = (name) => join(evidence, `${tag}-${name}`);
 const SEARCH_BUTTON_TITLE = "종목 검색 (/ 또는 Ctrl+K)";
 const journeys = {
   async "search-chart"(page, log) {
@@ -24,7 +27,7 @@ const journeys = {
     await dialog.getByRole("combobox", { name: "종목 검색" }).fill("삼성전자");
     const option = dialog.getByRole("option").filter({ hasText: "005930" }).first();
     await option.waitFor();
-    await page.screenshot({ path: join(evidence, "01-search-results.png") });
+    await page.screenshot({ path: shot("01-search-results.png") });
     await option.click();
     await expect(cell).toHaveAttribute("aria-label", /삼성전자/);
     await expect(cell).toHaveAttribute("aria-busy", "false");
@@ -32,7 +35,7 @@ const journeys = {
     await expect(chart).not.toHaveAttribute("data-bar-count", "0");
     const bars = Number(await chart.getAttribute("data-bar-count"));
     log("chart", { label: await cell.getAttribute("aria-label"), bars, firstBarT: await chart.getAttribute("data-first-bar-t") });
-    await page.screenshot({ path: join(evidence, "02-chart-after-search.png") });
+    await page.screenshot({ path: shot("02-chart-after-search.png") });
     if (!(bars > 0)) throw new Error("no bars rendered");
     const uiState = await (await page.request.get("/api/ui-state")).json();
     log("server ui-state after search", uiState);
@@ -43,19 +46,19 @@ const journeys = {
     const panel = page.getByRole("complementary", { name: "관심종목" });
     await expect(panel.getByRole("button", { name: /^관심종목 목록: / })).toHaveAccessibleName("관심종목 목록: 기본");
     await expect(panel.locator("li[data-code]")).toHaveCount(0);
-    await page.screenshot({ path: join(evidence, "01-watchlist-empty.png") });
+    await page.screenshot({ path: shot("01-watchlist-empty.png") });
     await panel.getByRole("button", { name: "관심종목에 넣기" }).click();
     const dialog = page.getByRole("dialog", { name: "관심종목에 넣을 종목 검색" });
     await dialog.getByRole("combobox", { name: "종목 검색" }).fill("삼성전자");
     await dialog.getByRole("option").filter({ hasText: "005930" }).first().click();
     await expect(panel.locator('li[data-code="005930"]')).toBeVisible();
-    await page.screenshot({ path: join(evidence, "02-watchlist-added.png") });
+    await page.screenshot({ path: shot("02-watchlist-added.png") });
     await expect.poll(async () => JSON.stringify(await (await page.request.get("/api/watchlists")).json())).toContain("005930");
     await page.reload();
     await expect(page.getByRole("complementary", { name: "관심종목" }).locator('li[data-code="005930"]')).toBeVisible();
     const stored = await (await page.request.get("/api/watchlists")).json();
     log("server watchlists after reload", stored);
-    await page.screenshot({ path: join(evidence, "03-watchlist-after-reload.png") });
+    await page.screenshot({ path: shot("03-watchlist-after-reload.png") });
     return { codes: ["005930"] };
   },
 };
@@ -71,6 +74,7 @@ const hosts = new Set();
 const consoleErrors = [];
 const steps = [];
 page.on("request", (r) => hosts.add(new URL(r.url()).host));
+page.on("websocket", (w) => hosts.add(new URL(w.url()).host));
 page.on("response", (r) => { const u = new URL(r.url()); requests.push({ status: r.status(), method: r.request().method(), host: u.host, path: u.pathname + u.search }); });
 page.on("console", (m) => { if (m.type() === "error") consoleErrors.push(m.text()); });
 page.on("pageerror", (e) => consoleErrors.push(String(e)));
@@ -81,14 +85,12 @@ try {
   outcome = { journey, ok: true, result };
 } catch (e) {
   outcome = { journey, ok: false, error: String(e) };
-  await page.screenshot({ path: join(evidence, `failure-${journey}.png`) }).catch(() => {});
+  await page.screenshot({ path: shot("failure.png") }).catch(() => {});
 } finally {
   const allowed = new URL(baseURL).host;
   const foreignHosts = [...hosts].filter((h) => h !== allowed && h !== "");
   if (outcome.ok && (consoleErrors.length || foreignHosts.length)) outcome = { ...outcome, ok: false, error: `consoleErrors=${consoleErrors.length} foreignHosts=${foreignHosts.join(",")}` };
-  let file = join(evidence, `${journey}.json`);
-  for (let n = 2; existsSync(file); n++) file = join(evidence, `${journey}-${n}.json`);
-  writeFileSync(file, JSON.stringify({ ...outcome, baseURL, steps, requests, foreignHosts, consoleErrors }, null, 1));
+  writeFileSync(join(evidence, `${tag}.json`), JSON.stringify({ ...outcome, baseURL, steps, requests, foreignHosts, consoleErrors }, null, 1));
   await browser.close();
 }
 console.log(JSON.stringify(outcome));

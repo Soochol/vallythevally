@@ -16,6 +16,7 @@ SERVER_BIN = ROOT / "target/dev/bin/vally-server"
 UI_DIR = ROOT / "target/verify-vally/ui"
 CLOCK_START = "20261109090000"
 USER_SERVER_PORT = 8080
+JOURNEY_TIMEOUT_SECONDS = 240
 
 
 def free_port():
@@ -52,7 +53,7 @@ def spawn(run_dir, state, name, argv, **options):
     blocked = {signal.SIGTERM, signal.SIGINT}
     signal.pthread_sigmask(signal.SIG_BLOCK, blocked)
     try:
-        process = subprocess.Popen(argv, start_new_session=True, **options)
+        process = subprocess.Popen(argv, start_new_session=True, preexec_fn=lambda: signal.pthread_sigmask(signal.SIG_UNBLOCK, blocked), **options)
         state[f"{name}_pid"] = process.pid
         state[f"{name}_start"] = start_time(process.pid)
         save(run_dir, state)
@@ -226,10 +227,17 @@ def run_all(journeys):
         failed = not doctor(run_dir)
         seen = set()
         for journey in journeys:
-            drive = subprocess.Popen(["node", str(HERE / "drive.mjs"), state["base_url"], str(run_dir / "evidence"), journey])
-            while drive.poll() is None:
-                seen.update(connections(state["server_pid"]))
-                time.sleep(0.2)
+            drive = subprocess.Popen(["node", str(HERE / "drive.mjs"), state["base_url"], str(run_dir / "evidence"), journey], start_new_session=True)
+            try:
+                deadline = time.monotonic() + JOURNEY_TIMEOUT_SECONDS
+                while drive.poll() is None and time.monotonic() < deadline:
+                    seen.update(connections(state["server_pid"]))
+                    time.sleep(0.2)
+            finally:
+                if drive.poll() is None:
+                    os.killpg(drive.pid, signal.SIGKILL)
+                    drive.wait()
+                    failed = True
             failed = failed or drive.returncode != 0
         seen.update(connections(state["server_pid"]))
         conns = [c for c in seen if "127.0.0.1" not in c.split()[4] or "127.0.0.1" not in c.split()[3]]

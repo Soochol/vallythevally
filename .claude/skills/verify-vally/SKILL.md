@@ -64,7 +64,7 @@ The existing repo harnesses are for mocked responses, not this skill: `python3 s
 
 ## Evidence
 
-Everything goes to `target/verify-vally/runs/<run-id>/evidence/` and survives `down`: `<journey>.json` (a rerun writes `<journey>-2.json`, never overwrites; steps, every response status/path, `foreignHosts`, console errors), screenshots, `kiwoom-requests.jsonl` (each fixture the server asked the fake for), and `failure-<journey>.png` on failure, and in `all` mode `server-connections.txt` (the server's TCP connections sampled every 0.2 s while the browser runs) and `network-interfaces.txt`. Proof standards:
+Everything goes to `target/verify-vally/runs/<run-id>/evidence/` and survives `down`: `<journey>.json` (a rerun writes `<journey>-2.json`, never overwrites; steps, every response status/path, `foreignHosts`, console errors), screenshots, `kiwoom-requests.jsonl` (each fixture the server asked the fake for), and screenshots named `<journey>-NN-….png` (a rerun uses `<journey>-2-…`) and `<journey>-failure.png` on failure, and in `all` mode `server-connections.txt` (the server's TCP connections sampled every 0.2 s while the browser runs) and `network-interfaces.txt`. Proof standards:
 - Drive the real user path (click, type); do not call internal setters or test-only endpoints.
 - Capture the action and the resulting state, and check the side effect on the server (`/api/watchlists`, `/api/ui-state`, `server.log`, `data/vally.db`) as well as the screen.
 - A journey that cannot reach its precondition reports failure, with the reason in that feature's Gotchas. Never weaken it.
