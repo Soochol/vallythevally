@@ -20,6 +20,7 @@ mod tls_tests;
 pub type Row = BTreeMap<String, String>;
 
 const ATTEMPTS: u64 = 3;
+const REQUEST_SPACING: Duration = Duration::from_millis(250);
 
 pub struct Client {
     http: reqwest::Client,
@@ -29,6 +30,7 @@ pub struct Client {
     key: Secret<String>,
     directory: Mutex<Option<Arc<Vec<Row>>>>,
     pace: Mutex<Option<tokio::time::Instant>>,
+    spacing: Duration,
     job: std::sync::Mutex<Option<JobContext>>,
 }
 
@@ -37,9 +39,13 @@ pub(super) enum Request { Json { endpoint: String, params: Vec<(String, String)>
 
 impl Client {
     pub fn new(key: Secret<String>, base: String, kind_base: String) -> Result<Self, Failure> {
+        Self::with_spacing(key, base, kind_base, REQUEST_SPACING)
+    }
+
+    pub fn with_spacing(key: Secret<String>, base: String, kind_base: String, spacing: Duration) -> Result<Self, Failure> {
         let http = dart_http_builder().build().map_err(|_| Failure::Network)?;
         let kind_http = kind_http_builder().build().map_err(|_| Failure::Network)?;
-        Ok(Self { http, kind_http, base, kind_base, key, directory: Mutex::new(None), pace: Mutex::new(None), job: std::sync::Mutex::new(None) })
+        Ok(Self { http, kind_http, base, kind_base, key, directory: Mutex::new(None), pace: Mutex::new(None), spacing, job: std::sync::Mutex::new(None) })
     }
 
     pub(super) async fn begin_job(&self, job: JobContext) -> Result<(), Failure> {
@@ -73,7 +79,7 @@ impl Client {
             self.check_halt()?;
             let result = send().await;
             if !matches!(result, Err(Interrupt::Failure(Failure::Network | Failure::Remote))) || attempt + 1 == ATTEMPTS { return result; }
-            tokio::time::sleep(Duration::from_millis(250 * (attempt + 1))).await;
+            tokio::time::sleep(self.spacing * (attempt + 1) as u32).await;
         }
         unreachable!()
     }
@@ -101,7 +107,7 @@ impl Client {
 
     async fn bytes(&self, endpoint: &str, params: &[(&str, String)]) -> Result<Vec<u8>, Interrupt> {
         let mut pace = self.pace.lock().await;
-        if let Some(last) = *pace { tokio::time::sleep_until(last + Duration::from_millis(250)).await; }
+        if let Some(last) = *pace { tokio::time::sleep_until(last + self.spacing).await; }
         self.check_halt()?;
         *pace = Some(tokio::time::Instant::now());
         let response = self.http.get(format!("{}/api/{endpoint}", self.base)).query(&[("crtfc_key", self.key.expose())]).query(params).send().await.map_err(|_| Failure::Network)?;

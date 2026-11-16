@@ -95,7 +95,15 @@ async fn reply(resp: reqwest::Response) -> Value {
 }
 
 async fn boot(fake: &ScriptedTransport, dir: &Path, clock_start: &str) -> (Server, Api) {
-    let server = Server::spawn_with(fake, &dir.join("run/server.lock"), dir, &[("VALLY_CLOCK_START", OsStr::new(clock_start))]);
+    boot_spaced(fake, dir, clock_start, "1").await
+}
+
+async fn boot_with_production_spacing(fake: &ScriptedTransport, dir: &Path, clock_start: &str) -> (Server, Api) {
+    boot_spaced(fake, dir, clock_start, "260").await
+}
+
+async fn boot_spaced(fake: &ScriptedTransport, dir: &Path, clock_start: &str, send_spacing_millis: &str) -> (Server, Api) {
+    let server = Server::spawn_with(fake, &dir.join("run/server.lock"), dir, &[("VALLY_CLOCK_START", OsStr::new(clock_start)), ("KIWOOM_SEND_SPACING_MILLIS", OsStr::new(send_spacing_millis))]);
     let api = Api::of(&server).await;
     (server, api)
 }
@@ -323,7 +331,7 @@ async fn a_history_cut_off_midway_is_fetched_again_from_its_first_page_and_only_
     let market = KrxMarket::sample(today);
     fake.set_krx_market(market.clone());
     let tmp = tempfile::tempdir().unwrap();
-    let (server, api) = boot(&fake, tmp.path(), &at(today, "2030")).await;
+    let (server, api) = boot_with_production_spacing(&fake, tmp.path(), &at(today, "2030")).await;
     api.update(false).await;
     api.wait_for("과거 이어 받기", |s| s["update"]["phase"] == "backfill").await;
     fake.delay("ka10081", Duration::from_secs(2));
@@ -676,7 +684,7 @@ async fn the_update_asks_for_the_kospi_calendar_behind_chart_requests_that_came_
     let market = KrxMarket::sample(today);
     fake.set_krx_market(market.clone());
     let tmp = tempfile::tempdir().unwrap();
-    let (server, api) = boot(&fake, tmp.path(), &at(today, "2030")).await;
+    let (server, api) = boot_with_production_spacing(&fake, tmp.path(), &at(today, "2030")).await;
     api.status().await;
     let base = format!("http://{}", server.addr().await);
     let charts: Vec<String> = market

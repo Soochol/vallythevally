@@ -20,5 +20,8 @@ debug = false
 opt-level = 3
 debug = false
 
+[profile.dev.package.duckdb]
+opt-level = 3
+
 [profile.dev.package.indicators]
 opt-level = 3

@@ -61,7 +61,7 @@ impl Server {
             let token_path = value("VALLY_TOKEN_PATH").map(PathBuf::from).unwrap_or_else(|| token_path(&lock));
             let clock = value("VALLY_CLOCK_START").map(|at| server::clock::Clock::fake(server::kiwoom::wire::parse_kst_datetime(at).unwrap())).unwrap_or_else(server::clock::Clock::system);
             let auth = server::kiwoom::auth::KiwoomAuth::new(server::config::Secret::new(value("VALLY_KIWOOM_APP_KEY").unwrap_or(APP_KEY).into()), server::config::Secret::new(APP_SECRET.into()), Some(server::kiwoom::token_file::TokenFile::new(token_path.clone(), &instance)));
-            let rest = server::kiwoom::rest::KiwoomRest::new(transport.transport(), auth, clock.clone());
+            let rest = server::kiwoom::rest::KiwoomRest::with_send_spacing(transport.transport(), auth, clock.clone(), std::time::Duration::from_millis(value("KIWOOM_SEND_SPACING_MILLIS").map_or(1, |millis| millis.parse().unwrap())));
             let db = server::db::AppDb::open(&parent.join("vally.db")).await.unwrap();
             let store_path = parent.join("screener.duckdb");
             let dispatcher = tracing::dispatcher::get_default(Clone::clone);
@@ -75,7 +75,7 @@ impl Server {
             background.spawn(server::app::daily_maintenance(state.clone()));
             let financial_path = value("VALLY_FINANCIAL_DB_PATH").map(PathBuf::from).unwrap_or_else(|| parent.join("financials.db"));
             let financial_store = server::financials::store::Store::open(&financial_path).await;
-            let client = value("OPENDART_API_KEY").filter(|key| !key.is_empty()).map(|key| server::financials::client::Client::new(server::config::Secret::new(key.into()), value("VALLY_DART_BASE_URL").expect("DART tests require loopback URL").into(), value("VALLY_KIND_BASE_URL").expect("KIND tests require loopback URL").into()).unwrap());
+            let client = value("OPENDART_API_KEY").filter(|key| !key.is_empty()).map(|key| server::financials::client::Client::with_spacing(server::config::Secret::new(key.into()), value("VALLY_DART_BASE_URL").expect("DART tests require loopback URL").into(), value("VALLY_KIND_BASE_URL").expect("KIND tests require loopback URL").into(), std::time::Duration::from_millis(value("DART_SPACING_MILLIS").map_or(1, |millis| millis.parse().unwrap()))).unwrap());
             let financials = server::financials::Financials::with_store(client, financial_store, clock);
             let automatic = (value("VALLY_FINANCIAL_AUTOMATIC") == Some("on")).then(|| financials.start_automatic(symbols.clone()));
             let app = server::http::router(state).merge(server::financials::routes(financials, symbols));

@@ -267,6 +267,7 @@ struct Inner {
     transport: Arc<dyn Transport>,
     auth: KiwoomAuth,
     clock: Clock,
+    send_spacing: Duration,
     queue: Mutex<Queue>,
     wake: Notify,
     path_stopped: Notify,
@@ -292,7 +293,11 @@ enum Step {
 impl KiwoomRest {
     /// 보내는 태스크를 하나 띄운다. tokio 런타임 안에서 부른다.
     pub fn new(transport: Arc<dyn Transport>, auth: KiwoomAuth, clock: Clock) -> Self {
-        let inner = Arc::new(Inner { transport, auth, clock, queue: Mutex::new(Queue::default()), wake: Notify::new(), path_stopped: Notify::new() });
+        Self::with_send_spacing(transport, auth, clock, SEND_SPACING)
+    }
+
+    pub fn with_send_spacing(transport: Arc<dyn Transport>, auth: KiwoomAuth, clock: Clock, send_spacing: Duration) -> Self {
+        let inner = Arc::new(Inner { transport, auth, clock, send_spacing, queue: Mutex::new(Queue::default()), wake: Notify::new(), path_stopped: Notify::new() });
         tokio::spawn(run(inner.clone()));
         KiwoomRest(inner)
     }
@@ -498,7 +503,7 @@ impl Inner {
         if !wants_issue && !has_market {
             return Step::Idle;
         }
-        let ready = q.last_send.map(|t| t + SEND_SPACING).into_iter().chain(q.pause_until).max();
+        let ready = q.last_send.map(|t| t + self.send_spacing).into_iter().chain(q.pause_until).max();
         if let Some(r) = ready.filter(|&r| r > now) {
             return Step::Wait(r);
         }
