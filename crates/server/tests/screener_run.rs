@@ -2406,10 +2406,10 @@ async fn regression_223_early_krx_before_0800_distinguishes_current_from_absence
 
 #[tokio::test]
 async fn a_halted_stock_is_adjusted_only_when_the_base_matches_neither_its_halt_price_nor_its_last_traded_close() {
-    for (base, adjusted) in [(150, false), (100, false), (300, true)] {
+    for (base, traded_days, adjusted) in [(150, 15, false), (100, 15, false), (300, 15, true), (100, 0, false)] {
         let today = day(2026, 11, 9);
         let days = last_open_days(20, today.add_days(-1));
-        let halted_after_trading_at_100 = |days: &[KstDate]| days.iter().enumerate().map(|(i, &d)| if i < 15 { bar(d, 100, 1_000) } else { bar(d, 150, 0) }).collect::<Vec<_>>();
+        let halted_after_trading_at_100 = |days: &[KstDate]| days.iter().enumerate().map(|(i, &d)| if i < traded_days { bar(d, 100, 1_000) } else { bar(d, 150, 0) }).collect::<Vec<_>>();
         let initial = KrxMarket { days: days.clone(), stocks: vec![stock("300000", priced(&days, |_| 100)), stock("300001", halted_after_trading_at_100(&days))] };
         let Loaded { _fake: fake, _dir: dir, _server: server, .. } = loaded(initial).await;
         server.stop().await;
@@ -2423,7 +2423,7 @@ async fn a_halted_stock_is_adjusted_only_when_the_base_matches_neither_its_halt_
         let server = boot(&fake, dir.path(), &at(today, "1200"));
         let api = Api::of(&server).await;
         let (status, body) = api.run(&every(vec![])).await;
-        assert_eq!(status, if adjusted { 409 } else { 200 }, "base {base}: {body}");
+        assert_eq!(status, if adjusted { 409 } else { 200 }, "base {base}, traded days {traded_days}: {body}");
         if adjusted {
             assert!(body["error"]["message"].as_str().unwrap().contains("300001"), "{body}");
         }

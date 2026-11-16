@@ -231,7 +231,7 @@ impl<'a> Snapshot<'a> {
             let quote = stock.result.as_ref().ok()?;
             let (last_bar, last_traded) = *previous.get(code.as_str())?;
             let moved_from = |close: u64| 10 * u128::from(quote.base.centi().abs_diff(close)) > 3 * u128::from(close);
-            (moved_from(last_bar) && last_traded.is_none_or(moved_from)).then_some(*code)
+            (moved_from(last_bar) && last_traded.is_some_and(moved_from)).then_some(*code)
         }).collect())
     }
 
