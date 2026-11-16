@@ -349,3 +349,44 @@ async fn deleting_the_key_while_the_token_file_is_unreadable_keeps_the_issue_int
     assert_ne!(again["state"], "connected", "{again}");
     assert_eq!(fake.issued(), 1, "{:?}", fake.api_ids());
 }
+
+#[tokio::test]
+async fn hello_stays_the_first_websocket_message_while_the_key_changes() {
+    let (env, fake) = (Env::new(), ScriptedTransport::new());
+    let overrides = [("SERVER_RUNTIME_THREADS", "4")];
+    let server = env.spawn(&fake, &overrides);
+    let client = Client::of(&server).await;
+    let changing = async {
+        for round in 0..60 {
+            let (key, secret) = if round % 2 == 0 { (APP_KEY, APP_SECRET) } else { (OTHER_APP_KEY, OTHER_APP_SECRET) };
+            client.put_key(key, secret).await;
+            client.delete_key().await;
+        }
+    };
+    let opening = async {
+        for _ in 0..80 {
+            let (mut ws, _) = tokio_tungstenite::connect_async(format!("ws://{}/api/ws", client.base.trim_start_matches("http://"))).await.unwrap();
+            let mut seen = String::new();
+            let first = tokio::time::timeout(Duration::from_secs(10), ws.next()).await.unwrap().unwrap().unwrap();
+            seen.push_str(first.to_text().unwrap());
+            let first: Value = serde_json::from_str(&seen).unwrap();
+            assert_eq!(first["type"], "hello", "{first}");
+            let second = next_link_message(&mut ws, &mut seen).await;
+            assert!(second["state"].is_string());
+        }
+    };
+    tokio::join!(changing, opening);
+}
+
+#[tokio::test]
+async fn a_server_bound_to_another_loopback_address_accepts_writes_to_that_address() {
+    let (env, fake) = (Env::new(), ScriptedTransport::new());
+    let server = env.spawn(&fake, &[("SERVER_BIND_IP", "127.0.0.2")]);
+    let addr = server.addr().await;
+    assert_eq!(addr.ip().to_string(), "127.0.0.2");
+    let http = reqwest::Client::new();
+    let url = format!("http://{addr}/api/system/kiwoom/key");
+    let put = |host: String| http.put(&url).header("content-type", "application/json").header("host", host).body(json!({"appKey": APP_KEY, "appSecret": APP_SECRET}).to_string());
+    assert_eq!(put(addr.to_string()).send().await.unwrap().status().as_u16(), 200);
+    assert_eq!(put(format!("127.0.0.3:{}", addr.port())).send().await.unwrap().status().as_u16(), 400);
+}

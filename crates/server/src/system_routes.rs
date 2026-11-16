@@ -23,21 +23,21 @@ pub struct SystemState {
     env_key: bool,
     key_file_problem: Mutex<Option<String>>,
     settings: Option<api::SystemSettings>,
-    port: OnceLock<u16>,
+    bound: OnceLock<std::net::SocketAddr>,
     write: tokio::sync::Mutex<()>,
 }
 
 impl SystemState {
     pub fn new(key_file: KeyFile, env_key: bool, key_file_problem: Option<FileError>, settings: api::SystemSettings) -> Self {
-        SystemState { key_file: Some(key_file), env_key, key_file_problem: Mutex::new(key_file_problem.map(|e| e.to_string())), settings: Some(settings), port: OnceLock::new(), write: tokio::sync::Mutex::new(()) }
+        SystemState { key_file: Some(key_file), env_key, key_file_problem: Mutex::new(key_file_problem.map(|e| e.to_string())), settings: Some(settings), bound: OnceLock::new(), write: tokio::sync::Mutex::new(()) }
     }
 
     pub fn unconfigured() -> Self {
-        SystemState { key_file: None, env_key: false, key_file_problem: Mutex::new(None), settings: None, port: OnceLock::new(), write: tokio::sync::Mutex::new(()) }
+        SystemState { key_file: None, env_key: false, key_file_problem: Mutex::new(None), settings: None, bound: OnceLock::new(), write: tokio::sync::Mutex::new(()) }
     }
 
-    pub fn bound(&self, port: u16) {
-        let _ = self.port.set(port);
+    pub fn bound(&self, addr: std::net::SocketAddr) {
+        let _ = self.bound.set(addr);
     }
 
     fn key_file_problem(&self) -> Option<String> {
@@ -108,8 +108,8 @@ fn check_write(system: &SystemState, req: &Request) -> Result<(), ApiFailure> {
     let headers = req.headers();
     let refuse = |what: &str| ApiFailure::bad_request(format!("이 요청은 받지 않습니다: {what}"));
     let host = headers.get(header::HOST).and_then(|h| h.to_str().ok()).or_else(|| req.uri().authority().map(|a| a.as_str())).ok_or_else(|| refuse("Host가 없습니다"))?;
-    let port = system.port.get().ok_or_else(|| refuse("서버가 아직 준비되지 않았습니다"))?;
-    if !is_own_host(host, *port) {
+    let bound = system.bound.get().ok_or_else(|| refuse("서버가 아직 준비되지 않았습니다"))?;
+    if !is_own_host(host, *bound) {
         return Err(refuse("Host가 이 서버의 주소가 아닙니다"));
     }
     check_origin(headers, host)?;
@@ -120,9 +120,9 @@ fn check_write(system: &SystemState, req: &Request) -> Result<(), ApiFailure> {
     Ok(())
 }
 
-fn is_own_host(host: &str, port: u16) -> bool {
-    let host = host.to_ascii_lowercase();
-    [format!("127.0.0.1:{port}"), format!("localhost:{port}"), format!("[::1]:{port}")].contains(&host)
+fn is_own_host(host: &str, bound: std::net::SocketAddr) -> bool {
+    let (host, port) = (host.to_ascii_lowercase(), bound.port());
+    [format!("127.0.0.1:{port}"), format!("localhost:{port}"), format!("[::1]:{port}"), bound.to_string()].contains(&host)
 }
 
 fn check_origin(headers: &HeaderMap, host: &str) -> Result<(), ApiFailure> {

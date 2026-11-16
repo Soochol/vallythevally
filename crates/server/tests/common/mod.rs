@@ -125,8 +125,8 @@ impl Server {
             let automatic = (value("VALLY_FINANCIAL_AUTOMATIC") == Some("on")).then(|| financials.start_automatic(symbols.clone()));
             let bound = state.clone();
             let app = server::http::router(state).merge(server::financials::routes(financials, symbols));
-            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-            bound.system.bound(listener.local_addr().unwrap().port());
+            let listener = tokio::net::TcpListener::bind(format!("{}:0", value("SERVER_BIND_IP").unwrap_or("127.0.0.1"))).await.unwrap();
+            bound.system.bound(listener.local_addr().unwrap());
             address.send_replace(Some(listener.local_addr().unwrap()));
             let automatic = automatic.map(AbortOnDrop);
             axum::serve(listener, app).await.unwrap();

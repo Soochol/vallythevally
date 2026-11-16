@@ -159,10 +159,10 @@ async fn serve(config: Config, token_file: TokenFile, key_file: KeyFile) -> Exit
             return ExitCode::from(1);
         }
     };
-    let bound_port = match listener.local_addr() {
+    let bound_addr = match listener.local_addr() {
         Ok(addr) => {
             tracing::info!(%addr, "포트를 열었습니다");
-            addr.port()
+            addr
         }
         Err(e) => {
             tracing::error!(error = %e, "연 주소를 읽지 못했습니다");
@@ -198,7 +198,7 @@ async fn serve(config: Config, token_file: TokenFile, key_file: KeyFile) -> Exit
     let stream = KiwoomStream::spawn(config.kiwoom_ws_url.clone(), rest.clone(), clock.clone());
     let system = SystemState::new(key_file, env_key, startup.file_problem, crate::api::SystemSettings::from_config(&config));
     let state = application_with_system(ApplicationInputs { rest: rest.clone(), clock: clock.clone(), symbols: symbols.clone(), db, screener_store, stream, static_dir: config.static_dir.clone(), screener_update_on_connect: config.screener_update_on_start }, system);
-    state.system.bound(bound_port);
+    state.system.bound(bound_addr);
     tokio::spawn(daily_maintenance(state.clone()));
 
     let financial_store = crate::financials::store::Store::open(&config.financial_db_path).await;

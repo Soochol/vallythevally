@@ -27,16 +27,18 @@ pub async fn upgrade(State(st): State<Arc<AppState>>, ws: WebSocketUpgrade) -> R
 
 async fn serve(socket: WebSocket, st: Arc<AppState>, hub: HubHandle) {
     let outbox = Outbox::new();
-    let conn = hub.connect_greeted(outbox.clone(), Some(ServerMessage::KiwoomLink { status: kiwoom_status(&st) }));
+    let conn = hub.connect(outbox.clone());
     let (sink, mut incoming) = socket.split();
     let mut writer = tokio::spawn(write(sink, outbox.clone()));
     let mut link_changes = st.link.subscribe();
+    hub.send_to(conn, ServerMessage::KiwoomLink { status: kiwoom_status(&st) });
     loop {
         tokio::select! {
             changed = link_changes.changed() => {
-                if changed.is_err() || outbox.push(ServerMessage::KiwoomLink { status: kiwoom_status(&st) }).is_err() {
+                if changed.is_err() {
                     break;
                 }
+                hub.send_to(conn, ServerMessage::KiwoomLink { status: kiwoom_status(&st) });
             }
             msg = incoming.next() => match msg {
                 Some(Ok(Message::Text(text))) => on_text(&hub, &outbox, conn, text.as_str()),

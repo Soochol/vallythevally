@@ -54,13 +54,13 @@ pub struct HubHandle {
 impl HubHandle {
     /// 연결을 등록한다. 허브가 `hello`를 그 연결의 outbox에 넣는다.
     pub fn connect(&self, outbox: Arc<Outbox>) -> ConnId {
-        self.connect_greeted(outbox, None)
+        let conn = ConnId(self.next_conn.fetch_add(1, Ordering::SeqCst));
+        self.send(HubInput::Connect { conn, outbox });
+        conn
     }
 
-    pub fn connect_greeted(&self, outbox: Arc<Outbox>, greeting: Option<ServerMessage>) -> ConnId {
-        let conn = ConnId(self.next_conn.fetch_add(1, Ordering::SeqCst));
-        self.send(HubInput::Connect { conn, outbox, greeting });
-        conn
+    pub fn send_to(&self, conn: ConnId, message: ServerMessage) {
+        self.send(HubInput::Direct { conn, message });
     }
 
     /// 답(`subscribed`, `sub_error`)은 그 연결의 outbox로 간다.
@@ -100,7 +100,8 @@ impl HubHandle {
 }
 
 enum HubInput {
-    Connect { conn: ConnId, outbox: Arc<Outbox>, greeting: Option<ServerMessage> },
+    Connect { conn: ConnId, outbox: Arc<Outbox> },
+    Direct { conn: ConnId, message: ServerMessage },
     Subscribe { conn: ConnId, sub: SubId, key: SeriesKey },
     Unsubscribe { conn: ConnId, sub: SubId },
     Disconnect(ConnId),
@@ -293,11 +294,14 @@ impl MarketHub {
     fn on_input(&mut self, input: HubInput) {
         let now = self.clock.now();
         match input {
-            HubInput::Connect { conn, outbox, greeting } => {
+            HubInput::Connect { conn, outbox } => {
                 let hello = ServerMessage::Hello { protocol: PROTOCOL, server_time: UnixSeconds(now.unix()), status: self.status() };
-                if outbox.push(hello).is_ok() && greeting.is_none_or(|greeting| outbox.push(greeting).is_ok()) {
+                if outbox.push(hello).is_ok() {
                     self.conns.insert(conn, Conn { outbox, subs: HashMap::new(), requested_watch: Vec::new(), watch_venue: Venue::Combined, limited_sent: BTreeSet::new() });
                 }
+            }
+            HubInput::Direct { conn, message } => {
+                push(&self.conns, &mut self.closing, conn, message);
             }
             HubInput::Subscribe { conn, sub, key } => self.subscribe(conn, sub, key, now),
             HubInput::Unsubscribe { conn, sub } => {
