@@ -87,6 +87,18 @@ test("연결 상태 메시지가 오면 상태 점과 문장이 바뀐다", asyn
   await expect(dialog(page).getByRole("tabpanel")).toContainText("키움이 지정단말기 인증을 거절했습니다");
 });
 
+test("열린 채 창이 좁아져도 초점이 창 안에 남고 내용 칸에 이름이 있다", async ({ page }) => {
+  await openDesktop(page);
+  await page.getByRole("button", { name: "시스템 설정", exact: true }).click();
+  await menu(page, "일반").click();
+  await expect(menu(page, "일반")).toBeFocused();
+  await page.setViewportSize({ width: 360, height: 800 });
+  await expect(dialog(page).getByRole("heading", { name: "일반" })).toBeFocused();
+  await expect(dialog(page).getByRole("tabpanel", { name: "일반" })).toBeVisible();
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await expect(menu(page, "일반")).toBeFocused();
+});
+
 test("1440×900 화면", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await openDesktop(page);

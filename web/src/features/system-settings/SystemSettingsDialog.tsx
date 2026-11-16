@@ -31,7 +31,7 @@ function SystemSettingsBody({ menu }: { menu: SystemMenuId | null }) {
     const target = focusTarget({ selected, view }, desktop);
     if (target.kind === "title") title.current?.focus();
     else document.getElementById(tabId(target.menu))?.focus();
-  }, [view]);
+  }, [view, desktop]);
 
   const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
     const next = menuAfterKey(selected, e.key);
@@ -74,7 +74,7 @@ function SystemSettingsBody({ menu }: { menu: SystemMenuId | null }) {
           </nav>
         )}
         {showContent && (
-          <section role="tabpanel" id={`${ids}-panel`} aria-labelledby={tabId(selected)} className="flex min-h-0 min-w-0 flex-1 flex-col">
+          <section role="tabpanel" id={`${ids}-panel`} aria-labelledby={showList ? tabId(selected) : undefined} aria-label={showList ? undefined : current.label} className="flex min-h-0 min-w-0 flex-1 flex-col">
             <header className="flex h-12 flex-none items-center gap-2 px-5 max-md:px-2">
               {!desktop && (
                 <button type="button" className="tb-btn px-2" onClick={() => dispatch({ type: "back" })}>‹ 시스템 설정</button>
