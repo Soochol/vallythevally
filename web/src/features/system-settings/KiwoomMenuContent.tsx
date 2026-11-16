@@ -18,9 +18,10 @@ export function KiwoomMenuContent() {
   const [checkedIp, setCheckedIp] = useState<PublicIpCheck | null>(null);
   const view = panelView(status, now, confirmations);
 
+  const keepsConfirmations = view.needsConfirmations || view.stage === "connecting";
   useEffect(() => {
-    if (!view.needsConfirmations) setConfirmations(NO_CONFIRMATIONS);
-  }, [view.needsConfirmations]);
+    if (!keepsConfirmations) setConfirmations(NO_CONFIRMATIONS);
+  }, [keepsConfirmations]);
 
   const confirm = async (next: Confirmations, registeredIpChecked: boolean) => {
     setConfirmations(next);
@@ -46,7 +47,7 @@ export function KiwoomMenuContent() {
         onRecheckTokenFile={() => void command.run(recheckKiwoomTokenFile)}
       />
       {command.error && <p role="alert" className="text-m text-danger">{command.error}</p>}
-      <KiwoomKeyForm status={status} command={command} />
+      <KiwoomKeyForm status={status} command={command} onSaved={() => setConfirmations(NO_CONFIRMATIONS)} />
       <KiwoomIpHelp status={status} openByItself={view.ipHelpOpensByItself} checked={checkedIp} onChecked={setCheckedIp} command={ipCommand} />
       {ipCommand.error && <p role="alert" className="text-m text-danger">{ipCommand.error}</p>}
     </div>

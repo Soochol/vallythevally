@@ -231,7 +231,11 @@ test.describe("1440×900", () => {
     const bodies: KiwoomConnectInput[] = [];
     scenario.on(route("POST", "/api/system/kiwoom/connect"), (request) => {
       bodies.push(request.postDataJSON());
-      if (bodies.length === 1) { scenario.live.link(waiting); return { body: waiting }; }
+      if (bodies.length === 1) {
+        scenario.live.link({ ...waiting, state: "connecting", problem: null, retryAt: null, step: "checkingKey", message: "키움에 연결하는 중입니다" });
+        scenario.live.link(waiting);
+        return { body: waiting };
+      }
       return { body: CONNECTED_KIWOOM };
     });
     await openKiwoom(page);
@@ -244,6 +248,23 @@ test.describe("1440×900", () => {
     await expect(reconnect).toBeEnabled({ timeout: 8000 });
     await reconnect.click();
     await expect.poll(() => bodies).toEqual([{ acknowledged: true }, { acknowledged: true }]);
+  });
+
+  test("8050에서 확인한 뒤 키를 바꾸면 확인 칸을 다시 받는다", async ({ page, scenario }) => {
+    const blocked = failed("authBlocked8050", null, BLOCKED_MESSAGE, { needsAcknowledgement: true });
+    scenario.live.kiwoomLink = blocked;
+    scenario.on(route("PUT", "/api/system/kiwoom/key"), () => ({ body: { ...blocked, appKeyTail: "9X9X" } }));
+    await openKiwoom(page);
+    await panel(page).getByLabel("포털에 지금 공인 IP를 등록했습니다").check();
+    await panel(page).getByLabel("반복 발급 잠금이 풀렸는지 확인했습니다").check();
+    await expect(panel(page).getByRole("button", { name: /^다시 연결/ })).toBeEnabled();
+    await panel(page).getByRole("button", { name: "바꾸기" }).click();
+    await page.getByLabel("앱키", { exact: true }).fill(FAKE_APP_KEY);
+    await page.getByLabel("시크릿", { exact: true }).fill(FAKE_APP_SECRET);
+    await page.getByRole("button", { name: "저장" }).click();
+    await expect(panel(page).getByLabel("반복 발급 잠금이 풀렸는지 확인했습니다")).not.toBeChecked();
+    await expect(panel(page).getByLabel("포털에 지금 공인 IP를 등록했습니다")).not.toBeChecked();
+    await expect(panel(page).getByRole("button", { name: /^다시 연결/ })).toBeDisabled();
   });
 
   test("등록한 IP를 저장하는 동안 푸시가 와도 저장한 IP가 보인다", async ({ page, scenario }) => {

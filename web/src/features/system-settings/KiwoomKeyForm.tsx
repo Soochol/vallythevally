@@ -7,7 +7,7 @@ import type { Command } from "./useCommand";
 
 const FIELD = "h-9 min-w-0 flex-1 rounded-s border border-line bg-bg px-2 text-m text-text focus:border-accent focus:outline-none disabled:opacity-60";
 
-export function KiwoomKeyForm({ status, command }: { status: KiwoomLinkStatus | null; command: Command }) {
+export function KiwoomKeyForm({ status, command, onSaved }: { status: KiwoomLinkStatus | null; command: Command; onSaved(): void }) {
   const [form, dispatch] = useReducer(keyFormReducer, EMPTY_KEY_FORM);
   const target = useSystemSettings().data?.kiwoomTarget;
   if (!status) return null;
@@ -18,7 +18,9 @@ export function KiwoomKeyForm({ status, command }: { status: KiwoomLinkStatus | 
 
   const save = async () => {
     const input = { appKey: form.appKey.trim(), appSecret: form.appSecret.trim() };
-    if (await command.run(() => saveKiwoomKey(input))) dispatch({ type: "saved" });
+    if (!(await command.run(() => saveKiwoomKey(input)))) return;
+    dispatch({ type: "saved" });
+    onSaved();
   };
   const remove = async () => {
     if (!(await confirmAction("저장한 키움 키를 지웁니다", { action: "키 지우기", danger: true }))) return;
