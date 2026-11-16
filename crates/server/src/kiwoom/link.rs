@@ -327,6 +327,9 @@ impl Link {
                 Ok(()) => return Ok(()),
                 Err(error) => error,
             };
+            if matches!(error, KiwoomError::Gated { cause: GateCause::IssueInterval, .. }) {
+                return Err(error);
+            }
             let Some(retry_at) = error.retry_at() else {
                 tracing::error!(error = %error, "종목 목록을 받지 못했습니다. 다시 받지 않습니다");
                 return Err(error);

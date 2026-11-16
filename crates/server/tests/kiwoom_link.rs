@@ -716,3 +716,42 @@ async fn a_key_rejection_answered_for_the_replaced_key_does_not_block_the_new_ke
     assert_eq!(fake.seen.token_bodies.lock().unwrap().last().unwrap()["appkey"], "FAKE-new-key");
     server.stop().await;
 }
+
+#[tokio::test]
+async fn a_failed_answer_for_a_replaced_key_ends_the_new_keys_connect_as_failed() {
+    let fake = ScriptedTransport::new();
+    reject_issue(&fake, KEY_REJECTED);
+    fake.delay("au10001", Duration::from_secs(2));
+    let env = env();
+    let server = spawn(&fake, &env, &[OFF, ("VALLY_CLOCK_START", "20261109100000")]);
+    server.addr().await;
+    let old = tokio::spawn({
+        let link = server.link();
+        async move { link.connect(false).await }
+    });
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    server.link().replace_key(Secret::new("FAKE-new-key".into()), Secret::new("FAKE-new-secret".into()));
+    server.clock().jump(601);
+    let new = server.connect(false).await;
+    old.await.unwrap();
+    assert!(matches!(new, LinkState::Failed(_)), "{new:?}");
+    assert!(matches!(server.link_state(), LinkState::Failed(_)), "{:?}", server.link_state());
+    let base = format!("http://{}", server.addr().await);
+    assert_eq!(get(&base, "/api/bars?symbol=005930&period=D").await.1["error"]["reason"], "not_connected");
+    server.stop().await;
+}
+
+#[tokio::test]
+async fn a_rejected_saved_token_inside_the_issue_interval_ends_the_connect_as_a_wait() {
+    let fake = ScriptedTransport::new();
+    fake.respond_with("ka10099", 200, json!({"return_code": 3, "return_msg": "인증 실패[8005:Token이 유효하지 않습니다]"}));
+    let env = env();
+    let at = now_unix() - 60;
+    write_private(&token_path(&env.lock), json!({"credential": credential_id(APP_KEY), "token": {"value": "saved-token", "expires_dt": "20991231000000", "issued_at": at}, "last_request_at": at}).to_string().as_bytes());
+    let server = spawn(&fake, &env, &[OFF]);
+    server.addr().await;
+    let outcome = tokio::time::timeout(Duration::from_secs(6), server.connect(false)).await.expect("연결이 끝나야 한다");
+    assert_eq!(failure(outcome).problem, Problem::IssueIntervalWait);
+    assert_eq!(fake.issued(), 0);
+    server.stop().await;
+}
