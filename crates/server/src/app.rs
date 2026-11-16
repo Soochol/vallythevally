@@ -196,7 +196,14 @@ async fn serve(config: Config, token_file: TokenFile, key_file: KeyFile) -> Exit
     rest.set_access(crate::kiwoom::rest::Access::Closed);
     let symbols = Arc::new(SymbolDirectory::default());
     let stream = KiwoomStream::spawn(config.kiwoom_ws_url.clone(), rest.clone(), clock.clone());
-    let system = SystemState::new(key_file, env_key, startup.file_problem, crate::api::SystemSettings::from_config(&config));
+    let public_ip = match crate::public_ip::ReqwestPublicIp::new(config.public_ip_url.clone()) {
+        Ok(t) => t,
+        Err(e) => {
+            tracing::error!(error = %e, "공인 IP 확인용 HTTP 클라이언트를 만들 수 없습니다");
+            return ExitCode::from(1);
+        }
+    };
+    let system = SystemState::new(key_file, env_key, startup.file_problem, crate::api::SystemSettings::from_config(&config)).with_public_ip(Arc::new(public_ip));
     let state = application_with_system(ApplicationInputs { rest: rest.clone(), clock: clock.clone(), symbols: symbols.clone(), db, screener_store, stream, static_dir: config.static_dir.clone(), screener_update_on_connect: config.screener_update_on_start }, system);
     state.system.bound(bound_addr);
     tokio::spawn(daily_maintenance(state.clone()));

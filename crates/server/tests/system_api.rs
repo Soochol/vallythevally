@@ -390,3 +390,146 @@ async fn a_server_bound_to_another_loopback_address_accepts_writes_to_that_addre
     assert_eq!(put(addr.to_string()).send().await.unwrap().status().as_u16(), 200);
     assert_eq!(put(format!("127.0.0.3:{}", addr.port())).send().await.unwrap().status().as_u16(), 400);
 }
+
+struct IpService {
+    url: String,
+    requests: std::sync::Arc<std::sync::Mutex<Vec<String>>>,
+}
+
+impl IpService {
+    async fn start(body: &'static str) -> IpService {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        let requests = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let seen = requests.clone();
+        tokio::spawn(async move {
+            loop {
+                let (mut socket, _) = listener.accept().await.unwrap();
+                let seen = seen.clone();
+                tokio::spawn(async move {
+                    let mut raw = Vec::new();
+                    let mut chunk = [0u8; 1024];
+                    while !raw.windows(4).any(|w| w == b"\r\n\r\n") {
+                        match socket.read(&mut chunk).await {
+                            Ok(0) | Err(_) => return,
+                            Ok(n) => raw.extend_from_slice(&chunk[..n]),
+                        }
+                    }
+                    seen.lock().unwrap().push(String::from_utf8_lossy(&raw).into_owned());
+                    let response = format!("HTTP/1.1 200 OK\r\ncontent-type: text/plain\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}", body.len());
+                    let _ = socket.write_all(response.as_bytes()).await;
+                });
+            }
+        });
+        IpService { url, requests }
+    }
+
+    fn requests(&self) -> Vec<String> {
+        self.requests.lock().unwrap().clone()
+    }
+}
+
+impl Client {
+    async fn ip_check(&self) -> (u16, Value) {
+        answer(self.write(reqwest::Method::POST, "/api/system/kiwoom/ip-check", None).send().await.unwrap()).await
+    }
+
+    async fn put_registered_ip(&self, ip: &str) -> (u16, Value) {
+        answer(self.write(reqwest::Method::PUT, "/api/system/kiwoom/registered-ip", Some(json!({"ip": ip}))).send().await.unwrap()).await
+    }
+}
+
+#[tokio::test]
+async fn one_ip_check_sends_one_bare_request_and_returns_the_address() {
+    let (env, fake, service) = (Env::new(), ScriptedTransport::new(), IpService::start("203.0.113.7\n").await);
+    let server = env.spawn(&fake, &[("VALLY_PUBLIC_IP_URL", &service.url)]);
+    let client = Client::of(&server).await;
+    assert_eq!(client.put_key(APP_KEY, APP_SECRET).await.0, 200);
+    client.get("/api/system/kiwoom").await;
+
+    let (status, checked) = client.ip_check().await;
+    assert_eq!(status, 200, "{checked}");
+    assert_eq!(checked["ip"].as_str(), Some("203.0.113.7"));
+    assert!(checked["checkedAt"].as_i64().is_some_and(|at| at > 0), "{checked}");
+
+    let requests = service.requests();
+    assert_eq!(requests.len(), 1, "{requests:?}");
+    let raw = requests[0].to_ascii_lowercase();
+    assert!(raw.starts_with("get / http/1.1"), "{raw}");
+    for forbidden in ["authorization", "cookie", &APP_KEY.to_ascii_lowercase(), &APP_SECRET.to_ascii_lowercase(), &token_for(APP_KEY).to_ascii_lowercase()] {
+        assert!(!raw.contains(forbidden), "요청에 {forbidden}가 있다: {raw}");
+    }
+    assert_eq!(fake.requests(), 0, "{:?}", fake.api_ids());
+}
+
+#[tokio::test]
+async fn starting_and_connecting_never_call_the_ip_service() {
+    let (env, fake, service) = (Env::new(), ScriptedTransport::new(), IpService::start("203.0.113.7").await);
+    let server = env.spawn(&fake, &[("VALLY_PUBLIC_IP_URL", &service.url)]);
+    let client = Client::of(&server).await;
+    assert_eq!(client.put_key(APP_KEY, APP_SECRET).await.0, 200);
+    let (_, connected) = client.connect(false).await;
+    assert_eq!(connected["state"].as_str(), Some("connected"), "{connected}");
+    client.get("/api/system/kiwoom").await;
+    assert_eq!(service.requests().len(), 0, "{:?}", service.requests());
+}
+
+#[tokio::test]
+async fn an_answer_that_is_not_an_address_fails_without_leaving_the_service_text() {
+    let page = "<html>LEAKY-PAGE-4Z9</html>";
+    let (env, fake, service) = (Env::new(), ScriptedTransport::new(), IpService::start(page).await);
+    let server = env.spawn(&fake, &[("VALLY_PUBLIC_IP_URL", &service.url)]);
+    let client = Client::of(&server).await;
+    let (status, failed) = client.ip_check().await;
+    assert!(status >= 500, "{status} {failed}");
+    assert!(failed["error"]["message"].as_str().is_some_and(|m| m.contains("IP 주소가 아닙니다")), "{failed}");
+    assert_eq!(service.requests().len(), 1);
+    let logs = server.stop().await;
+    assert!(!failed.to_string().contains("LEAKY-PAGE") && !logs.contains("LEAKY-PAGE"), "{failed}\n{logs}");
+}
+
+#[tokio::test]
+async fn the_registered_ip_is_private_on_disk_and_survives_a_restart() {
+    let (env, fake) = (Env::new(), ScriptedTransport::new());
+    let server = env.spawn(&fake, &[]);
+    let client = Client::of(&server).await;
+    assert!(client.get("/api/system/kiwoom").await.1["registeredIp"].is_null());
+    let (status, saved) = client.put_registered_ip("203.0.113.7").await;
+    assert_eq!(status, 200, "{saved}");
+    assert_eq!(saved["registeredIp"]["ip"].as_str(), Some("203.0.113.7"));
+    let ip_path = env.key_path.with_file_name("kiwoom-ip.json");
+    assert_eq!(mode(&ip_path), 0o600);
+    assert_eq!(mode(ip_path.parent().unwrap()), 0o700);
+    let at = saved["registeredIp"]["at"].as_i64().unwrap();
+    assert_eq!(client.put_registered_ip("not an ip").await.0, 400);
+    assert_eq!(client.put_registered_ip("").await.0, 400);
+    server.stop().await;
+
+    let restarted = env.spawn(&fake, &[]);
+    let client = Client::of(&restarted).await;
+    let (_, status) = client.get("/api/system/kiwoom").await;
+    assert_eq!((status["registeredIp"]["ip"].as_str(), status["registeredIp"]["at"].as_i64()), (Some("203.0.113.7"), Some(at)), "{status}");
+    assert_eq!(fake.requests(), 0);
+}
+
+#[tokio::test]
+async fn ip_routes_go_through_the_same_write_checks() {
+    let (env, fake) = (Env::new(), ScriptedTransport::new());
+    let server = env.spawn(&fake, &[]);
+    let client = Client::of(&server).await;
+    for (method, path, body) in [(reqwest::Method::POST, "/api/system/kiwoom/ip-check", None), (reqwest::Method::PUT, "/api/system/kiwoom/registered-ip", Some(json!({"ip": "203.0.113.7"})))] {
+        let request = |content_type: Option<&str>, host: Option<&str>, origin: Option<&str>| {
+            let mut builder = client.http.request(method.clone(), format!("{}{path}", client.base));
+            if let Some(content_type) = content_type { builder = builder.header("content-type", content_type); }
+            if let Some(host) = host { builder = builder.header("host", host); }
+            if let Some(origin) = origin { builder = builder.header("origin", origin); }
+            builder.body(body.clone().map(|b| b.to_string()).unwrap_or_default())
+        };
+        for (label, wrong) in [("Content-Type", request(Some("text/plain"), None, None)), ("Host", request(Some("application/json"), Some("evil.example"), None)), ("Origin", request(Some("application/json"), None, Some("http://evil.example")))] {
+            assert_eq!(answer(wrong.send().await.unwrap()).await.0, 400, "{path} {label}");
+        }
+    }
+    assert!(client.get("/api/system/kiwoom").await.1["registeredIp"].is_null(), "거절된 요청은 아무것도 쓰지 않는다");
+    assert!(!env.key_path.with_file_name("kiwoom-ip.json").exists());
+}

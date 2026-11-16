@@ -12,14 +12,19 @@ use serde::de::DeserializeOwned;
 use crate::api::{self, ApiErrorCode, KeySource, KiwoomConnectStep, KiwoomLinkProblem, KiwoomLinkState, KiwoomLinkStatus, UnixSeconds};
 use crate::config::{Config, KiwoomCredentials, Secret};
 use crate::http::{ApiFailure, AppState};
+use crate::kiwoom::ip_file::RegisteredIpFile;
 use crate::kiwoom::key_file::KeyFile;
 use crate::kiwoom::link::{ConnectStep, LinkState, Problem};
 use crate::kiwoom::private_file::FileError;
+use crate::public_ip::{self, PublicIpTransport};
 
 const BODY_LIMIT: usize = 4096;
 
 pub struct SystemState {
     key_file: Option<KeyFile>,
+    ip_file: Option<RegisteredIpFile>,
+    registered_ip: Mutex<Option<api::RegisteredIp>>,
+    public_ip: Option<Arc<dyn PublicIpTransport>>,
     env_key: bool,
     key_file_problem: Mutex<Option<String>>,
     settings: Option<api::SystemSettings>,
@@ -29,11 +34,21 @@ pub struct SystemState {
 
 impl SystemState {
     pub fn new(key_file: KeyFile, env_key: bool, key_file_problem: Option<FileError>, settings: api::SystemSettings) -> Self {
-        SystemState { key_file: Some(key_file), env_key, key_file_problem: Mutex::new(key_file_problem.map(|e| e.to_string())), settings: Some(settings), bound: OnceLock::new(), write: tokio::sync::Mutex::new(()) }
+        let ip_file = key_file.registered_ip_file();
+        let registered_ip = ip_file.load().unwrap_or_else(|e| {
+            tracing::warn!(error = %e, "등록한 IP 기록을 읽지 못했습니다. 없는 것으로 봅니다");
+            None
+        });
+        SystemState { key_file: Some(key_file), ip_file: Some(ip_file), registered_ip: Mutex::new(registered_ip), public_ip: None, env_key, key_file_problem: Mutex::new(key_file_problem.map(|e| e.to_string())), settings: Some(settings), bound: OnceLock::new(), write: tokio::sync::Mutex::new(()) }
+    }
+
+    pub fn with_public_ip(mut self, transport: Arc<dyn PublicIpTransport>) -> Self {
+        self.public_ip = Some(transport);
+        self
     }
 
     pub fn unconfigured() -> Self {
-        SystemState { key_file: None, env_key: false, key_file_problem: Mutex::new(None), settings: None, bound: OnceLock::new(), write: tokio::sync::Mutex::new(()) }
+        SystemState { key_file: None, ip_file: None, registered_ip: Mutex::new(None), public_ip: None, env_key: false, key_file_problem: Mutex::new(None), settings: None, bound: OnceLock::new(), write: tokio::sync::Mutex::new(()) }
     }
 
     pub fn bound(&self, addr: std::net::SocketAddr) {
@@ -42,6 +57,10 @@ impl SystemState {
 
     fn key_file_problem(&self) -> Option<String> {
         self.key_file_problem.lock().expect("키 파일 문제 잠금").clone()
+    }
+
+    fn registered_ip(&self) -> Option<api::RegisteredIp> {
+        self.registered_ip.lock().expect("등록 IP 잠금").clone()
     }
 
     fn set_key_file_problem(&self, problem: Option<String>) {
@@ -89,6 +108,8 @@ pub fn routes(state: Arc<AppState>) -> Router<Arc<AppState>> {
         .route("/api/system/kiwoom/key", put(put_key).delete(delete_key))
         .route("/api/system/kiwoom/connect", post(connect))
         .route("/api/system/kiwoom/disconnect", post(disconnect))
+        .route("/api/system/kiwoom/ip-check", post(ip_check))
+        .route("/api/system/kiwoom/registered-ip", put(put_registered_ip))
         .route("/api/system/kiwoom/recheck-token-file", post(recheck_token_file))
         .route("/api/system/settings", get(get_settings))
         .layer(middleware::from_fn_with_state(state, guard_writes))
@@ -202,6 +223,30 @@ async fn recheck_token_file(State(st): State<Arc<AppState>>) -> Json<KiwoomLinkS
     Json(kiwoom_status(&st))
 }
 
+async fn ip_check(State(st): State<Arc<AppState>>) -> Result<Json<api::PublicIpCheck>, ApiFailure> {
+    let transport = st.system.public_ip.as_ref().ok_or_else(|| ApiFailure::new(ApiErrorCode::Internal, "공인 IP 확인 주소가 정해지지 않았습니다"))?;
+    tracing::info!("공인 IP 확인을 요청받았습니다");
+    match public_ip::check(transport.as_ref()).await {
+        Ok(ip) => Ok(Json(api::PublicIpCheck { ip: ip.to_string(), checked_at: UnixSeconds(st.clock.now().unix()) })),
+        Err(failure) => {
+            tracing::warn!(?failure, "공인 IP를 확인하지 못했습니다");
+            Err(ApiFailure::new(ApiErrorCode::Internal, failure.to_string()))
+        }
+    }
+}
+
+async fn put_registered_ip(State(st): State<Arc<AppState>>, body: Body) -> Result<Json<KiwoomLinkStatus>, ApiFailure> {
+    let input: api::RegisteredIpInput = read_body(body).await?;
+    let ip: std::net::IpAddr = input.ip.trim().parse().map_err(|_| ApiFailure::bad_request("IP 주소 형식이 올바르지 않습니다"))?;
+    let _write = st.system.write.lock().await;
+    let file = st.system.ip_file.as_ref().ok_or_else(|| ApiFailure::new(ApiErrorCode::Internal, "등록 IP 파일 위치가 정해지지 않았습니다"))?;
+    let registered = api::RegisteredIp { ip: ip.to_string(), at: UnixSeconds(st.clock.now().unix()) };
+    file.save(&registered).map_err(|e| ApiFailure::new(ApiErrorCode::Internal, format!("등록한 IP를 파일에 쓰지 못했습니다: {e}")))?;
+    *st.system.registered_ip.lock().expect("등록 IP 잠금") = Some(registered);
+    tracing::info!("포털에 등록한 공인 IP를 기록했습니다");
+    Ok(Json(kiwoom_status(&st)))
+}
+
 async fn get_settings(State(st): State<Arc<AppState>>) -> Result<Json<api::SystemSettings>, ApiFailure> {
     st.system.settings.clone().map(Json).ok_or_else(|| ApiFailure::new(ApiErrorCode::Internal, "설정 값이 준비되지 않았습니다"))
 }
@@ -222,6 +267,7 @@ pub fn kiwoom_status(st: &AppState) -> KiwoomLinkStatus {
         token_expires_at: None,
         realtime_registered: None,
         symbol_count: None,
+        registered_ip: st.system.registered_ip(),
     };
     match st.link.state() {
         LinkState::NoKey => match st.system.key_file_problem() {

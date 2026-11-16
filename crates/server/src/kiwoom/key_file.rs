@@ -2,6 +2,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
+use super::ip_file::RegisteredIpFile;
 use super::private_file::{FileError, PrivateFile};
 use crate::config::{KiwoomCredentials, Secret};
 use crate::instance::InstanceLock;
@@ -24,6 +25,10 @@ impl KeyFile {
 
     pub fn path(&self) -> &Path {
         self.file.path()
+    }
+
+    pub fn registered_ip_file(&self) -> RegisteredIpFile {
+        RegisteredIpFile::new(PrivateFile::new(self.path().with_file_name("kiwoom-ip.json")))
     }
 
     pub fn load(&self) -> Result<Option<KiwoomCredentials>, FileError> {
