@@ -144,8 +144,8 @@ impl Link {
                 Some(flight) => flight.clone(),
                 None => {
                     let link = self.clone();
+                    let epoch = *self.0.epoch.borrow();
                     let task = tokio::spawn(async move {
-                        let epoch = *link.0.epoch.borrow();
                         let outcome = link.run_connect(acknowledged, epoch).await;
                         if *link.0.epoch.borrow() == epoch {
                             link.0.flight.lock().expect("연결 잠금").take();
@@ -164,6 +164,9 @@ impl Link {
     async fn run_connect(&self, acknowledged: bool, epoch: u64) -> LinkState {
         let rest = &self.0.rest;
         let auth = rest.auth();
+        if *self.0.epoch.borrow() != epoch {
+            return self.state();
+        }
         if self.is_connected() {
             return LinkState::Connected;
         }

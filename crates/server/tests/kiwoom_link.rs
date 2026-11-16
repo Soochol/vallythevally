@@ -392,3 +392,21 @@ async fn a_token_issued_for_the_replaced_key_is_not_kept_for_the_new_key() {
     assert!(saved["token"].is_null(), "옛 키로 받은 토큰이 새 키의 것으로 기록됐다: {saved}");
     server.stop().await;
 }
+
+#[tokio::test]
+async fn a_disconnect_right_after_connect_starts_wins() {
+    let fake = ScriptedTransport::new();
+    let env = env();
+    let server = spawn(&fake, &env, &[OFF]);
+    server.addr().await;
+    let link = server.link();
+    let connecting = link.connect(false);
+    tokio::pin!(connecting);
+    assert!(futures::poll!(connecting.as_mut()).is_pending());
+    link.disconnect();
+    connecting.await;
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert_eq!(server.link_state(), LinkState::Disconnected);
+    assert_eq!(fake.requests(), 0, "{:?}", fake.api_ids());
+    server.stop().await;
+}
