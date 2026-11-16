@@ -6,7 +6,7 @@ import { openSystemSettings } from "./open";
 export function SystemButton() {
   const tone = linkDotTone(useKiwoomLinkStore((s) => s.status));
   return (
-    <button type="button" className="tb-btn" aria-haspopup="dialog" aria-label="시스템 설정" title="시스템 설정 (Alt+,)" onClick={() => openSystemSettings()}>
+    <button type="button" className="tb-btn system-btn relative" aria-haspopup="dialog" aria-label="시스템 설정" title="시스템 설정 (Alt+,)" onClick={() => openSystemSettings()}>
       <GearIcon />
       <span className="max-xl:hidden">시스템</span>
       <span aria-hidden="true" className="conn-dot" data-tone={tone} />
