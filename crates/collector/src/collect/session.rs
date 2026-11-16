@@ -323,6 +323,9 @@ impl Session {
         };
         if let Err(Exit::Halt(Halt::Output(error))) = written {
             tracing::error!(%error, "down 사건 줄을 쓰지 못했습니다");
+            if matches!(finish, Finish::Shutdown) {
+                finish = Finish::Halted(Halt::Output(error));
+            }
         }
         if let Err(error) = self.out.close() {
             tracing::error!(%error, "원문 파일을 닫지 못했습니다");
