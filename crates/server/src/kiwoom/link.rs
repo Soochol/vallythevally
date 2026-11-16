@@ -120,12 +120,14 @@ impl Link {
     }
 
     fn stop_for_halt(&self) {
-        self.abandon_connect(|| {
-            if matches!(self.state(), LinkState::Connected | LinkState::Connecting(_)) {
-                self.0.rest.set_access(Access::Closed);
-                self.set(self.resting_state());
-            }
-        });
+        let mut slot = self.0.flight.lock().expect("연결 잠금");
+        if !self.is_connected() {
+            return;
+        }
+        self.0.epoch.send_modify(|epoch| *epoch += 1);
+        slot.take();
+        self.0.rest.set_access(Access::Closed);
+        self.set(self.resting_state());
     }
 
     pub fn state(&self) -> LinkState {
@@ -233,10 +235,13 @@ impl Link {
 
     async fn run_connect(&self, acknowledged: bool, epoch: u64) -> Result<LinkState, Stale> {
         let outcome = self.connect_steps(acknowledged, epoch).await;
-        if matches!(outcome, Ok(LinkState::Connected)) {
-            self.0.released_8050.lock().expect("8050 잠금").take();
-        } else {
-            self.restore_unsent_8050();
+        let _slot = self.0.flight.lock().expect("연결 잠금");
+        if *self.0.epoch.borrow() == epoch {
+            if matches!(outcome, Ok(LinkState::Connected)) {
+                self.0.released_8050.lock().expect("8050 잠금").take();
+            } else {
+                self.restore_unsent_8050();
+            }
         }
         outcome
     }

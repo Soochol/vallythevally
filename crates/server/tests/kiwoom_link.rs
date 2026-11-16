@@ -648,3 +648,26 @@ async fn the_state_after_an_abandoned_acknowledged_connect_still_shows_8050() {
     assert!(server.link().needs_acknowledgement());
     server.stop().await;
 }
+
+#[tokio::test]
+async fn an_acknowledged_connect_right_after_a_disconnect_that_restored_8050_still_connects() {
+    let fake = ScriptedTransport::new();
+    reject_issue(&fake, EIGHT_FIFTY);
+    let env = env();
+    let server = spawn(&fake, &env, &[OFF, ("VALLY_CLOCK_START", "20261109100000"), ("KIWOOM_SEND_SPACING_MILLIS", "3000")]);
+    server.addr().await;
+    assert_eq!(failure(server.connect(false).await).problem, Problem::AuthBlocked8050);
+    server.clock().jump(601);
+    fake.reset();
+    let abandoned = tokio::spawn({
+        let link = server.link();
+        async move { link.connect(true).await }
+    });
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    let link = server.link();
+    link.disconnect();
+    let again = link.connect(true).await;
+    abandoned.await.unwrap();
+    assert_eq!(again, LinkState::Connected);
+    server.stop().await;
+}
