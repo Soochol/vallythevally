@@ -48,6 +48,19 @@ def start_time(pid):
     return Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()[19]
 
 
+def spawn(run_dir, state, name, argv, **options):
+    blocked = {signal.SIGTERM, signal.SIGINT}
+    signal.pthread_sigmask(signal.SIG_BLOCK, blocked)
+    try:
+        process = subprocess.Popen(argv, start_new_session=True, **options)
+        state[f"{name}_pid"] = process.pid
+        state[f"{name}_start"] = start_time(process.pid)
+        save(run_dir, state)
+        return process
+    finally:
+        signal.pthread_sigmask(signal.SIG_UNBLOCK, blocked)
+
+
 def save(run_dir, state):
     (run_dir / "state.json").write_text(json.dumps(state, indent=1))
 
@@ -79,10 +92,8 @@ def start(run_id, run_dir):
     save(run_dir, state)
     kiwoom_port_file = run_dir / "kiwoom.port"
     kiwoom_log = run_dir / "evidence/kiwoom-requests.jsonl"
-    kiwoom = subprocess.Popen([sys.executable, str(HERE / "verification_loopback_kiwoom.py"), str(kiwoom_port_file), str(kiwoom_log)],
-                              stdout=open(run_dir / "kiwoom.out", "w"), stderr=subprocess.STDOUT, start_new_session=True)
-    state.update(kiwoom_pid=kiwoom.pid, kiwoom_start=start_time(kiwoom.pid))
-    save(run_dir, state)
+    kiwoom = spawn(run_dir, state, "kiwoom", [sys.executable, str(HERE / "verification_loopback_kiwoom.py"), str(kiwoom_port_file), str(kiwoom_log)],
+                   stdout=open(run_dir / "kiwoom.out", "w"), stderr=subprocess.STDOUT)
     for _ in range(100):
         if kiwoom_port_file.is_file() and kiwoom_port_file.read_text():
             break
@@ -114,9 +125,8 @@ def start(run_id, run_dir):
     env = {k: v for k, v in os.environ.items() if not k.startswith("VALLY_") and k != "OPENDART_API_KEY" and not k.lower().endswith("_proxy")}
     env["NO_PROXY"] = env["no_proxy"] = "127.0.0.1,localhost"
     env["VALLY_ENV_FILE"] = str(env_file)
-    server = subprocess.Popen([str(SERVER_BIN)], cwd=run_dir, env=env, stdout=open(run_dir / "server.log", "w"), stderr=subprocess.STDOUT, start_new_session=True)
-    state.update(base_url=f"http://127.0.0.1:{port}", server_pid=server.pid, server_start=start_time(server.pid), kiwoom_url=f"http://127.0.0.1:{kiwoom_port}")
-    save(run_dir, state)
+    state.update(base_url=f"http://127.0.0.1:{port}", kiwoom_url=f"http://127.0.0.1:{kiwoom_port}")
+    server = spawn(run_dir, state, "server", [str(SERVER_BIN)], cwd=run_dir, env=env, stdout=open(run_dir / "server.log", "w"), stderr=subprocess.STDOUT)
     deadline = time.monotonic() + 40
     while time.monotonic() < deadline:
         if server.poll() is not None:
@@ -178,7 +188,10 @@ def ours(state, name):
     expected = state.get(name.replace("_pid", "_start"))
     if not pid or not expected or not alive(pid):
         return None
-    return pid if start_time(pid) == expected else None
+    try:
+        return pid if start_time(pid) == expected else None
+    except FileNotFoundError:
+        return None
 
 
 def signal_ours(pid, sig):
@@ -211,12 +224,17 @@ def run_all(journeys):
     failed = False
     try:
         failed = not doctor(run_dir)
+        seen = set()
         for journey in journeys:
-            drive = subprocess.run(["node", str(HERE / "drive.mjs"), state["base_url"], str(run_dir / "evidence"), journey])
+            drive = subprocess.Popen(["node", str(HERE / "drive.mjs"), state["base_url"], str(run_dir / "evidence"), journey])
+            while drive.poll() is None:
+                seen.update(connections(state["server_pid"]))
+                time.sleep(0.2)
             failed = failed or drive.returncode != 0
-        conns = [c for c in connections(state["server_pid"]) if "127.0.0.1" not in c.split()[4]]
+        seen.update(connections(state["server_pid"]))
+        conns = [c for c in seen if "127.0.0.1" not in c.split()[4] or "127.0.0.1" not in c.split()[3]]
         (run_dir / "evidence/network-interfaces.txt").write_text(Path("/proc/net/dev").read_text())
-        (run_dir / "evidence/server-connections.txt").write_text("\n".join(connections(state["server_pid"])) + "\n")
+        (run_dir / "evidence/server-connections.txt").write_text("\n".join(sorted(seen)) + "\n")
         failed = failed or bool(conns)
     finally:
         stop(run_dir)
@@ -226,11 +244,13 @@ def run_all(journeys):
 
 def main():
     if len(sys.argv) < 2 or sys.argv[1] not in ("up", "doctor", "down", "all"):
-        sys.exit("usage: vv.py up | doctor [run-dir] | down [run-dir] | all [journey...]")
+        sys.exit("usage: vv.py up | doctor [run-dir] | down <run-dir> | all [journey...]")
     if sys.argv[1] == "up":
         return up()
     if sys.argv[1] == "all":
         return run_all(sys.argv[2:] or ["search-chart"])
+    if sys.argv[1] == "down" and len(sys.argv) < 3:
+        sys.exit("down: pass the run dir printed by up (a bare down could stop another agent's run)")
     run_dir = Path(sys.argv[2]) if len(sys.argv) > 2 else newest_run()
     if not run_dir:
         sys.exit("no run found")

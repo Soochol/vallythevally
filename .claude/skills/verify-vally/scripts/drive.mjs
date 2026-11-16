@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { createRequire } from "node:module";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -67,8 +67,10 @@ const browser = await chromium.launch({ env: { ...process.env, TMPDIR: tmp }, ch
 const context = await browser.newContext({ baseURL, locale: "ko-KR", timezoneId: "Asia/Seoul", viewport: { width: 1440, height: 900 }, serviceWorkers: "block" });
 const page = await context.newPage();
 const requests = [];
+const hosts = new Set();
 const consoleErrors = [];
 const steps = [];
+page.on("request", (r) => hosts.add(new URL(r.url()).host));
 page.on("response", (r) => { const u = new URL(r.url()); requests.push({ status: r.status(), method: r.request().method(), host: u.host, path: u.pathname + u.search }); });
 page.on("console", (m) => { if (m.type() === "error") consoleErrors.push(m.text()); });
 page.on("pageerror", (e) => consoleErrors.push(String(e)));
@@ -79,11 +81,15 @@ try {
   outcome = { journey, ok: true, result };
 } catch (e) {
   outcome = { journey, ok: false, error: String(e) };
-  await page.screenshot({ path: join(evidence, "failure.png") }).catch(() => {});
+  await page.screenshot({ path: join(evidence, `failure-${journey}.png`) }).catch(() => {});
 } finally {
-  const foreign = requests.filter((r) => r.host !== new URL(baseURL).host);
-  writeFileSync(join(evidence, `${journey}.json`), JSON.stringify({ ...outcome, baseURL, steps, requests, foreignHosts: foreign, consoleErrors }, null, 1));
+  const allowed = new URL(baseURL).host;
+  const foreignHosts = [...hosts].filter((h) => h !== allowed && h !== "");
+  if (outcome.ok && (consoleErrors.length || foreignHosts.length)) outcome = { ...outcome, ok: false, error: `consoleErrors=${consoleErrors.length} foreignHosts=${foreignHosts.join(",")}` };
+  let file = join(evidence, `${journey}.json`);
+  for (let n = 2; existsSync(file); n++) file = join(evidence, `${journey}-${n}.json`);
+  writeFileSync(file, JSON.stringify({ ...outcome, baseURL, steps, requests, foreignHosts, consoleErrors }, null, 1));
   await browser.close();
 }
 console.log(JSON.stringify(outcome));
-process.exit(outcome.ok && consoleErrors.length === 0 ? 0 : 1);
+process.exit(outcome.ok ? 0 : 1);

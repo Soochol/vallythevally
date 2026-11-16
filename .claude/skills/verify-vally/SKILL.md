@@ -58,13 +58,13 @@ Playwright (`web/node_modules/@playwright/test`, Chromium) through one script. S
 node .claude/skills/verify-vally/scripts/drive.mjs <base_url> <run-dir>/evidence <journey>
 ```
 
-Journeys: `search-chart` (search button `title="종목 검색 (/ 또는 Ctrl+K)"`, dialog `종목 검색`, combobox `종목 검색`, option text `005930`, then `region` named `칸 1: …` with `data-bar-count`), `watchlist-add` (complementary `관심종목`, button `관심종목에 넣기`, `li[data-code]`). Each journey asserts its fresh-start precondition (코스피 cell, empty 기본 list), so run one `up` per journey set and never reuse a run for a second pass; a reused run fails with the precondition error. The journey exits 1 on a failed expectation, a console error, or a page error. Add journeys to `drive.mjs` per `features/*.md`.
+Journeys: `search-chart` (search button `title="종목 검색 (/ 또는 Ctrl+K)"`, dialog `종목 검색`, combobox `종목 검색`, option text `005930`, then `region` named `칸 1: …` with `data-bar-count`), `watchlist-add` (complementary `관심종목`, button `관심종목에 넣기`, `li[data-code]`). Each journey asserts its fresh-start precondition (코스피 cell, empty 기본 list), so run one `up` per journey set and never reuse a run for a second pass; a reused run fails with the precondition error. A journey exits 1 on a failed expectation, a console error, a page error, or any request to a host other than the sandbox. Add journeys to `drive.mjs` per `features/*.md`.
 
 The existing repo harnesses are for mocked responses, not this skill: `python3 scripts/web.py e2e <spec>` (ADR 0016: Playwright against synthetic responses; no server) and `python3 scripts/web.py doctor` (Chromium check). Reuse their selectors; use them for broad regression, and this skill for "does the real server plus real UI work".
 
 ## Evidence
 
-Everything goes to `target/verify-vally/runs/<run-id>/evidence/` and survives `down`: `<journey>.json` (steps, every response status/path, `foreignHosts`, console errors), screenshots, `kiwoom-requests.jsonl` (each fixture the server asked the fake for), and in `all` mode `server-connections.txt` and `network-interfaces.txt`. Proof standards:
+Everything goes to `target/verify-vally/runs/<run-id>/evidence/` and survives `down`: `<journey>.json` (a rerun writes `<journey>-2.json`, never overwrites; steps, every response status/path, `foreignHosts`, console errors), screenshots, `kiwoom-requests.jsonl` (each fixture the server asked the fake for), and `failure-<journey>.png` on failure, and in `all` mode `server-connections.txt` (the server's TCP connections sampled every 0.2 s while the browser runs) and `network-interfaces.txt`. Proof standards:
 - Drive the real user path (click, type); do not call internal setters or test-only endpoints.
 - Capture the action and the resulting state, and check the side effect on the server (`/api/watchlists`, `/api/ui-state`, `server.log`, `data/vally.db`) as well as the screen.
 - A journey that cannot reach its precondition reports failure, with the reason in that feature's Gotchas. Never weaken it.
@@ -73,7 +73,7 @@ Everything goes to `target/verify-vally/runs/<run-id>/evidence/` and survives `d
 ## Cleanup
 
 ```sh
-python3 .claude/skills/verify-vally/scripts/vv.py down [run-dir]      # SIGTERM then SIGKILL the pids in state.json only
+python3 .claude/skills/verify-vally/scripts/vv.py down <run-dir>      # SIGTERM then SIGKILL the pids in state.json only, and only when the process start time matches the one recorded at launch; the run dir is required (use the `dir` printed by `up`)
 ```
 
 It stops the server and the fake and keeps the run directory including `evidence/`. Run it after every failed attempt. Old runs under `target/verify-vally/runs/` may be deleted by hand when no longer needed. Do not delete `evidence/` you still need.
