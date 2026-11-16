@@ -20,7 +20,7 @@ export interface MarketSocketLike {
   subscribe(key: SeriesKey, handler: (m: SubEvent) => void): () => void;
   /** 지금 연결 상태로 한 번 부르고, 바뀔 때마다 부른다. */
   watch(listener: (c: Connection) => void): () => void;
-  /** 지금 보이는 관심종목 전체, 위에서부터, 그 시세의 거래소. 마지막 것이 비어 있지 않으면 새 `hello`마다 다시 보낸다. */
+  /** 지금 보이는 관심종목 전체, 위에서부터. 마지막 것이 비어 있지 않으면 새 `hello`마다 다시 보낸다. */
   setWatch(symbols: readonly SymbolCode[], venue: Venue): void;
   onQuotes(handler: (e: QuoteEvent) => void): () => void;
 }
