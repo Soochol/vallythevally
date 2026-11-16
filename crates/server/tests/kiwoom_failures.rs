@@ -39,7 +39,7 @@ async fn quote_failure_is_logged_as_a_quote_request() {
     assert!(lines[0].contains("현재가 요청에 답하지 못했습니다"), "{}", lines[0]);
 }
 
-async fn the_symbol_list_is_not_fetched_again_after(reply: Value, want: &str) {
+async fn the_symbol_list_is_not_fetched_again_after(reply: Value) {
     let fake = ScriptedTransport::new();
     fake.respond_with("ka10099", 200, reply.clone());
     let tmp = tempfile::tempdir().unwrap();
@@ -50,7 +50,8 @@ async fn the_symbol_list_is_not_fetched_again_after(reply: Value, want: &str) {
     let longer_than_one_startup_list_retry = Duration::from_secs(11);
     tokio::time::sleep(longer_than_one_startup_list_retry).await;
     let (status, body) = get(&client, &base, "/api/symbols?q=005930").await;
-    assert_eq!(body["error"]["code"].as_str(), Some(want), "{reply}: {status} {body}");
+    assert_eq!(body["error"]["reason"].as_str(), Some("not_connected"), "{reply}: 종목 목록이 멈추면 연결은 실패로 끝난다: {status} {body}");
+    assert!(matches!(server.link_state(), server::kiwoom::link::LinkState::Failed(f) if f.problem == server::kiwoom::link::Problem::PathStopped), "{reply}: {:?}", server.link_state());
     let list_requests = fake.api_ids().iter().filter(|id| *id == "ka10099").count();
     assert_eq!(list_requests, 1, "{reply}: 브라우저 요청도 바깥 타이머도 같은 경로로 다시 보내지 않는다");
     let logs = server.stop().await;
@@ -60,12 +61,12 @@ async fn the_symbol_list_is_not_fetched_again_after(reply: Value, want: &str) {
 
 #[tokio::test]
 async fn an_unknown_failure_stops_the_symbol_list_path() {
-    the_symbol_list_is_not_fetched_again_after(json!({"return_code": 1, "return_msg": "알 수 없음"}), "kiwoom_unavailable").await;
+    the_symbol_list_is_not_fetched_again_after(json!({"return_code": 1, "return_msg": "알 수 없음"})).await;
 }
 
 #[tokio::test]
 async fn a_missing_envelope_is_not_an_empty_symbol_list() {
-    the_symbol_list_is_not_fetched_again_after(json!({}), "internal").await;
+    the_symbol_list_is_not_fetched_again_after(json!({})).await;
 }
 
 async fn logs_after_failures(api_id: &str, reply: Value, browser_path: &str) -> String {
@@ -115,7 +116,8 @@ async fn a_request_already_waiting_for_the_symbol_list_ends_when_the_list_path_s
     let after = get(&client, &base, "/api/symbols/005930").await;
     server.stop().await;
     assert!(waited < Duration::from_secs(5), "목록 대기 10초를 다 채우지 않는다: {waited:?}");
-    assert_eq!(waiting, after, "먼저 기다리던 요청도 같은 원인으로 끝난다");
+    assert_ne!(waiting.1["error"]["reason"], json!("symbol_list_loading"), "먼저 기다리던 요청은 목록 대기 시간 초과가 아니라 경로가 멈춘 원인으로 끝난다: {waiting:?}");
+    assert_eq!(after.1["error"]["reason"], json!("not_connected"), "목록이 멈춰 연결이 실패하면 그 뒤 조회는 연결 안 함으로 답한다: {after:?}");
     assert_eq!(fake.api_ids().iter().filter(|id| *id == "ka10099").count(), 1);
 }
 

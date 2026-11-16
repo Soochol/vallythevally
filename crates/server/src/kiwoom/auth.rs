@@ -7,7 +7,7 @@ use domain::{KstTime, TimeOfDay};
 use serde::Serialize;
 use tokio::sync::watch;
 
-use super::error::Failure;
+use super::error::{CodeKey, Failure};
 use super::token_file::{FileError, Saved, SavedToken, TokenFile, credential_id};
 use super::wire::{TokenResponse, parse_kst_datetime};
 use crate::config::Secret;
@@ -31,6 +31,18 @@ pub enum Halt {
     TokenFileUnreadable(FileError),
 }
 
+impl Halt {
+    pub fn is_8050(&self) -> bool {
+        matches!(self, Halt::Rejected(f) if f.detail() == Some(CodeKey::Rest(8050)))
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BeginIssueError {
+    NoKey,
+    File(FileError),
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AuthError {
     Halted(Halt),
@@ -45,8 +57,23 @@ struct Issued {
     generation: TokenGen,
 }
 
+struct Credentials {
+    app_key: Secret<String>,
+    app_secret: Secret<String>,
+    id: String,
+}
+
+impl Credentials {
+    fn new(app_key: Secret<String>, app_secret: Secret<String>) -> Self {
+        let id = credential_id(app_key.expose());
+        Credentials { app_key, app_secret, id }
+    }
+}
+
 #[derive(Default)]
 struct State {
+    credentials: Option<Credentials>,
+    issuing_for: Option<String>,
     issued: Option<Issued>,
     last_request_at: Option<KstTime>,
     /// 토큰 무효 응답을 받아 다시 발급해야 한다.
@@ -55,9 +82,6 @@ struct State {
 }
 
 pub struct KiwoomAuth {
-    app_key: Secret<String>,
-    app_secret: Secret<String>,
-    credential: String,
     file: Option<TokenFile>,
     state: Mutex<State>,
     halted: watch::Sender<Option<Halt>>,
@@ -67,8 +91,8 @@ impl fmt::Debug for KiwoomAuth {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let st = self.state.lock().expect("auth 잠금");
         f.debug_struct("KiwoomAuth")
-            .field("app_key", &self.app_key)
-            .field("app_secret", &self.app_secret)
+            .field("app_key", &st.credentials.as_ref().map(|c| &c.app_key))
+            .field("app_secret", &st.credentials.as_ref().map(|c| &c.app_secret))
             .field("file", &self.file.as_ref().map(TokenFile::path))
             .field("generation", &st.issued.as_ref().map(|i| i.generation))
             .field("token", &st.issued.as_ref().map(|i| &i.token))
@@ -89,26 +113,48 @@ struct TokenRequest<'a> {
 
 impl KiwoomAuth {
     pub fn new(app_key: Secret<String>, app_secret: Secret<String>, file: Option<TokenFile>) -> Self {
-        let credential = credential_id(app_key.expose());
-        let (state, halt) = match file.as_ref().map(TokenFile::load) {
+        Self::with_credentials(Some(Credentials::new(app_key, app_secret)), file)
+    }
+
+    pub fn keyless(file: Option<TokenFile>) -> Self {
+        Self::with_credentials(None, file)
+    }
+
+    fn with_credentials(credentials: Option<Credentials>, file: Option<TokenFile>) -> Self {
+        let id = credentials.as_ref().map(|c| c.id.as_str());
+        let (mut state, halt) = match file.as_ref().map(TokenFile::load) {
             None | Some(Ok(None)) => (State::default(), None),
-            Some(Ok(Some(saved))) => (restore(saved, &credential), None),
+            Some(Ok(Some(saved))) => (restore(saved, id), None),
             Some(Err(e)) => {
                 tracing::error!(error = %e, "토큰 파일을 읽지 못했습니다. 마지막 발급 요청 시각을 모르므로 조회와 토큰 발급을 멈춥니다");
                 (State::default(), Some(Halt::TokenFileUnreadable(e)))
             }
         };
-        KiwoomAuth { app_key, app_secret, credential, file, state: Mutex::new(state), halted: watch::channel(halt).0 }
+        state.credentials = credentials;
+        KiwoomAuth { file, state: Mutex::new(state), halted: watch::channel(halt).0 }
     }
 
     fn lock(&self) -> std::sync::MutexGuard<'_, State> {
         self.state.lock().expect("auth 잠금")
     }
 
+    pub fn issue_is_for_current_key(&self) -> bool {
+        let st = self.lock();
+        st.issuing_for.is_none() || st.credentials.as_ref().map(|c| &c.id) == st.issuing_for.as_ref()
+    }
+
+    pub fn watch_halted(&self) -> watch::Receiver<Option<Halt>> {
+        self.halted.subscribe()
+    }
+
+    pub fn has_credentials(&self) -> bool {
+        self.lock().credentials.is_some()
+    }
+
     fn save(&self, st: &State) -> Result<(), FileError> {
         let Some(file) = &self.file else { return Ok(()) };
         let saved = Saved {
-            credential: Some(self.credential.clone()),
+            credential: st.credentials.as_ref().map(|c| c.id.clone()),
             token: st.issued.as_ref().map(|i| SavedToken {
                 value: i.token.expose().clone(),
                 expires_dt: format_kst_datetime(i.expires_at),
@@ -119,19 +165,104 @@ impl KiwoomAuth {
         file.save(&saved)
     }
 
-    pub fn begin_issue(&self, now: KstTime) -> Result<Secret<String>, FileError> {
+    pub fn replace_credentials(&self, app_key: Secret<String>, app_secret: Secret<String>) {
+        let next = Credentials::new(app_key, app_secret);
         let mut st = self.lock();
+        let same_key = st.credentials.as_ref().is_some_and(|c| c.id == next.id);
+        if !same_key {
+            st.issued = None;
+            st.stale = false;
+            let from_file = self.file.as_ref().and_then(|f| f.load().ok().flatten()).and_then(|saved| restore(saved, Some(&next.id)).issued);
+            if let Some(mut issued) = from_file {
+                st.issued_count += 1;
+                issued.generation = TokenGen(st.issued_count);
+                st.issued = Some(issued);
+            }
+        }
+        st.credentials = Some(next);
+    }
+
+    pub fn clear_credentials(&self) {
+        let mut st = self.lock();
+        st.credentials = None;
+        st.issued = None;
+        st.stale = false;
+        if let Err(e) = self.save(&st) {
+            tracing::error!(error = %e, "토큰 파일에서 토큰을 비우지 못했습니다");
+        }
+    }
+
+    pub fn release_key_rejection(&self) {
+        self.halted.send_if_modified(|halt| {
+            let release = matches!(halt, Some(h @ Halt::Rejected(_)) if !h.is_8050());
+            if release {
+                *halt = None;
+            }
+            release
+        });
+    }
+
+    pub fn restore_halt(&self, halt: Halt) {
+        self.halted.send_if_modified(|current| {
+            let restore = current.is_none();
+            if restore {
+                *current = Some(halt);
+            }
+            restore
+        });
+    }
+
+    pub fn release_8050(&self) {
+        self.halted.send_if_modified(|halt| {
+            let release = halt.as_ref().is_some_and(Halt::is_8050);
+            if release {
+                *halt = None;
+            }
+            release
+        });
+    }
+
+    pub fn recheck_token_file(&self) -> Result<(), FileError> {
+        let Some(file) = &self.file else { return Ok(()) };
+        if !matches!(self.halted(), Some(Halt::TokenFileUnreadable(_))) {
+            return Ok(());
+        }
+        match file.load() {
+            Ok(saved) => {
+                let mut st = self.lock();
+                let id = st.credentials.as_ref().map(|c| c.id.clone());
+                let restored = saved.map_or_else(State::default, |saved| restore(saved, id.as_deref()));
+                st.issued = restored.issued;
+                st.issued_count = restored.issued_count;
+                st.last_request_at = restored.last_request_at;
+                st.stale = false;
+                drop(st);
+                self.halted.send_replace(None);
+                Ok(())
+            }
+            Err(e) => {
+                self.halted.send_replace(Some(Halt::TokenFileUnreadable(e.clone())));
+                Err(e)
+            }
+        }
+    }
+
+    pub fn begin_issue(&self, now: KstTime) -> Result<Secret<String>, BeginIssueError> {
+        let mut st = self.lock();
+        let Some(credentials) = &st.credentials else { return Err(BeginIssueError::NoKey) };
+        let req = TokenRequest {
+            grant_type: "client_credentials",
+            appkey: credentials.app_key.expose(),
+            secretkey: credentials.app_secret.expose(),
+        };
+        let body = Secret::new(serde_json::to_string(&req).expect("문자열만 담은 구조체"));
+        st.issuing_for = Some(credentials.id.clone());
         let previous = st.last_request_at.replace(now);
         if let Err(e) = self.save(&st) {
             st.last_request_at = previous;
-            return Err(e);
+            return Err(BeginIssueError::File(e));
         }
-        let req = TokenRequest {
-            grant_type: "client_credentials",
-            appkey: self.app_key.expose(),
-            secretkey: self.app_secret.expose(),
-        };
-        Ok(Secret::new(serde_json::to_string(&req).expect("문자열만 담은 구조체")))
+        Ok(body)
     }
 
     pub fn issue_blocked_until(&self, now: KstTime) -> Option<KstTime> {
@@ -173,6 +304,11 @@ impl KiwoomAuth {
             return Err(AuthError::BadTokenResponse);
         }
         let mut st = self.lock();
+        let still_ours = st.issuing_for.is_none() || st.credentials.as_ref().map(|c| &c.id) == st.issuing_for.as_ref();
+        if !still_ours {
+            tracing::warn!("토큰을 받는 동안 앱키가 바뀌어 그 토큰은 쓰지 않습니다");
+            return Ok(TokenGen(st.issued_count));
+        }
         st.issued_count += 1;
         let generation = TokenGen(st.issued_count);
         st.issued = Some(Issued { token: Secret::new(resp.token), issued_at: now, expires_at, generation });
@@ -201,8 +337,8 @@ impl KiwoomAuth {
     }
 }
 
-fn restore(saved: Saved, credential: &str) -> State {
-    let ours = saved.credential.as_deref() == Some(credential);
+fn restore(saved: Saved, credential: Option<&str>) -> State {
+    let ours = credential.is_some() && saved.credential.as_deref() == credential;
     if saved.token.is_some() && !ours {
         tracing::warn!("토큰 파일의 토큰은 지금 앱키로 받은 것이 아니라 쓰지 않습니다. 발급 요청 간격은 그대로 지킵니다");
     }
@@ -336,6 +472,35 @@ mod tests {
         a.record_issued(resp("t2", "20261110200500"), kst(d(9), 20, 5, 1)).unwrap();
         assert!(!a.due_daily_reissue(kst(d(9), 20, 15, 0)));
         assert!(a.due_daily_reissue(kst(d(10), 20, 5, 0)));
+    }
+
+    #[test]
+    fn a_keyless_auth_keeps_the_request_time_and_cannot_issue() {
+        let (_dir, _lock, file) = crate::kiwoom::token_file::testing::temp_token_file();
+        let t0 = kst(d(9), 9, 0, 0);
+        file.save(&Saved { credential: Some(credential_id(KEY)), token: None, last_request_at: t0.unix() }).unwrap();
+        let a = KiwoomAuth::keyless(Some(file));
+        assert!(!a.has_credentials());
+        assert_eq!(a.issue_blocked_until(t0.plus_secs(60)), Some(t0.plus_secs(600)));
+        assert_eq!(a.begin_issue(t0.plus_secs(60)).unwrap_err(), BeginIssueError::NoKey);
+    }
+
+    #[test]
+    fn replacing_the_key_drops_the_old_token_and_keeps_the_request_time() {
+        let (_dir, _lock, file) = crate::kiwoom::token_file::testing::temp_token_file();
+        let a = KiwoomAuth::new(Secret::new(KEY.into()), Secret::new(SECRET.into()), Some(file));
+        let t0 = kst(d(9), 9, 0, 0);
+        a.begin_issue(t0).unwrap();
+        a.record_issued(resp(TOKEN, "20991231000000"), t0).unwrap();
+        assert!(a.current(t0).is_some());
+        a.replace_credentials(Secret::new("FAKE-APPKEY-other".into()), Secret::new("other-secret".into()));
+        assert!(a.current(t0).is_none(), "앱키가 바뀌면 이전 토큰은 쓰지 않는다");
+        assert_eq!(a.issue_blocked_until(t0.plus_secs(60)), Some(t0.plus_secs(600)));
+        let body: serde_json::Value = serde_json::from_str(a.begin_issue(t0.plus_secs(700)).unwrap().expose()).unwrap();
+        assert_eq!(body["appkey"], "FAKE-APPKEY-other");
+        a.clear_credentials();
+        assert!(!a.has_credentials() && a.current(t0).is_none());
+        assert_eq!(a.issue_blocked_until(t0.plus_secs(710)), Some(t0.plus_secs(1300)));
     }
 
     #[test]

@@ -35,6 +35,15 @@ impl<T> fmt::Display for Secret<T> {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct KiwoomCredentials {
+    pub app_key: Secret<String>,
+    pub app_secret: Secret<String>,
+}
+
+pub const KIWOOM_BASE_URL: &str = "https://api.kiwoom.com";
+pub const KIWOOM_WS_URL: &str = "wss://api.kiwoom.com:10000/api/dostk/websocket";
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConfigError(pub String);
 
@@ -84,6 +93,7 @@ const KNOWN_KEYS: &[&str] = &[
     "VALLY_SCREENER_UPDATE_ON_START",
     "VALLY_LOCK_PATH",
     "VALLY_TOKEN_PATH",
+    "VALLY_KIWOOM_KEY_PATH",
     "VALLY_BIND",
     "VALLY_TELEGRAM_BOT_TOKEN",
     "VALLY_TELEGRAM_CHAT_ID",
@@ -98,14 +108,14 @@ const KNOWN_KEYS: &[&str] = &[
 
 #[derive(Debug, Clone)]
 pub struct Config {
-    pub kiwoom_app_key: Secret<String>,
-    pub kiwoom_app_secret: Secret<String>,
+    pub kiwoom_credentials: Option<KiwoomCredentials>,
     pub kiwoom_base_url: String,
     pub kiwoom_ws_url: String,
     /// 시험용. 서버 시계가 이 KST 시각에서 시작해 실제 시간만큼 흐른다. 실제 키움 주소와 함께 주면 시작하지 않는다.
     pub clock_start: Option<KstTime>,
     pub lock_path: PathBuf,
     pub token_path: PathBuf,
+    pub kiwoom_key_path: PathBuf,
     pub bind: BindAddr,
     pub static_dir: PathBuf,
     /// 사용자 자료 SQLite 파일(§7.1). 상대 경로면 서버 작업 디렉터리 기준.
@@ -130,7 +140,7 @@ impl Config {
             Some(path) => read_env_file(Path::new(path))?,
             None => BTreeMap::new(),
         };
-        Config::from_vars(file, process, default_lock_path, default_token_path)
+        Config::from_vars(file, process, default_lock_path, default_token_path, default_kiwoom_key_path)
     }
 
     /// 파일 값 위에 프로세스 값을 덮어 설정을 만든다.
@@ -139,6 +149,7 @@ impl Config {
         process: BTreeMap<String, String>,
         default_lock: impl FnOnce() -> Result<PathBuf, ConfigError>,
         default_token: impl FnOnce() -> Result<PathBuf, ConfigError>,
+        default_key: impl FnOnce() -> Result<PathBuf, ConfigError>,
     ) -> Result<(Config, ConfigWarnings), ConfigError> {
         let mut vars = file;
         vars.extend(process);
@@ -147,17 +158,21 @@ impl Config {
             .filter(|k| k.starts_with("VALLY_") && !KNOWN_KEYS.contains(&k.as_str()))
             .map(|k| format!("모르는 설정 키 {k}가 있습니다. 오타인지 확인하세요"))
             .collect();
-        let required = |k: &str| {
-            vars.get(k)
-                .filter(|v| !v.is_empty())
-                .cloned()
-                .ok_or_else(|| ConfigError(format!("{k}가 없습니다")))
-        };
+        let present = |k: &str| vars.get(k).filter(|v| !v.is_empty()).cloned();
         let url = |k: &str| vars.get(k).filter(|v| !v.is_empty()).map(|s| s.trim_end_matches('/').to_owned());
-        let (Some(kiwoom_base_url), Some(kiwoom_ws_url)) = (url("VALLY_KIWOOM_BASE_URL"), url("VALLY_KIWOOM_WS_URL")) else {
-            return Err(ConfigError(
-                "VALLY_KIWOOM_BASE_URL과 VALLY_KIWOOM_WS_URL을 .env에 둘 다 적어야 합니다. 실제 키움은 VALLY_KIWOOM_BASE_URL=https://api.kiwoom.com, VALLY_KIWOOM_WS_URL=wss://api.kiwoom.com:10000/api/dostk/websocket 입니다".into(),
-            ));
+        let (kiwoom_base_url, kiwoom_ws_url) = match (url("VALLY_KIWOOM_BASE_URL"), url("VALLY_KIWOOM_WS_URL")) {
+            (Some(base), Some(ws)) => (base, ws),
+            (None, None) => (KIWOOM_BASE_URL.to_owned(), KIWOOM_WS_URL.to_owned()),
+            _ => {
+                return Err(ConfigError(
+                    "VALLY_KIWOOM_BASE_URL과 VALLY_KIWOOM_WS_URL은 둘 다 적거나 둘 다 비워 둡니다. 둘 다 비우면 실제 키움(https://api.kiwoom.com, wss://api.kiwoom.com:10000/api/dostk/websocket)을 씁니다".into(),
+                ));
+            }
+        };
+        let kiwoom_credentials = match (present("VALLY_KIWOOM_APP_KEY"), present("VALLY_KIWOOM_APP_SECRET")) {
+            (Some(app_key), Some(app_secret)) => Some(KiwoomCredentials { app_key: Secret::new(app_key), app_secret: Secret::new(app_secret) }),
+            (None, None) => None,
+            _ => return Err(ConfigError("VALLY_KIWOOM_APP_KEY와 VALLY_KIWOOM_APP_SECRET은 둘 다 적거나 둘 다 비워 둡니다".into())),
         };
         let clock_start = match vars.get("VALLY_CLOCK_START") {
             None => None,
@@ -173,8 +188,7 @@ impl Config {
         let dart_base_url = public_or_loopback(url("VALLY_DART_BASE_URL"), "https://opendart.fss.or.kr")?;
         let kind_base_url = public_or_loopback(url("VALLY_KIND_BASE_URL"), "https://kind.krx.co.kr")?;
         let config = Config {
-            kiwoom_app_key: Secret::new(required("VALLY_KIWOOM_APP_KEY")?),
-            kiwoom_app_secret: Secret::new(required("VALLY_KIWOOM_APP_SECRET")?),
+            kiwoom_credentials,
             kiwoom_base_url,
             kiwoom_ws_url,
             clock_start,
@@ -185,6 +199,10 @@ impl Config {
             token_path: match vars.get("VALLY_TOKEN_PATH") {
                 Some(p) => PathBuf::from(p),
                 None => default_token()?,
+            },
+            kiwoom_key_path: match vars.get("VALLY_KIWOOM_KEY_PATH") {
+                Some(p) => PathBuf::from(p),
+                None => default_key()?,
             },
             bind: BindAddr::parse(vars.get("VALLY_BIND").map_or("127.0.0.1:8080", String::as_str))?,
             static_dir: PathBuf::from(vars.get("VALLY_STATIC_DIR").map_or("web/dist", String::as_str)),
@@ -252,17 +270,21 @@ fn default_lock_path() -> Result<PathBuf, ConfigError> {
 }
 
 fn default_token_path() -> Result<PathBuf, ConfigError> {
-    token_path_from(std::env::var_os("XDG_STATE_HOME"), std::env::var_os("HOME"))
+    state_file_path_from(std::env::var_os("XDG_STATE_HOME"), std::env::var_os("HOME"), "token.json", "VALLY_TOKEN_PATH")
 }
 
-fn token_path_from(state_home: Option<std::ffi::OsString>, home: Option<std::ffi::OsString>) -> Result<PathBuf, ConfigError> {
+fn default_kiwoom_key_path() -> Result<PathBuf, ConfigError> {
+    state_file_path_from(std::env::var_os("XDG_STATE_HOME"), std::env::var_os("HOME"), "kiwoom-key.json", "VALLY_KIWOOM_KEY_PATH")
+}
+
+fn state_file_path_from(state_home: Option<std::ffi::OsString>, home: Option<std::ffi::OsString>, file_name: &str, override_key: &str) -> Result<PathBuf, ConfigError> {
     let nonempty = |v: Option<std::ffi::OsString>| v.filter(|d| !d.is_empty()).map(PathBuf::from);
     let state = match (nonempty(state_home), nonempty(home)) {
         (Some(state), _) => state,
         (None, Some(home)) => home.join(".local/state"),
-        (None, None) => return Err(ConfigError("XDG_STATE_HOME도 HOME도 없어 토큰 파일 경로를 정할 수 없습니다. VALLY_TOKEN_PATH를 주세요".into())),
+        (None, None) => return Err(ConfigError(format!("XDG_STATE_HOME도 HOME도 없어 {file_name} 경로를 정할 수 없습니다. {override_key}를 주세요"))),
     };
-    Ok(state.join("vallythevally").join("token.json"))
+    Ok(state.join("vallythevally").join(file_name))
 }
 
 fn read_env_file(path: &Path) -> Result<BTreeMap<String, String>, ConfigError> {
@@ -317,12 +339,16 @@ mod tests {
         Ok(PathBuf::from("/nonexistent/token.json"))
     }
 
+    fn key() -> Result<PathBuf, ConfigError> {
+        Ok(PathBuf::from("/nonexistent/kiwoom-key.json"))
+    }
+
     #[test]
     fn dart_is_optional_redacted_and_uses_separate_rebuildable_storage() {
         let file = vars(&[("VALLY_KIWOOM_APP_KEY", KEY), ("VALLY_KIWOOM_APP_SECRET", SECRET), ("VALLY_DB_PATH", "isolated/user.db"), ("OPENDART_API_KEY", "file-dart-secret")]);
         let mut process = vars(&REAL);
         process.insert("OPENDART_API_KEY".into(), "process-dart-secret".into());
-        let (config, warnings) = Config::from_vars(file.clone(),process,lock,token).unwrap();
+        let (config, warnings) = Config::from_vars(file.clone(),process,lock,token,key).unwrap();
         assert!(warnings.is_empty());
         assert_eq!(config.opendart_api_key.as_ref().unwrap().expose(), "process-dart-secret");
         assert_eq!(config.financial_db_path, PathBuf::from("isolated/financials.db"));
@@ -330,7 +356,7 @@ mod tests {
         for endpoint in ["https://example.com", "https://opendart.fss.or.kr.evil.test", "http://user:pass@localhost:19", "http://localhost:19/?key=value"] {
             let mut process = vars(&REAL);
             process.insert("VALLY_DART_BASE_URL".into(),endpoint.into());
-            assert!(Config::from_vars(file.clone(),process,lock,token).is_err());
+            assert!(Config::from_vars(file.clone(),process,lock,token,key).is_err());
         }
     }
 
@@ -349,6 +375,7 @@ mod tests {
             vars(&REAL),
             lock,
             token,
+            key,
         )
         .unwrap();
         let dbg = format!("{c:?} {c:#?}");
@@ -363,10 +390,11 @@ mod tests {
             vars(&[("VALLY_KIWOOM_APP_KEY", KEY), ("VALLY_KIWOOM_BASE_URL", "http://127.0.0.1:5/"), ("VALLY_KIWOOM_WS_URL", "ws://127.0.0.1:5/api/dostk/websocket")]),
             lock,
             token,
+            key,
         )
         .unwrap();
         assert!(warnings.is_empty());
-        assert_eq!(c.kiwoom_app_key.expose(), KEY);
+        assert_eq!(c.kiwoom_credentials.as_ref().unwrap().app_key.expose(), KEY);
         assert_eq!(c.kiwoom_base_url, "http://127.0.0.1:5");
         assert_eq!(c.bind.socket_addr().port(), 9);
         assert_eq!(c.static_dir, PathBuf::from("web/dist"));
@@ -376,20 +404,27 @@ mod tests {
         assert_eq!(c.log_filter, "info");
         assert_eq!(c.lock_path, PathBuf::from("/nonexistent/test.lock"));
         assert_eq!(c.token_path, PathBuf::from("/nonexistent/token.json"));
+        assert_eq!(c.kiwoom_key_path, PathBuf::from("/nonexistent/kiwoom-key.json"));
 
-        let (c, _) = Config::from_vars(vars(&[("VALLY_KIWOOM_APP_KEY", KEY), ("VALLY_KIWOOM_APP_SECRET", SECRET)]), vars(&REAL), lock, token).unwrap();
+        let (c, _) = Config::from_vars(vars(&[("VALLY_KIWOOM_APP_KEY", KEY), ("VALLY_KIWOOM_APP_SECRET", SECRET)]), vars(&REAL), lock, token, key).unwrap();
         assert_eq!(c.bind.socket_addr(), "127.0.0.1:8080".parse().unwrap());
     }
 
     #[test]
-    fn missing_keys_fail_and_unknown_keys_warn() {
-        assert!(Config::from_vars(vars(&[("VALLY_KIWOOM_APP_KEY", KEY)]), BTreeMap::new(), lock, token).is_err());
-        assert!(Config::from_vars(vars(&[("VALLY_KIWOOM_APP_KEY", KEY), ("VALLY_KIWOOM_APP_SECRET", "")]), BTreeMap::new(), lock, token).is_err());
+    fn kiwoom_keys_are_optional_but_never_half_given_and_unknown_keys_warn() {
+        let start = |pairs: &[(&str, &str)]| Config::from_vars(vars(pairs), BTreeMap::new(), lock, token, key);
+        assert!(start(&[("VALLY_KIWOOM_APP_KEY", KEY)]).is_err(), "앱키만");
+        assert!(start(&[("VALLY_KIWOOM_APP_SECRET", SECRET)]).is_err(), "시크릿만");
+        assert!(start(&[("VALLY_KIWOOM_APP_KEY", KEY), ("VALLY_KIWOOM_APP_SECRET", "")]).is_err(), "빈 시크릿");
+        assert!(start(&[]).unwrap().0.kiwoom_credentials.is_none(), "키 없이 켜진다");
+        let (c, _) = start(&[("VALLY_KIWOOM_APP_KEY", KEY), ("VALLY_KIWOOM_APP_SECRET", SECRET)]).unwrap();
+        assert_eq!(c.kiwoom_credentials.unwrap().app_secret.expose(), SECRET);
         let (_, warnings) = Config::from_vars(
             vars(&[("VALLY_KIWOOM_APP_KEY", KEY), ("VALLY_KIWOOM_APP_SECRET", SECRET), ("VALLY_BIDN", "x")]),
             vars(&REAL),
             lock,
             token,
+            key,
         )
         .unwrap();
         assert_eq!(warnings.len(), 1);
@@ -401,9 +436,9 @@ mod tests {
         let keys = [("VALLY_KIWOOM_APP_KEY", KEY), ("VALLY_KIWOOM_APP_SECRET", SECRET)];
         let rest = ("VALLY_KIWOOM_BASE_URL", "http://127.0.0.1:5");
         let ws = ("VALLY_KIWOOM_WS_URL", "ws://127.0.0.1:5/api/dostk/websocket");
-        let start = |extra: &[(&str, &str)]| Config::from_vars(vars(&keys), vars(extra), lock, token);
-        let missing = start(&[]).unwrap_err().0;
-        assert!(missing.contains("VALLY_KIWOOM_BASE_URL") && missing.contains("VALLY_KIWOOM_WS_URL") && missing.contains(".env"), "무엇을 적을지 알려 준다: {missing}");
+        let start = |extra: &[(&str, &str)]| Config::from_vars(vars(&keys), vars(extra), lock, token, key);
+        let (c, _) = start(&[]).expect("둘 다 비우면 실제 키움");
+        assert_eq!((c.kiwoom_base_url.as_str(), c.kiwoom_ws_url.as_str()), (REAL[0].1, REAL[1].1));
         assert!(start(&[rest]).is_err(), "루프백 REST만");
         assert!(start(&[ws]).is_err(), "루프백 WS만");
         assert!(start(&REAL[..1]).is_err(), "실제 REST만");
@@ -421,32 +456,36 @@ mod tests {
     fn clock_start_requires_loopback_kiwoom_endpoints() {
         let keys = [("VALLY_KIWOOM_APP_KEY", KEY), ("VALLY_KIWOOM_APP_SECRET", SECRET), ("VALLY_CLOCK_START", "20261109100000")];
         let loopback = [("VALLY_KIWOOM_BASE_URL", "http://127.0.0.1:5"), ("VALLY_KIWOOM_WS_URL", "ws://127.0.0.1:5/api/dostk/websocket")];
-        let (c, _) = Config::from_vars(vars(&keys), vars(&loopback), lock, token).unwrap();
+        let (c, _) = Config::from_vars(vars(&keys), vars(&loopback), lock, token, key).unwrap();
         assert_eq!(c.clock_start.map(|t| t.to_string()), Some("2026-11-09 10:00:00 KST".to_owned()));
         assert_eq!(c.kiwoom_ws_url, "ws://127.0.0.1:5/api/dostk/websocket");
 
-        assert!(Config::from_vars(vars(&keys), vars(&REAL), lock, token).is_err(), "실제 키움 주소와 함께면 거부");
+        assert!(Config::from_vars(vars(&keys), vars(&REAL), lock, token, key).is_err(), "실제 키움 주소와 함께면 거부");
         let bad = [("VALLY_KIWOOM_APP_KEY", KEY), ("VALLY_KIWOOM_APP_SECRET", SECRET), ("VALLY_CLOCK_START", "2026-11-09")];
-        assert!(Config::from_vars(vars(&bad), vars(&loopback), lock, token).is_err());
+        assert!(Config::from_vars(vars(&bad), vars(&loopback), lock, token, key).is_err());
 
-        let (c, _) = Config::from_vars(vars(&keys[..2]), vars(&REAL), lock, token).unwrap();
+        let (c, _) = Config::from_vars(vars(&keys[..2]), vars(&REAL), lock, token, key).unwrap();
         assert_eq!(c.clock_start, None);
     }
 
     #[test]
     fn screener_update_on_start_is_on_or_off() {
-        let start = |value: &str| Config::from_vars(vars(&[("VALLY_KIWOOM_APP_KEY", KEY), ("VALLY_KIWOOM_APP_SECRET", SECRET), ("VALLY_SCREENER_UPDATE_ON_START", value)]), vars(&REAL), lock, token);
+        let start = |value: &str| Config::from_vars(vars(&[("VALLY_KIWOOM_APP_KEY", KEY), ("VALLY_KIWOOM_APP_SECRET", SECRET), ("VALLY_SCREENER_UPDATE_ON_START", value)]), vars(&REAL), lock, token, key);
         assert!(start("on").unwrap().0.screener_update_on_start);
         assert!(!start("off").unwrap().0.screener_update_on_start);
         assert!(start("no").is_err());
     }
 
     #[test]
-    fn token_path_follows_xdg_state_home_then_home() {
+    fn token_and_key_paths_follow_xdg_state_home_then_home() {
         let os = |s: &str| Some(std::ffi::OsString::from(s));
-        assert_eq!(token_path_from(os("/s"), os("/h")).unwrap(), PathBuf::from("/s/vallythevally/token.json"));
-        assert_eq!(token_path_from(os(""), os("/h")).unwrap(), PathBuf::from("/h/.local/state/vallythevally/token.json"));
-        assert!(token_path_from(None, None).is_err());
+        let token = |state, home| state_file_path_from(state, home, "token.json", "VALLY_TOKEN_PATH");
+        let key = |state, home| state_file_path_from(state, home, "kiwoom-key.json", "VALLY_KIWOOM_KEY_PATH");
+        assert_eq!(token(os("/s"), os("/h")).unwrap(), PathBuf::from("/s/vallythevally/token.json"));
+        assert_eq!(token(os(""), os("/h")).unwrap(), PathBuf::from("/h/.local/state/vallythevally/token.json"));
+        assert_eq!(key(os("/s"), os("/h")).unwrap(), PathBuf::from("/s/vallythevally/kiwoom-key.json"));
+        assert_eq!(key(os(""), os("/h")).unwrap(), PathBuf::from("/h/.local/state/vallythevally/kiwoom-key.json"));
+        assert!(token(None, None).is_err() && key(None, None).is_err());
     }
 
     #[test]
@@ -478,7 +517,7 @@ mod tests {
             if clock {
                 process.insert("VALLY_CLOCK_START".into(), "20261109100000".into());
             }
-            Config::from_vars(vars(&keys), process, lock, token)
+            Config::from_vars(vars(&keys), process, lock, token, key)
         };
         let loopback_rest = "http://127.0.0.1:5";
         let loopback_ws = "ws://127.0.0.1:5/api/dostk/websocket";

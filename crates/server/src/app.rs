@@ -1,6 +1,7 @@
 //! 서버를 켜는 순서와 하루 타이머(backend.md §4.1, §6.2, §6.6).
 //!
-//! 순서: 설정 → 잠금 파일 → 사용자 자료 DB → 포트 열기 → 토큰 파일(유효하면 다시 쓰고, 없으면 발급) → 종목 목록 받기 시작 → 요청 받기.
+//! 순서: 설정 → 잠금 파일 → 사용자 자료 DB → 포트 열기 → 토큰 파일 읽기(키움 요청 없음) → 요청 받기.
+//! 키움 요청과 WebSocket 접속은 켜질 때 없다. 사용자가 연결하면 `Link::connect`가 토큰 → 종목 목록 → 실시간 순으로 잇는다(ADR 0021).
 //! 잠금은 키움 요청보다 먼저다. 두 번째 서버는 키움에 아무것도 보내지 않고 끝난다.
 
 use std::process::ExitCode;
@@ -23,7 +24,8 @@ use crate::http::{AppState, router};
 use crate::instance::InstanceLock;
 use crate::market::hub::{HubHandle, MarketHub};
 use crate::kiwoom::auth::{DAILY_REISSUE_AT, KiwoomAuth};
-use crate::kiwoom::rest::{KiwoomError, KiwoomRest, Priority};
+use crate::kiwoom::link::Link;
+use crate::kiwoom::rest::{KiwoomRest, Priority};
 use crate::kiwoom::stream::KiwoomStream;
 use crate::kiwoom::token_file::TokenFile;
 use crate::kiwoom::transport::ReqwestTransport;
@@ -35,7 +37,6 @@ const DAILY_RESET_AT: TimeOfDay = match TimeOfDay::hms(7, 45, 0) {
     Some(t) => t,
     None => unreachable!(),
 };
-const STARTUP_LIST_RETRY: Duration = Duration::from_secs(10);
 const DAILY_LIST_RETRY: Duration = Duration::from_secs(5 * 60);
 const DAILY_TOKEN_RETRY: Duration = Duration::from_secs(10 * 60);
 
@@ -102,40 +103,22 @@ pub struct ApplicationInputs {
     pub screener_store: Store,
     pub stream: (KiwoomStream, tokio::sync::mpsc::Receiver<crate::kiwoom::stream::StreamEvent>),
     pub static_dir: std::path::PathBuf,
+    pub screener_update_on_connect: bool,
 }
 
 pub fn application(inputs: ApplicationInputs) -> Arc<AppState> {
-    let ApplicationInputs { rest, clock, symbols, db, screener_store, stream: (stream, events), static_dir } = inputs;
+    let ApplicationInputs { rest, clock, symbols, db, screener_store, stream: (stream, events), static_dir, screener_update_on_connect } = inputs;
     let bars = Arc::new(BarService::new(rest.clone(), symbols.clone(), clock.clone()));
     let screener = Arc::new(Screener::new(screener_store, rest.clone(), bars.clone(), symbols.clone(), clock.clone()));
     let hub = MarketHub::spawn(bars.clone(), stream, events, clock.clone());
-    Arc::new(AppState { symbols, bars, rest, db, clock, static_dir, hub, screener })
-}
-
-pub async fn initialize_rest(rest: &KiwoomRest, clock: &Clock, token_path: &std::path::Path) {
-    match rest.halted() {
-        Some(_) => {}
-        None if !rest.auth().needs_issue(clock.now()) => {
-            tracing::info!(path = %token_path.display(), "파일의 토큰을 다시 씁니다. 발급하지 않습니다");
-        }
-        None => {
-            if let Err(e) = rest.issue_token().await {
-                tracing::error!(error = %e, "첫 토큰을 받지 못했습니다. 조회가 들어오면 다시 받아 봅니다");
-            }
-        }
-    }
-}
-
-pub async fn initialize_market(state: Arc<AppState>, update_on_start: bool) {
-    if load_symbols_at_startup(state.clock.clone(), state.rest.clone(), state.symbols.clone()).await.is_err() { return; }
-    state.screener.fill_lost_listing().await;
-    if update_on_start { state.screener.update_if_behind().await; }
+    let link = Link::new(rest.clone(), symbols.clone(), screener.clone(), clock.clone(), screener_update_on_connect);
+    Arc::new(AppState { symbols, bars, rest, db, clock, static_dir, hub, screener, link })
 }
 
 pub async fn daily_maintenance(state: Arc<AppState>) {
     tokio::join!(
-        daily_reset(state.clock.clone(), state.rest.clone(), state.symbols.clone(), state.bars.clone(), state.hub.clone()),
-        daily_token(state.clock.clone(), state.rest.clone()),
+        daily_reset(state.clock.clone(), state.rest.clone(), state.symbols.clone(), state.bars.clone(), state.hub.clone(), state.link.clone()),
+        daily_token(state.clock.clone(), state.rest.clone(), state.link.clone()),
     );
 }
 
@@ -188,14 +171,16 @@ async fn serve(config: Config, token_file: TokenFile) -> ExitCode {
     };
     let rest = KiwoomRest::new(
         Arc::new(transport),
-        KiwoomAuth::new(config.kiwoom_app_key.clone(), config.kiwoom_app_secret.clone(), Some(token_file)),
+        match &config.kiwoom_credentials {
+            Some(credentials) => KiwoomAuth::new(credentials.app_key.clone(), credentials.app_secret.clone(), Some(token_file)),
+            None => KiwoomAuth::keyless(Some(token_file)),
+        },
         clock.clone(),
     );
-    initialize_rest(&rest, &clock, &config.token_path).await;
+    rest.set_access(crate::kiwoom::rest::Access::Closed);
     let symbols = Arc::new(SymbolDirectory::default());
     let stream = KiwoomStream::spawn(config.kiwoom_ws_url.clone(), rest.clone(), clock.clone());
-    let state = application(ApplicationInputs { rest: rest.clone(), clock: clock.clone(), symbols: symbols.clone(), db, screener_store, stream, static_dir: config.static_dir.clone() });
-    tokio::spawn(initialize_market(state.clone(), config.screener_update_on_start));
+    let state = application(ApplicationInputs { rest: rest.clone(), clock: clock.clone(), symbols: symbols.clone(), db, screener_store, stream, static_dir: config.static_dir.clone(), screener_update_on_connect: config.screener_update_on_start });
     tokio::spawn(daily_maintenance(state.clone()));
 
     let financial_store = crate::financials::store::Store::open(&config.financial_db_path).await;
@@ -229,31 +214,18 @@ async fn shutdown_signal() {
     tracing::info!("끝냅니다");
 }
 
-fn next_try(clock: &Clock, retry_at: KstTime, at_least: Duration) -> KstTime {
+pub(crate) fn next_try(clock: &Clock, retry_at: KstTime, at_least: Duration) -> KstTime {
     retry_at.max(clock.now().plus_secs(at_least.as_secs() as i64))
 }
 
-async fn load_symbols_at_startup(clock: Clock, rest: KiwoomRest, symbols: Arc<SymbolDirectory>) -> Result<(), KiwoomError> {
-    loop {
-        let e = match symbols.refresh(&rest, Priority::Screen).await {
-            Ok(()) => return Ok(()),
-            Err(e) => e,
-        };
-        let Some(retry_at) = e.retry_at() else {
-            tracing::error!(error = %e, "종목 목록을 받지 못했습니다. 다시 받지 않습니다");
-            return Err(e);
-        };
-        let at = next_try(&clock, retry_at, STARTUP_LIST_RETRY);
-        tracing::warn!(error = %e, %at, "종목 목록을 받지 못했습니다. 그 시각에 다시 받습니다");
-        clock.sleep_until(at).await;
-    }
-}
-
-async fn daily_reset(clock: Clock, rest: KiwoomRest, symbols: Arc<SymbolDirectory>, bars: Arc<BarService>, hub: HubHandle) {
+async fn daily_reset(clock: Clock, rest: KiwoomRest, symbols: Arc<SymbolDirectory>, bars: Arc<BarService>, hub: HubHandle, link: Link) {
     loop {
         clock.sleep_until(next_daily(clock.now(), DAILY_RESET_AT)).await;
         bars.clear_all();
         hub.daily_reset();
+        if !link.is_connected() {
+            continue;
+        }
         let deadline = next_daily(clock.now(), DAILY_RESET_AT);
         while let Err(e) = symbols.refresh(&rest, Priority::Background).await {
             let Some(retry_at) = e.retry_at() else {
@@ -271,10 +243,10 @@ async fn daily_reset(clock: Clock, rest: KiwoomRest, symbols: Arc<SymbolDirector
 }
 
 /// 매일 20:05: 그날 20:05 전에 받은 토큰이면 다시 받는다. 실패하면 07:45까지 10분마다.
-async fn daily_token(clock: Clock, rest: KiwoomRest) {
+async fn daily_token(clock: Clock, rest: KiwoomRest, link: Link) {
     loop {
         clock.sleep_until(next_daily(clock.now(), DAILY_REISSUE_AT)).await;
-        if rest.halted().is_some() || !rest.auth().due_daily_reissue(clock.now()) {
+        if !link.is_connected() || rest.halted().is_some() || !rest.auth().due_daily_reissue(clock.now()) {
             continue;
         }
         let deadline = next_daily(clock.now(), DAILY_RESET_AT);

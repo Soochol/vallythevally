@@ -1191,7 +1191,9 @@ async fn a_run_after_the_stock_list_arrives_but_before_the_start_fills_the_store
     let db = AppDb::open(&upgraded.path().join("run/vally.db")).await.unwrap();
     let (stream, _desired) = KiwoomStream::detached();
     let (_events, events) = tokio::sync::mpsc::channel(1);
-    let app = router(application(ApplicationInputs { rest: rest.clone(), clock, symbols: symbols.clone(), db, screener_store: store, stream: (stream, events), static_dir: upgraded.path().to_owned() }));
+    let state = application(ApplicationInputs { rest: rest.clone(), clock, symbols: symbols.clone(), db, screener_store: store, stream: (stream, events), static_dir: upgraded.path().to_owned(), screener_update_on_connect: false });
+    rest.set_access(server::kiwoom::rest::Access::Open);
+    let app = router(state);
     let call = |request: Request<Body>| {
         let app = app.clone();
         async move {

@@ -134,15 +134,15 @@ def start(run_id, run_dir):
             stop(run_dir)
             sys.exit(f"up: server exited early (code {server.returncode}); see {run_dir}/server.log")
         try:
-            status, body = http(f"{state['base_url']}/api/symbols?q=005930", timeout=2)
-            if status == 200 and b"005930" in body:
+            status, _ = http(f"{state['base_url']}/", timeout=2)
+            if status == 200:
                 print(json.dumps(state))
                 return state
         except Exception:
             pass
         time.sleep(0.2)
     stop(run_dir)
-    sys.exit(f"up: not ready (symbols never loaded); see {run_dir}/server.log")
+    sys.exit(f"up: not ready (GET / never answered 200); see {run_dir}/server.log")
 
 
 def connections(pid):
@@ -175,11 +175,13 @@ def doctor(run_dir):
         if status != 200:
             problems.append(f"GET / -> {status}")
         status, body = http(f"{state['base_url']}/api/symbols/005930")
-        if b"005930" not in body:
-            problems.append("symbol 005930 not loaded")
+        connected = b"005930" in body
+        if not connected and b"not_connected" not in body:
+            problems.append(f"symbols are neither loaded nor reported not_connected: {status} {body[:200]!r}")
     except Exception as e:
+        connected = False
         problems.append(f"http: {e}")
-    result = {"ok": not problems, "problems": problems, "base_url": state["base_url"], "run_dir": str(run_dir)}
+    result = {"ok": not problems, "connected": connected, "problems": problems, "base_url": state["base_url"], "run_dir": str(run_dir)}
     print(json.dumps(result, ensure_ascii=False, indent=1))
     return not problems
 

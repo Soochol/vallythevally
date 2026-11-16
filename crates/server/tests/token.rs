@@ -7,7 +7,15 @@ use std::time::Duration;
 use common::{APP_KEY, APP_SECRET, ScriptedTransport, Server, TOKEN, token_path};
 use common::support::token_for;
 use serde_json::{Value, json};
+use server::kiwoom::link::{LinkState, Problem};
 use server::kiwoom::token_file::credential_id;
+
+fn failure_of(state: LinkState) -> (Problem, Option<i64>, String) {
+    match state {
+        LinkState::Failed(failure) => (failure.problem, failure.retry_at.map(|at| at.unix()), failure.message),
+        other => panic!("연결 실패가 아니다: {other:?}"),
+    }
+}
 
 fn static_dir(root: &Path) -> PathBuf {
     let dir = root.join("dist");
@@ -98,13 +106,15 @@ async fn no_issue_within_ten_minutes_of_the_last_request_even_across_restarts() 
     let fake = ScriptedTransport::new();
     let tmp = tempfile::tempdir().unwrap();
     let lock = tmp.path().join("run/server.lock");
-    write_token_file(&lock, json!({"token": null, "last_request_at": now_unix() - 60}));
+    let last_request = now_unix() - 60;
+    write_token_file(&lock, json!({"token": null, "last_request_at": last_request}));
     let server = Server::spawn(&fake, &lock, &static_dir(tmp.path()));
     let base = format!("http://{}", server.addr().await);
-    let (status, body) = get(&base, "/api/bars?symbol=005930&period=D").await;
-    assert_eq!((status, body["error"]["code"].as_str()), (503, Some("kiwoom_unavailable")), "{body}");
-    let message = body["error"]["message"].as_str().unwrap();
+    let (problem, retry_at, message) = failure_of(server.link_state());
+    assert_eq!((problem, retry_at), (Problem::IssueIntervalWait, Some(last_request + 600)), "{message}");
     assert!(message.contains("10분"), "{message}");
+    let (status, body) = get(&base, "/api/bars?symbol=005930&period=D").await;
+    assert_eq!((status, body["error"]["code"].as_str(), body["error"]["reason"].as_str()), (503, Some("kiwoom_unavailable"), Some("not_connected")), "{body}");
     let logs = server.stop().await;
     assert_eq!(fake.requests(), 0, "{:?}\n{logs}", fake.api_ids());
 }
@@ -164,9 +174,11 @@ async fn assert_never_issues(fake: &ScriptedTransport, cases: Vec<(&str, Setup)>
             let server = Server::spawn_with(fake, &lock, &dist, &[("VALLY_TOKEN_PATH", token.as_os_str())]);
             let base = format!("http://{}", server.addr().await);
             let (status, body) = get(&base, "/api/symbols/005930").await;
+            let (problem, _, message) = failure_of(server.link_state());
             let logs = server.stop().await;
-            assert_eq!((status, body["error"]["code"].as_str()), (502, Some("kiwoom_auth_failed")), "{name}: {body}\n{logs}");
-            assert!(body["error"]["message"].as_str().unwrap().contains("토큰 파일"), "{name}: {body}");
+            assert_eq!((status, body["error"]["reason"].as_str()), (503, Some("not_connected")), "{name}: {body}\n{logs}");
+            assert_eq!(problem, Problem::TokenFileUnusable, "{name}: {message}");
+            assert!(message.contains("토큰 파일"), "{name}: {message}");
             let error = logs.lines().find(|l| l.contains("ERROR") && l.contains("토큰 파일을 읽지 못했습니다"));
             assert!(error.is_some_and(|l| l.contains(&token.display().to_string())), "{name}: 오류 로그에 경로가 있다\n{logs}");
             assert!(!logs.contains("파일의 토큰을 다시 씁니다"), "{name}\n{logs}");
@@ -201,10 +213,12 @@ async fn a_token_saved_for_another_app_key_is_never_sent_and_the_interval_still_
 
     let server = Server::spawn_with(&fake, &lock, &dist, other);
     let base = format!("http://{}", server.addr().await);
+    let (problem, _, message) = failure_of(server.link_state());
     let (status, body) = get(&base, "/api/bars?symbol=005930&period=D").await;
     let logs = server.stop().await;
-    assert_eq!((status, body["error"]["code"].as_str()), (503, Some("kiwoom_unavailable")), "{body}\n{logs}");
-    assert!(body["error"]["message"].as_str().unwrap().contains("10분"), "{body}");
+    assert_eq!((status, body["error"]["reason"].as_str()), (503, Some("not_connected")), "{body}\n{logs}");
+    assert_eq!(problem, Problem::IssueIntervalWait, "{message}");
+    assert!(message.contains("10분"), "{message}");
     assert_eq!(fake.requests(), sent_before, "앱키가 바뀌어도 10분 안에는 아무것도 보내지 않는다: {:?}", fake.api_ids());
 
     let path = token_path(&lock);

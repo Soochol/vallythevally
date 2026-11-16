@@ -11,7 +11,7 @@ use tokio_tungstenite::tungstenite::{Error as WsError, Message};
 use tokio_tungstenite::connect_async;
 
 use super::error::{Category, CodeKey, WsRejection, classify};
-use super::rest::KiwoomRest;
+use super::rest::{Access, KiwoomRest};
 use super::wire::{self, RealItem, RealType, WsControl, WsFrame};
 use crate::clock::Clock;
 
@@ -50,6 +50,7 @@ pub enum StreamEvent {
     Live { since: KstTime },
     /// 세션이 끊겼다. 다음 Live까지는 체결이 빠졌을 수 있다.
     Down { at: KstTime },
+    Idle,
     Halted,
 }
 
@@ -70,7 +71,8 @@ impl KiwoomStream {
     fn spawn_connector(connector: Box<dyn Connector>, rest: KiwoomRest, clock: Clock, timings: Timings) -> (KiwoomStream, mpsc::Receiver<StreamEvent>) {
         let (stream, desired) = KiwoomStream::detached();
         let (events, rx) = mpsc::channel(EVENT_BUFFER);
-        let session = Session { connector, rest, clock, timings, desired, events, budget: TokenBudget::Fresh, rebuild: ControlBudget::Fresh, dropped: Dropped::default() };
+        let access = rest.watch_access();
+        let session = Session { connector, rest, clock, timings, desired, access, events, budget: TokenBudget::Fresh, rebuild: ControlBudget::Fresh, dropped: Dropped::default() };
         tokio::spawn(session.run());
         (stream, rx)
     }
@@ -199,6 +201,7 @@ enum End {
     Transport(String),
     ControlTimeout(WsControl),
     ControlRejected(WsControl, WsRejection),
+    LinkClosed,
     Shutdown,
 }
 
@@ -217,6 +220,7 @@ impl std::fmt::Display for End {
             End::Transport(e) => write!(f, "WebSocket 전송 오류: {e}"),
             End::ControlTimeout(c) => write!(f, "{} 응답이 시간 안에 오지 않았습니다", c.trnm()),
             End::ControlRejected(c, r) => write!(f, "{}이 거절됐습니다({r:?})", c.trnm()),
+            End::LinkClosed => f.write_str("연결을 끊었습니다"),
             End::Shutdown => f.write_str("세션을 끝냅니다"),
         }
     }
@@ -241,6 +245,7 @@ struct Session {
     clock: Clock,
     timings: Timings,
     desired: watch::Receiver<BTreeSet<Symbol>>,
+    access: watch::Receiver<Access>,
     events: mpsc::Sender<StreamEvent>,
     budget: TokenBudget,
     rebuild: ControlBudget,
@@ -279,10 +284,17 @@ impl Session {
         loop {
             let from = state.name();
             state = match state {
-                SessionState::Disconnected { retry_at, attempt } => match self.wait_and_get_token(retry_at, attempt).await {
-                    Some(next) => next,
-                    None => return,
-                },
+                SessionState::Disconnected { retry_at, attempt } => {
+                    let (retry_at, attempt) = match self.wait_until_open().await {
+                        None => return,
+                        Some(false) => (retry_at, attempt),
+                        Some(true) => (Instant::now(), 0),
+                    };
+                    match self.wait_and_get_token(retry_at, attempt).await {
+                        Some(next) => next,
+                        None => return,
+                    }
+                }
                 SessionState::Connecting { attempt } => self.connect(attempt).await,
                 SessionState::LoggingIn { conn, attempt } => match self.log_in(conn, attempt).await {
                     Some(next) => next,
@@ -309,9 +321,15 @@ impl Session {
                     self.next_after_close(end, attempt)
                 }
                 SessionState::Halted => {
-                    tracing::error!("키움 WebSocket을 멈췄습니다. 서버를 다시 켜야 다시 연결합니다. 조회(REST)는 그대로 씁니다");
-                    let _ = self.events.send(StreamEvent::Halted).await;
-                    return;
+                    tracing::error!("키움 WebSocket을 멈췄습니다. 연결을 끊고 다시 연결해야 다시 접속합니다. 조회(REST)는 그대로 씁니다");
+                    if self.events.send(StreamEvent::Halted).await.is_err() {
+                        return;
+                    }
+                    tokio::select! {
+                        closed = self.access.wait_for(|access| *access != Access::Open) => if closed.is_err() { return },
+                        () = self.events.closed() => return,
+                    }
+                    SessionState::Disconnected { retry_at: Instant::now(), attempt: 0 }
                 }
             };
             match &state {
@@ -321,6 +339,21 @@ impl Session {
                 next => tracing::info!(from, to = next.name(), "키움 WebSocket 상태"),
             }
         }
+    }
+
+    async fn wait_until_open(&mut self) -> Option<bool> {
+        if *self.access.borrow() == Access::Open {
+            return Some(false);
+        }
+        self.events.send(StreamEvent::Idle).await.ok()?;
+        tokio::select! {
+            opened = self.access.wait_for(|access| *access == Access::Open) => { opened.ok()?; }
+            () = self.events.closed() => return None,
+        };
+        self.budget = TokenBudget::Fresh;
+        self.rebuild = ControlBudget::Fresh;
+        self.events.send(StreamEvent::Down { at: self.clock.now() }).await.ok()?;
+        Some(true)
     }
 
     fn retry_later(&self, attempt: u32) -> SessionState {
@@ -348,6 +381,10 @@ impl Session {
         tokio::select! {
             () = sleep_until(retry_at) => {}
             () = self.events.closed() => return None,
+            _ = self.access.wait_for(|access| *access != Access::Open) => {}
+        }
+        if *self.access.borrow() != Access::Open {
+            return Some(SessionState::Disconnected { retry_at: Instant::now(), attempt });
         }
         if self.rest.halted().is_some() {
             return Some(SessionState::Halted);
@@ -375,7 +412,11 @@ impl Session {
     }
 
     async fn connect(&mut self, attempt: u32) -> SessionState {
-        match timeout(self.timings.control, self.connector.connect()).await {
+        let connected = tokio::select! {
+            connected = timeout(self.timings.control, self.connector.connect()) => connected,
+            _ = self.access.wait_for(|access| *access != Access::Open) => return SessionState::Disconnected { retry_at: Instant::now(), attempt },
+        };
+        match connected {
             Ok(Ok(ws)) => SessionState::LoggingIn { conn: Conn::new(ws, self.timings.silence), attempt },
             Ok(Err(e)) => {
                 tracing::warn!(error = %e, "키움 WebSocket에 연결하지 못했습니다");
@@ -389,6 +430,10 @@ impl Session {
     }
 
     async fn log_in(&mut self, mut conn: Conn, attempt: u32) -> Option<SessionState> {
+        if *self.access.borrow() != Access::Open {
+            conn.close().await;
+            return Some(SessionState::Disconnected { retry_at: Instant::now(), attempt });
+        }
         let Some((token, generation)) = self.rest.auth().current(self.clock.now()) else {
             conn.close().await;
             return Some(SessionState::Disconnected { retry_at: Instant::now(), attempt });
@@ -511,6 +556,7 @@ impl Session {
             let message = tokio::select! {
                 m = conn.ws.next() => m,
                 () = sleep_until(conn.silent_at) => return Err(End::Silent),
+                _ = self.access.wait_for(|access| *access != Access::Open) => return Err(End::LinkClosed),
                 () = sleep_until(deadline.unwrap_or_else(Instant::now)), if deadline.is_some() => return Ok(Wake::Deadline),
                 changed = self.desired.changed(), if watch_desired => return changed.map(|()| Wake::Desired).map_err(|_| End::Shutdown),
             };
@@ -944,9 +990,13 @@ mod tests {
         holding_unrecorded(&rest, &clock);
         let (_stream, mut events) = peer.start_rest(rest.clone(), clock, fast(), &[samsung()]);
         assert_eq!(next(&mut events).await, StreamEvent::Halted);
-        assert!(events.recv().await.is_none());
+        tokio::task::yield_now().await;
+        assert!(events.try_recv().is_err(), "멈춘 세션은 연결을 끊기 전까지 더 보내지 않는다");
         assert_eq!((transport.sent().len(), peer.logins()), (1, 2));
         assert!(rest.halted().is_none());
+        rest.set_access(Access::Closed);
+        assert_eq!(next(&mut events).await, StreamEvent::Idle, "연결을 끊으면 멈춤에서 나와 접속하지 않는 상태로 돌아간다");
+        assert_eq!(peer.logins(), 2);
     }
 
     #[tokio::test(start_paused = true)]
@@ -1143,7 +1193,8 @@ mod tests {
         let (events_tx, mut events) = mpsc::channel(EVENT_BUFFER);
         let clock = clock();
         let (rest, _) = rest(&clock);
-        let session = Session { connector: Box::new(peer.clone()), rest, clock, timings: Timings::default(), desired, events: events_tx, budget: TokenBudget::Fresh, rebuild: ControlBudget::Fresh, dropped: Dropped::default() };
+        let access = rest.watch_access();
+        let session = Session { connector: Box::new(peer.clone()), rest, clock, timings: Timings::default(), desired, access, events: events_tx, budget: TokenBudget::Fresh, rebuild: ControlBudget::Fresh, dropped: Dropped::default() };
         let sender = session.events.clone();
         stream.set_desired([samsung()].into());
         tokio::spawn(session.run());

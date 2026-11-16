@@ -15,6 +15,8 @@ export function connectionView(c: Connection, now: UnixSeconds): ConnectionView 
   if (c.socket !== "open") return { tone: "gray", pulse: false, text: "서버에 다시 연결하는 중" };
   const { realtime, since, backfilling } = c.status;
   switch (realtime) {
+    case "notConnected":
+      return { tone: "gray", pulse: false, text: "키움에 연결하지 않았습니다" };
     case "halted":
       return { tone: "red", pulse: false, text: "실시간 멈춤: 서버를 다시 켜야 합니다" };
     case "reconnecting":
