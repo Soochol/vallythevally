@@ -366,6 +366,27 @@ try {
     return { screenshot: shot };
   });
 
+  await check("failed-date-switch-keeps-the-screen-consistent", async () => {
+    const other = await context.newPage();
+    await other.route("**/data/dates.json", (route) => route.fulfill({ json: [DATE, "20260721"] }));
+    await other.route("**/data/20260721/index.json", (route) => route.fulfill({ status: 500, body: "" }));
+    await other.goto(`${base}/?date=${DATE}&item=005930&t=10:30:30.000`);
+    await other.waitForFunction(() => document.getElementById("replay").dataset.ready === "true");
+    await other.selectOption("#date", "20260721");
+    await other.waitForFunction(() => document.getElementById("status").textContent.includes("받지 못했습니다"), null, { timeout: 15_000 });
+    await other.waitForFunction(() => document.getElementById("replay").dataset.ready === "true", null, { timeout: 15_000 });
+    const shown = await other.evaluate(() => ({
+      select: document.getElementById("date").value,
+      dataDate: document.getElementById("replay").dataset.date,
+      url: location.search,
+    }));
+    assert.equal(shown.select, DATE, "날짜 선택이 되돌아오지 않았다");
+    assert.equal(shown.dataDate, DATE);
+    assert.ok(shown.url.includes(`date=${DATE}`), shown.url);
+    await other.close();
+    return shown;
+  });
+
   await check("network-and-console", async () => {
     assert.deepEqual(outsideRequests, [], "띄운 주소 밖으로 요청이 나갔다");
     assert.ok(spanResponses.length > 0, "구간 파일 응답이 없다");

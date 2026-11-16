@@ -104,6 +104,7 @@ const state = {
   drawnCursor: null,
   windowEntry: -2,
   dirty: true,
+  notice: "",
   playing: false,
   speed: 1,
 };
@@ -283,7 +284,7 @@ function draw() {
         members: state.members,
       });
       waitingForOlderSpan = requestOlderForTrades(entry, earlier.length, frame.trades.value.length);
-      setStatus("");
+      setStatus(state.notice);
     } else if (loader.failed.has(key)) {
       frame = emptyFrame(state.cursor);
       setStatus(`구간 파일을 읽지 못했습니다: ${loader.failed.get(key)}`);
@@ -367,10 +368,19 @@ const fetchDayIndex = latestOnly((date) => fetchJson(`/data/${date}/index.json`)
 async function selectDate(date, wantedItem, startMs) {
   setReady(false);
   setStatus("목록을 받는 중");
-  state.entries = [];
   el.date.value = date;
-  const index = await fetchDayIndex(date);
+  let index;
+  try {
+    index = await fetchDayIndex(date);
+  } catch (error) {
+    el.date.value = state.date ?? "";
+    state.notice = `${date}의 목록을 받지 못했습니다: ${error.message ?? error}`;
+    state.dirty = true;
+    setStatus(state.notice);
+    return;
+  }
   if (index === STALE) return;
+  state.notice = "";
   state.date = date;
   el.replay.dataset.date = date;
   state.index = index;
