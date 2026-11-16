@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/domain", "crates/indicators", "crates/indicators-wasm", "crates/server"]
+members = ["crates/domain", "crates/indicators", "crates/indicators-wasm", "crates/server", "crates/hoga-format"]
 
 [workspace.package]
 edition = "2024"
