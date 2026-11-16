@@ -187,3 +187,24 @@ fn files_are_read_in_name_order() {
     let read = records(read_day(data.path(), 20260720).unwrap().collect());
     assert_eq!(read.iter().map(|record| record.recv_ms).collect::<Vec<_>>(), [t, t + 5 * MINUTE_MS]);
 }
+
+#[test]
+fn json_scalar_frames_round_trip_including_null() {
+    let data = tempdir().unwrap();
+    let t = KST_2026_07_20_10_27_55;
+    let texts = ["null", "true", "0", "\"s\"", "[]", "[null]"];
+    let mut writer = RawWriter::new(data.path());
+    for (offset, text) in texts.iter().enumerate() {
+        writer.write(&RawLine::Frame { recv_ms: t + offset as i64, text }).unwrap();
+    }
+    writer.close().unwrap();
+    let read = records(read_day(data.path(), 20260720).unwrap().collect());
+    let frames: Vec<&str> = read
+        .iter()
+        .map(|record| match &record.content {
+            RawContent::Frame(text) => text.as_str(),
+            other => panic!("{other:?}"),
+        })
+        .collect();
+    assert_eq!(frames, texts);
+}

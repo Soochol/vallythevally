@@ -49,7 +49,7 @@ impl Arguments {
                 .ok_or_else(|| ArgError::NotAnOption(token.clone()))?;
             if name == DATA_OPTION || spec.value_options.contains(&name) {
                 let value = remaining
-                    .next_if(|next| !next.starts_with("--"))
+                    .next_if(|next| !next.is_empty() && !next.starts_with("--"))
                     .ok_or_else(|| ArgError::MissingValue(name.to_string()))?;
                 if parsed.values.insert(name.to_string(), value.clone()).is_some() {
                     return Err(ArgError::Repeated(name.to_string()));
@@ -113,6 +113,7 @@ mod tests {
             parse(&["--items", "--follow"]),
             Err(ArgError::MissingValue("items".into()))
         );
+        assert_eq!(parse(&["--data", ""]), Err(ArgError::MissingValue("data".into())));
         assert_eq!(parse(&["--follow", "--follow"]), Err(ArgError::Repeated("follow".into())));
         assert_eq!(parse(&["stray"]), Err(ArgError::NotAnOption("stray".into())));
     }

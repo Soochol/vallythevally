@@ -139,11 +139,18 @@ impl FileReader {
 #[derive(Deserialize)]
 struct WireLine<'a> {
     recv_ms: i64,
-    #[serde(borrow)]
+    #[serde(default, borrow, deserialize_with = "present_value")]
     msg: Option<&'a RawValue>,
     event: Option<String>,
     reason: Option<String>,
     text: Option<String>,
+}
+
+fn present_value<'de, D>(deserializer: D) -> Result<Option<&'de RawValue>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    <&RawValue>::deserialize(deserializer).map(Some)
 }
 
 fn decode_record(line: &[u8]) -> Result<RawRecord, String> {
