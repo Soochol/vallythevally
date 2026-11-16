@@ -60,5 +60,5 @@ paths = [
   ".cargo/",
   "scripts/web.py",
   "scripts/dev.py",
-  "scripts/chromium.mjs",
+  "scripts/evidence.py",
 ]
