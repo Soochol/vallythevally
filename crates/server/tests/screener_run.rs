@@ -1716,7 +1716,8 @@ async fn a_market_cap_first_line_leaves_the_matched_date_to_the_next_bar_line_an
     }
 }
 
-const LARGE_STOCKS: usize = 4_000;
+const PAGE_BOUNDARY_STOCKS: usize = 350;
+const FULL_MARKET_STOCKS: usize = 4_000;
 const LARGE_BARS: usize = 3_000;
 
 fn random_walk(seed: u64, days: &[KstDate]) -> Vec<DayBar> {
@@ -1739,9 +1740,9 @@ fn random_walk(seed: u64, days: &[KstDate]) -> Vec<DayBar> {
         .collect()
 }
 
-fn fill_large_store(path: &Path, days: &[KstDate]) {
+fn fill_large_store(path: &Path, days: &[KstDate], stock_count: usize) {
     let store = Store::open(path).unwrap();
-    let codes: Vec<StockCode> = (0..LARGE_STOCKS).map(|i| StockCode::parse(&format!("{:05}0", 10_000 + i)).unwrap()).collect();
+    let codes: Vec<StockCode> = (0..stock_count).map(|i| StockCode::parse(&format!("{:05}0", 10_000 + i)).unwrap()).collect();
     let listing: Vec<ScreenerListing> = codes
         .iter()
         .enumerate()
@@ -1764,7 +1765,23 @@ fn fill_large_store(path: &Path, days: &[KstDate]) {
 }
 
 #[tokio::test]
-async fn a_screen_over_4000_stocks_collects_all_summaries_and_judges_thousands_of_bars() {
+async fn a_screen_over_several_summary_pages_collects_all_summaries_and_judges_thousands_of_bars() {
+    screen_large_market(PAGE_BOUNDARY_STOCKS, TimeBudget::Unchecked).await;
+}
+
+#[tokio::test]
+#[ignore = "전 종목 규모 시간 예산 성능 시험: docs/development-builds.md의 성능 시험 명령으로 실행한다"]
+async fn a_screen_over_4000_stocks_finishes_within_the_time_budget() {
+    screen_large_market(FULL_MARKET_STOCKS, TimeBudget::Checked).await;
+}
+
+#[derive(Clone, Copy, PartialEq)]
+enum TimeBudget {
+    Checked,
+    Unchecked,
+}
+
+async fn screen_large_market(stock_count: usize, budget: TimeBudget) {
     let days = last_open_days(LARGE_BARS, day(2026, 11, 6));
     let today = *days.last().unwrap();
     let dir = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
@@ -1772,11 +1789,11 @@ async fn a_screen_over_4000_stocks_collects_all_summaries_and_judges_thousands_o
     let path = dir.path().join("run/screener.duckdb");
     let filling = Instant::now();
     let stored = days.clone();
-    tokio::task::spawn_blocking(move || fill_large_store(&path, &stored)).await.unwrap();
-    eprintln!("가짜 저장소 {LARGE_STOCKS}종목 × {LARGE_BARS}봉을 {:?}에 채웠습니다", filling.elapsed());
+    tokio::task::spawn_blocking(move || fill_large_store(&path, &stored, stock_count)).await.unwrap();
+    eprintln!("가짜 저장소 {stock_count}종목 × {LARGE_BARS}봉을 {:?}에 채웠습니다", filling.elapsed());
 
     let fake = ScriptedTransport::new();
-    fake.set_quote_rows((0..LARGE_STOCKS).map(|i| {
+    fake.set_quote_rows((0..stock_count).map(|i| {
         let code = format!("{:05}0", 10_000 + i);
         summary_row(&code, today, 100, 100, 1000, 0)
     }).collect());
@@ -1828,11 +1845,13 @@ async fn a_screen_over_4000_stocks_collects_all_summaries_and_judges_thousands_o
         }
         let rows = result["rows"].as_array().unwrap().len();
         eprintln!("{label}: {took:?}, 결과 {rows}종목");
-        assert_eq!((result["universe"].clone(), result["excluded"].clone()), (json!(LARGE_STOCKS), excluded(0, 0)), "{label}");
+        assert_eq!((result["universe"].clone(), result["excluded"].clone()), (json!(stock_count), excluded(0, 0)), "{label}");
         assert!(rows > 0, "{label}: 판정이 실제로 돌았다면 맞는 종목이 있다");
         assert_eq!(result["missingSummary"], 0);
         let collection_budget = Duration::from_secs(12);
-        assert!(took.iter().all(|t| *t < *limit + collection_budget), "{label}: {took:?}");
+        if budget == TimeBudget::Checked {
+            assert!(took.iter().all(|t| *t < *limit + collection_budget), "{label}: {took:?}");
+        }
     }
     server.stop().await;
 }
