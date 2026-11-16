@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { createRequire } from "node:module";
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readdirSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -11,7 +11,8 @@ if (!baseURL || !evidence || !journey) throw new Error("usage: drive.mjs <base-u
 mkdirSync(evidence, { recursive: true });
 
 let tag = journey;
-for (let n = 2; existsSync(join(evidence, `${tag}.json`)); n++) tag = `${journey}-${n}`;
+const taken = (t) => readdirSync(evidence).some((f) => f.startsWith(`${t}.`) || f.startsWith(`${t}-0`) || f === `${t}-failure.png`);
+for (let n = 2; taken(tag); n++) tag = `${journey}-${n}`;
 const shot = (name) => join(evidence, `${tag}-${name}`);
 const SEARCH_BUTTON_TITLE = "종목 검색 (/ 또는 Ctrl+K)";
 const journeys = {
