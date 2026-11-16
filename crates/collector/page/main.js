@@ -253,16 +253,19 @@ function loadedEarlier(entry) {
 }
 
 function requestOlderForTrades(entry, loadedCount, tradeCount) {
-  if (tradeCount >= RECENT_TRADE_LIMIT || loadedCount >= MAX_TRADE_LOOKBACK_SPANS) return;
+  if (tradeCount >= RECENT_TRADE_LIMIT || loadedCount >= MAX_TRADE_LOOKBACK_SPANS) return false;
   const older = entry - loadedCount - 1;
-  if (older < 0 || state.starts[older + 1] - state.starts[older] !== SPAN_MINUTES) return;
-  loader.protectedKeys.add(keyOf(older));
-  loader.request(keyOf(older), urlOf(older));
+  if (older < 0 || state.starts[older + 1] - state.starts[older] !== SPAN_MINUTES) return false;
+  const key = keyOf(older);
+  loader.protectedKeys.add(key);
+  loader.request(key, urlOf(older));
+  return !loader.failed.has(key);
 }
 
 function draw() {
   const entry = entryIndexAt(state.starts, state.cursor);
   let frame;
+  let waitingForOlderSpan = false;
   if (entry < 0) {
     frame = emptyFrame(state.cursor);
     setStatus("이 시각의 구간 파일이 없습니다");
@@ -278,7 +281,7 @@ function draw() {
         timeMs: state.cursor,
         members: state.members,
       });
-      requestOlderForTrades(entry, earlier.length, frame.trades.value.length);
+      waitingForOlderSpan = requestOlderForTrades(entry, earlier.length, frame.trades.value.length);
       setStatus("");
     } else if (loader.failed.has(key)) {
       frame = emptyFrame(state.cursor);
@@ -294,9 +297,9 @@ function draw() {
   el.bar.setAttribute("aria-valuetext", formatClock(state.cursor));
   el.playhead.style.left = `${((state.cursor - state.min) / (state.max - state.min + 1)) * 100}%`;
   state.drawnCursor = state.cursor;
-  state.dirty = false;
+  state.dirty = waitingForOlderSpan;
   el.replay.dataset.cursorMs = String(state.cursor);
-  setReady(true);
+  setReady(!waitingForOlderSpan);
 }
 
 let lastTimestamp = 0;
