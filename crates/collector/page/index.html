@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>호가 복기</title>
+  <link rel="stylesheet" href="/style.css">
+  <script type="module" src="/main.js"></script>
+</head>
+<body>
+  <main id="replay" data-ready="false" data-cursor-ms="" data-date="" data-item="">
+    <header class="controls">
+      <label>날짜 <select id="date" aria-label="날짜"></select></label>
+      <label>종목 <select id="item" aria-label="종목"></select></label>
+      <button id="play" type="button">재생</button>
+      <label>배속
+        <select id="speed" aria-label="배속">
+          <option value="1">1배</option>
+          <option value="5">5배</option>
+          <option value="10">10배</option>
+        </select>
+      </label>
+      <output id="clock" aria-label="커서 시각">--:--:--.---</output>
+    </header>
+    <div class="bar" id="bar-wrap">
+      <div class="bar-track"></div>
+      <div class="bar-gaps" id="bar-gaps"></div>
+      <div class="bar-playhead" id="bar-playhead"></div>
+      <input id="bar" type="range" min="0" max="1" step="1" value="0" aria-label="시간 막대">
+    </div>
+    <p id="status" role="status"></p>
+    <section class="panes">
+      <section class="pane" aria-label="호가창">
+        <h2>호가창</h2>
+        <div id="book" class="book"></div>
+      </section>
+      <section class="pane" aria-label="최근 체결">
+        <h2>최근 체결</h2>
+        <div id="trades" class="trades"></div>
+      </section>
+      <section class="pane" aria-label="프로그램매매와 거래원">
+        <h2>프로그램매매</h2>
+        <div id="program" class="program"></div>
+        <h2>거래원</h2>
+        <div id="brokers" class="brokers"></div>
+      </section>
+    </section>
+    <div id="frame-stat" class="frame-stat" title="최근 300프레임의 프레임 간격 p95">프레임 p95 —</div>
+  </main>
+</body>
+</html>
