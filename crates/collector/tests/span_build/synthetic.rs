@@ -99,6 +99,47 @@ fn a_day_that_starts_with_live_has_no_gap() {
 }
 
 #[test]
+fn a_first_start_with_control_responses_before_live_has_no_gap() {
+    let data = tempfile::tempdir().unwrap();
+    write_raw(
+        data.path(),
+        &[
+            Line::Raw(at(9, 0, 0), r#"{"trnm":"LOGIN","return_code":0}"#),
+            Line::Raw(at(9, 0, 1), r#"{"trnm":"REG","return_code":0}"#),
+            Line::Live(at(9, 0, 2)),
+            Line::Frame(at(9, 0, 5), book_frame("FIRST", "090005", "1000", "1")),
+        ],
+    );
+    let report = build(data.path());
+    assert!(!report.failed(), "{report}");
+    assert_eq!(report.gap_intervals, 0);
+    assert!(read_span(data.path(), "FIRST", MIN_0900, 1).stream(StreamKind::Gaps).is_none());
+    assert!(verify_day(data.path(), DATE, AFTER_THE_DAY_UNIX_MS).unwrap().passed);
+}
+
+#[test]
+fn a_process_death_after_real_frames_leaves_a_gap_from_the_last_line() {
+    let data = tempfile::tempdir().unwrap();
+    write_raw(
+        data.path(),
+        &[
+            Line::Live(at(9, 0, 0)),
+            Line::Frame(at(9, 0, 5), book_frame("DIED", "090005", "1000", "1")),
+            Line::Raw(at(9, 3, 0), r#"{"trnm":"LOGIN","return_code":0}"#),
+            Line::Live(at(9, 3, 1)),
+            Line::Frame(at(9, 3, 5), book_frame("DIED", "090305", "1000", "1")),
+        ],
+    );
+    let report = build(data.path());
+    assert!(!report.failed(), "{report}");
+    assert_eq!(report.gap_intervals, 1);
+    let span = read_span(data.path(), "DIED", MIN_0900, 1);
+    assert_eq!(column(&span, StreamKind::Gaps, "from_ms"), [ms_of_day(at(9, 3, 0))]);
+    assert_eq!(column(&span, StreamKind::Gaps, "to_ms"), [ms_of_day(at(9, 3, 1))]);
+    assert!(verify_day(data.path(), DATE, AFTER_THE_DAY_UNIX_MS).unwrap().passed);
+}
+
+#[test]
 fn only_finished_spans_are_cut_for_today() {
     let ms = |h, m, s, extra| at(h, m, s) + extra;
     assert_eq!(last_finished_span(DATE, ms(9, 4, 59, 999)), Some(107));

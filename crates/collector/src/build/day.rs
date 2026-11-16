@@ -230,8 +230,8 @@ impl RawDay {
         let line_ms = time.ms_of_day;
         match content {
             RawContent::Frame(text) => {
-                self.take_frame(line_ms, &text);
-                tracker.record(line_ms, LineEvent::Other);
+                let event = if self.take_frame(line_ms, &text) { LineEvent::Real } else { LineEvent::Other };
+                tracker.record(line_ms, event);
             }
             RawContent::Text(_) => {
                 self.skipped.text_lines += 1;
@@ -242,15 +242,16 @@ impl RawDay {
         }
     }
 
-    fn take_frame(&mut self, line_ms: u32, text: &str) {
+    fn take_frame(&mut self, line_ms: u32, text: &str) -> bool {
         let entries = match parse_frame(text) {
             Ok(entries) => entries,
             Err(error) => {
                 self.errors.frames += 1;
                 self.sample(error.to_string());
-                return;
+                return false;
             }
         };
+        let carries_real_items = !entries.is_empty();
         for entry in entries {
             match entry {
                 Ok(Item::Row(row)) => {
@@ -282,6 +283,7 @@ impl RawDay {
                 }
             }
         }
+        carries_real_items
     }
 
     fn sample(&mut self, message: String) {
