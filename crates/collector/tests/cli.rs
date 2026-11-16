@@ -6,8 +6,8 @@ fn run(arguments: &[&str]) -> (Option<i32>, String) {
 }
 
 #[test]
-fn every_subcommand_reports_not_implemented_and_fails() {
-    for command in ["collect", "build", "verify", "serve"] {
+fn unfinished_subcommands_report_not_implemented_and_fail() {
+    for command in ["collect", "serve"] {
         let (code, stderr) = run(&[command]);
         assert_eq!(code, Some(1), "{command}");
         assert!(stderr.contains("아직 구현되지 않았습니다"), "{command}: {stderr}");
@@ -24,7 +24,9 @@ fn unknown_subcommand_unknown_argument_and_missing_value_fail() {
 
 #[test]
 fn data_option_is_accepted_by_every_subcommand() {
-    for command in ["collect", "build", "verify", "serve"] {
+    for command in ["collect", "serve"] {
         assert_eq!(run(&[command, "--data", "somewhere"]).0, Some(1), "{command}");
     }
+    assert_eq!(run(&["build", "--data", "somewhere", "--date", "20260720"]).0, Some(1));
+    assert_eq!(run(&["verify", "--data", "somewhere", "--date", "20260720"]).0, Some(1));
 }
