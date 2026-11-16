@@ -10,6 +10,13 @@ async function collapseDock(page: Page) {
   await page.mouse.move(5, 5);
   await cell(page).focus();
   await expect(page.getByRole("navigation", { name: "드로잉 도구" }).locator(".draw-pill")).toHaveAttribute("aria-expanded", "false");
+  let last = "";
+  await expect.poll(async () => {
+    const now = JSON.stringify(await page.getByRole("navigation", { name: "드로잉 도구" }).boundingBox());
+    const same = now === last;
+    last = now;
+    return same;
+  }, { intervals: [30, 30, 60, 100] }).toBe(true);
 }
 
 const GROUP_LABEL: Record<Tool["group"], string> = { line: "선", fib: "피보나치·갠", shape: "도형", note: "주석", measure: "측정", pattern: "패턴" };
@@ -61,8 +68,21 @@ async function place(page: Page, tool: Tool, index: number): Promise<(saved: num
   }
 }
 
-async function placeAll(page: Page, scenario: Scenario) {
-  for (const [index, tool] of TOOLS.entries()) {
+interface Slice { name: string; placed: readonly { tool: Tool; index: number }[] }
+
+const SLICE_SIZE = 5;
+const SLICES: readonly Slice[] = [...toolsByGroup()].flatMap(([group, groupTools]) => {
+  const slices: Slice[] = [];
+  const size = Math.ceil(groupTools.length / Math.ceil(groupTools.length / SLICE_SIZE));
+  for (let from = 0; from < groupTools.length; from += size) {
+    const placed = groupTools.slice(from, from + size).map((tool) => ({ tool, index: TOOLS.indexOf(tool) }));
+    slices.push({ name: `${GROUP_LABEL[group]} ${from + 1}~${from + placed.length}번째`, placed });
+  }
+  return slices;
+});
+
+async function placeSlice(page: Page, scenario: Scenario, slice: Slice) {
+  for (const [count, { tool, index }] of slice.placed.entries()) {
     await pickTool(page, GROUP_LABEL[tool.group], tool.label);
     const checkPoints = await place(page, tool, index);
     if (tool.text?.editOnPlace) {
@@ -71,7 +91,7 @@ async function placeAll(page: Page, scenario: Scenario) {
       await editor.press("Enter");
       await expect(editor).toBeHidden();
     }
-    await expect.poll(async () => (await drawings(scenario)).length, { message: tool.label }).toBe(index + 1);
+    await expect.poll(async () => (await drawings(scenario)).length, { message: tool.label }).toBe(count + 1);
     const saved = (await drawings(scenario)).at(-1)!;
     expect(saved.tool, tool.label).toBe(tool.tool);
     checkPoints(saved.points.length);
@@ -80,76 +100,84 @@ async function placeAll(page: Page, scenario: Scenario) {
 }
 
 const tools = () => TOOLS.map((t) => t.tool).sort();
+const toolNames = (slice: Slice) => slice.placed.map(({ tool }) => tool.tool).sort();
 
-test("등록된 도구는 36개다", () => {
+test("등록된 도구는 36개이고, 쪼갠 시험 묶음이 36개를 빠짐없이 한 번씩 받는다", () => {
   expect(TOOLS).toHaveLength(36);
+  expect(SLICES.flatMap(toolNames).sort()).toEqual(tools());
+  expect(Math.max(...SLICES.map((slice) => slice.placed.length))).toBeLessThanOrEqual(SLICE_SIZE);
 });
 
-test(`모든 도구: 도구 막대에서 골라 놓고, 새로고침 뒤에도 ${TOOLS.length}개가 개체 목록에 도구 이름으로 남는다`, async ({ page, scenario }, testInfo) => {
-  const errors: string[] = []; page.on("pageerror", (e) => errors.push(e.message));
-  saveChartShare(scenario, 0.642);
-  await page.setViewportSize({ width: 1280, height: 940 });
-  await open(page);
-  await placeAll(page, scenario);
-  expect(await drawings(scenario)).toHaveLength(TOOLS.length);
-  await expect.poll(async () => (await mirror(page)).map((d) => d.tool).sort()).toEqual(tools());
-  const saved = await drawings(scenario);
+for (const slice of SLICES) {
+  test(`모든 도구 ${slice.name}: 도구 막대에서 골라 놓고, 새로고침 뒤에도 ${slice.placed.length}개가 개체 목록에 도구 이름으로 남는다`, async ({ page, scenario }, testInfo) => {
+    const errors: string[] = []; page.on("pageerror", (e) => errors.push(e.message));
+    saveChartShare(scenario, 0.642);
+    await page.setViewportSize({ width: 1280, height: 940 });
+    await open(page);
+    await placeSlice(page, scenario, slice);
+    expect(await drawings(scenario)).toHaveLength(slice.placed.length);
+    await expect.poll(async () => (await mirror(page)).map((d) => d.tool).sort()).toEqual(toolNames(slice));
+    const saved = await drawings(scenario);
 
-  await page.reload();
-  await expect.poll(async () => (await mirror(page)).map((d) => d.tool).sort()).toEqual(tools());
-  expect((await mirror(page)).every((d) => d.points.every((p) => p !== null))).toBe(true);
-  expect(await drawings(scenario)).toEqual(saved);
-  await page.screenshot({ path: testInfo.outputPath("all-tools-1280.png") });
+    await page.reload();
+    await expect.poll(async () => (await mirror(page)).map((d) => d.tool).sort()).toEqual(toolNames(slice));
+    expect((await mirror(page)).every((d) => d.points.every((p) => p !== null))).toBe(true);
+    expect(await drawings(scenario)).toEqual(saved);
+    await page.screenshot({ path: testInfo.outputPath("all-tools-1280.png") });
 
-  await expandDock(page); await page.getByRole("button", { name: "개체 목록 열기", exact: true }).click();
-  const list = page.getByRole("region", { name: "개체 목록" });
-  await expect(list.locator(".draw-object-row")).toHaveCount(TOOLS.length);
-  for (const tool of TOOLS) await expect(list.getByRole("button", { name: `고르기: ${tool.label}`, exact: true })).toHaveCount(1);
+    await expandDock(page); await page.getByRole("button", { name: "개체 목록 열기", exact: true }).click();
+    const list = page.getByRole("region", { name: "개체 목록" });
+    await expect(list.locator(".draw-object-row")).toHaveCount(slice.placed.length);
+    for (const { tool } of slice.placed) await expect(list.getByRole("button", { name: `고르기: ${tool.label}`, exact: true })).toHaveCount(1);
 
-  await collapseDock(page);
-  const chart = chartOf(cell(page));
-  const pane = await chart.evaluate((el) => {
-    const r = [...el.querySelectorAll("canvas")].map((c) => c.getBoundingClientRect()).sort((a, b) => b.width * b.height - a.width * a.height)[0]!;
-    return { x: r.x, y: r.y, width: r.width, height: r.height };
+    await collapseDock(page);
+    const chart = chartOf(cell(page));
+    const pane = await chart.evaluate((el) => {
+      const r = [...el.querySelectorAll("canvas")].map((c) => c.getBoundingClientRect()).sort((a, b) => b.width * b.height - a.width * a.height)[0]!;
+      return { x: r.x, y: r.y, width: r.width, height: r.height };
+    });
+    const shot = () => page.screenshot({ clip: pane, mask: [page.getByRole("navigation", { name: "드로잉 도구" })] });
+    const shown = await shot();
+    for (const { tool } of slice.placed) {
+      await list.getByRole("button", { name: `${tool.label} 숨기기`, exact: true }).click();
+      await expect.poll(async () => (await shot()).equals(shown), { message: `${tool.label}: 숨기면 차트 그림이 바뀐다` }).toBe(false);
+      await list.getByRole("button", { name: `${tool.label} 보이기`, exact: true }).click();
+      await expect.poll(async () => (await shot()).equals(shown), { message: `${tool.label}: 다시 보이면 그림이 돌아온다` }).toBe(true);
+    }
+    expect(errors).toEqual([]);
   });
-  const shot = () => page.screenshot({ clip: pane, mask: [page.getByRole("navigation", { name: "드로잉 도구" })] });
-  const shown = await shot();
-  for (const tool of TOOLS) {
-    await list.getByRole("button", { name: `${tool.label} 숨기기`, exact: true }).click();
-    await expect.poll(async () => (await shot()).equals(shown), { message: `${tool.label}: 숨기면 차트 그림이 바뀐다` }).toBe(false);
-    await list.getByRole("button", { name: `${tool.label} 보이기`, exact: true }).click();
-    await expect.poll(async () => (await shot()).equals(shown), { message: `${tool.label}: 다시 보이면 그림이 돌아온다` }).toBe(true);
-  }
-  expect(errors).toEqual([]);
-});
 
-test(`모든 도구: 휴대폰 폭에서는 ${TOOLS.length}개가 보이고 편집 조작은 없다`, async ({ page, scenario }, testInfo) => {
-  await page.setViewportSize({ width: 1280, height: 800 });
-  await open(page);
-  await placeAll(page, scenario);
-  await expandDock(page); await page.getByRole("button", { name: "개체 목록 열기", exact: true }).click();
-  await page.getByRole("region", { name: "개체 목록" }).getByRole("button", { name: "고르기: 추세선", exact: true }).click();
-  await expect.poll(async () => (await mirror(page)).find((d) => d.tool === "trendline")?.handles.length).toBe(2);
-  await page.setViewportSize({ width: 390, height: 844 });
-  await expect(page.getByRole("navigation", { name: "드로잉 도구" })).toBeHidden();
-  await expect(page.getByRole("toolbar", { name: "드로잉 스타일" })).toBeHidden();
-  await expect.poll(async () => (await mirror(page)).map((d) => d.tool).sort()).toEqual(tools());
-  expect((await mirror(page)).flatMap((d) => d.handles)).toHaveLength(0);
-  const chart = chartOf(cell(page));
-  const r = (await chart.boundingBox())!;
-  await page.mouse.click(r.x + r.width * 0.3, r.y + r.height * 0.4); await page.keyboard.press("Delete");
-  expect(await drawings(scenario)).toHaveLength(TOOLS.length);
-  await page.screenshot({ path: testInfo.outputPath("all-tools-phone.png") });
+  test(`모든 도구 ${slice.name}: 휴대폰 폭에서는 ${slice.placed.length}개가 보이고 편집 조작은 없다`, async ({ page, scenario }, testInfo) => {
+    const first = slice.placed[0]!.tool;
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await open(page);
+    await placeSlice(page, scenario, slice);
+    await expandDock(page); await page.getByRole("button", { name: "개체 목록 열기", exact: true }).click();
+    await page.getByRole("region", { name: "개체 목록" }).getByRole("button", { name: `고르기: ${first.label}`, exact: true }).click();
+    await expect.poll(async () => (await mirror(page)).find((d) => d.tool === first.tool)?.handles.length).toBeGreaterThan(0);
+    const chart = chartOf(cell(page));
+    await page.setViewportSize({ width: 390, height: 844 });
+    await expect(page.getByRole("navigation", { name: "드로잉 도구" })).toBeHidden();
+    await expect(page.getByRole("toolbar", { name: "드로잉 스타일" })).toBeHidden();
+    await expect.poll(async () => (await mirror(page)).map((d) => d.tool).sort()).toEqual(toolNames(slice));
+    expect((await mirror(page)).flatMap((d) => d.handles)).toHaveLength(0);
+    const r = (await chart.boundingBox())!;
+    await page.mouse.click(r.x + r.width * 0.3, r.y + r.height * 0.4); await page.keyboard.press("Delete");
+    const onFirst = (await mirror(page)).find((d) => d.tool === first.tool)!.points[0]!;
+    await page.mouse.click(r.x + onFirst.x, r.y + onFirst.y); await page.keyboard.press("Delete");
+    expect(await drawings(scenario)).toHaveLength(slice.placed.length);
+    await page.screenshot({ path: testInfo.outputPath("all-tools-phone.png") });
 
-  await page.reload();
-  await expect.poll(async () => (await mirror(page)).length).toBe(TOOLS.length);
-  const shown = await chart.screenshot();
-  for (const d of await drawings(scenario)) scenario.documents.deleteDrawing(d.id);
-  await page.reload();
-  await expect(chart).toHaveAttribute("data-bar-count", /^[1-9]\d*$/);
-  await expect.poll(async () => (await mirror(page)).length).toBe(0);
-  expect((await chart.screenshot()).equals(shown)).toBe(false);
-});
+    await page.reload();
+    await expect.poll(async () => (await mirror(page)).length).toBe(slice.placed.length);
+    const shown = await chart.screenshot();
+    for (const d of await drawings(scenario)) scenario.documents.deleteDrawing(d.id);
+    await page.reload();
+    await expect(chart).toHaveAttribute("data-bar-count", /^[1-9]\d*$/);
+    await expect.poll(async () => (await mirror(page)).length).toBe(0);
+    expect((await chart.screenshot()).equals(shown)).toBe(false);
+  });
+}
 
 for (const width of [1280, 1024, 800]) {
   test(`도구 막대: 창 폭 ${width}px에서 차트 안에 머물고 모든 버튼과 그룹 메뉴에 닿는다`, async ({ page, scenario }) => {
