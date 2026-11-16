@@ -295,12 +295,20 @@ impl Link {
             return self.fail(&error, epoch);
         }
         self.step(epoch, LinkState::Connecting(ConnectStep::Realtime))?;
+        let mut outcome = LinkState::Connected;
         self.publish(epoch, || {
-            rest.set_access(Access::Open);
-            self.set(LinkState::Connected);
+            if let Some(halt) = auth.halted() {
+                outcome = LinkState::Failed(LinkFailure::of(&halt.into()));
+                rest.set_access(Access::Closed);
+            } else {
+                rest.set_access(Access::Open);
+            }
+            self.set(outcome.clone());
         })?;
-        self.start_screener_update();
-        Ok(LinkState::Connected)
+        if outcome == LinkState::Connected {
+            self.start_screener_update();
+        }
+        Ok(outcome)
     }
 
     fn finish(&self, epoch: u64, state: LinkState) -> Result<LinkState, Stale> {

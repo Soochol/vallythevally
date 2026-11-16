@@ -755,3 +755,28 @@ async fn a_rejected_saved_token_inside_the_issue_interval_ends_the_connect_as_a_
     assert_eq!(fake.issued(), 0);
     server.stop().await;
 }
+
+#[tokio::test]
+async fn a_key_rejection_while_connecting_always_leaves_the_link_failed_and_closed() {
+    let fake = ScriptedTransport::new();
+    fake.delay("ka10099", Duration::from_secs(1));
+    fake.respond_with("ka10081", 200, json!({"return_code": 3, "return_msg": KEY_REJECTED}));
+    let env = env();
+    let server = spawn(&fake, &env, &[OFF]);
+    let base = format!("http://{}", server.addr().await);
+    let connecting = tokio::spawn({
+        let link = server.link();
+        async move { link.connect(false).await }
+    });
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    let bars = tokio::spawn({
+        let base = base.clone();
+        async move { get(&base, "/api/bars?symbol=005930&period=D").await }
+    });
+    connecting.await.unwrap();
+    bars.await.unwrap();
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert_eq!(failure(server.link_state()).problem, Problem::KeyNeedsCheck);
+    assert_eq!(get(&base, "/api/bars?symbol=005930&period=D").await.1["error"]["reason"], "not_connected");
+    server.stop().await;
+}
