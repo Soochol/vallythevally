@@ -3,6 +3,7 @@ import type { ClientMessage } from "./generated/ClientMessage";
 import type { ConnectionStatus } from "./generated/ConnectionStatus";
 import type { ServerMessage } from "./generated/ServerMessage";
 import type { SymbolCode } from "./generated/SymbolCode";
+import type { Venue } from "./generated/Venue";
 
 /** 구독 하나에 오는 메시지. `resync`는 서버와 다시 연결되어 칸을 처음부터 만들어야 한다는 뜻이다(backend.md §8.3의 6). */
 export type SubEvent =
@@ -20,7 +21,7 @@ export interface MarketSocketLike {
   /** 지금 연결 상태로 한 번 부르고, 바뀔 때마다 부른다. */
   watch(listener: (c: Connection) => void): () => void;
   /** 지금 보이는 관심종목 전체, 위에서부터. 마지막 것이 비어 있지 않으면 새 `hello`마다 다시 보낸다. */
-  setWatch(symbols: readonly SymbolCode[]): void;
+  setWatch(symbols: readonly SymbolCode[], venue: Venue): void;
   onQuotes(handler: (e: QuoteEvent) => void): () => void;
 }
 
@@ -78,6 +79,7 @@ export class MarketSocket implements MarketSocketLike {
   private readonly subs = new Map<string, Subscription>();
   private readonly watchers = new Set<(c: Connection) => void>();
   private watchSymbols: SymbolCode[] = [];
+  private watchVenue: Venue = "combined";
   private readonly quoteHandlers = new Set<(e: QuoteEvent) => void>();
 
   constructor(private readonly opts: { url: () => string; connect?: Connect }) {}
@@ -113,8 +115,9 @@ export class MarketSocket implements MarketSocketLike {
     return () => this.watchers.delete(listener);
   }
 
-  setWatch(symbols: readonly SymbolCode[]): void {
+  setWatch(symbols: readonly SymbolCode[], venue: Venue): void {
     this.watchSymbols = [...symbols];
+    this.watchVenue = venue;
     if (this.connection.socket === "open") this.sendWatch();
   }
 
@@ -180,7 +183,7 @@ export class MarketSocket implements MarketSocketLike {
   }
 
   private sendWatch(): void {
-    this.send({ type: "watch", symbols: this.watchSymbols, venue: null });
+    this.send({ type: "watch", symbols: this.watchSymbols, venue: this.watchVenue });
   }
 
   private emitQuotes(e: QuoteEvent): void {

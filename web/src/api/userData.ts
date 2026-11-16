@@ -2,6 +2,7 @@ import type { Layout } from "./generated/Layout";
 import type { LayoutSummary } from "./generated/LayoutSummary";
 import type { Quote } from "./generated/Quote";
 import type { SymbolCode } from "./generated/SymbolCode";
+import type { Venue } from "./generated/Venue";
 import type { Watchlists } from "./generated/Watchlists";
 import { getJson } from "./http";
 
@@ -16,11 +17,11 @@ export const fetchLayout = (id: string, signal?: AbortSignal) => getJson<Layout>
 export const fetchUiState = (signal?: AbortSignal) => getJson<unknown>(UI_STATE_PATH, signal);
 export const fetchWatchlists = (signal?: AbortSignal) => getJson<Watchlists>(WATCHLISTS_PATH, signal);
 
-export async function fetchQuotes(symbols: readonly SymbolCode[], signal?: AbortSignal): Promise<Quote[]> {
+export async function fetchQuotes(symbols: readonly SymbolCode[], venue: Venue, signal?: AbortSignal): Promise<Quote[]> {
   const chunks: SymbolCode[][] = [];
   for (let i = 0; i < symbols.length; i += QUOTES_MAX_SYMBOLS) chunks.push(symbols.slice(i, i + QUOTES_MAX_SYMBOLS));
   const pages = await Promise.all(
-    chunks.map((c) => getJson<Quote[]>(`/api/quotes?symbols=${c.map(encodeURIComponent).join(",")}`, signal)),
+    chunks.map((c) => getJson<Quote[]>(`/api/quotes?symbols=${c.map(encodeURIComponent).join(",")}&venue=${venue}`, signal)),
   );
   return pages.flat();
 }

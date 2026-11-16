@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import type { Quote } from "../api/generated/Quote";
 import type { SymbolCode } from "../api/generated/SymbolCode";
+import type { Venue } from "../api/generated/Venue";
 import { ApiRequestError } from "../api/http";
 import type { QuoteEvent } from "../api/socket";
 import { QuoteBook } from "./quoteBook";
@@ -18,30 +19,36 @@ const quote = (symbol: SymbolCode, price: number, source: Quote["source"] = "rea
 
 interface Fetch {
   symbols: SymbolCode[];
+  venue: Venue;
   resolve(quotes: Quote[]): void;
   reject(error: unknown): void;
 }
 
 function setup() {
   const watches: SymbolCode[][] = [];
+  const watchVenues: Venue[] = [];
   const fetches: Fetch[] = [];
   let emit: (e: QuoteEvent) => void = () => {};
   const book = new QuoteBook({
     socket: {
-      setWatch: (symbols) => watches.push([...symbols]),
+      setWatch: (symbols, venue) => {
+        watches.push([...symbols]);
+        watchVenues.push(venue);
+      },
       onQuotes: (handler) => {
         emit = handler;
         return () => {};
       },
     },
-    fetchQuotes: (symbols) =>
+    fetchQuotes: (symbols, venue) =>
       new Promise((resolve, reject) => {
-        fetches.push({ symbols: [...symbols], resolve, reject });
+        fetches.push({ symbols: [...symbols], venue, resolve, reject });
       }),
   });
   const price = (code: SymbolCode) => book.get(code).quote?.price;
   const realtime = (...quotes: Quote[]) => emit({ type: "quotes", venue: "combined", quotes });
-  return { book, watches, fetches, price, realtime, emit: (e: QuoteEvent) => emit(e) };
+  const realtimeIn = (venue: Venue, ...quotes: Quote[]) => emit({ type: "quotes", venue, quotes });
+  return { book, watches, watchVenues, realtimeIn, fetches, price, realtime, emit: (e: QuoteEvent) => emit(e) };
 }
 
 const settle = () => vi.advanceTimersByTimeAsync(0);
@@ -315,5 +322,100 @@ describe("QuoteBook", () => {
     fetches[0]!.reject(new ApiRequestError("kiwoom_unavailable", "m", { reason: "unknown_failure", retryAt: null, manualActionRequired: true }));
     await vi.advanceTimersByTimeAsync(10 * 60_000);
     expect(fetches).toHaveLength(1);
+  });
+
+  describe("앱 전체 거래소", () => {
+    const inVenue = (venue: Venue, symbol: SymbolCode, price: number): Quote => ({ ...quote(symbol, price), venue });
+
+    test("거래소를 바꾸면 줄 값을 비우고 새 거래소로 watch와 REST를 다시 보낸다", async () => {
+      const { book, watches, watchVenues, fetches, price, realtimeIn } = setup();
+      book.lease(["005930", "000660"]);
+      await settle();
+      expect(watchVenues).toEqual(["combined"]);
+      expect(fetches.map((f) => f.venue)).toEqual(["combined"]);
+      fetches[0]!.resolve([inVenue("combined", "005930", 71_000)]);
+      await settle();
+
+      book.setVenue("krx");
+      expect(price("005930")).toBeUndefined();
+      expect(watches).toEqual([["005930", "000660"], ["005930", "000660"]]);
+      expect(watchVenues).toEqual(["combined", "krx"]);
+      expect(fetches.map((f) => [f.symbols, f.venue])).toEqual([[["005930", "000660"], "combined"], [["005930", "000660"], "krx"]]);
+      fetches[1]!.resolve([inVenue("krx", "005930", 70_500)]);
+      await settle();
+      expect(price("005930")).toBe(70_500);
+      realtimeIn("krx", inVenue("krx", "005930", 70_600));
+      expect(price("005930")).toBe(70_600);
+    });
+
+    test("같은 거래소를 다시 알리면 아무것도 보내지 않는다", async () => {
+      const { book, watches, fetches, price } = setup();
+      book.lease(["005930"]);
+      await settle();
+      fetches[0]!.resolve([quote("005930", 71_000, "polled")]);
+      await settle();
+      book.setVenue("combined");
+      await settle();
+      expect(watches).toHaveLength(1);
+      expect(fetches).toHaveLength(1);
+      expect(price("005930")).toBe(71_000);
+    });
+
+    test("거래소를 바꾼 뒤 늦게 온 옛 거래소의 REST 응답은 쓰지 않는다", async () => {
+      const { book, fetches, price } = setup();
+      book.lease(["005930"]);
+      await settle();
+      book.setVenue("nxt");
+      fetches[0]!.resolve([inVenue("combined", "005930", 71_000)]);
+      await settle();
+      expect(price("005930")).toBeUndefined();
+      fetches[1]!.resolve([inVenue("nxt", "005930", 70_000)]);
+      await settle();
+      expect(price("005930")).toBe(70_000);
+    });
+
+    test("거래소를 바꾼 뒤 늦게 온 옛 거래소의 실시간 시세는 쓰지 않는다", async () => {
+      const { book, fetches, price, realtimeIn } = setup();
+      book.lease(["005930"]);
+      await settle();
+      book.setVenue("krx");
+      realtimeIn("combined", inVenue("combined", "005930", 71_000));
+      expect(price("005930")).toBeUndefined();
+      realtimeIn("krx", inVenue("krx", "005930", 70_500));
+      expect(price("005930")).toBe(70_500);
+      fetches[1]!.resolve([inVenue("krx", "005930", 70_000)]);
+      await settle();
+      expect(price("005930")).toBe(70_500);
+    });
+
+    test("거래소를 바꾸면 서버가 이미 알린 실시간 아님은 값 없이 남는다", async () => {
+      const { book, emit } = setup();
+      book.lease(["005930"]);
+      await settle();
+      emit({ type: "watch_limited", symbols: ["005930"] });
+      book.setVenue("krx");
+      expect(book.get("005930")).toEqual({ quote: undefined, limited: true });
+    });
+
+    test("보는 종목이 없을 때 바꾼 거래소는 다음에 종목이 들어올 때 쓴다", async () => {
+      const { book, watches, watchVenues, fetches } = setup();
+      book.setVenue("nxt");
+      await settle();
+      expect(watches).toEqual([]);
+      book.lease(["005930"]);
+      await settle();
+      expect(watchVenues).toEqual(["nxt"]);
+      expect(fetches.map((f) => f.venue)).toEqual(["nxt"]);
+    });
+
+    test("거래소를 바꾼 뒤 실패한 옛 조회의 재시도는 새 거래소 조회를 건드리지 않는다", async () => {
+      const { book, fetches } = setup();
+      book.lease(["005930"]);
+      await settle();
+      book.setVenue("krx");
+      fetches[0]!.reject(new ApiRequestError("network", "서버에 연결하지 못했습니다"));
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(fetches.map((f) => f.venue)).toEqual(["combined", "krx"]);
+    });
   });
 });

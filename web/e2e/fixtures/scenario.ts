@@ -115,7 +115,7 @@ export class MarketFixtures {
     if ("error" in resolved) throw new Error(resolved.error);
     return clone(barsPage(info, resolved.venue, period, before === null ? Math.max(1, limit - 1) : limit, before, this.now));
   }
-  quote(symbol: string) { const info = fixtureSymbol(symbol); return info ? quoteOf(info, this.now) : null; }
+  quote(symbol: string, venue: Venue = "combined") { const info = fixtureSymbol(symbol); return info ? quoteOf(info, this.now, venue) : null; }
   search(query: string, options: { market?: string | null; kind?: string | null } = {}): SymbolInfo[] {
     const extra = this.symbols.filter(value => query.length > 0 && !findSymbol(value.code) && (value.code === query || value.name.includes(query)));
     return [...search(query), ...extra].filter(value => (!options.market || value.market === options.market) && (!options.kind || value.kind === options.kind));
@@ -263,7 +263,11 @@ export class Scenario {
       }
     }
     if (path === "/api/symbols" && method === "GET") return { body: this.market.search(url.searchParams.get("q") ?? "", { market: url.searchParams.get("market"), kind: url.searchParams.get("kind") }) };
-    if (path === "/api/quotes" && method === "GET") return { body: (url.searchParams.get("symbols") ?? "").split(",").flatMap(symbol => { const quote = this.market.quote(symbol); return quote ? [quote] : []; }) };
+    if (path === "/api/quotes" && method === "GET") {
+      const venue = url.searchParams.get("venue") ?? "combined";
+      if (venue !== "combined" && venue !== "krx" && venue !== "nxt") return error(400, "bad_request", "Invalid venue");
+      return { body: (url.searchParams.get("symbols") ?? "").split(",").flatMap(symbol => { const quote = this.market.quote(symbol, venue); return quote ? [quote] : []; }) };
+    }
     if (path === "/api/bars" && method === "GET") {
       const symbol = url.searchParams.get("symbol") ?? "";
       const period = url.searchParams.get("period") ?? "D";

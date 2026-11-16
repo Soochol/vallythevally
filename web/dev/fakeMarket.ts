@@ -337,9 +337,10 @@ export function search(raw: string): SymbolInfo[] {
     .map((x) => publicInfo(x.s));
 }
 
-export function quoteOf(s: FakeSymbol, nowMs: number): Quote | null {
+export function quoteOf(s: FakeSymbol, nowMs: number, requested: Venue = "combined"): Quote | null {
   if (s.fail === "unknown_symbol") return null;
-  const bars = seriesOf(s, s.kind === "index" ? null : "combined", "D", nowMs);
+  const venue = s.kind === "index" ? null : requested === "nxt" && !s.nxtEnabled ? "combined" : requested;
+  const bars = seriesOf(s, venue, "D", nowMs);
   const last = bars[bars.length - 1];
   const prev = bars[bars.length - 2];
   if (!last || !prev) return null;
@@ -352,6 +353,6 @@ export function quoteOf(s: FakeSymbol, nowMs: number): Quote | null {
     volume: last.v,
     t: Math.floor(nowMs / 1000),
     source: "polled",
-    venue: s.kind === "index" ? null : "combined",
+    venue,
   };
 }

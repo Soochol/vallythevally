@@ -112,13 +112,15 @@ export function fakeApi(screenerScenario: string | undefined): Plugin {
         if (path === "/quotes") {
           const codes = (url.searchParams.get("symbols") ?? "").split(",").filter(Boolean);
           if (codes.length > 200) return fail(res, 400, "bad_request", "종목은 한 번에 200개까지입니다");
+          const venue = url.searchParams.get("venue") ?? "combined";
+          if (venue !== "combined" && venue !== "krx" && venue !== "nxt") return fail(res, 400, "bad_request", "거래소는 combined, krx, nxt 중 하나입니다");
           const now = Date.now();
           return send(
             res,
             200,
             codes.flatMap((c) => {
               const s = findSymbol(c);
-              const q = s && quoteOf(s, now);
+              const q = s && quoteOf(s, now, venue);
               return q ? [q] : [];
             }),
           );

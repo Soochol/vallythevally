@@ -157,16 +157,32 @@ describe("MarketSocket", () => {
   test("관심종목은 연결 전이면 hello에서, 열려 있으면 바로 보낸다", () => {
     const { socket, last } = setup();
     socket.start();
-    socket.setWatch(["005930", "000660"]);
+    socket.setWatch(["005930", "000660"], "combined");
     expect(last().sent).toEqual([]);
     last().receive(hello());
-    expect(last().sent).toEqual([{ type: "watch", symbols: ["005930", "000660"], venue: null }]);
-    socket.setWatch(["000660"]);
-    socket.setWatch([]);
+    expect(last().sent).toEqual([{ type: "watch", symbols: ["005930", "000660"], venue: "combined" }]);
+    socket.setWatch(["000660"], "combined");
+    socket.setWatch([], "combined");
     expect(last().sent.slice(1)).toEqual([
-      { type: "watch", symbols: ["000660"], venue: null },
-      { type: "watch", symbols: [], venue: null },
+      { type: "watch", symbols: ["000660"], venue: "combined" },
+      { type: "watch", symbols: [], venue: "combined" },
     ]);
+  });
+
+  test("관심종목 거래소는 watch에 실리고, 거래소만 바꿔 다시 보내며, 다시 연결돼도 마지막 거래소로 보낸다", () => {
+    const { socket, last } = setup();
+    socket.start();
+    last().receive(hello());
+    socket.setWatch(["005930"], "krx");
+    socket.setWatch(["005930"], "nxt");
+    expect(last().sent).toEqual([
+      { type: "watch", symbols: ["005930"], venue: "krx" },
+      { type: "watch", symbols: ["005930"], venue: "nxt" },
+    ]);
+    last().drop();
+    vi.advanceTimersByTime(1000);
+    last().receive(hello());
+    expect(last().sent).toEqual([{ type: "watch", symbols: ["005930"], venue: "nxt" }]);
   });
 
   test("quotes와 watch_limited는 onQuotes로 간다", () => {
@@ -190,12 +206,12 @@ describe("MarketSocket", () => {
     last().receive(hello());
     const events: QuoteEvent[] = [];
     socket.onQuotes((e) => events.push(e));
-    socket.setWatch(["005930"]);
-    socket.setWatch(["005930", "IDX:001"]);
+    socket.setWatch(["005930"], "combined");
+    socket.setWatch(["005930", "IDX:001"], "combined");
     last().drop();
     vi.advanceTimersByTime(1000);
     last().receive(hello());
-    expect(last().sent).toEqual([{ type: "watch", symbols: ["005930", "IDX:001"], venue: null }]);
+    expect(last().sent).toEqual([{ type: "watch", symbols: ["005930", "IDX:001"], venue: "combined" }]);
     expect(events).toEqual([{ type: "resync" }]);
   });
 
@@ -203,8 +219,8 @@ describe("MarketSocket", () => {
     const { socket, last } = setup();
     socket.start();
     last().receive(hello());
-    socket.setWatch(["005930"]);
-    socket.setWatch([]);
+    socket.setWatch(["005930"], "combined");
+    socket.setWatch([], "combined");
     last().drop();
     vi.advanceTimersByTime(1000);
     last().receive(hello());

@@ -1,9 +1,11 @@
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { fetchQuotes } from "../../api/userData";
+import { useVenue } from "../../stores/ui";
 
 export function useSearchQuotes(contents: string) {
   const list = useRef<HTMLUListElement>(null);
+  const venue = useVenue();
   const [symbols, setSymbols] = useState("");
   useLayoutEffect(() => {
     const node = list.current;
@@ -28,8 +30,8 @@ export function useSearchQuotes(contents: string) {
   }, [contents]);
   useEffect(() => { setSymbols(""); }, [contents]);
   const quotes = useQuery({
-    queryKey: ["search-quotes", symbols],
-    queryFn: ({ signal }) => fetchQuotes(symbols.split(","), signal),
+    queryKey: ["search-quotes", symbols, venue],
+    queryFn: ({ signal }) => fetchQuotes(symbols.split(","), venue, signal),
     enabled: symbols !== "",
     staleTime: 30_000,
     retry: false,

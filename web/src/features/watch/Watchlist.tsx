@@ -33,7 +33,8 @@ import type { WindowId } from "../../layout/kinds";
 import type { WatchQuote } from "../../stores/quoteBook";
 import { quoteBook } from "../../stores/realtime";
 import { useSelectionStore } from "../../stores/selection";
-import { useUiStore } from "../../stores/ui";
+import { useUiStore, useVenue } from "../../stores/ui";
+import { VenueFallbackBadge } from "../venue/VenuePicker";
 import { useActiveWatchlist, useWatchlistStore } from "../../stores/watchlist";
 import { ArrowIcon, ChevronIcon, CloseIcon, CopyIcon, ListIcon, MoreIcon, PlusIcon } from "../icons";
 import { Menu, type MenuItem } from "../menu/Menu";
@@ -526,9 +527,11 @@ function WatchRow({ list, row, index, last, columns, template, variant, sender, 
   const isIndex = isIndexCode(code);
   const name = info?.name ?? code;
   const { quote, limited } = useWatchQuote(code);
+  const appVenue = useVenue();
+  const fallsBackToCombined = quote?.venue != null && quote.venue !== appVenue;
   const { moveBy } = useWatchlistStore.getState();
   const values = quote ? columns.map((c) => cellText(c, quote, isIndex)).join(" ") : "";
-  const label = unknown ? [name, "찾을 수 없음"] : [name, values, limited ? "실시간 아님" : ""];
+  const label = unknown ? [name, "찾을 수 없음"] : [name, fallsBackToCombined ? "통합 시세" : "", values, limited ? "실시간 아님" : ""];
 
   const open = () => {
     const { notice } = useLayoutStore.getState().sendSymbol(sender, cellId, info ?? { code });
@@ -619,8 +622,9 @@ function WatchRow({ list, row, index, last, columns, template, variant, sender, 
           editing ? (list.groups.length > 0 ? "max-md:pr-[220px]" : "max-md:pr-[176px]") : ""
         }`}
       >
-        <span className={`min-w-0 ${unknown ? "opacity-50" : ""}`}>
+        <span className={`flex min-w-0 items-center gap-1 ${unknown ? "opacity-50" : ""}`}>
           <SymbolName name={name} code={code} />
+          {fallsBackToCombined && <VenueFallbackBadge />}
         </span>
         {unknown ? (
           columns.length > 0 && (

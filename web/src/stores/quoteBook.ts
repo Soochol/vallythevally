@@ -1,5 +1,6 @@
 import type { Quote } from "../api/generated/Quote";
 import type { SymbolCode } from "../api/generated/SymbolCode";
+import type { Venue } from "../api/generated/Venue";
 import { retryDelay, shouldRetry } from "../api/retry";
 import type { MarketSocketLike, QuoteEvent } from "../api/socket";
 
@@ -11,7 +12,7 @@ export interface WatchQuote {
 
 const EMPTY: WatchQuote = { quote: undefined, limited: false };
 
-type FetchQuotes = (symbols: readonly SymbolCode[]) => Promise<Quote[]>;
+type FetchQuotes = (symbols: readonly SymbolCode[], venue: Venue) => Promise<Quote[]>;
 
 function union(lists: Iterable<readonly SymbolCode[]>): SymbolCode[] {
   const seen = new Set<SymbolCode>();
@@ -22,11 +23,12 @@ function union(lists: Iterable<readonly SymbolCode[]>): SymbolCode[] {
 const sameOrder = (a: readonly SymbolCode[], b: readonly SymbolCode[]) => a.length === b.length && a.every((c, i) => c === b[i]);
 
 /**
- * 보이는 관심종목 목록들의 현재가. 값은 실시간 `quotes`로 바뀌고, REST는 종목이 목록에 처음 들어올 때만 부른다.
+ * 보이는 관심종목 목록들의 현재가. 값은 실시간 `quotes`로 바뀌고, REST는 종목이 목록에 처음 들어올 때나 거래소가 바뀔 때 부른다.
  * 줄마다 같은 상태면 같은 객체를 돌려준다(`useSyncExternalStore`).
  */
 export class QuoteBook {
   private readonly leases = new Set<{ symbols: readonly SymbolCode[] }>();
+  private venue: Venue = "combined";
   private watched: readonly SymbolCode[] = [];
   private entries = new Map<SymbolCode, number>();
   private lastEntry = 0;
@@ -47,6 +49,17 @@ export class QuoteBook {
     return () => {
       if (this.leases.delete(lease)) this.schedule();
     };
+  }
+
+  setVenue(venue: Venue): void {
+    if (venue === this.venue) return;
+    this.venue = venue;
+    this.entries = new Map(this.watched.map((c) => [c, ++this.lastEntry]));
+    for (const code of this.watched) if (this.rows.delete(code)) this.notify(code);
+    if (this.watched.length === 0) return;
+    this.deps.socket.setWatch(this.watched, venue);
+    for (const code of this.watched) if (this.serverLimited.has(code)) this.setLimited(code, true);
+    void this.load(this.watched, 0);
   }
 
   get(code: SymbolCode): WatchQuote {
@@ -78,18 +91,19 @@ export class QuoteBook {
     this.watched = next;
     this.entries = new Map(next.map((c) => [c, before.get(c) ?? ++this.lastEntry]));
     for (const code of before.keys()) if (!this.entries.has(code) && this.rows.delete(code)) this.notify(code);
-    this.deps.socket.setWatch(next);
+    this.deps.socket.setWatch(next, this.venue);
     const added = next.filter((c) => !before.has(c));
     for (const code of added) if (this.serverLimited.has(code)) this.setLimited(code, true);
     if (added.length > 0) void this.load(added, 0);
   }
 
   private async load(symbols: readonly SymbolCode[], failures: number): Promise<void> {
+    const venue = this.venue;
     const asked = new Map(symbols.map((c) => [c, this.entries.get(c)] as const));
     const sameEntry = (c: SymbolCode) => asked.has(c) && asked.get(c) === this.entries.get(c);
     let quotes: Quote[];
     try {
-      quotes = await this.deps.fetchQuotes(symbols);
+      quotes = await this.deps.fetchQuotes(symbols, venue);
     } catch (e) {
       if (!shouldRetry(failures, e)) return;
       setTimeout(() => {
@@ -107,6 +121,7 @@ export class QuoteBook {
   private onEvent(e: QuoteEvent): void {
     switch (e.type) {
       case "quotes":
+        if (e.venue !== this.venue) return;
         for (const q of e.quotes) if (this.entries.has(q.symbol)) this.put(q.symbol, { quote: q, limited: this.get(q.symbol).limited });
         return;
       case "watch_limited":
