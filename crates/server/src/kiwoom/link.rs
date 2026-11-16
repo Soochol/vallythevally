@@ -187,9 +187,11 @@ impl Link {
 
     pub async fn connect(&self, acknowledged: bool) -> LinkState {
         loop {
+            let epoch = *self.0.epoch.borrow();
             let (started_acknowledged, flight) = self.join_or_start(acknowledged);
             let outcome = flight.await;
-            if acknowledged && !started_acknowledged && outcome != LinkState::Connected {
+            let failed_unabandoned = matches!(outcome, LinkState::Failed(_)) && *self.0.epoch.borrow() == epoch;
+            if acknowledged && !started_acknowledged && failed_unabandoned {
                 continue;
             }
             return outcome;

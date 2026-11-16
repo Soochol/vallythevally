@@ -582,3 +582,31 @@ async fn an_8050_at_the_daily_reissue_leaves_the_link_failed_and_closed() {
     assert_eq!(failure(server.connect(false).await).problem, Problem::AuthBlocked8050);
     server.stop().await;
 }
+
+#[tokio::test]
+async fn an_acknowledged_caller_joined_to_a_flight_does_not_reconnect_after_a_disconnect() {
+    let fake = ScriptedTransport::new();
+    let env = env();
+    let server = spawn(&fake, &env, &[OFF]);
+    server.addr().await;
+    assert_eq!(server.connect(false).await, LinkState::Connected);
+    server.link().disconnect();
+    fake.delay("ka10099", Duration::from_secs(2));
+    let link = server.link();
+    let plain = tokio::spawn({
+        let link = link.clone();
+        async move { link.connect(false).await }
+    });
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    let acknowledged = tokio::spawn({
+        let link = link.clone();
+        async move { link.connect(true).await }
+    });
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    link.disconnect();
+    plain.await.unwrap();
+    let outcome = acknowledged.await.unwrap();
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert_eq!(server.link_state(), LinkState::Disconnected, "outcome {outcome:?} {:?}", fake.api_ids());
+    server.stop().await;
+}
