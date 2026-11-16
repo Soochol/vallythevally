@@ -2111,6 +2111,7 @@ async fn regression_223_adjustment_normal_update_recovers() {
     api.update().await; let updated = api.settled().await;
     let after = api.run(&screen).await;
     assert_eq!((before.0, after.0), (409, 200));
+    assert!(before.1["error"]["message"].as_str().unwrap().contains("300001"), "{}", before.1);
     assert_eq!(after.1["rows"].as_array().unwrap().len(), 1);
     assert_eq!(api.post("update", json!({"full": true})).await.0, 200);
     let full = api.settled().await;
@@ -2401,4 +2402,31 @@ async fn regression_223_early_krx_before_0800_distinguishes_current_from_absence
     assert_eq!(responses[1]["status"], 200);
     assert_eq!(row(&responses[1]["result"], "300000")["latestBarDate"], today.to_string());
     assert_eq!(row(&responses[1]["result"], "300000")["provisional"], true);
+}
+
+#[tokio::test]
+async fn a_halted_stock_is_adjusted_only_when_the_base_matches_neither_its_halt_price_nor_its_last_traded_close() {
+    for (base, adjusted) in [(150, false), (100, false), (300, true)] {
+        let today = day(2026, 11, 9);
+        let days = last_open_days(20, today.add_days(-1));
+        let halted_after_trading_at_100 = |days: &[KstDate]| days.iter().enumerate().map(|(i, &d)| if i < 15 { bar(d, 100, 1_000) } else { bar(d, 150, 0) }).collect::<Vec<_>>();
+        let initial = KrxMarket { days: days.clone(), stocks: vec![stock("300000", priced(&days, |_| 100)), stock("300001", halted_after_trading_at_100(&days))] };
+        let Loaded { _fake: fake, _dir: dir, _server: server, .. } = loaded(initial).await;
+        server.stop().await;
+        let with_today = [days.clone(), vec![today]].concat();
+        let mut halted = stock("300001", halted_after_trading_at_100(&with_today));
+        halted.market_code = "10".into();
+        fake.set_krx_market(KrxMarket { days: with_today.clone(), stocks: vec![stock("300000", priced(&with_today, |_| 100)), halted] });
+        let mut halted_row = summary_row("300001", today, 150, 0, 0, 0);
+        halted_row["open_pric"] = "0".into(); halted_row["low_pric"] = "0".into(); halted_row["base_pric"] = base.to_string().into();
+        fake.set_quote_rows(vec![summary_row("300000", today, 100, 100, 1000, 1), halted_row]);
+        let server = boot(&fake, dir.path(), &at(today, "1200"));
+        let api = Api::of(&server).await;
+        let (status, body) = api.run(&every(vec![])).await;
+        assert_eq!(status, if adjusted { 409 } else { 200 }, "base {base}: {body}");
+        if adjusted {
+            assert!(body["error"]["message"].as_str().unwrap().contains("300001"), "{body}");
+        }
+        server.stop().await;
+    }
 }

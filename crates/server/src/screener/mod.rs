@@ -301,7 +301,9 @@ impl Screener {
             if !adjustments.is_empty() {
                 drop(snapshot);
                 me.store.require_refetch(&adjustments, Some(generation))?;
-                return Err(data_changed("기준가와 확정 이력의 차이가 커 수정 이력을 확인해야 합니다. 업데이트 후 다시 실행하세요"));
+                let named: Vec<&str> = adjustments.iter().take(5).map(|code| code.as_str()).collect();
+                let more = if adjustments.len() > named.len() { " 등" } else { "" };
+                return Err(data_changed(format!("기준가와 확정 이력의 차이가 커 수정 이력을 확인해야 합니다: {}{more}. 업데이트 후 다시 실행하세요", named.join(", "))));
             }
             let result = snapshot.screen(&screen, &batch, calendar.observation(me.clock.now()))?;
             if me.store.generation() != generation || me.next_run.load(Ordering::SeqCst) != update_epoch || me.clock.now().kst_date() != batch.target {
