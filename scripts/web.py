@@ -113,9 +113,9 @@ def ensure_wasm(root, environment):
         print("dev-web: WASM 재사용 (컴파일 잠금 생략)", flush=True)
         evidence.artifact("wasm", root / "web/src/wasm/indicators", "reused", key)
         return
-    common = Path(dev.output(["git", "rev-parse", "--path-format=absolute", "--git-common-dir"], root))
-    print("dev-web: WASM 준비 / 공통 컴파일 잠금 대기", flush=True)
-    with dev.locked(common / "compile.lock"):
+    lock = dev.compile_lock_path(root)
+    print(f"dev-web: WASM 준비 / 컴파일 잠금({lock.name}) 대기", flush=True)
+    with dev.locked(lock):
         key = wasm_key(root, environment, tools)
         if valid_wasm(root, key):
             print("dev-web: 다른 요청이 준비한 WASM 재사용", flush=True)

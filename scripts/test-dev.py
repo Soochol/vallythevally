@@ -1,14 +1,18 @@
 import argparse
 import contextlib
+import fcntl
 import hashlib
 import importlib.util
 import io
 import json
 import multiprocessing
 from pathlib import Path
+import os
 import shutil
+import subprocess
 import tarfile
 import tempfile
+import time
 import unittest
 from unittest.mock import patch
 
@@ -240,6 +244,46 @@ class DevCacheTest(unittest.TestCase):
             dev.prepare_duckdb(self.cache, pin, "host")
         entry = dev.library_entry(self.cache, pin["artifacts"]["host"])
         self.assertFalse(entry.exists())
+
+    @contextlib.contextmanager
+    def held_compile_lock(self, name):
+        common = self.root / ".git"
+        common.mkdir(exist_ok=True)
+        with patch.object(dev, "output", return_value=str(common)), (common / name).open("a") as stream:
+            fcntl.flock(stream, fcntl.LOCK_EX)
+            yield
+
+    def compile_waits(self, lane, timeout):
+        started = time.monotonic()
+        with patch.dict(os.environ, {dev.COMPILE_LANE_ENV: lane}):
+            result = subprocess.run(["flock", "--timeout", str(timeout), str(dev.compile_lock_path(self.root)), "true"])
+        return result.returncode == 0, time.monotonic() - started
+
+    def test_gate_compile_starts_while_worker_holds_compile_lock(self):
+        with self.held_compile_lock("compile.lock"):
+            started, elapsed = self.compile_waits("gate", 5)
+        self.assertTrue(started)
+        self.assertLess(elapsed, 2)
+
+    def test_ordinary_compiles_still_wait_for_each_other(self):
+        with self.held_compile_lock("compile.lock"):
+            started, elapsed = self.compile_waits("", 1)
+        self.assertFalse(started)
+        self.assertGreaterEqual(elapsed, 1)
+
+    def test_gate_compiles_wait_for_each_other(self):
+        with self.held_compile_lock("compile-gate.lock"):
+            started, _ = self.compile_waits("gate", 1)
+        self.assertFalse(started)
+
+    def test_compile_command_locks_by_lane_and_rejects_unknown_lane(self):
+        with self.held_compile_lock("compile.lock"):
+            for lane, name in (("", "compile.lock"), ("gate", "compile-gate.lock")):
+                with patch.dict(os.environ, {dev.COMPILE_LANE_ENV: lane}), patch.object(dev.evidence, "command") as run:
+                    dev.compile_command(self.root, ["cargo", "check"], {})
+                self.assertEqual(run.call_args.args[0], ["flock", str(self.root / ".git" / name), "cargo", "check"])
+            with patch.dict(os.environ, {dev.COMPILE_LANE_ENV: "fast"}), self.assertRaisesRegex(ValueError, "gate"):
+                dev.compile_lock_path(self.root)
 
     def test_cargo_test_compiles_with_lock_then_executes_without_it(self):
         command = dev.cargo_command(["test", "-p", "server", "--", "test_name"], False)

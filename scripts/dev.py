@@ -238,10 +238,22 @@ def needs_duckdb(command):
     return "--workspace" in head or not packages or any(name not in ("domain", "indicators", "indicators-wasm") for name in packages)
 
 
-def compile_command(root, command, environment):
+COMPILE_LANE_ENV = "VALLY_COMPILE_LANE"
+COMPILE_LOCKS = {"": "compile.lock", "gate": "compile-gate.lock"}
+
+
+def compile_lock_path(root):
+    lane = os.environ.get(COMPILE_LANE_ENV, "")
+    if lane not in COMPILE_LOCKS:
+        raise ValueError(f"{COMPILE_LANE_ENV}는 비우거나 gate여야 합니다: {lane}")
     common = output(["git", "rev-parse", "--path-format=absolute", "--git-common-dir"], root)
-    say("공통 컴파일 잠금 대기 / Cargo 실행")
-    evidence.command(["flock", str(Path(common) / "compile.lock"), *command], root, environment)
+    return Path(common) / COMPILE_LOCKS[lane]
+
+
+def compile_command(root, command, environment):
+    lock = compile_lock_path(root)
+    say(f"컴파일 잠금({lock.name}) 대기 / Cargo 실행")
+    evidence.command(["flock", str(lock), *command], root, environment)
 
 
 def run_cargo(root, command, environment):
