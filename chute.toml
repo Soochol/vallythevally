@@ -37,6 +37,7 @@ paths = [
   "crates/server/",
   "crates/domain/",
   "crates/indicators/",
+  "web/src/api/generated/",
   "Cargo.toml",
   "Cargo.lock",
   ".cargo/",
