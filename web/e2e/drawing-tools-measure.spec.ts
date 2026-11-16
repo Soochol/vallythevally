@@ -203,6 +203,13 @@ test("날짜·가격 범위, 기준봉 VWAP, 구간 거래량 프로파일을 �
   await expect.poll(() => textsOf(page, profile.id)).toEqual([expect.stringMatching(/^\d+분봉 기준$/)]);
   await page.mouse.move(5, 5);
   await expect(drawingDock(page).locator(".draw-pill")).toHaveAttribute("aria-expanded", "false");
+  let lastDock = "";
+  await expect.poll(async () => {
+    const now = JSON.stringify(await drawingDock(page).boundingBox());
+    const same = now === lastDock;
+    lastDock = now;
+    return same;
+  }, { intervals: [30, 30, 60, 100] }).toBe(true);
   const painted = await shot();
   for (const label of ["날짜·가격 범위", "기준봉 VWAP", "구간 거래량 프로파일"]) {
     await list.getByRole("button", { name: `${label} 숨기기`, exact: true }).click();
