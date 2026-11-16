@@ -366,7 +366,13 @@ async function selectDate(date, wantedItem, startMs) {
   setStatus("목록을 받는 중");
   state.entries = [];
   el.date.value = date;
-  const index = await fetchJson(`/data/${date}/index.json`);
+  let index;
+  try {
+    index = await fetchJson(`/data/${date}/index.json`);
+  } catch (error) {
+    if (request === dateRequest) throw error;
+    return;
+  }
   if (request !== dateRequest) return;
   state.date = date;
   el.replay.dataset.date = date;
