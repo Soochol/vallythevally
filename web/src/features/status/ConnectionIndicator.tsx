@@ -1,3 +1,4 @@
+import { useKiwoomLinkStore } from "../../stores/kiwoomLink";
 import { useRealtimeStore } from "../../stores/realtime";
 import { openSystemSettings } from "../system-settings/open";
 import { type ConnectionView, connectionView } from "./connectionView";
@@ -5,8 +6,9 @@ import { useServerTime } from "./useServerTime";
 
 export function useConnectionView(): ConnectionView {
   const connection = useRealtimeStore((s) => s.connection);
+  const link = useKiwoomLinkStore((s) => s.status);
   const now = useServerTime();
-  return connectionView(connection, now);
+  return connectionView(connection, now, link);
 }
 
 /** 연결 상태 점과 문장(frontend.md §2.2). */

@@ -17,6 +17,9 @@ import { useSelectionStore } from "../../stores/selection";
 import { openIndicatorCommand, shownIndicatorWindow } from "../indicator-command/open";
 import { useTheme, useVenue } from "../../stores/ui";
 import { cellErrorView, olderErrorView } from "./cellError";
+import { NOT_CONNECTED_FALLBACK, beforeConnect } from "../status/beforeConnect";
+import { useKiwoomLinkStore } from "../../stores/kiwoomLink";
+import { BeforeConnectCard } from "../status/BeforeConnectCard";
 import { useDrawingSurface } from "../../chart/drawings/useDrawingSurface";
 import { useShownSettings } from "../indicator-command/preview";
 import { AxisMode } from "./AxisMode";
@@ -125,7 +128,14 @@ export function ChartCell({ cellId, status, onStatus }: Props) {
 
   const cellNumber = useLayoutStore((s) => chartNumber(s.layout, cellId));
   const name = info?.name ?? cell.symbol;
-  const error = status.kind === "error" ? cellErrorView(status.error, cell.symbol) : null;
+  const link = useKiwoomLinkStore((s) => s.status);
+  const refusedBeforeConnect = status.kind === "error" && status.error.reason === "not_connected";
+  const notice = beforeConnect(link) ?? (refusedBeforeConnect && link === null ? NOT_CONNECTED_FALLBACK : null);
+  const connected = link?.state === "connected";
+  useEffect(() => {
+    if (refusedBeforeConnect && connected) ctl.current?.reload();
+  }, [refusedBeforeConnect, connected]);
+  const error = status.kind === "error" && notice === null && !refusedBeforeConnect ? cellErrorView(status.error, cell.symbol) : null;
   const olderError = status.kind === "ready" && status.olderError ? olderErrorView(status.olderError, cell.symbol) : null;
 
   return (
@@ -170,6 +180,7 @@ export function ChartCell({ cellId, status, onStatus }: Props) {
           </button>
         </div>
       )}
+      {notice && <BeforeConnectCard notice={notice} />}
       {error && (
         <div className="absolute inset-0 z-[5] grid place-items-center bg-chart-bg p-6">
           {error.action === "retry" ? <ErrorState message={error.text} retry={() => ctl.current?.reload()} /> : <div role="alert"><EmptyState title={error.text} action={error.action === "search" ? "종목 검색" : undefined} onAction={openSearch} /></div>}

@@ -17,6 +17,7 @@ import type { Screens } from "../../api/generated/Screens";
 import type { SymbolCode } from "../../api/generated/SymbolCode";
 import type { UpdatePhase } from "../../api/generated/UpdatePhase";
 import { useScreenerStatus, useUpdateCommands } from "../../api/screener";
+import { useBeforeConnect } from "../status/beforeConnect";
 import { isTypingTarget } from "../../lib/hotkeys";
 import { DESKTOP_QUERY, useMediaQuery } from "../../lib/media";
 import {
@@ -160,8 +161,10 @@ export function ScreenerPanel({ id }: { id: WindowId | null }) {
   useResultKeys({ rows, active, onSelect: select, onRun: execute });
   useEffect(() => dropPendingOpen, []);
   const band = status !== undefined && showsUpdateBand(status);
+  const offline = useBeforeConnect() !== null;
   return (
     <aside aria-label="스크리너" data-chart-control className="flex min-h-0 min-w-0 flex-1 flex-col">
+      {offline && status?.lastDay && <p className="flex-none border-b border-line px-3 py-1.5 text-xs text-text-2">저장된 일봉 {status.lastDay.slice(5).replace("-", "/")}까지 · 오늘 시세는 연결 뒤에 합칩니다</p>}
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         <div className="max-h-[50%] flex-none overflow-y-auto">
           {band && <UpdateBand status={status} />}
@@ -371,6 +374,7 @@ function PanelMenu({ screen, rows, status, saveOnly = false }: { screen: Screen 
     fresh === null
       ? []
       : [{ kind: "action", label: `새 목록 "${fresh}"`, disabled: nothing || lists.length >= MAX_WATCHLISTS, onSelect: () => sendToNewWatchlist(fresh, codes) }];
+  const offline = useBeforeConnect() !== null;
   const reload = async () => {
     if (await confirmAction(FULL_RELOAD_CONFIRM, { action: "전체 다시 받기" })) void start(true).catch(showCommandError);
   };
@@ -380,7 +384,7 @@ function PanelMenu({ screen, rows, status, saveOnly = false }: { screen: Screen 
     ...newList,
     ...(!saveOnly ? [
       { kind: "separator" } satisfies MenuItem,
-      { kind: "action", label: "전체 다시 받기…", hint: waiting?.from, disabled: isUpdating(status) || waiting !== null, onSelect: reload } satisfies MenuItem,
+      { kind: "action", label: "전체 다시 받기…", hint: waiting?.from, disabled: isUpdating(status) || waiting !== null || offline, onSelect: reload } satisfies MenuItem,
     ] : []),
   ];
   return (
@@ -577,6 +581,8 @@ function useUpdateRetry(error: ApiErrorBody | null): UpdateRetry | null {
 
 function UpdateBand({ status }: { status: ScreenerStatus }) {
   const { start, cancel } = useUpdateCommands();
+  const offline = useBeforeConnect() !== null;
+  const waitLabel = (label: string) => (offline ? "연결 뒤" : label);
   const run = (full: boolean) => void start(full).catch(showCommandError);
   const update = status.update;
   const retry = useUpdateRetry(update?.error ?? null);
@@ -631,10 +637,10 @@ function UpdateBand({ status }: { status: ScreenerStatus }) {
             <button
               type="button"
               className="btn-primary h-7 flex-none px-3 text-s disabled:cursor-not-allowed disabled:opacity-40"
-              disabled={retry.kind === "waiting"}
+              disabled={retry.kind === "waiting" || offline}
               onClick={() => run(update.full)}
             >
-              다시 시도
+              {waitLabel("다시 시도")}
             </button>
           )}
         </div>
@@ -656,8 +662,8 @@ function UpdateBand({ status }: { status: ScreenerStatus }) {
           <span className="conn-dot" data-tone="red" />
           <span className="text-s font-[650]">아직 받은 KRX 일봉이 없습니다</span>
           <span className="flex-1" />
-          <button type="button" className="btn-primary h-7 flex-none px-3 text-s" onClick={() => run(false)}>
-            처음 받기
+          <button type="button" className="btn-primary h-7 flex-none px-3 text-s disabled:cursor-not-allowed disabled:opacity-40" disabled={offline} aria-label={offline ? "처음 받기 (연결 뒤에 쓸 수 있습니다)" : undefined} onClick={() => run(false)}>
+            {waitLabel("처음 받기")}
           </button>
         </div>
         <p className="mt-1.5 text-xs leading-[1.45] text-text-2">
@@ -674,8 +680,8 @@ function UpdateBand({ status }: { status: ScreenerStatus }) {
           <span className="conn-dot" data-tone="red" />
           <span className="text-s font-[650]">자료가 모자랍니다</span>
           <span className="flex-1" />
-          <button type="button" className="btn-primary h-7 flex-none px-3 text-s" onClick={() => run(false)}>
-            업데이트
+          <button type="button" className="btn-primary h-7 flex-none px-3 text-s disabled:cursor-not-allowed disabled:opacity-40" disabled={offline} aria-label={offline ? "업데이트 (연결 뒤에 쓸 수 있습니다)" : undefined} onClick={() => run(false)}>
+            {waitLabel("업데이트")}
           </button>
         </div>
         <p className="mt-1.5 text-xs leading-[1.45] text-text-2">
@@ -704,6 +710,7 @@ function StatusFooterLine({ footer, status, onRetry }: { footer: StatusFooter; s
 
 function StoreLine({ status, lastDay }: { status: ScreenerStatus; lastDay: KstDate }) {
   const { start } = useUpdateCommands();
+  const offline = useBeforeConnect() !== null;
   const today = status.todayAvailable;
   const history = status.fullHistory.done < status.fullHistory.total ? `과거 이력 ${count(status.fullHistory.done)}/${count(status.fullHistory.total)}종목` : null;
   const unconfirmed = status.unconfirmed > 0 ? `확인 안 됨 ${count(status.unconfirmed)}종목` : null;
@@ -717,10 +724,12 @@ function StoreLine({ status, lastDay }: { status: ScreenerStatus; lastDay: KstDa
       </span>
       <button
         type="button"
-        className={`tb-btn h-7 flex-none px-2.5 text-s font-[600] ${today ? "border border-accent text-accent" : "text-text-2"}`}
+        className={`tb-btn h-7 flex-none px-2.5 text-s font-[600] disabled:cursor-not-allowed disabled:opacity-40 ${today ? "border border-accent text-accent" : "text-text-2"}`}
+        disabled={offline}
+        aria-label={offline ? "업데이트 (연결 뒤에 쓸 수 있습니다)" : undefined}
         onClick={() => void start(false).catch(showCommandError)}
       >
-        업데이트
+        {offline ? "연결 뒤" : "업데이트"}
       </button>
     </footer>
   );
