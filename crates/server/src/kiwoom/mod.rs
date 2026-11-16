@@ -3,7 +3,9 @@
 pub mod api;
 pub mod auth;
 pub mod error;
+pub mod key_file;
 pub mod link;
+pub mod private_file;
 pub mod rest;
 pub mod stream;
 pub mod token_file;

@@ -83,6 +83,10 @@ impl KiwoomStream {
         (KiwoomStream { desired }, rx)
     }
 
+    pub fn watch_desired(&self) -> watch::Receiver<BTreeSet<Symbol>> {
+        self.desired.subscribe()
+    }
+
     pub fn set_desired(&self, desired: BTreeSet<Symbol>) {
         self.desired.send_if_modified(|cur| {
             let changed = *cur != desired;

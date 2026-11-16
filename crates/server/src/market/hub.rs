@@ -59,6 +59,10 @@ impl HubHandle {
         conn
     }
 
+    pub fn send_to(&self, conn: ConnId, message: ServerMessage) {
+        self.send(HubInput::Direct { conn, message });
+    }
+
     /// 답(`subscribed`, `sub_error`)은 그 연결의 outbox로 간다.
     pub fn subscribe(&self, conn: ConnId, sub: SubId, key: SeriesKey) {
         self.send(HubInput::Subscribe { conn, sub, key });
@@ -97,6 +101,7 @@ impl HubHandle {
 
 enum HubInput {
     Connect { conn: ConnId, outbox: Arc<Outbox> },
+    Direct { conn: ConnId, message: ServerMessage },
     Subscribe { conn: ConnId, sub: SubId, key: SeriesKey },
     Unsubscribe { conn: ConnId, sub: SubId },
     Disconnect(ConnId),
@@ -294,6 +299,9 @@ impl MarketHub {
                 if outbox.push(hello).is_ok() {
                     self.conns.insert(conn, Conn { outbox, subs: HashMap::new(), requested_watch: Vec::new(), watch_venue: Venue::Combined, limited_sent: BTreeSet::new() });
                 }
+            }
+            HubInput::Direct { conn, message } => {
+                push(&self.conns, &mut self.closing, conn, message);
             }
             HubInput::Subscribe { conn, sub, key } => self.subscribe(conn, sub, key, now),
             HubInput::Unsubscribe { conn, sub } => {
