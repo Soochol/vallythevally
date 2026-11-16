@@ -225,12 +225,13 @@ impl<'a> Snapshot<'a> {
 
     pub(super) fn adjustments(&self, batch: &SummaryBatch) -> Result<Vec<StockCode>, StoreError> {
         if self.last_day >= Some(batch.target) { return Ok(Vec::new()); }
-        let mut stmt = self.tx.prepare("SELECT code, arg_max(close, day) FROM daily WHERE day < ? AND day <= (SELECT last_day FROM store_meta) AND volume > 0 AND code NOT IN (SELECT code FROM history WHERE refetch) GROUP BY code")?;
-        let previous = stmt.query_map(params![date_value(batch.target)], |row| Ok((row.get::<_, String>(0)?, row.get::<_, u64>(1)?)))?.collect::<Result<HashMap<_, _>, _>>()?;
+        let mut stmt = self.tx.prepare("SELECT code, arg_max(close, day), arg_max(close, day) FILTER (WHERE volume > 0) FROM daily WHERE day < ? AND day <= (SELECT last_day FROM store_meta) AND code NOT IN (SELECT code FROM history WHERE refetch) GROUP BY code")?;
+        let previous = stmt.query_map(params![date_value(batch.target)], |row| Ok((row.get::<_, String>(0)?, (row.get::<_, u64>(1)?, row.get::<_, Option<u64>>(2)?))))?.collect::<Result<HashMap<_, _>, _>>()?;
         Ok(batch.stocks.iter().filter_map(|(code, stock)| {
             let quote = stock.result.as_ref().ok()?;
-            let close = *previous.get(code.as_str())?;
-            (10 * u128::from(quote.base.centi().abs_diff(close)) > 3 * u128::from(close)).then_some(*code)
+            let (last_bar, last_traded) = *previous.get(code.as_str())?;
+            let moved_from = |close: u64| 10 * u128::from(quote.base.centi().abs_diff(close)) > 3 * u128::from(close);
+            (moved_from(last_bar) && last_traded.is_some_and(moved_from)).then_some(*code)
         }).collect())
     }
 
