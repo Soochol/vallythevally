@@ -273,7 +273,79 @@ collector verify [--data <폴더>]  --date YYYYMMDD
 
 ## serve와 복기 화면
 
-작업 `hoga-serve`가 채운다.
+`serve`가 구간 파일과 복기 화면을 `127.0.0.1`에서 내보내고, 브라우저가 종목과 날짜를 골라 시간 막대를 움직이거나 재생하면서 그 시각의 호가 10단계, 최근 체결, 프로그램 순매수, 거래원 상위 5를 본다. 코드는 `collector::serve`(서버)와 `crates/collector/page/`(화면)다.
+
+### 명령
+
+```sh
+collector serve [--data <폴더>] [--bind 127.0.0.1:8090]
+```
+
+- 루프백 주소(127.0.0.0/8, `::1`)에만 묶인다. 다른 주소면 시작하지 않고 종료 코드 2다(ADR 0001). `--bind`의 기본은 `127.0.0.1:8090`이고 포트 0이면 빈 포트를 쓴다.
+- 묶은 뒤 표준 출력에 `http://127.0.0.1:<포트>` 한 줄을 적는다.
+- 데이터 폴더가 없으면 종료 코드 1이다. SIGINT·SIGTERM에 끝난다.
+- 화면 파일(`crates/collector/page/`)은 실행 파일에 들어 있다. 화면과 자료가 같은 출처라 CORS 헤더는 없다.
+
+### 길
+
+| 길 | 응답 |
+|---|---|
+| `GET /`, `/style.css`, `/main.js`, `/worker.js`, `/decode.js`, `/seek.js`, `/latest.js`, `/replay.js`, `/view.js` | 화면 파일. `Cache-Control: no-cache` |
+| `GET /data/dates.json` | `spans/` 아래 `index.json`이 있는 날짜를 오름차순으로 담은 JSON 문자열 배열(`["20260720"]`). `no-store` |
+| `GET /data/<날짜>/index.json` | `spans/<날짜>/index.json` 그대로. `no-store` |
+| `GET /data/<날짜>/<종목>/<HHMM>-r<N>.hoga` | `spans/<날짜>/<종목>/<HHMM>-r<N>.hoga.br`의 내용 |
+
+- 구간 파일: 요청의 `Accept-Encoding`에 `br`(`q=0`이 아닌 것)이 있으면 디스크의 바이트를 그대로 `Content-Encoding: br`로 보낸다. 없으면 풀어서 보낸다. `Content-Type: application/octet-stream`, `Vary: Accept-Encoding`, `Cache-Control: public, max-age=31536000, immutable`(판 이름이 바뀌지 않는다).
+- 날짜는 숫자 8자리, 종목은 영문·숫자·밑줄, 파일 이름은 위 모양(`.hoga`)만 받는다. 그 밖의 길, 없는 파일, `..`이 든 길, `.hoga.br`를 직접 부르는 길은 404다. 데이터 폴더 밖은 읽지 않는다. 경로를 정규화해 데이터 폴더 안인지 확인하므로 폴더 밖을 가리키는 심볼릭 링크도 404다. `Accept-Encoding`의 `q` 값은 대소문자를 가리지 않고 읽는다.
+
+### 화면
+
+- 주소 인자: `/?date=20260720&item=005930_NX&t=19:58:00.000`. 없으면 가장 최근 날짜, 첫 종목, 첫 구간 시작이다. `t`는 `HH:MM[:SS[.mmm]]`다. 날짜·종목·시각을 바꾸거나 멈추면 주소의 인자가 갱신된다.
+- 위쪽: 날짜, 종목, 재생·멈춤, 배속(1배·5배·10배), 커서 시각(`HH:MM:SS.mmm`). 시간 막대는 그 종목의 첫 구간 시작부터 마지막 구간 끝까지이고 끌거나 눌러 옮긴다. 수집 끊김 구간이 막대에 붉게 표시된다.
+- 키보드(시간 막대에 초점이 있을 때): ←·→ 1초, Shift+←·→ 10초, PageDown·PageUp 1분, Home·End 처음·끝.
+- 호가창: 고정 20줄(매도 10단계에서 1단계, 이어 매수 1단계에서 10단계)과 매도·매수 총잔량. 매수 1호가가 매도 1호가 이상이면 받은 값 그대로 보이고 "교차"가 켜진다. 커서가 수집 끊김 안이면 "수집 끊김"이 켜진다.
+- 최근 체결: 커서 시각까지의 최신 20건(시각, 가격, 수량, 매수·매도, 거래소). 받아 둔 앞 구간이 있으면 이어서 보인다.
+- 프로그램매매: 순매수 수량(`buy_qty − sell_qty`)과 순매수 금액(백만원), 누적 매수·매도.
+- 거래원: 매도 상위 5와 매수 상위 5의 이름(`index.json`의 `members`, 없으면 세 자리 코드)과 누적 수량.
+- 그 시각까지 행이 없는 흐름은 `—`다. 구석의 "프레임 p95"는 재생 중 최근 300프레임의 프레임 간격 p95(ms)다. 10배속에서 60fps가 유지되는지(약 16.7ms) 실제 수집 날 재는 데 쓴다.
+- 움직이는 방식:
+  - 화면은 커서가 있는 구간의 파일부터 받고, 앞 1개·뒤 2개 구간을 미리 받는다. 받은 구간은 24개까지 쥔다.
+  - Web Worker가 파일을 받아 열마다 누적합으로 되돌리고 `Int32Array`를 transferable로 넘긴다.
+  - 시각으로 행을 찾을 때는 `recv_ms` 열을 이진 탐색한다(그 시각 이하의 마지막 행).
+  - `requestAnimationFrame` 루프 하나가 프레임마다 최신 시각을 한 번 그린다. 보이는 행 번호가 바뀐 흐름만 글자를 바꾼다.
+  - 재생은 흐른 시간 × 배속만큼 커서를 올리고 마지막 구간 끝에서 멈춘다.
+
+### 확인 스크립트가 읽는 자리
+
+화면이 DOM의 `data-*`로 내놓는다.
+
+| 자리 | 뜻 |
+|---|---|
+| `#replay[data-ready]` | `true`면 `data-cursor-ms`의 시각 화면이 다 그려졌다. 커서를 옮기면 바로 `false`가 된다 |
+| `#replay[data-cursor-ms]` | 그려진 커서 시각(KST 자정부터의 ms). `data-date`, `data-item`도 있다 |
+| `[data-book-row]` | 호가 줄 20개. `data-side`(`ask`·`bid`), `data-level`(1~10), `data-price`, `data-qty`(행이 없으면 빈 글자) |
+| `#book-ask-total`, `#book-bid-total` | 총잔량. `data-value` |
+| `#book-cross`, `#gap-banner` | `data-on`이 `true`면 "교차"와 "수집 끊김"이 켜져 있다 |
+| `[data-trade-row]` | 체결 줄 20개. `data-time`(`HH:MM:SS`), `data-price`, `data-qty`(절댓값), `data-side`(`buy`·`sell`), `data-venue`(`KRX`·`NXT`). 빈 줄은 값이 빈 글자 |
+| `#program-net-qty`, `#program-net-amt`, `#program-buy-qty`, `#program-buy-amt`, `#program-sell-qty`, `#program-sell-amt` | 프로그램매매. `data-value` |
+| `[data-broker-row]` | 거래원 줄. `data-side`(`sell`·`buy`), `data-rank`(1~5), `data-name`, `data-qty` |
+| `#frame-stat[data-p95]` | 프레임 간격 p95(ms) |
+| `#bar` | 시간 막대(`input[type=range]`, 값은 KST 자정부터의 ms) |
+| `#play`, `#speed`, `#clock` | 재생 단추(`data-playing`), 배속 선택, 커서 시각 |
+
+### 시험
+
+```sh
+python3 scripts/dev.py cargo test -p collector
+python3 scripts/dev.py cargo clippy -p collector --all-targets -- -D warnings
+python3 scripts/dev.py cargo build -p collector
+node --test crates/collector/page-tests/
+node scripts/test-hoga-replay.mjs
+```
+
+- `cargo test -p collector`의 `tests/serve/`가 길, 압축 협상, 404, 화면 파일의 `Content-Type`, 루프백이 아닌 주소 거절을 고정한다.
+- `crates/collector/page-tests/`는 DOM 없이 Node 내장 시험 실행기로 디코더(기준 파일 `crates/hoga-format/tests/fixtures/`)와 시각 → 행 계산을 시험한다. 실행 파일에는 들어가지 않는다.
+- `scripts/test-hoga-replay.mjs`는 `target/debug/collector`가 필요하고(`cargo build -p collector`), `web/`의 의존성(`cd web && pnpm install --frozen-lockfile`)과 Chromium을 쓴다. CI에는 없다. `target/hoga-replay-tests/run-<고유값>/`에 고정 입력을 복사해 `build`로 구간 파일을 만들고(수집 끊김 사건 두 줄을 더해 `gaps`도 확인한다) `serve --bind 127.0.0.1:0`을 띄운다. 기대값은 원문(`zlib.zstdDecompressSync`)에서 직접 구한다. 결과는 `result.json`과 스크린샷으로 남고 실패하면 종료 코드가 1이다. 띄운 서버만 끈다.
 
 ## 실제 수집 절차
 

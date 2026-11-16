@@ -6,10 +6,17 @@ fn run(arguments: &[&str]) -> (Option<i32>, String) {
 }
 
 #[test]
-fn unfinished_subcommands_report_not_implemented_and_fail() {
-    let (code, stderr) = run(&["serve"]);
-    assert_eq!(code, Some(1));
-    assert!(stderr.contains("아직 구현되지 않았습니다"), "{stderr}");
+fn no_subcommand_reports_not_implemented() {
+    let invocations: [&[&str]; 4] = [
+        &["collect"],
+        &["serve", "--data", "somewhere"],
+        &["build", "--data", "somewhere", "--date", "20260720"],
+        &["verify", "--data", "somewhere", "--date", "20260720"],
+    ];
+    for arguments in invocations {
+        let (_, stderr) = run(arguments);
+        assert!(!stderr.contains("아직 구현되지 않았습니다"), "{arguments:?}: {stderr}");
+    }
 }
 
 #[test]
@@ -18,6 +25,7 @@ fn unknown_subcommand_unknown_argument_and_missing_value_fail() {
     assert_eq!(run(&["nope"]).0, Some(2));
     assert_eq!(run(&["build", "--nope"]).0, Some(2));
     assert_eq!(run(&["build", "--data"]).0, Some(2));
+    assert_eq!(run(&["serve", "--data", "somewhere", "--bind"]).0, Some(2));
 }
 
 #[test]
