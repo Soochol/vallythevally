@@ -58,7 +58,11 @@ paths = [
   "Cargo.toml",
   "Cargo.lock",
   ".cargo/",
+  "rust-toolchain",
+  "rust-toolchain.toml",
+  "package.json",
+  "pnpm-workspace.yaml",
   "scripts/web.py",
   "scripts/dev.py",
-  "scripts/chromium.mjs",
+  "scripts/evidence.py",
 ]
