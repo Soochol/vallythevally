@@ -463,3 +463,59 @@ async fn frames_before_a_disconnect_are_flushed_during_the_reconnect_wait() {
     assert!(stored);
     running.stop().await;
 }
+
+fn down_count(data: &std::path::Path, date: u32) -> usize {
+    read_day(data, date)
+        .unwrap()
+        .filter(|item| matches!(item, RawItem::Record(record) if matches!(record.content, RawContent::Down { .. })))
+        .count()
+}
+
+#[tokio::test(start_paused = true)]
+async fn silence_is_cut_at_thirty_seconds_not_before_or_after() {
+    let peer = Peer::accepting();
+    let (paths, _kiwoom, running) = running_session(&peer).await;
+    let date = running.wall.date();
+    tokio::time::sleep(Duration::from_secs(29)).await;
+    assert_eq!(down_count(&paths.data(), date), 0);
+    tokio::time::sleep(Duration::from_millis(1500)).await;
+    assert_eq!(down_count(&paths.data(), date), 1);
+    running.stop().await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_connection_open_less_than_sixty_seconds_does_not_reset_the_wait() {
+    let peer = Peer::new(|connection, trnm, _| if connection == 0 && trnm == "REG" { Reply::AckThenClose } else { Reply::Ack });
+    let paths = Paths::new();
+    let running = launch(&paths, &peer, &FakeKiwoom::issuing_tokens(), timings());
+    until("둘째 연결", || peer.connect_count() == 2).await;
+    settle().await;
+    for _ in 0..3 {
+        tokio::time::sleep(Duration::from_secs(10)).await;
+        peer.text(1, r#"{"trnm":"PING"}"#);
+        settle().await;
+    }
+    let closed_at = tokio::time::Instant::now();
+    peer.close(1);
+    until("셋째 연결", || peer.connect_count() == 3).await;
+    assert_eq!(peer.connect_times()[2] - closed_at, Duration::from_secs(2));
+    running.stop().await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn failed_reconnects_do_not_repeat_down() {
+    let peer = Peer::new(|connection, trnm, _| match (connection, trnm) {
+        (0, "REG") => Reply::AckThenClose,
+        (0, _) => Reply::Ack,
+        (_, "LOGIN") => Reply::Silent,
+        _ => Reply::Ack,
+    });
+    let paths = Paths::new();
+    let running = launch(&paths, &peer, &FakeKiwoom::issuing_tokens(), timings());
+    until("넷째 연결", || peer.connect_count() == 4).await;
+    settle().await;
+    let date = running.wall.date();
+    running.stop().await;
+    let names: Vec<String> = events(&raw_lines(&paths.data(), date)).into_iter().map(|(event, _)| event).collect();
+    assert_eq!(names, ["live", "down"]);
+}
