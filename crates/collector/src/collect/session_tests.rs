@@ -227,8 +227,8 @@ async fn a_second_invalid_token_response_stops_the_collector() {
     let halt = halted(finish);
     assert!(matches!(halt, Halt::Login(rejection) if rejection.category == Category::TokenInvalid));
     let recorded = events(&raw_lines(&paths.data(), date));
-    assert_eq!(recorded.last().unwrap().0, "down");
-    assert!(recorded.last().unwrap().1.as_deref().unwrap().contains("멈춥니다"));
+    assert_eq!(recorded.len(), 1);
+    assert_eq!(recorded[0].0, "down");
 }
 
 #[tokio::test(start_paused = true)]
@@ -390,4 +390,33 @@ async fn the_real_web_socket_adapter_logs_in_registers_and_stores_a_frame_over_l
     let date = crate::kst::KstTime::from_unix_ms(super::session::SystemWallClock.now_ms()).date;
     let source = raw_source(&paths.data(), date);
     assert!(source.contains(&format!(",\"msg\":{REAL_FRAME}}}")), "{source}");
+}
+
+#[tokio::test(start_paused = true)]
+async fn the_down_line_is_readable_during_the_reconnect_wait() {
+    let peer = Peer::new(|connection, trnm, _| if connection < 6 && trnm == "REG" { Reply::AckThenClose } else { Reply::Ack });
+    let paths = Paths::new();
+    let running = launch(&paths, &peer, &FakeKiwoom::issuing_tokens(), timings());
+    until("여섯째 연결", || peer.connect_count() == 6).await;
+    tokio::time::sleep(Duration::from_secs(3)).await;
+    let date = running.wall.date();
+    let downs = read_day(&paths.data(), date)
+        .unwrap()
+        .filter(|item| matches!(item, RawItem::Record(record) if matches!(record.content, RawContent::Down { .. })))
+        .count();
+    assert_eq!(downs, 6);
+    running.stop().await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn shutdown_during_a_reconnect_wait_does_not_repeat_down() {
+    let peer = Peer::accepting();
+    let (paths, _kiwoom, running) = running_session(&peer).await;
+    peer.close(0);
+    settle().await;
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    let date = running.wall.date();
+    running.stop().await;
+    let names: Vec<String> = events(&raw_lines(&paths.data(), date)).into_iter().map(|(event, _)| event).collect();
+    assert_eq!(names, ["live", "down"]);
 }

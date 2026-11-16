@@ -313,8 +313,7 @@ impl Session {
             Exit::Shutdown => ("종료".to_owned(), Finish::Shutdown),
             Exit::Halt(halt) => (halt.reason(), Finish::Halted(halt)),
         };
-        let recv_ms = self.wall_clock.now_ms();
-        if let Err(error) = self.out.write_event(&RawLine::Down { recv_ms, reason: &reason }) {
+        if let Err(Exit::Halt(Halt::Output(error))) = self.mark_down(&reason) {
             tracing::error!(%error, "down 사건 줄을 쓰지 못했습니다");
         }
         if let Err(error) = self.out.close() {
@@ -389,6 +388,7 @@ impl Session {
         if self.gap != Gap::Down {
             let recv_ms = self.wall_clock.now_ms();
             self.out.write_event(&RawLine::Down { recv_ms, reason })?;
+            self.out.flush_if_dirty()?;
             self.gap = Gap::Down;
         }
         Ok(())
