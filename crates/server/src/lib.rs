@@ -15,6 +15,7 @@ pub mod instance;
 pub mod investors;
 pub mod kiwoom;
 pub mod market;
+pub mod public_ip;
 pub mod quotes;
 pub mod screener;
 pub mod symbols;

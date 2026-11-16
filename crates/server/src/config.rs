@@ -81,6 +81,8 @@ impl BindAddr {
 }
 
 
+pub const REGISTERED_IP_FILE_NAME: &str = "kiwoom-ip.json";
+
 const KNOWN_KEYS: &[&str] = &[
     "VALLY_ENV_FILE",
     "VALLY_KIWOOM_APP_KEY",
@@ -102,6 +104,7 @@ const KNOWN_KEYS: &[&str] = &[
     "OPENDART_API_KEY",
     "VALLY_DART_BASE_URL",
     "VALLY_KIND_BASE_URL",
+    "VALLY_PUBLIC_IP_URL",
     "VALLY_FINANCIAL_DB_PATH",
     "VALLY_FINANCIAL_AUTOMATIC",
 ];
@@ -126,6 +129,7 @@ pub struct Config {
     pub opendart_api_key: Option<Secret<String>>,
     pub dart_base_url: String,
     pub kind_base_url: String,
+    pub public_ip_url: String,
     pub financial_db_path: PathBuf,
     pub financial_automatic: bool,
 }
@@ -185,8 +189,9 @@ impl Config {
         if clock_start.is_some() && rest_endpoint == Endpoint::Kiwoom {
             return Err(ConfigError("VALLY_CLOCK_START는 루프백 키움 주소(VALLY_KIWOOM_BASE_URL, VALLY_KIWOOM_WS_URL)와만 쓸 수 있습니다".into()));
         }
-        let dart_base_url = public_or_loopback(url("VALLY_DART_BASE_URL"), "https://opendart.fss.or.kr")?;
-        let kind_base_url = public_or_loopback(url("VALLY_KIND_BASE_URL"), "https://kind.krx.co.kr")?;
+        let dart_base_url = public_or_loopback("VALLY_DART_BASE_URL", url("VALLY_DART_BASE_URL"), "https://opendart.fss.or.kr")?;
+        let kind_base_url = public_or_loopback("VALLY_KIND_BASE_URL", url("VALLY_KIND_BASE_URL"), "https://kind.krx.co.kr")?;
+        let public_ip_url = public_or_loopback("VALLY_PUBLIC_IP_URL", url("VALLY_PUBLIC_IP_URL"), "https://api.ipify.org")?;
         let config = Config {
             kiwoom_credentials,
             kiwoom_base_url,
@@ -221,21 +226,34 @@ impl Config {
             opendart_api_key: vars.get("OPENDART_API_KEY").filter(|s| !s.is_empty()).cloned().map(Secret::new),
             dart_base_url,
             kind_base_url,
+            public_ip_url,
             financial_db_path: vars.get("VALLY_FINANCIAL_DB_PATH").map(PathBuf::from).unwrap_or_else(|| PathBuf::from(vars.get("VALLY_DB_PATH").map_or("data/vally.db", String::as_str)).with_file_name("financials.db")),
             log_filter: vars.get("VALLY_LOG").cloned().unwrap_or_else(|| "info".to_owned()),
         };
+        let registered_ip_path = config.kiwoom_key_path.with_file_name(REGISTERED_IP_FILE_NAME);
+        let other_files = [
+            ("VALLY_KIWOOM_KEY_PATH", &config.kiwoom_key_path),
+            ("VALLY_TOKEN_PATH", &config.token_path),
+            ("VALLY_LOCK_PATH", &config.lock_path),
+            ("VALLY_DB_PATH", &config.db_path),
+            ("VALLY_SCREENER_DB_PATH", &config.screener_db_path),
+            ("VALLY_FINANCIAL_DB_PATH", &config.financial_db_path),
+        ];
+        if let Some((key, _)) = other_files.iter().find(|(_, path)| **path == registered_ip_path) {
+            return Err(ConfigError(format!("{key}가 포털에 등록한 IP 기록 파일({REGISTERED_IP_FILE_NAME}, 키 파일과 같은 폴더)과 같은 파일입니다")));
+        }
         Ok((config, warnings))
     }
 }
 
-fn public_or_loopback(value: Option<String>, official: &str) -> Result<String, ConfigError> {
+fn public_or_loopback(key: &str, value: Option<String>, official: &str) -> Result<String, ConfigError> {
     let value = value.unwrap_or_else(|| official.into());
     if value == official { return Ok(value); }
-    let parsed = reqwest::Url::parse(&value).map_err(|_| ConfigError("DART/KIND 주소가 올바르지 않습니다".into()))?;
+    let parsed = reqwest::Url::parse(&value).map_err(|_| ConfigError(format!("{key} 주소가 올바르지 않습니다")))?;
     let loopback = parsed.host_str().is_some_and(|h| h == "localhost" || h.trim_matches(['[', ']']).parse::<IpAddr>().is_ok_and(|ip| ip.is_loopback()));
     if loopback && parsed.scheme() == "http" && parsed.username().is_empty() && parsed.password().is_none() && parsed.query().is_none() && parsed.fragment().is_none() {
         Ok(value)
-    } else { Err(ConfigError("DART/KIND 주소는 공식 HTTPS 주소나 가짜 응답용 HTTP 루프백만 됩니다".into())) }
+    } else { Err(ConfigError(format!("{key}는 공식 HTTPS 주소나 가짜 응답용 HTTP 루프백만 됩니다"))) }
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -532,5 +550,28 @@ mod tests {
         assert!(start("not a url", loopback_ws, true).is_err());
         assert!(start("http://localhost:5", "ws://[::1]:5/ws", true).is_ok(), "루프백 이름과 IPv6");
     }
-}
 
+    #[test]
+    fn the_public_ip_service_is_the_official_https_address_or_a_loopback_http_stand_in() {
+        let start = |pairs: &[(&str, &str)]| Config::from_vars(vars(&[]), vars(pairs), lock, token, key).map(|(config, _)| config.public_ip_url);
+        assert_eq!(start(&[]).unwrap(), "https://api.ipify.org");
+        assert_eq!(start(&[("VALLY_PUBLIC_IP_URL", "http://127.0.0.1:9/")]).unwrap(), "http://127.0.0.1:9");
+        assert_eq!(start(&[("VALLY_PUBLIC_IP_URL", "http://localhost:9")]).unwrap(), "http://localhost:9");
+        for refused in ["http://example.com", "https://example.com", "http://user:pw@127.0.0.1:9", "http://127.0.0.1:9/?k=v", "not a url"] {
+            let error = start(&[("VALLY_PUBLIC_IP_URL", refused)]).expect_err(refused).to_string();
+            assert!(error.contains("VALLY_PUBLIC_IP_URL"), "{error}");
+        }
+    }
+
+    #[test]
+    fn no_other_file_can_be_the_registered_ip_file_next_to_the_key_file() {
+        let start = |pairs: &[(&str, &str)]| Config::from_vars(vars(&[]), vars(pairs), lock, token, key).map(|_| ());
+        let beside_key = "/state/vally/kiwoom-ip.json";
+        for key_name in ["VALLY_KIWOOM_KEY_PATH", "VALLY_TOKEN_PATH", "VALLY_LOCK_PATH", "VALLY_DB_PATH", "VALLY_SCREENER_DB_PATH", "VALLY_FINANCIAL_DB_PATH"] {
+            let pairs = if key_name == "VALLY_KIWOOM_KEY_PATH" { vec![(key_name, beside_key)] } else { vec![("VALLY_KIWOOM_KEY_PATH", "/state/vally/kiwoom-key.json"), (key_name, beside_key)] };
+            let error = start(&pairs).expect_err(key_name).to_string();
+            assert!(error.contains(key_name) && error.contains("kiwoom-ip.json"), "{error}");
+        }
+        assert!(start(&[("VALLY_KIWOOM_KEY_PATH", "/state/vally/kiwoom-key.json"), ("VALLY_TOKEN_PATH", "/elsewhere/kiwoom-ip.json")]).is_ok(), "다른 폴더의 같은 이름은 겹치지 않는다");
+    }
+}

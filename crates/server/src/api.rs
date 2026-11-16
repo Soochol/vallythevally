@@ -334,6 +334,30 @@ pub struct KiwoomLinkStatus {
     pub token_expires_at: Option<UnixSeconds>,
     pub realtime_registered: Option<u32>,
     pub symbol_count: Option<u32>,
+    pub registered_ip: Option<RegisteredIp>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct RegisteredIp {
+    pub ip: String,
+    pub at: UnixSeconds,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct PublicIpCheck {
+    pub ip: String,
+    pub checked_at: UnixSeconds,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct RegisteredIpInput {
+    pub ip: String,
 }
 
 #[derive(Clone, PartialEq, Eq, Deserialize, TS)]

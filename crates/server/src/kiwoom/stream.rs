@@ -669,17 +669,37 @@ mod tests {
     type Frames = UnboundedSender<Result<Message, WsError>>;
     type Script = dyn Fn(usize, &str, usize) -> Reply + Send + Sync;
 
-    struct Captured(Arc<Mutex<Vec<u8>>>);
+    thread_local! {
+        static CAPTURED_LOGS: std::cell::RefCell<Option<Vec<u8>>> = const { std::cell::RefCell::new(None) };
+    }
 
-    impl std::io::Write for Captured {
+    struct CapturedLogs;
+
+    impl std::io::Write for CapturedLogs {
         fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
-            self.0.lock().unwrap().extend_from_slice(bytes);
+            CAPTURED_LOGS.with(|logs| logs.borrow_mut().as_mut().map(|logs| logs.extend_from_slice(bytes)));
             Ok(bytes.len())
         }
 
         fn flush(&mut self) -> std::io::Result<()> {
             Ok(())
         }
+    }
+
+    fn install_global_log_capture() {
+        static INSTALLED: std::sync::Once = std::sync::Once::new();
+        INSTALLED.call_once(|| {
+            let subscriber = tracing_subscriber::fmt().with_writer(|| CapturedLogs).with_ansi(false).with_max_level(tracing::Level::TRACE).finish();
+            tracing::subscriber::set_global_default(subscriber).expect("전역 로그 구독자는 이 시험 묶음이 처음 설치한다");
+        });
+    }
+
+    fn start_capturing_logs_of_this_thread() {
+        CAPTURED_LOGS.with(|logs| *logs.borrow_mut() = Some(Vec::new()));
+    }
+
+    fn logs_captured_on_this_thread() -> String {
+        CAPTURED_LOGS.with(|logs| String::from_utf8(logs.borrow().clone().expect("로그 수집이 시작되지 않았다")).unwrap())
     }
 
     fn samsung() -> Symbol {
@@ -791,6 +811,7 @@ mod tests {
 
     impl Peer {
         fn new(script: impl Fn(usize, &str, usize) -> Reply + Send + Sync + 'static) -> Self {
+            install_global_log_capture();
             Self { script: Arc::new(script), seen: Arc::default(), frames: Arc::default(), attempts: Arc::default() }
         }
 
@@ -1069,19 +1090,16 @@ mod tests {
     #[tokio::test(start_paused = true)]
     async fn a_registration_refused_for_capacity_rebuilds_once_then_halts_only_the_stream() {
         for code in [105115, 105118] {
-            let output = Arc::new(Mutex::new(Vec::new()));
-            let writer = output.clone();
-            let subscriber = tracing_subscriber::fmt().with_writer(move || Captured(writer.clone())).with_ansi(false).with_max_level(tracing::Level::TRACE).finish();
-            let _guard = tracing::subscriber::set_default(subscriber);
             let peer = Peer::new(move |_, trnm, _| if trnm == "REG" { Reply::Code(code) } else { Reply::Ok });
             let clock = clock();
             let (rest, transport) = rest(&clock);
+            start_capturing_logs_of_this_thread();
             let (_stream, mut events) = peer.start_rest(rest.clone(), clock, fast(), &[samsung()]);
             assert_eq!(next(&mut events).await, StreamEvent::Halted, "{code}");
             assert_eq!(peer.logins(), 2);
             assert_eq!(transport.sent().len(), 1);
             assert!(rest.halted().is_none());
-            let logs = String::from_utf8(output.lock().unwrap().clone()).unwrap();
+            let logs = logs_captured_on_this_thread();
             let line = logs.lines().find(|line| line.contains("다시 구성한 세션에서도 제어가 실패했습니다")).unwrap_or_else(|| panic!("{logs}"));
             assert!(line.contains("ERROR") && line.contains(&format!("return_code: Some({code})")) && line.contains("budget=Rebuilt"), "{line}");
             assert!(!logs.contains("tok-1"));

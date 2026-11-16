@@ -4,6 +4,7 @@ respawn = []
 remote = "origin"
 serialize = false
 env_check = ["cargo --version", "node --version"]
+preflight = "never"
 
 [[verify]]
 name = "check"

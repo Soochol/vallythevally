@@ -108,7 +108,10 @@ impl Server {
                 opendart_key_present: value("OPENDART_API_KEY").is_some_and(|key| !key.is_empty()), token_path: path(&token_path), key_path: path(key_file.path()), lock_path: path(&lock),
                 kiwoom_target: server::system_routes::kiwoom_target(value("VALLY_KIWOOM_BASE_URL").unwrap_or("http://127.0.0.1:1")), server_version: env!("CARGO_PKG_VERSION").into(),
             };
-            let system = server::system_routes::SystemState::new(key_file, has_env_key, startup_key.file_problem, settings);
+            let mut system = server::system_routes::SystemState::new(key_file, has_env_key, startup_key.file_problem, settings);
+            if let Some(url) = value("VALLY_PUBLIC_IP_URL") {
+                system = system.with_public_ip(Arc::new(server::public_ip::ReqwestPublicIp::new(url.into()).unwrap()));
+            }
             let state = server::app::application_with_system(server::app::ApplicationInputs { rest: rest.clone(), clock: clock.clone(), symbols: symbols.clone(), db, screener_store: store, stream: (stream, stream_events), static_dir, screener_update_on_connect: value("VALLY_SCREENER_UPDATE_ON_START") == Some("on") }, system);
             let mut background = tokio::task::JoinSet::new();
             publish.set(Control { link: state.link.clone(), runtime: tokio::runtime::Handle::current(), clock: clock.clone() }).ok();
