@@ -569,7 +569,7 @@ fn signed(s: &str) -> Result<i64, WireError> {
 }
 
 fn decimal(s: &str) -> Result<f64, WireError> {
-    s.parse::<f64>().ok().filter(|x| x.is_finite()).ok_or_else(|| WireError(format!("소수가 아닙니다: {s:?}")))
+    s.trim().parse::<f64>().ok().filter(|x| x.is_finite()).ok_or_else(|| WireError(format!("소수가 아닙니다: {s:?}")))
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -611,7 +611,7 @@ fn page_days<R, T>(rows: &[R], dt: impl Fn(&R) -> &str, read: impl Fn(KstDate, &
 }
 
 fn shares(s: &str) -> Result<u64, WireError> {
-    s.strip_prefix('+').unwrap_or(s).parse().map_err(|_| WireError(format!("주식 수가 아닙니다: {s:?}")))
+    s.trim().strip_prefix('+').unwrap_or(s.trim()).parse().map_err(|_| WireError(format!("주식 수가 아닙니다: {s:?}")))
 }
 
 #[derive(Debug, PartialEq, Deserialize)]
@@ -801,7 +801,7 @@ fn parse_real_item(entry: &Value) -> Result<RealItem, WireError> {
             if qty == 0 {
                 return Ok(RealItem::AuctionOnly);
             }
-            let exchange = match values.get("9081").and_then(Value::as_str) {
+            let exchange = match values.get("9081").and_then(Value::as_str).map(str::trim) {
                 Some("KRX") => Some(Exchange::Krx),
                 Some("NXT") => Some(Exchange::Nxt),
                 _ => None,
@@ -822,6 +822,7 @@ fn parse_real_item(entry: &Value) -> Result<RealItem, WireError> {
 }
 
 fn hhmmss(s: &str) -> Result<TimeOfDay, WireError> {
+    let s = s.trim();
     let bad = || WireError(format!("체결시각이 HHMMSS가 아닙니다: {s:?}"));
     if s.len() != 6 || !s.bytes().all(|b| b.is_ascii_digit()) {
         return Err(bad());
@@ -1052,6 +1053,8 @@ mod tests {
             assert!(unsigned(bad).is_err(), "{bad:?}");
         }
         assert!(index_level(" ").is_err());
+        assert_eq!((decimal(" 1.5 "), shares(" +27931470 "), hhmmss(" 093001 ").map(|t| t.secs())), (Ok(1.5), Ok(27_931_470), Ok(34_201)));
+        assert!(hhmmss("09 3001").is_err() && hhmmss(" ").is_err());
     }
 
     fn level_centi_of(s: &str) -> Option<i64> {
@@ -1063,8 +1066,10 @@ mod tests {
         let mut v = trade_values("093001", 71_200, 15, 100, "KRX");
         v["10"] = " 172500".into();
         v["11"] = " +8100".into();
+        v["20"] = " 093001".into();
+        v["9081"] = " KRX".into();
         match one("0B", "005930_AL", v) {
-            Ok(RealItem::Trade(tick)) => assert_eq!((tick.price.centi(), tick.day.map(|d| d.change_centi)), (17_250_000, Some(810_000))),
+            Ok(RealItem::Trade(tick)) => assert_eq!((tick.price.centi(), tick.day.map(|d| d.change_centi), tick.exchange), (17_250_000, Some(810_000), Some(Exchange::Krx))),
             other => panic!("{other:?}"),
         }
     }
