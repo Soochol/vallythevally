@@ -91,7 +91,7 @@ impl Fake {
         reached.unwrap_or_else(|error| panic!("{label} was not reached: {error:?}; {:?}", self.observed()));
     }
 
-    fn client(&self) -> Client { Client::new(Secret::new(KEY.into()), self.url.clone(), self.url.clone()).unwrap() }
+    fn client(&self) -> Client { Client::with_spacing(Secret::new(KEY.into()), self.url.clone(), self.url.clone(), Duration::from_millis(1)).unwrap() }
     fn count(&self, endpoint: &str) -> usize { self.state.lock().unwrap().calls.iter().filter(|(e, _)| e == endpoint).count() }
 
     fn observed(&self) -> Vec<(String, BTreeMap<String, String>)> {
@@ -589,7 +589,12 @@ async fn http_settled(fake: &Fake, client: &reqwest::Client, base: &str) -> Valu
 }
 
 fn process(fake: &Fake, kiwoom: &common::ScriptedTransport, dir: &std::path::Path, start: &str) -> common::Server {
+    process_spaced(fake, kiwoom, dir, start, "1")
+}
+
+fn process_spaced(fake: &Fake, kiwoom: &common::ScriptedTransport, dir: &std::path::Path, start: &str, dart_spacing_millis: &str) -> common::Server {
     common::Server::spawn_with(kiwoom,&dir.join("run/server.lock"),dir,&[
+        ("DART_SPACING_MILLIS",std::ffi::OsStr::new(dart_spacing_millis)),
         ("OPENDART_API_KEY",std::ffi::OsStr::new(KEY)),
         ("VALLY_DART_BASE_URL",std::ffi::OsStr::new(&fake.url)),
         ("VALLY_KIND_BASE_URL",std::ffi::OsStr::new(&fake.url)),

@@ -95,7 +95,7 @@ async fn reply(resp: reqwest::Response) -> Value {
 }
 
 async fn boot(fake: &ScriptedTransport, dir: &Path, clock_start: &str) -> (Server, Api) {
-    let server = Server::spawn_with(fake, &dir.join("run/server.lock"), dir, &[("VALLY_CLOCK_START", OsStr::new(clock_start))]);
+    let server = Server::spawn_with(fake, &dir.join("run/server.lock"), dir, &[("VALLY_CLOCK_START", OsStr::new(clock_start)), ("KIWOOM_SEND_SPACING_MILLIS", OsStr::new("260"))]);
     let api = Api::of(&server).await;
     (server, api)
 }
@@ -439,7 +439,7 @@ async fn a_schema_4_store_keeps_its_daily_bars_and_history_and_is_listed_with_sh
     let upgraded = schema_4_copy();
     let boot_updating = || {
         let clock = at(today, "2040");
-        Server::spawn_with(&fake, &upgraded.path().join("run/server.lock"), upgraded.path(), &[("VALLY_CLOCK_START", OsStr::new(&clock)), ("VALLY_SCREENER_UPDATE_ON_START", OsStr::new("on"))])
+        Server::spawn_with(&fake, &upgraded.path().join("run/server.lock"), upgraded.path(), &[("VALLY_CLOCK_START", OsStr::new(&clock)), ("VALLY_SCREENER_UPDATE_ON_START", OsStr::new("on")), ("KIWOOM_SEND_SPACING_MILLIS", OsStr::new("260"))])
     };
     let seen = fake.calls().len();
 
@@ -831,7 +831,7 @@ async fn the_server_starts_an_update_when_its_store_is_behind_the_target_day_and
         let lock = tmp.path().join("run/server.lock");
         let dir = tmp.path().to_owned();
         let fake = &fake;
-        move || Server::spawn_with(fake, &lock, &dir, &[("VALLY_CLOCK_START", OsStr::new(&clock)), ("VALLY_SCREENER_UPDATE_ON_START", OsStr::new("on"))])
+        move || Server::spawn_with(fake, &lock, &dir, &[("VALLY_CLOCK_START", OsStr::new(&clock)), ("VALLY_SCREENER_UPDATE_ON_START", OsStr::new("on")), ("KIWOOM_SEND_SPACING_MILLIS", OsStr::new("260"))])
     };
 
     fake.set_krx_market(KrxMarket::sample(today).with_daily_withheld());
@@ -1121,7 +1121,7 @@ async fn an_upgraded_store_whose_first_stock_list_comes_back_empty_refuses_runs_
             &fake,
             &upgraded.path().join("run/server.lock"),
             upgraded.path(),
-            &[("VALLY_CLOCK_START", OsStr::new(&monday_before_07_45)), ("VALLY_SCREENER_UPDATE_ON_START", OsStr::new(update_on_start))],
+            &[("VALLY_CLOCK_START", OsStr::new(&monday_before_07_45)), ("VALLY_SCREENER_UPDATE_ON_START", OsStr::new(update_on_start)), ("KIWOOM_SEND_SPACING_MILLIS", OsStr::new("260"))],
         );
         let api = Api::of(&server).await;
         let screen = &screens_across_the_upgrade()[0];

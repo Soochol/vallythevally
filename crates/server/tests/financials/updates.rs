@@ -587,7 +587,7 @@ async fn a_company_remote_failure_has_a_bounded_retry_budget_and_preserves_previ
     body["list"].as_array_mut().unwrap().retain(|row| ["005930", "000020"].contains(&row["code"].as_str().unwrap()));
     kiwoom.respond_with("ka10099", 200, body);
     let dir = tempdir();
-    let server = process(&fake, &kiwoom, dir.path(), "20151231120000");
+    let server = process_spaced(&fake, &kiwoom, dir.path(), "20151231120000", "250");
     let base = format!("http://{}", server.addr().await);
     let client = reqwest::Client::new();
     client.get(format!("{base}/api/bars?symbol=005930&period=D&limit=5")).send().await.unwrap().error_for_status().unwrap();
