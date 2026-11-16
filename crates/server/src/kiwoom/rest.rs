@@ -592,6 +592,7 @@ impl Inner {
                         q.failed_once.remove(&ApiId::Au10001);
                         Ok(generation)
                     }
+                    Err(_) if !self.auth.issue_is_for_current_key() => Err(KiwoomError::NotConnected),
                     Err(failure) => {
                         if failure.category() == Category::RateLimit {
                             q.pause_until = Some(Instant::now() + RATE_LIMIT_PAUSE);

@@ -122,6 +122,9 @@ impl Link {
     fn stop_for_halt(&self) {
         let mut slot = self.0.flight.lock().expect("연결 잠금");
         if !self.is_connected() {
+            if !matches!(self.state(), LinkState::Connecting(_)) {
+                self.set(self.resting_state());
+            }
             return;
         }
         self.0.epoch.send_modify(|epoch| *epoch += 1);

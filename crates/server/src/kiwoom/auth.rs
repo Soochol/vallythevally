@@ -138,6 +138,11 @@ impl KiwoomAuth {
         self.state.lock().expect("auth 잠금")
     }
 
+    pub fn issue_is_for_current_key(&self) -> bool {
+        let st = self.lock();
+        st.issuing_for.is_none() || st.credentials.as_ref().map(|c| &c.id) == st.issuing_for.as_ref()
+    }
+
     pub fn watch_halted(&self) -> watch::Receiver<Option<Halt>> {
         self.halted.subscribe()
     }

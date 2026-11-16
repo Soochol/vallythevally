@@ -671,3 +671,48 @@ async fn an_acknowledged_connect_right_after_a_disconnect_that_restored_8050_sti
     assert_eq!(again, LinkState::Connected);
     server.stop().await;
 }
+
+#[tokio::test]
+async fn an_8050_answer_arriving_after_a_disconnect_still_shows_in_the_link_state() {
+    let fake = ScriptedTransport::new();
+    reject_issue(&fake, EIGHT_FIFTY);
+    fake.delay("au10001", Duration::from_millis(800));
+    let env = env();
+    let server = spawn(&fake, &env, &[OFF, ("VALLY_CLOCK_START", "20261109100000")]);
+    server.addr().await;
+    let connecting = tokio::spawn({
+        let link = server.link();
+        async move { link.connect(false).await }
+    });
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert_eq!(fake.issued(), 1);
+    server.link().disconnect();
+    connecting.await.unwrap();
+    tokio::time::sleep(Duration::from_millis(1200)).await;
+    assert!(server.link().needs_acknowledgement());
+    assert_eq!(failure(server.link_state()).problem, Problem::AuthBlocked8050);
+    server.stop().await;
+}
+
+#[tokio::test]
+async fn a_key_rejection_answered_for_the_replaced_key_does_not_block_the_new_key() {
+    let fake = ScriptedTransport::new();
+    reject_issue(&fake, KEY_REJECTED);
+    fake.delay("au10001", Duration::from_millis(800));
+    let env = env();
+    let server = spawn(&fake, &env, &[OFF, ("VALLY_CLOCK_START", "20261109100000")]);
+    server.addr().await;
+    let connecting = tokio::spawn({
+        let link = server.link();
+        async move { link.connect(false).await }
+    });
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    server.link().replace_key(Secret::new("FAKE-new-key".into()), Secret::new("FAKE-new-secret".into()));
+    connecting.await.unwrap();
+    tokio::time::sleep(Duration::from_millis(1200)).await;
+    fake.reset();
+    server.clock().jump(601);
+    assert_eq!(server.connect(false).await, LinkState::Connected);
+    assert_eq!(fake.seen.token_bodies.lock().unwrap().last().unwrap()["appkey"], "FAKE-new-key");
+    server.stop().await;
+}
