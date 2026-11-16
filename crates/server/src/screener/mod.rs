@@ -303,7 +303,7 @@ impl Screener {
                 me.store.require_refetch(&adjustments, Some(generation))?;
                 let named: Vec<&str> = adjustments.iter().take(5).map(|code| code.as_str()).collect();
                 let more = if adjustments.len() > named.len() { " 등" } else { "" };
-                return Err(data_changed(format!("기준가와 확정 이력의 차이가 커 수정 이력을 확인해야 합니다: {}{more}. 업데이트 후 다시 실행하세요", named.join(", "))));
+                return Err(data_changed(format!("기준가와 확정 이력의 차이가 커 수정 이력을 확인해야 합니다: {}{more}. 업데이트 후 다시 실행하세요. 업데이트 뒤에도 같은 종목이 거절되면 키움이 준 이력이 기준가와 맞지 않는 것이라, 그 종목의 이력이 바뀔 때까지 실행할 수 없습니다", named.join(", "))));
             }
             let result = snapshot.screen(&screen, &batch, calendar.observation(me.clock.now()))?;
             if me.store.generation() != generation || me.next_run.load(Ordering::SeqCst) != update_epoch || me.clock.now().kst_date() != batch.target {
