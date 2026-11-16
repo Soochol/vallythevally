@@ -324,3 +324,28 @@ fn the_real_kiwoom_target_shows_its_host_and_loopback_shows_only_the_fact() {
         assert_eq!((local.kind, local.host), (KiwoomTargetKind::Loopback, None), "{url}");
     }
 }
+
+#[tokio::test]
+async fn deleting_the_key_while_the_token_file_is_unreadable_keeps_the_issue_interval() {
+    let (env, fake) = (Env::new(), ScriptedTransport::new());
+    let server = env.spawn(&fake, &[]);
+    let client = Client::of(&server).await;
+    assert_eq!(client.put_key(APP_KEY, APP_SECRET).await.0, 200);
+    assert_eq!(client.connect(false).await.1["state"], "connected");
+    server.stop().await;
+    let token_file = common::token_path(&env.lock);
+    let before = std::fs::read(&token_file).unwrap();
+    std::fs::set_permissions(&token_file, std::fs::Permissions::from_mode(0o644)).unwrap();
+
+    let restarted = env.spawn(&fake, &[]);
+    let client = Client::of(&restarted).await;
+    assert_eq!(client.get("/api/system/kiwoom").await.1["problem"], "tokenFileUnusable");
+    assert_eq!(client.delete_key().await.0, 200);
+    assert_eq!(std::fs::read(&token_file).unwrap(), before, "읽을 수 없는 토큰 파일은 덮어쓰지 않는다");
+    assert_eq!(client.put_key(APP_KEY, APP_SECRET).await.0, 200);
+    let recheck = answer(client.write(reqwest::Method::POST, "/api/system/kiwoom/recheck-token-file", None).send().await.unwrap()).await.1;
+    assert_eq!(recheck["state"], "failed", "{recheck}");
+    let (_, again) = client.connect(false).await;
+    assert_ne!(again["state"], "connected", "{again}");
+    assert_eq!(fake.issued(), 1, "{:?}", fake.api_ids());
+}

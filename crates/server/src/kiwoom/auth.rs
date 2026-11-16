@@ -206,6 +206,9 @@ impl KiwoomAuth {
         st.credentials = None;
         st.issued = None;
         st.stale = false;
+        if matches!(self.halted(), Some(Halt::TokenFileUnreadable(_))) {
+            return;
+        }
         if let Err(e) = self.save(&st) {
             tracing::error!(error = %e, "토큰 파일에서 토큰을 비우지 못했습니다");
         }
