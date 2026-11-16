@@ -28,7 +28,7 @@ impl KeyFile {
     }
 
     pub fn registered_ip_file(&self) -> RegisteredIpFile {
-        RegisteredIpFile::new(PrivateFile::new(self.path().with_file_name("kiwoom-ip.json")))
+        RegisteredIpFile::new(PrivateFile::new(self.path().with_file_name(crate::config::REGISTERED_IP_FILE_NAME)))
     }
 
     pub fn load(&self) -> Result<Option<KiwoomCredentials>, FileError> {

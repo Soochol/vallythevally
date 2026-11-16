@@ -81,6 +81,8 @@ impl BindAddr {
 }
 
 
+pub const REGISTERED_IP_FILE_NAME: &str = "kiwoom-ip.json";
+
 const KNOWN_KEYS: &[&str] = &[
     "VALLY_ENV_FILE",
     "VALLY_KIWOOM_APP_KEY",
@@ -228,6 +230,11 @@ impl Config {
             financial_db_path: vars.get("VALLY_FINANCIAL_DB_PATH").map(PathBuf::from).unwrap_or_else(|| PathBuf::from(vars.get("VALLY_DB_PATH").map_or("data/vally.db", String::as_str)).with_file_name("financials.db")),
             log_filter: vars.get("VALLY_LOG").cloned().unwrap_or_else(|| "info".to_owned()),
         };
+        for (key, path) in [("VALLY_KIWOOM_KEY_PATH", &config.kiwoom_key_path), ("VALLY_TOKEN_PATH", &config.token_path)] {
+            if path.file_name().is_some_and(|name| name == REGISTERED_IP_FILE_NAME) {
+                return Err(ConfigError(format!("{key}의 파일 이름은 {REGISTERED_IP_FILE_NAME}일 수 없습니다. 그 이름은 포털에 등록한 IP 기록이 씁니다")));
+            }
+        }
         Ok((config, warnings))
     }
 }
@@ -546,6 +553,14 @@ mod tests {
         for refused in ["http://example.com", "https://example.com", "http://user:pw@127.0.0.1:9", "http://127.0.0.1:9/?k=v", "not a url"] {
             let error = start(&[("VALLY_PUBLIC_IP_URL", refused)]).expect_err(refused).to_string();
             assert!(error.contains("VALLY_PUBLIC_IP_URL"), "{error}");
+        }
+    }
+
+    #[test]
+    fn the_key_and_token_files_cannot_take_the_registered_ip_file_name() {
+        for key in ["VALLY_KIWOOM_KEY_PATH", "VALLY_TOKEN_PATH"] {
+            let error = Config::from_vars(vars(&[]), vars(&[(key, "/state/vally/kiwoom-ip.json")]), lock, token, self::key).expect_err(key).to_string();
+            assert!(error.contains(key) && error.contains("kiwoom-ip.json"), "{error}");
         }
     }
 }

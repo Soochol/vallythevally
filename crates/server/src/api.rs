@@ -337,7 +337,6 @@ pub struct KiwoomLinkStatus {
     pub registered_ip: Option<RegisteredIp>,
 }
 
-/// 사용자가 키움 포털에 등록했다고 표시한 공인 IP와 그 시각.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export)]
