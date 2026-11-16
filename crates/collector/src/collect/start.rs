@@ -27,14 +27,30 @@ pub struct Injected {
     pub timings: Timings,
 }
 
+#[derive(Debug)]
+pub enum StartError {
+    Lock(LockError),
+    DataFolder(std::io::Error),
+}
+
+impl std::fmt::Display for StartError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            StartError::Lock(error) => error.fmt(formatter),
+            StartError::DataFolder(error) => write!(formatter, "데이터 폴더를 만들 수 없습니다: {error}"),
+        }
+    }
+}
+
 pub async fn execute(
     config: &CollectorConfig,
     data_dir: PathBuf,
     items: &Items,
     injected: Injected,
     shutdown: watch::Receiver<bool>,
-) -> Result<Finish, LockError> {
-    let lock = InstanceLock::acquire(&config.lock_path)?;
+) -> Result<Finish, StartError> {
+    let lock = InstanceLock::acquire(&config.lock_path).map_err(StartError::Lock)?;
+    std::fs::create_dir_all(data_dir.join("raw")).map_err(StartError::DataFolder)?;
     let token_file = TokenFile::new(config.token_path.clone(), &lock);
     let auth = KiwoomAuth::new(config.app_key.clone(), config.app_secret.clone(), Some(token_file));
     let rest = KiwoomRest::new(injected.transport, auth, injected.token_clock.clone());

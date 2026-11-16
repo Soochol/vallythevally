@@ -232,12 +232,13 @@ enum FrameKind {
 }
 
 fn classify_frame(text: &str) -> FrameKind {
-    match serde_json::from_str::<FrameHead<'_>>(text) {
-        Ok(FrameHead { trnm: Some("PING") }) => FrameKind::Ping,
-        Ok(FrameHead { trnm: Some("REAL") }) => FrameKind::Real,
-        Ok(_) => FrameKind::Control,
-        Err(_) if serde_json::from_str::<IgnoredAny>(text).is_ok() => FrameKind::Control,
-        Err(_) => FrameKind::NotJson,
+    let head = if text.trim_start().starts_with('{') { serde_json::from_str::<FrameHead<'_>>(text).ok() } else { None };
+    match head {
+        Some(FrameHead { trnm: Some("PING") }) => FrameKind::Ping,
+        Some(FrameHead { trnm: Some("REAL") }) => FrameKind::Real,
+        Some(_) => FrameKind::Control,
+        None if serde_json::from_str::<IgnoredAny>(text).is_ok() => FrameKind::Control,
+        None => FrameKind::NotJson,
     }
 }
 
@@ -357,6 +358,9 @@ impl Session {
             self.live_since = None;
             let interrupt = self.serve(&mut conn).await;
             conn.close().await;
+            if let Err(error) = self.out.flush_if_dirty() {
+                return error.into();
+            }
             match interrupt {
                 Interrupt::Exit(exit) => return exit,
                 Interrupt::TokenRefresh => {

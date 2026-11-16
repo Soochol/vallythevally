@@ -12,7 +12,6 @@ use futures::future::BoxFuture;
 use futures::{Sink, Stream, StreamExt};
 use server::clock::{Clock, kst};
 use server::config::Secret;
-use server::instance::LockError;
 use server::kiwoom::transport::{HttpRequest, HttpResponse, Transport, TransportError};
 use tokio::sync::watch;
 use tokio::task::JoinHandle;
@@ -22,7 +21,7 @@ use tokio_tungstenite::tungstenite::{Error as WsError, Message};
 use super::config::CollectorConfig;
 use super::items::Items;
 use super::session::{Finish, Timings, WallClock};
-use super::start::{Injected, execute};
+use super::start::{Injected, StartError, execute};
 use super::ws::{Connector, Socket};
 
 pub const APP_KEY: &str = "FAKE-COLLECTOR-KEY-1111";
@@ -285,7 +284,7 @@ pub fn items() -> Items {
 pub struct Running {
     pub wall: Arc<FakeWall>,
     stop: watch::Sender<bool>,
-    task: JoinHandle<Result<Finish, LockError>>,
+    task: JoinHandle<Result<Finish, StartError>>,
 }
 
 pub fn launch(paths: &Paths, peer: &Peer, kiwoom: &Arc<FakeKiwoom>, timings: Timings) -> Running {
@@ -309,7 +308,7 @@ impl Running {
         self.task.await.unwrap().expect("잠금을 잡았다")
     }
 
-    pub async fn finish(self) -> Result<Finish, LockError> {
+    pub async fn finish(self) -> Result<Finish, StartError> {
         self.task.await.unwrap()
     }
 }

@@ -27,7 +27,7 @@ async fn running_session(peer: &Peer) -> (Paths, Arc<FakeKiwoom>, Running) {
     (paths, kiwoom, running)
 }
 
-fn halted(finish: Result<Finish, server::instance::LockError>) -> Halt {
+fn halted(finish: Result<Finish, super::start::StartError>) -> Halt {
     match finish.expect("잠금을 잡았다") {
         Finish::Halted(halt) => halt,
         Finish::Shutdown => panic!("멈춰야 하는데 정상 종료했다"),
@@ -327,7 +327,7 @@ async fn a_second_collector_on_the_same_lock_fails_at_once_without_touching_kiwo
     let second_peer = Peer::accepting();
     let second = launch(&paths, &second_peer, &second_kiwoom, timings());
     let result = second.finish().await;
-    assert!(matches!(result, Err(server::instance::LockError::Held { .. })), "{result:?}");
+    assert!(matches!(result, Err(super::start::StartError::Lock(server::instance::LockError::Held { .. }))), "{result:?}");
     assert_eq!(second_kiwoom.issue_count(), 0);
     assert_eq!(second_peer.connect_count(), 0);
     running.stop().await;
@@ -419,4 +419,47 @@ async fn shutdown_during_a_reconnect_wait_does_not_repeat_down() {
     running.stop().await;
     let names: Vec<String> = events(&raw_lines(&paths.data(), date)).into_iter().map(|(event, _)| event).collect();
     assert_eq!(names, ["live", "down"]);
+}
+
+#[tokio::test(start_paused = true)]
+async fn an_unusable_data_folder_fails_before_any_token_request_or_connection() {
+    let paths = Paths::new();
+    std::fs::write(paths.data(), "a file, not a folder").unwrap();
+    let peer = Peer::accepting();
+    let kiwoom = FakeKiwoom::issuing_tokens();
+    let result = launch(&paths, &peer, &kiwoom, timings()).finish().await;
+    assert!(matches!(result, Err(super::start::StartError::DataFolder(_))), "{result:?}");
+    assert_eq!(kiwoom.issue_count(), 0);
+    assert_eq!(peer.connect_count(), 0);
+}
+
+#[tokio::test(start_paused = true)]
+async fn only_a_json_object_can_be_a_ping() {
+    let peer = Peer::accepting();
+    let (paths, _kiwoom, running) = running_session(&peer).await;
+    peer.text(0, r#"["PING"]"#);
+    settle().await;
+    let date = running.wall.date();
+    running.stop().await;
+    assert_eq!(peer.sent_at(0, "PING").len(), 0);
+    assert!(raw_source(&paths.data(), date).contains(r#""msg":["PING"]"#));
+}
+
+#[tokio::test(start_paused = true)]
+async fn frames_before_a_disconnect_are_flushed_during_the_reconnect_wait() {
+    let peer = Peer::new(|connection, trnm, _| if connection < 4 && trnm == "REG" { Reply::AckThenClose } else { Reply::Ack });
+    let paths = Paths::new();
+    let running = launch(&paths, &peer, &FakeKiwoom::issuing_tokens(), timings());
+    until("다섯째 연결", || peer.connect_count() == 5).await;
+    settle().await;
+    peer.text(4, REAL_FRAME);
+    peer.close(4);
+    settle().await;
+    tokio::time::sleep(Duration::from_secs(5)).await;
+    let date = running.wall.date();
+    let stored = read_day(&paths.data(), date)
+        .unwrap()
+        .any(|item| matches!(item, RawItem::Record(record) if record.content == RawContent::Frame(REAL_FRAME.into())));
+    assert!(stored);
+    running.stop().await;
 }
