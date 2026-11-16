@@ -230,10 +230,17 @@ impl Config {
             financial_db_path: vars.get("VALLY_FINANCIAL_DB_PATH").map(PathBuf::from).unwrap_or_else(|| PathBuf::from(vars.get("VALLY_DB_PATH").map_or("data/vally.db", String::as_str)).with_file_name("financials.db")),
             log_filter: vars.get("VALLY_LOG").cloned().unwrap_or_else(|| "info".to_owned()),
         };
-        for (key, path) in [("VALLY_KIWOOM_KEY_PATH", &config.kiwoom_key_path), ("VALLY_TOKEN_PATH", &config.token_path)] {
-            if path.file_name().is_some_and(|name| name == REGISTERED_IP_FILE_NAME) {
-                return Err(ConfigError(format!("{key}의 파일 이름은 {REGISTERED_IP_FILE_NAME}일 수 없습니다. 그 이름은 포털에 등록한 IP 기록이 씁니다")));
-            }
+        let registered_ip_path = config.kiwoom_key_path.with_file_name(REGISTERED_IP_FILE_NAME);
+        let other_files = [
+            ("VALLY_KIWOOM_KEY_PATH", &config.kiwoom_key_path),
+            ("VALLY_TOKEN_PATH", &config.token_path),
+            ("VALLY_LOCK_PATH", &config.lock_path),
+            ("VALLY_DB_PATH", &config.db_path),
+            ("VALLY_SCREENER_DB_PATH", &config.screener_db_path),
+            ("VALLY_FINANCIAL_DB_PATH", &config.financial_db_path),
+        ];
+        if let Some((key, _)) = other_files.iter().find(|(_, path)| **path == registered_ip_path) {
+            return Err(ConfigError(format!("{key}가 포털에 등록한 IP 기록 파일({REGISTERED_IP_FILE_NAME}, 키 파일과 같은 폴더)과 같은 파일입니다")));
         }
         Ok((config, warnings))
     }
@@ -557,10 +564,14 @@ mod tests {
     }
 
     #[test]
-    fn the_key_and_token_files_cannot_take_the_registered_ip_file_name() {
-        for key in ["VALLY_KIWOOM_KEY_PATH", "VALLY_TOKEN_PATH"] {
-            let error = Config::from_vars(vars(&[]), vars(&[(key, "/state/vally/kiwoom-ip.json")]), lock, token, self::key).expect_err(key).to_string();
-            assert!(error.contains(key) && error.contains("kiwoom-ip.json"), "{error}");
+    fn no_other_file_can_be_the_registered_ip_file_next_to_the_key_file() {
+        let start = |pairs: &[(&str, &str)]| Config::from_vars(vars(&[]), vars(pairs), lock, token, key).map(|_| ());
+        let beside_key = "/state/vally/kiwoom-ip.json";
+        for key_name in ["VALLY_KIWOOM_KEY_PATH", "VALLY_TOKEN_PATH", "VALLY_LOCK_PATH", "VALLY_DB_PATH", "VALLY_SCREENER_DB_PATH", "VALLY_FINANCIAL_DB_PATH"] {
+            let pairs = if key_name == "VALLY_KIWOOM_KEY_PATH" { vec![(key_name, beside_key)] } else { vec![("VALLY_KIWOOM_KEY_PATH", "/state/vally/kiwoom-key.json"), (key_name, beside_key)] };
+            let error = start(&pairs).expect_err(key_name).to_string();
+            assert!(error.contains(key_name) && error.contains("kiwoom-ip.json"), "{error}");
         }
+        assert!(start(&[("VALLY_KIWOOM_KEY_PATH", "/state/vally/kiwoom-key.json"), ("VALLY_TOKEN_PATH", "/elsewhere/kiwoom-ip.json")]).is_ok(), "다른 폴더의 같은 이름은 겹치지 않는다");
     }
 }
