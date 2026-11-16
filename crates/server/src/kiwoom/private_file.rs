@@ -49,7 +49,6 @@ impl PrivateFile {
         Ok(Some(text))
     }
 
-    /// 경로가 홈 같은 공용 디렉터리를 가리킬 수 있어 chmod는 하지 않는다.
     fn private_dir(&self) -> Result<(), FileError> {
         let dir = self.dir();
         std::fs::DirBuilder::new().recursive(true).mode(0o700).create(dir).map_err(|e| self.error(e))?;
