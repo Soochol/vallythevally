@@ -1,11 +1,12 @@
 import { openSpan } from "./decode.js";
 import { SPAN_MINUTES, entryIndexAt } from "./seek.js";
-import { buildFrame, emptyFrame, formatClock, parseClock } from "./replay.js";
+import { RECENT_TRADE_LIMIT, buildFrame, emptyFrame, formatClock, parseClock } from "./replay.js";
 import { createView } from "./view.js";
 
 const MAX_CACHED_SPANS = 24;
 const PREFETCH_OFFSETS = [0, -1, 1, 2];
 const MAX_GAP_FILES = 40;
+const MAX_TRADE_LOOKBACK_SPANS = 12;
 const FRAME_SAMPLES = 300;
 const MAX_FRAME_STEP_MS = 250;
 const STAT_REFRESH_FRAMES = 30;
@@ -251,6 +252,14 @@ function loadedEarlier(entry) {
   return earlier;
 }
 
+function requestOlderForTrades(entry, loadedCount, tradeCount) {
+  if (tradeCount >= RECENT_TRADE_LIMIT || loadedCount >= MAX_TRADE_LOOKBACK_SPANS) return;
+  const older = entry - loadedCount - 1;
+  if (older < 0 || state.starts[older + 1] - state.starts[older] !== SPAN_MINUTES) return;
+  loader.protectedKeys.add(keyOf(older));
+  loader.request(keyOf(older), urlOf(older));
+}
+
 function draw() {
   const entry = entryIndexAt(state.starts, state.cursor);
   let frame;
@@ -262,12 +271,14 @@ function draw() {
     const key = keyOf(entry);
     const current = loader.get(key);
     if (current) {
+      const earlier = loadedEarlier(entry);
       frame = buildFrame({
         current: { key, span: current },
-        earlier: loadedEarlier(entry),
+        earlier,
         timeMs: state.cursor,
         members: state.members,
       });
+      requestOlderForTrades(entry, earlier.length, frame.trades.value.length);
       setStatus("");
     } else if (loader.failed.has(key)) {
       frame = emptyFrame(state.cursor);
@@ -347,14 +358,19 @@ function selectItem(item, startMs) {
   requestGapFiles();
 }
 
+let dateRequest = 0;
+
 async function selectDate(date, wantedItem, startMs) {
+  const request = ++dateRequest;
   setReady(false);
   setStatus("목록을 받는 중");
   state.entries = [];
+  el.date.value = date;
+  const index = await fetchJson(`/data/${date}/index.json`);
+  if (request !== dateRequest) return;
   state.date = date;
   el.replay.dataset.date = date;
-  el.date.value = date;
-  state.index = await fetchJson(`/data/${date}/index.json`);
+  state.index = index;
   state.members = state.index.members ?? {};
   const items = Object.keys(state.index.symbols).sort();
   if (items.length === 0) {

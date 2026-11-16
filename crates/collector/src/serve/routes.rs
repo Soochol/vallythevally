@@ -32,6 +32,15 @@ pub fn router(data_dir: PathBuf) -> Router {
         .with_state(Data { root: Arc::new(data_dir) })
 }
 
+async fn read_inside(root: &Path, path: &Path) -> Option<Vec<u8>> {
+    let inside = tokio::fs::canonicalize(root).await.ok()?;
+    let target = tokio::fs::canonicalize(path).await.ok()?;
+    if !target.starts_with(&inside) {
+        return None;
+    }
+    tokio::fs::read(target).await.ok()
+}
+
 fn not_found() -> Response {
     StatusCode::NOT_FOUND.into_response()
 }
@@ -68,7 +77,7 @@ async fn dates(State(data): State<Data>) -> Response {
     if let Ok(mut entries) = tokio::fs::read_dir(&spans).await {
         while let Ok(Some(entry)) = entries.next_entry().await {
             let Ok(name) = entry.file_name().into_string() else { continue };
-            if is_date(&name) && entry.path().join(INDEX_FILE_NAME).is_file() {
+            if is_date(&name) && read_inside(&data.root, &entry.path().join(INDEX_FILE_NAME)).await.is_some() {
                 dates.push(name);
             }
         }
@@ -85,11 +94,11 @@ fn day_dir(data: &Data, date: &str) -> Option<PathBuf> {
 
 async fn day_index(State(data): State<Data>, UrlPath(date): UrlPath<String>) -> Response {
     let Some(folder) = day_dir(&data, &date) else { return not_found() };
-    match tokio::fs::read(folder.join(INDEX_FILE_NAME)).await {
-        Ok(bytes) => {
+    match read_inside(&data.root, &folder.join(INDEX_FILE_NAME)).await {
+        Some(bytes) => {
             ([(header::CONTENT_TYPE, "application/json"), (header::CACHE_CONTROL, NEVER_CACHE)], bytes).into_response()
         }
-        Err(_) => not_found(),
+        None => not_found(),
     }
 }
 
@@ -103,7 +112,10 @@ fn accepts_brotli(headers: &HeaderMap) -> bool {
             let mut parts = coding.split(';');
             let name = parts.next().unwrap_or("").trim();
             let refused = parts.any(|parameter| {
-                parameter.trim().strip_prefix("q=").is_some_and(|quality| quality.trim().parse::<f32>() == Ok(0.0))
+                let parameter = parameter.trim();
+                parameter.len() > 2
+                    && parameter[..2].eq_ignore_ascii_case("q=")
+                    && parameter[2..].trim().parse::<f32>() == Ok(0.0)
             });
             name.eq_ignore_ascii_case("br") && !refused
         })
@@ -127,7 +139,7 @@ async fn span_file(
         return not_found();
     };
     let path: PathBuf = Path::new(&folder).join(&symbol).join(stored_name);
-    let Ok(compressed) = tokio::fs::read(&path).await else { return not_found() };
+    let Some(compressed) = read_inside(&data.root, &path).await else { return not_found() };
     let common = [
         (header::CONTENT_TYPE, HeaderValue::from_static("application/octet-stream")),
         (header::VARY, HeaderValue::from_static("Accept-Encoding")),

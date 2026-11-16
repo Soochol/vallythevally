@@ -223,7 +223,7 @@ collector serve [--data <폴더>] [--bind 127.0.0.1:8090]
 | `GET /data/<날짜>/<종목>/<HHMM>-r<N>.hoga` | `spans/<날짜>/<종목>/<HHMM>-r<N>.hoga.br`의 내용 |
 
 - 구간 파일: 요청의 `Accept-Encoding`에 `br`(`q=0`이 아닌 것)이 있으면 디스크의 바이트를 그대로 `Content-Encoding: br`로 보낸다. 없으면 풀어서 보낸다. `Content-Type: application/octet-stream`, `Vary: Accept-Encoding`, `Cache-Control: public, max-age=31536000, immutable`(판 이름이 바뀌지 않는다).
-- 날짜는 숫자 8자리, 종목은 영문·숫자·밑줄, 파일 이름은 위 모양(`.hoga`)만 받는다. 그 밖의 길, 없는 파일, `..`이 든 길, `.hoga.br`를 직접 부르는 길은 404다. 데이터 폴더의 `spans/` 밖은 읽지 않는다.
+- 날짜는 숫자 8자리, 종목은 영문·숫자·밑줄, 파일 이름은 위 모양(`.hoga`)만 받는다. 그 밖의 길, 없는 파일, `..`이 든 길, `.hoga.br`를 직접 부르는 길은 404다. 데이터 폴더 밖은 읽지 않는다. 경로를 정규화해 데이터 폴더 안인지 확인하므로 폴더 밖을 가리키는 심볼릭 링크도 404다. `Accept-Encoding`의 `q` 값은 대소문자를 가리지 않고 읽는다.
 
 ### 화면
 

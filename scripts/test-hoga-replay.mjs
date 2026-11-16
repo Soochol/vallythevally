@@ -297,6 +297,38 @@ try {
     return { visited };
   });
 
+  await check("cursor-exactly-on-a-row-time", async () => {
+    const expected = expect.book("005930_NX", 19 * 3_600_000 + 58 * 60_000);
+    await open("005930_NX", clock(expected.recvMs));
+    const screen = await settle(expected.recvMs);
+    assertBook(screen, expected, `행 시각 ${clock(expected.recvMs)}`);
+    const before = expect.book("005930_NX", expected.recvMs - 1);
+    assert.notDeepEqual(before, expected, "바로 앞 시각의 호가가 같아 시험이 구분하지 못한다");
+    return { rowTime: clock(expected.recvMs) };
+  });
+
+  await check("trades-continue-from-the-earlier-span", async () => {
+    const timeMs = 10 * 3_600_000 + 30 * 60_000;
+    await open("005930", "10:30:00.000");
+    const screen = await settle(timeMs);
+    assertFlows(screen, "005930", timeMs, expect, "10:30:00.000");
+    assert.equal(screen.trades.length, 20, "앞 구간의 체결이 이어지지 않았다");
+    return { trades: screen.trades.length };
+  });
+
+  await check("home-and-end-keys", async () => {
+    await open("005930", "10:30:30.000");
+    await settle(10 * 3_600_000 + 30 * 60_000 + 30_000);
+    await page.locator("#bar").focus();
+    const first = 10 * 3_600_000 + 25 * 60_000;
+    const last = 10 * 3_600_000 + 35 * 60_000 - 1;
+    await page.keyboard.press("Home");
+    assertFlows(await settle(first), "005930", first, expect, "Home");
+    await page.keyboard.press("End");
+    assertFlows(await settle(last), "005930", last, expect, "End");
+    return { first: clock(first), last: clock(last) };
+  });
+
   await check("playback-10x", async () => {
     const startMs = 10 * 3_600_000 + 30 * 60_000;
     await open("005930", "10:30:00.000");
@@ -317,15 +349,18 @@ try {
   });
 
   await check("collection-gap", async () => {
-    await open("005930", "10:31:20.000");
-    const inside = await settle(GAP_FROM_MS + 10_000);
-    assert.equal(inside.gapBanner, "true", "끊김 안인데 '수집 끊김'이 꺼져 있다");
+    const gapBannerAt = async (timeMs) => {
+      await open("005930", clock(timeMs));
+      return (await settle(timeMs)).gapBanner;
+    };
+    assert.equal(await gapBannerAt(GAP_FROM_MS - 1), "false", "끊김 시작 직전");
+    assert.equal(await gapBannerAt(GAP_FROM_MS), "true", "끊김 시작 시각");
+    assert.equal(await gapBannerAt(GAP_FROM_MS + 10_000), "true", "끊김 안");
+    assert.equal(await gapBannerAt(GAP_TO_MS - 1), "true", "끊김 끝 직전");
+    assert.equal(await gapBannerAt(GAP_TO_MS), "false", "끊김 끝 시각");
+    await open("005930", clock(GAP_FROM_MS + 10_000));
+    await settle(GAP_FROM_MS + 10_000);
     await page.waitForFunction(() => document.querySelectorAll(".bar-gap").length > 0, null, { timeout: 15_000 });
-    await page.locator("#bar").focus();
-    await page.keyboard.press("Shift+ArrowRight");
-    await page.keyboard.press("Shift+ArrowRight");
-    const outside = await settle(GAP_FROM_MS + 30_000);
-    assert.equal(outside.gapBanner, "false", "끊김이 끝났는데 '수집 끊김'이 켜져 있다");
     const shot = path.join(runDir, "gap-1031.png");
     await page.screenshot({ path: shot, fullPage: true });
     return { screenshot: shot };
