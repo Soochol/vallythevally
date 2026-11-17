@@ -3,6 +3,7 @@ import { installAxisProbe } from "./axis-probe";
 import { chartDisplayOptions, seedChartDisplay } from "./chart-display-fixture";
 import { installChartProbe } from "./chart-probe";
 import { type Scenario, cell, chartOf, expect, test } from "./harness";
+import { selectOption } from "./select-option";
 
 type Axes = ReturnType<Window["axisTexts"]>;
 
@@ -57,7 +58,7 @@ test.describe("축 표시 회귀", () => {
     await yearlyPrices(scenario, broad ? [1297000, 100000, 10000, 1000] : [1297000, 1296000, 1296000, 1296000]);
     await open(page);
     await assertRendered(page);
-    await page.getByRole("button", { name: "%", exact: true }).click();
+    await selectOption(cell(page).getByRole("combobox", { name: "가격축 방식" }), "percent");
     await expect(chartOf(cell(page))).toHaveAttribute("data-price-scale", "percent");
     await assertRendered(page);
     await page.reload();
@@ -74,8 +75,9 @@ test.describe("축 표시 회귀", () => {
     const originalHeight = await page.evaluate(() => window.chartProbe.chart.panes()[0]!.getHeight());
     for (const log of [true, false, true]) {
       await page.evaluate((height) => window.chartProbe.chart.panes()[0]!.setHeight(height), originalHeight);
-      const button = page.getByRole("button", { name: "로그", exact: true });
-      if ((await button.getAttribute("aria-pressed") === "true") !== log) await button.click();
+      const axis = cell(page).getByRole("combobox", { name: "가격축 방식" });
+      if ((await chartOf(cell(page)).getAttribute("data-price-scale") === "log") !== log) await selectOption(axis, log ? "log" : "normal");
+      await expect(chartOf(cell(page))).toHaveAttribute("data-price-scale", log ? "log" : "normal");
       await assertRendered(page);
       const range = await page.evaluate(() => window.chartProbe.chart.timeScale().getVisibleLogicalRange());
       await page.evaluate(() => window.chartProbe.chart.timeScale().setVisibleLogicalRange({ from: 0, to: 2 }));
