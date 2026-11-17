@@ -7,6 +7,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use domain::{KstTime, Symbol};
 
 use super::{ConnId, SubId};
+use crate::kiwoom::stream::DesiredFeeds;
+use crate::kiwoom::wire::RealType;
 
 /// 보유자가 모두 빠진 종목을 이만큼 더 받는다. 칸의 종목을 바꿨다가 바로 돌아와도 다시 받기를 기다리지 않는다.
 pub const RELEASE_GRACE_SECS: i64 = 30;
@@ -18,6 +20,7 @@ pub enum Holder {
     /// 브라우저 연결 하나의 구독 하나.
     Cell { conn: ConnId, sub: SubId },
     Watch { conn: ConnId, symbol: Symbol },
+    Feed { conn: ConnId, sub: SubId, kind: RealType },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -37,6 +40,7 @@ impl Rank {
 pub struct Plan {
     /// 키움에 REG 할 집합. 크기 ≤ REALTIME_LIMIT.
     pub realtime: BTreeSet<Symbol>,
+    pub feeds: DesiredFeeds,
     pub rejected: BTreeSet<Holder>,
 }
 
@@ -46,6 +50,7 @@ pub struct SubscriptionManager {
     held_order: BTreeMap<Symbol, u64>,
     next_order: u64,
     released_at: BTreeMap<Symbol, KstTime>,
+    kind_released_at: BTreeMap<(Symbol, RealType), KstTime>,
     admitted: BTreeSet<Symbol>,
     watch_rows: BTreeMap<ConnId, BTreeMap<Symbol, usize>>,
 }
@@ -54,6 +59,9 @@ impl SubscriptionManager {
     /// 유예 중인 종목이면 유예를 취소한다.
     pub fn hold(&mut self, symbol: Symbol, h: Holder) {
         self.released_at.remove(&symbol);
+        if let Some(kind) = h.feed_kind() {
+            self.kind_released_at.remove(&(symbol, kind));
+        }
         if !self.held_order.contains_key(&symbol) {
             self.held_order.insert(symbol, self.next_order);
             self.next_order += 1;
@@ -62,13 +70,28 @@ impl SubscriptionManager {
     }
 
     pub fn release(&mut self, symbol: Symbol, h: &Holder, now: KstTime) {
-        if self.remove_holder_left_empty(symbol, h) && self.admitted.contains(&symbol) {
+        let was_held = self.holders.get(&symbol).is_some_and(|hs| hs.contains(h));
+        let left_empty = self.remove_holder_left_empty(symbol, h);
+        if !self.admitted.contains(&symbol) {
+            return;
+        }
+        if was_held && let Some(kind) = h.feed_kind() && !self.kind_is_held(symbol, kind) {
+            self.kind_released_at.insert((symbol, kind), now);
+        }
+        if left_empty {
             self.released_at.insert(symbol, now);
         }
     }
 
+    fn kind_is_held(&self, symbol: Symbol, kind: RealType) -> bool {
+        self.holders.get(&symbol).into_iter().flatten().any(|h| h.feed_kind() == Some(kind))
+    }
+
     /// 유예 없이 놓는다. 키움에 없는 종목처럼 받을 이유가 없는 보유자에 쓴다.
     pub fn forget(&mut self, symbol: Symbol, h: &Holder) {
+        if let Some(kind) = h.feed_kind() {
+            self.kind_released_at.remove(&(symbol, kind));
+        }
         if self.remove_holder_left_empty(symbol, h) {
             self.admitted.remove(&symbol);
         }
@@ -107,7 +130,7 @@ impl SubscriptionManager {
     pub fn watchers(&self, symbol: Symbol) -> impl Iterator<Item = ConnId> + '_ {
         self.holders.get(&symbol).into_iter().flatten().filter_map(|h| match h {
             Holder::Watch { conn, .. } => Some(*conn),
-            Holder::Cell { .. } => None,
+            Holder::Cell { .. } | Holder::Feed { .. } => None,
         })
     }
 
@@ -132,6 +155,7 @@ impl SubscriptionManager {
             self.released_at.remove(&s);
             self.admitted.remove(&s);
         }
+        self.kind_released_at.retain(|_, at| at.plus_secs(RELEASE_GRACE_SECS) > now);
         let mut candidates: Vec<(Rank, Symbol)> =
             self.holders.keys().filter(|s| !self.admitted.contains(s)).map(|s| (self.rank(*s), *s)).collect();
         candidates.sort();
@@ -142,7 +166,15 @@ impl SubscriptionManager {
             self.admitted.insert(s);
         }
         let rejected = self.holders.iter().filter(|(s, _)| !self.admitted.contains(s)).flat_map(|(_, hs)| hs.iter().cloned()).collect();
-        Plan { realtime: self.admitted.clone(), rejected }
+        self.kind_released_at.retain(|(s, _), _| self.admitted.contains(s));
+        let feeds = self.admitted.iter().map(|&s| (s, self.kinds_to_receive(s))).collect();
+        Plan { realtime: self.admitted.clone(), feeds, rejected }
+    }
+
+    fn kinds_to_receive(&self, symbol: Symbol) -> BTreeSet<RealType> {
+        let held = self.holders.get(&symbol).into_iter().flatten().filter_map(Holder::feed_kind);
+        let in_grace = self.kind_released_at.keys().filter(|(s, _)| *s == symbol).map(|(_, kind)| *kind);
+        std::iter::once(RealType::of(symbol)).chain(held).chain(in_grace).collect()
     }
 
     fn make_room(&mut self, rank: Rank) -> bool {
@@ -168,7 +200,7 @@ impl SubscriptionManager {
         self.holders[&symbol]
             .iter()
             .map(|h| match h {
-                Holder::Cell { .. } => Rank::Cell { held },
+                Holder::Cell { .. } | Holder::Feed { .. } => Rank::Cell { held },
                 Holder::Watch { conn, .. } => Rank::Watch { row: self.watch_rows[conn][&symbol], held },
             })
             .min()
@@ -183,7 +215,14 @@ impl SubscriptionManager {
 impl Holder {
     fn conn(&self) -> ConnId {
         match self {
-            Holder::Cell { conn, .. } | Holder::Watch { conn, .. } => *conn,
+            Holder::Cell { conn, .. } | Holder::Watch { conn, .. } | Holder::Feed { conn, .. } => *conn,
+        }
+    }
+
+    fn feed_kind(&self) -> Option<RealType> {
+        match self {
+            Holder::Feed { kind, .. } if *kind != RealType::Trade => Some(*kind),
+            _ => None,
         }
     }
 }
@@ -435,5 +474,90 @@ mod tests {
         let pa = a.plan(t(2));
         assert_eq!(pa, b.plan(t(2)));
         assert_eq!(pa, a.plan(t(2)), "다시 불러도 같다");
+    }
+
+    fn feed(conn: u64, sub: &str, kind: RealType) -> Holder {
+        Holder::Feed { conn: ConnId(conn), sub: SubId(sub.into()), kind }
+    }
+
+    fn kinds(plan: &Plan, i: usize) -> BTreeSet<RealType> {
+        plan.feeds.get(&stock(i)).cloned().unwrap_or_default()
+    }
+
+    #[test]
+    fn book_holder_adds_book_type_for_its_symbol_only() {
+        let mut m = SubscriptionManager::default();
+        m.set_watch(ConnId(1), stocks(0..2), t(0));
+        m.hold(stock(0), feed(2, "b", RealType::Book));
+        let plan = m.plan(t(0));
+        assert_eq!(kinds(&plan, 0), BTreeSet::from([RealType::Trade, RealType::Book]));
+        assert_eq!(kinds(&plan, 1), BTreeSet::from([RealType::Trade]), "관심종목 종목에는 0D가 들지 않는다");
+    }
+
+    #[test]
+    fn each_feed_kind_adds_only_its_own_real_type() {
+        let mut m = SubscriptionManager::default();
+        m.hold(stock(0), feed(1, "t", RealType::Trade));
+        m.hold(stock(1), feed(1, "p", RealType::Program));
+        m.hold(stock(2), feed(1, "k", RealType::Broker));
+        let plan = m.plan(t(0));
+        assert_eq!(kinds(&plan, 0), BTreeSet::from([RealType::Trade]));
+        assert_eq!(kinds(&plan, 1), BTreeSet::from([RealType::Trade, RealType::Program]));
+        assert_eq!(kinds(&plan, 2), BTreeSet::from([RealType::Trade, RealType::Broker]));
+    }
+
+    #[test]
+    fn feed_holders_rank_like_cells_under_the_limit() {
+        let mut m = SubscriptionManager::default();
+        m.set_watch(ConnId(1), stocks(0..REALTIME_LIMIT), t(0));
+        m.plan(t(0));
+        m.hold(stock(500), feed(2, "b", RealType::Book));
+        let plan = m.plan(t(1));
+        assert!(plan.realtime.contains(&stock(500)));
+        assert_eq!(plan.rejected, BTreeSet::from([watch(1, REALTIME_LIMIT - 1)]));
+        assert!(plan.feeds[&stock(500)].contains(&RealType::Book));
+    }
+
+    #[test]
+    fn released_feed_type_is_kept_for_the_grace_period() {
+        let mut m = SubscriptionManager::default();
+        m.hold(stock(0), cell(1, "chart"));
+        m.hold(stock(0), feed(2, "b", RealType::Book));
+        m.plan(t(0));
+        m.release(stock(0), &feed(2, "b", RealType::Book), t(0));
+        assert_eq!(kinds(&m.plan(t(29)), 0), BTreeSet::from([RealType::Trade, RealType::Book]), "30초 유예 동안 0D를 유지한다");
+        assert_eq!(kinds(&m.plan(t(30)), 0), BTreeSet::from([RealType::Trade]));
+    }
+
+    #[test]
+    fn a_feed_kind_still_held_by_another_window_is_not_released() {
+        let mut m = SubscriptionManager::default();
+        m.hold(stock(0), feed(1, "a", RealType::Book));
+        m.hold(stock(0), feed(2, "b", RealType::Book));
+        m.plan(t(0));
+        m.release(stock(0), &feed(1, "a", RealType::Book), t(0));
+        assert_eq!(kinds(&m.plan(t(100)), 0), BTreeSet::from([RealType::Trade, RealType::Book]));
+    }
+
+    #[test]
+    fn resubscribing_a_feed_kind_within_the_grace_cancels_it() {
+        let mut m = SubscriptionManager::default();
+        m.hold(stock(0), cell(1, "chart"));
+        m.hold(stock(0), feed(2, "b", RealType::Book));
+        m.plan(t(0));
+        m.release(stock(0), &feed(2, "b", RealType::Book), t(0));
+        m.hold(stock(0), feed(3, "b2", RealType::Book));
+        assert_eq!(kinds(&m.plan(t(60)), 0), BTreeSet::from([RealType::Trade, RealType::Book]));
+    }
+
+    #[test]
+    fn feed_kinds_of_a_symbol_that_leaves_the_plan_do_not_come_back() {
+        let mut m = SubscriptionManager::default();
+        m.hold(stock(0), feed(1, "b", RealType::Book));
+        m.plan(t(0));
+        m.release(stock(0), &feed(1, "b", RealType::Book), t(0));
+        assert!(m.plan(t(30)).feeds.is_empty());
+        m.hold(stock(0), cell(2, "chart"));
+        assert_eq!(kinds(&m.plan(t(31)), 0), BTreeSet::from([RealType::Trade]));
     }
 }

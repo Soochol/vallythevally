@@ -179,6 +179,7 @@ pub struct BarsPage {
 #[ts(export)]
 pub enum ClientMessage {
     Subscribe { sub: String, symbol: SymbolCode, venue: Option<Venue>, period: Period },
+    SubscribeFeed { sub: String, symbol: SymbolCode, kind: FeedKind, venue: Option<Venue> },
     Unsubscribe { sub: String },
     /// 지금 보이는 관심종목 목록 전체, 위에서부터. 받을 때마다 통째로 바꾼다. 빈 배열은 목록을 닫았다는 뜻이다.
     /// `venue`는 이 연결의 관심종목 시세 거래소 하나다. 없거나 null이면 통합이다. 같은 목록으로 거래소만 바꿔 다시 보내면
@@ -206,6 +207,17 @@ pub enum ServerMessage {
         current: Option<Bar>,
     },
     SubError { sub: String, code: SubErrorCode },
+    FeedSubscribed { sub: String, kind: FeedKind },
+    FeedTrades {
+        sub: String,
+        #[ts(type = "number")]
+        seq: u64,
+        trades: Vec<FeedTrade>,
+    },
+    FeedBook { sub: String, book: FeedBook },
+    FeedProgram { sub: String, row: FeedProgramRow },
+    FeedBrokers { sub: String, brokers: FeedBrokers },
+    FeedLink { sub: String, live: bool, at: UnixSeconds },
     /// 현재 봉 갱신. 구독 하나당 초당 최대 10회. 중간 값은 건너뛸 수 있다.
     Bar {
         sub: String,
@@ -237,6 +249,105 @@ pub enum ServerMessage {
     KiwoomLink { status: KiwoomLinkStatus },
     Account { status: AccountStatus },
     SetupChanged { kinds: Vec<setup::DocumentKind> },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum FeedKind {
+    Trades,
+    Book,
+    Program,
+    Brokers,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct FeedTrade {
+    pub t: UnixSeconds,
+    pub price: f64,
+    #[ts(type = "number")]
+    pub qty: i64,
+    pub venue: Option<Venue>,
+    pub strength: Option<f64>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct FeedBookLevel {
+    pub price: f64,
+    #[ts(type = "number")]
+    pub qty: u64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct FeedExpected {
+    pub price: f64,
+    #[ts(type = "number")]
+    pub qty: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct FeedBook {
+    pub t: UnixSeconds,
+    pub asks: Vec<Option<FeedBookLevel>>,
+    pub bids: Vec<Option<FeedBookLevel>>,
+    #[ts(type = "number")]
+    pub total_ask_qty: u64,
+    #[ts(type = "number")]
+    pub total_bid_qty: u64,
+    pub expected: Option<FeedExpected>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct FeedProgramRow {
+    pub t: UnixSeconds,
+    pub price: Option<f64>,
+    #[ts(type = "number")]
+    pub sell_qty: u64,
+    #[ts(type = "number")]
+    pub sell_amount: u64,
+    #[ts(type = "number")]
+    pub buy_qty: u64,
+    #[ts(type = "number")]
+    pub buy_amount: u64,
+    #[ts(type = "number")]
+    pub net_qty: i64,
+    #[ts(type = "number")]
+    pub net_qty_change: i64,
+    #[ts(type = "number")]
+    pub net_amount: i64,
+    #[ts(type = "number")]
+    pub net_amount_change: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct FeedBroker {
+    pub code: String,
+    pub name: String,
+    #[ts(type = "number")]
+    pub qty: u64,
+    #[ts(type = "number")]
+    pub qty_change: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct FeedBrokers {
+    pub t: UnixSeconds,
+    pub sells: Vec<FeedBroker>,
+    pub buys: Vec<FeedBroker>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -1593,6 +1704,8 @@ mod tests {
     fn websocket_message_json_shape() {
         let sub: ClientMessage = serde_json::from_value(json!({"type": "subscribe", "sub": "c0", "symbol": "005930", "venue": "krx", "period": "1m"})).unwrap();
         assert_eq!(sub, ClientMessage::Subscribe { sub: "c0".into(), symbol: SymbolCode("005930".into()), venue: Some(Venue::Krx), period: Period::M1 });
+        let feed: ClientMessage = serde_json::from_value(json!({"type": "subscribe_feed", "sub": "f0", "symbol": "005930", "kind": "trades", "venue": "krx"})).unwrap();
+        assert_eq!(feed, ClientMessage::SubscribeFeed { sub: "f0".into(), symbol: SymbolCode("005930".into()), kind: FeedKind::Trades, venue: Some(Venue::Krx) });
         let unsub: ClientMessage = serde_json::from_value(json!({"type": "unsubscribe", "sub": "c0"})).unwrap();
         assert_eq!(unsub, ClientMessage::Unsubscribe { sub: "c0".into() });
         let watch: ClientMessage = serde_json::from_value(json!({"type": "watch", "symbols": ["005930", "IDX:001"]})).unwrap();
@@ -1611,6 +1724,12 @@ mod tests {
             ),
             (ServerMessage::Subscribed { sub: "c0".into(), seq: 7, current: None }, json!({"type": "subscribed", "sub": "c0", "seq": 7, "current": null})),
             (ServerMessage::SubError { sub: "c0".into(), code: SubErrorCode::RealtimeLimit }, json!({"type": "sub_error", "sub": "c0", "code": "realtime_limit"})),
+            (ServerMessage::FeedSubscribed { sub: "f0".into(), kind: FeedKind::Brokers }, json!({"type": "feed_subscribed", "sub": "f0", "kind": "brokers"})),
+            (
+                ServerMessage::FeedTrades { sub: "f0".into(), seq: 3, trades: vec![FeedTrade { t: UnixSeconds(5), price: 71_100.0, qty: -7, venue: Some(Venue::Nxt), strength: None }] },
+                json!({"type": "feed_trades", "sub": "f0", "seq": 3, "trades": [{"t": 5, "price": 71100.0, "qty": -7, "venue": "nxt", "strength": null}]}),
+            ),
+            (ServerMessage::FeedLink { sub: "f0".into(), live: false, at: UnixSeconds(9) }, json!({"type": "feed_link", "sub": "f0", "live": false, "at": 9})),
             (
                 ServerMessage::Confirmed { sub: "c0".into(), seq: 8, bar },
                 json!({"type": "confirmed", "sub": "c0", "seq": 8, "bar": {"t": 1_794_182_400, "o": 1.0, "h": 2.0, "l": 1.0, "c": 2.0, "v": 3}}),
