@@ -37,13 +37,20 @@ pub enum ApiId {
     Ka20019,
     Ka10008,
     Ka10059,
+    /// 주식호가(10단 호가와 총잔량)
+    Ka10004,
+    /// 체결정보(당일 체결 목록)
+    Ka10003,
+    /// 종목시간별프로그램매매추이
+    Ka90008,
 }
 
 impl ApiId {
     pub const fn path(self) -> &'static str {
         match self {
             ApiId::Au10001 => "/oauth2/token",
-            ApiId::Ka10099 | ApiId::Ka10100 | ApiId::Ka10095 | ApiId::Ka10001 | ApiId::Ka10059 => "/api/dostk/stkinfo",
+            ApiId::Ka10099 | ApiId::Ka10100 | ApiId::Ka10095 | ApiId::Ka10001 | ApiId::Ka10059 | ApiId::Ka10003 => "/api/dostk/stkinfo",
+            ApiId::Ka10004 | ApiId::Ka90008 => "/api/dostk/mrkcond",
             ApiId::Ka10008 => "/api/dostk/frgnistt",
             ApiId::Ka10080
             | ApiId::Ka10081
@@ -77,6 +84,9 @@ impl ApiId {
             ApiId::Ka20019 => "ka20019",
             ApiId::Ka10008 => "ka10008",
             ApiId::Ka10059 => "ka10059",
+            ApiId::Ka10004 => "ka10004",
+            ApiId::Ka10003 => "ka10003",
+            ApiId::Ka90008 => "ka90008",
         }
     }
 }
@@ -325,6 +335,64 @@ impl MarketRequest for StockInvestorNetShares {
     type Response = wire::StockInvestorNetSharesResponse;
 }
 
+/// ka10004. 호가는 통합 시세(`_AL`)로만 묻는다.
+#[derive(Serialize)]
+pub struct StockOrderBook {
+    stk_cd: String,
+}
+
+impl StockOrderBook {
+    pub fn new(code: StockCode) -> Self {
+        StockOrderBook { stk_cd: kiwoom_stock_code(code, Venue::Combined) }
+    }
+}
+
+impl sealed::Sealed for StockOrderBook {}
+impl MarketRequest for StockOrderBook {
+    const API_ID: ApiId = ApiId::Ka10004;
+    type Response = wire::StockOrderBookResponse;
+}
+
+/// ka10003. 날짜 입력이 없어 언제나 당일 체결이다. 거래소는 종목코드 접미사로 고른다.
+#[derive(Serialize)]
+pub struct StockTrades {
+    stk_cd: String,
+}
+
+impl StockTrades {
+    pub fn new(code: StockCode, venue: Venue) -> Self {
+        StockTrades { stk_cd: kiwoom_stock_code(code, venue) }
+    }
+}
+
+impl sealed::Sealed for StockTrades {}
+impl MarketRequest for StockTrades {
+    const API_ID: ApiId = ApiId::Ka10003;
+    type Response = wire::StockTradesResponse;
+}
+
+const PROGRAM_QUANTITY: &str = "2";
+
+/// ka90008. 호가처럼 통합 시세(`_AL`)로만 묻고, 날짜는 언제나 오늘이다.
+#[derive(Serialize)]
+pub struct StockProgramTrades {
+    stk_cd: String,
+    date: String,
+    amt_qty_tp: &'static str,
+}
+
+impl StockProgramTrades {
+    pub fn new(code: StockCode, today: KstDate) -> Self {
+        StockProgramTrades { stk_cd: kiwoom_stock_code(code, Venue::Combined), date: today.yyyymmdd(), amt_qty_tp: PROGRAM_QUANTITY }
+    }
+}
+
+impl sealed::Sealed for StockProgramTrades {}
+impl MarketRequest for StockProgramTrades {
+    const API_ID: ApiId = ApiId::Ka90008;
+    type Response = wire::StockProgramTradesResponse;
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -404,6 +472,17 @@ mod tests {
         );
         assert_eq!((<StockForeignHoldings as MarketRequest>::API_ID.as_str(), ApiId::Ka10008.path()), ("ka10008", "/api/dostk/frgnistt"));
         assert_eq!((<StockInvestorNetShares as MarketRequest>::API_ID.as_str(), ApiId::Ka10059.path()), ("ka10059", "/api/dostk/stkinfo"));
+    }
+
+    #[test]
+    fn feed_bodies_ask_for_the_combined_book_and_programs_and_todays_trades() {
+        let c = StockCode::parse("005930").unwrap();
+        assert_eq!(serde_json::to_value(StockOrderBook::new(c)).unwrap(), json!({"stk_cd": "005930_AL"}));
+        assert_eq!(serde_json::to_value(StockTrades::new(c, Venue::Nxt)).unwrap(), json!({"stk_cd": "005930_NX"}));
+        assert_eq!(serde_json::to_value(StockProgramTrades::new(c, today())).unwrap(), json!({"stk_cd": "005930_AL", "date": "20261109", "amt_qty_tp": "2"}));
+        assert_eq!((<StockOrderBook as MarketRequest>::API_ID.as_str(), ApiId::Ka10004.path()), ("ka10004", "/api/dostk/mrkcond"));
+        assert_eq!((<StockTrades as MarketRequest>::API_ID.as_str(), ApiId::Ka10003.path()), ("ka10003", "/api/dostk/stkinfo"));
+        assert_eq!((<StockProgramTrades as MarketRequest>::API_ID.as_str(), ApiId::Ka90008.path()), ("ka90008", "/api/dostk/mrkcond"));
     }
 
     #[test]

@@ -1,0 +1,44 @@
+{
+ "_source": "ka90008 합성 입력(필드 이름은 hoga-ops daily_program_trade.py·kiwoom 명세 기준). 실측 아님",
+ "_headers": {
+  "cont-yn": "Y",
+  "next-key": "PROG2"
+ },
+ "stk_tm_prm_trde_trnsn": [
+  {
+   "tm": "153000",
+   "cur_prc": "+70100",
+   "prm_sell_qty": "1500",
+   "prm_buy_qty": "1200",
+   "prm_netprps_qty": "-300",
+   "prm_sell_amt": "105",
+   "prm_buy_amt": "84",
+   "prm_netprps_amt": "-21",
+   "stex_tp": "통합"
+  },
+  {
+   "tm": "152900",
+   "cur_prc": "-70000",
+   "prm_sell_qty": "1400",
+   "prm_buy_qty": "1250",
+   "prm_netprps_qty": "-150",
+   "prm_sell_amt": "98",
+   "prm_buy_amt": "87",
+   "prm_netprps_amt": "-11",
+   "stex_tp": "통합"
+  },
+  {
+   "tm": "bad",
+   "cur_prc": "70000",
+   "prm_sell_qty": "1",
+   "prm_buy_qty": "1",
+   "prm_netprps_qty": "0",
+   "prm_sell_amt": "0",
+   "prm_buy_amt": "0",
+   "prm_netprps_amt": "0",
+   "stex_tp": "통합"
+  }
+ ],
+ "return_code": 0,
+ "return_msg": "정상적으로 처리되었습니다"
+}

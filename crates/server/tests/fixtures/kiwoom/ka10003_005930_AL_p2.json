@@ -1,0 +1,29 @@
+{
+ "_source": "ka10003 합성 입력(필드 이름은 hoga-ops trade_history.py 기준). 실측 아님",
+ "_headers": {
+  "cont-yn": "N",
+  "next-key": ""
+ },
+ "cntr_infr": [
+  {
+   "tm": "152957",
+   "cur_prc": "+69900",
+   "pred_pre": "+100",
+   "pre_rt": "+0.14",
+   "cntr_trde_qty": "+7",
+   "acc_trde_qty": "1000",
+   "stex_tp": "KRX"
+  },
+  {
+   "tm": "152956",
+   "cur_prc": "+69900",
+   "pred_pre": "+100",
+   "pre_rt": "+0.14",
+   "cntr_trde_qty": "-8",
+   "acc_trde_qty": "1000",
+   "stex_tp": "NXT"
+  }
+ ],
+ "return_code": 0,
+ "return_msg": "정상적으로 처리되었습니다"
+}
