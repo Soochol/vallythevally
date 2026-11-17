@@ -4,10 +4,10 @@ import { type Scenario, cell, DEFAULT_LAYOUT_ID, expect, test, windowTabs } from
 
 const SETTINGS = { v: 1, style: "candle", scale: "normal", indicators: [], compare: [], panels: [] };
 const KINDS = [
-  { kind: "trades", name: "체결" },
-  { kind: "book", name: "10호가" },
-  { kind: "program", name: "프로그램 체결" },
-  { kind: "brokers", name: "거래원 입체분석" },
+  { kind: "trades", name: "체결", filled: false },
+  { kind: "book", name: "10호가", filled: true },
+  { kind: "program", name: "프로그램 체결", filled: false },
+  { kind: "brokers", name: "거래원 입체분석", filled: false },
 ] as const;
 
 const addButton = (page: Page) => page.getByRole("toolbar", { name: "차트 도구 막대" }).getByRole("button", { name: "창 더하기" });
@@ -32,11 +32,15 @@ async function addWindow(page: Page, name: string) {
   await kindItem(page, name).click();
 }
 
-test.beforeEach(async ({ page }) => {
+test.beforeEach(async ({ page, scenario }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
+  for (const code of ["005930", "000660"]) {
+    scenario.reply((url) => url.pathname === `/api/symbols/${code}/order-book`, { body: { symbol: code, asks: [], bids: [], totalAskQuantity: 0, totalBidQuantity: 0, bookTime: null } });
+    scenario.reply((url) => url.pathname === `/api/symbols/${code}/fundamentals`, { body: { symbol: code, upperLimit: null, lowerLimit: null } });
+  }
 });
 
-for (const { kind, name } of KINDS) {
+for (const { kind, name, filled } of KINDS) {
   test(`${name} 창은 창 더하기에서 열리고 연동 색을 따르며 두 번째는 만들어지지 않는다`, async ({ page, scenario }) => {
     twoLinkedCharts(scenario);
     await page.goto("/");
@@ -44,16 +48,20 @@ for (const { kind, name } of KINDS) {
 
     await addWindow(page, name);
     await expect(tabOf(page, kind)).toHaveAccessibleName(new RegExp(`^${name}`));
-    await expect(preparing(page)).toContainText(`${name} 준비 중`);
-    await expect(preparing(page)).toContainText("삼성전자");
+    if (!filled) {
+      await expect(preparing(page)).toContainText(`${name} 준비 중`);
+      await expect(preparing(page)).toContainText("삼성전자");
+    }
     await expect(dotOf(page, kind)).toHaveAccessibleName("연동 색: 끔");
     await expect.poll(() => savedWindows(scenario).filter((w) => w.kind === kind)).toEqual([{ id: kind, link: null, kind }]);
 
     await dotOf(page, kind).click();
     await page.getByRole("menu", { name: "연동 색" }).getByRole("menuitemradio", { name: /^B/ }).click();
     await expect(dotOf(page, kind)).toHaveAccessibleName("연동 색: B");
-    await expect(preparing(page)).toContainText("SK하이닉스");
-    await expect(preparing(page)).toHaveAttribute("data-symbol", "000660");
+    if (!filled) {
+      await expect(preparing(page)).toContainText("SK하이닉스");
+      await expect(preparing(page)).toHaveAttribute("data-symbol", "000660");
+    }
     await expect.poll(() => savedWindows(scenario).find((w) => w.kind === kind)?.link).toBe("b");
 
     await addButton(page).click();

@@ -67,3 +67,14 @@ test("매수·매도 비율은 합이 100이고 둘 다 0이면 반반이다", (
   expect(ratioSplit(3, 1)).toEqual({ buy: 75, sell: 25 });
   expect(ratioSplit(0, 0)).toEqual({ buy: 50, sell: 50 });
 });
+
+test("교차·동일가 호가에서도 현재가 행은 하나만 강조한다", () => {
+  const rows = buildLadder({ asks: [level(100, 5), level(101, 5)], bids: [level(100, 7), level(99, 3)], lastPrice: 100, previousClose: 100 });
+  expect(rows.filter((r) => r.current)).toHaveLength(1);
+});
+
+test("잔량에 NaN·음수가 있어도 나머지 막대는 정상이고 그 행은 0이다", () => {
+  const rows = buildLadder({ asks: [level(101, Number.NaN), level(102, -5)], bids: [level(100, 8), level(99, 4)], lastPrice: 100, previousClose: 100 });
+  const ratios = rows.filter((r) => r.level).map((r) => [r.level!.price, r.barRatio]);
+  expect(ratios).toEqual([[102, 0], [101, 0], [100, 1], [99, 0.5]]);
+});

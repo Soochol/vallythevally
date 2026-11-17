@@ -40,3 +40,8 @@
 @keyframes mw-flash-up { from { background:color-mix(in srgb, var(--up) 40%, transparent); } to { background:transparent; } }
 @keyframes mw-flash-down { from { background:color-mix(in srgb, var(--down) 40%, transparent); } to { background:transparent; } }
 @keyframes mw-delta { 0%, 70% { opacity:1; } 100% { opacity:0; } }
+
+.bk { display:flex; flex:1; flex-direction:column; min-height:0; overflow:auto; }
+.bk-ladder { flex:1; transition:opacity .2s ease; }
+.bk-ladder[data-stale] { opacity:.4; }
+.bk-notice { margin-left:auto; padding:0 var(--s3); border-radius:var(--r-pill); background:var(--raised); color:var(--text-2); font-weight:600; }

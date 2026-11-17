@@ -39,3 +39,9 @@ test("잔량이 늘면 상승, 줄면 하락 증감 뱃지를 부호와 함께 �
   expect(html).toContain('data-flash="up">+40주');
   expect(html).toContain('data-flash="down">−20주');
 });
+
+test("기준가가 0이면 가격은 상승색이 아니다", () => {
+  const html = renderToStaticMarkup(createElement(PriceLadder, { rows, previousClose: 0 }));
+  expect(html).not.toContain("mw-up");
+  expect(html).not.toContain("mw-down");
+});

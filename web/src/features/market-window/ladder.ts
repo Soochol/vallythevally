@@ -41,13 +41,15 @@ export function buildLadder({ asks, bids, lastPrice, previousClose }: LadderInpu
     ...padded(nearestAsks(asks), "top").map((level): [LadderSide, BookLevel | null] => ["ask", level]),
     ...padded(nearestBids(bids), "bottom").map((level): [LadderSide, BookLevel | null] => ["bid", level]),
   ];
-  const largest = Math.max(0, ...levels.map(([, level]) => level?.quantity ?? 0));
+  const barQuantity = (level: BookLevel | null): number => (level !== null && Number.isFinite(level.quantity) && level.quantity > 0 ? level.quantity : 0);
+  const largest = Math.max(0, ...levels.map(([, level]) => barQuantity(level)));
+  const currentIndex = levels.findIndex(([, level]) => level !== null && level.price === lastPrice);
   return levels.map(([side, level], index) => ({
     key: `${side}-${index}`,
     side,
     level,
-    barRatio: level && largest > 0 ? level.quantity / largest : 0,
-    current: level !== null && level.price === lastPrice,
+    barRatio: largest > 0 ? barQuantity(level) / largest : 0,
+    current: index === currentIndex,
     rate: level && previousClose !== null && previousClose > 0 ? ((level.price - previousClose) / previousClose) * 100 : null,
   }));
 }
