@@ -6,6 +6,7 @@ import socket
 import subprocess
 import sys
 import time
+import urllib.error
 import urllib.request
 from pathlib import Path
 
@@ -13,6 +14,13 @@ ROOT = Path(__file__).resolve().parents[4]
 HERE = Path(__file__).resolve().parent
 RUNS = ROOT / "target/verify-vally/runs"
 SERVER_BIN = ROOT / "target/dev/bin/vally-server"
+ACCOUNT_BIN = ROOT / "target/debug/vally-account"
+FAKE_IDP_BIN = ROOT / "target/debug/vally-fake-idp"
+ACCOUNT_BUILD = "python3 scripts/dev.py cargo build -p account-server --all-targets"
+ACCOUNT_JOURNEYS = ("account-login",)
+FAKE_GOOGLE = ("FAKE-google-client-id", "FAKE-google-client-secret")
+FAKE_NAVER = ("FAKE-naver-client-id", "FAKE-naver-client-secret")
+REAL_IDP_HOSTS = ("accounts.google.com", "googleapis.com", "nid.naver.com", "openapi.naver.com", "kiwoom.com")
 UI_DIR = ROOT / "target/verify-vally/ui"
 CLOCK_START = "20261109090000"
 USER_SERVER_PORT = 8080
@@ -71,24 +79,93 @@ def http(url, timeout=3):
         return r.status, r.read()
 
 
-def up():
+def sandbox_env():
+    env = {k: v for k, v in os.environ.items() if not k.startswith("VALLY_") and k != "OPENDART_API_KEY" and not k.lower().endswith("_proxy")}
+    env["NO_PROXY"] = env["no_proxy"] = "127.0.0.1,localhost"
+    return env
+
+
+def pids_of(state):
+    return [name for name in ("server_pid", "account_pid", "idp_pid", "kiwoom_pid") if name in state]
+
+
+def up(account=False):
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(143))
     for needed in (SERVER_BIN, UI_DIR / "index.html"):
         if not needed.is_file():
             sys.exit(f"up: missing {needed}. Build first: python3 scripts/dev.py build ; python3 .claude/skills/verify-vally/scripts/build_ui.py {UI_DIR}")
+    for needed in (ACCOUNT_BIN, FAKE_IDP_BIN) if account else ():
+        if not needed.is_file():
+            sys.exit(f"up: missing {needed}. Build first: {ACCOUNT_BUILD}")
     run_id = time.strftime("%Y%m%d-%H%M%S") + f"-{os.getpid()}"
     run_dir = RUNS / run_id
     for sub in ("data", "evidence", "run"):
         (run_dir / sub).mkdir(parents=True)
     (run_dir / "run").chmod(0o700)
     try:
-        return start(run_id, run_dir)
+        return start(run_id, run_dir, account)
     except BaseException:
         stop(run_dir)
         raise
 
 
-def start(run_id, run_dir):
+def answers(url):
+    try:
+        http(url, timeout=2)
+    except urllib.error.HTTPError:
+        return True
+    except Exception:
+        return False
+    return True
+
+
+def wait_for(run_dir, what, ready, log):
+    for _ in range(100):
+        if ready():
+            return
+        time.sleep(0.1)
+    stop(run_dir)
+    sys.exit(f"up: {what} never became ready; see {log}")
+
+
+def start_account_side(run_dir, state):
+    base = sandbox_env()
+    idp_out = run_dir / "fake-idp.out"
+    spawn(run_dir, state, "idp", [str(FAKE_IDP_BIN)], cwd=run_dir, stdout=open(idp_out, "w"), stderr=subprocess.STDOUT, env={
+        **base,
+        "VALLY_FAKE_IDP_GOOGLE_CLIENT_ID": FAKE_GOOGLE[0],
+        "VALLY_FAKE_IDP_GOOGLE_CLIENT_SECRET": FAKE_GOOGLE[1],
+        "VALLY_FAKE_IDP_NAVER_CLIENT_ID": FAKE_NAVER[0],
+        "VALLY_FAKE_IDP_NAVER_CLIENT_SECRET": FAKE_NAVER[1],
+    })
+    wait_for(run_dir, "fake IdP", lambda: '"url"' in idp_out.read_text(), idp_out)
+    idp_url = json.loads(next(line for line in idp_out.read_text().splitlines() if line.startswith("{")))["url"]
+    port = free_port()
+    assert port != USER_SERVER_PORT
+    account_url = f"http://127.0.0.1:{port}"
+    account_log = run_dir / "account.log"
+    spawn(run_dir, state, "account", [str(ACCOUNT_BIN)], cwd=run_dir, stdout=open(account_log, "w"), stderr=subprocess.STDOUT, env={
+        **base,
+        "VALLY_ACCOUNT_PUBLIC_URL": account_url,
+        "VALLY_ACCOUNT_BIND": f"127.0.0.1:{port}",
+        "VALLY_ACCOUNT_DB_PATH": str(run_dir / "account-data/account.db"),
+        "VALLY_ACCOUNT_GOOGLE_CLIENT_ID": FAKE_GOOGLE[0],
+        "VALLY_ACCOUNT_GOOGLE_CLIENT_SECRET": FAKE_GOOGLE[1],
+        "VALLY_ACCOUNT_GOOGLE_AUTHORIZE_URL": f"{idp_url}/google/authorize",
+        "VALLY_ACCOUNT_GOOGLE_TOKEN_URL": f"{idp_url}/google/token",
+        "VALLY_ACCOUNT_NAVER_CLIENT_ID": FAKE_NAVER[0],
+        "VALLY_ACCOUNT_NAVER_CLIENT_SECRET": FAKE_NAVER[1],
+        "VALLY_ACCOUNT_NAVER_AUTHORIZE_URL": f"{idp_url}/naver/authorize",
+        "VALLY_ACCOUNT_NAVER_TOKEN_URL": f"{idp_url}/naver/token",
+        "VALLY_ACCOUNT_NAVER_PROFILE_URL": f"{idp_url}/naver/profile",
+    })
+    wait_for(run_dir, "account server", lambda: answers(account_url), account_log)
+    state.update(mode="account", idp_url=idp_url, account_url=account_url, account_db_path=str(run_dir / "account-data/account.db"), account_state_path=str(run_dir / "account-state/account.json"))
+    save(run_dir, state)
+    return [f"VALLY_ACCOUNT_SERVER_URL={account_url}", f"VALLY_ACCOUNT_STATE_PATH={state['account_state_path']}"]
+
+
+def start(run_id, run_dir, account=False):
     state = {"run_id": run_id, "dir": str(run_dir)}
     save(run_dir, state)
     kiwoom_port_file = run_dir / "kiwoom.port"
@@ -102,6 +179,7 @@ def start(run_id, run_dir):
     else:
         sys.exit(f"up: loopback Kiwoom stand-in never reported its port; see {run_dir}/kiwoom.out")
     kiwoom_port = int(kiwoom_port_file.read_text())
+    account_lines = start_account_side(run_dir, state) if account else []
     port = free_port()
     assert port != USER_SERVER_PORT
     env_file = run_dir / "server.env"
@@ -122,10 +200,10 @@ def start(run_id, run_dir):
         "VALLY_SCREENER_UPDATE_ON_START=off",
         "VALLY_FINANCIAL_AUTOMATIC=off",
         "VALLY_LOG=info",
+        *account_lines,
         "",
     ]))
-    env = {k: v for k, v in os.environ.items() if not k.startswith("VALLY_") and k != "OPENDART_API_KEY" and not k.lower().endswith("_proxy")}
-    env["NO_PROXY"] = env["no_proxy"] = "127.0.0.1,localhost"
+    env = sandbox_env()
     env["VALLY_ENV_FILE"] = str(env_file)
     state.update(base_url=f"http://127.0.0.1:{port}", kiwoom_url=f"http://127.0.0.1:{kiwoom_port}")
     server = spawn(run_dir, state, "server", [str(SERVER_BIN)], cwd=run_dir, env=env, stdout=open(run_dir / "server.log", "w"), stderr=subprocess.STDOUT)
@@ -175,6 +253,50 @@ def connections(pid):
     return [line for line in out.splitlines() if f"pid={pid}," in line]
 
 
+def environ_of(pid):
+    raw = Path(f"/proc/{pid}/environ").read_bytes().decode(errors="replace")
+    return dict(item.split("=", 1) for item in raw.split("\0") if "=" in item)
+
+
+def listeners(pid):
+    out = subprocess.run(["ss", "-ltnH", "-p"], capture_output=True, text=True).stdout
+    return [line.split()[3] for line in out.splitlines() if f"pid={pid}," in line]
+
+
+def account_problems(run_dir, state, connector_env):
+    problems = []
+    for key, expected in (("VALLY_ACCOUNT_SERVER_URL", state["account_url"]), ("VALLY_ACCOUNT_STATE_PATH", state["account_state_path"])):
+        if connector_env.get(key) != expected:
+            problems.append(f"connector {key} is {connector_env.get(key)!r}, expected {expected!r}")
+    if not Path(state["account_state_path"]).resolve().is_relative_to(run_dir.resolve()):
+        problems.append("account state file is outside the run dir")
+    if not state["account_url"].startswith("http://127.0.0.1:") or not state["idp_url"].startswith("http://127.0.0.1:"):
+        problems.append(f"account or IdP address is not loopback: {state['account_url']} {state['idp_url']}")
+    for name in ("server_pid", "account_pid", "idp_pid"):
+        pid = state.get(name)
+        if not ours(state, name):
+            continue
+        open_ports = listeners(pid)
+        if not open_ports:
+            problems.append(f"{name} listens on nothing")
+        problems.extend(f"{name} listens beyond loopback: {address}" for address in open_ports if not address.startswith("127.0.0.1:"))
+        external = [c for c in connections(pid) if "127.0.0.1" not in c.split()[3] or "127.0.0.1" not in c.split()[4]]
+        if external:
+            problems.append(f"{name} has non-loopback connections: {external}")
+        if name != "server_pid":
+            real = sorted({f"{key}={value}" for key, value in environ_of(pid).items() if any(host in value for host in REAL_IDP_HOSTS)})
+            if real:
+                problems.append(f"{name} env mentions a real IdP host: {[item.split('=', 1)[0] for item in real]}")
+    if ours(state, "account_pid"):
+        env = environ_of(state["account_pid"])
+        for key in ("VALLY_ACCOUNT_PUBLIC_URL", "VALLY_ACCOUNT_GOOGLE_AUTHORIZE_URL", "VALLY_ACCOUNT_GOOGLE_TOKEN_URL", "VALLY_ACCOUNT_NAVER_AUTHORIZE_URL", "VALLY_ACCOUNT_NAVER_TOKEN_URL", "VALLY_ACCOUNT_NAVER_PROFILE_URL"):
+            if not env.get(key, "").startswith("http://127.0.0.1:"):
+                problems.append(f"account server {key} is not an explicit loopback address")
+        if not env.get("VALLY_ACCOUNT_GOOGLE_CLIENT_ID", "").startswith("FAKE-"):
+            problems.append("account server Google client id is not a FAKE- value")
+    return problems
+
+
 def doctor(run_dir):
     state = load(run_dir)
     problems = []
@@ -184,9 +306,11 @@ def doctor(run_dir):
             problems.append(f"{key} is not loopback: {env[key]}")
     if "kiwoom.com" in (run_dir / "server.env").read_text():
         problems.append("real Kiwoom host in env file")
-    for name in ("server_pid", "kiwoom_pid"):
+    for name in pids_of(state):
         if not ours(state, name):
             problems.append(f"{name} {state[name]} is not running")
+    if state.get("mode") == "account":
+        problems.extend(account_problems(run_dir, state, env))
     if state["base_url"].endswith(f":{USER_SERVER_PORT}"):
         problems.append("run targets the user's server port")
     listening = subprocess.run(["ss", "-ltnpH", f"sport = :{state['base_url'].rsplit(':', 1)[1]}"], capture_output=True, text=True).stdout
@@ -234,10 +358,11 @@ def signal_ours(pid, sig):
 
 def stop(run_dir):
     state = load(run_dir) if (run_dir / "state.json").is_file() else {}
-    for name in ("server_pid", "kiwoom_pid"):
+    names = pids_of(state)
+    for name in names:
         if pid := ours(state, name):
             signal_ours(pid, signal.SIGTERM)
-    for name in ("server_pid", "kiwoom_pid"):
+    for name in names:
         for _ in range(50):
             if not ours(state, name):
                 break
@@ -247,18 +372,23 @@ def stop(run_dir):
 
 
 def run_all(journeys):
-    state = up()
+    account = bool(set(journeys) & set(ACCOUNT_JOURNEYS))
+    if account and not set(journeys) <= set(ACCOUNT_JOURNEYS):
+        sys.exit(f"all: account journeys {ACCOUNT_JOURNEYS} need account mode and cannot share a run with local-only journeys")
+    state = up(account)
     run_dir = Path(state["dir"])
     failed = False
     try:
         failed = not doctor(run_dir)
         seen = set()
+        watched = [name for name in ("server_pid", "account_pid", "idp_pid") if name in state]
         for journey in journeys:
             drive = subprocess.Popen(["node", str(HERE / "drive.mjs"), state["base_url"], str(run_dir / "evidence"), journey], start_new_session=True)
             try:
                 deadline = time.monotonic() + JOURNEY_TIMEOUT_SECONDS
                 while drive.poll() is None and time.monotonic() < deadline:
-                    seen.update(connections(state["server_pid"]))
+                    for name in watched:
+                        seen.update(connections(state[name]))
                     time.sleep(0.2)
             finally:
                 if drive.poll() is None:
@@ -266,7 +396,8 @@ def run_all(journeys):
                     drive.wait()
                     failed = True
             failed = failed or drive.returncode != 0
-        seen.update(connections(state["server_pid"]))
+        for name in watched:
+            seen.update(connections(state[name]))
         conns = [c for c in seen if "127.0.0.1" not in c.split()[4] or "127.0.0.1" not in c.split()[3]]
         (run_dir / "evidence/network-interfaces.txt").write_text(Path("/proc/net/dev").read_text())
         (run_dir / "evidence/server-connections.txt").write_text("\n".join(sorted(seen)) + "\n")
@@ -279,9 +410,11 @@ def run_all(journeys):
 
 def main():
     if len(sys.argv) < 2 or sys.argv[1] not in ("up", "doctor", "down", "all"):
-        sys.exit("usage: vv.py up | doctor [run-dir] | down <run-dir> | all [journey...]")
+        sys.exit("usage: vv.py up [--account] | doctor [run-dir] | down <run-dir> | all [journey...]")
     if sys.argv[1] == "up":
-        return up()
+        if sys.argv[2:] not in ([], ["--account"]):
+            sys.exit("usage: vv.py up [--account]")
+        return up(account=sys.argv[2:] == ["--account"])
     if sys.argv[1] == "all":
         return run_all(sys.argv[2:] or ["search-chart"])
     if sys.argv[1] == "down" and len(sys.argv) < 3:

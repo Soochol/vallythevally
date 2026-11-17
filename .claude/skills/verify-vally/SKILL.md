@@ -5,10 +5,11 @@ description: Launch and drive the real vally app (Rust `vally-server` serving th
 
 # verify-vally
 
-Primary surface: the browser UI in `web/` (search, chart, watchlists, screener, window layouts) served by `crates/server` (`vally-server`). Secondary surfaces `crates/collector` and the hoga replay screen do not exist yet. When they land, add a `features/` file for each.
+Primary surface: the browser UI in `web/` (search, chart, watchlists, screener, window layouts) served by `crates/server` (`vally-server`). Account mode adds the landing and login against real `vally-account` and `vally-fake-idp` processes (see "Account mode"). Secondary surfaces `crates/collector` and the hoga replay screen do not exist yet. When they land, add a `features/` file for each.
 
 Hard rules (AGENTS.md and the task that created this skill):
 - Never contact real Kiwoom or real DART. The sandbox server gets `VALLY_KIWOOM_BASE_URL`/`VALLY_KIWOOM_WS_URL` on loopback only (the server refuses `VALLY_CLOCK_START` with real Kiwoom, and Doctor fails if a non-loopback address appears). No `OPENDART_API_KEY`, no `VALLY_ENV_FILE` of the user.
+- Never contact real Google or Naver. In account mode the account server gets explicit loopback IdP addresses (the fake IdP, started from `vally-fake-idp`) and `FAKE-` client ids and secrets, and Doctor fails if a real IdP host appears in the account server's or the fake IdP's env.
 - Never touch the user's long-running server (`127.0.0.1:8080`, `/home/dev/code/vallythevally/data/`, `~/.local/state/vallythevally/token.json` and the lock). Every run uses a free port, a fresh data dir under `target/verify-vally/runs/<run-id>/`, and its own token and lock paths.
 - Kill only processes this skill started (pids in the run's `state.json`), never by name.
 - Do not run a second server in the user's checkout. This skill needs no write access outside `target/`.
@@ -40,6 +41,21 @@ One-shot, strongest isolation (a network namespace where only loopback exists, s
 
 It runs up, Doctor, each journey, a connection check, and down inside the namespace. If `unshare` is refused (AppArmor on ordinary terminals; hc terminals work), use the Launch/Drive/Cleanup steps by hand. Loopback-only config plus Doctor is then the guard.
 
+## Account mode
+
+Landing → connector `/api/account/login` → account server `start` → fake IdP → account server callback → connector `/auth/complete` → signed in, with all four processes real (connector, account server, fake IdP, Kiwoom stand-in). Details, steps and gotchas: `features/account-login.md`.
+
+```sh
+python3 scripts/dev.py cargo build -p account-server --all-targets    # target/debug/vally-account and vally-fake-idp (the fake IdP needs the fake-idp feature, which --all-targets turns on)
+python3 .claude/skills/verify-vally/scripts/vv.py up --account
+python3 .claude/skills/verify-vally/scripts/vv.py doctor <run-dir>
+node .claude/skills/verify-vally/scripts/drive.mjs <base_url> <run-dir>/evidence account-login
+python3 .claude/skills/verify-vally/scripts/vv.py down <run-dir>
+.claude/skills/verify-vally/scripts/offline-all.sh account-login     # the same inside the offline namespace
+```
+
+The run folder also holds `account-data/account.db`, `account-state/account.json` (the connector state file, mode 600 in a 700 folder), `account.log`, `fake-idp.out`. `state.json` records the account server and IdP pids with start times, so `down` stops all four processes and only those. `account-login` cannot share a run with local-only journeys.
+
 ## Doctor
 
 Read-only. Run first, and whenever something looks off:
@@ -47,6 +63,8 @@ Read-only. Run first, and whenever something looks off:
 ```sh
 python3 .claude/skills/verify-vally/scripts/vv.py doctor [run-dir]    # default: newest run; exit 1 on any problem
 ```
+
+Account mode adds: all processes listen on `127.0.0.1` only and hold loopback connections only, no real IdP host in the account server's or fake IdP's env, explicit loopback IdP URLs and `FAKE-` client ids, and the connector's account URL and state path belong to this run.
 
 Checks: Kiwoom URLs are `127.0.0.1`, no `kiwoom.com` in the env file, our server and fake pids are alive, the port is owned by our server pid (and is not 8080), our server has no non-loopback TCP connection, `GET /` is 200, and `/api/symbols/005930` either returns the loaded symbol (`connected: true`) or answers `not_connected` (`connected: false`, not a problem). After a connect, a failure of "neither loaded nor not_connected" or a missing symbol usually means the fake did not serve `ka10099`; read `server.log`.
 
@@ -58,7 +76,7 @@ Playwright (`web/node_modules/@playwright/test`, Chromium) through one script. S
 node .claude/skills/verify-vally/scripts/drive.mjs <base_url> <run-dir>/evidence <journey>
 ```
 
-Journeys: `search-chart` (search button `title="종목 검색 (/ 또는 Ctrl+K)"`, dialog `종목 검색`, combobox `종목 검색`, option text `005930`, then `region` named `칸 1: …` with `data-bar-count`), `watchlist-add` (complementary `관심종목`, button `관심종목에 넣기`, `li[data-code]`). Each journey asserts its fresh-start precondition (코스피 cell, empty 기본 list), so run one `up` per journey set and never reuse a run for a second pass; a reused run fails with the precondition error. Run journeys one at a time per evidence dir; two concurrent `drive.mjs` runs into the same dir can pick the same tag and overwrite each other. A journey exits 1 on a failed expectation, a console error, a page error, or any request to a host other than the sandbox. Add journeys to `drive.mjs` per `features/*.md`.
+Journeys: `account-login` (account mode only, see above), `search-chart` (search button `title="종목 검색 (/ 또는 Ctrl+K)"`, dialog `종목 검색`, combobox `종목 검색`, option text `005930`, then `region` named `칸 1: …` with `data-bar-count`), `watchlist-add` (complementary `관심종목`, button `관심종목에 넣기`, `li[data-code]`). Each journey asserts its fresh-start precondition (코스피 cell, empty 기본 list), so run one `up` per journey set and never reuse a run for a second pass; a reused run fails with the precondition error. Run journeys one at a time per evidence dir; two concurrent `drive.mjs` runs into the same dir can pick the same tag and overwrite each other. A journey exits 1 on a failed expectation, a console error, a page error, or any request to a host other than the sandbox. Add journeys to `drive.mjs` per `features/*.md`.
 
 The existing repo harnesses are for mocked responses, not this skill: `python3 scripts/web.py e2e <spec>` (ADR 0016: Playwright against synthetic responses; no server) and `python3 scripts/web.py doctor` (Chromium check). Reuse their selectors; use them for broad regression, and this skill for "does the real server plus real UI work".
 
@@ -76,16 +94,17 @@ Everything goes to `target/verify-vally/runs/<run-id>/evidence/` and survives `d
 python3 .claude/skills/verify-vally/scripts/vv.py down <run-dir>      # SIGTERM then SIGKILL the pids in state.json only, and only when the process start time matches the one recorded at launch; the run dir is required (use the `dir` printed by `up`)
 ```
 
-It stops the server and the fake and keeps the run directory including `evidence/`. Run it after every failed attempt. Old runs under `target/verify-vally/runs/` may be deleted by hand when no longer needed. Do not delete `evidence/` you still need.
+It stops the server, the fake Kiwoom and, in account mode, the account server and the fake IdP, and keeps the run directory including `evidence/`. Run it after every failed attempt. Old runs under `target/verify-vally/runs/` may be deleted by hand when no longer needed. Do not delete `evidence/` you still need.
 
 ## Helpers
 
 | Script | Use |
 |---|---|
-| `scripts/vv.py up\|doctor\|down\|all` | run lifecycle (above) |
+| `scripts/vv.py up [--account]\|doctor\|down\|all` | run lifecycle (above); `up --account` and `all account-login` start the account side |
 | `scripts/offline-all.sh [journey...]` | `vv.py all` inside the offline namespace |
 | `scripts/drive.mjs <base> <evidence> <journey>` | Playwright journeys |
 | `scripts/build_ui.py <out-dir>` | UI build via `scripts/web.py` internals |
 | `scripts/verification_loopback_kiwoom.py` | loopback Kiwoom stand-in, started by `vv.py` (VERIFICATION-ONLY) |
+| `crates/account-server/src/bin/vally-fake-idp.rs` | loopback Google/Naver stand-in, started by `vv.py up --account` (VERIFICATION-ONLY, built only with the `fake-idp` feature) |
 
 Feature map: `features/README.md`.

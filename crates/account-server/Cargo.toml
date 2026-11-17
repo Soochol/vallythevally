@@ -14,6 +14,11 @@ path = "src/lib.rs"
 name = "vally-account"
 path = "src/main.rs"
 
+[[bin]]
+name = "vally-fake-idp"
+path = "src/bin/vally-fake-idp.rs"
+required-features = ["fake-idp"]
+
 [dependencies]
 axum = "0.8"
 base64 = "0.22"
