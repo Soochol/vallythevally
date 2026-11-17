@@ -676,7 +676,7 @@ async fn an_import_also_beats_an_account_copy_whose_revision_is_ahead_of_this_pc
     a.synced().await;
     let earlier = a.export().await;
     b.synced().await;
-    b.saved("/api/watchlists", &watchlists("빠른 시계 PC", 9_000_000_000_000)).await;
+    b.saved("/api/watchlists", &watchlists("빠른 시계 PC", 1_794_200_000_000)).await;
     b.synced().await;
     a.synced().await;
     assert_eq!(a.put("/api/setup/import", &earlier).await.0, 200);
