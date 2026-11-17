@@ -257,7 +257,7 @@ pub struct MarketHub {
     tx: mpsc::UnboundedSender<HubInput>,
     manager: SubscriptionManager,
     rejected: BTreeSet<Holder>,
-    broker_history: BTreeMap<Symbol, BrokerSnapshot>,
+    broker_history: BTreeMap<Symbol, (BrokerSnapshot, KstTime)>,
     tallies: DayTallies,
     directory: watch::Receiver<Option<Arc<Directory>>>,
     conns: HashMap<ConnId, Conn>,
@@ -423,9 +423,9 @@ impl MarketHub {
     fn attach_feed(&mut self, conn: ConnId, sub: &SubId, feed: FeedSub) {
         push(&self.conns, &mut self.closing, conn, ServerMessage::FeedSubscribed { sub: sub.0.clone(), kind: feed.kind });
         if feed.kind == FeedKind::Brokers
-            && let Some(snapshot) = self.broker_history.get(&feed.symbol)
+            && let Some((snapshot, received_at)) = self.broker_history.get(&feed.symbol)
         {
-            let msg = ServerMessage::FeedBrokers { sub: sub.0.clone(), brokers: feed_brokers(snapshot, self.clock.now()) };
+            let msg = ServerMessage::FeedBrokers { sub: sub.0.clone(), brokers: feed_brokers(snapshot, *received_at) };
             push(&self.conns, &mut self.closing, conn, msg);
         }
     }
@@ -894,7 +894,7 @@ impl MarketHub {
             let msg = ServerMessage::FeedBrokers { sub: sub.0, brokers: message.clone() };
             push(&self.conns, &mut self.closing, conn, msg);
         }
-        self.broker_history.insert(snapshot.symbol, snapshot);
+        self.broker_history.insert(snapshot.symbol, (snapshot, received_at));
     }
 
     fn publish_feed_link(&mut self, live: bool, at: KstTime) {
@@ -3025,13 +3025,16 @@ mod tests {
         subscribe_feed(&h, conn, "first", FeedKind::Brokers, Venue::Combined);
         take(&out).await;
         h.events.send(broker_event(&h, 100)).await.unwrap();
+        let received_at = h.clock.now();
         h.events.send(broker_event(&h, 150)).await.unwrap();
         take(&out).await;
+        tokio::time::sleep(Duration::from_secs(15)).await;
         let (late_conn, late) = connect(&h).await;
         subscribe_feed(&h, late_conn, "late", FeedKind::Brokers, Venue::Combined);
         let msgs = take(&late).await;
         let [ServerMessage::FeedSubscribed { .. }, ServerMessage::FeedBrokers { sub, brokers }] = msgs.as_slice() else { panic!("{msgs:?}") };
         assert_eq!((sub.as_str(), brokers.sells.len(), brokers.sells[0].qty), ("late", 1, 150), "응답 다음에 가장 새 스냅샷이 먼저 온다");
+        assert_eq!(brokers.t.0, received_at.unix(), "t는 구독 시각이 아니라 수신 시각이다");
     }
 
     #[tokio::test(start_paused = true)]

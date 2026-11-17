@@ -15,6 +15,7 @@ const kindItem = (page: Page, name: string) => page.getByRole("menu", { name: "�
 const tabOf = (page: Page, id: string) => windowTabs(page).locator(`[role=tab][data-window-id="${id}"]`);
 const dotOf = (page: Page, id: string) => windowTabs(page).locator(`[role=tab][data-window-id="${id}"] + .link-dot`);
 const preparing = (page: Page) => page.getByTestId("market-window-preparing");
+const body = (page: Page, kind: string) => (kind === "brokers" ? page.getByTestId("brokers-window") : preparing(page));
 const savedWindows = (scenario: Scenario) => scenario.documents.layout(DEFAULT_LAYOUT_ID).windows;
 
 function twoLinkedCharts(scenario: Scenario) {
@@ -44,16 +45,16 @@ for (const { kind, name } of KINDS) {
 
     await addWindow(page, name);
     await expect(tabOf(page, kind)).toHaveAccessibleName(new RegExp(`^${name}`));
-    await expect(preparing(page)).toContainText(`${name} 준비 중`);
-    await expect(preparing(page)).toContainText("삼성전자");
+    if (kind !== "brokers") await expect(preparing(page)).toContainText(`${name} 준비 중`);
+    await expect(body(page, kind)).toContainText("삼성전자");
     await expect(dotOf(page, kind)).toHaveAccessibleName("연동 색: 끔");
     await expect.poll(() => savedWindows(scenario).filter((w) => w.kind === kind)).toEqual([{ id: kind, link: null, kind }]);
 
     await dotOf(page, kind).click();
     await page.getByRole("menu", { name: "연동 색" }).getByRole("menuitemradio", { name: /^B/ }).click();
     await expect(dotOf(page, kind)).toHaveAccessibleName("연동 색: B");
-    await expect(preparing(page)).toContainText("SK하이닉스");
-    await expect(preparing(page)).toHaveAttribute("data-symbol", "000660");
+    await expect(body(page, kind)).toContainText("SK하이닉스");
+    await expect(body(page, kind)).toHaveAttribute("data-symbol", "000660");
     await expect.poll(() => savedWindows(scenario).find((w) => w.kind === kind)?.link).toBe("b");
 
     await addButton(page).click();
