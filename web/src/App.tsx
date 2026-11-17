@@ -1,3 +1,4 @@
+import { useRefetchNamesOnConnect } from "./api/refetchNamesOnConnect";
 import { FinancialUpdateDialog } from "./features/financial-update/FinancialUpdateDialog";
 import { ConfirmHost } from "./features/overlay/Confirm";
 import { TooltipHost } from "./features/overlay/Tooltip";
@@ -40,6 +41,7 @@ export function ChartRoute() {
   const account = useAccountStore((s) => s.status);
   const wizardOpen = useWizardStore((s) => s.open);
   useWizardOpening(account);
+  useRefetchNamesOnConnect();
   if (account?.state === "signed_out") return <LoginScreen />;
   if (account?.state === "owner_mismatch") return <ReplaceLocalScreen status={account} />;
   return (

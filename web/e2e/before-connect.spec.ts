@@ -11,6 +11,14 @@ const guide = (page: Page) => page.getByRole("region", { name: "키움 연결 �
 const dialog = (page: Page) => page.getByRole("dialog", { name: "시스템 설정", exact: true });
 const noHorizontalScroll = (page: Page) => expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBe(0);
 
+const symbolRoute = (url: URL) => /^\/api\/symbols\/[^/]+$/.test(url.pathname);
+
+function refuseNamesBeforeConnect(scenario: Scenario) {
+  const state = { connected: false };
+  scenario.on((url) => symbolRoute(url) && !state.connected, () => NOT_CONNECTED);
+  return state;
+}
+
 function beforeConnect(scenario: Scenario, link: Partial<KiwoomLinkStatus>, realtime: "notConnected" | "live" = "notConnected") {
   scenario.live.kiwoomLink = { ...CONNECTED_KIWOOM, ...link };
   scenario.live.status({ realtime, since: Math.floor(scenario.now / 1000), backfilling: false });
@@ -39,6 +47,7 @@ test("키 없음: 차트 칸 카드의 단추가 키움 연결 내용을 열고 
 
 test("연결 안 함: 관심종목은 보이고 가격은 —, 검색은 연결 안내, 스크리너 업데이트는 꺼진다", async ({ page, scenario, screener }) => {
   beforeConnect(scenario, disconnected);
+  refuseNamesBeforeConnect(scenario);
   const lists = scenario.documents.watchlists();
   scenario.documents.saveWatchlists({ lists: lists.lists.map((list, i) => (i === 0 ? { ...list, symbols: ["005930"] } : list)), revision: lists.revision + 1 });
   screener.showStatus(readyStatus());
@@ -49,7 +58,7 @@ test("연결 안 함: 관심종목은 보이고 가격은 —, 검색은 연결 
   const watch = page.getByRole("complementary", { name: "관심종목" });
   await expect(watch.getByText("저장된 목록 · 시세 없음")).toBeVisible();
   const row = watch.locator('li[data-code="005930"]');
-  await expect(row.locator("[data-main]")).toHaveAccessibleName("삼성전자");
+  await expect(row.locator("[data-main]")).toHaveAccessibleName("005930");
   await expect(row.getByText("—").first()).toBeVisible();
 
   await page.keyboard.press("/");
@@ -89,6 +98,21 @@ test("연결됨 상태 메시지가 오면 카드가 사라지고 기존 화면�
   await expect(guide(page)).toHaveCount(0);
   await expect(statusBar(page).getByRole("button", { name: /실시간 연결됨|장 닫힘/ })).toBeVisible();
   await expect(page.getByRole("complementary", { name: "관심종목" }).getByText("저장된 목록 · 시세 없음")).toHaveCount(0);
+});
+
+test("연결되면 코드로 남았던 관심종목 줄이 종목 이름을 다시 받는다", async ({ page, scenario }) => {
+  beforeConnect(scenario, disconnected);
+  const names = refuseNamesBeforeConnect(scenario);
+  const lists = scenario.documents.watchlists();
+  scenario.documents.saveWatchlists({ lists: lists.lists.map((list, i) => (i === 0 ? { ...list, symbols: ["005930"] } : list)), revision: lists.revision + 1 });
+  await open(page);
+  const row = page.getByRole("complementary", { name: "관심종목" }).locator('li[data-code="005930"]');
+  await expect(row.locator("[data-main]")).toHaveAccessibleName("005930");
+  names.connected = true;
+  scenario.reply("/api/quotes", { body: [] });
+  scenario.live.status({ realtime: "live", since: Math.floor(scenario.now / 1000), backfilling: false });
+  scenario.live.link({ ...CONNECTED_KIWOOM });
+  await expect(row.locator("[data-main]")).toHaveAccessibleName("삼성전자");
 });
 
 test("연결 중 다른 이유로 실패한 차트도 연결됨이 되면 다시 받는다", async ({ page, scenario }) => {
