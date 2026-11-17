@@ -1,9 +1,12 @@
 import { useState } from "react";
-import { deleteAccount, logout } from "../../api/account";
+import { deleteAccount, logout, syncNow } from "../../api/account";
 import { ApiRequestError } from "../../api/http";
 import { useAccountStore } from "../../stores/account";
+import { useSelectionStore } from "../../stores/selection";
+import { useWizardStore } from "../setup-wizard/wizardOpen";
+import { syncErrorText } from "../status/syncView";
 import { useCommand } from "../system-settings/useCommand";
-import { DELETE_PHRASE, deleteFailureText, formatSignedInAt } from "./accountMenu";
+import { DELETE_PHRASE, deleteFailureText, formatSignedInAt, lastSyncText } from "./accountMenu";
 import { PROVIDER_NAME, shortAccountId } from "./provider";
 import { useReturnFocus } from "./useReturnFocus";
 
@@ -42,7 +45,24 @@ export function AccountMenuContent() {
         <dt className="text-text-2">로그인 시각</dt>
         <dd className="max-md:mb-2">{formatSignedInAt(status.signedInAt)}</dd>
       </dl>
+      {status.sync.state === "running" && (
+        <section aria-label="동기화" className="flex flex-col gap-3 rounded-m border border-line bg-surface p-4">
+          <h3 className="text-m font-semibold">동기화</h3>
+          <dl className="grid grid-cols-[minmax(0,10rem)_minmax(0,1fr)] gap-x-4 gap-y-3 text-m max-md:grid-cols-1 max-md:gap-y-1">
+            <dt className="text-text-2">마지막 성공</dt>
+            <dd className="max-md:mb-2">{lastSyncText(status.sync.lastSuccessAt)}</dd>
+            <dt className="text-text-2">올리지 못한 변경</dt>
+            <dd className="max-md:mb-2">{status.sync.pendingDocuments}개</dd>
+            <dt className="text-text-2">거절된 문서</dt>
+            <dd className="max-md:mb-2">{status.sync.refusedDocuments}개</dd>
+            <dt className="text-text-2">마지막 오류</dt>
+            <dd className="max-md:mb-2">{status.sync.lastError === null ? "없음" : syncErrorText(status.sync.lastError)}</dd>
+          </dl>
+          <button type="button" className="tb-btn h-9 self-start border border-line px-3" disabled={command.busy} onClick={() => void command.run(syncNow)}>지금 동기화</button>
+        </section>
+      )}
       <div className="flex flex-wrap gap-2">
+        <button type="button" className="tb-btn h-9 border border-line px-3" onClick={() => { useSelectionStore.getState().closeDialog(); useWizardStore.getState().show(); }}>셋업 마법사 다시 열기</button>
         <button type="button" className="tb-btn h-9 border border-line px-3" disabled={command.busy} onClick={() => void command.run(logout)}>로그아웃</button>
         {!deleting && <button ref={deleteButton} type="button" className="tb-btn h-9 border border-line px-3 text-danger" onClick={() => setDeleting(true)}>계정 삭제</button>}
       </div>

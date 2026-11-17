@@ -204,6 +204,11 @@ export function startAutosave(deps: AutosaveDeps): Autosave {
   return autosave;
 }
 
+export async function saveAllAndWait(): Promise<void> {
+  if (!active) return;
+  await Promise.all(Object.values(active.savers).map((saver) => saver.save()));
+}
+
 export function layoutAutosave(): Autosave {
   if (!active) throw new Error("레이아웃 저장이 시작되지 않았습니다");
   return active;
