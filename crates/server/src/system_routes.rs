@@ -100,7 +100,7 @@ impl api::SystemSettings {
             kiwoom_target: kiwoom_target(&config.kiwoom_base_url),
             server_version: env!("CARGO_PKG_VERSION").to_owned(),
             account_server_url: config.account_server_url.as_ref().map(|url| url.as_str().to_owned()),
-            account_state_path: path(&config.account_state_path),
+            account_state_path: config.account_state_path.as_deref().map(path),
         }
     }
 }

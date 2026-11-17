@@ -71,7 +71,7 @@ pub fn main() -> ExitCode {
     };
     let token_file = TokenFile::new(config.token_path.clone(), &lock);
     let key_file = KeyFile::new(config.kiwoom_key_path.clone(), &lock);
-    let account_file = AccountStateFile::new(config.account_state_path.clone(), &lock);
+    let account_file = config.account_state_path.clone().map(|path| AccountStateFile::new(path, &lock));
     let code = runtime.block_on(serve(config, token_file, key_file, account_file));
     drop(lock);
     code
@@ -132,7 +132,7 @@ pub async fn daily_maintenance(state: Arc<AppState>) {
     );
 }
 
-async fn serve(config: Config, token_file: TokenFile, key_file: KeyFile, account_file: AccountStateFile) -> ExitCode {
+async fn serve(config: Config, token_file: TokenFile, key_file: KeyFile, account_file: Option<AccountStateFile>) -> ExitCode {
     let db = match AppDb::open(&config.db_path).await {
         Ok(db) => db,
         Err(e) => {
@@ -205,15 +205,15 @@ async fn serve(config: Config, token_file: TokenFile, key_file: KeyFile, account
             return ExitCode::from(1);
         }
     };
-    let account = match &config.account_server_url {
-        None => AccountState::local_only(),
-        Some(url) => match AccountState::linked(url.clone(), account_file) {
+    let account = match (&config.account_server_url, account_file) {
+        (Some(url), Some(file)) => match AccountState::linked(url.clone(), file) {
             Ok(account) => account,
             Err(e) => {
                 tracing::error!(error = %e, "계정 서버용 HTTP 클라이언트를 만들 수 없습니다");
                 return ExitCode::from(1);
             }
         },
+        _ => AccountState::local_only(),
     };
     let system = SystemState::new(key_file, env_key, startup.file_problem, crate::api::SystemSettings::from_config(&config)).with_public_ip(Arc::new(public_ip)).with_account(account);
     let state = application_with_system(ApplicationInputs { rest: rest.clone(), clock: clock.clone(), symbols: symbols.clone(), db, screener_store, stream, static_dir: config.static_dir.clone(), screener_update_on_connect: config.screener_update_on_start }, system);

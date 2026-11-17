@@ -456,7 +456,7 @@ pub struct SystemSettings {
     pub kiwoom_target: KiwoomTarget,
     pub server_version: String,
     pub account_server_url: Option<String>,
-    pub account_state_path: String,
+    pub account_state_path: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]

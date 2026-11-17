@@ -136,7 +136,7 @@ pub struct Config {
     pub financial_db_path: PathBuf,
     pub financial_automatic: bool,
     pub account_server_url: Option<AccountServerUrl>,
-    pub account_state_path: PathBuf,
+    pub account_state_path: Option<PathBuf>,
 }
 
 /// 설정을 읽으며 모은 경고. 로그를 켜기 전에 읽으므로 호출자가 나중에 남긴다.
@@ -199,6 +199,11 @@ impl Config {
         let kind_base_url = public_or_loopback("VALLY_KIND_BASE_URL", url("VALLY_KIND_BASE_URL"), "https://kind.krx.co.kr")?;
         let public_ip_url = public_or_loopback("VALLY_PUBLIC_IP_URL", url("VALLY_PUBLIC_IP_URL"), "https://api.ipify.org")?;
         let account_server_url = url("VALLY_ACCOUNT_SERVER_URL").map(|value| AccountServerUrl::parse(&value).map_err(|e| ConfigError(format!("VALLY_ACCOUNT_SERVER_URL: {e}")))).transpose()?;
+        let account_state_path = match (vars.get("VALLY_ACCOUNT_STATE_PATH"), &account_server_url) {
+            (Some(p), _) => Some(PathBuf::from(p)),
+            (None, Some(_)) => Some(default_account()?),
+            (None, None) => default_account().ok(),
+        };
         let config = Config {
             kiwoom_credentials,
             kiwoom_base_url,
@@ -226,10 +231,7 @@ impl Config {
                 Some(other) => return Err(ConfigError(format!("VALLY_SCREENER_UPDATE_ON_START는 on이나 off입니다: {other}"))),
             },
             account_server_url,
-            account_state_path: match vars.get("VALLY_ACCOUNT_STATE_PATH") {
-                Some(p) => PathBuf::from(p),
-                None => default_account()?,
-            },
+            account_state_path,
             financial_automatic: match vars.get("VALLY_FINANCIAL_AUTOMATIC").map(String::as_str) {
                 None | Some("on") => true,
                 Some("off") => false,
@@ -250,9 +252,8 @@ impl Config {
             ("VALLY_DB_PATH", &config.db_path),
             ("VALLY_SCREENER_DB_PATH", &config.screener_db_path),
             ("VALLY_FINANCIAL_DB_PATH", &config.financial_db_path),
-            ("VALLY_ACCOUNT_STATE_PATH", &config.account_state_path),
         ];
-        if let Some((key, _)) = other_files.iter().filter(|(key, _)| *key != "VALLY_ACCOUNT_STATE_PATH").find(|(_, path)| **path == config.account_state_path) {
+        if let Some((key, _)) = other_files.iter().find(|(_, path)| Some(*path) == config.account_state_path.as_ref()) {
             return Err(ConfigError(format!("{key}가 계정 상태 파일(VALLY_ACCOUNT_STATE_PATH)과 같은 파일입니다")));
         }
         if let Some((key, _)) = other_files.iter().find(|(_, path)| **path == registered_ip_path) {
@@ -603,11 +604,22 @@ mod tests {
     }
 
     #[test]
+    fn local_only_mode_does_not_need_a_home_for_the_account_state_file() {
+        let no_home = || Err(ConfigError("HOME이 없다".into()));
+        let (c, _) = Config::from_vars(vars(&[]), vars(&[]), lock, token, key, no_home).unwrap();
+        assert_eq!(c.account_state_path, None);
+        let linked = vars(&[("VALLY_ACCOUNT_SERVER_URL", "https://account.example.com")]);
+        assert!(Config::from_vars(vars(&[]), linked.clone(), lock, token, key, no_home).is_err(), "계정 서버를 쓰면 상태 파일 경로가 필요하다");
+        let with_path = vars(&[("VALLY_ACCOUNT_SERVER_URL", "https://account.example.com"), ("VALLY_ACCOUNT_STATE_PATH", "/x/account.json")]);
+        assert!(Config::from_vars(vars(&[]), with_path, lock, token, key, no_home).is_ok());
+    }
+
+    #[test]
     fn the_account_state_path_defaults_under_xdg_state_and_cannot_be_another_file() {
         let (c, _) = Config::from_vars(vars(&[]), vars(&[("VALLY_ACCOUNT_STATE_PATH", "/x/account.json")]), lock, token, key, account).unwrap();
-        assert_eq!(c.account_state_path, PathBuf::from("/x/account.json"));
+        assert_eq!(c.account_state_path, Some(PathBuf::from("/x/account.json")));
         let (c, _) = Config::from_vars(vars(&[]), vars(&[]), lock, token, key, account).unwrap();
-        assert_eq!(c.account_state_path, PathBuf::from("/nonexistent/account.json"));
+        assert_eq!(c.account_state_path, Some(PathBuf::from("/nonexistent/account.json")));
         assert_eq!(state_file_path_from(Some("/s".into()), Some("/h".into()), "account.json", "K").unwrap(), PathBuf::from("/s/vallythevally/account.json"));
         assert_eq!(state_file_path_from(None, Some("/h".into()), "account.json", "K").unwrap(), PathBuf::from("/h/.local/state/vallythevally/account.json"));
         assert!(Config::from_vars(vars(&[]), vars(&[("VALLY_ACCOUNT_STATE_PATH", "/nonexistent/token.json")]), lock, token, key, account).is_err());
