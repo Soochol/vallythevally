@@ -24,6 +24,11 @@ const tabOf = (page: Page, id: string) => windowTabs(page).locator(`[role=tab][d
 const dotOf = (page: Page, id: string) => windowTabs(page).locator(`[role=tab][data-window-id="${id}"] + .link-dot`);
 const row = (page: Page, code: string) => page.getByRole("complementary", { name: "관심종목" }).locator(`li[data-code="${code}"] [data-main]`);
 const toast = (page: Page, text: string) => page.getByRole("status").filter({ hasText: text });
+async function boxOf(locator: Locator) {
+  const box = await locator.boundingBox();
+  if (!box) throw new Error("화면에 없는 요소의 자리를 찾았습니다");
+  return box;
+}
 const savedWindow = (scenario: Scenario, id: string) => scenario.documents.layout(DEFAULT_LAYOUT_ID).windows.find((w) => w.id === id);
 
 async function drawn(chartCell: Locator, label: RegExp) {
@@ -157,7 +162,13 @@ async function chooseLink(page: Page, dot: Locator, name: string) {
   await page.getByRole("menu", { name: "연동 색" }).getByRole("menuitemradio", { name: new RegExp(`^${name}`) }).click();
 }
 
-test("연동 색 점은 끔·A~J 메뉴를 열어 같은 색 창 수를 보이고, 고르면 바꾸고 Esc로 닫으면 초점이 점으로 돌아온다", async ({ page, scenario }) => {
+const LINKS = ["a", "b", "c", "d", "e", "f", "g", "h", "i", "j"] as const;
+
+const swatchMenu = (page: Page) => page.getByRole("menu", { name: "연동 색" });
+const swatchNamed = (page: Page, name: string) => swatchMenu(page).getByRole("menuitemradio", { name, exact: true });
+const swatchNote = (page: Page) => swatchMenu(page).locator(".link-swatch-note");
+
+test("연동 색 점은 끔·A~J 견본을 열어 같은 색 창 수를 이름에 보이고, 색과 지금 값을 표시한다", async ({ page, scenario }) => {
   linkedCharts(scenario);
   await ready(page);
   const dot = dotOf(page, "watchlist");
@@ -165,19 +176,133 @@ test("연동 색 점은 끔·A~J 메뉴를 열어 같은 색 창 수를 보이�
   await expect(dot).toHaveAttribute("aria-expanded", "false");
   await dot.click();
   await expect(dot).toHaveAttribute("aria-expanded", "true");
-  const menu = page.getByRole("menu", { name: "연동 색" });
-  await expect(menu.getByRole("menuitemradio")).toHaveText(["끔", "A창 2개", ...["B", "C", "D", "E", "F", "G", "H", "I", "J"].map((name) => `${name}없음`)]);
-  await expect(menu.getByRole("menuitemradio", { name: "끔" })).toHaveAttribute("aria-checked", "true");
+  const menu = swatchMenu(page);
+  await expect(menu).toHaveAttribute("aria-orientation", "horizontal");
+  await expect(menu.getByRole("menuitemradio")).toHaveCount(11);
+  const names = ["끔", "A · 창 2개", ...LINKS.slice(1).map((link) => `${link.toUpperCase()} · 없음`)];
+  for (const [index, name] of names.entries()) await expect(menu.getByRole("menuitemradio").nth(index)).toHaveAccessibleName(name);
+  await expect(menu.getByRole("menuitemradio", { checked: true })).toHaveAccessibleName("끔");
+
+  const fills = await page.evaluate((links) => {
+    const probe = document.createElement("div");
+    document.body.append(probe);
+    const expected = links.map((link) => { probe.style.background = `var(--link-${link})`; return getComputedStyle(probe).backgroundColor; });
+    probe.remove();
+    const swatches = [...document.querySelectorAll<HTMLElement>(".link-swatch")];
+    return { expected, off: swatches.slice(0, 1).map((swatch) => getComputedStyle(swatch).backgroundColor)[0], actual: swatches.slice(1).map((swatch) => getComputedStyle(swatch).backgroundColor) };
+  }, LINKS);
+  expect(fills.actual).toEqual(fills.expected);
+  expect(new Set(fills.actual).size).toBe(10);
+  expect(fills.off).toBe("rgba(0, 0, 0, 0)");
+  expect(await swatchNamed(page, "끔").evaluate((el) => getComputedStyle(el).boxShadow)).not.toBe("none");
+
+  const boxNamed = (name: string) => boxOf(swatchNamed(page, name));
+  const [off, a, e, f, jj] = [await boxNamed("끔"), await boxNamed("A · 창 2개"), await boxNamed("E · 없음"), await boxNamed("F · 없음"), await boxNamed("J · 없음")];
+  expect(off.x).toBeLessThan(a.x);
+  expect(e.y).toBe(a.y);
+  expect(f.y).toBeGreaterThan(a.y);
+  expect(f.x).toBe(a.x);
+  expect(jj.x).toBe(e.x);
+  expect(a.width).toBe(28);
+});
+
+test("견본 키보드: 열면 지금 값에 초점, 화살표·Home·End·글자로 초점만 옮기고 Enter로 고르면 점으로 돌아오며 Esc는 바꾸지 않는다", async ({ page, scenario }) => {
+  linkedCharts(scenario);
+  await ready(page);
+  const dot = dotOf(page, "cell-0");
+  const menu = swatchMenu(page);
+  await expect(dot).toHaveAccessibleName("연동 색: A");
+  await dot.focus();
+  await page.keyboard.press("Enter");
+  await expect(swatchNamed(page, "A · 창 1개")).toBeFocused();
+  await expect(swatchNamed(page, "A · 창 1개")).toHaveAttribute("aria-checked", "true");
+  await page.keyboard.press("ArrowRight");
+  await expect(swatchNamed(page, "B · 없음")).toBeFocused();
+  await page.keyboard.press("ArrowDown");
+  await expect(swatchNamed(page, "G · 없음")).toBeFocused();
+  await page.keyboard.press("ArrowUp");
+  await expect(swatchNamed(page, "B · 없음")).toBeFocused();
+  await page.keyboard.press("End");
+  await expect(swatchNamed(page, "J · 없음")).toBeFocused();
+  await page.keyboard.press("ArrowRight");
+  await expect(swatchNamed(page, "J · 없음")).toBeFocused();
+  await page.keyboard.press("Home");
+  await expect(swatchNamed(page, "끔")).toBeFocused();
+  await page.keyboard.press("ArrowDown");
+  await expect(swatchNamed(page, "끔")).toBeFocused();
+  await page.keyboard.press("D");
+  await expect(swatchNamed(page, "D · 없음")).toBeFocused();
+  await expect(swatchNote(page)).toHaveText("D · 아직 이 색을 쓰는 창이 없습니다");
+  await expect(dot).toHaveAccessibleName("연동 색: A");
+
   await page.keyboard.press("Escape");
   await expect(menu).toHaveCount(0);
   await expect(dot).toBeFocused();
-  await expect(dot).toHaveAccessibleName("연동 색: 끔");
+  await expect(dot).toHaveAccessibleName("연동 색: A");
+  expect(savedWindow(scenario, "cell-0")?.link).toBe("a");
 
-  await chooseLink(page, dot, "A");
-  await expect(dot).toHaveAccessibleName("연동 색: A");
-  await dot.click();
-  await expect(menu.getByRole("menuitemradio", { name: /^A/ })).toHaveAttribute("aria-checked", "true");
-  await menu.getByRole("menuitemradio", { name: /^A/ }).click();
-  await expect(dot).toHaveAccessibleName("연동 색: A");
+  await page.keyboard.press("Space");
+  await page.keyboard.press("d");
+  await page.keyboard.press("Enter");
+  await expect(menu).toHaveCount(0);
   await expect(dot).toBeFocused();
+  await expect(dot).toHaveAccessibleName("연동 색: D");
+  await expect.poll(() => savedWindow(scenario, "cell-0")?.link).toBe("d");
+
+  await page.keyboard.press("Enter");
+  await expect(swatchNamed(page, "D · 없음")).toBeFocused();
+  await page.keyboard.press("Tab");
+  await expect(menu).toHaveCount(0);
+});
+
+test("가리킨 견본의 설명 줄이 바뀌고 팝오버 폭은 그대로다", async ({ page, scenario }) => {
+  linkedCharts(scenario);
+  await ready(page);
+  const dot = dotOf(page, "watchlist");
+  await dot.click();
+  const menu = swatchMenu(page);
+  await expect(swatchNote(page)).toHaveText("끔 · 이 창만 따로 봅니다");
+  const width = (await boxOf(menu)).width;
+  await swatchNamed(page, "A · 창 2개").hover();
+  await expect(swatchNote(page)).toHaveText("A · 창 2개와 종목을 맞춥니다");
+  await swatchNamed(page, "J · 없음").hover();
+  await expect(swatchNote(page)).toHaveText("J · 아직 이 색을 쓰는 창이 없습니다");
+  expect((await boxOf(menu)).width).toBe(width);
+  await swatchNamed(page, "끔").hover();
+  await expect(swatchNote(page)).toHaveText("끔 · 이 창만 따로 봅니다");
+  expect((await boxOf(menu)).width).toBe(width);
+});
+
+for (const id of ["watchlist", "cell-0"]) {
+  test(`도킹 탭 ${id}: 점에 포인터를 올리거나 견본이 열려 있거나 Esc로 닫아도 점과 닫기 버튼이 제자리에 있다`, async ({ page, scenario }) => {
+    linkedCharts(scenario);
+    await ready(page);
+    const dot = dotOf(page, id);
+    const close = windowTabs(page).locator(`.dock-tab-group:has([data-window-id="${id}"]) .dock-tab-close`);
+    const placed = async () => ({ dot: await boxOf(dot), close: await boxOf(close) });
+    const before = await placed();
+    await dot.hover();
+    expect(await placed()).toEqual(before);
+    await dot.click();
+    await expect(swatchMenu(page)).toBeVisible();
+    expect(await placed()).toEqual(before);
+    await page.keyboard.press("Escape");
+    await expect(swatchMenu(page)).toHaveCount(0);
+    expect(await placed()).toEqual(before);
+  });
+}
+
+test("가장 좁은 데스크톱 폭 768px에서도 견본 팝오버가 화면 안에 든다", async ({ page, scenario }) => {
+  linkedCharts(scenario);
+  await page.setViewportSize({ width: 768, height: 740 });
+  await page.goto("/");
+  const dot = dotOf(page, "watchlist");
+  await dot.click();
+  const menu = swatchMenu(page);
+  await expect(menu).toBeVisible();
+  const box = await boxOf(menu);
+  expect(box.x).toBeGreaterThanOrEqual(0);
+  expect(box.x + box.width).toBeLessThanOrEqual(768);
+  expect(box.y).toBeGreaterThanOrEqual(0);
+  expect(box.y + box.height).toBeLessThanOrEqual(740);
 });
