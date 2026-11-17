@@ -31,6 +31,7 @@ test("위 막대 가운데 검색창은 지금 종목을 보이며 눌러도 / �
   await page.keyboard.press("/");
   await expect(page.getByRole("dialog", { name: "종목 검색", exact: true })).toBeVisible();
   await page.keyboard.press("Escape");
+  await page.mouse.move(700, 450);
   await page.getByTitle(SEARCH_BUTTON_TITLE).click();
   await expect(page.getByRole("dialog", { name: "종목 검색", exact: true })).toBeVisible();
   await page.keyboard.press("Escape");

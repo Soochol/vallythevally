@@ -100,9 +100,9 @@ test("열린 채 창이 좁아져도 초점이 창 안에 남고 내용 칸에 �
 });
 
 test("위 막대는 좁은 데스크톱 폭에서도 가로로 스크롤되지 않는다", async ({ page }) => {
+  await openDesktop(page);
   for (const width of [768, 770, 775, 800, 831, 832, 833, 836, 840, 841, 859, 860, 863, 864, 895, 896, 1024, 1025, 1028, 1031, 1055, 1056, 1279, 1280, 1281, 1360]) {
     await page.setViewportSize({ width, height: 700 });
-    await openDesktop(page);
     await expect(page.getByRole("button", { name: "시스템 설정", exact: true })).toBeVisible();
     const bar = page.getByRole("toolbar", { name: "차트 도구 막대" });
     expect(await bar.evaluate((el) => el.scrollWidth - el.clientWidth), `${width}px`).toBe(0);
