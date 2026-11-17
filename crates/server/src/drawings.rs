@@ -16,7 +16,7 @@ use crate::db::AppDb;
 use crate::drawing_api::{Drawing, DrawingInput, DrawingScope};
 use crate::http::{ApiFailure, AppState};
 use crate::user_routes::{parse_symbol, read_json};
-use setup::JSON_LIMIT;
+use setup::{DocumentKind, JSON_LIMIT};
 use crate::userdata::{StoreError, check_newer, corrupt, from_wire_name, wire_name};
 
 const GROUP_CHARS: std::ops::RangeInclusive<usize> = 1..=100;
@@ -87,8 +87,8 @@ pub async fn list_drawings_of(db: &AppDb, symbol: &str) -> Result<Vec<Drawing>, 
     rows.iter().map(read_drawing).collect()
 }
 
-pub async fn list_all_drawings(db: &AppDb) -> Result<Vec<Drawing>, StoreError> {
-    let rows = sqlx::query("SELECT * FROM drawings ORDER BY id").fetch_all(db.read()).await?;
+pub(crate) async fn list_all_drawings_in(conn: &mut SqliteConnection) -> Result<Vec<Drawing>, StoreError> {
+    let rows = sqlx::query("SELECT * FROM drawings ORDER BY id").fetch_all(conn).await?;
     rows.iter().map(read_drawing).collect()
 }
 
@@ -162,6 +162,9 @@ pub async fn delete_drawing_by_id(db: &AppDb, id: &str) -> Result<(), StoreError
 }
 
 pub(crate) fn check_drawing(path_id: &str, d: &DrawingInput) -> Result<(), ApiFailure> {
+    if !DocumentKind::Drawing.accepts_id(path_id) {
+        return Err(ApiFailure::bad_request(format!("드로잉 id는 영문자·숫자·`-`·`_`로 1~64바이트여야 합니다: {path_id}")));
+    }
     if d.id != path_id {
         return Err(ApiFailure::bad_request(format!("주소의 id({path_id})와 본문의 id({})가 다릅니다", d.id)));
     }

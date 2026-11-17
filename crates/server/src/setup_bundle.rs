@@ -49,15 +49,17 @@ fn json_of(value: &impl Serialize) -> Value {
 
 impl Setup {
     async fn read(db: &AppDb) -> Result<Setup, StoreError> {
-        let watchlists = userdata::get_watchlists(db).await?;
-        let screens = userdata::get_screens(db).await?;
-        let ui_state = userdata::get_ui_state(db).await?;
+        let mut tx = db.read().begin().await?;
+        let watchlists = userdata::get_watchlists_in(&mut tx).await?;
+        let screens = userdata::get_screens_in(&mut tx).await?;
+        let ui_state = userdata::get_ui_state_in(&mut tx).await?;
         let ui_state_revision = Revision(ui_state.0.get("revision").and_then(Value::as_i64).expect("저장된 화면 상태에는 revision이 있다"));
         let mut layouts = Vec::new();
-        for summary in userdata::list_layouts(db).await? {
-            layouts.push(userdata::get_layout(db, &summary.id).await?);
+        for summary in userdata::list_layouts_in(&mut tx).await? {
+            layouts.push(userdata::get_layout_in(&mut tx, &summary.id).await?);
         }
-        Ok(Setup { watchlists, screens, ui_state, ui_state_revision, layouts, drawings: drawings::list_all_drawings(db).await? })
+        let drawings = drawings::list_all_drawings_in(&mut tx).await?;
+        Ok(Setup { watchlists, screens, ui_state, ui_state_revision, layouts, drawings })
     }
 
     fn into_bundle(self) -> Bundle {

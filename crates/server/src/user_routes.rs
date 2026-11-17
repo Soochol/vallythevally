@@ -10,7 +10,7 @@ use axum::response::Json;
 use axum::routing::get;
 use domain::{Feed, Symbol, Venue};
 use serde::de::DeserializeOwned;
-use setup::{JSON_LIMIT, LAYOUT_LIMIT, MAX_CHART_WINDOWS, MAX_WATCHLIST_ID_BYTES, MAX_WATCHLIST_NAME_CHARS, MAX_WATCHLISTS, MAX_WATCH_GROUPS, SCREENS_LIMIT, WATCHLISTS_LIMIT};
+use setup::{DocumentKind, JSON_LIMIT, LAYOUT_LIMIT, MAX_CHART_WINDOWS, MAX_WATCHLIST_ID_BYTES, MAX_WATCHLIST_NAME_CHARS, MAX_WATCHLISTS, MAX_WATCH_GROUPS, SCREENS_LIMIT, WATCHLISTS_LIMIT};
 
 use crate::api::{self, ApiErrorCode, Layout, LayoutInput, LayoutSummary, Revision, Screen, Screens, UiState, UnixSeconds, Watchlist, Watchlists, WindowContent};
 use crate::http::{ApiFailure, AppState, symbol_list};
@@ -227,6 +227,9 @@ pub(crate) fn check_layout_input(path_id: &str, input: &LayoutInput) -> Result<V
 }
 
 fn check_layout(path_id: &str, input: &LayoutInput) -> Result<Vec<Symbol>, ApiFailure> {
+    if !DocumentKind::Layout.accepts_id(path_id) {
+        return Err(ApiFailure::bad_request(format!("레이아웃 id는 영문자·숫자·`-`·`_`로 1~64바이트여야 합니다: {path_id}")));
+    }
     if input.id != path_id {
         return Err(ApiFailure::bad_request(format!("주소의 id({path_id})와 본문의 id({})가 다릅니다", input.id)));
     }

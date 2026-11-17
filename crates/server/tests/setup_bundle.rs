@@ -271,3 +271,69 @@ async fn an_import_from_another_host_origin_or_content_type_is_refused_and_leave
     assert_eq!(into.import(&bundle).await.0, 200, "같은 요청이 Host·Origin·Content-Type이 맞으면 받는다");
     assert_eq!(into.get("/api/setup/export").await.0, 200, "읽기에는 이 검사를 걸지 않는다");
 }
+
+#[tokio::test]
+async fn an_id_the_format_refuses_is_refused_at_save_so_every_saved_setup_exports() {
+    let machine = machine().await;
+    fill(&machine).await;
+    let charts = json!([{"id": "cell-0", "link": null, "kind": "chart", "symbol": "IDX:001", "venue": null, "period": "D", "chartSettings": {"v": 1}}]);
+    for id in ["a.b", "a b", "내 레이아웃", &"a".repeat(65)] {
+        let path = format!("/api/layouts/{}", id.replace(' ', "%20"));
+        assert_eq!(machine.put(&path, &layout(id, "새것", 9_000_000_000_000, charts.clone())).await.0, 400, "{id}");
+        let path = format!("/api/drawings/{}", id.replace(' ', "%20"));
+        assert_eq!(machine.put(&path, &drawing(id, "005930", json!({"kind": "symbol"}), 9_000_000_000_000)).await.0, 400, "{id}");
+    }
+    assert_eq!(machine.get("/api/setup/export").await.0, 200);
+}
+
+#[tokio::test]
+async fn a_drawing_saved_at_the_route_body_limit_still_exports_and_imports() {
+    let (from, into) = (machine().await, machine().await);
+    fill(&from).await;
+    let mut full = drawing("BIG", "005930", json!({"kind": "symbol"}), 9_000_000_000_000);
+    full["style"] = json!({"pad": ""});
+    let room = JSON_LIMIT - full.to_string().len();
+    full["style"] = json!({"pad": "x".repeat(room)});
+    assert_eq!(full.to_string().len(), JSON_LIMIT);
+    from.saved("/api/drawings/BIG", &full).await;
+    let bundle = from.export().await;
+    assert_eq!(into.import(&bundle).await.0, 200);
+    assert_eq!(into.snapshot().await, from.snapshot().await);
+}
+
+#[tokio::test]
+async fn an_export_made_while_layouts_and_drawings_change_is_one_consistent_snapshot() {
+    let machine = machine().await;
+    fill(&machine).await;
+    let charts = json!([{"id": "cell-0", "link": null, "kind": "chart", "symbol": "IDX:001", "venue": null, "period": "D", "chartSettings": {"v": 1}}]);
+    let churn = async {
+        for n in 0..25_i64 {
+            let (layout_id, drawing_id) = (format!("R{n}"), format!("RD{n}"));
+            machine.saved(&format!("/api/layouts/{layout_id}"), &layout(&layout_id, &format!("임시 {n}"), 9_000_000_000_000 + n, charts.clone())).await;
+            machine.saved(&format!("/api/drawings/{drawing_id}"), &drawing(&drawing_id, "005930", json!({"kind": "layout", "layoutId": layout_id}), 9_000_000_000_000 + n)).await;
+            if n > 0 {
+                let previous = n - 1;
+                assert_eq!(machine.write(reqwest::Method::DELETE, &format!("/api/drawings/RD{previous}"), &json!({})).send().await.unwrap().status(), 204);
+                assert_eq!(machine.write(reqwest::Method::DELETE, &format!("/api/layouts/R{previous}"), &json!({})).send().await.unwrap().status(), 204);
+            }
+        }
+    };
+    let exports = async {
+        let mut bundles = Vec::new();
+        for _ in 0..40 {
+            let (status, bundle) = machine.get("/api/setup/export").await;
+            assert_eq!(status, 200, "{bundle}");
+            bundles.push(bundle);
+        }
+        bundles
+    };
+    let ((), bundles) = tokio::join!(churn, exports);
+    for bundle in bundles {
+        let layouts: std::collections::BTreeSet<String> = documents_of(&bundle, "layout").iter().map(|d| d["id"].as_str().unwrap().to_owned()).collect();
+        for drawing in documents_of(&bundle, "drawing") {
+            if let Some(layout_id) = drawing["body"]["scope"]["layoutId"].as_str() {
+                assert!(layouts.contains(layout_id), "묶음 안의 드로잉이 묶음에 없는 레이아웃을 가리킨다: {layout_id}");
+            }
+        }
+    }
+}

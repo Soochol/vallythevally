@@ -44,6 +44,10 @@ pub(crate) fn check_newer(stored: Option<i64>, sent: Revision) -> Result<(), Sto
 
 pub async fn get_watchlists(db: &AppDb) -> Result<Watchlists, StoreError> {
     let mut tx = db.read().begin().await?;
+    get_watchlists_in(&mut tx).await
+}
+
+pub(crate) async fn get_watchlists_in(tx: &mut SqliteConnection) -> Result<Watchlists, StoreError> {
     let mut lists: Vec<Watchlist> = sqlx::query("SELECT id, name FROM watchlists ORDER BY position")
         .fetch_all(&mut *tx)
         .await?
@@ -126,7 +130,11 @@ pub(crate) async fn store_watchlists(tx: &mut SqliteConnection, all: &Watchlists
 }
 
 pub async fn get_screens(db: &AppDb) -> Result<Screens, StoreError> {
-    let row = sqlx::query("SELECT list, revision FROM screens WHERE singleton = 1").fetch_one(db.read()).await?;
+    get_screens_in(&mut *db.read().acquire().await?).await
+}
+
+pub(crate) async fn get_screens_in(conn: &mut SqliteConnection) -> Result<Screens, StoreError> {
+    let row = sqlx::query("SELECT list, revision FROM screens WHERE singleton = 1").fetch_one(conn).await?;
     let screens = serde_json::from_str(row.get("list")).map_err(|e| corrupt("screens", e))?;
     Ok(Screens { screens, revision: Revision(row.get("revision")) })
 }
@@ -147,7 +155,11 @@ pub(crate) async fn store_screens(tx: &mut SqliteConnection, all: &Screens) -> R
 }
 
 pub async fn list_layouts(db: &AppDb) -> Result<Vec<LayoutSummary>, StoreError> {
-    let rows = sqlx::query("SELECT id, name, updated_at FROM layouts ORDER BY position, rowid").fetch_all(db.read()).await?;
+    list_layouts_in(&mut *db.read().acquire().await?).await
+}
+
+pub(crate) async fn list_layouts_in(conn: &mut SqliteConnection) -> Result<Vec<LayoutSummary>, StoreError> {
+    let rows = sqlx::query("SELECT id, name, updated_at FROM layouts ORDER BY position, rowid").fetch_all(conn).await?;
     Ok(rows.into_iter().map(|r| LayoutSummary { id: r.get("id"), name: r.get("name"), updated_at: UnixSeconds(r.get("updated_at")) }).collect())
 }
 
@@ -176,6 +188,10 @@ fn read_window(r: &SqliteRow) -> Result<LayoutWindow, StoreError> {
 
 pub async fn get_layout(db: &AppDb, id: &str) -> Result<Layout, StoreError> {
     let mut tx = db.read().begin().await?;
+    get_layout_in(&mut tx, id).await
+}
+
+pub(crate) async fn get_layout_in(tx: &mut SqliteConnection, id: &str) -> Result<Layout, StoreError> {
     let row = sqlx::query("SELECT name, sync, placement, updated_at, revision FROM layouts WHERE id = ?")
         .bind(id)
         .fetch_optional(&mut *tx)
@@ -303,7 +319,11 @@ pub async fn delete_layout(db: &AppDb, id: &str) -> Result<(), StoreError> {
 }
 
 pub async fn get_ui_state(db: &AppDb) -> Result<UiState, StoreError> {
-    let row = sqlx::query("SELECT state, revision FROM ui_state WHERE singleton = 1").fetch_one(db.read()).await?;
+    get_ui_state_in(&mut *db.read().acquire().await?).await
+}
+
+pub(crate) async fn get_ui_state_in(conn: &mut SqliteConnection) -> Result<UiState, StoreError> {
+    let row = sqlx::query("SELECT state, revision FROM ui_state WHERE singleton = 1").fetch_one(conn).await?;
     let mut state: UiState = serde_json::from_str(row.get("state")).map_err(|e| corrupt("ui_state", e))?;
     state.0.insert("revision".into(), row.get::<i64, _>("revision").into());
     Ok(state)

@@ -8,6 +8,7 @@ pub const FORMAT_VERSION: u32 = 1;
 pub const SINGLETON_ID: &str = "main";
 pub const DOCUMENT_ID_BYTES: std::ops::RangeInclusive<usize> = 1..=64;
 
+pub const SERVER_FIELDS_ALLOWANCE: usize = 64;
 pub const ACCOUNT_LIMIT: usize = 32 * 1024 * 1024;
 pub const BUNDLE_LIMIT: usize = 2 * ACCOUNT_LIMIT;
 
@@ -51,6 +52,17 @@ impl DocumentKind {
 
     pub const fn is_singleton(self) -> bool {
         matches!(self, DocumentKind::Watchlists | DocumentKind::Screens | DocumentKind::UiState)
+    }
+
+    pub fn accepts_id(self, id: &str) -> bool {
+        if self.is_singleton() {
+            return id == SINGLETON_ID;
+        }
+        DOCUMENT_ID_BYTES.contains(&id.len()) && id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
+    }
+
+    pub const fn document_limit(self) -> usize {
+        self.body_limit() + SERVER_FIELDS_ALLOWANCE
     }
 
     pub const fn body_limit(self) -> usize {
@@ -122,7 +134,7 @@ impl fmt::Display for ShapeError {
             ShapeError::NegativeRevision { revision, .. } => write!(f, "revision은 0 이상이어야 합니다: {revision}"),
             ShapeError::DeletedWithBody { .. } => f.write_str("삭제 문서에는 본문이 없어야 합니다"),
             ShapeError::LiveWithoutBody { .. } => f.write_str("삭제가 아닌 문서에는 본문이 있어야 합니다"),
-            ShapeError::BodyTooLarge { kind, size, .. } => write!(f, "본문이 {}KB를 넘습니다: {}KB", kind.body_limit() / 1024, size / 1024),
+            ShapeError::BodyTooLarge { kind, size, .. } => write!(f, "본문이 {}바이트를 넘습니다: {size}바이트", kind.document_limit()),
             ShapeError::AccountTooLarge { size } => write!(f, "계정 전체 본문이 {}MB를 넘습니다: {}MB", ACCOUNT_LIMIT / (1024 * 1024), size / (1024 * 1024)),
         }
     }
@@ -130,18 +142,11 @@ impl fmt::Display for ShapeError {
 
 impl std::error::Error for ShapeError {}
 
-fn id_fits(kind: DocumentKind, id: &str) -> bool {
-    if kind.is_singleton() {
-        return id == SINGLETON_ID;
-    }
-    DOCUMENT_ID_BYTES.contains(&id.len()) && id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
-}
-
 impl Document {
     pub fn check(&self) -> Result<usize, ShapeError> {
         let Document { kind, id, revision, deleted, body } = self;
         let (kind, id) = (*kind, id.clone());
-        if !id_fits(kind, &id) {
+        if !kind.accepts_id(&id) {
             return Err(ShapeError::Id { kind, id });
         }
         if *revision < 0 {
@@ -153,7 +158,7 @@ impl Document {
             (false, None) => Err(ShapeError::LiveWithoutBody { kind, id }),
             (false, Some(body)) => {
                 let size = body.to_string().len();
-                if size > kind.body_limit() { Err(ShapeError::BodyTooLarge { kind, id, size }) } else { Ok(size) }
+                if size > kind.document_limit() { Err(ShapeError::BodyTooLarge { kind, id, size }) } else { Ok(size) }
             }
         }
     }
@@ -256,10 +261,17 @@ mod tests {
     fn each_kind_stops_at_its_body_limit_exactly() {
         for kind in DocumentKind::ALL {
             let id = if kind.is_singleton() { SINGLETON_ID } else { "X" };
-            let limit = kind.body_limit();
+            let limit = kind.document_limit();
             assert_eq!(live(kind, id, padded(limit)).check(), Ok(limit), "{kind:?}");
             assert!(matches!(live(kind, id, padded(limit + 1)).check(), Err(ShapeError::BodyTooLarge { size, .. }) if size == limit + 1), "{kind:?}");
         }
+    }
+
+    #[test]
+    fn a_body_the_route_took_still_fits_after_the_server_fields_change() {
+        let route_body = padded(DocumentKind::Drawing.body_limit());
+        let stored = json!({"pad": route_body["pad"], "updatedAt": 1_794_152_040_i64});
+        assert!(live(DocumentKind::Drawing, "D1", stored).check().is_ok());
     }
 
     #[test]
@@ -274,9 +286,9 @@ mod tests {
     fn the_bundle_stops_at_the_account_limit_and_at_a_repeated_document() {
         let full = |count: usize| Bundle {
             version: FORMAT_VERSION,
-            documents: (0..count).map(|n| live(DocumentKind::Layout, &format!("L{n}"), padded(DocumentKind::Layout.body_limit()))).collect(),
+            documents: (0..count).map(|n| live(DocumentKind::Layout, &format!("L{n}"), padded(DocumentKind::Layout.document_limit()))).collect(),
         };
-        let fits = ACCOUNT_LIMIT / DocumentKind::Layout.body_limit();
+        let fits = ACCOUNT_LIMIT / DocumentKind::Layout.document_limit();
         assert_eq!(full(fits).check(), Ok(()));
         assert!(matches!(full(fits + 1).check(), Err(ShapeError::AccountTooLarge { .. })));
 
