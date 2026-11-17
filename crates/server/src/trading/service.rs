@@ -12,7 +12,7 @@ use super::switch::{SwitchRecord, SwitchStore};
 use crate::api::{self, OrderSide};
 use crate::clock::Clock;
 use crate::config::Secret;
-use crate::kiwoom::rest::{Admission, ContKey, KiwoomError, KiwoomRest, MergeScope, Page, Priority};
+use crate::kiwoom::rest::{Admission, ContKey, Dispatch, KiwoomError, KiwoomRest, MergeScope, Page, Priority};
 use crate::kiwoom::stream::{AccountEvent, AccountFeed};
 
 const VERIFY_TTL_SECS: i64 = 60;
@@ -168,7 +168,7 @@ impl Trading {
         let body = serde_json::to_string(req).expect("요청 타입은 언제나 직렬화된다");
         let open = self.open.clone();
         let admit: Option<Admission> = guarded.then(|| Arc::new(move || open.load(Ordering::SeqCst)) as Admission);
-        match self.rest.call_endpoint(R::API_ID.into(), body, |_| true, cont, Priority::Screen, MergeScope::default(), admit).await {
+        match self.rest.call_endpoint(Dispatch { endpoint: R::API_ID.into(), body, cont, priority: Priority::Screen, scope: MergeScope::default(), admit }, |_| true).await {
             Ok(page) => Ok(page),
             Err(e) if guarded => Err(self.enabled_record().err().unwrap_or(TradingError::Kiwoom(e))),
             Err(e) => Err(TradingError::Kiwoom(e)),

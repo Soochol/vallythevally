@@ -189,6 +189,15 @@ enum JobState {
 
 pub(crate) type Admission = Arc<dyn Fn() -> bool + Send + Sync>;
 
+pub(crate) struct Dispatch<'a> {
+    pub endpoint: Endpoint,
+    pub body: String,
+    pub cont: Option<&'a ContKey>,
+    pub priority: Priority,
+    pub scope: MergeScope,
+    pub admit: Option<Admission>,
+}
+
 struct Job {
     admit: Option<Admission>,
     key: DedupeKey,
@@ -399,19 +408,11 @@ impl KiwoomRest {
         scope: MergeScope,
     ) -> Result<Page<R::Response>, KiwoomError> {
         let body = serde_json::to_string(req).expect("요청 타입은 언제나 직렬화된다");
-        self.call_endpoint(R::API_ID.into(), body, |response| req.answers(response), cont, priority, scope, None).await
+        self.call_endpoint(Dispatch { endpoint: R::API_ID.into(), body, cont, priority, scope, admit: None }, |response| req.answers(response)).await
     }
 
-    pub(crate) async fn call_endpoint<T: serde::de::DeserializeOwned>(
-        &self,
-        endpoint: Endpoint,
-        body: String,
-        answers: impl FnOnce(&T) -> bool,
-        cont: Option<&ContKey>,
-        priority: Priority,
-        scope: MergeScope,
-        admit: Option<Admission>,
-    ) -> Result<Page<T>, KiwoomError> {
+    pub(crate) async fn call_endpoint<T: serde::de::DeserializeOwned>(&self, call: Dispatch<'_>, answers: impl FnOnce(&T) -> bool) -> Result<Page<T>, KiwoomError> {
+        let Dispatch { endpoint, body, cont, priority, scope, admit } = call;
         let key = DedupeKey { scope, api_id: endpoint, body, cont: cont.cloned() };
         let rx = self.0.enqueue(key, priority, admit);
         let raw = rx.await.unwrap_or_else(|_| Err(queue_gone(endpoint)))?;
