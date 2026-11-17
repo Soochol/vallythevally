@@ -36,13 +36,13 @@ frozen 의존성 설치, WASM 준비와 타입 검사, 현재 UI의 Vite 빌드�
 
 시험은 `harness.ts`의 `test`와 `scenario`를 사용한다. `scenario.documents`는 시험 안의 탭·추가 문맥에서 공유하고 다음 시험에서 새로 만든다. `scenario.reply/on/hold`와 실시간 프레임으로 화면 입력을 명시한다. 자료 수집·계산·재시도·재시작 영속성은 실제 Rust 서비스 시험이 담당한다. [책임 이동 기록](testing-migration.md)을 확인한다.
 
-전체 e2e는 chute의 머지 뒤 검사(`chute.toml`의 `[[post_verify]] e2e`)가 기본 브랜치의 tip에서 돌린다. `post_verify_interval = 180`은 앞 검사를 시작한 때부터 세는 최소 간격(분)이다. tip이 마지막 통과·실패 커밋과 다를 때만 돌고 사이 커밋을 하나씩 검사하지 않는다. 진짜 실패하면 범인 머지를 찾아 그 PR을 submit한 쪽에 알린다. 그 사이에 직접 돌릴 때는 저장소 루트에서 다음 명령을 쓴다.
+전체 e2e는 chute의 머지 뒤 검사(`chute.toml`의 `[[post_verify]] e2e`)가 기본 브랜치의 tip에서 돌린다. 간격을 두지 않으므로(`post_verify_interval = 0`) 기본 브랜치가 움직이면 앞 검사가 끝나는 대로 그때의 tip을 검사한다. tip이 마지막 통과·실패 커밋과 다를 때만 돌고 사이 커밋을 하나씩 검사하지 않는다. 진짜 실패하면 범인 머지를 찾아 그 PR을 submit한 쪽에 알린다. 그 사이에 직접 돌릴 때는 저장소 루트에서 다음 명령을 쓴다.
 
 ```sh
 env VALLY_COMPILE_LANE=gate python3 scripts/web.py e2e --workers=6
 ```
 
-`web/`를 고치는 작업은 머지 뒤 검사가 몇 시간 늦게 돌기 때문에 관련 spec을 직접 돌려 통과를 확인한다. spec은 화면을 겉에서 시험하고 `../src/`에서는 생성된 API 타입, 차트 설정, 그리기 도우미를 주로 가져온다. 화면 컴포넌트를 거의 가져오지 않으므로 import를 따라가는 선택(Playwright `--only-changed`)은 컴포넌트 변경과 관련된 spec을 잡지 못한다. 다음에서 고른다.
+`web/`를 고치는 작업은 머지 뒤 검사는 머지된 뒤에야 돌기 때문에 관련 spec을 직접 돌려 통과를 확인한다. spec은 화면을 겉에서 시험하고 `../src/`에서는 생성된 API 타입, 차트 설정, 그리기 도우미를 주로 가져온다. 화면 컴포넌트를 거의 가져오지 않으므로 import를 따라가는 선택(Playwright `--only-changed`)은 컴포넌트 변경과 관련된 spec을 잡지 못한다. 다음에서 고른다.
 
 - 고친 spec 자체
 - 고친 기능 영역 이름의 spec(`drawing-*`, `financial-*`, `screener-*`, `chart-*`, `win-*`, `watchlist*` 등)

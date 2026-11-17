@@ -2,10 +2,12 @@
 
 use std::fmt;
 use std::path::Path;
+use std::sync::Arc;
 use std::time::Duration;
 
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePool, SqlitePoolOptions, SqliteSynchronous};
 use sqlx::{Sqlite, Transaction};
+use tokio::sync::watch;
 
 const READ_POOL: u32 = 4;
 const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
@@ -32,6 +34,7 @@ pub struct AppDb {
     read: SqlitePool,
     /// 쓰기 풀. 크기 1. 모든 쓰기가 이 연결 하나로 줄 선다.
     write: SqlitePool,
+    released: Arc<watch::Sender<u64>>,
 }
 
 impl AppDb {
@@ -48,10 +51,23 @@ impl AppDb {
             .foreign_keys(true)
             .busy_timeout(BUSY_TIMEOUT)
             .synchronous(SqliteSynchronous::Normal);
-        let write = SqlitePoolOptions::new().max_connections(1).connect_with(options.clone()).await?;
+        let released = Arc::new(watch::channel(0u64).0);
+        let on_release = released.clone();
+        let write = SqlitePoolOptions::new()
+            .max_connections(1)
+            .after_release(move |_, _| {
+                on_release.send_modify(|count| *count += 1);
+                Box::pin(async { Ok(true) })
+            })
+            .connect_with(options.clone())
+            .await?;
         sqlx::migrate!("./migrations").run(&write).await.map_err(|e| DbError(format!("마이그레이션 실패: {e}")))?;
         let read = SqlitePoolOptions::new().max_connections(READ_POOL).connect_with(options.read_only(true)).await?;
-        Ok(AppDb { read, write })
+        Ok(AppDb { read, write, released })
+    }
+
+    pub fn write_releases(&self) -> watch::Receiver<u64> {
+        self.released.subscribe()
     }
 
     pub fn read(&self) -> &SqlitePool {

@@ -1,0 +1,27 @@
+import { useAccountStore } from "../stores/account";
+import type { AccountConfirm } from "./generated/AccountConfirm";
+import type { AccountLoginRequest } from "./generated/AccountLoginRequest";
+import type { AccountLoginStart } from "./generated/AccountLoginStart";
+import type { AccountProvider } from "./generated/AccountProvider";
+import type { AccountStatus } from "./generated/AccountStatus";
+import { getJson, sendJson } from "./http";
+
+const ACCOUNT = "/api/account";
+
+export async function loadAccount(signal?: AbortSignal): Promise<void> {
+  const pushesAtRequest = useAccountStore.getState().pushes;
+  useAccountStore.getState().receiveSnapshot(await getJson<AccountStatus>(ACCOUNT, signal), pushesAtRequest);
+}
+
+async function applyStatus(run: () => Promise<AccountStatus>): Promise<void> {
+  const pushesAtRequest = useAccountStore.getState().pushes;
+  useAccountStore.getState().receiveSnapshot(await run(), pushesAtRequest);
+}
+
+const confirmed = (path: string) => applyStatus(() => sendJson<AccountStatus>("POST", path, JSON.stringify({ confirm: true } satisfies AccountConfirm)));
+
+export const startLogin = (provider: AccountProvider) =>
+  sendJson<AccountLoginStart>("POST", `${ACCOUNT}/login`, JSON.stringify({ provider } satisfies AccountLoginRequest));
+export const logout = () => applyStatus(() => sendJson<AccountStatus>("POST", `${ACCOUNT}/logout`, "{}"));
+export const deleteAccount = () => confirmed(`${ACCOUNT}/delete`);
+export const replaceLocalSetup = () => confirmed(`${ACCOUNT}/replace-local`);

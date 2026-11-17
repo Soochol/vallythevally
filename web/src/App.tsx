@@ -13,6 +13,9 @@ import { PhoneTabs } from "./features/phone/PhoneTabs";
 import { IndicatorCommand } from "./features/indicator-command/IndicatorCommand";
 import { ScreenDialog } from "./features/screen-dialog/ScreenDialog";
 import { PhoneScreener } from "./features/screener/ScreenerPanel";
+import { LoginScreen } from "./features/account/LoginScreen";
+import { ReplaceLocalScreen } from "./features/account/ReplaceLocalScreen";
+import { useAccountStore } from "./stores/account";
 import { SearchDialog } from "./features/search/SearchDialog";
 import { StatusBar } from "./features/status/StatusBar";
 import { Toast } from "./features/toast/Toast";
@@ -31,6 +34,9 @@ import type { WindowId } from "./layout/kinds";
 
 export function ChartRoute() {
   const restoring = usePersistStore((s) => s.phase.kind === "restoring");
+  const account = useAccountStore((s) => s.status);
+  if (account?.state === "signed_out") return <LoginScreen />;
+  if (account?.state === "owner_mismatch") return <ReplaceLocalScreen status={account} />;
   return restoring ? <div className="h-dvh bg-bg" aria-busy="true" aria-label="마지막 화면을 불러오는 중" /> : <ChartScreen />;
 }
 
@@ -44,6 +50,12 @@ function ChartScreen() {
   const status: CellStatus = phoneStatus?.cellId === cellId ? phoneStatus.status : { kind: "loading" };
 
   useHotkeys();
+  useEffect(() => {
+    const { loginFailure, showLoginFailure } = useAccountStore.getState();
+    if (loginFailure === null) return;
+    useSelectionStore.getState().showToast(loginFailure);
+    showLoginFailure(null);
+  }, []);
   useEffect(() => {
     const load = new AbortController();
     void loadKiwoomLink(load.signal);
