@@ -4,7 +4,10 @@ import type { AccountStatus } from "../../api/generated/AccountStatus";
 
 const LOGIN_MARKER = "vv.login-started";
 
+let startedInThisDocument = false;
+
 export function markLoginStarted(): void {
+  startedInThisDocument = true;
   try {
     sessionStorage.setItem(LOGIN_MARKER, "1");
   } catch {
@@ -47,7 +50,7 @@ export function useWizardOpening(status: AccountStatus | null): void {
   const state = status?.state;
   const choosing = needsChoice(status);
   useEffect(() => {
-    if (!status) return;
+    if (!status || startedInThisDocument) return;
     const marked = takeLoginMarker(status.state === "owner_mismatch");
     if (loginReturn(status, marked) === "open") show();
   }, [state]);
