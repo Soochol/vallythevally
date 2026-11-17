@@ -60,7 +60,10 @@ pub enum CrossCheck {
 }
 
 pub fn cross_check(judgment: &Judgment, index_candle_days: &[Day]) -> CrossCheck {
-    if index_candle_days.is_empty() {
+    let Some(earliest_candle) = index_candle_days.iter().min() else {
+        return CrossCheck::Undetermined;
+    };
+    if judgment.day < *earliest_candle {
         return CrossCheck::Undetermined;
     }
     let has_candle = index_candle_days.contains(&judgment.day);

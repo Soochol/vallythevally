@@ -135,12 +135,8 @@ impl Calendar {
             Finding::Unknown => return unknown("12월 31일이 쉬는 날인지 알 수 없다"),
             Finding::Closed => {
                 let mut closing_day = year_end.previous();
-                loop {
-                    match self.base_status(closing_day) {
-                        Finding::Closed => closing_day = closing_day.previous(),
-                        Finding::Unknown => return unknown("직전 관측일을 알 수 없다"),
-                        Finding::Open => break,
-                    }
+                while self.base_status(closing_day) != Finding::Open {
+                    closing_day = closing_day.previous();
                 }
                 if closing_day == day {
                     return (

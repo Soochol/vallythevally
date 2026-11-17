@@ -116,7 +116,8 @@ impl Overrides {
 fn parse_minute_of_day(time: &str) -> Result<u16, OverridesError> {
     let bad = || OverridesError::BadTime(time.to_owned());
     let (hour, minute) = time.split_once(':').ok_or_else(bad)?;
-    if hour.len() != 2 || minute.len() != 2 {
+    let two_digits = |text: &str| text.len() == 2 && text.bytes().all(|byte| byte.is_ascii_digit());
+    if !two_digits(hour) || !two_digits(minute) {
         return Err(bad());
     }
     let hour: u16 = hour.parse().map_err(|_| bad())?;
@@ -158,6 +159,9 @@ mod tests {
             r#"{"version":1,"days":[{"kind":"closed","date":20261301,"reason":"x"}]}"#,
             r#"{"version":1,"days":[{"kind":"open_at","date":20261119,"time":"25:00","reason":"x"}]}"#,
             r#"{"version":1,"days":[{"kind":"open_at","date":20261119,"time":"9:00","reason":"x"}]}"#,
+            r#"{"version":1,"days":[{"kind":"open_at","date":20261119,"time":"09:75","reason":"x"}]}"#,
+            r#"{"version":1,"days":[{"kind":"open_at","date":20261119,"time":"+9:00","reason":"x"}]}"#,
+            r#"{"version":1,"days":[{"kind":"open_at","date":20261119,"time":"09:+5","reason":"x"}]}"#,
             r#"{"version":1,"days":[{"kind":"closed","date":20261119,"reason":"x","extra":1}]}"#,
             r#"{"version":1,"days":[{"kind":"holiday","date":20261119,"reason":"x"}]}"#,
             r#"{"version":1,"days":[

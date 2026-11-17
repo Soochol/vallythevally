@@ -189,6 +189,7 @@ fn read_cache(path: &Path, year: u16) -> Option<CachedHolidays> {
     let valid = |data: &CachedHolidays| {
         data.version == CACHE_VERSION
             && data.year == year
+            && !data.holidays.is_empty()
             && data.holidays.iter().all(|holiday| holiday.date.year() == year)
     };
     match serde_json::from_str::<CachedHolidays>(&text) {
@@ -229,7 +230,7 @@ pub fn parse_holiday_response(year: u16, body: &str) -> Result<Vec<Holiday>, Bad
         },
         None => return Err(BadResponse::UnexpectedShape),
     };
-    if let Some(total) = body.get("totalCount").and_then(Value::as_u64)
+    if let Some(total) = body.get("totalCount").and_then(text_of).and_then(|text| text.parse::<u64>().ok())
         && total > items.len() as u64
     {
         return Err(BadResponse::Truncated);
@@ -331,6 +332,13 @@ mod tests {
         assert_eq!(parse_holiday_response(2026, &response(&single, 1)).unwrap().len(), 1);
         let non_holiday = format!(r#"{{"item":[{},{}]}}"#, item(20260301, "삼일절", "Y"), item(20260302, "기념일", "N"));
         assert_eq!(parse_holiday_response(2026, &response(&non_holiday, 2)).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn total_count_written_as_text_still_detects_truncation() {
+        let one = format!(r#"{{"item":[{}]}}"#, item(20260101, "1월1일", "Y"));
+        let body = response(&one, 8).replace(r#""totalCount":8"#, r#""totalCount":"8""#);
+        assert_eq!(parse_holiday_response(2026, &body), Err(BadResponse::Truncated));
     }
 
     #[test]

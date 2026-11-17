@@ -376,6 +376,7 @@ async fn cross_check_compares_the_judgment_with_index_candles() {
         CrossCheck::Disagrees { mismatch: Mismatch::ClosedWithIndexCandle }
     );
     assert_eq!(cross_check(&open_day, &[]), CrossCheck::Undetermined);
+    assert_eq!(cross_check(&open_day, &[day(2026, 11, 18)]), CrossCheck::Undetermined);
 
     let data = tempdir().unwrap();
     let unknown_calendar = load_at(data.path(), &FakeHolidays::new(), day(2026, 11, 17)).await;
@@ -427,4 +428,46 @@ async fn the_service_key_never_reaches_files_logs_or_error_text() {
         assert!(!text.contains(SERVICE_KEY), "{text}");
         assert!(!text.contains("SvcKey"), "{text}");
     }
+}
+
+#[tokio::test]
+async fn a_cache_file_without_holidays_is_discarded() {
+    let data = tempdir().unwrap();
+    fs::create_dir_all(data.path().join("calendar")).unwrap();
+    fs::write(
+        data.path().join("calendar/holidays-2026.json"),
+        r#"{"version":1,"year":2026,"fetched_at_unix_ms":0,"holidays":[]}"#,
+    )
+    .unwrap();
+    let fake = FakeHolidays::new();
+    fake.set(2026, Err(TransportError::Unreachable));
+    let calendar = load_at(data.path(), &fake, day(2026, 11, 17)).await;
+    assert_eq!(calendar.judge(day(2026, 12, 25)).verdict, Verdict::Unknown);
+}
+
+#[tokio::test]
+async fn a_cache_file_that_does_not_match_its_year_is_discarded() {
+    let cases = [
+        r#"{"version":2,"year":2026,"fetched_at_unix_ms":0,"holidays":[{"date":20260101,"name":"x"}]}"#,
+        r#"{"version":1,"year":2025,"fetched_at_unix_ms":0,"holidays":[{"date":20250101,"name":"x"}]}"#,
+        r#"{"version":1,"year":2026,"fetched_at_unix_ms":0,"holidays":[{"date":20250101,"name":"x"}]}"#,
+        "{",
+    ];
+    for text in cases {
+        let data = tempdir().unwrap();
+        fs::create_dir_all(data.path().join("calendar")).unwrap();
+        fs::write(data.path().join("calendar/holidays-2026.json"), text).unwrap();
+        let fake = FakeHolidays::new();
+        let calendar = load_at(data.path(), &fake, day(2026, 11, 17)).await;
+        assert_eq!(calendar.judge(day(2026, 11, 17)).verdict, Verdict::Unknown, "{text}");
+    }
+}
+
+#[tokio::test]
+async fn the_year_end_rule_is_unknown_when_the_year_has_no_holiday_data() {
+    let data = tempdir().unwrap();
+    let calendar = load_at(data.path(), &FakeHolidays::new(), day(2026, 11, 17)).await;
+    let judgment = calendar.judge(day(2026, 12, 30));
+    assert_eq!(finding_of(&judgment, EvidenceInput::KrxClosure), Finding::Unknown);
+    assert_eq!(judgment.verdict, Verdict::Unknown);
 }

@@ -368,7 +368,7 @@ data/hoga/calendar/
   ]}
   ```
 
-- `Calendar::judge`는 `Judgment`(관측일 여부, 개장 분, 근거 목록)를 낸다. `next_observation_day`, `observation_days_after`, `observation_days_before`가 관측일을 센다. `cross_check`는 지수 일봉의 날짜 목록과 그날 판단을 대조한다.
+- `Calendar::judge`는 `Judgment`(관측일 여부, 개장 분, 근거 목록)를 낸다. `next_observation_day`, `observation_days_after`, `observation_days_before`가 관측일을 센다. `cross_check`는 지수 일봉의 날짜 목록과 그날 판단을 대조한다. 목록이 비었거나 그날이 목록의 가장 이른 날짜보다 앞이면 판단하지 않는다. 마지막 일봉 뒤의 날은 일봉이 없는 것으로 보므로 마감 뒤에 부른다.
 - 시험은 `python3 scripts/dev.py cargo test -p collector --test calendar`와 `--lib calendar`다. 합성 응답만 쓴다.
 
 ## 실제 수집 절차
