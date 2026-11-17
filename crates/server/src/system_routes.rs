@@ -2,10 +2,9 @@ use std::sync::{Arc, Mutex, OnceLock};
 
 use axum::Router;
 use axum::body::Body;
-use axum::extract::{Request, State};
-use axum::http::{HeaderMap, Method, header};
-use axum::middleware::{self, Next};
-use axum::response::{IntoResponse, Json, Response};
+use axum::extract::State;
+use axum::middleware;
+use axum::response::Json;
 use axum::routing::{get, post, put};
 use serde::de::DeserializeOwned;
 
@@ -53,6 +52,10 @@ impl SystemState {
 
     pub fn bound(&self, addr: std::net::SocketAddr) {
         let _ = self.bound.set(addr);
+    }
+
+    pub(crate) fn bound_addr(&self) -> Option<std::net::SocketAddr> {
+        self.bound.get().copied()
     }
 
     fn key_file_problem(&self) -> Option<String> {
@@ -112,45 +115,7 @@ pub fn routes(state: Arc<AppState>) -> Router<Arc<AppState>> {
         .route("/api/system/kiwoom/registered-ip", put(put_registered_ip))
         .route("/api/system/kiwoom/recheck-token-file", post(recheck_token_file))
         .route("/api/system/settings", get(get_settings))
-        .layer(middleware::from_fn_with_state(state, guard_writes))
-}
-
-async fn guard_writes(State(st): State<Arc<AppState>>, req: Request, next: Next) -> Response {
-    if !matches!(*req.method(), Method::GET | Method::HEAD | Method::OPTIONS)
-        && let Err(rejected) = check_write(&st.system, &req)
-    {
-        tracing::warn!(method = %req.method(), path = req.uri().path(), "시스템 설정 쓰기 요청을 거절했습니다");
-        return rejected.into_response();
-    }
-    next.run(req).await
-}
-
-fn check_write(system: &SystemState, req: &Request) -> Result<(), ApiFailure> {
-    let headers = req.headers();
-    let refuse = |what: &str| ApiFailure::bad_request(format!("이 요청은 받지 않습니다: {what}"));
-    let host = headers.get(header::HOST).and_then(|h| h.to_str().ok()).or_else(|| req.uri().authority().map(|a| a.as_str())).ok_or_else(|| refuse("Host가 없습니다"))?;
-    let bound = system.bound.get().ok_or_else(|| refuse("서버가 아직 준비되지 않았습니다"))?;
-    if !is_own_host(host, *bound) {
-        return Err(refuse("Host가 이 서버의 주소가 아닙니다"));
-    }
-    check_origin(headers, host)?;
-    let json = headers.get(header::CONTENT_TYPE).and_then(|v| v.to_str().ok()).is_some_and(|v| v.split(';').next().is_some_and(|essence| essence.trim().eq_ignore_ascii_case("application/json")));
-    if !json {
-        return Err(refuse("Content-Type은 application/json이어야 합니다"));
-    }
-    Ok(())
-}
-
-fn is_own_host(host: &str, bound: std::net::SocketAddr) -> bool {
-    let (host, port) = (host.to_ascii_lowercase(), bound.port());
-    [format!("127.0.0.1:{port}"), format!("localhost:{port}"), format!("[::1]:{port}"), bound.to_string()].contains(&host)
-}
-
-fn check_origin(headers: &HeaderMap, host: &str) -> Result<(), ApiFailure> {
-    let mut origins = headers.get_all(header::ORIGIN).iter();
-    let Some(origin) = origins.next() else { return Ok(()) };
-    let same = origins.next().is_none() && origin.to_str().is_ok_and(|o| o.eq_ignore_ascii_case(&format!("http://{host}")));
-    if same { Ok(()) } else { Err(ApiFailure::bad_request("이 요청은 받지 않습니다: Origin이 이 서버가 아닙니다")) }
+        .layer(middleware::from_fn_with_state(state, crate::write_guard::guard_writes))
 }
 
 async fn read_body<T: DeserializeOwned>(body: Body) -> Result<T, ApiFailure> {

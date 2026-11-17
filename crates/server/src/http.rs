@@ -47,6 +47,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/api/ws", get(crate::ws::upgrade))
         .merge(crate::user_routes::routes())
         .merge(crate::drawings::routes())
+        .merge(crate::setup_bundle::routes(state.clone()))
         .merge(crate::screener::routes())
         .merge(crate::investors::routes())
         .merge(crate::system_routes::routes(state.clone()))
@@ -98,6 +99,10 @@ impl ApiFailure {
             retry_at: Some(now),
             ..ApiFailure::new(api::ApiErrorCode::KiwoomUnavailable, "종목 목록을 아직 받지 못했습니다. 잠시 뒤 다시 시도하세요")
         }
+    }
+
+    pub(crate) fn message(&self) -> &str {
+        &self.message
     }
 
     pub(crate) fn bad_request(message: impl Into<String>) -> Self {
@@ -454,7 +459,7 @@ mod tests {
     use super::*;
     use crate::app::{ApplicationInputs, application};
     use crate::clock::{Clock, kst};
-    use crate::user_routes::LAYOUT_LIMIT;
+    use setup::LAYOUT_LIMIT;
     use crate::config::Secret;
     use crate::kiwoom::api::ApiId;
     use crate::kiwoom::auth::KiwoomAuth;
@@ -753,7 +758,7 @@ mod tests {
             (body(json!([one(&"가".repeat(21), json!([]))]), 2), StatusCode::BAD_REQUEST, "bad_request"),
             (json!({"lists": [one("가", json!([]))]}).to_string(), StatusCode::BAD_REQUEST, "bad_request"),
             ("{\"lists\": [".to_owned(), StatusCode::BAD_REQUEST, "bad_request"),
-            (json!({"lists": [one("가", json!([]))], "revision": 2, "pad": "x".repeat(crate::user_routes::WATCHLISTS_LIMIT)}).to_string(), StatusCode::PAYLOAD_TOO_LARGE, "payload_too_large"),
+            (json!({"lists": [one("가", json!([]))], "revision": 2, "pad": "x".repeat(setup::WATCHLISTS_LIMIT)}).to_string(), StatusCode::PAYLOAD_TOO_LARGE, "payload_too_large"),
             (body(json!([one("가", json!([]))]), 1), StatusCode::CONFLICT, "stale_revision"),
         ] {
             let (s, v) = send(&f.app, "PUT", "/api/watchlists", body).await;
@@ -820,7 +825,7 @@ mod tests {
         let f = live_fixture(true).await;
         let legacy_body = |codes: &[String]| json!({"symbols": codes, "revision": i64::MAX}).to_string();
         let mut codes: Vec<String> = Vec::new();
-        while legacy_body(&codes).len() <= crate::user_routes::JSON_LIMIT {
+        while legacy_body(&codes).len() <= setup::JSON_LIMIT {
             codes.push(format!("{:06}", 100_000 + codes.len()));
         }
         codes.pop();
@@ -847,7 +852,7 @@ mod tests {
             let bare = json!({"lists": [{"id": "X", "name": "가", "symbols": []}], "revision": revision, "pad": ""}).to_string();
             json!({"lists": [{"id": "X", "name": "가", "symbols": []}], "revision": revision, "pad": "x".repeat(bytes - bare.len())}).to_string()
         };
-        let limit = crate::user_routes::WATCHLISTS_LIMIT;
+        let limit = setup::WATCHLISTS_LIMIT;
         assert_eq!(send(&f.app, "PUT", "/api/watchlists", padded(limit, 10)).await.0, StatusCode::OK);
         let (s, v) = send(&f.app, "PUT", "/api/watchlists", padded(limit + 1, 11)).await;
         assert_eq!((s, code(&v)), (StatusCode::PAYLOAD_TOO_LARGE, "payload_too_large"));

@@ -2691,6 +2691,7 @@ dependencies = [
  "scraper",
  "serde",
  "serde_json",
+ "setup",
  "sha2 0.10.9",
  "sqlx",
  "tempfile",
@@ -2712,6 +2713,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b4eceb519ec34d8290aaf6e46f435102f2bfa63f22b05a144fb16ab266d3b198"
 dependencies = [
  "stable_deref_trait",
+]
+
+[[package]]
+name = "setup"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "ts-rs",
 ]
 
 [[package]]
