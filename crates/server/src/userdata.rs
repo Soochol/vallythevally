@@ -1,5 +1,6 @@
 
 use sqlx::Row;
+use sqlx::SqliteConnection;
 use sqlx::sqlite::SqliteRow;
 
 use crate::api::{Layout, LayoutInput, LayoutSummary, LayoutWindow, Revision, Screens, SymbolCode, UiState, UnixSeconds, WatchGroup, Watchlist, Watchlists, WindowContent, WindowId, parse_layout_feed};
@@ -43,6 +44,10 @@ pub(crate) fn check_newer(stored: Option<i64>, sent: Revision) -> Result<(), Sto
 
 pub async fn get_watchlists(db: &AppDb) -> Result<Watchlists, StoreError> {
     let mut tx = db.read().begin().await?;
+    get_watchlists_in(&mut tx).await
+}
+
+pub(crate) async fn get_watchlists_in(tx: &mut SqliteConnection) -> Result<Watchlists, StoreError> {
     let mut lists: Vec<Watchlist> = sqlx::query("SELECT id, name FROM watchlists ORDER BY position")
         .fetch_all(&mut *tx)
         .await?
@@ -79,6 +84,12 @@ pub async fn put_watchlists(db: &AppDb, all: &Watchlists) -> Result<(), StoreErr
     let mut tx = db.begin_write().await?;
     let stored: Option<i64> = sqlx::query_scalar("SELECT revision FROM watchlist_revision WHERE singleton = 1").fetch_optional(&mut *tx).await?;
     check_newer(stored, all.revision)?;
+    store_watchlists(&mut tx, all).await?;
+    tx.commit().await?;
+    Ok(())
+}
+
+pub(crate) async fn store_watchlists(tx: &mut SqliteConnection, all: &Watchlists) -> Result<(), StoreError> {
     sqlx::query("UPDATE watchlist_revision SET revision = ? WHERE singleton = 1").bind(all.revision.0).execute(&mut *tx).await?;
     sqlx::query("DELETE FROM watchlists").execute(&mut *tx).await?;
     for (list_position, list) in all.lists.iter().enumerate() {
@@ -115,28 +126,40 @@ pub async fn put_watchlists(db: &AppDb, all: &Watchlists) -> Result<(), StoreErr
             }
         }
     }
-    tx.commit().await?;
     Ok(())
 }
 
 pub async fn get_screens(db: &AppDb) -> Result<Screens, StoreError> {
-    let row = sqlx::query("SELECT list, revision FROM screens WHERE singleton = 1").fetch_one(db.read()).await?;
+    get_screens_in(&mut *db.read().acquire().await?).await
+}
+
+pub(crate) async fn get_screens_in(conn: &mut SqliteConnection) -> Result<Screens, StoreError> {
+    let row = sqlx::query("SELECT list, revision FROM screens WHERE singleton = 1").fetch_one(conn).await?;
     let screens = serde_json::from_str(row.get("list")).map_err(|e| corrupt("screens", e))?;
     Ok(Screens { screens, revision: Revision(row.get("revision")) })
 }
 
 pub async fn put_screens(db: &AppDb, all: &Screens) -> Result<(), StoreError> {
-    let list = serde_json::to_string(&all.screens).expect("Screen은 언제나 직렬화된다");
     let mut tx = db.begin_write().await?;
     let stored: Option<i64> = sqlx::query_scalar("SELECT revision FROM screens WHERE singleton = 1").fetch_optional(&mut *tx).await?;
     check_newer(stored, all.revision)?;
-    sqlx::query("UPDATE screens SET list = ?, revision = ? WHERE singleton = 1").bind(list).bind(all.revision.0).execute(&mut *tx).await?;
+    store_screens(&mut tx, all).await?;
     tx.commit().await?;
     Ok(())
 }
 
+pub(crate) async fn store_screens(tx: &mut SqliteConnection, all: &Screens) -> Result<(), StoreError> {
+    let list = serde_json::to_string(&all.screens).expect("Screen은 언제나 직렬화된다");
+    sqlx::query("UPDATE screens SET list = ?, revision = ? WHERE singleton = 1").bind(list).bind(all.revision.0).execute(&mut *tx).await?;
+    Ok(())
+}
+
 pub async fn list_layouts(db: &AppDb) -> Result<Vec<LayoutSummary>, StoreError> {
-    let rows = sqlx::query("SELECT id, name, updated_at FROM layouts ORDER BY position, rowid").fetch_all(db.read()).await?;
+    list_layouts_in(&mut *db.read().acquire().await?).await
+}
+
+pub(crate) async fn list_layouts_in(conn: &mut SqliteConnection) -> Result<Vec<LayoutSummary>, StoreError> {
+    let rows = sqlx::query("SELECT id, name, updated_at FROM layouts ORDER BY position, rowid").fetch_all(conn).await?;
     Ok(rows.into_iter().map(|r| LayoutSummary { id: r.get("id"), name: r.get("name"), updated_at: UnixSeconds(r.get("updated_at")) }).collect())
 }
 
@@ -165,6 +188,10 @@ fn read_window(r: &SqliteRow) -> Result<LayoutWindow, StoreError> {
 
 pub async fn get_layout(db: &AppDb, id: &str) -> Result<Layout, StoreError> {
     let mut tx = db.read().begin().await?;
+    get_layout_in(&mut tx, id).await
+}
+
+pub(crate) async fn get_layout_in(tx: &mut SqliteConnection, id: &str) -> Result<Layout, StoreError> {
     let row = sqlx::query("SELECT name, sync, placement, updated_at, revision FROM layouts WHERE id = ?")
         .bind(id)
         .fetch_optional(&mut *tx)
@@ -192,6 +219,20 @@ pub async fn put_layout(db: &AppDb, input: &LayoutInput, now: UnixSeconds) -> Re
     let mut tx = db.begin_write().await?;
     let stored: Option<i64> = sqlx::query_scalar("SELECT revision FROM layouts WHERE id = ?").bind(&input.id).fetch_optional(&mut *tx).await?;
     check_newer(stored, input.revision)?;
+    store_layout(&mut tx, input, now).await?;
+    tx.commit().await?;
+    Ok(Layout {
+        id: input.id.clone(),
+        name: input.name.clone(),
+        sync: input.sync,
+        windows: input.windows.clone(),
+        placement: input.placement.clone(),
+        updated_at: now,
+        revision: input.revision,
+    })
+}
+
+pub(crate) async fn store_layout(tx: &mut SqliteConnection, input: &LayoutInput, now: UnixSeconds) -> Result<(), StoreError> {
     let taken: Option<String> = sqlx::query_scalar("SELECT id FROM layouts WHERE name = ? AND id <> ?")
         .bind(&input.name)
         .bind(&input.id)
@@ -249,16 +290,7 @@ pub async fn put_layout(db: &AppDb, input: &LayoutInput, now: UnixSeconds) -> Re
     .bind(&input.id)
     .execute(&mut *tx)
     .await?;
-    tx.commit().await?;
-    Ok(Layout {
-        id: input.id.clone(),
-        name: input.name.clone(),
-        sync: input.sync,
-        windows: input.windows.clone(),
-        placement: input.placement.clone(),
-        updated_at: now,
-        revision: input.revision,
-    })
+    Ok(())
 }
 
 pub(crate) fn window_kind(content: &WindowContent) -> String {
@@ -287,19 +319,29 @@ pub async fn delete_layout(db: &AppDb, id: &str) -> Result<(), StoreError> {
 }
 
 pub async fn get_ui_state(db: &AppDb) -> Result<UiState, StoreError> {
-    let row = sqlx::query("SELECT state, revision FROM ui_state WHERE singleton = 1").fetch_one(db.read()).await?;
+    get_ui_state_in(&mut *db.read().acquire().await?).await
+}
+
+pub(crate) async fn get_ui_state_in(conn: &mut SqliteConnection) -> Result<UiState, StoreError> {
+    let row = sqlx::query("SELECT state, revision FROM ui_state WHERE singleton = 1").fetch_one(conn).await?;
     let mut state: UiState = serde_json::from_str(row.get("state")).map_err(|e| corrupt("ui_state", e))?;
     state.0.insert("revision".into(), row.get::<i64, _>("revision").into());
     Ok(state)
 }
 
 pub async fn put_ui_state(db: &AppDb, state: &UiState, revision: Revision) -> Result<(), StoreError> {
-    let mut fields = state.0.clone();
-    fields.remove("revision");
-    let text = serde_json::to_string(&fields).expect("UiState는 언제나 직렬화된다");
     let mut tx = db.begin_write().await?;
     let stored: Option<i64> = sqlx::query_scalar("SELECT revision FROM ui_state WHERE singleton = 1").fetch_optional(&mut *tx).await?;
     check_newer(stored, revision)?;
+    store_ui_state(&mut tx, state, revision).await?;
+    tx.commit().await?;
+    Ok(())
+}
+
+pub(crate) async fn store_ui_state(tx: &mut SqliteConnection, state: &UiState, revision: Revision) -> Result<(), StoreError> {
+    let mut fields = state.0.clone();
+    fields.remove("revision");
+    let text = serde_json::to_string(&fields).expect("UiState는 언제나 직렬화된다");
     sqlx::query(
         "INSERT INTO ui_state (singleton, state, revision) VALUES (1, ?, ?)
          ON CONFLICT(singleton) DO UPDATE SET state = excluded.state, revision = excluded.revision",
@@ -308,7 +350,6 @@ pub async fn put_ui_state(db: &AppDb, state: &UiState, revision: Revision) -> Re
     .bind(revision.0)
     .execute(&mut *tx)
     .await?;
-    tx.commit().await?;
     Ok(())
 }
 

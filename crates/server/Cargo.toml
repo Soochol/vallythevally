@@ -22,6 +22,7 @@ path = "src/bin/dart-smoke.rs"
 [dependencies]
 domain = { path = "../domain" }
 indicators = { path = "../indicators" }
+setup = { path = "../setup" }
 axum = { version = "0.8", features = ["ws"] }
 futures = "0.3"
 reqwest = { version = "0.13", default-features = false, features = ["rustls", "native-tls", "query"] }

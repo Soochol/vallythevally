@@ -8,13 +8,15 @@ use axum::response::Json;
 use axum::routing::{get, put};
 use serde::Deserialize;
 use sqlx::Row;
+use sqlx::SqliteConnection;
 use sqlx::sqlite::SqliteRow;
 
 use crate::api::{Revision, SymbolCode, UnixSeconds, WindowId};
 use crate::db::AppDb;
 use crate::drawing_api::{Drawing, DrawingInput, DrawingScope};
 use crate::http::{ApiFailure, AppState};
-use crate::user_routes::{JSON_LIMIT, parse_symbol, read_json};
+use crate::user_routes::{parse_symbol, read_json};
+use setup::{DocumentKind, JSON_LIMIT};
 use crate::userdata::{StoreError, check_newer, corrupt, from_wire_name, wire_name};
 
 const GROUP_CHARS: std::ops::RangeInclusive<usize> = 1..=100;
@@ -85,10 +87,21 @@ pub async fn list_drawings_of(db: &AppDb, symbol: &str) -> Result<Vec<Drawing>, 
     rows.iter().map(read_drawing).collect()
 }
 
+pub(crate) async fn list_all_drawings_in(conn: &mut SqliteConnection) -> Result<Vec<Drawing>, StoreError> {
+    let rows = sqlx::query("SELECT * FROM drawings ORDER BY id").fetch_all(conn).await?;
+    rows.iter().map(read_drawing).collect()
+}
+
 pub async fn upsert_drawing(db: &AppDb, input: DrawingInput, now: UnixSeconds) -> Result<Drawing, DrawingError> {
     let mut tx = db.begin_write().await?;
     let stored: Option<i64> = sqlx::query_scalar("SELECT revision FROM drawings WHERE id = ?").bind(&input.id).fetch_optional(&mut *tx).await?;
     check_newer(stored, input.revision)?;
+    store_drawing(&mut tx, &input, now).await?;
+    tx.commit().await?;
+    Ok(input.saved_at(now))
+}
+
+pub(crate) async fn store_drawing(tx: &mut SqliteConnection, input: &DrawingInput, updated_at: UnixSeconds) -> Result<(), DrawingError> {
     let (scope, layout_id, window_id) = match &input.scope {
         DrawingScope::Symbol => ("symbol", None, None),
         DrawingScope::Layout { layout_id } => ("layout", Some(layout_id), None),
@@ -134,12 +147,11 @@ pub async fn upsert_drawing(db: &AppDb, input: DrawingInput, now: UnixSeconds) -
     .bind(scope)
     .bind(layout_id)
     .bind(window_id)
-    .bind(now.0)
+    .bind(updated_at.0)
     .bind(input.revision.0)
     .execute(&mut *tx)
     .await?;
-    tx.commit().await?;
-    Ok(input.saved_at(now))
+    Ok(())
 }
 
 pub async fn delete_drawing_by_id(db: &AppDb, id: &str) -> Result<(), StoreError> {
@@ -149,7 +161,10 @@ pub async fn delete_drawing_by_id(db: &AppDb, id: &str) -> Result<(), StoreError
     Ok(())
 }
 
-fn check_drawing(path_id: &str, d: &DrawingInput) -> Result<(), ApiFailure> {
+pub(crate) fn check_drawing(path_id: &str, d: &DrawingInput) -> Result<(), ApiFailure> {
+    if !DocumentKind::Drawing.accepts_id(path_id) {
+        return Err(ApiFailure::bad_request(format!("드로잉 id는 영문자·숫자·`-`·`_`로 1~64바이트여야 합니다: {path_id}")));
+    }
     if d.id != path_id {
         return Err(ApiFailure::bad_request(format!("주소의 id({path_id})와 본문의 id({})가 다릅니다", d.id)));
     }
