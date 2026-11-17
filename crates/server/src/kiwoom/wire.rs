@@ -1377,6 +1377,25 @@ mod tests {
     }
 
     #[test]
+    fn each_audit_label_in_a_row_becomes_its_own_exclusion_in_the_screener_listing() {
+        let listed = |audit_info: &str| {
+            let row = ListingRow { code: "005930".into(), name: "가상".into(), market_code: "0".into(), audit_info: audit_info.into(), ..Default::default() };
+            let Listing::Include(info) = classify(&row) else { panic!() };
+            screener_listing(&row, &info).unwrap().excludable_as
+        };
+        use ExcludeKind::*;
+        assert_eq!(listed("관리종목"), [Managed]);
+        assert_eq!(listed("투자주의환기종목"), [InvestmentCautionAlert]);
+        assert_eq!(listed("투자경고"), [InvestmentWarning]);
+        assert_eq!(listed("투자위험"), [InvestmentDanger]);
+        assert_eq!(listed("투자주의"), [InvestmentCaution]);
+        assert_eq!(listed("단기과열"), [ShortTermOverheated]);
+        assert_eq!(listed("거래정지"), [TradingHalted]);
+        assert_eq!(listed("정상"), []);
+        assert_eq!(listed("관리종목|신종상태|거래정지"), [Managed, TradingHalted], "모르는 상태는 빠지고 나머지는 남는다");
+    }
+
+    #[test]
     fn token_expiry() {
         let t: TokenResponse = serde_json::from_str(&fixture("au10001_ok")).unwrap();
         let at = parse_kst_datetime(&t.expires_dt).unwrap();

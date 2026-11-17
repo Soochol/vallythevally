@@ -89,7 +89,10 @@ mod tests {
 
     fn included(row: &ListingRow) -> (SymbolKind, Market) {
         match classify(row) {
-            Listing::Include(info) => (info.kind, info.market),
+            Listing::Include(info) => {
+                assert_eq!(info.name, row.name);
+                (info.kind, info.market)
+            }
             other => panic!("{other:?}"),
         }
     }
@@ -123,6 +126,8 @@ mod tests {
             assert_eq!(included(&spac), (Common, Kosdaq));
         }
         assert!(!row("12345K", "10").is_spac());
+        let near_miss = ListingRow { name: "가나기업인수".into(), ..row("12345K", "10") };
+        assert!(!near_miss.is_spac());
     }
 
     #[test]
@@ -138,7 +143,7 @@ mod tests {
         assert!(why.contains("77") && why.contains("123450"), "{why}");
         for code in ["", "12345", "1234567", "12345a", "12 450"] {
             let Listing::Unknown(why) = classify(&row(code, "0")) else { panic!("{code:?}") };
-            assert!(why.contains("종목코드"), "{why}");
+            assert!(why.contains("종목코드") && why.contains(code), "{why}");
         }
         assert!(matches!(classify(&row("005930", "")), Listing::Unknown(_)));
     }
