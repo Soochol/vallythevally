@@ -4,7 +4,7 @@ import type { ClientMessage } from "./generated/ClientMessage";
 import type { ConnectionStatus } from "./generated/ConnectionStatus";
 import type { ServerMessage } from "./generated/ServerMessage";
 import type { Quote } from "./generated/Quote";
-import { type Connection, type Connect, MarketSocket, type QuoteEvent, sameOriginWsUrl, type SubEvent, type TransportEvents } from "./socket";
+import { type Connection, type Connect, type FeedEvent, MarketSocket, type QuoteEvent, sameOriginWsUrl, type SubEvent, type TransportEvents } from "./socket";
 
 const LIVE: ConnectionStatus = { realtime: "live", since: 1_000, backfilling: false };
 const key: SeriesKey = { symbol: "005930", venue: "combined", period: "1m" };
@@ -235,5 +235,66 @@ describe("MarketSocket", () => {
     last().drop();
     vi.advanceTimersByTime(60_000);
     expect(transports).toHaveLength(1);
+  });
+
+  test("새 창 흐름 구독은 열려 있으면 바로, 아니면 hello에서 보내고 해지하면 unsubscribe를 보낸다", () => {
+    const { socket, last } = setup();
+    socket.start();
+    const early = socket.subscribeFeed({ symbol: "005930", kind: "book" }, () => {});
+    expect(last().sent).toEqual([]);
+    last().receive(hello());
+    expect(last().sent).toEqual([{ type: "subscribe_feed", sub: "s1", symbol: "005930", kind: "book", venue: null }]);
+    const late = socket.subscribeFeed({ symbol: "000660", kind: "trades", venue: "krx" }, () => {});
+    expect(last().sent[1]).toEqual({ type: "subscribe_feed", sub: "s2", symbol: "000660", kind: "trades", venue: "krx" });
+    early();
+    late();
+    expect(last().sent.slice(2)).toEqual([
+      { type: "unsubscribe", sub: "s1" },
+      { type: "unsubscribe", sub: "s2" },
+    ]);
+  });
+
+  test("흐름 메시지는 그 구독의 handler로만 가고 봉 구독과 섞이지 않는다", () => {
+    const { socket, last } = setup();
+    socket.start();
+    last().receive(hello());
+    const feed: FeedEvent[] = [];
+    const bars: SubEvent[] = [];
+    socket.subscribeFeed({ symbol: "005930", kind: "trades" }, (m) => feed.push(m));
+    socket.subscribe(key, (m) => bars.push(m));
+    const trades: ServerMessage = { type: "feed_trades", sub: "s1", seq: 1, trades: [{ t: 1, price: 100, qty: -3, venue: "krx", strength: null }] };
+    last().receive({ type: "feed_subscribed", sub: "s1", kind: "trades" });
+    last().receive(trades);
+    last().receive({ type: "sub_error", sub: "s1", code: "realtime_limit" });
+    last().receive({ type: "sub_error", sub: "s2", code: "unknown_symbol" });
+    expect(feed.map((m) => m.type)).toEqual(["feed_subscribed", "feed_trades", "sub_error"]);
+    expect(bars.map((m) => m.type)).toEqual(["sub_error"]);
+  });
+
+  test("다시 연결되어 새 hello가 오면 새 창 구독을 다시 보내고 resync를 준다", () => {
+    const { socket, transports, last } = setup();
+    socket.start();
+    last().receive(hello());
+    const feed: FeedEvent[] = [];
+    socket.subscribeFeed({ symbol: "005930", kind: "brokers" }, (m) => feed.push(m));
+    last().drop();
+    vi.advanceTimersByTime(1000);
+    expect(transports).toHaveLength(2);
+    last().receive(hello());
+    expect(last().sent).toEqual([{ type: "subscribe_feed", sub: "s1", symbol: "005930", kind: "brokers", venue: null }]);
+    expect(feed).toEqual([{ type: "resync" }]);
+  });
+
+  test("연결이 닫혀 있을 때 해지한 새 창 구독은 다시 연결돼도 보내지 않는다", () => {
+    const { socket, transports, last } = setup();
+    socket.start();
+    last().receive(hello());
+    const off = socket.subscribeFeed({ symbol: "005930", kind: "program" }, () => {});
+    last().drop();
+    off();
+    vi.advanceTimersByTime(1000);
+    expect(transports).toHaveLength(2);
+    last().receive(hello());
+    expect(last().sent).toEqual([]);
   });
 });

@@ -10,7 +10,7 @@ use domain::{Feed, SeriesKey, Symbol};
 use futures::stream::SplitSink;
 use futures::{SinkExt, StreamExt};
 
-use crate::api::{ClientMessage, ServerMessage, SubErrorCode, SymbolCode};
+use crate::api::{ClientMessage, FeedKind, ServerMessage, SubErrorCode, SymbolCode};
 use crate::http::AppState;
 use crate::market::hub::HubHandle;
 use crate::market::outbox::Outbox;
@@ -111,6 +111,15 @@ fn on_text(hub: &HubHandle, outbox: &Outbox, conn: ConnId, text: &str) {
                 }
             }
         }
+        Ok(ClientMessage::SubscribeFeed { sub, symbol, kind, venue }) => match Symbol::parse(&symbol.0) {
+            Ok(symbol) => {
+                let venue = if kind == FeedKind::Trades { venue.map_or(domain::Venue::Combined, Into::into) } else { domain::Venue::Combined };
+                hub.subscribe_feed(conn, SubId(sub), symbol, kind, venue);
+            }
+            Err(_) => {
+                let _ = outbox.push(ServerMessage::SubError { sub, code: SubErrorCode::BadRequest });
+            }
+        },
         Ok(ClientMessage::Unsubscribe { sub }) => hub.unsubscribe(conn, SubId(sub)),
         Ok(ClientMessage::Watch { symbols, venue }) => hub.watch(conn, watch_symbols(&symbols), venue.map_or(domain::Venue::Combined, Into::into)),
         Err(e) => tracing::debug!(error = %e, "읽을 수 없는 브라우저 메시지를 버립니다"),

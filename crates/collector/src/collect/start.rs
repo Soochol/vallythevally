@@ -125,7 +125,7 @@ pub fn exit_status(finish: &Finish) -> u8 {
     }
 }
 
-pub(super) async fn forward_termination_signals(stop: watch::Sender<bool>) {
+pub(crate) async fn forward_termination_signals(stop: watch::Sender<bool>) {
     use tokio::signal::unix::{SignalKind, signal};
     let (Ok(mut terminate), Ok(mut interrupt)) = (signal(SignalKind::terminate()), signal(SignalKind::interrupt())) else {
         tracing::error!("종료 신호를 받을 수 없습니다");

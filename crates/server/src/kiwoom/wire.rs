@@ -11,7 +11,7 @@ use serde_json::{Value, json};
 use super::api::kiwoom_stock_code;
 use crate::api::{self, ExcludeKind};
 use super::error::{WsRejection, judge_ws_ack};
-use super::stream::{BOOK_DEPTH, BookLevel, BookSnapshot, BrokerEntry, BrokerSnapshot, DayTotals, ExpectedTrade, Exchange, RealProgramTrade, RealTick};
+use super::stream::{BOOK_DEPTH, BookLevel, BookSnapshot, BrokerEntry, BrokerSnapshot, DayTotals, ExpectedTrade, Exchange, RealProgramTrade, RealTick, TradeSide};
 use crate::config::Secret;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -870,7 +870,7 @@ impl WsControl {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Hash, Eq, PartialOrd, Ord)]
 pub enum RealType {
     Trade,
     Index,
@@ -985,7 +985,13 @@ fn parse_real_item(entry: &Value) -> Result<RealItem, WireError> {
         "0B" => {
             let code = item.strip_suffix("_AL").ok_or_else(|| WireError(format!("0B 통합 시세(_AL)가 아닙니다: {item:?}")))?;
             let code = StockCode::parse(code).map_err(|e| WireError(format!("{e}: {item:?}")))?;
-            let qty = unsigned(field("15")?)?;
+            let qty_text = field("15")?;
+            let qty = unsigned(qty_text)?;
+            let side = match qty_text.trim().chars().next() {
+                Some('+') => Some(TradeSide::Buy),
+                Some('-') => Some(TradeSide::Sell),
+                _ => None,
+            };
             if qty == 0 {
                 return Ok(RealItem::AuctionOnly);
             }
@@ -999,7 +1005,7 @@ fn parse_real_item(entry: &Value) -> Result<RealItem, WireError> {
                 Some(DayTotals { change_centi, cumulative: Volume(unsigned(field("13").ok()?).ok()?) })
             })();
             let strength_centi = field("228").ok().and_then(|s| level_centi(s.trim().trim_start_matches(['+', '-'])));
-            Ok(RealItem::Trade(RealTick { symbol: Symbol::Stock(code), hhmmss: hhmmss(field("20")?)?, price: stock_price(field("10")?)?, qty: Volume(qty), exchange, day, strength_centi }))
+            Ok(RealItem::Trade(RealTick { symbol: Symbol::Stock(code), hhmmss: hhmmss(field("20")?)?, price: stock_price(field("10")?)?, qty: Volume(qty), exchange, day, strength_centi, side }))
         }
         "0J" => {
             let index = IndexCode::parse(item).map_err(|e| WireError(format!("{e}: {item:?}")))?;
@@ -1023,10 +1029,12 @@ fn combined_stock(kind: &str, item: &str) -> Result<Symbol, WireError> {
 }
 
 fn fid_or<T: Default>(values: &Value, fid: impl fmt::Display, read: fn(&str) -> Result<T, WireError>) -> Result<T, WireError> {
-    match values.get(fid.to_string()).and_then(Value::as_str).map(str::trim) {
-        None | Some("") => Ok(T::default()),
-        Some(text) => read(text),
-    }
+    let text = match values.get(fid.to_string()) {
+        Some(Value::String(text)) => text.trim().to_owned(),
+        Some(Value::Number(number)) => number.to_string(),
+        _ => String::new(),
+    };
+    if text.is_empty() { Ok(T::default()) } else { read(&text) }
 }
 
 fn required_time(values: &Value, fid: &str, kind: &str, item: &str) -> Result<TimeOfDay, WireError> {
@@ -1048,7 +1056,11 @@ fn book_side(values: &Value, price_base: u32, qty_base: u32) -> Result<[Option<B
 }
 
 fn parse_book(item: &str, values: &Value) -> Result<BookSnapshot, WireError> {
-    let expected_qty = Volume(fid_or(values, 24, unsigned)?);
+    let expected = (|| {
+        let price = won_or_absent(values, 23).ok()??;
+        let qty = fid_or(values, 24, unsigned).ok()?;
+        Some(ExpectedTrade { price, qty: Volume(qty) })
+    })();
     Ok(BookSnapshot {
         symbol: combined_stock("0D", item)?,
         hhmmss: required_time(values, "21", "0D", item)?,
@@ -1056,7 +1068,7 @@ fn parse_book(item: &str, values: &Value) -> Result<BookSnapshot, WireError> {
         bids: book_side(values, 50, 70)?,
         total_ask_qty: Volume(fid_or(values, 121, unsigned)?),
         total_bid_qty: Volume(fid_or(values, 125, unsigned)?),
-        expected: won_or_absent(values, 23)?.map(|price| ExpectedTrade { price, qty: expected_qty }),
+        expected,
     })
 }
 
@@ -1095,6 +1107,9 @@ fn broker_side(values: &Value, code_base: u32, name_base: u32, qty_base: u32, ch
 }
 
 fn parse_broker(item: &str, values: &Value) -> Result<BrokerSnapshot, WireError> {
+    if !values.is_object() {
+        return Err(WireError(format!("0F {item}: values가 객체가 아닙니다")));
+    }
     Ok(BrokerSnapshot {
         symbol: combined_stock("0F", item)?,
         sells: broker_side(values, 145, 140, 160, 165)?,
@@ -1863,8 +1878,12 @@ mod tests {
     fn real_0b_is_a_combined_trade_with_abs_price_and_qty() {
         let code = StockCode::parse("005930").unwrap();
         let day = Some(DayTotals { change_centi: 0, cumulative: Volume(100) });
-        let tick = |exchange| RealTick { symbol: Symbol::Stock(code), hhmmss: TimeOfDay::hms(9, 30, 1).unwrap(), price: Price::from_centi(7_120_000).unwrap(), qty: Volume(15), exchange, day, strength_centi: None };
-        assert_eq!(one("0B", "005930_AL", trade_values("093001", -71_200, -15, 100, "NXT")), Ok(RealItem::Trade(tick(Some(Exchange::Nxt)))));
+        let tick = |exchange| RealTick { symbol: Symbol::Stock(code), hhmmss: TimeOfDay::hms(9, 30, 1).unwrap(), price: Price::from_centi(7_120_000).unwrap(), qty: Volume(15), exchange, day, strength_centi: None, side: None };
+        let sell = |exchange| RealTick { side: Some(TradeSide::Sell), ..tick(exchange) };
+        assert_eq!(one("0B", "005930_AL", trade_values("093001", -71_200, -15, 100, "NXT")), Ok(RealItem::Trade(sell(Some(Exchange::Nxt)))));
+        let mut buy = trade_values("093001", 71_200, 15, 100, "KRX");
+        buy["15"] = "+15".into();
+        assert_eq!(one("0B", "005930_AL", buy), Ok(RealItem::Trade(RealTick { side: Some(TradeSide::Buy), ..tick(Some(Exchange::Krx)) })));
         assert_eq!(one("0B", "005930_AL", trade_values("093001", 71_200, 15, 100, "KRX")), Ok(RealItem::Trade(tick(Some(Exchange::Krx)))));
         assert_eq!(one("0B", "005930_AL", trade_values("093001", 71_200, 15, 100, "1")), Ok(RealItem::Trade(tick(None))));
         assert_eq!(one("0B", "005930_AL", trade_values("093001", 71_200, 0, 100, "KRX")), Ok(RealItem::AuctionOnly));
@@ -2048,5 +2067,28 @@ mod tests {
         assert_eq!(snapshot.buys, [entry("003", "삼성", 3_000, 9)]);
         let Ok(RealItem::Broker(empty)) = one("0F", "005930_AL", json!({})) else { panic!() };
         assert!(empty.sells.is_empty() && empty.buys.is_empty());
+    }
+
+    #[test]
+    fn a_book_frame_with_an_unreadable_expected_quantity_keeps_its_levels() {
+        let mut values = book_values();
+        values["24"] = json!("x");
+        let book = book(one("0D", "005930_AL", values));
+        assert_eq!(book.expected, None);
+        assert!(book.asks.iter().all(Option::is_some));
+    }
+
+    #[test]
+    fn a_book_price_sent_as_a_json_number_is_read_not_dropped() {
+        let mut values = book_values();
+        values["41"] = json!(71_100);
+        let book = book(one("0D", "005930_AL", values));
+        assert_eq!(book.asks[0].unwrap().price, Price::from_centi(7_110_000).unwrap());
+    }
+
+    #[test]
+    fn a_broker_frame_whose_values_are_not_an_object_is_rejected() {
+        assert!(one("0F", "005930_AL", Value::Null).is_err());
+        assert!(one("0F", "005930_AL", json!("x")).is_err());
     }
 }

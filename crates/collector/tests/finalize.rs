@@ -286,7 +286,7 @@ fn day_with_data() -> (TempDir, Expected) {
 }
 
 fn verify_json(data: &Path) -> Json {
-    serde_json::from_slice(&fs::read(temporary_store_dir(data, DATE).join("verify.json")).unwrap()).unwrap()
+    serde_json::from_slice(&fs::read(store_dir(data, DATE).join("verify.json")).unwrap()).unwrap()
 }
 
 fn expected_cell(kind: ColumnKind, text: Option<&String>) -> (Cellular, bool) {
@@ -379,7 +379,7 @@ fn finalize_writes_typed_bucket_files_that_read_back_as_the_raw_frames() {
     let (data, expected) = day_with_data();
     let (code, stderr) = finalize(data.path(), &[]);
     assert_eq!(code, Some(0), "{stderr}");
-    let store = temporary_store_dir(data.path(), DATE);
+    let store = store_dir(data.path(), DATE);
 
     for (type_index, realtime) in schema::types().iter().enumerate() {
         let want = sorted_expected(&expected, type_index);
@@ -410,7 +410,7 @@ fn a_known_frame_is_stored_with_its_signs_and_blanks() {
     writer.close().unwrap();
     assert_eq!(finalize(data.path(), &[]).0, Some(0));
 
-    let rows = read_type(&temporary_store_dir(data.path(), DATE), "0B");
+    let rows = read_type(&store_dir(data.path(), DATE), "0B");
     assert_eq!(rows.len(), 1);
     let row = &rows[0];
     assert_eq!(row["symbol"], Cellular::Text("005930_AL".into()));
@@ -455,7 +455,7 @@ fn odd_raw_shapes_are_stored_exactly_or_counted_as_unfinalized() {
     let messages: BTreeMap<String, u64> = serde_json::from_value(verify["symbol_messages"].clone()).unwrap();
     assert_eq!(messages.keys().map(String::as_str).collect::<Vec<_>>(), ["A_AL", "B_AL", "G1_AL", "G2_AL", "N_AL", "P_AL", "W_AL"]);
 
-    let rows = read_type(&temporary_store_dir(data.path(), DATE), "0B");
+    let rows = read_type(&store_dir(data.path(), DATE), "0B");
     let by_symbol: BTreeMap<String, &BTreeMap<String, Cellular>> = rows
         .iter()
         .map(|row| match &row["symbol"] {
@@ -481,7 +481,7 @@ fn merge_thread_count_does_not_change_the_result() {
     let (quad, _) = day_with_data();
     assert_eq!(finalize(single.path(), &["--threads", "1"]).0, Some(0));
     assert_eq!(finalize(quad.path(), &["--threads", "4"]).0, Some(0));
-    let (one, four) = (files_under(&temporary_store_dir(single.path(), DATE)), files_under(&temporary_store_dir(quad.path(), DATE)));
+    let (one, four) = (files_under(&store_dir(single.path(), DATE)), files_under(&store_dir(quad.path(), DATE)));
     assert_eq!(one.keys().collect::<Vec<_>>(), four.keys().collect::<Vec<_>>());
     for (name, bytes) in &one {
         assert!(bytes == &four[name], "{name}이 다르다");
@@ -579,7 +579,7 @@ fn verify_only_reads_the_bucket_count_from_the_files_and_needs_a_finished_store(
 }
 
 #[test]
-fn an_existing_finished_folder_is_left_alone_and_a_stale_temporary_folder_is_rewritten() {
+fn an_existing_finished_folder_is_replaced_and_a_stale_temporary_folder_is_rewritten() {
     let (data, _) = day_with_data();
     let finished = store_dir(data.path(), DATE);
     fs::create_dir_all(&finished).unwrap();
@@ -591,11 +591,12 @@ fn an_existing_finished_folder_is_left_alone_and_a_stale_temporary_folder_is_rew
 
     assert_eq!(finalize(data.path(), &[]).0, Some(0));
 
-    assert_eq!(files_under(&finished).keys().collect::<Vec<_>>(), ["complete.json"]);
-    assert_eq!(fs::read(finished.join("complete.json")).unwrap(), b"{\"sentinel\":true}");
-    assert!(!temporary.join("stale.txt").exists());
-    assert!(!temporary.join("0B").join("999.parquet").exists());
-    assert!(temporary.join("verify.json").exists());
+    assert!(!temporary.exists());
+    assert!(files_under(&finished).contains_key("verify.json"));
+    assert!(!files_under(&finished).contains_key("0B/999.parquet"));
+    assert_ne!(fs::read(finished.join("complete.json")).unwrap(), b"{\"sentinel\":true}");
+    let leftovers: Vec<String> = fs::read_dir(data.path().join("store")).unwrap().map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned()).collect();
+    assert_eq!(leftovers, [DATE_TEXT]);
 }
 
 #[test]
@@ -615,7 +616,7 @@ fn the_real_recorded_day_finalizes_without_leftovers() {
         .output()
         .unwrap();
     assert_eq!(output.status.code(), Some(0), "{}", String::from_utf8_lossy(&output.stderr));
-    let verify: Json = serde_json::from_slice(&fs::read(data.path().join("store/20260720.tmp/verify.json")).unwrap()).unwrap();
+    let verify: Json = serde_json::from_slice(&fs::read(data.path().join("store/20260720/verify.json")).unwrap()).unwrap();
     assert_eq!(verify["passed"], json!(true));
     let kinds = verify["lines"]["unfinalized"]["kinds"].as_object().unwrap();
     let unfinalized: Vec<(&String, &Json)> = kinds.iter().filter(|(kind, count)| **count != json!(0) && !kind.ends_with("_file")).collect();
@@ -707,7 +708,7 @@ fn rows_with_the_same_symbol_and_time_keep_their_raw_order_for_any_thread_count(
         }
         writer.close().unwrap();
         assert_eq!(finalize(data.path(), &["--threads", threads]).0, Some(0));
-        read_type(&temporary_store_dir(data.path(), DATE), "0B")
+        read_type(&store_dir(data.path(), DATE), "0B")
     };
     let single = build("1");
     assert_eq!(single, build("8"));

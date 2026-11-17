@@ -14,6 +14,8 @@ data/hoga/
   spans/<YYYYMMDD>/verified.json                  대조 결과
   store/<YYYYMMDD>.tmp/<타입>/<버킷>.parquet       finalize가 쓰는 중인 수집 저장소
   store/<YYYYMMDD>.tmp/verify.json                finalize의 원문 대조 결과
+  store/<YYYYMMDD>/complete.json                  정리 완료 표시. 앱은 이 파일이 있는 날만 읽는다
+  store/prune.log.jsonl                           원문 지우기 기록
   plan/<YYYYMMDD>.json                            그날의 수집 계획
 ```
 
@@ -346,22 +348,23 @@ collector verify [--data <폴더>]  --date YYYYMMDD
 
 ## finalize
 
-`finalize`가 그날 원문을 관측일·타입별 Parquet으로 정리하고, Parquet을 다시 읽어 원문과 대조한다. 코드는 `collector::finalize`이고 파일 형식은 [`collector-store-format.md`](collector-store-format.md)가 계약이다. 정리 완료 표시, 폴더 이름 바꾸기, 원문 지우기는 하지 않는다.
+`finalize`가 그날 원문을 관측일·타입별 Parquet으로 정리하고, Parquet을 다시 읽어 원문과 대조한다. 코드는 `collector::finalize`이고 파일 형식은 [`collector-store-format.md`](collector-store-format.md)가 계약이다. 대조를 통과하면 커버리지를 모아 정리 완료 표시(`complete.json`)를 쓰고, 폴더를 `store/<YYYYMMDD>/`로 갈아 끼우고, `--prune`이면 조건을 모두 만족한 날의 원문을 지운다.
 
 ### 명령
 
 ```sh
-collector finalize [--data <폴더>] --date YYYYMMDD [--threads 4] [--buckets 64] [--verify-only]
+collector finalize [--data <폴더>] --date YYYYMMDD [--threads 4] [--buckets 64] [--verify-only] [--prune [--keep-early 7] [--keep 1] [--early-period 10]]
 ```
 
 | 종료 코드 | 뜻 |
 |---|---|
 | 0 | 정리했고 원문 대조가 통과했다. 정리 못 한 줄이 있어도 0이다. 그 수는 `verify.json`에 있다 |
 | 1 | 원문 대조가 실패했다, 원문 폴더가 없다, 읽기·쓰기 오류가 났다 |
-| 2 | 인수 오류. `--date`가 없거나 `YYYYMMDD`가 아니다, `--threads`가 1~64가 아니다, `--buckets`가 1~999가 아니다 |
+| 2 | 인수 오류. `--date`가 없거나 `YYYYMMDD`가 아니다, `--threads`가 1~64가 아니다, `--buckets`가 1~999가 아니다, `--keep-early`·`--keep`이 1 이상 정수가 아니다, `--prune` 없이 지우기 인수를 줬다 |
 
-- 결과는 `store/<YYYYMMDD>.tmp/`에 쓴다. 폴더가 남아 있으면 지우고 처음부터 쓴다. `store/<YYYYMMDD>/`는 있어도 건드리지 않는다.
-- `--verify-only`는 쓰지 않고 원문 줄만 다시 세어 `store/<YYYYMMDD>.tmp/`의 Parquet과 대조한다. `verify.json`을 새로 쓴다.
+- 시작할 때 두 이름 바꾸기 사이에 끊긴 흔적(`store/<YYYYMMDD>.old-*`)이 있으면 고친다. 결과는 `store/<YYYYMMDD>.tmp/`에 쓴다. 폴더가 남아 있으면 지우고 처음부터 쓴다. 대조가 통과하면 `complete.json`을 맨 마지막에 쓰고 `store/<YYYYMMDD>/`로 바꾼다. 대조가 실패하면 `complete.json` 없이 `.tmp`를 남기고 1로 끝난다.
+- `--verify-only`는 쓰지 않고 원문 줄만 다시 세어 Parquet과 대조한다. `.tmp`가 있으면 그것을, 없으면 `store/<YYYYMMDD>/`를 대조한다. `verify.json`을 새로 쓰고 `complete.json`은 건드리지 않는다. 지우기는 하지 않는다.
+- `--prune`은 대조가 통과한 뒤 `raw/` 아래 모든 날을 따져 지울 수 있는 날의 원문을 지운다. 조건과 기록은 [`collector-store-format.md`](collector-store-format.md)의 "원문 지우기"를 따른다. 오늘은 `--date`다. 지우다 실패한 날이 있으면 1이다.
 - `--threads`는 원문을 해석하는 스레드와 버킷을 정렬해 쓰는 스레드의 수다. 상한은 이 값이다. 원문은 `raw_read::read_day` 하나가 읽고 스레드들이 줄 묶음을 나눠 받는다. 줄에 번호를 매겨 정렬 기준에 넣으므로 스레드 수가 달라도 파일이 같다.
 
 ### 하는 일
@@ -374,7 +377,9 @@ collector finalize [--data <폴더>] --date YYYYMMDD [--threads 4] [--buckets 64
 
 ### 시험
 
-`crates/collector/tests/finalize.rs`가 합성 원문(열한 타입, 종목 48개, 버킷 여럿)을 정리해 DuckDB로 읽은 행이 원문 프레임과 같은지, 스레드 1과 4의 결과 파일이 같은지, `verify.json`의 줄 수 구분, 원문에서 줄 하나를 뺀 Parquet이 대조에서 실패하는지, 이미 있는 `store/<날짜>/`를 건드리지 않는지, 문서의 열 표가 코드의 열 정의와 같은지를 고정한다.
+`crates/collector/tests/finalize.rs`가 합성 원문(열한 타입, 종목 48개, 버킷 여럿)을 정리해 DuckDB로 읽은 행이 원문 프레임과 같은지, 스레드 1과 4의 결과 파일이 같은지, `verify.json`의 줄 수 구분, 원문에서 줄 하나를 뺀 Parquet이 대조에서 실패하는지, 이미 있는 `store/<날짜>/`를 갈아 끼우는지, 문서의 열 표가 코드의 열 정의와 같은지를 고정한다.
+
+`crates/collector/tests/finalize_complete.rs`는 합성 원문·계획·사건 기록으로 종목별 커버리지(계획, 등록 실패, 받지 못함, 끊긴 구간, 제외, 거래정지, 인계)와 처음 정리, 다시 정리(열린 옛 파일이 끝까지 읽힘), 끊긴 이름 바꾸기 회복, 대조 실패 때 `complete.json`이 없는 것을 확인한다. `finalize_prune.rs`는 지울 날을 가르는 조건과 보관 기간, 설정값, 휴장일, `raw/` 밖 경로 거부를 확인한다. `python3 scripts/dev.py cargo test -p collector --test finalize_complete`, `--test finalize_prune`.
 
 ## 수집 종목 목록
 
@@ -573,6 +578,79 @@ data/hoga/calendar/
 `check_plan`이 한 종목이 정확히 한 키에만 드는지(와 키마다 190 이하, 예비 키가 비어 있는지, 시장 단위 타입이 수집 키 하나에만 있는지)를 확인한다. `write_plan`이 쓰기 전에 부르고, 인계 때 데몬이 다시 부른다. `write_plan`은 임시 파일에 쓴 뒤 이름을 바꾸고, 파일이 이미 있으면 덮어쓰지 않고 오류를 낸다. 그날의 기록이고 `finalize`의 입력이기 때문이다. `read_plan`은 형식 버전을 확인하고 읽는다.
 
 시험은 `python3 scripts/dev.py cargo test -p collector --test plan`이다. 가짜 키와 비밀값 파일만 쓴다.
+
+## supervise
+
+`collector supervise --date YYYYMMDD --keys <키 목록 설정> [--state <폴더>] [--data <폴더>]`는 감독 데몬([ADR 0026](adr/0026-collector-supervisor-collects-common-and-preferred-stocks.md))이다. 그날 계획(`plan/<YYYYMMDD>.json`)을 받아 수집 키마다 `collect --child` 자식을 띄우고, 토큰을 발급하고, 감시하고, 다시 띄우고, 인계한다. 지금은 장중 수집 하나를 돌린다. 상태 API와 07:20~마감 뒤 하루 일정은 뒤 작업이 이 입구를 바꾼다. 코드는 `collector::supervise`다.
+
+`--state`는 키마다 기본 토큰·잠금 파일 경로의 바탕 폴더다. 없으면 `collect`와 같은 규칙(`$XDG_STATE_HOME` 또는 `$HOME/.local/state` 아래 `vallythevally/collector`)이다. 종료 코드는 0(SIGTERM·SIGINT 또는 종료 시각으로 끝남), 1(시작하지 못함), 2(인수·설정 오류)다.
+
+### 시작
+
+시작할 때 하나라도 어긋나면 자식을 띄우기 전에 멈춘다.
+
+- 계획 파일의 `date`가 `--date`와 같고 `check_plan`을 통과해야 한다. `read_plan`은 이 둘을 확인하지 않으므로 데몬이 부른다.
+- 계획의 키와 키 목록 설정의 활성 키가 이름, 역할, 앱키 해시까지 같아야 한다. 한쪽에만 있는 키가 있으면 멈춘다.
+- 키마다 `token_path`와 `lock_path`가 서로 달라야 한다. 키 하나의 토큰을 쥐는 프로세스는 하나다(ADR 0004).
+- 키마다 잠금 파일(`InstanceLock`)을 잡는다. 잠금은 풀지 않는다. 데몬이 끝나면 프로세스와 함께 놓인다.
+
+### 토큰
+
+- 키마다 `KiwoomAuth`·`KiwoomRest` 하나를 쓴다. 토큰 파일에 아직 쓸 수 있는 토큰이 있으면 새로 발급하지 않고 그것을 쓴다. 한 키의 발급 사이는 10분(`KiwoomAuth`), 만료 10분 전에는 다시 받는다.
+- 키 사이 발급 간격은 설정값 `token_spacing`이고 기본 5초다. 발급 요청은 한 줄(`IssueLane`)로 세워 이 간격을 지킨다. 예비 키 토큰도 장 시작에 미리 받는다.
+- 자식의 `token_invalid`를 받으면 그 세대를 무효로 하고 10분 간격이 지난 뒤 새 토큰을 보낸다. 그 사이 자식은 `waiting_for_token`으로 하트비트를 계속 낸다. 이미 더 새 토큰이 있으면 그것을 다시 보낸다.
+- `Control::reissue_token_at(키, 시각)`이 키마다 다른 시각에 재발급하는 입구다. 20:05 재발급의 엇갈림은 하루 일정 작업이 이 입구로 건다.
+- 8050이나 그 밖의 발급 정지(앱키 거절, 토큰 파일을 읽을 수 없음)를 받은 키는 멈춤이다. 8050은 사건 기록에 `8050`이 든 까닭으로 남는다.
+- 토큰 값과 앱키는 사건 기록과 로그에 쓰지 않는다.
+
+### 자식과 재시작
+
+- 자식은 같은 실행 파일을 `collect --child --key <이름> --data <폴더>`로 띄운다. 환경변수는 비우고 `VALLY_COLLECTOR_WS_URL`, `RUST_LOG`만 넘긴다. stdin·stdout은 프로토콜 줄이고 stderr는 데몬 로그(`자식: …`)로 잇는다. 띄우는 부분은 `Launcher` trait이고 실제 구현은 `tokio::process`(`TokioLauncher`)다.
+- `PR_SET_PDEATHSIG`는 자식이 건다. 리눅스는 이 신호를 부모를 만든 스레드가 끝날 때 보내므로, 데몬은 자식을 tokio 런타임의 작업 스레드(`spawn_blocking`이 아님)에서 띄운다.
+- `hello`가 오면 토큰과 계획의 몫을 `register`로 보낸다. 자식이 다시 뜨면 토큰과 등록을 처음부터 다시 보낸다.
+- 하트비트가 `heartbeat_timeout`(15초) 동안 오지 않거나 자식이 끝나면 그 자식을 SIGTERM으로 끝내고, `shutdown_grace`(10초) 안에 끝나지 않으면 SIGKILL로 끝낸 뒤 같은 키로 다시 띄운다.
+- 재시작 간격은 `restart_delays`(1, 2, 5, 10, 30초이고 끝 값을 계속 쓴다), 그날 재시작 한도는 `restart_limit`(5회)다. 한도를 넘어 끝난 키는 멈춤이다.
+- `hello`가 틀린 키를 말하거나 줄이 프로토콜에 맞지 않으면 그 자식을 끝내고 다시 띄운다. 형식 버전이 다른 줄이면 다시 띄워도 같으므로 그 키를 멈춤으로 한다.
+- 등록 결과(`registered`)는 `(id, part, parts)`가 같으면 하나로 센다. 쪼개진 묶음이 재전송되면 같은 묶음의 결과가 두 번 오기 때문이다. 나중 결과가 앞의 것을 대체하고, 등록 실패 수는 마지막 결과가 거절인 묶음 수다.
+- 등록 명령은 키의 `stocks`를 한 묶음(`<키>-stocks`, 타입은 `0B`·`0D`·`0w`·`0F`·`1h`·`0H`·`0E`·`0g`)으로, 시장 단위 타입을 타입마다 하나(`<키>-market-<타입>`, 항목은 빈 글자 하나)로 보낸다. 시장 단위 타입의 항목 형식은 아직 실접속으로 확인하지 않았다. 거절은 `registered`의 `ok:false`로 보이고 사건 기록에 남는다.
+
+### 인계
+
+- 수집 키가 멈춤이 되면(재시작 한도를 넘음, 8050, 버전 불일치) 그 키의 몫(종목과 시장 단위 타입)을 예비 키 자식에게 `register`로 보낸다. id는 `handoff-<키>-…`다. 원래 키는 `HandedOff`가 되고 그날 다시 띄우지도 등록하지도 않는다.
+- 예비 키는 멈춘 키 하나의 몫만 받는다. 두 번째로 멈춘 키는 인계하지 않고 수집 끊김(`Stopped`)으로 남으며 `handoff_skipped`가 기록된다. 예비 키가 멈췄거나 몫이 없는 키는 인계하지 않는다.
+- 인계 전후에 `check_plan`을 부른다. 인계 뒤의 모양은 `effective_plan`이 만든다. 멈춘 키는 비워 예비 역할로, 받는 키는 그 몫을 쥔 수집 역할로 바꾼 계획이다. 어느 쪽이든 틀리면 인계하지 않고 이유를 기록한다.
+- 예비 키 자식은 장 시작부터 띄워 두고(등록 없이 LOGIN까지) 토큰도 미리 받아 둔다. 예비 키 자식이 다시 뜨면 받은 몫을 다시 등록한다.
+
+### 사건 기록 `plan/<YYYYMMDD>.events.jsonl`
+
+사건 하나가 한 줄이고 데이터 폴더의 계획 파일 옆에 덧붙는다. 모든 줄에 `v`(형식 버전, 지금 1), `at`(KST 시각 `YYYY-MM-DDTHH:MM:SS+09:00`), `event`가 있다. `finalize-complete`가 이 기록으로 커버리지에 인계를 반영한다.
+
+| `event` | 필드 | 뜻 |
+|---|---|---|
+| `child_started` | `key`, `pid`, `restarts` | 자식을 띄웠다. `restarts`는 그 키의 그날 재시작 수 |
+| `child_exited` | `key`, `code` | 자식이 끝났다. 신호로 끝나면 `code`가 `null` |
+| `heartbeat_lost` | `key`, `silent_secs` | 하트비트가 끊겼다 |
+| `child_rejected` | `key`, `reason` | 띄우지 못했거나 프로토콜에 맞지 않는 줄을 보냈다 |
+| `restart` | `key`, `restart`, `delay_secs` | 다시 띄우기로 했다. `restart`는 1부터 센 번호 |
+| `key_stopped` | `key`, `reason` | 키가 멈췄다. 이 키의 수집은 그 시각부터 끊긴다(인계가 없으면 그날 끝까지) |
+| `handoff` | `from`, `to`, `stocks`, `market_types` | `from`의 몫을 `to`로 옮겼다. 이 시각 이후 `stocks`는 `to` 키의 원문에 들어간다 |
+| `handoff_skipped` | `key`, `reason` | 인계하지 않았다 |
+| `register_failed` | `key`, `id`, `part`, `parts`, `items`, `reason`, `return_code`, `detail` | 등록 묶음이 거절됐다. 같은 묶음의 재전송 거절은 한 번만 적는다 |
+| `token_issued` | `key`, `generation` | 토큰을 새로 받았다(값은 적지 않는다) |
+| `token_invalid` | `key`, `generation` | 자식이 그 세대의 토큰이 무효라고 알렸다 |
+
+### 상태 모양과 로그
+
+`Supervisor::status()`가 `watch` 수신기로 `DaemonStatus`(`date`, 키마다 `KeyStatus`)를 준다. 상태 API 작업이 이것을 내보낸다. 키 상태는 `waiting`(대기), `connecting`(연결 중), `receiving`(받는 중), `disconnected`(끊김), `stopped`(멈춤), `handed_off`(인계됨)이고, 키마다 맡은 종목 수(`stocks`, 예비 키는 받은 몫, 인계한 키는 0), 직전 하트비트의 초당 메시지(`messages_per_second`), 등록 실패 수(`register_failures`), 그날 재시작 수(`restarts`)가 있다. 이 작업은 1분마다(`housekeeping_every`) 로그 한 줄로만 찍는다.
+
+### 끝내기
+
+SIGTERM·SIGINT나 종료 시각(`end_at`, 기본 20:05 KST)이면 모든 자식에 `shutdown`을 보낸다. `shutdown_grace`(10초) 뒤에도 남은 자식은 SIGTERM, 다시 10초 뒤 SIGKILL로 끝낸다. 데몬을 SIGKILL로 죽여도 자식의 `PR_SET_PDEATHSIG`가 자식을 끝낸다.
+
+### 시험
+
+- `tests/supervise.rs`: 가짜 자식(`Launcher`·`ChildProcess`를 구현한 in-process 가짜), 합성 `Transport`, 멈춘 tokio 시간과 `Clock::fake`로 토큰 간격, 재시작, 인계, 8050, `token_invalid`, 종료, 시작 확인, 사건 기록과 로그의 토큰 비노출을 확인한다. `python3 scripts/dev.py cargo test -p collector --test supervise`.
+- `tests/supervise_process.rs`: 실제 `collector supervise`가 실제 `collect --child` 자식 둘을 루프백 WebSocket 시험 서버에 붙여 LOGIN과 REG까지 가고, 데몬을 끝내면(SIGTERM) 자식도 끝나고, 데몬을 SIGKILL로 죽여도 자식이 끝남을 확인한다. 토큰은 토큰 파일에 미리 넣어 두고 `VALLY_COLLECTOR_REST_URL`(`http://127.0.0.1…`만 받는다)을 닫힌 포트로 돌려 키움에는 아무것도 보내지 않는다. `python3 scripts/dev.py cargo test -p collector --test supervise_process`.
 
 ## 실제 수집 절차
 
