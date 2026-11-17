@@ -33,9 +33,9 @@ export async function start(deps: StartDeps = browserStartDeps): Promise<void> {
     const step = stepFor(lifecycle, status);
     const replacedLocalSetup = previous?.state === "owner_mismatch" && status.state === "signed_in";
     previous = status;
+    if (replacedLocalSetup) deps.discardUnsaved();
     if (step === "boot") {
       lifecycle = "running";
-      if (replacedLocalSetup) deps.discardUnsaved();
       void deps.boot();
     } else if (step === "suspend") {
       lifecycle = "suspended";

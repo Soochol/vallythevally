@@ -76,6 +76,15 @@ describe("시작 흐름의 상태별 분기", () => {
     expect(deps.boot).toHaveBeenCalledOnce();
   });
 
+  test("실행 중에 owner_mismatch가 온 뒤 바꾸기가 끝나도 이전 계정의 미저장 편집을 버리고 새로 시작한다", async () => {
+    const { deps, push } = harness(signedIn);
+    await start(deps);
+    push(mismatch);
+    push(signedIn);
+    expect(deps.discardUnsaved).toHaveBeenCalledOnce();
+    expect(deps.reload).toHaveBeenCalledOnce();
+  });
+
   test("바꾸기가 아닌 시작에서는 미저장 편집을 버리지 않는다", async () => {
     const { deps } = harness(signedIn);
     await start(deps);

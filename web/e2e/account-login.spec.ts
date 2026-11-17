@@ -145,6 +145,15 @@ test.describe("1440×900", () => {
     await expect(page.getByText("이 브라우저에서 시작한 로그인이 아니어서", { exact: false })).toHaveCount(0);
   });
 
+  test("로그인 화면에서 이미 본 실패 문장은 다른 탭 로그인으로 열려도 알림으로 다시 나오지 않는다", async ({ page, scenario }) => {
+    scenario.live.account = SIGNED_OUT;
+    await page.goto("/?login=error&reason=cancelled");
+    await expect(page.getByText("로그인을 취소했습니다")).toBeVisible();
+    scenario.live.setAccount(SIGNED_IN);
+    await expect(cell(page)).toBeVisible();
+    await expect(page.getByText("로그인을 취소했습니다")).toHaveCount(0);
+  });
+
   test("owner_mismatch: 확인 화면이 보이고 지우고 바꾸기는 두 단계 확인 뒤에만 요청이 간다", async ({ page, scenario }) => {
     scenario.live.account = MISMATCH;
     answerStatus(scenario, "/api/account/replace-local", SIGNED_IN);

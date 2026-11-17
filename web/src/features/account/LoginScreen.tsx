@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { startLogin } from "../../api/account";
 import type { AccountProvider } from "../../api/generated/AccountProvider";
 import { useAccountStore } from "../../stores/account";
@@ -7,14 +7,15 @@ import { PROVIDER_NAME } from "./provider";
 const PROVIDER_BUTTON = "h-11 w-full rounded-m border border-line bg-raised px-4 text-m font-semibold text-text hover:bg-hover disabled:opacity-60";
 
 export function LoginScreen() {
-  const failure = useAccountStore((s) => s.loginFailure);
+  const [failure] = useState(() => useAccountStore.getState().loginFailure);
   const [leaving, setLeaving] = useState<AccountProvider | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => useAccountStore.getState().showLoginFailure(null), []);
 
   const login = async (provider: AccountProvider) => {
     setLeaving(provider);
     setError(null);
-    useAccountStore.getState().showLoginFailure(null);
     try {
       window.location.assign((await startLogin(provider)).url);
     } catch (e) {
