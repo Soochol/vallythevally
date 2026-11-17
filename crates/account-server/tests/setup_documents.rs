@@ -426,3 +426,31 @@ async fn a_body_comes_back_from_changes_and_stale_byte_for_byte_as_it_was_sent()
     assert!(stale.contains(r#""status":"stale""#));
     assert!(stale.contains(&format!(r#""body":{body}}}"#)), "stale 본문이 달라졌다: {stale}");
 }
+
+#[tokio::test]
+async fn the_size_limit_counts_the_bytes_sent_so_padding_whitespace_cannot_exceed_it() {
+    let harness = Harness::start().await;
+    let account = Account::login(&harness, "a").await;
+    let limit = DocumentKind::Layout.document_limit();
+    let compact = padded(limit);
+    let spaced = format!(r#"{{"documents":[{{"kind":"layout","id":"L1","revision":1,"deleted":false,"body":{{ {}}}]}}"#, &compact.to_string()[1..]);
+    let send = |request: String| harness.http.post(format!("{}/v1/setup/push", harness.base)).bearer_auth(&account.token).header("content-type", "application/json").body(request).send();
+    let response: Value = send(spaced).await.unwrap().json().await.unwrap();
+    assert_eq!(statuses(&response), ["rejected"]);
+    assert_eq!(account.summary().await["bytes"], 0);
+    assert_eq!(statuses(&account.push(json!([live("layout", "L1", 1, compact)])).await), ["accepted"]);
+}
+
+#[tokio::test]
+async fn a_body_that_serde_json_could_not_read_back_is_refused_whole_and_nothing_is_stored() {
+    let harness = Harness::start().await;
+    let account = Account::login(&harness, "a").await;
+    let deep = format!("{}{}", "[".repeat(5000), "]".repeat(5000));
+    for body in [deep.as_str(), r#"{"t":"\ud800"}"#] {
+        let request = format!(r#"{{"documents":[{{"kind":"layout","id":"L1","revision":1,"deleted":false,"body":{body}}}]}}"#);
+        let response = harness.http.post(format!("{}/v1/setup/push", harness.base)).bearer_auth(&account.token).header("content-type", "application/json").body(request).send().await.unwrap();
+        assert_eq!(response.status(), 400);
+        assert_eq!(response.json::<Value>().await.unwrap()["code"], "invalid_request");
+    }
+    assert_eq!(account.summary().await["seq"], 0);
+}

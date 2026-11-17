@@ -51,28 +51,29 @@ struct PushResponse {
     seq: i64,
 }
 
-#[derive(Deserialize, Default)]
-struct Labels {
-    #[serde(default)]
-    kind: serde_json::Value,
-    #[serde(default)]
-    id: serde_json::Value,
+fn echoed(raw: &serde_json::Value, field: &str) -> Option<String> {
+    raw.get(field).and_then(serde_json::Value::as_str).map(str::to_owned)
 }
 
-fn labels_of(raw: &RawValue) -> (Option<String>, Option<String>) {
-    let labels: Labels = serde_json::from_str(raw.get()).unwrap_or_default();
-    let text = |value: serde_json::Value| value.as_str().map(str::to_owned);
-    (text(labels.kind), text(labels.id))
+fn invalid_push() -> ApiError {
+    ApiError::invalid_request("본문은 {documents: [문서…]} JSON이어야 합니다")
 }
 
 async fn push(State(state): Shared, headers: HeaderMap, body: Bytes) -> Result<Json<PushResponse>, ApiError> {
     let (_, account_id) = authenticate(&state, &headers).await?;
     let request: PushRequest =
-        serde_json::from_slice(&body).map_err(|_| ApiError::invalid_request("본문은 {documents: [문서…]} JSON이어야 합니다"))?;
+        serde_json::from_slice(&body).map_err(|_| invalid_push())?;
     if request.documents.len() > MAX_PUSH_DOCUMENTS {
         return Err(ApiError::invalid_request(format!("한 번에 문서 {MAX_PUSH_DOCUMENTS}개까지 보냅니다")));
     }
-    let labels: Vec<_> = request.documents.iter().map(|raw| labels_of(raw)).collect();
+    let labels = request
+        .documents
+        .iter()
+        .map(|raw| {
+            let value: serde_json::Value = serde_json::from_str(raw.get()).map_err(|_| invalid_push())?;
+            Ok((echoed(&value, "kind"), echoed(&value, "id")))
+        })
+        .collect::<Result<Vec<_>, ApiError>>()?;
     let now_millis = state.clock.now().0.saturating_mul(1000);
     let mut seen = HashSet::new();
     let parsed: Vec<_> = request
