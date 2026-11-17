@@ -229,6 +229,44 @@ async fn after_a_reconnect_every_accepted_registration_is_sent_again_with_the_sa
 }
 
 #[tokio::test(start_paused = true)]
+async fn only_a_batch_that_was_sent_before_is_flagged_as_a_replay() {
+    let peer = Peer::accepting();
+    let child = live_child(&peer, 2).await;
+    child.seen();
+    peer.close(0);
+    until("끊김", || child.events.try_iter().any(|event| matches!(event, Event::Down { .. }))).await;
+    child.send(Command::Register(Registration::new("fresh", vec!["000777".into()], vec![RealType::Trade]).unwrap()));
+    until("둘째 연결의 REG 둘", || peer.count_sent("REG") == 3).await;
+    settle().await;
+    let flags: Vec<(String, bool)> = child
+        .seen()
+        .into_iter()
+        .filter_map(|event| match event {
+            Event::Registered { batch, replay, .. } => Some((batch.id, replay)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(flags, [("r1".to_owned(), true), ("fresh".to_owned(), false)]);
+    child.stop().await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn the_same_pair_registered_twice_before_any_answer_is_still_replayed_once() {
+    let peer = Peer::accepting();
+    let child = launch_child(&peer);
+    child.send(Command::Register(stocks("a", 2, &[RealType::Trade])));
+    child.send(Command::Register(stocks("b", 2, &[RealType::Trade])));
+    child.send(token(CHILD_TOKEN, 1));
+    until("REG 둘", || peer.count_sent("REG") == 2).await;
+    settle().await;
+    peer.close(0);
+    until("둘째 연결의 REG", || peer.count_sent("REG") == 3).await;
+    settle().await;
+    assert_eq!(peer.trnms(1), ["LOGIN", "REG"]);
+    child.stop().await;
+}
+
+#[tokio::test(start_paused = true)]
 async fn a_token_rejected_at_login_is_reported_with_its_generation_and_a_new_one_is_awaited() {
     let peer = Peer::new(|connection, trnm, _| if trnm == "LOGIN" && connection == 0 { Reply::Code(8005) } else { Reply::Ack });
     let child = launch_child(&peer);

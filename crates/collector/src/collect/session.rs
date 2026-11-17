@@ -1,4 +1,4 @@
-use std::collections::VecDeque;
+use std::collections::{HashSet, VecDeque};
 use std::convert::Infallible;
 use std::fmt;
 use std::future::Future;
@@ -414,6 +414,7 @@ pub struct Session {
     tokens: Tokens,
     registry: Registry,
     queue: VecDeque<Op>,
+    sent: HashSet<u64>,
     out: Output,
     connector: Arc<dyn Connector>,
     wall_clock: Arc<dyn WallClock>,
@@ -428,7 +429,6 @@ pub struct Session {
     retry_at: Instant,
     live_since: Option<Instant>,
     logged_in: bool,
-    resumed: bool,
     confirmed_any: bool,
     live: bool,
 }
@@ -445,6 +445,7 @@ impl Session {
             tokens: parts.tokens,
             registry: parts.registry,
             queue: VecDeque::new(),
+            sent: HashSet::new(),
             out: parts.output,
             connector: parts.connector,
             wall_clock: parts.wall_clock,
@@ -459,7 +460,6 @@ impl Session {
             retry_at: Instant::now(),
             live_since: None,
             logged_in: false,
-            resumed: false,
             confirmed_any: false,
             live: false,
         }
@@ -661,9 +661,13 @@ impl Session {
     fn begin_registration(&mut self) {
         self.logged_in = true;
         self.set_state(SessionState::Registering);
-        let replay = self.resumed;
-        self.queue = self.registry.wanted().iter().cloned().map(|chunk| Op { kind: OpKind::Register, chunk, replay }).collect();
-        self.resumed = true;
+        self.queue = self
+            .registry
+            .wanted()
+            .iter()
+            .cloned()
+            .map(|chunk| Op { kind: OpKind::Register, replay: self.sent.contains(&chunk.seq), chunk })
+            .collect();
     }
 
     fn announce_live_if_ready(&mut self) -> Result<(), Exit> {
@@ -712,6 +716,9 @@ impl Session {
 
     async fn send_op(&mut self, conn: &mut Conn, op: Op) -> Result<(), Interrupt> {
         let message = op.message();
+        if op.kind == OpKind::Register {
+            self.sent.insert(op.chunk.seq);
+        }
         conn.send(message.clone()).await?;
         let mut result = self.await_ack(conn, op.control()).await?;
         if matches!(&result, Err(rejection) if rejection.category == Category::RateLimit) {

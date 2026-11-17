@@ -104,7 +104,7 @@ impl Registry {
         self.wanted = self
             .wanted
             .iter()
-            .flat_map(|wanted| if wanted.seq == chunk.seq { vec![wanted.clone()] } else { wanted.without(&items, &chunk.types) })
+            .flat_map(|wanted| if wanted.seq < chunk.seq { wanted.without(&items, &chunk.types) } else { vec![wanted.clone()] })
             .collect();
     }
 
@@ -157,7 +157,7 @@ mod tests {
     }
 
     #[test]
-    fn an_accepted_registration_takes_over_the_pairs_of_older_ones() {
+    fn an_accepted_registration_takes_over_the_pairs_of_older_ones_only() {
         let mut registry = Registry::default();
         let first = registry.add(Chunk::split(&registration("a", 3, &[RealType::Trade])));
         registry.accepted(&first[0]);
@@ -165,6 +165,16 @@ mod tests {
         registry.accepted(&second[0]);
         let ids: Vec<(&str, usize)> = registry.wanted().iter().map(|chunk| (chunk.id.as_str(), chunk.items.len())).collect();
         assert_eq!(ids, [("a", 1), ("b", 2)]);
+    }
+
+    #[test]
+    fn two_pending_registrations_of_the_same_pair_leave_the_newer_one_when_both_are_accepted() {
+        let mut registry = Registry::default();
+        let first = registry.add(Chunk::split(&registration("a", 3, &[RealType::Trade])));
+        let second = registry.add(Chunk::split(&registration("b", 3, &[RealType::Trade])));
+        registry.accepted(&first[0]);
+        registry.accepted(&second[0]);
+        assert_eq!(registry.wanted(), &second[..]);
     }
 
     #[test]
