@@ -31,6 +31,11 @@ pub struct NewPendingLogin<'a> {
     pub code_challenge: &'a CodeChallenge,
 }
 
+pub enum PendingLoginSlot {
+    Granted,
+    Full,
+}
+
 pub struct PendingLogin {
     pub nonce: String,
     pub port: ConnectorPort,
@@ -74,9 +79,14 @@ impl Store {
         Ok(())
     }
 
-    pub async fn insert_pending_login(&self, pending: NewPendingLogin<'_>, now: UnixSeconds) -> Result<(), sqlx::Error> {
-        sqlx::query(
-            "INSERT INTO pending_logins (idp_state, provider, browser_hash, nonce, connector_port, connector_state, code_challenge, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+    pub async fn insert_pending_login(
+        &self,
+        pending: NewPendingLogin<'_>,
+        now: UnixSeconds,
+        limit: u32,
+    ) -> Result<PendingLoginSlot, sqlx::Error> {
+        let inserted = sqlx::query(
+            "INSERT INTO pending_logins (idp_state, provider, browser_hash, nonce, connector_port, connector_state, code_challenge, expires_at) SELECT ?, ?, ?, ?, ?, ?, ?, ? WHERE (SELECT COUNT(*) FROM pending_logins WHERE expires_at > ?) < ?",
         )
         .bind(pending.idp_state)
         .bind(pending.provider.as_str())
@@ -86,9 +96,12 @@ impl Store {
         .bind(pending.connector_state.as_str())
         .bind(pending.code_challenge.as_str())
         .bind(now.plus(PENDING_LOGIN_SECONDS).0)
+        .bind(now.0)
+        .bind(i64::from(limit))
         .execute(&self.pool)
-        .await?;
-        Ok(())
+        .await?
+        .rows_affected();
+        Ok(if inserted == 1 { PendingLoginSlot::Granted } else { PendingLoginSlot::Full })
     }
 
     pub async fn take_pending_login(
