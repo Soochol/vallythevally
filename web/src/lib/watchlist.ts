@@ -138,23 +138,36 @@ export function deleteGroup(list: Watchlist, id: string): Watchlist {
   return { ...list, symbols: list.symbols.filter((c) => !gone.has(c)), groups };
 }
 
-export function addToGroup(list: Watchlist, code: SymbolCode, groupId: string): Watchlist {
-  if (!list.symbols.includes(code)) return list;
-  const group = list.groups.find((g) => g.id === groupId);
-  if (!group || group.symbols.includes(code)) return list;
-  return withGroups(list, (gs) => gs.map((g) => g === group ? { ...g, symbols: [...g.symbols, code] } : g));
-}
-
 export function removeRow(list: Watchlist, row: WatchRowRef): Watchlist {
   if (!rowExists(list, row)) return list;
   if (row.groupId === null) return removeSymbol(list, row.code);
   return withGroups(list, (gs) => gs.map((g) => g.id === row.groupId ? { ...g, symbols: g.symbols.filter((c) => c !== row.code) } : g));
 }
 
-export function moveToGroup(list: Watchlist, row: WatchRowRef, groupId: string): Watchlist {
-  if (!rowExists(list, row) || row.groupId === groupId || !list.groups.some((g) => g.id === groupId)) return list;
-  const removed = row.groupId === null ? list : removeRow(list, row);
-  return addToGroup(removed, row.code, groupId);
+export interface DropTarget {
+  groupId: string | null;
+  before: SymbolCode | null;
+}
+
+export type DropHow = "move" | "copy" | "move-merging";
+export type DropRefusal = "missing" | "same-group" | "already-in-group" | "in-other-group";
+export type DropResult = { list: Watchlist } | { refusal: DropRefusal };
+
+const leavingRow = (list: Watchlist, row: WatchRowRef, how: DropHow): Watchlist => (row.groupId === null || how === "copy" ? list : removeRow(list, row));
+
+export function dropRow(list: Watchlist, row: WatchRowRef, target: DropTarget, how: DropHow): DropResult {
+  if (!rowExists(list, row)) return { refusal: "missing" };
+  if (row.groupId === target.groupId) return { refusal: "same-group" };
+  if (target.groupId === null) {
+    return list.groups.some((g) => g.id !== row.groupId && g.symbols.includes(row.code)) ? { refusal: "in-other-group" } : { list: removeRow(list, row) };
+  }
+  const group = list.groups.find((g) => g.id === target.groupId);
+  if (!group) return { refusal: "missing" };
+  const leaving = leavingRow(list, row, how);
+  if (group.symbols.includes(row.code)) return how === "move-merging" ? { list: leaving } : { refusal: "already-in-group" };
+  const at = target.before === null ? -1 : group.symbols.indexOf(target.before);
+  const joined = at < 0 ? [...group.symbols, row.code] : [...group.symbols.slice(0, at), row.code, ...group.symbols.slice(at)];
+  return { list: withGroups(leaving, (gs) => gs.map((g) => g.id === group.id ? { ...g, symbols: joined } : g)) };
 }
 
 export function duplicateWatchlist(original: Watchlist, id: string, name: string, newId: () => string): Watchlist {

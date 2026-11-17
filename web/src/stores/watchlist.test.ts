@@ -174,7 +174,7 @@ test("그룹 편집은 목록 하나만 바꾸고 편집마다 revision이 늘�
   s.addAll(FIRST_WATCHLIST_ID, ["000660", "005930"]);
   const r0 = useWatchlistStore.getState().revision;
   s.createGroup(FIRST_WATCHLIST_ID, "G", "반도체");
-  s.addToGroup(FIRST_WATCHLIST_ID, "005930", "G");
+  s.dropRow(FIRST_WATCHLIST_ID, { code: "005930", groupId: null }, { groupId: "G", before: null }, "move");
   s.renameGroup(FIRST_WATCHLIST_ID, "G", "칩");
   s.createGroup(FIRST_WATCHLIST_ID, "H", "관찰");
   s.moveGroupBy(FIRST_WATCHLIST_ID, "H", -1);
