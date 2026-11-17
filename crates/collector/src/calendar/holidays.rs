@@ -230,10 +230,13 @@ pub fn parse_holiday_response(year: u16, body: &str) -> Result<Vec<Holiday>, Bad
         },
         None => return Err(BadResponse::UnexpectedShape),
     };
-    if let Some(total) = body.get("totalCount").and_then(text_of).and_then(|text| text.parse::<u64>().ok())
-        && total > items.len() as u64
-    {
-        return Err(BadResponse::Truncated);
+    if let Some(total) = body.get("totalCount") {
+        let total = text_of(total)
+            .and_then(|text| text.parse::<u64>().ok())
+            .ok_or(BadResponse::UnexpectedShape)?;
+        if total > items.len() as u64 {
+            return Err(BadResponse::Truncated);
+        }
     }
     let mut names_by_day: BTreeMap<Day, Vec<String>> = BTreeMap::new();
     for item in items {
@@ -339,6 +342,15 @@ mod tests {
         let one = format!(r#"{{"item":[{}]}}"#, item(20260101, "1월1일", "Y"));
         let body = response(&one, 8).replace(r#""totalCount":8"#, r#""totalCount":"8""#);
         assert_eq!(parse_holiday_response(2026, &body), Err(BadResponse::Truncated));
+    }
+
+    #[test]
+    fn total_count_that_is_not_a_plain_integer_is_rejected() {
+        let one = format!(r#"{{"item":[{}]}}"#, item(20260101, "1월1일", "Y"));
+        for count in ["8.0", "\" 8\"", "null", "-1", "\"many\""] {
+            let body = response(&one, 1).replace(r#""totalCount":1"#, &format!(r#""totalCount":{count}"#));
+            assert_eq!(parse_holiday_response(2026, &body), Err(BadResponse::UnexpectedShape), "{count}");
+        }
     }
 
     #[test]
