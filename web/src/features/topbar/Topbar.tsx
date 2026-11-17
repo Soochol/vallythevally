@@ -9,8 +9,7 @@ import { useCell, useLayoutStore } from "../../stores/layout";
 import { useSelectionStore } from "../../stores/selection";
 import { useUiStore } from "../../stores/ui";
 import { openIndicatorCommand } from "../indicator-command/open";
-import { BrandIcon, ChevronIcon, CameraIcon, CopyIcon, IndicatorIcon, SearchIcon, SlidersIcon, CompareIcon } from "../icons";
-import { canCopyImage, saveSnapshot } from "../snapshot/saveSnapshot";
+import { BrandIcon, IndicatorIcon, SearchIcon, SlidersIcon, CompareIcon } from "../icons";
 import { LayoutMenu } from "../layouts/LayoutMenu";
 import { VenuePicker } from "../venue/VenuePicker";
 import { SystemButton } from "../system-settings/SystemButton";
@@ -22,6 +21,7 @@ export function Topbar() {
   const cell = useCell(cellId);
   const opensDialog = useUiStore((s) => s.prefs.indicatorWindow) === "dialog";
   const info = useSymbolInfo(cell.symbol).data;
+  const name = info?.name ?? cell.symbol;
   const { setPeriod } = useLayoutStore.getState();
   const settingsButton = useRef<HTMLButtonElement>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -29,11 +29,6 @@ export function Topbar() {
   return (
     <header role="toolbar" aria-label="차트 도구 막대" className="desktop-topbar ui-island relative z-20 mx-[var(--island-gap)] mt-[var(--island-gap)] h-[var(--island-h)] flex-none rounded-l max-md:hidden">
       <span className="app-brand" title="vallythevally"><BrandIcon /><span>vally</span></span>
-      <button type="button" className="tb-btn shell-symbol" aria-haspopup="dialog" title="종목 바꾸기" onClick={() => openSearch()}>
-        <b className="min-w-0 flex-1 truncate text-left font-semibold" title={info?.name ?? cell.symbol}>{info?.name ?? cell.symbol}</b>
-        <span className="flex-none text-s text-text-3">{symbolSub(cell.symbol, info)}</span>
-        <ChevronIcon />
-      </button>
       <span className="tb-sep" />
       <div role="group" aria-label="봉 주기" className="flex flex-none items-center gap-px">
         <MinuteMenu value={cell.period} onChange={(period) => setPeriod(cellId, period)} />
@@ -45,20 +40,28 @@ export function Topbar() {
       <span className="tb-sep" />
       <button type="button" className="tb-btn" aria-label="지표" aria-haspopup={opensDialog ? "dialog" : undefined} title="지표 (I)" onClick={() => openIndicatorCommand(cellId)}><IndicatorIcon /><span className="max-lg:hidden">지표</span></button>
       <button type="button" className="tb-btn" aria-label="비교" aria-haspopup={opensDialog ? "dialog" : undefined} title="비교 종목" onClick={() => openIndicatorCommand(cellId, "compare")}><CompareIcon /><span className="max-lg:hidden">비교</span></button>
-      <span className="min-w-0 flex-1" />
-      <VenuePicker variant="desktop" />
-      <LayoutMenu />
-      <AddWindowMenu />
-      <FinancialUpdateButton />
-      <button type="button" className="icon-btn" title="차트 이미지 내려받기 (Alt+S)" aria-label="차트 이미지 내려받기" onClick={() => saveSnapshot(cellId, "download")}><CameraIcon /></button>
-      {canCopyImage() && <button type="button" className="icon-btn" title="차트 이미지 복사 (Alt+Shift+S)" aria-label="차트 이미지 복사" onClick={() => saveSnapshot(cellId, "copy")}><CopyIcon /></button>}
+      <span className="tb-sep" />
       <button ref={settingsButton} type="button" className="tb-btn aria-expanded:bg-accent-soft aria-expanded:font-semibold aria-expanded:text-accent" aria-label="차트 설정" aria-haspopup="dialog" aria-expanded={settingsOpen} onClick={() => setSettingsOpen((open) => !open)}><SlidersIcon /><span className="max-xl:hidden">차트 설정</span></button>
       {settingsOpen && <ChartSettingsPopover cellId={cellId} anchor={settingsButton} onClose={() => setSettingsOpen(false)} />}
+      <div className="topbar-search-slot">
+        <button type="button" className="shell-search" aria-haspopup="dialog" aria-label="종목·지표·명령 찾기" title="종목 검색 (/ 또는 Ctrl+K)" onClick={() => openSearch()}>
+          <SearchIcon size={14} />
+          <span className="shell-search-symbol">
+            <b title={name}>{name}</b>
+            <span>{symbolSub(cell.symbol, info)}</span>
+          </span>
+          <span className="shell-search-hint">종목·지표·명령 찾기</span>
+          <kbd>/</kbd>
+          <kbd>Ctrl K</kbd>
+        </button>
+      </div>
+      <VenuePicker variant="desktop" />
+      <span className="tb-sep" />
+      <LayoutMenu />
+      <AddWindowMenu />
+      <span className="tb-sep" />
+      <FinancialUpdateButton />
       <SystemButton />
-      <button type="button" className="tb-btn shell-search" aria-haspopup="dialog" aria-label="종목·지표·명령 찾기" title="종목 검색 (/ 또는 Ctrl+K)" onClick={() => openSearch()}>
-        <SearchIcon size={14} />
-        <kbd>/</kbd>
-      </button>
     </header>
   );
 }

@@ -1,6 +1,6 @@
 import type { Page } from "@playwright/test";
 import type { Layout } from "../src/api/generated/Layout";
-import { cell, DEFAULT_LAYOUT_ID, expect, firstChart, test } from "./harness";
+import { cell, DEFAULT_LAYOUT_ID, expect, firstChart, SEARCH_BUTTON_TITLE, test } from "./harness";
 
 test.use({ clockStart: "20261109100000" });
 const topbar = (page: Page) => page.getByRole("toolbar", { name: "차트 도구 막대" });
@@ -24,7 +24,7 @@ async function nameLayout(page: Page, kind: "새 이름으로 저장" | "이름 
   return dialog;
 }
 async function symbol(page: Page, code: string) {
-  await topbar(page).getByTitle("종목 바꾸기").click();
+  await topbar(page).getByTitle(SEARCH_BUTTON_TITLE).click();
   const dialog = page.getByRole("dialog", { name: "종목 검색", exact: true });
   await dialog.getByRole("combobox", { name: "종목 검색" }).fill(code);
   await dialog.getByRole("option").filter({ hasText: code }).click();

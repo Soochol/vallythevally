@@ -208,3 +208,12 @@ test.describe("휴대폰 390px", () => {
     await expect.poll(() => savedVenue(scenario)).toBe("krx");
   });
 });
+
+test("보이는 거래소 글자를 눌러도 콤보박스가 열린다", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/");
+  await expect(desktopVenueCombo(page)).toBeVisible();
+  await page.getByRole("toolbar", { name: "차트 도구 막대" }).getByText("거래소", { exact: true }).click();
+  await expect(desktopVenueCombo(page)).toHaveAttribute("aria-expanded", "true");
+  await expect(page.getByRole("menu", { name: "거래소", exact: true })).toBeVisible();
+});
