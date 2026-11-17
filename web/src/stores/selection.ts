@@ -2,6 +2,8 @@ import { create } from "zustand";
 import type { WindowId } from "../layout/kinds";
 import type { SystemMenuId } from "../features/system-settings/menus";
 import { chartWindows, DEFAULT_LAYOUT, useLayoutStore } from "./layout";
+import { useUiStore } from "./ui";
+import { activeWatchlist, useWatchlistStore } from "./watchlist";
 
 export interface ToastUndo {
   available(): boolean;
@@ -11,6 +13,7 @@ export interface ToastUndo {
 }
 
 export type SearchPurpose = "open" | "watch";
+export interface PutTarget { listId: string; groupId: string | null }
 export type IndicatorCommandMode = "current" | "add" | "compare";
 export type Dialog =
   | { kind: "search"; purpose: SearchPurpose }
@@ -28,8 +31,10 @@ interface SelectionState {
   inspector: InspectorRequest | null;
   phoneTab: PhoneTab;
   toast: null | { id: number; text: string; undo?: ToastUndo };
+  putTarget: PutTarget | null;
   setActiveCell(cellId: WindowId): void;
-  openSearch(purpose?: SearchPurpose): void;
+  openSearch(purpose?: SearchPurpose, putTarget?: PutTarget): void;
+  setPutTarget(putTarget: PutTarget | null): void;
   openIndicatorDialog(cellId: WindowId, mode: IndicatorCommandMode, indicatorId: string | null): void;
   openIndicatorInspector(cellId: WindowId, mode: IndicatorCommandMode, indicatorId: string | null): void;
   takeInspectorRequest(): InspectorRequest | null;
@@ -55,8 +60,10 @@ export const useSelectionStore = create<SelectionState>()((set, get) => ({
   inspector: null,
   phoneTab: "chart",
   toast: null,
+  putTarget: null,
   setActiveCell: (activeCell) => set((s) => (s.activeCell === activeCell ? s : { activeCell })),
-  openSearch: (purpose = "open") => set({ dialog: { kind: "search", purpose } }),
+  openSearch: (purpose = "open", putTarget) => set({ dialog: { kind: "search", purpose }, ...(putTarget ? { putTarget } : {}) }),
+  setPutTarget: (putTarget) => set({ putTarget }),
   openIndicatorDialog: (cellId, mode, indicatorId) => set({ dialog: { kind: "indicatorCommand", cellId, mode, indicatorId } }),
   openIndicatorInspector: (cellId, mode, indicatorId) => {
     set({ dialog: null, activeCell: cellId, inspector: { cellId, mode, indicatorId } });
@@ -75,3 +82,8 @@ export const useSelectionStore = create<SelectionState>()((set, get) => ({
   showToast: (text, undo) => set({ toast: { id: ++toastId, text, undo } }),
   clearToast: (id) => set((s) => (s.toast?.id === id ? { toast: null } : s)),
 }));
+
+useUiStore.subscribe((state, previous) => {
+  const { lists } = useWatchlistStore.getState();
+  if (activeWatchlist(lists, state.prefs.activeWatchlistId).id !== activeWatchlist(lists, previous.prefs.activeWatchlistId).id) useSelectionStore.getState().setPutTarget(null);
+});

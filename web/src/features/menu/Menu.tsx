@@ -1,4 +1,4 @@
-import { type ReactNode, type RefObject, useRef } from "react";
+import { type ReactNode, type RefObject, useEffect, useRef } from "react";
 import { Popover } from "../overlay/Popover";
 import { menuIndex, type Placement } from "../overlay/position";
 import { CheckIcon } from "../icons";
@@ -14,6 +14,13 @@ type Focusable = Extract<MenuItem, { onSelect(): void }>;
 
 const ROLE = { radio: "menuitemradio", check: "menuitemcheckbox", action: "menuitem" } as const;
 
+export interface MenuFilter {
+  label: string;
+  placeholder: string;
+  value: string;
+  onChange(value: string): void;
+}
+
 interface Props {
   label: string;
   items: readonly MenuItem[];
@@ -22,10 +29,11 @@ interface Props {
   className?: string;
   placement?: Placement;
   style?: React.CSSProperties;
+  filter?: MenuFilter;
   children?: ReactNode;
 }
 
-export function Menu({ label, items, onClose, root, className, placement, style, children }: Props) {
+export function Menu({ label, items, onClose, root, className, placement, style, filter, children }: Props) {
   const point = typeof style?.left === "number" && typeof style?.top === "number" ? { x: style.left, y: style.top } : undefined;
   const trigger = useRef<HTMLElement | null>(point ? null : root.current?.tagName === "BUTTON" ? root.current : root.current?.querySelector<HTMLElement>("[aria-expanded=true]") ?? root.current?.querySelector<HTMLElement>("button") ?? null);
   const focusTarget = useRef<HTMLElement | null>(point
@@ -38,14 +46,23 @@ export function Menu({ label, items, onClose, root, className, placement, style,
   const onKeyDown = (e: React.KeyboardEvent) => {
     const all = focusable();
     const i = all.findIndex((el) => el === document.activeElement);
+    const typing = e.target instanceof HTMLInputElement;
     e.stopPropagation();
     if (e.nativeEvent.isComposing) return;
-    if (["ArrowDown", "ArrowUp", "Home", "End"].includes(e.key)) {
+    if (typing && e.key === "Enter") {
       e.preventDefault();
-      all[menuIndex(all.map((b) => b.textContent ?? ""), i, e.key)]?.focus();
+      all[0]?.click();
+    } else if (["ArrowDown", "ArrowUp"].includes(e.key) || (!typing && ["Home", "End"].includes(e.key))) {
+      e.preventDefault();
+      all[menuIndex(all.map((b) => b.textContent ?? ""), i, typing && i < 0 && e.key === "ArrowUp" ? "End" : e.key)]?.focus();
     } else if (e.key === "Tab" && (!children || e.shiftKey || document.activeElement !== all.at(-1))) onClose(true);
-    else if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && e.key !== " ") {
+    else if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && e.key !== " " && !typing) {
       e.preventDefault();
+      if (filter) {
+        filter.onChange(filter.value + e.key);
+        e.currentTarget.querySelector("input")?.focus();
+        return;
+      }
       const now = Date.now();
       typed.current = { text: now - typed.current.at < 600 ? typed.current.text + e.key : e.key, at: now };
       all[menuIndex(all.map((b) => b.textContent?.trim() ?? ""), i, e.key, typed.current.text)]?.focus();
@@ -67,6 +84,7 @@ export function Menu({ label, items, onClose, root, className, placement, style,
       style={{ minWidth: style?.minWidth }}
       className={`z-40 flex min-w-[120px] flex-col whitespace-nowrap p-1 ${className ?? ""}`}
     >
+      {filter && <MenuFilterInput filter={filter} />}
       {items.map((item, i) => {
         if (item.kind === "separator") return <div key={i} role="separator" className="my-1 border-t border-line" />;
         if (item.kind === "heading") {
@@ -81,6 +99,14 @@ export function Menu({ label, items, onClose, root, className, placement, style,
       {children}
     </Popover>
   );
+}
+
+function MenuFilterInput({ filter }: { filter: MenuFilter }) {
+  const input = useRef<HTMLInputElement>(null);
+  useEffect(() => input.current?.focus(), []);
+  return <input ref={input} type="text" aria-label={filter.label} placeholder={filter.placeholder} value={filter.value} autoComplete="off" spellCheck={false}
+    onChange={(e) => filter.onChange(e.target.value)}
+    className="mb-1 h-8 flex-none rounded-m border border-line bg-transparent px-2 text-s text-text outline-none placeholder:text-text-3 focus:border-accent max-md:h-10" />;
 }
 
 function MenuButton({ item, onClose, register }: { item: Focusable; onClose: Props["onClose"]; register(el: HTMLButtonElement | null): void }) {

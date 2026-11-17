@@ -16,6 +16,8 @@ async function addToActiveList(page: Page, query: string, code: string) {
   await dialog.getByRole("combobox", { name: "종목 검색" }).fill(query);
   await dialog.getByRole("option").filter({ hasText: code }).first().click();
   await expect(panel(page).locator(`li[data-code="${code}"]`)).toBeVisible();
+  await dialog.getByRole("button", { name: "검색 닫기" }).click();
+  await expect(dialog).toBeHidden();
 }
 
 async function createList(page: Page, name: string) {

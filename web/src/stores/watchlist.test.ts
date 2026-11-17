@@ -232,3 +232,38 @@ test("그룹 행 빼기 되돌리기는 모든 그룹 순서와 공유 소속을
   commit(undo);
   expect(useWatchlistStore.getState().lists).toEqual(before);
 });
+
+const seedGroups = () => useWatchlistStore.getState().load([{ id: FIRST_WATCHLIST_ID, name: "기본", symbols: ["000660", "005930"], groups: [{ id: "g", name: "반도체", symbols: ["000660"] }] }]);
+
+test("그룹으로 넣기는 한 번의 편집이고 새 종목의 되돌리기는 목록에서도 뺀다", () => {
+  seedGroups();
+  const s = useWatchlistStore.getState();
+  const { outcome, undo } = s.put(FIRST_WATCHLIST_ID, "035420", "g");
+  expect(outcome).toBe("added");
+  const after = useWatchlistStore.getState();
+  expect(after.revision - s.revision).toBe(1);
+  expect(after.lists[0]).toEqual({ id: FIRST_WATCHLIST_ID, name: "기본", symbols: ["000660", "005930", "035420"], groups: [{ id: "g", name: "반도체", symbols: ["000660", "035420"] }] });
+  commit(undo!);
+  expect(useWatchlistStore.getState().lists[0]).toEqual({ id: FIRST_WATCHLIST_ID, name: "기본", symbols: ["000660", "005930"], groups: [{ id: "g", name: "반도체", symbols: ["000660"] }] });
+});
+
+test("이미 목록에 있던 종목의 되돌리기는 그 그룹에서만 뺀다", () => {
+  seedGroups();
+  const { outcome, undo } = useWatchlistStore.getState().put(FIRST_WATCHLIST_ID, "005930", "g");
+  expect(outcome).toBe("joined");
+  expect(useWatchlistStore.getState().lists[0]!.groups[0]!.symbols).toEqual(["000660", "005930"]);
+  commit(undo!);
+  expect(useWatchlistStore.getState().lists[0]).toEqual({ id: FIRST_WATCHLIST_ID, name: "기본", symbols: ["000660", "005930"], groups: [{ id: "g", name: "반도체", symbols: ["000660"] }] });
+});
+
+test("이미 있거나 그룹이 지워졌으면 편집도 되돌리기도 만들지 않고, 그 뒤의 편집은 되돌리기를 막는다", () => {
+  seedGroups();
+  const s = useWatchlistStore.getState();
+  expect(s.put(FIRST_WATCHLIST_ID, "000660", "g")).toEqual({ outcome: "already", undo: null });
+  expect(s.put(FIRST_WATCHLIST_ID, "035420", "gone")).toEqual({ outcome: "missing", undo: null });
+  expect(s.put("nope", "035420", null)).toEqual({ outcome: "missing", undo: null });
+  expect(useWatchlistStore.getState().revision).toBe(s.revision);
+  const { undo } = s.put(FIRST_WATCHLIST_ID, "035420", null);
+  s.add(FIRST_WATCHLIST_ID, "000001");
+  expect(undo!.available()).toBe(false);
+});

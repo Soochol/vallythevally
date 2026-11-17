@@ -65,6 +65,20 @@ const withGroups = (list: Watchlist, f: (groups: readonly WatchGroup[]) => reado
 const withoutCode = (groups: readonly WatchGroup[], code: SymbolCode): readonly WatchGroup[] =>
   groups.some((g) => g.symbols.includes(code)) ? groups.map((g) => g.symbols.includes(code) ? { ...g, symbols: g.symbols.filter((c) => c !== code) } : g) : groups;
 
+export type PutOutcome = "added" | "joined" | "already" | "missing";
+
+export function putSymbol(list: Watchlist, code: SymbolCode, groupId: string | null): { list: Watchlist; outcome: PutOutcome } {
+  const group = groupId === null ? null : list.groups.find((g) => g.id === groupId);
+  if (group === undefined) return { list, outcome: "missing" };
+  const member = list.symbols.includes(code);
+  if (group === null) return member ? { list, outcome: "already" } : { list: { ...list, symbols: [...list.symbols, code] }, outcome: "added" };
+  if (group.symbols.includes(code)) return { list, outcome: "already" };
+  return {
+    list: { ...list, symbols: member ? list.symbols : [...list.symbols, code], groups: list.groups.map((g) => g === group ? { ...g, symbols: [...g.symbols, code] } : g) },
+    outcome: member ? "joined" : "added",
+  };
+}
+
 export function removeSymbol(list: Watchlist, code: SymbolCode): Watchlist {
   if (!list.symbols.includes(code)) return list;
   return { ...list, symbols: list.symbols.filter((c) => c !== code), groups: [...withoutCode(list.groups, code)] };

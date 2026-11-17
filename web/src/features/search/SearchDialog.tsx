@@ -8,6 +8,8 @@ import { chartWindows, useLayoutStore } from "../../stores/layout";
 import { type SearchPurpose, useSelectionStore } from "../../stores/selection";
 import { useUiStore } from "../../stores/ui";
 import { useActiveWatchlist, useWatchlistStore } from "../../stores/watchlist";
+import { removalUndo } from "../watch/removalUndo";
+import { PutTargetPill } from "./PutTargetPill";
 import { type SearchCommand, searchCommandsSnapshot, subscribeSearchCommands } from "../commands/registry";
 import { CloseIcon, Icon, ICON_PATHS, SearchIcon } from "../icons";
 import { CommandFrame } from "../commands/CommandFrame";
@@ -41,6 +43,10 @@ function SearchDialogBody({ purpose }: { purpose: SearchPurpose }) {
   const [market, setMarket] = useState<MarketFilter>("all");
   const [active, setActive] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
+  const pillRef = useRef<HTMLButtonElement>(null);
+  const putTarget = useSelectionStore((s) => s.putTarget);
+  const putGroup = purpose === "watch" && putTarget?.listId === watchlist.id ? watchlist.groups.find((g) => g.id === putTarget.groupId) ?? null : null;
+  const putName = putGroup?.name ?? watchlist.name;
   const mode = searchMode(input);
   const query = mode.query;
   const filters = SEARCH_FILTERS[market];
@@ -65,18 +71,17 @@ function SearchDialogBody({ purpose }: { purpose: SearchPurpose }) {
     document.getElementById(`${ids}-opt-${activeIndex}`)?.scrollIntoView({ block: "nearest" });
   }, [activeIndex, ids, contents]);
 
-  const toggleOrAdd = (info: SymbolInfo, toggle: boolean) => {
+  const put = (info: SymbolInfo) => {
     const selection = useSelectionStore.getState();
-    const lists = useWatchlistStore.getState();
-    if (watchlist.symbols.includes(info.code)) {
-      if (toggle) {
-        lists.remove(watchlist.id, info.code);
-        selection.showToast(`${watchlist.name}에서 뺐습니다: ${info.name}`);
-      } else selection.showToast(`${info.name}은 이미 ${watchlist.name}에 있습니다`);
-    } else {
-      lists.add(watchlist.id, info.code);
-      selection.showToast(`${watchlist.name}에 넣었습니다: ${info.name}`);
-    }
+    const { outcome, undo } = useWatchlistStore.getState().put(watchlist.id, info.code, putGroup?.id ?? null);
+    if (outcome === "already") selection.showToast(`이미 ${putName}에 있습니다`);
+    else if (outcome === "added" || outcome === "joined") selection.showToast(`${info.name} · ${putName}에 넣었습니다`, removalUndo(undo) ?? undefined);
+  };
+  const toggleOrAdd = (info: SymbolInfo, toggle: boolean) => {
+    if (toggle && watchlist.symbols.includes(info.code)) {
+      useWatchlistStore.getState().remove(watchlist.id, info.code);
+      useSelectionStore.getState().showToast(`${watchlist.name}에서 뺐습니다: ${info.name}`);
+    } else put(info);
   };
   const chooseSymbol = (info: SymbolInfo, action: "open" | "watch" | "toggleWatch" | "compare") => {
     queryClient.setQueryData(["symbol", info.code], info);
@@ -93,6 +98,10 @@ function SearchDialogBody({ purpose }: { purpose: SearchPurpose }) {
       selection.showToast(`비교에 추가했습니다: ${info.name}`);
     } else if (action === "watch" || action === "toggleWatch") {
       toggleOrAdd(info, action === "toggleWatch");
+      if (purpose === "watch") {
+        inputRef.current?.focus();
+        return;
+      }
     } else {
       const { notice } = useLayoutStore.getState().setSymbol(cellId, info);
       if (notice) selection.showToast(notice);
@@ -118,6 +127,10 @@ function SearchDialogBody({ purpose }: { purpose: SearchPurpose }) {
     } else if (e.key === "Enter") {
       e.preventDefault();
       if (selected) choose(selected, e);
+    } else if (e.key === "Tab" && !e.shiftKey && purpose === "watch") {
+      e.preventDefault();
+      e.stopPropagation();
+      pillRef.current?.focus();
     }
   };
   const resetInput = () => { setInput(""); inputRef.current?.focus(); };
@@ -152,8 +165,9 @@ function SearchDialogBody({ purpose }: { purpose: SearchPurpose }) {
               onPointerMove={() => selectable && i !== activeIndex && setActive(i)} onClick={(e) => choose(row, e)}
               className="group/row flex min-h-[36px] cursor-pointer items-center gap-2 rounded-m px-3 py-1 text-s aria-selected:bg-accent-soft aria-disabled:cursor-default aria-disabled:opacity-70 max-md:min-h-[44px]">
               {row.kind === "symbol" ? <>
-                <WatchStar included={watchlist.symbols.includes(row.info.code)} disabled={!selectable} listName={watchlist.name} onToggle={() => toggleOrAdd(row.info, true)} />
+                <WatchStar included={watchlist.symbols.includes(row.info.code)} disabled={!selectable} addName={putName} removeName={watchlist.name} onToggle={() => toggleOrAdd(row.info, true)} />
                 <span className="min-w-0 flex-1"><span className="font-semibold"><Marked text={row.info.name} query={query} /></span> <span className="whitespace-nowrap text-xs text-text-3"><Marked text={row.info.code} query={query} /></span></span>
+                {putGroup?.symbols.includes(row.info.code) && <span className="max-w-[9rem] flex-none truncate text-[11px] text-text-2">✓ {putGroup.name}에 있음</span>}
                 <span className="rounded-s bg-raised px-1 text-xs text-text-3 max-md:hidden">{row.info.kind === "etf" ? KIND_LABEL.etf : MARKET_LABEL[row.info.market]}</span>
                 <QuoteValue quote={bySymbol.get(row.info.code)} />
               </> : <><Icon size={16} path="M4 17l5-6 4 3 7-9" /><span className="flex-1"><Marked text={row.command.label} query={query} /></span>{row.command.shortcut && <kbd>{row.command.shortcut}</kbd>}</>}
@@ -164,9 +178,13 @@ function SearchDialogBody({ purpose }: { purpose: SearchPurpose }) {
         </ul>
         {selected?.kind === "symbol" ? <SearchPreview key={selected.info.code} purpose={purpose} info={selected.info} quote={bySymbol.get(selected.info.code)} /> : <aside className="w-[280px] flex-none space-y-3 border-l border-line p-4 text-text-2 max-md:hidden"><h3 className="font-semibold text-text">{selected?.kind === "command" ? selected.command.label : "종목·명령 찾기"}</h3><p className="text-s">{selected?.kind === "command" ? "Enter를 눌러 실행합니다" : "종목을 고르면 현재가와 60일 추세를 볼 수 있습니다"}</p><p className="text-xs text-text-3">&gt;로 시작하면 명령만 찾습니다</p></aside>}
       </div>}
-      <div className="flex flex-none flex-wrap items-center gap-2 border-t border-line px-4 py-2 text-xs text-text-3">
-        <span><kbd>↑↓</kbd> 고르기</span><span><kbd>↵</kbd> {purpose === "watch" ? "관심종목에 넣기" : "열기"}</span><span><kbd>☆·Ctrl+↵</kbd> 관심종목</span><span><kbd>Shift+↵</kbd> 비교</span><span><kbd>Esc</kbd> 닫기</span>
-      </div>
+      {purpose === "watch" ? <div className="flex flex-none items-center gap-3 border-t border-line px-4 py-2 text-xs text-text-3 max-md:px-3">
+        <PutTargetPill list={watchlist} group={putGroup} pillRef={pillRef} onBack={() => inputRef.current?.focus()} onType={(char) => { setInput((value) => value + char); inputRef.current?.focus(); }} />
+        <span className="flex-1" />
+        <span className="whitespace-nowrap max-md:hidden"><kbd>↵</kbd> 넣기</span><span className="whitespace-nowrap max-md:hidden"><kbd>Tab</kbd> 넣을 곳</span><span className="whitespace-nowrap max-md:hidden"><kbd>Esc</kbd> 닫기</span>
+      </div> : <div className="flex flex-none flex-wrap items-center gap-2 border-t border-line px-4 py-2 text-xs text-text-3">
+        <span><kbd>↑↓</kbd> 고르기</span><span><kbd>↵</kbd> 열기</span><span><kbd>☆·Ctrl+↵</kbd> 관심종목</span><span><kbd>Shift+↵</kbd> 비교</span><span><kbd>Esc</kbd> 닫기</span>
+      </div>}
     </div>
   </CommandFrame>;
 }
@@ -175,8 +193,8 @@ function Marked({ text, query }: { text: string; query: string }) {
   return highlight(text, query).map((seg, i) => seg.match ? <mark key={i} className="bg-transparent font-bold text-accent">{seg.text}</mark> : seg.text);
 }
 
-function WatchStar({ included, disabled, listName, onToggle }: { included: boolean; disabled: boolean; listName: string; onToggle: () => void }) {
-  return <><span className="sr-only">{included ? "관심종목" : ""}</span><span aria-hidden="true" title={disabled ? undefined : `${listName}${included ? "에서 빼기" : "에 넣기"} · Ctrl+↵`}
+function WatchStar({ included, disabled, addName, removeName, onToggle }: { included: boolean; disabled: boolean; addName: string; removeName: string; onToggle: () => void }) {
+  return <><span className="sr-only">{included ? "관심종목" : ""}</span><span aria-hidden="true" title={disabled ? undefined : `${included ? `${removeName}에서 빼기` : `${addName}에 넣기`} · Ctrl+↵`}
     onPointerMove={(e) => e.stopPropagation()} onMouseDown={(e) => e.preventDefault()}
     onClick={(e) => { e.stopPropagation(); if (!disabled) onToggle(); }}
     className={`group/star flex h-5 w-5 flex-none items-center justify-center rounded-s ${disabled ? "" : "hover:bg-hover"} ${included ? "text-warning" : "text-text-3 opacity-0 group-hover/row:opacity-100 group-aria-selected/row:opacity-100"} ${disabled ? "" : "hover:text-warning"}`}>
