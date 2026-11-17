@@ -1,13 +1,13 @@
 use crate::app::{AppState, Shared, authenticate};
 use crate::error::ApiError;
-use crate::setup_store::{Checked, Outcome};
+use crate::setup_store::{Checked, Outcome, SetupDocument};
 use axum::body::Bytes;
 use axum::extract::{DefaultBodyLimit, RawQuery, State};
 use axum::http::HeaderMap;
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use serde::{Deserialize, Serialize};
-use setup::Document;
+use serde_json::value::RawValue;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
@@ -26,14 +26,14 @@ pub fn routes() -> Router<Arc<AppState>> {
 
 #[derive(Deserialize)]
 struct PushRequest {
-    documents: Vec<serde_json::Value>,
+    documents: Vec<Box<RawValue>>,
 }
 
 #[derive(Serialize)]
 #[serde(tag = "status", rename_all = "snake_case")]
 enum PushStatus {
     Accepted { seq: i64 },
-    Stale { document: Document },
+    Stale { document: SetupDocument },
     Rejected { reason: String },
 }
 
@@ -51,8 +51,18 @@ struct PushResponse {
     seq: i64,
 }
 
-fn echoed(raw: &serde_json::Value, field: &str) -> Option<String> {
-    raw.get(field).and_then(serde_json::Value::as_str).map(str::to_owned)
+#[derive(Deserialize, Default)]
+struct Labels {
+    #[serde(default)]
+    kind: serde_json::Value,
+    #[serde(default)]
+    id: serde_json::Value,
+}
+
+fn labels_of(raw: &RawValue) -> (Option<String>, Option<String>) {
+    let labels: Labels = serde_json::from_str(raw.get()).unwrap_or_default();
+    let text = |value: serde_json::Value| value.as_str().map(str::to_owned);
+    (text(labels.kind), text(labels.id))
 }
 
 async fn push(State(state): Shared, headers: HeaderMap, body: Bytes) -> Result<Json<PushResponse>, ApiError> {
@@ -62,13 +72,14 @@ async fn push(State(state): Shared, headers: HeaderMap, body: Bytes) -> Result<J
     if request.documents.len() > MAX_PUSH_DOCUMENTS {
         return Err(ApiError::invalid_request(format!("한 번에 문서 {MAX_PUSH_DOCUMENTS}개까지 보냅니다")));
     }
-    let labels: Vec<_> = request.documents.iter().map(|raw| (echoed(raw, "kind"), echoed(raw, "id"))).collect();
+    let labels: Vec<_> = request.documents.iter().map(|raw| labels_of(raw)).collect();
+    let now_millis = state.clock.now().0.saturating_mul(1000);
     let mut seen = HashSet::new();
     let parsed: Vec<_> = request
         .documents
         .into_iter()
         .map(|raw| {
-            let checked = Checked::parse(raw)?;
+            let checked = Checked::parse(&raw, now_millis)?;
             if seen.insert((checked.document.kind, checked.document.id.clone())) {
                 Ok(checked)
             } else {
@@ -112,7 +123,7 @@ fn query_number(query: &HashMap<String, String>, name: &str, default: i64, range
 
 #[derive(Serialize)]
 struct ChangesResponse {
-    documents: Vec<Document>,
+    documents: Vec<SetupDocument>,
     seq: i64,
     more: bool,
 }

@@ -378,3 +378,51 @@ async fn a_document_repeated_in_one_request_is_rejected_after_its_first_appearan
     assert_eq!(statuses(&fresh), ["accepted", "rejected"]);
     assert_eq!(account.changes("since=1").await["documents"], json!([live("drawing", "D1", 1, json!({}))]));
 }
+
+const DAY_MILLIS: i64 = 24 * 60 * 60 * 1000;
+
+#[tokio::test]
+async fn a_revision_far_ahead_of_the_server_clock_is_rejected_and_no_accepted_revision_locks_a_document_for_good() {
+    let harness = Harness::start().await;
+    let account = Account::login(&harness, "a").await;
+    let now_millis = START_TIME * 1000;
+    let ceiling = now_millis + DAY_MILLIS;
+
+    for revision in [ceiling + 1, i64::MAX - 1, i64::MAX] {
+        let response = account.push(json!([live("layout", "L1", revision, json!({"locked": true})), gone("drawing", "D1", revision)])).await;
+        assert_eq!(statuses(&response), ["rejected", "rejected"]);
+        assert_eq!(response["seq"], 0);
+    }
+    assert_eq!(account.summary().await["documents"], 0);
+
+    assert_eq!(statuses(&account.push(json!([live("layout", "L1", now_millis, json!({"v": 1}))])).await), ["accepted"]);
+    assert_eq!(statuses(&account.push(json!([live("layout", "L1", now_millis, json!({"v": 2}))])).await), ["stale"]);
+    assert_eq!(statuses(&account.push(json!([live("layout", "L1", ceiling, json!({"v": 3}))])).await), ["accepted"]);
+
+    assert_eq!(statuses(&account.push(json!([gone("layout", "L1", ceiling + 1)])).await), ["rejected"]);
+    harness.clock.advance(3600);
+    assert_eq!(statuses(&account.push(json!([gone("layout", "L1", ceiling + 1)])).await), ["accepted"]);
+    assert_eq!(account.changes("since=0").await["documents"], json!([gone("layout", "L1", ceiling + 1)]));
+}
+
+#[tokio::test]
+async fn a_body_comes_back_from_changes_and_stale_byte_for_byte_as_it_was_sent() {
+    let harness = Harness::start().await;
+    let account = Account::login(&harness, "a").await;
+    let body = r#"{"z":1, "a":[1,  2],"dup":1,"dup":2,"big":18446744073709551617,"exp":1e2,"fraction":0.10,"text":"é\/"}"#;
+    let request = format!(r#"{{"documents":[{{"kind":"layout","id":"L1","revision":5,"deleted":false,"body":{body}}}]}}"#);
+    let send = |request: String| {
+        harness.http.post(format!("{}/v1/setup/push", harness.base)).bearer_auth(&account.token).header("content-type", "application/json").body(request).send()
+    };
+
+    let pushed = send(request).await.unwrap();
+    assert_eq!(pushed.status(), 200);
+    assert!(pushed.text().await.unwrap().contains(r#""status":"accepted""#));
+
+    let changes = harness.http.get(format!("{}/v1/setup/changes?since=0", harness.base)).bearer_auth(&account.token).send().await.unwrap().text().await.unwrap();
+    assert!(changes.contains(&format!(r#""body":{body}}}"#)), "changes 본문이 달라졌다: {changes}");
+
+    let stale = send(r#"{"documents":[{"kind":"layout","id":"L1","revision":4,"deleted":false,"body":{}}]}"#.to_owned()).await.unwrap().text().await.unwrap();
+    assert!(stale.contains(r#""status":"stale""#));
+    assert!(stale.contains(&format!(r#""body":{body}}}"#)), "stale 본문이 달라졌다: {stale}");
+}

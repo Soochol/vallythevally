@@ -21,7 +21,7 @@ use url::Url;
 pub(crate) struct AppState {
     pub(crate) store: Store,
     idp: IdpClient,
-    clock: Arc<dyn Clock>,
+    pub(crate) clock: Arc<dyn Clock>,
     cookie_name: &'static str,
     secure_cookie: bool,
 }
