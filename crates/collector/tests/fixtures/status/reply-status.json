@@ -1,0 +1,55 @@
+{
+  "v": 1,
+  "type": "status",
+  "sent_at": "2026-11-18T09:00:05+09:00",
+  "status": {
+    "date": 20261118,
+    "phase": "collecting",
+    "today": {
+      "planned_stocks": 6,
+      "receiving_stocks": 3,
+      "register_failed_batches": 0,
+      "disconnected_stocks": 0,
+      "handed_off_stocks": 3,
+      "excluded_stocks": 2
+    },
+    "keys": [
+      {
+        "name": "collect-01",
+        "app_key_hash_prefix": "1a2b3c4d",
+        "role": "collecting",
+        "state": "receiving",
+        "stocks": 3,
+        "messages_per_second": 10.0,
+        "register_failures": 0,
+        "restarts": 0,
+        "rest": { "planned_jobs": 0, "finished_jobs": 0 }
+      },
+      {
+        "name": "collect-02",
+        "app_key_hash_prefix": "5e6f7a8b",
+        "role": "collecting",
+        "state": "handed_off",
+        "stocks": 0,
+        "messages_per_second": null,
+        "register_failures": 0,
+        "restarts": 5,
+        "rest": { "planned_jobs": 0, "finished_jobs": 0 }
+      }
+    ],
+    "universe_changes": null,
+    "observation_day": null,
+    "alerts": [
+      {
+        "at": "2026-11-18T07:35:00+09:00",
+        "kind": "excluded",
+        "message": "키 용량이 모자라 2종목을 수집에서 제외했습니다"
+      },
+      {
+        "at": "2026-11-18T08:41:12+09:00",
+        "kind": "handoff",
+        "message": "collect-02의 3종목을 spare-01에 인계했습니다"
+      }
+    ]
+  }
+}

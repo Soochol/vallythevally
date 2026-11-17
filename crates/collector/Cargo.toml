@@ -22,7 +22,7 @@ domain = { path = "../domain" }
 axum = "0.8"
 brotli = "9"
 futures = "0.3"
-rustix = { version = "1", features = ["process"] }
+rustix = { version = "1", features = ["process", "fs"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["float_roundtrip", "raw_value"] }
 tempfile = "3"

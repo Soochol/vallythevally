@@ -12,24 +12,32 @@ use crate::collect::config::{Variables, default_state_folder, process_variables}
 use crate::collect::start::{KIWOOM_BASE_URL, forward_termination_signals, init_logging};
 use crate::keys::KeyList;
 
+mod api;
 mod daemon;
+mod files;
 mod handoff;
 mod journal;
 mod process;
 mod settings;
+mod status_command;
 mod status;
 mod tokens;
+mod wire;
 
 pub use daemon::{Control, Injected, Inputs, StartError, Supervisor, load_plan};
 pub use handoff::{STOCK_TYPES, effective_plan, registrations_of};
 pub use journal::{JOURNAL_VERSION, JournalEvent, journal_path, kst_stamp};
 pub use process::{ChildMessage, ChildProcess, FORWARDED_VARIABLES, Launcher, Spawned, TokioLauncher};
-pub use settings::Settings;
-pub use status::{DaemonStatus, KeyState, KeyStatus};
+pub use settings::{Settings, SocketSetting};
+pub use status_command::run as run_status;
+pub use status::{Alert, AlertKind, DaemonStatus, DayPhase, KeyState, KeyStatus, ObservationDay, ObservationVerdict, RestProgress, Today};
+pub use api::{MAX_CONNECTIONS, OUTBOX_LINES, SOCKET_FILE_NAME};
+pub use files::{read_coverage, read_disk};
+pub use wire::{API_VERSION, CoverageDay, CoverageState, DayBytes, DiskUsage, ErrorCode, Filesystem, Reply, ReplyBody, Request, RequestKind};
 
 pub const REST_URL_VARIABLE: &str = "VALLY_COLLECTOR_REST_URL";
 
-const SPEC: ArgSpec = ArgSpec { value_options: &["date", "keys", "state"], flag_options: &[] };
+const SPEC: ArgSpec = ArgSpec { value_options: &["date", "keys", "state", "socket"], flag_options: &[] };
 
 pub fn rest_base_url(variables: &Variables) -> Result<String, String> {
     let Some(url) = variables.get(REST_URL_VARIABLE).filter(|url| !url.is_empty()) else {
@@ -66,6 +74,11 @@ pub fn run(raw_arguments: &[String]) -> ExitCode {
             Err(error) => return usage_error(error),
         },
     };
+    let socket_given = arguments.value("socket").is_some();
+    let socket = match status_command::socket_path(&arguments, &process) {
+        Ok(socket) => socket,
+        Err(message) => return usage_error(message),
+    };
     let rest_url = match rest_base_url(&process) {
         Ok(url) => url,
         Err(message) => return usage_error(message),
@@ -98,7 +111,7 @@ pub fn run(raw_arguments: &[String]) -> ExitCode {
             transport: Arc::new(transport),
             clock: Clock::system(),
         };
-        let supervisor = match Supervisor::start(Inputs { plan, keys: keys.active, data_dir, settings: Settings::default() }, injected) {
+        let supervisor = match Supervisor::start(Inputs { plan, keys: keys.active, data_dir, settings: Settings { status_socket: Some(SocketSetting { path: socket, required: socket_given }), ..Settings::default() } }, injected) {
             Ok(supervisor) => supervisor,
             Err(error) => {
                 eprintln!("supervise: 시작하지 못했습니다: {error}");
