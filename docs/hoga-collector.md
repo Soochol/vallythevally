@@ -519,7 +519,7 @@ data/hoga/calendar/
 ```
 
 - 특일정보는 올해와 지난해를 받고 12월에는 내년도 받는다. 올해(와 내년) 캐시는 받은 달이 이번 달이 아니면 다시 받고, 지난해 캐시는 다시 받지 않는다. 받기가 실패하면 캐시를 쓰고 근거에 그렇게 적는다. 캐시도 없으면 그 해의 날짜는 "모름"이다. 공휴일이 0건인 응답은 잘못된 응답으로 보고 캐시에 쓰지 않는다.
-- 서비스 키는 파일 한 개에 적고 `read_service_key`가 `Secret`으로 읽는다. 캐시, 근거, 오류 문구에 나오지 않는다. 실제 HTTP는 `HolidayTransport`를 구현해 주입한다.
+- 서비스 키는 파일 한 개에 적고 `read_service_key`가 `Secret`으로 읽는다. 캐시, 근거, 오류 문구에 나오지 않는다. 실제 HTTP는 `ReqwestHolidayTransport`(`calendar/http.rs`)가 한다. 기본 주소는 `https://apis.data.go.kr/B090041/openapi/service/SpcdeInfoService`이고 `with_base_url`로 바꿔 시험 서버에 붙인다. 요청은 `getRestDeInfo`에 `solYear`, `_type=json`, `numOfRows=100`, `ServiceKey`를 쿼리로 보낸다(`solMonth`는 보내지 않아 한 해를 한 번에 받는다). 키가 든 URL은 오류 문구와 로그에 남기지 않는다(reqwest 오류에서 URL을 떼고, 리다이렉트는 따라가지 않는다). 키 파일에는 공공데이터포털의 Decoding 키를 적는다. 요청을 만들 때 값을 URL 인코딩하므로 Encoding 키를 적으면 이중으로 인코딩돼 서비스 오류가 난다. 실제 HTTP를 구현해 주입할 수도 있다(`HolidayTransport`).
 - 수정 파일 형식이다. `date`는 YYYYMMDD 숫자, `reason`은 근거에 그대로 보인다. 같은 날을 두 번 적을 수 없다. 형식이 틀리면 쉬는 날이 아닌 날의 판단이 "모름"이다.
 
   ```json
@@ -531,6 +531,37 @@ data/hoga/calendar/
 
 - `Calendar::judge`는 `Judgment`(관측일 여부, 개장 분, 근거 목록)를 낸다. `next_observation_day`, `observation_days_after`, `observation_days_before`가 관측일을 센다. `cross_check`는 지수 일봉의 날짜 목록과 그날 판단을 대조한다. 목록이 비었거나 그날이 목록의 가장 이른 날짜보다 앞이면 판단하지 않는다. 마지막 일봉 뒤의 날은 일봉이 없는 것으로 보므로 마감 뒤에 부른다.
 - 시험은 `python3 scripts/dev.py cargo test -p collector --test calendar`와 `--lib calendar`다. 합성 응답만 쓴다.
+
+## 특일정보 첫 실제 호출 확인
+
+`ReqwestHolidayTransport`의 응답 해석(`response.body.items.item`, `locdate`, `isHoliday`, `dateName`, `totalCount`)은 공공데이터포털 관례를 가정한 것이고 실제 응답으로 확인한 적이 없다. 처음 켜기 전에 사람이 한 번 직접 불러 아래를 비교한다. 자동 시험과 자동 작업은 이 호출을 하지 않는다.
+
+1. **키를 파일에 둔다.** 화면에 찍히거나 셸 기록에 남지 않게 입력 없이 읽는다. 권한은 600이고 저장소 밖에 둔다.
+
+   ```sh
+   install -m 600 /dev/null ~/.config/holiday-service-key
+   read -rs HOLIDAY_KEY && printf '%s' "$HOLIDAY_KEY" > ~/.config/holiday-service-key; unset HOLIDAY_KEY
+   ```
+2. **한 해를 한 번 부른다.** 키는 `curl`이 파일에서 읽어 인코딩하므로 명령줄에도 남지 않는다. 응답은 `-o`로 파일에만 쓰고 화면에 찍지 않는다. 오류 출력에 URL이 나올 수 있으니 `-sS` 대신 `-s`를 쓰고 상태 코드만 본다.
+
+   ```sh
+   curl -s -G -o holidays-2026.json -w '%{http_code}\n' \
+     --data-urlencode 'solYear=2026' --data-urlencode '_type=json' --data-urlencode 'numOfRows=100' \
+     --data-urlencode 'ServiceKey@'"$HOME"/.config/holiday-service-key \
+     https://apis.data.go.kr/B090041/openapi/service/SpcdeInfoService/getRestDeInfo
+   ```
+
+   `200`이 아니거나 파일이 JSON이 아니면 여기서 멈춘다. 파일에 키가 들어 있지 않은지 `grep -cF -f ~/.config/holiday-service-key holidays-2026.json`으로 확인하고, 서비스 오류 응답이 키를 되돌려 보냈다면 파일을 지운다. 파일은 저장소 밖이나 작업 폴더의 무시되는 위치에 둔다.
+3. **모양을 비교한다.** `jq '.response.header, .response.body.totalCount, (.response.body.items.item | type)' holidays-2026.json`로 아래를 확인한다.
+   - `header.resultCode`가 `"00"`이다.
+   - `items.item`이 배열이고 `totalCount`가 배열 길이와 같다. 한 해에 1건뿐인 경우는 없으므로 객체가 나오면 가정과 다른 것이다.
+   - 각 항목의 `locdate`가 `YYYYMMDD` 숫자(문자열이어도 읽는다), `isHoliday`가 `"Y"`, `dateName`이 문자열이다.
+   - 날짜가 모두 2026년이고, 1월 1일·삼일절 대체공휴일 등 알려진 날이 있다. 달력과 대조한다.
+   - 같은 날이 두 항목으로 나오면(공휴일이 일요일과 겹칠 때) 판단 모듈이 이름을 `, `로 합친다.
+4. **한 항목과 0건 모양을 확인한다.** `solMonth`를 더해 공휴일이 하나뿐인 달(예: `solMonth=01`)과 없는 달(예: `solMonth=07`)을 부르고 `items.item`이 객체, `items`가 빈 문자열(또는 비었음)로 오는지 본다. 가정과 다르면 `parse_holiday_response`와 이 문서를 고친다.
+5. **수집 쪽에서 확인한다.** 가정과 같으면 `collector`가 받은 뒤 `data/hoga/calendar/holidays-2026.json`의 `holidays`가 위 응답의 `isHoliday`가 `Y`인 항목과 같은지 본다. 로그에 키나 URL이 없는지도 한 번 훑는다.
+
+다르면 키와 URL을 어디에도 붙여 넣지 말고 달라진 필드 이름과 타입만 적어 알린다. 확인이 끝나면 `holidays-2026.json`과 키 파일 안의 값이 남아 있지 않게 정리한다.
 
 ## 키 목록 설정
 
