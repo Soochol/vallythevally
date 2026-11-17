@@ -518,7 +518,7 @@ pub struct StockFundamentals {
 #[serde(try_from = "BasicInfoRow")]
 pub enum StockBasicInfoResponse {
     UnknownSymbol,
-    Found { kiwoom_code: String, fundamentals: StockFundamentals },
+    Found { kiwoom_code: String, fundamentals: Box<StockFundamentals> },
 }
 
 const WON_PER_EOK: u64 = 100_000_000;
@@ -549,7 +549,7 @@ impl TryFrom<BasicInfoRow> for StockBasicInfoResponse {
             upper_limit_won: optional(&r.upl_pric, unsigned)?,
             lower_limit_won: optional(&r.lst_pric, unsigned)?,
         };
-        Ok(StockBasicInfoResponse::Found { kiwoom_code: r.stk_cd, fundamentals })
+        Ok(StockBasicInfoResponse::Found { kiwoom_code: r.stk_cd, fundamentals: Box::new(fundamentals) })
     }
 }
 
@@ -1221,7 +1221,7 @@ mod tests {
 
     fn basic_info(name: &str) -> StockFundamentals {
         match serde_json::from_str(&fixture(name)).unwrap() {
-            StockBasicInfoResponse::Found { fundamentals, .. } => fundamentals,
+            StockBasicInfoResponse::Found { fundamentals, .. } => *fundamentals,
             StockBasicInfoResponse::UnknownSymbol => panic!("{name}: UnknownSymbol"),
         }
     }
