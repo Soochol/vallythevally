@@ -65,11 +65,22 @@ function SearchDialogBody({ purpose }: { purpose: SearchPurpose }) {
     document.getElementById(`${ids}-opt-${activeIndex}`)?.scrollIntoView({ block: "nearest" });
   }, [activeIndex, ids, contents]);
 
+  const toggleOrAdd = (info: SymbolInfo, toggle: boolean) => {
+    const selection = useSelectionStore.getState();
+    const lists = useWatchlistStore.getState();
+    if (watchlist.symbols.includes(info.code)) {
+      if (toggle) {
+        lists.remove(watchlist.id, info.code);
+        selection.showToast(`${watchlist.name}에서 뺐습니다: ${info.name}`);
+      } else selection.showToast(`${info.name}은 이미 ${watchlist.name}에 있습니다`);
+    } else {
+      lists.add(watchlist.id, info.code);
+      selection.showToast(`${watchlist.name}에 넣었습니다: ${info.name}`);
+    }
+  };
   const chooseSymbol = (info: SymbolInfo, action: "open" | "watch" | "toggleWatch" | "compare") => {
     queryClient.setQueryData(["symbol", info.code], info);
     const selection = useSelectionStore.getState();
-    const lists = useWatchlistStore.getState();
-    const included = watchlist.symbols.includes(info.code);
     if (action === "compare") {
       const layout = useLayoutStore.getState();
       const cell = chartWindows(layout.layout).find((c) => c.id === cellId);
@@ -81,14 +92,7 @@ function SearchDialogBody({ purpose }: { purpose: SearchPurpose }) {
       layout.addCompare(cellId, info.code);
       selection.showToast(`비교에 추가했습니다: ${info.name}`);
     } else if (action === "watch" || action === "toggleWatch") {
-      if (included && action === "toggleWatch") {
-        lists.remove(watchlist.id, info.code);
-        selection.showToast(`${watchlist.name}에서 뺐습니다: ${info.name}`);
-      } else if (included) selection.showToast(`${info.name}은 이미 ${watchlist.name}에 있습니다`);
-      else {
-        lists.add(watchlist.id, info.code);
-        selection.showToast(`${watchlist.name}에 넣었습니다: ${info.name}`);
-      }
+      toggleOrAdd(info, action === "toggleWatch");
     } else {
       const { notice } = useLayoutStore.getState().setSymbol(cellId, info);
       if (notice) selection.showToast(notice);
@@ -146,11 +150,9 @@ function SearchDialogBody({ purpose }: { purpose: SearchPurpose }) {
             <li id={optionId(i)} role="option" aria-selected={i === activeIndex} aria-disabled={!selectable}
               data-symbol={row.kind === "symbol" && selectable ? row.info.code : undefined}
               onPointerMove={() => selectable && i !== activeIndex && setActive(i)} onClick={(e) => choose(row, e)}
-              className="flex min-h-[36px] cursor-pointer items-center gap-2 rounded-m px-3 py-1 text-s aria-selected:bg-accent-soft aria-disabled:cursor-default aria-disabled:opacity-70 max-md:min-h-[44px]">
+              className="group/row flex min-h-[36px] cursor-pointer items-center gap-2 rounded-m px-3 py-1 text-s aria-selected:bg-accent-soft aria-disabled:cursor-default aria-disabled:opacity-70 max-md:min-h-[44px]">
               {row.kind === "symbol" ? <>
-                <span className={`w-4 flex-none ${watchlist.symbols.includes(row.info.code) ? "text-warning" : "text-text-3"}`} aria-label={watchlist.symbols.includes(row.info.code) ? "관심종목" : undefined}>
-                  {watchlist.symbols.includes(row.info.code) && <Icon size={14} path={ICON_PATHS.star} fill="currentColor" />}
-                </span>
+                <WatchStar included={watchlist.symbols.includes(row.info.code)} disabled={!selectable} listName={watchlist.name} onToggle={() => toggleOrAdd(row.info, true)} />
                 <span className="min-w-0 flex-1"><span className="font-semibold"><Marked text={row.info.name} query={query} /></span> <span className="whitespace-nowrap text-xs text-text-3"><Marked text={row.info.code} query={query} /></span></span>
                 <span className="rounded-s bg-raised px-1 text-xs text-text-3 max-md:hidden">{row.info.kind === "etf" ? KIND_LABEL.etf : MARKET_LABEL[row.info.market]}</span>
                 <QuoteValue quote={bySymbol.get(row.info.code)} />
@@ -163,7 +165,7 @@ function SearchDialogBody({ purpose }: { purpose: SearchPurpose }) {
         {selected?.kind === "symbol" ? <SearchPreview key={selected.info.code} purpose={purpose} info={selected.info} quote={bySymbol.get(selected.info.code)} /> : <aside className="w-[280px] flex-none space-y-3 border-l border-line p-4 text-text-2 max-md:hidden"><h3 className="font-semibold text-text">{selected?.kind === "command" ? selected.command.label : "종목·명령 찾기"}</h3><p className="text-s">{selected?.kind === "command" ? "Enter를 눌러 실행합니다" : "종목을 고르면 현재가와 60일 추세를 볼 수 있습니다"}</p><p className="text-xs text-text-3">&gt;로 시작하면 명령만 찾습니다</p></aside>}
       </div>}
       <div className="flex flex-none flex-wrap items-center gap-2 border-t border-line px-4 py-2 text-xs text-text-3">
-        <span><kbd>↑↓</kbd> 고르기</span><span><kbd>↵</kbd> {purpose === "watch" ? "관심종목에 넣기" : "열기"}</span><span><kbd>Ctrl+↵</kbd> 관심종목</span><span><kbd>Shift+↵</kbd> 비교</span><span><kbd>Esc</kbd> 닫기</span>
+        <span><kbd>↑↓</kbd> 고르기</span><span><kbd>↵</kbd> {purpose === "watch" ? "관심종목에 넣기" : "열기"}</span><span><kbd>☆·Ctrl+↵</kbd> 관심종목</span><span><kbd>Shift+↵</kbd> 비교</span><span><kbd>Esc</kbd> 닫기</span>
       </div>
     </div>
   </CommandFrame>;
@@ -171,4 +173,13 @@ function SearchDialogBody({ purpose }: { purpose: SearchPurpose }) {
 
 function Marked({ text, query }: { text: string; query: string }) {
   return highlight(text, query).map((seg, i) => seg.match ? <mark key={i} className="bg-transparent font-bold text-accent">{seg.text}</mark> : seg.text);
+}
+
+function WatchStar({ included, disabled, listName, onToggle }: { included: boolean; disabled: boolean; listName: string; onToggle: () => void }) {
+  return <><span className="sr-only">{included ? "관심종목" : ""}</span><span aria-hidden="true" title={disabled ? undefined : `${listName}${included ? "에서 빼기" : "에 넣기"} · Ctrl+↵`}
+    onPointerMove={(e) => e.stopPropagation()} onMouseDown={(e) => e.preventDefault()}
+    onClick={(e) => { e.stopPropagation(); if (!disabled) onToggle(); }}
+    className={`group/star flex h-5 w-5 flex-none items-center justify-center rounded-s ${disabled ? "" : "hover:bg-hover"} ${included ? "text-warning" : "text-text-3 opacity-0 group-hover/row:opacity-100 group-aria-selected/row:opacity-100"} ${disabled ? "" : "hover:text-warning"}`}>
+    <Icon size={14} path={ICON_PATHS.star} fill={included ? "currentColor" : "none"} />
+  </span></>;
 }
