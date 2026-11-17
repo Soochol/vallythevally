@@ -18,15 +18,15 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use url::Url;
 
-struct AppState {
-    store: Store,
+pub(crate) struct AppState {
+    pub(crate) store: Store,
     idp: IdpClient,
     clock: Arc<dyn Clock>,
     cookie_name: &'static str,
     secure_cookie: bool,
 }
 
-type Shared = State<Arc<AppState>>;
+pub(crate) type Shared = State<Arc<AppState>>;
 
 pub fn router(config: AccountConfig, pool: SqlitePool, clock: Arc<dyn Clock>) -> Router {
     let secure_cookie = config.public_url.is_secure();
@@ -43,9 +43,10 @@ pub fn router(config: AccountConfig, pool: SqlitePool, clock: Arc<dyn Clock>) ->
         .route("/v1/auth/token", post(exchange_token).delete(revoke_token))
         .route("/v1/me", get(me))
         .route("/v1/account", delete(delete_account))
+        .layer(DefaultBodyLimit::max(4096))
+        .merge(crate::setup_api::routes())
         .fallback(|| async { ApiError::not_found() })
         .method_not_allowed_fallback(|| async { ApiError::method_not_allowed() })
-        .layer(DefaultBodyLimit::max(4096))
         .layer(axum::middleware::map_response(no_store))
         .with_state(state)
 }
@@ -222,7 +223,7 @@ async fn exchange_token(State(state): Shared, body: Bytes) -> Result<Json<TokenR
     Ok(Json(TokenResponse { token, account: AccountRef { id: account.id, provider: account.provider } }))
 }
 
-async fn authenticate(state: &AppState, headers: &HeaderMap) -> Result<(String, String), ApiError> {
+pub(crate) async fn authenticate(state: &AppState, headers: &HeaderMap) -> Result<(String, String), ApiError> {
     let token = headers
         .get("authorization")
         .and_then(|value| value.to_str().ok())

@@ -8,6 +8,8 @@ mod idp;
 mod model;
 mod secrets;
 pub mod settings;
+mod setup_api;
+mod setup_store;
 mod store;
 
 pub use app::router;

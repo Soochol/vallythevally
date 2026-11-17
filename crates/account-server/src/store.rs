@@ -46,7 +46,7 @@ pub struct AccountView {
 
 #[derive(Clone)]
 pub struct Store {
-    pool: SqlitePool,
+    pub(crate) pool: SqlitePool,
 }
 
 impl Store {
