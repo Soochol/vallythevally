@@ -783,7 +783,7 @@ impl Supervisor {
 fn can_receive_share(phase: &Phase) -> bool {
     match phase {
         Phase::Backoff { .. } => true,
-        Phase::Running(running) => running.retiring.is_none(),
+        Phase::Running(running) => running.retiring.as_ref().is_none_or(|retiring| retiring.then == Then::Restart),
         Phase::Stopped | Phase::HandedOff => false,
     }
 }

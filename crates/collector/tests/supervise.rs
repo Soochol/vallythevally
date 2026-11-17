@@ -669,20 +669,40 @@ fn the_plan_after_a_handoff_still_has_every_stock_on_exactly_one_key() {
     assert_eq!(effective_plan(&plan, None), plan);
 }
 
-#[tokio::test(start_paused = true)]
-async fn a_spare_that_is_already_being_ended_does_not_take_a_share() {
-    let world = World::start_with(plan_for(2, 3), Settings::default(), |launcher, transport| {
-        launcher.stubborn.store(true, Ordering::SeqCst);
-        transport.refuse_8050("collect-02");
-    });
+async fn stopped_spare_scenario(spare_event: ChildMessage) -> World {
+    let world = World::start_with(plan_for(2, 3), Settings::default(), |launcher, _| launcher.stubborn.store(true, Ordering::SeqCst));
     world.pass(1).await;
-    world.launcher.only("spare-01").events.send(ChildMessage::BadLine(collector::protocol::ProtocolError::Version(Some(2)))).unwrap();
-    world.pass(30).await;
+    world.launcher.only("spare-01").events.send(spare_event).unwrap();
+    world.pass(1).await;
+    let giver = world.launcher.only("collect-02");
+    giver.stubborn.store(false, Ordering::SeqCst);
+    giver.events.send(ChildMessage::BadLine(collector::protocol::ProtocolError::Version(Some(2)))).unwrap();
+    world.pass(1).await;
+    assert_eq!(world.launcher.only("spare-01").signals(), ["terminate"], "예비 키는 아직 끝나는 중이다");
+    world
+}
 
+#[tokio::test(start_paused = true)]
+async fn a_spare_that_is_being_stopped_does_not_take_a_share() {
+    let world = stopped_spare_scenario(ChildMessage::BadLine(collector::protocol::ProtocolError::Version(Some(2)))).await;
+    world.pass(30).await;
     assert!(world.journal_of("handoff").is_empty(), "받지 못하는 예비 키로 인계했다고 적으면 안 된다");
     assert_eq!(world.journal_of("handoff_skipped").len(), 1);
     assert_eq!(world.state_of("collect-02"), KeyState::Stopped);
     assert!(world.launcher.only("spare-01").registers().is_empty());
+    world.finish().await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_spare_that_is_being_restarted_still_takes_the_share_and_registers_it_after_it_is_back() {
+    let world = stopped_spare_scenario(ChildMessage::BadLine(collector::protocol::ProtocolError::NotJson)).await;
+    world.pass(40).await;
+    assert_eq!(world.journal_of("handoff").len(), 1);
+    assert_eq!(world.state_of("collect-02"), KeyState::HandedOff);
+    let spares = world.launcher.children_of("spare-01");
+    assert_eq!(spares.len(), 2);
+    let wire: Vec<String> = spares[1].registers().iter().flat_map(Registration::wire_items).collect();
+    assert_eq!(wire, ["000004_AL", "000005_AL", "000006_AL"]);
     world.finish().await;
 }
 
