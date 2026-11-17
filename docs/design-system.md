@@ -249,3 +249,14 @@ DOM 범례는 `iconMarkup("gear" | "eye" | "eyeOff" | "close" | "up" | "down")`�
 | 노랑 | 연결 중, 발급 간격 대기, 인증 불확실, 네트워크 |
 | 빨강 | 인증 차단(8050), 키 확인, 토큰 파일, 키 파일, 경로 멈춤 |
 | 초록 | 연결됨 |
+
+## 랜딩
+
+`features/landing/`가 계정 모드에서 `signed_out`일 때 `App.tsx`의 `ChartRoute`에 그린다(`Landing`). 로컬 전용 모드, `owner_mismatch`, `signed_in` 화면은 바꾸지 않는다. 스타일은 `styles/landing.css`다.
+
+- 구성: 고정 상단 막대(왼쪽 vally 로고, 오른쪽 "로그인" 단추 하나), 400dvh 고정 구간(이야기), "서버에 가는 것은 셋업뿐입니다" 라임 띠, 바닥글. 로그인 단추는 이것 하나뿐이고 상단 막대는 스크롤하는 동안 늘 보인다.
+- 로그인 창은 `LoginPopover`다. 단추에 붙는 비모달 `Popover`(`.ui-popover`)이며 `role="dialog"`, 접근성 이름과 제목 "로그인"이다. 단추는 `aria-expanded`를 알리고, Esc와 창 밖 누르기는 `Popover`가 닫고 초점을 단추로 돌린다. 창 안은 Google·네이버 단추와 개인정보 문장 둘이다. 누르면 `startLogin` → `markLoginStarted()` → `window.location.assign`이고, 이동하는 동안 두 단추를 끄고 "<provider> 로그인 화면으로 이동합니다"를 `role="status"`로 보인다. 이 시작 상태는 `LandingBar`의 `useLoginStart`가 쥐므로 창을 닫았다 다시 열어도 단추는 꺼진 채이고 시작 요청은 한 번만 간다. 시작이 실패하면 `role="alert"`로 이유를 보이고 단추를 다시 켠다. `?login=error`로 돌아온 실패 문장이 있으면 창을 연 채로 시작하고 창 안에 `role="status"`로 보인다. 한 번 보인 문장은 마운트 때 지운다.
+- 스크롤 컨테이너는 랜딩 바깥 요소(`data-testid="landing"`, `h-dvh overflow-y-auto`)다. `body`가 `overflow: hidden`이기 때문이다. `useScrollStory`가 passive 스크롤 수신기와 `requestAnimationFrame`으로 한 프레임에 한 번, 고정 구간 안의 진행률을 컨테이너의 CSS 변수 `--p`(0~1)로 쓰고 지금 장 번호(1~4)를 이야기 구간(`region "스크롤 이야기"`)의 `data-step`으로 내놓는다. 진행률은 `scrollProgress.ts`의 순수 함수이고, 장은 진행률 4등분마다 바뀐다. 차트 선의 `stroke-dashoffset`, 진행 막대의 `scaleX`, 네 장의 투명도, "스크롤" 안내의 투명도가 `--p`를 읽는다. 시험은 `data-step`을 기다린다.
+- `prefers-reduced-motion: reduce`이면 스크롤 구동을 붙이지 않고 `data-step`도 없다. 고정 구간이 없어(`position: static`) 네 장이 문서 흐름에 차례로 놓여 모두 투명도 1로 보이고, 차트 선은 다 그려져 있고(`stroke-dashoffset: 0`), 진행 막대와 "스크롤" 안내는 그리지 않는다.
+- 휴대폰 폭(390)에서도 같은 구성이다. 큰 제목은 `--fs-display`가 줄어 화면 폭 안에 들어오고 가로 스크롤이 없다. 로그인 창은 `Popover`가 화면 안으로 맞춘다.
+- 새 글자 크기 토큰: `--fs-display`(큰 제목, clamp 34~88px), `--fs-title`(띠 제목, 26~40px), `--fs-lead`(본문, 15~19px). Tailwind에는 `text-display`, `text-title`, `text-lead`로 잇는다. 글꼴은 Pretendard 하나이고 외부 글꼴을 쓰지 않는다. 랜딩 CSS는 색 값을 직접 쓰지 않고 토큰만 쓴다.

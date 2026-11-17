@@ -4,6 +4,7 @@
 @import "./drawings.css";
 @import "./ui.css";
 @import "./colors.css";
+@import "./landing.css";
 
 /* Tailwind 테마는 토큰 변수만 가리킨다. 기본 색·글자 크기는 지워 토큰 밖의 값을 못 쓰게 한다. */
 @theme inline {
@@ -32,6 +33,9 @@
   --text-m: var(--fs-m);
   --text-l: var(--fs-l);
   --text-xl: var(--fs-xl);
+  --text-display: var(--fs-display);
+  --text-title: var(--fs-title);
+  --text-lead: var(--fs-lead);
 
   --radius-*: initial;
   --radius-s: var(--r-s);
