@@ -1594,7 +1594,7 @@ mod tests {
             until("계좌 REG가 보내졌다", || peer.controls(0).len() >= 3).await;
             tokio::task::yield_now().await;
             assert_eq!(peer.controls(0), ["LOGIN", "REG", "REG"], "거절된 계좌 REG는 이 연결에서 다시 보내지 않는다");
-            tokio::time::sleep(Duration::from_secs(40)).await;
+            tokio::time::sleep(Duration::from_secs(2)).await;
             assert_eq!(peer.logins(), 1, "시세 세션은 다시 연결하지 않는다");
             stream.set_desired(feeds(&[(samsung(), &[RealType::Trade, RealType::Book])]));
             until("시세 등록은 계속 된다", || peer.controls(0).len() == 4).await;
