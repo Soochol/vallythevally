@@ -3,6 +3,7 @@ import type { WindowId } from "../layout/kinds";
 import type { SystemMenuId } from "../features/system-settings/menus";
 import { chartWindows, DEFAULT_LAYOUT, useLayoutStore } from "./layout";
 import { useUiStore } from "./ui";
+import { activeWatchlist, useWatchlistStore } from "./watchlist";
 
 export interface ToastUndo {
   available(): boolean;
@@ -83,5 +84,6 @@ export const useSelectionStore = create<SelectionState>()((set, get) => ({
 }));
 
 useUiStore.subscribe((state, previous) => {
-  if (state.prefs.activeWatchlistId !== previous.prefs.activeWatchlistId) useSelectionStore.getState().setPutTarget(null);
+  const { lists } = useWatchlistStore.getState();
+  if (activeWatchlist(lists, state.prefs.activeWatchlistId).id !== activeWatchlist(lists, previous.prefs.activeWatchlistId).id) useSelectionStore.getState().setPutTarget(null);
 });
