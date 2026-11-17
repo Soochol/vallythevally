@@ -28,7 +28,7 @@ impl KstTime {
     }
 }
 
-fn civil_from_days(days_since_epoch: i64) -> (i64, i64, i64) {
+pub(crate) fn civil_from_days(days_since_epoch: i64) -> (i64, i64, i64) {
     let shifted = days_since_epoch + 719_468;
     let era = shifted.div_euclid(146_097);
     let day_of_era = shifted.rem_euclid(146_097);

@@ -451,6 +451,30 @@ node scripts/test-hoga-replay.mjs
 - `crates/collector/page-tests/`는 DOM 없이 Node 내장 시험 실행기로 디코더(기준 파일 `crates/hoga-format/tests/fixtures/`)와 시각 → 행 계산을 시험한다. 실행 파일에는 들어가지 않는다.
 - `scripts/test-hoga-replay.mjs`는 `target/debug/collector`가 필요하고(`cargo build -p collector`), `web/`의 의존성(`cd web && pnpm install --frozen-lockfile`)과 Chromium을 쓴다. CI에는 없다. `target/hoga-replay-tests/run-<고유값>/`에 고정 입력을 복사해 `build`로 구간 파일을 만들고(수집 끊김 사건 두 줄을 더해 `gaps`도 확인한다) `serve --bind 127.0.0.1:0`을 띄운다. 기대값은 원문(`zlib.zstdDecompressSync`)에서 직접 구한다. 결과는 `result.json`과 스크린샷으로 남고 실패하면 종료 코드가 1이다. 띄운 서버만 끈다.
 
+## 관측일 판단
+
+`collector::calendar`가 그날이 관측일인지, 개장 시각이 언제인지, 그 근거가 무엇인지 정한다. 입력은 주말, 한국천문연구원 특일정보 API(`SpcdeInfoService/getRestDeInfo`)의 공휴일, KRX 고정 휴장일(5월 1일, 12월 31일), 수정 파일이다. 12월 31일이 쉬는 날(주말·공휴일)이면 그 직전 관측일이 쉰다. 새해 첫 관측일은 개장이 10:00이다. 하나라도 쉰다고 하면 쉬는 날이고, 쉰다고 한 입력이 없는데 알 수 없는 입력이 있으면 판단은 "모름"이다.
+
+```
+data/hoga/calendar/
+  holidays-<YYYY>.json   특일정보 캐시(version, year, fetched_at_unix_ms, holidays[{date, name}])
+  overrides.json         사람이 적는 수정 파일. 없으면 수정이 없는 것이다
+```
+
+- 특일정보는 올해와 지난해를 받고 12월에는 내년도 받는다. 올해(와 내년) 캐시는 받은 달이 이번 달이 아니면 다시 받고, 지난해 캐시는 다시 받지 않는다. 받기가 실패하면 캐시를 쓰고 근거에 그렇게 적는다. 캐시도 없으면 그 해의 날짜는 "모름"이다. 공휴일이 0건인 응답은 잘못된 응답으로 보고 캐시에 쓰지 않는다.
+- 서비스 키는 파일 한 개에 적고 `read_service_key`가 `Secret`으로 읽는다. 캐시, 근거, 오류 문구에 나오지 않는다. 실제 HTTP는 `HolidayTransport`를 구현해 주입한다.
+- 수정 파일 형식이다. `date`는 YYYYMMDD 숫자, `reason`은 근거에 그대로 보인다. 같은 날을 두 번 적을 수 없다. 형식이 틀리면 쉬는 날이 아닌 날의 판단이 "모름"이다.
+
+  ```json
+  {"version": 1, "days": [
+    {"kind": "closed", "date": 20261118, "reason": "임시 휴장"},
+    {"kind": "open_at", "date": 20261119, "time": "10:00", "reason": "수능"}
+  ]}
+  ```
+
+- `Calendar::judge`는 `Judgment`(관측일 여부, 개장 분, 근거 목록)를 낸다. `next_observation_day`, `observation_days_after`, `observation_days_before`가 관측일을 센다. `cross_check`는 지수 일봉의 날짜 목록과 그날 판단을 대조한다. 목록이 비었거나 그날이 목록의 가장 이른 날짜보다 앞이면 판단하지 않는다. 마지막 일봉 뒤의 날은 일봉이 없는 것으로 보므로 마감 뒤에 부른다.
+- 시험은 `python3 scripts/dev.py cargo test -p collector --test calendar`와 `--lib calendar`다. 합성 응답만 쓴다.
+
 ## 실제 수집 절차
 
 사용자가 장중에 직접 따라 한다. 자동 시험과 자동 작업은 실제 키움에 접속하지 않는다. 한 IP에서 세션 여러 개와 연속 토큰 발급을 재는 절차는 [`collector-session-probe.md`](collector-session-probe.md)에 있다.
