@@ -28,7 +28,7 @@ function BookBody({ code }: { code: SymbolCode }) {
   const rows = buildLadder({ asks: view.asks, bids: view.bids, lastPrice: feed.lastPrice, previousClose: feed.previousClose });
   const notice = feed.rejected ? REJECTION[feed.rejected] : feed.connected ? null : "끊김";
   return (
-    <div className="bk" data-testid="book-window" data-connected={feed.connected ? "" : undefined}>
+    <div className="bk" data-testid="book-window" data-symbol={code} data-connected={feed.connected ? "" : undefined}>
       <Strip>
         <IntegratedBadge />
         <b data-testid="book-total-ask" className="mw-down">{formatShares(view.totalAsk)}</b>

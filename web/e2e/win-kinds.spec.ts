@@ -48,7 +48,8 @@ for (const { kind, name, filled } of KINDS) {
 
     await addWindow(page, name);
     await expect(tabOf(page, kind)).toHaveAccessibleName(new RegExp(`^${name}`));
-    if (!filled) {
+    if (filled) await expect(page.getByTestId("book-window")).toHaveAttribute("data-symbol", "005930");
+    else {
       await expect(preparing(page)).toContainText(`${name} 준비 중`);
       await expect(preparing(page)).toContainText("삼성전자");
     }
@@ -58,7 +59,8 @@ for (const { kind, name, filled } of KINDS) {
     await dotOf(page, kind).click();
     await page.getByRole("menu", { name: "연동 색" }).getByRole("menuitemradio", { name: /^B/ }).click();
     await expect(dotOf(page, kind)).toHaveAccessibleName("연동 색: B");
-    if (!filled) {
+    if (filled) await expect(page.getByTestId("book-window")).toHaveAttribute("data-symbol", "000660");
+    else {
       await expect(preparing(page)).toContainText("SK하이닉스");
       await expect(preparing(page)).toHaveAttribute("data-symbol", "000660");
     }
