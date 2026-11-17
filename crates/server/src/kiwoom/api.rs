@@ -91,7 +91,6 @@ impl ApiId {
     }
 }
 
-/// 요청이 나가는 곳. 시세 `ApiId`와 `trading`의 계좌 TR을 한 대기열과 transport가 함께 나른다.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum Endpoint {
     Market(ApiId),

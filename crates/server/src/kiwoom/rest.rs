@@ -399,7 +399,6 @@ impl KiwoomRest {
         self.call_endpoint(R::API_ID.into(), body, |response| req.answers(response), cont, priority, scope).await
     }
 
-    /// 요청 본문을 만드는 쪽(`MarketRequest`, `trading`의 봉인된 요청)이 보낼 곳을 정해 넘긴다.
     pub(crate) async fn call_endpoint<T: serde::de::DeserializeOwned>(
         &self,
         endpoint: Endpoint,
