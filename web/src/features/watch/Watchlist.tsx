@@ -70,6 +70,11 @@ interface HeadDrop {
   drop(e: React.DragEvent): void;
 }
 
+const NEW_GROUP_SLOT = "flex h-[34px] w-full items-center gap-1.5 rounded-m px-2.5 text-s text-text-2 hover:bg-[var(--hover)] hover:text-text disabled:cursor-not-allowed disabled:text-text-3 disabled:hover:bg-transparent disabled:hover:text-text-3";
+const NEW_GROUP_SLOT_REST = "border border-dashed border-[var(--line-strong)]";
+const NEW_GROUP_SLOT_OVER = "border border-[var(--accent)] bg-accent-soft text-accent hover:bg-accent-soft hover:text-accent";
+const NEW_GROUP_SLOT_VERB: Record<"move" | "copy", string> = { move: "옮김", copy: "복사" };
+
 const GROUP_SPACING = "[&:not(:first-child)]:mt-1.5";
 const GROUP_BAR = "h-3.5 w-[3px] flex-none rounded-[2px]";
 function setCollapsed(id: string, collapsed: boolean) {
@@ -134,30 +139,20 @@ function WatchHead({ children, onNaming }: { children?: React.ReactNode; onNamin
         <NameInput naming={naming} onDone={() => setNaming(null)} />
       ) : (
         <>
-          <ListMenu list={list} onName={setNaming} />
+          <ListMenu list={list} onName={setNaming} onNaming={onNaming} />
           <span className="flex-none text-s text-text-3">{list.symbols.length}종목</span>
           {offline && <span className="min-w-0 shrink-[8] truncate text-xs text-text-3">저장된 목록 · 시세 없음</span>}
           <span className="flex-1" />
           <button
             type="button"
-            className="tb-btn h-7 flex-none gap-1 px-1.5 text-s max-md:h-10"
-            title={list.groups.length >= MAX_WATCH_GROUPS ? `그룹은 ${MAX_WATCH_GROUPS}개까지입니다` : "새 그룹"}
-            aria-label="새 그룹"
-            disabled={list.groups.length >= MAX_WATCH_GROUPS}
-            onClick={() => startGroup(list, onNaming)}
-          >
-            <PlusIcon size={12} />
-            그룹
-          </button>
-          <button
-            type="button"
-            className="icon-btn max-md:h-10 max-md:w-10"
-            title={`${list.name}에 넣기`}
+            className="inline-flex h-7 flex-none items-center gap-1 rounded-m pl-1.5 pr-[9px] text-s font-[600] text-text shadow-[inset_0_0_0_1px_var(--line-strong)] hover:bg-[var(--hover)] hover:shadow-[inset_0_0_0_1px_var(--accent)] max-md:h-9 max-md:pl-[9px] max-md:pr-3"
+            title={`${list.name}에 넣기 (종목 검색)`}
             aria-label="관심종목에 넣기"
             aria-haspopup="dialog"
             onClick={() => openSearch("watch")}
           >
-            <PlusIcon />
+            <span className="text-accent"><PlusIcon size={14} /></span>
+            종목
           </button>
           {children}
         </>
@@ -166,7 +161,7 @@ function WatchHead({ children, onNaming }: { children?: React.ReactNode; onNamin
   );
 }
 
-function ListMenu({ list, onName }: { list: Watchlist; onName(n: Naming): void }) {
+function ListMenu({ list, onName, onNaming }: { list: Watchlist; onName(n: Naming): void; onNaming: GroupNaming["onNaming"] }) {
   const lists = useWatchlistStore((s) => s.lists);
   const columns = useUiStore((s) => s.prefs.watchColumns);
   const [open, setOpen] = useState(false);
@@ -189,6 +184,7 @@ function ListMenu({ list, onName }: { list: Watchlist; onName(n: Naming): void }
     { kind: "heading", label: "목록" },
     ...lists.map((l): MenuItem => ({ kind: "radio", label: l.name, hint: `${l.symbols.length}`, checked: l.id === list.id, onSelect: () => ui.setActiveWatchlist(l.id) })),
     { kind: "separator" },
+    { kind: "action", label: "새 그룹", icon: <PlusIcon />, disabled: list.groups.length >= MAX_WATCH_GROUPS, onSelect: () => startGroup(list, onNaming) },
     { kind: "action", label: "새 목록", icon: <PlusIcon />, disabled: lists.length >= MAX_WATCHLISTS, onSelect: () => onName({ kind: "create" }) },
     { kind: "action", label: "이름 바꾸기", onSelect: () => onName({ kind: "rename", id: list.id }) },
     { kind: "action", label: "복제", icon: <CopyIcon />, disabled: lists.length >= MAX_WATCHLISTS, onSelect: () => {
@@ -289,6 +285,7 @@ function WatchList({ variant, sender, editing, naming, onNaming, width = null }:
   const onScreen = variant === "desktop" ? desktop : !desktop;
   const [hover, setHover] = useState<{ target: DropTarget; how: DropHow } | null>(null);
   const [dragged, setDragged] = useState<WatchRowRef | null>(null);
+  const [slotHover, setSlotHover] = useState<"move" | "copy" | null>(null);
   const scroller = useRef<HTMLElement>(null);
   const [focusRow, setFocusRow] = useState<WatchRowRef | null>(null);
   const template = { gridTemplateColumns: columnTemplate(variant, columns) };
@@ -305,10 +302,12 @@ function WatchList({ variant, sender, editing, naming, onNaming, width = null }:
   const endDrag = () => {
     setDragged(null);
     setHover(null);
+    setSlotHover(null);
   };
   const howFor = (e: React.DragEvent, target: DropTarget): "move" | "copy" => (dragged?.groupId != null && target.groupId !== null && dragged.groupId !== target.groupId && copyKeyHeld(e) ? "copy" : "move");
   const hoverOver = (e: React.DragEvent, target: DropTarget) => {
     if (dragged === null) return;
+    setSlotHover(null);
     const how = howFor(e, target);
     const refused = dragged.groupId !== target.groupId && "refusal" in dropRow(list, dragged, target, how);
     if (refused) e.dataTransfer.dropEffect = "none";
@@ -335,6 +334,41 @@ function WatchList({ variant, sender, editing, naming, onNaming, width = null }:
       }
     }
     endDrag();
+  };
+  const slotFull = list.groups.length >= MAX_WATCH_GROUPS;
+  const slotHowFor = (e: React.DragEvent): "move" | "copy" => (dragged?.groupId != null && copyKeyHeld(e) ? "copy" : "move");
+  const newGroupSlot: NewGroupSlotProps | null = symbols.length === 0 ? null : {
+    full: slotFull,
+    desktop: variant === "desktop",
+    over: slotFull || dragged === null ? null : slotHover,
+    create: () => startGroup(list, onNaming),
+    dragOver: (e) => {
+      if (dragged === null) return;
+      setHover(null);
+      if (slotFull) {
+        e.dataTransfer.dropEffect = "none";
+        return;
+      }
+      e.preventDefault();
+      const how = slotHowFor(e);
+      e.dataTransfer.dropEffect = how;
+      setSlotHover(how);
+    },
+    dragLeave: (e) => {
+      if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setSlotHover(null);
+    },
+    drop: (e) => {
+      e.preventDefault();
+      if (dragged !== null && !slotFull) {
+        if (slotHowFor(e) === "copy") startGroup(list, onNaming, [dragged.code]);
+        else {
+          const id = crypto.randomUUID();
+          useWatchlistStore.getState().moveToNewGroup(list.id, dragged, id, nextGroupName(list));
+          onNaming(id);
+        }
+      }
+      endDrag();
+    },
   };
   const hoverVerdict = hover === null || dragged === null ? null : dropRow(list, dragged, hover.target, hover.how);
   const headDrop = (groupId: string | null): HeadDrop => {
@@ -396,11 +430,12 @@ function WatchList({ variant, sender, editing, naming, onNaming, width = null }:
           </span>
         ))}
       </div>
-      {symbols.length === 0 && <EmptyState title={`${list.name}에 종목이 없습니다. +로 종목을 넣으세요`} action="종목 넣기" onAction={() => useSelectionStore.getState().openSearch("watch")} />}
+      {symbols.length === 0 && <EmptyState title={`${list.name}에 종목이 없습니다`} action="종목 넣기" onAction={() => useSelectionStore.getState().openSearch("watch")} />}
       {list.groups.length === 0 ? (
-        <ul ref={(el) => { scroller.current = el; }} aria-label={list.name} className={scrollClass} onDragLeave={leave}>
-          {rows(sections[0]!)}
-        </ul>
+        <div ref={(el) => { scroller.current = el; }} className={scrollClass} onDragLeave={leave}>
+          <ul aria-label={list.name}>{rows(sections[0]!)}</ul>
+          {newGroupSlot && <NewGroupSlot {...newGroupSlot} />}
+        </div>
       ) : (
         <div ref={(el) => { scroller.current = el; }} role="group" aria-label={list.name} className={scrollClass} onDragLeave={leave}>
           {sections.map(({ group, symbols: codes }, i) => group ? (
@@ -414,9 +449,40 @@ function WatchList({ variant, sender, editing, naming, onNaming, width = null }:
               <ul aria-label="그룹 없음">{rows(sections[i]!)}</ul>
             </div>
           ))}
+          {newGroupSlot && <NewGroupSlot {...newGroupSlot} />}
         </div>
       )}
     </>
+  );
+}
+
+interface NewGroupSlotProps {
+  full: boolean;
+  desktop: boolean;
+  over: "move" | "copy" | null;
+  create(): void;
+  dragOver(e: React.DragEvent): void;
+  dragLeave(e: React.DragEvent): void;
+  drop(e: React.DragEvent): void;
+}
+
+function NewGroupSlot({ full, desktop, over, create, dragOver, dragLeave, drop }: NewGroupSlotProps) {
+  const limit = `그룹은 ${MAX_WATCH_GROUPS}개까지입니다`;
+  return (
+    <div className="px-2.5 pb-3 pt-2.5" onDragOver={desktop ? dragOver : undefined} onDragLeave={desktop ? dragLeave : undefined} onDrop={desktop ? drop : undefined}>
+      <button
+        type="button"
+        className={`${NEW_GROUP_SLOT} ${over === null ? NEW_GROUP_SLOT_REST : NEW_GROUP_SLOT_OVER}`}
+        aria-label="새 그룹"
+        title={full ? limit : undefined}
+        disabled={full}
+        onClick={create}
+      >
+        <PlusIcon size={14} />
+        <span className="min-w-0 truncate">{full ? limit : over === null ? "새 그룹" : `여기 놓으면 새 그룹으로 ${NEW_GROUP_SLOT_VERB[over]}`}</span>
+        {desktop && !full && over === null && <span className="ml-auto flex-none text-xs text-text-3">종목을 끌어 놓아도 됩니다</span>}
+      </button>
+    </div>
   );
 }
 
