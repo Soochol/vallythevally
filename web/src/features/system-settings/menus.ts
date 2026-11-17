@@ -4,6 +4,7 @@ export const SYSTEM_MENUS = [
   { id: "telegram", label: "알림 · 텔레그램", ready: false },
   { id: "dart", label: "재무자료 · DART", ready: false },
   { id: "data", label: "데이터 · 저장소", ready: true },
+  { id: "account", label: "계정", ready: true },
   { id: "about", label: "정보", ready: true },
 ] as const;
 

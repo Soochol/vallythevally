@@ -6,7 +6,7 @@ import { SAVE_TARGETS, usePersistStore } from "../stores/persist";
 import { useSelectionStore } from "../stores/selection";
 import { useUiStore } from "../stores/ui";
 import { useWatchlistStore } from "../stores/watchlist";
-import { startAutosave } from "./autosave";
+import { type Autosave, startAutosave } from "./autosave";
 import { restore } from "./restore";
 import { clearUnsaved, readUnsaved } from "./unsaved";
 import { DEFAULT_UI_PREFS, type Theme } from "./uiState";
@@ -29,6 +29,15 @@ function followTheme() {
   useUiStore.subscribe((s, prev) => s.prefs.theme !== prev.prefs.theme && paintTheme(s.prefs.theme));
 }
 
+let running: Autosave | null = null;
+let suspended = false;
+
+export function suspendSetup() {
+  suspended = true;
+  running?.stop();
+  running = null;
+}
+
 export async function boot() {
   const { setPhase } = usePersistStore.getState();
   const toast = (text: string) => useSelectionStore.getState().showToast(text);
@@ -40,6 +49,7 @@ export async function boot() {
       watchlists: () => fetchWatchlists(),
       unsaved: readUnsaved,
     });
+    if (suspended) return;
     useLayoutStore.getState().load(restored.layout);
     useSelectionStore.setState({ activeCell: chartWindows(restored.layout)[0]!.id });
     useUiStore.getState().load(restored.ui.prefs, restored.ui.extra);
@@ -47,6 +57,7 @@ export async function boot() {
     followTheme();
     for (const target of SAVE_TARGETS) clearUnsaved(target, restored.serverRevisions[target], target === "layout" ? layoutPath(restored.layout.id) : undefined);
     const autosave = startAutosave({ put: (path, json, o) => sendJson("PUT", path, json, o), toast, revisions: restored.revisions, serverCharts: restored.serverCharts });
+    running = autosave;
     if (restored.layoutDirty) autosave.savers.layout.changed();
     if (restored.uiDirty) autosave.savers.ui.changed();
     if (restored.watchlistDirty) autosave.savers.watchlist.changed();

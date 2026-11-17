@@ -3,6 +3,7 @@ import { DESKTOP_QUERY, useMediaQuery } from "../../lib/media";
 import { useKiwoomLinkStore } from "../../stores/kiwoomLink";
 import { useSelectionStore } from "../../stores/selection";
 import { DialogFrame } from "../dialog/DialogParts";
+import { AccountMenuContent } from "../account/AccountMenuContent";
 import { CloseIcon } from "../icons";
 import { KiwoomMenuContent } from "./KiwoomMenuContent";
 import { linkDotTone } from "./linkDot";
@@ -83,7 +84,7 @@ function SystemSettingsBody({ menu }: { menu: SystemMenuId | null }) {
               <button type="button" className="icon-btn flex-none" aria-label="닫기" onClick={close}><CloseIcon /></button>
             </header>
             <div className="min-h-0 flex-1 overflow-y-auto px-5 pb-5 max-md:px-4">
-              {selected === "kiwoom" ? <KiwoomMenuContent /> : selected === "general" || selected === "data" || selected === "about" ? <ReadOnlyMenuContent menu={selected} /> : null}
+              {selected === "kiwoom" ? <KiwoomMenuContent /> : selected === "account" ? <AccountMenuContent /> : selected === "general" || selected === "data" || selected === "about" ? <ReadOnlyMenuContent menu={selected} /> : null}
             </div>
           </section>
         )}
