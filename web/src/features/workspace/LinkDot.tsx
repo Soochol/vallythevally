@@ -1,10 +1,11 @@
 import { useRef, useState } from "react";
 import { WINDOW_KINDS } from "../../layout/kinds";
 import type { LinkColor } from "../../api/generated/LinkColor";
+import { LINK_COLORS } from "../../api/linkColors";
 import { linkedWindowCount, linkLabel, useLayoutStore, type WindowState } from "../../stores/layout";
 import { Menu, type MenuItem } from "../menu/Menu";
 
-const CHOICES: readonly (LinkColor | null)[] = [null, "a", "b", "c"];
+const CHOICES: readonly (LinkColor | null)[] = [null, ...LINK_COLORS];
 
 const choiceName = (link: LinkColor | null) => (link === null ? "끔" : linkLabel(link));
 

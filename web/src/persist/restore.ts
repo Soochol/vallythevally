@@ -1,6 +1,6 @@
 import type { Layout } from "../api/generated/Layout";
 import type { LayoutWindow } from "../api/generated/LayoutWindow";
-import type { LinkColor } from "../api/generated/LinkColor";
+import { LINK_COLORS } from "../api/linkColors";
 import type { LayoutSummary } from "../api/generated/LayoutSummary";
 import type { Watchlist } from "../api/generated/Watchlist";
 import type { Watchlists } from "../api/generated/Watchlists";
@@ -49,11 +49,11 @@ function newer(u: Unsaved | null, path: string, serverRevision: number): { value
 
 const isFields = (x: unknown): x is Record<string, unknown> => typeof x === "object" && x !== null && !Array.isArray(x);
 const WINDOW_ID = /^[A-Za-z0-9_-]{1,64}$/;
-const LINK_COLORS: readonly unknown[] = [null, "a", "b", "c"] satisfies (LinkColor | null)[];
+const DRAFT_LINKS: readonly unknown[] = [null, ...LINK_COLORS];
 const isWindowKind = (k: unknown): k is WindowKind => typeof k === "string" && Object.hasOwn(WINDOW_KINDS, k);
 
 function isDraftWindow(w: unknown): w is LayoutWindow {
-  if (!isFields(w) || typeof w.id !== "string" || !WINDOW_ID.test(w.id) || !LINK_COLORS.includes(w.link) || !isWindowKind(w.kind)) return false;
+  if (!isFields(w) || typeof w.id !== "string" || !WINDOW_ID.test(w.id) || !DRAFT_LINKS.includes(w.link) || !isWindowKind(w.kind)) return false;
   return w.kind !== "chart" || (typeof w.symbol === "string" && typeof w.period === "string" && (w.venue === null || typeof w.venue === "string") && "chartSettings" in w);
 }
 

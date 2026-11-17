@@ -726,6 +726,13 @@ pub enum LinkColor {
     A,
     B,
     C,
+    D,
+    E,
+    F,
+    G,
+    H,
+    I,
+    J,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -1388,6 +1395,13 @@ mod tests {
         }
         let window: LayoutWindow = serde_json::from_value(json!({"id": "chart", "kind": "chart", "symbol": "IDX:001", "period": "D", "chartSettings": {}})).unwrap();
         assert_eq!(serde_json::to_value(window).unwrap()["venue"], serde_json::Value::Null);
+    }
+
+    #[test]
+    fn link_colors_run_from_a_to_j_on_the_wire() {
+        assert_eq!(serde_json::to_value(LinkColor::J).unwrap(), json!("j"));
+        assert_eq!(serde_json::from_value::<LinkColor>(json!("j")).unwrap(), LinkColor::J);
+        assert!(serde_json::from_value::<LinkColor>(json!("k")).is_err());
     }
 
     #[test]

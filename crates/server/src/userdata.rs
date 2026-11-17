@@ -582,6 +582,61 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn link_colors_ten_migration_keeps_windows_and_cell_drawings_and_widens_the_link_check() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("vally.db");
+        {
+            let pool = SqlitePoolOptions::new().connect_with(SqliteConnectOptions::new().filename(&path).create_if_missing(true).foreign_keys(true)).await.unwrap();
+            sqlx::migrate!("./migrations").run_to(13, &pool).await.unwrap();
+            sqlx::query("INSERT INTO layouts (id, name, sync, position, updated_at, revision) VALUES ('L3', '셋', '{}', 1, 50, 7)").execute(&pool).await.unwrap();
+            for (position, id, link) in [(0, "w-a", Some("a")), (1, "w-b", Some("b")), (2, "w-c", Some("c")), (3, "w-none", None)] {
+                sqlx::query("INSERT INTO layout_windows (layout_id, id, position, kind, link, symbol, venue, period, chart_settings) VALUES ('L3', ?, ?, 'chart', ?, '005930', 'combined', 'D', '{}')")
+                    .bind(id).bind(position).bind(link).execute(&pool).await.unwrap();
+            }
+            sqlx::query(
+                "INSERT INTO drawings (id, symbol, tool, points, style, z, scope, layout_id, window_id, updated_at, revision) VALUES
+                 ('D1', '005930', 'hline', '[{\"t\":1,\"price\":2}]', '{}', 0, 'cell', 'L3', 'w-b', 40, 41),
+                 ('D2', '005930', 'hline', '[{\"t\":1,\"price\":2}]', '{}', 1, 'cell', 'L3', 'w-none', 40, 42)",
+            )
+            .execute(&pool).await.unwrap();
+            pool.close().await;
+        }
+        let db = AppDb::open(&path).await.unwrap();
+        let migrated = get_layout(&db, "L3").await.unwrap();
+        assert_eq!(
+            kinds(&migrated),
+            [("w-a", "chart".into(), Some(LinkColor::A)), ("w-b", "chart".into(), Some(LinkColor::B)), ("w-c", "chart".into(), Some(LinkColor::C)), ("w-none", "chart".into(), None)]
+        );
+        let drawings = crate::drawings::list_drawings_of(&db, "005930").await.unwrap();
+        let scopes: Vec<_> = drawings.iter().map(|d| (d.id.as_str(), d.scope.clone())).collect();
+        assert_eq!(
+            scopes,
+            [
+                ("D1", crate::drawing_api::DrawingScope::Cell { layout_id: "L3".into(), window_id: window_id("w-b") }),
+                ("D2", crate::drawing_api::DrawingScope::Cell { layout_id: "L3".into(), window_id: window_id("w-none") }),
+            ],
+            "이 칸 드로잉이 그대로 창을 가리킨다"
+        );
+
+        let check = SqlitePoolOptions::new().connect_with(SqliteConnectOptions::new().filename(&path).foreign_keys(true)).await.unwrap();
+        let violations = sqlx::query("PRAGMA foreign_key_check").fetch_all(&check).await.unwrap();
+        assert!(violations.is_empty(), "외래 키 위반이 없다");
+
+        let colors = [LinkColor::D, LinkColor::E, LinkColor::F, LinkColor::G, LinkColor::H, LinkColor::I, LinkColor::J];
+        let windows: Vec<_> = colors
+            .iter()
+            .enumerate()
+            .map(|(i, color)| LayoutWindow { link: Some(*color), ..chart(&format!("w{i}"), "005930", Some(Venue::Combined)) })
+            .collect();
+        put_layout(&db, &layout_at("L3", "셋", windows.clone(), 8), UnixSeconds(100)).await.unwrap();
+        assert_eq!(get_layout(&db, "L3").await.unwrap().windows, windows, "d~j도 저장해 다시 읽는다");
+
+        let rejected = sqlx::query("INSERT INTO layout_windows (layout_id, id, position, kind, link) VALUES ('L3', 'bad', 99, 'watchlist', 'k')").execute(&check).await;
+        assert!(rejected.is_err(), "k는 CHECK가 거부한다");
+        check.close().await;
+    }
+
     #[sqlx::test(migrations = "./migrations")]
     async fn quarterly_and_yearly_chart_periods_survive_storage(_: SqlitePoolOptions, opts: SqliteConnectOptions) {
         let db = db(opts).await;
@@ -614,12 +669,14 @@ mod tests {
         linked.link = Some(LinkColor::B);
         let mut screener = side(WindowContent::Screener);
         screener.link = Some(LinkColor::C);
-        let windows = vec![screener, linked, side(WindowContent::Indicators), chart("left", "IDX:101", None), side(WindowContent::Objects)];
+        let mut last = chart("last", "000660", Some(Venue::Krx));
+        last.link = Some(LinkColor::J);
+        let windows = vec![screener, linked, side(WindowContent::Indicators), chart("left", "IDX:101", None), side(WindowContent::Objects), last];
         let saved = put_layout(&db, &layout("L2", "둘", windows.clone()), UnixSeconds(100)).await.unwrap();
         let read = get_layout(&db, "L2").await.unwrap();
         assert_eq!(saved, read);
         assert_eq!(read.windows, windows, "창의 순서, 연동 색, 차트 창의 내용을 그대로 돌려준다");
-        assert_eq!(serde_json::Value::Object(read.placement.clone()), json!({"v": 1, "windows": 5, "future": {"dock": null}}), "배치는 모르는 키도 그대로");
+        assert_eq!(serde_json::Value::Object(read.placement.clone()), json!({"v": 1, "windows": 6, "future": {"dock": null}}), "배치는 모르는 키도 그대로");
         assert_eq!(read.sync, LayoutSync { crosshair: false, scroll: true });
 
         let one = layout_at("L2", "둘 바꿈", vec![chart("only", "000660", Some(Venue::Krx))], 2);

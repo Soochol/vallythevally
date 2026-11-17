@@ -98,6 +98,13 @@
 .link-dot[data-link=a] { --link:var(--link-a); }
 .link-dot[data-link=b] { --link:var(--link-b); }
 .link-dot[data-link=c] { --link:var(--link-c); }
+.link-dot[data-link=d] { --link:var(--link-d); }
+.link-dot[data-link=e] { --link:var(--link-e); }
+.link-dot[data-link=f] { --link:var(--link-f); }
+.link-dot[data-link=g] { --link:var(--link-g); }
+.link-dot[data-link=h] { --link:var(--link-h); }
+.link-dot[data-link=i] { --link:var(--link-i); }
+.link-dot[data-link=j] { --link:var(--link-j); }
 .link-dot:not([data-link]) { background:transparent; box-shadow:inset 0 0 0 var(--size-2) var(--line-strong); }
 .link-dot:hover { box-shadow:0 0 0 var(--size-2) var(--hover); }
 .link-dot:not([data-link]):hover { box-shadow:inset 0 0 0 var(--size-2) var(--text-2); }
