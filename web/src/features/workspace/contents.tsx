@@ -10,7 +10,7 @@ export type WindowContent = { readonly Content: ComponentType<{ id: WindowId }>;
 
 export const WINDOW_CONTENT: { readonly [K in WindowKind]: WindowContent } = {
   chart: { Content: ChartWindow, overflow: "hidden" },
-  watchlist: { Content: WatchPanel, overflow: "auto" },
+  watchlist: { Content: WatchPanel, overflow: "hidden" },
   screener: { Content: ScreenerPanel, overflow: "hidden" },
   objects: { Content: ObjectList, overflow: "auto" },
   indicators: { Content: IndicatorInspector, overflow: "hidden" },

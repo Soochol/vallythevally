@@ -255,3 +255,57 @@ test("관심종목 줄에는 종목 코드가 보이지 않는다", async ({ sce
     await expect(row(page, code).getByText(code)).toHaveCount(0);
   }
 });
+
+const crowded = Array.from({ length: 26 }, (_, i) => `1${String(i).padStart(5, "0")}`);
+
+async function seedCrowded(scenario: Scenario, grouped: boolean) {
+  scenario.documents.saveWatchlists({ revision: 100, lists: [
+    { id: "source", name: "기본", symbols: crowded, groups: grouped ? [{ id: "g1", name: "반도체", symbols: crowded.slice(0, 3) }] : [] },
+  ] });
+}
+
+const overflowOf = (page: Page) => panelOf(page).evaluate((el) => el.scrollHeight - el.clientHeight);
+const panelOf = (page: Page) => panel(page).locator("xpath=ancestor::*[contains(@class,'dock-panel') or contains(@class,'window-panel')][1]");
+const scrollerOf = (page: Page) => panel(page).locator("div.overflow-y-auto");
+
+for (const height of [860, 360, 300, 240]) {
+  for (const grouped of [false, true]) {
+    test(`관심종목 창은 높이 ${height}px에서 ${grouped ? "그룹 있는" : "그룹 없는"} 목록이 많아도 목록 칸만 스크롤한다`, async ({ scenario, page }) => {
+      await seedCrowded(scenario, grouped);
+      await page.setViewportSize({ width: 1440, height });
+      await page.goto("/?symbol=005930");
+      await expect(cell(page)).toHaveAttribute("aria-busy", "false");
+      await expect(row(page, crowded[0]!)).toBeVisible();
+      expect(await overflowOf(page)).toBe(0);
+      expect(await scrollerOf(page).evaluate((el) => el.scrollHeight - el.clientHeight)).toBeGreaterThan(0);
+      await expect(panel(page).getByRole("button", { name: "관심종목에 넣기" })).toBeInViewport();
+    });
+  }
+}
+
+test("관심종목 창이 낮고 떠 있어도 패널은 넘치지 않고 목록 칸만 줄어든다", async ({ scenario, page }) => {
+  await seedCrowded(scenario, false);
+  await page.setViewportSize({ width: 1440, height: 360 });
+  await page.goto("/?symbol=005930");
+  await expect(cell(page)).toHaveAttribute("aria-busy", "false");
+  await page.getByRole("tab", { name: "관심종목" }).press("Shift+F10");
+  await page.getByRole("menuitem", { name: "띄우기", exact: true }).click();
+  await expect(page.locator('[data-dock-float="watchlist"]')).toBeVisible();
+  expect(await overflowOf(page)).toBe(0);
+  await expect(panel(page).getByRole("button", { name: "관심종목에 넣기" })).toBeInViewport();
+});
+
+test("목록 맨 위를 보다가 종목을 넣으면 넣은 줄이 보이도록 목록 칸만 스크롤한다", async ({ scenario, page }) => {
+  await seedCrowded(scenario, false);
+  await page.setViewportSize({ width: 1440, height: 360 });
+  await page.goto("/?symbol=005930");
+  await expect(cell(page)).toHaveAttribute("aria-busy", "false");
+  await expect(scrollerOf(page)).toHaveJSProperty("scrollTop", 0);
+  await panel(page).getByRole("button", { name: "관심종목에 넣기" }).click();
+  const dialog = page.getByRole("dialog", { name: "관심종목에 넣을 종목 검색" });
+  await dialog.getByRole("combobox", { name: "종목 검색" }).fill("005930");
+  await dialog.getByRole("option").filter({ hasText: "005930" }).first().click();
+  await expect(row(page, "005930")).toBeAttached();
+  await expect(row(page, "005930")).toBeInViewport();
+  expect(await overflowOf(page)).toBe(0);
+});
