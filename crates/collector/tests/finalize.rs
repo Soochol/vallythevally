@@ -436,6 +436,7 @@ fn odd_raw_shapes_are_stored_exactly_or_counted_as_unfinalized() {
         r#"{"trnm":"REAL","data":[{"type":"0B","item":"G1_AL","values":{"11":"1"}},{"type":"0B","item":5930,"values":{}},{"type":"0B","item":"G2_AL","values":{"11":"2"}}]}"#,
         r#"{"trnm":"REAL","data":[{"type":"0B","item":"N_AL","values":{"20":1.50,"9081":1e2,"13":12345,"12":-0.0}}]}"#,
         r#"{"trnm":"REAL","data":[{"type":"0B","item":"P_AL","values":{"15":" +82","16":"+7","14":"-0"}}]}"#,
+        r#"{"trnm":"REAL","data":[{"type":"0B","item":"W_AL","values":[]}]}"#,
     ];
     let mut writer = RawWriter::new(data.path());
     for (index, text) in frames.iter().enumerate() {
@@ -448,11 +449,11 @@ fn odd_raw_shapes_are_stored_exactly_or_counted_as_unfinalized() {
     assert_eq!(verify["lines"]["finalized"], json!(2));
     assert_eq!(verify["lines"]["unfinalized"]["kinds"]["unknown_fid"], json!(1));
     assert_eq!(verify["lines"]["unfinalized"]["kinds"]["unparsable_value"], json!(1));
-    assert_eq!(verify["lines"]["unfinalized"]["kinds"]["malformed_realtime_frame"], json!(1));
+    assert_eq!(verify["lines"]["unfinalized"]["kinds"]["malformed_realtime_frame"], json!(2));
     assert_eq!(verify["unknown_fids"], json!({"0B": {"+10": 1, "010": 1}}));
     assert_eq!(verify["unparsable_values"], json!({"0B": {"10": 1}}));
     let messages: BTreeMap<String, u64> = serde_json::from_value(verify["symbol_messages"].clone()).unwrap();
-    assert_eq!(messages.keys().map(String::as_str).collect::<Vec<_>>(), ["A_AL", "B_AL", "G1_AL", "G2_AL", "N_AL", "P_AL"]);
+    assert_eq!(messages.keys().map(String::as_str).collect::<Vec<_>>(), ["A_AL", "B_AL", "G1_AL", "G2_AL", "N_AL", "P_AL", "W_AL"]);
 
     let rows = read_type(&temporary_store_dir(data.path(), DATE), "0B");
     let by_symbol: BTreeMap<String, &BTreeMap<String, Cellular>> = rows

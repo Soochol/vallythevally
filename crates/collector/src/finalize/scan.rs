@@ -307,9 +307,13 @@ impl<'a> Worker<'a> {
         if let Some(item) = item.filter(|item| !item.is_empty()) {
             self.tally.count_message(item);
         }
-        let (Some(code), Some(item), Some(values)) = (entry.kind.as_ref(), item, entry.values.as_ref()) else {
+        let (Some(code), Some(item), Some(raw_values)) = (entry.kind.as_ref(), item, entry.values) else {
             return Some(Unfinalized::MalformedFrame);
         };
+        let Ok(values) = serde_json::from_str::<Values<'_>>(raw_values.get()) else {
+            return Some(Unfinalized::MalformedFrame);
+        };
+        let values = &values;
         let Some(type_index) = schema::type_index(&code.0) else {
             *self.tally.unknown_types.entry(code.0.to_string()).or_insert(0) += 1;
             return Some(Unfinalized::UnknownRealtimeType);
@@ -556,5 +560,5 @@ struct EntryWire<'a> {
     #[serde(default, borrow)]
     item: Option<Text<'a>>,
     #[serde(default, borrow)]
-    values: Option<Values<'a>>,
+    values: Option<&'a RawValue>,
 }

@@ -83,6 +83,8 @@ store/<YYYYMMDD>/            정리가 끝난 날. 앱이 읽는다.
 
 `--verify-only`는 버킷 수를 Parquet 파일의 메타데이터에서 읽는다. 파일이 하나도 없는 날은 `--buckets` 값을 쓴다.
 
+`finalized`는 프레임의 `trnm`·`data`와 항목의 `type`·`item`·`values`를 모두 저장했다는 뜻이다. 그 밖의 필드(`name` 등)는 읽지 않고 버린다. `values` 객체의 키 하나를 글자로 풀 수 없거나(짝 없는 서로게이트 이스케이프) 한 항목에 같은 필드가 두 번 있으면 그 항목은 `malformed_realtime_frame`이고, 항목의 `item`은 `symbol_messages`에 세지 않는다.
+
 한 줄에 문제가 둘 이상이면 표 위쪽 종류로 센다(`malformed_realtime_frame`이 가장 앞). 줄에 여러 항목이 있으면 문제 없는 항목은 행으로 저장된다. 줄은 정리 못 함으로 센다.
 
 ## 열 표
