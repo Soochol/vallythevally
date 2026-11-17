@@ -70,7 +70,7 @@ pub struct BookSnapshot {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct ProgramTradeRow {
+pub struct RealProgramTrade {
     pub symbol: Symbol,
     pub hhmmss: TimeOfDay,
     pub price: Option<Price>,
@@ -103,7 +103,7 @@ pub struct BrokerSnapshot {
 pub enum StreamEvent {
     Tick { tick: RealTick, received_at: KstTime },
     Book { book: Box<BookSnapshot>, received_at: KstTime },
-    Program { row: ProgramTradeRow, received_at: KstTime },
+    Program { row: RealProgramTrade, received_at: KstTime },
     Broker { snapshot: BrokerSnapshot, received_at: KstTime },
     /// 세션이 LOGIN을 마치고 원하는 집합을 모두 REG 했다.
     Live { since: KstTime },

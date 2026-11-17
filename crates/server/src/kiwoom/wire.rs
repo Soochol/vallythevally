@@ -11,7 +11,7 @@ use serde_json::{Value, json};
 use super::api::kiwoom_stock_code;
 use crate::api::{self, ExcludeKind};
 use super::error::{WsRejection, judge_ws_ack};
-use super::stream::{BOOK_DEPTH, BookLevel, BookSnapshot, BrokerEntry, BrokerSnapshot, DayTotals, ExpectedTrade, Exchange, ProgramTradeRow, RealTick};
+use super::stream::{BOOK_DEPTH, BookLevel, BookSnapshot, BrokerEntry, BrokerSnapshot, DayTotals, ExpectedTrade, Exchange, RealProgramTrade, RealTick};
 use crate::config::Secret;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -926,7 +926,7 @@ pub enum RealItem {
     /// 0J. 체결량은 `13`(누적거래량)의 증가분이라 세션이 앞 프레임과 비교해 정한다.
     Index { index: IndexCode, hhmmss: TimeOfDay, price: Price, cumulative: u64, change_centi: Option<i64> },
     Book(Box<BookSnapshot>),
-    Program(ProgramTradeRow),
+    Program(RealProgramTrade),
     Broker(BrokerSnapshot),
     OtherType(String),
 }
@@ -1032,8 +1032,8 @@ fn parse_book(item: &str, values: &Value) -> Result<BookSnapshot, WireError> {
     })
 }
 
-fn parse_program(item: &str, values: &Value) -> Result<ProgramTradeRow, WireError> {
-    Ok(ProgramTradeRow {
+fn parse_program(item: &str, values: &Value) -> Result<RealProgramTrade, WireError> {
+    Ok(RealProgramTrade {
         symbol: combined_stock("0w", item)?,
         hhmmss: required_time(values, "20", "0w", item)?,
         price: won_or_absent(values, 10)?,
@@ -1979,7 +1979,7 @@ mod tests {
     fn parses_program_frame() {
         let values = json!({"20": "093002", "10": "+71200", "202": "100", "204": "7", "206": "300", "208": "21", "210": "200", "211": "-5", "212": "14", "213": "-1"});
         let Ok(RealItem::Program(row)) = one("0w", "005930_AL", values) else { panic!() };
-        assert_eq!(row, ProgramTradeRow {
+        assert_eq!(row, RealProgramTrade {
             symbol: Symbol::Stock(StockCode::parse("005930").unwrap()),
             hhmmss: TimeOfDay::hms(9, 30, 2).unwrap(),
             price: Price::from_centi(7_120_000),
