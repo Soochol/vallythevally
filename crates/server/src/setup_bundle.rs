@@ -235,6 +235,10 @@ async fn replace_all(db: &AppDb, setup: &Setup, now: UnixSeconds) -> Result<(), 
     let internal = |e: sqlx::Error| ApiFailure::from(StoreError::from(e));
     let mut tx = db.begin_write().await.map_err(internal)?;
     replace_all_in(&mut tx, setup, now).await?;
+    let owned: Option<i64> = sqlx::query_scalar("SELECT 1 FROM local_owner WHERE singleton = 1").fetch_optional(&mut *tx).await.map_err(internal)?;
+    if owned.is_some() {
+        sync_log::raise_revisions(&mut tx, now.millis()).await.map_err(internal)?;
+    }
     tx.commit().await.map_err(internal)?;
     Ok(())
 }
@@ -321,6 +325,15 @@ pub(crate) fn in_application_order(documents: &mut [Document]) {
     documents.sort_by_key(application_order);
 }
 
+pub(crate) fn in_push_order(documents: &mut [Document]) {
+    documents.sort_by_key(|document| match (document.kind, document.deleted) {
+        (DocumentKind::Layout, false) => 0,
+        (DocumentKind::Drawing, true) => 2,
+        (DocumentKind::Layout, true) => 3,
+        _ => 1,
+    });
+}
+
 async fn widened_drawing(tx: &mut sqlx::SqliteConnection, drawing: &Drawing) -> Result<Option<DrawingInput>, StoreError> {
     let DrawingScope::Cell { layout_id, .. } = &drawing.scope else { return Ok(None) };
     let layout: Option<i64> = sqlx::query_scalar("SELECT 1 FROM layouts WHERE id = ?").bind(layout_id).fetch_optional(&mut *tx).await?;
@@ -381,27 +394,27 @@ async fn apply_in(tx: &mut sqlx::Transaction<'static, sqlx::Sqlite>, document: &
     Ok(Outcome::Applied)
 }
 
-pub(crate) async fn apply_received(st: &AppState, document: &Document) -> Result<Received, StoreError> {
+pub(crate) async fn apply_received(st: &AppState, document: &Document, over_equal: bool) -> Result<Received, StoreError> {
     if let Err(e) = document.check() {
-        return finish_refused(&st.db, document, e.to_string()).await;
+        return finish_refused(&st.db, document, e.to_string(), over_equal).await;
     }
     let parsed = if document.deleted {
         None
     } else {
         match parse_document(document) {
             Ok(parsed) => Some(parsed),
-            Err(e) => return finish_refused(&st.db, document, e.message().to_owned()).await,
+            Err(e) => return finish_refused(&st.db, document, e.message().to_owned(), over_equal).await,
         }
     };
     if let Some(Parsed::Layout(_, nxt)) = &parsed
         && let Err(e) = check_nxt_traded(st, nxt).await
         && matches!(e.code(), ApiErrorCode::BadRequest)
     {
-        return finish_refused(&st.db, document, e.message().to_owned()).await;
+        return finish_refused(&st.db, document, e.message().to_owned(), over_equal).await;
     }
     let mut tx = st.db.begin_write().await?;
     let known = sync_log::recorded_revision(&mut tx, document.kind, &document.id).await?;
-    if known.is_some_and(|known| document.revision <= known) {
+    if known.is_some_and(|known| superseded(document.revision, known, over_equal)) {
         return Ok(Received::Discarded);
     }
     match apply_in(&mut tx, document, parsed).await? {
@@ -411,15 +424,19 @@ pub(crate) async fn apply_received(st: &AppState, document: &Document) -> Result
         }
         Outcome::Refused(why) => {
             drop(tx);
-            finish_refused(&st.db, document, why).await
+            finish_refused(&st.db, document, why, over_equal).await
         }
     }
 }
 
-async fn finish_refused(db: &AppDb, document: &Document, why: String) -> Result<Received, StoreError> {
+fn superseded(received: i64, known: i64, over_equal: bool) -> bool {
+    received < known || (received == known && !over_equal)
+}
+
+async fn finish_refused(db: &AppDb, document: &Document, why: String, over_equal: bool) -> Result<Received, StoreError> {
     let mut tx = db.begin_write().await?;
     let known = sync_log::recorded_revision(&mut tx, document.kind, &document.id).await?;
-    if known.is_some_and(|known| document.revision <= known) {
+    if known.is_some_and(|known| superseded(document.revision, known, over_equal)) {
         return Ok(Received::Discarded);
     }
     sync_log::refuse(&mut tx, document.kind, &document.id, document.revision, Direction::Pull, &why).await?;

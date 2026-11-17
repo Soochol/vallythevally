@@ -607,3 +607,63 @@ async fn the_requests_to_the_account_server_carry_only_the_five_document_kinds_a
     let logs = connector.server.stop().await;
     assert!(!logs.contains(&token) && !logs.contains(APP_SECRET), "로그에 비밀값이 있다");
 }
+
+#[tokio::test]
+async fn two_pcs_that_saved_different_content_under_the_same_revision_end_with_the_account_copy() {
+    let pair = pair().await;
+    let (accounts, a, b) = (&pair.accounts, &pair.a, &pair.b);
+    accounts.set_down(true);
+    a.saved("/api/screens", &screens("A의 편집", 1_794_152_120_001)).await;
+    b.saved("/api/screens", &screens("B의 편집", 1_794_152_120_001)).await;
+    accounts.set_down(false);
+    a.synced().await;
+    b.synced().await;
+    a.synced().await;
+    b.synced().await;
+    let (a_snapshot, b_snapshot) = (a.snapshot().await, b.snapshot().await);
+    assert_eq!(a_snapshot["screens"], b_snapshot["screens"]);
+    assert_eq!(a_snapshot["screens"]["screens"][0]["name"], "A의 편집", "먼저 올린 쪽이 계정 사본이 된다");
+    assert_eq!(b.sync_status().await["pendingDocuments"], 0);
+}
+
+#[tokio::test]
+async fn uploading_the_local_setup_beats_account_documents_whose_revision_is_ahead_of_this_pcs_clock() {
+    let accounts = Accounts::start().await;
+    let (seed_machine, upload_machine, witness_machine) = (Machine::new(), Machine::new(), Machine::new());
+    let seed = seed_machine.run(&accounts.base).await;
+    seed.saved("/api/watchlists", &watchlists("계정 쪽, 시계가 빠른 PC", 9_000_000_000_000)).await;
+    seed.login(&accounts).await;
+    seed.synced().await;
+
+    let upload = upload_machine.run(&accounts.base).await;
+    upload.saved("/api/watchlists", &watchlists("올릴 것", 1_794_152_130_001)).await;
+    upload.login(&accounts).await;
+    assert_eq!(upload.synced().await["sync"]["state"], "needs_choice");
+    let (status, body) = upload.post("/api/account/initial-sync", &json!({"choice": "upload_local"})).await;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(upload.get("/api/watchlists").await.1["lists"][0]["name"], "올릴 것");
+
+    let witness = witness_machine.run(&accounts.base).await;
+    witness.login(&accounts).await;
+    witness.synced().await;
+    assert_eq!(witness.get("/api/watchlists").await.1["lists"][0]["name"], "올릴 것");
+}
+
+#[tokio::test]
+async fn an_older_setup_imported_on_a_signed_in_pc_survives_the_next_sync_and_reaches_the_other_pc() {
+    let pair = pair().await;
+    let (a, b) = (&pair.a, &pair.b);
+    fill(a).await;
+    a.synced().await;
+    let earlier = a.export().await;
+    a.saved("/api/watchlists", &watchlists("나중 편집", 1_794_152_140_001)).await;
+    a.synced().await;
+    b.synced().await;
+
+    assert_eq!(a.put("/api/setup/import", &earlier).await.0, 200);
+    a.synced().await;
+    b.synced().await;
+    a.synced().await;
+    assert_eq!(a.get("/api/watchlists").await.1["lists"][0]["name"], "기본");
+    assert_eq!(a.snapshot().await, b.snapshot().await);
+}

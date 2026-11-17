@@ -236,7 +236,6 @@ pub enum ServerMessage {
     WatchLimited { symbols: Vec<SymbolCode> },
     KiwoomLink { status: KiwoomLinkStatus },
     Account { status: AccountStatus },
-    /// 다른 PC에서 바뀐 셋업을 받아 이 PC의 로컬 사본에 적용했다. 열린 화면은 바뀌지 않는다. `kinds`는 바뀐 문서 종류(중복 없음, 정해진 순서)다.
     SetupChanged { kinds: Vec<setup::DocumentKind> },
 }
 

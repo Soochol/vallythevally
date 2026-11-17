@@ -261,8 +261,10 @@ impl AccountState {
                 };
                 outgoing.push(document);
             }
+            setup_bundle::in_push_order(&mut outgoing);
             outgoing
         };
+        let mut replaced = Vec::new();
         let mut stale = Vec::new();
         for chunk in chunked(outgoing) {
             let response = self.guard(linked, login, linked.client.push(&login.token, &chunk).await).await?;
@@ -273,7 +275,8 @@ impl AccountState {
             for (sent, result) in chunk.iter().zip(response.results) {
                 match result.status {
                     PushStatus::Accepted => sync_log::acked(&mut tx, sent.kind, &sent.id, sent.revision).await.map_err(storage)?,
-                    PushStatus::Stale { document } if document.revision == sent.revision => sync_log::acked(&mut tx, sent.kind, &sent.id, sent.revision).await.map_err(storage)?,
+                    PushStatus::Stale { document } if document.revision == sent.revision && document.body == sent.body => sync_log::acked(&mut tx, sent.kind, &sent.id, sent.revision).await.map_err(storage)?,
+                    PushStatus::Stale { document } if document.revision == sent.revision => replaced.push(document),
                     PushStatus::Stale { document } => stale.push(document),
                     PushStatus::Rejected { reason } => {
                         tracing::warn!(kind = sent.kind.wire_name(), id = sent.id, reason, "계정 서버가 문서를 거절했습니다");
@@ -283,6 +286,12 @@ impl AccountState {
             }
             tx.commit().await.map_err(storage)?;
             report.touched = true;
+        }
+        for document in replaced {
+            match setup_bundle::apply_received(st, &document, true).await.map_err(|e| storage(format!("{e:?}")))? {
+                Received::Applied => report.applied(document.kind),
+                Received::Discarded | Received::Refused(_) => {}
+            }
         }
         Ok(stale)
     }
@@ -329,8 +338,9 @@ impl AccountState {
     }
 
     async fn upload_local(&self, st: &AppState, linked: &Linked, login: &Login, upload: Upload) -> Result<(), Refusal> {
-        let account_documents = if upload == Upload::ReplaceAccount { self.fetch_changes(linked, login, 0).await?.0 } else { Vec::new() };
-        let now = UnixSeconds(st.clock.now().unix()).millis();
+        let account_documents = if upload == Upload::Plain { Vec::new() } else { self.fetch_changes(linked, login, 0).await?.0 };
+        let account_newest = account_documents.iter().map(|document| document.revision + 1).max().unwrap_or(0);
+        let now = UnixSeconds(st.clock.now().unix()).millis().max(account_newest);
         let mut tx = st.db.begin_write().await.map_err(storage)?;
         if upload != Upload::Plain {
             sync_log::raise_revisions(&mut tx, now).await.map_err(storage)?;
@@ -377,7 +387,7 @@ async fn apply_all(st: &AppState, mut documents: Vec<Document>, report: &mut Rep
         let attempted = documents.len();
         let mut refused = Vec::new();
         for document in documents {
-            match setup_bundle::apply_received(st, &document).await.map_err(|e| storage(format!("{e:?}")))? {
+            match setup_bundle::apply_received(st, &document, false).await.map_err(|e| storage(format!("{e:?}")))? {
                 Received::Applied => report.applied(document.kind),
                 Received::Discarded => {}
                 Received::Refused(why) => {
@@ -470,6 +480,21 @@ mod tests {
     fn the_retry_delay_doubles_from_five_seconds_up_to_five_minutes() {
         let seconds: Vec<u64> = (1..=9).map(|failures| retry_delay(failures).as_secs()).collect();
         assert_eq!(seconds, [5, 10, 20, 40, 80, 160, 300, 300, 300]);
+    }
+
+    #[test]
+    fn a_push_sends_layouts_before_drawings_and_deleted_drawings_before_deleted_layouts() {
+        let document = |kind, id: &str, deleted| Document { kind, id: id.into(), revision: 1, deleted, body: (!deleted).then(|| serde_json::json!({})) };
+        let mut documents = vec![
+            document(DocumentKind::Layout, "gone", true),
+            document(DocumentKind::Drawing, "D", false),
+            document(DocumentKind::Drawing, "dead", true),
+            document(DocumentKind::Layout, "L", false),
+            document(DocumentKind::Watchlists, "main", false),
+        ];
+        setup_bundle::in_push_order(&mut documents);
+        let order: Vec<(DocumentKind, bool)> = documents.iter().map(|d| (d.kind, d.deleted)).collect();
+        assert_eq!(order, [(DocumentKind::Layout, false), (DocumentKind::Drawing, false), (DocumentKind::Watchlists, false), (DocumentKind::Drawing, true), (DocumentKind::Layout, true)]);
     }
 
     #[test]
