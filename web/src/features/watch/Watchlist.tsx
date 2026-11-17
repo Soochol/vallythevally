@@ -47,13 +47,15 @@ import { useBeforeConnect } from "../status/beforeConnect";
 
 const DIR_CLASS = { up: "text-up", down: "text-down", flat: "text-text-2" } as const;
 const ROW_GRID = "grid gap-1";
-const GROUP_HEAD = "flex h-[30px] items-center gap-1.5 border-t border-line pl-2 pr-1.5 text-s max-md:h-11 max-md:pl-3";
+const GROUP_HEAD = "flex h-[34px] items-center gap-1.5 border-y border-line bg-white/[0.045] pl-2 pr-1.5 text-[13px] font-[700] max-md:h-11 max-md:pl-3";
+const GROUP_SPACING = "[&:not(:first-child)]:mt-1.5";
+const GROUP_BAR = "h-3.5 w-[3px] flex-none rounded-[2px]";
 function setCollapsed(id: string, collapsed: boolean) {
   const known = useWatchlistStore.getState().lists.flatMap((l) => l.groups.map((g) => g.id));
   useUiStore.getState().setWatchGroupCollapsed(id, collapsed, known);
 }
 
-const COUNT_BADGE = "flex-none rounded-full bg-raised px-1.5 text-xs leading-4 text-text-2";
+const COUNT_BADGE = "flex-none rounded-full bg-white/10 px-1.5 text-xs font-[600] leading-4 text-text";
 
 interface GroupNaming {
   naming: string | null;
@@ -332,14 +334,15 @@ function WatchList({ variant, sender, editing, naming, onNaming, width = null }:
       ) : (
         <div ref={(el) => { scroller.current = el; }} role="group" aria-label={list.name} className={scrollClass} onDragLeave={leave}>
           {sections.map(({ group, symbols: codes }, i) => group ? (
-            <div key={group.id}>
+            <div key={group.id} className={GROUP_SPACING}>
               <GroupHead list={list} group={group} collapsed={collapsed.includes(group.id)} naming={naming === group.id} onNaming={onNaming} />
               {!collapsed.includes(group.id) && codes.length > 0 && <ul id={`watch-group-${group.id}`} aria-label={group.name}>{rows(sections[i]!)}</ul>}
             </div>
           ) : codes.length > 0 && (
-            <div key="ungrouped">
-              <div className={`${GROUP_HEAD} text-text-2`}>
-                <span className="font-[600]">그룹 없음</span>
+            <div key="ungrouped" className={GROUP_SPACING}>
+              <div className={`${GROUP_HEAD} pl-[26px] text-text-2`}>
+                <span aria-hidden="true" className={`${GROUP_BAR} bg-text-3`} />
+                <span>그룹 없음</span>
                 <span className={COUNT_BADGE}>{codes.length}<span className="sr-only">종목</span></span>
               </div>
               <ul aria-label="그룹 없음">{rows(sections[i]!)}</ul>
@@ -352,9 +355,9 @@ function WatchList({ variant, sender, editing, naming, onNaming, width = null }:
 }
 
 function GroupHead({ list, group, collapsed, naming, onNaming }: { list: Watchlist; group: WatchGroup; collapsed: boolean; naming: boolean; onNaming: GroupNaming["onNaming"] }) {
-  if (naming) return <div className={GROUP_HEAD}><GroupNameInput list={list} group={group} onDone={() => onNaming(null)} /></div>;
+  if (naming) return <div className={`${GROUP_HEAD} text-text`}><GroupNameInput list={list} group={group} onDone={() => onNaming(null)} /></div>;
   return (
-    <div className={GROUP_HEAD}>
+    <div className={`${GROUP_HEAD} text-text`}>
       <button
         type="button"
         className="flex h-full min-w-0 flex-1 items-center gap-1.5 text-left"
@@ -363,8 +366,9 @@ function GroupHead({ list, group, collapsed, naming, onNaming }: { list: Watchli
         aria-controls={collapsed || group.symbols.length === 0 ? undefined : `watch-group-${group.id}`}
         onClick={() => setCollapsed(group.id, !collapsed)}
       >
-        <span className={`grid flex-none place-items-center text-text-2 transition-transform ${collapsed ? "-rotate-90" : ""}`}><ChevronIcon /></span>
-        <span className="truncate font-[600]">{group.name}</span>
+        <span className={`grid flex-none place-items-center text-text transition-transform ${collapsed ? "-rotate-90" : ""}`}><ChevronIcon /></span>
+        <span aria-hidden="true" className={`${GROUP_BAR} bg-accent`} />
+        <span className="truncate">{group.name}</span>
         <span className={COUNT_BADGE}>{group.symbols.length}</span>
       </button>
       <GroupMenu list={list} group={group} onRename={() => onNaming(group.id)} />
@@ -621,7 +625,7 @@ function WatchRow({ list, row, index, last, columns, template, variant, sender, 
           move(e.key === "ArrowUp" ? -1 : 1);
         }}
         style={template}
-        className={`${ROW_GRID} ${LIST_ROW_HEIGHT} w-full items-center pl-2.5 pr-3 text-left ${LIST_ROW_HOVER} max-md:h-auto max-md:min-h-[56px] max-md:px-4 max-md:py-2 ${
+        className={`${ROW_GRID} ${LIST_ROW_HEIGHT} w-full items-center ${list.groups.length > 0 ? "pl-[33px]" : "pl-2.5"} pr-3 text-left ${LIST_ROW_HOVER} max-md:h-auto max-md:min-h-[56px] max-md:px-4 max-md:py-2 ${
           editing ? (list.groups.length > 0 ? "max-md:pr-[220px]" : "max-md:pr-[176px]") : ""
         }`}
       >
