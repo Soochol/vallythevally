@@ -14,6 +14,7 @@ data/hoga/
   spans/<YYYYMMDD>/verified.json                  대조 결과
   store/<YYYYMMDD>.tmp/<타입>/<버킷>.parquet       finalize가 쓰는 중인 수집 저장소
   store/<YYYYMMDD>.tmp/verify.json                finalize의 원문 대조 결과
+  plan/<YYYYMMDD>.json                            그날의 수집 계획
 ```
 
 날짜와 `HHMM`은 수신 시각의 KST 날짜와 5분 구간 시작이다. `<종목>`은 등록한 글자 그대로다(`005930_AL`).
@@ -525,6 +526,53 @@ data/hoga/calendar/
 
 - `Calendar::judge`는 `Judgment`(관측일 여부, 개장 분, 근거 목록)를 낸다. `next_observation_day`, `observation_days_after`, `observation_days_before`가 관측일을 센다. `cross_check`는 지수 일봉의 날짜 목록과 그날 판단을 대조한다. 목록이 비었거나 그날이 목록의 가장 이른 날짜보다 앞이면 판단하지 않는다. 마지막 일봉 뒤의 날은 일봉이 없는 것으로 보므로 마감 뒤에 부른다.
 - 시험은 `python3 scripts/dev.py cargo test -p collector --test calendar`와 `--lib calendar`다. 합성 응답만 쓴다.
+
+## 키 목록 설정
+
+`collector::keys::KeyList::load`가 저장소 밖 JSON 파일 하나에서 수집 키 목록을 읽는다. 비밀값은 이 파일에 없고 키마다 비밀값 파일을 가리킨다. 아래 값은 모두 가짜다.
+
+```json
+{"version": 1, "keys": [
+  {"name": "collect-01", "active": true, "spare": false,
+   "app_key_hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+   "secret_file": "/etc/vally/collect-01.env"},
+  {"name": "spare-01", "active": true, "spare": true,
+   "app_key_hash": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+   "secret_file": "/etc/vally/spare-01.env",
+   "token_path": "/var/lib/vally/spare-01/token.json",
+   "lock_path": "/var/lib/vally/spare-01/collector.lock"}
+]}
+```
+
+- `name`은 `a-z0-9-`다. `app_key_hash`는 토큰 파일이 쓰는 `sha256:<소문자 16진수 64자>`다. 모든 경로는 절대 경로다.
+- 비밀값 파일은 `collect`의 env 파일과 같은 형식이다(`VALLY_COLLECTOR_APP_KEY`, `VALLY_COLLECTOR_APP_SECRET`). 읽는 것은 활성 키뿐이라 아직 없는 키는 `active: false`로 적어 둘 수 있다.
+- `token_path`와 `lock_path`를 적지 않으면 상태 폴더 아래 키 이름 폴더(`<상태 폴더>/<키 이름>/token.json`, `collector.lock`)다.
+- 읽을 때 다음이 하나라도 틀리면 오류다. 이름이 겹침, `spare: true`가 정확히 하나가 아님, 비밀값 파일 권한에 그룹·다른 사용자 비트가 있음(600이어야 한다), 비밀값 파일의 앱키 해시가 설정과 다름, 두 키의 앱키 해시가 같음, 앱 서버 키(`VALLY_KIWOOM_APP_KEY`)와 같음.
+- 오류 문구에는 키 이름과 경로만 나온다. 비밀값은 `Secret`에 담긴다.
+
+## 수집 계획
+
+`collector::plan::build_plan`이 그날의 수집 계획을 정하는 순수 함수다. 입력은 활성 키(`KeyList::identities`), 그날의 수집 종목 목록(`UniverseFile`), `종목 → 전날 메시지 수` 맵이다. 읽어 오는 일과 부르는 시각은 호출하는 쪽이 정한다. 같은 입력이면 입력 순서와 상관없이 같은 계획이 나온다.
+
+- 키 하나의 몫은 190종목이다(`KEY_CAPACITY`). 예비 키에는 종목, 시장 단위 타입, REST 작업을 맡기지 않는다.
+- 등록할 종목이 수집 키 수 × 190보다 많으면 종목코드 순으로 채우고 나머지는 `excluded`에 남기며 `alerts`에 적는다.
+- 전날 메시지 수가 큰 종목부터 합이 가장 작은 키(같으면 종목 수가 적은 키, 같으면 키 이름 순)에 넣는다. 전날 값이 없는 종목은 부하 0으로 보고 마지막에 종목 수가 가장 적은 키에 넣는다.
+- 시장 단위 타입 `0J`·`0U`·`0s`는 종목을 나눈 뒤 부하가 가장 작은 수집 키(같으면 종목 수가 적은 키, 같으면 키 이름 순) 하나에 건다.
+- 거래정지로 등록하지 않는 종목은 `unregistered`에 남고 어느 키에도 들지 않는다.
+- `rest_jobs`는 지금 빈 목록이다.
+
+`plan/<YYYYMMDD>.json`의 최상위 값이다.
+
+| 값 | 뜻 |
+|---|---|
+| `format_version`, `date`, `created_at` | 형식 버전(1), 날짜, 만든 KST 시각 |
+| `input` | `active_keys`(활성 키 수, 예비 키 포함), `universe_replaced`(종목 목록이 이전 목록으로 대체됐으면 그 까닭과 원래 날짜) |
+| `keys[]` | `name`, `role`(`collecting`·`spare`), `app_key_hash`, `stocks`, `market_types`, `rest_jobs`, `load`(몫의 전날 메시지 수 합) |
+| `excluded`, `unregistered`, `alerts` | 제외한 종목코드, 등록하지 않는 종목코드, 경보 문구 |
+
+`check_plan`이 한 종목이 정확히 한 키에만 드는지(와 키마다 190 이하, 예비 키가 비어 있는지, 시장 단위 타입이 수집 키 하나에만 있는지)를 확인한다. `write_plan`이 쓰기 전에 부르고, 인계 때 데몬이 다시 부른다. `write_plan`은 임시 파일에 쓴 뒤 이름을 바꾸고, 파일이 이미 있으면 덮어쓰지 않고 오류를 낸다. 그날의 기록이고 `finalize`의 입력이기 때문이다. `read_plan`은 형식 버전을 확인하고 읽는다.
+
+시험은 `python3 scripts/dev.py cargo test -p collector --test plan`이다. 가짜 키와 비밀값 파일만 쓴다.
 
 ## 실제 수집 절차
 

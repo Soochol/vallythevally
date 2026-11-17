@@ -42,7 +42,7 @@ impl From<StoreError> for UniverseError {
     }
 }
 
-fn kst_stamp(time: KstTime) -> String {
+pub(crate) fn kst_stamp(time: KstTime) -> String {
     let (date, seconds) = (time.date, time.ms_of_day / 1000);
     format!(
         "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}+09:00",
