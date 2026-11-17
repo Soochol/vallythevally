@@ -31,6 +31,9 @@ fn generated<T: TS + 'static>() -> (String, String) {
 #[test]
 fn generated_typescript_matches_the_committed_files() {
     let ours = [
+        generated::<setup::Bundle>(),
+        generated::<setup::Document>(),
+        generated::<setup::DocumentKind>(),
         generated::<ApiError>(),
         generated::<ApiErrorBody>(),
         generated::<ApiErrorCode>(),
