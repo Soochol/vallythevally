@@ -1021,3 +1021,43 @@ fn day_plan() -> PlanFile {
         alerts: Vec::new(),
     }
 }
+
+fn copy_tree(from: &Path, to: &Path) {
+    std::fs::create_dir_all(to).unwrap();
+    let status = std::process::Command::new("cp").arg("-a").arg(format!("{}/.", from.display())).arg(to).status().unwrap();
+    assert!(status.success());
+}
+
+#[tokio::test(start_paused = true)]
+async fn an_unknown_day_with_a_changed_open_time_moves_the_zero_s_deadline() {
+    let harness = Harness::start_with(Config { holidays: Holidays::Down, open_at: Some(at(10, 0, 0)), ..Config::default() }, |data| {
+        write(
+            &data.join("calendar").join("overrides.json"),
+            r#"{"version":1,"days":[{"kind":"open_at","date":20261118,"time":"10:00","reason":"수능일"}]}"#,
+        );
+    });
+    harness.until(at(10, 12, 0)).await;
+    assert!(harness.journal_of("market_open_missing").is_empty(), "판단이 모름이어도 수정 파일의 개장 시각을 따라야 한다");
+    assert_eq!(harness.journal_of("market_open_seen").len(), 1);
+    harness.finish().await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_restart_after_a_missing_zero_s_keeps_the_missing_result() {
+    let first = Harness::start(Config { open_at: None, ..Config::default() });
+    first.until(at(9, 15, 0)).await;
+    assert_eq!(first.journal_of("market_open_missing").len(), 1);
+    let snapshot = tempfile::tempdir().unwrap();
+    let Harness { folder, stop, done, .. } = first;
+    stop.send(true).unwrap();
+    timeout(Duration::from_secs(120), done).await.unwrap().unwrap();
+    copy_tree(&folder.path().join("data"), snapshot.path());
+    let snapshot_path = snapshot.path().to_path_buf();
+    let second = Harness::start_with(Config { start: at(11, 0, 0), open_at: None, ..Config::default() }, move |data| {
+        copy_tree(&snapshot_path, data);
+    });
+    second.until_finalize_finished(1).await;
+    let complete = second.complete();
+    assert_eq!(complete["observation"]["market_open"]["state"], "missing", "다시 뜬 데몬이 이미 적힌 0s 없음을 덮으면 안 된다");
+    second.finish().await;
+}

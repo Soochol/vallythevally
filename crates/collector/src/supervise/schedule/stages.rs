@@ -117,7 +117,7 @@ impl Daemon {
             }
         };
         self.reporter.observation_day(ObservationDay { verdict: status_verdict, reasons });
-        day.open_minute = summary.open_minute;
+        day.open_minute = summary.open_minute.or_else(|| (!closed).then(|| calendar.open_minute_of(calendar_day)));
         day.calendar = Some(calendar);
         day.judgment = Some(judgment);
         if closed {

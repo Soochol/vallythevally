@@ -197,6 +197,10 @@ impl Calendar {
         Evidence { input: EvidenceInput::Overrides, finding, detail }
     }
 
+    pub fn open_minute_of(&self, day: Day) -> u16 {
+        self.open_minute(day).0
+    }
+
     fn open_minute(&self, day: Day) -> (u16, Evidence) {
         let observed = |minute: u16, detail: String| {
             (minute, Evidence { input: EvidenceInput::OpenTime, finding: Finding::Open, detail })

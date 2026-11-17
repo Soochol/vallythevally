@@ -14,7 +14,7 @@ use tokio::time::{Instant, sleep_until};
 
 use super::api::{StatusApi, StatusSocket, serve};
 use super::handoff::{effective_plan, registrations_of};
-use super::journal::{Journal, JournalEvent, journal_path, kst_stamp};
+use super::journal::{Journal, JournalEvent, has_event, journal_path, kst_stamp};
 use super::process::{ChildMessage, ChildProcess, Launcher};
 use super::settings::{Settings, SocketSetting};
 use super::status::{Alert, AlertKind, DaemonStatus, DayPhase, KeyState, KeyStatus, RestProgress, Today};
@@ -424,7 +424,10 @@ impl Supervisor {
     fn arm_market_open(&mut self) {
         let Some(check) = self.settings.market_open_check else { return };
         let now = self.clock.now();
-        if now.unix() >= check.opens_at.unix() {
+        let settled_before = ["market_open_seen", "market_open_missing"].iter().any(|event| has_event(&journal_path(&self.data_dir, self.date), event));
+        if settled_before {
+            self.market_open = MarketOpenWatch::Settled;
+        } else if now.unix() >= check.opens_at.unix() {
             let reason = format!("개장({})이 지난 뒤에 시작해 0s 대조를 하지 않습니다", kst_stamp(check.opens_at));
             self.record(JournalEvent::MarketOpenNotChecked { reason });
             self.market_open = MarketOpenWatch::Settled;
