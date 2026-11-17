@@ -69,8 +69,10 @@
 @media (width < 80rem) { .desktop-topbar .venue-picker-prefix { display:none; } .desktop-topbar .tb-sep { display:none; } }
 @media (width < 80rem) { .desktop-topbar .system-btn { width:var(--size-24); padding-inline:0; justify-content:center; } .system-btn .conn-dot { position:absolute; top:var(--size-4); right:var(--size-2); } }
 @media (width <= 80rem) { .desktop-topbar { padding-inline:var(--size-8); } }
-@media (width <= 64rem) { .desktop-topbar .topbar-search-slot { min-width:var(--size-220); } .shell-search kbd { display:none; } .desktop-topbar { gap:var(--size-2); } }
-@media (width < 52rem) { .app-brand > span { display:none; } .desktop-topbar .topbar-search-slot { min-width:var(--size-140); } }
+@media (width < 66rem) { .desktop-topbar .topbar-search-slot { min-width:var(--size-220); } }
+@media (width <= 64rem) { .shell-search kbd { display:none; } .desktop-topbar { gap:var(--size-2); } }
+@media (width < 52rem) { .app-brand > span { display:none; } }
+@media (width < 54rem) { .desktop-topbar .topbar-search-slot { min-width:var(--size-140); } }
 @media (width < 56rem) { .desktop-topbar { padding-inline:var(--size-5); } }
 .workspace { position:relative; flex:1; min-width:0; min-height:0; margin:var(--island-gap); overflow:hidden; }
 .status-bar { height:var(--size-28); }
