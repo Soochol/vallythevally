@@ -44,7 +44,9 @@ async function editChosen(page: Page, title = "조건식 편집") {
 }
 
 async function createScreen(page: Page) {
-  await panel(page).getByRole("button", { name: "새 조건식", exact: true }).click();
+  await expect(panel(page).getByRole("button", { name: "새 조건식", exact: true })).toHaveCount(0);
+  await screenChooser(page).click();
+  await page.getByRole("menu", { name: "조건식 고르기", exact: true }).getByRole("menuitem", { name: "새 조건식…", exact: true }).click();
   const dialog = dialogOf(page, "새 조건식");
   await expect(dialog).toBeVisible();
   return dialog;
