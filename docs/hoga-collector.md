@@ -349,7 +349,7 @@ node scripts/test-hoga-replay.mjs
 
 ## 실제 수집 절차
 
-사용자가 장중에 직접 따라 한다. 자동 시험과 자동 작업은 실제 키움에 접속하지 않는다.
+사용자가 장중에 직접 따라 한다. 자동 시험과 자동 작업은 실제 키움에 접속하지 않는다. 한 IP에서 세션 여러 개와 연속 토큰 발급을 재는 절차는 [`collector-session-probe.md`](collector-session-probe.md)에 있다.
 
 1. **수집기 전용 키를 저장소 밖 파일에 둔다.** 권한은 600이다.
 
