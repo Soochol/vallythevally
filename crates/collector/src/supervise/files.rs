@@ -10,11 +10,43 @@ use crate::raw_write::raw_day_dir;
 pub const LISTED_DAYS: usize = 60;
 const COMPLETE_FILE: &str = "complete.json";
 
-#[derive(Deserialize, Default)]
+#[derive(Deserialize)]
+struct CompleteFile {
+    verify: VerifyPart,
+    plan: Option<PlanPart>,
+    stocks: Vec<StockPart>,
+}
+
+#[derive(Deserialize)]
+struct VerifyPart {
+    passed: bool,
+}
+
+#[derive(Deserialize)]
+struct PlanPart {
+    planned_stocks: u64,
+}
+
+#[derive(Deserialize)]
+struct StockPart {
+    received: bool,
+}
+
+#[derive(Default)]
 struct CompleteSummary {
     verified: Option<bool>,
     planned_stocks: Option<u64>,
     received_stocks: Option<u64>,
+}
+
+impl From<CompleteFile> for CompleteSummary {
+    fn from(file: CompleteFile) -> CompleteSummary {
+        CompleteSummary {
+            verified: Some(file.verify.passed),
+            planned_stocks: file.plan.map(|plan| plan.planned_stocks),
+            received_stocks: Some(file.stocks.iter().filter(|stock| stock.received).count() as u64),
+        }
+    }
 }
 
 fn dates_in(folder: &Path, trim_suffix: &str) -> Vec<u32> {
@@ -50,8 +82,8 @@ fn coverage_of(data_dir: &Path, date: u32) -> CoverageDay {
         return day(CoverageState::Unreadable, CompleteSummary::default());
     }
     match fs::read(&complete) {
-        Ok(bytes) => match serde_json::from_slice::<CompleteSummary>(&bytes) {
-            Ok(summary) => day(CoverageState::Complete, summary),
+        Ok(bytes) => match serde_json::from_slice::<CompleteFile>(&bytes) {
+            Ok(file) => day(CoverageState::Complete, file.into()),
             Err(_) => day(CoverageState::Unreadable, CompleteSummary::default()),
         },
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => day(CoverageState::Incomplete, CompleteSummary::default()),
@@ -103,7 +135,7 @@ mod tests {
     fn coverage_lists_days_newest_first_with_their_state() {
         let folder = tempfile::tempdir().unwrap();
         let store = folder.path().join("store");
-        write(&store.join("20261116/complete.json"), r#"{"verified":true,"planned_stocks":2600,"received_stocks":2590,"extra":1}"#);
+        write(&store.join("20261116/complete.json"), r#"{"format_version":1,"date":20261116,"verify":{"passed":true,"mismatch_count":0},"plan":{"planned_stocks":2600,"excluded":2},"stocks":[{"code":"000010","received":true,"messages":9},{"code":"000020","received":false,"messages":0},{"code":"000030","received":true,"messages":3}]}"#);
         write(&store.join("20261117/complete.json"), "not json");
         write(&store.join("20261114/0B/000.parquet"), "x");
         write(&store.join("20261118.tmp/0B/000.parquet"), "x");
@@ -115,7 +147,8 @@ mod tests {
             [(20261118, CoverageState::InProgress), (20261117, CoverageState::Unreadable), (20261116, CoverageState::Complete), (20261114, CoverageState::Incomplete)]
         );
         assert_eq!(days[2].verified, Some(true));
-        assert_eq!(days[2].received_stocks, Some(2590));
+        assert_eq!(days[2].planned_stocks, Some(2600));
+        assert_eq!(days[2].received_stocks, Some(2));
         assert_eq!(days[3].verified, None);
     }
 

@@ -105,7 +105,11 @@
 `days[]`는 날짜 내림차순이고 최대 60일이다. 항목은 `{date, state, verified, planned_stocks, received_stocks}`다.
 
 - `state`: `complete`(`store/<날짜>/complete.json`이 있고 읽힘), `incomplete`(날짜 폴더는 있고 `complete.json`이 없음), `in_progress`(`store/<날짜>.tmp`만 있음), `unreadable`(`complete.json`이 읽히지 않음).
-- `verified`(원문 대조 통과 여부), `planned_stocks`, `received_stocks`는 `complete.json` 최상위에서 같은 이름의 값을 읽는다. 없으면 `null`이다. `complete.json`을 쓰는 `finalize-complete` 작업이 이 이름으로 쓴다.
+- `verified`, `planned_stocks`, `received_stocks`는 `complete.json`([수집 저장소 형식](collector-store-format.md)의 "complete.json")에서 구한다.
+  - `verified`는 `verify.passed`다(원문 대조 통과 여부).
+  - `planned_stocks`는 `plan.planned_stocks`다. 수집 키에 맡긴 종목, 용량 때문에 제외된 종목, 거래정지로 등록하지 않은 종목을 합한 수다. 그날 계획 파일이 없어 `plan`이 `null`이면 `null`이다.
+  - `received_stocks`는 `stocks[]`에서 `received`가 `true`인 종목 수다. 계획에 없는데 받은 종목도 센다.
+  - `state`가 `complete`가 아니면 셋 다 `null`이다.
 
 ### `disk` (`reply-disk.json`)
 

@@ -574,3 +574,36 @@ async fn a_file_reply_is_still_delivered_after_the_client_half_closes() {
     }
     world.finish().await;
 }
+
+fn finalize_a_day(data: &Path, date: u32, with_plan: bool) {
+    let base_ms = collector::calendar::Day::from_yyyymmdd(date).unwrap().unix_ms_at_kst(9, 0);
+    let name = KeyName::parse("collect-01").unwrap();
+    if with_plan {
+        let mut plan = plan_for(1, 3, 1);
+        plan.date = date;
+        plan.unregistered = vec!["300002".to_owned()];
+        collector::plan::write_plan(data, &plan).unwrap();
+    }
+    let mut writer = collector::raw_write::RawWriter::for_key(data, name);
+    for (offset, code) in [(1000, "000001"), (2000, "000001"), (3000, "000002")] {
+        let text = json!({"trnm": "REAL", "data": [{"type": "0B", "item": format!("{code}_AL"), "values": {"10": "100"}}]}).to_string();
+        writer.write(&collector::raw_write::RawLine::Frame { recv_ms: base_ms + offset, text: &text }).unwrap();
+    }
+    writer.close().unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_collector")).args(["finalize", "--data", data.to_str().unwrap(), "--date", &date.to_string()]).output().unwrap();
+    assert_eq!(output.status.code(), Some(0), "{}", String::from_utf8_lossy(&output.stderr));
+}
+
+#[tokio::test(start_paused = true)]
+async fn the_coverage_summarizes_the_complete_json_that_finalize_really_writes() {
+    let world = World::start(plan_for(2, 3, 0));
+    finalize_a_day(&world.data(), 20261117, true);
+    finalize_a_day(&world.data(), 20261116, false);
+    let mut client = world.connect().await;
+    let reply = client.ask(fixture_line("request-coverage.json").trim()).await;
+    let days = reply["days"].as_array().unwrap();
+    let day = |date: u64| days.iter().find(|day| day["date"] == date).unwrap().clone();
+    assert_eq!(day(20261117), json!({"date": 20261117, "state": "complete", "verified": true, "planned_stocks": 5, "received_stocks": 2}));
+    assert_eq!(day(20261116), json!({"date": 20261116, "state": "complete", "verified": true, "planned_stocks": null, "received_stocks": 2}));
+    world.finish().await;
+}
