@@ -4,8 +4,10 @@ import type { Watchlist } from "../api/generated/Watchlist";
 import {
   addSymbol,
   addSymbols,
-  addToGroup,
-  moveToGroup,
+  dropRow,
+  type DropHow,
+  type DropResult,
+  type DropTarget,
   removeRow,
   rowExists,
   type WatchRowRef,
@@ -27,6 +29,8 @@ import {
 } from "../lib/watchlist";
 import { useUiStore } from "./ui";
 import type { ToastUndo } from "./selection";
+
+const applied = (result: DropResult, unchanged: Watchlist): Watchlist => ("list" in result ? result.list : unchanged);
 
 export interface WatchlistRemoval extends Omit<ToastUndo, "run"> {
   restore(lists: readonly Watchlist[], allowRestored?: boolean): Watchlist[] | null;
@@ -55,8 +59,7 @@ interface WatchlistState {
   moveGroupBy(list: string, id: string, step: -1 | 1): void;
   ungroup(list: string, id: string): void;
   deleteGroup(list: string, id: string): void;
-  addToGroup(list: string, code: SymbolCode, group: string): void;
-  moveToGroup(list: string, row: WatchRowRef, group: string): void;
+  dropRow(list: string, row: WatchRowRef, target: DropTarget, how: DropHow): void;
 }
 
 export const useWatchlistStore = create<WatchlistState>()((set, get) => {
@@ -130,14 +133,13 @@ export const useWatchlistStore = create<WatchlistState>()((set, get) => {
     moveToNewGroup: (list, row, id, name) => editList(list, (l) => {
       if (!rowExists(l, row)) return l;
       const created = createGroup(l, id, name);
-      return created === l ? l : moveToGroup(created, row, id);
+      return created === l ? l : applied(dropRow(created, row, { groupId: id, before: null }, "move"), l);
     }),
     renameGroup: (list, id, name) => editList(list, (l) => renameGroup(l, id, name)),
     moveGroupBy: (list, id, step) => editList(list, (l) => moveGroupBy(l, id, step)),
     ungroup: (list, id) => editList(list, (l) => ungroup(l, id)),
     deleteGroup: (list, id) => editList(list, (l) => deleteGroup(l, id)),
-    addToGroup: (list, code, group) => editList(list, (l) => addToGroup(l, code, group)),
-    moveToGroup: (list, row, group) => editList(list, (l) => moveToGroup(l, row, group)),
+    dropRow: (list, row, target, how) => editList(list, (l) => applied(dropRow(l, row, target, how), l)),
   };
 });
 

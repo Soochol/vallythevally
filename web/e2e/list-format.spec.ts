@@ -73,7 +73,7 @@ test("두 목록의 줄은 같은 글자 크기·굵기·배지·높이·열 폭
   const watchedName = watchRow(page, "005930").locator("b");
   const resultName = rowOf(page, rows[0]!.symbol).locator("b");
   const names = [await look(watchedName), await look(resultName)];
-  for (const name of names) expect([name.fontSize, name.fontWeight]).toEqual(["14px", "550"]);
+  for (const name of names) expect([name.fontSize, name.fontWeight]).toEqual(["14px", "600"]);
   expect(names[0]!.color).toBe(names[1]!.color);
 
   const watchPrice = watchRow(page, "005930").locator("[data-main] > span").nth(1);
