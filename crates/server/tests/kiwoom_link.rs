@@ -1078,3 +1078,31 @@ async fn a_disconnect_during_the_issue_interval_wait_sends_nothing() {
     assert_eq!(fake.requests(), 0, "{:?}", fake.api_ids());
     server.stop().await;
 }
+
+#[tokio::test]
+async fn an_acknowledged_connect_that_fails_before_a_token_keeps_8050_blocked_for_the_automatic_paths() {
+    let fake = ScriptedTransport::new();
+    fake.respond_with("au10001", 500, json!({}));
+    let env = env();
+    write_private(&token_path(&env.lock), json!({"credential": credential_id(APP_KEY), "token": null, "last_request_at": unix_of(AT_TEN) - 3600, "auth_block": {"detail": {"rest": 8050}, "credential": null, "at": unix_of(AT_TEN) - 3600}}).to_string().as_bytes());
+    let server = spawn(&fake, &env, &[START, ("VALLY_CLOCK_START", AT_TEN)]);
+    server.addr().await;
+    assert_eq!(failure(server.link_state()).problem, Problem::AuthBlocked8050);
+    assert_eq!(fake.requests(), 0);
+
+    assert_eq!(failure(server.connect(true).await).problem, Problem::AuthBlocked8050, "토큰을 받기 전에 실패하면 8050 차단이 다시 선다");
+    assert!(server.link().needs_acknowledgement());
+    assert_eq!(fake.issued(), 1);
+
+    server.link().replace_key(Secret::new("FAKE-new-key".into()), Secret::new("FAKE-new-secret".into()));
+    server.link().connect_in_background();
+    server.clock().jump(601);
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert_eq!(failure(server.link_state()).problem, Problem::AuthBlocked8050, "키 저장 때의 자동 연결은 확인 없이 발급하지 않는다");
+    assert_eq!(fake.issued(), 1, "{:?}", fake.api_ids());
+
+    fake.reset();
+    assert_eq!(server.connect(true).await, LinkState::Connected, "확인하고 간격이 지난 손 연결은 지금처럼 풀린다");
+    assert_eq!(fake.issued(), 2);
+    server.stop().await;
+}

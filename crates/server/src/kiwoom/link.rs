@@ -179,13 +179,15 @@ impl Link {
         self.0.state.send_replace(state);
     }
 
-    fn restore_unsent_8050(&self) {
+    fn restore_unsent_8050(&self) -> bool {
         let released = self.0.released_8050.lock().expect("8050 잠금").take();
         let auth = self.0.rest.auth();
-        if let Some(halt) = released
-            && auth.issue_blocked_until(self.0.clock.now()).is_none()
-        {
-            auth.restore_halt(halt);
+        match released {
+            Some(halt) if auth.current(self.0.clock.now()).is_none() => {
+                auth.restore_halt(halt);
+                auth.halted().is_some_and(|halt| halt.is_8050())
+            }
+            _ => false,
         }
     }
 
@@ -253,8 +255,10 @@ impl Link {
             if matches!(outcome, Ok(LinkState::Connected)) {
                 self.0.released_8050.lock().expect("8050 잠금").take();
                 self.0.rest.auth().clear_connect_records();
-            } else {
-                self.restore_unsent_8050();
+            } else if self.restore_unsent_8050() {
+                let blocked = self.resting_state();
+                self.set(blocked.clone());
+                return Ok(blocked);
             }
         }
         outcome
