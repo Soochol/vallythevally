@@ -375,6 +375,57 @@ collector finalize [--data <폴더>] --date YYYYMMDD [--threads 4] [--buckets 64
 
 `crates/collector/tests/finalize.rs`가 합성 원문(열한 타입, 종목 48개, 버킷 여럿)을 정리해 DuckDB로 읽은 행이 원문 프레임과 같은지, 스레드 1과 4의 결과 파일이 같은지, `verify.json`의 줄 수 구분, 원문에서 줄 하나를 뺀 Parquet이 대조에서 실패하는지, 이미 있는 `store/<날짜>/`를 건드리지 않는지, 문서의 열 표가 코드의 열 정의와 같은지를 고정한다.
 
+## 수집 종목 목록
+
+`collector::universe`가 아침에 `ka10099`로 받아 `<데이터 폴더>/universe/`에 쓴다. 대상과 규칙은 [ADR 0026](adr/0026-collector-supervisor-collects-common-and-preferred-stocks.md)을, 용어는 `GLOSSARY.md`의 **수집 종목 목록**을 따른다. 07:20에 부르는 일은 감독 데몬의 몫이고, 이 모듈은 `KiwoomRest` 하나를 받아 받기·가르기·검사·쓰기만 한다.
+
+```
+universe/<YYYYMMDD>.json            그날의 수집 종목 목록(계획의 입력)
+universe/<YYYYMMDD>.rejected.json   쓰지 않기로 한 목록(진단용)
+universe/<YYYYMMDD>.after.json      마감 뒤 목록과 아침 목록의 차이
+```
+
+모든 파일은 임시 파일에 쓴 뒤 이름을 바꿔 놓는다. 같은 날짜로 다시 돌리면 그날 파일을 새로 쓴다. 전날 목록은 그날보다 이른 날짜 가운데 가장 늦은 `<YYYYMMDD>.json`이다.
+
+### 받기와 가르기
+
+`mrkt_tp` 0과 10을 연속조회 끝까지 부른다(`server::symbols::fetch_listing_rows`, 서버의 `fetch_directory`와 같은 호출이다). 시장마다 쪽 수 상한(`MAX_LIST_PAGES`)에 닿았는데 다음 쪽이 남아 있으면 끊긴 목록이다. 행은 `domain::classify`로 가른다.
+
+- 보통주와 우선주를 남긴다. 스팩(`ListingRow::is_spac`)은 종류 `spac`으로 남는다.
+- ETF·리츠·ETN 등 `Exclude` 행은 넣지 않는다. 규칙에 없는 `marketCode` 행도 넣지 않고 `warnings`에 적는다. 모르는 `auditInfo` 상태와 겹치는 종목코드도 `warnings`에 적는다.
+- `auditInfo`에 거래정지가 있으면 목록에는 두고 `registered`를 `false`로 한다. 관리종목·투자경고 같은 다른 상태는 `registered`가 `true`다. 계획이 쓸 "등록할 종목"은 `UniverseFile::registrable()`이다. 목록을 읽는 함수는 `read_universe`다.
+
+### 그날 목록 파일
+
+| 필드 | 뜻 |
+|---|---|
+| `format_version` | 형식 버전. 지금은 1이고 다른 값은 읽지 않는다 |
+| `date`, `fetched_at` | 목록 날짜(`YYYYMMDD`)와 받은 시각(KST, `+09:00`) |
+| `stocks` | 종목코드 순. 종목마다 `code`, `name`, `market`(`kospi`·`kosdaq`), `kind`(`common`·`preferred`·`spac`), `status`(`auditInfo`의 낱말 그대로), `registered` |
+| `warnings` | 위 가르기 경고 |
+| `diff` | 전날 목록과의 차이: `added`, `removed`, `renamed`(`code`·`from`·`to`), `halt_started`, `halt_lifted`. 전날 목록이 없으면 비어 있다 |
+| `replaced` | 대체됐을 때만 있다: `reason`, `detail`, `source_date` |
+
+### 검사
+
+아래 경우에는 받은 목록을 그날 목록으로 쓰지 않는다. 가장 최근 목록의 `stocks`를 그날 파일에 쓰고(`diff`는 비고 `warnings`는 그 목록의 것이다) `replaced`에 까닭을 적는다. 받은 목록은 `<YYYYMMDD>.rejected.json`에 남긴다(`reason`, `detail`, `previous_count`, `stocks`, `warnings`).
+
+| `reason` | 경우 |
+|---|---|
+| `fetch_failed` | 조회가 실패했다 |
+| `shrunk` | 종목 수가 가장 최근 목록보다 3% 넘게 줄었다. 정확히 3%는 쓴다 |
+| `cut_off` | 연속조회가 쪽 수 상한에 닿았는데 다음 쪽이 남았다 |
+
+대신 쓸 이전 목록이 없으면 `rejected.json`만 쓰고 `UniverseError::NoFallback`을 낸다.
+
+### 마감 뒤 목록
+
+`collect_after_close`가 같은 호출로 한 번 더 받아 아침 목록과의 차이만 `<YYYYMMDD>.after.json`(`morning_count`, `after_close_count`, `warnings`, `diff`)에 쓴다. 그날 목록 파일은 바꾸지 않고 계획에도 쓰지 않는다. 조회가 실패하거나 끊기면 파일을 쓰지 않고 오류를 낸다.
+
+### 시험
+
+`crates/collector/tests/universe.rs`가 합성 `Transport`로 여러 쪽 응답을 주고 가르기, 차이 다섯 종류, 3% 경계, 조회 실패·끊긴 목록의 대체와 `rejected.json`, 마감 뒤 목록이 그날 파일을 바꾸지 않는 것을 고정한다.
+
 ## serve와 복기 화면
 
 `serve`가 구간 파일과 복기 화면을 `127.0.0.1`에서 내보내고, 브라우저가 종목과 날짜를 골라 시간 막대를 움직이거나 재생하면서 그 시각의 호가 10단계, 최근 체결, 프로그램 순매수, 거래원 상위 5를 본다. 코드는 `collector::serve`(서버)와 `crates/collector/page/`(화면)다.
