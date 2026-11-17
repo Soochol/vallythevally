@@ -5,6 +5,7 @@ import { useAccountStore } from "../../stores/account";
 import { useCommand } from "../system-settings/useCommand";
 import { DELETE_PHRASE, deleteFailureText, formatSignedInAt } from "./accountMenu";
 import { PROVIDER_NAME, shortAccountId } from "./provider";
+import { useReturnFocus } from "./useReturnFocus";
 
 export function AccountMenuContent() {
   const status = useAccountStore((s) => s.status);
@@ -12,6 +13,7 @@ export function AccountMenuContent() {
   const [deleting, setDeleting] = useState(false);
   const [phrase, setPhrase] = useState("");
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  const deleteButton = useReturnFocus<HTMLButtonElement>(deleting);
 
   if (!status) return <p className="text-m text-text-2">계정 상태를 불러오는 중입니다</p>;
   if (status.state === "local_only") return <p className="text-m text-text-2">계정 서버를 쓰지 않습니다. 셋업은 이 PC에만 있습니다.</p>;
@@ -42,14 +44,14 @@ export function AccountMenuContent() {
       </dl>
       <div className="flex flex-wrap gap-2">
         <button type="button" className="tb-btn h-9 border border-line px-3" disabled={command.busy} onClick={() => void command.run(logout)}>로그아웃</button>
-        {!deleting && <button type="button" className="tb-btn h-9 border border-line px-3 text-danger" onClick={() => setDeleting(true)}>계정 삭제</button>}
+        {!deleting && <button ref={deleteButton} type="button" className="tb-btn h-9 border border-line px-3 text-danger" onClick={() => setDeleting(true)}>계정 삭제</button>}
       </div>
       {deleting && (
         <section aria-label="계정 삭제" className="flex flex-col gap-3 rounded-m border border-line bg-surface p-4">
           <p className="text-m">계정 서버에 있는 이 계정과 올려 둔 셋업을 지웁니다. 이 PC의 셋업은 남습니다.</p>
           <label className="flex flex-col gap-1 text-m">
             <span className="text-text-2">확인하려면 “{DELETE_PHRASE}”을 입력하세요</span>
-            <input className="ui-field" value={phrase} autoComplete="off" spellCheck={false} onChange={(e) => setPhrase(e.target.value)} />
+            <input autoFocus className="ui-field" value={phrase} autoComplete="off" spellCheck={false} onChange={(e) => setPhrase(e.target.value)} />
           </label>
           <div className="flex flex-wrap gap-2">
             <button type="button" className="tb-btn h-9 bg-[color-mix(in_srgb,var(--danger)_16%,transparent)] px-3 font-semibold text-danger disabled:opacity-50" disabled={phrase.trim() !== DELETE_PHRASE || command.busy} onClick={() => void remove()}>

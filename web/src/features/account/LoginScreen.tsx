@@ -14,6 +14,7 @@ export function LoginScreen() {
   const login = async (provider: AccountProvider) => {
     setLeaving(provider);
     setError(null);
+    useAccountStore.getState().showLoginFailure(null);
     try {
       window.location.assign((await startLogin(provider)).url);
     } catch (e) {

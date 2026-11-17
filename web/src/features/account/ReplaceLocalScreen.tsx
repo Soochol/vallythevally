@@ -3,10 +3,12 @@ import { logout, replaceLocalSetup } from "../../api/account";
 import type { AccountStatus } from "../../api/generated/AccountStatus";
 import { useCommand } from "../system-settings/useCommand";
 import { PROVIDER_NAME, shortAccountId } from "./provider";
+import { useReturnFocus } from "./useReturnFocus";
 
 export function ReplaceLocalScreen({ status }: { status: Extract<AccountStatus, { state: "owner_mismatch" }> }) {
   const [asking, setAsking] = useState(false);
   const command = useCommand();
+  const askButton = useReturnFocus<HTMLButtonElement>(asking);
   return (
     <main aria-label="계정 바꾸기 확인" className="grid min-h-dvh place-items-center bg-bg p-4">
       <div className="flex w-full max-w-[440px] flex-col gap-4 rounded-m border border-line bg-surface p-6">
@@ -24,12 +26,12 @@ export function ReplaceLocalScreen({ status }: { status: Extract<AccountStatus, 
               <button type="button" className="tb-btn h-9 bg-[color-mix(in_srgb,var(--danger)_16%,transparent)] px-3 font-semibold text-danger" disabled={command.busy} onClick={() => void command.run(replaceLocalSetup)}>
                 지우고 바꾸기
               </button>
-              <button type="button" className="tb-btn h-9 px-3" disabled={command.busy} onClick={() => setAsking(false)}>취소</button>
+              <button type="button" autoFocus className="tb-btn h-9 px-3" disabled={command.busy} onClick={() => setAsking(false)}>취소</button>
             </div>
           </section>
         ) : (
           <div className="flex flex-wrap gap-2">
-            <button type="button" className="tb-btn h-9 border border-line px-3" onClick={() => setAsking(true)}>이 PC 셋업 지우고 바꾸기</button>
+            <button ref={askButton} type="button" className="tb-btn h-9 border border-line px-3" onClick={() => setAsking(true)}>이 PC 셋업 지우고 바꾸기</button>
             <button type="button" className="tb-btn h-9 border border-line px-3" disabled={command.busy} onClick={() => void command.run(logout)}>로그아웃</button>
           </div>
         )}

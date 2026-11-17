@@ -13,7 +13,9 @@ function harness(first: AccountStatus | "unreadable") {
       if (first === "unreadable") throw new Error("offline");
       listener(first);
     }),
+    knownStatus: vi.fn((): AccountStatus | null => null),
     boot: vi.fn(async () => {}),
+    discardUnsaved: vi.fn(),
     suspendSetup: vi.fn(),
     reload: vi.fn(),
     subscribe: (l: (s: AccountStatus) => void) => ((listener = l), () => {}),
@@ -40,6 +42,13 @@ describe("시작 흐름의 상태별 분기", () => {
     expect(deps.boot).toHaveBeenCalledOnce();
   });
 
+  test("밀어 준 상태로 이미 로그인 화면이면 GET이 실패해도 셋업을 읽지 않는다", async () => {
+    const { deps } = harness("unreadable");
+    deps.knownStatus.mockReturnValue({ state: "signed_out" });
+    await start(deps);
+    expect(deps.boot).not.toHaveBeenCalled();
+  });
+
   test("실행 중에 signed_out이 되면 저장을 멈추고 다시 로그인하면 새로 시작한다", async () => {
     const { deps, push } = harness(signedIn);
     await start(deps);
@@ -59,11 +68,18 @@ describe("시작 흐름의 상태별 분기", () => {
     expect(deps.reload).not.toHaveBeenCalled();
   });
 
-  test("owner_mismatch에서 바꾸기가 끝나면 되살린다", async () => {
+  test("owner_mismatch에서 바꾸기가 끝나면 이전 계정의 미저장 편집을 버리고 되살린다", async () => {
     const { deps, push } = harness(mismatch);
     await start(deps);
     push(signedIn);
+    expect(deps.discardUnsaved).toHaveBeenCalledOnce();
     expect(deps.boot).toHaveBeenCalledOnce();
+  });
+
+  test("바꾸기가 아닌 시작에서는 미저장 편집을 버리지 않는다", async () => {
+    const { deps } = harness(signedIn);
+    await start(deps);
+    expect(deps.discardUnsaved).not.toHaveBeenCalled();
   });
 });
 

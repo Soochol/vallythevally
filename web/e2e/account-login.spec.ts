@@ -115,6 +115,36 @@ test.describe("1440×900", () => {
     await expect(cell(page)).toHaveCount(0);
   });
 
+  test("복원하는 도중 signed_out이 오면 복원이 끝나도 저장을 시작하지 않는다", async ({ page, scenario }) => {
+    scenario.live.account = SIGNED_IN;
+    const held = scenario.hold(route("GET", "/api/ui-state"));
+    await page.goto("/?symbol=005930");
+    await held.received;
+    scenario.live.setAccount(SIGNED_OUT);
+    await expect(page.getByRole("heading", { name: "로그인", exact: true })).toBeVisible();
+    held.reply({ body: scenario.documents.uiState() });
+    await page.waitForTimeout(1500);
+    expect(scenario.requests.filter((r) => r.method() === "PUT")).toHaveLength(0);
+    await expect(cell(page)).toHaveCount(0);
+  });
+
+  test("로그인 화면이 아닌 상태로 돌아와도 실패 문장을 알림으로 보이고 주소창을 정리한다", async ({ page, scenario }) => {
+    scenario.live.account = SIGNED_IN;
+    await page.goto("/?symbol=005930&login=error&reason=storage");
+    await expect(cell(page)).toHaveAttribute("aria-busy", "false");
+    await expect(page.getByText("이 PC에 로그인 정보를 저장하지 못했습니다", { exact: false })).toBeVisible();
+    await expect.poll(() => ["login", "reason"].some((key) => new URL(page.url()).searchParams.has(key))).toBe(false);
+  });
+
+  test("한 번 본 실패 문장은 다음 로그인 화면에 다시 나오지 않는다", async ({ page, scenario }) => {
+    scenario.live.account = SIGNED_IN;
+    await page.goto("/?symbol=005930&login=error&reason=state");
+    await expect(cell(page)).toHaveAttribute("aria-busy", "false");
+    scenario.live.setAccount(SIGNED_OUT);
+    await expect(page.getByRole("heading", { name: "로그인", exact: true })).toBeVisible();
+    await expect(page.getByText("이 브라우저에서 시작한 로그인이 아니어서", { exact: false })).toHaveCount(0);
+  });
+
   test("owner_mismatch: 확인 화면이 보이고 지우고 바꾸기는 두 단계 확인 뒤에만 요청이 간다", async ({ page, scenario }) => {
     scenario.live.account = MISMATCH;
     answerStatus(scenario, "/api/account/replace-local", SIGNED_IN);
@@ -127,8 +157,10 @@ test.describe("1440×900", () => {
 
     await page.getByRole("button", { name: "이 PC 셋업 지우고 바꾸기" }).click();
     expect(callsTo(scenario, "POST", "/api/account/replace-local")).toHaveLength(0);
+    await expect(page.getByRole("button", { name: "취소" })).toBeFocused();
     await shot(page, "account-mismatch-confirm-desktop.png");
     await page.getByRole("button", { name: "취소" }).click();
+    await expect(page.getByRole("button", { name: "이 PC 셋업 지우고 바꾸기" })).toBeFocused();
     expect(callsTo(scenario, "POST", "/api/account/replace-local")).toHaveLength(0);
 
     await page.getByRole("button", { name: "이 PC 셋업 지우고 바꾸기" }).click();
@@ -138,6 +170,19 @@ test.describe("1440×900", () => {
     expect(calls).toHaveLength(1);
     expect(calls[0]!.postDataJSON()).toEqual({ confirm: true });
     expect(setupCalls(scenario).length).toBeGreaterThan(0);
+  });
+
+  test("바꾸기가 끝나면 이전 계정의 미저장 편집은 새 계정으로 올라가지 않는다", async ({ page, scenario }) => {
+    scenario.live.account = MISMATCH;
+    answerStatus(scenario, "/api/account/replace-local", SIGNED_IN);
+    await page.addInitScript(() => localStorage.setItem("vv.unsaved.watchlist", JSON.stringify({ path: "/api/watchlists", revision: 9_999_999_999_999, body: JSON.stringify({ lists: [{ id: "old", name: "이전계정목록", symbols: [] }], revision: 9_999_999_999_999 }) })));
+    await page.goto("/");
+    await page.getByRole("button", { name: "이 PC 셋업 지우고 바꾸기" }).click();
+    await page.getByRole("button", { name: "지우고 바꾸기", exact: true }).click();
+    await expect(cell(page)).toBeVisible();
+    await page.waitForTimeout(1500);
+    expect(scenario.requests.filter((r) => r.method() === "PUT" && new URL(r.url()).pathname === "/api/watchlists")).toHaveLength(0);
+    expect(await page.evaluate(() => localStorage.getItem("vv.unsaved.watchlist"))).toBeNull();
   });
 
   test("owner_mismatch에서 로그아웃하면 로그인 화면이 된다", async ({ page, scenario }) => {
@@ -156,6 +201,7 @@ test.describe("1440×900", () => {
     await openAccountMenu(page);
     const panel = dialog(page).getByRole("tabpanel");
     await panel.getByRole("button", { name: "계정 삭제", exact: true }).click();
+    await expect(panel.getByRole("textbox")).toBeFocused();
     await expect(panel.getByText("이 PC의 셋업은 남습니다", { exact: false })).toBeVisible();
     const run = panel.getByRole("button", { name: "계정 삭제 실행" });
     await expect(run).toBeDisabled();

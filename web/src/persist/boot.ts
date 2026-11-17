@@ -30,8 +30,10 @@ function followTheme() {
 }
 
 let running: Autosave | null = null;
+let suspended = false;
 
 export function suspendSetup() {
+  suspended = true;
   running?.stop();
   running = null;
 }
@@ -47,6 +49,7 @@ export async function boot() {
       watchlists: () => fetchWatchlists(),
       unsaved: readUnsaved,
     });
+    if (suspended) return;
     useLayoutStore.getState().load(restored.layout);
     useSelectionStore.setState({ activeCell: chartWindows(restored.layout)[0]!.id });
     useUiStore.getState().load(restored.ui.prefs, restored.ui.extra);

@@ -51,6 +51,12 @@ function ChartScreen() {
 
   useHotkeys();
   useEffect(() => {
+    const { loginFailure, showLoginFailure } = useAccountStore.getState();
+    if (loginFailure === null) return;
+    useSelectionStore.getState().showToast(loginFailure);
+    showLoginFailure(null);
+  }, []);
+  useEffect(() => {
     const load = new AbortController();
     void loadKiwoomLink(load.signal);
     return () => load.abort();
