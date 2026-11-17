@@ -140,7 +140,7 @@ mod tests {
     #[test]
     fn an_unknown_market_code_or_a_malformed_code_is_reported_not_included() {
         let Listing::Unknown(why) = classify(&row("123450", "77")) else { panic!() };
-        assert!(why.contains("77") && why.contains("123450"), "{why}");
+        assert!(why.contains("77") && why.contains("123450") && why.contains("가상"), "{why}");
         for code in ["", "12345", "1234567", "12345a", "12 450"] {
             let Listing::Unknown(why) = classify(&row(code, "0")) else { panic!("{code:?}") };
             assert!(why.contains("종목코드") && why.contains(code), "{why}");

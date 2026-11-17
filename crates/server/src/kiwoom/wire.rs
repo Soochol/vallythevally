@@ -1396,6 +1396,40 @@ mod tests {
     }
 
     #[test]
+    fn a_list_row_keeps_every_field_of_the_json_row() {
+        let body = r#"{"list":[{"code":"12345K","name":"가나스팩","marketCode":"10","companyClassName":"스팩","nxtEnable":"Y","regDay":"20240102","auditInfo":"관리종목|거래정지","listCount":"0000000000001234"}]}"#;
+        let response: StockListResponse = serde_json::from_str(body).unwrap();
+        let want = ListingRow {
+            code: "12345K".into(),
+            name: "가나스팩".into(),
+            market_code: "10".into(),
+            company_class_name: "스팩".into(),
+            nxt_enable: "Y".into(),
+            reg_day: "20240102".into(),
+            audit_info: "관리종목|거래정지".into(),
+            list_count: "0000000000001234".into(),
+        };
+        assert_eq!(response.list, [want]);
+    }
+
+    #[test]
+    fn the_kind_of_a_listed_product_becomes_its_screener_exclusion() {
+        let kinds = |code: &str, name: &str, market_code: &str| {
+            let row = ListingRow { code: code.into(), name: name.into(), market_code: market_code.into(), ..Default::default() };
+            let Listing::Include(info) = classify(&row) else { panic!() };
+            screener_listing(&row, &info).unwrap().excludable_as
+        };
+        use ExcludeKind::*;
+        assert_eq!(kinds("0000D0", "가상", "8"), [Etf]);
+        assert_eq!(kinds("0030R0", "가상", "6"), [Reit]);
+        assert_eq!(kinds("005935", "가상", "0"), [Preferred]);
+        assert_eq!(kinds("03481K", "가상", "10"), [Preferred]);
+        assert_eq!(kinds("12345K", "가나스팩", "10"), [Spac]);
+        assert_eq!(kinds("005930", "가나스팩", "0"), [], "스팩 제외는 코스닥 보통주에만 붙는다");
+        assert_eq!(kinds("005930", "가상", "0"), []);
+    }
+
+    #[test]
     fn token_expiry() {
         let t: TokenResponse = serde_json::from_str(&fixture("au10001_ok")).unwrap();
         let at = parse_kst_datetime(&t.expires_dt).unwrap();
