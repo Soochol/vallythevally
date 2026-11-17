@@ -4,7 +4,7 @@ use std::collections::BTreeSet;
 use std::fmt;
 use std::num::NonZeroU64;
 
-use domain::{Bucket, IndexCode, KstDate, KstTime, Market, Ohlcv, Period, Price, StockCode, Symbol, SymbolInfo, SymbolKind, TimeOfDay, Venue, Volume};
+use domain::{AuditStatus, Bucket, IndexCode, KstDate, KstTime, ListingRow, Market, Ohlcv, Period, Price, StockCode, Symbol, SymbolInfo, SymbolKind, TimeOfDay, Venue, Volume};
 use serde::Deserialize;
 use serde_json::{Value, json};
 
@@ -215,52 +215,40 @@ fn index_price(s: &str) -> Result<Price, WireError> {
 
 #[derive(Debug, Deserialize)]
 pub struct StockListResponse {
-    pub list: Vec<ListRow>,
+    #[serde(deserialize_with = "list_rows")]
+    pub list: Vec<ListingRow>,
 }
 
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Default, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
-pub struct ListRow {
-    pub code: String,
-    pub name: String,
-    pub market_code: String,
-    pub company_class_name: String,
-    pub nxt_enable: String,
-    pub reg_day: String,
-    pub audit_info: String,
-    pub list_count: String,
+struct WireListRow {
+    code: String,
+    name: String,
+    market_code: String,
+    company_class_name: String,
+    nxt_enable: String,
+    reg_day: String,
+    audit_info: String,
+    list_count: String,
 }
 
-/// ka10099 한 행을 가른 결과(§6.6 표).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Listing {
-    Include(SymbolInfo),
-    /// ETN, 인프라투자금융, 뮤추얼펀드처럼 일부러 넣지 않는 상품.
-    Exclude,
-    /// 표에 없는 marketCode 또는 코드 형식이 아닌 행. 넣지 않고 경고한다.
-    Unknown(String),
+impl From<WireListRow> for ListingRow {
+    fn from(row: WireListRow) -> ListingRow {
+        ListingRow {
+            code: row.code,
+            name: row.name,
+            market_code: row.market_code,
+            company_class_name: row.company_class_name,
+            nxt_enable: row.nxt_enable,
+            reg_day: row.reg_day,
+            audit_info: row.audit_info,
+            list_count: row.list_count,
+        }
+    }
 }
 
-pub fn classify(row: &ListRow) -> Listing {
-    let Ok(code) = StockCode::parse(&row.code) else {
-        return Listing::Unknown(format!("종목코드 형식이 아닙니다: {:?}", row.code));
-    };
-    let stock_kind = |code: StockCode| if code.is_preferred_code() { SymbolKind::Preferred } else { SymbolKind::Common };
-    let (kind, market) = match row.market_code.as_str() {
-        "0" => (stock_kind(code), Market::Kospi),
-        "8" => (SymbolKind::Etf, Market::Kospi),
-        "6" => (SymbolKind::Reit, Market::Kospi),
-        "10" if is_spac(row) => (SymbolKind::Common, Market::Kosdaq),
-        "10" => (stock_kind(code), Market::Kosdaq),
-        "60" | "70" | "90" | "2" | "4" => return Listing::Exclude,
-        other => return Listing::Unknown(format!("모르는 marketCode {other:?}({} {})", row.code, row.name)),
-    };
-    Listing::Include(SymbolInfo { symbol: Symbol::Stock(code), name: row.name.clone(), kind, market, nxt_enabled: row.nxt_enable == "Y" })
-}
-
-/// 스팩은 코스닥 보통주로 둔다(D13). 가리는 규칙은 kiwoom.md §5.
-fn is_spac(row: &ListRow) -> bool {
-    row.company_class_name == "스팩" || row.name.contains("스팩") || row.name.contains("기업인수목적")
+fn list_rows<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<Vec<ListingRow>, D::Error> {
+    Ok(Vec::<WireListRow>::deserialize(deserializer)?.into_iter().map(ListingRow::from).collect())
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -273,7 +261,7 @@ pub struct ScreenerListing {
     pub listed_shares: Option<NonZeroU64>,
 }
 
-pub fn screener_listing(row: &ListRow, info: &SymbolInfo) -> Option<ScreenerListing> {
+pub fn screener_listing(row: &ListingRow, info: &SymbolInfo) -> Option<ScreenerListing> {
     let Symbol::Stock(code) = info.symbol else {
         return None;
     };
@@ -281,15 +269,15 @@ pub fn screener_listing(row: &ListRow, info: &SymbolInfo) -> Option<ScreenerList
         SymbolKind::Etf => Some(ExcludeKind::Etf),
         SymbolKind::Reit => Some(ExcludeKind::Reit),
         SymbolKind::Preferred => Some(ExcludeKind::Preferred),
-        SymbolKind::Common if info.market == Market::Kosdaq && is_spac(row) => Some(ExcludeKind::Spac),
+        SymbolKind::Common if info.market == Market::Kosdaq && row.is_spac() => Some(ExcludeKind::Spac),
         SymbolKind::Common | SymbolKind::Index => None,
     };
-    let states = row.audit_info.split('|').map(str::trim).filter_map(|label| match audit_state(label) {
-        Ok(state) => state,
-        Err(()) => {
+    let states = row.audit_statuses().filter_map(|(label, status)| match status {
+        AuditStatus::Unknown => {
             tracing::warn!(code = %row.code, label, "auditInfo에 모르는 상태가 있어 상태 제외에 넣지 않습니다");
             None
         }
+        known => exclude_kind_of(known),
     });
     Some(ScreenerListing {
         code,
@@ -301,7 +289,7 @@ pub fn screener_listing(row: &ListRow, info: &SymbolInfo) -> Option<ScreenerList
     })
 }
 
-fn listed_shares(row: &ListRow) -> Option<NonZeroU64> {
+fn listed_shares(row: &ListingRow) -> Option<NonZeroU64> {
     match row.list_count.parse() {
         Ok(shares) => NonZeroU64::new(shares),
         Err(_) if row.list_count.is_empty() => None,
@@ -312,18 +300,17 @@ fn listed_shares(row: &ListRow) -> Option<NonZeroU64> {
     }
 }
 
-fn audit_state(label: &str) -> Result<Option<ExcludeKind>, ()> {
-    Ok(Some(match label {
-        "정상" | "" => return Ok(None),
-        "관리종목" => ExcludeKind::Managed,
-        "투자주의환기종목" => ExcludeKind::InvestmentCautionAlert,
-        "투자경고" => ExcludeKind::InvestmentWarning,
-        "투자위험" => ExcludeKind::InvestmentDanger,
-        "투자주의" => ExcludeKind::InvestmentCaution,
-        "단기과열" => ExcludeKind::ShortTermOverheated,
-        "거래정지" => ExcludeKind::TradingHalted,
-        _ => return Err(()),
-    }))
+fn exclude_kind_of(status: AuditStatus) -> Option<ExcludeKind> {
+    match status {
+        AuditStatus::Normal | AuditStatus::Unknown => None,
+        AuditStatus::Managed => Some(ExcludeKind::Managed),
+        AuditStatus::InvestmentCautionAlert => Some(ExcludeKind::InvestmentCautionAlert),
+        AuditStatus::InvestmentWarning => Some(ExcludeKind::InvestmentWarning),
+        AuditStatus::InvestmentDanger => Some(ExcludeKind::InvestmentDanger),
+        AuditStatus::InvestmentCaution => Some(ExcludeKind::InvestmentCaution),
+        AuditStatus::ShortTermOverheated => Some(ExcludeKind::ShortTermOverheated),
+        AuditStatus::TradingHalted => Some(ExcludeKind::TradingHalted),
+    }
 }
 
 /// ka10095 응답. 행 순서는 요청 순서였지만(kiwoom.md §10.6) 호출자는 `stk_cd`로 맞춘다.
@@ -891,6 +878,7 @@ pub fn remove_message(kind: RealType, symbols: &BTreeSet<Symbol>) -> String {
 
 #[cfg(test)]
 mod tests {
+    use domain::{Listing, classify};
     use super::*;
 
     fn trade_values(time: &str, price: i64, qty: i64, cumulative: i64, exchange: &str) -> Value {
@@ -1359,11 +1347,11 @@ mod tests {
 
     #[test]
     fn spac_rule_wins_over_code_rule_and_unknown_market_is_reported() {
-        let spac = ListRow { code: "12345K".into(), name: "가나스팩".into(), market_code: "10".into(), ..Default::default() };
+        let spac = ListingRow { code: "12345K".into(), name: "가나스팩".into(), market_code: "10".into(), ..Default::default() };
         assert!(matches!(classify(&spac), Listing::Include(SymbolInfo { kind: SymbolKind::Common, .. })));
-        let odd = ListRow { code: "123450".into(), name: "x".into(), market_code: "77".into(), ..Default::default() };
+        let odd = ListingRow { code: "123450".into(), name: "x".into(), market_code: "77".into(), ..Default::default() };
         assert!(matches!(classify(&odd), Listing::Unknown(_)));
-        let info: ListRow = serde_json::from_str(&fixture("ka10100_005930")).unwrap();
+        let info = ListingRow::from(serde_json::from_str::<WireListRow>(&fixture("ka10100_005930")).unwrap());
         assert!(matches!(classify(&info), Listing::Include(SymbolInfo { kind: SymbolKind::Common, .. })));
     }
 
@@ -1371,11 +1359,11 @@ mod tests {
     fn a_screener_listing_takes_the_market_of_the_list_and_reads_the_zero_padded_list_count_as_listed_shares() {
         let rows = |name: &str| serde_json::from_str::<StockListResponse>(&fixture(name)).unwrap().list;
         let (kospi, kosdaq) = (rows("ka10099_0"), rows("ka10099_10"));
-        let listing = |row: &ListRow| match classify(row) {
+        let listing = |row: &ListingRow| match classify(row) {
             Listing::Include(info) => screener_listing(row, &info).unwrap(),
             other => panic!("{other:?}"),
         };
-        let of = |rows: &[ListRow], code: &str| {
+        let of = |rows: &[ListingRow], code: &str| {
             let l = listing(rows.iter().find(|r| r.code == code).unwrap());
             (l.market, l.listed_shares.map(NonZeroU64::get))
         };
@@ -1384,8 +1372,61 @@ mod tests {
         assert_eq!(of(&kosdaq, "03481K"), (api::Market::Kosdaq, Some(1_377_453)));
 
         let dongwha = kospi.iter().find(|r| r.code == "000020").unwrap();
-        let shares = |list_count: &str| listing(&ListRow { list_count: list_count.into(), ..dongwha.clone() }).listed_shares;
+        let shares = |list_count: &str| listing(&ListingRow { list_count: list_count.into(), ..dongwha.clone() }).listed_shares;
         assert_eq!([shares(""), shares("0000000000000000"), shares("27,931,470"), shares("-1")], [None; 4], "없거나 0이거나 수가 아니면 상장주식수를 모른다");
+    }
+
+    #[test]
+    fn each_audit_label_in_a_row_becomes_its_own_exclusion_in_the_screener_listing() {
+        let listed = |audit_info: &str| {
+            let row = ListingRow { code: "005930".into(), name: "가상".into(), market_code: "0".into(), audit_info: audit_info.into(), ..Default::default() };
+            let Listing::Include(info) = classify(&row) else { panic!() };
+            screener_listing(&row, &info).unwrap().excludable_as
+        };
+        use ExcludeKind::*;
+        assert_eq!(listed("관리종목"), [Managed]);
+        assert_eq!(listed("투자주의환기종목"), [InvestmentCautionAlert]);
+        assert_eq!(listed("투자경고"), [InvestmentWarning]);
+        assert_eq!(listed("투자위험"), [InvestmentDanger]);
+        assert_eq!(listed("투자주의"), [InvestmentCaution]);
+        assert_eq!(listed("단기과열"), [ShortTermOverheated]);
+        assert_eq!(listed("거래정지"), [TradingHalted]);
+        assert_eq!(listed("정상"), []);
+        assert_eq!(listed("관리종목|신종상태|거래정지"), [Managed, TradingHalted], "모르는 상태는 빠지고 나머지는 남는다");
+    }
+
+    #[test]
+    fn a_list_row_keeps_every_field_of_the_json_row() {
+        let body = r#"{"list":[{"code":"12345K","name":"가나스팩","marketCode":"10","companyClassName":"스팩","nxtEnable":"Y","regDay":"20240102","auditInfo":"관리종목|거래정지","listCount":"0000000000001234"}]}"#;
+        let response: StockListResponse = serde_json::from_str(body).unwrap();
+        let want = ListingRow {
+            code: "12345K".into(),
+            name: "가나스팩".into(),
+            market_code: "10".into(),
+            company_class_name: "스팩".into(),
+            nxt_enable: "Y".into(),
+            reg_day: "20240102".into(),
+            audit_info: "관리종목|거래정지".into(),
+            list_count: "0000000000001234".into(),
+        };
+        assert_eq!(response.list, [want]);
+    }
+
+    #[test]
+    fn the_kind_of_a_listed_product_becomes_its_screener_exclusion() {
+        let kinds = |code: &str, name: &str, market_code: &str| {
+            let row = ListingRow { code: code.into(), name: name.into(), market_code: market_code.into(), ..Default::default() };
+            let Listing::Include(info) = classify(&row) else { panic!() };
+            screener_listing(&row, &info).unwrap().excludable_as
+        };
+        use ExcludeKind::*;
+        assert_eq!(kinds("0000D0", "가상", "8"), [Etf]);
+        assert_eq!(kinds("0030R0", "가상", "6"), [Reit]);
+        assert_eq!(kinds("005935", "가상", "0"), [Preferred]);
+        assert_eq!(kinds("03481K", "가상", "10"), [Preferred]);
+        assert_eq!(kinds("12345K", "가나스팩", "10"), [Spac]);
+        assert_eq!(kinds("005930", "가나스팩", "0"), [], "스팩 제외는 코스닥 보통주에만 붙는다");
+        assert_eq!(kinds("005930", "가상", "0"), []);
     }
 
     #[test]
