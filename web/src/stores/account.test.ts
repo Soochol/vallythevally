@@ -3,7 +3,7 @@ import type { AccountStatus } from "../api/generated/AccountStatus";
 import { type Connect, MarketSocket } from "../api/socket";
 import { receiveAccountPush, useAccountStore } from "./account";
 
-const signedIn: AccountStatus = { state: "signed_in", provider: "google", accountId: "0123456789abcdef", signedInAt: 1_700_000_000 };
+const signedIn: AccountStatus = { state: "signed_in", provider: "google", accountId: "0123456789abcdef", signedInAt: 1_700_000_000, sync: { state: "running", lastSuccessAt: null, pendingDocuments: 0, refusedDocuments: 0, lastError: null } };
 
 beforeEach(() => useAccountStore.setState({ status: null, pushes: 0, loginFailure: null }));
 

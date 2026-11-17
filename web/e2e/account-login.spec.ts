@@ -7,8 +7,8 @@ import { cell, expect, test, type Scenario } from "./harness";
 const SCREENS = path.resolve("../target/ux-screens");
 const ACCOUNT_ID = "0123456789abcdef0123";
 const SIGNED_OUT: AccountStatus = { state: "signed_out" };
-const SIGNED_IN: AccountStatus = { state: "signed_in", provider: "google", accountId: ACCOUNT_ID, signedInAt: Date.parse("2026-11-09T09:30:00+09:00") / 1000 };
-const MISMATCH: AccountStatus = { state: "owner_mismatch", provider: "naver", accountId: "fedcba9876543210fedc", signedInAt: SIGNED_IN.state === "signed_in" ? SIGNED_IN.signedInAt : 0, localOwner: ACCOUNT_ID };
+const SIGNED_IN: AccountStatus = { state: "signed_in", provider: "google", accountId: ACCOUNT_ID, signedInAt: Date.parse("2026-11-09T09:30:00+09:00") / 1000, sync: { state: "running", lastSuccessAt: null, pendingDocuments: 0, refusedDocuments: 0, lastError: null } };
+const MISMATCH: AccountStatus = { state: "owner_mismatch", provider: "naver", accountId: "fedcba9876543210fedc", signedInAt: SIGNED_IN.state === "signed_in" ? SIGNED_IN.signedInAt : 0, localOwner: ACCOUNT_ID, sync: { state: "running", lastSuccessAt: null, pendingDocuments: 0, refusedDocuments: 0, lastError: null } };
 const SETUP_PATHS = ["/api/layouts", "/api/watchlists", "/api/ui-state"];
 
 const route = (method: string, pathname: string) => (url: URL, request: { method(): string }) => url.pathname === pathname && request.method() === method;

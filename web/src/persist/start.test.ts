@@ -3,8 +3,8 @@ import type { AccountStatus } from "../api/generated/AccountStatus";
 import { start, type StartDeps } from "./start";
 import { stepFor } from "./startFlow";
 
-const signedIn: AccountStatus = { state: "signed_in", provider: "naver", accountId: "abcdef0123456789", signedInAt: 1 };
-const mismatch: AccountStatus = { state: "owner_mismatch", provider: "naver", accountId: "abcdef0123456789", signedInAt: 1, localOwner: "ffffffff00000000" };
+const signedIn: AccountStatus = { state: "signed_in", provider: "naver", accountId: "abcdef0123456789", signedInAt: 1, sync: { state: "running", lastSuccessAt: null, pendingDocuments: 0, refusedDocuments: 0, lastError: null } };
+const mismatch: AccountStatus = { state: "owner_mismatch", provider: "naver", accountId: "abcdef0123456789", signedInAt: 1, localOwner: "ffffffff00000000", sync: { state: "running", lastSuccessAt: null, pendingDocuments: 0, refusedDocuments: 0, lastError: null } };
 
 function harness(first: AccountStatus | "unreadable") {
   let listener: (s: AccountStatus) => void = () => {};
