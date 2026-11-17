@@ -108,6 +108,7 @@ export interface ControllerDeps {
   onIndicatorCommand?: (id: string, command: IndicatorCommand, anchor: HTMLElement) => void;
   onPanelStretch?: (stretches: Panel["stretch"][]) => void;
   onCompareRemove?: (code: SymbolCode) => void;
+  onCorner?: (corner: { width: number; height: number }) => void;
 }
 
 /** 칸 하나의 차트 엔진 래퍼(frontend.md §5.4). React 밖의 명령형 객체다. */
@@ -155,9 +156,11 @@ export class ChartController {
   private readonly unwatch: () => void;
   private readonly resize: ResizeObserver;
   private readonly hostResize: ResizeObserver;
+  private readonly onCorner: ControllerDeps["onCorner"];
 
   constructor(el: HTMLElement, deps: ControllerDeps) {
     this.el = el;
+    this.onCorner = deps.onCorner;
     this.tokens = deps.tokens;
     this.onStatus = deps.onStatus;
     this.hostResize = new ResizeObserver(() => {
@@ -206,6 +209,7 @@ export class ChartController {
       const width = this.axisWidth();
       if (this.chart.options().rightPriceScale.minimumWidth !== width) this.chart.priceScale("right").applyOptions({ minimumWidth: width });
       this.indicators.applyStretch();
+      this.reportCorner();
       this.scheduleFrame();
     });
     this.resize.observe(el);
@@ -401,6 +405,7 @@ export class ChartController {
 
   setTheme(tokens: ThemeTokens): void {
     this.flushPendingDraw();
+    this.reportCorner();
     this.compare.flush(this.bars);
     this.indicators.flush();
     this.tokens = tokens;
@@ -579,6 +584,15 @@ export class ChartController {
     this.realtimeLive = live;
     if (previousStalledAt !== this.stalledAt) this.requestLegendSources("base");
     this.scheduleFrame();
+  }
+
+  private reportedCorner = { width: 0, height: 0 };
+  private reportCorner(): void {
+    const width = this.chart.priceScale("right").width();
+    const height = this.chart.timeScale().height();
+    if (width === this.reportedCorner.width && height === this.reportedCorner.height) return;
+    this.reportedCorner = { width, height };
+    this.onCorner?.(this.reportedCorner);
   }
 
   private scheduleFrame(): void {

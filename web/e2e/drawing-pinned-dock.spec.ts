@@ -85,7 +85,7 @@ for (const symbol of SYMBOLS) for (const width of [1440, 1280, 1024]) {
       expect(await dock(page).evaluate((el) => el.scrollWidth - el.clientWidth), `${label}: 도구 막대 넘침`).toBe(0);
       const chart = (await chartOf(cell(page)).boundingBox())!;
       expect(barBox.left, label).toBeGreaterThanOrEqual(chart.x);
-      const axis = (await cell(page).getByRole("group", { name: "가격축 방식" }).boundingBox())!;
+      const axis = (await cell(page).getByRole("combobox", { name: "가격축 방식" }).boundingBox())!;
       expect(barBox.right, `${label}: 가격축 쪽 끝`).toBeLessThanOrEqual(axis.x + axis.width);
 
       const shown = dock(page).getByRole("button", { name: /고정 도구$/ });

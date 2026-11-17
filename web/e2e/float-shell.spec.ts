@@ -1,4 +1,5 @@
 import type { Locator, Page } from "@playwright/test";
+import { selectOption } from "./select-option";
 import { cell, chartOf, expect, SEARCH_BUTTON_TITLE, test, windowTabs } from "./harness";
 
 test.use({ clockStart: "20261109100030", viewport: { width: 1440, height: 900 } });
@@ -6,7 +7,7 @@ test.use({ clockStart: "20261109100030", viewport: { width: 1440, height: 900 } 
 const GAP = 12;
 const toolbar = (page: Page) => page.getByRole("toolbar", { name: "차트 도구 막대" });
 const workspace = (page: Page) => page.getByRole("main", { name: "작업 영역" });
-const axisMode = (page: Page) => cell(page).getByRole("group", { name: "가격축 방식" });
+const axisMode = (page: Page) => cell(page).getByRole("combobox", { name: "가격축 방식" });
 const boxOf = async (locator: Locator) => (await locator.boundingBox())!;
 const overflow = (page: Page) => page.evaluate(() => [document.documentElement.scrollWidth - innerWidth, document.documentElement.scrollHeight - innerHeight]);
 
@@ -49,22 +50,35 @@ test("위 막대 섬은 창 폭을 쓰고 작업 영역은 그 아래에서 12px
   }
 });
 
-test("가격축 방식은 차트의 가격축 옆 묶음 버튼으로 바꾸고 위 막대에는 없다", async ({ page }) => {
+test("가격축 방식은 가격축과 시간축이 만나는 모서리의 콤보박스로 바꾸고 위 막대에는 없다", async ({ page }) => {
   await open(page);
   await expect(toolbar(page).getByRole("button", { name: "로그", exact: true })).toHaveCount(0);
-  const pick = (name: string) => axisMode(page).getByRole("button", { name, exact: true });
-  await expect(pick("자동")).toHaveAttribute("aria-pressed", "true");
-  await pick("로그").click();
+  const axis = axisMode(page);
+  await expect(axis).toHaveText("자동");
+  await selectOption(axis, "log");
   await expect(chartOf(cell(page))).toHaveAttribute("data-price-scale", "log");
-  await expect(pick("로그")).toHaveAttribute("aria-pressed", "true");
-  await pick("%").click();
+  await expect(axis).toHaveText("로그");
+  await selectOption(axis, "percent");
   await expect(chartOf(cell(page))).toHaveAttribute("data-price-scale", "percent");
-  await pick("자동").click();
+  await expect(axis).toHaveText("%");
+  await selectOption(axis, "normal");
   await expect(chartOf(cell(page))).toHaveAttribute("data-price-scale", "normal");
-  const group = await boxOf(axisMode(page));
-  const chart = await boxOf(cell(page));
-  expect(group.x + group.width).toBeLessThan(chart.x + chart.width - 72);
-  expect(group.y + group.height).toBeLessThan(900);
+  await axis.click();
+  await expect(page.getByRole("menuitemradio", { name: /^자동/ })).toHaveAttribute("aria-checked", "true");
+  await expect(page.getByRole("menuitemradio", { name: /^로그/ })).toContainText("L");
+  await expect(page.getByRole("menuitemradio", { name: /^자동/ })).toContainText("가격 그대로");
+  await expect(page.getByRole("menuitemradio", { name: /^%/ })).toContainText("왼쪽 끝 봉 기준");
+  const menu = await boxOf(page.getByRole("menu", { name: "가격축 방식" }));
+  const box = await boxOf(axis);
+  expect(menu.y + menu.height).toBeLessThanOrEqual(box.y);
+  await page.keyboard.press("Escape");
+  const corner = await boxOf(chartOf(cell(page)));
+  const right = corner.x + corner.width;
+  const bottom = corner.y + corner.height;
+  expect(box.x).toBeGreaterThanOrEqual(right - 72);
+  expect(box.x + box.width).toBeLessThanOrEqual(right);
+  expect(box.y).toBeGreaterThanOrEqual(bottom - 40);
+  expect(box.y + box.height).toBeLessThanOrEqual(bottom);
 });
 
 test("1024px 창에서도 위 막대가 창 폭을 쓰고 작업 영역이 그 아래에 있으며 넘치지 않는다", async ({ page }, info) => {
