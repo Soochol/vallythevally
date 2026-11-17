@@ -7,7 +7,7 @@ import { groupOfWindow, listGroups } from "../layout/dock/tree";
 import { MAX_WINDOWS, windowId } from "../layout/kinds";
 import type { LinkColor } from "../api/generated/LinkColor";
 import type { SymbolCode } from "../api/generated/SymbolCode";
-import { ARRANGEMENT_STEPS, type ChartWindowState, chartWindow, chartWindows, DEFAULT_LAYOUT, fittedDock, nextLink, useLayoutStore, watchedSymbol, windowRefs, type WindowState } from "./layout";
+import { ARRANGEMENT_STEPS, type ChartWindowState, chartWindow, chartWindows, DEFAULT_LAYOUT, fittedDock, linkedWindowCount, useLayoutStore, watchedSymbol, windowRefs, type WindowState } from "./layout";
 
 const state = () => useLayoutStore.getState();
 const shownTab = (kind: string) => {
@@ -129,8 +129,9 @@ test("차트의 색을 이미 쓰는 색으로 바꾸면 그 색의 종목을 �
   expect(state().revision).toBe(3);
 });
 
-test("연동 색은 끔 → A → B → C → 끔으로 돌고, 개체 목록과 지표 창에는 붙지 않는다", () => {
-  expect([null, "a", "b", "c"].map((l) => nextLink(l as LinkColor | null))).toEqual(["a", "b", "c", null]);
+test("같은 연동 색을 쓰는 다른 창만 센다. 연동 색은 개체 목록과 지표 창에는 붙지 않는다", () => {
+  const windows = [{ id: windowId("x"), link: "a" }, { id: windowId("y"), link: "a" }, { id: windowId("z"), link: "b" }, { id: windowId("w"), link: null }] as WindowState[];
+  expect([linkedWindowCount(windows, "a", windowId("x")), linkedWindowCount(windows, "b", windowId("x")), linkedWindowCount(windows, "c", windowId("x"))]).toEqual([1, 1, 0]);
   linked({ id: windowId("indicators"), link: null, kind: "indicators" });
   state().setLink(windowId("objects"), "a");
   state().setLink(windowId("indicators"), "a");

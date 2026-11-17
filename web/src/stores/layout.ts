@@ -49,7 +49,8 @@ export const fittedDock = (layout: EditableLayout): DockPlacement => fitDock(lay
 
 export const linkLabel = (link: LinkColor): string => link.toUpperCase();
 
-export const nextLink = (link: LinkColor | null): LinkColor | null => (link === null ? "a" : link === "a" ? "b" : link === "b" ? "c" : null);
+export const linkedWindowCount = (windows: readonly WindowState[], link: LinkColor, except: WindowId): number =>
+  windows.filter((w) => w.link === link && w.id !== except).length;
 
 export type SymbolTarget = Pick<SymbolInfo, "code"> & { name?: string };
 export type SymbolChange = { changed: WindowId[]; notice: string | null };

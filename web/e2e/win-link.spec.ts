@@ -56,6 +56,7 @@ test("관심종목의 연동 색에 따라 종목을 그 색의 차트, 활성 �
   await page.keyboard.press("Tab");
   await expect(watchDot).toBeFocused();
   await page.keyboard.press("Enter");
+  await page.getByRole("menuitemradio", { name: /^A/ }).click();
   await expect(watchDot).toHaveAccessibleName("연동 색: A");
   await expect(watchDot).toHaveText("A");
   await page.keyboard.press("Tab");
@@ -76,6 +77,7 @@ test("관심종목의 연동 색에 따라 종목을 그 색의 차트, 활성 �
   await page.screenshot({ path: path.join(SCREENS, "win-link-1440x900.png") });
 
   await watchDot.press("Space");
+  await page.getByRole("menuitemradio", { name: /^B/ }).click();
   await expect(watchDot).toHaveAccessibleName("연동 색: B");
   await expect(row(page, "035420")).not.toHaveAttribute("aria-current", "true");
   await row(page, "051910").click();
@@ -84,8 +86,7 @@ test("관심종목의 연동 색에 따라 종목을 그 색의 차트, 활성 �
   await expect(cell(page, 2)).toHaveAttribute("aria-label", /^칸 2: NAVER /);
   await expect(cell(page, 3)).toHaveAttribute("aria-label", /^칸 3: SK하이닉스 /);
 
-  await watchDot.click();
-  await watchDot.click();
+  await chooseLink(page, watchDot, "끔");
   await expect(watchDot).toHaveAccessibleName("연동 색: 끔");
   const third = await cell(page, 3).boundingBox();
   await page.mouse.click(third!.x + third!.width / 2, third!.y + third!.height / 2);
@@ -115,11 +116,12 @@ test("위 막대 검색으로 바꾼 종목은 같은 색의 차트로 퍼지고
   const thirdDot = dotOf(page, "cell-2");
   await thirdDot.focus();
   await page.keyboard.press("Enter");
+  await page.getByRole("menuitemradio", { name: /^A/ }).click();
   await expect(thirdDot).toHaveAccessibleName("연동 색: A");
   await drawn(cell(page, 3), /^칸 3: 카카오 .* 일$/);
   await expect(tabOf(page, "cell-2").locator(".dock-tab-flash")).toBeAttached();
 
-  await dotOf(page, "screener").click();
+  await chooseLink(page, dotOf(page, "screener"), "A");
   await expect(dotOf(page, "screener")).toHaveAccessibleName("연동 색: A");
   await expect.poll(() => [savedWindow(scenario, "cell-2"), savedWindow(scenario, "screener")?.link]).toEqual([
     expect.objectContaining({ link: "a", symbol: "035720", period: "D" }),
@@ -148,4 +150,34 @@ test("주소로 연 종목은 같은 색의 차트로 퍼지고, venue는 앱 �
   await drawn(cell(page, 1), /^칸 1: 삼성전자우 통합 일$/);
   await drawn(cell(page, 2), /^칸 2: 삼성전자우 통합 주$/);
   await expect(cell(page, 3)).toHaveAttribute("aria-label", /^칸 3: SK하이닉스 /);
+});
+
+async function chooseLink(page: Page, dot: Locator, name: string) {
+  await dot.click();
+  await page.getByRole("menu", { name: "연동 색" }).getByRole("menuitemradio", { name: new RegExp(`^${name}`) }).click();
+}
+
+test("연동 색 점은 끔·A·B·C 메뉴를 열어 같은 색 창 수를 보이고, 고르면 바꾸고 Esc로 닫으면 초점이 점으로 돌아온다", async ({ page, scenario }) => {
+  linkedCharts(scenario);
+  await ready(page);
+  const dot = dotOf(page, "watchlist");
+  await expect(dot).toHaveAttribute("aria-haspopup", "menu");
+  await expect(dot).toHaveAttribute("aria-expanded", "false");
+  await dot.click();
+  await expect(dot).toHaveAttribute("aria-expanded", "true");
+  const menu = page.getByRole("menu", { name: "연동 색" });
+  await expect(menu.getByRole("menuitemradio")).toHaveText(["끔", "A창 2개", "B없음", "C없음"]);
+  await expect(menu.getByRole("menuitemradio", { name: "끔" })).toHaveAttribute("aria-checked", "true");
+  await page.keyboard.press("Escape");
+  await expect(menu).toHaveCount(0);
+  await expect(dot).toBeFocused();
+  await expect(dot).toHaveAccessibleName("연동 색: 끔");
+
+  await chooseLink(page, dot, "A");
+  await expect(dot).toHaveAccessibleName("연동 색: A");
+  await dot.click();
+  await expect(menu.getByRole("menuitemradio", { name: /^A/ })).toHaveAttribute("aria-checked", "true");
+  await menu.getByRole("menuitemradio", { name: /^A/ }).click();
+  await expect(dot).toHaveAccessibleName("연동 색: A");
+  await expect(dot).toBeFocused();
 });

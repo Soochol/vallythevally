@@ -400,7 +400,7 @@ test("머리의 연동 색 점을 누르면 색 변경과 함께 떠 있는 차�
   await expect(frame(page, "cell-1")).not.toHaveAttribute("data-active-cell");
   const link = frame(page, "cell-1").getByRole("button", { name: /^연동 색:/ });
   await expect(link).toHaveAccessibleName("연동 색: B");
-  await link.click();
+  await chooseLink(page, link, "C");
   await expect(link).toHaveAccessibleName("연동 색: C");
   await expect(frame(page, "cell-1")).toHaveAttribute("data-active-cell", "");
   await expect.poll(() => saved(scenario).dock?.floats.at(-1)?.window).toBe("cell-1");
@@ -436,3 +436,8 @@ test("일반 차트 탭을 영역 밖이나 거절한 자리에 놓으면 활성
     await expect(active).toHaveAttribute("data-active-cell", "");
   }
 });
+
+async function chooseLink(page: Page, dot: Locator, name: string) {
+  await dot.click();
+  await page.getByRole("menu", { name: "연동 색" }).getByRole("menuitemradio", { name: new RegExp(`^${name}`) }).click();
+}

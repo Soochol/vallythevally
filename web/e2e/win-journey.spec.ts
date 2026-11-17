@@ -102,7 +102,7 @@ async function atSizes(page: Page, testInfo: TestInfo, name: string) {
 async function linked(page: Page, id: string) {
   const actual = await head(page, id).count() ? head(page, id).getByRole("button", { name: /^연동 색:/ }) : tab(page, id).locator("+ .link-dot");
   await expect(actual).toHaveAccessibleName("연동 색: 끔");
-  await actual.click();
+  await chooseLink(page, actual, "A");
   await expect(actual).toHaveAccessibleName("연동 색: A");
 }
 
@@ -235,13 +235,13 @@ test("숨긴 연동 차트와 창 범위 드로잉은 떠 있는 창과 캔버�
   await detach(page, "cell-1");
   await expect(chartOf(cell(page, 2)).locator(".drawing-mirror")).toHaveAttribute("data-drawings", new RegExp(drawingId));
   await expect(head(page, "cell-1").getByRole("button", { name: "연동 색: A" })).toBeVisible();
-  await head(page, "cell-1").getByRole("button", { name: "연동 색: A" }).click();
+  await chooseLink(page, head(page, "cell-1").getByRole("button", { name: "연동 색: A" }), "B");
   await expect(head(page, "cell-1").getByRole("button", { name: "연동 색: B" })).toBeVisible();
   await atSizes(page, testInfo, "dock-float");
   await setMode(page, "canvas");
   await ready(page, 2);
   await expect(head(page, "cell-1").getByRole("button", { name: "연동 색: B" })).toBeVisible();
-  await head(page, "cell-1").getByRole("button", { name: "연동 색: B" }).click();
+  await chooseLink(page, head(page, "cell-1").getByRole("button", { name: "연동 색: B" }), "C");
   await expect(head(page, "cell-1").getByRole("button", { name: "연동 색: C" })).toBeVisible();
   await expect(chartOf(cell(page, 2)).locator(".drawing-mirror")).toHaveAttribute("data-drawings", new RegExp(drawingId));
   await expect(chartOf(cell(page)).locator(".drawing-mirror")).not.toHaveAttribute("data-drawings", new RegExp(drawingId));
@@ -762,4 +762,9 @@ for (const mode of MODES) {
     await expect(layoutMenu(page).getByRole("menuitem", { name: "배치 되돌리기", exact: true })).toBeDisabled();
     expect(placement(scenario)).toEqual(before);
   });
+}
+
+async function chooseLink(page: Page, dot: Locator, name: string) {
+  await dot.click();
+  await page.getByRole("menu", { name: "연동 색" }).getByRole("menuitemradio", { name: new RegExp(`^${name}`) }).click();
 }
