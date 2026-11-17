@@ -1,6 +1,7 @@
 pub mod args;
 pub mod build;
 pub mod collect;
+pub mod finalize;
 pub mod kst;
 pub mod parse;
 pub mod raw_read;
