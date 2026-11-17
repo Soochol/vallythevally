@@ -1591,13 +1591,13 @@ mod tests {
             let (stream, mut events) = peer.start_feeds(feeds(&[(samsung(), &[RealType::Trade])]));
             assert!(matches!(next(&mut events).await, StreamEvent::Live { .. }));
             stream.account_feed().set_wanted(true);
-            until("계좌 REG가 보내졌다(한 번 다시 보낸다)", || peer.controls(0).len() >= 4).await;
+            until("계좌 REG가 보내졌다", || peer.controls(0).len() >= 3).await;
             tokio::task::yield_now().await;
-            assert_eq!(peer.controls(0), ["LOGIN", "REG", "REG", "REG"]);
+            assert_eq!(peer.controls(0), ["LOGIN", "REG", "REG"], "거절된 계좌 REG는 이 연결에서 다시 보내지 않는다");
             assert_eq!(peer.logins(), 1, "시세 세션은 다시 연결하지 않는다");
             stream.set_desired(feeds(&[(samsung(), &[RealType::Trade, RealType::Book])]));
-            until("시세 등록은 계속 된다", || peer.controls(0).len() == 5).await;
-            assert_eq!(peer.messages(0)[4]["data"], json!([{"item": ["005930_AL"], "type": ["0D"]}]));
+            until("시세 등록은 계속 된다", || peer.controls(0).len() == 4).await;
+            assert_eq!(peer.messages(0)[3]["data"], json!([{"item": ["005930_AL"], "type": ["0D"]}]));
             assert_eq!(peer.logins(), 1);
         }
 
