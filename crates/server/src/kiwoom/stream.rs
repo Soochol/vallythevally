@@ -299,6 +299,14 @@ impl Control {
         remove.or_else(|| (!added.is_empty()).then_some(Control::Reg(added)))
     }
 
+    fn withdrawn_by(&self, account_wanted: bool) -> bool {
+        match self {
+            Control::AccountReg => !account_wanted,
+            Control::AccountRemove => account_wanted,
+            Control::Reg(_) | Control::Remove(..) => false,
+        }
+    }
+
     fn kind(&self) -> WsControl {
         match self {
             Control::Reg(_) | Control::AccountReg => WsControl::Reg,
@@ -333,6 +341,7 @@ enum End {
     ControlRejected(WsControl, WsRejection),
     LinkClosed,
     Shutdown,
+    Withdrawn,
 }
 
 impl End {
@@ -352,6 +361,7 @@ impl std::fmt::Display for End {
             End::ControlRejected(c, r) => write!(f, "{}이 거절됐습니다({r:?})", c.trnm()),
             End::LinkClosed => f.write_str("연결을 끊었습니다"),
             End::Shutdown => f.write_str("세션을 끝냅니다"),
+            End::Withdrawn => f.write_str("보내기 전에 뜻이 바뀌어 제어 메시지를 거둡니다"),
         }
     }
 }
@@ -666,6 +676,7 @@ impl Session {
         let control = if wanted { Control::AccountReg } else { Control::AccountRemove };
         match self.control(conn, &control).await {
             Ok(()) => self.account_registered = wanted,
+            Err(End::Withdrawn) => return Ok(true),
             Err(End::ControlRejected(kind, rejection)) if wanted => {
                 tracing::warn!(trnm = kind.trnm(), ?rejection, "계좌 실시간 제어가 거절됐습니다. 시세 세션은 그대로 두고 이 연결에서는 다시 보내지 않습니다");
                 self.account_refused = Some(wanted);
@@ -691,6 +702,9 @@ impl Session {
             tracing::warn!(?rejection, "제어 메시지가 거절됐습니다. 한 번 다시 보냅니다");
             if rejection.category == Category::RateLimit {
                 self.serve_until(conn, self.timings.rate_limit_pause).await?;
+            }
+            if control.withdrawn_by(*self.account_wanted.borrow()) {
+                return Err(End::Withdrawn);
             }
             resent = true;
         }
@@ -1606,6 +1620,20 @@ mod tests {
             stream.set_desired(feeds(&[(samsung(), &[RealType::Trade, RealType::Book])]));
             until("시세 등록은 계속 된다", || peer.controls(0).len() == 4).await;
             assert_eq!(peer.messages(0)[3]["data"], json!([{"item": ["005930_AL"], "type": ["0D"]}]));
+            assert_eq!(peer.logins(), 1);
+        }
+
+        #[tokio::test(start_paused = true)]
+        async fn switching_off_while_a_rejected_account_registration_waits_to_be_resent_sends_no_registration() {
+            let peer = Peer::new(|_, trnm, nth| if trnm == "REG" && nth == 2 { Reply::Code(105110) } else { Reply::Ok });
+            let (stream, mut events) = peer.start_feeds(feeds(&[(samsung(), &[RealType::Trade])]));
+            assert!(matches!(next(&mut events).await, StreamEvent::Live { .. }));
+            let account = stream.account_feed();
+            account.set_wanted(true);
+            until("계좌 REG가 거절됐다", || peer.controls(0).len() >= 3).await;
+            account.set_wanted(false);
+            tokio::time::sleep(Duration::from_secs(2)).await;
+            assert_eq!(peer.controls(0), ["LOGIN", "REG", "REG"], "끈 뒤에는 00·04 REG를 다시 보내지 않는다");
             assert_eq!(peer.logins(), 1);
         }
 
