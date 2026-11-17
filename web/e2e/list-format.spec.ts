@@ -112,32 +112,52 @@ test("두 목록의 줄은 같은 글자 크기·굵기·배지·높이·열 폭
   expect(await resultContainer.evaluate((el) => getComputedStyle(el).borderBottomWidth)).toBe("0px");
 });
 
-test("고른 줄과 포인터가 올라간 줄의 바탕과 왼쪽 선이 두 목록에서 같다", async ({ scenario, screener, page }) => {
+const tokenColor = (page: Page, token: string) => page.evaluate((name) => {
+  const probe = document.createElement("div");
+  probe.style.backgroundColor = `var(${name})`;
+  document.body.append(probe);
+  const color = getComputedStyle(probe).backgroundColor;
+  probe.remove();
+  return color;
+}, token);
+const nameOffset = (row: Locator) => row.evaluate((el) => el.querySelector("b")!.getBoundingClientRect().left - el.getBoundingClientRect().left);
+
+test("고른 줄은 --accent-soft 바탕, 포인터를 올린 줄은 --hover 바탕이고 왼쪽 선이 없다", async ({ scenario, screener, page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   const rows = await showBoth(scenario, screener, page);
+  const accentSoft = await tokenColor(page, "--accent-soft");
+  const hover = await tokenColor(page, "--hover");
   const chosenWatch = watchRow(page, "000660");
   await chosenWatch.locator("[data-main]").click();
   await expect(chosenWatch.locator("[data-main]")).toHaveAttribute("aria-current", "true");
   await page.mouse.move(0, 0);
-  const watchChosenLook = { fill: (await look(chosenWatch)).background, edge: await edge(chosenWatch) };
+  expect((await look(chosenWatch)).background).toBe(accentSoft);
+  expect((await edge(chosenWatch)).width).toBe("0px");
+  await chosenWatch.locator("[data-main]").hover();
+  expect((await look(chosenWatch)).background).toBe(accentSoft);
   const chosenResult = rowOf(page, rows[1]!.symbol);
   await chosenResult.getByRole("button").click();
   await expect(chosenResult).toHaveAttribute("aria-selected", "true");
   await expect(chosenResult.getByRole("button")).toHaveAttribute("aria-current", "true");
   await page.mouse.move(0, 0);
-  expect({ fill: (await look(chosenResult)).background, edge: await edge(chosenResult.locator("td").first()) }).toEqual(watchChosenLook);
-  expect(watchChosenLook.edge.width).toBe("2px");
-  expect(watchChosenLook.fill).not.toBe("rgba(0, 0, 0, 0)");
+  expect((await look(chosenResult)).background).toBe(accentSoft);
+  expect((await edge(chosenResult.locator("td").first())).width).toBe("0px");
   const idleWatch = watchRow(page, "035420");
   const idleResult = rowOf(page, rows[2]!.symbol);
-  expect(await edge(idleWatch)).toEqual(await edge(idleResult.locator("td").first()));
-  expect((await look(idleResult)).background).toBe((await look(idleWatch)).background);
-  await rowOf(page, rows[2]!.symbol).hover();
-  const hoveredResult = (await look(rowOf(page, rows[2]!.symbol))).background;
-  await watchRow(page, "035420").locator("[data-main]").hover();
-  const hoveredWatch = (await look(watchRow(page, "035420").locator("[data-main]"))).background;
-  expect(hoveredResult).toBe(hoveredWatch);
-  expect(hoveredResult).toBe(watchChosenLook.fill);
+  expect((await edge(idleWatch)).width).toBe("0px");
+  expect((await edge(idleResult.locator("td").first())).width).toBe("0px");
+  const idle = (await look(idleWatch)).background;
+  expect((await look(idleResult)).background).toBe(idle);
+  await idleResult.hover();
+  expect((await look(idleResult)).background).toBe(hover);
+  await idleWatch.locator("[data-main]").hover();
+  expect((await look(idleWatch)).background).toBe(hover);
+  expect(hover).not.toBe(idle);
+  expect(hover).not.toBe(accentSoft);
+  await chosenResult.hover();
+  expect((await look(chosenResult)).background).toBe(accentSoft);
+  expect(await nameOffset(idleWatch)).toBe(12);
+  expect(await nameOffset(idleResult)).toBe(12);
 });
 
 test("두 목록의 줄에는 종목코드 글자가 없고 풍선말에 이름과 코드가 있다", async ({ scenario, screener, page }) => {

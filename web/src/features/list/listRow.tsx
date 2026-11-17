@@ -10,13 +10,10 @@ export const LIST_EDGE = 12;
 
 export const LIST_HEAD = "text-xs text-text-3";
 export const LIST_ROW_HEIGHT = "h-[34px]";
-export const LIST_ROW_HOVER = "hover:bg-surface";
 
 const RATE_BADGE: Record<ChangeDirection, string> = { up: "bg-up/10 text-up", down: "bg-down/10 text-down", flat: "bg-raised text-text-2" };
 
-export const listRowEdge = (active: boolean) => `border-l-2 ${active ? "border-l-accent" : "border-l-transparent"}`;
-export const listRowFill = (active: boolean) => (active ? "bg-surface" : "");
-export const listRowSelection = (active: boolean) => `${listRowEdge(active)} ${listRowFill(active)}`;
+export const listRowFill = (active: boolean) => (active ? "bg-accent-soft" : "hover:bg-[var(--hover)]");
 
 export function SymbolName({ name, code }: { name: string; code: SymbolCode }) {
   return <b title={name === code ? code : `${name} ${code}`} className="block min-w-0 truncate text-m font-[600]">{name}</b>;
