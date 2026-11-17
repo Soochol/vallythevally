@@ -398,3 +398,70 @@ fn publishing_needs_a_temporary_folder() {
     fs::create_dir_all(data.path().join("store")).unwrap();
     assert!(publish_store(data.path(), DATE).is_err());
 }
+
+fn write_events(data: &Path, lines: &[Value]) {
+    fs::create_dir_all(data.join("plan")).unwrap();
+    let text: String = lines.iter().map(|line| format!("{line}\n")).collect();
+    fs::write(data.join("plan").join(format!("{DATE}.events.jsonl")), text).unwrap();
+}
+
+#[test]
+fn a_spare_that_was_already_live_resumes_at_its_registration_answer() {
+    let data = tempdir().unwrap();
+    write_events(
+        data.path(),
+        &[json!({"v": 1, "at": "2026-11-17T09:00:06+09:00", "event": "handoff", "from": "collect-02", "to": "spare-01", "stocks": ["000050"], "market_types": []})],
+    );
+    let mut stopped = KeyDay::new(data.path(), "collect-02");
+    stopped.login_and_registration();
+    stopped.real(1000, "000050");
+    stopped.real(5000, "000050");
+    stopped.close();
+    let mut spare = KeyDay::new(data.path(), "spare-01");
+    spare.login_and_registration();
+    spare.frame(6400, &json!({"trnm": "REG", "return_code": 0}).to_string());
+    spare.real(6500, "000050");
+    spare.real(30_000, "000050");
+    spare.close();
+
+    finalize_day(&options(data.path())).unwrap();
+
+    assert_eq!(stock(&complete_json(data.path()), "000050")["gaps"], json!([{"from_ms": base_ms() + 5000, "to_ms": base_ms() + 6400}]));
+}
+
+#[test]
+fn an_outage_that_never_ended_lasts_until_the_last_line_of_the_day() {
+    let data = tempdir().unwrap();
+    let mut down = KeyDay::new(data.path(), "collect-01");
+    down.login_and_registration();
+    down.real(1000, "000010");
+    down.down(4000);
+    down.close();
+    let mut other = KeyDay::new(data.path(), "collect-02");
+    other.login_and_registration();
+    other.real(50_000, "000020");
+    other.close();
+    write_day_plan_for(data.path(), ["000010"], ["000020"]);
+
+    finalize_day(&options(data.path())).unwrap();
+
+    assert_eq!(stock(&complete_json(data.path()), "000010")["gaps"], json!([{"from_ms": base_ms() + 4000, "to_ms": base_ms() + 50_000}]));
+    assert_eq!(stock(&complete_json(data.path()), "000020")["gaps"], json!([]));
+}
+
+fn write_day_plan_for<const A: usize, const B: usize>(data: &Path, first: [&str; A], second: [&str; B]) {
+    let plan = PlanFile {
+        format_version: 1,
+        date: DATE,
+        created_at: "2026-11-17T07:35:00+09:00".to_owned(),
+        input: InputSummary { active_keys: 2, universe_replaced: None },
+        keys: vec![
+            share("collect-01", KeyRole::Collecting, first.map(String::from).to_vec(), true),
+            share("collect-02", KeyRole::Collecting, second.map(String::from).to_vec(), false),
+        ],
+        excluded: Vec::new(),
+        unregistered: Vec::new(),
+        alerts: Vec::new(),
+    };
+    write_plan(data, &plan).unwrap();
+}

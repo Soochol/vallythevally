@@ -67,8 +67,9 @@ pub enum JournalFact {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct KeyTimeline {
     pub last_ms: i64,
-    pub lives: Vec<i64>,
+    pub confirmations: Vec<i64>,
     pub gaps: Vec<Gap>,
+    pub open_since: Option<i64>,
 }
 
 pub type KeyTimelines = BTreeMap<Option<String>, KeyTimeline>;
@@ -114,6 +115,12 @@ pub fn read_timelines(data_dir: &Path, date: u32) -> io::Result<KeyTimelines> {
     for (key, reader) in read_day_by_key(data_dir, date)? {
         timelines.insert(key, timeline_of(reader));
     }
+    let day_last_ms = timelines.values().map(|timeline| timeline.last_ms).max().unwrap_or_default();
+    for timeline in timelines.values_mut() {
+        if let Some(start) = timeline.open_since.take() {
+            timeline.gaps.push(Gap { from_ms: start, to_ms: day_last_ms });
+        }
+    }
     Ok(timelines)
 }
 
@@ -129,32 +136,33 @@ fn timeline_of(items: impl Iterator<Item = RawItem>) -> KeyTimeline {
                 down_since.get_or_insert(record.recv_ms);
             }
             RawContent::Live => {
-                timeline.lives.push(record.recv_ms);
+                timeline.confirmations.push(record.recv_ms);
                 match down_since.take() {
                     Some(start) => timeline.gaps.push(Gap { from_ms: start, to_ms: record.recv_ms }),
                     None if saw_real => timeline.gaps.push(Gap { from_ms: timeline.last_ms, to_ms: record.recv_ms }),
                     None => {}
                 }
             }
-            RawContent::Frame(text) => saw_real |= is_real_frame(&text),
+            RawContent::Frame(text) => match frame_name(&text).as_deref() {
+                Some("REAL") => saw_real = true,
+                Some("REG") => timeline.confirmations.push(record.recv_ms),
+                _ => {}
+            },
             RawContent::Text(_) => {}
         }
         timeline.last_ms = if seen_any { timeline.last_ms.max(record.recv_ms) } else { record.recv_ms };
         seen_any = true;
     }
-    if let Some(start) = down_since {
-        timeline.gaps.push(Gap { from_ms: start, to_ms: timeline.last_ms });
-    }
+    timeline.open_since = down_since;
     timeline
 }
 
-fn is_real_frame(text: &str) -> bool {
+fn frame_name(text: &str) -> Option<String> {
     #[derive(serde::Deserialize)]
-    struct Head<'a> {
-        #[serde(borrow)]
-        trnm: Option<std::borrow::Cow<'a, str>>,
+    struct Head {
+        trnm: Option<String>,
     }
-    serde_json::from_str::<Head<'_>>(text).is_ok_and(|head| head.trnm.as_deref() == Some("REAL"))
+    serde_json::from_str::<Head>(text).ok()?.trnm
 }
 
 pub fn build_coverage(input: &CoverageInput<'_>) -> Vec<StockCoverage> {
@@ -240,10 +248,16 @@ fn gaps_of(stock: &StockCoverage, handoff: Option<&(String, String, i64)>, timel
         let at_ms = *at_ms;
         let from_timeline = timelines.get(&Some(from.clone()));
         let to_timeline = timelines.get(&Some(to.clone()));
-        let mut gaps = from_timeline.map(|timeline| timeline.gaps.clone()).unwrap_or_default();
         let from_last = from_timeline.map_or(at_ms, |timeline| timeline.last_ms);
-        if let Some(to_timeline) = to_timeline {
-            let resumed = to_timeline.lives.iter().copied().find(|live| *live >= at_ms).unwrap_or(to_timeline.last_ms);
+        let resumed = to_timeline.map(|timeline| timeline.confirmations.iter().copied().find(|confirmed| *confirmed >= at_ms).unwrap_or(timeline.last_ms));
+        let cut = resumed.unwrap_or(i64::MAX);
+        let mut gaps: Vec<Gap> = from_timeline
+            .into_iter()
+            .flat_map(|timeline| &timeline.gaps)
+            .filter(|gap| gap.from_ms < cut)
+            .map(|gap| Gap { from_ms: gap.from_ms, to_ms: gap.to_ms.min(cut) })
+            .collect();
+        if let (Some(resumed), Some(to_timeline)) = (resumed, to_timeline) {
             if resumed > from_last {
                 gaps.push(Gap { from_ms: from_last, to_ms: resumed });
             }
