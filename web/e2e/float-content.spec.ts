@@ -19,11 +19,16 @@ function seedScreen(scenario: Scenario) {
   scenario.documents.saveScreens({ screens: [SCREEN], revision: 1 });
 }
 
-test("위 막대는 종목 버튼과 검색 아이콘으로 같은 검색 창을 열고 툴팁은 이름과 단축키를 나눠 보이며 마우스를 올린 동안 브라우저 기본 툴팁은 막는다", async ({ page }) => {
+test("위 막대 가운데 검색창은 지금 종목을 보이며 눌러도 / 키로도 같은 검색 창을 열고 툴팁은 이름과 단축키를 나눠 보이며 마우스를 올린 동안 브라우저 기본 툴팁은 막는다", async ({ page }) => {
   await open(page);
-  const symbol = toolbar(page).getByRole("button", { name: /삼성전자/ });
-  await expect(symbol).toContainText("005930");
-  await symbol.click();
+  const search = toolbar(page).getByRole("button", { name: "종목·지표·명령 찾기", exact: true });
+  await expect(search).toContainText("삼성전자");
+  await expect(search).toContainText("005930");
+  await search.click();
+  await expect(page.getByRole("dialog", { name: "종목 검색", exact: true })).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(search).toBeFocused();
+  await page.keyboard.press("/");
   await expect(page.getByRole("dialog", { name: "종목 검색", exact: true })).toBeVisible();
   await page.keyboard.press("Escape");
   await page.getByTitle(SEARCH_BUTTON_TITLE).click();
