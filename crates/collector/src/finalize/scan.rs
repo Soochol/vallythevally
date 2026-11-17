@@ -8,7 +8,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use std::thread;
 
-use serde::de::{self, Deserializer, IgnoredAny, MapAccess, SeqAccess, Visitor};
+use serde::de::{self, Deserializer, MapAccess, Visitor};
 use serde::Deserialize;
 use serde_json::value::RawValue;
 
@@ -17,7 +17,6 @@ use super::schema::{self, ColumnKind, RealtimeType, bucket_of};
 use crate::raw_read::{RawContent, RawDayReader, RawItem};
 
 const BATCH_LINES: usize = 1024;
-const SPILL_BUDGET_BYTES: usize = 128 << 20;
 const SPILL_ZSTD_LEVEL: i32 = 1;
 const LOGIN_FRAME: &str = "LOGIN";
 const REG_FRAME: &str = "REG";
@@ -177,7 +176,7 @@ struct Source {
     next_line: u64,
 }
 
-pub fn scan(reader: RawDayReader, spill: Option<&SpillLayout>, threads: usize, buckets: usize) -> io::Result<ScanOutput> {
+pub fn scan(reader: RawDayReader, spill: Option<&SpillLayout>, threads: usize, buckets: usize, budget_bytes: usize) -> io::Result<ScanOutput> {
     let source = Mutex::new(Source { reader, next_line: 0 });
     let stop = AtomicBool::new(false);
     let results: Vec<io::Result<ScanOutput>> = thread::scope(|scope| {
@@ -185,7 +184,7 @@ pub fn scan(reader: RawDayReader, spill: Option<&SpillLayout>, threads: usize, b
             .map(|worker| {
                 let (source, stop) = (&source, &stop);
                 scope.spawn(move || {
-                    let result = Worker::new(worker, spill, buckets).and_then(|worker| worker.run(source, stop));
+                    let result = Worker::new(worker, spill, buckets, budget_bytes).and_then(|worker| worker.run(source, stop));
                     if result.is_err() {
                         stop.store(true, Ordering::Relaxed);
                     }
@@ -208,6 +207,7 @@ struct Worker<'a> {
     index: usize,
     spill: Option<&'a SpillLayout>,
     buckets: usize,
+    budget_bytes: usize,
     chunks: Vec<Option<Chunk>>,
     buffered_bytes: usize,
     spilled: BTreeSet<(usize, usize)>,
@@ -216,7 +216,7 @@ struct Worker<'a> {
 }
 
 impl<'a> Worker<'a> {
-    fn new(index: usize, spill: Option<&'a SpillLayout>, buckets: usize) -> io::Result<Worker<'a>> {
+    fn new(index: usize, spill: Option<&'a SpillLayout>, buckets: usize, budget_bytes: usize) -> io::Result<Worker<'a>> {
         if let Some(spill) = spill {
             spill.create_worker_dir(index)?;
         }
@@ -224,6 +224,7 @@ impl<'a> Worker<'a> {
             index,
             spill,
             buckets,
+            budget_bytes,
             chunks: (0..schema::types().len() * buckets).map(|_| None).collect(),
             buffered_bytes: 0,
             spilled: BTreeSet::new(),
@@ -241,7 +242,7 @@ impl<'a> Worker<'a> {
             for (line, item) in batch {
                 self.process_item(line, item);
             }
-            if self.buffered_bytes >= SPILL_BUDGET_BYTES {
+            if self.buffered_bytes >= self.budget_bytes {
                 self.flush()?;
             }
         }
@@ -287,12 +288,15 @@ impl<'a> Worker<'a> {
     }
 
     fn process_real(&mut self, line: u64, recv_ms: i64, data: Option<&RawValue>) -> Option<Unfinalized> {
-        let Some(entries) = data.and_then(|raw| serde_json::from_str::<Vec<EntryWire<'_>>>(raw.get()).ok()) else {
+        let Some(entries) = data.and_then(|raw| serde_json::from_str::<Vec<&RawValue>>(raw.get()).ok()) else {
             return Some(Unfinalized::MalformedFrame);
         };
         let mut worst: Option<Unfinalized> = None;
-        for (index, entry) in entries.iter().enumerate() {
-            let outcome = self.process_entry(line, index as u32, recv_ms, entry);
+        for (index, raw) in entries.into_iter().enumerate() {
+            let outcome = match serde_json::from_str::<EntryWire<'_>>(raw.get()) {
+                Ok(entry) => self.process_entry(line, index as u32, recv_ms, &entry),
+                Err(_) => Some(Unfinalized::MalformedFrame),
+            };
             worst = worse(worst, outcome);
         }
         worst
@@ -323,16 +327,17 @@ impl<'a> Worker<'a> {
         };
         let before = chunk.as_ref().map_or(0, |chunk| chunk.approx_bytes());
         for (slot, column) in realtime.values.iter().enumerate() {
-            let cell = match self.source_slots[slot] {
-                NO_VALUE => Cell::Null,
-                position => match cell_of(column.kind, &values.0[position as usize].1) {
-                    Some(cell) => cell,
-                    None => {
-                        *self.tally.unparsable_values.entry((type_index, column.fid)).or_insert(0) += 1;
-                        worst = worse(worst, Some(Unfinalized::UnparsableValue));
-                        Cell::Null
-                    }
-                },
+            let scalar = match self.source_slots[slot] {
+                NO_VALUE => Scalar::Null,
+                position => scalar_of(values.0[position as usize].1),
+            };
+            let cell = match cell_of(column.kind, &scalar) {
+                Some(cell) => cell,
+                None => {
+                    *self.tally.unparsable_values.entry((type_index, column.fid)).or_insert(0) += 1;
+                    worst = worse(worst, Some(Unfinalized::UnparsableValue));
+                    Cell::Null
+                }
             };
             if let Some(chunk) = chunk.as_mut() {
                 chunk.push_cell(slot, column.plus_slot, cell);
@@ -349,7 +354,13 @@ impl<'a> Worker<'a> {
         let mut worst = None;
         for (position, (key, _)) in values.0.iter().enumerate() {
             match realtime.slot_of(&key.0) {
-                Some(slot) => self.source_slots[slot] = position as u32,
+                Some(slot) => {
+                    if self.source_slots[slot] != NO_VALUE {
+                        *self.tally.unparsable_values.entry((type_index, realtime.values[slot].fid)).or_insert(0) += 1;
+                        worst = worse(worst, Some(Unfinalized::UnparsableValue));
+                    }
+                    self.source_slots[slot] = position as u32;
+                }
                 None => {
                     *self.tally.unknown_fids.entry((type_index, key.0.to_string())).or_insert(0) += 1;
                     worst = Some(Unfinalized::UnknownFid);
@@ -438,7 +449,7 @@ fn cell_of<'v>(kind: ColumnKind, scalar: &'v Scalar<'_>) -> Option<Cell<'v>> {
             if trimmed.is_empty() {
                 return Some(Cell::Null);
             }
-            trimmed.parse::<i64>().ok().map(|value| Cell::Int { value, plus: trimmed.starts_with('+') })
+            trimmed.parse::<i64>().ok().map(|value| Cell::Int { value, plus: text.starts_with('+') })
         }
         ColumnKind::Float => {
             let trimmed = text.trim();
@@ -449,7 +460,7 @@ fn cell_of<'v>(kind: ColumnKind, scalar: &'v Scalar<'_>) -> Option<Cell<'v>> {
                 .parse::<f64>()
                 .ok()
                 .filter(|value| value.is_finite())
-                .map(|value| Cell::Float { value, plus: trimmed.starts_with('+') })
+                .map(|value| Cell::Float { value, plus: text.starts_with('+') })
         }
     }
 }
@@ -484,68 +495,29 @@ impl<'de: 'a, 'a> Deserialize<'de> for Text<'a> {
 
 enum Scalar<'a> {
     Text(Cow<'a, str>),
-    Number(String),
+    Number(&'a str),
     Null,
     Other,
 }
 
-impl<'de: 'a, 'a> Deserialize<'de> for Scalar<'a> {
-    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        struct ScalarVisitor<'a>(std::marker::PhantomData<&'a ()>);
-        impl<'de: 'a, 'a> Visitor<'de> for ScalarVisitor<'a> {
-            type Value = Scalar<'a>;
-
-            fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-                formatter.write_str("JSON 값")
-            }
-
-            fn visit_borrowed_str<E: de::Error>(self, value: &'de str) -> Result<Self::Value, E> {
-                Ok(Scalar::Text(Cow::Borrowed(value)))
-            }
-
-            fn visit_str<E: de::Error>(self, value: &str) -> Result<Self::Value, E> {
-                Ok(Scalar::Text(Cow::Owned(value.to_string())))
-            }
-
-            fn visit_string<E: de::Error>(self, value: String) -> Result<Self::Value, E> {
-                Ok(Scalar::Text(Cow::Owned(value)))
-            }
-
-            fn visit_i64<E: de::Error>(self, value: i64) -> Result<Self::Value, E> {
-                Ok(Scalar::Number(value.to_string()))
-            }
-
-            fn visit_u64<E: de::Error>(self, value: u64) -> Result<Self::Value, E> {
-                Ok(Scalar::Number(value.to_string()))
-            }
-
-            fn visit_f64<E: de::Error>(self, value: f64) -> Result<Self::Value, E> {
-                Ok(Scalar::Number(value.to_string()))
-            }
-
-            fn visit_bool<E: de::Error>(self, _: bool) -> Result<Self::Value, E> {
-                Ok(Scalar::Other)
-            }
-
-            fn visit_unit<E: de::Error>(self) -> Result<Self::Value, E> {
-                Ok(Scalar::Null)
-            }
-
-            fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<Self::Value, A::Error> {
-                while seq.next_element::<IgnoredAny>()?.is_some() {}
-                Ok(Scalar::Other)
-            }
-
-            fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Self::Value, A::Error> {
-                while map.next_entry::<IgnoredAny, IgnoredAny>()?.is_some() {}
-                Ok(Scalar::Other)
+fn scalar_of(raw: &RawValue) -> Scalar<'_> {
+    let text = raw.get().trim();
+    match text.as_bytes().first() {
+        Some(b'"') => {
+            let inner = &text[1..text.len() - 1];
+            if !inner.contains('\\') {
+                Scalar::Text(Cow::Borrowed(inner))
+            } else {
+                serde_json::from_str::<String>(text).map_or(Scalar::Other, |owned| Scalar::Text(Cow::Owned(owned)))
             }
         }
-        deserializer.deserialize_any(ScalarVisitor(std::marker::PhantomData))
+        Some(b'n') => Scalar::Null,
+        Some(b't' | b'f' | b'{' | b'[') => Scalar::Other,
+        _ => Scalar::Number(text),
     }
 }
 
-struct Values<'a>(Vec<(Text<'a>, Scalar<'a>)>);
+struct Values<'a>(Vec<(Text<'a>, &'a RawValue)>);
 
 impl<'de: 'a, 'a> Deserialize<'de> for Values<'a> {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
@@ -559,7 +531,7 @@ impl<'de: 'a, 'a> Deserialize<'de> for Values<'a> {
 
             fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Self::Value, A::Error> {
                 let mut entries = Vec::with_capacity(map.size_hint().unwrap_or(0));
-                while let Some(entry) = map.next_entry::<Text<'a>, Scalar<'a>>()? {
+                while let Some(entry) = map.next_entry::<Text<'a>, &'de RawValue>()? {
                     entries.push(entry);
                 }
                 Ok(Values(entries))

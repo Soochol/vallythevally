@@ -20,6 +20,7 @@ pub use schema::{FORMAT_VERSION, bucket_of};
 
 pub const DEFAULT_THREADS: usize = 4;
 pub const DEFAULT_BUCKETS: usize = 64;
+pub const DEFAULT_SPILL_BUDGET_BYTES: usize = 128 << 20;
 const MAX_THREADS: usize = 64;
 const MAX_BUCKETS: usize = 999;
 const STORE_FOLDER: &str = "store";
@@ -38,6 +39,7 @@ pub struct Options {
     pub threads: usize,
     pub buckets: usize,
     pub verify_only: bool,
+    pub spill_budget_bytes: usize,
 }
 
 pub struct Written {
@@ -99,6 +101,7 @@ fn parse_options(raw_arguments: &[String]) -> Result<Options, String> {
         threads: bounded(&arguments, "threads", DEFAULT_THREADS, MAX_THREADS)?,
         buckets: bounded(&arguments, "buckets", DEFAULT_BUCKETS, MAX_BUCKETS)?,
         verify_only: arguments.flag("verify-only"),
+        spill_budget_bytes: DEFAULT_SPILL_BUDGET_BYTES,
     })
 }
 
@@ -126,13 +129,14 @@ pub fn finalize_day(options: &Options) -> io::Result<VerifyReport> {
 
 pub fn tally_day(options: &Options) -> io::Result<Tally> {
     let reader = read_day(&options.data_dir, options.date)?;
-    Ok(scan::scan(reader, None, options.threads, options.buckets)?.tally)
+    Ok(scan::scan(reader, None, options.threads, options.buckets, options.spill_budget_bytes)?.tally)
 }
 
 pub fn write_store(options: &Options) -> io::Result<Written> {
     let reader = read_day(&options.data_dir, options.date)?;
     let store_dir = temporary_store_dir(&options.data_dir, options.date);
-    match fs::remove_dir_all(&store_dir) {
+    let removed = if store_dir.is_dir() { fs::remove_dir_all(&store_dir) } else { fs::remove_file(&store_dir) };
+    match removed {
         Ok(()) => {}
         Err(error) if error.kind() == io::ErrorKind::NotFound => {}
         Err(error) => return Err(error),
@@ -152,7 +156,7 @@ fn write_buckets(
     spill_root: &Path,
 ) -> io::Result<(Tally, Vec<WrittenFile>)> {
     let spill = scan::SpillLayout::new(spill_root.to_path_buf());
-    let scanned = scan::scan(reader, Some(&spill), options.threads, options.buckets)?;
+    let scanned = scan::scan(reader, Some(&spill), options.threads, options.buckets, options.spill_budget_bytes)?;
     let tasks: Vec<(usize, usize)> = scanned.spilled.iter().copied().collect();
     let files = merge::merge(store_dir, &spill, options.threads, &tasks, options.buckets, options.threads)?;
     Ok((scanned.tally, files))

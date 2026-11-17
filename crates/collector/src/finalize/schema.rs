@@ -88,7 +88,8 @@ impl RealtimeType {
     }
 
     pub fn slot_of(&self, fid: &str) -> Option<usize> {
-        let number: usize = fid.parse().ok()?;
+        let canonical = !fid.is_empty() && fid.bytes().all(|byte| byte.is_ascii_digit()) && (fid.len() == 1 || !fid.starts_with('0'));
+        let number: usize = canonical.then(|| fid.parse().ok()).flatten()?;
         let slot = *self.slot_by_fid.get(number)?;
         (slot != NO_SLOT).then_some(slot as usize)
     }

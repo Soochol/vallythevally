@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use collector::finalize::schema::{self, ColumnKind};
-use collector::finalize::{Options, bucket_of, store_dir, temporary_store_dir, tally_day, verify_store, write_store};
+use collector::finalize::{DEFAULT_SPILL_BUDGET_BYTES, Options, bucket_of, store_dir, temporary_store_dir, tally_day, verify_store, write_store};
 use collector::raw_write::{RawLine, RawWriter};
 use duckdb::Connection;
 use duckdb::types::Value;
@@ -265,7 +265,7 @@ fn unparsable_entry() -> EntrySpec {
 }
 
 fn options(data: &Path, threads: usize) -> Options {
-    Options { data_dir: data.to_path_buf(), date: DATE, threads, buckets: 64, verify_only: false }
+    Options { data_dir: data.to_path_buf(), date: DATE, threads, buckets: 64, verify_only: false, spill_budget_bytes: DEFAULT_SPILL_BUDGET_BYTES }
 }
 
 fn run(arguments: &[&str]) -> (Option<i32>, String) {
@@ -294,9 +294,9 @@ fn expected_cell(kind: ColumnKind, text: Option<&String>) -> (Cellular, bool) {
     match kind {
         ColumnKind::Text => (Cellular::Text(text.clone()), false),
         ColumnKind::Int if text.trim().is_empty() => (Cellular::Null, false),
-        ColumnKind::Int => (Cellular::Int(text.trim().parse().unwrap()), text.trim().starts_with('+')),
+        ColumnKind::Int => (Cellular::Int(text.trim().parse().unwrap()), text.starts_with('+')),
         ColumnKind::Float if text.trim().is_empty() => (Cellular::Null, false),
-        ColumnKind::Float => (Cellular::Float(text.trim().parse().unwrap()), text.trim().starts_with('+')),
+        ColumnKind::Float => (Cellular::Float(text.trim().parse().unwrap()), text.starts_with('+')),
     }
 }
 
@@ -423,6 +423,55 @@ fn a_known_frame_is_stored_with_its_signs_and_blanks() {
     assert_eq!(row["f851"], Cellular::Null);
     assert_eq!(row["f9081"], Cellular::Text("NXT".into()));
     assert_eq!(row["f13"], Cellular::Null);
+}
+
+#[test]
+fn odd_raw_shapes_are_stored_exactly_or_counted_as_unfinalized() {
+    let data = tempdir().unwrap();
+    fs::create_dir_all(data.path().join("store")).unwrap();
+    fs::write(temporary_store_dir(data.path(), DATE), "a stale file").unwrap();
+    let frames = [
+        r#"{"trnm":"REAL","data":[{"type":"0B","item":"A_AL","values":{"+10":"111","010":"333","11":"5"}}]}"#,
+        r#"{"trnm":"REAL","data":[{"type":"0B","item":"B_AL","values":{"10":"444","10":"555"}}]}"#,
+        r#"{"trnm":"REAL","data":[{"type":"0B","item":"G1_AL","values":{"11":"1"}},{"type":"0B","item":5930,"values":{}},{"type":"0B","item":"G2_AL","values":{"11":"2"}}]}"#,
+        r#"{"trnm":"REAL","data":[{"type":"0B","item":"N_AL","values":{"20":1.50,"9081":1e2,"13":12345,"12":-0.0}}]}"#,
+        r#"{"trnm":"REAL","data":[{"type":"0B","item":"P_AL","values":{"15":" +82","16":"+7","14":"-0"}}]}"#,
+    ];
+    let mut writer = RawWriter::new(data.path());
+    for (index, text) in frames.iter().enumerate() {
+        writer.write(&RawLine::Frame { recv_ms: NINE_AM_KST_MS + index as i64, text }).unwrap();
+    }
+    writer.close().unwrap();
+    assert_eq!(finalize(data.path(), &[]).0, Some(0));
+
+    let verify = verify_json(data.path());
+    assert_eq!(verify["lines"]["finalized"], json!(2));
+    assert_eq!(verify["lines"]["unfinalized"]["kinds"]["unknown_fid"], json!(1));
+    assert_eq!(verify["lines"]["unfinalized"]["kinds"]["unparsable_value"], json!(1));
+    assert_eq!(verify["lines"]["unfinalized"]["kinds"]["malformed_realtime_frame"], json!(1));
+    assert_eq!(verify["unknown_fids"], json!({"0B": {"+10": 1, "010": 1}}));
+    assert_eq!(verify["unparsable_values"], json!({"0B": {"10": 1}}));
+    let messages: BTreeMap<String, u64> = serde_json::from_value(verify["symbol_messages"].clone()).unwrap();
+    assert_eq!(messages.keys().map(String::as_str).collect::<Vec<_>>(), ["A_AL", "B_AL", "G1_AL", "G2_AL", "N_AL", "P_AL"]);
+
+    let rows = read_type(&temporary_store_dir(data.path(), DATE), "0B");
+    let by_symbol: BTreeMap<String, &BTreeMap<String, Cellular>> = rows
+        .iter()
+        .map(|row| match &row["symbol"] {
+            Cellular::Text(symbol) => (symbol.clone(), row),
+            other => panic!("{other:?}"),
+        })
+        .collect();
+    assert_eq!(by_symbol.keys().map(String::as_str).collect::<Vec<_>>(), ["A_AL", "B_AL", "G1_AL", "G2_AL", "N_AL", "P_AL"]);
+    assert_eq!(by_symbol["A_AL"]["f10"], Cellular::Null);
+    assert_eq!(by_symbol["A_AL"]["f11"], Cellular::Int(5));
+    assert_eq!(by_symbol["G1_AL"]["f11"], Cellular::Int(1));
+    assert_eq!(by_symbol["N_AL"]["f20"], Cellular::Text("1.50".into()));
+    assert_eq!(by_symbol["N_AL"]["f9081"], Cellular::Text("1e2".into()));
+    assert_eq!(by_symbol["N_AL"]["f13"], Cellular::Int(12345));
+    assert_eq!((&by_symbol["P_AL"]["f15"], &by_symbol["P_AL"]["f15_plus"]), (&Cellular::Int(82), &Cellular::Flag(false)));
+    assert_eq!((&by_symbol["P_AL"]["f16"], &by_symbol["P_AL"]["f16_plus"]), (&Cellular::Int(7), &Cellular::Flag(true)));
+    assert_eq!(by_symbol["P_AL"]["f14"], Cellular::Int(0));
 }
 
 #[test]
@@ -623,4 +672,45 @@ fn the_format_document_lists_exactly_the_columns_in_the_code() {
             .collect();
         assert_eq!(documented, in_code, "{}", realtime.code);
     }
+}
+
+#[test]
+fn flushing_the_spill_many_times_gives_the_same_files() {
+    let (data, _) = day_with_data();
+    let whole = options(data.path(), 4);
+    let written = write_store(&whole).unwrap();
+    let verify = verify_store(&written.store_dir, DATE, 64, 4, &written.tally).unwrap();
+    assert!(verify.passed);
+    let once = files_under(&written.store_dir);
+
+    let tiny = Options { spill_budget_bytes: 2_000, ..options(data.path(), 4) };
+    let written = write_store(&tiny).unwrap();
+    assert!(verify_store(&written.store_dir, DATE, 64, 4, &written.tally).unwrap().passed);
+    let many = files_under(&written.store_dir);
+    assert_eq!(once.keys().collect::<Vec<_>>(), many.keys().collect::<Vec<_>>());
+    for (name, bytes) in &once {
+        assert!(bytes == &many[name], "{name}이 다르다");
+    }
+}
+
+#[test]
+fn rows_with_the_same_symbol_and_time_keep_their_raw_order_for_any_thread_count() {
+    let build = |threads: &str| {
+        let data = tempdir().unwrap();
+        let mut writer = RawWriter::new(data.path());
+        for index in 0..6_000 {
+            let frame = format!(
+                r#"{{"trnm":"REAL","data":[{{"type":"0B","item":"T_AL","values":{{"15":"{index}"}}}},{{"type":"0B","item":"T_AL","values":{{"15":"-{index}"}}}}]}}"#
+            );
+            writer.write(&RawLine::Frame { recv_ms: NINE_AM_KST_MS, text: &frame }).unwrap();
+        }
+        writer.close().unwrap();
+        assert_eq!(finalize(data.path(), &["--threads", threads]).0, Some(0));
+        read_type(&temporary_store_dir(data.path(), DATE), "0B")
+    };
+    let single = build("1");
+    assert_eq!(single, build("8"));
+    let quantities: Vec<Cellular> = single.iter().map(|row| row["f15"].clone()).collect();
+    let wanted: Vec<Cellular> = (0..6_000).flat_map(|index| [Cellular::Int(index), Cellular::Int(-index)]).collect();
+    assert_eq!(quantities, wanted);
 }
