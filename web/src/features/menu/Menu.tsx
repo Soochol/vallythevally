@@ -26,7 +26,7 @@ interface Props {
 
 export function Menu({ label, items, onClose, root, className, style, children }: Props) {
   const point = typeof style?.left === "number" && typeof style?.top === "number" ? { x: style.left, y: style.top } : undefined;
-  const trigger = useRef<HTMLElement | null>(point ? null : root.current instanceof HTMLButtonElement ? root.current : root.current?.querySelector<HTMLElement>("[aria-expanded=true]") ?? root.current?.querySelector<HTMLElement>("button") ?? null);
+  const trigger = useRef<HTMLElement | null>(point ? null : root.current?.tagName === "BUTTON" ? root.current : root.current?.querySelector<HTMLElement>("[aria-expanded=true]") ?? root.current?.querySelector<HTMLElement>("button") ?? null);
   const focusTarget = useRef<HTMLElement | null>(point
     ? (typeof document !== "undefined" && document.activeElement instanceof HTMLElement ? document.activeElement : null)
     : trigger.current);
