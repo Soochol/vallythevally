@@ -133,6 +133,7 @@ export const DEFAULT_SYSTEM_SETTINGS: SystemSettings = {
   bind: "127.0.0.1:8080", logFilter: "info", staticDir: "web/dist", dbPath: "data/vally.db", screenerDbPath: "data/screener.db", financialDbPath: "data/financial.db",
   screenerUpdateOnStart: true, financialAutomatic: false, opendartKeyPresent: true, tokenPath: "state/kiwoom-token.json", keyPath: "state/kiwoom-key.json", lockPath: "state/vally.lock",
   kiwoomTarget: { kind: "kiwoom", host: "api.kiwoom.com" }, serverVersion: "0.1.0-test",
+  accountServerUrl: null, accountStatePath: "state/account.json",
 };
 
 export class LiveFrames {

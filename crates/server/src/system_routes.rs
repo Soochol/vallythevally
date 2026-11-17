@@ -27,6 +27,7 @@ pub struct SystemState {
     env_key: bool,
     key_file_problem: Mutex<Option<String>>,
     settings: Option<api::SystemSettings>,
+    account: crate::account::AccountState,
     bound: OnceLock<std::net::SocketAddr>,
     write: tokio::sync::Mutex<()>,
 }
@@ -38,7 +39,7 @@ impl SystemState {
             tracing::warn!(error = %e, "등록한 IP 기록을 읽지 못했습니다. 없는 것으로 봅니다");
             None
         });
-        SystemState { key_file: Some(key_file), ip_file: Some(ip_file), registered_ip: Mutex::new(registered_ip), public_ip: None, env_key, key_file_problem: Mutex::new(key_file_problem.map(|e| e.to_string())), settings: Some(settings), bound: OnceLock::new(), write: tokio::sync::Mutex::new(()) }
+        SystemState { key_file: Some(key_file), ip_file: Some(ip_file), registered_ip: Mutex::new(registered_ip), public_ip: None, env_key, key_file_problem: Mutex::new(key_file_problem.map(|e| e.to_string())), settings: Some(settings), account: crate::account::AccountState::local_only(), bound: OnceLock::new(), write: tokio::sync::Mutex::new(()) }
     }
 
     pub fn with_public_ip(mut self, transport: Arc<dyn PublicIpTransport>) -> Self {
@@ -46,8 +47,17 @@ impl SystemState {
         self
     }
 
+    pub fn with_account(mut self, account: crate::account::AccountState) -> Self {
+        self.account = account;
+        self
+    }
+
+    pub fn account(&self) -> &crate::account::AccountState {
+        &self.account
+    }
+
     pub fn unconfigured() -> Self {
-        SystemState { key_file: None, ip_file: None, registered_ip: Mutex::new(None), public_ip: None, env_key: false, key_file_problem: Mutex::new(None), settings: None, bound: OnceLock::new(), write: tokio::sync::Mutex::new(()) }
+        SystemState { key_file: None, ip_file: None, registered_ip: Mutex::new(None), public_ip: None, env_key: false, key_file_problem: Mutex::new(None), settings: None, account: crate::account::AccountState::local_only(), bound: OnceLock::new(), write: tokio::sync::Mutex::new(()) }
     }
 
     pub fn bound(&self, addr: std::net::SocketAddr) {
@@ -89,6 +99,8 @@ impl api::SystemSettings {
             lock_path: path(&config.lock_path),
             kiwoom_target: kiwoom_target(&config.kiwoom_base_url),
             server_version: env!("CARGO_PKG_VERSION").to_owned(),
+            account_server_url: config.account_server_url.as_ref().map(|url| url.as_str().to_owned()),
+            account_state_path: path(&config.account_state_path),
         }
     }
 }

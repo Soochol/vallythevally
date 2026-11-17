@@ -117,7 +117,7 @@ fn sub_of(msg: &ServerMessage) -> Option<&str> {
         | ServerMessage::Bar { sub, .. }
         | ServerMessage::Confirmed { sub, .. }
         | ServerMessage::Reload { sub, .. } => Some(sub),
-        ServerMessage::Hello { .. } | ServerMessage::Status { .. } | ServerMessage::Quotes { .. } | ServerMessage::WatchLimited { .. } | ServerMessage::KiwoomLink { .. } => None,
+        ServerMessage::Hello { .. } | ServerMessage::Status { .. } | ServerMessage::Quotes { .. } | ServerMessage::WatchLimited { .. } | ServerMessage::KiwoomLink { .. } | ServerMessage::Account { .. } => None,
     }
 }
 
