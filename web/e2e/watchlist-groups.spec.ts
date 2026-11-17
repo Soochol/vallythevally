@@ -465,12 +465,15 @@ test("그룹이 가득 차면 새 그룹 칸 위에서 앞서 가리키던 놓�
   const bar = ungroupedHead(page).locator("xpath=..");
   const fill = () => bar.evaluate((el) => getComputedStyle(el).backgroundColor);
   const idle = await fill();
+  await slot(page).scrollIntoViewIfNeeded();
   const source = (await membership(page, "그룹 100", "005935").boundingBox())!;
-  await page.mouse.move(source.x + 20, source.y + 10);
+  await page.mouse.move(source.x + 20, source.y + source.height / 2);
   await page.mouse.down();
-  await ungroupedRow(page, "000660").hover();
+  const over = (await ungroupedRow(page, "000660").boundingBox())!;
+  await page.mouse.move(over.x + 20, over.y + over.height / 2, { steps: 8 });
   await expect.poll(fill).not.toBe(idle);
-  await slot(page).locator("xpath=..").hover();
+  const target = (await slot(page).boundingBox())!;
+  await page.mouse.move(target.x + 20, target.y + target.height / 2, { steps: 8 });
   await expect.poll(fill).toBe(idle);
   await page.mouse.up();
   await expect(ungroupedRow(page, "000660")).toBeVisible();
