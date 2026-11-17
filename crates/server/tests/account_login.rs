@@ -20,6 +20,7 @@ struct Accounts {
     base: String,
     idp: FakeIdp,
     requests: Arc<AtomicUsize>,
+    setup_requests: Arc<AtomicUsize>,
     serving: tokio::task::JoinHandle<()>,
     _dir: tempfile::TempDir,
 }
@@ -39,22 +40,31 @@ impl Accounts {
         let dir = tempfile::tempdir().unwrap();
         let pool = open_database(&dir.path().join("account.db")).await.unwrap();
         let requests = Arc::new(AtomicUsize::new(0));
-        let counter = requests.clone();
+        let setup_requests = Arc::new(AtomicUsize::new(0));
+        let (counter, setup_counter) = (requests.clone(), setup_requests.clone());
         let app = router(config, pool, clock).layer(axum::middleware::from_fn(move |request: axum::extract::Request, next: axum::middleware::Next| {
-            let counter = counter.clone();
+            let (counter, setup_counter) = (counter.clone(), setup_counter.clone());
             async move {
-                counter.fetch_add(1, Ordering::SeqCst);
+                if request.uri().path().starts_with("/v1/setup/") {
+                    setup_counter.fetch_add(1, Ordering::SeqCst);
+                } else {
+                    counter.fetch_add(1, Ordering::SeqCst);
+                }
                 next.run(request).await
             }
         }));
         let serving = tokio::spawn(async move {
             axum::serve(listener, app).await.unwrap();
         });
-        Accounts { base, idp, requests, serving, _dir: dir }
+        Accounts { base, idp, requests, setup_requests, serving, _dir: dir }
     }
 
     fn requests(&self) -> usize {
         self.requests.load(Ordering::SeqCst)
+    }
+
+    fn setup_requests(&self) -> usize {
+        self.setup_requests.load(Ordering::SeqCst)
     }
 
     async fn stop(self) -> String {
@@ -349,18 +359,19 @@ async fn a_different_account_server_address_means_signed_out_and_sends_nothing()
 }
 
 #[tokio::test]
-async fn starting_the_connector_sends_no_request_even_when_signed_in() {
+async fn starting_the_connector_sends_only_setup_sync_requests_when_signed_in() {
     let (accounts, machine) = (Accounts::start().await, Machine::new());
     let connector = machine.run(Some(&accounts.base)).await;
     connector.login_ok(&accounts, "naver").await;
     connector.server.stop().await;
-    let before = accounts.requests();
+    let (before, setup_before) = (accounts.requests(), accounts.setup_requests());
     let restarted = machine.run(Some(&accounts.base)).await;
     assert_eq!(restarted.status().await["state"], "signed_in");
     let _ = restarted.get("/api/system/settings").await;
     let (_socket, _) = tokio_tungstenite::connect_async(format!("ws://{}/api/ws", restarted.base.trim_start_matches("http://"))).await.unwrap();
     tokio::time::sleep(Duration::from_millis(500)).await;
-    assert_eq!(accounts.requests(), before);
+    assert_eq!(accounts.requests(), before, "토큰 확인 같은 로그인 요청은 가지 않는다");
+    assert!(accounts.setup_requests() > setup_before, "로그인돼 있으면 시작 때 셋업 동기화를 한다");
 }
 
 #[tokio::test]
@@ -554,8 +565,12 @@ async fn when_the_state_file_cannot_be_removed_after_deletion_memory_and_file_st
     assert_eq!(connector.status().await["state"], "signed_in", "파일이 남았으니 메모리도 로그인 상태다");
     connector.server.stop().await;
     let restarted = machine.run(Some(&accounts.base)).await;
-    assert_eq!(restarted.status().await["state"], "signed_in");
-    let (status, body) = restarted.post("/api/account/refresh", &json!({})).await;
-    assert_eq!((status, &body), (200, &json!({"state": "signed_out"})), "계정 서버가 모르는 토큰은 새로 고침이 정리한다");
+    tokio::time::timeout(Duration::from_secs(10), async {
+        while restarted.status().await["state"] != "signed_out" {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .expect("시작 때의 동기화가 계정 서버가 모르는 토큰을 로그아웃으로 정리한다");
     assert!(machine.state_file().is_none());
 }
