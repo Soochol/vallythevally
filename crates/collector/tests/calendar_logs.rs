@@ -75,11 +75,16 @@ async fn failed_fetches_log_without_the_service_key() {
         let data = tempdir().unwrap();
         Calendar::load(data.path(), transport, &key, now).await;
     }
+    let cached = tempdir().unwrap();
+    let october = Day::from_ymd(2026, 10, 5).unwrap().unix_ms_at_kst(7, 20);
+    Calendar::load(cached.path(), &OneHoliday, &key, october).await;
+    Calendar::load(cached.path(), &Unreachable, &key, now).await;
     let blocked = tempdir().unwrap();
     std::fs::write(blocked.path().join("calendar"), "").unwrap();
     Calendar::load(blocked.path(), &OneHoliday, &key, now).await;
     let captured = String::from_utf8(logs.0.lock().unwrap().clone()).unwrap();
     assert!(captured.contains("특일정보를 받지 못했고 캐시도 없다"), "{captured}");
+    assert!(captured.contains("특일정보를 받지 못해 캐시를 쓴다"), "{captured}");
     assert!(captured.contains("특일정보 캐시를 쓰지 못했다"), "{captured}");
     assert!(!captured.contains(SERVICE_KEY), "{captured}");
     assert!(!captured.contains("SvcKey"), "{captured}");

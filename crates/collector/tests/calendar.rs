@@ -499,3 +499,16 @@ async fn the_year_end_closure_skips_days_the_overrides_close() {
     assert_eq!(calendar.judge(day(2022, 12, 29)).verdict, Verdict::Closed);
     assert!(matches!(calendar.judge(day(2022, 12, 28)).verdict, Verdict::Observed { .. }));
 }
+
+#[tokio::test]
+async fn a_malformed_overrides_file_makes_the_year_end_closing_day_unknown() {
+    let data = tempdir().unwrap();
+    write_overrides(data.path(), "{not json");
+    let fake = FakeHolidays::new();
+    for year in [2021, 2022, 2023] {
+        fake.set(year, Ok(response_body(&[(u32::from(year) * 10_000 + 101, "1월1일")])));
+    }
+    let calendar = load_at(data.path(), &fake, day(2022, 12, 1)).await;
+    assert_eq!(calendar.judge(day(2022, 12, 30)).verdict, Verdict::Unknown);
+    assert_eq!(calendar.judge(day(2022, 12, 31)).verdict, Verdict::Closed);
+}
