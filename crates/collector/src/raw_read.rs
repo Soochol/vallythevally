@@ -38,20 +38,30 @@ pub fn read_day(data_dir: &Path, date: u32) -> io::Result<RawDayReader> {
     let mut files = Vec::new();
     for entry in fs::read_dir(&folder)? {
         let path = entry?.path();
-        let is_raw_file = path
-            .file_name()
-            .and_then(|name| name.to_str())
-            .is_some_and(|name| name.ends_with(RAW_FILE_SUFFIX));
-        if is_raw_file {
-            files.push(path);
+        if path.is_dir() {
+            for key_entry in fs::read_dir(&path)? {
+                push_if_raw_file(&mut files, key_entry?.path());
+            }
+        } else {
+            push_if_raw_file(&mut files, path);
         }
     }
-    files.sort();
+    files.sort_by(|first, second| first.file_name().cmp(&second.file_name()).then_with(|| first.cmp(second)));
     Ok(RawDayReader {
         pending_files: files.into(),
         current: None,
         queued: VecDeque::new(),
     })
+}
+
+fn push_if_raw_file(files: &mut Vec<PathBuf>, path: PathBuf) {
+    let is_raw_file = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| name.ends_with(RAW_FILE_SUFFIX));
+    if is_raw_file {
+        files.push(path);
+    }
 }
 
 pub struct RawDayReader {

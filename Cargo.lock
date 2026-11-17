@@ -587,6 +587,7 @@ dependencies = [
  "futures",
  "hoga-format",
  "http-body-util",
+ "rustix",
  "serde",
  "serde_json",
  "server",

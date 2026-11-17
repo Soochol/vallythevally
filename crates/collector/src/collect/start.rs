@@ -13,7 +13,8 @@ use tokio::sync::watch;
 use super::config::CollectorConfig;
 use super::items::Items;
 use super::output::Output;
-use super::session::{Finish, Session, SessionParts, SystemWallClock, Timings, WallClock};
+use super::registry::Registry;
+use super::session::{Finish, Session, SessionParts, SystemWallClock, Timings, Tokens, WallClock};
 use super::ws::{Connector, WebSocketConnector};
 
 pub const KIWOOM_BASE_URL: &str = "https://api.kiwoom.com";
@@ -55,25 +56,29 @@ pub async fn execute(
     let auth = KiwoomAuth::new(config.app_key.clone(), config.app_secret.clone(), Some(token_file));
     let rest = KiwoomRest::new(injected.transport, auth, injected.token_clock.clone());
     let session = Session::new(SessionParts {
-        rest,
-        registrations: items.registrations(),
+        tokens: Tokens::issued(rest, injected.token_clock),
+        registry: Registry::standalone(items.registrations()),
         output: Output::new(data_dir),
         connector: injected.connector,
         wall_clock: injected.wall_clock,
-        token_clock: injected.token_clock,
         timings: injected.timings,
         shutdown,
+        child: None,
     });
     let finish = session.run().await;
     drop(lock);
     Ok(finish)
 }
 
-pub fn run_collector(config: &CollectorConfig, data_dir: PathBuf, items: &Items) -> ExitCode {
+pub fn init_logging() {
     let _ = tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")))
         .with_writer(std::io::stderr)
         .try_init();
+}
+
+pub fn run_collector(config: &CollectorConfig, data_dir: PathBuf, items: &Items) -> ExitCode {
+    init_logging();
     let runtime = match tokio::runtime::Builder::new_multi_thread().enable_all().build() {
         Ok(runtime) => runtime,
         Err(error) => {
@@ -120,7 +125,7 @@ pub fn exit_status(finish: &Finish) -> u8 {
     }
 }
 
-async fn forward_termination_signals(stop: watch::Sender<bool>) {
+pub(super) async fn forward_termination_signals(stop: watch::Sender<bool>) {
     use tokio::signal::unix::{SignalKind, signal};
     let (Ok(mut terminate), Ok(mut interrupt)) = (signal(SignalKind::terminate()), signal(SignalKind::interrupt())) else {
         tracing::error!("종료 신호를 받을 수 없습니다");
