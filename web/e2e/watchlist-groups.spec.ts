@@ -384,3 +384,97 @@ test("그룹 없음에 놓으면 원래 그룹에서 빼고 다른 그룹에도 
   await expect(ungroupedRow(page, "005935")).toBeVisible();
   expect(servedGroups(scenario)).toEqual([["첫째", ["086520"]], ["둘째", ["086520"]]]);
 });
+
+const head = (page: Page) => panel(page).locator("div.border-b").first();
+const slot = (page: Page) => panel(page).getByRole("button", { name: "새 그룹", exact: true });
+const listMenu = (page: Page) => panel(page).getByRole("button", { name: /^관심종목 목록: / });
+
+test("머리에는 종목 넣기만 있고 새 그룹은 목록 메뉴와 목록 맨 아래 칸에서 만든다", async ({ scenario, page }) => {
+  await seed(scenario);
+  await open(page);
+  await expect(head(page).getByRole("button", { name: "관심종목에 넣기" })).toHaveCount(1);
+  await expect(head(page).getByRole("button", { name: "새 그룹" })).toHaveCount(0);
+  await expect(slot(page)).toHaveCount(1);
+
+  await listMenu(page).click();
+  await page.getByRole("menuitem", { name: "새 그룹", exact: true }).click();
+  await expect(panel(page).getByRole("textbox", { name: "그룹 이름" })).toHaveValue("그룹 1");
+  await nameGroup(page, "첫째");
+  await expect.poll(() => servedGroups(scenario)).toEqual([["첫째", []]]);
+
+  await slot(page).click();
+  await expect(panel(page).getByRole("textbox", { name: "그룹 이름" })).toHaveValue("그룹 1");
+  await nameGroup(page, "둘째");
+  await expect.poll(() => servedGroups(scenario)).toEqual([["첫째", []], ["둘째", []]]);
+});
+
+test("그룹 안 줄을 새 그룹 칸에 끌어 놓으면 새 그룹으로 옮기고 Ctrl이면 복사하며 그룹 없음의 줄도 옮긴다", async ({ scenario, page }) => {
+  await seed(scenario, [{ id: "A", name: "첫째", symbols: ["005935", "086520"] }]);
+  await open(page);
+  await membership(page, "첫째", "086520").dragTo(slot(page));
+  await expect.poll(() => servedGroups(scenario)).toEqual([["첫째", ["005935"]], ["그룹 1", ["086520"]]]);
+  await nameGroup(page, "옮김");
+  await expect.poll(() => servedGroups(scenario)).toEqual([["첫째", ["005935"]], ["옮김", ["086520"]]]);
+
+  await page.keyboard.down("Control");
+  await membership(page, "첫째", "005935").dragTo(slot(page));
+  await page.keyboard.up("Control");
+  await expect.poll(() => servedGroups(scenario)).toEqual([["첫째", ["005935"]], ["옮김", ["086520"]], ["그룹 1", ["005935"]]]);
+  await nameGroup(page, "복사");
+
+  await page.keyboard.down("Control");
+  await ungroupedRow(page, "000660").dragTo(slot(page));
+  await page.keyboard.up("Control");
+  await expect.poll(() => servedGroups(scenario)).toEqual([["첫째", ["005935"]], ["옮김", ["086520"]], ["복사", ["005935"]], ["그룹 1", ["000660"]]]);
+  await expect(ungroupedRow(page, "000660")).toHaveCount(0);
+});
+
+test("그룹이 100개면 새 그룹 칸은 비활성이고 이유를 보인다", async ({ scenario, page }) => {
+  const full = Array.from({ length: 100 }, (_, i): WatchGroup => ({ id: `G${i}`, name: `그룹 ${i + 1}`, symbols: i === 0 ? ["005935"] : [] }));
+  await seed(scenario, full);
+  await open(page);
+  await expect(slot(page)).toBeDisabled();
+  await expect(slot(page)).toHaveAttribute("title", "그룹은 100개까지입니다");
+  await expect(slot(page)).toContainText("그룹은 100개까지입니다");
+});
+
+test("종목이 없는 목록에는 새 그룹 칸이 없다", async ({ scenario, page }) => {
+  scenario.documents.saveWatchlists({ revision: 100, lists: [{ id: "L", name: "기본", symbols: [], groups: [] }] });
+  await page.goto("/?symbol=005930");
+  await expect(panel(page).getByText("기본에 종목이 없습니다")).toBeVisible();
+  await expect(slot(page)).toHaveCount(0);
+});
+
+test("관심종목 머리는 데스크톱과 휴대폰 폭에서 넘치지 않는다", async ({ scenario, page }) => {
+  await seed(scenario, [{ id: "A", name: "첫째", symbols: ["005935"] }]);
+  await open(page);
+  expect(await head(page).evaluate((el) => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(0);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/");
+  await page.getByRole("navigation", { name: "휴대폰 탭" }).getByRole("button", { name: "관심종목" }).click();
+  const sheet = page.getByRole("region", { name: "관심종목", exact: true });
+  await expect(sheet.getByRole("button", { name: "관심종목에 넣기" })).toBeVisible();
+  await expect(sheet.getByRole("button", { name: "새 그룹", exact: true })).toHaveText(/새 그룹/);
+  expect(await sheet.locator("div.border-b").first().evaluate((el) => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(0);
+});
+
+test("그룹이 가득 차면 새 그룹 칸 위에서 앞서 가리키던 놓을 곳의 강조가 사라진다", async ({ scenario, page }) => {
+  const full = Array.from({ length: 100 }, (_, i): WatchGroup => ({ id: `G${i}`, name: `그룹 ${i + 1}`, symbols: i === 99 ? ["005935", "086520"] : [] }));
+  await seed(scenario, full);
+  await open(page);
+  const bar = ungroupedHead(page).locator("xpath=..");
+  const fill = () => bar.evaluate((el) => getComputedStyle(el).backgroundColor);
+  const idle = await fill();
+  await slot(page).scrollIntoViewIfNeeded();
+  const source = (await membership(page, "그룹 100", "005935").boundingBox())!;
+  await page.mouse.move(source.x + 20, source.y + source.height / 2);
+  await page.mouse.down();
+  const over = (await ungroupedRow(page, "000660").boundingBox())!;
+  await page.mouse.move(over.x + 20, over.y + over.height / 2, { steps: 8 });
+  await expect.poll(fill).not.toBe(idle);
+  const target = (await slot(page).boundingBox())!;
+  await page.mouse.move(target.x + 20, target.y + target.height / 2, { steps: 8 });
+  await expect.poll(fill).toBe(idle);
+  await page.mouse.up();
+  await expect(ungroupedRow(page, "000660")).toBeVisible();
+});

@@ -612,7 +612,10 @@ for (const mode of MODES) {
       scenario.documents.saveUiState({ ...scenario.documents.uiState(), layoutMode: mode });
       await page.goto("/");
       await ready(page);
-      if (destination === "input") await frame(page, "watchlist").getByRole("button", { name: "새 그룹", exact: true }).click();
+      if (destination === "input") {
+        await frame(page, "watchlist").getByRole("button", { name: /^관심종목 목록: / }).click();
+        await page.getByRole("menuitem", { name: "새 그룹", exact: true }).click();
+      }
       const target = destination === "input" ? frame(page, "watchlist").getByRole("textbox", { name: "그룹 이름", exact: true }) : destination === "button" ? topbar(page).getByRole("button", { name: "창 더하기", exact: true }) : page.locator("body");
       await expect(target).toBeVisible();
       expect(await target.evaluate(async (target, destination) => {

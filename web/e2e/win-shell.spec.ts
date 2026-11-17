@@ -20,6 +20,7 @@ const tabs = (page: Page, n: number) => page.getByRole("tablist", { name: `창 �
 const tab = (page: Page, n: number, name: string) => tabs(page, n).getByRole("tab", { name: new RegExp(`^${name}`) });
 const divider = (page: Page) => page.getByRole("separator", { name: "좌우 창 경계" });
 const pageScroll = (page: Page) => page.evaluate(() => [document.documentElement.scrollWidth - innerWidth, document.documentElement.scrollHeight - innerHeight]);
+const currentSymbol = (topbar: Locator) => topbar.getByRole("button", { name: "종목·지표·명령 찾기", exact: true });
 const bar = (t: number, c: number): Bar => ({ t, o: c, h: c, l: c, c, v: 1000 });
 
 async function boxOf(locator: Locator): Promise<Box> {
@@ -183,7 +184,7 @@ test("둘째 차트를 누르면 위 막대·봉 주기·관심종목·드로잉
   const periods = topbar.getByRole("group", { name: "봉 주기" });
   const toolbar = page.getByRole("navigation", { name: "드로잉 도구" });
   await expect(second).toHaveAttribute("aria-busy", "false");
-  await expect(topbar.getByRole("button", { name: /^삼성전자/ })).toBeVisible();
+  await expect(currentSymbol(topbar)).toContainText("삼성전자");
   expect(inside(await boxOf(toolbar), await boxOf(group(page, 1)))).toBe(true);
 
   await tab(page, 3, "개체 목록").click();
@@ -191,7 +192,7 @@ test("둘째 차트를 누르면 위 막대·봉 주기·관심종목·드로잉
   await expect(objects).toContainText(/005930 드로잉\s*0/);
   const area = await boxOf(second);
   await page.mouse.click(area.x + area.width / 2, area.y + area.height / 2);
-  await expect(topbar.getByRole("button", { name: /^SK하이닉스/ })).toBeVisible();
+  await expect(currentSymbol(topbar)).toContainText("SK하이닉스");
   await expect(periods.getByRole("button", { name: "주", exact: true })).toHaveAttribute("aria-pressed", "true");
   await expect(tab(page, 2, "SK하이닉스")).toHaveAttribute("data-active-cell", "");
   await expect(tab(page, 1, "삼성전자")).not.toHaveAttribute("data-active-cell", "");
@@ -202,10 +203,10 @@ test("둘째 차트를 누르면 위 막대·봉 주기·관심종목·드로잉
   expect(Math.abs(bar.x + bar.width / 2 - (chartGroup.x + chartGroup.width / 2))).toBeLessThanOrEqual(2);
 
   await tab(page, 1, "삼성전자").click();
-  await expect(topbar.getByRole("button", { name: /^삼성전자/ })).toBeVisible();
+  await expect(currentSymbol(topbar)).toContainText("삼성전자");
   await expect(tab(page, 1, "삼성전자")).toHaveAttribute("data-active-cell", "");
   await tab(page, 2, "SK하이닉스").click();
-  await expect(topbar.getByRole("button", { name: /^SK하이닉스/ })).toBeVisible();
+  await expect(currentSymbol(topbar)).toContainText("SK하이닉스");
 
   await periods.getByRole("button", { name: "월", exact: true }).click();
   await expect(second).toHaveAttribute("aria-label", /SK하이닉스.* 월$/);
@@ -215,7 +216,7 @@ test("둘째 차트를 누르면 위 막대·봉 주기·관심종목·드로잉
   await page.getByRole("complementary", { name: "관심종목" }).locator('li[data-code="000810"] [data-main]').click();
   await expect(second).toHaveAttribute("aria-label", /^칸 2: 삼성화재/);
   await expect(first).toHaveAttribute("aria-label", /^칸 1: 삼성전자/);
-  await expect(topbar.getByRole("button", { name: /^삼성화재/ })).toBeVisible();
+  await expect(currentSymbol(topbar)).toContainText("삼성화재");
 });
 
 test("한 묶음에 쌓인 차트 탭 가운데 고른 탭이 새로고침 뒤에도 활성 칸이고 위 막대와 단축키가 그 차트에 적용된다", async ({ page, scenario }) => {
@@ -227,11 +228,11 @@ test("한 묶음에 쌓인 차트 탭 가운데 고른 탭이 새로고침 뒤�
   await page.goto("/");
   const topbar = page.getByRole("toolbar", { name: "차트 도구 막대" });
   await tab(page, 1, "SK하이닉스").click();
-  await expect(topbar.getByRole("button", { name: /^SK하이닉스/ })).toBeVisible();
+  await expect(currentSymbol(topbar)).toContainText("SK하이닉스");
   await expect.poll(async () => JSON.stringify(await savedDock(scenario))).toContain('"active":"cell-1"');
   await page.reload();
   await expect(cell(page, 2)).toHaveAttribute("aria-busy", "false");
-  await expect(topbar.getByRole("button", { name: /^SK하이닉스/ })).toBeVisible();
+  await expect(currentSymbol(topbar)).toContainText("SK하이닉스");
   await expect(tab(page, 1, "SK하이닉스")).toHaveAttribute("data-active-cell", "");
   await expect(page.getByRole("navigation", { name: "드로잉 도구" })).toHaveCount(1);
   await cell(page, 2).focus();

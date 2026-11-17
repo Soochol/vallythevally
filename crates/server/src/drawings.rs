@@ -8,13 +8,16 @@ use axum::response::Json;
 use axum::routing::{get, put};
 use serde::Deserialize;
 use sqlx::Row;
+use sqlx::SqliteConnection;
 use sqlx::sqlite::SqliteRow;
 
 use crate::api::{Revision, SymbolCode, UnixSeconds, WindowId};
 use crate::db::AppDb;
 use crate::drawing_api::{Drawing, DrawingInput, DrawingScope};
 use crate::http::{ApiFailure, AppState};
-use crate::user_routes::{JSON_LIMIT, parse_symbol, read_json};
+use crate::user_routes::{parse_symbol, read_json};
+use setup::{DocumentKind, JSON_LIMIT};
+use crate::sync_log;
 use crate::userdata::{StoreError, check_newer, corrupt, from_wire_name, wire_name};
 
 const GROUP_CHARS: std::ops::RangeInclusive<usize> = 1..=100;
@@ -85,10 +88,22 @@ pub async fn list_drawings_of(db: &AppDb, symbol: &str) -> Result<Vec<Drawing>, 
     rows.iter().map(read_drawing).collect()
 }
 
+pub(crate) async fn list_all_drawings_in(conn: &mut SqliteConnection) -> Result<Vec<Drawing>, StoreError> {
+    let rows = sqlx::query("SELECT * FROM drawings ORDER BY id").fetch_all(conn).await?;
+    rows.iter().map(read_drawing).collect()
+}
+
 pub async fn upsert_drawing(db: &AppDb, input: DrawingInput, now: UnixSeconds) -> Result<Drawing, DrawingError> {
     let mut tx = db.begin_write().await?;
     let stored: Option<i64> = sqlx::query_scalar("SELECT revision FROM drawings WHERE id = ?").bind(&input.id).fetch_optional(&mut *tx).await?;
-    check_newer(stored, input.revision)?;
+    let tombstone = sync_log::tombstone_revision(&mut tx, DocumentKind::Drawing, &input.id).await?;
+    check_newer(stored.max(tombstone), input.revision)?;
+    store_drawing(&mut tx, &input, now).await?;
+    tx.commit().await?;
+    Ok(input.saved_at(now))
+}
+
+pub(crate) async fn store_drawing(tx: &mut SqliteConnection, input: &DrawingInput, updated_at: UnixSeconds) -> Result<(), DrawingError> {
     let (scope, layout_id, window_id) = match &input.scope {
         DrawingScope::Symbol => ("symbol", None, None),
         DrawingScope::Layout { layout_id } => ("layout", Some(layout_id), None),
@@ -134,22 +149,28 @@ pub async fn upsert_drawing(db: &AppDb, input: DrawingInput, now: UnixSeconds) -
     .bind(scope)
     .bind(layout_id)
     .bind(window_id)
-    .bind(now.0)
+    .bind(updated_at.0)
     .bind(input.revision.0)
     .execute(&mut *tx)
     .await?;
-    tx.commit().await?;
-    Ok(input.saved_at(now))
+    sync_log::saved(tx, DocumentKind::Drawing, &input.id, input.revision.0).await?;
+    Ok(())
 }
 
-pub async fn delete_drawing_by_id(db: &AppDb, id: &str) -> Result<(), StoreError> {
+pub async fn delete_drawing_by_id(db: &AppDb, id: &str, now: UnixSeconds) -> Result<(), StoreError> {
     let mut tx = db.begin_write().await?;
-    sqlx::query("DELETE FROM drawings WHERE id = ?").bind(id).execute(&mut *tx).await?;
+    let removed = sqlx::query("DELETE FROM drawings WHERE id = ?").bind(id).execute(&mut *tx).await?.rows_affected();
+    if removed > 0 {
+        sync_log::deleted(&mut tx, DocumentKind::Drawing, id, now.millis()).await?;
+    }
     tx.commit().await?;
     Ok(())
 }
 
-fn check_drawing(path_id: &str, d: &DrawingInput) -> Result<(), ApiFailure> {
+pub(crate) fn check_drawing(path_id: &str, d: &DrawingInput) -> Result<(), ApiFailure> {
+    if !DocumentKind::Drawing.accepts_id(path_id) {
+        return Err(ApiFailure::bad_request(format!("드로잉 id는 영문자·숫자·`-`·`_`로 1~64바이트여야 합니다: {path_id}")));
+    }
     if d.id != path_id {
         return Err(ApiFailure::bad_request(format!("주소의 id({path_id})와 본문의 id({})가 다릅니다", d.id)));
     }
@@ -200,7 +221,8 @@ async fn put_drawing(State(st): State<Arc<AppState>>, Path(id): Path<String>, bo
 }
 
 async fn delete_drawing(State(st): State<Arc<AppState>>, Path(id): Path<String>) -> Result<StatusCode, ApiFailure> {
-    delete_drawing_by_id(&st.db, &id).await?;
+    let now = UnixSeconds(st.clock.now().unix());
+    delete_drawing_by_id(&st.db, &id, now).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -291,10 +313,31 @@ mod tests {
         }
         assert_eq!(list_drawings_of(&db, "005930").await.unwrap(), [saved]);
 
-        delete_drawing_by_id(&db, "A").await.unwrap();
-        delete_drawing_by_id(&db, "A").await.unwrap();
-        delete_drawing_by_id(&db, "never").await.unwrap();
+        delete_drawing_by_id(&db, "A", UnixSeconds(1)).await.unwrap();
+        delete_drawing_by_id(&db, "A", UnixSeconds(1)).await.unwrap();
+        delete_drawing_by_id(&db, "never", UnixSeconds(1)).await.unwrap();
         assert!(list_drawings_of(&db, "005930").await.unwrap().is_empty());
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn a_drawing_save_and_delete_share_a_transaction_with_their_sync_record(_: SqlitePoolOptions, opts: SqliteConnectOptions) {
+        let db = AppDb::connect(opts).await.unwrap();
+        let record = |db: AppDb| async move { sqlx::query_as::<_, (i64, i64)>("SELECT revision, deleted FROM sync_documents WHERE kind = 'drawing' AND id = 'A'").fetch_optional(db.read()).await.unwrap() };
+        upsert_drawing(&db, input("A", "005930", 1.0, DrawingScope::Symbol, 10), UnixSeconds(1)).await.unwrap();
+        assert_eq!(record(db.clone()).await, Some((10, 0)));
+        delete_drawing_by_id(&db, "never", UnixSeconds(2)).await.unwrap();
+        assert!(sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM sync_documents WHERE id = 'never'").fetch_one(db.read()).await.unwrap() == 0, "없던 드로잉은 삭제 표시를 남기지 않는다");
+        delete_drawing_by_id(&db, "A", UnixSeconds(1_800_000_000)).await.unwrap();
+        assert_eq!(record(db.clone()).await, Some((1_800_000_000_000, 1)));
+        let err = upsert_drawing(&db, input("A", "005930", 1.0, DrawingScope::Symbol, 10), UnixSeconds(3)).await.unwrap_err();
+        assert!(matches!(err, DrawingError::Store(StoreError::Stale(_))), "{err:?}");
+
+        upsert_drawing(&db, input("A", "005930", 1.0, DrawingScope::Symbol, 1_800_000_000_001), UnixSeconds(4)).await.unwrap();
+        crate::sync_log::break_for_test(&db).await;
+        assert!(upsert_drawing(&db, input("A", "005930", 9.0, DrawingScope::Symbol, 1_800_000_000_002), UnixSeconds(5)).await.is_err());
+        assert!(delete_drawing_by_id(&db, "A", UnixSeconds(6)).await.is_err());
+        let kept = list_drawings_of(&db, "005930").await.unwrap();
+        assert_eq!((kept.len(), kept[0].z, kept[0].revision), (1, 1.0, Revision(1_800_000_000_001)), "기록을 쓰지 못하면 저장도 삭제도 되돌려진다");
     }
 
     #[sqlx::test(migrations = "./migrations")]
@@ -318,10 +361,10 @@ mod tests {
         let db = AppDb::connect(opts).await.unwrap();
         userdata::put_layout(&db, &layout("L2", vec![chart_window("c")], 1), UnixSeconds(1)).await.unwrap();
         upsert_drawing(&db, input("A", "005930", 0.0, DrawingScope::Layout { layout_id: "L2".into() }, 1), UnixSeconds(1)).await.unwrap();
-        let err = userdata::delete_layout(&db, "L2").await.unwrap_err();
+        let err = userdata::delete_layout(&db, "L2", UnixSeconds(1)).await.unwrap_err();
         assert!(matches!(&err, StoreError::Db(e) if e.0.contains("FOREIGN KEY")), "{err:?}");
-        delete_drawing_by_id(&db, "A").await.unwrap();
-        userdata::delete_layout(&db, "L2").await.unwrap();
+        delete_drawing_by_id(&db, "A", UnixSeconds(1)).await.unwrap();
+        userdata::delete_layout(&db, "L2", UnixSeconds(1)).await.unwrap();
     }
 
     #[sqlx::test(migrations = "./migrations")]

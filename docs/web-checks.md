@@ -36,6 +36,25 @@ frozen 의존성 설치, WASM 준비와 타입 검사, 현재 UI의 Vite 빌드�
 
 시험은 `harness.ts`의 `test`와 `scenario`를 사용한다. `scenario.documents`는 시험 안의 탭·추가 문맥에서 공유하고 다음 시험에서 새로 만든다. `scenario.reply/on/hold`와 실시간 프레임으로 화면 입력을 명시한다. 자료 수집·계산·재시도·재시작 영속성은 실제 Rust 서비스 시험이 담당한다. [책임 이동 기록](testing-migration.md)을 확인한다.
 
+전체 e2e는 chute의 머지 뒤 검사(`chute.toml`의 `[[post_verify]] e2e`)가 기본 브랜치의 tip에서 돌린다. 간격을 두지 않으므로(`post_verify_interval = 0`) 기본 브랜치가 움직이면 앞 검사가 끝나는 대로 그때의 tip을 검사한다. tip이 마지막 통과·실패 커밋과 다를 때만 돌고 사이 커밋을 하나씩 검사하지 않는다. 진짜 실패하면 범인 머지를 찾아 그 PR을 submit한 쪽에 알린다. 그 사이에 직접 돌릴 때는 저장소 루트에서 다음 명령을 쓴다.
+
+```sh
+env VALLY_COMPILE_LANE=gate python3 scripts/web.py e2e --workers=6
+```
+
+`web/`를 고치는 작업은 머지 뒤 검사는 머지된 뒤에야 돌기 때문에 관련 spec을 직접 돌려 통과를 확인한다. spec은 화면을 겉에서 시험하고 `../src/`에서는 생성된 API 타입, 차트 설정, 그리기 도우미를 주로 가져온다. 화면 컴포넌트를 거의 가져오지 않으므로 import를 따라가는 선택(Playwright `--only-changed`)은 컴포넌트 변경과 관련된 spec을 잡지 못한다. 다음에서 고른다.
+
+- 고친 spec 자체
+- 고친 기능 영역 이름의 spec(`drawing-*`, `financial-*`, `screener-*`, `chart-*`, `win-*`, `watchlist*` 등)
+- 바뀐 화면의 문구·역할·`data-testid`를 쓰는 spec. `rg -l "종목 검색" web/e2e`로 찾는다.
+- 공용 부품을 고치면 그 부품을 거치는 주요 흐름 spec 몇 개
+
+고른 spec은 한 번에 넘긴다. 준비 단계가 실행마다 한 번 돈다. 작업마다 전체 e2e를 돌리지 않는다.
+
+```sh
+python3 scripts/web.py e2e e2e/search.spec.ts e2e/search-filters.spec.ts
+```
+
 브라우저가 없는 환경에서는 웹 의존성 설치 후 Chromium을 준비한다. Linux 시스템 의존성과 sandbox 설정은 기존 프로젝트 절차를 따른다.
 
 ```sh
@@ -45,9 +64,7 @@ pnpm exec playwright install --only-shell chromium
 
 ## 시험 작성 시 주의사항
 
-- `clockStart`는 브라우저 시계를 고정한다. 서버 기준 재시도 시험은 합성 응답의 `Date` 헤더와 함께 명시하고 필요하면 `clockStart: null`로 실행한다.
-- Playwright `clock.setSystemTime`은 벽시계만 바꾸고 `performance.now`는 그대로다.
-- 임시 웹 시험 파일은 `web/` 안에 둔다. 밖에서는 ESM 설정이 적용되지 않아 `import.meta`가 실패할 수 있다.
+시험 작성 기준(`clockStart`, `clock.setSystemTime`, 임시 웹 시험 파일 위치 포함)은 [e2e 시험 작성 기준](e2e-tests.md)을 따른다.
 
 웹 검증 도구를 변경하면 다음 시험을 실행한다. 실원천 도구의 loopback 시험은 [실제 DART 확인](#명시적으로-실제-dart-확인)을 따른다.
 

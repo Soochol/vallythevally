@@ -31,9 +31,23 @@ async fn serve(socket: WebSocket, st: Arc<AppState>, hub: HubHandle) {
     let (sink, mut incoming) = socket.split();
     let mut writer = tokio::spawn(write(sink, outbox.clone()));
     let mut link_changes = st.link.subscribe();
+    let mut account_changes = st.system.account().subscribe();
+    let mut setup_changes = st.system.account().subscribe_setup_changes();
     hub.send_to(conn, ServerMessage::KiwoomLink { status: kiwoom_status(&st) });
+    send_account(&st, &hub, conn).await;
     loop {
         tokio::select! {
+            changed = account_changes.changed() => {
+                if changed.is_err() {
+                    break;
+                }
+                send_account(&st, &hub, conn).await;
+            }
+            changed = setup_changes.recv() => match changed {
+                Ok(kinds) => hub.send_to(conn, ServerMessage::SetupChanged { kinds }),
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => hub.send_to(conn, ServerMessage::SetupChanged { kinds: setup::DocumentKind::ALL.to_vec() }),
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+            },
             changed = link_changes.changed() => {
                 if changed.is_err() {
                     break;
@@ -50,6 +64,13 @@ async fn serve(socket: WebSocket, st: Arc<AppState>, hub: HubHandle) {
     }
     hub.disconnect(conn);
     outbox.close();
+}
+
+async fn send_account(st: &AppState, hub: &HubHandle, conn: ConnId) {
+    match st.system.account().status(&st.db).await {
+        Ok(status) => hub.send_to(conn, ServerMessage::Account { status }),
+        Err(e) => tracing::warn!(error = %e, "계정 상태를 읽지 못해 브라우저에 알리지 못했습니다"),
+    }
 }
 
 async fn write(mut sink: SplitSink<WebSocket, Message>, outbox: Arc<Outbox>) {

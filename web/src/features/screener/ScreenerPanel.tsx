@@ -261,9 +261,6 @@ function ScreenHeader({ screenEditing, chosen, entries, block, status, rows, onR
           <PenIcon size={14} />
           편집
         </button>
-        <button type="button" className="icon-btn" title="새 조건식" aria-label="새 조건식" onClick={() => createInDialog(screenEditing)}>
-          <PlusIcon />
-        </button>
         <PanelMenu screen={screen} rows={rows} status={status} />
       </div>
       <ScreenSummary screen={screen} />

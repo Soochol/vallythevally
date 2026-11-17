@@ -10,16 +10,14 @@ use axum::response::Json;
 use axum::routing::get;
 use domain::{Feed, Symbol, Venue};
 use serde::de::DeserializeOwned;
+use setup::{DocumentKind, JSON_LIMIT, LAYOUT_LIMIT, MAX_CHART_WINDOWS, MAX_WATCHLIST_ID_BYTES, MAX_WATCHLIST_NAME_CHARS, MAX_WATCHLISTS, MAX_WATCH_GROUPS, SCREENS_LIMIT, WATCHLISTS_LIMIT};
 
 use crate::api::{self, ApiErrorCode, Layout, LayoutInput, LayoutSummary, Revision, Screen, Screens, UiState, UnixSeconds, Watchlist, Watchlists, WindowContent};
 use crate::http::{ApiFailure, AppState, symbol_list};
 use crate::screener::{RunnableScreen, parse_screen};
 use crate::userdata::{self, StoreError, wire_name};
 
-pub const JSON_LIMIT: usize = 64 * 1024;
 pub const MAX_WINDOWS: usize = 12;
-pub const MAX_CHART_WINDOWS: usize = 8;
-pub const LAYOUT_LIMIT: usize = (MAX_CHART_WINDOWS + 1) * JSON_LIMIT + 16 * 1024;
 
 pub fn routes() -> Router<Arc<AppState>> {
     Router::new()
@@ -61,15 +59,6 @@ pub(crate) fn parse_symbol(code: &str) -> Result<Symbol, ApiFailure> {
     Symbol::parse(code).map_err(|e| ApiFailure::bad_request(format!("{e}: {code}")))
 }
 
-pub const MAX_WATCHLISTS: usize = 20;
-pub const MAX_WATCHLIST_NAME_CHARS: usize = 20;
-pub const MAX_WATCH_GROUPS: usize = 100;
-const MAX_WATCHLIST_ID_BYTES: usize = 64;
-const LONGEST_WATCH_GROUP_WRAPPER_BYTES: usize = r#"{"id":"","name":"","symbols":[]},"#.len() + MAX_WATCHLIST_ID_BYTES + 4 * MAX_WATCHLIST_NAME_CHARS;
-const LONGEST_WATCHLIST_WRAPPER_BYTES: usize =
-    LONGEST_WATCH_GROUP_WRAPPER_BYTES + r#""groups":[],"#.len() + MAX_WATCH_GROUPS * LONGEST_WATCH_GROUP_WRAPPER_BYTES;
-pub const WATCHLISTS_LIMIT: usize = (MAX_WATCH_GROUPS + 1) * JSON_LIMIT + MAX_WATCHLISTS * LONGEST_WATCHLIST_WRAPPER_BYTES;
-
 type WatchlistsResponse = ([(&'static str, &'static str); 1], Json<Watchlists>);
 
 async fn get_watchlists(State(st): State<Arc<AppState>>) -> Result<WatchlistsResponse, ApiFailure> {
@@ -84,7 +73,7 @@ async fn put_watchlists(State(st): State<Arc<AppState>>, body: Body) -> Result<W
 }
 
 /// 종목 목록에 없는 코드도 받는다. 상장폐지된 종목이 목록에서 사라져도 관심종목은 남아야 한다.
-fn check_watchlists(all: &Watchlists) -> Result<(), ApiFailure> {
+pub(crate) fn check_watchlists(all: &Watchlists) -> Result<(), ApiFailure> {
     if all.lists.is_empty() || all.lists.len() > MAX_WATCHLISTS {
         return Err(ApiFailure::bad_request(format!("관심종목 목록은 1~{MAX_WATCHLISTS}개여야 합니다: {}개", all.lists.len())));
     }
@@ -143,7 +132,6 @@ fn check_watch_groups<'a>(list: &'a Watchlist, ids: &mut HashSet<&'a str>) -> Re
 }
 
 const MAX_SCREENS: usize = 50;
-pub const SCREENS_LIMIT: usize = 2 * JSON_LIMIT;
 const MAX_SCREEN_NAME_CHARS: usize = 40;
 const MAX_SCREEN_CONDITIONS: usize = 10;
 const MAX_SCREEN_ID_BYTES: usize = 64;
@@ -159,7 +147,7 @@ async fn put_screens(State(st): State<Arc<AppState>>, body: Body) -> Result<Json
     Ok(Json(all))
 }
 
-fn check_screens(all: &Screens) -> Result<(), ApiFailure> {
+pub(crate) fn check_screens(all: &Screens) -> Result<(), ApiFailure> {
     if all.screens.len() > MAX_SCREENS {
         return Err(ApiFailure::bad_request(format!("조건식은 {MAX_SCREENS}개까지 저장할 수 있습니다: {}개", all.screens.len())));
     }
@@ -206,20 +194,8 @@ async fn get_layout(State(st): State<Arc<AppState>>, Path(id): Path<String>) -> 
 
 async fn put_layout(State(st): State<Arc<AppState>>, Path(id): Path<String>, body: Body) -> Result<Json<Layout>, ApiFailure> {
     let input: LayoutInput = read_json(body, LAYOUT_LIMIT, "레이아웃 본문").await?;
-    let oversized_chart = input.windows.iter().any(|w| matches!(&w.content, WindowContent::Chart { chart_settings, .. } if chart_settings.to_string().len() > JSON_LIMIT));
-    if oversized_chart {
-        return Err(too_large("차트 창의 chartSettings", JSON_LIMIT));
-    }
-    if serde_json::to_string(&input.placement).expect("JSON 객체는 언제나 직렬화된다").len() > JSON_LIMIT {
-        return Err(too_large("placement", JSON_LIMIT));
-    }
-    let nxt = check_layout(&id, &input)?;
-    if !nxt.is_empty() {
-        let dir = symbol_list(&st).await?;
-        if let Some(info) = nxt.iter().find_map(|s| listed_without_nxt(&dir, s)) {
-            return Err(ApiFailure::bad_request(format!("NXT에서 거래되지 않는 종목입니다: {}({})", info.name, info.symbol.as_wire())));
-        }
-    }
+    let nxt = check_layout_input(&id, &input)?;
+    check_nxt_traded(&st, &nxt).await?;
     let now = UnixSeconds(st.clock.now().unix());
     Ok(Json(userdata::put_layout(&st.db, &input, now).await?))
 }
@@ -228,7 +204,32 @@ fn listed_without_nxt<'a>(dir: &'a crate::symbols::Directory, symbol: &Symbol) -
     dir.get(*symbol).filter(|info| !info.nxt_enabled)
 }
 
+pub(crate) async fn check_nxt_traded(st: &AppState, nxt: &[Symbol]) -> Result<(), ApiFailure> {
+    if nxt.is_empty() {
+        return Ok(());
+    }
+    let dir = symbol_list(st).await?;
+    match nxt.iter().find_map(|s| listed_without_nxt(&dir, s)) {
+        Some(info) => Err(ApiFailure::bad_request(format!("NXT에서 거래되지 않는 종목입니다: {}({})", info.name, info.symbol.as_wire()))),
+        None => Ok(()),
+    }
+}
+
+pub(crate) fn check_layout_input(path_id: &str, input: &LayoutInput) -> Result<Vec<Symbol>, ApiFailure> {
+    let oversized_chart = input.windows.iter().any(|w| matches!(&w.content, WindowContent::Chart { chart_settings, .. } if chart_settings.to_string().len() > JSON_LIMIT));
+    if oversized_chart {
+        return Err(too_large("차트 창의 chartSettings", JSON_LIMIT));
+    }
+    if serde_json::to_string(&input.placement).expect("JSON 객체는 언제나 직렬화된다").len() > JSON_LIMIT {
+        return Err(too_large("placement", JSON_LIMIT));
+    }
+    check_layout(path_id, input)
+}
+
 fn check_layout(path_id: &str, input: &LayoutInput) -> Result<Vec<Symbol>, ApiFailure> {
+    if !DocumentKind::Layout.accepts_id(path_id) {
+        return Err(ApiFailure::bad_request(format!("레이아웃 id는 영문자·숫자·`-`·`_`로 1~64바이트여야 합니다: {path_id}")));
+    }
     if input.id != path_id {
         return Err(ApiFailure::bad_request(format!("주소의 id({path_id})와 본문의 id({})가 다릅니다", input.id)));
     }
@@ -260,7 +261,8 @@ fn check_layout(path_id: &str, input: &LayoutInput) -> Result<Vec<Symbol>, ApiFa
 }
 
 async fn delete_layout(State(st): State<Arc<AppState>>, Path(id): Path<String>) -> Result<StatusCode, ApiFailure> {
-    userdata::delete_layout(&st.db, &id).await?;
+    let now = UnixSeconds(st.clock.now().unix());
+    userdata::delete_layout(&st.db, &id, now).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 

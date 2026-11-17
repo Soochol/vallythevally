@@ -5,6 +5,7 @@ import { ConnectionIndicator, useConnectionView } from "./ConnectionIndicator";
 import { FinancialStatus } from "./FinancialStatus";
 import { MarketClock } from "./MarketClock";
 import { SaveStatus } from "./SaveStatus";
+import { SyncIndicator } from "./SyncIndicator";
 
 export function StatusBar() {
   const stopped = useKiwoomStore((s) => s.stopped);
@@ -29,6 +30,7 @@ export function StatusBar() {
       )}
       <MarketClock />
       <SaveStatus />
+      <SyncIndicator />
       <FinancialStatus />
       <span className="flex-1" />
       <Attribution icon className="flex flex-none items-center text-text-2 hover:text-text" />

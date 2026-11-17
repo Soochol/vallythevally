@@ -102,13 +102,19 @@ impl Server {
                 }
             };
             let path = |p: &Path| p.display().to_string();
+            let account_path = value("VALLY_ACCOUNT_STATE_PATH").map(PathBuf::from).unwrap_or_else(|| lock.with_file_name("account.json"));
+            let account_url = value("VALLY_ACCOUNT_SERVER_URL").map(|url| server::account::AccountServerUrl::parse(url).unwrap());
             let settings = server::api::SystemSettings {
                 bind: "127.0.0.1:0".into(), log_filter: "server=trace".into(), static_dir: path(&static_dir), db_path: path(&parent.join("vally.db")), screener_db_path: path(&parent.join("screener.duckdb")),
                 financial_db_path: path(&parent.join("financials.db")), screener_update_on_start: value("VALLY_SCREENER_UPDATE_ON_START") == Some("on"), financial_automatic: value("VALLY_FINANCIAL_AUTOMATIC") == Some("on"),
                 opendart_key_present: value("OPENDART_API_KEY").is_some_and(|key| !key.is_empty()), token_path: path(&token_path), key_path: path(key_file.path()), lock_path: path(&lock),
                 kiwoom_target: server::system_routes::kiwoom_target(value("VALLY_KIWOOM_BASE_URL").unwrap_or("http://127.0.0.1:1")), server_version: env!("CARGO_PKG_VERSION").into(),
+                account_server_url: account_url.as_ref().map(|url| url.as_str().to_owned()), account_state_path: Some(path(&account_path)),
             };
             let mut system = server::system_routes::SystemState::new(key_file, has_env_key, startup_key.file_problem, settings);
+            if let Some(url) = account_url {
+                system = system.with_account(server::account::AccountState::linked(url, server::account::AccountStateFile::new(account_path, &instance)).unwrap());
+            }
             if let Some(url) = value("VALLY_PUBLIC_IP_URL") {
                 system = system.with_public_ip(Arc::new(server::public_ip::ReqwestPublicIp::new(url.into()).unwrap()));
             }
@@ -121,6 +127,7 @@ impl Server {
                 state.link.subscribe().wait_for(|state| matches!(state, LinkState::NoKey | LinkState::Connected | LinkState::Failed(_) | LinkState::Connecting(ConnectStep::Symbols | ConnectStep::Realtime))).await.unwrap();
             }
             background.spawn(server::app::daily_maintenance(state.clone()));
+            background.spawn(server::account::sync::run(state.clone()));
             let financial_path = value("VALLY_FINANCIAL_DB_PATH").map(PathBuf::from).unwrap_or_else(|| parent.join("financials.db"));
             let financial_store = server::financials::store::Store::open(&financial_path).await;
             let client = value("OPENDART_API_KEY").filter(|key| !key.is_empty()).map(|key| server::financials::client::Client::with_spacing(server::config::Secret::new(key.into()), value("VALLY_DART_BASE_URL").expect("DART tests require loopback URL").into(), value("VALLY_KIND_BASE_URL").expect("KIND tests require loopback URL").into(), std::time::Duration::from_millis(value("DART_SPACING_MILLIS").map_or(1, |millis| millis.parse().unwrap()))).unwrap());

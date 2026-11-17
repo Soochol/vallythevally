@@ -1,0 +1,38 @@
+[package]
+name = "account-server"
+edition.workspace = true
+version.workspace = true
+publish.workspace = true
+
+[features]
+fake-idp = []
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "vally-account"
+path = "src/main.rs"
+
+[dependencies]
+axum = "0.8"
+base64 = "0.22"
+getrandom = "0.3"
+reqwest = { version = "0.13", default-features = false, features = ["rustls", "query", "form", "json"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["raw_value"] }
+setup = { path = "../setup" }
+sha2 = "0.10"
+sqlx = { version = "0.9.0", default-features = false, features = ["runtime-tokio", "sqlite", "migrate", "macros"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "time", "sync", "signal"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+url = "2"
+
+[dev-dependencies]
+account-server = { path = ".", features = ["fake-idp"] }
+tempfile = "3"
+tower = { version = "0.5", features = ["util"] }
+
+[lints]
+workspace = true

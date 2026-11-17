@@ -9,6 +9,12 @@ use ts_rs::TS;
 #[ts(export)]
 pub struct UnixSeconds(#[ts(type = "number")] pub i64);
 
+impl UnixSeconds {
+    pub const fn millis(self) -> i64 {
+        self.0 * 1000
+    }
+}
+
 /// 주식·ETF "005930", 지수 "IDX:001"(코스피) "IDX:101"(코스닥).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[ts(export)]
@@ -229,6 +235,8 @@ pub enum ServerMessage {
     /// 이 연결의 관심종목 가운데 실시간 한도로 받지 못하는 종목, 목록 순서. 바뀔 때만 온다. 브라우저는 통째로 바꾼다.
     WatchLimited { symbols: Vec<SymbolCode> },
     KiwoomLink { status: KiwoomLinkStatus },
+    Account { status: AccountStatus },
+    SetupChanged { kinds: Vec<setup::DocumentKind> },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -397,6 +405,88 @@ pub struct KiwoomTarget {
     pub host: Option<String>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum AccountProvider {
+    Google,
+    Naver,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(tag = "state", rename_all = "snake_case", rename_all_fields = "camelCase")]
+#[ts(export)]
+pub enum AccountStatus {
+    LocalOnly,
+    SignedOut,
+    SignedIn { provider: AccountProvider, account_id: String, signed_in_at: UnixSeconds, sync: SyncStatus },
+    OwnerMismatch { provider: AccountProvider, account_id: String, signed_in_at: UnixSeconds, local_owner: String, sync: SyncStatus },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(tag = "state", rename_all = "snake_case", rename_all_fields = "camelCase")]
+#[ts(export)]
+pub enum SyncState {
+    Running,
+    NeedsChoice {
+        #[ts(type = "number")]
+        local_documents: i64,
+        #[ts(type = "number")]
+        account_documents: i64,
+    },
+    OwnerMismatch,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct SyncStatus {
+    #[serde(flatten)]
+    pub state: SyncState,
+    pub last_success_at: Option<UnixSeconds>,
+    #[ts(type = "number")]
+    pub pending_documents: i64,
+    #[ts(type = "number")]
+    pub refused_documents: i64,
+    pub last_error: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum InitialSyncChoice {
+    UploadLocal,
+    TakeAccount,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(deny_unknown_fields)]
+#[ts(export)]
+pub struct InitialSyncRequest {
+    pub choice: InitialSyncChoice,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(deny_unknown_fields)]
+#[ts(export)]
+pub struct AccountLoginRequest {
+    pub provider: AccountProvider,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct AccountLoginStart {
+    pub url: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(deny_unknown_fields)]
+#[ts(export)]
+pub struct AccountConfirm {
+    pub confirm: bool,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export)]
@@ -415,6 +505,8 @@ pub struct SystemSettings {
     pub lock_path: String,
     pub kiwoom_target: KiwoomTarget,
     pub server_version: String,
+    pub account_server_url: Option<String>,
+    pub account_state_path: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -1183,6 +1275,7 @@ pub enum ApiErrorCode {
     ScreenerNotReady,
     /// 있는 API 경로에 틀린 메서드를 보냈다.
     MethodNotAllowed,
+    AccountServerUnavailable,
     Internal,
 }
 

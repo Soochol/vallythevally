@@ -3,6 +3,28 @@
 version = 4
 
 [[package]]
+name = "account-server"
+version = "0.1.0"
+dependencies = [
+ "account-server",
+ "axum",
+ "base64 0.22.1",
+ "getrandom 0.3.4",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "setup",
+ "sha2 0.10.9",
+ "sqlx",
+ "tempfile",
+ "tokio",
+ "tower",
+ "tracing",
+ "tracing-subscriber",
+ "url",
+]
+
+[[package]]
 name = "adler2"
 version = "2.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2365,6 +2387,7 @@ dependencies = [
  "rustls-pki-types",
  "rustls-platform-verifier",
  "serde",
+ "serde_json",
  "serde_urlencoded",
  "sync_wrapper",
  "tokio",
@@ -2679,10 +2702,13 @@ dependencies = [
 name = "server"
 version = "0.1.0"
 dependencies = [
+ "account-server",
  "axum",
+ "base64 0.22.1",
  "domain",
  "duckdb",
  "futures",
+ "getrandom 0.3.4",
  "http-body-util",
  "indicators",
  "openssl",
@@ -2691,6 +2717,7 @@ dependencies = [
  "scraper",
  "serde",
  "serde_json",
+ "setup",
  "sha2 0.10.9",
  "sqlx",
  "tempfile",
@@ -2712,6 +2739,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b4eceb519ec34d8290aaf6e46f435102f2bfa63f22b05a144fb16ab266d3b198"
 dependencies = [
  "stable_deref_trait",
+]
+
+[[package]]
+name = "setup"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "ts-rs",
 ]
 
 [[package]]

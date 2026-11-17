@@ -8,8 +8,10 @@ import type { ClientMessage } from "../../src/api/generated/ClientMessage";
 import type { ConnectionStatus } from "../../src/api/generated/ConnectionStatus";
 import type { FinancialsPage } from "../../src/api/generated/FinancialsPage";
 import type { FinancialUpdatePage } from "../../src/api/generated/FinancialUpdatePage";
+import type { AccountStatus } from "../../src/api/generated/AccountStatus";
 import type { KiwoomLinkStatus } from "../../src/api/generated/KiwoomLinkStatus";
 import type { ScreenerStatus } from "../../src/api/generated/ScreenerStatus";
+import type { SyncStatus } from "../../src/api/generated/SyncStatus";
 import type { SystemSettings } from "../../src/api/generated/SystemSettings";
 import type { Drawing } from "../../src/api/generated/Drawing";
 import type { DrawingInput } from "../../src/api/generated/DrawingInput";
@@ -129,10 +131,13 @@ export const CONNECTED_KIWOOM: KiwoomLinkStatus = {
   retryAt: null, needsAcknowledgement: false, step: null, tokenExpiresAt: null, realtimeRegistered: 0, symbolCount: 2800,
 };
 
+export const SYNCED: SyncStatus = { state: "running", lastSuccessAt: 1_762_650_000, pendingDocuments: 0, refusedDocuments: 0, lastError: null };
+
 export const DEFAULT_SYSTEM_SETTINGS: SystemSettings = {
   bind: "127.0.0.1:8080", logFilter: "info", staticDir: "web/dist", dbPath: "data/vally.db", screenerDbPath: "data/screener.db", financialDbPath: "data/financial.db",
   screenerUpdateOnStart: true, financialAutomatic: false, opendartKeyPresent: true, tokenPath: "state/kiwoom-token.json", keyPath: "state/kiwoom-key.json", lockPath: "state/vally.lock",
   kiwoomTarget: { kind: "kiwoom", host: "api.kiwoom.com" }, serverVersion: "0.1.0-test",
+  accountServerUrl: null, accountStatePath: "state/account.json",
 };
 
 export class LiveFrames {
@@ -144,12 +149,14 @@ export class LiveFrames {
   private seq = 0;
   private state: ConnectionStatus;
   kiwoomLink: KiwoomLinkStatus = CONNECTED_KIWOOM;
+  account: AccountStatus = { state: "local_only" };
   constructor(private readonly now: number, private readonly market: MarketFixtures) { this.state = { realtime: "live", since: Math.floor(now / 1000), backfilling: false }; }
   connect(socket: WebSocketRoute) {
     const subscriptions = new Map<string, Subscription>();
     this.peers.set(socket, subscriptions);
     socket.send(JSON.stringify({ type: "hello", protocol: 1, serverTime: Math.floor(this.now / 1000), status: this.state } satisfies ServerMessage));
     socket.send(JSON.stringify({ type: "kiwoom_link", status: this.kiwoomLink } satisfies ServerMessage));
+    socket.send(JSON.stringify({ type: "account", status: this.account } satisfies ServerMessage));
     socket.onMessage(message => {
       const input: ClientMessage = JSON.parse(String(message));
       this.messages.push(input);
@@ -181,6 +188,7 @@ export class LiveFrames {
     return delivered;
   }
   link(status: KiwoomLinkStatus): void { this.kiwoomLink = clone(status); this.emit({ type: "kiwoom_link", status }); }
+  setAccount(status: AccountStatus): void { this.account = clone(status); this.emit({ type: "account", status }); }
   status(status: ConnectionStatus): void { this.state = clone(status); this.emit({ type: "status", status }); }
   close(code = 1000, reason = "fixture close"): void { for (const socket of this.peers.keys()) socket.close({ code, reason }); this.peers.clear(); }
 }
@@ -278,6 +286,7 @@ export class Scenario {
         return this.documents.hasScope(value.scope) ? { body: this.documents.saveDrawing(value) } : error(400, "bad_request", "드로잉 범위의 레이아웃이나 차트 창이 없습니다");
       }
     }
+    if (path === "/api/account" && method === "GET") return { body: this.live.account };
     if (path === "/api/system/kiwoom" && method === "GET") return { body: this.live.kiwoomLink };
     if (path === "/api/system/settings" && method === "GET") return { body: DEFAULT_SYSTEM_SETTINGS };
     if (path === "/api/symbols" && method === "GET") return { body: this.market.search(url.searchParams.get("q") ?? "", { market: url.searchParams.get("market"), kind: url.searchParams.get("kind") }) };

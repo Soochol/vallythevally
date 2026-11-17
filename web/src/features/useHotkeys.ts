@@ -9,12 +9,15 @@ import { useSelectionStore } from "../stores/selection";
 import { pressScale } from "./indicator-dialog/compareForm";
 import { saveSnapshot } from "./snapshot/saveSnapshot";
 import { openSystemSettings } from "./system-settings/open";
+import { wizardVisible, useWizardStore } from "./setup-wizard/wizardOpen";
+import { useAccountStore } from "../stores/account";
 
 /** 화면 전체의 단축키. 대화상자가 열려 있거나 입력칸에 초점이 있으면 쓰지 않는다. */
 export function useHotkeys() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.defaultPrevented || e.isComposing || ownsChartKeyboard(e)) return;
+      if (wizardVisible(useAccountStore.getState().status, useWizardStore.getState().open)) return;
       const sel = useSelectionStore.getState();
       if (sel.dialog) {
         if (e.key === "Escape") sel.closeDialog();

@@ -2,10 +2,9 @@ use std::sync::{Arc, Mutex, OnceLock};
 
 use axum::Router;
 use axum::body::Body;
-use axum::extract::{Request, State};
-use axum::http::{HeaderMap, Method, header};
-use axum::middleware::{self, Next};
-use axum::response::{IntoResponse, Json, Response};
+use axum::extract::State;
+use axum::middleware;
+use axum::response::Json;
 use axum::routing::{get, post, put};
 use serde::de::DeserializeOwned;
 
@@ -28,7 +27,9 @@ pub struct SystemState {
     env_key: bool,
     key_file_problem: Mutex<Option<String>>,
     settings: Option<api::SystemSettings>,
+    account: crate::account::AccountState,
     bound: OnceLock<std::net::SocketAddr>,
+    bound_signal: tokio::sync::Notify,
     write: tokio::sync::Mutex<()>,
 }
 
@@ -39,7 +40,7 @@ impl SystemState {
             tracing::warn!(error = %e, "등록한 IP 기록을 읽지 못했습니다. 없는 것으로 봅니다");
             None
         });
-        SystemState { key_file: Some(key_file), ip_file: Some(ip_file), registered_ip: Mutex::new(registered_ip), public_ip: None, env_key, key_file_problem: Mutex::new(key_file_problem.map(|e| e.to_string())), settings: Some(settings), bound: OnceLock::new(), write: tokio::sync::Mutex::new(()) }
+        SystemState { key_file: Some(key_file), ip_file: Some(ip_file), registered_ip: Mutex::new(registered_ip), public_ip: None, env_key, key_file_problem: Mutex::new(key_file_problem.map(|e| e.to_string())), settings: Some(settings), account: crate::account::AccountState::local_only(), bound: OnceLock::new(), bound_signal: tokio::sync::Notify::new(), write: tokio::sync::Mutex::new(()) }
     }
 
     pub fn with_public_ip(mut self, transport: Arc<dyn PublicIpTransport>) -> Self {
@@ -47,12 +48,38 @@ impl SystemState {
         self
     }
 
+    pub fn with_account(mut self, account: crate::account::AccountState) -> Self {
+        self.account = account;
+        self
+    }
+
+    pub fn account(&self) -> &crate::account::AccountState {
+        &self.account
+    }
+
     pub fn unconfigured() -> Self {
-        SystemState { key_file: None, ip_file: None, registered_ip: Mutex::new(None), public_ip: None, env_key: false, key_file_problem: Mutex::new(None), settings: None, bound: OnceLock::new(), write: tokio::sync::Mutex::new(()) }
+        SystemState { key_file: None, ip_file: None, registered_ip: Mutex::new(None), public_ip: None, env_key: false, key_file_problem: Mutex::new(None), settings: None, account: crate::account::AccountState::local_only(), bound: OnceLock::new(), bound_signal: tokio::sync::Notify::new(), write: tokio::sync::Mutex::new(()) }
     }
 
     pub fn bound(&self, addr: std::net::SocketAddr) {
         let _ = self.bound.set(addr);
+        self.bound_signal.notify_waiters();
+    }
+
+    pub async fn when_bound(&self) {
+        loop {
+            let signal = self.bound_signal.notified();
+            tokio::pin!(signal);
+            signal.as_mut().enable();
+            if self.bound.get().is_some() {
+                return;
+            }
+            signal.await;
+        }
+    }
+
+    pub(crate) fn bound_addr(&self) -> Option<std::net::SocketAddr> {
+        self.bound.get().copied()
     }
 
     fn key_file_problem(&self) -> Option<String> {
@@ -86,6 +113,8 @@ impl api::SystemSettings {
             lock_path: path(&config.lock_path),
             kiwoom_target: kiwoom_target(&config.kiwoom_base_url),
             server_version: env!("CARGO_PKG_VERSION").to_owned(),
+            account_server_url: config.account_server_url.as_ref().map(|url| url.as_str().to_owned()),
+            account_state_path: config.account_state_path.as_deref().map(path),
         }
     }
 }
@@ -112,45 +141,7 @@ pub fn routes(state: Arc<AppState>) -> Router<Arc<AppState>> {
         .route("/api/system/kiwoom/registered-ip", put(put_registered_ip))
         .route("/api/system/kiwoom/recheck-token-file", post(recheck_token_file))
         .route("/api/system/settings", get(get_settings))
-        .layer(middleware::from_fn_with_state(state, guard_writes))
-}
-
-async fn guard_writes(State(st): State<Arc<AppState>>, req: Request, next: Next) -> Response {
-    if !matches!(*req.method(), Method::GET | Method::HEAD | Method::OPTIONS)
-        && let Err(rejected) = check_write(&st.system, &req)
-    {
-        tracing::warn!(method = %req.method(), path = req.uri().path(), "시스템 설정 쓰기 요청을 거절했습니다");
-        return rejected.into_response();
-    }
-    next.run(req).await
-}
-
-fn check_write(system: &SystemState, req: &Request) -> Result<(), ApiFailure> {
-    let headers = req.headers();
-    let refuse = |what: &str| ApiFailure::bad_request(format!("이 요청은 받지 않습니다: {what}"));
-    let host = headers.get(header::HOST).and_then(|h| h.to_str().ok()).or_else(|| req.uri().authority().map(|a| a.as_str())).ok_or_else(|| refuse("Host가 없습니다"))?;
-    let bound = system.bound.get().ok_or_else(|| refuse("서버가 아직 준비되지 않았습니다"))?;
-    if !is_own_host(host, *bound) {
-        return Err(refuse("Host가 이 서버의 주소가 아닙니다"));
-    }
-    check_origin(headers, host)?;
-    let json = headers.get(header::CONTENT_TYPE).and_then(|v| v.to_str().ok()).is_some_and(|v| v.split(';').next().is_some_and(|essence| essence.trim().eq_ignore_ascii_case("application/json")));
-    if !json {
-        return Err(refuse("Content-Type은 application/json이어야 합니다"));
-    }
-    Ok(())
-}
-
-fn is_own_host(host: &str, bound: std::net::SocketAddr) -> bool {
-    let (host, port) = (host.to_ascii_lowercase(), bound.port());
-    [format!("127.0.0.1:{port}"), format!("localhost:{port}"), format!("[::1]:{port}"), bound.to_string()].contains(&host)
-}
-
-fn check_origin(headers: &HeaderMap, host: &str) -> Result<(), ApiFailure> {
-    let mut origins = headers.get_all(header::ORIGIN).iter();
-    let Some(origin) = origins.next() else { return Ok(()) };
-    let same = origins.next().is_none() && origin.to_str().is_ok_and(|o| o.eq_ignore_ascii_case(&format!("http://{host}")));
-    if same { Ok(()) } else { Err(ApiFailure::bad_request("이 요청은 받지 않습니다: Origin이 이 서버가 아닙니다")) }
+        .layer(middleware::from_fn_with_state(state, crate::write_guard::guard_writes))
 }
 
 async fn read_body<T: DeserializeOwned>(body: Body) -> Result<T, ApiFailure> {

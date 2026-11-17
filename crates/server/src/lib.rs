@@ -1,5 +1,7 @@
 //! vallythevally 서버(backend.md §1). 바이너리 `vally-server`가 이 크레이트를 쓴다.
 
+pub mod account;
+pub mod account_routes;
 pub mod api;
 pub mod app;
 pub mod bars;
@@ -18,8 +20,11 @@ pub mod market;
 pub mod public_ip;
 pub mod quotes;
 pub mod screener;
+pub mod setup_bundle;
 pub mod symbols;
+mod sync_log;
 pub mod system_routes;
 pub mod user_routes;
 pub mod userdata;
+pub mod write_guard;
 pub mod ws;

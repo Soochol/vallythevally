@@ -5,6 +5,7 @@ remote = "origin"
 serialize = false
 env_check = ["cargo --version", "node --version"]
 preflight = "never"
+post_verify_interval = 0
 
 [[verify]]
 name = "check"
@@ -12,7 +13,7 @@ run = "env VALLY_COMPILE_LANE=gate python3 scripts/web.py check"
 
 [[verify]]
 name = "clippy"
-run = "env VALLY_COMPILE_LANE=gate python3 scripts/dev.py cargo clippy -p server -p hoga-format -p collector --all-targets -- -D warnings"
+run = "env VALLY_COMPILE_LANE=gate python3 scripts/dev.py cargo clippy -p server -p hoga-format -p collector -p account-server -p setup --all-targets -- -D warnings"
 paths = ["crates/", "Cargo.toml", "Cargo.lock"]
 
 [[verify]]
@@ -31,11 +32,31 @@ paths = [
 ]
 
 [[verify]]
+name = "account-server-test"
+run = "env VALLY_COMPILE_LANE=gate python3 scripts/dev.py cargo test -p account-server"
+failed = 'test (\S+) \.\.\. FAILED'
+paths = [
+  "crates/account-server/",
+  "crates/setup/",
+  "Cargo.toml",
+  "Cargo.lock",
+  ".cargo/",
+]
+
+[[verify]]
+name = "setup-test"
+run = "env VALLY_COMPILE_LANE=gate python3 scripts/dev.py cargo test -p setup"
+failed = 'test (\S+) \.\.\. FAILED'
+paths = ["crates/setup/", "Cargo.toml", "Cargo.lock"]
+
+[[verify]]
 name = "server-test"
 run = "env VALLY_COMPILE_LANE=gate python3 scripts/dev.py cargo test -p server"
 failed = 'test (\S+) \.\.\. FAILED'
 paths = [
   "crates/server/",
+  "crates/setup/",
+  "crates/account-server/",
   "crates/domain/",
   "crates/indicators/",
   "web/src/api/generated/",
@@ -47,6 +68,7 @@ paths = [
 [[post_verify]]
 name = "e2e"
 run = "env VALLY_COMPILE_LANE=gate python3 scripts/web.py e2e --workers=6"
+probe = "env VALLY_COMPILE_LANE=gate python3 scripts/web.py e2e {tests}"
 timeout = 1800
 failed = '✘.*?› (e2e/\S+?\.spec\.ts:\d+):\d+ ›'
 paths = [

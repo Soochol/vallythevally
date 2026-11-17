@@ -2,11 +2,25 @@ import { test as base, expect, type Locator, type Page } from "@playwright/test"
 import { DEFAULT_LAYOUT_ID, Scenario } from "./fixtures/scenario";
 export { DEFAULT_LAYOUT_ID, firstChart, withFirstChart, type Scenario } from "./fixtures/scenario";
 
+function cpuThrottleRate(): number | null {
+  const raw = process.env.VALLY_E2E_CPU_THROTTLE;
+  if (raw === undefined || raw === "") return null;
+  const rate = Number(raw);
+  if (!Number.isFinite(rate) || rate < 1) throw new Error(`VALLY_E2E_CPU_THROTTLE는 1 이상의 수여야 한다: ${JSON.stringify(raw)}`);
+  return rate;
+}
+
 export const test = base.extend<{ scenario: Scenario; clockStart: string | null }>({
   clockStart: [null, { option: true }],
   scenario: [async ({ context, clockStart }, use) => {
     const now = clockStart ? Date.parse(`${clockStart.slice(0,4)}-${clockStart.slice(4,6)}-${clockStart.slice(6,8)}T${clockStart.slice(8,10)}:${clockStart.slice(10,12)}:${clockStart.slice(12,14)}+09:00`) : undefined;
     const scenario = new Scenario(now);
+    const throttle = cpuThrottleRate();
+    if (throttle !== null) {
+      const apply = async (page: Page) => { await (await context.newCDPSession(page)).send("Emulation.setCPUThrottlingRate", { rate: throttle }); };
+      context.on("page", page => { apply(page).catch(() => {}); });
+      await Promise.all(context.pages().map(apply));
+    }
     await scenario.install(context);
     try { await use(scenario); } finally { await scenario.close(); }
   }, { auto: true }],
@@ -60,3 +74,9 @@ export async function pickDesktopVenue(page: Page, venue: VenueName): Promise<vo
 }
 
 export const expectDesktopVenue = (page: Page, venue: VenueName) => expect(desktopVenueCombo(page)).toHaveAttribute("data-value", VENUE_VALUE[venue]);
+
+export async function fixedWait(page: Page, ms: number, reason: string): Promise<void> {
+  if (!reason.trim()) throw new Error("fixedWait에는 이유가 필요합니다");
+  test.info().annotations.push({ type: "fixed-wait", description: `${ms}ms ${reason}` });
+  await page.waitForTimeout(ms);
+}

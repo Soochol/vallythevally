@@ -6,6 +6,7 @@ import json
 import multiprocessing
 from pathlib import Path
 import subprocess
+import sys
 import os
 import tempfile
 import time
@@ -15,6 +16,8 @@ from unittest.mock import MagicMock, patch
 
 
 ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import e2e_rules
 SPEC = importlib.util.spec_from_file_location("web_checks", ROOT / "scripts/web.py")
 web = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(web)
@@ -62,6 +65,7 @@ class WebWorkflowTest(unittest.TestCase):
             "scripts/dev.py": "shared helpers",
             "web/scripts/build-wasm.sh": "entry point",
             "web/src/App.tsx": "current UI",
+            "web/e2e/rules-baseline.json": "{}",
         }
         for name, value in files.items():
             path = self.root / name
@@ -162,6 +166,22 @@ class WebWorkflowTest(unittest.TestCase):
         self.assertEqual(calls[0], ["pnpm", "install", "--frozen-lockfile"])
         self.assertEqual(self.build_count(), 1)
         self.assertEqual(calls[-1][-2:], ["run", "specific.test.ts"])
+
+    def test_e2e_rules_run_first_and_failure_skips_installation(self):
+        calls = []
+        with self.commands(lambda arguments, cwd, environment: calls.append(arguments)):
+            web.check_web(self.root, [])
+        self.assertEqual(calls[0], ["pnpm", "install", "--frozen-lockfile"])
+        calls.clear()
+        (self.root / "web/e2e/bad.spec.ts").write_text("await page.waitForTimeout(10);\n")
+        with self.commands(lambda arguments, cwd, environment: calls.append(arguments)), contextlib.redirect_stdout(io.StringIO()), self.assertRaisesRegex(ValueError, "e2e 시험 규칙 위반 1건"):
+            web.check_web(self.root, [])
+        self.assertEqual(calls, [])
+        manifests = sorted((self.root / "target/web-runs").glob("check-*/manifest.json"), key=lambda path: path.stat().st_mtime)
+        steps = json.loads(manifests[-1].read_text())["steps"]
+        self.assertEqual(list(steps)[0], "e2e-rules")
+        self.assertEqual(steps["e2e-rules"]["status"], "failed")
+        self.assertEqual(steps["dependencies"]["status"], "not_run")
 
     def test_e2e_uses_fresh_ui_and_separate_normalized_paths(self):
         stale = self.root / "web/dist/index.html"
@@ -344,6 +364,90 @@ class WebWorkflowTest(unittest.TestCase):
                     web.run_e2e(self.root, [])
                 manifests = [json.loads(path.read_text()) for path in (self.root / "target/web-runs").glob("e2e-*/manifest.json")]
                 self.assertTrue(all(manifest["status"] == "failed" for manifest in manifests))
+
+
+class E2eRulesTest(unittest.TestCase):
+    CASES = {
+        "waitForTimeout": ("a.spec.ts", "test('x', async ({ page }) => {\n  await page.waitForTimeout(10);\n});\n", 2, "fixedWait"),
+        "serial-describe": ("a.spec.ts", "test.describe.serial('x', () => {});\n", 1, "scenario"),
+        "serial-configure": ("a.spec.ts", "test.describe.configure({ mode: 'serial' });\n", 1, "scenario"),
+        "beforeAll": ("a.spec.ts", "\ntest.beforeAll(async () => {});\n", 2, "scenario"),
+        "afterAll": ("a.spec.ts", "test.afterAll(async () => {});\n", 1, "scenario"),
+        "let": ("a.spec.ts", "import x from 'y';\nlet shared = 1;\n", 2, "scenario"),
+        "export let": ("a.spec.ts", "export let shared = 1;\n", 1, "scenario"),
+        "var": ("a.spec.ts", "var shared = 1;\n", 1, "scenario"),
+        "setTimeout": ("a.spec.ts", "test('x', async () => {\n  test.setTimeout(120_000);\n});\n", 2, "그룹별"),
+        "slow": ("a.spec.ts", "test.slow();\n", 1, "그룹별"),
+        "testInfo setTimeout": ("a.spec.ts", "testInfo.setTimeout(1);\n", 1, "그룹별"),
+        "configure nested timeout": ("a.spec.ts", "test.describe.configure({ retries: { x: 1 }, timeout: 90000 });\n", 1, "그룹별"),
+        "spaced waitForTimeout": ("a.spec.ts", "await page.waitForTimeout (5);\n", 1, "fixedWait"),
+        "spaced serial": ("a.spec.ts", "test.describe . serial('x', () => {});\n", 1, "scenario"),
+        "tab let": ("a.spec.ts", "let\tshared = 1;\n", 1, "scenario"),
+        "optional waitForTimeout": ("a.spec.ts", "await page.waitForTimeout?.(10);\n", 1, "fixedWait"),
+        "bound waitForTimeout": ("a.spec.ts", "const wait = page.waitForTimeout.bind(page);\n", 1, "fixedWait"),
+        "info setTimeout": ("a.spec.ts", "test.info().setTimeout(1);\n", 1, "그룹별"),
+        "split test setTimeout": ("a.spec.ts", "test\n  .setTimeout(1);\n", 1, "그룹별"),
+        "backtick serial": ("a.spec.ts", "test.describe.configure({ mode: `serial` });\n", 1, "scenario"),
+        "configure timeout": ("a.spec.ts", "test.describe.configure({\n  timeout: 120_000,\n});\n", 1, "그룹별"),
+    }
+
+    def setUp(self):
+        temporary = ROOT / "target/web-workflow-tests"
+        temporary.mkdir(parents=True, exist_ok=True)
+        self.directory = tempfile.TemporaryDirectory(dir=temporary)
+        self.addCleanup(self.directory.cleanup)
+        self.root = Path(self.directory.name)
+        (self.root / "web/e2e").mkdir(parents=True)
+        self.baseline({})
+
+    def baseline(self, value):
+        (self.root / "web/e2e/rules-baseline.json").write_text(json.dumps(value))
+
+    def write(self, name, text):
+        (self.root / "web/e2e" / name).write_text(text)
+
+    def test_clean_tree_passes(self):
+        self.write("a.spec.ts", "import { test } from './harness';\ntest('x', async ({ page }) => {\n  let local = 1;\n  test.describe.configure({ mode: 'parallel' });\n});\n")
+        self.assertEqual(e2e_rules.check(self.root), [])
+
+    def test_each_rule_reports_file_line_and_fix(self):
+        for name, (file, text, line, fix) in self.CASES.items():
+            with self.subTest(name):
+                self.write(file, text)
+                problems = e2e_rules.check(self.root)
+                self.assertEqual(len(problems), 1, problems)
+                self.assertTrue(problems[0].startswith(f"web/e2e/{file}:{line} "), problems[0])
+                self.assertIn(fix, problems[0])
+
+    def test_harness_may_wait_and_indented_let_is_not_module_level(self):
+        self.write("harness.ts", "await page.waitForTimeout(ms);\n")
+        self.write("probe.ts", "let shared = 1;\n")
+        self.assertEqual(e2e_rules.check(self.root), [])
+
+    def test_baseline_must_match_exactly(self):
+        self.write("a.spec.ts", "await page.waitForTimeout(1);\nawait page.waitForTimeout(2);\n")
+        self.baseline({"waitForTimeout": {"a.spec.ts": 2}})
+        self.assertEqual(e2e_rules.check(self.root), [])
+        self.baseline({"waitForTimeout": {"a.spec.ts": 1}})
+        self.assertEqual(len(e2e_rules.check(self.root)), 2)
+        self.baseline({"waitForTimeout": {"a.spec.ts": 3}})
+        lowered = e2e_rules.check(self.root)
+        self.assertEqual(len(lowered), 1)
+        self.assertIn("허용 목록을 2으로 낮춘다", lowered[0])
+
+    def test_file_missing_from_baseline_is_new_violation(self):
+        self.write("a.spec.ts", "await page.waitForTimeout(1);\n")
+        self.write("b.spec.ts", "await page.waitForTimeout(1);\n")
+        self.baseline({"waitForTimeout": {"a.spec.ts": 1}})
+        problems = e2e_rules.check(self.root)
+        self.assertEqual(len(problems), 1)
+        self.assertTrue(problems[0].startswith("web/e2e/b.spec.ts:1 "))
+
+    def test_entry_point_exits_nonzero_with_location(self):
+        self.write("a.spec.ts", "test.beforeAll(async () => {});\n")
+        with patch("sys.stdout", io.StringIO()) as output:
+            self.assertEqual(e2e_rules.main(self.root), 1)
+        self.assertIn("web/e2e/a.spec.ts:1", output.getvalue())
 
 
 if __name__ == "__main__":

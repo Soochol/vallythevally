@@ -47,9 +47,11 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/api/ws", get(crate::ws::upgrade))
         .merge(crate::user_routes::routes())
         .merge(crate::drawings::routes())
+        .merge(crate::setup_bundle::routes(state.clone()))
         .merge(crate::screener::routes())
         .merge(crate::investors::routes())
         .merge(crate::system_routes::routes(state.clone()))
+        .merge(crate::account_routes::routes(state.clone()))
         .route("/api", any(api_not_found))
         .route("/api/{*rest}", any(api_not_found))
         .method_not_allowed_fallback(method_not_allowed)
@@ -100,6 +102,14 @@ impl ApiFailure {
         }
     }
 
+    pub(crate) fn message(&self) -> &str {
+        &self.message
+    }
+
+    pub(crate) fn code(&self) -> api::ApiErrorCode {
+        self.code
+    }
+
     pub(crate) fn bad_request(message: impl Into<String>) -> Self {
         ApiFailure::new(api::ApiErrorCode::BadRequest, message)
     }
@@ -116,7 +126,7 @@ pub fn status_of(code: api::ApiErrorCode) -> StatusCode {
         NotFound | UnknownSymbol => StatusCode::NOT_FOUND,
         KiwoomUnavailable => StatusCode::SERVICE_UNAVAILABLE,
         // 키움이 우리 인증을 거절했다. 다시 시도해도 낫지 않으므로 503이 아니라 502로 둔다.
-        KiwoomAuthFailed => StatusCode::BAD_GATEWAY,
+        KiwoomAuthFailed | AccountServerUnavailable => StatusCode::BAD_GATEWAY,
         Conflict | StaleRevision | ScreenerNotReady => StatusCode::CONFLICT,
         PayloadTooLarge => StatusCode::PAYLOAD_TOO_LARGE,
         MethodNotAllowed => StatusCode::METHOD_NOT_ALLOWED,
@@ -454,7 +464,7 @@ mod tests {
     use super::*;
     use crate::app::{ApplicationInputs, application};
     use crate::clock::{Clock, kst};
-    use crate::user_routes::LAYOUT_LIMIT;
+    use setup::LAYOUT_LIMIT;
     use crate::config::Secret;
     use crate::kiwoom::api::ApiId;
     use crate::kiwoom::auth::KiwoomAuth;
@@ -753,7 +763,7 @@ mod tests {
             (body(json!([one(&"가".repeat(21), json!([]))]), 2), StatusCode::BAD_REQUEST, "bad_request"),
             (json!({"lists": [one("가", json!([]))]}).to_string(), StatusCode::BAD_REQUEST, "bad_request"),
             ("{\"lists\": [".to_owned(), StatusCode::BAD_REQUEST, "bad_request"),
-            (json!({"lists": [one("가", json!([]))], "revision": 2, "pad": "x".repeat(crate::user_routes::WATCHLISTS_LIMIT)}).to_string(), StatusCode::PAYLOAD_TOO_LARGE, "payload_too_large"),
+            (json!({"lists": [one("가", json!([]))], "revision": 2, "pad": "x".repeat(setup::WATCHLISTS_LIMIT)}).to_string(), StatusCode::PAYLOAD_TOO_LARGE, "payload_too_large"),
             (body(json!([one("가", json!([]))]), 1), StatusCode::CONFLICT, "stale_revision"),
         ] {
             let (s, v) = send(&f.app, "PUT", "/api/watchlists", body).await;
@@ -820,7 +830,7 @@ mod tests {
         let f = live_fixture(true).await;
         let legacy_body = |codes: &[String]| json!({"symbols": codes, "revision": i64::MAX}).to_string();
         let mut codes: Vec<String> = Vec::new();
-        while legacy_body(&codes).len() <= crate::user_routes::JSON_LIMIT {
+        while legacy_body(&codes).len() <= setup::JSON_LIMIT {
             codes.push(format!("{:06}", 100_000 + codes.len()));
         }
         codes.pop();
@@ -847,7 +857,7 @@ mod tests {
             let bare = json!({"lists": [{"id": "X", "name": "가", "symbols": []}], "revision": revision, "pad": ""}).to_string();
             json!({"lists": [{"id": "X", "name": "가", "symbols": []}], "revision": revision, "pad": "x".repeat(bytes - bare.len())}).to_string()
         };
-        let limit = crate::user_routes::WATCHLISTS_LIMIT;
+        let limit = setup::WATCHLISTS_LIMIT;
         assert_eq!(send(&f.app, "PUT", "/api/watchlists", padded(limit, 10)).await.0, StatusCode::OK);
         let (s, v) = send(&f.app, "PUT", "/api/watchlists", padded(limit + 1, 11)).await;
         assert_eq!((s, code(&v)), (StatusCode::PAYLOAD_TOO_LARGE, "payload_too_large"));
@@ -1232,6 +1242,7 @@ mod tests {
         let hello = recv_json(&mut ws).await;
         assert_eq!((hello["type"].as_str(), hello["protocol"].as_i64()), (Some("hello"), Some(1)), "{hello}");
         assert_eq!(recv_json(&mut ws).await["type"], "kiwoom_link", "hello 바로 뒤에 키움 연결 상태가 온다");
+        assert_eq!(recv_json(&mut ws).await, json!({"type": "account", "status": {"state": "local_only"}}), "그 뒤에 계정 상태가 온다");
         for text in [
             "not json",
             r#"{"type":"subscribe","sub":"bad","symbol":"IDX:001","venue":"krx","period":"D"}"#,
