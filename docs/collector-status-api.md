@@ -58,11 +58,11 @@
 | 필드 | 뜻 |
 |---|---|
 | `date` | 데몬이 맡은 날짜. `YYYYMMDD` 정수 |
-| `phase` | 데몬의 단계: `off_hours`(장 밖 대기), `morning_prep`(아침 준비), `collecting`(장중 수집), `after_close`(마감 뒤 정리) |
+| `phase` | 데몬의 단계: `off_hours`(장 밖 대기), `morning_prep`(아침 준비), `collecting`(장중 수집), `after_close`(마감 뒤 처리: 마감 뒤 목록, 지수 일봉 대조, 토큰 재발급), `finalizing`(정리 중) |
 | `today` | 오늘의 요약. 아래 표 |
 | `keys` | 키마다 한 항목. 아래 표 |
-| `universe_changes` | 종목 목록의 전날 대비 변동. 아직 채우는 곳이 없으면 `null` |
-| `observation_day` | 관측일 판단과 근거. 아직 채우는 곳이 없으면 `null` |
+| `universe_changes` | 그날 아침 종목 목록의 전날 대비 변동. 아침 목록이 아직 없으면 `null` |
+| `observation_day` | 그날 관측일 판단과 근거. 판단 전(07:20 전)에는 `null` |
 | `alerts` | 경보 목록. 오래된 것이 앞이고 최대 200개 |
 
 `today`(종목 수 단위, 예외는 `register_failed_batches`):
@@ -94,7 +94,7 @@
 
 `observation_day`는 `{verdict, reasons}`다. `verdict`는 `observed`, `not_observed`, `unknown`이고 `reasons`는 사람이 읽는 근거 문장 배열이다.
 
-`alerts[]`는 `{at, kind, message}`다. `at`은 KST 시각이다. `kind`는 `excluded`(제외 발생), `plan_note`(계획의 알림), `handoff`(인계), `handoff_skipped`(인계하지 못함), `key_stopped`(키 멈춤), `register_failed`(등록 실패), `market_open_missing`(관측일인데 `0s`가 정한 시각까지 오지 않음)이다. 모르는 `kind`는 그대로 보여 준다.
+`alerts[]`는 `{at, kind, message}`다. `at`은 KST 시각이다. `kind`는 `excluded`(제외 발생), `plan_note`(계획의 알림), `handoff`(인계), `handoff_skipped`(인계하지 못함), `key_stopped`(키 멈춤), `register_failed`(등록 실패), `market_open_missing`(관측일인데 `0s`가 정한 시각까지 오지 않음), `observation_unknown`(관측일인지 알 수 없어 관측일로 보고 돌림), `index_mismatch`(코스피 지수 일봉과 관측일 판단이 어긋남), `stage_failed`(하루 단계 하나가 실패함: 종목 목록, 계획, 마감 뒤 처리, 정리 등)이다. 읽는 쪽은 모르는 `phase`와 `kind`를 그대로 보여 준다. 새 값은 형식 버전을 올리지 않는다.
 
 ### `heartbeat` (`reply-heartbeat.json`)
 

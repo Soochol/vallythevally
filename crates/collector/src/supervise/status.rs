@@ -36,6 +36,7 @@ pub enum DayPhase {
     #[default]
     Collecting,
     AfterClose,
+    Finalizing,
 }
 
 impl DayPhase {
@@ -44,7 +45,8 @@ impl DayPhase {
             DayPhase::OffHours => "장 밖 대기",
             DayPhase::MorningPrep => "아침 준비",
             DayPhase::Collecting => "장중 수집",
-            DayPhase::AfterClose => "마감 뒤 정리",
+            DayPhase::AfterClose => "마감 뒤 처리",
+            DayPhase::Finalizing => "정리 중",
         }
     }
 }
@@ -88,6 +90,9 @@ pub enum AlertKind {
     KeyStopped,
     RegisterFailed,
     MarketOpenMissing,
+    ObservationUnknown,
+    IndexMismatch,
+    StageFailed,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
