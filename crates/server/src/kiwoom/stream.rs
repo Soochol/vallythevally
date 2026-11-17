@@ -136,7 +136,7 @@ impl AccountFeed {
     }
 
     pub fn set_wanted(&self, wanted: bool) {
-        self.wanted.send_replace(wanted);
+        self.wanted.send_if_modified(|current| std::mem::replace(current, wanted) != wanted);
     }
 
     pub fn wanted(&self) -> bool {
@@ -175,7 +175,7 @@ impl KiwoomStream {
         let access = rest.watch_access();
         let account = stream.account.clone();
         let account_wanted = account.wanted.subscribe();
-        let session = Session { connector, rest, clock, timings, desired, access, events, account, account_wanted, account_registered: false, budget: TokenBudget::Fresh, rebuild: ControlBudget::Fresh, dropped: Dropped::default() };
+        let session = Session { connector, rest, clock, timings, desired, access, events, account, account_wanted, account_registered: false, account_refused: None, budget: TokenBudget::Fresh, rebuild: ControlBudget::Fresh, dropped: Dropped::default() };
         tokio::spawn(session.run());
         (stream, rx)
     }
@@ -373,6 +373,7 @@ struct Session {
     account: AccountFeed,
     account_wanted: watch::Receiver<bool>,
     account_registered: bool,
+    account_refused: Option<bool>,
     budget: TokenBudget,
     rebuild: ControlBudget,
     dropped: Dropped,
@@ -608,6 +609,7 @@ impl Session {
             }
         }
         self.account_registered = false;
+        self.account_refused = None;
         match self.sync_account(&mut conn).await {
             Ok(_) => {}
             Err(End::Shutdown) => return None,
@@ -651,12 +653,19 @@ impl Session {
 
     async fn sync_account(&mut self, conn: &mut Conn) -> Result<bool, End> {
         let wanted = *self.account_wanted.borrow_and_update();
-        if wanted == self.account_registered {
+        if wanted == self.account_registered || self.account_refused == Some(wanted) {
             return Ok(false);
         }
         let control = if wanted { Control::AccountReg } else { Control::AccountRemove };
-        self.control(conn, &control).await?;
-        self.account_registered = wanted;
+        match self.control(conn, &control).await {
+            Ok(()) => self.account_registered = wanted,
+            Err(End::ControlRejected(kind, rejection)) => {
+                tracing::warn!(trnm = kind.trnm(), ?rejection, "계좌 실시간 제어가 거절됐습니다. 시세 세션은 그대로 두고 이 연결에서는 다시 보내지 않습니다");
+                self.account_refused = Some(wanted);
+                return Ok(false);
+            }
+            Err(end) => return Err(end),
+        }
         Ok(true)
     }
 
@@ -1483,7 +1492,7 @@ mod tests {
         let clock = clock();
         let (rest, _) = rest(&clock);
         let access = rest.watch_access();
-        let session = Session { connector: Box::new(peer.clone()), rest, clock, timings: Timings::default(), desired, access, events: events_tx, account: stream.account_feed(), account_wanted: stream.account_feed().wanted.subscribe(), account_registered: false, budget: TokenBudget::Fresh, rebuild: ControlBudget::Fresh, dropped: Dropped::default() };
+        let session = Session { connector: Box::new(peer.clone()), rest, clock, timings: Timings::default(), desired, access, events: events_tx, account: stream.account_feed(), account_wanted: stream.account_feed().wanted.subscribe(), account_registered: false, account_refused: None, budget: TokenBudget::Fresh, rebuild: ControlBudget::Fresh, dropped: Dropped::default() };
         let sender = session.events.clone();
         stream.set_desired(trades_only([samsung()].into()));
         tokio::spawn(session.run());
@@ -1574,6 +1583,22 @@ mod tests {
             assert!(matches!(next(&mut events).await, StreamEvent::Live { .. }));
             assert_eq!(peer.controls(1), ["LOGIN", "REG", "REG"]);
             assert_eq!(peer.messages(1)[2]["data"], account_entry());
+        }
+
+        #[tokio::test(start_paused = true)]
+        async fn a_rejected_account_registration_leaves_the_market_session_alone() {
+            let peer = Peer::new(|_, trnm, nth| if trnm == "REG" && nth >= 2 { Reply::Code(105118) } else { Reply::Ok });
+            let (stream, mut events) = peer.start_feeds(feeds(&[(samsung(), &[RealType::Trade])]));
+            assert!(matches!(next(&mut events).await, StreamEvent::Live { .. }));
+            stream.account_feed().set_wanted(true);
+            until("계좌 REG가 보내졌다(한 번 다시 보낸다)", || peer.controls(0).len() >= 4).await;
+            tokio::task::yield_now().await;
+            assert_eq!(peer.controls(0), ["LOGIN", "REG", "REG", "REG"]);
+            assert_eq!(peer.logins(), 1, "시세 세션은 다시 연결하지 않는다");
+            stream.set_desired(feeds(&[(samsung(), &[RealType::Trade, RealType::Book])]));
+            until("시세 등록은 계속 된다", || peer.controls(0).len() == 5).await;
+            assert_eq!(peer.messages(0)[4]["data"], json!([{"item": ["005930_AL"], "type": ["0D"]}]));
+            assert_eq!(peer.logins(), 1);
         }
 
         #[tokio::test(start_paused = true)]

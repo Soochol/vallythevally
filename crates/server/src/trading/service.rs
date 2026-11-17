@@ -122,14 +122,22 @@ impl Trading {
     }
 
     fn enabled_record(&self) -> Result<SwitchRecord, TradingError> {
-        match self.store.load() {
+        let record = match self.store.load() {
             Err(e) => Err(TradingError::FileUnusable(e.to_string())),
             Ok(Some(record)) if record.enabled => Ok(record),
             Ok(_) => Err(TradingError::Off),
-        }
+        };
+        self.feed.set_wanted(record.is_ok());
+        record
+    }
+
+    async fn read<R: TradingRequest>(&self, req: &R, cont: Option<&ContKey>) -> Result<Page<R::Response>, TradingError> {
+        self.enabled_record()?;
+        self.send(req, cont).await
     }
 
     pub fn status(&self) -> api::OrdersStatus {
+        let enabled = self.enabled_record();
         let record = match self.store.load() {
             Err(e) => {
                 return api::OrdersStatus { state: api::OrdersState::FileUnusable, account_ref: None, account_tail: None, message: TradingError::FileUnusable(e.to_string()).to_string() };
@@ -155,7 +163,7 @@ impl Trading {
     async fn pages<R: TradingRequest>(&self, req: &R) -> Result<Vec<R::Response>, TradingError> {
         let (mut pages, mut seen, mut cont) = (Vec::new(), HashSet::new(), None::<ContKey>);
         for _ in 0..MAX_PAGES {
-            let page = self.send(req, cont.as_ref()).await?;
+            let page = self.read(req, cont.as_ref()).await?;
             pages.push(page.body);
             match page.next {
                 None => return Ok(pages),
@@ -223,6 +231,7 @@ impl Trading {
             }
         }
         let number = self.account_number().await?;
+        let record = self.enabled_record()?;
         let account_ref = account_ref_of(&record.salt, number.expose());
         let mut state = self.lock();
         if record.account_ref.as_deref() != Some(account_ref.as_str()) {
@@ -303,7 +312,7 @@ impl Trading {
             return Err(TradingError::BadRequest("가격은 0보다 커야 합니다"));
         }
         let account = self.verified().await?;
-        let reply = self.send(&Orderable::new(code, order_side, order_price), None).await?.body;
+        let reply = self.read(&Orderable::new(code, order_side, order_price), None).await?.body;
         Ok(api::TradingOrderable { account_ref: account.account_ref, code: code.as_str().to_owned(), side: order_side, price: order_price, amount: unsigned(&reply.profa_100ord_alow_amt)?, quantity: unsigned(&reply.profa_100ord_alowq)? })
     }
 
@@ -382,6 +391,9 @@ fn centi(text: &str) -> Option<i64> {
         None => (false, text.strip_prefix('+').unwrap_or(text)),
     };
     let (whole, fraction) = digits.split_once('.').unwrap_or((digits, ""));
+    if !fraction.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
     let fraction = format!("{fraction:0<2}");
     let value = whole.parse::<i64>().ok()?.checked_mul(100)?.checked_add(fraction[..2].parse::<i64>().ok()?)?;
     Some(if negative { -value } else { value })
@@ -419,4 +431,20 @@ fn venue(labels: &[&str]) -> Result<Venue, TradingError> {
         }
     }
     Err(TradingError::Unreadable("거래소구분"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::centi;
+
+    #[test]
+    fn centi_reads_ascii_decimals_and_nothing_else() {
+        assert_eq!(centi("+10.00"), Some(1000));
+        assert_eq!(centi("1.5"), Some(150));
+        assert_eq!(centi("-0.5"), Some(-50));
+        assert_eq!(centi("7"), Some(700));
+        assert_eq!(centi("1.가"), None);
+        assert_eq!(centi(""), None);
+        assert_eq!(centi("x.10"), None);
+    }
 }

@@ -371,3 +371,73 @@ async fn account_events_for_the_confirmed_account_tell_the_browser_the_account_c
     assert!(changes.try_recv().is_err(), "다른 계좌의 이벤트는 알리지 않는다");
     assert_eq!(f.fake.sent().len(), sent, "이벤트만으로는 아무것도 조회하지 않는다");
 }
+
+fn direct_trading(latency: Duration, store: SwitchStore) -> (Arc<Trading>, Arc<FakeTransport>, AccountFeed, Clock) {
+    let fake = Arc::new(FakeTransport::new(latency, |sent| if sent.api_id == Endpoint::ISSUE { token(1) } else { reply(sent, ACCOUNT, ACCOUNT) }));
+    let clock = Clock::fake(kst(KstDate::new(2026, 11, 9).unwrap(), 10, 0, 0));
+    let rest = KiwoomRest::with_send_spacing(Arc::new(fake.clone()), KiwoomAuth::new(Secret::new("k".into()), Secret::new("s".into()), None), clock.clone(), Duration::ZERO);
+    rest.set_access(Access::Open);
+    let (stream, _desired) = KiwoomStream::detached();
+    let feed = stream.account_feed();
+    (Trading::new(rest, clock.clone(), store, feed.clone()), fake, feed, clock)
+}
+
+fn confirm(tail: &str) -> OrdersSwitchInput {
+    OrdersSwitchInput { enabled: true, confirm_account_tail: Some(tail.into()) }
+}
+
+#[tokio::test]
+async fn an_off_switch_stops_a_read_that_is_already_in_flight() {
+    let (trading, fake, _feed, clock) = direct_trading(Duration::from_millis(150), SwitchStore::memory());
+    trading.set_enabled(confirm("01")).await.unwrap();
+    clock.jump(120);
+    let sent = trading_sends(&fake).len();
+    let reading = tokio::spawn({
+        let trading = trading.clone();
+        async move { trading.balance().await }
+    });
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    trading.set_enabled(OrdersSwitchInput { enabled: false, confirm_account_tail: None }).await.unwrap();
+    let outcome = reading.await.unwrap();
+    assert!(matches!(outcome, Err(TradingError::Off)), "{outcome:?}");
+    assert_eq!(trading_sends(&fake)[sent..], ["ka00001"], "끈 뒤에는 잔고 TR이 나가지 않는다");
+}
+
+#[tokio::test]
+async fn realtime_registration_follows_the_switch_file_even_when_it_changes_behind_the_servers_back() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("state").join("orders.json");
+    let store = || SwitchStore::file(PrivateFile::new(path.clone()));
+    let (trading, _fake, feed, _clock) = direct_trading(Duration::ZERO, store());
+    trading.set_enabled(confirm("01")).await.unwrap();
+    assert!(feed.wanted());
+
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+    assert_eq!(trading.status().state, crate::api::OrdersState::FileUnusable);
+    assert!(!feed.wanted(), "파일이 열려 있으면 00·04를 해지한다");
+
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
+    assert_eq!(trading.status().state, crate::api::OrdersState::On);
+    assert!(feed.wanted());
+    let mut record = store().load().unwrap().unwrap();
+    record.enabled = false;
+    store().save(&record).unwrap();
+    assert_eq!(trading.status().state, crate::api::OrdersState::Off);
+    assert!(!feed.wanted(), "파일이 꺼짐으로 바뀌면 00·04를 해지한다");
+}
+
+#[tokio::test]
+async fn enabling_while_a_stale_verification_is_in_flight_does_not_lock_the_new_account() {
+    let (trading, _fake, _feed, clock) = direct_trading(Duration::from_millis(150), SwitchStore::memory());
+    trading.set_enabled(confirm("01")).await.unwrap();
+    clock.jump(120);
+    let reading = tokio::spawn({
+        let trading = trading.clone();
+        async move { trading.balance().await.map(drop) }
+    });
+    tokio::time::sleep(Duration::from_millis(30)).await;
+    trading.set_enabled(confirm("01")).await.unwrap();
+    reading.await.unwrap().unwrap();
+    assert_eq!(trading.status().state, crate::api::OrdersState::On);
+}
