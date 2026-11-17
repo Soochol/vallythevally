@@ -465,3 +465,25 @@ fn write_day_plan_for<const A: usize, const B: usize>(data: &Path, first: [&str;
     };
     write_plan(data, &plan).unwrap();
 }
+
+#[test]
+fn a_rejected_registration_answer_does_not_end_the_handoff_gap() {
+    let data = tempdir().unwrap();
+    write_events(
+        data.path(),
+        &[json!({"v": 1, "at": "2026-11-17T09:00:06+09:00", "event": "handoff", "from": "collect-02", "to": "spare-01", "stocks": ["000050"], "market_types": []})],
+    );
+    let mut stopped = KeyDay::new(data.path(), "collect-02");
+    stopped.login_and_registration();
+    stopped.real(5000, "000050");
+    stopped.close();
+    let mut spare = KeyDay::new(data.path(), "spare-01");
+    spare.login_and_registration();
+    spare.frame(6400, &json!({"trnm": "REG", "return_code": 1}).to_string());
+    spare.real(30_000, "000070");
+    spare.close();
+
+    finalize_day(&options(data.path())).unwrap();
+
+    assert_eq!(stock(&complete_json(data.path()), "000050")["gaps"], json!([{"from_ms": base_ms() + 5000, "to_ms": base_ms() + 30_000}]));
+}

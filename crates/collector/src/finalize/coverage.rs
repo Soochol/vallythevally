@@ -143,10 +143,10 @@ fn timeline_of(items: impl Iterator<Item = RawItem>) -> KeyTimeline {
                     None => {}
                 }
             }
-            RawContent::Frame(text) => match frame_name(&text).as_deref() {
-                Some("REAL") => saw_real = true,
-                Some("REG") => timeline.confirmations.push(record.recv_ms),
-                _ => {}
+            RawContent::Frame(text) => match frame_head(&text) {
+                FrameHead::Real => saw_real = true,
+                FrameHead::AcceptedRegistration => timeline.confirmations.push(record.recv_ms),
+                FrameHead::Other => {}
             },
             RawContent::Text(_) => {}
         }
@@ -157,12 +157,29 @@ fn timeline_of(items: impl Iterator<Item = RawItem>) -> KeyTimeline {
     timeline
 }
 
-fn frame_name(text: &str) -> Option<String> {
+enum FrameHead {
+    Real,
+    AcceptedRegistration,
+    Other,
+}
+
+fn frame_head(text: &str) -> FrameHead {
     #[derive(serde::Deserialize)]
     struct Head {
         trnm: Option<String>,
+        return_code: Option<Value>,
     }
-    serde_json::from_str::<Head>(text).ok()?.trnm
+    let Ok(head) = serde_json::from_str::<Head>(text) else { return FrameHead::Other };
+    let accepted = match &head.return_code {
+        Some(Value::Number(code)) => code.as_i64() == Some(0),
+        Some(Value::String(code)) => code == "0",
+        _ => false,
+    };
+    match head.trnm.as_deref() {
+        Some("REAL") => FrameHead::Real,
+        Some("REG") if accepted => FrameHead::AcceptedRegistration,
+        _ => FrameHead::Other,
+    }
 }
 
 pub fn build_coverage(input: &CoverageInput<'_>) -> Vec<StockCoverage> {
