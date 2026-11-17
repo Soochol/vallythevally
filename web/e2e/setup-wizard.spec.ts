@@ -59,7 +59,7 @@ for (const viewport of [{ name: "1440×900", width: 1440, height: 900, tag: "des
   test.describe(viewport.name, () => {
     test.use({ viewport: { width: viewport.width, height: viewport.height } });
 
-    test("로그인 직후 돌아오면 ①완료 ②키부터 열리고, 키 저장 → IP 확인 → 연결이 기존 키움 요청으로 간다. ⑤에서 이미 맞음을 보이고 닫으면 화면이 열린다", async ({ page, scenario }) => {
+    test("로그인 직후 돌아오면 ①완료 ②IP 확인부터 열리고, IP 확인 → 키 저장 → 연결 진행이 이어진다. 키 저장 뒤 화면은 연결 요청을 따로 보내지 않는다", async ({ page, scenario }) => {
       scenario.live.account = signedIn();
       scenario.live.kiwoomLink = NO_KEY;
       answerKiwoom(scenario);
@@ -67,20 +67,10 @@ for (const viewport of [{ name: "1440×900", width: 1440, height: 900, tag: "des
 
       await page.goto("/");
       await expect(wizard(page)).toBeVisible();
-      await expect(current(page)).toContainText("2. 키움 키");
+      await expect(current(page)).toContainText("2. IP 확인");
       await expect(steps(page).getByRole("listitem").filter({ hasText: "1. 로그인" })).toContainText("끝");
       await expect(wizard(page)).toContainText("Google 계정으로 로그인했습니다");
-      await expect(wizard(page).getByRole("button", { name: "다음" })).toBeDisabled();
-      await shot(page, `setup-wizard-${viewport.tag}-1-key.png`);
-
-      await page.getByLabel("앱키", { exact: true }).fill(FAKE_KEY.appKey);
-      await page.getByLabel("시크릿", { exact: true }).fill(FAKE_KEY.appSecret);
-      await wizard(page).getByRole("button", { name: "저장" }).click();
-      await expect(wizard(page).getByRole("button", { name: "바꾸기" })).toBeVisible();
-      expect(callsTo(scenario, "PUT", "/api/system/kiwoom/key").map((r) => r.postDataJSON())).toEqual([FAKE_KEY]);
-      await wizard(page).getByRole("button", { name: "다음" }).click();
-
-      await expect(current(page)).toContainText("3. IP 확인");
+      await expect(wizard(page).getByRole("button", { name: "이전" })).toHaveCount(0);
       await expect(wizard(page).getByRole("button", { name: "다음" })).toBeDisabled();
       await wizard(page).getByRole("button", { name: "내 공인 IP 확인" }).click();
       await expect(wizard(page)).toContainText("203.0.113.7");
@@ -88,14 +78,29 @@ for (const viewport of [{ name: "1440×900", width: 1440, height: 900, tag: "des
       await expect(wizard(page).getByLabel("반복 발급 잠금이 풀렸는지 확인했습니다")).toHaveCount(0);
       await expect(wizard(page).getByRole("button", { name: "다음" })).toBeEnabled();
       expect(callsTo(scenario, "PUT", "/api/system/kiwoom/registered-ip").map((r) => r.postDataJSON())).toEqual([{ ip: "203.0.113.7" }]);
-      await shot(page, `setup-wizard-${viewport.tag}-2-ip.png`);
+      await shot(page, `setup-wizard-${viewport.tag}-1-ip.png`);
+      await wizard(page).getByRole("button", { name: "다음" }).click();
+
+      await expect(current(page)).toContainText("3. 키움 키");
+      await expect(wizard(page).getByRole("button", { name: "다음" })).toBeDisabled();
+      await expect(wizard(page)).toContainText("저장하면 바로 키움에 연결합니다. 포털에 지금 공인 IP를 먼저 등록하세요");
+      await shot(page, `setup-wizard-${viewport.tag}-2-key.png`);
+      await page.getByLabel("앱키", { exact: true }).fill(FAKE_KEY.appKey);
+      await page.getByLabel("시크릿", { exact: true }).fill(FAKE_KEY.appSecret);
+      await wizard(page).getByRole("button", { name: "저장" }).click();
+      await expect(wizard(page).getByRole("button", { name: "바꾸기" })).toBeVisible();
+      expect(callsTo(scenario, "PUT", "/api/system/kiwoom/key").map((r) => r.postDataJSON())).toEqual([FAKE_KEY]);
       await wizard(page).getByRole("button", { name: "다음" }).click();
 
       await expect(current(page)).toContainText("4. 연결");
+      scenario.live.link({ ...CONNECTED_KIWOOM, state: "connecting", step: "token", realtimeRegistered: null, symbolCount: null });
+      await expect(wizard(page).getByRole("heading", { name: "연결 중" })).toBeVisible();
+      await expect(wizard(page).getByRole("list", { name: "연결 단계" })).toBeVisible();
       await shot(page, `setup-wizard-${viewport.tag}-3-connect.png`);
-      await wizard(page).getByRole("button", { name: "키움에 연결" }).click();
+      scenario.live.link(CONNECTED_KIWOOM);
       await expect(wizard(page).getByRole("heading", { name: "연결됨" })).toBeVisible();
-      expect(callsTo(scenario, "POST", "/api/system/kiwoom/connect")).toHaveLength(1);
+      await expect(wizard(page)).toContainText("다음부터는 서버를 켜면 자동으로 연결합니다");
+      expect(callsTo(scenario, "POST", "/api/system/kiwoom/connect")).toHaveLength(0);
       await wizard(page).getByRole("button", { name: "다음" }).click();
 
       await expect(current(page)).toContainText("5. 기본 셋업");
@@ -106,6 +111,23 @@ for (const viewport of [{ name: "1440×900", width: 1440, height: 900, tag: "des
       await expect(cell(page)).toHaveAttribute("aria-busy", "false");
     });
 
+    test("연결 단계에서 연결 안 함이면 연결 단추를, 네트워크 실패면 다시 시도 단추를 보인다", async ({ page, scenario }) => {
+      scenario.live.account = signedIn();
+      scenario.live.kiwoomLink = { ...DISCONNECTED, atStart: "keptDisconnected" };
+      answerKiwoom(scenario);
+      await justLoggedIn(page);
+      await page.goto("/");
+      await wizard(page).getByRole("button", { name: "내 공인 IP 확인" }).click();
+      await wizard(page).getByLabel("포털에 지금 공인 IP를 등록했습니다").check();
+      await wizard(page).getByRole("button", { name: "다음" }).click();
+      await wizard(page).getByRole("button", { name: "다음" }).click();
+      await expect(current(page)).toContainText("4. 연결");
+      await expect(wizard(page)).toContainText("연결하면 다음부터 서버를 켤 때 자동으로 연결합니다");
+      await wizard(page).getByRole("button", { name: "키움에 연결" }).click();
+      await expect(wizard(page).getByRole("heading", { name: "연결됨" })).toBeVisible();
+      expect(callsTo(scenario, "POST", "/api/system/kiwoom/connect").map((r) => r.postDataJSON())).toEqual([{ acknowledged: false }]);
+    });
+
     test("나중에 하기로 ②~④를 건너뛰면 연결 전 안내 카드가 이어 받는다", async ({ page, scenario }) => {
       scenario.live.account = signedIn();
       scenario.live.kiwoomLink = NO_KEY;
@@ -113,22 +135,23 @@ for (const viewport of [{ name: "1440×900", width: 1440, height: 900, tag: "des
       await page.goto("/");
       await wizard(page).getByRole("button", { name: "나중에 하기" }).click();
       await expect(current(page)).toContainText("5. 기본 셋업");
-      await expect(steps(page).getByRole("listitem").filter({ hasText: "2. 키움 키" })).toContainText("나중에");
+      await expect(steps(page).getByRole("listitem").filter({ hasText: "3. 키움 키" })).toContainText("나중에");
       await wizard(page).getByRole("button", { name: "닫기" }).click();
       await expect(page.getByRole("region", { name: "키움 연결 안내" }).getByRole("heading", { name: "키움 키를 넣으면 시세가 보입니다" })).toBeVisible();
       expect(callsTo(scenario, "PUT", "/api/system/kiwoom/key")).toHaveLength(0);
     });
 
-    test(".env 키는 ②를 지나 IP 확인부터 열린다", async ({ page, scenario }) => {
+    test(".env 키여도 IP 확인부터 열리고, 다음 단계의 키는 읽기 전용이다", async ({ page, scenario }) => {
       scenario.live.account = signedIn();
       scenario.live.kiwoomLink = { ...DISCONNECTED, keySource: "env" };
       await justLoggedIn(page);
       await page.goto("/");
-      await expect(current(page)).toContainText("3. IP 확인");
-      await expect(steps(page).getByRole("listitem").filter({ hasText: "2. 키움 키" })).toContainText("끝");
-      await wizard(page).getByRole("button", { name: "이전" }).click();
+      await expect(current(page)).toContainText("2. IP 확인");
+      await wizard(page).getByLabel("포털에 지금 공인 IP를 등록했습니다").check();
+      await wizard(page).getByRole("button", { name: "다음" }).click();
       await expect(wizard(page)).toContainText(".env에서 읽음");
-      await expect(wizard(page).locator("input")).toHaveCount(0);
+      await expect(wizard(page).locator("input[type=password], input[type=text]")).toHaveCount(0);
+      await expect(wizard(page)).not.toContainText("저장하면 바로 키움에 연결합니다");
     });
 
     test("needs_choice: 두 선택과 문서 수가 보이고, 확인 뒤에만 initial-sync가 가며, 그 전에는 셋업을 읽지 않는다", async ({ page, scenario }) => {
@@ -242,7 +265,7 @@ for (const viewport of [{ name: "1440×900", width: 1440, height: 900, tag: "des
       scenario.live.kiwoomLink = NO_KEY;
       await justLoggedIn(page);
       await page.goto("/");
-      await expect(current(page)).toContainText("2. 키움 키");
+      await expect(current(page)).toContainText("2. IP 확인");
       const box = await steps(page).boundingBox();
       expect(box!.x).toBeGreaterThanOrEqual(0);
       expect(box!.x + box!.width).toBeLessThanOrEqual(viewport.width);

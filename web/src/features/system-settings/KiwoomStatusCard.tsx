@@ -11,6 +11,7 @@ const TITLES: Record<PanelView["stage"], string> = {
   noKey: "키 없음",
   disconnected: "연결 안 함",
   connecting: "연결 중",
+  connectingWait: "발급 간격 대기",
   connected: "연결됨",
   wait: "발급 간격 대기",
   authBlocked: "인증 차단",
@@ -42,7 +43,8 @@ export function KiwoomStatusCard({ status, view, confirmations, onConfirm, busy,
       {status && <p className="text-m leading-relaxed text-text-2">{status.message}</p>}
       {status && view.stage === "connecting" && <Steps step={status.step} />}
       {status && view.stage === "connected" && <ConnectedFacts status={status} />}
-      {view.countdown && status?.retryAt != null && <Waiting retryAt={status.retryAt} remaining={view.countdown.remainingSeconds} progress={view.countdown.progress} />}
+      {view.countdown && status?.retryAt != null && <Waiting retryAt={status.retryAt} remaining={view.countdown.remainingSeconds} progress={view.countdown.progress} automatic={view.stage === "connectingWait"} />}
+      {view.startNote && <p className="text-m text-text">{view.startNote}</p>}
       {view.stage === "keyNeedsCheck" && <p className="text-m text-text">{status?.keySource === "env" ? "앱키·시크릿을 확인하세요." : "앱키·시크릿을 확인하세요. 새 키를 저장하면 풀립니다."}</p>}
       {view.stage === "pathStopped" && <p className="text-m text-text">서버 로그를 확인하세요. 이 상태만 서버를 다시 켜야 풀립니다.</p>}
       {view.stage === "tokenFileUnusable" && <TokenFile busy={busy} onRecheck={onRecheckTokenFile} />}
@@ -56,7 +58,12 @@ export function KiwoomStatusCard({ status, view, confirmations, onConfirm, busy,
           {view.stage === "noKey" && <p className="text-s text-text-3">키를 먼저 저장하세요</p>}
         </div>
       )}
-      {view.disconnect && <button type="button" className="tb-btn h-9 self-start px-3" disabled={busy} onClick={onDisconnect}>연결 끊기</button>}
+      {view.disconnect && (
+        <div className="flex flex-col items-start gap-1">
+          <button type="button" className="tb-btn h-9 px-3" disabled={busy} onClick={onDisconnect}>연결 끊기</button>
+          {view.disconnectNote && <p className="text-s text-text-3">{view.disconnectNote}</p>}
+        </div>
+      )}
     </section>
   );
 }
@@ -93,11 +100,13 @@ function ConnectedFacts({ status }: { status: KiwoomLinkStatus }) {
   );
 }
 
-function Waiting({ retryAt, remaining, progress }: { retryAt: number; remaining: number; progress: number }) {
+function Waiting({ retryAt, remaining, progress, automatic }: { retryAt: number; remaining: number; progress: number; automatic: boolean }) {
   return (
     <div className="flex flex-col gap-2">
       <p className="text-m text-text">
-        {remaining > 0 ? <>다음 발급 가능 <time className="font-mono">{formatKstClockSeconds(retryAt)}</time> ({formatRemaining(remaining)} 뒤)</> : "발급 간격이 지났습니다"}
+        {automatic ? (
+          remaining > 0 ? <>{formatRemaining(remaining)} 뒤 저절로 이어 연결합니다</> : "곧 저절로 이어 연결합니다"
+        ) : remaining > 0 ? <>다음 발급 가능 <time className="font-mono">{formatKstClockSeconds(retryAt)}</time> ({formatRemaining(remaining)} 뒤)</> : "발급 간격이 지났습니다"}
       </p>
       <div aria-hidden="true" className="h-1 overflow-hidden rounded-full bg-raised">
         <div className="h-full bg-warning" style={{ width: `${Math.round(progress * 100)}%` }} />

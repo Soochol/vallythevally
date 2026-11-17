@@ -2,12 +2,12 @@ import { useReducer } from "react";
 import type { KiwoomLinkStatus } from "../../api/generated/KiwoomLinkStatus";
 import { deleteKiwoomKey, saveKiwoomKey, useSystemSettings } from "../../api/system";
 import { confirmAction } from "../overlay/Confirm";
-import { canSaveKey, EMPTY_KEY_FORM, keyFormReducer, keyLocked, maskedAppKey } from "./kiwoomPanel";
+import { canSaveKey, EMPTY_KEY_FORM, keyFormReducer, keyLocked, keySaveNote, maskedAppKey } from "./kiwoomPanel";
 import type { Command } from "./useCommand";
 
 const FIELD = "h-9 min-w-0 flex-1 rounded-s border border-line bg-bg px-2 text-m text-text focus:border-accent focus:outline-none disabled:opacity-60";
 
-export function KiwoomKeyForm({ status, command, onSaved }: { status: KiwoomLinkStatus | null; command: Command; onSaved(): void }) {
+export function KiwoomKeyForm({ status, command, onSaved, onOpenIpHelp }: { status: KiwoomLinkStatus | null; command: Command; onSaved(): void; onOpenIpHelp?(): void }) {
   const [form, dispatch] = useReducer(keyFormReducer, EMPTY_KEY_FORM);
   const target = useSystemSettings().data?.kiwoomTarget;
   if (!status) return null;
@@ -54,6 +54,7 @@ export function KiwoomKeyForm({ status, command, onSaved }: { status: KiwoomLink
             <button type="submit" className="btn-primary h-9 px-4 disabled:cursor-not-allowed disabled:opacity-50" disabled={locked || command.busy || !canSaveKey(form)}>저장</button>
             {form.editing && <button type="button" className="tb-btn h-9 px-3" onClick={() => dispatch({ type: "cancel" })}>취소</button>}
           </div>
+          <SaveNote note={keySaveNote(status)} onOpenIpHelp={onOpenIpHelp} />
         </form>
       ) : (
         <div className="flex flex-col gap-2">
@@ -66,8 +67,18 @@ export function KiwoomKeyForm({ status, command, onSaved }: { status: KiwoomLink
         </div>
       )}
       {status.keySource === "env" && <p className="text-s text-text-3">화면에서 바꾸려면 .env에서 두 줄을 지우세요.</p>}
-      <p className="text-s text-text-3">키를 저장해도 키움에는 아무것도 보내지 않습니다.</p>
     </section>
+  );
+}
+
+function SaveNote({ note, onOpenIpHelp }: { note: ReturnType<typeof keySaveNote>; onOpenIpHelp?(): void }) {
+  if (note === null) return null;
+  if (note === "blockedBy8050") return <p className="text-s text-text-3">8050 확인을 마치기 전에는 저장해도 연결하지 않습니다</p>;
+  return (
+    <p className="text-s text-text-3">
+      저장하면 바로 키움에 연결합니다. 포털에 지금 공인 IP를 먼저 등록하세요.{" "}
+      {onOpenIpHelp && <button type="button" className="underline underline-offset-2" onClick={onOpenIpHelp}>공인 IP 확인 · 포털 안내 열기</button>}
+    </p>
   );
 }
 

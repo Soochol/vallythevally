@@ -64,8 +64,7 @@ test("연결 안 함: 관심종목은 보이고 가격은 —, 검색은 연결 
   await page.keyboard.press("/");
   const search = page.getByRole("dialog", { name: "종목 검색" });
   await expect(search.getByText("키움에 연결하면 검색할 수 있습니다")).toBeVisible();
-  await search.getByRole("button", { name: "시스템 설정 열기" }).click();
-  await expect(dialog(page)).toBeVisible();
+  await expect(search.getByRole("button", { name: "연결", exact: true })).toBeVisible();
   await page.keyboard.press("Escape");
 
   await openScreener(page);
@@ -86,6 +85,64 @@ test("8050: 상태 줄이 붉고 시스템 설정으로 이끌며 누르면 키�
   await expect(statusBar(page)).toHaveClass(/danger/);
   await sentence.click();
   await expect(dialog(page).getByRole("tabpanel")).toContainText("키움이 지정단말기 인증을 거절했습니다");
+});
+
+const connectCalls = (scenario: Scenario) => scenario.requests.filter((r) => r.method() === "POST" && new URL(r.url()).pathname === "/api/system/kiwoom/connect");
+const waitingLink = (scenario: Scenario, seconds: number): Partial<KiwoomLinkStatus> => ({ state: "connecting", step: "issueInterval", retryAt: Math.floor(scenario.now / 1000) + seconds, message: "발급 간격을 기다립니다" });
+
+test("연결 안 함(끊어 둠): 차트 카드의 연결이 acknowledged false로 한 번 나가고 시스템 설정은 열리지 않는다", async ({ page, scenario }) => {
+  beforeConnect(scenario, { ...disconnected, atStart: "keptDisconnected" });
+  scenario.on((url, request) => url.pathname === "/api/system/kiwoom/connect" && request.method() === "POST", () => ({ body: { ...CONNECTED_KIWOOM } }));
+  await open(page);
+  await expect(guide(page)).toContainText("연결하면 다음부터 서버를 켤 때 자동으로 연결합니다");
+  await expect(statusBar(page)).toContainText("연결을 끊어 두었습니다");
+  await guide(page).getByRole("button", { name: "연결", exact: true }).click();
+  await expect.poll(() => connectCalls(scenario).length).toBe(1);
+  expect(connectCalls(scenario)[0]!.postDataJSON()).toEqual({ acknowledged: false });
+  await expect(dialog(page)).toHaveCount(0);
+});
+
+test("연결 안 함(시작 때 연결): 상태 줄의 키움에 연결 단추도 같다", async ({ page, scenario }) => {
+  beforeConnect(scenario, { ...disconnected, atStart: "connects" });
+  scenario.on((url, request) => url.pathname === "/api/system/kiwoom/connect" && request.method() === "POST", () => ({ body: { ...CONNECTED_KIWOOM } }));
+  await open(page);
+  await expect(statusBar(page)).toContainText("키는 저장됨 · 연결하지 않았습니다");
+  await statusBar(page).getByRole("button", { name: "키움에 연결" }).click();
+  await expect.poll(() => connectCalls(scenario).length).toBe(1);
+  expect(connectCalls(scenario)[0]!.postDataJSON()).toEqual({ acknowledged: false });
+  await expect(dialog(page)).toHaveCount(0);
+});
+
+test("대기 단계: 상태 줄과 카드에 남은 시간이 보이고 줄며 연결 요청은 나가지 않는다", async ({ page, scenario }) => {
+  beforeConnect(scenario, waitingLink(scenario, 400));
+  await open(page);
+  await expect(statusBar(page)).toContainText(/발급 간격 대기 · \d:\d\d 뒤 저절로 연결/);
+  await expect(guide(page)).toContainText(/발급 간격 대기 · \d:\d\d 뒤 저절로 연결/);
+  await expect(guide(page)).toContainText("기다리는 동안 키움에 아무것도 보내지 않습니다");
+  await expect(guide(page).getByRole("button")).toHaveCount(0);
+  await expect(statusBar(page).getByRole("button", { name: "키움에 연결" })).toHaveCount(0);
+  const first = await statusBar(page).innerText();
+  await expect.poll(async () => (await statusBar(page).innerText()) !== first, { timeout: 4000 }).toBe(true);
+  expect(connectCalls(scenario)).toHaveLength(0);
+});
+
+test("네트워크 실패: 간격 뒤에는 다시 시도, 간격 안에서는 비활성 남은 시간 단추다", async ({ page, scenario }) => {
+  const net: Partial<KiwoomLinkStatus> = { state: "failed", problem: "network", message: "키움에 닿지 못했습니다" };
+  beforeConnect(scenario, { ...net, retryAt: Math.floor(scenario.now / 1000) + 300 });
+  await open(page);
+  await expect(statusBar(page).getByRole("button", { name: /\d:\d\d 뒤 다시 시도/ })).toBeDisabled();
+  await expect(guide(page).getByRole("button", { name: /\d:\d\d 뒤 다시 시도/ })).toBeDisabled();
+  scenario.live.link({ ...CONNECTED_KIWOOM, ...net, retryAt: null });
+  await expect(statusBar(page).getByRole("button", { name: "다시 시도" })).toBeEnabled();
+  await expect(guide(page).getByRole("button", { name: "다시 시도" })).toBeEnabled();
+});
+
+test("8050: 상태 줄과 카드에 연결 단추가 없고 시스템 설정으로 이끈다", async ({ page, scenario }) => {
+  beforeConnect(scenario, blocked);
+  await open(page);
+  await expect(statusBar(page).getByRole("button", { name: /^(키움에 연결|연결|다시 시도)$/ })).toHaveCount(0);
+  await expect(guide(page).getByRole("button", { name: /^(연결|다시 시도)$/ })).toHaveCount(0);
+  await expect(guide(page).getByRole("button", { name: "시스템 설정 열기" })).toBeVisible();
 });
 
 test("연결됨 상태 메시지가 오면 카드가 사라지고 기존 화면으로 돌아온다", async ({ page, scenario }) => {
@@ -159,6 +216,20 @@ test.describe("360px 폭", () => {
     await noHorizontalScroll(page);
     const box = await guide(page).boundingBox();
     expect(box!.x).toBeGreaterThanOrEqual(0);
+    expect(box!.x + box!.width).toBeLessThanOrEqual(360);
+  });
+});
+
+test.describe("360px 폭 연결 단추", () => {
+  test.use({ viewport: { width: 360, height: 800 } });
+
+  test("끊어 둠 카드와 헤더의 연결 단추가 가로 스크롤 없이 보인다", async ({ page, scenario }) => {
+    beforeConnect(scenario, { ...disconnected, atStart: "keptDisconnected" });
+    await open(page);
+    await expect(guide(page).getByRole("button", { name: "연결", exact: true })).toBeVisible();
+    await expect(page.getByRole("button", { name: "키움에 연결" })).toBeVisible();
+    await noHorizontalScroll(page);
+    const box = await page.getByRole("button", { name: "키움에 연결" }).boundingBox();
     expect(box!.x + box!.width).toBeLessThanOrEqual(360);
   });
 });

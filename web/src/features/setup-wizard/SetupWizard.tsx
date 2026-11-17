@@ -15,8 +15,8 @@ import { needsChoice, useWizardStore } from "./wizardOpen";
 
 const STEP_HELP: Record<"key" | "ip" | "connect", string> = {
   key: "키움 Open API 앱키와 시크릿을 넣습니다. 키는 이 PC에만 저장되고 계정 서버에는 올라가지 않습니다.",
-  ip: "키움은 등록한 공인 IP에서 오는 요청만 받습니다. 지금 공인 IP를 확인해 포털에 등록하세요.",
-  connect: "키움에 연결하면 차트와 시세를 볼 수 있습니다.",
+  ip: "키움은 등록한 공인 IP에서 오는 요청만 받습니다. 키를 저장하면 바로 연결하므로, 먼저 지금 공인 IP를 확인해 포털에 등록하세요.",
+  connect: "키를 저장하면 서버가 바로 키움에 연결합니다. 진행과 결과를 여기서 봅니다.",
 };
 
 export function SetupWizard() {
@@ -65,7 +65,7 @@ function WizardBody({ initial }: { initial: WizardStepId }) {
 
       <div className="flex flex-col gap-4" aria-label={WIZARD_STEPS.find((s) => s.id === step)!.label} role="group">
         {step !== "setup" && step !== "login" && <p className="text-m text-text-2">{STEP_HELP[step]}</p>}
-        {step === "key" && <KiwoomKeyForm status={panel.status} command={panel.command} onSaved={panel.clearConfirmations} />}
+        {step === "key" && <KiwoomKeyForm status={panel.status} command={panel.command} onSaved={panel.clearConfirmations} onOpenIpHelp={() => setStep("ip")} />}
         {step === "ip" && (
           <>
             <KiwoomIpHelp status={panel.status} openByItself checked={panel.checkedIp} onChecked={panel.setCheckedIp} command={panel.ipCommand} />
@@ -76,12 +76,13 @@ function WizardBody({ initial }: { initial: WizardStepId }) {
         {step === "connect" && (
           <KiwoomStatusCard status={panel.status} view={panel.view} confirmations={panel.confirmations} onConfirm={panel.confirm} busy={panel.command.busy} onConnect={panel.connect} onDisconnect={panel.disconnect} onRecheckTokenFile={panel.recheckTokenFile} />
         )}
+        {step === "connect" && panel.status.state === "connected" && <p role="status" className="text-m text-success">다음부터는 서버를 켜면 자동으로 연결합니다</p>}
         {step === "setup" && <SetupStepPanel sync={account.sync} chosen={chosen} onChosen={(choice) => { setChosen(choice); useSetupChangeStore.getState().settleChoice(); }} />}
         {step !== "setup" && panel.command.error && <p role="alert" className="text-m text-danger">{panel.command.error}</p>}
       </div>
 
       <div className="mt-auto flex flex-wrap items-center gap-2 pt-2">
-        {step !== "key" && <button type="button" className="tb-btn h-9 px-3" onClick={() => setStep(previousStep(step))}>이전</button>}
+        {step !== "ip" && <button type="button" className="tb-btn h-9 px-3" onClick={() => setStep(previousStep(step))}>이전</button>}
         <span className="flex-1" />
         {isSkippable(step) && <button type="button" className="tb-btn h-9 px-3" onClick={() => setStep(skipToSetup)}>나중에 하기</button>}
         {isSkippable(step) && <button type="button" className="btn-primary h-9 px-4 disabled:cursor-not-allowed disabled:opacity-50" disabled={!canAdvance(step, facts)} onClick={() => setStep(nextStep(step))}>다음</button>}

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { KiwoomLinkStatus } from "../../api/generated/KiwoomLinkStatus";
-import { canSaveKey, EMPTY_KEY_FORM, formatRemaining, ipDiffers, keyFormReducer, keyLocked, maskedAppKey, NO_CONFIRMATIONS, panelView } from "./kiwoomPanel";
+import { canSaveKey, EMPTY_KEY_FORM, formatRemaining, ipDiffers, keyFormReducer, keyLocked, keySaveNote, maskedAppKey, NO_CONFIRMATIONS, panelView } from "./kiwoomPanel";
 
 const base: KiwoomLinkStatus = {
   keySource: "file", appKeyTail: "7Q2D", credentialId: null, state: "disconnected", problem: null, message: "", retryAt: null, needsAcknowledgement: false,
@@ -133,5 +133,40 @@ describe("등록한 IP 비교", () => {
   it("확인 전이거나 등록한 IP가 없으면 경고하지 않는다", () => {
     expect(ipDiffers(null, registered)).toBe(false);
     expect(ipDiffers("2.2.2.2", base)).toBe(false);
+  });
+});
+
+describe("시작 때 연결 안내와 대기 단계", () => {
+  it("연결 안 함은 시작 때 연결 값에 따라 안내가 다르다", () => {
+    expect(panelView({ ...base, atStart: "connects" }, 0).startNote).toBe("키는 저장됨 · 연결하지 않았습니다");
+    expect(panelView({ ...base, atStart: "keptDisconnected" }, 0).startNote).toBe("연결을 끊어 두었습니다. 연결하면 다음부터 서버를 켤 때 자동으로 연결합니다");
+  });
+  it("연결됨은 자동 연결과 끊기 설명을 둔다", () => {
+    expect(panelView({ ...base, state: "connected" }, 0)).toMatchObject({ startNote: "서버를 다시 켜도 자동으로 연결합니다", disconnectNote: "끊으면 다음에 서버를 켤 때도 연결하지 않습니다" });
+  });
+  it("8050은 재시작해도 풀리지 않는다고 알린다", () => {
+    expect(panelView(failed("authBlocked8050", null), 0).startNote).toBe("서버를 다시 켜도 차단은 풀리지 않고 자동 연결도 하지 않습니다");
+  });
+  it("연결 중 대기 단계는 남은 시간과 끊기가 있고 연결 단추는 없다", () => {
+    const view = panelView({ ...base, state: "connecting", step: "issueInterval", retryAt: 1000 }, 940);
+    expect(view).toMatchObject({ stage: "connectingWait", connect: null, disconnect: true });
+    expect(view.countdown?.remainingSeconds).toBe(60);
+  });
+  it("대기 단계가 아닌 연결 중은 끊기가 없다", () => {
+    expect(panelView({ ...base, state: "connecting", step: "symbols" }, 0)).toMatchObject({ stage: "connecting", disconnect: false });
+  });
+});
+
+describe("키 저장 안내", () => {
+  it("저장하면 바로 연결한다고 알린다", () => {
+    expect(keySaveNote(base)).toBe("connectsAtOnce");
+    expect(keySaveNote({ ...base, state: "noKey", keySource: "none" })).toBe("connectsAtOnce");
+  });
+  it("8050 차단 중이면 확인 전에는 연결하지 않는다고 알린다", () => {
+    expect(keySaveNote(failed("authBlocked8050"))).toBe("blockedBy8050");
+  });
+  it("환경 키는 저장할 수 없으니 안내가 없다", () => {
+    expect(keySaveNote({ ...base, keySource: "env" })).toBeNull();
+    expect(keySaveNote(null)).toBeNull();
   });
 });

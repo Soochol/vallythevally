@@ -19,7 +19,7 @@ import { highlight } from "./highlight";
 import { GROUP_LABEL, searchList, type SearchGroup } from "./searchList";
 import { MARKET_FILTERS, SEARCH_FILTERS, matchesMarket, matchingCommands, type MarketFilter, searchMode } from "./searchMode";
 import { useBeforeConnect } from "../status/beforeConnect";
-import { OpenSettingsButton } from "../status/BeforeConnectCard";
+import { BeforeConnectButton } from "../status/BeforeConnectCard";
 import { QuoteValue, SearchPreview } from "./SearchPreview";
 import { useSearchQuotes } from "./useSearchQuotes";
 
@@ -154,7 +154,7 @@ function SearchDialogBody({ purpose }: { purpose: SearchPurpose }) {
       </div>
       {offline ? <div role="status" className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 p-6 text-center">
         <p className="text-m text-text">키움에 연결하면 검색할 수 있습니다</p>
-        {beforeConnect?.canOpenSettings && <OpenSettingsButton />}
+        {beforeConnect && <BeforeConnectButton notice={beforeConnect} />}
       </div> : <div className="flex min-h-0 flex-1">
         <ul ref={list} id={`${ids}-list`} role="listbox" aria-label={purpose === "watch" ? "관심종목에 넣을 종목" : query === "" ? "관심종목과 최근 본 종목" : "검색 결과"}
           aria-busy={!selectable && !search.isError} className="min-w-0 flex-1 overflow-auto p-1">

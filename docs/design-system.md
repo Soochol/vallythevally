@@ -239,6 +239,8 @@ DOM 범례는 `iconMarkup("gear" | "eye" | "eyeOff" | "close" | "up" | "down")`�
 - 여는 곳은 위 막대 "차트 설정" 오른쪽의 "시스템" 단추(톱니와 상태 점), 상태 줄과 휴대폰 머리의 연결 문장 단추, `Alt+,`, 명령 찾기의 "시스템 설정", 휴대폰 머리의 톱니 단추다. 코드에서는 `openSystemSettings(menu?)` 하나로 연다. 메뉴를 주면 그 내용을 바로 보이고(좁은 화면에서도 목록을 건너뛴다) 주지 않으면 키움 연결을 고른 채 연다. 키가 없어도 창을 저절로 열지 않는다.
 - 연결 상태는 `useKiwoomLinkStore`(`stores/kiwoomLink.ts`)가 하나의 값으로 쥔다. WebSocket의 `kiwoom_link` 메시지가 `GET /api/system/kiwoom` 응답보다 앞서며, 응답을 기다리는 사이 메시지가 왔으면 응답을 버린다. 키 입력 값은 이 저장소, React Query 캐시, `localStorage`, `UiState`에 넣지 않는다.
 
+상태 줄과 차트 칸 연결 안내 카드(`BeforeConnectCard`), 검색 창의 연결 안내는 같은 규칙으로 바로 연결 단추를 둔다(`linkAction`). 연결 안 함이면 "연결"(접근성 이름 "키움에 연결")이고 `connectKiwoom({ acknowledged: false })`를 부른다. 네트워크 실패이면 간격이 지났을 때 "다시 시도", 안 지났을 때 비활성 "m:ss 뒤 다시 시도"다. 8050·키 확인·파일 사용 불가에는 단추 없이 시스템 설정으로 이끈다. 연결 중이면 "키움에 연결하는 중 · 단계 이름"이고, 대기 단계(`step: issueInterval`)는 "발급 간격 대기 · m:ss 뒤 저절로 연결"을 서버의 `retryAt`과 서버 시각으로 1초마다 줄여 보인다(점은 노랑). 상태 줄이 좁으면 문구를 자르고 단추를 남긴다. 연결 안 함 문구는 `atStart`를 따른다: `keptDisconnected`는 "연결을 끊어 두었습니다", `connects`는 "키는 저장됨 · 연결하지 않았습니다".
+
 상태 점 색(`linkDotTone`)은 다음과 같다.
 
 | 색 | 상태 |
