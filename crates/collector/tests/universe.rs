@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use collector::kst::KstTime;
 use collector::universe::{
-    Entry, ReplaceReason, StockKind, UniverseError, UniverseFile, collect_after_close, collect_morning, read_universe,
+    Entry, Morning, ReplaceReason, StockKind, UniverseError, UniverseFile, Written, collect_after_close, collect_morning, read_universe,
 };
 use domain::KstDate;
 use futures::future::BoxFuture;
@@ -85,8 +85,12 @@ fn at(date: u32) -> KstTime {
     KstTime { date, ms_of_day: (7 * 60 + 20) * 60 * 1000 }
 }
 
-async fn morning(data: &Path, date: u32, kiwoom: Kiwoom) -> Result<UniverseFile, UniverseError> {
+async fn morning_outcome(data: &Path, date: u32, kiwoom: Kiwoom) -> Result<Morning, UniverseError> {
     collect_morning(&rest(kiwoom), data, date, at(date)).await
+}
+
+async fn morning(data: &Path, date: u32, kiwoom: Kiwoom) -> Result<UniverseFile, UniverseError> {
+    morning_outcome(data, date, kiwoom).await.map(|outcome| outcome.file)
 }
 
 fn entry<'a>(file: &'a UniverseFile, code: &str) -> &'a Entry {
@@ -258,4 +262,106 @@ async fn the_after_close_list_needs_the_morning_list() {
     let data = tempfile::tempdir().unwrap();
     let result = collect_after_close(&rest(listing(fillers(5))), data.path(), 20261118, at(20261118)).await;
     assert!(matches!(result, Err(UniverseError::NoMorningList { date: 20261118, .. })), "{result:?}");
+}
+
+fn with_new_stock(count: usize) -> Kiwoom {
+    let mut rows = fillers(count);
+    rows.push(plain("300010", "신규상장"));
+    listing(rows)
+}
+
+#[tokio::test(start_paused = true)]
+async fn same_day_rerun_with_failure_keeps_the_good_list() {
+    let data = tempfile::tempdir().unwrap();
+    morning(data.path(), 20261117, listing(fillers(100))).await.unwrap();
+    let good = morning(data.path(), 20261118, with_new_stock(100)).await.unwrap();
+    let good_bytes = std::fs::read(data.path().join("universe/20261118.json")).unwrap();
+
+    let rerun = morning_outcome(data.path(), 20261118, Kiwoom::Failing).await.unwrap();
+
+    assert!(matches!(rerun.written, Written::LeftAsIs { reason: ReplaceReason::FetchFailed, .. }), "{:?}", rerun.written);
+    assert_eq!(rerun.file, good);
+    assert!(codes(&read_universe(data.path(), 20261118).unwrap()).contains(&"300010"));
+    assert_eq!(std::fs::read(data.path().join("universe/20261118.json")).unwrap(), good_bytes);
+    assert!(universe_files(data.path()).contains(&"20261118.rejected.json".to_owned()));
+}
+
+#[tokio::test(start_paused = true)]
+async fn same_day_rerun_rejected_by_check_keeps_the_good_list() {
+    let data = tempfile::tempdir().unwrap();
+    morning(data.path(), 20261117, listing(fillers(100))).await.unwrap();
+    let good = morning(data.path(), 20261118, with_new_stock(100)).await.unwrap();
+
+    let rerun = morning_outcome(data.path(), 20261118, listing(fillers(90))).await.unwrap();
+
+    assert!(matches!(rerun.written, Written::LeftAsIs { reason: ReplaceReason::Shrunk, .. }), "{:?}", rerun.written);
+    assert_eq!(read_universe(data.path(), 20261118).unwrap(), good);
+    assert!(good.replaced.is_none());
+}
+
+#[tokio::test(start_paused = true)]
+async fn unreadable_latest_file_is_skipped_for_an_older_one() {
+    let data = tempfile::tempdir().unwrap();
+    let oldest = morning(data.path(), 20261116, listing(fillers(100))).await.unwrap();
+    morning(data.path(), 20261117, listing(fillers(100))).await.unwrap();
+    let broken = data.path().join("universe/20261117.json");
+    std::fs::write(&broken, "{not json").unwrap();
+
+    let first = morning_outcome(data.path(), 20261118, with_new_stock(100)).await.unwrap();
+    let second = morning_outcome(data.path(), 20261119, listing(fillers(100))).await.unwrap();
+
+    assert!(matches!(first.written, Written::NewList));
+    assert_eq!(first.skipped.len(), 1);
+    assert_eq!(first.skipped[0].date, 20261117);
+    assert!(first.skipped[0].cause.contains("20261117.json"), "{}", first.skipped[0].cause);
+    assert_eq!(first.file.diff.added[0].code, "300010");
+    assert_eq!(first.file.diff.removed.len(), 0);
+    assert!(second.skipped.is_empty(), "{:?}", second.skipped);
+    assert_eq!(second.file.diff.added.len(), 0);
+    assert_eq!(read_universe(data.path(), 20261118).unwrap(), first.file);
+    assert_eq!(read_universe(data.path(), 20261119).unwrap(), second.file);
+    assert_eq!(std::fs::read(&broken).unwrap(), b"{not json");
+    assert_eq!(oldest.stocks.len(), 100);
+}
+
+#[tokio::test(start_paused = true)]
+async fn unreadable_latest_file_sets_the_shrink_baseline_to_the_older_one() {
+    let data = tempfile::tempdir().unwrap();
+    morning(data.path(), 20261116, listing(fillers(100))).await.unwrap();
+    morning(data.path(), 20261117, listing(fillers(100))).await.unwrap();
+    std::fs::write(data.path().join("universe/20261117.json"), "{not json").unwrap();
+
+    let outcome = morning_outcome(data.path(), 20261118, listing(fillers(96))).await.unwrap();
+
+    let Written::ReplacementList = outcome.written else { panic!("{:?}", outcome.written) };
+    assert_eq!(outcome.file.replaced.unwrap().source_date, 20261116);
+    assert_eq!(outcome.skipped.len(), 1);
+}
+
+#[tokio::test(start_paused = true)]
+async fn good_rerun_removes_that_days_rejected_file() {
+    let data = tempfile::tempdir().unwrap();
+    morning(data.path(), 20261117, listing(fillers(100))).await.unwrap();
+    morning(data.path(), 20261118, Kiwoom::Failing).await.unwrap();
+    assert!(universe_files(data.path()).contains(&"20261118.rejected.json".to_owned()));
+
+    let rerun = morning_outcome(data.path(), 20261118, with_new_stock(100)).await.unwrap();
+
+    assert!(matches!(rerun.written, Written::NewList));
+    assert!(rerun.warnings.is_empty());
+    assert_eq!(universe_files(data.path()), ["20261117.json", "20261118.json"]);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_rejected_file_that_cannot_be_removed_is_a_warning_not_an_error() {
+    let data = tempfile::tempdir().unwrap();
+    morning(data.path(), 20261117, listing(fillers(100))).await.unwrap();
+    std::fs::create_dir(data.path().join("universe/20261118.rejected.json")).unwrap();
+
+    let outcome = morning_outcome(data.path(), 20261118, with_new_stock(100)).await.unwrap();
+
+    assert!(matches!(outcome.written, Written::NewList));
+    assert_eq!(outcome.warnings.len(), 1);
+    assert!(outcome.warnings[0].contains("rejected.json"), "{:?}", outcome.warnings);
+    assert_eq!(read_universe(data.path(), 20261118).unwrap(), outcome.file);
 }

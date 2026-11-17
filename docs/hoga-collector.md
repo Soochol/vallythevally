@@ -385,7 +385,7 @@ universe/<YYYYMMDD>.rejected.json   쓰지 않기로 한 목록(진단용)
 universe/<YYYYMMDD>.after.json      마감 뒤 목록과 아침 목록의 차이
 ```
 
-모든 파일은 임시 파일에 쓴 뒤 이름을 바꿔 놓는다. 같은 날짜로 다시 돌리면 그날 파일을 새로 쓴다. 전날 목록은 그날보다 이른 날짜 가운데 가장 늦은 `<YYYYMMDD>.json`이다.
+모든 파일은 임시 파일에 쓴 뒤 이름을 바꿔 놓는다. 같은 날짜로 다시 돌려 정상 목록을 받으면 그날 파일을 새로 쓰고 그날의 `rejected.json`을 지운다(지우지 못하면 오류가 아니라 경고다). 전날 목록은 그날보다 이른 날짜 가운데 가장 늦은 `<YYYYMMDD>.json`이고, 읽을 수 없는 파일은 지우거나 고치지 않고 건너뛰어 그보다 앞선 읽히는 파일을 쓴다. 건너뛴 파일과 까닭은 `collect_morning`의 결과(`Morning::skipped`)와 로그에 남고, 3% 검사의 비교 대상도 같은 목록이다.
 
 ### 받기와 가르기
 
@@ -408,7 +408,7 @@ universe/<YYYYMMDD>.after.json      마감 뒤 목록과 아침 목록의 차이
 
 ### 검사
 
-아래 경우에는 받은 목록을 그날 목록으로 쓰지 않는다. 가장 최근 목록의 `stocks`를 그날 파일에 쓰고(`diff`는 비고 `warnings`는 그 목록의 것이다) `replaced`에 까닭을 적는다. 받은 목록은 `<YYYYMMDD>.rejected.json`에 남긴다(`reason`, `detail`, `previous_count`, `stocks`, `warnings`).
+아래 경우에는 받은 목록을 그날 목록으로 쓰지 않는다. 그날 목록 파일이 이미 있으면 그대로 둔다. 없을 때만 가장 최근 읽히는 이전 목록의 `stocks`를 그날 파일에 쓰고(`diff`는 비고 `warnings`는 그 목록의 것이다) `replaced`에 까닭을 적는다. 받은 목록은 `<YYYYMMDD>.rejected.json`에 남긴다(`reason`, `detail`, `previous_count`, `stocks`, `warnings`). 결과의 `Morning::written`이 새 목록(`NewList`), 대체(`ReplacementList`), 그대로 둠(`LeftAsIs`, 거부 까닭 포함) 중 무엇을 했는지 알린다.
 
 | `reason` | 경우 |
 |---|---|
@@ -424,7 +424,7 @@ universe/<YYYYMMDD>.after.json      마감 뒤 목록과 아침 목록의 차이
 
 ### 시험
 
-`crates/collector/tests/universe.rs`가 합성 `Transport`로 여러 쪽 응답을 주고 가르기, 차이 다섯 종류, 3% 경계, 조회 실패·끊긴 목록의 대체와 `rejected.json`, 마감 뒤 목록이 그날 파일을 바꾸지 않는 것을 고정한다.
+`crates/collector/tests/universe.rs`가 합성 `Transport`로 여러 쪽 응답을 주고 가르기, 차이 다섯 종류, 3% 경계, 조회 실패·끊긴 목록의 대체와 `rejected.json`, 같은 날 재실행이 좋은 목록을 덮지 않는 것, 읽히지 않는 최근 파일을 건너뛰는 것, 정상 재실행이 `rejected.json`을 지우는 것, 마감 뒤 목록이 그날 파일을 바꾸지 않는 것을 고정한다.
 
 ## serve와 복기 화면
 
