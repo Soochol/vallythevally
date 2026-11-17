@@ -17,6 +17,13 @@ const dotOf = (page: Page, id: string) => windowTabs(page).locator(`[role=tab][d
 const preparing = (page: Page) => page.getByTestId("market-window-preparing");
 const savedWindows = (scenario: Scenario) => scenario.documents.layout(DEFAULT_LAYOUT_ID).windows;
 
+const BUILT_KINDS: readonly string[] = ["trades"];
+const bodyOf = (page: Page, kind: string) => (BUILT_KINDS.includes(kind) ? page.getByTestId(`${kind}-window`) : preparing(page));
+
+function emptyTrades(scenario: Scenario) {
+  scenario.reply((url) => /^\/api\/symbols\/[^/]+\/trades$/.test(url.pathname), { body: { symbol: "005930", venue: "combined", trades: [], skippedRows: 0 } });
+}
+
 function twoLinkedCharts(scenario: Scenario) {
   const layout = scenario.documents.layout(DEFAULT_LAYOUT_ID);
   const windows: LayoutWindow[] = [
@@ -39,21 +46,23 @@ test.beforeEach(async ({ page }) => {
 for (const { kind, name } of KINDS) {
   test(`${name} 창은 창 더하기에서 열리고 연동 색을 따르며 두 번째는 만들어지지 않는다`, async ({ page, scenario }) => {
     twoLinkedCharts(scenario);
+    emptyTrades(scenario);
     await page.goto("/");
     await expect(cell(page)).toHaveAttribute("aria-busy", "false");
 
     await addWindow(page, name);
     await expect(tabOf(page, kind)).toHaveAccessibleName(new RegExp(`^${name}`));
-    await expect(preparing(page)).toContainText(`${name} 준비 중`);
-    await expect(preparing(page)).toContainText("삼성전자");
+    if (!BUILT_KINDS.includes(kind)) await expect(preparing(page)).toContainText(`${name} 준비 중`);
+    if (!BUILT_KINDS.includes(kind)) await expect(preparing(page)).toContainText("삼성전자");
+    await expect(bodyOf(page, kind)).toHaveAttribute("data-symbol", "005930");
     await expect(dotOf(page, kind)).toHaveAccessibleName("연동 색: 끔");
     await expect.poll(() => savedWindows(scenario).filter((w) => w.kind === kind)).toEqual([{ id: kind, link: null, kind }]);
 
     await dotOf(page, kind).click();
     await page.getByRole("menu", { name: "연동 색" }).getByRole("menuitemradio", { name: /^B/ }).click();
     await expect(dotOf(page, kind)).toHaveAccessibleName("연동 색: B");
-    await expect(preparing(page)).toContainText("SK하이닉스");
-    await expect(preparing(page)).toHaveAttribute("data-symbol", "000660");
+    if (!BUILT_KINDS.includes(kind)) await expect(preparing(page)).toContainText("SK하이닉스");
+    await expect(bodyOf(page, kind)).toHaveAttribute("data-symbol", "000660");
     await expect.poll(() => savedWindows(scenario).find((w) => w.kind === kind)?.link).toBe("b");
 
     await addButton(page).click();
@@ -74,6 +83,7 @@ test("지수 종목을 따르는 시세 창은 주식만 보인다고 알린다"
 
 test("새 종류 넷을 레이아웃에 저장하면 다시 열어도 그대로 있다", async ({ page, scenario }) => {
   twoLinkedCharts(scenario);
+  emptyTrades(scenario);
   await page.goto("/");
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
   for (const { name } of KINDS) await addWindow(page, name);
