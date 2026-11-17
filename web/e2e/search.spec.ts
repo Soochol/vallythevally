@@ -1,6 +1,7 @@
 import { screenerScenario } from "./fixtures/screener";
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
+import type { Locator } from "@playwright/test";
 import type { ScreenerResult } from "../src/api/generated/ScreenerResult";
 import { panel, rows, runButton, updateBand, waitForUpdateToFinish } from "./screener-page";
 import { barTimes, cell, chartOf, dragTowardPast, expect, SEARCH_BUTTON_TITLE, test } from "./harness";
@@ -328,5 +329,54 @@ test("관심종목 용도로 연 검색은 미리보기의 Enter 안내도 관�
   await input.press("Enter");
   await expect(dialog).toBeHidden();
   await expect(watchlist.locator('li[data-code="005930"]')).toHaveCount(1);
+  await expect(cell(page)).toHaveAttribute("aria-label", before!);
+});
+
+const star = (option: Locator, action: string) => option.locator(`[title="${action} · Ctrl+↵"], [aria-description="${action} · Ctrl+↵"]`);
+
+test("검색 별을 누르면 창을 닫지 않고 지금 목록에 넣고 빼며 활성 칸을 바꾸지 않는다", async ({ page }) => {
+  await page.goto("/");
+  await expect(cell(page)).toHaveAttribute("aria-busy", "false");
+  const before = await cell(page).getAttribute("aria-label");
+  const dialog = page.getByRole("dialog", { name: "종목 검색" });
+  await page.keyboard.press("Control+k");
+  const input = dialog.getByRole("combobox", { name: "종목 검색" });
+  await input.fill("005930");
+  const option = dialog.getByRole("option").filter({ hasText: "005930" });
+  await expect(option).toHaveAttribute("aria-disabled", "false");
+  await option.hover();
+  const addStar = star(option, "기본에 넣기");
+  await expect(addStar).toBeVisible();
+  await addStar.click();
+  await expect(page.getByRole("status").filter({ hasText: "기본에 넣었습니다" })).toBeVisible();
+  await expect(dialog).toBeVisible();
+  await expect(input).toBeFocused();
+  await expect(option).toContainText("관심종목");
+  const removeStar = star(option, "기본에서 빼기");
+  await removeStar.click();
+  await expect(page.getByRole("status").filter({ hasText: "기본에서 뺐습니다" })).toBeVisible();
+  await expect(dialog).toBeVisible();
+  await expect(star(option, "기본에 넣기")).toHaveCount(1);
+  await expect(cell(page)).toHaveAttribute("aria-label", before!);
+});
+
+test("+종목으로 연 검색에서도 별이 같은 일을 하고 창은 열린 채 남는다", async ({ page }) => {
+  await page.goto("/");
+  await expect(cell(page)).toHaveAttribute("aria-busy", "false");
+  const before = await cell(page).getAttribute("aria-label");
+  const watchlist = page.getByRole("complementary", { name: "관심종목", exact: true });
+  await watchlist.getByRole("button", { name: "관심종목에 넣기", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "관심종목에 넣을 종목 검색" });
+  const input = dialog.getByRole("combobox", { name: "종목 검색" });
+  await input.fill("005930");
+  const option = dialog.getByRole("option").filter({ hasText: "005930" });
+  await expect(option).toHaveAttribute("aria-disabled", "false");
+  await option.hover();
+  await star(option, "기본에 넣기").click();
+  await expect(dialog).toBeVisible();
+  await expect(input).toBeFocused();
+  await expect(watchlist.locator('li[data-code="005930"]')).toHaveCount(1);
+  await star(option, "기본에서 빼기").click();
+  await expect(watchlist.locator('li[data-code="005930"]')).toHaveCount(0);
   await expect(cell(page)).toHaveAttribute("aria-label", before!);
 });
