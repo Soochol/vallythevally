@@ -14,10 +14,13 @@ const addButton = (page: Page) => page.getByRole("toolbar", { name: "차트 도�
 const kindItem = (page: Page, name: string) => page.getByRole("menu", { name: "창 더하기" }).getByRole("menuitem", { name: new RegExp(`^${name}`) });
 const tabOf = (page: Page, id: string) => windowTabs(page).locator(`[role=tab][data-window-id="${id}"]`);
 const dotOf = (page: Page, id: string) => windowTabs(page).locator(`[role=tab][data-window-id="${id}"] + .link-dot`);
+const READY_KINDS: readonly string[] = ["program"];
 const preparing = (page: Page) => page.getByTestId("market-window-preparing");
+const windowBody = (page: Page, kind: string) => (READY_KINDS.includes(kind) ? page.getByTestId("program-window") : preparing(page));
 const savedWindows = (scenario: Scenario) => scenario.documents.layout(DEFAULT_LAYOUT_ID).windows;
 
 function twoLinkedCharts(scenario: Scenario) {
+  scenario.reply((url) => url.pathname.endsWith("/program-trades"), { body: { symbol: "005930", points: [{ time: "09:00:00", price: 70_000, buyQuantity: 10, sellQuantity: 4, netQuantity: 6, buyAmount: 700_000_000, sellAmount: 280_000_000, netAmount: 420_000_000 }], skippedRows: 0 } });
   const layout = scenario.documents.layout(DEFAULT_LAYOUT_ID);
   const windows: LayoutWindow[] = [
     { id: "cell-0", link: "a", kind: "chart", symbol: "005930", venue: "combined", period: "D", chartSettings: SETTINGS },
@@ -44,16 +47,15 @@ for (const { kind, name } of KINDS) {
 
     await addWindow(page, name);
     await expect(tabOf(page, kind)).toHaveAccessibleName(new RegExp(`^${name}`));
-    await expect(preparing(page)).toContainText(`${name} 준비 중`);
-    await expect(preparing(page)).toContainText("삼성전자");
+    if (!READY_KINDS.includes(kind)) await expect(preparing(page)).toContainText(`${name} 준비 중`);
+    await expect(windowBody(page, kind)).toHaveAttribute("data-symbol", "005930");
     await expect(dotOf(page, kind)).toHaveAccessibleName("연동 색: 끔");
     await expect.poll(() => savedWindows(scenario).filter((w) => w.kind === kind)).toEqual([{ id: kind, link: null, kind }]);
 
     await dotOf(page, kind).click();
     await page.getByRole("menu", { name: "연동 색" }).getByRole("menuitemradio", { name: /^B/ }).click();
     await expect(dotOf(page, kind)).toHaveAccessibleName("연동 색: B");
-    await expect(preparing(page)).toContainText("SK하이닉스");
-    await expect(preparing(page)).toHaveAttribute("data-symbol", "000660");
+    await expect(windowBody(page, kind)).toHaveAttribute("data-symbol", "000660");
     await expect.poll(() => savedWindows(scenario).find((w) => w.kind === kind)?.link).toBe("b");
 
     await addButton(page).click();
