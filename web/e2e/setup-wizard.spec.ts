@@ -367,4 +367,51 @@ test.describe("셋업 알림과 선택 대기의 경계", () => {
     expect(reads).toHaveLength(0);
     await expect(cell(page)).toHaveCount(0);
   });
+
+  test("새로 고침 뒤 나중에를 누르면 저장이 끝나도 쪽을 새로 고치지 않고, 다음 알림의 새로 고침은 눌린다", async ({ page, scenario }) => {
+    scenario.live.account = signedIn();
+    await page.goto("/?symbol=005930");
+    await expect(cell(page)).toHaveAttribute("aria-busy", "false");
+    let release = () => {};
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    let received = () => {};
+    const arrived = new Promise<void>((resolve) => { received = resolve; });
+    let first = true;
+    scenario.on((url, request) => first && url.pathname.startsWith("/api/layouts/") && request.method() === "PUT", async (request) => {
+      first = false;
+      received();
+      await gate;
+      return scenario.respond(request);
+    });
+    await page.getByRole("toolbar", { name: "차트 도구 막대" }).getByRole("group", { name: "봉 주기" }).getByRole("button", { name: "주", exact: true }).click();
+    await arrived;
+    scenario.live.emit({ type: "setup_changed", kinds: ["layout"] });
+    await notice(page).getByRole("button", { name: "새로 고침" }).click();
+    await notice(page).getByRole("button", { name: "나중에" }).click();
+    await expect(notice(page)).toHaveCount(0);
+    let loads = 0;
+    page.on("load", () => { loads++; });
+    release();
+    await page.waitForTimeout(1500);
+    expect(loads).toBe(0);
+    scenario.live.emit({ type: "setup_changed", kinds: ["watchlists"] });
+    await expect(notice(page).getByRole("button", { name: "새로 고침" })).toBeEnabled();
+  });
+
+  test("계정 셋업 받기 응답 뒤에 늦게 온 setup_changed로는 알림이 뜨지 않는다", async ({ page, scenario }) => {
+    scenario.live.account = signedIn(NEEDS_CHOICE);
+    scenario.on(route("POST", "/api/account/initial-sync"), () => {
+      const next = signedIn();
+      scenario.live.setAccount(next);
+      setTimeout(() => scenario.live.emit({ type: "setup_changed", kinds: ["layout", "watchlists"] }), 300);
+      return { body: next };
+    });
+    await page.goto("/");
+    await wizard(page).getByRole("button", { name: /계정 셋업 받기/ }).click();
+    await wizard(page).getByRole("button", { name: "계정 셋업으로 덮어쓰기" }).click();
+    await wizard(page).getByRole("button", { name: "닫기" }).click();
+    await expect(cell(page)).toHaveAttribute("aria-busy", "false");
+    await page.waitForTimeout(1000);
+    await expect(notice(page)).toHaveCount(0);
+  });
 });

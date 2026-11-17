@@ -76,7 +76,7 @@ function WizardBody({ initial }: { initial: WizardStepId }) {
         {step === "connect" && (
           <KiwoomStatusCard status={panel.status} view={panel.view} confirmations={panel.confirmations} onConfirm={panel.confirm} busy={panel.command.busy} onConnect={panel.connect} onDisconnect={panel.disconnect} onRecheckTokenFile={panel.recheckTokenFile} />
         )}
-        {step === "setup" && <SetupStepPanel sync={account.sync} chosen={chosen} onChosen={(choice) => { setChosen(choice); useSetupChangeStore.setState({ kinds: [] }); }} />}
+        {step === "setup" && <SetupStepPanel sync={account.sync} chosen={chosen} onChosen={(choice) => { setChosen(choice); useSetupChangeStore.getState().settleChoice(); }} />}
         {step !== "setup" && panel.command.error && <p role="alert" className="text-m text-danger">{panel.command.error}</p>}
       </div>
 
