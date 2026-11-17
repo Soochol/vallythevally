@@ -20,6 +20,8 @@ import {
   moveGroupBy,
   moveSymbol,
   moveSymbolBy,
+  type PutOutcome,
+  putSymbol,
   removeSymbol,
   renameGroup,
   sameWatchlist,
@@ -48,6 +50,7 @@ interface WatchlistState {
   add(list: string, code: SymbolCode): void;
   addAll(list: string, codes: readonly SymbolCode[]): void;
   remove(list: string, code: SymbolCode): void;
+  put(list: string, code: SymbolCode, groupId: string | null): { outcome: PutOutcome; undo: WatchlistRemoval | null };
   removeFromListWithUndo(list: string, code: SymbolCode): WatchlistRemoval | null;
   removeRowWithUndo(list: string, row: WatchRowRef): WatchlistRemoval | null;
   move(list: string, row: WatchRowRef, to: number): void;
@@ -80,7 +83,7 @@ export const useWatchlistStore = create<WatchlistState>()((set, get) => {
       const symbols = f(l.symbols);
       return symbols === l.symbols ? l : { ...l, symbols: [...symbols] };
     });
-  const removeWithUndo = (list: string, transform: (list: Watchlist) => Watchlist): WatchlistRemoval | null => {
+  const editWithUndo = (list: string, transform: (list: Watchlist) => Watchlist): WatchlistRemoval | null => {
     const source = get().lists.find((l) => l.id === list);
     if (!source) return null;
     const after = transform(source);
@@ -124,8 +127,13 @@ export const useWatchlistStore = create<WatchlistState>()((set, get) => {
     add: (list, code) => editSymbols(list, (l) => addSymbol(l, code)),
     addAll: (list, codes) => editSymbols(list, (l) => addSymbols(l, codes)),
     remove: (list, code) => editList(list, (l) => removeSymbol(l, code)),
-    removeFromListWithUndo: (list, code) => removeWithUndo(list, (l) => removeSymbol(l, code)),
-    removeRowWithUndo: (list, row) => removeWithUndo(list, (l) => removeRow(l, row)),
+    put: (list, code, groupId) => {
+      const source = get().lists.find((l) => l.id === list);
+      const { outcome } = source ? putSymbol(source, code, groupId) : { outcome: "missing" as const };
+      return { outcome, undo: outcome === "added" || outcome === "joined" ? editWithUndo(list, (l) => putSymbol(l, code, groupId).list) : null };
+    },
+    removeFromListWithUndo: (list, code) => editWithUndo(list, (l) => removeSymbol(l, code)),
+    removeRowWithUndo: (list, row) => editWithUndo(list, (l) => removeRow(l, row)),
     move: (list, row, to) => editList(list, (l) => moveSymbol(l, row, to)),
     moveBy: (list, row, step) => editList(list, (l) => moveSymbolBy(l, row, step)),
     transfer: (from, to, row, how) => edit((lists) => transferSymbol(lists, from, to, row, how)),

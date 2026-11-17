@@ -520,7 +520,7 @@ function UngroupedHead({ count, drop }: { count: number; drop: HeadDrop }) {
 function GroupHead({ list, group, collapsed, naming, onNaming, drop }: { list: Watchlist; group: WatchGroup; collapsed: boolean; naming: boolean; onNaming: GroupNaming["onNaming"]; drop: HeadDrop }) {
   if (naming) return <div className={`${GROUP_HEAD} ${HEAD_FILL.idle} text-text`}><GroupNameInput list={list} group={group} onDone={() => onNaming(null)} /></div>;
   return (
-    <div className={`${GROUP_HEAD} ${HEAD_FILL[drop.state]} text-text`} onDragOver={drop.over} onDragLeave={drop.leave} onDrop={drop.drop}>
+    <div className={`group/head ${GROUP_HEAD} ${HEAD_FILL[drop.state]} text-text`} onDragOver={drop.over} onDragLeave={drop.leave} onDrop={drop.drop}>
       <button
         type="button"
         className="flex h-full min-w-0 flex-1 items-center gap-1.5 text-left"
@@ -535,6 +535,16 @@ function GroupHead({ list, group, collapsed, naming, onNaming, drop }: { list: W
         <span className={COUNT_BADGE}>{group.symbols.length}</span>
       </button>
       <DropNote drop={drop} />
+      <button
+        type="button"
+        className="icon-btn h-[22px] w-[22px] flex-none text-accent hover:text-accent opacity-0 group-focus-within/head:opacity-100 group-hover/head:opacity-100 [@media(hover:none)]:opacity-100 max-md:h-10 max-md:w-10 max-md:opacity-100"
+        title={`${group.name}에 종목 넣기`}
+        aria-label={`${group.name}에 종목 넣기`}
+        aria-haspopup="dialog"
+        onClick={() => useSelectionStore.getState().openSearch("watch", { listId: list.id, groupId: group.id })}
+      >
+        <PlusIcon size={14} />
+      </button>
       <GroupMenu list={list} group={group} onRename={() => onNaming(group.id)} />
     </div>
   );

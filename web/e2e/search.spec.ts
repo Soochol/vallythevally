@@ -313,7 +313,7 @@ test("시세의 첫 실패는 다시 받고 도중 실패에도 종목 열기를
   await expect(cell(page)).toHaveAttribute("aria-label", "칸 1: 삼성SDI 통합 일");
 });
 
-test("관심종목 용도로 연 검색은 미리보기의 Enter 안내도 관심종목 추가이며 차트를 바꾸지 않는다", async ({ page }) => {
+test("관심종목 용도로 연 검색은 미리보기의 Enter 안내도 넣기이며 차트를 바꾸지 않고 창을 닫지 않는다", async ({ page }) => {
   await page.goto("/");
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
   const before = await cell(page).getAttribute("aria-label");
@@ -324,10 +324,10 @@ test("관심종목 용도로 연 검색은 미리보기의 Enter 안내도 관�
   await input.fill("005930");
   await expect(dialog.getByRole("option")).toHaveAttribute("aria-disabled", "false");
   const preview = dialog.getByRole("complementary", { name: "종목 미리보기" });
-  await expect(preview.getByText("↵ 관심종목에 넣기", { exact: true })).toBeVisible();
+  await expect(preview.getByText("↵ 넣기", { exact: true })).toBeVisible();
   await expect(preview.getByText("↵ 이 칸에 열기", { exact: true })).toHaveCount(0);
   await input.press("Enter");
-  await expect(dialog).toBeHidden();
+  await expect(dialog).toBeVisible();
   await expect(watchlist.locator('li[data-code="005930"]')).toHaveCount(1);
   await expect(cell(page)).toHaveAttribute("aria-label", before!);
 });

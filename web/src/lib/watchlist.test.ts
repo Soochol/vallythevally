@@ -23,6 +23,7 @@ import {
   nextGroupName,
   nextListName,
   parseWatchlists,
+  putSymbol,
   removeSymbol,
   renameGroup,
   transferSymbol,
@@ -347,4 +348,32 @@ test("다른 목록으로 행을 옮겨도 원래 목록의 다른 그룹 소속
   const final = transferSymbol(after, "L", "T", { code: "2", groupId: "B" }, "move");
   expect(final[0]!.symbols).not.toContain("2");
   expect(final[1]!.symbols).toEqual(["2"]);
+});
+
+const withGroups = (): Watchlist => ({ id: "L", name: "기본", symbols: ["1", "2"], groups: [{ id: "g", name: "반도체", symbols: ["1"] }, { id: "h", name: "2차전지", symbols: ["2"] }] });
+
+test("넣을 곳이 그룹 없음이면 목록 끝에 넣고 이미 있으면 바꾸지 않는다", () => {
+  expect(putSymbol(withGroups(), "3", null)).toMatchObject({ outcome: "added", list: { symbols: ["1", "2", "3"] } });
+  const before = withGroups();
+  expect(putSymbol(before, "2", null)).toEqual({ list: before, outcome: "already" });
+});
+
+test("새 종목을 그룹에 넣으면 목록과 그 그룹에만 들어간다", () => {
+  const { list, outcome } = putSymbol(withGroups(), "3", "g");
+  expect(outcome).toBe("added");
+  expect(list.symbols).toEqual(["1", "2", "3"]);
+  expect(list.groups.map((g) => g.symbols)).toEqual([["1", "3"], ["2"]]);
+});
+
+test("이미 목록에 있는 종목은 그룹에 더하고 다른 그룹 소속은 그대로 둔다", () => {
+  const { list, outcome } = putSymbol(withGroups(), "2", "g");
+  expect(outcome).toBe("joined");
+  expect(list.symbols).toEqual(["1", "2"]);
+  expect(list.groups.map((g) => g.symbols)).toEqual([["1", "2"], ["2"]]);
+});
+
+test("이미 그 그룹에 있거나 그룹이 지워졌으면 목록을 바꾸지 않는다", () => {
+  const before = withGroups();
+  expect(putSymbol(before, "1", "g")).toEqual({ list: before, outcome: "already" });
+  expect(putSymbol(before, "3", "gone")).toEqual({ list: before, outcome: "missing" });
 });
