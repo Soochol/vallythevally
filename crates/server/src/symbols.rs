@@ -200,14 +200,12 @@ impl SymbolDirectory {
 
 pub struct ListingPages {
     pub rows: Vec<ListingRow>,
-    /// 쪽 수 상한에 닿았는데 다음 쪽이 남아 있었다. 끊긴 목록이다.
-    pub cut_off: bool,
+    pub stopped_at_page_limit_with_pages_left: bool,
 }
 
-/// ka10099를 `mrkt_tp=0`, `10`으로 연속조회 끝까지 불러 행을 그대로 모은다.
 pub async fn fetch_listing_rows(rest: &KiwoomRest, priority: Priority) -> Result<ListingPages, KiwoomError> {
     let mut rows = Vec::new();
-    let mut cut_off = false;
+    let mut stopped_at_page_limit_with_pages_left = false;
     for req in [StockList::EXCHANGE, StockList::KOSDAQ] {
         let mut cont = None;
         for _ in 0..MAX_LIST_PAGES {
@@ -218,9 +216,9 @@ pub async fn fetch_listing_rows(rest: &KiwoomRest, priority: Priority) -> Result
                 break;
             }
         }
-        cut_off |= cont.is_some();
+        stopped_at_page_limit_with_pages_left |= cont.is_some();
     }
-    Ok(ListingPages { rows, cut_off })
+    Ok(ListingPages { rows, stopped_at_page_limit_with_pages_left })
 }
 
 /// ka10099를 `mrkt_tp=0`, `10`으로 불러 목록을 만든다.

@@ -77,7 +77,7 @@ async fn fetch_stocks(rest: &KiwoomRest, previous: Option<&UniverseFile>) -> Fet
         Err(error) => return Fetched::Rejected(failed(error)),
     };
     let classified = model::classify_rows(&pages.rows);
-    if pages.cut_off {
+    if pages.stopped_at_page_limit_with_pages_left {
         return Fetched::Rejected(Rejection {
             reason: ReplaceReason::CutOff,
             detail: format!("연속조회가 쪽 수 상한({})에 닿았는데 다음 쪽이 남아 있습니다", server::symbols::MAX_LIST_PAGES),
@@ -148,7 +148,7 @@ pub async fn collect_after_close(rest: &KiwoomRest, data_dir: &Path, date: u32, 
     let pages = fetch_listing_rows(rest, Priority::Background)
         .await
         .map_err(|error| UniverseError::AfterCloseFetch { detail: error.to_string() })?;
-    if pages.cut_off {
+    if pages.stopped_at_page_limit_with_pages_left {
         return Err(UniverseError::AfterCloseFetch { detail: "연속조회가 쪽 수 상한에 닿았는데 다음 쪽이 남아 있습니다".into() });
     }
     let classified = model::classify_rows(&pages.rows);
