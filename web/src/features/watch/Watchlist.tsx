@@ -306,7 +306,7 @@ function WatchList({ variant, sender, editing, naming, onNaming, width = null }:
     setDragged(null);
     setHover(null);
   };
-  const howFor = (e: React.DragEvent, target: DropTarget): "move" | "copy" => (dragged?.groupId != null && target.groupId !== null && copyKeyHeld(e) ? "copy" : "move");
+  const howFor = (e: React.DragEvent, target: DropTarget): "move" | "copy" => (dragged?.groupId != null && target.groupId !== null && dragged.groupId !== target.groupId && copyKeyHeld(e) ? "copy" : "move");
   const hoverOver = (e: React.DragEvent, target: DropTarget) => {
     if (dragged === null) return;
     const how = howFor(e, target);
@@ -383,7 +383,7 @@ function WatchList({ variant, sender, editing, naming, onNaming, width = null }:
       );
     });
   };
-  const leave = (e: React.DragEvent) => e.currentTarget === e.target && setHover(null);
+  const leave = (e: React.DragEvent) => !e.currentTarget.contains(e.relatedTarget as Node | null) && setHover(null);
   const scrollClass = "min-h-0 flex-1 overflow-y-auto overflow-x-hidden";
 
   return (
