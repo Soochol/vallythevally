@@ -1,7 +1,7 @@
 import { selectMinute } from "./select-option";
 import type { Locator, Page } from "@playwright/test";
 import type { SeriesKey } from "../src/api/bars";
-import { cell, chartOf, expect, test } from "./harness";
+import { cell, chartOf, expect, test, pickDesktopVenue, expectDesktopVenue } from "./harness";
 
 function recordBarRequests(page: Page): SeriesKey[] {
   const seen: SeriesKey[] = [];
@@ -44,15 +44,14 @@ test.describe("데스크톱", () => {
     const expectCellShows = watchCell(page, "005930");
     await page.goto("/?symbol=005930");
     const toolbar = page.getByRole("toolbar", { name: "차트 도구 막대" });
-    const venues = page.getByRole("group", { name: "거래소" });
     const periods = toolbar.getByRole("group", { name: "봉 주기" });
     await expectCellShows("삼성전자 통합 일", "combined", "D");
 
-    await choose(venues, "KRX");
+    await pickDesktopVenue(page, "KRX");
     await expectCellShows("삼성전자 KRX 일", "krx", "D");
-    await choose(venues, "NXT");
+    await pickDesktopVenue(page, "NXT");
     await expectCellShows("삼성전자 NXT 일", "nxt", "D");
-    await choose(venues, "통합");
+    await pickDesktopVenue(page, "통합");
     await expectCellShows("삼성전자 통합 일", "combined", "D");
 
     for (const [button, period] of [["주", "W"], ["월", "M"], ["5분", "5m"], ["1분", "1m"], ["일", "D"]] as const) {
@@ -64,12 +63,9 @@ test.describe("데스크톱", () => {
   test("NXT에서 거래되지 않는 종목은 NXT를 눌러도 통합 봉을 그리고 위 막대는 NXT로 남는다", async ({ page }) => {
     const expectCellShows = watchCell(page, "005935");
     await page.goto("/?symbol=005935");
-    const venues = page.getByRole("group", { name: "거래소" });
     await expectCellShows("삼성전자우 통합 일", "combined", "D");
-    const nxt = venues.getByRole("button", { name: "NXT", exact: true });
-    await expect(nxt).not.toHaveAttribute("aria-disabled", "true");
-    await nxt.click();
-    await expect(nxt).toHaveAttribute("aria-pressed", "true");
+    await pickDesktopVenue(page, "NXT");
+    await expectDesktopVenue(page, "NXT");
     await expectCellShows("삼성전자우 통합 일", "combined", "D");
     await expect(cell(page).getByText("통합", { exact: true })).toBeVisible();
   });

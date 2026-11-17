@@ -5,7 +5,7 @@ import { toChartTime } from "../src/chart/time";
 import { TOOLS } from "../src/chart/drawings/tools";
 import { installChartProbe } from "./chart-probe";
 import { expandDock } from "./drawing-probe";
-import { cell, chartOf, expect, type Scenario, test } from "./harness";
+import { cell, chartOf, expect, type Scenario, test, pickDesktopVenue, expectDesktopVenue } from "./harness";
 
 test.use({ clockStart: "20261109100000", actionTimeout: 10_000 });
 
@@ -194,12 +194,11 @@ for (const pinned of [false, true]) test(`minimum canvas toolbar retains help, m
   }
   expect(storedPresentation(scenario)).toBe(saved);
   expect(storedDocuments(scenario)).toBe(documents);
-  const venues = page.getByRole("group", { name: "거래소" });
-  await venues.getByRole("button", { name: "KRX", exact: true }).click();
+  await pickDesktopVenue(page, "KRX");
   await expect(cell(page)).toHaveAttribute("aria-label", "칸 1: 삼성전자 KRX 일");
   await expect.poll(() => scenario.documents.layout().windows.find((window) => window.kind === "chart")?.venue).toBe("combined");
   await expect.poll(() => scenario.documents.uiState().venue).toBe("krx");
-  await venues.getByRole("button", { name: "통합", exact: true }).click();
+  await pickDesktopVenue(page, "통합");
   await expect(cell(page)).toHaveAttribute("aria-label", "칸 1: 삼성전자 통합 일");
   await expect.poll(() => scenario.documents.uiState().venue).toBe("combined");
   await settle(page, 1);
@@ -259,12 +258,10 @@ test("compact controls support hover, keyboard, venue, settings, collapse, toolb
   await settle(page, 4);
   readable(await geometry(page));
   const current = cell(page);
-  const venue = page.getByRole("group", { name: "거래소" }).getByRole("button", { name: "KRX", exact: true });
-  await venue.focus();
-  await page.keyboard.press("Enter");
+  await pickDesktopVenue(page, "KRX");
   await expect(current).toHaveAttribute("aria-label", "칸 1: 삼성전자 KRX 일");
-  await expect(venue).toHaveAttribute("aria-pressed", "true");
-  await page.getByRole("group", { name: "거래소" }).getByRole("button", { name: "통합", exact: true }).click();
+  await expectDesktopVenue(page, "KRX");
+  await pickDesktopVenue(page, "통합");
   await settle(page, 4);
   const volume = current.locator("[data-indicator-row]");
   await volume.hover();

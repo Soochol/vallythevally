@@ -1,7 +1,7 @@
 import type { Page } from "@playwright/test";
 import type { Quote } from "../src/api/generated/Quote";
 import type { Venue } from "../src/api/generated/Venue";
-import { type Scenario, cell, expect, test } from "./harness";
+import { type Scenario, cell, expect, test, pickDesktopVenue } from "./harness";
 
 test.use({ clockStart: "20261109100000" });
 
@@ -15,7 +15,6 @@ const PRICES: Record<Venue, Record<string, number>> = {
 const panel = (page: Page) => page.getByRole("complementary", { name: "관심종목" });
 const row = (page: Page, code: string) => panel(page).locator(`li[data-code="${code}"]`);
 const main = (page: Page, code: string) => row(page, code).locator("[data-main]");
-const venueButton = (page: Page, name: string) => page.getByRole("toolbar", { name: "차트 도구 막대" }).getByRole("group", { name: "거래소", exact: true }).getByRole("button", { name, exact: true });
 const fallbackBadge = (page: Page, code: string) => row(page, code).getByText("통합", { exact: true });
 
 function quoteIn(requested: Venue, symbol: string): Quote {
@@ -77,7 +76,7 @@ test("위 막대에서 KRX를 누르면 시세 조회와 watch가 KRX로 다시 
   await expect(main(page, "005930")).toHaveAccessibleName(/^삼성전자 71,000 /);
 
   const release = served.holdUntilReleased("krx");
-  await venueButton(page, "KRX").click();
+  await pickDesktopVenue(page, "KRX");
   await expect.poll(() => served.requests.at(-1)).toEqual({ symbols: WATCHED, venue: "krx" });
   await expect.poll(() => lastWatch(scenario)).toEqual({ symbols: WATCHED, venue: "krx" });
   await expect(main(page, "005930")).toHaveAccessibleName("삼성전자");
@@ -95,7 +94,7 @@ test("KRX인 동안 실시간으로 온 시세가 줄에 반영되고 옛 거래
   serveQuotes(scenario);
   await page.goto("/");
   await expect(main(page, "005930")).toHaveAccessibleName(/^삼성전자 71,000 /);
-  await venueButton(page, "KRX").click();
+  await pickDesktopVenue(page, "KRX");
   await expect(main(page, "005930")).toHaveAccessibleName(/^삼성전자 70,500 /);
 
   scenario.live.emit({ type: "quotes", venue: "krx", quotes: [{ ...quoteIn("krx", "005930"), price: 70_700, source: "realtime" }] });
@@ -111,7 +110,7 @@ test("NXT를 누르면 NXT 불가 종목의 줄에만 통합 표시가 붙고 �
   await page.goto("/");
   await expect(main(page, "005930")).toHaveAccessibleName(/^삼성전자 71,000 /);
 
-  await venueButton(page, "NXT").click();
+  await pickDesktopVenue(page, "NXT");
   await expect.poll(() => served.requests.at(-1)).toEqual({ symbols: WATCHED, venue: "nxt" });
   await expect.poll(() => lastWatch(scenario)).toEqual({ symbols: WATCHED, venue: "nxt" });
   await expect(main(page, "005930")).toHaveAccessibleName(/^삼성전자 70,800 /);
@@ -121,7 +120,7 @@ test("NXT를 누르면 NXT 불가 종목의 줄에만 통합 표시가 붙고 �
   await expect(fallbackBadge(page, "IDX:001")).toHaveCount(0);
   await expect(main(page, "IDX:001")).not.toHaveAccessibleName(/통합 시세/);
 
-  await venueButton(page, "통합").click();
+  await pickDesktopVenue(page, "통합");
   await expect(main(page, "005935")).toHaveAccessibleName(/^삼성전자우 52,000 /);
   await expect(fallbackBadge(page, "005935")).toHaveCount(0);
 });
@@ -131,7 +130,7 @@ test("새로고침하면 저장된 앱 전체 거래소로 시세를 묻는다",
   const served = serveQuotes(scenario);
   await page.goto("/");
   await expect(main(page, "005930")).toHaveAccessibleName(/^삼성전자 71,000 /);
-  await venueButton(page, "KRX").click();
+  await pickDesktopVenue(page, "KRX");
   await expect(main(page, "005930")).toHaveAccessibleName(/^삼성전자 70,500 /);
   await expect.poll(() => scenario.documents.uiState().venue).toBe("krx");
 
@@ -157,7 +156,7 @@ test("종목 검색을 열면 시세를 앱 전체 거래소로 묻고, 거래�
   await page.keyboard.press("Escape");
   await expect(dialog).toHaveCount(0);
 
-  await venueButton(page, "KRX").click();
+  await pickDesktopVenue(page, "KRX");
   await expect.poll(() => scenario.documents.uiState().venue).toBe("krx");
   await page.keyboard.press("/");
   await dialog.getByRole("combobox").fill("ㅅㅅ");

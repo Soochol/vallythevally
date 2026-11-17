@@ -4,7 +4,7 @@ import type { Locator, Page } from "@playwright/test";
 import type { LayoutWindow } from "../src/api/generated/LayoutWindow";
 import type { LinkColor } from "../src/api/generated/LinkColor";
 import type { Venue } from "../src/api/generated/Venue";
-import { type Scenario, cell, chartOf, DEFAULT_LAYOUT_ID, expect, SEARCH_BUTTON_TITLE, test, windowTabs } from "./harness";
+import { type Scenario, cell, chartOf, DEFAULT_LAYOUT_ID, expect, SEARCH_BUTTON_TITLE, test, windowTabs, expectDesktopVenue } from "./harness";
 
 const SCREENS = path.resolve("../target/ux-screens");
 const SETTINGS = { v: 1, style: "candle", scale: "normal", indicators: [], compare: [], panels: [] };
@@ -144,7 +144,7 @@ test("주소로 연 종목은 같은 색의 차트로 퍼지고, venue는 앱 �
 
   await page.goto("/?symbol=005935&venue=nxt");
   await expect(toast(page, "연동 A: 차트 2개가 삼성전자우로 바뀌었습니다")).toBeVisible();
-  await expect(page.getByRole("group", { name: "거래소", exact: true }).getByRole("button", { name: "NXT", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await expectDesktopVenue(page, "NXT");
   await drawn(cell(page, 1), /^칸 1: 삼성전자우 통합 일$/);
   await drawn(cell(page, 2), /^칸 2: 삼성전자우 통합 주$/);
   await expect(cell(page, 3)).toHaveAttribute("aria-label", /^칸 3: SK하이닉스 /);

@@ -1,4 +1,4 @@
-import { cell, chartOf, expect, test } from "./harness";
+import { cell, chartOf, expect, test, pickDesktopVenue, expectDesktopVenue } from "./harness";
 
 for (const initialFailure of [true, false]) {
   test(initialFailure ? "처음 연 거래소 조회가 실패해도 위 막대에서 다른 거래소로 복구한다" : "거래소를 바꾼 뒤 조회가 실패해도 위 막대에서 다른 거래소로 복구한다", async ({ page }, info) => {
@@ -6,17 +6,16 @@ for (const initialFailure of [true, false]) {
       ? route.fulfill({ status: 503, json: { error: { code: "kiwoom_unavailable", message: "시험용 KRX 조회 실패" } } })
       : route.fallback());
     await page.goto(initialFailure ? "/?symbol=005930&venue=krx" : "/?symbol=005930");
-    const venues = page.getByRole("group", { name: "거래소", exact: true });
     if (!initialFailure) {
       await expect(cell(page)).toHaveAttribute("aria-busy", "false");
       await expect(chartOf(cell(page))).not.toHaveAttribute("data-bar-count", "0");
-      await venues.getByRole("button", { name: "KRX", exact: true }).click();
+      await pickDesktopVenue(page, "KRX");
     }
     await expect(cell(page).getByRole("button", { name: "다시 시도", exact: true })).toBeVisible();
-    await expect(venues.getByRole("button", { name: "KRX", exact: true })).toHaveAttribute("aria-pressed", "true");
+    await expectDesktopVenue(page, "KRX");
     await expect(cell(page).getByText("삼성전자", { exact: true })).toBeVisible();
     await page.screenshot({ path: info.outputPath("venue-error.png") });
-    await venues.getByRole("button", { name: "통합", exact: true }).click({ timeout: 3000 });
+    await pickDesktopVenue(page, "통합");
     await expect(cell(page)).toHaveAttribute("aria-label", "칸 1: 삼성전자 통합 일");
     await expect(cell(page)).toHaveAttribute("aria-busy", "false");
     await expect(cell(page).getByRole("button", { name: "다시 시도", exact: true })).toHaveCount(0);

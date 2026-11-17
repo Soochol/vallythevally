@@ -2,7 +2,7 @@ import type { Page } from "@playwright/test";
 import { type ChartSettings, DEFAULT_CHART_SETTINGS, type IndicatorConfig } from "../src/chart/settings";
 import type { Bar } from "../src/api/generated/Bar";
 import { installChartProbe } from "./chart-probe";
-import { type Scenario, cell, chartOf, DEFAULT_LAYOUT_ID, expect, saveChartShare, test, firstChart, withFirstChart } from "./harness";
+import { type Scenario, cell, chartOf, DEFAULT_LAYOUT_ID, expect, saveChartShare, test, firstChart, withFirstChart, pickDesktopVenue } from "./harness";
 import { selectMinute } from "./select-option";
 
 const RIGHT_OFFSET = 6;
@@ -362,7 +362,6 @@ const ohlcCells = (bar: Bar, prev: Bar | null) => [
 const PRICE_MA: IndicatorConfig = { id: "ma-price", spec: { kind: "ma", method: "sma", period: 5 }, panel: "price", visible: true, style: { colors: ["ind-2"], width: 1 } };
 const VOLUME_ID = DEFAULT_CHART_SETTINGS.indicators[0]!.id;
 const legendSwitch = (page: Page) => popover(page).getByRole("switch", { name: /^범례/ });
-const venues = (page: Page) => page.getByRole("group", { name: "거래소", exact: true });
 const fallbackBadge = (page: Page) => cell(page).getByText("통합", { exact: true });
 
 function showFallbackBadge(scenario: Scenario) {
@@ -443,9 +442,9 @@ test("범례를 끈 채 거래소 조회가 실패해도 위 막대에서 다른
     : route.fallback());
   await open(page);
   await expect(ohlc(page)).toBeVisible();
-  await venues(page).getByRole("button", { name: "KRX", exact: true }).click();
+  await pickDesktopVenue(page, "KRX");
   await expect(cell(page).getByRole("button", { name: "다시 시도", exact: true })).toBeVisible();
-  await venues(page).getByRole("button", { name: "통합", exact: true }).click({ timeout: 3000 });
+  await pickDesktopVenue(page, "통합");
   await expect(cell(page)).toHaveAttribute("aria-label", /: 삼성전자 통합 일$/);
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
   await expect(ohlc(page)).toBeVisible();
