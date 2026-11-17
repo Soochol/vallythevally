@@ -74,3 +74,9 @@ export async function pickDesktopVenue(page: Page, venue: VenueName): Promise<vo
 }
 
 export const expectDesktopVenue = (page: Page, venue: VenueName) => expect(desktopVenueCombo(page)).toHaveAttribute("data-value", VENUE_VALUE[venue]);
+
+export async function fixedWait(page: Page, ms: number, reason: string): Promise<void> {
+  if (!reason.trim()) throw new Error("fixedWait에는 이유가 필요합니다");
+  test.info().annotations.push({ type: "fixed-wait", description: `${ms}ms ${reason}` });
+  await page.waitForTimeout(ms);
+}
