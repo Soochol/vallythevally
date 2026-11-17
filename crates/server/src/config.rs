@@ -56,7 +56,7 @@ impl fmt::Display for ConfigError {
 
 impl std::error::Error for ConfigError {}
 
-/// 받는 주소. 루프백만 받는다(ADR 0001).
+/// 받는 주소. 루프백만 받는다.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BindAddr(SocketAddr);
 
