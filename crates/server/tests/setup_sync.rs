@@ -667,3 +667,22 @@ async fn an_older_setup_imported_on_a_signed_in_pc_survives_the_next_sync_and_re
     assert_eq!(a.get("/api/watchlists").await.1["lists"][0]["name"], "기본");
     assert_eq!(a.snapshot().await, b.snapshot().await);
 }
+
+#[tokio::test]
+async fn an_import_also_beats_an_account_copy_whose_revision_is_ahead_of_this_pcs_clock() {
+    let pair = pair().await;
+    let (a, b) = (&pair.a, &pair.b);
+    fill(a).await;
+    a.synced().await;
+    let earlier = a.export().await;
+    b.synced().await;
+    b.saved("/api/watchlists", &watchlists("빠른 시계 PC", 9_000_000_000_000)).await;
+    b.synced().await;
+    a.synced().await;
+    assert_eq!(a.put("/api/setup/import", &earlier).await.0, 200);
+    a.synced().await;
+    b.synced().await;
+    a.synced().await;
+    assert_eq!(a.get("/api/watchlists").await.1["lists"][0]["name"], "기본");
+    assert_eq!(a.snapshot().await, b.snapshot().await);
+}

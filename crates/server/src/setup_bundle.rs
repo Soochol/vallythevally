@@ -234,10 +234,11 @@ impl From<DrawingError> for StoreFault {
 async fn replace_all(db: &AppDb, setup: &Setup, now: UnixSeconds) -> Result<(), ApiFailure> {
     let internal = |e: sqlx::Error| ApiFailure::from(StoreError::from(e));
     let mut tx = db.begin_write().await.map_err(internal)?;
+    let newest_known: Option<i64> = sqlx::query_scalar("SELECT MAX(revision) FROM sync_documents").fetch_one(&mut *tx).await.map_err(internal)?;
     replace_all_in(&mut tx, setup, now).await?;
     let owned: Option<i64> = sqlx::query_scalar("SELECT 1 FROM local_owner WHERE singleton = 1").fetch_optional(&mut *tx).await.map_err(internal)?;
     if owned.is_some() {
-        sync_log::raise_revisions(&mut tx, now.millis()).await.map_err(internal)?;
+        sync_log::raise_revisions(&mut tx, now.millis().max(newest_known.map_or(0, |newest| newest + 1))).await.map_err(internal)?;
     }
     tx.commit().await.map_err(internal)?;
     Ok(())
