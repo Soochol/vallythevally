@@ -1,6 +1,7 @@
 import { beforeEach, expect, test } from "vitest";
 import { DEFAULT_CHART_SETTINGS } from "../chart/settings";
 import { detachWindow, moveFloat } from "../layout/dock/floats";
+import { useSelectionStore } from "./selection";
 import { useUiStore } from "./ui";
 import { layoutDock } from "../layout/dock/geometry";
 import { groupOfWindow, listGroups } from "../layout/dock/tree";
@@ -435,4 +436,13 @@ test("창이 열두 개이면 없는 종류와 차트는 더하지 못하고 열
   state().showWindow("trades");
   expect(state().layout.windows).toHaveLength(MAX_WINDOWS);
   expect(shownTab("trades")).toBe(true);
+});
+
+test("창이 열두 개라 지표 창을 더하지 못하면 인스펙터 요청을 남기지 않고 가운데 창으로 연다", () => {
+  for (const kind of ["trades", "book", "program", "brokers"] as const) state().showWindow(kind);
+  while (state().layout.windows.length < MAX_WINDOWS) state().addChart(firstChart().id, room);
+  useSelectionStore.getState().openIndicatorInspector(firstChart().id, "add", null);
+  expect(state().layout.windows.some((w) => w.kind === "indicators")).toBe(false);
+  expect(useSelectionStore.getState().inspector).toBeNull();
+  expect(useSelectionStore.getState().dialog).toMatchObject({ kind: "indicatorCommand", cellId: firstChart().id, mode: "add" });
 });
