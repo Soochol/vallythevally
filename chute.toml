@@ -12,7 +12,7 @@ run = "env VALLY_COMPILE_LANE=gate python3 scripts/web.py check"
 
 [[verify]]
 name = "clippy"
-run = "env VALLY_COMPILE_LANE=gate python3 scripts/dev.py cargo clippy -p server -p hoga-format -p collector --all-targets -- -D warnings"
+run = "env VALLY_COMPILE_LANE=gate python3 scripts/dev.py cargo clippy -p server -p hoga-format -p collector -p account-server --all-targets -- -D warnings"
 paths = ["crates/", "Cargo.toml", "Cargo.lock"]
 
 [[verify]]
@@ -25,6 +25,18 @@ paths = [
   "crates/server/",
   "crates/domain/",
   "crates/indicators/",
+  "Cargo.toml",
+  "Cargo.lock",
+  ".cargo/",
+]
+
+[[verify]]
+name = "account-server-test"
+run = "env VALLY_COMPILE_LANE=gate python3 scripts/dev.py cargo test -p account-server"
+failed = 'test (\S+) \.\.\. FAILED'
+paths = [
+  "crates/account-server/",
+  "crates/setup/",
   "Cargo.toml",
   "Cargo.lock",
   ".cargo/",

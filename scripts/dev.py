@@ -235,7 +235,7 @@ def needs_duckdb(command):
             packages.append(head[index + 1])
         elif arg.startswith("--package="):
             packages.append(arg.removeprefix("--package="))
-    return "--workspace" in head or not packages or any(name not in ("domain", "indicators", "indicators-wasm") for name in packages)
+    return "--workspace" in head or not packages or any(name not in ("domain", "indicators", "indicators-wasm", "account-server") for name in packages)
 
 
 COMPILE_LANE_ENV = "VALLY_COMPILE_LANE"
