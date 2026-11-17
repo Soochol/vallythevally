@@ -232,6 +232,7 @@ pub fn parse_holiday_response(year: u16, body: &str) -> Result<Vec<Holiday>, Bad
     };
     if let Some(total) = body.get("totalCount") {
         let total = text_of(total)
+            .filter(|text| !text.is_empty() && text.bytes().all(|byte| byte.is_ascii_digit()))
             .and_then(|text| text.parse::<u64>().ok())
             .ok_or(BadResponse::UnexpectedShape)?;
         if total > items.len() as u64 {
@@ -347,7 +348,7 @@ mod tests {
     #[test]
     fn total_count_that_is_not_a_plain_integer_is_rejected() {
         let one = format!(r#"{{"item":[{}]}}"#, item(20260101, "1월1일", "Y"));
-        for count in ["8.0", "\" 8\"", "null", "-1", "\"many\""] {
+        for count in ["8.0", "\" 8\"", "null", "-1", "\"many\"", "\"+2\""] {
             let body = response(&one, 1).replace(r#""totalCount":1"#, &format!(r#""totalCount":{count}"#));
             assert_eq!(parse_holiday_response(2026, &body), Err(BadResponse::UnexpectedShape), "{count}");
         }

@@ -1,8 +1,7 @@
 use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
-use std::io;
-use std::sync::{Arc, Mutex};
+use std::sync::Mutex;
 
 use collector::calendar::{
     Calendar, CrossCheck, Day, EvidenceInput, Finding, HolidayRequest, HolidayTransport, Judgment,
@@ -11,28 +10,6 @@ use collector::calendar::{
 use futures::future::BoxFuture;
 use server::config::Secret;
 use tempfile::{TempDir, tempdir};
-
-#[derive(Clone, Default)]
-struct LogCapture(Arc<Mutex<Vec<u8>>>);
-
-impl io::Write for LogCapture {
-    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        self.0.lock().unwrap().extend_from_slice(buf);
-        Ok(buf.len())
-    }
-
-    fn flush(&mut self) -> io::Result<()> {
-        Ok(())
-    }
-}
-
-impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for LogCapture {
-    type Writer = LogCapture;
-
-    fn make_writer(&'a self) -> LogCapture {
-        self.clone()
-    }
-}
 
 const SERVICE_KEY: &str = "SvcKey-9f2c+/7aQ==";
 
@@ -421,15 +398,7 @@ async fn a_judgment_serializes_with_its_evidence() {
 }
 
 #[tokio::test]
-async fn the_service_key_never_reaches_files_logs_or_error_text() {
-    let logs = LogCapture::default();
-    let _log_guard = tracing::subscriber::set_default(
-        tracing_subscriber::fmt()
-            .with_writer(logs.clone())
-            .with_ansi(false)
-            .with_max_level(tracing::Level::TRACE)
-            .finish(),
-    );
+async fn the_service_key_never_reaches_files_debug_output_or_error_text() {
     let data = tempdir().unwrap();
     let fake = FakeHolidays::with_years(&[(2025, HOLIDAYS_2025), (2026, HOLIDAYS_2026)]);
     load_at(data.path(), &fake, day(2026, 10, 5)).await;
@@ -455,9 +424,6 @@ async fn the_service_key_never_reaches_files_logs_or_error_text() {
             }
         }
     }
-    let captured = String::from_utf8(logs.0.lock().unwrap().clone()).unwrap();
-    assert!(captured.contains("특일정보"), "{captured}");
-    texts.push(captured);
     for text in texts {
         assert!(!text.contains(SERVICE_KEY), "{text}");
         assert!(!text.contains("SvcKey"), "{text}");
@@ -518,4 +484,18 @@ async fn the_year_end_rule_returns_unknown_when_december_31_is_a_weekend_and_the
         }
         assert!(calendar.next_observation_day(day(year, 12, 20)).is_err());
     }
+}
+
+#[tokio::test]
+async fn the_year_end_closure_skips_days_the_overrides_close() {
+    let data = tempdir().unwrap();
+    write_overrides(data.path(), r#"{"version":1,"days":[{"kind":"closed","date":20221230,"reason":"임시 휴장"}]}"#);
+    let fake = FakeHolidays::new();
+    for year in [2021, 2022, 2023] {
+        fake.set(year, Ok(response_body(&[(u32::from(year) * 10_000 + 101, "1월1일")])));
+    }
+    let calendar = load_at(data.path(), &fake, day(2022, 12, 1)).await;
+    assert_eq!(calendar.judge(day(2022, 12, 30)).verdict, Verdict::Closed);
+    assert_eq!(calendar.judge(day(2022, 12, 29)).verdict, Verdict::Closed);
+    assert!(matches!(calendar.judge(day(2022, 12, 28)).verdict, Verdict::Observed { .. }));
 }

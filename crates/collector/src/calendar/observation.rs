@@ -136,7 +136,7 @@ impl Calendar {
             Finding::Closed => {
                 let mut closing_day = year_end.previous();
                 loop {
-                    match self.base_status(closing_day) {
+                    match self.observation_status(closing_day) {
                         Finding::Closed => closing_day = closing_day.previous(),
                         Finding::Unknown => return unknown("직전 관측일을 알 수 없다"),
                         Finding::Open => break,
@@ -154,6 +154,14 @@ impl Calendar {
             }
         }
         (Finding::Open, "KRX 고정 휴장일이 아니다".to_owned())
+    }
+
+    fn observation_status(&self, day: Day) -> Finding {
+        match (self.base_status(day), &self.overrides) {
+            (Finding::Open, Ok(overrides)) if overrides.closure_reason(day).is_some() => Finding::Closed,
+            (Finding::Open, Err(_)) => Finding::Unknown,
+            (status, _) => status,
+        }
     }
 
     fn base_status(&self, day: Day) -> Finding {
