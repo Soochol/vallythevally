@@ -8,7 +8,7 @@ import type { KiwoomLinkStatus } from "../src/api/generated/KiwoomLinkStatus";
 import type { PublicIpCheck } from "../src/api/generated/PublicIpCheck";
 import type { RegisteredIpInput } from "../src/api/generated/RegisteredIpInput";
 import type { SyncStatus } from "../src/api/generated/SyncStatus";
-import { cell, expect, test, type Scenario } from "./harness";
+import { cell, chartOf, expect, test, type Scenario } from "./harness";
 import { CONNECTED_KIWOOM, SYNCED } from "./fixtures/scenario";
 
 const SCREENS = path.resolve("../target/ux-screens");
@@ -226,6 +226,17 @@ for (const viewport of [{ name: "1440×900", width: 1440, height: 900, tag: "des
       await expect(wizard(page)).toHaveCount(0);
     });
 
+    test("마법사가 열려 있는 동안 차트 단축키는 일하지 않는다", async ({ page, scenario }) => {
+      scenario.live.account = signedIn();
+      scenario.live.kiwoomLink = NO_KEY;
+      await justLoggedIn(page);
+      await page.goto("/");
+      await wizard(page).getByRole("heading", { name: "처음 설정" }).click();
+      await page.keyboard.press("/");
+      await expect(page.getByRole("dialog")).toHaveCount(1);
+      await expect(wizard(page)).toBeVisible();
+    });
+
     test("마법사 단계와 단추가 화면 안에 들어온다", async ({ page, scenario }) => {
       scenario.live.account = signedIn();
       scenario.live.kiwoomLink = NO_KEY;
@@ -275,5 +286,85 @@ test.describe("동기화 표시와 로컬 전용", () => {
     await expect(cell(page)).toHaveAttribute("aria-busy", "false");
     await expect(indicator(page)).toHaveCount(0);
     await expect(wizard(page)).toHaveCount(0);
+  });
+});
+
+test.describe("셋업 알림과 선택 대기의 경계", () => {
+  test.use({ viewport: { width: 1440, height: 900 } });
+
+  const notice = (page: Page) => page.getByRole("status").filter({ hasText: "다른 PC에서 바뀐 셋업이 있습니다" });
+  const uiStateReads = (scenario: Scenario) => scenario.requests.filter((r) => r.method() === "GET" && new URL(r.url()).pathname === "/api/ui-state").length;
+
+  test("복원하는 도중에 온 setup_changed도 복원이 끝나면 알림으로 보인다", async ({ page, scenario }) => {
+    scenario.live.account = signedIn();
+    let release = () => {};
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    let received = () => {};
+    const arrived = new Promise<void>((resolve) => { received = resolve; });
+    let first = true;
+    scenario.on((url, request) => first && url.pathname.startsWith("/api/layouts") && request.method() === "GET", async (request) => {
+      first = false;
+      received();
+      await gate;
+      return scenario.respond(request);
+    });
+    await page.goto("/?symbol=005930");
+    await arrived;
+    scenario.live.emit({ type: "setup_changed", kinds: ["watchlists"] });
+    release();
+    await expect(cell(page)).toHaveAttribute("aria-busy", "false");
+    await expect(notice(page)).toBeVisible();
+  });
+
+  test("저장이 끝나지 않아도 알림은 나중에로 닫을 수 있고, 저장이 끝나기 전에는 새로 고치지 않는다", async ({ page, scenario }) => {
+    scenario.live.account = signedIn();
+    await page.goto("/?symbol=005930");
+    await expect(cell(page)).toHaveAttribute("aria-busy", "false");
+    const held = scenario.hold((url, request) => url.pathname.startsWith("/api/layouts/") && request.method() === "PUT");
+    await page.getByRole("toolbar", { name: "차트 도구 막대" }).getByRole("group", { name: "봉 주기" }).getByRole("button", { name: "주", exact: true }).click();
+    await held.received;
+    scenario.live.emit({ type: "setup_changed", kinds: ["layout"] });
+    const before = uiStateReads(scenario);
+    await notice(page).getByRole("button", { name: "새로 고침" }).click();
+    await expect(notice(page).getByRole("button", { name: "나중에" })).toBeEnabled();
+    await page.waitForTimeout(1500);
+    expect(uiStateReads(scenario)).toBe(before);
+    await notice(page).getByRole("button", { name: "나중에" }).click();
+    await expect(notice(page)).toHaveCount(0);
+  });
+
+  test("드로잉 저장이 끝나지 않았으면 새로 고치지 않는다", async ({ page, scenario }) => {
+    scenario.live.account = signedIn();
+    const loaded = page.waitForResponse((response) => response.url().includes("/api/drawings?") && response.request().method() === "GET");
+    await page.goto("/");
+    await (await loaded).finished();
+    await expect(chartOf(cell(page))).toHaveAttribute("data-bar-count", /^[1-9]\d*$/);
+    await expect(page.getByRole("contentinfo")).toContainText("자동 저장됨");
+    const held = scenario.hold((url, request) => url.pathname.startsWith("/api/drawings/") && request.method() === "PUT");
+    const bounds = await chartOf(cell(page)).boundingBox();
+    await cell(page).focus();
+    await page.keyboard.press("H");
+    await page.mouse.click(bounds!.x + bounds!.width * 0.75, bounds!.y + bounds!.height * 0.4);
+    await held.received;
+    scenario.live.emit({ type: "setup_changed", kinds: ["drawing"] });
+    const before = uiStateReads(scenario);
+    await notice(page).getByRole("button", { name: "새로 고침" }).click();
+    await page.waitForTimeout(1500);
+    expect(uiStateReads(scenario)).toBe(before);
+  });
+
+  test("실행 중이던 탭에 needs_choice가 오면 고르기 전에 셋업을 읽지 않는다", async ({ page, scenario }) => {
+    scenario.live.account = signedIn();
+    await page.goto("/?symbol=005930");
+    await expect(cell(page)).toHaveAttribute("aria-busy", "false");
+    scenario.live.setAccount({ state: "signed_out" });
+    await expect(page.getByRole("heading", { name: "로그인", exact: true })).toBeVisible();
+    const before = scenario.requests.length;
+    scenario.live.setAccount(signedIn(NEEDS_CHOICE));
+    await expect(wizard(page)).toBeVisible();
+    await page.waitForTimeout(1000);
+    const reads = scenario.requests.slice(before).filter((r) => r.method() === "GET" && /^\/api\/(layouts|watchlists|ui-state|screens|drawings)/.test(new URL(r.url()).pathname));
+    expect(reads).toHaveLength(0);
+    await expect(cell(page)).toHaveCount(0);
   });
 });

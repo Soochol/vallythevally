@@ -3,6 +3,7 @@ import { loadKiwoomLink } from "../../api/system";
 import type { InitialSyncChoice } from "../../api/generated/InitialSyncChoice";
 import { useAccountStore } from "../../stores/account";
 import { useKiwoomLinkStore } from "../../stores/kiwoomLink";
+import { useSetupChangeStore } from "../../stores/setupChange";
 import { PROVIDER_NAME } from "../account/provider";
 import { KiwoomIpHelp } from "../system-settings/KiwoomIpHelp";
 import { KiwoomKeyForm } from "../system-settings/KiwoomKeyForm";
@@ -75,7 +76,7 @@ function WizardBody({ initial }: { initial: WizardStepId }) {
         {step === "connect" && (
           <KiwoomStatusCard status={panel.status} view={panel.view} confirmations={panel.confirmations} onConfirm={panel.confirm} busy={panel.command.busy} onConnect={panel.connect} onDisconnect={panel.disconnect} onRecheckTokenFile={panel.recheckTokenFile} />
         )}
-        {step === "setup" && <SetupStepPanel sync={account.sync} chosen={chosen} onChosen={setChosen} />}
+        {step === "setup" && <SetupStepPanel sync={account.sync} chosen={chosen} onChosen={(choice) => { setChosen(choice); useSetupChangeStore.setState({ kinds: [] }); }} />}
         {step !== "setup" && panel.command.error && <p role="alert" className="text-m text-danger">{panel.command.error}</p>}
       </div>
 

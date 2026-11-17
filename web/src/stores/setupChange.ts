@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import type { DocumentKind } from "../api/generated/DocumentKind";
-import { usePersistStore } from "./persist";
+import { useAccountStore } from "./account";
 
 interface SetupChangeStore {
   kinds: readonly DocumentKind[];
@@ -13,6 +13,7 @@ export const useSetupChangeStore = create<SetupChangeStore>()((set) => ({
 }));
 
 export const receiveSetupChanged = (kinds: readonly DocumentKind[]) => {
-  if (usePersistStore.getState().phase.kind !== "ready") return;
+  const account = useAccountStore.getState().status;
+  if (account?.state === "signed_in" && account.sync.state === "needs_choice") return;
   useSetupChangeStore.getState().receive(kinds);
 };

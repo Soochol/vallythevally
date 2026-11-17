@@ -15,7 +15,7 @@ import { ScreenDialog } from "./features/screen-dialog/ScreenDialog";
 import { PhoneScreener } from "./features/screener/ScreenerPanel";
 import { LoginScreen } from "./features/account/LoginScreen";
 import { SetupWizard } from "./features/setup-wizard/SetupWizard";
-import { useWizardOpening, useWizardStore, wizardVisible } from "./features/setup-wizard/wizardOpen";
+import { needsChoice, useWizardOpening, useWizardStore, wizardVisible } from "./features/setup-wizard/wizardOpen";
 import { SetupChangedNotice } from "./features/status/SetupChangedNotice";
 import { ReplaceLocalScreen } from "./features/account/ReplaceLocalScreen";
 import { useAccountStore } from "./stores/account";
@@ -44,7 +44,7 @@ export function ChartRoute() {
   if (account?.state === "owner_mismatch") return <ReplaceLocalScreen status={account} />;
   return (
     <>
-      {restoring ? <div className="h-dvh bg-bg" aria-busy="true" aria-label="마지막 화면을 불러오는 중" /> : <ChartScreen />}
+      {restoring || needsChoice(account) ? <div className="h-dvh bg-bg" aria-busy="true" aria-label="마지막 화면을 불러오는 중" /> : <ChartScreen />}
       {wizardVisible(account, wizardOpen) && <SetupWizard />}
     </>
   );
