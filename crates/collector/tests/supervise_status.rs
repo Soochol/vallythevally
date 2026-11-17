@@ -560,3 +560,17 @@ async fn a_coverage_read_that_never_returns_does_not_stop_the_heartbeats_of_a_wa
     }
     world.finish().await;
 }
+
+#[tokio::test(start_paused = true)]
+async fn a_file_reply_is_still_delivered_after_the_client_half_closes() {
+    let world = World::start(plan_for(2, 3, 0));
+    sleep(Duration::from_secs(20)).await;
+    for request in ["request-coverage.json", "request-disk.json"] {
+        let mut client = world.connect().await;
+        client.send(&fixture_line(request)).await;
+        client.writer.shutdown().await.unwrap();
+        let reply = client.read().await;
+        assert_eq!(reply["type"], request.trim_start_matches("request-").trim_end_matches(".json"));
+    }
+    world.finish().await;
+}

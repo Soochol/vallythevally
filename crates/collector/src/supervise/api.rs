@@ -21,6 +21,8 @@ use super::wire::{ErrorCode, MAX_REQUEST_BYTES, Reply, ReplyBody, RequestKind, p
 pub const SOCKET_FILE_NAME: &str = "supervise.sock";
 pub const OUTBOX_LINES: usize = 64;
 pub const MAX_CONNECTIONS: usize = 16;
+const MAX_PENDING_REPLIES: usize = 4;
+const DRAIN_LIMIT: Duration = Duration::from_secs(5);
 const FILE_VIEW_TTL: Duration = Duration::from_secs(30);
 const SOCKET_MODE: u32 = 0o600;
 const FOLDER_MODE: u32 = 0o700;
@@ -250,8 +252,18 @@ async fn converse(reader: impl AsyncRead + Unpin, outbox: &mpsc::Sender<String>,
                     }
                 }
             }
-            line = read_line_limited(&mut reader, &mut pending) => match line {
-                Line::Closed => return Ended::Peer,
+            line = read_line_limited(&mut reader, &mut pending), if replies.len() < MAX_PENDING_REPLIES => match line {
+                Line::Closed => {
+                    let drained = timeout(DRAIN_LIMIT, async {
+                        let mut sent_all = true;
+                        while let Some(finished) = replies.join_next().await {
+                            sent_all &= matches!(finished, Ok(true));
+                        }
+                        sent_all
+                    })
+                    .await;
+                    return if drained == Ok(false) { Ended::Overflow } else { Ended::Peer };
+                }
                 Line::TooLong => {
                     push(outbox, &Reply::error(ErrorCode::BadRequest, format!("요청 한 줄은 {MAX_REQUEST_BYTES}바이트까지입니다")));
                     return Ended::Peer;
