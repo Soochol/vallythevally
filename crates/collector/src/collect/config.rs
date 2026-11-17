@@ -76,7 +76,7 @@ impl CollectorConfig {
     }
 }
 
-fn default_state_folder(variables: &Variables) -> Result<PathBuf, ConfigError> {
+pub(crate) fn default_state_folder(variables: &Variables) -> Result<PathBuf, ConfigError> {
     let nonempty = |name: &str| variables.get(name).filter(|value| !value.is_empty()).map(PathBuf::from);
     let state_home = match (nonempty("XDG_STATE_HOME"), nonempty("HOME")) {
         (Some(state_home), _) => state_home,

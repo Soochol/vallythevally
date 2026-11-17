@@ -574,6 +574,79 @@ data/hoga/calendar/
 
 시험은 `python3 scripts/dev.py cargo test -p collector --test plan`이다. 가짜 키와 비밀값 파일만 쓴다.
 
+## supervise
+
+`collector supervise --date YYYYMMDD --keys <키 목록 설정> [--state <폴더>] [--data <폴더>]`는 감독 데몬([ADR 0026](adr/0026-collector-supervisor-collects-common-and-preferred-stocks.md))이다. 그날 계획(`plan/<YYYYMMDD>.json`)을 받아 수집 키마다 `collect --child` 자식을 띄우고, 토큰을 발급하고, 감시하고, 다시 띄우고, 인계한다. 지금은 장중 수집 하나를 돌린다. 상태 API와 07:20~마감 뒤 하루 일정은 뒤 작업이 이 입구를 바꾼다. 코드는 `collector::supervise`다.
+
+`--state`는 키마다 기본 토큰·잠금 파일 경로의 바탕 폴더다. 없으면 `collect`와 같은 규칙(`$XDG_STATE_HOME` 또는 `$HOME/.local/state` 아래 `vallythevally/collector`)이다. 종료 코드는 0(SIGTERM·SIGINT 또는 종료 시각으로 끝남), 1(시작하지 못함), 2(인수·설정 오류)다.
+
+### 시작
+
+시작할 때 하나라도 어긋나면 자식을 띄우기 전에 멈춘다.
+
+- 계획 파일의 `date`가 `--date`와 같고 `check_plan`을 통과해야 한다. `read_plan`은 이 둘을 확인하지 않으므로 데몬이 부른다.
+- 계획의 키와 키 목록 설정의 활성 키가 이름, 역할, 앱키 해시까지 같아야 한다. 한쪽에만 있는 키가 있으면 멈춘다.
+- 키마다 `token_path`와 `lock_path`가 서로 달라야 한다. 키 하나의 토큰을 쥐는 프로세스는 하나다(ADR 0004).
+- 키마다 잠금 파일(`InstanceLock`)을 잡는다. 잠금은 풀지 않는다. 데몬이 끝나면 프로세스와 함께 놓인다.
+
+### 토큰
+
+- 키마다 `KiwoomAuth`·`KiwoomRest` 하나를 쓴다. 토큰 파일에 아직 쓸 수 있는 토큰이 있으면 새로 발급하지 않고 그것을 쓴다. 한 키의 발급 사이는 10분(`KiwoomAuth`), 만료 10분 전에는 다시 받는다.
+- 키 사이 발급 간격은 설정값 `token_spacing`이고 기본 5초다. 발급 요청은 한 줄(`IssueLane`)로 세워 이 간격을 지킨다. 예비 키 토큰도 장 시작에 미리 받는다.
+- 자식의 `token_invalid`를 받으면 그 세대를 무효로 하고 10분 간격이 지난 뒤 새 토큰을 보낸다. 그 사이 자식은 `waiting_for_token`으로 하트비트를 계속 낸다. 이미 더 새 토큰이 있으면 그것을 다시 보낸다.
+- `Control::reissue_token_at(키, 시각)`이 키마다 다른 시각에 재발급하는 입구다. 20:05 재발급의 엇갈림은 하루 일정 작업이 이 입구로 건다.
+- 8050이나 그 밖의 발급 정지(앱키 거절, 토큰 파일을 읽을 수 없음)를 받은 키는 멈춤이다. 8050은 사건 기록에 `8050`이 든 까닭으로 남는다.
+- 토큰 값과 앱키는 사건 기록과 로그에 쓰지 않는다.
+
+### 자식과 재시작
+
+- 자식은 같은 실행 파일을 `collect --child --key <이름> --data <폴더>`로 띄운다. 환경변수는 비우고 `VALLY_COLLECTOR_WS_URL`, `RUST_LOG`만 넘긴다. stdin·stdout은 프로토콜 줄이고 stderr는 데몬 로그(`자식: …`)로 잇는다. 띄우는 부분은 `Launcher` trait이고 실제 구현은 `tokio::process`(`TokioLauncher`)다.
+- `PR_SET_PDEATHSIG`는 자식이 건다. 리눅스는 이 신호를 부모를 만든 스레드가 끝날 때 보내므로, 데몬은 자식을 tokio 런타임의 작업 스레드(`spawn_blocking`이 아님)에서 띄운다.
+- `hello`가 오면 토큰과 계획의 몫을 `register`로 보낸다. 자식이 다시 뜨면 토큰과 등록을 처음부터 다시 보낸다.
+- 하트비트가 `heartbeat_timeout`(15초) 동안 오지 않거나 자식이 끝나면 그 자식을 SIGTERM으로 끝내고, `shutdown_grace`(10초) 안에 끝나지 않으면 SIGKILL로 끝낸 뒤 같은 키로 다시 띄운다.
+- 재시작 간격은 `restart_delays`(1, 2, 5, 10, 30초이고 끝 값을 계속 쓴다), 그날 재시작 한도는 `restart_limit`(5회)다. 한도를 넘어 끝난 키는 멈춤이다.
+- `hello`가 틀린 키를 말하거나 줄이 프로토콜에 맞지 않으면 그 자식을 끝내고 다시 띄운다. 형식 버전이 다른 줄이면 다시 띄워도 같으므로 그 키를 멈춤으로 한다.
+- 등록 결과(`registered`)는 `(id, part, parts)`가 같으면 하나로 센다. 쪼개진 묶음이 재전송되면 같은 묶음의 결과가 두 번 오기 때문이다. 나중 결과가 앞의 것을 대체하고, 등록 실패 수는 마지막 결과가 거절인 묶음 수다.
+- 등록 명령은 키의 `stocks`를 한 묶음(`<키>-stocks`, 타입은 `0B`·`0D`·`0w`·`0F`·`1h`·`0H`·`0E`·`0g`)으로, 시장 단위 타입을 타입마다 하나(`<키>-market-<타입>`, 항목은 빈 글자 하나)로 보낸다. 시장 단위 타입의 항목 형식은 아직 실접속으로 확인하지 않았다. 거절은 `registered`의 `ok:false`로 보이고 사건 기록에 남는다.
+
+### 인계
+
+- 수집 키가 멈춤이 되면(재시작 한도를 넘음, 8050, 버전 불일치) 그 키의 몫(종목과 시장 단위 타입)을 예비 키 자식에게 `register`로 보낸다. id는 `handoff-<키>-…`다. 원래 키는 `HandedOff`가 되고 그날 다시 띄우지도 등록하지도 않는다.
+- 예비 키는 멈춘 키 하나의 몫만 받는다. 두 번째로 멈춘 키는 인계하지 않고 수집 끊김(`Stopped`)으로 남으며 `handoff_skipped`가 기록된다. 예비 키가 멈췄거나 몫이 없는 키는 인계하지 않는다.
+- 인계 전후에 `check_plan`을 부른다. 인계 뒤의 모양은 `effective_plan`이 만든다. 멈춘 키는 비워 예비 역할로, 받는 키는 그 몫을 쥔 수집 역할로 바꾼 계획이다. 어느 쪽이든 틀리면 인계하지 않고 이유를 기록한다.
+- 예비 키 자식은 장 시작부터 띄워 두고(등록 없이 LOGIN까지) 토큰도 미리 받아 둔다. 예비 키 자식이 다시 뜨면 받은 몫을 다시 등록한다.
+
+### 사건 기록 `plan/<YYYYMMDD>.events.jsonl`
+
+사건 하나가 한 줄이고 데이터 폴더의 계획 파일 옆에 덧붙는다. 모든 줄에 `v`(형식 버전, 지금 1), `at`(KST 시각 `YYYY-MM-DDTHH:MM:SS+09:00`), `event`가 있다. `finalize-complete`가 이 기록으로 커버리지에 인계를 반영한다.
+
+| `event` | 필드 | 뜻 |
+|---|---|---|
+| `child_started` | `key`, `pid`, `restarts` | 자식을 띄웠다. `restarts`는 그 키의 그날 재시작 수 |
+| `child_exited` | `key`, `code` | 자식이 끝났다. 신호로 끝나면 `code`가 `null` |
+| `heartbeat_lost` | `key`, `silent_secs` | 하트비트가 끊겼다 |
+| `child_rejected` | `key`, `reason` | 띄우지 못했거나 프로토콜에 맞지 않는 줄을 보냈다 |
+| `restart` | `key`, `restart`, `delay_secs` | 다시 띄우기로 했다. `restart`는 1부터 센 번호 |
+| `key_stopped` | `key`, `reason` | 키가 멈췄다. 이 키의 수집은 그 시각부터 끊긴다(인계가 없으면 그날 끝까지) |
+| `handoff` | `from`, `to`, `stocks`, `market_types` | `from`의 몫을 `to`로 옮겼다. 이 시각 이후 `stocks`는 `to` 키의 원문에 들어간다 |
+| `handoff_skipped` | `key`, `reason` | 인계하지 않았다 |
+| `register_failed` | `key`, `id`, `part`, `parts`, `items`, `reason`, `return_code`, `detail` | 등록 묶음이 거절됐다. 같은 묶음의 재전송 거절은 한 번만 적는다 |
+| `token_issued` | `key`, `generation` | 토큰을 새로 받았다(값은 적지 않는다) |
+| `token_invalid` | `key`, `generation` | 자식이 그 세대의 토큰이 무효라고 알렸다 |
+
+### 상태 모양과 로그
+
+`Supervisor::status()`가 `watch` 수신기로 `DaemonStatus`(`date`, 키마다 `KeyStatus`)를 준다. 상태 API 작업이 이것을 내보낸다. 키 상태는 `waiting`(대기), `connecting`(연결 중), `receiving`(받는 중), `disconnected`(끊김), `stopped`(멈춤), `handed_off`(인계됨)이고, 키마다 맡은 종목 수(`stocks`, 예비 키는 받은 몫, 인계한 키는 0), 직전 하트비트의 초당 메시지(`messages_per_second`), 등록 실패 수(`register_failures`), 그날 재시작 수(`restarts`)가 있다. 이 작업은 1분마다(`housekeeping_every`) 로그 한 줄로만 찍는다.
+
+### 끝내기
+
+SIGTERM·SIGINT나 종료 시각(`end_at`, 기본 20:05 KST)이면 모든 자식에 `shutdown`을 보낸다. `shutdown_grace`(10초) 뒤에도 남은 자식은 SIGTERM, 다시 10초 뒤 SIGKILL로 끝낸다. 데몬을 SIGKILL로 죽여도 자식의 `PR_SET_PDEATHSIG`가 자식을 끝낸다.
+
+### 시험
+
+- `tests/supervise.rs`: 가짜 자식(`Launcher`·`ChildProcess`를 구현한 in-process 가짜), 합성 `Transport`, 멈춘 tokio 시간과 `Clock::fake`로 토큰 간격, 재시작, 인계, 8050, `token_invalid`, 종료, 시작 확인, 사건 기록과 로그의 토큰 비노출을 확인한다. `python3 scripts/dev.py cargo test -p collector --test supervise`.
+- `tests/supervise_process.rs`: 실제 `collector supervise`가 실제 `collect --child` 자식 둘을 루프백 WebSocket 시험 서버에 붙여 LOGIN과 REG까지 가고, 데몬을 끝내면(SIGTERM) 자식도 끝나고, 데몬을 SIGKILL로 죽여도 자식이 끝남을 확인한다. 토큰은 토큰 파일에 미리 넣어 두고 `VALLY_COLLECTOR_REST_URL`(`http://127.0.0.1…`만 받는다)을 닫힌 포트로 돌려 키움에는 아무것도 보내지 않는다. `python3 scripts/dev.py cargo test -p collector --test supervise_process`.
+
 ## 실제 수집 절차
 
 사용자가 장중에 직접 따라 한다. 자동 시험과 자동 작업은 실제 키움에 접속하지 않는다. 한 IP에서 세션 여러 개와 연속 토큰 발급을 재는 절차는 [`collector-session-probe.md`](collector-session-probe.md)에 있다.
