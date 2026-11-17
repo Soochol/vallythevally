@@ -1106,3 +1106,29 @@ async fn an_acknowledged_connect_that_fails_before_a_token_keeps_8050_blocked_fo
     assert_eq!(fake.issued(), 2);
     server.stop().await;
 }
+
+#[tokio::test]
+async fn an_acknowledged_connect_that_reuses_a_saved_token_and_is_cut_off_keeps_8050_blocked() {
+    let fake = ScriptedTransport::new();
+    fake.delay("ka10099", Duration::from_secs(2));
+    let env = env();
+    let at = unix_of(AT_TEN) - 3600;
+    write_private(&token_path(&env.lock), json!({"credential": credential_id(APP_KEY), "token": {"value": "saved-token", "expires_dt": "20991231000000", "issued_at": at}, "last_request_at": at, "auth_block": {"detail": {"rest": 8050}, "credential": null, "at": at}}).to_string().as_bytes());
+    let server = spawn(&fake, &env, &[START, ("VALLY_CLOCK_START", AT_TEN)]);
+    server.addr().await;
+    let acknowledged = tokio::spawn({
+        let link = server.link();
+        async move { link.connect(true).await }
+    });
+    tokio::time::sleep(Duration::from_millis(700)).await;
+    server.link().disconnect();
+    acknowledged.await.unwrap();
+    assert_eq!(failure(server.link_state()).problem, Problem::AuthBlocked8050, "새 토큰을 받지 못했으니 8050 차단이 남는다");
+
+    server.link().replace_key(Secret::new("FAKE-new-key".into()), Secret::new("FAKE-new-secret".into()));
+    server.link().connect_in_background();
+    tokio::time::sleep(Duration::from_secs(3)).await;
+    assert_eq!(fake.issued(), 0, "{:?}", fake.api_ids());
+    assert_eq!(failure(server.link_state()).problem, Problem::AuthBlocked8050);
+    server.stop().await;
+}

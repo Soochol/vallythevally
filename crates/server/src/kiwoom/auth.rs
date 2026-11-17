@@ -363,6 +363,10 @@ impl KiwoomAuth {
         (i.expires_at.unix() - now.unix() >= EXPIRY_MARGIN_SECS).then(|| (i.token.clone(), i.generation))
     }
 
+    pub fn issued_generation(&self) -> Option<TokenGen> {
+        self.lock().issued.as_ref().map(|i| i.generation)
+    }
+
     pub fn needs_issue(&self, now: KstTime) -> bool {
         self.halted().is_none() && self.current(now).is_none()
     }

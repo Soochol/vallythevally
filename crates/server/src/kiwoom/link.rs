@@ -7,7 +7,7 @@ use futures::FutureExt;
 use futures::future::{BoxFuture, Shared};
 use tokio::sync::watch;
 
-use super::auth::Halt;
+use super::auth::{Halt, TokenGen};
 use super::error::Category;
 use super::rest::{Access, GateCause, KiwoomError, KiwoomRest, Priority};
 use crate::clock::Clock;
@@ -93,7 +93,7 @@ struct Inner {
     update_on_start: bool,
     state: watch::Sender<LinkState>,
     flight: Mutex<Option<(bool, Flight)>>,
-    released_8050: Mutex<Option<Halt>>,
+    released_8050: Mutex<Option<(Halt, Option<TokenGen>)>>,
     epoch: watch::Sender<u64>,
 }
 
@@ -183,7 +183,7 @@ impl Link {
         let released = self.0.released_8050.lock().expect("8050 잠금").take();
         let auth = self.0.rest.auth();
         match released {
-            Some(halt) if auth.current(self.0.clock.now()).is_none() => {
+            Some((halt, generation_at_release)) if auth.issued_generation() == generation_at_release => {
                 auth.restore_halt(halt);
                 auth.halted().is_some_and(|halt| halt.is_8050())
             }
@@ -323,8 +323,8 @@ impl Link {
                     return self.finish(epoch, LinkState::Failed(LinkFailure::of(&KiwoomError::Gated { until, cause: GateCause::IssueInterval }))).map(Decision::Done);
                 }
                 self.publish(epoch, || {
-                    *self.0.released_8050.lock().expect("8050 잠금") = Some(halt);
                     auth.release_8050();
+                    *self.0.released_8050.lock().expect("8050 잠금") = Some((halt, auth.issued_generation()));
                 })?;
             }
             Some(halt) => return self.finish(epoch, LinkState::Failed(LinkFailure::of(&halt.into()))).map(Decision::Done),
