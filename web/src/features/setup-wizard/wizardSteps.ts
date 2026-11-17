@@ -2,8 +2,8 @@ import type { KiwoomLinkStatus } from "../../api/generated/KiwoomLinkStatus";
 
 export const WIZARD_STEPS = [
   { id: "login", label: "로그인" },
-  { id: "key", label: "키움 키" },
   { id: "ip", label: "IP 확인" },
+  { id: "key", label: "키움 키" },
   { id: "connect", label: "연결" },
   { id: "setup", label: "기본 셋업" },
 ] as const;
@@ -17,7 +17,7 @@ export const isSkippable = (id: WizardStepId) => id === "key" || id === "ip" || 
 
 export function firstStep(link: KiwoomLinkStatus): WizardStepId {
   if (link.state === "connected") return "setup";
-  return link.keySource === "none" ? "key" : "ip";
+  return "ip";
 }
 
 export const nextStep = (id: WizardStepId): WizardStepId => ORDER[Math.min(ORDER.length - 1, indexOf(id) + 1)]!;

@@ -1,13 +1,17 @@
 import { describe, expect, test } from "vitest";
 import type { KiwoomLinkStatus } from "../../api/generated/KiwoomLinkStatus";
-import { canAdvance, firstStep, isSkippable, nextStep, previousStep, stepMark } from "./wizardSteps";
+import { canAdvance, firstStep, isSkippable, nextStep, previousStep, stepMark, WIZARD_STEPS } from "./wizardSteps";
 
 const link = (patch: Partial<KiwoomLinkStatus>): KiwoomLinkStatus => ({ state: "noKey", keySource: "none", ...patch }) as KiwoomLinkStatus;
 const facts = (patch: Partial<KiwoomLinkStatus>, portalIpConfirmed = false) => ({ link: link(patch), portalIpConfirmed });
 
 describe("마법사 단계 진행 규칙", () => {
-  test("키가 없으면 키부터, .env나 저장된 키가 있으면 IP 확인부터, 이미 연결됐으면 기본 셋업부터 연다", () => {
-    expect(firstStep(link({ state: "noKey", keySource: "none" }))).toBe("key");
+  test("단계 순서는 로그인, IP 확인, 키움 키, 연결, 기본 셋업이다", () => {
+    expect(WIZARD_STEPS.map((s) => s.id)).toEqual(["login", "ip", "key", "connect", "setup"]);
+  });
+
+  test("키가 없거나 연결 안 됨이면 IP 확인부터, 이미 연결됐으면 기본 셋업부터 연다", () => {
+    expect(firstStep(link({ state: "noKey", keySource: "none" }))).toBe("ip");
     expect(firstStep(link({ state: "disconnected", keySource: "env" }))).toBe("ip");
     expect(firstStep(link({ state: "disconnected", keySource: "file" }))).toBe("ip");
     expect(firstStep(link({ state: "failed", keySource: "file" }))).toBe("ip");
@@ -25,13 +29,15 @@ describe("마법사 단계 진행 규칙", () => {
   });
 
   test("나중에 하기는 키·IP·연결에만 있다", () => {
-    expect(["login", "key", "ip", "connect", "setup"].map((id) => isSkippable(id as never))).toEqual([false, true, true, true, false]);
+    expect(["login", "ip", "key", "connect", "setup"].map((id) => isSkippable(id as never))).toEqual([false, true, true, true, false]);
   });
 
   test("이전은 로그인 단계로 돌아가지 않고, 다음은 마지막을 넘지 않는다", () => {
-    expect(previousStep("key")).toBe("key");
+    expect(previousStep("ip")).toBe("ip");
+    expect(previousStep("key")).toBe("ip");
     expect(previousStep("setup")).toBe("connect");
-    expect(nextStep("key")).toBe("ip");
+    expect(nextStep("ip")).toBe("key");
+    expect(nextStep("key")).toBe("connect");
     expect(nextStep("setup")).toBe("setup");
   });
 

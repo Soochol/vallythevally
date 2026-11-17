@@ -16,6 +16,7 @@ export type PanelStage =
   | "noKey"
   | "disconnected"
   | "connecting"
+  | "connectingWait"
   | "connected"
   | "wait"
   | "authBlocked"
@@ -52,6 +53,8 @@ export interface PanelView {
   recheckTokenFile: boolean;
   needsConfirmations: boolean;
   ipHelpOpensByItself: boolean;
+  startNote: string | null;
+  disconnectNote: string | null;
 }
 
 export function countdownOf(retryAt: UnixSeconds | null, now: UnixSeconds): Countdown | null {
@@ -68,17 +71,18 @@ const waitingLabel = (countdown: Countdown | null) =>
   countdown && countdown.remainingSeconds > 0 ? `다시 연결 (${formatRemaining(countdown.remainingSeconds)} 뒤 가능)` : "다시 연결";
 
 export function panelView(status: KiwoomLinkStatus | null, now: UnixSeconds, confirmations: Confirmations = NO_CONFIRMATIONS): PanelView {
-  const view: PanelView = { stage: "loading", countdown: null, connect: null, disconnect: false, recheckTokenFile: false, needsConfirmations: false, ipHelpOpensByItself: false };
+  const view: PanelView = { stage: "loading", countdown: null, connect: null, disconnect: false, recheckTokenFile: false, needsConfirmations: false, ipHelpOpensByItself: false, startNote: null, disconnectNote: null };
   if (!status) return view;
   switch (status.state) {
     case "noKey":
       return { ...view, stage: "noKey", connect: { label: "키움에 연결", enabled: false, acknowledged: false, readyNotice: false } };
     case "disconnected":
-      return { ...view, stage: "disconnected", connect: { label: "키움에 연결", enabled: true, acknowledged: false, readyNotice: false } };
+      return { ...view, stage: "disconnected", startNote: disconnectedNote(status), connect: { label: "키움에 연결", enabled: true, acknowledged: false, readyNotice: false } };
     case "connecting":
+      if (status.step === "issueInterval") return { ...view, stage: "connectingWait", countdown: countdownOf(status.retryAt, now), disconnect: true };
       return { ...view, stage: "connecting" };
     case "connected":
-      return { ...view, stage: "connected", disconnect: true };
+      return { ...view, stage: "connected", disconnect: true, startNote: "서버를 다시 켜도 자동으로 연결합니다", disconnectNote: "끊으면 다음에 서버를 켤 때도 연결하지 않습니다" };
     case "failed":
       return failedView(view, status, now, confirmations);
     default: {
@@ -86,6 +90,30 @@ export function panelView(status: KiwoomLinkStatus | null, now: UnixSeconds, con
       return _exhaustive;
     }
   }
+}
+
+export const KEPT_DISCONNECTED_NOTE = "연결하면 다음부터 서버를 켤 때 자동으로 연결합니다";
+
+function disconnectedNote(status: KiwoomLinkStatus): string | null {
+  switch (status.atStart) {
+    case "keptDisconnected":
+      return `연결을 끊어 두었습니다. ${KEPT_DISCONNECTED_NOTE}`;
+    case "connects":
+      return "키는 저장됨 · 연결하지 않았습니다";
+    case null:
+      return null;
+    default: {
+      const _exhaustive: never = status.atStart;
+      return _exhaustive;
+    }
+  }
+}
+
+export type KeySaveNote = "connectsAtOnce" | "blockedBy8050" | null;
+
+export function keySaveNote(status: KiwoomLinkStatus | null): KeySaveNote {
+  if (!status || status.keySource === "env") return null;
+  return status.problem === "authBlocked8050" ? "blockedBy8050" : "connectsAtOnce";
 }
 
 function failedView(base: PanelView, status: KiwoomLinkStatus, now: UnixSeconds, confirmations: Confirmations): PanelView {
@@ -97,7 +125,7 @@ function failedView(base: PanelView, status: KiwoomLinkStatus, now: UnixSeconds,
   const withConfirmations = { needsConfirmations: acknowledging, ipHelpOpensByItself: acknowledging };
   switch (status.problem) {
     case "authBlocked8050":
-      return { ...base, ...withConfirmations, stage: "authBlocked", countdown, connect: retry(waitingLabel(countdown), confirmed && elapsed, confirmed && elapsed && countdown !== null) };
+      return { ...base, ...withConfirmations, stage: "authBlocked", countdown, startNote: "서버를 다시 켜도 차단은 풀리지 않고 자동 연결도 하지 않습니다", connect: retry(waitingLabel(countdown), confirmed && elapsed, confirmed && elapsed && countdown !== null) };
     case "issueIntervalWait":
     case "authUncertain": {
       const enabled = elapsed && (!acknowledging || confirmed);

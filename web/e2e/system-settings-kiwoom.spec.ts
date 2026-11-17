@@ -55,7 +55,7 @@ test.describe("1440×900", () => {
     await openKiwoom(page);
     await expect(panel(page)).toContainText("키 없음");
     await expect(panel(page).getByRole("button", { name: "키움에 연결" })).toBeDisabled();
-    await expect(panel(page)).toContainText("키를 저장해도 키움에는 아무것도 보내지 않습니다");
+    await expect(panel(page)).toContainText("저장하면 바로 키움에 연결합니다. 포털에 지금 공인 IP를 먼저 등록하세요");
     await expect(panel(page)).toContainText("키움 REST · api.kiwoom.com (고정)");
     await expect(page.getByLabel("앱키", { exact: true })).toHaveAttribute("type", "password");
     await expect(page.getByLabel("앱키", { exact: true })).toHaveAttribute("autocomplete", "off");
@@ -69,6 +69,7 @@ test.describe("1440×900", () => {
 
     await expect(panel(page).getByRole("button", { name: "바꾸기" })).toBeVisible();
     expect(saved).toEqual([{ appKey: FAKE_APP_KEY, appSecret: FAKE_APP_SECRET }]);
+    expect(callsTo(scenario, "POST", "/api/system/kiwoom/connect")).toHaveLength(0);
     await expect(panel(page)).toContainText("••••••••••••7Z2D");
     await expect(panel(page)).toContainText("저장됨 · 다시 볼 수 없음");
     await expect(page.locator("input[type=password], input[type=text]")).toHaveCount(0);
@@ -109,6 +110,58 @@ test.describe("1440×900", () => {
     expect(callsTo(scenario, "POST", "/api/system/kiwoom/connect")).toHaveLength(1);
     expect(scenario.requests.find((r) => new URL(r.url()).pathname === "/api/system/kiwoom/connect")!.postDataJSON()).toEqual({ acknowledged: false } satisfies KiwoomConnectInput);
     await shot(page, "kiwoom-1440x900-connected.png");
+  });
+
+  test("연결됨: 서버를 다시 켜도 자동 연결한다는 안내와 끊으면 다음에도 연결하지 않는다는 설명이 보인다", async ({ page, scenario }) => {
+    scenario.live.kiwoomLink = CONNECTED_KIWOOM;
+    await openKiwoom(page);
+    await expect(panel(page).getByRole("heading", { name: "연결됨" })).toBeVisible();
+    await expect(panel(page)).toContainText("서버를 다시 켜도 자동으로 연결합니다");
+    await expect(panel(page)).toContainText("끊으면 다음에 서버를 켤 때도 연결하지 않습니다");
+  });
+
+  test("연결 안 함: 시작 때 연결 값에 따라 안내가 다르다", async ({ page, scenario }) => {
+    scenario.live.kiwoomLink = { ...DISCONNECTED, atStart: "connects" };
+    await openKiwoom(page);
+    await expect(panel(page)).toContainText("키는 저장됨 · 연결하지 않았습니다");
+    scenario.live.link({ ...DISCONNECTED, atStart: "keptDisconnected" });
+    await expect(panel(page)).toContainText("연결을 끊어 두었습니다. 연결하면 다음부터 서버를 켤 때 자동으로 연결합니다");
+  });
+
+  test("연결 중 발급 간격 대기: 남은 시간이 줄고 저절로 이어 연결하며 끊기만 있고 연결 요청은 나가지 않는다", async ({ page, scenario }) => {
+    scenario.live.kiwoomLink = { ...DISCONNECTED, state: "connecting", step: "issueInterval", retryAt: serverSeconds(scenario) + 400, message: "키움 토큰 발급 간격을 기다립니다" };
+    await openKiwoom(page);
+    await expect(panel(page).getByRole("heading", { name: "발급 간격 대기" })).toBeVisible();
+    await expect(panel(page)).toContainText(/\d:\d\d 뒤 저절로 이어 연결합니다/);
+    await expect(panel(page).getByRole("button", { name: "연결 끊기" })).toBeVisible();
+    await expect(panel(page).getByRole("button", { name: /연결$|다시 연결/ })).toHaveCount(0);
+    const before = await panel(page).innerText();
+    await expect.poll(async () => (await panel(page).innerText()) !== before, { timeout: 4000 }).toBe(true);
+    expect(callsTo(scenario, "POST", "/api/system/kiwoom/connect")).toHaveLength(0);
+  });
+
+  test("8050 차단은 재시작해도 풀리지 않는다고 알리고, 키 폼은 확인 전에는 연결하지 않는다고 알린다", async ({ page, scenario }) => {
+    scenario.live.kiwoomLink = failed("authBlocked8050", null, BLOCKED_MESSAGE, { needsAcknowledgement: true });
+    await openKiwoom(page);
+    await expect(panel(page)).toContainText("서버를 다시 켜도 차단은 풀리지 않고 자동 연결도 하지 않습니다");
+    await panel(page).getByRole("button", { name: "바꾸기" }).click();
+    await expect(panel(page)).toContainText("8050 확인을 마치기 전에는 저장해도 연결하지 않습니다");
+    await expect(panel(page)).not.toContainText("저장하면 바로 키움에 연결합니다");
+  });
+
+  test("키 폼 안내의 링크가 공인 IP 도움말을 연다", async ({ page, scenario }) => {
+    scenario.live.kiwoomLink = NO_KEY;
+    await openKiwoom(page);
+    const help = panel(page).getByRole("button", { name: "공인 IP 확인 · 포털 안내", exact: true });
+    await expect(help).toHaveAttribute("aria-expanded", "false");
+    await panel(page).getByRole("button", { name: "공인 IP 확인 · 포털 안내 열기" }).click();
+    await expect(help).toHaveAttribute("aria-expanded", "true");
+  });
+
+  test("환경 키는 저장 안내가 없다", async ({ page, scenario }) => {
+    scenario.live.kiwoomLink = { ...DISCONNECTED, keySource: "env", appKeyTail: "ENV4" };
+    await openKiwoom(page);
+    await expect(panel(page)).not.toContainText("저장하면 바로 키움에 연결합니다");
   });
 
   test("키를 지우기 전에 확인을 받고 확인하면 지운다", async ({ page, scenario }) => {

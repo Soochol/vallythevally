@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { KiwoomLinkStatus } from "../../api/generated/KiwoomLinkStatus";
 import type { PublicIpCheck } from "../../api/generated/PublicIpCheck";
 import { checkPublicIp } from "../../api/system";
@@ -21,10 +21,14 @@ interface Props {
   checked: PublicIpCheck | null;
   onChecked(result: PublicIpCheck): void;
   command: Command;
+  openRequests?: number;
 }
 
-export function KiwoomIpHelp({ status, openByItself, checked, onChecked, command }: Props) {
+export function KiwoomIpHelp({ status, openByItself, checked, onChecked, command, openRequests = 0 }: Props) {
   const [userChoice, setUserChoice] = useState<boolean | null>(null);
+  useEffect(() => {
+    if (openRequests > 0) setUserChoice(true);
+  }, [openRequests]);
   const [copied, setCopied] = useState(false);
   const open = userChoice ?? openByItself;
   const check = () => void command.run(async () => onChecked(await checkPublicIp()));
