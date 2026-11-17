@@ -88,7 +88,6 @@
 .dock-tab:focus-visible { box-shadow:inset 0 0 0 var(--size-2) var(--accent); }
 .dock-tab[aria-selected=true] { background:var(--raised); color:var(--text); font-weight:650; }
 .dock-group[data-kind=chart] .dock-tab[aria-selected=true] { background:var(--surface); }
-.dock-tab[data-active-cell] { box-shadow:inset 0 var(--size-2) 0 var(--accent); }
 .dock-tab-name { min-width:0; overflow:hidden; text-overflow:ellipsis; }
 .dock-tab-sub { color:var(--text-3); font-weight:500; }
 .dock-tab:has(+ .link-dot) { position:relative; padding-right:var(--size-32); }

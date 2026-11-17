@@ -195,6 +195,8 @@ test("둘째 차트를 누르면 위 막대·봉 주기·관심종목·드로잉
   await expect(currentSymbol(topbar)).toContainText("SK하이닉스");
   await expect(periods.getByRole("button", { name: "주", exact: true })).toHaveAttribute("aria-pressed", "true");
   await expect(tab(page, 2, "SK하이닉스")).toHaveAttribute("data-active-cell", "");
+  await expect(tab(page, 2, "SK하이닉스")).toHaveCSS("box-shadow", "none");
+  await expect(group(page, 2)).toHaveAttribute("data-active-cell", "");
   await expect(tab(page, 1, "삼성전자")).not.toHaveAttribute("data-active-cell", "");
   await expect(objects).toContainText(/000660 드로잉\s*1/);
   const bar = await boxOf(toolbar);
