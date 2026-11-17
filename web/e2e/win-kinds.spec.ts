@@ -15,10 +15,8 @@ const kindItem = (page: Page, name: string) => page.getByRole("menu", { name: "�
 const tabOf = (page: Page, id: string) => windowTabs(page).locator(`[role=tab][data-window-id="${id}"]`);
 const dotOf = (page: Page, id: string) => windowTabs(page).locator(`[role=tab][data-window-id="${id}"] + .link-dot`);
 const preparing = (page: Page) => page.getByTestId("market-window-preparing");
+const body = (page: Page, kind: string) => (kind === "brokers" || kind === "trades" ? page.getByTestId(`${kind}-window`) : preparing(page));
 const savedWindows = (scenario: Scenario) => scenario.documents.layout(DEFAULT_LAYOUT_ID).windows;
-
-const BUILT_KINDS: readonly string[] = ["trades"];
-const bodyOf = (page: Page, kind: string) => (BUILT_KINDS.includes(kind) ? page.getByTestId(`${kind}-window`) : preparing(page));
 
 function emptyTrades(scenario: Scenario) {
   scenario.reply((url) => /^\/api\/symbols\/[^/]+\/trades$/.test(url.pathname), { body: { symbol: "005930", venue: "combined", trades: [], skippedRows: 0 } });
@@ -52,17 +50,17 @@ for (const { kind, name } of KINDS) {
 
     await addWindow(page, name);
     await expect(tabOf(page, kind)).toHaveAccessibleName(new RegExp(`^${name}`));
-    if (!BUILT_KINDS.includes(kind)) await expect(preparing(page)).toContainText(`${name} 준비 중`);
-    if (!BUILT_KINDS.includes(kind)) await expect(preparing(page)).toContainText("삼성전자");
-    await expect(bodyOf(page, kind)).toHaveAttribute("data-symbol", "005930");
+    if (kind !== "brokers" && kind !== "trades") await expect(preparing(page)).toContainText(`${name} 준비 중`);
+    if (kind !== "trades") await expect(body(page, kind)).toContainText("삼성전자");
+    await expect(body(page, kind)).toHaveAttribute("data-symbol", "005930");
     await expect(dotOf(page, kind)).toHaveAccessibleName("연동 색: 끔");
     await expect.poll(() => savedWindows(scenario).filter((w) => w.kind === kind)).toEqual([{ id: kind, link: null, kind }]);
 
     await dotOf(page, kind).click();
     await page.getByRole("menu", { name: "연동 색" }).getByRole("menuitemradio", { name: /^B/ }).click();
     await expect(dotOf(page, kind)).toHaveAccessibleName("연동 색: B");
-    if (!BUILT_KINDS.includes(kind)) await expect(preparing(page)).toContainText("SK하이닉스");
-    await expect(bodyOf(page, kind)).toHaveAttribute("data-symbol", "000660");
+    if (kind !== "trades") await expect(body(page, kind)).toContainText("SK하이닉스");
+    await expect(body(page, kind)).toHaveAttribute("data-symbol", "000660");
     await expect.poll(() => savedWindows(scenario).find((w) => w.kind === kind)?.link).toBe("b");
 
     await addButton(page).click();
