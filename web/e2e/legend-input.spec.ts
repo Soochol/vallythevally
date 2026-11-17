@@ -6,7 +6,7 @@ import type { Layout } from "../src/api/generated/Layout";
 import { parseChartSettings } from "../src/chart/settings";
 import type { DrawingInput } from "../src/api/generated/DrawingInput";
 import { installChartProbe } from "./chart-probe";
-import { type Scenario, DEFAULT_LAYOUT_ID, cell, chartOf, expect, test, firstChart, withFirstChart } from "./harness";
+import { type Scenario, DEFAULT_LAYOUT_ID, cell, chartOf, expect, test, firstChart, withFirstChart, pickDesktopVenue, expectDesktopVenue } from "./harness";
 
 const LONG_NAME = "TIGER 엔비디아미국채커버드콜밸런스(합성) 장기 보유 목적 포트폴리오 시험 종목";
 const saved = async (scenario: Scenario): Promise<Drawing[]> => scenario.documents.drawings("005930");
@@ -48,11 +48,10 @@ for (const history of ["짧은 이력", "끌어서 이동한 이력"]) {
       }
       await cell(page).focus();
       await page.keyboard.press(key);
-      const venues = page.getByRole("group", { name: "거래소", exact: true });
-      await venues.getByRole("button", { name: "KRX", exact: true }).click({ timeout: 3000 });
+      await pickDesktopVenue(page, "KRX");
       await expect(cell(page)).toHaveAttribute("aria-label", "칸 1: 삼성전자 KRX 일");
       await expect(cell(page)).toHaveAttribute("aria-busy", "false");
-      await expect(venues.getByRole("button", { name: "KRX", exact: true })).toHaveAttribute("aria-pressed", "true");
+      await expectDesktopVenue(page, "KRX");
       expect(await saved(scenario)).toEqual(before);
       const loaded = page.waitForResponse((response) => new URL(response.url()).pathname === "/api/drawings" && response.request().method() === "GET");
       await page.reload();

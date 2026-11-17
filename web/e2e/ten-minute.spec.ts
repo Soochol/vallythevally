@@ -4,7 +4,7 @@ import type { Locator, Page } from "@playwright/test";
 import type { SeriesKey } from "../src/api/bars";
 import type { Drawing } from "../src/api/generated/Drawing";
 import type { Layout } from "../src/api/generated/Layout";
-import { type Scenario, cell, chartOf, DEFAULT_LAYOUT_ID, expect, test, firstChart, withFirstChart } from "./harness";
+import { type Scenario, cell, chartOf, DEFAULT_LAYOUT_ID, expect, test, firstChart, withFirstChart, pickDesktopVenue } from "./harness";
 import { expandDock } from "./drawing-probe";
 
 const TEN_MINUTES = 600;
@@ -67,15 +67,14 @@ test.describe("데스크톱", () => {
     await page.goto("/?symbol=005930");
     const toolbar = page.getByRole("toolbar", { name: "차트 도구 막대" });
     const periods = toolbar.getByRole("group", { name: "봉 주기" });
-    const venues = page.getByRole("group", { name: "거래소" });
     await expect(cell(page)).toHaveAttribute("aria-label", "칸 1: 삼성전자 통합 일");
     await expect(periods.getByRole("button")).toHaveText(["3분", "일", "주", "월", "분기", "연"]);
 
     await choose(periods, "10분");
     await expectTenMinuteBars(page, requested, "삼성전자 통합 10분", { symbol: "005930", venue: "combined", period: "10m" });
-    await choose(venues, "KRX");
+    await pickDesktopVenue(page, "KRX");
     await expectTenMinuteBars(page, requested, "삼성전자 KRX 10분", { symbol: "005930", venue: "krx", period: "10m" });
-    await choose(venues, "NXT");
+    await pickDesktopVenue(page, "NXT");
     await expectTenMinuteBars(page, requested, "삼성전자 NXT 10분", { symbol: "005930", venue: "nxt", period: "10m" });
 
     await page.keyboard.press("BracketLeft");
@@ -99,7 +98,7 @@ test.describe("데스크톱", () => {
       await expectTenMinuteBars(page, requested, "삼성전자 통합 10분", { symbol: "005930", venue: "combined", period: "10m" });
       expect(await toolbarLayout(page)).toEqual({ wrapped: [], pageOverflow: 0, toolbarOverflow: 0 });
 
-      await choose(page.getByRole("group", { name: "거래소" }), "KRX");
+      await pickDesktopVenue(page, "KRX");
       await expectTenMinuteBars(page, requested, "삼성전자 KRX 10분", { symbol: "005930", venue: "krx", period: "10m" });
       await toolbar.getByRole("button", { name: "차트 설정", exact: true }).click();
       await expect(page.getByRole("dialog", { name: "차트 설정", exact: true })).toBeInViewport({ ratio: 1 });

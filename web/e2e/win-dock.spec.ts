@@ -4,7 +4,7 @@ import type { Locator, Page } from "@playwright/test";
 import type { Bar } from "../src/api/generated/Bar";
 import type { LayoutWindow } from "../src/api/generated/LayoutWindow";
 import { parsePlacement } from "../src/layout/placement";
-import { cell, chartOf, DEFAULT_LAYOUT_ID, expect, test, type Scenario } from "./harness";
+import { cell, chartOf, DEFAULT_LAYOUT_ID, expect, test, type Scenario, desktopVenueCombo, expectDesktopVenue } from "./harness";
 
 test.use({ clockStart: "20261109100000", viewport: { width: 1440, height: 900 } });
 const screens = path.resolve("../target/ux-screens");
@@ -321,10 +321,10 @@ test("끌 때 차트 드로잉과 관심종목·포털 도구 입력을 막고 �
   await expect(area(page)).toHaveAttribute("data-dock-dragging", "");
   await page.mouse.move(chart.x + chart.width * 0.8, chart.y + chart.height * 0.3, { steps: 10 });
   await page.mouse.wheel(0, 300);
-  const exchange = page.getByRole("group", { name: "거래소", exact: true });
-  const krx = exchange.getByRole("button", { name: "KRX", exact: true });
-  await krx.dispatchEvent("click");
-  await expect(krx).toHaveAttribute("aria-pressed", "false");
+  const exchange = desktopVenueCombo(page);
+  await exchange.dispatchEvent("click");
+  await expect(exchange).toHaveAttribute("aria-expanded", "false");
+  await expectDesktopVenue(page, "통합");
   const watch = page.getByRole("complementary", { name: "관심종목" });
   const stock = watch.getByText("SK하이닉스", { exact: true }).first();
   const stockBox = await boxOf(stock);

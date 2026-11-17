@@ -6,7 +6,7 @@ import type { Layout } from "../src/api/generated/Layout";
 import type { Scenario } from "./fixtures/scenario";
 import { parseChartSettings, type ChartSettings } from "../src/chart/settings";
 import { installFrameProbe } from "./frame-probe";
-import { cell, chartOf, DEFAULT_LAYOUT_ID, expect, SEARCH_BUTTON_TITLE, firstChart, withFirstChart } from "./harness";
+import { cell, chartOf, DEFAULT_LAYOUT_ID, expect, SEARCH_BUTTON_TITLE, firstChart, withFirstChart, pickDesktopVenue } from "./harness";
 
 const METRICS = ["revenue", "operating_income", "owner_roe", "investing_cash_flow", "dps", "debt_ratio"] as const;
 const LABELS = ["매출액", "영업이익", "지배주주 ROE", "투자활동 현금흐름", "DPS", "부채비율"];
@@ -154,7 +154,7 @@ test.describe("재무지원 경계", () => {
       } else if (symbol === "0000D0" || symbol === "IDX:001") await expect(row(page, "revenue")).toContainText("미지원");
       else await expect(row(page, "revenue")).toContainText("확인 완료");
     }
-    await page.getByRole("group", { name: "거래소", exact: true }).getByRole("button", { name: "KRX", exact: true }).click();
+    await pickDesktopVenue(page, "KRX");
     await expect(cell(page)).toHaveAttribute("aria-busy", "false");
     await expect(row(page, "revenue")).toContainText("확인 완료");
     await expect(page.getByRole("contentinfo")).toContainText("자동 저장됨");

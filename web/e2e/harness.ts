@@ -48,3 +48,15 @@ export async function dragTowardPast(page: Page, chart: Locator, until: () => Pr
     await until();
   }).toPass({ timeout: 30_000, intervals: [0] });
 }
+
+const VENUE_VALUE = { "통합": "combined", KRX: "krx", NXT: "nxt" } as const;
+export type VenueName = keyof typeof VENUE_VALUE;
+
+export const desktopVenueCombo = (page: Page): Locator => page.getByRole("combobox", { name: "거래소", exact: true });
+
+export async function pickDesktopVenue(page: Page, venue: VenueName): Promise<void> {
+  await desktopVenueCombo(page).click();
+  await page.getByRole("menu", { name: "거래소", exact: true }).locator(`[data-option-value="${VENUE_VALUE[venue]}"]`).click();
+}
+
+export const expectDesktopVenue = (page: Page, venue: VenueName) => expect(desktopVenueCombo(page)).toHaveAttribute("data-value", VENUE_VALUE[venue]);

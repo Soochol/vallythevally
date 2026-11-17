@@ -1,25 +1,31 @@
+import { Select } from "../menu/Select";
 import { VENUE_LABEL, VENUES } from "../../lib/venue";
 import { useUiStore, useVenue } from "../../stores/ui";
 
-const CLASS = {
-  desktop: "seg-btn",
-  phone:
-    "h-7 min-w-10 rounded-[var(--r-pill)] px-2 text-s text-text-2 aria-pressed:bg-accent aria-pressed:font-[650] aria-pressed:text-accent-ink",
-} as const;
+const PHONE_PILL =
+  "h-7 min-w-10 rounded-[var(--r-pill)] px-2 text-s text-text-2 aria-pressed:bg-accent aria-pressed:font-[650] aria-pressed:text-accent-ink";
 
-/** 앱 전체 거래소 고르기: 통합 / KRX / NXT(ADR 0020). */
-export function VenuePicker({ variant }: { variant: keyof typeof CLASS }) {
+const VENUE_HINT = { combined: "KRX와 NXT를 합친 시세", krx: "한국거래소 정규장 시세", nxt: "넥스트레이드 시세 · 없는 종목은 통합" } as const;
+const VENUE_MENU_HEADING = "거래소 · 모든 차트와 관심종목에 적용";
+const VENUE_OPTIONS = VENUES.map((value) => ({ value, label: VENUE_LABEL[value], hint: VENUE_HINT[value], group: VENUE_MENU_HEADING }));
+
+/** 앱 전체 거래소 고르기: 통합 / KRX / NXT(ADR 0020). 데스크톱은 콤보박스, 휴대폰은 알약 묶음. */
+export function VenuePicker({ variant }: { variant: "desktop" | "phone" }) {
   const venue = useVenue();
   const setVenue = useUiStore((s) => s.setVenue);
 
+  if (variant === "desktop") {
+    return (
+      <div className="venue-picker">
+        <span aria-hidden className="venue-picker-prefix">거래소</span>
+        <Select label="거래소" value={venue} options={VENUE_OPTIONS} onChange={setVenue} className="venue-picker-select" />
+      </div>
+    );
+  }
   return (
-    <div
-      role="group"
-      aria-label="거래소"
-      className={variant === "desktop" ? "venue-picker inline-flex flex-none items-center gap-px" : "inline-flex flex-none gap-px rounded-[var(--r-pill)] bg-[var(--hover)] p-0.5"}
-    >
+    <div role="group" aria-label="거래소" className="inline-flex flex-none gap-px rounded-[var(--r-pill)] bg-[var(--hover)] p-0.5">
       {VENUES.map((v) => (
-        <button key={v} type="button" className={CLASS[variant]} aria-pressed={venue === v} title={`${VENUE_LABEL[v]} 시세`} onClick={() => setVenue(v)}>
+        <button key={v} type="button" className={PHONE_PILL} aria-pressed={venue === v} title={`${VENUE_LABEL[v]} 시세`} onClick={() => setVenue(v)}>
           {VENUE_LABEL[v]}
         </button>
       ))}

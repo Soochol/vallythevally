@@ -12,7 +12,7 @@ import { toChartTime } from "../src/chart/time";
 import type { ChartSettings } from "../src/chart/settings";
 import { installChartProbe } from "./chart-probe";
 import { installFrameProbe } from "./frame-probe";
-import { type Scenario, cell, chartOf, DEFAULT_LAYOUT_ID, expect, withFirstChart } from "./harness";
+import { type Scenario, cell, chartOf, DEFAULT_LAYOUT_ID, expect, withFirstChart, pickDesktopVenue } from "./harness";
 import { expandDock } from "./drawing-probe";
 
 const kst = (date: string) => Date.parse(`${date}T00:00:00+09:00`) / 1000;
@@ -332,7 +332,7 @@ test.describe("같은 재무 키의 응답 순서", () => {
       const url = new URL(response.url());
       return response.request().method() === "GET" && url.pathname === "/api/bars" && url.searchParams.get("symbol") === "005930" && url.searchParams.get("venue") === "krx" && url.searchParams.get("period") === "Q" && !url.searchParams.has("before");
     });
-    await page.getByRole("group", { name: "거래소", exact: true }).getByRole("button", { name: "KRX", exact: true }).click();
+    await pickDesktopVenue(page, "KRX");
     expect((await krxBars).ok()).toBe(true);
     await expect(cell(page)).toHaveAttribute("aria-busy", "false");
     await expect.poll(() => series(page)).toEqual(quarter);

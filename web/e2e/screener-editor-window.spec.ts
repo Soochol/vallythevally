@@ -1,7 +1,7 @@
 import type { Screen } from "../src/api/generated/Screen";
 import type { Page } from "@playwright/test";
 import { type Scenario, expect, test } from "./screener-harness";
-import { cell, chartOf } from "./screener-harness";
+import { cell, chartOf, pickDesktopVenue } from "./screener-harness";
 import { openScreener, panel, updateBand, waitForUpdateToFinish } from "./screener-page";
 import { editorWindow } from "./sentence-editor";
 
@@ -127,7 +127,7 @@ test("창 밖 차트 조작은 창을 닫으면서 그대로 실행된다", asyn
   await seed(scenario, page);
   await editButton(page).click();
   await expect(editorWindow(page)).toBeVisible();
-  await page.getByRole("group", { name: "거래소" }).getByRole("button", { name: "KRX", exact: true }).click();
+  await pickDesktopVenue(page, "KRX");
   await expect(editorWindow(page)).toHaveCount(0);
   await expect(cell(page)).toHaveAttribute("aria-label", /KRX/);
 });
