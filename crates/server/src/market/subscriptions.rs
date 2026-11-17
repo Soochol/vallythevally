@@ -20,7 +20,6 @@ pub enum Holder {
     /// 브라우저 연결 하나의 구독 하나.
     Cell { conn: ConnId, sub: SubId },
     Watch { conn: ConnId, symbol: Symbol },
-    /// 새 창의 흐름 구독 하나. 자리는 칸과 같은 순위로 받는다. `kind`는 이 창이 그 종목에 더 원하는 키움 종류다.
     Feed { conn: ConnId, sub: SubId, kind: RealType },
 }
 
@@ -41,7 +40,6 @@ impl Rank {
 pub struct Plan {
     /// 키움에 REG 할 집합. 크기 ≤ REALTIME_LIMIT.
     pub realtime: BTreeSet<Symbol>,
-    /// `realtime`의 종목마다 받을 종류. 종목 자신의 체결 종류는 언제나 들어 있다.
     pub feeds: DesiredFeeds,
     pub rejected: BTreeSet<Holder>,
 }
@@ -221,7 +219,6 @@ impl Holder {
         }
     }
 
-    /// 체결 흐름은 모든 종목이 이미 받는 0B라서 더 받을 종류가 없다.
     fn feed_kind(&self) -> Option<RealType> {
         match self {
             Holder::Feed { kind, .. } if *kind != RealType::Trade => Some(*kind),

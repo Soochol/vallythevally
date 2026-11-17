@@ -17,12 +17,10 @@ export type SubEvent =
 /** 관심종목 현재가 쪽 메시지. `resync`는 새 연결이라 서버의 `watch_limited`가 빈 상태부터 다시 온다는 뜻이다. */
 export type QuoteEvent = Extract<ServerMessage, { type: "quotes" | "watch_limited" }> | { type: "resync" };
 
-/** 새 창 흐름 구독 하나에 오는 메시지. `resync`는 서버와 다시 연결되어 창이 지난 흐름을 버리고 처음부터 받는다는 뜻이다. 끊긴 사이는 메워지지 않는다. */
 export type FeedEvent =
   | Extract<ServerMessage, { type: "feed_subscribed" | "feed_trades" | "feed_book" | "feed_program" | "feed_brokers" | "feed_link" | "sub_error" }>
   | { type: "resync" };
 
-/** 새 창이 받을 흐름. `venue`는 체결에만 뜻이 있다. 없으면 통합이다. */
 export interface FeedRequest {
   symbol: SymbolCode;
   kind: FeedKind;
@@ -34,7 +32,6 @@ export type Connection = { socket: "connecting" | "closed" } | { socket: "open";
 
 export interface MarketSocketLike {
   subscribe(key: SeriesKey, handler: (m: SubEvent) => void): () => void;
-  /** 새 창 흐름 구독. 해지하면 서버에 `unsubscribe`를 보낸다. 다시 연결되면 자동으로 다시 구독하고 handler에 `resync`를 준다. */
   subscribeFeed(request: FeedRequest, handler: (m: FeedEvent) => void): () => void;
   /** 지금 연결 상태로 한 번 부르고, 바뀔 때마다 부른다. */
   watch(listener: (c: Connection) => void): () => void;

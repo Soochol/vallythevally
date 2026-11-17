@@ -69,7 +69,6 @@ impl HubHandle {
         self.send(HubInput::Subscribe { conn, sub, key });
     }
 
-    /// 새 창 흐름 구독. 답(`feed_subscribed`, `sub_error`)은 그 연결의 outbox로 간다. 해지는 `unsubscribe`다.
     pub fn subscribe_feed(&self, conn: ConnId, sub: SubId, symbol: Symbol, kind: FeedKind, venue: Venue) {
         self.send(HubInput::SubscribeFeed { conn, sub, feed: FeedSub { symbol, kind, venue } });
     }

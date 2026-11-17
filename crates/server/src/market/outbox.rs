@@ -13,7 +13,6 @@ use super::SubId;
 use crate::api::{Bar, FeedBook, FeedTrade, Quote, ServerMessage, Venue};
 
 pub const MUST_CAPACITY: usize = 256;
-/// 100ms 묶음을 기다리는 체결이 이만큼 쌓이면 쓰기 태스크가 막힌 것이다. `MUST_CAPACITY`처럼 연결을 닫는다.
 pub const PENDING_TRADES_CAPACITY: usize = 4096;
 
 /// 버리면 안 되는 메시지가 MUST_CAPACITY만큼 밀렸거나 연결이 이미 닫혔다. 연결을 닫는다.
@@ -92,7 +91,6 @@ impl Outbox {
         }
     }
 
-    /// 그 흐름 구독의 다음 묶음에 체결을 덧붙인다. 버리지 않는다. 쌓인 것이 `PENDING_TRADES_CAPACITY`를 넘으면 연결을 닫는다.
     pub fn add_trade(&self, sub: &SubId, trade: FeedTrade) -> Result<(), Closed> {
         let mut s = self.state.lock().expect("outbox 잠금");
         if s.closed || s.pending_trades >= PENDING_TRADES_CAPACITY {
@@ -106,7 +104,6 @@ impl Outbox {
         Ok(())
     }
 
-    /// 그 흐름 구독의 대기 중 호가를 덮어쓴다.
     pub fn set_book(&self, sub: &SubId, book: FeedBook) {
         let mut s = self.state.lock().expect("outbox 잠금");
         if !s.closed {
@@ -114,7 +111,6 @@ impl Outbox {
         }
     }
 
-    /// 흐름 구독을 놓거나 바꿀 때 그 구독의 대기 중 체결·호가와 순서 번호를 지운다.
     pub fn forget_feed(&self, sub: &SubId) {
         let mut s = self.state.lock().expect("outbox 잠금");
         if let Some(dropped) = s.trades.remove(&sub.0) {

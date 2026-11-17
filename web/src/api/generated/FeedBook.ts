@@ -3,7 +3,4 @@ import type { FeedBookLevel } from "./FeedBookLevel";
 import type { FeedExpected } from "./FeedExpected";
 import type { UnixSeconds } from "./UnixSeconds";
 
-/**
- * 10호가. `asks`·`bids`는 1호가부터 열 칸이고 가격이 없는 단계는 null이다.
- */
 export type FeedBook = { t: UnixSeconds, asks: Array<FeedBookLevel | null>, bids: Array<FeedBookLevel | null>, totalAskQty: number, totalBidQty: number, expected: FeedExpected | null, };

@@ -179,8 +179,6 @@ pub struct BarsPage {
 #[ts(export)]
 pub enum ClientMessage {
     Subscribe { sub: String, symbol: SymbolCode, venue: Option<Venue>, period: Period },
-    /// 새 창의 흐름 구독. 응답은 `feed_subscribed`나 `sub_error`다. 해지는 `unsubscribe`다. `venue`는 체결 흐름에만 뜻이 있다:
-    /// 없거나 통합이면 모든 체결이고 KRX·NXT면 그 거래소 체결만 온다. 호가·프로그램·거래원은 언제나 통합 값이다. 지수에는 `bad_request`다.
     SubscribeFeed { sub: String, symbol: SymbolCode, kind: FeedKind, venue: Option<Venue> },
     Unsubscribe { sub: String },
     /// 지금 보이는 관심종목 목록 전체, 위에서부터. 받을 때마다 통째로 바꾼다. 빈 배열은 목록을 닫았다는 뜻이다.
@@ -209,22 +207,16 @@ pub enum ServerMessage {
         current: Option<Bar>,
     },
     SubError { sub: String, code: SubErrorCode },
-    /// `subscribe_feed` 응답. 실시간 한도로 거절되었다가 자리가 나면 같은 sub로 다시 온다. 거래원이면 이 뒤에 서버가 둔 스냅샷이 먼저 온다.
     FeedSubscribed { sub: String, kind: FeedKind },
-    /// 100ms 묶음의 체결. 건마다 빠짐없이, 받은 순서대로 담는다. `seq`는 구독마다 1부터 묶음마다 하나씩 늘어난다.
     FeedTrades {
         sub: String,
         #[ts(type = "number")]
         seq: u64,
         trades: Vec<FeedTrade>,
     },
-    /// 호가. 100ms 묶음마다 가장 새 값 하나다.
     FeedBook { sub: String, book: FeedBook },
-    /// 프로그램매매 행. 받은 행마다 하나씩 온다.
     FeedProgram { sub: String, row: FeedProgramRow },
-    /// 거래원 스냅샷. 받을 때마다 온다. 구독 직후에는 서버가 그 종목의 0F를 받기 시작한 뒤의 마지막 스냅샷이 먼저 온다.
     FeedBrokers { sub: String, brokers: FeedBrokers },
-    /// 키움 실시간 연결이 끊겼다(`live: false`)가 이어졌다(`live: true`). 끊긴 사이는 메우지 않는다.
     FeedLink { sub: String, live: bool, at: UnixSeconds },
     /// 현재 봉 갱신. 구독 하나당 초당 최대 10회. 중간 값은 건너뛸 수 있다.
     Bar {
@@ -269,7 +261,6 @@ pub enum FeedKind {
     Brokers,
 }
 
-/// 체결 한 건. `qty`의 부호가 방향이다: 양수는 매수, 음수는 매도다. `venue`는 `9081`을 모르면 null이다.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export)]
@@ -279,7 +270,6 @@ pub struct FeedTrade {
     #[ts(type = "number")]
     pub qty: i64,
     pub venue: Option<Venue>,
-    /// 체결강도(%). 프레임에 없으면 null.
     pub strength: Option<f64>,
 }
 
@@ -301,7 +291,6 @@ pub struct FeedExpected {
     pub qty: u64,
 }
 
-/// 10호가. `asks`·`bids`는 1호가부터 열 칸이고 가격이 없는 단계는 null이다.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export)]
@@ -316,7 +305,6 @@ pub struct FeedBook {
     pub expected: Option<FeedExpected>,
 }
 
-/// 프로그램매매 한 행. 금액은 백만 원이다. `net_*_change`는 직전 행 대비 증감이다.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export)]
