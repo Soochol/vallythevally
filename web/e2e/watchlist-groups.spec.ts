@@ -457,3 +457,21 @@ test("관심종목 머리는 데스크톱과 휴대폰 폭에서 넘치지 않�
   await expect(sheet.getByRole("button", { name: "새 그룹", exact: true })).toHaveText(/새 그룹/);
   expect(await sheet.locator("div.border-b").first().evaluate((el) => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(0);
 });
+
+test("그룹이 가득 차면 새 그룹 칸 위에서 앞서 가리키던 놓을 곳의 강조가 사라진다", async ({ scenario, page }) => {
+  const full = Array.from({ length: 100 }, (_, i): WatchGroup => ({ id: `G${i}`, name: `그룹 ${i + 1}`, symbols: i === 99 ? ["005935", "086520"] : [] }));
+  await seed(scenario, full);
+  await open(page);
+  const bar = ungroupedHead(page).locator("xpath=..");
+  const fill = () => bar.evaluate((el) => getComputedStyle(el).backgroundColor);
+  const idle = await fill();
+  const source = (await membership(page, "그룹 100", "005935").boundingBox())!;
+  await page.mouse.move(source.x + 20, source.y + 10);
+  await page.mouse.down();
+  await ungroupedRow(page, "000660").hover();
+  await expect.poll(fill).not.toBe(idle);
+  await slot(page).locator("xpath=..").hover();
+  await expect.poll(fill).toBe(idle);
+  await page.mouse.up();
+  await expect(ungroupedRow(page, "000660")).toBeVisible();
+});

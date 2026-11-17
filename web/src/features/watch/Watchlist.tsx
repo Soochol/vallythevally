@@ -343,11 +343,15 @@ function WatchList({ variant, sender, editing, naming, onNaming, width = null }:
     over: slotFull || dragged === null ? null : slotHover,
     create: () => startGroup(list, onNaming),
     dragOver: (e) => {
-      if (dragged === null || slotFull) return;
+      if (dragged === null) return;
+      setHover(null);
+      if (slotFull) {
+        e.dataTransfer.dropEffect = "none";
+        return;
+      }
       e.preventDefault();
       const how = slotHowFor(e);
       e.dataTransfer.dropEffect = how;
-      setHover(null);
       setSlotHover(how);
     },
     dragLeave: (e) => {
@@ -465,7 +469,7 @@ interface NewGroupSlotProps {
 function NewGroupSlot({ full, desktop, over, create, dragOver, dragLeave, drop }: NewGroupSlotProps) {
   const limit = `그룹은 ${MAX_WATCH_GROUPS}개까지입니다`;
   return (
-    <div className="px-2.5 pb-3 pt-2.5">
+    <div className="px-2.5 pb-3 pt-2.5" onDragOver={desktop ? dragOver : undefined} onDragLeave={desktop ? dragLeave : undefined} onDrop={desktop ? drop : undefined}>
       <button
         type="button"
         className={`${NEW_GROUP_SLOT} ${over === null ? NEW_GROUP_SLOT_REST : NEW_GROUP_SLOT_OVER}`}
@@ -473,9 +477,6 @@ function NewGroupSlot({ full, desktop, over, create, dragOver, dragLeave, drop }
         title={full ? limit : undefined}
         disabled={full}
         onClick={create}
-        onDragOver={desktop ? dragOver : undefined}
-        onDragLeave={desktop ? dragLeave : undefined}
-        onDrop={desktop ? drop : undefined}
       >
         <PlusIcon size={14} />
         <span className="min-w-0 truncate">{full ? limit : over === null ? "새 그룹" : `여기 놓으면 새 그룹으로 ${NEW_GROUP_SLOT_VERB[over]}`}</span>
