@@ -4,13 +4,14 @@ use std::time::Duration;
 use reqwest::header::CONTENT_TYPE;
 use serde::Deserialize;
 use serde_json::json;
+use setup::Document;
 
 use super::AccountServerUrl;
 use crate::api::AccountProvider;
 use crate::config::Secret;
 
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(3);
-const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ClientError {
@@ -38,6 +39,38 @@ struct TokenResponse {
 struct MeResponse {
     id: String,
     provider: AccountProvider,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(tag = "status", rename_all = "snake_case")]
+pub enum PushStatus {
+    Accepted,
+    Stale { document: Document },
+    Rejected { reason: String },
+}
+
+#[derive(Debug, Deserialize)]
+pub struct PushResult {
+    #[serde(flatten)]
+    pub status: PushStatus,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct PushResponse {
+    pub results: Vec<PushResult>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct Changes {
+    pub documents: Vec<Document>,
+    pub seq: i64,
+    pub more: bool,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct Summary {
+    pub documents: i64,
+    pub seq: i64,
 }
 
 pub struct Exchanged {
@@ -75,6 +108,22 @@ impl AccountClient {
         let bytes = self.send(self.http.get(format!("{}/v1/me", self.origin)).bearer_auth(token.expose())).await?;
         let me: MeResponse = serde_json::from_slice(&bytes).map_err(|_| ClientError::Malformed)?;
         Ok((me.id, me.provider))
+    }
+
+    pub async fn push(&self, token: &Secret<String>, documents: &[Document]) -> Result<PushResponse, ClientError> {
+        let body = serde_json::to_vec(&json!({"documents": documents})).expect("셋업 문서는 언제나 직렬화된다");
+        let bytes = self.send(self.http.post(format!("{}/v1/setup/push", self.origin)).bearer_auth(token.expose()).header(CONTENT_TYPE, "application/json").body(body)).await?;
+        serde_json::from_slice(&bytes).map_err(|_| ClientError::Malformed)
+    }
+
+    pub async fn changes(&self, token: &Secret<String>, since: i64, limit: usize) -> Result<Changes, ClientError> {
+        let bytes = self.send(self.http.get(format!("{}/v1/setup/changes?since={since}&limit={limit}", self.origin)).bearer_auth(token.expose())).await?;
+        serde_json::from_slice(&bytes).map_err(|_| ClientError::Malformed)
+    }
+
+    pub async fn summary(&self, token: &Secret<String>) -> Result<Summary, ClientError> {
+        let bytes = self.send(self.http.get(format!("{}/v1/setup/summary", self.origin)).bearer_auth(token.expose())).await?;
+        serde_json::from_slice(&bytes).map_err(|_| ClientError::Malformed)
     }
 
     pub async fn revoke(&self, token: &Secret<String>) -> Result<(), ClientError> {

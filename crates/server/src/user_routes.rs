@@ -261,7 +261,8 @@ fn check_layout(path_id: &str, input: &LayoutInput) -> Result<Vec<Symbol>, ApiFa
 }
 
 async fn delete_layout(State(st): State<Arc<AppState>>, Path(id): Path<String>) -> Result<StatusCode, ApiFailure> {
-    userdata::delete_layout(&st.db, &id).await?;
+    let now = UnixSeconds(st.clock.now().unix());
+    userdata::delete_layout(&st.db, &id, now).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 

@@ -219,6 +219,7 @@ async fn serve(config: Config, token_file: TokenFile, key_file: KeyFile, account
     let state = application_with_system(ApplicationInputs { rest: rest.clone(), clock: clock.clone(), symbols: symbols.clone(), db, screener_store, stream, static_dir: config.static_dir.clone(), screener_update_on_connect: config.screener_update_on_start }, system);
     state.system.bound(bound_addr);
     tokio::spawn(daily_maintenance(state.clone()));
+    tokio::spawn(crate::account::sync::run(state.clone()));
 
     let financial_store = crate::financials::store::Store::open(&config.financial_db_path).await;
     if let Err(failure) = financial_store { tracing::warn!(?failure, "재무 저장소를 열 수 없습니다"); }

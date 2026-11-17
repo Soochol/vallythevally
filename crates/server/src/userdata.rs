@@ -5,6 +5,8 @@ use sqlx::sqlite::SqliteRow;
 
 use crate::api::{Layout, LayoutInput, LayoutSummary, LayoutWindow, Revision, Screens, SymbolCode, UiState, UnixSeconds, WatchGroup, Watchlist, Watchlists, WindowContent, WindowId, parse_layout_feed};
 use crate::db::{AppDb, DbError};
+use crate::sync_log;
+use setup::{DocumentKind, SINGLETON_ID};
 
 #[derive(Debug)]
 pub enum StoreError {
@@ -91,6 +93,7 @@ pub async fn put_watchlists(db: &AppDb, all: &Watchlists) -> Result<(), StoreErr
 
 pub(crate) async fn store_watchlists(tx: &mut SqliteConnection, all: &Watchlists) -> Result<(), StoreError> {
     sqlx::query("UPDATE watchlist_revision SET revision = ? WHERE singleton = 1").bind(all.revision.0).execute(&mut *tx).await?;
+    sync_log::saved(tx, DocumentKind::Watchlists, SINGLETON_ID, all.revision.0).await?;
     sqlx::query("DELETE FROM watchlists").execute(&mut *tx).await?;
     for (list_position, list) in all.lists.iter().enumerate() {
         sqlx::query("INSERT INTO watchlists (id, name, position) VALUES (?, ?, ?)")
@@ -151,6 +154,7 @@ pub async fn put_screens(db: &AppDb, all: &Screens) -> Result<(), StoreError> {
 pub(crate) async fn store_screens(tx: &mut SqliteConnection, all: &Screens) -> Result<(), StoreError> {
     let list = serde_json::to_string(&all.screens).expect("Screen은 언제나 직렬화된다");
     sqlx::query("UPDATE screens SET list = ?, revision = ? WHERE singleton = 1").bind(list).bind(all.revision.0).execute(&mut *tx).await?;
+    sync_log::saved(tx, DocumentKind::Screens, SINGLETON_ID, all.revision.0).await?;
     Ok(())
 }
 
@@ -218,7 +222,8 @@ pub(crate) async fn get_layout_in(tx: &mut SqliteConnection, id: &str) -> Result
 pub async fn put_layout(db: &AppDb, input: &LayoutInput, now: UnixSeconds) -> Result<Layout, StoreError> {
     let mut tx = db.begin_write().await?;
     let stored: Option<i64> = sqlx::query_scalar("SELECT revision FROM layouts WHERE id = ?").bind(&input.id).fetch_optional(&mut *tx).await?;
-    check_newer(stored, input.revision)?;
+    let tombstone = sync_log::tombstone_revision(&mut tx, DocumentKind::Layout, &input.id).await?;
+    check_newer(stored.max(tombstone), input.revision)?;
     store_layout(&mut tx, input, now).await?;
     tx.commit().await?;
     Ok(Layout {
@@ -257,6 +262,7 @@ pub(crate) async fn store_layout(tx: &mut SqliteConnection, input: &LayoutInput,
     .bind(input.revision.0)
     .execute(&mut *tx)
     .await?;
+    sync_log::saved(tx, DocumentKind::Layout, &input.id, input.revision.0).await?;
     sqlx::query("DELETE FROM layout_windows WHERE layout_id = ?").bind(&input.id).execute(&mut *tx).await?;
     for (position, w) in input.windows.iter().enumerate() {
         let (symbol, venue, period, chart_settings) = match &w.content {
@@ -303,7 +309,7 @@ pub(crate) fn window_kind(content: &WindowContent) -> String {
     }
 }
 
-pub async fn delete_layout(db: &AppDb, id: &str) -> Result<(), StoreError> {
+pub async fn delete_layout(db: &AppDb, id: &str, now: UnixSeconds) -> Result<(), StoreError> {
     let mut tx = db.begin_write().await?;
     let exists: Option<i64> = sqlx::query_scalar("SELECT 1 FROM layouts WHERE id = ?").bind(id).fetch_optional(&mut *tx).await?;
     if exists.is_none() {
@@ -314,6 +320,7 @@ pub async fn delete_layout(db: &AppDb, id: &str) -> Result<(), StoreError> {
         return Err(StoreError::Conflict("마지막 레이아웃은 지울 수 없습니다".into()));
     }
     sqlx::query("DELETE FROM layouts WHERE id = ?").bind(id).execute(&mut *tx).await?;
+    sync_log::deleted(&mut tx, DocumentKind::Layout, id, now.millis()).await?;
     tx.commit().await?;
     Ok(())
 }
@@ -350,6 +357,7 @@ pub(crate) async fn store_ui_state(tx: &mut SqliteConnection, state: &UiState, r
     .bind(revision.0)
     .execute(&mut *tx)
     .await?;
+    sync_log::saved(tx, DocumentKind::UiState, SINGLETON_ID, revision.0).await?;
     Ok(())
 }
 
@@ -629,14 +637,14 @@ mod tests {
         let db = db(opts).await;
         let dup = layout("L2", "기본", vec![chart("c", "005930", Some(Venue::Combined))]);
         assert!(matches!(put_layout(&db, &dup, UnixSeconds(1)).await, Err(StoreError::Conflict(_))));
-        assert!(matches!(delete_layout(&db, DEFAULT_ID).await, Err(StoreError::Conflict(_))));
-        assert!(matches!(delete_layout(&db, "nope").await, Err(StoreError::NotFound)));
+        assert!(matches!(delete_layout(&db, DEFAULT_ID, UnixSeconds(1)).await, Err(StoreError::Conflict(_))));
+        assert!(matches!(delete_layout(&db, "nope", UnixSeconds(1)).await, Err(StoreError::NotFound)));
 
         put_layout(&db, &layout("L2", "둘", vec![chart("c", "005930", Some(Venue::Combined))]), UnixSeconds(1)).await.unwrap();
-        delete_layout(&db, DEFAULT_ID).await.unwrap();
+        delete_layout(&db, DEFAULT_ID, UnixSeconds(1)).await.unwrap();
         let windows: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM layout_windows WHERE layout_id = ?").bind(DEFAULT_ID).fetch_one(db.read()).await.unwrap();
         assert_eq!(windows, 0, "foreign_keys가 켜져 있어 창도 함께 지워진다");
-        assert!(matches!(delete_layout(&db, "L2").await, Err(StoreError::Conflict(_))));
+        assert!(matches!(delete_layout(&db, "L2", UnixSeconds(1)).await, Err(StoreError::Conflict(_))));
     }
 
     #[sqlx::test(migrations = "./migrations")]
@@ -688,6 +696,55 @@ mod tests {
             let err = get_layout(&db, DEFAULT_ID).await.unwrap_err();
             assert!(matches!(&err, StoreError::Db(e) if e.0.contains("차트 창")), "{symbol}: {err:?}");
         }
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn every_save_writes_its_sync_record_in_the_same_transaction(_: SqlitePoolOptions, opts: SqliteConnectOptions) {
+        let db = AppDb::connect(opts).await.unwrap();
+        let recorded = |kind: &'static str, id: &'static str| {
+            let db = db.clone();
+            async move { sqlx::query_scalar::<_, i64>("SELECT revision FROM sync_documents WHERE kind = ? AND id = ?").bind(kind).bind(id).fetch_one(db.read()).await.unwrap() }
+        };
+        put_watchlists(&db, &watch(vec![list("L1", "하나", &["005930"])], 10)).await.unwrap();
+        put_screens(&db, &Screens { screens: vec![], revision: Revision(10) }).await.unwrap();
+        put_ui_state(&db, &serde_json::from_value(json!({"lastLayoutId": null, "theme": "light", "revision": 10})).unwrap(), Revision(10)).await.unwrap();
+        put_layout(&db, &layout_at("L2", "둘", vec![chart("c", "005930", Some(Venue::Krx))], 10), UnixSeconds(1)).await.unwrap();
+        for (kind, id) in [("watchlists", "main"), ("screens", "main"), ("ui_state", "main"), ("layout", "L2")] {
+            assert_eq!(recorded(kind, id).await, 10, "{kind}");
+        }
+
+        crate::sync_log::break_for_test(&db).await;
+        assert!(put_watchlists(&db, &watch(vec![list("L1", "바뀜", &["005930"])], 11)).await.is_err());
+        assert!(put_screens(&db, &Screens { screens: vec![], revision: Revision(11) }).await.is_err());
+        assert!(put_ui_state(&db, &serde_json::from_value(json!({"lastLayoutId": null, "theme": "dark", "revision": 11})).unwrap(), Revision(11)).await.is_err());
+        assert!(put_layout(&db, &layout_at("L2", "바뀜", vec![chart("c", "005930", Some(Venue::Krx))], 11), UnixSeconds(2)).await.is_err());
+        assert!(delete_layout(&db, "L2", UnixSeconds(3)).await.is_err());
+
+        let watchlists = get_watchlists(&db).await.unwrap();
+        assert_eq!((watchlists.lists[0].name.as_str(), watchlists.revision), ("하나", Revision(10)));
+        assert_eq!(get_screens(&db).await.unwrap().revision, Revision(10));
+        assert_eq!(get_ui_state(&db).await.unwrap().0["theme"], "light");
+        let layout = get_layout(&db, "L2").await.unwrap();
+        assert_eq!((layout.name.as_str(), layout.revision), ("둘", Revision(10)));
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn a_deleted_layout_leaves_a_tombstone_that_beats_its_last_revision_and_refuses_older_saves(_: SqlitePoolOptions, opts: SqliteConnectOptions) {
+        let db = AppDb::connect(opts).await.unwrap();
+        let far_future = 9_000_000_000_000;
+        put_layout(&db, &layout_at("L2", "둘", vec![chart("c", "005930", Some(Venue::Krx))], far_future), UnixSeconds(1)).await.unwrap();
+        delete_layout(&db, "L2", UnixSeconds(1_800_000_000)).await.unwrap();
+        let (revision, deleted): (i64, i64) = sqlx::query_as("SELECT revision, deleted FROM sync_documents WHERE kind = 'layout' AND id = 'L2'").fetch_one(db.read()).await.unwrap();
+        assert_eq!((revision, deleted), (far_future + 1, 1), "max(저장된 revision + 1, 지금 밀리초)");
+        assert!(matches!(put_layout(&db, &layout_at("L2", "둘", vec![chart("c", "005930", Some(Venue::Krx))], far_future), UnixSeconds(2)).await, Err(StoreError::Stale(Revision(r))) if r == far_future + 1));
+        put_layout(&db, &layout_at("L2", "다시", vec![chart("c", "005930", Some(Venue::Krx))], far_future + 2), UnixSeconds(3)).await.unwrap();
+        let (revision, deleted): (i64, i64) = sqlx::query_as("SELECT revision, deleted FROM sync_documents WHERE kind = 'layout' AND id = 'L2'").fetch_one(db.read()).await.unwrap();
+        assert_eq!((revision, deleted), (far_future + 2, 0));
+
+        delete_layout(&db, "L2", UnixSeconds(1_800_000_000)).await.unwrap();
+        delete_layout(&db, DEFAULT_ID, UnixSeconds(1_800_000_000)).await.unwrap_err();
+        let default_revision: i64 = sqlx::query_scalar("SELECT revision FROM sync_documents WHERE kind = 'layout' AND id = ?").bind(DEFAULT_ID).fetch_one(db.read()).await.unwrap();
+        assert_eq!(default_revision, 0, "지우지 못한 레이아웃의 기록은 그대로다");
     }
 
     #[sqlx::test(migrations = "./migrations")]

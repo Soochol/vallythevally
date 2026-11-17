@@ -5,6 +5,7 @@ remote = "origin"
 serialize = false
 env_check = ["cargo --version", "node --version"]
 preflight = "never"
+post_verify_interval = 180
 
 [[verify]]
 name = "check"

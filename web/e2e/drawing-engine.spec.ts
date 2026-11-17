@@ -228,10 +228,26 @@ test("drawing engine: Alt tool aliases consume browser shortcuts and text fields
 
 const GROUP_LABEL: Record<Tool["group"], string> = { line: "선", fib: "피보나치·갠", shape: "도형", note: "주석", measure: "측정", pattern: "패턴" };
 
-test("drawing engine: the toolbar picks every registered tool by group and name", async ({ page }) => {
-  await open(page);
-  for (const [group, tools] of toolsByGroup()) for (const tool of tools) await pickTool(page, GROUP_LABEL[group], tool.label);
+const PICK_SLICE_SIZE = 4;
+const PICK_SLICES = [...toolsByGroup()].flatMap(([group, groupTools]) => {
+  const size = Math.ceil(groupTools.length / Math.ceil(groupTools.length / PICK_SLICE_SIZE));
+  return Array.from({ length: Math.ceil(groupTools.length / size) }, (_, n) => {
+    const tools = groupTools.slice(n * size, (n + 1) * size);
+    return { group, tools, name: `${GROUP_LABEL[group]} ${n * size + 1}~${n * size + tools.length}번째` };
+  });
 });
+
+test("drawing engine: the toolbar test slices cover every registered tool exactly once", () => {
+  expect(PICK_SLICES.flatMap(({ tools }) => tools.map((t) => t.tool)).sort()).toEqual([...toolsByGroup().values()].flat().map((t) => t.tool).sort());
+  expect(Math.max(...PICK_SLICES.map(({ tools }) => tools.length))).toBeLessThanOrEqual(PICK_SLICE_SIZE);
+});
+
+for (const { group, tools, name } of PICK_SLICES) {
+  test(`drawing engine: the toolbar picks every registered tool by group and name (${name})`, async ({ page }) => {
+    await open(page);
+    for (const tool of tools) await pickTool(page, GROUP_LABEL[group], tool.label);
+  });
+}
 
 test("drawing engine: phone shows persisted shapes without editing controls", async ({ page, scenario }, testInfo) => {
   await open(page); await draw(page); await expect.poll(async () => (await drawings(scenario)).length).toBe(1);

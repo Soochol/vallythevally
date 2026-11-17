@@ -9,8 +9,9 @@ use axum::response::{IntoResponse, Json, Response};
 use axum::routing::{get, post};
 use serde::Deserialize;
 
+use crate::account::sync::{Outcome, Phase};
 use crate::account::{CompleteQuery, Refusal};
-use crate::api::{AccountConfirm, AccountLoginRequest, AccountLoginStart, AccountStatus, ApiErrorCode, UnixSeconds};
+use crate::api::{AccountConfirm, AccountLoginRequest, InitialSyncRequest, AccountLoginStart, AccountStatus, ApiErrorCode, UnixSeconds};
 use crate::http::{ApiFailure, AppState};
 use crate::user_routes::read_json;
 
@@ -24,6 +25,8 @@ pub fn routes(state: Arc<AppState>) -> Router<Arc<AppState>> {
         .route("/api/account/refresh", post(refresh))
         .route("/api/account/delete", post(delete))
         .route("/api/account/replace-local", post(replace_local))
+        .route("/api/account/sync", post(sync))
+        .route("/api/account/initial-sync", post(initial_sync))
         .layer(middleware::from_fn_with_state(state, crate::write_guard::guard_writes))
         .route("/auth/complete", get(complete))
 }
@@ -31,7 +34,7 @@ pub fn routes(state: Arc<AppState>) -> Router<Arc<AppState>> {
 impl From<Refusal> for ApiFailure {
     fn from(refusal: Refusal) -> Self {
         let code = match refusal {
-            Refusal::LocalOnly | Refusal::NotSignedIn | Refusal::NotOwnerMismatch => ApiErrorCode::Conflict,
+            Refusal::LocalOnly | Refusal::NotSignedIn | Refusal::NotOwnerMismatch | Refusal::OwnerMismatch | Refusal::NeedsChoice | Refusal::NoChoicePending => ApiErrorCode::Conflict,
             Refusal::ServerUnavailable(_) => ApiErrorCode::AccountServerUnavailable,
             Refusal::Storage => ApiErrorCode::Internal,
         };
@@ -85,6 +88,19 @@ async fn delete(State(st): State<Arc<AppState>>, body: Body) -> Result<Json<Acco
 async fn replace_local(State(st): State<Arc<AppState>>, body: Body) -> Result<Json<AccountStatus>, ApiFailure> {
     confirmed(body).await?;
     st.system.account().replace_local(&st.db).await?;
+    current(&st).await
+}
+
+async fn sync(State(st): State<Arc<AppState>>) -> Result<Json<AccountStatus>, ApiFailure> {
+    match st.system.account().sync_now(&st, Phase::Full).await {
+        Ok(Outcome::Synced | Outcome::NeedsChoice) | Err(Refusal::NeedsChoice) => current(&st).await,
+        Err(refusal) => Err(refusal.into()),
+    }
+}
+
+async fn initial_sync(State(st): State<Arc<AppState>>, body: Body) -> Result<Json<AccountStatus>, ApiFailure> {
+    let request: InitialSyncRequest = read_json(body, BODY_LIMIT, "첫 로그인 선택").await?;
+    st.system.account().initial_sync(&st, request.choice).await?;
     current(&st).await
 }
 

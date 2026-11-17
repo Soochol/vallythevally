@@ -127,6 +127,7 @@ impl Server {
                 state.link.subscribe().wait_for(|state| matches!(state, LinkState::NoKey | LinkState::Connected | LinkState::Failed(_) | LinkState::Connecting(ConnectStep::Symbols | ConnectStep::Realtime))).await.unwrap();
             }
             background.spawn(server::app::daily_maintenance(state.clone()));
+            background.spawn(server::account::sync::run(state.clone()));
             let financial_path = value("VALLY_FINANCIAL_DB_PATH").map(PathBuf::from).unwrap_or_else(|| parent.join("financials.db"));
             let financial_store = server::financials::store::Store::open(&financial_path).await;
             let client = value("OPENDART_API_KEY").filter(|key| !key.is_empty()).map(|key| server::financials::client::Client::with_spacing(server::config::Secret::new(key.into()), value("VALLY_DART_BASE_URL").expect("DART tests require loopback URL").into(), value("VALLY_KIND_BASE_URL").expect("KIND tests require loopback URL").into(), std::time::Duration::from_millis(value("DART_SPACING_MILLIS").map_or(1, |millis| millis.parse().unwrap()))).unwrap());

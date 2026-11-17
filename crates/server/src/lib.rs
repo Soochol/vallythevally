@@ -22,6 +22,7 @@ pub mod quotes;
 pub mod screener;
 pub mod setup_bundle;
 pub mod symbols;
+mod sync_log;
 pub mod system_routes;
 pub mod user_routes;
 pub mod userdata;
