@@ -10,6 +10,7 @@ use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWriteExt, BufReader};
 use tokio::net::unix::OwnedWriteHalf;
 use tokio::net::{UnixListener, UnixStream};
 use tokio::sync::{Mutex, Semaphore, mpsc, watch};
+use tokio::task::JoinSet;
 use tokio::time::{Instant, Interval, interval_at, timeout};
 
 use super::files::{read_coverage, read_disk};
@@ -139,11 +140,13 @@ pub async fn serve(socket: StatusSocket, api: StatusApi, mut shutdown: watch::Re
 async fn connection(stream: UnixStream, shared: Arc<Shared>, mut shutdown: watch::Receiver<bool>) {
     let (reader, writer) = stream.into_split();
     let (outbox, lines) = mpsc::channel::<String>(OUTBOX_LINES);
-    let writer = tokio::spawn(write_lines(writer, lines));
+    let mut writer = tokio::spawn(write_lines(writer, lines));
     let Ok(_slot) = shared.slots.clone().try_acquire_owned() else {
         let _ = outbox.try_send(Reply::error(ErrorCode::TooManyConnections, "연결이 너무 많습니다").to_line());
         drop(outbox);
-        let _ = timeout(Duration::from_secs(1), writer).await;
+        if timeout(Duration::from_secs(1), &mut writer).await.is_err() {
+            writer.abort();
+        }
         return;
     };
     let ended = converse(reader, &outbox, &shared, &mut shutdown).await;
@@ -151,7 +154,9 @@ async fn connection(stream: UnixStream, shared: Arc<Shared>, mut shutdown: watch
     match ended {
         Ended::Overflow => writer.abort(),
         Ended::Peer => {
-            let _ = timeout(Duration::from_secs(2), writer).await;
+            if timeout(Duration::from_secs(2), &mut writer).await.is_err() {
+                writer.abort();
+            }
         }
     }
 }
@@ -171,8 +176,7 @@ enum Line {
     Closed,
 }
 
-async fn read_line_limited(reader: &mut BufReader<impl AsyncRead + Unpin>) -> Line {
-    let mut bytes = Vec::new();
+async fn read_line_limited(reader: &mut BufReader<impl AsyncRead + Unpin>, pending: &mut Vec<u8>) -> Line {
     loop {
         let Ok(chunk) = reader.fill_buf().await else { return Line::Closed };
         if chunk.is_empty() {
@@ -180,14 +184,15 @@ async fn read_line_limited(reader: &mut BufReader<impl AsyncRead + Unpin>) -> Li
         }
         let newline = chunk.iter().position(|byte| *byte == b'\n');
         let take = newline.map_or(chunk.len(), |at| at + 1);
-        bytes.extend_from_slice(&chunk[..take]);
+        pending.extend_from_slice(&chunk[..take]);
         reader.consume(take);
-        if newline.is_some() {
-            bytes.pop();
-            return Line::Text(String::from_utf8_lossy(&bytes).into_owned());
-        }
-        if bytes.len() > MAX_REQUEST_BYTES {
+        let length = pending.len() - usize::from(newline.is_some());
+        if length > MAX_REQUEST_BYTES {
             return Line::TooLong;
+        }
+        if newline.is_some() {
+            pending.pop();
+            return Line::Text(String::from_utf8_lossy(&std::mem::take(pending)).into_owned());
         }
     }
 }
@@ -201,8 +206,10 @@ enum Ended {
     Overflow,
 }
 
-async fn converse(reader: impl AsyncRead + Unpin, outbox: &mpsc::Sender<String>, shared: &Shared, shutdown: &mut watch::Receiver<bool>) -> Ended {
+async fn converse(reader: impl AsyncRead + Unpin, outbox: &mpsc::Sender<String>, shared: &Arc<Shared>, shutdown: &mut watch::Receiver<bool>) -> Ended {
     let mut reader = BufReader::new(reader);
+    let mut pending = Vec::new();
+    let mut replies = JoinSet::new();
     let mut ticker: Option<Interval> = None;
     let mut sequence = 0_u64;
     let mut last_phase = DayPhase::default();
@@ -218,6 +225,11 @@ async fn converse(reader: impl AsyncRead + Unpin, outbox: &mpsc::Sender<String>,
         tokio::select! {
             biased;
             _ = shutdown.changed() => return Ended::Peer,
+            Some(finished) = replies.join_next(), if !replies.is_empty() => {
+                if matches!(finished, Ok(false)) {
+                    return Ended::Overflow;
+                }
+            }
             _ = tick => {
                 sequence += 1;
                 last_phase = shared.api.status.borrow().phase;
@@ -238,7 +250,7 @@ async fn converse(reader: impl AsyncRead + Unpin, outbox: &mpsc::Sender<String>,
                     }
                 }
             }
-            line = read_line_limited(&mut reader) => match line {
+            line = read_line_limited(&mut reader, &mut pending) => match line {
                 Line::Closed => return Ended::Peer,
                 Line::TooLong => {
                     push(outbox, &Reply::error(ErrorCode::BadRequest, format!("요청 한 줄은 {MAX_REQUEST_BYTES}바이트까지입니다")));
@@ -252,6 +264,14 @@ async fn converse(reader: impl AsyncRead + Unpin, outbox: &mpsc::Sender<String>,
                                 ticker = Some(interval_at(Instant::now() + every, every));
                                 last_phase = shared.api.status.borrow().phase;
                                 status.borrow_and_update();
+                            }
+                            if matches!(request.kind, RequestKind::Coverage | RequestKind::Disk) {
+                                let (shared, outbox) = (shared.clone(), outbox.clone());
+                                replies.spawn(async move {
+                                    let reply = shared.answer(request.kind).await;
+                                    push(&outbox, &reply)
+                                });
+                                continue;
                             }
                             shared.answer(request.kind).await
                         }

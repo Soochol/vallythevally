@@ -45,7 +45,11 @@ fn coverage_of(data_dir: &Path, date: u32) -> CoverageDay {
     if !folder.is_dir() {
         return day(CoverageState::InProgress, CompleteSummary::default());
     }
-    match fs::read(folder.join(COMPLETE_FILE)) {
+    let complete = folder.join(COMPLETE_FILE);
+    if fs::symlink_metadata(&complete).is_ok_and(|metadata| !metadata.is_file()) {
+        return day(CoverageState::Unreadable, CompleteSummary::default());
+    }
+    match fs::read(&complete) {
         Ok(bytes) => match serde_json::from_slice::<CompleteSummary>(&bytes) {
             Ok(summary) => day(CoverageState::Complete, summary),
             Err(_) => day(CoverageState::Unreadable, CompleteSummary::default()),

@@ -514,3 +514,49 @@ fn collector_status_says_the_daemon_is_off_and_fails_when_nothing_listens() {
     assert_eq!(code, Some(1), "기본 소켓은 상태 폴더 아래 supervise.sock이다");
     assert!(stdout.contains("supervise.sock"), "{stdout}");
 }
+
+#[tokio::test(start_paused = true)]
+async fn a_request_split_across_writes_survives_a_heartbeat_tick_and_an_oversized_line_is_refused_even_in_one_write() {
+    let world = World::start(plan_for(2, 3, 0));
+    sleep(Duration::from_secs(20)).await;
+    let mut client = world.connect().await;
+    client.send(&fixture_line("request-watch.json")).await;
+    assert_eq!(client.read().await["type"], "status");
+    client.send(r#"{"v":1,"ty"#).await;
+    sleep(Duration::from_secs(6)).await;
+    client.send("pe\":\"disk\"}\n").await;
+    let mut types = Vec::new();
+    for _ in 0..3 {
+        types.push(client.read().await["type"].as_str().unwrap().to_owned());
+    }
+    assert_eq!(types.iter().filter(|kind| *kind == "disk").count(), 1, "{types:?}");
+    assert!(!types.contains(&"error".to_owned()), "{types:?}");
+
+    let mut oversized = world.connect().await;
+    oversized.send(&format!("{{\"v\":1,\"type\":\"status\",\"pad\":\"{}\"}}\n", " ".repeat(6000))).await;
+    assert_eq!(error_code(&oversized.read().await), "bad_request");
+    world.finish().await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_coverage_read_that_never_returns_does_not_stop_the_heartbeats_of_a_watching_connection() {
+    let world = World::start(plan_for(2, 3, 0));
+    sleep(Duration::from_secs(20)).await;
+    let fifo = world.data().join("store/20261117/complete.json");
+    std::fs::create_dir_all(fifo.parent().unwrap()).unwrap();
+    assert!(Command::new("mkfifo").arg(&fifo).status().unwrap().success());
+    let mut client = world.connect().await;
+    client.send(&fixture_line("request-watch.json")).await;
+    assert_eq!(client.read().await["type"], "status");
+    client.send(&fixture_line("request-coverage.json")).await;
+    let coverage = client.read().await;
+    assert_eq!(coverage["type"], "coverage");
+    assert_eq!(coverage["days"][0]["state"], "unreadable");
+    let mut heartbeats = 0;
+    while heartbeats < 3 {
+        if client.read().await["type"] == "heartbeat" {
+            heartbeats += 1;
+        }
+    }
+    world.finish().await;
+}
