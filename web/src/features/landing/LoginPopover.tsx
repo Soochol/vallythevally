@@ -1,7 +1,5 @@
-import { type RefObject, useState } from "react";
-import { startLogin } from "../../api/account";
+import type { RefObject } from "react";
 import type { AccountProvider } from "../../api/generated/AccountProvider";
-import { markLoginStarted } from "../setup-wizard/wizardOpen";
 import { Popover } from "../overlay/Popover";
 import { PROVIDER_NAME } from "../account/provider";
 
@@ -11,26 +9,13 @@ const PROVIDERS = ["google", "naver"] as const;
 interface Props {
   anchor: RefObject<HTMLElement | null>;
   failure: string | null;
+  leaving: AccountProvider | null;
+  error: string | null;
+  onLogin(provider: AccountProvider): void;
   onClose(): void;
 }
 
-export function LoginPopover({ anchor, failure, onClose }: Props) {
-  const [leaving, setLeaving] = useState<AccountProvider | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  const login = async (provider: AccountProvider) => {
-    setLeaving(provider);
-    setError(null);
-    try {
-      const { url } = await startLogin(provider);
-      markLoginStarted();
-      window.location.assign(url);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "로그인을 시작하지 못했습니다");
-      setLeaving(null);
-    }
-  };
-
+export function LoginPopover({ anchor, failure, leaving, error, onLogin, onClose }: Props) {
   return (
     <Popover role="dialog" aria-label="로그인" anchor={anchor} placement="bottom" onClose={onClose} className="flex w-[300px] flex-col gap-3 p-4">
       <h2 className="text-l font-semibold">로그인</h2>
@@ -38,7 +23,7 @@ export function LoginPopover({ anchor, failure, onClose }: Props) {
       {error && <p role="alert" className="text-m text-danger">{error}</p>}
       <div className="flex flex-col gap-2">
         {PROVIDERS.map((provider) => (
-          <button key={provider} type="button" className={PROVIDER_BUTTON} disabled={leaving !== null} onClick={() => void login(provider)}>
+          <button key={provider} type="button" className={PROVIDER_BUTTON} disabled={leaving !== null} onClick={() => onLogin(provider)}>
             {PROVIDER_NAME[provider]}로 로그인
           </button>
         ))}

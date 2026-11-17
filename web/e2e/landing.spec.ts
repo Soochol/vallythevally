@@ -121,6 +121,39 @@ test.describe("1440×900", () => {
     await expect(page).toHaveURL(/\/fake-idp\/start\?state=held$/);
   });
 
+  test("이동하는 동안 창을 닫았다 다시 열어도 단추는 꺼져 있고 로그인 시작은 한 번만 간다", async ({ page, scenario }) => {
+    scenario.live.account = SIGNED_OUT;
+    await page.route("**/fake-idp/**", (r) => r.fulfill({ status: 200, contentType: "text/html", body: "<title>idp</title>" }));
+    const held = scenario.hold(route("POST", "/api/account/login"));
+    await page.goto("/");
+    await loginButton(page).click();
+    await loginDialog(page).getByRole("button", { name: "네이버로 로그인" }).click();
+    await held.received;
+    await page.keyboard.press("Escape");
+    await expect(loginDialog(page)).toHaveCount(0);
+    await loginButton(page).click();
+    await expect(loginDialog(page).getByRole("button", { name: "Google로 로그인" })).toBeDisabled();
+    await expect(loginDialog(page).getByRole("button", { name: "네이버로 로그인" })).toBeDisabled();
+    await expect(loginDialog(page).getByRole("status")).toHaveText("네이버 로그인 화면으로 이동합니다");
+    held.reply({ body: { url: `${new URL(page.url()).origin}/fake-idp/start?state=once` } });
+    await expect(page).toHaveURL(/\/fake-idp\/start\?state=once$/);
+    expect(scenario.requests.filter((r) => route("POST", "/api/account/login")(new URL(r.url()), r))).toHaveLength(1);
+  });
+
+  test("이동하는 동안 창을 닫아 두었는데 시작이 실패하면 다시 열었을 때 이유가 보이고 단추가 켜진다", async ({ page, scenario }) => {
+    scenario.live.account = SIGNED_OUT;
+    const held = scenario.hold(route("POST", "/api/account/login"));
+    await page.goto("/");
+    await loginButton(page).click();
+    await loginDialog(page).getByRole("button", { name: "네이버로 로그인" }).click();
+    await held.received;
+    await page.keyboard.press("Escape");
+    held.reply({ status: 503, body: { error: { code: "account_server_unavailable", message: "계정 서버에 연결하지 못했습니다" } } });
+    await loginButton(page).click();
+    await expect(loginDialog(page).getByRole("alert")).toHaveText("계정 서버에 연결하지 못했습니다");
+    await expect(loginDialog(page).getByRole("button", { name: "네이버로 로그인" })).toBeEnabled();
+  });
+
   test("움직임 줄이기: 고정 구간 없이 네 장이 모두 보이고 위에서 아래로 놓인다. 차트 선은 다 그려져 있다", async ({ page, scenario }) => {
     scenario.live.account = SIGNED_OUT;
     await page.emulateMedia({ reducedMotion: "reduce" });

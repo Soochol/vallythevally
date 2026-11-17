@@ -1,5 +1,6 @@
 import { useRef, useState } from "react";
 import { LoginPopover } from "./LoginPopover";
+import { useLoginStart } from "./useLoginStart";
 
 function LogoMark() {
   return (
@@ -13,6 +14,7 @@ function LogoMark() {
 export function LandingBar({ initialFailure }: { initialFailure: string | null }) {
   const [open, setOpen] = useState(initialFailure !== null);
   const button = useRef<HTMLButtonElement>(null);
+  const { leaving, error, login } = useLoginStart();
   return (
     <header className="landing-bar">
       <span className="flex items-center gap-2.5 text-xl font-bold tracking-tight">
@@ -22,7 +24,7 @@ export function LandingBar({ initialFailure }: { initialFailure: string | null }
       <button ref={button} type="button" aria-expanded={open} className="landing-login" onClick={() => setOpen((value) => !value)}>
         로그인
       </button>
-      {open && <LoginPopover anchor={button} failure={initialFailure} onClose={() => setOpen(false)} />}
+      {open && <LoginPopover anchor={button} failure={initialFailure} leaving={leaving} error={error} onLogin={(provider) => void login(provider)} onClose={() => setOpen(false)} />}
     </header>
   );
 }
