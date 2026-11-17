@@ -81,7 +81,7 @@ fn verify(claims: &Claims, config: &GoogleConfig, grant: &CodeGrant<'_>) -> Resu
     }
     let audience_matches = match &claims.aud {
         Audience::One(value) => value == &config.client_id,
-        Audience::Many(values) => values.contains(&config.client_id),
+        Audience::Many(values) => values.len() == 1 && values[0] == config.client_id,
     };
     if !audience_matches {
         return Err(IdpFailure("id_token aud가 맞지 않는다"));

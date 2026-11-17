@@ -22,6 +22,7 @@ pub struct ClientCredentials {
 pub enum Fault {
     None,
     WrongAudience,
+    ExtraAudience,
     WrongIssuer,
     WrongNonce,
     ExpiredIdToken,
@@ -192,7 +193,11 @@ async fn google_token(State(inner): State<Arc<Inner>>, Form(form): Form<HashMap<
     let now = inner.clock.now().0;
     let claims = json!({
         "iss": if grant.fault == Fault::WrongIssuer { "https://issuer.example.test" } else { "https://accounts.google.com" },
-        "aud": if grant.fault == Fault::WrongAudience { "another-client" } else { inner.google.id.as_str() },
+        "aud": match grant.fault {
+            Fault::WrongAudience => json!("another-client"),
+            Fault::ExtraAudience => json!(["another-client", inner.google.id]),
+            _ => json!(inner.google.id),
+        },
         "exp": if grant.fault == Fault::ExpiredIdToken { now - 1 } else { now + 3600 },
         "iat": now,
         "nonce": if grant.fault == Fault::WrongNonce { "another-nonce" } else { grant.nonce.as_str() },

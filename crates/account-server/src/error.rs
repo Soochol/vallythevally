@@ -45,6 +45,17 @@ impl ApiError {
         Self::new(StatusCode::UNAUTHORIZED, "unauthorized", "토큰이 올바르지 않거나 만료됐습니다")
     }
 
+    pub fn from_rejection(status: StatusCode) -> Self {
+        match status {
+            StatusCode::PAYLOAD_TOO_LARGE => Self::new(status, "payload_too_large", "본문이 너무 큽니다"),
+            _ => Self::new(status, "invalid_request", "요청을 처리할 수 없습니다"),
+        }
+    }
+
+    pub fn is_foreign_key_violation(error: &sqlx::Error) -> bool {
+        error.as_database_error().is_some_and(|database| database.is_foreign_key_violation())
+    }
+
     pub fn internal() -> Self {
         Self::new(StatusCode::INTERNAL_SERVER_ERROR, "internal", "서버 오류입니다")
     }

@@ -198,7 +198,7 @@ async fn a_one_time_code_works_once_with_the_right_verifier_in_time() {
 #[tokio::test]
 async fn bad_id_tokens_do_not_log_anyone_in() {
     let harness = Harness::start().await;
-    for fault in [Fault::WrongAudience, Fault::WrongIssuer, Fault::WrongNonce, Fault::ExpiredIdToken, Fault::TokenExchangeRejected] {
+    for fault in [Fault::WrongAudience, Fault::ExtraAudience, Fault::WrongIssuer, Fault::WrongNonce, Fault::ExpiredIdToken, Fault::TokenExchangeRejected] {
         harness.idp.set_fault(fault);
         assert_connector_error(&harness, "google", "idp_failed").await;
     }
@@ -364,4 +364,18 @@ fn settings_read_names_defaults_and_env_files() {
     let error = Settings::from_values(&values).err().unwrap();
     assert!(error.to_string().contains("VALLY_ACCOUNT_NAVER_CLIENT_SECRET"));
     assert!(!format!("{:?}", settings.config).contains("gs\""));
+}
+
+#[tokio::test]
+async fn framework_rejections_use_the_json_error_shape() {
+    let harness = Harness::start().await;
+    let oversized = harness.http.post(format!("{}/v1/auth/token", harness.base)).body("x".repeat(5000)).send().await.unwrap();
+    assert_eq!(oversized.status(), 413);
+    let body: serde_json::Value = oversized.json().await.unwrap();
+    assert!(body["code"].is_string() && body["message"].is_string());
+
+    let bad_path = harness.http.get(format!("{}/v1/auth/%FF/start", harness.base)).send().await.unwrap();
+    assert_eq!(bad_path.status(), 400);
+    let body: serde_json::Value = bad_path.json().await.unwrap();
+    assert!(body["code"].is_string() && body["message"].is_string());
 }

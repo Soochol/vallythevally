@@ -50,7 +50,14 @@ pub fn router(config: AccountConfig, pool: SqlitePool, clock: Arc<dyn Clock>) ->
         .with_state(state)
 }
 
-async fn no_store(mut response: Response) -> Response {
+async fn no_store(response: Response) -> Response {
+    let plain_client_error = response.status().is_client_error()
+        && response
+            .headers()
+            .get(CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok())
+            .is_some_and(|value| value.starts_with("text/plain"));
+    let mut response = if plain_client_error { ApiError::from_rejection(response.status()).into_response() } else { response };
     response.headers_mut().insert(CACHE_CONTROL, HeaderValue::from_static("no-store"));
     response
 }
@@ -208,7 +215,9 @@ async fn exchange_token(State(state): Shared, body: Bytes) -> Result<Json<TokenR
     }
     let account = state.store.account(&account_id).await?.ok_or_else(ApiError::invalid_grant)?;
     let token = random_string(32);
-    state.store.insert_token(&token, &account_id, now).await?;
+    state.store.insert_token(&token, &account_id, now).await.map_err(|error| {
+        if ApiError::is_foreign_key_violation(&error) { ApiError::invalid_grant() } else { error.into() }
+    })?;
     tracing::info!(account_id, "커넥터 토큰 발급");
     Ok(Json(TokenResponse { token, account: AccountRef { id: account.id, provider: account.provider } }))
 }
