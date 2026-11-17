@@ -5,7 +5,9 @@ import { createBrowserRouter, Navigate, RouterProvider } from "react-router";
 import { watchFinancialJob } from "./api/financialUpdate";
 import { retryDelay, shouldRetry } from "./api/retry";
 import { ChartRoute } from "./App";
-import { boot } from "./persist/boot";
+import { takeLoginFailure } from "./features/account/loginFailure";
+import { start } from "./persist/start";
+import { useAccountStore } from "./stores/account";
 import { marketSocket } from "./stores/realtime";
 import "./styles/index.css";
 
@@ -20,8 +22,14 @@ const queryClient = new QueryClient({
 });
 watchFinancialJob(queryClient);
 
+const loginFailure = takeLoginFailure(new URL(location.href));
+if (loginFailure) {
+  history.replaceState(history.state, "", loginFailure.cleaned);
+  useAccountStore.getState().showLoginFailure(loginFailure.text);
+}
+
 // React 밖에서 한 번만 되살린다. StrictMode가 효과를 두 번 부르더라도 복원은 한 번이다.
-void boot();
+void start();
 marketSocket.start();
 
 const router = createBrowserRouter([
