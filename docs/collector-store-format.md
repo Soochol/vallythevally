@@ -1,6 +1,6 @@
 # 수집 저장소 형식
 
-수집기 `finalize`가 하루 원문을 정리해 만드는 Parquet 파일의 계약이다. 앱 서버는 수집기 코드를 가져다 쓰지 않고 이 문서만 보고 DuckDB로 읽는다([ADR 0025](adr/0025-collector-stores-closed-days-for-the-app.md) "수집 저장소"). 코드의 열 정의와 아래 열 표는 시험(`crates/collector/tests/finalize.rs`)이 견준다.
+수집기 `finalize`가 하루 원문을 정리해 만드는 Parquet 파일의 계약이다. 앱 서버는 수집기 코드를 가져다 쓰지 않고 이 문서만 보고 DuckDB로 읽는다([ADR 0025](adr/0025-collector-stores-closed-days-for-the-app.md) "수집 저장소"). 코드의 열 정의와 아래 열 표는 시험(`crates/collector/tests/finalize.rs`)이 견준다. 정리 완료 표시와 폴더 갈아 끼우기는 "complete.json" 절이 정한다.
 
 형식 버전은 1이다. 열을 지우거나 열의 형·뜻을 바꾸거나 정렬·파일 배치·버킷 규칙을 바꾸면 버전을 올리고 이 문서에 이력을 적는다. 열만 더하는 것은 버전을 올리지 않는다. 읽는 쪽은 열을 이름으로 고른다.
 
@@ -11,9 +11,12 @@ store/<YYYYMMDD>.tmp/        정리 중인 날. finalize가 쓴다.
 store/<YYYYMMDD>/            정리가 끝난 날. 앱이 읽는다.
   <타입>/<버킷 번호>.parquet   예: 0B/056.parquet
   verify.json               원문 대조 결과(아래 "verify.json")
+  complete.json             정리 완료 표시(아래 "complete.json")
+store/<YYYYMMDD>.old-<시각>/ 다시 정리하는 중 잠깐 있는 옛 폴더. 앱은 읽지 않는다.
+store/prune.log.jsonl        원문 지우기 기록(아래 "원문 지우기")
 ```
 
-- 앱은 `store/<YYYYMMDD>/`만 읽는다. `.tmp` 폴더는 쓰는 중이라 읽지 않는다. 정리 완료 표시(`complete.json`)와 `.tmp` 이름 바꾸기는 이 문서 밖의 뒤 작업이 정한다.
+- 앱은 `store/<YYYYMMDD>/` 가운데 `complete.json`이 있는 날짜만 읽는다. `.tmp`와 `.old-<시각>` 폴더는 읽지 않는다.
 - `<타입>`은 키움 실시간 타입 코드다. 대소문자를 구분한다. 받는 열한 가지는 `0B`·`0D`·`0w`·`0F`·`1h`·`0H`·`0E`·`0g`·`0J`·`0U`·`0s`다. 그날 행이 없는 타입은 폴더가 없다.
 - `<버킷 번호>`는 세 자리 0 채움 정수다. 종목 하나의 행은 한 타입에서 파일 하나에만 있다. 행이 없는 버킷은 파일이 없다. 타입 폴더의 `*.parquet`를 모두 읽으면 그 타입의 전부다.
 - 버킷은 `symbol`의 UTF-8 바이트에 FNV-1a 64비트(오프셋 `0xcbf29ce484222325`, 소수 `0x100000001b3`)를 적용한 값을 버킷 수로 나눈 나머지다. 기본 버킷 수는 64다. 종목 하나의 파일만 읽으려면 이 규칙으로 번호를 구한다. 예를 들어 `005930_AL`은 64개일 때 56번이다.
@@ -52,7 +55,7 @@ store/<YYYYMMDD>/            정리가 끝난 날. 앱이 읽는다.
 
 ## verify.json
 
-`finalize`가 정리 끝에 같은 폴더에 쓴다. 원문 대조 결과이고 뒤 작업이 `complete.json`에 옮겨 쓴다. 시각은 적지 않는다. 같은 원문이면 같은 파일이 나온다.
+`finalize`가 정리 끝에 같은 폴더에 쓴다. 원문 대조 결과이고 `complete.json`이 통과 여부와 줄 수를 옮겨 쓴다. 시각은 적지 않는다. 같은 원문이면 같은 파일이 나온다.
 
 | 키 | 뜻 |
 |---|---|
@@ -83,9 +86,55 @@ store/<YYYYMMDD>/            정리가 끝난 날. 앱이 읽는다.
 
 `--verify-only`는 버킷 수를 Parquet 파일의 메타데이터에서 읽는다. 파일이 하나도 없는 날은 `--buckets` 값을 쓴다.
 
-`finalized`는 프레임의 `trnm`·`data`와 항목의 `type`·`item`·`values`를 모두 저장했다는 뜻이다. 그 밖의 필드(`name` 등)는 읽지 않고 버린다. `values`가 객체가 아니거나, 키 하나를 글자로 풀 수 없거나(짝 없는 서로게이트 이스케이프), 필드가 없거나 `null`이면 그 항목은 `malformed_realtime_frame`이고 행이 없다. `symbol_messages`는 항목의 `type`이 글자이고(없거나 `null`이어도 된다) `item`이 글자이며 같은 필드가 두 번 없을 때 그 `item`을 센다. `type`이 글자가 아니거나 같은 필드가 두 번 있으면 세지 않는다.
+`finalized`는 프레임의 `trnm`·`data`와 항목의 `type`·`item`·`values`를 모두 저장했다는 뜻이다. 그 밖의 필드(`name` 등)는 읽지 않고 버린다. `values`가 객체가 아니거나, 키 하나를 글자로 풀 수 없거나(짝 없는 서로게이트 이스케이프), 필드가 없거나 `null`이면 그 항목은 `malformed_realtime_frame`이고 행이 없다. `symbol_messages`는 항목의 `item`이 비어 있지 않은 글자일 때 그 `item`을 센다. `type`은 없거나 `null`이어도 되지만 글자가 아닌 값이면 세지 않는다. 한 항목에 `type`·`item`·`values` 필드가 두 번 있으면 세지 않는다. 짝 없는 서로게이트 이스케이프가 든 `type`·`item`은 항목 전체를 `malformed_realtime_frame`으로 거절하고 세지 않는다. 빈 `item`(예: `0s`)은 행으로 저장되지만 세지 않는다.
 
 한 줄에 문제가 둘 이상이면 표 위쪽 종류로 센다(`malformed_realtime_frame`이 가장 앞). 줄에 여러 항목이 있으면 문제 없는 항목은 행으로 저장된다. 줄은 정리 못 함으로 센다.
+
+## complete.json
+
+`finalize`가 그날 정리를 모두 마친 뒤 맨 마지막에 쓰는 정리 완료 표시다. 앱은 이 파일이 있는 날짜만 읽는다. `store/<YYYYMMDD>.tmp/`에 Parquet, `verify.json`, `complete.json`을 모두 쓴 뒤 `complete.json`은 임시 파일에 쓰고 이름을 바꿔 둔다. 원문 대조가 실패하면 쓰지 않고 `.tmp` 폴더를 남긴다.
+
+| 키 | 뜻 |
+|---|---|
+| `format_version`, `date` | 이 파일의 형식 버전(1), 날짜(`YYYYMMDD` 수) |
+| `verify` | `passed`(원문 대조 통과 여부), `mismatch_count`, `buckets`, `lines_total`·`lines_finalized`·`lines_control`·`lines_unfinalized`(`verify.json`의 줄 수) |
+| `plan` | 그날 `plan/<날짜>.json`의 요약. 계획 파일이 없는 날은 `null`. `created_at`, `active_keys`, `universe_replaced`(불리언), `planned_stocks`, `excluded`, `unregistered`, `alerts`, `keys[]`(`name`, `role`, `stocks`(개수), `market_types`, `load`) |
+| `stocks[]` | 종목마다 하나. 종목코드 순이다 |
+
+`stocks[]`의 항목은 다음 필드를 가진다. 종목 코드는 원문의 `<종목코드>_AL`에서 `_AL`을 뗀 것이다.
+
+| 필드 | 뜻 |
+|---|---|
+| `code` | 종목코드 |
+| `planned` | 계획에 들었다. 계획에 없는데 받은 종목, 계획 파일이 없는 날의 모든 종목은 `false` |
+| `key` | 계획이 맡긴 수집 키 이름. 제외·등록하지 않는 종목과 계획 밖 종목은 `null` |
+| `excluded` | 용량 때문에 계획에서 제외됐다 |
+| `suspended` | 거래정지라 등록하지 않았다 |
+| `registered` | 키에 맡겨져 등록을 시도했고 사건 기록에 그 종목이 든 등록 묶음의 거절이 없다. 등록 묶음은 50종목씩 순서대로 끊는다. 한 번이라도 거절됐으면 `false`다 |
+| `received` | 원문에 이 종목의 `REAL` 항목이 하나 이상 있다 |
+| `messages` | 받은 `REAL` 항목 수. `verify.json`의 `symbol_messages`와 같은 셈이다. 다음 날 수집 계획의 부하 입력이 읽는다(위 "verify.json"의 셈 규칙을 따른다) |
+| `gaps[]` | 끊긴 구간 `{from_ms, to_ms}`(유닉스 밀리초). 키별 원문에서 구한다 |
+| `handoff` | 인계됐으면 `{at, from, to}`(`at`은 사건 기록의 KST 시각 글자), 아니면 `null` |
+
+- 끊긴 구간은 `down`부터 다음 `live`까지다. `live` 앞에 `down`이 없으면 앞 마지막 줄의 시각부터다. 그 키에서 앞에 `REAL` 프레임이 하나도 없었다면 끊김이 아니다. 끝나지 않은 끊김은 그 키 원문의 마지막 줄 시각까지다. 겹치거나 이어진 구간은 하나로 합친다.
+- 인계된 종목은 두 키 폴더의 원문을 이어 한 종목으로 본다. 인계 전의 끊긴 구간은 원래 키의 것이고, 그 키의 마지막 줄 시각부터 받는 키가 인계 시각 이후 처음 쓴 `live`까지가 끊긴 구간이다. 그 뒤의 끊긴 구간은 받는 키의 것이다.
+- 계획 파일이 없는 날(프로토타입 원문)은 계획 항목 없이 받은 것만 적고, 끊긴 구간은 키 폴더 없이 쓴 원문 전체에서 구한다.
+
+### 갈아 끼우기
+
+1. `store/<YYYYMMDD>/`가 없으면 `.tmp` 폴더의 이름을 바꿔 둔다.
+2. 이미 있으면(다시 정리) 옛 폴더를 `store/<YYYYMMDD>.old-<시각>/`으로, `.tmp`를 `store/<YYYYMMDD>/`로 바꾸고 옛 폴더를 지운다. 제자리에서 덮어쓰지 않는다. 이미 열린 파일은 이름이 바뀌어도 끝까지 읽힌다.
+3. 두 이름 바꾸기 사이에 죽으면 다음 `finalize`가 시작할 때 고친다. `.old-*`만 있고 `store/<YYYYMMDD>/`가 없으면 `complete.json`이 든 `.tmp`를 올리고, 없으면 옛 폴더를 되돌린다. 둘 다 있으면 옛 폴더를 지운다. 두 이름 바꾸기 사이에는 잠깐 그날 폴더가 없다.
+
+### 원문 지우기
+
+`finalize --prune`이 정리가 끝난 뒤 `raw/<날짜>/`를 지운다. 다음을 모두 만족하는 날만 지운다.
+
+- `store/<날짜>/complete.json`이 있고 `verify.passed`가 `true`이며 `verify.json`의 `passed`도 `false`가 아니다.
+- `verify.json`의 `lines.unfinalized.total`이 0이다. 이 셈이 없거나 읽을 수 없으면 지우지 않는다.
+- 그날 뒤로 관측일이 보관 기간만큼 지났다. 기간은 지우기를 도는 날(`--date`)로 정한다. 처음 `complete.json`을 쓴 날(`store/` 아래 `complete.json`이 있는 가장 이른 날짜)을 포함한 10관측일 동안은 7관측일이고 그 뒤는 1관측일이다. 세 값은 `--keep-early`(7), `--keep`(1), `--early-period`(10)로 바꾼다. 관측일은 `collector-calendar`의 셈이고 휴장일은 들지 않는다. `calendar/`의 특일정보 캐시만 읽고 받지 않으므로, 캐시가 없어 관측일을 판단할 수 없으면 지우지 않는다.
+
+결과는 `store/prune.log.jsonl`에 줄마다 `run_date`, `date`, `action`(`deleted`·`kept`·`failed`)으로 덧붙인다. `deleted`에는 `bytes`, `kept`에는 `reason`이 있다. 까닭은 `no_complete`, `complete_unreadable`, `verification_failed`, `unfinalized_count_missing`, `unfinalized`(`total`과 종류별 `kinds`), `within_retention`(`keep_observation_days`), `observation_unknown`이다. 지우는 부분은 `raw/` 바로 아래 8자리 날짜 폴더가 아닌 경로를 거부한다.
 
 ## 열 표
 
