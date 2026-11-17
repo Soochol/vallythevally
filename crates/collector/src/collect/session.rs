@@ -612,8 +612,7 @@ impl Session {
                 }
             }
             Command::Register(registration) => {
-                let chunks = Chunk::split(&registration);
-                self.registry.add(&chunks);
+                let chunks = self.registry.add(Chunk::split(&registration));
                 self.queue_ops(OpKind::Register, chunks);
             }
             Command::Unregister(registration) => {
@@ -729,6 +728,7 @@ impl Session {
         match (op.kind, result) {
             (OpKind::Register, Ok(())) => {
                 self.confirmed_any = true;
+                self.registry.accepted(&op.chunk);
                 self.events.registered(op.chunk.batch(), op.replay, None);
             }
             (OpKind::Register, Err(rejection)) => {

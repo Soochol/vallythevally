@@ -153,8 +153,8 @@ impl fmt::Display for RegistrationError {
             RegistrationError::NoTypes => formatter.write_str("types가 비었습니다"),
             RegistrationError::RepeatedType(kind) => write!(formatter, "types에 {}이 두 번 있습니다", kind.wire()),
             RegistrationError::MixedScopes => formatter.write_str("종목 단위 타입과 시장 단위 타입을 한 명령에 섞을 수 없습니다"),
-            RegistrationError::Stock(text) => write!(formatter, "종목코드가 아닌 값이 있습니다: {text:?}"),
-            RegistrationError::RepeatedItem(text) => write!(formatter, "같은 항목이 두 번 있습니다: {text:?}"),
+            RegistrationError::Stock(_) => formatter.write_str("종목코드가 아닌 값이 있습니다"),
+            RegistrationError::RepeatedItem(_) => formatter.write_str("같은 항목이 두 번 있습니다"),
         }
     }
 }
@@ -404,10 +404,16 @@ pub fn parse_command(line: &str) -> Result<Command, ProtocolError> {
     let Some(name) = name else {
         return Err(ProtocolError::UnknownCommand(printable_name(object.get("cmd"))));
     };
-    serde_json::from_value::<Command>(Value::Object(object)).map_err(|error| ProtocolError::Invalid {
-        command: name.clone(),
-        message: if name == "token" { "token(문자열)과 generation(정수)이 필요합니다".to_owned() } else { error.to_string() },
-    })
+    let invalid = |message: String| ProtocolError::Invalid { command: name.clone(), message };
+    match name.as_str() {
+        "register" | "unregister" => {
+            let wire = serde_json::from_value::<RegistrationWire>(Value::Object(object))
+                .map_err(|_| invalid("id(글자), items(글자 배열), types(타입 코드 배열)가 필요합니다".to_owned()))?;
+            let registration = Registration::try_from(wire).map_err(|error| invalid(error.to_string()))?;
+            Ok(if name == "register" { Command::Register(registration) } else { Command::Unregister(registration) })
+        }
+        _ => serde_json::from_value::<Command>(Value::Object(object)).map_err(|_| invalid("token(문자열)과 generation(정수)이 필요합니다".to_owned())),
+    }
 }
 
 pub fn parse_event(line: &str) -> Result<Event, ProtocolError> {
@@ -543,6 +549,7 @@ mod tests {
         assert_eq!(parse_command(r#"{"v":1,"cmd":"dance"}"#), Err(ProtocolError::UnknownCommand("dance".into())));
         assert_eq!(parse_command(r#"{"v":1}"#), Err(ProtocolError::UnknownCommand("(이름을 읽을 수 없음)".into())));
         assert!(matches!(parse_command(r#"{"v":1,"cmd":"register","id":"r","items":["5930"],"types":["0B"]}"#), Err(ProtocolError::Invalid { .. })));
+        assert!(matches!(parse_command(r#"{"v":1,"cmd":"shutdown","extra":1}"#), Ok(Command::Shutdown)));
         assert!(matches!(parse_command(r#"{"v":1,"cmd":"register","id":"r","items":["005930"],"types":["zz"]}"#), Err(ProtocolError::Invalid { .. })));
         assert_eq!(parse_command(r#"{"v":1,"cmd":"shutdown"}"#), Ok(Command::Shutdown));
     }
@@ -555,6 +562,10 @@ mod tests {
             format!(r#"{{"v":1,"cmd":"token","token":"{secret}"}}"#),
             format!(r#"{{"v":1,"cmd":"{secret}"}}"#),
             format!(r#"{{"v":1,"cmd":"token","token":["{secret}"],"generation":1}}"#),
+            format!(r#"{{"v":1,"cmd":"register","id":"r","items":["{secret}"],"types":["0B"]}}"#),
+            format!(r#"{{"v":1,"cmd":"register","id":"r","items":["005930"],"types":["{secret}"]}}"#),
+            format!(r#"{{"v":1,"cmd":"unregister","id":"{secret}","items":"005930","types":["0B"]}}"#),
+            format!(r#"{{"v":1,"cmd":"register","id":"r","items":["{secret}","{secret}"],"types":["0s"]}}"#),
         ] {
             let error = parse_command(&line).unwrap_err();
             assert!(!format!("{error} {error:?}").contains(secret), "{line}");

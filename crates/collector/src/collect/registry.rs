@@ -9,6 +9,7 @@ const STANDALONE_ID: &str = "items";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Chunk {
+    pub seq: u64,
     pub id: String,
     pub part: u32,
     pub parts: u32,
@@ -24,6 +25,7 @@ impl Chunk {
             .chunks(REGISTER_BATCH_SIZE)
             .enumerate()
             .map(|(part, items)| Chunk {
+                seq: 0,
                 id: registration.id().to_owned(),
                 part: part as u32,
                 parts,
@@ -70,12 +72,14 @@ impl Chunk {
 #[derive(Debug, Default)]
 pub struct Registry {
     wanted: Vec<Chunk>,
+    next_seq: u64,
 }
 
 impl Registry {
     pub fn standalone(items: Vec<String>) -> Registry {
         Registry {
-            wanted: vec![Chunk { id: STANDALONE_ID.to_owned(), part: 0, parts: 1, items, types: STREAM_TYPES.to_vec() }],
+            wanted: vec![Chunk { seq: 0, id: STANDALONE_ID.to_owned(), part: 0, parts: 1, items, types: STREAM_TYPES.to_vec() }],
+            next_seq: 1,
         }
     }
 
@@ -83,11 +87,25 @@ impl Registry {
         &self.wanted
     }
 
-    pub fn add(&mut self, chunks: &[Chunk]) {
-        for chunk in chunks {
-            self.subtract(&chunk.items, &chunk.types);
-        }
-        self.wanted.extend_from_slice(chunks);
+    pub fn add(&mut self, chunks: Vec<Chunk>) -> Vec<Chunk> {
+        let numbered: Vec<Chunk> = chunks
+            .into_iter()
+            .map(|chunk| {
+                self.next_seq += 1;
+                Chunk { seq: self.next_seq, ..chunk }
+            })
+            .collect();
+        self.wanted.extend_from_slice(&numbered);
+        numbered
+    }
+
+    pub fn accepted(&mut self, chunk: &Chunk) {
+        let items: HashSet<&str> = chunk.items.iter().map(String::as_str).collect();
+        self.wanted = self
+            .wanted
+            .iter()
+            .flat_map(|wanted| if wanted.seq == chunk.seq { vec![wanted.clone()] } else { wanted.without(&items, &chunk.types) })
+            .collect();
     }
 
     pub fn remove(&mut self, chunks: &[Chunk]) {
@@ -97,7 +115,7 @@ impl Registry {
     }
 
     pub fn forget(&mut self, chunk: &Chunk) {
-        self.wanted.retain(|wanted| wanted != chunk);
+        self.wanted.retain(|wanted| wanted.seq != chunk.seq);
     }
 
     fn subtract(&mut self, items: &[String], types: &[RealType]) {
@@ -139,18 +157,41 @@ mod tests {
     }
 
     #[test]
-    fn registering_the_same_pair_again_keeps_one_copy() {
+    fn an_accepted_registration_takes_over_the_pairs_of_older_ones() {
         let mut registry = Registry::default();
-        registry.add(&Chunk::split(&registration("a", 3, &[RealType::Trade])));
-        registry.add(&Chunk::split(&registration("b", 2, &[RealType::Trade])));
+        let first = registry.add(Chunk::split(&registration("a", 3, &[RealType::Trade])));
+        registry.accepted(&first[0]);
+        let second = registry.add(Chunk::split(&registration("b", 2, &[RealType::Trade])));
+        registry.accepted(&second[0]);
         let ids: Vec<(&str, usize)> = registry.wanted().iter().map(|chunk| (chunk.id.as_str(), chunk.items.len())).collect();
         assert_eq!(ids, [("a", 1), ("b", 2)]);
     }
 
     #[test]
+    fn a_rejected_re_registration_leaves_the_accepted_one_whole() {
+        let mut registry = Registry::default();
+        let first = registry.add(Chunk::split(&registration("a", 2, &[RealType::Trade])));
+        registry.accepted(&first[0]);
+        let second = registry.add(Chunk::split(&registration("b", 1, &[RealType::Trade])));
+        registry.forget(&second[0]);
+        assert_eq!(registry.wanted(), &first[..]);
+    }
+
+    #[test]
+    fn a_rejected_chunk_that_was_split_meanwhile_is_forgotten_in_every_piece() {
+        let mut registry = Registry::default();
+        let chunks = registry.add(Chunk::split(&registration("a", 60, &[RealType::Trade])));
+        registry.remove(&Chunk::split(&registration("x", 1, &[RealType::Trade])));
+        assert_eq!(registry.wanted()[0].items.len(), 49);
+        registry.forget(&chunks[0]);
+        assert_eq!(registry.wanted().len(), 1);
+        assert_eq!(registry.wanted()[0].items.len(), 10);
+    }
+
+    #[test]
     fn unregistering_removes_only_the_named_items_and_types() {
         let mut registry = Registry::default();
-        registry.add(&Chunk::split(&registration("a", 3, &[RealType::Trade, RealType::OrderBook])));
+        registry.add(Chunk::split(&registration("a", 3, &[RealType::Trade, RealType::OrderBook])));
         registry.remove(&Chunk::split(&registration("x", 1, &[RealType::Trade])));
         let left: Vec<(Vec<String>, Vec<RealType>)> = registry.wanted().iter().map(|chunk| (chunk.items.clone(), chunk.types.clone())).collect();
         assert_eq!(
@@ -167,8 +208,7 @@ mod tests {
     #[test]
     fn forgetting_a_rejected_chunk_leaves_the_others() {
         let mut registry = Registry::default();
-        let chunks = Chunk::split(&registration("a", 60, &[RealType::Trade]));
-        registry.add(&chunks);
+        let chunks = registry.add(Chunk::split(&registration("a", 60, &[RealType::Trade])));
         registry.forget(&chunks[0]);
         assert_eq!(registry.wanted(), &chunks[1..]);
     }

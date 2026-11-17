@@ -196,6 +196,22 @@ async fn a_rejected_batch_is_reported_dropped_from_the_replay_and_the_others_sta
 }
 
 #[tokio::test(start_paused = true)]
+async fn a_rejected_re_registration_does_not_take_an_accepted_item_out_of_the_replay() {
+    let peer = Peer::new(|connection, trnm, nth| if connection == 0 && trnm == "REG" && nth == 2 { Reply::Code(105115) } else { Reply::Ack });
+    let child = live_child(&peer, 2).await;
+    child.send(Command::Register(Registration::new("again", vec!["000001".into()], vec![RealType::Trade, RealType::OrderBook]).unwrap()));
+    until("둘째 REG", || peer.count_sent("REG") == 2).await;
+    settle().await;
+    assert_eq!(registered(&child.seen()).iter().map(|batch| batch.3).collect::<Vec<_>>(), [true, false]);
+    peer.close(0);
+    until("둘째 연결의 REG", || peer.count_sent("REG") == 3).await;
+    settle().await;
+    let replayed: Vec<Value> = peer.texts(1).iter().skip(1).map(|text| serde_json::from_str::<Value>(text).unwrap()["data"][0]["item"].clone()).collect();
+    assert_eq!(replayed, [json!(["000001_AL", "000002_AL"])]);
+    child.stop().await;
+}
+
+#[tokio::test(start_paused = true)]
 async fn after_a_reconnect_every_accepted_registration_is_sent_again_with_the_same_token() {
     let peer = Peer::accepting();
     let child = live_child(&peer, 120).await;
@@ -450,7 +466,8 @@ fn only_loopback_addresses_may_replace_the_kiwoom_address() {
     for good in ["ws://127.0.0.1:8080", "ws://localhost:9", "ws://[::1]:1/x", "ws://127.0.0.1"] {
         assert!(is_loopback_ws(good), "{good}");
     }
-    for bad in ["wss://127.0.0.1:1", "ws://example.com:1", "ws://127.0.0.1.evil.com:1", "ws://localhost.evil.com", "http://127.0.0.1", "127.0.0.1:1"] {
+    for bad in ["wss://127.0.0.1:1", "ws://example.com:1", "ws://127.0.0.1.evil.com:1", "ws://localhost.evil.com", "http://127.0.0.1", "127.0.0.1:1",
+        "ws://127.0.0.1:1@127.0.0.2:9", "ws://localhost:x@evil.com:9", "ws://[::1]:1@evil.com", "ws://127.0.0.1:1\\@evil.com", "ws://127.0.0.1:@x", "ws://127.0.0.1:1x", "ws://[::1", "ws://"] {
         assert!(!is_loopback_ws(bad), "{bad}");
     }
     let variables = |url: &str| [("VALLY_COLLECTOR_WS_URL".to_owned(), url.to_owned())].into_iter().collect();
