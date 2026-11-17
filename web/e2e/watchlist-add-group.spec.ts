@@ -215,3 +215,17 @@ test("휴대폰 폭에서도 알약이 바닥에 보이고 바닥 줄이 넘치�
   const box = (await pill(page, "아주 긴 이름의 그룹입니다 열여덟자").boundingBox())!;
   expect(box.x + box.width).toBeLessThanOrEqual(360);
 });
+
+test("목록을 바꿨다가 돌아오면 넣을 곳은 그룹 없음이다", async ({ scenario, page }) => {
+  scenario.documents.saveWatchlists({ revision: 100, lists: [{ id: "L", name: "기본", symbols: ["005930", "086520"], groups: GROUPS }, { id: "M", name: "둘째", symbols: [], groups: [] }] });
+  await page.goto("/?symbol=005930");
+  await panel(page).getByRole("button", { name: "반도체에 종목 넣기" }).click();
+  await expect(pill(page, "반도체")).toBeVisible();
+  await dialog(page).getByRole("button", { name: "검색 닫기" }).click();
+  await panel(page).getByRole("button", { name: /^관심종목 목록/ }).click();
+  await page.getByRole("menuitemradio", { name: "둘째" }).click();
+  await panel(page).getByRole("button", { name: /^관심종목 목록/ }).click();
+  await page.getByRole("menuitemradio", { name: "기본" }).click();
+  await panel(page).getByRole("button", { name: "관심종목에 넣기" }).click();
+  await expect(pill(page, "그룹 없음")).toBeVisible();
+});

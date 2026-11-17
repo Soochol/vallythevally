@@ -68,10 +68,6 @@ function SearchDialogBody({ purpose }: { purpose: SearchPurpose }) {
 
   useEffect(() => setActive(0), [input, market, search.data]);
   useEffect(() => {
-    const stale = useSelectionStore.getState().putTarget;
-    if (stale && stale.listId !== watchlist.id) useSelectionStore.getState().setPutTarget(null);
-  }, [watchlist.id]);
-  useEffect(() => {
     document.getElementById(`${ids}-opt-${activeIndex}`)?.scrollIntoView({ block: "nearest" });
   }, [activeIndex, ids, contents]);
 
