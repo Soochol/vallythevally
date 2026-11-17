@@ -66,6 +66,7 @@ paths = [
 [[post_verify]]
 name = "e2e"
 run = "env VALLY_COMPILE_LANE=gate python3 scripts/web.py e2e --workers=6"
+probe = "env VALLY_COMPILE_LANE=gate python3 scripts/web.py e2e {tests}"
 timeout = 1800
 failed = '✘.*?› (e2e/\S+?\.spec\.ts:\d+):\d+ ›'
 paths = [
