@@ -1,6 +1,6 @@
 //! 키움 응답 → `domain` 타입(backend.md §4.6). 숫자는 모두 문자열로 오고, 가격 부호는 믿지 않는다.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::num::NonZeroU64;
 
@@ -11,7 +11,7 @@ use serde_json::{Value, json};
 use super::api::kiwoom_stock_code;
 use crate::api::{self, ExcludeKind};
 use super::error::{WsRejection, judge_ws_ack};
-use super::stream::{DayTotals, Exchange, RealTick};
+use super::stream::{BOOK_DEPTH, BookLevel, BookSnapshot, BrokerEntry, BrokerSnapshot, DayTotals, ExpectedTrade, Exchange, RealProgramTrade, RealTick};
 use crate::config::Secret;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -874,9 +874,14 @@ impl WsControl {
 pub enum RealType {
     Trade,
     Index,
+    Book,
+    Program,
+    Broker,
 }
 
 impl RealType {
+    pub const ALL: [RealType; 5] = [RealType::Trade, RealType::Index, RealType::Book, RealType::Program, RealType::Broker];
+
     pub fn of(symbol: Symbol) -> RealType {
         match symbol {
             Symbol::Stock(_) => RealType::Trade,
@@ -884,13 +889,25 @@ impl RealType {
         }
     }
 
+    pub fn serves(self, symbol: Symbol) -> bool {
+        match symbol {
+            Symbol::Stock(_) => self != RealType::Index,
+            Symbol::Index(_) => self == RealType::Index,
+        }
+    }
+
     pub fn as_wire(self) -> &'static str {
         match self {
             RealType::Trade => "0B",
             RealType::Index => "0J",
+            RealType::Book => "0D",
+            RealType::Program => "0w",
+            RealType::Broker => "0F",
         }
     }
 }
+
+pub type Registrations = BTreeSet<(RealType, Symbol)>;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum WsFrame {
@@ -908,6 +925,9 @@ pub enum RealItem {
     AuctionOnly,
     /// 0J. 체결량은 `13`(누적거래량)의 증가분이라 세션이 앞 프레임과 비교해 정한다.
     Index { index: IndexCode, hhmmss: TimeOfDay, price: Price, cumulative: u64, change_centi: Option<i64> },
+    Book(Box<BookSnapshot>),
+    Program(RealProgramTrade),
+    Broker(BrokerSnapshot),
     OtherType(String),
 }
 
@@ -954,15 +974,104 @@ fn parse_real_item(entry: &Value) -> Result<RealItem, WireError> {
                 let change_centi = signed(field("11").ok()?).ok()?.checked_mul(100)?;
                 Some(DayTotals { change_centi, cumulative: Volume(unsigned(field("13").ok()?).ok()?) })
             })();
-            Ok(RealItem::Trade(RealTick { symbol: Symbol::Stock(code), hhmmss: hhmmss(field("20")?)?, price: stock_price(field("10")?)?, qty: Volume(qty), exchange, day }))
+            let strength_centi = field("228").ok().and_then(|s| level_centi(s.trim().trim_start_matches(['+', '-'])));
+            Ok(RealItem::Trade(RealTick { symbol: Symbol::Stock(code), hhmmss: hhmmss(field("20")?)?, price: stock_price(field("10")?)?, qty: Volume(qty), exchange, day, strength_centi }))
         }
         "0J" => {
             let index = IndexCode::parse(item).map_err(|e| WireError(format!("{e}: {item:?}")))?;
             let change_centi = field("11").ok().and_then(signed_level_centi);
             Ok(RealItem::Index { index, hhmmss: hhmmss(field("20")?)?, price: index_level(field("10")?)?, cumulative: unsigned(field("13")?)?, change_centi })
         }
+        "0D" => parse_book(item, values).map(|book| RealItem::Book(Box::new(book))),
+        "0w" => parse_program(item, values).map(RealItem::Program),
+        "0F" => parse_broker(item, values).map(RealItem::Broker),
         other => Ok(RealItem::OtherType(other.to_owned())),
     }
+}
+
+fn combined_stock(kind: &str, item: &str) -> Result<Symbol, WireError> {
+    let code = item.strip_suffix("_AL").ok_or_else(|| WireError(format!("{kind} 통합 시세(_AL)가 아닙니다: {item:?}")))?;
+    StockCode::parse(code).map(Symbol::Stock).map_err(|e| WireError(format!("{e}: {item:?}")))
+}
+
+fn fid_or<T: Default>(values: &Value, fid: impl fmt::Display, read: fn(&str) -> Result<T, WireError>) -> Result<T, WireError> {
+    match values.get(fid.to_string()).and_then(Value::as_str).map(str::trim) {
+        None | Some("") => Ok(T::default()),
+        Some(text) => read(text),
+    }
+}
+
+fn required_time(values: &Value, fid: &str, kind: &str, item: &str) -> Result<TimeOfDay, WireError> {
+    hhmmss(values.get(fid).and_then(Value::as_str).ok_or_else(|| WireError(format!("{kind} {item}: FID {fid}가 없습니다")))?)
+}
+
+fn won_or_absent(values: &Value, fid: u32) -> Result<Option<Price>, WireError> {
+    Ok(Price::from_centi(fid_or(values, fid, unsigned)?.checked_mul(100).ok_or_else(|| WireError(format!("FID {fid}: 가격이 너무 큽니다")))?))
+}
+
+fn book_side(values: &Value, price_base: u32, qty_base: u32) -> Result<[Option<BookLevel>; BOOK_DEPTH], WireError> {
+    let mut levels = [None; BOOK_DEPTH];
+    for (depth, level) in levels.iter_mut().enumerate() {
+        let depth = depth as u32 + 1;
+        let qty = Volume(fid_or(values, qty_base + depth, unsigned)?);
+        *level = won_or_absent(values, price_base + depth)?.map(|price| BookLevel { price, qty });
+    }
+    Ok(levels)
+}
+
+fn parse_book(item: &str, values: &Value) -> Result<BookSnapshot, WireError> {
+    let expected_qty = Volume(fid_or(values, 24, unsigned)?);
+    Ok(BookSnapshot {
+        symbol: combined_stock("0D", item)?,
+        hhmmss: required_time(values, "21", "0D", item)?,
+        asks: book_side(values, 40, 60)?,
+        bids: book_side(values, 50, 70)?,
+        total_ask_qty: Volume(fid_or(values, 121, unsigned)?),
+        total_bid_qty: Volume(fid_or(values, 125, unsigned)?),
+        expected: won_or_absent(values, 23)?.map(|price| ExpectedTrade { price, qty: expected_qty }),
+    })
+}
+
+fn parse_program(item: &str, values: &Value) -> Result<RealProgramTrade, WireError> {
+    Ok(RealProgramTrade {
+        symbol: combined_stock("0w", item)?,
+        hhmmss: required_time(values, "20", "0w", item)?,
+        price: won_or_absent(values, 10)?,
+        sell_qty: Volume(fid_or(values, 202, unsigned)?),
+        sell_amount_million_won: fid_or(values, 204, unsigned)?,
+        buy_qty: Volume(fid_or(values, 206, unsigned)?),
+        buy_amount_million_won: fid_or(values, 208, unsigned)?,
+        net_buy_qty: fid_or(values, 210, signed)?,
+        net_buy_qty_change: fid_or(values, 211, signed)?,
+        net_buy_amount_million_won: fid_or(values, 212, signed)?,
+        net_buy_amount_change_million_won: fid_or(values, 213, signed)?,
+    })
+}
+
+fn broker_side(values: &Value, code_base: u32, name_base: u32, qty_base: u32, change_base: u32) -> Result<Vec<BrokerEntry>, WireError> {
+    let text = |fid: u32| values.get(fid.to_string()).and_then(Value::as_str).map(str::trim).unwrap_or_default();
+    let mut entries = Vec::new();
+    for rank in 1..=5 {
+        let (member_code, member_name) = (text(code_base + rank), text(name_base + rank));
+        if member_code.is_empty() || member_name.is_empty() {
+            continue;
+        }
+        entries.push(BrokerEntry {
+            member_code: member_code.to_owned(),
+            member_name: member_name.to_owned(),
+            cumulative_qty: Volume(fid_or(values, qty_base + rank, unsigned)?),
+            change_qty: fid_or(values, change_base + rank, signed)?,
+        });
+    }
+    Ok(entries)
+}
+
+fn parse_broker(item: &str, values: &Value) -> Result<BrokerSnapshot, WireError> {
+    Ok(BrokerSnapshot {
+        symbol: combined_stock("0F", item)?,
+        sells: broker_side(values, 145, 140, 160, 165)?,
+        buys: broker_side(values, 155, 150, 170, 175)?,
+    })
 }
 
 fn hhmmss(s: &str) -> Result<TimeOfDay, WireError> {
@@ -1019,12 +1128,12 @@ pub fn login_message(token: &Secret<String>) -> Secret<String> {
     Secret::new(json!({"trnm": "LOGIN", "token": token.expose()}).to_string())
 }
 
-pub fn reg_message(symbols: &BTreeSet<Symbol>) -> String {
-    let data: Vec<Value> = [RealType::Trade, RealType::Index]
-        .into_iter()
-        .filter(|&kind| symbols.iter().any(|&s| RealType::of(s) == kind))
-        .map(|kind| real_entry(kind, symbols.iter().copied().filter(move |&s| RealType::of(s) == kind)))
-        .collect();
+pub fn reg_message(registrations: &Registrations) -> String {
+    let mut by_kind: BTreeMap<RealType, Vec<Symbol>> = BTreeMap::new();
+    for &(kind, symbol) in registrations {
+        by_kind.entry(kind).or_default().push(symbol);
+    }
+    let data: Vec<Value> = by_kind.into_iter().map(|(kind, symbols)| real_entry(kind, symbols.into_iter())).collect();
     json!({"trnm": "REG", "grp_no": "1", "refresh": "1", "data": data}).to_string()
 }
 
@@ -1714,7 +1823,7 @@ mod tests {
     fn real_0b_is_a_combined_trade_with_abs_price_and_qty() {
         let code = StockCode::parse("005930").unwrap();
         let day = Some(DayTotals { change_centi: 0, cumulative: Volume(100) });
-        let tick = |exchange| RealTick { symbol: Symbol::Stock(code), hhmmss: TimeOfDay::hms(9, 30, 1).unwrap(), price: Price::from_centi(7_120_000).unwrap(), qty: Volume(15), exchange, day };
+        let tick = |exchange| RealTick { symbol: Symbol::Stock(code), hhmmss: TimeOfDay::hms(9, 30, 1).unwrap(), price: Price::from_centi(7_120_000).unwrap(), qty: Volume(15), exchange, day, strength_centi: None };
         assert_eq!(one("0B", "005930_AL", trade_values("093001", -71_200, -15, 100, "NXT")), Ok(RealItem::Trade(tick(Some(Exchange::Nxt)))));
         assert_eq!(one("0B", "005930_AL", trade_values("093001", 71_200, 15, 100, "KRX")), Ok(RealItem::Trade(tick(Some(Exchange::Krx)))));
         assert_eq!(one("0B", "005930_AL", trade_values("093001", 71_200, 15, 100, "1")), Ok(RealItem::Trade(tick(None))));
@@ -1782,23 +1891,122 @@ mod tests {
         let text = json!({"trnm": "REAL", "data": [
             {"type": "0B", "item": "005930_AL", "values": trade_values("093001", 71_200, 15, 100, "KRX")},
             {"type": "0B", "item": "005930_AL", "values": {"20": "x"}},
-            {"type": "0D", "item": "005930_AL", "values": {}},
+            {"type": "0g", "item": "005930_AL", "values": {}},
         ]}).to_string();
         let WsFrame::Real(items) = parse_ws_frame(&text).unwrap() else { panic!() };
-        assert!(matches!(items.as_slice(), [Ok(RealItem::Trade(_)), Err(_), Ok(RealItem::OtherType(k))] if k == "0D"));
+        assert!(matches!(items.as_slice(), [Ok(RealItem::Trade(_)), Err(_), Ok(RealItem::OtherType(k))] if k == "0g"));
     }
 
     #[test]
     fn reg_and_remove_messages() {
         let stock = Symbol::Stock(StockCode::parse("005930").unwrap());
-        let both: BTreeSet<Symbol> = [stock, Symbol::Index(IndexCode::KOSPI)].into();
+        let both: Registrations = [(RealType::Trade, stock), (RealType::Index, Symbol::Index(IndexCode::KOSPI))].into();
         let v: Value = serde_json::from_str(&reg_message(&both)).unwrap();
         assert_eq!(v, json!({"trnm": "REG", "grp_no": "1", "refresh": "1", "data": [{"item": ["005930_AL"], "type": ["0B"]}, {"item": ["001"], "type": ["0J"]}]}));
-        let v: Value = serde_json::from_str(&reg_message(&[Symbol::Index(IndexCode::KOSDAQ)].into())).unwrap();
+        let v: Value = serde_json::from_str(&reg_message(&[(RealType::Index, Symbol::Index(IndexCode::KOSDAQ))].into())).unwrap();
         assert_eq!(v["data"], json!([{"item": ["101"], "type": ["0J"]}]), "빈 원소는 넣지 않는다");
+        let v: Value = serde_json::from_str(&reg_message(&[(RealType::Book, stock), (RealType::Program, stock), (RealType::Broker, stock)].into())).unwrap();
+        assert_eq!(v["data"], json!([{"item": ["005930_AL"], "type": ["0D"]}, {"item": ["005930_AL"], "type": ["0w"]}, {"item": ["005930_AL"], "type": ["0F"]}]));
         let v: Value = serde_json::from_str(&remove_message(RealType::Trade, &[stock].into())).unwrap();
         assert_eq!(v, json!({"trnm": "REMOVE", "grp_no": "1", "data": [{"item": ["005930_AL"], "type": ["0B"]}]}));
         let login: Value = serde_json::from_str(login_message(&Secret::new("t".into())).expose()).unwrap();
         assert_eq!(login, json!({"trnm": "LOGIN", "token": "t"}));
+    }
+
+    fn book_values() -> Value {
+        let mut values = json!({"21": "093001", "23": "71150", "24": "300", "121": "5100", "125": "4200"});
+        for depth in 1..=10_i64 {
+            values[(40 + depth).to_string()] = json!(format!("+{}", 71_000 + depth * 100));
+            values[(50 + depth).to_string()] = json!(format!("-{}", 71_000 - (depth - 1) * 100));
+            values[(60 + depth).to_string()] = json!((100 * depth).to_string());
+            values[(70 + depth).to_string()] = json!((10 * depth).to_string());
+        }
+        values
+    }
+
+    fn book(result: Result<RealItem, WireError>) -> BookSnapshot {
+        match result {
+            Ok(RealItem::Book(book)) => *book,
+            other => panic!("호가가 아니다: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parses_book_frame_into_ten_levels() {
+        let book = book(one("0D", "005930_AL", book_values()));
+        let level = |won: u64, qty: u64| Some(BookLevel { price: Price::from_centi(won * 100).unwrap(), qty: Volume(qty) });
+        assert_eq!((book.symbol, book.hhmmss), (Symbol::Stock(StockCode::parse("005930").unwrap()), TimeOfDay::hms(9, 30, 1).unwrap()));
+        assert_eq!((book.asks[0], book.asks[9]), (level(71_100, 100), level(72_000, 1_000)));
+        assert_eq!((book.bids[0], book.bids[9]), (level(71_000, 10), level(70_100, 100)));
+        assert_eq!((book.total_ask_qty, book.total_bid_qty), (Volume(5_100), Volume(4_200)));
+        assert_eq!(book.expected, Some(ExpectedTrade { price: Price::from_centi(7_115_000).unwrap(), qty: Volume(300) }));
+    }
+
+    #[test]
+    fn a_crossed_book_is_read_as_it_comes() {
+        let mut values = book_values();
+        values["41"] = json!("+70900");
+        values["51"] = json!("-71000");
+        let book = book(one("0D", "005930_AL", values));
+        assert!(book.bids[0].unwrap().price > book.asks[0].unwrap().price);
+    }
+
+    #[test]
+    fn book_levels_without_a_price_are_absent_and_expected_values_may_be_zero() {
+        let mut values = book_values();
+        values["59"] = json!("0");
+        values["60"] = json!("");
+        values["23"] = json!("0");
+        values["24"] = json!("0");
+        let book = book(one("0D", "005930_AL", values));
+        assert!(book.bids[8].is_none() && book.bids[9].is_none());
+        assert!(book.bids[7].is_some() && book.asks.iter().all(Option::is_some));
+        assert_eq!(book.expected, None);
+    }
+
+    #[test]
+    fn a_book_frame_needs_a_time_a_combined_code_and_readable_numbers() {
+        let mut no_time = book_values();
+        no_time.as_object_mut().unwrap().remove("21");
+        assert!(one("0D", "005930_AL", no_time).is_err());
+        assert!(one("0D", "005930", book_values()).is_err());
+        let mut garbage = book_values();
+        garbage["61"] = json!("x");
+        assert!(one("0D", "005930_AL", garbage).is_err());
+    }
+
+    #[test]
+    fn parses_program_frame() {
+        let values = json!({"20": "093002", "10": "+71200", "202": "100", "204": "7", "206": "300", "208": "21", "210": "200", "211": "-5", "212": "14", "213": "-1"});
+        let Ok(RealItem::Program(row)) = one("0w", "005930_AL", values) else { panic!() };
+        assert_eq!(row, RealProgramTrade {
+            symbol: Symbol::Stock(StockCode::parse("005930").unwrap()),
+            hhmmss: TimeOfDay::hms(9, 30, 2).unwrap(),
+            price: Price::from_centi(7_120_000),
+            sell_qty: Volume(100),
+            sell_amount_million_won: 7,
+            buy_qty: Volume(300),
+            buy_amount_million_won: 21,
+            net_buy_qty: 200,
+            net_buy_qty_change: -5,
+            net_buy_amount_million_won: 14,
+            net_buy_amount_change_million_won: -1,
+        });
+        assert!(one("0w", "005930_AL", json!({"10": "71200"})).is_err(), "시각이 없다");
+    }
+
+    #[test]
+    fn parses_broker_frame_with_member_names() {
+        let values = json!({
+            "141": "미래에셋", "142": "키움", "146": "001", "147": "002", "161": "5000", "162": "4000", "166": "-30", "167": "+12",
+            "151": "삼성", "156": "003", "171": "3000", "176": "9",
+            "143": "이름만", "148": "",
+        });
+        let Ok(RealItem::Broker(snapshot)) = one("0F", "005930_AL", values) else { panic!() };
+        let entry = |code: &str, name: &str, cumulative: u64, change: i64| BrokerEntry { member_code: code.into(), member_name: name.into(), cumulative_qty: Volume(cumulative), change_qty: change };
+        assert_eq!(snapshot.sells, [entry("001", "미래에셋", 5_000, -30), entry("002", "키움", 4_000, 12)]);
+        assert_eq!(snapshot.buys, [entry("003", "삼성", 3_000, 9)]);
+        let Ok(RealItem::Broker(empty)) = one("0F", "005930_AL", json!({})) else { panic!() };
+        assert!(empty.sells.is_empty() && empty.buys.is_empty());
     }
 }
