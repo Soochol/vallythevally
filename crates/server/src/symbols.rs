@@ -4,12 +4,12 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
-use domain::{IndexCode, Market, Symbol, SymbolInfo, SymbolKind};
+use domain::{IndexCode, Listing, Market, Symbol, SymbolInfo, SymbolKind, classify};
 use tokio::sync::watch;
 
 use crate::kiwoom::api::{ApiId, StockList};
 use crate::kiwoom::rest::{KiwoomError, KiwoomRest, MergeScope, Priority};
-use crate::kiwoom::wire::{self, Listing, ScreenerListing, classify};
+use crate::kiwoom::wire::{self, ScreenerListing};
 
 pub const READY_WAIT: Duration = Duration::from_secs(10);
 const MAX_RESULTS: usize = 20;
