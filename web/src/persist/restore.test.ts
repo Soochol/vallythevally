@@ -111,7 +111,7 @@ test.each([
   ["창 id가 겹친다", [{ id: "a", link: null, kind: "watchlist" }, { id: "a", link: null, kind: "chart", symbol: "005930", venue: "combined", period: "M", chartSettings: {} }]],
   ["모르는 종류가 있다", [{ id: "c", link: null, kind: "chart", symbol: "005930", venue: "combined", period: "M", chartSettings: {} }, { id: "x", link: null, kind: "nope" }]],
   ["차트 창에 종목이 없다", [{ id: "c", link: null, kind: "chart", venue: "combined", period: "M", chartSettings: {} }]],
-  ["연동 색이 틀렸다", [{ id: "c", link: "d", kind: "chart", symbol: "005930", venue: "combined", period: "M", chartSettings: {} }]],
+  ["연동 색이 틀렸다", [{ id: "c", link: "k", kind: "chart", symbol: "005930", venue: "combined", period: "M", chartSettings: {} }]],
   ["관심종목 창이 둘이다", [{ id: "c", link: null, kind: "chart", symbol: "005930", venue: "combined", period: "M", chartSettings: {} }, { id: "w1", link: null, kind: "watchlist" }, { id: "w2", link: null, kind: "watchlist" }]],
 ])("%s면 미저장 본문을 버리고 서버 레이아웃을 연다", async (_, windows) => {
   const draft = { id: "L1", name: "L1", sync: SYNC, windows, placement: {} };
@@ -122,12 +122,12 @@ test.each([
 
 test("차트가 아닌 창과 배치를 순서·연동 색 그대로 열고, 마이그레이션이 남긴 빈 배치는 경고 없이 읽는다", async () => {
   const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-  const windows: LayoutWindow[] = [cell({ id: "cell-0", link: "a" }), { id: "watchlist", link: "a", kind: "watchlist" }, cell({ id: "cell-1", symbol: "IDX:001", venue: null }), ...SIDE_WINDOWS.slice(1)];
+  const windows: LayoutWindow[] = [cell({ id: "cell-0", link: "a" }), { id: "watchlist", link: "j", kind: "watchlist" }, cell({ id: "cell-1", symbol: "IDX:001", venue: null }), ...SIDE_WINDOWS.slice(1)];
   const stored: Layout = { ...layout("L1"), windows };
   const r = await restore(sources({ layouts: [stored] }));
   expect(r.layout.windows.map((w) => [w.id, w.kind, w.link])).toEqual([
     ["cell-0", "chart", "a"],
-    ["watchlist", "watchlist", "a"],
+    ["watchlist", "watchlist", "j"],
     ["cell-1", "chart", null],
     ["screener", "screener", null],
     ["objects", "objects", null],

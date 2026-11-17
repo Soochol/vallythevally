@@ -130,8 +130,8 @@ test("차트의 색을 이미 쓰는 색으로 바꾸면 그 색의 종목을 �
 });
 
 test("같은 연동 색을 쓰는 다른 창만 센다. 연동 색은 개체 목록과 지표 창에는 붙지 않는다", () => {
-  const windows = [{ id: windowId("x"), link: "a" }, { id: windowId("y"), link: "a" }, { id: windowId("z"), link: "b" }, { id: windowId("w"), link: null }] as WindowState[];
-  expect([linkedWindowCount(windows, "a", windowId("x")), linkedWindowCount(windows, "b", windowId("x")), linkedWindowCount(windows, "c", windowId("x"))]).toEqual([1, 1, 0]);
+  const windows = [{ id: windowId("x"), link: "a" }, { id: windowId("y"), link: "a" }, { id: windowId("z"), link: "b" }, { id: windowId("w"), link: null }, { id: windowId("v"), link: "j" }] as WindowState[];
+  expect([linkedWindowCount(windows, "a", windowId("x")), linkedWindowCount(windows, "b", windowId("x")), linkedWindowCount(windows, "c", windowId("x")), linkedWindowCount(windows, "j", windowId("x"))]).toEqual([1, 1, 0, 1]);
   linked({ id: windowId("indicators"), link: null, kind: "indicators" });
   state().setLink(windowId("objects"), "a");
   state().setLink(windowId("indicators"), "a");

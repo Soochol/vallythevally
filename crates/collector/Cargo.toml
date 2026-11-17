@@ -31,11 +31,15 @@ tokio-tungstenite = { version = "0.29", features = ["rustls-tls-webpki-roots"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 zstd = "0.13"
+parquet = { version = "60", default-features = false, features = ["arrow", "zstd"] }
+arrow-array = "60"
+arrow-schema = "60"
 
 [dev-dependencies]
 tokio = { version = "1", features = ["test-util", "process", "io-util"] }
 tower = { version = "0.5", features = ["util"] }
 http-body-util = "0.1"
+duckdb = { version = "~1.20000.1", default-features = false }
 
 [lints]
 workspace = true

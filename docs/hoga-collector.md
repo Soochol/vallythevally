@@ -1,10 +1,10 @@
 # 호가 복기 수집기
 
-`crates/collector`의 실행 파일 `collector`는 하위 명령 넷(`collect`, `build`, `verify`, `serve`)을 가진다. 계획은 [`plans/hoga-replay-prototype.md`](plans/hoga-replay-prototype.md), 구간 파일 형식은 [`hoga-format.md`](hoga-format.md)에 있다. 이 문서는 절마다 채우는 작업이 다르다.
+`crates/collector`의 실행 파일 `collector`는 하위 명령 다섯(`collect`, `build`, `verify`, `serve`, `finalize`)을 가진다. 계획은 [`plans/hoga-replay-prototype.md`](plans/hoga-replay-prototype.md), 구간 파일 형식은 [`hoga-format.md`](hoga-format.md)에 있다. 이 문서는 절마다 채우는 작업이 다르다.
 
 ## 데이터 폴더
 
-`--data <폴더>`로 받고 기본은 `data/hoga`다. 네 하위 명령이 같은 인수를 쓴다.
+`--data <폴더>`로 받고 기본은 `data/hoga`다. 모든 하위 명령이 같은 인수를 쓴다.
 
 ```
 data/hoga/
@@ -12,6 +12,8 @@ data/hoga/
   spans/<YYYYMMDD>/index.json                     그날의 구간 파일 목록
   spans/<YYYYMMDD>/<종목>/<HHMM>-r<N>.hoga.br     구간 파일
   spans/<YYYYMMDD>/verified.json                  대조 결과
+  store/<YYYYMMDD>.tmp/<타입>/<버킷>.parquet       finalize가 쓰는 중인 수집 저장소
+  store/<YYYYMMDD>.tmp/verify.json                finalize의 원문 대조 결과
 ```
 
 날짜와 `HHMM`은 수신 시각의 KST 날짜와 5분 구간 시작이다. `<종목>`은 등록한 글자 그대로다(`005930_AL`).
@@ -341,6 +343,38 @@ collector verify [--data <폴더>]  --date YYYYMMDD
 - `problems`는 처음 20개만 싣고 `problem_count`가 전체 수다. 항목의 `symbol`·`stream`·`row`(원문 행 열의 0부터 센 번호)·`column`·`expected`(원문)·`actual`(구간 파일)은 해당할 때만 있고 `message`는 늘 있다. 흐름마다 처음 다른 곳 하나만 적는다.
 - 원문을 지우는 명령은 없다. 원문은 `verify`가 통과한 날 사용자가 손으로 지운다.
 
+## finalize
+
+`finalize`가 그날 원문을 관측일·타입별 Parquet으로 정리하고, Parquet을 다시 읽어 원문과 대조한다. 코드는 `collector::finalize`이고 파일 형식은 [`collector-store-format.md`](collector-store-format.md)가 계약이다. 정리 완료 표시, 폴더 이름 바꾸기, 원문 지우기는 하지 않는다.
+
+### 명령
+
+```sh
+collector finalize [--data <폴더>] --date YYYYMMDD [--threads 4] [--buckets 64] [--verify-only]
+```
+
+| 종료 코드 | 뜻 |
+|---|---|
+| 0 | 정리했고 원문 대조가 통과했다. 정리 못 한 줄이 있어도 0이다. 그 수는 `verify.json`에 있다 |
+| 1 | 원문 대조가 실패했다, 원문 폴더가 없다, 읽기·쓰기 오류가 났다 |
+| 2 | 인수 오류. `--date`가 없거나 `YYYYMMDD`가 아니다, `--threads`가 1~64가 아니다, `--buckets`가 1~999가 아니다 |
+
+- 결과는 `store/<YYYYMMDD>.tmp/`에 쓴다. 폴더가 남아 있으면 지우고 처음부터 쓴다. `store/<YYYYMMDD>/`는 있어도 건드리지 않는다.
+- `--verify-only`는 쓰지 않고 원문 줄만 다시 세어 `store/<YYYYMMDD>.tmp/`의 Parquet과 대조한다. `verify.json`을 새로 쓴다.
+- `--threads`는 원문을 해석하는 스레드와 버킷을 정렬해 쓰는 스레드의 수다. 상한은 이 값이다. 원문은 `raw_read::read_day` 하나가 읽고 스레드들이 줄 묶음을 나눠 받는다. 줄에 번호를 매겨 정렬 기준에 넣으므로 스레드 수가 달라도 파일이 같다.
+
+### 하는 일
+
+1. 원문을 읽는 스레드들이 프레임을 해석해 행을 종목 해시 버킷별로 모은다. 모은 양이 스레드당 128MiB를 넘으면 `store/<날짜>.tmp/.spill/`에 zstd 1로 압축해 흘린다. 하루치를 메모리에 올리지 않는다.
+2. 타입·버킷마다 흘린 조각을 모아 종목·시각 순으로 정렬하고 Parquet으로 쓴다. 버킷 하나(한 타입)가 메모리에 오른다. 메모리를 줄이려면 `--buckets`를 늘린다.
+3. 흘린 폴더를 지우고, Parquet 파일을 다시 읽어 종목·타입별 행 수와 첫·끝 `recv_ms`를 원문에서 센 값과 견준다. 종목·시각 순과 종목의 버킷도 확인한다. 결과를 `verify.json`에 쓴다.
+
+열 목록은 원문을 훑어 정하지 않고 키움 명세로 정한다. 명세에 없는 FID는 버리지 않고 타입·FID별로 센다. 원문 줄을 정리됨·제어·정리 못 함으로 나눈 개수도 `verify.json`에 늘 쓴다. 뜻은 [`collector-store-format.md`](collector-store-format.md)의 "verify.json"을 본다.
+
+### 시험
+
+`crates/collector/tests/finalize.rs`가 합성 원문(열한 타입, 종목 48개, 버킷 여럿)을 정리해 DuckDB로 읽은 행이 원문 프레임과 같은지, 스레드 1과 4의 결과 파일이 같은지, `verify.json`의 줄 수 구분, 원문에서 줄 하나를 뺀 Parquet이 대조에서 실패하는지, 이미 있는 `store/<날짜>/`를 건드리지 않는지, 문서의 열 표가 코드의 열 정의와 같은지를 고정한다.
+
 ## serve와 복기 화면
 
 `serve`가 구간 파일과 복기 화면을 `127.0.0.1`에서 내보내고, 브라우저가 종목과 날짜를 골라 시간 막대를 움직이거나 재생하면서 그 시각의 호가 10단계, 최근 체결, 프로그램 순매수, 거래원 상위 5를 본다. 코드는 `collector::serve`(서버)와 `crates/collector/page/`(화면)다.
@@ -419,7 +453,7 @@ node scripts/test-hoga-replay.mjs
 
 ## 실제 수집 절차
 
-사용자가 장중에 직접 따라 한다. 자동 시험과 자동 작업은 실제 키움에 접속하지 않는다.
+사용자가 장중에 직접 따라 한다. 자동 시험과 자동 작업은 실제 키움에 접속하지 않는다. 한 IP에서 세션 여러 개와 연속 토큰 발급을 재는 절차는 [`collector-session-probe.md`](collector-session-probe.md)에 있다.
 
 1. **수집기 전용 키를 저장소 밖 파일에 둔다.** 권한은 600이다.
 

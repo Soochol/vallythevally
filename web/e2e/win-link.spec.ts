@@ -157,7 +157,7 @@ async function chooseLink(page: Page, dot: Locator, name: string) {
   await page.getByRole("menu", { name: "연동 색" }).getByRole("menuitemradio", { name: new RegExp(`^${name}`) }).click();
 }
 
-test("연동 색 점은 끔·A·B·C 메뉴를 열어 같은 색 창 수를 보이고, 고르면 바꾸고 Esc로 닫으면 초점이 점으로 돌아온다", async ({ page, scenario }) => {
+test("연동 색 점은 끔·A~J 메뉴를 열어 같은 색 창 수를 보이고, 고르면 바꾸고 Esc로 닫으면 초점이 점으로 돌아온다", async ({ page, scenario }) => {
   linkedCharts(scenario);
   await ready(page);
   const dot = dotOf(page, "watchlist");
@@ -166,7 +166,7 @@ test("연동 색 점은 끔·A·B·C 메뉴를 열어 같은 색 창 수를 보�
   await dot.click();
   await expect(dot).toHaveAttribute("aria-expanded", "true");
   const menu = page.getByRole("menu", { name: "연동 색" });
-  await expect(menu.getByRole("menuitemradio")).toHaveText(["끔", "A창 2개", "B없음", "C없음"]);
+  await expect(menu.getByRole("menuitemradio")).toHaveText(["끔", "A창 2개", ...["B", "C", "D", "E", "F", "G", "H", "I", "J"].map((name) => `${name}없음`)]);
   await expect(menu.getByRole("menuitemradio", { name: "끔" })).toHaveAttribute("aria-checked", "true");
   await page.keyboard.press("Escape");
   await expect(menu).toHaveCount(0);

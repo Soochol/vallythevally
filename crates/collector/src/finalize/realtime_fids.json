@@ -1,0 +1,1821 @@
+{
+ "spec": "https://github.com/Kiwoom-Securities/Kiwoom-REST-API/blob/c7a3d25449ed4b4238bef378780c41103c67b9e9/kiwoom/_data/kiwoom_api_spec.json",
+ "types": [
+  {
+   "type": "0B",
+   "name": "주식체결",
+   "fids": [
+    {
+     "fid": 20,
+     "name": "체결시간",
+     "kind": "text"
+    },
+    {
+     "fid": 10,
+     "name": "현재가",
+     "kind": "int"
+    },
+    {
+     "fid": 11,
+     "name": "전일대비",
+     "kind": "int"
+    },
+    {
+     "fid": 12,
+     "name": "등락율",
+     "kind": "float"
+    },
+    {
+     "fid": 27,
+     "name": "(최우선)매도호가",
+     "kind": "int"
+    },
+    {
+     "fid": 28,
+     "name": "(최우선)매수호가",
+     "kind": "int"
+    },
+    {
+     "fid": 15,
+     "name": "거래량",
+     "kind": "int"
+    },
+    {
+     "fid": 13,
+     "name": "누적거래량",
+     "kind": "int"
+    },
+    {
+     "fid": 14,
+     "name": "누적거래대금",
+     "kind": "int"
+    },
+    {
+     "fid": 16,
+     "name": "시가",
+     "kind": "int"
+    },
+    {
+     "fid": 17,
+     "name": "고가",
+     "kind": "int"
+    },
+    {
+     "fid": 18,
+     "name": "저가",
+     "kind": "int"
+    },
+    {
+     "fid": 25,
+     "name": "전일대비기호",
+     "kind": "int"
+    },
+    {
+     "fid": 26,
+     "name": "전일거래량대비(계약,주)",
+     "kind": "int"
+    },
+    {
+     "fid": 29,
+     "name": "거래대금증감",
+     "kind": "int"
+    },
+    {
+     "fid": 30,
+     "name": "전일거래량대비(비율)",
+     "kind": "float"
+    },
+    {
+     "fid": 31,
+     "name": "거래회전율",
+     "kind": "float"
+    },
+    {
+     "fid": 32,
+     "name": "거래비용",
+     "kind": "int"
+    },
+    {
+     "fid": 228,
+     "name": "체결강도",
+     "kind": "float"
+    },
+    {
+     "fid": 311,
+     "name": "시가총액(억)",
+     "kind": "int"
+    },
+    {
+     "fid": 290,
+     "name": "장구분",
+     "kind": "text"
+    },
+    {
+     "fid": 691,
+     "name": "K.O 접근도",
+     "kind": "int"
+    },
+    {
+     "fid": 567,
+     "name": "상한가발생시간",
+     "kind": "text"
+    },
+    {
+     "fid": 568,
+     "name": "하한가발생시간",
+     "kind": "text"
+    },
+    {
+     "fid": 851,
+     "name": "전일 동시간 거래량 비율",
+     "kind": "float"
+    },
+    {
+     "fid": 1890,
+     "name": "시가시간",
+     "kind": "text"
+    },
+    {
+     "fid": 1891,
+     "name": "고가시간",
+     "kind": "text"
+    },
+    {
+     "fid": 1892,
+     "name": "저가시간",
+     "kind": "text"
+    },
+    {
+     "fid": 1030,
+     "name": "매도체결량",
+     "kind": "int"
+    },
+    {
+     "fid": 1031,
+     "name": "매수체결량",
+     "kind": "int"
+    },
+    {
+     "fid": 1032,
+     "name": "매수비율",
+     "kind": "float"
+    },
+    {
+     "fid": 1071,
+     "name": "매도체결건수",
+     "kind": "int"
+    },
+    {
+     "fid": 1072,
+     "name": "매수체결건수",
+     "kind": "int"
+    },
+    {
+     "fid": 1313,
+     "name": "순간거래대금",
+     "kind": "int"
+    },
+    {
+     "fid": 1315,
+     "name": "매도체결량_단건",
+     "kind": "int"
+    },
+    {
+     "fid": 1316,
+     "name": "매수체결량_단건",
+     "kind": "int"
+    },
+    {
+     "fid": 1314,
+     "name": "순매수체결량",
+     "kind": "int"
+    },
+    {
+     "fid": 1497,
+     "name": "CFD증거금",
+     "kind": "int"
+    },
+    {
+     "fid": 1498,
+     "name": "유지증거금",
+     "kind": "int"
+    },
+    {
+     "fid": 620,
+     "name": "당일거래평균가",
+     "kind": "int"
+    },
+    {
+     "fid": 732,
+     "name": "CFD거래비용",
+     "kind": "int"
+    },
+    {
+     "fid": 852,
+     "name": "대주거래비용",
+     "kind": "int"
+    },
+    {
+     "fid": 9081,
+     "name": "거래소구분",
+     "kind": "text"
+    }
+   ]
+  },
+  {
+   "type": "0D",
+   "name": "주식호가잔량",
+   "fids": [
+    {
+     "fid": 21,
+     "name": "호가시간",
+     "kind": "text"
+    },
+    {
+     "fid": 41,
+     "name": "매도호가1",
+     "kind": "int"
+    },
+    {
+     "fid": 61,
+     "name": "매도호가수량1",
+     "kind": "int"
+    },
+    {
+     "fid": 81,
+     "name": "매도호가직전대비1",
+     "kind": "int"
+    },
+    {
+     "fid": 51,
+     "name": "매수호가1",
+     "kind": "int"
+    },
+    {
+     "fid": 71,
+     "name": "매수호가수량1",
+     "kind": "int"
+    },
+    {
+     "fid": 91,
+     "name": "매수호가직전대비1",
+     "kind": "int"
+    },
+    {
+     "fid": 42,
+     "name": "매도호가2",
+     "kind": "int"
+    },
+    {
+     "fid": 62,
+     "name": "매도호가수량2",
+     "kind": "int"
+    },
+    {
+     "fid": 82,
+     "name": "매도호가직전대비2",
+     "kind": "int"
+    },
+    {
+     "fid": 52,
+     "name": "매수호가2",
+     "kind": "int"
+    },
+    {
+     "fid": 72,
+     "name": "매수호가수량2",
+     "kind": "int"
+    },
+    {
+     "fid": 92,
+     "name": "매수호가직전대비2",
+     "kind": "int"
+    },
+    {
+     "fid": 43,
+     "name": "매도호가3",
+     "kind": "int"
+    },
+    {
+     "fid": 63,
+     "name": "매도호가수량3",
+     "kind": "int"
+    },
+    {
+     "fid": 83,
+     "name": "매도호가직전대비3",
+     "kind": "int"
+    },
+    {
+     "fid": 53,
+     "name": "매수호가3",
+     "kind": "int"
+    },
+    {
+     "fid": 73,
+     "name": "매수호가수량3",
+     "kind": "int"
+    },
+    {
+     "fid": 93,
+     "name": "매수호가직전대비3",
+     "kind": "int"
+    },
+    {
+     "fid": 44,
+     "name": "매도호가4",
+     "kind": "int"
+    },
+    {
+     "fid": 64,
+     "name": "매도호가수량4",
+     "kind": "int"
+    },
+    {
+     "fid": 84,
+     "name": "매도호가직전대비4",
+     "kind": "int"
+    },
+    {
+     "fid": 54,
+     "name": "매수호가4",
+     "kind": "int"
+    },
+    {
+     "fid": 74,
+     "name": "매수호가수량4",
+     "kind": "int"
+    },
+    {
+     "fid": 94,
+     "name": "매수호가직전대비4",
+     "kind": "int"
+    },
+    {
+     "fid": 45,
+     "name": "매도호가5",
+     "kind": "int"
+    },
+    {
+     "fid": 65,
+     "name": "매도호가수량5",
+     "kind": "int"
+    },
+    {
+     "fid": 85,
+     "name": "매도호가직전대비5",
+     "kind": "int"
+    },
+    {
+     "fid": 55,
+     "name": "매수호가5",
+     "kind": "int"
+    },
+    {
+     "fid": 75,
+     "name": "매수호가수량5",
+     "kind": "int"
+    },
+    {
+     "fid": 95,
+     "name": "매수호가직전대비5",
+     "kind": "int"
+    },
+    {
+     "fid": 46,
+     "name": "매도호가6",
+     "kind": "int"
+    },
+    {
+     "fid": 66,
+     "name": "매도호가수량6",
+     "kind": "int"
+    },
+    {
+     "fid": 86,
+     "name": "매도호가직전대비6",
+     "kind": "int"
+    },
+    {
+     "fid": 56,
+     "name": "매수호가6",
+     "kind": "int"
+    },
+    {
+     "fid": 76,
+     "name": "매수호가수량6",
+     "kind": "int"
+    },
+    {
+     "fid": 96,
+     "name": "매수호가직전대비6",
+     "kind": "int"
+    },
+    {
+     "fid": 47,
+     "name": "매도호가7",
+     "kind": "int"
+    },
+    {
+     "fid": 67,
+     "name": "매도호가수량7",
+     "kind": "int"
+    },
+    {
+     "fid": 87,
+     "name": "매도호가직전대비7",
+     "kind": "int"
+    },
+    {
+     "fid": 57,
+     "name": "매수호가7",
+     "kind": "int"
+    },
+    {
+     "fid": 77,
+     "name": "매수호가수량7",
+     "kind": "int"
+    },
+    {
+     "fid": 97,
+     "name": "매수호가직전대비7",
+     "kind": "int"
+    },
+    {
+     "fid": 48,
+     "name": "매도호가8",
+     "kind": "int"
+    },
+    {
+     "fid": 68,
+     "name": "매도호가수량8",
+     "kind": "int"
+    },
+    {
+     "fid": 88,
+     "name": "매도호가직전대비8",
+     "kind": "int"
+    },
+    {
+     "fid": 58,
+     "name": "매수호가8",
+     "kind": "int"
+    },
+    {
+     "fid": 78,
+     "name": "매수호가수량8",
+     "kind": "int"
+    },
+    {
+     "fid": 98,
+     "name": "매수호가직전대비8",
+     "kind": "int"
+    },
+    {
+     "fid": 49,
+     "name": "매도호가9",
+     "kind": "int"
+    },
+    {
+     "fid": 69,
+     "name": "매도호가수량9",
+     "kind": "int"
+    },
+    {
+     "fid": 89,
+     "name": "매도호가직전대비9",
+     "kind": "int"
+    },
+    {
+     "fid": 59,
+     "name": "매수호가9",
+     "kind": "int"
+    },
+    {
+     "fid": 79,
+     "name": "매수호가수량9",
+     "kind": "int"
+    },
+    {
+     "fid": 99,
+     "name": "매수호가직전대비9",
+     "kind": "int"
+    },
+    {
+     "fid": 50,
+     "name": "매도호가10",
+     "kind": "int"
+    },
+    {
+     "fid": 70,
+     "name": "매도호가수량10",
+     "kind": "int"
+    },
+    {
+     "fid": 90,
+     "name": "매도호가직전대비10",
+     "kind": "int"
+    },
+    {
+     "fid": 60,
+     "name": "매수호가10",
+     "kind": "int"
+    },
+    {
+     "fid": 80,
+     "name": "매수호가수량10",
+     "kind": "int"
+    },
+    {
+     "fid": 100,
+     "name": "매수호가직전대비10",
+     "kind": "int"
+    },
+    {
+     "fid": 121,
+     "name": "매도호가총잔량",
+     "kind": "int"
+    },
+    {
+     "fid": 122,
+     "name": "매도호가총잔량직전대비",
+     "kind": "int"
+    },
+    {
+     "fid": 125,
+     "name": "매수호가총잔량",
+     "kind": "int"
+    },
+    {
+     "fid": 126,
+     "name": "매수호가총잔량직전대비",
+     "kind": "int"
+    },
+    {
+     "fid": 23,
+     "name": "예상체결가",
+     "kind": "int"
+    },
+    {
+     "fid": 24,
+     "name": "예상체결수량",
+     "kind": "int"
+    },
+    {
+     "fid": 128,
+     "name": "순매수잔량",
+     "kind": "int"
+    },
+    {
+     "fid": 129,
+     "name": "매수비율",
+     "kind": "float"
+    },
+    {
+     "fid": 138,
+     "name": "순매도잔량",
+     "kind": "int"
+    },
+    {
+     "fid": 139,
+     "name": "매도비율",
+     "kind": "float"
+    },
+    {
+     "fid": 200,
+     "name": "예상체결가전일종가대비",
+     "kind": "int"
+    },
+    {
+     "fid": 201,
+     "name": "예상체결가전일종가대비등락율",
+     "kind": "float"
+    },
+    {
+     "fid": 238,
+     "name": "예상체결가전일종가대비기호",
+     "kind": "int"
+    },
+    {
+     "fid": 291,
+     "name": "예상체결가",
+     "kind": "int"
+    },
+    {
+     "fid": 292,
+     "name": "예상체결량",
+     "kind": "int"
+    },
+    {
+     "fid": 293,
+     "name": "예상체결가전일대비기호",
+     "kind": "int"
+    },
+    {
+     "fid": 294,
+     "name": "예상체결가전일대비",
+     "kind": "int"
+    },
+    {
+     "fid": 295,
+     "name": "예상체결가전일대비등락율",
+     "kind": "float"
+    },
+    {
+     "fid": 621,
+     "name": "LP매도호가수량1",
+     "kind": "int"
+    },
+    {
+     "fid": 631,
+     "name": "LP매수호가수량1",
+     "kind": "int"
+    },
+    {
+     "fid": 622,
+     "name": "LP매도호가수량2",
+     "kind": "int"
+    },
+    {
+     "fid": 632,
+     "name": "LP매수호가수량2",
+     "kind": "int"
+    },
+    {
+     "fid": 623,
+     "name": "LP매도호가수량3",
+     "kind": "int"
+    },
+    {
+     "fid": 633,
+     "name": "LP매수호가수량3",
+     "kind": "int"
+    },
+    {
+     "fid": 624,
+     "name": "LP매도호가수량4",
+     "kind": "int"
+    },
+    {
+     "fid": 634,
+     "name": "LP매수호가수량4",
+     "kind": "int"
+    },
+    {
+     "fid": 625,
+     "name": "LP매도호가수량5",
+     "kind": "int"
+    },
+    {
+     "fid": 635,
+     "name": "LP매수호가수량5",
+     "kind": "int"
+    },
+    {
+     "fid": 626,
+     "name": "LP매도호가수량6",
+     "kind": "int"
+    },
+    {
+     "fid": 636,
+     "name": "LP매수호가수량6",
+     "kind": "int"
+    },
+    {
+     "fid": 627,
+     "name": "LP매도호가수량7",
+     "kind": "int"
+    },
+    {
+     "fid": 637,
+     "name": "LP매수호가수량7",
+     "kind": "int"
+    },
+    {
+     "fid": 628,
+     "name": "LP매도호가수량8",
+     "kind": "int"
+    },
+    {
+     "fid": 638,
+     "name": "LP매수호가수량8",
+     "kind": "int"
+    },
+    {
+     "fid": 629,
+     "name": "LP매도호가수량9",
+     "kind": "int"
+    },
+    {
+     "fid": 639,
+     "name": "LP매수호가수량9",
+     "kind": "int"
+    },
+    {
+     "fid": 630,
+     "name": "LP매도호가수량10",
+     "kind": "int"
+    },
+    {
+     "fid": 640,
+     "name": "LP매수호가수량10",
+     "kind": "int"
+    },
+    {
+     "fid": 13,
+     "name": "누적거래량",
+     "kind": "int"
+    },
+    {
+     "fid": 299,
+     "name": "전일거래량대비예상체결율",
+     "kind": "float"
+    },
+    {
+     "fid": 215,
+     "name": "장운영구분",
+     "kind": "text"
+    },
+    {
+     "fid": 216,
+     "name": "투자자별ticker",
+     "kind": "text"
+    },
+    {
+     "fid": 6044,
+     "name": "KRX 매도호가잔량1",
+     "kind": "int"
+    },
+    {
+     "fid": 6045,
+     "name": "KRX 매도호가잔량2",
+     "kind": "int"
+    },
+    {
+     "fid": 6046,
+     "name": "KRX 매도호가잔량3",
+     "kind": "int"
+    },
+    {
+     "fid": 6047,
+     "name": "KRX 매도호가잔량4",
+     "kind": "int"
+    },
+    {
+     "fid": 6048,
+     "name": "KRX 매도호가잔량5",
+     "kind": "int"
+    },
+    {
+     "fid": 6049,
+     "name": "KRX 매도호가잔량6",
+     "kind": "int"
+    },
+    {
+     "fid": 6050,
+     "name": "KRX 매도호가잔량7",
+     "kind": "int"
+    },
+    {
+     "fid": 6051,
+     "name": "KRX 매도호가잔량8",
+     "kind": "int"
+    },
+    {
+     "fid": 6052,
+     "name": "KRX 매도호가잔량9",
+     "kind": "int"
+    },
+    {
+     "fid": 6053,
+     "name": "KRX 매도호가잔량10",
+     "kind": "int"
+    },
+    {
+     "fid": 6054,
+     "name": "KRX 매수호가잔량1",
+     "kind": "int"
+    },
+    {
+     "fid": 6055,
+     "name": "KRX 매수호가잔량2",
+     "kind": "int"
+    },
+    {
+     "fid": 6056,
+     "name": "KRX 매수호가잔량3",
+     "kind": "int"
+    },
+    {
+     "fid": 6057,
+     "name": "KRX 매수호가잔량4",
+     "kind": "int"
+    },
+    {
+     "fid": 6058,
+     "name": "KRX 매수호가잔량5",
+     "kind": "int"
+    },
+    {
+     "fid": 6059,
+     "name": "KRX 매수호가잔량6",
+     "kind": "int"
+    },
+    {
+     "fid": 6060,
+     "name": "KRX 매수호가잔량7",
+     "kind": "int"
+    },
+    {
+     "fid": 6061,
+     "name": "KRX 매수호가잔량8",
+     "kind": "int"
+    },
+    {
+     "fid": 6062,
+     "name": "KRX 매수호가잔량9",
+     "kind": "int"
+    },
+    {
+     "fid": 6063,
+     "name": "KRX 매수호가잔량10",
+     "kind": "int"
+    },
+    {
+     "fid": 6064,
+     "name": "KRX 매도호가총잔량",
+     "kind": "int"
+    },
+    {
+     "fid": 6065,
+     "name": "KRX 매수호가총잔량",
+     "kind": "int"
+    },
+    {
+     "fid": 6066,
+     "name": "NXT 매도호가잔량1",
+     "kind": "int"
+    },
+    {
+     "fid": 6067,
+     "name": "NXT 매도호가잔량2",
+     "kind": "int"
+    },
+    {
+     "fid": 6068,
+     "name": "NXT 매도호가잔량3",
+     "kind": "int"
+    },
+    {
+     "fid": 6069,
+     "name": "NXT 매도호가잔량4",
+     "kind": "int"
+    },
+    {
+     "fid": 6070,
+     "name": "NXT 매도호가잔량5",
+     "kind": "int"
+    },
+    {
+     "fid": 6071,
+     "name": "NXT 매도호가잔량6",
+     "kind": "int"
+    },
+    {
+     "fid": 6072,
+     "name": "NXT 매도호가잔량7",
+     "kind": "int"
+    },
+    {
+     "fid": 6073,
+     "name": "NXT 매도호가잔량8",
+     "kind": "int"
+    },
+    {
+     "fid": 6074,
+     "name": "NXT 매도호가잔량9",
+     "kind": "int"
+    },
+    {
+     "fid": 6075,
+     "name": "NXT 매도호가잔량10",
+     "kind": "int"
+    },
+    {
+     "fid": 6076,
+     "name": "NXT 매수호가잔량1",
+     "kind": "int"
+    },
+    {
+     "fid": 6077,
+     "name": "NXT 매수호가잔량2",
+     "kind": "int"
+    },
+    {
+     "fid": 6078,
+     "name": "NXT 매수호가잔량3",
+     "kind": "int"
+    },
+    {
+     "fid": 6079,
+     "name": "NXT 매수호가잔량4",
+     "kind": "int"
+    },
+    {
+     "fid": 6080,
+     "name": "NXT 매수호가잔량5",
+     "kind": "int"
+    },
+    {
+     "fid": 6081,
+     "name": "NXT 매수호가잔량6",
+     "kind": "int"
+    },
+    {
+     "fid": 6082,
+     "name": "NXT 매수호가잔량7",
+     "kind": "int"
+    },
+    {
+     "fid": 6083,
+     "name": "NXT 매수호가잔량8",
+     "kind": "int"
+    },
+    {
+     "fid": 6084,
+     "name": "NXT 매수호가잔량9",
+     "kind": "int"
+    },
+    {
+     "fid": 6085,
+     "name": "NXT 매수호가잔량10",
+     "kind": "int"
+    },
+    {
+     "fid": 6086,
+     "name": "NXT 매도호가총잔량",
+     "kind": "int"
+    },
+    {
+     "fid": 6087,
+     "name": "NXT 매수호가총잔량",
+     "kind": "int"
+    },
+    {
+     "fid": 6100,
+     "name": "KRX 중간가 매도 총잔량 증감",
+     "kind": "int"
+    },
+    {
+     "fid": 6101,
+     "name": "KRX 중간가 매도 총잔량",
+     "kind": "int"
+    },
+    {
+     "fid": 6102,
+     "name": "KRX 중간가",
+     "kind": "int"
+    },
+    {
+     "fid": 6103,
+     "name": "KRX 중간가 매수 총잔량",
+     "kind": "int"
+    },
+    {
+     "fid": 6104,
+     "name": "KRX 중간가 매수 총잔량 증감",
+     "kind": "int"
+    },
+    {
+     "fid": 6105,
+     "name": "NXT중간가 매도 총잔량 증감",
+     "kind": "int"
+    },
+    {
+     "fid": 6106,
+     "name": "NXT중간가 매도 총잔량",
+     "kind": "int"
+    },
+    {
+     "fid": 6107,
+     "name": "NXT중간가",
+     "kind": "int"
+    },
+    {
+     "fid": 6108,
+     "name": "NXT중간가 매수 총잔량",
+     "kind": "int"
+    },
+    {
+     "fid": 6109,
+     "name": "NXT중간가 매수 총잔량 증감",
+     "kind": "int"
+    },
+    {
+     "fid": 6110,
+     "name": "KRX중간가대비",
+     "kind": "int"
+    },
+    {
+     "fid": 6111,
+     "name": "KRX중간가대비 기호",
+     "kind": "int"
+    },
+    {
+     "fid": 6112,
+     "name": "KRX중간가대비등락율",
+     "kind": "float"
+    },
+    {
+     "fid": 6113,
+     "name": "NXT중간가대비",
+     "kind": "int"
+    },
+    {
+     "fid": 6114,
+     "name": "NXT중간가대비 기호",
+     "kind": "int"
+    },
+    {
+     "fid": 6115,
+     "name": "NXT중간가대비등락율",
+     "kind": "float"
+    }
+   ]
+  },
+  {
+   "type": "0w",
+   "name": "종목프로그램매매",
+   "fids": [
+    {
+     "fid": 20,
+     "name": "체결시간",
+     "kind": "text"
+    },
+    {
+     "fid": 10,
+     "name": "현재가",
+     "kind": "int"
+    },
+    {
+     "fid": 25,
+     "name": "전일대비기호",
+     "kind": "int"
+    },
+    {
+     "fid": 11,
+     "name": "전일대비",
+     "kind": "int"
+    },
+    {
+     "fid": 12,
+     "name": "등락율",
+     "kind": "float"
+    },
+    {
+     "fid": 13,
+     "name": "누적거래량",
+     "kind": "int"
+    },
+    {
+     "fid": 202,
+     "name": "매도수량",
+     "kind": "int"
+    },
+    {
+     "fid": 204,
+     "name": "매도금액",
+     "kind": "int"
+    },
+    {
+     "fid": 206,
+     "name": "매수수량",
+     "kind": "int"
+    },
+    {
+     "fid": 208,
+     "name": "매수금액",
+     "kind": "int"
+    },
+    {
+     "fid": 210,
+     "name": "순매수수량",
+     "kind": "int"
+    },
+    {
+     "fid": 211,
+     "name": "순매수수량증감",
+     "kind": "int"
+    },
+    {
+     "fid": 212,
+     "name": "순매수금액",
+     "kind": "int"
+    },
+    {
+     "fid": 213,
+     "name": "순매수금액증감",
+     "kind": "int"
+    },
+    {
+     "fid": 214,
+     "name": "장시작예상잔여시간",
+     "kind": "text"
+    },
+    {
+     "fid": 215,
+     "name": "장운영구분",
+     "kind": "text"
+    },
+    {
+     "fid": 216,
+     "name": "투자자별ticker",
+     "kind": "text"
+    }
+   ]
+  },
+  {
+   "type": "0F",
+   "name": "주식당일거래원",
+   "fids": [
+    {
+     "fid": 141,
+     "name": "매도거래원1",
+     "kind": "text"
+    },
+    {
+     "fid": 161,
+     "name": "매도거래원수량1",
+     "kind": "int"
+    },
+    {
+     "fid": 166,
+     "name": "매도거래원별증감1",
+     "kind": "int"
+    },
+    {
+     "fid": 146,
+     "name": "매도거래원코드1",
+     "kind": "text"
+    },
+    {
+     "fid": 271,
+     "name": "매도거래원색깔1",
+     "kind": "text"
+    },
+    {
+     "fid": 151,
+     "name": "매수거래원1",
+     "kind": "text"
+    },
+    {
+     "fid": 171,
+     "name": "매수거래원수량1",
+     "kind": "int"
+    },
+    {
+     "fid": 176,
+     "name": "매수거래원별증감1",
+     "kind": "int"
+    },
+    {
+     "fid": 156,
+     "name": "매수거래원코드1",
+     "kind": "text"
+    },
+    {
+     "fid": 281,
+     "name": "매수거래원색깔1",
+     "kind": "text"
+    },
+    {
+     "fid": 142,
+     "name": "매도거래원2",
+     "kind": "text"
+    },
+    {
+     "fid": 162,
+     "name": "매도거래원수량2",
+     "kind": "int"
+    },
+    {
+     "fid": 167,
+     "name": "매도거래원별증감2",
+     "kind": "int"
+    },
+    {
+     "fid": 147,
+     "name": "매도거래원코드2",
+     "kind": "text"
+    },
+    {
+     "fid": 272,
+     "name": "매도거래원색깔2",
+     "kind": "text"
+    },
+    {
+     "fid": 152,
+     "name": "매수거래원2",
+     "kind": "text"
+    },
+    {
+     "fid": 172,
+     "name": "매수거래원수량2",
+     "kind": "int"
+    },
+    {
+     "fid": 177,
+     "name": "매수거래원별증감2",
+     "kind": "int"
+    },
+    {
+     "fid": 157,
+     "name": "매수거래원코드2",
+     "kind": "text"
+    },
+    {
+     "fid": 282,
+     "name": "매수거래원색깔2",
+     "kind": "text"
+    },
+    {
+     "fid": 143,
+     "name": "매도거래원3",
+     "kind": "text"
+    },
+    {
+     "fid": 163,
+     "name": "매도거래원수량3",
+     "kind": "int"
+    },
+    {
+     "fid": 168,
+     "name": "매도거래원별증감3",
+     "kind": "int"
+    },
+    {
+     "fid": 148,
+     "name": "매도거래원코드3",
+     "kind": "text"
+    },
+    {
+     "fid": 273,
+     "name": "매도거래원색깔3",
+     "kind": "text"
+    },
+    {
+     "fid": 153,
+     "name": "매수거래원3",
+     "kind": "text"
+    },
+    {
+     "fid": 173,
+     "name": "매수거래원수량3",
+     "kind": "int"
+    },
+    {
+     "fid": 178,
+     "name": "매수거래원별증감3",
+     "kind": "int"
+    },
+    {
+     "fid": 158,
+     "name": "매수거래원코드3",
+     "kind": "text"
+    },
+    {
+     "fid": 283,
+     "name": "매수거래원색깔3",
+     "kind": "text"
+    },
+    {
+     "fid": 144,
+     "name": "매도거래원4",
+     "kind": "text"
+    },
+    {
+     "fid": 164,
+     "name": "매도거래원수량4",
+     "kind": "int"
+    },
+    {
+     "fid": 169,
+     "name": "매도거래원별증감4",
+     "kind": "int"
+    },
+    {
+     "fid": 149,
+     "name": "매도거래원코드4",
+     "kind": "text"
+    },
+    {
+     "fid": 274,
+     "name": "매도거래원색깔4",
+     "kind": "text"
+    },
+    {
+     "fid": 154,
+     "name": "매수거래원4",
+     "kind": "text"
+    },
+    {
+     "fid": 174,
+     "name": "매수거래원수량4",
+     "kind": "int"
+    },
+    {
+     "fid": 179,
+     "name": "매수거래원별증감4",
+     "kind": "int"
+    },
+    {
+     "fid": 159,
+     "name": "매수거래원코드4",
+     "kind": "text"
+    },
+    {
+     "fid": 284,
+     "name": "매수거래원색깔4",
+     "kind": "text"
+    },
+    {
+     "fid": 145,
+     "name": "매도거래원5",
+     "kind": "text"
+    },
+    {
+     "fid": 165,
+     "name": "매도거래원수량5",
+     "kind": "int"
+    },
+    {
+     "fid": 170,
+     "name": "매도거래원별증감5",
+     "kind": "int"
+    },
+    {
+     "fid": 150,
+     "name": "매도거래원코드5",
+     "kind": "text"
+    },
+    {
+     "fid": 275,
+     "name": "매도거래원색깔5",
+     "kind": "text"
+    },
+    {
+     "fid": 155,
+     "name": "매수거래원5",
+     "kind": "text"
+    },
+    {
+     "fid": 175,
+     "name": "매수거래원수량5",
+     "kind": "int"
+    },
+    {
+     "fid": 180,
+     "name": "매수거래원별증감5",
+     "kind": "int"
+    },
+    {
+     "fid": 160,
+     "name": "매수거래원코드5",
+     "kind": "text"
+    },
+    {
+     "fid": 285,
+     "name": "매수거래원색깔5",
+     "kind": "text"
+    },
+    {
+     "fid": 261,
+     "name": "외국계매도추정합",
+     "kind": "int"
+    },
+    {
+     "fid": 262,
+     "name": "외국계매도추정합변동",
+     "kind": "int"
+    },
+    {
+     "fid": 263,
+     "name": "외국계매수추정합",
+     "kind": "int"
+    },
+    {
+     "fid": 264,
+     "name": "외국계매수추정합변동",
+     "kind": "int"
+    },
+    {
+     "fid": 267,
+     "name": "외국계순매수추정합",
+     "kind": "int"
+    },
+    {
+     "fid": 268,
+     "name": "외국계순매수변동",
+     "kind": "int"
+    },
+    {
+     "fid": 337,
+     "name": "거래소구분",
+     "kind": "text"
+    }
+   ]
+  },
+  {
+   "type": "1h",
+   "name": "VI발동/해제",
+   "fids": [
+    {
+     "fid": 9001,
+     "name": "종목코드",
+     "kind": "text"
+    },
+    {
+     "fid": 302,
+     "name": "종목명",
+     "kind": "text"
+    },
+    {
+     "fid": 13,
+     "name": "누적거래량",
+     "kind": "int"
+    },
+    {
+     "fid": 14,
+     "name": "누적거래대금",
+     "kind": "int"
+    },
+    {
+     "fid": 9068,
+     "name": "VI발동구분",
+     "kind": "text"
+    },
+    {
+     "fid": 9008,
+     "name": "KOSPI,KOSDAQ,전체구분",
+     "kind": "text"
+    },
+    {
+     "fid": 9075,
+     "name": "장전구분",
+     "kind": "text"
+    },
+    {
+     "fid": 1221,
+     "name": "VI발동가격",
+     "kind": "int"
+    },
+    {
+     "fid": 1223,
+     "name": "매매체결처리시각",
+     "kind": "text"
+    },
+    {
+     "fid": 1224,
+     "name": "VI해제시각",
+     "kind": "text"
+    },
+    {
+     "fid": 1225,
+     "name": "VI적용구분",
+     "kind": "text"
+    },
+    {
+     "fid": 1236,
+     "name": "기준가격 정적",
+     "kind": "int"
+    },
+    {
+     "fid": 1237,
+     "name": "기준가격 동적",
+     "kind": "int"
+    },
+    {
+     "fid": 1238,
+     "name": "괴리율 정적",
+     "kind": "float"
+    },
+    {
+     "fid": 1239,
+     "name": "괴리율 동적",
+     "kind": "float"
+    },
+    {
+     "fid": 1489,
+     "name": "VI발동가 등락율",
+     "kind": "float"
+    },
+    {
+     "fid": 1490,
+     "name": "VI발동횟수",
+     "kind": "int"
+    },
+    {
+     "fid": 9069,
+     "name": "발동방향구분",
+     "kind": "text"
+    },
+    {
+     "fid": 1279,
+     "name": "Extra Item",
+     "kind": "text"
+    }
+   ]
+  },
+  {
+   "type": "0H",
+   "name": "주식예상체결",
+   "fids": [
+    {
+     "fid": 20,
+     "name": "체결시간",
+     "kind": "text"
+    },
+    {
+     "fid": 10,
+     "name": "현재가",
+     "kind": "int"
+    },
+    {
+     "fid": 11,
+     "name": "전일대비",
+     "kind": "int"
+    },
+    {
+     "fid": 12,
+     "name": "등락율",
+     "kind": "float"
+    },
+    {
+     "fid": 15,
+     "name": "거래량",
+     "kind": "int"
+    },
+    {
+     "fid": 13,
+     "name": "누적거래량",
+     "kind": "int"
+    },
+    {
+     "fid": 25,
+     "name": "전일대비기호",
+     "kind": "int"
+    }
+   ]
+  },
+  {
+   "type": "0E",
+   "name": "주식시간외호가",
+   "fids": [
+    {
+     "fid": 21,
+     "name": "호가시간",
+     "kind": "text"
+    },
+    {
+     "fid": 131,
+     "name": "시간외매도호가총잔량",
+     "kind": "int"
+    },
+    {
+     "fid": 132,
+     "name": "시간외매도호가총잔량직전대비",
+     "kind": "int"
+    },
+    {
+     "fid": 135,
+     "name": "시간외매수호가총잔량",
+     "kind": "int"
+    },
+    {
+     "fid": 136,
+     "name": "시간외매수호가총잔량직전대비",
+     "kind": "int"
+    }
+   ]
+  },
+  {
+   "type": "0g",
+   "name": "주식종목정보",
+   "fids": [
+    {
+     "fid": 297,
+     "name": "임의연장",
+     "kind": "text"
+    },
+    {
+     "fid": 592,
+     "name": "장전임의연장",
+     "kind": "text"
+    },
+    {
+     "fid": 593,
+     "name": "장후임의연장",
+     "kind": "text"
+    },
+    {
+     "fid": 305,
+     "name": "상한가",
+     "kind": "int"
+    },
+    {
+     "fid": 306,
+     "name": "하한가",
+     "kind": "int"
+    },
+    {
+     "fid": 307,
+     "name": "기준가",
+     "kind": "int"
+    },
+    {
+     "fid": 689,
+     "name": "조기종료ELW발생",
+     "kind": "text"
+    },
+    {
+     "fid": 594,
+     "name": "통화단위",
+     "kind": "text"
+    },
+    {
+     "fid": 382,
+     "name": "증거금율표시",
+     "kind": "text"
+    },
+    {
+     "fid": 370,
+     "name": "종목정보",
+     "kind": "text"
+    }
+   ]
+  },
+  {
+   "type": "0J",
+   "name": "업종지수",
+   "fids": [
+    {
+     "fid": 20,
+     "name": "체결시간",
+     "kind": "text"
+    },
+    {
+     "fid": 10,
+     "name": "현재가",
+     "kind": "float"
+    },
+    {
+     "fid": 11,
+     "name": "전일대비",
+     "kind": "float"
+    },
+    {
+     "fid": 12,
+     "name": "등락율",
+     "kind": "float"
+    },
+    {
+     "fid": 15,
+     "name": "거래량",
+     "kind": "int"
+    },
+    {
+     "fid": 13,
+     "name": "누적거래량",
+     "kind": "int"
+    },
+    {
+     "fid": 14,
+     "name": "누적거래대금",
+     "kind": "int"
+    },
+    {
+     "fid": 16,
+     "name": "시가",
+     "kind": "float"
+    },
+    {
+     "fid": 17,
+     "name": "고가",
+     "kind": "float"
+    },
+    {
+     "fid": 18,
+     "name": "저가",
+     "kind": "float"
+    },
+    {
+     "fid": 25,
+     "name": "전일대비기호",
+     "kind": "int"
+    },
+    {
+     "fid": 26,
+     "name": "전일거래량대비",
+     "kind": "int"
+    }
+   ]
+  },
+  {
+   "type": "0U",
+   "name": "업종등락",
+   "fids": [
+    {
+     "fid": 20,
+     "name": "체결시간",
+     "kind": "text"
+    },
+    {
+     "fid": 252,
+     "name": "상승종목수",
+     "kind": "int"
+    },
+    {
+     "fid": 251,
+     "name": "상한종목수",
+     "kind": "int"
+    },
+    {
+     "fid": 253,
+     "name": "보합종목수",
+     "kind": "int"
+    },
+    {
+     "fid": 255,
+     "name": "하락종목수",
+     "kind": "int"
+    },
+    {
+     "fid": 254,
+     "name": "하한종목수",
+     "kind": "int"
+    },
+    {
+     "fid": 13,
+     "name": "누적거래량",
+     "kind": "int"
+    },
+    {
+     "fid": 14,
+     "name": "누적거래대금",
+     "kind": "int"
+    },
+    {
+     "fid": 10,
+     "name": "현재가",
+     "kind": "float"
+    },
+    {
+     "fid": 11,
+     "name": "전일대비",
+     "kind": "float"
+    },
+    {
+     "fid": 12,
+     "name": "등락율",
+     "kind": "float"
+    },
+    {
+     "fid": 256,
+     "name": "거래형성종목수",
+     "kind": "int"
+    },
+    {
+     "fid": 257,
+     "name": "거래형성비율",
+     "kind": "float"
+    },
+    {
+     "fid": 25,
+     "name": "전일대비기호",
+     "kind": "int"
+    }
+   ]
+  },
+  {
+   "type": "0s",
+   "name": "장시작시간",
+   "fids": [
+    {
+     "fid": 215,
+     "name": "장운영구분",
+     "kind": "text"
+    },
+    {
+     "fid": 20,
+     "name": "체결시간",
+     "kind": "text"
+    },
+    {
+     "fid": 214,
+     "name": "장시작예상잔여시간",
+     "kind": "text"
+    }
+   ]
+  }
+ ]
+}

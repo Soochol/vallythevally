@@ -902,7 +902,7 @@ mod tests {
             ("/api/layouts/L2", with(&|v| v["windows"] = json!((0..9).map(|i| chart_window(&format!("c{i}"))).collect::<Vec<_>>())), StatusCode::BAD_REQUEST, "bad_request"),
             ("/api/layouts/L2", with(&|v| { let mut w = windows(v); w.push(json!({"id": "watchlist2", "link": null, "kind": "watchlist"})); v["windows"] = json!(w); }), StatusCode::BAD_REQUEST, "bad_request"),
             ("/api/layouts/L2", with(&|v| v["windows"][1]["kind"] = json!("orders")), StatusCode::BAD_REQUEST, "bad_request"),
-            ("/api/layouts/L2", with(&|v| v["windows"][1]["link"] = json!("d")), StatusCode::BAD_REQUEST, "bad_request"),
+            ("/api/layouts/L2", with(&|v| v["windows"][1]["link"] = json!("k")), StatusCode::BAD_REQUEST, "bad_request"),
             ("/api/layouts/L2", with(&|v| v["windows"][2]["venue"] = json!("krx")), StatusCode::BAD_REQUEST, "bad_request"),
             ("/api/layouts/L2", with(&|v| v["windows"][0]["venue"] = json!(null)), StatusCode::BAD_REQUEST, "bad_request"),
             ("/api/layouts/L2", with(&|v| v["windows"][0]["symbol"] = json!("bad")), StatusCode::BAD_REQUEST, "bad_request"),
