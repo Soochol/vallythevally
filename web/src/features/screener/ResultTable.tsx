@@ -12,7 +12,7 @@ import { useSelectionStore } from "../../stores/selection";
 import { addRowToCompare } from "../list/symbolRowMenu";
 import { SortIcon } from "../icons";
 import { ResultRowMenu, type ResultMenuState } from "./ResultRowMenu";
-import { LIST_COLUMN_GAP, LIST_EDGE, LIST_HEAD, LIST_PRICE_WIDTH, LIST_RATE_WIDTH, LIST_ROW_HEIGHT, LIST_ROW_HOVER, PriceText, RateBadge, SymbolName, listRowEdge, listRowFill } from "../list/listRow";
+import { LIST_COLUMN_GAP, LIST_EDGE, LIST_HEAD, LIST_PRICE_WIDTH, LIST_RATE_WIDTH, LIST_ROW_HEIGHT, PriceText, RateBadge, SymbolName, listRowFill } from "../list/listRow";
 
 const COLUMNS: readonly { key: ResultSortKey; label: string }[] = [
   { key: "name", label: "종목" },
@@ -65,8 +65,8 @@ export function ResultTable({ screen, asOf, rows, selected, sort, onSort, onSele
       const active = row.symbol === selected;
       return <tr key={row.symbol} data-code={row.symbol} aria-selected={active} onClick={() => onSelect(row.symbol)}
         onContextMenu={desktop ? (e) => { e.preventDefault(); openMenu(row.symbol, e.clientX, e.clientY); } : undefined}
-        className={`${LIST_ROW_HEIGHT} cursor-pointer ${LIST_ROW_HOVER} ${listRowFill(active)}`}>
-        <td className={`${listRowEdge(active)} pl-2.5`}>
+        className={`${LIST_ROW_HEIGHT} cursor-pointer ${listRowFill(active)}`}>
+        <td className="pl-3">
           <button type="button" data-chart-control data-result-row aria-current={active || undefined} className="block w-full min-w-0 text-left"
             aria-haspopup={desktop ? "menu" : undefined} aria-expanded={desktop ? menu?.code === row.symbol : undefined}
             aria-keyshortcuts={desktop ? "Shift+Enter Shift+F10" : undefined}

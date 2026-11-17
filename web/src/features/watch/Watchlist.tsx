@@ -43,7 +43,7 @@ import { useActiveWatchlist, useWatchlistStore } from "../../stores/watchlist";
 import { ArrowIcon, ChevronIcon, CloseIcon, CopyIcon, ListIcon, MoreIcon, PlusIcon } from "../icons";
 import { Menu, type MenuItem } from "../menu/Menu";
 import { addRowToCompare, symbolRowMenuItems } from "../list/symbolRowMenu";
-import { LIST_HEAD, LIST_ROW_HEIGHT, LIST_ROW_HOVER, PriceText, RateBadge, SymbolName, listRowSelection } from "../list/listRow";
+import { LIST_HEAD, LIST_ROW_HEIGHT, PriceText, RateBadge, SymbolName, listRowFill } from "../list/listRow";
 import { columnTemplate, fitColumns, type WatchVariant } from "./columns";
 import { useElementSize } from "../workspace/size";
 import { removalUndo } from "./removalUndo";
@@ -737,7 +737,7 @@ function WatchRow({ list, row, index, last, columns, template, variant, sender, 
       onDrop={drag.drop}
       onDragEnd={drag.end}
       onContextMenu={variant === "desktop" ? (e) => { e.preventDefault(); context(e.clientX, e.clientY); } : undefined}
-      className={`group relative ${listRowSelection(active)} ${
+      className={`group relative ${listRowFill(active)} ${
         dropBefore ? "shadow-[inset_0_2px_0_var(--accent)]" : ""
       }`}
     >
@@ -768,7 +768,7 @@ function WatchRow({ list, row, index, last, columns, template, variant, sender, 
           move(e.key === "ArrowUp" ? -1 : 1);
         }}
         style={template}
-        className={`${ROW_GRID} ${LIST_ROW_HEIGHT} w-full items-center ${list.groups.length > 0 ? "pl-[33px]" : "pl-2.5"} pr-3 text-left ${LIST_ROW_HOVER} max-md:h-auto max-md:min-h-[56px] max-md:px-4 max-md:py-2 ${
+        className={`${ROW_GRID} ${LIST_ROW_HEIGHT} w-full items-center ${list.groups.length > 0 ? "pl-[35px]" : "pl-3"} pr-3 text-left max-md:h-auto max-md:min-h-[56px] max-md:px-4 max-md:py-2 ${
           editing ? (list.groups.length > 0 ? "max-md:pr-[220px]" : "max-md:pr-[176px]") : ""
         }`}
       >
