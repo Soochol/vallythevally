@@ -12,7 +12,11 @@ import { direction, formatChange, formatPercent, formatPrice, formatVolume } fro
 import { DESKTOP_QUERY, useMediaQuery } from "../../lib/media";
 import { isIndexCode } from "../../lib/symbol";
 import {
+  dropRow,
   groupNameProblem,
+  type DropHow,
+  type DropRefusal,
+  type DropTarget,
   rowKey,
   type WatchRowRef,
   MAX_WATCH_GROUPS,
@@ -47,7 +51,25 @@ import { useBeforeConnect } from "../status/beforeConnect";
 
 const DIR_CLASS = { up: "text-up", down: "text-down", flat: "text-text-2" } as const;
 const ROW_GRID = "grid gap-1";
-const GROUP_HEAD = "flex h-[34px] items-center gap-1.5 border-y border-line bg-white/[0.045] pl-2 pr-1.5 text-[13px] font-[700] max-md:h-11 max-md:pl-3";
+const GROUP_HEAD = "flex h-[34px] items-center gap-1.5 border-y border-line pl-2 pr-1.5 text-[13px] font-[700] max-md:h-11 max-md:pl-3";
+type HeadDropState = "idle" | "accept" | "refuse";
+const HEAD_FILL: Record<HeadDropState, string> = {
+  idle: "bg-white/[0.045]",
+  accept: "bg-accent-soft shadow-[inset_0_0_0_1px_var(--accent)]",
+  refuse: "bg-[color-mix(in_srgb,var(--danger)_15%,transparent)] shadow-[inset_0_0_0_1px_var(--danger)]",
+};
+const REFUSAL_NOTE: Partial<Record<DropRefusal, string>> = { "already-in-group": "이미 있음", "in-other-group": "다른 그룹에도 있음" };
+const COPY_KEY_IS_OPTION = /Mac|iPhone|iPad/.test(navigator.platform);
+const copyKeyHeld = (e: React.DragEvent) => (COPY_KEY_IS_OPTION ? e.altKey : e.ctrlKey);
+
+interface HeadDrop {
+  state: HeadDropState;
+  note: string | null;
+  over(e: React.DragEvent): void;
+  leave(e: React.DragEvent): void;
+  drop(e: React.DragEvent): void;
+}
+
 const GROUP_SPACING = "[&:not(:first-child)]:mt-1.5";
 const GROUP_BAR = "h-3.5 w-[3px] flex-none rounded-[2px]";
 function setCollapsed(id: string, collapsed: boolean) {
@@ -265,7 +287,7 @@ function WatchList({ variant, sender, editing, naming, onNaming, width = null }:
   const columns = editing ? [] : width === null ? chosen : fitColumns(chosen, width);
   const desktop = useMediaQuery(DESKTOP_QUERY);
   const onScreen = variant === "desktop" ? desktop : !desktop;
-  const [dragOver, setDragOver] = useState<number | null>(null);
+  const [hover, setHover] = useState<{ target: DropTarget; how: DropHow } | null>(null);
   const [dragged, setDragged] = useState<WatchRowRef | null>(null);
   const scroller = useRef<HTMLElement>(null);
   const [focusRow, setFocusRow] = useState<WatchRowRef | null>(null);
@@ -282,38 +304,86 @@ function WatchList({ variant, sender, editing, naming, onNaming, width = null }:
 
   const endDrag = () => {
     setDragged(null);
-    setDragOver(null);
+    setHover(null);
+  };
+  const howFor = (e: React.DragEvent, target: DropTarget): "move" | "copy" => (dragged?.groupId != null && target.groupId !== null && copyKeyHeld(e) ? "copy" : "move");
+  const hoverOver = (e: React.DragEvent, target: DropTarget) => {
+    if (dragged === null) return;
+    const how = howFor(e, target);
+    const refused = dragged.groupId !== target.groupId && "refusal" in dropRow(list, dragged, target, how);
+    if (refused) e.dataTransfer.dropEffect = "none";
+    else if (dragged.groupId !== target.groupId || target.before !== null) {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = how;
+    } else {
+      setHover(null);
+      return;
+    }
+    setHover((now) => (now !== null && now.how === how && now.target.groupId === target.groupId && now.target.before === target.before ? now : { target, how }));
+  };
+  const dropOn = (e: React.DragEvent, target: DropTarget, sameSectionIndex: number | null) => {
+    e.preventDefault();
+    const store = useWatchlistStore.getState();
+    if (dragged !== null && dragged.groupId === target.groupId) {
+      if (sameSectionIndex !== null) store.move(list.id, dragged, sameSectionIndex);
+    } else if (dragged !== null) {
+      const how = howFor(e, target);
+      if ("list" in dropRow(list, dragged, target, how)) {
+        store.dropRow(list.id, dragged, target, how);
+        if (target.groupId !== null) setCollapsed(target.groupId, false);
+        setFocusRow({ code: dragged.code, groupId: target.groupId });
+      }
+    }
+    endDrag();
+  };
+  const hoverVerdict = hover === null || dragged === null ? null : dropRow(list, dragged, hover.target, hover.how);
+  const headDrop = (groupId: string | null): HeadDrop => {
+    const mine = hover !== null && hover.target.groupId === groupId && hoverVerdict !== null && dragged?.groupId !== groupId ? hover : null;
+    const refusal = mine !== null && hoverVerdict !== null && "refusal" in hoverVerdict ? hoverVerdict.refusal : null;
+    const accepts = mine !== null && refusal === null && (mine.target.before === null || groupId === null);
+    return {
+      state: refusal !== null ? "refuse" : accepts ? "accept" : "idle",
+      note: refusal === null ? null : REFUSAL_NOTE[refusal] ?? null,
+      over: (e) => hoverOver(e, { groupId, before: null }),
+      leave: (e) => {
+        if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setHover((now) => (now !== null && now.target.groupId === groupId ? null : now));
+      },
+      drop: (e) => dropOn(e, { groupId, before: null }, null),
+    };
   };
   const rows = (section: WatchSection) => {
-    const sameSection = dragged !== null && dragged.groupId === (section.group?.id ?? null);
-    return section.symbols.map((code, i) => (
-      <WatchRow
-        key={rowKey({ code, groupId: section.group?.id ?? null })}
-        list={list}
-        row={{ code, groupId: section.group?.id ?? null }}
-        index={i}
-        last={i === section.symbols.length - 1}
-        columns={columns}
-        template={template}
-        variant={variant}
-        sender={sender}
-        editing={editing}
-        dropBefore={sameSection && dragOver === i}
-        onMoved={setFocusRow}
-        onNaming={onNaming}
-        drag={{
-          start: () => setDragged({ code, groupId: section.group?.id ?? null }),
-          over: () => sameSection && setDragOver(i),
-          drop: () => {
-            if (sameSection && dragged) useWatchlistStore.getState().move(list.id, dragged, i);
-            endDrag();
-          },
-          end: endDrag,
-        }}
-      />
-    ));
+    const sectionId = section.group?.id ?? null;
+    const sameSection = dragged !== null && dragged.groupId === sectionId;
+    return section.symbols.map((code, i) => {
+      const target: DropTarget = { groupId: sectionId, before: code };
+      const here = hover !== null && hover.target.groupId === sectionId && hover.target.before === code;
+      const joins = here && sectionId !== null && hoverVerdict !== null && "list" in hoverVerdict;
+      return (
+        <WatchRow
+          key={rowKey({ code, groupId: sectionId })}
+          list={list}
+          row={{ code, groupId: sectionId }}
+          index={i}
+          last={i === section.symbols.length - 1}
+          columns={columns}
+          template={template}
+          variant={variant}
+          sender={sender}
+          editing={editing}
+          dropBefore={sameSection ? here : joins}
+          onMoved={setFocusRow}
+          onNaming={onNaming}
+          drag={{
+            start: () => setDragged({ code, groupId: sectionId }),
+            over: (e) => hoverOver(e, target),
+            drop: (e) => dropOn(e, target, i),
+            end: endDrag,
+          }}
+        />
+      );
+    });
   };
-  const leave = (e: React.DragEvent) => e.currentTarget === e.target && setDragOver(null);
+  const leave = (e: React.DragEvent) => e.currentTarget === e.target && setHover(null);
   const scrollClass = "min-h-0 flex-1 overflow-y-auto overflow-x-hidden";
 
   return (
@@ -335,16 +405,12 @@ function WatchList({ variant, sender, editing, naming, onNaming, width = null }:
         <div ref={(el) => { scroller.current = el; }} role="group" aria-label={list.name} className={scrollClass} onDragLeave={leave}>
           {sections.map(({ group, symbols: codes }, i) => group ? (
             <div key={group.id} className={GROUP_SPACING}>
-              <GroupHead list={list} group={group} collapsed={collapsed.includes(group.id)} naming={naming === group.id} onNaming={onNaming} />
+              <GroupHead list={list} group={group} collapsed={collapsed.includes(group.id)} naming={naming === group.id} onNaming={onNaming} drop={headDrop(group.id)} />
               {!collapsed.includes(group.id) && codes.length > 0 && <ul id={`watch-group-${group.id}`} aria-label={group.name}>{rows(sections[i]!)}</ul>}
             </div>
           ) : codes.length > 0 && (
             <div key="ungrouped" className={GROUP_SPACING}>
-              <div className={`${GROUP_HEAD} pl-[26px] text-text-2`}>
-                <span aria-hidden="true" className={`${GROUP_BAR} bg-text-3`} />
-                <span>그룹 없음</span>
-                <span className={COUNT_BADGE}>{codes.length}<span className="sr-only">종목</span></span>
-              </div>
+              <UngroupedHead count={codes.length} drop={headDrop(null)} />
               <ul aria-label="그룹 없음">{rows(sections[i]!)}</ul>
             </div>
           ))}
@@ -354,10 +420,26 @@ function WatchList({ variant, sender, editing, naming, onNaming, width = null }:
   );
 }
 
-function GroupHead({ list, group, collapsed, naming, onNaming }: { list: Watchlist; group: WatchGroup; collapsed: boolean; naming: boolean; onNaming: GroupNaming["onNaming"] }) {
-  if (naming) return <div className={`${GROUP_HEAD} text-text`}><GroupNameInput list={list} group={group} onDone={() => onNaming(null)} /></div>;
+function DropNote({ drop }: { drop: HeadDrop }) {
+  return drop.note === null ? null : <span className="flex-none text-xs font-[600] text-danger">{drop.note}</span>;
+}
+
+function UngroupedHead({ count, drop }: { count: number; drop: HeadDrop }) {
   return (
-    <div className={`${GROUP_HEAD} text-text`}>
+    <div className={`${GROUP_HEAD} ${HEAD_FILL[drop.state]} pl-[26px] text-text-2`} onDragOver={drop.over} onDragLeave={drop.leave} onDrop={drop.drop}>
+      <span aria-hidden="true" className={`${GROUP_BAR} bg-text-3`} />
+      <span>그룹 없음</span>
+      <span className={COUNT_BADGE}>{count}<span className="sr-only">종목</span></span>
+      <span className="flex-1" />
+      <DropNote drop={drop} />
+    </div>
+  );
+}
+
+function GroupHead({ list, group, collapsed, naming, onNaming, drop }: { list: Watchlist; group: WatchGroup; collapsed: boolean; naming: boolean; onNaming: GroupNaming["onNaming"]; drop: HeadDrop }) {
+  if (naming) return <div className={`${GROUP_HEAD} ${HEAD_FILL.idle} text-text`}><GroupNameInput list={list} group={group} onDone={() => onNaming(null)} /></div>;
+  return (
+    <div className={`${GROUP_HEAD} ${HEAD_FILL[drop.state]} text-text`} onDragOver={drop.over} onDragLeave={drop.leave} onDrop={drop.drop}>
       <button
         type="button"
         className="flex h-full min-w-0 flex-1 items-center gap-1.5 text-left"
@@ -371,6 +453,7 @@ function GroupHead({ list, group, collapsed, naming, onNaming }: { list: Watchli
         <span className="truncate">{group.name}</span>
         <span className={COUNT_BADGE}>{group.symbols.length}</span>
       </button>
+      <DropNote drop={drop} />
       <GroupMenu list={list} group={group} onRename={() => onNaming(group.id)} />
     </div>
   );
@@ -481,7 +564,7 @@ interface RowProps {
   dropBefore: boolean;
   onMoved(row: WatchRowRef): void;
   onNaming: GroupNaming["onNaming"];
-  drag: { start(): void; over(): void; drop(): void; end(): void };
+  drag: { start(): void; over(e: React.DragEvent): void; drop(e: React.DragEvent): void; end(): void };
 }
 
 function cellText(column: WatchColumn, quote: Quote, isIndex: boolean): string {
@@ -580,18 +663,12 @@ function WatchRow({ list, row, index, last, columns, template, variant, sender, 
       data-row={rowKey(row)}
       draggable={variant === "desktop"}
       onDragStart={(e) => {
-        e.dataTransfer.effectAllowed = "move";
+        e.dataTransfer.effectAllowed = "copyMove";
         e.dataTransfer.setData("text/plain", rowKey(row));
         drag.start();
       }}
-      onDragOver={(e) => {
-        e.preventDefault();
-        drag.over();
-      }}
-      onDrop={(e) => {
-        e.preventDefault();
-        drag.drop();
-      }}
+      onDragOver={drag.over}
+      onDrop={drag.drop}
       onDragEnd={drag.end}
       onContextMenu={variant === "desktop" ? (e) => { e.preventDefault(); context(e.clientX, e.clientY); } : undefined}
       className={`group relative ${listRowSelection(active)} ${
@@ -670,8 +747,7 @@ const MENU_LABEL = { actions: "행 동작", addGroup: "그룹에 추가", group:
 function groupItems(list: Watchlist, row: WatchRowRef, onNaming: GroupNaming["onNaming"], onMoved: RowProps["onMoved"], additive = false): MenuItem[] {
   const assign = (group: string) => {
     const store = useWatchlistStore.getState();
-    if (additive) store.addToGroup(list.id, row.code, group);
-    else store.moveToGroup(list.id, row, group);
+    store.dropRow(list.id, row, { groupId: group, before: null }, additive ? "copy" : "move-merging");
     setCollapsed(group, false);
     onMoved({ code: row.code, groupId: group });
   };

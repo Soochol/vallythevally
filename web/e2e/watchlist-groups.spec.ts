@@ -315,3 +315,72 @@ test("그룹 머리 이름은 종목 이름보다 작지 않고 굵기 700이며
   }));
   expect(Math.abs(await left(stockName) - await left(groupName))).toBeLessThanOrEqual(2);
 });
+
+const ungroupedHead = (page: Page) => panel(page).getByText("그룹 없음", { exact: true });
+const ungroupedRow = (page: Page, code: string) => panel(page).getByRole("list", { name: "그룹 없음", exact: true }).locator(`li[data-code="${code}"]`);
+const headBox = (page: Page, name: string) => groupHead(page, name).locator("xpath=..");
+
+test("다른 그룹의 줄 위에 놓으면 그 줄 앞으로 옮기고 새로고침 뒤에도 남는다", async ({ scenario, page }) => {
+  await seed(scenario, [{ id: "A", name: "첫째", symbols: ["005935", "086520"] }, { id: "B", name: "둘째", symbols: ["000660"] }]);
+  await open(page);
+  await membership(page, "첫째", "086520").dragTo(membership(page, "둘째", "000660"));
+  await expect.poll(() => servedGroups(scenario)).toEqual([["첫째", ["005935"]], ["둘째", ["086520", "000660"]]]);
+  await expect(membership(page, "둘째", "086520").locator("[data-main]")).toBeFocused();
+  await page.reload();
+  await expect(membership(page, "둘째", "086520")).toBeVisible();
+  expect(servedGroups(scenario)).toEqual([["첫째", ["005935"]], ["둘째", ["086520", "000660"]]]);
+});
+
+test("접힌 그룹 머리에 놓으면 맨 끝으로 옮기고 그룹을 편다", async ({ scenario, page }) => {
+  await seed(scenario, [{ id: "A", name: "첫째", symbols: ["005935", "086520"] }, { id: "B", name: "둘째", symbols: ["000660"] }]);
+  await open(page);
+  await groupHead(page, "둘째").click();
+  await expect(groupHead(page, "둘째")).toHaveAttribute("aria-expanded", "false");
+  await membership(page, "첫째", "005935").dragTo(groupHead(page, "둘째"));
+  await expect.poll(() => servedGroups(scenario)).toEqual([["첫째", ["086520"]], ["둘째", ["000660", "005935"]]]);
+  await expect(groupHead(page, "둘째")).toHaveAttribute("aria-expanded", "true");
+  await expect(membership(page, "둘째", "005935").locator("[data-main]")).toBeFocused();
+  await expect.poll(() => scenario.documents.uiPrefs().collapsedWatchGroups).toEqual([]);
+});
+
+test("Ctrl을 누른 채 놓으면 복사하고 원래 그룹에도 남는다", async ({ scenario, page }) => {
+  await seed(scenario, [{ id: "A", name: "첫째", symbols: ["005935", "086520"] }, { id: "B", name: "둘째", symbols: ["000660"] }]);
+  await open(page);
+  await page.keyboard.down("Control");
+  await membership(page, "첫째", "086520").dragTo(membership(page, "둘째", "000660"));
+  await page.keyboard.up("Control");
+  await expect.poll(() => servedGroups(scenario)).toEqual([["첫째", ["005935", "086520"]], ["둘째", ["086520", "000660"]]]);
+  await expect(membership(page, "첫째", "086520")).toBeVisible();
+});
+
+test("이미 같은 종목이 있는 그룹에는 놓을 수 없고 머리에 이유가 보인다", async ({ scenario, page }) => {
+  await seed(scenario, [{ id: "A", name: "첫째", symbols: ["005935", "086520"] }, { id: "B", name: "둘째", symbols: ["086520", "000660"] }]);
+  await page.goto("/?symbol=005930");
+  await expect(membership(page, "둘째", "086520")).toContainText("에코프로");
+  const source = membership(page, "첫째", "086520");
+  const box = (await source.boundingBox())!;
+  await page.mouse.move(box.x + 20, box.y + box.height / 2);
+  await page.mouse.down();
+  const head = (await headBox(page, "둘째").boundingBox())!;
+  await page.mouse.move(head.x + 40, head.y + head.height / 2, { steps: 8 });
+  await expect(headBox(page, "둘째")).toContainText("이미 있음");
+  await page.mouse.up();
+  await expect(headBox(page, "둘째")).not.toContainText("이미 있음");
+  expect(servedGroups(scenario)).toEqual([["첫째", ["005935", "086520"]], ["둘째", ["086520", "000660"]]]);
+  expect(await codes(page)).toEqual(["005935", "086520", "086520", "000660", "005930"]);
+});
+
+test("그룹 없음에 놓으면 원래 그룹에서 빼고 다른 그룹에도 있으면 그대로 둔다", async ({ scenario, page }) => {
+  await seed(scenario, [{ id: "A", name: "첫째", symbols: ["005935", "086520"] }, { id: "B", name: "둘째", symbols: ["086520"] }]);
+  await page.goto("/?symbol=005930");
+  await expect(membership(page, "둘째", "086520")).toContainText("에코프로");
+  await membership(page, "첫째", "086520").dragTo(ungroupedHead(page));
+  expect(servedGroups(scenario)).toEqual([["첫째", ["005935", "086520"]], ["둘째", ["086520"]]]);
+  await membership(page, "첫째", "005935").dragTo(ungroupedRow(page, "005930"));
+  await expect.poll(() => servedGroups(scenario)).toEqual([["첫째", ["086520"]], ["둘째", ["086520"]]]);
+  await expect(ungroupedRow(page, "005935").locator("[data-main]")).toBeFocused();
+  expect(served(scenario).symbols).toEqual(["005930", "086520", "005935", "000660"]);
+  await page.reload();
+  await expect(ungroupedRow(page, "005935")).toBeVisible();
+  expect(servedGroups(scenario)).toEqual([["첫째", ["086520"]], ["둘째", ["086520"]]]);
+});
