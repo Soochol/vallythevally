@@ -115,3 +115,12 @@ async fn kiwooms_explicitly_empty_answer_is_an_unknown_stock() {
     assert_eq!((status, &body["error"]["code"]), (404, &json!("unknown_symbol")), "{body}");
     assert!(f.rest.stopped(ApiId::Ka10001).is_none());
 }
+
+#[tokio::test]
+async fn the_basic_info_answer_carries_todays_price_limits() {
+    let f = Fixture::start().await;
+    f.fake.respond_with("ka10001", 200, fixture("ka10001_005930_AL"));
+    let (status, body) = f.get("005930").await;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!((&body["upperLimit"], &body["lowerLimit"]), (&json!(245_000), &json!(132_100)), "{body}");
+}

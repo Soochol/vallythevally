@@ -50,6 +50,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .merge(crate::setup_bundle::routes(state.clone()))
         .merge(crate::screener::routes())
         .merge(crate::investors::routes())
+        .merge(crate::intraday_feed::routes())
         .merge(crate::system_routes::routes(state.clone()))
         .merge(crate::account_routes::routes(state.clone()))
         .route("/api", any(api_not_found))
@@ -161,6 +162,9 @@ pub(crate) enum Lookup {
     Fundamentals,
     ForeignHoldings,
     InvestorNetShares,
+    OrderBook,
+    Trades,
+    ProgramTrades,
     ScreenerUpdate,
     ScreenerRun,
 }
@@ -174,6 +178,9 @@ impl Lookup {
             Lookup::Fundamentals => "종목 기본 정보",
             Lookup::ForeignHoldings => "외국인 보유",
             Lookup::InvestorNetShares => "투자자별 순매수",
+            Lookup::OrderBook => "호가",
+            Lookup::Trades => "당일 체결",
+            Lookup::ProgramTrades => "당일 프로그램매매",
             Lookup::ScreenerUpdate => "스크리너 업데이트",
             Lookup::ScreenerRun => "스크리너 실행",
         }
@@ -707,7 +714,7 @@ mod tests {
         assert_eq!(
             v,
             json!({"symbol": "005930", "marketCap": 1_093_838_700_000_000u64, "listedShares": 5_846_279_000u64, "per": 28.51, "pbr": 2.92, "roe": 10.9,
-                   "eps": 6564, "bps": 63997, "foreignExhaustionRate": 45.93, "high52w": 380_000, "low52w": 93_500})
+                   "eps": 6564, "bps": 63997, "foreignExhaustionRate": 45.93, "high52w": 380_000, "low52w": 93_500, "upperLimit": 245_000, "lowerLimit": 132_100})
         );
         let bodies: Vec<String> = f.fake.market_sent().into_iter().filter(|s| s.api_id == ApiId::Ka10001).map(|s| s.body).collect();
         assert_eq!(bodies, [r#"{"stk_cd":"005930_AL"}"#]);
