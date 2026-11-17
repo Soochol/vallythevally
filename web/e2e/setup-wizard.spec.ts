@@ -381,7 +381,7 @@ test.describe("셋업 알림과 선택 대기의 경계", () => {
     await page.goto("/?symbol=005930");
     await expect(cell(page)).toHaveAttribute("aria-busy", "false");
     scenario.live.setAccount({ state: "signed_out" });
-    await expect(page.getByRole("heading", { name: "로그인", exact: true })).toBeVisible();
+    await expect(page.getByTestId("landing")).toBeVisible();
     const before = scenario.requests.length;
     scenario.live.setAccount(signedIn(NEEDS_CHOICE));
     await expect(wizard(page)).toBeVisible();

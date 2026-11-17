@@ -14,6 +14,13 @@ const SETUP_PATHS = ["/api/layouts", "/api/watchlists", "/api/ui-state"];
 const route = (method: string, pathname: string) => (url: URL, request: { method(): string }) => url.pathname === pathname && request.method() === method;
 const callsTo = (scenario: Scenario, method: string, pathname: string) => scenario.requests.filter((r) => r.method() === method && new URL(r.url()).pathname === pathname);
 const setupCalls = (scenario: Scenario) => scenario.requests.filter((r) => SETUP_PATHS.includes(new URL(r.url()).pathname));
+const landing = (page: Page) => page.getByTestId("landing");
+const loginButton = (page: Page) => page.getByRole("button", { name: "로그인", exact: true });
+const loginDialog = (page: Page) => page.getByRole("dialog", { name: "로그인", exact: true });
+async function openLogin(page: Page) {
+  await loginButton(page).click();
+  await expect(loginDialog(page)).toBeVisible();
+}
 const dialog = (page: Page) => page.getByRole("dialog", { name: "시스템 설정", exact: true });
 
 async function shot(page: Page, name: string) {
@@ -36,7 +43,7 @@ function answerStatus(scenario: Scenario, pathname: string, next: AccountStatus)
 test.describe("1440×900", () => {
   test.use({ viewport: { width: 1440, height: 900 } });
 
-  test("signed_out: 로그인 화면만 보이고 셋업을 읽지 않는다. Google 단추는 돌려준 주소로 이동한다", async ({ page, scenario }) => {
+  test("signed_out: 랜딩만 보이고 셋업을 읽지 않는다. 로그인 창의 Google 단추는 돌려준 주소로 이동한다", async ({ page, scenario }) => {
     scenario.live.account = SIGNED_OUT;
     let started: unknown = null;
     await page.route("**/fake-idp/**", (r) => r.fulfill({ status: 200, contentType: "text/html", body: "<title>idp</title>" }));
@@ -46,14 +53,18 @@ test.describe("1440×900", () => {
     });
 
     await page.goto("/");
-    await expect(page.getByRole("heading", { name: "로그인", exact: true })).toBeVisible();
-    await expect(page.getByRole("button", { name: "Google로 로그인" })).toBeVisible();
-    await expect(page.getByRole("button", { name: "네이버로 로그인" })).toBeVisible();
+    await expect(landing(page)).toBeVisible();
+    await expect(loginButton(page)).toBeVisible();
+    await expect(loginDialog(page)).toHaveCount(0);
     await expect(page.locator("input")).toHaveCount(0);
-    await expect(page.getByText("로그인한 계정의 고유 번호만 받습니다. 이메일과 이름은 받지 않습니다.")).toBeVisible();
-    await expect(page.getByText(/Google과 네이버는 서로 다른 계정/)).toBeVisible();
     await expect(page.getByRole("button", { name: "시스템 설정", exact: true })).toHaveCount(0);
     await shot(page, "account-login-desktop.png");
+
+    await openLogin(page);
+    await expect(page.getByRole("button", { name: "Google로 로그인" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "네이버로 로그인" })).toBeVisible();
+    await expect(page.getByText("로그인한 계정의 고유 번호만 받습니다. 이메일과 이름은 받지 않습니다.")).toBeVisible();
+    await expect(page.getByText(/Google과 네이버는 서로 다른 계정/)).toBeVisible();
 
     await page.getByRole("button", { name: "Google로 로그인" }).click();
     await expect(page).toHaveURL(/\/fake-idp\/start\?state=abc$/);
@@ -65,6 +76,7 @@ test.describe("1440×900", () => {
     scenario.live.account = SIGNED_OUT;
     scenario.reply(route("POST", "/api/account/login"), { status: 503, body: { error: { code: "account_server_unavailable", message: "계정 서버에 연결하지 못했습니다" } } });
     await page.goto("/");
+    await openLogin(page);
     await page.getByRole("button", { name: "네이버로 로그인" }).click();
     await expect(page.getByRole("alert")).toHaveText("계정 서버에 연결하지 못했습니다");
     await expect(page.getByRole("button", { name: "네이버로 로그인" })).toBeEnabled();
@@ -74,7 +86,8 @@ test.describe("1440×900", () => {
     test(`/?login=error&reason=${reason}: 취소 문장을 보이고 주소창의 쿼리를 지운다`, async ({ page, scenario }) => {
       scenario.live.account = SIGNED_OUT;
       await page.goto(`/?login=error&reason=${reason}`);
-      await expect(page.getByText("로그인을 취소했습니다")).toBeVisible();
+      await expect(loginDialog(page)).toBeVisible();
+      await expect(loginDialog(page).getByText("로그인을 취소했습니다")).toBeVisible();
       await expect(page.getByRole("alert")).toHaveCount(0);
       await expect.poll(() => new URL(page.url()).search).toBe("");
     });
@@ -83,15 +96,15 @@ test.describe("1440×900", () => {
   test("로그인 실패 이유는 이유별 문장으로 보인다", async ({ page, scenario }) => {
     scenario.live.account = SIGNED_OUT;
     await page.goto("/?login=error&reason=server_unreachable");
-    await expect(page.getByText("계정 서버에 연결하지 못했습니다. 잠시 뒤 다시 시도하세요")).toBeVisible();
+    await expect(loginDialog(page).getByText("계정 서버에 연결하지 못했습니다. 잠시 뒤 다시 시도하세요")).toBeVisible();
   });
 
-  test("signed_in: 지금 화면이 열리고 계정 메뉴에 provider와 짧은 id가 보인다. 로그아웃하면 로그인 화면으로 바뀐다", async ({ page, scenario }) => {
+  test("signed_in: 지금 화면이 열리고 계정 메뉴에 provider와 짧은 id가 보인다. 로그아웃하면 랜딩으로 바뀐다", async ({ page, scenario }) => {
     scenario.live.account = SIGNED_IN;
     answerStatus(scenario, "/api/account/logout", SIGNED_OUT);
     await page.goto("/?symbol=005930");
     await expect(cell(page)).toHaveAttribute("aria-busy", "false");
-    await expect(page.getByRole("heading", { name: "로그인", exact: true })).toHaveCount(0);
+    await expect(landing(page)).toHaveCount(0);
 
     await openAccountMenu(page);
     const panel = dialog(page).getByRole("tabpanel");
@@ -102,16 +115,16 @@ test.describe("1440×900", () => {
     await shot(page, "account-menu-desktop.png");
 
     await panel.getByRole("button", { name: "로그아웃", exact: true }).click();
-    await expect(page.getByRole("heading", { name: "로그인", exact: true })).toBeVisible();
+    await expect(landing(page)).toBeVisible();
     expect(callsTo(scenario, "POST", "/api/account/logout")).toHaveLength(1);
   });
 
-  test("실행 중에 서버가 signed_out을 밀어 주면 로그인 화면으로 바뀌고 차트 칸이 사라진다", async ({ page, scenario }) => {
+  test("실행 중에 서버가 signed_out을 밀어 주면 랜딩으로 바뀌고 차트 칸이 사라진다", async ({ page, scenario }) => {
     scenario.live.account = SIGNED_IN;
     await page.goto("/?symbol=005930");
     await expect(cell(page)).toHaveAttribute("aria-busy", "false");
     scenario.live.setAccount(SIGNED_OUT);
-    await expect(page.getByRole("heading", { name: "로그인", exact: true })).toBeVisible();
+    await expect(landing(page)).toBeVisible();
     await expect(cell(page)).toHaveCount(0);
   });
 
@@ -121,14 +134,14 @@ test.describe("1440×900", () => {
     await page.goto("/?symbol=005930");
     await held.received;
     scenario.live.setAccount(SIGNED_OUT);
-    await expect(page.getByRole("heading", { name: "로그인", exact: true })).toBeVisible();
+    await expect(landing(page)).toBeVisible();
     held.reply({ body: scenario.documents.uiState() });
     await page.waitForTimeout(1500);
     expect(scenario.requests.filter((r) => r.method() === "PUT")).toHaveLength(0);
     await expect(cell(page)).toHaveCount(0);
   });
 
-  test("로그인 화면이 아닌 상태로 돌아와도 실패 문장을 알림으로 보이고 주소창을 정리한다", async ({ page, scenario }) => {
+  test("랜딩이 아닌 상태로 돌아와도 실패 문장을 알림으로 보이고 주소창을 정리한다", async ({ page, scenario }) => {
     scenario.live.account = SIGNED_IN;
     await page.goto("/?symbol=005930&login=error&reason=storage");
     await expect(cell(page)).toHaveAttribute("aria-busy", "false");
@@ -136,19 +149,20 @@ test.describe("1440×900", () => {
     await expect.poll(() => ["login", "reason"].some((key) => new URL(page.url()).searchParams.has(key))).toBe(false);
   });
 
-  test("한 번 본 실패 문장은 다음 로그인 화면에 다시 나오지 않는다", async ({ page, scenario }) => {
+  test("한 번 본 실패 문장은 다음 랜딩에 다시 나오지 않는다", async ({ page, scenario }) => {
     scenario.live.account = SIGNED_IN;
     await page.goto("/?symbol=005930&login=error&reason=state");
     await expect(cell(page)).toHaveAttribute("aria-busy", "false");
     scenario.live.setAccount(SIGNED_OUT);
-    await expect(page.getByRole("heading", { name: "로그인", exact: true })).toBeVisible();
+    await expect(landing(page)).toBeVisible();
+    await openLogin(page);
     await expect(page.getByText("이 브라우저에서 시작한 로그인이 아니어서", { exact: false })).toHaveCount(0);
   });
 
-  test("로그인 화면에서 이미 본 실패 문장은 다른 탭 로그인으로 열려도 알림으로 다시 나오지 않는다", async ({ page, scenario }) => {
+  test("랜딩에서 이미 본 실패 문장은 다른 탭 로그인으로 열려도 알림으로 다시 나오지 않는다", async ({ page, scenario }) => {
     scenario.live.account = SIGNED_OUT;
     await page.goto("/?login=error&reason=cancelled");
-    await expect(page.getByText("로그인을 취소했습니다")).toBeVisible();
+    await expect(loginDialog(page).getByText("로그인을 취소했습니다")).toBeVisible();
     scenario.live.setAccount(SIGNED_IN);
     await expect(cell(page)).toBeVisible();
     await expect(page.getByText("로그인을 취소했습니다")).toHaveCount(0);
@@ -194,12 +208,12 @@ test.describe("1440×900", () => {
     expect(await page.evaluate(() => localStorage.getItem("vv.unsaved.watchlist"))).toBeNull();
   });
 
-  test("owner_mismatch에서 로그아웃하면 로그인 화면이 된다", async ({ page, scenario }) => {
+  test("owner_mismatch에서 로그아웃하면 랜딩이 된다", async ({ page, scenario }) => {
     scenario.live.account = MISMATCH;
     answerStatus(scenario, "/api/account/logout", SIGNED_OUT);
     await page.goto("/");
     await page.getByRole("button", { name: "로그아웃", exact: true }).click();
-    await expect(page.getByRole("heading", { name: "로그인", exact: true })).toBeVisible();
+    await expect(landing(page)).toBeVisible();
   });
 
   test("계정 삭제: 확인 문구를 넣기 전에는 단추가 꺼져 있고, 서버가 실패하면 아무것도 지워지지 않았다고 보인다", async ({ page, scenario }) => {
@@ -222,10 +236,10 @@ test.describe("1440×900", () => {
     await expect(panel.getByRole("alert")).toContainText("아무것도 지워지지 않았습니다");
     expect(callsTo(scenario, "POST", "/api/account/delete")).toHaveLength(1);
     expect(callsTo(scenario, "POST", "/api/account/delete")[0]!.postDataJSON()).toEqual({ confirm: true });
-    await expect(page.getByRole("heading", { name: "로그인", exact: true })).toHaveCount(0);
+    await expect(landing(page)).toHaveCount(0);
   });
 
-  test("계정 삭제가 끝나면 로그인 화면이 된다", async ({ page, scenario }) => {
+  test("계정 삭제가 끝나면 랜딩이 된다", async ({ page, scenario }) => {
     scenario.live.account = SIGNED_IN;
     answerStatus(scenario, "/api/account/delete", SIGNED_OUT);
     await page.goto("/?symbol=005930");
@@ -235,13 +249,13 @@ test.describe("1440×900", () => {
     await panel.getByRole("button", { name: "계정 삭제", exact: true }).click();
     await panel.getByRole("textbox").fill("계정 삭제");
     await panel.getByRole("button", { name: "계정 삭제 실행" }).click();
-    await expect(page.getByRole("heading", { name: "로그인", exact: true })).toBeVisible();
+    await expect(landing(page)).toBeVisible();
   });
 
-  test("local_only: 로그인 화면이 없고 계정 메뉴가 로컬 전용 문장을 보인다", async ({ page }) => {
+  test("local_only: 랜딩이 없고 계정 메뉴가 로컬 전용 문장을 보인다", async ({ page }) => {
     await page.goto("/?symbol=005930");
     await expect(cell(page)).toHaveAttribute("aria-busy", "false");
-    await expect(page.getByRole("heading", { name: "로그인", exact: true })).toHaveCount(0);
+    await expect(landing(page)).toHaveCount(0);
     await openAccountMenu(page);
     await expect(dialog(page).getByRole("tabpanel").getByText("계정 서버를 쓰지 않습니다. 셋업은 이 PC에만 있습니다.")).toBeVisible();
   });
@@ -250,18 +264,20 @@ test.describe("1440×900", () => {
 test.describe("휴대폰 폭", () => {
   test.use({ viewport: { width: 390, height: 844 } });
 
-  test("로그인 화면 단추가 화면 안에 들어온다", async ({ page, scenario }) => {
+  test("랜딩의 로그인 단추와 열린 로그인 창의 단추가 화면 안에 들어온다", async ({ page, scenario }) => {
     scenario.live.account = SIGNED_OUT;
     await page.goto("/");
-    for (const name of ["Google로 로그인", "네이버로 로그인"]) {
-      const box = await page.getByRole("button", { name }).boundingBox();
+    await expect(landing(page)).toBeVisible();
+    await shot(page, "account-login-phone.png");
+    await openLogin(page);
+    for (const name of ["로그인", "Google로 로그인", "네이버로 로그인"]) {
+      const box = await page.getByRole("button", { name, exact: true }).boundingBox();
       expect(box).not.toBeNull();
       expect(box!.x).toBeGreaterThanOrEqual(0);
       expect(box!.x + box!.width).toBeLessThanOrEqual(390);
       expect(box!.y + box!.height).toBeLessThanOrEqual(844);
     }
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
-    await shot(page, "account-login-phone.png");
   });
 
   test("계정 바꾸기 확인 화면과 계정 메뉴도 화면 안에 들어온다", async ({ page, scenario }) => {

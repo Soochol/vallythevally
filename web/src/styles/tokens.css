@@ -1,6 +1,7 @@
 :root {
   --font-sans: "Pretendard Variable", Pretendard, "Noto Sans CJK KR", "Apple SD Gothic Neo", system-ui, sans-serif;
   --fs-xs: 11px; --fs-s: 12px; --fs-m: 14px; --fs-l: 17px; --fs-xl: 28px;
+  --fs-display: clamp(34px, 6vw, 88px); --fs-title: clamp(26px, 3vw, 40px); --fs-lead: clamp(15px, 1.4vw, 19px);
   --s1: 4px; --s2: 4px; --s3: 8px; --s4: 12px; --s5: 16px; --s6: 24px;
   --r-s: 7px; --r-m: 9px; --r-l: 16px; --r-xl: 18px; --r-pill: 999px;
   --island-gap: 12px; --island-h: 48px;
