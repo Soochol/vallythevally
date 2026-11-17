@@ -45,4 +45,12 @@ high52w: number | null,
 /**
  * 최근 250관측일 최저가(원).
  */
-low52w: number | null, };
+low52w: number | null, 
+/**
+ * 오늘의 상한가(원).
+ */
+upperLimit: number | null, 
+/**
+ * 오늘의 하한가(원).
+ */
+lowerLimit: number | null, };

@@ -11,6 +11,7 @@ pub mod db;
 pub mod drawing_api;
 pub mod drawings;
 pub mod fundamentals;
+pub mod intraday_feed;
 pub mod financials;
 pub mod http;
 pub mod instance;

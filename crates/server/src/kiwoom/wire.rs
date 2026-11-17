@@ -494,6 +494,8 @@ pub struct BasicInfoRow {
     high_250: String,
     #[serde(rename = "250lwst")]
     low_250: String,
+    upl_pric: String,
+    lst_pric: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
@@ -508,13 +510,15 @@ pub struct StockFundamentals {
     pub foreign_exhaustion_pct: Option<f64>,
     pub high_250_won: Option<u64>,
     pub low_250_won: Option<u64>,
+    pub upper_limit_won: Option<u64>,
+    pub lower_limit_won: Option<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(try_from = "BasicInfoRow")]
 pub enum StockBasicInfoResponse {
     UnknownSymbol,
-    Found { kiwoom_code: String, fundamentals: StockFundamentals },
+    Found { kiwoom_code: String, fundamentals: Box<StockFundamentals> },
 }
 
 const WON_PER_EOK: u64 = 100_000_000;
@@ -542,8 +546,10 @@ impl TryFrom<BasicInfoRow> for StockBasicInfoResponse {
             foreign_exhaustion_pct: optional(&r.for_exh_rt, decimal)?,
             high_250_won: optional(&r.high_250, unsigned)?,
             low_250_won: optional(&r.low_250, unsigned)?,
+            upper_limit_won: optional(&r.upl_pric, unsigned)?,
+            lower_limit_won: optional(&r.lst_pric, unsigned)?,
         };
-        Ok(StockBasicInfoResponse::Found { kiwoom_code: r.stk_cd, fundamentals })
+        Ok(StockBasicInfoResponse::Found { kiwoom_code: r.stk_cd, fundamentals: Box::new(fundamentals) })
     }
 }
 
@@ -672,6 +678,157 @@ impl DayPage for StockInvestorNetSharesResponse {
                 other_corporation: field("otherCorporation", "etc_corp", &r.etc_corp, signed)?,
             })
         })
+    }
+}
+
+const ORDER_BOOK_LEVELS: usize = 10;
+
+/// ka10004 응답. 호가 40여 개 필드가 납작하게 오므로 이름으로 읽는다.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(try_from = "std::collections::HashMap<String, Value>")]
+pub struct StockOrderBookResponse {
+    pub asks: Vec<api::OrderBookLevel>,
+    pub bids: Vec<api::OrderBookLevel>,
+    pub total_ask_quantity: u64,
+    pub total_bid_quantity: u64,
+    pub book_time: Option<String>,
+}
+
+impl TryFrom<std::collections::HashMap<String, Value>> for StockOrderBookResponse {
+    type Error = WireError;
+
+    fn try_from(fields: std::collections::HashMap<String, Value>) -> Result<Self, WireError> {
+        let text = |name: &str| match fields.get(name) {
+            Some(Value::String(s)) => Ok(s.as_str()),
+            Some(other) => Err(WireError(format!("{name}가 문자열이 아닙니다: {other}"))),
+            None => Err(WireError(format!("{name}가 없습니다"))),
+        };
+        let quantity = |name: &str| text(name).and_then(|s| optional(s, unsigned).map(Option::unwrap_or_default));
+        let side = |prefix: &str| -> Result<Vec<api::OrderBookLevel>, WireError> {
+            let mut levels = Vec::new();
+            for rank in 1..=ORDER_BOOK_LEVELS {
+                let (price, size) = if rank == 1 { (format!("{prefix}_fpr_bid"), format!("{prefix}_fpr_req")) } else { (format!("{prefix}_{rank}th_pre_bid"), format!("{prefix}_{rank}th_pre_req")) };
+                let price = optional(text(&price)?, unsigned)?.unwrap_or_default();
+                if price != 0 {
+                    levels.push(api::OrderBookLevel { price, quantity: quantity(&size)? });
+                }
+            }
+            Ok(levels)
+        };
+        let clock = text("bid_req_base_tm")?.trim();
+        Ok(StockOrderBookResponse {
+            asks: side("sel")?,
+            bids: side("buy")?,
+            total_ask_quantity: quantity("tot_sel_req")?,
+            total_bid_quantity: quantity("tot_buy_req")?,
+            book_time: if clock.is_empty() { None } else { Some(clock_text(clock)?) },
+        })
+    }
+}
+
+/// `HHMMSS` → `HH:MM:SS`.
+fn clock_text(s: &str) -> Result<String, WireError> {
+    let valid = s.len() == 6 && s.is_ascii() && s.bytes().all(|b| b.is_ascii_digit());
+    let n = |r: std::ops::Range<usize>| s[r].parse::<u32>().unwrap_or(99);
+    if valid && TimeOfDay::hms(n(0..2), n(2..4), n(4..6)).is_some() {
+        Ok(format!("{}:{}:{}", &s[..2], &s[2..4], &s[4..]))
+    } else {
+        Err(WireError(format!("시각이 아닙니다: {s:?}")))
+    }
+}
+
+/// 부호 붙은 정수. `+`와 `-`가 겹쳐 와도 앞의 부호만 방향으로 읽는다.
+fn signed_quantity(s: &str) -> Result<i64, WireError> {
+    let magnitude = i64::try_from(unsigned(s)?).map_err(|_| WireError(format!("값이 너무 큽니다: {s:?}")))?;
+    Ok(if s.trim().starts_with('-') { -magnitude } else { magnitude })
+}
+
+const WON_PER_MILLION: i64 = 1_000_000;
+
+/// 백만원 단위 금액을 원으로. 부호는 방향이다.
+fn million_won(s: &str) -> Result<i64, WireError> {
+    signed_quantity(s)?.checked_mul(WON_PER_MILLION).ok_or_else(|| WireError(format!("금액이 너무 큽니다: {s:?}")))
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ParsedRows<T> {
+    pub rows: Vec<T>,
+    pub skipped: u32,
+}
+
+fn collect_rows<R, T>(rows: &[R], read: impl Fn(&R) -> Result<T, WireError>, api_id: &str) -> ParsedRows<T> {
+    let (mut parsed, mut skipped) = (Vec::new(), 0);
+    for r in rows {
+        match read(r) {
+            Ok(row) => parsed.push(row),
+            Err(reason) => {
+                tracing::warn!(api_id, %reason, "키움 행을 읽지 못해 그 행만 빼고 받습니다");
+                skipped += 1;
+            }
+        }
+    }
+    ParsedRows { rows: parsed, skipped }
+}
+
+#[derive(Debug, PartialEq, Deserialize)]
+pub struct StockTradesResponse {
+    cntr_infr: Vec<TradeRow>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
+#[serde(default)]
+pub struct TradeRow {
+    tm: String,
+    cur_prc: String,
+    cntr_trde_qty: String,
+    stex_tp: String,
+}
+
+impl StockTradesResponse {
+    pub fn trades(&self) -> ParsedRows<api::TradePrint> {
+        collect_rows(&self.cntr_infr, |r| {
+            let exchange = match r.stex_tp.trim() {
+                "KRX" => Some(api::Venue::Krx),
+                "NXT" => Some(api::Venue::Nxt),
+                _ => None,
+            };
+            Ok(api::TradePrint { time: clock_text(r.tm.trim())?, price: unsigned(&r.cur_prc)?, quantity: signed_quantity(&r.cntr_trde_qty)?, exchange })
+        }, "ka10003")
+    }
+}
+
+#[derive(Debug, PartialEq, Deserialize)]
+pub struct StockProgramTradesResponse {
+    stk_tm_prm_trde_trnsn: Vec<ProgramTradeRow>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
+#[serde(default)]
+pub struct ProgramTradeRow {
+    tm: String,
+    cur_prc: String,
+    prm_sell_qty: String,
+    prm_buy_qty: String,
+    prm_netprps_qty: String,
+    prm_sell_amt: String,
+    prm_buy_amt: String,
+    prm_netprps_amt: String,
+}
+
+impl StockProgramTradesResponse {
+    pub fn points(&self) -> ParsedRows<api::ProgramTradePoint> {
+        collect_rows(&self.stk_tm_prm_trde_trnsn, |r| {
+            Ok(api::ProgramTradePoint {
+                time: clock_text(r.tm.trim())?,
+                price: optional(&r.cur_prc, unsigned)?,
+                sell_quantity: unsigned(&r.prm_sell_qty)?,
+                buy_quantity: unsigned(&r.prm_buy_qty)?,
+                net_quantity: signed_quantity(&r.prm_netprps_qty)?,
+                sell_amount: million_won(&r.prm_sell_amt)?.abs(),
+                buy_amount: million_won(&r.prm_buy_amt)?.abs(),
+                net_amount: million_won(&r.prm_netprps_amt)?,
+            })
+        }, "ka90008")
     }
 }
 
@@ -1173,7 +1330,7 @@ mod tests {
 
     fn basic_info(name: &str) -> StockFundamentals {
         match serde_json::from_str(&fixture(name)).unwrap() {
-            StockBasicInfoResponse::Found { fundamentals, .. } => fundamentals,
+            StockBasicInfoResponse::Found { fundamentals, .. } => *fundamentals,
             StockBasicInfoResponse::UnknownSymbol => panic!("{name}: UnknownSymbol"),
         }
     }
@@ -1193,8 +1350,66 @@ mod tests {
                 foreign_exhaustion_pct: Some(45.93),
                 high_250_won: Some(380_000),
                 low_250_won: Some(93_500),
+                upper_limit_won: Some(245_000),
+                lower_limit_won: Some(132_100),
             }
         );
+    }
+
+    #[test]
+    fn basic_info_reads_price_limits_unsigned_and_empty_ones_as_none() {
+        let loss = basic_info("ka10001_086520_AL");
+        assert_eq!((loss.upper_limit_won, loss.lower_limit_won), (Some(86_000), Some(46_400)));
+        let mut body: serde_json::Value = serde_json::from_str(&fixture("ka10001_005930_AL")).unwrap();
+        body["upl_pric"] = "".into();
+        body["lst_pric"] = "".into();
+        let StockBasicInfoResponse::Found { fundamentals, .. } = serde_json::from_value(body).unwrap() else { panic!() };
+        assert_eq!((fundamentals.upper_limit_won, fundamentals.lower_limit_won), (None, None));
+    }
+
+    #[test]
+    fn order_book_keeps_ranked_levels_unsigned_and_drops_levels_without_a_price() {
+        let book: StockOrderBookResponse = serde_json::from_str(&fixture("ka10004_005930_AL")).unwrap();
+        assert_eq!((book.asks.len(), book.bids.len()), (9, 10));
+        assert_eq!(book.asks[0], api::OrderBookLevel { price: 70_100, quantity: 1_000 });
+        assert_eq!(book.bids[9], api::OrderBookLevel { price: 69_100, quantity: 10_000 });
+        assert_eq!((book.total_ask_quantity, book.total_bid_quantity, book.book_time.as_deref()), (55_000, 66_000, Some("15:30:00")));
+        let mut body: serde_json::Value = serde_json::from_str(&fixture("ka10004_005930_AL")).unwrap();
+        body["bid_req_base_tm"] = "".into();
+        assert_eq!(serde_json::from_value::<StockOrderBookResponse>(body.clone()).unwrap().book_time, None);
+        body["bid_req_base_tm"] = "256100".into();
+        assert!(serde_json::from_value::<StockOrderBookResponse>(body.clone()).is_err());
+        body.as_object_mut().unwrap().remove("tot_sel_req");
+        assert!(serde_json::from_value::<StockOrderBookResponse>(body).is_err(), "필드 없는 성공 응답은 빈 호가가 아니라 형식 오류다");
+    }
+
+    #[test]
+    fn trades_carry_direction_in_the_quantity_sign_and_skip_unreadable_rows() {
+        let page: StockTradesResponse = serde_json::from_str(&fixture("ka10003_005930_AL_p1")).unwrap();
+        let parsed = page.trades();
+        assert_eq!(parsed.skipped, 1, "시각이 여섯 자리가 아닌 행");
+        let seen: Vec<_> = parsed.rows.iter().map(|t| (t.time.as_str(), t.price, t.quantity, t.exchange)).collect();
+        assert_eq!(
+            seen,
+            [
+                ("15:30:00", 70_100, 30, Some(api::Venue::Krx)),
+                ("15:29:59", 70_000, -12, Some(api::Venue::Nxt)),
+                ("15:29:58", 70_000, 5, None),
+            ]
+        );
+        assert!(serde_json::from_value::<StockTradesResponse>(json!({"return_code": 0})).is_err());
+    }
+
+    #[test]
+    fn program_points_are_in_won_with_gross_sides_unsigned_and_net_signed() {
+        let page: StockProgramTradesResponse = serde_json::from_str(&fixture("ka90008_005930_AL_p1")).unwrap();
+        let parsed = page.points();
+        assert_eq!(parsed.skipped, 1);
+        assert_eq!(
+            parsed.rows[0],
+            api::ProgramTradePoint { time: "15:30:00".into(), price: Some(70_100), buy_quantity: 1_200, sell_quantity: 1_500, net_quantity: -300, buy_amount: 84_000_000, sell_amount: 105_000_000, net_amount: -21_000_000 }
+        );
+        assert!(serde_json::from_value::<StockProgramTradesResponse>(json!({"return_code": 0})).is_err());
     }
 
     #[test]

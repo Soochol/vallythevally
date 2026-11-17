@@ -648,6 +648,105 @@ pub struct Fundamentals {
     /// 최근 250관측일 최저가(원).
     #[ts(type = "number | null")]
     pub low52w: Option<u64>,
+    /// 오늘의 상한가(원).
+    #[ts(type = "number | null")]
+    pub upper_limit: Option<u64>,
+    /// 오늘의 하한가(원).
+    #[ts(type = "number | null")]
+    pub lower_limit: Option<u64>,
+}
+
+/// 호가 한 단. 가격은 원, 잔량은 주.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct OrderBookLevel {
+    #[ts(type = "number")]
+    pub price: u64,
+    #[ts(type = "number")]
+    pub quantity: u64,
+}
+
+/// `GET /api/symbols/:code/order-book` → 통합 시세(ka10004)의 10호가. 지수는 400 `bad_request`.
+/// 매도·매수 모두 1호가부터 순서대로이고, 키움이 가격을 주지 않은 단은 빠진다.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct OrderBook {
+    pub symbol: SymbolCode,
+    pub asks: Vec<OrderBookLevel>,
+    pub bids: Vec<OrderBookLevel>,
+    #[ts(type = "number")]
+    pub total_ask_quantity: u64,
+    #[ts(type = "number")]
+    pub total_bid_quantity: u64,
+    /// 호가 기준 시각 `HH:MM:SS`(KST). 키움은 날짜를 주지 않는다. 없으면 null.
+    pub book_time: Option<String>,
+}
+
+/// 체결 한 건. 수량의 부호가 방향이다(+ 매수 체결, - 매도 체결).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct TradePrint {
+    /// 체결 시각 `HH:MM:SS`(KST).
+    pub time: String,
+    #[ts(type = "number")]
+    pub price: u64,
+    #[ts(type = "number")]
+    pub quantity: i64,
+    /// 그 체결이 난 거래소. 키움이 행에 적지 않았으면 null.
+    pub exchange: Option<Venue>,
+}
+
+/// `GET /api/symbols/:code/trades?venue=&limit=` → 당일 체결(ka10003), 최근부터. 지수는 400 `bad_request`.
+/// `venue`는 combined·krx·nxt이고 기본은 combined다. 요청이 nxt인데 그 종목이 NXT에서 거래되지 않으면 combined로 묻고
+/// 응답의 `venue`가 그 사실을 알린다. `limit`는 기본 200, 최대 500이다.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct TradeTape {
+    pub symbol: SymbolCode,
+    /// 실제로 물은 거래소.
+    pub venue: Venue,
+    pub trades: Vec<TradePrint>,
+    /// 읽지 못해 뺀 행 수.
+    pub skipped_rows: u32,
+}
+
+/// 프로그램매매 한 시점(통합). 수량은 주, 금액은 원. 매수·매도는 당일 누적이고 순매수는 부호가 방향이다.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct ProgramTradePoint {
+    /// `HH:MM:SS`(KST).
+    pub time: String,
+    #[ts(type = "number | null")]
+    pub price: Option<u64>,
+    #[ts(type = "number")]
+    pub buy_quantity: u64,
+    #[ts(type = "number")]
+    pub sell_quantity: u64,
+    #[ts(type = "number")]
+    pub net_quantity: i64,
+    #[ts(type = "number")]
+    pub buy_amount: i64,
+    #[ts(type = "number")]
+    pub sell_amount: i64,
+    #[ts(type = "number")]
+    pub net_amount: i64,
+}
+
+/// `GET /api/symbols/:code/program-trades` → 당일 프로그램매매 시간대(ka90008, 통합), 키움이 주는 순서대로.
+/// 지수는 400 `bad_request`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct ProgramTradeTimeline {
+    pub symbol: SymbolCode,
+    pub points: Vec<ProgramTradePoint>,
+    /// 읽지 못해 뺀 행 수.
+    pub skipped_rows: u32,
 }
 
 /// 저장 순서 번호. 브라우저가 저장할 때마다 늘려 보낸다(`max(지금 ms, 마지막 + 1)`).

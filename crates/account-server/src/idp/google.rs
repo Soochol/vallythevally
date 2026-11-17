@@ -14,6 +14,7 @@ pub fn authorize_url(config: &GoogleConfig, redirect_uri: &str, params: Authoriz
         .append_pair("client_id", &config.client_id)
         .append_pair("redirect_uri", redirect_uri)
         .append_pair("scope", "openid")
+        .append_pair("prompt", "select_account")
         .append_pair("state", params.state)
         .append_pair("nonce", params.nonce);
     url

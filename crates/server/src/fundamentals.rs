@@ -23,5 +23,7 @@ pub async fn fundamentals(rest: &KiwoomRest, code: StockCode) -> Result<api::Fun
         foreign_exhaustion_rate: f.foreign_exhaustion_pct,
         high52w: f.high_250_won,
         low52w: f.low_250_won,
+        upper_limit: f.upper_limit_won,
+        lower_limit: f.lower_limit_won,
     })
 }

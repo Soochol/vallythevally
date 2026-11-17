@@ -1,13 +1,13 @@
 use crate::clock::Clock;
-use crate::config::AccountConfig;
+use crate::config::{AccountConfig, DEFAULT_PENDING_LOGIN_LIMIT};
 use crate::error::ApiError;
 use crate::idp::{AuthorizeParams, CodeGrant, IdpClient};
 use crate::model::{ConnectorPort, Provider, StartRequest};
 use crate::secrets::{random_string, s256_challenge};
-use crate::store::Store;
+use crate::store::{PendingLoginSlot, Store};
 use axum::body::Bytes;
 use axum::extract::{DefaultBodyLimit, Path, RawQuery, State};
-use axum::http::header::{CACHE_CONTROL, CONTENT_TYPE, COOKIE, LOCATION, SET_COOKIE};
+use axum::http::header::{CACHE_CONTROL, CONTENT_TYPE, COOKIE, LOCATION, RETRY_AFTER, SET_COOKIE};
 use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{delete, get, post};
@@ -22,20 +22,31 @@ pub(crate) struct AppState {
     pub(crate) store: Store,
     idp: IdpClient,
     pub(crate) clock: Arc<dyn Clock>,
-    cookie_name: &'static str,
+    cookie_prefix: &'static str,
     secure_cookie: bool,
+    pending_login_limit: u32,
 }
 
 pub(crate) type Shared = State<Arc<AppState>>;
 
 pub fn router(config: AccountConfig, pool: SqlitePool, clock: Arc<dyn Clock>) -> Router {
+    router_with_pending_login_limit(config, pool, clock, DEFAULT_PENDING_LOGIN_LIMIT)
+}
+
+pub fn router_with_pending_login_limit(
+    config: AccountConfig,
+    pool: SqlitePool,
+    clock: Arc<dyn Clock>,
+    pending_login_limit: u32,
+) -> Router {
     let secure_cookie = config.public_url.is_secure();
     let state = Arc::new(AppState {
         store: Store::new(pool),
         idp: IdpClient::new(&config),
         clock,
-        cookie_name: if secure_cookie { "__Host-vally_login" } else { "vally_login" },
+        cookie_prefix: if secure_cookie { "__Host-vally_login_" } else { "vally_login_" },
         secure_cookie,
+        pending_login_limit,
     });
     Router::new()
         .route("/v1/auth/{provider}/start", get(start))
@@ -86,19 +97,20 @@ fn with_cookie(mut response: Response, cookie: &str) -> Response {
 }
 
 impl AppState {
-    fn login_cookie(&self, value: &str, max_age: u32) -> String {
+    fn login_cookie(&self, idp_state: &str, value: &str, max_age: u32) -> String {
         let secure = if self.secure_cookie { "; Secure" } else { "" };
-        format!("{}={value}; Path=/; HttpOnly; SameSite=Lax; Max-Age={max_age}{secure}", self.cookie_name)
+        format!("{}{idp_state}={value}; Path=/; HttpOnly; SameSite=Lax; Max-Age={max_age}{secure}", self.cookie_prefix)
     }
 
-    fn browser_secret(&self, headers: &HeaderMap) -> Option<String> {
+    fn browser_secret(&self, headers: &HeaderMap, idp_state: &str) -> Option<String> {
+        let cookie_name = format!("{}{idp_state}", self.cookie_prefix);
         headers
             .get_all(COOKIE)
             .iter()
             .filter_map(|value| value.to_str().ok())
             .flat_map(|line| line.split(';'))
             .filter_map(|pair| pair.trim().split_once('='))
-            .find(|(name, _)| *name == self.cookie_name)
+            .find(|(name, _)| *name == cookie_name)
             .map(|(_, value)| value.to_owned())
     }
 }
@@ -115,7 +127,7 @@ async fn start(
     let idp_state = random_string(32);
     let browser_secret = random_string(32);
     let nonce = random_string(32);
-    state
+    let slot = state
         .store
         .insert_pending_login(
             crate::store::NewPendingLogin {
@@ -128,16 +140,32 @@ async fn start(
                 code_challenge: &request.code_challenge,
             },
             now,
+            state.pending_login_limit,
         )
         .await?;
+    if matches!(slot, PendingLoginSlot::Full) {
+        return Ok(login_busy_page());
+    }
     let authorize = state.idp.authorize_url(provider, AuthorizeParams { state: &idp_state, nonce: &nonce });
-    let cookie = state.login_cookie(&browser_secret, 600);
+    let cookie = state.login_cookie(&idp_state, &browser_secret, 600);
     Ok(with_cookie(redirect(authorize.as_str()), &cookie))
 }
 
 fn login_error_page() -> Response {
     let body = "<!doctype html><meta charset=\"utf-8\"><title>로그인 실패</title><p>로그인을 마치지 못했습니다. vally에서 로그인을 다시 시작하세요.</p>";
     (StatusCode::BAD_REQUEST, [(CONTENT_TYPE, "text/html; charset=utf-8")], body).into_response()
+}
+
+const LOGIN_BUSY_RETRY_SECONDS: &str = "60";
+
+fn login_busy_page() -> Response {
+    let body = "<!doctype html><meta charset=\"utf-8\"><title>로그인 대기</title><p>로그인 요청이 많아 잠시 받지 않습니다. 잠시 뒤 vally에서 로그인을 다시 시작하세요.</p>";
+    (
+        StatusCode::SERVICE_UNAVAILABLE,
+        [(CONTENT_TYPE, "text/html; charset=utf-8"), (RETRY_AFTER, LOGIN_BUSY_RETRY_SECONDS)],
+        body,
+    )
+        .into_response()
 }
 
 fn connector_url(port: ConnectorPort, pairs: &[(&str, &str)]) -> String {
@@ -155,14 +183,17 @@ async fn callback(
 ) -> Result<Response, ApiError> {
     let provider = Provider::parse(&provider)?;
     let query = query_map(raw);
-    let (Some(idp_state), Some(browser_secret)) = (query.get("state"), state.browser_secret(&headers)) else {
+    let Some(idp_state) = query.get("state") else {
+        return Ok(login_error_page());
+    };
+    let Some(browser_secret) = state.browser_secret(&headers, idp_state) else {
         return Ok(login_error_page());
     };
     let now = state.clock.now();
     let Some(pending) = state.store.take_pending_login(provider, idp_state, &browser_secret, now).await? else {
         return Ok(login_error_page());
     };
-    let clear = state.login_cookie("", 0);
+    let clear = state.login_cookie(idp_state, "", 0);
     let back = |pairs: &[(&str, &str)]| with_cookie(redirect(&connector_url(pending.port, pairs)), &clear);
     let connector_state = pending.connector_state.as_str();
     if query.contains_key("error") {
