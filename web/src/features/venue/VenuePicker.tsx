@@ -1,3 +1,4 @@
+import type { MouseEvent } from "react";
 import { Select } from "../menu/Select";
 import { VENUE_LABEL, VENUES } from "../../lib/venue";
 import { useUiStore, useVenue } from "../../stores/ui";
@@ -15,8 +16,11 @@ export function VenuePicker({ variant }: { variant: "desktop" | "phone" }) {
   const setVenue = useUiStore((s) => s.setVenue);
 
   if (variant === "desktop") {
+    const openFromLabel = (e: MouseEvent<HTMLDivElement>) => {
+      if (e.target === e.currentTarget || (e.target as Element).closest(".venue-picker-prefix")) e.currentTarget.querySelector<HTMLButtonElement>("[role=combobox]")?.click();
+    };
     return (
-      <div className="venue-picker">
+      <div className="venue-picker" onClick={openFromLabel}>
         <span aria-hidden className="venue-picker-prefix">거래소</span>
         <Select label="거래소" value={venue} options={VENUE_OPTIONS} onChange={setVenue} className="venue-picker-select" />
       </div>

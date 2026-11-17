@@ -40,7 +40,8 @@ test("색상표와 직접 고른 색·굵기 5를 지표에 적용하고 관리 
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
   await expect.poll(() => page.evaluate(() => window.frameProbe.snapshot().some((s) => s.type === "Custom" && s.data.length > 0 && s.style.color === "#8B5CF6" && s.style.width === 5))).toBe(true);
   const download = page.waitForEvent("download");
-  await page.getByRole("button", { name: "차트 이미지 내려받기", exact: true }).click();
+  await chartOf(cell(page)).click();
+  await page.keyboard.press("Alt+KeyS");
   const image = await download;
   expect(image.suggestedFilename()).toMatch(/\.png$/);
   const savedImage = info.outputPath("chart-with-custom-line.png");

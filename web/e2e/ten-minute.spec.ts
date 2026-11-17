@@ -103,7 +103,7 @@ test.describe("데스크톱", () => {
       await toolbar.getByRole("button", { name: "차트 설정", exact: true }).click();
       await expect(page.getByRole("dialog", { name: "차트 설정", exact: true })).toBeInViewport({ ratio: 1 });
       await page.keyboard.press("Escape");
-      await expect(toolbar.getByRole("button", { name: "차트 이미지 내려받기" })).toBeInViewport();
+      await expect(toolbar.getByRole("button", { name: "차트 이미지 내려받기" })).toHaveCount(0);
       await expect(toolbar.getByRole("button", { name: "테마 바꾸기" })).toHaveCount(0);
       expect(await toolbarLayout(page)).toEqual({ wrapped: [], pageOverflow: 0, toolbarOverflow: 0 });
     });

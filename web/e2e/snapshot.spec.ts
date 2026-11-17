@@ -160,16 +160,15 @@ const download = (page: Page, chart: Locator, act: () => Promise<void>, headLine
   Promise.all([page.waitForEvent("download"), act()]).then(([d]) => expectSnapshot(page, d, chart, headLines));
 
 test.describe("데스크톱", () => {
-  test("위 막대 버튼과 Alt+S로 머리가 붙은 차트 PNG를 내려받는다", async ({ scenario, page }, testInfo) => {
+  test("위 막대에는 차트 이미지 버튼이 없고 Alt+S로 머리가 붙은 차트 PNG를 내려받는다", async ({ scenario, page }, testInfo) => {
     const chart = await openSamsung(page, scenario);
-    const button = page.getByRole("toolbar", { name: "차트 도구 막대" }).getByRole("button", { name: "차트 이미지 내려받기" });
-
-    const { png, drawn } = await download(page, chart, () => button.click());
-    await testInfo.attach("snapshot-desktop.png", { body: png, contentType: "image/png" });
-    expect(drawn.map((t) => t.text), "기본 거래량 지표 줄").toContain("거래량");
+    const bar = page.getByRole("toolbar", { name: "차트 도구 막대" });
+    await expect(bar.getByRole("button", { name: /차트 이미지/ })).toHaveCount(0);
 
     await chart.click();
-    await download(page, chart, () => page.keyboard.press("Alt+KeyS"));
+    const { png, drawn } = await download(page, chart, () => page.keyboard.press("Alt+KeyS"));
+    await testInfo.attach("snapshot-desktop.png", { body: png, contentType: "image/png" });
+    expect(drawn.map((t) => t.text), "기본 거래량 지표 줄").toContain("거래량");
   });
 
   test("차트 우클릭 메뉴로 차트 PNG를 내려받는다", async ({ scenario, page }) => {
@@ -191,10 +190,11 @@ test.describe("데스크톱", () => {
     await download(page, chart, () => menu.getByRole("menuitem", { name: /차트 이미지 내려받기/ }).click());
   });
 
-  test("복사 버튼은 같은 PNG를 클립보드에 넣는다", async ({ scenario, page, context, baseURL }) => {
+  test("Alt+Shift+S는 같은 PNG를 클립보드에 넣는다", async ({ scenario, page, context, baseURL }) => {
     await context.grantPermissions(["clipboard-read", "clipboard-write"], { origin: baseURL });
     const chart = await openSamsung(page, scenario);
-    await page.getByRole("toolbar", { name: "차트 도구 막대" }).getByRole("button", { name: "차트 이미지 복사" }).click();
+    await chart.click();
+    await page.keyboard.press("Alt+Shift+KeyS");
     await expect(page.getByText("차트 이미지를 클립보드에 복사했습니다")).toBeVisible();
 
     const png = await readClipboardPng(page);
