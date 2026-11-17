@@ -4,6 +4,7 @@ pub mod collect;
 pub mod finalize;
 pub mod kst;
 pub mod parse;
+pub mod protocol;
 pub mod raw_read;
 pub mod raw_write;
 pub mod serve;

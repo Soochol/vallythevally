@@ -41,7 +41,9 @@ data/hoga/
 - 시계가 5분 구간 경계를 넘어 뒤로 가면 앞 구간을 다시 열어 다음 번호 파일에 쓴다. 읽기는 파일 이름 순이라 이 줄들은 쓴 순서가 아니라 파일 순서로 나온다. 줄마다 `recv_ms`가 있어 읽는 쪽이 정렬할 수 있다.
 - 끊긴 구간은 `down`부터 다음 `live`까지다. `live` 앞에 `down`이 없으면(프로세스가 죽은 경우) 그 앞 마지막 줄의 시각부터다. 그날 앞에 실시간(REAL) 프레임이 하나도 없었다면(처음 시작해 LOGIN·REG 응답만 있었다면) 끊김이 아니다.
 
-읽기는 `read_day(데이터 폴더, 날짜)`가 그날의 파일을 이름 순으로, 파일 안에서는 줄 순으로 `RawItem`을 준다.
+- 자식 모드(`collect --child --key <이름>`)는 `raw/<YYYYMMDD>/<키 이름>/` 아래에 같은 이름 규칙으로 쓴다. `--items` 모드는 `raw/<YYYYMMDD>/`에 쓴다.
+
+읽기는 `read_day(데이터 폴더, 날짜)`가 그날의 파일을 이름 순으로, 파일 안에서는 줄 순으로 `RawItem`을 준다. 날짜 폴더 바로 아래의 파일과 키 폴더(날짜 폴더 아래 한 단계) 안의 파일을 모두 읽는다. 파일은 파일 이름(`HHMM-NNN.jsonl.zst`) 순으로 늘어서고 이름이 같으면 경로 순이다. 같은 종목이 인계로 두 키 폴더에 나뉘면 그 줄들은 쓴 순서가 아니라 이 순서로 나온다. 줄마다 `recv_ms`가 있어 읽는 쪽이 정렬할 수 있다.
 
 | `RawItem` | 뜻 |
 |---|---|
@@ -85,7 +87,7 @@ data/hoga/
 
 ## collect
 
-`collector collect --data <폴더> --items <코드,코드,…>`가 수집기 전용 키로 키움 WebSocket에 붙어 원문 파일을 쓴다. 받은 프레임을 해석하지 않는다.
+`collector collect --data <폴더> --items <코드,코드,…>`가 수집기 전용 키로 키움 WebSocket에 붙어 원문 파일을 쓴다. 받은 프레임을 해석하지 않는다. 같은 세션 코어를 감독 데몬이 부리는 자식 모드(`collect --child --key <이름>`)로도 쓴다. 이 절의 나머지는 `--items` 모드를 설명하고, 자식 모드는 [자식 모드](#자식-모드)에 있다.
 
 ### 설정
 
@@ -156,9 +158,77 @@ data/hoga/
 
 멈춘 뒤에는 고치고 `collector collect`를 다시 실행한다. 토큰 발급 간격은 토큰 파일에 남아 있어 다시 실행해도 지켜진다.
 
+### 자식 모드
+
+`collector collect --child --key <이름> [--data <폴더>]`는 감독 데몬(ADR 0026)이 수집 키마다 하나씩 띄우는 자식이다. 토큰도 종목도 스스로 정하지 않고 데몬이 stdin으로 준다. 데몬 쪽 코드는 `supervise-core` 작업이 만든다. 형식 타입은 `collector::protocol` 한 곳에 있어 데몬과 자식이 함께 쓴다.
+
+두 모드는 세션 코어(`collect::session`)를 함께 쓴다. 다른 것은 토큰을 얻는 길, 등록 목록을 받는 길, 사건을 내는 곳, 원문 위치뿐이다.
+
+| | `--items` | `--child` |
+|---|---|---|
+| 토큰 | 토큰 파일과 `au10001`(키 잠금을 잡는다) | stdin의 `token` 명령. `au10001`을 부르지 않고 토큰 파일과 키 잠금을 잡지 않는다 |
+| 키·시크릿 설정 | 필요 | 필요 없다. 환경변수를 읽지 않는다(아래 시험용 주소 하나만 예외) |
+| 등록 | 인수의 종목 전부를 한 REG로, 타입은 `0B`·`0D`·`0w`·`0F` | `register` 명령 하나를 50종목씩 나눈 REG들 |
+| REG 거절 | 멈춘다 | 그 묶음만 거절로 알리고 계속한다. 거절된 묶음은 다시 붙을 때 다시 보내지 않는다 |
+| LOGIN 토큰 무효 | 토큰을 한 번 다시 받고, 또 거절되면 멈춘다 | `token_invalid`를 내고 새 `token`을 기다린다 |
+| 사건 | 로그뿐 | stdout의 줄 단위 JSON |
+| 원문 위치 | `raw/<날짜>/` | `raw/<날짜>/<키 이름>/` |
+
+#### 인수
+
+- `--key <이름>`: 영문자·숫자·`-`·`_` 64자까지. 원문 폴더 이름이 된다. `--child`와 함께만 쓴다.
+- `--child`는 `--items`를 받지 않는다. 틀린 인수는 stdout에 아무것도 쓰기 전에 stderr에 적고 종료 코드 2로 끝난다.
+- `VALLY_COLLECTOR_WS_URL`: 시험용으로만 키움 WebSocket 주소를 바꾼다. `ws://127.0.0.1…`, `ws://localhost…`, `ws://[::1]…`만 받고 그 밖의 주소는 종료 코드 2로 끝난다. 토큰을 밖으로 보내지 않으려는 제한이다. 정해지지 않았으면 키움 주소(`wss://api.kiwoom.com:10000/api/dostk/websocket`)다.
+
+#### 시작과 부모 종료
+
+1. 인수를 확인한다.
+2. `PR_SET_PDEATHSIG`(SIGTERM)를 건다(`rustix`). 거는 사이에 부모가 바뀌었으면 아무것도 하지 않고 종료 코드 0으로 끝난다. 부모가 죽으면 SIGTERM을 받아 아래 종료 절차를 밟는다. 리눅스는 이 신호를 부모를 만든 스레드가 끝날 때 보낸다. 그래서 데몬은 자식을 오래 사는 스레드에서 띄워야 한다(tokio 작업 스레드면 된다).
+3. stdout에 `hello`를 쓰고 stdin을 읽기 시작한다. stdin이 닫히면(데몬이 죽었거나 닫았으면) `shutdown` 명령과 같다.
+4. `token` 명령이 올 때까지 연결하지 않는다.
+
+#### 프로토콜(버전 1)
+
+stdin은 명령을, stdout은 사건을 준다. 줄마다 JSON 객체 하나이고 `"v":1`이 있다. 사람이 읽는 로그는 stderr로만 쓴다.
+
+명령(데몬 → 자식). 모양은 `{"v":1,"cmd":"<이름>",…}`다.
+
+| `cmd` | 필드 | 뜻 |
+|---|---|---|
+| `token` | `token`(글자), `generation`(정수) | LOGIN에 쓸 토큰과 데몬이 매긴 세대. 새 `token`은 앞의 것을 대체한다. 이미 붙은 세션은 끊지 않고 다음 LOGIN부터 쓴다 |
+| `register` | `id`(글자), `items`(글자 배열), `types`(글자 배열) | 등록. `items`를 50개씩 나눠 REG로 보낸다. 붙어 있지 않으면 받아 두었다가 LOGIN 뒤 보낸다 |
+| `unregister` | `register`와 같다 | 해제. 50개씩 나눠 REMOVE로 보내고 다시 붙을 때 보낼 목록에서 뺀다 |
+| `shutdown` | 없음 | 종료 |
+
+- `types`는 `0B`·`0D`·`0w`·`0F`·`1h`·`0H`·`0E`·`0g`(종목 단위) 또는 `0J`·`0U`·`0s`(시장 단위) 가운데 하나 이상이다. 한 명령에 두 갈래를 섞을 수 없다. 같은 타입을 두 번 적을 수 없다.
+- 종목 단위 타입의 `items`는 종목코드(6자리 영숫자 대문자)이고 자식이 `_AL`을 붙인다. 시장 단위 타입의 `items`는 글자 그대로 REG의 `item`에 간다(업종 코드, 빈 글자 `""` 등). 이 세 타입의 항목 형식은 키움 공식 명세(`kiwoom_api_spec.json`, [ADR 0012](adr/0012-quarterly-bars-from-kiwoom-monthly-bars.md)가 링크한 고정본)에도, `docs/research/2026-11-15-kiwoom-al-realtime-types.md`에도 적혀 있지 않다. 명세는 `item`을 "거래소별 종목코드, 업종코드"라고만 적는다. 그래서 자식은 항목을 검사하지 않고 데몬이 정한 대로 보낸다. 어떤 항목이 실제로 받아들여지는지는 실제 접속으로 확인해야 하고, 거절은 `registered`의 `ok:false`로 보인다.
+- `items`는 비면 안 되고 같은 항목이 두 번 있으면 안 된다. 같은 (항목, 타입)을 다시 등록하면 한 벌만 남는다.
+
+사건(자식 → 데몬). 모양은 `{"v":1,"event":"<이름>",…}`다.
+
+| `event` | 필드 | 언제 |
+|---|---|---|
+| `hello` | `key`, `pid` | 시작하자마자 한 번 |
+| `heartbeat` | `frames`, `bytes`, `state` | 5초마다. 직전 하트비트 뒤 받은 프레임 수와 글자 바이트 수(원문 현황과 같은 세기), 세션 상태(`waiting_for_token`·`backoff`·`connecting`·`logging_in`·`registering`·`live`). 세션 루프와 따로 도는 작업이 내므로 토큰을 기다리거나 쉬는 동안에도 온다 |
+| `registered` | `id`, `part`, `parts`, `items`, `ok`, `replay`, `rejection`(거절일 때) | `register`의 묶음 하나(`part`는 0부터)가 REG 응답을 받을 때마다. 다시 붙어 보낸 묶음은 `replay:true`다 |
+| `unregistered` | `id`, `part`, `parts`, `items`, `ok`, `rejection` | `unregister`의 묶음 하나가 REMOVE 응답을 받을 때마다 |
+| `live` | 없음 | LOGIN 뒤 묶음 하나 이상이 등록돼 수집이 시작된 때. 다시 붙을 때마다 다시 낸다 |
+| `down` | `reason` | 끊기거나 멈추거나 종료할 때. 원문의 `down` 줄과 같은 때에 낸다 |
+| `token_invalid` | `generation` | LOGIN이 토큰 무효로 거절됨. 거절된 `token`의 세대를 싣는다. 새 `token`이 올 때까지 다시 LOGIN하지 않는다 |
+| `market_open` | `recv_ms`, `values` | `0s` 프레임을 받을 때마다. `values`는 그 항목의 값 객체(`"215"` 장운영구분, `"20"` 시각, `"214"` 장시작예상잔여시간) 그대로고 `recv_ms`는 받은 때의 유닉스 ms다. 어느 값이 장 시작인지는 데몬이 판단한다 |
+| `halted` | `reason`, `action` | 멈출 때. 까닭과 할 일 |
+
+- `rejection`은 `{"reason":"<키움 오류 분류>","return_code":…,"detail":…}`다. 값이 없으면 `null`이다.
+- 모르는 명령, 버전이 다른 줄(`v`가 없거나 1이 아님), 깨진 줄(JSON 객체가 아님, 빈 줄, UTF-8이 아님, 필드가 맞지 않음)은 `down`과 `halted`를 내고 종료 코드 1로 끝난다. 조용히 넘기지 않는다.
+- 토큰 값은 stdin으로만 받는다. 로그, 사건, 원문, 오류 문구(깨진 `token` 줄을 읽다 난 오류 포함)에 나오지 않는다.
+
+#### 끝나는 경우
+
+`shutdown` 명령, stdin 닫힘, SIGTERM·SIGINT(부모 종료 포함)는 `down`(까닭 `종료`)을 내고 원문을 닫고 종료 코드 0으로 끝난다. 멈춤은 `down`과 `halted`를 내고 종료 코드 1이다. 인수 오류는 종료 코드 2다.
+
 ### 시험
 
-`crates/collector/src/collect/`의 시험은 모두 합성 전송(`Transport`)과 채널로 만든 합성 연결을 쓰고, 멈춘 tokio 시간과 `Clock::fake`로 돌린다. 실제 키움에는 접속하지 않는다. 실제 WebSocket 어댑터는 루프백(`ws://127.0.0.1`) 시험 서버 하나로 LOGIN → REG → REAL 한 프레임 → 원문 파일까지 확인한다.
+`crates/collector/src/collect/`의 시험은 모두 합성 전송(`Transport`)과 채널로 만든 합성 연결을 쓰고, 멈춘 tokio 시간과 `Clock::fake`로 돌린다. 실제 키움에는 접속하지 않는다. 실제 WebSocket 어댑터는 루프백(`ws://127.0.0.1`) 시험 서버 하나로 LOGIN → REG → REAL 한 프레임 → 원문 파일까지 확인한다. 자식 모드의 세션 코어 시험은 `collect/child_tests.rs`, 프로토콜 타입 시험은 `protocol.rs`에 있다. 실제 `collector` 실행 파일을 `--child`로 띄워 루프백 시험 서버에 붙이는 시험은 `tests/child_protocol.rs`다. 토큰 무효, 깨진 줄, 토큰 비노출, 부모 종료(중간 `sh`를 죽여 확인)를 다룬다.
 
 ## build와 verify
 

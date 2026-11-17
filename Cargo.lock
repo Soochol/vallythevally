@@ -605,6 +605,7 @@ dependencies = [
  "hoga-format",
  "http-body-util",
  "parquet",
+ "rustix",
  "serde",
  "serde_json",
  "server",

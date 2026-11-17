@@ -171,3 +171,33 @@ fn verify_passes_on_the_untouched_build_and_leaves_the_raw_files() {
     assert_eq!(written["date"], DATE);
     assert_eq!(fs::read_dir(data.path().join("raw/20260720")).unwrap().count(), 4);
 }
+
+fn files_under(folder: &std::path::Path) -> std::collections::BTreeMap<std::path::PathBuf, Vec<u8>> {
+    let mut files = std::collections::BTreeMap::new();
+    let mut pending = vec![folder.to_path_buf()];
+    while let Some(current) = pending.pop() {
+        for entry in fs::read_dir(&current).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                pending.push(path);
+            } else {
+                files.insert(path.strip_prefix(folder).unwrap().to_path_buf(), fs::read(&path).unwrap());
+            }
+        }
+    }
+    files
+}
+
+#[test]
+fn raw_files_in_a_key_folder_build_the_same_spans_as_the_flat_folder() {
+    let flat = built_fixture();
+    let keyed = fixture_day_in_key_folder();
+    let report = build_day(keyed.path(), DATE, AFTER_THE_DAY_UNIX_MS).unwrap();
+    assert!(!report.failed(), "{report}");
+    let (flat_built, keyed_built) = (files_under(&flat.path().join("spans")), files_under(&keyed.path().join("spans")));
+    assert!(flat_built.len() > 10);
+    assert_eq!(keyed_built.keys().collect::<Vec<_>>(), flat_built.keys().collect::<Vec<_>>());
+    assert!(keyed_built == flat_built, "키 폴더의 원문으로 만든 결과가 평평한 폴더의 결과와 다르다");
+    let verified = verify_day(keyed.path(), DATE, AFTER_THE_DAY_UNIX_MS).unwrap();
+    assert!(verified.passed, "{verified}");
+}

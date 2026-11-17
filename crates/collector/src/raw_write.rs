@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use zstd::stream::write::Encoder;
 
 use crate::kst::KstTime;
+use crate::protocol::KeyName;
 
 const ZSTD_LEVEL: i32 = 3;
 
@@ -61,6 +62,7 @@ struct OpenFile {
 
 pub struct RawWriter {
     data_dir: PathBuf,
+    key: Option<KeyName>,
     open: Option<OpenFile>,
 }
 
@@ -68,6 +70,15 @@ impl RawWriter {
     pub fn new(data_dir: impl Into<PathBuf>) -> RawWriter {
         RawWriter {
             data_dir: data_dir.into(),
+            key: None,
+            open: None,
+        }
+    }
+
+    pub fn for_key(data_dir: impl Into<PathBuf>, key: KeyName) -> RawWriter {
+        RawWriter {
+            data_dir: data_dir.into(),
+            key: Some(key),
             open: None,
         }
     }
@@ -105,7 +116,10 @@ impl RawWriter {
     }
 
     fn open_new_file(&self, key: SpanKey) -> io::Result<OpenFile> {
-        let folder = raw_day_dir(&self.data_dir, key.date);
+        let folder = match &self.key {
+            Some(name) => raw_key_dir(&self.data_dir, key.date, name),
+            None => raw_day_dir(&self.data_dir, key.date),
+        };
         fs::create_dir_all(&folder)?;
         let hhmm = format!("{:02}{:02}", key.start_minute / 60, key.start_minute % 60);
         for number in 0u32.. {
@@ -127,4 +141,8 @@ impl RawWriter {
 
 pub fn raw_day_dir(data_dir: &Path, date: u32) -> PathBuf {
     data_dir.join("raw").join(date.to_string())
+}
+
+pub fn raw_key_dir(data_dir: &Path, date: u32, key: &KeyName) -> PathBuf {
+    raw_day_dir(data_dir, date).join(key.as_str())
 }

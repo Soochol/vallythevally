@@ -21,9 +21,17 @@ pub fn ms_of_day(unix_ms: i64) -> i64 {
 }
 
 pub fn fixture_day() -> TempDir {
+    fixture_day_under("raw/20260720")
+}
+
+pub fn fixture_day_in_key_folder() -> TempDir {
+    fixture_day_under("raw/20260720/k1")
+}
+
+fn fixture_day_under(raw_folder: &str) -> TempDir {
     let data = tempdir().unwrap();
     let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/raw/20260720");
-    let target = data.path().join("raw/20260720");
+    let target = data.path().join(raw_folder);
     fs::create_dir_all(&target).unwrap();
     for entry in fs::read_dir(source).unwrap() {
         let path = entry.unwrap().path();

@@ -1,17 +1,38 @@
 use std::io;
 use std::path::PathBuf;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use tokio::time::{Interval, MissedTickBehavior, interval_at, Instant};
 
+use crate::protocol::KeyName;
 use crate::raw_write::{RawLine, RawWriter};
 
 pub const FLUSH_EVERY: Duration = Duration::from_secs(1);
 pub const REPORT_EVERY: Duration = Duration::from_secs(60);
 
+#[derive(Debug, Default)]
+pub struct Throughput {
+    frames: AtomicU64,
+    bytes: AtomicU64,
+}
+
+impl Throughput {
+    fn add(&self, bytes: usize) {
+        self.frames.fetch_add(1, Ordering::Relaxed);
+        self.bytes.fetch_add(bytes as u64, Ordering::Relaxed);
+    }
+
+    pub fn take(&self) -> (u64, u64) {
+        (self.frames.swap(0, Ordering::Relaxed), self.bytes.swap(0, Ordering::Relaxed))
+    }
+}
+
 pub struct Output {
     writer: Option<RawWriter>,
     dirty: bool,
+    throughput: Arc<Throughput>,
     since_report: Counts,
     total: Counts,
     pub flush_tick: Interval,
@@ -32,14 +53,27 @@ fn ticker(period: Duration) -> Interval {
 
 impl Output {
     pub fn new(data_dir: impl Into<PathBuf>) -> Output {
+        Output::with_writer(RawWriter::new(data_dir))
+    }
+
+    pub fn for_key(data_dir: impl Into<PathBuf>, key: KeyName) -> Output {
+        Output::with_writer(RawWriter::for_key(data_dir, key))
+    }
+
+    fn with_writer(writer: RawWriter) -> Output {
         Output {
-            writer: Some(RawWriter::new(data_dir)),
+            writer: Some(writer),
             dirty: false,
+            throughput: Arc::default(),
             since_report: Counts::default(),
             total: Counts::default(),
             flush_tick: ticker(FLUSH_EVERY),
             report_tick: ticker(REPORT_EVERY),
         }
+    }
+
+    pub fn throughput(&self) -> Arc<Throughput> {
+        self.throughput.clone()
     }
 
     pub fn write_frame(&mut self, recv_ms: i64, text: &str) -> io::Result<()> {
@@ -57,6 +91,7 @@ impl Output {
     }
 
     fn count(&mut self, bytes: usize) {
+        self.throughput.add(bytes);
         for counts in [&mut self.since_report, &mut self.total] {
             counts.frames += 1;
             counts.bytes += bytes as u64;

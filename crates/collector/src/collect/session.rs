@@ -1,3 +1,4 @@
+use std::collections::VecDeque;
 use std::convert::Infallible;
 use std::fmt;
 use std::future::Future;
@@ -8,8 +9,10 @@ use std::time::Duration;
 use futures::{SinkExt, StreamExt};
 use serde::Deserialize;
 use serde::de::IgnoredAny;
+use serde_json::{Map, Value};
 use server::clock::Clock;
-use server::kiwoom::auth::AuthError;
+use server::config::Secret;
+use server::kiwoom::auth::{AuthError, TokenGen};
 use server::kiwoom::error::{Category, CodeKey, WsRejection, classify};
 use server::kiwoom::rest::{KiwoomError, KiwoomRest};
 use server::kiwoom::wire::{self, WsControl, WsFrame};
@@ -17,11 +20,12 @@ use tokio::sync::watch;
 use tokio::time::{Instant, sleep_until, timeout};
 use tokio_tungstenite::tungstenite::Message;
 
+use super::link::{ChildLink, Commands, Events};
 use super::output::Output;
+use super::registry::{Chunk, Registry};
 use super::ws::{Connector, Socket};
+use crate::protocol::{Command, ProtocolError, Rejection, SessionState};
 use crate::raw_write::RawLine;
-
-pub const STREAM_TYPES: [&str; 4] = ["0B", "0D", "0w", "0F"];
 
 pub trait WallClock: Send + Sync {
     fn now_ms(&self) -> i64;
@@ -71,6 +75,7 @@ pub enum Halt {
     Login(WsRejection),
     Register(WsRejection),
     Output(io::Error),
+    Protocol(ProtocolError),
 }
 
 impl Halt {
@@ -81,6 +86,7 @@ impl Halt {
             Halt::Login(rejection) => format!("LOGIN이 거절돼 멈춥니다({rejection:?})"),
             Halt::Register(rejection) => format!("REG가 거절돼 멈춥니다({rejection:?})"),
             Halt::Output(error) => format!("원문 파일을 쓰지 못해 멈춥니다: {error}"),
+            Halt::Protocol(error) => format!("데몬이 보낸 줄을 처리하지 못해 멈춥니다: {error}"),
         }
     }
 
@@ -96,6 +102,7 @@ impl Halt {
             Halt::Register(rejection) if rejection.category == Category::RealtimeCapacity => "등록 한도를 넘었습니다. --items의 종목 수를 줄여 다시 실행하세요",
             Halt::Register(_) => "--items의 종목 코드와 개수를 확인하세요. 같은 입력으로 다시 접속하면 같은 거절이 반복됩니다",
             Halt::Output(_) => "데이터 폴더의 디스크 공간과 권한을 확인하세요",
+            Halt::Protocol(_) => "데몬과 수집기의 프로토콜 버전이 같은지, 데몬이 명령을 형식대로 보내는지 확인하세요",
         }
     }
 }
@@ -191,7 +198,147 @@ enum TokenReady {
 
 enum Wake {
     Ack(WsControl, Result<(), WsRejection>),
+    Command(Command),
     Deadline,
+}
+
+enum Waited<T> {
+    Done(T),
+    Command(Command),
+}
+
+#[derive(Debug, Clone)]
+pub struct Credential {
+    token: Secret<String>,
+    generation: u64,
+}
+
+pub struct Issuer {
+    rest: KiwoomRest,
+    clock: Clock,
+    budget: TokenBudget,
+}
+
+pub enum Tokens {
+    Issue(Issuer),
+    Supplied(Option<Credential>),
+}
+
+impl Tokens {
+    pub fn issued(rest: KiwoomRest, clock: Clock) -> Tokens {
+        Tokens::Issue(Issuer { rest, clock, budget: TokenBudget::Fresh })
+    }
+
+    pub fn supplied() -> Tokens {
+        Tokens::Supplied(None)
+    }
+
+    fn credential(&self) -> Option<Credential> {
+        match self {
+            Tokens::Issue(issuer) => issuer
+                .rest
+                .auth()
+                .current(issuer.clock.now())
+                .map(|(token, TokenGen(generation))| Credential { token, generation }),
+            Tokens::Supplied(credential) => credential.clone(),
+        }
+    }
+
+    fn confirmed(&mut self) {
+        if let Tokens::Issue(issuer) = self {
+            issuer.budget = TokenBudget::Fresh;
+        }
+    }
+
+    fn rejected(&mut self, credential: &Credential, events: &Events) -> Result<bool, AuthError> {
+        match self {
+            Tokens::Issue(issuer) if issuer.budget == TokenBudget::Fresh => {
+                issuer.budget = TokenBudget::Reissued;
+                issuer.rest.auth().invalidate(TokenGen(credential.generation))?;
+                Ok(true)
+            }
+            Tokens::Issue(_) => Ok(false),
+            Tokens::Supplied(slot) => {
+                events.token_invalid(credential.generation);
+                if slot.as_ref().is_some_and(|held| held.generation == credential.generation) {
+                    *slot = None;
+                }
+                Ok(true)
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum OpKind {
+    Register,
+    Remove,
+}
+
+struct Op {
+    kind: OpKind,
+    chunk: Chunk,
+    replay: bool,
+}
+
+impl Op {
+    fn control(&self) -> WsControl {
+        match self.kind {
+            OpKind::Register => WsControl::Reg,
+            OpKind::Remove => WsControl::Remove,
+        }
+    }
+
+    fn message(&self) -> String {
+        match self.kind {
+            OpKind::Register => self.chunk.register_message(),
+            OpKind::Remove => self.chunk.remove_message(),
+        }
+    }
+}
+
+fn rejection_event(rejection: &WsRejection) -> Rejection {
+    Rejection {
+        reason: format!("{:?}", rejection.category),
+        return_code: rejection.return_code,
+        detail: rejection.detail,
+    }
+}
+
+async fn next_incoming(commands: &mut Option<Commands>) -> Result<Command, Exit> {
+    let Some(receiver) = commands else {
+        return std::future::pending().await;
+    };
+    match receiver.recv().await {
+        Some(Ok(command)) => Ok(command),
+        Some(Err(error)) => Err(Halt::Protocol(error).into()),
+        None => Err(Exit::Shutdown),
+    }
+}
+
+async fn next_command(shutdown: &mut watch::Receiver<bool>, commands: &mut Option<Commands>) -> Result<Command, Exit> {
+    if *shutdown.borrow() {
+        return Err(Exit::Shutdown);
+    }
+    tokio::select! {
+        command = next_incoming(commands) => command,
+        _ = shutdown.changed() => Err(Exit::Shutdown),
+    }
+}
+
+async fn interruptible<T>(
+    shutdown: &mut watch::Receiver<bool>,
+    commands: &mut Option<Commands>,
+    work: &mut (impl Future<Output = T> + Unpin),
+) -> Result<Waited<T>, Exit> {
+    if *shutdown.borrow() {
+        return Err(Exit::Shutdown);
+    }
+    tokio::select! {
+        output = &mut *work => Ok(Waited::Done(output)),
+        command = next_incoming(commands) => command.map(Waited::Command),
+        _ = shutdown.changed() => Err(Exit::Shutdown),
+    }
 }
 
 struct Conn {
@@ -242,16 +389,6 @@ fn classify_frame(text: &str) -> FrameKind {
     }
 }
 
-pub fn register_message(registrations: &[String]) -> String {
-    serde_json::json!({
-        "trnm": "REG",
-        "grp_no": "1",
-        "refresh": "1",
-        "data": [{"item": registrations, "type": STREAM_TYPES}],
-    })
-    .to_string()
-}
-
 async fn or_shutdown<T>(shutdown: &mut watch::Receiver<bool>, work: impl Future<Output = T>) -> Result<T, Exit> {
     if *shutdown.borrow() {
         return Err(Exit::Shutdown);
@@ -263,48 +400,66 @@ async fn or_shutdown<T>(shutdown: &mut watch::Receiver<bool>, work: impl Future<
 }
 
 pub struct SessionParts {
-    pub rest: KiwoomRest,
-    pub registrations: Vec<String>,
+    pub tokens: Tokens,
+    pub registry: Registry,
     pub output: Output,
     pub connector: Arc<dyn Connector>,
     pub wall_clock: Arc<dyn WallClock>,
-    pub token_clock: Clock,
     pub timings: Timings,
     pub shutdown: watch::Receiver<bool>,
+    pub child: Option<ChildLink>,
 }
 
 pub struct Session {
-    rest: KiwoomRest,
-    register: String,
+    tokens: Tokens,
+    registry: Registry,
+    queue: VecDeque<Op>,
     out: Output,
     connector: Arc<dyn Connector>,
     wall_clock: Arc<dyn WallClock>,
-    token_clock: Clock,
     timings: Timings,
     shutdown: watch::Receiver<bool>,
-    budget: TokenBudget,
+    commands: Option<Commands>,
+    events: Events,
+    state: watch::Sender<SessionState>,
+    halt_on_rejected_register: bool,
     gap: Gap,
     attempt: u32,
     retry_at: Instant,
     live_since: Option<Instant>,
+    logged_in: bool,
+    confirmed_any: bool,
+    live: bool,
 }
 
 impl Session {
     pub fn new(parts: SessionParts) -> Session {
+        let child = parts.child;
+        let halt_on_rejected_register = child.is_none();
+        let (commands, events, state) = match child {
+            Some(link) => (Some(link.commands), link.events, link.state),
+            None => (None, Events::none(), watch::channel(SessionState::Backoff).0),
+        };
         Session {
-            rest: parts.rest,
-            register: register_message(&parts.registrations),
+            tokens: parts.tokens,
+            registry: parts.registry,
+            queue: VecDeque::new(),
             out: parts.output,
             connector: parts.connector,
             wall_clock: parts.wall_clock,
-            token_clock: parts.token_clock,
             timings: parts.timings,
             shutdown: parts.shutdown,
-            budget: TokenBudget::Fresh,
+            commands,
+            events,
+            state,
+            halt_on_rejected_register,
             gap: Gap::Unknown,
             attempt: 0,
             retry_at: Instant::now(),
             live_since: None,
+            logged_in: false,
+            confirmed_any: false,
+            live: false,
         }
     }
 
@@ -315,12 +470,12 @@ impl Session {
             Exit::Halt(halt) => (halt.reason(), Finish::Halted(halt)),
         };
         let written = match &finish {
-            Finish::Halted(_) => {
-                let recv_ms = self.wall_clock.now_ms();
-                self.out.write_event(&RawLine::Down { recv_ms, reason: &reason }).map_err(Exit::from)
-            }
+            Finish::Halted(_) => self.write_down(&reason),
             Finish::Shutdown => self.mark_down(&reason),
         };
+        if let Finish::Halted(halt) = &finish {
+            self.events.halted(&halt.reason(), halt.action());
+        }
         if let Err(Exit::Halt(Halt::Output(error))) = written {
             tracing::error!(%error, "down 사건 줄을 쓰지 못했습니다");
             if matches!(finish, Finish::Shutdown) {
@@ -336,9 +491,26 @@ impl Session {
         finish
     }
 
+    fn set_state(&self, state: SessionState) {
+        self.state.send_replace(state);
+    }
+
+    async fn wait_for<T>(&mut self, work: impl Future<Output = T>) -> Result<T, Exit> {
+        let mut work = Box::pin(work);
+        loop {
+            match interruptible(&mut self.shutdown, &mut self.commands, &mut work).await? {
+                Waited::Done(output) => return Ok(output),
+                Waited::Command(command) => self.take_command(command)?,
+            }
+        }
+    }
+
     async fn drive(&mut self) -> Exit {
         loop {
-            if let Err(exit) = or_shutdown(&mut self.shutdown, sleep_until(self.retry_at)).await {
+            if self.retry_at > Instant::now() {
+                self.set_state(SessionState::Backoff);
+            }
+            if let Err(exit) = self.wait_for(sleep_until(self.retry_at)).await {
                 return exit;
             }
             match self.ensure_token().await {
@@ -349,7 +521,9 @@ impl Session {
                 }
                 Ok(TokenReady::Ready) => {}
             }
-            let connected = match or_shutdown(&mut self.shutdown, timeout(self.timings.control, self.connector.connect())).await {
+            self.set_state(SessionState::Connecting);
+            let (connector, control) = (self.connector.clone(), self.timings.control);
+            let connected = match self.wait_for(async move { timeout(control, connector.connect()).await }).await {
                 Err(exit) => return exit,
                 Ok(Ok(Ok(socket))) => Some(Conn::new(socket, self.timings.silence)),
                 Ok(Ok(Err(error))) => {
@@ -367,6 +541,8 @@ impl Session {
             };
             self.live_since = None;
             let interrupt = self.serve(&mut conn).await;
+            self.logged_in = false;
+            self.queue.clear();
             conn.close().await;
             if let Err(error) = self.out.flush_if_dirty() {
                 return error.into();
@@ -398,10 +574,16 @@ impl Session {
         self.attempt += 1;
     }
 
+    fn write_down(&mut self, reason: &str) -> Result<(), Exit> {
+        self.events.down(reason);
+        let recv_ms = self.wall_clock.now_ms();
+        self.out.write_event(&RawLine::Down { recv_ms, reason })?;
+        Ok(())
+    }
+
     fn mark_down(&mut self, reason: &str) -> Result<(), Exit> {
         if self.gap != Gap::Down {
-            let recv_ms = self.wall_clock.now_ms();
-            self.out.write_event(&RawLine::Down { recv_ms, reason })?;
+            self.write_down(reason)?;
             self.out.flush_if_dirty()?;
             self.gap = Gap::Down;
         }
@@ -409,26 +591,41 @@ impl Session {
     }
 
     async fn ensure_token(&mut self) -> Result<TokenReady, Exit> {
-        if let Some(error) = self.rest.halted() {
-            return Err(Halt::Token(error).into());
+        if let Tokens::Issue(issuer) = &mut self.tokens {
+            return issuer.ensure(&mut self.shutdown, &self.timings, &mut self.attempt).await;
         }
-        if self.rest.auth().current(self.token_clock.now()).is_some() {
-            return Ok(TokenReady::Ready);
+        self.set_state(SessionState::WaitingForToken);
+        while self.tokens.credential().is_none() {
+            let command = next_command(&mut self.shutdown, &mut self.commands).await?;
+            self.take_command(command)?;
         }
-        match or_shutdown(&mut self.shutdown, self.rest.issue_token()).await? {
-            Ok(_) => Ok(TokenReady::Ready),
-            Err(error) if self.rest.halted().is_some() || error.manual_action_required() => Err(Halt::Token(error).into()),
-            Err(error) => {
-                tracing::warn!(%error, "WebSocket에 쓸 토큰을 받지 못했습니다");
-                Ok(TokenReady::WaitFor(match error.retry_at() {
-                    Some(until) => Duration::from_secs((until.unix() - self.token_clock.now().unix()).max(0) as u64),
-                    None => {
-                        let wait = self.timings.backoff(self.attempt);
-                        self.attempt += 1;
-                        wait
-                    }
-                }))
+        Ok(TokenReady::Ready)
+    }
+
+    fn take_command(&mut self, command: Command) -> Result<(), Exit> {
+        match command {
+            Command::Token { token, generation } => {
+                if let Tokens::Supplied(slot) = &mut self.tokens {
+                    *slot = Some(Credential { token, generation });
+                }
             }
+            Command::Register(registration) => {
+                let chunks = self.registry.add(Chunk::split(&registration));
+                self.queue_ops(OpKind::Register, chunks);
+            }
+            Command::Unregister(registration) => {
+                let chunks = Chunk::split(&registration);
+                self.registry.remove(&chunks);
+                self.queue_ops(OpKind::Remove, chunks);
+            }
+            Command::Shutdown => return Err(Exit::Shutdown),
+        }
+        Ok(())
+    }
+
+    fn queue_ops(&mut self, kind: OpKind, chunks: Vec<Chunk>) {
+        if self.logged_in {
+            self.queue.extend(chunks.into_iter().map(|chunk| Op { kind, chunk, replay: false }));
         }
     }
 
@@ -440,54 +637,122 @@ impl Session {
     }
 
     async fn serve_connection(&mut self, conn: &mut Conn) -> Result<Infallible, Interrupt> {
+        self.live = false;
+        self.confirmed_any = false;
         self.log_in(conn).await?;
-        self.register(conn).await?;
-        let recv_ms = self.wall_clock.now_ms();
-        self.out.write_event(&RawLine::Live { recv_ms })?;
-        self.gap = Gap::Up;
-        self.budget = TokenBudget::Fresh;
-        self.live_since = Some(Instant::now());
-        tracing::info!("수집을 시작합니다(LOGIN과 REG 완료)");
+        self.begin_registration();
+        self.drain_queue(conn).await?;
+        self.announce_live_if_ready()?;
         loop {
-            if let Wake::Ack(control, _) = self.recv(conn, None).await? {
-                tracing::debug!(trnm = control.trnm(), "기다리지 않던 응답을 버립니다");
+            match self.recv(conn, None).await? {
+                Wake::Command(command) => {
+                    self.take_command(command)?;
+                    self.drain_queue(conn).await?;
+                    self.announce_live_if_ready()?;
+                }
+                Wake::Ack(control, _) => tracing::debug!(trnm = control.trnm(), "기다리지 않던 응답을 버립니다"),
+                Wake::Deadline => {}
             }
         }
     }
 
+    fn begin_registration(&mut self) {
+        self.logged_in = true;
+        self.set_state(SessionState::Registering);
+        self.queue = self.registry.replay().into_iter().map(|chunk| Op { kind: OpKind::Register, replay: chunk.sent, chunk }).collect();
+    }
+
+    fn announce_live_if_ready(&mut self) -> Result<(), Exit> {
+        if self.live || !self.confirmed_any {
+            return Ok(());
+        }
+        let recv_ms = self.wall_clock.now_ms();
+        self.out.write_event(&RawLine::Live { recv_ms })?;
+        self.gap = Gap::Up;
+        self.tokens.confirmed();
+        self.live_since = Some(Instant::now());
+        self.live = true;
+        self.set_state(SessionState::Live);
+        self.events.live();
+        tracing::info!("수집을 시작합니다(LOGIN과 REG 완료)");
+        Ok(())
+    }
+
     async fn log_in(&mut self, conn: &mut Conn) -> Result<(), Interrupt> {
-        let Some((token, generation)) = self.rest.auth().current(self.token_clock.now()) else {
+        self.set_state(SessionState::LoggingIn);
+        let Some(credential) = self.tokens.credential() else {
             return Err(End::TokenGone.into());
         };
-        let login = wire::login_message(&token);
+        let login = wire::login_message(&credential.token);
         conn.send(login.expose().clone()).await?;
         match self.await_ack(conn, WsControl::Login).await? {
             Ok(()) => Ok(()),
-            Err(rejection) if rejection.category == Category::TokenInvalid && self.budget == TokenBudget::Fresh => {
-                tracing::warn!(?rejection, "LOGIN이 토큰 무효로 거절됐습니다. 토큰을 한 번 다시 받습니다");
-                self.budget = TokenBudget::Reissued;
-                self.rest.auth().invalidate(generation).map_err(|error| Exit::Halt(Halt::TokenState(error)))?;
-                Err(Interrupt::TokenRefresh)
-            }
+            Err(rejection) if rejection.category == Category::TokenInvalid => match self.tokens.rejected(&credential, &self.events) {
+                Ok(true) => {
+                    tracing::warn!(?rejection, "LOGIN이 토큰 무효로 거절됐습니다. 새 토큰을 기다립니다");
+                    Err(Interrupt::TokenRefresh)
+                }
+                Ok(false) => Err(Exit::Halt(Halt::Login(rejection)).into()),
+                Err(error) => Err(Exit::Halt(Halt::TokenState(error)).into()),
+            },
             Err(rejection) => Err(Exit::Halt(Halt::Login(rejection)).into()),
         }
     }
 
-    async fn register(&mut self, conn: &mut Conn) -> Result<(), Interrupt> {
-        conn.send(self.register.clone()).await?;
-        let Err(rejection) = self.await_ack(conn, WsControl::Reg).await? else {
-            return Ok(());
-        };
-        if rejection.category != Category::RateLimit {
-            return Err(Exit::Halt(Halt::Register(rejection)).into());
+    async fn drain_queue(&mut self, conn: &mut Conn) -> Result<(), Interrupt> {
+        while let Some(op) = self.queue.pop_front() {
+            self.send_op(conn, op).await?;
         }
-        tracing::warn!(?rejection, "REG가 유량 제한으로 거절됐습니다. 한 번 다시 보냅니다");
-        let until = Instant::now() + self.timings.rate_limit_pause;
-        while !matches!(self.recv(conn, Some(until)).await?, Wake::Deadline) {}
-        conn.send(self.register.clone()).await?;
-        match self.await_ack(conn, WsControl::Reg).await? {
-            Ok(()) => Ok(()),
-            Err(rejection) => Err(Exit::Halt(Halt::Register(rejection)).into()),
+        Ok(())
+    }
+
+    async fn send_op(&mut self, conn: &mut Conn, op: Op) -> Result<(), Interrupt> {
+        let message = op.message();
+        if op.kind == OpKind::Register {
+            self.registry.mark_sent(op.chunk.seq);
+        }
+        conn.send(message.clone()).await?;
+        let mut result = self.await_ack(conn, op.control()).await?;
+        if matches!(&result, Err(rejection) if rejection.category == Category::RateLimit) {
+            tracing::warn!(trnm = op.control().trnm(), "유량 제한으로 거절됐습니다. 한 번 다시 보냅니다");
+            self.pause(conn, Instant::now() + self.timings.rate_limit_pause).await?;
+            conn.send(message).await?;
+            result = self.await_ack(conn, op.control()).await?;
+        }
+        self.finish_op(&op, result)?;
+        Ok(())
+    }
+
+    fn finish_op(&mut self, op: &Op, result: Result<(), WsRejection>) -> Result<(), Exit> {
+        match (op.kind, result) {
+            (OpKind::Register, Ok(())) => {
+                self.confirmed_any = true;
+                self.registry.accepted(&op.chunk);
+                self.events.registered(op.chunk.batch(), op.replay, None);
+            }
+            (OpKind::Register, Err(rejection)) => {
+                if self.halt_on_rejected_register {
+                    return Err(Halt::Register(rejection).into());
+                }
+                tracing::warn!(?rejection, id = op.chunk.id, part = op.chunk.part, "REG가 거절됐습니다. 이 묶음은 다시 보내지 않습니다");
+                self.registry.forget(&op.chunk);
+                self.events.registered(op.chunk.batch(), op.replay, Some(rejection_event(&rejection)));
+            }
+            (OpKind::Remove, result) => {
+                let rejection = result.err().map(|rejection| rejection_event(&rejection));
+                self.events.unregistered(op.chunk.batch(), rejection);
+            }
+        }
+        Ok(())
+    }
+
+    async fn pause(&mut self, conn: &mut Conn, until: Instant) -> Result<(), Interrupt> {
+        loop {
+            match self.recv(conn, Some(until)).await? {
+                Wake::Deadline => return Ok(()),
+                Wake::Command(command) => self.take_command(command)?,
+                Wake::Ack(..) => {}
+            }
         }
     }
 
@@ -497,6 +762,7 @@ impl Session {
             match self.recv(conn, Some(deadline)).await? {
                 Wake::Ack(got, result) if got == control => return Ok(result),
                 Wake::Ack(got, _) => tracing::debug!(trnm = got.trnm(), want = control.trnm(), "기다리던 것과 다른 응답을 버립니다"),
+                Wake::Command(command) => self.take_command(command)?,
                 Wake::Deadline => return Err(End::ControlTimeout(control).into()),
             }
         }
@@ -517,6 +783,7 @@ impl Session {
                     continue;
                 }
                 _ = self.shutdown.changed() => return Err(Exit::Shutdown.into()),
+                command = next_incoming(&mut self.commands) => return Ok(Wake::Command(command?)),
             };
             let recv_ms = self.wall_clock.now_ms();
             let text = match message {
@@ -545,7 +812,10 @@ impl Session {
         match classify_frame(text) {
             FrameKind::Ping => conn.send(text.to_owned()).await?,
             FrameKind::NotJson => self.out.write_text(recv_ms, text)?,
-            FrameKind::Real => self.out.write_frame(recv_ms, text)?,
+            FrameKind::Real => {
+                self.out.write_frame(recv_ms, text)?;
+                self.report_market_hours(text, recv_ms);
+            }
             FrameKind::Control => {
                 self.out.write_frame(recv_ms, text)?;
                 if let Ok(WsFrame::Ack { control, result }) = wire::parse_ws_frame(text) {
@@ -554,5 +824,81 @@ impl Session {
             }
         }
         Ok(None)
+    }
+
+    fn report_market_hours(&self, text: &str, recv_ms: i64) {
+        if !self.events.enabled() || !text.contains(MARKET_HOURS_MARK) {
+            return;
+        }
+        let Ok(frame) = serde_json::from_str::<RealFrame>(text) else {
+            return;
+        };
+        for entry in frame.data.into_iter().filter(|entry| entry.kind.as_deref() == Some("0s")) {
+            self.events.market_open(recv_ms, entry.values);
+        }
+    }
+}
+
+const MARKET_HOURS_MARK: &str = "\"0s\"";
+
+#[derive(Deserialize)]
+struct RealFrame {
+    #[serde(default)]
+    data: Vec<RealEntry>,
+}
+
+#[derive(Deserialize)]
+struct RealEntry {
+    #[serde(rename = "type")]
+    kind: Option<String>,
+    #[serde(default)]
+    values: Map<String, Value>,
+}
+
+impl Issuer {
+    async fn ensure(&mut self, shutdown: &mut watch::Receiver<bool>, timings: &Timings, attempt: &mut u32) -> Result<TokenReady, Exit> {
+        if let Some(error) = self.rest.halted() {
+            return Err(Halt::Token(error).into());
+        }
+        if self.rest.auth().current(self.clock.now()).is_some() {
+            return Ok(TokenReady::Ready);
+        }
+        match or_shutdown(shutdown, self.rest.issue_token()).await? {
+            Ok(_) => Ok(TokenReady::Ready),
+            Err(error) if self.rest.halted().is_some() || error.manual_action_required() => Err(Halt::Token(error).into()),
+            Err(error) => {
+                tracing::warn!(%error, "WebSocket에 쓸 토큰을 받지 못했습니다");
+                Ok(TokenReady::WaitFor(match error.retry_at() {
+                    Some(until) => Duration::from_secs((until.unix() - self.clock.now().unix()).max(0) as u64),
+                    None => {
+                        let wait = timings.backoff(*attempt);
+                        *attempt += 1;
+                        wait
+                    }
+                }))
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tokens_tests {
+    use super::*;
+
+    fn credential(generation: u64) -> Credential {
+        Credential { token: Secret::new(format!("FAKE-TOKEN-{generation}")), generation }
+    }
+
+    #[test]
+    fn a_rejection_clears_only_the_token_of_the_rejected_generation() {
+        let (sink, source) = std::sync::mpsc::channel();
+        let events = Events::to(sink);
+        let mut tokens = Tokens::Supplied(Some(credential(2)));
+        assert!(tokens.rejected(&credential(1), &events).unwrap());
+        assert_eq!(tokens.credential().unwrap().generation, 2, "더 새 토큰은 남는다");
+        assert!(tokens.rejected(&credential(2), &events).unwrap());
+        assert!(tokens.credential().is_none());
+        let reported: Vec<_> = source.try_iter().collect();
+        assert_eq!(reported, [crate::protocol::Event::TokenInvalid { generation: 1 }, crate::protocol::Event::TokenInvalid { generation: 2 }]);
     }
 }
