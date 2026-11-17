@@ -8,6 +8,7 @@
     "drawing-tools-pattern.spec.ts": 1,
     "drawing-tools-shape.spec.ts": 1,
     "pending-frame-series.spec.ts": 1,
+    "setup-wizard.spec.ts": 5,
     "system-settings-kiwoom.spec.ts": 1,
     "win-manage.spec.ts": 2
   }
