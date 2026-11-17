@@ -34,7 +34,7 @@ pub struct AppState {
     pub screener: Arc<Screener>,
     pub link: Link,
     pub system: crate::system_routes::SystemState,
-    pub registered: tokio::sync::watch::Receiver<std::collections::BTreeSet<Symbol>>,
+    pub registered: tokio::sync::watch::Receiver<crate::kiwoom::stream::DesiredFeeds>,
 }
 
 pub fn router(state: Arc<AppState>) -> Router {

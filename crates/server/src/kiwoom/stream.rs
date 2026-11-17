@@ -1,6 +1,6 @@
 //! 키움 WebSocket 세션(backend.md §5.1, §5.2). 토큰 하나에 세션 하나라서 서버 안에서도 세션은 언제나 하나다.
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::time::Duration;
 
 use domain::{IndexCode, KstTime, Price, Symbol, TimeOfDay, Volume};
@@ -12,7 +12,7 @@ use tokio_tungstenite::connect_async;
 
 use super::error::{Category, CodeKey, WsRejection, classify};
 use super::rest::{Access, KiwoomRest};
-use super::wire::{self, RealItem, RealType, WsControl, WsFrame};
+use super::wire::{self, RealItem, RealType, Registrations, WsControl, WsFrame};
 use crate::clock::Clock;
 
 /// 0B `9081`. `_AL` 한 흐름이 KRX와 NXT 체결을 함께 준다(kiwoom.md 11.1, 11.2).
@@ -33,6 +33,7 @@ pub struct RealTick {
     pub exchange: Option<Exchange>,
     /// 프레임에 11·13이 없거나 읽지 못하면 None.
     pub day: Option<DayTotals>,
+    pub strength_centi: Option<u64>,
 }
 
 /// 체결 프레임에 같이 오는 그날 값(kiwoom.md §11.3, §11.5).
@@ -43,9 +44,67 @@ pub struct DayTotals {
     pub cumulative: Volume,
 }
 
+pub const BOOK_DEPTH: usize = 10;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BookLevel {
+    pub price: Price,
+    pub qty: Volume,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ExpectedTrade {
+    pub price: Price,
+    pub qty: Volume,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BookSnapshot {
+    pub symbol: Symbol,
+    pub hhmmss: TimeOfDay,
+    pub asks: [Option<BookLevel>; BOOK_DEPTH],
+    pub bids: [Option<BookLevel>; BOOK_DEPTH],
+    pub total_ask_qty: Volume,
+    pub total_bid_qty: Volume,
+    pub expected: Option<ExpectedTrade>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ProgramTradeRow {
+    pub symbol: Symbol,
+    pub hhmmss: TimeOfDay,
+    pub price: Option<Price>,
+    pub sell_qty: Volume,
+    pub sell_amount_million_won: u64,
+    pub buy_qty: Volume,
+    pub buy_amount_million_won: u64,
+    pub net_buy_qty: i64,
+    pub net_buy_qty_change: i64,
+    pub net_buy_amount_million_won: i64,
+    pub net_buy_amount_change_million_won: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BrokerEntry {
+    pub member_code: String,
+    pub member_name: String,
+    pub cumulative_qty: Volume,
+    pub change_qty: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BrokerSnapshot {
+    pub symbol: Symbol,
+    pub sells: Vec<BrokerEntry>,
+    pub buys: Vec<BrokerEntry>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StreamEvent {
     Tick { tick: RealTick, received_at: KstTime },
+    Book { book: Box<BookSnapshot>, received_at: KstTime },
+    Program { row: ProgramTradeRow, received_at: KstTime },
+    Broker { snapshot: BrokerSnapshot, received_at: KstTime },
     /// 세션이 LOGIN을 마치고 원하는 집합을 모두 REG 했다.
     Live { since: KstTime },
     /// 세션이 끊겼다. 다음 Live까지는 체결이 빠졌을 수 있다.
@@ -54,9 +113,18 @@ pub enum StreamEvent {
     Halted,
 }
 
-/// 세션 태스크의 손잡이. 받을 종목 전체 집합을 통째로 주면 세션이 차이를 REG/REMOVE 한다.
+pub type DesiredFeeds = BTreeMap<Symbol, BTreeSet<RealType>>;
+
+pub fn trades_only(symbols: BTreeSet<Symbol>) -> DesiredFeeds {
+    symbols.into_iter().map(|symbol| (symbol, BTreeSet::from([RealType::of(symbol)]))).collect()
+}
+
+fn registrations(desired: &DesiredFeeds) -> Registrations {
+    desired.iter().flat_map(|(&symbol, kinds)| kinds.iter().map(move |&kind| (kind, symbol))).collect()
+}
+
 pub struct KiwoomStream {
-    desired: watch::Sender<BTreeSet<Symbol>>,
+    desired: watch::Sender<DesiredFeeds>,
 }
 
 impl KiwoomStream {
@@ -78,16 +146,23 @@ impl KiwoomStream {
     }
 
     /// 세션 없이 손잡이만 만든다. 시험이 원하는 집합을 읽는다.
-    pub fn detached() -> (KiwoomStream, watch::Receiver<BTreeSet<Symbol>>) {
-        let (desired, rx) = watch::channel(BTreeSet::new());
+    pub fn detached() -> (KiwoomStream, watch::Receiver<DesiredFeeds>) {
+        let (desired, rx) = watch::channel(DesiredFeeds::new());
         (KiwoomStream { desired }, rx)
     }
 
-    pub fn watch_desired(&self) -> watch::Receiver<BTreeSet<Symbol>> {
+    pub fn watch_desired(&self) -> watch::Receiver<DesiredFeeds> {
         self.desired.subscribe()
     }
 
-    pub fn set_desired(&self, desired: BTreeSet<Symbol>) {
+    pub fn set_desired(&self, desired: DesiredFeeds) {
+        let desired: DesiredFeeds = desired
+            .into_iter()
+            .filter_map(|(symbol, kinds)| {
+                let kinds: BTreeSet<RealType> = kinds.into_iter().filter(|kind| kind.serves(symbol)).collect();
+                (!kinds.is_empty()).then_some((symbol, kinds))
+            })
+            .collect();
         self.desired.send_if_modified(|cur| {
             let changed = *cur != desired;
             *cur = desired;
@@ -131,7 +206,7 @@ enum SessionState {
     Disconnected { retry_at: Instant, attempt: u32 },
     Connecting { attempt: u32 },
     LoggingIn { conn: Conn, attempt: u32 },
-    Live { conn: Conn, since: KstTime, accepted: BTreeSet<Symbol>, attempt: u32 },
+    Live { conn: Conn, since: KstTime, accepted: Registrations, attempt: u32 },
     Halted,
 }
 
@@ -161,18 +236,18 @@ enum ControlBudget {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Control {
-    Reg(BTreeSet<Symbol>),
+    Reg(Registrations),
     Remove(RealType, BTreeSet<Symbol>),
 }
 
 impl Control {
     /// 해지가 먼저다. 200개가 찬 채로 하나를 바꿀 때 REG를 먼저 보내면 잠깐 201개라 키움이 거절한다.
-    fn next(desired: &BTreeSet<Symbol>, accepted: &BTreeSet<Symbol>) -> Option<Control> {
-        let remove = [RealType::Trade, RealType::Index].into_iter().find_map(|kind| {
-            let removed: BTreeSet<Symbol> = accepted.difference(desired).copied().filter(|&s| RealType::of(s) == kind).collect();
+    fn next(desired: &Registrations, accepted: &Registrations) -> Option<Control> {
+        let remove = RealType::ALL.into_iter().find_map(|kind| {
+            let removed: BTreeSet<Symbol> = accepted.difference(desired).filter(|(k, _)| *k == kind).map(|&(_, symbol)| symbol).collect();
             (!removed.is_empty()).then_some(Control::Remove(kind, removed))
         });
-        let added: BTreeSet<Symbol> = desired.difference(accepted).copied().collect();
+        let added: Registrations = desired.difference(accepted).copied().collect();
         remove.or_else(|| (!added.is_empty()).then_some(Control::Reg(added)))
     }
 
@@ -185,15 +260,15 @@ impl Control {
 
     fn message(&self) -> String {
         match self {
-            Control::Reg(symbols) => wire::reg_message(symbols),
+            Control::Reg(registrations) => wire::reg_message(registrations),
             Control::Remove(kind, symbols) => wire::remove_message(*kind, symbols),
         }
     }
 
-    fn apply(self, accepted: &mut BTreeSet<Symbol>) {
+    fn apply(self, accepted: &mut Registrations) {
         match self {
-            Control::Reg(symbols) => accepted.extend(symbols),
-            Control::Remove(_, symbols) => accepted.retain(|s| !symbols.contains(s)),
+            Control::Reg(registrations) => accepted.extend(registrations),
+            Control::Remove(kind, symbols) => accepted.retain(|(k, symbol)| !(*k == kind && symbols.contains(symbol))),
         }
     }
 }
@@ -248,7 +323,7 @@ struct Session {
     rest: KiwoomRest,
     clock: Clock,
     timings: Timings,
-    desired: watch::Receiver<BTreeSet<Symbol>>,
+    desired: watch::Receiver<DesiredFeeds>,
     access: watch::Receiver<Access>,
     events: mpsc::Sender<StreamEvent>,
     budget: TokenBudget,
@@ -472,8 +547,8 @@ impl Session {
                 return Some(self.retry_later(attempt));
             }
         }
-        let desired = self.desired.borrow_and_update().clone();
-        let mut accepted = BTreeSet::new();
+        let desired = registrations(&self.desired.borrow_and_update());
+        let mut accepted = Registrations::new();
         if let Some(control) = Control::next(&desired, &accepted) {
             match self.control(&mut conn, &control).await {
                 Ok(()) => control.apply(&mut accepted),
@@ -491,9 +566,9 @@ impl Session {
         Some(SessionState::Live { conn, since, accepted, attempt })
     }
 
-    async fn live(&mut self, mut conn: Conn, mut accepted: BTreeSet<Symbol>) -> End {
+    async fn live(&mut self, mut conn: Conn, mut accepted: Registrations) -> End {
         let end = loop {
-            let desired = self.desired.borrow_and_update().clone();
+            let desired = registrations(&self.desired.borrow_and_update());
             if let Some(control) = Control::next(&desired, &accepted) {
                 match self.control(&mut conn, &control).await {
                     Ok(()) => control.apply(&mut accepted),
@@ -593,14 +668,18 @@ impl Session {
     async fn on_real(&mut self, conn: &mut Conn, items: Vec<Result<RealItem, wire::WireError>>) -> Result<(), End> {
         let received_at = self.clock.now();
         for item in items {
-            let tick = match item {
-                Ok(RealItem::Trade(tick)) => tick,
+            let event = match item {
+                Ok(RealItem::Trade(tick)) => StreamEvent::Tick { tick, received_at },
                 Ok(RealItem::Index { index, hhmmss, price, cumulative, change_centi }) => {
                     let before = conn.index_cumulative.insert(index, cumulative);
                     let qty = before.map_or(0, |b| cumulative.saturating_sub(b));
                     let day = change_centi.map(|change_centi| DayTotals { change_centi, cumulative: Volume(cumulative) });
-                    RealTick { symbol: Symbol::Index(index), hhmmss, price, qty: Volume(qty), exchange: None, day }
+                    let tick = RealTick { symbol: Symbol::Index(index), hhmmss, price, qty: Volume(qty), exchange: None, day, strength_centi: None };
+                    StreamEvent::Tick { tick, received_at }
                 }
+                Ok(RealItem::Book(book)) => StreamEvent::Book { book, received_at },
+                Ok(RealItem::Program(row)) => StreamEvent::Program { row, received_at },
+                Ok(RealItem::Broker(snapshot)) => StreamEvent::Broker { snapshot, received_at },
                 Ok(RealItem::AuctionOnly) => {
                     self.dropped.auction_only += 1;
                     tracing::debug!(count = self.dropped.auction_only, "체결량 0인 0B(동시호가)를 버립니다");
@@ -615,7 +694,7 @@ impl Session {
                     continue;
                 }
             };
-            self.events.send(StreamEvent::Tick { tick, received_at }).await.map_err(|_| End::Shutdown)?;
+            self.events.send(event).await.map_err(|_| End::Shutdown)?;
         }
         Ok(())
     }
@@ -751,6 +830,21 @@ mod tests {
         json!({"type": "0B", "item": "005930_AL", "values": {"20": time, "10": price.to_string(), "15": qty.to_string(), "13": cumulative.to_string(), "9081": exchange, "11": "0"}})
     }
 
+    fn feeds(spec: &[(Symbol, &[RealType])]) -> DesiredFeeds {
+        spec.iter().map(|&(symbol, kinds)| (symbol, kinds.iter().copied().collect())).collect()
+    }
+
+    fn book_frame(item: &str) -> Value {
+        let mut values = json!({"21": "093001", "23": "0", "24": "0", "121": "5100", "125": "4200"});
+        for depth in 1..=10_i64 {
+            values[(40 + depth).to_string()] = json!(format!("+{}", 71_000 + depth * 100));
+            values[(50 + depth).to_string()] = json!(format!("-{}", 71_000 - (depth - 1) * 100));
+            values[(60 + depth).to_string()] = json!((100 * depth).to_string());
+            values[(70 + depth).to_string()] = json!((10 * depth).to_string());
+        }
+        json!({"type": "0D", "item": item, "values": values})
+    }
+
     fn index(centi: i64, cumulative: u64) -> Value {
         let sign = if centi < 0 { "-" } else { "+" };
         let magnitude = centi.unsigned_abs();
@@ -827,9 +921,19 @@ mod tests {
         }
 
         fn start_rest(&self, rest: KiwoomRest, clock: Clock, timings: Timings, desired: &[Symbol]) -> (KiwoomStream, mpsc::Receiver<StreamEvent>) {
+            self.start_feeds_rest(rest, clock, timings, trades_only(desired.iter().copied().collect()))
+        }
+
+        fn start_feeds_rest(&self, rest: KiwoomRest, clock: Clock, timings: Timings, desired: DesiredFeeds) -> (KiwoomStream, mpsc::Receiver<StreamEvent>) {
             let (stream, events) = KiwoomStream::spawn_connector(Box::new(self.clone()), rest, clock, timings);
-            stream.set_desired(desired.iter().copied().collect());
+            stream.set_desired(desired);
             (stream, events)
+        }
+
+        fn start_feeds(&self, desired: DesiredFeeds) -> (KiwoomStream, mpsc::Receiver<StreamEvent>) {
+            let clock = clock();
+            let (rest, _) = rest(&clock);
+            self.start_feeds_rest(rest, clock, fast(), desired)
         }
 
         fn controls(&self, conn: usize) -> Vec<String> {
@@ -954,12 +1058,12 @@ mod tests {
         let peer = Peer::ok();
         let (stream, mut events, _) = peer.start(fast(), &[samsung(), kospi()]);
         assert!(matches!(next(&mut events).await, StreamEvent::Live { .. }));
-        stream.set_desired(BTreeSet::new());
+        stream.set_desired(DesiredFeeds::new());
         until("모두 해지됐다", || peer.controls(0).len() == 4).await;
         let messages = peer.messages(0);
         assert_eq!(messages[2]["data"], json!([{"item": ["005930_AL"], "type": ["0B"]}]));
         assert_eq!(messages[3]["data"], json!([{"item": ["001"], "type": ["0J"]}]));
-        stream.set_desired([samsung(), kospi()].into());
+        stream.set_desired(trades_only([samsung(), kospi()].into()));
         until("다시 등록됐다", || peer.controls(0).len() == 5).await;
         assert_eq!(peer.controls(0), ["LOGIN", "REG", "REMOVE", "REMOVE", "REG"]);
         assert_eq!(peer.logins(), 1);
@@ -1161,30 +1265,115 @@ mod tests {
         let (stream, mut events, _) = peer.start(timings, &[samsung()]);
         assert!(matches!(next(&mut events).await, StreamEvent::Live { .. }));
         tokio::time::advance(timings.live_resets_backoff_after).await;
-        stream.set_desired([samsung(), kospi()].into());
+        stream.set_desired(trades_only([samsung(), kospi()].into()));
         assert!(matches!(next(&mut events).await, StreamEvent::Down { .. }));
         assert!(matches!(next(&mut events).await, StreamEvent::Live { .. }));
-        stream.set_desired([samsung()].into());
+        stream.set_desired(trades_only([samsung()].into()));
         until("REMOVE가 받아들여졌다", || peer.controls(2).contains(&"REMOVE".to_owned())).await;
-        stream.set_desired([samsung(), kospi()].into());
+        stream.set_desired(trades_only([samsung(), kospi()].into()));
         assert!(matches!(next(&mut events).await, StreamEvent::Down { .. }));
         assert_eq!(next(&mut events).await, StreamEvent::Halted);
         assert_eq!(peer.logins(), 3);
     }
 
     #[tokio::test(start_paused = true)]
-    async fn replacing_one_of_two_hundred_registrations_removes_before_it_registers() {
+    async fn full_limit_removes_before_registering() {
         let peer = Peer::ok();
         let stock = |n: u32| Symbol::Stock(StockCode::parse(&format!("{n:06}")).unwrap());
-        let desired: Vec<Symbol> = (1..=200).map(stock).collect();
-        let (stream, mut events, _) = peer.start(fast(), &desired);
+        let both = |range: std::ops::RangeInclusive<u32>| -> DesiredFeeds { range.map(|n| (stock(n), [RealType::Trade, RealType::Book].into())).collect() };
+        let (stream, mut events) = peer.start_feeds(both(1..=200));
         assert!(matches!(next(&mut events).await, StreamEvent::Live { .. }));
-        stream.set_desired((2..=201).map(stock).collect());
-        until("바꾼 종목이 등록됐다", || peer.controls(0).len() == 4).await;
-        assert_eq!(peer.controls(0), ["LOGIN", "REG", "REMOVE", "REG"]);
+        stream.set_desired(both(2..=201));
+        until("바꾼 종목이 등록됐다", || peer.controls(0).len() == 5).await;
+        assert_eq!(peer.controls(0), ["LOGIN", "REG", "REMOVE", "REMOVE", "REG"]);
         assert_eq!(peer.messages(0)[2]["data"], json!([{"item": ["000001_AL"], "type": ["0B"]}]));
-        assert_eq!(peer.messages(0)[3]["data"], json!([{"item": ["000201_AL"], "type": ["0B"]}]));
+        assert_eq!(peer.messages(0)[3]["data"], json!([{"item": ["000001_AL"], "type": ["0D"]}]));
+        assert_eq!(peer.messages(0)[4]["data"], json!([{"item": ["000201_AL"], "type": ["0B"]}, {"item": ["000201_AL"], "type": ["0D"]}]));
         assert!(events.try_recv().is_err());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn reg_adds_only_the_new_type_for_a_symbol() {
+        let peer = Peer::ok();
+        let (stream, mut events) = peer.start_feeds(feeds(&[(samsung(), &[RealType::Trade]), (kospi(), &[RealType::Index])]));
+        assert!(matches!(next(&mut events).await, StreamEvent::Live { .. }));
+        stream.set_desired(feeds(&[(samsung(), &[RealType::Trade, RealType::Book]), (kospi(), &[RealType::Index])]));
+        until("0D가 등록됐다", || peer.controls(0).len() == 3).await;
+        assert_eq!(peer.controls(0), ["LOGIN", "REG", "REG"]);
+        assert_eq!(peer.messages(0)[2], json!({"trnm": "REG", "grp_no": "1", "refresh": "1", "data": [{"item": ["005930_AL"], "type": ["0D"]}]}));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn remove_drops_only_the_removed_type() {
+        let peer = Peer::ok();
+        let (stream, mut events) = peer.start_feeds(feeds(&[(samsung(), &[RealType::Trade, RealType::Book, RealType::Broker])]));
+        assert!(matches!(next(&mut events).await, StreamEvent::Live { .. }));
+        stream.set_desired(feeds(&[(samsung(), &[RealType::Trade, RealType::Broker])]));
+        until("0D가 해지됐다", || peer.controls(0).len() == 3).await;
+        assert_eq!(peer.controls(0), ["LOGIN", "REG", "REMOVE"]);
+        assert_eq!(peer.messages(0)[2], json!({"trnm": "REMOVE", "grp_no": "1", "data": [{"item": ["005930_AL"], "type": ["0D"]}]}));
+        stream.set_desired(feeds(&[(samsung(), &[RealType::Trade])]));
+        until("0F가 해지됐다", || peer.controls(0).len() == 4).await;
+        assert_eq!(peer.messages(0)[3]["data"], json!([{"item": ["005930_AL"], "type": ["0F"]}]));
+    }
+
+    #[test]
+    fn kinds_a_symbol_cannot_receive_are_dropped_before_the_session_sees_them() {
+        let (stream, desired) = KiwoomStream::detached();
+        stream.set_desired(feeds(&[(samsung(), &[RealType::Trade, RealType::Index]), (kospi(), &[RealType::Book, RealType::Index]), (Symbol::Index(IndexCode::KOSDAQ), &[RealType::Broker]), (Symbol::Stock(StockCode::parse("000660").unwrap()), &[])]));
+        assert_eq!(*desired.borrow(), feeds(&[(samsung(), &[RealType::Trade]), (kospi(), &[RealType::Index])]));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn reconnect_registers_every_type_again() {
+        let peer = Peer::ok();
+        let all = [RealType::Trade, RealType::Book, RealType::Program, RealType::Broker];
+        let (_stream, mut events) = peer.start_feeds(feeds(&[(samsung(), &all), (kospi(), &[RealType::Index])]));
+        assert!(matches!(next(&mut events).await, StreamEvent::Live { .. }));
+        assert_eq!(peer.messages(0)[1]["data"], json!([
+            {"item": ["005930_AL"], "type": ["0B"]},
+            {"item": ["001"], "type": ["0J"]},
+            {"item": ["005930_AL"], "type": ["0D"]},
+            {"item": ["005930_AL"], "type": ["0w"]},
+            {"item": ["005930_AL"], "type": ["0F"]},
+        ]));
+        peer.drop_session(0);
+        assert!(matches!(next(&mut events).await, StreamEvent::Down { .. }));
+        assert!(matches!(next(&mut events).await, StreamEvent::Live { .. }));
+        assert_eq!(peer.messages(0), peer.messages(1));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn book_program_and_broker_frames_become_events_with_the_receive_time() {
+        let peer = Peer::ok();
+        let (_stream, mut events) = peer.start_feeds(feeds(&[(samsung(), &[RealType::Trade, RealType::Book, RealType::Program, RealType::Broker])]));
+        assert!(matches!(next(&mut events).await, StreamEvent::Live { .. }));
+        let program = json!({"type": "0w", "item": "005930_AL", "values": {"20": "093002", "10": "+71200", "202": "100", "204": "7", "206": "300", "208": "21", "210": "200", "211": "-5", "212": "14", "213": "-1"}});
+        let broker = json!({"type": "0F", "item": "005930_AL", "values": {"141": "미래에셋", "146": "001", "161": "5000", "166": "-30", "151": "키움", "156": "002", "171": "4000", "176": "10"}});
+        peer.real(0, vec![book_frame("005930_AL"), program, broker]);
+        let received_at = clock().now();
+        let StreamEvent::Book { book, received_at: at } = next(&mut events).await else { panic!("호가가 아니다") };
+        assert_eq!((book.symbol, book.hhmmss, at), (samsung(), TimeOfDay::hms(9, 30, 1).unwrap(), received_at));
+        let StreamEvent::Program { row, .. } = next(&mut events).await else { panic!("프로그램이 아니다") };
+        assert_eq!((row.hhmmss, row.net_buy_qty_change), (TimeOfDay::hms(9, 30, 2).unwrap(), -5));
+        let StreamEvent::Broker { snapshot, received_at: at } = next(&mut events).await else { panic!("거래원이 아니다") };
+        assert_eq!((snapshot.sells[0].member_name.as_str(), snapshot.buys[0].change_qty, at), ("미래에셋", 10, received_at));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn trade_tick_carries_strength_when_present() {
+        let peer = Peer::ok();
+        let (_stream, mut events, _) = peer.start(fast(), &[samsung()]);
+        assert!(matches!(next(&mut events).await, StreamEvent::Live { .. }));
+        let mut with = trade("093001", 71_200, 15, 100, "KRX");
+        with["values"]["228"] = json!("112.34");
+        peer.real(0, vec![with, trade("093002", 71_200, 15, 115, "KRX")]);
+        assert_eq!(tick(next(&mut events).await).strength_centi, Some(11_234));
+        assert_eq!(tick(next(&mut events).await).strength_centi, None);
+        let mut unreadable = trade("093003", 71_200, 5, 120, "KRX");
+        unreadable["values"]["228"] = json!("n/a");
+        peer.real(0, vec![unreadable]);
+        assert_eq!(tick(next(&mut events).await).strength_centi, None);
     }
 
     #[tokio::test(start_paused = true)]
@@ -1218,12 +1407,12 @@ mod tests {
         let access = rest.watch_access();
         let session = Session { connector: Box::new(peer.clone()), rest, clock, timings: Timings::default(), desired, access, events: events_tx, budget: TokenBudget::Fresh, rebuild: ControlBudget::Fresh, dropped: Dropped::default() };
         let sender = session.events.clone();
-        stream.set_desired([samsung()].into());
+        stream.set_desired(trades_only([samsung()].into()));
         tokio::spawn(session.run());
         assert!(matches!(next(&mut events).await, StreamEvent::Live { .. }));
         assert_eq!(peer.logins(), 2);
         until("4096 real ticks fill the production event queue", || sender.capacity() == 0).await;
-        stream.set_desired([samsung(), kospi()].into());
+        stream.set_desired(trades_only([samsung(), kospi()].into()));
         until("second capacity rejection", || peer.controls(1).len() == 3).await;
         tokio::task::yield_now().await;
         assert_eq!(sender.capacity(), 0);

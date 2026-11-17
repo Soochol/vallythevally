@@ -23,7 +23,7 @@ use crate::bars::{BarError, BarService, Seed};
 use crate::clock::Clock;
 use crate::kiwoom::rest::Priority;
 use crate::kiwoom::rest::KiwoomError;
-use crate::kiwoom::stream::{Exchange, KiwoomStream, RealTick, StreamEvent};
+use crate::kiwoom::stream::{Exchange, KiwoomStream, RealTick, StreamEvent, trades_only};
 use crate::quotes;
 use crate::symbols::Directory;
 
@@ -476,7 +476,7 @@ impl MarketHub {
 
     fn replan(&mut self, now: KstTime) {
         let plan = self.manager.plan(now);
-        self.stream.set_desired(plan.realtime);
+        self.stream.set_desired(trades_only(plan.realtime));
         let newly: Vec<Holder> = plan.rejected.difference(&self.rejected).cloned().collect();
         let recovered: Vec<Holder> = self.rejected.difference(&plan.rejected).cloned().collect();
         self.rejected = plan.rejected;
@@ -699,6 +699,7 @@ impl MarketHub {
     fn on_event(&mut self, ev: StreamEvent) {
         match ev {
             StreamEvent::Tick { tick, received_at } => self.on_trade(tick, received_at),
+            StreamEvent::Book { .. } | StreamEvent::Program { .. } | StreamEvent::Broker { .. } => {}
             StreamEvent::Down { at } => {
                 let from = *self.gap_from.get_or_insert(at);
                 self.session_down(RealtimeState::Reconnecting, from);
@@ -1013,7 +1014,7 @@ mod tests {
         day_volumes: Arc<Mutex<HashMap<String, u64>>>,
         hub: HubHandle,
         events: mpsc::Sender<StreamEvent>,
-        desired: watch::Receiver<BTreeSet<Symbol>>,
+        desired: watch::Receiver<crate::kiwoom::stream::DesiredFeeds>,
         bars: Arc<BarService>,
         symbols: Arc<SymbolDirectory>,
         chart: Arc<Mutex<Chart>>,
@@ -1140,6 +1141,7 @@ mod tests {
             qty: Volume(qty),
             exchange,
             day: None,
+            strength_centi: None,
         };
         StreamEvent::Tick { tick, received_at: h.clock.now() }
     }
@@ -1232,7 +1234,7 @@ mod tests {
     async fn subscribe_seeds_then_every_trade_moves_the_current_bar() {
         let h = std_harness();
         let (_, out) = subscribed_samsung(&h).await;
-        assert_eq!(*h.desired.borrow(), BTreeSet::from([samsung().feed.symbol()]));
+        assert_eq!(*h.desired.borrow(), trades_only(BTreeSet::from([samsung().feed.symbol()])));
         h.events.send(trade(&h, (9, 0, 51), 112, 2, Some(Exchange::Krx))).await.unwrap();
         assert_eq!(take(&out).await, vec![bar_msg("a", 2, bar(at(9, 0, 0), [100, 112, 95, 112, 52]))]);
         h.events.send(trade(&h, (9, 0, 52), 90, 1, Some(Exchange::Nxt))).await.unwrap();
@@ -1315,7 +1317,7 @@ mod tests {
         assert_eq!(got(take(&out).await), [("all".to_owned(), 102.0), ("nxt".to_owned(), 102.0)]);
         h.events.send(trade(&h, (9, 0, 53), 103, 1, None)).await.unwrap();
         assert_eq!(got(take(&out).await), [("all".to_owned(), 103.0)], "거래소를 모르면 통합에만");
-        assert_eq!(*h.desired.borrow(), BTreeSet::from([samsung().feed.symbol()]), "거래소가 셋이어도 REG는 하나");
+        assert_eq!(*h.desired.borrow(), trades_only(BTreeSet::from([samsung().feed.symbol()])), "거래소가 셋이어도 REG는 하나");
     }
 
     #[tokio::test(start_paused = true)]
@@ -1393,14 +1395,14 @@ mod tests {
         let symbol = samsung().feed.symbol();
         h.hub.unsubscribe(conn, sub("a"));
         tokio::time::sleep(Duration::from_secs(20)).await;
-        assert_eq!(*h.desired.borrow(), BTreeSet::from([symbol]), "30초 유예");
+        assert_eq!(*h.desired.borrow(), trades_only(BTreeSet::from([symbol])), "30초 유예");
         h.hub.subscribe(conn, sub("a2"), samsung());
         assert_eq!(take(&out).await, vec![subscribed("a2", 2, None)], "유예 중 다시 구독하면 키를 이어 쓴다(09:00 봉은 타이머로 확정됐다)");
         h.hub.unsubscribe(conn, sub("a2"));
         tokio::time::sleep(Duration::from_secs(29)).await;
-        assert_eq!(*h.desired.borrow(), BTreeSet::from([symbol]));
+        assert_eq!(*h.desired.borrow(), trades_only(BTreeSet::from([symbol])));
         tokio::time::sleep(Duration::from_secs(2)).await;
-        assert_eq!(*h.desired.borrow(), BTreeSet::new());
+        assert_eq!(*h.desired.borrow(), trades_only(BTreeSet::new()));
         assert_eq!(h.hub.snapshot(samsung()).await, None, "구독도 유예도 없는 키는 내린다");
     }
 
@@ -1410,7 +1412,7 @@ mod tests {
         let (conn, _out) = subscribed_samsung(&h).await;
         h.hub.disconnect(conn);
         tokio::time::sleep(Duration::from_secs(31)).await;
-        assert_eq!(*h.desired.borrow(), BTreeSet::new());
+        assert_eq!(*h.desired.borrow(), trades_only(BTreeSet::new()));
     }
 
     fn statuses(msgs: &[ServerMessage]) -> Vec<(RealtimeState, bool)> {
@@ -1513,7 +1515,7 @@ mod tests {
             take(&out).await,
             vec![subscribed("x", 0, None), subscribed("y", 0, None), sub_error("x", SubErrorCode::UnknownSymbol), sub_error("y", SubErrorCode::BadRequest)]
         );
-        assert_eq!(*h.desired.borrow(), BTreeSet::new(), "받을 수 없는 종목은 유예 없이 놓는다");
+        assert_eq!(*h.desired.borrow(), trades_only(BTreeSet::new()), "받을 수 없는 종목은 유예 없이 놓는다");
         assert_eq!(h.hub.snapshot(key(UNLISTED, Venue::Combined)).await, None);
     }
 
@@ -1564,8 +1566,8 @@ mod tests {
         tokio::time::sleep(Duration::from_secs(2)).await;
         let msgs = out.take(true).messages;
         assert!(msgs.contains(&subscribed("over", 0, None)), "유예 중인 종목을 빼서 자리를 만들고 같은 sub로 다시 알린다: {msgs:?}");
-        assert!(!h.desired.borrow().contains(&samsung().feed.symbol()));
-        assert!(h.desired.borrow().contains(&Symbol::parse(&listed_filler(REALTIME_LIMIT - 1)).unwrap()));
+        assert!(!h.desired.borrow().contains_key(&samsung().feed.symbol()));
+        assert!(h.desired.borrow().contains_key(&Symbol::parse(&listed_filler(REALTIME_LIMIT - 1)).unwrap()));
     }
 
     #[tokio::test(start_paused = true)]
@@ -1608,8 +1610,8 @@ mod tests {
         tokio::time::sleep(Duration::from_secs(2)).await;
         let msgs = out.take(true).messages;
         assert!(msgs.contains(&limited(&[])), "유예 중인 칸 종목을 빼서 자리를 만든다: {msgs:?}");
-        assert!(h.desired.borrow().contains(&fillers(REALTIME_LIMIT)[REALTIME_LIMIT - 1]));
-        assert!(!h.desired.borrow().contains(&samsung().feed.symbol()));
+        assert!(h.desired.borrow().contains_key(&fillers(REALTIME_LIMIT)[REALTIME_LIMIT - 1]));
+        assert!(!h.desired.borrow().contains_key(&samsung().feed.symbol()));
         tokio::time::sleep(Duration::from_secs(2)).await;
         assert!(!out.take(true).messages.iter().any(|m| matches!(m, ServerMessage::WatchLimited { .. })), "바뀌지 않으면 다시 보내지 않는다");
     }
@@ -1628,7 +1630,7 @@ mod tests {
         h.hub.watch(conn, rows.clone(), Venue::Combined);
         tokio::time::sleep_until(t0 + Duration::from_millis(3_100)).await;
         let mut desired = h.desired.clone();
-        assert!(!desired.borrow_and_update().contains(&samsung));
+        assert!(!desired.borrow_and_update().contains_key(&samsung));
         for _ in 0..3 {
             h.hub.watch(conn, moved.clone(), Venue::Combined);
             h.hub.watch(conn, rows.clone(), Venue::Combined);
@@ -1639,7 +1641,7 @@ mod tests {
         tokio::time::sleep_until(t0 + Duration::from_millis(4_100)).await;
         assert!(desired.has_changed().unwrap());
         let now = desired.borrow_and_update().clone();
-        assert!(now.contains(&samsung) && !now.contains(&fillers(REALTIME_LIMIT)[REALTIME_LIMIT - 1]), "다음 1초 타이머에 마지막 순서로 한 번 바뀐다");
+        assert!(now.contains_key(&samsung) && !now.contains_key(&fillers(REALTIME_LIMIT)[REALTIME_LIMIT - 1]), "다음 1초 타이머에 마지막 순서로 한 번 바뀐다");
     }
 
     #[tokio::test(start_paused = true)]
@@ -1650,11 +1652,11 @@ mod tests {
         let unlisted = Symbol::parse(UNLISTED).unwrap();
         h.hub.watch(conn, vec![unlisted, samsung().feed.symbol()], Venue::Combined);
         tokio::time::sleep(Duration::from_secs(2)).await;
-        assert_eq!(*h.desired.borrow(), BTreeSet::from([samsung().feed.symbol()]), "없는 코드는 REG하지 않는다");
+        assert_eq!(*h.desired.borrow(), trades_only(BTreeSet::from([samsung().feed.symbol()])), "없는 코드는 REG하지 않는다");
         let info = |symbol| SymbolInfo { symbol, name: "x".into(), kind: SymbolKind::Common, market: Market::Kospi, nxt_enabled: false };
         h.symbols.replace(Directory::build(vec![info(unlisted), info(samsung().feed.symbol())]));
         tokio::time::sleep(Duration::from_secs(2)).await;
-        assert_eq!(*h.desired.borrow(), BTreeSet::from([unlisted, samsung().feed.symbol()]), "종목 목록이 바뀌면 다시 맞춘다");
+        assert_eq!(*h.desired.borrow(), trades_only(BTreeSet::from([unlisted, samsung().feed.symbol()])), "종목 목록이 바뀌면 다시 맞춘다");
     }
 
     #[tokio::test(start_paused = true)]
@@ -1664,19 +1666,19 @@ mod tests {
         let (conn, _out) = connect(&h).await;
         h.hub.watch(conn, vec![samsung().feed.symbol()], Venue::Combined);
         tokio::time::sleep(Duration::from_secs(2)).await;
-        assert_eq!(*h.desired.borrow(), BTreeSet::from([samsung().feed.symbol()]));
+        assert_eq!(*h.desired.borrow(), trades_only(BTreeSet::from([samsung().feed.symbol()])));
         h.hub.watch(conn, Vec::new(), Venue::Combined);
         tokio::time::sleep(Duration::from_secs(29)).await;
-        assert_eq!(*h.desired.borrow(), BTreeSet::from([samsung().feed.symbol()]));
+        assert_eq!(*h.desired.borrow(), trades_only(BTreeSet::from([samsung().feed.symbol()])));
         tokio::time::sleep(Duration::from_secs(2)).await;
-        assert_eq!(*h.desired.borrow(), BTreeSet::new());
+        assert_eq!(*h.desired.borrow(), trades_only(BTreeSet::new()));
         h.hub.watch(conn, vec![samsung().feed.symbol()], Venue::Combined);
         tokio::time::sleep(Duration::from_secs(2)).await;
         h.hub.disconnect(conn);
         tokio::time::sleep(Duration::from_secs(29)).await;
-        assert_eq!(*h.desired.borrow(), BTreeSet::from([samsung().feed.symbol()]), "연결이 끊겨도 30초 유예");
+        assert_eq!(*h.desired.borrow(), trades_only(BTreeSet::from([samsung().feed.symbol()])), "연결이 끊겨도 30초 유예");
         tokio::time::sleep(Duration::from_secs(2)).await;
-        assert_eq!(*h.desired.borrow(), BTreeSet::new());
+        assert_eq!(*h.desired.borrow(), trades_only(BTreeSet::new()));
     }
 
     #[tokio::test(start_paused = true)]
@@ -1691,7 +1693,7 @@ mod tests {
         assert!(h.hub.snapshot(samsung()).await.is_some(), "닫은 칸의 키는 30초 유예");
         tokio::time::sleep(Duration::from_secs(2)).await;
         assert_eq!(h.hub.snapshot(samsung()).await, None, "관심종목이 종목을 잡고 있어도 닫은 칸의 키는 내린다");
-        assert_eq!(*h.desired.borrow(), BTreeSet::from([symbol]), "관심종목 줄이 REG를 지킨다");
+        assert_eq!(*h.desired.borrow(), trades_only(BTreeSet::from([symbol])), "관심종목 줄이 REG를 지킨다");
         out.take(true);
         h.events.send(day_trade(&h, (9, 1, 23), 112, Exchange::Krx, 12, 1_000)).await.unwrap();
         assert_eq!(take(&out).await, vec![quote_msg(SAMSUNG, 112.0, 12.0, 1_000, at(9, 1, 23))], "키가 없어도 관심종목 줄은 체결을 받는다");
@@ -2551,7 +2553,7 @@ mod tests {
         rows.push(samsung().feed.symbol());
         h.hub.watch(conn, rows, Venue::Krx);
         tokio::time::sleep(Duration::from_secs(3)).await;
-        assert!(h.desired.borrow().contains(&samsung().feed.symbol()), "마지막 목록 줄도 실시간 자리를 받는다");
+        assert!(h.desired.borrow().contains_key(&samsung().feed.symbol()), "마지막 목록 줄도 실시간 자리를 받는다");
         h.events.send(fill(&h, SAMSUNG, (9, 0, 51), 112, Some(Exchange::Krx), 5, (12, 1_005))).await.unwrap();
         assert_eq!(quote_messages(take(&out).await), vec![quotes_msg(api::Venue::Krx, vec![venue_quote(SAMSUNG, api::Venue::Krx, 112.0, 12.0, 705, at(9, 0, 51))])]);
     }
