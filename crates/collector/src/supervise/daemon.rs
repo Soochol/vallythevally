@@ -414,10 +414,15 @@ impl Supervisor {
                 self.acquire_token(index);
             }
             if self.keys[index].reissue_at.is_some_and(|at| at <= now) {
-                self.keys[index].reissue_at = None;
-                self.keys[index].tokens.mark_current_stale();
-                self.keys[index].sent_generation = None;
-                self.acquire_token(index);
+                let wait = self.keys[index].tokens.wait_before_issue();
+                if wait.is_zero() {
+                    self.keys[index].reissue_at = None;
+                    self.keys[index].tokens.mark_current_stale();
+                    self.keys[index].sent_generation = None;
+                    self.acquire_token(index);
+                } else {
+                    self.keys[index].reissue_at = Some(now + wait);
+                }
             }
         }
         if self.housekeeping_at <= now {
@@ -530,7 +535,7 @@ impl Supervisor {
             let first = self.name(first);
             return skip(self, format!("예비 키가 이미 {first}의 몫을 받았습니다. 이 키의 몫은 수집이 끊긴 채로 남습니다"));
         }
-        let Some(to) = self.keys.iter().position(|runtime| runtime.role == KeyRole::Spare && matches!(runtime.phase, Phase::Backoff { .. } | Phase::Running(_))) else {
+        let Some(to) = self.keys.iter().position(|runtime| runtime.role == KeyRole::Spare && can_receive_share(&runtime.phase)) else {
             return skip(self, "받을 수 있는 예비 키가 없습니다".to_owned());
         };
         let receiver = self.name(to);
@@ -772,6 +777,14 @@ impl Supervisor {
                 }
             }
         }
+    }
+}
+
+fn can_receive_share(phase: &Phase) -> bool {
+    match phase {
+        Phase::Backoff { .. } => true,
+        Phase::Running(running) => running.retiring.is_none(),
+        Phase::Stopped | Phase::HandedOff => false,
     }
 }
 

@@ -668,3 +668,41 @@ fn the_plan_after_a_handoff_still_has_every_stock_on_exactly_one_key() {
     assert_eq!(held(&after, "spare-01").market_types, MARKET_TYPES.to_vec());
     assert_eq!(effective_plan(&plan, None), plan);
 }
+
+#[tokio::test(start_paused = true)]
+async fn a_spare_that_is_already_being_ended_does_not_take_a_share() {
+    let world = World::start_with(plan_for(2, 3), Settings::default(), |launcher, transport| {
+        launcher.stubborn.store(true, Ordering::SeqCst);
+        transport.refuse_8050("collect-02");
+    });
+    world.pass(1).await;
+    world.launcher.only("spare-01").events.send(ChildMessage::BadLine(collector::protocol::ProtocolError::Version(Some(2)))).unwrap();
+    world.pass(30).await;
+
+    assert!(world.journal_of("handoff").is_empty(), "받지 못하는 예비 키로 인계했다고 적으면 안 된다");
+    assert_eq!(world.journal_of("handoff_skipped").len(), 1);
+    assert_eq!(world.state_of("collect-02"), KeyState::Stopped);
+    assert!(world.launcher.only("spare-01").registers().is_empty());
+    world.finish().await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_reissue_due_inside_the_issue_interval_keeps_the_valid_token_until_the_new_one_can_be_issued() {
+    let world = World::start(plan_for(2, 2));
+    world.pass(30).await;
+    let now = world.clock.now();
+    world.control.reissue_token_at(KeyName::parse("collect-02").unwrap(), now.plus_secs(100));
+    world.pass(200).await;
+    let first = world.launcher.only("collect-02");
+    first.exit(1);
+    world.pass(30).await;
+
+    let children = world.launcher.children_of("collect-02");
+    assert_eq!(children.len(), 2);
+    assert_eq!(children[1].tokens().len(), 1, "다시 뜬 자식은 아직 유효한 토큰을 바로 받는다");
+    assert_eq!(children[1].tokens()[0].0, first.tokens()[0].0);
+    world.pass(700).await;
+    assert_eq!(world.transport.issues("collect-02").len(), 2);
+    assert_eq!(world.launcher.children_of("collect-02")[1].tokens().len(), 2, "새 토큰은 발급 간격이 지난 뒤 간다");
+    world.finish().await;
+}
