@@ -2,7 +2,7 @@ use crate::clock::UnixSeconds;
 use crate::model::{CodeChallenge, ConnectorPort, ConnectorState, Provider};
 use crate::secrets::{random_string, sha256};
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous};
-use sqlx::{Row, SqlitePool};
+use sqlx::{Row, Sqlite, SqlitePool, Transaction};
 use std::path::Path;
 
 pub const PENDING_LOGIN_SECONDS: i64 = 10 * 60;
@@ -52,6 +52,10 @@ pub struct Store {
 impl Store {
     pub fn new(pool: SqlitePool) -> Self {
         Self { pool }
+    }
+
+    pub(crate) async fn begin_account_write(&self) -> Result<Transaction<'static, Sqlite>, sqlx::Error> {
+        self.pool.begin_with("BEGIN IMMEDIATE").await
     }
 
     pub async fn purge_expired(&self, now: UnixSeconds) -> Result<(), sqlx::Error> {
