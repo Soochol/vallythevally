@@ -1,11 +1,13 @@
 use std::fmt;
 
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use super::api::ApiId;
 use super::transport::{SEND_TIMEOUT, TransportError};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum CodeKey {
     /// REST `return_msg`의 `[NNNN:…]`·`[NNNN]`.
     Rest(u16),
@@ -286,6 +288,10 @@ impl Failure {
             detail: None,
             note,
         }
+    }
+
+    pub fn restored_auth_block(detail: CodeKey) -> Failure {
+        Failure { category: AuthBlocked, api_id: ApiId::Au10001, http_status: None, return_code: None, detail: Some(detail), note: Note::None }
     }
 
     pub fn note(&self) -> &Note {

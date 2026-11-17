@@ -8,7 +8,7 @@ use axum::response::Json;
 use axum::routing::{get, post, put};
 use serde::de::DeserializeOwned;
 
-use crate::api::{self, ApiErrorCode, KeySource, KiwoomConnectStep, KiwoomLinkProblem, KiwoomLinkState, KiwoomLinkStatus, UnixSeconds};
+use crate::api::{self, ApiErrorCode, KeySource, KiwoomAtStart, KiwoomConnectStep, KiwoomLinkProblem, KiwoomLinkState, KiwoomLinkStatus, UnixSeconds};
 use crate::config::{Config, KiwoomCredentials, Secret};
 use crate::http::{ApiFailure, AppState};
 use crate::kiwoom::ip_file::RegisteredIpFile;
@@ -181,6 +181,7 @@ async fn put_key(State(st): State<Arc<AppState>>, body: Body) -> Result<Json<Kiw
     st.system.set_key_file_problem(None);
     st.link.replace_key(credentials.app_key, credentials.app_secret);
     tracing::info!("키움 키를 저장했습니다");
+    st.link.connect_in_background();
     Ok(Json(kiwoom_status(&st)))
 }
 
@@ -200,12 +201,12 @@ async fn delete_key(State(st): State<Arc<AppState>>) -> Result<Json<KiwoomLinkSt
 async fn connect(State(st): State<Arc<AppState>>, body: Body) -> Result<Json<KiwoomLinkStatus>, ApiFailure> {
     let input: api::KiwoomConnectInput = read_body(body).await?;
     tracing::info!(acknowledged = input.acknowledged, "키움 연결을 요청받았습니다");
-    st.link.connect(input.acknowledged).await;
+    st.link.connect_until_waiting(input.acknowledged).await;
     Ok(Json(kiwoom_status(&st)))
 }
 
 async fn disconnect(State(st): State<Arc<AppState>>) -> Json<KiwoomLinkStatus> {
-    st.link.disconnect();
+    st.link.disconnect_by_user();
     Json(kiwoom_status(&st))
 }
 
@@ -244,6 +245,7 @@ async fn get_settings(State(st): State<Arc<AppState>>) -> Result<Json<api::Syste
 
 pub fn kiwoom_status(st: &AppState) -> KiwoomLinkStatus {
     let summary = st.rest.auth().credential_summary();
+    let summary_present = summary.is_some();
     let key_source = if st.system.env_key { KeySource::Env } else if summary.is_some() { KeySource::File } else { KeySource::None };
     let mut status = KiwoomLinkStatus {
         key_source,
@@ -259,7 +261,9 @@ pub fn kiwoom_status(st: &AppState) -> KiwoomLinkStatus {
         realtime_registered: None,
         symbol_count: None,
         registered_ip: st.system.registered_ip(),
+        at_start: None,
     };
+    status.at_start = summary_present.then(|| if st.rest.auth().kept_disconnected() { KiwoomAtStart::KeptDisconnected } else { KiwoomAtStart::Connects });
     match st.link.state() {
         LinkState::NoKey => match st.system.key_file_problem() {
             Some(problem) => {
@@ -271,12 +275,21 @@ pub fn kiwoom_status(st: &AppState) -> KiwoomLinkStatus {
         },
         LinkState::Disconnected => {
             status.state = KiwoomLinkState::Disconnected;
-            status.message = "키가 저장돼 있습니다. 연결하지 않았습니다".to_owned();
+            status.message = match status.at_start {
+                Some(KiwoomAtStart::KeptDisconnected) => "연결을 끊어 두었습니다. 연결하면 다음부터 서버를 켤 때 자동으로 연결합니다",
+                _ => "키가 저장돼 있습니다. 서버를 켤 때 자동으로 연결합니다",
+            }
+            .to_owned();
         }
         LinkState::Connecting(step) => {
             status.state = KiwoomLinkState::Connecting;
             status.step = Some(connect_step(step));
-            status.message = "키움에 연결하는 중입니다".to_owned();
+            if let ConnectStep::IssueInterval(until) = step {
+                status.retry_at = Some(UnixSeconds(until.unix()));
+                status.message = "키움 토큰 발급 간격을 기다리는 중입니다. 간격이 끝나면 저절로 연결합니다".to_owned();
+            } else {
+                status.message = "키움에 연결하는 중입니다".to_owned();
+            }
         }
         LinkState::Connected => {
             status.state = KiwoomLinkState::Connected;
@@ -303,6 +316,7 @@ fn connect_step(step: ConnectStep) -> KiwoomConnectStep {
     match step {
         ConnectStep::CheckingKey => KiwoomConnectStep::CheckingKey,
         ConnectStep::Token => KiwoomConnectStep::Token,
+        ConnectStep::IssueInterval(_) => KiwoomConnectStep::IssueInterval,
         ConnectStep::Symbols => KiwoomConnectStep::Symbols,
         ConnectStep::Realtime => KiwoomConnectStep::Realtime,
     }

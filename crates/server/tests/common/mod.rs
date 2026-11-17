@@ -121,10 +121,12 @@ impl Server {
             let state = server::app::application_with_system(server::app::ApplicationInputs { rest: rest.clone(), clock: clock.clone(), symbols: symbols.clone(), db, screener_store: store, stream: (stream, stream_events), static_dir, screener_update_on_connect: value("VALLY_SCREENER_UPDATE_ON_START") == Some("on") }, system);
             let mut background = tokio::task::JoinSet::new();
             publish.set(Control { link: state.link.clone(), runtime: tokio::runtime::Handle::current(), clock: clock.clone() }).ok();
-            if value("VALLY_KIWOOM_CONNECT") != Some("off") {
+            if value("VALLY_KIWOOM_CONNECT") == Some("start") {
+                state.link.connect_at_start();
+            } else if value("VALLY_KIWOOM_CONNECT") != Some("off") {
                 let link = state.link.clone();
                 background.spawn(async move { link.connect(false).await; });
-                state.link.subscribe().wait_for(|state| matches!(state, LinkState::NoKey | LinkState::Connected | LinkState::Failed(_) | LinkState::Connecting(ConnectStep::Symbols | ConnectStep::Realtime))).await.unwrap();
+                state.link.subscribe().wait_for(|state| matches!(state, LinkState::NoKey | LinkState::Connected | LinkState::Failed(_) | LinkState::Connecting(ConnectStep::IssueInterval(_) | ConnectStep::Symbols | ConnectStep::Realtime))).await.unwrap();
             }
             background.spawn(server::app::daily_maintenance(state.clone()));
             background.spawn(server::account::sync::run(state.clone()));
@@ -154,6 +156,20 @@ impl Server {
         let control = self.control.get().expect("서버가 아직 준비되지 않았습니다");
         let link = control.link.clone();
         control.runtime.spawn(async move { link.connect(acknowledged).await }).await.unwrap()
+    }
+
+    pub async fn connect_until_waiting(&self, acknowledged: bool) -> LinkState {
+        let control = self.control.get().expect("서버가 아직 준비되지 않았습니다");
+        let link = control.link.clone();
+        control.runtime.spawn(async move { link.connect_until_waiting(acknowledged).await }).await.unwrap()
+    }
+
+    pub async fn wait_for_state(&self, wanted: fn(&LinkState) -> bool) -> LinkState {
+        let control = self.control.get().expect("서버가 아직 준비되지 않았습니다");
+        let mut state = control.link.subscribe();
+        control.runtime.spawn(async move {
+            tokio::time::timeout(std::time::Duration::from_secs(10), async { state.wait_for(wanted).await.unwrap().clone() }).await.expect("기다리던 연결 상태가 오지 않았다")
+        }).await.unwrap()
     }
 
     pub fn clock(&self) -> server::clock::Clock { self.control.get().expect("서버가 아직 준비되지 않았습니다").clock.clone() }

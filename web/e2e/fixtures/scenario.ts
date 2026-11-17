@@ -128,7 +128,7 @@ export class MarketFixtures {
 
 export const CONNECTED_KIWOOM: KiwoomLinkStatus = {
   keySource: "file", appKeyTail: "1234", registeredIp: null, credentialId: null, state: "connected", problem: null, message: "키움에 연결되어 있습니다",
-  retryAt: null, needsAcknowledgement: false, step: null, tokenExpiresAt: null, realtimeRegistered: 0, symbolCount: 2800,
+  retryAt: null, needsAcknowledgement: false, step: null, tokenExpiresAt: null, realtimeRegistered: 0, symbolCount: 2800, atStart: "connects",
 };
 
 export const SYNCED: SyncStatus = { state: "running", lastSuccessAt: 1_762_650_000, pendingDocuments: 0, refusedDocuments: 0, lastError: null };

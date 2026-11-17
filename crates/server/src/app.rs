@@ -1,7 +1,6 @@
 //! 서버를 켜는 순서와 하루 타이머(backend.md §4.1, §6.2, §6.6).
 //!
 //! 순서: 설정 → 잠금 파일 → 사용자 자료 DB → 포트 열기 → 토큰 파일 읽기(키움 요청 없음) → 요청 받기.
-//! 키움 요청과 WebSocket 접속은 켜질 때 없다. 사용자가 연결하면 `Link::connect`가 토큰 → 종목 목록 → 실시간 순으로 잇는다(ADR 0021).
 //! 잠금은 키움 요청보다 먼저다. 두 번째 서버는 키움에 아무것도 보내지 않고 끝난다.
 
 use std::process::ExitCode;
@@ -218,6 +217,7 @@ async fn serve(config: Config, token_file: TokenFile, key_file: KeyFile, account
     let system = SystemState::new(key_file, env_key, startup.file_problem, crate::api::SystemSettings::from_config(&config)).with_public_ip(Arc::new(public_ip)).with_account(account);
     let state = application_with_system(ApplicationInputs { rest: rest.clone(), clock: clock.clone(), symbols: symbols.clone(), db, screener_store, stream, static_dir: config.static_dir.clone(), screener_update_on_connect: config.screener_update_on_start }, system);
     state.system.bound(bound_addr);
+    state.link.connect_at_start();
     tokio::spawn(daily_maintenance(state.clone()));
     tokio::spawn(crate::account::sync::run(state.clone()));
 

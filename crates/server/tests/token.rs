@@ -7,13 +7,20 @@ use std::time::Duration;
 use common::{APP_KEY, APP_SECRET, ScriptedTransport, Server, TOKEN, token_path};
 use common::support::token_for;
 use serde_json::{Value, json};
-use server::kiwoom::link::{LinkState, Problem};
+use server::kiwoom::link::{ConnectStep, LinkState, Problem};
 use server::kiwoom::token_file::credential_id;
 
 fn failure_of(state: LinkState) -> (Problem, Option<i64>, String) {
     match state {
         LinkState::Failed(failure) => (failure.problem, failure.retry_at.map(|at| at.unix()), failure.message),
         other => panic!("연결 실패가 아니다: {other:?}"),
+    }
+}
+
+fn waiting_until(state: LinkState) -> i64 {
+    match state {
+        LinkState::Connecting(ConnectStep::IssueInterval(until)) => until.unix(),
+        other => panic!("발급 간격 대기가 아니다: {other:?}"),
     }
 }
 
@@ -110,9 +117,9 @@ async fn no_issue_within_ten_minutes_of_the_last_request_even_across_restarts() 
     write_token_file(&lock, json!({"token": null, "last_request_at": last_request}));
     let server = Server::spawn(&fake, &lock, &static_dir(tmp.path()));
     let base = format!("http://{}", server.addr().await);
-    let (problem, retry_at, message) = failure_of(server.link_state());
-    assert_eq!((problem, retry_at), (Problem::IssueIntervalWait, Some(last_request + 600)), "{message}");
-    assert!(message.contains("10분"), "{message}");
+    assert_eq!(waiting_until(server.link_state()), last_request + 600);
+    let (_, status_body) = get(&base, "/api/system/kiwoom").await;
+    assert_eq!((status_body["state"].as_str(), status_body["step"].as_str(), status_body["retryAt"].as_i64()), (Some("connecting"), Some("issueInterval"), Some(last_request + 600)), "{status_body}");
     let (status, body) = get(&base, "/api/bars?symbol=005930&period=D").await;
     assert_eq!((status, body["error"]["code"].as_str(), body["error"]["reason"].as_str()), (503, Some("kiwoom_unavailable"), Some("not_connected")), "{body}");
     let logs = server.stop().await;
@@ -213,12 +220,11 @@ async fn a_token_saved_for_another_app_key_is_never_sent_and_the_interval_still_
 
     let server = Server::spawn_with(&fake, &lock, &dist, other);
     let base = format!("http://{}", server.addr().await);
-    let (problem, _, message) = failure_of(server.link_state());
+    let until = waiting_until(server.link_state());
     let (status, body) = get(&base, "/api/bars?symbol=005930&period=D").await;
     let logs = server.stop().await;
     assert_eq!((status, body["error"]["reason"].as_str()), (503, Some("not_connected")), "{body}\n{logs}");
-    assert_eq!(problem, Problem::IssueIntervalWait, "{message}");
-    assert!(message.contains("10분"), "{message}");
+    assert!(until > now_unix() && until <= now_unix() + 600, "{until}");
     assert_eq!(fake.requests(), sent_before, "앱키가 바뀌어도 10분 안에는 아무것도 보내지 않는다: {:?}", fake.api_ids());
 
     let path = token_path(&lock);
@@ -237,4 +243,55 @@ async fn a_token_saved_for_another_app_key_is_never_sent_and_the_interval_still_
 async fn a_token_file_others_can_read_is_not_used() {
     let cases = vec![("파일 644", with_modes(0o700, 0o644)), ("디렉터리 755", with_modes(0o755, 0o600))];
     assert_never_issues(&ScriptedTransport::new(), cases).await;
+}
+
+#[tokio::test]
+async fn a_token_file_from_before_the_records_is_read_and_keeps_working() {
+    let fake = ScriptedTransport::new();
+    let tmp = tempfile::tempdir().unwrap();
+    let lock = tmp.path().join("run/server.lock");
+    let at = now_unix() - 3600;
+    write_token_file(&lock, json!({"credential": credential_id(APP_KEY), "token": {"value": TOKEN, "expires_dt": "20991231000000", "issued_at": at}, "last_request_at": at}));
+    let server = Server::spawn_with(&fake, &lock, &static_dir(tmp.path()), &[("VALLY_KIWOOM_CONNECT", "start".as_ref())]);
+    server.addr().await;
+    server.wait_for_state(|state| *state == LinkState::Connected).await;
+    assert_eq!(fake.issued(), 0, "{:?}", fake.api_ids());
+    server.stop().await;
+    let saved: Value = serde_json::from_str(&std::fs::read_to_string(token_path(&lock)).unwrap()).unwrap();
+    assert_eq!(saved["token"]["value"], TOKEN);
+}
+
+#[tokio::test]
+async fn the_block_and_disconnect_records_are_read_again_at_the_next_start() {
+    let tmp = tempfile::tempdir().unwrap();
+    let dist = static_dir(tmp.path());
+    let at = now_unix() - 3600;
+    let start: &[(&str, &std::ffi::OsStr)] = &[("VALLY_KIWOOM_CONNECT", "start".as_ref())];
+
+    let fake = ScriptedTransport::new();
+    let lock = tmp.path().join("eight/server.lock");
+    write_token_file(&lock, json!({"credential": credential_id(APP_KEY), "token": null, "last_request_at": at, "auth_block": {"detail": {"rest": 8050}, "credential": credential_id("FAKE-APPKEY-another"), "at": at}}));
+    let server = Server::spawn_with(&fake, &lock, &dist, start);
+    server.addr().await;
+    let (problem, _, _) = failure_of(server.link_state());
+    assert_eq!(problem, Problem::AuthBlocked8050, "8050은 다른 앱키 해시로 쓴 기록이어도 복원한다");
+    assert!(server.link().needs_acknowledgement());
+    server.stop().await;
+
+    let lock = tmp.path().join("rejected/server.lock");
+    write_token_file(&lock, json!({"credential": credential_id(APP_KEY), "token": null, "last_request_at": at, "auth_block": {"detail": {"rest": 8001}, "credential": credential_id("FAKE-APPKEY-another"), "at": at}}));
+    let server = Server::spawn_with(&fake, &lock, &dist, start);
+    server.addr().await;
+    server.wait_for_state(|state| *state == LinkState::Connected).await;
+    server.stop().await;
+
+    let lock = tmp.path().join("kept/server.lock");
+    write_token_file(&lock, json!({"credential": credential_id(APP_KEY), "token": null, "last_request_at": at, "disconnected": credential_id(APP_KEY)}));
+    let sent = fake.requests();
+    let server = Server::spawn_with(&fake, &lock, &dist, start);
+    server.addr().await;
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert_eq!(server.link_state(), LinkState::Disconnected);
+    assert_eq!(fake.requests(), sent, "{:?}", fake.api_ids());
+    server.stop().await;
 }

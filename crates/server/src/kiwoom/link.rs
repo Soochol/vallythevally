@@ -7,7 +7,7 @@ use futures::FutureExt;
 use futures::future::{BoxFuture, Shared};
 use tokio::sync::watch;
 
-use super::auth::Halt;
+use super::auth::{Halt, TokenGen};
 use super::error::Category;
 use super::rest::{Access, GateCause, KiwoomError, KiwoomRest, Priority};
 use crate::clock::Clock;
@@ -21,6 +21,7 @@ const SYMBOL_LIST_RETRY: Duration = Duration::from_secs(10);
 pub enum ConnectStep {
     CheckingKey,
     Token,
+    IssueInterval(KstTime),
     Symbols,
     Realtime,
 }
@@ -76,6 +77,12 @@ pub enum LinkState {
 
 struct Stale;
 
+enum Decision {
+    Done(LinkState),
+    WaitUntil(KstTime),
+    Proceed { has_token: bool },
+}
+
 type Flight = Shared<BoxFuture<'static, LinkState>>;
 
 struct Inner {
@@ -86,7 +93,7 @@ struct Inner {
     update_on_start: bool,
     state: watch::Sender<LinkState>,
     flight: Mutex<Option<(bool, Flight)>>,
-    released_8050: Mutex<Option<Halt>>,
+    released_8050: Mutex<Option<(Halt, Option<TokenGen>)>>,
     epoch: watch::Sender<u64>,
 }
 
@@ -172,13 +179,15 @@ impl Link {
         self.0.state.send_replace(state);
     }
 
-    fn restore_unsent_8050(&self) {
+    fn restore_unsent_8050(&self) -> bool {
         let released = self.0.released_8050.lock().expect("8050 잠금").take();
         let auth = self.0.rest.auth();
-        if let Some(halt) = released
-            && auth.issue_blocked_until(self.0.clock.now()).is_none()
-        {
-            auth.restore_halt(halt);
+        match released {
+            Some((halt, generation_at_release)) if auth.issued_generation() == generation_at_release => {
+                auth.restore_halt(halt);
+                auth.halted().is_some_and(|halt| halt.is_8050())
+            }
+            _ => false,
         }
     }
 
@@ -233,6 +242,9 @@ impl Link {
         });
         let flight = async move { task.await.unwrap_or(LinkState::Disconnected) }.boxed().shared();
         *slot = Some((acknowledged, flight.clone()));
+        if !self.is_connected() {
+            self.set(LinkState::Connecting(ConnectStep::CheckingKey));
+        }
         (acknowledged, flight)
     }
 
@@ -242,8 +254,11 @@ impl Link {
         if *self.0.epoch.borrow() == epoch {
             if matches!(outcome, Ok(LinkState::Connected)) {
                 self.0.released_8050.lock().expect("8050 잠금").take();
-            } else {
-                self.restore_unsent_8050();
+                self.0.rest.auth().clear_connect_records();
+            } else if self.restore_unsent_8050() {
+                let blocked = self.resting_state();
+                self.set(blocked.clone());
+                return Ok(blocked);
             }
         }
         outcome
@@ -252,35 +267,13 @@ impl Link {
     async fn connect_steps(&self, acknowledged: bool, epoch: u64) -> Result<LinkState, Stale> {
         let rest = &self.0.rest;
         let auth = rest.auth();
-        if self.aborted(epoch) {
-            return Err(Stale);
-        }
-        if self.is_connected() {
-            return Ok(LinkState::Connected);
-        }
-        self.step(epoch, LinkState::Connecting(ConnectStep::CheckingKey))?;
-        if !auth.has_credentials() {
-            return self.finish(epoch, LinkState::NoKey);
-        }
-        match auth.halted() {
-            Some(halt) if halt.is_8050() && acknowledged => {
-                let now = self.0.clock.now();
-                if let Some(until) = auth.issue_blocked_until(now) {
-                    return self.finish(epoch, LinkState::Failed(LinkFailure::of(&KiwoomError::Gated { until, cause: GateCause::IssueInterval })));
-                }
-                self.publish(epoch, || {
-                    *self.0.released_8050.lock().expect("8050 잠금") = Some(halt);
-                    auth.release_8050();
-                })?;
+        let has_token = loop {
+            match self.decide(acknowledged, epoch)? {
+                Decision::Done(state) => return Ok(state),
+                Decision::WaitUntil(until) => self.wait_for_issue_interval(until, epoch).await?,
+                Decision::Proceed { has_token } => break has_token,
             }
-            Some(halt) => return self.finish(epoch, LinkState::Failed(LinkFailure::of(&halt.into()))),
-            None => {}
-        }
-        let now = self.0.clock.now();
-        let has_token = auth.current(now).is_some();
-        if !has_token && let Some(until) = auth.issue_blocked_until(now) {
-            return self.finish(epoch, LinkState::Failed(LinkFailure::of(&KiwoomError::Gated { until, cause: GateCause::IssueInterval })));
-        }
+        };
         self.open_access(epoch, Access::Connecting)?;
         if has_token {
             tracing::info!("파일의 토큰을 다시 씁니다. 발급하지 않습니다");
@@ -309,6 +302,53 @@ impl Link {
             self.start_screener_update();
         }
         Ok(outcome)
+    }
+
+    fn decide(&self, acknowledged: bool, epoch: u64) -> Result<Decision, Stale> {
+        let auth = self.0.rest.auth();
+        if self.aborted(epoch) {
+            return Err(Stale);
+        }
+        if self.is_connected() {
+            return Ok(Decision::Done(LinkState::Connected));
+        }
+        self.step(epoch, LinkState::Connecting(ConnectStep::CheckingKey))?;
+        if !auth.has_credentials() {
+            return self.finish(epoch, LinkState::NoKey).map(Decision::Done);
+        }
+        match auth.halted() {
+            Some(halt) if halt.is_8050() && acknowledged => {
+                let now = self.0.clock.now();
+                if let Some(until) = auth.issue_blocked_until(now) {
+                    return self.finish(epoch, LinkState::Failed(LinkFailure::of(&KiwoomError::Gated { until, cause: GateCause::IssueInterval }))).map(Decision::Done);
+                }
+                self.publish(epoch, || {
+                    auth.release_8050();
+                    *self.0.released_8050.lock().expect("8050 잠금") = Some((halt, auth.issued_generation()));
+                })?;
+            }
+            Some(halt) => return self.finish(epoch, LinkState::Failed(LinkFailure::of(&halt.into()))).map(Decision::Done),
+            None => {}
+        }
+        let now = self.0.clock.now();
+        let has_token = auth.current(now).is_some();
+        if !has_token && let Some(until) = auth.issue_blocked_until(now) {
+            if acknowledged {
+                return self.finish(epoch, LinkState::Failed(LinkFailure::of(&KiwoomError::Gated { until, cause: GateCause::IssueInterval }))).map(Decision::Done);
+            }
+            self.step(epoch, LinkState::Connecting(ConnectStep::IssueInterval(until)))?;
+            return Ok(Decision::WaitUntil(until));
+        }
+        Ok(Decision::Proceed { has_token })
+    }
+
+    async fn wait_for_issue_interval(&self, until: KstTime, epoch: u64) -> Result<(), Stale> {
+        let mut abandoned = self.0.epoch.subscribe();
+        tokio::select! {
+            () = self.0.clock.sleep_until(until) => {}
+            _ = abandoned.wait_for(|current| *current != epoch) => {}
+        }
+        if self.aborted(epoch) { Err(Stale) } else { Ok(()) }
     }
 
     fn finish(&self, epoch: u64, state: LinkState) -> Result<LinkState, Stale> {
@@ -363,6 +403,42 @@ impl Link {
             if update_on_start {
                 screener.update_if_behind().await;
             }
+        });
+    }
+
+    pub fn connect_at_start(&self) {
+        let auth = self.0.rest.auth();
+        if !auth.has_credentials() || auth.halted().is_some() {
+            return;
+        }
+        if auth.kept_disconnected() {
+            tracing::info!("사용자가 연결을 끊어 둔 키라 켤 때 연결하지 않습니다");
+            return;
+        }
+        tracing::info!("키가 있어 키움에 저절로 연결합니다");
+        self.connect_in_background();
+    }
+
+    pub fn connect_in_background(&self) {
+        drop(self.join_or_start(false));
+    }
+
+    pub async fn connect_until_waiting(&self, acknowledged: bool) -> LinkState {
+        let mut state = self.subscribe();
+        let waiting = async {
+            let _ = state.wait_for(|state| matches!(state, LinkState::Connecting(ConnectStep::IssueInterval(_)))).await;
+        };
+        tokio::select! {
+            outcome = self.connect(acknowledged) => outcome,
+            () = waiting => self.state(),
+        }
+    }
+
+    pub fn disconnect_by_user(&self) {
+        self.abandon_connect(|| {
+            self.0.rest.set_access(Access::Closed);
+            self.0.rest.auth().keep_disconnected();
+            self.set(self.resting_state());
         });
     }
 

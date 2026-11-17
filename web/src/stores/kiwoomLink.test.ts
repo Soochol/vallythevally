@@ -6,7 +6,7 @@ import { receiveKiwoomLinkPush, useKiwoomLinkStore } from "./kiwoomLink";
 
 const status = (patch: Partial<KiwoomLinkStatus>): KiwoomLinkStatus => ({
   keySource: "file", appKeyTail: "1234", registeredIp: null, credentialId: null, state: "disconnected", problem: null, message: "연결하지 않았습니다",
-  retryAt: null, needsAcknowledgement: false, step: null, tokenExpiresAt: null, realtimeRegistered: null, symbolCount: null, ...patch,
+  retryAt: null, needsAcknowledgement: false, step: null, tokenExpiresAt: null, realtimeRegistered: null, symbolCount: null, atStart: "connects", ...patch,
 });
 
 beforeEach(() => useKiwoomLinkStore.setState({ status: null, pushes: 0 }));
