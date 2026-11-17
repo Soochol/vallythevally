@@ -343,11 +343,13 @@ async fn the_login_cookie_uses_the_host_prefix_on_https_and_none_on_loopback_htt
 fn configuration_rejects_unsafe_addresses_and_hides_secrets() {
     assert!(PublicUrl::parse("https://accounts.example.test").is_ok());
     assert!(PublicUrl::parse("http://127.0.0.1:8090").is_ok());
-    for bad in ["http://accounts.example.test", "http://localhost:8090", "ftp://127.0.0.1", "https://a.test/path", "https://a.test/?q=1", "nonsense"] {
+    for bad in ["http://accounts.example.test", "http://localhost:8090", "ftp://127.0.0.1", "https://a.test/path", "https://a.test/?q=1", "https://:pw@a.test", "https://user:pw@a.test", "nonsense"] {
         assert!(PublicUrl::parse(bad).is_err(), "{bad}");
     }
     assert!(IdpUrl::parse("http://example.test/token").is_err());
     assert!(IdpUrl::parse("http://127.0.0.1:9/token").is_ok());
+    assert!(IdpUrl::parse("https://user:pw@idp.test/token").is_err());
+    assert!(IdpUrl::parse("https://:pw@idp.test/token").is_err());
     assert_eq!(format!("{:?}", Secret::new("hunter2")), "Secret(***)");
 }
 

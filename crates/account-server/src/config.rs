@@ -17,6 +17,10 @@ fn is_loopback_ip(url: &Url) -> bool {
     matches!(url.host(), Some(Host::Ipv4(address)) if address.is_loopback())
 }
 
+fn has_userinfo(url: &Url) -> bool {
+    !url.username().is_empty() || url.password().is_some()
+}
+
 #[derive(Clone, Debug)]
 pub struct PublicUrl(Url);
 
@@ -27,7 +31,7 @@ impl PublicUrl {
         if !allowed || url.host().is_none() {
             return Err(ConfigError("공개 주소는 https이거나 루프백 IP의 http여야 합니다".into()));
         }
-        if url.path() != "/" || url.query().is_some() || url.fragment().is_some() || !url.username().is_empty() {
+        if url.path() != "/" || url.query().is_some() || url.fragment().is_some() || has_userinfo(&url) {
             return Err(ConfigError("공개 주소는 경로와 질의 없이 출처만 적습니다".into()));
         }
         Ok(Self(url))
@@ -50,7 +54,7 @@ impl IdpUrl {
     pub fn parse(value: &str) -> Result<Self, ConfigError> {
         let url = Url::parse(value).map_err(|_| ConfigError(format!("IdP 주소를 읽을 수 없습니다: {value}")))?;
         let allowed = url.scheme() == "https" || (url.scheme() == "http" && is_loopback_ip(&url));
-        if !allowed {
+        if !allowed || has_userinfo(&url) {
             return Err(ConfigError(format!("IdP 주소는 https이거나 루프백 IP의 http여야 합니다: {value}")));
         }
         Ok(Self(url))
