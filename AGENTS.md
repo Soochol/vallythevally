@@ -12,4 +12,5 @@
 
 - Rust 빌드·시험·배포 작업 전 [`docs/development-builds.md`](docs/development-builds.md)를 읽는다.
 - 웹 검사·E2E·브라우저 진단 작업 전 [`docs/web-checks.md`](docs/web-checks.md)를 읽는다.
+- e2e 시험을 쓰거나 고치기 전 [`docs/e2e-tests.md`](docs/e2e-tests.md)를 읽는다.
 - `web/`를 고치는 작업은 관련 e2e spec을 돌려 통과를 확인한다. 머지 뒤 검사는 머지된 뒤에야 돈다. 고르는 기준은 [`docs/web-checks.md`](docs/web-checks.md)를 따른다.

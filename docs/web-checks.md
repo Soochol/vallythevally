@@ -64,9 +64,7 @@ pnpm exec playwright install --only-shell chromium
 
 ## 시험 작성 시 주의사항
 
-- `clockStart`는 브라우저 시계를 고정한다. 서버 기준 재시도 시험은 합성 응답의 `Date` 헤더와 함께 명시하고 필요하면 `clockStart: null`로 실행한다.
-- Playwright `clock.setSystemTime`은 벽시계만 바꾸고 `performance.now`는 그대로다.
-- 임시 웹 시험 파일은 `web/` 안에 둔다. 밖에서는 ESM 설정이 적용되지 않아 `import.meta`가 실패할 수 있다.
+시험 작성 기준(`clockStart`, `clock.setSystemTime`, 임시 웹 시험 파일 위치 포함)은 [e2e 시험 작성 기준](e2e-tests.md)을 따른다.
 
 웹 검증 도구를 변경하면 다음 시험을 실행한다. 실원천 도구의 loopback 시험은 [실제 DART 확인](#명시적으로-실제-dart-확인)을 따른다.
 
