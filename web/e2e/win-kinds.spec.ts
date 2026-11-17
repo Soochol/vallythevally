@@ -14,9 +14,9 @@ const addButton = (page: Page) => page.getByRole("toolbar", { name: "차트 도�
 const kindItem = (page: Page, name: string) => page.getByRole("menu", { name: "창 더하기" }).getByRole("menuitem", { name: new RegExp(`^${name}`) });
 const tabOf = (page: Page, id: string) => windowTabs(page).locator(`[role=tab][data-window-id="${id}"]`);
 const dotOf = (page: Page, id: string) => windowTabs(page).locator(`[role=tab][data-window-id="${id}"] + .link-dot`);
-const READY_KINDS: readonly string[] = ["program"];
+const READY_BODIES: Readonly<Record<string, string>> = { program: "program-window", brokers: "brokers-window" };
 const preparing = (page: Page) => page.getByTestId("market-window-preparing");
-const windowBody = (page: Page, kind: string) => (READY_KINDS.includes(kind) ? page.getByTestId("program-window") : preparing(page));
+const body = (page: Page, kind: string) => page.getByTestId(READY_BODIES[kind] ?? "market-window-preparing");
 const savedWindows = (scenario: Scenario) => scenario.documents.layout(DEFAULT_LAYOUT_ID).windows;
 
 function twoLinkedCharts(scenario: Scenario) {
@@ -47,15 +47,15 @@ for (const { kind, name } of KINDS) {
 
     await addWindow(page, name);
     await expect(tabOf(page, kind)).toHaveAccessibleName(new RegExp(`^${name}`));
-    if (!READY_KINDS.includes(kind)) await expect(preparing(page)).toContainText(`${name} 준비 중`);
-    await expect(windowBody(page, kind)).toHaveAttribute("data-symbol", "005930");
+    if (!(kind in READY_BODIES)) await expect(preparing(page)).toContainText(`${name} 준비 중`);
+    await expect(body(page, kind)).toHaveAttribute("data-symbol", "005930");
     await expect(dotOf(page, kind)).toHaveAccessibleName("연동 색: 끔");
     await expect.poll(() => savedWindows(scenario).filter((w) => w.kind === kind)).toEqual([{ id: kind, link: null, kind }]);
 
     await dotOf(page, kind).click();
     await page.getByRole("menu", { name: "연동 색" }).getByRole("menuitemradio", { name: /^B/ }).click();
     await expect(dotOf(page, kind)).toHaveAccessibleName("연동 색: B");
-    await expect(windowBody(page, kind)).toHaveAttribute("data-symbol", "000660");
+    await expect(body(page, kind)).toHaveAttribute("data-symbol", "000660");
     await expect.poll(() => savedWindows(scenario).find((w) => w.kind === kind)?.link).toBe("b");
 
     await addButton(page).click();
