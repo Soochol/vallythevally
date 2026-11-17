@@ -359,3 +359,55 @@ test("탭 중심의 수평 끌기는 순서를 바꾸고 위쪽으로 끌면 전
   await expect(groups(page)).toHaveCount(3);
   expect((await boxOf(groupWith(page, "스크리너"))).y).toBe(room.y);
 });
+
+const closeOf = (page: Page, name: string) => groups(page).getByRole("button", { name: new RegExp(`^${name}.* 닫기$`) });
+const closeOpacity = (button: Locator) => button.evaluate((element) => Number(getComputedStyle(element).opacity));
+
+test("닫기 버튼은 탭에 포인터를 올리거나 키보드 초점이 있을 때만 보이고 자리는 그대로다", async ({ page }) => {
+  await page.goto("/");
+  await expect(cell(page)).toHaveAttribute("aria-busy", "false");
+  const screener = tab(page, "스크리너");
+  const watch = tab(page, "관심종목");
+  await expect(watch).toHaveAttribute("aria-selected", "true");
+  await page.mouse.move(0, 0);
+  const selectedClose = closeOf(page, "관심종목");
+  const otherClose = closeOf(page, "스크리너");
+  await expect.poll(() => closeOpacity(selectedClose)).toBe(0);
+  await expect.poll(() => closeOpacity(otherClose)).toBe(0);
+  const screenerBox = await boxOf(screener);
+  const before = await Promise.all([screener, watch, tab(page, "개체 목록")].map(boxOf));
+  await page.mouse.move(screenerBox.x + screenerBox.width / 2, screenerBox.y + screenerBox.height / 2);
+  await expect.poll(() => closeOpacity(otherClose)).toBe(1);
+  await expect.poll(() => closeOpacity(selectedClose)).toBe(0);
+  const after = await Promise.all([screener, watch, tab(page, "개체 목록")].map(boxOf));
+  expect(after).toEqual(before);
+  await page.mouse.move(0, 0);
+  await expect.poll(() => closeOpacity(otherClose)).toBe(0);
+  await watch.focus();
+  await expect.poll(() => closeOpacity(selectedClose)).toBe(1);
+  await selectedClose.focus();
+  await expect.poll(() => closeOpacity(selectedClose)).toBe(1);
+});
+
+test("마지막 차트 창의 비활성 닫기 버튼도 같은 규칙으로 보이고 숨으며 흐림을 지킨다", async ({ page }) => {
+  await page.goto("/");
+  await expect(cell(page)).toHaveAttribute("aria-busy", "false");
+  const last = closeOf(page, "칸 1");
+  await expect(last).toBeDisabled();
+  await page.mouse.move(0, 0);
+  await expect.poll(() => closeOpacity(last)).toBe(0);
+  const box = await boxOf(page.locator(".dock-tab-group").filter({ has: page.getByRole("button", { name: /^칸 1.* 닫기$/ }) }).getByRole("tab"));
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await expect.poll(() => closeOpacity(last)).toBeCloseTo(0.35, 2);
+});
+
+test.describe("포인터 올리기가 없는 화면", () => {
+  test.use({ hasTouch: true, isMobile: true });
+
+  test("닫기 버튼이 늘 보인다", async ({ page }) => {
+    await page.goto("/");
+    await expect(cell(page)).toHaveAttribute("aria-busy", "false");
+    expect(await page.evaluate(() => matchMedia("(hover: none)").matches)).toBe(true);
+    for (const name of ["스크리너", "관심종목", "개체 목록"]) await expect.poll(() => closeOpacity(closeOf(page, name))).toBe(1);
+  });
+});
