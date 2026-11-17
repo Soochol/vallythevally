@@ -14,7 +14,7 @@ import { PhoneTabs } from "./features/phone/PhoneTabs";
 import { IndicatorCommand } from "./features/indicator-command/IndicatorCommand";
 import { ScreenDialog } from "./features/screen-dialog/ScreenDialog";
 import { PhoneScreener } from "./features/screener/ScreenerPanel";
-import { LoginScreen } from "./features/account/LoginScreen";
+import { Landing } from "./features/landing/Landing";
 import { SetupWizard } from "./features/setup-wizard/SetupWizard";
 import { needsChoice, useWizardOpening, useWizardStore, wizardVisible } from "./features/setup-wizard/wizardOpen";
 import { SetupChangedNotice } from "./features/status/SetupChangedNotice";
@@ -42,7 +42,7 @@ export function ChartRoute() {
   const wizardOpen = useWizardStore((s) => s.open);
   useWizardOpening(account);
   useRefetchNamesOnConnect();
-  if (account?.state === "signed_out") return <LoginScreen />;
+  if (account?.state === "signed_out") return <Landing />;
   if (account?.state === "owner_mismatch") return <ReplaceLocalScreen status={account} />;
   return (
     <>
