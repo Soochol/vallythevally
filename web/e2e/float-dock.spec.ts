@@ -134,7 +134,7 @@ test("좁고 낮은 창에서도 도크는 창 안에 있고 가격축 방식 �
     await page.setViewportSize(size);
     await expandDock(page);
     const bar = await boxOf(dock(page));
-    const axis = await boxOf(cell(page).getByRole("group", { name: "가격축 방식" }));
+    const axis = await boxOf(cell(page).getByRole("combobox", { name: "가격축 방식" }));
     expect(bar.x).toBeGreaterThanOrEqual(0);
     expect(bar.y + bar.height).toBeLessThanOrEqual(size.height);
     expect(bar.y + bar.height <= axis.y || bar.x + bar.width <= axis.x).toBe(true);

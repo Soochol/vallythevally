@@ -2,6 +2,7 @@ import type { Locator, Page } from "@playwright/test";
 import type { Layout } from "../src/api/generated/Layout";
 import { installChartProbe } from "./chart-probe";
 import { installFrameProbe } from "./frame-probe";
+import { selectOption } from "./select-option";
 import { type Scenario, cell, chartOf, DEFAULT_LAYOUT_ID, expect, test, firstChart, withFirstChart } from "./harness";
 
 test.use({ clockStart: "20261109100030" });
@@ -91,22 +92,22 @@ test("% 축은 비교 종목 없이도 켜고 끄며, 비교 종목이 있는 �
   await page.goto("/");
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
   const chart = chartOf(cell(page));
-  const pct = cell(page).getByRole("group", { name: "가격축 방식" }).getByRole("button", { name: "%", exact: true });
-  const log = cell(page).getByRole("group", { name: "가격축 방식" }).getByRole("button", { name: "로그", exact: true });
+  const axis = cell(page).getByRole("combobox", { name: "가격축 방식" });
 
-  await pct.click();
+  await selectOption(axis, "percent");
   await expect(chart).toHaveAttribute("data-price-scale", "percent");
   await expect.poll(async () => (await settingsOf(scenario)).scale).toBe("percent");
-  await pct.click();
+  await selectOption(axis, "normal");
   await expect(chart).toHaveAttribute("data-price-scale", "normal");
-  await log.click();
+  await selectOption(axis, "log");
   await expect(chart).toHaveAttribute("data-price-scale", "log");
 
   const dialog = await openCompareTab(page);
   await addCompare(dialog, "삼성SDI");
   await expect(chart).toHaveAttribute("data-price-scale", "percent");
-  await expect(pct).toBeDisabled();
-  await expect(log).toBeDisabled();
+  await expect(axis).toBeDisabled();
+  await expect(axis).toHaveText("%");
+  await expect(axis).toHaveAttribute("title", /./);
   await expect(dialog.getByRole("switch", { name: "가격축을 % 변화로" })).toBeDisabled();
   await expect.poll(async () => (await settingsOf(scenario)).scale).toBe("log");
 
@@ -210,7 +211,7 @@ test("비교 종목이 저장된 칸을 열어도 지표 패널 축은 % 축이 
   await page.getByRole("dialog").getByRole("button", { name: "코스피 지우기" }).click();
   await page.keyboard.press("Escape");
   await expect(chartOf(cell(page))).toHaveAttribute("data-price-scale", "normal");
-  await cell(page).getByRole("group", { name: "가격축 방식" }).getByRole("button", { name: "로그", exact: true }).click();
+  await selectOption(cell(page).getByRole("combobox", { name: "가격축 방식" }), "log");
   await expect.poll(modes).toEqual({ main: 1, volume: 0 });
 });
 

@@ -1,6 +1,6 @@
 import { type ReactNode, type RefObject, useRef } from "react";
 import { Popover } from "../overlay/Popover";
-import { menuIndex } from "../overlay/position";
+import { menuIndex, type Placement } from "../overlay/position";
 import { CheckIcon } from "../icons";
 
 export type MenuItem =
@@ -20,11 +20,12 @@ interface Props {
   onClose: (restoreFocus: boolean) => void;
   root: RefObject<HTMLElement | null>;
   className?: string;
+  placement?: Placement;
   style?: React.CSSProperties;
   children?: ReactNode;
 }
 
-export function Menu({ label, items, onClose, root, className, style, children }: Props) {
+export function Menu({ label, items, onClose, root, className, placement, style, children }: Props) {
   const point = typeof style?.left === "number" && typeof style?.top === "number" ? { x: style.left, y: style.top } : undefined;
   const trigger = useRef<HTMLElement | null>(point ? null : root.current?.querySelector<HTMLElement>("[aria-expanded=true]") ?? root.current?.querySelector<HTMLElement>("button") ?? null);
   const focusTarget = useRef<HTMLElement | null>(point
@@ -57,6 +58,7 @@ export function Menu({ label, items, onClose, root, className, style, children }
     <Popover
       anchor={trigger}
       point={point}
+      placement={placement}
       focusTarget={focusTarget}
       onClose={() => onClose(true)}
       role="menu"

@@ -76,6 +76,7 @@ export function ChartCell({ cellId, status, onStatus }: Props) {
   const chartEl = useRef<HTMLDivElement>(null);
   const ctl = useRef<ChartController | null>(null);
   const [editing, setEditing] = useState<{ initial: IndicatorConfig; anchor: HTMLElement } | null>(null);
+  const [corner, setCorner] = useState({ width: 72, height: 28 });
   const [venueAnchor, setVenueAnchor] = useState<HTMLElement | null>(null);
   const onStatusRef = useRef(onStatus);
   onStatusRef.current = onStatus;
@@ -96,6 +97,7 @@ export function ChartCell({ cellId, status, onStatus }: Props) {
       },
       onPanelStretch: (stretches) => useLayoutStore.getState().setPanelStretches(cellIdRef.current, stretches),
       onCompareRemove: (code) => useLayoutStore.getState().removeCompare(cellIdRef.current, code),
+      onCorner: setCorner,
     });
     ctl.current = c;
     setVenueAnchor(c.venueAnchor);
@@ -148,7 +150,7 @@ export function ChartCell({ cellId, status, onStatus }: Props) {
       className="relative min-h-0 min-w-0 bg-chart-bg focus-visible:outline-offset-[-2px]"
     >
       <div ref={chartEl} className="absolute inset-0" />
-      <AxisMode cellId={cellId} />
+      <AxisMode cellId={cellId} corner={corner} />
       {venueAnchor && venue !== null && venue !== appVenue && createPortal(<VenueFallbackBadge />, venueAnchor)}
       <DrawingOverlay cellId={cellId} />
       {editing && cell.chartSettings.indicators.some((i) => i.id === editing.initial.id) && <IndicatorPopover key={editing.initial.id} cellId={cellId} {...editing} editRoot={chartEl.current!} onClose={() => setEditing(null)} />}
