@@ -378,7 +378,16 @@ class E2eRulesTest(unittest.TestCase):
         "var": ("a.spec.ts", "var shared = 1;\n", 1, "scenario"),
         "setTimeout": ("a.spec.ts", "test('x', async () => {\n  test.setTimeout(120_000);\n});\n", 2, "그룹별"),
         "slow": ("a.spec.ts", "test.slow();\n", 1, "그룹별"),
-        "info setTimeout": ("a.spec.ts", "testInfo.setTimeout(1);\n", 1, "그룹별"),
+        "testInfo setTimeout": ("a.spec.ts", "testInfo.setTimeout(1);\n", 1, "그룹별"),
+        "configure nested timeout": ("a.spec.ts", "test.describe.configure({ retries: { x: 1 }, timeout: 90000 });\n", 1, "그룹별"),
+        "spaced waitForTimeout": ("a.spec.ts", "await page.waitForTimeout (5);\n", 1, "fixedWait"),
+        "spaced serial": ("a.spec.ts", "test.describe . serial('x', () => {});\n", 1, "scenario"),
+        "tab let": ("a.spec.ts", "let\tshared = 1;\n", 1, "scenario"),
+        "optional waitForTimeout": ("a.spec.ts", "await page.waitForTimeout?.(10);\n", 1, "fixedWait"),
+        "bound waitForTimeout": ("a.spec.ts", "const wait = page.waitForTimeout.bind(page);\n", 1, "fixedWait"),
+        "info setTimeout": ("a.spec.ts", "test.info().setTimeout(1);\n", 1, "그룹별"),
+        "split test setTimeout": ("a.spec.ts", "test\n  .setTimeout(1);\n", 1, "그룹별"),
+        "backtick serial": ("a.spec.ts", "test.describe.configure({ mode: `serial` });\n", 1, "scenario"),
         "configure timeout": ("a.spec.ts", "test.describe.configure({\n  timeout: 120_000,\n});\n", 1, "그룹별"),
     }
 

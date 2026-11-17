@@ -14,11 +14,11 @@ FIX_FRESH_STATE = "시험마다 `scenario` fixture로 상태를 새로 만든다
 FIX_SPLIT = "30초 예산을 넘는 시험은 그룹별 시험으로 나눈다(PR #447 방식)"
 
 RULES = {
-    "waitForTimeout": {"pattern": re.compile(r"waitForTimeout\("), "files": lambda path: path != "harness.ts", "fix": FIX_STATE_WAIT},
-    "serial": {"pattern": re.compile(r"\.serial\b|\bmode\s*:\s*[\"']serial[\"']"), "files": lambda path: True, "fix": FIX_FRESH_STATE},
+    "waitForTimeout": {"pattern": re.compile(r"waitForTimeout\b"), "files": lambda path: path != "harness.ts", "fix": FIX_STATE_WAIT},
+    "serial": {"pattern": re.compile(r"\.\s*serial\b|\[\s*[\"'`]serial[\"'`]\s*\]|\bmode\s*:\s*[\"'`]serial[\"'`]"), "files": lambda path: True, "fix": FIX_FRESH_STATE},
     "beforeAll-afterAll": {"pattern": re.compile(r"\b(beforeAll|afterAll)\b"), "files": lambda path: True, "fix": FIX_FRESH_STATE},
-    "module-variable": {"pattern": re.compile(r"^(export )?(let|var) ", re.MULTILINE), "files": lambda path: path.endswith(".spec.ts"), "fix": FIX_FRESH_STATE},
-    "test-timeout": {"pattern": re.compile(r"\btest\.setTimeout\(|\btest\.slow\(|\btestInfo\.setTimeout\(|\bdescribe\.configure\(\s*\{[^}]*\btimeout\b"), "files": lambda path: True, "fix": FIX_SPLIT},
+    "module-variable": {"pattern": re.compile(r"^(export\s+)?(let|var)\s", re.MULTILINE), "files": lambda path: path.endswith(".spec.ts"), "fix": FIX_FRESH_STATE},
+    "test-timeout": {"pattern": re.compile(r"\btest\s*\.\s*(setTimeout|slow)\s*\(|\b(testInfo|info|test\s*\.\s*info\s*\(\s*\))\s*\.\s*setTimeout\s*\(|\bdescribe\.configure\s*\([^;]*?\btimeout\b"), "files": lambda path: True, "fix": FIX_SPLIT},
 }
 
 
