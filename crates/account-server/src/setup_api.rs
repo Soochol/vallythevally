@@ -29,6 +29,11 @@ struct PushRequest {
     documents: Vec<Box<RawValue>>,
 }
 
+#[derive(Deserialize)]
+struct PushRequestValues {
+    documents: Vec<serde_json::Value>,
+}
+
 #[derive(Serialize)]
 #[serde(tag = "status", rename_all = "snake_case")]
 enum PushStatus {
@@ -66,14 +71,8 @@ async fn push(State(state): Shared, headers: HeaderMap, body: Bytes) -> Result<J
     if request.documents.len() > MAX_PUSH_DOCUMENTS {
         return Err(ApiError::invalid_request(format!("한 번에 문서 {MAX_PUSH_DOCUMENTS}개까지 보냅니다")));
     }
-    let labels = request
-        .documents
-        .iter()
-        .map(|raw| {
-            let value: serde_json::Value = serde_json::from_str(raw.get()).map_err(|_| invalid_push())?;
-            Ok((echoed(&value, "kind"), echoed(&value, "id")))
-        })
-        .collect::<Result<Vec<_>, ApiError>>()?;
+    let values: PushRequestValues = serde_json::from_slice(&body).map_err(|_| invalid_push())?;
+    let labels: Vec<_> = values.documents.iter().map(|value| (echoed(value, "kind"), echoed(value, "id"))).collect();
     let now_millis = state.clock.now().0.saturating_mul(1000);
     let mut seen = HashSet::new();
     let parsed: Vec<_> = request

@@ -445,8 +445,9 @@ async fn the_size_limit_counts_the_bytes_sent_so_padding_whitespace_cannot_excee
 async fn a_body_that_serde_json_could_not_read_back_is_refused_whole_and_nothing_is_stored() {
     let harness = Harness::start().await;
     let account = Account::login(&harness, "a").await;
-    let deep = format!("{}{}", "[".repeat(5000), "]".repeat(5000));
-    for body in [deep.as_str(), r#"{"t":"\ud800"}"#] {
+    let nested = |depth: usize| format!("{}{}", "[".repeat(depth), "]".repeat(depth));
+    let (deep, just_too_deep) = (nested(5000), nested(126));
+    for body in [deep.as_str(), just_too_deep.as_str(), r#"{"t":"\ud800"}"#] {
         let request = format!(r#"{{"documents":[{{"kind":"layout","id":"L1","revision":1,"deleted":false,"body":{body}}}]}}"#);
         let response = harness.http.post(format!("{}/v1/setup/push", harness.base)).bearer_auth(&account.token).header("content-type", "application/json").body(request).send().await.unwrap();
         assert_eq!(response.status(), 400);
