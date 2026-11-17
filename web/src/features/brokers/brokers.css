@@ -1,0 +1,27 @@
+.br { display:flex; flex:1; flex-direction:column; min-height:0; min-width:0; overflow:hidden; font-variant-numeric:tabular-nums; }
+.br-scrub { display:flex; align-items:center; gap:var(--s3); padding:var(--s3) var(--s4); color:var(--text-3); font-size:var(--fs-xs); }
+.br-scrub input { flex:1; min-width:0; accent-color:var(--accent); }
+.br-scrub output { min-width:var(--size-60); color:var(--text); font-weight:600; text-align:right; }
+.br-scroll { flex:1; min-height:0; overflow:auto; padding:0 var(--s4); }
+.br-body { display:grid; grid-template-columns:max-content minmax(0, 1fr) max-content; align-items:start; column-gap:var(--s3); }
+.br-names, .br-values { display:flex; flex-direction:column; }
+.br-name { height:var(--br-row); padding:0 var(--s2); border-radius:var(--r-s); color:var(--text-2); font-size:var(--fs-xs); text-align:left; white-space:nowrap; }
+.br-name:hover { background:var(--hover); color:var(--text); }
+.br-name[aria-pressed=true] { background:var(--accent-soft); color:var(--text); font-weight:600; }
+.br-canvas { display:block; width:100%; }
+.br-value { position:relative; display:flex; align-items:center; justify-content:flex-end; height:var(--br-row); font-size:var(--fs-xs); }
+.br-value i { position:absolute; top:4px; bottom:4px; right:0; border-radius:3px; opacity:.28; }
+.br-value[data-kind=buy] i { background:var(--up); } .br-value[data-kind=sell] i { background:var(--down); }
+.br-value span { position:relative; padding:0 var(--s2); white-space:nowrap; }
+.br-value[data-kind=buy] span { color:var(--up); } .br-value[data-kind=sell] span { color:var(--down); }
+.br-legend { display:flex; flex-wrap:wrap; gap:var(--s4); padding:var(--s3) var(--s4); border-top:var(--size-1) solid var(--line); color:var(--text-3); font-size:var(--fs-xs); }
+.br-legend span { display:inline-flex; align-items:center; gap:var(--s2); }
+.br-swatch { display:inline-block; width:12px; height:12px; border-radius:3px; }
+.br-swatch[data-kind=buy] { background:var(--up); } .br-swatch[data-kind=sell] { background:var(--down); }
+.br-swatch[data-kind=out] { border:1px dashed var(--text-3); opacity:.6; }
+.br-line { flex:none; margin:0; padding:var(--s3) var(--s4); border-top:var(--size-1) solid var(--line); }
+.br-line figcaption { margin-bottom:var(--s2); color:var(--text-2); font-size:var(--fs-xs); font-weight:600; }
+.br-line svg { display:block; width:100%; height:80px; overflow:visible; }
+.br-path { fill:none; stroke:var(--accent); stroke-width:1.5; vector-effect:non-scaling-stroke; }
+.br-zero { stroke:var(--text-3); stroke-dasharray:3 3; opacity:.5; vector-effect:non-scaling-stroke; }
+.br-now { stroke:var(--text-3); opacity:.6; vector-effect:non-scaling-stroke; }

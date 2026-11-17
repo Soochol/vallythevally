@@ -1,4 +1,4 @@
-use std::collections::VecDeque;
+use std::collections::{BTreeMap, VecDeque};
 use std::fs::{self, File};
 use std::io::{self, BufRead, BufReader};
 use std::path::{Path, PathBuf};
@@ -34,33 +34,43 @@ pub enum RawItem {
 }
 
 pub fn read_day(data_dir: &Path, date: u32) -> io::Result<RawDayReader> {
+    let files = day_files(data_dir, date)?.into_iter().map(|(_, path)| path).collect();
+    Ok(RawDayReader::over(files))
+}
+
+pub fn read_day_by_key(data_dir: &Path, date: u32) -> io::Result<Vec<(Option<String>, RawDayReader)>> {
+    let mut by_key: BTreeMap<Option<String>, Vec<PathBuf>> = BTreeMap::new();
+    for (key, path) in day_files(data_dir, date)? {
+        by_key.entry(key).or_default().push(path);
+    }
+    Ok(by_key.into_iter().map(|(key, files)| (key, RawDayReader::over(files))).collect())
+}
+
+fn day_files(data_dir: &Path, date: u32) -> io::Result<Vec<(Option<String>, PathBuf)>> {
     let folder = raw_day_dir(data_dir, date);
     let mut files = Vec::new();
     for entry in fs::read_dir(&folder)? {
         let path = entry?.path();
         if path.is_dir() {
+            let key = path.file_name().and_then(|name| name.to_str()).map(str::to_owned);
             for key_entry in fs::read_dir(&path)? {
-                push_if_raw_file(&mut files, key_entry?.path());
+                push_if_raw_file(&mut files, key.clone(), key_entry?.path());
             }
         } else {
-            push_if_raw_file(&mut files, path);
+            push_if_raw_file(&mut files, None, path);
         }
     }
-    files.sort_by(|first, second| first.file_name().cmp(&second.file_name()).then_with(|| first.cmp(second)));
-    Ok(RawDayReader {
-        pending_files: files.into(),
-        current: None,
-        queued: VecDeque::new(),
-    })
+    files.sort_by(|(_, first), (_, second)| first.file_name().cmp(&second.file_name()).then_with(|| first.cmp(second)));
+    Ok(files)
 }
 
-fn push_if_raw_file(files: &mut Vec<PathBuf>, path: PathBuf) {
+fn push_if_raw_file(files: &mut Vec<(Option<String>, PathBuf)>, key: Option<String>, path: PathBuf) {
     let is_raw_file = path
         .file_name()
         .and_then(|name| name.to_str())
         .is_some_and(|name| name.ends_with(RAW_FILE_SUFFIX));
     if is_raw_file {
-        files.push(path);
+        files.push((key, path));
     }
 }
 
@@ -75,6 +85,12 @@ struct FileReader {
     lines: BufReader<Decoder<'static, BufReader<File>>>,
     line_number: usize,
     ended: bool,
+}
+
+impl RawDayReader {
+    fn over(files: Vec<PathBuf>) -> RawDayReader {
+        RawDayReader { pending_files: files.into(), current: None, queued: VecDeque::new() }
+    }
 }
 
 impl Iterator for RawDayReader {

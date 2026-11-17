@@ -154,14 +154,9 @@ const journeys = {
       await settings.getByRole("tab", { name: "계정", exact: true }).click();
       return settings.getByRole("tabpanel");
     };
-    const wizardAutoOpened = await wizard.waitFor({ timeout: 5000 }).then(() => true, () => false);
-    if (!wizardAutoOpened) {
-      await expect(page.getByRole("region", { name: /^칸 1: / })).toBeVisible();
-      await (await openAccountMenu()).getByRole("button", { name: "셋업 마법사 다시 열기" }).click();
-    }
-    await expect(wizard).toBeVisible();
+    await expect(wizard).toBeVisible({ timeout: 5000 });
     await page.screenshot({ path: shot("03-signed-in-wizard.png") });
-    log("step 2 google login passed account server and fake IdP, ended signed_in, and the first-run wizard opens", { hops: googleHops, provider: "google", wizardAutoOpened });
+    log("step 2 google login passed account server and fake IdP, ended signed_in, and the first-run wizard opens", { hops: googleHops, provider: "google", wizardAutoOpened: true });
 
     const token = savedToken();
     expect(token.length).toBeGreaterThanOrEqual(32);
@@ -194,7 +189,7 @@ const journeys = {
 
     const evidenceText = JSON.stringify({ steps, requests });
     if (evidenceText.includes(token) || evidenceText.includes(naverToken)) throw new Error("a connector token leaked into the evidence");
-    return { providers: ["google", "naver"], finalState: naverStatus.state, wizardAutoOpened };
+    return { providers: ["google", "naver"], finalState: naverStatus.state, wizardAutoOpened: true };
   },
 };
 if (!journeys[journey]) throw new Error(`unknown journey ${journey}; have ${Object.keys(journeys)}`);
