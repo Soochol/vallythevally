@@ -299,3 +299,19 @@ test("휴대폰의 중복 소속 삭제 버튼은 선택한 그룹만 빼고 마
   await expect(sheet.getByRole("list", { name: "그룹 없음", exact: true }).locator('li[data-code="086520"]')).toBeVisible();
   expect(served(scenario).symbols).toContain("086520");
 });
+
+test("그룹 머리 이름은 종목 이름보다 작지 않고 굵기 700이며 그룹 안 종목 이름은 그룹 이름에 맞춰 들여쓴다", async ({ scenario, page }) => {
+  await seed(scenario, [{ id: "g1", name: "반도체", symbols: ["005930", "000660"] }]);
+  await open(page);
+  const groupName = groupHead(page, "반도체").locator("span.truncate");
+  const stockName = row(page, "005930").locator("b");
+  const size = (locator: typeof groupName) => locator.evaluate((el) => parseFloat(getComputedStyle(el).fontSize));
+  expect(await size(groupName)).toBeGreaterThanOrEqual(await size(stockName) - 1);
+  expect(await groupName.evaluate((el) => getComputedStyle(el).fontWeight)).toBe("700");
+  const left = async (locator: typeof groupName) => (await locator.evaluate((el) => {
+    const range = document.createRange();
+    range.selectNodeContents(el);
+    return range.getBoundingClientRect().left;
+  }));
+  expect(Math.abs(await left(stockName) - await left(groupName))).toBeLessThanOrEqual(2);
+});
