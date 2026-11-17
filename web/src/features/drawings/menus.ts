@@ -6,7 +6,7 @@ import { formatPrice } from "../../lib/format";
 import { isIndexCode } from "../../lib/symbol";
 import { useSelectionStore } from "../../stores/selection";
 import { activeWatchlist, useWatchlistStore } from "../../stores/watchlist";
-import { CopyIcon, DRAWING_ICONS, ExpandIcon, Icon, PlusIcon } from "../icons";
+import { CameraIcon, CopyIcon, DRAWING_ICONS, ExpandIcon, Icon, PlusIcon } from "../icons";
 import { canCopyImage, saveSnapshot } from "../snapshot/saveSnapshot";
 import { defaultObjectStyle } from "../../chart/drawings/objects";
 import { toolOf } from "../../chart/drawings/tools";
@@ -29,7 +29,9 @@ function chartItems(surface: DrawingSurface, at: ScreenPoint): MenuItem[] {
     { kind: "action", label: "이 가격에 수평선", icon: glyph(DRAWING_ICONS.hline), hint: "Alt+H", onSelect: () => surface.placeHorizontalLine(at) },
     { kind: "action", label: "관심종목에 넣기", icon: createElement(PlusIcon), disabled: watchlist.symbols.includes(view.symbol), onSelect: () => { useWatchlistStore.getState().add(watchlist.id, view.symbol); toast(`${watchlist.name}에 넣었습니다`); } },
     { kind: "action", label: "축 자동 맞춤", icon: createElement(ExpandIcon, { size: 14 }), onSelect: () => surface.fitPriceScale() },
+    { kind: "separator" },
     ...(canCopyImage() ? [{ kind: "action" as const, label: "차트 이미지 복사", icon: createElement(CopyIcon, { size: 14 }), hint: "Alt+Shift+S", onSelect: () => void saveSnapshot(surface.cellId, "copy") }] : []),
+    { kind: "action", label: "차트 이미지 내려받기", icon: createElement(CameraIcon, { size: 14 }), hint: "Alt+S", onSelect: () => void saveSnapshot(surface.cellId, "download") },
     { kind: "separator" },
   ];
 }

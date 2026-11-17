@@ -172,6 +172,25 @@ test.describe("데스크톱", () => {
     await download(page, chart, () => page.keyboard.press("Alt+KeyS"));
   });
 
+  test("차트 우클릭 메뉴로 차트 PNG를 내려받는다", async ({ scenario, page }) => {
+    const chart = await openSamsung(page, scenario);
+    const box = (await chart.boundingBox())!;
+    await page.mouse.click(box.x + box.width * 0.4, box.y + box.height * 0.45, { button: "right" });
+    const menu = page.getByRole("menu", { name: "드로잉 메뉴", exact: true });
+    await expect(menu.getByRole("menuitem", { name: /차트 이미지 복사/ })).toBeVisible();
+    await download(page, chart, () => menu.getByRole("menuitem", { name: /차트 이미지 내려받기/ }).click());
+  });
+
+  test("복사를 지원하지 않는 브라우저의 차트 우클릭 메뉴에는 내려받기만 있다", async ({ scenario, page }) => {
+    await page.addInitScript(() => { Reflect.deleteProperty(window, "ClipboardItem"); });
+    const chart = await openSamsung(page, scenario);
+    const box = (await chart.boundingBox())!;
+    await page.mouse.click(box.x + box.width * 0.4, box.y + box.height * 0.45, { button: "right" });
+    const menu = page.getByRole("menu", { name: "드로잉 메뉴", exact: true });
+    await expect(menu.getByRole("menuitem", { name: /차트 이미지 복사/ })).toHaveCount(0);
+    await download(page, chart, () => menu.getByRole("menuitem", { name: /차트 이미지 내려받기/ }).click());
+  });
+
   test("복사 버튼은 같은 PNG를 클립보드에 넣는다", async ({ scenario, page, context, baseURL }) => {
     await context.grantPermissions(["clipboard-read", "clipboard-write"], { origin: baseURL });
     const chart = await openSamsung(page, scenario);
