@@ -101,6 +101,10 @@ export const IndicatorIcon = ({ size }: P) => (
     <path d="M3 21h18" />
   </Icon>
 );
+export const TradesIcon = ({ size }: P) => <Icon size={size} path="M4 6h16M4 12h16M4 18h9" />;
+export const BookIcon = ({ size }: P) => <Icon size={size} path="M12 4v16M3 7h6M5 12h4M2 17h7M15 7h6M15 12h4M15 17h6" />;
+export const ProgramIcon = ({ size }: P) => <Icon size={size} path="M5 20v-8M11 20V4M17 20v-6M3 20h18" />;
+export const BrokersIcon = ({ size }: P) => <Icon size={size} path="M4 20h16M6 20V10l6-5 6 5v10M10 20v-6h4v6" />;
 export const SlidersIcon = ({ size = 16 }: P) => (
   <Icon size={size}>
     <path d="M4 6h8M18 6h2M4 12h2M12 12h8M4 18h10M20 18h0" />

@@ -226,7 +226,7 @@ pub(crate) fn check_layout_input(path_id: &str, input: &LayoutInput) -> Result<V
     check_layout(path_id, input)
 }
 
-fn check_layout(path_id: &str, input: &LayoutInput) -> Result<Vec<Symbol>, ApiFailure> {
+pub(crate) fn check_layout(path_id: &str, input: &LayoutInput) -> Result<Vec<Symbol>, ApiFailure> {
     if !DocumentKind::Layout.accepts_id(path_id) {
         return Err(ApiFailure::bad_request(format!("레이아웃 id는 영문자·숫자·`-`·`_`로 1~64바이트여야 합니다: {path_id}")));
     }

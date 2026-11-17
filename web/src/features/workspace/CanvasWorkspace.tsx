@@ -1,10 +1,11 @@
+import type { ReactNode } from "react";
 import { countOverlaps, type Area } from "../../layout/canvas/geometry";
 import { rectsForArea } from "../../layout/canvas/arrange";
-import { WINDOW_KIND_LIST, WINDOW_KINDS } from "../../layout/kinds";
+import { WINDOW_KIND_LIST, WINDOW_KINDS, type WindowKind } from "../../layout/kinds";
 import type { CanvasPlacement } from "../../layout/placement";
 import { windowRefs, type WindowState } from "../../stores/layout";
 import { useSelectionStore } from "../../stores/selection";
-import { ChartIcon, DrawingsIcon, FunnelIcon, IndicatorIcon, ListIcon } from "../icons";
+import { BookIcon, BrokersIcon, ChartIcon, DrawingsIcon, FunnelIcon, IndicatorIcon, ListIcon, ProgramIcon, TradesIcon } from "../icons";
 import { canvasPanelId, useCanvasInteraction } from "./canvasInteraction";
 import { tidyCanvas } from "./canvasCommands";
 import { WINDOW_CONTENT } from "./contents";
@@ -12,7 +13,7 @@ import { addWindow, CHART_LIMIT_REASON, workspaceRoom } from "./manage";
 import { WindowFrame } from "./WindowFrame";
 import { WindowHeader } from "./WindowHeader";
 
-const KIND_ICONS = { chart: ChartIcon, watchlist: ListIcon, screener: FunnelIcon, objects: DrawingsIcon, indicators: IndicatorIcon };
+const KIND_ICONS: Record<WindowKind, ({ size }: { size?: number }) => ReactNode> = { chart: ChartIcon, watchlist: ListIcon, screener: FunnelIcon, objects: DrawingsIcon, indicators: IndicatorIcon, trades: TradesIcon, book: BookIcon, program: ProgramIcon, brokers: BrokersIcon };
 
 export function CanvasWorkspace({ canvas, windows, area }: { canvas: CanvasPlacement; windows: readonly WindowState[]; area: Area }) {
   const interaction = useCanvasInteraction(canvas, windows, area);

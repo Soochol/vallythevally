@@ -269,7 +269,14 @@ pub(crate) async fn store_layout(tx: &mut SqliteConnection, input: &LayoutInput,
             WindowContent::Chart { feed, period, chart_settings } => {
                 (Some(feed.0.symbol().as_wire()), feed.0.venue().map(|v| v.as_wire()), Some(wire_name(period)), Some(chart_settings.to_string()))
             }
-            WindowContent::Watchlist | WindowContent::Screener | WindowContent::Objects | WindowContent::Indicators => (None, None, None, None),
+            WindowContent::Watchlist
+            | WindowContent::Screener
+            | WindowContent::Objects
+            | WindowContent::Indicators
+            | WindowContent::Trades
+            | WindowContent::Book
+            | WindowContent::Program
+            | WindowContent::Brokers => (None, None, None, None),
         };
         sqlx::query(
             "INSERT INTO layout_windows (layout_id, id, position, kind, link, symbol, venue, period, chart_settings) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
@@ -687,6 +694,35 @@ mod tests {
         let names: Vec<_> = list_layouts(&db).await.unwrap().into_iter().map(|s| s.name).collect();
         assert_eq!(names, ["기본", "둘 바꿈"], "바꿔도 자리는 그대로");
         assert!(matches!(get_layout(&db, "nope").await, Err(StoreError::NotFound)));
+    }
+
+    fn market_windows() -> Vec<LayoutWindow> {
+        vec![side(WindowContent::Trades), side(WindowContent::Book), side(WindowContent::Program), side(WindowContent::Brokers)]
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn market_window_kinds_round_trip_with_their_link_colors(_: SqlitePoolOptions, opts: SqliteConnectOptions) {
+        let db = db(opts).await;
+        let mut windows = vec![chart("c", "005930", Some(Venue::Krx))];
+        windows.extend(market_windows());
+        windows[1].link = Some(LinkColor::A);
+        windows[4].link = Some(LinkColor::J);
+        put_layout(&db, &layout("L2", "시세 창", windows.clone()), UnixSeconds(100)).await.unwrap();
+        let read = get_layout(&db, "L2").await.unwrap();
+        assert_eq!(read.windows, windows);
+        assert_eq!(kinds(&read).iter().map(|(_, kind, _)| kind.as_str()).collect::<Vec<_>>(), ["chart", "trades", "book", "program", "brokers"]);
+    }
+
+    #[test]
+    fn a_second_window_of_the_same_market_kind_is_rejected() {
+        let mut windows = vec![chart("c", "005930", Some(Venue::Krx))];
+        windows.extend(market_windows());
+        assert!(crate::user_routes::check_layout("L2", &layout("L2", "넷", windows.clone())).is_ok());
+        for kind in [WindowContent::Trades, WindowContent::Book, WindowContent::Program, WindowContent::Brokers] {
+            let mut twice = windows.clone();
+            twice.push(LayoutWindow { id: window_id("again"), link: None, content: kind.clone() });
+            assert!(crate::user_routes::check_layout("L2", &layout("L2", "둘", twice)).is_err(), "{kind:?}");
+        }
     }
 
     #[sqlx::test(migrations = "./migrations")]
