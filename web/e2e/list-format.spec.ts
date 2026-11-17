@@ -137,6 +137,7 @@ test("고른 줄은 --accent-soft 바탕, 포인터를 올린 줄은 --hover 바
   expect((await look(chosenWatch)).background).toBe(accentSoft);
   const chosenResult = rowOf(page, rows[1]!.symbol);
   await chosenResult.getByRole("button").click();
+  await expect(chosenResult).toHaveAttribute("aria-selected", "true");
   await expect(chosenResult.getByRole("button")).toHaveAttribute("aria-current", "true");
   await page.mouse.move(0, 0);
   expect((await look(chosenResult)).background).toBe(accentSoft);
