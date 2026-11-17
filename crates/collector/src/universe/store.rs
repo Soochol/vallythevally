@@ -56,19 +56,50 @@ pub fn read_universe(data_dir: &Path, date: u32) -> Result<UniverseFile, StoreEr
     Ok(file)
 }
 
-pub fn latest_universe_before(data_dir: &Path, date: u32) -> Result<Option<UniverseFile>, StoreError> {
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SkippedFile {
+    pub date: u32,
+    pub cause: String,
+}
+
+#[derive(Debug, Default)]
+pub struct Previous {
+    pub file: Option<UniverseFile>,
+    pub skipped: Vec<SkippedFile>,
+}
+
+pub fn latest_readable_before(data_dir: &Path, date: u32) -> Result<Previous, StoreError> {
     let folder = folder(data_dir);
     let entries = match fs::read_dir(&folder) {
         Ok(entries) => entries,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(Previous::default()),
         Err(error) => return Err(StoreError::Read { path: folder, cause: error.to_string() }),
     };
-    let latest = entries
+    let mut candidates: Vec<u32> = entries
         .filter_map(Result::ok)
         .filter_map(|entry| entry.file_name().to_str().and_then(universe_date_of_name))
         .filter(|candidate| *candidate < date)
-        .max();
-    latest.map(|latest| read_universe(data_dir, latest)).transpose()
+        .collect();
+    candidates.sort_unstable_by(|a, b| b.cmp(a));
+    let mut previous = Previous::default();
+    for candidate in candidates {
+        match read_universe(data_dir, candidate) {
+            Ok(file) => {
+                previous.file = Some(file);
+                break;
+            }
+            Err(error) => previous.skipped.push(SkippedFile { date: candidate, cause: error.to_string() }),
+        }
+    }
+    Ok(previous)
+}
+
+pub fn read_universe_if_present(data_dir: &Path, date: u32) -> Result<Option<UniverseFile>, StoreError> {
+    match universe_path(data_dir, date).try_exists() {
+        Ok(true) => read_universe(data_dir, date).map(Some),
+        Ok(false) => Ok(None),
+        Err(error) => Err(StoreError::Read { path: universe_path(data_dir, date), cause: error.to_string() }),
+    }
 }
 
 fn universe_date_of_name(name: &str) -> Option<u32> {
@@ -80,8 +111,20 @@ pub fn write_universe(data_dir: &Path, file: &UniverseFile) -> Result<(), StoreE
     write_json(universe_path(data_dir, file.date), file)
 }
 
+fn rejected_path(data_dir: &Path, date: u32) -> PathBuf {
+    folder(data_dir).join(format!("{date}.rejected.json"))
+}
+
 pub fn write_rejected(data_dir: &Path, file: &RejectedFile) -> Result<(), StoreError> {
-    write_json(folder(data_dir).join(format!("{}.rejected.json", file.date)), file)
+    write_json(rejected_path(data_dir, file.date), file)
+}
+
+pub fn remove_rejected(data_dir: &Path, date: u32) -> Result<(), StoreError> {
+    let path = rejected_path(data_dir, date);
+    match fs::remove_file(&path) {
+        Err(error) if error.kind() != io::ErrorKind::NotFound => Err(StoreError::Write { path, cause: error }),
+        _ => Ok(()),
+    }
 }
 
 pub fn write_after_close(data_dir: &Path, file: &AfterCloseFile) -> Result<(), StoreError> {

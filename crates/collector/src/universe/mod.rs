@@ -11,7 +11,7 @@ mod store;
 
 pub use diff::{Diff, Named, Renamed, diff};
 pub use model::{AfterCloseFile, Entry, FORMAT_VERSION, MarketName, RejectedFile, ReplaceReason, Replacement, StockKind, UniverseFile};
-pub use store::{StoreError, latest_universe_before, read_universe};
+pub use store::{SkippedFile, StoreError, read_universe};
 
 const MAX_SHRINK_PERCENT: usize = 3;
 
@@ -100,15 +100,48 @@ fn failed(error: KiwoomError) -> Rejection {
     Rejection { reason: ReplaceReason::FetchFailed, detail: format!("조회가 실패했습니다: {error}"), stocks: Vec::new(), warnings: Vec::new() }
 }
 
-pub async fn collect_morning(rest: &KiwoomRest, data_dir: &Path, date: u32, fetched_at: KstTime) -> Result<UniverseFile, UniverseError> {
-    let previous = latest_universe_before(data_dir, date)?;
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Written {
+    NewList,
+    ReplacementList,
+    LeftAsIs { reason: ReplaceReason, detail: String },
+}
+
+#[derive(Debug)]
+pub struct Morning {
+    pub file: UniverseFile,
+    pub written: Written,
+    pub skipped: Vec<SkippedFile>,
+    pub warnings: Vec<String>,
+}
+
+pub async fn collect_morning(rest: &KiwoomRest, data_dir: &Path, date: u32, fetched_at: KstTime) -> Result<Morning, UniverseError> {
+    let mut skipped = Vec::new();
+    let existing = match store::read_universe_if_present(data_dir, date) {
+        Ok(existing) => existing,
+        Err(error) => {
+            skipped.push(SkippedFile { date, cause: error.to_string() });
+            None
+        }
+    };
+    let before = store::latest_readable_before(data_dir, date)?;
+    skipped.extend(before.skipped);
+    for file in &skipped {
+        tracing::warn!(date = file.date, cause = %file.cause, "읽을 수 없는 목록 파일을 건너뜁니다");
+    }
+    let previous = before.file;
     let fetched_at = kst_stamp(fetched_at);
+    let mut warnings = Vec::new();
     match fetch_stocks(rest, previous.as_ref()).await {
-        Fetched::Whole { stocks, warnings } => {
+        Fetched::Whole { stocks, warnings: list_warnings } => {
             let diff = previous.as_ref().map(|previous| diff::diff(&previous.stocks, &stocks)).unwrap_or_default();
-            let file = UniverseFile { format_version: FORMAT_VERSION, date, fetched_at, stocks, warnings, diff, replaced: None };
+            let file = UniverseFile { format_version: FORMAT_VERSION, date, fetched_at, stocks, warnings: list_warnings, diff, replaced: None };
             store::write_universe(data_dir, &file)?;
-            Ok(file)
+            if let Err(error) = store::remove_rejected(data_dir, date) {
+                tracing::warn!(date, %error, "그날의 rejected 파일을 지우지 못했습니다");
+                warnings.push(error.to_string());
+            }
+            Ok(Morning { file, written: Written::NewList, skipped, warnings })
         }
         Fetched::Rejected(rejection) => {
             store::write_rejected(
@@ -124,6 +157,10 @@ pub async fn collect_morning(rest: &KiwoomRest, data_dir: &Path, date: u32, fetc
                     warnings: rejection.warnings,
                 },
             )?;
+            if let Some(file) = existing {
+                let written = Written::LeftAsIs { reason: rejection.reason, detail: rejection.detail };
+                return Ok(Morning { file, written, skipped, warnings });
+            }
             let Some(previous) = previous else {
                 return Err(UniverseError::NoFallback { reason: rejection.reason, detail: rejection.detail });
             };
@@ -138,7 +175,7 @@ pub async fn collect_morning(rest: &KiwoomRest, data_dir: &Path, date: u32, fetc
                 replaced: Some(replacement),
             };
             store::write_universe(data_dir, &file)?;
-            Ok(file)
+            Ok(Morning { file, written: Written::ReplacementList, skipped, warnings })
         }
     }
 }
