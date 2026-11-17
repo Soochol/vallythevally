@@ -13,8 +13,8 @@ const APP_SERVER_ENV_FILE_VARIABLE: &str = "VALLY_ENV_FILE";
 const APP_SERVER_KEY_VARIABLE: &str = "VALLY_KIWOOM_APP_KEY";
 
 const STATE_FOLDER: &str = "vallythevally/collector";
-const TOKEN_FILE_NAME: &str = "token.json";
-const LOCK_FILE_NAME: &str = "collector.lock";
+pub(crate) const TOKEN_FILE_NAME: &str = "token.json";
+pub(crate) const LOCK_FILE_NAME: &str = "collector.lock";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConfigError(String);
@@ -90,7 +90,7 @@ fn default_state_folder(variables: &Variables) -> Result<PathBuf, ConfigError> {
     Ok(state_home.join(STATE_FOLDER))
 }
 
-fn reject_app_server_key(process: &Variables, collector_key: &str) -> Result<(), ConfigError> {
+pub(crate) fn reject_app_server_key(process: &Variables, collector_key: &str) -> Result<(), ConfigError> {
     let mut app_server = match process.get(APP_SERVER_ENV_FILE_VARIABLE).filter(|path| !path.is_empty()) {
         Some(path) => read_env_file(APP_SERVER_ENV_FILE_VARIABLE, Path::new(path))?,
         None => Variables::new(),
@@ -104,7 +104,7 @@ fn reject_app_server_key(process: &Variables, collector_key: &str) -> Result<(),
     Ok(())
 }
 
-fn read_env_file(variable: &str, path: &Path) -> Result<Variables, ConfigError> {
+pub(crate) fn read_env_file(variable: &str, path: &Path) -> Result<Variables, ConfigError> {
     if !path.is_absolute() {
         return Err(ConfigError(format!("{variable}은 절대 경로여야 합니다: {}", path.display())));
     }
