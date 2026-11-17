@@ -4,7 +4,7 @@ import { canSaveKey, EMPTY_KEY_FORM, formatRemaining, ipDiffers, keyFormReducer,
 
 const base: KiwoomLinkStatus = {
   keySource: "file", appKeyTail: "7Q2D", credentialId: null, state: "disconnected", problem: null, message: "", retryAt: null, needsAcknowledgement: false,
-  step: null, tokenExpiresAt: null, realtimeRegistered: null, symbolCount: null, registeredIp: null,
+  step: null, tokenExpiresAt: null, realtimeRegistered: null, symbolCount: null, registeredIp: null, atStart: "connects",
 };
 const failed = (problem: NonNullable<KiwoomLinkStatus["problem"]>, retryAt: number | null = null, patch: Partial<KiwoomLinkStatus> = {}): KiwoomLinkStatus => ({ ...base, state: "failed", problem, retryAt, ...patch });
 const both = { registeredIp: true, lockChecked: true };

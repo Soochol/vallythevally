@@ -10,10 +10,13 @@ use std::time::Duration;
 use common::{APP_KEY, ScriptedTransport, Server, token_path};
 use serde_json::{Value, json};
 use server::config::Secret;
-use server::kiwoom::link::{LinkFailure, LinkState, Problem};
+use server::kiwoom::link::{ConnectStep, LinkFailure, LinkState, Problem};
 use server::kiwoom::token_file::credential_id;
 
 const OFF: (&str, &str) = ("VALLY_KIWOOM_CONNECT", "off");
+const START: (&str, &str) = ("VALLY_KIWOOM_CONNECT", "start");
+const AT_TEN: &str = "20261109100000";
+const AT_TEN_TWENTY: &str = "20261109102000";
 const NO_KEY: (&str, &str) = ("VALLY_KIWOOM_APP_KEY", "");
 
 fn static_dir(root: &Path) -> PathBuf {
@@ -39,6 +42,26 @@ fn write_private(path: &Path, contents: &[u8]) {
     std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700)).unwrap();
     std::fs::write(path, contents).unwrap();
     std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600)).unwrap();
+}
+
+fn unix_of(kst: &str) -> i64 {
+    server::kiwoom::wire::parse_kst_datetime(kst).unwrap().unix()
+}
+
+fn token_file_of(env: &Env) -> Value {
+    serde_json::from_str(&std::fs::read_to_string(token_path(&env.lock)).unwrap()).unwrap()
+}
+
+fn is_connected(state: &LinkState) -> bool {
+    *state == LinkState::Connected
+}
+
+fn is_issue_interval_wait(state: &LinkState) -> bool {
+    matches!(state, LinkState::Connecting(ConnectStep::IssueInterval(_)))
+}
+
+fn is_failed(state: &LinkState) -> bool {
+    matches!(state, LinkState::Failed(_))
 }
 
 fn failure(state: LinkState) -> LinkFailure {
@@ -184,8 +207,9 @@ async fn inside_the_issue_interval_connect_waits_without_issuing_and_says_until_
     write_private(&token_path(&env.lock), json!({"token": null, "last_request_at": last_request}).to_string().as_bytes());
     let server = spawn(&fake, &env, &[OFF]);
     server.addr().await;
-    let waiting = failure(server.connect(false).await);
-    assert_eq!((waiting.problem, waiting.retry_at.map(|at| at.unix())), (Problem::IssueIntervalWait, Some(last_request + 600)), "{}", waiting.message);
+    let waiting = server.connect_until_waiting(false).await;
+    let LinkState::Connecting(ConnectStep::IssueInterval(until)) = waiting else { panic!("발급 간격 대기여야 한다: {waiting:?}") };
+    assert_eq!(until.unix(), last_request + 600);
     assert_eq!(fake.requests(), 0, "{:?}", fake.api_ids());
     server.stop().await;
 }
@@ -232,7 +256,7 @@ async fn a_key_replacement_clears_a_key_block_but_keeps_the_issue_interval() {
 
     let state = server.link().replace_key(Secret::new("FAKE-new-key".into()), Secret::new("FAKE-new-secret".into()));
     assert_eq!(state, LinkState::Disconnected);
-    assert_eq!(failure(server.connect(false).await).problem, Problem::IssueIntervalWait, "키를 바꿔도 마지막 발급 요청 시각은 지켜진다");
+    assert!(is_issue_interval_wait(&server.connect_until_waiting(false).await), "키를 바꿔도 마지막 발급 요청 시각은 지켜진다");
     assert_eq!(fake.issued(), 1);
 
     fake.reset();
@@ -356,7 +380,7 @@ async fn a_connect_after_a_disconnect_is_not_swallowed_by_the_abandoned_attempt(
     let fake = ScriptedTransport::new();
     fake.delay("au10001", Duration::from_secs(2));
     let env = env();
-    let server = spawn(&fake, &env, &[OFF]);
+    let server = spawn(&fake, &env, &[OFF, ("VALLY_CLOCK_START", AT_TEN)]);
     server.addr().await;
     let abandoned = tokio::spawn({
         let link = server.link();
@@ -364,11 +388,12 @@ async fn a_connect_after_a_disconnect_is_not_swallowed_by_the_abandoned_attempt(
     });
     tokio::time::sleep(Duration::from_millis(300)).await;
     server.link().disconnect();
-    let second = failure(server.connect(false).await);
-    assert_eq!(second.problem, Problem::IssueIntervalWait, "{}", second.message);
+    let second = server.connect_until_waiting(false).await;
+    assert!(is_issue_interval_wait(&second), "{second:?}");
     abandoned.await.unwrap();
     assert_eq!(fake.issued(), 1, "{:?}", fake.api_ids());
     tokio::time::sleep(Duration::from_millis(2500)).await;
+    server.clock().jump(601);
     assert_eq!(server.connect(false).await, LinkState::Connected);
     assert_eq!(fake.issued(), 1, "먼저 받던 토큰이 파일에 남아 있다: {:?}", fake.api_ids());
     server.stop().await;
@@ -778,5 +803,278 @@ async fn a_key_rejection_while_connecting_always_leaves_the_link_failed_and_clos
     tokio::time::sleep(Duration::from_millis(300)).await;
     assert_eq!(failure(server.link_state()).problem, Problem::KeyNeedsCheck);
     assert_eq!(get(&base, "/api/bars?symbol=005930&period=D").await.1["error"]["reason"], "not_connected");
+    server.stop().await;
+}
+
+#[tokio::test]
+async fn a_first_start_with_a_key_connects_by_itself_with_one_issue() {
+    let fake = ScriptedTransport::new();
+    let env = env();
+    let server = spawn(&fake, &env, &[START]);
+    server.addr().await;
+    assert_eq!(server.wait_for_state(is_connected).await, LinkState::Connected);
+    assert_eq!(fake.issued(), 1, "{:?}", fake.api_ids());
+    assert_eq!(token_file_of(&env)["credential"], credential_id(APP_KEY));
+    server.stop().await;
+}
+
+#[tokio::test]
+async fn a_restart_after_a_connect_connects_by_itself_and_issues_nothing_with_the_saved_token() {
+    let socket = counted_socket().await;
+    let fake = ScriptedTransport::new();
+    let env = env();
+    let ws = ("VALLY_KIWOOM_WS_URL", socket.url.as_str());
+    let first = spawn(&fake, &env, &[START, ws]);
+    first.addr().await;
+    first.wait_for_state(is_connected).await;
+    assert_eq!(fake.issued(), 1);
+    first.stop().await;
+    let accepts_before = socket.accepts.load(Ordering::SeqCst);
+
+    let second = spawn(&fake, &env, &[START, ws]);
+    second.addr().await;
+    second.wait_for_state(is_connected).await;
+    assert_eq!(fake.issued(), 1, "저장한 토큰을 쓰므로 발급은 늘지 않는다: {:?}", fake.api_ids());
+    let mut accepts = accepts_before;
+    for _ in 0..50 {
+        accepts = socket.accepts.load(Ordering::SeqCst);
+        if accepts > accepts_before {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    assert!(accepts > accepts_before, "재시작 뒤에도 WebSocket에 접속한다");
+    second.stop().await;
+}
+
+#[tokio::test]
+async fn a_restart_with_an_expired_token_connects_by_itself_with_one_issue() {
+    let fake = ScriptedTransport::new();
+    let env = env();
+    let at = now_unix() - 3600;
+    write_private(&token_path(&env.lock), json!({"credential": credential_id(APP_KEY), "token": {"value": "expired-token", "expires_dt": "20200101000000", "issued_at": at - 86400}, "last_request_at": at}).to_string().as_bytes());
+    let server = spawn(&fake, &env, &[START]);
+    server.addr().await;
+    server.wait_for_state(is_connected).await;
+    assert_eq!(fake.issued(), 1, "{:?}", fake.api_ids());
+    assert!(fake.seen.authorizations.lock().unwrap().iter().all(|auth| auth != "Bearer expired-token"));
+    server.stop().await;
+}
+
+#[tokio::test]
+async fn a_restart_inside_the_issue_interval_waits_and_then_connects_by_itself() {
+    let fake = ScriptedTransport::new();
+    let env = env();
+    let last_request = unix_of(AT_TEN) - 60;
+    write_private(&token_path(&env.lock), json!({"token": null, "last_request_at": last_request}).to_string().as_bytes());
+    let server = spawn(&fake, &env, &[START, ("VALLY_CLOCK_START", AT_TEN)]);
+    server.addr().await;
+    let waiting = server.wait_for_state(is_issue_interval_wait).await;
+    assert_eq!(waiting, LinkState::Connecting(ConnectStep::IssueInterval(server::kiwoom::wire::parse_kst_datetime(AT_TEN).unwrap().plus_secs(-60 + 600))));
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert_eq!(fake.requests(), 0, "그 시각 전에는 아무것도 보내지 않는다: {:?}", fake.api_ids());
+    server.clock().jump(541);
+    server.wait_for_state(is_connected).await;
+    assert_eq!(fake.issued(), 1, "{:?}", fake.api_ids());
+    server.stop().await;
+}
+
+#[tokio::test]
+async fn a_first_automatic_issue_answered_8050_stops_blocked_and_does_not_repeat() {
+    let fake = ScriptedTransport::new();
+    reject_issue(&fake, EIGHT_FIFTY);
+    let env = env();
+    let server = spawn(&fake, &env, &[START, ("VALLY_CLOCK_START", AT_TEN)]);
+    server.addr().await;
+    let blocked = server.wait_for_state(is_failed).await;
+    assert_eq!(failure(blocked).problem, Problem::AuthBlocked8050);
+    assert_eq!(failure(server.link_state()).problem, Problem::AuthBlocked8050);
+    assert_eq!(fake.issued(), 1);
+
+    server.clock().jump(601);
+    assert_eq!(failure(server.connect(false).await).problem, Problem::AuthBlocked8050);
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert_eq!(fake.issued(), 1, "같은 프로세스에서 간격이 지나도 저절로 다시 보내지 않는다: {:?}", fake.api_ids());
+    server.stop().await;
+
+    let again = spawn(&fake, &env, &[START, ("VALLY_CLOCK_START", AT_TEN_TWENTY)]);
+    again.addr().await;
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert_eq!(failure(again.link_state()).problem, Problem::AuthBlocked8050);
+    assert_eq!(fake.issued(), 1, "같은 파일로 다시 켜도 발급은 1회 그대로다: {:?}", fake.api_ids());
+    again.stop().await;
+}
+
+#[tokio::test]
+async fn a_restart_after_8050_stays_blocked_and_sends_nothing() {
+    let fake = ScriptedTransport::new();
+    reject_issue(&fake, EIGHT_FIFTY);
+    let env = env();
+    let first = spawn(&fake, &env, &[OFF, ("VALLY_CLOCK_START", AT_TEN)]);
+    first.addr().await;
+    let blocked = first.connect(false).await;
+    assert_eq!(failure(blocked.clone()).problem, Problem::AuthBlocked8050);
+    assert_eq!(fake.requests(), 1);
+    first.stop().await;
+    fake.reset();
+
+    let server = spawn(&fake, &env, &[START, ("VALLY_CLOCK_START", AT_TEN_TWENTY)]);
+    server.addr().await;
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert_eq!(server.link_state(), blocked, "재시작 뒤 상태가 8050 직후와 같다");
+    assert!(server.link().needs_acknowledgement());
+    assert_eq!(fake.requests(), 1, "켜기만 하면 요청이 없다: {:?}", fake.api_ids());
+    assert_eq!(failure(server.connect(false).await).problem, Problem::AuthBlocked8050);
+    assert_eq!(fake.requests(), 1, "확인 없는 연결도 요청이 없다");
+
+    assert_eq!(server.connect(true).await, LinkState::Connected, "확인하고 간격이 지난 연결은 풀린다");
+    assert_eq!(fake.issued(), 2);
+    let saved = token_file_of(&env);
+    assert!(saved["auth_block"].is_null(), "{saved}");
+    server.stop().await;
+}
+
+#[tokio::test]
+async fn a_restart_after_a_key_rejection_stays_blocked_until_a_new_key_is_saved() {
+    let fake = ScriptedTransport::new();
+    reject_issue(&fake, KEY_REJECTED);
+    let env = env();
+    let first = spawn(&fake, &env, &[START, ("VALLY_CLOCK_START", AT_TEN)]);
+    first.addr().await;
+    let blocked = first.wait_for_state(is_failed).await;
+    assert_eq!(failure(blocked.clone()).problem, Problem::KeyNeedsCheck);
+    assert_eq!(token_file_of(&env)["auth_block"]["credential"], credential_id(APP_KEY));
+    first.stop().await;
+    fake.reset();
+
+    let server = spawn(&fake, &env, &[START, ("VALLY_CLOCK_START", AT_TEN_TWENTY)]);
+    server.addr().await;
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert_eq!(failure(server.link_state()).problem, Problem::KeyNeedsCheck);
+    assert_eq!(fake.issued(), 1, "{:?}", fake.api_ids());
+    assert_eq!(failure(server.connect(true).await).problem, Problem::KeyNeedsCheck, "확인 체크는 키 문제를 풀지 못한다");
+
+    let state = server.link().replace_key(Secret::new("FAKE-new-key".into()), Secret::new("FAKE-new-secret".into()));
+    assert_eq!(state, LinkState::Disconnected);
+    assert!(token_file_of(&env)["auth_block"].is_null());
+    assert_eq!(server.connect(false).await, LinkState::Connected);
+    assert_eq!(fake.issued(), 2);
+    server.stop().await;
+}
+
+#[tokio::test]
+async fn a_restart_with_another_app_key_does_not_restore_a_key_rejection() {
+    let fake = ScriptedTransport::new();
+    reject_issue(&fake, KEY_REJECTED);
+    let env = env();
+    let first = spawn(&fake, &env, &[START, ("VALLY_CLOCK_START", AT_TEN)]);
+    first.addr().await;
+    first.wait_for_state(is_failed).await;
+    first.stop().await;
+    fake.reset();
+
+    let other = spawn(&fake, &env, &[START, ("VALLY_CLOCK_START", AT_TEN_TWENTY), ("VALLY_KIWOOM_APP_KEY", "FAKE-other-key")]);
+    other.addr().await;
+    other.wait_for_state(is_connected).await;
+    assert_eq!(fake.issued(), 2, "{:?}", fake.api_ids());
+    other.stop().await;
+}
+
+#[tokio::test]
+async fn a_restart_after_the_user_disconnects_stays_disconnected() {
+    let fake = ScriptedTransport::new();
+    let env = env();
+    let first = spawn(&fake, &env, &[START]);
+    first.addr().await;
+    first.wait_for_state(is_connected).await;
+    first.link().disconnect_by_user();
+    assert_eq!(first.link_state(), LinkState::Disconnected);
+    assert_eq!(token_file_of(&env)["disconnected"], credential_id(APP_KEY));
+    first.stop().await;
+    let sent = fake.requests();
+
+    let second = spawn(&fake, &env, &[START]);
+    second.addr().await;
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert_eq!(second.link_state(), LinkState::Disconnected);
+    assert_eq!(fake.requests(), sent, "끊어 둔 키는 켤 때 아무것도 보내지 않는다: {:?}", fake.api_ids());
+    assert_eq!(second.connect(false).await, LinkState::Connected);
+    assert!(token_file_of(&env)["disconnected"].is_null(), "다시 연결하면 끊어 둔 기록이 지워진다");
+    second.stop().await;
+
+    let third = spawn(&fake, &env, &[START]);
+    third.addr().await;
+    third.wait_for_state(is_connected).await;
+    assert_eq!(fake.issued(), 1, "{:?}", fake.api_ids());
+    third.stop().await;
+}
+
+#[tokio::test]
+async fn a_disconnect_that_a_key_save_or_delete_makes_is_not_remembered() {
+    let fake = ScriptedTransport::new();
+    let env = env();
+    let server = spawn(&fake, &env, &[START]);
+    server.addr().await;
+    server.wait_for_state(is_connected).await;
+    server.link().disconnect();
+    server.link().replace_key(Secret::new(APP_KEY.into()), Secret::new("FAKE-SECRET".into()));
+    assert!(token_file_of(&env)["disconnected"].is_null());
+    server.link().disconnect();
+    server.link().clear_key();
+    assert!(token_file_of(&env)["disconnected"].is_null());
+    server.stop().await;
+}
+
+#[tokio::test]
+async fn restarting_again_and_again_issues_at_most_one_token_per_issue_interval() {
+    let fake = ScriptedTransport::new();
+    fake.respond_with("au10001", 500, json!({}));
+    let env = env();
+    for round in 0..4 {
+        let server = spawn(&fake, &env, &[START, ("VALLY_CLOCK_START", AT_TEN)]);
+        server.addr().await;
+        tokio::time::sleep(Duration::from_millis(600)).await;
+        assert_eq!(fake.issued(), 1, "{round}번째 시작: {:?}", fake.api_ids());
+        server.stop().await;
+    }
+    fake.reset();
+    let later = spawn(&fake, &env, &[START, ("VALLY_CLOCK_START", AT_TEN_TWENTY)]);
+    later.addr().await;
+    later.wait_for_state(is_connected).await;
+    assert_eq!(fake.issued(), 2, "간격이 지나야 다음 발급이 나간다: {:?}", fake.api_ids());
+    later.stop().await;
+}
+
+#[tokio::test]
+async fn a_plain_connect_inside_the_issue_interval_continues_by_itself_when_it_ends() {
+    let fake = ScriptedTransport::new();
+    let env = env();
+    write_private(&token_path(&env.lock), json!({"token": null, "last_request_at": unix_of(AT_TEN) - 60}).to_string().as_bytes());
+    let server = spawn(&fake, &env, &[OFF, ("VALLY_CLOCK_START", AT_TEN)]);
+    server.addr().await;
+    let waiting = server.connect_until_waiting(false).await;
+    assert!(is_issue_interval_wait(&waiting), "{waiting:?}");
+    assert!(is_issue_interval_wait(&server.connect_until_waiting(false).await), "다른 연결 요청은 같은 대기에 붙는다");
+    assert_eq!(fake.requests(), 0);
+    server.clock().jump(541);
+    server.wait_for_state(is_connected).await;
+    assert_eq!(fake.issued(), 1, "{:?}", fake.api_ids());
+    server.stop().await;
+}
+
+#[tokio::test]
+async fn a_disconnect_during_the_issue_interval_wait_sends_nothing() {
+    let fake = ScriptedTransport::new();
+    let env = env();
+    write_private(&token_path(&env.lock), json!({"token": null, "last_request_at": unix_of(AT_TEN) - 60}).to_string().as_bytes());
+    let server = spawn(&fake, &env, &[START, ("VALLY_CLOCK_START", AT_TEN)]);
+    server.addr().await;
+    server.wait_for_state(is_issue_interval_wait).await;
+    server.link().disconnect();
+    assert_eq!(server.link_state(), LinkState::Disconnected);
+    server.clock().jump(700);
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert_eq!(server.link_state(), LinkState::Disconnected);
+    assert_eq!(fake.requests(), 0, "{:?}", fake.api_ids());
     server.stop().await;
 }

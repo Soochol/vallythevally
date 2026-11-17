@@ -90,6 +90,7 @@ fn generated_typescript_matches_the_committed_files() {
         generated::<IchimokuTest>(),
         generated::<IndicatorSpec>(),
         generated::<KeySource>(),
+        generated::<KiwoomAtStart>(),
         generated::<KiwoomConnectInput>(),
         generated::<KiwoomConnectStep>(),
         generated::<KiwoomKeyInput>(),

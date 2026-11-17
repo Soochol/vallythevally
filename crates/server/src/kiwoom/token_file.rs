@@ -5,15 +5,29 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
+use super::error::CodeKey;
 use crate::instance::InstanceLock;
 
-#[derive(Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, PartialEq, Eq, Default)]
 pub struct Saved {
     #[serde(default)]
     pub credential: Option<String>,
     pub token: Option<SavedToken>,
     /// 유닉스 초. 키움 실측 프로그램도 이 파일을 읽고 쓴다.
     pub last_request_at: i64,
+    /// 사용자가 연결을 끊어 둔 앱키의 해시.
+    #[serde(default)]
+    pub disconnected: Option<String>,
+    #[serde(default)]
+    pub auth_block: Option<SavedAuthBlock>,
+}
+
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
+pub struct SavedAuthBlock {
+    pub detail: CodeKey,
+    pub credential: Option<String>,
+    /// 유닉스 초.
+    pub at: i64,
 }
 
 #[derive(Serialize, Deserialize, PartialEq, Eq)]
@@ -86,6 +100,8 @@ mod tests {
             credential: Some(credential_id("FAKE-APPKEY-file-1")),
             token: Some(SavedToken { value: "FAKE-TOKEN-file-1".into(), expires_dt: "20261110090000".into(), issued_at: 10 }),
             last_request_at: 9,
+            disconnected: Some(credential_id("FAKE-APPKEY-file-1")),
+            auth_block: Some(SavedAuthBlock { detail: CodeKey::Rest(8050), credential: None, at: 8 }),
         };
         file.save(&saved).unwrap();
         file.save(&saved).unwrap();
@@ -110,7 +126,7 @@ mod tests {
     }
 
     fn saved() -> Saved {
-        Saved { credential: None, token: None, last_request_at: 9 }
+        Saved { last_request_at: 9, ..Saved::default() }
     }
 
     #[test]

@@ -308,8 +308,17 @@ pub enum KiwoomLinkState {
 pub enum KiwoomConnectStep {
     CheckingKey,
     Token,
+    IssueInterval,
     Symbols,
     Realtime,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub enum KiwoomAtStart {
+    Connects,
+    KeptDisconnected,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -343,6 +352,7 @@ pub struct KiwoomLinkStatus {
     pub realtime_registered: Option<u32>,
     pub symbol_count: Option<u32>,
     pub registered_ip: Option<RegisteredIp>,
+    pub at_start: Option<KiwoomAtStart>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]

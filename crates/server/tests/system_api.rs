@@ -67,6 +67,24 @@ impl Client {
         }
     }
 
+    async fn until_state(&self, wanted: &str) -> Value {
+        tokio::time::timeout(Duration::from_secs(10), async {
+            loop {
+                let (_, status) = self.get("/api/system/kiwoom").await;
+                if status["state"] == wanted {
+                    return status;
+                }
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+        })
+        .await
+        .unwrap_or_else(|_| panic!("연결 상태 {wanted}가 오지 않았다"))
+    }
+
+    async fn disconnect(&self) -> (u16, Value) {
+        answer(self.write(reqwest::Method::POST, "/api/system/kiwoom/disconnect", None).send().await.unwrap()).await
+    }
+
     async fn put_key(&self, key: &str, secret: &str) -> (u16, Value) {
         answer(self.write(reqwest::Method::PUT, "/api/system/kiwoom/key", Some(json!({"appKey": key, "appSecret": secret}))).send().await.unwrap()).await
     }
@@ -128,9 +146,12 @@ async fn a_saved_key_never_shows_in_responses_the_socket_logs_or_ui_state() {
 
     let (status, saved) = client.put_key(APP_KEY, APP_SECRET).await;
     assert_eq!(status, 200, "{saved}");
-    assert_eq!((saved["state"].as_str(), saved["keySource"].as_str(), saved["appKeyTail"].as_str()), (Some("disconnected"), Some("file"), Some("7Q2D")));
-    let pushed = next_link_message(&mut ws, &mut seen).await;
-    assert_eq!((pushed["state"].as_str(), pushed["appKeyTail"].as_str()), (Some("disconnected"), Some("7Q2D")));
+    assert_eq!((saved["state"].as_str(), saved["keySource"].as_str(), saved["appKeyTail"].as_str()), (Some("connecting"), Some("file"), Some("7Q2D")));
+    let mut pushed = next_link_message(&mut ws, &mut seen).await;
+    while pushed["state"] != "connected" {
+        assert_eq!(pushed["appKeyTail"].as_str(), Some("7Q2D"));
+        pushed = next_link_message(&mut ws, &mut seen).await;
+    }
 
     let (status, connected) = client.connect(false).await;
     assert_eq!((status, connected["state"].as_str()), (200, Some("connected")), "{connected}");
@@ -158,16 +179,18 @@ async fn the_key_file_is_private_and_the_next_start_reads_it_without_calling_kiw
     let server = env.spawn(&fake, &[]);
     let client = Client::of(&server).await;
     assert_eq!(client.put_key(APP_KEY, APP_SECRET).await.0, 200);
+    client.until_state("connected").await;
     assert_eq!(mode(&env.key_path), 0o600);
     assert_eq!(mode(env.key_path.parent().unwrap()), 0o700);
     server.stop().await;
+    let sent = fake.requests();
 
     let restarted = env.spawn(&fake, &[]);
     let client = Client::of(&restarted).await;
     let (_, status) = client.get("/api/system/kiwoom").await;
     assert_eq!((status["keySource"].as_str(), status["state"].as_str(), status["appKeyTail"].as_str()), (Some("file"), Some("disconnected"), Some("7Q2D")), "{status}");
     assert_eq!(status["credentialId"].as_str().map(str::len), Some(8));
-    assert_eq!(fake.requests(), 0, "{:?}", fake.api_ids());
+    assert_eq!(fake.requests(), sent, "{:?}", fake.api_ids());
 }
 
 #[tokio::test]
@@ -176,7 +199,9 @@ async fn a_key_file_others_can_read_is_not_read_and_the_status_names_the_cause()
     let server = env.spawn(&fake, &[]);
     let client = Client::of(&server).await;
     assert_eq!(client.put_key(APP_KEY, APP_SECRET).await.0, 200);
+    client.until_state("connected").await;
     server.stop().await;
+    let sent = fake.requests();
     std::fs::set_permissions(&env.key_path, std::fs::Permissions::from_mode(0o644)).unwrap();
 
     let restarted = env.spawn(&fake, &[]);
@@ -186,13 +211,13 @@ async fn a_key_file_others_can_read_is_not_read_and_the_status_names_the_cause()
     assert!(status["message"].as_str().unwrap().contains("chmod 600"), "{status}");
     let (_, after_connect) = client.connect(false).await;
     assert_eq!(after_connect["problem"].as_str(), Some("keyFileUnusable"));
-    assert_eq!(fake.requests(), 0, "{:?}", fake.api_ids());
+    assert_eq!(fake.requests(), sent, "{:?}", fake.api_ids());
     assert_no_secret("상태", &status.to_string());
     assert_eq!(mode(&env.key_path), 0o644, "읽지 않은 파일은 건드리지 않는다");
 
     assert_eq!(client.put_key(OTHER_APP_KEY, OTHER_APP_SECRET).await.0, 200, "새 키를 저장하면 파일이 새로 쓰여 문제가 풀린다");
     let (_, fixed) = client.get("/api/system/kiwoom").await;
-    assert_eq!((fixed["state"].as_str(), fixed["problem"].as_str()), (Some("disconnected"), None), "{fixed}");
+    assert_eq!((fixed["state"].as_str(), fixed["problem"].as_str()), (Some("connecting"), None), "{fixed}");
     assert_eq!(mode(&env.key_path), 0o600);
 }
 
@@ -216,30 +241,33 @@ async fn an_environment_key_wins_and_the_screen_cannot_change_it() {
 }
 
 #[tokio::test]
-async fn saving_a_key_sends_nothing_and_connecting_five_times_at_once_issues_one_token() {
+async fn saving_a_key_connects_by_itself_and_answers_without_waiting() {
     let (env, fake) = (Env::new(), ScriptedTransport::new());
+    fake.delay("au10001", Duration::from_millis(800));
     let server = env.spawn(&fake, &[]);
     let client = Client::of(&server).await;
     assert_eq!(client.connect(false).await.1["state"], "noKey");
-    assert_eq!(client.put_key(APP_KEY, APP_SECRET).await.0, 200);
-    assert_eq!(fake.requests(), 0, "키를 저장해도 키움에는 아무것도 보내지 않는다");
+    let asked = std::time::Instant::now();
+    let (status, saved) = client.put_key(APP_KEY, APP_SECRET).await;
+    assert_eq!((status, saved["state"].as_str()), (200, Some("connecting")), "{saved}");
+    assert!(asked.elapsed() < Duration::from_millis(600), "키 저장 응답이 연결이 끝나길 기다렸다: {:?}", asked.elapsed());
 
     let answers = futures::future::join_all((0..5).map(|_| client.connect(false))).await;
     for (status, body) in &answers {
         assert_eq!((*status, body["state"].as_str()), (200, Some("connected")), "{body}");
     }
-    assert_eq!(fake.issued(), 1, "{:?}", fake.api_ids());
+    assert_eq!(fake.issued(), 1, "저장으로 시작한 연결에 붙는다: {:?}", fake.api_ids());
     let (_, connected) = client.get("/api/system/kiwoom").await;
     assert!(connected["tokenExpiresAt"].is_i64() && connected["symbolCount"].as_u64().unwrap() > 0 && connected["realtimeRegistered"].is_u64(), "{connected}");
 }
 
 #[tokio::test]
-async fn deleting_and_saving_again_does_not_skip_the_issue_interval() {
+async fn deleting_and_saving_again_waits_out_the_issue_interval_and_then_connects_by_itself() {
     let (env, fake) = (Env::new(), ScriptedTransport::new());
-    let server = env.spawn(&fake, &[]);
+    let server = env.spawn(&fake, &[("VALLY_CLOCK_START", "20261109100000")]);
     let client = Client::of(&server).await;
     assert_eq!(client.put_key(APP_KEY, APP_SECRET).await.0, 200);
-    assert_eq!(client.connect(false).await.1["state"], "connected");
+    client.until_state("connected").await;
     assert_eq!(fake.issued(), 1);
 
     let (status, deleted) = client.delete_key().await;
@@ -248,10 +276,100 @@ async fn deleting_and_saving_again_does_not_skip_the_issue_interval() {
     assert_eq!(client.delete_key().await.0, 200, "이미 지운 키를 또 지워도 같은 결과다");
 
     assert_eq!(client.put_key(APP_KEY, APP_SECRET).await.0, 200);
-    let (_, again) = client.connect(false).await;
-    assert_eq!((again["state"].as_str(), again["problem"].as_str()), (Some("failed"), Some("issueIntervalWait")), "{again}");
-    assert!(again["retryAt"].is_i64(), "{again}");
+    let waiting = client.until_state("connecting").await;
+    assert_eq!(waiting["step"], "issueInterval", "{waiting}");
+    assert!(waiting["retryAt"].is_i64(), "{waiting}");
+    tokio::time::sleep(Duration::from_millis(300)).await;
     assert_eq!(fake.issued(), 1, "{:?}", fake.api_ids());
+
+    server.clock().jump(601);
+    client.until_state("connected").await;
+    assert_eq!(fake.issued(), 2, "{:?}", fake.api_ids());
+}
+
+#[tokio::test]
+async fn a_connect_request_answers_as_soon_as_the_issue_interval_wait_starts() {
+    let (env, fake) = (Env::new(), ScriptedTransport::new());
+    let last_request = 1_794_909_600_i64 - 60;
+    let token_file = common::token_path(&env.lock);
+    std::fs::create_dir_all(token_file.parent().unwrap()).unwrap();
+    std::fs::set_permissions(token_file.parent().unwrap(), std::fs::Permissions::from_mode(0o700)).unwrap();
+    std::fs::write(&token_file, json!({"token": null, "last_request_at": last_request}).to_string()).unwrap();
+    std::fs::set_permissions(&token_file, std::fs::Permissions::from_mode(0o600)).unwrap();
+    let server = env.spawn(&fake, &[("VALLY_CLOCK_START", "20261109100000")]);
+    let client = Client::of(&server).await;
+    assert_eq!(client.put_key(APP_KEY, APP_SECRET).await.0, 200);
+
+    let (status, body) = tokio::time::timeout(Duration::from_secs(3), client.connect(false)).await.expect("대기에 들어가면 바로 답해야 한다");
+    assert_eq!((status, body["state"].as_str(), body["step"].as_str(), body["retryAt"].as_i64()), (200, Some("connecting"), Some("issueInterval"), Some(last_request + 600)), "{body}");
+    assert_eq!(fake.requests(), 0, "{:?}", fake.api_ids());
+}
+
+#[tokio::test]
+async fn saving_a_new_key_after_8050_issues_nothing_without_the_acknowledgement() {
+    let (env, fake) = (Env::new(), ScriptedTransport::new());
+    fake.respond_with("au10001", 200, json!({"return_code": 3, "return_msg": "인증에 실패했습니다[8050:지정단말기 인증에 실패했습니다]"}));
+    let server = env.spawn(&fake, &[("VALLY_CLOCK_START", "20261109100000")]);
+    let client = Client::of(&server).await;
+    assert_eq!(client.put_key(APP_KEY, APP_SECRET).await.0, 200);
+    let blocked = client.until_state("failed").await;
+    assert_eq!((blocked["problem"].as_str(), blocked["needsAcknowledgement"].as_bool()), (Some("authBlocked8050"), Some(true)), "{blocked}");
+    assert_eq!(fake.issued(), 1);
+
+    server.clock().jump(601);
+    let (status, saved) = client.put_key(OTHER_APP_KEY, OTHER_APP_SECRET).await;
+    assert_eq!(status, 200, "{saved}");
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    let (_, after) = client.get("/api/system/kiwoom").await;
+    assert_eq!((after["problem"].as_str(), after["needsAcknowledgement"].as_bool()), (Some("authBlocked8050"), Some(true)), "새 키를 저장해도 8050 차단은 남는다: {after}");
+    assert_eq!(fake.issued(), 1, "간격이 지나도 확인 없이는 발급하지 않는다: {:?}", fake.api_ids());
+}
+
+#[tokio::test]
+async fn saving_a_key_after_the_user_disconnected_connects_again() {
+    let (env, fake) = (Env::new(), ScriptedTransport::new());
+    let server = env.spawn(&fake, &[]);
+    let client = Client::of(&server).await;
+    assert_eq!(client.put_key(APP_KEY, APP_SECRET).await.0, 200);
+    client.until_state("connected").await;
+
+    let (status, kept) = client.disconnect().await;
+    assert_eq!((status, kept["state"].as_str(), kept["atStart"].as_str()), (200, Some("disconnected"), Some("keptDisconnected")), "{kept}");
+    assert_eq!(kept["message"].as_str(), Some("연결을 끊어 두었습니다. 연결하면 다음부터 서버를 켤 때 자동으로 연결합니다"));
+
+    assert_eq!(client.put_key(APP_KEY, APP_SECRET).await.0, 200);
+    let again = client.until_state("connected").await;
+    assert_eq!(again["atStart"].as_str(), Some("connects"), "{again}");
+    assert_eq!(fake.issued(), 1, "저장한 토큰이 유효하다: {:?}", fake.api_ids());
+}
+
+#[tokio::test]
+async fn the_status_says_what_happens_at_the_next_start() {
+    let (env, fake) = (Env::new(), ScriptedTransport::new());
+    let server = env.spawn(&fake, &[]);
+    let client = Client::of(&server).await;
+    let (_, without_key) = client.get("/api/system/kiwoom").await;
+    assert!(without_key["atStart"].is_null(), "{without_key}");
+
+    assert_eq!(client.put_key(APP_KEY, APP_SECRET).await.0, 200);
+    let connected = client.until_state("connected").await;
+    assert_eq!(connected["atStart"].as_str(), Some("connects"));
+    let (_, kept) = client.disconnect().await;
+    assert_eq!(kept["atStart"].as_str(), Some("keptDisconnected"));
+    let (_, connected_again) = client.connect(false).await;
+    assert_eq!((connected_again["state"].as_str(), connected_again["atStart"].as_str()), (Some("connected"), Some("connects")));
+    let (_, deleted) = client.delete_key().await;
+    assert!(deleted["atStart"].is_null(), "{deleted}");
+
+    assert_eq!(client.put_key(APP_KEY, APP_SECRET).await.0, 200);
+    let (_, kept_again) = client.disconnect().await;
+    assert_eq!(kept_again["atStart"].as_str(), Some("keptDisconnected"));
+    server.stop().await;
+    let restarted = env.spawn(&fake, &[]);
+    let client = Client::of(&restarted).await;
+    let (_, status) = client.get("/api/system/kiwoom").await;
+    assert_eq!((status["state"].as_str(), status["atStart"].as_str()), (Some("disconnected"), Some("keptDisconnected")), "{status}");
+    assert_eq!(status["message"].as_str(), Some("연결을 끊어 두었습니다. 연결하면 다음부터 서버를 켤 때 자동으로 연결합니다"));
 }
 
 #[tokio::test]
@@ -260,6 +378,8 @@ async fn a_write_from_another_site_host_or_content_type_is_refused_and_leaves_th
     let server = env.spawn(&fake, &[]);
     let client = Client::of(&server).await;
     assert_eq!(client.put_key(APP_KEY, APP_SECRET).await.0, 200);
+    client.until_state("connected").await;
+    let sent = fake.requests();
     let saved = std::fs::read(&env.key_path).unwrap();
 
     let evil_host = client.put_request(OTHER_APP_KEY, OTHER_APP_SECRET).header("host", format!("evil.example:{}", client.port));
@@ -278,13 +398,13 @@ async fn a_write_from_another_site_host_or_content_type_is_refused_and_leaves_th
         assert_eq!(std::fs::read(&env.key_path).unwrap(), saved, "{name}");
     }
     let (_, status) = client.get("/api/system/kiwoom").await;
-    assert_eq!((status["state"].as_str(), status["appKeyTail"].as_str()), (Some("disconnected"), Some("7Q2D")));
+    assert_eq!((status["state"].as_str(), status["appKeyTail"].as_str()), (Some("connected"), Some("7Q2D")));
+    assert_eq!(fake.requests(), sent, "거절된 쓰기는 키움으로 아무것도 보내지 않는다: {:?}", fake.api_ids());
 
     let same_origin = client.put_request(OTHER_APP_KEY, OTHER_APP_SECRET).header("origin", format!("http://localhost:{}", client.port)).header("host", format!("localhost:{}", client.port));
     assert_eq!(same_origin.send().await.unwrap().status().as_u16(), 200, "같은 출처는 받는다");
     let with_charset = client.http.put(format!("{}/api/system/kiwoom/key", client.base)).header("content-type", "application/json; charset=utf-8").body(json!({"appKey": APP_KEY, "appSecret": APP_SECRET}).to_string());
     assert_eq!(with_charset.send().await.unwrap().status().as_u16(), 200);
-    assert_eq!(fake.requests(), 0);
 }
 
 #[tokio::test]
@@ -446,7 +566,8 @@ async fn one_ip_check_sends_one_bare_request_and_returns_the_address() {
     let server = env.spawn(&fake, &[("VALLY_PUBLIC_IP_URL", &service.url)]);
     let client = Client::of(&server).await;
     assert_eq!(client.put_key(APP_KEY, APP_SECRET).await.0, 200);
-    client.get("/api/system/kiwoom").await;
+    client.until_state("connected").await;
+    let sent = fake.requests();
 
     let (status, checked) = client.ip_check().await;
     assert_eq!(status, 200, "{checked}");
@@ -460,7 +581,7 @@ async fn one_ip_check_sends_one_bare_request_and_returns_the_address() {
     for forbidden in ["authorization", "cookie", &APP_KEY.to_ascii_lowercase(), &APP_SECRET.to_ascii_lowercase(), &token_for(APP_KEY).to_ascii_lowercase()] {
         assert!(!raw.contains(forbidden), "요청에 {forbidden}가 있다: {raw}");
     }
-    assert_eq!(fake.requests(), 0, "{:?}", fake.api_ids());
+    assert_eq!(fake.requests(), sent, "{:?}", fake.api_ids());
 }
 
 #[tokio::test]

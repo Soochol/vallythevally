@@ -634,7 +634,7 @@ impl Inner {
             }
             Stop::Everything => {
                 tracing::error!(api_id = api_id.as_str(), "{failure}");
-                self.auth.halt(failure.clone());
+                self.auth.halt(failure.clone(), self.clock.now());
                 KiwoomError::Stopped(failure)
             }
         }
@@ -724,7 +724,7 @@ impl Inner {
             }
             (Stop::AuthGate, Stop::AuthGate) => {
                 tracing::error!(api_id = failure.api_id().as_str(), "{failure}. 10분 뒤 확인도 실패해 조회와 토큰 발급을 멈춥니다");
-                self.auth.halt(failure.clone());
+                self.auth.halt(failure.clone(), self.clock.now());
                 KiwoomError::Stopped(failure)
             }
             _ => return self.market_failed(q, id, generation, failure),
@@ -759,7 +759,7 @@ impl Inner {
             }
             Retry::RefreshTokenOnce if job.resent_after_invalid_token => {
                 tracing::error!(api_id, "새 토큰으로도 토큰 무효 응답을 받았습니다. 조회와 토큰 발급을 멈춥니다");
-                self.auth.halt(failure.clone());
+                self.auth.halt(failure.clone(), self.clock.now());
                 q.finish(id, Err(KiwoomError::Stopped(failure)));
                 return;
             }
@@ -927,7 +927,7 @@ mod tests {
         let (dir, lock, file) = temp_token_file();
         let an_hour_ago = start.unix() - 3600;
         let token = SavedToken { value: "tok-0".into(), expires_dt: "20991231000000".into(), issued_at: an_hour_ago };
-        file.save(&Saved { credential: Some(credential_id("k")), token: Some(token), last_request_at: an_hour_ago }).unwrap();
+        file.save(&Saved { credential: Some(credential_id("k")), token: Some(token), last_request_at: an_hour_ago, ..Saved::default() }).unwrap();
         let auth = KiwoomAuth::new(Secret::new("k".into()), Secret::new("s".into()), Some(file));
         (KiwoomRest::new(Arc::new(fake.clone()), auth, Clock::fake(start)), (dir, lock))
     }
