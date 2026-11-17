@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
-use domain::{IndexCode, Listing, Market, Symbol, SymbolInfo, SymbolKind, classify};
+use domain::{IndexCode, Listing, ListingRow, Market, Symbol, SymbolInfo, SymbolKind, classify};
 use tokio::sync::watch;
 
 use crate::kiwoom::api::{ApiId, StockList};
@@ -13,7 +13,7 @@ use crate::kiwoom::wire::{self, ScreenerListing};
 
 pub const READY_WAIT: Duration = Duration::from_secs(10);
 const MAX_RESULTS: usize = 20;
-const MAX_LIST_PAGES: usize = 10;
+pub const MAX_LIST_PAGES: usize = 10;
 
 #[derive(Debug, Default, Clone, Copy)]
 pub struct SearchFilter {
@@ -198,29 +198,44 @@ impl SymbolDirectory {
     }
 }
 
+pub struct ListingPages {
+    pub rows: Vec<ListingRow>,
+    /// 쪽 수 상한에 닿았는데 다음 쪽이 남아 있었다. 끊긴 목록이다.
+    pub cut_off: bool,
+}
+
+/// ka10099를 `mrkt_tp=0`, `10`으로 연속조회 끝까지 불러 행을 그대로 모은다.
+pub async fn fetch_listing_rows(rest: &KiwoomRest, priority: Priority) -> Result<ListingPages, KiwoomError> {
+    let mut rows = Vec::new();
+    let mut cut_off = false;
+    for req in [StockList::EXCHANGE, StockList::KOSDAQ] {
+        let mut cont = None;
+        for _ in 0..MAX_LIST_PAGES {
+            let page = rest.call(&req, cont.as_ref(), priority, MergeScope::default()).await?;
+            rows.extend(page.body.list);
+            cont = page.next;
+            if cont.is_none() {
+                break;
+            }
+        }
+        cut_off |= cont.is_some();
+    }
+    Ok(ListingPages { rows, cut_off })
+}
+
 /// ka10099를 `mrkt_tp=0`, `10`으로 불러 목록을 만든다.
 pub async fn fetch_directory(rest: &KiwoomRest, priority: Priority) -> Result<Directory, KiwoomError> {
     let mut stocks = Vec::new();
     let mut screener_listing = Vec::new();
     let mut unknown = Vec::new();
-    for req in [StockList::EXCHANGE, StockList::KOSDAQ] {
-        let mut cont = None;
-        for _ in 0..MAX_LIST_PAGES {
-            let page = rest.call(&req, cont.as_ref(), priority, MergeScope::default()).await?;
-            for row in &page.body.list {
-                match classify(row) {
-                    Listing::Include(info) => {
-                        screener_listing.extend(wire::screener_listing(row, &info));
-                        stocks.push(info);
-                    }
-                    Listing::Exclude => {}
-                    Listing::Unknown(why) => unknown.push(why),
-                }
+    for row in &fetch_listing_rows(rest, priority).await?.rows {
+        match classify(row) {
+            Listing::Include(info) => {
+                screener_listing.extend(wire::screener_listing(row, &info));
+                stocks.push(info);
             }
-            cont = page.next;
-            if cont.is_none() {
-                break;
-            }
+            Listing::Exclude => {}
+            Listing::Unknown(why) => unknown.push(why),
         }
     }
     if !unknown.is_empty() {
