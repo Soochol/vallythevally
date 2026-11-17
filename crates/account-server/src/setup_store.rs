@@ -139,9 +139,9 @@ impl Store {
             .await?;
         let rows = sqlx::query(
             "SELECT d.kind, d.id, d.revision, d.deleted, d.body, d.seq
-             FROM (SELECT seq, SUM(size) OVER (ORDER BY seq) - size AS bytes_before FROM setup_documents WHERE account_id = ? AND seq > ?) AS w
+             FROM (SELECT seq, SUM(size) OVER (ORDER BY seq) AS running FROM setup_documents WHERE account_id = ? AND seq > ?) AS w
              JOIN setup_documents d ON d.account_id = ? AND d.seq = w.seq
-             WHERE w.bytes_before < ?
+             WHERE w.running <= ?
              ORDER BY d.seq
              LIMIT ?",
         )

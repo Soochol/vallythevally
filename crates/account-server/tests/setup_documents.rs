@@ -137,10 +137,11 @@ async fn changes_stops_at_the_byte_budget_and_says_there_is_more() {
     let mut since = 0;
     let mut pages = 0;
     loop {
-        let page = account.changes(&format!("since={since}")).await;
-        let count = page["documents"].as_array().unwrap().len();
-        assert!(count <= 8 * 1024 * 1024 / size + 1);
-        received += count;
+        let response = harness.http.get(format!("{}/v1/setup/changes?since={since}", harness.base)).bearer_auth(&account.token).send().await.unwrap();
+        let wire = response.bytes().await.unwrap();
+        assert!(wire.len() <= 8 * 1024 * 1024, "응답이 {}바이트다", wire.len());
+        let page: Value = serde_json::from_slice(&wire).unwrap();
+        received += page["documents"].as_array().unwrap().len();
         pages += 1;
         since = page["seq"].as_i64().unwrap();
         if !page["more"].as_bool().unwrap() {

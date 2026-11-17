@@ -12,6 +12,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 pub const MESSAGE_BYTES: usize = 8 * 1024 * 1024;
+pub const CHANGES_BODY_BYTES: i64 = 7 * 1024 * 1024;
 pub const MAX_PUSH_DOCUMENTS: usize = 500;
 pub const DEFAULT_CHANGES_LIMIT: i64 = 100;
 pub const MAX_CHANGES_LIMIT: i64 = 500;
@@ -109,7 +110,7 @@ async fn changes(State(state): Shared, headers: HeaderMap, RawQuery(raw): RawQue
     let query: HashMap<String, String> = url::form_urlencoded::parse(raw.unwrap_or_default().as_bytes()).into_owned().collect();
     let since = query_number(&query, "since", 0, 0..=i64::MAX)?;
     let limit = query_number(&query, "limit", DEFAULT_CHANGES_LIMIT, 1..=MAX_CHANGES_LIMIT)?;
-    let changes = state.store.setup_changes(&account_id, since, limit, MESSAGE_BYTES as i64).await?;
+    let changes = state.store.setup_changes(&account_id, since, limit, CHANGES_BODY_BYTES).await?;
     tracing::info!(account_id, documents = changes.documents.len(), "셋업 변경 보냄");
     Ok(Json(ChangesResponse { documents: changes.documents, seq: changes.seq, more: changes.more }))
 }
