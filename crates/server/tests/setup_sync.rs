@@ -15,6 +15,9 @@ use serde_json::{Value, json};
 const GOOGLE_SECRET: &str = "google-secret-setup-sync-2b7e";
 const NAVER_SECRET: &str = "naver-secret-setup-sync-9c31";
 const CLOCK_START: &str = "20261117090000";
+const CLOCK_START_MILLIS: i64 = 1_794_873_600_000;
+const REVISION_AHEAD_OF_CLOCK: i64 = 1_795_000_000_000;
+const _: () = assert!(REVISION_AHEAD_OF_CLOCK > CLOCK_START_MILLIS);
 const LAYOUT_ONE: &str = "0193aaaa-0000-7000-8000-000000000001";
 const LAYOUT_TWO: &str = "0193aaaa-0000-7000-8000-000000000002";
 const SYMBOLS: [&str; 3] = ["005930", "000660", "IDX:001"];
@@ -98,6 +101,13 @@ impl Accounts {
 
     async fn summary(&self, token: &str) -> Value {
         reqwest::Client::new().get(format!("{}/v1/setup/summary", self.base)).bearer_auth(token).send().await.unwrap().json().await.unwrap()
+    }
+
+    async fn stored_revision(&self, token: &str, kind: &str) -> Option<i64> {
+        let response = reqwest::Client::new().get(format!("{}/v1/setup/changes?since=0", self.base)).bearer_auth(token).send().await.unwrap();
+        assert_eq!(response.status(), 200);
+        let changes: Value = response.json().await.unwrap();
+        changes["documents"].as_array().unwrap().iter().find(|document| document["kind"] == kind).and_then(|document| document["revision"].as_i64())
     }
 
     async fn revoke(&self, token: &str) {
@@ -631,9 +641,10 @@ async fn uploading_the_local_setup_beats_account_documents_whose_revision_is_ahe
     let accounts = Accounts::start().await;
     let (seed_machine, upload_machine, witness_machine) = (Machine::new(), Machine::new(), Machine::new());
     let seed = seed_machine.run(&accounts.base).await;
-    seed.saved("/api/watchlists", &watchlists("계정 쪽, 시계가 빠른 PC", 9_000_000_000_000)).await;
+    seed.saved("/api/watchlists", &watchlists("계정 쪽, 시계가 빠른 PC", REVISION_AHEAD_OF_CLOCK)).await;
     seed.login(&accounts).await;
     seed.synced().await;
+    assert_eq!(accounts.stored_revision(&seed.token(), "watchlists").await, Some(REVISION_AHEAD_OF_CLOCK));
 
     let upload = upload_machine.run(&accounts.base).await;
     upload.saved("/api/watchlists", &watchlists("올릴 것", 1_794_152_130_001)).await;
@@ -671,13 +682,14 @@ async fn an_older_setup_imported_on_a_signed_in_pc_survives_the_next_sync_and_re
 #[tokio::test]
 async fn an_import_also_beats_an_account_copy_whose_revision_is_ahead_of_this_pcs_clock() {
     let pair = pair().await;
-    let (a, b) = (&pair.a, &pair.b);
+    let (accounts, a, b) = (&pair.accounts, &pair.a, &pair.b);
     fill(a).await;
     a.synced().await;
     let earlier = a.export().await;
     b.synced().await;
-    b.saved("/api/watchlists", &watchlists("빠른 시계 PC", 1_794_200_000_000)).await;
+    b.saved("/api/watchlists", &watchlists("빠른 시계 PC", REVISION_AHEAD_OF_CLOCK)).await;
     b.synced().await;
+    assert_eq!(accounts.stored_revision(&b.token(), "watchlists").await, Some(REVISION_AHEAD_OF_CLOCK));
     a.synced().await;
     assert_eq!(a.put("/api/setup/import", &earlier).await.0, 200);
     a.synced().await;
