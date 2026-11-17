@@ -14,7 +14,7 @@ export default defineConfig({
     baseURL: origin,
     serviceWorkers: "block",
     trace: "retain-on-failure",
-    screenshot: "only-on-failure",
+    screenshot: "off",
     locale: "ko-KR",
     timezoneId: "Asia/Seoul",
     launchOptions: { chromiumSandbox: true },
