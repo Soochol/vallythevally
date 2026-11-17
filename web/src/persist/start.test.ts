@@ -92,6 +92,17 @@ describe("시작 흐름의 상태별 분기", () => {
   });
 });
 
+const needsChoice: AccountStatus = { ...signedIn, sync: { state: "needs_choice", localDocuments: 4, accountDocuments: 9, lastSuccessAt: null, pendingDocuments: 0, refusedDocuments: 0, lastError: null } };
+
+test("첫 로그인 선택을 기다리는 동안은 셋업을 되살리지 않고, 선택이 끝나면 되살린다", async () => {
+  const { deps, push } = harness(needsChoice);
+  await start(deps);
+  expect(deps.boot).not.toHaveBeenCalled();
+  push(signedIn);
+  expect(deps.boot).toHaveBeenCalledOnce();
+  expect(deps.reload).not.toHaveBeenCalled();
+});
+
 test("계정이 바뀌어도 실행 중이면 아무것도 하지 않는다", () => {
   expect(stepFor("running", signedIn)).toBe("none");
   expect(stepFor("suspended", { state: "signed_out" })).toBe("none");

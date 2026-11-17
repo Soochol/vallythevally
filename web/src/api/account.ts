@@ -4,6 +4,8 @@ import type { AccountLoginRequest } from "./generated/AccountLoginRequest";
 import type { AccountLoginStart } from "./generated/AccountLoginStart";
 import type { AccountProvider } from "./generated/AccountProvider";
 import type { AccountStatus } from "./generated/AccountStatus";
+import type { InitialSyncChoice } from "./generated/InitialSyncChoice";
+import type { InitialSyncRequest } from "./generated/InitialSyncRequest";
 import { getJson, sendJson } from "./http";
 
 const ACCOUNT = "/api/account";
@@ -25,3 +27,6 @@ export const startLogin = (provider: AccountProvider) =>
 export const logout = () => applyStatus(() => sendJson<AccountStatus>("POST", `${ACCOUNT}/logout`, "{}"));
 export const deleteAccount = () => confirmed(`${ACCOUNT}/delete`);
 export const replaceLocalSetup = () => confirmed(`${ACCOUNT}/replace-local`);
+export const syncNow = () => applyStatus(() => sendJson<AccountStatus>("POST", `${ACCOUNT}/sync`, "{}"));
+export const initialSync = (choice: InitialSyncChoice) =>
+  applyStatus(() => sendJson<AccountStatus>("POST", `${ACCOUNT}/initial-sync`, JSON.stringify({ choice } satisfies InitialSyncRequest)));

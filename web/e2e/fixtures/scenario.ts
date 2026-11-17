@@ -11,6 +11,7 @@ import type { FinancialUpdatePage } from "../../src/api/generated/FinancialUpdat
 import type { AccountStatus } from "../../src/api/generated/AccountStatus";
 import type { KiwoomLinkStatus } from "../../src/api/generated/KiwoomLinkStatus";
 import type { ScreenerStatus } from "../../src/api/generated/ScreenerStatus";
+import type { SyncStatus } from "../../src/api/generated/SyncStatus";
 import type { SystemSettings } from "../../src/api/generated/SystemSettings";
 import type { Drawing } from "../../src/api/generated/Drawing";
 import type { DrawingInput } from "../../src/api/generated/DrawingInput";
@@ -129,6 +130,8 @@ export const CONNECTED_KIWOOM: KiwoomLinkStatus = {
   keySource: "file", appKeyTail: "1234", registeredIp: null, credentialId: null, state: "connected", problem: null, message: "키움에 연결되어 있습니다",
   retryAt: null, needsAcknowledgement: false, step: null, tokenExpiresAt: null, realtimeRegistered: 0, symbolCount: 2800,
 };
+
+export const SYNCED: SyncStatus = { state: "running", lastSuccessAt: 1_762_650_000, pendingDocuments: 0, refusedDocuments: 0, lastError: null };
 
 export const DEFAULT_SYSTEM_SETTINGS: SystemSettings = {
   bind: "127.0.0.1:8080", logFilter: "info", staticDir: "web/dist", dbPath: "data/vally.db", screenerDbPath: "data/screener.db", financialDbPath: "data/financial.db",

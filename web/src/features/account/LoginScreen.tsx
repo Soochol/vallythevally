@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { startLogin } from "../../api/account";
 import type { AccountProvider } from "../../api/generated/AccountProvider";
 import { useAccountStore } from "../../stores/account";
+import { markLoginStarted } from "../setup-wizard/wizardOpen";
 import { PROVIDER_NAME } from "./provider";
 
 const PROVIDER_BUTTON = "h-11 w-full rounded-m border border-line bg-raised px-4 text-m font-semibold text-text hover:bg-hover disabled:opacity-60";
@@ -17,7 +18,9 @@ export function LoginScreen() {
     setLeaving(provider);
     setError(null);
     try {
-      window.location.assign((await startLogin(provider)).url);
+      const { url } = await startLogin(provider);
+      markLoginStarted();
+      window.location.assign(url);
     } catch (e) {
       setError(e instanceof Error ? e.message : "로그인을 시작하지 못했습니다");
       setLeaving(null);

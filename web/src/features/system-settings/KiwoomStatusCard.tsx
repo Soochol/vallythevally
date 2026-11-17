@@ -117,7 +117,7 @@ function TokenFile({ busy, onRecheck }: { busy: boolean; onRecheck(): void }) {
   );
 }
 
-function Confirm({ confirmations, onConfirm }: { confirmations: Confirmations; onConfirm(next: Confirmations, registeredIpChecked: boolean): void }) {
+export function Confirm({ confirmations, onConfirm, lock = true }: { confirmations: Confirmations; onConfirm(next: Confirmations, registeredIpChecked: boolean): void; lock?: boolean }) {
   return (
     <fieldset className="flex flex-col gap-2 border-0 p-0">
       <legend className="sr-only">다시 연결하기 전 확인</legend>
@@ -125,10 +125,10 @@ function Confirm({ confirmations, onConfirm }: { confirmations: Confirmations; o
         <input type="checkbox" className="mt-1" checked={confirmations.registeredIp} onChange={(e) => onConfirm({ ...confirmations, registeredIp: e.target.checked }, e.target.checked)} />
         포털에 지금 공인 IP를 등록했습니다
       </label>
-      <label className="flex items-start gap-2 text-m">
+      {lock && <label className="flex items-start gap-2 text-m">
         <input type="checkbox" className="mt-1" checked={confirmations.lockChecked} onChange={(e) => onConfirm({ ...confirmations, lockChecked: e.target.checked }, false)} />
         반복 발급 잠금이 풀렸는지 확인했습니다
-      </label>
+      </label>}
     </fieldset>
   );
 }
