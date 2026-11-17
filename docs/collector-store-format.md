@@ -99,7 +99,16 @@ store/prune.log.jsonl        원문 지우기 기록(아래 "원문 지우기")
 | `format_version`, `date` | 이 파일의 형식 버전(1), 날짜(`YYYYMMDD` 수) |
 | `verify` | `passed`(원문 대조 통과 여부), `mismatch_count`, `buckets`, `lines_total`·`lines_finalized`·`lines_control`·`lines_unfinalized`(`verify.json`의 줄 수) |
 | `plan` | 그날 `plan/<날짜>.json`의 요약. 계획 파일이 없는 날은 `null`. `created_at`, `active_keys`, `universe_replaced`(불리언), `planned_stocks`, `excluded`, `unregistered`, `alerts`, `keys[]`(`name`, `role`, `stocks`(개수), `market_types`, `load`) |
+| `observation` | 그날 사건 기록(`plan/<날짜>.events.jsonl`)이 적은 관측일 판단·개장 대조·지수 일봉 대조. 아래 표. 형식 버전은 그대로 1이고, 이 필드가 없는 파일도 있다 |
 | `stocks[]` | 종목마다 하나. 종목코드 순이다 |
+
+`observation`은 같은 종류의 사건이 여럿이면 마지막 것을 쓴다. 사건 기록이나 해당 줄이 없으면 `not_recorded`다.
+
+| 필드 | 뜻 |
+|---|---|
+| `judgment` | `{day, verdict, open_minute, treated_as, evidence[]}`, 없으면 `null`. `verdict`는 `observed`·`closed`·`unknown`, `open_minute`는 개장 분(KST 0시부터, 없으면 `null`), `treated_as`는 실제로 돌린 방식(`observed`·`closed`)이다. 판단이 `unknown`이면 `observed`로 보고 돌렸다는 뜻이다. `evidence[]`는 `{input, finding, detail}` |
+| `market_open` | `{state}`와 상태별 필드. `seen`(`key`, `deadline`: `0s`가 처음 온 키), `missing`(`deadline`: 기한까지 오지 않음), `not_checked`(`reason`: 개장 뒤에 시작해 대조하지 않음), `not_recorded`. `seen`이 있으면 `seen`, 없으면 가장 마지막 `missing`·`not_checked`다 |
+| `index_check` | `{result, mismatch, detail}`. `result`는 `agrees`·`disagrees`·`undetermined`·`failed`·`not_recorded`, `mismatch`는 `disagrees`일 때 `observed_without_index_candle`·`closed_with_index_candle`, 아니면 `null` |
 
 `stocks[]`의 항목은 다음 필드를 가진다. 종목 코드는 원문의 `<종목코드>_AL`에서 `_AL`을 뗀 것이다.
 
@@ -132,7 +141,7 @@ store/prune.log.jsonl        원문 지우기 기록(아래 "원문 지우기")
 
 - `store/<날짜>/complete.json`이 있고 `verify.passed`가 `true`이며 `verify.json`의 `passed`도 `false`가 아니다.
 - `verify.json`의 `lines.unfinalized.total`이 0이다. 이 셈이 없거나 읽을 수 없으면 지우지 않는다.
-- 그날 뒤로 관측일이 보관 기간만큼 지났다. 기간은 지우기를 도는 날(`--date`)로 정한다. 처음 `complete.json`을 쓴 날(`store/` 아래 `complete.json`이 있는 가장 이른 날짜)을 포함한 10관측일 동안은 7관측일이고 그 뒤는 1관측일이다. 세 값은 `--keep-early`(7), `--keep`(1), `--early-period`(10)로 바꾼다. 관측일은 `collector-calendar`의 셈이고 휴장일은 들지 않는다. `calendar/`의 특일정보 캐시만 읽고 받지 않으므로, 캐시가 없어 관측일을 판단할 수 없으면 지우지 않는다.
+- 그날 뒤로 관측일이 보관 기간만큼 지났다. 기간은 지우기를 도는 날(`--date`)로 정한다. 처음 `complete.json`을 쓴 날(`store/` 아래 `complete.json`이 있는 가장 이른 날짜)을 포함한 10관측일 동안은 7관측일이고 그 뒤는 1관측일이다. 세 값은 `--keep-early`(7), `--keep`(1), `--early-period`(10)로 바꾼다. 관측일은 `collector-calendar`의 셈이고 휴장일은 들지 않는다. `calendar/`의 특일정보 캐시만 읽고 받지 않으므로, 캐시가 없어 관측일을 판단할 수 없으면 지우지 않는다. 달력은 처음 `complete.json`을 쓴 날이 속한 해부터 올해(12월이면 내년)까지 싣는다. 중간에 캐시가 없는 해가 끼면 그 해의 날은 판단 모름이라 지우지 않는데, 원문을 잃는 쪽이 아니라 남기는 쪽으로 실패하는 것이므로 옳고, 대신 그 해의 캐시를 채울 때까지 그 앞 원문이 계속 남는 것이 한계다.
 
 결과는 `store/prune.log.jsonl`에 줄마다 `run_date`, `date`, `action`(`deleted`·`kept`·`failed`)으로 덧붙인다. `deleted`에는 `bytes`, `kept`에는 `reason`이 있다. 까닭은 `no_complete`, `complete_unreadable`, `verification_failed`, `unfinalized_count_missing`, `unfinalized`(`total`과 종류별 `kinds`), `within_retention`(`keep_observation_days`), `observation_unknown`이다. 지우는 부분은 `raw/` 바로 아래 8자리 날짜 폴더가 아닌 경로를 거부한다.
 
