@@ -299,6 +299,21 @@ function WatchList({ variant, sender, editing, naming, onNaming, width = null }:
     setFocusRow(null);
   }, [focusRow, list]);
 
+  const knownSymbols = useRef({ listId: list.id, symbols });
+  useEffect(() => {
+    const known = knownSymbols.current;
+    knownSymbols.current = { listId: list.id, symbols };
+    const box = scroller.current;
+    if (!box || known.listId !== list.id) return;
+    const added = symbols.filter((code) => !known.symbols.includes(code));
+    const line = added.length === 0 ? null : box.querySelector<HTMLElement>(`li[data-code="${CSS.escape(added[added.length - 1]!)}"]`);
+    if (!line) return;
+    const room = box.getBoundingClientRect();
+    const at = line.getBoundingClientRect();
+    if (at.bottom > room.bottom) box.scrollTop += at.bottom - room.bottom;
+    else if (at.top < room.top) box.scrollTop -= room.top - at.top;
+  }, [list.id, symbols]);
+
   const endDrag = () => {
     setDragged(null);
     setHover(null);
@@ -418,7 +433,7 @@ function WatchList({ variant, sender, editing, naming, onNaming, width = null }:
     });
   };
   const leave = (e: React.DragEvent) => !e.currentTarget.contains(e.relatedTarget as Node | null) && setHover(null);
-  const scrollClass = "min-h-0 flex-1 overflow-y-auto overflow-x-hidden";
+  const scrollClass = "relative min-h-0 flex-1 overflow-y-auto overflow-x-hidden";
 
   return (
     <>
