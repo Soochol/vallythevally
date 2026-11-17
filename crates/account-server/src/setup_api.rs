@@ -8,7 +8,7 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use serde::{Deserialize, Serialize};
 use setup::Document;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 pub const MESSAGE_BYTES: usize = 8 * 1024 * 1024;
@@ -63,7 +63,19 @@ async fn push(State(state): Shared, headers: HeaderMap, body: Bytes) -> Result<J
         return Err(ApiError::invalid_request(format!("한 번에 문서 {MAX_PUSH_DOCUMENTS}개까지 보냅니다")));
     }
     let labels: Vec<_> = request.documents.iter().map(|raw| (echoed(raw, "kind"), echoed(raw, "id"))).collect();
-    let parsed: Vec<_> = request.documents.into_iter().map(Checked::parse).collect();
+    let mut seen = HashSet::new();
+    let parsed: Vec<_> = request
+        .documents
+        .into_iter()
+        .map(|raw| {
+            let checked = Checked::parse(raw)?;
+            if seen.insert((checked.document.kind, checked.document.id.clone())) {
+                Ok(checked)
+            } else {
+                Err("같은 요청에 같은 종류와 id의 문서가 두 개 있습니다".to_owned())
+            }
+        })
+        .collect();
     let valid: Vec<_> = parsed.iter().filter_map(|checked| checked.as_ref().ok()).collect();
     let pushed = state.store.push_documents(&account_id, &valid).await.map_err(|error| {
         if ApiError::is_foreign_key_violation(&error) { ApiError::unauthorized() } else { error.into() }

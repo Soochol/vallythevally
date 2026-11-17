@@ -358,3 +358,23 @@ async fn a_push_larger_than_the_request_limit_is_refused_whole() {
     assert_eq!(response.json::<Value>().await.unwrap()["code"], "payload_too_large");
     assert_eq!(account.summary().await["documents"], 0);
 }
+
+#[tokio::test]
+async fn a_document_repeated_in_one_request_is_rejected_after_its_first_appearance() {
+    let harness = Harness::start().await;
+    let account = Account::login(&harness, "a").await;
+    account.push(json!([live("layout", "L1", 5, padded(DocumentKind::Layout.document_limit()))])).await;
+    let repeats: Vec<Value> = (0..200).map(|_| gone("layout", "L1", 1)).collect();
+    let response = account.push_raw(json!(repeats)).await;
+    assert_eq!(response.status(), 200);
+    let wire = response.bytes().await.unwrap();
+    assert!(wire.len() < 2 * DocumentKind::Layout.document_limit(), "응답이 {}바이트다", wire.len());
+    let body: Value = serde_json::from_slice(&wire).unwrap();
+    let results = statuses(&body);
+    assert_eq!(results[0], "stale");
+    assert!(results[1..].iter().all(|status| *status == "rejected"));
+
+    let fresh = account.push(json!([live("drawing", "D1", 1, json!({})), live("drawing", "D1", 2, json!({"second": true}))])).await;
+    assert_eq!(statuses(&fresh), ["accepted", "rejected"]);
+    assert_eq!(account.changes("since=1").await["documents"], json!([live("drawing", "D1", 1, json!({}))]));
+}
