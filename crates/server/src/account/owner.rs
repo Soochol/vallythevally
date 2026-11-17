@@ -19,6 +19,9 @@ pub async fn set_in(tx: &mut Transaction<'_, Sqlite>, account_id: &str) -> Resul
 
 pub async fn clear_if_owned_by(db: &AppDb, account_id: &str) -> Result<(), sqlx::Error> {
     let mut tx = db.begin_write().await?;
-    sqlx::query("DELETE FROM local_owner WHERE account_id = ?").bind(account_id).execute(&mut *tx).await?;
+    let cleared = sqlx::query("DELETE FROM local_owner WHERE account_id = ?").bind(account_id).execute(&mut *tx).await?.rows_affected();
+    if cleared > 0 {
+        crate::sync_log::forget_account(&mut tx).await?;
+    }
     tx.commit().await
 }

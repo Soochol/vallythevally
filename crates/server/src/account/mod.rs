@@ -2,6 +2,7 @@ mod client;
 pub(crate) mod owner;
 mod pending;
 mod state_file;
+pub mod sync;
 
 use std::fmt;
 use std::sync::Mutex;
@@ -46,6 +47,9 @@ pub enum Refusal {
     LocalOnly,
     NotSignedIn,
     NotOwnerMismatch,
+    OwnerMismatch,
+    NeedsChoice,
+    NoChoicePending,
     ServerUnavailable(ClientError),
     Storage,
 }
@@ -56,6 +60,9 @@ impl fmt::Display for Refusal {
             Refusal::LocalOnly => f.write_str("계정 서버를 쓰지 않는 로컬 전용 모드입니다"),
             Refusal::NotSignedIn => f.write_str("로그인한 계정이 없습니다"),
             Refusal::NotOwnerMismatch => f.write_str("이 PC의 셋업이 다른 계정의 것일 때만 쓸 수 있습니다"),
+            Refusal::OwnerMismatch => f.write_str("이 PC의 셋업이 다른 계정의 것이라 동기화하지 않습니다"),
+            Refusal::NeedsChoice => f.write_str("첫 로그인 선택이 끝나지 않아 동기화하지 않습니다"),
+            Refusal::NoChoicePending => f.write_str("지금 고를 첫 로그인 선택이 없습니다"),
             Refusal::ServerUnavailable(e) => e.fmt(f),
             Refusal::Storage => f.write_str("계정 상태를 저장하지 못했습니다. 서버 로그를 확인하세요"),
         }
@@ -118,7 +125,9 @@ enum Mode {
 pub struct AccountState {
     mode: Mode,
     changes: tokio::sync::watch::Sender<u64>,
+    sessions: tokio::sync::watch::Sender<u64>,
     write: tokio::sync::Mutex<()>,
+    sync: sync::Sync,
 }
 
 const RANDOM_BYTES: usize = 32;
@@ -139,7 +148,7 @@ fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 
 impl AccountState {
     pub fn local_only() -> Self {
-        AccountState { mode: Mode::LocalOnly, changes: tokio::sync::watch::channel(0).0, write: tokio::sync::Mutex::new(()) }
+        AccountState { mode: Mode::LocalOnly, changes: tokio::sync::watch::channel(0).0, sessions: tokio::sync::watch::channel(0).0, write: tokio::sync::Mutex::new(()), sync: sync::Sync::default() }
     }
 
     pub fn linked(url: AccountServerUrl, file: AccountStateFile) -> Result<Self, reqwest::Error> {
@@ -160,7 +169,7 @@ impl AccountState {
             }
         };
         let linked = Linked { url, client, file, login: Mutex::new(login), pending: Mutex::new(PendingLogins::default()) };
-        Ok(AccountState { mode: Mode::Linked(Box::new(linked)), changes: tokio::sync::watch::channel(0).0, write: tokio::sync::Mutex::new(()) })
+        Ok(AccountState { mode: Mode::Linked(Box::new(linked)), changes: tokio::sync::watch::channel(0).0, sessions: tokio::sync::watch::channel(0).0, write: tokio::sync::Mutex::new(()), sync: sync::Sync::default() })
     }
 
     pub fn subscribe(&self) -> tokio::sync::watch::Receiver<u64> {
@@ -169,6 +178,19 @@ impl AccountState {
 
     fn changed(&self) {
         self.changes.send_modify(|version| *version += 1);
+    }
+
+    fn session_changed(&self) {
+        self.sessions.send_modify(|version| *version += 1);
+        self.changed();
+    }
+
+    pub fn subscribe_sessions(&self) -> tokio::sync::watch::Receiver<u64> {
+        self.sessions.subscribe()
+    }
+
+    pub fn is_linked(&self) -> bool {
+        self.linked_mode().is_some()
     }
 
     fn linked_mode(&self) -> Option<&Linked> {
@@ -182,9 +204,12 @@ impl AccountState {
         let Some(linked) = self.linked_mode() else { return Ok(AccountStatus::LocalOnly) };
         let Some(login) = lock(&linked.login).clone() else { return Ok(AccountStatus::SignedOut) };
         let (provider, account_id, signed_in_at) = (login.provider, prefix(&login.account_id), login.signed_in_at);
-        Ok(match owner::get(db).await? {
-            Some(local_owner) if local_owner != login.account_id => AccountStatus::OwnerMismatch { provider, account_id, signed_in_at, local_owner: prefix(&local_owner) },
-            _ => AccountStatus::SignedIn { provider, account_id, signed_in_at },
+        let local_owner = owner::get(db).await?;
+        let mismatch = local_owner.as_deref().filter(|local_owner| *local_owner != login.account_id);
+        let sync = self.sync_status(db, mismatch.is_some()).await?;
+        Ok(match mismatch {
+            Some(local_owner) => AccountStatus::OwnerMismatch { provider, account_id, signed_in_at, local_owner: prefix(local_owner), sync },
+            None => AccountStatus::SignedIn { provider, account_id, signed_in_at, sync },
         })
     }
 
@@ -243,7 +268,7 @@ impl AccountState {
             let _ = linked.client.revoke(&previous.token).await;
         }
         tracing::info!(provider = ?provider, "계정에 로그인했습니다");
-        self.changed();
+        self.session_changed();
         Ok(())
     }
 
@@ -260,7 +285,7 @@ impl AccountState {
                     Refusal::Storage
                 })?;
                 *lock(&linked.login) = None;
-                self.changed();
+                self.session_changed();
                 Ok(())
             }
             Err(e) => Err(Refusal::ServerUnavailable(e)),
@@ -280,7 +305,7 @@ impl AccountState {
         })?;
         *lock(&linked.login) = None;
         tracing::info!("계정에서 로그아웃했습니다");
-        self.changed();
+        self.session_changed();
         Ok(())
     }
 
@@ -302,7 +327,7 @@ impl AccountState {
         if let Err(e) = &cleared {
             tracing::error!(error = %e, "계정 삭제 뒤 로컬 소유 표시를 지우지 못했습니다");
         }
-        self.changed();
+        self.session_changed();
         tracing::info!("계정을 삭제했습니다");
         if removed.is_err() || cleared.is_err() { Err(Refusal::Storage) } else { Ok(()) }
     }
@@ -323,7 +348,7 @@ impl AccountState {
             Refusal::Storage
         })?;
         tracing::info!("이 PC의 셋업을 기본 상태로 되돌리고 소유 계정을 바꿨습니다");
-        self.changed();
+        self.session_changed();
         Ok(())
     }
 }
