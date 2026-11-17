@@ -196,18 +196,36 @@ impl From<DrawingError> for StoreFault {
 async fn replace_all(db: &AppDb, setup: &Setup) -> Result<(), ApiFailure> {
     let internal = |e: sqlx::Error| ApiFailure::from(StoreError::from(e));
     let mut tx = db.begin_write().await.map_err(internal)?;
-    sqlx::query("DELETE FROM drawings").execute(&mut *tx).await.map_err(internal)?;
-    sqlx::query("DELETE FROM layouts").execute(&mut *tx).await.map_err(internal)?;
-    userdata::store_watchlists(&mut tx, &setup.watchlists).await.map_err(|e| store_failure(DocumentKind::Watchlists, SINGLETON_ID, e))?;
-    userdata::store_screens(&mut tx, &setup.screens).await.map_err(|e| store_failure(DocumentKind::Screens, SINGLETON_ID, e))?;
-    userdata::store_ui_state(&mut tx, &setup.ui_state, setup.ui_state_revision).await.map_err(|e| store_failure(DocumentKind::UiState, SINGLETON_ID, e))?;
+    replace_all_in(&mut tx, setup).await?;
+    tx.commit().await.map_err(internal)?;
+    Ok(())
+}
+
+async fn replace_all_in(tx: &mut sqlx::Transaction<'static, sqlx::Sqlite>, setup: &Setup) -> Result<(), ApiFailure> {
+    let internal = |e: sqlx::Error| ApiFailure::from(StoreError::from(e));
+    sqlx::query("DELETE FROM drawings").execute(&mut **tx).await.map_err(internal)?;
+    sqlx::query("DELETE FROM layouts").execute(&mut **tx).await.map_err(internal)?;
+    userdata::store_watchlists(tx, &setup.watchlists).await.map_err(|e| store_failure(DocumentKind::Watchlists, SINGLETON_ID, e))?;
+    userdata::store_screens(tx, &setup.screens).await.map_err(|e| store_failure(DocumentKind::Screens, SINGLETON_ID, e))?;
+    userdata::store_ui_state(tx, &setup.ui_state, setup.ui_state_revision).await.map_err(|e| store_failure(DocumentKind::UiState, SINGLETON_ID, e))?;
     for layout in &setup.layouts {
         let input = LayoutInput { id: layout.id.clone(), name: layout.name.clone(), sync: layout.sync, windows: layout.windows.clone(), placement: layout.placement.clone(), revision: layout.revision };
-        userdata::store_layout(&mut tx, &input, layout.updated_at).await.map_err(|e| store_failure(DocumentKind::Layout, &layout.id, e))?;
+        userdata::store_layout(tx, &input, layout.updated_at).await.map_err(|e| store_failure(DocumentKind::Layout, &layout.id, e))?;
     }
     for drawing in &setup.drawings {
-        drawings::store_drawing(&mut tx, &drawing_input(drawing), drawing.updated_at).await.map_err(|e| store_failure(DocumentKind::Drawing, &drawing.id, e))?;
+        drawings::store_drawing(tx, &drawing_input(drawing), drawing.updated_at).await.map_err(|e| store_failure(DocumentKind::Drawing, &drawing.id, e))?;
     }
+    Ok(())
+}
+
+pub(crate) async fn reset_to_default(db: &AppDb, owner: &str) -> Result<(), ApiFailure> {
+    let internal = |e: sqlx::Error| ApiFailure::from(StoreError::from(e));
+    let scratch = tempfile::tempdir().map_err(|e| ApiFailure::new(ApiErrorCode::Internal, format!("기본 셋업을 만들 임시 폴더를 만들지 못했습니다: {e}")))?;
+    let fresh = AppDb::open(&scratch.path().join("default.db")).await.map_err(|e| ApiFailure::new(ApiErrorCode::Internal, format!("기본 셋업을 만들지 못했습니다: {e}")))?;
+    let defaults = Setup::read(&fresh).await?;
+    let mut tx = db.begin_write().await.map_err(internal)?;
+    replace_all_in(&mut tx, &defaults).await?;
+    crate::account::owner::set_in(&mut tx, owner).await.map_err(internal)?;
     tx.commit().await.map_err(internal)?;
     Ok(())
 }

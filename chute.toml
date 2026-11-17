@@ -55,6 +55,7 @@ failed = 'test (\S+) \.\.\. FAILED'
 paths = [
   "crates/server/",
   "crates/setup/",
+  "crates/account-server/",
   "crates/domain/",
   "crates/indicators/",
   "web/src/api/generated/",

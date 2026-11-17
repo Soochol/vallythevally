@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use axum::extract::{Request, State};
-use axum::http::{HeaderMap, Method, header};
+use axum::http::{HeaderMap, Method, Uri, header};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 
@@ -17,14 +17,22 @@ pub(crate) async fn guard_writes(State(st): State<Arc<AppState>>, req: Request, 
     next.run(req).await
 }
 
-fn check_write(st: &AppState, req: &Request) -> Result<(), ApiFailure> {
-    let headers = req.headers();
-    let refuse = |what: &str| ApiFailure::bad_request(format!("이 요청은 받지 않습니다: {what}"));
-    let host = headers.get(header::HOST).and_then(|h| h.to_str().ok()).or_else(|| req.uri().authority().map(|a| a.as_str())).ok_or_else(|| refuse("Host가 없습니다"))?;
+fn refuse(what: &str) -> ApiFailure {
+    ApiFailure::bad_request(format!("이 요청은 받지 않습니다: {what}"))
+}
+
+pub(crate) fn check_host<'a>(st: &AppState, headers: &'a HeaderMap, uri: &'a Uri) -> Result<&'a str, ApiFailure> {
+    let host = headers.get(header::HOST).and_then(|h| h.to_str().ok()).or_else(|| uri.authority().map(|a| a.as_str())).ok_or_else(|| refuse("Host가 없습니다"))?;
     let bound = st.system.bound_addr().ok_or_else(|| refuse("서버가 아직 준비되지 않았습니다"))?;
     if !is_own_host(host, bound) {
         return Err(refuse("Host가 이 서버의 주소가 아닙니다"));
     }
+    Ok(host)
+}
+
+fn check_write(st: &AppState, req: &Request) -> Result<(), ApiFailure> {
+    let headers = req.headers();
+    let host = check_host(st, headers, req.uri())?;
     check_origin(headers, host)?;
     let json = headers.get(header::CONTENT_TYPE).and_then(|v| v.to_str().ok()).is_some_and(|v| v.split(';').next().is_some_and(|essence| essence.trim().eq_ignore_ascii_case("application/json")));
     if !json {

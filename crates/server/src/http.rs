@@ -51,6 +51,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .merge(crate::screener::routes())
         .merge(crate::investors::routes())
         .merge(crate::system_routes::routes(state.clone()))
+        .merge(crate::account_routes::routes(state.clone()))
         .route("/api", any(api_not_found))
         .route("/api/{*rest}", any(api_not_found))
         .method_not_allowed_fallback(method_not_allowed)
@@ -121,7 +122,7 @@ pub fn status_of(code: api::ApiErrorCode) -> StatusCode {
         NotFound | UnknownSymbol => StatusCode::NOT_FOUND,
         KiwoomUnavailable => StatusCode::SERVICE_UNAVAILABLE,
         // 키움이 우리 인증을 거절했다. 다시 시도해도 낫지 않으므로 503이 아니라 502로 둔다.
-        KiwoomAuthFailed => StatusCode::BAD_GATEWAY,
+        KiwoomAuthFailed | AccountServerUnavailable => StatusCode::BAD_GATEWAY,
         Conflict | StaleRevision | ScreenerNotReady => StatusCode::CONFLICT,
         PayloadTooLarge => StatusCode::PAYLOAD_TOO_LARGE,
         MethodNotAllowed => StatusCode::METHOD_NOT_ALLOWED,
@@ -1237,6 +1238,7 @@ mod tests {
         let hello = recv_json(&mut ws).await;
         assert_eq!((hello["type"].as_str(), hello["protocol"].as_i64()), (Some("hello"), Some(1)), "{hello}");
         assert_eq!(recv_json(&mut ws).await["type"], "kiwoom_link", "hello 바로 뒤에 키움 연결 상태가 온다");
+        assert_eq!(recv_json(&mut ws).await, json!({"type": "account", "status": {"state": "local_only"}}), "그 뒤에 계정 상태가 온다");
         for text in [
             "not json",
             r#"{"type":"subscribe","sub":"bad","symbol":"IDX:001","venue":"krx","period":"D"}"#,
