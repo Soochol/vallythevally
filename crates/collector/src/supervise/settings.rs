@@ -1,3 +1,4 @@
+use std::path::PathBuf;
 use std::time::Duration;
 
 use domain::TimeOfDay;
@@ -8,6 +9,12 @@ const END_OF_DAY: TimeOfDay = match TimeOfDay::hms(20, 5, 0) {
 };
 
 #[derive(Debug, Clone)]
+pub struct SocketSetting {
+    pub path: PathBuf,
+    pub required: bool,
+}
+
+#[derive(Debug, Clone)]
 pub struct Settings {
     pub token_spacing: Duration,
     pub heartbeat_timeout: Duration,
@@ -16,6 +23,8 @@ pub struct Settings {
     pub shutdown_grace: Duration,
     pub housekeeping_every: Duration,
     pub end_at: Option<TimeOfDay>,
+    pub status_socket: Option<SocketSetting>,
+    pub watch_every: Duration,
 }
 
 impl Default for Settings {
@@ -28,6 +37,8 @@ impl Default for Settings {
             shutdown_grace: Duration::from_secs(10),
             housekeeping_every: Duration::from_secs(60),
             end_at: Some(END_OF_DAY),
+            status_socket: None,
+            watch_every: Duration::from_secs(5),
         }
     }
 }

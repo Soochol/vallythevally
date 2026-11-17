@@ -12,15 +12,19 @@ use server::kiwoom::transport::Transport;
 use tokio::sync::{mpsc, watch};
 use tokio::time::{Instant, sleep_until};
 
+use super::api::{StatusApi, StatusSocket, serve};
 use super::handoff::{effective_plan, registrations_of};
-use super::journal::{Journal, JournalEvent, journal_path};
+use super::journal::{Journal, JournalEvent, journal_path, kst_stamp};
 use super::process::{ChildMessage, ChildProcess, Launcher};
-use super::settings::Settings;
-use super::status::{DaemonStatus, KeyState, KeyStatus};
+use super::settings::{Settings, SocketSetting};
+use super::status::{Alert, AlertKind, DaemonStatus, DayPhase, KeyState, KeyStatus, RestProgress, Today};
 use super::tokens::{Halted, Issue, IssueLane, KeyTokens};
 use crate::keys::{ActiveKey, KeyRole};
 use crate::plan::{PlanError, PlanFile, Violation, check_plan, read_plan};
 use crate::protocol::{Command, Event, HEARTBEAT_EVERY, KeyName, ProtocolError, Registration, RegistrationError, SessionState};
+
+const ALERT_LIMIT: usize = 200;
+const HASH_PREFIX_LEN: usize = 8;
 
 pub struct Injected {
     pub launcher: Arc<dyn Launcher>,
@@ -46,6 +50,7 @@ pub enum StartError {
     Registration { key: KeyName, error: RegistrationError },
     Lock { key: KeyName, error: LockError },
     Journal(io::Error),
+    StatusSocket { path: PathBuf, error: io::Error },
 }
 
 impl fmt::Display for StartError {
@@ -62,6 +67,7 @@ impl fmt::Display for StartError {
             StartError::Registration { key, error } => write!(formatter, "키 {key}의 몫으로 등록 명령을 만들 수 없습니다: {error}"),
             StartError::Lock { key, error } => write!(formatter, "키 {key}의 잠금을 잡지 못했습니다: {error}"),
             StartError::Journal(error) => write!(formatter, "사건 기록 파일을 열 수 없습니다: {error}"),
+            StartError::StatusSocket { path, error } => write!(formatter, "상태 소켓 {}을 열 수 없습니다: {error}", path.display()),
         }
     }
 }
@@ -85,11 +91,16 @@ pub struct Control {
 #[derive(Debug)]
 enum ControlCommand {
     ReissueToken { key: KeyName, at: KstTime },
+    EnterPhase(DayPhase),
 }
 
 impl Control {
     pub fn reissue_token_at(&self, key: KeyName, at: KstTime) {
         let _ = self.commands.send(ControlCommand::ReissueToken { key, at });
+    }
+
+    pub fn enter_phase(&self, phase: DayPhase) {
+        let _ = self.commands.send(ControlCommand::EnterPhase(phase));
     }
 }
 
@@ -149,6 +160,8 @@ struct KeyRuntime {
     role: KeyRole,
     own: Vec<Registration>,
     own_stocks: usize,
+    rest_jobs: usize,
+    hash_prefix: String,
     handoff_share: Vec<Registration>,
     inherited: Vec<Registration>,
     inherited_stocks: usize,
@@ -190,18 +203,21 @@ impl KeyRuntime {
         };
         KeyStatus {
             name: self.name.clone(),
+            app_key_hash_prefix: self.hash_prefix.clone(),
             role: self.role,
             state: self.state(),
             stocks,
             messages_per_second: self.messages_per_second,
             register_failures: self.failed_batches(),
             restarts: self.restarts,
+            rest: RestProgress { planned_jobs: self.rest_jobs, finished_jobs: 0 },
         }
     }
 }
 
 pub struct Supervisor {
     date: u32,
+    data_dir: PathBuf,
     plan: PlanFile,
     settings: Settings,
     keys: Vec<KeyRuntime>,
@@ -214,6 +230,9 @@ pub struct Supervisor {
     control_sink: mpsc::UnboundedSender<ControlCommand>,
     control_source: mpsc::UnboundedReceiver<ControlCommand>,
     status: watch::Sender<DaemonStatus>,
+    status_socket: Option<StatusSocket>,
+    phase: DayPhase,
+    alerts: Vec<Alert>,
     handed: Option<usize>,
     housekeeping_at: Instant,
 }
@@ -258,6 +277,8 @@ impl Supervisor {
                 role: share.role,
                 own: registrations_of(share, share.name.as_str()).map_err(registration_error)?,
                 own_stocks: share.stocks.len(),
+                rest_jobs: share.rest_jobs.len(),
+                hash_prefix: hash_prefix(&share.app_key_hash),
                 handoff_share: registrations_of(share, &format!("handoff-{}", share.name)).map_err(registration_error)?,
                 inherited: Vec::new(),
                 inherited_stocks: 0,
@@ -276,9 +297,22 @@ impl Supervisor {
         }
         let (inbox, inbox_source) = mpsc::unbounded_channel();
         let (control_sink, control_source) = mpsc::unbounded_channel();
+        let status_socket = match &settings.status_socket {
+            Some(SocketSetting { path, required }) => match StatusSocket::bind(path) {
+                Ok(socket) => Some(socket),
+                Err(error) if *required => return Err(StartError::StatusSocket { path: path.clone(), error }),
+                Err(error) => {
+                    tracing::error!(path = %path.display(), %error, "상태 소켓을 열 수 없어 상태 API 없이 수집을 이어 갑니다");
+                    None
+                }
+            },
+            None => None,
+        };
         let date = plan.date;
+        let alerts = plan_alerts(&plan);
         Ok(Supervisor {
             date,
+            data_dir,
             plan,
             lane: Arc::new(IssueLane::new(settings.token_spacing)),
             housekeeping_at: Instant::now() + settings.housekeeping_every,
@@ -291,7 +325,10 @@ impl Supervisor {
             inbox_source,
             control_sink,
             control_source,
-            status: watch::channel(DaemonStatus { date, keys: Vec::new() }).0,
+            status: watch::channel(DaemonStatus { date, ..DaemonStatus::default() }).0,
+            status_socket,
+            phase: DayPhase::default(),
+            alerts,
             handed: None,
         })
     }
@@ -305,7 +342,14 @@ impl Supervisor {
     }
 
     fn record(&mut self, event: JournalEvent) {
-        self.journal.append(self.clock.now(), &event);
+        let at = self.clock.now();
+        self.journal.append(at, &event);
+        if let Some((kind, message)) = alert_of(&event) {
+            self.alerts.push(Alert { at: kst_stamp(at), kind, message });
+            if self.alerts.len() > ALERT_LIMIT {
+                self.alerts.remove(0);
+            }
+        }
     }
 
     fn name(&self, index: usize) -> KeyName {
@@ -318,6 +362,11 @@ impl Supervisor {
         }
         let end = self.end_instant();
         self.publish_status();
+        let (api_stop, api_shutdown) = watch::channel(false);
+        let api = self.status_socket.take().map(|socket| {
+            let api = StatusApi { status: self.status.subscribe(), data_dir: self.data_dir.clone(), clock: self.clock.clone(), watch_every: self.settings.watch_every };
+            tokio::spawn(serve(socket, api, api_shutdown))
+        });
         loop {
             let wake = self.next_deadline();
             tokio::select! {
@@ -336,6 +385,10 @@ impl Supervisor {
         }
         self.shut_down().await;
         self.publish_status();
+        let _ = api_stop.send(true);
+        if let Some(api) = api {
+            let _ = api.await;
+        }
     }
 
     fn end_instant(&self) -> Option<Instant> {
@@ -346,7 +399,8 @@ impl Supervisor {
     }
 
     fn publish_status(&self) {
-        let status = DaemonStatus { date: self.date, keys: self.keys.iter().map(KeyRuntime::status).collect() };
+        let keys: Vec<KeyStatus> = self.keys.iter().map(KeyRuntime::status).collect();
+        let status = DaemonStatus { date: self.date, phase: self.phase, today: self.today(&keys), keys, alerts: self.alerts.clone(), ..DaemonStatus::default() };
         self.status.send_if_modified(|current| {
             let changed = *current != status;
             if changed {
@@ -354,6 +408,18 @@ impl Supervisor {
             }
             changed
         });
+    }
+
+    fn today(&self, statuses: &[KeyStatus]) -> Today {
+        let stocks_in = |wanted: &[KeyState]| statuses.iter().filter(|status| wanted.contains(&status.state)).map(|status| status.stocks).sum();
+        Today {
+            planned_stocks: self.keys.iter().map(|key| key.own_stocks).sum(),
+            receiving_stocks: stocks_in(&[KeyState::Receiving]),
+            register_failed_batches: statuses.iter().map(|status| status.register_failures).sum(),
+            disconnected_stocks: stocks_in(&[KeyState::Disconnected, KeyState::Stopped]),
+            handed_off_stocks: self.keys.iter().filter(|key| matches!(key.phase, Phase::HandedOff)).map(|key| key.own_stocks).sum(),
+            excluded_stocks: self.plan.excluded.len(),
+        }
     }
 
     fn next_deadline(&self) -> Instant {
@@ -444,6 +510,7 @@ impl Supervisor {
                 let wait = (at.unix() - self.clock.now().unix()).max(0) as u64;
                 self.keys[index].reissue_at = Some(Instant::now() + Duration::from_secs(wait));
             }
+            ControlCommand::EnterPhase(phase) => self.phase = phase,
         }
     }
 
@@ -777,6 +844,27 @@ impl Supervisor {
                 }
             }
         }
+    }
+}
+
+fn hash_prefix(app_key_hash: &str) -> String {
+    app_key_hash.strip_prefix("sha256:").unwrap_or(app_key_hash).chars().take(HASH_PREFIX_LEN).collect()
+}
+
+fn plan_alerts(plan: &PlanFile) -> Vec<Alert> {
+    let at = plan.created_at.clone();
+    let excluded = (!plan.excluded.is_empty()).then(|| Alert { at: at.clone(), kind: AlertKind::Excluded, message: format!("키 용량이 모자라 {}종목을 수집에서 제외했습니다", plan.excluded.len()) });
+    let notes = plan.alerts.iter().map(|note| Alert { at: at.clone(), kind: AlertKind::PlanNote, message: note.clone() });
+    excluded.into_iter().chain(notes).collect()
+}
+
+fn alert_of(event: &JournalEvent) -> Option<(AlertKind, String)> {
+    match event {
+        JournalEvent::Handoff { from, to, stocks, .. } => Some((AlertKind::Handoff, format!("{from}의 {}종목을 {to}에 인계했습니다", stocks.len()))),
+        JournalEvent::HandoffSkipped { key, reason } => Some((AlertKind::HandoffSkipped, format!("{key}의 몫을 인계하지 않았습니다: {reason}"))),
+        JournalEvent::KeyStopped { key, reason } => Some((AlertKind::KeyStopped, format!("{key}를 멈췄습니다: {reason}"))),
+        JournalEvent::RegisterFailed { key, id, part, parts, reason, .. } => Some((AlertKind::RegisterFailed, format!("{key}의 등록 {id} {part}/{parts}번이 실패했습니다: {reason}"))),
+        _ => None,
     }
 }
 

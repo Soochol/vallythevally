@@ -578,6 +578,8 @@ data/hoga/calendar/
 
 `collector supervise --date YYYYMMDD --keys <키 목록 설정> [--state <폴더>] [--data <폴더>]`는 감독 데몬([ADR 0026](adr/0026-collector-supervisor-collects-common-and-preferred-stocks.md))이다. 그날 계획(`plan/<YYYYMMDD>.json`)을 받아 수집 키마다 `collect --child` 자식을 띄우고, 토큰을 발급하고, 감시하고, 다시 띄우고, 인계한다. 지금은 장중 수집 하나를 돌린다. 상태 API와 07:20~마감 뒤 하루 일정은 뒤 작업이 이 입구를 바꾼다. 코드는 `collector::supervise`다.
 
+`--socket`은 읽기 전용 상태 API의 unix socket 경로다(기본은 `--state` 폴더 아래 `supervise.sock`, 계약은 [수집 감독 데몬 상태 API](collector-status-api.md)). `collector status`는 그 소켓에 한 번 물어 표로 찍는다.
+
 `--state`는 키마다 기본 토큰·잠금 파일 경로의 바탕 폴더다. 없으면 `collect`와 같은 규칙(`$XDG_STATE_HOME` 또는 `$HOME/.local/state` 아래 `vallythevally/collector`)이다. 종료 코드는 0(SIGTERM·SIGINT 또는 종료 시각으로 끝남), 1(시작하지 못함), 2(인수·설정 오류)다.
 
 ### 시작
@@ -645,6 +647,7 @@ SIGTERM·SIGINT나 종료 시각(`end_at`, 기본 20:05 KST)이면 모든 자식
 ### 시험
 
 - `tests/supervise.rs`: 가짜 자식(`Launcher`·`ChildProcess`를 구현한 in-process 가짜), 합성 `Transport`, 멈춘 tokio 시간과 `Clock::fake`로 토큰 간격, 재시작, 인계, 8050, `token_invalid`, 종료, 시작 확인, 사건 기록과 로그의 토큰 비노출을 확인한다. `python3 scripts/dev.py cargo test -p collector --test supervise`.
+- `tests/supervise_status.rs`: 상태 소켓 권한(600), 남은 소켓 파일, 응답이 `tests/fixtures/status/` 예시와 같은 모양인지, 감시 연결의 5초 하트비트와 단계 변경 즉시 전송, 읽지 않는 연결 끊기, 명령 거절, 비밀값 비노출, `collector status` 표와 "데몬 꺼짐"을 확인한다. 소켓 경로 길이 한도(SUN_LEN) 때문에 소켓만 `/tmp` 아래 짧은 임시 폴더에 둔다. `python3 scripts/dev.py cargo test -p collector --test supervise_status`.
 - `tests/supervise_process.rs`: 실제 `collector supervise`가 실제 `collect --child` 자식 둘을 루프백 WebSocket 시험 서버에 붙여 LOGIN과 REG까지 가고, 데몬을 끝내면(SIGTERM) 자식도 끝나고, 데몬을 SIGKILL로 죽여도 자식이 끝남을 확인한다. 토큰은 토큰 파일에 미리 넣어 두고 `VALLY_COLLECTOR_REST_URL`(`http://127.0.0.1…`만 받는다)을 닫힌 포트로 돌려 키움에는 아무것도 보내지 않는다. `python3 scripts/dev.py cargo test -p collector --test supervise_process`.
 
 ## 실제 수집 절차
