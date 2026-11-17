@@ -187,7 +187,10 @@ enum JobState {
     Backoff,
 }
 
+pub(crate) type Admission = Arc<dyn Fn() -> bool + Send + Sync>;
+
 struct Job {
+    admit: Option<Admission>,
     key: DedupeKey,
     priority: Priority,
     state: JobState,
@@ -396,7 +399,7 @@ impl KiwoomRest {
         scope: MergeScope,
     ) -> Result<Page<R::Response>, KiwoomError> {
         let body = serde_json::to_string(req).expect("요청 타입은 언제나 직렬화된다");
-        self.call_endpoint(R::API_ID.into(), body, |response| req.answers(response), cont, priority, scope).await
+        self.call_endpoint(R::API_ID.into(), body, |response| req.answers(response), cont, priority, scope, None).await
     }
 
     pub(crate) async fn call_endpoint<T: serde::de::DeserializeOwned>(
@@ -407,9 +410,10 @@ impl KiwoomRest {
         cont: Option<&ContKey>,
         priority: Priority,
         scope: MergeScope,
+        admit: Option<Admission>,
     ) -> Result<Page<T>, KiwoomError> {
         let key = DedupeKey { scope, api_id: endpoint, body, cont: cont.cloned() };
-        let rx = self.0.enqueue(key, priority);
+        let rx = self.0.enqueue(key, priority, admit);
         let raw = rx.await.unwrap_or_else(|_| Err(queue_gone(endpoint)))?;
         let note = match serde_json::from_str::<T>(&raw.body) {
             Ok(body) if answers(&body) => return Ok(Page { body, next: raw.next }),
@@ -450,7 +454,7 @@ impl Inner {
         self.queue.lock().expect("대기열 잠금")
     }
 
-    fn enqueue(&self, key: DedupeKey, priority: Priority) -> oneshot::Receiver<JobResult> {
+    fn enqueue(&self, key: DedupeKey, priority: Priority, admit: Option<Admission>) -> oneshot::Receiver<JobResult> {
         let (tx, rx) = oneshot::channel();
         let mut q = self.lock();
         if *self.access.borrow() == Access::Closed {
@@ -479,6 +483,7 @@ impl Inner {
             q.jobs.insert(
                 id,
                 Job {
+                    admit,
                     key,
                     priority,
                     state: JobState::Queued,
@@ -571,6 +576,10 @@ impl Inner {
         let api_id = q.jobs.get(&id).expect("대기열의 id는 jobs에 있다").key.api_id;
         if let Some(err) = q.stopped(api_id) {
             q.finish(id, Err(err));
+            return Step::Again;
+        }
+        if q.jobs.get(&id).and_then(|job| job.admit.as_ref()).is_some_and(|admit| !admit()) {
+            q.finish(id, Err(KiwoomError::NotConnected));
             return Step::Again;
         }
         if let Gate::Closed { cause, misses, .. } = std::mem::take(&mut q.gate) {

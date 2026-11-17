@@ -659,7 +659,7 @@ impl Session {
         let control = if wanted { Control::AccountReg } else { Control::AccountRemove };
         match self.control(conn, &control).await {
             Ok(()) => self.account_registered = wanted,
-            Err(End::ControlRejected(kind, rejection)) => {
+            Err(End::ControlRejected(kind, rejection)) if wanted => {
                 tracing::warn!(trnm = kind.trnm(), ?rejection, "계좌 실시간 제어가 거절됐습니다. 시세 세션은 그대로 두고 이 연결에서는 다시 보내지 않습니다");
                 self.account_refused = Some(wanted);
                 return Ok(false);
@@ -1587,18 +1587,33 @@ mod tests {
 
         #[tokio::test(start_paused = true)]
         async fn a_rejected_account_registration_leaves_the_market_session_alone() {
-            let peer = Peer::new(|_, trnm, nth| if trnm == "REG" && nth >= 2 { Reply::Code(105118) } else { Reply::Ok });
+            let peer = Peer::new(|_, trnm, nth| if trnm == "REG" && nth == 2 { Reply::Code(105118) } else { Reply::Ok });
             let (stream, mut events) = peer.start_feeds(feeds(&[(samsung(), &[RealType::Trade])]));
             assert!(matches!(next(&mut events).await, StreamEvent::Live { .. }));
             stream.account_feed().set_wanted(true);
             until("계좌 REG가 보내졌다", || peer.controls(0).len() >= 3).await;
             tokio::task::yield_now().await;
             assert_eq!(peer.controls(0), ["LOGIN", "REG", "REG"], "거절된 계좌 REG는 이 연결에서 다시 보내지 않는다");
+            tokio::time::sleep(Duration::from_secs(40)).await;
             assert_eq!(peer.logins(), 1, "시세 세션은 다시 연결하지 않는다");
             stream.set_desired(feeds(&[(samsung(), &[RealType::Trade, RealType::Book])]));
             until("시세 등록은 계속 된다", || peer.controls(0).len() == 4).await;
             assert_eq!(peer.messages(0)[3]["data"], json!([{"item": ["005930_AL"], "type": ["0D"]}]));
             assert_eq!(peer.logins(), 1);
+        }
+
+        #[tokio::test(start_paused = true)]
+        async fn a_rejected_account_removal_reconnects_so_the_new_session_drops_the_registration() {
+            let peer = Peer::new(|conn, trnm, _| if conn == 0 && trnm == "REMOVE" { Reply::Code(105118) } else { Reply::Ok });
+            let (stream, mut events) = peer.start_feeds(feeds(&[(samsung(), &[RealType::Trade])]));
+            let account = stream.account_feed();
+            account.set_wanted(true);
+            assert!(matches!(next(&mut events).await, StreamEvent::Live { .. }));
+            until("계좌 REG", || peer.controls(0).len() == 3).await;
+            account.set_wanted(false);
+            assert!(matches!(next(&mut events).await, StreamEvent::Down { .. }));
+            assert!(matches!(next(&mut events).await, StreamEvent::Live { .. }));
+            assert_eq!(peer.controls(1), ["LOGIN", "REG"], "다시 연결한 세션은 00·04를 등록하지 않는다");
         }
 
         #[tokio::test(start_paused = true)]

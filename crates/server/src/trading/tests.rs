@@ -373,9 +373,13 @@ async fn account_events_for_the_confirmed_account_tell_the_browser_the_account_c
 }
 
 fn direct_trading(latency: Duration, store: SwitchStore) -> (Arc<Trading>, Arc<FakeTransport>, AccountFeed, Clock) {
+    direct_trading_spaced(latency, Duration::ZERO, store)
+}
+
+fn direct_trading_spaced(latency: Duration, spacing: Duration, store: SwitchStore) -> (Arc<Trading>, Arc<FakeTransport>, AccountFeed, Clock) {
     let fake = Arc::new(FakeTransport::new(latency, |sent| if sent.api_id == Endpoint::ISSUE { token(1) } else { reply(sent, ACCOUNT, ACCOUNT) }));
     let clock = Clock::fake(kst(KstDate::new(2026, 11, 9).unwrap(), 10, 0, 0));
-    let rest = KiwoomRest::with_send_spacing(Arc::new(fake.clone()), KiwoomAuth::new(Secret::new("k".into()), Secret::new("s".into()), None), clock.clone(), Duration::ZERO);
+    let rest = KiwoomRest::with_send_spacing(Arc::new(fake.clone()), KiwoomAuth::new(Secret::new("k".into()), Secret::new("s".into()), None), clock.clone(), spacing);
     rest.set_access(Access::Open);
     let (stream, _desired) = KiwoomStream::detached();
     let feed = stream.account_feed();
@@ -440,4 +444,50 @@ async fn enabling_while_a_stale_verification_is_in_flight_does_not_lock_the_new_
     trading.set_enabled(confirm("01")).await.unwrap();
     reading.await.unwrap().unwrap();
     assert_eq!(trading.status().state, crate::api::OrdersState::On);
+}
+
+#[tokio::test]
+async fn an_off_switch_stops_a_read_that_is_still_queued_behind_the_send_spacing() {
+    let (trading, fake, _feed, clock) = direct_trading_spaced(Duration::ZERO, Duration::from_millis(300), SwitchStore::memory());
+    trading.set_enabled(confirm("01")).await.unwrap();
+    clock.jump(120);
+    let sent = trading_sends(&fake).len();
+    let reading = tokio::spawn({
+        let trading = trading.clone();
+        async move { trading.balance().await.map(drop) }
+    });
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    trading.set_enabled(OrdersSwitchInput { enabled: false, confirm_account_tail: None }).await.unwrap();
+    let outcome = reading.await.unwrap();
+    assert!(matches!(outcome, Err(TradingError::Off)), "{outcome:?}");
+    tokio::time::sleep(Duration::from_millis(700)).await;
+    assert_eq!(trading_sends(&fake)[sent..], Vec::<&str>::new(), "대기열에 있던 요청도 끈 뒤에는 나가지 않는다");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn the_realtime_registration_matches_the_switch_right_after_every_change_even_with_readers_running() {
+    let dir = tempfile::tempdir().unwrap();
+    let (trading, _fake, feed, _clock) = direct_trading(Duration::ZERO, SwitchStore::file(PrivateFile::new(dir.path().join("state").join("orders.json"))));
+    trading.set_enabled(confirm("01")).await.unwrap();
+    let running = Arc::new(std::sync::atomic::AtomicBool::new(true));
+    let readers: Vec<_> = (0..3)
+        .map(|_| {
+            let (trading, running) = (trading.clone(), running.clone());
+            std::thread::spawn(move || {
+                while running.load(std::sync::atomic::Ordering::SeqCst) {
+                    trading.status();
+                }
+            })
+        })
+        .collect();
+    for round in 0..300 {
+        trading.set_enabled(OrdersSwitchInput { enabled: false, confirm_account_tail: None }).await.unwrap();
+        assert!(!feed.wanted(), "끈 직후 {round}번째");
+        trading.set_enabled(confirm("01")).await.unwrap();
+        assert!(feed.wanted(), "켠 직후 {round}번째");
+    }
+    running.store(false, std::sync::atomic::Ordering::SeqCst);
+    for reader in readers {
+        reader.join().unwrap();
+    }
 }

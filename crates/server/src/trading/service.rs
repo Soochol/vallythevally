@@ -1,5 +1,6 @@
 use std::collections::HashSet;
 use std::fmt;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use domain::{StockCode, Venue};
@@ -11,7 +12,7 @@ use super::switch::{SwitchRecord, SwitchStore};
 use crate::api::{self, OrderSide};
 use crate::clock::Clock;
 use crate::config::Secret;
-use crate::kiwoom::rest::{ContKey, KiwoomError, KiwoomRest, MergeScope, Page, Priority};
+use crate::kiwoom::rest::{Admission, ContKey, KiwoomError, KiwoomRest, MergeScope, Page, Priority};
 use crate::kiwoom::stream::{AccountEvent, AccountFeed};
 
 const VERIFY_TTL_SECS: i64 = 60;
@@ -76,6 +77,8 @@ pub struct Trading {
     store: SwitchStore,
     feed: AccountFeed,
     state: Mutex<State>,
+    switch_lock: Mutex<()>,
+    open: Arc<AtomicBool>,
     write: tokio::sync::Mutex<()>,
     changes: broadcast::Sender<AccountChanged>,
 }
@@ -104,11 +107,11 @@ fn new_salt() -> String {
 
 impl Trading {
     pub fn new(rest: KiwoomRest, clock: Clock, store: SwitchStore, feed: AccountFeed) -> Arc<Trading> {
-        let trading = Arc::new(Trading { rest, clock, store, feed, state: Mutex::new(State::default()), write: tokio::sync::Mutex::new(()), changes: broadcast::channel(16).0 });
+        let trading = Arc::new(Trading { rest, clock, store, feed, state: Mutex::new(State::default()), switch_lock: Mutex::new(()), open: Arc::new(AtomicBool::new(false)), write: tokio::sync::Mutex::new(()), changes: broadcast::channel(16).0 });
         if let Err(e) = trading.store.load() {
             tracing::error!(error = %e, "주문 사용 스위치 파일을 읽지 못했습니다. 꺼진 것으로 봅니다");
         }
-        trading.feed.set_wanted(trading.enabled_record().is_ok());
+        drop(trading.enabled_record());
         tokio::spawn(forward_events(Arc::downgrade(&trading), trading.feed.subscribe()));
         trading
     }
@@ -122,22 +125,28 @@ impl Trading {
     }
 
     fn enabled_record(&self) -> Result<SwitchRecord, TradingError> {
+        let _switch = self.switch_lock.lock().expect("스위치 잠금");
         let record = match self.store.load() {
             Err(e) => Err(TradingError::FileUnusable(e.to_string())),
             Ok(Some(record)) if record.enabled => Ok(record),
             Ok(_) => Err(TradingError::Off),
         };
-        self.feed.set_wanted(record.is_ok());
+        self.publish(record.is_ok());
         record
+    }
+
+    fn publish(&self, enabled: bool) {
+        self.open.store(enabled, Ordering::SeqCst);
+        self.feed.set_wanted(enabled);
     }
 
     async fn read<R: TradingRequest>(&self, req: &R, cont: Option<&ContKey>) -> Result<Page<R::Response>, TradingError> {
         self.enabled_record()?;
-        self.send(req, cont).await
+        self.send(req, cont, true).await
     }
 
     pub fn status(&self) -> api::OrdersStatus {
-        let enabled = self.enabled_record();
+        drop(self.enabled_record());
         let record = match self.store.load() {
             Err(e) => {
                 return api::OrdersStatus { state: api::OrdersState::FileUnusable, account_ref: None, account_tail: None, message: TradingError::FileUnusable(e.to_string()).to_string() };
@@ -155,9 +164,15 @@ impl Trading {
         api::OrdersStatus { state, account_ref: record.account_ref, account_tail: record.account_tail, message }
     }
 
-    async fn send<R: TradingRequest>(&self, req: &R, cont: Option<&ContKey>) -> Result<Page<R::Response>, TradingError> {
+    async fn send<R: TradingRequest>(&self, req: &R, cont: Option<&ContKey>, guarded: bool) -> Result<Page<R::Response>, TradingError> {
         let body = serde_json::to_string(req).expect("요청 타입은 언제나 직렬화된다");
-        Ok(self.rest.call_endpoint(R::API_ID.into(), body, |_| true, cont, Priority::Screen, MergeScope::default()).await?)
+        let open = self.open.clone();
+        let admit: Option<Admission> = guarded.then(|| Arc::new(move || open.load(Ordering::SeqCst)) as Admission);
+        match self.rest.call_endpoint(R::API_ID.into(), body, |_| true, cont, Priority::Screen, MergeScope::default(), admit).await {
+            Ok(page) => Ok(page),
+            Err(e) if guarded => Err(self.enabled_record().err().unwrap_or(TradingError::Kiwoom(e))),
+            Err(e) => Err(TradingError::Kiwoom(e)),
+        }
     }
 
     async fn pages<R: TradingRequest>(&self, req: &R) -> Result<Vec<R::Response>, TradingError> {
@@ -174,8 +189,8 @@ impl Trading {
         Err(TradingError::Unreadable("연속조회 페이지 수 초과"))
     }
 
-    async fn account_number(&self) -> Result<Secret<String>, TradingError> {
-        let number = self.send(&AccountNumber {}, None).await?.body.account.ok_or(TradingError::Unreadable("계좌번호 없음"))?;
+    async fn account_number(&self, guarded: bool) -> Result<Secret<String>, TradingError> {
+        let number = self.send(&AccountNumber {}, None, guarded).await?.body.account.ok_or(TradingError::Unreadable("계좌번호 없음"))?;
         let digits = number.expose();
         if digits.len() != ACCOUNT_DIGITS || !digits.bytes().all(|b| b.is_ascii_digit()) {
             return Err(TradingError::Unreadable("계좌번호 형식"));
@@ -184,42 +199,44 @@ impl Trading {
     }
 
     pub async fn check_account(&self) -> Result<api::OrdersAccountCheck, TradingError> {
-        let number = self.account_number().await?;
+        let number = self.account_number(false).await?;
         Ok(api::OrdersAccountCheck { account_tail: tail_of(number.expose()) })
     }
 
     pub async fn set_enabled(&self, input: api::OrdersSwitchInput) -> Result<api::OrdersStatus, TradingError> {
         let _write = self.write.lock().await;
         if !input.enabled {
-            self.feed.set_wanted(false);
-            let mut state = self.lock();
-            *state = State::default();
-            drop(state);
+            *self.lock() = State::default();
+            let switch = self.switch_lock.lock().expect("스위치 잠금");
+            self.publish(false);
             let saved = self.store.load().map_err(|e| TradingError::FileUnusable(e.to_string()))?;
             if let Some(record) = saved.filter(|r| r.enabled) {
                 self.store.save(&SwitchRecord { enabled: false, ..record }).map_err(|e| TradingError::FileUnusable(e.to_string()))?;
             }
+            drop(switch);
             tracing::info!("주문 사용을 껐습니다");
             return Ok(self.status());
         }
         let saved = self.store.load().map_err(|e| TradingError::FileUnusable(e.to_string()))?;
         let tail = input.confirm_account_tail.ok_or(TradingError::BadRequest("켜려면 확인한 계좌 끝 2자리를 보내야 합니다"))?;
-        let number = self.account_number().await?;
+        let number = self.account_number(false).await?;
         if tail_of(number.expose()) != tail.trim() {
             return Err(TradingError::TailMismatch);
         }
         let salt = saved.map_or_else(new_salt, |r| r.salt);
         let account_ref = account_ref_of(&salt, number.expose());
         let record = SwitchRecord { enabled: true, salt, account_ref: Some(account_ref.clone()), account_tail: Some(tail_of(number.expose())) };
+        let switch = self.switch_lock.lock().expect("스위치 잠금");
         self.store.save(&record).map_err(|e| TradingError::FileUnusable(e.to_string()))?;
         *self.lock() = State { mismatch: false, verified: Some(Verified { number, account_ref, at: self.clock.now().unix() }) };
-        self.feed.set_wanted(true);
+        self.publish(true);
+        drop(switch);
         tracing::info!("주문 사용을 켰습니다");
         Ok(self.status())
     }
 
     async fn verified(&self) -> Result<Verified, TradingError> {
-        let record = self.enabled_record()?;
+        self.enabled_record()?;
         let now = self.clock.now().unix();
         {
             let state = self.lock();
@@ -230,7 +247,7 @@ impl Trading {
                 return Ok(v.clone());
             }
         }
-        let number = self.account_number().await?;
+        let number = self.account_number(true).await?;
         let record = self.enabled_record()?;
         let account_ref = account_ref_of(&record.salt, number.expose());
         let mut state = self.lock();
