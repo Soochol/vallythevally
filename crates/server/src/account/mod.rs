@@ -292,16 +292,17 @@ impl AccountState {
             tracing::warn!(error = %e, "계정 삭제를 계정 서버가 끝내지 못했습니다. 로컬 상태는 그대로 둡니다");
             Refusal::ServerUnavailable(e)
         })?;
-        *lock(&linked.login) = None;
-        self.changed();
         let removed = linked.file.remove();
-        let cleared = owner::clear(db).await;
+        let cleared = owner::clear_if_owned_by(db, &login.account_id).await;
         if let Err(e) = &removed {
-            tracing::error!(error = %e, "계정 삭제 뒤 계정 상태 파일을 지우지 못했습니다");
+            tracing::error!(error = %e, "계정 삭제 뒤 계정 상태 파일을 지우지 못했습니다. 파일과 같게 로그인 상태로 둡니다");
+        } else {
+            *lock(&linked.login) = None;
         }
         if let Err(e) = &cleared {
             tracing::error!(error = %e, "계정 삭제 뒤 로컬 소유 표시를 지우지 못했습니다");
         }
+        self.changed();
         tracing::info!("계정을 삭제했습니다");
         if removed.is_err() || cleared.is_err() { Err(Refusal::Storage) } else { Ok(()) }
     }

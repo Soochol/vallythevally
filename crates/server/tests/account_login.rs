@@ -521,3 +521,41 @@ async fn account_writes_with_a_foreign_host_origin_or_content_type_are_refused()
     assert_eq!(right_host.headers()["location"], "/", "잘못된 Host의 요청이 state를 쓰지 않았다");
     assert_eq!(connector.status().await["state"], "signed_in");
 }
+
+#[tokio::test]
+async fn deleting_a_mismatched_account_leaves_the_local_owner_in_place() {
+    let (accounts, machine) = (Accounts::start().await, Machine::new());
+    let connector = machine.run(Some(&accounts.base)).await;
+    accounts.idp.set_subject("owner-person");
+    connector.login_ok(&accounts, "google").await;
+    let owner = connector.status().await["accountId"].as_str().unwrap().to_owned();
+    connector.post("/api/account/logout", &json!({})).await;
+    accounts.idp.set_subject("other-person");
+    connector.login_ok(&accounts, "google").await;
+    assert_eq!(connector.status().await["state"], "owner_mismatch");
+    let (status, body) = connector.post("/api/account/delete", &json!({"confirm": true})).await;
+    assert_eq!((status, &body), (200, &json!({"state": "signed_out"})));
+    accounts.idp.set_subject("third-person");
+    connector.login_ok(&accounts, "google").await;
+    let status = connector.status().await;
+    assert_eq!((status["state"].clone(), status["localOwner"].clone()), (json!("owner_mismatch"), json!(owner)), "삭제한 계정이 소유자가 아니면 소유 표시는 그대로다");
+}
+
+#[tokio::test]
+async fn when_the_state_file_cannot_be_removed_after_deletion_memory_and_file_still_agree() {
+    let (accounts, machine) = (Accounts::start().await, Machine::new());
+    let connector = machine.run(Some(&accounts.base)).await;
+    connector.login_ok(&accounts, "google").await;
+    let dir = machine.state_path.parent().unwrap().to_owned();
+    std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o500)).unwrap();
+    let (status, _) = connector.post("/api/account/delete", &json!({"confirm": true})).await;
+    std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)).unwrap();
+    assert_eq!(status, 500);
+    assert_eq!(connector.status().await["state"], "signed_in", "파일이 남았으니 메모리도 로그인 상태다");
+    connector.server.stop().await;
+    let restarted = machine.run(Some(&accounts.base)).await;
+    assert_eq!(restarted.status().await["state"], "signed_in");
+    let (status, body) = restarted.post("/api/account/refresh", &json!({})).await;
+    assert_eq!((status, &body), (200, &json!({"state": "signed_out"})), "계정 서버가 모르는 토큰은 새로 고침이 정리한다");
+    assert!(machine.state_file().is_none());
+}
