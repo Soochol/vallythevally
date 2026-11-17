@@ -1,4 +1,4 @@
-import { Fragment, type KeyboardEvent, useState } from "react";
+import { type KeyboardEvent, useState } from "react";
 import { useSymbolInfo } from "../../api/queries";
 import type { GroupNode } from "../../layout/dock/tree";
 import { WINDOW_KINDS, type WindowId } from "../../layout/kinds";
@@ -102,7 +102,7 @@ export function DockGroup({ group, rect, number, interaction }: { group: GroupNo
           if (!window) return null;
           const selected = tab === group.active;
           return (
-            <Fragment key={tab}>
+            <span key={tab} className="dock-tab-group">
               <button id={tabId(tab)} type="button" role="tab" data-window-id={tab} data-active-cell={tab === activeCell ? "" : undefined}
                 aria-selected={selected} aria-controls={selected ? panelId(group.id) : undefined} tabIndex={selected ? 0 : -1}
                 className="dock-tab" onClick={() => select(tab)} onKeyDown={(event) => move(event, tab)}
@@ -111,7 +111,7 @@ export function DockGroup({ group, rect, number, interaction }: { group: GroupNo
               </button>
               <LinkDot window={window} selected={selected} />
               <CloseTab window={window} selected={selected} onClosed={() => focusShownTab(group.id)} />
-            </Fragment>
+            </span>
           );
         })}
         <AddWindowMenu targetGroup={group.id} />
