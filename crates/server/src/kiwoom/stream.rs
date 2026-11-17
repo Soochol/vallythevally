@@ -5,13 +5,14 @@ use std::time::Duration;
 
 use domain::{IndexCode, KstTime, Price, Symbol, TimeOfDay, Volume};
 use futures::{Sink, SinkExt, Stream, StreamExt, future::BoxFuture};
-use tokio::sync::{mpsc, watch};
+use tokio::sync::{broadcast, mpsc, watch};
 use tokio::time::{Instant, sleep_until, timeout};
 use tokio_tungstenite::tungstenite::{Error as WsError, Message};
 use tokio_tungstenite::connect_async;
 
 use super::error::{Category, CodeKey, WsRejection, classify};
 use super::rest::{Access, KiwoomRest};
+pub use super::wire::{AccountEvent, AccountKind};
 use super::wire::{self, RealItem, RealType, Registrations, WsControl, WsFrame};
 use crate::clock::Clock;
 
@@ -123,8 +124,40 @@ fn registrations(desired: &DesiredFeeds) -> Registrations {
     desired.iter().flat_map(|(&symbol, kinds)| kinds.iter().map(move |&kind| (kind, symbol))).collect()
 }
 
+#[derive(Clone)]
+pub struct AccountFeed {
+    wanted: std::sync::Arc<watch::Sender<bool>>,
+    events: broadcast::Sender<AccountEvent>,
+}
+
+impl AccountFeed {
+    fn new() -> AccountFeed {
+        AccountFeed { wanted: std::sync::Arc::new(watch::channel(false).0), events: broadcast::channel(ACCOUNT_EVENT_BUFFER).0 }
+    }
+
+    pub fn set_wanted(&self, wanted: bool) {
+        self.wanted.send_replace(wanted);
+    }
+
+    pub fn wanted(&self) -> bool {
+        *self.wanted.borrow()
+    }
+
+    pub fn subscribe(&self) -> broadcast::Receiver<AccountEvent> {
+        self.events.subscribe()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn emit(&self, event: AccountEvent) {
+        let _ = self.events.send(event);
+    }
+}
+
+const ACCOUNT_EVENT_BUFFER: usize = 64;
+
 pub struct KiwoomStream {
     desired: watch::Sender<DesiredFeeds>,
+    account: AccountFeed,
 }
 
 impl KiwoomStream {
@@ -140,7 +173,9 @@ impl KiwoomStream {
         let (stream, desired) = KiwoomStream::detached();
         let (events, rx) = mpsc::channel(EVENT_BUFFER);
         let access = rest.watch_access();
-        let session = Session { connector, rest, clock, timings, desired, access, events, budget: TokenBudget::Fresh, rebuild: ControlBudget::Fresh, dropped: Dropped::default() };
+        let account = stream.account.clone();
+        let account_wanted = account.wanted.subscribe();
+        let session = Session { connector, rest, clock, timings, desired, access, events, account, account_wanted, account_registered: false, budget: TokenBudget::Fresh, rebuild: ControlBudget::Fresh, dropped: Dropped::default() };
         tokio::spawn(session.run());
         (stream, rx)
     }
@@ -148,7 +183,11 @@ impl KiwoomStream {
     /// 세션 없이 손잡이만 만든다. 시험이 원하는 집합을 읽는다.
     pub fn detached() -> (KiwoomStream, watch::Receiver<DesiredFeeds>) {
         let (desired, rx) = watch::channel(DesiredFeeds::new());
-        (KiwoomStream { desired }, rx)
+        (KiwoomStream { desired, account: AccountFeed::new() }, rx)
+    }
+
+    pub fn account_feed(&self) -> AccountFeed {
+        self.account.clone()
     }
 
     pub fn watch_desired(&self) -> watch::Receiver<DesiredFeeds> {
@@ -238,6 +277,8 @@ enum ControlBudget {
 enum Control {
     Reg(Registrations),
     Remove(RealType, BTreeSet<Symbol>),
+    AccountReg,
+    AccountRemove,
 }
 
 impl Control {
@@ -253,8 +294,8 @@ impl Control {
 
     fn kind(&self) -> WsControl {
         match self {
-            Control::Reg(_) => WsControl::Reg,
-            Control::Remove(..) => WsControl::Remove,
+            Control::Reg(_) | Control::AccountReg => WsControl::Reg,
+            Control::Remove(..) | Control::AccountRemove => WsControl::Remove,
         }
     }
 
@@ -262,6 +303,8 @@ impl Control {
         match self {
             Control::Reg(registrations) => wire::reg_message(registrations),
             Control::Remove(kind, symbols) => wire::remove_message(*kind, symbols),
+            Control::AccountReg => wire::account_reg_message(),
+            Control::AccountRemove => wire::account_remove_message(),
         }
     }
 
@@ -269,6 +312,7 @@ impl Control {
         match self {
             Control::Reg(registrations) => accepted.extend(registrations),
             Control::Remove(kind, symbols) => accepted.retain(|(k, symbol)| !(*k == kind && symbols.contains(symbol))),
+            Control::AccountReg | Control::AccountRemove => {}
         }
     }
 }
@@ -326,6 +370,9 @@ struct Session {
     desired: watch::Receiver<DesiredFeeds>,
     access: watch::Receiver<Access>,
     events: mpsc::Sender<StreamEvent>,
+    account: AccountFeed,
+    account_wanted: watch::Receiver<bool>,
+    account_registered: bool,
     budget: TokenBudget,
     rebuild: ControlBudget,
     dropped: Dropped,
@@ -560,6 +607,16 @@ impl Session {
                 }
             }
         }
+        self.account_registered = false;
+        match self.sync_account(&mut conn).await {
+            Ok(_) => {}
+            Err(End::Shutdown) => return None,
+            Err(end) => {
+                tracing::warn!(%end, "처음 계좌 REG를 마치지 못했습니다");
+                conn.close().await;
+                return Some(self.next_after_close(end, attempt));
+            }
+        }
         let since = self.clock.now();
         self.budget = TokenBudget::Fresh;
         self.events.send(StreamEvent::Live { since }).await.ok()?;
@@ -576,6 +633,11 @@ impl Session {
                 }
                 continue;
             }
+            match self.sync_account(&mut conn).await {
+                Ok(true) => continue,
+                Ok(false) => {}
+                Err(end) => break end,
+            }
             match self.recv(&mut conn, None, true).await {
                 Ok(Wake::Desired) => {}
                 Ok(Wake::Ack(control, _)) => tracing::debug!(trnm = control.trnm(), "기다리지 않던 응답을 버립니다"),
@@ -585,6 +647,17 @@ impl Session {
         };
         conn.close().await;
         end
+    }
+
+    async fn sync_account(&mut self, conn: &mut Conn) -> Result<bool, End> {
+        let wanted = *self.account_wanted.borrow_and_update();
+        if wanted == self.account_registered {
+            return Ok(false);
+        }
+        let control = if wanted { Control::AccountReg } else { Control::AccountRemove };
+        self.control(conn, &control).await?;
+        self.account_registered = wanted;
+        Ok(true)
     }
 
     /// 응답에 요청 번호가 없어서, 시간 안에 응답이 없으면 늦은 응답이 어느 요청의 것인지 알 수 없다. 그 연결로는 더 보내지 않는다.
@@ -638,6 +711,7 @@ impl Session {
                 _ = self.access.wait_for(|access| *access != Access::Open) => return Err(End::LinkClosed),
                 () = sleep_until(deadline.unwrap_or_else(Instant::now)), if deadline.is_some() => return Ok(Wake::Deadline),
                 changed = self.desired.changed(), if watch_desired => return changed.map(|()| Wake::Desired).map_err(|_| End::Shutdown),
+                changed = self.account_wanted.changed(), if watch_desired => return changed.map(|()| Wake::Desired).map_err(|_| End::Shutdown),
             };
             let text = match message {
                 Some(Ok(Message::Text(text))) => text,
@@ -680,6 +754,10 @@ impl Session {
                 Ok(RealItem::Book(book)) => StreamEvent::Book { book, received_at },
                 Ok(RealItem::Program(row)) => StreamEvent::Program { row, received_at },
                 Ok(RealItem::Broker(snapshot)) => StreamEvent::Broker { snapshot, received_at },
+                Ok(RealItem::Account(event)) => {
+                    let _ = self.account.events.send(event);
+                    continue;
+                }
                 Ok(RealItem::AuctionOnly) => {
                     self.dropped.auction_only += 1;
                     tracing::debug!(count = self.dropped.auction_only, "체결량 0인 0B(동시호가)를 버립니다");
@@ -1405,7 +1483,7 @@ mod tests {
         let clock = clock();
         let (rest, _) = rest(&clock);
         let access = rest.watch_access();
-        let session = Session { connector: Box::new(peer.clone()), rest, clock, timings: Timings::default(), desired, access, events: events_tx, budget: TokenBudget::Fresh, rebuild: ControlBudget::Fresh, dropped: Dropped::default() };
+        let session = Session { connector: Box::new(peer.clone()), rest, clock, timings: Timings::default(), desired, access, events: events_tx, account: stream.account_feed(), account_wanted: stream.account_feed().wanted.subscribe(), account_registered: false, budget: TokenBudget::Fresh, rebuild: ControlBudget::Fresh, dropped: Dropped::default() };
         let sender = session.events.clone();
         stream.set_desired(trades_only([samsung()].into()));
         tokio::spawn(session.run());
@@ -1447,5 +1525,68 @@ mod tests {
         peer.real(0, vec![json!({"type":"0B", "item":"005930_AL", "values":{"20":"x"}}), trade("093001", 71_200, 15, 100, "KRX")]);
         assert_eq!(tick(next(&mut events).await).price.centi(), 7_120_000);
         assert_eq!(peer.logins(), 1);
+    }
+
+    mod trading_account {
+        use super::*;
+        use crate::config::Secret;
+
+        const SYNTHETIC_ACCOUNT: &str = "5550123401";
+
+        fn account_entry() -> Value {
+            json!([{"item": [""], "type": ["00", "04"]}])
+        }
+
+        fn fill(account: &str) -> Value {
+            json!({"type": "00", "item": "", "values": {"9201": account, "9203": "0000001", "913": "접수"}})
+        }
+
+        #[tokio::test(start_paused = true)]
+        async fn account_realtime_registers_on_the_market_session() {
+            let peer = Peer::ok();
+            let (stream, mut events) = peer.start_feeds(feeds(&[(samsung(), &[RealType::Trade])]));
+            assert!(matches!(next(&mut events).await, StreamEvent::Live { .. }));
+            assert_eq!(peer.controls(0), ["LOGIN", "REG"], "스위치가 꺼져 있으면 00·04를 등록하지 않는다");
+            let account = stream.account_feed();
+            account.set_wanted(true);
+            until("00·04가 같은 세션에 등록됐다", || peer.controls(0).len() == 3).await;
+            assert_eq!(peer.controls(0), ["LOGIN", "REG", "REG"]);
+            assert_eq!(peer.messages(0)[2], json!({"trnm": "REG", "grp_no": "1", "refresh": "1", "data": account_entry()}));
+            assert_eq!(peer.logins(), 1, "시세와 같은 세션이다");
+            account.set_wanted(false);
+            until("스위치를 끄자 00·04가 해지됐다", || peer.controls(0).len() == 4).await;
+            assert_eq!(peer.messages(0)[3], json!({"trnm": "REMOVE", "grp_no": "1", "data": account_entry()}));
+            stream.set_desired(feeds(&[(samsung(), &[RealType::Trade, RealType::Book])]));
+            until("시세 등록은 계좌와 따로 움직인다", || peer.controls(0).len() == 5).await;
+            assert_eq!(peer.messages(0)[4]["data"], json!([{"item": ["005930_AL"], "type": ["0D"]}]));
+        }
+
+        #[tokio::test(start_paused = true)]
+        async fn account_registration_comes_after_the_market_registration_and_returns_after_a_reconnect() {
+            let peer = Peer::ok();
+            let (stream, mut events) = peer.start_feeds(feeds(&[(samsung(), &[RealType::Trade])]));
+            stream.account_feed().set_wanted(true);
+            assert!(matches!(next(&mut events).await, StreamEvent::Live { .. }));
+            until("처음 연결의 계좌 등록", || peer.controls(0).len() == 3).await;
+            assert_eq!(peer.controls(0), ["LOGIN", "REG", "REG"]);
+            peer.drop_session(0);
+            assert!(matches!(next(&mut events).await, StreamEvent::Down { .. }));
+            assert!(matches!(next(&mut events).await, StreamEvent::Live { .. }));
+            assert_eq!(peer.controls(1), ["LOGIN", "REG", "REG"]);
+            assert_eq!(peer.messages(1)[2]["data"], account_entry());
+        }
+
+        #[tokio::test(start_paused = true)]
+        async fn account_events_reach_the_feed_and_never_the_market_events() {
+            let peer = Peer::ok();
+            let (stream, mut events) = peer.start_feeds(feeds(&[(samsung(), &[RealType::Trade])]));
+            let mut received = stream.account_feed().subscribe();
+            assert!(matches!(next(&mut events).await, StreamEvent::Live { .. }));
+            peer.real(0, vec![fill(SYNTHETIC_ACCOUNT), trade("093001", 71_200, 15, 100, "KRX")]);
+            assert_eq!(tick(next(&mut events).await).price.centi(), 7_120_000);
+            let event = received.recv().await.unwrap();
+            assert_eq!(event, AccountEvent { kind: AccountKind::OrderFill, account: Secret::new(SYNTHETIC_ACCOUNT.into()) });
+            assert!(!format!("{event:?}").contains(SYNTHETIC_ACCOUNT), "Debug 출력에 계좌번호가 없다");
+        }
     }
 }

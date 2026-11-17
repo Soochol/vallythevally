@@ -31,6 +31,10 @@ impl KeyFile {
         RegisteredIpFile::new(PrivateFile::new(self.path().with_file_name(crate::config::REGISTERED_IP_FILE_NAME)))
     }
 
+    pub fn order_switch_store(&self) -> crate::trading::SwitchStore {
+        crate::trading::SwitchStore::file(PrivateFile::new(self.path().with_file_name(crate::trading::ORDER_SWITCH_FILE_NAME)))
+    }
+
     pub fn load(&self) -> Result<Option<KiwoomCredentials>, FileError> {
         let Some(text) = self.file.read()? else { return Ok(None) };
         let stored: Stored = serde_json::from_str(&text).map_err(|e| self.file.error(format_args!("JSON {:?} 오류, {}번째 줄", e.classify(), e.line())))?;

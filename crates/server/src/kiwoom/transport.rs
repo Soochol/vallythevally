@@ -4,13 +4,13 @@ use std::time::Duration;
 
 use futures::future::BoxFuture;
 
-use super::api::ApiId;
+use super::api::Endpoint;
 use super::rest::ContKey;
 use crate::config::Secret;
 
 /// Debug를 두지 않는다. au10001 본문에는 앱키와 시크릿이 들어 있다.
 pub struct HttpRequest {
-    pub api_id: ApiId,
+    pub api_id: Endpoint,
     pub token: Option<Secret<String>>,
     pub cont: Option<ContKey>,
     pub body: Secret<String>,
