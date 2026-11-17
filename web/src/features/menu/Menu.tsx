@@ -4,7 +4,7 @@ import { menuIndex } from "../overlay/position";
 import { CheckIcon } from "../icons";
 
 export type MenuItem =
-  | { kind: "radio"; label: string; value?: string; hint?: string; checked: boolean; onSelect(): void }
+  | { kind: "radio"; label: string; value?: string; icon?: ReactNode; hint?: string; checked: boolean; onSelect(): void }
   | { kind: "check"; label: string; value?: string; checked: boolean; onSelect(): void }
   | { kind: "action"; label: string; icon?: ReactNode; hint?: string; disabled?: boolean; danger?: boolean; onSelect(): void }
   | { kind: "heading"; label: string }
@@ -26,7 +26,7 @@ interface Props {
 
 export function Menu({ label, items, onClose, root, className, style, children }: Props) {
   const point = typeof style?.left === "number" && typeof style?.top === "number" ? { x: style.left, y: style.top } : undefined;
-  const trigger = useRef<HTMLElement | null>(point ? null : root.current?.querySelector<HTMLElement>("[aria-expanded=true]") ?? root.current?.querySelector<HTMLElement>("button") ?? null);
+  const trigger = useRef<HTMLElement | null>(point ? null : root.current instanceof HTMLButtonElement ? root.current : root.current?.querySelector<HTMLElement>("[aria-expanded=true]") ?? root.current?.querySelector<HTMLElement>("button") ?? null);
   const focusTarget = useRef<HTMLElement | null>(point
     ? (typeof document !== "undefined" && document.activeElement instanceof HTMLElement ? document.activeElement : null)
     : trigger.current);
@@ -98,6 +98,7 @@ function MenuButton({ item, onClose, register }: { item: Focusable; onClose: Pro
       }}
     >
       <span className="grid w-4 place-items-center">{item.kind === "action" ? item.icon : item.checked && <CheckIcon />}</span>
+      {item.kind === "radio" && item.icon}
       <span className="group-disabled:opacity-40">{item.label}</span>
       {"hint" in item && item.hint && <span className="ml-auto pl-4 text-xs text-text-2">{item.hint}</span>}
     </button>
