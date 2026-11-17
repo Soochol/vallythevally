@@ -22,6 +22,12 @@ pub enum Exchange {
     Nxt,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TradeSide {
+    Buy,
+    Sell,
+}
+
 /// 실시간 체결 하나. 날짜는 아직 없다(`domain::resolve_trade_time`이 붙인다).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RealTick {
@@ -34,6 +40,7 @@ pub struct RealTick {
     /// 프레임에 11·13이 없거나 읽지 못하면 None.
     pub day: Option<DayTotals>,
     pub strength_centi: Option<u64>,
+    pub side: Option<TradeSide>,
 }
 
 /// 체결 프레임에 같이 오는 그날 값(kiwoom.md §11.3, §11.5).
@@ -674,7 +681,7 @@ impl Session {
                     let before = conn.index_cumulative.insert(index, cumulative);
                     let qty = before.map_or(0, |b| cumulative.saturating_sub(b));
                     let day = change_centi.map(|change_centi| DayTotals { change_centi, cumulative: Volume(cumulative) });
-                    let tick = RealTick { symbol: Symbol::Index(index), hhmmss, price, qty: Volume(qty), exchange: None, day, strength_centi: None };
+                    let tick = RealTick { symbol: Symbol::Index(index), hhmmss, price, qty: Volume(qty), exchange: None, day, strength_centi: None, side: None };
                     StreamEvent::Tick { tick, received_at }
                 }
                 Ok(RealItem::Book(book)) => StreamEvent::Book { book, received_at },

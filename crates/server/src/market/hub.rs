@@ -9,8 +9,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use domain::{
-    Aggregator, Applied, Bucket, CLOSE_GRACE_SECS, ConfirmedBar, CurrentBar, Feed, KstTime, Ohlcv, SESSION_CLOSE, SeriesKey, StockCode, Symbol,
-    TRADING_OPEN, Trade, TradeTimeError, Venue, resolve_trade_time,
+    Aggregator, Applied, Bucket, CLOSE_GRACE_SECS, ConfirmedBar, CurrentBar, Feed, KstTime, Ohlcv, Price, SESSION_CLOSE, SeriesKey, StockCode, Symbol,
+    TRADING_OPEN, TimeOfDay, Trade, TradeTimeError, Venue, resolve_trade_time,
 };
 use tokio::sync::{mpsc, oneshot, watch};
 
@@ -18,12 +18,13 @@ use super::outbox::Outbox;
 use super::subscriptions::{Holder, SubscriptionManager};
 use super::venue_volume::{DayTallies, DayVolumes, Fill};
 use super::{ConnId, SubId};
-use crate::api::{self, ConnectionStatus, RealtimeState, ReloadReason, ServerMessage, SubErrorCode, UnixSeconds};
+use crate::api::{self, ConnectionStatus, FeedKind, RealtimeState, ReloadReason, ServerMessage, SubErrorCode, UnixSeconds};
 use crate::bars::{BarError, BarService, Seed};
 use crate::clock::Clock;
 use crate::kiwoom::rest::Priority;
 use crate::kiwoom::rest::KiwoomError;
-use crate::kiwoom::stream::{Exchange, KiwoomStream, RealTick, StreamEvent, trades_only};
+use crate::kiwoom::stream::{BookLevel, BookSnapshot, BrokerEntry, BrokerSnapshot, Exchange, KiwoomStream, RealProgramTrade, RealTick, StreamEvent, TradeSide};
+use crate::kiwoom::wire::RealType;
 use crate::quotes;
 use crate::symbols::Directory;
 
@@ -68,6 +69,11 @@ impl HubHandle {
         self.send(HubInput::Subscribe { conn, sub, key });
     }
 
+    /// 새 창 흐름 구독. 답(`feed_subscribed`, `sub_error`)은 그 연결의 outbox로 간다. 해지는 `unsubscribe`다.
+    pub fn subscribe_feed(&self, conn: ConnId, sub: SubId, symbol: Symbol, kind: FeedKind, venue: Venue) {
+        self.send(HubInput::SubscribeFeed { conn, sub, feed: FeedSub { symbol, kind, venue } });
+    }
+
     pub fn unsubscribe(&self, conn: ConnId, sub: SubId) {
         self.send(HubInput::Unsubscribe { conn, sub });
     }
@@ -103,6 +109,7 @@ enum HubInput {
     Connect { conn: ConnId, outbox: Arc<Outbox> },
     Direct { conn: ConnId, message: ServerMessage },
     Subscribe { conn: ConnId, sub: SubId, key: SeriesKey },
+    SubscribeFeed { conn: ConnId, sub: SubId, feed: FeedSub },
     Unsubscribe { conn: ConnId, sub: SubId },
     Disconnect(ConnId),
     Watch { conn: ConnId, symbols: Vec<Symbol>, venue: Venue },
@@ -203,9 +210,32 @@ impl KeyState {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct FeedSub {
+    symbol: Symbol,
+    kind: FeedKind,
+    venue: Venue,
+}
+
+impl FeedSub {
+    fn holder(&self, conn: ConnId, sub: &SubId) -> Holder {
+        Holder::Feed { conn, sub: sub.clone(), kind: real_type(self.kind) }
+    }
+}
+
+fn real_type(kind: FeedKind) -> RealType {
+    match kind {
+        FeedKind::Trades => RealType::Trade,
+        FeedKind::Book => RealType::Book,
+        FeedKind::Program => RealType::Program,
+        FeedKind::Brokers => RealType::Broker,
+    }
+}
+
 struct Conn {
     outbox: Arc<Outbox>,
     subs: HashMap<SubId, SeriesKey>,
+    feeds: HashMap<SubId, FeedSub>,
     requested_watch: Vec<Symbol>,
     watch_venue: Venue,
     limited_sent: BTreeSet<Symbol>,
@@ -228,6 +258,7 @@ pub struct MarketHub {
     tx: mpsc::UnboundedSender<HubInput>,
     manager: SubscriptionManager,
     rejected: BTreeSet<Holder>,
+    broker_history: BTreeMap<Symbol, BrokerSnapshot>,
     tallies: DayTallies,
     directory: watch::Receiver<Option<Arc<Directory>>>,
     conns: HashMap<ConnId, Conn>,
@@ -256,6 +287,7 @@ impl MarketHub {
             tx: tx.clone(),
             manager: SubscriptionManager::default(),
             rejected: BTreeSet::new(),
+            broker_history: BTreeMap::new(),
             tallies: DayTallies::default(),
             conns: HashMap::new(),
             keys: HashMap::new(),
@@ -297,16 +329,21 @@ impl MarketHub {
             HubInput::Connect { conn, outbox } => {
                 let hello = ServerMessage::Hello { protocol: PROTOCOL, server_time: UnixSeconds(now.unix()), status: self.status() };
                 if outbox.push(hello).is_ok() {
-                    self.conns.insert(conn, Conn { outbox, subs: HashMap::new(), requested_watch: Vec::new(), watch_venue: Venue::Combined, limited_sent: BTreeSet::new() });
+                    self.conns.insert(conn, Conn { outbox, subs: HashMap::new(), feeds: HashMap::new(), requested_watch: Vec::new(), watch_venue: Venue::Combined, limited_sent: BTreeSet::new() });
                 }
             }
             HubInput::Direct { conn, message } => {
                 push(&self.conns, &mut self.closing, conn, message);
             }
             HubInput::Subscribe { conn, sub, key } => self.subscribe(conn, sub, key, now),
+            HubInput::SubscribeFeed { conn, sub, feed } => self.subscribe_feed(conn, sub, feed, now),
             HubInput::Unsubscribe { conn, sub } => {
                 if let Some(key) = self.conns.get_mut(&conn).and_then(|c| c.subs.remove(&sub)) {
-                    self.release(conn, sub, key, now);
+                    self.release(conn, sub.clone(), key, now);
+                    self.replan(now);
+                }
+                if let Some(feed) = self.conns.get_mut(&conn).and_then(|c| c.feeds.remove(&sub)) {
+                    self.release_feed(conn, &sub, feed, now);
                     self.replan(now);
                 }
             }
@@ -321,6 +358,7 @@ impl MarketHub {
                 let _ = reply.send(snap);
             }
             HubInput::DailyReset => {
+                self.broker_history.clear();
                 tracing::info!(keys = self.keys.len(), "07:45 실시간 키를 모두 다시 시드합니다");
                 self.reseed_all(SeedPurpose::Reload { reason: ReloadReason::DailyReset, from: None });
             }
@@ -345,6 +383,54 @@ impl MarketHub {
         }
     }
 
+    fn subscribe_feed(&mut self, conn: ConnId, sub: SubId, feed: FeedSub, now: KstTime) {
+        if !self.conns.contains_key(&conn) {
+            return;
+        }
+        let error = match &*self.directory.borrow() {
+            _ if !matches!(feed.symbol, Symbol::Stock(_)) => Some(SubErrorCode::BadRequest),
+            Some(dir) if dir.get(feed.symbol).is_none() => Some(SubErrorCode::UnknownSymbol),
+            _ => None,
+        };
+        if let Some(code) = error {
+            push(&self.conns, &mut self.closing, conn, ServerMessage::SubError { sub: sub.0, code });
+            return;
+        }
+        let old_cell = self.conns.get_mut(&conn).and_then(|c| c.subs.remove(&sub));
+        let old_feed = self.conns.get_mut(&conn).and_then(|c| c.feeds.insert(sub.clone(), feed));
+        if let Some(key) = old_cell {
+            self.release(conn, sub.clone(), key, now);
+        }
+        if let Some(old) = old_feed {
+            self.release_feed(conn, &sub, old, now);
+        }
+        let holder = feed.holder(conn, &sub);
+        self.manager.hold(feed.symbol, holder.clone());
+        self.replan(now);
+        if !self.rejected.contains(&holder) {
+            self.attach_feed(conn, &sub, feed);
+        }
+    }
+
+    fn release_feed(&mut self, conn: ConnId, sub: &SubId, feed: FeedSub, now: KstTime) {
+        let holder = feed.holder(conn, sub);
+        self.manager.release(feed.symbol, &holder, now);
+        self.rejected.remove(&holder);
+        if let Some(c) = self.conns.get(&conn) {
+            c.outbox.forget_feed(sub);
+        }
+    }
+
+    fn attach_feed(&mut self, conn: ConnId, sub: &SubId, feed: FeedSub) {
+        push(&self.conns, &mut self.closing, conn, ServerMessage::FeedSubscribed { sub: sub.0.clone(), kind: feed.kind });
+        if feed.kind == FeedKind::Brokers
+            && let Some(snapshot) = self.broker_history.get(&feed.symbol)
+        {
+            let msg = ServerMessage::FeedBrokers { sub: sub.0.clone(), brokers: feed_brokers(snapshot, self.clock.now()) };
+            push(&self.conns, &mut self.closing, conn, msg);
+        }
+    }
+
     /// 구독 하나를 놓는다. 종목은 30초 더 받는다.
     fn release(&mut self, conn: ConnId, sub: SubId, key: SeriesKey, now: KstTime) {
         let holder = Holder::Cell { conn, sub: sub.clone() };
@@ -365,6 +451,9 @@ impl MarketHub {
         c.outbox.close();
         for (sub, key) in c.subs {
             self.release(conn, sub, key, now);
+        }
+        for (sub, feed) in &c.feeds {
+            self.rejected.remove(&feed.holder(conn, sub));
         }
         self.manager.release_conn(conn, now);
         self.replan(now);
@@ -476,10 +565,19 @@ impl MarketHub {
 
     fn replan(&mut self, now: KstTime) {
         let plan = self.manager.plan(now);
-        self.stream.set_desired(trades_only(plan.realtime));
+        self.broker_history.retain(|symbol, _| plan.feeds.get(symbol).is_some_and(|kinds| kinds.contains(&RealType::Broker)));
+        self.stream.set_desired(plan.feeds);
         let newly: Vec<Holder> = plan.rejected.difference(&self.rejected).cloned().collect();
         let recovered: Vec<Holder> = self.rejected.difference(&plan.rejected).cloned().collect();
         self.rejected = plan.rejected;
+        for (conn, sub) in newly.iter().filter_map(feed_of) {
+            push(&self.conns, &mut self.closing, conn, ServerMessage::SubError { sub: sub.0, code: SubErrorCode::RealtimeLimit });
+        }
+        for (conn, sub) in recovered.iter().filter_map(feed_of) {
+            if let Some(feed) = self.conns.get(&conn).and_then(|c| c.feeds.get(&sub)).copied() {
+                self.attach_feed(conn, &sub, feed);
+            }
+        }
         for (conn, sub) in newly.into_iter().filter_map(cell_of) {
             if let Some(key) = self.conns.get(&conn).and_then(|c| c.subs.get(&sub)).copied()
                 && let Some(ks) = self.keys.get_mut(&key)
@@ -699,22 +797,28 @@ impl MarketHub {
     fn on_event(&mut self, ev: StreamEvent) {
         match ev {
             StreamEvent::Tick { tick, received_at } => self.on_trade(tick, received_at),
-            StreamEvent::Book { .. } | StreamEvent::Program { .. } | StreamEvent::Broker { .. } => {}
+            StreamEvent::Book { book, received_at } => self.on_book(&book, received_at),
+            StreamEvent::Program { row, received_at } => self.on_program(&row, received_at),
+            StreamEvent::Broker { snapshot, received_at } => self.on_broker(snapshot, received_at),
             StreamEvent::Down { at } => {
+                self.publish_feed_link(false, at);
                 let from = *self.gap_from.get_or_insert(at);
                 self.session_down(RealtimeState::Reconnecting, from);
             }
             StreamEvent::Idle => {
                 let now = self.clock.now();
+                self.publish_feed_link(false, now);
                 self.gap_from.get_or_insert(now);
                 self.session_down(RealtimeState::NotConnected, now);
             }
             StreamEvent::Halted => {
                 let now = self.clock.now();
+                self.publish_feed_link(false, now);
                 self.gap_from.get_or_insert(now);
                 self.session_down(RealtimeState::Halted, now);
             }
             StreamEvent::Live { since } => {
+                self.publish_feed_link(true, since);
                 self.session_live = true;
                 self.realtime = RealtimeState::Live;
                 self.realtime_since = since;
@@ -731,6 +835,78 @@ impl MarketHub {
                     }
                 }
             }
+        }
+    }
+
+    fn feed_targets(&self, symbol: Symbol, kind: FeedKind) -> Vec<(ConnId, SubId)> {
+        let mut targets = Vec::new();
+        for (&conn, c) in &self.conns {
+            for (sub, feed) in &c.feeds {
+                if feed.symbol == symbol && feed.kind == kind && (self.rejected.is_empty() || !self.rejected.contains(&feed.holder(conn, sub))) {
+                    targets.push((conn, sub.clone()));
+                }
+            }
+        }
+        targets
+    }
+
+    fn publish_feed_trade(&mut self, tick: &RealTick, at: KstTime) {
+        let qty = i64::try_from(tick.qty.0).unwrap_or(i64::MAX);
+        let trade = api::FeedTrade {
+            t: UnixSeconds(at.unix()),
+            price: won(tick.price),
+            qty: if tick.side == Some(TradeSide::Sell) { -qty } else { qty },
+            venue: tick.exchange.map(|exchange| match exchange {
+                Exchange::Krx => api::Venue::Krx,
+                Exchange::Nxt => api::Venue::Nxt,
+            }),
+            strength: tick.strength_centi.map(|centi| centi as f64 / 100.0),
+        };
+        for (conn, sub) in self.feed_targets(tick.symbol, FeedKind::Trades) {
+            let Some(c) = self.conns.get(&conn) else {
+                continue;
+            };
+            if venue_takes(c.feeds[&sub].venue, tick.exchange) && c.outbox.add_trade(&sub, trade.clone()).is_err() {
+                self.closing.push(conn);
+            }
+        }
+    }
+
+    fn on_book(&mut self, book: &BookSnapshot, received_at: KstTime) {
+        let message = feed_book(book, received_at);
+        for (conn, sub) in self.feed_targets(book.symbol, FeedKind::Book) {
+            if let Some(c) = self.conns.get(&conn) {
+                c.outbox.set_book(&sub, message.clone());
+            }
+        }
+    }
+
+    fn on_program(&mut self, row: &RealProgramTrade, received_at: KstTime) {
+        let message = feed_program(row, received_at);
+        for (conn, sub) in self.feed_targets(row.symbol, FeedKind::Program) {
+            let msg = ServerMessage::FeedProgram { sub: sub.0, row: message.clone() };
+            push(&self.conns, &mut self.closing, conn, msg);
+        }
+    }
+
+    fn on_broker(&mut self, snapshot: BrokerSnapshot, received_at: KstTime) {
+        let message = feed_brokers(&snapshot, received_at);
+        for (conn, sub) in self.feed_targets(snapshot.symbol, FeedKind::Brokers) {
+            let msg = ServerMessage::FeedBrokers { sub: sub.0, brokers: message.clone() };
+            push(&self.conns, &mut self.closing, conn, msg);
+        }
+        self.broker_history.insert(snapshot.symbol, snapshot);
+    }
+
+    fn publish_feed_link(&mut self, live: bool, at: KstTime) {
+        if self.session_live == live {
+            return;
+        }
+        let subs: Vec<(ConnId, SubId)> =
+            self.conns.iter().flat_map(|(&conn, c)| c.feeds.keys().map(move |sub| (conn, sub.clone()))).collect();
+        for (conn, sub) in subs {
+            let msg = ServerMessage::FeedLink { sub: sub.0, live, at: UnixSeconds(at.unix()) };
+            push(&self.conns, &mut self.closing, conn, msg);
         }
     }
 
@@ -759,6 +935,7 @@ impl MarketHub {
             self.counters.unknown_exchange += 1;
         }
         self.publish_quotes(&tick, at);
+        self.publish_feed_trade(&tick, at);
         let trade = Trade { at, price: tick.price, qty: tick.qty };
         let now = self.clock.now();
         for (key, ks) in self.keys.iter_mut().filter(|(k, _)| k.feed.symbol() == tick.symbol && accepts(k.feed, tick.exchange)) {
@@ -935,10 +1112,65 @@ fn spawn_verify(bars: &Arc<BarService>, tx: &mpsc::UnboundedSender<HubInput>, ke
     });
 }
 
+fn won(price: Price) -> f64 {
+    price.centi() as f64 / 100.0
+}
+
+fn feed_time(received_at: KstTime, hhmmss: TimeOfDay) -> UnixSeconds {
+    UnixSeconds(resolve_trade_time(received_at, hhmmss).unwrap_or(received_at).unix())
+}
+
+fn venue_takes(requested: Venue, exchange: Option<Exchange>) -> bool {
+    match requested {
+        Venue::Combined => true,
+        Venue::Krx => exchange == Some(Exchange::Krx),
+        Venue::Nxt => exchange == Some(Exchange::Nxt),
+    }
+}
+
+fn feed_book(book: &BookSnapshot, received_at: KstTime) -> api::FeedBook {
+    let side = |levels: &[Option<BookLevel>]| levels.iter().map(|l| l.map(|l| api::FeedBookLevel { price: won(l.price), qty: l.qty.0 })).collect();
+    api::FeedBook {
+        t: feed_time(received_at, book.hhmmss),
+        asks: side(&book.asks),
+        bids: side(&book.bids),
+        total_ask_qty: book.total_ask_qty.0,
+        total_bid_qty: book.total_bid_qty.0,
+        expected: book.expected.map(|e| api::FeedExpected { price: won(e.price), qty: e.qty.0 }),
+    }
+}
+
+fn feed_program(row: &RealProgramTrade, received_at: KstTime) -> api::FeedProgramRow {
+    api::FeedProgramRow {
+        t: feed_time(received_at, row.hhmmss),
+        price: row.price.map(won),
+        sell_qty: row.sell_qty.0,
+        sell_amount: row.sell_amount_million_won,
+        buy_qty: row.buy_qty.0,
+        buy_amount: row.buy_amount_million_won,
+        net_qty: row.net_buy_qty,
+        net_qty_change: row.net_buy_qty_change,
+        net_amount: row.net_buy_amount_million_won,
+        net_amount_change: row.net_buy_amount_change_million_won,
+    }
+}
+
+fn feed_brokers(snapshot: &BrokerSnapshot, at: KstTime) -> api::FeedBrokers {
+    let side = |entries: &[BrokerEntry]| entries.iter().map(|e| api::FeedBroker { code: e.member_code.clone(), name: e.member_name.clone(), qty: e.cumulative_qty.0, qty_change: e.change_qty }).collect();
+    api::FeedBrokers { t: UnixSeconds(at.unix()), sells: side(&snapshot.sells), buys: side(&snapshot.buys) }
+}
+
 fn cell_of(h: Holder) -> Option<(ConnId, SubId)> {
     match h {
         Holder::Cell { conn, sub } => Some((conn, sub)),
-        Holder::Watch { .. } => None,
+        Holder::Watch { .. } | Holder::Feed { .. } => None,
+    }
+}
+
+fn feed_of(h: &Holder) -> Option<(ConnId, SubId)> {
+    match h {
+        Holder::Feed { conn, sub, .. } => Some((*conn, sub.clone())),
+        Holder::Cell { .. } | Holder::Watch { .. } => None,
     }
 }
 
@@ -978,7 +1210,7 @@ mod tests {
     use crate::clock::kst;
     use crate::config::Secret;
     use crate::kiwoom::api::ApiId;
-    use crate::kiwoom::stream::DayTotals;
+    use crate::kiwoom::stream::{DayTotals, trades_only};
     use crate::kiwoom::auth::KiwoomAuth;
     use crate::kiwoom::rest::KiwoomRest;
     use crate::kiwoom::rest::testing::{FakeTransport, ok, status, token};
@@ -1142,6 +1374,7 @@ mod tests {
             exchange,
             day: None,
             strength_centi: None,
+            side: None,
         };
         StreamEvent::Tick { tick, received_at: h.clock.now() }
     }
@@ -2643,5 +2876,248 @@ mod tests {
         h.events.send(fill(&h, SAMSUNG, (9, 0, 51), 112, Some(Exchange::Nxt), 5, (12, 1_005))).await.unwrap();
         assert_eq!(quote_messages(take(&out).await), vec![quotes_msg(api::Venue::Combined, vec![venue_quote(SAMSUNG, api::Venue::Combined, 112.0, 12.0, 1_005, at(9, 0, 51))])]);
         assert_eq!(day_volume_requests(&h).len(), 1);
+    }
+
+    fn samsung_symbol() -> Symbol {
+        samsung().feed.symbol()
+    }
+
+    fn feed_trade_of(h: &Harness, price: u64, qty: u64, side: Option<TradeSide>, exchange: Option<Exchange>) -> StreamEvent {
+        let StreamEvent::Tick { mut tick, received_at } = trade(h, (9, 0, 50), price, qty, exchange) else {
+            unreachable!("trade는 Tick이다")
+        };
+        tick.side = side;
+        tick.strength_centi = Some(11_234);
+        StreamEvent::Tick { tick, received_at }
+    }
+
+    fn book_event(h: &Harness, ask: u64, qty: u64) -> StreamEvent {
+        let mut asks = [None; crate::kiwoom::stream::BOOK_DEPTH];
+        asks[0] = Some(BookLevel { price: won(ask), qty: Volume(qty) });
+        let book = BookSnapshot {
+            symbol: samsung_symbol(),
+            hhmmss: TimeOfDay::hms(9, 0, 50).unwrap(),
+            asks,
+            bids: [None; crate::kiwoom::stream::BOOK_DEPTH],
+            total_ask_qty: Volume(qty),
+            total_bid_qty: Volume(0),
+            expected: None,
+        };
+        StreamEvent::Book { book: Box::new(book), received_at: h.clock.now() }
+    }
+
+    fn broker_event(h: &Harness, cumulative: u64) -> StreamEvent {
+        let sells = vec![BrokerEntry { member_code: "001".into(), member_name: "키움".into(), cumulative_qty: Volume(cumulative), change_qty: -3 }];
+        StreamEvent::Broker { snapshot: BrokerSnapshot { symbol: samsung_symbol(), sells, buys: Vec::new() }, received_at: h.clock.now() }
+    }
+
+    fn program_event(h: &Harness, net: i64) -> StreamEvent {
+        let row = RealProgramTrade {
+            symbol: samsung_symbol(),
+            hhmmss: TimeOfDay::hms(9, 0, 50).unwrap(),
+            price: Some(won(100)),
+            sell_qty: Volume(1),
+            sell_amount_million_won: 2,
+            buy_qty: Volume(3),
+            buy_amount_million_won: 4,
+            net_buy_qty: net,
+            net_buy_qty_change: -1,
+            net_buy_amount_million_won: 5,
+            net_buy_amount_change_million_won: 6,
+        };
+        StreamEvent::Program { row, received_at: h.clock.now() }
+    }
+
+    fn subscribe_feed(h: &Harness, conn: ConnId, name: &str, kind: FeedKind, venue: Venue) {
+        h.hub.subscribe_feed(conn, sub(name), samsung_symbol(), kind, venue);
+    }
+
+    type SentTrades = Vec<(u64, Vec<(i64, Option<api::Venue>)>)>;
+
+    fn feed_trades(msgs: &[ServerMessage], name: &str) -> SentTrades {
+        msgs.iter()
+            .filter_map(|m| match m {
+                ServerMessage::FeedTrades { sub, seq, trades } if sub == name => Some((*seq, trades.iter().map(|t| (t.qty, t.venue)).collect())),
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn feed_subscribed(name: &str, kind: FeedKind) -> ServerMessage {
+        ServerMessage::FeedSubscribed { sub: name.into(), kind }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn trades_are_sent_in_order_without_loss_per_flush() {
+        let h = std_harness();
+        live(&h).await;
+        let (conn, out) = connect(&h).await;
+        subscribe_feed(&h, conn, "t", FeedKind::Trades, Venue::Combined);
+        assert_eq!(take(&out).await, [feed_subscribed("t", FeedKind::Trades)]);
+        for (qty, side) in [(5, Some(TradeSide::Buy)), (7, Some(TradeSide::Sell)), (2, Some(TradeSide::Buy)), (9, None)] {
+            h.events.send(feed_trade_of(&h, 100, qty, side, Some(Exchange::Krx))).await.unwrap();
+        }
+        let msgs = take(&out).await;
+        let krx = Some(api::Venue::Krx);
+        assert_eq!(feed_trades(&msgs, "t"), [(1, vec![(5, krx), (-7, krx), (2, krx), (9, krx)])], "한 묶음에 네 건이 순서대로 간다");
+        let ServerMessage::FeedTrades { trades, .. } = &msgs[0] else { panic!("{msgs:?}") };
+        assert_eq!((trades[0].price, trades[0].strength), (100.0, Some(112.34)));
+        h.events.send(feed_trade_of(&h, 100, 1, Some(TradeSide::Buy), Some(Exchange::Krx))).await.unwrap();
+        assert_eq!(feed_trades(&take(&out).await, "t"), [(2, vec![(1, krx)])]);
+        assert!(take(&out).await.is_empty(), "체결이 없으면 빈 묶음을 보내지 않는다");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn book_sends_only_the_latest_per_flush() {
+        let h = std_harness();
+        live(&h).await;
+        let (conn, out) = connect(&h).await;
+        subscribe_feed(&h, conn, "b", FeedKind::Book, Venue::Combined);
+        take(&out).await;
+        h.events.send(book_event(&h, 101, 10)).await.unwrap();
+        h.events.send(book_event(&h, 102, 20)).await.unwrap();
+        let msgs = take(&out).await;
+        let [ServerMessage::FeedBook { sub, book }] = msgs.as_slice() else { panic!("{msgs:?}") };
+        assert_eq!(sub, "b");
+        assert_eq!((book.asks[0], book.total_ask_qty, book.asks.len(), book.bids.len()), (Some(api::FeedBookLevel { price: 102.0, qty: 20 }), 20, 10, 10));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn trades_follow_the_requested_venue() {
+        let h = std_harness();
+        live(&h).await;
+        let (conn, out) = connect(&h).await;
+        for (name, venue) in [("all", Venue::Combined), ("krx", Venue::Krx), ("nxt", Venue::Nxt)] {
+            subscribe_feed(&h, conn, name, FeedKind::Trades, venue);
+        }
+        take(&out).await;
+        for (qty, exchange) in [(1, Some(Exchange::Krx)), (2, Some(Exchange::Nxt)), (3, None)] {
+            h.events.send(feed_trade_of(&h, 100, qty, Some(TradeSide::Buy), exchange)).await.unwrap();
+        }
+        let msgs = take(&out).await;
+        let (krx, nxt) = (Some(api::Venue::Krx), Some(api::Venue::Nxt));
+        assert_eq!(feed_trades(&msgs, "all"), [(1, vec![(1, krx), (2, nxt), (3, None)])]);
+        assert_eq!(feed_trades(&msgs, "krx"), [(1, vec![(1, krx)])], "KRX 구독에는 NXT 체결이 가지 않는다");
+        assert_eq!(feed_trades(&msgs, "nxt"), [(1, vec![(2, nxt)])]);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn program_rows_are_all_sent() {
+        let h = std_harness();
+        live(&h).await;
+        let (conn, out) = connect(&h).await;
+        subscribe_feed(&h, conn, "p", FeedKind::Program, Venue::Combined);
+        take(&out).await;
+        for net in [10, -20, 30] {
+            h.events.send(program_event(&h, net)).await.unwrap();
+        }
+        let nets: Vec<i64> = take(&out).await.into_iter().filter_map(|m| match m {
+            ServerMessage::FeedProgram { row, .. } => Some(row.net_qty),
+            _ => None,
+        }).collect();
+        assert_eq!(nets, [10, -20, 30]);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn broker_history_is_sent_to_a_late_subscriber() {
+        let h = std_harness();
+        live(&h).await;
+        let (conn, out) = connect(&h).await;
+        subscribe_feed(&h, conn, "first", FeedKind::Brokers, Venue::Combined);
+        take(&out).await;
+        h.events.send(broker_event(&h, 100)).await.unwrap();
+        h.events.send(broker_event(&h, 150)).await.unwrap();
+        take(&out).await;
+        let (late_conn, late) = connect(&h).await;
+        subscribe_feed(&h, late_conn, "late", FeedKind::Brokers, Venue::Combined);
+        let msgs = take(&late).await;
+        let [ServerMessage::FeedSubscribed { .. }, ServerMessage::FeedBrokers { sub, brokers }] = msgs.as_slice() else { panic!("{msgs:?}") };
+        assert_eq!((sub.as_str(), brokers.sells.len(), brokers.sells[0].qty), ("late", 1, 150), "응답 다음에 가장 새 스냅샷이 먼저 온다");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn broker_history_is_dropped_after_release_and_daily_reset() {
+        let h = std_harness();
+        live(&h).await;
+        let (conn, out) = connect(&h).await;
+        subscribe_feed(&h, conn, "a", FeedKind::Brokers, Venue::Combined);
+        take(&out).await;
+        h.events.send(broker_event(&h, 100)).await.unwrap();
+        take(&out).await;
+        h.hub.unsubscribe(conn, sub("a"));
+        tokio::time::sleep(Duration::from_secs(20)).await;
+        subscribe_feed(&h, conn, "within-grace", FeedKind::Brokers, Venue::Combined);
+        assert_eq!(take(&out).await.len(), 2, "유예 안에서는 스냅샷이 남아 있다");
+        h.hub.unsubscribe(conn, sub("within-grace"));
+        tokio::time::sleep(Duration::from_secs(32)).await;
+        subscribe_feed(&h, conn, "after-grace", FeedKind::Brokers, Venue::Combined);
+        assert_eq!(take(&out).await, [feed_subscribed("after-grace", FeedKind::Brokers)], "유예가 지나면 버린다");
+        h.events.send(broker_event(&h, 200)).await.unwrap();
+        take(&out).await;
+        h.hub.daily_reset();
+        settle().await;
+        h.hub.unsubscribe(conn, sub("after-grace"));
+        subscribe_feed(&h, conn, "after-reset", FeedKind::Brokers, Venue::Combined);
+        assert_eq!(take(&out).await, [feed_subscribed("after-reset", FeedKind::Brokers)], "07:45 비우기에서 버린다");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn feed_subscribers_hear_stream_down_and_live() {
+        let h = std_harness();
+        live(&h).await;
+        let (conn, out) = connect(&h).await;
+        subscribe_feed(&h, conn, "t", FeedKind::Trades, Venue::Combined);
+        take(&out).await;
+        let down_at = h.clock.now();
+        h.events.send(StreamEvent::Down { at: down_at }).await.unwrap();
+        let link = |live: bool, at: KstTime| ServerMessage::FeedLink { sub: "t".into(), live, at: UnixSeconds(at.unix()) };
+        assert_eq!(take(&out).await.into_iter().filter(|m| matches!(m, ServerMessage::FeedLink { .. })).collect::<Vec<_>>(), [link(false, down_at)]);
+        h.events.send(StreamEvent::Down { at: down_at }).await.unwrap();
+        assert!(take(&out).await.iter().all(|m| !matches!(m, ServerMessage::FeedLink { .. })), "이미 끊겼으면 다시 알리지 않는다");
+        let live_at = h.clock.now();
+        h.events.send(StreamEvent::Live { since: live_at }).await.unwrap();
+        assert_eq!(take(&out).await.into_iter().filter(|m| matches!(m, ServerMessage::FeedLink { .. })).collect::<Vec<_>>(), [link(true, live_at)]);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_feed_asks_the_session_for_its_kind_and_keeps_it_for_the_grace() {
+        let h = std_harness();
+        live(&h).await;
+        let (conn, _out) = connect(&h).await;
+        subscribe_feed(&h, conn, "b", FeedKind::Book, Venue::Combined);
+        settle().await;
+        let want = |kinds: &[RealType]| h.desired.borrow().get(&samsung_symbol()).cloned().unwrap_or_default() == kinds.iter().copied().collect::<BTreeSet<_>>();
+        assert!(want(&[RealType::Trade, RealType::Book]));
+        h.hub.unsubscribe(conn, sub("b"));
+        tokio::time::sleep(Duration::from_secs(29)).await;
+        assert!(want(&[RealType::Trade, RealType::Book]), "마지막 호가 창을 닫아도 30초 동안 0D를 유지한다");
+        tokio::time::sleep(Duration::from_secs(2)).await;
+        assert!(want(&[]), "유예가 지나면 종목째 빠진다");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_feed_for_an_index_or_an_unknown_symbol_is_an_error() {
+        let h = std_harness();
+        live(&h).await;
+        let (conn, out) = connect(&h).await;
+        h.hub.subscribe_feed(conn, sub("i"), Symbol::parse("IDX:001").unwrap(), FeedKind::Trades, Venue::Combined);
+        h.hub.subscribe_feed(conn, sub("u"), Symbol::parse(UNLISTED).unwrap(), FeedKind::Book, Venue::Combined);
+        assert_eq!(take(&out).await, [sub_error("i", SubErrorCode::BadRequest), sub_error("u", SubErrorCode::UnknownSymbol)]);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn resubscribing_a_feed_sub_drops_what_the_old_one_had_pending() {
+        let h = std_harness();
+        live(&h).await;
+        let (conn, out) = connect(&h).await;
+        subscribe_feed(&h, conn, "t", FeedKind::Trades, Venue::Combined);
+        take(&out).await;
+        h.events.send(feed_trade_of(&h, 100, 4, Some(TradeSide::Buy), Some(Exchange::Krx))).await.unwrap();
+        h.events.send(feed_trade_of(&h, 100, 5, Some(TradeSide::Buy), Some(Exchange::Krx))).await.unwrap();
+        tokio::time::sleep(Duration::from_millis(1)).await;
+        h.hub.unsubscribe(conn, sub("t"));
+        subscribe_feed(&h, conn, "t", FeedKind::Trades, Venue::Krx);
+        let msgs = take(&out).await;
+        assert_eq!(msgs, [feed_subscribed("t", FeedKind::Trades)], "{msgs:?}");
     }
 }

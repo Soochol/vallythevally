@@ -10,9 +10,11 @@ use std::sync::{Arc, Mutex};
 use tokio::sync::Notify;
 
 use super::SubId;
-use crate::api::{Bar, Quote, ServerMessage, Venue};
+use crate::api::{Bar, FeedBook, FeedTrade, Quote, ServerMessage, Venue};
 
 pub const MUST_CAPACITY: usize = 256;
+/// 100ms 묶음을 기다리는 체결이 이만큼 쌓이면 쓰기 태스크가 막힌 것이다. `MUST_CAPACITY`처럼 연결을 닫는다.
+pub const PENDING_TRADES_CAPACITY: usize = 4096;
 
 /// 버리면 안 되는 메시지가 MUST_CAPACITY만큼 밀렸거나 연결이 이미 닫혔다. 연결을 닫는다.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -30,6 +32,10 @@ struct State {
     bars: BTreeMap<String, (u64, Bar)>,
     quotes: BTreeMap<String, Quote>,
     quote_venue: Venue,
+    trades: BTreeMap<String, Vec<FeedTrade>>,
+    pending_trades: usize,
+    trade_seq: BTreeMap<String, u64>,
+    books: BTreeMap<String, FeedBook>,
     closed: bool,
 }
 
@@ -86,6 +92,38 @@ impl Outbox {
         }
     }
 
+    /// 그 흐름 구독의 다음 묶음에 체결을 덧붙인다. 버리지 않는다. 쌓인 것이 `PENDING_TRADES_CAPACITY`를 넘으면 연결을 닫는다.
+    pub fn add_trade(&self, sub: &SubId, trade: FeedTrade) -> Result<(), Closed> {
+        let mut s = self.state.lock().expect("outbox 잠금");
+        if s.closed || s.pending_trades >= PENDING_TRADES_CAPACITY {
+            s.closed = true;
+            drop(s);
+            self.wake.notify_one();
+            return Err(Closed);
+        }
+        s.pending_trades += 1;
+        s.trades.entry(sub.0.clone()).or_default().push(trade);
+        Ok(())
+    }
+
+    /// 그 흐름 구독의 대기 중 호가를 덮어쓴다.
+    pub fn set_book(&self, sub: &SubId, book: FeedBook) {
+        let mut s = self.state.lock().expect("outbox 잠금");
+        if !s.closed {
+            s.books.insert(sub.0.clone(), book);
+        }
+    }
+
+    /// 흐름 구독을 놓거나 바꿀 때 그 구독의 대기 중 체결·호가와 순서 번호를 지운다.
+    pub fn forget_feed(&self, sub: &SubId) {
+        let mut s = self.state.lock().expect("outbox 잠금");
+        if let Some(dropped) = s.trades.remove(&sub.0) {
+            s.pending_trades -= dropped.len();
+        }
+        s.books.remove(&sub.0);
+        s.trade_seq.remove(&sub.0);
+    }
+
     pub fn close(&self) {
         self.state.lock().expect("outbox 잠금").closed = true;
         self.wake.notify_one();
@@ -96,6 +134,14 @@ impl Outbox {
         let mut s = self.state.lock().expect("outbox 잠금");
         let mut messages: Vec<ServerMessage> = s.must.drain(..).collect();
         if with_bars {
+            let trades = std::mem::take(&mut s.trades);
+            s.pending_trades = 0;
+            for (sub, trades) in trades {
+                let seq = s.trade_seq.entry(sub.clone()).or_default();
+                *seq += 1;
+                messages.push(ServerMessage::FeedTrades { sub, seq: *seq, trades });
+            }
+            messages.extend(std::mem::take(&mut s.books).into_iter().map(|(sub, book)| ServerMessage::FeedBook { sub, book }));
             messages.extend(std::mem::take(&mut s.bars).into_iter().map(|(sub, (seq, bar))| ServerMessage::Bar { sub, seq, bar }));
             if !s.quotes.is_empty() {
                 messages.push(ServerMessage::Quotes { venue: s.quote_venue, quotes: std::mem::take(&mut s.quotes).into_values().collect() });
@@ -117,7 +163,13 @@ fn sub_of(msg: &ServerMessage) -> Option<&str> {
         | ServerMessage::Bar { sub, .. }
         | ServerMessage::Confirmed { sub, .. }
         | ServerMessage::Reload { sub, .. } => Some(sub),
-        ServerMessage::Hello { .. } | ServerMessage::Status { .. } | ServerMessage::Quotes { .. } | ServerMessage::WatchLimited { .. } | ServerMessage::KiwoomLink { .. } | ServerMessage::Account { .. } | ServerMessage::SetupChanged { .. } => None,
+        ServerMessage::FeedSubscribed { .. }
+        | ServerMessage::FeedTrades { .. }
+        | ServerMessage::FeedBook { .. }
+        | ServerMessage::FeedProgram { .. }
+        | ServerMessage::FeedBrokers { .. }
+        | ServerMessage::FeedLink { .. }
+        | ServerMessage::Hello { .. } | ServerMessage::Status { .. } | ServerMessage::Quotes { .. } | ServerMessage::WatchLimited { .. } | ServerMessage::KiwoomLink { .. } | ServerMessage::Account { .. } | ServerMessage::SetupChanged { .. } => None,
     }
 }
 
@@ -263,5 +315,37 @@ mod tests {
         assert_eq!(out.push(ServerMessage::Confirmed { sub: "a".into(), seq: 999, bar: bar(0.0) }), Err(Closed));
         assert!(out.take(true).closed);
         assert_eq!(out.push(ServerMessage::Status { status: crate::api::ConnectionStatus { realtime: crate::api::RealtimeState::Live, since: UnixSeconds(0), backfilling: false } }), Err(Closed));
+    }
+
+    fn feed_trade() -> FeedTrade {
+        FeedTrade { t: crate::api::UnixSeconds(0), price: 1.0, qty: 1, venue: None, strength: None }
+    }
+
+    #[test]
+    fn feed_trades_wait_for_the_tick_and_count_their_batches_per_sub() {
+        let out = Outbox::new();
+        let sub = SubId("f".into());
+        out.add_trade(&sub, feed_trade()).unwrap();
+        assert!(out.take(false).messages.is_empty());
+        out.add_trade(&sub, feed_trade()).unwrap();
+        let batch = out.take(true).messages;
+        let [ServerMessage::FeedTrades { seq: 1, trades, .. }] = batch.as_slice() else { panic!() };
+        assert_eq!(trades.len(), 2);
+        out.add_trade(&sub, feed_trade()).unwrap();
+        assert!(matches!(out.take(true).messages.as_slice(), [ServerMessage::FeedTrades { seq: 2, .. }]));
+        out.forget_feed(&sub);
+        out.add_trade(&sub, feed_trade()).unwrap();
+        assert!(matches!(out.take(true).messages.as_slice(), [ServerMessage::FeedTrades { seq: 1, .. }]), "해지하면 번호를 다시 센다");
+    }
+
+    #[test]
+    fn pending_feed_trades_past_the_capacity_close_the_connection() {
+        let out = Outbox::new();
+        let sub = SubId("f".into());
+        for _ in 0..PENDING_TRADES_CAPACITY {
+            out.add_trade(&sub, feed_trade()).unwrap();
+        }
+        assert_eq!(out.add_trade(&sub, feed_trade()), Err(Closed));
+        assert!(out.take(true).closed);
     }
 }

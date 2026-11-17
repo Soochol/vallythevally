@@ -3,6 +3,7 @@ import type { AccountStatus } from "./generated/AccountStatus";
 import type { ClientMessage } from "./generated/ClientMessage";
 import type { ConnectionStatus } from "./generated/ConnectionStatus";
 import type { DocumentKind } from "./generated/DocumentKind";
+import type { FeedKind } from "./generated/FeedKind";
 import type { KiwoomLinkStatus } from "./generated/KiwoomLinkStatus";
 import type { ServerMessage } from "./generated/ServerMessage";
 import type { SymbolCode } from "./generated/SymbolCode";
@@ -16,11 +17,25 @@ export type SubEvent =
 /** 관심종목 현재가 쪽 메시지. `resync`는 새 연결이라 서버의 `watch_limited`가 빈 상태부터 다시 온다는 뜻이다. */
 export type QuoteEvent = Extract<ServerMessage, { type: "quotes" | "watch_limited" }> | { type: "resync" };
 
+/** 새 창 흐름 구독 하나에 오는 메시지. `resync`는 서버와 다시 연결되어 창이 지난 흐름을 버리고 처음부터 받는다는 뜻이다. 끊긴 사이는 메워지지 않는다. */
+export type FeedEvent =
+  | Extract<ServerMessage, { type: "feed_subscribed" | "feed_trades" | "feed_book" | "feed_program" | "feed_brokers" | "feed_link" | "sub_error" }>
+  | { type: "resync" };
+
+/** 새 창이 받을 흐름. `venue`는 체결에만 뜻이 있다. 없으면 통합이다. */
+export interface FeedRequest {
+  symbol: SymbolCode;
+  kind: FeedKind;
+  venue?: Venue;
+}
+
 /** 브라우저↔서버 연결. `open`은 `hello`를 받은 뒤다. */
 export type Connection = { socket: "connecting" | "closed" } | { socket: "open"; status: ConnectionStatus };
 
 export interface MarketSocketLike {
   subscribe(key: SeriesKey, handler: (m: SubEvent) => void): () => void;
+  /** 새 창 흐름 구독. 해지하면 서버에 `unsubscribe`를 보낸다. 다시 연결되면 자동으로 다시 구독하고 handler에 `resync`를 준다. */
+  subscribeFeed(request: FeedRequest, handler: (m: FeedEvent) => void): () => void;
   /** 지금 연결 상태로 한 번 부르고, 바뀔 때마다 부른다. */
   watch(listener: (c: Connection) => void): () => void;
   /** 지금 보이는 관심종목 전체, 위에서부터. 마지막 것이 비어 있지 않으면 새 `hello`마다 다시 보낸다. */
@@ -66,6 +81,11 @@ function parseServerMessage(text: string): ServerMessage | null {
   return value as ServerMessage;
 }
 
+interface FeedSubscription {
+  request: FeedRequest;
+  handler: (m: FeedEvent) => void;
+}
+
 interface Subscription {
   key: SeriesKey;
   handler: (m: SubEvent) => void;
@@ -80,6 +100,7 @@ export class MarketSocket implements MarketSocketLike {
   private nextSub = 1;
   private connection: Connection = { socket: "connecting" };
   private readonly subs = new Map<string, Subscription>();
+  private readonly feeds = new Map<string, FeedSubscription>();
   private readonly watchers = new Set<(c: Connection) => void>();
   private watchSymbols: SymbolCode[] = [];
   private watchVenue: Venue = "combined";
@@ -109,6 +130,15 @@ export class MarketSocket implements MarketSocketLike {
     if (this.connection.socket === "open") this.sendSubscribe(sub, key);
     return () => {
       if (this.subs.delete(sub) && this.connection.socket === "open") this.send({ type: "unsubscribe", sub });
+    };
+  }
+
+  subscribeFeed(request: FeedRequest, handler: (m: FeedEvent) => void): () => void {
+    const sub = `s${this.nextSub++}`;
+    this.feeds.set(sub, { request, handler });
+    if (this.connection.socket === "open") this.sendSubscribeFeed(sub, request);
+    return () => {
+      if (this.feeds.delete(sub) && this.connection.socket === "open") this.send({ type: "unsubscribe", sub });
     };
   }
 
@@ -160,8 +190,21 @@ export class MarketSocket implements MarketSocketLike {
       case "status":
         if (this.connection.socket === "open") this.setConnection({ socket: "open", status: m.status });
         return;
+      case "sub_error": {
+        const feed = this.feeds.get(m.sub);
+        if (feed) feed.handler(m);
+        else this.subs.get(m.sub)?.handler(m);
+        return;
+      }
+      case "feed_subscribed":
+      case "feed_trades":
+      case "feed_book":
+      case "feed_program":
+      case "feed_brokers":
+      case "feed_link":
+        this.feeds.get(m.sub)?.handler(m);
+        return;
       case "subscribed":
-      case "sub_error":
       case "bar":
       case "confirmed":
       case "reload":
@@ -187,6 +230,9 @@ export class MarketSocket implements MarketSocketLike {
     const subs = [...this.subs];
     for (const [sub, { key }] of subs) this.sendSubscribe(sub, key);
     for (const [sub, { handler }] of subs) if (this.subs.has(sub)) handler({ type: "resync" });
+    const feeds = [...this.feeds];
+    for (const [sub, { request }] of feeds) this.sendSubscribeFeed(sub, request);
+    for (const [sub, { handler }] of feeds) if (this.feeds.has(sub)) handler({ type: "resync" });
     if (this.watchSymbols.length > 0) this.sendWatch();
     this.emitQuotes({ type: "resync" });
   }
@@ -201,6 +247,10 @@ export class MarketSocket implements MarketSocketLike {
 
   private sendSubscribe(sub: string, key: SeriesKey): void {
     this.send({ type: "subscribe", sub, symbol: key.symbol, venue: key.venue, period: key.period });
+  }
+
+  private sendSubscribeFeed(sub: string, request: FeedRequest): void {
+    this.send({ type: "subscribe_feed", sub, symbol: request.symbol, kind: request.kind, venue: request.venue ?? null });
   }
 
   private send(m: ClientMessage): void {
