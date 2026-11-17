@@ -89,7 +89,7 @@ fn document_from(row: &SqliteRow) -> Result<SetupDocument, sqlx::Error> {
 
 impl Store {
     pub async fn push_documents(&self, account_id: &str, documents: &[&Checked]) -> Result<Pushed, sqlx::Error> {
-        let mut transaction = self.pool.begin().await?;
+        let mut transaction = self.begin_account_write().await?;
         sqlx::query("INSERT INTO setup_accounts (account_id) VALUES (?) ON CONFLICT DO NOTHING")
             .bind(account_id)
             .execute(&mut *transaction)
