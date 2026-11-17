@@ -1,11 +1,12 @@
 import { findGroup } from "../../layout/dock/tree";
-import type { WindowId, WindowKind } from "../../layout/kinds";
+import { MAX_WINDOWS, type WindowId, type WindowKind } from "../../layout/kinds";
 import { chartWindows, fittedDock, type DockRoom, useLayoutStore } from "../../stores/layout";
 import { type ToastUndo, useSelectionStore } from "../../stores/selection";
 import { DOCK_GAP } from "./size";
 import { focusAfterClose } from "./focus";
 
 export const LAST_CHART_REASON = "차트 창은 하나 이상 있어야 합니다";
+export const WINDOW_LIMIT_REASON = `창은 ${MAX_WINDOWS}개까지 둘 수 있습니다`;
 export const CHART_LIMIT_REASON = "차트 창은 8개까지 둘 수 있습니다";
 
 export function workspaceRoom(): DockRoom | null {

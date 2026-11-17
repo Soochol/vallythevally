@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import { countOverlaps, type Area } from "../../layout/canvas/geometry";
 import { rectsForArea } from "../../layout/canvas/arrange";
-import { WINDOW_KIND_LIST, WINDOW_KINDS, type WindowKind } from "../../layout/kinds";
+import { MAX_WINDOWS, WINDOW_KIND_LIST, WINDOW_KINDS, type WindowKind } from "../../layout/kinds";
 import type { CanvasPlacement } from "../../layout/placement";
 import { windowRefs, type WindowState } from "../../stores/layout";
 import { useSelectionStore } from "../../stores/selection";
@@ -9,7 +9,7 @@ import { BookIcon, BrokersIcon, ChartIcon, DrawingsIcon, FunnelIcon, IndicatorIc
 import { canvasPanelId, useCanvasInteraction } from "./canvasInteraction";
 import { tidyCanvas } from "./canvasCommands";
 import { WINDOW_CONTENT } from "./contents";
-import { addWindow, CHART_LIMIT_REASON, workspaceRoom } from "./manage";
+import { addWindow, CHART_LIMIT_REASON, WINDOW_LIMIT_REASON, workspaceRoom } from "./manage";
 import { WindowFrame } from "./WindowFrame";
 import { WindowHeader } from "./WindowHeader";
 
@@ -33,8 +33,10 @@ export function CanvasWorkspace({ canvas, windows, area }: { canvas: CanvasPlace
         <nav aria-label="창 종류" className="canvas-kind-dock">
           {WINDOW_KIND_LIST.map((kind) => {
             const Icon = KIND_ICONS[kind];
-            const full = kind === "chart" && chartCount >= WINDOW_KINDS.chart.maxCount;
-            return <button key={kind} type="button" className="canvas-kind-button" aria-label={`${WINDOW_KINDS[kind].name} 창 더하기`} title={full ? CHART_LIMIT_REASON : WINDOW_KINDS[kind].name} disabled={full} onClick={() => addWindow(kind, workspaceRoom())}><Icon size={18} /><span>{WINDOW_KINDS[kind].name}</span></button>;
+            const chartFull = kind === "chart" && chartCount >= WINDOW_KINDS.chart.maxCount;
+            const totalFull = windows.length >= MAX_WINDOWS && (kind === "chart" || !windows.some((window) => window.kind === kind));
+            const full = chartFull || totalFull;
+            return <button key={kind} type="button" className="canvas-kind-button" aria-label={`${WINDOW_KINDS[kind].name} 창 더하기`} title={chartFull ? CHART_LIMIT_REASON : totalFull ? WINDOW_LIMIT_REASON : WINDOW_KINDS[kind].name} disabled={full} onClick={() => addWindow(kind, workspaceRoom())}><Icon size={18} /><span>{WINDOW_KINDS[kind].name}</span></button>;
           })}
         </nav>
         <button type="button" className="tb-btn canvas-tidy" onClick={tidyCanvas}>가지런히<span aria-label="겹친 곳">{overlaps}</span></button>

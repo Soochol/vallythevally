@@ -15,7 +15,7 @@ import { fitDock, type WindowList } from "../layout/dock/fit";
 import type { Size } from "../layout/dock/geometry";
 import { placeBeside } from "../layout/dock/split";
 import { findGroup, groupOfWindow, putTab, selectTab } from "../layout/dock/tree";
-import { windowId, WINDOW_KINDS, type WindowId } from "../layout/kinds";
+import { MAX_WINDOWS, windowId, WINDOW_KINDS, type WindowId } from "../layout/kinds";
 import type { CanvasPlacement, DockPlacement, Placement } from "../layout/placement";
 import { toward } from "../lib/josa";
 import { readDockOrigins, writeDockOrigins } from "../persist/dockOrigins";
@@ -296,6 +296,7 @@ export const useLayoutStore = create<LayoutState>()((set, get) => {
     showWindow: (kind, targetGroup) => {
       const { windows, placement } = get().layout;
       const canvasArea = get().canvasArea;
+      if (!windows.some((w) => w.kind === kind) && windows.length >= MAX_WINDOWS) return;
       if (canvasActive() && canvasArea) {
         const shown = windows.find((w) => w.kind === kind);
         const id = shown?.id ?? freeWindowId(windows, kind);
@@ -318,6 +319,7 @@ export const useLayoutStore = create<LayoutState>()((set, get) => {
     addChart: (from, room, targetGroup) => {
       const { layout } = get();
       const canvasArea = get().canvasArea;
+      if (layout.windows.length >= MAX_WINDOWS) return null;
       if (canvasActive() && canvasArea) {
         if (chartWindows(layout).length >= WINDOW_KINDS.chart.maxCount) return null;
         const id = freeChartId(layout.windows);

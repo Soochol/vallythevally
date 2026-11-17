@@ -424,3 +424,15 @@ test("저장하지 않은 기본 도킹의 커밋은 초기 저장 없이 원래
   state().undoArrangement();
   expect(state().layout.placement.dock).toBeNull();
 });
+
+test("창이 열두 개이면 없는 종류와 차트는 더하지 못하고 열려 있는 종류는 그대로 고른다", () => {
+  for (const kind of ["trades", "book", "program", "brokers"] as const) state().showWindow(kind);
+  while (state().layout.windows.length < MAX_WINDOWS) expect(state().addChart(firstChart().id, room)).not.toBeNull();
+  const before = arrangement();
+  expect(state().addChart(firstChart().id, room)).toBeNull();
+  state().showWindow("indicators");
+  expect(arrangement()).toEqual(before);
+  state().showWindow("trades");
+  expect(state().layout.windows).toHaveLength(MAX_WINDOWS);
+  expect(shownTab("trades")).toBe(true);
+});
