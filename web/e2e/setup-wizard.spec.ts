@@ -312,6 +312,26 @@ test.describe("동기화 표시와 로컬 전용", () => {
   });
 });
 
+test.describe("로그인 사슬이 끝나기 전의 옛 문서", () => {
+  test.use({ viewport: { width: 1440, height: 900 } });
+
+  test("옛 랜딩 문서가 signed_in 푸시를 먼저 받아도 돌아온 새 문서에서 마법사가 열린다", async ({ page, scenario }) => {
+    scenario.live.account = { state: "signed_out" };
+    scenario.live.kiwoomLink = NO_KEY;
+    scenario.on(route("POST", "/api/account/login"), (request) => ({ body: { url: `${new URL(request.url()).origin}/#login-chain` } }));
+    await page.goto("/");
+    await page.getByRole("button", { name: "로그인", exact: true }).click();
+    await page.getByRole("dialog", { name: "로그인", exact: true }).getByRole("button", { name: "Google로 로그인" }).click();
+    await expect(page).toHaveURL(/#login-chain$/);
+
+    scenario.live.setAccount(signedIn());
+    await expect(cell(page)).toBeVisible();
+    await page.goto("/?returned=1");
+    await expect(wizard(page)).toBeVisible();
+    await expect(current(page)).toContainText("2. IP 확인");
+  });
+});
+
 test.describe("셋업 알림과 선택 대기의 경계", () => {
   test.use({ viewport: { width: 1440, height: 900 } });
 
