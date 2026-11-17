@@ -922,6 +922,10 @@ pub enum WindowContent {
     Screener,
     Objects,
     Indicators,
+    Trades,
+    Book,
+    Program,
+    Brokers,
 }
 
 impl WindowContent {

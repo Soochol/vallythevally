@@ -68,6 +68,7 @@ export const useSelectionStore = create<SelectionState>()((set, get) => ({
   openIndicatorInspector: (cellId, mode, indicatorId) => {
     set({ dialog: null, activeCell: cellId, inspector: { cellId, mode, indicatorId } });
     useLayoutStore.getState().showWindow("indicators");
+    if (!useLayoutStore.getState().layout.windows.some((w) => w.kind === "indicators")) set({ inspector: null, dialog: { kind: "indicatorCommand", cellId, mode, indicatorId } });
   },
   takeInspectorRequest: () => {
     const request = get().inspector;

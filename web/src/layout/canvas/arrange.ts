@@ -11,6 +11,10 @@ export const DEFAULT_WINDOW_SIZE: Readonly<Record<WindowKind, Size>> = Object.fr
   screener: { w: 320, h: 400 },
   objects: { w: 320, h: 400 },
   indicators: { w: 320, h: 400 },
+  trades: { w: 300, h: 400 },
+  book: { w: 320, h: 580 },
+  program: { w: 300, h: 400 },
+  brokers: { w: 420, h: 420 },
 });
 
 const sameSpot = (a: Rect, b: Rect): boolean => Math.abs(a.x - b.x) < 1 && Math.abs(a.y - b.y) < 1;
